@@ -14,6 +14,7 @@ from typing import Dict, List, Tuple
 
 from ..config import Config
 from ..shared_fs import resolve_shared_fs
+from ..ssh import authorized_keys_append_command
 from ..utils import (
     host_ssh_cmd, log, log_verbose, run_parallel, ssh_opts,
 )
@@ -53,17 +54,15 @@ def push_pubkey_to_remotes(cfg, remote_hosts, pub_key_path):
         cfg.host_ssh_port, batch=False, connect_timeout=None,
     )
 
+    # Same shell snippet that ssh._add_to_host_authorized_keys runs locally,
+    # so the local and remote install paths cannot drift apart.
+    remote_cmd = authorized_keys_append_command(pub_data)
+
     jobs = {}  # type: Dict[str, List[str]]
     for host in remote_hosts:
         if use_copy_id:
             cmd = ["ssh-copy-id", "-i", pub_key_path] + copy_id_opts + [host]
         else:
-            remote_cmd = (
-                "mkdir -p ~/.ssh && chmod 700 ~/.ssh && "
-                "grep -qxF '{key}' ~/.ssh/authorized_keys 2>/dev/null "
-                "|| echo '{key}' >> ~/.ssh/authorized_keys && "
-                "chmod 600 ~/.ssh/authorized_keys"
-            ).format(key=pub_data)
             cmd = host_ssh_cmd(cfg, host) + [remote_cmd]
         jobs[host] = cmd
     results = run_parallel(jobs)

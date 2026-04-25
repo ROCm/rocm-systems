@@ -100,9 +100,14 @@ def assemble_run_args(cfg):
     return args
 
 
-def print_launch_summary(cfg):
+def print_ready_summary(cfg):
     # type: (object) -> None
-    """Print the post-launch banner; does NOT wait for the entrypoint."""
+    """Print the post-Ready banner once the entrypoint is confirmed ready.
+
+    Must be called AFTER :func:`wait_for_entrypoint` returns ``True`` --
+    otherwise the user is shown shell hints for a container that may
+    not yet be (or never become) usable.
+    """
     log("")
     log("=== Container '{}' is running ===".format(cfg.container_name))
     log("")
@@ -202,5 +207,7 @@ def launch(cfg, image_exists):
             log("    python3 -m mnctl --run --rebuild")
             raise SystemExit(1)
 
-    print_launch_summary(cfg)
-    wait_for_entrypoint(cfg)
+    # Wait BEFORE printing the summary so the "is running" banner only
+    # appears once the entrypoint has actually reached '=== Ready ==='.
+    if wait_for_entrypoint(cfg):
+        print_ready_summary(cfg)

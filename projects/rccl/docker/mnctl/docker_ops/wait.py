@@ -31,8 +31,18 @@ def inspect_container_state(cfg):
 
 
 def wait_for_entrypoint(cfg, timeout=600):
-    # type: (object, int) -> None
-    """Follow container logs until '=== Ready ===' prints or we time out."""
+    # type: (object, int) -> bool
+    """Follow container logs until '=== Ready ===' prints or we time out.
+
+    Returns
+    -------
+    bool
+        ``True`` if the entrypoint reached the "=== Ready ===" marker
+        within *timeout* seconds, ``False`` if it timed out or the
+        container exited first.  Callers that print a post-launch
+        summary should gate on this so the user is never told the
+        container is ready when it isn't.
+    """
     log("")
     log("  Waiting for entrypoint to finish (timeout {}s) ...".format(
         timeout,
@@ -110,3 +120,4 @@ def wait_for_entrypoint(cfg, timeout=600):
     elif timed_out:
         log("  Inspect with: docker logs {}".format(cfg.container_name))
     log("")
+    return ready_evt.is_set()

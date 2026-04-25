@@ -113,7 +113,13 @@ Path expansion:
     action.add_argument(
         "--setup-deps", dest="action", action="store_const",
         const=Action.SETUP_DEPS,
-        help=argparse.SUPPRESS,
+        help=(
+            "[advanced] Build/cache shared dependencies (UCX + OpenMPI) "
+            "without launching a container. Used by --launch-all when "
+            "forwarding to remote nodes; can be invoked directly to "
+            "warm a node's --builds-dir. With --shared-fs auto/yes the "
+            "leader builds and followers wait for a completion marker."
+        ),
     )
 
     # --- Visible options ---

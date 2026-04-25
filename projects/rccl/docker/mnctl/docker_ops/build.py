@@ -90,6 +90,18 @@ def ensure_base_image(cfg, image_exists, base):
         log("  Pulled '{}'".format(base))
         return
 
+    _print_missing_base_image_hint(cfg, base)
+    raise SystemExit(1)
+
+
+def _print_missing_base_image_hint(cfg, base):
+    # type: (object, str) -> None
+    """Emit the user-facing options block when the base image is missing.
+
+    Mirrors the structured-hint pattern used in
+    :func:`mnctl.ssh._print_ssh_fix_hints` so all "here's how to recover"
+    blocks live in their own helpers and are easy to grep for.
+    """
     log("")
     error("Base image '{}' is not available".format(base))
     log("  It does not exist locally and could not be pulled.")
@@ -106,7 +118,6 @@ def ensure_base_image(cfg, image_exists, base):
     log("       docker build -t {} -f <Dockerfile> .".format(base))
     log("    3. Use a different base image:")
     log("       python3 -m mnctl <other-image>")
-    raise SystemExit(1)
 
 
 def build_image(cfg, image_exists):

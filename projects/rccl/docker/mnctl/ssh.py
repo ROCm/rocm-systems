@@ -15,7 +15,7 @@ from typing import Dict, Optional, Tuple
 from .config import Config
 from .utils import (
     log, log_verbose, get_local_hostnames, Timer,
-    ensure_dir, ssh_opts, ssh_cmd, host_ssh_cmd, run_parallel,
+    ssh_opts, ssh_cmd, host_ssh_cmd, run_parallel,
 )
 
 
@@ -64,27 +64,55 @@ def install_ssh_keys(cfg):
         log_verbose("  --ssh                 # generate a new shared pair")
 
 
+def authorized_keys_append_command(pub_data):
+    # type: (str) -> str
+    """Return a POSIX-shell snippet that idempotently installs *pub_data*.
+
+    The snippet:
+      * creates ``~/.ssh`` (mode 700) if missing,
+      * appends *pub_data* to ``~/.ssh/authorized_keys`` only when not
+        already present (``grep -qxF`` exact-line match),
+      * leaves ``authorized_keys`` at mode 600.
+
+    This is the SINGLE SOURCE OF TRUTH for the "ensure pubkey trusted"
+    primitive.  It is invoked locally via ``sh -c`` (see
+    :func:`_add_to_host_authorized_keys`) and remotely via SSH (see
+    :func:`mnctl.orchestrate.distribute.push_pubkey_to_remotes`) so
+    both code paths stay in lockstep.
+    """
+    return (
+        "mkdir -p ~/.ssh && chmod 700 ~/.ssh && "
+        "grep -qxF '{key}' ~/.ssh/authorized_keys 2>/dev/null "
+        "|| echo '{key}' >> ~/.ssh/authorized_keys && "
+        "chmod 600 ~/.ssh/authorized_keys"
+    ).format(key=pub_data)
+
+
 def _add_to_host_authorized_keys(pub_key_path):
     # type: (str) -> None
-    """Append the public key to the host's ~/.ssh/authorized_keys (idempotent)."""
-    host_ssh_dir = os.path.join(os.path.expanduser("~"), ".ssh")
-    ensure_dir(host_ssh_dir, modes=(0o700,))
+    """Append the public key to the host's ~/.ssh/authorized_keys (idempotent).
 
-    auth_keys = os.path.join(host_ssh_dir, "authorized_keys")
+    Delegates to :func:`authorized_keys_append_command` so the local and
+    remote paths share the exact same install logic.
+    """
     with open(pub_key_path, "r") as f:
         pub_data = f.read().strip()
 
-    if os.path.isfile(auth_keys):
-        with open(auth_keys, "r") as f:
-            existing = f.read()
-        if pub_data in existing:
-            log_verbose("Public key already in host authorized_keys")
-            return
+    snippet = authorized_keys_append_command(pub_data)
+    result = subprocess.run(
+        ["sh", "-c", snippet],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+    )
+    if result.returncode != 0:
+        log_verbose(
+            "Failed to install public key locally: {}".format(
+                result.stderr.decode("utf-8", errors="replace").strip()[:200]
+            )
+        )
+        return
 
-    with open(auth_keys, "a") as f:
-        f.write(pub_data + "\n")
-    os.chmod(auth_keys, 0o600)
-    log_verbose("Added public key to {}".format(auth_keys))
+    auth_keys = os.path.join(os.path.expanduser("~"), ".ssh", "authorized_keys")
+    log_verbose("Public key ensured in {}".format(auth_keys))
 
 
 def _install_from_existing(cfg, key_dir):
@@ -148,102 +176,125 @@ def _detect_container_user(cfg):
 
 def verify_ssh(cfg):
     # type: (Config) -> None
-    """Verify SSH connectivity to all hosts in the hostfile."""
-    from .utils import parse_hostfile
+    """Verify SSH connectivity to all hosts in the hostfile.
 
+    Orchestrates four steps -- each one a focused helper below -- and
+    fails fast on the first that detects a problem.  Keeping this
+    function short makes the high-level verification flow readable at
+    a glance; the heavy lifting lives in the ``_step_*`` helpers.
+    """
     with Timer("SSH verification"):
         log("=== Verifying SSH connectivity (port {}) ===".format(cfg.ssh.port))
 
-        if not os.path.isfile(cfg.hostfile):
-            log("  Hostfile not found: {}".format(cfg.hostfile))
-            log(
-                "  Create it first:  echo 'hostname slots=8' > {}".format(
-                    cfg.hostfile
-                )
-            )
-            sys.exit(1)
+        hosts = _step_load_hostfile(cfg)
+        ssh_key = _step_require_ssh_key(cfg)
+        users = _step_check_user_ssh(cfg, hosts, ssh_key)
 
-        log_verbose("Hostfile: {}".format(cfg.hostfile))
-        if cfg.verbose:
-            log_verbose("Hostfile contents:")
-            with open(cfg.hostfile) as f:
-                for line in f:
-                    log_verbose("  {}".format(line.rstrip()))
-
-        hosts = parse_hostfile(cfg.hostfile)
-
-        ssh_key = os.path.join(cfg.ssh.key_dir, "id_rsa")
-        if not os.path.isfile(ssh_key):
-            log("  Shared SSH key not found: {}".format(ssh_key))
-            log("")
-            log("  Set up SSH keys first:")
-            log(
-                "    python3 -m mnctl --launch-all "
-                "--ssh ~/.ssh/id_rsa   # use your key pair"
-            )
-            log(
-                "    python3 -m mnctl --launch-all "
-                "--ssh                 # generate a new pair"
-            )
-            sys.exit(1)
-
-        log_verbose("Using SSH key: {}".format(ssh_key))
-
-        # Container-side SSH (cfg.ssh.port = container sshd port)
-        container_ssh_opts = ssh_opts(
-            cfg.ssh.port, identity=ssh_key, connect_timeout=5,
-        )
-
-        container_user = _detect_container_user(cfg) or cfg.container_user
-        test_users = ["root", container_user]
-
-        log_verbose(
-            "Verifying {} hosts x {} users ({})".format(
-                len(hosts), len(test_users),
-                ", ".join(test_users),
-            )
-        )
-
-        # Spawn all (host, user) checks at once
-        jobs = {
-            (host, user): (
-                ["ssh"] + container_ssh_opts
-                + ["{}@{}".format(user, host), "hostname"]
-            )
-            for host in hosts for user in test_users
-        }
-        results = run_parallel(jobs)
-
-        # Print in hostfile order
-        failed = False
-        for host in hosts:
-            for user in test_users:
-                if results[(host, user)].ok:
-                    log("  [OK]   {}@{}".format(user, host))
-                else:
-                    log("  [FAIL] {}@{}".format(user, host))
-                    failed = True
-                    if cfg.verbose:
-                        _log_ssh_debug(container_ssh_opts, user, host)
-
-        if failed:
-            _print_ssh_fix_hints(cfg)
-            sys.exit(1)
-
-        # Self-SSH: verify each container can SSH to itself (needed by MPI)
         log("")
         log("=== Verifying container self-SSH (localhost) ===")
-        self_failed = _verify_self_ssh(cfg, hosts)
-        if self_failed:
+        if _verify_self_ssh(cfg, hosts):
             _print_ssh_fix_hints(cfg)
             sys.exit(1)
 
     log("")
     log(
         "All hosts reachable (as {}). Ready for MPI workloads.".format(
-            " ".join(test_users)
+            " ".join(users)
         )
     )
+
+
+def _step_load_hostfile(cfg):
+    # type: (Config) -> list
+    """Validate and parse the hostfile; exit(1) on missing file."""
+    from .utils import parse_hostfile
+
+    if not os.path.isfile(cfg.hostfile):
+        log("  Hostfile not found: {}".format(cfg.hostfile))
+        log(
+            "  Create it first:  echo 'hostname slots=8' > {}".format(
+                cfg.hostfile
+            )
+        )
+        sys.exit(1)
+
+    log_verbose("Hostfile: {}".format(cfg.hostfile))
+    if cfg.verbose:
+        log_verbose("Hostfile contents:")
+        with open(cfg.hostfile) as f:
+            for line in f:
+                log_verbose("  {}".format(line.rstrip()))
+
+    return parse_hostfile(cfg.hostfile)
+
+
+def _step_require_ssh_key(cfg):
+    # type: (Config) -> str
+    """Return the shared private key path; exit(1) if absent."""
+    ssh_key = os.path.join(cfg.ssh.key_dir, "id_rsa")
+    if not os.path.isfile(ssh_key):
+        log("  Shared SSH key not found: {}".format(ssh_key))
+        log("")
+        log("  Set up SSH keys first:")
+        log(
+            "    python3 -m mnctl --launch-all "
+            "--ssh ~/.ssh/id_rsa   # use your key pair"
+        )
+        log(
+            "    python3 -m mnctl --launch-all "
+            "--ssh                 # generate a new pair"
+        )
+        sys.exit(1)
+
+    log_verbose("Using SSH key: {}".format(ssh_key))
+    return ssh_key
+
+
+def _step_check_user_ssh(cfg, hosts, ssh_key):
+    # type: (Config, list, str) -> list
+    """Verify root + container_user SSH on every host; exit(1) on any failure.
+
+    Returns the list of users actually tested (caller uses it for the
+    final success message).
+    """
+    container_ssh_opts = ssh_opts(
+        cfg.ssh.port, identity=ssh_key, connect_timeout=5,
+    )
+
+    container_user = _detect_container_user(cfg) or cfg.container_user
+    test_users = ["root", container_user]
+
+    log_verbose(
+        "Verifying {} hosts x {} users ({})".format(
+            len(hosts), len(test_users), ", ".join(test_users),
+        )
+    )
+
+    jobs = {
+        (host, user): (
+            ["ssh"] + container_ssh_opts
+            + ["{}@{}".format(user, host), "hostname"]
+        )
+        for host in hosts for user in test_users
+    }
+    results = run_parallel(jobs)
+
+    failed = False
+    for host in hosts:
+        for user in test_users:
+            if results[(host, user)].ok:
+                log("  [OK]   {}@{}".format(user, host))
+            else:
+                log("  [FAIL] {}@{}".format(user, host))
+                failed = True
+                if cfg.verbose:
+                    _log_ssh_debug(container_ssh_opts, user, host)
+
+    if failed:
+        _print_ssh_fix_hints(cfg)
+        sys.exit(1)
+
+    return test_users
 
 
 def _verify_self_ssh(cfg, hosts):

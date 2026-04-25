@@ -25,12 +25,28 @@
 
 set -e
 
-SSH_PORT="${SSH_PORT:-2224}"
-SSH_KEY_SOURCE="${SSH_KEY_SOURCE:-/opt/ssh-keys}"
-CONTAINER_USER="${CONTAINER_USER:-ubuntu}"
-NIC_TYPE="${NIC_TYPE:-mellanox}"
-VERBOSE="${VERBOSE:-}"
-POST_SETUP_DIRS="${POST_SETUP_DIRS:-}"
+# ============================================================================
+# Defaults for every environment variable consumed below.
+#
+# Mirrors the role of mnctl/config.py's Config.__init__: every knob has a
+# documented default in ONE place so later code can read ${VAR} without
+# repeating the fallback expression.  ``:=`` (assign) is intentional --
+# values become bound in this shell so children inherit them via export
+# below where applicable.
+# ============================================================================
+: "${SSH_PORT:=2224}"
+: "${SSH_KEY_SOURCE:=/opt/ssh-keys}"
+: "${CONTAINER_USER:=ubuntu}"
+: "${NIC_TYPE:=mellanox}"
+: "${VERBOSE:=}"
+: "${POST_SETUP_DIRS:=}"
+: "${HOST_UID:=1000}"
+: "${HOST_GID:=1000}"
+: "${RENDER_GID:=109}"
+: "${LAUNCH_SCRIPT:=}"
+: "${LAUNCH_SCRIPT_ARGS:=}"
+: "${FORCE_POST_SETUP:=}"
+: "${GPUS:=}"
 
 log_verbose() {
     [[ -n "${VERBOSE}" ]] && echo "  [verbose] $*" || true
@@ -40,8 +56,8 @@ log_verbose() {
 # Remap non-root user UID/GID to match host
 # ============================================================================
 setup_container_user() {
-    local target_uid="${HOST_UID:-1000}"
-    local target_gid="${HOST_GID:-1000}"
+    local target_uid="${HOST_UID}"
+    local target_gid="${HOST_GID}"
     local user_home="/home/${CONTAINER_USER}"
 
     log_verbose "setup_container_user: target_uid=${target_uid} target_gid=${target_gid} user=${CONTAINER_USER}"
@@ -65,9 +81,8 @@ setup_container_user() {
     chown "${target_uid}:${target_gid}" "${user_home}" 2>/dev/null || true
 
     # Ensure render group exists with the host's GID
-    local render_gid="${RENDER_GID:-109}"
     if ! getent group render &>/dev/null; then
-        if ! groupadd -g "${render_gid}" render 2>/dev/null; then
+        if ! groupadd -g "${RENDER_GID}" render 2>/dev/null; then
             # GID may be taken by another group; try without specifying GID
             groupadd render 2>/dev/null || true
         fi
@@ -184,7 +199,7 @@ run_one_post_setup() {
 
         local marker="/opt/builds/.post-setup.${hash:0:16}.done"
 
-        if [[ "${FORCE_POST_SETUP:-}" == "1" ]] && [[ -f "${marker}" ]]; then
+        if [[ "${FORCE_POST_SETUP}" == "1" ]] && [[ -f "${marker}" ]]; then
             echo "    clearing stale marker (FORCE_POST_SETUP=1)"
             rm -f "${marker}"
         fi
@@ -256,11 +271,11 @@ if [[ -n "${VERBOSE}" ]]; then
     log_verbose "  SSH_PORT=${SSH_PORT}"
     log_verbose "  SSH_KEY_SOURCE=${SSH_KEY_SOURCE}"
     log_verbose "  CONTAINER_USER=${CONTAINER_USER}"
-    log_verbose "  HOST_UID=${HOST_UID:-1000}  HOST_GID=${HOST_GID:-1000}"
-    log_verbose "  LAUNCH_SCRIPT=${LAUNCH_SCRIPT:-}"
+    log_verbose "  HOST_UID=${HOST_UID}  HOST_GID=${HOST_GID}"
+    log_verbose "  LAUNCH_SCRIPT=${LAUNCH_SCRIPT}"
     log_verbose "  POST_SETUP_DIRS=${POST_SETUP_DIRS}"
     log_verbose "  NIC_TYPE=${NIC_TYPE}"
-    log_verbose "  GPUS=${GPUS:-}"
+    log_verbose "  GPUS=${GPUS}"
     log_verbose "Mounted volumes:"
     mount | grep -E '/opt/(shared|builds|ssh-keys)' | while read -r line; do
         log_verbose "  ${line}"
@@ -305,9 +320,9 @@ echo "=== Ready ==="
 if [ $# -gt 0 ]; then
     log_verbose "Executing command: $*"
     exec "$@"
-elif [ -n "${LAUNCH_SCRIPT:-}" ] && [ -f "${LAUNCH_SCRIPT}" ]; then
-    log_verbose "Executing launch script: ${LAUNCH_SCRIPT} ${LAUNCH_SCRIPT_ARGS:-}"
-    exec "${LAUNCH_SCRIPT}" ${LAUNCH_SCRIPT_ARGS:-}
+elif [ -n "${LAUNCH_SCRIPT}" ] && [ -f "${LAUNCH_SCRIPT}" ]; then
+    log_verbose "Executing launch script: ${LAUNCH_SCRIPT} ${LAUNCH_SCRIPT_ARGS}"
+    exec "${LAUNCH_SCRIPT}" ${LAUNCH_SCRIPT_ARGS}
 else
     log_verbose "No command or launch script; idling with tail -f /dev/null"
     exec tail -f /dev/null
