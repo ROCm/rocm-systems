@@ -448,7 +448,15 @@ drain_all()
         std::sort(fresh.begin(), fresh.end(),
                   [](const timed_record_t& a, const timed_record_t& b) { return a.ts < b.ts; });
 
-        queue_ring_state_t* lookup_qs = (aql_qs ? aql_qs : &qs);
+        // Correlation lookup MUST use the queue that owns the
+        // firmware-ring records — the launching thread captured into
+        // THIS queue's corr_slots, not aql_qs's. The aql_qs fallback is
+        // ONLY for kernel_object lookup in the multi-XCC case where qs
+        // itself lacks a base_address.
+        queue_ring_state_t* corr_lookup_qs = &qs;
+        queue_ring_state_t* kobj_lookup_qs =
+            (qs.queue && qs.queue->base_address) ? &qs : aql_qs;
+        if(!kobj_lookup_qs) continue;  // no source for kernel_object — skip
 
         // TODO(ai/KNOWN_ISSUES.md item 2): pair START with END using a
         // smallest-positive-gap heuristic. This produces correct
@@ -493,12 +501,12 @@ drain_all()
                 if(g_emitted_dispatch_idx.count(start.dispatch_idx)) continue;
 
                 const uint64_t kernel_obj =
-                    lookup_kernel_object(*lookup_qs, start.dispatch_idx);
+                    lookup_kernel_object(*kobj_lookup_qs, start.dispatch_idx);
 
                 process_dispatch_record(
-                    lookup_qs, start.dispatch_idx, start.ts, r.ts, kernel_obj);
+                    corr_lookup_qs, start.dispatch_idx, start.ts, r.ts, kernel_obj);
                 g_emitted_dispatch_idx.insert(start.dispatch_idx);
-                lookup_qs->dispatch_count++;
+                corr_lookup_qs->dispatch_count++;
             }
         }
     }
