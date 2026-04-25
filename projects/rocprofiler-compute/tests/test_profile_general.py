@@ -2295,12 +2295,7 @@ def test_live_attach_detach_pc_sampling(
 
 @pytest.mark.sets_func
 class TestSetsIntegration:
-    # Auto-discovered from the sets YAML for the current GPU arch.
-    # This integration test complements pre-commit validator
-    # (tools/validate_sets_metric_ids.py) by exercising the end-to-end
-    # runtime path: CLI arg parsing -> YAML loading -> counter file
-    # generation -> profiler invocation. It catches wiring bugs that
-    # static validation cannot.
+    # Ensure single pass for auto-discovered sets from YAML for the current GPU arch.
     @pytest.mark.parametrize("set_name", AVAILABLE_SETS, ids=lambda s: s)
     def test_set_profiling(
         self, binary_handler_profile_rocprof_compute, set_name, request
