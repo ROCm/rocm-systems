@@ -610,14 +610,30 @@ wrap_signal_store_relaxed(hsa_signal_t sig, hsa_signal_value_t val)
     }
 
     auto s = lookup_queue_state_by_doorbell(sig);
-    if(s)
+    if(!s)
     {
-        process_doorbell_impl(s, val, [](hsa_signal_t db, hsa_signal_value_t v) {
-            s_next_table.hsa_signal_store_relaxed_fn(db, v);
-        });
+        // Not one of our queues.
+        s_next_table.hsa_signal_store_relaxed_fn(sig, val);
         return;
     }
-    s_next_table.hsa_signal_store_relaxed_fn(sig, val);
+
+    if(s->mode == QueueState::Mode::tracing_only)
+    {
+        process_doorbell_tracing_only(s, val);
+        // ALWAYS chain through — the application's queue is the real HSA
+        // queue; the GPU needs to see the doorbell. Unlike
+        // process_doorbell_impl, the tracing_only path does not chain
+        // internally.
+        s_next_table.hsa_signal_store_relaxed_fn(sig, val);
+        return;
+    }
+
+    // Mode::full_intercept — existing PR 5219 path. process_doorbell_impl
+    // chains through via the lambda (directly when no new packets, or via
+    // publish_submitted_packets/tls_ring_doorbell otherwise).
+    process_doorbell_impl(s, val, [](hsa_signal_t db, hsa_signal_value_t v) {
+        s_next_table.hsa_signal_store_relaxed_fn(db, v);
+    });
 }
 
 void
@@ -630,14 +646,30 @@ wrap_signal_store_screlease(hsa_signal_t sig, hsa_signal_value_t val)
     }
 
     auto s = lookup_queue_state_by_doorbell(sig);
-    if(s)
+    if(!s)
     {
-        process_doorbell_impl(s, val, [](hsa_signal_t db, hsa_signal_value_t v) {
-            s_next_table.hsa_signal_store_screlease_fn(db, v);
-        });
+        // Not one of our queues.
+        s_next_table.hsa_signal_store_screlease_fn(sig, val);
         return;
     }
-    s_next_table.hsa_signal_store_screlease_fn(sig, val);
+
+    if(s->mode == QueueState::Mode::tracing_only)
+    {
+        process_doorbell_tracing_only(s, val);
+        // ALWAYS chain through — the application's queue is the real HSA
+        // queue; the GPU needs to see the doorbell. Unlike
+        // process_doorbell_impl, the tracing_only path does not chain
+        // internally.
+        s_next_table.hsa_signal_store_screlease_fn(sig, val);
+        return;
+    }
+
+    // Mode::full_intercept — existing PR 5219 path. process_doorbell_impl
+    // chains through via the lambda (directly when no new packets, or via
+    // publish_submitted_packets/tls_ring_doorbell otherwise).
+    process_doorbell_impl(s, val, [](hsa_signal_t db, hsa_signal_value_t v) {
+        s_next_table.hsa_signal_store_screlease_fn(db, v);
+    });
 }
 
 }  // namespace
