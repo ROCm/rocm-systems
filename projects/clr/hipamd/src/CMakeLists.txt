@@ -125,7 +125,9 @@ target_sources(amdhip64 PRIVATE
   hip_table_interface.cpp
   hip_table_interface_c.cpp
   hip_comgr_helper.cpp
-  hip_library.cpp)
+  hip_library.cpp
+  lttng/rocm_hip_tp.cpp
+  lttng/rocm_trace_init.cpp)
 
 if(WIN32)
   target_sources(amdhip64 PRIVATE hip_runtime.cpp)
@@ -319,6 +321,25 @@ if(HIP_ENABLE_ROCPROFILER_REGISTER)
         HIP_ROCP_REG_VERSION_PATCH=0)
     target_link_libraries(amdhip64 PRIVATE rocprofiler-register::rocprofiler-register)
     set_target_properties(amdhip64 PROPERTIES INSTALL_RPATH "\$ORIGIN")
+endif()
+
+# LTTng-UST tracepoint emission. ON by default; OFF is supported only as
+# an emergency escape valve. The packaging declarations in
+# hipamd/packaging/CMakeLists.txt are gated on this same option so the
+# binary's NEEDED entry is always package-resolvable.
+if(WIN32 OR NOT BUILD_SHARED_LIBS)
+    set(HIP_ENABLE_LTTNG_UST OFF)
+else()
+    option(HIP_ENABLE_LTTNG_UST "Build with LTTng-UST tracepoint emission" ON)
+endif()
+
+if(HIP_ENABLE_LTTNG_UST)
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(LTTNG_UST REQUIRED IMPORTED_TARGET lttng-ust>=2.13)
+    target_compile_definitions(amdhip64 PRIVATE HIP_ENABLE_LTTNG_UST=1)
+    target_include_directories(amdhip64 PRIVATE
+        ${CMAKE_CURRENT_LIST_DIR}/lttng)
+    target_link_libraries(amdhip64 PRIVATE PkgConfig::LTTNG_UST ${CMAKE_DL_LIBS})
 endif()
 
 add_custom_command(TARGET amdhip64 POST_BUILD COMMAND

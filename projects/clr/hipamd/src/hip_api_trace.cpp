@@ -1492,6 +1492,8 @@ template <typename Tp> void ToolsInit(Tp* table) {
 #endif
 }
 
+extern "C" void __rocm_hip_tp_init(void);
+
 template <typename Tp> Tp& GetDispatchTableImpl() {
   // using a static inside a function prevents static initialization fiascos
   static auto dispatch_table = Tp{};
@@ -1501,6 +1503,11 @@ template <typename Tp> Tp& GetDispatchTableImpl() {
 
   // Profiler Registration, may wrap the function pointers
   ToolsInit(&dispatch_table);
+
+  // LTTng-UST: idempotent provider readiness marker. The provider's own
+  // static-init has already registered (via TRACEPOINT_DEFINE in
+  // rocm_hip_tp.cpp); this call is the explicit "we're done with init".
+  __rocm_hip_tp_init();
 
   return dispatch_table;
 }
