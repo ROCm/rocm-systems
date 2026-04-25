@@ -10,6 +10,8 @@
 #include "rocpdsna/writer.hpp"
 #include "rocpdsna/writer_types.hpp"
 
+#include "data_storage/vtable/kernel_dispatch_buffer.hpp"
+
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
@@ -146,6 +148,13 @@ main(int argc, char** argv)
 
     agent_unique_id_t gpu_agent;
     register_setup(*writer, gpu_agent);
+
+    if(auto* buffer =
+           rocpdsna::data_storage::vtable::kernel_dispatch_buffer::get_active_instance(
+               "rocpd_kernel_dispatch_bench"))
+    {
+        buffer->reserve(count);
+    }
 
     const trace_environment_t trace_env{ .node_id    = k_node_id,
                                          .process_id = k_pid,

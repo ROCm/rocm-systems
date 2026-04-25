@@ -316,6 +316,18 @@ kernel_dispatch_buffer::flush()
 }
 
 void
+kernel_dispatch_buffer::reserve(std::size_t expected_rows)
+{
+    for(auto& col : m_int_cols)
+    {
+        col.values.reserve(expected_rows);
+        col.is_null.reserve(expected_rows);
+    }
+    m_text_col.values.reserve(expected_rows);
+    m_text_col.is_null.reserve(expected_rows);
+}
+
+void
 kernel_dispatch_buffer::register_instance(const std::string&      real_table_name,
                                           kernel_dispatch_buffer* buffer)
 {

@@ -75,6 +75,10 @@ public:
     // Bulk-write the buffered rows to the real table.
     int flush();
 
+    // Pre-size all per-column vectors to avoid reallocation thrashing on the
+    // hot insert path. Bench-driven hint; safe to call before any push().
+    void reserve(std::size_t expected_rows);
+
     [[nodiscard]] size_t row_count() const noexcept { return m_row_count; }
 
     // Static registry: lets the writer reach the active buffer instance for
