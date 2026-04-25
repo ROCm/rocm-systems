@@ -3,8 +3,11 @@
 
 #include "sqlite_backend.hpp"
 
+#include "data_storage/vtable/kernel_dispatch_buffer_vtab.hpp"
 #include "debug.hpp"
 #include "directory.hpp"
+
+#include "spdlog/fmt/bundled/core.h"
 
 #include <filesystem>
 #include <stdexcept>
@@ -297,6 +300,25 @@ sqlite_backend::initialize_schema()
             LOG_ERROR("Failed to apply PRAGMA foreign_keys=OFF: {}",
                       err_msg != nullptr ? err_msg : "unknown error");
             sqlite3_free(err_msg);
+        }
+    }
+
+    // Shape 3 POC: register the kernel_dispatch_buffer vtable module and create
+    // a virtual table that fronts the real rocpd_kernel_dispatch_<uuid> table.
+    vtable::register_kernel_dispatch_buffer_module(m_sqlite3);
+
+    {
+        const auto sql =
+            fmt::format("CREATE VIRTUAL TABLE IF NOT EXISTS kernel_dispatch_buf "
+                        "USING kernel_dispatch_buffer('rocpd_kernel_dispatch_{}')",
+                        m_uuid);
+        char* err = nullptr;
+        int   rc  = sqlite3_exec(m_sqlite3, sql.c_str(), nullptr, nullptr, &err);
+        if(rc != SQLITE_OK)
+        {
+            LOG_ERROR("Failed to create kernel_dispatch_buf vtable: {}",
+                      err != nullptr ? err : "unknown");
+            sqlite3_free(err);
         }
     }
 }

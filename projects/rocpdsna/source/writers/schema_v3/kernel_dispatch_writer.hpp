@@ -39,8 +39,9 @@ public:
     void insert_impl(const writer_types::kernel_dispatch_data_t& data,
                      const writer_types::trace_environment_t&    trace_env)
     {
-        auto transaction_block = m_ctx->backend->begin_transaction();
-
+        // Shape 3 POC: no per-row transaction. Inserts go through the
+        // kernel_dispatch_buf virtual table which buffers in RAM and flushes
+        // in bulk. Validators / chained event/sample inserts run unwrapped.
         m_ctx->validator->require_node(trace_env.node_id)
             .require_process(trace_env.process_id)
             .require_thread(trace_env.thread_id)
