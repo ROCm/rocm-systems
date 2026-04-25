@@ -487,6 +487,13 @@ should_bypass_inline_intercept()
 
 // --- add_write_index wrappers (4) ---
 
+// PHASE 1 FIX: tracing_only mode does NOT virtualize wdid. The application's
+// queue is the real HSA queue and the application must advance the real
+// write_dispatch_id directly. process_doorbell_tracing_only does not touch
+// real wdid (unlike process_doorbell_impl in full_intercept mode), so any
+// wptr virtualization here would be silently lost on the real queue mqd.
+// Per spec §3.1, tracing_only wraps only signal_store/queue_create/destroy.
+
 uint64_t
 wrap_add_write_index_relaxed(const hsa_queue_t* q, uint64_t v)
 {
@@ -494,8 +501,12 @@ wrap_add_write_index_relaxed(const hsa_queue_t* q, uint64_t v)
         return s_next_table.hsa_queue_add_write_index_relaxed_fn(q, v);
 
     auto s = lookup_queue_state(q);
-    if(s) return add_write_index_impl(s.get(), v);
-    return s_next_table.hsa_queue_add_write_index_relaxed_fn(q, v);
+    if(!s) return s_next_table.hsa_queue_add_write_index_relaxed_fn(q, v);
+
+    if(s->mode == QueueState::Mode::tracing_only)
+        return s_next_table.hsa_queue_add_write_index_relaxed_fn(q, v);
+
+    return add_write_index_impl(s.get(), v);
 }
 
 uint64_t
@@ -505,8 +516,12 @@ wrap_add_write_index_scacq_screl(const hsa_queue_t* q, uint64_t v)
         return s_next_table.hsa_queue_add_write_index_scacq_screl_fn(q, v);
 
     auto s = lookup_queue_state(q);
-    if(s) return add_write_index_impl(s.get(), v);
-    return s_next_table.hsa_queue_add_write_index_scacq_screl_fn(q, v);
+    if(!s) return s_next_table.hsa_queue_add_write_index_scacq_screl_fn(q, v);
+
+    if(s->mode == QueueState::Mode::tracing_only)
+        return s_next_table.hsa_queue_add_write_index_scacq_screl_fn(q, v);
+
+    return add_write_index_impl(s.get(), v);
 }
 
 uint64_t
@@ -516,8 +531,12 @@ wrap_add_write_index_scacquire(const hsa_queue_t* q, uint64_t v)
         return s_next_table.hsa_queue_add_write_index_scacquire_fn(q, v);
 
     auto s = lookup_queue_state(q);
-    if(s) return add_write_index_impl(s.get(), v);
-    return s_next_table.hsa_queue_add_write_index_scacquire_fn(q, v);
+    if(!s) return s_next_table.hsa_queue_add_write_index_scacquire_fn(q, v);
+
+    if(s->mode == QueueState::Mode::tracing_only)
+        return s_next_table.hsa_queue_add_write_index_scacquire_fn(q, v);
+
+    return add_write_index_impl(s.get(), v);
 }
 
 uint64_t
@@ -527,8 +546,12 @@ wrap_add_write_index_screlease(const hsa_queue_t* q, uint64_t v)
         return s_next_table.hsa_queue_add_write_index_screlease_fn(q, v);
 
     auto s = lookup_queue_state(q);
-    if(s) return add_write_index_impl(s.get(), v);
-    return s_next_table.hsa_queue_add_write_index_screlease_fn(q, v);
+    if(!s) return s_next_table.hsa_queue_add_write_index_screlease_fn(q, v);
+
+    if(s->mode == QueueState::Mode::tracing_only)
+        return s_next_table.hsa_queue_add_write_index_screlease_fn(q, v);
+
+    return add_write_index_impl(s.get(), v);
 }
 
 // --- store_write_index wrappers (2) ---
@@ -543,12 +566,19 @@ wrap_store_write_index_relaxed(const hsa_queue_t* q, uint64_t v)
     }
 
     auto s = lookup_queue_state(q);
-    if(s)
+    if(!s)
     {
-        store_write_index_impl(s.get(), v);
+        s_next_table.hsa_queue_store_write_index_relaxed_fn(q, v);
         return;
     }
-    s_next_table.hsa_queue_store_write_index_relaxed_fn(q, v);
+
+    if(s->mode == QueueState::Mode::tracing_only)
+    {
+        s_next_table.hsa_queue_store_write_index_relaxed_fn(q, v);
+        return;
+    }
+
+    store_write_index_impl(s.get(), v);
 }
 
 void
@@ -561,12 +591,19 @@ wrap_store_write_index_screlease(const hsa_queue_t* q, uint64_t v)
     }
 
     auto s = lookup_queue_state(q);
-    if(s)
+    if(!s)
     {
-        store_write_index_impl(s.get(), v);
+        s_next_table.hsa_queue_store_write_index_screlease_fn(q, v);
         return;
     }
-    s_next_table.hsa_queue_store_write_index_screlease_fn(q, v);
+
+    if(s->mode == QueueState::Mode::tracing_only)
+    {
+        s_next_table.hsa_queue_store_write_index_screlease_fn(q, v);
+        return;
+    }
+
+    store_write_index_impl(s.get(), v);
 }
 
 // --- cas_write_index wrappers (4) ---
@@ -578,8 +615,12 @@ wrap_cas_write_index_relaxed(const hsa_queue_t* q, uint64_t expected, uint64_t v
         return s_next_table.hsa_queue_cas_write_index_relaxed_fn(q, expected, value);
 
     auto s = lookup_queue_state(q);
-    if(s) return cas_write_index_impl(s.get(), expected, value);
-    return s_next_table.hsa_queue_cas_write_index_relaxed_fn(q, expected, value);
+    if(!s) return s_next_table.hsa_queue_cas_write_index_relaxed_fn(q, expected, value);
+
+    if(s->mode == QueueState::Mode::tracing_only)
+        return s_next_table.hsa_queue_cas_write_index_relaxed_fn(q, expected, value);
+
+    return cas_write_index_impl(s.get(), expected, value);
 }
 
 uint64_t
@@ -589,8 +630,12 @@ wrap_cas_write_index_scacq_screl(const hsa_queue_t* q, uint64_t expected, uint64
         return s_next_table.hsa_queue_cas_write_index_scacq_screl_fn(q, expected, value);
 
     auto s = lookup_queue_state(q);
-    if(s) return cas_write_index_impl(s.get(), expected, value);
-    return s_next_table.hsa_queue_cas_write_index_scacq_screl_fn(q, expected, value);
+    if(!s) return s_next_table.hsa_queue_cas_write_index_scacq_screl_fn(q, expected, value);
+
+    if(s->mode == QueueState::Mode::tracing_only)
+        return s_next_table.hsa_queue_cas_write_index_scacq_screl_fn(q, expected, value);
+
+    return cas_write_index_impl(s.get(), expected, value);
 }
 
 uint64_t
@@ -600,8 +645,12 @@ wrap_cas_write_index_scacquire(const hsa_queue_t* q, uint64_t expected, uint64_t
         return s_next_table.hsa_queue_cas_write_index_scacquire_fn(q, expected, value);
 
     auto s = lookup_queue_state(q);
-    if(s) return cas_write_index_impl(s.get(), expected, value);
-    return s_next_table.hsa_queue_cas_write_index_scacquire_fn(q, expected, value);
+    if(!s) return s_next_table.hsa_queue_cas_write_index_scacquire_fn(q, expected, value);
+
+    if(s->mode == QueueState::Mode::tracing_only)
+        return s_next_table.hsa_queue_cas_write_index_scacquire_fn(q, expected, value);
+
+    return cas_write_index_impl(s.get(), expected, value);
 }
 
 uint64_t
@@ -611,8 +660,12 @@ wrap_cas_write_index_screlease(const hsa_queue_t* q, uint64_t expected, uint64_t
         return s_next_table.hsa_queue_cas_write_index_screlease_fn(q, expected, value);
 
     auto s = lookup_queue_state(q);
-    if(s) return cas_write_index_impl(s.get(), expected, value);
-    return s_next_table.hsa_queue_cas_write_index_screlease_fn(q, expected, value);
+    if(!s) return s_next_table.hsa_queue_cas_write_index_screlease_fn(q, expected, value);
+
+    if(s->mode == QueueState::Mode::tracing_only)
+        return s_next_table.hsa_queue_cas_write_index_screlease_fn(q, expected, value);
+
+    return cas_write_index_impl(s.get(), expected, value);
 }
 
 // --- load_write_index wrappers (2) ---
@@ -624,8 +677,12 @@ wrap_load_write_index_relaxed(const hsa_queue_t* q)
         return s_next_table.hsa_queue_load_write_index_relaxed_fn(q);
 
     auto s = lookup_queue_state(q);
-    if(s) return load_write_index_impl(s.get());
-    return s_next_table.hsa_queue_load_write_index_relaxed_fn(q);
+    if(!s) return s_next_table.hsa_queue_load_write_index_relaxed_fn(q);
+
+    if(s->mode == QueueState::Mode::tracing_only)
+        return s_next_table.hsa_queue_load_write_index_relaxed_fn(q);
+
+    return load_write_index_impl(s.get());
 }
 
 uint64_t
@@ -635,8 +692,12 @@ wrap_load_write_index_scacquire(const hsa_queue_t* q)
         return s_next_table.hsa_queue_load_write_index_scacquire_fn(q);
 
     auto s = lookup_queue_state(q);
-    if(s) return load_write_index_impl(s.get());
-    return s_next_table.hsa_queue_load_write_index_scacquire_fn(q);
+    if(!s) return s_next_table.hsa_queue_load_write_index_scacquire_fn(q);
+
+    if(s->mode == QueueState::Mode::tracing_only)
+        return s_next_table.hsa_queue_load_write_index_scacquire_fn(q);
+
+    return load_write_index_impl(s.get());
 }
 
 // --- signal_store wrappers (2) ---
