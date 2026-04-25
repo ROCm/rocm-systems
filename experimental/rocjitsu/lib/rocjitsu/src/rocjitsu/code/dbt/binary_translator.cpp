@@ -3,6 +3,7 @@
 
 #include "rocjitsu/code/dbt/binary_translator.h"
 
+#include "rocjitsu/analysis/register_liveness.h"
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/basic_block.h"
@@ -92,6 +93,7 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
   patcher.set_cave_start(code_end);
 
   for (const auto &block : blocks) {
+    auto liveness = RegisterLiveness::compute(*block);
     auto replacements = semantic_translator_->translate(*block);
 
     for (const auto &repl : replacements)

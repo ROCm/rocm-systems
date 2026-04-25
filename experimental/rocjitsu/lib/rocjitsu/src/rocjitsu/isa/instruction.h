@@ -152,6 +152,20 @@ public:
   /// @returns Destination operand count.
   int num_dst_operands() const { return num_dst_; }
 
+  /// @brief Access a source operand by index.
+  /// @param i  Operand index (0-based, must be < num_src_operands()).
+  /// @returns Pointer to the operand, or nullptr if index out of range.
+  [[nodiscard]] const Operand *src_operand(int i) const {
+    return (i >= 0 && i < num_src_) ? src_operands_[i] : nullptr;
+  }
+
+  /// @brief Access a destination operand by index.
+  /// @param i  Operand index (0-based, must be < num_dst_operands()).
+  /// @returns Pointer to the operand, or nullptr if index out of range.
+  [[nodiscard]] const Operand *dst_operand(int i) const {
+    return (i >= 0 && i < num_dst_) ? dst_operands_[i] : nullptr;
+  }
+
   /// @brief Size of the instruction's encoding in bytes.
   /// @returns Encoding size in bytes.
   int size() const { return size_; }

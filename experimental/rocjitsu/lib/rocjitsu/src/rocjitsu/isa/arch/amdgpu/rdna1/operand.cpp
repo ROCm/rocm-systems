@@ -25,7 +25,9 @@ std::string reg_name(const char *prefix, int reg_num, int size_bits) {
 } // namespace
 
 Operand::Operand(int size_bits, OperandType opr_type, int encoding_value)
-    : IsaOperand<Isa>(size_bits, opr_type, encoding_value) {}
+    : IsaOperand<Isa>(size_bits, opr_type, encoding_value) {
+  is_vgpr_ = is_vgpr_operand_type(opr_type);
+}
 
 std::string Operand::name() const {
   switch (opr_type_) {

@@ -5674,6 +5674,18 @@ class CodeGenerator:
             opnd_sel_enum += '};'
             code_lines.append(cgen.Line(opnd_sel_enum))
 
+        # Generate is_vgpr_operand_type() constexpr function.
+        vgpr_types = [t for t in self.isa_spec.operand_types
+                      if 'VGPR' in t or 'ACCVGPR' in t]
+        if vgpr_types:
+            fn = '[[nodiscard]] constexpr bool is_vgpr_operand_type(OperandType t) {'
+            fn += ' switch (t) {'
+            for t in vgpr_types:
+                fn += f' case OperandType::{t}:'
+            fn += ' return true;'
+            fn += ' default: return false; } }'
+            code_lines.append(cgen.Line(fn))
+
         opnd_type_def_file = CppFile(
             'operand_types',
             self.out_path,
@@ -5801,7 +5813,9 @@ class CodeGenerator:
         class_impl = [
             cgen.Line(
                 'Operand::Operand(int size_bits, OperandType opr_type, int encoding_value)\n'
-                '    : IsaOperand<Isa>(size_bits, opr_type, encoding_value) {}'
+                '    : IsaOperand<Isa>(size_bits, opr_type, encoding_value) {\n'
+                '  is_vgpr_ = is_vgpr_operand_type(opr_type);\n'
+                '}'
             ),
             cgen.Line(name_impl),
         ]
