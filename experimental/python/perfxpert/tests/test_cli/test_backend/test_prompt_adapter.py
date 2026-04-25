@@ -61,6 +61,17 @@ def test_render_substitutes_tool_names_gemini() -> None:
     assert "mcp_perfxpert_intent_classify" in out
 
 
+def test_render_substitutes_tool_names_codex() -> None:
+    out = pa.render_prompt(
+        SOURCE,
+        backend="codex",
+        tool_name_template="mcp__perfxpert__{tool}",
+        known_tools=TOOLS,
+        reject_language=False,
+    )
+    assert "mcp__perfxpert__intent_classify" in out
+
+
 def test_render_strips_non_target_backend_blocks() -> None:
     out = pa.render_prompt(
         SOURCE,
@@ -96,7 +107,7 @@ def test_render_rejects_native_fallback_when_gate_tool_missing() -> None:
     out = pa.render_prompt(
         SOURCE,
         backend="codex",
-        tool_name_template="mcp_perfxpert_{tool}",
+        tool_name_template="mcp__perfxpert__{tool}",
         known_tools=TOOLS,
         reject_language=True,
     )

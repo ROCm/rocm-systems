@@ -149,10 +149,9 @@ class CodexAdapter:
     )
     min_version: str | None = "0.7.0"
     known_schema_versions: tuple[str, ...] = ("0.7.x",)
-    # Codex's MCP tool name wire format is `mcp_<server>_<tool>` per
-    # the April 2026 observed behavior. verify_mcp_live() probes the
-    # actual wire format and warns on drift (plan B1).
-    tool_name_template: str = "mcp_perfxpert_{tool}"
+    # Codex exposes MCP tools using the same namespace form surfaced in
+    # backend sessions: `mcp__<server>__<tool>`.
+    tool_name_template: str = "mcp__perfxpert__{tool}"
     spawn_strategy: Literal["execvpe", "subprocess"] = "execvpe"
 
     _PERFXPERT_DIR = ".perfxpert"  # legacy cleanup only

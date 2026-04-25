@@ -538,7 +538,7 @@ session:
 |---|---|---|---|
 | `perfxpert-code claude`  | Claude Code | `.mcp.json` + `CLAUDE.local.md` + `.claude/settings.json` | `mcp__perfxpert__<tool>` |
 | `perfxpert-code gemini`  | Gemini CLI  | `.gemini/settings.json` (project-local list-append, never touches `GEMINI.md`) | `mcp_perfxpert_<tool>` |
-| `perfxpert-code codex`   | Codex CLI   | `~/.codex/config.toml` (trust) + `<cwd>/.codex/config.toml` when trusted or fallback `~/.codex/config.toml` for MCP + `AGENTS.override.md` | `mcp_perfxpert_<tool>` |
+| `perfxpert-code codex`   | Codex CLI   | `~/.codex/config.toml` (trust) + `<cwd>/.codex/config.toml` when trusted or fallback `~/.codex/config.toml` for MCP + `AGENTS.override.md` | `mcp__perfxpert__<tool>` |
 
 All three subcommands accept the same dispatcher-owned flags:
 
