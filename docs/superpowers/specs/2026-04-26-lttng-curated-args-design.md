@@ -358,10 +358,20 @@ The sentinel is a stable, comment-only marker emitted unconditionally for every 
 Three new variants of the existing `ROCM_TRACE_RET_*` macros. The macros follow a single helper-signature rule: **every `rocm_trace_emit_<api>_args` helper accepts `corr_id` first and the call's status as its last positional argument.** The migrator and codegen both honor this rule, so OUT-only and INOUT direction handling does not require any per-API contract negotiation between the macro and the helper:
 
 - For status-returning APIs (`_STATUS_CURATED`, `_HSA` variant), status is the macro-evaluated `__rocm_status` (`hipError_t` or `hsa_status_t`).
-- For pointer-returning APIs (`_PTR_CURATED`), status is synthesized from the return value: `__rocm_ptr != nullptr ? hipSuccess : hipErrorOutOfMemory` (this captures the only signal a pointer-returning HIP API conveys to its caller).
-- For void-returning APIs (`_VOID_CURATED`), status is the literal `hipSuccess` — the call cannot fail at this layer, so OUT params (if any) are always treated as valid.
+- For pointer-returning APIs (`_PTR_CURATED`), status is synthesized **only for the `_args` helper's OUT-gating logic** from the return value: `__rocm_ptr != nullptr ? hipSuccess : hipErrorOutOfMemory` (this captures the only signal a pointer-returning HIP API conveys to its caller). The synthesized status is **not** emitted as a generic exit event — `_PTR_CURATED` continues to emit the existing `hip_api_exit_ptr` event so the generic schema is preserved verbatim (see the §1 Goal "augment without replacing" and the §2 non-goal "Generic events keep their current schema").
+- For void-returning APIs (`_VOID_CURATED`), status is the literal `hipSuccess` — the call cannot fail at this layer, so OUT params (if any) are always treated as valid. The generic exit event remains `hip_api_exit_void`.
 
 Codegen always emits the helper signature with `status` as the last parameter, even for all-IN APIs (where the helper simply ignores it). This keeps the macro/helper contract uniform and avoids per-API special cases.
+
+**Generic exit-event preservation (normative).** Each `_CURATED` macro variant MUST emit the same generic exit tracepoint that its non-curated counterpart emits today:
+
+| Macro | Generic exit tracepoint emitted | Matches non-curated counterpart |
+|---|---|---|
+| `_STATUS_CURATED` | `hip_api_exit_status` | `ROCM_TRACE_RET_STATUS` (hip_table_interface.cpp:77-83) |
+| `_PTR_CURATED` | `hip_api_exit_ptr` | `ROCM_TRACE_RET_PTR` (hip_table_interface.cpp:85-90) |
+| `_VOID_CURATED` | `hip_api_exit_void` | `ROCM_TRACE_RET_VOID` (hip_table_interface.cpp:92-97) |
+
+This invariant is verified by `test_hip_api_tracepoints.sh` (existing) and re-asserted by `test_hip_curated_args_payload.sh` (new): for each curated pointer-returning API, the trace MUST contain both `<api>_args` and `hip_api_exit_ptr` (carrying `retval_ptr`), never `hip_api_exit_status`.
 
 ```c
 #define ROCM_TRACE_RET_STATUS_CURATED(api, expr, corr, ...)              \
@@ -376,11 +386,14 @@ Codegen always emits the helper signature with `status` as the last parameter, e
 #define ROCM_TRACE_RET_PTR_CURATED(api, ptr_type, expr, corr, ...)       \
     do {                                                                 \
         ptr_type const __rocm_ptr = (expr);                              \
+        /* Status is synthesized ONLY for the _args helper's OUT-gating  \
+           logic; it is NOT emitted as a generic exit event. The generic \
+           exit event remains hip_api_exit_ptr to preserve the existing  \
+           pointer-return schema (see §6.2 generic-exit preservation). */\
         const hipError_t __rocm_status =                                 \
             (__rocm_ptr != nullptr) ? hipSuccess : hipErrorOutOfMemory;  \
         rocm_trace_emit_##api##_args((corr), __VA_ARGS__, __rocm_status);\
-        rocm_trace_emit_hip_api_exit_status(__func__,                    \
-            (corr), (int32_t)__rocm_status);                             \
+        rocm_trace_emit_hip_api_exit_ptr(__func__, (corr), __rocm_ptr);  \
         return __rocm_ptr;                                               \
     } while (0)
 
