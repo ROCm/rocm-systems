@@ -173,13 +173,14 @@ Every generated `<api>_args` event MUST stay within LTTng-UST's documented limit
 
 Note: `dim3` expands to **3** fields, not 1. Codegen MUST count expanded fields, not DSL entries, when validating against the limit.
 
-When a curated API exceeds 9 payload fields under the natural mapping, the YAML author MUST apply one of the following mitigations, in this order of preference:
+When a curated API exceeds 9 payload fields under the natural mapping, the YAML author MUST apply one of the following mitigations, in this order of preference. Both mitigations are expressed entirely through existing per-arg fields (`type`, `name`) — there are no separate top-level `pack:` or `split:` directives in the DSL:
 
-1. **Use `dim3_packed`** in place of `dim3` (saves 2 fields per dim3).
-2. **Drop low-value fields** (e.g. captured pointer values for opaque blob args like `kernelParams`, `extra`) and document the omission in the API's YAML `notes:`.
-3. **Split into two events** — `<api>_args` and `<api>_args_ext` — both keyed on the same `corr_id`. Codegen emits both from a single helper. Reserved as a last resort; consumer-side join logic costs.
+1. **Use `dim3_packed`** in place of `dim3` for one or more `dim3` args (saves 2 fields per dim3). Authored as `{name: <name>, type: dim3_packed, dir: IN}`.
+2. **Drop low-value fields** (e.g. captured pointer values for opaque blob args like `kernelParams`, `extra`) by simply omitting them from the `args:` list, and document the omission in the API's YAML `notes:`.
 
-Codegen enforces this at generation time: it computes the expanded field count and aborts with a clear error if any API exceeds 9 payload fields without a `pack:` or `split:` directive in its YAML entry. Verify script (`lttng_curated_verify.py`) re-checks at CI time.
+Splitting one logical API into multiple events (`<api>_args` + `<api>_args_ext`) is **explicitly out of scope** for v1 — it would require defining cross-event ordering, naming, and consumer-side join semantics, none of which are needed for the curated API set defined in Appendix A. If a future API genuinely cannot fit in 9 payload fields after applying mitigations 1–2, the response is to file a follow-up that introduces a `split:` mechanism with full spec coverage; v1 codegen treats over-budget without an in-vocabulary mitigation as a hard error.
+
+Codegen enforces this at generation time: it computes the **post-type-expansion** payload field count (i.e. `dim3` → 3 fields, `dim3_packed` → 1 field, every other type → 1 field) and aborts with a clear error if any API exceeds 9 payload fields. Verify script (`lttng_curated_verify.py`) re-checks at CI time using the same expansion rule.
 
 **Known high-arity APIs that require mitigation:**
 
@@ -187,14 +188,14 @@ Counts in the "Natural fields" column include `corr_id` plus all expanded payloa
 
 | API | Natural fields (incl. corr_id, dim3 expanded) | Mitigation in v1 | Total after mitigation |
 |---|---|---|---|
-| `hipLaunchKernel` | 11 (corr_id + function_address + 3 numBlocks + 3 dimBlocks + args + sharedMemBytes + stream) | `pack: [numBlocks, dimBlocks]` using `dim3_packed` → saves 4 fields. | 7 |
-| `hipLaunchCooperativeKernel` | 11 (same shape as `hipLaunchKernel`) | `pack: [numBlocks, dimBlocks]`. | 7 |
-| `hipExtLaunchKernel` | 13 (adds 2 event handles) | `pack: [numBlocks, dimBlocks]`. | 9 |
-| `hipModuleLaunchKernel` | 12 (corr_id + f + 3 grid + 3 block + sharedMem + stream + kernelParams + extra) | `pack: [gridDim, blockDim]` using `dim3_packed` → 8 fields. | 8 |
-| `hipExtModuleLaunchKernel` | 14 (adds 2 global grid dims) | `pack: [gridDim, blockDim, globalGridDim]` using `dim3_packed`. | 9 |
+| `hipLaunchKernel` | 11 (corr_id + function_address + 3 numBlocks + 3 dimBlocks + args + sharedMemBytes + stream) | Type `numBlocks` and `dimBlocks` as `dim3_packed` → saves 4 fields. | 7 |
+| `hipLaunchCooperativeKernel` | 11 (same shape as `hipLaunchKernel`) | Type `numBlocks` and `dimBlocks` as `dim3_packed`. | 7 |
+| `hipExtLaunchKernel` | 13 (adds 2 event handles) | Type `numBlocks` and `dimBlocks` as `dim3_packed`. | 9 |
+| `hipModuleLaunchKernel` | 12 (corr_id + f + 3 grid + 3 block + sharedMem + stream + kernelParams + extra) | Type `gridDim` and `blockDim` as `dim3_packed` → 8 fields. | 8 |
+| `hipExtModuleLaunchKernel` | 14 (adds 2 global grid dims) | Type `gridDim`, `blockDim`, and `globalGridDim` as `dim3_packed`. | 9 |
 | `hsa_queue_create` | 9 (corr_id + agent + size + type + callback + data + private_seg + group_seg + queue) | None needed (8 payload fields, 1 spare). | 9 |
 | `hsa_amd_memory_async_copy` | 9 (corr_id + dst + dst_agent + src + src_agent + size + num_dep + dep_signals + completion_signal) | None needed (8 payload fields, 1 spare). | 9 |
-| `hsa_amd_memory_async_copy_on_engine` | 11 (`hsa_amd_memory_async_copy` + `engine_id` + `force_copy_on_sdma`) | Drop `dep_signals` pointer field → 9 payload + corr_id = 10 total (at limit). | 10 |
+| `hsa_amd_memory_async_copy_on_engine` | 11 (`hsa_amd_memory_async_copy` + `engine_id` + `force_copy_on_sdma`) | Drop `dep_signals` from the YAML `args:` list → 9 payload + corr_id = 10 total (at limit). | 10 |
 
 Any future API additions must pass the 9-payload-field budget at codegen time.
 
