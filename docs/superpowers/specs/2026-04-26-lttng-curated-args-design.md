@@ -109,7 +109,53 @@ Per `args` entry:
 | `float` | `ctf_float(float)` | `float`. |
 | `enum` | `ctf_integer(int32_t)` | `hipMemcpyKind`, `hipMemoryAdvise`, `hsa_queue_type32_t`, etc. |
 | `dim3` | 3 × `ctf_integer(uint32_t)` | `dim3`. Auto-expands to `<name>_x`, `<name>_y`, `<name>_z`. |
-| `dim3_packed` | 1 × `ctf_integer_hex(uint64_t)` | `dim3`. Three 16-bit lanes packed into one uint64 (`x | y<<16 | z<<32`). Used to stay under field-budget for high-arity APIs (see §4.4). |
+| `dim3_packed` | 1 × `ctf_integer_hex(uint64_t)` | `dim3`. See dim3_packed encoding below. Used to stay under field-budget for high-arity APIs (see §4.4). |
+
+**`dim3_packed` encoding (`ROCM_DIM3_PACK`).**
+
+The encoding allocates lane widths to match real-world HIP `dim3` ranges:
+
+| Bits | Field | Range | Rationale |
+|---|---|---|---|
+| 0–31 | `x` | `[0, 2^31-1]` | Grid X may need the full 32 bits in HIP; block X ≤ 1024 fits trivially. |
+| 32–47 | `y` | `[0, 65535]` | HIP gridDim.y ≤ 65535 by hardware; blockDim.y ≤ 1024. |
+| 48–63 | `z` | `[0, 65535]` | HIP gridDim.z ≤ 65535; blockDim.z ≤ 64. |
+
+Codegen emits a single inline helper macro/function:
+
+```c
+static inline uint64_t ROCM_DIM3_PACK(dim3 d) {
+    /* Saturating pack with single-bit overflow indicator (see policy below). */
+    const uint32_t x = d.x;                        /* 32 bits — never overflows lane */
+    const uint32_t y_raw = d.y;
+    const uint32_t z_raw = d.z;
+    const uint64_t y = (y_raw > 0xFFFFu) ? 0xFFFFu : y_raw;
+    const uint64_t z = (z_raw > 0xFFFFu) ? 0xFFFFu : z_raw;
+    /* High bit (63) is normally part of z; if z's true value exceeded the lane,
+       producers MAY OR with the sentinel ROCM_DIM3_OVERFLOW_BIT == (1ULL<<63),
+       which post-saturates z to 0x7FFF in the same lane. Consumers detect
+       overflow by checking the high bit; the saturated value remains a
+       recoverable lower bound. */
+    const uint64_t overflow = ((y_raw > 0xFFFFu) || (z_raw > 0xFFFFu))
+                                  ? (1ULL << 63) : 0ULL;
+    return ((uint64_t)x) | (y << 32) | (z << 48) | overflow;
+}
+```
+
+**Overflow policy (normative).** When any dimension exceeds its lane width (only possible for `y` and `z`, since `x` has the full 32 bits):
+
+1. The dim is saturated to its lane maximum (`0xFFFF` for y/z).
+2. Bit 63 (the `ROCM_DIM3_OVERFLOW_BIT`) is set in the packed value, and z is post-saturated to `0x7FFF` so the saturated value remains readable in the low 15 bits of the z lane.
+3. The saturated value is a **lower bound**, not the true dim. Consumers MUST treat any packed value with bit 63 set as "true z (and possibly y) is unknown but ≥ 0x7FFF".
+4. The codegen does not abort on overflow at runtime — capture must remain branch-light. Overflow is a degraded-data signal, not an error.
+
+**Testable success criteria (added to §8.1):**
+
+- `test_dim3_packed_normal_range`: assert `ROCM_DIM3_PACK({1, 2, 3}) == 0x0003'0002'00000001`.
+- `test_dim3_packed_x_full_32bit`: assert `ROCM_DIM3_PACK({0x7FFFFFFF, 1, 1}) == 0x0001'0001'7FFFFFFF` and bit 63 clear.
+- `test_dim3_packed_y_overflow`: `ROCM_DIM3_PACK({1, 0x10000, 1})` has bit 63 set, y lane = 0xFFFF.
+- `test_dim3_packed_z_overflow`: `ROCM_DIM3_PACK({1, 1, 0x10000})` has bit 63 set, z lane (bits 48–62) = 0x7FFF.
+- `test_dim3_packed_x_max_no_false_overflow`: x=2^31-1 with y=z=1 must NOT set bit 63 (x lane is wide enough).
 | `cstring` | `ctf_string` | `const char*`. NULL-safe (NULL → empty string). Helper guards on `tracepoint_enabled()`. |
 
 ### 4.4 Field-budget rule (LTTng-UST 10-field / 20-arg limit)
