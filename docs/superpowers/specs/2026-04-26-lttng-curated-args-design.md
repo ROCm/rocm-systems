@@ -93,7 +93,34 @@ Per `args` entry:
 | `float` | `ctf_float(float)` | `float`. |
 | `enum` | `ctf_integer(int32_t)` | `hipMemcpyKind`, `hipMemoryAdvise`, `hsa_queue_type32_t`, etc. |
 | `dim3` | 3 × `ctf_integer(uint32_t)` | `dim3`. Auto-expands to `<name>_x`, `<name>_y`, `<name>_z`. |
+| `dim3_packed` | 1 × `ctf_integer_hex(uint64_t)` | `dim3`. Three 16-bit lanes packed into one uint64 (`x | y<<16 | z<<32`). Used to stay under field-budget for high-arity APIs (see §4.4). |
 | `cstring` | `ctf_string` | `const char*`. NULL-safe (NULL → empty string). Helper guards on `tracepoint_enabled()`. |
+
+### 4.4 Field-budget rule (LTTng-UST 10-field / 20-arg limit)
+
+Every generated `<api>_args` event MUST stay within LTTng-UST's documented limit of **10 LTTng fields** (which corresponds to 20 `LTTNG_UST_TP_ARGS` slots, since each field is 2 args). The mandatory `corr_id` field counts as 1 of the 10. This means each curated API may declare at most **9 fields** of payload after `corr_id`.
+
+Note: `dim3` expands to **3** fields, not 1. Codegen MUST count expanded fields, not DSL entries, when validating against the limit.
+
+When a curated API exceeds 9 payload fields under the natural mapping, the YAML author MUST apply one of the following mitigations, in this order of preference:
+
+1. **Use `dim3_packed`** in place of `dim3` (saves 2 fields per dim3).
+2. **Drop low-value fields** (e.g. captured pointer values for opaque blob args like `kernelParams`, `extra`) and document the omission in the API's YAML `notes:`.
+3. **Split into two events** — `<api>_args` and `<api>_args_ext` — both keyed on the same `corr_id`. Codegen emits both from a single helper. Reserved as a last resort; consumer-side join logic costs.
+
+Codegen enforces this at generation time: it computes the expanded field count and aborts with a clear error if any API exceeds 9 payload fields without a `pack:` or `split:` directive in its YAML entry. Verify script (`lttng_curated_verify.py`) re-checks at CI time.
+
+**Known high-arity APIs that require mitigation:**
+
+| API | Natural fields | Mitigation in v1 |
+|---|---|---|
+| `hipModuleLaunchKernel` | 12 (corr_id + f + 3 grid + 3 block + sharedMem + stream + kernelParams + extra) | `pack: [gridDim, blockDim]` using `dim3_packed` → 8 fields. |
+| `hipExtModuleLaunchKernel` | 14 (adds 2 global grid dims) | `pack: [gridDim, blockDim, globalGridDim]` using `dim3_packed` → 9 fields. |
+| `hsa_queue_create` | 10 (corr_id + agent + size + type + callback + data + private_seg + group_seg + queue) | At limit; no mitigation needed (9 payload fields). |
+| `hsa_amd_memory_async_copy` | 10 (corr_id + dst + dst_agent + src + src_agent + size + num_dep + dep_signals + completion_signal) | At limit; no mitigation needed. |
+| `hsa_amd_memory_async_copy_on_engine` | 11 (adds engine_id) | Drop `dep_signals` pointer field → 10 (9 payload). |
+
+Any future API additions must pass the 9-payload-field budget at codegen time.
 
 ### 4.2 Direction semantics
 
@@ -396,8 +423,8 @@ add_dependencies(amdhip64 lttng_curated_codegen)
 | `hipLaunchKernel` | IN ptr function_address, IN dim3 numBlocks, IN dim3 dimBlocks, IN ptr args, IN size sharedMemBytes, IN handle stream |
 | `hipLaunchCooperativeKernel` | (same as hipLaunchKernel) |
 | `hipLaunchCooperativeKernelMultiDevice` | IN ptr launchParamsList, IN int32 numDevices, IN uint32 flags |
-| `hipModuleLaunchKernel` | IN handle f, IN uint32 gridDimX..Z, IN uint32 blockDimX..Z, IN uint32 sharedMemBytes, IN handle stream, IN ptr kernelParams, IN ptr extra |
-| `hipExtModuleLaunchKernel` | (extends hipModuleLaunchKernel + global grid dims) |
+| `hipModuleLaunchKernel` | IN handle f, IN dim3_packed gridDim, IN dim3_packed blockDim, IN uint32 sharedMemBytes, IN handle stream, IN ptr kernelParams, IN ptr extra (packed per §4.4 to fit 9-field budget) |
+| `hipExtModuleLaunchKernel` | extends hipModuleLaunchKernel with IN dim3_packed globalGridDim (packed per §4.4) |
 | `hipExtLaunchKernel` | (hipLaunchKernel + IN handle startEvent, IN handle stopEvent) |
 | `hipExtLaunchMultiKernelMultiDevice` | IN ptr launchParamsList, IN int32 numDevices, IN uint32 flags |
 | `hipModuleGetFunction` | OUT handle function, IN handle module, IN cstring kname |
