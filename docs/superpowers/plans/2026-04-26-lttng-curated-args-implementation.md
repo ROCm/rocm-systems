@@ -82,10 +82,10 @@ projects/rocr-runtime/runtime/hsa-runtime/CMakeLists.txt  # Regenerate target (T
 projects/rocr-runtime/runtime/hsa-runtime/core/common/hsa_table_interface.cpp  # Re-migrated (Task 14)
 ```
 
-### One-time CI workflow update
+### CI workflow
 
 ```
-.github/workflows/<existing-ci>.yml        # Add YAML drift + idempotency gates (Task 13)
+.github/workflows/lttng-curated-gates.yml  # NEW — drift + verifier gates (Task 13.5)
 ```
 
 ---
@@ -98,7 +98,7 @@ projects/rocr-runtime/runtime/hsa-runtime/core/common/hsa_table_interface.cpp  #
 | **B.** Author HIP YAML (minimal) | 5 | `curated_apis.yaml` with 2 APIs (`hipMemcpyAsync` all-IN, `hipMalloc` OUT-param) |
 | **C.** Generate + wire HIP headers | 6–7 | `rocm_hip_curated_tp.h`, `rocm_trace_emit_curated.h` checked in, included from existing tp.h / emit.h |
 | **D.** Migrator + macros + coverage gate | 8–11 | Extended migrator + `_CURATED` macros + updated coverage gate, all wrappers re-migrated |
-| **E.** Build + test HIP minimal | 12–13 | CMake opt-in target, library builds, payload + coverage tests pass on container |
+| **E.** Build + test HIP minimal | 12–13, 13.5 | CMake opt-in target, library builds, payload + coverage tests pass on container, CI drift+verifier gates wired |
 | **F.** Expand HIP curated set | 14 | Full HIP YAML (~72 APIs); regenerate; re-migrate; re-test |
 | **G.** HSA mirror | 15 | HSA YAML, generate, _CURATED_HSA macros, migrator extension, tests pass |
 | **H.** Final integration | 16 | Container deploy, GraphBench overhead measurement, debate-driven-development re-run, push to PR #5475 |
@@ -3121,16 +3121,14 @@ new APIs added to the YAML are auto-tested. Asserts each <api>_args
 event appears in the trace at least once."
 ```
 
-- [ ] **Step 6: Document the CI gates as a comment in the gate script**
+- [ ] **Step 6: Document the CI gate invocations in codegen header**
 
-The CI workflow integration is deferred to whoever maintains `.github/workflows/`. For now add a comment in the gate script with the recommended CI invocation:
-
-Edit `projects/clr/hipamd/scripts/lttng_curated_codegen.py`, prepend to the docstring:
+Independent of the workflow wiring (Task 13.5), capture the canonical CI invocations in the codegen script so anyone reading the script has the exact commands. Edit `projects/clr/hipamd/scripts/lttng_curated_codegen.py`, prepend to the docstring:
 
 ```python
 """...
 
-CI usage (recommended; not yet wired in this PR):
+CI usage (wired into .github/workflows/lttng-curated-gates.yml by Task 13.5):
 
     # Drift gate: codegen output must match checked-in headers.
     python3 projects/clr/hipamd/scripts/lttng_curated_codegen.py \\
@@ -3155,9 +3153,171 @@ CI usage (recommended; not yet wired in this PR):
 git add projects/clr/hipamd/scripts/lttng_curated_codegen.py
 git commit -m "lttng: document CI drift + verify gate invocations in codegen header
 
-The actual .github/workflows/ wiring is owned by the CI team and lands
-separately; documenting the recommended invocations here so anyone
-adding the workflow has the exact commands. Per spec §9.3."
+Documents the canonical CI invocations so the codegen script is
+self-describing for anyone adding or maintaining the workflow. The
+actual .github/workflows wiring lands in Task 13.5. Per spec §9.3."
+```
+
+---
+
+### Task 13.5: Wire CI drift + verifier gates into a GitHub workflow
+
+**Files:**
+- Create: `.github/workflows/lttng-curated-gates.yml`
+
+**Why this task is here.** Spec §9.1 / §9.3 require the drift gate AND the verifier gate to run "Per CI run." Without an actual workflow file, these are aspirational. The workflow lives in this PR so the gates are active from the moment the curated-args feature merges.
+
+If the project's CI policy requires workflow edits to land via a separate PR/team review, file a follow-up issue tracking this work and SKIP this task here — but in that case Step 4 below MUST be executed (file the follow-up issue + comment on PR #5475 referencing it). Do not silently leave the spec requirement unmet.
+
+- [ ] **Step 1: Locate similar existing workflow as template**
+
+Inspect an existing project-scoped workflow that already runs Python validation (good templates):
+
+```bash
+ls .github/workflows/hipfile-pylint.yml .github/workflows/hipfile-shellcheck.yml \
+   .github/workflows/hipfile-codespell.yml 2>/dev/null
+head -40 .github/workflows/hipfile-pylint.yml 2>/dev/null
+```
+
+Use whichever exists as the structural template (trigger config, runner image, checkout step) so the new workflow matches project conventions.
+
+- [ ] **Step 2: Create `.github/workflows/lttng-curated-gates.yml`**
+
+```yaml
+name: LTTng Curated Gates
+
+on:
+  pull_request:
+    paths:
+      - 'projects/clr/hipamd/scripts/curated_apis.yaml'
+      - 'projects/clr/hipamd/scripts/lttng_curated_*.py'
+      - 'projects/clr/hipamd/src/lttng/rocm_hip_curated_tp.h'
+      - 'projects/clr/hipamd/src/lttng/rocm_trace_emit_curated.h'
+      - 'projects/rocr-runtime/runtime/hsa-runtime/scripts/curated_apis.yaml'
+      - 'projects/rocr-runtime/runtime/hsa-runtime/scripts/lttng_curated_*.py'
+      - 'projects/rocr-runtime/runtime/hsa-runtime/lttng/rocm_hsa_curated_tp.h'
+      - 'projects/rocr-runtime/runtime/hsa-runtime/lttng/rocm_trace_emit_curated.h'
+      - '.github/workflows/lttng-curated-gates.yml'
+  push:
+    branches: [main, develop]
+
+jobs:
+  drift-gate:
+    name: Codegen drift (HIP + HSA)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.11' }
+      - run: pip install pyyaml
+      - name: Regenerate HIP curated headers and diff
+        run: |
+          python3 projects/clr/hipamd/scripts/lttng_curated_codegen.py \
+            --yaml projects/clr/hipamd/scripts/curated_apis.yaml \
+            --provider rocm_hip \
+            --status-type hipError_t --status-success hipSuccess \
+            --out-tp projects/clr/hipamd/src/lttng/rocm_hip_curated_tp.h \
+            --out-emit projects/clr/hipamd/src/lttng/rocm_trace_emit_curated.h
+          git diff --exit-code -- \
+            projects/clr/hipamd/src/lttng/rocm_hip_curated_tp.h \
+            projects/clr/hipamd/src/lttng/rocm_trace_emit_curated.h
+      - name: Regenerate HSA curated headers and diff
+        run: |
+          python3 projects/rocr-runtime/runtime/hsa-runtime/scripts/lttng_curated_codegen.py \
+            --yaml projects/rocr-runtime/runtime/hsa-runtime/scripts/curated_apis.yaml \
+            --provider rocm_hsa \
+            --status-type hsa_status_t --status-success HSA_STATUS_SUCCESS \
+            --out-tp projects/rocr-runtime/runtime/hsa-runtime/lttng/rocm_hsa_curated_tp.h \
+            --out-emit projects/rocr-runtime/runtime/hsa-runtime/lttng/rocm_trace_emit_curated.h
+          git diff --exit-code -- \
+            projects/rocr-runtime/runtime/hsa-runtime/lttng/rocm_hsa_curated_tp.h \
+            projects/rocr-runtime/runtime/hsa-runtime/lttng/rocm_trace_emit_curated.h
+
+  verify-gate:
+    name: Verifier (libclang vs YAML)
+    runs-on: ubuntu-latest
+    container:
+      image: rocm/dev-ubuntu-24.04:latest    # adjust to whichever ROCm image
+                                              # the project's other CI jobs use
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.11' }
+      - run: pip install pyyaml libclang
+      - name: Verify HIP YAML against headers
+        run: |
+          python3 projects/clr/hipamd/scripts/lttng_curated_verify.py \
+            --yaml projects/clr/hipamd/scripts/curated_apis.yaml \
+            --header /opt/rocm/include/hip/hip_runtime_api.h \
+            --extra-arg=-D__HIP_PLATFORM_AMD__=1 \
+            --extra-arg=-I/opt/rocm/include
+      - name: Verify HSA YAML against headers
+        run: |
+          python3 projects/rocr-runtime/runtime/hsa-runtime/scripts/lttng_curated_verify.py \
+            --yaml projects/rocr-runtime/runtime/hsa-runtime/scripts/curated_apis.yaml \
+            --header /opt/rocm/include/hsa/hsa.h \
+            --header /opt/rocm/include/hsa/hsa_ext_amd.h \
+            --extra-arg=-I/opt/rocm/include
+```
+
+Notes for the implementer:
+- The exact `runs-on` / `container:` image MUST match what the project's other Python-based gate workflows use. Inspect `hipfile-pylint.yml` etc. and copy that idiom.
+- The verify-gate uses the multi-`--header` form added in Task 4.5 (HSA APIs span `hsa.h` + `hsa_ext_amd.h`).
+- If the ROCm-image-required verifier job exceeds the project's allowed CI image surface, run only the drift-gate in CI and file a follow-up to land the verifier in a nightly workflow. Document the choice in the workflow file's top comment.
+
+- [ ] **Step 3: Locally validate the workflow YAML syntax**
+
+```bash
+# If actionlint is available locally:
+which actionlint && actionlint .github/workflows/lttng-curated-gates.yml
+# Or via Python yaml parse to at least catch syntax errors:
+python3 -c "import yaml; yaml.safe_load(open('.github/workflows/lttng-curated-gates.yml'))"
+```
+
+Expected: no errors.
+
+- [ ] **Step 4: Fallback if CI policy blocks workflow edits in this PR**
+
+If the project's CI policy requires workflow files to be added via a separate review/PR, do the following INSTEAD of Steps 2–3:
+
+```bash
+gh issue create \
+  --title "Wire LTTng curated drift+verify gates into CI" \
+  --body "$(cat <<'EOF'
+Spec §9.1/§9.3 of docs/superpowers/specs/2026-04-26-lttng-curated-args-design.md
+requires per-CI-run drift and verify gates. The implementation plan
+(docs/superpowers/plans/2026-04-26-lttng-curated-args-implementation.md
+Task 13.5) provides the workflow YAML; that workflow needs to land here.
+
+Recommended commands documented in
+projects/clr/hipamd/scripts/lttng_curated_codegen.py docstring.
+
+Blocks: full satisfaction of the curated-args spec.
+Linked PR: #5475
+EOF
+)"
+# Then comment on PR #5475 with the issue number so reviewers see the
+# tracking link and the spec requirement is not dropped on the floor.
+gh pr comment 5475 --body "Filed follow-up #<issue-num> to wire CI gates per spec §9.1/§9.3."
+```
+
+In this fallback case, also amend the spec to mark §9.3 CI wiring as "tracked in <issue-num>" so future readers know the gap is intentional and tracked.
+
+- [ ] **Step 5: Commit (only if Step 2 was executed)**
+
+```bash
+git add .github/workflows/lttng-curated-gates.yml
+git commit -m "ci(lttng): add curated-args drift + verifier gates
+
+Per spec §9.1/§9.3: drift gate regenerates the per-API tracepoint
+headers from curated_apis.yaml and asserts byte-identity with the
+checked-in copies; verifier gate uses libclang to assert YAML matches
+HIP/HSA header signatures.
+
+Both jobs run on PRs that touch curated_apis.yaml, the codegen/verify
+scripts, or the generated headers. Drift gate runs on the standard
+runner; verifier gate needs the ROCm image so headers are present at
+the expected /opt/rocm/include path."
 ```
 
 ---
