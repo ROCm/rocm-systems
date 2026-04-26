@@ -54,7 +54,7 @@ projects/rocr-runtime/.../lttng/rocm_trace_emit_curated.h   (generated, checked 
 lttng_curated_verify.py     (libclang vs YAML — separate CI gate; per-ROCm-version drift detection)
 ```
 
-Generated files are **checked in**. CMake regenerates them on YAML change. Build does not require Python at compile time if YAML is unchanged. CI step `git diff --exit-code` after running codegen catches any divergence between checked-in files and current YAML.
+Generated files are **checked in**. The build does not invoke the codegen by default — it consumes the checked-in headers directly. Codegen runs only when explicitly requested (developer regeneration, or CI drift gate). See §9 for the exact build/CI dependency contract.
 
 ### 3.3 Exception path
 
@@ -344,26 +344,44 @@ CATCH does NOT emit `<api>_args`. Documented in schema header. If consumers need
 
 ## 9. Build wiring
 
-### 9.1 CMake (HIP, mirrored for HSA)
+### 9.1 Build/CI dependency contract
+
+| Stage | Python | PyYAML | libclang | When invoked |
+|---|---|---|---|---|
+| Default build | not required | not required | not required | Always — consumes checked-in headers. |
+| Developer `make regenerate-lttng-curated` | required | required | not required | Opt-in target only. |
+| CI drift gate (`lttng_curated_codegen` + `git diff`) | required | required | not required | Per CI run. |
+| CI verify gate (`lttng_curated_verify.py`) | required | required | required | Per CI run. |
+
+**Default build does not regenerate.** The custom command is wired to a *manual* target named `regenerate-lttng-curated`. It is **not** added as a dependency of `amdhip64` or any default-built target. This guarantees the build does not require Python or PyYAML at compile time.
+
+### 9.2 CMake (HIP, mirrored for HSA)
 
 ```cmake
-find_package(Python3 REQUIRED COMPONENTS Interpreter)
-add_custom_command(
-    OUTPUT ${CURATED_TP_H} ${CURATED_EMIT_H}
-    COMMAND ${Python3_EXECUTABLE}
-            ${CMAKE_CURRENT_SOURCE_DIR}/scripts/lttng_curated_codegen.py
-            --yaml ${CURATED_YAML} --provider rocm_hip
-            --out-tp ${CURATED_TP_H} --out-emit ${CURATED_EMIT_H}
-    DEPENDS ${CURATED_YAML}
-            ${CMAKE_CURRENT_SOURCE_DIR}/scripts/lttng_curated_codegen.py
-)
-add_custom_target(lttng_curated_codegen DEPENDS ${CURATED_TP_H} ${CURATED_EMIT_H})
-add_dependencies(amdhip64 lttng_curated_codegen)
+# Optional Python detection — informational only at configure time.
+find_package(Python3 QUIET COMPONENTS Interpreter)
+if(NOT Python3_FOUND)
+    message(STATUS "Python3 not found; LTTng curated regeneration target unavailable.")
+else()
+    add_custom_command(
+        OUTPUT ${CURATED_TP_H} ${CURATED_EMIT_H}
+        COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/scripts/lttng_curated_codegen.py
+                --yaml ${CURATED_YAML} --provider rocm_hip
+                --out-tp ${CURATED_TP_H} --out-emit ${CURATED_EMIT_H}
+        DEPENDS ${CURATED_YAML}
+                ${CMAKE_CURRENT_SOURCE_DIR}/scripts/lttng_curated_codegen.py
+    )
+    # Manual target only — NOT a dependency of amdhip64. Default build
+    # consumes the checked-in ${CURATED_TP_H} / ${CURATED_EMIT_H} directly.
+    add_custom_target(regenerate-lttng-curated
+                      DEPENDS ${CURATED_TP_H} ${CURATED_EMIT_H})
+endif()
 ```
 
-`pyyaml` available check is informational warning only — checked-in generated files mean the build still succeeds without it as long as YAML is unchanged.
+`pyyaml` is detected at codegen-script invocation time, not at CMake configure time. If a developer invokes `regenerate-lttng-curated` without PyYAML installed, the script aborts with a clear error.
 
-### 9.2 CI gates
+### 9.3 CI gates
 
 ```yaml
 - name: LTTng curated YAML drift check
