@@ -1534,29 +1534,37 @@ def verify(yaml_path, header_path, extra_args):
             continue
         hdr_params = header_decls[name]
         yaml_args = api['args']
-        if len(hdr_params) != len(yaml_args):
-            errors.append(
-                f"{name}: arg count mismatch — header has {len(hdr_params)} "
-                f"({[p[0] for p in hdr_params]}), YAML has {len(yaml_args)} "
-                f"({[a['name'] for a in yaml_args]})")
-            continue
-        for i, (yaml_arg, (hname, htype)) in enumerate(zip(yaml_args, hdr_params)):
-            if yaml_arg['name'] != hname:
+        # Spec §4.4 explicitly allows omitting low-value header params as a
+        # field-budget mitigation. Match by NAME, not by count/position.
+        hdr_by_name = {hname: htype for hname, htype in hdr_params}
+        yaml_names = [a['name'] for a in yaml_args]
+        # Hard-error: YAML arg name not in header (typo or stale name).
+        for i, yaml_arg in enumerate(yaml_args):
+            if yaml_arg['name'] not in hdr_by_name:
                 errors.append(
-                    f"{name} arg {i}: name mismatch — YAML {yaml_arg['name']!r} "
-                    f"vs header {hname!r}")
+                    f"{name} arg {i}: YAML name {yaml_arg['name']!r} not in "
+                    f"header params {list(hdr_by_name)}")
                 continue
+            htype = hdr_by_name[yaml_arg['name']]
             # Spec §4.1: C bool MUST be DSL type bool, not uint32.
             if (htype.strip() in ('bool', '_Bool')
                     and yaml_arg['type'] != 'bool'):
                 errors.append(
-                    f"{name} arg {hname}: C bool requires DSL type 'bool' "
-                    f"(spec §4.1), got {yaml_arg['type']!r}")
+                    f"{name} arg {yaml_arg['name']}: C bool requires DSL type "
+                    f"'bool' (spec §4.1), got {yaml_arg['type']!r}")
                 continue
             if not _is_compatible(htype, yaml_arg['type']):
                 errors.append(
-                    f"{name} arg {hname}: type mismatch — C {htype!r} not "
-                    f"compatible with DSL {yaml_arg['type']!r}")
+                    f"{name} arg {yaml_arg['name']}: type mismatch — C "
+                    f"{htype!r} not compatible with DSL {yaml_arg['type']!r}")
+        # Informational: header params not in YAML (intentional partial
+        # coverage per spec §4.4 / §8.3 'partial coverage of large APIs is
+        # by design').
+        for hname, _ in hdr_params:
+            if hname not in yaml_names:
+                warnings.append(
+                    f"{name}: header param {hname!r} not in YAML "
+                    f"(intentional omission per spec §4.4 mitigation?)")
         # Field-budget re-check (also enforced by parser, but verifier is the
         # CI gate so we report it again).
         if expanded_field_count(api) > PAYLOAD_BUDGET:
