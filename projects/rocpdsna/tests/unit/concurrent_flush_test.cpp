@@ -342,6 +342,59 @@ TEST_F(concurrent_flush_test, all_buffers_share_writer_connection)
 }
 
 // ---------------------------------------------------------------------------
+// 1b. Destructor must drain pending vtable buffers BEFORE closing the
+//     SQLite connection. If sqlite3_close happens first, vtable xDisconnect
+//     destroys each buffer; the buffer's flush() then issues
+//     BEGIN/INSERT/COMMIT on a connection that is mid-close, which fails
+//     and silently drops the rows.
+// ---------------------------------------------------------------------------
+TEST_F(concurrent_flush_test, destructor_flushes_buffers_before_closing_connection)
+{
+    push_kernel_dispatch_rows(m_kd, 1);
+    push_memory_copy_rows(m_mc, 1);
+    push_memory_alloc_rows(m_ma, 1);
+    push_region_rows(m_rg, 1);
+    push_pmc_event_rows(m_pm, 1);
+
+    // Drop in-process pointers; they will dangle once storage is destroyed.
+    m_kd = nullptr;
+    m_mc = nullptr;
+    m_ma = nullptr;
+    m_rg = nullptr;
+    m_pm = nullptr;
+
+    // Trigger destruction. NO explicit flush -- the dtor must do it.
+    m_writer.reset();
+    m_storage.reset();
+
+    // Reopen with a fresh sqlite3 handle and verify each table has the row.
+    sqlite3* db = nullptr;
+    ASSERT_EQ(sqlite3_open(m_database_path.c_str(), &db), SQLITE_OK);
+
+    auto count_table = [&](const std::string& sql) -> int64_t {
+        sqlite3_stmt* stmt = nullptr;
+        EXPECT_EQ(sqlite3_prepare_v2(db, sql.c_str(), -1, &stmt, nullptr), SQLITE_OK);
+        int64_t value = -1;
+        if(sqlite3_step(stmt) == SQLITE_ROW) value = sqlite3_column_int64(stmt, 0);
+        sqlite3_finalize(stmt);
+        return value;
+    };
+
+    EXPECT_EQ(count_table("SELECT COUNT(*) FROM rocpd_kernel_dispatch_concflush"), 1)
+        << "destructor must flush kernel_dispatch buffer before close";
+    EXPECT_EQ(count_table("SELECT COUNT(*) FROM rocpd_memory_copy_concflush"), 1)
+        << "destructor must flush memory_copy buffer before close";
+    EXPECT_EQ(count_table("SELECT COUNT(*) FROM rocpd_memory_allocate_concflush"), 1)
+        << "destructor must flush memory_alloc buffer before close";
+    EXPECT_EQ(count_table("SELECT COUNT(*) FROM rocpd_region_concflush"), 1)
+        << "destructor must flush region buffer before close";
+    EXPECT_EQ(count_table("SELECT COUNT(*) FROM rocpd_pmc_event_concflush"), 1)
+        << "destructor must flush pmc_event buffer before close";
+
+    sqlite3_close(db);
+}
+
+// ---------------------------------------------------------------------------
 // 2. Sequential drain of all 5 buffers must succeed and the wall time is
 //    recorded for comparison against the pre-refactor baseline. This mirrors
 //    the production drain order in sqlite_backend::flush(): the shared

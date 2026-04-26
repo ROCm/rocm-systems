@@ -230,7 +230,25 @@ sqlite_backend::sqlite_backend(std::string db_path, std::string uuid, storage_mo
     LOG_INFO("rocpdsna database initialized (uuid: {}, path: {})", m_uuid, m_db_path);
 }
 
-sqlite_backend::~sqlite_backend() { sqlite3_close(m_sqlite3); }
+sqlite_backend::~sqlite_backend()
+{
+    // Drain any pending vtable buffers BEFORE closing the SQLite connection.
+    // If sqlite3_close runs first, the vtables xDisconnect during close,
+    // which destroys each buffer; the buffer's flush() then issues
+    // BEGIN/INSERT/COMMIT on a connection that is mid-close. Doing the
+    // drain here guarantees the buffers reach the underlying tables while
+    // the connection is fully usable.
+    try
+    {
+        flush();
+    } catch(...)
+    {}
+
+    // sqlite3_close_v2 marks the connection as zombie if any prepared
+    // statements / blobs are still outstanding and cleans up once they
+    // are released, instead of returning SQLITE_BUSY and leaking.
+    sqlite3_close_v2(m_sqlite3);
+}
 
 std::vector<std::string>
 sqlite_backend::discover_uuids()
