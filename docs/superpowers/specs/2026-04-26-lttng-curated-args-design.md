@@ -76,7 +76,7 @@ Per `args` entry:
 
 | Field | Required | Description |
 |---|---|---|
-| `name` | yes | Parameter name (matches HIP header; verify script enforces). |
+| `name` | yes | Parameter name. **Must exactly match the corresponding parameter name in the HIP/HSA header declaration** — the migrator binds YAML entries to source parameters by name (positional binding is intentionally not used because parameter reorderings would silently produce wrong-typed captures). The verify script enforces this as a hard error (see §8.3). |
 | `type` | yes | DSL type from the vocabulary below. |
 | `dir` | yes | `IN` \| `OUT` \| `INOUT`. |
 
@@ -335,8 +335,9 @@ CATCH does NOT emit `<api>_args`. Documented in schema header. If consumers need
 ### 8.3 `lttng_curated_verify.py` (separate CI gate)
 - Loads YAML.
 - For each API, looks up declaration in `/opt/rocm/include` via libclang.
-- Verifies arg count + per-arg type match per the type-vocabulary mapping.
-- Warns (not errors) on arg-name mismatch.
+- Verifies arg count + per-arg type match per the type-vocabulary mapping. Mismatch → **hard error**.
+- Verifies every YAML `name` exists as a parameter in the header declaration. Mismatch → **hard error** (this is a correctness invariant: the migrator binds by name).
+- Reports unused header parameters (declared but not in YAML) as informational only — partial coverage of large APIs is by design.
 
 ### 8.4 Existing tests unchanged
 `test_hip_invariants.sh`, `test_hip_api_tracepoints.sh`, and HSA equivalents test generic enter/exit invariants which are unmodified.
