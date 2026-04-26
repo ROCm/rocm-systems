@@ -130,19 +130,6 @@ infer_record_size(uint32_t ring_bytes)
     return 0;
 }
 
-uint64_t
-lookup_kernel_object(queue_ring_state_t& qs, uint32_t dispatch_idx)
-{
-    if(!qs.queue || !qs.queue->base_address || qs.queue->size == 0) return 0;
-    const uint32_t q_size = qs.queue->size;
-    const uint32_t slot   = dispatch_idx % q_size;
-    const auto*    pkts =
-        static_cast<const hsa_kernel_dispatch_packet_t*>(qs.queue->base_address);
-    uint64_t ko = 0;
-    std::memcpy(&ko, &pkts[slot].kernel_object, sizeof(ko));
-    return ko;
-}
-
 void
 emit_kernel_dispatch_tracing(hsa_agent_t                            hag,
                              hsa_queue_t*                           queue,
@@ -164,23 +151,16 @@ emit_kernel_dispatch_tracing(hsa_agent_t                            hag,
                              uint32_t                               group_seg,
                              tracing::tracing_data                  captured_td)
 {
-    // H7 fix: emit to the contexts captured at enqueue time, not to
-    // whatever is active at completion. captured_td was populated by
-    // process_doorbell_tracing_only and travelled here through
-    // CorrEntry. For the fallback path (late-attach / alias-rejected /
-    // post-destroy), captured_td is empty; populate from current
-    // active contexts so those records still reach SOMETHING.
-    tracing::tracing_data* td_ptr = &captured_td;
-    tracing::tracing_data  fallback_td{};
-    if(captured_td.callback_contexts.empty() && captured_td.buffered_contexts.empty())
-    {
-        tracing::populate_contexts(ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH,
-                                   ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH,
-                                   ROCPROFILER_KERNEL_DISPATCH_COMPLETE,
-                                   fallback_td);
-        td_ptr = &fallback_td;
-    }
-    auto& td = *td_ptr;
+    // H7 / I10: emit ONLY to the contexts captured synchronously at
+    // enqueue time (process_doorbell_tracing_only populated captured_td
+    // and threaded it here through CorrEntry). Per design invariant
+    // I10, the drainer MUST NOT read live tracing state at drain time
+    // (no populate_contexts here). For the fallback path (late-attach /
+    // alias-rejected / post-destroy), captured_td is empty by
+    // construction; the early return below means we emit nothing.
+    // Late-attach in-flight kernels are a known degraded surface
+    // (KNOWN_ISSUES.md item 1).
+    auto& td = captured_td;
     if(td.callback_contexts.empty() && td.buffered_contexts.empty()) return;
 
     uint64_t start_ns = raw_start_ts;
@@ -341,15 +321,15 @@ process_dispatch_record(queue_ring_state_t* st,
         cid    = &fallback_cid;
         thr_id = common::get_tid();
         // ext_ids stays empty
-        // For fallback, there is no captured kernel_object — the slot
-        // either never existed (late-attach) or has already been
-        // cleared (alias rejection / destroy). Fall back to reading
-        // the live AQL queue. This restores prior behavior on the
-        // fallback path; it accepts the slot-reuse race for
-        // late-attach kernels, which is no worse than the situation
-        // before Block 2 (those kernels already had no correlation).
-        kernel_obj_capt = lookup_kernel_object(*st, dispatch_idx);
-        // wg/grid/segs stay zero on fallback — same as prior behavior.
+        // I10: do NOT read the live AQL queue here. The slot either
+        // never existed (late-attach) or has already been cleared
+        // (alias rejection / destroy). kernel_obj_capt stays 0; wg /
+        // grid / segs stay 0. Combined with the empty captured_td
+        // (which causes emit_kernel_dispatch_tracing to early-return
+        // when no contexts were captured at enqueue), the fallback
+        // path emits nothing rather than synthesising data from live
+        // queue state. Late-attach in-flight kernels are a known
+        // degraded surface (KNOWN_ISSUES.md item 1).
     }
 
     auto dispatch_id = g_next_dispatch_id.fetch_add(1, std::memory_order_relaxed);
@@ -490,13 +470,10 @@ drain_all()
         // corr_slots. With Block 2 the captured kernel_object travels
         // through CorrEntry, so the multi-XCC workaround that scanned
         // for any queue with a populated base_address is no longer
-        // needed for the common (slot-hit) path. The fallback path
-        // inside process_dispatch_record reads the live AQL queue via
-        // lookup_kernel_object(*st, ...) — so st itself must have a
-        // base_address for the fallback to find a kernel object. Slot
-        // hits don't need this; slot misses produce zero kernel_object
-        // when st->queue->base_address is null, which is the same
-        // graceful degradation the multi-XCC workaround papered over.
+        // needed. Per I10, the fallback path inside
+        // process_dispatch_record does NOT read the live AQL queue;
+        // slot misses produce zero kernel_object and (combined with
+        // empty captured_td) skip emission entirely.
         queue_ring_state_t* corr_lookup_qs = &qs;
 
         // Walk forward from the per-ring read cursor. Bounded at
