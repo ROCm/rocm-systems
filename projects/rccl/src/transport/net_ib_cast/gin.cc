@@ -5,10 +5,10 @@
  * See LICENSE.txt for more license information
  *************************************************************************/
 
-#include "common.h"
+#include "common_cast.h"
 
 #include "gin/gin_host.h"
-#include "gin.h"
+#include "gin_cast.h"
 
 const int NCCL_GIN_IB_ALLGATHER_TAG = 0xa0;
 const int NCCL_GIN_IB_ALLTOALL_TAG = 0xa1;

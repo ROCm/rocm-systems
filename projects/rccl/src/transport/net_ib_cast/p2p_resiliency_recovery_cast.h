@@ -8,7 +8,7 @@
 #define NET_IB_P2P_RESILIENCY_RECOVERY_H_
 
 #include "nccl.h" // For ncclResult_t
-#include "p2p_resiliency.h"
+#include "p2p_resiliency_cast.h"
 
 ncclResult_t ncclIbPortRecoveryThreadStart();
 ncclResult_t ncclIbPortRecoveryThreadStop();

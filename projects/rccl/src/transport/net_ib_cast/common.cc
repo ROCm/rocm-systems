@@ -5,8 +5,8 @@
  * See LICENSE.txt for more license information
  *************************************************************************/
 
-#include "common.h"
-#include "p2p_resiliency.h"
+#include "common_cast.h"
+#include "p2p_resiliency_cast.h"
 
 char ncclIbIfName[MAX_IF_NAME_SIZE+1];
 union ncclSocketAddress ncclIbIfAddr;
