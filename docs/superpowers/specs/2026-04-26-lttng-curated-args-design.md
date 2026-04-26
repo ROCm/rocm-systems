@@ -261,6 +261,14 @@ hipStream_t const    __rocm_in_stream    = stream;
 
 For OUT-only args, no IN-local; the wrapper's original out-pointer parameter is used at exit. For INOUT, the IN-local captures the in-value; the OUT side reads from the original pointer at exit.
 
+**Curated marker (independent of IN locals).** Because some curated APIs have only OUT args (e.g. `hipStreamCreate`) or no args at all (e.g. `hipDeviceSynchronize`), `__rocm_in_*` is not a reliable indicator that a wrapper was migrated as curated. The migrator therefore inserts a dedicated single-line sentinel comment as the first statement of every curated wrapper, immediately after the existing `__rocm_corr` allocation:
+
+```c
+/* __ROCM_CURATED__: <api_name> */
+```
+
+The sentinel is a stable, comment-only marker emitted unconditionally for every curated wrapper, regardless of arg shape. Idempotency and the coverage gate both key off this sentinel (see §6.3 and §8.2).
+
 ### 6.2 New `_CURATED` macros
 
 Three new variants of the existing `ROCM_TRACE_RET_*` macros:
@@ -282,7 +290,7 @@ The migrator rewrites `return <expr>;` to `ROCM_TRACE_RET_STATUS_CURATED(<api>, 
 
 ### 6.3 Idempotency
 
-Re-running the migrator on a curated wrapper is a no-op when `__rocm_in_` is already present in the body (in addition to the existing `__rocm_corr` sentinel).
+Re-running the migrator on a curated wrapper is a no-op when the `/* __ROCM_CURATED__: <api> */` sentinel (see §6.1) is already present in the body. The sentinel is emitted for every curated wrapper, including OUT-only and no-arg APIs, so this rule applies uniformly.
 
 ### 6.4 Ordering
 
@@ -321,7 +329,8 @@ CATCH does NOT emit `<api>_args`. Documented in schema header. If consumers need
 
 ### 8.2 Coverage gate update (`lttng_coverage_gate.sh`)
 - Verifies every API in `curated_apis.yaml` is present in the migration inventory.
-- Body-content scan: each curated wrapper contains `__rocm_in_` AND `_CURATED(`.
+- Body-content scan: each curated wrapper contains the `/* __ROCM_CURATED__: <api> */` sentinel AND a `_CURATED(` macro invocation.
+- Additionally, when the API's YAML entry has at least one IN or INOUT arg, the wrapper body must contain at least one `__rocm_in_` local. APIs with only OUT args or no args are exempt from the `__rocm_in_` check.
 
 ### 8.3 `lttng_curated_verify.py` (separate CI gate)
 - Loads YAML.
