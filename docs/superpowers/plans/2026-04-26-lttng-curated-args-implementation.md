@@ -3528,17 +3528,14 @@ on:
       - 'projects/clr/hipamd/scripts/lttng_curated_*.py'
       - 'projects/clr/hipamd/src/lttng/rocm_hip_curated_tp.h'
       - 'projects/clr/hipamd/src/lttng/rocm_trace_emit_curated.h'
-      - 'projects/rocr-runtime/runtime/hsa-runtime/scripts/curated_apis.yaml'
-      - 'projects/rocr-runtime/runtime/hsa-runtime/scripts/lttng_curated_*.py'
-      - 'projects/rocr-runtime/runtime/hsa-runtime/lttng/rocm_hsa_curated_tp.h'
-      - 'projects/rocr-runtime/runtime/hsa-runtime/lttng/rocm_trace_emit_curated.h'
+      # HSA path filters added by Task 15h after HSA files exist
       - '.github/workflows/lttng-curated-gates.yml'
   push:
     branches: [main, develop]
 
 jobs:
   drift-gate:
-    name: Codegen drift (HIP + HSA)
+    name: Codegen drift (HIP)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -3556,17 +3553,7 @@ jobs:
           git diff --exit-code -- \
             projects/clr/hipamd/src/lttng/rocm_hip_curated_tp.h \
             projects/clr/hipamd/src/lttng/rocm_trace_emit_curated.h
-      - name: Regenerate HSA curated headers and diff
-        run: |
-          python3 projects/rocr-runtime/runtime/hsa-runtime/scripts/lttng_curated_codegen.py \
-            --yaml projects/rocr-runtime/runtime/hsa-runtime/scripts/curated_apis.yaml \
-            --provider rocm_hsa \
-            --status-type hsa_status_t --status-success HSA_STATUS_SUCCESS \
-            --out-tp projects/rocr-runtime/runtime/hsa-runtime/lttng/rocm_hsa_curated_tp.h \
-            --out-emit projects/rocr-runtime/runtime/hsa-runtime/lttng/rocm_trace_emit_curated.h
-          git diff --exit-code -- \
-            projects/rocr-runtime/runtime/hsa-runtime/lttng/rocm_hsa_curated_tp.h \
-            projects/rocr-runtime/runtime/hsa-runtime/lttng/rocm_trace_emit_curated.h
+      # HSA codegen step added by Task 15h after HSA files exist
 
   verify-gate:
     name: Verifier (libclang vs YAML)
@@ -3586,15 +3573,10 @@ jobs:
             --header /opt/rocm/include/hip/hip_runtime_api.h \
             --extra-arg=-D__HIP_PLATFORM_AMD__=1 \
             --extra-arg=-I/opt/rocm/include
-      - name: Verify HSA YAML against headers
-        run: |
-          python3 projects/rocr-runtime/runtime/hsa-runtime/scripts/lttng_curated_verify.py \
-            --yaml projects/rocr-runtime/runtime/hsa-runtime/scripts/curated_apis.yaml \
-            --header /opt/rocm/include/hsa/hsa.h \
-            --header /opt/rocm/include/hsa/hsa_ext_amd.h \
-            --header /opt/rocm/include/hsa/hsa_api_trace.h \
-            --extra-arg=-I/opt/rocm/include
+      # HSA verify step added by Task 15h after HSA files exist
  ```
+
+> **Note:** HSA codegen + verify steps (and HSA path filters) are deferred to Task 15h to avoid referencing files (HSA YAML, generated headers, scripts) that don't exist until later commits. The HIP workflow is operational immediately; Task 15h appends the HSA steps once the HSA assets land in Tasks 15a–15g.
 
 Notes for the implementer:
 - The exact `runs-on` / `container:` image MUST match what the project's other Python-based gate workflows use. Inspect `hipfile-pylint.yml` etc. and copy that idiom.
@@ -4864,6 +4846,46 @@ the trace at least once.
 Coverage loop uses process substitution (< <(...)) instead of a pipe
 into 'while read' so the MISSING counter accumulates in the parent
 shell — same fix as the HIP coverage test (C5)."
+```
+
+- [ ] **Step 5 (final): Append HSA steps to `.github/workflows/lttng-curated-gates.yml`**
+
+Task 13.5 wired only the HIP drift + verify steps (HSA files didn't exist yet). Now that all HSA assets are in place (YAML from 15a, generated headers from 15b, codegen + verify scripts copied in 15a), append the HSA steps to the workflow.
+
+Edit `.github/workflows/lttng-curated-gates.yml`:
+
+1. Under `on.pull_request.paths`, add the four HSA path filters (replacing the `# HSA path filters added by Task 15h…` comment):
+   - `projects/rocr-runtime/runtime/hsa-runtime/scripts/curated_apis.yaml`
+   - `projects/rocr-runtime/runtime/hsa-runtime/scripts/lttng_curated_*.py`
+   - `projects/rocr-runtime/runtime/hsa-runtime/lttng/rocm_hsa_curated_tp.h`
+   - `projects/rocr-runtime/runtime/hsa-runtime/lttng/rocm_trace_emit_curated.h`
+
+2. Rename the `drift-gate` job's `name:` from `Codegen drift (HIP)` to `Codegen drift (HIP + HSA)`.
+
+3. In the `drift-gate` job (replacing the `# HSA codegen step added by Task 15h…` comment), append a step mirroring the HIP shape but with `--provider rocm_hsa`, `--status-type hsa_status_t`, `--status-success HSA_STATUS_SUCCESS`, pointing at the HSA YAML / scripts / output paths. The step regenerates `rocm_hsa_curated_tp.h` + `rocm_trace_emit_curated.h` then `git diff --exit-code` against them.
+
+4. In the `verify-gate` job (replacing the `# HSA verify step added by Task 15h…` comment), append a step that invokes `lttng_curated_verify.py` against the HSA YAML with three `--header` args (`hsa.h`, `hsa_ext_amd.h`, `hsa_api_trace.h`) and `--extra-arg=-I/opt/rocm/include`. (The multi-`--header` form was added in Task 4.5; `hsa_api_trace.h` is required because it declares `hsa_amd_queue_intercept_create` per Task 15a.)
+
+Validate locally:
+
+```bash
+python3 -c "import yaml; yaml.safe_load(open('.github/workflows/lttng-curated-gates.yml'))"
+which actionlint && actionlint .github/workflows/lttng-curated-gates.yml
+```
+
+Commit:
+
+```bash
+git add .github/workflows/lttng-curated-gates.yml
+git commit -m "ci(lttng): add HSA steps to curated-gates workflow
+
+Task 13.5 wired only HIP drift + verify (HSA files didn't exist yet).
+Now that 15a–15g have landed the HSA YAML, generated headers, scripts,
+and tests, append the HSA codegen + verify steps and HSA path filters
+to .github/workflows/lttng-curated-gates.yml. Mirrors the HIP shape
+with provider=rocm_hsa, status_type=hsa_status_t,
+status_success=HSA_STATUS_SUCCESS, and three --header args
+(hsa.h, hsa_ext_amd.h, hsa_api_trace.h)."
 ```
 
 ---
