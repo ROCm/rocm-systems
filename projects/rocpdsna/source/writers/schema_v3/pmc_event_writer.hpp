@@ -74,11 +74,12 @@ public:
                                      : std::nullopt;
             };
 
-            m_buffer->push(static_cast<int64_t>(pk),
-                           to_opt_int64(event_pk),
-                           static_cast<int64_t>(pmc_pk),
-                           data.value,
-                           data.extdata);
+            m_buffer->push(data_storage::vtable::pmc_event_row{
+                .id       = static_cast<int64_t>(pk),
+                .event_id = to_opt_int64(event_pk),
+                .pmc_id   = static_cast<int64_t>(pmc_pk),
+                .value    = data.value,
+                .extdata  = data.extdata });
         }
         else
         {

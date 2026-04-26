@@ -19,6 +19,17 @@
 namespace rocpdsna::data_storage::vtable
 {
 
+// Named-field row for pmc_event_buffer::push. Field order matches the SQL
+// column list: id, event_id, pmc_id, value, extdata.
+struct pmc_event_row
+{
+    int64_t                id;
+    std::optional<int64_t> event_id;
+    int64_t                pmc_id;
+    double                 value;
+    std::string_view       extdata;
+};
+
 class pmc_event_buffer
 {
 public:
@@ -37,11 +48,7 @@ public:
     pmc_event_buffer(pmc_event_buffer&&)                 = delete;
     pmc_event_buffer& operator=(pmc_event_buffer&&)      = delete;
 
-    void push(int64_t                id,
-              std::optional<int64_t> event_id,
-              int64_t                pmc_id,
-              double                 value,
-              std::string_view       extdata);
+    void push(const pmc_event_row& row);
 
     void push_from_values(sqlite3_value** argv);
 

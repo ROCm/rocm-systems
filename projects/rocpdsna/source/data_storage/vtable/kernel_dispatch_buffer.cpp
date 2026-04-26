@@ -89,28 +89,7 @@ kernel_dispatch_buffer::~kernel_dispatch_buffer()
 }
 
 void
-kernel_dispatch_buffer::push(int64_t                id,
-                             int64_t                nid,
-                             int64_t                pid,
-                             std::optional<int64_t> tid,
-                             int64_t                agent_id,
-                             int64_t                kernel_id,
-                             int64_t                dispatch_id,
-                             int64_t                queue_id,
-                             int64_t                stream_id,
-                             int64_t                start,
-                             int64_t                end,
-                             std::optional<int64_t> private_segment_size,
-                             std::optional<int64_t> group_segment_size,
-                             int64_t                workgroup_size_x,
-                             int64_t                workgroup_size_y,
-                             int64_t                workgroup_size_z,
-                             int64_t                grid_size_x,
-                             int64_t                grid_size_y,
-                             int64_t                grid_size_z,
-                             std::optional<int64_t> region_name_id,
-                             std::optional<int64_t> event_id,
-                             std::string_view       extdata)
+kernel_dispatch_buffer::push(const kernel_dispatch_row& row)
 {
     auto push_int_at = [&](size_t col_idx, int64_t v) {
         m_int_cols[col_idx].values.push_back(v);
@@ -130,29 +109,29 @@ kernel_dispatch_buffer::push(int64_t                id,
         }
     };
 
-    push_int_at(0, id);
-    push_int_at(1, nid);
-    push_int_at(2, pid);
-    push_opt_at(3, tid);
-    push_int_at(4, agent_id);
-    push_int_at(5, kernel_id);
-    push_int_at(6, dispatch_id);
-    push_int_at(7, queue_id);
-    push_int_at(8, stream_id);
-    push_int_at(9, start);
-    push_int_at(10, end);
-    push_opt_at(11, private_segment_size);
-    push_opt_at(12, group_segment_size);
-    push_int_at(13, workgroup_size_x);
-    push_int_at(14, workgroup_size_y);
-    push_int_at(15, workgroup_size_z);
-    push_int_at(16, grid_size_x);
-    push_int_at(17, grid_size_y);
-    push_int_at(18, grid_size_z);
-    push_opt_at(19, region_name_id);
-    push_opt_at(20, event_id);
+    push_int_at(0, row.id);
+    push_int_at(1, row.nid);
+    push_int_at(2, row.pid);
+    push_opt_at(3, row.tid);
+    push_int_at(4, row.agent_id);
+    push_int_at(5, row.kernel_id);
+    push_int_at(6, row.dispatch_id);
+    push_int_at(7, row.queue_id);
+    push_int_at(8, row.stream_id);
+    push_int_at(9, row.start);
+    push_int_at(10, row.end);
+    push_opt_at(11, row.private_segment_size);
+    push_opt_at(12, row.group_segment_size);
+    push_int_at(13, row.workgroup_size_x);
+    push_int_at(14, row.workgroup_size_y);
+    push_int_at(15, row.workgroup_size_z);
+    push_int_at(16, row.grid_size_x);
+    push_int_at(17, row.grid_size_y);
+    push_int_at(18, row.grid_size_z);
+    push_opt_at(19, row.region_name_id);
+    push_opt_at(20, row.event_id);
 
-    m_text_col.values.emplace_back(extdata);
+    m_text_col.values.emplace_back(row.extdata);
     m_text_col.is_null.push_back(0);
 
     ++m_row_count;

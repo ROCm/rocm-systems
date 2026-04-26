@@ -19,6 +19,28 @@
 namespace rocpdsna::data_storage::vtable
 {
 
+// Named-field row for memory_alloc_buffer::push. Field order matches the
+// SQL column list: id, nid, pid, tid, agent_id, type, level, start, end,
+// address, size, queue_id, stream_id, event_id, extdata.
+struct memory_alloc_row
+{
+    int64_t                         id;
+    int64_t                         nid;
+    int64_t                         pid;
+    std::optional<int64_t>          tid;
+    std::optional<int64_t>          agent_id;
+    std::optional<std::string_view> type;
+    std::optional<std::string_view> level;
+    int64_t                         start;
+    int64_t                         end;
+    std::optional<int64_t>          address;
+    int64_t                         size;
+    std::optional<int64_t>          queue_id;
+    std::optional<int64_t>          stream_id;
+    std::optional<int64_t>          event_id;
+    std::string_view                extdata;
+};
+
 class memory_alloc_buffer
 {
 public:
@@ -42,21 +64,7 @@ public:
     memory_alloc_buffer(memory_alloc_buffer&&)                 = delete;
     memory_alloc_buffer& operator=(memory_alloc_buffer&&)      = delete;
 
-    void push(int64_t                         id,
-              int64_t                         nid,
-              int64_t                         pid,
-              std::optional<int64_t>          tid,
-              std::optional<int64_t>          agent_id,
-              std::optional<std::string_view> type,
-              std::optional<std::string_view> level,
-              int64_t                         start,
-              int64_t                         end,
-              std::optional<int64_t>          address,
-              int64_t                         size,
-              std::optional<int64_t>          queue_id,
-              std::optional<int64_t>          stream_id,
-              std::optional<int64_t>          event_id,
-              std::string_view                extdata);
+    void push(const memory_alloc_row& row);
 
     void push_from_values(sqlite3_value** argv);
 

@@ -19,6 +19,30 @@
 namespace rocpdsna::data_storage::vtable
 {
 
+// Named-field row for memory_copy_buffer::push. Replaces the old
+// 17-positional-argument push() so callers cannot silently swap any of the
+// addresses or agent IDs.
+struct memory_copy_row
+{
+    int64_t                id;
+    int64_t                nid;
+    int64_t                pid;
+    std::optional<int64_t> tid;
+    int64_t                start;
+    int64_t                end;
+    int64_t                name_id;
+    std::optional<int64_t> dst_agent_id;
+    std::optional<int64_t> dst_address;
+    std::optional<int64_t> src_agent_id;
+    std::optional<int64_t> src_address;
+    int64_t                size;
+    std::optional<int64_t> queue_id;
+    std::optional<int64_t> stream_id;
+    std::optional<int64_t> region_name_id;
+    std::optional<int64_t> event_id;
+    std::string_view       extdata;
+};
+
 class memory_copy_buffer
 {
 public:
@@ -34,27 +58,11 @@ public:
     memory_copy_buffer(memory_copy_buffer&&)                 = delete;
     memory_copy_buffer& operator=(memory_copy_buffer&&)      = delete;
 
-    // Argument order matches the memory_copy column list:
-    //   id, nid, pid, tid, start, end, name_id, dst_agent_id, dst_address,
-    //   src_agent_id, src_address, size, queue_id, stream_id, region_name_id,
-    //   event_id, extdata.
-    void push(int64_t                id,
-              int64_t                nid,
-              int64_t                pid,
-              std::optional<int64_t> tid,
-              int64_t                start,
-              int64_t                end,
-              int64_t                name_id,
-              std::optional<int64_t> dst_agent_id,
-              std::optional<int64_t> dst_address,
-              std::optional<int64_t> src_agent_id,
-              std::optional<int64_t> src_address,
-              int64_t                size,
-              std::optional<int64_t> queue_id,
-              std::optional<int64_t> stream_id,
-              std::optional<int64_t> region_name_id,
-              std::optional<int64_t> event_id,
-              std::string_view       extdata);
+    // Direct push - no SQLite trampoline. Field order in memory_copy_row
+    // matches the SQL column list: id, nid, pid, tid, start, end, name_id,
+    // dst_agent_id, dst_address, src_agent_id, src_address, size, queue_id,
+    // stream_id, region_name_id, event_id, extdata.
+    void push(const memory_copy_row& row);
 
     void push_from_values(sqlite3_value** argv);
 

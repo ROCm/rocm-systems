@@ -96,15 +96,16 @@ public:
                                      : std::nullopt;
             };
 
-            m_buffer->push(static_cast<int64_t>(pk),
-                           static_cast<int64_t>(trace_env.node_id.value()),
-                           static_cast<int64_t>(process_pk),
-                           static_cast<int64_t>(thread_pk),
-                           static_cast<int64_t>(data.start_timestamp),
-                           static_cast<int64_t>(data.end_timestamp),
-                           static_cast<int64_t>(name_pk),
-                           to_opt_int64(event_pk),
-                           data.extdata);
+            m_buffer->push(data_storage::vtable::region_row{
+                .id       = static_cast<int64_t>(pk),
+                .nid      = static_cast<int64_t>(trace_env.node_id.value()),
+                .pid      = static_cast<int64_t>(process_pk),
+                .tid      = static_cast<int64_t>(thread_pk),
+                .start    = static_cast<int64_t>(data.start_timestamp),
+                .end      = static_cast<int64_t>(data.end_timestamp),
+                .name_id  = static_cast<int64_t>(name_pk),
+                .event_id = to_opt_int64(event_pk),
+                .extdata  = data.extdata });
         }
         else
         {

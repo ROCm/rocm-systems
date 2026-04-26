@@ -24,6 +24,36 @@
 namespace rocpdsna::data_storage::vtable
 {
 
+// Named-field row for kernel_dispatch_buffer::push. Replaces the old
+// 22-positional-argument push() so callers cannot silently swap any of
+// the workgroup/grid coordinates (clang-tidy
+// bugprone-easily-swappable-parameters).
+struct kernel_dispatch_row
+{
+    int64_t                id;
+    int64_t                nid;
+    int64_t                pid;
+    std::optional<int64_t> tid;
+    int64_t                agent_id;
+    int64_t                kernel_id;
+    int64_t                dispatch_id;
+    int64_t                queue_id;
+    int64_t                stream_id;
+    int64_t                start;
+    int64_t                end;
+    std::optional<int64_t> private_segment_size;
+    std::optional<int64_t> group_segment_size;
+    int64_t                workgroup_size_x;
+    int64_t                workgroup_size_y;
+    int64_t                workgroup_size_z;
+    int64_t                grid_size_x;
+    int64_t                grid_size_y;
+    int64_t                grid_size_z;
+    std::optional<int64_t> region_name_id;
+    std::optional<int64_t> event_id;
+    std::string_view       extdata;
+};
+
 class kernel_dispatch_buffer
 {
 public:
@@ -39,35 +69,13 @@ public:
     kernel_dispatch_buffer(kernel_dispatch_buffer&&)                 = delete;
     kernel_dispatch_buffer& operator=(kernel_dispatch_buffer&&)      = delete;
 
-    // Direct push - no SQLite trampoline.
-    // Argument order matches the kernel_dispatch column list:
-    //   id, nid, pid, tid, agent_id, kernel_id, dispatch_id, queue_id,
-    //   stream_id, start, end, private_segment_size, group_segment_size,
-    //   workgroup_size_x, workgroup_size_y, workgroup_size_z,
-    //   grid_size_x, grid_size_y, grid_size_z, region_name_id, event_id,
-    //   extdata.
-    void push(int64_t                id,
-              int64_t                nid,
-              int64_t                pid,
-              std::optional<int64_t> tid,
-              int64_t                agent_id,
-              int64_t                kernel_id,
-              int64_t                dispatch_id,
-              int64_t                queue_id,
-              int64_t                stream_id,
-              int64_t                start,
-              int64_t                end,
-              std::optional<int64_t> private_segment_size,
-              std::optional<int64_t> group_segment_size,
-              int64_t                workgroup_size_x,
-              int64_t                workgroup_size_y,
-              int64_t                workgroup_size_z,
-              int64_t                grid_size_x,
-              int64_t                grid_size_y,
-              int64_t                grid_size_z,
-              std::optional<int64_t> region_name_id,
-              std::optional<int64_t> event_id,
-              std::string_view       extdata);
+    // Direct push - no SQLite trampoline. Column order is fixed by
+    // kernel_dispatch_row's declaration order, which matches the SQL column
+    // list: id, nid, pid, tid, agent_id, kernel_id, dispatch_id, queue_id,
+    // stream_id, start, end, private_segment_size, group_segment_size,
+    // workgroup_size_{x,y,z}, grid_size_{x,y,z}, region_name_id, event_id,
+    // extdata.
+    void push(const kernel_dispatch_row& row);
 
     // Existing vtable trampoline path (kept for completeness, used by xUpdate).
     void push_from_values(sqlite3_value** argv);

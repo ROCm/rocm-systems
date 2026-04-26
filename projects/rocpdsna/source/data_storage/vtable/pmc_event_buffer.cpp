@@ -67,11 +67,7 @@ pmc_event_buffer::~pmc_event_buffer()
 }
 
 void
-pmc_event_buffer::push(int64_t                id,
-                       std::optional<int64_t> event_id,
-                       int64_t                pmc_id,
-                       double                 value,
-                       std::string_view       extdata)
+pmc_event_buffer::push(const pmc_event_row& row)
 {
     auto push_int_at = [&](size_t col_idx, int64_t v) {
         m_int_cols[col_idx].values.push_back(v);
@@ -91,14 +87,14 @@ pmc_event_buffer::push(int64_t                id,
         }
     };
 
-    push_int_at(0, id);
-    push_opt_at(1, event_id);
-    push_int_at(2, pmc_id);
+    push_int_at(0, row.id);
+    push_opt_at(1, row.event_id);
+    push_int_at(2, row.pmc_id);
 
-    m_real_col.values.push_back(value);
+    m_real_col.values.push_back(row.value);
     m_real_col.is_null.push_back(0);
 
-    m_text_col.values.emplace_back(extdata);
+    m_text_col.values.emplace_back(row.extdata);
     m_text_col.is_null.push_back(0);
 
     ++m_row_count;

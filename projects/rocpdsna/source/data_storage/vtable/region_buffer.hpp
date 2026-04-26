@@ -17,6 +17,21 @@
 namespace rocpdsna::data_storage::vtable
 {
 
+// Named-field row for region_buffer::push. Field order matches the SQL
+// column list: id, nid, pid, tid, start, end, name_id, event_id, extdata.
+struct region_row
+{
+    int64_t                id;
+    int64_t                nid;
+    int64_t                pid;
+    int64_t                tid;
+    int64_t                start;
+    int64_t                end;
+    int64_t                name_id;
+    std::optional<int64_t> event_id;
+    std::string_view       extdata;
+};
+
 class region_buffer
 {
 public:
@@ -32,16 +47,7 @@ public:
     region_buffer(region_buffer&&)                 = delete;
     region_buffer& operator=(region_buffer&&)      = delete;
 
-    // Column order: id, nid, pid, tid, start, end, name_id, event_id, extdata.
-    void push(int64_t                id,
-              int64_t                nid,
-              int64_t                pid,
-              int64_t                tid,
-              int64_t                start,
-              int64_t                end,
-              int64_t                name_id,
-              std::optional<int64_t> event_id,
-              std::string_view       extdata);
+    void push(const region_row& row);
 
     void push_from_values(sqlite3_value** argv);
 

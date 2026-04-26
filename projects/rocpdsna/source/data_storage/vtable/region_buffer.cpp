@@ -68,15 +68,7 @@ region_buffer::~region_buffer()
 }
 
 void
-region_buffer::push(int64_t                id,
-                    int64_t                nid,
-                    int64_t                pid,
-                    int64_t                tid,
-                    int64_t                start,
-                    int64_t                end,
-                    int64_t                name_id,
-                    std::optional<int64_t> event_id,
-                    std::string_view       extdata)
+region_buffer::push(const region_row& row)
 {
     auto push_int_at = [&](size_t col_idx, int64_t v) {
         m_int_cols[col_idx].values.push_back(v);
@@ -96,16 +88,16 @@ region_buffer::push(int64_t                id,
         }
     };
 
-    push_int_at(0, id);
-    push_int_at(1, nid);
-    push_int_at(2, pid);
-    push_int_at(3, tid);
-    push_int_at(4, start);
-    push_int_at(5, end);
-    push_int_at(6, name_id);
-    push_opt_at(7, event_id);
+    push_int_at(0, row.id);
+    push_int_at(1, row.nid);
+    push_int_at(2, row.pid);
+    push_int_at(3, row.tid);
+    push_int_at(4, row.start);
+    push_int_at(5, row.end);
+    push_int_at(6, row.name_id);
+    push_opt_at(7, row.event_id);
 
-    m_text_col.values.emplace_back(extdata);
+    m_text_col.values.emplace_back(row.extdata);
     m_text_col.is_null.push_back(0);
 
     ++m_row_count;

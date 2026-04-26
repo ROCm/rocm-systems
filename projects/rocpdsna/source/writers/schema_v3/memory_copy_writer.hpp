@@ -103,23 +103,24 @@ public:
                                      : std::nullopt;
             };
 
-            m_buffer->push(static_cast<int64_t>(pk),
-                           static_cast<int64_t>(trace_env.node_id.value()),
-                           static_cast<int64_t>(process_pk),
-                           to_opt_int64(thread_pk),
-                           static_cast<int64_t>(data.start_timestamp),
-                           static_cast<int64_t>(data.end_timestamp),
-                           static_cast<int64_t>(name_pk),
-                           to_opt_int64(dst_agent_pk),
-                           to_opt_int64(data.dst_address),
-                           to_opt_int64(src_agent_pk),
-                           to_opt_int64(data.src_address),
-                           static_cast<int64_t>(data.size),
-                           to_opt_int64(queue_pk),
-                           to_opt_int64(stream_pk),
-                           to_opt_int64(region_name_pk),
-                           to_opt_int64(event_pk),
-                           data.extdata);
+            m_buffer->push(data_storage::vtable::memory_copy_row{
+                .id             = static_cast<int64_t>(pk),
+                .nid            = static_cast<int64_t>(trace_env.node_id.value()),
+                .pid            = static_cast<int64_t>(process_pk),
+                .tid            = to_opt_int64(thread_pk),
+                .start          = static_cast<int64_t>(data.start_timestamp),
+                .end            = static_cast<int64_t>(data.end_timestamp),
+                .name_id        = static_cast<int64_t>(name_pk),
+                .dst_agent_id   = to_opt_int64(dst_agent_pk),
+                .dst_address    = to_opt_int64(data.dst_address),
+                .src_agent_id   = to_opt_int64(src_agent_pk),
+                .src_address    = to_opt_int64(data.src_address),
+                .size           = static_cast<int64_t>(data.size),
+                .queue_id       = to_opt_int64(queue_pk),
+                .stream_id      = to_opt_int64(stream_pk),
+                .region_name_id = to_opt_int64(region_name_pk),
+                .event_id       = to_opt_int64(event_pk),
+                .extdata        = data.extdata });
         }
         else
         {

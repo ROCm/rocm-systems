@@ -71,23 +71,7 @@ memory_copy_buffer::~memory_copy_buffer()
 }
 
 void
-memory_copy_buffer::push(int64_t                id,
-                         int64_t                nid,
-                         int64_t                pid,
-                         std::optional<int64_t> tid,
-                         int64_t                start,
-                         int64_t                end,
-                         int64_t                name_id,
-                         std::optional<int64_t> dst_agent_id,
-                         std::optional<int64_t> dst_address,
-                         std::optional<int64_t> src_agent_id,
-                         std::optional<int64_t> src_address,
-                         int64_t                size,
-                         std::optional<int64_t> queue_id,
-                         std::optional<int64_t> stream_id,
-                         std::optional<int64_t> region_name_id,
-                         std::optional<int64_t> event_id,
-                         std::string_view       extdata)
+memory_copy_buffer::push(const memory_copy_row& row)
 {
     auto push_int_at = [&](size_t col_idx, int64_t v) {
         m_int_cols[col_idx].values.push_back(v);
@@ -107,24 +91,24 @@ memory_copy_buffer::push(int64_t                id,
         }
     };
 
-    push_int_at(0, id);
-    push_int_at(1, nid);
-    push_int_at(2, pid);
-    push_opt_at(3, tid);
-    push_int_at(4, start);
-    push_int_at(5, end);
-    push_int_at(6, name_id);
-    push_opt_at(7, dst_agent_id);
-    push_opt_at(8, dst_address);
-    push_opt_at(9, src_agent_id);
-    push_opt_at(10, src_address);
-    push_int_at(11, size);
-    push_opt_at(12, queue_id);
-    push_opt_at(13, stream_id);
-    push_opt_at(14, region_name_id);
-    push_opt_at(15, event_id);
+    push_int_at(0, row.id);
+    push_int_at(1, row.nid);
+    push_int_at(2, row.pid);
+    push_opt_at(3, row.tid);
+    push_int_at(4, row.start);
+    push_int_at(5, row.end);
+    push_int_at(6, row.name_id);
+    push_opt_at(7, row.dst_agent_id);
+    push_opt_at(8, row.dst_address);
+    push_opt_at(9, row.src_agent_id);
+    push_opt_at(10, row.src_address);
+    push_int_at(11, row.size);
+    push_opt_at(12, row.queue_id);
+    push_opt_at(13, row.stream_id);
+    push_opt_at(14, row.region_name_id);
+    push_opt_at(15, row.event_id);
 
-    m_text_col.values.emplace_back(extdata);
+    m_text_col.values.emplace_back(row.extdata);
     m_text_col.is_null.push_back(0);
 
     ++m_row_count;

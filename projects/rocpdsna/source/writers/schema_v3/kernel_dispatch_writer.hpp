@@ -98,28 +98,29 @@ public:
                                      : std::nullopt;
             };
 
-            m_buffer->push(static_cast<int64_t>(pk),
-                           static_cast<int64_t>(trace_env.node_id.value()),
-                           static_cast<int64_t>(process_pk),
-                           to_opt_int64(thread_pk),
-                           static_cast<int64_t>(agent_pk),
-                           static_cast<int64_t>(data.kernel_symbol_id),
-                           static_cast<int64_t>(data.dispatch_id),
-                           static_cast<int64_t>(queue_pk),
-                           static_cast<int64_t>(stream_pk),
-                           static_cast<int64_t>(data.start_timestamp),
-                           static_cast<int64_t>(data.end_timestamp),
-                           to_opt_int64(data.private_segment_size),
-                           to_opt_int64(data.group_segment_size),
-                           static_cast<int64_t>(data.workgroup_size_x),
-                           static_cast<int64_t>(data.workgroup_size_y),
-                           static_cast<int64_t>(data.workgroup_size_z),
-                           static_cast<int64_t>(data.grid_size_x),
-                           static_cast<int64_t>(data.grid_size_y),
-                           static_cast<int64_t>(data.grid_size_z),
-                           to_opt_int64(name_pk),
-                           to_opt_int64(event_pk),
-                           data.extdata);
+            m_buffer->push(data_storage::vtable::kernel_dispatch_row{
+                .id                   = static_cast<int64_t>(pk),
+                .nid                  = static_cast<int64_t>(trace_env.node_id.value()),
+                .pid                  = static_cast<int64_t>(process_pk),
+                .tid                  = to_opt_int64(thread_pk),
+                .agent_id             = static_cast<int64_t>(agent_pk),
+                .kernel_id            = static_cast<int64_t>(data.kernel_symbol_id),
+                .dispatch_id          = static_cast<int64_t>(data.dispatch_id),
+                .queue_id             = static_cast<int64_t>(queue_pk),
+                .stream_id            = static_cast<int64_t>(stream_pk),
+                .start                = static_cast<int64_t>(data.start_timestamp),
+                .end                  = static_cast<int64_t>(data.end_timestamp),
+                .private_segment_size = to_opt_int64(data.private_segment_size),
+                .group_segment_size   = to_opt_int64(data.group_segment_size),
+                .workgroup_size_x     = static_cast<int64_t>(data.workgroup_size_x),
+                .workgroup_size_y     = static_cast<int64_t>(data.workgroup_size_y),
+                .workgroup_size_z     = static_cast<int64_t>(data.workgroup_size_z),
+                .grid_size_x          = static_cast<int64_t>(data.grid_size_x),
+                .grid_size_y          = static_cast<int64_t>(data.grid_size_y),
+                .grid_size_z          = static_cast<int64_t>(data.grid_size_z),
+                .region_name_id       = to_opt_int64(name_pk),
+                .event_id             = to_opt_int64(event_pk),
+                .extdata              = data.extdata });
         }
         else
         {

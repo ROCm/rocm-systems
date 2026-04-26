@@ -120,21 +120,22 @@ public:
                                      : std::nullopt;
             };
 
-            m_buffer->push(static_cast<int64_t>(pk),
-                           static_cast<int64_t>(trace_env.node_id.value()),
-                           static_cast<int64_t>(process_pk),
-                           to_opt_int64(thread_pk),
-                           to_opt_int64(agent_pk),
-                           data.type,
-                           data.level,
-                           static_cast<int64_t>(data.start_timestamp),
-                           static_cast<int64_t>(data.end_timestamp),
-                           to_opt_int64(data.address),
-                           static_cast<int64_t>(data.size),
-                           to_opt_int64(queue_pk),
-                           to_opt_int64(stream_pk),
-                           to_opt_int64(event_pk),
-                           data.extdata);
+            m_buffer->push(data_storage::vtable::memory_alloc_row{
+                .id        = static_cast<int64_t>(pk),
+                .nid       = static_cast<int64_t>(trace_env.node_id.value()),
+                .pid       = static_cast<int64_t>(process_pk),
+                .tid       = to_opt_int64(thread_pk),
+                .agent_id  = to_opt_int64(agent_pk),
+                .type      = data.type,
+                .level     = data.level,
+                .start     = static_cast<int64_t>(data.start_timestamp),
+                .end       = static_cast<int64_t>(data.end_timestamp),
+                .address   = to_opt_int64(data.address),
+                .size      = static_cast<int64_t>(data.size),
+                .queue_id  = to_opt_int64(queue_pk),
+                .stream_id = to_opt_int64(stream_pk),
+                .event_id  = to_opt_int64(event_pk),
+                .extdata   = data.extdata });
         }
         else
         {
