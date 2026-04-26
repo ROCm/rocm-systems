@@ -184,6 +184,17 @@ memory_copy_buffer::flush()
     int rc = prepare_insert_stmt();
     if(rc != SQLITE_OK) return rc;
 
+    auto clear_state = [this]() {
+        for(auto& col : m_int_cols)
+        {
+            col.values.clear();
+            col.is_null.clear();
+        }
+        m_text_col.values.clear();
+        m_text_col.is_null.clear();
+        m_row_count = 0;
+    };
+
     char* err = nullptr;
     rc        = sqlite3_exec(m_writer_conn, "BEGIN IMMEDIATE", nullptr, nullptr, &err);
     if(rc != SQLITE_OK)
@@ -229,6 +240,7 @@ memory_copy_buffer::flush()
             LOG_ERROR(
                 "buffer: step failed at row {}: {}", r, sqlite3_errmsg(m_writer_conn));
             sqlite3_exec(m_writer_conn, "ROLLBACK", nullptr, nullptr, nullptr);
+            clear_state();
             return rc;
         }
     }
@@ -239,17 +251,11 @@ memory_copy_buffer::flush()
         LOG_ERROR("buffer: COMMIT failed: {}", err != nullptr ? err : "?");
         sqlite3_free(err);
         sqlite3_exec(m_writer_conn, "ROLLBACK", nullptr, nullptr, nullptr);
+        clear_state();
         return rc;
     }
 
-    for(auto& col : m_int_cols)
-    {
-        col.values.clear();
-        col.is_null.clear();
-    }
-    m_text_col.values.clear();
-    m_text_col.is_null.clear();
-    m_row_count = 0;
+    clear_state();
     return SQLITE_OK;
 }
 

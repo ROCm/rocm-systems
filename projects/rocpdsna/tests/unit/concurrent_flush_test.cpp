@@ -395,6 +395,45 @@ TEST_F(concurrent_flush_test, destructor_flushes_buffers_before_closing_connecti
 }
 
 // ---------------------------------------------------------------------------
+// 1c. On a mid-flush sqlite3_step failure (e.g., UNIQUE constraint), the
+//     buffer must clear its column vectors before returning the error.
+//     Otherwise the next flush() call would replay the same rows and
+//     double-insert anything that did succeed before the failing row.
+// ---------------------------------------------------------------------------
+TEST_F(concurrent_flush_test, mid_flush_step_failure_clears_buffer)
+{
+    // Two rows with the same primary key collide on the second insert.
+    push_kernel_dispatch_rows(m_kd, 1);
+    push_kernel_dispatch_rows(m_kd, 1);  // duplicate id -> UNIQUE failure
+
+    const int rc = m_kd->flush();
+    EXPECT_NE(rc, SQLITE_OK)
+        << "flush should report an error when the second row violates UNIQUE";
+
+    // The buffer must have dropped both rows. A subsequent flush() should
+    // be a no-op rather than replaying the partially-applied batch.
+    const int rc2 = m_kd->flush();
+    EXPECT_EQ(rc2, SQLITE_OK)
+        << "second flush should be a no-op if buffer was cleared after failure";
+
+    // Verify the on-disk table never received the duplicate either.
+    sqlite3* db = nullptr;
+    ASSERT_EQ(sqlite3_open(m_database_path.c_str(), &db), SQLITE_OK);
+    sqlite3_stmt* stmt = nullptr;
+    ASSERT_EQ(sqlite3_prepare_v2(db,
+                                 "SELECT COUNT(*) FROM rocpd_kernel_dispatch_concflush",
+                                 -1,
+                                 &stmt,
+                                 nullptr),
+              SQLITE_OK);
+    ASSERT_EQ(sqlite3_step(stmt), SQLITE_ROW);
+    const int64_t count = sqlite3_column_int64(stmt, 0);
+    sqlite3_finalize(stmt);
+    sqlite3_close(db);
+    EXPECT_EQ(count, 0) << "rolled-back transaction must leave table empty";
+}
+
+// ---------------------------------------------------------------------------
 // 2. Sequential drain of all 5 buffers must succeed and the wall time is
 //    recorded for comparison against the pre-refactor baseline. This mirrors
 //    the production drain order in sqlite_backend::flush(): the shared
