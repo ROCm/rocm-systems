@@ -174,6 +174,13 @@ Every generated `<api>_args` event MUST stay within LTTng-UST's documented limit
 
 Note: `dim3` expands to **3** fields, not 1. Codegen MUST count expanded fields, not DSL entries, when validating against the limit.
 
+**Field counting is post-type-expansion AND post-direction-expansion** (normative). The expanded field count for one DSL arg is `type_expansion × direction_expansion`, where:
+
+- `type_expansion`: `dim3` → 3, `dim3_packed` → 1, every other type (including `bool`) → 1.
+- `direction_expansion`: `IN` → 1, `OUT` → 1, `INOUT` → 2 (one input field `<name>` plus one output field `<name>_out`).
+
+Examples: `{name: x, type: uint32, dir: INOUT}` contributes 2 fields. `{name: dims, type: dim3, dir: INOUT}` would contribute 6 fields (`x_x, x_y, x_z, x_out_x, x_out_y, x_out_z`).
+
 When a curated API exceeds 9 payload fields under the natural mapping, the YAML author MUST apply one of the following mitigations, in this order of preference. Both mitigations are expressed entirely through existing per-arg fields (`type`, `name`) — there are no separate top-level `pack:` or `split:` directives in the DSL:
 
 1. **Use `dim3_packed`** in place of `dim3` for one or more `dim3` args (saves 2 fields per dim3). Authored as `{name: <name>, type: dim3_packed, dir: IN}`.
@@ -181,7 +188,9 @@ When a curated API exceeds 9 payload fields under the natural mapping, the YAML 
 
 Splitting one logical API into multiple events (`<api>_args` + `<api>_args_ext`) is **explicitly out of scope** for v1 — it would require defining cross-event ordering, naming, and consumer-side join semantics, none of which are needed for the curated API set defined in Appendix A. If a future API genuinely cannot fit in 9 payload fields after applying mitigations 1–2, the response is to file a follow-up that introduces a `split:` mechanism with full spec coverage; v1 codegen treats over-budget without an in-vocabulary mitigation as a hard error.
 
-Codegen enforces this at generation time: it computes the **post-type-expansion** payload field count (i.e. `dim3` → 3 fields, `dim3_packed` → 1 field, every other type → 1 field) and aborts with a clear error if any API exceeds 9 payload fields. Verify script (`lttng_curated_verify.py`) re-checks at CI time using the same expansion rule.
+Codegen enforces this at generation time: it computes the **post-type-expansion AND post-direction-expansion** payload field count (i.e. for each DSL arg, `type_expansion × direction_expansion` per the rules above) and aborts with a clear error if any API exceeds 9 payload fields. Verify script (`lttng_curated_verify.py`) re-checks at CI time using the same expansion rule.
+
+**INOUT scope (v1).** No API in the v1 curated set in Appendix A uses `INOUT` direction — every entry is `IN` or `OUT`. The DSL accepts `INOUT` as a value of `dir` and the field-counting rule above defines its expansion, but v1 codegen MUST reject any YAML entry with `dir: INOUT` as an out-of-scope direction (hard error in both codegen and `lttng_curated_verify.py`). Lifting this restriction is a follow-up: it requires (a) defining the temporal capture order (input-side latched at entry into `__rocm_in_<name>`, output-side re-read at exit only when status indicates success per §4.2), (b) confirming the doubled field budget against §4.4 for any candidate API, and (c) extending the migrator's per-arg binding to emit both `<name>` and `<name>_out` payload entries. Until then, an INOUT parameter must be modeled as a single `IN` capture (input value only) or a single `OUT` capture (final value only), and the YAML author MUST document the choice in the API's `notes:`.
 
 **Known high-arity APIs that require mitigation:**
 
@@ -204,7 +213,7 @@ Any future API additions must pass the 9-payload-field budget at codegen time.
 
 - `IN` — captured at wrapper entry into a `__rocm_in_<name>` C local; emitted at exit.
 - `OUT` — captured at exit by deref'ing the original out-pointer parameter. Only when `status == hipSuccess` (HIP) or `HSA_STATUS_SUCCESS` (HSA); on error path emitted as 0/empty.
-- `INOUT` — both. IN-side captured into local; OUT-side re-read at exit and emitted as `<name>_out` field.
+- `INOUT` — both. IN-side captured into local; OUT-side re-read at exit and emitted as `<name>_out` field. **Out of scope for v1** — see §4.4 ("INOUT scope (v1)"); v1 codegen and the verifier reject `dir: INOUT`.
 
 ### 4.3 YAML example
 
@@ -513,6 +522,8 @@ Adding exception-path IN-param visibility is a separate design: it would require
 - Loads YAML.
 - For each API, looks up declaration in `/opt/rocm/include` via libclang.
 - Verifies arg count + per-arg type match per the type-vocabulary mapping (§4.1). Mismatch → **hard error**. C `bool` / `_Bool` parameters in the header MUST be declared as DSL type `bool` in YAML; using `uint32` (or any other DSL type) for a C bool parameter is a hard error so that the canonical 0/1 conversion in §4.1 is always applied.
+- Re-runs the §4.4 field-budget check using the post-type-expansion AND post-direction-expansion rule. Over-budget → **hard error**.
+- Rejects any YAML entry with `dir: INOUT` as out-of-scope for v1 (see §4.4 "INOUT scope (v1)"). **Hard error**.
 - Verifies every YAML `name` exists as a parameter in the header declaration. Mismatch → **hard error** (this is a correctness invariant: the migrator binds by name).
 - Reports unused header parameters (declared but not in YAML) as informational only — partial coverage of large APIs is by design.
 
