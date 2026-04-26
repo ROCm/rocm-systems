@@ -43,6 +43,33 @@ namespace hsa
 {
 namespace
 {
+// Single source of truth for the per-queue mode-selection predicate.
+//
+// Returns true when a queue must use Mode::full_intercept (rather than
+// Mode::tracing_only). This is the case when EITHER:
+//   1. needs_packet_rewriting_intercept() — at least one registered context
+//      requires WriteInterceptor (counter / ATT / PCS / scratch), forcing
+//      full_intercept globally so all queues run the rewriter.
+//   2. !queue_intercept::is_intercepting_inline() — the inline doorbell
+//      wrapper is unavailable (e.g. ROCPROFILER_INLINE_INTERCEPT=false),
+//      so a tracing_only queue would have NO correlation capture path.
+//      Fall back to full_intercept so the WriteInterceptor captures
+//      correlation_id.
+//
+// This helper exists to keep create_queue (above) and
+// queue_controller_iterate_attach_queue (below) from drifting out of
+// sync — three sibling-site bugs (C6/C7/C9) emerged historically from
+// duplicating this predicate by hand. The drainer-start gate in
+// start_firmware_dispatch_ring_drainer_if_needed() consults
+// queue_intercept::is_intercepting_inline() directly because it
+// composes that predicate with additional context-shape checks; it is
+// intentionally not folded into this helper.
+bool
+needs_full_intercept_mode()
+{
+    return needs_packet_rewriting_intercept() || !queue_intercept::is_intercepting_inline();
+}
+
 // HSA Intercept Functions (create_queue/destroy_queue)
 hsa_status_t
 create_queue(hsa_agent_t        agent,
@@ -76,11 +103,8 @@ create_queue(hsa_agent_t        agent,
             //      record via the zero-correlation fallback. Fall back to
             //      full_intercept in that case so the existing
             //      WriteInterceptor path captures correlation_id.
-            const bool needs_full =
-                needs_packet_rewriting_intercept() ||
-                !queue_intercept::is_intercepting_inline();
-            const auto mode =
-                needs_full ? Queue::Mode::full_intercept : Queue::Mode::tracing_only;
+            const auto mode = needs_full_intercept_mode() ? Queue::Mode::full_intercept
+                                                          : Queue::Mode::tracing_only;
             // The inline (queue_intercept) path installs only doorbell /
             // wptr wrappers — it does NOT call hsa_amd_queue_intercept_register
             // and the lambda passed below as set_write_interceptor is a
@@ -289,20 +313,19 @@ queue_controller_iterate_attach_queue(hsa_queue_t* queue, hsa_agent_t agent, voi
     // the Phase 1 tracing-only fast path when the firmware ring is
     // available, instead of silently defaulting to full_intercept.
     //
-    // Mirror create_queue()'s two-gate predicate (see comment block at
-    // queue_controller.cpp:63-78). In addition to needs_packet_rewriting_intercept()
-    // we must also fall back to full_intercept when the inline doorbell
-    // wrapper was not installed (ROCPROFILER_INLINE_INTERCEPT=false). A
-    // late-attach Mode::tracing_only queue with no inline wrapper would
-    // construct a real HSA queue with NO correlation capture path: the
-    // Queue ctor only installs WriteInterceptor for full_intercept
-    // (queue.cpp:843-884), and the firmware-ring drainer's start gate
-    // (queue_controller.cpp ~L792) also requires is_intercepting_inline(),
-    // so the drainer would never run. The result would be a fully
-    // un-traced existing queue.
-    const bool needs_full = needs_packet_rewriting_intercept() ||
-                            !queue_intercept::is_intercepting_inline();
-    const auto mode = needs_full ? Queue::Mode::full_intercept : Queue::Mode::tracing_only;
+    // Mirror create_queue()'s two-gate predicate via the shared helper
+    // needs_full_intercept_mode() (defined at top of this anon
+    // namespace). The helper folds in both needs_packet_rewriting_intercept()
+    // and the !is_intercepting_inline() fallback so a late-attach
+    // Mode::tracing_only queue with no inline wrapper does not construct
+    // a real HSA queue with NO correlation capture path: the Queue ctor
+    // only installs WriteInterceptor for full_intercept (queue.cpp:843-884),
+    // and the firmware-ring drainer's start gate (see
+    // start_firmware_dispatch_ring_drainer_if_needed) also requires
+    // is_intercepting_inline(), so the drainer would never run. The
+    // result would be a fully un-traced existing queue.
+    const auto mode = needs_full_intercept_mode() ? Queue::Mode::full_intercept
+                                                  : Queue::Mode::tracing_only;
     for(const auto& [_, agent_info] : qc->get_supported_agents())
     {
         if(agent_info.get_hsa_agent().handle == agent.handle)
