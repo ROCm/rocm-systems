@@ -183,9 +183,9 @@ Counts in the "Natural fields" column include `corr_id` plus all expanded payloa
 | `hipExtLaunchKernel` | 13 (adds 2 event handles) | `pack: [numBlocks, dimBlocks]`. | 9 |
 | `hipModuleLaunchKernel` | 12 (corr_id + f + 3 grid + 3 block + sharedMem + stream + kernelParams + extra) | `pack: [gridDim, blockDim]` using `dim3_packed` → 8 fields. | 8 |
 | `hipExtModuleLaunchKernel` | 14 (adds 2 global grid dims) | `pack: [gridDim, blockDim, globalGridDim]` using `dim3_packed`. | 9 |
-| `hsa_queue_create` | 10 (corr_id + agent + size + type + callback + data + private_seg + group_seg + queue) | At limit; no mitigation needed (9 payload fields). | 10 |
-| `hsa_amd_memory_async_copy` | 10 (corr_id + dst + dst_agent + src + src_agent + size + num_dep + dep_signals + completion_signal) | At limit; no mitigation needed. | 10 |
-| `hsa_amd_memory_async_copy_on_engine` | 11 (adds engine_id) | Drop `dep_signals` pointer field → 10 (9 payload). | 10 |
+| `hsa_queue_create` | 9 (corr_id + agent + size + type + callback + data + private_seg + group_seg + queue) | None needed (8 payload fields, 1 spare). | 9 |
+| `hsa_amd_memory_async_copy` | 9 (corr_id + dst + dst_agent + src + src_agent + size + num_dep + dep_signals + completion_signal) | None needed (8 payload fields, 1 spare). | 9 |
+| `hsa_amd_memory_async_copy_on_engine` | 11 (`hsa_amd_memory_async_copy` + `engine_id` + `force_copy_on_sdma`) | Drop `dep_signals` pointer field → 9 payload + corr_id = 10 total (at limit). | 10 |
 
 Any future API additions must pass the 9-payload-field budget at codegen time.
 
@@ -629,5 +629,5 @@ Memory ops:
 - `hsa_amd_signal_create` — (similar)
 - `hsa_amd_memory_pool_allocate` — IN handle pool, IN size size, IN uint32 flags, OUT ptr ptr
 - `hsa_amd_memory_pool_free` — IN ptr ptr
-- `hsa_amd_memory_async_copy` — IN ptr dst, IN handle dst_agent, IN ptr src, IN handle src_agent, IN size size, IN uint32 num_dep_signals, IN ptr dep_signals, IN handle completion_signal
-- `hsa_amd_memory_async_copy_on_engine` — (same + IN uint32 engine_id)
+- `hsa_amd_memory_async_copy` — IN ptr dst, IN handle dst_agent, IN ptr src, IN handle src_agent, IN size size, IN uint32 num_dep_signals, IN ptr dep_signals, IN handle completion_signal *(8 payload fields; fits the 9-payload budget without mitigation)*
+- `hsa_amd_memory_async_copy_on_engine` — same as above plus IN uint32 engine_id, IN uint32 force_copy_on_sdma *(`force_copy_on_sdma` is C `bool` captured as uint32; total 10 payload fields; mitigation per §4.4 drops `dep_signals` to fit 9 payload)*
