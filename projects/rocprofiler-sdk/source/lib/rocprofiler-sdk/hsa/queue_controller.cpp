@@ -478,10 +478,21 @@ QueueController::init(CoreApiTable& core_table, AmdExtTable& ext_table)
     {
         if(*(get_attach_table()))
         {
-            // Attach table was previously registered, so we need to
-            // - Load and instrument queues that the attach library captured
-            // - NOT instrument the HSA API as the attach library has already done so
-            queue_controller_load_attach_queues();
+            // Attach table was previously registered, so we do NOT instrument
+            // the HSA API (the attach library has already done so).
+            //
+            // NOTE: actual loading of the attach-captured queues is deferred
+            // to load_attach_queues_if_needed(), which is invoked from
+            // registration.cpp AFTER queue_intercept::install_intercept so
+            // that queue_intercept::is_intercepting_inline() reflects its
+            // final value before queue_controller_iterate_attach_queue's
+            // Mode-selection predicate evaluates it. Without this deferral,
+            // pre-existing attach-table queues would be constructed with
+            // Mode::full_intercept (because is_intercepting_inline() is
+            // still false here) and install WriteInterceptor — and once
+            // the firmware-ring drainer subsequently starts (it is now
+            // gated on is_intercepting_inline()=true), both paths would
+            // run in parallel, violating I6 mutual-exclusion.
         }
         else
         {
@@ -738,6 +749,28 @@ queue_controller_init(HsaApiTable* table)
     // NOTE: drainer-start moved to start_firmware_dispatch_ring_drainer_if_needed()
     // and is invoked from registration.cpp AFTER queue_intercept::install_intercept,
     // so that queue_intercept::is_intercepting_inline() reflects its final state.
+    //
+    // NOTE: attach-table queue loading is also deferred — see
+    // load_attach_queues_if_needed(), invoked from registration.cpp AFTER
+    // install_intercept, for the same reason.
+}
+
+void
+load_attach_queues_if_needed()
+{
+    // Load and instrument queues that the attach library previously captured.
+    //
+    // MUST be invoked AFTER queue_intercept::install_intercept so that
+    // queue_intercept::is_intercepting_inline() reflects its final value
+    // before queue_controller_iterate_attach_queue's Mode-selection
+    // predicate consults it. Calling this earlier would force pre-existing
+    // attach-table queues into Mode::full_intercept (WriteInterceptor
+    // installed), which combined with the now-eligible firmware-ring
+    // drainer violates I6 mutual-exclusion.
+    if(needs_queue_object_tracking() && *(get_attach_table()))
+    {
+        queue_controller_load_attach_queues();
+    }
 }
 
 void

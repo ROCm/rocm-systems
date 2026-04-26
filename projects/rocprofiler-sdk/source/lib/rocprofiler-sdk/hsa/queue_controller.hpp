@@ -153,6 +153,20 @@ queue_controller_init(HsaApiTable* table);
 void
 start_firmware_dispatch_ring_drainer_if_needed();
 
+// Load and instrument queues that the attach library captured prior to
+// rocprofiler-sdk initialization. Safe to call unconditionally — no-op if
+// no attach table was registered or queue-object tracking is not required.
+//
+// MUST be invoked AFTER rocprofiler::hsa::queue_intercept::install_intercept()
+// — the per-queue Mode-selection predicate inside
+// queue_controller_iterate_attach_queue consults
+// queue_intercept::is_intercepting_inline(). Calling this earlier would
+// force pre-existing attach-table queues into Mode::full_intercept (which
+// installs WriteInterceptor); combined with the now-eligible firmware-ring
+// drainer, both paths would run in parallel and violate I6 mutual-exclusion.
+void
+load_attach_queues_if_needed();
+
 void
 queue_controller_fini();
 

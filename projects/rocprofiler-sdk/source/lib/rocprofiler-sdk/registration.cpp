@@ -1272,6 +1272,18 @@ rocprofiler_set_api_table(const char* name,
             }
         }
 
+        // Load attach-table queues AFTER inline intercept install so the
+        // per-queue Mode-selection predicate (which consults
+        // queue_intercept::is_intercepting_inline()) sees the final state.
+        // Same root cause as the deferred drainer-start below: if this ran
+        // earlier (e.g. inside QueueController::init at queue_controller_init
+        // above), pre-existing attach-table queues would be constructed in
+        // Mode::full_intercept (WriteInterceptor installed) AND the
+        // firmware-ring drainer would later start — violating I6
+        // mutual-exclusion. Safe to call unconditionally — the function
+        // internally short-circuits when prerequisites are not met.
+        rocprofiler::hsa::load_attach_queues_if_needed();
+
         // Start the firmware-ring drainer AFTER inline intercept install so the
         // gate (which consults queue_intercept::is_intercepting_inline()) sees
         // the final state. Safe to call unconditionally — the function
