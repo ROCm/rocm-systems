@@ -255,7 +255,7 @@ static inline void rocm_trace_emit_hipLaunchKernel_args(
 }
 ```
 
-When `HIP_ENABLE_LTTNG_UST=0`, the `#else` branch provides empty no-op definitions for all 78 helpers — preserves zero-cost OFF mode.
+When `HIP_ENABLE_LTTNG_UST=0`, the `#else` branch provides empty no-op definitions for every helper generated from `curated_apis.yaml` — preserves zero-cost OFF mode. The exact count is whatever YAML defines (the YAML is the single source of truth; see §1).
 
 ## 6. Migrator changes
 
@@ -429,7 +429,9 @@ endif()
 
 ---
 
-## Appendix A — Full curated API list (78 APIs)
+## Appendix A — Illustrative curated API list (~82 APIs)
+
+> **Note:** This appendix is illustrative of the intended curation as of spec drafting. The authoritative source of curated APIs is `curated_apis.yaml` (HIP) and the HSA mirror; success criteria for coverage tests count against YAML, not this appendix. The category subtotals below sum to 82, matching the "~82" figure used in §1.
 
 ### A.1 HIP streams + sync (12)
 
