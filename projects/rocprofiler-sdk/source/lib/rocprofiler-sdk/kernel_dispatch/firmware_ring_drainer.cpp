@@ -73,13 +73,19 @@ struct mec_dispatch_record_16
 
 struct queue_ring_state_t
 {
-    hsa_queue_t*       queue{};
-    void*              buf{};
-    uint32_t           ring_bytes{};
-    volatile uint32_t* wptr{};
-    uint32_t           record_size{};
-    hsa_agent_t        agent{};
-    uint64_t           dispatch_count{0};
+    hsa_queue_t* queue{};
+    void*        buf{};
+    uint32_t     ring_bytes{};
+    // Note: the firmware ring's wptr is intentionally NOT cached here.
+    // The drain state machine derives progress from `read_cursor` and
+    // `last_consumed_dispatch_idx` against the ring contents, not from
+    // a producer-side write pointer. The local wptr in the registration
+    // path is still needed as a non-null sanity check on the value
+    // returned by dispatch_ring_buffer_get_dispatch_records_fn_v(), but
+    // pass-through caching of it on this struct served no consumer.
+    uint32_t     record_size{};
+    hsa_agent_t  agent{};
+    uint64_t     dispatch_count{0};
 
     // Per-ring read cursor: index into the firmware ring (modulo
     // num_slots) of the next slot to read. Advances monotonically as
@@ -432,7 +438,6 @@ register_or_refresh_queue(hsa_queue_t* queue, void* /*data*/)
     ent.queue       = queue;
     ent.buf         = buf;
     ent.ring_bytes  = sz;
-    ent.wptr        = wptr;
     ent.agent       = agent;
     ent.record_size = rec_sz;
     ent.queue_ptr   = queue;
