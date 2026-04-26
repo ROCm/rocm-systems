@@ -748,6 +748,16 @@ queue_controller_init(HsaApiTable* table)
         //
         // Compute both predicates GLOBALLY across all contexts to match
         // the global mode-selection invariant.
+        //
+        // Additionally, gate on queue_intercept::is_intercepting_inline():
+        // create_queue (above) folds !is_intercepting_inline() into
+        // needs_full and falls back to Mode::full_intercept when the inline
+        // doorbell wrapper is unavailable (e.g. ROCPROFILER_INLINE_INTERCEPT=
+        // false). The drainer must honor that same fallback — otherwise a
+        // kernel-tracing-only context with the inline path disabled would
+        // run BOTH the WriteInterceptor (from the full_intercept queue) AND
+        // the firmware-ring drainer, producing duplicate records and
+        // double-decremented correlation refcounts (I6 violation).
         bool any_kernel_tracing   = false;
         bool any_needs_interceptor = false;
         for(const auto& itr : context::get_registered_contexts())
@@ -767,7 +777,8 @@ queue_controller_init(HsaApiTable* table)
             if(has_kernel_tracing) any_kernel_tracing = true;
             if(needs_interceptor) any_needs_interceptor = true;
         }
-        if(any_kernel_tracing && !any_needs_interceptor)
+        if(any_kernel_tracing && !any_needs_interceptor &&
+           queue_intercept::is_intercepting_inline())
             kernel_dispatch::start_firmware_dispatch_ring_drainer();
     }
 }
