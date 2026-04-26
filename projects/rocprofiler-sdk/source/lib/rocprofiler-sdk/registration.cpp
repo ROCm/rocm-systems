@@ -1246,18 +1246,29 @@ rocprofiler_set_api_table(const char* name,
                       << (inline_intercept ? "true" : "false");
             if(inline_intercept)
             {
-                auto counter_att_contexts = rocprofiler::context::get_registered_contexts(
-                    [](const rocprofiler::context::context* ctx) {
-                        return (ctx->dispatch_counter_collection != nullptr ||
-                                ctx->dispatch_thread_trace != nullptr);
-                    });
-                ROCP_INFO << "[queue-intercept] counter/ATT contexts found: "
-                          << counter_att_contexts.size();
-                if(counter_att_contexts.empty())
+                // The inline intercept path is only safe when NO registered
+                // context requires WriteInterceptor packet rewriting /
+                // signal allocation. If any such context exists,
+                // create_queue selects Mode::full_intercept and the legacy
+                // hsa_amd_queue_intercept_create path, but Queue's ctor
+                // skips set_write_interceptor when is_intercepting_inline()
+                // returns true (queue.cpp:880) — silently disabling all
+                // packet rewriting.
+                //
+                // Use the SAME predicate as create_queue
+                // (needs_packet_rewriting_intercept) so the gate cannot
+                // disagree. The previous filter only checked
+                // dispatch_counter_collection and dispatch_thread_trace and
+                // missed pc_sampler / device_counter_collection /
+                // device_thread_trace / scratch reporting.
+                const bool needs_full = rocprofiler::hsa::needs_packet_rewriting_intercept();
+                ROCP_INFO << "[queue-intercept] needs_packet_rewriting_intercept="
+                          << (needs_full ? "true" : "false");
+                if(!needs_full)
                     rocprofiler::hsa::queue_intercept::install_intercept(*hsa_api_table->core_);
                 else
                     ROCP_INFO << "[queue-intercept] skipping inline intercept — "
-                                 "counter/ATT contexts present";
+                                 "a registered context requires packet rewriting";
             }
         }
 
