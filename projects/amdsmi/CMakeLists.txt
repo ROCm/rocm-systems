@@ -593,6 +593,14 @@ set(CPACK_RPM_POST_UNINSTALL_SCRIPT_FILE "${CMAKE_CURRENT_BINARY_DIR}/RPM/postun
 set(CPACK_DEBIAN_FILE_NAME "DEB-DEFAULT")
 set(CPACK_RPM_FILE_NAME "RPM-DEFAULT")
 
+# Strip shared libraries and binaries in packaged artifacts.
+# RPM has its own brp-strip-shared pass via rpmbuild macros, so RPMs were
+# always shipping stripped .so files. DEB has no equivalent automatic step,
+# which left libamd_smi.so unstripped and bloated the .deb (~88MB lib vs
+# ~3.9MB stripped). CPACK_STRIP_FILES tells CPack to invoke `strip` on
+# every binary it stages for packaging, fixing parity with the RPM side.
+set(CPACK_STRIP_FILES ON)
+
 # Configure Lintian Specific Package Data
 configure_pkg( ${CPACK_PACKAGE_NAME} ${COMP_TYPE} ${CPACK_PACKAGE_VERSION} ${PKG_MAINTAINER_NM} ${PKG_MAINTAINER_EMAIL})
 
