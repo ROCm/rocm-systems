@@ -61,7 +61,9 @@ public:
     static constexpr size_t k_text_column_index = 21;
     static constexpr size_t k_total_columns     = 22;
 
-    kernel_dispatch_buffer(std::string real_table_name, std::string db_path);
+    // The writer_conn is owned by sqlite_backend and outlives this buffer.
+    // The buffer reuses it for bulk INSERT; it does NOT close it.
+    kernel_dispatch_buffer(std::string real_table_name, sqlite3* writer_conn);
     ~kernel_dispatch_buffer();
 
     kernel_dispatch_buffer(const kernel_dispatch_buffer&)            = delete;
@@ -89,6 +91,12 @@ public:
 
     [[nodiscard]] size_t row_count() const noexcept { return m_row_count; }
 
+    // Identity accessor for the writer connection used by flush(). Pre-shared-
+    // connection refactor: returns the buffer's own private sqlite3* (null
+    // until first flush). Post-refactor: returns the connection owned by
+    // sqlite_backend, the same one returned by every other buffer.
+    [[nodiscard]] sqlite3* writer_connection() const noexcept { return m_writer_conn; }
+
     // Static registry: lets the writer reach the active buffer instance for
     // a given real table without plumbing through storage_t.
     static void register_instance(const std::string&      real_table_name,
@@ -113,7 +121,6 @@ private:
     };
 
     std::string                                  m_real_table_name;
-    std::string                                  m_db_path;
     std::string                                  m_insert_sql;
     sqlite3*                                     m_writer_conn = nullptr;
     sqlite3_stmt*                                m_insert_stmt = nullptr;

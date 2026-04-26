@@ -39,7 +39,8 @@ public:
     static constexpr size_t k_text_column_index = 8;
     static constexpr size_t k_total_columns     = 9;
 
-    region_buffer(std::string real_table_name, std::string db_path);
+    // The writer_conn is owned by sqlite_backend and outlives this buffer.
+    region_buffer(std::string real_table_name, sqlite3* writer_conn);
     ~region_buffer();
 
     region_buffer(const region_buffer&)            = delete;
@@ -56,6 +57,8 @@ public:
     void reserve(std::size_t expected_rows);
 
     [[nodiscard]] size_t row_count() const noexcept { return m_row_count; }
+
+    [[nodiscard]] sqlite3* writer_connection() const noexcept { return m_writer_conn; }
 
     static void register_instance(const std::string& real_table_name,
                                   region_buffer*     buffer);
@@ -79,7 +82,6 @@ private:
     };
 
     std::string                                  m_real_table_name;
-    std::string                                  m_db_path;
     std::string                                  m_insert_sql;
     sqlite3*                                     m_writer_conn = nullptr;
     sqlite3_stmt*                                m_insert_stmt = nullptr;

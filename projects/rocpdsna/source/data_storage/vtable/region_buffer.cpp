@@ -38,9 +38,9 @@ registry()
 
 }  // namespace
 
-region_buffer::region_buffer(std::string real_table_name, std::string db_path)
+region_buffer::region_buffer(std::string real_table_name, sqlite3* writer_conn)
 : m_real_table_name(std::move(real_table_name))
-, m_db_path(std::move(db_path))
+, m_writer_conn(writer_conn)
 {
     std::string columns;
     std::string placeholders;
@@ -64,7 +64,7 @@ region_buffer::~region_buffer()
 {
     flush();
     if(m_insert_stmt != nullptr) sqlite3_finalize(m_insert_stmt);
-    if(m_writer_conn != nullptr) sqlite3_close(m_writer_conn);
+    // m_writer_conn is owned by sqlite_backend; do not close it here.
 }
 
 void
@@ -145,28 +145,8 @@ region_buffer::prepare_insert_stmt()
 
     if(m_writer_conn == nullptr)
     {
-        if(m_db_path.empty() || m_db_path == ":memory:")
-        {
-            LOG_ERROR("buffer: bulk writer requires on-disk db, got '{}'", m_db_path);
-            return SQLITE_ERROR;
-        }
-        int rc = sqlite3_open(m_db_path.c_str(), &m_writer_conn);
-        if(rc != SQLITE_OK)
-        {
-            LOG_ERROR("buffer: failed to open bulk writer conn for '{}': {}",
-                      m_db_path,
-                      sqlite3_errmsg(m_writer_conn));
-            return rc;
-        }
-        sqlite3_exec(m_writer_conn, "PRAGMA journal_mode=WAL", nullptr, nullptr, nullptr);
-        sqlite3_exec(
-            m_writer_conn, "PRAGMA synchronous=NORMAL", nullptr, nullptr, nullptr);
-        sqlite3_exec(m_writer_conn, "PRAGMA foreign_keys=OFF", nullptr, nullptr, nullptr);
-        sqlite3_exec(
-            m_writer_conn, "PRAGMA cache_size=-65536", nullptr, nullptr, nullptr);
-        sqlite3_exec(
-            m_writer_conn, "PRAGMA temp_store=MEMORY", nullptr, nullptr, nullptr);
-        sqlite3_busy_timeout(m_writer_conn, 5000);
+        LOG_ERROR("buffer: writer connection not provided");
+        return SQLITE_ERROR;
     }
 
     int rc = sqlite3_prepare_v2(

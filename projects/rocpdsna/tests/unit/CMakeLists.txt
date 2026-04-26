@@ -30,6 +30,7 @@ set(UNIT_TEST_SOURCES
     table_select_query_test.cpp
     database_test.cpp
     json_serializer_test.cpp
+    concurrent_flush_test.cpp
 )
 
 add_executable(rocpdsna_unit_tests ${UNIT_TEST_SOURCES})

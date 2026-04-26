@@ -210,6 +210,11 @@ public:
     void                      flush();
     [[nodiscard]] std::string get_uuid() const;
 
+    // The writer connection this backend owns. Vtable buffers reuse it for
+    // bulk INSERT instead of opening their own (WAL is single-writer; one
+    // shared connection avoids busy_timeout contention and cache duplication).
+    [[nodiscard]] sqlite3* writer_connection() const noexcept { return m_sqlite3; }
+
     // =========================================================================
     // Write statement executor
     //

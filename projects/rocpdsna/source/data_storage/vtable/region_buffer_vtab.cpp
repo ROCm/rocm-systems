@@ -70,10 +70,9 @@ xCreateOrConnect(sqlite3* db,
     vtab->db              = db;
     vtab->real_table_name = real;
 
-    const char* path    = sqlite3_db_filename(db, "main");
-    std::string db_path = (path != nullptr) ? std::string(path) : std::string{};
-
-    vtab->buffer = std::make_unique<region_buffer>(vtab->real_table_name, db_path);
+    // Reuse the writer connection that owns this vtable instance. The buffer
+    // does not open or close the connection; sqlite_backend owns its lifetime.
+    vtab->buffer = std::make_unique<region_buffer>(vtab->real_table_name, db);
     region_buffer::register_instance(vtab->real_table_name, vtab->buffer.get());
 
     *out_vtab = vtab;
