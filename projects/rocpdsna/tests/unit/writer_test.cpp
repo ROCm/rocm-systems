@@ -3035,3 +3035,522 @@ TEST_F(writer_test, transaction_rollback_on_exception_reverts_inserts)
     ASSERT_EQ(region_result.rows.size(), 1);
     EXPECT_EQ(region_result.rows[0][0], "successful_region");
 }
+
+// ============================================================================
+// Table-Driven Buffer Push-Ordering Tests
+//
+// The vtable column buffers bypass SQLite transactions. Once push() writes a
+// row into the C++ vectors, ROLLBACK cannot undo it. The invariant (enforced
+// by region_writer, missing in the other four) is:
+//
+//     All throwing operations MUST complete BEFORE push().
+//
+// These tests prove the invariant by triggering a throw in
+// maybe_insert_sample / insert_sample (via an unregistered track) and
+// verifying that no orphan row leaks into the table.
+// ============================================================================
+
+namespace
+{
+
+enum class WriterKind
+{
+    Region,
+    KernelDispatch,
+    MemoryCopy,
+    MemoryAlloc,
+    PmcEvent
+};
+
+struct BufferPushOrderingCase
+{
+    const char* name;                 // TEST_P instance name
+    const char* description;          // human-readable explanation of what this row tests
+    WriterKind  writer;               // which writer type to exercise
+
+    // --- inputs that vary between rows ---
+    size_t   n_good_rows;             // successful inserts before the critical insert
+    bool     include_event;           // attach event_data_t so the sample path is reachable?
+    bool     register_track;          // true = register track (insert succeeds); false = don't (throw)
+    uint64_t start_timestamp;         // timestamps fed to the data struct
+    uint64_t end_timestamp;
+    const char* extdata;              // extdata string; nullptr sentinel = generate 64 KB string
+
+    // --- expected outcomes ---
+    bool   expect_throw_on_last;      // if true, the final insert should throw std::runtime_error
+    size_t expected_row_count;        // SELECT COUNT(*) from the data table after flush
+};
+
+// ---------------------------------------------------------------------------
+// Helper: table name prefix for each writer kind
+// ---------------------------------------------------------------------------
+const char*
+table_name_for(WriterKind w)
+{
+    switch(w)
+    {
+        case WriterKind::Region: return "rocpd_region";
+        case WriterKind::KernelDispatch: return "rocpd_kernel_dispatch";
+        case WriterKind::MemoryCopy: return "rocpd_memory_copy";
+        case WriterKind::MemoryAlloc: return "rocpd_memory_allocate";
+        case WriterKind::PmcEvent: return "rocpd_pmc_event";
+    }
+    return "";
+}
+
+// ---------------------------------------------------------------------------
+// Helper: register ALL entity dependencies for a given writer kind
+// ---------------------------------------------------------------------------
+void
+register_all_deps_for(WriterKind writer_kind, rocpdsna::writer_t& writer)
+{
+    // Every writer needs node → process → thread.
+    register_base_dependencies(writer, 1, 1000, 100);
+
+    switch(writer_kind)
+    {
+        case WriterKind::KernelDispatch:
+            writer.register_agent_info(create_test_agent_info(1, 1000, "GPU", 0));
+            writer.register_queue_info(create_test_queue_info(1, 1000, 1));
+            writer.register_stream_info(create_test_stream_info(1, 1000, 1));
+            writer.register_code_object_info(
+                create_test_code_object_info(1, 1, 1000, { "GPU", 0 }));
+            writer.register_kernel_symbol_info(
+                create_test_kernel_symbol_info(1, 1, 1000, 1));
+            break;
+        case WriterKind::PmcEvent:
+            writer.register_agent_info(create_test_agent_info(1, 1000, "GPU", 0));
+            writer.register_pmc_info(create_test_pmc_info(
+                1, 1000, "test_counter",
+                rocpdsna::writer_types::agent_unique_id_t{ "GPU", 0 }));
+            break;
+        default: break;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Helper: register a track so maybe_insert_sample / insert_sample succeeds
+// ---------------------------------------------------------------------------
+void
+register_track(rocpdsna::writer_t& writer)
+{
+    writer.register_track_info(
+        create_test_track_info(1, 1000, 100, "REGISTERED_TRACK"));
+}
+
+// ---------------------------------------------------------------------------
+// Helper: build an event_data_t with a unique correlation_id per row
+// ---------------------------------------------------------------------------
+rocpdsna::writer_types::event_data_t
+make_event(size_t row_index)
+{
+    return rocpdsna::writer_types::event_data_t{
+        .stack_id        = 1,
+        .parent_stack_id = 0,
+        .correlation_id  = static_cast<uint64_t>(1000 + row_index),
+        .call_stack      = {},
+        .line_info_list  = {},
+        .event_category  = "TEST_API",
+        .extdata         = "{}"
+    };
+}
+
+// ---------------------------------------------------------------------------
+// Helper: resolve the extdata string (nullptr sentinel → 64 KB payload)
+// ---------------------------------------------------------------------------
+std::string
+resolve_extdata(const char* extdata)
+{
+    if(extdata == nullptr)
+    {
+        // 64 KB stress payload
+        return std::string(65536, 'X');
+    }
+    return std::string(extdata);
+}
+
+// ---------------------------------------------------------------------------
+// Helper: insert a single row for the given writer kind
+// ---------------------------------------------------------------------------
+void
+insert_row(WriterKind                     writer_kind,
+           rocpdsna::writer_t&            writer,
+           const BufferPushOrderingCase&  C,
+           size_t                         row_index,
+           bool                           use_registered_track,
+           bool                           include_event)
+{
+    const std::string extdata_str = resolve_extdata(C.extdata);
+    const char* track_name =
+        use_registered_track ? "REGISTERED_TRACK" : "UNREGISTERED_TRACK";
+
+    switch(writer_kind)
+    {
+        case WriterKind::Region:
+        {
+            auto data    = create_test_region_data("test_region", C.start_timestamp,
+                                                    C.end_timestamp);
+            data.extdata = extdata_str;
+            if(include_event) data.event = make_event(row_index);
+
+            auto env = create_test_trace_environment(1, 1000, 100);
+            if(include_event) env.track_name = track_name;
+
+            writer.insert_region_data(data, env);
+            break;
+        }
+        case WriterKind::KernelDispatch:
+        {
+            auto data            = create_test_kernel_dispatch_data(1, 1);
+            data.start_timestamp = C.start_timestamp;
+            data.end_timestamp   = C.end_timestamp;
+            data.dispatch_id     = row_index + 1;
+            data.extdata         = extdata_str;
+            if(include_event) data.event = make_event(row_index);
+
+            auto env      = create_test_trace_environment(1, 1000, 100);
+            env.agent_id  = rocpdsna::writer_types::agent_unique_id_t{ "GPU", 0 };
+            env.queue_id  = 1;
+            env.stream_id = 1;
+            if(include_event) env.track_name = track_name;
+
+            writer.insert_kernel_dispatch_data(data, env);
+            break;
+        }
+        case WriterKind::MemoryCopy:
+        {
+            auto data            = create_test_memory_copy_data();
+            data.start_timestamp = C.start_timestamp;
+            data.end_timestamp   = C.end_timestamp;
+            data.extdata         = extdata_str;
+            if(include_event) data.event = make_event(row_index);
+
+            auto env = create_test_trace_environment(1, 1000, 100);
+            if(include_event) env.track_name = track_name;
+
+            writer.insert_memory_copy_data(data, env);
+            break;
+        }
+        case WriterKind::MemoryAlloc:
+        {
+            auto data            = create_test_memory_alloc_data();
+            data.start_timestamp = C.start_timestamp;
+            data.end_timestamp   = C.end_timestamp;
+            data.extdata         = extdata_str;
+            if(include_event) data.event = make_event(row_index);
+
+            auto env = create_test_trace_environment(1, 1000, 100);
+            if(include_event) env.track_name = track_name;
+
+            writer.insert_memory_alloc_data(data, env);
+            break;
+        }
+        case WriterKind::PmcEvent:
+        {
+            auto data    = create_test_pmc_event_data(42.0 + static_cast<double>(row_index));
+            data.extdata = extdata_str;
+
+            if(include_event)
+            {
+                data.event = make_event(row_index);
+                // For pmc_event, the sample track is on the data struct, not trace_env.
+                data.sample.track = rocpdsna::writer_types::track_info_t{
+                    .name       = track_name,
+                    .extdata    = "{}",
+                    .node_id    = 1,
+                    .process_id = 1000,
+                    .thread_id  = 100
+                };
+            }
+
+            rocpdsna::writer_types::pmc_info_unique_id_t pmc_uid{
+                .name     = "test_counter",
+                .agent_id = rocpdsna::writer_types::agent_unique_id_t{ "GPU", 0 }
+            };
+            writer.insert_pmc_event_data(data, pmc_uid);
+            break;
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Test case table
+//
+// Each row describes: which writer, what inputs, whether it should throw,
+// and how many rows should survive in the database after flush.
+//
+// Categories:
+//   POSITIVE  — normal operation, all inserts succeed
+//   NEGATIVE  — unregistered track triggers throw; tests push-ordering contract
+//   CORNER    — boundary / stress values combined with both paths
+// ---------------------------------------------------------------------------
+// clang-format off
+static const BufferPushOrderingCase kBufferPushOrderingCases[] = {
+
+    // =====================================================================
+    //  POSITIVE: normal inserts, all should succeed, no throws
+    // =====================================================================
+    {"region_basic_1_row",
+     "Region: single row, no event, no sample path exercised",
+     WriterKind::Region,
+     /*n_good=*/1, /*event=*/false, /*reg_track=*/true,
+     /*start=*/1000000, /*end=*/2000000, /*extdata=*/"{}",
+     /*throw=*/false, /*expect_rows=*/1},
+
+    {"region_with_event_and_track",
+     "Region: single row with event + registered track, sample commits",
+     WriterKind::Region,
+     1, true, true,
+     1000000, 2000000, "{}",
+     false, 1},
+
+    {"kernel_dispatch_basic",
+     "KernelDispatch: single row, no event, no sample path",
+     WriterKind::KernelDispatch,
+     1, false, true,
+     1000000, 2000000, "{}",
+     false, 1},
+
+    {"memory_copy_basic",
+     "MemoryCopy: single row, no event",
+     WriterKind::MemoryCopy,
+     1, false, true,
+     1000000, 2000000, "{}",
+     false, 1},
+
+    {"memory_alloc_basic",
+     "MemoryAlloc: single row, no event",
+     WriterKind::MemoryAlloc,
+     1, false, true,
+     1000000, 2000000, "{}",
+     false, 1},
+
+    {"pmc_event_basic",
+     "PmcEvent: single row, no event, sample path not triggered",
+     WriterKind::PmcEvent,
+     1, false, true,
+     1000000, 2000000, "{}",
+     false, 1},
+
+    {"region_10_rows",
+     "Region: 10 rows, all good, verifies multi-row buffer commit",
+     WriterKind::Region,
+     10, false, true,
+     1000000, 2000000, "{}",
+     false, 10},
+
+    {"kernel_dispatch_5_rows_with_events",
+     "KernelDispatch: 5 rows with events + registered track, all committed",
+     WriterKind::KernelDispatch,
+     5, true, true,
+     1000000, 2000000, "{}",
+     false, 5},
+
+    {"pmc_event_with_event_and_track",
+     "PmcEvent: event + registered track, sample path succeeds",
+     WriterKind::PmcEvent,
+     1, true, true,
+     1000000, 2000000, "{}",
+     false, 1},
+
+    // =====================================================================
+    //  NEGATIVE / ROLLBACK: unregistered track → throw in maybe_insert_sample
+    //
+    //  The region_rollback_control test should PASS on both broken and fixed
+    //  code (region_writer already has push-last ordering).
+    //
+    //  The other 4 FAIL on broken code (orphan row leaks past throw) and
+    //  PASS after the fix.
+    // =====================================================================
+    {"region_rollback_control",
+     "Region (CONTROL): 1 good + 1 throw in maybe_insert_sample → 1 row. "
+     "Should PASS before and after the fix — region_writer is already correct.",
+     WriterKind::Region,
+     1, true, false,
+     1000000, 2000000, "{}",
+     true, 1},
+
+    {"kernel_dispatch_rollback",
+     "KernelDispatch: 1 good + 1 throw → expect 1 row. "
+     "FAILS on broken code: push() before maybe_insert_sample leaks an orphan row.",
+     WriterKind::KernelDispatch,
+     1, true, false,
+     1000000, 2000000, "{}",
+     true, 1},
+
+    {"memory_copy_rollback",
+     "MemoryCopy: 1 good + 1 throw → expect 1 row. "
+     "FAILS on broken code: push() before maybe_insert_sample leaks an orphan row.",
+     WriterKind::MemoryCopy,
+     1, true, false,
+     1000000, 2000000, "{}",
+     true, 1},
+
+    {"memory_alloc_rollback",
+     "MemoryAlloc: 1 good + 1 throw → expect 1 row. "
+     "FAILS on broken code: push() before maybe_insert_sample leaks an orphan row.",
+     WriterKind::MemoryAlloc,
+     1, true, false,
+     1000000, 2000000, "{}",
+     true, 1},
+
+    {"pmc_event_rollback",
+     "PmcEvent: 1 good + 1 throw → expect 1 row. "
+     "FAILS on broken code: push() before insert_sample leaks an orphan row.",
+     WriterKind::PmcEvent,
+     1, true, false,
+     1000000, 2000000, "{}",
+     true, 1},
+
+    {"kernel_dispatch_0_good_then_throw",
+     "KernelDispatch: 0 good rows + throw on first → 0 committed. "
+     "Verifies orphan doesn't appear even on an empty table.",
+     WriterKind::KernelDispatch,
+     0, true, false,
+     1000000, 2000000, "{}",
+     true, 0},
+
+    {"memory_copy_5_good_then_throw",
+     "MemoryCopy: 5 good + 1 throw → expect 5 rows. "
+     "Orphan detection with multiple prior committed rows.",
+     WriterKind::MemoryCopy,
+     5, true, false,
+     1000000, 2000000, "{}",
+     true, 5},
+
+    // =====================================================================
+    //  CORNER CASES: boundary values, crazy inputs, combined with both paths
+    // =====================================================================
+    {"region_zero_timestamps",
+     "Region: start=0, end=0 — zero is a valid timestamp, should commit",
+     WriterKind::Region,
+     1, false, true,
+     0, 0, "{}",
+     false, 1},
+
+    {"kernel_dispatch_max_uint64_timestamps",
+     "KernelDispatch: UINT64_MAX timestamps — boundary value check",
+     WriterKind::KernelDispatch,
+     1, false, true,
+     UINT64_MAX, UINT64_MAX, "{}",
+     false, 1},
+
+    {"region_inverted_range",
+     "Region: start > end (inverted time range) — library does not validate, should commit",
+     WriterKind::Region,
+     1, false, true,
+     9000000, 1000000, "{}",
+     false, 1},
+
+    {"region_empty_extdata",
+     "Region: empty extdata string — should commit fine",
+     WriterKind::Region,
+     1, false, true,
+     1000000, 2000000, "",
+     false, 1},
+
+    {"memory_alloc_huge_extdata",
+     "MemoryAlloc: 64 KB extdata — large text column stress test",
+     WriterKind::MemoryAlloc,
+     1, false, true,
+     1000000, 2000000, nullptr,
+     false, 1},
+
+    {"region_rollback_zero_timestamps",
+     "Region: throw path with start=0, end=0 — corner + rollback combined",
+     WriterKind::Region,
+     1, true, false,
+     0, 0, "{}",
+     true, 1},
+
+    {"kernel_dispatch_rollback_max_timestamps",
+     "KernelDispatch: throw path with UINT64_MAX timestamps — corner + rollback combined. "
+     "FAILS on broken code.",
+     WriterKind::KernelDispatch,
+     1, true, false,
+     UINT64_MAX, UINT64_MAX, "{}",
+     true, 1},
+
+    {"memory_alloc_rollback_huge_extdata",
+     "MemoryAlloc: throw path with 64 KB extdata — large payload + rollback combined. "
+     "FAILS on broken code.",
+     WriterKind::MemoryAlloc,
+     1, true, false,
+     1000000, 2000000, nullptr,
+     true, 1},
+
+    {"pmc_event_rollback_0_good",
+     "PmcEvent: 0 good + throw → 0 rows. "
+     "Verifies pmc_event orphan on empty table.",
+     WriterKind::PmcEvent,
+     0, true, false,
+     1000000, 2000000, "{}",
+     true, 0},
+};
+// clang-format on
+
+}  // namespace
+
+// ---------------------------------------------------------------------------
+// Parameterized test suite
+// ---------------------------------------------------------------------------
+
+class BufferPushOrderingTest
+: public writer_test
+, public ::testing::WithParamInterface<BufferPushOrderingCase>
+{};
+
+TEST_P(BufferPushOrderingTest, NoOrphanRowOnThrow)
+{
+    const auto& C = GetParam();
+
+    // 1. Register entity dependencies for this writer type.
+    register_all_deps_for(C.writer, *m_writer);
+
+    // 2. If the test exercises the sample path and expects success, register the track.
+    if(C.include_event && C.register_track)
+    {
+        register_track(*m_writer);
+    }
+
+    // 3. Insert n_good_rows that should all succeed.
+    //    Good rows include events only when the track is registered, so the
+    //    sample path succeeds.  When register_track is false the good rows
+    //    skip the sample path entirely (no event → no track lookup).
+    const bool good_row_event = C.include_event && C.register_track;
+    for(size_t i = 0; i < C.n_good_rows; ++i)
+    {
+        ASSERT_NO_THROW(
+            insert_row(C.writer, *m_writer, C, i, /*use_registered_track=*/true,
+                       good_row_event))
+            << C.description << " — good row " << i << " unexpectedly threw";
+    }
+
+    // 4. If this row tests the throw path, insert one more with event +
+    //    unregistered track → throws in maybe_insert_sample / insert_sample.
+    if(C.expect_throw_on_last)
+    {
+        EXPECT_THROW(
+            insert_row(C.writer, *m_writer, C, C.n_good_rows,
+                       /*use_registered_track=*/false, C.include_event),
+            std::runtime_error)
+            << C.description << " — expected std::runtime_error from unregistered track";
+    }
+
+    // 5. Flush all buffered rows to disk.
+    m_writer->flush_in_memory_data_to_disk();
+
+    // 6. Verify exactly the expected number of rows reached the database.
+    const auto count = count_rows(m_database_path, table_name_for(C.writer), m_uuid);
+    EXPECT_EQ(count, C.expected_row_count)
+        << C.description
+        << " — row count mismatch after flush (orphan row leaked past throw?)";
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    BufferPushOrdering,
+    BufferPushOrderingTest,
+    ::testing::ValuesIn(kBufferPushOrderingCases),
+    [](const ::testing::TestParamInfo<BufferPushOrderingCase>& info) {
+        return std::string(info.param.name);
+    });
