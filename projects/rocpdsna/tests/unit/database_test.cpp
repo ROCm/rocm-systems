@@ -254,4 +254,25 @@ TEST_F(sqlite_backend_test, statement_outlives_backend)
     EXPECT_NO_THROW(executor(42));
 }
 
+TEST_F(sqlite_backend_test, on_disk_engages_wal_journal_mode)
+{
+    auto db = sqlite_backend::create(
+        m_database_path, m_uuid, sqlite_backend::storage_mode_t::on_disk);
+
+    // Open a fresh handle to the same file and read the journal mode back.
+    // sqlite_backend's constructor already raises if WAL did not engage,
+    // so reaching this point implies the active mode is WAL; the second
+    // open re-confirms it is persisted on disk.
+    sqlite3* handle = nullptr;
+    ASSERT_EQ(sqlite3_open(m_database_path.c_str(), &handle), SQLITE_OK);
+    sqlite3_stmt* stmt = nullptr;
+    ASSERT_EQ(sqlite3_prepare_v2(handle, "PRAGMA journal_mode", -1, &stmt, nullptr),
+              SQLITE_OK);
+    ASSERT_EQ(sqlite3_step(stmt), SQLITE_ROW);
+    std::string mode{ reinterpret_cast<const char*>(sqlite3_column_text(stmt, 0)) };
+    sqlite3_finalize(stmt);
+    sqlite3_close(handle);
+    EXPECT_EQ(mode, "wal");
+}
+
 }  // namespace

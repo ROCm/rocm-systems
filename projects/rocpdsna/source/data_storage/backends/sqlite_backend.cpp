@@ -18,6 +18,7 @@
 
 #include "spdlog/fmt/bundled/core.h"
 
+#include <cctype>
 #include <filesystem>
 #include <stdexcept>
 #include <string>
@@ -226,6 +227,41 @@ sqlite_backend::sqlite_backend(std::string db_path, std::string uuid, storage_mo
     exec_pragma("PRAGMA synchronous=NORMAL");
     exec_pragma("PRAGMA cache_size=-65536");  // 64 MiB page cache
     exec_pragma("PRAGMA temp_store=MEMORY");
+
+    // Verify WAL was actually engaged when on disk. PRAGMA journal_mode
+    // returns the active mode; on :memory: it reports "memory" and is
+    // accepted. Anything else means the throughput tuning silently failed.
+    if(m_mode == storage_mode_t::on_disk)
+    {
+        sqlite3_stmt* stmt = nullptr;
+        std::string   active_mode;
+        if(sqlite3_prepare_v2(m_sqlite3, "PRAGMA journal_mode", -1, &stmt, nullptr) ==
+           SQLITE_OK)
+        {
+            if(sqlite3_step(stmt) == SQLITE_ROW)
+            {
+                const auto* text =
+                    reinterpret_cast<const char*>(sqlite3_column_text(stmt, 0));
+                if(text != nullptr) active_mode = text;
+            }
+            sqlite3_finalize(stmt);
+        }
+
+        std::string lowered;
+        lowered.reserve(active_mode.size());
+        for(char ch : active_mode)
+        {
+            lowered.push_back(static_cast<char>(std::tolower(ch)));
+        }
+
+        if(lowered != "wal")
+        {
+            throw std::runtime_error(
+                "rocpdsna: PRAGMA journal_mode=WAL did not engage; active mode is '" +
+                active_mode + "' for db_path '" + m_db_path + "'");
+        }
+        LOG_DEBUG("rocpdsna: WAL journal_mode engaged for db_path '{}'", m_db_path);
+    }
 
     LOG_INFO("rocpdsna database initialized (uuid: {}, path: {})", m_uuid, m_db_path);
 }
