@@ -50,15 +50,31 @@ static inline uint32_t rocp_reg_current_tid_(void) {
 static inline uint32_t rocp_reg_current_tid_(void) { return 0; }
 #endif
 
+// Per-thread monotonic counter and cached tid backing rocp_reg_next_corr_id.
+// These are EXTERN TLS (defined in librocprofiler-register) so all runtimes
+// share the same counter on a given thread; otherwise each TU would mint
+// from its own counter and the same corr_id value could be issued twice on
+// the same thread by different runtimes.
+#ifdef __cplusplus
+extern "C" {
+#endif
+extern __thread uint32_t rocp_reg_corr_id_counter_
+    __attribute__((visibility("default")));
+extern __thread uint32_t rocp_reg_corr_id_cached_tid_
+    __attribute__((visibility("default")));
+#ifdef __cplusplus
+}
+#endif
+
 // Generate a process-globally-unique 64-bit corr_id.
 //   high 32 bits = tid (cached per-thread)
 //   low  32 bits = per-thread monotonic counter
 // Cost: 1-2 TLS loads + 1 increment. No syscalls (after first call), no atomics.
 static inline uint64_t rocp_reg_next_corr_id(void) {
-    static __thread uint32_t counter    = 0;
-    static __thread uint32_t cached_tid = 0;
-    if (cached_tid == 0) cached_tid = rocp_reg_current_tid_();
-    return ((uint64_t)cached_tid << 32) | (uint64_t)(++counter);
+    if (rocp_reg_corr_id_cached_tid_ == 0)
+        rocp_reg_corr_id_cached_tid_ = rocp_reg_current_tid_();
+    return ((uint64_t)rocp_reg_corr_id_cached_tid_ << 32)
+         | (uint64_t)(++rocp_reg_corr_id_counter_);
 }
 
 // Push a new corr_id onto the per-thread "active" slot. Returns the previous

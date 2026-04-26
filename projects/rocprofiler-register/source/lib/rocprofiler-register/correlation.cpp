@@ -18,4 +18,8 @@ __attribute__((visibility("default"))) __thread uint64_t rocp_reg_active_corr_id
 __attribute__((visibility("default"))) __thread uint64_t
     rocp_reg_auto_stack_[ROCP_REG_AUTO_STACK_CAP] = {0};
 __attribute__((visibility("default"))) __thread int rocp_reg_auto_depth_ = 0;
+
+// Shared per-thread monotonic counter and cached tid for rocp_reg_next_corr_id.
+__attribute__((visibility("default"))) __thread uint32_t rocp_reg_corr_id_counter_   = 0;
+__attribute__((visibility("default"))) __thread uint32_t rocp_reg_corr_id_cached_tid_ = 0;
 }
