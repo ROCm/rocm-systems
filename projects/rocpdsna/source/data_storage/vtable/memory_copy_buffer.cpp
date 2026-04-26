@@ -160,8 +160,12 @@ memory_copy_buffer::prepare_insert_stmt()
         return SQLITE_ERROR;
     }
 
-    int rc = sqlite3_prepare_v2(
-        m_writer_conn, m_insert_sql.c_str(), -1, &m_insert_stmt, nullptr);
+    int rc = sqlite3_prepare_v3(m_writer_conn,
+                                m_insert_sql.c_str(),
+                                -1,
+                                SQLITE_PREPARE_PERSISTENT,
+                                &m_insert_stmt,
+                                nullptr);
     if(rc != SQLITE_OK)
     {
         LOG_ERROR("buffer: failed to prepare insert: {} sql={}",
@@ -181,7 +185,7 @@ memory_copy_buffer::flush()
     if(rc != SQLITE_OK) return rc;
 
     char* err = nullptr;
-    rc        = sqlite3_exec(m_writer_conn, "BEGIN", nullptr, nullptr, &err);
+    rc        = sqlite3_exec(m_writer_conn, "BEGIN IMMEDIATE", nullptr, nullptr, &err);
     if(rc != SQLITE_OK)
     {
         LOG_ERROR("buffer: BEGIN failed: {}", err != nullptr ? err : "?");
@@ -216,7 +220,7 @@ memory_copy_buffer::flush()
         {
             const std::string& s = m_text_col.values[r];
             sqlite3_bind_text(
-                stmt, text_pos, s.data(), static_cast<int>(s.size()), SQLITE_TRANSIENT);
+                stmt, text_pos, s.data(), static_cast<int>(s.size()), SQLITE_STATIC);
         }
 
         rc = sqlite3_step(stmt);
