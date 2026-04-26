@@ -29,7 +29,12 @@ SESSION_NAME="hip-lttng-test-$$"
 cleanup() {
     set +e
     lttng destroy "$SESSION_NAME" >/dev/null 2>&1
-    pkill -f 'lttng-sessiond' 2>/dev/null
+    # Scoped sessiond kill: only this test's daemon (started below with
+    # a pidfile and isolated LTTNG_HOME). Avoid host-wide pkill -f which
+    # would kill any concurrent test's lttng-sessiond.
+    if [ -n "${SESSIOND_PIDFILE:-}" ] && [ -f "$SESSIOND_PIDFILE" ]; then
+        kill "$(cat "$SESSIOND_PIDFILE")" 2>/dev/null
+    fi
     rm -rf "$WORK"
 }
 trap cleanup EXIT
@@ -84,8 +89,17 @@ fi
     -Wl,-rpath,"$BUILD_LIB_DIR" 2>&1
 
 # Per-user sessiond + session.
-lttng-sessiond --daemonize
-sleep 1
+# Use isolated LTTNG_HOME and pidfile so cleanup can target THIS test's
+# daemon only (host-wide pkill would interfere with concurrent tests).
+export LTTNG_HOME="$WORK/lttng-home"
+mkdir -p "$LTTNG_HOME"
+SESSIOND_PIDFILE="$WORK/sessiond.pid"
+lttng-sessiond --daemonize --pidfile="$SESSIOND_PIDFILE"
+# Wait briefly for pidfile to appear.
+for i in 1 2 3 4 5; do
+    [ -f "$SESSIOND_PIDFILE" ] && break
+    sleep 0.5
+done
 lttng create "$SESSION_NAME" --output="$WORK/trace"
 
 # Enable a per-CPU userspace channel with conservative sizing

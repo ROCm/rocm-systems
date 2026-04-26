@@ -1,10 +1,34 @@
 #if defined(HSA_ENABLE_LTTNG_UST) && HSA_ENABLE_LTTNG_UST
 
+/* dladdr1 + RTLD_DL_LINKMAP are GNU extensions; _GNU_SOURCE makes them
+ * visible from <dlfcn.h>. Defined before any system header is included. */
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE 1
+#endif
+
 #include <atomic>
 #include <cstdlib>
 #include <link.h>     /* for Lmid_t, LM_ID_BASE */
-#include <dlfcn.h>    /* for dlopen, dlinfo, RTLD_DI_LMID */
+#include <dlfcn.h>    /* for dladdr1, RTLD_DL_LINKMAP, dlinfo, RTLD_DI_LMID */
 #include "rocm_hsa_tp.h"
+
+/* Runtime-wide kill switch -- definition. The emit helpers in
+ * rocm_trace_emit.h short-circuit on this flag (single relaxed atomic load
+ * per emit). Set true when ROCM_LTTNG_UST_DISABLE=1 or when running in a
+ * non-default link namespace (dlmopen mitigation). Default visibility so
+ * the dynamic linker resolves all loads from the HSA TUs to this single
+ * definition.
+ *
+ * The symbol is named `rocm_hsa_trace_g_disabled` (not the shared
+ * `rocm_trace_g_disabled` it used to be) so ELF symbol interposition
+ * cannot bind references to HIP's `rocm_hip_trace_g_disabled` (or vice
+ * versa) when both libamdhip64 and libhsa-runtime64 are loaded into the
+ * same process. */
+/* Note: NOT `extern "C"` — std::atomic<bool> is a C++ type and combining
+ * `extern` with initializer is flagged by GCC -Werror=extern-initialized.
+ * The header declares with matching C++ linkage. */
+std::atomic<bool> rocm_hsa_trace_g_disabled
+    __attribute__((visibility("default"))) {false};
 
 namespace {
 std::atomic<bool> g_initialized{false};
@@ -38,15 +62,9 @@ extern "C" void __rocm_hsa_tp_init(void) {
  *   dlopen("liblttng-ust-tracepoint.so.1") which triggers a glibc bug in
  *   add_to_global_resize() and SEGFAULTs the process.
  *
- *   The fix: detect we are NOT in the base namespace (LM_ID_BASE) and
- *   either (a) set ROCM_LTTNG_UST_DISABLE=1 in our environment so the
- *   provider's static-init skips registration, or (b) swallow with a stderr
- *   warning and never call __rocm_*_tp_init().
- *
- *   We use approach (b) below: detect at runtime, log once, no-op forever.
- *   Approach (a) is unreliable because the LTTng constructor may run
- *   BEFORE this constructor (static init order is not guaranteed across
- *   .so files).
+ *   Mitigation: set rocm_hsa_trace_g_disabled so the per-call emit helpers
+ *   short-circuit before touching any LTTng state, AND set g_initialized
+ *   so __rocm_hsa_tp_init never proceeds.
  */
 extern "C" __attribute__((constructor(101))) void __rocm_hsa_tp_ctor(void) {
     /* Honor explicit disable. */
@@ -55,32 +73,47 @@ extern "C" __attribute__((constructor(101))) void __rocm_hsa_tp_ctor(void) {
         /* Explicit disable wins. The LTTng provider's static-init has
          * already run by now and may have registered with sessiond — we
          * cannot un-register, but the runtime will never CALL any tracepoint
-         * because g_initialized stays false (see __rocm_hsa_tp_init). */
+         * because rocm_hsa_trace_g_disabled is now true. g_initialized is also
+         * marked so __rocm_hsa_tp_init bails out. */
+        rocm_hsa_trace_g_disabled.store(true, std::memory_order_relaxed);
+        g_initialized.store(true);
         return;
     }
 
 #if defined(__GLIBC__)
-    /* Detect non-default link namespace. dlinfo(RTLD_DI_LMID, ...) returns
-     * the link-namespace id of any handle we own; using ourselves (NULL)
-     * gives the namespace the current load-unit is in. */
+    /* Detect non-default link namespace.
+     *
+     * IMPORTANT: do NOT use `dlopen(NULL, RTLD_NOLOAD)` + `dlinfo()` here.
+     * Per dlopen(3): "If filename is NULL, then the returned handle is for
+     * the main program." That handle reflects the MAIN PROGRAM's namespace,
+     * not the namespace this DSO was loaded into via dlmopen. In the very
+     * dlmopen-into-non-default-namespace scenario this mitigation targets,
+     * dlinfo(RTLD_DI_LMID) on the main-program handle silently returns
+     * LM_ID_BASE and bypasses the mitigation. (Verified empirically: in a
+     * dlmopen(LM_ID_NEWLM, ...) DSO the old pattern reports ns_id=0 while
+     * the correct namespace is 1.)
+     *
+     * Use `dladdr1(<symbol-in-this-DSO>, ..., RTLD_DL_LINKMAP)` to obtain
+     * the `struct link_map*` for THIS DSO (the one containing
+     * __rocm_hsa_tp_ctor), then bridge to `dlinfo(handle, RTLD_DI_LMID, ...)`
+     * to read its namespace id. The link_map handle is exactly what dlopen
+     * returns under the hood, so dlinfo accepts it directly. We avoid
+     * touching `lm->l_lmid` directly because that field is not exposed in
+     * the public glibc <link.h>. */
     Lmid_t ns_id = LM_ID_BASE;
-    void* self = dlopen(NULL, RTLD_LAZY | RTLD_NOLOAD);
-    if (self != NULL) {
-        if (dlinfo(self, RTLD_DI_LMID, &ns_id) == 0 && ns_id != LM_ID_BASE) {
-            /* In a non-default namespace. Skip registration to avoid the
-             * glibc dlmopen + LTTng-internal-dlopen SEGFAULT (Phase 0
-             * finding). */
-            dlclose(self);
-            /* Note: at this point the LTTng provider's
-             * __attribute__((constructor)) has already RUN and may have
-             * crashed already. If we got here, we did NOT crash — meaning
-             * the LTTng provider has not yet been loaded for this .so.
-             * Either way, we set g_initialized to a "permanently disabled"
-             * marker so __rocm_hsa_tp_init never proceeds. */
-            g_initialized.store(true);
-            return;
-        }
-        dlclose(self);
+    Dl_info info;
+    void*   lm_handle = NULL;
+    if (dladdr1(reinterpret_cast<void*>(&__rocm_hsa_tp_ctor),
+                &info, &lm_handle, RTLD_DL_LINKMAP) != 0
+        && lm_handle != NULL
+        && dlinfo(lm_handle, RTLD_DI_LMID, &ns_id) == 0
+        && ns_id != LM_ID_BASE) {
+        /* In a non-default namespace. Skip registration to avoid the
+         * glibc dlmopen + LTTng-internal-dlopen SEGFAULT (Phase 0
+         * finding). */
+        rocm_hsa_trace_g_disabled.store(true, std::memory_order_relaxed);
+        g_initialized.store(true);
+        return;
     }
 #endif
     /* Otherwise fall through; __rocm_hsa_tp_init will be called normally

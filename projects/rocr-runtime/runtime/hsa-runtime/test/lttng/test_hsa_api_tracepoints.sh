@@ -23,8 +23,17 @@ fi
 
 TRACE_DIR="$(mktemp -d)"
 cleanup() {
-    pkill -P $$ 2>/dev/null || true
-    pkill -f "lttng-sessiond.*--no-kernel" 2>/dev/null || true
+    # Disable errexit inside the trap so a kill of an already-exited
+    # daemon (or any other cleanup hiccup) doesn't override an
+    # otherwise-passing test's exit status.
+    set +e
+    pkill -P $$ 2>/dev/null
+    # Scoped sessiond kill: only this test's daemon (started below with
+    # a pidfile and isolated LTTNG_HOME). Avoid host-wide pkill -f which
+    # would terminate any concurrent test's lttng-sessiond.
+    if [ -n "${SESSIOND_PIDFILE:-}" ] && [ -f "$SESSIOND_PIDFILE" ]; then
+        kill "$(cat "$SESSIOND_PIDFILE")" 2>/dev/null || true
+    fi
     rm -rf "$TRACE_DIR"
 }
 trap cleanup EXIT
@@ -68,9 +77,17 @@ fi
 
 fail() { echo "FAIL: $*" >&2; exit 1; }
 
-# Start a per-user sessiond.
-lttng-sessiond --daemonize --no-kernel
-trap 'pkill -f "lttng-sessiond.*--no-kernel" 2>/dev/null || true; rm -rf "$TRACE_DIR"' EXIT
+# Start a per-user sessiond, isolated to this test's LTTNG_HOME and
+# tracked by a pidfile so cleanup can target THIS test's daemon only.
+export LTTNG_HOME="$TRACE_DIR/lttng-home"
+mkdir -p "$LTTNG_HOME"
+SESSIOND_PIDFILE="$TRACE_DIR/sessiond.pid"
+lttng-sessiond --daemonize --no-kernel --pidfile="$SESSIOND_PIDFILE"
+for i in 1 2 3 4 5; do
+    [ -f "$SESSIOND_PIDFILE" ] && break
+    sleep 0.5
+done
+# (cleanup trap already set above, uses SESSIOND_PIDFILE)
 
 # ============================================================
 # Run 1: API events (tiny standalone HSA program)

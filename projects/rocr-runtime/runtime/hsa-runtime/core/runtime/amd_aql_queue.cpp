@@ -499,8 +499,7 @@ void AqlQueue::StoreRelaxed(hsa_signal_value_t value) {
         (int64_t)value);
   }
   rocm_trace_emit_hsa_doorbell_ring(
-      (uint32_t)queue_id_, (int64_t)value, pkt_type,
-      rocm_trace_active_corr_id());
+      (uint32_t)queue_id_, (int64_t)value, pkt_type);
 
   if (core::Runtime::runtime_singleton_->thunkLoader()->IsDTIF() ||
         core::Runtime::runtime_singleton_->thunkLoader()->IsDXG()) {

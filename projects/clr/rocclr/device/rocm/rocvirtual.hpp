@@ -772,16 +772,6 @@ class VirtualGPU : public device::VirtualDevice {
                                               //!< with a completion signal
   hsa_signal_t last_completion_signal_{};     //!< The last completion signal
 
-  //! Per-VirtualGPU monotonic counter of AQL kernel-dispatch packets submitted.
-  //! Tagged onto the rocm_hip:hip_aql_kernel_dispatch_submit tracepoint as
-  //! dispatch_idx so consumers can join with downstream firmware-ring records.
-  //! Atomic with relaxed ordering: HIP CLR serializes per-stream via
-  //! execution() lock, but a single hsa_queue_t may be shared across
-  //! VirtualGPUs (queue pool reuse). Within a stream the counter is
-  //! single-writer; across streams sharing a queue, consumers can sort by
-  //! timestamp. Relaxed ordering is sufficient — uniqueness only.
-  std::atomic<uint64_t> kernel_dispatch_count_{0};
-
   //! SDMA engine affinity tracking for this VirtualGPU/stream
   uint32_t assigned_sdma_engine_ = 0;           //!< Assigned SDMA engine mask for all operations
 

@@ -64,7 +64,23 @@ static inline uint8_t rocm_trace_sniff_packet_type(
 
 #if defined(HSA_ENABLE_LTTNG_UST) && HSA_ENABLE_LTTNG_UST
 
+#include <atomic>
 #include "rocm_hsa_tp.h"
+
+/* Runtime-wide kill switch defined in rocm_trace_init.cpp. Set true when
+ * ROCM_LTTNG_UST_DISABLE=1 or when running in a non-default link namespace
+ * (dlmopen mitigation). When true every emit helper short-circuits before
+ * touching any LTTng state OR the auto-stack -- enter and exit both check
+ * the same flag so the depth stays balanced.
+ *
+ * The symbol is named per-DSO (`rocm_hsa_...` in libhsa-runtime64,
+ * `rocm_hip_...` in libamdhip64) so ELF symbol interposition cannot
+ * cross-bind the two runtimes' flags. */
+extern std::atomic<bool> rocm_hsa_trace_g_disabled;
+
+static inline bool rocm_trace_disabled(void) {
+    return rocm_hsa_trace_g_disabled.load(std::memory_order_relaxed);
+}
 
 /* HSA emit_enter: capture parent_corr_id (= the active slot value BEFORE
  * the push) and emit with it as the new field. The push then makes the
@@ -76,6 +92,7 @@ static inline uint8_t rocm_trace_sniff_packet_type(
  * parent values. The matching pop happens in the exit emit helpers. */
 static inline void rocm_trace_emit_hsa_api_enter(const char* api_name,
                                                  uint64_t    corr_id) {
+    if (rocm_trace_disabled()) return;
     const uint64_t parent = rocp_reg_auto_push(corr_id);
     if (lttng_ust_tracepoint_enabled(rocm_hsa, hsa_api_enter)) {
         lttng_ust_do_tracepoint(rocm_hsa, hsa_api_enter,
@@ -88,6 +105,7 @@ static inline void rocm_trace_emit_hsa_api_enter(const char* api_name,
 static inline void rocm_trace_emit_hsa_api_exit_status(const char* api_name,
                                                        uint64_t    corr_id,
                                                        int32_t     status) {
+    if (rocm_trace_disabled()) return;
     /* Pop first, then read active. The post-pop active value equals the
      * pre-push parent, so the exit event's parent_corr_id matches the
      * matching enter event's parent_corr_id. */
@@ -99,10 +117,39 @@ static inline void rocm_trace_emit_hsa_api_exit_status(const char* api_name,
     }
 }
 
+/* Unsigned 64-bit integer-returning APIs (queue index ops). Preserves
+ * full width of the return value. */
+static inline void rocm_trace_emit_hsa_api_exit_u64(const char* api_name,
+                                                    uint64_t    corr_id,
+                                                    uint64_t    retval) {
+    if (rocm_trace_disabled()) return;
+    rocp_reg_auto_pop();
+    const uint64_t parent = rocp_reg_active_corr_id_get();
+    if (lttng_ust_tracepoint_enabled(rocm_hsa, hsa_api_exit_u64)) {
+        lttng_ust_do_tracepoint(rocm_hsa, hsa_api_exit_u64,
+                                api_name, corr_id, retval, parent);
+    }
+}
+
+/* Signed 64-bit integer-returning APIs (signal value ops). Preserves
+ * full width and sign of the return value. */
+static inline void rocm_trace_emit_hsa_api_exit_i64(const char* api_name,
+                                                    uint64_t    corr_id,
+                                                    int64_t     retval) {
+    if (rocm_trace_disabled()) return;
+    rocp_reg_auto_pop();
+    const uint64_t parent = rocp_reg_active_corr_id_get();
+    if (lttng_ust_tracepoint_enabled(rocm_hsa, hsa_api_exit_i64)) {
+        lttng_ust_do_tracepoint(rocm_hsa, hsa_api_exit_i64,
+                                api_name, corr_id, retval, parent);
+    }
+}
+
 /* Pointer-returning APIs */
 static inline void rocm_trace_emit_hsa_api_exit_ptr(const char* api_name,
                                                     uint64_t    corr_id,
                                                     const void* retval) {
+    if (rocm_trace_disabled()) return;
     rocp_reg_auto_pop();
     const uint64_t parent = rocp_reg_active_corr_id_get();
     if (lttng_ust_tracepoint_enabled(rocm_hsa, hsa_api_exit_ptr)) {
@@ -114,6 +161,7 @@ static inline void rocm_trace_emit_hsa_api_exit_ptr(const char* api_name,
 /* Void-returning APIs */
 static inline void rocm_trace_emit_hsa_api_exit_void(const char* api_name,
                                                      uint64_t    corr_id) {
+    if (rocm_trace_disabled()) return;
     rocp_reg_auto_pop();
     const uint64_t parent = rocp_reg_active_corr_id_get();
     if (lttng_ust_tracepoint_enabled(rocm_hsa, hsa_api_exit_void)) {
@@ -122,19 +170,25 @@ static inline void rocm_trace_emit_hsa_api_exit_void(const char* api_name,
     }
 }
 
-/* Doorbell ring: parent_corr_id is just whatever's active on the calling
- * thread at emit time. When called from within an HSA wrapper this will
- * equal the wrapper's own corr_id (which was pushed by emit_hsa_api_enter);
- * outside any wrapper context it's the slot's last-written value (or 0). */
+/* Doorbell ring: mints a fresh self_corr for the doorbell event itself so
+ * that the schema's `corr_id` field uniquely identifies this doorbell
+ * occurrence (rather than aliasing the surrounding HSA wrapper's corr_id,
+ * which would make corr_id == parent_corr_id). parent_corr_id carries
+ * whatever is active on the calling thread at emit time -- when called
+ * from within an HSA wrapper this is the wrapper's own corr_id (which
+ * was pushed by emit_hsa_api_enter); outside any wrapper context it's
+ * the slot's last-written value (or 0). Pattern mirrors
+ * rocm_trace_emit_hip_aql_kernel_dispatch_submit. */
 static inline void rocm_trace_emit_hsa_doorbell_ring(uint32_t queue_id,
                                                      int64_t  write_idx,
-                                                     uint8_t  packet_type,
-                                                     uint64_t corr_id) {
+                                                     uint8_t  packet_type) {
+    if (rocm_trace_disabled()) return;
     if (lttng_ust_tracepoint_enabled(rocm_hsa, hsa_doorbell_ring)) {
-        const uint64_t parent = rocp_reg_active_corr_id_get();
+        const uint64_t self_corr = rocp_reg_next_corr_id();
+        const uint64_t parent    = rocp_reg_active_corr_id_get();
         lttng_ust_do_tracepoint(rocm_hsa, hsa_doorbell_ring,
                                 queue_id, write_idx, packet_type,
-                                corr_id, rocm_trace_current_tid(), parent);
+                                self_corr, rocm_trace_current_tid(), parent);
     }
 }
 
@@ -142,6 +196,7 @@ static inline void rocm_trace_emit_hsa_intercept_packets(uint32_t queue_id,
                                                          uint64_t pkt_index,
                                                          uint32_t pkt_count,
                                                          uint8_t  packet_type) {
+    if (rocm_trace_disabled()) return;
     if (lttng_ust_tracepoint_enabled(rocm_hsa, hsa_intercept_packets)) {
         const uint64_t parent = rocp_reg_active_corr_id_get();
         lttng_ust_do_tracepoint(rocm_hsa, hsa_intercept_packets,
@@ -158,14 +213,20 @@ static inline void rocm_trace_emit_hsa_api_enter(const char* a, uint64_t c) {
 static inline void rocm_trace_emit_hsa_api_exit_status(const char* a, uint64_t c, int32_t s) {
     (void)a; (void)c; (void)s;
 }
+static inline void rocm_trace_emit_hsa_api_exit_u64(const char* a, uint64_t c, uint64_t v) {
+    (void)a; (void)c; (void)v;
+}
+static inline void rocm_trace_emit_hsa_api_exit_i64(const char* a, uint64_t c, int64_t v) {
+    (void)a; (void)c; (void)v;
+}
 static inline void rocm_trace_emit_hsa_api_exit_ptr(const char* a, uint64_t c, const void* p) {
     (void)a; (void)c; (void)p;
 }
 static inline void rocm_trace_emit_hsa_api_exit_void(const char* a, uint64_t c) {
     (void)a; (void)c;
 }
-static inline void rocm_trace_emit_hsa_doorbell_ring(uint32_t a, int64_t b, uint8_t c, uint64_t d) {
-    (void)a; (void)b; (void)c; (void)d;
+static inline void rocm_trace_emit_hsa_doorbell_ring(uint32_t a, int64_t b, uint8_t c) {
+    (void)a; (void)b; (void)c;
 }
 static inline void rocm_trace_emit_hsa_intercept_packets(uint32_t a, uint64_t b, uint32_t c, uint8_t d) {
     (void)a; (void)b; (void)c; (void)d;

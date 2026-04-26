@@ -29,8 +29,11 @@ import sys
 from clang import cindex
 
 
-# Status types: anything safely castable to int32_t (with an explicit
-# "wider int truncated" caveat for the queue/signal hot-path ops).
+# Status types: 32-bit-coercible. NOTE: 64-bit returns (uint64_t /
+# int64_t / hsa_signal_value_t) used to live here too -- silently
+# truncated to int32_t in the exit_status event. They have moved to
+# U64_TYPES / I64_TYPES below so the typed exit_u64 / exit_i64 events
+# preserve full 64-bit width on the wire.
 STATUS_TYPES = {
     'hsa_status_t',
     'int',
@@ -38,15 +41,17 @@ STATUS_TYPES = {
     'uint32_t',
     'int32_t',
     'bool',
-    # Wider-than-32 returns from queue/signal index ops. The exit_status
-    # event field is int32_t; the high 32 bits are dropped. This is OK
-    # for a tracepoint marker — consumers that need the actual index can
-    # capture it via the synchronous instrumentation pair (read_index_*
-    # is paired with hsa_signal_load) or via the doorbell-ring tracepoint.
-    'uint64_t',
-    'int64_t',
-    'hsa_signal_value_t',
 }
+
+# Unsigned 64-bit returns -- queue index ops
+# (hsa_queue_load_*_index_*, hsa_queue_cas_*_index_*, hsa_queue_add_*_index_*).
+U64_TYPES = {'uint64_t'}
+
+# Signed 64-bit returns -- signal value ops
+# (hsa_signal_load_*, hsa_signal_cas_*, hsa_signal_exchange_*,
+# hsa_signal_wait_*). hsa_signal_value_t is int64_t in the large memory
+# model (HSA_LARGE_MODEL=1, which the runtime always builds with).
+I64_TYPES = {'int64_t', 'hsa_signal_value_t'}
 
 # Void return.
 VOID_TYPES = {'void'}
@@ -58,6 +63,10 @@ def classify(return_type_spelling: str) -> str:
         return 'VOID'
     if s in STATUS_TYPES:
         return 'STATUS'
+    if s in U64_TYPES:
+        return 'U64'
+    if s in I64_TYPES:
+        return 'I64'
     # Any pointer return — the schema captures pointer-as-uint64 hex.
     if s.endswith('*') or s.endswith('**') or 'const char *' in s:
         return 'PTR'
@@ -201,6 +210,25 @@ def rewrite(source_path, include_path, inventory_path):
             ret_start_off = line_col_to_offset(lines, rs.line, rs.column)
             ret_end_off = line_col_to_offset(lines, re.line, re.column)
 
+        # Locate the body's closing '}' so we can inject exit_void into
+        # pure-void no-return wrappers. body.extent.end points one past the
+        # '}'; verify and back up by one.
+        body_node = None
+        for c in n.get_children():
+            if c.kind == cindex.CursorKind.COMPOUND_STMT:
+                body_node = c
+                break
+        body_close_off = None
+        if body_node is not None:
+            be = body_node.extent.end
+            be_off = line_col_to_offset(lines, be.line, be.column)
+            # libclang sometimes reports end at the char *after* '}'. Try
+            # both positions.
+            if be_off > 0 and be_off <= len(src) and src[be_off - 1] == '}':
+                body_close_off = be_off - 1
+            elif be_off < len(src) and src[be_off] == '}':
+                body_close_off = be_off
+
         wrappers.append({
             'name': n.spelling,
             'cls': cls,
@@ -208,6 +236,7 @@ def rewrite(source_path, include_path, inventory_path):
             'insert_off': insert_off,
             'ret_start': ret_start_off,
             'ret_end': ret_end_off,
+            'body_close': body_close_off,
         })
 
     if not wrappers:
@@ -224,7 +253,11 @@ def rewrite(source_path, include_path, inventory_path):
         )
         edits.append((w['insert_off'], w['insert_off'], enter_snippet))
 
-        # 2. Replace the return stmt with the typed macro.
+        # 2. Replace the return stmt with the typed macro, OR (for pure-void
+        # no-return wrappers) inject an exit_void emit immediately before the
+        # body's closing '}' so every void wrapper has a balanced enter/exit
+        # pair (fixes C1 -- previously the only no-return wrapper,
+        # hsa_table_interface_init, never popped its corr_id slot).
         if w['cls'] == 'VOID':
             if w['ret_start'] is not None:
                 # Wrapper has `return foo();`. The expression to wrap is the
@@ -245,9 +278,17 @@ def rewrite(source_path, include_path, inventory_path):
                 if end < len(src) and src[end] == ';':
                     end += 1
                 edits.append((w['ret_start'], end, replacement))
-            # else: pure void no-return body — emit nothing extra (the enter
-            # snippet alone is fine; an exit_void event would be nice but
-            # there's no clean injection point without an AST-level pass).
+            else:
+                # Pure void no-return body. Inject exit_void emit just
+                # before the closing '}'.
+                if w['body_close'] is None:
+                    sys.exit(
+                        f'lttng_migrate: cannot locate closing }} for '
+                        f'pure-void wrapper {w["name"]}; cannot inject exit_void')
+                exit_snippet = (
+                    ' rocm_trace_emit_hsa_api_exit_void(__func__, __rocm_corr);'
+                )
+                edits.append((w['body_close'], w['body_close'], exit_snippet))
         else:
             assert w['ret_start'] is not None, f'expected return stmt in {w["name"]}'
             ret_text = src[w['ret_start']:w['ret_end']]
@@ -255,7 +296,14 @@ def rewrite(source_path, include_path, inventory_path):
                 sys.exit(f'lttng_migrate: malformed return for {w["name"]}: {ret_text!r}')
             body_expr = ret_text[len('return'):].lstrip()
             body_expr = body_expr.rstrip().rstrip(';').rstrip()
-            macro = 'ROCR_TRACE_API_RET_PTR' if w['cls'] == 'PTR' else 'ROCR_TRACE_API_RET_STATUS'
+            if w['cls'] == 'PTR':
+                macro = 'ROCR_TRACE_API_RET_PTR'
+            elif w['cls'] == 'U64':
+                macro = 'ROCR_TRACE_API_RET_U64'
+            elif w['cls'] == 'I64':
+                macro = 'ROCR_TRACE_API_RET_I64'
+            else:
+                macro = 'ROCR_TRACE_API_RET_STATUS'
             replacement = f'{macro}({body_expr});'
             end = w['ret_end']
             if end < len(src) and src[end] == ';':

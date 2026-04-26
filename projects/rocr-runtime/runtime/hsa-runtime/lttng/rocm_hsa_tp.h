@@ -30,12 +30,9 @@ LTTNG_UST_TRACEPOINT_EVENT(
     )
 )
 
-/* hsa_api_exit_status: for hsa_status_t / int returns. Wider integer returns
- * (uint64_t, hsa_signal_value_t / int64_t — used by queue/signal ops) are
- * truncated to int32_t when emitted via this event. The truncation is
- * acceptable for HSA status codes (small enum) and adequate for the
- * hot-path queue/signal index ops where the wrapper is mostly used as
- * a marker rather than a value carrier. */
+/* hsa_api_exit_status: for hsa_status_t / int returns. Use the typed
+ * hsa_api_exit_u64 / _i64 events below for 64-bit integer returns from
+ * hsa_signal_* / hsa_queue_* index ops -- those preserve full width. */
 LTTNG_UST_TRACEPOINT_EVENT(
     rocm_hsa, hsa_api_exit_status,
     LTTNG_UST_TP_ARGS(const char*, api_name, uint64_t, corr_id, int32_t, status,
@@ -44,6 +41,36 @@ LTTNG_UST_TRACEPOINT_EVENT(
         lttng_ust_field_string(api_name, api_name)
         lttng_ust_field_integer(uint64_t, corr_id, corr_id)
         lttng_ust_field_integer(int32_t, status, status)
+        lttng_ust_field_integer(uint64_t, parent_corr_id, parent_corr_id)
+    )
+)
+
+/* hsa_api_exit_u64: for unsigned 64-bit integer returns. Used by queue
+ * index ops (hsa_queue_load_*_index_*, hsa_queue_cas_write_index_*,
+ * hsa_queue_add_write_index_*) -- their return type is uint64_t. */
+LTTNG_UST_TRACEPOINT_EVENT(
+    rocm_hsa, hsa_api_exit_u64,
+    LTTNG_UST_TP_ARGS(const char*, api_name, uint64_t, corr_id,
+                      uint64_t, retval, uint64_t, parent_corr_id),
+    LTTNG_UST_TP_FIELDS(
+        lttng_ust_field_string(api_name, api_name)
+        lttng_ust_field_integer(uint64_t, corr_id, corr_id)
+        lttng_ust_field_integer(uint64_t, retval, retval)
+        lttng_ust_field_integer(uint64_t, parent_corr_id, parent_corr_id)
+    )
+)
+
+/* hsa_api_exit_i64: for signed 64-bit integer returns. Used by signal value
+ * ops (hsa_signal_load_*, hsa_signal_cas_*, hsa_signal_exchange_*,
+ * hsa_signal_wait_*) -- their return type is hsa_signal_value_t (int64_t). */
+LTTNG_UST_TRACEPOINT_EVENT(
+    rocm_hsa, hsa_api_exit_i64,
+    LTTNG_UST_TP_ARGS(const char*, api_name, uint64_t, corr_id,
+                      int64_t, retval, uint64_t, parent_corr_id),
+    LTTNG_UST_TP_FIELDS(
+        lttng_ust_field_string(api_name, api_name)
+        lttng_ust_field_integer(uint64_t, corr_id, corr_id)
+        lttng_ust_field_integer(int64_t, retval, retval)
         lttng_ust_field_integer(uint64_t, parent_corr_id, parent_corr_id)
     )
 )

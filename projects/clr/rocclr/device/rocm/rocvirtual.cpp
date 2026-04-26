@@ -33,8 +33,8 @@
  * the LTTng include path. Keep these in sync with the !HIP_ENABLE_LTTNG_UST
  * branch of hipamd/src/lttng/rocm_trace_emit.h. */
 static inline void rocm_trace_emit_hip_aql_kernel_dispatch_submit(
-    uint32_t a, uint64_t b, uint64_t c, uint64_t d, uint64_t e) {
-    (void)a; (void)b; (void)c; (void)d; (void)e;
+    uint32_t a, uint64_t b, uint64_t c, uint64_t d) {
+    (void)a; (void)b; (void)c; (void)d;
 }
 #endif
 
@@ -1296,13 +1296,10 @@ bool VirtualGPU::dispatchGenericAqlPacket(AqlPacket* packet, uint16_t header, ui
     const uint8_t pkt_type = extractAqlBits(header, HSA_PACKET_HEADER_TYPE,
                                             HSA_PACKET_HEADER_WIDTH_TYPE);
     if (pkt_type == HSA_PACKET_TYPE_KERNEL_DISPATCH) {
-      const uint64_t dispatch_idx =
-          kernel_dispatch_count_.fetch_add(1, std::memory_order_relaxed);
       auto* kdp = reinterpret_cast<hsa_kernel_dispatch_packet_t*>(packet);
       rocm_trace_emit_hip_aql_kernel_dispatch_submit(
           gpu_queue_->id,
           index,
-          dispatch_idx,
           kdp->kernel_object,
           kdp->completion_signal.handle);
     }
@@ -1560,12 +1557,9 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const std::vector<uint8_t>& flatPack
           const uint64_t slotIdx_i = (startIndex + i) & queueMask;
           auto* slot_i = reinterpret_cast<hsa_kernel_dispatch_packet_t*>(
               queueBase + slotIdx_i * kPacketSize);
-          const uint64_t dispatch_idx =
-              kernel_dispatch_count_.fetch_add(1, std::memory_order_relaxed);
           rocm_trace_emit_hip_aql_kernel_dispatch_submit(
               gpu_queue_->id,
               startIndex + i,
-              dispatch_idx,
               slot_i->kernel_object,
               slot_i->completion_signal.handle);
         }

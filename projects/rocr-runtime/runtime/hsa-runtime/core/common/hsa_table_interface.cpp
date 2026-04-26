@@ -72,6 +72,24 @@
         return;                                                                \
     } while (0)
 
+/* Wider integer returns from queue/signal hot-path ops. _U64 covers
+ * uint64_t (queue index ops); _I64 covers hsa_signal_value_t / int64_t
+ * (signal value ops). Full 64-bit width is preserved on the wire (vs.
+ * truncation to int32 by the older _STATUS path). */
+#define ROCR_TRACE_API_RET_U64(EXPR)                                           \
+    do {                                                                       \
+        const uint64_t __rocm_rv = static_cast<uint64_t>(EXPR);                \
+        rocm_trace_emit_hsa_api_exit_u64(__func__, __rocm_corr, __rocm_rv);    \
+        return __rocm_rv;                                                      \
+    } while (0)
+
+#define ROCR_TRACE_API_RET_I64(EXPR)                                           \
+    do {                                                                       \
+        const int64_t __rocm_rv = static_cast<int64_t>(EXPR);                  \
+        rocm_trace_emit_hsa_api_exit_i64(__func__, __rocm_corr, __rocm_rv);    \
+        return __rocm_rv;                                                      \
+    } while (0)
+
 static const HsaApiTable* hsaApiTable;
 static const CoreApiTable* coreApiTable;
 static const AmdExtTable* amdExtTable;
@@ -82,6 +100,7 @@ void hsa_table_interface_init(const HsaApiTable* apiTable) { const uint64_t __ro
     coreApiTable = apiTable->core_;
     amdExtTable = apiTable->amd_ext_;
     toolsApiTable = apiTable->tools_;
+    rocm_trace_emit_hsa_api_exit_void(__func__, __rocm_corr);
 }
 
 const HsaApiTable* hsa_table_interface_get_table() { const uint64_t __rocm_corr = rocm_trace_next_corr_id(); rocm_trace_emit_hsa_api_enter(__func__, __rocm_corr);
@@ -208,19 +227,19 @@ hsa_status_t HSA_API hsa_queue_inactivate(hsa_queue_t* queue) { const uint64_t _
 }
 
 uint64_t HSA_API hsa_queue_load_read_index_scacquire(const hsa_queue_t* queue) { const uint64_t __rocm_corr = rocm_trace_next_corr_id(); rocm_trace_emit_hsa_api_enter(__func__, __rocm_corr);
-  ROCR_TRACE_API_RET_STATUS(coreApiTable->hsa_queue_load_read_index_scacquire_fn(queue));
+  ROCR_TRACE_API_RET_U64(coreApiTable->hsa_queue_load_read_index_scacquire_fn(queue));
 }
 
 uint64_t HSA_API hsa_queue_load_read_index_relaxed(const hsa_queue_t* queue) { const uint64_t __rocm_corr = rocm_trace_next_corr_id(); rocm_trace_emit_hsa_api_enter(__func__, __rocm_corr);
-  ROCR_TRACE_API_RET_STATUS(coreApiTable->hsa_queue_load_read_index_relaxed_fn(queue));
+  ROCR_TRACE_API_RET_U64(coreApiTable->hsa_queue_load_read_index_relaxed_fn(queue));
 }
 
 uint64_t HSA_API hsa_queue_load_write_index_scacquire(const hsa_queue_t* queue) { const uint64_t __rocm_corr = rocm_trace_next_corr_id(); rocm_trace_emit_hsa_api_enter(__func__, __rocm_corr);
-  ROCR_TRACE_API_RET_STATUS(coreApiTable->hsa_queue_load_write_index_scacquire_fn(queue));
+  ROCR_TRACE_API_RET_U64(coreApiTable->hsa_queue_load_write_index_scacquire_fn(queue));
 }
 
 uint64_t HSA_API hsa_queue_load_write_index_relaxed(const hsa_queue_t* queue) { const uint64_t __rocm_corr = rocm_trace_next_corr_id(); rocm_trace_emit_hsa_api_enter(__func__, __rocm_corr);
-  ROCR_TRACE_API_RET_STATUS(coreApiTable->hsa_queue_load_write_index_relaxed_fn(queue));
+  ROCR_TRACE_API_RET_U64(coreApiTable->hsa_queue_load_write_index_relaxed_fn(queue));
 }
 
 void HSA_API hsa_queue_store_write_index_relaxed(const hsa_queue_t* queue,
@@ -234,41 +253,41 @@ void HSA_API hsa_queue_store_write_index_screlease(const hsa_queue_t* queue, uin
 
 uint64_t HSA_API hsa_queue_cas_write_index_scacq_screl(const hsa_queue_t* queue, uint64_t expected,
                                                        uint64_t value) { const uint64_t __rocm_corr = rocm_trace_next_corr_id(); rocm_trace_emit_hsa_api_enter(__func__, __rocm_corr);
-  ROCR_TRACE_API_RET_STATUS(coreApiTable->hsa_queue_cas_write_index_scacq_screl_fn(queue, expected, value));
+  ROCR_TRACE_API_RET_U64(coreApiTable->hsa_queue_cas_write_index_scacq_screl_fn(queue, expected, value));
 }
 
 uint64_t HSA_API hsa_queue_cas_write_index_scacquire(const hsa_queue_t* queue, uint64_t expected,
                                                      uint64_t value) { const uint64_t __rocm_corr = rocm_trace_next_corr_id(); rocm_trace_emit_hsa_api_enter(__func__, __rocm_corr);
-  ROCR_TRACE_API_RET_STATUS(coreApiTable->hsa_queue_cas_write_index_scacquire_fn(queue, expected, value));
+  ROCR_TRACE_API_RET_U64(coreApiTable->hsa_queue_cas_write_index_scacquire_fn(queue, expected, value));
 }
 
 uint64_t HSA_API hsa_queue_cas_write_index_relaxed(const hsa_queue_t* queue,
                                                    uint64_t expected,
                                                    uint64_t value) { const uint64_t __rocm_corr = rocm_trace_next_corr_id(); rocm_trace_emit_hsa_api_enter(__func__, __rocm_corr);
-  ROCR_TRACE_API_RET_STATUS(coreApiTable->hsa_queue_cas_write_index_relaxed_fn(queue, expected,
+  ROCR_TRACE_API_RET_U64(coreApiTable->hsa_queue_cas_write_index_relaxed_fn(queue, expected,
                                                            value));
 }
 
 uint64_t HSA_API hsa_queue_cas_write_index_screlease(const hsa_queue_t* queue, uint64_t expected,
                                                      uint64_t value) { const uint64_t __rocm_corr = rocm_trace_next_corr_id(); rocm_trace_emit_hsa_api_enter(__func__, __rocm_corr);
-  ROCR_TRACE_API_RET_STATUS(coreApiTable->hsa_queue_cas_write_index_screlease_fn(queue, expected, value));
+  ROCR_TRACE_API_RET_U64(coreApiTable->hsa_queue_cas_write_index_screlease_fn(queue, expected, value));
 }
 
 uint64_t HSA_API hsa_queue_add_write_index_scacq_screl(const hsa_queue_t* queue, uint64_t value) { const uint64_t __rocm_corr = rocm_trace_next_corr_id(); rocm_trace_emit_hsa_api_enter(__func__, __rocm_corr);
-  ROCR_TRACE_API_RET_STATUS(coreApiTable->hsa_queue_add_write_index_scacq_screl_fn(queue, value));
+  ROCR_TRACE_API_RET_U64(coreApiTable->hsa_queue_add_write_index_scacq_screl_fn(queue, value));
 }
 
 uint64_t HSA_API hsa_queue_add_write_index_scacquire(const hsa_queue_t* queue, uint64_t value) { const uint64_t __rocm_corr = rocm_trace_next_corr_id(); rocm_trace_emit_hsa_api_enter(__func__, __rocm_corr);
-  ROCR_TRACE_API_RET_STATUS(coreApiTable->hsa_queue_add_write_index_scacquire_fn(queue, value));
+  ROCR_TRACE_API_RET_U64(coreApiTable->hsa_queue_add_write_index_scacquire_fn(queue, value));
 }
 
 uint64_t HSA_API hsa_queue_add_write_index_relaxed(const hsa_queue_t* queue,
                                                    uint64_t value) { const uint64_t __rocm_corr = rocm_trace_next_corr_id(); rocm_trace_emit_hsa_api_enter(__func__, __rocm_corr);
-  ROCR_TRACE_API_RET_STATUS(coreApiTable->hsa_queue_add_write_index_relaxed_fn(queue, value));
+  ROCR_TRACE_API_RET_U64(coreApiTable->hsa_queue_add_write_index_relaxed_fn(queue, value));
 }
 
 uint64_t HSA_API hsa_queue_add_write_index_screlease(const hsa_queue_t* queue, uint64_t value) { const uint64_t __rocm_corr = rocm_trace_next_corr_id(); rocm_trace_emit_hsa_api_enter(__func__, __rocm_corr);
-  ROCR_TRACE_API_RET_STATUS(coreApiTable->hsa_queue_add_write_index_screlease_fn(queue, value));
+  ROCR_TRACE_API_RET_U64(coreApiTable->hsa_queue_add_write_index_screlease_fn(queue, value));
 }
 
 void HSA_API hsa_queue_store_read_index_relaxed(const hsa_queue_t* queue,
@@ -330,11 +349,11 @@ hsa_status_t HSA_API hsa_signal_destroy(hsa_signal_t signal) { const uint64_t __
 }
 
 hsa_signal_value_t HSA_API hsa_signal_load_relaxed(hsa_signal_t signal) { const uint64_t __rocm_corr = rocm_trace_next_corr_id(); rocm_trace_emit_hsa_api_enter(__func__, __rocm_corr);
-  ROCR_TRACE_API_RET_STATUS(coreApiTable->hsa_signal_load_relaxed_fn(signal));
+  ROCR_TRACE_API_RET_I64(coreApiTable->hsa_signal_load_relaxed_fn(signal));
 }
 
 hsa_signal_value_t HSA_API hsa_signal_load_scacquire(hsa_signal_t signal) { const uint64_t __rocm_corr = rocm_trace_next_corr_id(); rocm_trace_emit_hsa_api_enter(__func__, __rocm_corr);
-  ROCR_TRACE_API_RET_STATUS(coreApiTable->hsa_signal_load_scacquire_fn(signal));
+  ROCR_TRACE_API_RET_I64(coreApiTable->hsa_signal_load_scacquire_fn(signal));
 }
 
 void HSA_API
@@ -360,7 +379,7 @@ hsa_signal_value_t HSA_API
                             hsa_signal_value_t compare_value,
                             uint64_t timeout_hint,
                             hsa_wait_state_t wait_expectancy_hint) { const uint64_t __rocm_corr = rocm_trace_next_corr_id(); rocm_trace_emit_hsa_api_enter(__func__, __rocm_corr);
-  ROCR_TRACE_API_RET_STATUS(coreApiTable->hsa_signal_wait_relaxed_fn(
+  ROCR_TRACE_API_RET_I64(coreApiTable->hsa_signal_wait_relaxed_fn(
       signal, condition, compare_value, timeout_hint, wait_expectancy_hint));
 }
 
@@ -369,7 +388,7 @@ hsa_signal_value_t HSA_API hsa_signal_wait_scacquire(hsa_signal_t signal,
                                                      hsa_signal_value_t compare_value,
                                                      uint64_t timeout_hint,
                                                      hsa_wait_state_t wait_expectancy_hint) { const uint64_t __rocm_corr = rocm_trace_next_corr_id(); rocm_trace_emit_hsa_api_enter(__func__, __rocm_corr);
-  ROCR_TRACE_API_RET_STATUS(coreApiTable->hsa_signal_wait_scacquire_fn(signal, condition, compare_value, timeout_hint,
+  ROCR_TRACE_API_RET_I64(coreApiTable->hsa_signal_wait_scacquire_fn(signal, condition, compare_value, timeout_hint,
                                                     wait_expectancy_hint));
 }
 
@@ -491,46 +510,46 @@ void HSA_API hsa_signal_subtract_scacq_screl(hsa_signal_t signal, hsa_signal_val
 
 hsa_signal_value_t HSA_API
     hsa_signal_exchange_relaxed(hsa_signal_t signal, hsa_signal_value_t value) { const uint64_t __rocm_corr = rocm_trace_next_corr_id(); rocm_trace_emit_hsa_api_enter(__func__, __rocm_corr);
-  ROCR_TRACE_API_RET_STATUS(coreApiTable->hsa_signal_exchange_relaxed_fn(signal, value));
+  ROCR_TRACE_API_RET_I64(coreApiTable->hsa_signal_exchange_relaxed_fn(signal, value));
 }
 
 hsa_signal_value_t HSA_API hsa_signal_exchange_scacquire(hsa_signal_t signal,
                                                          hsa_signal_value_t value) { const uint64_t __rocm_corr = rocm_trace_next_corr_id(); rocm_trace_emit_hsa_api_enter(__func__, __rocm_corr);
-  ROCR_TRACE_API_RET_STATUS(coreApiTable->hsa_signal_exchange_scacquire_fn(signal, value));
+  ROCR_TRACE_API_RET_I64(coreApiTable->hsa_signal_exchange_scacquire_fn(signal, value));
 }
 
 hsa_signal_value_t HSA_API hsa_signal_exchange_screlease(hsa_signal_t signal,
                                                          hsa_signal_value_t value) { const uint64_t __rocm_corr = rocm_trace_next_corr_id(); rocm_trace_emit_hsa_api_enter(__func__, __rocm_corr);
-  ROCR_TRACE_API_RET_STATUS(coreApiTable->hsa_signal_exchange_screlease_fn(signal, value));
+  ROCR_TRACE_API_RET_I64(coreApiTable->hsa_signal_exchange_screlease_fn(signal, value));
 }
 
 hsa_signal_value_t HSA_API hsa_signal_exchange_scacq_screl(hsa_signal_t signal,
                                                            hsa_signal_value_t value) { const uint64_t __rocm_corr = rocm_trace_next_corr_id(); rocm_trace_emit_hsa_api_enter(__func__, __rocm_corr);
-  ROCR_TRACE_API_RET_STATUS(coreApiTable->hsa_signal_exchange_scacq_screl_fn(signal, value));
+  ROCR_TRACE_API_RET_I64(coreApiTable->hsa_signal_exchange_scacq_screl_fn(signal, value));
 }
 
 hsa_signal_value_t HSA_API hsa_signal_cas_relaxed(hsa_signal_t signal,
                                                   hsa_signal_value_t expected,
                                                   hsa_signal_value_t value) { const uint64_t __rocm_corr = rocm_trace_next_corr_id(); rocm_trace_emit_hsa_api_enter(__func__, __rocm_corr);
-  ROCR_TRACE_API_RET_STATUS(coreApiTable->hsa_signal_cas_relaxed_fn(signal, expected, value));
+  ROCR_TRACE_API_RET_I64(coreApiTable->hsa_signal_cas_relaxed_fn(signal, expected, value));
 }
 
 hsa_signal_value_t HSA_API hsa_signal_cas_scacquire(hsa_signal_t signal,
                                                     hsa_signal_value_t expected,
                                                     hsa_signal_value_t value) { const uint64_t __rocm_corr = rocm_trace_next_corr_id(); rocm_trace_emit_hsa_api_enter(__func__, __rocm_corr);
-  ROCR_TRACE_API_RET_STATUS(coreApiTable->hsa_signal_cas_scacquire_fn(signal, expected, value));
+  ROCR_TRACE_API_RET_I64(coreApiTable->hsa_signal_cas_scacquire_fn(signal, expected, value));
 }
 
 hsa_signal_value_t HSA_API hsa_signal_cas_screlease(hsa_signal_t signal,
                                                     hsa_signal_value_t expected,
                                                     hsa_signal_value_t value) { const uint64_t __rocm_corr = rocm_trace_next_corr_id(); rocm_trace_emit_hsa_api_enter(__func__, __rocm_corr);
-  ROCR_TRACE_API_RET_STATUS(coreApiTable->hsa_signal_cas_screlease_fn(signal, expected, value));
+  ROCR_TRACE_API_RET_I64(coreApiTable->hsa_signal_cas_screlease_fn(signal, expected, value));
 }
 
 hsa_signal_value_t HSA_API hsa_signal_cas_scacq_screl(hsa_signal_t signal,
                                                       hsa_signal_value_t expected,
                                                       hsa_signal_value_t value) { const uint64_t __rocm_corr = rocm_trace_next_corr_id(); rocm_trace_emit_hsa_api_enter(__func__, __rocm_corr);
-  ROCR_TRACE_API_RET_STATUS(coreApiTable->hsa_signal_cas_scacq_screl_fn(signal, expected, value));
+  ROCR_TRACE_API_RET_I64(coreApiTable->hsa_signal_cas_scacq_screl_fn(signal, expected, value));
 }
 
 //===--- Instruction Set Architecture -------------------------------------===//

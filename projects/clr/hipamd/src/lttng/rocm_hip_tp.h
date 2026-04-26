@@ -22,6 +22,26 @@
 #include <lttng/tracepoint.h>
 #include <stdint.h>
 
+/* Schema version. Bump on any breaking change to event field layout
+ * (field add/remove/rename/type-change) so consumers can detect they
+ * are reading a stream produced by a different schema generation.
+ *
+ * Version history:
+ *   1 - initial schema (development branch only; never released)
+ *   2 - hip_aql_kernel_dispatch_submit dropped `dispatch_idx` field
+ *       (was a per-VirtualGPU counter; non-unique across VirtualGPUs
+ *       sharing a queue via queue pooling). Join key for the
+ *       firmware-ring track is now (queue_id, write_idx).
+ *
+ * NOTE: This LTTng instrumentation has NEVER shipped in any released
+ * ROCm version; it lives entirely on development branch
+ * `users/bewelton/lttng`. Schema-version bumps here are advisory only —
+ * there are zero downstream CTF consumers in the wild that need to
+ * tolerate the change. Once this work merges to mainline ROCm, this
+ * version becomes the contract baseline and future bumps require
+ * proper deprecation handling. */
+#define ROCM_HIP_TP_SCHEMA_VERSION 2
+
 /* hip_api_enter: corr_id is freshly minted for THIS HIP call.
  * parent_corr_id is the active corr_id slot value BEFORE this call's push --
  * i.e., the calling context's corr_id (an outer HIP API for nested calls,
@@ -127,16 +147,51 @@ LTTNG_UST_TRACEPOINT_EVENT(
  * HIP's intent BEFORE any HSA intercept-queue rewrite, with corr_id from
  * TLS naturally available. This is the join key for the firmware-ring track.
  *
+ * Join key for the firmware-ring track is (queue_id, write_idx). The HSA
+ * AQL queue's hardware ring slot index is unique per-queue and matches
+ * what firmware records as its dispatch index. No separate software
+ * dispatch counter is needed (and a per-VirtualGPU counter would be wrong
+ * across VirtualGPUs that share a single hsa_queue_t via queue pooling).
+ *
  * parent_corr_id (uint64) carries the active TLS slot value at emit time;
  * for dispatches submitted from inside a HIP API call body this is the
- * surrounding HIP API's corr_id. */
+ * surrounding HIP API's corr_id.
+ *
+ * ============================================================================
+ * SCHEMA BREAKING CHANGE (development-branch only) — bumped to v2:
+ *
+ *   v1 of this event included a `dispatch_idx` field (uint64) — a software
+ *   counter incremented per-VirtualGPU at packet write time. That field
+ *   was REMOVED in v2 because:
+ *
+ *     - VirtualGPU instances frequently share a single hsa_queue_t via
+ *       HIP's queue-pool reuse path, so per-VirtualGPU counters DUPLICATE
+ *       across VirtualGPUs that submit to the same hardware queue. The
+ *       counter therefore could not serve as a unique key on the firmware
+ *       ring (multiple events with the same dispatch_idx but on the same
+ *       (queue_id, write_idx) slot).
+ *
+ *     - (queue_id, write_idx) IS a unique key per ring submission, and
+ *       firmware records the same write_idx as its own dispatch index, so
+ *       the join key on the firmware-ring track is naturally available
+ *       without the separate software counter.
+ *
+ *   This is a backward-incompatible CTF schema change. The change is
+ *   acceptable here because this LTTng instrumentation has NEVER shipped
+ *   in any released ROCm version — it lives entirely on development
+ *   branch `users/bewelton/lttng`. There are zero downstream CTF consumers
+ *   in the wild. Consumers building against this branch must use the
+ *   current (v2) schema; see ROCM_HIP_TP_SCHEMA_VERSION above. Once this
+ *   work merges to mainline, future schema changes will require proper
+ *   deprecation handling.
+ * ============================================================================
+ */
 LTTNG_UST_TRACEPOINT_EVENT(
     rocm_hip,
     hip_aql_kernel_dispatch_submit,
     LTTNG_UST_TP_ARGS(
         uint32_t,    queue_id,
         uint64_t,    write_idx,
-        uint64_t,    dispatch_idx,
         uint64_t,    corr_id,
         uint64_t,    parent_corr_id,
         uint32_t,    tid,
@@ -146,7 +201,6 @@ LTTNG_UST_TRACEPOINT_EVENT(
     LTTNG_UST_TP_FIELDS(
         lttng_ust_field_integer(uint32_t, queue_id, queue_id)
         lttng_ust_field_integer(uint64_t, write_idx, write_idx)
-        lttng_ust_field_integer(uint64_t, dispatch_idx, dispatch_idx)
         lttng_ust_field_integer(uint64_t, corr_id, corr_id)
         lttng_ust_field_integer(uint64_t, parent_corr_id, parent_corr_id)
         lttng_ust_field_integer(uint32_t, tid, tid)

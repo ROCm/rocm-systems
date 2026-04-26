@@ -29,7 +29,26 @@
 
 #if defined(HIP_ENABLE_LTTNG_UST) && HIP_ENABLE_LTTNG_UST
 
+#include <atomic>
 #include "rocm_hip_tp.h"
+
+/* Runtime-wide kill switch defined in rocm_trace_init.cpp. Set true when
+ * ROCM_LTTNG_UST_DISABLE=1 or when running in a non-default link namespace
+ * (dlmopen mitigation). When true every emit helper short-circuits before
+ * touching any LTTng state OR the auto-stack. We deliberately skip the
+ * push/pop too: when emission is disabled the parent_corr_id chain is
+ * unobservable, so leaving the stack untouched is correct AND saves a
+ * pair of TLS writes per API call. The enter and exit helpers both check
+ * the same flag so the depth stays balanced.
+ *
+ * The symbol is named per-DSO (`rocm_hip_...` in libamdhip64,
+ * `rocm_hsa_...` in libhsa-runtime64) so ELF symbol interposition cannot
+ * cross-bind the two runtimes' flags. */
+extern std::atomic<bool> rocm_hip_trace_g_disabled;
+
+static inline bool rocm_trace_disabled(void) {
+    return rocm_hip_trace_g_disabled.load(std::memory_order_relaxed);
+}
 
 /* HIP emit_enter: capture parent_corr_id (= the active slot value BEFORE
  * the push) and emit it as the new parent_corr_id field. The push then
@@ -44,6 +63,7 @@
  * emit_hsa_api_enter so HIP <-> HSA chains have consistent semantics. */
 static inline void rocm_trace_emit_hip_api_enter(const char* api_name,
                                                  uint64_t    corr_id) {
+    if (rocm_trace_disabled()) return;
     const uint64_t parent = rocp_reg_auto_push(corr_id);
     if (lttng_ust_tracepoint_enabled(rocm_hip, hip_api_enter)) {
         lttng_ust_do_tracepoint(rocm_hip, hip_api_enter,
@@ -59,6 +79,7 @@ static inline void rocm_trace_emit_hip_api_enter(const char* api_name,
 static inline void rocm_trace_emit_hip_api_exit_status(const char* api_name,
                                                        uint64_t    corr_id,
                                                        int32_t     status) {
+    if (rocm_trace_disabled()) return;
     rocp_reg_auto_pop();
     const uint64_t parent = rocp_reg_active_corr_id_get();
     if (lttng_ust_tracepoint_enabled(rocm_hip, hip_api_exit_status)) {
@@ -71,6 +92,7 @@ static inline void rocm_trace_emit_hip_api_exit_status(const char* api_name,
 static inline void rocm_trace_emit_hip_api_exit_ptr(const char* api_name,
                                                     uint64_t    corr_id,
                                                     const void* retval) {
+    if (rocm_trace_disabled()) return;
     rocp_reg_auto_pop();
     const uint64_t parent = rocp_reg_active_corr_id_get();
     if (lttng_ust_tracepoint_enabled(rocm_hip, hip_api_exit_ptr)) {
@@ -83,6 +105,7 @@ static inline void rocm_trace_emit_hip_api_exit_ptr(const char* api_name,
 /* Void-returning APIs */
 static inline void rocm_trace_emit_hip_api_exit_void(const char* api_name,
                                                      uint64_t    corr_id) {
+    if (rocm_trace_disabled()) return;
     rocp_reg_auto_pop();
     const uint64_t parent = rocp_reg_active_corr_id_get();
     if (lttng_ust_tracepoint_enabled(rocm_hip, hip_api_exit_void)) {
@@ -111,6 +134,7 @@ static inline void rocm_trace_emit_hip_kernel_dispatch_enqueue(
     uint32_t grid_x, uint32_t grid_y, uint32_t grid_z,
     uint32_t block_x, uint32_t block_y, uint32_t block_z,
     uint32_t shared_mem_bytes) {
+    if (rocm_trace_disabled()) return;
     if (lttng_ust_tracepoint_enabled(rocm_hip, hip_kernel_dispatch_enqueue)) {
         const uint64_t self_corr   = rocp_reg_next_corr_id();
         const uint64_t parent_corr = rocp_reg_active_corr_id_get();
@@ -129,15 +153,20 @@ static inline void rocm_trace_emit_hip_kernel_dispatch_enqueue(
  * own corr_id (distinct identity for this submit step). parent_corr_id is
  * the active TLS slot at emit time -- the surrounding HIP API's corr_id
  * (which the wrapper pushed on entry) when called from inside a HIP API
- * call body; otherwise 0. */
+ * call body; otherwise 0.
+ *
+ * Join key for the firmware-ring track is (queue_id, write_idx); see
+ * rocm_hip_tp.h for the rationale. There is no separate software
+ * dispatch counter. */
 static inline void rocm_trace_emit_hip_aql_kernel_dispatch_submit(
-    uint32_t queue_id, uint64_t write_idx, uint64_t dispatch_idx,
+    uint32_t queue_id, uint64_t write_idx,
     uint64_t kernel_object, uint64_t completion_signal) {
+    if (rocm_trace_disabled()) return;
     if (lttng_ust_tracepoint_enabled(rocm_hip, hip_aql_kernel_dispatch_submit)) {
         const uint64_t self_corr   = rocp_reg_next_corr_id();
         const uint64_t parent_corr = rocp_reg_active_corr_id_get();
         lttng_ust_do_tracepoint(rocm_hip, hip_aql_kernel_dispatch_submit,
-                                queue_id, write_idx, dispatch_idx,
+                                queue_id, write_idx,
                                 self_corr, parent_corr, rocm_trace_current_tid(),
                                 kernel_object, completion_signal);
     }
@@ -161,8 +190,8 @@ static inline void rocm_trace_emit_hip_kernel_dispatch_enqueue(
     (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; (void)g; (void)h; (void)i;
 }
 static inline void rocm_trace_emit_hip_aql_kernel_dispatch_submit(
-    uint32_t a, uint64_t b, uint64_t c, uint64_t d, uint64_t e) {
-    (void)a; (void)b; (void)c; (void)d; (void)e;
+    uint32_t a, uint64_t b, uint64_t c, uint64_t d) {
+    (void)a; (void)b; (void)c; (void)d;
 }
 
 #endif
