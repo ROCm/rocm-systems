@@ -108,6 +108,7 @@ Per `args` entry:
 | `int64` / `uint64` | `ctf_integer(int64_t)` / `ctf_integer(uint64_t)` | `int64_t`, `uint64_t`. |
 | `float` | `ctf_float(float)` | `float`. |
 | `enum` | `ctf_integer(int32_t)` | `hipMemcpyKind`, `hipMemoryAdvise`, `hsa_queue_type32_t`, etc. |
+| `bool` | `ctf_integer(uint32_t)` | C `bool` / `_Bool`. Captured value is 0 if the C bool is `false`, 1 if `true` (normative: codegen emits `(uint32_t)(!!(<arg>))` to guarantee canonical 0/1 regardless of the underlying `_Bool` storage representation). The verifier (§8.3) treats C `bool` as compatible with the `bool` DSL type only; using `uint32` for a C `bool` parameter is a hard error. |
 | `dim3` | 3 × `ctf_integer(uint32_t)` | `dim3`. Auto-expands to `<name>_x`, `<name>_y`, `<name>_z`. |
 | `dim3_packed` | 1 × `ctf_integer_hex(uint64_t)` | `dim3`. See dim3_packed encoding below. Used to stay under field-budget for high-arity APIs (see §4.4). |
 
@@ -511,7 +512,7 @@ Adding exception-path IN-param visibility is a separate design: it would require
 ### 8.3 `lttng_curated_verify.py` (separate CI gate)
 - Loads YAML.
 - For each API, looks up declaration in `/opt/rocm/include` via libclang.
-- Verifies arg count + per-arg type match per the type-vocabulary mapping. Mismatch → **hard error**.
+- Verifies arg count + per-arg type match per the type-vocabulary mapping (§4.1). Mismatch → **hard error**. C `bool` / `_Bool` parameters in the header MUST be declared as DSL type `bool` in YAML; using `uint32` (or any other DSL type) for a C bool parameter is a hard error so that the canonical 0/1 conversion in §4.1 is always applied.
 - Verifies every YAML `name` exists as a parameter in the header declaration. Mismatch → **hard error** (this is a correctness invariant: the migrator binds by name).
 - Reports unused header parameters (declared but not in YAML) as informational only — partial coverage of large APIs is by design.
 
@@ -698,4 +699,4 @@ Memory ops:
 - `hsa_amd_memory_pool_allocate` — IN handle pool, IN size size, IN uint32 flags, OUT ptr ptr
 - `hsa_amd_memory_pool_free` — IN ptr ptr
 - `hsa_amd_memory_async_copy` — IN ptr dst, IN handle dst_agent, IN ptr src, IN handle src_agent, IN size size, IN uint32 num_dep_signals, IN ptr dep_signals, IN handle completion_signal *(8 payload fields; fits the 9-payload budget without mitigation)*
-- `hsa_amd_memory_async_copy_on_engine` — same as above plus IN uint32 engine_id, IN uint32 force_copy_on_sdma *(`force_copy_on_sdma` is C `bool` captured as uint32; total 10 payload fields; mitigation per §4.4 drops `dep_signals` to fit 9 payload)*
+- `hsa_amd_memory_async_copy_on_engine` — same as above plus IN uint32 engine_id, IN bool force_copy_on_sdma *(`force_copy_on_sdma` is C `bool`, declared as the `bool` DSL type per §4.1 → `ctf_integer(uint32_t)` payload; total 10 payload fields; mitigation per §4.4 drops `dep_signals` to fit 9 payload)*
