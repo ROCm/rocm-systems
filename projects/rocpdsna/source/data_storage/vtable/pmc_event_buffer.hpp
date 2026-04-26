@@ -1,9 +1,8 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier:  MIT
 //
-// Bypass-the-trampoline POC: per-table buffer for the pmc_event writer.
-// Schema mixes integers with one REAL (value) column and one TEXT (extdata)
-// column.
+// Per-table buffer for the pmc_event writer. Schema mixes integers with one
+// REAL (value) column and one TEXT (extdata) column.
 
 #pragma once
 

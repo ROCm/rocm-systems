@@ -36,7 +36,8 @@ public:
     , m_stmts(std::move(stmts))
     , m_common_ops(std::move(common_ops))
     {
-        // Bypass POC: cache the per-connection buffer pointer.
+        // Cache the per-connection buffer pointer to skip the vtable
+        // trampoline on each insert.
         const auto real_table_name = fmt::format("rocpd_memory_copy_{}", m_ctx->uuid);
         m_buffer = data_storage::vtable::memory_copy_buffer::get_active_instance(
             real_table_name);

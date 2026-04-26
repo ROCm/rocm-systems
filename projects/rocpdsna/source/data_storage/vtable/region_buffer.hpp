@@ -1,7 +1,7 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier:  MIT
 //
-// Bypass-the-trampoline POC: per-table buffer for the region writer.
+// Per-table buffer for the region writer.
 
 #pragma once
 

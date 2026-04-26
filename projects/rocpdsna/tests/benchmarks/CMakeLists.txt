@@ -42,7 +42,7 @@ target_include_directories(
     PRIVATE ${CMAKE_SOURCE_DIR}/source ${CMAKE_SOURCE_DIR}/source/common
 )
 
-# Standalone CLI bench used to compare baseline vs WAL+PRAGMA throughput.
+# Standalone CLI bench for measuring writer throughput per table.
 add_executable(rocpdsna_bench_write bench_write.cpp)
 target_link_libraries(
     rocpdsna_bench_write

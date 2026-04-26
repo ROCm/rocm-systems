@@ -1,9 +1,9 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier:  MIT
 //
-// Bypass-the-trampoline POC: per-table buffer for the memory_alloc writer.
-// Schema mixes optional text columns (type, level, extdata) with integers,
-// so the buffer carries an array of text columns indexed by position.
+// Per-table buffer for the memory_alloc writer. Schema mixes optional text
+// columns (type, level, extdata) with integers, so the buffer carries an
+// array of text columns indexed by position.
 
 #pragma once
 

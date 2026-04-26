@@ -1,9 +1,8 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier:  MIT
 //
-// Bypass-the-trampoline POC: per-table buffer for the memory_copy writer.
-// Same shape as kernel_dispatch_buffer; column count and null-policy are
-// table-specific.
+// Per-table buffer for the memory_copy writer. Same shape as
+// kernel_dispatch_buffer; column count and null-policy are table-specific.
 
 #pragma once
 

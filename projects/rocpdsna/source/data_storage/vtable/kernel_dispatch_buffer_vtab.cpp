@@ -29,7 +29,7 @@ struct kernel_dispatch_vtab : public sqlite3_vtab
 
 struct kernel_dispatch_cursor : public sqlite3_vtab_cursor
 {
-    // POC: cursor always reports EOF, no rows returned.
+    // Cursor always reports EOF; this vtable is write-only buffer storage.
     sqlite3_int64 rowid = 0;
 };
 
@@ -172,7 +172,7 @@ xNext(sqlite3_vtab_cursor* c)
 int
 xEof(sqlite3_vtab_cursor* /*c*/)
 {
-    return 1;  // POC: never returns rows from buffer.
+    return 1;  // Write-only buffer: never returns rows from SELECT.
 }
 
 int
@@ -189,9 +189,9 @@ xRowid(sqlite3_vtab_cursor* c, sqlite3_int64* out)
     return SQLITE_OK;
 }
 
-// Vestigial xUpdate path. Bypass POC: writers no longer trigger this; they
-// call kernel_dispatch_buffer::push directly. Kept for SQL-level INSERTs
-// (tests, ad-hoc queries).
+// xUpdate path is not used by the writer hot path (writers call
+// kernel_dispatch_buffer::push directly). Kept for SQL-level INSERTs from
+// tests and ad-hoc queries.
 int
 xUpdate(sqlite3_vtab* p, int argc, sqlite3_value** argv, sqlite3_int64* out_rowid)
 {

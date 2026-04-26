@@ -676,8 +676,8 @@ private:
     void initialize_kernel_dispatch_statement()
     {
         rocpdsna::queries::insert::table_insert_query query_builder;
-        // Shape 3 POC: route through the kernel_dispatch_buf virtual table which
-        // amortizes per-row commits via in-RAM buffering. Real table is
+        // Route through the kernel_dispatch_buf virtual table which amortizes
+        // per-row commits via in-RAM buffering. Real table is
         // rocpd_kernel_dispatch_<uuid>; vtable forwards to it on flush.
         auto query = query_builder.set_table_name("kernel_dispatch_buf")
                          .set_columns("id",

@@ -1,15 +1,16 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier:  MIT
 //
-// Shape 3 POC: SQLite virtual table that buffers INSERTs for the
-// rocpd_kernel_dispatch table in per-column vectors and flushes them in
-// bulk transactions. Trades durability between flushes for write throughput.
+// SQLite virtual table that buffers INSERTs for the rocpd_kernel_dispatch
+// table in per-column vectors and flushes them in bulk transactions. Trades
+// durability between flushes for write throughput.
 //
-// Limitations (POC, by design):
+// Constraints:
 //   - INSERT only; UPDATE/DELETE return SQLITE_READONLY.
-//   - SELECT against the vtable returns no rows.
-//     Buffered rows are NOT visible until flushed to the real table.
-//   - Schema is hard-coded to the kernel_dispatch column layout (21 int64 + 1 text).
+//   - SELECT against the vtable returns no rows. Buffered rows are NOT
+//     visible until flushed to the real table.
+//   - Schema is hard-coded to the kernel_dispatch column layout
+//     (21 int64 + 1 text).
 
 #pragma once
 

@@ -1,14 +1,14 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier:  MIT
 //
-// Bypass-the-trampoline POC: kernel_dispatch_buffer holds the per-column
-// vectors that previously lived inside the SQLite virtual table xUpdate
-// path. Writers can push rows directly via push() without going through
-// sqlite3_step / xUpdate / sqlite3_value unpacking.
+// kernel_dispatch_buffer holds the per-column vectors used to amortize
+// per-row INSERTs. Writers push rows directly via push() and bypass the
+// SQLite virtual table xUpdate trampoline (sqlite3_step / xUpdate /
+// sqlite3_value unpacking).
 //
 // The vtable wrapper still exists for SELECT compatibility and for the
-// flush trigger reachable via storage_t. Its xUpdate path is now
-// vestigial: the writer no longer drives it.
+// flush trigger reachable via storage_t. Its xUpdate path is unused on
+// the writer hot path.
 
 #pragma once
 
@@ -79,7 +79,8 @@ public:
     // extdata.
     void push(const kernel_dispatch_row& row);
 
-    // Existing vtable trampoline path (kept for completeness, used by xUpdate).
+    // Trampoline path used by the vtable's xUpdate; kept for SELECT-side
+    // compatibility, not exercised by the writer hot path.
     void push_from_values(sqlite3_value** argv);
 
     // Bulk-write the buffered rows to the real table.
@@ -91,10 +92,8 @@ public:
 
     [[nodiscard]] size_t row_count() const noexcept { return m_row_count; }
 
-    // Identity accessor for the writer connection used by flush(). Pre-shared-
-    // connection refactor: returns the buffer's own private sqlite3* (null
-    // until first flush). Post-refactor: returns the connection owned by
-    // sqlite_backend, the same one returned by every other buffer.
+    // Returns the writer connection used by flush(). All buffers share the
+    // single writer connection owned by sqlite_backend.
     [[nodiscard]] sqlite3* writer_connection() const noexcept { return m_writer_conn; }
 
     // Static registry: lets the writer reach the active buffer instance for

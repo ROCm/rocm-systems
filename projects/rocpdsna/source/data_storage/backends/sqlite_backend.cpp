@@ -312,8 +312,8 @@ sqlite_backend::initialize_schema()
         }
     }
 
-    // Shape 3 POC: register the per-table buffer vtable modules and create
-    // virtual tables that front the real rocpd_<table>_<uuid> tables.
+    // Register the per-table buffer vtable modules and create virtual tables
+    // that front the real rocpd_<table>_<uuid> tables.
     vtable::register_kernel_dispatch_buffer_module(m_sqlite3);
     vtable::register_memory_copy_buffer_module(m_sqlite3);
     vtable::register_memory_alloc_buffer_module(m_sqlite3);

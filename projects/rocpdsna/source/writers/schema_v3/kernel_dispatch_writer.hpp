@@ -37,10 +37,9 @@ public:
     , m_stmts(std::move(stmts))
     , m_common_ops(std::move(common_ops))
     {
-        // Bypass POC: acquire the buffer pointer once at construction. Option
-        // (a) - lookup via the static registry keyed by real table name.
-        // Cheapest wiring; the buffer is owned by the vtable instance and
-        // lives as long as the connection.
+        // Cache the buffer pointer at construction via the static registry
+        // keyed by real table name. The buffer is owned by the vtable
+        // instance and lives as long as the connection.
         const auto real_table_name = fmt::format("rocpd_kernel_dispatch_{}", m_ctx->uuid);
         m_buffer = data_storage::vtable::kernel_dispatch_buffer::get_active_instance(
             real_table_name);
@@ -88,8 +87,8 @@ public:
         // before a throw cannot be rolled back.
         m_common_ops->maybe_insert_sample(trace_env, data.start_timestamp, event_pk);
 
-        // Bypass POC: skip the SQLite vtable trampoline entirely. Push columns
-        // straight into the buffer's per-column vectors. Falls back to the
+        // Push columns straight into the buffer's per-column vectors,
+        // skipping the SQLite vtable trampoline. Falls back to the
         // prepared-statement path if the buffer is unavailable.
         if(m_buffer != nullptr)
         {
