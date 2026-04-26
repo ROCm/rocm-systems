@@ -110,12 +110,22 @@ struct queue_ring_state_t
 std::mutex                                       g_ring_mu;
 std::unordered_map<uint64_t, queue_ring_state_t> g_queue_rings;
 std::atomic<bool>                                g_drainer_stop{true};
-// Owned strictly by start_/stop_firmware_dispatch_ring_drainer to make
-// the start/stop sequence idempotent: start returns early when already
-// running; stop returns early when not running. CAS on this flag
-// gates ownership of g_drainer_thread (and of the g_drainer_stop
-// transition).
+// Lifecycle invariant for g_drainer_thread: g_drainer_running goes
+// true *before* the thread is spawned in start_*() and is cleared
+// only *after* join() completes in stop_*(). A concurrent start_*()
+// observing running==true bails out, guaranteeing the assignment
+// `g_drainer_thread = std::thread{...}` never runs while the
+// existing thread object is still joinable (which would invoke
+// std::terminate). CAS on g_drainer_running gates spawn ownership.
+//
+// Stop ownership is selected by a separate CAS on g_drainer_stopping
+// so that two concurrent stop_*() calls cannot both proceed to
+// join() (joining an already-joined thread is undefined behavior).
+// Without this second flag, keeping g_drainer_running==true through
+// the entire stop sequence would leave nothing to arbitrate between
+// concurrent stoppers.
 std::atomic<bool>                      g_drainer_running{false};
+std::atomic<bool>                      g_drainer_stopping{false};
 std::thread                            g_drainer_thread;
 std::atomic<rocprofiler_dispatch_id_t> g_next_dispatch_id{1};
 
@@ -612,11 +622,22 @@ unregister_queue(hsa_queue_t* queue)
 void
 stop_firmware_dispatch_ring_drainer()
 {
-    // Idempotency guard: only the thread that wins the CAS owns the
-    // shutdown sequence. A second stop_* call (or one without a
-    // matching start_*) returns immediately.
-    bool expected = true;
-    if(!g_drainer_running.compare_exchange_strong(expected, false)) return;
+    // Stop-side idempotency: a single stopper wins the CAS on
+    // g_drainer_stopping; concurrent or repeat callers return
+    // immediately, avoiding a double join() (UB) and a double
+    // sleep/clear.
+    bool expected_stopping = false;
+    if(!g_drainer_stopping.compare_exchange_strong(expected_stopping, true)) return;
+
+    // Nothing to stop if we never started. Note: we must check this
+    // *after* claiming the stopping CAS, otherwise a start_*() that
+    // races us could flip running true between the load and the CAS
+    // and we'd silently leak a join.
+    if(!g_drainer_running.load(std::memory_order_acquire))
+    {
+        g_drainer_stopping.store(false, std::memory_order_release);
+        return;
+    }
 
     // TODO(ai/KNOWN_ISSUES.md item 3): the 10ms grace sleep gives the
     // drainer a few extra cycles to pick up records emitted by recent
@@ -626,6 +647,15 @@ stop_firmware_dispatch_ring_drainer()
 
     g_drainer_stop.store(true, std::memory_order_release);
     if(g_drainer_thread.joinable()) g_drainer_thread.join();
+
+    // Only now is it safe to advertise "not running": the thread has
+    // been joined, so g_drainer_thread is no longer joinable and a
+    // subsequent start_*() can safely assign a new std::thread into
+    // it. Order matters: clear running before stopping, so that any
+    // start_*() that observes stopping==false on its next attempt
+    // also sees running==false and proceeds to spawn.
+    g_drainer_running.store(false, std::memory_order_release);
+    g_drainer_stopping.store(false, std::memory_order_release);
 
     std::lock_guard<std::mutex> lk(g_ring_mu);
     g_queue_rings.clear();
