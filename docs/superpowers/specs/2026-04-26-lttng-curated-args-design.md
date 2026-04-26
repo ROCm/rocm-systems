@@ -26,15 +26,24 @@ Add per-API typed parameter-capture LTTng tracepoints for ~82 curated HIP and HS
 ### 3.1 Per-call event flow (curated API)
 
 ```
+Normal (non-throw) path:
 1. wrapper enters
    -> tracepoint: rocm_hip:hip_api_enter        (corr_id, parent_corr_id)  [generic, unchanged]
 2. function body runs (IN-params held in C locals across the body)
 3. just before return:
    -> tracepoint: rocm_hip:<api>_args           (corr_id, IN-params..., OUT-params...) [NEW typed]
    -> tracepoint: rocm_hip:hip_api_exit_status  (corr_id, status)           [generic, unchanged]
+
+Exception (throw) path:
+1. wrapper enters
+   -> tracepoint: rocm_hip:hip_api_enter        (corr_id, parent_corr_id)  [generic, unchanged]
+2. function body throws; CATCH/CATCHRET runs (see §3.3)
+   -> NO <api>_args event
+   -> NO hip_api_exit_status event
+   (consumer sees an unmatched hip_api_enter, interpreted as "exception thrown")
 ```
 
-Three events per curated call (vs. 2 today). Consumers that don't subscribe to `<api>_args` pay the standard `lttng_ust_tracepoint_enabled()` short-circuit cost (one atomic load + unlikely branch).
+Three events per curated call on the normal path (vs. 2 today). Consumers that don't subscribe to `<api>_args` pay the standard `lttng_ust_tracepoint_enabled()` short-circuit cost (one atomic load + unlikely branch).
 
 ### 3.2 Source-of-truth and toolchain
 
@@ -58,7 +67,14 @@ Generated files are **checked in**. The build does not invoke the codegen by def
 
 ### 3.3 Exception path
 
-If the wrapper body throws, `<api>_args` is **not** emitted. The existing `CATCH` macro continues to fire `hip_api_exit_status` with the error code. Rationale: OUT params haven't been written; the dominant exception is allocation failure where IN-params alone don't add much beyond `api_name` from `hip_api_enter`.
+If the wrapper body throws, neither `<api>_args` nor `hip_api_exit_status` is emitted. This matches the existing behavior of the `CATCH` / `CATCHRET` macros in `hip_table_interface.cpp:55-76`, which only call `rocp_reg_auto_pop()` and return `hip::HandleException<...>()` — they intentionally do **not** emit an exit tracepoint. Consumers therefore observe `hip_api_enter` with no matching exit event on exception paths and must interpret an unmatched enter as "exception thrown" (this is documented today as an accepted limitation; see comment block at `hip_table_interface.cpp:73-76`).
+
+Rationale for not emitting on exception:
+- OUT params have not been written; capturing them would yield garbage.
+- The existing wrapper macros do not emit exit on this path, and changing that behavior is **out of scope** for this spec (it would require touching all 500+ wrappers and is a separate concern from curated parameter capture).
+- The dominant exception is allocation failure, where IN-params alone add little beyond `api_name` from `hip_api_enter`.
+
+This applies symmetrically to the HSA `CATCHRET_HSA` equivalent.
 
 ## 4. DSL — `curated_apis.yaml`
 
@@ -318,7 +334,7 @@ As `int32_t`. Symbolic-name resolution is consumer-side.
 NULL-safe wrapper before `lttng_ust_field_string`: `kname ? kname : ""`. Strict `tracepoint_enabled()` guard because string copy is non-trivial.
 
 ### 7.6 Exception path
-CATCH does NOT emit `<api>_args`. Documented in schema header. If consumers need IN-params on the failure path, they reconstruct from a nearby successful args event.
+On the throw path, the existing `CATCH` / `CATCHRET` macros emit neither `<api>_args` nor `hip_api_exit_status` (see §3.3). Consumers see `hip_api_enter` without a matching exit, which is the documented existing behavior. If consumers need IN-params on the failure path, they reconstruct from a nearby successful args event for the same `api_name` on the same TID. Documented in schema header.
 
 ## 8. Tests
 
