@@ -3154,21 +3154,25 @@ DUMP="$WORK/trace.txt"
 babeltrace2 "$TRACE_DIR" > "$DUMP"
 
 # Assert each API's _args event appears at least once.
+# IMPORTANT: do NOT pipe into `while read` — the loop body would run in a
+# subshell and any MISSING counter increments would be lost in the parent.
+# Use process substitution `< <(...)` so the loop body shares the parent
+# shell's MISSING variable.
 MISSING=0
-python3 -c "
-import sys
-sys.path.insert(0, 'projects/clr/hipamd/scripts')
-from lttng_curated_lib import parse_yaml_file
-for a in parse_yaml_file('$YAML'):
-    print(a['api'])
-" | while read api; do
+while read api; do
     if grep -q "rocm_hip:${api}_args" "$DUMP"; then
         echo "  PASS  ${api}_args fired"
     else
         echo "  FAIL  ${api}_args NOT in trace"
         MISSING=$((MISSING+1))
     fi
-done
+done < <(python3 -c "
+import sys
+sys.path.insert(0, 'projects/clr/hipamd/scripts')
+from lttng_curated_lib import parse_yaml_file
+for a in parse_yaml_file('$YAML'):
+    print(a['api'])
+")
 
 if [ "$MISSING" -gt 0 ]; then
     echo "FAIL: $MISSING curated _args events missing"
