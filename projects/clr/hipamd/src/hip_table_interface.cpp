@@ -52,8 +52,13 @@ template <> hipError_t HandleException<hipError_t>() {
 }  // namespace hip
 
 #define TRY try {
-#define CATCH } catch(...) { return hip::HandleException<hipError_t>(); }
-#define CATCHRET(RETURN_TYPE) } catch(...) { return hip::HandleException<RETURN_TYPE>(); }
+/* CATCH/CATCHRET: must call rocp_reg_auto_pop() before returning so that the
+ * shared TLS corr_id slot pushed by emit_hip_api_enter is restored even on
+ * the exception path. Otherwise the slot would stay pushed for the rest of
+ * the thread's lifetime, leaking the exception-throwing API's corr_id into
+ * every subsequent HSA tracepoint as parent_corr_id. */
+#define CATCH } catch(...) { rocp_reg_auto_pop(); return hip::HandleException<hipError_t>(); }
+#define CATCHRET(RETURN_TYPE) } catch(...) { rocp_reg_auto_pop(); return hip::HandleException<RETURN_TYPE>(); }
 
 /* Typed exit macros used by the AST-migrated wrappers (see
  * scripts/lttng_migrate.py). The wrapper body declares the corr id and

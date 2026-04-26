@@ -66,11 +66,21 @@ static inline uint8_t rocm_trace_sniff_packet_type(
 
 #include "rocm_hsa_tp.h"
 
+/* HSA emit_enter: capture parent_corr_id (= the active slot value BEFORE
+ * the push) and emit with it as the new field. The push then makes the
+ * HSA call's own corr_id the active slot value, so any nested HSA / non-HSA
+ * tracepoints see this HSA call as their parent.
+ *
+ * The push always runs regardless of tracepoint enable state so that nested
+ * tracepoints (which may be enabled even when this one is not) see correct
+ * parent values. The matching pop happens in the exit emit helpers. */
 static inline void rocm_trace_emit_hsa_api_enter(const char* api_name,
                                                  uint64_t    corr_id) {
+    const uint64_t parent = rocp_reg_auto_push(corr_id);
     if (lttng_ust_tracepoint_enabled(rocm_hsa, hsa_api_enter)) {
         lttng_ust_do_tracepoint(rocm_hsa, hsa_api_enter,
-                                api_name, corr_id, rocm_trace_current_tid());
+                                api_name, corr_id, rocm_trace_current_tid(),
+                                parent);
     }
 }
 
@@ -78,9 +88,14 @@ static inline void rocm_trace_emit_hsa_api_enter(const char* api_name,
 static inline void rocm_trace_emit_hsa_api_exit_status(const char* api_name,
                                                        uint64_t    corr_id,
                                                        int32_t     status) {
+    /* Pop first, then read active. The post-pop active value equals the
+     * pre-push parent, so the exit event's parent_corr_id matches the
+     * matching enter event's parent_corr_id. */
+    rocp_reg_auto_pop();
+    const uint64_t parent = rocp_reg_active_corr_id_get();
     if (lttng_ust_tracepoint_enabled(rocm_hsa, hsa_api_exit_status)) {
         lttng_ust_do_tracepoint(rocm_hsa, hsa_api_exit_status,
-                                api_name, corr_id, status);
+                                api_name, corr_id, status, parent);
     }
 }
 
@@ -88,28 +103,38 @@ static inline void rocm_trace_emit_hsa_api_exit_status(const char* api_name,
 static inline void rocm_trace_emit_hsa_api_exit_ptr(const char* api_name,
                                                     uint64_t    corr_id,
                                                     const void* retval) {
+    rocp_reg_auto_pop();
+    const uint64_t parent = rocp_reg_active_corr_id_get();
     if (lttng_ust_tracepoint_enabled(rocm_hsa, hsa_api_exit_ptr)) {
         lttng_ust_do_tracepoint(rocm_hsa, hsa_api_exit_ptr,
-                                api_name, corr_id, (uint64_t)retval);
+                                api_name, corr_id, (uint64_t)retval, parent);
     }
 }
 
 /* Void-returning APIs */
 static inline void rocm_trace_emit_hsa_api_exit_void(const char* api_name,
                                                      uint64_t    corr_id) {
+    rocp_reg_auto_pop();
+    const uint64_t parent = rocp_reg_active_corr_id_get();
     if (lttng_ust_tracepoint_enabled(rocm_hsa, hsa_api_exit_void)) {
-        lttng_ust_do_tracepoint(rocm_hsa, hsa_api_exit_void, api_name, corr_id);
+        lttng_ust_do_tracepoint(rocm_hsa, hsa_api_exit_void,
+                                api_name, corr_id, parent);
     }
 }
 
+/* Doorbell ring: parent_corr_id is just whatever's active on the calling
+ * thread at emit time. When called from within an HSA wrapper this will
+ * equal the wrapper's own corr_id (which was pushed by emit_hsa_api_enter);
+ * outside any wrapper context it's the slot's last-written value (or 0). */
 static inline void rocm_trace_emit_hsa_doorbell_ring(uint32_t queue_id,
                                                      int64_t  write_idx,
                                                      uint8_t  packet_type,
                                                      uint64_t corr_id) {
     if (lttng_ust_tracepoint_enabled(rocm_hsa, hsa_doorbell_ring)) {
+        const uint64_t parent = rocp_reg_active_corr_id_get();
         lttng_ust_do_tracepoint(rocm_hsa, hsa_doorbell_ring,
                                 queue_id, write_idx, packet_type,
-                                corr_id, rocm_trace_current_tid());
+                                corr_id, rocm_trace_current_tid(), parent);
     }
 }
 
@@ -118,8 +143,10 @@ static inline void rocm_trace_emit_hsa_intercept_packets(uint32_t queue_id,
                                                          uint32_t pkt_count,
                                                          uint8_t  packet_type) {
     if (lttng_ust_tracepoint_enabled(rocm_hsa, hsa_intercept_packets)) {
+        const uint64_t parent = rocp_reg_active_corr_id_get();
         lttng_ust_do_tracepoint(rocm_hsa, hsa_intercept_packets,
-                                queue_id, pkt_index, pkt_count, packet_type);
+                                queue_id, pkt_index, pkt_count, packet_type,
+                                parent);
     }
 }
 

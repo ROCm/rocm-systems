@@ -1,65 +1,38 @@
 /* Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
  * SPDX-License-Identifier: MIT
  *
- * Portable tid lookup + 64-bit correlation-id minting for the LTTng-UST
- * tracepoint emission path. Header-only (every translation unit gets its
- * own static inline copies).
+ * Thin wrappers over librocprofiler-register's correlation API. The TLS
+ * slot used to be `static __thread` (TU-local) here, which prevented
+ * cross-runtime same-thread propagation. The slot has been hoisted to
+ * librocprofiler-register/correlation.h so HIP and HSA share it via the
+ * dynamic linker.
+ *
+ * Existing call sites that use `rocm_trace_*` names compile unchanged.
  */
 #ifndef ROCM_TRACE_TID_H_
 #define ROCM_TRACE_TID_H_
 
 #include <stdint.h>
+#include <rocprofiler-register/correlation.h>
 
-#if defined(__linux__)
-  #include <sys/syscall.h>     /* SYS_gettid - the portable, arch-correct macro */
-  #include <unistd.h>          /* syscall() prototype */
-  /* glibc 2.30+ exposes gettid() directly. Older bases (Ubuntu 18.04,
-   * RHEL 8) lack it; fall through to the SYS_gettid syscall path. */
-  #if defined(__GLIBC__) && (__GLIBC__ > 2 || (__GLIBC__ == 2 && __GLIBC_MINOR__ >= 30))
-    static inline uint32_t rocm_trace_current_tid(void) {
-        return (uint32_t)gettid();   /* glibc inlines or caches in TLS */
-    }
-  #else
-    static inline uint32_t rocm_trace_current_tid(void) {
-        /* SYS_gettid is defined in <sys/syscall.h> per-arch:
-         *   x86_64 -> 186, aarch64 -> 178, riscv64 -> 178, etc.
-         * glibc caches the result per-thread starting in 2.18 if the
-         * syscall was used at thread-init; expect 5-15 ns/call overall. */
-        return (uint32_t)syscall(SYS_gettid);
-    }
-  #endif
-#else
-  static inline uint32_t rocm_trace_current_tid(void) { return 0; }
-#endif
+static inline uint32_t rocm_trace_current_tid(void) {
+    return rocp_reg_current_tid_();
+}
 
-/* Compose a process-globally-unique 64-bit correlation id:
- *   high 32 bits = tid (truncated to 32 bits)
- *   low  32 bits = per-thread monotonic counter
- * Two threads cannot collide because their tids differ. A single thread
- * cannot collide with itself within 2^32 events (~4 billion API calls).
- * Cost: 1 TLS load + 1 increment + 1 (cached) tid read. */
 static inline uint64_t rocm_trace_next_corr_id(void) {
-    static __thread uint32_t counter = 0;
-    static __thread uint32_t cached_tid = 0;
-    if (cached_tid == 0) cached_tid = rocm_trace_current_tid();
-    return ((uint64_t)cached_tid << 32) | (uint64_t)(++counter);
+    return rocp_reg_next_corr_id();
 }
 
-/* Push a corr id into the TLS slot read by downstream tracepoints
- * (e.g., HSA's StoreRelaxed when called on the same thread that ran
- * the HIP API). Returns the previous value so the caller can restore
- * it on exit, supporting nested tracepoints. */
-static __thread uint64_t g_rocm_active_corr_id;
 static inline uint64_t rocm_trace_push_corr_id(uint64_t v) {
-    uint64_t prev = g_rocm_active_corr_id;
-    g_rocm_active_corr_id = v;
-    return prev;
+    return rocp_reg_push_corr_id(v);
 }
+
 static inline void rocm_trace_pop_corr_id(uint64_t prev) {
-    g_rocm_active_corr_id = prev;
+    rocp_reg_pop_corr_id(prev);
 }
+
 static inline uint64_t rocm_trace_active_corr_id(void) {
-    return g_rocm_active_corr_id;
+    return rocp_reg_active_corr_id_get();
 }
 
 #endif /* ROCM_TRACE_TID_H_ */

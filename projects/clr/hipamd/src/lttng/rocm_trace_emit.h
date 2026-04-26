@@ -13,6 +13,13 @@
  * The two backends (LTTng-UST today, user_events future) are encapsulated
  * by the contents of these inline functions. To swap a future backend in,
  * the only change is the function bodies - the call sites stay identical.
+ *
+ * Cross-runtime same-thread correlation:
+ *   emit_hip_api_enter pushes the entering API's corr_id onto the shared
+ *   librocprofiler-register TLS slot and emit_hip_api_exit_* pops it. This
+ *   is the slot HSA's emit helpers read at emit time to populate
+ *   `parent_corr_id` on HSA tracepoints fired during a HIP API call on the
+ *   same thread.
  */
 #ifndef ROCM_HIP_TRACE_EMIT_H_
 #define ROCM_HIP_TRACE_EMIT_H_
@@ -26,6 +33,13 @@
 
 static inline void rocm_trace_emit_hip_api_enter(const char* api_name,
                                                  uint64_t    corr_id) {
+    /* Push the entering API's corr_id onto the shared TLS slot so any HSA
+     * tracepoints fired further down the stack on this thread can read it
+     * as their parent_corr_id. The matching pop happens in the exit emit
+     * helpers. Push always runs even if the tracepoint is disabled, so that
+     * the HSA-side propagation works regardless of whether the HIP enter
+     * event itself is captured. */
+    (void)rocp_reg_auto_push(corr_id);
     if (lttng_ust_tracepoint_enabled(rocm_hip, hip_api_enter)) {
         lttng_ust_do_tracepoint(rocm_hip, hip_api_enter,
                                 api_name, corr_id, rocm_trace_current_tid());
@@ -40,6 +54,7 @@ static inline void rocm_trace_emit_hip_api_exit_status(const char* api_name,
         lttng_ust_do_tracepoint(rocm_hip, hip_api_exit_status,
                                 api_name, corr_id, status);
     }
+    rocp_reg_auto_pop();
 }
 
 /* Pointer-returning APIs (hipApiName, __hipRegisterFatBinary, etc.) */
@@ -50,6 +65,7 @@ static inline void rocm_trace_emit_hip_api_exit_ptr(const char* api_name,
         lttng_ust_do_tracepoint(rocm_hip, hip_api_exit_ptr,
                                 api_name, corr_id, (uint64_t)(uintptr_t)retval);
     }
+    rocp_reg_auto_pop();
 }
 
 /* Void-returning APIs */
@@ -58,6 +74,7 @@ static inline void rocm_trace_emit_hip_api_exit_void(const char* api_name,
     if (lttng_ust_tracepoint_enabled(rocm_hip, hip_api_exit_void)) {
         lttng_ust_do_tracepoint(rocm_hip, hip_api_exit_void, api_name, corr_id);
     }
+    rocp_reg_auto_pop();
 }
 
 /* Pack three 16-bit dims into a 64-bit field. Bits [15:0]=x, [31:16]=y,
@@ -85,14 +102,18 @@ static inline void rocm_trace_emit_hip_kernel_dispatch_enqueue(
 }
 
 /* hip_aql_kernel_dispatch_submit: emit at the HIP CLR per-packet write site,
- * once per AQL kernel-dispatch packet written to a queue ring. */
+ * once per AQL kernel-dispatch packet written to a queue ring. The
+ * parent_corr_id is the active TLS slot at emit time -- typically the
+ * surrounding HIP API's corr_id (since the wrapper pushed it on entry) when
+ * the dispatch is submitted from inside a HIP API call body. */
 static inline void rocm_trace_emit_hip_aql_kernel_dispatch_submit(
     uint32_t queue_id, uint64_t write_idx, uint64_t dispatch_idx,
     uint64_t corr_id, uint64_t kernel_object, uint64_t completion_signal) {
     if (lttng_ust_tracepoint_enabled(rocm_hip, hip_aql_kernel_dispatch_submit)) {
+        const uint64_t parent = rocp_reg_active_corr_id_get();
         lttng_ust_do_tracepoint(rocm_hip, hip_aql_kernel_dispatch_submit,
                                 queue_id, write_idx, dispatch_idx,
-                                corr_id, rocm_trace_current_tid(),
+                                corr_id, parent, rocm_trace_current_tid(),
                                 kernel_object, completion_signal);
     }
 }

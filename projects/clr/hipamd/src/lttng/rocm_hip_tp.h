@@ -102,7 +102,11 @@ LTTNG_UST_TRACEPOINT_EVENT(
  * (rocvirtual.cpp:dispatchGenericAqlPacket and dispatchAqlPacketBatchFlat),
  * once per AQL kernel-dispatch packet written into a queue ring. Captures
  * HIP's intent BEFORE any HSA intercept-queue rewrite, with corr_id from
- * TLS naturally available. This is the join key for the firmware-ring track. */
+ * TLS naturally available. This is the join key for the firmware-ring track.
+ *
+ * parent_corr_id (uint64) carries the active TLS slot value at emit time;
+ * for dispatches submitted from inside a HIP API call body this is the
+ * surrounding HIP API's corr_id. */
 LTTNG_UST_TRACEPOINT_EVENT(
     rocm_hip,
     hip_aql_kernel_dispatch_submit,
@@ -111,6 +115,7 @@ LTTNG_UST_TRACEPOINT_EVENT(
         uint64_t,    write_idx,
         uint64_t,    dispatch_idx,
         uint64_t,    corr_id,
+        uint64_t,    parent_corr_id,
         uint32_t,    tid,
         uint64_t,    kernel_object,
         uint64_t,    completion_signal
@@ -120,6 +125,7 @@ LTTNG_UST_TRACEPOINT_EVENT(
         lttng_ust_field_integer(uint64_t, write_idx, write_idx)
         lttng_ust_field_integer(uint64_t, dispatch_idx, dispatch_idx)
         lttng_ust_field_integer(uint64_t, corr_id, corr_id)
+        lttng_ust_field_integer(uint64_t, parent_corr_id, parent_corr_id)
         lttng_ust_field_integer(uint32_t, tid, tid)
         lttng_ust_field_integer_hex(uint64_t, kernel_object, kernel_object)
         lttng_ust_field_integer_hex(uint64_t, completion_signal, completion_signal)

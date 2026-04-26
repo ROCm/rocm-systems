@@ -23,7 +23,8 @@ template <> hipError_t HandleException<hipError_t>();
 #endif  // !_WIN32
 
 #define TRY try {
-#define CATCH } catch(...) { return hip::HandleException<hipError_t>(); }
+/* See hip_table_interface.cpp for why CATCH must call rocp_reg_auto_pop(). */
+#define CATCH } catch(...) { rocp_reg_auto_pop(); return hip::HandleException<hipError_t>(); }
 
 /* See hip_table_interface.cpp for full doc on these macros. Both wrappers
  * here are STATUS (hipError_t), so only that variant is needed. */
