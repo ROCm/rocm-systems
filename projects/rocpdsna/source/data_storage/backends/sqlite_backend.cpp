@@ -16,8 +16,6 @@
 #include "debug.hpp"
 #include "directory.hpp"
 
-#include "spdlog/fmt/bundled/core.h"
-
 #include <cctype>
 #include <filesystem>
 #include <stdexcept>
@@ -377,11 +375,13 @@ sqlite_backend::initialize_schema()
     auto create_buf_vtab = [&](const char*        vtab_name,
                                const char*        module_name,
                                const std::string& real_table) {
-        const auto sql =
-            fmt::format("CREATE VIRTUAL TABLE IF NOT EXISTS {} USING {}('{}')",
-                        vtab_name,
-                        module_name,
-                        real_table);
+        std::string sql = "CREATE VIRTUAL TABLE IF NOT EXISTS ";
+        sql += vtab_name;
+        sql += " USING ";
+        sql += module_name;
+        sql += "('";
+        sql += real_table;
+        sql += "')";
         char* err = nullptr;
         int   rc  = sqlite3_exec(m_sqlite3, sql.c_str(), nullptr, nullptr, &err);
         if(rc != SQLITE_OK)
@@ -395,17 +395,13 @@ sqlite_backend::initialize_schema()
 
     create_buf_vtab("kernel_dispatch_buf",
                     "kernel_dispatch_buffer",
-                    fmt::format("rocpd_kernel_dispatch_{}", m_uuid));
-    create_buf_vtab("memory_copy_buf",
-                    "memory_copy_buffer",
-                    fmt::format("rocpd_memory_copy_{}", m_uuid));
-    create_buf_vtab("memory_alloc_buf",
-                    "memory_alloc_buffer",
-                    fmt::format("rocpd_memory_allocate_{}", m_uuid));
+                    "rocpd_kernel_dispatch_" + m_uuid);
     create_buf_vtab(
-        "region_buf", "region_buffer", fmt::format("rocpd_region_{}", m_uuid));
+        "memory_copy_buf", "memory_copy_buffer", "rocpd_memory_copy_" + m_uuid);
     create_buf_vtab(
-        "pmc_event_buf", "pmc_event_buffer", fmt::format("rocpd_pmc_event_{}", m_uuid));
+        "memory_alloc_buf", "memory_alloc_buffer", "rocpd_memory_allocate_" + m_uuid);
+    create_buf_vtab("region_buf", "region_buffer", "rocpd_region_" + m_uuid);
+    create_buf_vtab("pmc_event_buf", "pmc_event_buffer", "rocpd_pmc_event_" + m_uuid);
 }
 
 void
@@ -430,15 +426,14 @@ sqlite_backend::flush()
         }
     };
     drain_buffer(vtable::kernel_dispatch_buffer::get_active_instance(
-        fmt::format("rocpd_kernel_dispatch_{}", m_uuid)));
-    drain_buffer(vtable::memory_copy_buffer::get_active_instance(
-        fmt::format("rocpd_memory_copy_{}", m_uuid)));
+        "rocpd_kernel_dispatch_" + m_uuid));
+    drain_buffer(
+        vtable::memory_copy_buffer::get_active_instance("rocpd_memory_copy_" + m_uuid));
     drain_buffer(vtable::memory_alloc_buffer::get_active_instance(
-        fmt::format("rocpd_memory_allocate_{}", m_uuid)));
-    drain_buffer(vtable::region_buffer::get_active_instance(
-        fmt::format("rocpd_region_{}", m_uuid)));
-    drain_buffer(vtable::pmc_event_buffer::get_active_instance(
-        fmt::format("rocpd_pmc_event_{}", m_uuid)));
+        "rocpd_memory_allocate_" + m_uuid));
+    drain_buffer(vtable::region_buffer::get_active_instance("rocpd_region_" + m_uuid));
+    drain_buffer(
+        vtable::pmc_event_buffer::get_active_instance("rocpd_pmc_event_" + m_uuid));
 
     if(m_mode == storage_mode_t::on_disk)
     {
