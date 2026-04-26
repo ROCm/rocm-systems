@@ -490,7 +490,11 @@ As `int32_t`. Symbolic-name resolution is consumer-side.
 NULL-safe wrapper before `lttng_ust_field_string`: `kname ? kname : ""`. Strict `tracepoint_enabled()` guard because string copy is non-trivial.
 
 ### 7.6 Exception path
-On the throw path, the existing `CATCH` / `CATCHRET` macros emit neither `<api>_args` nor `hip_api_exit_status` (see §3.3). Consumers see `hip_api_enter` without a matching exit, which is the documented existing behavior. If consumers need IN-params on the failure path, they reconstruct from a nearby successful args event for the same `api_name` on the same TID. Documented in schema header.
+On the throw path, the existing `CATCH` / `CATCHRET` macros emit neither `<api>_args` nor `hip_api_exit_status` (see §3.3). Consumers see `hip_api_enter` without a matching exit, which is the documented existing behavior.
+
+**Per-call IN-params on the exception path are unavailable.** Because args are emitted just before return (§3.1) and the throw bypasses that emit point, no `<api>_args` event exists for the failed call, and no other event in the stream carries that call's parameters. Consumers MUST treat an unmatched `hip_api_enter` as "exception thrown; per-call parameters unknown" — reconstruction from a nearby successful args event on the same TID is **not valid**, since correlation IDs do not match, "nearby" has no defined bound, and adjacent calls to the same API can carry different arguments. Documented in schema header.
+
+Adding exception-path IN-param visibility is a separate design: it would require either (a) emitting the args event at wrapper entry instead of just before return (changes ordering semantics for all consumers and doubles the event count for normal-path calls), or (b) modifying the `CATCH` / `CATCHRET` macros to emit on the exception path (explicitly out-of-scope per §3.3). Either option is a follow-up spec, not a v1 change.
 
 ## 8. Tests
 
