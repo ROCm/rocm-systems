@@ -1,3 +1,10 @@
+/*************************************************************************
+ * SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * See LICENSE.txt for more license information
+ *************************************************************************/
+
 #include <sys/types.h>
 #include <unistd.h>
 
@@ -50,7 +57,7 @@ ncclResult_t buildIbvSymbols(struct ncclIbvSymbols* ibvSymbols) {
   ASSIGN_SYM(ibvSymbols, ibv_destroy_qp, ibv_internal_destroy_qp);
   ASSIGN_SYM(ibvSymbols, ibv_fork_init, ibv_internal_fork_init);
   ASSIGN_SYM(ibvSymbols, ibv_event_type_str, ibv_internal_event_type_str);
-  
+
   ASSIGN_SYM(ibvSymbols, ibv_query_ece, ibv_internal_query_ece);
   ASSIGN_SYM(ibvSymbols, ibv_set_ece, ibv_internal_set_ece);
 
@@ -68,20 +75,23 @@ ncclResult_t buildIbvSymbols(struct ncclIbvSymbols* ibvSymbols) {
 
 // IBVERBS Library versioning
 #define IBVERBS_VERSION "IBVERBS_1.1"
+#define NCCL_IBVERBS_LIBS 3
 
 ncclResult_t buildIbvSymbols(struct ncclIbvSymbols* ibvSymbols) {
   static void* ibvhandle = NULL;
   void* tmp;
   void** cast;
+  const char* envIbVerbsLib = ncclGetEnv("NCCL_IBVERBS_LIB");
+  const char* ibVerbsLib[NCCL_IBVERBS_LIBS] = { envIbVerbsLib, "libibverbs.so", "libibverbs.so.1" };
+  if (envIbVerbsLib) INFO(NCCL_ENV|NCCL_INIT, "NCCL_IBVERBS_LIB set by environment to %s", envIbVerbsLib);
 
-  ibvhandle=dlopen("libibverbs.so", RTLD_NOW);
-  if (!ibvhandle) {
-    ibvhandle=dlopen("libibverbs.so.1", RTLD_NOW);
-    if (!ibvhandle) {
-      INFO(NCCL_INIT, "Failed to open libibverbs.so[.1]");
-      goto teardown;
-    }
+  for (int i = 0; i < NCCL_IBVERBS_LIBS; i++) {
+    if (ibVerbsLib[i] == nullptr) continue;
+    ibvhandle = dlopen(ibVerbsLib[i], RTLD_NOW);
+    if (ibvhandle) break;
+    INFO(NCCL_INIT, "Count not open %s", ibVerbsLib[i]);
   }
+  if (ibvhandle == nullptr) goto teardown;
 
 #define LOAD_SYM(handle, symbol, funcptr) do {           \
     cast = (void**)&funcptr;                             \
