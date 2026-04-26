@@ -322,7 +322,6 @@ process_doorbell_tracing_only(const queue_state_ptr_t& state, hsa_signal_value_t
 
     const auto tid =
         corr_id->thread_idx ? corr_id->thread_idx : common::get_tid();
-    const auto enqueue_ts = common::timestamp_ns();
 
     // Snapshot tracing contexts active at enqueue time. Filtered by
     // the COMPLETE operation so the captured set matches what the
@@ -398,7 +397,6 @@ process_doorbell_tracing_only(const queue_state_ptr_t& state, hsa_signal_value_t
 
         entry.corr_id           = corr_id;
         entry.tid               = tid;
-        entry.enqueue_ts        = enqueue_ts;
         entry.external_corr_ids = td.external_correlation_ids;
         entry.seq               = s_seq.fetch_add(1, std::memory_order_relaxed);
         entry.captured_wdid     = d;  // §3.5 Invariant 1

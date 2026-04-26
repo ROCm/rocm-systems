@@ -60,7 +60,6 @@ struct CorrEntry
 {
     context::correlation_id*               corr_id    = nullptr;
     rocprofiler_thread_id_t                tid        = 0;
-    uint64_t                               enqueue_ts = 0;
     tracing::external_correlation_id_map_t external_corr_ids;
     uint64_t                               seq        = 0;
     // Full 64-bit dispatch index (NOT modulo'd). Drainer compares

@@ -164,7 +164,6 @@ emit_kernel_dispatch_tracing(hsa_agent_t                            hag,
                              context::correlation_id*               cid,
                              rocprofiler_thread_id_t                thr_id,
                              tracing::external_correlation_id_map_t ext_ids,
-                             uint64_t /*enqueue_ts*/,
                              uint16_t                               wg_x,
                              uint16_t                               wg_y,
                              uint16_t                               wg_z,
@@ -286,7 +285,6 @@ process_dispatch_record(queue_ring_state_t* st,
 
     context::correlation_id*               cid             = nullptr;
     rocprofiler_thread_id_t                thr_id          = 0;
-    uint64_t                               enq_ts          = 0;
     tracing::external_correlation_id_map_t ext_ids;
     // Block 2 (H6, M2): captured AQL packet data. Read out of the
     // CorrEntry slot under slot_publish_mu so the drainer never reads
@@ -313,7 +311,6 @@ process_dispatch_record(queue_ring_state_t* st,
         {
             cid             = slot.corr_id;
             thr_id          = slot.tid;
-            enq_ts          = slot.enqueue_ts;
             ext_ids         = std::move(slot.external_corr_ids);
             kernel_obj_capt = slot.kernel_object;
             wg_x            = slot.workgroup_size_x;
@@ -366,7 +363,6 @@ process_dispatch_record(queue_ring_state_t* st,
                                  cid,
                                  thr_id,
                                  std::move(ext_ids),
-                                 enq_ts,
                                  wg_x, wg_y, wg_z,
                                  grid_x, grid_y, grid_z,
                                  priv_seg, group_seg,
