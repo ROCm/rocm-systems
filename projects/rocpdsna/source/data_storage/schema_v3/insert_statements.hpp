@@ -39,12 +39,7 @@ struct insert_statements
         initialize_track_info_statement();
         initialize_event_statement();
         initialize_arg_statement();
-        initialize_pmc_event_statement();
-        initialize_region_statement();
         initialize_sample_statement();
-        initialize_kernel_dispatch_statement();
-        initialize_memory_copy_statement();
-        initialize_memory_alloc_statement();
     }
 
     insert_statements()                                    = delete;
@@ -191,86 +186,11 @@ struct insert_statements
                                              std::optional<std::string_view>,
                                              std::string_view>;
 
-    using pmc_event_statement_func_t = statement_t<integer_primary_key_t,
-                                                   std::optional<integer_foreign_key_t>,
-                                                   integer_foreign_key_t,
-                                                   double,
-                                                   std::string_view>;
-
-    using region_statement_func_t = statement_t<integer_primary_key_t,
-                                                integer_foreign_key_t,
-                                                integer_foreign_key_t,
-                                                integer_foreign_key_t,
-                                                uint64_t,
-                                                uint64_t,
-                                                integer_foreign_key_t,
-                                                std::optional<integer_foreign_key_t>,
-                                                std::string_view>;
-
     using sample_statement_func_t = statement_t<integer_primary_key_t,
                                                 integer_foreign_key_t,
                                                 uint64_t,
                                                 std::optional<integer_foreign_key_t>,
                                                 std::string_view>;
-
-    using kernel_dispatch_statement_func_t =
-        statement_t<integer_primary_key_t,
-                    integer_foreign_key_t,
-                    integer_foreign_key_t,
-                    std::optional<integer_foreign_key_t>,
-                    integer_foreign_key_t,
-                    integer_foreign_key_t,
-                    size_t,
-                    integer_foreign_key_t,
-                    integer_foreign_key_t,
-                    uint64_t,
-                    uint64_t,
-                    std::optional<size_t>,
-                    std::optional<size_t>,
-                    size_t,
-                    size_t,
-                    size_t,
-                    size_t,
-                    size_t,
-                    size_t,
-                    std::optional<integer_foreign_key_t>,
-                    std::optional<integer_foreign_key_t>,
-                    std::string_view>;
-
-    using memory_copy_statement_func_t = statement_t<integer_primary_key_t,
-                                                     integer_foreign_key_t,
-                                                     integer_foreign_key_t,
-                                                     std::optional<integer_foreign_key_t>,
-                                                     uint64_t,
-                                                     uint64_t,
-                                                     integer_foreign_key_t,
-                                                     std::optional<integer_foreign_key_t>,
-                                                     std::optional<size_t>,
-                                                     std::optional<integer_foreign_key_t>,
-                                                     std::optional<size_t>,
-                                                     size_t,
-                                                     std::optional<integer_foreign_key_t>,
-                                                     std::optional<integer_foreign_key_t>,
-                                                     std::optional<integer_foreign_key_t>,
-                                                     std::optional<integer_foreign_key_t>,
-                                                     std::string_view>;
-
-    using memory_alloc_statement_func_t =
-        statement_t<integer_primary_key_t,
-                    integer_foreign_key_t,
-                    integer_foreign_key_t,
-                    std::optional<integer_foreign_key_t>,
-                    std::optional<integer_foreign_key_t>,
-                    std::optional<std::string_view>,
-                    std::optional<std::string_view>,
-                    uint64_t,
-                    uint64_t,
-                    std::optional<size_t>,
-                    size_t,
-                    std::optional<integer_foreign_key_t>,
-                    std::optional<integer_foreign_key_t>,
-                    std::optional<integer_foreign_key_t>,
-                    std::string_view>;
 
 public:
     [[nodiscard]] const string_statement_func_t& string_statement() const
@@ -340,35 +260,9 @@ public:
         return m_arg_statement;
     }
 
-    [[nodiscard]] const pmc_event_statement_func_t& pmc_event_statement() const
-    {
-        return m_pmc_event_statement;
-    }
-
-    [[nodiscard]] const region_statement_func_t& region_statement() const
-    {
-        return m_region_statement;
-    }
-
     [[nodiscard]] const sample_statement_func_t& sample_statement() const
     {
         return m_sample_statement;
-    }
-
-    [[nodiscard]] const kernel_dispatch_statement_func_t& kernel_dispatch_statement()
-        const
-    {
-        return m_kernel_dispatch_statement;
-    }
-
-    [[nodiscard]] const memory_copy_statement_func_t& memory_copy_statement() const
-    {
-        return m_memory_copy_statement;
-    }
-
-    [[nodiscard]] const memory_alloc_statement_func_t& memory_alloc_statement() const
-    {
-        return m_memory_alloc_statement;
     }
 
 private:
@@ -633,35 +527,6 @@ private:
         create_statement(m_arg_statement, query);
     }
 
-    void initialize_pmc_event_statement()
-    {
-        rocpdsna::queries::insert::table_insert_query query_builder;
-        auto                                          query =
-            query_builder.set_table_name(fmt::format("rocpd_pmc_event_{}", m_uuid))
-                .set_columns("id", "event_id", "pmc_id", "value", "extdata")
-                .set_values('?', '?', '?', '?', '?')
-                .get_query_string();
-        create_statement(m_pmc_event_statement, query);
-    }
-
-    void initialize_region_statement()
-    {
-        rocpdsna::queries::insert::table_insert_query query_builder;
-        auto query = query_builder.set_table_name(fmt::format("rocpd_region_{}", m_uuid))
-                         .set_columns("id",
-                                      "nid",
-                                      "pid",
-                                      "tid",
-                                      "start",
-                                      "end",
-                                      "name_id",
-                                      "event_id",
-                                      "extdata")
-                         .set_values('?', '?', '?', '?', '?', '?', '?', '?', '?')
-                         .get_query_string();
-        create_statement(m_region_statement, query);
-    }
-
     void initialize_sample_statement()
     {
         rocpdsna::queries::insert::table_insert_query query_builder;
@@ -671,143 +536,6 @@ private:
                 .set_values('?', '?', '?', '?', '?')
                 .get_query_string();
         create_statement(m_sample_statement, query);
-    }
-
-    void initialize_kernel_dispatch_statement()
-    {
-        rocpdsna::queries::insert::table_insert_query query_builder;
-        // Route through the kernel_dispatch_buf virtual table which amortizes
-        // per-row commits via in-RAM buffering. Real table is
-        // rocpd_kernel_dispatch_<uuid>; vtable forwards to it on flush.
-        auto query = query_builder.set_table_name("kernel_dispatch_buf")
-                         .set_columns("id",
-                                      "nid",
-                                      "pid",
-                                      "tid",
-                                      "agent_id",
-                                      "kernel_id",
-                                      "dispatch_id",
-                                      "queue_id",
-                                      "stream_id",
-                                      "start",
-                                      "end",
-                                      "private_segment_size",
-                                      "group_segment_size",
-                                      "workgroup_size_x",
-                                      "workgroup_size_y",
-                                      "workgroup_size_z",
-                                      "grid_size_x",
-                                      "grid_size_y",
-                                      "grid_size_z",
-                                      "region_name_id",
-                                      "event_id",
-                                      "extdata")
-                         .set_values('?',
-                                     '?',
-                                     '?',
-                                     '?',
-                                     '?',
-                                     '?',
-                                     '?',
-                                     '?',
-                                     '?',
-                                     '?',
-                                     '?',
-                                     '?',
-                                     '?',
-                                     '?',
-                                     '?',
-                                     '?',
-                                     '?',
-                                     '?',
-                                     '?',
-                                     '?',
-                                     '?',
-                                     '?')
-                         .get_query_string();
-        create_statement(m_kernel_dispatch_statement, query);
-    }
-
-    void initialize_memory_copy_statement()
-    {
-        rocpdsna::queries::insert::table_insert_query query_builder;
-        auto                                          query =
-            query_builder.set_table_name(fmt::format("rocpd_memory_copy_{}", m_uuid))
-                .set_columns("id",
-                             "nid",
-                             "pid",
-                             "tid",
-                             "start",
-                             "end",
-                             "name_id",
-                             "dst_agent_id",
-                             "dst_address",
-                             "src_agent_id",
-                             "src_address",
-                             "size",
-                             "queue_id",
-                             "stream_id",
-                             "region_name_id",
-                             "event_id",
-                             "extdata")
-                .set_values('?',
-                            '?',
-                            '?',
-                            '?',
-                            '?',
-                            '?',
-                            '?',
-                            '?',
-                            '?',
-                            '?',
-                            '?',
-                            '?',
-                            '?',
-                            '?',
-                            '?',
-                            '?',
-                            '?')
-                .get_query_string();
-        create_statement(m_memory_copy_statement, query);
-    }
-
-    void initialize_memory_alloc_statement()
-    {
-        rocpdsna::queries::insert::table_insert_query query_builder;
-        auto                                          query =
-            query_builder.set_table_name(fmt::format("rocpd_memory_allocate_{}", m_uuid))
-                .set_columns("id",
-                             "nid",
-                             "pid",
-                             "tid",
-                             "agent_id",
-                             "type",
-                             "level",
-                             "start",
-                             "end",
-                             "address",
-                             "size",
-                             "queue_id",
-                             "stream_id",
-                             "event_id",
-                             "extdata")
-                .set_values('?',
-                            '?',
-                            '?',
-                            '?',
-                            '?',
-                            '?',
-                            '?',
-                            '?',
-                            '?',
-                            '?',
-                            '?',
-                            '?',
-                            '?',
-                            '?',
-                            '?')
-                .get_query_string();
-        create_statement(m_memory_alloc_statement, query);
     }
 
     std::shared_ptr<Backend> m_backend;
@@ -826,12 +554,7 @@ private:
     track_info_statement_func_t         m_track_info_statement;
     event_statement_func_t              m_event_statement;
     arg_statement_func_t                m_arg_statement;
-    pmc_event_statement_func_t          m_pmc_event_statement;
-    region_statement_func_t             m_region_statement;
     sample_statement_func_t             m_sample_statement;
-    kernel_dispatch_statement_func_t    m_kernel_dispatch_statement;
-    memory_copy_statement_func_t        m_memory_copy_statement;
-    memory_alloc_statement_func_t       m_memory_alloc_statement;
 };
 
 }  // namespace rocpdsna::data_storage::schema_v3

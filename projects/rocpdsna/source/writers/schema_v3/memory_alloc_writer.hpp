@@ -43,6 +43,11 @@ public:
         const auto real_table_name = fmt::format("rocpd_memory_allocate_{}", m_ctx->uuid);
         m_buffer = data_storage::vtable::memory_alloc_buffer::get_active_instance(
             real_table_name);
+        if(m_buffer == nullptr)
+        {
+            throw std::runtime_error("memory_alloc buffer not registered for table " +
+                                     real_table_name);
+        }
     }
 
     void insert_impl(const writer_types::memory_alloc_data_t& data,
@@ -113,48 +118,27 @@ public:
         // before a throw cannot be rolled back.
         m_common_ops->maybe_insert_sample(trace_env, data.start_timestamp, event_pk);
 
-        if(m_buffer != nullptr)
-        {
-            auto to_opt_int64 = [](const std::optional<size_t>& v) {
-                return v.has_value() ? std::make_optional(static_cast<int64_t>(*v))
-                                     : std::nullopt;
-            };
+        auto to_opt_int64 = [](const std::optional<size_t>& v) {
+            return v.has_value() ? std::make_optional(static_cast<int64_t>(*v))
+                                 : std::nullopt;
+        };
 
-            m_buffer->push(data_storage::vtable::memory_alloc_row{
-                .id        = static_cast<int64_t>(pk),
-                .nid       = static_cast<int64_t>(trace_env.node_id.value()),
-                .pid       = static_cast<int64_t>(process_pk),
-                .tid       = to_opt_int64(thread_pk),
-                .agent_id  = to_opt_int64(agent_pk),
-                .type      = data.type,
-                .level     = data.level,
-                .start     = static_cast<int64_t>(data.start_timestamp),
-                .end       = static_cast<int64_t>(data.end_timestamp),
-                .address   = to_opt_int64(data.address),
-                .size      = static_cast<int64_t>(data.size),
-                .queue_id  = to_opt_int64(queue_pk),
-                .stream_id = to_opt_int64(stream_pk),
-                .event_id  = to_opt_int64(event_pk),
-                .extdata   = data.extdata });
-        }
-        else
-        {
-            m_stmts->memory_alloc_statement()(pk,
-                                              trace_env.node_id.value(),
-                                              process_pk,
-                                              thread_pk,
-                                              agent_pk,
-                                              data.type,
-                                              data.level,
-                                              data.start_timestamp,
-                                              data.end_timestamp,
-                                              data.address,
-                                              data.size,
-                                              queue_pk,
-                                              stream_pk,
-                                              event_pk,
-                                              data.extdata);
-        }
+        m_buffer->push(data_storage::vtable::memory_alloc_row{
+            .id        = static_cast<int64_t>(pk),
+            .nid       = static_cast<int64_t>(trace_env.node_id.value()),
+            .pid       = static_cast<int64_t>(process_pk),
+            .tid       = to_opt_int64(thread_pk),
+            .agent_id  = to_opt_int64(agent_pk),
+            .type      = data.type,
+            .level     = data.level,
+            .start     = static_cast<int64_t>(data.start_timestamp),
+            .end       = static_cast<int64_t>(data.end_timestamp),
+            .address   = to_opt_int64(data.address),
+            .size      = static_cast<int64_t>(data.size),
+            .queue_id  = to_opt_int64(queue_pk),
+            .stream_id = to_opt_int64(stream_pk),
+            .event_id  = to_opt_int64(event_pk),
+            .extdata   = data.extdata });
     }
 
 private:

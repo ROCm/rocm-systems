@@ -40,6 +40,11 @@ public:
         const auto real_table_name = fmt::format("rocpd_region_{}", m_ctx->uuid);
         m_buffer =
             data_storage::vtable::region_buffer::get_active_instance(real_table_name);
+        if(m_buffer == nullptr)
+        {
+            throw std::runtime_error("region buffer not registered for table " +
+                                     real_table_name);
+        }
     }
 
     void insert_impl(const writer_types::region_data_t&       data,
@@ -89,36 +94,21 @@ public:
 
         m_common_ops->maybe_insert_sample(trace_env, data.start_timestamp, event_pk);
 
-        if(m_buffer != nullptr)
-        {
-            auto to_opt_int64 = [](const std::optional<size_t>& v) {
-                return v.has_value() ? std::make_optional(static_cast<int64_t>(*v))
-                                     : std::nullopt;
-            };
+        auto to_opt_int64 = [](const std::optional<size_t>& v) {
+            return v.has_value() ? std::make_optional(static_cast<int64_t>(*v))
+                                 : std::nullopt;
+        };
 
-            m_buffer->push(data_storage::vtable::region_row{
-                .id       = static_cast<int64_t>(pk),
-                .nid      = static_cast<int64_t>(trace_env.node_id.value()),
-                .pid      = static_cast<int64_t>(process_pk),
-                .tid      = static_cast<int64_t>(thread_pk),
-                .start    = static_cast<int64_t>(data.start_timestamp),
-                .end      = static_cast<int64_t>(data.end_timestamp),
-                .name_id  = static_cast<int64_t>(name_pk),
-                .event_id = to_opt_int64(event_pk),
-                .extdata  = data.extdata });
-        }
-        else
-        {
-            m_stmts->region_statement()(pk,
-                                        trace_env.node_id.value(),
-                                        process_pk,
-                                        thread_pk,
-                                        data.start_timestamp,
-                                        data.end_timestamp,
-                                        name_pk,
-                                        event_pk,
-                                        data.extdata);
-        }
+        m_buffer->push(data_storage::vtable::region_row{
+            .id       = static_cast<int64_t>(pk),
+            .nid      = static_cast<int64_t>(trace_env.node_id.value()),
+            .pid      = static_cast<int64_t>(process_pk),
+            .tid      = static_cast<int64_t>(thread_pk),
+            .start    = static_cast<int64_t>(data.start_timestamp),
+            .end      = static_cast<int64_t>(data.end_timestamp),
+            .name_id  = static_cast<int64_t>(name_pk),
+            .event_id = to_opt_int64(event_pk),
+            .extdata  = data.extdata });
     }
 
 private:

@@ -17,6 +17,7 @@
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <stdexcept>
 
 namespace rocpdsna
 {
@@ -39,6 +40,11 @@ public:
         const auto real_table_name = fmt::format("rocpd_pmc_event_{}", m_ctx->uuid);
         m_buffer =
             data_storage::vtable::pmc_event_buffer::get_active_instance(real_table_name);
+        if(m_buffer == nullptr)
+        {
+            throw std::runtime_error("pmc_event buffer not registered for table " +
+                                     real_table_name);
+        }
     }
 
     void insert_impl(const writer_types::pmc_event_data_t&     data,
@@ -67,25 +73,17 @@ public:
             m_common_ops->insert_sample(data.sample, event_pk.value());
         }
 
-        if(m_buffer != nullptr)
-        {
-            auto to_opt_int64 = [](const std::optional<size_t>& v) {
-                return v.has_value() ? std::make_optional(static_cast<int64_t>(*v))
-                                     : std::nullopt;
-            };
+        auto to_opt_int64 = [](const std::optional<size_t>& v) {
+            return v.has_value() ? std::make_optional(static_cast<int64_t>(*v))
+                                 : std::nullopt;
+        };
 
-            m_buffer->push(data_storage::vtable::pmc_event_row{
-                .id       = static_cast<int64_t>(pk),
-                .event_id = to_opt_int64(event_pk),
-                .pmc_id   = static_cast<int64_t>(pmc_pk),
-                .value    = data.value,
-                .extdata  = data.extdata });
-        }
-        else
-        {
-            m_stmts->pmc_event_statement()(
-                pk, event_pk, pmc_pk, data.value, data.extdata);
-        }
+        m_buffer->push(
+            data_storage::vtable::pmc_event_row{ .id       = static_cast<int64_t>(pk),
+                                                 .event_id = to_opt_int64(event_pk),
+                                                 .pmc_id   = static_cast<int64_t>(pmc_pk),
+                                                 .value    = data.value,
+                                                 .extdata  = data.extdata });
     }
 
 private:
