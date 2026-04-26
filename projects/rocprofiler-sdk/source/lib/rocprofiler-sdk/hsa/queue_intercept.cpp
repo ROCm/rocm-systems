@@ -339,8 +339,6 @@ process_doorbell_tracing_only(const queue_state_ptr_t& state, hsa_signal_value_t
         ROCPROFILER_KERNEL_DISPATCH_ENQUEUE,
         corr_id->internal);
 
-    static std::atomic<uint64_t> s_seq{0};
-
     const auto* pkts =
         static_cast<const hsa_kernel_dispatch_packet_t*>(state_ptr->ring_buf);
 
@@ -398,7 +396,6 @@ process_doorbell_tracing_only(const queue_state_ptr_t& state, hsa_signal_value_t
         entry.corr_id           = corr_id;
         entry.tid               = tid;
         entry.external_corr_ids = td.external_correlation_ids;
-        entry.seq               = s_seq.fetch_add(1, std::memory_order_relaxed);
         entry.captured_wdid     = d;  // §3.5 Invariant 1
 
         // Block 2 (H6, M2): capture AQL packet data synchronously
