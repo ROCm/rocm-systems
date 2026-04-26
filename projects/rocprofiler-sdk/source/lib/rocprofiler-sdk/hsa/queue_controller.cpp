@@ -60,8 +60,27 @@ create_queue(hsa_agent_t        agent,
         if(agent_info.get_hsa_agent().handle == agent.handle)
         {
             std::unique_ptr<Queue> new_queue;
-            const auto mode = needs_packet_rewriting_intercept() ? Queue::Mode::full_intercept
-                                                                 : Queue::Mode::tracing_only;
+            // Mode selection has TWO independent gates:
+            //   1. needs_packet_rewriting_intercept(): any registered
+            //      context that requires WriteInterceptor (counter / ATT /
+            //      PCS / scratch) forces full_intercept globally so all
+            //      queues run the rewriter.
+            //   2. queue_intercept::is_intercepting_inline(): tracing_only
+            //      relies on the inline doorbell wrapper to capture
+            //      correlation entries the firmware-ring drainer pairs
+            //      with dispatch records. If the inline wrapper was not
+            //      installed (e.g. ROCPROFILER_INLINE_INTERCEPT=false at
+            //      registration.cpp:1247), tracing_only would create a
+            //      real HSA queue with NO correlation capture path — the
+            //      drainer would scan empty ring slots and emit every
+            //      record via the zero-correlation fallback. Fall back to
+            //      full_intercept in that case so the existing
+            //      WriteInterceptor path captures correlation_id.
+            const bool needs_full =
+                needs_packet_rewriting_intercept() ||
+                !queue_intercept::is_intercepting_inline();
+            const auto mode =
+                needs_full ? Queue::Mode::full_intercept : Queue::Mode::tracing_only;
             // The inline (queue_intercept) path installs only doorbell /
             // wptr wrappers — it does NOT call hsa_amd_queue_intercept_register
             // and the lambda passed below as set_write_interceptor is a
