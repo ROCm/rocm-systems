@@ -288,8 +288,21 @@ queue_controller_iterate_attach_queue(hsa_queue_t* queue, hsa_agent_t agent, voi
     // so existing queues registered after rocprofiler attaches end up on
     // the Phase 1 tracing-only fast path when the firmware ring is
     // available, instead of silently defaulting to full_intercept.
-    const auto mode = needs_packet_rewriting_intercept() ? Queue::Mode::full_intercept
-                                                         : Queue::Mode::tracing_only;
+    //
+    // Mirror create_queue()'s two-gate predicate (see comment block at
+    // queue_controller.cpp:63-78). In addition to needs_packet_rewriting_intercept()
+    // we must also fall back to full_intercept when the inline doorbell
+    // wrapper was not installed (ROCPROFILER_INLINE_INTERCEPT=false). A
+    // late-attach Mode::tracing_only queue with no inline wrapper would
+    // construct a real HSA queue with NO correlation capture path: the
+    // Queue ctor only installs WriteInterceptor for full_intercept
+    // (queue.cpp:843-884), and the firmware-ring drainer's start gate
+    // (queue_controller.cpp ~L792) also requires is_intercepting_inline(),
+    // so the drainer would never run. The result would be a fully
+    // un-traced existing queue.
+    const bool needs_full = needs_packet_rewriting_intercept() ||
+                            !queue_intercept::is_intercepting_inline();
+    const auto mode = needs_full ? Queue::Mode::full_intercept : Queue::Mode::tracing_only;
     for(const auto& [_, agent_info] : qc->get_supported_agents())
     {
         if(agent_info.get_hsa_agent().handle == agent.handle)
