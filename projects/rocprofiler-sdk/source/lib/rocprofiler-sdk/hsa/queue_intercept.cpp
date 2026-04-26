@@ -349,28 +349,48 @@ process_doorbell_tracing_only(const queue_state_ptr_t& state, hsa_signal_value_t
     {
         const uint32_t slot_idx = static_cast<uint32_t>(d & state_ptr->corr_ring_mask);
 
-        // Skip non-kernel-dispatch packets (barrier_and/or, agent_dispatch).
-        // The firmware ring only emits records for kernel dispatches, so a
-        // captured slot for a non-kernel-dispatch packet would never be
-        // consumed and would slowly leak.
-        const uint16_t hdr =
-            __atomic_load_n(&pkts[slot_idx].header, __ATOMIC_ACQUIRE);
-        const uint8_t ptype = (hdr >> HSA_PACKET_HEADER_TYPE) &
-                              ((1u << HSA_PACKET_HEADER_WIDTH_TYPE) - 1u);
-        if(ptype != HSA_PACKET_TYPE_KERNEL_DISPATCH) continue;
-
         auto& entry = state_ptr->corr_slots[slot_idx];
 
         // §3.5 Invariant 2: detect wraparound overwrite. If the slot is
         // still occupied by a previous capture that the drainer has not
-        // consumed, retire its refcounts so we don't leak. The drainer
-        // will receive the prior dispatch's END record later, fail the
-        // alias guard, and emit it as a zero-corr fallback.
-        if(entry.gen.load(std::memory_order_relaxed) != 0 && entry.corr_id)
+        // consumed, retire its refcounts so we don't leak. This MUST run
+        // before the non-kernel-packet skip below: a non-kernel packet
+        // (barrier_and/or, agent_dispatch) overwrites the slot's AQL
+        // packet too, so any prior kernel CorrEntry occupying the slot
+        // can no longer be paired with a firmware record. Retire the
+        // refcounts and clear the slot here; otherwise the entry leaks
+        // until shutdown (or until a later kernel reuses the slot and
+        // re-triggers this branch — leading to confused alias checks in
+        // between).
+        const bool slot_occupied =
+            entry.gen.load(std::memory_order_relaxed) != 0 && entry.corr_id;
+        if(slot_occupied)
         {
             entry.corr_id->sub_kern_count();
             entry.corr_id->sub_ref_count();
             log_overwrite_warning_once(state_ptr);
+        }
+
+        // Skip non-kernel-dispatch packets (barrier_and/or, agent_dispatch).
+        // The firmware ring only emits records for kernel dispatches, so we
+        // do not publish a new CorrEntry for these packets. We DO clear any
+        // prior occupant of the slot above so the drainer cannot mis-pair
+        // a stale CorrEntry with a future kernel firmware record.
+        const uint16_t hdr =
+            __atomic_load_n(&pkts[slot_idx].header, __ATOMIC_ACQUIRE);
+        const uint8_t ptype = (hdr >> HSA_PACKET_HEADER_TYPE) &
+                              ((1u << HSA_PACKET_HEADER_WIDTH_TYPE) - 1u);
+        if(ptype != HSA_PACKET_TYPE_KERNEL_DISPATCH)
+        {
+            // Clear the slot if we just retired its prior occupant, so
+            // the drainer does not see a stale (corr_id, gen) pair on
+            // its next scan of this index.
+            if(slot_occupied)
+            {
+                entry.corr_id = nullptr;
+                entry.gen.store(0, std::memory_order_release);
+            }
+            continue;
         }
 
         corr_id->add_ref_count();
