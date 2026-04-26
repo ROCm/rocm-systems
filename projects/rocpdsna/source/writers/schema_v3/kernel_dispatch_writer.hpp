@@ -49,6 +49,8 @@ public:
     void insert_impl(const writer_types::kernel_dispatch_data_t& data,
                      const writer_types::trace_environment_t&    trace_env)
     {
+        auto transaction_block = m_ctx->backend->begin_transaction();
+
         m_ctx->validator->require_node(trace_env.node_id)
             .require_process(trace_env.process_id)
             .require_thread(trace_env.thread_id)
@@ -81,6 +83,11 @@ public:
 
         const auto pk =
             m_ctx->key_providers->kernel_dispatch_data().get_primary_key_value();
+
+        // Run all throwing operations before the buffer push. The buffer
+        // bypasses SQLite transactions, so any push that happens before a
+        // throw cannot be rolled back.
+        m_common_ops->maybe_insert_sample(trace_env, data.start_timestamp, event_pk);
 
         // Bypass POC: skip the SQLite vtable trampoline entirely. Push columns
         // straight into the buffer's per-column vectors. Falls back to the
@@ -140,8 +147,6 @@ public:
                                                  event_pk,
                                                  data.extdata);
         }
-
-        m_common_ops->maybe_insert_sample(trace_env, data.start_timestamp, event_pk);
     }
 
 private:
