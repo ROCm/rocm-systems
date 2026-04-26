@@ -2351,13 +2351,21 @@ Create `projects/clr/hipamd/scripts/lttng_migrate_curated_overlay.py`:
 Idempotent: skips wrappers that already have the __ROCM_CURATED__ sentinel.
 
 For each wrapper named in --curated-yaml whose body in --source contains
-`__rocm_corr` but NOT the curated sentinel:
+the provider's ENTER snippet but NOT the curated sentinel:
   1. Insert sentinel + IN-locals right after the ENTER_SNIPPET.
-  2. Rewrite the wrapper's ROCM_TRACE_RET_<cls>(EXPR) to the matching
-     _CURATED or _CURATED_NOARGS variant.
+  2. Rewrite the wrapper's existing macro family (ROCM_TRACE_RET_* for HIP,
+     ROCR_TRACE_API_RET_* for HSA) to the matching _CURATED / _CURATED_HSA
+     (and _NOARGS) variant.
+
+Provider-agnostic: takes --provider hip|hsa and selects:
+- enter-helper regex (rocm_trace_emit_hip_api_enter vs rocm_trace_emit_hsa_api_enter)
+- existing macro family regex
+- emitted curated macro names
+- default include flags (HIP needs -D__HIP_PLATFORM_AMD__=1)
 
 Usage:
     python3 lttng_migrate_curated_overlay.py \\
+        --provider hip \\
         --source path/to/hip_table_interface.cpp \\
         --curated-yaml path/to/curated_apis.yaml \\
         --include-path /opt/rocm/include
@@ -2368,11 +2376,45 @@ sys.path.insert(0, HERE)
 from lttng_curated_lib import parse_yaml_file
 from clang import cindex
 
+# Provider-specific configuration. Adding a new provider means adding one
+# entry here and updating the --provider choices.
+PROVIDER_CONFIG = {
+    'hip': {
+        'enter_re': re.compile(
+            r'__rocm_corr\s*=\s*rocm_trace_next_corr_id\(\)\s*;'
+            r'\s*rocm_trace_emit_hip_api_enter\([^)]*\)\s*;'),
+        # Match ONLY the non-curated forms — must not re-match _CURATED on a
+        # second pass. Anchor with a negative lookahead.
+        'ret_re': re.compile(
+            r'ROCM_TRACE_RET_(STATUS|PTR|VOID)(?!_CURATED)\s*\(\s*([^;]+?)\s*\)\s*;',
+            flags=re.DOTALL),
+        # Curated macro name template: {cls} in {STATUS,PTR,VOID}, plus _NOARGS.
+        'curated_status':         'ROCM_TRACE_RET_STATUS_CURATED',
+        'curated_status_noargs':  'ROCM_TRACE_RET_STATUS_CURATED_NOARGS',
+        'curated_ptr':            'ROCM_TRACE_RET_PTR_CURATED',
+        'curated_ptr_noargs':     'ROCM_TRACE_RET_PTR_CURATED_NOARGS',
+        'curated_void':           'ROCM_TRACE_RET_VOID_CURATED',
+        'curated_void_noargs':    'ROCM_TRACE_RET_VOID_CURATED_NOARGS',
+        'default_extra_args': ['-D__HIP_PLATFORM_AMD__=1'],
+    },
+    'hsa': {
+        'enter_re': re.compile(
+            r'__rocm_corr\s*=\s*rocm_trace_next_corr_id\(\)\s*;'
+            r'\s*rocm_trace_emit_hsa_api_enter\([^)]*\)\s*;'),
+        'ret_re': re.compile(
+            r'ROCR_TRACE_API_RET_(STATUS|PTR|VOID)(?!_CURATED)\s*\(\s*([^;]+?)\s*\)\s*;',
+            flags=re.DOTALL),
+        'curated_status':         'ROCR_TRACE_API_RET_STATUS_CURATED_HSA',
+        'curated_status_noargs':  'ROCR_TRACE_API_RET_STATUS_CURATED_HSA_NOARGS',
+        'curated_ptr':            'ROCR_TRACE_API_RET_PTR_CURATED_HSA',
+        'curated_ptr_noargs':     'ROCR_TRACE_API_RET_PTR_CURATED_HSA_NOARGS',
+        'curated_void':           'ROCR_TRACE_API_RET_VOID_CURATED_HSA',
+        'curated_void_noargs':    'ROCR_TRACE_API_RET_VOID_CURATED_HSA_NOARGS',
+        'default_extra_args': [],   # HSA headers don't need __HIP_PLATFORM_AMD__
+    },
+}
+
 SENTINEL_RE = lambda api: re.compile(rf'/\* __ROCM_CURATED__: {re.escape(api)} \*/')
-ENTER_RE = re.compile(r'__rocm_corr\s*=\s*rocm_trace_next_corr_id\(\)\s*;'
-                      r'\s*rocm_trace_emit_hip_api_enter\([^)]*\)\s*;')
-RET_RE   = re.compile(r'ROCM_TRACE_RET_(STATUS|PTR|VOID)\s*\(\s*([^;]+?)\s*\)\s*;',
-                      flags=re.DOTALL)
 
 
 def find_wrapper_body(text, fn_name):
@@ -2395,12 +2437,12 @@ def find_wrapper_body(text, fn_name):
     return None
 
 
-def overlay(source_path, yaml_path, include_path):
+def overlay(provider, source_path, yaml_path, include_path):
+    cfg = PROVIDER_CONFIG[provider]
     apis = {a['api']: a for a in parse_yaml_file(yaml_path)}
 
     # Use libclang to get param-type info for wrapper signatures.
-    args = ['-x', 'c++', '-std=c++17', '-D__HIP_PLATFORM_AMD__=1',
-            '-I', include_path]
+    args = ['-x', 'c++', '-std=c++17', '-I', include_path] + cfg['default_extra_args']
     idx = cindex.Index.create()
     tu = idx.parse(source_path, args=args)
     param_types = {}  # fn_name -> {pname: ptype}
@@ -2423,8 +2465,9 @@ def overlay(source_path, yaml_path, include_path):
             continue
         bstart, bend = body
         body_text = src[bstart:bend]
-        # Find ENTER_SNIPPET in body to anchor the sentinel insertion.
-        em = ENTER_RE.search(body_text)
+        # Find provider-specific ENTER snippet in body to anchor the
+        # sentinel insertion.
+        em = cfg['enter_re'].search(body_text)
         if em is None:
             print(f'  {fn}: ENTER snippet not found; skip', file=sys.stderr)
             continue
@@ -2444,8 +2487,11 @@ def overlay(source_path, yaml_path, include_path):
         insertion = sentinel + ''.join(in_locals)
         edits.append((insert_off, insert_off, insertion))
 
-        # Rewrite ROCM_TRACE_RET_<cls>(EXPR); to _CURATED variant.
-        for m in RET_RE.finditer(body_text):
+        # Rewrite the existing macro family to its _CURATED variant. The
+        # macro family and curated-name templates are picked from cfg so
+        # the same code handles both HIP (ROCM_TRACE_RET_*) and HSA
+        # (ROCR_TRACE_API_RET_*) without duplication.
+        for m in cfg['ret_re'].finditer(body_text):
             cls, expr = m.group(1), m.group(2)
             macro_start = bstart + m.start(0)
             macro_end   = bstart + m.end(0)
@@ -2458,22 +2504,22 @@ def overlay(source_path, yaml_path, include_path):
                     captured.append(a['name'])
             if cls == 'STATUS':
                 if captured:
-                    repl = (f'ROCM_TRACE_RET_STATUS_CURATED({fn}, {expr}, '
+                    repl = (f'{cfg["curated_status"]}({fn}, {expr}, '
                             f'__rocm_corr, {", ".join(captured)});')
                 else:
-                    repl = f'ROCM_TRACE_RET_STATUS_CURATED_NOARGS({fn}, {expr}, __rocm_corr);'
+                    repl = f'{cfg["curated_status_noargs"]}({fn}, {expr}, __rocm_corr);'
             elif cls == 'PTR':
                 if captured:
-                    repl = (f'ROCM_TRACE_RET_PTR_CURATED({fn}, auto, {expr}, '
+                    repl = (f'{cfg["curated_ptr"]}({fn}, auto, {expr}, '
                             f'__rocm_corr, {", ".join(captured)});')
                 else:
-                    repl = f'ROCM_TRACE_RET_PTR_CURATED_NOARGS({fn}, auto, {expr}, __rocm_corr);'
+                    repl = f'{cfg["curated_ptr_noargs"]}({fn}, auto, {expr}, __rocm_corr);'
             elif cls == 'VOID':
                 if captured:
-                    repl = (f'ROCM_TRACE_RET_VOID_CURATED({fn}, {expr}, '
+                    repl = (f'{cfg["curated_void"]}({fn}, {expr}, '
                             f'__rocm_corr, {", ".join(captured)});')
                 else:
-                    repl = f'ROCM_TRACE_RET_VOID_CURATED_NOARGS({fn}, {expr}, __rocm_corr);'
+                    repl = f'{cfg["curated_void_noargs"]}({fn}, {expr}, __rocm_corr);'
             else:
                 continue
             edits.append((macro_start, macro_end, repl))
@@ -2492,11 +2538,13 @@ def overlay(source_path, yaml_path, include_path):
 
 def main():
     ap = argparse.ArgumentParser()
+    ap.add_argument('--provider', required=True, choices=sorted(PROVIDER_CONFIG))
     ap.add_argument('--source', required=True)
     ap.add_argument('--curated-yaml', required=True)
     ap.add_argument('--include-path', default='/opt/rocm/include')
     args = ap.parse_args()
-    sys.exit(overlay(args.source, args.curated_yaml, args.include_path))
+    sys.exit(overlay(args.provider, args.source, args.curated_yaml,
+                     args.include_path))
 
 if __name__ == '__main__':
     main()
@@ -2518,6 +2566,7 @@ python3 -c "from clang import cindex; print('libclang OK')"
 # (and re-test), or fall back to Option B below.
 
 python3 projects/clr/hipamd/scripts/lttng_migrate_curated_overlay.py \
+    --provider hip \
     --source projects/clr/hipamd/src/hip_table_interface.cpp \
     --curated-yaml projects/clr/hipamd/scripts/curated_apis.yaml
 ```
@@ -2531,6 +2580,7 @@ python3 projects/clr/hipamd/scripts/lttng_migrate_curated_overlay.py \
 # 2. Run the overlay inside the container against the (now in-sync) source.
 ./dev-bin/in-container.sh main "cd /root/rocm-systems && python3 \
     projects/clr/hipamd/scripts/lttng_migrate_curated_overlay.py \
+    --provider hip \
     --source projects/clr/hipamd/src/hip_table_interface.cpp \
     --curated-yaml projects/clr/hipamd/scripts/curated_apis.yaml"
 
@@ -3426,6 +3476,7 @@ Expected: `OK: 72 curated APIs verified`. If verifier reports type or name misma
 
 ```bash
 ./dev-bin/in-container.sh main "cd /root/rocm-systems && python3 projects/clr/hipamd/scripts/lttng_migrate_curated_overlay.py \
+    --provider hip \
     --source projects/clr/hipamd/src/hip_table_interface.cpp \
     --curated-yaml projects/clr/hipamd/scripts/curated_apis.yaml"
 ```
@@ -3499,18 +3550,30 @@ This task is a structural copy of Phases C+D+E for HSA. Each step is identical i
 
 Sub-steps mirror Phases C through E:
 
-- [ ] **Step 1: Copy `lttng_curated_lib.py`, `lttng_curated_codegen.py`, `lttng_curated_verify.py`, and `lttng_migrate_curated_overlay.py` semantics** — actually, **don't copy**, just symlink to the HIP versions. The scripts are provider-agnostic by design.
+- [ ] **Step 1: Make the four shared scripts available from the HSA scripts dir**
+
+All four scripts are provider-agnostic:
+- `lttng_curated_lib.py` — pure parser, no provider state.
+- `lttng_curated_codegen.py` — takes `--provider rocm_hip|rocm_hsa`.
+- `lttng_curated_verify.py` — takes any `--header` (and post-Task-4.5, multiple).
+- `lttng_migrate_curated_overlay.py` — takes `--provider hip|hsa` (per the C4 fix in Task 10).
+
+Copy (not symlink) the scripts to honor the project's monorepo no-cross-symlink convention. The copies are byte-identical and intentionally so:
 
 ```bash
-cd projects/rocr-runtime/runtime/hsa-runtime/scripts/
-ln -s ../../../../clr/hipamd/scripts/lttng_curated_lib.py .
-ln -s ../../../../clr/hipamd/scripts/lttng_curated_codegen.py .
-ln -s ../../../../clr/hipamd/scripts/lttng_curated_verify.py .
-ln -s ../../../../clr/hipamd/scripts/lttng_migrate_curated_overlay.py .
-cd -
+cp projects/clr/hipamd/scripts/lttng_curated_lib.py \
+   projects/rocr-runtime/runtime/hsa-runtime/scripts/
+cp projects/clr/hipamd/scripts/lttng_curated_codegen.py \
+   projects/rocr-runtime/runtime/hsa-runtime/scripts/
+cp projects/clr/hipamd/scripts/lttng_curated_verify.py \
+   projects/rocr-runtime/runtime/hsa-runtime/scripts/
+cp projects/clr/hipamd/scripts/lttng_migrate_curated_overlay.py \
+   projects/rocr-runtime/runtime/hsa-runtime/scripts/
 ```
 
-Or commit copies if symlinks are policy-disallowed (verify with project conventions; ROCm projects typically use copies for cross-project sharing).
+The HSA invocations of the overlay later in this task use `--provider hsa`; codegen uses `--provider rocm_hsa`; verify uses HSA `--header` paths.
+
+A drift check between the HIP and HSA copies of these four scripts is a recommended follow-up CI gate (out of scope for this PR; file as separate issue).
 
 - [ ] **Step 2: Author HSA `curated_apis.yaml`** — translate spec §A.6:
 
