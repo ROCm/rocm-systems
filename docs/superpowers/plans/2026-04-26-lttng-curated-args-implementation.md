@@ -3770,40 +3770,97 @@ Mirror the entire pipeline for HSA: 10 curated APIs, same codegen script (parame
 
 ---
 
-### Task 15: HSA mirror — YAML, generated headers, _CURATED_HSA macros, migrator overlay, tests
+### Task 15: HSA mirror — broken into eight concrete sub-tasks (15a–15h)
 
-**Files (all created or modified per HSA mirror):**
+The previous version of this task said "same as Task 7", "same shape as Task 8", etc. — that violates the plan's "no placeholders / repeat the code" rule. The HSA mirror is now expanded into eight concrete sub-tasks below, each with the actual file edits, commands, and expected outputs adapted for HSA.
+
+The sub-tasks have a strict order: **15a → 15b → 15c → 15d → 15e → 15f → 15g → 15h**. Each sub-task ends with its own commit. The total of ~8 commits for HSA mirror is intentional.
+
+**Common HSA file paths (used by all sub-tasks):**
+
+| Role | Path |
+|---|---|
+| HSA YAML | `projects/rocr-runtime/runtime/hsa-runtime/scripts/curated_apis.yaml` |
+| HSA tp.h (existing) | `projects/rocr-runtime/runtime/hsa-runtime/lttng/rocm_hsa_tp.h` |
+| HSA tp.h (curated, generated) | `projects/rocr-runtime/runtime/hsa-runtime/lttng/rocm_hsa_curated_tp.h` |
+| HSA emit.h (existing) | `projects/rocr-runtime/runtime/hsa-runtime/lttng/rocm_trace_emit.h` |
+| HSA emit.h (curated, generated) | `projects/rocr-runtime/runtime/hsa-runtime/lttng/rocm_trace_emit_curated.h` |
+| HSA wrappers TU | `projects/rocr-runtime/runtime/hsa-runtime/core/common/hsa_table_interface.cpp` |
+| HSA migrator | `projects/rocr-runtime/runtime/hsa-runtime/scripts/lttng_migrate.py` |
+| HSA coverage gate | `projects/rocr-runtime/runtime/hsa-runtime/scripts/lttng_coverage_gate.sh` |
+| HSA CMakeLists | `projects/rocr-runtime/runtime/hsa-runtime/CMakeLists.txt` |
+| HSA test dir | `projects/rocr-runtime/runtime/hsa-runtime/test/lttng/` |
+| HSA scripts dir | `projects/rocr-runtime/runtime/hsa-runtime/scripts/` |
+| HIP scripts dir (source for copies) | `projects/clr/hipamd/scripts/` |
+
+**Common HSA values:**
+
+| Variable | Value |
+|---|---|
+| Provider name | `rocm_hsa` |
+| Status type | `hsa_status_t` |
+| Status success | `HSA_STATUS_SUCCESS` |
+| Existing macro family | `ROCR_TRACE_API_RET_*` |
+| Curated macro family | `ROCR_TRACE_API_RET_*_CURATED_HSA(_NOARGS)?` |
+| Headers (verify multi) | `/opt/rocm/include/hsa/hsa.h` and `/opt/rocm/include/hsa/hsa_ext_amd.h` |
+| Generic enter helper | `rocm_trace_emit_hsa_api_enter` |
+| Generic exit helpers | `rocm_trace_emit_hsa_api_exit_status`, `_ptr`, `_void` |
+| Tracing-enabled macro | `HSA_ENABLE_LTTNG_UST` |
+
+---
+
+#### Task 15a: Author HSA `curated_apis.yaml` and copy shared scripts
+
+**Files:**
 - Create: `projects/rocr-runtime/runtime/hsa-runtime/scripts/curated_apis.yaml`
-- Create: `projects/rocr-runtime/runtime/hsa-runtime/lttng/rocm_hsa_curated_tp.h` (generated)
-- Create: `projects/rocr-runtime/runtime/hsa-runtime/lttng/rocm_trace_emit_curated.h` (generated)
-- Modify: `projects/rocr-runtime/runtime/hsa-runtime/lttng/rocm_hsa_tp.h` (add include)
-- Modify: `projects/rocr-runtime/runtime/hsa-runtime/lttng/rocm_trace_emit.h` (add include + macros)
-- Modify: `projects/rocr-runtime/runtime/hsa-runtime/scripts/lttng_migrate.py` (curated routing)
-- Modify: `projects/rocr-runtime/runtime/hsa-runtime/scripts/lttng_coverage_gate.sh` (curated checks)
-- Modify: `projects/rocr-runtime/runtime/hsa-runtime/CMakeLists.txt` (regenerate target)
-- Modify: `projects/rocr-runtime/runtime/hsa-runtime/core/common/hsa_table_interface.cpp` (re-migrate)
-- Create: `projects/rocr-runtime/runtime/hsa-runtime/test/lttng/test_hsa_curated_args_payload.sh`
-- Create: `projects/rocr-runtime/runtime/hsa-runtime/test/lttng/test_hsa_curated_args_coverage.sh`
+- Copy:   `projects/rocr-runtime/runtime/hsa-runtime/scripts/lttng_curated_lib.py` (from HIP)
+- Copy:   `projects/rocr-runtime/runtime/hsa-runtime/scripts/lttng_curated_codegen.py` (from HIP)
+- Copy:   `projects/rocr-runtime/runtime/hsa-runtime/scripts/lttng_curated_verify.py` (from HIP)
+- Copy:   `projects/rocr-runtime/runtime/hsa-runtime/scripts/lttng_migrate_curated_overlay.py` (from HIP)
 
-This task is a structural copy of Phases C+D+E for HSA. Each step is identical in shape; differences:
-- Provider name: `rocm_hsa` not `rocm_hip`
-- Status type: `hsa_status_t` not `hipError_t`
-- Status success: `HSA_STATUS_SUCCESS` not `hipSuccess`
-- Macros named `_CURATED_HSA` and `_CURATED_HSA_NOARGS`
-- Include path: `<hsa/hsa.h>` and `<hsa/hsa_ext_amd.h>`
-- Headers: `/opt/rocm/include/hsa/hsa.h`, `hsa_ext_amd.h`
+- [ ] **Step 1: Confirm exact HSA header signatures before authoring YAML**
 
-Sub-steps mirror Phases C through E:
+The two APIs that previously held `args:  # placeholder — fill from real header` notes have been resolved against the real HSA headers in `/opt/rocm/include/hsa/`:
 
-- [ ] **Step 1: Make the four shared scripts available from the HSA scripts dir**
+```bash
+grep -A 8 'hsa_status_t HSA_API hsa_signal_create' /opt/rocm/include/hsa/hsa.h
+grep -A 8 'hsa_status_t HSA_API hsa_queue_create'  /opt/rocm/include/hsa/hsa.h
+grep -A 5 'hsa_status_t HSA_API hsa_amd_signal_create' /opt/rocm/include/hsa/hsa_ext_amd.h
+grep -A 5 'hsa_amd_queue_intercept_create' /opt/rocm/include/hsa/hsa_api_trace.h
+```
 
-All four scripts are provider-agnostic:
-- `lttng_curated_lib.py` — pure parser, no provider state.
-- `lttng_curated_codegen.py` — takes `--provider rocm_hip|rocm_hsa`.
-- `lttng_curated_verify.py` — takes any `--header` (and post-Task-4.5, multiple).
-- `lttng_migrate_curated_overlay.py` — takes `--provider hip|hsa` (per the C4 fix in Task 10).
+Verified declarations (recorded here so the YAML below is auditable without re-running the greps):
 
-Copy (not symlink) the scripts to honor the project's monorepo no-cross-symlink convention. The copies are byte-identical and intentionally so:
+```c
+hsa_status_t hsa_queue_create(hsa_agent_t agent, uint32_t size,
+                              hsa_queue_type32_t type,
+                              void (*callback)(hsa_status_t, hsa_queue_t*, void*),
+                              void* data,
+                              uint32_t private_segment_size,
+                              uint32_t group_segment_size,
+                              hsa_queue_t** queue);
+
+hsa_status_t hsa_signal_create(hsa_signal_value_t initial_value,    /* int64 */
+                               uint32_t num_consumers,
+                               const hsa_agent_t* consumers,
+                               hsa_signal_t* signal);
+
+hsa_status_t hsa_amd_signal_create(hsa_signal_value_t initial_value,
+                                   uint32_t num_consumers,
+                                   const hsa_agent_t* consumers,
+                                   uint64_t attributes,
+                                   hsa_signal_t* signal);
+
+hsa_status_t hsa_amd_queue_intercept_create(
+    hsa_agent_t agent_handle, uint32_t size, hsa_queue_type32_t type,
+    void (*callback)(hsa_status_t, hsa_queue_t*, void*), void* data,
+    uint32_t private_segment_size, uint32_t group_segment_size,
+    hsa_queue_t** queue);
+```
+
+The verifier in 15a-Step 4 below will fail loudly if anything in the YAML drifts from these.
+
+- [ ] **Step 2: Copy the shared scripts (HIP -> HSA scripts dir)**
 
 ```bash
 cp projects/clr/hipamd/scripts/lttng_curated_lib.py \
@@ -3816,14 +3873,16 @@ cp projects/clr/hipamd/scripts/lttng_migrate_curated_overlay.py \
    projects/rocr-runtime/runtime/hsa-runtime/scripts/
 ```
 
-The HSA invocations of the overlay later in this task use `--provider hsa`; codegen uses `--provider rocm_hsa`; verify uses HSA `--header` paths.
+The four scripts are provider-agnostic (codegen / verify take `--provider`, overlay takes `--provider hip|hsa` per the C4 fix in Task 10, lib has no provider state). Copies (not symlinks) per the project's monorepo conventions. A drift check between the HIP/HSA copies is a recommended follow-up CI gate (file as separate issue; out of scope for this PR).
 
-A drift check between the HIP and HSA copies of these four scripts is a recommended follow-up CI gate (out of scope for this PR; file as separate issue).
+- [ ] **Step 3: Author HSA `curated_apis.yaml`**
 
-- [ ] **Step 2: Author HSA `curated_apis.yaml`** — translate spec §A.6:
+Create `projects/rocr-runtime/runtime/hsa-runtime/scripts/curated_apis.yaml` with the 10 HSA APIs from spec §A.6. The two previously-placeholder entries (`hsa_amd_queue_intercept_create`, `hsa_amd_signal_create`) are now filled with the actual parameter names from the headers above:
 
 ```yaml
 # HSA curated APIs. Source of truth — see spec §A.6.
+# Schema: same as HIP curated_apis.yaml; see spec §4.
+
 - api: hsa_queue_create
   category: hsa_queues
   args:
@@ -3835,21 +3894,27 @@ A drift check between the HIP and HSA copies of these four scripts is a recommen
     - {name: private_segment_size, type: uint32, dir: IN}
     - {name: group_segment_size,   type: uint32, dir: IN}
     - {name: queue,                type: handle, dir: OUT}
+
 - api: hsa_queue_destroy
   category: hsa_queues
   args:
     - {name: queue, type: handle, dir: IN}
+
 - api: hsa_amd_queue_intercept_create
   category: hsa_queues
-  args:  # placeholder — fill from real header
-    - {name: agent_handle, type: handle, dir: IN}
-    - {name: size,         type: uint32, dir: IN}
-    - {name: type,         type: enum,   dir: IN}
-    - {name: callback,     type: ptr,    dir: IN}
-    - {name: data,         type: ptr,    dir: IN}
+  notes: |
+    Verified against /opt/rocm/include/hsa/hsa_api_trace.h.
+    Same shape as hsa_queue_create with first param renamed agent_handle.
+  args:
+    - {name: agent_handle,         type: handle, dir: IN}
+    - {name: size,                 type: uint32, dir: IN}
+    - {name: type,                 type: enum,   dir: IN}
+    - {name: callback,             type: ptr,    dir: IN}
+    - {name: data,                 type: ptr,    dir: IN}
     - {name: private_segment_size, type: uint32, dir: IN}
     - {name: group_segment_size,   type: uint32, dir: IN}
-    - {name: queue,        type: handle, dir: OUT}
+    - {name: queue,                type: handle, dir: OUT}
+
 - api: hsa_signal_create
   category: hsa_signals
   args:
@@ -3857,18 +3922,24 @@ A drift check between the HIP and HSA copies of these four scripts is a recommen
     - {name: num_consumers, type: uint32, dir: IN}
     - {name: consumers,     type: ptr,    dir: IN}
     - {name: signal,        type: handle, dir: OUT}
+
 - api: hsa_signal_destroy
   category: hsa_signals
   args:
     - {name: signal, type: handle, dir: IN}
+
 - api: hsa_amd_signal_create
   category: hsa_signals
-  args:  # placeholder — fill from real header
+  notes: |
+    Verified against /opt/rocm/include/hsa/hsa_ext_amd.h. Same as
+    hsa_signal_create with one extra IN attributes:uint64.
+  args:
     - {name: initial_value, type: int64,  dir: IN}
     - {name: num_consumers, type: uint32, dir: IN}
     - {name: consumers,     type: ptr,    dir: IN}
     - {name: attributes,    type: uint64, dir: IN}
     - {name: signal,        type: handle, dir: OUT}
+
 - api: hsa_amd_memory_pool_allocate
   category: hsa_memory
   args:
@@ -3876,13 +3947,16 @@ A drift check between the HIP and HSA copies of these four scripts is a recommen
     - {name: size,        type: size,   dir: IN}
     - {name: flags,       type: uint32, dir: IN}
     - {name: ptr,         type: ptr,    dir: OUT}
+
 - api: hsa_amd_memory_pool_free
   category: hsa_memory
   args:
     - {name: ptr, type: ptr, dir: IN}
+
 - api: hsa_amd_memory_async_copy
   category: hsa_memory
-  args:  # 8 payload + corr_id = 9 total — fits
+  notes: 8 payload + corr_id = 9 total — fits the 9-payload budget.
+  args:
     - {name: dst,               type: ptr,    dir: IN}
     - {name: dst_agent,         type: handle, dir: IN}
     - {name: src,               type: ptr,    dir: IN}
@@ -3891,6 +3965,7 @@ A drift check between the HIP and HSA copies of these four scripts is a recommen
     - {name: num_dep_signals,   type: uint32, dir: IN}
     - {name: dep_signals,       type: ptr,    dir: IN}
     - {name: completion_signal, type: handle, dir: IN}
+
 - api: hsa_amd_memory_async_copy_on_engine
   category: hsa_memory
   notes: |
@@ -3910,24 +3985,65 @@ A drift check between the HIP and HSA copies of these four scripts is a recommen
     - {name: force_copy_on_sdma,  type: bool,   dir: IN}
 ```
 
-- [ ] **Step 3: Verify against real HSA headers (single invocation, multi-header)**
-
-Per Task 4.5, the verifier accepts multiple `--header` values and unions declarations. HSA needs both:
+- [ ] **Step 4: Validate via parser and verifier (multi-header per Task 4.5)**
 
 ```bash
-./dev-bin/in-container.sh main "cd /root/rocm-systems && python3 projects/rocr-runtime/runtime/hsa-runtime/scripts/lttng_curated_verify.py \
+# Parser:
+python3 -c "
+import sys; sys.path.insert(0, 'projects/rocr-runtime/runtime/hsa-runtime/scripts')
+from lttng_curated_lib import parse_yaml_file
+apis = parse_yaml_file('projects/rocr-runtime/runtime/hsa-runtime/scripts/curated_apis.yaml')
+print(f'OK: {len(apis)} APIs validated')
+"
+
+# Verifier (multi-header — see Task 4.5):
+./dev-bin/in-container.sh main "cd /root/rocm-systems && python3 \
+    projects/rocr-runtime/runtime/hsa-runtime/scripts/lttng_curated_verify.py \
     --yaml projects/rocr-runtime/runtime/hsa-runtime/scripts/curated_apis.yaml \
     --header /opt/rocm/include/hsa/hsa.h \
     --header /opt/rocm/include/hsa/hsa_ext_amd.h \
+    --header /opt/rocm/include/hsa/hsa_api_trace.h \
     --extra-arg=-I/opt/rocm/include"
 ```
 
-Expected: `OK: 10 curated APIs verified against 2 header(s)`.
+Expected: `OK: 10 APIs validated` and `OK: 10 curated APIs verified against 3 header(s)`.
 
-- [ ] **Step 4: Generate HSA curated headers**
+- [ ] **Step 5: Commit**
 
 ```bash
-./dev-bin/in-container.sh main "cd /root/rocm-systems && python3 projects/rocr-runtime/runtime/hsa-runtime/scripts/lttng_curated_codegen.py \
+git add projects/rocr-runtime/runtime/hsa-runtime/scripts/curated_apis.yaml \
+        projects/rocr-runtime/runtime/hsa-runtime/scripts/lttng_curated_lib.py \
+        projects/rocr-runtime/runtime/hsa-runtime/scripts/lttng_curated_codegen.py \
+        projects/rocr-runtime/runtime/hsa-runtime/scripts/lttng_curated_verify.py \
+        projects/rocr-runtime/runtime/hsa-runtime/scripts/lttng_migrate_curated_overlay.py
+git commit -m "lttng(hsa): add curated_apis.yaml + copy shared codegen scripts
+
+10 HSA APIs from spec §A.6: queue lifecycle (3), signal lifecycle (3),
+memory pool + async copy (4 — incl. async_copy_on_engine with bool
+force_copy_on_sdma, dep_signals dropped per §4.4).
+
+Parameter names for hsa_amd_queue_intercept_create and
+hsa_amd_signal_create resolved against /opt/rocm/include/hsa/
+hsa_api_trace.h and hsa_ext_amd.h respectively (no placeholders).
+
+Provider-agnostic scripts (lttng_curated_lib.py, codegen, verify,
+overlay) copied byte-identical from projects/clr/hipamd/scripts/.
+Drift between the two copies is a recommended follow-up CI gate."
+```
+
+---
+
+#### Task 15b: Generate + check in HSA curated headers
+
+**Files:**
+- Create (generated): `projects/rocr-runtime/runtime/hsa-runtime/lttng/rocm_hsa_curated_tp.h`
+- Create (generated): `projects/rocr-runtime/runtime/hsa-runtime/lttng/rocm_trace_emit_curated.h`
+
+- [ ] **Step 1: Run codegen with HSA-specific arguments**
+
+```bash
+./dev-bin/in-container.sh main "cd /root/rocm-systems && python3 \
+    projects/rocr-runtime/runtime/hsa-runtime/scripts/lttng_curated_codegen.py \
     --yaml projects/rocr-runtime/runtime/hsa-runtime/scripts/curated_apis.yaml \
     --provider rocm_hsa \
     --status-type hsa_status_t --status-success HSA_STATUS_SUCCESS \
@@ -3935,58 +4051,810 @@ Expected: `OK: 10 curated APIs verified against 2 header(s)`.
     --out-emit projects/rocr-runtime/runtime/hsa-runtime/lttng/rocm_trace_emit_curated.h"
 ```
 
-- [ ] **Step 5: Wire HSA includes** — same as Task 7 but for HSA tp.h and emit.h
+Expected stderr: `wrote ... 10 APIs`.
 
-- [ ] **Step 6: Add HSA `_CURATED_HSA` macros to `hsa_table_interface.cpp`** — same shape as Task 8 but with `hsa_status_t` and `HSA_STATUS_SUCCESS`. The six macro names: `ROCR_TRACE_API_RET_STATUS_CURATED_HSA`, `_PTR_CURATED_HSA`, `_VOID_CURATED_HSA`, plus `_NOARGS` variants. (The existing HSA macro family is `ROCR_TRACE_API_RET_*` per the coverage gate's regex.)
+- [ ] **Step 2: Sanity-check the generated files**
 
-- [ ] **Step 7: Run the HSA migrator overlay** — same as Task 10 but on `hsa_table_interface.cpp`
+```bash
+head -25 projects/rocr-runtime/runtime/hsa-runtime/lttng/rocm_hsa_curated_tp.h
+echo '---'
+sed -n '/hsa_signal_create_args/,/^}$/p' \
+    projects/rocr-runtime/runtime/hsa-runtime/lttng/rocm_trace_emit_curated.h | head -30
+```
 
-- [ ] **Step 8: Update HSA coverage gate** — same as Task 11 but in HSA's gate script
+Verify: `AUTO-GENERATED` comment present, SHA256 prefix present, provider is `rocm_hsa`, helper signature for `hsa_signal_create_args` ends with `hsa_status_t status`, and the OUT-param `signal` body uses `(status == HSA_STATUS_SUCCESS && signal_out_ptr != NULL) ? ... : 0ULL`.
 
-- [ ] **Step 9: Add HSA CMake regenerate target** — same as Task 12 but in HSA's CMakeLists
+- [ ] **Step 3: Commit**
 
-- [ ] **Step 10: Write HSA payload + coverage tests** — same as Task 13 but with HSA APIs
+```bash
+git add projects/rocr-runtime/runtime/hsa-runtime/lttng/rocm_hsa_curated_tp.h \
+        projects/rocr-runtime/runtime/hsa-runtime/lttng/rocm_trace_emit_curated.h
+git commit -m "lttng(hsa): generate curated tp.h + emit.h headers (10 APIs)
 
-- [ ] **Step 11: Build, test end-to-end**
+Generated by lttng_curated_codegen.py from
+projects/rocr-runtime/runtime/hsa-runtime/scripts/curated_apis.yaml,
+with --provider rocm_hsa --status-type hsa_status_t
+--status-success HSA_STATUS_SUCCESS.
+
+Checked-in headers per spec §3.2 — default build consumes these
+directly without invoking Python. Re-running codegen on the same YAML
+produces byte-identical output (CI drift gate).
+
+This commit only adds the headers; they are not yet #included from
+rocm_hsa_tp.h or rocm_trace_emit.h. That wiring lands in 15c so the
+checked-in artifact is reviewable in isolation."
+```
+
+---
+
+#### Task 15c: Wire generated HSA headers into existing HSA tp.h + emit.h
+
+**Files:**
+- Modify: `projects/rocr-runtime/runtime/hsa-runtime/lttng/rocm_hsa_tp.h`
+- Modify: `projects/rocr-runtime/runtime/hsa-runtime/lttng/rocm_trace_emit.h`
+
+- [ ] **Step 1: Locate HSA tp.h insertion point**
+
+```bash
+grep -n 'LTTNG_UST_TRACEPOINT_EVENT\|^#endif' \
+    projects/rocr-runtime/runtime/hsa-runtime/lttng/rocm_hsa_tp.h | tail -8
+```
+
+The closing `#endif` for the file's include guard is the insertion point — the new `#include` must precede it.
+
+- [ ] **Step 2: Add include in `rocm_hsa_tp.h`**
+
+Use the Edit tool to insert immediately before the file's final `#endif`:
+
+```c
+/* Curated per-API typed tracepoint events. Generated by
+ * lttng_curated_codegen.py from curated_apis.yaml. See spec §5.1. */
+#include "rocm_hsa_curated_tp.h"
+```
+
+- [ ] **Step 3: Add include in `rocm_trace_emit.h`**
+
+Find the `HSA_ENABLE_LTTNG_UST` enable branch in the existing emit.h (`grep -n 'HSA_ENABLE_LTTNG_UST' projects/rocr-runtime/runtime/hsa-runtime/lttng/rocm_trace_emit.h`). Inside that branch, after the existing `static inline void rocm_trace_emit_hsa_api_enter` block and before the matching `#else`, insert:
+
+```c
+/* Curated per-API typed emit helpers. Generated; see spec §5.2. */
+#include "rocm_trace_emit_curated.h"
+```
+
+The generated `rocm_trace_emit_curated.h` already includes `rocm_dim3_pack.h` and the curated tp.h transitively, so no extra includes are needed here.
+
+- [ ] **Step 4: Build `hsa-runtime64` to verify the includes are wellformed**
 
 ```bash
 ./dev-bin/sync.sh main
 ./dev-bin/in-container.sh main "cd /root/rocm-systems && cmake --build build/rocr -j 32 --target hsa-runtime64 2>&1 | tail -20"
-./dev-bin/in-container.sh main "cd /root/rocm-systems && bash projects/rocr-runtime/runtime/hsa-runtime/scripts/lttng_coverage_gate.sh ..."
-./dev-bin/in-container.sh main "cd /root/rocm-systems && bash projects/rocr-runtime/runtime/hsa-runtime/test/lttng/test_hsa_curated_args_payload.sh"
-./dev-bin/in-container.sh main "cd /root/rocm-systems && bash projects/rocr-runtime/runtime/hsa-runtime/test/lttng/test_hsa_curated_args_coverage.sh"
 ```
 
-- [ ] **Step 12: Commit (one commit per sub-step or one big "HSA mirror" commit)**
+Expected: build succeeds with no warnings about the curated headers.
 
-Recommended split:
-- commit 1: HSA YAML
-- commit 2: HSA generated headers
-- commit 3: HSA wiring (tp.h, emit.h, _CURATED_HSA macros)
-- commit 4: HSA migrator overlay applied
-- commit 5: HSA coverage gate update
-- commit 6: HSA CMake regenerate target
-- commit 7: HSA payload + coverage tests
+- [ ] **Step 5: Verify HSA curated tracepoint events appear in the .so**
 
 ```bash
-# Example for commit 1:
-git add projects/rocr-runtime/runtime/hsa-runtime/scripts/curated_apis.yaml \
-        projects/rocr-runtime/runtime/hsa-runtime/scripts/lttng_curated_lib.py \
-        projects/rocr-runtime/runtime/hsa-runtime/scripts/lttng_curated_codegen.py \
-        projects/rocr-runtime/runtime/hsa-runtime/scripts/lttng_curated_verify.py \
-        projects/rocr-runtime/runtime/hsa-runtime/scripts/lttng_migrate_curated_overlay.py
-git commit -m "lttng(hsa): add HSA curated_apis.yaml + shared codegen scripts
+./dev-bin/in-container.sh main "cd /root/rocm-systems && nm \
+    build/rocr/runtime/hsa-runtime/libhsa-runtime64.so | \
+    grep '__tracepoint.*_args' | head"
+```
 
-10 HSA APIs from spec §A.6: queue lifecycle (3), signal lifecycle (3),
-memory pool + async copy (4 — incl. async_copy_on_engine with bool
-force_copy_on_sdma, dep_signals dropped per §4.4).
+Expected: lines containing `__tracepoint__rocm_hsa__hsa_queue_create_args`, `_hsa_signal_create_args`, etc.
 
-The codegen / verify / migrate-overlay scripts are copied (not
-symlinked) from the HIP scripts/ to honor the project's monorepo
-no-cross-symlink convention. The library files are byte-identical
-to their HIP counterparts and intentionally so — they are
-provider-agnostic. Future drift between HIP/HSA copies is caught by
-a comparison check in CI (recommended follow-up)."
+- [ ] **Step 6: Commit**
+
+```bash
+git add projects/rocr-runtime/runtime/hsa-runtime/lttng/rocm_hsa_tp.h \
+        projects/rocr-runtime/runtime/hsa-runtime/lttng/rocm_trace_emit.h
+git commit -m "lttng(hsa): wire generated curated tp.h + emit.h into HSA provider
+
+#include rocm_hsa_curated_tp.h from rocm_hsa_tp.h so the per-API
+tracepoint events register alongside the existing generic events
+(hsa_api_enter / hsa_api_exit_*) under the same provider package.
+#include rocm_trace_emit_curated.h from rocm_trace_emit.h so wrappers
+can call the generated helpers.
+
+After this commit libhsa-runtime64.so exposes hsa_queue_create_args,
+hsa_signal_create_args, etc. tracepoint events but no wrapper fires
+them yet — that wiring lands with the migrator overlay in 15e."
+```
+
+---
+
+#### Task 15d: Add six `_CURATED_HSA` macro variants to `hsa_table_interface.cpp`
+
+**Files:**
+- Modify: `projects/rocr-runtime/runtime/hsa-runtime/core/common/hsa_table_interface.cpp`
+
+- [ ] **Step 1: Locate insertion point — verify existing macro family**
+
+```bash
+grep -n 'ROCR_TRACE_API_RET_STATUS\b\|ROCR_TRACE_API_RET_PTR\b\|ROCR_TRACE_API_RET_VOID\b' \
+    projects/rocr-runtime/runtime/hsa-runtime/core/common/hsa_table_interface.cpp | head -6
+```
+
+Expected (per the source verified during plan authoring): macros at lines 53 (STATUS), 61 (PTR), 68 (VOID). Insert the new `_CURATED_HSA` variants immediately after the closing `#endif` (or last macro line) of the existing block.
+
+- [ ] **Step 2: Add the six `_CURATED_HSA` macros**
+
+Insert after the existing macros, per spec §6.5:
+
+```c
+/* ---------- HSA curated parameter-capture variants (spec §6.2 / §6.5)
+ * Six macros: STATUS / PTR / VOID, each with a captured-args form and a
+ * _NOARGS form. The migrator selects _NOARGS iff the curated API has zero
+ * captured args. Helper signature invariant: every helper takes
+ *   (uint64_t corr_id, <captured-args...>, hsa_status_t status)
+ * even when captured-args is empty. Status comes from:
+ *   - STATUS variants: macro-evaluated __rocm_status from the call's expr
+ *   - PTR variants:    synthesized from null-vs-non-null retval (rare on HSA)
+ *   - VOID variants:   literal HSA_STATUS_SUCCESS
+ *
+ * Generic exit events (hsa_api_exit_status / _ptr / _void) are still
+ * emitted by these macros — the typed _args event AUGMENTS the existing
+ * generic event, never replaces it (spec §1, §2).
+ */
+
+/* Captured-args variants. __VA_ARGS__ is non-empty by construction (the
+ * migrator emits the _NOARGS form for zero-arg APIs). */
+#define ROCR_TRACE_API_RET_STATUS_CURATED_HSA(api, expr, corr, ...)          \
+    do {                                                                     \
+        const hsa_status_t __rocm_status = (expr);                           \
+        rocm_trace_emit_##api##_args((corr), __VA_ARGS__, __rocm_status);    \
+        rocm_trace_emit_hsa_api_exit_status(__func__,                        \
+            (corr), (int32_t)__rocm_status);                                 \
+        return __rocm_status;                                                \
+    } while (0)
+
+#define ROCR_TRACE_API_RET_PTR_CURATED_HSA(api, ptr_type, expr, corr, ...)   \
+    do {                                                                     \
+        ptr_type const __rocm_ptr = (expr);                                  \
+        const hsa_status_t __rocm_status =                                   \
+            (__rocm_ptr != nullptr) ? HSA_STATUS_SUCCESS                     \
+                                    : HSA_STATUS_ERROR_OUT_OF_RESOURCES;     \
+        rocm_trace_emit_##api##_args((corr), __VA_ARGS__, __rocm_status);    \
+        rocm_trace_emit_hsa_api_exit_ptr(__func__, (corr), __rocm_ptr);      \
+        return __rocm_ptr;                                                   \
+    } while (0)
+
+#define ROCR_TRACE_API_RET_VOID_CURATED_HSA(api, expr, corr, ...)            \
+    do {                                                                     \
+        (expr);                                                              \
+        rocm_trace_emit_##api##_args((corr), __VA_ARGS__, HSA_STATUS_SUCCESS);\
+        rocm_trace_emit_hsa_api_exit_void(__func__, (corr));                 \
+        return;                                                              \
+    } while (0)
+
+/* Zero-captured-args variants. Mirrors HIP's _NOARGS rationale (mixed
+ * C++ standard surface; avoid empty-__VA_ARGS__ expansion). */
+#define ROCR_TRACE_API_RET_STATUS_CURATED_HSA_NOARGS(api, expr, corr)        \
+    do {                                                                     \
+        const hsa_status_t __rocm_status = (expr);                           \
+        rocm_trace_emit_##api##_args((corr), __rocm_status);                 \
+        rocm_trace_emit_hsa_api_exit_status(__func__,                        \
+            (corr), (int32_t)__rocm_status);                                 \
+        return __rocm_status;                                                \
+    } while (0)
+
+#define ROCR_TRACE_API_RET_PTR_CURATED_HSA_NOARGS(api, ptr_type, expr, corr) \
+    do {                                                                     \
+        ptr_type const __rocm_ptr = (expr);                                  \
+        const hsa_status_t __rocm_status =                                   \
+            (__rocm_ptr != nullptr) ? HSA_STATUS_SUCCESS                     \
+                                    : HSA_STATUS_ERROR_OUT_OF_RESOURCES;     \
+        rocm_trace_emit_##api##_args((corr), __rocm_status);                 \
+        rocm_trace_emit_hsa_api_exit_ptr(__func__, (corr), __rocm_ptr);      \
+        return __rocm_ptr;                                                   \
+    } while (0)
+
+#define ROCR_TRACE_API_RET_VOID_CURATED_HSA_NOARGS(api, expr, corr)          \
+    do {                                                                     \
+        (expr);                                                              \
+        rocm_trace_emit_##api##_args((corr), HSA_STATUS_SUCCESS);            \
+        rocm_trace_emit_hsa_api_exit_void(__func__, (corr));                 \
+        return;                                                              \
+    } while (0)
+```
+
+- [ ] **Step 2.5: Confirm `HSA_STATUS_ERROR_OUT_OF_RESOURCES` is the right sentinel**
+
+```bash
+grep 'HSA_STATUS_ERROR_OUT_OF_RESOURCES' /opt/rocm/include/hsa/hsa.h | head -3
+```
+
+Expected: the symbol exists. If a different "OOM" sentinel is the convention in HSA (some headers use `HSA_STATUS_ERROR`), substitute it before building. The verifier doesn't check this; only the build does.
+
+- [ ] **Step 3: Build to verify the macros compile (no use sites yet)**
+
+```bash
+./dev-bin/sync.sh main
+./dev-bin/in-container.sh main "cd /root/rocm-systems && cmake --build build/rocr -j 32 --target hsa-runtime64 2>&1 | tail -10"
+```
+
+Expected: build succeeds. The macros are defined but unused.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add projects/rocr-runtime/runtime/hsa-runtime/core/common/hsa_table_interface.cpp
+git commit -m "lttng(hsa): add 6 _CURATED_HSA macro variants (STATUS/PTR/VOID + _NOARGS)
+
+Per spec §6.2 / §6.5. Three captured-args variants and three _NOARGS
+variants mirror the existing ROCR_TRACE_API_RET_* macro family. Each
+variant emits the typed <api>_args event AND preserves the matching
+generic exit event (hsa_api_exit_status / _ptr / _void) so the
+augment-not-replace contract from spec §1/§2 holds.
+
+Helper signature invariant: every helper takes (corr_id, captured...,
+status). PTR variants synthesize status from null-vs-non-null retval
+using HSA_STATUS_ERROR_OUT_OF_RESOURCES as the OOM sentinel. VOID
+variants pass literal HSA_STATUS_SUCCESS.
+
+No use sites yet — those land with the HSA migrator overlay in 15e."
+```
+
+---
+
+#### Task 15e: Run the migrator overlay on `hsa_table_interface.cpp`
+
+**Files:**
+- Modify: `projects/rocr-runtime/runtime/hsa-runtime/core/common/hsa_table_interface.cpp`
+
+- [ ] **Step 1: Run the overlay (Option A or Option B per Task 10's pattern)**
+
+The overlay script is the same provider-agnostic file as HIP, invoked with `--provider hsa`:
+
+**Option A (overlay runs locally if libclang is available):**
+
+```bash
+python3 -c "from clang import cindex; print('libclang OK')"
+python3 projects/rocr-runtime/runtime/hsa-runtime/scripts/lttng_migrate_curated_overlay.py \
+    --provider hsa \
+    --source projects/rocr-runtime/runtime/hsa-runtime/core/common/hsa_table_interface.cpp \
+    --curated-yaml projects/rocr-runtime/runtime/hsa-runtime/scripts/curated_apis.yaml \
+    --include-path /opt/rocm/include
+```
+
+**Option B (overlay runs in container, single file copied back via `docker cp` — never `git reset --hard`):**
+
+```bash
+./dev-bin/sync.sh main
+./dev-bin/in-container.sh main "cd /root/rocm-systems && python3 \
+    projects/rocr-runtime/runtime/hsa-runtime/scripts/lttng_migrate_curated_overlay.py \
+    --provider hsa \
+    --source projects/rocr-runtime/runtime/hsa-runtime/core/common/hsa_table_interface.cpp \
+    --curated-yaml projects/rocr-runtime/runtime/hsa-runtime/scripts/curated_apis.yaml \
+    --include-path /opt/rocm/include"
+
+REMOTE_HOST=bewelton@banff-ccs-aus-g05-05.cs-aus.dcgpu
+CONTAINER=bewelton_lttng
+LOCAL_FILE=projects/rocr-runtime/runtime/hsa-runtime/core/common/hsa_table_interface.cpp
+ssh "$REMOTE_HOST" "docker cp ${CONTAINER}:/root/rocm-systems/${LOCAL_FILE} /tmp/hsa_table_interface.cpp.from-container"
+scp "$REMOTE_HOST:/tmp/hsa_table_interface.cpp.from-container" "$LOCAL_FILE"
+ssh "$REMOTE_HOST" "rm -f /tmp/hsa_table_interface.cpp.from-container"
+git diff --stat -- "$LOCAL_FILE"
+```
+
+Expected: `applied <N> edits` where N = 10 sentinels + 10 IN-locals blocks + 10 macro rewrites = 30 edits.
+
+- [ ] **Step 2: Inspect the diff**
+
+```bash
+grep -B 1 -A 4 '__ROCM_CURATED__: hsa_queue_create\|__ROCM_CURATED__: hsa_signal_create\|__ROCM_CURATED__: hsa_amd_memory_async_copy' \
+    projects/rocr-runtime/runtime/hsa-runtime/core/common/hsa_table_interface.cpp | head -40
+```
+
+Verify each of the three spot-checked APIs has the sentinel and a `_CURATED_HSA(...)` (or `_CURATED_HSA_NOARGS`) macro invocation, and that `hsa_signal_destroy` (the only no-IN-arg API; well, single-IN-arg) has the appropriate IN-locals.
+
+- [ ] **Step 3: Build to verify the wrappers compile**
+
+```bash
+./dev-bin/sync.sh main
+./dev-bin/in-container.sh main "cd /root/rocm-systems && cmake --build build/rocr -j 32 --target hsa-runtime64 2>&1 | tail -20"
+```
+
+Expected: build succeeds.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add projects/rocr-runtime/runtime/hsa-runtime/core/common/hsa_table_interface.cpp
+git commit -m "lttng(hsa): overlay curated-args migration on hsa_table_interface.cpp
+
+Applied lttng_migrate_curated_overlay.py --provider hsa to inject the
+sentinel + IN-locals + _CURATED_HSA macro variants for each of the 10
+HSA curated APIs in spec §A.6. Build verified."
+```
+
+---
+
+#### Task 15f: Update HSA `lttng_coverage_gate.sh` for curated checks
+
+**Files:**
+- Modify: `projects/rocr-runtime/runtime/hsa-runtime/scripts/lttng_coverage_gate.sh`
+
+- [ ] **Step 1: Add a curated-coverage gate section**
+
+The HSA gate script's structure mirrors the HIP gate. Append the same Python-driven body-content scan as Task 11 Step 1, but parameterize for HSA. Insert before the final `exit 0`:
+
+```bash
+# ---------------------------------------------------------------------------
+# 3. HSA curated-args coverage gate (spec §8.2)
+# ---------------------------------------------------------------------------
+
+CURATED_YAML="$SCRIPT_DIR/curated_apis.yaml"
+if [ -f "$CURATED_YAML" ]; then
+    python3 -c "
+import sys
+sys.path.insert(0, '$SCRIPT_DIR')
+from lttng_curated_lib import parse_yaml_file
+for a in parse_yaml_file('$CURATED_YAML'):
+    print(a['api'])
+" | sort -u > "$WORK/curated.txt"
+
+    MISSING_FROM_INV="$(comm -23 "$WORK/curated.txt" "$WORK/migrated.txt" || true)"
+    if [ -n "$MISSING_FROM_INV" ]; then
+        echo "FAIL (curated): APIs in HSA curated_apis.yaml are missing from migration inventory:"
+        printf '  %s\n' $MISSING_FROM_INV
+        exit 1
+    fi
+
+    PYTHON_CURATED_GATE="$(cat <<'PY'
+import os, re, sys
+sys.path.insert(0, sys.argv[3])
+from lttng_curated_lib import parse_yaml_file
+
+src_dir   = sys.argv[1]
+yaml_path = sys.argv[2]
+
+apis = parse_yaml_file(yaml_path)
+files = []
+for root, _, fs in os.walk(src_dir):
+    for fn in fs:
+        if fn.endswith('.cpp'):
+            p = os.path.join(root, fn)
+            with open(p, 'rb') as fh:
+                files.append((p, fh.read().decode('utf-8', errors='replace')))
+
+# Spec §8.2 regex matcher — covers all six HSA curated-macro variants.
+MACRO_RE = re.compile(
+    r'ROCR_TRACE_API_RET_(STATUS|PTR|VOID)_CURATED_HSA(_NOARGS)?\s*\(')
+
+def find_body(text, name):
+    pat = re.compile(r'\b' + re.escape(name) + r'\s*\(')
+    for m in pat.finditer(text):
+        depth = 0
+        i = m.end() - 1
+        while i < len(text):
+            if text[i] == '(': depth += 1
+            elif text[i] == ')':
+                depth -= 1
+                if depth == 0:
+                    j = text.find('{', i)
+                    if j < 0: break
+                    bdepth = 0; k = j
+                    while k < len(text):
+                        if text[k] == '{': bdepth += 1
+                        elif text[k] == '}':
+                            bdepth -= 1
+                            if bdepth == 0:
+                                return text[j:k+1]
+                        k += 1
+                    break
+            i += 1
+    return None
+
+failures = []
+for api in apis:
+    name = api['api']
+    sentinel = f'/* __ROCM_CURATED__: {name} */'
+    body = None
+    for path, text in files:
+        b = find_body(text, name)
+        if b and sentinel in b:
+            body = b
+            break
+    if body is None:
+        failures.append(f'{name}: no wrapper body found containing sentinel {sentinel!r}')
+        continue
+    if not MACRO_RE.search(body):
+        failures.append(f'{name}: sentinel present but no _CURATED_HSA macro invocation')
+        continue
+    has_in = any(a['dir'] in ('IN', 'INOUT') for a in api['args'])
+    if has_in and '__rocm_in_' not in body:
+        failures.append(f'{name}: has IN args but no __rocm_in_ locals in body')
+
+if failures:
+    for f in failures:
+        print(f'  CURATED FAIL: {f}')
+    sys.exit(1)
+print(f'CURATED (HSA): {len(apis)} curated APIs verified')
+PY
+)"
+    set +e
+    python3 -c "$PYTHON_CURATED_GATE" "$SRC_DIR" "$CURATED_YAML" "$SCRIPT_DIR" \
+        > "$WORK/curated.log" 2>&1
+    CURATED_RC=$?
+    set -e
+    cat "$WORK/curated.log"
+    if [ "$CURATED_RC" -ne 0 ]; then
+        echo "FAIL: HSA curated-args coverage gate failed"
+        exit 1
+    fi
+fi
+```
+
+(Substitute the actual HSA gate script's existing variable names for `$SCRIPT_DIR`, `$WORK`, `$SRC_DIR` if they differ from the HIP gate's; verify with `head -40 projects/rocr-runtime/runtime/hsa-runtime/scripts/lttng_coverage_gate.sh`.)
+
+Note: the macro regex is HSA-specific (`_CURATED_HSA` suffix only) — distinct from the HIP regex which matches both `_CURATED` and `_CURATED_HSA` per spec §8.2. This is intentional: each gate enforces only its own provider's macros.
+
+- [ ] **Step 2: Run the gate manually**
+
+```bash
+./dev-bin/in-container.sh main "cd /root/rocm-systems && bash \
+    projects/rocr-runtime/runtime/hsa-runtime/scripts/lttng_coverage_gate.sh \
+    build/rocr/runtime/hsa-runtime/libhsa-runtime64.so \
+    projects/rocr-runtime/runtime/hsa-runtime/scripts/lttng_migration_inventory.txt"
+```
+
+Expected: original `PASS: all <N> exported HSA symbols migrated` PLUS `CURATED (HSA): 10 curated APIs verified`.
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add projects/rocr-runtime/runtime/hsa-runtime/scripts/lttng_coverage_gate.sh
+git commit -m "lttng(hsa): extend coverage gate with curated-args checks (spec §8.2)
+
+Mirrors the HIP gate's third section (Task 11) but with the
+HSA-specific macro regex ROCR_TRACE_API_RET_(STATUS|PTR|VOID)_CURATED_HSA(_NOARGS)?
+so the HSA gate enforces only HSA's curated macros.
+
+Skipped silently when curated_apis.yaml is absent (allows gradual
+rollout)."
+```
+
+---
+
+#### Task 15g: Add HSA opt-in `regenerate-lttng-curated-hsa` CMake target
+
+**Files:**
+- Modify: `projects/rocr-runtime/runtime/hsa-runtime/CMakeLists.txt`
+
+- [ ] **Step 1: Locate the HSA `HSA_ENABLE_LTTNG_UST` block**
+
+```bash
+grep -n 'HSA_ENABLE_LTTNG_UST\|find_package.*PkgConfig' \
+    projects/rocr-runtime/runtime/hsa-runtime/CMakeLists.txt | head -10
+```
+
+Note the line range of the block — the new target lives inside it.
+
+- [ ] **Step 2: Add the regenerate target**
+
+Inside the existing `if(HSA_ENABLE_LTTNG_UST)` block (or equivalent guard), insert:
+
+```cmake
+    # ---- Curated parameter-capture: opt-in regeneration target (HSA) ----
+    # Per spec §9.1: default build does NOT regenerate. The custom command
+    # is wired only to the manual `regenerate-lttng-curated-hsa` target so
+    # the build never requires Python or PyYAML. Generated headers are
+    # checked in. CI runs codegen + `git diff --exit-code` to catch drift.
+    find_package(Python3 QUIET COMPONENTS Interpreter)
+    if(Python3_FOUND)
+        set(_HSA_CURATED_YAML  ${CMAKE_CURRENT_LIST_DIR}/scripts/curated_apis.yaml)
+        set(_HSA_CURATED_TP_H  ${CMAKE_CURRENT_LIST_DIR}/lttng/rocm_hsa_curated_tp.h)
+        set(_HSA_CURATED_EMIT_H ${CMAKE_CURRENT_LIST_DIR}/lttng/rocm_trace_emit_curated.h)
+        if(EXISTS ${_HSA_CURATED_YAML})
+            add_custom_command(
+                OUTPUT ${_HSA_CURATED_TP_H} ${_HSA_CURATED_EMIT_H}
+                COMMAND ${Python3_EXECUTABLE}
+                        ${CMAKE_CURRENT_LIST_DIR}/scripts/lttng_curated_codegen.py
+                        --yaml      ${_HSA_CURATED_YAML}
+                        --provider  rocm_hsa
+                        --status-type hsa_status_t
+                        --status-success HSA_STATUS_SUCCESS
+                        --out-tp    ${_HSA_CURATED_TP_H}
+                        --out-emit  ${_HSA_CURATED_EMIT_H}
+                DEPENDS ${_HSA_CURATED_YAML}
+                        ${CMAKE_CURRENT_LIST_DIR}/scripts/lttng_curated_codegen.py
+                        ${CMAKE_CURRENT_LIST_DIR}/scripts/lttng_curated_lib.py
+                COMMENT "Regenerating LTTng curated tracepoints (HSA)"
+            )
+            # Manual target — NOT a dependency of hsa-runtime64. Default
+            # build consumes the checked-in headers directly.
+            add_custom_target(regenerate-lttng-curated-hsa
+                              DEPENDS ${_HSA_CURATED_TP_H} ${_HSA_CURATED_EMIT_H})
+        endif()
+    else()
+        message(STATUS "Python3 not found; HSA LTTng curated regeneration target unavailable.")
+    endif()
+```
+
+The target name `regenerate-lttng-curated-hsa` is distinct from the HIP `regenerate-lttng-curated` so a developer can regenerate one or the other.
+
+- [ ] **Step 3: Verify default build is unaffected and the manual target works**
+
+```bash
+./dev-bin/sync.sh main
+./dev-bin/in-container.sh main "cd /root/rocm-systems && cmake --build build/rocr -j 32 --target hsa-runtime64 2>&1 | tail -10"
+./dev-bin/in-container.sh main "cd /root/rocm-systems && cmake --build build/rocr --target regenerate-lttng-curated-hsa 2>&1 | tail -5"
+```
+
+Expected: hsa-runtime64 builds; regenerate target runs; `git status -- projects/rocr-runtime/runtime/hsa-runtime/lttng/rocm_*.h` shows no changes.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add projects/rocr-runtime/runtime/hsa-runtime/CMakeLists.txt
+git commit -m "lttng(hsa): add opt-in regenerate-lttng-curated-hsa CMake target
+
+Per spec §9.1: default HSA build does NOT regenerate the curated
+headers and does NOT require Python or PyYAML. The custom command
+is wired to a manual target only. Developers regenerate after
+editing the HSA YAML via:
+
+    cmake --build build/rocr --target regenerate-lttng-curated-hsa
+
+CI catches drift via the lttng-curated-gates.yml workflow (Task 13.5)."
+```
+
+---
+
+#### Task 15h: HSA payload + coverage tests
+
+**Files:**
+- Create: `projects/rocr-runtime/runtime/hsa-runtime/test/lttng/test_hsa_curated_args_payload.sh`
+- Create: `projects/rocr-runtime/runtime/hsa-runtime/test/lttng/test_hsa_curated_args_coverage.sh`
+
+- [ ] **Step 1: Write the HSA payload test**
+
+The HSA payload test is structurally identical to Task 13's HIP version but exercises HSA APIs. Pick three representative APIs: `hsa_signal_create` (OUT-param), `hsa_signal_destroy` (single-IN-arg), and `hsa_amd_memory_pool_allocate` (OUT + IN args). Create `projects/rocr-runtime/runtime/hsa-runtime/test/lttng/test_hsa_curated_args_payload.sh`:
+
+```bash
+#!/usr/bin/env bash
+# End-to-end payload test for HSA curated _args events.
+set -euo pipefail
+
+BUILD_LIB_DIR="${1:-$PWD/build/rocr/runtime/hsa-runtime}"
+if [ ! -f "$BUILD_LIB_DIR/libhsa-runtime64.so" ]; then
+    echo "ERROR: $BUILD_LIB_DIR/libhsa-runtime64.so not found" >&2
+    exit 2
+fi
+
+WORK="$(mktemp -d)"
+SESSION_NAME="hsa-lttng-curated-payload-$$"
+export LTTNG_HOME="$WORK/lttng_home"
+mkdir -p "$LTTNG_HOME"
+SESSIOND_PIDFILE="$WORK/sessiond.pid"
+
+cleanup() {
+    set +e
+    lttng destroy "$SESSION_NAME" >/dev/null 2>&1
+    if [ -f "$SESSIOND_PIDFILE" ]; then kill "$(cat $SESSIOND_PIDFILE)" 2>/dev/null; fi
+    rm -rf "$WORK"
+}
+trap cleanup EXIT
+
+# Tiny HSA program with known argument values.
+cat > "$WORK/curated.cpp" <<'EOF'
+#include <hsa/hsa.h>
+#include <stdio.h>
+int main() {
+    hsa_init();
+    // hsa_signal_create with KNOWN initial_value 0x1234 and num_consumers 0.
+    hsa_signal_t sig;
+    hsa_signal_create(0x1234, 0, NULL, &sig);
+    // hsa_signal_destroy with the just-created handle.
+    hsa_signal_destroy(sig);
+    hsa_shut_down();
+    return 0;
+}
+EOF
+
+g++ -std=c++17 "$WORK/curated.cpp" -I/opt/rocm/include \
+    -L "$BUILD_LIB_DIR" -lhsa-runtime64 -Wl,-rpath,"$BUILD_LIB_DIR" \
+    -o "$WORK/curated_test"
+
+lttng-sessiond --daemonize --pidfile "$SESSIOND_PIDFILE"
+TRACE_DIR="$WORK/trace"
+lttng create "$SESSION_NAME" --output "$TRACE_DIR" >/dev/null
+lttng enable-channel --userspace --discard --subbuf-size=32768 --num-subbuf=4 ch1 >/dev/null
+lttng enable-event --userspace --channel=ch1 \
+    'rocm_hsa:hsa_api_enter' \
+    'rocm_hsa:hsa_api_exit_status' \
+    'rocm_hsa:hsa_signal_create_args' \
+    'rocm_hsa:hsa_signal_destroy_args' >/dev/null
+lttng start "$SESSION_NAME" >/dev/null
+
+"$WORK/curated_test"
+
+lttng stop "$SESSION_NAME" >/dev/null
+lttng destroy "$SESSION_NAME" >/dev/null
+
+DUMP="$WORK/trace.txt"
+babeltrace2 "$TRACE_DIR" > "$DUMP"
+
+echo "=== HSA curated payload assertions ==="
+
+# A. hsa_signal_create_args: initial_value == 0x1234, num_consumers == 0.
+if grep 'rocm_hsa:hsa_signal_create_args' "$DUMP" | grep -q 'initial_value = 4660' && \
+   grep 'rocm_hsa:hsa_signal_create_args' "$DUMP" | grep -q 'num_consumers = 0'; then
+    echo "  PASS  hsa_signal_create_args present with correct payload"
+else
+    echo "  FAIL  hsa_signal_create_args missing or payload mismatch"
+    grep 'hsa_signal_create' "$DUMP" || true
+    exit 1
+fi
+
+# B. hsa_signal_destroy_args present.
+if grep -q 'rocm_hsa:hsa_signal_destroy_args' "$DUMP"; then
+    echo "  PASS  hsa_signal_destroy_args present"
+else
+    echo "  FAIL  hsa_signal_destroy_args missing"
+    exit 1
+fi
+
+# C. Generic enter/exit_status preserved (augment-not-replace).
+N_ENTER=$(grep -c 'rocm_hsa:hsa_api_enter' "$DUMP" || true)
+N_EXIT=$(grep -c 'rocm_hsa:hsa_api_exit_status' "$DUMP" || true)
+if [ "$N_ENTER" -ge 2 ] && [ "$N_EXIT" -ge 2 ]; then
+    echo "  PASS  generic enter/exit_status preserved ($N_ENTER enter, $N_EXIT exit_status)"
+else
+    echo "  FAIL  generic event preservation broken"
+    exit 1
+fi
+
+echo "=== ALL HSA PAYLOAD ASSERTIONS PASSED ==="
+exit 0
+```
+
+- [ ] **Step 2: Write the HSA coverage test**
+
+Same shape as Task 13 Step 3's HIP coverage test, with the same C5 fix (`while read api; ...; done < <(python3 -c ...)`):
+
+```bash
+#!/usr/bin/env bash
+# Coverage test: every API in HSA curated_apis.yaml fires its _args event.
+set -euo pipefail
+
+BUILD_LIB_DIR="${1:-$PWD/build/rocr/runtime/hsa-runtime}"
+YAML="${2:-projects/rocr-runtime/runtime/hsa-runtime/scripts/curated_apis.yaml}"
+
+WORK="$(mktemp -d)"
+SESSION_NAME="hsa-lttng-curated-coverage-$$"
+export LTTNG_HOME="$WORK/lttng_home"; mkdir -p "$LTTNG_HOME"
+SESSIOND_PIDFILE="$WORK/sessiond.pid"
+
+cleanup() {
+    set +e
+    lttng destroy "$SESSION_NAME" >/dev/null 2>&1
+    if [ -f "$SESSIOND_PIDFILE" ]; then kill "$(cat $SESSIOND_PIDFILE)" 2>/dev/null; fi
+    rm -rf "$WORK"
+}
+trap cleanup EXIT
+
+# Generate harness from YAML — placeholder args.
+python3 - <<PY > "$WORK/harness.cpp"
+import sys
+sys.path.insert(0, 'projects/rocr-runtime/runtime/hsa-runtime/scripts')
+from lttng_curated_lib import parse_yaml_file
+
+PLACEHOLDERS = {
+    'ptr':         '(void*)0x1000',
+    'handle':      '{ 0 }',                 # hsa_signal_t / hsa_agent_t / hsa_queue_t handle
+    'size':        '64',
+    'int32':       '0', 'uint32': '0', 'int64': '0', 'uint64': '0',
+    'float':       '1.0f', 'enum': '0', 'bool': 'false',
+    'cstring':     '"x"',
+}
+
+print('#include <hsa/hsa.h>')
+print('#include <hsa/hsa_ext_amd.h>')
+print('int main() {')
+print('    hsa_init();')
+for api in parse_yaml_file('$YAML'):
+    name = api['api']
+    args = []
+    for a in api['args']:
+        if a['dir'] == 'OUT':
+            args.append('NULL')
+        elif a['type'] == 'handle':
+            # Pass a default-initialized handle struct via a cast.
+            args.append('hsa_agent_t{}' if 'agent' in a['name']
+                        else ('hsa_queue_t*{}' if a['name'] == 'queue'
+                              else 'hsa_signal_t{}'))
+        else:
+            args.append(PLACEHOLDERS.get(a['type'], '0'))
+    # Wrap in a try/catch-equivalent: HSA APIs return status, never throw.
+    print(f'    {name}({", ".join(args)});')
+print('    hsa_shut_down();')
+print('    return 0;')
+print('}')
+PY
+
+g++ -std=c++17 "$WORK/harness.cpp" -I/opt/rocm/include \
+    -L "$BUILD_LIB_DIR" -lhsa-runtime64 -Wl,-rpath,"$BUILD_LIB_DIR" \
+    -o "$WORK/coverage_test"
+
+lttng-sessiond --daemonize --pidfile "$SESSIOND_PIDFILE"
+TRACE_DIR="$WORK/trace"
+lttng create "$SESSION_NAME" --output "$TRACE_DIR" >/dev/null
+lttng enable-channel --userspace --discard --subbuf-size=32768 --num-subbuf=4 ch1 >/dev/null
+python3 -c "
+import sys
+sys.path.insert(0, 'projects/rocr-runtime/runtime/hsa-runtime/scripts')
+from lttng_curated_lib import parse_yaml_file
+for a in parse_yaml_file('$YAML'):
+    print(f'rocm_hsa:{a[\"api\"]}_args')
+" | xargs -r lttng enable-event --userspace --channel=ch1 >/dev/null
+
+lttng start "$SESSION_NAME" >/dev/null
+"$WORK/coverage_test" || true   # placeholder args may fail; OK
+lttng stop "$SESSION_NAME" >/dev/null
+lttng destroy "$SESSION_NAME" >/dev/null
+
+DUMP="$WORK/trace.txt"
+babeltrace2 "$TRACE_DIR" > "$DUMP"
+
+# IMPORTANT: process substitution, not a pipe — so MISSING accumulates
+# in the parent shell (per the C5 fix in Task 13).
+MISSING=0
+while read api; do
+    if grep -q "rocm_hsa:${api}_args" "$DUMP"; then
+        echo "  PASS  ${api}_args fired"
+    else
+        echo "  FAIL  ${api}_args NOT in trace"
+        MISSING=$((MISSING+1))
+    fi
+done < <(python3 -c "
+import sys
+sys.path.insert(0, 'projects/rocr-runtime/runtime/hsa-runtime/scripts')
+from lttng_curated_lib import parse_yaml_file
+for a in parse_yaml_file('$YAML'):
+    print(a['api'])
+")
+
+if [ "$MISSING" -gt 0 ]; then
+    echo "FAIL: $MISSING HSA curated _args events missing"
+    exit 1
+fi
+echo "PASS: all HSA curated _args events fired"
+```
+
+- [ ] **Step 3: Make tests executable and run them**
+
+```bash
+chmod +x projects/rocr-runtime/runtime/hsa-runtime/test/lttng/test_hsa_curated_args_payload.sh \
+         projects/rocr-runtime/runtime/hsa-runtime/test/lttng/test_hsa_curated_args_coverage.sh
+./dev-bin/sync.sh main
+./dev-bin/in-container.sh main "cd /root/rocm-systems && bash \
+    projects/rocr-runtime/runtime/hsa-runtime/test/lttng/test_hsa_curated_args_payload.sh"
+./dev-bin/in-container.sh main "cd /root/rocm-systems && bash \
+    projects/rocr-runtime/runtime/hsa-runtime/test/lttng/test_hsa_curated_args_coverage.sh"
+```
+
+Expected: payload test prints `=== ALL HSA PAYLOAD ASSERTIONS PASSED ===`, coverage test prints `PASS: all HSA curated _args events fired`.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add projects/rocr-runtime/runtime/hsa-runtime/test/lttng/test_hsa_curated_args_payload.sh \
+        projects/rocr-runtime/runtime/hsa-runtime/test/lttng/test_hsa_curated_args_coverage.sh
+git commit -m "lttng(hsa): add HSA curated-args payload + coverage tests
+
+Payload test: hsa_signal_create (initial_value=0x1234, num_consumers=0),
+hsa_signal_destroy. Asserts payload values match and generic
+enter/exit_status events still fire (augment-not-replace).
+
+Coverage test: harness program is generated from
+projects/rocr-runtime/.../scripts/curated_apis.yaml so new APIs added
+to the YAML are auto-tested. Asserts each <api>_args event appears in
+the trace at least once.
+
+Coverage loop uses process substitution (< <(...)) instead of a pipe
+into 'while read' so the MISSING counter accumulates in the parent
+shell — same fix as the HIP coverage test (C5)."
 ```
 
 ---
