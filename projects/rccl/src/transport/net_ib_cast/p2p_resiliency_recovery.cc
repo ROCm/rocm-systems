@@ -4,7 +4,7 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-#include "p2p_resiliency_recovery.h"
+#include "p2p_resiliency_recovery_cast.h"
 #include <list>
 
 NCCL_PARAM(IbResiliencyPortRecovery, "IB_RESILIENCY_PORT_RECOVERY", 0);
