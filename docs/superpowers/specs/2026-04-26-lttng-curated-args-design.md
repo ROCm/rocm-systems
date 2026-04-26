@@ -374,6 +374,9 @@ Codegen always emits the helper signature with `status` as the last parameter, e
 This invariant is verified by `test_hip_api_tracepoints.sh` (existing) and re-asserted by `test_hip_curated_args_payload.sh` (new): for each curated pointer-returning API, the trace MUST contain both `<api>_args` and `hip_api_exit_ptr` (carrying `retval_ptr`), never `hip_api_exit_status`.
 
 ```c
+/* Captured-args variants (one or more captured args). __VA_ARGS__ is
+   non-empty by construction — see the migrator rule below and the
+   no-arg variants further down. */
 #define ROCM_TRACE_RET_STATUS_CURATED(api, expr, corr, ...)              \
     do {                                                                 \
         const hipError_t __rocm_status = (expr);                         \
@@ -404,9 +407,47 @@ This invariant is verified by `test_hip_api_tracepoints.sh` (existing) and re-as
         rocm_trace_emit_hip_api_exit_void(__func__, (corr));             \
         return;                                                          \
     } while (0)
+
+/* Zero-captured-args variants. Required because the codebase is built
+   under a mix of C++14 / C++17 / C++20 (rocclr.cmake, hiprtc CMakeLists,
+   src/CMakeLists), so __VA_OPT__ is not portable across all
+   translation units. The migrator selects the _NOARGS variant whenever
+   the curated API has zero captured args (e.g. hipDeviceSynchronize) —
+   this avoids any empty-__VA_ARGS__ expansion entirely. */
+#define ROCM_TRACE_RET_STATUS_CURATED_NOARGS(api, expr, corr)            \
+    do {                                                                 \
+        const hipError_t __rocm_status = (expr);                         \
+        rocm_trace_emit_##api##_args((corr), __rocm_status);             \
+        rocm_trace_emit_hip_api_exit_status(__func__,                    \
+            (corr), (int32_t)__rocm_status);                             \
+        return __rocm_status;                                            \
+    } while (0)
+
+#define ROCM_TRACE_RET_PTR_CURATED_NOARGS(api, ptr_type, expr, corr)     \
+    do {                                                                 \
+        ptr_type const __rocm_ptr = (expr);                              \
+        const hipError_t __rocm_status =                                 \
+            (__rocm_ptr != nullptr) ? hipSuccess : hipErrorOutOfMemory;  \
+        rocm_trace_emit_##api##_args((corr), __rocm_status);             \
+        rocm_trace_emit_hip_api_exit_ptr(__func__, (corr), __rocm_ptr);  \
+        return __rocm_ptr;                                               \
+    } while (0)
+
+#define ROCM_TRACE_RET_VOID_CURATED_NOARGS(api, expr, corr)              \
+    do {                                                                 \
+        (expr);                                                          \
+        rocm_trace_emit_##api##_args((corr), hipSuccess);                \
+        rocm_trace_emit_hip_api_exit_void(__func__, (corr));             \
+        return;                                                          \
+    } while (0)
 ```
 
-The migrator rewrites `return <expr>;` to `ROCM_TRACE_RET_STATUS_CURATED(<api>, <expr>, __rocm_corr, <captured-args>);` — the macro itself appends `__rocm_status` to the helper call site. The migrator never emits `__rocm_status` into the macro's variadic arg list.
+The migrator rewrites `return <expr>;` to one of:
+
+- `ROCM_TRACE_RET_STATUS_CURATED(<api>, <expr>, __rocm_corr, <captured-args>);` — when the API has at least one captured arg.
+- `ROCM_TRACE_RET_STATUS_CURATED_NOARGS(<api>, <expr>, __rocm_corr);` — when the API has zero captured args (e.g. `hipDeviceSynchronize`).
+
+The `_NOARGS` variant selection is mechanical: the migrator counts captured args (post `dim3_packed` packing) for the API and emits the `_NOARGS` form iff the count is zero. The macro itself appends `__rocm_status` to the helper call site in either form, so the helper signature invariant of §6.2 ("`corr_id` first, `status` last") holds for no-arg APIs too — the helper signature is just `void rocm_trace_emit_<api>_args(uint64_t corr_id, hipError_t status)`. The migrator never emits `__rocm_status` into the macro's argument list.
 
 Helper signature rule (codegen invariant): the helper for any curated API has signature
 
@@ -453,7 +494,7 @@ On the throw path, the existing `CATCH` / `CATCHRET` macros emit neither `<api>_
 ## 8. Tests
 
 ### 8.1 New test scripts
-- `test_hip_curated_args_payload.sh` — picks ~8 representative APIs across categories; asserts payload field correctness via `babeltrace2` + grep.
+- `test_hip_curated_args_payload.sh` — picks ~8 representative APIs across categories; asserts payload field correctness via `babeltrace2` + grep. Includes at least one zero-captured-args API (`hipDeviceSynchronize`) to verify the `_NOARGS` macro variant compiles cleanly and emits its `_args` event with only `corr_id` payload.
 - `test_hip_curated_args_coverage.sh` — runs a generated helper that calls every curated API; asserts every API's `_args` event appears with matching `corr_id` linkage to generic enter/exit.
 - HSA mirrors of both.
 
