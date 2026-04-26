@@ -48,6 +48,13 @@ public:
     void insert_impl(const writer_types::kernel_dispatch_data_t& data,
                      const writer_types::trace_environment_t&    trace_env)
     {
+        // Guard the entire insert with a transaction so insert_event,
+        // maybe_insert_sample, and any other intermediate writes commit
+        // atomically (or roll back together) with the buffered dispatch row.
+        // The vtable buffer's flush(), which actually persists the dispatch
+        // row, runs against this same transaction's connection later.
+        auto transaction_block = m_ctx->backend->begin_transaction();
+
         m_ctx->validator->require_node(trace_env.node_id)
             .require_process(trace_env.process_id)
             .require_thread(trace_env.thread_id)

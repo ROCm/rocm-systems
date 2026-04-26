@@ -3106,6 +3106,13 @@ TEST_F(writer_test, kernel_dispatch_throw_after_push_does_not_leave_orphan_buffe
     EXPECT_EQ(row_count, 1)
         << "Buffer should contain only the successful dispatch; the failed insert "
            "must not leave an orphan row pushed before the throw.";
+
+    // insert_event runs before maybe_insert_sample throws. Without a
+    // surrounding transaction guard on insert_impl, the event row would
+    // commit independently and survive the throw.
+    auto event_count = count_rows(m_database_path, "rocpd_event", m_uuid);
+    EXPECT_EQ(event_count, 0)
+        << "Event from the rolled-back transaction must not be visible.";
 }
 
 TEST_F(writer_test, memory_copy_throw_after_push_does_not_leave_orphan_buffer_row)
