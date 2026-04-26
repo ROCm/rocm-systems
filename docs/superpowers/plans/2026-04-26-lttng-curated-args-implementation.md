@@ -3592,12 +3592,13 @@ jobs:
             --yaml projects/rocr-runtime/runtime/hsa-runtime/scripts/curated_apis.yaml \
             --header /opt/rocm/include/hsa/hsa.h \
             --header /opt/rocm/include/hsa/hsa_ext_amd.h \
+            --header /opt/rocm/include/hsa/hsa_api_trace.h \
             --extra-arg=-I/opt/rocm/include
-```
+ ```
 
 Notes for the implementer:
 - The exact `runs-on` / `container:` image MUST match what the project's other Python-based gate workflows use. Inspect `hipfile-pylint.yml` etc. and copy that idiom.
-- The verify-gate uses the multi-`--header` form added in Task 4.5 (HSA APIs span `hsa.h` + `hsa_ext_amd.h`).
+- The verify-gate uses the multi-`--header` form added in Task 4.5 (HSA APIs span `hsa.h` + `hsa_ext_amd.h` + `hsa_api_trace.h` — the last one declares `hsa_amd_queue_intercept_create` per Task 15a).
 - If the ROCm-image-required verifier job exceeds the project's allowed CI image surface, run only the drift-gate in CI and file a follow-up to land the verifier in a nightly workflow. Document the choice in the workflow file's top comment.
 
 - [ ] **Step 3: Locally validate the workflow YAML syntax**
