@@ -116,22 +116,30 @@ struct queue_ring_state_t
 std::mutex                                       g_ring_mu;
 std::unordered_map<uint64_t, queue_ring_state_t> g_queue_rings;
 std::atomic<bool>                                g_drainer_stop{true};
-// Lifecycle invariant for g_drainer_thread: g_drainer_running goes
-// true *before* the thread is spawned in start_*() and is cleared
-// only *after* join() completes in stop_*(). A concurrent start_*()
-// observing running==true bails out, guaranteeing the assignment
-// `g_drainer_thread = std::thread{...}` never runs while the
-// existing thread object is still joinable (which would invoke
-// std::terminate). CAS on g_drainer_running gates spawn ownership.
+// Lifecycle serialization for start_*() / stop_*().
 //
-// Stop ownership is selected by a separate CAS on g_drainer_stopping
-// so that two concurrent stop_*() calls cannot both proceed to
-// join() (joining an already-joined thread is undefined behavior).
-// Without this second flag, keeping g_drainer_running==true through
-// the entire stop sequence would leave nothing to arbitrate between
-// concurrent stoppers.
+// All transitions of (g_drainer_thread, g_drainer_running) are made
+// under g_drainer_lifecycle_mu. The drainer thread itself NEVER takes
+// this mutex, so holding it across join() is safe (no self-wait).
+//
+// This single-mutex design closes three classes of race:
+//   1. Concurrent start_*() calls cannot both spawn — the loser
+//      observes g_drainer_running==true under the lock and bails.
+//   2. Concurrent stop_*() calls cannot both join — the loser
+//      observes g_drainer_running==false under the lock and bails.
+//      Critically, a stop_*() loser does NOT return until the
+//      winning stop has completed (lock acquisition serializes them).
+//   3. A start_*() racing a stop_*() cannot interleave with cleanup.
+//      The g_queue_rings.clear() at the tail of stop_*() runs under
+//      the lifecycle mutex, so a follow-on start_*() either sees a
+//      fully-cleaned state (running==false, queue rings empty) and
+//      proceeds, or waits behind the in-progress stop.
+//
+// g_drainer_running stays atomic so that callers outside the
+// lifecycle path (none today, but keep the invariant cheap to
+// reason about) can observe it without taking the mutex.
+std::mutex                             g_drainer_lifecycle_mu;
 std::atomic<bool>                      g_drainer_running{false};
-std::atomic<bool>                      g_drainer_stopping{false};
 std::thread                            g_drainer_thread;
 std::atomic<rocprofiler_dispatch_id_t> g_next_dispatch_id{1};
 
@@ -605,15 +613,19 @@ start_firmware_dispatch_ring_drainer()
 {
     if(!hsa::firmware_dispatch_ring_available()) return;
 
-    // Idempotency guard: only one drainer thread, ever. A second
-    // start_* call while the drainer is already running is a no-op
-    // (rather than an attempt to spawn-and-join, which would try to
-    // join an already-joinable thread and abort).
-    bool expected = false;
-    if(!g_drainer_running.compare_exchange_strong(expected, true)) return;
+    // Serialized against any in-progress stop_*(): if a stop is
+    // running, we wait here until it has cleared g_drainer_running
+    // AND g_queue_rings (both done under this lock), then proceed
+    // with a clean slate. If another start_*() already won, we see
+    // running==true and no-op. The lifecycle mutex guarantees the
+    // assignment to g_drainer_thread never races with the previous
+    // thread still being joinable.
+    std::lock_guard<std::mutex> lk(g_drainer_lifecycle_mu);
+    if(g_drainer_running.load(std::memory_order_acquire)) return;
 
     g_drainer_stop.store(false, std::memory_order_release);
     g_drainer_thread = std::thread{drainer_loop};
+    g_drainer_running.store(true, std::memory_order_release);
 }
 
 void
@@ -627,22 +639,13 @@ unregister_queue(hsa_queue_t* queue)
 void
 stop_firmware_dispatch_ring_drainer()
 {
-    // Stop-side idempotency: a single stopper wins the CAS on
-    // g_drainer_stopping; concurrent or repeat callers return
-    // immediately, avoiding a double join() (UB) and a double
-    // sleep/clear.
-    bool expected_stopping = false;
-    if(!g_drainer_stopping.compare_exchange_strong(expected_stopping, true)) return;
-
-    // Nothing to stop if we never started. Note: we must check this
-    // *after* claiming the stopping CAS, otherwise a start_*() that
-    // races us could flip running true between the load and the CAS
-    // and we'd silently leak a join.
-    if(!g_drainer_running.load(std::memory_order_acquire))
-    {
-        g_drainer_stopping.store(false, std::memory_order_release);
-        return;
-    }
+    // Serialized against concurrent start_*() / stop_*() callers.
+    // Concurrent stoppers queue here and observe running==false on
+    // entry to the critical section, returning safely. A start_*()
+    // racing us cannot proceed until g_queue_rings.clear() below has
+    // executed, so it is impossible to restart the drainer mid-cleanup.
+    std::lock_guard<std::mutex> lifecycle_lk(g_drainer_lifecycle_mu);
+    if(!g_drainer_running.load(std::memory_order_acquire)) return;
 
     // TODO(ai/KNOWN_ISSUES.md item 3): the 10ms grace sleep gives the
     // drainer a few extra cycles to pick up records emitted by recent
@@ -653,16 +656,13 @@ stop_firmware_dispatch_ring_drainer()
     g_drainer_stop.store(true, std::memory_order_release);
     if(g_drainer_thread.joinable()) g_drainer_thread.join();
 
-    // Only now is it safe to advertise "not running": the thread has
-    // been joined, so g_drainer_thread is no longer joinable and a
-    // subsequent start_*() can safely assign a new std::thread into
-    // it. Order matters: clear running before stopping, so that any
-    // start_*() that observes stopping==false on its next attempt
-    // also sees running==false and proceeds to spawn.
     g_drainer_running.store(false, std::memory_order_release);
-    g_drainer_stopping.store(false, std::memory_order_release);
 
-    std::lock_guard<std::mutex> lk(g_ring_mu);
+    // Clear queue rings under the lifecycle mutex so a racing start_*()
+    // cannot observe a half-cleaned state. g_ring_mu is still required
+    // because other paths (register_or_refresh_queue, unregister_queue)
+    // mutate g_queue_rings without holding the lifecycle lock.
+    std::lock_guard<std::mutex> ring_lk(g_ring_mu);
     g_queue_rings.clear();
 }
 
