@@ -9,7 +9,10 @@
 
 #include <gtest/gtest.h>
 
+#include <cstdint>
 #include <cstdio>
+#include <functional>
+#include <limits>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -3215,3 +3218,816 @@ TEST_F(writer_test, pmc_event_throw_after_push_does_not_leave_orphan_buffer_row)
     EXPECT_EQ(event_count, 0)
         << "Event from the rolled-back transaction must not be visible.";
 }
+
+// ============================================================================
+// Group F: WriterCase table-driven tests for the buffered path
+// ============================================================================
+// Each WriterCase exercises one row through a writer, then queries the
+// flushed table to verify the row landed correctly. Cases cover positive
+// (typical), NULL coverage on optional fields, and corner rows (zero,
+// max int64, empty/long strings, max workgroup/grid).
+// ============================================================================
+
+namespace
+{
+
+// One case = a label, a setup callback that registers any extra
+// dependencies, an insert callback that calls the writer, and a verify
+// callback that queries the DB after flush.
+struct writer_case
+{
+    std::string                                                         name;
+    std::function<void(rocpdsna::writer_t&)>                            setup;
+    std::function<void(rocpdsna::writer_t&)>                            insert;
+    std::function<void(const std::string& db, const std::string& uuid)> verify;
+};
+
+struct case_name_printer
+{
+    template <typename ParamType>
+    std::string operator()(const testing::TestParamInfo<ParamType>& info) const
+    {
+        return info.param.name;
+    }
+};
+
+constexpr int64_t k_int64_max = std::numeric_limits<int64_t>::max();
+
+}  // namespace
+
+// Parameterized writer-case fixture: each per-table subclass sets up
+// storage/writer keyed by the case name (the base writer_test::SetUp uses
+// the gtest test name, which for parameterized tests contains "/" and
+// breaks sqlite_open).
+//
+// Define this as a macro so each subclass owns its own SetUp() body that
+// can call the gtest-injected GetParam() with the right type.
+#define WRITER_CASE_SUITE_SETUP(suite_tag)                                               \
+    void SetUp() override                                                                \
+    {                                                                                    \
+        m_database_path =                                                                \
+            std::string("test_writer_") + suite_tag + "_" + GetParam().name + ".db";     \
+        m_uuid    = "12345";                                                             \
+        m_storage = std::make_unique<rocpdsna::storage_t>(m_database_path, m_uuid);      \
+        m_writer  = std::make_shared<rocpdsna::writer_t>(std::move(m_storage));          \
+    }
+
+// --------------------- Kernel Dispatch Cases ---------------------
+
+class kernel_dispatch_writer_case_test
+: public writer_test
+, public ::testing::WithParamInterface<writer_case>
+{
+protected:
+    WRITER_CASE_SUITE_SETUP("kernel_dispatch")
+};
+
+namespace
+{
+
+void
+kernel_dispatch_base_setup(rocpdsna::writer_t& w)
+{
+    w.register_node_info(create_test_node_info(1));
+    w.register_process_info(create_test_process_info(1, 1000));
+    w.register_thread_info(create_test_thread_info(1, 1000, 100));
+    w.register_agent_info(create_test_agent_info(1, 1000, "GPU", 0));
+    w.register_queue_info(create_test_queue_info(1, 1000, 1));
+    w.register_stream_info(create_test_stream_info(1, 1000, 1));
+    w.register_code_object_info(create_test_code_object_info(1, 1, 1000, { "GPU", 0 }));
+    w.register_kernel_symbol_info(create_test_kernel_symbol_info(1, 1, 1000, 1));
+}
+
+rocpdsna::writer_types::trace_environment_t
+kernel_dispatch_full_env()
+{
+    return rocpdsna::writer_types::trace_environment_t{
+        .node_id    = 1,
+        .process_id = 1000,
+        .thread_id  = 100,
+        .agent_id   = rocpdsna::writer_types::agent_unique_id_t{ "GPU", 0 },
+        .stream_id  = 1,
+        .queue_id   = 1,
+        .track_name = std::nullopt
+    };
+}
+
+const std::vector<writer_case> k_kernel_dispatch_cases = {
+    { "minimal_typical_row",
+      &kernel_dispatch_base_setup,
+      [](rocpdsna::writer_t& w) {
+          auto data = create_test_kernel_dispatch_data(1, 1);
+          w.insert_kernel_dispatch_data(data, kernel_dispatch_full_env());
+          w.flush_in_memory_data_to_disk();
+      },
+      [](const std::string& db, const std::string& uuid) {
+          auto rows = query_database(db,
+                                     "SELECT start, end, dispatch_id FROM "
+                                     "rocpd_kernel_dispatch_" +
+                                         uuid);
+          ASSERT_EQ(rows.rows.size(), 1U);
+          EXPECT_EQ(rows.rows[0][0], "1000000");
+          EXPECT_EQ(rows.rows[0][1], "2000000");
+          EXPECT_EQ(rows.rows[0][2], "1");
+      } },
+    { "null_optional_name_id",
+      &kernel_dispatch_base_setup,
+      [](rocpdsna::writer_t& w) {
+          auto data = create_test_kernel_dispatch_data(1, 1);
+          data.name = std::nullopt;
+          w.insert_kernel_dispatch_data(data, kernel_dispatch_full_env());
+          w.flush_in_memory_data_to_disk();
+      },
+      [](const std::string& db, const std::string& uuid) {
+          auto rows = query_database(
+              db, "SELECT region_name_id FROM rocpd_kernel_dispatch_" + uuid);
+          ASSERT_EQ(rows.rows.size(), 1U);
+          EXPECT_EQ(rows.rows[0][0], "NULL");
+      } },
+    { "max_int64_timestamps_and_workgroup",
+      &kernel_dispatch_base_setup,
+      [](rocpdsna::writer_t& w) {
+          auto data             = create_test_kernel_dispatch_data(1, 1);
+          data.start_timestamp  = static_cast<size_t>(k_int64_max - 1);
+          data.end_timestamp    = static_cast<size_t>(k_int64_max);
+          data.workgroup_size_x = static_cast<size_t>(k_int64_max);
+          data.grid_size_z      = static_cast<size_t>(k_int64_max);
+          w.insert_kernel_dispatch_data(data, kernel_dispatch_full_env());
+          w.flush_in_memory_data_to_disk();
+      },
+      [](const std::string& db, const std::string& uuid) {
+          auto rows = query_database(db,
+                                     "SELECT start, end, workgroup_size_x, grid_size_z "
+                                     "FROM rocpd_kernel_dispatch_" +
+                                         uuid);
+          ASSERT_EQ(rows.rows.size(), 1U);
+          EXPECT_EQ(rows.rows[0][0], std::to_string(k_int64_max - 1));
+          EXPECT_EQ(rows.rows[0][1], std::to_string(k_int64_max));
+          EXPECT_EQ(rows.rows[0][2], std::to_string(k_int64_max));
+          EXPECT_EQ(rows.rows[0][3], std::to_string(k_int64_max));
+      } },
+    { "zero_timestamps_and_grid",
+      &kernel_dispatch_base_setup,
+      [](rocpdsna::writer_t& w) {
+          auto data             = create_test_kernel_dispatch_data(1, 1);
+          data.start_timestamp  = 0;
+          data.end_timestamp    = 0;
+          data.workgroup_size_x = 0;
+          data.workgroup_size_y = 0;
+          data.workgroup_size_z = 0;
+          data.grid_size_x      = 0;
+          data.grid_size_y      = 0;
+          data.grid_size_z      = 0;
+          w.insert_kernel_dispatch_data(data, kernel_dispatch_full_env());
+          w.flush_in_memory_data_to_disk();
+      },
+      [](const std::string& db, const std::string& uuid) {
+          auto rows = query_database(db,
+                                     "SELECT start, end, workgroup_size_x, grid_size_x "
+                                     "FROM rocpd_kernel_dispatch_" +
+                                         uuid);
+          ASSERT_EQ(rows.rows.size(), 1U);
+          EXPECT_EQ(rows.rows[0][0], "0");
+          EXPECT_EQ(rows.rows[0][1], "0");
+          EXPECT_EQ(rows.rows[0][2], "0");
+          EXPECT_EQ(rows.rows[0][3], "0");
+      } },
+    { "very_long_extdata",
+      &kernel_dispatch_base_setup,
+      [](rocpdsna::writer_t& w) {
+          static const std::string long_blob =
+              "{\"k\":\"" + std::string(8192, 'x') + "\"}";
+          auto data    = create_test_kernel_dispatch_data(1, 1);
+          data.extdata = long_blob;
+          w.insert_kernel_dispatch_data(data, kernel_dispatch_full_env());
+          w.flush_in_memory_data_to_disk();
+      },
+      [](const std::string& db, const std::string& uuid) {
+          auto rows = query_database(
+              db, "SELECT length(extdata) FROM rocpd_kernel_dispatch_" + uuid);
+          ASSERT_EQ(rows.rows.size(), 1U);
+          EXPECT_EQ(rows.rows[0][0], std::to_string(6 + 8192 + 2));
+      } },
+    { "many_rows_one_flush",
+      &kernel_dispatch_base_setup,
+      [](rocpdsna::writer_t& w) {
+          for(size_t i = 0; i < 50; ++i)
+          {
+              auto data            = create_test_kernel_dispatch_data(1, 1);
+              data.dispatch_id     = i;
+              data.start_timestamp = i * 1000;
+              data.end_timestamp   = i * 1000 + 500;
+              w.insert_kernel_dispatch_data(data, kernel_dispatch_full_env());
+          }
+          w.flush_in_memory_data_to_disk();
+      },
+      [](const std::string& db, const std::string& uuid) {
+          auto rows = query_database(
+              db,
+              "SELECT COUNT(*), MIN(start), MAX(end) FROM rocpd_kernel_dispatch_" + uuid);
+          ASSERT_EQ(rows.rows.size(), 1U);
+          EXPECT_EQ(rows.rows[0][0], "50");
+          EXPECT_EQ(rows.rows[0][1], "0");
+          EXPECT_EQ(rows.rows[0][2], "49500");
+      } },
+};
+
+}  // namespace
+
+TEST_P(kernel_dispatch_writer_case_test, buffered_writer_round_trip)
+{
+    const auto& tc = GetParam();
+    tc.setup(*m_writer);
+    tc.insert(*m_writer);
+    tc.verify(m_database_path, m_uuid);
+}
+
+INSTANTIATE_TEST_SUITE_P(buffered_writer_cases,
+                         kernel_dispatch_writer_case_test,
+                         ::testing::ValuesIn(k_kernel_dispatch_cases),
+                         case_name_printer{});
+
+// --------------------- Memory Copy Cases ---------------------
+
+class memory_copy_writer_case_test
+: public writer_test
+, public ::testing::WithParamInterface<writer_case>
+{
+protected:
+    WRITER_CASE_SUITE_SETUP("memory_copy")
+};
+
+namespace
+{
+
+void
+memory_copy_base_setup(rocpdsna::writer_t& w)
+{
+    w.register_node_info(create_test_node_info(1));
+    w.register_process_info(create_test_process_info(1, 1000));
+    w.register_thread_info(create_test_thread_info(1, 1000, 100));
+}
+
+void
+memory_copy_with_agents_setup(rocpdsna::writer_t& w)
+{
+    memory_copy_base_setup(w);
+    w.register_agent_info(create_test_agent_info(1, 1000, "GPU", 0));
+    w.register_agent_info(create_test_agent_info(1, 1000, "CPU", 0));
+    w.register_queue_info(create_test_queue_info(1, 1000, 1));
+    w.register_stream_info(create_test_stream_info(1, 1000, 1));
+}
+
+const std::vector<writer_case> k_memory_copy_cases = {
+    { "minimal_typical_row",
+      &memory_copy_base_setup,
+      [](rocpdsna::writer_t& w) {
+          auto data     = create_test_memory_copy_data();
+          auto env      = create_test_trace_environment(1, 1000, 100);
+          env.thread_id = std::nullopt;
+          w.insert_memory_copy_data(data, env);
+          w.flush_in_memory_data_to_disk();
+      },
+      [](const std::string& db, const std::string& uuid) {
+          auto rows = query_database(
+              db, "SELECT start, end, size, tid FROM rocpd_memory_copy_" + uuid);
+          ASSERT_EQ(rows.rows.size(), 1U);
+          EXPECT_EQ(rows.rows[0][0], "1000000");
+          EXPECT_EQ(rows.rows[0][1], "2000000");
+          EXPECT_EQ(rows.rows[0][2], "4096");
+          EXPECT_EQ(rows.rows[0][3], "NULL");
+      } },
+    { "all_optional_addresses_null",
+      &memory_copy_base_setup,
+      [](rocpdsna::writer_t& w) {
+          auto data        = create_test_memory_copy_data();
+          data.dst_address = std::nullopt;
+          data.src_address = std::nullopt;
+          auto env         = create_test_trace_environment(1, 1000, 100);
+          env.thread_id    = std::nullopt;
+          w.insert_memory_copy_data(data, env);
+          w.flush_in_memory_data_to_disk();
+      },
+      [](const std::string& db, const std::string& uuid) {
+          auto rows = query_database(
+              db, "SELECT dst_address, src_address FROM rocpd_memory_copy_" + uuid);
+          ASSERT_EQ(rows.rows.size(), 1U);
+          EXPECT_EQ(rows.rows[0][0], "NULL");
+          EXPECT_EQ(rows.rows[0][1], "NULL");
+      } },
+    { "with_both_agents_and_queue",
+      &memory_copy_with_agents_setup,
+      [](rocpdsna::writer_t& w) {
+          auto data         = create_test_memory_copy_data();
+          data.src_agent_id = rocpdsna::writer_types::agent_unique_id_t{ "CPU", 0 };
+          data.dst_agent_id = rocpdsna::writer_types::agent_unique_id_t{ "GPU", 0 };
+          auto env =
+              rocpdsna::writer_types::trace_environment_t{ .node_id    = 1,
+                                                           .process_id = 1000,
+                                                           .thread_id  = 100,
+                                                           .agent_id   = std::nullopt,
+                                                           .stream_id  = 1,
+                                                           .queue_id   = 1,
+                                                           .track_name = std::nullopt };
+          w.insert_memory_copy_data(data, env);
+          w.flush_in_memory_data_to_disk();
+      },
+      [](const std::string& db, const std::string& uuid) {
+          auto rows = query_database(db,
+                                     "SELECT dst_agent_id IS NOT NULL, src_agent_id IS "
+                                     "NOT NULL, queue_id IS NOT NULL FROM "
+                                     "rocpd_memory_copy_" +
+                                         uuid);
+          ASSERT_EQ(rows.rows.size(), 1U);
+          EXPECT_EQ(rows.rows[0][0], "1");
+          EXPECT_EQ(rows.rows[0][1], "1");
+          EXPECT_EQ(rows.rows[0][2], "1");
+      } },
+    { "max_int64_size_and_addresses",
+      &memory_copy_base_setup,
+      [](rocpdsna::writer_t& w) {
+          auto data        = create_test_memory_copy_data();
+          data.size        = static_cast<size_t>(k_int64_max);
+          data.dst_address = static_cast<size_t>(k_int64_max);
+          data.src_address = static_cast<size_t>(k_int64_max - 1);
+          auto env         = create_test_trace_environment(1, 1000, 100);
+          env.thread_id    = std::nullopt;
+          w.insert_memory_copy_data(data, env);
+          w.flush_in_memory_data_to_disk();
+      },
+      [](const std::string& db, const std::string& uuid) {
+          auto rows = query_database(
+              db, "SELECT size, dst_address, src_address FROM rocpd_memory_copy_" + uuid);
+          ASSERT_EQ(rows.rows.size(), 1U);
+          EXPECT_EQ(rows.rows[0][0], std::to_string(k_int64_max));
+          EXPECT_EQ(rows.rows[0][1], std::to_string(k_int64_max));
+          EXPECT_EQ(rows.rows[0][2], std::to_string(k_int64_max - 1));
+      } },
+    { "zero_size_copy",
+      &memory_copy_base_setup,
+      [](rocpdsna::writer_t& w) {
+          auto data     = create_test_memory_copy_data();
+          data.size     = 0;
+          auto env      = create_test_trace_environment(1, 1000, 100);
+          env.thread_id = std::nullopt;
+          w.insert_memory_copy_data(data, env);
+          w.flush_in_memory_data_to_disk();
+      },
+      [](const std::string& db, const std::string& uuid) {
+          auto rows = query_database(db, "SELECT size FROM rocpd_memory_copy_" + uuid);
+          ASSERT_EQ(rows.rows.size(), 1U);
+          EXPECT_EQ(rows.rows[0][0], "0");
+      } },
+    { "with_region_name",
+      &memory_copy_base_setup,
+      [](rocpdsna::writer_t& w) {
+          auto data        = create_test_memory_copy_data();
+          data.region_name = "user_marker_region";
+          auto env         = create_test_trace_environment(1, 1000, 100);
+          env.thread_id    = std::nullopt;
+          w.insert_memory_copy_data(data, env);
+          w.flush_in_memory_data_to_disk();
+      },
+      [](const std::string& db, const std::string& uuid) {
+          auto rows = query_database(
+              db, "SELECT region_name_id IS NOT NULL FROM rocpd_memory_copy_" + uuid);
+          ASSERT_EQ(rows.rows.size(), 1U);
+          EXPECT_EQ(rows.rows[0][0], "1");
+      } },
+};
+
+}  // namespace
+
+TEST_P(memory_copy_writer_case_test, buffered_writer_round_trip)
+{
+    const auto& tc = GetParam();
+    tc.setup(*m_writer);
+    tc.insert(*m_writer);
+    tc.verify(m_database_path, m_uuid);
+}
+
+INSTANTIATE_TEST_SUITE_P(buffered_writer_cases,
+                         memory_copy_writer_case_test,
+                         ::testing::ValuesIn(k_memory_copy_cases),
+                         case_name_printer{});
+
+// --------------------- Memory Alloc Cases ---------------------
+
+class memory_alloc_writer_case_test
+: public writer_test
+, public ::testing::WithParamInterface<writer_case>
+{
+protected:
+    WRITER_CASE_SUITE_SETUP("memory_alloc")
+};
+
+namespace
+{
+
+void
+memory_alloc_base_setup(rocpdsna::writer_t& w)
+{
+    w.register_node_info(create_test_node_info(1));
+    w.register_process_info(create_test_process_info(1, 1000));
+}
+
+const std::vector<writer_case> k_memory_alloc_cases = {
+    { "alloc_real_typical",
+      &memory_alloc_base_setup,
+      [](rocpdsna::writer_t& w) {
+          auto data     = create_test_memory_alloc_data("ALLOC", "REAL");
+          auto env      = create_test_trace_environment(1, 1000, 100);
+          env.thread_id = std::nullopt;
+          w.insert_memory_alloc_data(data, env);
+          w.flush_in_memory_data_to_disk();
+      },
+      [](const std::string& db, const std::string& uuid) {
+          auto rows = query_database(
+              db, "SELECT type, level, size FROM rocpd_memory_allocate_" + uuid);
+          ASSERT_EQ(rows.rows.size(), 1U);
+          EXPECT_EQ(rows.rows[0][0], "ALLOC");
+          EXPECT_EQ(rows.rows[0][1], "REAL");
+          EXPECT_EQ(rows.rows[0][2], "4096");
+      } },
+    { "free_virtual",
+      &memory_alloc_base_setup,
+      [](rocpdsna::writer_t& w) {
+          auto data     = create_test_memory_alloc_data("FREE", "VIRTUAL");
+          auto env      = create_test_trace_environment(1, 1000, 100);
+          env.thread_id = std::nullopt;
+          w.insert_memory_alloc_data(data, env);
+          w.flush_in_memory_data_to_disk();
+      },
+      [](const std::string& db, const std::string& uuid) {
+          auto rows =
+              query_database(db, "SELECT type, level FROM rocpd_memory_allocate_" + uuid);
+          ASSERT_EQ(rows.rows.size(), 1U);
+          EXPECT_EQ(rows.rows[0][0], "FREE");
+          EXPECT_EQ(rows.rows[0][1], "VIRTUAL");
+      } },
+    { "null_type_and_level",
+      &memory_alloc_base_setup,
+      [](rocpdsna::writer_t& w) {
+          auto data     = create_test_memory_alloc_data(std::nullopt, std::nullopt);
+          auto env      = create_test_trace_environment(1, 1000, 100);
+          env.thread_id = std::nullopt;
+          w.insert_memory_alloc_data(data, env);
+          w.flush_in_memory_data_to_disk();
+      },
+      [](const std::string& db, const std::string& uuid) {
+          auto rows =
+              query_database(db, "SELECT type, level FROM rocpd_memory_allocate_" + uuid);
+          ASSERT_EQ(rows.rows.size(), 1U);
+          EXPECT_EQ(rows.rows[0][0], "NULL");
+          EXPECT_EQ(rows.rows[0][1], "NULL");
+      } },
+    { "null_address",
+      &memory_alloc_base_setup,
+      [](rocpdsna::writer_t& w) {
+          auto data     = create_test_memory_alloc_data("ALLOC", "REAL");
+          data.address  = std::nullopt;
+          auto env      = create_test_trace_environment(1, 1000, 100);
+          env.thread_id = std::nullopt;
+          w.insert_memory_alloc_data(data, env);
+          w.flush_in_memory_data_to_disk();
+      },
+      [](const std::string& db, const std::string& uuid) {
+          auto rows =
+              query_database(db, "SELECT address FROM rocpd_memory_allocate_" + uuid);
+          ASSERT_EQ(rows.rows.size(), 1U);
+          EXPECT_EQ(rows.rows[0][0], "NULL");
+      } },
+    { "max_int64_size_and_address",
+      &memory_alloc_base_setup,
+      [](rocpdsna::writer_t& w) {
+          auto data     = create_test_memory_alloc_data("ALLOC", "REAL");
+          data.size     = static_cast<size_t>(k_int64_max);
+          data.address  = static_cast<size_t>(k_int64_max - 1);
+          auto env      = create_test_trace_environment(1, 1000, 100);
+          env.thread_id = std::nullopt;
+          w.insert_memory_alloc_data(data, env);
+          w.flush_in_memory_data_to_disk();
+      },
+      [](const std::string& db, const std::string& uuid) {
+          auto rows = query_database(
+              db, "SELECT size, address FROM rocpd_memory_allocate_" + uuid);
+          ASSERT_EQ(rows.rows.size(), 1U);
+          EXPECT_EQ(rows.rows[0][0], std::to_string(k_int64_max));
+          EXPECT_EQ(rows.rows[0][1], std::to_string(k_int64_max - 1));
+      } },
+    { "reclaim_scratch",
+      &memory_alloc_base_setup,
+      [](rocpdsna::writer_t& w) {
+          auto data     = create_test_memory_alloc_data("RECLAIM", "SCRATCH");
+          auto env      = create_test_trace_environment(1, 1000, 100);
+          env.thread_id = std::nullopt;
+          w.insert_memory_alloc_data(data, env);
+          w.flush_in_memory_data_to_disk();
+      },
+      [](const std::string& db, const std::string& uuid) {
+          auto rows =
+              query_database(db, "SELECT type, level FROM rocpd_memory_allocate_" + uuid);
+          ASSERT_EQ(rows.rows.size(), 1U);
+          EXPECT_EQ(rows.rows[0][0], "RECLAIM");
+          EXPECT_EQ(rows.rows[0][1], "SCRATCH");
+      } },
+    { "many_rows_one_flush",
+      &memory_alloc_base_setup,
+      [](rocpdsna::writer_t& w) {
+          auto env      = create_test_trace_environment(1, 1000, 100);
+          env.thread_id = std::nullopt;
+          for(size_t i = 0; i < 25; ++i)
+          {
+              auto data            = create_test_memory_alloc_data("ALLOC", "REAL");
+              data.start_timestamp = i * 1000;
+              data.end_timestamp   = i * 1000 + 100;
+              data.address         = static_cast<size_t>(0x10000 + i * 0x1000);
+              data.size            = (i + 1) * 1024;
+              w.insert_memory_alloc_data(data, env);
+          }
+          w.flush_in_memory_data_to_disk();
+      },
+      [](const std::string& db, const std::string& uuid) {
+          auto rows = query_database(
+              db, "SELECT COUNT(*), SUM(size) FROM rocpd_memory_allocate_" + uuid);
+          ASSERT_EQ(rows.rows.size(), 1U);
+          EXPECT_EQ(rows.rows[0][0], "25");
+          EXPECT_EQ(rows.rows[0][1], std::to_string(25 * 26 / 2 * 1024));
+      } },
+};
+
+}  // namespace
+
+TEST_P(memory_alloc_writer_case_test, buffered_writer_round_trip)
+{
+    const auto& tc = GetParam();
+    tc.setup(*m_writer);
+    tc.insert(*m_writer);
+    tc.verify(m_database_path, m_uuid);
+}
+
+INSTANTIATE_TEST_SUITE_P(buffered_writer_cases,
+                         memory_alloc_writer_case_test,
+                         ::testing::ValuesIn(k_memory_alloc_cases),
+                         case_name_printer{});
+
+// --------------------- Region Cases ---------------------
+
+class region_writer_case_test
+: public writer_test
+, public ::testing::WithParamInterface<writer_case>
+{
+protected:
+    WRITER_CASE_SUITE_SETUP("region")
+};
+
+namespace
+{
+
+void
+region_base_setup(rocpdsna::writer_t& w)
+{
+    w.register_node_info(create_test_node_info(1));
+    w.register_process_info(create_test_process_info(1, 1000));
+    w.register_thread_info(create_test_thread_info(1, 1000, 100));
+}
+
+const std::vector<writer_case> k_region_cases = {
+    { "minimal_typical_row",
+      &region_base_setup,
+      [](rocpdsna::writer_t& w) {
+          auto data = create_test_region_data("hipMalloc");
+          auto env  = create_test_trace_environment(1, 1000, 100);
+          w.insert_region_data(data, env);
+          w.flush_in_memory_data_to_disk();
+      },
+      [](const std::string& db, const std::string& uuid) {
+          auto rows = query_database(db, "SELECT start, end FROM rocpd_region_" + uuid);
+          ASSERT_EQ(rows.rows.size(), 1U);
+          EXPECT_EQ(rows.rows[0][0], "1000000");
+          EXPECT_EQ(rows.rows[0][1], "2000000");
+      } },
+    { "null_event",
+      &region_base_setup,
+      [](rocpdsna::writer_t& w) {
+          auto data  = create_test_region_data("hipFree");
+          data.event = std::nullopt;
+          auto env   = create_test_trace_environment(1, 1000, 100);
+          w.insert_region_data(data, env);
+          w.flush_in_memory_data_to_disk();
+      },
+      [](const std::string& db, const std::string& uuid) {
+          auto rows = query_database(db, "SELECT event_id FROM rocpd_region_" + uuid);
+          ASSERT_EQ(rows.rows.size(), 1U);
+          EXPECT_EQ(rows.rows[0][0], "NULL");
+      } },
+    { "max_int64_timestamps",
+      &region_base_setup,
+      [](rocpdsna::writer_t& w) {
+          auto data = create_test_region_data("long_region",
+                                              static_cast<size_t>(k_int64_max - 1),
+                                              static_cast<size_t>(k_int64_max));
+          auto env  = create_test_trace_environment(1, 1000, 100);
+          w.insert_region_data(data, env);
+          w.flush_in_memory_data_to_disk();
+      },
+      [](const std::string& db, const std::string& uuid) {
+          auto rows = query_database(db, "SELECT start, end FROM rocpd_region_" + uuid);
+          ASSERT_EQ(rows.rows.size(), 1U);
+          EXPECT_EQ(rows.rows[0][0], std::to_string(k_int64_max - 1));
+          EXPECT_EQ(rows.rows[0][1], std::to_string(k_int64_max));
+      } },
+    { "zero_duration",
+      &region_base_setup,
+      [](rocpdsna::writer_t& w) {
+          auto data = create_test_region_data("instant_marker", 5000, 5000);
+          auto env  = create_test_trace_environment(1, 1000, 100);
+          w.insert_region_data(data, env);
+          w.flush_in_memory_data_to_disk();
+      },
+      [](const std::string& db, const std::string& uuid) {
+          auto rows = query_database(db, "SELECT start, end FROM rocpd_region_" + uuid);
+          ASSERT_EQ(rows.rows.size(), 1U);
+          EXPECT_EQ(rows.rows[0][0], "5000");
+          EXPECT_EQ(rows.rows[0][1], "5000");
+      } },
+    { "very_long_extdata",
+      &region_base_setup,
+      [](rocpdsna::writer_t& w) {
+          static const std::string blob = "{\"k\":\"" + std::string(4096, 'q') + "\"}";
+          auto                     data = create_test_region_data("with_blob");
+          data.extdata                  = blob;
+          auto env                      = create_test_trace_environment(1, 1000, 100);
+          w.insert_region_data(data, env);
+          w.flush_in_memory_data_to_disk();
+      },
+      [](const std::string& db, const std::string& uuid) {
+          auto rows =
+              query_database(db, "SELECT length(extdata) FROM rocpd_region_" + uuid);
+          ASSERT_EQ(rows.rows.size(), 1U);
+          EXPECT_EQ(rows.rows[0][0], std::to_string(6 + 4096 + 2));
+      } },
+    { "many_rows_one_flush",
+      &region_base_setup,
+      [](rocpdsna::writer_t& w) {
+          auto env = create_test_trace_environment(1, 1000, 100);
+          for(size_t i = 0; i < 30; ++i)
+          {
+              auto data = create_test_region_data("region", i * 1000, i * 1000 + 200);
+              w.insert_region_data(data, env);
+          }
+          w.flush_in_memory_data_to_disk();
+      },
+      [](const std::string& db, const std::string& uuid) {
+          auto rows = query_database(
+              db, "SELECT COUNT(*), MIN(start), MAX(end) FROM rocpd_region_" + uuid);
+          ASSERT_EQ(rows.rows.size(), 1U);
+          EXPECT_EQ(rows.rows[0][0], "30");
+          EXPECT_EQ(rows.rows[0][1], "0");
+          EXPECT_EQ(rows.rows[0][2], "29200");
+      } },
+};
+
+}  // namespace
+
+TEST_P(region_writer_case_test, buffered_writer_round_trip)
+{
+    const auto& tc = GetParam();
+    tc.setup(*m_writer);
+    tc.insert(*m_writer);
+    tc.verify(m_database_path, m_uuid);
+}
+
+INSTANTIATE_TEST_SUITE_P(buffered_writer_cases,
+                         region_writer_case_test,
+                         ::testing::ValuesIn(k_region_cases),
+                         case_name_printer{});
+
+// --------------------- PMC Event Cases ---------------------
+
+class pmc_event_writer_case_test
+: public writer_test
+, public ::testing::WithParamInterface<writer_case>
+{
+protected:
+    WRITER_CASE_SUITE_SETUP("pmc_event")
+};
+
+namespace
+{
+
+void
+pmc_event_base_setup(rocpdsna::writer_t& w)
+{
+    w.register_node_info(create_test_node_info(1));
+    w.register_process_info(create_test_process_info(1, 1000));
+    w.register_agent_info(create_test_agent_info(1, 1000, "GPU", 0));
+    rocpdsna::writer_types::agent_unique_id_t agent_id{ "GPU", 0 };
+    w.register_pmc_info(create_test_pmc_info(1, 1000, "my_counter", agent_id));
+}
+
+rocpdsna::writer_types::pmc_info_unique_id_t
+pmc_event_unique_id()
+{
+    return rocpdsna::writer_types::pmc_info_unique_id_t{
+        .name     = "my_counter",
+        .agent_id = rocpdsna::writer_types::agent_unique_id_t{ "GPU", 0 }
+    };
+}
+
+const std::vector<writer_case> k_pmc_event_cases = {
+    { "positive_typical_value",
+      &pmc_event_base_setup,
+      [](rocpdsna::writer_t& w) {
+          auto data = create_test_pmc_event_data(42.5);
+          w.insert_pmc_event_data(data, pmc_event_unique_id());
+          w.flush_in_memory_data_to_disk();
+      },
+      [](const std::string& db, const std::string& uuid) {
+          auto rows = query_database(db, "SELECT value FROM rocpd_pmc_event_" + uuid);
+          ASSERT_EQ(rows.rows.size(), 1U);
+          EXPECT_EQ(rows.rows[0][0], "42.5");
+      } },
+    { "zero_value",
+      &pmc_event_base_setup,
+      [](rocpdsna::writer_t& w) {
+          auto data = create_test_pmc_event_data(0.0);
+          w.insert_pmc_event_data(data, pmc_event_unique_id());
+          w.flush_in_memory_data_to_disk();
+      },
+      [](const std::string& db, const std::string& uuid) {
+          auto rows = query_database(db, "SELECT value FROM rocpd_pmc_event_" + uuid);
+          ASSERT_EQ(rows.rows.size(), 1U);
+          EXPECT_EQ(rows.rows[0][0], "0.0");
+      } },
+    { "negative_value",
+      &pmc_event_base_setup,
+      [](rocpdsna::writer_t& w) {
+          auto data = create_test_pmc_event_data(-1234.5);
+          w.insert_pmc_event_data(data, pmc_event_unique_id());
+          w.flush_in_memory_data_to_disk();
+      },
+      [](const std::string& db, const std::string& uuid) {
+          auto rows = query_database(db, "SELECT value FROM rocpd_pmc_event_" + uuid);
+          ASSERT_EQ(rows.rows.size(), 1U);
+          EXPECT_EQ(rows.rows[0][0], "-1234.5");
+      } },
+    { "very_large_value",
+      &pmc_event_base_setup,
+      [](rocpdsna::writer_t& w) {
+          auto data = create_test_pmc_event_data(1.0e18);
+          w.insert_pmc_event_data(data, pmc_event_unique_id());
+          w.flush_in_memory_data_to_disk();
+      },
+      [](const std::string& db, const std::string& uuid) {
+          auto rows =
+              query_database(db, "SELECT value > 1.0e17 FROM rocpd_pmc_event_" + uuid);
+          ASSERT_EQ(rows.rows.size(), 1U);
+          EXPECT_EQ(rows.rows[0][0], "1");
+      } },
+    { "null_event_id",
+      &pmc_event_base_setup,
+      [](rocpdsna::writer_t& w) {
+          auto data  = create_test_pmc_event_data(7.0);
+          data.event = std::nullopt;
+          w.insert_pmc_event_data(data, pmc_event_unique_id());
+          w.flush_in_memory_data_to_disk();
+      },
+      [](const std::string& db, const std::string& uuid) {
+          auto rows = query_database(db, "SELECT event_id FROM rocpd_pmc_event_" + uuid);
+          ASSERT_EQ(rows.rows.size(), 1U);
+          EXPECT_EQ(rows.rows[0][0], "NULL");
+      } },
+    { "many_rows_one_flush",
+      &pmc_event_base_setup,
+      [](rocpdsna::writer_t& w) {
+          for(size_t i = 0; i < 40; ++i)
+          {
+              auto data = create_test_pmc_event_data(static_cast<double>(i));
+              w.insert_pmc_event_data(data, pmc_event_unique_id());
+          }
+          w.flush_in_memory_data_to_disk();
+      },
+      [](const std::string& db, const std::string& uuid) {
+          auto rows = query_database(
+              db, "SELECT COUNT(*), SUM(value) FROM rocpd_pmc_event_" + uuid);
+          ASSERT_EQ(rows.rows.size(), 1U);
+          EXPECT_EQ(rows.rows[0][0], "40");
+          EXPECT_EQ(rows.rows[0][1], "780.0");
+      } },
+};
+
+}  // namespace
+
+TEST_P(pmc_event_writer_case_test, buffered_writer_round_trip)
+{
+    const auto& tc = GetParam();
+    tc.setup(*m_writer);
+    tc.insert(*m_writer);
+    tc.verify(m_database_path, m_uuid);
+}
+
+INSTANTIATE_TEST_SUITE_P(buffered_writer_cases,
+                         pmc_event_writer_case_test,
+                         ::testing::ValuesIn(k_pmc_event_cases),
+                         case_name_printer{});
