@@ -82,6 +82,12 @@ public:
         const auto pk =
             m_ctx->key_providers->kernel_dispatch_data().get_primary_key_value();
 
+        // Run all throwing operations first so the row commits to the buffer
+        // only when the surrounding transaction would have committed too.
+        // The buffer bypasses SQLite transactions, so any push that happens
+        // before a throw cannot be rolled back.
+        m_common_ops->maybe_insert_sample(trace_env, data.start_timestamp, event_pk);
+
         // Bypass POC: skip the SQLite vtable trampoline entirely. Push columns
         // straight into the buffer's per-column vectors. Falls back to the
         // prepared-statement path if the buffer is unavailable.
@@ -140,8 +146,6 @@ public:
                                                  event_pk,
                                                  data.extdata);
         }
-
-        m_common_ops->maybe_insert_sample(trace_env, data.start_timestamp, event_pk);
     }
 
 private:

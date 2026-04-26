@@ -58,6 +58,15 @@ public:
 
         const auto pk = m_ctx->key_providers->pmc_event_data().get_primary_key_value();
 
+        // Run all throwing operations first so the row commits to the buffer
+        // only when the surrounding transaction would have committed too.
+        // The buffer bypasses SQLite transactions, so any push that happens
+        // before a throw cannot be rolled back.
+        if(event_pk.has_value())
+        {
+            m_common_ops->insert_sample(data.sample, event_pk.value());
+        }
+
         if(m_buffer != nullptr)
         {
             auto to_opt_int64 = [](const std::optional<size_t>& v) {
@@ -75,11 +84,6 @@ public:
         {
             m_stmts->pmc_event_statement()(
                 pk, event_pk, pmc_pk, data.value, data.extdata);
-        }
-
-        if(event_pk.has_value())
-        {
-            m_common_ops->insert_sample(data.sample, event_pk.value());
         }
     }
 

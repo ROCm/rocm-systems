@@ -3035,3 +3035,183 @@ TEST_F(writer_test, transaction_rollback_on_exception_reverts_inserts)
     ASSERT_EQ(region_result.rows.size(), 1);
     EXPECT_EQ(region_result.rows[0][0], "successful_region");
 }
+
+// ============================================================================
+// Buffer-orphan regression tests for the remaining 4 writers.
+//
+// Each test exercises the same hazard the region_writer fix addresses: an
+// insert_impl that pushes into the per-table column buffer BEFORE running an
+// operation that can throw will leave an orphan row in the buffer when that
+// operation fails. The buffer bypasses SQLite transactions, so a rollback on
+// the surrounding transaction guard cannot undo the push.
+//
+// The throw site exercised here is maybe_insert_sample / insert_sample, which
+// raises std::runtime_error when the trace_environment supplies a track_name
+// whose track_info has not been registered. With push-buffer-last, the throw
+// happens before any vtable buffer push, so the buffer (and therefore the
+// flushed table) contains only the row that did not throw.
+// ============================================================================
+
+TEST_F(writer_test, kernel_dispatch_throw_after_push_does_not_leave_orphan_buffer_row)
+{
+    m_writer->register_node_info(create_test_node_info(1));
+    m_writer->register_process_info(create_test_process_info(1, 1000));
+    m_writer->register_thread_info(create_test_thread_info(1, 1000, 100));
+    m_writer->register_agent_info(create_test_agent_info(1, 1000, "GPU", 0));
+    m_writer->register_queue_info(create_test_queue_info(1, 1000, 1));
+    m_writer->register_stream_info(create_test_stream_info(1, 1000, 1));
+    m_writer->register_code_object_info(
+        create_test_code_object_info(1, 1, 1000, { "GPU", 0 }));
+    m_writer->register_kernel_symbol_info(create_test_kernel_symbol_info(1, 1, 1000, 1));
+
+    auto good_dispatch = create_test_kernel_dispatch_data(1, 1);
+    auto good_env      = rocpdsna::writer_types::trace_environment_t{
+             .node_id    = 1,
+             .process_id = 1000,
+             .thread_id  = 100,
+             .agent_id   = rocpdsna::writer_types::agent_unique_id_t{ "GPU", 0 },
+             .stream_id  = 1,
+             .queue_id   = 1,
+             .track_name = std::nullopt
+    };
+    m_writer->insert_kernel_dispatch_data(good_dispatch, good_env);
+
+    auto bad_dispatch = create_test_kernel_dispatch_data(1, 1);
+    bad_dispatch.event =
+        rocpdsna::writer_types::event_data_t{ .stack_id        = 1,
+                                              .parent_stack_id = 0,
+                                              .correlation_id  = 7,
+                                              .call_stack      = {},
+                                              .line_info_list  = {},
+                                              .event_category  = "TEST_API",
+                                              .extdata         = "{}" };
+    auto bad_env = rocpdsna::writer_types::trace_environment_t{
+        .node_id    = 1,
+        .process_id = 1000,
+        .thread_id  = 100,
+        .agent_id   = rocpdsna::writer_types::agent_unique_id_t{ "GPU", 0 },
+        .stream_id  = 1,
+        .queue_id   = 1,
+        .track_name = "unregistered-track"
+    };
+    EXPECT_THROW(m_writer->insert_kernel_dispatch_data(bad_dispatch, bad_env),
+                 std::runtime_error);
+
+    m_writer->flush_in_memory_data_to_disk();
+
+    auto row_count = count_rows(m_database_path, "rocpd_kernel_dispatch", m_uuid);
+    EXPECT_EQ(row_count, 1)
+        << "Buffer should contain only the successful dispatch; the failed insert "
+           "must not leave an orphan row pushed before the throw.";
+}
+
+TEST_F(writer_test, memory_copy_throw_after_push_does_not_leave_orphan_buffer_row)
+{
+    register_base_dependencies(*m_writer, 1, 1000, 100);
+
+    auto good_copy = create_test_memory_copy_data();
+    auto good_env  = create_test_trace_environment(1, 1000, 100);
+    m_writer->insert_memory_copy_data(good_copy, good_env);
+
+    auto bad_copy      = create_test_memory_copy_data();
+    bad_copy.event     = rocpdsna::writer_types::event_data_t{ .stack_id        = 1,
+                                                               .parent_stack_id = 0,
+                                                               .correlation_id  = 9,
+                                                               .call_stack      = {},
+                                                               .line_info_list  = {},
+                                                               .event_category  = "TEST_API",
+                                                               .extdata         = "{}" };
+    auto bad_env       = create_test_trace_environment(1, 1000, 100);
+    bad_env.track_name = "unregistered-track";
+    EXPECT_THROW(m_writer->insert_memory_copy_data(bad_copy, bad_env),
+                 std::runtime_error);
+
+    m_writer->flush_in_memory_data_to_disk();
+
+    auto row_count = count_rows(m_database_path, "rocpd_memory_copy", m_uuid);
+    EXPECT_EQ(row_count, 1)
+        << "Buffer should contain only the successful memory_copy; the failed insert "
+           "must not leave an orphan row pushed before the throw.";
+
+    auto event_count = count_rows(m_database_path, "rocpd_event", m_uuid);
+    EXPECT_EQ(event_count, 0)
+        << "Event from the rolled-back transaction must not be visible.";
+}
+
+TEST_F(writer_test, memory_alloc_throw_after_push_does_not_leave_orphan_buffer_row)
+{
+    register_base_dependencies(*m_writer, 1, 1000, 100);
+
+    auto good_alloc = create_test_memory_alloc_data();
+    auto good_env   = create_test_trace_environment(1, 1000, 100);
+    m_writer->insert_memory_alloc_data(good_alloc, good_env);
+
+    auto bad_alloc     = create_test_memory_alloc_data();
+    bad_alloc.event    = rocpdsna::writer_types::event_data_t{ .stack_id        = 1,
+                                                               .parent_stack_id = 0,
+                                                               .correlation_id  = 11,
+                                                               .call_stack      = {},
+                                                               .line_info_list  = {},
+                                                               .event_category  = "TEST_API",
+                                                               .extdata         = "{}" };
+    auto bad_env       = create_test_trace_environment(1, 1000, 100);
+    bad_env.track_name = "unregistered-track";
+    EXPECT_THROW(m_writer->insert_memory_alloc_data(bad_alloc, bad_env),
+                 std::runtime_error);
+
+    m_writer->flush_in_memory_data_to_disk();
+
+    auto row_count = count_rows(m_database_path, "rocpd_memory_allocate", m_uuid);
+    EXPECT_EQ(row_count, 1)
+        << "Buffer should contain only the successful memory_alloc; the failed insert "
+           "must not leave an orphan row pushed before the throw.";
+
+    auto event_count = count_rows(m_database_path, "rocpd_event", m_uuid);
+    EXPECT_EQ(event_count, 0)
+        << "Event from the rolled-back transaction must not be visible.";
+}
+
+TEST_F(writer_test, pmc_event_throw_after_push_does_not_leave_orphan_buffer_row)
+{
+    m_writer->register_node_info(create_test_node_info(1));
+    m_writer->register_process_info(create_test_process_info(1, 1000));
+    m_writer->register_agent_info(create_test_agent_info(1, 1000, "GPU", 0));
+
+    rocpdsna::writer_types::agent_unique_id_t agent_id{ "GPU", 0 };
+    auto pmc = create_test_pmc_info(1, 1000, "my_counter", agent_id);
+    m_writer->register_pmc_info(pmc);
+
+    auto pmc_unique_id =
+        rocpdsna::writer_types::pmc_info_unique_id_t{ .name     = "my_counter",
+                                                      .agent_id = agent_id };
+
+    auto good_pmc_event = create_test_pmc_event_data(1.0);
+    m_writer->insert_pmc_event_data(good_pmc_event, pmc_unique_id);
+
+    // pmc_event_writer calls insert_sample (not maybe_insert_sample) when
+    // event_pk is set. insert_sample throws if the track is not registered;
+    // create_test_pmc_event_data sets sample.track to a default track_info_t
+    // (via create_test_track_info) that has not been registered.
+    auto bad_pmc_event = create_test_pmc_event_data(2.0);
+    bad_pmc_event.event =
+        rocpdsna::writer_types::event_data_t{ .stack_id        = 1,
+                                              .parent_stack_id = 0,
+                                              .correlation_id  = 13,
+                                              .call_stack      = {},
+                                              .line_info_list  = {},
+                                              .event_category  = "TEST_API",
+                                              .extdata         = "{}" };
+    EXPECT_THROW(m_writer->insert_pmc_event_data(bad_pmc_event, pmc_unique_id),
+                 std::runtime_error);
+
+    m_writer->flush_in_memory_data_to_disk();
+
+    auto row_count = count_rows(m_database_path, "rocpd_pmc_event", m_uuid);
+    EXPECT_EQ(row_count, 1)
+        << "Buffer should contain only the successful pmc_event; the failed insert "
+           "must not leave an orphan row pushed before the throw.";
+
+    auto event_count = count_rows(m_database_path, "rocpd_event", m_uuid);
+    EXPECT_EQ(event_count, 0)
+        << "Event from the rolled-back transaction must not be visible.";
+}

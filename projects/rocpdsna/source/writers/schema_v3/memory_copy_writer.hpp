@@ -90,6 +90,12 @@ public:
 
         const auto pk = m_ctx->key_providers->memory_copy_data().get_primary_key_value();
 
+        // Run all throwing operations first so the row commits to the buffer
+        // only when the surrounding transaction would have committed too.
+        // The buffer bypasses SQLite transactions, so any push that happens
+        // before a throw cannot be rolled back.
+        m_common_ops->maybe_insert_sample(trace_env, data.start_timestamp, event_pk);
+
         if(m_buffer != nullptr)
         {
             auto to_opt_int64 = [](const std::optional<size_t>& v) {
@@ -135,8 +141,6 @@ public:
                                              event_pk,
                                              data.extdata);
         }
-
-        m_common_ops->maybe_insert_sample(trace_env, data.start_timestamp, event_pk);
     }
 
 private:
