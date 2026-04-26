@@ -128,13 +128,18 @@ Codegen enforces this at generation time: it computes the expanded field count a
 
 **Known high-arity APIs that require mitigation:**
 
-| API | Natural fields | Mitigation in v1 |
-|---|---|---|
-| `hipModuleLaunchKernel` | 12 (corr_id + f + 3 grid + 3 block + sharedMem + stream + kernelParams + extra) | `pack: [gridDim, blockDim]` using `dim3_packed` → 8 fields. |
-| `hipExtModuleLaunchKernel` | 14 (adds 2 global grid dims) | `pack: [gridDim, blockDim, globalGridDim]` using `dim3_packed` → 9 fields. |
-| `hsa_queue_create` | 10 (corr_id + agent + size + type + callback + data + private_seg + group_seg + queue) | At limit; no mitigation needed (9 payload fields). |
-| `hsa_amd_memory_async_copy` | 10 (corr_id + dst + dst_agent + src + src_agent + size + num_dep + dep_signals + completion_signal) | At limit; no mitigation needed. |
-| `hsa_amd_memory_async_copy_on_engine` | 11 (adds engine_id) | Drop `dep_signals` pointer field → 10 (9 payload). |
+Counts in the "Natural fields" column include `corr_id` plus all expanded payload fields (each `dim3` counted as 3). The "Total after mitigation" column also includes `corr_id`. The 10-field LTTng limit corresponds to a 9-payload-field budget.
+
+| API | Natural fields (incl. corr_id, dim3 expanded) | Mitigation in v1 | Total after mitigation |
+|---|---|---|---|
+| `hipLaunchKernel` | 11 (corr_id + function_address + 3 numBlocks + 3 dimBlocks + args + sharedMemBytes + stream) | `pack: [numBlocks, dimBlocks]` using `dim3_packed` → saves 4 fields. | 7 |
+| `hipLaunchCooperativeKernel` | 11 (same shape as `hipLaunchKernel`) | `pack: [numBlocks, dimBlocks]`. | 7 |
+| `hipExtLaunchKernel` | 13 (adds 2 event handles) | `pack: [numBlocks, dimBlocks]`. | 9 |
+| `hipModuleLaunchKernel` | 12 (corr_id + f + 3 grid + 3 block + sharedMem + stream + kernelParams + extra) | `pack: [gridDim, blockDim]` using `dim3_packed` → 8 fields. | 8 |
+| `hipExtModuleLaunchKernel` | 14 (adds 2 global grid dims) | `pack: [gridDim, blockDim, globalGridDim]` using `dim3_packed`. | 9 |
+| `hsa_queue_create` | 10 (corr_id + agent + size + type + callback + data + private_seg + group_seg + queue) | At limit; no mitigation needed (9 payload fields). | 10 |
+| `hsa_amd_memory_async_copy` | 10 (corr_id + dst + dst_agent + src + src_agent + size + num_dep + dep_signals + completion_signal) | At limit; no mitigation needed. | 10 |
+| `hsa_amd_memory_async_copy_on_engine` | 11 (adds engine_id) | Drop `dep_signals` pointer field → 10 (9 payload). | 10 |
 
 Any future API additions must pass the 9-payload-field budget at codegen time.
 
@@ -164,13 +169,15 @@ Any future API additions must pass the 9-payload-field budget at codegen time.
 
 - api: hipLaunchKernel
   category: kernel_launch
+  # numBlocks + dimBlocks packed per §4.4 to fit the 9-payload-field budget
+  # (without packing this would be 10 payload fields).
   args:
-    - {name: function_address, type: ptr,    dir: IN}
-    - {name: numBlocks,        type: dim3,   dir: IN}
-    - {name: dimBlocks,        type: dim3,   dir: IN}
-    - {name: args,             type: ptr,    dir: IN}
-    - {name: sharedMemBytes,   type: size,   dir: IN}
-    - {name: stream,           type: handle, dir: IN}
+    - {name: function_address, type: ptr,         dir: IN}
+    - {name: numBlocks,        type: dim3_packed, dir: IN}
+    - {name: dimBlocks,        type: dim3_packed, dir: IN}
+    - {name: args,             type: ptr,         dir: IN}
+    - {name: sharedMemBytes,   type: size,        dir: IN}
+    - {name: stream,           type: handle,      dir: IN}
 ```
 
 ## 5. Codegen output
@@ -236,7 +243,7 @@ static inline void rocm_trace_emit_hipMalloc_args(
 }
 ```
 
-`dim3` expansion (`hipLaunchKernel`):
+`dim3_packed` expansion (`hipLaunchKernel`):
 
 ```c
 static inline void rocm_trace_emit_hipLaunchKernel_args(
@@ -245,15 +252,19 @@ static inline void rocm_trace_emit_hipLaunchKernel_args(
     void** args, size_t sharedMemBytes, hipStream_t stream) {
     if (rocm_trace_disabled()) return;
     if (lttng_ust_tracepoint_enabled(rocm_hip, hipLaunchKernel_args)) {
+        /* dim3_packed encoding per §4.1: see ROCM_DIM3_PACK in §4.1. */
+        const uint64_t numBlocks_packed = ROCM_DIM3_PACK(numBlocks);
+        const uint64_t dimBlocks_packed = ROCM_DIM3_PACK(dimBlocks);
         lttng_ust_do_tracepoint(rocm_hip, hipLaunchKernel_args, corr_id,
             (uint64_t)(uintptr_t)function_address,
-            (uint32_t)numBlocks.x, (uint32_t)numBlocks.y, (uint32_t)numBlocks.z,
-            (uint32_t)dimBlocks.x, (uint32_t)dimBlocks.y, (uint32_t)dimBlocks.z,
+            numBlocks_packed, dimBlocks_packed,
             (uint64_t)(uintptr_t)args, (uint64_t)sharedMemBytes,
             (uint64_t)(uintptr_t)stream);
     }
 }
 ```
+
+Resulting payload field count: `function_address` (1) + `numBlocks_packed` (1) + `dimBlocks_packed` (1) + `args` (1) + `sharedMemBytes` (1) + `stream` (1) = **6 payload fields** (well under the 9-field budget). Total event field count = 7 including `corr_id`.
 
 When `HIP_ENABLE_LTTNG_UST=0`, the `#else` branch provides empty no-op definitions for every helper generated from `curated_apis.yaml` — preserves zero-cost OFF mode. The exact count is whatever YAML defines (the YAML is the single source of truth; see §1).
 
