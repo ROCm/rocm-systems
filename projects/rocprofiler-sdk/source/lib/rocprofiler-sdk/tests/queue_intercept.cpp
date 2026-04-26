@@ -38,6 +38,19 @@ namespace queue_intercept
 {
 namespace
 {
+// TODO(phase1-drainer-testing-gap): The firmware-ring drainer state
+// machine in kernel_dispatch/firmware_ring_drainer.cpp:480-562 has no
+// unit-level coverage. The required fake-firmware-ring fixture and the
+// invariants it must test (I6 mutual exclusion against the
+// WriteInterceptor, I7 per-queue lookup with no aql_qs fallback, I9
+// per-ring cursor + dispatch_idx pairing with no timestamp heuristics)
+// are documented in:
+//
+//     lib/rocprofiler-sdk/tests/phase1-drainer-testing-gap.md
+//
+// The same document also calls for an INLINE-ctor _mode default
+// regression test (queue.cpp; see commit 0b7ba9e789). Both pieces of
+// work are deferred until the build/CI environment is restored.
 TEST(QueueIntercept, QueueStateDefaultInit)
 {
     QueueState state;
