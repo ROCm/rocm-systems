@@ -768,7 +768,7 @@ if(EXISTS "${ROCM_SYSTEMS_ROOT}/shared/ctest/TestCategories.cmake")
 
     install(
         FILES "${INSTALL_TEST_FILE}"
-        DESTINATION "${CMAKE_INSTALL_BINDIR}/${PROJECT_NAME}-tests"
+        DESTINATION "${CMAKE_INSTALL_BINDIR}/${PROJECT_NAME}"
         COMPONENT tests
         RENAME "CTestTestfile.cmake"
     )
