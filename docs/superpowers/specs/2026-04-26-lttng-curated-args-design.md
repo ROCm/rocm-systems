@@ -209,13 +209,14 @@ Header includes a `SHA256(curated_apis.yaml)` comment for reviewer / CI verifica
 
 Included from `rocm_trace_emit.h`. One `static inline` helper per API.
 
-All-IN example (`hipMemcpyAsync`):
+All-IN example (`hipMemcpyAsync`). Per the §6.2 helper-signature rule, every curated helper accepts `status` as its last parameter even when unused:
 
 ```c
 static inline void rocm_trace_emit_hipMemcpyAsync_args(
     uint64_t corr_id,
     void* dst, const void* src, size_t sizeBytes,
-    hipMemcpyKind kind, hipStream_t stream) {
+    hipMemcpyKind kind, hipStream_t stream,
+    hipError_t /*status*/ /* unused: all-IN API */) {
     if (rocm_trace_disabled()) return;
     if (lttng_ust_tracepoint_enabled(rocm_hip, hipMemcpyAsync_args)) {
         lttng_ust_do_tracepoint(rocm_hip, hipMemcpyAsync_args, corr_id,
@@ -249,7 +250,8 @@ static inline void rocm_trace_emit_hipMalloc_args(
 static inline void rocm_trace_emit_hipLaunchKernel_args(
     uint64_t corr_id,
     const void* function_address, dim3 numBlocks, dim3 dimBlocks,
-    void** args, size_t sharedMemBytes, hipStream_t stream) {
+    void** args, size_t sharedMemBytes, hipStream_t stream,
+    hipError_t /*status*/ /* unused: all-IN API */) {
     if (rocm_trace_disabled()) return;
     if (lttng_ust_tracepoint_enabled(rocm_hip, hipLaunchKernel_args)) {
         /* dim3_packed encoding per §4.1: see ROCM_DIM3_PACK in §4.1. */
@@ -298,22 +300,55 @@ The sentinel is a stable, comment-only marker emitted unconditionally for every 
 
 ### 6.2 New `_CURATED` macros
 
-Three new variants of the existing `ROCM_TRACE_RET_*` macros:
+Three new variants of the existing `ROCM_TRACE_RET_*` macros. The macros follow a single helper-signature rule: **every `rocm_trace_emit_<api>_args` helper accepts `corr_id` first and the call's status as its last positional argument.** The migrator and codegen both honor this rule, so OUT-only and INOUT direction handling does not require any per-API contract negotiation between the macro and the helper:
+
+- For status-returning APIs (`_STATUS_CURATED`, `_HSA` variant), status is the macro-evaluated `__rocm_status` (`hipError_t` or `hsa_status_t`).
+- For pointer-returning APIs (`_PTR_CURATED`), status is synthesized from the return value: `__rocm_ptr != nullptr ? hipSuccess : hipErrorOutOfMemory` (this captures the only signal a pointer-returning HIP API conveys to its caller).
+- For void-returning APIs (`_VOID_CURATED`), status is the literal `hipSuccess` — the call cannot fail at this layer, so OUT params (if any) are always treated as valid.
+
+Codegen always emits the helper signature with `status` as the last parameter, even for all-IN APIs (where the helper simply ignores it). This keeps the macro/helper contract uniform and avoids per-API special cases.
 
 ```c
-#define ROCM_TRACE_RET_STATUS_CURATED(api, expr, ...) \
-    do {                                              \
-        const hipError_t __rocm_status = (expr);      \
-        rocm_trace_emit_##api##_args(__VA_ARGS__);    \
-        rocm_trace_emit_hip_api_exit_status(__func__, \
-            __rocm_corr, (int32_t)__rocm_status);     \
-        return __rocm_status;                         \
+#define ROCM_TRACE_RET_STATUS_CURATED(api, expr, corr, ...)              \
+    do {                                                                 \
+        const hipError_t __rocm_status = (expr);                         \
+        rocm_trace_emit_##api##_args((corr), __VA_ARGS__, __rocm_status);\
+        rocm_trace_emit_hip_api_exit_status(__func__,                    \
+            (corr), (int32_t)__rocm_status);                             \
+        return __rocm_status;                                            \
     } while (0)
 
-/* Similar for _PTR_CURATED and _VOID_CURATED. */
+#define ROCM_TRACE_RET_PTR_CURATED(api, ptr_type, expr, corr, ...)       \
+    do {                                                                 \
+        ptr_type const __rocm_ptr = (expr);                              \
+        const hipError_t __rocm_status =                                 \
+            (__rocm_ptr != nullptr) ? hipSuccess : hipErrorOutOfMemory;  \
+        rocm_trace_emit_##api##_args((corr), __VA_ARGS__, __rocm_status);\
+        rocm_trace_emit_hip_api_exit_status(__func__,                    \
+            (corr), (int32_t)__rocm_status);                             \
+        return __rocm_ptr;                                               \
+    } while (0)
+
+#define ROCM_TRACE_RET_VOID_CURATED(api, expr, corr, ...)                \
+    do {                                                                 \
+        (expr);                                                          \
+        rocm_trace_emit_##api##_args((corr), __VA_ARGS__, hipSuccess);   \
+        rocm_trace_emit_hip_api_exit_void(__func__, (corr));             \
+        return;                                                          \
+    } while (0)
 ```
 
-The migrator rewrites `return <expr>;` to `ROCM_TRACE_RET_STATUS_CURATED(<api>, <expr>, __rocm_corr, <captured-args>);`.
+The migrator rewrites `return <expr>;` to `ROCM_TRACE_RET_STATUS_CURATED(<api>, <expr>, __rocm_corr, <captured-args>);` — the macro itself appends `__rocm_status` to the helper call site. The migrator never emits `__rocm_status` into the macro's variadic arg list.
+
+Helper signature rule (codegen invariant): the helper for any curated API has signature
+
+```
+void rocm_trace_emit_<api>_args(uint64_t corr_id,
+                                <captured-args...>,
+                                <status_type> status);
+```
+
+where `<status_type>` is `hipError_t` (HIP) or `hsa_status_t` (HSA). All-IN APIs ignore `status`; OUT/INOUT APIs use it to gate dereference per §4.2.
 
 ### 6.3 Idempotency
 
