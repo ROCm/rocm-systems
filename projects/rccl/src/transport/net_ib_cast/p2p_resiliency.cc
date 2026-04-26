@@ -5,10 +5,10 @@
  * See LICENSE.txt for more license information
  *************************************************************************/
 
-#include "p2p_resiliency.h"
-#include "p2p.h" // For replay (ncclIbMultiSend() and ncclIbPostFifo())
-#include "connect.h" // For ncclIbQpCreate()
-#include "p2p_resiliency_recovery.h"
+#include "p2p_resiliency_cast.h"
+#include "p2p_cast.h" // For replay (ncclIbMultiSend() and ncclIbPostFifo())
+#include "connect_cast.h" // For ncclIbQpCreate()
+#include "p2p_resiliency_recovery_cast.h"
 
 NCCL_PARAM(IbResiliencyPortFailover, "IB_RESILIENCY_PORT_FAILOVER", 0);
 NCCL_PARAM(IbResiliencyPortFailoverMaxAttempts, "IB_RESILIENCY_PORT_FAILOVER_MAX_ATTEMPTS", 1);

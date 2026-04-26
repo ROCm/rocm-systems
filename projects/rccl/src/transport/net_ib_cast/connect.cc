@@ -5,9 +5,9 @@
  * See LICENSE.txt for more license information
  *************************************************************************/
 
-#include "connect.h"
-#include "common.h"
-#include "p2p_resiliency.h"
+#include "connect_cast.h"
+#include "common_cast.h"
+#include "p2p_resiliency_cast.h"
 
 NCCL_PARAM(IbGidIndex, "IB_GID_INDEX", -1);
 NCCL_PARAM(IbRoutableFlidIbGidIndex, "IB_ROUTABLE_FLID_GID_INDEX", 1);

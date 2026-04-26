@@ -8,8 +8,8 @@
 #ifndef NET_IB_P2P_RESILIENCY_H_
 #define NET_IB_P2P_RESILIENCY_H_
 
-#include "common.h"
-#include "connect.h"
+#include "common_cast.h"
+#include "connect_cast.h"
 
 enum ncclIbResiliencyDevState {
   // The device is operating normally.

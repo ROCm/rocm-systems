@@ -5,8 +5,8 @@
  * See LICENSE.txt for more license information
  *************************************************************************/
 
-#include "common.h"
-#include "p2p_resiliency_recovery.h"
+#include "common_cast.h"
+#include "p2p_resiliency_recovery_cast.h"
 
 NCCL_PARAM(IbPciRelaxedOrdering, "IB_PCI_RELAXED_ORDERING", 2);
 NCCL_PARAM(IbAdaptiveRouting, "IB_ADAPTIVE_ROUTING", -2);

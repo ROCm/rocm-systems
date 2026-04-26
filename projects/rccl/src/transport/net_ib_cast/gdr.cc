@@ -5,7 +5,7 @@
  * See LICENSE.txt for more license information
  *************************************************************************/
 
-#include "common.h"
+#include "common_cast.h"
 
 // Detect whether GDR can work on a given NIC with the current CUDA device
 // Returns :

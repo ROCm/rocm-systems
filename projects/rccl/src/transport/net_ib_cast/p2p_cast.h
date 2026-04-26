@@ -8,7 +8,7 @@
 #ifndef NET_IB_P2P_H_
 #define NET_IB_P2P_H_
 
-#include "common.h"
+#include "common_cast.h"
 
 #define NCCL_IB_FLUSH_REQ_WR_ID_OFFSET 0x1000
 static_assert(NCCL_IB_FLUSH_REQ_WR_ID_OFFSET > NET_IB_MAX_REQUESTS, "wr_id offset for flush requests must be greater than NET_IB_MAX_REQUESTS");
