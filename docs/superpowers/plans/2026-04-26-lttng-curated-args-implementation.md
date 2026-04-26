@@ -2502,22 +2502,54 @@ if __name__ == '__main__':
     main()
 ```
 
-- [ ] **Step 2: Run the overlay on `hip_table_interface.cpp`**
+- [ ] **Step 2: Run the overlay (run LOCALLY when libclang available; otherwise in container with explicit `docker cp` copy-back)**
+
+The overlay script needs libclang Python bindings. Per `dev-bin/sync.sh` the official sync direction is local→container (push to origin, container fetches+resets). Container→local is **not** an automated path — `git reset --hard origin/<branch>` LOCALLY would DISCARD any local commits made in earlier tasks. **Never** do that.
+
+Two safe options. Pick (A) if libclang is installable on the host; otherwise pick (B):
+
+**Option A — overlay runs locally (preferred):**
 
 ```bash
-./dev-bin/in-container.sh main "cd /root/rocm-systems && python3 projects/clr/hipamd/scripts/lttng_migrate_curated_overlay.py \
+# Confirm libclang is available locally:
+python3 -c "from clang import cindex; print('libclang OK')"
+
+# If "ImportError" / "No module named 'clang'": either `pip install --user libclang`
+# (and re-test), or fall back to Option B below.
+
+python3 projects/clr/hipamd/scripts/lttng_migrate_curated_overlay.py \
+    --source projects/clr/hipamd/src/hip_table_interface.cpp \
+    --curated-yaml projects/clr/hipamd/scripts/curated_apis.yaml
+```
+
+**Option B — overlay runs in container, single file copied back via `docker cp`:**
+
+```bash
+# 1. Get current local file into container via the official sync channel.
+./dev-bin/sync.sh main
+
+# 2. Run the overlay inside the container against the (now in-sync) source.
+./dev-bin/in-container.sh main "cd /root/rocm-systems && python3 \
+    projects/clr/hipamd/scripts/lttng_migrate_curated_overlay.py \
     --source projects/clr/hipamd/src/hip_table_interface.cpp \
     --curated-yaml projects/clr/hipamd/scripts/curated_apis.yaml"
+
+# 3. Copy the SINGLE edited file back to the local worktree. This is
+#    surgical — it touches only the overlay's output file, never the
+#    rest of the worktree, and CANNOT discard local commits.
+REMOTE_HOST=bewelton@banff-ccs-aus-g05-05.cs-aus.dcgpu
+CONTAINER=bewelton_lttng
+LOCAL_FILE=projects/clr/hipamd/src/hip_table_interface.cpp
+ssh "$REMOTE_HOST" "docker cp ${CONTAINER}:/root/rocm-systems/${LOCAL_FILE} /tmp/hip_table_interface.cpp.from-container"
+scp "$REMOTE_HOST:/tmp/hip_table_interface.cpp.from-container" "$LOCAL_FILE"
+ssh "$REMOTE_HOST" "rm -f /tmp/hip_table_interface.cpp.from-container"
+
+# 4. Sanity-check: the local diff should equal the overlay's edits, with
+#    no unrelated changes.
+git diff --stat -- "$LOCAL_FILE"
 ```
 
-Then sync back to local:
-
-```bash
-./dev-bin/in-container.sh main "cd /root/rocm-systems && git add projects/clr/hipamd/src/hip_table_interface.cpp && git diff --cached projects/clr/hipamd/src/hip_table_interface.cpp | head -80"
-git fetch origin && git reset --hard origin/users/bewelton/lttng
-```
-
-(Adjust the sync workflow per your `dev-bin/sync.sh` direction; the key point is the file gets edited.)
+**Forbidden:** running `git fetch origin && git reset --hard origin/users/bewelton/lttng` locally as a "sync back" step. That destroys uncommitted work and any local commits not yet pushed. The overlay's outputs are reachable via `docker cp`; do not use a hard-reset to move data between machines.
 
 - [ ] **Step 3: Inspect the diff for hipMemcpyAsync, hipMalloc, hipDeviceSynchronize**
 
