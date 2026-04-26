@@ -31,50 +31,64 @@
 
 #include "rocm_hip_tp.h"
 
+/* HIP emit_enter: capture parent_corr_id (= the active slot value BEFORE
+ * the push) and emit it as the new parent_corr_id field. The push then
+ * makes this HIP call's own corr_id the active slot value, so any nested
+ * HSA / HIP tracepoints fired from within this HIP API's body see this
+ * call as their parent.
+ *
+ * The push always runs regardless of tracepoint enable state so that
+ * nested tracepoints (which may be enabled even when this one is not) see
+ * correct parent values. The matching pop happens in the exit emit helpers
+ * (and in the CATCH macro for the exception path). Pattern matches HSA's
+ * emit_hsa_api_enter so HIP <-> HSA chains have consistent semantics. */
 static inline void rocm_trace_emit_hip_api_enter(const char* api_name,
                                                  uint64_t    corr_id) {
-    /* Push the entering API's corr_id onto the shared TLS slot so any HSA
-     * tracepoints fired further down the stack on this thread can read it
-     * as their parent_corr_id. The matching pop happens in the exit emit
-     * helpers. Push always runs even if the tracepoint is disabled, so that
-     * the HSA-side propagation works regardless of whether the HIP enter
-     * event itself is captured. */
-    (void)rocp_reg_auto_push(corr_id);
+    const uint64_t parent = rocp_reg_auto_push(corr_id);
     if (lttng_ust_tracepoint_enabled(rocm_hip, hip_api_enter)) {
         lttng_ust_do_tracepoint(rocm_hip, hip_api_enter,
-                                api_name, corr_id, rocm_trace_current_tid());
+                                api_name, corr_id, rocm_trace_current_tid(),
+                                parent);
     }
 }
 
-/* Status-returning APIs (hipError_t, int, etc.) */
+/* Status-returning APIs (hipError_t, int, etc.).
+ * Pop first, then read active. Post-pop active equals pre-push parent, so
+ * the exit event's parent_corr_id matches the matching enter's
+ * parent_corr_id. Same pattern as HSA's emit_hsa_api_exit_status. */
 static inline void rocm_trace_emit_hip_api_exit_status(const char* api_name,
                                                        uint64_t    corr_id,
                                                        int32_t     status) {
+    rocp_reg_auto_pop();
+    const uint64_t parent = rocp_reg_active_corr_id_get();
     if (lttng_ust_tracepoint_enabled(rocm_hip, hip_api_exit_status)) {
         lttng_ust_do_tracepoint(rocm_hip, hip_api_exit_status,
-                                api_name, corr_id, status);
+                                api_name, corr_id, status, parent);
     }
-    rocp_reg_auto_pop();
 }
 
 /* Pointer-returning APIs (hipApiName, __hipRegisterFatBinary, etc.) */
 static inline void rocm_trace_emit_hip_api_exit_ptr(const char* api_name,
                                                     uint64_t    corr_id,
                                                     const void* retval) {
+    rocp_reg_auto_pop();
+    const uint64_t parent = rocp_reg_active_corr_id_get();
     if (lttng_ust_tracepoint_enabled(rocm_hip, hip_api_exit_ptr)) {
         lttng_ust_do_tracepoint(rocm_hip, hip_api_exit_ptr,
-                                api_name, corr_id, (uint64_t)(uintptr_t)retval);
+                                api_name, corr_id, (uint64_t)(uintptr_t)retval,
+                                parent);
     }
-    rocp_reg_auto_pop();
 }
 
 /* Void-returning APIs */
 static inline void rocm_trace_emit_hip_api_exit_void(const char* api_name,
                                                      uint64_t    corr_id) {
-    if (lttng_ust_tracepoint_enabled(rocm_hip, hip_api_exit_void)) {
-        lttng_ust_do_tracepoint(rocm_hip, hip_api_exit_void, api_name, corr_id);
-    }
     rocp_reg_auto_pop();
+    const uint64_t parent = rocp_reg_active_corr_id_get();
+    if (lttng_ust_tracepoint_enabled(rocm_hip, hip_api_exit_void)) {
+        lttng_ust_do_tracepoint(rocm_hip, hip_api_exit_void,
+                                api_name, corr_id, parent);
+    }
 }
 
 /* Pack three 16-bit dims into a 64-bit field. Bits [15:0]=x, [31:16]=y,
@@ -86,34 +100,45 @@ static inline uint64_t rocm_trace_pack_dims3(uint32_t x, uint32_t y, uint32_t z)
          | ((uint64_t)(z & 0xffffu) << 32);
 }
 
+/* hip_kernel_dispatch_enqueue: emitted just before command->enqueue() in
+ * ihipModuleLaunchKernel. corr_id is freshly minted for THIS dispatch
+ * enqueue event so the dispatch step has its own identity, distinct from
+ * the launching HIP API. parent_corr_id is the active TLS slot at emit
+ * time -- the surrounding HIP API launch's corr_id when called from
+ * inside an HIP API body, or 0 if launched outside any HIP API context. */
 static inline void rocm_trace_emit_hip_kernel_dispatch_enqueue(
-    const char* kernel_name, uint64_t corr_id, void* stream,
+    const char* kernel_name, void* stream,
     uint32_t grid_x, uint32_t grid_y, uint32_t grid_z,
     uint32_t block_x, uint32_t block_y, uint32_t block_z,
     uint32_t shared_mem_bytes) {
     if (lttng_ust_tracepoint_enabled(rocm_hip, hip_kernel_dispatch_enqueue)) {
+        const uint64_t self_corr   = rocp_reg_next_corr_id();
+        const uint64_t parent_corr = rocp_reg_active_corr_id_get();
         lttng_ust_do_tracepoint(rocm_hip, hip_kernel_dispatch_enqueue,
-                                kernel_name, corr_id, rocm_trace_current_tid(),
+                                kernel_name, self_corr, rocm_trace_current_tid(),
                                 stream,
                                 rocm_trace_pack_dims3(grid_x, grid_y, grid_z),
                                 rocm_trace_pack_dims3(block_x, block_y, block_z),
-                                shared_mem_bytes);
+                                shared_mem_bytes,
+                                parent_corr);
     }
 }
 
 /* hip_aql_kernel_dispatch_submit: emit at the HIP CLR per-packet write site,
- * once per AQL kernel-dispatch packet written to a queue ring. The
- * parent_corr_id is the active TLS slot at emit time -- typically the
- * surrounding HIP API's corr_id (since the wrapper pushed it on entry) when
- * the dispatch is submitted from inside a HIP API call body. */
+ * once per AQL kernel-dispatch packet written to a queue ring. Mints its
+ * own corr_id (distinct identity for this submit step). parent_corr_id is
+ * the active TLS slot at emit time -- the surrounding HIP API's corr_id
+ * (which the wrapper pushed on entry) when called from inside a HIP API
+ * call body; otherwise 0. */
 static inline void rocm_trace_emit_hip_aql_kernel_dispatch_submit(
     uint32_t queue_id, uint64_t write_idx, uint64_t dispatch_idx,
-    uint64_t corr_id, uint64_t kernel_object, uint64_t completion_signal) {
+    uint64_t kernel_object, uint64_t completion_signal) {
     if (lttng_ust_tracepoint_enabled(rocm_hip, hip_aql_kernel_dispatch_submit)) {
-        const uint64_t parent = rocp_reg_active_corr_id_get();
+        const uint64_t self_corr   = rocp_reg_next_corr_id();
+        const uint64_t parent_corr = rocp_reg_active_corr_id_get();
         lttng_ust_do_tracepoint(rocm_hip, hip_aql_kernel_dispatch_submit,
                                 queue_id, write_idx, dispatch_idx,
-                                corr_id, parent, rocm_trace_current_tid(),
+                                self_corr, parent_corr, rocm_trace_current_tid(),
                                 kernel_object, completion_signal);
     }
 }
@@ -131,13 +156,13 @@ static inline void rocm_trace_emit_hip_api_exit_void(const char* a, uint64_t c) 
     (void)a; (void)c;
 }
 static inline void rocm_trace_emit_hip_kernel_dispatch_enqueue(
-    const char* a, uint64_t b, void* c, uint32_t d, uint32_t e, uint32_t f,
-    uint32_t g, uint32_t h, uint32_t i, uint32_t j) {
-    (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; (void)g; (void)h; (void)i; (void)j;
+    const char* a, void* b, uint32_t c, uint32_t d, uint32_t e,
+    uint32_t f, uint32_t g, uint32_t h, uint32_t i) {
+    (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; (void)g; (void)h; (void)i;
 }
 static inline void rocm_trace_emit_hip_aql_kernel_dispatch_submit(
-    uint32_t a, uint64_t b, uint64_t c, uint64_t d, uint64_t e, uint64_t f) {
-    (void)a; (void)b; (void)c; (void)d; (void)e; (void)f;
+    uint32_t a, uint64_t b, uint64_t c, uint64_t d, uint64_t e) {
+    (void)a; (void)b; (void)c; (void)d; (void)e;
 }
 
 #endif

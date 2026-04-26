@@ -22,51 +22,66 @@
 #include <lttng/tracepoint.h>
 #include <stdint.h>
 
+/* hip_api_enter: corr_id is freshly minted for THIS HIP call.
+ * parent_corr_id is the active corr_id slot value BEFORE this call's push --
+ * i.e., the calling context's corr_id (an outer HIP API for nested calls,
+ * or 0 for top-level user calls). */
 LTTNG_UST_TRACEPOINT_EVENT(
     rocm_hip,
     hip_api_enter,
-    LTTNG_UST_TP_ARGS(const char*, api_name, uint64_t, corr_id, uint32_t, tid),
+    LTTNG_UST_TP_ARGS(const char*, api_name, uint64_t, corr_id, uint32_t, tid,
+                      uint64_t, parent_corr_id),
     LTTNG_UST_TP_FIELDS(
         lttng_ust_field_string(api_name, api_name)
         lttng_ust_field_integer(uint64_t, corr_id, corr_id)
         lttng_ust_field_integer(uint32_t, tid, tid)
+        lttng_ust_field_integer(uint64_t, parent_corr_id, parent_corr_id)
     )
 )
 
-/* hip_api_exit_status: for hipError_t / int / other 32-bit-status returns */
+/* hip_api_exit_status: for hipError_t / int / other 32-bit-status returns.
+ * parent_corr_id mirrors the matching enter's parent_corr_id (i.e., the
+ * pre-push slot value, recovered by popping before the read). */
 LTTNG_UST_TRACEPOINT_EVENT(
     rocm_hip,
     hip_api_exit_status,
-    LTTNG_UST_TP_ARGS(const char*, api_name, uint64_t, corr_id, int32_t, status),
+    LTTNG_UST_TP_ARGS(const char*, api_name, uint64_t, corr_id, int32_t, status,
+                      uint64_t, parent_corr_id),
     LTTNG_UST_TP_FIELDS(
         lttng_ust_field_string(api_name, api_name)
         lttng_ust_field_integer(uint64_t, corr_id, corr_id)
         lttng_ust_field_integer(int32_t, status, status)
+        lttng_ust_field_integer(uint64_t, parent_corr_id, parent_corr_id)
     )
 )
 
 /* hip_api_exit_ptr: for pointer-returning APIs (hipApiName,
  * __hipRegisterFatBinary, etc.). The pointer is captured as a uint64_t
- * hex field (0 if NULL). */
+ * hex field (0 if NULL). parent_corr_id semantics same as exit_status. */
 LTTNG_UST_TRACEPOINT_EVENT(
     rocm_hip,
     hip_api_exit_ptr,
-    LTTNG_UST_TP_ARGS(const char*, api_name, uint64_t, corr_id, uint64_t, retval_ptr),
+    LTTNG_UST_TP_ARGS(const char*, api_name, uint64_t, corr_id, uint64_t, retval_ptr,
+                      uint64_t, parent_corr_id),
     LTTNG_UST_TP_FIELDS(
         lttng_ust_field_string(api_name, api_name)
         lttng_ust_field_integer(uint64_t, corr_id, corr_id)
         lttng_ust_field_integer_hex(uint64_t, retval_ptr, retval_ptr)
+        lttng_ust_field_integer(uint64_t, parent_corr_id, parent_corr_id)
     )
 )
 
-/* hip_api_exit_void: for void-returning APIs */
+/* hip_api_exit_void: for void-returning APIs. parent_corr_id semantics
+ * same as exit_status. */
 LTTNG_UST_TRACEPOINT_EVENT(
     rocm_hip,
     hip_api_exit_void,
-    LTTNG_UST_TP_ARGS(const char*, api_name, uint64_t, corr_id),
+    LTTNG_UST_TP_ARGS(const char*, api_name, uint64_t, corr_id,
+                      uint64_t, parent_corr_id),
     LTTNG_UST_TP_FIELDS(
         lttng_ust_field_string(api_name, api_name)
         lttng_ust_field_integer(uint64_t, corr_id, corr_id)
+        lttng_ust_field_integer(uint64_t, parent_corr_id, parent_corr_id)
     )
 )
 
@@ -74,7 +89,13 @@ LTTNG_UST_TRACEPOINT_EVENT(
  * ihipModuleLaunchKernel. The 6 launch dims (grid_xyz, block_xyz) are packed
  * into two uint64_t (each 16 bits per dim, hipDim3 max is 2^31 but real
  * launches never exceed 2^16-1 per dim) to stay under LTTng-UST's 10-field
- * (20-arg) tracepoint limit. tid is available via LTTng's vtid context. */
+ * (20-arg) tracepoint limit. tid is available via LTTng's vtid context.
+ *
+ * corr_id is freshly minted for THIS dispatch enqueue event (so the
+ * dispatch step has its own identity, distinct from the launching HIP API).
+ * parent_corr_id is the active TLS slot at emit time -- typically the
+ * surrounding HIP API launch's corr_id when called from inside an HIP API
+ * body; 0 if launched outside any HIP API context. */
 LTTNG_UST_TRACEPOINT_EVENT(
     rocm_hip,
     hip_kernel_dispatch_enqueue,
@@ -85,7 +106,8 @@ LTTNG_UST_TRACEPOINT_EVENT(
         void*,       stream,
         uint64_t,    grid_xyz_packed,
         uint64_t,    block_xyz_packed,
-        uint32_t,    shared_mem_bytes
+        uint32_t,    shared_mem_bytes,
+        uint64_t,    parent_corr_id
     ),
     LTTNG_UST_TP_FIELDS(
         lttng_ust_field_string(kernel_name, kernel_name)
@@ -95,6 +117,7 @@ LTTNG_UST_TRACEPOINT_EVENT(
         lttng_ust_field_integer_hex(uint64_t, grid_xyz_packed, grid_xyz_packed)
         lttng_ust_field_integer_hex(uint64_t, block_xyz_packed, block_xyz_packed)
         lttng_ust_field_integer(uint32_t, shared_mem_bytes, shared_mem_bytes)
+        lttng_ust_field_integer(uint64_t, parent_corr_id, parent_corr_id)
     )
 )
 

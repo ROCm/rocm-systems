@@ -32,10 +32,9 @@
 /* No-op stubs duplicated here so the call sites in this file compile without
  * the LTTng include path. Keep these in sync with the !HIP_ENABLE_LTTNG_UST
  * branch of hipamd/src/lttng/rocm_trace_emit.h. */
-static inline uint64_t rocm_trace_active_corr_id(void) { return 0; }
 static inline void rocm_trace_emit_hip_aql_kernel_dispatch_submit(
-    uint32_t a, uint64_t b, uint64_t c, uint64_t d, uint64_t e, uint64_t f) {
-    (void)a; (void)b; (void)c; (void)d; (void)e; (void)f;
+    uint32_t a, uint64_t b, uint64_t c, uint64_t d, uint64_t e) {
+    (void)a; (void)b; (void)c; (void)d; (void)e;
 }
 #endif
 
@@ -1290,8 +1289,9 @@ bool VirtualGPU::dispatchGenericAqlPacket(AqlPacket* packet, uint16_t header, ui
   /* LTTng: emit per-packet dispatch tracepoint, but only for KERNEL_DISPATCH
    * packets (barriers and PM4 vendor-specific packets share this dispatch
    * helper and are filtered out below). The tracepoint represents HIP's
-   * intent before any HSA intercept rewrite; corr_id comes from the TLS
-   * slot set by the HIP API enter/exit instrumentation. */
+   * intent before any HSA intercept rewrite; the helper internally mints
+   * its own corr_id and reads the TLS slot for parent_corr_id (= the
+   * launching HIP API's corr_id). */
   {
     const uint8_t pkt_type = extractAqlBits(header, HSA_PACKET_HEADER_TYPE,
                                             HSA_PACKET_HEADER_WIDTH_TYPE);
@@ -1303,7 +1303,6 @@ bool VirtualGPU::dispatchGenericAqlPacket(AqlPacket* packet, uint16_t header, ui
           gpu_queue_->id,
           index,
           dispatch_idx,
-          rocm_trace_active_corr_id(),
           kdp->kernel_object,
           kdp->completion_signal.handle);
     }
@@ -1550,8 +1549,9 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const std::vector<uint8_t>& flatPack
     // packet in this chunk. Done after all completion-signal patches above
     // (fixup loop and lastSlot patch) so the emitted handle is final. The
     // emit helper is a one-atomic-load no-op when no LTTng session is active.
+    // The helper internally mints its own corr_id per packet and reads the
+    // TLS slot for parent_corr_id (= the launching HIP API's corr_id).
     {
-      const uint64_t corr = rocm_trace_active_corr_id();
       for (size_t i = chunkStart; i < chunkEnd; ++i) {
         const uint16_t hdr_i = static_cast<uint16_t>(validFullHeaders[i]);
         if (extractAqlBits(hdr_i, HSA_PACKET_HEADER_TYPE,
@@ -1566,7 +1566,6 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const std::vector<uint8_t>& flatPack
               gpu_queue_->id,
               startIndex + i,
               dispatch_idx,
-              corr,
               slot_i->kernel_object,
               slot_i->completion_signal.handle);
         }

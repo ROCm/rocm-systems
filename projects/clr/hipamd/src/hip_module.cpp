@@ -524,20 +524,17 @@ hipError_t ihipModuleLaunchKernel(hipFunction_t f, amd::LaunchParams& launch_par
   // kernel launch passes through (regular launch, cooperative launch,
   // multi-grid, hipGraph node submission via ihipModuleLaunchKernel).
   //
-  // Correlation id: reuse the HIP-API caller's corr id if it set one on
-  // this thread (same-thread case - one consistent id across hip_api_enter,
-  // hip_kernel_dispatch_enqueue, and downstream HSA tracepoints). When
-  // the launch happens on a different thread (no caller corr id in TLS),
-  // mint a fresh corr id; the consumer joins via (tid_high_32, timestamp).
+  // The emit helper internally mints its own corr_id (so the dispatch
+  // enqueue step has a distinct identity) and reads the TLS slot for
+  // parent_corr_id (= the launching HIP API's corr_id when called from
+  // inside an HIP API body, or 0 if the launch happens on a thread with
+  // no surrounding HIP API context).
   {
-    uint64_t k_corr = rocm_trace_active_corr_id();
-    if (k_corr == 0) k_corr = rocm_trace_next_corr_id();
     // grid_ holds the total number of workgroups in N-dims; local_ holds
     // the workgroup size. Together they describe the launch's grid and
     // block dims in CUDA-style hipDim3 terms.
     rocm_trace_emit_hip_kernel_dispatch_enqueue(
         FunctionName(f).c_str(),
-        k_corr,
         static_cast<void*>(hStream),
         static_cast<uint32_t>(launch_params.grid_[0]),
         static_cast<uint32_t>(launch_params.grid_[1]),
