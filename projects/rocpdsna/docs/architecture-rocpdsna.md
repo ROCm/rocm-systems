@@ -86,7 +86,7 @@ Each writer class inherits from its corresponding CRTP interface, passing itself
 
 ![Writer Insert Data Flow](graphs/writer_insert_flow.png)
 
-The typical insert_impl method follows a consistent pattern. It begins a transaction through the backend. It validates that all required entities have been registered, using the insert validator. It resolves foreign keys from user-facing identifiers to database primary keys. It optionally inserts an event record if event metadata is present. It executes the prepared insert statement for its table. It optionally inserts argument records and sample records for timeline correlation. The transaction commits automatically when the scope exits.
+The typical insert_impl method follows a consistent pattern. It begins a transaction through the backend. It validates that all required entities have been registered, using the insert validator. It resolves foreign keys from user-facing identifiers to database primary keys. It optionally inserts an event record if event metadata is present. It records the row for its own table -- either by executing the prepared insert statement directly, or, for the buffered hot tables, by pushing column values into the table's per-column buffer to be drained at flush time. It optionally inserts argument records and sample records for timeline correlation. The transaction commits automatically when the scope exits; for buffered writers the row is pushed last so a throw earlier in the method rolls back without leaving an orphaned buffer entry.
 
 Common insert operations is a utility class shared by all data writers within a schema version. It handles event insertion, sample insertion, argument insertion, and string registration. These operations are factored out because they are identical across all data types within the same schema: an event row has the same structure whether it belongs to a region or a kernel dispatch.
 
@@ -218,9 +218,11 @@ This design means that writers do not need explicit commit or rollback calls. A 
 
 ### Storage Modes
 
-The backend supports two storage modes: in-memory and on-disk. The mode is selected at creation time through the factory method. When the writer creates a backend, it uses in-memory mode for performance during high-throughput data ingestion. The flush operation writes the in-memory database to disk. When the reader creates a backend, it uses on-disk mode because it reads from an existing database file.
+The backend supports two storage modes: in-memory and on-disk. The mode is selected at creation time through the factory method. The writer creates the backend in on-disk mode and writes directly to the target database file; high-throughput ingestion for the hot tables (kernel_dispatch, memory_copy, memory_alloc, region, pmc_event) is sustained by per-table column buffers that batch rows behind a SQLite virtual table and flush via a single bulk INSERT, rather than by holding the database in RAM. The flush operation drains those buffers to the on-disk file and issues a WAL checkpoint. When the reader creates a backend, it uses on-disk mode because it reads from an existing database file.
 
-The storage_t impl mediates this through a database factory. The factory selects the mode based on whether the storage is being used for writing or reading. This decision is made once, when the writer or reader first accesses the backend, and cannot be changed afterward.
+WAL journal mode is enforced on the writer connection at open time. The backend issues `PRAGMA journal_mode=WAL` and asserts that SQLite reports `wal` back; any other mode is treated as a hard error because the buffered-flush throughput target depends on WAL semantics.
+
+The storage_t impl mediates mode selection through a database factory. The factory selects the mode based on whether the storage is being used for writing or reading. This decision is made once, when the writer or reader first accesses the backend, and cannot be changed afterward.
 
 ### Backend Substitutability
 

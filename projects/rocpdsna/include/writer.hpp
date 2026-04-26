@@ -137,8 +137,13 @@ struct writer_t
         const writer_types::trace_environment_t& trace_environment);
 
     /***
-     * @brief Flush in-memory data to disk
-     * @note This function is only used with in-memory database option
+     * @brief Drain pending writes to the on-disk database
+     * @note Drains the per-table column buffers used by the hot writers
+     *       (kernel_dispatch, memory_copy, memory_alloc, region, pmc_event)
+     *       into their target tables and issues a WAL checkpoint. The
+     *       function name is preserved for ABI continuity; the writer
+     *       backend is on-disk and this is the explicit drain point that
+     *       makes buffered rows visible to readers and external tools.
      */
     void flush_in_memory_data_to_disk();
 
