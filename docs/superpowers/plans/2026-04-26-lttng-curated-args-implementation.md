@@ -94,7 +94,7 @@ projects/rocr-runtime/runtime/hsa-runtime/core/common/hsa_table_interface.cpp  #
 
 | Phase | Tasks | Deliverable |
 |---|---|---|
-| **A.** Foundation library | 1–4 | `lttng_curated_lib.py`, `rocm_dim3_pack.h`, codegen + verifier scripts, all with unit tests, ZERO impact on existing build |
+| **A.** Foundation library | 1–4, 4.5 | `lttng_curated_lib.py`, `rocm_dim3_pack.h`, codegen + verifier scripts (incl. multi-header support), all with unit tests, ZERO impact on existing build |
 | **B.** Author HIP YAML (minimal) | 5 | `curated_apis.yaml` with 2 APIs (`hipMemcpyAsync` all-IN, `hipMalloc` OUT-param) |
 | **C.** Generate + wire HIP headers | 6–7 | `rocm_hip_curated_tp.h`, `rocm_trace_emit_curated.h` checked in, included from existing tp.h / emit.h |
 | **D.** Migrator + macros + coverage gate | 8–11 | Extended migrator + `_CURATED` macros + updated coverage gate, all wrappers re-migrated |
@@ -1617,6 +1617,247 @@ signature changes that diverge from curated_apis.yaml. Hard errors:
 
 6 unit tests against a fake HIP header fixture cover the matching case
 and each hard-error path."
+```
+
+---
+
+### Task 4.5: Multi-header verifier support (HSA APIs span hsa.h + hsa_ext_amd.h)
+
+**Files:**
+- Modify: `projects/clr/hipamd/scripts/lttng_curated_verify.py`
+- Modify: `projects/clr/hipamd/scripts/test_lttng_curated_verify.py`
+- Create: `projects/clr/hipamd/scripts/testdata/fake_hsa_base.h`
+- Create: `projects/clr/hipamd/scripts/testdata/fake_hsa_ext.h`
+
+**Why this task is here.** HIP curated APIs all live in `hip_runtime_api.h`, so `--header` taking a single value is fine for HIP. HSA is different: base APIs (`hsa_queue_create`, `hsa_signal_create`) live in `hsa.h`, but AMD extensions (`hsa_amd_*`) live in `hsa_ext_amd.h`. The verifier MUST union the declarations from both headers before checking each YAML API; otherwise either base APIs or extension APIs would always fail "not declared in header".
+
+Task 15 originally said "extend the verifier if needed" — this is that scheduled extension.
+
+- [ ] **Step 1: Write the new test fixtures**
+
+Create `projects/clr/hipamd/scripts/testdata/fake_hsa_base.h`:
+
+```c
+/* Test fixture — minimal HSA-base-like header (no AMD extensions). */
+#ifndef FAKE_HSA_BASE_H_
+#define FAKE_HSA_BASE_H_
+#include <stdint.h>
+#include <stddef.h>
+
+typedef enum { HSA_STATUS_SUCCESS = 0 } hsa_status_t;
+typedef struct { uint64_t handle; } hsa_signal_t;
+
+hsa_status_t hsa_signal_create(int64_t initial_value,
+                               uint32_t num_consumers,
+                               const void* consumers,
+                               hsa_signal_t* signal);
+#endif
+```
+
+Create `projects/clr/hipamd/scripts/testdata/fake_hsa_ext.h`:
+
+```c
+/* Test fixture — HSA AMD-extensions-only header. */
+#ifndef FAKE_HSA_EXT_H_
+#define FAKE_HSA_EXT_H_
+#include "fake_hsa_base.h"
+
+hsa_status_t hsa_amd_signal_create(int64_t initial_value,
+                                   uint32_t num_consumers,
+                                   const void* consumers,
+                                   uint64_t attributes,
+                                   hsa_signal_t* signal);
+#endif
+```
+
+- [ ] **Step 2: Write the new tests against the fixtures**
+
+Append to `projects/clr/hipamd/scripts/test_lttng_curated_verify.py`:
+
+```python
+HSA_BASE = os.path.join(HERE, 'testdata', 'fake_hsa_base.h')
+HSA_EXT  = os.path.join(HERE, 'testdata', 'fake_hsa_ext.h')
+
+def _run_verify_multi(yaml_text, headers, expect_pass):
+    """Like _run_verify but accepts multiple --header arguments."""
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
+        f.write(yaml_text); yaml_path = f.name
+    try:
+        cmd = ['python3', VERIFY, '--yaml', yaml_path]
+        for h in headers:
+            cmd += ['--header', h]
+        r = subprocess.run(cmd, capture_output=True, text=True)
+        if expect_pass:
+            assert r.returncode == 0, f"expected pass, got rc={r.returncode}\n{r.stderr}"
+        else:
+            assert r.returncode != 0, f"expected fail\n{r.stdout}"
+        return r.returncode, r.stdout + r.stderr
+    finally:
+        os.unlink(yaml_path)
+
+def test_multi_header_base_only_api_verifies():
+    """An API declared in hsa.h verifies when both --header values are given."""
+    yaml_text = """
+- api: hsa_signal_create
+  category: hsa_signals
+  args:
+    - {name: initial_value, type: int64,  dir: IN}
+    - {name: num_consumers, type: uint32, dir: IN}
+    - {name: consumers,     type: ptr,    dir: IN}
+    - {name: signal,        type: handle, dir: OUT}
+"""
+    _run_verify_multi(yaml_text, [HSA_BASE, HSA_EXT], expect_pass=True)
+
+def test_multi_header_ext_only_api_verifies():
+    """An API declared only in hsa_ext_amd.h verifies via the union."""
+    yaml_text = """
+- api: hsa_amd_signal_create
+  category: hsa_signals
+  args:
+    - {name: initial_value, type: int64,  dir: IN}
+    - {name: num_consumers, type: uint32, dir: IN}
+    - {name: consumers,     type: ptr,    dir: IN}
+    - {name: attributes,    type: uint64, dir: IN}
+    - {name: signal,        type: handle, dir: OUT}
+"""
+    _run_verify_multi(yaml_text, [HSA_BASE, HSA_EXT], expect_pass=True)
+
+def test_multi_header_mixed_api_set_verifies():
+    """Both APIs in one YAML, spanning both headers — passes."""
+    yaml_text = """
+- api: hsa_signal_create
+  category: hsa_signals
+  args:
+    - {name: initial_value, type: int64,  dir: IN}
+    - {name: num_consumers, type: uint32, dir: IN}
+    - {name: consumers,     type: ptr,    dir: IN}
+    - {name: signal,        type: handle, dir: OUT}
+- api: hsa_amd_signal_create
+  category: hsa_signals
+  args:
+    - {name: initial_value, type: int64,  dir: IN}
+    - {name: num_consumers, type: uint32, dir: IN}
+    - {name: consumers,     type: ptr,    dir: IN}
+    - {name: attributes,    type: uint64, dir: IN}
+    - {name: signal,        type: handle, dir: OUT}
+"""
+    _run_verify_multi(yaml_text, [HSA_BASE, HSA_EXT], expect_pass=True)
+
+def test_multi_header_undeclared_api_fails():
+    """API not declared in any of the supplied headers — hard error."""
+    yaml_text = """
+- api: hsa_amd_nonexistent
+  category: hsa_signals
+  args: []
+"""
+    _, output = _run_verify_multi(yaml_text, [HSA_BASE, HSA_EXT], expect_pass=False)
+    assert 'hsa_amd_nonexistent' in output
+```
+
+- [ ] **Step 3: Run tests, verify the new ones fail (single-header verifier doesn't support multi)**
+
+```bash
+python3 projects/clr/hipamd/scripts/test_lttng_curated_verify.py
+```
+
+Expected: 4 new tests fail with errors like "argument --header: cannot be specified more than once" (or similar). Pre-existing 6 tests still pass.
+
+- [ ] **Step 4: Modify the verifier to accept multiple `--header` values and union declarations**
+
+Edit `projects/clr/hipamd/scripts/lttng_curated_verify.py`:
+
+(4a) Change the argparse declaration:
+
+```python
+ap.add_argument('--header', required=True, action='append',
+                help='Header file to verify against. May be specified '
+                     'multiple times; declarations from all headers are '
+                     'unioned before checking YAML APIs (e.g. HSA needs '
+                     'both hsa.h and hsa_ext_amd.h).')
+```
+
+(4b) Change `parse_header(header_path, extra_args)` to `parse_headers(header_paths, extra_args)`:
+
+```python
+def parse_headers(header_paths, extra_args):
+    """Parse one or more headers; return a unioned {api_name: [(name, c_type)]}.
+
+    On duplicate api_name across headers (shouldn't happen in HSA, but
+    defend against it), the LATER header wins and a warning is emitted.
+    """
+    try:
+        from clang import cindex
+    except ImportError:
+        sys.exit("ERROR: libclang Python bindings not installed. Try: pip install libclang")
+    args = ['-x', 'c++', '-std=c++17'] + list(extra_args)
+    idx = cindex.Index.create()
+    union = {}
+    for hp in header_paths:
+        tu = idx.parse(hp, args=args)
+        for n in tu.cursor.walk_preorder():
+            if n.kind != cindex.CursorKind.FUNCTION_DECL:
+                continue
+            params = [(arg.spelling, arg.type.spelling)
+                      for arg in n.get_arguments()]
+            if n.spelling in union and union[n.spelling] != params:
+                print(f"WARN: {n.spelling}: declaration in {hp} differs from "
+                      f"earlier header; using {hp}", file=sys.stderr)
+            union[n.spelling] = params
+    return union
+```
+
+(4c) Update `verify()`:
+
+```python
+def verify(yaml_path, header_paths, extra_args):
+    apis = parse_yaml_file(yaml_path)
+    header_decls = parse_headers(header_paths, extra_args)
+    # ... existing loop unchanged; the error message in the
+    # 'not declared' branch should mention all header paths:
+    if name not in header_decls:
+        errors.append(f"{name}: not declared in any of {header_paths}")
+        continue
+    # ... rest unchanged ...
+    print(f"OK: {len(apis)} curated APIs verified against {len(header_paths)} header(s)")
+    return 0
+```
+
+(4d) Update `main()` to pass the list:
+
+```python
+sys.exit(verify(args.yaml, args.header, args.extra_arg))
+```
+
+- [ ] **Step 5: Run all tests, all 10 must pass**
+
+```bash
+python3 projects/clr/hipamd/scripts/test_lttng_curated_verify.py
+```
+
+Expected: `PASS: 0 failures` across 10 tests (6 original + 4 new).
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add projects/clr/hipamd/scripts/lttng_curated_verify.py \
+        projects/clr/hipamd/scripts/test_lttng_curated_verify.py \
+        projects/clr/hipamd/scripts/testdata/fake_hsa_base.h \
+        projects/clr/hipamd/scripts/testdata/fake_hsa_ext.h
+git commit -m "lttng: verifier accepts multiple --header args (HSA spans 2 headers)
+
+HSA curated APIs split between hsa.h (base — hsa_queue_create,
+hsa_signal_create) and hsa_ext_amd.h (AMD extensions — hsa_amd_*).
+Single --header would always fail half the API set.
+
+Change --header to action='append' and union declarations from all
+supplied headers before name-lookup. Add 4 unit tests against fake
+HSA base + ext fixtures covering: base-only API verifies, ext-only
+API verifies, mixed YAML verifies, and undeclared API fails.
+
+Required by Task 15 (HSA verify) — that task now invokes
+  --header /opt/rocm/include/hsa/hsa.h
+  --header /opt/rocm/include/hsa/hsa_ext_amd.h
+in a single command rather than two passes."
 ```
 
 ---
@@ -3669,21 +3910,19 @@ A drift check between the HIP and HSA copies of these four scripts is a recommen
     - {name: force_copy_on_sdma,  type: bool,   dir: IN}
 ```
 
-- [ ] **Step 3: Verify against real HSA headers**
+- [ ] **Step 3: Verify against real HSA headers (single invocation, multi-header)**
+
+Per Task 4.5, the verifier accepts multiple `--header` values and unions declarations. HSA needs both:
 
 ```bash
 ./dev-bin/in-container.sh main "cd /root/rocm-systems && python3 projects/rocr-runtime/runtime/hsa-runtime/scripts/lttng_curated_verify.py \
     --yaml projects/rocr-runtime/runtime/hsa-runtime/scripts/curated_apis.yaml \
     --header /opt/rocm/include/hsa/hsa.h \
-    --extra-arg=-I/opt/rocm/include"
-# And:
-./dev-bin/in-container.sh main "cd /root/rocm-systems && python3 projects/rocr-runtime/runtime/hsa-runtime/scripts/lttng_curated_verify.py \
-    --yaml projects/rocr-runtime/runtime/hsa-runtime/scripts/curated_apis.yaml \
     --header /opt/rocm/include/hsa/hsa_ext_amd.h \
     --extra-arg=-I/opt/rocm/include"
 ```
 
-(The verifier currently takes one --header; if the HSA APIs span hsa.h and hsa_ext_amd.h, extend the verifier with `--header` accepting multiple values, or run twice with each header and accept "API not found in this header" as long as found in the union. Add this enhancement as part of this task if needed.)
+Expected: `OK: 10 curated APIs verified against 2 header(s)`.
 
 - [ ] **Step 4: Generate HSA curated headers**
 
