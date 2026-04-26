@@ -500,7 +500,7 @@ On the throw path, the existing `CATCH` / `CATCHRET` macros emit neither `<api>_
 
 ### 8.2 Coverage gate update (`lttng_coverage_gate.sh`)
 - Verifies every API in `curated_apis.yaml` is present in the migration inventory.
-- Body-content scan: each curated wrapper contains the `/* __ROCM_CURATED__: <api> */` sentinel AND a `_CURATED(` macro invocation.
+- Body-content scan: each curated wrapper contains the `/* __ROCM_CURATED__: <api> */` sentinel AND a curated-macro invocation. The normative matcher is the regex `ROCM_TRACE_RET_(STATUS|PTR|VOID)_CURATED(_NOARGS)?(_HSA(_NOARGS)?)?\(` so that all six curated-macro variants (`_STATUS_CURATED`, `_PTR_CURATED`, `_VOID_CURATED`, plus their `_NOARGS`, `_HSA`, and `_HSA_NOARGS` forms) match. (A naive substring scan for `_CURATED(` would miss `_CURATED_NOARGS(` and `_CURATED_HSA(`.)
 - Additionally, when the API's YAML entry has at least one IN or INOUT arg, the wrapper body must contain at least one `__rocm_in_` local. APIs with only OUT args or no args are exempt from the `__rocm_in_` check.
 
 ### 8.3 `lttng_curated_verify.py` (separate CI gate)
