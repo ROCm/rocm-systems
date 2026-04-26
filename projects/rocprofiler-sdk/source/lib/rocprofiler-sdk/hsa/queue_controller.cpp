@@ -137,6 +137,26 @@ create_queue(hsa_agent_t        agent,
                                                                                queue);
                 if(status != HSA_STATUS_SUCCESS) return status;
 
+                // Synchronously enable HSA profiling on the new queue so the
+                // firmware dispatch ring records timestamps for kernels
+                // dispatched between hsa_queue_create() returning and the
+                // firmware_ring_drainer's discovery poll (~1ms cadence).
+                // Without this, early dispatches on a freshly-created
+                // tracing_only queue produce no firmware records and are
+                // silently dropped.
+                //
+                // This mirrors the synchronous enable performed by the
+                // multi-arg Queue ctor's tracing_only branch
+                // (queue.cpp:753-755). The legacy/non-inline create path
+                // routes through that ctor; the inline path constructs
+                // Queue via the existing-queue ctor (queue.cpp:843), which
+                // does NOT enable profiling, so we must do it here.
+                ROCP_HSA_TABLE_CALL(
+                    FATAL,
+                    controller->get_ext_table().hsa_amd_profiling_set_profiler_enabled_fn(*queue,
+                                                                                          true))
+                    << "Could not enable profiler on HSA queue (tracing-only, inline path)";
+
                 new_queue = std::make_unique<Queue>(
                     agent_info,
                     controller->get_core_table(),
