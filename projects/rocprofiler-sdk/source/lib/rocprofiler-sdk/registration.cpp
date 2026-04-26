@@ -1272,6 +1272,12 @@ rocprofiler_set_api_table(const char* name,
             }
         }
 
+        // Start the firmware-ring drainer AFTER inline intercept install so the
+        // gate (which consults queue_intercept::is_intercepting_inline()) sees
+        // the final state. Safe to call unconditionally — the function
+        // internally short-circuits when prerequisites are not met.
+        rocprofiler::hsa::start_firmware_dispatch_ring_drainer_if_needed();
+
 #if ROCPROFILER_SDK_HSA_PC_SAMPLING > 0
         // Initialize PC sampling service if configured
         if(runtime_pc_sampling_table)

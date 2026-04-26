@@ -722,11 +722,23 @@ queue_controller_init(HsaApiTable* table)
 
     if(enable_queue_intercept()) queue_init();
 
+    // NOTE: drainer-start moved to start_firmware_dispatch_ring_drainer_if_needed()
+    // and is invoked from registration.cpp AFTER queue_intercept::install_intercept,
+    // so that queue_intercept::is_intercepting_inline() reflects its final state.
+}
+
+void
+start_firmware_dispatch_ring_drainer_if_needed()
+{
     // Start the firmware-ring drainer if the runtime exposes the firmware
     // dispatch ring APIs and any registered context wants kernel-dispatch
     // tracing without PC sampling. With the firmware ring path, kernel
     // dispatch records are produced from a polled host-visible ring buffer
     // instead of via HSA queue interception.
+    //
+    // MUST be called AFTER queue_intercept::install_intercept so that
+    // is_intercepting_inline() returns its final value — the gate below
+    // depends on it.
     if(firmware_dispatch_ring_available())
     {
         // The firmware-ring drainer and the WriteInterceptor path are

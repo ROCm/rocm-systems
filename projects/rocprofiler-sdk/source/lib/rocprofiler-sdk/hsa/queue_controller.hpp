@@ -142,6 +142,17 @@ needs_packet_rewriting_intercept();
 void
 queue_controller_init(HsaApiTable* table);
 
+// Start the firmware-ring kernel-dispatch drainer if all gating conditions are
+// met (firmware ring available, at least one kernel-tracing context, no
+// packet-rewriting context, and the inline doorbell intercept is installed).
+//
+// MUST be invoked AFTER rocprofiler::hsa::queue_intercept::install_intercept()
+// — the gate consults queue_intercept::is_intercepting_inline(), which only
+// returns true once install_intercept has run. Calling this before
+// install_intercept will leave the drainer un-started.
+void
+start_firmware_dispatch_ring_drainer_if_needed();
+
 void
 queue_controller_fini();
 
