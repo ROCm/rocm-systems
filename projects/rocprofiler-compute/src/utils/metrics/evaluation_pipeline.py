@@ -230,8 +230,55 @@ def eval_metric(
     # Print aggregated summary of any noise clamping warnings
     print_noise_clamp_summary()
 
+    # Derive Pct of Peak from evaluated Value and Peak columns
+    compute_pct_of_peak(dfs, dfs_type)
+
     # Check for metrics exceeding theoretical peak due to dual-issue
     validate_dual_issue_metrics(dfs, dfs_type, sys_info, raw_pmc_df)
+
+
+def compute_pct_of_peak(dfs: dict, dfs_type: dict) -> None:
+    """Derive Pct of Peak = 100 * value / peak for all metric tables.
+
+    The Pct of Peak column is inserted automatically when both a value
+    column (Value or Avg) and a peak column (Peak or Peak (Empirical))
+    are present in a metric table.
+    """
+    pop_col = "Pct of Peak"
+    for df_id, df in dfs.items():
+        if dfs_type[df_id] != "metric_table":
+            continue
+
+        # Detect value and peak columns by name
+        value_col = (
+            "Value"
+            if "Value" in df.columns
+            else ("Avg" if "Avg" in df.columns else None)
+        )
+        peak_col = (
+            "Peak (Empirical)"
+            if "Peak (Empirical)" in df.columns
+            else ("Peak" if "Peak" in df.columns else None)
+        )
+        # Skip tables without both value and peak columns
+        if not value_col or not peak_col:
+            continue
+
+        # Place the new column immediately after the Peak column
+        peak_pos = df.columns.get_loc(peak_col)
+        df.insert(peak_pos + 1, pop_col, "")
+
+        # Compute 100 * value / peak per row; leave empty for
+        # non-numeric entries (e.g. "N/A") or zero peak
+        for idx in df.index:
+            val = df.loc[idx, value_col]
+            peak = df.loc[idx, peak_col]
+            try:
+                val_f = float(val)
+                peak_f = float(peak)
+                df.at[idx, pop_col] = (val_f / peak_f) * 100 if peak_f != 0 else ""
+            except (ValueError, TypeError):
+                df.at[idx, pop_col] = ""
 
 
 def validate_dual_issue_metrics(
