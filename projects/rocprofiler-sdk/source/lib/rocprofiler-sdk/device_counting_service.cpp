@@ -83,8 +83,15 @@ rocprofiler_sample_device_counting_service(rocprofiler_context_id_t      context
                 return ROCPROFILER_STATUS_ERROR_OUT_OF_RESOURCES;
             }
             *rec_count = recs.size();
-            std::memcpy(
-                output_records, recs.data(), sizeof(rocprofiler_counter_record_t) * recs.size());
+            // Only call memcpy when there are records to copy.
+            // Passing nullptr to memcpy (from empty vector's data()) is undefined behavior
+            // even when the size is 0, as memcpy's src parameter is declared nonnull.
+            if(!recs.empty())
+            {
+                std::memcpy(output_records,
+                            recs.data(),
+                            sizeof(rocprofiler_counter_record_t) * recs.size());
+            }
         }
         return status;
     }

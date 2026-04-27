@@ -226,6 +226,8 @@ QueueController::destroy_queue(hsa_queue_t* id)
 {
     if(!id) return;
 
+    // Get queue pointer while holding rlock - queue must remain in map during sync()
+    // because signal handlers may need to look it up
     const auto* queue = get_queue(*id);
 
     // return if queue does not exist
@@ -233,10 +235,30 @@ QueueController::destroy_queue(hsa_queue_t* id)
 
     ROCP_INFO << "destroying queue...";
 
+    // Wait for active kernels to complete while queue is still in map
     queue->sync();
-    if(queue->block_signal.handle != 0) get_core_table().hsa_signal_destroy_fn(queue->block_signal);
-    _queues.wlock([&](auto& map) { map.erase(id); });
 
+    // Now extract the queue from the map and destroy signal while holding wlock
+    // This ensures the Queue destructor runs outside the lock to avoid races
+    std::unique_ptr<Queue> queue_to_destroy;
+    hsa_signal_t           block_signal_to_destroy{0};
+
+    _queues.wlock([&](auto& map) {
+        auto it = map.find(id);
+        if(it != map.end())
+        {
+            // Capture signal handle before moving unique_ptr
+            block_signal_to_destroy = it->second->block_signal;
+            queue_to_destroy        = std::move(it->second);
+            map.erase(it);
+        }
+    });
+
+    // Destroy block signal after removing from map but before Queue destructor
+    if(block_signal_to_destroy.handle != 0)
+        get_core_table().hsa_signal_destroy_fn(block_signal_to_destroy);
+
+    // Queue is destroyed when queue_to_destroy goes out of scope (outside any lock)
     ROCP_INFO << "queue destroyed";
 }
 
