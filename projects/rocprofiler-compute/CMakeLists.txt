@@ -555,6 +555,18 @@ add_test(
 )
 
 # -----------------------------------
+# PMC data cache tests
+# -----------------------------------
+
+add_test(
+    NAME test_pmc_data_cache
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
+        --junitxml=tests/test_pmc_data_cache.xml ${COV_OPTION}
+        tests/test_pmc_data_cache.py ${WORKING_DIR_OPTION}
+)
+
+# -----------------------------------
 # Metrics unit tests
 # -----------------------------------
 
@@ -706,6 +718,7 @@ if(${ENABLE_COVERAGE})
         test_analyze_commands
         test_analyze_workloads
         test_metric_utils
+        test_pmc_data_cache
         test_L1_cache_counters
         test_num_xcds_spec_class
         test_num_xcds_cli_output
