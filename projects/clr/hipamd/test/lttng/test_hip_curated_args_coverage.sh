@@ -4,6 +4,7 @@
 # contain matching _args event with linked corr_id.
 set -euo pipefail
 
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 BUILD_LIB_DIR="${1:-$PWD/build/clr/hipamd/lib}"
 YAML="${2:-projects/clr/hipamd/scripts/curated_apis.yaml}"
 
@@ -209,15 +210,31 @@ PLACEHOLDER_OVERRIDES = {
                                    'startEvent': 'real_event',
                                    'stopEvent':  'real_event_2'},
 
-    # APIs skipped at runtime (need a real code-object blob or
-    # launchParamsList array — not worth synthesizing in this harness).
-    # Static coverage gate (sentinel + macro presence in linked .so)
-    # still verifies that the wrapper exists.
-    'hipModuleGetFunction':                  None,
-    'hipModuleLoadData':                     None,
-    'hipModuleLoadDataEx':                   None,
-    'hipModuleUnload':                       None,
-    'hipModuleLaunchKernel':                 None,
+    # Module APIs — use the .hsaco fixture loaded at startup. OUT args
+    # (`module`/`function`) are handled by the auto OUT-slot mechanism;
+    # only IN args need overrides. `kname` default placeholder is wrong
+    # (we need the actual exported symbol name); `module` IN default is
+    # `real_stream` (wrong type) so override to `real_module`. The
+    # `image` IN default is `&real_host_buf[0]` (random bytes — would
+    # fail the magic check); override to the loaded code-object bytes.
+    'hipModuleLoadData':    {'image': 'hsaco_image.data()'},
+    'hipModuleLoadDataEx':  {'image':       'hsaco_image.data()',
+                              'numOptions':  '0',
+                              'options':     'nullptr',
+                              'optionValues':'nullptr'},
+    'hipModuleGetFunction': {'module': 'real_module',
+                              'kname':  '"noop_kernel"'},
+    # Use a PRIVATE module — same reasoning as hipStreamDestroy / hipFree:
+    # fork COW protects the parent handle variable, but the underlying
+    # driver-side module state is shared, so unloading the parent's
+    # `real_module` from a forked child would invalidate `real_function`
+    # (used by hipModuleLaunchKernel) and any sibling Module API.
+    'hipModuleUnload':      {'module': '_local_dest_module'},
+
+    # APIs skipped at runtime (need launchParamsList array — not worth
+    # synthesizing in this harness). Static coverage gate (sentinel +
+    # macro presence in linked .so) still verifies that the wrapper
+    # exists.
     'hipLaunchCooperativeKernelMultiDevice': None,
     'hipExtLaunchMultiKernelMultiDevice':    None,
 }
@@ -250,6 +267,7 @@ INLINE_APIS = {
     'hipEventRecord',
     'hipLaunchKernel',
     'hipExtLaunchKernel',
+    'hipModuleLaunchKernel',
     'hipGraphLaunch',
     'hipMemcpy',
     'hipMemcpyAsync',
@@ -286,6 +304,10 @@ PER_API_LOCALS = {
     'hipStreamDestroy':    'hipStream_t _local_dest_stream = nullptr; hipStreamCreate(&_local_dest_stream);',
     'hipEventDestroy':     'hipEvent_t _local_dest_event = nullptr; hipEventCreate(&_local_dest_event);',
     'hipGraphDestroy':     'hipGraph_t _local_dest_graph = nullptr; hipGraphCreate(&_local_dest_graph, 0);',
+    # Module unload: load a private module from the same fixture image so
+    # destruction doesn't touch the shared parent's `real_module`.
+    'hipModuleUnload':     'hipModule_t _local_dest_module = nullptr; '
+                           'if (!hsaco_image.empty()) hipModuleLoadData(&_local_dest_module, hsaco_image.data());',
     'hipGraphExecDestroy': 'hipGraph_t _local_dg = nullptr; hipGraphCreate(&_local_dg, 0); '
                            'hipKernelNodeParams _kp = {}; _kp.func = (void*)noop_kernel; '
                            '_kp.gridDim = dim3(1,1,1); _kp.blockDim = dim3(1,1,1); '
@@ -295,9 +317,18 @@ PER_API_LOCALS = {
 }
 
 # Full call-expression overrides for APIs whose YAML omits required header
-# args (per spec §4.4 omission mitigation). Currently empty: the only
-# previous entry (hipModuleLaunchKernel) is now in RUNTIME_SKIP.
-CALL_OVERRIDES = {}
+# args (per spec §4.4 omission mitigation). hipModuleLaunchKernel YAML has
+# only 5 args (f, sharedMemBytes, stream, kernelParams, extra); the real
+# header signature has 7 (gridDimX/Y/Z, blockDimX/Y/Z), so we can't build
+# the call from per-arg placeholders. Note kernelParams and extra are both
+# nullptr — the kernel takes no args.
+CALL_OVERRIDES = {
+    'hipModuleLaunchKernel':
+        'real_function, '
+        '1u, 1u, 1u, '       # gridDimX/Y/Z
+        '1u, 1u, 1u, '       # blockDimX/Y/Z
+        '0u, real_stream, nullptr, nullptr',
+}
 
 def placeholder_for(api_name, arg):
     overrides = PLACEHOLDER_OVERRIDES.get(api_name) or {}
@@ -309,6 +340,8 @@ print('#include <hip/hip_runtime.h>')
 print('#include <sys/wait.h>')
 print('#include <unistd.h>')
 print('#include <cstdlib>')
+print('#include <cstdio>')
+print('#include <vector>')
 print('#include <functional>')
 print('')
 # A real __global__ kernel symbol so the launch-family APIs
@@ -342,6 +375,14 @@ print('static void*            real_host_pinned = nullptr;')
 print('static hipGraph_t       real_graph       = nullptr;')
 print('static hipGraphExec_t   real_graph_exec  = nullptr;')
 print('static hipGraphNode_t   real_graph_node  = nullptr;')
+# Module fixture — populated in main() from a .hsaco code object built
+# at test-setup time by `hipcc --genco` (path substituted into the
+# generated source via shell sed replacement of FIXTURE_HSACO_PATH_HERE).
+# Used by the 5 hipModule* APIs in PLACEHOLDER_OVERRIDES below.
+print('static const char*      FIXTURE_HSACO_PATH = "FIXTURE_HSACO_PATH_HERE";')
+print('static std::vector<char> hsaco_image;')
+print('static hipModule_t      real_module      = nullptr;')
+print('static hipFunction_t    real_function    = nullptr;')
 print('')
 # call_isolated() runs each API call in a forked child so a SIGSEGV (which
 # C++ try/catch cannot intercept) in one API does not kill the harness.
@@ -396,6 +437,30 @@ print('    }')
 print('    hipGraphInstantiate(&real_graph_exec, real_graph,')
 print('                        nullptr, nullptr, 0);')
 print('')
+# Read the .hsaco code object once, then prime real_module / real_function
+# so the 5 hipModule* APIs can use them as inputs. If the file is missing
+# or load fails, the per-API calls will simply return error codes — the
+# curated _args event still fires (it emits AFTER the impl returns).
+print('    {')
+print('        FILE* f = fopen(FIXTURE_HSACO_PATH, "rb");')
+print('        if (f) {')
+print('            fseek(f, 0, SEEK_END);')
+print('            long sz = ftell(f);')
+print('            fseek(f, 0, SEEK_SET);')
+print('            if (sz > 0) {')
+print('                hsaco_image.resize((size_t)sz);')
+print('                fread(hsaco_image.data(), 1, (size_t)sz, f);')
+print('            }')
+print('            fclose(f);')
+print('        }')
+print('    }')
+print('    if (!hsaco_image.empty()) {')
+print('        hipModuleLoadData(&real_module, hsaco_image.data());')
+print('        if (real_module) {')
+print('            hipModuleGetFunction(&real_function, real_module, "noop_kernel");')
+print('        }')
+print('    }')
+print('')
 # Stable-sort APIs so any single-API segfault doesn't suppress
 # earlier-letter APIs. Order from least-likely-to-crash to most-likely:
 #   risk 0: simple stream/event/query APIs that no-op on bad args
@@ -432,7 +497,12 @@ for idx, api in enumerate(apis):
     if name in CALL_OVERRIDES:
         # Full-call override (e.g., for APIs whose YAML omits required
         # header args; the harness can't synthesize those from YAML).
-        print(f'    call_isolated("{name}", []() {{ {name}({CALL_OVERRIDES[name]}); }});')
+        # Respect INLINE_APIS — kernel-launch overrides need the parent's
+        # background threads, so run inline rather than in a forked child.
+        if name in INLINE_APIS:
+            print(f'    {{ try {{ {name}({CALL_OVERRIDES[name]}); }} catch(...) {{}} }}')
+        else:
+            print(f'    call_isolated("{name}", []() {{ {name}({CALL_OVERRIDES[name]}); }});')
         continue
     out_decls = []
     call_args = []
@@ -491,6 +561,27 @@ print('}')
 PY
 
 HIPCC=/opt/rocm/bin/hipcc
+
+# Compile fixture kernel to a code object (.hsaco) for module-API tests.
+# --genco produces a stand-alone code object instead of a host executable.
+# --offload-arch=gfx942 targets the MI300/MI325 (gfx942) GPUs on the
+# test bench. If the host has a different arch, hipModuleLoadData will
+# return an arch-mismatch error at runtime and the affected APIs will
+# emit their _args event but return non-zero (acceptable — the trace
+# event still fires).
+"$HIPCC" --genco --offload-arch=gfx942 \
+    "${SCRIPT_DIR}/fixture_kernel.hip.cpp" \
+    -o "$WORK/noop_kernel.hsaco" 2>&1 | tail -5
+if [ ! -f "$WORK/noop_kernel.hsaco" ]; then
+    echo "FAIL: fixture kernel compilation failed; aborting" >&2
+    exit 1
+fi
+echo "  OK: fixture kernel built ($(stat -c '%s' "$WORK/noop_kernel.hsaco") bytes)"
+
+# Substitute the fixture's absolute path into the generated harness
+# (the heredoc emits the literal placeholder FIXTURE_HSACO_PATH_HERE).
+sed -i "s|FIXTURE_HSACO_PATH_HERE|$WORK/noop_kernel.hsaco|" "$WORK/harness.hip.cpp"
+
 "$HIPCC" "$WORK/harness.hip.cpp" -L "$BUILD_LIB_DIR" -lamdhip64 \
     -Wl,-rpath,"$BUILD_LIB_DIR" -o "$WORK/coverage_test"
 
@@ -518,16 +609,12 @@ lttng destroy "$SESSION_NAME" >/dev/null
 DUMP="$WORK/trace.txt"
 babeltrace2 "$TRACE_DIR" > "$DUMP"
 
-# APIs intentionally skipped at runtime (need real code-object blob or
-# launchParamsList array). Static coverage gate (lttng_coverage_gate.sh)
-# verifies the wrapper macro is present in the linked .so. Keep this list
-# in sync with RUNTIME_SKIP in the Python harness generator above.
+# APIs intentionally skipped at runtime (need launchParamsList array
+# and 2+ devices — out of scope for this single-device fixture). Static
+# coverage gate (lttng_coverage_gate.sh) verifies the wrapper macro is
+# present in the linked .so. Keep this list in sync with RUNTIME_SKIP
+# in the Python harness generator above.
 RUNTIME_SKIP_LIST=" \
-    hipModuleGetFunction \
-    hipModuleLoadData \
-    hipModuleLoadDataEx \
-    hipModuleUnload \
-    hipModuleLaunchKernel \
     hipLaunchCooperativeKernelMultiDevice \
     hipExtLaunchMultiKernelMultiDevice \
 "
@@ -550,7 +637,7 @@ ENV_CRASH=0
 [ "$APP_RC" -ne 0 ] && ENV_CRASH=1
 while read api; do
     if is_runtime_skip "$api"; then
-        echo "  SKIP  ${api}_args (runtime; static-only; needs code object or launchParamsList)"
+        echo "  SKIP  ${api}_args (runtime; static-only; needs multi-device + launchParamsList)"
         SKIP=$((SKIP+1))
     elif grep -q "rocm_hip:${api}_args" "$DUMP"; then
         echo "  PASS  ${api}_args fired"
