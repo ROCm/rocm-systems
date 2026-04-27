@@ -25,12 +25,14 @@
 #include <unordered_map>
 #include <utility>
 #include <vector>
-#include "gfx11/gfx11wave.h"
-#include "gfx12parser.h"
-#include "gfx12token.h"
+#include "gfx12/gfx12wave.h"
+#include "mi400parser.h"
+#include "mi400token.h"
 #include "trace_parser.hpp"
 
-namespace gfx12
+namespace mi400
 {
-mapped_inst_t map_to_common_type(int einst, int dprate, int derate);
-} // namespace gfx12
+mapped_inst_t map_to_common_type(int einst, int trans2);
+
+void handle_xnack_rewind(gfx10::wave_t& wave);
+} // namespace mi400
