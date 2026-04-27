@@ -1433,17 +1433,26 @@ void WriteProtoTraceImpl(const char* filepath) {
 
 // atexit handler — registered only when GPU_CLR_PROFILE_OUTPUT is set.
 // Runs before static destructors so HIP devices are still alive for DrainAllDevices().
+// Insert PID before the file extension: "trace.json" → "trace_1234.json"
+static std::string AddPidToPath(const std::string& path) {
+  auto dot = path.rfind('.');
+  std::string pid_str = "_" + std::to_string(amd::Os::getProcessId());
+  if (dot == std::string::npos)
+    return path + pid_str;
+  return path.substr(0, dot) + pid_str + path.substr(dot);
+}
+
 static void ProfilerAtExit() {
   // DrainAllDevices can crash on Windows KFD if streams are already partially
   // torn down when the atexit handler fires. GPU work has already completed by
   // the time the process exits normally, so skip the sync here.
-  const char* path = g_env_output_path.c_str();
+  std::string path = AddPidToPath(g_env_output_path);
   // Detect extension: use binary Perfetto format for .pftrace, JSON otherwise.
-  const char* ext = strrchr(path, '.');
+  const char* ext = strrchr(path.c_str(), '.');
   if (ext && strcmp(ext, ".pftrace") == 0)
-    WriteProtoTraceImpl(path);
+    WriteProtoTraceImpl(path.c_str());
   else
-    WriteJsonTraceImpl(path);
+    WriteJsonTraceImpl(path.c_str());
 }
 
 struct HipClrProfilerFinalizer {
