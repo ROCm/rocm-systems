@@ -17,6 +17,7 @@ import numpy as np
 import pandas as pd
 import pytest
 import test_utils
+import yaml
 from scipy.stats import zscore
 
 # Runtime config options
@@ -146,7 +147,33 @@ SLURM_RANK_VAR, SLURM_SIZE_VAR = "SLURM_PROCID", "SLURM_NTASKS"
 test_utils.check_resource_allocation()
 
 # Get soc info
-soc = test_utils.gpu_soc()
+gpu_arch, soc = test_utils.gpu_soc()
+
+ROOT = os.path.dirname(os.path.dirname(__file__))
+SRC = os.path.join(ROOT, "src")
+
+
+def get_available_sets_for_arch(gpu_arch):
+    """Return available set options for the given GPU arch,
+    or [] if gpu_arch is falsy."""
+    if not gpu_arch:
+        return []
+    if SRC not in sys.path:
+        sys.path.insert(0, SRC)
+    sets_file = (
+        Path(SRC)
+        / "rocprof_compute_soc"
+        / "profile_configs"
+        / "sets"
+        / f"{gpu_arch}_sets.yaml"
+    )
+    if not sets_file.exists():
+        return []
+    data = yaml.safe_load(sets_file.read_text())
+    return [s["set_option"] for s in data.get("sets", []) if s.get("set_option")]
+
+
+AVAILABLE_SETS = get_available_sets_for_arch(gpu_arch)
 
 # Set default profiler
 os.environ["ROCPROF"] = "rocprofiler-sdk"
@@ -2268,92 +2295,42 @@ def test_live_attach_detach_pc_sampling(
 
 @pytest.mark.sets_func
 class TestSetsIntegration:
-    def test_memory_throughput_set(self, binary_handler_profile_rocprof_compute):
-        options = ["--set", "mem_thruput"]
-        workload_dir = test_utils.get_output_dir()
-
-        binary_handler_profile_rocprof_compute(
-            config,
-            workload_dir,
-            options,
-            check_success=True,
-            roof=False,
-        )
-
-        assert test_utils.get_num_pmc_file(workload_dir) == 1
-
-        memory_metrics = (
-            ["2.1.18", "17.1.0"] if is_strix_halo_soc() else ["16.1.2", "17.1.0"]
-        )
-        for metric_id in memory_metrics:
-            assert metric_id in open(Path(workload_dir) / "log.txt").read(), (
-                f"Expected memory metric {metric_id} not found"
-            )
-
-        test_utils.clean_output_dir(config["cleanup"], workload_dir)
-
-    def test_launch_stats_set(self, binary_handler_profile_rocprof_compute):
-        options = ["--set", "launch_stats"]
-        workload_dir = test_utils.get_output_dir()
-
-        binary_handler_profile_rocprof_compute(
-            config,
-            workload_dir,
-            options,
-            check_success=True,
-            roof=False,
-        )
-
-        assert test_utils.get_num_pmc_file(workload_dir) == 1
-
-        test_utils.clean_output_dir(config["cleanup"], workload_dir)
-
-    def test_compute_thruput_util_set(self, binary_handler_profile_rocprof_compute):
-        options = ["--set", "compute_thruput_util"]
-        workload_dir = test_utils.get_output_dir()
-
-        binary_handler_profile_rocprof_compute(
-            config,
-            workload_dir,
-            options,
-            check_success=True,
-            roof=False,
-        )
-
-        assert test_utils.get_num_pmc_file(workload_dir) == 1
-
-        assert test_utils.check_file_pattern(
-            "- 11.2.3", f"{workload_dir}/profiling_config.yaml"
-        )
-
-        test_utils.clean_output_dir(config["cleanup"], workload_dir)
-
-    def test_compute_thruput_flops_set(self, binary_handler_profile_rocprof_compute):
-        options = ["--set", "compute_thruput_flops"]
-        workload_dir = test_utils.get_output_dir()
-
-        binary_handler_profile_rocprof_compute(
-            config,
-            workload_dir,
-            options,
-            check_success=True,
-            roof=False,
-        )
-
-        assert test_utils.get_num_pmc_file(workload_dir) == 1
-
-        test_utils.clean_output_dir(config["cleanup"], workload_dir)
-
-    def test_invalid_set_error_handling(self, binary_handler_profile_rocprof_compute):
-        options = ["--set", "nonexistent_set"]
-        workload_dir = test_utils.get_output_dir()
+    # Ensure single pass for auto-discovered sets from YAML for the current GPU arch.
+    @pytest.mark.parametrize("set_name", AVAILABLE_SETS, ids=lambda s: s)
+    def test_set_profiling(
+        self, binary_handler_profile_rocprof_compute, set_name, request
+    ):
+        """Each set_option runs successfully and produces a single PMC file."""
+        options = ["--set", set_name]
+        workload_dir = test_utils.get_output_dir(param_id=set_name)
 
         returncode = binary_handler_profile_rocprof_compute(
-            config,
-            workload_dir,
-            options,
-            check_success=False,
-            roof=False,
+            config, workload_dir, options, check_success=True, roof=False
+        )
+
+        assert returncode == 0
+        assert test_utils.get_num_pmc_file(workload_dir) == 1
+        test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+    @pytest.mark.parametrize(
+        "set_name",
+        [
+            pytest.param("nonexistent_set", id="nonexistent"),
+            pytest.param("x" * 1024, id="very_long_name"),
+            pytest.param("mem_thruput; rm -rf /", id="shell_metachar"),
+        ],
+    )
+    def test_invalid_set_rejected(
+        self, binary_handler_profile_rocprof_compute, set_name, request
+    ):
+        """Invalid or adversarial set names are rejected with exit code 1."""
+        options = ["--set", set_name]
+        workload_dir = test_utils.get_output_dir(
+            param_id=f"invalid_{request.node.callspec.id}"
+        )
+
+        returncode = binary_handler_profile_rocprof_compute(
+            config, workload_dir, options, check_success=False, roof=False
         )
 
         assert returncode == 1

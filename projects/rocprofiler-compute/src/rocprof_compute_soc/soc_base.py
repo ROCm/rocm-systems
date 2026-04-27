@@ -7,7 +7,6 @@ import argparse
 import functools
 import math
 import os
-import re
 import shutil
 import sys
 from abc import abstractmethod
@@ -27,9 +26,7 @@ from utils.logger import (
 from utils.mi_gpu_spec import mi_gpu_specs
 from utils.specs import MachineSpecs
 from utils.utils_common import (
-    BUILD_IN_VARS,
     METRIC_ID_RE,
-    SUPPORTED_DENOM,
     add_counter_extra_config_input_yaml,
     convert_metric_id_to_panel_info,
     create_temp_rocprofiler_metrics_path,
@@ -39,6 +36,10 @@ from utils.utils_common import (
     parse_sets_yaml,
     resolve_rocm_library_path,
     validate_roofline_csv,
+)
+from utils.utils_counter_defs import (
+    BLOCK_REMAP,
+    extract_counters,
 )
 from vendored import yaml
 
@@ -397,7 +398,7 @@ class OmniSoC_Base:
             metric_name,
             metric_yaml,
         ) in self._iter_arch_analysis_yaml_metrics():
-            hw = self.parse_counters(metric_yaml)
+            hw = extract_counters(metric_yaml)
             hw = self._expand_tcc_template_counters(hw)
             counters = frozenset(hw & remaining)
             if not counters:
@@ -493,7 +494,7 @@ class OmniSoC_Base:
                 block_id, config_filename_dict, config_root_dir, texts
             )
 
-        counters = self.parse_counters("\n".join(texts))
+        counters = extract_counters("\n".join(texts))
         counters = self._expand_tcc_template_counters(counters)
 
         return counters, filter_blocks
@@ -650,58 +651,6 @@ class OmniSoC_Base:
                     except (TypeError, yaml.YAMLError):
                         continue
                     yield stem_id, panel_id, idx, metric_name, metric_text
-
-    @demarcate
-    def parse_counters(self, config_text: str) -> set[str]:
-        """
-        Create a set of all hardware counters mentioned in the given config file
-        content string.
-        """
-        hw_counter_matches, variable_matches = self.parse_counters_text(config_text)
-
-        # get hw counters and variables for all supported denominators
-        for formula in SUPPORTED_DENOM.values():
-            hw_counter_matches_denom, variable_matches_denom = self.parse_counters_text(
-                formula
-            )
-            hw_counter_matches.update(hw_counter_matches_denom)
-            variable_matches.update(variable_matches_denom)
-
-        # get hw counters corresponding to variables recursively
-        while variable_matches:
-            subvariable_matches: set[str] = set()
-            for var in variable_matches:
-                if var in BUILD_IN_VARS:
-                    (
-                        hw_counter_matches_vars,
-                        variable_matches_vars,
-                    ) = self.parse_counters_text(BUILD_IN_VARS[var])
-                    hw_counter_matches.update(hw_counter_matches_vars)
-                    subvariable_matches.update(variable_matches_vars)
-            # process new found variables
-            variable_matches = subvariable_matches - variable_matches
-
-        return hw_counter_matches
-
-    def parse_counters_text(self, text: str) -> tuple[set[str], set[str]]:
-        """Parse out hardware counters and variables from given text"""
-        # hw counter name should start with ip block name
-        # hw counter name should have all capital letters or digits
-        # and should not end with underscore
-        # he counter name can either optionally end with '[' or '_sum'
-        _blk = (
-            r"(?:SQ|SQC|SP|TA|TD|TCP|TCC|GL1A|GL1C|GL2A|GL2C|"
-            r"CPC|CPF|SPI|GCEA|GRBM)"
-        )
-        _sfx = r"_[0-9A-Z_]*[0-9A-Z](?:\[|_sum|_avr|_max|_min)*"
-        hw_counter_regex = _blk + _sfx
-        # only capture the variable name after $ using capturing group
-        variable_regex = r"\$([0-9A-Za-z_]*[0-9A-Za-z])"
-        hw_counter_matches = set(re.findall(hw_counter_regex, text))
-        variable_matches = set(re.findall(variable_regex, text))
-        # variable matches cannot be counters
-        hw_counter_matches = hw_counter_matches - variable_matches
-        return hw_counter_matches, variable_matches
 
     def get_rocprof_supported_counters(self) -> set[str]:
         args = self.get_args()
@@ -1015,13 +964,7 @@ class CounterFile:
 
     def add(self, counter: str) -> bool:
         block = counter.split("_")[0]
-
-        # SQ and SQC belong to the same IP block
-        if block == "SQC":
-            block = "SQ"
-        if block == "SP":
-            block = "SQ"
-
+        block = BLOCK_REMAP.get(block, block)
         return self.blocks[block].add(counter)
 
 

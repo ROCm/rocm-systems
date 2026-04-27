@@ -30,7 +30,7 @@ time_units = {"s": 10**9, "ms": 10**6, "us": 10**3, "ns": 1}
 # Roofline analyze tests
 # =============================================================================
 
-roofline_soc = test_utils.gpu_soc()
+_, roofline_soc = test_utils.gpu_soc()
 
 
 def test_analyze_generates_roofline_html(

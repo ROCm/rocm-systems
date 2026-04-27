@@ -16,7 +16,7 @@ config["METRIC_COMPARE"] = False
 
 num_devices = 1
 
-soc = test_utils.gpu_soc()
+_, soc = test_utils.gpu_soc()
 
 if soc is None:
     pytest.skip("GPU not supported", allow_module_level=True)
