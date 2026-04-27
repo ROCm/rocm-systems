@@ -365,7 +365,7 @@ class TestRocprofilerSystemsInstrument(RocprofsysTest):
         )
         self.assert_regex(
             result,
-            pass_regex=[r"\[filter\] skipping shared lib 'libomptarget"],
+            pass_regex=[r"\[filter\] skipping shared lib 'lib(omptarget|LLVM)"],
         )
 
     @pytest.mark.timeout(100)
