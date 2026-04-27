@@ -124,6 +124,18 @@ def _is_windowsapps_path(path: str | os.PathLike[str] | None) -> bool:
     return "\\windowsapps\\" in os.fspath(path).replace("/", "\\").lower()
 
 
+def _path_env_key(env: dict[str, str]) -> str:
+    """Return the PATH key already used by this environment."""
+    if os.name == "nt":
+        for key in ("Path", "PATH", "path"):
+            if key in env:
+                return key
+        for key in env:
+            if key.lower() == "path":
+                return key
+    return "PATH"
+
+
 def _windows_path_to_wsl(path: Path) -> str | None:
     """Convert a Windows absolute path to `/mnt/<drive>/...` for WSL hooks."""
     resolved = Path(path).resolve()
@@ -567,7 +579,7 @@ class ClaudeCodeAdapter:
         except OSError:
             return env
 
-        path_key = "PATH"
+        path_key = _path_env_key(env)
         path = env.get(path_key, "")
         norm_scripts = os.path.normcase(os.path.abspath(str(scripts_path)))
         parts = [p for p in path.split(os.pathsep) if p]
@@ -585,7 +597,9 @@ class ClaudeCodeAdapter:
 
     def _with_wsl_node_shim(self, env: dict[str, str], cwd: Path) -> dict[str, str]:
         """Make `node` visible to WSL bash hooks launched by Claude on Windows."""
-        if os.name != "nt" or not env.get("PATH") or not shutil.which("bash"):
+        path_key = _path_env_key(env)
+        path = env.get(path_key, "")
+        if os.name != "nt" or not path or not shutil.which("bash"):
             return env
 
         try:
@@ -638,7 +652,7 @@ class ClaudeCodeAdapter:
                 pass
 
         updated = dict(env)
-        updated["PATH"] = f"{shim_dir}{os.pathsep}{env.get('PATH', '')}"
+        updated[path_key] = f"{shim_dir}{os.pathsep}{path}"
         return updated
 
     # ------------------------------------------------------------------

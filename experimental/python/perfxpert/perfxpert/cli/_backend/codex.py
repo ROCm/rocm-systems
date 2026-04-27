@@ -154,6 +154,18 @@ def _is_windowsapps_codex_alias(path: str | os.PathLike[str] | None) -> bool:
     return "\\windowsapps\\" in normalized and "\\openai.codex_" in normalized
 
 
+def _path_env_key(env: dict[str, str]) -> str:
+    """Return the PATH key already used by this environment."""
+    if _is_windows_platform():
+        for key in ("Path", "PATH", "path"):
+            if key in env:
+                return key
+        for key in env:
+            if key.lower() == "path":
+                return key
+    return "PATH"
+
+
 def _codex_localcache_candidates() -> list[Path]:
     """Known Codex Desktop install locations with a directly runnable CLI."""
     if not _is_windows_platform():
@@ -725,7 +737,7 @@ class CodexAdapter:
             self._structured_edit_config_toml(config_toml)
             return
 
-        binary = shutil.which(self.binary_name)
+        binary = _resolve_codex_executable(self.binary_name)
 
         # 1) Idempotency: skip if already registered.
         if binary and self._mcp_already_registered(binary, cwd):
@@ -994,8 +1006,9 @@ class CodexAdapter:
             )
         if os.path.isabs(executable):
             env = dict(env)
-            env["PATH"] = (
-                f"{Path(executable).parent}{os.pathsep}{env.get('PATH', '')}"
+            path_key = _path_env_key(env)
+            env[path_key] = (
+                f"{Path(executable).parent}{os.pathsep}{env.get(path_key, '')}"
             )
         if _is_windows_platform():
             return _run_windows_tui(

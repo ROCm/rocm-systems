@@ -33,7 +33,6 @@ import pytest
 from perfxpert.cli._backend.claude import (
     ClaudeCodeAdapter,
     SKIP_LIVE_CHECK_ENV,
-    _windows_path_to_wsl,
 )
 from perfxpert.cli._backend.protocol import (
     BackendAdapter,
@@ -546,6 +545,26 @@ def test_spawn_handles_windows_tui_keyboard_interrupt(
     assert waits == [None, 5]
 
 
+def test_python_scripts_path_preserves_windows_path_key(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    fake_scripts = tmp_path / "Scripts"
+    fake_scripts.mkdir()
+    monkeypatch.setattr("perfxpert.cli._backend.claude.os.name", "nt")
+    monkeypatch.setattr(
+        "perfxpert.cli._backend.claude.sysconfig.get_path",
+        lambda _name: str(fake_scripts),
+    )
+
+    env = ClaudeCodeAdapter()._with_python_scripts_on_path(
+        {"Path": r"C:\base"}
+    )
+
+    assert "Path" in env
+    assert "PATH" not in env
+    assert env["Path"].startswith(f"{fake_scripts}{os.pathsep}")
+
+
 def test_spawn_adds_node_shim_for_wsl_hooks(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -553,6 +572,7 @@ def test_spawn_adds_node_shim_for_wsl_hooks(
     called = {}
     node_exe = tmp_path / "node.exe"
     node_exe.write_text("fake")
+    node_wsl = "/mnt/c/tools/node.exe"
 
     class _Result:
         def __init__(self, returncode: int) -> None:
@@ -584,6 +604,16 @@ def test_spawn_adds_node_shim_for_wsl_hooks(
         "perfxpert.cli._backend.claude._find_windows_node_exe",
         lambda: node_exe,
     )
+
+    def _fake_windows_path_to_wsl(path):
+        if path == node_exe:
+            return node_wsl
+        return "/mnt/c/proj/.perfxpert/bin/node"
+
+    monkeypatch.setattr(
+        "perfxpert.cli._backend.claude._windows_path_to_wsl",
+        _fake_windows_path_to_wsl,
+    )
     monkeypatch.setattr(
         "perfxpert.cli._backend.claude.subprocess.run",
         _fake_run,
@@ -592,12 +622,13 @@ def test_spawn_adds_node_shim_for_wsl_hooks(
     monkeypatch.setattr("os.chdir", lambda _p: None)
 
     with pytest.raises(RuntimeError, match="stopped"):
-        ClaudeCodeAdapter().spawn(["hello"], {"PATH": r"C:\base"}, tmp_path)
+        ClaudeCodeAdapter().spawn(["hello"], {"Path": r"C:\base"}, tmp_path)
 
     shim = tmp_path / ".perfxpert" / "bin" / "node"
     assert shim.is_file()
-    assert _windows_path_to_wsl(node_exe) in shim.read_text()
-    assert str(shim.parent) in called["env"]["PATH"]
+    assert node_wsl in shim.read_text()
+    assert str(shim.parent) in called["env"]["Path"]
+    assert "PATH" not in called["env"]
     assert called["argv"] == ["claude", "hello"]
 
 

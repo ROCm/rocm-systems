@@ -574,6 +574,50 @@ def test_user_scope_install_uses_tomlkit_lazy_import_on_primary_mcp_add_path(
             _sys.modules["tomlkit"] = original
 
 
+def test_user_scope_register_uses_resolved_codex_desktop_executable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """User-scope registration must share the Desktop-aware resolver."""
+    executable = tmp_path / "codex.exe"
+    executable.write_text("fake")
+    calls: list[list[str]] = []
+
+    def _run(cmd, *args, **kwargs):
+        calls.append(list(cmd))
+
+        class _R:
+            returncode = 0
+            stdout = b""
+            stderr = b""
+
+        return _R()
+
+    monkeypatch.setattr("shutil.which", lambda _: None)
+    monkeypatch.setattr(
+        "perfxpert.cli._backend.codex._resolve_codex_executable",
+        lambda _binary_name="codex": str(executable),
+    )
+    monkeypatch.setattr("perfxpert.cli._backend.codex.subprocess.run", _run)
+
+    project_cwd = tmp_path / "proj"
+    project_cwd.mkdir()
+    cfg = tmp_path / "home" / ".codex" / "config.toml"
+
+    CodexAdapter()._register_mcp(project_cwd, cfg, "user")
+
+    assert calls[0][:3] == [str(executable), "mcp", "list"]
+    assert calls[1] == [
+        str(executable),
+        "mcp",
+        "add",
+        "perfxpert",
+        "--",
+        "perfxpert-mcp",
+    ]
+    assert not cfg.exists()
+
+
 def test_structured_edit_fallback_uses_tomlkit(
     project_cwd: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -872,7 +916,11 @@ def test_spawn_waits_for_codex_on_windows(
         _fake_popen,
     )
 
-    rc = CodexAdapter().spawn(["hello"], {"K": "V"}, tmp_path)
+    rc = CodexAdapter().spawn(
+        ["hello"],
+        {"K": "V", "Path": r"C:\base"},
+        tmp_path,
+    )
 
     assert rc == 23
     assert captured["cmd"] == [str(executable), "hello"]
@@ -880,7 +928,8 @@ def test_spawn_waits_for_codex_on_windows(
     assert kwargs["cwd"] == str(tmp_path)  # type: ignore[index]
     env = kwargs["env"]  # type: ignore[index]
     assert env["K"] == "V"
-    assert str(executable.parent) in env["PATH"]
+    assert env["Path"].startswith(f"{executable.parent}{os.pathsep}")
+    assert "PATH" not in env
 
 
 def test_spawn_handles_windows_tui_keyboard_interrupt(
