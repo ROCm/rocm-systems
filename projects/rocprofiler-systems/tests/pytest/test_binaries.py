@@ -328,6 +328,74 @@ class TestRocprofilerSystemsInstrument(RocprofsysTest):
         self.assert_regex(result, pass_regex=pass_regex)
         self.assert_file_exists(result.output_dir / "instrumentation" / "user.log")
 
+    def test_exe_only(self, rocprof_config):
+        """Test that when --exe-only is set, all shared lib are excluded."""
+        try:
+            transpose = rocprof_config.get_target_executable("transpose")
+        except FileNotFoundError:
+            pytest.skip("transpose binary not found")
+
+        result = self.run_test(
+            "baseline",
+            target=self.target,
+            run_args=["--simulate", "--exe-only", "--", str(transpose)],
+            fail_on_not_found=True,
+        )
+        self.assert_regex(
+            result, pass_regex=[r"\[filter\] skipping shared lib 'lib.*' \(\--exe-only\)"]
+        )
+
+    def test_max_library_functions(self, rocprof_config):
+        """Test that --max-library-functions excludes large libraries.
+
+        In particular, for an offload OpenMP application compiled using amd-llvm, libomptarget.so
+        """
+        try:
+            openmp_target = rocprof_config.get_target_executable("openmp-target")
+        except FileNotFoundError:
+            pytest.skip("openmp-target binary not found")
+
+        result = self.run_test(
+            "baseline",
+            target=self.target,
+            run_args=["--simulate", "--", str(openmp_target)],
+            fail_on_not_found=True,
+        )
+        self.assert_regex(
+            result,
+            pass_regex=[r"\[filter\] skipping shared lib 'libomptarget"],
+        )
+
+    def test_max_library_functions_bypass(self, rocprof_config):
+        """Test that --max-library-functions is bypassed by module include regex."""
+        try:
+            openmp_target = rocprof_config.get_target_executable("openmp-target")
+        except FileNotFoundError:
+            pytest.skip("openmp-target binary not found")
+        result = self.run_test(
+            "baseline",
+            target=self.target,
+            run_args=[
+                "--simulate",
+                "-v",
+                "2",
+                "--max-library-functions",
+                "10",
+                "-MI",
+                r"libomp(\.so|$)",
+                "--",
+                str(openmp_target),
+            ],
+            fail_on_not_found=True,
+        )
+        self.assert_regex(
+            result,
+            pass_regex=[
+                r"\[filter\] forcing object 'libomp\.so' "
+                r"\(module-include-regex matched"
+            ],
+        )
+
 
 # ============================================================================
 # rocprof-sys-avail tests

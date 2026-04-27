@@ -912,7 +912,7 @@ filter_objects(std::vector<object_t*>* app_objects)
         // Exclude every shared library when --exe-only is requested.
         if(exe_only && obj->isSharedLib())
         {
-            verbprintf(2, "[filter] skipping shared lib '%s' (--exe-only)\n",
+            verbprintf(0, "[filter] skipping shared lib '%s' (--exe-only)\n",
                        obj->name().c_str());
             continue;
         }
@@ -999,6 +999,16 @@ filter_objects(std::vector<object_t*>* app_objects)
                "(%.3f %s, %.3f %s)\n",
                _result.size(), app_objects->size(), _excluded_count, _wc.get(),
                _wc.display_unit().c_str(), _pr.get(), _pr.display_unit().c_str());
+
+    if(verbose_level >= 2)
+    {
+        verbprintf(2, "[filter] The following objects have not been filtered out:\n");
+        for(auto* obj : _result)
+        {
+            if(!obj) continue;
+            verbprintf(2, "[filter] '%s'\n", obj->name().c_str());
+        }
+    }
 
     return _result;
 }
@@ -1135,6 +1145,16 @@ filter_modules(std::vector<module_t*>* app_modules)
                "(%.3f %s, %.3f %s)\n",
                _result.size(), app_modules->size(), _excluded_count, _wc.get(),
                _wc.display_unit().c_str(), _pr.get(), _pr.display_unit().c_str());
+
+    if(verbose_level >= 2)
+    {
+        verbprintf(2, "[filter] The following modules have not been filtered out:\n");
+        for(auto* mod : _result)
+        {
+            if(!mod) continue;
+            verbprintf(2, "[filter] '%s'\n", std::string{ get_name(mod) }.c_str());
+        }
+    }
 
     return _result;
 }
