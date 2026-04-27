@@ -84,16 +84,6 @@ HBM (High-Bandwidth Memory) thermal throttling occurs when GPU memory overheats.
 - On **MI3x+**: Detected via `per_hbm_thrm` (HBM_TVIOL%) and `active_hbm_thrm` in the violation API.
 - On **Navi/MI1x/MI2x**: Check the `TEMP_MEM` bit in `indep_throttle_status`. Detailed HBM violation percentages are only available on MI3x+.
 
-### How to interpret violation status codes in AMD SMI?
-
-Violation percentages:
-
-- **0%** = no throttling (good)
-- **>0%** = time spent throttled (higher = worse)
-- **N/A or max_uint** = feature not supported on this GPU.
-
-The API returns both `power_violation_pct` (PVIOL) and `thermal_violation_pct` (TVIOL) as percentages.
-
 ### What triggers socket power violations in AMD GPUs?
 
 Socket power violations (SOCKET_THM) occur when total platform power exceeds limits, not just GPU power. This is tracked separately from PPT (package power tracking) which monitors GPU-only power limits. Triggered by excessive power draw across the entire socket/system.
@@ -117,6 +107,8 @@ A GPU can have both simultaneously (e.g., 30% PVIOL + 20% TVIOL).
 - On **Navi/MI1x/MI2x**: Use `throttle_status` bit flags in `amd-smi metric --power` to see if PPT (power) or thermal throttling is active.
 
 ## Interpreting violation results
+
+The API returns both `power_violation_pct` ([PVIOL](#key-concepts)) and `thermal_violation_pct` ([TVIOL](#key-concepts)) as percentages.
 
 | Value | Meaning |
 |-------|----------|
