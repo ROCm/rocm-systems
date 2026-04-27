@@ -14,19 +14,19 @@
 static_assert(NCCL_IB_FLUSH_REQ_WR_ID_OFFSET > NET_IB_MAX_REQUESTS, "wr_id offset for flush requests must be greater than NET_IB_MAX_REQUESTS");
 static_assert(NCCL_IB_FLUSH_REQ_WR_ID_OFFSET <= UINT64_MAX - NET_IB_MAX_REQUESTS, "wr_id for flush requests must fit in 64 bits since ibv_send_wr::wr_id is 64 bits");
 
-ncclResult_t ncclIbPostFifo(struct ncclIbRecvComm* comm, struct ncclIbRequest* req, int slot);
-ncclResult_t ncclIbMultiSend(struct ncclIbSendComm* comm, int slot);
+ncclResult_t IbCastPostFifo(struct ncclIbRecvComm* comm, struct ncclIbRequest* req, int slot);
+ncclResult_t IbCastMultiSend(struct ncclIbSendComm* comm, int slot);
 
-static inline ncclResult_t ncclIbRecvCommGetQpForCts(struct ncclIbRecvComm* recvComm, uint32_t id, ncclIbQp** qp) {
+static inline ncclResult_t IbCastRecvCommGetQpForCts(struct ncclIbRecvComm* recvComm, uint32_t id, ncclIbQp** qp) {
   int devIndex = id % recvComm->base.vProps.ndevs;
   // CTS message is always posted the first QP on the device
   int qpIndex = 0;
-  ncclIbCommBaseGetQpByIndex(&recvComm->base, devIndex, qpIndex, qp);
+  IbCastCommBaseGetQpByIndex(&recvComm->base, devIndex, qpIndex, qp);
   assert(*qp != NULL);
   return ncclSuccess;
 }
 
-static inline ncclResult_t ncclIbRequestRetrieveAsIndex(ncclIbRequest* reqs, uint32_t reqIndex, ncclIbRequest** req) {
+static inline ncclResult_t IbCastRequestRetrieveAsIndex(ncclIbRequest* reqs, uint32_t reqIndex, ncclIbRequest** req) {
   if (reqIndex < 0 || reqIndex >= NET_IB_MAX_REQUESTS) {
     WARN("NET/IB: %s: Invalid request index %d. Not in the range [%d, %d). Cannot retrieve request.", __func__, reqIndex, 0, NET_IB_MAX_REQUESTS);
     return ncclInternalError;
