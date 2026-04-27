@@ -23,9 +23,10 @@
 ```
 projects/clr/hipamd/scripts/
     curated_apis.yaml                       # HIP DSL (Phase B)
+    curated_apis_sigs.json                  # GENERATED sidecar JSON (verifier -> codegen, C10), checked in (Phase E)
     lttng_curated_lib.py                    # Shared DSL parser + field-budget calc (Phase A)
-    lttng_curated_codegen.py                # Codegen: YAML -> tp.h + emit.h (Phase A)
-    lttng_curated_verify.py                 # Verifier: libclang vs YAML (Phase A)
+    lttng_curated_codegen.py                # Codegen: YAML + sidecar JSON -> tp.h + emit.h (Phase A)
+    lttng_curated_verify.py                 # Verifier: libclang vs YAML; emits sidecar JSON (Phase A)
     test_lttng_curated_lib.py               # Unit tests for parser library (Phase A)
     test_lttng_curated_codegen.py           # Golden-file tests for codegen (Phase A)
     test_lttng_curated_verify.py            # Verifier tests (Phase A)
@@ -42,6 +43,7 @@ projects/clr/hipamd/test/lttng/
 
 projects/rocr-runtime/runtime/hsa-runtime/scripts/
     curated_apis.yaml                       # HSA DSL (Phase E)
+    curated_apis_sigs.json                  # GENERATED sidecar JSON (HSA verifier -> codegen, C10), checked in (Phase E)
     # codegen + verify scripts SHARED with HIP via lttng_curated_lib.py
     # but invoked from this dir with --provider rocm_hsa
 
@@ -884,24 +886,84 @@ HELPER_PARAM_TYPE = {
     'dim3_packed': 'dim3',         # helper takes dim3, packs internally
 }
 
-# OUT-param helpers must take a typed pointer-to-the-out-type. For now we
-# use void** for all OUT-ptr cases — the helper deref's and casts to uint64.
-# See spec §5.2 hipMalloc example.
-def out_helper_param_type(arg):
-    """C type for an OUT/INOUT helper parameter (which is a pointer-to-T)."""
-    if arg['type'] in ('ptr', 'handle', 'device_ptr'):
-        return 'void**'
-    if arg['type'] in ('size', 'uint32', 'uint64'):
-        return f"{HELPER_PARAM_TYPE[arg['type']]}*"
-    if arg['type'] in ('int32', 'int64'):
-        return f"{HELPER_PARAM_TYPE[arg['type']]}*"
-    if arg['type'] == 'float':
-        return 'float*'
-    if arg['type'] == 'enum':
-        return 'int32_t*'  # generic
-    if arg['type'] == 'bool':
-        return 'int*'
-    raise SystemExit(f"OUT not supported for type {arg['type']}")
+# OUT-param helpers must take a typed pointer-to-the-out-type.
+#
+# For pointer/handle OUT params, the correct C type AND deref expression
+# differ between providers (debate-review C10):
+#   HIP: hipStream_t is a typedef'd void* -> hipStream_t* helper param is
+#        compatible with void**, deref is *(void**)p.
+#   HSA: hsa_signal_t is { uint64_t handle; } -> hsa_signal_t* helper
+#        param is NOT compatible with void**; the deref must read
+#        p->handle (struct field), not *p (which would read the first
+#        8 bytes of the struct — happens to work for hsa_signal_t but is
+#        UB-adjacent and breaks for any handle type whose first field is
+#        not the uint64 handle).
+#   HSA: hsa_queue_t** (pointer-to-pointer) -> deref *p (the pointer
+#        itself is the handle).
+#
+# Resolution: codegen consumes a JSON sidecar emitted by the verifier
+# (--sigs <path>; see Task 4) that contains the libclang-resolved real
+# C type for each (api, arg) pair. The sidecar is checked in alongside
+# the generated headers so the build doesn't need libclang. For the
+# HIP-only Task 3 unit tests (which run before the sidecar exists), an
+# absent sidecar falls back to the legacy `void**` behavior so existing
+# golden tests keep working.
+def out_helper_emit(arg, real_c_type=None):
+    """Return (helper_param_type, deref_expr_template) for an OUT arg.
+
+    `real_c_type` is the libclang-resolved C type from the verifier
+    sidecar — e.g. 'void **', 'hsa_signal_t *', 'hsa_queue_t **',
+    'size_t *', 'hipDeviceptr_t *'. When None (no sidecar; legacy /
+    unit-test path), fall back to provider-agnostic void**/T* shapes.
+
+    The deref_expr_template uses '{p}' for the helper param name
+    (e.g. 'ptr_out_ptr') so callers can substitute.
+    """
+    ty = arg['type']
+    # Numeric/scalar OUT types are unaffected by the C10 fix.
+    if ty in ('size', 'uint32', 'uint64'):
+        return (f"{HELPER_PARAM_TYPE[ty]}*", "*{p}")
+    if ty in ('int32', 'int64'):
+        return (f"{HELPER_PARAM_TYPE[ty]}*", "*{p}")
+    if ty == 'float':
+        return ('float*', "*{p}")
+    if ty == 'enum':
+        return ('int32_t*', "*{p}")
+    if ty == 'bool':
+        return ('int*', "*{p}")
+    if ty not in ('ptr', 'handle', 'device_ptr'):
+        raise SystemExit(f"OUT not supported for type {ty}")
+
+    # Pointer/handle OUT — provider-aware shape from sidecar.
+    if real_c_type is None:
+        # Legacy fallback (HIP-style, used by Task 3 unit tests that
+        # have no sidecar).
+        return ('void**', "(uint64_t)(uintptr_t)(*{p})")
+
+    rct = real_c_type.strip()
+    # Normalize whitespace inside the type spelling (libclang emits
+    # 'hsa_signal_t *' with the space).
+    rct_compact = rct.replace(' ', '')
+
+    # HSA pointer-to-pointer (e.g. hsa_queue_t**) — handle is the
+    # pointer itself, deref one level.
+    if rct_compact.startswith('hsa_') and rct_compact.endswith('**'):
+        return (rct, "(uint64_t)(uintptr_t)(*{p})")
+
+    # HSA pointer-to-struct (e.g. hsa_signal_t*, hsa_agent_t*) — read
+    # the .handle field of the struct, NOT the first 8 bytes.
+    if rct_compact.startswith('hsa_') and rct_compact.endswith('*'):
+        return (rct, "({p}->handle)")
+
+    # HIP and everything else — handle is itself a typedef'd pointer
+    # (hipStream_t == void*), so the helper param is pointer-to-pointer
+    # and the deref is one level.
+    return (rct or 'void**', "(uint64_t)(uintptr_t)(*{p})")
+
+
+def out_helper_param_type(arg, real_c_type=None):
+    """Back-compat shim: return only the helper param C type."""
+    return out_helper_emit(arg, real_c_type)[0]
 
 
 # ---- Codegen: tp.h ----
@@ -991,10 +1053,18 @@ def emit_tp_h(provider, apis, yaml_path, yaml_sha256):
 
 # ---- Codegen: emit.h ----
 
-def emit_helper(provider, api, status_type, status_success):
-    """Emit one static-inline helper function."""
+def emit_helper(provider, api, status_type, status_success, sigs=None):
+    """Emit one static-inline helper function.
+
+    `sigs` is the optional sidecar dict for THIS api: a list of
+    {'name': ..., 'c_type': ...} entries from the verifier (None if no
+    sidecar was supplied — fall back to provider-agnostic shapes).
+    """
     name = api['api']
     args = api['args']
+
+    # Index sidecar by arg name for O(1) lookup.
+    sig_by_name = {s['name']: s['c_type'] for s in sigs} if sigs else {}
 
     # Helper formal-param list. Order: corr_id, captured-args..., status.
     formal_params = ['uint64_t corr_id']
@@ -1023,16 +1093,21 @@ def emit_helper(provider, api, status_type, status_success):
                 _, _, cast_tmpl = TYPE_INFO[ty]
                 cast_exprs.append(cast_tmpl.format(arg=nm))
         elif dr == 'OUT':
-            ptype = out_helper_param_type(a)
+            real_c = sig_by_name.get(nm)  # None if no sidecar
+            ptype, deref_tmpl = out_helper_emit(a, real_c)
             formal_params.append(f"{ptype} {nm}_out_ptr")
             # Setup line: compute deref value, gated by status.
-            # For ptr/handle/device_ptr — emit (uint64_t)(uintptr_t)(*ptr).
-            # For other types — just deref.
+            # For ptr/handle/device_ptr — provider-aware deref expr from
+            # out_helper_emit (see C10 fix). For other types — just deref.
             if ty in ('ptr', 'handle', 'device_ptr'):
+                # deref_tmpl already produces a uint64_t-typed expression
+                # (either (uint64_t)(uintptr_t)(*p) for pointers or
+                # p->handle for HSA struct handles, both uint64_t).
+                deref_expr = deref_tmpl.format(p=f"{nm}_out_ptr")
                 deref_setups.append(textwrap.dedent(f"""\
                             const uint64_t {nm}_val =
                                 (status == {status_success} && {nm}_out_ptr != NULL)
-                                    ? (uint64_t)(uintptr_t)(*{nm}_out_ptr) : 0ULL;""").rstrip())
+                                    ? (uint64_t)({deref_expr}) : 0ULL;""").rstrip())
                 cast_exprs.append(f"{nm}_val")
             else:
                 # Numeric OUT: read or zero.
@@ -1071,14 +1146,21 @@ def emit_helper(provider, api, status_type, status_success):
         """)
 
 
-def emit_noop_helper(api, status_type):
-    """Emit a no-op helper for HIP_ENABLE_LTTNG_UST=0 mode."""
+def emit_noop_helper(api, status_type, sigs=None):
+    """Emit a no-op helper for HIP_ENABLE_LTTNG_UST=0 mode.
+
+    The no-op signature MUST byte-match the active-mode signature so
+    callers compile identically in both modes (C10: provider-aware
+    OUT-handle types).
+    """
     name = api['api']
     args = api['args']
+    sig_by_name = {s['name']: s['c_type'] for s in sigs} if sigs else {}
     formals = ['uint64_t']
     for a in args:
         if a['dir'] == 'OUT':
-            formals.append(out_helper_param_type(a))
+            real_c = sig_by_name.get(a['name'])
+            formals.append(out_helper_param_type(a, real_c))
         elif a['type'] == 'dim3':
             formals.append('dim3')
         elif a['type'] == 'dim3_packed':
@@ -1090,7 +1172,7 @@ def emit_noop_helper(api, status_type):
     return f"static inline void rocm_trace_emit_{name}_args({formal_str}) {{}}\n"
 
 
-def emit_emit_h(provider, apis, status_type, status_success, yaml_path, yaml_sha256):
+def emit_emit_h(provider, apis, status_type, status_success, yaml_path, yaml_sha256, sigs_by_api=None):
     """Generate rocm_trace_emit_curated.h."""
     macro_guard = f"ROCM_{provider.upper().replace('ROCM_', '')}_TRACE_EMIT_CURATED_H_"
     enable_macro = 'HIP_ENABLE_LTTNG_UST' if provider == 'rocm_hip' else 'HSA_ENABLE_LTTNG_UST'
@@ -1134,7 +1216,8 @@ static inline bool rocm_trace_disabled(void) {{
 """)
 
     for api in apis:
-        out.append(emit_helper(provider, api, status_type, status_success))
+        sigs = (sigs_by_api or {}).get(api['api'])
+        out.append(emit_helper(provider, api, status_type, status_success, sigs=sigs))
         out.append('\n')
 
     out.append(f"""
@@ -1142,7 +1225,8 @@ static inline bool rocm_trace_disabled(void) {{
 
 """)
     for api in apis:
-        out.append(emit_noop_helper(api, status_type))
+        sigs = (sigs_by_api or {}).get(api['api'])
+        out.append(emit_noop_helper(api, status_type, sigs=sigs))
 
     out.append(f"""
 #endif  /* {enable_macro} */
@@ -1165,16 +1249,28 @@ def main():
                     help='Success-status sentinel, e.g. hipSuccess or HSA_STATUS_SUCCESS')
     ap.add_argument('--out-tp',   required=True)
     ap.add_argument('--out-emit', required=True)
+    ap.add_argument('--sigs', default=None,
+                    help='Optional verifier signature sidecar JSON '
+                         '({api: [{name, c_type}, ...]}) used to choose '
+                         'provider-correct OUT-handle helper signatures '
+                         '(C10 fix). Without --sigs, OUT-handle helpers '
+                         'fall back to void** (HIP-style).')
     args = ap.parse_args()
 
     apis = parse_yaml_file(args.yaml)
     with open(args.yaml, 'rb') as f:
         sha256 = hashlib.sha256(f.read()).hexdigest()
 
+    sigs_by_api = None
+    if args.sigs:
+        import json
+        with open(args.sigs) as f:
+            sigs_by_api = json.load(f)
+
     tp_text   = emit_tp_h(args.provider, apis, args.yaml, sha256)
     emit_text = emit_emit_h(args.provider, apis,
                              args.status_type, args.status_success,
-                             args.yaml, sha256)
+                             args.yaml, sha256, sigs_by_api=sigs_by_api)
 
     os.makedirs(os.path.dirname(args.out_tp) or '.', exist_ok=True)
     with open(args.out_tp, 'w') as f:
@@ -1195,7 +1291,25 @@ if __name__ == '__main__':
 python3 projects/clr/hipamd/scripts/test_lttng_curated_codegen.py
 ```
 
-Expected: all 9 tests pass with `PASS: 0 failures`.
+Expected: all 11 tests pass with `PASS: 0 failures`.
+
+The 11 tests are: the 9 original (per-API event, corr_id-first, helper
+signature invariant, OUT-param status-gated deref, no-arg helper, OFF
+no-op branch, HSA provider parameterization, SHA256 header, all-IN
+status unused) PLUS 2 new sidecar tests (C10 fix):
+
+- **`test_out_handle_helper_uses_void_pp_without_sigs`** — invoke
+  codegen WITHOUT `--sigs` on a YAML containing `hipMalloc(ptr, size)`;
+  assert helper signature contains `void** ptr_out_ptr` and deref body
+  contains `(uint64_t)(uintptr_t)(*ptr_out_ptr)`. Locks in the legacy
+  fallback so existing HIP golden tests keep passing.
+
+- **`test_out_handle_helper_uses_struct_handle_with_hsa_sigs`** —
+  invoke codegen WITH `--sigs <tmp.json>` where the JSON contains
+  `{"hsa_signal_create": [{"name": "signal", "c_type": "hsa_signal_t *"}, ...]}`
+  on an HSA YAML for `hsa_signal_create`; assert helper signature
+  contains `hsa_signal_t * signal_out_ptr` and deref body contains
+  `signal_out_ptr->handle` (NOT `*signal_out_ptr`).
 
 - [ ] **Step 6: Sanity-check the generated output by hand**
 
@@ -1212,7 +1326,7 @@ sed -n '/hipMalloc_args/,/^}$/p' /tmp/sample_emit.h | head -40
 
 Verify:
 - `hipMalloc_args` helper signature ends with `hipError_t status`
-- Body has `(status == hipSuccess && ptr_out_ptr != NULL) ? (uint64_t)(uintptr_t)(*ptr_out_ptr) : 0ULL`
+- Body has `(status == hipSuccess && ptr_out_ptr != NULL) ? (uint64_t)((uint64_t)(uintptr_t)(*ptr_out_ptr)) : 0ULL` (the inner expression comes from the deref template; the outer `(uint64_t)` cast is harmless and ensures the conditional has a single type — see C10 fix in `out_helper_emit`)
 - Tracepoint event for `hipMemcpyAsync_args` has corr_id field first
 
 - [ ] **Step 7: Commit**
@@ -1237,10 +1351,13 @@ Output structure (per spec §5):
 Generated headers carry SHA256(yaml) + AUTO-GENERATED comments for
 reviewer / CI verification.
 
-9 unit tests cover: per-API event emission, corr_id-first invariant,
+11 unit tests cover: per-API event emission, corr_id-first invariant,
 helper signature invariant, OUT-param status-gated deref, no-arg helper
 shape, OFF-mode no-op branch, provider parameterization for HSA, SHA256
-header presence."
+header presence; plus two sidecar tests for the C10 fix:
+provider-aware OUT-handle helper signature derived from the verifier
+signature sidecar (--sigs JSON) — HIP void** fallback when sidecar
+absent vs HSA hsa_signal_t* + p->handle deref when sidecar present."
 ```
 
 ---
@@ -1585,12 +1702,52 @@ def main():
     ap.add_argument('--yaml',   required=True)
     ap.add_argument('--header', required=True)
     ap.add_argument('--extra-arg', action='append', default=[])
+    ap.add_argument('--out-sidecar', default=None,
+                    help='Optional path to dump verified API signatures as JSON '
+                         '(used by codegen for provider-correct OUT-handle '
+                         'helper signatures — see Task 3 sidecar mechanism).')
     args = ap.parse_args()
-    sys.exit(verify(args.yaml, args.header, args.extra_arg))
+    sys.exit(verify(args.yaml, args.header, args.extra_arg,
+                    out_sidecar=args.out_sidecar))
 
 if __name__ == '__main__':
     main()
 ```
+
+**Sidecar emission inside `verify()`** (debate-review C10 fix). Codegen
+cannot determine provider-correct OUT-handle helper signatures from the
+YAML alone (HIP `hipStream_t*` is pointer-to-typedef'd-pointer, but HSA
+`hsa_signal_t*` is pointer-to-struct with `.handle` field). The verifier
+already has the libclang-resolved signatures in `header_decls`, so it
+also writes them to a JSON sidecar that codegen consumes. The sidecar
+is checked in alongside the generated headers — the build still doesn't
+need libclang at compile time (§3.2 invariant).
+
+Update `verify()` to accept `out_sidecar=None` and, after errors-check
+passes (just before the `print(f"OK: ...")` line), emit the sidecar:
+
+```python
+import json
+# ... after the errors loop, before the success print ...
+if out_sidecar:
+    sidecar = {
+        a['api']: [{'name': nm, 'c_type': ct}
+                   for nm, ct in header_decls[a['api']]]
+        for a in apis if a['api'] in header_decls
+    }
+    os.makedirs(os.path.dirname(out_sidecar) or '.', exist_ok=True)
+    with open(out_sidecar, 'w') as f:
+        json.dump(sidecar, f, indent=2, sort_keys=True)
+    print(f"wrote signature sidecar: {out_sidecar} "
+          f"({len(sidecar)} APIs)", file=sys.stderr)
+```
+
+Update the `verify(yaml_path, header_path, extra_args)` signature
+accordingly to `verify(yaml_path, header_path, extra_args, out_sidecar=None)`.
+
+Add a 7th unit test that invokes the verifier with `--out-sidecar` and
+asserts the JSON file has the expected `{api: [{name, c_type}, ...]}`
+shape for `hipMalloc` (`ptr` arg with `c_type` containing `void**`).
 
 - [ ] **Step 5: Run tests**
 
@@ -1598,7 +1755,7 @@ if __name__ == '__main__':
 python3 projects/clr/hipamd/scripts/test_lttng_curated_verify.py
 ```
 
-Expected: all 6 tests pass. (Requires `pip install libclang` if not already present.)
+Expected: all 7 tests pass (6 original + 1 sidecar test). (Requires `pip install libclang` if not already present.)
 
 If libclang is missing in your local environment but available in the container:
 ```bash
@@ -1623,8 +1780,14 @@ signature changes that diverge from curated_apis.yaml. Hard errors:
 - Over-budget (§4.4 re-check)
 - dir: INOUT (rejected upstream by parser, re-checked here)
 
-6 unit tests against a fake HIP header fixture cover the matching case
-and each hard-error path."
+Also exposes --out-sidecar <path>: dumps the libclang-resolved
+{api: [{name, c_type}, ...]} as JSON so the codegen (Task 3) can emit
+provider-correct OUT-handle helper signatures (HIP void** vs HSA
+struct-with-.handle) without itself needing libclang at build time.
+The sidecar JSON is checked in alongside the generated headers.
+
+7 unit tests against a fake HIP header fixture cover the matching case,
+each hard-error path, and the sidecar JSON shape."
 ```
 
 ---
@@ -1981,12 +2144,34 @@ This phase generates the per-API tracepoint header and emit-helper header from t
 **Files:**
 - Create (generated): `projects/clr/hipamd/src/lttng/rocm_hip_curated_tp.h`
 - Create (generated): `projects/clr/hipamd/src/lttng/rocm_trace_emit_curated.h`
+- Create (generated): `projects/clr/hipamd/scripts/curated_apis_sigs.json`
 
-- [ ] **Step 1: Run the codegen**
+- [ ] **Step 1: Run the verifier with --out-sidecar (C10 fix)**
+
+The codegen needs the verifier-emitted signature sidecar to choose
+provider-correct OUT-handle helper signatures. For HIP this is
+strictly belt-and-suspenders (HIP handles are typedef'd void* so the
+legacy void** fallback also works), but generating the sidecar here
+keeps HIP and HSA pipelines symmetric and exercises the gate.
+
+```bash
+python3 projects/clr/hipamd/scripts/lttng_curated_verify.py \
+    --yaml projects/clr/hipamd/scripts/curated_apis.yaml \
+    --header /opt/rocm/include/hip/hip_runtime_api.h \
+    --extra-arg -I/opt/rocm/include \
+    --extra-arg -D__HIP_PLATFORM_AMD__=1 \
+    --out-sidecar projects/clr/hipamd/scripts/curated_apis_sigs.json
+```
+
+Expected stderr: `OK: 3 curated APIs verified ...` and
+`wrote signature sidecar: .../curated_apis_sigs.json (3 APIs)`.
+
+- [ ] **Step 2: Run the codegen with --sigs**
 
 ```bash
 python3 projects/clr/hipamd/scripts/lttng_curated_codegen.py \
     --yaml projects/clr/hipamd/scripts/curated_apis.yaml \
+    --sigs projects/clr/hipamd/scripts/curated_apis_sigs.json \
     --provider rocm_hip \
     --status-type hipError_t --status-success hipSuccess \
     --out-tp projects/clr/hipamd/src/lttng/rocm_hip_curated_tp.h \
@@ -1995,7 +2180,7 @@ python3 projects/clr/hipamd/scripts/lttng_curated_codegen.py \
 
 Expected stderr: `wrote ... 3 APIs`.
 
-- [ ] **Step 2: Eyeball the generated files**
+- [ ] **Step 3: Eyeball the generated files**
 
 ```bash
 head -25 projects/clr/hipamd/src/lttng/rocm_hip_curated_tp.h
@@ -2005,22 +2190,26 @@ sed -n '/hipMalloc_args/,/^}$/p' projects/clr/hipamd/src/lttng/rocm_trace_emit_c
 
 Verify: each contains `AUTO-GENERATED`, the SHA256 prefix, and the three APIs.
 
-- [ ] **Step 3: Commit the generated files**
+- [ ] **Step 4: Commit the generated files + sidecar JSON**
 
 ```bash
 git add projects/clr/hipamd/src/lttng/rocm_hip_curated_tp.h \
-        projects/clr/hipamd/src/lttng/rocm_trace_emit_curated.h
-git commit -m "lttng: generate HIP curated tracepoint + emit headers (Phase C, 3 APIs)
+        projects/clr/hipamd/src/lttng/rocm_trace_emit_curated.h \
+        projects/clr/hipamd/scripts/curated_apis_sigs.json
+git commit -m "lttng: generate HIP curated tracepoint + emit headers + sidecar (Phase C, 3 APIs)
 
-Generated by lttng_curated_codegen.py from curated_apis.yaml.
-Checked-in headers per spec §3.2 — default build consumes these
-directly without invoking Python. Re-running codegen on the same YAML
-produces byte-identical output (CI drift gate).
+Generated by lttng_curated_codegen.py from curated_apis.yaml using
+the verifier-emitted curated_apis_sigs.json signature sidecar (C10
+fix — provider-correct OUT-handle helper signatures). Checked-in
+headers + sidecar per spec §3.2 — default build consumes these
+directly without invoking Python or libclang. Re-running verifier +
+codegen on the same YAML/header inputs produces byte-identical
+output (CI drift gate).
 
-This commit only adds the headers; they are not yet #included from
-the tracepoint provider (rocm_hip_tp.h) or the emit abstraction
-(rocm_trace_emit.h). That wiring lands in the next commit so the
-checked-in artifact is reviewable in isolation."
+This commit only adds the headers + sidecar; they are not yet
+#included from the tracepoint provider (rocm_hip_tp.h) or the emit
+abstraction (rocm_trace_emit.h). That wiring lands in the next commit
+so the checked-in artifact is reviewable in isolation."
 ```
 
 ---
@@ -3062,38 +3251,68 @@ Inside the existing `if(HIP_ENABLE_LTTNG_UST)` block in `projects/clr/hipamd/src
     # ---- Curated parameter-capture: opt-in regeneration target ----
     # Per spec §9.1: default build does NOT regenerate. The custom command
     # is wired only to the manual `regenerate-lttng-curated` target so the
-    # build never requires Python or PyYAML. Generated headers are checked
-    # in. CI runs codegen + `git diff --exit-code` to catch YAML drift.
+    # build never requires Python, PyYAML, or libclang. Generated headers
+    # AND the verifier signature sidecar JSON are checked in (§3.2). CI
+    # runs codegen + `git diff --exit-code` to catch YAML drift.
+    #
+    # The regeneration is a two-step pipeline (debate-review C10 fix):
+    #   1. Verifier  --out-sidecar=<JSON>   (needs libclang + headers)
+    #   2. Codegen   --sigs=<JSON>          (pure Python, reads JSON)
+    # Codegen consumes the sidecar to emit provider-correct OUT-handle
+    # helper signatures (HIP void** vs HSA hsa_signal_t* with .handle).
+    # The sidecar JSON is checked into git alongside the generated
+    # headers so the build never needs libclang at compile time.
     find_package(Python3 QUIET COMPONENTS Interpreter)
     if(Python3_FOUND)
         set(_CURATED_YAML  ${CMAKE_CURRENT_LIST_DIR}/../scripts/curated_apis.yaml)
+        set(_CURATED_SIGS  ${CMAKE_CURRENT_LIST_DIR}/../scripts/curated_apis_sigs.json)
         set(_CURATED_TP_H  ${CMAKE_CURRENT_LIST_DIR}/lttng/rocm_hip_curated_tp.h)
         set(_CURATED_EMIT_H ${CMAKE_CURRENT_LIST_DIR}/lttng/rocm_trace_emit_curated.h)
         if(EXISTS ${_CURATED_YAML})
+            # Step 1: verifier produces the signature sidecar JSON.
+            # Pinned to /opt/rocm/include layout — override via env.
+            add_custom_command(
+                OUTPUT ${_CURATED_SIGS}
+                COMMAND ${Python3_EXECUTABLE}
+                        ${CMAKE_CURRENT_LIST_DIR}/../scripts/lttng_curated_verify.py
+                        --yaml         ${_CURATED_YAML}
+                        --header       /opt/rocm/include/hip/hip_runtime_api.h
+                        --extra-arg    -I/opt/rocm/include
+                        --extra-arg    -D__HIP_PLATFORM_AMD__=1
+                        --out-sidecar  ${_CURATED_SIGS}
+                DEPENDS ${_CURATED_YAML}
+                        ${CMAKE_CURRENT_LIST_DIR}/../scripts/lttng_curated_verify.py
+                COMMENT "Verifying HIP curated YAML + emitting signature sidecar"
+            )
+            # Step 2: codegen reads the sidecar.
             add_custom_command(
                 OUTPUT ${_CURATED_TP_H} ${_CURATED_EMIT_H}
                 COMMAND ${Python3_EXECUTABLE}
                         ${CMAKE_CURRENT_LIST_DIR}/../scripts/lttng_curated_codegen.py
                         --yaml      ${_CURATED_YAML}
+                        --sigs      ${_CURATED_SIGS}
                         --provider  rocm_hip
                         --status-type hipError_t
                         --status-success hipSuccess
                         --out-tp    ${_CURATED_TP_H}
                         --out-emit  ${_CURATED_EMIT_H}
                 DEPENDS ${_CURATED_YAML}
+                        ${_CURATED_SIGS}
                         ${CMAKE_CURRENT_LIST_DIR}/../scripts/lttng_curated_codegen.py
                         ${CMAKE_CURRENT_LIST_DIR}/../scripts/lttng_curated_lib.py
                 COMMENT "Regenerating LTTng curated tracepoints (HIP)"
             )
             # Manual target — NOT a dependency of amdhip64. Default build
-            # consumes the checked-in headers directly.
+            # consumes the checked-in headers + sidecar directly.
             add_custom_target(regenerate-lttng-curated
-                              DEPENDS ${_CURATED_TP_H} ${_CURATED_EMIT_H})
+                              DEPENDS ${_CURATED_TP_H} ${_CURATED_EMIT_H} ${_CURATED_SIGS})
         endif()
     else()
         message(STATUS "Python3 not found; LTTng curated regeneration target unavailable.")
     endif()
 ```
+
+**Sidecar path (HIP):** `projects/clr/hipamd/scripts/curated_apis_sigs.json` — checked into git alongside `curated_apis.yaml` and the generated tp.h / emit.h headers. Per §3.2 ("no Python at compile time"), the build never invokes libclang; only the manual regenerate target does.
 
 - [ ] **Step 2: Verify default build still works (no regen)**
 
@@ -3116,7 +3335,7 @@ Expected: `regenerate-lttng-curated` is listed (target exists) but is not built 
 ./dev-bin/in-container.sh main "cd /root/rocm-systems && cmake --build build/clr --target regenerate-lttng-curated 2>&1 | tail -5"
 ```
 
-Expected: codegen runs; `git status projects/clr/hipamd/src/lttng/rocm_hip_curated_tp.h projects/clr/hipamd/src/lttng/rocm_trace_emit_curated.h` shows no changes (already in sync with YAML).
+Expected: verifier runs (emits `curated_apis_sigs.json`), then codegen runs (consumes the sidecar). `git status projects/clr/hipamd/src/lttng/rocm_hip_curated_tp.h projects/clr/hipamd/src/lttng/rocm_trace_emit_curated.h projects/clr/hipamd/scripts/curated_apis_sigs.json` shows no changes (already in sync with YAML + headers).
 
 - [ ] **Step 4: Commit**
 
@@ -3125,10 +3344,16 @@ git add projects/clr/hipamd/src/CMakeLists.txt
 git commit -m "lttng: add opt-in regenerate-lttng-curated CMake target
 
 Per spec §9.1: default build does NOT regenerate the curated headers
-and does NOT require Python or PyYAML. The custom command is wired to
-a manual target only. Developers regenerate after editing YAML via:
+and does NOT require Python, PyYAML, or libclang. The custom command
+is wired to a manual target only. Developers regenerate after editing
+YAML via:
 
     cmake --build build/clr --target regenerate-lttng-curated
+
+The target runs verifier --out-sidecar then codegen --sigs (C10 fix
+for provider-correct OUT-handle helper signatures). The sidecar JSON
+(scripts/curated_apis_sigs.json) is checked into git alongside the
+generated headers so the build never invokes libclang.
 
 CI catches drift via a separate gate (added in Task 13). Skipped
 silently when Python3 is not available or curated_apis.yaml is absent."
@@ -3465,20 +3690,26 @@ Independent of the workflow wiring (Task 13.5), capture the canonical CI invocat
 
 CI usage (wired into .github/workflows/lttng-curated-gates.yml by Task 13.5):
 
-    # Drift gate: codegen output must match checked-in headers.
+    # Drift gate: codegen output (consuming checked-in sidecar) must
+    # match checked-in headers. Runs without libclang.
     python3 projects/clr/hipamd/scripts/lttng_curated_codegen.py \\
         --yaml projects/clr/hipamd/scripts/curated_apis.yaml \\
+        --sigs projects/clr/hipamd/scripts/curated_apis_sigs.json \\
         --provider rocm_hip --status-type hipError_t --status-success hipSuccess \\
         --out-tp projects/clr/hipamd/src/lttng/rocm_hip_curated_tp.h \\
         --out-emit projects/clr/hipamd/src/lttng/rocm_trace_emit_curated.h
     git diff --exit-code -- 'projects/clr/hipamd/src/lttng/rocm_hip_curated_tp.h' \\
                             'projects/clr/hipamd/src/lttng/rocm_trace_emit_curated.h'
 
-    # Verifier gate: YAML signatures must match HIP headers.
+    # Verifier gate: YAML signatures must match HIP headers; also
+    # rewrites curated_apis_sigs.json so a header-side signature change
+    # for an OUT-handle param is caught by the diff (C10 fix).
     python3 projects/clr/hipamd/scripts/lttng_curated_verify.py \\
         --yaml projects/clr/hipamd/scripts/curated_apis.yaml \\
         --header /opt/rocm/include/hip/hip_runtime_api.h \\
-        --extra-arg=-D__HIP_PLATFORM_AMD__=1 --extra-arg=-I/opt/rocm/include
+        --extra-arg=-D__HIP_PLATFORM_AMD__=1 --extra-arg=-I/opt/rocm/include \\
+        --out-sidecar projects/clr/hipamd/scripts/curated_apis_sigs.json
+    git diff --exit-code -- 'projects/clr/hipamd/scripts/curated_apis_sigs.json'
 """
 ```
 
@@ -3525,6 +3756,7 @@ on:
   pull_request:
     paths:
       - 'projects/clr/hipamd/scripts/curated_apis.yaml'
+      - 'projects/clr/hipamd/scripts/curated_apis_sigs.json'
       - 'projects/clr/hipamd/scripts/lttng_curated_*.py'
       - 'projects/clr/hipamd/src/lttng/rocm_hip_curated_tp.h'
       - 'projects/clr/hipamd/src/lttng/rocm_trace_emit_curated.h'
@@ -3542,10 +3774,15 @@ jobs:
       - uses: actions/setup-python@v5
         with: { python-version: '3.11' }
       - run: pip install pyyaml
-      - name: Regenerate HIP curated headers and diff
+      - name: Regenerate HIP curated headers from checked-in sidecar and diff
+        # Drift gate runs WITHOUT libclang — it consumes the checked-in
+        # curated_apis_sigs.json sidecar, regenerates the headers, and
+        # asserts byte-identity. The sidecar itself is regenerated +
+        # diffed by the verify-gate (which has libclang).
         run: |
           python3 projects/clr/hipamd/scripts/lttng_curated_codegen.py \
             --yaml projects/clr/hipamd/scripts/curated_apis.yaml \
+            --sigs projects/clr/hipamd/scripts/curated_apis_sigs.json \
             --provider rocm_hip \
             --status-type hipError_t --status-success hipSuccess \
             --out-tp projects/clr/hipamd/src/lttng/rocm_hip_curated_tp.h \
@@ -3556,7 +3793,7 @@ jobs:
       # HSA codegen step added by Task 15h after HSA files exist
 
   verify-gate:
-    name: Verifier (libclang vs YAML)
+    name: Verifier (libclang vs YAML) + sidecar drift
     runs-on: ubuntu-latest
     container:
       image: rocm/dev-ubuntu-24.04:latest    # adjust to whichever ROCm image
@@ -3566,13 +3803,20 @@ jobs:
       - uses: actions/setup-python@v5
         with: { python-version: '3.11' }
       - run: pip install pyyaml libclang
-      - name: Verify HIP YAML against headers
+      - name: Verify HIP YAML against headers + diff sidecar
+        # Verifier rewrites the sidecar JSON; if a header changed in a
+        # way that affects an OUT-handle's libclang-resolved C type, the
+        # sidecar diff catches it (and the drift-gate would then mis-
+        # generate the helper signature without this check).
         run: |
           python3 projects/clr/hipamd/scripts/lttng_curated_verify.py \
             --yaml projects/clr/hipamd/scripts/curated_apis.yaml \
             --header /opt/rocm/include/hip/hip_runtime_api.h \
             --extra-arg=-D__HIP_PLATFORM_AMD__=1 \
-            --extra-arg=-I/opt/rocm/include
+            --extra-arg=-I/opt/rocm/include \
+            --out-sidecar projects/clr/hipamd/scripts/curated_apis_sigs.json
+          git diff --exit-code -- \
+            projects/clr/hipamd/scripts/curated_apis_sigs.json
       # HSA verify step added by Task 15h after HSA files exist
  ```
 
@@ -3987,27 +4231,30 @@ apis = parse_yaml_file('projects/rocr-runtime/runtime/hsa-runtime/scripts/curate
 print(f'OK: {len(apis)} APIs validated')
 "
 
-# Verifier (multi-header — see Task 4.5):
+# Verifier (multi-header — see Task 4.5; also emits signature sidecar
+# JSON consumed by codegen in Task 15b — C10 fix):
 ./dev-bin/in-container.sh main "cd /root/rocm-systems && python3 \
     projects/rocr-runtime/runtime/hsa-runtime/scripts/lttng_curated_verify.py \
     --yaml projects/rocr-runtime/runtime/hsa-runtime/scripts/curated_apis.yaml \
     --header /opt/rocm/include/hsa/hsa.h \
     --header /opt/rocm/include/hsa/hsa_ext_amd.h \
     --header /opt/rocm/include/hsa/hsa_api_trace.h \
-    --extra-arg=-I/opt/rocm/include"
+    --extra-arg=-I/opt/rocm/include \
+    --out-sidecar projects/rocr-runtime/runtime/hsa-runtime/scripts/curated_apis_sigs.json"
 ```
 
-Expected: `OK: 10 APIs validated` and `OK: 10 curated APIs verified against 3 header(s)`.
+Expected: `OK: 10 APIs validated`, `OK: 10 curated APIs verified against 3 header(s)`, and `wrote signature sidecar: .../curated_apis_sigs.json (10 APIs)`. The sidecar JSON is required by Task 15b codegen so HSA `hsa_signal_t*`/`hsa_queue_t**` OUT params get correct helper signatures + `p->handle` deref instead of the HIP-style `void**` fallback (which would mis-compile against pointer-to-struct handles).
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add projects/rocr-runtime/runtime/hsa-runtime/scripts/curated_apis.yaml \
+        projects/rocr-runtime/runtime/hsa-runtime/scripts/curated_apis_sigs.json \
         projects/rocr-runtime/runtime/hsa-runtime/scripts/lttng_curated_lib.py \
         projects/rocr-runtime/runtime/hsa-runtime/scripts/lttng_curated_codegen.py \
         projects/rocr-runtime/runtime/hsa-runtime/scripts/lttng_curated_verify.py \
         projects/rocr-runtime/runtime/hsa-runtime/scripts/lttng_migrate_curated_overlay.py
-git commit -m "lttng(hsa): add curated_apis.yaml + copy shared codegen scripts
+git commit -m "lttng(hsa): add curated_apis.yaml + sidecar JSON + copy shared codegen scripts
 
 10 HSA APIs from spec §A.6: queue lifecycle (3), signal lifecycle (3),
 memory pool + async copy (4 — incl. async_copy_on_engine with bool
@@ -4016,6 +4263,12 @@ force_copy_on_sdma, dep_signals dropped per §4.4).
 Parameter names for hsa_amd_queue_intercept_create and
 hsa_amd_signal_create resolved against /opt/rocm/include/hsa/
 hsa_api_trace.h and hsa_ext_amd.h respectively (no placeholders).
+
+Also checks in curated_apis_sigs.json — verifier-emitted libclang
+signature sidecar consumed by codegen for provider-correct OUT-handle
+helper signatures (C10 fix). Required because HSA handles are
+pointer-to-struct (hsa_signal_t->handle) not pointer-to-typedef'd-pointer
+like HIP, so the void** fallback would mis-compile.
 
 Provider-agnostic scripts (lttng_curated_lib.py, codegen, verify,
 overlay) copied byte-identical from projects/clr/hipamd/scripts/.
@@ -4030,12 +4283,19 @@ Drift between the two copies is a recommended follow-up CI gate."
 - Create (generated): `projects/rocr-runtime/runtime/hsa-runtime/lttng/rocm_hsa_curated_tp.h`
 - Create (generated): `projects/rocr-runtime/runtime/hsa-runtime/lttng/rocm_trace_emit_curated.h`
 
-- [ ] **Step 1: Run codegen with HSA-specific arguments**
+- [ ] **Step 1: Run codegen with HSA-specific arguments + sidecar**
+
+The HSA codegen MUST be invoked with `--sigs` pointing at the
+sidecar JSON that Task 15a's verifier emitted. Without it, codegen
+falls back to the HIP-style `void**` shape, which mis-compiles
+against HSA pointer-to-struct handles (`hsa_signal_t* signal` —
+helper would deref `*signal_out_ptr` instead of `signal_out_ptr->handle`).
 
 ```bash
 ./dev-bin/in-container.sh main "cd /root/rocm-systems && python3 \
     projects/rocr-runtime/runtime/hsa-runtime/scripts/lttng_curated_codegen.py \
     --yaml projects/rocr-runtime/runtime/hsa-runtime/scripts/curated_apis.yaml \
+    --sigs projects/rocr-runtime/runtime/hsa-runtime/scripts/curated_apis_sigs.json \
     --provider rocm_hsa \
     --status-type hsa_status_t --status-success HSA_STATUS_SUCCESS \
     --out-tp projects/rocr-runtime/runtime/hsa-runtime/lttng/rocm_hsa_curated_tp.h \
@@ -4044,16 +4304,20 @@ Drift between the two copies is a recommended follow-up CI gate."
 
 Expected stderr: `wrote ... 10 APIs`.
 
-- [ ] **Step 2: Sanity-check the generated files**
+- [ ] **Step 2: Sanity-check the generated files (especially HSA OUT-handle shapes)**
 
 ```bash
 head -25 projects/rocr-runtime/runtime/hsa-runtime/lttng/rocm_hsa_curated_tp.h
 echo '---'
 sed -n '/hsa_signal_create_args/,/^}$/p' \
     projects/rocr-runtime/runtime/hsa-runtime/lttng/rocm_trace_emit_curated.h | head -30
+echo '---'
+# C10 check — the helper signature must use hsa_signal_t*, NOT void**:
+grep -E 'hsa_signal_create_args\(.*signal_out_ptr|signal_out_ptr->handle' \
+    projects/rocr-runtime/runtime/hsa-runtime/lttng/rocm_trace_emit_curated.h
 ```
 
-Verify: `AUTO-GENERATED` comment present, SHA256 prefix present, provider is `rocm_hsa`, helper signature for `hsa_signal_create_args` ends with `hsa_status_t status`, and the OUT-param `signal` body uses `(status == HSA_STATUS_SUCCESS && signal_out_ptr != NULL) ? ... : 0ULL`.
+Verify: `AUTO-GENERATED` comment present, SHA256 prefix present, provider is `rocm_hsa`, helper signature for `hsa_signal_create_args` includes `hsa_signal_t * signal_out_ptr` (NOT `void** signal_out_ptr`), the OUT-param `signal` body dereferences `signal_out_ptr->handle` (NOT `*signal_out_ptr`), and the helper signature ends with `hsa_status_t status`. Same checks for `hsa_queue_create_args` (queue is `hsa_queue_t**`, deref is `*queue_out_ptr`).
 
 - [ ] **Step 3: Commit**
 
@@ -4529,33 +4793,59 @@ Inside the existing `if(HSA_ENABLE_LTTNG_UST)` block (or equivalent guard), inse
     # ---- Curated parameter-capture: opt-in regeneration target (HSA) ----
     # Per spec §9.1: default build does NOT regenerate. The custom command
     # is wired only to the manual `regenerate-lttng-curated-hsa` target so
-    # the build never requires Python or PyYAML. Generated headers are
-    # checked in. CI runs codegen + `git diff --exit-code` to catch drift.
+    # the build never requires Python, PyYAML, or libclang. Generated
+    # headers AND the verifier signature sidecar JSON are checked in
+    # (§3.2). CI runs codegen + `git diff --exit-code` to catch drift.
+    #
+    # Two-step pipeline (debate-review C10 fix), same shape as HIP:
+    #   1. Verifier  --out-sidecar=<JSON>  (libclang against hsa.h + hsa_ext_amd.h)
+    #   2. Codegen   --sigs=<JSON>         (pure Python; emits HSA-correct
+    #                                       hsa_signal_t* helpers with
+    #                                       p->handle deref, NOT void**.)
     find_package(Python3 QUIET COMPONENTS Interpreter)
     if(Python3_FOUND)
         set(_HSA_CURATED_YAML  ${CMAKE_CURRENT_LIST_DIR}/scripts/curated_apis.yaml)
+        set(_HSA_CURATED_SIGS  ${CMAKE_CURRENT_LIST_DIR}/scripts/curated_apis_sigs.json)
         set(_HSA_CURATED_TP_H  ${CMAKE_CURRENT_LIST_DIR}/lttng/rocm_hsa_curated_tp.h)
         set(_HSA_CURATED_EMIT_H ${CMAKE_CURRENT_LIST_DIR}/lttng/rocm_trace_emit_curated.h)
         if(EXISTS ${_HSA_CURATED_YAML})
+            # Step 1: verifier emits the signature sidecar. HSA spans two
+            # headers (Task 4.5 multi-header support).
+            add_custom_command(
+                OUTPUT ${_HSA_CURATED_SIGS}
+                COMMAND ${Python3_EXECUTABLE}
+                        ${CMAKE_CURRENT_LIST_DIR}/scripts/lttng_curated_verify.py
+                        --yaml         ${_HSA_CURATED_YAML}
+                        --header       /opt/rocm/include/hsa/hsa.h
+                        --header       /opt/rocm/include/hsa/hsa_ext_amd.h
+                        --extra-arg    -I/opt/rocm/include
+                        --out-sidecar  ${_HSA_CURATED_SIGS}
+                DEPENDS ${_HSA_CURATED_YAML}
+                        ${CMAKE_CURRENT_LIST_DIR}/scripts/lttng_curated_verify.py
+                COMMENT "Verifying HSA curated YAML + emitting signature sidecar"
+            )
+            # Step 2: codegen reads the sidecar.
             add_custom_command(
                 OUTPUT ${_HSA_CURATED_TP_H} ${_HSA_CURATED_EMIT_H}
                 COMMAND ${Python3_EXECUTABLE}
                         ${CMAKE_CURRENT_LIST_DIR}/scripts/lttng_curated_codegen.py
                         --yaml      ${_HSA_CURATED_YAML}
+                        --sigs      ${_HSA_CURATED_SIGS}
                         --provider  rocm_hsa
                         --status-type hsa_status_t
                         --status-success HSA_STATUS_SUCCESS
                         --out-tp    ${_HSA_CURATED_TP_H}
                         --out-emit  ${_HSA_CURATED_EMIT_H}
                 DEPENDS ${_HSA_CURATED_YAML}
+                        ${_HSA_CURATED_SIGS}
                         ${CMAKE_CURRENT_LIST_DIR}/scripts/lttng_curated_codegen.py
                         ${CMAKE_CURRENT_LIST_DIR}/scripts/lttng_curated_lib.py
                 COMMENT "Regenerating LTTng curated tracepoints (HSA)"
             )
             # Manual target — NOT a dependency of hsa-runtime64. Default
-            # build consumes the checked-in headers directly.
+            # build consumes the checked-in headers + sidecar directly.
             add_custom_target(regenerate-lttng-curated-hsa
-                              DEPENDS ${_HSA_CURATED_TP_H} ${_HSA_CURATED_EMIT_H})
+                              DEPENDS ${_HSA_CURATED_TP_H} ${_HSA_CURATED_EMIT_H} ${_HSA_CURATED_SIGS})
         endif()
     else()
         message(STATUS "Python3 not found; HSA LTTng curated regeneration target unavailable.")
@@ -4563,6 +4853,8 @@ Inside the existing `if(HSA_ENABLE_LTTNG_UST)` block (or equivalent guard), inse
 ```
 
 The target name `regenerate-lttng-curated-hsa` is distinct from the HIP `regenerate-lttng-curated` so a developer can regenerate one or the other.
+
+**Sidecar path (HSA):** `projects/rocr-runtime/runtime/hsa-runtime/scripts/curated_apis_sigs.json` — checked into git alongside the HSA `curated_apis.yaml` and the generated tp.h / emit.h headers. The HSA sidecar is what makes the `hsa_signal_t* signal_out_ptr` + `signal_out_ptr->handle` deref correct (vs the HIP-style `void**` fallback that would mis-compile).
 
 - [ ] **Step 3: Verify default build is unaffected and the manual target works**
 
@@ -4581,11 +4873,19 @@ git add projects/rocr-runtime/runtime/hsa-runtime/CMakeLists.txt
 git commit -m "lttng(hsa): add opt-in regenerate-lttng-curated-hsa CMake target
 
 Per spec §9.1: default HSA build does NOT regenerate the curated
-headers and does NOT require Python or PyYAML. The custom command
-is wired to a manual target only. Developers regenerate after
-editing the HSA YAML via:
+headers and does NOT require Python, PyYAML, or libclang. The custom
+command is wired to a manual target only. Developers regenerate
+after editing the HSA YAML via:
 
     cmake --build build/rocr --target regenerate-lttng-curated-hsa
+
+The target runs verifier --out-sidecar (against hsa.h + hsa_ext_amd.h)
+then codegen --sigs (C10 fix). The sidecar JSON
+(scripts/curated_apis_sigs.json) is checked into git alongside the
+generated headers and is what makes HSA helpers emit
+'hsa_signal_t* signal_out_ptr' + 'signal_out_ptr->handle' deref
+instead of the HIP-style void** fallback (which would mis-compile
+against pointer-to-struct handles).
 
 CI catches drift via the lttng-curated-gates.yml workflow (Task 13.5)."
 ```
@@ -4854,17 +5154,18 @@ Task 13.5 wired only the HIP drift + verify steps (HSA files didn't exist yet). 
 
 Edit `.github/workflows/lttng-curated-gates.yml`:
 
-1. Under `on.pull_request.paths`, add the four HSA path filters (replacing the `# HSA path filters added by Task 15h…` comment):
+1. Under `on.pull_request.paths`, add the five HSA path filters (replacing the `# HSA path filters added by Task 15h…` comment):
    - `projects/rocr-runtime/runtime/hsa-runtime/scripts/curated_apis.yaml`
+   - `projects/rocr-runtime/runtime/hsa-runtime/scripts/curated_apis_sigs.json`
    - `projects/rocr-runtime/runtime/hsa-runtime/scripts/lttng_curated_*.py`
    - `projects/rocr-runtime/runtime/hsa-runtime/lttng/rocm_hsa_curated_tp.h`
    - `projects/rocr-runtime/runtime/hsa-runtime/lttng/rocm_trace_emit_curated.h`
 
 2. Rename the `drift-gate` job's `name:` from `Codegen drift (HIP)` to `Codegen drift (HIP + HSA)`.
 
-3. In the `drift-gate` job (replacing the `# HSA codegen step added by Task 15h…` comment), append a step mirroring the HIP shape but with `--provider rocm_hsa`, `--status-type hsa_status_t`, `--status-success HSA_STATUS_SUCCESS`, pointing at the HSA YAML / scripts / output paths. The step regenerates `rocm_hsa_curated_tp.h` + `rocm_trace_emit_curated.h` then `git diff --exit-code` against them.
+3. In the `drift-gate` job (replacing the `# HSA codegen step added by Task 15h…` comment), append a step mirroring the HIP shape but with `--provider rocm_hsa`, `--status-type hsa_status_t`, `--status-success HSA_STATUS_SUCCESS`, `--sigs projects/rocr-runtime/runtime/hsa-runtime/scripts/curated_apis_sigs.json`, pointing at the HSA YAML / scripts / output paths. The step regenerates `rocm_hsa_curated_tp.h` + `rocm_trace_emit_curated.h` then `git diff --exit-code` against them.
 
-4. In the `verify-gate` job (replacing the `# HSA verify step added by Task 15h…` comment), append a step that invokes `lttng_curated_verify.py` against the HSA YAML with three `--header` args (`hsa.h`, `hsa_ext_amd.h`, `hsa_api_trace.h`) and `--extra-arg=-I/opt/rocm/include`. (The multi-`--header` form was added in Task 4.5; `hsa_api_trace.h` is required because it declares `hsa_amd_queue_intercept_create` per Task 15a.)
+4. In the `verify-gate` job (replacing the `# HSA verify step added by Task 15h…` comment), append a step that invokes `lttng_curated_verify.py` against the HSA YAML with three `--header` args (`hsa.h`, `hsa_ext_amd.h`, `hsa_api_trace.h`), `--extra-arg=-I/opt/rocm/include`, AND `--out-sidecar projects/rocr-runtime/runtime/hsa-runtime/scripts/curated_apis_sigs.json` followed by `git diff --exit-code` against the sidecar JSON. (The multi-`--header` form was added in Task 4.5; `hsa_api_trace.h` is required because it declares `hsa_amd_queue_intercept_create` per Task 15a. The `--out-sidecar` + diff catches header-side OUT-handle type changes per the C10 fix.)
 
 Validate locally:
 
