@@ -1,0 +1,39 @@
+# Curated HIP APIs for typed parameter capture.
+# Source of truth — see docs/superpowers/specs/2026-04-26-lttng-curated-args-design.md.
+#
+# Schema:
+#   - api: string (must match HIP header function name exactly)
+#     category: streams | events | kernel_launch | memory | graphs | module
+#     args:
+#       - {name: <param_name>, type: <DSL type>, dir: IN | OUT}
+#
+# DSL types: handle | ptr | device_ptr | size | int32 | uint32 | int64 |
+#            uint64 | float | enum | bool | dim3 | dim3_packed | cstring
+#
+# Direction: IN (captured at entry, emitted at exit) | OUT (deref'd at exit)
+# INOUT is rejected by codegen + verifier in v1 — see spec §4.4.
+#
+# Field budget: each API may have at most 9 payload fields after corr_id.
+# Use `dim3_packed` instead of `dim3` to fit high-arity launch APIs.
+#
+# Phase B: minimal set (3 APIs) for end-to-end validation.
+# Phase F will expand to the full ~72-API curated set per spec Appendix A.
+
+- api: hipMemcpyAsync
+  category: memory
+  args:
+    - {name: dst,       type: ptr,    dir: IN}
+    - {name: src,       type: ptr,    dir: IN}
+    - {name: sizeBytes, type: size,   dir: IN}
+    - {name: kind,      type: enum,   dir: IN}
+    - {name: stream,    type: handle, dir: IN}
+
+- api: hipMalloc
+  category: memory
+  args:
+    - {name: ptr,  type: ptr,  dir: OUT}
+    - {name: size, type: size, dir: IN}
+
+- api: hipDeviceSynchronize
+  category: streams
+  args: []
