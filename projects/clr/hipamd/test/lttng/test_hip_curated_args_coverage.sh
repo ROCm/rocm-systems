@@ -185,15 +185,18 @@ PLACEHOLDER_OVERRIDES = {
     # Stream attach — needs managed ptr.
     'hipStreamAttachMemAsync': {'dev_ptr': 'real_managed_ptr'},
 
-    # Launch APIs — function_address must be a real __global__ symbol.
-    # noop_kernel is defined in the harness; its address is a usable
-    # `const void*` for the templated launch APIs.
+    # Launch APIs — function_address must be a real __global__ symbol;
+    # `args`/`kernelParams` are typed `void**` (NOT generic char*), so
+    # override with nullptr (zero kernel args, kernel takes none).
     'hipLaunchKernel':            {'function_address':
-                                       '(const void*)&noop_kernel'},
+                                       '(const void*)&noop_kernel',
+                                   'args': 'nullptr'},
     'hipLaunchCooperativeKernel': {'f':
-                                       '(const void*)&noop_kernel'},
+                                       '(const void*)&noop_kernel',
+                                   'kernelParams': 'nullptr'},
     'hipExtLaunchKernel':         {'function_address':
                                        '(const void*)&noop_kernel',
+                                   'args':       'nullptr',
                                    'startEvent': 'real_event',
                                    'stopEvent':  'real_event_2'},
 
