@@ -53,10 +53,18 @@ iteration_multiplexing_mode_t iteration_multiplexing_mode(const std::string& mod
 {
     if (mode == "kernel")
         return iteration_multiplexing_mode_t::KERNEL;
-    else if (mode == "kernel_launch_params")
+    if (mode == "kernel_launch_params")
         return iteration_multiplexing_mode_t::LAUNCH;
-    else
-        return iteration_multiplexing_mode_t::DISABLED;
+    return iteration_multiplexing_mode_t::DISABLED;
+}
+
+PcSamplingMode pc_sampling_mode(const std::string& mode)
+{
+    if (mode == "stochastic")
+        return PcSamplingMode::Stochastic;
+    if (mode == "host_trap")
+        return PcSamplingMode::HostTrap;
+    return PcSamplingMode::Disabled;
 }
 
 void dispatch_callback(rocprofiler_dispatch_counting_service_data_t dispatch_data,
@@ -98,10 +106,13 @@ void code_object_tracing_callback(rocprofiler_callback_tracing_record_t record,
     if (record.kind == ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT &&
         record.operation == ROCPROFILER_CODE_OBJECT_LOAD && record.phase == ROCPROFILER_CALLBACK_PHASE_LOAD)
     {
-        auto* tool_data = static_cast<tool_data_t*>(data);
-        auto* obj_data = static_cast<rocprofiler_callback_tracing_code_object_load_data_t*>(record.payload);
-        tool_data->pc_sampling_collector.rlock([&](const pc_sampling_collector_t::Ptr& collector)
-                                               { collector->on_code_object_load(*obj_data); });
+        if (pc_sampling_mode(g_input_parameters->get_pc_sampling_mode()) != PcSamplingMode::Disabled)
+        {
+            auto* tool_data = static_cast<tool_data_t*>(data);
+            auto* obj_data = static_cast<rocprofiler_callback_tracing_code_object_load_data_t*>(record.payload);
+            tool_data->pc_sampling_collector.rlock([&](const pc_sampling_collector_t::Ptr& collector)
+                                                   { collector->on_code_object_load(*obj_data); });
+        }
     }
 }
 
