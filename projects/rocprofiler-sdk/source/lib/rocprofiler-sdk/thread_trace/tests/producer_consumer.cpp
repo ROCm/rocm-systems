@@ -608,12 +608,19 @@ TEST(thread_trace, destructor_force_wake)
 
     // Mock submit that RESETS the completion signal to 1 so the producer's
     // signal_wait actually blocks (production behavior). The destructor then
-    // unblocks it by storing 0.
+    // unblocks it by storing 0. We also bump a static counter so the test
+    // can observe that the producer has reached the submit step (and is
+    // therefore about to park on signal_wait) without having to wait on
+    // query_calls_total — which would never increment because the producer
+    // is parked BEFORE query_buffer_status_fn is invoked.
+    static std::atomic<int> submit_count{0};
+    submit_count.store(0);
     auto mock_submit_blocking =
         [](const thread_trace::att_queue_t&,
            hsa_ext_amd_aql_pm4_packet_t*,
            hsa_signal_t* completion) {
             if(completion) thread_trace::signal_reset(*completion);
+            submit_count.fetch_add(1);
         };
 
     auto mock_queue       = thread_trace::make_mock_queue(*agent);
@@ -647,12 +654,35 @@ TEST(thread_trace, destructor_force_wake)
     // Let the producer reach its blocking signal_wait on producer_submit_signal.
     // The mock_submit_blocking resets the signal to 1 on first submit, after
     // which signal_wait (waits for ==0) blocks indefinitely until something
-    // stores 0 to it.
-    while(query_calls_total.load() < 1 && running_flag->load() != thread_trace::WORKER_FLAG_DESTRUCTOR)
+    // stores 0 to it. We must NOT wait on query_calls_total here: the
+    // producer is parked BEFORE query_buffer_status_fn runs, so that counter
+    // stays at 0 and the loop would deadlock. Instead wait on submit_count,
+    // which is bumped synchronously inside mock_submit_blocking right before
+    // the producer reaches signal_wait.
+    constexpr auto SETTLE_TIMEOUT = std::chrono::seconds(5);
+    auto           t_start        = std::chrono::steady_clock::now();
+    while(submit_count.load() < 1)
+    {
+        if(std::chrono::steady_clock::now() - t_start > SETTLE_TIMEOUT)
+        {
+            // Best-effort cleanup so the test fails rather than hanging.
+            running_flag->store(thread_trace::WORKER_FLAG_DESTRUCTOR);
+            auto* core_cleanup = hsa::get_core_table();
+            if(core_cleanup)
+            {
+                core_cleanup->hsa_signal_store_screlease_fn(
+                    *worker_data->producer_submit_signal, 0);
+                core_cleanup->hsa_signal_store_screlease_fn(*start_signal, 0);
+            }
+            if(producer.joinable()) producer.join();
+            FAIL() << "Producer never reached mock_submit_blocking; cannot exercise "
+                      "destructor wake path";
+        }
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
 
     // Producer should now be parked on signal_wait(*producer_submit_signal)
-    // after submitting the next query packet. Give it a moment to settle.
+    // after submitting the query packet. Give it a moment to settle.
     std::this_thread::sleep_for(std::chrono::milliseconds(20));
     int calls_before_destructor = query_calls_total.load();
 
