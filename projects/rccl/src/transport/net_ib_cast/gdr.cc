@@ -12,10 +12,10 @@
 // ncclSuccess : GDR works
 // ncclSystemError : no module or module loaded but not supported by GPU
 #define KNL_MODULE_LOADED(a) ((access(a, F_OK) == -1) ? 0 : 1)
-static int ncclIbGdrModuleLoaded = 0; // 1 = true, 0 = false
+static int IbCastGdrModuleLoaded = 0; // 1 = true, 0 = false
 static void ibGdrSupportInitOnce() {
   // Check for the nv_peer_mem module being loaded
-  ncclIbGdrModuleLoaded = KNL_MODULE_LOADED("/sys/kernel/mm/memory_peers/nv_mem/version") ||
+  IbCastGdrModuleLoaded = KNL_MODULE_LOADED("/sys/kernel/mm/memory_peers/nv_mem/version") ||
                           KNL_MODULE_LOADED("/sys/kernel/mm/memory_peers/nv_mem_nc/version") ||
                           KNL_MODULE_LOADED("/sys/module/nvidia_peermem/version");
 }
@@ -24,21 +24,21 @@ static void ibGdrSupportInitOnce() {
 ncclResult_t IbCastGdrSupport() {
   static std::once_flag once;
   std::call_once(once, ibGdrSupportInitOnce);
-  if (!ncclIbGdrModuleLoaded)
+  if (!IbCastGdrModuleLoaded)
     return ncclSystemError;
   return ncclSuccess;
 }
 
-static int ncclIbPeerMemModuleLoaded = 0; // 1 = true, 0 = false
+static int IbCastPeerMemModuleLoaded = 0; // 1 = true, 0 = false
 static void ibPeerMemSupportInitOnce() {
-  ncclIbPeerMemModuleLoaded = KNL_MODULE_LOADED("/sys/module/nvidia_peermem/version");
+  IbCastPeerMemModuleLoaded = KNL_MODULE_LOADED("/sys/module/nvidia_peermem/version");
 }
 
 // Returns ncclSuccess if nvidia_peermem module is loaded. Does not check legacy implementations of nv_peer_mem (e.g. nv_mem, nv_mem_nc)
 ncclResult_t IbCastPeerMemSupport() {
   static std::once_flag once;
   std::call_once(once, ibPeerMemSupportInitOnce);
-  if (!ncclIbPeerMemModuleLoaded)
+  if (!IbCastPeerMemModuleLoaded)
     return ncclSystemError;
   return ncclSuccess;
 }
@@ -49,8 +49,8 @@ static void ibDmaBufSupportInitOnce() {
   int dev_fail = 0;
 
   // This is a physical device, not a virtual one, so select from ibDevs
-  ncclIbMergedDev* mergedDev = ncclIbMergedDevs + ibDmaSupportInitDev;
-  ncclIbDev* ibDev = ncclIbDevs + mergedDev->vProps.devs[0];
+  ncclIbMergedDev* mergedDev = IbCastMergedDevs + ibDmaSupportInitDev;
+  ncclIbDev* ibDev = IbCastDevs + mergedDev->vProps.devs[0];
   struct ibv_pd* pd;
   struct ibv_context* ctx = ibDev->context;
   NCCLCHECKGOTO(wrap_ibv_alloc_pd(&pd, ctx), res, failure);
@@ -76,8 +76,8 @@ ncclResult_t IbCastDmaBufSupport(int dev) {
   // init the device only once
   ibDmaSupportInitDev = dev;
   std::call_once(onces[dev], ibDmaBufSupportInitOnce);
-  ncclIbMergedDev* mergedDev = ncclIbMergedDevs + ibDmaSupportInitDev;
-  ncclIbDev* ibDev = ncclIbDevs + mergedDev->vProps.devs[0];
+  ncclIbMergedDev* mergedDev = IbCastMergedDevs + ibDmaSupportInitDev;
+  ncclIbDev* ibDev = IbCastDevs + mergedDev->vProps.devs[0];
   int dmaBufSupported = ibDev->dmaBufSupported;
   if (dmaBufSupported == 1) return ncclSuccess;
   return ncclSystemError;

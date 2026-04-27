@@ -47,34 +47,34 @@ static ncclResult_t ncclGinIbGdrGpuSupport(bool gdaki) {
 
 NCCL_PARAM(GinType, "GIN_TYPE", -1);
 
-static std::mutex ncclGinIbGdakiLockMutex;
-static int ncclGinIbGdakiNDevs = -1;
-int ncclGinIbGdakiDevIndexes[MAX_IB_DEVS];
+static std::mutex IbCastGinGdakiLockMutex;
+static int IbCastGinGdakiNDevs = -1;
+int IbCastGinGdakiDevIndexes[MAX_IB_DEVS];
 
 ncclResult_t ncclGinIbGdakiInit() {
-  std::lock_guard<std::mutex> lock(ncclGinIbGdakiLockMutex);
-  if (ncclGinIbGdakiNDevs == -1) {
+  std::lock_guard<std::mutex> lock(IbCastGinGdakiLockMutex);
+  if (IbCastGinGdakiNDevs == -1) {
     int ndevs = 0;
-    for (int i = 0; i < ncclNIbDevs; i++) {
-      if (ncclIbDevs[i].ibProvider == IB_PROVIDER_MLX5) {
-        ncclGinIbGdakiDevIndexes[ndevs] = i;
+    for (int i = 0; i < IbCastNDevs; i++) {
+      if (IbCastDevs[i].ibProvider == IB_PROVIDER_MLX5) {
+        IbCastGinGdakiDevIndexes[ndevs] = i;
         ++ndevs;
       }
     }
-    ncclGinIbGdakiNDevs = ndevs;
+    IbCastGinGdakiNDevs = ndevs;
   }
   return ncclSuccess;
 }
 
-extern ncclGin_t ncclGinIb;
-extern ncclGin_t ncclGinIbGdaki;
-extern ncclGin_t ncclGinIbProxy;
+extern ncclGin_t IbCastGinIb;
+extern ncclGin_t IbCastGinIbGdaki;
+extern ncclGin_t IbCastGinIbProxy;
 
 // Initlialize GDAKI or PROXY backend. ginType can force a particular backend.
 // If provided, overwrite ginIb with the backend (generic ginIb case).
 ncclResult_t ncclGinIbInitType(void** ctx, uint64_t commId, ncclDebugLogger_t logFunction, int ginType, ncclGin_t* ginIb) {
   NCCLCHECK(IbCastInitDevices(logFunction, nullptr));
-  if (ncclNIbDevs == 0) return ncclInternalError; // Caught in plugin init code, not propagated to user.
+  if (IbCastNDevs == 0) return ncclInternalError; // Caught in plugin init code, not propagated to user.
 
   if (ginType == NCCL_GIN_TYPE_GDAKI) goto try_gdaki;
   if (ginType == NCCL_GIN_TYPE_PROXY) goto try_proxy;
@@ -88,18 +88,18 @@ ncclResult_t ncclGinIbInitType(void** ctx, uint64_t commId, ncclDebugLogger_t lo
   // First try GDAKI
 try_gdaki:
   NCCLCHECK(ncclGinIbGdakiInit());
-  if (ncclGinIbGdakiNDevs == 0 && ginType == -1) goto try_proxy;
+  if (IbCastGinGdakiNDevs == 0 && ginType == -1) goto try_proxy;
   NCCLCHECK(ncclGinIbGdrSupport(&gdrSupport, /*gdaki*/ true));
   if (!gdrSupport && ginType == -1) goto try_proxy;
   if (!gdrSupport) return ncclInternalError;
-  if (ginIb) memcpy(ginIb, &ncclGinIbGdaki, sizeof(ncclGinIb));
+  if (ginIb) memcpy(ginIb, &IbCastGinIbGdaki, sizeof(IbCastGinIb));
   goto end;
 
   // Then Proxy
 try_proxy:
   NCCLCHECK(ncclGinIbGdrSupport(&gdrSupport, /*gdaki*/ false));
   if (!gdrSupport) return ncclInternalError;
-  if (ginIb) memcpy(ginIb, &ncclGinIbProxy, sizeof(ncclGinIb));
+  if (ginIb) memcpy(ginIb, &IbCastGinIbProxy, sizeof(IbCastGinIb));
 
 end:
   ncclNetCommConfig_t* netCommConfig = nullptr;
@@ -109,11 +109,11 @@ end:
   return ncclSuccess;
 }
 ncclResult_t ncclGinIbInit(void** ctx, uint64_t commId, ncclDebugLogger_t logFunction) {
-  return ncclGinIbInitType(ctx, commId, logFunction, ncclParamGinType(), &ncclGinIb);
+  return ncclGinIbInitType(ctx, commId, logFunction, ncclParamGinType(), &IbCastGinIb);
 }
 
 // GIN Entry point, which will then morph into either the GDAKI or PROXY backend
-ncclGin_t ncclGinIb = {
+ncclGin_t IbCastGinIb = {
   "GIN_IB",
   ncclGinIbInit,
   NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL
@@ -242,8 +242,8 @@ ncclResult_t ncclGinIbConnect(void *ctx, void *handles[], int nranks, int rank,
   cComm->getGidIndex = IbCastGetGidIndex;
   cComm->dev = lComm->dev;
 
-  cComm->ib.context = ncclIbDevs[cComm->dev].context;
-  cComm->ib.pd = ncclIbDevs[cComm->dev].pd;
+  cComm->ib.context = IbCastDevs[cComm->dev].context;
+  cComm->ib.pd = IbCastDevs[cComm->dev].pd;
 
   *collComm = cCommArray;
   return ncclSuccess;
@@ -277,18 +277,18 @@ ncclResult_t ncclGinIbGdakiInit(void** ctx, uint64_t commId, ncclDebugLogger_t l
 }
 
 ncclResult_t ncclGinIbGdakiDevices(int* ndev) {
-  std::lock_guard<std::mutex> lock(ncclGinIbGdakiLockMutex);
-  *ndev = ncclGinIbGdakiNDevs;
+  std::lock_guard<std::mutex> lock(IbCastGinGdakiLockMutex);
+  *ndev = IbCastGinGdakiNDevs;
   return ncclSuccess;
 }
 
 ncclResult_t ncclGinIbGdakiGetProperties(int dev, ncclNetProperties_t* props) {
-  std::lock_guard<std::mutex> lock(ncclGinIbGdakiLockMutex);
-  if (dev >= ncclGinIbGdakiNDevs) {
-    WARN("NET/IB : Requested properties for GIN GDAKI NIC %d, only %d GIN GDAKI NICs have been created", dev, ncclGinIbGdakiNDevs);
+  std::lock_guard<std::mutex> lock(IbCastGinGdakiLockMutex);
+  if (dev >= IbCastGinGdakiNDevs) {
+    WARN("NET/IB : Requested properties for GIN GDAKI NIC %d, only %d GIN GDAKI NICs have been created", dev, IbCastGinGdakiNDevs);
     return ncclInvalidUsage;
   }
-  NCCLCHECK(IbCastGetPhysProperties(ncclGinIbGdakiDevIndexes[dev], props));
+  NCCLCHECK(IbCastGetPhysProperties(IbCastGinGdakiDevIndexes[dev], props));
   props->netDeviceType = NCCL_NET_DEVICE_GIN_GDAKI;
   props->vProps.ndevs = 1;
   props->vProps.devs[0] = dev;
@@ -296,8 +296,8 @@ ncclResult_t ncclGinIbGdakiGetProperties(int dev, ncclNetProperties_t* props) {
 }
 
 ncclResult_t ncclGinIbGdakiListen(void* ctx, int dev, void* opaqueHandle, void** listenComm) {
-  std::lock_guard<std::mutex> lock(ncclGinIbGdakiLockMutex);
-  return ncclNetIb.listen(ctx, ncclGinIbGdakiDevIndexes[dev], opaqueHandle, listenComm);
+  std::lock_guard<std::mutex> lock(IbCastGinGdakiLockMutex);
+  return ncclNetIb.listen(ctx, IbCastGinGdakiDevIndexes[dev], opaqueHandle, listenComm);
 }
 
 ncclResult_t ncclGinIbGdakiConnect(void *ctx, void *handles[], int nranks, int rank,
@@ -342,7 +342,7 @@ ncclResult_t ncclGinIbGdakiQueryLastError(void *ginCtx, bool *hasError) {
   return ncclGinGdakiQueryLastError(ginCtx, hasError);
 }
 
-ncclGin_t ncclGinIbGdaki = {
+ncclGin_t IbCastGinIbGdaki = {
   "GIN_IB_GDAKI",
   ncclGinIbGdakiInit,
   ncclGinIbGdakiDevices,
@@ -746,7 +746,7 @@ ncclResult_t ncclGinIbProxyTest(void* collComm, void *request, int *done) {
       char line[SOCKET_NAME_MAXLEN+1];
       char *hcaName = devBase->pd->context->device->name;
       WARN("NET/IB/GIN: Got completion from peer %s with status=%d opcode=%d len=%u vendor err %u (%s)%s%s%s%s hca %s",
-          ncclSocketToString(&addr, line), wc[i].status, wc[i].opcode, wc[i].byte_len, wc[i].vendor_err, ncclIbReqTypeStr[req->type],
+          ncclSocketToString(&addr, line), wc[i].status, wc[i].opcode, wc[i].byte_len, wc[i].vendor_err, IbCastReqTypeStr[req->type],
           localGidStr ?  " localGid ":"", localGidString, remoteGidStr ? " remoteGids":"", remoteGidString, hcaName);
       return ncclRemoteError;
     }
@@ -802,7 +802,7 @@ ncclResult_t ncclGinIbProxyIFlush(void *ginCtx, int context, void* mhandle, uint
 }
 
 // No support for NCCL_IB_SPLIT_DATA_ON_QPS or NCCL_IB_MERGE_NICS
-ncclGin_t ncclGinIbProxy = {
+ncclGin_t IbCastGinIbProxy = {
   "GIN_IB_PROXY",
   ncclGinIbProxyInit,
   IbCastDevices,
