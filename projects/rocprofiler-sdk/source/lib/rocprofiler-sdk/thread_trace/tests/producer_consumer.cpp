@@ -272,13 +272,17 @@ TEST(thread_trace, multiple_calls)
     auto data_received = std::atomic<size_t>{0};
 
     // Accumulate the payload sizes so we can verify every buffer reported by the
-    // mock GPU eventually reaches the consumer.
+    // mock GPU eventually reaches the consumer. Skip the FLAGS_END tail-flush
+    // payload that producer_loop emits via iterate_trace() after WORKER_FLAG_STOP:
+    // that payload is a residual aqlprofile_att_iterate_data flush whose size
+    // is not counted by status_called and would falsely inflate data_received.
     auto fetch_cb = [](rocprofiler_agent_id_t,
                        int64_t,
                        void*,
-                       size_t data_size,
-                       rocprofiler_thread_trace_shader_data_flags_t,
-                       rocprofiler_user_data_t userdata) {
+                       size_t                                       data_size,
+                       rocprofiler_thread_trace_shader_data_flags_t flags,
+                       rocprofiler_user_data_t                      userdata) {
+        if(flags & ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_END) return;
         static_cast<std::atomic<size_t>*>(userdata.ptr)->fetch_add(data_size);
     };
 
@@ -322,12 +326,18 @@ TEST(thread_trace, data_integrity)
     output_buffer.reserve(128 * BUFFER_SIZE / sizeof(size_t));
 
     // Capture every word of the buffer so we can assert exact ordering after many copies.
+    // Skip the FLAGS_END tail-flush payload that producer_loop emits via
+    // iterate_trace() after WORKER_FLAG_STOP: that payload is a residual
+    // aqlprofile_att_iterate_data flush whose contents are not part of the
+    // query/swap stream this test reconstructs and would corrupt the sequential
+    // ordering check.
     auto fetch_cb = [](rocprofiler_agent_id_t,
                        int64_t,
-                       void*  datain,
-                       size_t data_size,
-                       rocprofiler_thread_trace_shader_data_flags_t,
-                       rocprofiler_user_data_t userdata) {
+                       void*                                        datain,
+                       size_t                                       data_size,
+                       rocprofiler_thread_trace_shader_data_flags_t flags,
+                       rocprofiler_user_data_t                      userdata) {
+        if(flags & ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_END) return;
         auto* buf  = static_cast<pair_t*>(userdata.ptr);
         auto* data = static_cast<size_t*>(datain);
 
