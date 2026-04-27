@@ -5,7 +5,7 @@
 # Usage:
 #   bash scripts/pip-install-from-git.sh
 #   bash scripts/pip-install-from-git.sh v0.2.0
-#   bash scripts/pip-install-from-git.sh <SHA> --user
+#   bash scripts/pip-install-from-git.sh <SHA> --allow-user-site --user
 #   bash scripts/pip-install-from-git.sh --extras '' --no-deps
 #
 # Notes:
@@ -53,13 +53,16 @@ while scoping git submodule init down to the opencode subtree only.
 Usage:
   bash scripts/pip-install-from-git.sh
   bash scripts/pip-install-from-git.sh v0.2.0
-  bash scripts/pip-install-from-git.sh <SHA> --user
+  bash scripts/pip-install-from-git.sh <SHA> --allow-user-site --user
   bash scripts/pip-install-from-git.sh --extras '' --no-deps
 
 Options:
   --extras <name>   Optional extras to install (default: all).
                     Use `--extras ''` to install the base package only.
   --repo-url <url>  Override the git remote (default: ROCm/rocm-systems).
+  --allow-user-site Allow dependency installation outside a virtualenv.
+                    This can update or downgrade packages in the active
+                    Python/user site. Prefer a virtualenv.
   -h, --help        Show this help.
 
 Interpreter selection:
@@ -345,6 +348,8 @@ fi
 _REF=""
 _EXTRAS="all"
 _REPO_URL="${_DEFAULT_REPO_URL}"
+_ALLOW_USER_SITE="0"
+_PIP_NO_DEPS="0"
 declare -a _PIP_ARGS=()
 
 while [ "$#" -gt 0 ]; do
@@ -363,9 +368,21 @@ while [ "$#" -gt 0 ]; do
       _REPO_URL="$2"
       shift 2
       ;;
+    --allow-user-site)
+      _ALLOW_USER_SITE="1"
+      shift
+      ;;
+    --no-deps)
+      _PIP_NO_DEPS="1"
+      _PIP_ARGS+=("$1")
+      shift
+      ;;
     --)
       shift
       while [ "$#" -gt 0 ]; do
+        if [ "$1" = "--no-deps" ]; then
+          _PIP_NO_DEPS="1"
+        fi
         _PIP_ARGS+=("$1")
         shift
       done
@@ -402,6 +419,32 @@ if [[ "${_REPO_URL}" == file://* ]]; then
   _SPEC="${_VCS_TARGET}#egg=${_PACKAGE}&subdirectory=${_SUBDIRECTORY}"
 else
   _SPEC="${_PACKAGE} @ ${_VCS_TARGET}#subdirectory=${_SUBDIRECTORY}"
+fi
+
+if [ "${_IN_VENV}" != "1" ] && [ "${_ALLOW_USER_SITE}" != "1" ] && [ "${_PIP_NO_DEPS}" != "1" ]; then
+  {
+    cat <<'EOF'
+pip-install-from-git: refusing to install dependencies into a non-virtualenv Python.
+
+The default `perfxpert[all]` install includes LLM provider packages such as
+LiteLLM and the OpenAI Agents SDK. Those packages may pin shared dependencies
+like openai, pydantic, jsonschema, aiohttp, and click, so installing them into
+the user site can update or downgrade tools unrelated to PerfXpert.
+
+Create and activate a virtual environment first:
+EOF
+    _print_python_prereqs
+    cat <<'EOF'
+
+If you intentionally want to mutate this Python environment, rerun with:
+  --allow-user-site
+
+If the dependencies are already present and you only want to refresh
+PerfXpert itself, rerun with:
+  --extras '' --no-deps
+EOF
+  } >&2
+  exit 2
 fi
 
 echo "pip-install-from-git: installing ${_SPEC}" >&2

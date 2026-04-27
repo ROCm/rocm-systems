@@ -37,7 +37,9 @@ The wrapper installs from GitHub, scopes submodule init to the pinned
 PerfXpert `opencode` submodule, and bootstraps bun when needed. It
 builds the patched bundled `perfxpert-code` binary and verifies it before exiting.
 No separate `opencode` install is needed for the default `perfxpert-code`
-TUI. See [docs/guides/getting-started.md](docs/guides/getting-started.md)
+TUI. The wrapper refuses dependency installs outside an active virtual
+environment by default because the LLM provider extras can update shared
+Python packages in the user site. See [docs/guides/getting-started.md](docs/guides/getting-started.md)
 for the Ubuntu/RHEL/SLES package matrix, direct-pip equivalent, editable
 installs, and troubleshooting.
 

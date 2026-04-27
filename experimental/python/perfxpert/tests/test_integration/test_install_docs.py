@@ -57,6 +57,7 @@ def test_install_wrapper_help_mentions_supported_prereqs() -> None:
     assert "pip build hook bootstraps bun" in result.stdout
     assert "package-manager install" in result.stdout
     assert "It never downloads" in result.stdout
+    assert "--allow-user-site" in result.stdout
     assert "command -v curl >/dev/null || dnf install -y curl" in result.stdout
     assert "dnf install -y git unzip python3.11 python3.11-pip" in result.stdout
     assert "dnf install -y git unzip python3 python3-pip" in result.stdout
@@ -78,6 +79,7 @@ def test_install_wrapper_help_works_from_stdin() -> None:
     assert "pip build hook bootstraps bun" in result.stdout
     assert "package-manager install" in result.stdout
     assert "It never downloads" in result.stdout
+    assert "--allow-user-site" in result.stdout
     assert "command -v curl >/dev/null || dnf install -y curl" in result.stdout
     assert "dnf install -y git unzip python3.11 python3.11-pip" in result.stdout
     assert "zypper install -y curl git unzip python311 python311-pip" in result.stdout
@@ -498,6 +500,182 @@ exit 99
     assert "dnf install -y git unzip python3.11 python3.11-pip" in result.stderr
     assert "dnf install -y git unzip python3 python3-pip" in result.stderr
     assert "zypper install -y curl git unzip python311 python311-pip" in result.stderr
+
+
+def test_install_wrapper_rejects_non_venv_dependency_install(tmp_path: Path) -> None:
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    _write_executable(
+        bin_dir / "python3",
+        f"""#!/bin/bash
+if [ "$1" = "-m" ] && [ "$2" = "pip" ] && [ "$3" = "--version" ]; then
+  echo "pip 24.0"
+  exit 0
+fi
+if [ "$1" = "-m" ] && [ "$2" = "pip" ] && [ "$3" = "install" ]; then
+  echo "pip install should not run" >&2
+  exit 88
+fi
+if [ "$1" = "-c" ]; then
+  case "$2" in
+    *"sys.version_info"*)
+      exit 0
+      ;;
+    *'sys.prefix != getattr(sys, "base_prefix", sys.prefix)'*)
+      echo 0
+      exit 0
+      ;;
+    *'sysconfig.get_path("stdlib")'*)
+      echo "{tmp_path / 'missing-externally-managed'}"
+      exit 0
+      ;;
+  esac
+fi
+exit 99
+""",
+    )
+    _symlink_tool(bin_dir, "curl")
+    _symlink_tool(bin_dir, "unzip")
+    _symlink_tool(bin_dir, "cat")
+    _symlink_tool(bin_dir, "git")
+
+    result = subprocess.run(
+        ["/bin/bash", str(_INSTALL_WRAPPER), "develop"],
+        capture_output=True,
+        text=True,
+        env=_env_with_path(bin_dir),
+        check=False,
+    )
+
+    assert result.returncode == 2
+    assert "refusing to install dependencies into a non-virtualenv Python" in result.stderr
+    assert "LiteLLM and the OpenAI Agents SDK" in result.stderr
+    assert "openai, pydantic, jsonschema, aiohttp, and click" in result.stderr
+    assert "--allow-user-site" in result.stderr
+    assert "--extras '' --no-deps" in result.stderr
+    assert "pip install should not run" not in result.stderr
+
+
+def test_install_wrapper_allow_user_site_is_explicit_escape_hatch(tmp_path: Path) -> None:
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    bundled = tmp_path / "site-packages" / "perfxpert" / "_bundled" / "opencode"
+    bundled.parent.mkdir(parents=True)
+    bundled.write_text("fake-opencode", encoding="utf-8")
+    bundled.chmod(0o755)
+    pip_args = tmp_path / "pip-args.txt"
+    _write_executable(
+        bin_dir / "python3",
+        f"""#!/bin/bash
+if [ "$1" = "-m" ] && [ "$2" = "pip" ] && [ "$3" = "--version" ]; then
+  echo "pip 24.0"
+  exit 0
+fi
+if [ "$1" = "-m" ] && [ "$2" = "pip" ] && [ "$3" = "install" ]; then
+  printf '%s\\n' "$*" > "{pip_args}"
+  exit 0
+fi
+if [ "$1" = "-c" ]; then
+  case "$2" in
+    *"sys.version_info"*)
+      exit 0
+      ;;
+    *'sys.prefix != getattr(sys, "base_prefix", sys.prefix)'*)
+      echo 0
+      exit 0
+      ;;
+    *'sysconfig.get_path("stdlib")'*)
+      echo "{tmp_path / 'missing-externally-managed'}"
+      exit 0
+      ;;
+    *'resources.files("perfxpert")'*)
+      echo "{bundled}"
+      exit 0
+      ;;
+  esac
+fi
+exit 99
+""",
+    )
+    _symlink_tool(bin_dir, "curl")
+    _symlink_tool(bin_dir, "unzip")
+    _symlink_tool(bin_dir, "cat")
+    _symlink_tool(bin_dir, "git")
+
+    result = subprocess.run(
+        ["/bin/bash", str(_INSTALL_WRAPPER), "develop", "--allow-user-site"],
+        capture_output=True,
+        text=True,
+        env=_env_with_path(bin_dir),
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "bundled patched perfxpert-code ready" in result.stderr
+    text = pip_args.read_text(encoding="utf-8")
+    assert "--allow-user-site" not in text
+    assert "perfxpert[all] @ git+https://github.com/ROCm/rocm-systems.git@develop" in text
+
+
+def test_install_wrapper_no_deps_can_refresh_base_package_outside_venv(tmp_path: Path) -> None:
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    bundled = tmp_path / "site-packages" / "perfxpert" / "_bundled" / "opencode"
+    bundled.parent.mkdir(parents=True)
+    bundled.write_text("fake-opencode", encoding="utf-8")
+    bundled.chmod(0o755)
+    pip_args = tmp_path / "pip-args.txt"
+    _write_executable(
+        bin_dir / "python3",
+        f"""#!/bin/bash
+if [ "$1" = "-m" ] && [ "$2" = "pip" ] && [ "$3" = "--version" ]; then
+  echo "pip 24.0"
+  exit 0
+fi
+if [ "$1" = "-m" ] && [ "$2" = "pip" ] && [ "$3" = "install" ]; then
+  printf '%s\\n' "$*" > "{pip_args}"
+  exit 0
+fi
+if [ "$1" = "-c" ]; then
+  case "$2" in
+    *"sys.version_info"*)
+      exit 0
+      ;;
+    *'sys.prefix != getattr(sys, "base_prefix", sys.prefix)'*)
+      echo 0
+      exit 0
+      ;;
+    *'sysconfig.get_path("stdlib")'*)
+      echo "{tmp_path / 'missing-externally-managed'}"
+      exit 0
+      ;;
+    *'resources.files("perfxpert")'*)
+      echo "{bundled}"
+      exit 0
+      ;;
+  esac
+fi
+exit 99
+""",
+    )
+    _symlink_tool(bin_dir, "curl")
+    _symlink_tool(bin_dir, "unzip")
+    _symlink_tool(bin_dir, "cat")
+    _symlink_tool(bin_dir, "git")
+
+    result = subprocess.run(
+        ["/bin/bash", str(_INSTALL_WRAPPER), "develop", "--extras", "", "--no-deps"],
+        capture_output=True,
+        text=True,
+        env=_env_with_path(bin_dir),
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    text = pip_args.read_text(encoding="utf-8")
+    assert "--no-deps" in text
+    assert "perfxpert @ git+https://github.com/ROCm/rocm-systems.git@develop" in text
+    assert "perfxpert[all]" not in text
 
 
 def test_install_wrapper_reports_ready_bundle_from_pip_build(tmp_path: Path) -> None:

@@ -167,6 +167,15 @@ pip/editable paths use the same `setup.py` build hook: pip bootstraps
 bun when the OS prerequisites are available, or fails with a
 distro-specific prerequisite message when they are not.
 
+The wrapper intentionally refuses dependency installs outside an active
+virtual environment unless `--allow-user-site` is passed. The default
+LLM extras include LiteLLM and the OpenAI Agents SDK; those packages can
+pin shared dependencies such as `openai`, `pydantic`, `jsonschema`,
+`aiohttp`, and `click`, so installing them into the user site can update
+or downgrade unrelated Python tools. If the dependencies are already
+present and only the PerfXpert package needs to be refreshed, use
+`--extras '' --no-deps`.
+
 ### 1.2 Why the wrapper: scoped submodule init
 
 `pip install "perfxpert @ git+https://...rocm-systems.git#subdirectory=..."`
