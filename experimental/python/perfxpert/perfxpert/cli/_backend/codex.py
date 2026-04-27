@@ -151,7 +151,9 @@ def _is_windowsapps_codex_alias(path: str | os.PathLike[str] | None) -> bool:
     if path is None:
         return False
     normalized = os.fspath(path).replace("/", "\\").lower()
-    return "\\windowsapps\\" in normalized and "\\openai.codex_" in normalized
+    return "\\windowsapps\\" in normalized and (
+        "\\openai.codex_" in normalized or normalized.endswith("\\codex.exe")
+    )
 
 
 def _path_env_key(env: dict[str, str]) -> str:

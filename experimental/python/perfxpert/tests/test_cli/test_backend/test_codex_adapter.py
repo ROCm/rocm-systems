@@ -258,7 +258,9 @@ def test_windowsapps_codex_alias_is_detected() -> None:
         r"C:\Program Files\WindowsApps\OpenAI.Codex_26.422.1952.0_x64__"
         r"2p2nqsd0c76g0\app\resources\codex"
     )
+    app_execution_alias = r"C:\Users\u\AppData\Local\Microsoft\WindowsApps\codex.exe"
     assert _is_windowsapps_codex_alias(alias) is True
+    assert _is_windowsapps_codex_alias(app_execution_alias) is True
     assert _is_windowsapps_codex_alias(r"C:\tools\codex.exe") is False
 
 

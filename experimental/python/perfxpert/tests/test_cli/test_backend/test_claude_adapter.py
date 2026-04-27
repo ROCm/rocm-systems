@@ -550,7 +550,10 @@ def test_python_scripts_path_preserves_windows_path_key(
 ) -> None:
     fake_scripts = tmp_path / "Scripts"
     fake_scripts.mkdir()
-    monkeypatch.setattr("perfxpert.cli._backend.claude.os.name", "nt")
+    monkeypatch.setattr(
+        "perfxpert.cli._backend.claude._is_windows_platform",
+        lambda: True,
+    )
     monkeypatch.setattr(
         "perfxpert.cli._backend.claude.sysconfig.get_path",
         lambda _name: str(fake_scripts),
@@ -569,7 +572,6 @@ def test_spawn_adds_node_shim_for_wsl_hooks(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """Windows Claude hooks run in bash; add a `node` shim when bash lacks one."""
-    called = {}
     node_exe = tmp_path / "node.exe"
     node_exe.write_text("fake")
     node_wsl = "/mnt/c/tools/node.exe"
@@ -585,16 +587,9 @@ def test_spawn_adds_node_shim_for_wsl_hooks(
             return _Result(1)
         return _Result(0)
 
-    def _fake_execvpe(name, argv, env):
-        called["name"] = name
-        called["argv"] = list(argv)
-        called["env"] = dict(env)
-        raise RuntimeError("stopped")
-
-    monkeypatch.setattr("perfxpert.cli._backend.claude.os.name", "nt")
     monkeypatch.setattr(
         "perfxpert.cli._backend.claude._is_windows_platform",
-        lambda: False,
+        lambda: True,
     )
     monkeypatch.setattr(
         "perfxpert.cli._backend.claude.shutil.which",
@@ -618,18 +613,13 @@ def test_spawn_adds_node_shim_for_wsl_hooks(
         "perfxpert.cli._backend.claude.subprocess.run",
         _fake_run,
     )
-    monkeypatch.setattr("os.execvpe", _fake_execvpe)
-    monkeypatch.setattr("os.chdir", lambda _p: None)
-
-    with pytest.raises(RuntimeError, match="stopped"):
-        ClaudeCodeAdapter().spawn(["hello"], {"Path": r"C:\base"}, tmp_path)
+    env = ClaudeCodeAdapter()._with_wsl_node_shim({"Path": r"C:\base"}, tmp_path)
 
     shim = tmp_path / ".perfxpert" / "bin" / "node"
     assert shim.is_file()
     assert node_wsl in shim.read_text()
-    assert str(shim.parent) in called["env"]["Path"]
-    assert "PATH" not in called["env"]
-    assert called["argv"] == ["claude", "hello"]
+    assert str(shim.parent) in env["Path"]
+    assert "PATH" not in env
 
 
 # ---------------------------------------------------------------------------

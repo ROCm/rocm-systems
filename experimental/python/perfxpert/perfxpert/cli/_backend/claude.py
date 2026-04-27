@@ -126,7 +126,7 @@ def _is_windowsapps_path(path: str | os.PathLike[str] | None) -> bool:
 
 def _path_env_key(env: dict[str, str]) -> str:
     """Return the PATH key already used by this environment."""
-    if os.name == "nt":
+    if _is_windows_platform():
         for key in ("Path", "PATH", "path"):
             if key in env:
                 return key
@@ -599,7 +599,7 @@ class ClaudeCodeAdapter:
         """Make `node` visible to WSL bash hooks launched by Claude on Windows."""
         path_key = _path_env_key(env)
         path = env.get(path_key, "")
-        if os.name != "nt" or not path or not shutil.which("bash"):
+        if not _is_windows_platform() or not path or not shutil.which("bash"):
             return env
 
         try:

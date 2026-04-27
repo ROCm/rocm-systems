@@ -3,42 +3,37 @@
 Requires:
 - perfxpert-code installed (entry point)
 - perfxpert-mcp installed (entry point)
-- bundled opencode binary OR PERFXPERT_OPENCODE_PATH set
+- managed bundled opencode binary
 - Any LLM provider configured, OR --no-llm / air-gap mode
 
-Skips gracefully if the opencode binary isn't available.
+Skips launcher smoke gracefully if the managed opencode binary isn't available.
 """
 
 import os
 import shutil
 import subprocess
 import sys
-from pathlib import Path
 
 import pytest
 
 
 @pytest.fixture
 def opencode_available():
-    # Check bundled OR PATH
-    if os.environ.get("PERFXPERT_OPENCODE_PATH"):
-        if Path(os.environ["PERFXPERT_OPENCODE_PATH"]).is_file():
-            return True
-    if shutil.which("opencode"):
-        return True
+    # The default perfxpert-code path intentionally uses only the managed
+    # bundled binary. User-owned upstream binaries are limited to the explicit
+    # `perfxpert-code opencode ...` escape hatch.
     try:
-        from importlib import resources
-        with resources.as_file(resources.files("perfxpert") / "_bundled" / "opencode") as p:
-            if p.is_file():
-                return True
-    except Exception:
-        pass
-    return False
+        from perfxpert.cli.opencode_launcher import resolve_opencode_binary
+
+        resolve_opencode_binary()
+    except FileNotFoundError:
+        return False
+    return shutil.which("perfxpert-code") is not None
 
 
 def test_perfxpert_code_launches_if_opencode_available(opencode_available):
     if not opencode_available:
-        pytest.skip("opencode binary not available on this system")
+        pytest.skip("managed opencode/perfxpert-code not available on this system")
 
     # Smoke: perfxpert-code must print our AMD banner to stderr BEFORE handing
     # off to opencode's interactive TUI. opencode is an alternate-screen
@@ -58,9 +53,12 @@ def test_perfxpert_code_launches_if_opencode_available(opencode_available):
         import time as _t
         _t.sleep(1.5)
     finally:
-        try:
-            os.killpg(proc.pid, signal.SIGKILL)
-        except (ProcessLookupError, PermissionError):
+        if hasattr(os, "killpg"):
+            try:
+                os.killpg(proc.pid, signal.SIGKILL)
+            except (ProcessLookupError, PermissionError):
+                proc.kill()
+        else:
             proc.kill()
         try:
             _, stderr = proc.communicate(timeout=5)
@@ -70,52 +68,30 @@ def test_perfxpert_code_launches_if_opencode_available(opencode_available):
     assert b"AMD ROCm PerfXpert" in stderr
 
 
-def test_mcp_server_accepts_a_call_from_shell(opencode_available):
-    """Verify perfxpert-mcp at least starts and can receive an initialization message."""
-    import json
-    import queue
-    import threading
+def test_mcp_server_accepts_a_call_from_shell():
+    """Verify perfxpert-mcp starts and responds through the MCP stdio transport."""
+    import anyio
+    from datetime import timedelta
+    from mcp import ClientSession, StdioServerParameters
+    from mcp.client.stdio import stdio_client
 
-    # Start perfxpert-mcp with stdio
-    p = subprocess.Popen(
-        [sys.executable, "-m", "mcp_server.server"],
-        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-    )
-    try:
-        # Send an MCP initialize request (simplified; real MCP uses JSON-RPC framing)
-        init = json.dumps({
-            "jsonrpc": "2.0", "id": 1, "method": "initialize",
-            "params": {
-                "protocolVersion": "2024-11-05",
-                "capabilities": {},
-                "clientInfo": {"name": "perfxpert-e2e", "version": "1.0"},
-            },
-        }) + "\n"
-        p.stdin.write(init.encode("utf-8"))
-        p.stdin.flush()
-
-        responses: queue.Queue[bytes] = queue.Queue()
-        reader = threading.Thread(
-            target=lambda: responses.put(p.stdout.readline()),
-            daemon=True,
+    async def _probe() -> None:
+        server = StdioServerParameters(
+            command=sys.executable,
+            args=["-m", "mcp_server.server"],
         )
-        reader.start()
-        try:
-            response_bytes = responses.get(timeout=5)
-        except queue.Empty:
-            pytest.fail("perfxpert-mcp did not respond to initialize within 5s")
-        response_line = response_bytes.decode("utf-8").strip()
-        assert response_line
-        response = json.loads(response_line)
-        assert "result" in response or "error" in response
-    finally:
-        if p.poll() is None:
-            p.terminate()
-            try:
-                p.wait(timeout=2)
-            except subprocess.TimeoutExpired:
-                p.kill()
-                p.wait(timeout=2)
+        async with stdio_client(server) as (read_stream, write_stream):
+            async with ClientSession(
+                read_stream,
+                write_stream,
+                read_timeout_seconds=timedelta(seconds=10),
+            ) as session:
+                init = await session.initialize()
+                assert init.serverInfo.name == "perfxpert"
+                tools = await session.list_tools()
+                assert tools.tools
+
+    anyio.run(_probe)
 
 
 # NOTE: The test_end_to_end_interactive_session was a flaky pexpect-based TUI test.
