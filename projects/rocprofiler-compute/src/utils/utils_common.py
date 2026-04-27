@@ -37,26 +37,6 @@ from vendored import yaml
 # Global constants
 METRIC_ID_RE = re.compile(pattern=r"^\d{1,2}(?:\.\d{1,2}){0,2}$")
 
-SUPPORTED_DENOM: dict[str, str] = {
-    "per_wave": "SQ_WAVES",
-    "per_cycle": "$GRBM_GUI_ACTIVE_PER_XCD",
-    "per_second": "((End_Timestamp - Start_Timestamp) / 1000000000)",
-    "per_kernel": "1",
-}
-
-# Build-in defined in mongodb variables:
-BUILD_IN_VARS: dict[str, str] = {
-    "GRBM_GUI_ACTIVE_PER_XCD": "(GRBM_GUI_ACTIVE / $num_xcd)",
-    "GRBM_COUNT_PER_XCD": "(GRBM_COUNT / $num_xcd)",
-    "GRBM_SPI_BUSY_PER_XCD": "(GRBM_SPI_BUSY / $num_xcd)",
-    "numActiveCUs": "TO_INT(MIN(ROUND(SUM(4 * SQ_BUSY_CU_CYCLES) / \
-        SUM($GRBM_GUI_ACTIVE_PER_XCD), 0) / $max_waves_per_cu * 8 + \
-        MIN(MOD(ROUND(SUM(4 * SQ_BUSY_CU_CYCLES) / \
-        SUM($GRBM_GUI_ACTIVE_PER_XCD), 0), $max_waves_per_cu), 8), $cu_per_gpu))",
-    "kernelBusyCycles": "ROUND(AVG((((End_Timestamp - Start_Timestamp) / \
-        1000) * $max_sclk)), 0)",
-    "hbmBandwidth": "($max_mclk / 1000 * 32 * $num_hbm_channels)",
-}
 
 # Supported expression field names for metric tables
 SUPPORTED_FIELD: list[str] = [
