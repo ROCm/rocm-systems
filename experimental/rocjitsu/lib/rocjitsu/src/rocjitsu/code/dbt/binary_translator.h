@@ -25,6 +25,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -126,7 +127,8 @@ private:
   /// @param text       The translated text buffer.
   /// @param dst_opcode Target opcode from the legalization table.
   void handle_encoding(const Instruction &inst, uint64_t offset, std::vector<uint8_t> &text,
-                       uint16_t dst_opcode, CodeObjectPatcher &patcher);
+                       uint16_t dst_opcode, CodeObjectPatcher &patcher,
+                       std::span<const uint8_t> orig_text);
 
   rj_code_arch_t guest_arch_;                               ///< Source ISA.
   rj_code_arch_t host_arch_;                                ///< Target ISA.

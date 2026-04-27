@@ -69,9 +69,17 @@ public:
   [[nodiscard]] std::optional<uint16_t> find_free_run(uint64_t offset, uint16_t count,
                                                       uint16_t search_start = 0) const;
 
+  /// @brief Find an even-aligned pair of consecutive free SGPRs.
+  /// Uses conservative analysis: allocates above the highest SGPR referenced.
+  [[nodiscard]] std::optional<uint16_t> find_free_sgpr_pair(uint16_t search_start = 0) const;
+
+  /// @brief Find a single free SGPR above all referenced SGPRs.
+  [[nodiscard]] std::optional<uint16_t> find_free_sgpr(uint16_t search_start = 0) const;
+
 private:
   std::unordered_map<uint64_t, VgprLiveSet> live_sets_;
   VgprLiveSet empty_set_{};
+  uint16_t max_sgpr_ = 0; ///< Highest SGPR index referenced in the block.
 };
 
 } // namespace rocjitsu

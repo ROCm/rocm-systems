@@ -94,27 +94,11 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
 
   for (const auto &block : blocks) {
     auto liveness = RegisterLiveness::compute(*block);
-    auto replacements = semantic_translator_->translate(*block);
-
-    for (const auto &repl : replacements)
-      apply_semantic(repl, translated_text, patcher);
 
     uint64_t offset = block->start_offset();
     for (auto it = block->instructions().begin(); it != block->instructions().end(); ++it) {
       const auto &inst = *it;
       const uint32_t inst_size = inst.size();
-
-      bool consumed = false;
-      for (const auto &repl : replacements) {
-        if (offset >= repl.start_offset && offset < repl.end_offset) {
-          consumed = true;
-          break;
-        }
-      }
-      if (consumed) {
-        offset += inst_size;
-        continue;
-      }
 
       const uint32_t *raw = inst.raw_encoding();
       if (!raw) {
@@ -129,23 +113,29 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
 
       const uint16_t dst_opcode = leg ? leg->target_opcode : inst.opcode();
 
-      if (leg && leg->action == Action::Expand) {
-        auto expansion = semantic_translator_->try_lower_expand(inst);
+      // Try semantic lowering for Expand and Lower actions.
+      // For Expand: must lower (NOP-fill if unhandled).
+      // For Lower: try lowering first, fall through to encoding if unhandled.
+      {
+        auto expansion = semantic_translator_->try_lower_expand(inst, offset, liveness);
         if (!expansion.empty()) {
           SemanticReplacement repl{offset, offset + inst_size, std::move(expansion)};
           apply_semantic(repl, translated_text, patcher);
-        } else {
-          result.warnings.push_back("EXPAND not yet implemented for " +
-                                    std::string(inst.mnemonic()));
-          const uint32_t nop = build_s_nop(0, host_arch_);
-          for (uint32_t i = 0; i < inst_size; i += 4)
-            std::memcpy(translated_text.data() + offset + i, &nop, 4);
+          offset += inst_size;
+          continue;
         }
+      }
+
+      if (leg && leg->action == Action::Expand) {
+        result.warnings.push_back("EXPAND not yet implemented for " + std::string(inst.mnemonic()));
+        const uint32_t nop = build_s_nop(0, host_arch_);
+        for (uint32_t i = 0; i < inst_size; i += 4)
+          std::memcpy(translated_text.data() + offset + i, &nop, 4);
         offset += inst_size;
         continue;
       }
 
-      handle_encoding(inst, offset, translated_text, dst_opcode, patcher);
+      handle_encoding(inst, offset, translated_text, dst_opcode, patcher, text);
       offset += inst_size;
     }
   }
@@ -227,7 +217,8 @@ void BinaryTranslator::apply_semantic(const SemanticReplacement &repl, std::vect
 
 void BinaryTranslator::handle_encoding(const Instruction &inst, uint64_t offset,
                                        std::vector<uint8_t> &text, uint16_t dst_opcode,
-                                       CodeObjectPatcher &patcher) {
+                                       CodeObjectPatcher &patcher,
+                                       std::span<const uint8_t> orig_text) {
   const uint32_t *raw = inst.raw_encoding();
   assert(raw && "handle_encoding called without raw encoding");
   if (!encoding_translate_) {
@@ -246,8 +237,26 @@ void BinaryTranslator::handle_encoding(const Instruction &inst, uint64_t offset,
     return;
   }
 
+  // Append any trailing literal constant words that the encoding translator
+  // did not consume. Single-word formats (SOP1, SOP2, VOP1, VOP2, etc.) can
+  // have a 32-bit literal appended when a source operand is 0xFF. The
+  // encoding translator only translates the opcode word; the literal passes
+  // through unchanged. Read from the original text since raw_encoding()
+  // only covers the struct portion, not the trailing literal.
+  const uint32_t translated_bytes = tr.word_count * 4u;
+  const uint32_t orig_bytes = inst.size();
+  if (translated_bytes < orig_bytes) {
+    const uint32_t literal_words = (orig_bytes - translated_bytes) / 4;
+    for (uint32_t i = 0; i < literal_words && tr.word_count < 3; ++i) {
+      uint32_t lit_offset = offset + translated_bytes + i * 4;
+      uint32_t lit_word;
+      std::memcpy(&lit_word, orig_text.data() + lit_offset, 4);
+      tr.words[tr.word_count++] = lit_word;
+    }
+  }
+
   const uint32_t target_size = tr.word_count * 4u;
-  if (target_size <= static_cast<uint32_t>(inst.size())) {
+  if (target_size <= orig_bytes) {
     std::memcpy(text.data() + offset, tr.words, target_size);
   } else {
     SemanticReplacement repl{offset, offset + inst.size(), {tr.words, tr.words + tr.word_count}};

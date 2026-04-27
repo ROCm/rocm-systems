@@ -106,7 +106,9 @@ The semantic translator handles instructions and ABI conventions whose behavior 
 - **Waitcnt splitting:** GFX9 monolithic `s_waitcnt` → GFX12 split `s_wait_loadcnt` / `s_wait_storecnt_dscnt` / `s_wait_kmcnt` / `s_wait_expcnt`. Decode and encode functions live in `semantic_translator.cpp`.
 - **Workgroup ID ABI:** CDNA4 delivers workgroup IDs via SGPRs; RDNA4 delivers them via TTMP registers (TTMP9 for X, TTMP7 for Y/Z). The semantic translator rewrites operand fields in affected instructions.
 - **Instruction lowering:** One-to-many expansion for instructions that don't exist on the target ISA. Example: `v_lshl_add_u64` → `v_add_co_u32` + `s_wait_alu` + `v_add_co_ci_u32` carry chain.
-- **Future:** MFMA → WMMA decomposition, AccVGPR elimination, transpose load replacement.
+- **MFMA → WMMA translation:** `v_mfma_f32_16x16x16_f16` → `v_wmma_f32_16x16x16_f16` with ds_bpermute lane remap (XOR-48 at lanes 16-47). Address VGPR selected via RegisterLiveness to avoid clobbering live state.
+- **AccVGPR elimination:** `v_accvgpr_read/write` → `v_mov_b32` or NOP on the unified VGPR file.
+- **Future:** Additional MFMA shapes, transpose load replacement.
 
 ### Rule-based translations
 
@@ -175,4 +177,7 @@ Across all ISA pairs, the encoding translator handles 60–99% of instructions d
 ## Testing
 
 - **Simulator tests (292):** Encoding correctness, legalization tables, coherency remapping, waitcnt translation, end-to-end translation with disassembly validation.
-- **Hardware test (1):** Translate CDNA4 `vector_add` → RDNA4, dispatch on real GFX1201 GPU via HSA, verify 1024 elements against CPU golden reference. Run with `build/tests/hsa_translate_test`.
+- **Hardware tests (2):**
+  - `vector_add`: Translate CDNA4 → RDNA4, dispatch on GFX1201 via HSA, verify 1024 elements with random float inputs against CPU golden.
+  - `matmul_mfma_16x16`: Translate MFMA 16×16×16 FP16 → WMMA with ds_bpermute lane remap, 10 fuzzing iterations with random FP16 inputs, verify 256 elements per iteration against CPU golden.
+  - Run with `build/tests/hsa_translate_test`.

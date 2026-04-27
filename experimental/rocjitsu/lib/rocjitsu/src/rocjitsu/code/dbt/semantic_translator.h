@@ -29,6 +29,8 @@
 #include <span>
 #include <vector>
 
+#include "rocjitsu/analysis/register_liveness.h"
+#include "rocjitsu/code/dbt/translation_rule.h"
 #include "rocjitsu/code/patch/code_object_patcher.h"
 #include "rocjitsu/code/rj_code.h"
 
@@ -61,65 +63,34 @@ struct SemanticReplacement {
   [[nodiscard]] bool matched() const { return !target_words.empty(); }
 };
 
-/// @brief A single semantic translation rule.
+/// @brief Semantic translator for cross-ISA behavioral differences.
 ///
-/// @details Each rule identifies anchor instructions via anchor_flags (tested
-/// against Instruction::flags()) and provides a translate function that
-/// attempts to match and produce the replacement. Returns a SemanticReplacement
-/// with matched()==true on success, or an empty replacement on failure.
-struct SemanticRule {
-  const char *name;      ///< Human-readable rule name for diagnostics.
-  uint64_t anchor_flags; ///< Required InstFlags bits on the anchor instruction.
-
-  /// @brief Attempt to translate an anchor instruction.
-  ///
-  /// @param anchor        The decoded guest instruction that triggered this rule.
-  /// @param anchor_offset Byte offset of the anchor within the .text section.
-  /// @param host_arch     Target ISA architecture.
-  /// @returns SemanticReplacement with matched()==true on success, empty on failure.
-  using TranslateFn = SemanticReplacement (*)(const Instruction &anchor, uint64_t anchor_offset,
-                                              rj_code_arch_t host_arch);
-  TranslateFn translate; ///< The translate function for this rule.
-};
-
-/// @brief Per-basic-block semantic translator.
-///
-/// @details Constructed once per BinaryTranslator with a (guest_arch, host_arch)
-/// pair. Selects the appropriate rule table for the pair. The translate() method
-/// scans a basic block's instructions, tests each against the rule table's
-/// anchor_flags, and calls the translate function for matching rules.
+/// @details All expansion rules (waitcnt, MFMA→WMMA, AccVGPR, etc.) are
+/// registered as TranslationRule entries with RuleAction::Expand. The
+/// try_lower_expand() method looks up rules by opcode via binary search.
 class SemanticTranslator {
 public:
-  /// @brief Construct a translator for the given (guest, host) ISA pair.
-  /// @param guest_arch  Source ISA architecture.
-  /// @param host_arch   Target ISA architecture.
   SemanticTranslator(rj_code_arch_t guest_arch, rj_code_arch_t host_arch);
 
-  /// @brief Scan a basic block for instructions requiring semantic translation.
-  ///
-  /// @param block  The decoded basic block to scan.
-  /// @returns A list of non-overlapping replacements, ordered by start_offset.
-  [[nodiscard]] std::vector<SemanticReplacement> translate(BasicBlock &block) const;
-
   /// @brief Rewrite workgroup_id SGPR references to TTMP registers.
-  /// On RDNA4, workgroup IDs are delivered via TTMP registers, not SGPRs.
-  /// This pass substitutes the SGPR operand in each matching instruction.
   [[nodiscard]] std::vector<SemanticReplacement>
   rewrite_workgroup_ids(BasicBlock &block,
                         std::span<const CodeObjectPatcher::WorkGroupIdInfo> wg_info,
                         std::span<const uint8_t> translated_text) const;
 
-  /// @brief Try to lower an instruction marked as Action::Expand.
-  /// @returns Replacement instruction words on success, empty vector if unhandled.
-  [[nodiscard]] std::vector<uint32_t> try_lower_expand(const Instruction &inst) const;
+  /// @brief Try to expand/lower an instruction via the expand rules table.
+  /// @param inst      The decoded instruction.
+  /// @param offset    Byte offset of the instruction in .text.
+  /// @param liveness  Per-instruction VGPR liveness data.
+  /// @returns Replacement instruction words on success, empty vector if no rule matches.
+  [[nodiscard]] std::vector<uint32_t> try_lower_expand(const Instruction &inst, uint64_t offset,
+                                                       const RegisterLiveness &liveness) const;
 
-  /// @brief Whether any semantic rules exist for this (guest, host) pair.
-  [[nodiscard]] bool has_rules() const { return !rules_.empty(); }
+  [[nodiscard]] bool has_rules() const { return !expand_rules_.empty(); }
 
 private:
-  std::span<const SemanticRule> rules_;        ///< Rule table for this (guest, host) pair.
-  [[maybe_unused]] rj_code_arch_t guest_arch_; ///< Source ISA.
-  rj_code_arch_t host_arch_;                   ///< Target ISA.
+  std::span<const TranslationRule> expand_rules_; ///< Sorted by src_opcode.
+  rj_code_arch_t host_arch_;
 };
 
 } // namespace rocjitsu
