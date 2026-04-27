@@ -5,10 +5,10 @@
 
 namespace rocprofiler_compute_tool
 {
-class input_parameters_t
+class env_parameters_t
 {
 public:
-    virtual ~input_parameters_t()                         = default;
+    virtual ~env_parameters_t()                         = default;
     virtual const char* get_output_path()                 = 0;
     virtual const char* get_requested_counters()          = 0;
     virtual const char* get_iteration_multiplexing_mode() = 0;
@@ -17,7 +17,7 @@ public:
     virtual const char* get_pc_sampling_mode() const      = 0;
 };
 
-class env_input_parameters_t : public input_parameters_t
+class env_parameters_impl_t : public env_parameters_t
 {
 public:
     const char* get_output_path() override;
@@ -25,6 +25,6 @@ public:
     const char* get_iteration_multiplexing_mode() override;
     const char* get_kernel_filter_include_regex() override;
     const char* get_kernel_filter_range() override;
-    const char* get_pc_sampling_mode() const;
+    const char* get_pc_sampling_mode() const override;
 };
 }  // namespace rocprofiler_compute_tool

@@ -40,7 +40,7 @@ void code_object_tracing_callback(rocprofiler_callback_tracing_record_t record,
 
 namespace rocprofiler_compute_tool::test_knobs
 {
-void set_input_parameters(const std::shared_ptr<input_parameters_t>& parameters);
+void set_input_parameters(const std::shared_ptr<env_parameters_t>& parameters);
 void set_sdk_wrapper(const std::shared_ptr<sdk_wrapper_t>& sdk_wrapper);
 void set_csv_writer(const std::shared_ptr<counters_writer_t>& csv_writer);
 void reset_cfg();

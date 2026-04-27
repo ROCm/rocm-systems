@@ -10,31 +10,31 @@ using namespace rocprofiler_compute_tool;
 
 TEST_F(test_rocprofiler_compute_tool_t, ProvidedEmptyOutputPath_Throws)
 {
-    m_input_parameters->set_output_path("");
+    m_env_parameters->set_output_path("");
     EXPECT_THROW(rocprofiler_configure(1, "", 1, &m_client_id), std::runtime_error);
 }
 
 TEST_F(test_rocprofiler_compute_tool_t, ProvidedNoRequestedCounters_Throws)
 {
-    m_input_parameters->set_requested_counters("");
+    m_env_parameters->set_requested_counters("");
     EXPECT_NO_THROW(rocprofiler_configure(1, "", 1, &m_client_id));
 }
 
 TEST_F(test_rocprofiler_compute_tool_t, ProvidedEmptyInterationMultiplexingMode_DoesntThrow)
 {
-    m_input_parameters->set_iteration_multiplexing_mode("");
+    m_env_parameters->set_iteration_multiplexing_mode("");
     EXPECT_NO_THROW(rocprofiler_configure(1, "", 1, &m_client_id));
 }
 
 TEST_F(test_rocprofiler_compute_tool_t, ProvidedEmptyKernelFilterIncludeRegex_DoesntThrow)
 {
-    m_input_parameters->set_kernel_filter_include_regex("");
+    m_env_parameters->set_kernel_filter_include_regex("");
     EXPECT_NO_THROW(rocprofiler_configure(1, "", 1, &m_client_id));
 }
 
 TEST_F(test_rocprofiler_compute_tool_t, ProvidedEmptyKernelFilterRange_DoesntThrow)
 {
-    m_input_parameters->set_kernel_filter_range("");
+    m_env_parameters->set_kernel_filter_range("");
     EXPECT_NO_THROW(rocprofiler_configure(1, "", 1, &m_client_id));
 }
 
@@ -42,7 +42,7 @@ TEST_F(test_rocprofiler_compute_tool_t, ProvidedNonEmptyOutputPath_ReturnsItExte
 {
     const auto cfg       = rocprofiler_configure(1, "", 1, &m_client_id);
     const auto tool_data = get_tool_data(cfg);
-    EXPECT_TRUE(tool_data->output_filename.find(m_input_parameters->get_output_path()) !=
+    EXPECT_TRUE(tool_data->output_filename.find(m_env_parameters->get_output_path()) !=
                 std::string::npos);
     EXPECT_TRUE(tool_data->output_filename.find(
                     std::to_string(getpid()) + "_native_counter_collection.csv") != std::string::npos);
@@ -52,12 +52,12 @@ TEST_F(test_rocprofiler_compute_tool_t, ProvidedRequestedCounters_ReturnsIt)
 {
     const auto cfg       = rocprofiler_configure(1, "", 1, &m_client_id);
     const auto tool_data = get_tool_data(cfg);
-    EXPECT_EQ(tool_data->requested_counters, m_input_parameters->get_requested_counters());
+    EXPECT_EQ(tool_data->requested_counters, m_env_parameters->get_requested_counters());
 }
 
 TEST_F(test_rocprofiler_compute_tool_t, ProvidedIncorrectIterationMultiplexingMode_ReturnsDisabled)
 {
-    m_input_parameters->set_iteration_multiplexing_mode("incorrect");
+    m_env_parameters->set_iteration_multiplexing_mode("incorrect");
     const auto cfg       = rocprofiler_configure(1, "", 1, &m_client_id);
     const auto tool_data = get_tool_data(cfg);
     EXPECT_EQ(tool_data->iteration_multiplexing_mode, iteration_multiplexing_mode_t::DISABLED);
@@ -65,7 +65,7 @@ TEST_F(test_rocprofiler_compute_tool_t, ProvidedIncorrectIterationMultiplexingMo
 
 TEST_F(test_rocprofiler_compute_tool_t, ProvidedKernelIterationMultiplexingMode_ReturnsIt)
 {
-    m_input_parameters->set_iteration_multiplexing_mode("kernel");
+    m_env_parameters->set_iteration_multiplexing_mode("kernel");
     const auto cfg       = rocprofiler_configure(1, "", 1, &m_client_id);
     const auto tool_data = get_tool_data(cfg);
     EXPECT_EQ(tool_data->iteration_multiplexing_mode, iteration_multiplexing_mode_t::KERNEL);
@@ -73,7 +73,7 @@ TEST_F(test_rocprofiler_compute_tool_t, ProvidedKernelIterationMultiplexingMode_
 
 TEST_F(test_rocprofiler_compute_tool_t, ProvidedKernelLauncParamsIterationMultiplexingMode_ReturnsIt)
 {
-    m_input_parameters->set_iteration_multiplexing_mode("kernel_launch_params");
+    m_env_parameters->set_iteration_multiplexing_mode("kernel_launch_params");
     const auto cfg       = rocprofiler_configure(1, "", 1, &m_client_id);
     const auto tool_data = get_tool_data(cfg);
     EXPECT_EQ(tool_data->iteration_multiplexing_mode, iteration_multiplexing_mode_t::LAUNCH);
@@ -84,12 +84,12 @@ TEST_F(test_rocprofiler_compute_tool_t, ProvidedKernelFilterIncludeRegex_Returns
     const auto cfg       = rocprofiler_configure(1, "", 1, &m_client_id);
     const auto tool_data = get_tool_data(cfg);
     EXPECT_EQ(tool_data->kernel_filter_include_regex,
-              m_input_parameters->get_kernel_filter_include_regex());
+              m_env_parameters->get_kernel_filter_include_regex());
 }
 
 TEST_F(test_rocprofiler_compute_tool_t, ProvidedIncorrectKernelFilterRange_ReturnsEmpty)
 {
-    m_input_parameters->set_kernel_filter_range("invalid");
+    m_env_parameters->set_kernel_filter_range("invalid");
     const auto cfg       = rocprofiler_configure(1, "", 1, &m_client_id);
     const auto tool_data = get_tool_data(cfg);
     EXPECT_TRUE(tool_data->kernel_filter_ranges.empty());
@@ -97,7 +97,7 @@ TEST_F(test_rocprofiler_compute_tool_t, ProvidedIncorrectKernelFilterRange_Retur
 
 TEST_F(test_rocprofiler_compute_tool_t, ProvidedSingleRangeWithSquareBrackets_ReturnsRangeWithoutBrackets)
 {
-    m_input_parameters->set_kernel_filter_range("[4]");
+    m_env_parameters->set_kernel_filter_range("[4]");
     const auto cfg       = rocprofiler_configure(1, "", 1, &m_client_id);
     const auto tool_data = get_tool_data(cfg);
     EXPECT_EQ(tool_data->kernel_filter_ranges.size(), 1);
@@ -107,7 +107,7 @@ TEST_F(test_rocprofiler_compute_tool_t, ProvidedSingleRangeWithSquareBrackets_Re
 
 TEST_F(test_rocprofiler_compute_tool_t, ProvidedSingleRangeWithoutSquareBrackets_ReturnsRange)
 {
-    m_input_parameters->set_kernel_filter_range("4");
+    m_env_parameters->set_kernel_filter_range("4");
     const auto cfg       = rocprofiler_configure(1, "", 1, &m_client_id);
     const auto tool_data = get_tool_data(cfg);
     EXPECT_EQ(tool_data->kernel_filter_ranges.size(), 1);
@@ -117,7 +117,7 @@ TEST_F(test_rocprofiler_compute_tool_t, ProvidedSingleRangeWithoutSquareBrackets
 
 TEST_F(test_rocprofiler_compute_tool_t, ProvidedMixOfRanges_ReturnsThem)
 {
-    m_input_parameters->set_kernel_filter_range("4, 10-11, 12-23, 5");
+    m_env_parameters->set_kernel_filter_range("4, 10-11, 12-23, 5");
     const auto cfg       = rocprofiler_configure(1, "", 1, &m_client_id);
     const auto tool_data = get_tool_data(cfg);
     EXPECT_EQ(tool_data->kernel_filter_ranges.size(), 4);
@@ -133,21 +133,21 @@ TEST_F(test_rocprofiler_compute_tool_t, ProvidedMixOfRanges_ReturnsThem)
 
 TEST_F(test_rocprofiler_compute_tool_t, DISABLED_ProvidedInvalidRangeWithEndSmallerStart_Throws)
 {
-    m_input_parameters->set_kernel_filter_range("10-5");
+    m_env_parameters->set_kernel_filter_range("10-5");
     EXPECT_THROW(rocprofiler_configure(1, "", 1, &m_client_id), std::runtime_error);
 }
 
 TEST_F(test_rocprofiler_compute_tool_t, DISABLED_ProvidedIncompleteRange_Throws)
 {
-    m_input_parameters->set_kernel_filter_range("-5");
+    m_env_parameters->set_kernel_filter_range("-5");
     EXPECT_THROW(rocprofiler_configure(1, "", 1, &m_client_id), std::runtime_error);
-    m_input_parameters->set_kernel_filter_range("5-");
+    m_env_parameters->set_kernel_filter_range("5-");
     EXPECT_THROW(rocprofiler_configure(1, "", 1, &m_client_id), std::runtime_error);
 }
 
 TEST_F(test_rocprofiler_compute_tool_t, DISABLED_ProvidedIntersectingRanges_Throws)
 {
-    m_input_parameters->set_kernel_filter_range("2-5, 3-6");
+    m_env_parameters->set_kernel_filter_range("2-5, 3-6");
     EXPECT_THROW(rocprofiler_configure(1, "", 1, &m_client_id), std::runtime_error);
 }
 
@@ -280,13 +280,13 @@ TEST_F(test_rocprofiler_compute_tool_t, OnCodeObjectTracingCallback_ForwardsToSd
 /// test_rocprofiler_compute_tool_t
 void test_rocprofiler_compute_tool_t::SetUp()
 {
-    m_input_parameters      = std::make_shared<mock_input_parameters_t>();
+    m_env_parameters      = std::make_shared<mock_env_parameters_t>();
     m_sdk_wrapper           = std::make_shared<mock_sdk_wrapper_t>();
     m_counters_writer       = std::make_shared<mock_counters_writer_t>();
     m_sdk_callbacks         = std::make_shared<mock_sdk_callbacks_t>();
     m_pc_sampling_collector = std::make_shared<mock_pc_sampling_collector_t>();
 
-    test_knobs::set_input_parameters(m_input_parameters);
+    test_knobs::set_input_parameters(m_env_parameters);
     test_knobs::set_sdk_wrapper(m_sdk_wrapper);
     test_knobs::set_csv_writer(m_counters_writer);
 }

@@ -20,7 +20,7 @@ protected:
     static rocprofiler_callback_tracing_record_t create_code_object_load_info_with_payload(rocprofiler_callback_tracing_code_object_load_data_t& payload);
 
     rocprofiler_client_id_t                       m_client_id{};
-    std::shared_ptr<mock_input_parameters_t>      m_input_parameters;
+    std::shared_ptr<mock_env_parameters_t>      m_env_parameters;
     std::shared_ptr<mock_sdk_wrapper_t>           m_sdk_wrapper;
     std::shared_ptr<mock_counters_writer_t>       m_counters_writer;
     std::shared_ptr<mock_sdk_callbacks_t>         m_sdk_callbacks;

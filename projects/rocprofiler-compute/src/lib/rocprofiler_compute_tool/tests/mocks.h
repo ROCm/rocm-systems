@@ -7,7 +7,7 @@
 #include "sdk_callbacks.h"
 #include "sdk_wrapper.h"
 
-class mock_input_parameters_t : public rocprofiler_compute_tool::input_parameters_t
+class mock_env_parameters_t : public rocprofiler_compute_tool::env_parameters_t
 {
 public:
     const char* get_output_path() override;

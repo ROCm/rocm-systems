@@ -16,12 +16,12 @@
 
 using namespace rocprofiler_compute_tool;
 
-static std::shared_ptr<input_parameters_t> g_input_parameters = std::make_shared<env_input_parameters_t>();
+static std::shared_ptr<env_parameters_t> g_input_parameters = std::make_shared<env_parameters_impl_t>();
 static std::shared_ptr<sdk_wrapper_t> g_sdk_wrapper = std::make_shared<sdk_wrapper_impl_t>();
 static std::shared_ptr<counters_writer_t> g_counters_writer = std::make_shared<csv_counters_writer_t>();
 static std::shared_ptr<rocprofiler_tool_configure_result_t> g_cfg;
 
-void test_knobs::set_input_parameters(const std::shared_ptr<input_parameters_t>& input_parameters)
+void test_knobs::set_input_parameters(const std::shared_ptr<env_parameters_t>& input_parameters)
 {
     g_input_parameters = input_parameters;
 }

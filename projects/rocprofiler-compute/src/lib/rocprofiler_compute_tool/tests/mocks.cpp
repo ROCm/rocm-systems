@@ -5,62 +5,62 @@
 #include "gsl_assert.h"
 using namespace rocprofiler_compute_tool;
 
-const char* mock_input_parameters_t::get_output_path()
+const char* mock_env_parameters_t::get_output_path()
 {
     return m_output_path.c_str();
 }
 
-const char* mock_input_parameters_t::get_requested_counters()
+const char* mock_env_parameters_t::get_requested_counters()
 {
     return m_requested_counters.c_str();
 }
 
-const char* mock_input_parameters_t::get_iteration_multiplexing_mode()
+const char* mock_env_parameters_t::get_iteration_multiplexing_mode()
 {
     return m_iteration_multiplexing_mode.c_str();
 }
 
-const char* mock_input_parameters_t::get_kernel_filter_include_regex()
+const char* mock_env_parameters_t::get_kernel_filter_include_regex()
 {
     return m_kernel_filter_include_regex.c_str();
 }
 
-const char* mock_input_parameters_t::get_kernel_filter_range()
+const char* mock_env_parameters_t::get_kernel_filter_range()
 {
     return m_kernel_filter_range.c_str();
 }
 
-const char* mock_input_parameters_t::get_pc_sampling_mode() const
+const char* mock_env_parameters_t::get_pc_sampling_mode() const
 {
     return m_pc_sampling_mode.c_str();
 }
 
-void mock_input_parameters_t::set_output_path(const std::string& output_path)
+void mock_env_parameters_t::set_output_path(const std::string& output_path)
 {
     m_output_path = output_path;
 }
 
-void mock_input_parameters_t::set_requested_counters(const std::string& counters)
+void mock_env_parameters_t::set_requested_counters(const std::string& counters)
 {
     m_requested_counters = counters;
 }
 
-void mock_input_parameters_t::set_iteration_multiplexing_mode(const std::string& mode)
+void mock_env_parameters_t::set_iteration_multiplexing_mode(const std::string& mode)
 {
     m_iteration_multiplexing_mode = mode;
 }
 
-void mock_input_parameters_t::set_kernel_filter_include_regex(const std::string& regex)
+void mock_env_parameters_t::set_kernel_filter_include_regex(const std::string& regex)
 {
     m_kernel_filter_include_regex = regex;
 }
 
-void mock_input_parameters_t::set_kernel_filter_range(const std::string& range)
+void mock_env_parameters_t::set_kernel_filter_range(const std::string& range)
 {
     m_kernel_filter_range = range;
 }
 
-void mock_input_parameters_t::set_pc_sampling_mode(const std::string& mode)
+void mock_env_parameters_t::set_pc_sampling_mode(const std::string& mode)
 {
     m_pc_sampling_mode = mode;
 }
