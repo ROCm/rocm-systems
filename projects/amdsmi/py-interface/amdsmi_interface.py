@@ -1390,8 +1390,7 @@ def amdsmi_get_cpu_core_ccd_power(processor_handle: processor_handle_t) -> int:
 
     _check_res(amdsmi_wrapper.amdsmi_get_cpu_core_ccd_power(processor_handle, ctypes.byref(power)))
 
-    # In Watt
-    return power.value
+    return power.value  # in mW
 
 
 def amdsmi_get_cpu_socket_energy(processor_handle: processor_handle_t) -> str:
@@ -1501,27 +1500,27 @@ def amdsmi_get_cpu_core_current_freq_limit(processor_handle: processor_handle_t)
     return f"{freq.value} MHz"
 
 
-def amdsmi_get_cpu_socket_power(processor_handle: processor_handle_t) -> str:
+def amdsmi_get_cpu_socket_power(processor_handle: processor_handle_t) -> int:
     if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
         raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
 
     ppower = ctypes.c_uint32()
     _check_res(amdsmi_wrapper.amdsmi_get_cpu_socket_power(processor_handle, ctypes.byref(ppower)))
 
-    return f"{ppower.value} Watts"
+    return ppower.value  # in mW
 
 
-def amdsmi_get_cpu_socket_power_cap(processor_handle: processor_handle_t) -> str:
+def amdsmi_get_cpu_socket_power_cap(processor_handle: processor_handle_t) -> int:
     if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
         raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
 
     pcap = ctypes.c_uint32()
     _check_res(amdsmi_wrapper.amdsmi_get_cpu_socket_power_cap(processor_handle, ctypes.byref(pcap)))
 
-    return f"{pcap.value} Watts"
+    return pcap.value  # in mW
 
 
-def amdsmi_get_cpu_socket_power_cap_max(processor_handle: processor_handle_t) -> str:
+def amdsmi_get_cpu_socket_power_cap_max(processor_handle: processor_handle_t) -> int:
     if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
         raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
 
@@ -1530,7 +1529,7 @@ def amdsmi_get_cpu_socket_power_cap_max(processor_handle: processor_handle_t) ->
         amdsmi_wrapper.amdsmi_get_cpu_socket_power_cap_max(processor_handle, ctypes.byref(pmax))
     )
 
-    return f"{pmax.value} Watts"
+    return pmax.value  # in mW
 
 
 def amdsmi_get_cpu_pwr_svi_telemetry_all_rails(processor_handle: processor_handle_t) -> str:
@@ -2358,15 +2357,14 @@ def amdsmi_set_cpu_sdps_limit(processor_handle: processor_handle_t, sdps_limit: 
     _check_res(amdsmi_wrapper.amdsmi_set_cpu_sdps_limit(processor_handle, sdps_limit_32))
 
 
-def amdsmi_get_cpu_sdps_limit(processor_handle: processor_handle_t) -> str:
+def amdsmi_get_cpu_sdps_limit(processor_handle: processor_handle_t) -> int:
     if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
         raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
 
     sdps_limit = ctypes.c_uint32()
     _check_res(amdsmi_wrapper.amdsmi_get_cpu_sdps_limit(processor_handle, ctypes.byref(sdps_limit)))
 
-    # In Watt
-    return f"{sdps_limit.value} Watts"
+    return sdps_limit.value  # in mW
 
 
 # Get 2's complement of 32 bit unsigned integer
