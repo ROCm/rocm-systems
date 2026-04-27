@@ -34,8 +34,6 @@ void initCollNet();
 
 ncclResult_t ncclTopoGetSystem(const char* xmlTopoFile, struct ncclTopoSystem** system);
 
-ncclResult_t ncclTopoGetSystemFromXml(struct ncclXml* xml, struct ncclTopoSystem** topoSystem);
-
 ncclResult_t fillInfo(struct ncclComm* comm, struct ncclPeerInfo* info, uint64_t commHash);
 
 ncclResult_t initTransportsRank_1(struct ncclComm* comm, struct allGatherInfo *allGather3Data,
