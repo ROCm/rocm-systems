@@ -4,10 +4,10 @@
 #include <memory>
 #include <vector>
 
-#include "d3dkmt_types.h"
-#include "gpu_info.h"
-#include "status.h"
-#include "thunk_proxy/thunk_proxy.h"
+#include "shared/include/d3dkmt_types.h"
+#include "shared/include/gpu_info.h"
+#include "shared/include/status.h"
+#include "shared/include/thunk_proxy/thunk_proxy.h"
 
 namespace wsl {
 namespace thunk {

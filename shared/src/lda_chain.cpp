@@ -40,11 +40,11 @@
 //
 ////////////////////////////////////////////////////////////////////////////////
 
-#include "device.h"
-#include "thunks.h"
-#include "lda_chain.h"
-#include "thunk_proxy/thunk_proxy.h"
-#include "constants.h"
+#include "shared/include/device.h"
+#include "shared/include/thunks.h"
+#include "shared/include/lda_chain.h"
+#include "shared/include/thunk_proxy/thunk_proxy.h"
+#include "shared/include/constants.h"
 #include <algorithm>
 #include <memory>
 

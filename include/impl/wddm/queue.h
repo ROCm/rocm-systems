@@ -47,7 +47,7 @@
 #include <iostream>
 #include <queue>
 #include <utility>
-#include "d3dkmt_types.h"
+#include "shared/include/d3dkmt_types.h"
 #include "impl/wddm/device.h"
 #include "impl/wddm/gpu_memory.h"
 #include "impl/hsa/hsa_ext_amd.h"

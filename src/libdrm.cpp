@@ -41,7 +41,7 @@
 ////////////////////////////////////////////////////////////////////////////////
 #include <cstdint>
 
-#include "d3dkmt_types.h"
+#include "shared/include/d3dkmt_types.h"
 #include "impl/wddm/device.h"
 
 HSAKMT_STATUS HSAKMTAPI hsaKmtGetAMDGPUDeviceHandle(

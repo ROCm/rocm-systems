@@ -49,11 +49,11 @@
 #include <linux/mman.h>
 #include <fcntl.h>
 #include <unistd.h>
-#include "status.h"
-#include "d3dkmt_types.h"
+#include "shared/include/status.h"
+#include "shared/include/d3dkmt_types.h"
 #include "impl/wddm/device.h"
 #include "impl/wddm/queue.h"
-#include "utils.h"
+#include "shared/include/utils.h"
 
 namespace wsl {
 namespace thunk {

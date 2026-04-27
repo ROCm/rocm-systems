@@ -2,9 +2,9 @@
 #define SHARED_THUNK_PROXY_H
 
 #include <vector>
-#include "d3dkmt_types.h"
-#include "gpu_info.h"
-#include "status.h"
+#include "shared/include/d3dkmt_types.h"
+#include "shared/include/gpu_info.h"
+#include "shared/include/status.h"
 
 namespace thunk_proxy {
 

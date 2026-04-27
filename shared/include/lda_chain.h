@@ -43,11 +43,11 @@
 #ifndef _WSL_THUNK_INC_LDA_CHAIN_H_
 #define _WSL_THUNK_INC_LDA_CHAIN_H_
 
-#include "status.h"
-#include "constants.h"
-#include "utils.h"
-#include "d3dkmt_types.h"
-#include "thunk_proxy/thunk_proxy.h"
+#include "shared/include/status.h"
+#include "shared/include/constants.h"
+#include "shared/include/utils.h"
+#include "shared/include/d3dkmt_types.h"
+#include "shared/include/thunk_proxy/thunk_proxy.h"
 #include <memory>
 #include <vector>
 

@@ -43,7 +43,7 @@
 #ifndef _WSL_THUNK_INC_CONSTANTS_H_
 #define _WSL_THUNK_INC_CONSTANTS_H_
 
-#include "d3dkmt_types.h"
+#include "shared/include/d3dkmt_types.h"
 
 namespace wsl {
 namespace thunk {
