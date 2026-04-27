@@ -27,11 +27,10 @@
 
 import re
 import sys
+from importlib import metadata
 from pathlib import Path
 
 try:
-    from importlib import metadata
-
     from rocprof_compute_base import RocProfCompute
     from utils.logger import console_error
 except ImportError as e:
@@ -46,15 +45,18 @@ except ImportError as e:
         additional_path = current_path / "../libexec/rocprofiler-compute"
         sys.path.append(str(additional_path.resolve()))
 
-        from importlib import metadata
+        from utils.utils import console_error
 
         from rocprof_compute_base import RocProfCompute
-        from utils.utils import console_error
     except ImportError:
         pass
 
 
-def check_version(local_ver, desired_ver, operator) -> bool:
+def check_version(
+    local_version: str,
+    desired_version: str,
+    comparison_operator: str | None,
+) -> bool:
     """Check package version strings with simple operators used in companion
     requirements.txt file"""
     ops = {
@@ -64,7 +66,10 @@ def check_version(local_ver, desired_ver, operator) -> bool:
         ">": lambda loc, des: loc > des,
         "<": lambda loc, des: loc < des,
     }
-    return ops.get(operator, lambda loc, des: True)(local_ver, desired_ver)
+    return ops.get(comparison_operator, lambda loc, des: True)(
+        local_version,
+        desired_version,
+    )
 
 
 def verify_deps() -> None:
@@ -72,14 +77,6 @@ def verify_deps() -> None:
     to load them within current execution environment.
     Used in top-level rocprofiler-compute to provide error messages if necessary
     dependencies are not available."""
-
-    # Check which version of python is being used
-    if sys.version_info < (3, 8):
-        print(
-            f"[ERROR] Python 3.8 or higher is required to run rocprofiler-compute. "
-            f"The current version is {sys.version_info[0]}.{sys.version_info[1]}."
-        )
-        sys.exit(1)
 
     bindir = str(Path(__file__).resolve().parent)
     deps_locations = ["requirements.txt", "../requirements.txt"]

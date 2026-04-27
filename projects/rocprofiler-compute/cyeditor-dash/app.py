@@ -1,10 +1,11 @@
-import dash
-from dash import dcc, html, Input, Output, State, callback_context, ALL, MATCH
-import dash_cytoscape as cyto
+import base64
 import json
 import uuid
-import base64
 from datetime import datetime
+
+import dash
+import dash_cytoscape as cyto
+from dash import ALL, Input, Output, State, callback_context, dcc, html
 
 # Load extra layouts
 cyto.load_extra_layouts()
@@ -516,10 +517,19 @@ def update_elements(
             node_types[1],
         )
         new_id = f"node_{uuid.uuid4().hex[:8]}"
+        existing_node_count = len(
+            [
+                element
+                for element in current_elements
+                if "source" not in element.get("data", {})
+            ]
+        )
         new_node = {
             "data": {
                 "id": new_id,
-                "label": f"{node_type_info['label']} {len([e for e in current_elements if 'source' not in e.get('data', {})])}",
+                "label": (
+                    f"{node_type_info['label']} {existing_node_count}"
+                ),
                 "color": node_type_info["color"],
                 "size": 70,
                 "type": selected_node_type,
@@ -625,7 +635,11 @@ def display_selected_info(selected_nodes, selected_edges):
         for node in selected_nodes:
             info.append(
                 html.P(
-                    f"ID: {node['id']}, Label: {node.get('label', 'No label')}, Type: {node.get('type', 'unknown')}"
+                    (
+                        f"ID: {node['id']}, "
+                        f"Label: {node.get('label', 'No label')}, "
+                        f"Type: {node.get('type', 'unknown')}"
+                    )
                 )
             )
 
@@ -783,7 +797,7 @@ app.index_string = """
                 padding: 0;
                 background-color: #f8f9fa;
             }
-            
+
             .app-container {
                 max-width: 1400px;
                 margin: 0 auto;
@@ -791,23 +805,23 @@ app.index_string = """
                 box-shadow: 0 0 20px rgba(0,0,0,0.1);
                 min-height: 100vh;
             }
-            
+
             .header {
                 background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
                 color: white;
                 padding: 20px;
             }
-            
+
             .header-title {
                 margin: 0 0 20px 0;
                 font-size: 28px;
                 font-weight: 300;
             }
-            
+
             .toolbar, .file-toolbar {
                 margin-bottom: 15px;
             }
-            
+
             .btn {
                 background-color: #4CAF50;
                 color: white;
@@ -819,41 +833,41 @@ app.index_string = """
                 font-size: 14px;
                 transition: all 0.3s ease;
             }
-            
+
             .btn:hover {
                 transform: translateY(-2px);
                 box-shadow: 0 4px 8px rgba(0,0,0,0.2);
             }
-            
+
             .btn-primary { background-color: #007bff; }
             .btn-secondary { background-color: #6c757d; }
             .btn-danger { background-color: #dc3545; }
             .btn-warning { background-color: #ffc107; color: #212529; }
             .btn-info { background-color: #17a2b8; }
             .btn-success { background-color: #28a745; }
-            
+
             .btn:disabled {
                 background-color: #cccccc;
                 cursor: not-allowed;
                 transform: none;
             }
-            
+
             .controls {
                 display: flex;
                 align-items: center;
                 gap: 15px;
                 flex-wrap: wrap;
             }
-            
+
             .control-label {
                 font-weight: bold;
                 margin-right: 5px;
             }
-            
+
             .layout-dropdown, .edge-style-dropdown {
                 min-width: 120px;
             }
-            
+
             .upload-btn {
                 background-color: #17a2b8;
                 color: white;
@@ -864,17 +878,17 @@ app.index_string = """
                 margin: 5px;
                 transition: all 0.3s ease;
             }
-            
+
             .upload-btn:hover {
                 background-color: #138496;
                 transform: translateY(-2px);
             }
-            
+
             .main-content {
                 display: flex;
                 min-height: 600px;
             }
-            
+
             .left-sidebar, .right-sidebar {
                 width: 280px;
                 background-color: #f8f9fa;
@@ -883,19 +897,19 @@ app.index_string = """
                 overflow-y: auto;
                 max-height: 600px;
             }
-            
+
             .right-sidebar {
                 border-right: none;
                 border-left: 1px solid #dee2e6;
             }
-            
+
             .graph-container {
                 flex: 1;
                 border: 1px solid #ddd;
                 margin: 0;
                 position: relative;
             }
-            
+
             .panel-title {
                 margin: 0 0 15px 0;
                 font-size: 18px;
@@ -904,22 +918,22 @@ app.index_string = """
                 border-bottom: 2px solid #007bff;
                 padding-bottom: 5px;
             }
-            
+
             .node-types-container {
                 margin-bottom: 30px;
             }
-            
+
             .node-type-item {
                 transition: all 0.3s ease;
                 border: 2px solid transparent;
             }
-            
+
             .node-type-item:hover {
                 transform: scale(1.05);
                 border-color: white;
                 box-shadow: 0 4px 8px rgba(0,0,0,0.2);
             }
-            
+
             .property-input {
                 width: 100%;
                 padding: 8px;
@@ -928,11 +942,11 @@ app.index_string = """
                 border-radius: 4px;
                 font-size: 14px;
             }
-            
+
             .property-slider {
                 margin: 10px 0 20px 0;
             }
-            
+
             #selected-info {
                 background-color: white;
                 padding: 15px;
@@ -940,7 +954,7 @@ app.index_string = """
                 border: 1px solid #dee2e6;
                 margin-top: 10px;
             }
-            
+
             #navigator-info {
                 background-color: white;
                 padding: 15px;
