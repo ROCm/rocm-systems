@@ -266,7 +266,9 @@ void TestGpuMetricsRead::Run(void) {
       err = amdsmi_get_gpu_asic_info(processor_handles_[i], &asic_info);
       ASSERT_EQ(err, AMDSMI_STATUS_SUCCESS);
       if ((asic_info.flags & AMDGPU_IDS_FLAGS_FUSION) != 0 && smu.apu_metrics == nullptr) {
-        GTEST_SKIP() << "Fusion/APU device detected but APU metrics not available";
+        std::cout << "Fusion/APU device detected but APU metrics not available, skipping device "
+                  << i << std::endl;
+        continue;
       }
       IF_VERB(STANDARD) {
         std::cout << "METRIC TABLE HEADER:\n";

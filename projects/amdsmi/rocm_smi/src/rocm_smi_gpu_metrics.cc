@@ -2720,8 +2720,14 @@ AMGpuMetricsPublicLatestTupl_t ApuMetricsBase_v30_t::copy_internal_to_external_m
     metrics_public_init.common_header.content_revision = header.m_content_revision;
   };
   // Keep APU-specific power fields in raw mW; convert and clamp only the generic legacy field.
+  // Guard sentinel values (0xFFFF for uint16_t, 0xFFFFFFFF for uint32_t) before arithmetic
+  // to avoid overflow: e.g. uint32_t(0xFFFFFFFF) + 500U wraps to 499.
   auto convert_apu_power_mw_to_public_w = [&ss](auto power_mw) {
+    using InputT = decltype(power_mw);
     using PublicPowerT = decltype(metrics_public_init.average_socket_power);
+    if (power_mw == std::numeric_limits<InputT>::max()) {
+      return std::numeric_limits<PublicPowerT>::max();
+    }
     const auto rounded_watts = (static_cast<uint32_t>(power_mw) + 500U) / 1000U;
     constexpr auto max_power = std::numeric_limits<PublicPowerT>::max();
     if (rounded_watts > max_power) {

@@ -1216,8 +1216,8 @@ typedef struct metrics_table_header_t metrics_table_header_t;
  *
  * @cond @tag{gpu_bm_linux} @endcond
  */
-#define RSMI_APU_V24_CORES 8   //!< v2_4 core count
 #define RSMI_APU_MAX_CORES 16  //!< v2_4 = 8, v3_0 = 16
+#define RSMI_APU_V24_CORES 8   //!< v2_4 core count
 #define RSMI_APU_MAX_L3 2      //!< v2_4
 #define RSMI_APU_MAX_IPU 8     //!< v3_0, average_ipu_activity[]
 /**
@@ -1336,6 +1336,10 @@ typedef struct {
 
   /**
    * @brief Power [mW]
+   *
+   * All power fields in this struct are in milliwatts (mW) as reported by
+   * the APU firmware. Note: the top-level gpu_metrics_t.average_socket_power
+   * is converted to Watts; these APU sub-struct fields are NOT converted.
    */
   uint32_t average_socket_power;                    //!< v2_4[uint16_t], v3_0[uint32_t]
   uint16_t average_cpu_power;                       //!< v2_4

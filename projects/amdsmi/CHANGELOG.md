@@ -31,7 +31,7 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
     - `average_vpeclk_frequency`, `average_ipuclk_frequency`, `average_mpipu_frequency`
     - `throttle_residency_prochot`, `throttle_residency_spl`, `throttle_residency_fppt`, `throttle_residency_sppt`, `throttle_residency_thm_core`, `throttle_residency_thm_gfx`, `throttle_residency_thm_soc`
     - `time_filter_alphavalue`
-  - Fields not applicable to the current version are set to `0xFFFF` (sentinel).
+  - Fields not applicable to the current version are set to sentinel values: `0xFFFF` for `uint16_t`, `0xFFFFFFFF` for `uint32_t`, and `UINT64_MAX` for `uint64_t` fields.
   - Python bindings updated with `AmdSmiApuMetrics` ctypes structure.
 
 - **Added `oam_id` to `amdsmi_enumeration_info_t`**.

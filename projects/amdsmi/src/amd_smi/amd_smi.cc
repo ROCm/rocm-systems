@@ -30,6 +30,7 @@
 #include <cassert>
 #include <cctype>
 #include <cerrno>
+#include <cstddef>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -176,6 +177,26 @@ static_assert(sizeof(rsmi_apu_metrics_t) == sizeof(amdsmi_apu_metrics_t),
               "APU metrics structs must remain layout-compatible");
 static_assert(sizeof(rsmi_gpu_metrics_t) == sizeof(amdsmi_gpu_metrics_t),
               "GPU metrics structs must remain layout-compatible");
+
+// Verify layout compatibility beyond size — catch field reordering between the two headers.
+static_assert(offsetof(rsmi_apu_metrics_t, average_socket_power) ==
+                  offsetof(amdsmi_apu_metrics_t, average_socket_power),
+              "APU metrics: average_socket_power offset mismatch");
+static_assert(offsetof(rsmi_apu_metrics_t, throttle_status) ==
+                  offsetof(amdsmi_apu_metrics_t, throttle_status),
+              "APU metrics: throttle_status offset mismatch");
+static_assert(offsetof(rsmi_apu_metrics_t, time_filter_alphavalue) ==
+                  offsetof(amdsmi_apu_metrics_t, time_filter_alphavalue),
+              "APU metrics: time_filter_alphavalue (last field) offset mismatch");
+static_assert(offsetof(rsmi_gpu_metrics_t, average_socket_power) ==
+                  offsetof(amdsmi_gpu_metrics_t, average_socket_power),
+              "GPU metrics: average_socket_power offset mismatch");
+static_assert(offsetof(rsmi_gpu_metrics_t, throttle_status) ==
+                  offsetof(amdsmi_gpu_metrics_t, throttle_status),
+              "GPU metrics: throttle_status offset mismatch");
+static_assert(offsetof(rsmi_gpu_metrics_t, apu_metrics) ==
+                  offsetof(amdsmi_gpu_metrics_t, apu_metrics),
+              "GPU metrics: apu_metrics (last field) offset mismatch");
 
 static void copy_rsmi_gpu_metrics_to_amdsmi(const rsmi_gpu_metrics_t& rsmi_metrics,
                                             amdsmi_gpu_metrics_t* amdsmi_metrics) {
