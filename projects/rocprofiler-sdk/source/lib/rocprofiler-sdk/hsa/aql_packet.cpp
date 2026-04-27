@@ -217,10 +217,10 @@ SQTTBufferingPackets::SQTTBufferingPackets(aqlprofile_handle_t _handle,
                                            test_skip_init_t /*tag*/)
 : handle(_handle)
 , shader_engine_id(_shader_engine_id)
-, query_buffer_status_fn(nullptr)
 {
-    // Test-only constructor: skip the real aqlprofile_dl call. The test is
-    // required to overwrite query_buffer_status_fn before producer_loop runs.
+    // Test-only constructor: skip the real aqlprofile_dl call.
+    // query_buffer_status_fn defaults to nullptr (see aql_packet.hpp); the
+    // test is required to overwrite it before producer_loop runs.
     // query_status and buffer_swap remain default-constructed because the
     // mock submit path ignores them.
 }
