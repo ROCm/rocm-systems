@@ -5,7 +5,11 @@ project(rocprofiler-sdk-tests-buffering LANGUAGES C CXX)
 
 include(GoogleTest)
 
-set(buffering_sources buffering-serial.cpp buffering-parallel.cpp buffering-save-load.cpp)
+set(buffering_sources
+    buffering-serial.cpp
+    buffering-parallel.cpp
+    buffering-save-load.cpp
+    user-ring-buffer.cpp)
 
 add_executable(buffering-tests)
 target_sources(buffering-tests PRIVATE ${buffering_sources})

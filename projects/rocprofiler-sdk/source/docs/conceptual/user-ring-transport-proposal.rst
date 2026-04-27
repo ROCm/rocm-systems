@@ -18,6 +18,10 @@ initial public buffered-services API. Tools would continue to create buffers,
 configure buffered services, receive ``rocprofiler_record_header_t`` batches, and
 observe discard or lossless backpressure through existing buffer policy semantics.
 
+This draft PR includes a proof-of-concept implementation behind the
+``ROCPROFILER_EXPERIMENTAL_USER_RING_BUFFER`` CMake option. The default
+``record_header_buffer`` backend is unchanged when the option is disabled.
+
 Motivation
 ==========
 
@@ -110,6 +114,12 @@ space check, the payload write, and a commit-store. If the shard is full, the
 backend applies the buffer policy locally: increment the logical drop count for
 discard mode or wait for the shard consumer cursor in lossless mode.
 
+The POC backend uses ``user_ring_record_header_buffer`` as the internal storage
+type when ``ROCPROFILER_EXPERIMENTAL_USER_RING_BUFFER=ON``. Each producer thread
+lazily creates one shard for each logical buffer object. The shard uses
+page-aligned process-private memory by default and stores the slot header,
+``rocprofiler_record_header_t``, and payload in one contiguous slot.
+
 Out-of-process backend
 ======================
 
@@ -130,6 +140,12 @@ marker, feature flags, logical buffer id, shard count, per-shard state, producer
 identity, generation number, and lifecycle state. The collector must be able to
 detect a producer that exits without finalizing and drain all committed records
 whose commit markers are visible.
+
+The POC does not add the collector control channel yet. To exercise the storage
+mode, setting ``ROCPROFILER_EXPERIMENTAL_USER_RING_BUFFER_SHARED_MMAP=1`` makes
+the POC allocate shard storage with anonymous shared ``mmap`` instead of
+process-private memory. A production out-of-process backend still needs file
+descriptor handoff, collector lifecycle, and crash-recovery protocol work.
 
 Ordering model
 ==============
@@ -247,11 +263,11 @@ Migration plan
 
 The proposal can be implemented in staged PRs:
 
-1. Add an internal ring-shard abstraction behind an experimental build option,
-   for example ``ROCPROFILER_EXPERIMENTAL_USER_RING_BUFFER``.
+1. Add an internal ring-shard abstraction behind
+   ``ROCPROFILER_EXPERIMENTAL_USER_RING_BUFFER``.
 2. Add an in-process backend for one logical buffer using per-thread shards while
    preserving the existing callback ABI.
-3. Add tests for discard, lossless, watermark, explicit flush, final flush,
+3. Add tests for direct shard behavior plus discard, lossless, watermark, explicit flush,
    thread exit, and callback-thread assignment.
 4. Add microbenchmarks for hot API tracing, kernel dispatch records, and
    multi-thread producer pressure compared with the current double-buffer path.
