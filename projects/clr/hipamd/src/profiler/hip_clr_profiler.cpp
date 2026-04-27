@@ -1521,7 +1521,8 @@ uint64_t HipProfilerDisableExt() {
 // ============================================================
 extern "C" {
 
-hipError_t hipProfilerEnableExt(uint64_t* start_record_id) {
+hipError_t hipProfilerEnableExt(uint64_t* start_record_id, uint64_t state) {
+  (void)state;  // reserved for future feature flags; ignored in this version
   uint64_t id = HipProfilerEnableExt();
   if (start_record_id) *start_record_id = id;
   return hipSuccess;

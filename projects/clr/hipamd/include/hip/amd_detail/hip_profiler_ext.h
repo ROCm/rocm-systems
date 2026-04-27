@@ -215,9 +215,14 @@ static_assert(sizeof(HipApiRecordExt) == 256, "HipApiRecordExt must be 256 bytes
  *                              profiling was enabled (i.e. the index of the
  *                              first record that will be attributed to this
  *                              session).  May be NULL.
+ * @param[in]  state            Feature flags for this profiling session.
+ *                              Pass 0 for default behaviour (all features off).
+ *                              Reserved for future use — all bits must be zero
+ *                              in this version; non-zero values are accepted but
+ *                              ignored.
  * @return hipSuccess
  */
-hipError_t hipProfilerEnableExt(uint64_t* start_record_id);
+hipError_t hipProfilerEnableExt(uint64_t* start_record_id, uint64_t state);
 
 /**
  * @brief Disable built-in profiling.  Already-collected records are kept.
