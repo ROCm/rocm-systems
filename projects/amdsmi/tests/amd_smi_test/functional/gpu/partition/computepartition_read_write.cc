@@ -33,11 +33,11 @@
 #include <string>
 #include <vector>
 
-#include "test_base.h"
-#include "test_common.h"
 #include "amd_smi/amdsmi.h"
 #include "amd_smi/impl/amd_smi_utils.h"
 #include "rocm_smi/rocm_smi_utils.h"
+#include "test_base.h"
+#include "test_common.h"
 
 TestComputePartitionReadWrite::TestComputePartitionReadWrite() : TestBase() {
   set_title("AMDSMI Compute Partition Read/Write Test");

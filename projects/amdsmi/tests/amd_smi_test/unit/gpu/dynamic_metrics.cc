@@ -27,8 +27,8 @@
 #include <fstream>
 #include <vector>
 
-#include "test_common.h"
 #include "rocm_smi/rocm_smi_gpu_metrics.h"
+#include "test_common.h"
 
 namespace amd::smi {
 

@@ -29,8 +29,9 @@ import unittest
 
 # Allow direct execution: walk up to find the 'common/' package root
 import os as _os
+
 _d = _os.path.dirname(_os.path.abspath(__file__))
-while _d != _os.path.dirname(_d) and not _os.path.isdir(_os.path.join(_d, 'common')):
+while _d != _os.path.dirname(_d) and not _os.path.isdir(_os.path.join(_d, "common")):
     _d = _os.path.dirname(_d)
 sys.path.insert(0, _d)
 del _d, _os
@@ -41,9 +42,7 @@ from cli.base import TestCliBase
 
 amdsmi_path = os.environ.get("AMDSMI_PATH", "/opt/rocm/share/amd_smi")
 if not os.path.exists(amdsmi_path):
-    raise FileNotFoundError(
-        f'AMDSMI_PATH "{amdsmi_path}" does not exist.'
-    )
+    raise FileNotFoundError(f'AMDSMI_PATH "{amdsmi_path}" does not exist.')
 sys.path.append(amdsmi_path)
 try:
     import amdsmi

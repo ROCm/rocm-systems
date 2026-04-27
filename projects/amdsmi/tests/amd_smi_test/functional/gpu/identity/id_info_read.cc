@@ -29,8 +29,8 @@
 #include <map>
 #include <string>
 
-#include "test_common.h"
 #include "amd_smi/amdsmi.h"
+#include "test_common.h"
 
 TestIdInfoRead::TestIdInfoRead() : TestBase() {
   set_title("AMDSMI ID Info Read Test");

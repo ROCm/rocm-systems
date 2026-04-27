@@ -30,8 +30,8 @@
 #include <random>
 #include <thread>  // NOLINT
 
-#include "test_common.h"
 #include "amd_smi/amdsmi.h"
+#include "test_common.h"
 
 extern int32_t rsmi_test_refcount(uint64_t refcnt_type);
 

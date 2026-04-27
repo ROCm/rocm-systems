@@ -31,8 +31,8 @@
 #include <string>
 #include <vector>
 
-#include "test_common.h"
 #include "amd_smi/amdsmi.h"
+#include "test_common.h"
 
 typedef struct {
   std::string type;

@@ -28,8 +28,8 @@
 #include <map>
 #include <string>
 
-#include "test_common.h"
 #include "amd_smi/amdsmi.h"
+#include "test_common.h"
 
 static const std::map<uint32_t, std::string> kTempSensorNameMap = {
     {AMDSMI_TEMPERATURE_TYPE_VRAM, "Memory"},

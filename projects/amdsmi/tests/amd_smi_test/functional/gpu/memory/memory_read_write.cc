@@ -32,8 +32,8 @@
 #include <string>
 #include <vector>
 
-#include "test_common.h"
 #include "amd_smi/amdsmi.h"
+#include "test_common.h"
 
 /**
  * RAII helper to set and automatically restore an environment variable

@@ -26,8 +26,9 @@ import unittest
 
 # Allow direct execution: walk up to find the 'common/' package root
 import os as _os
+
 _d = _os.path.dirname(_os.path.abspath(__file__))
-while _d != _os.path.dirname(_d) and not _os.path.isdir(_os.path.join(_d, 'common')):
+while _d != _os.path.dirname(_d) and not _os.path.isdir(_os.path.join(_d, "common")):
     _d = _os.path.dirname(_d)
 sys.path.insert(0, _d)
 del _d, _os
@@ -212,7 +213,6 @@ class TestCpuPower(unittest.TestCase):
 
     # integration
 
-
     def test_cpu_socket_boostlimit(self):
         self.common.print_func_name("")
 
@@ -286,12 +286,10 @@ class TestCpuPower(unittest.TestCase):
             raise self.raise_exception
         return
 
+
 if __name__ == "__main__":
     if os.geteuid() != 0:
-        print(
-            "Warning: Some tests may require elevated privileges (sudo/root).\n",
-            file=sys.stderr,
-        )
+        print("Warning: Some tests may require elevated privileges (sudo/root).\n", file=sys.stderr)
     verbose = common.VERBOSITY_NORMAL
     if "-q" in sys.argv or "--quiet" in sys.argv:
         verbose = common.VERBOSITY_QUIET

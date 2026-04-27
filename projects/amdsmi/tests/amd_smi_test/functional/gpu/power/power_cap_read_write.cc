@@ -30,8 +30,8 @@
 #include <iostream>
 #include <string>
 
-#include "test_common.h"
 #include "amd_smi/amdsmi.h"
+#include "test_common.h"
 
 const uint64_t MICRO_CONVERSION = 1000000;
 

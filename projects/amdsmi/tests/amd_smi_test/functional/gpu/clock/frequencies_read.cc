@@ -28,8 +28,8 @@
 #include <iostream>
 #include <string>
 
-#include "test_common.h"
 #include "amd_smi/amdsmi.h"
+#include "test_common.h"
 
 TestFrequenciesRead::TestFrequenciesRead() : TestBase() {
   set_title("AMDSMI Frequencies Read Test");

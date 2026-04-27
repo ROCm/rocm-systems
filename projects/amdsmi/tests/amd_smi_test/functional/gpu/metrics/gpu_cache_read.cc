@@ -32,11 +32,11 @@
 #include <sstream>
 #include <string>
 
-#include "test_common.h"
 #include "amd_smi/amdsmi.h"
 #include "amd_smi/impl/amd_smi_utils.h"
 #include "gpu_metrics_read.h"
 #include "rocm_smi/rocm_smi_utils.h"
+#include "test_common.h"
 
 TestGPUCacheRead::TestGPUCacheRead() : TestBase() {
   set_title("GPU Cache Read Test");

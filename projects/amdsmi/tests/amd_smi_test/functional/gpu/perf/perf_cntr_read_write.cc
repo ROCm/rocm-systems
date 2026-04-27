@@ -29,8 +29,8 @@
 #include <string>
 #include <vector>
 
-#include "test_common.h"
 #include "amd_smi/amdsmi.h"
+#include "test_common.h"
 
 PerfCntrEvtGrp::PerfCntrEvtGrp(amdsmi_event_group_t grp, uint32_t first, uint32_t last,
                                std::string name)
