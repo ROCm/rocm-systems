@@ -22,6 +22,16 @@ This draft PR includes a proof-of-concept implementation behind the
 ``ROCPROFILER_EXPERIMENTAL_USER_RING_BUFFER`` CMake option. The default
 ``record_header_buffer`` backend is unchanged when the option is disabled.
 
+Decision criteria
+=================
+
+Transport recommendations in this proposal family are ranked by lowest
+producer-side time overhead first. Memory footprint is the second criterion and
+is used after the time ranking. This is why the per-thread or per-producer ring
+is the recommended common direction: it removes shared producer contention first
+and still keeps memory close to the compact BPF-style proposal through lazy,
+bounded shard allocation.
+
 Motivation
 ==========
 
@@ -256,7 +266,139 @@ Comparison with other transport choices
 
 The recommendation is to use per-thread or per-producer SPSC rings as the common
 transport model, with separate storage backends for process-private memory and
-shared ``mmap`` memory.
+shared ``mmap`` memory. This recommendation is based on producer-side time
+overhead first and memory footprint second.
+
+Benchmark snapshot
+==================
+
+The cross-proposal microbenchmark uses one unit for time, nanoseconds per
+record, and one unit for footprint, MiB. It uses 64-byte payload records, 131072
+records per round, and 15 rounds. The LTTng row is the measurable
+no-active-session path; active-session measurement is still blocked on this test
+host because ``lttng create`` fails in the local session-daemon control path
+after spawning ``lttng-sessiond``.
+
+.. list-table::
+   :header-rows: 1
+
+   * - Producers
+     - Transport
+     - Emit ns/record
+     - Drain ns/record
+     - Total ns/record
+     - Storage MiB
+     - Max RSS MiB
+   * - 1
+     - Current
+     - 24.518
+     - 2.498
+     - 27.016
+     - 136.07
+     - 141.81
+   * - 1
+     - BPF-style
+     - 17.299
+     - 13.874
+     - 31.173
+     - 12.01
+     - 17.83
+   * - 1
+     - Ring private
+     - 4.369
+     - 1.594
+     - 5.963
+     - 12.00
+     - 17.67
+   * - 1
+     - Ring shared mmap
+     - 4.335
+     - 1.574
+     - 5.909
+     - 12.00
+     - 17.91
+   * - 1
+     - LTTng-UST inactive
+     - 29.520
+     - 2.433
+     - 31.953
+     - 136.07
+     - 141.81
+   * - 4
+     - Current
+     - 243.692
+     - 2.558
+     - 246.250
+     - 136.07
+     - 141.96
+   * - 4
+     - BPF-style
+     - 167.720
+     - 13.020
+     - 180.740
+     - 12.01
+     - 17.97
+   * - 4
+     - Ring private
+     - 5.944
+     - 4.993
+     - 10.936
+     - 12.02
+     - 17.68
+   * - 4
+     - Ring shared mmap
+     - 5.970
+     - 3.345
+     - 9.315
+     - 12.02
+     - 17.79
+   * - 4
+     - LTTng-UST inactive
+     - 288.077
+     - 2.435
+     - 290.512
+     - 136.07
+     - 141.84
+   * - 16
+     - Current
+     - 260.940
+     - 2.484
+     - 263.424
+     - 136.07
+     - 142.28
+   * - 16
+     - BPF-style
+     - 150.954
+     - 16.893
+     - 167.847
+     - 12.01
+     - 18.00
+   * - 16
+     - Ring private
+     - 4.993
+     - 12.037
+     - 17.029
+     - 12.06
+     - 18.09
+   * - 16
+     - Ring shared mmap
+     - 5.519
+     - 5.655
+     - 11.174
+     - 12.06
+     - 18.04
+   * - 16
+     - LTTng-UST inactive
+     - 294.816
+     - 2.665
+     - 297.481
+     - 136.07
+     - 142.29
+
+Based on lowest overhead first, the shared-mmap ring is the best common
+in-process and out-of-process direction in this benchmark. It is within roughly
+the same memory band as the BPF-style buffer and is far below the current
+backend and inactive LTTng-UST shadow path on producer time.
 
 Migration plan
 ==============
