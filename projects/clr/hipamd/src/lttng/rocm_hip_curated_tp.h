@@ -2,15 +2,386 @@
  * DO NOT EDIT BY HAND. Regenerate via the `regenerate-lttng-curated`
  * CMake target or by invoking the codegen script directly.
  *
- * SHA256(curated_apis.yaml) at generation: 0f2e1452d4da6a69b49b3845940d40ad5ed4db2273dc26d002291c5372a64250
+ * SHA256(curated_apis.yaml) at generation: 644fc23cd752aec46ae309d5b3f117f4bac5067a8a169b5d6fe8674028c5df45
  *
  * Provider: rocm_hip
- * API count: 3
+ * API count: 73
  *
  * Spec: docs/superpowers/specs/2026-04-26-lttng-curated-args-design.md
  */
 #if !defined(_ROCM_HIP_CURATED_TP_H) || defined(LTTNG_UST_TRACEPOINT_HEADER_MULTI_READ)
 #define _ROCM_HIP_CURATED_TP_H
+
+/* dim3_packed encoding is defined in rocm_dim3_pack.h, included by
+ * the emit-helper header that includes us transitively. */
+
+LTTNG_UST_TRACEPOINT_EVENT(
+    rocm_hip, hipStreamCreate_args,
+    LTTNG_UST_TP_ARGS(uint64_t, corr_id, uint64_t, stream),
+    LTTNG_UST_TP_FIELDS(
+        lttng_ust_field_integer(uint64_t, corr_id, corr_id)
+lttng_ust_field_integer_hex(uint64_t, stream, stream)
+    )
+)
+
+LTTNG_UST_TRACEPOINT_EVENT(
+    rocm_hip, hipStreamCreateWithFlags_args,
+    LTTNG_UST_TP_ARGS(uint64_t, corr_id, uint64_t, stream, uint32_t, flags),
+    LTTNG_UST_TP_FIELDS(
+        lttng_ust_field_integer(uint64_t, corr_id, corr_id)
+lttng_ust_field_integer_hex(uint64_t, stream, stream)
+lttng_ust_field_integer(uint32_t, flags, flags)
+    )
+)
+
+LTTNG_UST_TRACEPOINT_EVENT(
+    rocm_hip, hipStreamCreateWithPriority_args,
+    LTTNG_UST_TP_ARGS(uint64_t, corr_id, uint64_t, stream, uint32_t, flags, int32_t, priority),
+    LTTNG_UST_TP_FIELDS(
+        lttng_ust_field_integer(uint64_t, corr_id, corr_id)
+lttng_ust_field_integer_hex(uint64_t, stream, stream)
+lttng_ust_field_integer(uint32_t, flags, flags)
+lttng_ust_field_integer(int32_t, priority, priority)
+    )
+)
+
+LTTNG_UST_TRACEPOINT_EVENT(
+    rocm_hip, hipStreamDestroy_args,
+    LTTNG_UST_TP_ARGS(uint64_t, corr_id, uint64_t, stream),
+    LTTNG_UST_TP_FIELDS(
+        lttng_ust_field_integer(uint64_t, corr_id, corr_id)
+lttng_ust_field_integer_hex(uint64_t, stream, stream)
+    )
+)
+
+LTTNG_UST_TRACEPOINT_EVENT(
+    rocm_hip, hipStreamGetFlags_args,
+    LTTNG_UST_TP_ARGS(uint64_t, corr_id, uint64_t, stream, uint32_t, flags),
+    LTTNG_UST_TP_FIELDS(
+        lttng_ust_field_integer(uint64_t, corr_id, corr_id)
+lttng_ust_field_integer_hex(uint64_t, stream, stream)
+lttng_ust_field_integer(uint32_t, flags, flags)
+    )
+)
+
+LTTNG_UST_TRACEPOINT_EVENT(
+    rocm_hip, hipStreamGetPriority_args,
+    LTTNG_UST_TP_ARGS(uint64_t, corr_id, uint64_t, stream, int32_t, priority),
+    LTTNG_UST_TP_FIELDS(
+        lttng_ust_field_integer(uint64_t, corr_id, corr_id)
+lttng_ust_field_integer_hex(uint64_t, stream, stream)
+lttng_ust_field_integer(int32_t, priority, priority)
+    )
+)
+
+LTTNG_UST_TRACEPOINT_EVENT(
+    rocm_hip, hipStreamSynchronize_args,
+    LTTNG_UST_TP_ARGS(uint64_t, corr_id, uint64_t, stream),
+    LTTNG_UST_TP_FIELDS(
+        lttng_ust_field_integer(uint64_t, corr_id, corr_id)
+lttng_ust_field_integer_hex(uint64_t, stream, stream)
+    )
+)
+
+LTTNG_UST_TRACEPOINT_EVENT(
+    rocm_hip, hipStreamWaitEvent_args,
+    LTTNG_UST_TP_ARGS(uint64_t, corr_id, uint64_t, stream, uint64_t, event, uint32_t, flags),
+    LTTNG_UST_TP_FIELDS(
+        lttng_ust_field_integer(uint64_t, corr_id, corr_id)
+lttng_ust_field_integer_hex(uint64_t, stream, stream)
+lttng_ust_field_integer_hex(uint64_t, event, event)
+lttng_ust_field_integer(uint32_t, flags, flags)
+    )
+)
+
+LTTNG_UST_TRACEPOINT_EVENT(
+    rocm_hip, hipStreamQuery_args,
+    LTTNG_UST_TP_ARGS(uint64_t, corr_id, uint64_t, stream),
+    LTTNG_UST_TP_FIELDS(
+        lttng_ust_field_integer(uint64_t, corr_id, corr_id)
+lttng_ust_field_integer_hex(uint64_t, stream, stream)
+    )
+)
+
+LTTNG_UST_TRACEPOINT_EVENT(
+    rocm_hip, hipStreamAddCallback_args,
+    LTTNG_UST_TP_ARGS(uint64_t, corr_id, uint64_t, stream, uint64_t, callback, uint64_t, userData, uint32_t, flags),
+    LTTNG_UST_TP_FIELDS(
+        lttng_ust_field_integer(uint64_t, corr_id, corr_id)
+lttng_ust_field_integer_hex(uint64_t, stream, stream)
+lttng_ust_field_integer_hex(uint64_t, callback, callback)
+lttng_ust_field_integer_hex(uint64_t, userData, userData)
+lttng_ust_field_integer(uint32_t, flags, flags)
+    )
+)
+
+LTTNG_UST_TRACEPOINT_EVENT(
+    rocm_hip, hipDeviceSynchronize_args,
+    LTTNG_UST_TP_ARGS(uint64_t, corr_id),
+    LTTNG_UST_TP_FIELDS(
+        lttng_ust_field_integer(uint64_t, corr_id, corr_id)
+    )
+)
+
+LTTNG_UST_TRACEPOINT_EVENT(
+    rocm_hip, hipStreamAttachMemAsync_args,
+    LTTNG_UST_TP_ARGS(uint64_t, corr_id, uint64_t, stream, uint64_t, dev_ptr, uint64_t, length, uint32_t, flags),
+    LTTNG_UST_TP_FIELDS(
+        lttng_ust_field_integer(uint64_t, corr_id, corr_id)
+lttng_ust_field_integer_hex(uint64_t, stream, stream)
+lttng_ust_field_integer_hex(uint64_t, dev_ptr, dev_ptr)
+lttng_ust_field_integer(uint64_t, length, length)
+lttng_ust_field_integer(uint32_t, flags, flags)
+    )
+)
+
+LTTNG_UST_TRACEPOINT_EVENT(
+    rocm_hip, hipEventCreate_args,
+    LTTNG_UST_TP_ARGS(uint64_t, corr_id, uint64_t, event),
+    LTTNG_UST_TP_FIELDS(
+        lttng_ust_field_integer(uint64_t, corr_id, corr_id)
+lttng_ust_field_integer_hex(uint64_t, event, event)
+    )
+)
+
+LTTNG_UST_TRACEPOINT_EVENT(
+    rocm_hip, hipEventCreateWithFlags_args,
+    LTTNG_UST_TP_ARGS(uint64_t, corr_id, uint64_t, event, uint32_t, flags),
+    LTTNG_UST_TP_FIELDS(
+        lttng_ust_field_integer(uint64_t, corr_id, corr_id)
+lttng_ust_field_integer_hex(uint64_t, event, event)
+lttng_ust_field_integer(uint32_t, flags, flags)
+    )
+)
+
+LTTNG_UST_TRACEPOINT_EVENT(
+    rocm_hip, hipEventDestroy_args,
+    LTTNG_UST_TP_ARGS(uint64_t, corr_id, uint64_t, event),
+    LTTNG_UST_TP_FIELDS(
+        lttng_ust_field_integer(uint64_t, corr_id, corr_id)
+lttng_ust_field_integer_hex(uint64_t, event, event)
+    )
+)
+
+LTTNG_UST_TRACEPOINT_EVENT(
+    rocm_hip, hipEventRecord_args,
+    LTTNG_UST_TP_ARGS(uint64_t, corr_id, uint64_t, event, uint64_t, stream),
+    LTTNG_UST_TP_FIELDS(
+        lttng_ust_field_integer(uint64_t, corr_id, corr_id)
+lttng_ust_field_integer_hex(uint64_t, event, event)
+lttng_ust_field_integer_hex(uint64_t, stream, stream)
+    )
+)
+
+LTTNG_UST_TRACEPOINT_EVENT(
+    rocm_hip, hipEventSynchronize_args,
+    LTTNG_UST_TP_ARGS(uint64_t, corr_id, uint64_t, event),
+    LTTNG_UST_TP_FIELDS(
+        lttng_ust_field_integer(uint64_t, corr_id, corr_id)
+lttng_ust_field_integer_hex(uint64_t, event, event)
+    )
+)
+
+LTTNG_UST_TRACEPOINT_EVENT(
+    rocm_hip, hipEventQuery_args,
+    LTTNG_UST_TP_ARGS(uint64_t, corr_id, uint64_t, event),
+    LTTNG_UST_TP_FIELDS(
+        lttng_ust_field_integer(uint64_t, corr_id, corr_id)
+lttng_ust_field_integer_hex(uint64_t, event, event)
+    )
+)
+
+LTTNG_UST_TRACEPOINT_EVENT(
+    rocm_hip, hipEventElapsedTime_args,
+    LTTNG_UST_TP_ARGS(uint64_t, corr_id, float, ms, uint64_t, start, uint64_t, stop),
+    LTTNG_UST_TP_FIELDS(
+        lttng_ust_field_integer(uint64_t, corr_id, corr_id)
+lttng_ust_field_float(float, ms, ms)
+lttng_ust_field_integer_hex(uint64_t, start, start)
+lttng_ust_field_integer_hex(uint64_t, stop, stop)
+    )
+)
+
+LTTNG_UST_TRACEPOINT_EVENT(
+    rocm_hip, hipLaunchKernel_args,
+    LTTNG_UST_TP_ARGS(uint64_t, corr_id, uint64_t, function_address, uint64_t, numBlocks, uint64_t, dimBlocks, uint64_t, args, uint64_t, sharedMemBytes, uint64_t, stream),
+    LTTNG_UST_TP_FIELDS(
+        lttng_ust_field_integer(uint64_t, corr_id, corr_id)
+lttng_ust_field_integer_hex(uint64_t, function_address, function_address)
+lttng_ust_field_integer_hex(uint64_t, numBlocks, numBlocks)
+lttng_ust_field_integer_hex(uint64_t, dimBlocks, dimBlocks)
+lttng_ust_field_integer_hex(uint64_t, args, args)
+lttng_ust_field_integer(uint64_t, sharedMemBytes, sharedMemBytes)
+lttng_ust_field_integer_hex(uint64_t, stream, stream)
+    )
+)
+
+LTTNG_UST_TRACEPOINT_EVENT(
+    rocm_hip, hipLaunchCooperativeKernel_args,
+    LTTNG_UST_TP_ARGS(uint64_t, corr_id, uint64_t, f, uint64_t, gridDim, uint64_t, blockDimX, uint64_t, kernelParams, uint32_t, sharedMemBytes, uint64_t, stream),
+    LTTNG_UST_TP_FIELDS(
+        lttng_ust_field_integer(uint64_t, corr_id, corr_id)
+lttng_ust_field_integer_hex(uint64_t, f, f)
+lttng_ust_field_integer_hex(uint64_t, gridDim, gridDim)
+lttng_ust_field_integer_hex(uint64_t, blockDimX, blockDimX)
+lttng_ust_field_integer_hex(uint64_t, kernelParams, kernelParams)
+lttng_ust_field_integer(uint32_t, sharedMemBytes, sharedMemBytes)
+lttng_ust_field_integer_hex(uint64_t, stream, stream)
+    )
+)
+
+LTTNG_UST_TRACEPOINT_EVENT(
+    rocm_hip, hipLaunchCooperativeKernelMultiDevice_args,
+    LTTNG_UST_TP_ARGS(uint64_t, corr_id, uint64_t, launchParamsList, int32_t, numDevices, uint32_t, flags),
+    LTTNG_UST_TP_FIELDS(
+        lttng_ust_field_integer(uint64_t, corr_id, corr_id)
+lttng_ust_field_integer_hex(uint64_t, launchParamsList, launchParamsList)
+lttng_ust_field_integer(int32_t, numDevices, numDevices)
+lttng_ust_field_integer(uint32_t, flags, flags)
+    )
+)
+
+LTTNG_UST_TRACEPOINT_EVENT(
+    rocm_hip, hipModuleLaunchKernel_args,
+    LTTNG_UST_TP_ARGS(uint64_t, corr_id, uint64_t, f, uint32_t, sharedMemBytes, uint64_t, stream, uint64_t, kernelParams, uint64_t, extra),
+    LTTNG_UST_TP_FIELDS(
+        lttng_ust_field_integer(uint64_t, corr_id, corr_id)
+lttng_ust_field_integer_hex(uint64_t, f, f)
+lttng_ust_field_integer(uint32_t, sharedMemBytes, sharedMemBytes)
+lttng_ust_field_integer_hex(uint64_t, stream, stream)
+lttng_ust_field_integer_hex(uint64_t, kernelParams, kernelParams)
+lttng_ust_field_integer_hex(uint64_t, extra, extra)
+    )
+)
+
+LTTNG_UST_TRACEPOINT_EVENT(
+    rocm_hip, hipExtLaunchKernel_args,
+    LTTNG_UST_TP_ARGS(uint64_t, corr_id, uint64_t, function_address, uint64_t, numBlocks, uint64_t, dimBlocks, uint64_t, args, uint64_t, sharedMemBytes, uint64_t, stream, uint64_t, startEvent, uint64_t, stopEvent, int32_t, flags),
+    LTTNG_UST_TP_FIELDS(
+        lttng_ust_field_integer(uint64_t, corr_id, corr_id)
+lttng_ust_field_integer_hex(uint64_t, function_address, function_address)
+lttng_ust_field_integer_hex(uint64_t, numBlocks, numBlocks)
+lttng_ust_field_integer_hex(uint64_t, dimBlocks, dimBlocks)
+lttng_ust_field_integer_hex(uint64_t, args, args)
+lttng_ust_field_integer(uint64_t, sharedMemBytes, sharedMemBytes)
+lttng_ust_field_integer_hex(uint64_t, stream, stream)
+lttng_ust_field_integer_hex(uint64_t, startEvent, startEvent)
+lttng_ust_field_integer_hex(uint64_t, stopEvent, stopEvent)
+lttng_ust_field_integer(int32_t, flags, flags)
+    )
+)
+
+LTTNG_UST_TRACEPOINT_EVENT(
+    rocm_hip, hipExtLaunchMultiKernelMultiDevice_args,
+    LTTNG_UST_TP_ARGS(uint64_t, corr_id, uint64_t, launchParamsList, int32_t, numDevices, uint32_t, flags),
+    LTTNG_UST_TP_FIELDS(
+        lttng_ust_field_integer(uint64_t, corr_id, corr_id)
+lttng_ust_field_integer_hex(uint64_t, launchParamsList, launchParamsList)
+lttng_ust_field_integer(int32_t, numDevices, numDevices)
+lttng_ust_field_integer(uint32_t, flags, flags)
+    )
+)
+
+LTTNG_UST_TRACEPOINT_EVENT(
+    rocm_hip, hipModuleGetFunction_args,
+    LTTNG_UST_TP_ARGS(uint64_t, corr_id, uint64_t, function, uint64_t, module, const char*, kname),
+    LTTNG_UST_TP_FIELDS(
+        lttng_ust_field_integer(uint64_t, corr_id, corr_id)
+lttng_ust_field_integer_hex(uint64_t, function, function)
+lttng_ust_field_integer_hex(uint64_t, module, module)
+lttng_ust_field_string(kname, kname)
+    )
+)
+
+LTTNG_UST_TRACEPOINT_EVENT(
+    rocm_hip, hipModuleLoadData_args,
+    LTTNG_UST_TP_ARGS(uint64_t, corr_id, uint64_t, module, uint64_t, image),
+    LTTNG_UST_TP_FIELDS(
+        lttng_ust_field_integer(uint64_t, corr_id, corr_id)
+lttng_ust_field_integer_hex(uint64_t, module, module)
+lttng_ust_field_integer_hex(uint64_t, image, image)
+    )
+)
+
+LTTNG_UST_TRACEPOINT_EVENT(
+    rocm_hip, hipModuleLoadDataEx_args,
+    LTTNG_UST_TP_ARGS(uint64_t, corr_id, uint64_t, module, uint64_t, image, uint32_t, numOptions, uint64_t, options, uint64_t, optionValues),
+    LTTNG_UST_TP_FIELDS(
+        lttng_ust_field_integer(uint64_t, corr_id, corr_id)
+lttng_ust_field_integer_hex(uint64_t, module, module)
+lttng_ust_field_integer_hex(uint64_t, image, image)
+lttng_ust_field_integer(uint32_t, numOptions, numOptions)
+lttng_ust_field_integer_hex(uint64_t, options, options)
+lttng_ust_field_integer_hex(uint64_t, optionValues, optionValues)
+    )
+)
+
+LTTNG_UST_TRACEPOINT_EVENT(
+    rocm_hip, hipModuleUnload_args,
+    LTTNG_UST_TP_ARGS(uint64_t, corr_id, uint64_t, module),
+    LTTNG_UST_TP_FIELDS(
+        lttng_ust_field_integer(uint64_t, corr_id, corr_id)
+lttng_ust_field_integer_hex(uint64_t, module, module)
+    )
+)
+
+LTTNG_UST_TRACEPOINT_EVENT(
+    rocm_hip, hipMemcpy_args,
+    LTTNG_UST_TP_ARGS(uint64_t, corr_id, uint64_t, dst, uint64_t, src, uint64_t, sizeBytes, int32_t, kind),
+    LTTNG_UST_TP_FIELDS(
+        lttng_ust_field_integer(uint64_t, corr_id, corr_id)
+lttng_ust_field_integer_hex(uint64_t, dst, dst)
+lttng_ust_field_integer_hex(uint64_t, src, src)
+lttng_ust_field_integer(uint64_t, sizeBytes, sizeBytes)
+lttng_ust_field_integer(int32_t, kind, kind)
+    )
+)
+
+LTTNG_UST_TRACEPOINT_EVENT(
+    rocm_hip, hipMemcpyDtoH_args,
+    LTTNG_UST_TP_ARGS(uint64_t, corr_id, uint64_t, dst, uint64_t, src, uint64_t, sizeBytes),
+    LTTNG_UST_TP_FIELDS(
+        lttng_ust_field_integer(uint64_t, corr_id, corr_id)
+lttng_ust_field_integer_hex(uint64_t, dst, dst)
+lttng_ust_field_integer_hex(uint64_t, src, src)
+lttng_ust_field_integer(uint64_t, sizeBytes, sizeBytes)
+    )
+)
+
+LTTNG_UST_TRACEPOINT_EVENT(
+    rocm_hip, hipMemcpyHtoD_args,
+    LTTNG_UST_TP_ARGS(uint64_t, corr_id, uint64_t, dst, uint64_t, src, uint64_t, sizeBytes),
+    LTTNG_UST_TP_FIELDS(
+        lttng_ust_field_integer(uint64_t, corr_id, corr_id)
+lttng_ust_field_integer_hex(uint64_t, dst, dst)
+lttng_ust_field_integer_hex(uint64_t, src, src)
+lttng_ust_field_integer(uint64_t, sizeBytes, sizeBytes)
+    )
+)
+
+LTTNG_UST_TRACEPOINT_EVENT(
+    rocm_hip, hipMemcpyDtoD_args,
+    LTTNG_UST_TP_ARGS(uint64_t, corr_id, uint64_t, dst, uint64_t, src, uint64_t, sizeBytes),
+    LTTNG_UST_TP_FIELDS(
+        lttng_ust_field_integer(uint64_t, corr_id, corr_id)
+lttng_ust_field_integer_hex(uint64_t, dst, dst)
+lttng_ust_field_integer_hex(uint64_t, src, src)
+lttng_ust_field_integer(uint64_t, sizeBytes, sizeBytes)
+    )
+)
+
+LTTNG_UST_TRACEPOINT_EVENT(
+    rocm_hip, hipMemcpyPeer_args,
+    LTTNG_UST_TP_ARGS(uint64_t, corr_id, uint64_t, dst, int32_t, dstDeviceId, uint64_t, src, int32_t, srcDeviceId, uint64_t, sizeBytes),
+    LTTNG_UST_TP_FIELDS(
+        lttng_ust_field_integer(uint64_t, corr_id, corr_id)
+lttng_ust_field_integer_hex(uint64_t, dst, dst)
+lttng_ust_field_integer(int32_t, dstDeviceId, dstDeviceId)
+lttng_ust_field_integer_hex(uint64_t, src, src)
+lttng_ust_field_integer(int32_t, srcDeviceId, srcDeviceId)
+lttng_ust_field_integer(uint64_t, sizeBytes, sizeBytes)
+    )
+)
 
 LTTNG_UST_TRACEPOINT_EVENT(
     rocm_hip, hipMemcpyAsync_args,
@@ -26,6 +397,82 @@ lttng_ust_field_integer_hex(uint64_t, stream, stream)
 )
 
 LTTNG_UST_TRACEPOINT_EVENT(
+    rocm_hip, hipMemcpyDtoHAsync_args,
+    LTTNG_UST_TP_ARGS(uint64_t, corr_id, uint64_t, dst, uint64_t, src, uint64_t, sizeBytes, uint64_t, stream),
+    LTTNG_UST_TP_FIELDS(
+        lttng_ust_field_integer(uint64_t, corr_id, corr_id)
+lttng_ust_field_integer_hex(uint64_t, dst, dst)
+lttng_ust_field_integer_hex(uint64_t, src, src)
+lttng_ust_field_integer(uint64_t, sizeBytes, sizeBytes)
+lttng_ust_field_integer_hex(uint64_t, stream, stream)
+    )
+)
+
+LTTNG_UST_TRACEPOINT_EVENT(
+    rocm_hip, hipMemcpyHtoDAsync_args,
+    LTTNG_UST_TP_ARGS(uint64_t, corr_id, uint64_t, dst, uint64_t, src, uint64_t, sizeBytes, uint64_t, stream),
+    LTTNG_UST_TP_FIELDS(
+        lttng_ust_field_integer(uint64_t, corr_id, corr_id)
+lttng_ust_field_integer_hex(uint64_t, dst, dst)
+lttng_ust_field_integer_hex(uint64_t, src, src)
+lttng_ust_field_integer(uint64_t, sizeBytes, sizeBytes)
+lttng_ust_field_integer_hex(uint64_t, stream, stream)
+    )
+)
+
+LTTNG_UST_TRACEPOINT_EVENT(
+    rocm_hip, hipMemcpyDtoDAsync_args,
+    LTTNG_UST_TP_ARGS(uint64_t, corr_id, uint64_t, dst, uint64_t, src, uint64_t, sizeBytes, uint64_t, stream),
+    LTTNG_UST_TP_FIELDS(
+        lttng_ust_field_integer(uint64_t, corr_id, corr_id)
+lttng_ust_field_integer_hex(uint64_t, dst, dst)
+lttng_ust_field_integer_hex(uint64_t, src, src)
+lttng_ust_field_integer(uint64_t, sizeBytes, sizeBytes)
+lttng_ust_field_integer_hex(uint64_t, stream, stream)
+    )
+)
+
+LTTNG_UST_TRACEPOINT_EVENT(
+    rocm_hip, hipMemcpyPeerAsync_args,
+    LTTNG_UST_TP_ARGS(uint64_t, corr_id, uint64_t, dst, int32_t, dstDeviceId, uint64_t, src, int32_t, srcDevice, uint64_t, sizeBytes, uint64_t, stream),
+    LTTNG_UST_TP_FIELDS(
+        lttng_ust_field_integer(uint64_t, corr_id, corr_id)
+lttng_ust_field_integer_hex(uint64_t, dst, dst)
+lttng_ust_field_integer(int32_t, dstDeviceId, dstDeviceId)
+lttng_ust_field_integer_hex(uint64_t, src, src)
+lttng_ust_field_integer(int32_t, srcDevice, srcDevice)
+lttng_ust_field_integer(uint64_t, sizeBytes, sizeBytes)
+lttng_ust_field_integer_hex(uint64_t, stream, stream)
+    )
+)
+
+LTTNG_UST_TRACEPOINT_EVENT(
+    rocm_hip, hipMemcpy2DAsync_args,
+    LTTNG_UST_TP_ARGS(uint64_t, corr_id, uint64_t, dst, uint64_t, dpitch, uint64_t, src, uint64_t, spitch, uint64_t, width, uint64_t, height, int32_t, kind, uint64_t, stream),
+    LTTNG_UST_TP_FIELDS(
+        lttng_ust_field_integer(uint64_t, corr_id, corr_id)
+lttng_ust_field_integer_hex(uint64_t, dst, dst)
+lttng_ust_field_integer(uint64_t, dpitch, dpitch)
+lttng_ust_field_integer_hex(uint64_t, src, src)
+lttng_ust_field_integer(uint64_t, spitch, spitch)
+lttng_ust_field_integer(uint64_t, width, width)
+lttng_ust_field_integer(uint64_t, height, height)
+lttng_ust_field_integer(int32_t, kind, kind)
+lttng_ust_field_integer_hex(uint64_t, stream, stream)
+    )
+)
+
+LTTNG_UST_TRACEPOINT_EVENT(
+    rocm_hip, hipMemcpy3DAsync_args,
+    LTTNG_UST_TP_ARGS(uint64_t, corr_id, uint64_t, p, uint64_t, stream),
+    LTTNG_UST_TP_FIELDS(
+        lttng_ust_field_integer(uint64_t, corr_id, corr_id)
+lttng_ust_field_integer_hex(uint64_t, p, p)
+lttng_ust_field_integer_hex(uint64_t, stream, stream)
+    )
+)
+
+LTTNG_UST_TRACEPOINT_EVENT(
     rocm_hip, hipMalloc_args,
     LTTNG_UST_TP_ARGS(uint64_t, corr_id, uint64_t, ptr, uint64_t, size),
     LTTNG_UST_TP_FIELDS(
@@ -36,10 +483,345 @@ lttng_ust_field_integer(uint64_t, size, size)
 )
 
 LTTNG_UST_TRACEPOINT_EVENT(
-    rocm_hip, hipDeviceSynchronize_args,
-    LTTNG_UST_TP_ARGS(uint64_t, corr_id),
+    rocm_hip, hipMallocAsync_args,
+    LTTNG_UST_TP_ARGS(uint64_t, corr_id, uint64_t, dev_ptr, uint64_t, size, uint64_t, stream),
     LTTNG_UST_TP_FIELDS(
         lttng_ust_field_integer(uint64_t, corr_id, corr_id)
+lttng_ust_field_integer_hex(uint64_t, dev_ptr, dev_ptr)
+lttng_ust_field_integer(uint64_t, size, size)
+lttng_ust_field_integer_hex(uint64_t, stream, stream)
+    )
+)
+
+LTTNG_UST_TRACEPOINT_EVENT(
+    rocm_hip, hipMallocHost_args,
+    LTTNG_UST_TP_ARGS(uint64_t, corr_id, uint64_t, ptr, uint64_t, size),
+    LTTNG_UST_TP_FIELDS(
+        lttng_ust_field_integer(uint64_t, corr_id, corr_id)
+lttng_ust_field_integer_hex(uint64_t, ptr, ptr)
+lttng_ust_field_integer(uint64_t, size, size)
+    )
+)
+
+LTTNG_UST_TRACEPOINT_EVENT(
+    rocm_hip, hipHostMalloc_args,
+    LTTNG_UST_TP_ARGS(uint64_t, corr_id, uint64_t, ptr, uint64_t, size, uint32_t, flags),
+    LTTNG_UST_TP_FIELDS(
+        lttng_ust_field_integer(uint64_t, corr_id, corr_id)
+lttng_ust_field_integer_hex(uint64_t, ptr, ptr)
+lttng_ust_field_integer(uint64_t, size, size)
+lttng_ust_field_integer(uint32_t, flags, flags)
+    )
+)
+
+LTTNG_UST_TRACEPOINT_EVENT(
+    rocm_hip, hipMallocManaged_args,
+    LTTNG_UST_TP_ARGS(uint64_t, corr_id, uint64_t, dev_ptr, uint64_t, size, uint32_t, flags),
+    LTTNG_UST_TP_FIELDS(
+        lttng_ust_field_integer(uint64_t, corr_id, corr_id)
+lttng_ust_field_integer_hex(uint64_t, dev_ptr, dev_ptr)
+lttng_ust_field_integer(uint64_t, size, size)
+lttng_ust_field_integer(uint32_t, flags, flags)
+    )
+)
+
+LTTNG_UST_TRACEPOINT_EVENT(
+    rocm_hip, hipFree_args,
+    LTTNG_UST_TP_ARGS(uint64_t, corr_id, uint64_t, ptr),
+    LTTNG_UST_TP_FIELDS(
+        lttng_ust_field_integer(uint64_t, corr_id, corr_id)
+lttng_ust_field_integer_hex(uint64_t, ptr, ptr)
+    )
+)
+
+LTTNG_UST_TRACEPOINT_EVENT(
+    rocm_hip, hipFreeAsync_args,
+    LTTNG_UST_TP_ARGS(uint64_t, corr_id, uint64_t, dev_ptr, uint64_t, stream),
+    LTTNG_UST_TP_FIELDS(
+        lttng_ust_field_integer(uint64_t, corr_id, corr_id)
+lttng_ust_field_integer_hex(uint64_t, dev_ptr, dev_ptr)
+lttng_ust_field_integer_hex(uint64_t, stream, stream)
+    )
+)
+
+LTTNG_UST_TRACEPOINT_EVENT(
+    rocm_hip, hipFreeHost_args,
+    LTTNG_UST_TP_ARGS(uint64_t, corr_id, uint64_t, ptr),
+    LTTNG_UST_TP_FIELDS(
+        lttng_ust_field_integer(uint64_t, corr_id, corr_id)
+lttng_ust_field_integer_hex(uint64_t, ptr, ptr)
+    )
+)
+
+LTTNG_UST_TRACEPOINT_EVENT(
+    rocm_hip, hipHostFree_args,
+    LTTNG_UST_TP_ARGS(uint64_t, corr_id, uint64_t, ptr),
+    LTTNG_UST_TP_FIELDS(
+        lttng_ust_field_integer(uint64_t, corr_id, corr_id)
+lttng_ust_field_integer_hex(uint64_t, ptr, ptr)
+    )
+)
+
+LTTNG_UST_TRACEPOINT_EVENT(
+    rocm_hip, hipMemset_args,
+    LTTNG_UST_TP_ARGS(uint64_t, corr_id, uint64_t, dst, int32_t, value, uint64_t, sizeBytes),
+    LTTNG_UST_TP_FIELDS(
+        lttng_ust_field_integer(uint64_t, corr_id, corr_id)
+lttng_ust_field_integer_hex(uint64_t, dst, dst)
+lttng_ust_field_integer(int32_t, value, value)
+lttng_ust_field_integer(uint64_t, sizeBytes, sizeBytes)
+    )
+)
+
+LTTNG_UST_TRACEPOINT_EVENT(
+    rocm_hip, hipMemsetAsync_args,
+    LTTNG_UST_TP_ARGS(uint64_t, corr_id, uint64_t, dst, int32_t, value, uint64_t, sizeBytes, uint64_t, stream),
+    LTTNG_UST_TP_FIELDS(
+        lttng_ust_field_integer(uint64_t, corr_id, corr_id)
+lttng_ust_field_integer_hex(uint64_t, dst, dst)
+lttng_ust_field_integer(int32_t, value, value)
+lttng_ust_field_integer(uint64_t, sizeBytes, sizeBytes)
+lttng_ust_field_integer_hex(uint64_t, stream, stream)
+    )
+)
+
+LTTNG_UST_TRACEPOINT_EVENT(
+    rocm_hip, hipMemsetD8_args,
+    LTTNG_UST_TP_ARGS(uint64_t, corr_id, uint64_t, dest, uint32_t, value, uint64_t, count),
+    LTTNG_UST_TP_FIELDS(
+        lttng_ust_field_integer(uint64_t, corr_id, corr_id)
+lttng_ust_field_integer_hex(uint64_t, dest, dest)
+lttng_ust_field_integer(uint32_t, value, value)
+lttng_ust_field_integer(uint64_t, count, count)
+    )
+)
+
+LTTNG_UST_TRACEPOINT_EVENT(
+    rocm_hip, hipMemsetD16_args,
+    LTTNG_UST_TP_ARGS(uint64_t, corr_id, uint64_t, dest, uint32_t, value, uint64_t, count),
+    LTTNG_UST_TP_FIELDS(
+        lttng_ust_field_integer(uint64_t, corr_id, corr_id)
+lttng_ust_field_integer_hex(uint64_t, dest, dest)
+lttng_ust_field_integer(uint32_t, value, value)
+lttng_ust_field_integer(uint64_t, count, count)
+    )
+)
+
+LTTNG_UST_TRACEPOINT_EVENT(
+    rocm_hip, hipMemsetD32_args,
+    LTTNG_UST_TP_ARGS(uint64_t, corr_id, uint64_t, dest, int32_t, value, uint64_t, count),
+    LTTNG_UST_TP_FIELDS(
+        lttng_ust_field_integer(uint64_t, corr_id, corr_id)
+lttng_ust_field_integer_hex(uint64_t, dest, dest)
+lttng_ust_field_integer(int32_t, value, value)
+lttng_ust_field_integer(uint64_t, count, count)
+    )
+)
+
+LTTNG_UST_TRACEPOINT_EVENT(
+    rocm_hip, hipMemPrefetchAsync_args,
+    LTTNG_UST_TP_ARGS(uint64_t, corr_id, uint64_t, dev_ptr, uint64_t, count, int32_t, device, uint64_t, stream),
+    LTTNG_UST_TP_FIELDS(
+        lttng_ust_field_integer(uint64_t, corr_id, corr_id)
+lttng_ust_field_integer_hex(uint64_t, dev_ptr, dev_ptr)
+lttng_ust_field_integer(uint64_t, count, count)
+lttng_ust_field_integer(int32_t, device, device)
+lttng_ust_field_integer_hex(uint64_t, stream, stream)
+    )
+)
+
+LTTNG_UST_TRACEPOINT_EVENT(
+    rocm_hip, hipMemAdvise_args,
+    LTTNG_UST_TP_ARGS(uint64_t, corr_id, uint64_t, dev_ptr, uint64_t, count, int32_t, advice, int32_t, device),
+    LTTNG_UST_TP_FIELDS(
+        lttng_ust_field_integer(uint64_t, corr_id, corr_id)
+lttng_ust_field_integer_hex(uint64_t, dev_ptr, dev_ptr)
+lttng_ust_field_integer(uint64_t, count, count)
+lttng_ust_field_integer(int32_t, advice, advice)
+lttng_ust_field_integer(int32_t, device, device)
+    )
+)
+
+LTTNG_UST_TRACEPOINT_EVENT(
+    rocm_hip, hipGraphCreate_args,
+    LTTNG_UST_TP_ARGS(uint64_t, corr_id, uint64_t, pGraph, uint32_t, flags),
+    LTTNG_UST_TP_FIELDS(
+        lttng_ust_field_integer(uint64_t, corr_id, corr_id)
+lttng_ust_field_integer_hex(uint64_t, pGraph, pGraph)
+lttng_ust_field_integer(uint32_t, flags, flags)
+    )
+)
+
+LTTNG_UST_TRACEPOINT_EVENT(
+    rocm_hip, hipGraphDestroy_args,
+    LTTNG_UST_TP_ARGS(uint64_t, corr_id, uint64_t, graph),
+    LTTNG_UST_TP_FIELDS(
+        lttng_ust_field_integer(uint64_t, corr_id, corr_id)
+lttng_ust_field_integer_hex(uint64_t, graph, graph)
+    )
+)
+
+LTTNG_UST_TRACEPOINT_EVENT(
+    rocm_hip, hipGraphInstantiate_args,
+    LTTNG_UST_TP_ARGS(uint64_t, corr_id, uint64_t, pGraphExec, uint64_t, graph, uint64_t, pErrorNode, uint64_t, pLogBuffer, uint64_t, bufferSize),
+    LTTNG_UST_TP_FIELDS(
+        lttng_ust_field_integer(uint64_t, corr_id, corr_id)
+lttng_ust_field_integer_hex(uint64_t, pGraphExec, pGraphExec)
+lttng_ust_field_integer_hex(uint64_t, graph, graph)
+lttng_ust_field_integer_hex(uint64_t, pErrorNode, pErrorNode)
+lttng_ust_field_integer_hex(uint64_t, pLogBuffer, pLogBuffer)
+lttng_ust_field_integer(uint64_t, bufferSize, bufferSize)
+    )
+)
+
+LTTNG_UST_TRACEPOINT_EVENT(
+    rocm_hip, hipGraphExecDestroy_args,
+    LTTNG_UST_TP_ARGS(uint64_t, corr_id, uint64_t, graphExec),
+    LTTNG_UST_TP_FIELDS(
+        lttng_ust_field_integer(uint64_t, corr_id, corr_id)
+lttng_ust_field_integer_hex(uint64_t, graphExec, graphExec)
+    )
+)
+
+LTTNG_UST_TRACEPOINT_EVENT(
+    rocm_hip, hipStreamBeginCapture_args,
+    LTTNG_UST_TP_ARGS(uint64_t, corr_id, uint64_t, stream, int32_t, mode),
+    LTTNG_UST_TP_FIELDS(
+        lttng_ust_field_integer(uint64_t, corr_id, corr_id)
+lttng_ust_field_integer_hex(uint64_t, stream, stream)
+lttng_ust_field_integer(int32_t, mode, mode)
+    )
+)
+
+LTTNG_UST_TRACEPOINT_EVENT(
+    rocm_hip, hipStreamEndCapture_args,
+    LTTNG_UST_TP_ARGS(uint64_t, corr_id, uint64_t, stream, uint64_t, pGraph),
+    LTTNG_UST_TP_FIELDS(
+        lttng_ust_field_integer(uint64_t, corr_id, corr_id)
+lttng_ust_field_integer_hex(uint64_t, stream, stream)
+lttng_ust_field_integer_hex(uint64_t, pGraph, pGraph)
+    )
+)
+
+LTTNG_UST_TRACEPOINT_EVENT(
+    rocm_hip, hipStreamIsCapturing_args,
+    LTTNG_UST_TP_ARGS(uint64_t, corr_id, uint64_t, stream, int32_t, pCaptureStatus),
+    LTTNG_UST_TP_FIELDS(
+        lttng_ust_field_integer(uint64_t, corr_id, corr_id)
+lttng_ust_field_integer_hex(uint64_t, stream, stream)
+lttng_ust_field_integer(int32_t, pCaptureStatus, pCaptureStatus)
+    )
+)
+
+LTTNG_UST_TRACEPOINT_EVENT(
+    rocm_hip, hipGraphAddKernelNode_args,
+    LTTNG_UST_TP_ARGS(uint64_t, corr_id, uint64_t, pGraphNode, uint64_t, graph, uint64_t, pDependencies, uint64_t, numDependencies, uint64_t, pNodeParams),
+    LTTNG_UST_TP_FIELDS(
+        lttng_ust_field_integer(uint64_t, corr_id, corr_id)
+lttng_ust_field_integer_hex(uint64_t, pGraphNode, pGraphNode)
+lttng_ust_field_integer_hex(uint64_t, graph, graph)
+lttng_ust_field_integer_hex(uint64_t, pDependencies, pDependencies)
+lttng_ust_field_integer(uint64_t, numDependencies, numDependencies)
+lttng_ust_field_integer_hex(uint64_t, pNodeParams, pNodeParams)
+    )
+)
+
+LTTNG_UST_TRACEPOINT_EVENT(
+    rocm_hip, hipGraphAddMemcpyNode_args,
+    LTTNG_UST_TP_ARGS(uint64_t, corr_id, uint64_t, pGraphNode, uint64_t, graph, uint64_t, pDependencies, uint64_t, numDependencies, uint64_t, pCopyParams),
+    LTTNG_UST_TP_FIELDS(
+        lttng_ust_field_integer(uint64_t, corr_id, corr_id)
+lttng_ust_field_integer_hex(uint64_t, pGraphNode, pGraphNode)
+lttng_ust_field_integer_hex(uint64_t, graph, graph)
+lttng_ust_field_integer_hex(uint64_t, pDependencies, pDependencies)
+lttng_ust_field_integer(uint64_t, numDependencies, numDependencies)
+lttng_ust_field_integer_hex(uint64_t, pCopyParams, pCopyParams)
+    )
+)
+
+LTTNG_UST_TRACEPOINT_EVENT(
+    rocm_hip, hipGraphAddMemsetNode_args,
+    LTTNG_UST_TP_ARGS(uint64_t, corr_id, uint64_t, pGraphNode, uint64_t, graph, uint64_t, pDependencies, uint64_t, numDependencies, uint64_t, pMemsetParams),
+    LTTNG_UST_TP_FIELDS(
+        lttng_ust_field_integer(uint64_t, corr_id, corr_id)
+lttng_ust_field_integer_hex(uint64_t, pGraphNode, pGraphNode)
+lttng_ust_field_integer_hex(uint64_t, graph, graph)
+lttng_ust_field_integer_hex(uint64_t, pDependencies, pDependencies)
+lttng_ust_field_integer(uint64_t, numDependencies, numDependencies)
+lttng_ust_field_integer_hex(uint64_t, pMemsetParams, pMemsetParams)
+    )
+)
+
+LTTNG_UST_TRACEPOINT_EVENT(
+    rocm_hip, hipGraphAddEventRecordNode_args,
+    LTTNG_UST_TP_ARGS(uint64_t, corr_id, uint64_t, pGraphNode, uint64_t, graph, uint64_t, pDependencies, uint64_t, numDependencies, uint64_t, event),
+    LTTNG_UST_TP_FIELDS(
+        lttng_ust_field_integer(uint64_t, corr_id, corr_id)
+lttng_ust_field_integer_hex(uint64_t, pGraphNode, pGraphNode)
+lttng_ust_field_integer_hex(uint64_t, graph, graph)
+lttng_ust_field_integer_hex(uint64_t, pDependencies, pDependencies)
+lttng_ust_field_integer(uint64_t, numDependencies, numDependencies)
+lttng_ust_field_integer_hex(uint64_t, event, event)
+    )
+)
+
+LTTNG_UST_TRACEPOINT_EVENT(
+    rocm_hip, hipGraphAddEventWaitNode_args,
+    LTTNG_UST_TP_ARGS(uint64_t, corr_id, uint64_t, pGraphNode, uint64_t, graph, uint64_t, pDependencies, uint64_t, numDependencies, uint64_t, event),
+    LTTNG_UST_TP_FIELDS(
+        lttng_ust_field_integer(uint64_t, corr_id, corr_id)
+lttng_ust_field_integer_hex(uint64_t, pGraphNode, pGraphNode)
+lttng_ust_field_integer_hex(uint64_t, graph, graph)
+lttng_ust_field_integer_hex(uint64_t, pDependencies, pDependencies)
+lttng_ust_field_integer(uint64_t, numDependencies, numDependencies)
+lttng_ust_field_integer_hex(uint64_t, event, event)
+    )
+)
+
+LTTNG_UST_TRACEPOINT_EVENT(
+    rocm_hip, hipGraphAddDependencies_args,
+    LTTNG_UST_TP_ARGS(uint64_t, corr_id, uint64_t, graph, uint64_t, from, uint64_t, to, uint64_t, numDependencies),
+    LTTNG_UST_TP_FIELDS(
+        lttng_ust_field_integer(uint64_t, corr_id, corr_id)
+lttng_ust_field_integer_hex(uint64_t, graph, graph)
+lttng_ust_field_integer_hex(uint64_t, from, from)
+lttng_ust_field_integer_hex(uint64_t, to, to)
+lttng_ust_field_integer(uint64_t, numDependencies, numDependencies)
+    )
+)
+
+LTTNG_UST_TRACEPOINT_EVENT(
+    rocm_hip, hipGraphLaunch_args,
+    LTTNG_UST_TP_ARGS(uint64_t, corr_id, uint64_t, graphExec, uint64_t, stream),
+    LTTNG_UST_TP_FIELDS(
+        lttng_ust_field_integer(uint64_t, corr_id, corr_id)
+lttng_ust_field_integer_hex(uint64_t, graphExec, graphExec)
+lttng_ust_field_integer_hex(uint64_t, stream, stream)
+    )
+)
+
+LTTNG_UST_TRACEPOINT_EVENT(
+    rocm_hip, hipGraphExecKernelNodeSetParams_args,
+    LTTNG_UST_TP_ARGS(uint64_t, corr_id, uint64_t, hGraphExec, uint64_t, node, uint64_t, pNodeParams),
+    LTTNG_UST_TP_FIELDS(
+        lttng_ust_field_integer(uint64_t, corr_id, corr_id)
+lttng_ust_field_integer_hex(uint64_t, hGraphExec, hGraphExec)
+lttng_ust_field_integer_hex(uint64_t, node, node)
+lttng_ust_field_integer_hex(uint64_t, pNodeParams, pNodeParams)
+    )
+)
+
+LTTNG_UST_TRACEPOINT_EVENT(
+    rocm_hip, hipGraphExecMemcpyNodeSetParams1D_args,
+    LTTNG_UST_TP_ARGS(uint64_t, corr_id, uint64_t, hGraphExec, uint64_t, node, uint64_t, dst, uint64_t, src, uint64_t, count, int32_t, kind),
+    LTTNG_UST_TP_FIELDS(
+        lttng_ust_field_integer(uint64_t, corr_id, corr_id)
+lttng_ust_field_integer_hex(uint64_t, hGraphExec, hGraphExec)
+lttng_ust_field_integer_hex(uint64_t, node, node)
+lttng_ust_field_integer_hex(uint64_t, dst, dst)
+lttng_ust_field_integer_hex(uint64_t, src, src)
+lttng_ust_field_integer(uint64_t, count, count)
+lttng_ust_field_integer(int32_t, kind, kind)
     )
 )
 

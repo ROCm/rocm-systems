@@ -49,6 +49,13 @@ C_TO_DSL = {
     'uint32_t':                {'uint32', 'enum'},
     'int64_t':                 {'int64'},
     'uint64_t':                {'uint64'},
+    # Narrow integer types are upper-compatible with the wider DSL
+    # uint32 type (used for hipMemsetD8/D16's `value` param). The
+    # helper signature widens to uint32_t.
+    'unsigned char':           {'uint32'},
+    'unsigned short':          {'uint32'},
+    'short':                   {'int32'},
+    'signed char':             {'int32'},
     'float':                   {'float'},
     'bool':                    {'bool'},   # spec §4.1: hard error if YAML uses uint32
     '_Bool':                   {'bool'},
@@ -61,14 +68,32 @@ C_TO_DSL = {
 }
 
 # Pointer-to-struct types from HIP/HSA — accept as `handle`.
+# Substring match against the canonical libclang spelling, e.g.
+# `ihipStream_t *` for hipStream_t. Some HIP graph types canonicalize
+# to names without the `_t` suffix (`ihipGraph`, `hipGraphExec`,
+# `hipGraphNode`); list both shapes here.
 HANDLE_TYPE_PATTERNS = (
     'ihipStream_t', 'ihipEvent_t', 'ihipModule_t', 'ihipFunction_t',
-    'ihipGraph_t', 'ihipGraphExec_t', 'ihipGraphNode_t', 'hipUserObject_t',
+    'ihipModuleSymbol_t',
+    'ihipGraph_t', 'ihipGraphExec_t', 'ihipGraphNode_t',
+    'ihipGraph', 'hipGraphExec', 'hipGraphNode',
+    'hipUserObject_t',
     'hsa_signal_t', 'hsa_queue_t', 'hsa_agent_t',
 )
 
 def _type_is_handle(c_type):
     return any(p in c_type for p in HANDLE_TYPE_PATTERNS)
+
+
+def _strip_one_pointer(c_type):
+    """Strip a single trailing `*` (with optional whitespace) from a C type
+    spelling. Used to normalize OUT params: header has `unsigned int *`,
+    but the DSL `uint32` describes the value the helper writes through it."""
+    s = c_type.rstrip()
+    if s.endswith('*'):
+        return s[:-1].rstrip()
+    return c_type
+
 
 def _is_compatible(c_type, dsl_type, canonical_type=None, is_enum=False):
     """Return True iff the C type is compatible with the DSL type.
@@ -118,8 +143,13 @@ def parse_headers(header_paths, extra_args):
 
     We capture the typedef spelling (c_type), the canonical spelling
     (canonical_type, e.g. `ihipStream_t *` for `hipStream_t`), and an
-    is_enum flag so the type-compat checker can recognize typedef'd
-    enums whose spelling lacks the `enum` keyword.
+    is_enum flag.
+
+    is_enum is True if EITHER the param itself is an enum (typedef'd
+    enum like `hipMemcpyKind`) OR the param is a pointer-to-enum (OUT
+    enum, e.g. `hipStreamCaptureStatus *`). Both cases are needed by
+    the type-compat checker since libclang strips the `enum` keyword
+    from typedef'd enums.
 
     On duplicate api_name across headers (shouldn't happen for HSA, but
     defend against it), the LATER header wins and a warning is emitted.
@@ -141,6 +171,11 @@ def parse_headers(header_paths, extra_args):
                 ct = arg.type
                 canon = ct.get_canonical()
                 is_enum = canon.kind == cindex.TypeKind.ENUM
+                # OUT enum: param is pointer-to-enum.
+                if (not is_enum and canon.kind == cindex.TypeKind.POINTER):
+                    pointee = canon.get_pointee()
+                    if pointee.kind == cindex.TypeKind.ENUM:
+                        is_enum = True
                 params.append((arg.spelling, ct.spelling, canon.spelling, is_enum))
             if n.spelling in union and union[n.spelling] != params:
                 print(f"WARN: {n.spelling}: declaration in {hp} differs from "
@@ -189,8 +224,17 @@ def verify(yaml_path, header_paths, extra_args, out_sidecar=None):
                     f"{name} arg {yaml_arg['name']}: C bool requires DSL type "
                     f"'bool' (spec §4.1), got {yaml_arg['type']!r}")
                 continue
-            if not _is_compatible(htype, yaml_arg['type'],
-                                  canonical_type=canon, is_enum=is_enum):
+            ok = _is_compatible(htype, yaml_arg['type'],
+                                canonical_type=canon, is_enum=is_enum)
+            # OUT params: the header carries pointer-to-T (e.g.
+            # `unsigned int *`), the DSL type describes T (e.g. `uint32`).
+            # Retry with one `*` stripped for OUT.
+            if not ok and yaml_arg['dir'] == 'OUT':
+                ok = _is_compatible(_strip_one_pointer(htype),
+                                    yaml_arg['type'],
+                                    canonical_type=_strip_one_pointer(canon),
+                                    is_enum=is_enum)
+            if not ok:
                 errors.append(
                     f"{name} arg {yaml_arg['name']}: type mismatch — C "
                     f"{htype!r} (canonical {canon!r}) not compatible with "

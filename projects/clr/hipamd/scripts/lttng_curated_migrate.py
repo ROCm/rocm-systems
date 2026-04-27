@@ -40,7 +40,11 @@ from clang import cindex
 # call-site expressions.
 _CURATED_IN_CAST_TMPL = {
     'handle':      '(uint64_t)(uintptr_t)({arg})',
-    'ptr':         '({arg})',
+    # `ptr` covers everything from `void*` to function pointers to
+    # struct pointers (e.g. `hipMemcpy3DParms*`). Cast through
+    # `(const void*)(uintptr_t)` so all pointer flavors — including
+    # function pointers — convert without a C++ type-checker complaint.
+    'ptr':         '(const void*)(uintptr_t)({arg})',
     'device_ptr':  '(uint64_t)({arg})',
     'size':        '({arg})',
     'int32':       '({arg})',
@@ -50,7 +54,9 @@ _CURATED_IN_CAST_TMPL = {
     'float':       '({arg})',
     'enum':        '(int32_t)({arg})',
     'bool':        '({arg})',
-    'cstring':     '({arg})',
+    # `cstring` is `const char*`; a plain (const char*) cast handles
+    # any const variants of the source.
+    'cstring':     '(const char*)({arg})',
     'dim3':        '({arg})',
     'dim3_packed': '({arg})',
 }
@@ -221,7 +227,20 @@ def overlay(provider, source_path, yaml_path, include_path):
                     captured.append(
                         _captured_arg_expr(a, f'__rocm_in_{a["name"]}'))
                 elif a['dir'] == 'OUT':
-                    captured.append(a['name'])
+                    # OUT args are passed by-pointer; helper deref's the
+                    # pointer to read the value at exit time. Most OUT
+                    # types use the source's pointer-to-T directly (e.g.
+                    # `unsigned int *` for OUT uint32 → helper `uint32_t*`
+                    # is layout-compatible). For OUT enum the helper
+                    # signature is `int32_t*` while the source is
+                    # `<some_typedef>*`, so cast to keep the C++ type
+                    # checker happy. Same for OUT bool (`int*`).
+                    if a['type'] == 'enum':
+                        captured.append(f'(int32_t*)({a["name"]})')
+                    elif a['type'] == 'bool':
+                        captured.append(f'(int*)({a["name"]})')
+                    else:
+                        captured.append(a['name'])
             if cls == 'STATUS':
                 if captured:
                     repl = (f'{cfg["curated_status"]}({fn}, {expr}, '

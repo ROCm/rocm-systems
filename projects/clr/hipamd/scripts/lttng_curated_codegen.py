@@ -409,23 +409,13 @@ def emit_emit_h(provider, apis, status_type, status_success, yaml_path, yaml_sha
 #include <stddef.h>
 #include "rocm_trace_tid.h"
 """)
-    # Only include rocm_dim3_pack.h if any API uses dim3 or dim3_packed.
-    # HSA APIs use no dim3 types and the HSA tree has no rocm_dim3_pack.h,
-    # so emitting this include unconditionally would break the HSA build.
-    needs_dim3 = any(a['type'] in ('dim3', 'dim3_packed')
-                     for api in apis for a in api['args'])
-    if needs_dim3:
-        out.append('#include "rocm_dim3_pack.h"\n')
-
-    out.append(f"""
-#if defined({enable_macro}) && {enable_macro}
-
-#include <atomic>
-#include "{provider}_curated_tp.h"
-""")
-    # Provider-runtime header. Helper signatures use provider types
-    # (hipError_t, hipStream_t, hsa_status_t, ...) so we need the
-    # runtime header in scope at the point of helper definition.
+    # Provider-runtime header — pulled in UNCONDITIONALLY (outside the
+    # HIP_ENABLE_LTTNG_UST guard) because BOTH the active-mode helpers and
+    # the no-op fallbacks use provider types in their signatures (e.g.
+    # `hipStream_t *`, `hipGraphNode_t *` for OUT-handle helpers per the
+    # C10 sidecar fix). Pre-Phase 14 the no-op branch only used
+    # uint64/void*/etc. and worked without the include; expanding to the
+    # full curated set added OUT-handle helpers in the no-op branch too.
     #
     # HIP: hip_runtime_api.h hard-#errors when neither __HIP_PLATFORM_AMD__
     # nor __HIP_PLATFORM_NVIDIA__ is defined, but several rocclr internal
@@ -433,6 +423,9 @@ def emit_emit_h(provider, apis, status_type, status_success, yaml_path, yaml_sha
     # device/rocm/rocvirtual.cpp) don't set the define. Force the AMD
     # platform here so the include is self-contained — this is HIP-on-AMD
     # code by definition; the NVIDIA path is irrelevant for libamdhip64.
+    #
+    # IMPORTANT: this define MUST precede rocm_dim3_pack.h since that
+    # header transitively pulls in <hip/hip_runtime_api.h> for `dim3`.
     if provider == 'rocm_hip':
         out.append("""\
 /* Force the AMD platform define so the host-only HIP runtime header is
@@ -446,6 +439,23 @@ def emit_emit_h(provider, apis, status_type, status_success, yaml_path, yaml_sha
 """)
     else:
         out.append('#include <hsa/hsa.h>\n#include <hsa/hsa_ext_amd.h>\n')
+
+    # Only include rocm_dim3_pack.h if any API uses dim3 or dim3_packed.
+    # HSA APIs use no dim3 types and the HSA tree has no rocm_dim3_pack.h,
+    # so emitting this include unconditionally would break the HSA build.
+    # Must come AFTER the platform define + hip_runtime_api.h include
+    # since rocm_dim3_pack.h transitively pulls hip_runtime_api.h for dim3.
+    needs_dim3 = any(a['type'] in ('dim3', 'dim3_packed')
+                     for api in apis for a in api['args'])
+    if needs_dim3:
+        out.append('#include "rocm_dim3_pack.h"\n')
+
+    out.append(f"""
+#if defined({enable_macro}) && {enable_macro}
+
+#include <atomic>
+#include "{provider}_curated_tp.h"
+""")
 
     # Reuse the same disabled flag as the existing generic helpers.
     # The rocm_trace_disabled() inline definition is guarded with
