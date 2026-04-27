@@ -87,14 +87,15 @@ lttng-sessiond --daemonize --pidfile "$SESSIOND_PIDFILE"
 TRACE_DIR="$WORK/trace"
 lttng create "$SESSION_NAME" --output "$TRACE_DIR" >/dev/null
 lttng enable-channel --userspace --discard --subbuf-size=32768 --num-subbuf=4 ch1 >/dev/null
-# Enable all curated _args events.
-python3 -c "
+# Enable all curated _args events. lttng enable-event takes a single
+# comma-separated event-name list, not multiple positional args.
+EVENTS=$(python3 -c "
 import sys
 sys.path.insert(0, 'projects/clr/hipamd/scripts')
 from lttng_curated_lib import parse_yaml_file
-for a in parse_yaml_file('$YAML'):
-    print(f'rocm_hip:{a[\"api\"]}_args')
-" | xargs -r lttng enable-event --userspace --channel=ch1 >/dev/null
+print(','.join(f'rocm_hip:{a[\"api\"]}_args' for a in parse_yaml_file('$YAML')))
+")
+lttng enable-event --userspace --channel=ch1 "$EVENTS" >/dev/null
 
 lttng start "$SESSION_NAME" >/dev/null
 "$WORK/coverage_test" || true   # placeholder args may cause hipError; OK

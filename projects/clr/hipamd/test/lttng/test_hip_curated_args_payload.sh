@@ -74,14 +74,10 @@ lttng enable-channel --userspace --discard --subbuf-size=32768 --num-subbuf=4 ch
 # Generic events (already covered by existing test; we re-enable to verify
 # augment-not-replace behavior).
 lttng enable-event --userspace --channel=ch1 \
-    'rocm_hip:hip_api_enter' \
-    'rocm_hip:hip_api_exit_status' \
-    'rocm_hip:hip_api_exit_ptr' >/dev/null
+    'rocm_hip:hip_api_enter,rocm_hip:hip_api_exit_status,rocm_hip:hip_api_exit_ptr' >/dev/null
 # Curated typed events.
 lttng enable-event --userspace --channel=ch1 \
-    'rocm_hip:hipMalloc_args' \
-    'rocm_hip:hipMemcpyAsync_args' \
-    'rocm_hip:hipDeviceSynchronize_args' >/dev/null
+    'rocm_hip:hipMalloc_args,rocm_hip:hipMemcpyAsync_args,rocm_hip:hipDeviceSynchronize_args' >/dev/null
 lttng start "$SESSION_NAME" >/dev/null
 
 "$WORK/curated_test"
