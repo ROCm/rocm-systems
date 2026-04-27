@@ -91,10 +91,12 @@ Benchmark Snapshot
 The draft benchmark compares the existing buffer, the BPF-style buffer, the
 per-producer ring POC, and the LTTng-UST shadow-emission POC with 64-byte
 payload records, 131072 records per round, and 15 rounds. Time values are
-median nanoseconds per record. Footprint values are MiB. The LTTng row below is
-the no-active-session path; active-session measurement is still blocked on this
-test host because ``lttng create`` fails in the local session-daemon control
-path after spawning ``lttng-sessiond``.
+median nanoseconds per record. Footprint values are MiB. The active LTTng
+benchmark required a matched LTTng userspace stack: the test host had
+``lttng-tools`` 2.13 loading ``liblttng-ctl`` 2.14, which made the client and
+session daemon disagree on control command IDs. The active rows below were run
+with a complete LTTng 2.14 stack extracted under ``/tmp`` and an isolated
+``LTTNG_HOME``/``XDG_RUNTIME_DIR``.
 
 .. list-table::
    :header-rows: 1
@@ -141,6 +143,13 @@ path after spawning ``lttng-sessiond``.
      - 31.953
      - 136.07
      - 141.81
+   * - 1
+     - LTTng-UST active
+     - 141.760
+     - 2.719
+     - 144.479
+     - 136.07
+     - 157.90
    * - 4
      - Current
      - 243.692
@@ -176,6 +185,13 @@ path after spawning ``lttng-sessiond``.
      - 290.512
      - 136.07
      - 141.84
+   * - 4
+     - LTTng-UST active
+     - 501.102
+     - 2.192
+     - 503.294
+     - 136.07
+     - 180.27
    * - 16
      - Current
      - 260.940
@@ -211,11 +227,20 @@ path after spawning ``lttng-sessiond``.
      - 297.481
      - 136.07
      - 142.29
+   * - 16
+     - LTTng-UST active
+     - 563.533
+     - 2.330
+     - 565.863
+     - 136.07
+     - 203.93
 
 With the requested ranking, the benchmark keeps the per-producer user-space
 ring as the preferred common transport. It has the lowest producer-side time in
 both private-memory and shared-mmap forms and it keeps footprint near the
 BPF-style buffer. BPF-style storage remains interesting only when minimizing
 footprint is more important than producer time. LTTng-UST remains a separate
-out-of-process subscription experiment until active-session measurements show a
-competitive time cost.
+out-of-process subscription experiment: the active tracepoint path works and
+produced 258.93 MiB of CTF trace data for the three-row active benchmark run,
+but its measured producer-side time is higher than the ring and BPF-style
+proposals.
