@@ -63,25 +63,42 @@ _CURATED_IN_CAST_TMPL = {
 
 # Provider-specific overrides for the IN-cast templates. HIP handles
 # are pointer typedefs (e.g. `hipStream_t = ihipStream_t*`), so the
-# uintptr_t cast in the default table above works. HSA handles are
-# value-type structs with a single `.handle` uint64_t member; reading
-# that member is the canonical way to get the integer-valued handle
-# (cf. HSA spec §2.3 "opaque handles"), and the (uintptr_t) cast on
-# the struct itself is not legal.
+# uintptr_t cast in the default table above works. HSA handles per
+# spec §2.3 are opaque structs with a single `.handle` uint64_t member;
+# reading that member is the canonical way to get the integer-valued
+# handle, and the (uintptr_t) cast on the struct itself is not legal.
+#
+# Wrinkle: a few HSA APIs take a *pointer* to a handle struct (e.g.
+# hsa_queue_destroy(hsa_queue_t *queue)) — for those the access is
+# `->handle` rather than `.handle`. The override is a callable so it
+# can dispatch on the libclang-resolved C type.
+def _hsa_handle_in_cast(arg, ident, c_type):
+    """For HSA handle IN-args, choose '.handle' (value type) or
+    '->handle' (pointer-to-struct) based on whether the param type is
+    a pointer. c_type is the libclang spelling, e.g. 'hsa_agent_t' or
+    'hsa_queue_t *'."""
+    if c_type and '*' in c_type:
+        return f'(uint64_t)(({ident})->handle)'
+    return f'(uint64_t)(({ident}).handle)'
+
+
 _CURATED_IN_CAST_OVERRIDES = {
     'hsa': {
-        'handle': '(uint64_t)(({arg}).handle)',
+        'handle': _hsa_handle_in_cast,
     },
 }
 
 
-def _captured_arg_expr(arg, ident, provider='hip'):
+def _captured_arg_expr(arg, ident, provider='hip', c_type=None):
     """Cast `ident` (typically '__rocm_in_<name>' or the OUT param name)
     to the helper's formal-param type per the DSL `arg`."""
     overrides = _CURATED_IN_CAST_OVERRIDES.get(provider, {})
-    tmpl = overrides.get(arg['type'])
-    if tmpl is None:
-        tmpl = _CURATED_IN_CAST_TMPL.get(arg['type'], '({arg})')
+    override = overrides.get(arg['type'])
+    if callable(override):
+        return override(arg, ident, c_type)
+    if isinstance(override, str):
+        return override.format(arg=ident)
+    tmpl = _CURATED_IN_CAST_TMPL.get(arg['type'], '({arg})')
     return tmpl.format(arg=ident)
 
 
@@ -245,7 +262,8 @@ def overlay(provider, source_path, yaml_path, include_path, extra_includes=None)
                 if a['dir'] == 'IN':
                     captured.append(
                         _captured_arg_expr(a, f'__rocm_in_{a["name"]}',
-                                           provider=provider))
+                                           provider=provider,
+                                           c_type=ptypes.get(a['name'])))
                 elif a['dir'] == 'OUT':
                     # OUT args are passed by-pointer; helper deref's the
                     # pointer to read the value at exit time. Most OUT
