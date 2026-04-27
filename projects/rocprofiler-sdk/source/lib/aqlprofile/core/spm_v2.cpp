@@ -3,7 +3,7 @@
 //
 
 #include "lib/aqlprofile/hsa_includes.h"
-#include "lib/aqlprofile/aql_profile_v2.h"
+#include "lib/aqlprofile/aqlprofile.hpp"
 #include "lib/aqlprofile/core/spm_common.hpp"
 #include "lib/aqlprofile/core/memorymanager.hpp"
 #include "lib/aqlprofile/core/commandbuffermgr.hpp"

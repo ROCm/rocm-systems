@@ -22,7 +22,7 @@
 
 #pragma once
 
-#include "lib/aqlprofile/aql_profile_v2.h"
+#include "lib/aqlprofile/aqlprofile.hpp"
 #include "lib/aqlprofile/pm4/trace_config.h"
 #include "lib/common/synchronized.hpp"
 

@@ -23,7 +23,6 @@
 #include <gtest/gtest.h>
 #include <gmock/gmock.h>
 #include "lib/aqlprofile/aqlprofile.hpp"
-#include "lib/aqlprofile/aql_profile_v2.h"
 
 // Mocks and helpers
 namespace

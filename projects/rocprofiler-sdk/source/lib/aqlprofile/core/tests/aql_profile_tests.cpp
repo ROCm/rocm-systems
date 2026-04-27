@@ -22,7 +22,7 @@
 #include "lib/aqlprofile/core/aql_profile.hpp"
 #include "lib/aqlprofile/aqlprofile.hpp"
 #include "lib/aqlprofile/core/pm4_factory.h"
-#include "lib/aqlprofile/aql_profile_v2.h"
+#include "lib/aqlprofile/aqlprofile.hpp"
 
 #include <gtest/gtest.h>
 #include <gmock/gmock.h>

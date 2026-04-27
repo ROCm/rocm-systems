@@ -27,7 +27,7 @@
 
 #include <iostream>
 #include <string>
-#include "lib/aqlprofile/aql_profile_v2.h"
+#include "lib/aqlprofile/aqlprofile.hpp"
 
 #include "lib/aqlprofile/core/aql_profile_exception.h"
 

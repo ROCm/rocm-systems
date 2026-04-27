@@ -22,8 +22,9 @@
 
 #pragma once
 
-#ifndef ROCPROFILER_INTERNAL_AQLPROFILE_INCLUDE
-#error "This file should not be included directly, use lib/aqlprofile/aqlprofile.hpp instead"
+#if !defined(ROCPROFILER_INTERNAL_AQLPROFILE_INCLUDE) ||                                           \
+    ROCPROFILER_INTERNAL_AQLPROFILE_INCLUDE != 1
+#    error "This file should not be included directly, use lib/aqlprofile/aqlprofile.hpp instead"
 #endif
 
 #ifdef _WIN32

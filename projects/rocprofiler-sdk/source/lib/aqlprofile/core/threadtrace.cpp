@@ -21,7 +21,7 @@
 // THE SOFTWARE.
 
 #include "lib/aqlprofile/core/aql_profile.hpp"
-#include "lib/aqlprofile/aql_profile_v2.h"
+#include "lib/aqlprofile/aqlprofile.hpp"
 
 #include <cstdint>
 #include <future>

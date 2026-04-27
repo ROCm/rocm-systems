@@ -19,6 +19,8 @@ configure_file(${CMAKE_CURRENT_LIST_DIR}/version.h.in
 
 add_library(rocprofiler-sdk-aqlprofile STATIC)
 add_library(rocprofiler-sdk::rocprofiler-sdk-aqlprofile ALIAS rocprofiler-sdk-aqlprofile)
+target_include_directories(rocprofiler-sdk-aqlprofile
+                           INTERFACE $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/source>)
 target_link_libraries(
     rocprofiler-sdk-aqlprofile
     PRIVATE $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-headers>

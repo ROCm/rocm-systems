@@ -1,6 +1,6 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-#include "lib/aqlprofile/aql_profile_v2.h"
+#include "lib/aqlprofile/aqlprofile.hpp"
 #include "lib/aqlprofile/core/logger.h"
 #include "lib/aqlprofile/core/pm4_factory.h"
 
