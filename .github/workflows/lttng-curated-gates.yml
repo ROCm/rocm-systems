@@ -1,0 +1,124 @@
+# LTTng curated parameter-capture: drift + verifier gates.
+#
+# Per spec §9.1 / §9.3 these gates run on every PR that touches the
+# curated YAML, the codegen/verify scripts, the generated tracepoint
+# headers, or this workflow itself. The gates ensure:
+#
+#   1. Drift gate (no libclang): regenerating the per-API headers from
+#      the checked-in YAML + sidecar JSON yields byte-identical output
+#      to the checked-in headers. Catches stale codegen output after a
+#      YAML edit that didn't run `cmake --build build/clr --target
+#      regenerate-lttng-curated`.
+#
+#   2. Verifier gate (libclang): the YAML signatures match the actual
+#      HIP header signatures, AND regenerating the sidecar JSON yields
+#      byte-identical output to the checked-in copy. Catches header-side
+#      type changes for OUT-handle params (per debate-review C10 fix --
+#      a missed sidecar update would mis-generate helper signatures
+#      without this check).
+#
+# Only HIP wiring is included here. HSA codegen + verify steps (and HSA
+# path filters) are added by Task 15h after the HSA assets land in
+# Tasks 15a–15g, to avoid referencing files that don't exist until
+# later commits.
+
+name: LTTng Curated Gates
+
+on:
+  pull_request:
+    paths:
+      - 'projects/clr/hipamd/scripts/curated_apis.yaml'
+      - 'projects/clr/hipamd/scripts/curated_apis_sigs.json'
+      - 'projects/clr/hipamd/scripts/lttng_curated_*.py'
+      - 'projects/clr/hipamd/src/lttng/rocm_hip_curated_tp.h'
+      - 'projects/clr/hipamd/src/lttng/rocm_trace_emit_curated.h'
+      # HSA path filters added by Task 15h after HSA files exist
+      - '.github/workflows/lttng-curated-gates.yml'
+  push:
+    branches: [develop]
+
+permissions:
+  contents: read
+
+jobs:
+  drift-gate:
+    name: Codegen drift (HIP)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: |
+            projects/clr/hipamd/scripts
+            projects/clr/hipamd/src/lttng
+            .github/workflows
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.12"
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pyyaml
+
+      - name: Regenerate HIP curated headers from checked-in sidecar and diff
+        # Drift gate runs WITHOUT libclang -- it consumes the checked-in
+        # curated_apis_sigs.json sidecar, regenerates the headers, and
+        # asserts byte-identity. The sidecar itself is regenerated +
+        # diffed by the verify-gate (which has libclang).
+        run: |
+          python3 projects/clr/hipamd/scripts/lttng_curated_codegen.py \
+            --yaml projects/clr/hipamd/scripts/curated_apis.yaml \
+            --sigs projects/clr/hipamd/scripts/curated_apis_sigs.json \
+            --provider rocm_hip \
+            --status-type hipError_t --status-success hipSuccess \
+            --out-tp projects/clr/hipamd/src/lttng/rocm_hip_curated_tp.h \
+            --out-emit projects/clr/hipamd/src/lttng/rocm_trace_emit_curated.h
+          git diff --exit-code -- \
+            projects/clr/hipamd/src/lttng/rocm_hip_curated_tp.h \
+            projects/clr/hipamd/src/lttng/rocm_trace_emit_curated.h
+      # HSA codegen step added by Task 15h after HSA files exist
+
+  verify-gate:
+    name: Verifier (libclang vs YAML) + sidecar drift
+    runs-on: ubuntu-latest
+    container:
+      # Use the project's standard ROCm image so HIP headers are present
+      # at /opt/rocm/include for libclang to parse. Adjust to whichever
+      # ROCm image the project's other CI jobs use.
+      image: rocm/dev-ubuntu-24.04:latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: |
+            projects/clr/hipamd/scripts
+            .github/workflows
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.12"
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pyyaml libclang
+
+      - name: Verify HIP YAML against headers + diff sidecar
+        # Verifier rewrites the sidecar JSON; if a header changed in a
+        # way that affects an OUT-handle's libclang-resolved C type, the
+        # sidecar diff catches it (and the drift-gate would then mis-
+        # generate the helper signature without this check).
+        run: |
+          python3 projects/clr/hipamd/scripts/lttng_curated_verify.py \
+            --yaml projects/clr/hipamd/scripts/curated_apis.yaml \
+            --header /opt/rocm/include/hip/hip_runtime_api.h \
+            --extra-arg=-D__HIP_PLATFORM_AMD__=1 \
+            --extra-arg=-I/opt/rocm/include \
+            --out-sidecar projects/clr/hipamd/scripts/curated_apis_sigs.json
+          git diff --exit-code -- \
+            projects/clr/hipamd/scripts/curated_apis_sigs.json
+      # HSA verify step added by Task 15h after HSA files exist
