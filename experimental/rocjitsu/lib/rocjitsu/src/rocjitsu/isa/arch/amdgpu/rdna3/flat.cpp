@@ -42,7 +42,7 @@ void FlatLoadU8Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->is_load = true;
   d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
-  flat_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  flat_calculate_addresses(inst_, wf, *d);
   set_data(std::move(d));
 }
 
@@ -67,7 +67,7 @@ void FlatLoadI8Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->sign_extend = true;
   d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
-  flat_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  flat_calculate_addresses(inst_, wf, *d);
   set_data(std::move(d));
 }
 
@@ -91,7 +91,7 @@ void FlatLoadU16Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->is_load = true;
   d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
-  flat_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  flat_calculate_addresses(inst_, wf, *d);
   set_data(std::move(d));
 }
 
@@ -116,7 +116,7 @@ void FlatLoadI16Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->sign_extend = true;
   d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
-  flat_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  flat_calculate_addresses(inst_, wf, *d);
   set_data(std::move(d));
 }
 
@@ -140,7 +140,7 @@ void FlatLoadB32Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->is_load = true;
   d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
-  flat_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  flat_calculate_addresses(inst_, wf, *d);
   set_data(std::move(d));
 }
 
@@ -164,7 +164,7 @@ void FlatLoadB64Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->is_load = true;
   d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
-  flat_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  flat_calculate_addresses(inst_, wf, *d);
   set_data(std::move(d));
 }
 
@@ -188,7 +188,7 @@ void FlatLoadB96Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->is_load = true;
   d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
-  flat_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  flat_calculate_addresses(inst_, wf, *d);
   set_data(std::move(d));
 }
 
@@ -212,7 +212,7 @@ void FlatLoadB128Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->is_load = true;
   d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
-  flat_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  flat_calculate_addresses(inst_, wf, *d);
   set_data(std::move(d));
 }
 
@@ -235,7 +235,7 @@ void FlatStoreB8Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->is_load = false;
   d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
-  flat_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  flat_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 1);
@@ -267,7 +267,7 @@ void FlatStoreB16Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->is_load = false;
   d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
-  flat_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  flat_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 2);
@@ -299,7 +299,7 @@ void FlatStoreB32Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->is_load = false;
   d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
-  flat_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  flat_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 4);
@@ -331,7 +331,7 @@ void FlatStoreB64Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->is_load = false;
   d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
-  flat_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  flat_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 8);
@@ -365,7 +365,7 @@ void FlatStoreB96Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->is_load = false;
   d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
-  flat_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  flat_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 12);
@@ -401,7 +401,7 @@ void FlatStoreB128Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->is_load = false;
   d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
-  flat_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  flat_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 16);
@@ -440,7 +440,7 @@ void FlatLoadD16U8Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->is_load = true;
   d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
-  flat_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  flat_calculate_addresses(inst_, wf, *d);
   set_data(std::move(d));
 }
 
@@ -465,7 +465,7 @@ void FlatLoadD16I8Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->sign_extend = true;
   d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
-  flat_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  flat_calculate_addresses(inst_, wf, *d);
   set_data(std::move(d));
 }
 
@@ -489,7 +489,7 @@ void FlatLoadD16B16Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->is_load = true;
   d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
-  flat_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  flat_calculate_addresses(inst_, wf, *d);
   set_data(std::move(d));
 }
 
@@ -513,7 +513,7 @@ void FlatLoadD16HiU8Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->is_load = true;
   d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
-  flat_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  flat_calculate_addresses(inst_, wf, *d);
   set_data(std::move(d));
 }
 
@@ -538,7 +538,7 @@ void FlatLoadD16HiI8Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->sign_extend = true;
   d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
-  flat_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  flat_calculate_addresses(inst_, wf, *d);
   set_data(std::move(d));
 }
 
@@ -562,7 +562,7 @@ void FlatLoadD16HiB16Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->is_load = true;
   d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
-  flat_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  flat_calculate_addresses(inst_, wf, *d);
   set_data(std::move(d));
 }
 
@@ -585,7 +585,7 @@ void FlatStoreD16HiB8Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->is_load = false;
   d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
-  flat_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  flat_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 1);
@@ -617,7 +617,7 @@ void FlatStoreD16HiB16Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->is_load = false;
   d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
-  flat_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  flat_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 2);
@@ -653,7 +653,7 @@ void FlatAtomicSwapB32Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->atomic_op = amdgpu::AtomicOp::SWAP;
   d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
-  flat_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  flat_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 4);
@@ -689,7 +689,7 @@ void FlatAtomicCmpswapB32Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->atomic_op = amdgpu::AtomicOp::CMPSWAP;
   d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
-  flat_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  flat_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 8);
@@ -727,7 +727,7 @@ void FlatAtomicAddU32Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->atomic_op = amdgpu::AtomicOp::ADD;
   d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
-  flat_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  flat_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 4);
@@ -763,7 +763,7 @@ void FlatAtomicSubU32Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->atomic_op = amdgpu::AtomicOp::SUB;
   d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
-  flat_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  flat_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 4);
@@ -799,7 +799,7 @@ void FlatAtomicMinI32Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->atomic_op = amdgpu::AtomicOp::SMIN;
   d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
-  flat_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  flat_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 4);
@@ -835,7 +835,7 @@ void FlatAtomicMinU32Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->atomic_op = amdgpu::AtomicOp::UMIN;
   d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
-  flat_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  flat_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 4);
@@ -871,7 +871,7 @@ void FlatAtomicMaxI32Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->atomic_op = amdgpu::AtomicOp::SMAX;
   d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
-  flat_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  flat_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 4);
@@ -907,7 +907,7 @@ void FlatAtomicMaxU32Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->atomic_op = amdgpu::AtomicOp::UMAX;
   d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
-  flat_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  flat_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 4);
@@ -943,7 +943,7 @@ void FlatAtomicAndB32Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->atomic_op = amdgpu::AtomicOp::AND;
   d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
-  flat_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  flat_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 4);
@@ -979,7 +979,7 @@ void FlatAtomicOrB32Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->atomic_op = amdgpu::AtomicOp::OR;
   d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
-  flat_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  flat_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 4);
@@ -1015,7 +1015,7 @@ void FlatAtomicXorB32Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->atomic_op = amdgpu::AtomicOp::XOR;
   d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
-  flat_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  flat_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 4);
@@ -1051,7 +1051,7 @@ void FlatAtomicIncU32Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->atomic_op = amdgpu::AtomicOp::INC;
   d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
-  flat_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  flat_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 4);
@@ -1087,7 +1087,7 @@ void FlatAtomicDecU32Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->atomic_op = amdgpu::AtomicOp::DEC;
   d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
-  flat_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  flat_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 4);
@@ -1123,7 +1123,7 @@ void FlatAtomicSwapB64Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->atomic_op = amdgpu::AtomicOp::SWAP;
   d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
-  flat_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  flat_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 4);
@@ -1159,7 +1159,7 @@ void FlatAtomicCmpswapB64Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->atomic_op = amdgpu::AtomicOp::CMPSWAP;
   d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
-  flat_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  flat_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 8);
@@ -1197,7 +1197,7 @@ void FlatAtomicAddU64Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->atomic_op = amdgpu::AtomicOp::ADD;
   d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
-  flat_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  flat_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 4);
@@ -1233,7 +1233,7 @@ void FlatAtomicSubU64Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->atomic_op = amdgpu::AtomicOp::SUB;
   d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
-  flat_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  flat_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 4);
@@ -1269,7 +1269,7 @@ void FlatAtomicMinI64Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->atomic_op = amdgpu::AtomicOp::SMIN;
   d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
-  flat_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  flat_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 8);
@@ -1307,7 +1307,7 @@ void FlatAtomicMinU64Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->atomic_op = amdgpu::AtomicOp::UMIN;
   d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
-  flat_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  flat_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 8);
@@ -1345,7 +1345,7 @@ void FlatAtomicMaxI64Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->atomic_op = amdgpu::AtomicOp::SMAX;
   d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
-  flat_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  flat_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 8);
@@ -1383,7 +1383,7 @@ void FlatAtomicMaxU64Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->atomic_op = amdgpu::AtomicOp::UMAX;
   d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
-  flat_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  flat_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 8);
@@ -1421,7 +1421,7 @@ void FlatAtomicAndB64Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->atomic_op = amdgpu::AtomicOp::AND;
   d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
-  flat_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  flat_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 4);
@@ -1457,7 +1457,7 @@ void FlatAtomicOrB64Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->atomic_op = amdgpu::AtomicOp::OR;
   d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
-  flat_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  flat_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 4);
@@ -1493,7 +1493,7 @@ void FlatAtomicXorB64Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->atomic_op = amdgpu::AtomicOp::XOR;
   d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
-  flat_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  flat_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 4);
@@ -1529,7 +1529,7 @@ void FlatAtomicIncU64Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->atomic_op = amdgpu::AtomicOp::INC;
   d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
-  flat_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  flat_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 4);
@@ -1565,7 +1565,7 @@ void FlatAtomicDecU64Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->atomic_op = amdgpu::AtomicOp::DEC;
   d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
-  flat_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  flat_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 4);
@@ -1601,7 +1601,7 @@ void FlatAtomicCmpswapF32Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->atomic_op = amdgpu::AtomicOp::CMPSWAP;
   d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
-  flat_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  flat_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 8);
@@ -1639,7 +1639,7 @@ void FlatAtomicMinF32Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->atomic_op = amdgpu::AtomicOp::FMIN;
   d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
-  flat_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  flat_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 4);
@@ -1675,7 +1675,7 @@ void FlatAtomicMaxF32Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->atomic_op = amdgpu::AtomicOp::FMAX;
   d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
-  flat_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  flat_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 4);
@@ -1711,7 +1711,7 @@ void FlatAtomicAddF32Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->atomic_op = amdgpu::AtomicOp::FADD;
   d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
-  flat_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  flat_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 4);

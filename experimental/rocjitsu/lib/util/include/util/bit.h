@@ -174,21 +174,6 @@ inline T extend_bits(T val, int num_bits) {
   return res;
 }
 
-/// @brief Return the popcount of val.
-/// @param[in] val Value whose bits are being counted.
-/// @returns Number of 1 bits.
-template <typename T> inline int popcount(T val) { return std::popcount<T>(val); }
-
-/// @brief lead_zero_count. Return the leading zero count of val.
-/// @param[in] val Value whose bits are being counted.
-/// @returns Number of leading 0 bits.
-template <typename T> inline int lead_zero_count(T val) { return std::countl_zero<T>(val); }
-
-/// @brief Return the trailing zero count of val.
-/// @param[in] val Value whose bits are being counted.
-/// @returns Number of trailing 0 bits.
-template <typename T> inline int trail_zero_count(T val) { return std::countr_zero<T>(val); }
-
 /// @brief Check if a number is a power of 2.
 /// @param[in] val Value to check.
 /// @returns true if @p val is a power of 2.

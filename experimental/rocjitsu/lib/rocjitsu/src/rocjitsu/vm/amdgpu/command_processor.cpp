@@ -272,9 +272,8 @@ bool CommandProcessor::step() {
         init_wavefront_regs(cu, wf, pkt, global_wg_id, w);
         wg_wavefronts.push_back(wf);
       }
-      plugin_group_->onAmdgpuDispatchWorkgroup(
-            global_wg_id, pkt.vgprs_per_wf, pkt.sgprs_per_wf,
-            std::span<Wavefront *>(wg_wavefronts));
+      plugin_group_->onAmdgpuDispatchWorkgroup(global_wg_id, pkt.vgprs_per_wf, pkt.sgprs_per_wf,
+                                               std::span<Wavefront *>(wg_wavefronts));
       next_cu_ = (cu_idx + 1) % cus_.size();
       wg_dispatched = true;
     }
@@ -628,44 +627,52 @@ void CommandProcessor::process_aql_packet(const hsa_kernel_dispatch_packet_t &pk
   // Fast-path for multi-WF blit copies only: wfs_per_wg >= 4 AND vgprs <= 16
   // AND signal=0 AND user_sgprs >= 8. This catches the 27MB Tensile code object
   // copy kernel but not CopyAligned (single-WF) or Tensile GEMM (high vgprs).
-  // Fast-path for blit copy kernels: kcp=0x8 (only kernarg_ptr), vgprs <= 24
-  // (blits use 8-24), and no scratch (private_segment_fixed_size == 0).
-  // This catches CopyAligned and multi-WF blits but not HIP compute kernels
-  // (which use scratch) or Tensile GEMM (which uses 64+ VGPRs).
-  // Fast-path for ROCR blit copy kernels. Detected by: kcp=0x8, no scratch,
-  // vgprs <= 24, AND workgroup_size is 64 or 256 (ROCR blit standard sizes).
-  // This excludes HIP compute kernels which use different workgroup sizes.
-  // Fast-path: skip ROCR blit copy kernels by doing memcpy directly.
-  // Detected by: kcp=0x8, vgprs 16-24 (copies, not fills which use 8),
-  // no scratch, and both src/dst are host-mapped.
-  if (false) { // DISABLED until SDMA model is ready
-    auto *ka = reinterpret_cast<const uint32_t *>(pkt.kernarg_address);
-    uint64_t src = static_cast<uint64_t>(ka[0]) | (static_cast<uint64_t>(ka[1]) << 32);
-    uint64_t dst = static_cast<uint64_t>(ka[2]) | (static_cast<uint64_t>(ka[3]) << 32);
-    uint32_t size = ka[8];
-    bool src_mapped = memory_ && size > 0 && size <= 256 * 1024 * 1024 &&
-                      memory_->is_host_mapped(src) && memory_->is_host_mapped(src + size - 1);
-    bool dst_mapped = memory_ && size > 0 && size <= 256 * 1024 * 1024 &&
-                      memory_->is_host_mapped(dst) && memory_->is_host_mapped(dst + size - 1);
-    if (src != 0 && dst != 0 && src_mapped && dst_mapped) {
-      std::memcpy(reinterpret_cast<void *>(dst), reinterpret_cast<const void *>(src), size);
-      util::Logger::vm("CP: blit fast-path memcpy 0x", std::hex, src, " -> 0x", dst, std::dec,
-                       " size=", size, " signal=0x", std::hex, pkt.completion_signal.handle);
-      // Fire completion signal if present (CopyAligned blits have signals).
-      if (pkt.completion_signal.handle != 0) {
-        constexpr uint32_t SIG_VAL_OFF = 8, MAILBOX_PTR_OFF = 16, EVENT_ID_OFF = 24;
-        auto *val = reinterpret_cast<int64_t *>(pkt.completion_signal.handle + SIG_VAL_OFF);
-        std::atomic_ref<int64_t>(*val).fetch_sub(1, std::memory_order_release);
-        auto mbp = *reinterpret_cast<uint64_t *>(pkt.completion_signal.handle + MAILBOX_PTR_OFF);
-        if (mbp != 0) {
-          auto eid = *reinterpret_cast<uint32_t *>(pkt.completion_signal.handle + EVENT_ID_OFF);
-          std::atomic_ref<uint64_t>(*reinterpret_cast<uint64_t *>(mbp))
-              .store(uint64_t(eid), std::memory_order_release);
-          if (interrupt_cb_)
-            interrupt_cb_(eid);
+  // Fast-path for ROCR blit copy kernels: replace instruction simulation with
+  // a single memcpy. Detected by: kcp=0x8 (only kernarg_ptr), vgprs 16-24
+  // (copies use 24, fills use 8), and both src/dst are host-mapped.
+  //
+  // ROCR CopyAligned kernarg layout (4-phase copy):
+  //   dw[0:1]   = phase1_src_start    dw[2:3]   = phase1_dst_start
+  //   dw[4:5]   = phase2_src_start    dw[6:7]   = phase2_dst_start
+  //   dw[8:9]   = phase3_src_start    dw[10:11] = phase3_dst_start
+  //   dw[12:13] = phase4_src_start    dw[14:15] = phase4_dst_start
+  //   dw[16:17] = phase4_src_end      dw[18:19] = phase4_dst_end
+  //   dw[20]    = num_workitems
+  //
+  // For the fast-path we compute total_size = phase4_src_end - phase1_src_start
+  // and do a single memcpy from phase1_src to phase1_dst.
+  uint16_t kcp = kd.kernel_code_properties;
+  if (host_accessible && kcp == 0x8 && vgprs >= 16 && vgprs <= 24 &&
+      pkt.kernarg_address != nullptr && memory_) {
+    auto *ka = reinterpret_cast<const uint64_t *>(pkt.kernarg_address);
+    uint64_t src = ka[0];     // phase1_src_start
+    uint64_t dst = ka[1];     // phase1_dst_start
+    uint64_t src_end = ka[8]; // phase4_src_end
+    if (src_end > src && src != 0 && dst != 0) {
+      uint64_t size = src_end - src;
+      bool src_mapped = size <= 256 * 1024 * 1024 && memory_->is_host_mapped(src) &&
+                        memory_->is_host_mapped(src + size - 1);
+      bool dst_mapped = memory_->is_host_mapped(dst) && memory_->is_host_mapped(dst + size - 1);
+      if (src_mapped && dst_mapped) {
+        std::memcpy(reinterpret_cast<void *>(dst), reinterpret_cast<const void *>(src), size);
+        util::Logger::vm("CP: blit fast-path memcpy 0x", std::hex, src, " -> 0x", dst, std::dec,
+                         " size=", size, " signal=0x", std::hex, pkt.completion_signal.handle);
+        // Fire completion signal if present.
+        if (pkt.completion_signal.handle != 0) {
+          constexpr uint32_t SIG_VAL_OFF = 8, MAILBOX_PTR_OFF = 16, EVENT_ID_OFF = 24;
+          auto *val = reinterpret_cast<int64_t *>(pkt.completion_signal.handle + SIG_VAL_OFF);
+          std::atomic_ref<int64_t>(*val).fetch_sub(1, std::memory_order_release);
+          auto mbp = *reinterpret_cast<uint64_t *>(pkt.completion_signal.handle + MAILBOX_PTR_OFF);
+          if (mbp != 0) {
+            auto eid = *reinterpret_cast<uint32_t *>(pkt.completion_signal.handle + EVENT_ID_OFF);
+            std::atomic_ref<uint64_t>(*reinterpret_cast<uint64_t *>(mbp))
+                .store(uint64_t(eid), std::memory_order_release);
+            if (interrupt_cb_)
+              interrupt_cb_(eid);
+          }
         }
+        return;
       }
-      return;
     }
   }
 

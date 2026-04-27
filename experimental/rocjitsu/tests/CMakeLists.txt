@@ -194,6 +194,59 @@ if(HIPCC_EXECUTABLE AND HSA_RUNTIME64)
     rj_add_hip_test_case(hip_memcpy_test "HipMemcpyTest.RoundTripInt")
     rj_add_hip_test_case(hip_memcpy_test "HipMemcpyTest.DeviceToDevice")
     rj_add_hip_test(hip_vector_add_test)
+
+    # --- rocBLAS GEMM test ---
+    find_library(ROCBLAS_LIB rocblas PATHS /opt/rocm/lib ENV ROCM_PATH PATH_SUFFIXES lib)
+    if(ROCBLAS_LIB)
+        set(GEMM_SRC ${CMAKE_CURRENT_SOURCE_DIR}/hip_gemm_test.cpp)
+        set(GEMM_BIN ${CMAKE_CURRENT_BINARY_DIR}/hip_gemm_test)
+        add_custom_command(OUTPUT ${GEMM_BIN}
+            COMMAND ${HIPCC_EXECUTABLE} --offload-arch=gfx950 -std=c++20
+                -isystem ${GTEST_INC}
+                -L${GTEST_LIB_DIR} -lgtest -lpthread -lrocblas
+                -Wl,-rpath,${GTEST_LIB_DIR}
+                -o ${GEMM_BIN} ${GEMM_SRC}
+            DEPENDS ${GEMM_SRC} GTest::gtest
+            COMMENT "Building hip_gemm_test with hipcc + rocblas"
+            VERBATIM
+        )
+        add_custom_target(hip_gemm_test_target ALL DEPENDS ${GEMM_BIN})
+
+        # CDNA4 test cases (default KMD config).
+        foreach(TC IN ITEMS
+            Tiny_2x2x3 Square_4x4 Square_8x8 Square_16x16
+            Square_32x32 Square_64x64 Rect_16x32x8 Rect_1x64x1
+            Rect_64x1x64 Rect_7x11x13 AlphaBeta BetaZero)
+            rj_add_hip_test_case(hip_gemm_test "RocblasGemmTest.${TC}")
+        endforeach()
+        foreach(I RANGE 0 4)
+            rj_add_hip_test_case(hip_gemm_test "RocblasGemmFuzz.Iter${I}")
+        endforeach()
+
+        # CDNA3 test cases (same binary, CDNA3 KMD config).
+        set(RJ_CDNA3_ENV
+            "LD_PRELOAD=$<TARGET_FILE:rocjitsu_kmd_shim>"
+            "RJ_CONFIG=${CMAKE_SOURCE_DIR}/configs/amdgpu_cdna3_kmd.json"
+            "RJ_SCHEMA=${CMAKE_SOURCE_DIR}/schemas/simulation_config.fbs"
+        )
+        foreach(TC IN ITEMS
+            Tiny_2x2x3 Square_16x16 Square_32x32 Rect_7x11x13)
+            add_test(NAME "RocblasGemmCdna3.${TC}"
+                COMMAND ${GEMM_BIN} --gtest_filter=RocblasGemmTest.${TC})
+            set_tests_properties("RocblasGemmCdna3.${TC}" PROPERTIES
+                ENVIRONMENT "${RJ_CDNA3_ENV}" TIMEOUT 120)
+        endforeach()
+        foreach(I RANGE 0 2)
+            add_test(NAME "RocblasGemmCdna3.Fuzz_Iter${I}"
+                COMMAND ${GEMM_BIN} --gtest_filter=RocblasGemmFuzz.Iter${I})
+            set_tests_properties("RocblasGemmCdna3.Fuzz_Iter${I}" PROPERTIES
+                ENVIRONMENT "${RJ_CDNA3_ENV}" TIMEOUT 120)
+        endforeach()
+        message(STATUS "rocBLAS GEMM test enabled (found ${ROCBLAS_LIB})")
+    else()
+        message(STATUS "rocBLAS GEMM test disabled (librocblas not found)")
+    endif()
+
     message(STATUS "HIP tests enabled (found ${HIPCC_EXECUTABLE})")
 else()
     message(STATUS "HIP tests disabled (hipcc or libhsa-runtime64 not found)")

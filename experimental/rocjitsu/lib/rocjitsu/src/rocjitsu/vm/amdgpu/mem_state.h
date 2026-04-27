@@ -68,7 +68,9 @@ struct VectorMemState : DynamicInstState {
   VectorMemState(MemPipelineTag pipeline) { tag_ = pipeline; }
   std::array<uint64_t, 64> per_lane_addr = {};
   uint64_t lane_mask = 0;
-  uint32_t wf_size = 64; ///< Wavefront width (set from wavefront's wf_size()).
+  uint64_t exec_mask = 0; ///< EXEC mask at issue time. Set by addr calc functions.
+                          ///< Writeback zeroes OOB lanes (exec_mask & ~lane_mask).
+  uint32_t wf_size = 64;  ///< Wavefront width (set from wavefront's wf_size()).
   uint32_t dst_reg_base = 0;
   uint32_t elem_size = 0;
   uint32_t num_elems = 0;
@@ -82,6 +84,18 @@ struct VectorMemState : DynamicInstState {
   uint64_t issue_pc = 0;               ///< PC at which the instruction was issued (debug).
   std::vector<uint8_t> response_data;
   std::vector<uint8_t> store_data;
+
+  /// @brief DS dual-access support (ds_write2/ds_read2).
+  ///
+  /// When ds2_active is true, per_lane_addr holds the first access addresses
+  /// and ds2_per_lane_addr holds the second. For loads, ds2_dst_reg_base is
+  /// the VGPR base for the second access result. For stores, ds2_store_data
+  /// contains the second access data.
+  bool ds2_active = false;
+  std::array<uint64_t, 64> ds2_per_lane_addr = {};
+  uint32_t ds2_dst_reg_base = 0;
+  std::vector<uint8_t> ds2_store_data;
+  std::vector<uint8_t> ds2_response_data;
 };
 
 } // namespace amdgpu
