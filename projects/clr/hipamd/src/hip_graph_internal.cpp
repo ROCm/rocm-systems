@@ -1836,7 +1836,16 @@ hipError_t GraphExec::EnqueueSegment(const Segment& segment, hip::Stream* stream
     if (!flatData->empty()) {
       // Patch reserved2 (correlation_id) in each dispatch packet so the profiler can
       // attribute GPU events from graph replay to the current hipGraphLaunch call.
-      // HSA kernel dispatch packets are 64 bytes; reserved2 is at byte offset 56.
+      // hsa_kernel_dispatch_packet_t layout (64 bytes, HSA_LARGE_MODEL):
+      //   offset 0:  header/setup (u32)
+      //   offset 4:  workgroup_size_x/y/z (3xu16) + reserved0 (u16)
+      //   offset 12: grid_size_x/y/z (3xu32)
+      //   offset 24: private_segment_size (u32)
+      //   offset 28: group_segment_size (u32)
+      //   offset 32: kernel_object (u64)
+      //   offset 40: kernarg_address (void*)
+      //   offset 48: reserved2 (u64)    ← correlation_id goes here
+      //   offset 56: completion_signal (u64) ← ApplyHwEventPatches writes here; do NOT touch
       // Packet type 2 (HSA_PACKET_TYPE_KERNEL_DISPATCH) is in header bits [7:0].
       if (amd::activity_prof::IsEnabled(OP_ID_DISPATCH)) {
         const uint64_t corr_id = amd::activity_prof::correlation_id;
@@ -1844,7 +1853,7 @@ hipError_t GraphExec::EnqueueSegment(const Segment& segment, hip::Stream* stream
         for (size_t p = 0; p < numPackets; ++p) {
           if (((*flatHdrs)[p] & 0xFF) == 2 /* HSA_PACKET_TYPE_KERNEL_DISPATCH */) {
             uint8_t* pkt = const_cast<uint8_t*>(flatData->data()) + p * PacketBatch::kAqlPktSize;
-            std::memcpy(pkt + 56, &corr_id, sizeof(corr_id));
+            std::memcpy(pkt + 48, &corr_id, sizeof(corr_id));
           }
         }
       }
