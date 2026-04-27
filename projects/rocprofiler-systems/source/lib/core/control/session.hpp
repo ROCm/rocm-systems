@@ -9,6 +9,7 @@
 
 #include <atomic>
 #include <mutex>
+#include <string_view>
 #include <vector>
 
 namespace rocprofsys::control
@@ -48,13 +49,18 @@ public:
         return m_active.load(std::memory_order_relaxed);
     }
 
+    /// True iff every trigger except @p name has voted active or abstain.
+    /// Used by consumers (e.g. roctx_client's marker gate) that combine a
+    /// trigger-local rule with "no external trigger pausing us".
+    [[nodiscard]] bool is_active_excluding(std::string_view name) const noexcept;
+
 private:
     std::vector<vote_entry> m_votes;
     std::vector<subscriber> m_subscribers;
     std::atomic<bool>       m_active{ true };
 
-    std::mutex m_votes_mutex;
-    std::mutex m_subscribers_mutex;
+    mutable std::mutex m_votes_mutex;
+    std::mutex         m_subscribers_mutex;
 
     [[nodiscard]] bool resolve_locked() const noexcept;
     void               notify_pause();

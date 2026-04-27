@@ -85,6 +85,20 @@ session::resolve_locked() const noexcept
     return true;
 }
 
+bool
+session::is_active_excluding(std::string_view name) const noexcept
+{
+    // Cold path: typical caller (roctx marker gate) hits this only on the
+    // recording side after a fast atomic check, and there are 1-2 votes.
+    std::scoped_lock const lk{ m_votes_mutex };
+    for(const auto& entry : m_votes)
+    {
+        if(entry.name == name) continue;
+        if(entry.current_vote == vote::paused) return false;
+    }
+    return true;
+}
+
 void
 session::notify_pause()
 {
