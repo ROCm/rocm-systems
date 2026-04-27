@@ -247,6 +247,16 @@ producer_loop(
         att_queue_submit(queue, &buffer_packet.query_status, submit_signal);
         signal_wait(*submit_signal);
 
+        // The destructor path force-wakes this signal_wait by storing 0.
+        // If we were woken that way, the GPU may not have processed the query
+        // packet yet, so query_buffer_status_fn would return stale/garbage
+        // data. Bail out before consuming it.
+        if(worker_flag.load() == WORKER_FLAG_DESTRUCTOR)
+        {
+            ROCP_INFO << "Producer woken at query signal by destructor; bailing out";
+            return;
+        }
+
         if(auto status = buffer_packet.query_buffer_status_fn(buffer_packet))
         {
             ROCP_TRACE << "Sending buffer swap";
@@ -292,6 +302,15 @@ producer_loop(
             // buffer, so skip the backoff when a flip just occurred.
             do_sleep = false;
             signal_wait(*submit_signal);
+
+            // Same destructor force-wake concern as the earlier signal_wait:
+            // bail before re-entering the loop body so we don't restart traces
+            // or submit further packets during teardown.
+            if(worker_flag.load() == WORKER_FLAG_DESTRUCTOR)
+            {
+                ROCP_INFO << "Producer woken at swap signal by destructor; bailing out";
+                return;
+            }
         }
     }
     stop_trace();
