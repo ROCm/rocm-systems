@@ -50,6 +50,7 @@ class ExpansionKind(Enum):
     MFMA = auto()
     ACCVGPR = auto()
     WMMA = auto()
+    CMP_REMOVED = auto()
 
 
 @dataclass
@@ -88,6 +89,7 @@ class LegalizationEntry:
     src_mnemonic: str
     src_encoding: str
     src_encoding_order: int
+    src_encoding_bits: int
     src_opcode: int
     action: LegalizationAction
 
@@ -369,6 +371,7 @@ class _InstRecord:
     isa_name: str
     enc_name: str
     enc_order: int
+    enc_bits: int
     opcode: int
     field_sig: tuple[tuple[str, int], ...]
     opnd_sig: tuple
@@ -400,6 +403,26 @@ class LegalizationGenerator:
         self._build_records()
         self._discover_equivalences()
 
+    @staticmethod
+    def _dt_index(enc, spec) -> int:
+        if enc.primary_dt_ptrs is None:
+            parent_name = spec.profile.derive_parent_enc_name(enc.enc_name)
+            if parent_name in spec.encoding_map:
+                return LegalizationGenerator._dt_index(
+                    spec.encoding_map[parent_name], spec)
+            return 0
+        for ptr in enc.primary_dt_ptrs:
+            if ptr != -1:
+                return ptr
+        return 0
+
+    @staticmethod
+    def _enc_field_value(enc, spec) -> int:
+        dt_idx = LegalizationGenerator._dt_index(enc, spec)
+        max_enc_bits = spec.profile.max_enc_bits
+        dont_care = max_enc_bits - enc.enc_field_bit_cnt
+        return dt_idx >> dont_care
+
     def _alloc_id(self) -> int:
         eid = self._next_id
         self._next_id += 1
@@ -421,7 +444,8 @@ class LegalizationGenerator:
                         canonical=canonical_mnemonic(inst.name),
                         isa_name=isa_name,
                         enc_name=enc.enc_name,
-                        enc_order=enc.order,
+                        enc_order=self._dt_index(enc, spec),
+                        enc_bits=enc.enc_field_bit_cnt,
                         opcode=inst.opcode,
                         field_sig=fsig,
                         opnd_sig=opsig,
@@ -470,6 +494,7 @@ class LegalizationGenerator:
                 src_mnemonic=src_rec.mnemonic,
                 src_encoding=src_rec.enc_name,
                 src_encoding_order=src_rec.enc_order,
+                src_encoding_bits=src_rec.enc_bits,
                 src_opcode=src_rec.opcode,
                 action=action,
             ))
@@ -484,9 +509,17 @@ class LegalizationGenerator:
         for dst in candidates:
             if src.field_sig == dst.field_sig and src.opnd_sig == dst.opnd_sig:
                 if src.opcode == dst.opcode:
-                    return LegalizationAction.identity()
-                return LegalizationAction.substitute(dst.opcode)
-        return LegalizationAction.lower()
+                    return LegalizationAction('identity', target_opcode=dst.opcode)
+                return LegalizationAction('substitute', target_opcode=dst.opcode)
+        # Encoding differs — LOWER.  Prefer a candidate in the same encoding
+        # format; fall back to any candidate; if none has a valid opcode, Expand.
+        same_enc = [c for c in candidates if c.enc_name == src.enc_name]
+        best = same_enc[0] if same_enc else candidates[0] if candidates else None
+        if best:
+            if best.opcode == 0 and src.opcode != 0:
+                return LegalizationAction.expand(ExpansionKind.CMP_REMOVED)
+            return LegalizationAction('lower', target_opcode=best.opcode)
+        return LegalizationAction.expand(ExpansionKind.CMP_REMOVED)
 
     @staticmethod
     def _no_match_action(src: _InstRecord) -> LegalizationAction:
@@ -511,9 +544,9 @@ class LegalizationGenerator:
             return LegalizationAction.lower(LoweringKind.GENERIC)
         if name.startswith('IMAGE_'):
             return LegalizationAction.lower(LoweringKind.GENERIC)
-        # All remaining unmatched instructions are LOWER — the
-        # BinaryTranslator emits a target-native equivalent sequence.
-        return LegalizationAction.lower(LoweringKind.GENERIC)
+        # All remaining unmatched instructions are EXPAND — no target
+        # equivalent exists. BinaryTranslator emits s_nop placeholder.
+        return LegalizationAction.expand(ExpansionKind.CMP_REMOVED)
 
     def generate_all(
         self,
@@ -588,6 +621,15 @@ def _apply_domain_rules(
 
         if name.startswith('V_ACCVGPR_') and not dst_has_accvgpr:
             entry.action = LegalizationAction.expand(ExpansionKind.ACCVGPR)
+
+        # V_CMP_F_* (always-false) and V_CMP_TRU_* / V_CMPX_TRU_* (always-true)
+        # are removed on GFX11+ (RDNA3/3.5/4). They have no target equivalent
+        # and must be expanded to s_mov_b32 vcc, 0 / s_mov_b64 vcc, exec.
+        if name.startswith(('V_CMP_F_', 'V_CMPX_F_',
+                            'V_CMP_TRU_', 'V_CMPX_TRU_',
+                            'V_CMP_T_', 'V_CMPX_T_')):
+            if entry.action.target_opcode == 0:
+                entry.action = LegalizationAction.expand(ExpansionKind.CMP_REMOVED)
 
 
 # ---------------------------------------------------------------------------

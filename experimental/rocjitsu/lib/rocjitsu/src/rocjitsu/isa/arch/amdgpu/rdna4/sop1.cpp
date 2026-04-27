@@ -1532,6 +1532,7 @@ SBarrierSignalSop1::SBarrierSignalSop1(const MachineInst *inst)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+  flags_ |= BARRIER;
 }
 
 void SBarrierSignalSop1::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }

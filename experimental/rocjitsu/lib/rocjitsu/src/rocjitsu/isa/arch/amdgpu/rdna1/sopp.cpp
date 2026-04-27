@@ -156,6 +156,7 @@ SBarrierSopp::SBarrierSopp(const MachineInst *inst)
     : Sopp("s_barrier", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SBarrierSopp>()) {
   num_src_ = 0;
   num_dst_ = 0;
+  flags_ |= BARRIER;
 }
 
 void SBarrierSopp::execute_impl(amdgpu::Wavefront &wf) { wf.set_state(amdgpu::WfState::BARRIER); }
@@ -176,6 +177,7 @@ SWaitcntSopp::SWaitcntSopp(const MachineInst *inst)
   src_operands_[0] = &simm16;
   num_src_ = 1;
   num_dst_ = 0;
+  flags_ |= WAITCNT;
 }
 
 void SWaitcntSopp::execute_impl(amdgpu::Wavefront &wf) {
@@ -387,6 +389,7 @@ SWaitIdleSopp::SWaitIdleSopp(const MachineInst *inst)
            make_exec_fn<SWaitIdleSopp>()) {
   num_src_ = 0;
   num_dst_ = 0;
+  flags_ |= WAITCNT;
 }
 
 void SWaitIdleSopp::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
@@ -399,6 +402,7 @@ SWaitcntDepctrSopp::SWaitcntDepctrSopp(const MachineInst *inst)
   src_operands_[0] = &simm16;
   num_src_ = 1;
   num_dst_ = 0;
+  flags_ |= WAITCNT;
 }
 
 void SWaitcntDepctrSopp::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
