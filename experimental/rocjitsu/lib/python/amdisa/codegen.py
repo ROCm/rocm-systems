@@ -922,7 +922,7 @@ class CodeGenerator:
             return self._gen_vector_cmp(dst_ops, src_ops, op, dtype, is_vop3)
 
         if cls == 'vector_cmpx':
-            return self._gen_vector_cmpx(src_ops, op, dtype, is_vop3)
+            return self._gen_vector_cmpx(src_ops, op, dtype, is_vop3, dst_ops)
 
         if cls == 'vector_cndmask':
             # v_cndmask_b32 is a pure bitwise select — no input/output
@@ -1065,7 +1065,8 @@ class CodeGenerator:
         if cls in ('vector_cvt_pk_u8_f32', 'vector_cvt_pknorm',
                     'vector_cvt_pkrtz_f16_f32', 'vector_cvt_pk',
                     'vector_cvt_pk_f16_f32', 'vector_cvt_pk_bf16_f32',
-                    'vector_cvt_sr_f16_f32', 'vector_cvt_sr_bf16_f32'):
+                    'vector_cvt_sr_f16_f32', 'vector_cvt_sr_bf16_f32',
+                    'vector_pack_b32_f16'):
             return self._gen_vector_cvt_pk(dst_ops, src_ops, cls, op)
 
         if cls == 'vector_dot2c_bf16':
@@ -1176,6 +1177,7 @@ class CodeGenerator:
             L.append(f'  uint64_t exec = wf.exec();')
             L.append(f'  uint32_t vb = wf.vgpr_alloc().base;')
             L.append(f'  uint32_t offset = inst_.offset0 | (inst_.offset1 << 8);')
+            L.append(f'  // Pre-read all data0 values from every lane.')
             L.append(f'  uint32_t src_data[64];')
             L.append(f'  for (uint32_t i = 0; i < wf.wf_size(); ++i)')
             L.append(f'    src_data[i] = cu.read_vgpr(vb + inst_.data0, i);')
@@ -1237,12 +1239,14 @@ class CodeGenerator:
             L.append(f'    if (!(exec & (1ULL << lane))) continue;')
             L.append(f'    uint32_t src_lane;')
             L.append(f'    if (offset & 0x8000) {{')
+            L.append(f'      // QDMode: swizzle within 4-lane quads.')
             L.append(f'      uint32_t and_mask = offset & 0x1F;')
             L.append(f'      uint32_t or_mask = (offset >> 5) & 0x1F;')
             L.append(f'      uint32_t xor_mask = (offset >> 10) & 0x1F;')
             L.append(f'      src_lane = ((lane & and_mask) | or_mask) ^ xor_mask;')
             L.append(f'      src_lane = (lane & ~0x3) | (src_lane & 0x3);  // stay in quad')
             L.append(f'    }} else {{')
+            L.append(f'      // BitMode: full-wave swizzle.')
             L.append(f'      uint32_t and_mask = offset & 0x1F;')
             L.append(f'      uint32_t or_mask = (offset >> 5) & 0x1F;')
             L.append(f'      uint32_t xor_mask = (offset >> 10) & 0x1F;')
@@ -1743,6 +1747,10 @@ class CodeGenerator:
             L.append(f'    uint32_t lo = util::f32_to_bf16(s0);')
             L.append(f'    uint32_t hi = util::f32_to_bf16(s1);')
             L.append(f'    {dst[0]}.write_lane(wf, lane, lo | (hi << 16));')
+        elif cls == 'vector_pack_b32_f16':
+            L.append(f'    uint32_t s0 = {src[0]}.read_lane(wf, lane) & 0xFFFF;')
+            L.append(f'    uint32_t s1 = {src[1]}.read_lane(wf, lane) & 0xFFFF;')
+            L.append(f'    {dst[0]}.write_lane(wf, lane, s0 | (s1 << 16));')
         elif cls == 'vector_cvt_sr_f16_f32':
             # Stochastic rounding: use src1 as random bits for rounding
             L.append(f'    float s0 = std::bit_cast<float>({src[0]}.read_lane(wf, lane));')
@@ -3216,11 +3224,13 @@ class CodeGenerator:
             L.append('  wf.set_vcc(vcc);')
         return '\n'.join(L)
 
-    def _gen_vector_cmpx(self, src: list[str], op: str | None, dtype: str | None, is_vop3: bool = False) -> str:
+    def _gen_vector_cmpx(self, src: list[str], op: str | None, dtype: str | None,
+                         is_vop3: bool = False, dst: list[str] | None = None) -> str:
         """Generate vector compare-and-write-EXEC body.
 
-        On CDNA (GFX9), V_CMPX writes both EXEC and VCC. On RDNA,
-        V_CMPX writes only EXEC.
+        On CDNA (GFX9), V_CMPX writes both EXEC and the SDST operand.
+        For VOP3 encoding, SDST is the vdst field (which may be VCC or
+        another SGPR pair). On RDNA, V_CMPX writes only EXEC.
         """
         L = []
         L.append('  uint64_t exec = wf.exec();')
@@ -3238,7 +3248,10 @@ class CodeGenerator:
             L.append('      result |= (1ULL << lane);')
         L.append('  }')
         if self.isa_spec.profile.cmpx_writes_vcc:
-            L.append('  wf.set_vcc(result);')
+            if dst and is_vop3:
+                L.append(f'  {dst[0]}.write_scalar64(wf, result);')
+            else:
+                L.append('  wf.set_vcc(result);')
         L.append('  wf.set_exec(result);')
         return '\n'.join(L)
 
@@ -3489,20 +3502,29 @@ class CodeGenerator:
         """Generate packed F32 binary op (V_PK_ADD_F32, V_PK_MUL_F32).
 
         Operands are 64-bit VGPR pairs holding two 32-bit floats.
+        Uses op_sel/op_sel_hi to select which 32-bit half feeds each lane,
+        and neg/neg_hi for per-lane negation.
         """
         d, s0, s1 = dst[0], src[0], src[1]
+        opsel, opsel_hi = self._vop3p_opsel_exprs()
         L = []
         L.append('  uint64_t exec = wf.exec();')
         L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
         L.append('    if (!(exec & (1ULL << lane))) continue;')
         L.append(f'    uint64_t raw0 = {s0}.read_lane64(wf, lane);')
         L.append(f'    uint64_t raw1 = {s1}.read_lane64(wf, lane);')
-        L.append('    float a_lo = std::bit_cast<float>(static_cast<uint32_t>(raw0));')
-        L.append('    float a_hi = std::bit_cast<float>(static_cast<uint32_t>(raw0 >> 32));')
-        L.append('    float b_lo = std::bit_cast<float>(static_cast<uint32_t>(raw1));')
-        L.append('    float b_hi = std::bit_cast<float>(static_cast<uint32_t>(raw1 >> 32));')
-        L.append('    if (inst_.neg & 1) { a_lo = -a_lo; a_hi = -a_hi; }')
-        L.append('    if (inst_.neg & 2) { b_lo = -b_lo; b_hi = -b_hi; }')
+        L.append(f'    bool sel0_lo = ({opsel} >> 0) & 1;')
+        L.append(f'    bool sel1_lo = ({opsel} >> 1) & 1;')
+        L.append(f'    bool sel0_hi = ({opsel_hi} >> 0) & 1;')
+        L.append(f'    bool sel1_hi = ({opsel_hi} >> 1) & 1;')
+        L.append('    float a_lo = std::bit_cast<float>(static_cast<uint32_t>(sel0_lo ? (raw0 >> 32) : raw0));')
+        L.append('    float a_hi = std::bit_cast<float>(static_cast<uint32_t>(sel0_hi ? (raw0 >> 32) : raw0));')
+        L.append('    float b_lo = std::bit_cast<float>(static_cast<uint32_t>(sel1_lo ? (raw1 >> 32) : raw1));')
+        L.append('    float b_hi = std::bit_cast<float>(static_cast<uint32_t>(sel1_hi ? (raw1 >> 32) : raw1));')
+        L.append('    if (inst_.neg & 1) a_lo = -a_lo;')
+        L.append('    if (inst_.neg & 2) b_lo = -b_lo;')
+        L.append('    if (inst_.neg_hi & 1) a_hi = -a_hi;')
+        L.append('    if (inst_.neg_hi & 2) b_hi = -b_hi;')
         f_map = {
             'add': ('a_lo + b_lo', 'a_hi + b_hi'),
             'mul': ('a_lo * b_lo', 'a_hi * b_hi'),
@@ -3515,8 +3537,14 @@ class CodeGenerator:
         return '\n'.join(L)
 
     def _gen_pk_ternary_f32(self, dst: list[str], src: list[str], op: str | None) -> str:
-        """Generate packed F32 ternary op (V_PK_FMA_F32)."""
+        """Generate packed F32 ternary op (V_PK_FMA_F32).
+
+        Uses op_sel/op_sel_hi/op_sel_hi_2 to select which 32-bit half
+        of each source feeds the low and high FMA lanes.
+        """
         d, s0, s1, s2 = dst[0], src[0], src[1], src[2]
+        opsel, opsel_hi = self._vop3p_opsel_exprs()
+        opsel_hi_2 = self._op_sel_hi_2_expr(self._enc_name)
         L = []
         L.append('  uint64_t exec = wf.exec();')
         L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
@@ -3524,15 +3552,24 @@ class CodeGenerator:
         L.append(f'    uint64_t raw0 = {s0}.read_lane64(wf, lane);')
         L.append(f'    uint64_t raw1 = {s1}.read_lane64(wf, lane);')
         L.append(f'    uint64_t raw2 = {s2}.read_lane64(wf, lane);')
-        L.append('    float a_lo = std::bit_cast<float>(static_cast<uint32_t>(raw0));')
-        L.append('    float a_hi = std::bit_cast<float>(static_cast<uint32_t>(raw0 >> 32));')
-        L.append('    float b_lo = std::bit_cast<float>(static_cast<uint32_t>(raw1));')
-        L.append('    float b_hi = std::bit_cast<float>(static_cast<uint32_t>(raw1 >> 32));')
-        L.append('    float c_lo = std::bit_cast<float>(static_cast<uint32_t>(raw2));')
-        L.append('    float c_hi = std::bit_cast<float>(static_cast<uint32_t>(raw2 >> 32));')
-        L.append('    if (inst_.neg & 1) { a_lo = -a_lo; a_hi = -a_hi; }')
-        L.append('    if (inst_.neg & 2) { b_lo = -b_lo; b_hi = -b_hi; }')
-        L.append('    if (inst_.neg & 4) { c_lo = -c_lo; c_hi = -c_hi; }')
+        L.append(f'    bool sel0_lo = ({opsel} >> 0) & 1;')
+        L.append(f'    bool sel1_lo = ({opsel} >> 1) & 1;')
+        L.append(f'    bool sel2_lo = ({opsel} >> 2) & 1;')
+        L.append(f'    bool sel0_hi = ({opsel_hi} >> 0) & 1;')
+        L.append(f'    bool sel1_hi = ({opsel_hi} >> 1) & 1;')
+        L.append(f'    bool sel2_hi = {opsel_hi_2};')
+        L.append('    float a_lo = std::bit_cast<float>(static_cast<uint32_t>(sel0_lo ? (raw0 >> 32) : raw0));')
+        L.append('    float a_hi = std::bit_cast<float>(static_cast<uint32_t>(sel0_hi ? (raw0 >> 32) : raw0));')
+        L.append('    float b_lo = std::bit_cast<float>(static_cast<uint32_t>(sel1_lo ? (raw1 >> 32) : raw1));')
+        L.append('    float b_hi = std::bit_cast<float>(static_cast<uint32_t>(sel1_hi ? (raw1 >> 32) : raw1));')
+        L.append('    float c_lo = std::bit_cast<float>(static_cast<uint32_t>(sel2_lo ? (raw2 >> 32) : raw2));')
+        L.append('    float c_hi = std::bit_cast<float>(static_cast<uint32_t>(sel2_hi ? (raw2 >> 32) : raw2));')
+        L.append('    if (inst_.neg & 1) a_lo = -a_lo;')
+        L.append('    if (inst_.neg & 2) b_lo = -b_lo;')
+        L.append('    if (inst_.neg & 4) c_lo = -c_lo;')
+        L.append('    if (inst_.neg_hi & 1) a_hi = -a_hi;')
+        L.append('    if (inst_.neg_hi & 2) b_hi = -b_hi;')
+        L.append('    if (inst_.neg_hi & 4) c_hi = -c_hi;')
         L.append('    uint32_t rlo = std::bit_cast<uint32_t>(std::fma(a_lo, b_lo, c_lo));')
         L.append('    uint32_t rhi = std::bit_cast<uint32_t>(std::fma(a_hi, b_hi, c_hi));')
         L.append(f'    {d}.write_lane64(wf, lane, static_cast<uint64_t>(rlo) | (static_cast<uint64_t>(rhi) << 32));')
@@ -3548,9 +3585,9 @@ class CodeGenerator:
         L.append('    if (!(exec & (1ULL << lane))) continue;')
         L.append(f'    uint64_t raw0 = {s0}.read_lane64(wf, lane);')
         L.append(f'    uint64_t raw1 = {s1}.read_lane64(wf, lane);')
-        opsel, _opsel_hi = self._vop3p_opsel_exprs()
+        opsel, opsel_hi = self._vop3p_opsel_exprs()
         L.append(f'    uint32_t lo = ({opsel} & 1) ? static_cast<uint32_t>(raw0 >> 32) : static_cast<uint32_t>(raw0);')
-        L.append(f'    uint32_t hi = ({opsel} & 2) ? static_cast<uint32_t>(raw1 >> 32) : static_cast<uint32_t>(raw1);')
+        L.append(f'    uint32_t hi = ({opsel_hi} & 2) ? static_cast<uint32_t>(raw1 >> 32) : static_cast<uint32_t>(raw1);')
         L.append(f'    {d}.write_lane64(wf, lane, static_cast<uint64_t>(lo) | (static_cast<uint64_t>(hi) << 32));')
         L.append('  }')
         return '\n'.join(L)
@@ -3617,41 +3654,53 @@ class CodeGenerator:
         return '\n'.join(L)
 
     def _gen_dot2(self, dst: list[str], src: list[str], cls: str) -> str:
-        """Generate V_DOT2_F32_F16, V_DOT2_I32_I16, V_DOT2_U32_U16."""
+        """Generate V_DOT2_F32_F16, V_DOT2_I32_I16, V_DOT2_U32_U16.
+
+        Uses op_sel to select which 16-bit half of each source feeds
+        element 0 (low) and element 1 (high) of the dot product.
+        neg/neg_hi are split per element.
+        """
         d, s0, s1, s2 = dst[0], src[0], src[1], src[2]
+        opsel, opsel_hi = self._vop3p_opsel_exprs()
         L = []
         L.append('  uint64_t exec = wf.exec();')
         L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
         L.append('    if (!(exec & (1ULL << lane))) continue;')
         L.append(f'    uint32_t raw0 = {s0}.read_lane(wf, lane);')
         L.append(f'    uint32_t raw1 = {s1}.read_lane(wf, lane);')
+        L.append(f'    bool sel0_lo = ({opsel} >> 0) & 1;')
+        L.append(f'    bool sel1_lo = ({opsel} >> 1) & 1;')
+        L.append(f'    bool sel0_hi = ({opsel_hi} >> 0) & 1;')
+        L.append(f'    bool sel1_hi = ({opsel_hi} >> 1) & 1;')
 
         if cls == 'dot2_f32_f16':
-            L.append('    float a0 = util::f16_to_f32(static_cast<uint16_t>(raw0));')
-            L.append('    float a1 = util::f16_to_f32(static_cast<uint16_t>(raw0 >> 16));')
-            L.append('    float b0 = util::f16_to_f32(static_cast<uint16_t>(raw1));')
-            L.append('    float b1 = util::f16_to_f32(static_cast<uint16_t>(raw1 >> 16));')
-            L.append('    if (inst_.neg & 1) { a0 = -a0; a1 = -a1; }')
-            L.append('    if (inst_.neg & 2) { b0 = -b0; b1 = -b1; }')
+            L.append('    float a0 = util::f16_to_f32(static_cast<uint16_t>(sel0_lo ? (raw0 >> 16) : raw0));')
+            L.append('    float a1 = util::f16_to_f32(static_cast<uint16_t>(sel0_hi ? (raw0 >> 16) : raw0));')
+            L.append('    float b0 = util::f16_to_f32(static_cast<uint16_t>(sel1_lo ? (raw1 >> 16) : raw1));')
+            L.append('    float b1 = util::f16_to_f32(static_cast<uint16_t>(sel1_hi ? (raw1 >> 16) : raw1));')
+            L.append('    if (inst_.neg & 1) a0 = -a0;')
+            L.append('    if (inst_.neg & 2) b0 = -b0;')
+            L.append('    if (inst_.neg_hi & 1) a1 = -a1;')
+            L.append('    if (inst_.neg_hi & 2) b1 = -b1;')
             L.append(f'    float acc = std::bit_cast<float>({s2}.read_lane(wf, lane));')
             L.append('    if (inst_.neg & 4) acc = -acc;')
             L.append('    float result = a0 * b0 + a1 * b1 + acc;')
             L.append('    if (inst_.clamp) result = std::clamp(result, 0.0f, 1.0f);')
             L.append(f'    {d}.write_lane(wf, lane, std::bit_cast<uint32_t>(result));')
         elif cls == 'dot2_i32_i16':
-            L.append('    int16_t a0 = static_cast<int16_t>(raw0);')
-            L.append('    int16_t a1 = static_cast<int16_t>(raw0 >> 16);')
-            L.append('    int16_t b0 = static_cast<int16_t>(raw1);')
-            L.append('    int16_t b1 = static_cast<int16_t>(raw1 >> 16);')
+            L.append('    int16_t a0 = static_cast<int16_t>(sel0_lo ? (raw0 >> 16) : raw0);')
+            L.append('    int16_t a1 = static_cast<int16_t>(sel0_hi ? (raw0 >> 16) : raw0);')
+            L.append('    int16_t b0 = static_cast<int16_t>(sel1_lo ? (raw1 >> 16) : raw1);')
+            L.append('    int16_t b1 = static_cast<int16_t>(sel1_hi ? (raw1 >> 16) : raw1);')
             L.append(f'    int32_t acc = static_cast<int32_t>({s2}.read_lane(wf, lane));')
             L.append('    int32_t result = static_cast<int32_t>(a0) * b0 + static_cast<int32_t>(a1) * b1 + acc;')
             L.append('    if (inst_.clamp) result = std::clamp(result, static_cast<int32_t>(0), std::numeric_limits<int32_t>::max());')
             L.append(f'    {d}.write_lane(wf, lane, static_cast<uint32_t>(result));')
         else:  # dot2_u32_u16
-            L.append('    uint16_t a0 = static_cast<uint16_t>(raw0);')
-            L.append('    uint16_t a1 = static_cast<uint16_t>(raw0 >> 16);')
-            L.append('    uint16_t b0 = static_cast<uint16_t>(raw1);')
-            L.append('    uint16_t b1 = static_cast<uint16_t>(raw1 >> 16);')
+            L.append('    uint16_t a0 = static_cast<uint16_t>(sel0_lo ? (raw0 >> 16) : raw0);')
+            L.append('    uint16_t a1 = static_cast<uint16_t>(sel0_hi ? (raw0 >> 16) : raw0);')
+            L.append('    uint16_t b0 = static_cast<uint16_t>(sel1_lo ? (raw1 >> 16) : raw1);')
+            L.append('    uint16_t b1 = static_cast<uint16_t>(sel1_hi ? (raw1 >> 16) : raw1);')
             L.append(f'    uint32_t acc = {s2}.read_lane(wf, lane);')
             L.append('    uint32_t result = static_cast<uint32_t>(a0) * b0 + static_cast<uint32_t>(a1) * b1 + acc;')
             L.append(f'    {d}.write_lane(wf, lane, result);')
@@ -3817,6 +3866,7 @@ class CodeGenerator:
                 L.append(f'    }}')
                 L.append(f'    int32_t acc0 = static_cast<int32_t>({s2}.read_lane(wf, lane));')
                 L.append(f'    {d}.write_lane(wf, lane, static_cast<uint32_t>(acc0 + dot));')
+                L.append(f'    // Additional result registers would require cross-lane data')
             else:
                 # FP8/BF8 variants: input_type is e.g. "BF8_BF8", "BF8_FP8", etc.
                 _FP8_CONV = {'BF8': 'util::bf8_e5m2_to_f32', 'FP8': 'util::fp8_e4m3_to_f32'}
@@ -4139,10 +4189,13 @@ class CodeGenerator:
         L.append('  d->is_load = true;')
         if sem.sign_extend:
             L.append('  d->sign_extend = true;')
+        if sem.d16_hi:
+            L.append('  d->d16_hi = true;')
+        if sem.d16_lo:
+            L.append('  d->d16_lo = true;')
         L.append(f'  d->mtype = {self._mtype_expr()};')
         L.append(f'  d->non_temporal = {nt};')
         L.append('  flat_calculate_addresses(inst_, wf, *d);')
-        # Counter increment handled by MemoryPipeline::issue().
         L.append('  set_data(std::move(d));')
         return '\n'.join(L)
 
@@ -4171,9 +4224,13 @@ class CodeGenerator:
                 L.append(f'    std::memcpy(&d->store_data[lane * {stride} + {i * esz}], &val{i}, 4);')
             elif esz == 2:
                 L.append(f'    uint32_t val{i} = cu.read_vgpr(wf.vgpr_alloc().base + {acc} + inst_.{data_field}, lane);')
+                if sem.d16_hi:
+                    L.append(f'    val{i} >>= 16;')
                 L.append(f'    std::memcpy(&d->store_data[lane * {stride} + {i * esz}], &val{i}, 2);')
             elif esz == 1:
                 L.append(f'    uint32_t val{i} = cu.read_vgpr(wf.vgpr_alloc().base + {acc} + inst_.{data_field}, lane);')
+                if sem.d16_hi:
+                    L.append(f'    val{i} >>= 16;')
                 L.append(f'    d->store_data[lane * {stride} + {i}] = static_cast<uint8_t>(val{i});')
         L.append('  }')
         L.append('  set_data(std::move(d));')
@@ -4349,6 +4406,10 @@ class CodeGenerator:
         L.append('  d->is_load = true;')
         if sem.sign_extend:
             L.append('  d->sign_extend = true;')
+        if sem.d16_hi:
+            L.append('  d->d16_hi = true;')
+        if sem.d16_lo:
+            L.append('  d->d16_lo = true;')
         L.append(f'  d->mtype = {self._mtype_expr()};')
         L.append(f'  d->non_temporal = {nt};')
         L.append(f'  {addr_fn}(inst_, wf, *d);')
@@ -4380,9 +4441,13 @@ class CodeGenerator:
                 L.append(f'    std::memcpy(&d->store_data[lane * {stride} + {i * esz}], &val{i}, {esz});')
             elif esz == 2:
                 L.append(f'    uint32_t val{i} = cu.read_vgpr(wf.vgpr_alloc().base + {acc} + inst_.vdata, lane);')
+                if sem.d16_hi:
+                    L.append(f'    val{i} >>= 16;')
                 L.append(f'    std::memcpy(&d->store_data[lane * {stride} + {i * esz}], &val{i}, 2);')
             elif esz == 1:
                 L.append(f'    uint32_t val{i} = cu.read_vgpr(wf.vgpr_alloc().base + {acc} + inst_.vdata, lane);')
+                if sem.d16_hi:
+                    L.append(f'    val{i} >>= 16;')
                 L.append(f'    d->store_data[lane * {stride} + {i}] = static_cast<uint8_t>(val{i});')
         L.append('  }')
         # Counter increment handled by MemoryPipeline::issue().
@@ -4400,8 +4465,11 @@ class CodeGenerator:
         L.append('  d->is_load = true;')
         if sem.sign_extend:
             L.append('  d->sign_extend = true;')
+        if sem.d16_hi:
+            L.append('  d->d16_hi = true;')
+        if sem.d16_lo:
+            L.append('  d->d16_lo = true;')
         L.append('  ds_calculate_addresses(inst_, wf, *d);')
-        # Counter increment handled by MemoryPipeline::issue().
         L.append('  set_data(std::move(d));')
         return '\n'.join(L)
 
@@ -4433,9 +4501,13 @@ class CodeGenerator:
                 L.append(f'    std::memcpy(&d->store_data[lane * {stride} + {off}], &val{i}, 4);')
             elif esz == 2:
                 L.append(f'    uint32_t val{i} = cu.read_vgpr(wf.vgpr_alloc().base + {acc} + inst_.data0, lane);')
+                if sem.d16_hi:
+                    L.append(f'    val{i} >>= 16;')
                 L.append(f'    std::memcpy(&d->store_data[lane * {stride} + {off}], &val{i}, 2);')
             elif esz == 1:
                 L.append(f'    uint32_t val{i} = cu.read_vgpr(wf.vgpr_alloc().base + {acc} + inst_.data0, lane);')
+                if sem.d16_hi:
+                    L.append(f'    val{i} >>= 16;')
                 L.append(f'    d->store_data[lane * {stride} + {off}] = static_cast<uint8_t>(val{i});')
         L.append('  }')
         # Counter increment handled by MemoryPipeline::issue().
@@ -4581,28 +4653,14 @@ class CodeGenerator:
         'vector_cmpx', 'vector_cmpx_class',
     })
 
-    def _can_share_execute(self, mnemonic: str, encoding_name: str) -> bool:
+    def _can_share_execute(self, mnemonic: str) -> bool:
         """Check if an instruction's execute() body can be shared across ISAs.
-
-        Args:
-            mnemonic: Instruction mnemonic (e.g., 'v_mov_b32')
-            encoding_name: Encoding name (e.g., 'ENC_VOP1', 'ENC_VOP3').
-                Used for family_shared lookup; the same mnemonic can have
-                different encodings with different sharing characteristics.
-
-        Returns:
-            True if instruction is universal or family_shared on ≥2 ISAs.
 
         An instruction is shareable if:
         1. It exists on 2+ ISAs with the same semantic class (family_shared
            or universal in the shared_plan).
         2. Its semantic class is profile-independent (no mtype/coherency calls).
         3. The current ISA is one of the ISAs that share this instruction.
-
-        Lookup strategy:
-        - Universal instructions: looked up by mnemonic only (encoding-agnostic)
-        - Family-shared instructions: looked up by (mnemonic, encoding_name) key
-        - Searches all families; returns True on first shareable match
         """
         if self.shared_plan is None:
             return False
@@ -4613,16 +4671,16 @@ class CodeGenerator:
             if info.semantic_class in self._NON_SHAREABLE_CLASSES:
                 return False
             return arch in info.isa_names and len(info.isa_names) >= 2
-        # Check family_shared (direct lookup using composite key)
-        inst_key = (mnemonic, encoding_name)
+        # Check family_shared — a mnemonic may appear in multiple families
+        # (e.g., gfx9 and gfx10) with different encoding layouts. Search
+        # all families for the one that includes the current ISA.
         for fam_insts in self.shared_plan.family_shared.values():
-            if inst_key in fam_insts:
-                info = fam_insts[inst_key]
+            if mnemonic in fam_insts:
+                info = fam_insts[mnemonic]
                 if info.semantic_class in self._NON_SHAREABLE_CLASSES:
                     return False
                 if arch in info.isa_names and len(info.isa_names) >= 2:
                     return True
-                # Continue searching other families (same mnemonic+encoding can appear in multiple families)
         return False
 
     def gen_insts(self) -> None:
@@ -4727,9 +4785,15 @@ class CodeGenerator:
                                 f'reinterpret_cast<const OpEncoding*>(inst)))'
                             )
                         elif opnd.name in inst_field_names:
+                            opr_type = opnd.operand_type
+                            inst_sem = (self.semantics.instructions.get(inst.name)
+                                        if self.semantics else None)
+                            if (inst_sem and inst_sem.accvgpr_srcs
+                                    and opnd.is_input):
+                                opr_type = 'OPR_SRC_VGPR_OR_ACCVGPR'
                             opnd_ctor_init.append(
                                 f'{opnd.name}({opnd.size}, '
-                                f'OperandType::{opnd.operand_type}, '
+                                f'OperandType::{opr_type}, '
                                 f'reinterpret_cast<const OpEncoding*>(inst)'
                                 f'->{opnd.name})'
                             )
@@ -4932,7 +4996,25 @@ class CodeGenerator:
                                 '    src_operands_[0] = dpp_src0_.get();\n'
                                 '  }\n'
                             )
-                        can_share = self._can_share_execute(inst.mnemonic, enc.enc_name)
+                        # SDWA postamble: apply float clamp after ALU.
+                        _sdwa_postamble = ''
+                        is_float_op = (sem and sem.data_type in ('f16', 'f32', 'f64'))
+                        if (enc.enc_name.upper() in ('ENC_VOP1', 'ENC_VOP2')
+                                and is_float_op):
+                            _sdwa_postamble = (
+                                '  if (sdwa_clamp_) {\n'
+                                '    uint64_t ex = wf.exec();\n'
+                                '    uint32_t vb = wf.vgpr_alloc().base;\n'
+                                '    for (uint32_t ln = 0; ln < wf.wf_size(); ++ln) {\n'
+                                '      if (!(ex & (1ULL << ln))) continue;\n'
+                                '      uint32_t dv = wf.cu().read_vgpr(vb + inst_.vdst, ln);\n'
+                                '      float fv = std::bit_cast<float>(dv);\n'
+                                '      fv = std::clamp(fv, 0.0f, 1.0f);\n'
+                                '      wf.cu().write_vgpr(vb + inst_.vdst, ln, std::bit_cast<uint32_t>(fv));\n'
+                                '    }\n'
+                                '  }\n'
+                            )
+                        can_share = self._can_share_execute(inst.mnemonic)
                         if can_share:
                             enc_key = enc.enc_name.lower().replace('enc_', '')
                             tmpl_name = f'{inst.mnemonic}_{enc_key}'
@@ -4940,7 +5022,8 @@ class CodeGenerator:
                                 f'void {inst.fmt_name}::execute_impl'
                                 f'(amdgpu::Wavefront &wf) {{\n'
                                 f'{_dpp_preamble}'
-                                f'  amdgpu::execute_{tmpl_name}(*this, wf);\n}}'
+                                f'  amdgpu::execute_{tmpl_name}(*this, wf);\n'
+                                f'{_sdwa_postamble}}}'
                             )
                             body_key = (inst.mnemonic, enc.enc_name)
                             self._shared_execute_bodies[body_key] = (
@@ -4951,7 +5034,8 @@ class CodeGenerator:
                                 f'void {inst.fmt_name}::execute_impl'
                                 f'(amdgpu::Wavefront &wf) {{\n'
                                 f'{_dpp_preamble}'
-                                f'{body}\n}}'
+                                f'{body}\n'
+                                f'{_sdwa_postamble}}}'
                             )
                     else:
                         exec_impl = cgen.Line(
@@ -5041,7 +5125,7 @@ class CodeGenerator:
                 # any instruction in this encoding delegates to a template.
                 if self.shared_plan is not None:
                     has_shared = any(
-                        self._can_share_execute(i.mnemonic, enc.enc_name)
+                        self._can_share_execute(i.mnemonic)
                         for i in all_insts
                         if self.semantics and i.name in self.semantics.instructions
                     )

@@ -77,7 +77,8 @@ void flat_calculate_addresses(const FlatInst &inst, amdgpu::Wavefront &wf, Vecto
       uint32_t vbase = wf.vgpr_alloc().base + inst.addr;
       uint64_t vaddr;
       if (inst.saddr != 0x7F) {
-        vaddr = cu.read_vgpr(vbase, lane); // 32-bit VGPR offset
+        vaddr = static_cast<uint64_t>(static_cast<int64_t>(
+            static_cast<int32_t>(cu.read_vgpr(vbase, lane)))); // sign-extended 32-bit offset
       } else {
         vaddr = (static_cast<uint64_t>(cu.read_vgpr(vbase + 1, lane)) << 32) |
                 cu.read_vgpr(vbase, lane); // 64-bit VGPR pair

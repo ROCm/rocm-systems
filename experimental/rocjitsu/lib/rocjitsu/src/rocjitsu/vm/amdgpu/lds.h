@@ -166,6 +166,12 @@ public:
   /// @brief Zero all LDS contents.
   void clear() { std::memset(data_.data(), 0, data_.size()); }
 
+  void zero_range(uint32_t offset, uint32_t len) {
+    uint32_t end = std::min(static_cast<uint32_t>(data_.size()), offset + len);
+    if (offset < end)
+      std::memset(&data_[offset], 0, end - offset);
+  }
+
   /// @brief Direct pointer access (for DMA or debugging).
   const uint8_t *data() const { return data_.data(); }
   uint8_t *data() { return data_.data(); }

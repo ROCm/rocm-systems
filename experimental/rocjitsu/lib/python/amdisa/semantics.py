@@ -48,6 +48,9 @@ class InstructionSemantics:
     elem_size: int | None = None
     num_elems: int | None = None
     sign_extend: bool = False
+    d16_hi: bool = False
+    d16_lo: bool = False
+    accvgpr_srcs: bool = False
 
 class SemanticsSpec:
     """Collection of instruction semantics keyed by instruction name.
@@ -904,12 +907,16 @@ def _derive_vop3(name: str) -> InstructionSemantics | None:
                 'V_PERMLANE16_VAR_B32', 'V_PERMLANEX16_VAR_B32'):
         return InstructionSemantics(name, 'nop')
 
+    if name == 'V_PACK_B32_F16':
+        sem = InstructionSemantics(name, 'vector_pack_b32_f16')
+        sem.semantic_class = 'vector_pack_b32_f16'
+        return sem
+
     # FP8/BF8 pack/convert (non-scaled, CDNA3/4)
     _FP8_PATTERNS = (
         'V_CVT_PK_FP8_F32', 'V_CVT_PK_BF8_F32',
         'V_CVT_SR_FP8_F32', 'V_CVT_SR_BF8_F32',
         'V_CVT_PKNORM_I16_F16', 'V_CVT_PKNORM_U16_F16',
-        'V_PACK_B32_F16',
     )
     if name in _FP8_PATTERNS:
         return InstructionSemantics(name, 'nop')
@@ -1019,7 +1026,7 @@ def _derive_vop3p(name: str) -> InstructionSemantics | None:
         return InstructionSemantics(name, 'pk_binop_f32',
                                    operation='add', data_type='f32')
     if name == 'V_PK_MOV_B32':
-        return InstructionSemantics(name, 'pk_mov_b32')
+        return InstructionSemantics(name, 'pk_mov_b32', accvgpr_srcs=True)
 
     # Packed min3/max3 (CDNA4 / RDNA4)
     if name in ('V_PK_MINIMUM3_F16', 'V_PK_MAXIMUM3_F16'):
@@ -1246,7 +1253,9 @@ def _derive_flat(name: str) -> InstructionSemantics | None:
                 esz, ne, se = info
                 cls = 'flat_store' if is_store else 'flat_load'
                 return InstructionSemantics(name, cls, elem_size=esz,
-                                            num_elems=ne, sign_extend=se)
+                                            num_elems=ne, sign_extend=se,
+                                            d16_hi='D16_HI' in suffix,
+                                            d16_lo='D16' in suffix and 'D16_HI' not in suffix)
     return InstructionSemantics(name, 'nop')
 
 _BUFFER_FORMAT_MAP: dict[str, tuple[int, int]] = {
@@ -1296,7 +1305,9 @@ def _derive_mubuf(name: str) -> InstructionSemantics | None:
                 esz, ne, se = info
                 cls = 'buffer_store' if is_store else 'buffer_load'
                 return InstructionSemantics(name, cls, elem_size=esz,
-                                            num_elems=ne, sign_extend=se)
+                                            num_elems=ne, sign_extend=se,
+                                            d16_hi='D16_HI' in suffix,
+                                            d16_lo='D16' in suffix and 'D16_HI' not in suffix)
     return InstructionSemantics(name, 'nop')
 
 _MTBUF_FORMAT_MAP: dict[str, tuple[int, int, bool]] = {
@@ -1322,7 +1333,9 @@ def _derive_mtbuf(name: str) -> InstructionSemantics | None:
                 esz, ne, se = info
                 cls = 'tbuffer_store' if is_store else 'tbuffer_load'
                 return InstructionSemantics(name, cls, elem_size=esz,
-                                            num_elems=ne, sign_extend=se)
+                                            num_elems=ne, sign_extend=se,
+                                            d16_hi='D16_HI' in suffix,
+                                            d16_lo='D16' in suffix and 'D16_HI' not in suffix)
     return InstructionSemantics(name, 'nop')
 
 _DS_DATA_MAP: dict[str, tuple[int, int]] = {
@@ -1368,17 +1381,17 @@ def _derive_ds(name: str) -> InstructionSemantics | None:
         for suffix, (esz, ne) in _DS_DATA_MAP.items():
             if upper.endswith(suffix):
                 return InstructionSemantics(name, 'ds_write', elem_size=esz,
-                                            num_elems=ne)
+                                            num_elems=ne,
+                                            d16_hi='D16_HI' in suffix)
         return InstructionSemantics(name, 'ds_write', elem_size=4, num_elems=1)
     if is_read:
         for suffix, (esz, ne) in _DS_DATA_MAP.items():
             if upper.endswith(suffix):
-                # Signed sub-dword loads (I8, I16) need sign-extension.
-                # Check startswith('I') to avoid false positives like
-                # 'U8_D16_HI' which contains 'I' in 'HI'.
                 se = suffix.startswith('I')
                 return InstructionSemantics(name, 'ds_read', elem_size=esz,
-                                            num_elems=ne, sign_extend=bool(se))
+                                            num_elems=ne, sign_extend=bool(se),
+                                            d16_hi='D16_HI' in suffix,
+                                            d16_lo='D16' in suffix and 'D16_HI' not in suffix)
         return InstructionSemantics(name, 'ds_read', elem_size=4, num_elems=1)
     # DS atomic operations — extract the specific op and data width.
     # RTN variants use the same operation; the codegen sets is_load based

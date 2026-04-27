@@ -38,7 +38,8 @@ uint64_t smem_calculate_address(const SmemInst &inst, amdgpu::Wavefront &wf) {
     off += cu.read_sgpr(wf.sgpr_alloc().base + inst.soffset);
   if (inst.imm)
     off += static_cast<int64_t>(static_cast<int32_t>(inst.offset << 11) >> 11);
-  uint64_t addr = (base + off) & ~0x3ULL;
+  uint64_t addr = base + off;
+  assert((addr & 0x3) == 0 && "SMEM address must be 4-byte aligned");
   util::Logger::vm([&](auto &os) {
     static thread_local uint64_t smem_count = 0;
     if (++smem_count <= 12 || (smem_count % 240) == 0)
@@ -61,12 +62,29 @@ void ds_calculate_addresses(const DsInst &inst, amdgpu::Wavefront &wf, VectorMem
   uint64_t exec = wf.exec();
   d.lane_mask = exec;
   d.exec_mask = exec;
+  d.wg_id = wf.wg_id();
+  d.wf_id = wf.wf_id();
+  d.cu_path = wf.cu().full_path();
   uint32_t offset = (static_cast<uint32_t>(inst.offset1) << 8) | inst.offset0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    d.per_lane_addr[lane] = cu.read_vgpr(wf.vgpr_alloc().base + inst.addr, lane) + offset;
+    d.per_lane_addr[lane] =
+        cu.read_vgpr(wf.vgpr_alloc().base + inst.addr, lane) + offset + wf.lds_base();
   }
+  util::Logger::vm([&](auto &os) {
+    static uint64_t ds_addr_count = 0;
+    if (++ds_addr_count > 100)
+      return;
+    os << std::format("DS addr: {} wg[{}] wf[{}] v{}+{:#x} lds_base={} is_load={}",
+                      wf.cu().full_path(), wf.wg_id(), wf.wf_id(), inst.addr, offset, wf.lds_base(),
+                      d.is_load);
+    for (uint32_t ln = 0; ln < wf.wf_size(); ++ln) {
+      if (!(d.lane_mask & (1ULL << ln)))
+        continue;
+      os << std::format(" L{}:{:#x}", ln, d.per_lane_addr[ln]);
+    }
+  });
 }
 
 } // namespace addr_calc
