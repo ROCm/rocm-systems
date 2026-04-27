@@ -154,6 +154,14 @@ static HipCopyKindExt ToCopyKindExt(uint32_t cl_kind) {
   }
 }
 
+// ── Graph exec → node info table ─────────────────────────────────────────────
+// Populated at hipGraphInstantiate time; erased at hipGraphExecDestroy.
+// Looked up in HipActivityCallbackExt to fill per-node dims+kargs in spill nodes.
+// Declared here (before HipActivityCallbackExt) so the callback lambdas can
+// access the map directly under the lock without calling HipGetGraphExecNodesExt.
+std::unordered_map<uintptr_t, std::vector<HipGraphNodeInfoExt>> g_graph_exec_nodes;
+std::mutex g_graph_exec_mtx;
+
 // ============================================================
 // GPU ops callback — same logic as reference ReportActivityCallback.
 // correlation_id == slot index → direct array lookup, no map needed.
@@ -232,10 +240,11 @@ int HipActivityCallbackExt(activity_domain_t domain, uint32_t op_id, void* data)
       // Graph launch: look up node info by exec handle stored in memory1.
       // Copy the kernel_args blob so every HipGpuActivityExt owns its blob
       // and FreeChunk can unconditionally delete[] it.
-      auto* exec  = reinterpret_cast<hipGraphExec_t>(rec->memory1);
-      auto* nodes = HipGetGraphExecNodesExt(exec);
-      if (nodes && ar->kernel_name) {
-        for (const auto& ni : *nodes) {
+      auto* exec = reinterpret_cast<hipGraphExec_t>(rec->memory1);
+      std::lock_guard<std::mutex> lk(g_graph_exec_mtx);
+      auto it = g_graph_exec_nodes.find(reinterpret_cast<uintptr_t>(exec));
+      if (it != g_graph_exec_nodes.end() && ar->kernel_name) {
+        for (const auto& ni : it->second) {
           if (ni.kernel_name == ar->kernel_name) {
             gact->grid_x = ni.grid_x;
             gact->grid_y = ni.grid_y;
@@ -266,11 +275,12 @@ int HipActivityCallbackExt(activity_domain_t domain, uint32_t op_id, void* data)
       gact->src = rec->memory2;
       gact->dst = rec->memory1;
     } else {
-      auto* exec  = reinterpret_cast<hipGraphExec_t>(rec->memory1);
-      auto* nodes = HipGetGraphExecNodesExt(exec);
-      if (nodes) {
+      auto* exec = reinterpret_cast<hipGraphExec_t>(rec->memory1);
+      std::lock_guard<std::mutex> lk(g_graph_exec_mtx);
+      auto it = g_graph_exec_nodes.find(reinterpret_cast<uintptr_t>(exec));
+      if (it != g_graph_exec_nodes.end()) {
         HipCopyKindExt ck = static_cast<HipCopyKindExt>(gact->copy_kind);
-        for (const auto& ni : *nodes) {
+        for (const auto& ni : it->second) {
           if (ni.op == HIP_OP_COPY_EXT && ni.copy_kind == ck && ni.bytes == gact->bytes) {
             gact->src = ni.src;
             gact->dst = ni.dst;
@@ -354,7 +364,27 @@ static const char* CopyKindName(uint32_t kind) {
   }
 }
 
+// ── Shared helpers for both JSON and proto writers ───────────────────────────
+
+static bool IsAllocApi(const char* n) { return n && strncmp(n, "hipMalloc", 9) == 0; }
+static bool IsFreeApi (const char* n) { return n && strncmp(n, "hipFree",   7) == 0; }
+
+// Pre-demangle all kernel names in g_kernel_names under a single lock acquisition.
+// Both writers call this once at the start so the per-event lookup needs no demangling.
+static void PreDemangleKernelNames() {
+  std::lock_guard<std::mutex> lk(g_kernel_names_mtx);
+  for (auto& kv : g_kernel_names) {
+    if (kv.second.size() > 0 && kv.second[0] == '_') {
+      std::string demangled;
+      if (hip::helpers::demangleName(kv.second, demangled))
+        kv.second = std::move(demangled);
+    }
+  }
+}
+
 void WriteJsonTraceImpl(const char* filepath) {
+  PreDemangleKernelNames();
+
   const char* path = (filepath && filepath[0]) ? filepath : "hip_clr_trace.json";
   std::ofstream trace(path, std::fstream::out);
   if (!trace.is_open()) return;
@@ -387,13 +417,6 @@ void WriteJsonTraceImpl(const char* filepath) {
   };
   // Key = device pointer (uint64_t cast of void*)
   std::unordered_map<uint64_t, AllocInfo> alloc_map;
-  // Helpers: identify alloc/free/copy API names by prefix.
-  auto is_alloc = [](const char* n) {
-    return (strncmp(n, "hipMalloc", 9) == 0);
-  };
-  auto is_free  = [](const char* n) {
-    return (strncmp(n, "hipFree", 7) == 0);
-  };
   // First pass: populate alloc_map.
   for (size_t c = 0; c < g_records.size(); ++c) {
     HipApiRecordExt* chunk = g_records[c];
@@ -403,9 +426,9 @@ void WriteJsonTraceImpl(const char* filepath) {
       const HipApiRecordExt& rec = chunk[i];
       if (!rec.api_name) continue;
       uint64_t ptr = reinterpret_cast<uintptr_t>(rec.memory1);
-      if (is_alloc(rec.api_name) && ptr) {
+      if (IsAllocApi(rec.api_name) && ptr) {
         alloc_map[ptr] = AllocInfo{rec.start_ns, 0, rec.size, 0};
-      } else if (is_free(rec.api_name) && ptr) {
+      } else if (IsFreeApi(rec.api_name) && ptr) {
         auto it = alloc_map.find(ptr);
         if (it != alloc_map.end() && it->second.end_ns == 0)
           it->second.end_ns = rec.start_ns;
@@ -504,18 +527,11 @@ void WriteJsonTraceImpl(const char* filepath) {
                                                             : kGpuEvents[op_idx];
         std::string gpu_name = gpu_name_cstr;
         if (op_idx == OP_ID_DISPATCH && gop.kernel_name) {
+          // PreDemangleKernelNames() already ran — just look up the (now-demangled) copy.
+          // Never use gop.kernel_name at write time — it may be dangling.
           std::lock_guard<std::mutex> lk(g_kernel_names_mtx);
           auto it = g_kernel_names.find(gop.kernel_name);
-          if (it != g_kernel_names.end()) {
-            // it->second holds the eagerly-copied mangled name; demangle lazily on first use.
-            // Never use gop.kernel_name at write time — it may be dangling.
-            if (it->second.size() > 0 && it->second[0] == '_') {
-              std::string demangled;
-              if (hip::helpers::demangleName(it->second, demangled))
-                it->second = std::move(demangled);
-            }
-            gpu_name = it->second;
-          }
+          if (it != g_kernel_names.end()) gpu_name = it->second;
         }
 
         // Track stream→lane mapping for metadata labels.
@@ -938,6 +954,8 @@ static void EmitSlice(std::string& out, uint64_t uuid, uint32_t /*seq_id*/,
 }
 
 void WriteProtoTraceImpl(const char* filepath) {
+  PreDemangleKernelNames();
+
   std::string out;
 
   size_t total = g_rec_counter.load(std::memory_order_acquire);
@@ -955,8 +973,6 @@ void WriteProtoTraceImpl(const char* filepath) {
 
   struct AllocInfoP { uint64_t start_ns, end_ns, size; };
   std::unordered_map<uint64_t, AllocInfoP> alloc_map;
-  auto is_alloc = [](const char* n){ return n && strncmp(n,"hipMalloc",9)==0; };
-  auto is_free  = [](const char* n){ return n && strncmp(n,"hipFree",  7)==0; };
 
   uint64_t t_end = 0;
   for (size_t c = 0; c < g_records.size(); ++c) {
@@ -969,8 +985,8 @@ void WriteProtoTraceImpl(const char* filepath) {
       compact_tid(rec.thread_id);
       if (rec.api_name) {
         uint64_t ptr = reinterpret_cast<uintptr_t>(rec.memory1);
-        if      (is_alloc(rec.api_name) && ptr) alloc_map[ptr] = {rec.start_ns, 0, rec.size};
-        else if (is_free (rec.api_name) && ptr) {
+        if      (IsAllocApi(rec.api_name) && ptr) alloc_map[ptr] = {rec.start_ns, 0, rec.size};
+        else if (IsFreeApi (rec.api_name) && ptr) {
           auto it = alloc_map.find(ptr);
           if (it != alloc_map.end() && it->second.end_ns == 0) it->second.end_ns = rec.start_ns;
         }
@@ -1108,6 +1124,10 @@ void WriteProtoTraceImpl(const char* filepath) {
   }
 
   // ── Pass 3: emit events with embedded flow_ids on BEGIN ───────────────────
+  // Hoisted out of the per-record inner loop to avoid repeated heap allocs.
+  std::vector<std::pair<std::string,std::string>> gpu_anns;
+  std::vector<uint64_t> in_flows_vec;
+  std::vector<uint64_t> out_flows_vec;
   for (size_t c = 0; c < g_records.size(); ++c) {
     HipApiRecordExt* chunk = g_records[c];
     size_t base  = c * kChunkSize;
@@ -1148,41 +1168,34 @@ void WriteProtoTraceImpl(const char* filepath) {
 
         std::string gpu_name;
         if (gop.op == OP_ID_DISPATCH && gop.kernel_name) {
+          // PreDemangleKernelNames() already ran — just look up the (now-demangled) copy.
+          // Never use gop.kernel_name at write time — it may be dangling.
           std::lock_guard<std::mutex> lk(g_kernel_names_mtx);
           auto it = g_kernel_names.find(gop.kernel_name);
-          if (it != g_kernel_names.end()) {
-            // it->second holds the eagerly-copied mangled name; demangle lazily on first use.
-            // Never use gop.kernel_name at write time — it may be dangling.
-            if (it->second.size() > 0 && it->second[0] == '_') {
-              std::string d;
-              if (hip::helpers::demangleName(it->second, d))
-                it->second = std::move(d);
-            }
-            gpu_name = it->second;
-          }
-          // If not found in map, kernel_name is dangling — leave gpu_name empty (shown as dispatch op type).
+          if (it != g_kernel_names.end()) gpu_name = it->second;
+          // If not found in map, kernel_name is dangling — leave gpu_name empty.
         } else if (gop.op == OP_ID_COPY) {
           gpu_name = CopyKindName(gop.copy_kind);
         } else { gpu_name = "Barrier"; }
 
-        std::vector<std::pair<std::string,std::string>> anns;
+        gpu_anns.clear();
         if (gop.op == OP_ID_DISPATCH && gop.grid_x) {
           char buf[64];
-          snprintf(buf, sizeof(buf), "%ux%ux%u", gop.grid_x, gop.grid_y, gop.grid_z); anns.push_back({"grid", buf});
-          snprintf(buf, sizeof(buf), "%ux%ux%u", gop.block_x, gop.block_y, gop.block_z); anns.push_back({"block", buf});
+          snprintf(buf, sizeof(buf), "%ux%ux%u", gop.grid_x, gop.grid_y, gop.grid_z); gpu_anns.push_back({"grid", buf});
+          snprintf(buf, sizeof(buf), "%ux%ux%u", gop.block_x, gop.block_y, gop.block_z); gpu_anns.push_back({"block", buf});
         }
         if (gop.op == OP_ID_COPY && gop.bytes) {
-          anns.push_back({"copy_kind", CopyKindName(gop.copy_kind)});
-          anns.push_back({"bytes", std::to_string(gop.bytes)});
+          gpu_anns.push_back({"copy_kind", CopyKindName(gop.copy_kind)});
+          gpu_anns.push_back({"bytes", std::to_string(gop.bytes)});
           if (gop.dst) {
             char buf[32]; snprintf(buf, sizeof(buf), "0x%llx",
               static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(gop.dst)));
-            anns.push_back({"dst", buf});
+            gpu_anns.push_back({"dst", buf});
           }
           if (gop.src) {
             char buf[32]; snprintf(buf, sizeof(buf), "0x%llx",
               static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(gop.src)));
-            anns.push_back({"src", buf});
+            gpu_anns.push_back({"src", buf});
           }
         }
         // Kernel args — same positional format as JSON writer
@@ -1203,23 +1216,23 @@ void WriteProtoTraceImpl(const char* filepath) {
             } else {
               snprintf(vbuf, sizeof(vbuf), "(sz=%u)", sz);
             }
-            anns.push_back({std::to_string(kidx++), vbuf});
+            gpu_anns.push_back({std::to_string(kidx++), vbuf});
             p += sz;
           }
         }
 
         // CPU→GPU incoming on first op
-        std::vector<uint64_t> in_flows;
-        if (first_op && cfit != cpu_gpu_flow.end()) in_flows.push_back(cfit->second);
+        in_flows_vec.clear();
+        if (first_op && cfit != cpu_gpu_flow.end()) in_flows_vec.push_back(cfit->second);
         first_op = false;
 
         // GPU→memory outgoing
-        std::vector<uint64_t> out_flows;
+        out_flows_vec.clear();
         auto ofit = gpu_out_flows.find(slot * 1000 + op_ord);
-        if (ofit != gpu_out_flows.end()) out_flows = ofit->second;
+        if (ofit != gpu_out_flows.end()) out_flows_vec = ofit->second;
         ++op_ord;
 
-        EmitSlice(out, gpu_uuid, 0, g_ts, g_dur, gpu_name, "gpu", anns, out_flows, in_flows);
+        EmitSlice(out, gpu_uuid, 0, g_ts, g_dur, gpu_name, "gpu", gpu_anns, out_flows_vec, in_flows_vec);
       };
 
       if (rec.gpu.gpu_op_count > 0) {
@@ -1274,12 +1287,6 @@ struct HipClrProfilerFinalizer {
     for (auto* chunk : g_records) FreeChunk(chunk);
   }
 } g_finalizer;
-
-// ── Graph exec → node info table ─────────────────────────────────────────────
-// Populated at hipGraphInstantiate time; erased at hipGraphExecDestroy.
-// Looked up in HipActivityCallbackExt to fill per-node dims+kargs in spill nodes.
-std::unordered_map<uintptr_t, std::vector<HipGraphNodeInfoExt>> g_graph_exec_nodes;
-std::mutex g_graph_exec_mtx;
 
 }  // anonymous namespace
 
