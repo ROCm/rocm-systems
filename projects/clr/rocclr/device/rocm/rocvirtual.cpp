@@ -2527,6 +2527,17 @@ void VirtualGPU::submitSvmPrefetchAsync(amd::SvmPrefetchAsyncCommand& cmd) {
   if (dev().info().hmmSupported_) {
     // Initialize signal for the barrier
     auto wait_events = Barriers().WaitingSignal(HwQueueEngine::Unknown);
+
+    // Memory prefetch requires system-scope coherency to ensure all prior GPU writes
+    // are visible to the target agent (CPU or device). Submit a system-scope barrier
+    // if there are pending operations to guarantee cache coherency before prefetch.
+    if (!wait_events.empty()) {
+      // Submit a barrier with system-scope fences to flush GPU caches
+      dispatchBarrierPacket(kBarrierPacketHeader, false);
+      // Clear wait events since barrier now handles the dependencies
+      wait_events.clear();
+    }
+
     hsa_signal_t active = Barriers().ActiveSignal(kInitSignalValueOne, timestamp_);
 
     // Find the requested agent for the transfer
@@ -2551,7 +2562,7 @@ void VirtualGPU::submitSvmPrefetchAsync(amd::SvmPrefetchAsyncCommand& cmd) {
       cmd.setStatus(CL_INVALID_OPERATION);
     }
 
-    // Add system scope, since the prefetch scope is unclear
+    // Add system scope for subsequent operations that may access prefetched data
     addSystemScope();
   } else {
     LogWarning("hsa_amd_svm_prefetch_async is ignored, because no HMM support");
@@ -2565,10 +2576,25 @@ void VirtualGPU::SubmitSvmPrefetchBatchAsync(amd::SvmPrefetchBatchAsyncCommand& 
   profilingBegin(command);
 
   auto wait_events = Barriers().WaitingSignal(HwQueueEngine::Unknown);
-  hsa_signal_t active = Barriers().ActiveSignal(command.Count(), timestamp_);
+
+  // Memory prefetch requires system-scope coherency to ensure all prior GPU writes
+  // are visible to the target agent (CPU or device). Submit a system-scope barrier
+  // if there are pending operations to guarantee cache coherency before prefetch.
+  if (!wait_events.empty()) {
+    // Submit a barrier with system-scope fences to flush GPU caches
+    dispatchBarrierPacket(kBarrierPacketHeader, false);
+    // Clear wait events since barrier now handles the dependencies
+    wait_events.clear();
+  }
 
   const bool enable_system_memory =
       (dev().settings().hmmFlags_ & Settings::Hmm::EnableSystemMemory) != 0;
+
+  // Each prefetch operation needs its own signal for proper completion tracking.
+  // Sharing a single signal across all operations can cause race conditions where
+  // the signal reaches zero before all specific operations complete.
+  std::vector<hsa_signal_t> operation_signals;
+  operation_signals.reserve(command.Count());
 
   for (size_t idx = 0; idx < command.Count(); idx++) {
     void* dev_ptr = command.DevicePointers()[idx];
@@ -2579,12 +2605,17 @@ void VirtualGPU::SubmitSvmPrefetchBatchAsync(amd::SvmPrefetchBatchAsyncCommand& 
     hsa_agent_t agent = (cpu_access || enable_system_memory) ? dev().getCpuAgent(CpuDeviceId)
                                                              : target_dev->getBackendDevice();
 
+    // Create individual signal for this operation
+    hsa_signal_t operation_signal = Barriers().ActiveSignal(kInitSignalValueOne, timestamp_);
+    operation_signals.push_back(operation_signal);
+
     hsa_status_t status = Hsa::svm_prefetch_async(dev_ptr, size, agent, wait_events.size(),
-                                                  wait_events.data(), active);
+                                                  wait_events.data(), operation_signal);
     ClPrint(amd::LOG_DEBUG, amd::LOG_COPY,
             "HSA prefetch batch async[%zu] dev_ptr=0x%zx, size=%zu, wait_event=0x%zx, "
             "completion_signal=0x%zx",
-            idx, dev_ptr, size, wait_events.empty() ? 0 : wait_events[0].handle, active.handle);
+            idx, dev_ptr, size, wait_events.empty() ? 0 : wait_events[0].handle,
+            operation_signal.handle);
 
     if (status != HSA_STATUS_SUCCESS) {
       Barriers().ResetCurrentSignal();
@@ -2595,6 +2626,14 @@ void VirtualGPU::SubmitSvmPrefetchBatchAsync(amd::SvmPrefetchBatchAsyncCommand& 
     }
   }
 
+  // Wait for all prefetch operations to complete before returning.
+  // This ensures each individual operation finished, not just that the total
+  // number of signal decrements matches the operation count.
+  for (size_t idx = 0; idx < operation_signals.size(); idx++) {
+    WaitCompleteSignal(operation_signals[idx]);
+  }
+
+  // Add system scope for subsequent operations that may access prefetched data
   addSystemScope();
   profilingEnd();
 }
