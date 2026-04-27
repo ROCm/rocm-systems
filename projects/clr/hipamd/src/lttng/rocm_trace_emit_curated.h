@@ -19,6 +19,14 @@
 
 #include <atomic>
 #include "rocm_hip_curated_tp.h"
+/* Force the AMD platform define so the host-only HIP runtime header is
+ * self-contained. rocclr internal TUs that pull in rocm_trace_emit.h
+ * (e.g. device/rocm/rocvirtual.cpp) don't set this themselves. This
+ * file is built only into libamdhip64; there is no NVIDIA path. */
+#ifndef __HIP_PLATFORM_AMD__
+#define __HIP_PLATFORM_AMD__ 1
+#endif
+#include <hip/hip_runtime_api.h>
 
 extern std::atomic<bool> rocm_hip_trace_g_disabled;
 #ifndef ROCM_TRACE_DISABLED_DEFINED

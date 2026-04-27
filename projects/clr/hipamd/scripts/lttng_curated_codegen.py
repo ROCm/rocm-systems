@@ -400,23 +400,29 @@ def emit_emit_h(provider, apis, status_type, status_success, yaml_path, yaml_sha
 #include <atomic>
 #include "{provider}_curated_tp.h"
 """)
-    # NOTE: We intentionally do NOT include the provider-side runtime
-    # headers (<hip/hip_runtime_api.h> or <hsa/hsa.h>) from this generated
-    # file. The helper signatures use provider types (hipError_t,
-    # hipMemcpyKind, hipStream_t, hsa_status_t, hsa_signal_t, ...) but
-    # any TU that calls these helpers necessarily already has those
-    # types in scope (they are HIP/HSA API wrapper bodies). Including
-    # the runtime header here causes:
-    #   - HIP: 'Must define exactly one of __HIP_PLATFORM_AMD__ or
-    #     __HIP_PLATFORM_NVIDIA__' in TUs that don't set the define
-    #     (e.g. rocclr internals) plus a chain of hipHost* enum
-    #     not-declared errors when host-only inline functions in
-    #     hip_runtime_api.h reference enums whose forward-decl /
-    #     definition order is wrong at this transitive include point.
-    #   - HSA: similar transitive include / namespace pollution.
-    # The right contract is: callers must have the provider headers in
-    # scope before #including rocm_trace_emit.h. All existing wrappers
-    # already do.
+    # Provider-runtime header. Helper signatures use provider types
+    # (hipError_t, hipStream_t, hsa_status_t, ...) so we need the
+    # runtime header in scope at the point of helper definition.
+    #
+    # HIP: hip_runtime_api.h hard-#errors when neither __HIP_PLATFORM_AMD__
+    # nor __HIP_PLATFORM_NVIDIA__ is defined, but several rocclr internal
+    # TUs that pull in rocm_trace_emit.h transitively (e.g.
+    # device/rocm/rocvirtual.cpp) don't set the define. Force the AMD
+    # platform here so the include is self-contained — this is HIP-on-AMD
+    # code by definition; the NVIDIA path is irrelevant for libamdhip64.
+    if provider == 'rocm_hip':
+        out.append("""\
+/* Force the AMD platform define so the host-only HIP runtime header is
+ * self-contained. rocclr internal TUs that pull in rocm_trace_emit.h
+ * (e.g. device/rocm/rocvirtual.cpp) don't set this themselves. This
+ * file is built only into libamdhip64; there is no NVIDIA path. */
+#ifndef __HIP_PLATFORM_AMD__
+#define __HIP_PLATFORM_AMD__ 1
+#endif
+#include <hip/hip_runtime_api.h>
+""")
+    else:
+        out.append('#include <hsa/hsa.h>\n#include <hsa/hsa_ext_amd.h>\n')
 
     # Reuse the same disabled flag as the existing generic helpers.
     # The rocm_trace_disabled() inline definition is guarded with
