@@ -1353,6 +1353,11 @@ construct_counter_collection_profile(rocprofiler_agent_id_t       agent_id,
     const auto*       agent_v                 = tool_metadata->get_agent(agent_id);
     auto              expected_v              = counters.size();
 
+    if(gpu_agents_counter_info.find(agent_id) == gpu_agents_counter_info.end())
+    {
+        return std::nullopt;
+    }
+
     constexpr auto device_qualifier = std::string_view{":device="};
     for(const auto& itr : counters)
     {
@@ -1501,6 +1506,11 @@ get_att_perfcounter_params(rocprofiler_agent_id_t                           agen
     if(att_perf_counters.empty()) return _data;
 
     static const auto agent_counter_info = get_agent_counter_info();
+
+    if(agent_counter_info.find(agent) == agent_counter_info.end())
+    {
+        return _data;
+    }
 
     for(const auto& att_perf_counter : att_perf_counters)
     {
