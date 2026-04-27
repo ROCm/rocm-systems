@@ -1,13 +1,13 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier:  MIT
 #pragma once
-#include <mutex>
-#include <set>
-#include <map>
 #include "pc_sampling_collector.h"
 #include "synchronized.hpp"
 
+#include <map>
 #include <memory>
+#include <mutex>
+#include <set>
 #include <string>
 
 namespace rocprofiler_compute_tool
@@ -81,7 +81,7 @@ struct tool_data_t
     std::vector<counter_info_record_t>         counter_records;
     std::set<uint64_t>                         target_kernel_ids{};
     iteration_multiplexing_mode_t iteration_multiplexing_mode{iteration_multiplexing_mode_t::DISABLED};
-    rocprof_compute::synchronized_t<pc_sampling_collector_t> pc_sampling_collector;
-    std::shared_ptr<sdk_callbacks_t>                         sdk_callbacks{};
+    rocprof_compute::synchronized_t<pc_sampling_collector_t::Ptr> pc_sampling_collector;
+    std::shared_ptr<sdk_callbacks_t>                              sdk_callbacks{};
 };
 }  // namespace rocprofiler_compute_tool

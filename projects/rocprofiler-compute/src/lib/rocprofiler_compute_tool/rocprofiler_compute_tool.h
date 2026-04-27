@@ -32,6 +32,10 @@ void record_callback(rocprofiler_dispatch_counting_service_data_t dispatch_data,
 void tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
                            rocprofiler_user_data_t*              user_data,
                            void*                                 callback_data);
+
+void code_object_tracing_callback(rocprofiler_callback_tracing_record_t record,
+                                                        rocprofiler_user_data_t* user_data,
+                                                        void*                    data);
 }  // namespace rocprofiler_compute_tool
 
 namespace rocprofiler_compute_tool::test_knobs

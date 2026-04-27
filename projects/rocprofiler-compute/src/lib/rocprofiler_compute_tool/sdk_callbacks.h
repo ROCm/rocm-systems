@@ -33,8 +33,6 @@ public:
     virtual void tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
                                        tool_data_t&                          tool_data) = 0;
 
-    virtual void code_object_tracing_callback(rocprofiler_callback_tracing_record_t record,
-                                              tool_data_t&                          tool_data) = 0;
 };
 
 class sdk_callbacks_impl_t : public sdk_callbacks_t
@@ -53,9 +51,6 @@ public:
 
     void tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
                                tool_data_t&                          tool_data) override;
-
-    void code_object_tracing_callback(rocprofiler_callback_tracing_record_t record,
-                                      tool_data_t&                          tool_data) override;
 
 private:
     static bool is_targeted_dispatch(const tool_data_t& tool, uint64_t kernel_id, uint64_t kernel_iteration);

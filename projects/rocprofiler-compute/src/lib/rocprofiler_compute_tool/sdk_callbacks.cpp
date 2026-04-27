@@ -430,11 +430,6 @@ void sdk_callbacks_impl_t::code_object_tracing_callback(rocprofiler_callback_tra
 }
 #endif
 
-void sdk_callbacks_impl_t::code_object_tracing_callback(rocprofiler_callback_tracing_record_t record,
-                                                        tool_data_t& tool_data)
-{
-}
-
 std::string sdk_callbacks_impl_t::truncate_name(std::string_view name)
 {
     // The function extracts the kernel name from

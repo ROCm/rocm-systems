@@ -5,8 +5,7 @@
 #include "input_parameters.h"
 #include "sdk_callbacks.h"
 #include "sdk_wrapper.h"
-
-#include <gmock/gmock.h>
+#include "pc_sampling_collector.h"
 
 class mock_input_parameters_t : public rocprofiler_compute_tool::input_parameters_t
 {
@@ -151,18 +150,28 @@ public:
     void tool_tracing_callback(rocprofiler_callback_tracing_record_t  record,
                                rocprofiler_compute_tool::tool_data_t& tool_data) override;
 
-    void code_object_tracing_callback(rocprofiler_callback_tracing_record_t  record,
-                                      rocprofiler_compute_tool::tool_data_t& tool_data) override;
 
     // Test accessors
     const std::vector<dispatch_callback_info_t>& get_dispatch_callback_info() const;
     const std::vector<record_callback_info_t>&   get_record_callback_info() const;
     const std::vector<tracing_callback_info_t>&  get_tracing_callback_info() const;
-    int                                          get_code_object_callback_call_count() const;
 
 private:
     std::vector<dispatch_callback_info_t> m_dispatch_callback_info;
     std::vector<record_callback_info_t>   m_record_callback_info;
     std::vector<tracing_callback_info_t>  m_tracing_callback_info;
-    int                                   m_code_object_callback_call_count = 0;
+};
+
+class mock_pc_sampling_collector_t : public rocprofiler_compute_tool::pc_sampling_collector_t
+{
+public:
+    struct on_code_object_load_info_t
+    {
+        uint32_t dummy;
+    };
+    void on_code_object_load(const rocprofiler_callback_tracing_record_t& record) override;
+    const std::vector<on_code_object_load_info_t>& get_on_code_object_load_info() const;
+
+private:
+    std::vector<on_code_object_load_info_t> m_on_code_object_load_info = {};
 };

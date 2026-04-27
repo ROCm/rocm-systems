@@ -89,6 +89,17 @@ void tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
     tool_data->sdk_callbacks->tool_tracing_callback(record, *tool_data);
 }
 
+void code_object_tracing_callback(rocprofiler_callback_tracing_record_t record,
+                                                        rocprofiler_user_data_t* user_data,
+                                                        void*                    data)
+{
+    Expects(data);
+    auto* tool_data = static_cast<tool_data_t*>(data);
+    tool_data->pc_sampling_collector.wlock([&](auto& collector) {
+        collector->on_code_object_load(record);
+    });
+}
+
 int tool_init(rocprofiler_client_finalize_t, void* user_data)
 {
     std::clog << "[rocprofiler-compute] In tool init\n";

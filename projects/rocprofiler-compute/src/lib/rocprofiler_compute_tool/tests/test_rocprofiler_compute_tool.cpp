@@ -221,7 +221,7 @@ TEST_F(test_rocprofiler_compute_tool_t, OnDispatchCallback_ForwardsToSdkCallback
     dispatch_callback(dispatch_data, &config, nullptr, &tool_data);
 
     const auto& calls = m_sdk_callbacks->get_dispatch_callback_info();
-    ASSERT_EQ(calls.size(), 1);
+    EXPECT_EQ(calls.size(), 1);
     EXPECT_EQ(calls[0].dispatch_data.dispatch_info.kernel_id, dispatch_data.dispatch_info.kernel_id);
     EXPECT_EQ(calls[0].config, &config);
 }
@@ -240,7 +240,7 @@ TEST_F(test_rocprofiler_compute_tool_t, OnRecordCallback_ForwardsToSdkCallbacks)
     record_callback(dispatch_data, &record, record_count, user_data, &tool_data);
 
     const auto& calls = m_sdk_callbacks->get_record_callback_info();
-    ASSERT_EQ(calls.size(), 1);
+    EXPECT_EQ(calls.size(), 1);
     EXPECT_EQ(calls[0].dispatch_data.dispatch_info.kernel_id, dispatch_data.dispatch_info.kernel_id);
     EXPECT_EQ(calls[0].record_data, &record);
     EXPECT_EQ(calls[0].record_count, record_count);
@@ -257,8 +257,26 @@ TEST_F(test_rocprofiler_compute_tool_t, OnToolTracingCallback_ForwardsToSdkCallb
     tool_tracing_callback(record, nullptr, &tool_data);
 
     const auto& calls = m_sdk_callbacks->get_tracing_callback_info();
-    ASSERT_EQ(calls.size(), 1);
+    EXPECT_EQ(calls.size(), 1);
     EXPECT_EQ(calls[0].record.kind, record.kind);
+}
+
+TEST_F(test_rocprofiler_compute_tool_t, OnCodeObjectTracingCallback_ForwardsToSdkCallbacks)
+{
+    tool_data_t tool_data{};
+    tool_data.pc_sampling_collector.wlock(
+        [&](auto& ptr)
+        { ptr = m_pc_sampling_collector; });
+
+    rocprofiler_callback_tracing_record_t record = {};
+    record.kind                                  = ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT;
+    record.operation                             = ROCPROFILER_CODE_OBJECT_LOAD;
+    record.phase                                 = ROCPROFILER_CALLBACK_PHASE_LOAD;
+
+    code_object_tracing_callback(record, nullptr, &tool_data);
+
+    const auto& calls = m_pc_sampling_collector->get_on_code_object_load_info();
+    EXPECT_EQ(calls.size(), 1);
 }
 
 //////////////////////////////////////////////////////////////////////////

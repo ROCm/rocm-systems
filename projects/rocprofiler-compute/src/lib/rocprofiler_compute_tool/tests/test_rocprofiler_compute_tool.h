@@ -3,6 +3,7 @@
 #pragma once
 #include "mocks.h"
 #include "rocprofiler_compute_tool.h"
+#include "gtest/gtest.h"
 
 #include <memory>
 
@@ -22,4 +23,5 @@ protected:
     std::shared_ptr<mock_sdk_wrapper_t>      m_sdk_wrapper;
     std::shared_ptr<mock_counters_writer_t>  m_counters_writer;
     std::shared_ptr<mock_sdk_callbacks_t>    m_sdk_callbacks;
+    std::shared_ptr<mock_pc_sampling_collector_t> m_pc_sampling_collector;
 };

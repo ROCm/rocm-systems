@@ -2,6 +2,7 @@
 // SPDX-License-Identifier:  MIT
 #pragma once
 #include "mocks.h"
+#include "gtest/gtest.h"
 
 class test_sdk_callbacks_t : public ::testing::Test
 {
@@ -33,7 +34,7 @@ protected:
 
 class test_sdk_callbacks_multiplexing_t
     : public test_sdk_callbacks_t
-    , public ::testing::WithParamInterface<rocprofiler_compute_tool::iteration_multiplexing_mode_t>
+    , public testing::WithParamInterface<rocprofiler_compute_tool::iteration_multiplexing_mode_t>
 {
 protected:
     void SetUp() override;

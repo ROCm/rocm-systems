@@ -70,7 +70,8 @@ TEST_F(test_sdk_callbacks_t, ProvidedSameKernelSameParamsWithLaunchMultiplexing_
     EXPECT_EQ(created_config_info[config_index_1].counter_names, m_counters_pmc1);
 }
 
-TEST_F(test_sdk_callbacks_t, ProvidedSameKernelDifferentParamsWithLaunchMultiplexing_DispatchCbReturnsSamePmc)
+TEST_F(test_sdk_callbacks_t,
+       ProvidedSameKernelDifferentParamsWithLaunchMultiplexing_DispatchCbReturnsSamePmc)
 {
     m_tool_data->iteration_multiplexing_mode   = iteration_multiplexing_mode_t::LAUNCH;
     kernel_dispatch_info_t info                = {1, 2, {3, 3, 3}, {4, 4, 4}, 5};
@@ -180,22 +181,6 @@ TEST_P(test_sdk_callbacks_kernel_filtering_t, ProvidedKernelFilteringEnabled_Ret
     EXPECT_EQ(*m_tool_data->target_kernel_ids.cbegin(), kernel_id_0);
 }
 
-TEST_F(test_sdk_callbacks_t, ProvidedCallbackTracingRecordInMemory_StoresCodeObjectInformation)
-{
-    rocprofiler_callback_tracing_code_object_load_data_t payload = {};
-    payload.storage_type = ROCPROFILER_CODE_OBJECT_STORAGE_TYPE_MEMORY;
-
-    rocprofiler_callback_tracing_record_t record = {};
-    record.kind                                  = ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT;
-    record.operation                             = ROCPROFILER_CODE_OBJECT_LOAD;
-    record.phase                                 = ROCPROFILER_CALLBACK_PHASE_LOAD;
-    record.payload                               = &payload;
-
-    m_sdk_callbacks->code_object_tracing_callback(record, *m_tool_data);
-
-    // m_tool_data->pc_sampling_collector;
-}
-
 //////////////////////////////////////////////////////////////////////////
 /// test_sdk_callbacks_t
 void test_sdk_callbacks_t::SetUp()
@@ -206,9 +191,10 @@ void test_sdk_callbacks_t::SetUp()
     m_tool_data     = std::make_unique<tool_data_t>();
 }
 
-uint64_t test_sdk_callbacks_t::dispatch_kernel_with_dispatch_info(const kernel_dispatch_info_t& dispatch_info,
-                                                              const std::vector<std::string>& counters_pmc0,
-                                                              const std::vector<std::string>& counters_pmc1) const
+uint64_t test_sdk_callbacks_t::dispatch_kernel_with_dispatch_info(
+    const kernel_dispatch_info_t&   dispatch_info,
+    const std::vector<std::string>& counters_pmc0,
+    const std::vector<std::string>& counters_pmc1) const
 {
     m_tool_data->requested_counters = convert_counters_per_pmc_to_str({counters_pmc0, counters_pmc1});
     m_sdk_wrapper->set_available_counters(concat_counters(counters_pmc0, counters_pmc1));
@@ -225,9 +211,9 @@ uint64_t test_sdk_callbacks_t::dispatch_kernel_with_dispatch_info(const kernel_d
     return config.handle;
 }
 
-uint64_t test_sdk_callbacks_t::dispatch_kernel_with_id(uint64_t                        kernel_id,
-                                                   const std::vector<std::string>& counters_pmc0,
-                                                   const std::vector<std::string>& counters_pmc1) const
+uint64_t test_sdk_callbacks_t::dispatch_kernel_with_id(uint64_t kernel_id,
+                                                       const std::vector<std::string>& counters_pmc0,
+                                                       const std::vector<std::string>& counters_pmc1) const
 {
     kernel_dispatch_info_t dispatch_info = {};
     dispatch_info.kernel_id              = kernel_id;
@@ -235,8 +221,8 @@ uint64_t test_sdk_callbacks_t::dispatch_kernel_with_id(uint64_t                 
 }
 
 void test_sdk_callbacks_t::invoke_record_callback(uint64_t           counter_id,
-                                              const std::string& counter_name,
-                                              double             counter_value) const
+                                                  const std::string& counter_name,
+                                                  double             counter_value) const
 {
     rocprofiler_dispatch_counting_service_data_t dispatch_data = {};
     dispatch_data.dispatch_info.dispatch_id                    = 100;
@@ -262,7 +248,8 @@ void test_sdk_callbacks_t::invoke_record_callback(uint64_t           counter_id,
               dispatch_data.dispatch_info.group_segment_size);
 }
 
-void test_sdk_callbacks_t::invoke_tool_tracing_callback(uint64_t kernel_id, const std::string& kernel_name) const
+void test_sdk_callbacks_t::invoke_tool_tracing_callback(uint64_t           kernel_id,
+                                                        const std::string& kernel_name) const
 {
     rocprofiler_callback_tracing_record_t                                  record  = {};
     rocprofiler_callback_tracing_code_object_kernel_symbol_register_data_t payload = {};
@@ -312,7 +299,7 @@ std::string test_sdk_callbacks_t::remove_trailing_comma(const std::string& str)
 }
 
 std::vector<std::string> test_sdk_callbacks_t::concat_counters(const std::vector<std::string>& v0,
-                                                           const std::vector<std::string>& v1)
+                                                               const std::vector<std::string>& v1)
 {
     auto result = v0;
     result.insert(result.end(), v1.begin(), v1.end());

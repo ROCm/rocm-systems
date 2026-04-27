@@ -70,18 +70,18 @@ void mock_sdk_wrapper_t::configure_callback_dispatch_counting_service(
 {
     m_dispatch_counting_service_info.push_back(
         dispatch_counting_service_info_t{context_id.handle,
-                                       reinterpret_cast<void*>(dispatch_callback),
-                                       dispatch_callback_args,
-                                       reinterpret_cast<void*>(record_callback),
-                                       record_callback_args});
+                                         reinterpret_cast<void*>(dispatch_callback),
+                                         dispatch_callback_args,
+                                         reinterpret_cast<void*>(record_callback),
+                                         record_callback_args});
 }
 
 void mock_sdk_wrapper_t::configure_callback_tracing_service(rocprofiler_context_id_t context_id,
-                                                        rocprofiler_callback_tracing_kind_t kind,
-                                                        const rocprofiler_tracing_operation_t* operations,
-                                                        size_t operations_count,
-                                                        rocprofiler_callback_tracing_cb_t callback,
-                                                        void* callback_args)
+                                                            rocprofiler_callback_tracing_kind_t kind,
+                                                            const rocprofiler_tracing_operation_t* operations,
+                                                            size_t operations_count,
+                                                            rocprofiler_callback_tracing_cb_t callback,
+                                                            void* callback_args)
 {
 }
 
@@ -90,9 +90,9 @@ void mock_sdk_wrapper_t::start_context(rocprofiler_context_id_t context_id)
     m_started_contexts.push_back(context_id.handle);
 }
 
-void mock_sdk_wrapper_t::iterate_agent_supported_counters(rocprofiler_agent_id_t              agent_id,
-                                                      rocprofiler_available_counters_cb_t cb,
-                                                      void*                               user_data)
+void mock_sdk_wrapper_t::iterate_agent_supported_counters(rocprofiler_agent_id_t agent_id,
+                                                          rocprofiler_available_counters_cb_t cb,
+                                                          void* user_data)
 {
     auto counters = get_counters();
     cb(agent_id, counters.data(), counters.size(), user_data);
@@ -110,8 +110,8 @@ std::vector<rocprofiler_counter_id_t> mock_sdk_wrapper_t::get_counters() const
 }
 
 void mock_sdk_wrapper_t::query_counter_info(rocprofiler_counter_id_t              counter_id,
-                                        rocprofiler_counter_info_version_id_t version,
-                                        void*                                 info)
+                                            rocprofiler_counter_info_version_id_t version,
+                                            void*                                 info)
 {
     Expects(counter_id.handle < m_counter_names.size());
     Expects(info);
@@ -122,9 +122,9 @@ void mock_sdk_wrapper_t::query_counter_info(rocprofiler_counter_id_t            
 }
 
 void mock_sdk_wrapper_t::create_counter_config(rocprofiler_agent_id_t           agent_id,
-                                           rocprofiler_counter_id_t*        counters_list,
-                                           size_t                           counters_count,
-                                           rocprofiler_counter_config_id_t* config_id)
+                                               rocprofiler_counter_id_t*        counters_list,
+                                               size_t                           counters_count,
+                                               rocprofiler_counter_config_id_t* config_id)
 {
     Expects(counters_count <= m_counter_names.size());
     create_counter_config_info_t info;
@@ -138,7 +138,7 @@ void mock_sdk_wrapper_t::create_counter_config(rocprofiler_agent_id_t           
 }
 
 void mock_sdk_wrapper_t::query_record_counter_id(rocprofiler_counter_instance_id_t id,
-                                             rocprofiler_counter_id_t*         counter_id)
+                                                 rocprofiler_counter_id_t*         counter_id)
 {
     m_query_counter_record_info.push_back({id, id});
     counter_id->handle = id;
@@ -165,12 +165,14 @@ const std::vector<mock_sdk_wrapper_t::dispatch_counting_service_info_t>&
     return m_dispatch_counting_service_info;
 }
 
-const std::vector<mock_sdk_wrapper_t::create_counter_config_info_t>& mock_sdk_wrapper_t::get_create_counter_config_info() const
+const std::vector<mock_sdk_wrapper_t::create_counter_config_info_t>&
+    mock_sdk_wrapper_t::get_create_counter_config_info() const
 {
     return m_create_counter_config_info;
 }
 
-const std::vector<mock_sdk_wrapper_t::query_counter_record_info_t>& mock_sdk_wrapper_t::get_query_counter_record_info() const
+const std::vector<mock_sdk_wrapper_t::query_counter_record_info_t>&
+    mock_sdk_wrapper_t::get_query_counter_record_info() const
 {
     return m_query_counter_record_info;
 }
@@ -195,56 +197,49 @@ const std::vector<mock_counters_writer_t::write_counters_info_t>& mock_counters_
 
 /////////////////////////////////////////////////////////////////////////
 // mock_sdk_callbacks_t
-void mock_sdk_callbacks_t::dispatch_callback(
-    rocprofiler_dispatch_counting_service_data_t dispatch_data,
-    rocprofiler_counter_config_id_t*             config,
-    rocprofiler_compute_tool::tool_data_t& /*tool_data*/)
+void mock_sdk_callbacks_t::dispatch_callback(rocprofiler_dispatch_counting_service_data_t dispatch_data,
+                                             rocprofiler_counter_config_id_t* config,
+                                             rocprofiler_compute_tool::tool_data_t& /*tool_data*/)
 {
     m_dispatch_callback_info.push_back({dispatch_data, config});
 }
 
-void mock_sdk_callbacks_t::record_callback(
-    rocprofiler_dispatch_counting_service_data_t dispatch_data,
-    rocprofiler_counter_record_t*                record_data,
-    size_t                                       record_count,
-    rocprofiler_compute_tool::tool_data_t& /*tool_data*/)
+void mock_sdk_callbacks_t::record_callback(rocprofiler_dispatch_counting_service_data_t dispatch_data,
+                                           rocprofiler_counter_record_t* record_data,
+                                           size_t                        record_count,
+                                           rocprofiler_compute_tool::tool_data_t& /*tool_data*/)
 {
     m_record_callback_info.push_back({dispatch_data, record_data, record_count});
 }
 
-void mock_sdk_callbacks_t::tool_tracing_callback(
-    rocprofiler_callback_tracing_record_t  record,
-    rocprofiler_compute_tool::tool_data_t& /*tool_data*/)
+void mock_sdk_callbacks_t::tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
+                                                 rocprofiler_compute_tool::tool_data_t& /*tool_data*/)
 {
     m_tracing_callback_info.push_back({record});
 }
 
-void mock_sdk_callbacks_t::code_object_tracing_callback(
-    rocprofiler_callback_tracing_record_t /*record*/,
-    rocprofiler_compute_tool::tool_data_t& /*tool_data*/)
-{
-    ++m_code_object_callback_call_count;
-}
-
-const std::vector<mock_sdk_callbacks_t::dispatch_callback_info_t>&
-    mock_sdk_callbacks_t::get_dispatch_callback_info() const
+const std::vector<mock_sdk_callbacks_t::dispatch_callback_info_t>& mock_sdk_callbacks_t::get_dispatch_callback_info() const
 {
     return m_dispatch_callback_info;
 }
 
-const std::vector<mock_sdk_callbacks_t::record_callback_info_t>&
-    mock_sdk_callbacks_t::get_record_callback_info() const
+const std::vector<mock_sdk_callbacks_t::record_callback_info_t>& mock_sdk_callbacks_t::get_record_callback_info() const
 {
     return m_record_callback_info;
 }
 
-const std::vector<mock_sdk_callbacks_t::tracing_callback_info_t>&
-    mock_sdk_callbacks_t::get_tracing_callback_info() const
+const std::vector<mock_sdk_callbacks_t::tracing_callback_info_t>& mock_sdk_callbacks_t::get_tracing_callback_info() const
 {
     return m_tracing_callback_info;
 }
 
-int mock_sdk_callbacks_t::get_code_object_callback_call_count() const
+void mock_pc_sampling_collector_t::on_code_object_load(const rocprofiler_callback_tracing_record_t& record)
 {
-    return m_code_object_callback_call_count;
+    m_on_code_object_load_info.push_back({});
+}
+
+const std::vector<mock_pc_sampling_collector_t::on_code_object_load_info_t>&
+    mock_pc_sampling_collector_t::get_on_code_object_load_info() const
+{
+    return m_on_code_object_load_info;
 }
