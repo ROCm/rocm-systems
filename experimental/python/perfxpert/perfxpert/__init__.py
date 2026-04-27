@@ -17,7 +17,12 @@ CLI
     perfxpert analyze -i trace.db --format json
 """
 
-__version__ = "0.1.0"
+from importlib.metadata import PackageNotFoundError, version
+
+try:
+    __version__ = version("perfxpert")
+except PackageNotFoundError:
+    __version__ = "0.0.0"
 __author__ = "Advanced Micro Devices, Inc."
 
 from .connection import PerfxpertConnection, execute_statement, merge_sqlite_dbs
