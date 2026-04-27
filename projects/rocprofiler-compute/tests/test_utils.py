@@ -269,26 +269,26 @@ def get_num_pmc_file(output_dir):
 
 
 def gpu_soc():
-    # Parse arch details from rocminfo
-    rocminfo = str(
-        # decode with utf-8 to account for rocm-smi changes in latest rocm
-        subprocess.run(
-            ["rocminfo"], stdout=subprocess.PIPE, stderr=subprocess.PIPE
-        ).stdout.decode("utf-8")
+    """Return (arch, model) from rocminfo, e.g. ('gfx942', 'MI300').
+
+    Both are '' when no supported GPU is detected.
+    """
+    # decode with utf-8 to account for rocm-smi changes in latest rocm
+    rocminfo = (
+        subprocess
+        .run(["rocminfo"], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        .stdout.decode("utf-8")
+        .split("\n")
     )
-    rocminfo = rocminfo.split("\n")
     soc_regex = re.compile(r"^\s*Name\s*:\s+ ([a-zA-Z0-9]+)\s*$", re.MULTILINE)
     devices = list(filter(soc_regex.match, rocminfo))
     if not devices:
-        return ""
-    gpu_arch = devices[0].split()[1]
-
-    if gpu_arch not in SUPPORTED_ARCHS.keys():
-        return ""
-
-    gpu_model = list(SUPPORTED_ARCHS[gpu_arch].keys())[0].upper()
-
-    return gpu_model
+        return "", ""
+    arch = devices[0].split()[1]
+    if arch not in SUPPORTED_ARCHS:
+        return "", ""
+    model = list(SUPPORTED_ARCHS[arch].keys())[0].upper()
+    return arch, model
 
 
 # =============================================================================

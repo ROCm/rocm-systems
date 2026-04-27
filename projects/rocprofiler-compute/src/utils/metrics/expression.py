@@ -11,7 +11,8 @@ import re
 import astunparse
 
 from utils import schema
-from utils.utils_common import SUPPORTED_DENOM, SUPPORTED_FIELD
+from utils.utils_common import SUPPORTED_FIELD
+from utils.utils_counter_defs import SUPPORTED_DENOM
 
 SUPPORTED_CALL: dict[str, str] = {
     # If the below has a single arg, like(expr), it is an aggr,
