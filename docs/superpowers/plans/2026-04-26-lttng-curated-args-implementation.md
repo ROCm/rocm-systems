@@ -4108,7 +4108,7 @@ The sub-tasks have a strict order: **15a → 15b → 15c → 15d → 15e → 15f
 | Status success | `HSA_STATUS_SUCCESS` |
 | Existing macro family | `ROCR_TRACE_API_RET_*` |
 | Curated macro family | `ROCR_TRACE_API_RET_*_CURATED_HSA(_NOARGS)?` |
-| Headers (verify multi) | `/opt/rocm/include/hsa/hsa.h` and `/opt/rocm/include/hsa/hsa_ext_amd.h` |
+| Headers (verify multi) | `/opt/rocm/include/hsa/hsa.h`, `/opt/rocm/include/hsa/hsa_ext_amd.h`, and `/opt/rocm/include/hsa/hsa_api_trace.h` (the third declares `hsa_amd_queue_intercept_create` per Task 15a) |
 | Generic enter helper | `rocm_trace_emit_hsa_api_enter` |
 | Generic exit helpers | `rocm_trace_emit_hsa_api_exit_status`, `_ptr`, `_void` |
 | Tracing-enabled macro | `HSA_ENABLE_LTTNG_UST` |
@@ -4869,7 +4869,11 @@ Inside the existing `if(HSA_ENABLE_LTTNG_UST)` block (or equivalent guard), inse
     # (§3.2). CI runs codegen + `git diff --exit-code` to catch drift.
     #
     # Two-step pipeline (debate-review C10 fix), same shape as HIP:
-    #   1. Verifier  --out-sidecar=<JSON>  (libclang against hsa.h + hsa_ext_amd.h)
+    #   1. Verifier  --out-sidecar=<JSON>  (libclang against hsa.h +
+    #                                       hsa_ext_amd.h + hsa_api_trace.h —
+    #                                       the third declares
+    #                                       hsa_amd_queue_intercept_create
+    #                                       per Task 15a)
     #   2. Codegen   --sigs=<JSON>         (pure Python; emits HSA-correct
     #                                       hsa_signal_t* helpers with
     #                                       p->handle deref, NOT void**.)
@@ -4880,8 +4884,10 @@ Inside the existing `if(HSA_ENABLE_LTTNG_UST)` block (or equivalent guard), inse
         set(_HSA_CURATED_TP_H  ${CMAKE_CURRENT_LIST_DIR}/lttng/rocm_hsa_curated_tp.h)
         set(_HSA_CURATED_EMIT_H ${CMAKE_CURRENT_LIST_DIR}/lttng/rocm_trace_emit_curated.h)
         if(EXISTS ${_HSA_CURATED_YAML})
-            # Step 1: verifier emits the signature sidecar. HSA spans two
-            # headers (Task 4.5 multi-header support).
+            # Step 1: verifier emits the signature sidecar. HSA spans three
+            # headers (Task 4.5 multi-header support): hsa.h + hsa_ext_amd.h +
+            # hsa_api_trace.h (the third declares hsa_amd_queue_intercept_create
+            # per Task 15a).
             add_custom_command(
                 OUTPUT ${_HSA_CURATED_SIGS}
                 COMMAND ${Python3_EXECUTABLE}
@@ -4889,6 +4895,7 @@ Inside the existing `if(HSA_ENABLE_LTTNG_UST)` block (or equivalent guard), inse
                         --yaml         ${_HSA_CURATED_YAML}
                         --header       /opt/rocm/include/hsa/hsa.h
                         --header       /opt/rocm/include/hsa/hsa_ext_amd.h
+                        --header       /opt/rocm/include/hsa/hsa_api_trace.h
                         --extra-arg    -I/opt/rocm/include
                         --out-sidecar  ${_HSA_CURATED_SIGS}
                 DEPENDS ${_HSA_CURATED_YAML}
@@ -4950,8 +4957,9 @@ after editing the HSA YAML via:
 
     cmake --build build/rocr --target regenerate-lttng-curated-hsa
 
-The target runs verifier --out-sidecar (against hsa.h + hsa_ext_amd.h)
-then codegen --sigs (C10 fix). The sidecar JSON
+The target runs verifier --out-sidecar (against hsa.h + hsa_ext_amd.h
++ hsa_api_trace.h, where the third declares hsa_amd_queue_intercept_create
+per Task 15a) then codegen --sigs (C10 fix). The sidecar JSON
 (scripts/curated_apis_sigs.json) is checked into git alongside the
 generated headers and is what makes HSA helpers emit
 'hsa_signal_t* signal_out_ptr' + 'signal_out_ptr->handle' deref
