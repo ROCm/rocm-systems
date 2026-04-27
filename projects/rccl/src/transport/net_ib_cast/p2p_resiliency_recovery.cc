@@ -32,7 +32,7 @@ extern int64_t ncclParamIbPkey();
 #define NCCL_IB_RESILIENCY_PORT_RECOVERY_CQ_SIZE (NCCL_IB_RESILIENCY_PORT_RECOVERY_ALIVE_MSG_BATCH_SIZE_MAX*2)
 
 // Asynchronous thread to handle port recovery operations
-std::thread ncclIbPortRecoveryAsyncThread;
+std::thread IbCastPortRecoveryAsyncThread;
 
 // Reference count of active resiliency contexts using port recovery
 static std::atomic<int> IbCastPortRecoveryRefCount(0);
@@ -52,27 +52,27 @@ static std::atomic<bool> IbCastPortRecoveryThreadActive(false);
 // while preventing data races on the shared inbox.
 //
 // closeReq->completed must be set under the lock to prevent a lost-wakeup
-// race on ncclIbPortRecoveryCloseCond: the closing thread could evaluate the
+// race on IbCastPortRecoveryCloseCond: the closing thread could evaluate the
 // wait predicate (false), then the async thread sets completed and notifies,
 // then the closing thread sleeps on the condvar and never wakes.
 //
 // Usage pattern:
 // 1. IbCastPortRecoveryHandleFailure: acquires lock to push to recoveryInbox
-// 2. IbCastPortRecoveryClose: acquires lock to add close request, then waits on ncclIbPortRecoveryCloseCond
+// 2. IbCastPortRecoveryClose: acquires lock to add close request, then waits on IbCastPortRecoveryCloseCond
 // 3. IbCastPortRecoveryAsyncThreadMain: acquires lock to splice inbox, swap close requests;
 //    processes both outside the lock; re-acquires lock to set completed and notify
-static std::mutex ncclIbPortRecoveryMutex;
-static std::condition_variable ncclIbPortRecoveryCond;
+static std::mutex IbCastPortRecoveryMutex;
+static std::condition_variable IbCastPortRecoveryCond;
 
 struct ncclIbPortRecoveryCloseRequest {
   struct ncclIbResiliency* resCtx;
   bool completed;
 };
 
-// Shared vector of close requests - protected by ncclIbPortRecoveryMutex
+// Shared vector of close requests - protected by IbCastPortRecoveryMutex
 static std::vector<ncclIbPortRecoveryCloseRequest*> recoveryCloseRequests;
 // Condition variable to signal completion of close requests
-static std::condition_variable ncclIbPortRecoveryCloseCond;
+static std::condition_variable IbCastPortRecoveryCloseCond;
 
 enum ncclIbPortRecoveryState {
   // Recovery protocol has not started yet. Before moving to the next state,
@@ -147,7 +147,7 @@ struct ncclIbPortRecoveryContext {
   };
 };
 
-// Shared inbox for new recovery contexts - protected by ncclIbPortRecoveryMutex.
+// Shared inbox for new recovery contexts - protected by IbCastPortRecoveryMutex.
 // Producer threads add items here; the async thread drains it under lock.
 static std::list<ncclIbPortRecoveryContext*> recoveryInbox;
 
@@ -168,7 +168,7 @@ static inline ncclResult_t IbCastPortRecoveryQpsToError(ncclIbPortRecoveryContex
 // Predefined work ID for receive work request for port recovery messages
 #define NCCL_IB_PORT_RECOVERY_WR_ID (0xAAAA)
 
-static struct ibv_recv_wr ncclIbResiliencyPortRecoveryRecvWr = {
+static struct ibv_recv_wr IbCastResiliencyPortRecoveryRecvWr = {
     .wr_id = NCCL_IB_PORT_RECOVERY_WR_ID,
     .next = NULL,
     .sg_list = NULL,
@@ -177,7 +177,7 @@ static struct ibv_recv_wr ncclIbResiliencyPortRecoveryRecvWr = {
 
 inline static ncclResult_t IbCastPortRecoveryPostRecvWorkRequest(struct ibv_qp* qp) {
   struct ibv_recv_wr* bad_wr;
-  return wrap_ibv_post_recv(qp, &ncclIbResiliencyPortRecoveryRecvWr, &bad_wr);
+  return wrap_ibv_post_recv(qp, &IbCastResiliencyPortRecoveryRecvWr, &bad_wr);
 }
 
 // Helper function to drain CQEs on the provided CQ and fill a Receive WQE for
@@ -317,7 +317,7 @@ ncclResult_t IbCastPortRecoverySenderQpsCreate(struct ncclIbResiliency* resCtx, 
   for (int localQpIndex = 0; localQpIndex < nQps; localQpIndex++) {
     int localDevIndex = localQpIndex % sendComm->base.vProps.ndevs;
     ncclIbSendCommDev* sendCommDev = &sendComm->devs[localDevIndex];
-    ncclIbDev* ibDev = &ncclIbDevs[sendCommDev->base.ibDevN];
+    ncclIbDev* ibDev = &IbCastDevs[sendCommDev->base.ibDevN];
     ncclIbQp* localQp = &resCtx->portRecoveryQps[localQpIndex];
     qpCreateAttrs.cq = resCtx->devs[localDevIndex].portRecoveryCq;
     qpCreateAttrs.pd = sendCommDev->base.pd;
@@ -349,7 +349,7 @@ ncclResult_t IbCastPortRecoverySenderQpsToRts(struct ncclIbResiliency* resCtx, s
   for (int localQpIndex = 0; localQpIndex < nQps; localQpIndex++) {
     int localDevIndex = localQpIndex % sendComm->base.vProps.ndevs;;
     ncclIbSendCommDev* sendCommDev = &sendComm->devs[localDevIndex];
-    ncclIbDev* ibDev = &ncclIbDevs[sendCommDev->base.ibDevN];
+    ncclIbDev* ibDev = &IbCastDevs[sendCommDev->base.ibDevN];
     localQp = &resCtx->portRecoveryQps[localQpIndex];
     remQpInfo = &(remInfo->resiliencyInfo.portRecoveryQpsInfo[localQpIndex]);
     localQp->remDevIdx = remQpInfo->devIndex;
@@ -388,7 +388,7 @@ ncclResult_t IbCastPortRecoveryReceiverQpsCreateToRts(struct ncclIbResiliency* r
   for (int localQpIndex = 0; localQpIndex < nQps; localQpIndex++) {
     int localDevIndex = localQpIndex % recvComm->base.vProps.ndevs;
     ncclIbRecvCommDev* recvCommDev = &recvComm->devs[localDevIndex];
-    ncclIbDev* ibDev = &ncclIbDevs[recvCommDev->base.ibDevN];
+    ncclIbDev* ibDev = &IbCastDevs[recvCommDev->base.ibDevN];
     ncclIbQp* localQp = &resCtx->portRecoveryQps[localQpIndex];
     qpCreateAttrs.cq = resCtx->devs[localDevIndex].portRecoveryCq;
     qpCreateAttrs.pd = recvCommDev->base.pd;
@@ -1114,8 +1114,8 @@ ncclResult_t IbCastPortRecoveryAsyncThreadMain() {
     // shutdown is requested (ThreadActive == false)
     std::vector<ncclIbPortRecoveryCloseRequest*> localCloseRequests;
     {
-      std::unique_lock<std::mutex> lock(ncclIbPortRecoveryMutex);
-      ncclIbPortRecoveryCond.wait(lock, [&] {
+      std::unique_lock<std::mutex> lock(IbCastPortRecoveryMutex);
+      IbCastPortRecoveryCond.wait(lock, [&] {
         return !IbCastPortRecoveryThreadActive.load() ||
                !recoveryInbox.empty() ||
                !recoveryQueue.empty() ||
@@ -1136,11 +1136,11 @@ ncclResult_t IbCastPortRecoveryAsyncThreadMain() {
       // Mark requests completed under lock to prevent lost-wakeup
       // on the close condition variable
       {
-        std::lock_guard<std::mutex> lock(ncclIbPortRecoveryMutex);
+        std::lock_guard<std::mutex> lock(IbCastPortRecoveryMutex);
         for (auto* closeReq : localCloseRequests) {
           closeReq->completed = true;
         }
-        ncclIbPortRecoveryCloseCond.notify_all();
+        IbCastPortRecoveryCloseCond.notify_all();
       }
     }
 
@@ -1203,17 +1203,17 @@ ncclResult_t IbCastPortRecoveryClose(struct ncclIbResiliency* resCtx) {
   closeReq.completed = false;
 
   {
-    std::lock_guard<std::mutex> lock(ncclIbPortRecoveryMutex);
+    std::lock_guard<std::mutex> lock(IbCastPortRecoveryMutex);
     recoveryCloseRequests.push_back(&closeReq);
   }
 
   // Wake up the async thread to process the close request
-  ncclIbPortRecoveryCond.notify_one();
+  IbCastPortRecoveryCond.notify_one();
 
   // Wait for the close request to be completed by the async thread
   {
-    std::unique_lock<std::mutex> lock(ncclIbPortRecoveryMutex);
-    ncclIbPortRecoveryCloseCond.wait(lock, [&] {
+    std::unique_lock<std::mutex> lock(IbCastPortRecoveryMutex);
+    IbCastPortRecoveryCloseCond.wait(lock, [&] {
       return closeReq.completed;
     });
   }
@@ -1236,8 +1236,8 @@ ncclResult_t IbCastPortRecoveryThreadStart() {
   }
 
   INFO(NCCL_NET, "NET/IB: %s: Starting port recovery async thread", __func__);
-  ncclIbPortRecoveryAsyncThread = std::thread(IbCastPortRecoveryAsyncThreadMain);
-  ncclSetThreadName(ncclIbPortRecoveryAsyncThread.native_handle(), "NCCL IbResiliencyPortRecoveryAsync");
+  IbCastPortRecoveryAsyncThread = std::thread(IbCastPortRecoveryAsyncThreadMain);
+  ncclSetThreadName(IbCastPortRecoveryAsyncThread.native_handle(), "NCCL IbResiliencyPortRecoveryAsync");
 
   return ncclSuccess;
 }
@@ -1254,10 +1254,10 @@ ncclResult_t IbCastPortRecoveryThreadStop() {
   INFO(NCCL_NET, "NET/IB: %s: Shutting down port recovery async thread", __func__);
 
   IbCastPortRecoveryThreadActive.store(false);
-  ncclIbPortRecoveryCond.notify_one();
+  IbCastPortRecoveryCond.notify_one();
 
-  if (ncclIbPortRecoveryAsyncThread.joinable()) {
-    ncclIbPortRecoveryAsyncThread.join();
+  if (IbCastPortRecoveryAsyncThread.joinable()) {
+    IbCastPortRecoveryAsyncThread.join();
   }
 
   INFO(NCCL_NET, "NET/IB: %s: Port recovery async thread stopped", __func__);
@@ -1281,12 +1281,12 @@ ncclResult_t IbCastPortRecoveryHandleFailure(struct ncclIbResiliency* resCtx, in
   // Hold lock while adding to inbox to ensure proper synchronization with
   // the recovery thread
   {
-    std::lock_guard<std::mutex> lock(ncclIbPortRecoveryMutex);
+    std::lock_guard<std::mutex> lock(IbCastPortRecoveryMutex);
     recoveryInbox.push_back(recoveryCtx);
   }
 
   // Wake up the async recovery thread
-  ncclIbPortRecoveryCond.notify_one();
+  IbCastPortRecoveryCond.notify_one();
 
   INFO(NCCL_NET, "NET/IB: %s: Added device %d into the recovery queue (%s comm=%p, devIndex=%d, isSend=%d)", __func__, devIndex, resCtx->baseComm->isSend ? "send" : "recv", resCtx->baseComm, devIndex, resCtx->baseComm->isSend);
   return ncclSuccess;

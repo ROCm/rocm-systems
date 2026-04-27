@@ -59,8 +59,8 @@
 
 #define MAXSUFFIXSIZE 16
 #define MAXNAMESIZE (64 + MAXSUFFIXSIZE)
-extern char ncclIbIfName[MAX_IF_NAME_SIZE+1];
-extern union ncclSocketAddress ncclIbIfAddr;
+extern char IbCastIfName[MAX_IF_NAME_SIZE+1];
+extern union ncclSocketAddress IbCastIfAddr;
 
 enum ncclIbRequestMatchingScheme {
   BY_INDEX=0,
@@ -79,7 +79,7 @@ struct ncclIbMrCache {
   int capacity, population;
 };
 
-extern int ncclNMergedIbDevs;
+extern int IbCastNMergedDevs;
 #define NCCL_IB_MAX_DEVS_PER_NIC NCCL_NET_MAX_DEVS_PER_NIC
 #define MAX_MERGED_DEV_NAME (MAXNAMESIZE*NCCL_IB_MAX_DEVS_PER_NIC)+NCCL_IB_MAX_DEVS_PER_NIC
 struct alignas(64) ncclIbMergedDev {
@@ -98,7 +98,7 @@ enum ncclIbProvider {
   IB_PROVIDER_MAX = 2,
 };
 
-extern int ncclNIbDevs;
+extern int IbCastNDevs;
 struct alignas(64) ncclIbDev {
   std::mutex mutex;
   int device;
@@ -131,9 +131,9 @@ struct alignas(64) ncclIbDev {
 
 #define MAX_IB_DEVS  32
 #define MAX_IB_VDEVS MAX_IB_DEVS*8
-extern struct ncclIbMergedDev ncclIbMergedDevs[MAX_IB_VDEVS];
-extern struct ncclIbDev ncclIbDevs[MAX_IB_DEVS];
-extern int ncclIbRelaxedOrderingEnabled;
+extern struct ncclIbMergedDev IbCastMergedDevs[MAX_IB_VDEVS];
+extern struct ncclIbDev IbCastDevs[MAX_IB_DEVS];
+extern int IbCastRelaxedOrderingEnabled;
 
 #define NCCL_IB_LLSTR(ll) (((ll) == IBV_LINK_LAYER_INFINIBAND) ? "IB" : (((ll) == IBV_LINK_LAYER_ETHERNET) ? "RoCE" : "UNSPECIFIED"))
 
@@ -185,7 +185,7 @@ struct ncclProfilerInfo {
 #define NCCL_NET_IB_REQ_FLUSH 3
 #define NCCL_NET_IB_REQ_GIN_IPUT 4
 #define NCCL_NET_IB_REQ_GIN_IGET 5
-extern const char* ncclIbReqTypeStr[];
+extern const char* IbCastReqTypeStr[];
 
 // Maximal number of QPs a communicator can have for data transfers
 #define NCCL_IB_MAX_QPS 128
@@ -569,9 +569,9 @@ static void IbCastDevFatalError(struct ncclIbDev* dev) {
 }
 ncclResult_t IbCastStatsCheckFatalCount(struct ncclIbStats* stat, const char* funcName);
 
-extern ncclProfilerCallback_t ncclProfilerFunction;
+extern ncclProfilerCallback_t IbCastProfilerFunction;
 
-extern std::thread ncclIbAsyncThread;
+extern std::thread IbCastAsyncThread;
 void* IbCastAsyncThreadMain(void* args);
 
 ncclResult_t IbCastGdrSupport();

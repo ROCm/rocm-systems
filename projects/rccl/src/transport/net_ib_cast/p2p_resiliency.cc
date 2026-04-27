@@ -125,7 +125,7 @@ static ncclResult_t IbCastResiliencySendRequestInit(struct ncclIbResiliencySend*
       return ncclSuccess;
     } else {
       // The request was already replayed and released. The CQE should be ignored.
-      INFO(NCCL_NET, "NET/IB: %s: Attempting to initiate a replay protocol but the failed request was already handled (req=%p, comm=%p, id=%ld, slot=%d, req.type=%s).", __func__, request, request->base, request->id, slot, ncclIbReqTypeStr[request->type]);
+      INFO(NCCL_NET, "NET/IB: %s: Attempting to initiate a replay protocol but the failed request was already handled (req=%p, comm=%p, id=%ld, slot=%d, req.type=%s).", __func__, request, request->base, request->id, slot, IbCastReqTypeStr[request->type]);
       return ncclSuccess;
     }
   }
@@ -136,7 +136,7 @@ static ncclResult_t IbCastResiliencySendRequestInit(struct ncclIbResiliencySend*
   }
 
   if (request->type != NCCL_NET_IB_REQ_SEND) {
-    WARN("NET/IB: %s: Attempting to initiate a failed request using a '%s' request while expecting a 'send' request (req=%p, comm=%p, id=%ld, slot=%d, failedSendRequest.id=%ld).", __func__, ncclIbReqTypeStr[request->type], request, request->base, request->id, slot, failedSendRequest->id);
+    WARN("NET/IB: %s: Attempting to initiate a failed request using a '%s' request while expecting a 'send' request (req=%p, comm=%p, id=%ld, slot=%d, failedSendRequest.id=%ld).", __func__, IbCastReqTypeStr[request->type], request, request->base, request->id, slot, failedSendRequest->id);
     return ncclInternalError;
   }
 
@@ -309,7 +309,7 @@ static ncclResult_t IbCastResiliencyHandleCompletionErrorSender(struct ncclIbRes
   struct ncclIbResiliencySend* sendResCtx = (struct ncclIbResiliencySend*)resCtx;
   res = IbCastResiliencySendRequestInit(sendResCtx, request, devIndex);
   if (res != ncclSuccess) {
-    WARN("NET/IB: %s: Failed to initialize a resiliency send request (req=%p, comm=%p, id=%ld, type=%s, wc.wr_id=%ld, wc.status=%s(%d), wc.opcode=%s(%d), slot=%ld).", __func__, request, request->base, request->id, ncclIbReqTypeStr[request->type], wc->wr_id, ibvWcStatusStr(wc->status), wc->status, ibvWcOpcodeStr(wc->opcode), wc->opcode, slot);
+    WARN("NET/IB: %s: Failed to initialize a resiliency send request (req=%p, comm=%p, id=%ld, type=%s, wc.wr_id=%ld, wc.status=%s(%d), wc.opcode=%s(%d), slot=%ld).", __func__, request, request->base, request->id, IbCastReqTypeStr[request->type], wc->wr_id, ibvWcStatusStr(wc->status), wc->status, ibvWcOpcodeStr(wc->opcode), wc->opcode, slot);
     return res;
   }
 
@@ -717,7 +717,7 @@ ncclResult_t IbCastResiliencySenderCreateQps(struct ncclIbResiliency* resCtx, st
     // Sender creates a single probing QP per local device.
     int localDevIndex = localQpIndex;
     ncclIbSendCommDev* sendCommDev = &sendComm->devs[localDevIndex];
-    ncclIbDev* ibDev = &ncclIbDevs[sendCommDev->base.ibDevN];
+    ncclIbDev* ibDev = &IbCastDevs[sendCommDev->base.ibDevN];
     ncclIbQp* localQp = &resCtx->probingQps[localQpIndex];
     qpCreateAttrs.cq = resCtx->devs[localDevIndex].probingCq;
     qpCreateAttrs.pd = sendCommDev->base.pd;
@@ -752,7 +752,7 @@ ncclResult_t IbCastResiliencySenderQpsToRts(struct ncclIbResiliency* resCtx, str
   for (int localQpIndex = 0; localQpIndex < resCtx->nProbingQps; localQpIndex++) {
     int localDevIndex = localQpIndex;
     ncclIbSendCommDev* sendCommDev = &sendComm->devs[localDevIndex];
-    ncclIbDev* ibDev = &ncclIbDevs[sendCommDev->base.ibDevN];
+    ncclIbDev* ibDev = &IbCastDevs[sendCommDev->base.ibDevN];
     localQp = &resCtx->probingQps[localQpIndex];
     remQpInfo = &(remInfo->resiliencyInfo.probingQpsInfo[localQpIndex]);
     localQp->remDevIdx = remQpInfo->devIndex;
@@ -802,7 +802,7 @@ ncclResult_t IbCastResiliencyReceiverQpsCreateToRts(struct ncclIbResiliency* res
     // manner.
     int localDevIndex = localQpIndex % recvComm->base.vProps.ndevs;
     ncclIbRecvCommDev* recvCommDev = &recvComm->devs[localDevIndex];
-    ncclIbDev* ibDev = &ncclIbDevs[recvCommDev->base.ibDevN];
+    ncclIbDev* ibDev = &IbCastDevs[recvCommDev->base.ibDevN];
     ncclIbQp* localQp = &resCtx->probingQps[localQpIndex];
     qpCreateAttrs.cq = resCtx->devs[localDevIndex].probingCq;
     qpCreateAttrs.pd = recvCommDev->base.pd;

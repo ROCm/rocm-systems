@@ -8,16 +8,16 @@
 #include "common_cast.h"
 #include "p2p_resiliency_cast.h"
 
-char ncclIbIfName[MAX_IF_NAME_SIZE+1];
-union ncclSocketAddress ncclIbIfAddr;
+char IbCastIfName[MAX_IF_NAME_SIZE+1];
+union ncclSocketAddress IbCastIfAddr;
 
-int ncclNMergedIbDevs = -1;
-int ncclNIbDevs = -1;
-struct ncclIbMergedDev ncclIbMergedDevs[MAX_IB_VDEVS];
-struct ncclIbDev ncclIbDevs[MAX_IB_DEVS];
-int ncclIbRelaxedOrderingEnabled = 0;
+int IbCastNMergedDevs = -1;
+int IbCastNDevs = -1;
+struct ncclIbMergedDev IbCastMergedDevs[MAX_IB_VDEVS];
+struct ncclIbDev IbCastDevs[MAX_IB_DEVS];
+int IbCastRelaxedOrderingEnabled = 0;
 
-ncclProfilerCallback_t ncclProfilerFunction;
+ncclProfilerCallback_t IbCastProfilerFunction;
 
 NCCL_PARAM(IbSplitDataOnQps, "IB_SPLIT_DATA_ON_QPS", 0);
 NCCL_PARAM(IbPrepostReceiveWorkRequests, "IB_PREPOST_RECEIVE_WORK_REQUESTS", -2);
@@ -108,7 +108,7 @@ ncclResult_t IbCastSendCommInit(struct ncclIbSendComm* sendComm) {
   return ncclSuccess;
 }
 
-std::thread ncclIbAsyncThread;
+std::thread IbCastAsyncThread;
 void* IbCastAsyncThreadMain(void* args) {
   struct ncclIbDev* dev = (struct ncclIbDev*)args;
   while (1) {
