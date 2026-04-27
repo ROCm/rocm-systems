@@ -97,18 +97,18 @@ public:
     virtual void dispatch_callback(rocprofiler_dispatch_counting_service_data_t dispatch_data,
 
                                    rocprofiler_counter_config_id_t* config,
-                                   void*                            callback_data_args) = 0;
+                                   tool_data_t&                     tool_data) = 0;
 
     virtual void record_callback(rocprofiler_dispatch_counting_service_data_t dispatch_data,
                                  rocprofiler_counter_record_t*                record_data,
                                  size_t                                       record_count,
-                                 void* callback_data_args) = 0;
+                                 tool_data_t&                                 tool_data) = 0;
 
     virtual void tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
-                                       void*                                 callback_data) = 0;
+                                       tool_data_t&                          tool_data) = 0;
 
     virtual void code_object_tracing_callback(rocprofiler_callback_tracing_record_t record,
-                                              void*                                 data) = 0;
+                                              tool_data_t&                          tool_data) = 0;
 };
 
 class sdk_callbacks_impl_t : public sdk_callbacks_t
@@ -118,21 +118,21 @@ public:
 
     void dispatch_callback(rocprofiler_dispatch_counting_service_data_t dispatch_data,
                            rocprofiler_counter_config_id_t*             config,
-                           void* callback_data_args) override;
+                           tool_data_t&                                 tool_data) override;
 
     void record_callback(rocprofiler_dispatch_counting_service_data_t dispatch_data,
                          rocprofiler_counter_record_t*                record_data,
                          size_t                                       record_count,
-                         void*                                        callback_data_args) override;
+                         tool_data_t&                                 tool_data) override;
 
-    void tool_tracing_callback(rocprofiler_callback_tracing_record_t record, void* callback_data) override;
+    void tool_tracing_callback(rocprofiler_callback_tracing_record_t record, tool_data_t& tool_data) override;
 
-    void code_object_tracing_callback(rocprofiler_callback_tracing_record_t record, void* data) override;
+    void code_object_tracing_callback(rocprofiler_callback_tracing_record_t record, tool_data_t& tool_data) override;
 
 private:
-    static bool is_targeted_dispatch(const tool_data_t* tool, uint64_t kernel_id, uint64_t kernel_iteration);
+    static bool is_targeted_dispatch(const tool_data_t& tool, uint64_t kernel_id, uint64_t kernel_iteration);
     void create_counter_collection_profile(
-        tool_data_t*           tool,
+        tool_data_t&           tool,
         rocprofiler_agent_id_t agent_id,
         std::unordered_map<uint64_t, std::vector<rocprofiler_counter_config_id_t>>& profile_cache) const;
 

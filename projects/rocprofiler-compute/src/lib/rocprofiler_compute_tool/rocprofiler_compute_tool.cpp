@@ -66,7 +66,9 @@ void dispatch_callback(rocprofiler_dispatch_counting_service_data_t dispatch_dat
                        rocprofiler_user_data_t* /*user_data*/,
                        void* callback_data_args)
 {
-    g_sdk_callbacks->dispatch_callback(dispatch_data, config, callback_data_args);
+    Expects(callback_data_args);
+    auto* tool_data = static_cast<tool_data_t*>(callback_data_args);
+    g_sdk_callbacks->dispatch_callback(dispatch_data, config, *tool_data);
 }
 
 void record_callback(rocprofiler_dispatch_counting_service_data_t dispatch_data,
@@ -75,14 +77,18 @@ void record_callback(rocprofiler_dispatch_counting_service_data_t dispatch_data,
                      rocprofiler_user_data_t /* user_data */,
                      void* callback_data_args)
 {
-    g_sdk_callbacks->record_callback(dispatch_data, record_data, record_count, callback_data_args);
+    Expects(callback_data_args);
+    auto* tool_data = static_cast<tool_data_t*>(callback_data_args);
+    g_sdk_callbacks->record_callback(dispatch_data, record_data, record_count, *tool_data);
 }
 
 void tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
                            rocprofiler_user_data_t* /*user_data*/,
                            void* callback_data)
 {
-    g_sdk_callbacks->tool_tracing_callback(record, callback_data);
+    Expects(callback_data);
+    auto* tool_data = static_cast<tool_data_t*>(callback_data);
+    g_sdk_callbacks->tool_tracing_callback(record, *tool_data);
 }
 
 int tool_init(rocprofiler_client_finalize_t, void* user_data)
