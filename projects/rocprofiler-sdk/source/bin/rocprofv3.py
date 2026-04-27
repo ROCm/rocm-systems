@@ -473,6 +473,11 @@ For attachment profiling of running processes:
     )
     add_parser_bool_argument(
         basic_tracing_options,
+        "--lite-trace",
+        help="Collect only kernel dispatch names and timestamps by setting ROCPROF_LITE_TRACE=1 for the profiled process. This option is mutually exclusive with all other trace services.",
+    )
+    add_parser_bool_argument(
+        basic_tracing_options,
         "--memory-copy-trace",
         help="For collecting Memory Copy Traces. This was part of HIP and HSA traces in previous rocprof versions but is now a separate option",
     )
@@ -1131,7 +1136,8 @@ def parse_input(input_file):
 
     _, extension = os.path.splitext(input_file)
     if extension == ".txt" or extension == ".text":
-        warning("""
+        warning(
+            """
             Text file format for counter collection is deprecated and will be removed in a future release.
             Please use JSON or YAML format instead.
 
@@ -1148,7 +1154,8 @@ def parse_input(input_file):
 
             JSON file (recommended):
                 {"jobs":[{"pmc": ["SQ_WAVES"]},{ "pmc":["GRBM_COUNT"]}]}
-            """)
+            """
+        )
         text_input = parse_text(input_file)
         text_input_lst = [{"pmc": itr, "sub_directory": "pmc_"} for itr in text_input]
         return [dotdict(itr) for itr in text_input_lst]
@@ -1354,6 +1361,16 @@ def run(app_args, args, **kwargs):
                 except Exception as e:
                     fatal_error(f"{e}\n")
 
+    def env_is_enabled(env_var):
+        return str(app_env.get(env_var, "")).strip().lower() in (
+            "1",
+            "true",
+            "t",
+            "yes",
+            "y",
+            "on",
+        )
+
     def setattrifnone(obj, attr, value):
         if getattr(obj, f"{attr}") is None:
             setattr(obj, f"{attr}", value)
@@ -1546,6 +1563,42 @@ def run(app_args, args, **kwargs):
         for itr in ("core", "amd", "image", "finalizer"):
             setattrifnone(args, f"hsa_{itr}_trace", True)
 
+    lite_trace_enabled = env_is_enabled("ROCPROF_LITE_TRACE") or bool(args.lite_trace)
+    if lite_trace_enabled:
+        setattrifnone(args, "kernel_trace", True)
+
+        incompatible = (
+            "runtime_trace",
+            "sys_trace",
+            "hip_trace",
+            "hip_runtime_trace",
+            "hip_compiler_trace",
+            "hsa_trace",
+            "hsa_core_trace",
+            "hsa_amd_trace",
+            "hsa_image_trace",
+            "hsa_finalizer_trace",
+            "marker_trace",
+            "rccl_trace",
+            "rocdecode_trace",
+            "rocjpeg_trace",
+            "memory_copy_trace",
+            "memory_allocation_trace",
+            "kfd_trace",
+            "kfd_page_migration_trace",
+            "kfd_page_mapping_trace",
+            "kfd_queue_trace",
+            "kfd_dropped_events_trace",
+            "scratch_memory_trace",
+            "advanced_thread_trace",
+            "pc_sampling_beta_enabled",
+        )
+        for opt in incompatible:
+            if hasattr(args, opt) and getattr(args, opt):
+                fatal_error(
+                    f"--lite-trace/ROCPROF_LITE_TRACE only supports kernel tracing; disable --{opt.replace('_', '-')}"
+                )
+
     if args.kfd_trace:
         for itr in ("page_migration", "page_mapping", "queue", "dropped_events"):
             setattrifnone(args, f"kfd_{itr}_trace", True)
@@ -1579,6 +1632,8 @@ def run(app_args, args, **kwargs):
         update_env(f"ROCPROF_{env_val}", val, overwrite_if_true=True)
         trace_count += 1 if val else 0
         trace_opts += ["--{}".format(opt.replace("_", "-"))]
+
+    update_env("ROCPROF_LITE_TRACE", lite_trace_enabled, overwrite_if_true=True)
 
     for opt in ["advanced_thread_trace", "pmc", "pc_sampling_beta_enabled"]:
         if not hasattr(args, f"{opt}"):

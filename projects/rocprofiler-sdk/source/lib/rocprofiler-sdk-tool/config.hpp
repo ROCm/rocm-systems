@@ -113,7 +113,9 @@ struct config : output_config
 
     bool   demangle                    = get_env("ROCPROF_DEMANGLE_KERNELS", true);
     bool   truncate                    = get_env("ROCPROF_TRUNCATE_KERNELS", false);
-    bool   kernel_trace                = get_env("ROCPROF_KERNEL_TRACE", false);
+    bool   lite_trace                  = get_env("ROCPROF_LITE_TRACE", false);
+    bool   kernel_trace                = get_env("ROCPROF_KERNEL_TRACE", false) || lite_trace;
+    bool   kernel_trace_fast_path      = lite_trace;
     bool   hsa_core_api_trace          = get_env("ROCPROF_HSA_CORE_API_TRACE", false);
     bool   hsa_amd_ext_api_trace       = get_env("ROCPROF_HSA_AMD_EXT_API_TRACE", false);
     bool   hsa_image_ext_api_trace     = get_env("ROCPROF_HSA_IMAGE_EXT_API_TRACE", false);
@@ -198,6 +200,8 @@ inline auto
 config::get_attach_invariants() const
 {
     return std::make_tuple(kernel_trace,
+                           lite_trace,
+                           kernel_trace_fast_path,
                            hsa_core_api_trace,
                            hsa_amd_ext_api_trace,
                            hsa_image_ext_api_trace,
@@ -261,7 +265,9 @@ config::save(ArchiveT& ar) const
 {
     CFG_SERIALIZE_NAMED_MEMBER("benchmark_mode", benchmark_mode_env);
 
+    CFG_SERIALIZE_MEMBER(lite_trace);
     CFG_SERIALIZE_MEMBER(kernel_trace);
+    CFG_SERIALIZE_MEMBER(kernel_trace_fast_path);
     CFG_SERIALIZE_MEMBER(hsa_core_api_trace);
     CFG_SERIALIZE_MEMBER(hsa_amd_ext_api_trace);
     CFG_SERIALIZE_MEMBER(hsa_image_ext_api_trace);

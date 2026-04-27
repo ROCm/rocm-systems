@@ -24,6 +24,7 @@
 #include <rocprofiler-sdk/pc_sampling.h>
 
 #include "lib/common/environment.hpp"
+#include "lib/common/lite_trace_internal.hpp"
 #include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/buffer.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
@@ -140,7 +141,8 @@ is_pc_sampling_explicitly_enabled()
 }
 }  // namespace
 
-extern "C" {
+extern "C"
+{
 rocprofiler_status_t
 rocprofiler_configure_pc_sampling_service(rocprofiler_context_id_t         context_id,
                                           rocprofiler_agent_id_t           agent_id,
@@ -150,6 +152,8 @@ rocprofiler_configure_pc_sampling_service(rocprofiler_context_id_t         conte
                                           rocprofiler_buffer_id_t          buffer_id,
                                           int /*flags*/)
 {
+    if(rocprofiler::common::lite_trace::enabled()) return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
+
     if(!is_pc_sampling_explicitly_enabled()) return ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
 
 #if ROCPROFILER_SDK_HSA_PC_SAMPLING > 0

@@ -20,12 +20,14 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+#include "lib/common/lite_trace_internal.hpp"
 #include "lib/rocprofiler-sdk/counters/controller.hpp"
 #include "lib/rocprofiler-sdk/counters/core.hpp"
 
 #include <rocprofiler-sdk/dispatch_counting_service.h>
 
-extern "C" {
+extern "C"
+{
 /**
  * @brief Configure buffered dispatch profile Counting Service.
  *        Collects the counters in dispatch packets and stores them
@@ -45,6 +47,8 @@ rocprofiler_configure_buffer_dispatch_counting_service(
     rocprofiler_dispatch_counting_service_cb_t callback,
     void*                                      callback_data_args)
 {
+    if(rocprofiler::common::lite_trace::enabled()) return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
+
     return rocprofiler::counters::configure_buffered_dispatch(
         context_id, buffer_id, callback, callback_data_args);
 }
@@ -69,6 +73,8 @@ rocprofiler_configure_callback_dispatch_counting_service(
     rocprofiler_dispatch_counting_record_cb_t  record_callback,
     void*                                      record_callback_args)
 {
+    if(rocprofiler::common::lite_trace::enabled()) return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
+
     return rocprofiler::counters::configure_callback_dispatch(context_id,
                                                               dispatch_callback,
                                                               dispatch_callback_args,

@@ -20,6 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+#include "lib/common/lite_trace_internal.hpp"
 #include "lib/rocprofiler-sdk/code_object/code_object.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/context/domain.hpp"
@@ -123,7 +124,8 @@ get_unsupported()
 }  // namespace callback_tracing
 }  // namespace rocprofiler
 
-extern "C" {
+extern "C"
+{
 rocprofiler_status_t
 rocprofiler_configure_callback_tracing_service(rocprofiler_context_id_t               context_id,
                                                rocprofiler_callback_tracing_kind_t    kind,
@@ -136,6 +138,10 @@ rocprofiler_configure_callback_tracing_service(rocprofiler_context_id_t         
 
     if(rocprofiler::registration::get_init_status() > -1)
         return ROCPROFILER_STATUS_ERROR_CONFIGURATION_LOCKED;
+
+    if(rocprofiler::common::lite_trace::enabled() &&
+       !rocprofiler::common::lite_trace::is_allowed_callback_tracing_kind(kind))
+        return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
 
     if(unsupported.count(kind) > 0) return ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
 

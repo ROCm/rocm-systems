@@ -20,6 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+#include "lib/common/lite_trace_internal.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/counters/core.hpp"
 #include "lib/rocprofiler-sdk/counters/device_counting.hpp"
@@ -36,7 +37,8 @@ namespace
 constexpr auto rocprofiler_context_none = ROCPROFILER_CONTEXT_NONE;
 }
 
-extern "C" {
+extern "C"
+{
 rocprofiler_status_t
 rocprofiler_configure_device_counting_service(rocprofiler_context_id_t                 context_id,
                                               rocprofiler_buffer_id_t                  buffer_id,
@@ -44,6 +46,8 @@ rocprofiler_configure_device_counting_service(rocprofiler_context_id_t          
                                               rocprofiler_device_counting_service_cb_t cb,
                                               void*                                    user_data)
 {
+    if(rocprofiler::common::lite_trace::enabled()) return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
+
     return rocprofiler::counters::configure_agent_collection(
         context_id, buffer_id, agent_id, cb, user_data);
 }

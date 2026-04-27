@@ -30,7 +30,8 @@
 #include <string>
 #include <vector>
 
-extern "C" {
+extern "C"
+{
 // this is the "hidden" function that rocprofiler-register invokes to pass
 // the API tables to rocprofiler
 int

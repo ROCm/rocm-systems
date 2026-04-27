@@ -22,6 +22,8 @@
 
 #include "lib/rocprofiler-sdk/hsa/queue.hpp"
 #include "lib/common/container/pool.hpp"
+#include "lib/common/environment.hpp"
+#include "lib/common/lite_trace_internal.hpp"
 #include "lib/common/logging.hpp"
 #include "lib/common/scope_destructor.hpp"
 #include "lib/common/static_object.hpp"
@@ -48,8 +50,12 @@
 #include <hsa/hsa.h>
 #include <hsa/hsa_ext_amd.h>
 
+#include <algorithm>
+#include <array>
 #include <atomic>
 #include <memory>
+#include <mutex>
+#include <new>
 #include <utility>
 
 // static assert for rocprofiler_packet ABI compatibility
@@ -286,6 +292,434 @@ bit_extract(Integral x, int first, int last)
     return (x >> first) & bit_mask(0, last - first);
 }
 
+bool
+kernel_trace_fast_path_enabled()
+{
+    static const auto enabled = common::get_env("ROCPROF_LITE_TRACE", false);
+    return enabled;
+}
+
+struct fast_path_counters_t
+{
+    std::atomic<uint64_t> intercepts             = {0};
+    std::atomic<uint64_t> recorded               = {0};
+    std::atomic<uint64_t> skipped_no_context     = {0};
+    std::atomic<uint64_t> skipped_non_kernel     = {0};
+    std::atomic<uint64_t> skipped_batch          = {0};
+    std::atomic<uint64_t> reused_existing_signal = {0};
+    std::atomic<uint64_t> injected_signal        = {0};
+    std::atomic<uint64_t> signal_fail            = {0};
+    std::atomic<uint64_t> timestamp_fail         = {0};
+    std::atomic<uint64_t> timestamp_invalid      = {0};
+    std::atomic<uint64_t> async_handler_fail     = {0};
+    std::atomic<uint64_t> allocation_fail        = {0};
+    std::atomic<uint64_t> record_overflow        = {0};
+    std::atomic<bool>     reported               = {false};
+};
+
+fast_path_counters_t&
+fast_path_counters()
+{
+    static auto counters = fast_path_counters_t{};
+    return counters;
+}
+
+constexpr size_t fast_signal_pool_capacity = 4096;
+constexpr size_t fast_signal_pool_mask     = fast_signal_pool_capacity - 1;
+
+bool
+fast_path_record_try_append(common::lite_trace::kernel_dispatch_record_t record)
+{
+    if(!common::lite_trace::record_store_available())
+    {
+        fast_path_counters().allocation_fail.fetch_add(1, std::memory_order_relaxed);
+        return false;
+    }
+
+    if(!common::lite_trace::record_try_append(record))
+    {
+        fast_path_counters().record_overflow.fetch_add(1, std::memory_order_relaxed);
+        return false;
+    }
+
+    return true;
+}
+
+struct alignas(64) fast_signal_slot_t
+{
+    std::atomic<uint64_t> sequence = {0};
+    hsa_signal_t          signal   = {.handle = 0};
+};
+
+auto&
+fast_signal_slots()
+{
+    static auto slots = std::array<fast_signal_slot_t, fast_signal_pool_capacity>{};
+    return slots;
+}
+
+auto&
+fast_signal_head()
+{
+    static auto head = std::atomic<uint64_t>{0};
+    return head;
+}
+
+auto&
+fast_signal_tail()
+{
+    static auto tail = std::atomic<uint64_t>{0};
+    return tail;
+}
+
+bool
+fast_signal_try_pop(hsa_signal_t& out)
+{
+    auto&    slots = fast_signal_slots();
+    uint64_t pos   = fast_signal_head().load(std::memory_order_relaxed);
+    while(true)
+    {
+        auto&   slot = slots[pos & fast_signal_pool_mask];
+        auto    seq  = slot.sequence.load(std::memory_order_acquire);
+        int64_t diff = static_cast<int64_t>(seq) - static_cast<int64_t>(pos + 1);
+        if(diff == 0)
+        {
+            if(fast_signal_head().compare_exchange_weak(
+                   pos, pos + 1, std::memory_order_relaxed, std::memory_order_relaxed))
+            {
+                out = slot.signal;
+                slot.sequence.store(pos + fast_signal_pool_capacity, std::memory_order_release);
+                return true;
+            }
+        }
+        else if(diff < 0)
+        {
+            return false;
+        }
+        else
+        {
+            pos = fast_signal_head().load(std::memory_order_relaxed);
+        }
+    }
+}
+
+bool
+fast_signal_try_push(hsa_signal_t signal)
+{
+    auto&    slots = fast_signal_slots();
+    uint64_t pos   = fast_signal_tail().load(std::memory_order_relaxed);
+    while(true)
+    {
+        auto&   slot = slots[pos & fast_signal_pool_mask];
+        auto    seq  = slot.sequence.load(std::memory_order_acquire);
+        int64_t diff = static_cast<int64_t>(seq) - static_cast<int64_t>(pos);
+        if(diff == 0)
+        {
+            if(fast_signal_tail().compare_exchange_weak(
+                   pos, pos + 1, std::memory_order_relaxed, std::memory_order_relaxed))
+            {
+                slot.signal = signal;
+                slot.sequence.store(pos + 1, std::memory_order_release);
+                return true;
+            }
+        }
+        else if(diff < 0)
+        {
+            return false;
+        }
+        else
+        {
+            pos = fast_signal_tail().load(std::memory_order_relaxed);
+        }
+    }
+}
+
+void
+init_fast_signal_pool()
+{
+    auto& slots = fast_signal_slots();
+    for(size_t i = 0; i < slots.size(); ++i)
+    {
+        slots.at(i).sequence.store(i, std::memory_order_relaxed);
+        slots.at(i).signal = null_hsa_signal;
+    }
+
+    if(!get_amd_ext_table() || !get_amd_ext_table()->hsa_amd_signal_create_fn) return;
+
+    for(size_t i = 0; i < fast_signal_pool_capacity; ++i)
+    {
+        auto signal = hsa_signal_t{.handle = 0};
+        auto status = get_amd_ext_table()->hsa_amd_signal_create_fn(1, 0, nullptr, 0, &signal);
+        if(status != HSA_STATUS_SUCCESS) break;
+        if(!fast_signal_try_push(signal))
+        {
+            get_core_table()->hsa_signal_destroy_fn(signal);
+            break;
+        }
+    }
+}
+
+hsa_signal_t
+fast_acquire_signal()
+{
+    static auto init_once = std::once_flag{};
+    std::call_once(init_once, init_fast_signal_pool);
+
+    auto signal = hsa_signal_t{.handle = 0};
+    if(fast_signal_try_pop(signal))
+    {
+        get_core_table()->hsa_signal_store_relaxed_fn(signal, 1);
+        return signal;
+    }
+
+    if(!get_amd_ext_table() || !get_amd_ext_table()->hsa_amd_signal_create_fn)
+        return null_hsa_signal;
+
+    auto status = get_amd_ext_table()->hsa_amd_signal_create_fn(1, 0, nullptr, 0, &signal);
+    if(status != HSA_STATUS_SUCCESS) return null_hsa_signal;
+    return signal;
+}
+
+void
+fast_release_signal(hsa_signal_t signal)
+{
+    if(signal == null_hsa_signal) return;
+    if(fast_signal_try_push(signal)) return;
+    get_core_table()->hsa_signal_destroy_fn(signal);
+}
+
+struct fast_path_session_t
+{
+    Queue*                             queue       = nullptr;
+    hsa_signal_t                       signal      = {.handle = 0};
+    hsa_signal_value_t                 wait_value  = 1;
+    bool                               owns_signal = false;
+    rocprofiler_thread_id_t            tid         = 0;
+    rocprofiler_timestamp_t            enqueue_ts  = 0;
+    rocprofiler_dispatch_id_t          dispatch_id = 0;
+    rocprofiler_kernel_dispatch_info_t dispatch_info{};
+};
+
+bool
+FastPathSignalHandler(hsa_signal_value_t /*signal_value*/, void* data)
+{
+    auto* session = static_cast<fast_path_session_t*>(data);
+    if(!session || !session->queue) return false;
+
+    auto _cleanup = common::scope_destructor{[session]() {
+        if(session->owns_signal) fast_release_signal(session->signal);
+        session->queue->async_complete();
+        delete session;
+    }};
+
+    if(registration::get_fini_status() > 0) return false;
+
+    auto dispatch_time =
+        kernel_dispatch::get_dispatch_time(session->queue->get_agent().get_hsa_agent(),
+                                           session->signal,
+                                           session->dispatch_info.kernel_id,
+                                           session->enqueue_ts);
+
+    if(dispatch_time.status != HSA_STATUS_SUCCESS)
+    {
+        fast_path_counters().timestamp_fail.fetch_add(1, std::memory_order_relaxed);
+        return false;
+    }
+
+    if(dispatch_time.end <= dispatch_time.start)
+    {
+        fast_path_counters().timestamp_invalid.fetch_add(1, std::memory_order_relaxed);
+        return false;
+    }
+
+    if(fast_path_record_try_append(common::lite_trace::kernel_dispatch_record_t{
+           session->tid, dispatch_time.start, dispatch_time.end, session->dispatch_info}))
+    {
+        fast_path_counters().recorded.fetch_add(1, std::memory_order_relaxed);
+    }
+    return false;
+}
+
+void
+cleanup_fast_path_session_after_register_failure(fast_path_session_t* session)
+{
+    if(!session) return;
+
+    if(session->owns_signal && session->queue)
+    {
+        constexpr auto timeout_hint =
+            std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::seconds{1});
+        session->queue->core_api().hsa_signal_wait_scacquire_fn(session->signal,
+                                                                HSA_SIGNAL_CONDITION_LT,
+                                                                session->wait_value,
+                                                                timeout_hint.count(),
+                                                                HSA_WAIT_STATE_BLOCKED);
+        fast_release_signal(session->signal);
+    }
+
+    if(session->queue) session->queue->async_complete();
+    delete session;
+}
+
+void
+register_fast_path_handler(fast_path_session_t* session)
+{
+    auto status = session->queue->ext_api().hsa_amd_signal_async_handler_fn(session->signal,
+                                                                            HSA_SIGNAL_CONDITION_LT,
+                                                                            session->wait_value,
+                                                                            FastPathSignalHandler,
+                                                                            session);
+
+    if(status == HSA_STATUS_INFO_BREAK)
+    {
+        return;
+    }
+
+    if(status != HSA_STATUS_SUCCESS)
+    {
+        fast_path_counters().async_handler_fail.fetch_add(1, std::memory_order_relaxed);
+        cleanup_fast_path_session_after_register_failure(session);
+    }
+}
+
+bool
+FastPathWriteInterceptor(const void*                           packets,
+                         uint64_t                              pkt_count,
+                         Queue&                                queue,
+                         hsa_amd_queue_intercept_packet_writer writer)
+{
+    auto& counters = fast_path_counters();
+    counters.intercepts.fetch_add(1, std::memory_order_relaxed);
+
+    if(pkt_count == 0)
+    {
+        writer(packets, pkt_count);
+        return true;
+    }
+
+    if(pkt_count > 1)
+    {
+        counters.skipped_batch.fetch_add(pkt_count, std::memory_order_relaxed);
+        writer(packets, pkt_count);
+        return true;
+    }
+
+    const auto* packets_arr     = static_cast<const rocprofiler_packet*>(packets);
+    const auto& original_packet = packets_arr[0].kernel_dispatch;
+    auto        packet_type     = bit_extract(original_packet.header,
+                                   HSA_PACKET_HEADER_TYPE,
+                                   HSA_PACKET_HEADER_TYPE + HSA_PACKET_HEADER_WIDTH_TYPE - 1);
+
+    if(packet_type != HSA_PACKET_TYPE_KERNEL_DISPATCH)
+    {
+        counters.skipped_non_kernel.fetch_add(1, std::memory_order_relaxed);
+        writer(packets, pkt_count);
+        return true;
+    }
+
+    auto signal      = original_packet.completion_signal;
+    auto wait_value  = hsa_signal_value_t{1};
+    auto owns_signal = false;
+    auto out_packet  = packets_arr[0];
+
+    if(signal == null_hsa_signal)
+    {
+        signal = fast_acquire_signal();
+        if(signal == null_hsa_signal)
+        {
+            counters.signal_fail.fetch_add(1, std::memory_order_relaxed);
+            writer(packets, pkt_count);
+            return true;
+        }
+
+        owns_signal                                  = true;
+        out_packet.kernel_dispatch.completion_signal = signal;
+        counters.injected_signal.fetch_add(1, std::memory_order_relaxed);
+    }
+    else
+    {
+        wait_value = queue.core_api().hsa_signal_load_scacquire_fn(signal);
+        counters.reused_existing_signal.fetch_add(1, std::memory_order_relaxed);
+    }
+
+    // unique sequence id for the dispatch
+    static auto sequence_counter = std::atomic<rocprofiler_dispatch_id_t>{0};
+    const auto  dispatch_id      = ++sequence_counter;
+
+    constexpr auto kernel_dispatch_info_rt_size =
+        common::compute_runtime_sizeof<rocprofiler_kernel_dispatch_info_t>();
+
+    auto dispatch_info = rocprofiler_kernel_dispatch_info_t{
+        .size                 = kernel_dispatch_info_rt_size,
+        .agent_id             = queue.get_agent().get_rocp_agent()->id,
+        .queue_id             = queue.get_id(),
+        .kernel_id            = code_object::get_kernel_id(original_packet.kernel_object),
+        .dispatch_id          = dispatch_id,
+        .private_segment_size = original_packet.private_segment_size,
+        .group_segment_size   = original_packet.group_segment_size,
+        .workgroup_size       = rocprofiler_dim3_t{original_packet.workgroup_size_x,
+                                             original_packet.workgroup_size_y,
+                                             original_packet.workgroup_size_z},
+        .grid_size            = rocprofiler_dim3_t{original_packet.grid_size_x,
+                                        original_packet.grid_size_y,
+                                        original_packet.grid_size_z},
+        .reserved_padding     = {0}};
+
+    auto* session = new(std::nothrow) fast_path_session_t{.queue         = &queue,
+                                                          .signal        = signal,
+                                                          .wait_value    = wait_value,
+                                                          .owns_signal   = owns_signal,
+                                                          .tid           = common::get_tid(),
+                                                          .enqueue_ts    = common::timestamp_ns(),
+                                                          .dispatch_id   = dispatch_id,
+                                                          .dispatch_info = dispatch_info};
+
+    if(!session)
+    {
+        counters.allocation_fail.fetch_add(1, std::memory_order_relaxed);
+        if(owns_signal) fast_release_signal(signal);
+        writer(packets, pkt_count);
+        return true;
+    }
+
+    queue.async_started();
+    if(owns_signal)
+        writer(&out_packet, 1);
+    else
+        writer(packets, pkt_count);
+
+    register_fast_path_handler(session);
+    return true;
+}
+
+void
+report_fast_path_counters_once()
+{
+    if(!kernel_trace_fast_path_enabled()) return;
+
+    auto& counters = fast_path_counters();
+    if(counters.reported.exchange(true, std::memory_order_acq_rel)) return;
+
+    ROCP_WARNING << fmt::format(
+        "rocprofv3 kernel fast-path summary: intercepts={}, recorded={}, "
+        "skipped_no_context={}, skipped_non_kernel={}, skipped_batch={}, "
+        "reused_existing_signal={}, injected_signal={}, signal_fail={}, timestamp_fail={}, "
+        "timestamp_invalid={}, async_handler_fail={}, allocation_fail={}, record_overflow={}",
+        counters.intercepts.load(std::memory_order_relaxed),
+        counters.recorded.load(std::memory_order_relaxed),
+        counters.skipped_no_context.load(std::memory_order_relaxed),
+        counters.skipped_non_kernel.load(std::memory_order_relaxed),
+        counters.skipped_batch.load(std::memory_order_relaxed),
+        counters.reused_existing_signal.load(std::memory_order_relaxed),
+        counters.injected_signal.load(std::memory_order_relaxed),
+        counters.signal_fail.load(std::memory_order_relaxed),
+        counters.timestamp_fail.load(std::memory_order_relaxed),
+        counters.timestamp_invalid.load(std::memory_order_relaxed),
+        counters.async_handler_fail.load(std::memory_order_relaxed),
+        counters.allocation_fail.load(std::memory_order_relaxed),
+        counters.record_overflow.load(std::memory_order_relaxed));
+}
+
 /**
  * @brief This function is a queue write interceptor. It intercepts the
  * packet write function. Creates an instance of packet class with the raw
@@ -329,6 +763,11 @@ WriteInterceptor(const void* packets,
     ROCP_FATAL_IF(data == nullptr) << "WriteInterceptor was not passed a pointer to the queue";
 
     auto& queue = *static_cast<Queue*>(data);
+
+    if(kernel_trace_fast_path_enabled() && queue.get_notifiers() == 0)
+    {
+        if(FastPathWriteInterceptor(packets, pkt_count, queue, writer)) return;
+    }
 
     // We have no packets or no one who needs to be notified, do nothing.
     if(pkt_count == 0 ||
@@ -405,7 +844,7 @@ WriteInterceptor(const void* packets,
         }
     }};
 
-    using packet_writer_fn_t = std::function<void(packet_vector_t &&)>;
+    using packet_writer_fn_t = std::function<void(packet_vector_t&&)>;
 
     auto process_packet_batch = [&queue, &corr_id, tracing_data_v](
                                     const rocprofiler_packet* _packets,
@@ -847,6 +1286,7 @@ Queue::Queue(
 Queue::~Queue()
 {
     sync();
+    report_fast_path_counters_once();
     _core_api.hsa_signal_destroy_fn(_active_kernels);
 }
 

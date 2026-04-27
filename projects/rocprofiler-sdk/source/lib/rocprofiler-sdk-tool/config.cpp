@@ -309,6 +309,42 @@ config::config()
         }
     }
 
+    if(lite_trace)
+    {
+        ROCP_FATAL_IF(!kernel_trace || !kernel_trace_fast_path)
+            << "ROCPROF_LITE_TRACE requires kernel tracing through the fast path";
+
+        const auto incompatible = std::vector<std::pair<std::string_view, bool>>{
+            {"ROCPROF_HSA_CORE_API_TRACE", hsa_core_api_trace},
+            {"ROCPROF_HSA_AMD_EXT_API_TRACE", hsa_amd_ext_api_trace},
+            {"ROCPROF_HSA_IMAGE_EXT_API_TRACE", hsa_image_ext_api_trace},
+            {"ROCPROF_HSA_FINALIZER_EXT_API_TRACE", hsa_finalizer_ext_api_trace},
+            {"ROCPROF_MARKER_API_TRACE", marker_api_trace},
+            {"ROCPROF_MEMORY_COPY_TRACE", memory_copy_trace},
+            {"ROCPROF_MEMORY_ALLOCATION_TRACE", memory_allocation_trace},
+            {"ROCPROF_SCRATCH_MEMORY_TRACE", scratch_memory_trace},
+            {"ROCPROF_COUNTER_COLLECTION", counter_collection},
+            {"ROCPROF_HIP_RUNTIME_API_TRACE", hip_runtime_api_trace},
+            {"ROCPROF_HIP_COMPILER_API_TRACE", hip_compiler_api_trace},
+            {"ROCPROF_RCCL_API_TRACE", rccl_api_trace},
+            {"ROCPROF_ROCDECODE_API_TRACE", rocdecode_api_trace},
+            {"ROCPROF_ROCJPEG_API_TRACE", rocjpeg_api_trace},
+            {"ROCPROF_ADVANCED_THREAD_TRACE", advanced_thread_trace},
+            {"ROCPROF_PC_SAMPLING_METHOD",
+             pc_sampling_method_value != ROCPROFILER_PC_SAMPLING_METHOD_NONE},
+            {"ROCPROF_COLLECTION_PERIOD", !collection_periods.empty()},
+            {"ROCPROF_COUNTERS", !counters.empty()},
+            {"ROCPROF_EXTRA_COUNTERS_CONTENTS", !extra_counters_contents.empty()},
+        };
+
+        for(const auto& itr : incompatible)
+        {
+            ROCP_FATAL_IF(itr.second)
+                << "ROCPROF_LITE_TRACE only supports kernel dispatch tracing; disable "
+                << itr.first;
+        }
+    }
+
     // Benchmarking Enable/Disable
     if(!benchmark_mode_env.empty())
     {

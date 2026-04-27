@@ -20,6 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+#include "lib/common/lite_trace_internal.hpp"
 #include "lib/rocprofiler-sdk/aql/helpers.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
@@ -98,7 +99,8 @@ build_pack_from_array(parameter_pack&                             pack,
 }
 };  // namespace
 
-extern "C" {
+extern "C"
+{
 rocprofiler_status_t
 rocprofiler_configure_dispatch_thread_trace_service(
     rocprofiler_context_id_t                        context_id,
@@ -110,6 +112,8 @@ rocprofiler_configure_dispatch_thread_trace_service(
     void*                                           callback_userdata)
 {
     ROCP_TRACE << "Configuring Dispatch ATT for agent " << agent_id.handle;
+
+    if(rocprofiler::common::lite_trace::enabled()) return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
 
     if(rocprofiler::registration::get_init_status() > -1)
         return ROCPROFILER_STATUS_ERROR_CONFIGURATION_LOCKED;
@@ -149,6 +153,8 @@ rocprofiler_configure_device_thread_trace_service(
     rocprofiler_user_data_t                         userdata)
 {
     ROCP_TRACE << "Configuring Device ATT for agent " << agent_id.handle;
+
+    if(rocprofiler::common::lite_trace::enabled()) return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
 
     if(rocprofiler::registration::get_init_status() > -1)
         return ROCPROFILER_STATUS_ERROR_CONFIGURATION_LOCKED;

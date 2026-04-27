@@ -27,6 +27,7 @@ set(common_headers
     environment.hpp
     filesystem.hpp
     hasher.hpp
+    lite_trace_internal.hpp
     logging.hpp
     md5sum.hpp
     mpl.hpp

@@ -21,6 +21,7 @@
 // SOFTWARE.
 
 #include "lib/rocprofiler-sdk/external_correlation.hpp"
+#include "lib/common/lite_trace_internal.hpp"
 #include "lib/common/synchronized.hpp"
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
@@ -163,7 +164,8 @@ external_correlation::push(rocprofiler_thread_id_t tid, rocprofiler_user_data_t 
             return true;
         },
         tid))
-    {}
+    {
+    }
 
     // since we know from above that there will be a key for the tid, we start with a read
     // lock and then once we have have the mapped data for the key, we leverage the enabling
@@ -267,7 +269,8 @@ external_correlation::invoke_callback(rocprofiler_thread_id_t thr_id,
 }  // namespace external_correlation
 }  // namespace rocprofiler
 
-extern "C" {
+extern "C"
+{
 rocprofiler_status_t
 rocprofiler_configure_external_correlation_id_request_service(
     rocprofiler_context_id_t                                  context_id,
@@ -276,6 +279,8 @@ rocprofiler_configure_external_correlation_id_request_service(
     rocprofiler_external_correlation_id_request_cb_t          callback,
     void*                                                     callback_args)
 {
+    if(rocprofiler::common::lite_trace::enabled()) return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
+
     auto* ctx = rocprofiler::context::get_mutable_registered_context(context_id);
     if(!ctx) return ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_FOUND;
 

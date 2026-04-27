@@ -33,6 +33,7 @@
 #include "lib/common/demangle.hpp"
 #include "lib/common/filesystem.hpp"
 #include "lib/common/hasher.hpp"
+#include "lib/common/lite_trace_internal.hpp"
 #include "lib/common/logging.hpp"
 #include "lib/common/md5sum.hpp"
 #include "lib/common/mpl.hpp"
@@ -62,11 +63,14 @@
 #include <dlfcn.h>
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cctype>
 #include <chrono>
 #include <filesystem>
 #include <initializer_list>
 #include <limits>
+#include <memory>
+#include <mutex>
 #include <set>
 #include <type_traits>
 #include <unordered_map>
@@ -136,10 +140,10 @@ struct rocpd_db
 
     rocpd_db() = default;
     ~rocpd_db();
-    rocpd_db(const rocpd_db&) = delete;
+    rocpd_db(const rocpd_db&)            = delete;
     rocpd_db& operator=(const rocpd_db&) = delete;
     rocpd_db(rocpd_db&&)                 = delete;
-    rocpd_db& operator=(rocpd_db&&) = delete;
+    rocpd_db& operator=(rocpd_db&&)      = delete;
 
     sqlite3*            conn                = nullptr;
     std::string         uuid                = {};
@@ -884,7 +888,7 @@ extract_flags_field(const Tp& _data)
 
 #define GENERATE_FIELD_ACCESSOR(FUNC_NAME, FIELD_NAME, DATA_TYPE, ...)                             \
     template <typename Tp, typename Up = Tp>                                                       \
-    auto FUNC_NAME(const Tp& _data, int)->decltype(std::declval<Up>().FIELD_NAME, DATA_TYPE{})     \
+    auto FUNC_NAME(const Tp& _data, int) -> decltype(std::declval<Up>().FIELD_NAME, DATA_TYPE{})   \
     {                                                                                              \
         return _data.FIELD_NAME;                                                                   \
     }                                                                                              \
@@ -905,6 +909,262 @@ GENERATE_FIELD_ACCESSOR(extract_stream_field, stream_id, rocprofiler_stream_id_t
 GENERATE_FIELD_ACCESSOR(extract_queue_field, queue_id, rocprofiler_queue_id_t, 0)
 GENERATE_FIELD_ACCESSOR(extract_allocation_size_field, allocation_size, uint64_t, 0)
 GENERATE_FIELD_ACCESSOR(extract_address_field, address, rocprofiler_address_t, 0)
+
+void
+write_fast_rocpd(
+    const output_config&                                               cfg,
+    const metadata&                                                    tool_metadata,
+    const generator<tool_buffer_tracing_kernel_dispatch_ext_record_t>& kernel_dispatch_gen)
+{
+    static auto get_simple_timer = [](std::string_view label) {
+        return common::simple_timer{fmt::format("SQLite3 fast-path :: {:24}", label)};
+    };
+
+    auto _sqlgenperf = get_simple_timer("total");
+
+    auto node_hash =
+        get_hash_id(tool_metadata.node_data.machine_id) % std::numeric_limits<int64_t>::max();
+    auto node_id = node_hash % std::numeric_limits<uint32_t>::max();
+
+    const uint64_t this_pid         = tool_metadata.process_id;
+    const uint64_t this_ppid        = tool_metadata.parent_process_id;
+    const uint64_t this_pid_init_ns = tool_metadata.process_start_ns;
+
+    const auto& mach_id = tool_metadata.node_data.machine_id;
+    auto        ticks   = common::get_process_start_ticks_since_boot(this_pid);
+    auto        seed    = common::compute_system_seed(mach_id, this_pid, this_ppid, ticks);
+    auto        uuid_v7 = common::generate_uuid_v7(this_pid_init_ns, seed);
+
+    auto      db   = rocpd_db{};
+    sqlite3*& conn = db.conn;
+
+    db.guid = fmt::format("{}", uuid_v7);
+    db.uuid = fmt::format("_{}", replace_all(uuid_v7, '-', "_"));
+
+    auto output_file = get_output_filename(cfg, "results", "db");
+    if(fs::exists(output_file)) fs::remove(output_file);
+
+    SQLITE3_CHECK(sqlite3_open_v2(
+        output_file.c_str(), &conn, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE, nullptr));
+    SQLITE3_CHECK(sqlite3_busy_handler(conn, &sql::busy_handler, nullptr));
+
+    execute_raw_sql_statements(conn,
+                               "PRAGMA journal_mode = WAL;"
+                               "PRAGMA synchronous = OFF;"
+                               "PRAGMA cache_size = -65536;");
+
+    ROCP_ERROR << fmt::format("Opened fast-path result file: {} (UUID={})", output_file, uuid_v7);
+
+    auto ddl = fmt::format(
+        R"sql(
+CREATE TABLE rocpd_metadata{0} (
+    tag TEXT NOT NULL,
+    value TEXT
+);
+CREATE TABLE rocpd_string{0} (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guid TEXT NOT NULL DEFAULT "{1}",
+    string TEXT NOT NULL UNIQUE
+);
+CREATE TABLE rocpd_info_kernel_symbol{0} (
+    id INTEGER NOT NULL PRIMARY KEY,
+    guid TEXT NOT NULL DEFAULT "{1}",
+    nid INTEGER NOT NULL,
+    pid INTEGER NOT NULL,
+    code_object_id INTEGER,
+    kernel_name TEXT,
+    display_name TEXT,
+    kernel_object INTEGER,
+    extdata JSONB NOT NULL DEFAULT "{{}}"
+);
+CREATE TABLE rocpd_kernel_dispatch{0} (
+    id INTEGER NOT NULL PRIMARY KEY,
+    guid TEXT NOT NULL DEFAULT "{1}",
+    nid INTEGER NOT NULL,
+    pid INTEGER NOT NULL,
+    tid INTEGER,
+    agent_id INTEGER NOT NULL,
+    kernel_id INTEGER NOT NULL,
+    dispatch_id INTEGER NOT NULL,
+    queue_id INTEGER NOT NULL,
+    stream_id INTEGER NOT NULL,
+    start BIGINT NOT NULL,
+    end BIGINT NOT NULL,
+    private_segment_size INTEGER,
+    group_segment_size INTEGER,
+    workgroup_size_x INTEGER NOT NULL,
+    workgroup_size_y INTEGER NOT NULL,
+    workgroup_size_z INTEGER NOT NULL,
+    grid_size_x INTEGER NOT NULL,
+    grid_size_y INTEGER NOT NULL,
+    grid_size_z INTEGER NOT NULL,
+    extdata JSONB NOT NULL DEFAULT "{{}}"
+);
+)sql",
+        db.uuid,
+        db.guid);
+    execute_raw_sql_statements(conn, ddl);
+
+    sqlite3_stmt* metadata_stmt = nullptr;
+    sqlite3_stmt* string_stmt   = nullptr;
+    sqlite3_stmt* symbol_stmt   = nullptr;
+    sqlite3_stmt* dispatch_stmt = nullptr;
+
+    auto finalize_statement = [](sqlite3_stmt*& stmt) {
+        if(!stmt) return;
+        SQLITE3_CHECK(sqlite3_finalize(stmt));
+        stmt = nullptr;
+    };
+
+    auto metadata_sql =
+        fmt::format("INSERT INTO rocpd_metadata{} (tag, value) VALUES (?, ?);", db.uuid);
+    auto string_sql =
+        fmt::format("INSERT OR IGNORE INTO rocpd_string{} (string) VALUES (?);", db.uuid);
+    auto symbol_sql =
+        fmt::format("INSERT OR IGNORE INTO rocpd_info_kernel_symbol{} "
+                    "(id, nid, pid, code_object_id, kernel_name, display_name, kernel_object) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?);",
+                    db.uuid);
+    auto dispatch_sql = fmt::format(
+        "INSERT INTO rocpd_kernel_dispatch{} "
+        "(id, nid, pid, tid, agent_id, kernel_id, dispatch_id, queue_id, stream_id, start, end, "
+        "private_segment_size, group_segment_size, workgroup_size_x, workgroup_size_y, "
+        "workgroup_size_z, grid_size_x, grid_size_y, grid_size_z) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);",
+        db.uuid);
+
+    SQLITE3_CHECK(sqlite3_prepare_v2(conn, metadata_sql.c_str(), -1, &metadata_stmt, nullptr));
+    SQLITE3_CHECK(sqlite3_prepare_v2(conn, string_sql.c_str(), -1, &string_stmt, nullptr));
+    SQLITE3_CHECK(sqlite3_prepare_v2(conn, symbol_sql.c_str(), -1, &symbol_stmt, nullptr));
+    SQLITE3_CHECK(sqlite3_prepare_v2(conn, dispatch_sql.c_str(), -1, &dispatch_stmt, nullptr));
+
+    auto bind_text = [](sqlite3_stmt* stmt, int idx, std::string_view value) {
+        SQLITE3_CHECK(sqlite3_bind_text(
+            stmt, idx, value.data(), static_cast<int>(value.size()), SQLITE_TRANSIENT));
+    };
+
+    auto step_reset = [](sqlite3_stmt* stmt) {
+        auto status = sqlite3_step(stmt);
+        ROCP_FATAL_IF(status != SQLITE_DONE && status != SQLITE_ROW)
+            << "sqlite3_step failed with status " << status;
+        SQLITE3_CHECK(sqlite3_reset(stmt));
+        SQLITE3_CHECK(sqlite3_clear_bindings(stmt));
+    };
+
+    execute_raw_sql_statements(conn, "BEGIN TRANSACTION;");
+
+    bind_text(metadata_stmt, 1, "pid");
+    bind_text(metadata_stmt, 2, fmt::format("{}", this_pid));
+    step_reset(metadata_stmt);
+
+    {
+        auto _sqlgenperf_rocpd = get_simple_timer("kernel_symbols");
+        for(const auto& itr : tool_metadata.get_kernel_symbols())
+        {
+            if(itr.kernel_id == 0 && itr.code_object_id == 0) continue;
+
+            bind_text(string_stmt, 1, itr.formatted_kernel_name);
+            step_reset(string_stmt);
+
+            SQLITE3_CHECK(
+                sqlite3_bind_int64(symbol_stmt, 1, static_cast<sqlite3_int64>(itr.kernel_id)));
+            SQLITE3_CHECK(sqlite3_bind_int64(symbol_stmt, 2, static_cast<sqlite3_int64>(node_id)));
+            SQLITE3_CHECK(sqlite3_bind_int64(symbol_stmt, 3, static_cast<sqlite3_int64>(this_pid)));
+            SQLITE3_CHECK(
+                sqlite3_bind_int64(symbol_stmt, 4, static_cast<sqlite3_int64>(itr.code_object_id)));
+            bind_text(symbol_stmt, 5, itr.kernel_name);
+            bind_text(symbol_stmt, 6, itr.formatted_kernel_name);
+            SQLITE3_CHECK(
+                sqlite3_bind_int64(symbol_stmt, 7, static_cast<sqlite3_int64>(itr.kernel_object)));
+            step_reset(symbol_stmt);
+        }
+    }
+
+    auto insert_dispatch = [&](rocprofiler_thread_id_t                   thread_id,
+                               rocprofiler_timestamp_t                   start_timestamp,
+                               rocprofiler_timestamp_t                   end_timestamp,
+                               rocprofiler_stream_id_t                   stream_id,
+                               const rocprofiler_kernel_dispatch_info_t& info) {
+        auto agent_node_id = CHECK_NOTNULL(tool_metadata.get_agent(info.agent_id))->node_id;
+
+        SQLITE3_CHECK(
+            sqlite3_bind_int64(dispatch_stmt, 1, static_cast<sqlite3_int64>(info.dispatch_id)));
+        SQLITE3_CHECK(sqlite3_bind_int64(dispatch_stmt, 2, static_cast<sqlite3_int64>(node_id)));
+        SQLITE3_CHECK(sqlite3_bind_int64(dispatch_stmt, 3, static_cast<sqlite3_int64>(this_pid)));
+        SQLITE3_CHECK(sqlite3_bind_int64(dispatch_stmt, 4, static_cast<sqlite3_int64>(thread_id)));
+        SQLITE3_CHECK(
+            sqlite3_bind_int64(dispatch_stmt, 5, static_cast<sqlite3_int64>(agent_node_id)));
+        SQLITE3_CHECK(
+            sqlite3_bind_int64(dispatch_stmt, 6, static_cast<sqlite3_int64>(info.kernel_id)));
+        SQLITE3_CHECK(
+            sqlite3_bind_int64(dispatch_stmt, 7, static_cast<sqlite3_int64>(info.dispatch_id)));
+        SQLITE3_CHECK(
+            sqlite3_bind_int64(dispatch_stmt, 8, static_cast<sqlite3_int64>(info.queue_id.handle)));
+        SQLITE3_CHECK(
+            sqlite3_bind_int64(dispatch_stmt, 9, static_cast<sqlite3_int64>(stream_id.handle)));
+        SQLITE3_CHECK(
+            sqlite3_bind_int64(dispatch_stmt, 10, static_cast<sqlite3_int64>(start_timestamp)));
+        SQLITE3_CHECK(
+            sqlite3_bind_int64(dispatch_stmt, 11, static_cast<sqlite3_int64>(end_timestamp)));
+        SQLITE3_CHECK(sqlite3_bind_int64(
+            dispatch_stmt, 12, static_cast<sqlite3_int64>(info.private_segment_size)));
+        SQLITE3_CHECK(sqlite3_bind_int64(
+            dispatch_stmt, 13, static_cast<sqlite3_int64>(info.group_segment_size)));
+        SQLITE3_CHECK(sqlite3_bind_int64(
+            dispatch_stmt, 14, static_cast<sqlite3_int64>(info.workgroup_size.x)));
+        SQLITE3_CHECK(sqlite3_bind_int64(
+            dispatch_stmt, 15, static_cast<sqlite3_int64>(info.workgroup_size.y)));
+        SQLITE3_CHECK(sqlite3_bind_int64(
+            dispatch_stmt, 16, static_cast<sqlite3_int64>(info.workgroup_size.z)));
+        SQLITE3_CHECK(
+            sqlite3_bind_int64(dispatch_stmt, 17, static_cast<sqlite3_int64>(info.grid_size.x)));
+        SQLITE3_CHECK(
+            sqlite3_bind_int64(dispatch_stmt, 18, static_cast<sqlite3_int64>(info.grid_size.y)));
+        SQLITE3_CHECK(
+            sqlite3_bind_int64(dispatch_stmt, 19, static_cast<sqlite3_int64>(info.grid_size.z)));
+        step_reset(dispatch_stmt);
+    };
+
+    {
+        auto     _sqlgenperf_rocpd = get_simple_timer("kernel_dispatch");
+        uint64_t compact_count     = 0;
+        auto*    compact_records   = common::lite_trace::records(&compact_count);
+
+        if(compact_records && compact_count > 0)
+        {
+            for(uint64_t i = 0; i < compact_count; ++i)
+            {
+                const auto& itr = compact_records[i];
+                insert_dispatch(itr.thread_id,
+                                itr.start,
+                                itr.end,
+                                rocprofiler_stream_id_t{0},
+                                itr.dispatch_info);
+            }
+        }
+        else
+        {
+            for(auto pitr : kernel_dispatch_gen)
+            {
+                for(auto itr : kernel_dispatch_gen.get(pitr))
+                {
+                    insert_dispatch(itr.thread_id,
+                                    itr.start_timestamp,
+                                    itr.end_timestamp,
+                                    itr.stream_id,
+                                    itr.dispatch_info);
+                }
+            }
+        }
+    }
+
+    execute_raw_sql_statements(conn, "COMMIT;");
+    common::lite_trace::unlink_record_store();
+    finalize_statement(metadata_stmt);
+    finalize_statement(string_stmt);
+    finalize_statement(symbol_stmt);
+    finalize_statement(dispatch_stmt);
+}
 }  // namespace
 
 namespace
@@ -1028,6 +1288,12 @@ write_rocpd(
         return common::simple_timer{fmt::format("SQLite3 generation :: {:24}", label)};
     };
 
+    if(cfg.rocpd_fast_path)
+    {
+        write_fast_rocpd(cfg, tool_metadata, kernel_dispatch_gen);
+        return;
+    }
+
     auto _sqlgenperf = get_simple_timer("total");
 
     auto node_hash =
@@ -1062,18 +1328,28 @@ write_rocpd(
         SQLITE3_CHECK(sqlite3_open_v2(
             output_file.c_str(), &conn, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE, nullptr));
         SQLITE3_CHECK(sqlite3_busy_handler(conn, &sql::busy_handler, nullptr));
+        if(cfg.rocpd_fast_path)
+        {
+            execute_raw_sql_statements(conn,
+                                       "PRAGMA journal_mode = WAL;"
+                                       "PRAGMA synchronous = OFF;"
+                                       "PRAGMA cache_size = -65536;");
+        }
 
         ROCP_ERROR << fmt::format("Opened result file: {} (UUID={})", output_file, uuid_v7);
 
         execute_raw_sql_statements(conn, table_schema);
 
-        for(auto itr : {ROCPD_SQL_SCHEMA_ROCPD_VIEWS,
-                        ROCPD_SQL_SCHEMA_ROCPD_DATA_VIEWS,
-                        ROCPD_SQL_SCHEMA_ROCPD_MARKER_VIEWS,
-                        ROCPD_SQL_SCHEMA_ROCPD_SUMMARY_VIEWS})
+        if(!cfg.rocpd_fast_path)
         {
-            auto views_schema = read_schema_file(db, itr);
-            execute_raw_sql_statements(conn, views_schema);
+            for(auto itr : {ROCPD_SQL_SCHEMA_ROCPD_VIEWS,
+                            ROCPD_SQL_SCHEMA_ROCPD_DATA_VIEWS,
+                            ROCPD_SQL_SCHEMA_ROCPD_MARKER_VIEWS,
+                            ROCPD_SQL_SCHEMA_ROCPD_SUMMARY_VIEWS})
+            {
+                auto views_schema = read_schema_file(db, itr);
+                execute_raw_sql_statements(conn, views_schema);
+            }
         }
     }
 
@@ -2028,6 +2304,7 @@ write_rocpd(
         insert_memory_alloc_data(scratch_memory_gen);
     }
 
+    if(!cfg.rocpd_fast_path)
     {
         auto kfd_pmc_ids = std::unordered_map<rocprofiler_buffer_tracing_kind_t, uint64_t>{};
         insert_kfd_data(kfd_pmc_ids);
@@ -2043,9 +2320,12 @@ write_rocpd(
         }
 
         {
-            auto _sqlgenperf_rocpd = get_simple_timer("SQL indexing");
-            auto indexes_schema    = read_schema_file(db, ROCPD_SQL_SCHEMA_ROCPD_INDEXES);
-            execute_raw_sql_statements(conn, indexes_schema);
+            if(!cfg.rocpd_fast_path)
+            {
+                auto _sqlgenperf_rocpd = get_simple_timer("SQL indexing");
+                auto indexes_schema    = read_schema_file(db, ROCPD_SQL_SCHEMA_ROCPD_INDEXES);
+                execute_raw_sql_statements(conn, indexes_schema);
+            }
         }
     }
 }

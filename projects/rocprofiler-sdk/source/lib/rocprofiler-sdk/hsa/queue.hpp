@@ -34,6 +34,7 @@
 #include <rocprofiler-sdk/agent.h>
 #include <rocprofiler-sdk/buffer_tracing.h>
 #include <rocprofiler-sdk/callback_tracing.h>
+#include <rocprofiler-sdk/defines.h>
 #include <rocprofiler-sdk/fwd.h>
 
 #include <hsa/amd_hsa_kernel_code.h>

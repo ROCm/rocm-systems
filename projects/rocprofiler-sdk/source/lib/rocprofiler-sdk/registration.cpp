@@ -27,6 +27,7 @@
 #include "lib/common/elf_utils.hpp"
 #include "lib/common/environment.hpp"
 #include "lib/common/filesystem.hpp"
+#include "lib/common/lite_trace_internal.hpp"
 #include "lib/common/logging.hpp"
 #include "lib/common/static_object.hpp"
 #include "lib/common/static_tl_object.hpp"
@@ -90,7 +91,8 @@
 #include <unordered_set>
 #include <vector>
 
-extern "C" {
+extern "C"
+{
 #pragma weak rocprofiler_configure
 
 extern rocprofiler_tool_configure_result_t*
@@ -323,7 +325,7 @@ struct client_library
     client_library(const client_library&)     = delete;
     client_library(client_library&&) noexcept = default;
 
-    client_library& operator=(const client_library&) = delete;
+    client_library& operator=(const client_library&)     = delete;
     client_library& operator=(client_library&&) noexcept = delete;
 
     std::string                                 name                    = {};
@@ -998,6 +1000,7 @@ finalize()
         {
             invoke_client_finalizers();
         }
+        if(common::lite_trace::enabled()) common::lite_trace::unlink_record_store();
         if(num_clients > 0) internal_threading::finalize();
         set_fini_status(1);
     });
@@ -1021,7 +1024,8 @@ detach()
 }  // namespace registration
 }  // namespace rocprofiler
 
-extern "C" {
+extern "C"
+{
 rocprofiler_status_t
 rocprofiler_is_initialized(int* status)
 {
