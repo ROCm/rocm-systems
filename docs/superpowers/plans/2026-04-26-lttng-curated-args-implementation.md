@@ -1953,14 +1953,58 @@ def test_multi_header_undeclared_api_fails():
 
 def test_multi_header_sidecar_works():
     """Sidecar emission must work with multi-header verifier (regression
-    guard for C13 — earlier draft of the Task 4.5 rewrite dropped the
-    out_sidecar parameter from verify()/main(), breaking Task 3 codegen
-    and Task 15g's CMake regenerate target)."""
-    # Use both fake HSA headers from Task 4.5 fixtures + a small mixed YAML.
-    # Assert: rc==0 AND the sidecar JSON file is created with the expected
-    # top-level api keys ('hsa_signal_create', 'hsa_amd_signal_create')
-    # and each value is a list of {name, c_type} dicts.
-    pass  # implementation per existing test patterns in this file
+    guard for C13: Task 4.5 multi-header rewrite must not drop the
+    --out-sidecar parameter introduced by Task 4)."""
+    import tempfile, json
+    yaml_text = """
+- api: hsa_signal_create
+  category: hsa_signals
+  args:
+    - {name: initial_value, type: int64,  dir: IN}
+    - {name: num_consumers, type: uint32, dir: IN}
+    - {name: consumers,     type: ptr,    dir: IN}
+    - {name: signal,        type: handle, dir: OUT}
+- api: hsa_amd_signal_create
+  category: hsa_signals
+  args:
+    - {name: initial_value, type: int64,  dir: IN}
+    - {name: num_consumers, type: uint32, dir: IN}
+    - {name: consumers,     type: ptr,    dir: IN}
+    - {name: attributes,    type: uint64, dir: IN}
+    - {name: signal,        type: handle, dir: OUT}
+"""
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
+        f.write(yaml_text)
+        yaml_path = f.name
+    sidecar_path = yaml_path + '.sidecar.json'
+    try:
+        cmd = ['python3', VERIFY,
+               '--yaml',   yaml_path,
+               '--header', os.path.join(HERE, 'testdata', 'fake_hsa_base.h'),
+               '--header', os.path.join(HERE, 'testdata', 'fake_hsa_ext.h'),
+               '--out-sidecar', sidecar_path]
+        r = subprocess.run(cmd, capture_output=True, text=True)
+        assert r.returncode == 0, f"verifier failed:\n{r.stderr}"
+        assert os.path.exists(sidecar_path), "sidecar JSON file not created"
+        with open(sidecar_path) as f:
+            data = json.load(f)
+        # Both APIs present.
+        assert 'hsa_signal_create' in data
+        assert 'hsa_amd_signal_create' in data
+        # Each API has non-empty list of {name, c_type} dicts.
+        for api in ('hsa_signal_create', 'hsa_amd_signal_create'):
+            assert len(data[api]) > 0
+            for arg in data[api]:
+                assert 'name' in arg
+                assert 'c_type' in arg
+        # Spot-check one arg.
+        signal_args = data['hsa_signal_create']
+        names = [a['name'] for a in signal_args]
+        assert 'signal' in names
+    finally:
+        os.unlink(yaml_path)
+        if os.path.exists(sidecar_path):
+            os.unlink(sidecar_path)
 ```
 
 - [ ] **Step 3: Run tests, verify the new ones fail (single-header verifier doesn't support multi)**
