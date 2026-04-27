@@ -2,10 +2,9 @@
 // SPDX-License-Identifier:  MIT
 #include "test_rocprofiler_compute_tool.h"
 
+#include "gtest/gtest.h"
 #include "mocks.h"
 #include "rocprofiler_compute_tool.h"
-
-#include "gtest/gtest.h"
 
 using namespace rocprofiler_compute_tool;
 
@@ -264,18 +263,11 @@ TEST_F(test_rocprofiler_compute_tool_t, OnToolTracingCallback_ForwardsToSdkCallb
 TEST_F(test_rocprofiler_compute_tool_t, OnCodeObjectTracingCallback_ForwardsToSdkCallbacks)
 {
     tool_data_t tool_data{};
-    tool_data.pc_sampling_collector.wlock(
-        [&](auto& ptr)
-        { ptr = m_pc_sampling_collector; });
+    tool_data.pc_sampling_collector.wlock([&](auto& ptr) { ptr = m_pc_sampling_collector; });
 
     rocprofiler_callback_tracing_code_object_load_data_t payload = {};
     payload.code_object_id                                       = 0xfe;
-
-    rocprofiler_callback_tracing_record_t record = {};
-    record.kind                                  = ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT;
-    record.operation                             = ROCPROFILER_CODE_OBJECT_LOAD;
-    record.phase                                 = ROCPROFILER_CALLBACK_PHASE_LOAD;
-    record.payload                               = &payload;
+    const auto record = create_code_object_load_info_with_payload(payload);
 
     code_object_tracing_callback(record, nullptr, &tool_data);
 
@@ -288,10 +280,10 @@ TEST_F(test_rocprofiler_compute_tool_t, OnCodeObjectTracingCallback_ForwardsToSd
 /// test_rocprofiler_compute_tool_t
 void test_rocprofiler_compute_tool_t::SetUp()
 {
-    m_input_parameters = std::make_shared<mock_input_parameters_t>();
-    m_sdk_wrapper      = std::make_shared<mock_sdk_wrapper_t>();
-    m_counters_writer  = std::make_shared<mock_counters_writer_t>();
-    m_sdk_callbacks    = std::make_shared<mock_sdk_callbacks_t>();
+    m_input_parameters      = std::make_shared<mock_input_parameters_t>();
+    m_sdk_wrapper           = std::make_shared<mock_sdk_wrapper_t>();
+    m_counters_writer       = std::make_shared<mock_counters_writer_t>();
+    m_sdk_callbacks         = std::make_shared<mock_sdk_callbacks_t>();
     m_pc_sampling_collector = std::make_shared<mock_pc_sampling_collector_t>();
 
     test_knobs::set_input_parameters(m_input_parameters);
@@ -325,5 +317,17 @@ counter_info_record_t test_rocprofiler_compute_tool_t::create_counter_record(uin
     counter_info_record_t record = {};
     record.counter_id            = counter_id;
     record.kernel_id             = kernel_id;
+    return record;
+}
+
+rocprofiler_callback_tracing_record_t test_rocprofiler_compute_tool_t::create_code_object_load_info_with_payload(
+    rocprofiler_callback_tracing_code_object_load_data_t& payload)
+{
+    rocprofiler_callback_tracing_record_t record = {};
+    record.kind                                  = ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT;
+    record.operation                             = ROCPROFILER_CODE_OBJECT_LOAD;
+    record.phase                                 = ROCPROFILER_CALLBACK_PHASE_LOAD;
+    record.payload                               = &payload;
+
     return record;
 }

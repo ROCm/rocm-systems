@@ -15,12 +15,14 @@ public:
     const char* get_iteration_multiplexing_mode() override;
     const char* get_kernel_filter_include_regex() override;
     const char* get_kernel_filter_range() override;
+    const char* get_pc_sampling_mode() const override;
 
     void set_output_path(const std::string& output_path);
     void set_requested_counters(const std::string& counters);
     void set_iteration_multiplexing_mode(const std::string& mode);
     void set_kernel_filter_include_regex(const std::string& regex);
     void set_kernel_filter_range(const std::string& range);
+    void set_pc_sampling_mode(const std::string& mode);
 
 private:
     const char* m_non_empty_str               = "non empty string";
@@ -29,6 +31,7 @@ private:
     std::string m_iteration_multiplexing_mode = m_non_empty_str;
     std::string m_kernel_filter_include_regex = m_non_empty_str;
     std::string m_kernel_filter_range         = m_non_empty_str;
+    std::string m_pc_sampling_mode            = m_non_empty_str;
 };
 
 class mock_sdk_wrapper_t : public rocprofiler_compute_tool::sdk_wrapper_t

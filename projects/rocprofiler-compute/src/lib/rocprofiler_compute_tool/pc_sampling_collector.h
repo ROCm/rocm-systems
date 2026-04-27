@@ -7,6 +7,14 @@
 
 namespace rocprofiler_compute_tool
 {
+
+enum class PcSamplingMode : uint8_t
+{
+    Disabled,
+    Stochastic,
+    HostTrap
+};
+
 class pc_sampling_collector_t
 {
 public:

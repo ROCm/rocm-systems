@@ -2,7 +2,7 @@
 // SPDX-License-Identifier:  MIT
 #include "input_parameters.h"
 
-#include <stdlib.h>
+#include <string>
 
 using namespace rocprofiler_compute_tool;
 
@@ -29,4 +29,9 @@ const char* env_input_parameters_t::get_kernel_filter_include_regex()
 const char* env_input_parameters_t::get_kernel_filter_range()
 {
     return getenv("ROCPROF_KERNEL_FILTER_RANGE");
+}
+
+const char* env_input_parameters_t::get_pc_sampling_mode() const
+{
+    return getenv("ROCPROF_PC_SAMPLING_METHOD");
 }
