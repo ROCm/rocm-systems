@@ -5392,7 +5392,7 @@ status_success=HSA_STATUS_SUCCESS, and three --header args
 ./dev-bin/in-container.sh main "cd /root/rocm-systems && bash projects/clr/hipamd/test/lttng/test_hip_invariants.sh build/clr/hipamd/lib"
 ./dev-bin/in-container.sh main "cd /root/rocm-systems && bash projects/clr/hipamd/test/lttng/test_hip_curated_args_payload.sh build/clr/hipamd/lib"
 ./dev-bin/in-container.sh main "cd /root/rocm-systems && bash projects/clr/hipamd/test/lttng/test_hip_curated_args_coverage.sh build/clr/hipamd/lib"
-./dev-bin/in-container.sh main "cd /root/rocm-systems && bash projects/rocr-runtime/runtime/hsa-runtime/scripts/lttng_coverage_gate.sh ..."
+./dev-bin/in-container.sh main "cd /root/rocm-systems && bash projects/rocr-runtime/runtime/hsa-runtime/scripts/lttng_coverage_gate.sh build/rocr/runtime/hsa-runtime/libhsa-runtime64.so projects/rocr-runtime/runtime/hsa-runtime/scripts/lttng_migration_inventory.txt"
 ./dev-bin/in-container.sh main "cd /root/rocm-systems && bash projects/rocr-runtime/runtime/hsa-runtime/test/lttng/test_hsa_api_tracepoints.sh"
 ./dev-bin/in-container.sh main "cd /root/rocm-systems && bash projects/rocr-runtime/runtime/hsa-runtime/test/lttng/test_hsa_invariants.sh"
 ./dev-bin/in-container.sh main "cd /root/rocm-systems && bash projects/rocr-runtime/runtime/hsa-runtime/test/lttng/test_hsa_curated_args_payload.sh"
