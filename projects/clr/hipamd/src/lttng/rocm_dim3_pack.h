@@ -20,7 +20,7 @@
 #define ROCM_DIM3_PACK_H_
 
 #include <stdint.h>
-#include <hip/hip_runtime.h>  /* for dim3 */
+#include <hip/hip_runtime_api.h>  /* for dim3 */
 
 #define ROCM_DIM3_OVERFLOW_BIT (1ULL << 63)
 #define ROCM_DIM3_Z_MAX        (0x7FFFu)   /* 15-bit lane max */

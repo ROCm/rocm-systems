@@ -1,8 +1,7 @@
 // Standalone unit tests for ROCM_DIM3_PACK. Compile with:
-//   g++ -std=c++17 -I /opt/rocm/include test_dim3_pack.cpp -o test_dim3_pack
-// Expects ROCM_DIM3_PACK to live in the same dir as this test (header is
-// included via -I argument or relative path -- see the Makefile target in
-// Step 6).
+//   g++ -std=c++17 -D__HIP_PLATFORM_AMD__=1 -I/opt/rocm/include \
+//       projects/clr/hipamd/test/lttng/test_dim3_pack.cpp -o test_dim3_pack
+// The header is included via the relative path below; no -I needed for it.
 #include "../../src/lttng/rocm_dim3_pack.h"
 #include <cassert>
 #include <cstdint>
@@ -35,6 +34,7 @@ int main() {
         EXPECT_EQ(v & ROCM_DIM3_OVERFLOW_BIT, ROCM_DIM3_OVERFLOW_BIT);
         EXPECT_EQ((v >> 32) & 0xFFFFu, uint64_t(0xFFFFu));      // y lane saturated
         EXPECT_EQ((v >> 48) & 0x7FFFu, uint64_t(1));            // z untouched
+        EXPECT_EQ(v & 0xFFFFFFFFu, uint64_t(1));                // x lane survived
     }
 
     // test_dim3_packed_z_overflow: z=0x10000 saturates to 0x7FFF, bit 63 set
@@ -42,6 +42,7 @@ int main() {
         uint64_t v = ROCM_DIM3_PACK(dim3(1, 1, 0x10000u));
         EXPECT_EQ(v & ROCM_DIM3_OVERFLOW_BIT, ROCM_DIM3_OVERFLOW_BIT);
         EXPECT_EQ((v >> 48) & 0x7FFFu, uint64_t(0x7FFFu));      // z lane saturated
+        EXPECT_EQ(v & 0xFFFFFFFFu, uint64_t(1));                // x lane survived
     }
 
     // test_dim3_packed_z_high_bit_overflow: z=0x8000 ALSO overflow (15-bit lane)
