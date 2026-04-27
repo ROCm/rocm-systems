@@ -25,9 +25,14 @@
 #include <rocprofiler-sdk/buffer.h>
 #include <rocprofiler-sdk/fwd.h>
 
-#include "lib/common/container/record_header_buffer.hpp"
+#if defined(ROCPROFILER_EXPERIMENTAL_BPF_BUFFER) && ROCPROFILER_EXPERIMENTAL_BPF_BUFFER > 0
+#    include "lib/common/container/bpf_record_header_buffer.hpp"
+#else
+#    include "lib/common/container/record_header_buffer.hpp"
+#endif
 #include "lib/common/container/stable_vector.hpp"
 #include "lib/common/demangle.hpp"
+#include "lib/common/logging.hpp"
 
 #include <fmt/format.h>
 
@@ -44,7 +49,11 @@ namespace buffer
 {
 struct instance
 {
-    using buffer_t                       = common::container::record_header_buffer;
+#if defined(ROCPROFILER_EXPERIMENTAL_BPF_BUFFER) && ROCPROFILER_EXPERIMENTAL_BPF_BUFFER > 0
+    using buffer_t = common::container::bpf_record_header_buffer;
+#else
+    using buffer_t = common::container::record_header_buffer;
+#endif
     static constexpr auto size           = 2;  // double buffering
     static constexpr auto sync_wait_usec = std::chrono::microseconds{10};
 

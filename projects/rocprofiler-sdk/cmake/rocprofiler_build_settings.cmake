@@ -203,6 +203,11 @@ if(ROCPROFILER_BUILD_CI_STRICT_TIMESTAMPS)
                                            INTERFACE ROCPROFILER_CI_STRICT_TIMESTAMPS)
 endif()
 
+if(ROCPROFILER_EXPERIMENTAL_BPF_BUFFER)
+    rocprofiler_target_compile_definitions(
+        rocprofiler-sdk-build-flags INTERFACE ROCPROFILER_EXPERIMENTAL_BPF_BUFFER=1)
+endif()
+
 # ----------------------------------------------------------------------------------------#
 # extra flags for compiling with experimental warnings
 #

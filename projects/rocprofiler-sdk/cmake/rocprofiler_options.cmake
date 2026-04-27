@@ -51,6 +51,11 @@ rocprofiler_add_option(
     "Use (internal) <rocprofiler-sdk/rccl/details/api_trace.h> instead of RCCL-provided <rccl/amd_detail/api_trace.h>. Note: this should never be used in production"
     OFF
     ADVANCED)
+rocprofiler_add_option(
+    ROCPROFILER_EXPERIMENTAL_BPF_BUFFER
+    "Use the experimental BPF-style internal record buffer backend for rocprofiler buffers"
+    OFF
+    ADVANCED)
 
 rocprofiler_add_option(
     ROCPROFILER_BUILD_GHC_FS
