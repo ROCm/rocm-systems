@@ -138,7 +138,10 @@ Benchmark note
 The cross-proposal microbenchmark uses one unit for time, nanoseconds per
 record, and one unit for footprint, MiB. With 64-byte payload records and 131072
 records per round, the BPF-style buffer reduces storage from 136.07 MiB to
-12.01 MiB, but it does not beat the per-producer ring on producer time:
+12.01 MiB, but it does not beat the per-producer ring on producer time. The
+active LTTng rows were measured with a locally extracted matching LTTng 2.14
+userspace stack because the host install mixed ``lttng-tools`` 2.13 with
+``liblttng-ctl`` 2.14.
 
 .. list-table::
    :header-rows: 1
@@ -168,11 +171,11 @@ records per round, the BPF-style buffer reduces storage from 136.07 MiB to
      - 12.00
      - 17.91
    * - 1
-     - LTTng-UST inactive
-     - 29.520
-     - 31.953
+     - LTTng-UST active
+     - 141.760
+     - 144.479
      - 136.07
-     - 141.81
+     - 157.90
    * - 4
      - Current
      - 243.692
@@ -192,11 +195,11 @@ records per round, the BPF-style buffer reduces storage from 136.07 MiB to
      - 12.02
      - 17.79
    * - 4
-     - LTTng-UST inactive
-     - 288.077
-     - 290.512
+     - LTTng-UST active
+     - 501.102
+     - 503.294
      - 136.07
-     - 141.84
+     - 180.27
    * - 16
      - Current
      - 260.940
@@ -216,11 +219,13 @@ records per round, the BPF-style buffer reduces storage from 136.07 MiB to
      - 12.06
      - 18.04
    * - 16
-     - LTTng-UST inactive
-     - 294.816
-     - 297.481
+     - LTTng-UST active
+     - 563.533
+     - 565.863
      - 136.07
-     - 142.29
+     - 203.93
 
 The resulting recommendation is ring first for lowest overhead, then BPF-style
-when low footprint is the stronger secondary constraint.
+when low footprint is the stronger secondary constraint. LTTng-UST is validated
+as an active out-of-process tracepoint path, but its producer-side cost is not
+competitive with the ring or BPF-style buffer for the SDK-internal transport.
