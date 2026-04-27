@@ -191,11 +191,11 @@ start_threads(rocprofiler_thread_trace_shader_data_callback_t cb_fn,
 
     auto producer_data             = triple_buffer_producer_data_t{};
     producer_data.producer_running = running_flag;
-    producer_data.start_pkt_signal = start_signal;
     producer_data.control_packet   = std::move(control_packet);
     producer_data.copy_data_fn     = copy_data_mock;
     producer_data.shared           = worker_data;
     producer_data.buffer_packet    = std::move(buffer_packet);
+    // start_pkt_signal lives on worker_data->start_pkt_signal (set above).
 
     auto consumer_data        = triple_buffer_consumer_data_t{};
     consumer_data.callback_fn = params.shader_cb_fn;
@@ -643,11 +643,11 @@ TEST(thread_trace, destructor_force_wake)
 
     auto producer_data             = thread_trace::triple_buffer_producer_data_t{};
     producer_data.producer_running = running_flag;
-    producer_data.start_pkt_signal = start_signal;
     producer_data.control_packet   = std::move(control_packet);
     producer_data.copy_data_fn     = thread_trace::copy_data_mock;
     producer_data.shared           = worker_data;
     producer_data.buffer_packet    = std::move(buffer_packet);
+    // start_pkt_signal lives on worker_data->start_pkt_signal (set above).
 
     auto producer = std::thread{thread_trace::producer_loop, std::move(producer_data)};
 

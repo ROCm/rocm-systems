@@ -188,8 +188,10 @@ producer_loop(
 
     auto start_t0 = std::chrono::system_clock::now();
     bool do_sleep{false};
-    // Wait until ATT start packets have been executed
-    signal_wait(*CHECK_NOTNULL(parameters.start_pkt_signal));
+    // Wait until ATT start packets have been executed.
+    // Use the shared start_pkt_signal so this is the same handle the destructor
+    // force-wakes via core.cpp's stop_thread_trace path.
+    signal_wait(*CHECK_NOTNULL(parameters.shared->start_pkt_signal));
     if(worker_flag.load() == WORKER_FLAG_DESTRUCTOR)
     {
         ROCP_INFO << "Producer woken at start by destructor; bailing out";

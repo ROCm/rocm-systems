@@ -87,11 +87,15 @@ struct triple_buffer_consumer_data_t
 };
 
 /// Parameters passed into the producer worker thread.
+///
+/// NOTE: start_pkt_signal is NOT carried here — it lives on
+/// triple_buffer_shared_data_t::start_pkt_signal so the destructor force-wake
+/// path and the producer wait observe the exact same handle. Producer reads it
+/// via parameters.shared->start_pkt_signal.
 struct triple_buffer_producer_data_t
 {
     copy_data_t*                                 copy_data_fn{};
     std::shared_ptr<std::atomic<int>>            producer_running{};
-    std::shared_ptr<hsa_signal_t>                start_pkt_signal{};
     std::unique_ptr<hsa::TraceControlAQLPacket>  control_packet{};
     std::shared_ptr<triple_buffer_shared_data_t> shared{};
     std::unique_ptr<hsa::SQTTBufferingPackets>   buffer_packet{};
