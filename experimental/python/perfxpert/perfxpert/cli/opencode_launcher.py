@@ -170,10 +170,14 @@ def _repo_local_patched_opencode_paths() -> "list[Path]":
     package_root = Path(__file__).resolve().parents[2]
     submodule = package_root / "opencode" / "packages" / "opencode" / "dist"
     binary_name = _opencode_binary_name()
+    if _is_windows_platform():
+        return [
+            submodule / "opencode-windows-x64" / "bin" / "opencode.exe",
+            submodule / "opencode-windows-x64-baseline" / "bin" / "opencode.exe",
+            submodule / "opencode-windows-arm64" / "bin" / "opencode.exe",
+            submodule / "opencode" / "bin" / binary_name,
+        ]
     return [
-        submodule / "opencode-windows-x64" / "bin" / "opencode.exe",
-        submodule / "opencode-windows-x64-baseline" / "bin" / "opencode.exe",
-        submodule / "opencode-windows-arm64" / "bin" / "opencode.exe",
         submodule / "opencode-linux-x64" / "bin" / "opencode",
         submodule / "opencode-linux-arm64" / "bin" / "opencode",
         submodule / "opencode-darwin-x64" / "bin" / "opencode",

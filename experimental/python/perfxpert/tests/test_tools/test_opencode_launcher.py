@@ -1,12 +1,18 @@
 """Unit tests for perfxpert.cli.opencode_launcher."""
 
 import os
+from importlib.metadata import version
 from pathlib import Path
 from unittest import mock
 
 import pytest
 
 from perfxpert.cli import opencode_launcher
+
+
+_ORIGINAL_REPO_LOCAL_PATCHED_OPENCODE_PATHS = (
+    opencode_launcher._repo_local_patched_opencode_paths
+)
 
 
 @pytest.fixture(autouse=True)
@@ -23,6 +29,7 @@ def test_version_flag_short_circuit(capsys):
     assert rc == 0
     captured = capsys.readouterr()
     assert "AMD" in captured.out
+    assert version("perfxpert") in captured.out
 
 
 def test_v_short_flag(capsys):
@@ -71,6 +78,21 @@ def test_resolve_binary_prefers_repo_local_patched_build(tmp_path: Path, monkeyp
     monkeypatch.setattr(opencode_launcher.resources, "as_file", _fake_as_file)
 
     assert opencode_launcher.resolve_opencode_binary() == local_bin
+
+
+def test_repo_local_patched_paths_are_platform_scoped(monkeypatch):
+    monkeypatch.setattr(opencode_launcher, "_is_windows_platform", lambda: False)
+    posix_paths = _ORIGINAL_REPO_LOCAL_PATCHED_OPENCODE_PATHS()
+    posix_text = [p.as_posix() for p in posix_paths]
+    assert all("windows" not in p for p in posix_text)
+    assert any("linux" in p for p in posix_text)
+    assert any("darwin" in p for p in posix_text)
+
+    monkeypatch.setattr(opencode_launcher, "_is_windows_platform", lambda: True)
+    windows_paths = _ORIGINAL_REPO_LOCAL_PATCHED_OPENCODE_PATHS()
+    windows_text = [p.as_posix() for p in windows_paths]
+    assert all("linux" not in p and "darwin" not in p for p in windows_text)
+    assert all(p.name == "opencode.exe" for p in windows_paths)
 
 
 def test_resolve_user_binary_raises_when_override_missing(tmp_path: Path, monkeypatch):

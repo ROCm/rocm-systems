@@ -21,11 +21,13 @@ Trust-gate behavior (plan Task 10):
      `~/.codex/config.toml` with an explicit stderr warning.
   4. trusted → project-scope `<cwd>/.codex/config.toml`.
 
-MCP registration prefers `codex mcp add` shell-out; falls back to
-direct TOML edit via **lazy-imported `tomlkit`** (historically
-cycle-2 I7, superseded by commit 3547736829 which made tomlkit a
-required runtime dep — imported inside the fallback branch ONLY;
-the primary code path must never pay the import cost).
+MCP registration writes trusted project scope directly to
+`<cwd>/.codex/config.toml`; user scope prefers `codex mcp add`
+shell-out and falls back to direct TOML edit via **lazy-imported
+`tomlkit`** (historically cycle-2 I7, superseded by commit 3547736829
+which made tomlkit a required runtime dep — imported inside the
+fallback branch ONLY; the primary user-scope shell-out path must never
+pay the import cost).
 
 Prompt staging writes a **perfxpert-managed compatibility file**
 `<cwd>/AGENTS.override.md`. If the repo already has an `AGENTS.md`,

@@ -9,7 +9,7 @@ Covers:
     - non-interactive + untrusted → TrustRequired.
     - PERFXPERT_AUTO_TRUST=1 → auto-marks trusted.
     - declined prompt → falls back to user scope with warning.
-* Lazy import of `tomlkit` — the primary `codex mcp add` path must
+* Lazy import of `tomlkit` — the primary user-scope `codex mcp add` path must
   NEVER import tomlkit at module-load time (supersedes cycle-2 I7;
   commit 3547736829 made tomlkit a required dep but the import is
   still deferred to keep the primary path import-cost-free).
@@ -532,19 +532,17 @@ def test_install_reprompts_consent_after_scope_falls_back_to_user(
 # ---------------------------------------------------------------------------
 
 
-def test_install_uses_tomlkit_lazy_import_in_fallback(
+def test_user_scope_install_uses_tomlkit_lazy_import_on_primary_mcp_add_path(
     project_cwd: Path,
     monkeypatch: pytest.MonkeyPatch,
     isolated_home: Path,
 ) -> None:
-    """The primary `codex mcp add` path must NOT import tomlkit.
+    """The primary user-scope `codex mcp add` path must NOT import tomlkit.
 
-    We pre-trust the project to skip the trust-gate write (which uses
-    tomlkit), then pin tomlkit to a sentinel that raises if imported
-    during install. The test passes iff `codex mcp add` succeeds
+    We pin tomlkit to a sentinel that raises if imported during install.
+    The test passes iff the user-scope `codex mcp add` path succeeds
     without any tomlkit import.
     """
-    _mark_trusted(isolated_home, project_cwd)
     monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/codex")
     monkeypatch.setattr(
         "perfxpert.cli._backend.codex.subprocess.run",
@@ -567,7 +565,7 @@ def test_install_uses_tomlkit_lazy_import_in_fallback(
     # `import tomlkit` + accesses an attr, we blow up loudly.
     _sys.modules["tomlkit"] = _Sentinel()  # type: ignore[assignment]
     try:
-        CodexAdapter().install(project_cwd, scope="project")
+        CodexAdapter().install(project_cwd, scope="user")
     finally:
         # Restore original tomlkit binding (or clear).
         if original is None:

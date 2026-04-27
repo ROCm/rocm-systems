@@ -10,6 +10,7 @@ A simple C++ testing framework for multi-process RCCL tests using MPI (Message P
 - [Quick Start](#quick-start)
 - [Core Concepts](#core-concepts)
 - [Per-Rank Logging](#per-rank-logging)
+- [Scoped log capture for assertions (MPIHelpers)](#scoped-log-capture-for-assertions-mpihelpers)
 - [API Reference](#api-reference)
 - [Examples](#examples)
 - [Best Practices](#best-practices)
@@ -38,6 +39,7 @@ A simple C++ testing framework for multi-process RCCL tests using MPI (Message P
 
 **Locations:**
 - `test/common/MPITestBase.hpp` - Main test infrastructure
+- `test/common/MPIHelpers.hpp` - Per-rank logging, scoped `NCCL_DEBUG_FILE`, assertion log reads
 - `test/common/ResourceGuards.hpp` - RAII guards
 - `test/common/DeviceBufferHelpers.hpp` - Buffer utilities
 
@@ -592,6 +594,81 @@ TEST_TRACE("Trace message");     // NCCL_DEBUG=TRACE
 mi300x-3:[0] TEST INFO Starting test with buffer size 1024
 mi300x-4:[1] TEST INFO Starting test with buffer size 1024
 ```
+
+---
+
+## Scoped log capture for assertions (MPIHelpers)
+
+Use this when a test must **assert that NCCL (or test output) wrote a specific line**, without relying on a shared global log. It complements [Per-Rank Logging](#per-rank-logging): per-rank files capture stdout/stderr; `TestLogAssertionContext` can additionally steer NCCL into a dedicated file and/or read rank logs after the action under test.
+
+**Header:** `test/common/MPIHelpers.hpp`
+
+### How to choose a logging mode
+
+| Mode | What it captures | Typical environment | When to set up in the test | How to read |
+|------|------------------|---------------------|----------------------------|-------------|
+| **Per-rank log files** | Each rank’s stdout/stderr appended to `rccl_test_rank_<r>.log` in the process working directory (rank 0 also tees to the console). | `RCCL_MPI_LOG_ALL_RANKS=1` | Handled at MPI startup (`setupRankLogging` in `main_mpi`); no per-test object required unless you also use scoped reads below. | `MPIHelpers::readRankLogFile(rank)` (flushes first), or `TestLogAssertionContext::readPerRankStderrLog()` when using the assertion context. |
+| **NCCL debug file (scoped)** | NCCL library debug lines written to a file pointed to by `NCCL_DEBUG_FILE` for the lifetime of the context. | `NCCL_DEBUG=INFO` (or higher) so the line exists | Construct `MPIHelpers::TestLogAssertionContext` with `makeNcclDebugFileAssertionOptions(mpi_rank)` **before** `ncclCommInit*` / `ncclCommInitRankConfig*`. Destructor restores the previous `NCCL_DEBUG_FILE`. | `readNcclDebugLog()` after comm init (and any sync needed for logs to flush). |
+| **Per-rank log (assertion slice)** | Same files as per-rank mode; optional **isolation** so only bytes appended after the context is constructed are visible (reduces bleed from earlier tests in the same process). | `RCCL_MPI_LOG_ALL_RANKS=1` if you expect non‑rank‑0 stderr in files | `makePerRankStderrAssertionOptions(mpi_rank)` before the code that should emit the line. | `readPerRankStderrLog()` after the action. |
+| **Combined (NCCL file + per-rank log)** | Either the scoped NCCL debug file **or** the per-rank log may contain the substring (useful when CI enables per-rank capture and NCCL writes to its file). | `NCCL_DEBUG=INFO` **and** usually `RCCL_MPI_LOG_ALL_RANKS=1` for the stderr/tee path | `makeCombinedAssertionLogOptions(mpi_rank)` **before** communicator creation. | After comm init: check `readNcclDebugLog()` and/or `readPerRankStderrLog()` for the expected substring (either may match). |
+
+### Factory helpers
+
+```cpp
+// NCCL_DEBUG_FILE only (auto path under /tmp if nccl_debug_file_path left empty)
+MPIHelpers::TestLogAssertionOptions MPIHelpers::makeNcclDebugFileAssertionOptions(int mpi_rank);
+
+// Per-rank rccl_test_rank_<rank>.log only (isolate_new_output defaults to true)
+MPIHelpers::TestLogAssertionOptions MPIHelpers::makePerRankStderrAssertionOptions(int mpi_rank);
+
+// Both mechanisms enabled (typical for “assert log line exists somewhere” tests)
+MPIHelpers::TestLogAssertionOptions MPIHelpers::makeCombinedAssertionLogOptions(int mpi_rank);
+```
+
+### `TestLogAssertionOptions` (selected fields)
+
+| Field | Default | Meaning |
+|-------|---------|---------|
+| `capture_nccl_debug_file` | `false` | When true, set `NCCL_DEBUG_FILE` for this scope (path from `nccl_debug_file_path`, or auto-generated under `/tmp` if empty). |
+| `read_per_rank_stderr_log` | `false` | When true, `readPerRankStderrLog()` reads `rccl_test_rank_<mpi_rank>.log` after flush. |
+| `isolate_new_output` | `true` | Record file size at construction time; reads return only **new** bytes (avoids matching text from earlier tests). |
+| `nccl_debug_file_path` | empty | Explicit path for NCCL output; if empty and capture is on, uses a temp file (see `unlink_*` flags in the header for cleanup). |
+
+### Example: assert an NCCL log line (combined mode)
+
+Pattern from `test/CommMPITests.cpp` (`TrafficClassMPITest.ConfiguredTrafficClass`): create the context **before** communicator init, then search either sink for the needle.
+
+```cpp
+#include "MPIHelpers.hpp"
+
+TEST_F(TrafficClassMPITest, ConfiguredTrafficClass)
+{
+    ASSERT_MPI_TRUE(validateTestPrerequisites(kMinProcessesForMPI));
+    configured_traffic_class_ = 46;
+
+    MPIHelpers::TestLogAssertionContext log_ctx(
+        MPIHelpers::makeCombinedAssertionLogOptions(getTestMpiRank()));
+
+    ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+
+    static constexpr const char* kNeedle = "Traffic class set to 46";
+    const std::string from_nccl     = log_ctx.readNcclDebugLog();
+    const std::string from_rank_log = log_ctx.readPerRankStderrLog();
+    const bool found = (from_nccl.find(kNeedle) != std::string::npos)
+                    || (from_rank_log.find(kNeedle) != std::string::npos);
+    ASSERT_MPI_TRUE(found);
+}
+```
+
+### Other helpers
+
+- `MPIHelpers::isPerRankLoggingEnabled()` — true when `RCCL_MPI_LOG_ALL_RANKS=1`.
+- `MPIHelpers::getRankLogFilePath(rank)` — path to `rccl_test_rank_<rank>.log`.
+- `MPIHelpers::readTextFile(path)` — read a file for ad hoc checks.
+
+### Test runner note
+
+The Python test runner streams gtest stdout live for long MPI tests so `TEST_INFO` and progress lines appear before the run finishes or times out. Per-rank files still land in each rank’s working directory on the node where that process runs.
 
 ---
 
@@ -2654,11 +2731,13 @@ int main(int argc, char** argv) {
 **Core Test Infrastructure:**
 - **MPITestCore.hpp** - Framework-agnostic base class
 - **MPITestBase.hpp** - Google Test adapter (full API documentation)
+- **MPIHelpers.hpp** / **MPIHelpers.cpp** - Per-rank logging, `TestLogAssertionContext`, log file helpers
 - **MPIStandaloneTest.hpp** - Standalone test adapter
 - **MPIEnvironment.hpp** - MPI environment setup
 - **MPIEnvironment.cpp** - Multi-node GPU assignment implementation
 
 **Test Examples:**
+- **CommMPITests.cpp** - `TestLogAssertionContext` / combined NCCL + per-rank log assertion
 - **transport/P2pMPITests.cpp** - P2P transport tests (demonstrate single-node validation)
 - **transport/ShmMPITests.cpp** - Shared memory transport tests (demonstrate single-node validation)
 - **transport/NetMPITests.cpp** - Network transport tests (demonstrate multi-node capable tests)
