@@ -572,8 +572,7 @@ TEST(thread_trace, destructor_force_wake)
     }
     if(agent == nullptr) GTEST_SKIP() << "No GPU agent available";
 
-    auto running_flag =
-        std::make_shared<std::atomic<int>>(thread_trace::WORKER_FLAG_RUNNING);
+    auto running_flag = std::make_shared<std::atomic<int>>(thread_trace::WORKER_FLAG_RUNNING);
 
     auto params              = thread_trace::thread_trace_parameter_pack{};
     params.triple_buffering  = true;
@@ -595,16 +594,14 @@ TEST(thread_trace, destructor_force_wake)
     // should NOT run between the force-wake and the producer's exit.
     std::atomic<int> query_calls_total{0};
     std::atomic<int> query_calls_after_destructor{0};
-    auto             query_fn =
-        [&]() -> std::optional<hsa::sqtt_buffer_status_t> {
+    auto             query_fn = [&]() -> std::optional<hsa::sqtt_buffer_status_t> {
         query_calls_total.fetch_add(1);
         if(running_flag->load() == thread_trace::WORKER_FLAG_DESTRUCTOR)
             query_calls_after_destructor.fetch_add(1);
         return std::nullopt;
     };
 
-    auto buffer_packet =
-        thread_trace::make_mock_packets(control_packet->GetHandle(), query_fn);
+    auto buffer_packet = thread_trace::make_mock_packets(control_packet->GetHandle(), query_fn);
 
     // Mock submit that RESETS the completion signal to 1 so the producer's
     // signal_wait actually blocks (production behavior). The destructor then
@@ -615,13 +612,12 @@ TEST(thread_trace, destructor_force_wake)
     // is parked BEFORE query_buffer_status_fn is invoked.
     static std::atomic<int> submit_count{0};
     submit_count.store(0);
-    auto mock_submit_blocking =
-        [](const thread_trace::att_queue_t&,
-           hsa_ext_amd_aql_pm4_packet_t*,
-           hsa_signal_t* completion) {
-            if(completion) thread_trace::signal_reset(*completion);
-            submit_count.fetch_add(1);
-        };
+    auto mock_submit_blocking = [](const thread_trace::att_queue_t&,
+                                   hsa_ext_amd_aql_pm4_packet_t*,
+                                   hsa_signal_t* completion) {
+        if(completion) thread_trace::signal_reset(*completion);
+        submit_count.fetch_add(1);
+    };
 
     auto mock_queue       = thread_trace::make_mock_queue(*agent);
     mock_queue->submit_fn = mock_submit_blocking;
@@ -670,8 +666,8 @@ TEST(thread_trace, destructor_force_wake)
             auto* core_cleanup = hsa::get_core_table();
             if(core_cleanup)
             {
-                core_cleanup->hsa_signal_store_screlease_fn(
-                    *worker_data->producer_submit_signal, 0);
+                core_cleanup->hsa_signal_store_screlease_fn(*worker_data->producer_submit_signal,
+                                                            0);
                 core_cleanup->hsa_signal_store_screlease_fn(*start_signal, 0);
             }
             if(producer.joinable()) producer.join();
