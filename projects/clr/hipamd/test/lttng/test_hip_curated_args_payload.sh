@@ -80,7 +80,15 @@ lttng enable-event --userspace --channel=ch1 \
     'rocm_hip:hipMalloc_args,rocm_hip:hipMemcpyAsync_args,rocm_hip:hipDeviceSynchronize_args' >/dev/null
 lttng start "$SESSION_NAME" >/dev/null
 
-"$WORK/curated_test"
+# The binary may segfault mid-flight on systems where the rocclr blit-
+# kernel JIT can't resolve __amd_streamOps* externs (a build-environment
+# issue independent of LTTng). Use a wrapper to capture the exit code
+# without aborting the script, so we can still inspect the trace data
+# for whatever events DID fire before the crash and let the assertions
+# pinpoint exactly which curated event is missing.
+APP_RC=0
+"$WORK/curated_test" || APP_RC=$?
+echo "  curated_test exit=$APP_RC"
 
 lttng stop "$SESSION_NAME" >/dev/null
 lttng destroy "$SESSION_NAME" >/dev/null
