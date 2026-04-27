@@ -349,6 +349,8 @@ rocprofiler_add_integration_validate_test(
     BUNDLE_TESTS
     ARGS validate.py::test_summary_truncate_kernels
          validate.py::test_summary_mangled_kernels
+         --json-input
+         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/out_results.json
          --csv-input-summary
          ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/summary/out_kernels_summary.csv
          --csv-input-truncated

@@ -184,6 +184,91 @@ def _kernel_names(df):
     return [str(name) for name in df["Name"].tolist()]
 
 
+def _extract_kernel_names_from_json(json_data, name_type="full"):
+    """
+    Extract kernel names from JSON data (source of truth).
+
+    Extracts names only for kernels that were actually dispatched.
+
+    Args:
+        json_data: JSON data from rocprofiler output
+        name_type: Type of name to extract - "full", "truncated", or "mangled"
+
+    Returns:
+        Set of kernel names from dispatched kernels in JSON
+    """
+    tool_data = json_data.get("rocprofiler-sdk-tool")
+    assert tool_data, "Missing rocprofiler-sdk-tool in JSON"
+
+    kernel_symbols = tool_data.get("kernel_symbols", [])
+    assert kernel_symbols, "No kernel_symbols found in JSON"
+    kernel_dispatches = tool_data.get("buffer_records", {}).get("kernel_dispatch", [])
+    assert kernel_dispatches, "No kernel_dispatch records found in JSON"
+
+    # Map to JSON fields based on what summary.py actually uses:
+    # - "full": uses display_name which equals formatted_kernel_name
+    # - "truncated": uses truncated_kernel_name
+    # - "mangled": uses kernel_name (raw mangled name)
+    name_field_map = {
+        "mangled": "kernel_name",
+        "full": "formatted_kernel_name",
+        "truncated": "truncated_kernel_name",
+    }
+
+    assert name_type in name_field_map, f"Unknown kernel name type: {name_type}"
+    field = name_field_map[name_type]
+
+    # Build lookup table of kernel symbols by ID
+    symbols_by_id = {
+        symbol["kernel_id"]: symbol
+        for symbol in kernel_symbols
+        if symbol.get("kernel_id", 0) > 0
+    }
+
+    # Extract names only from dispatched kernels
+    names = set()
+    for dispatch in kernel_dispatches:
+        kernel_id = dispatch["dispatch_info"]["kernel_id"]
+
+        assert kernel_id in symbols_by_id, (
+            f"kernel_dispatch references kernel_id={kernel_id}, "
+            "but no matching kernel symbol was found"
+        )
+
+        name = symbols_by_id[kernel_id].get(field)
+        assert name, f"kernel_id={kernel_id} does not contain expected field '{field}'"
+
+        names.add(str(name))
+
+    return names
+
+
+def _verify_names_match_json(csv_df, json_data, name_type):
+    """
+    Verify CSV kernel names match JSON source exactly.
+
+    Args:
+        csv_df: DataFrame from CSV summary
+        json_data: Original JSON data (source of truth)
+        name_type: "full", "truncated", or "mangled"
+    """
+    json_kernel_names = _extract_kernel_names_from_json(json_data, name_type)
+    csv_kernel_names = set(_kernel_names(csv_df))
+
+    assert json_kernel_names, "No kernel names found in JSON data"
+    assert csv_kernel_names, "No kernel names found in CSV data"
+
+    # Verify exact match: CSV and JSON should have the same dispatched kernel names
+    missing_in_csv = json_kernel_names - csv_kernel_names
+    unexpected_in_csv = csv_kernel_names - json_kernel_names
+
+    assert not missing_in_csv and not unexpected_in_csv, (
+        f"CSV kernel names do not match JSON ({name_type} format).\n"
+        f"Missing in CSV: {sorted(list(missing_in_csv))[:5]}\n"
+        f"Unexpected in CSV: {sorted(list(unexpected_in_csv))[:5]}"
+    )
+
+
 def _looks_demangled(name: str) -> bool:
     """Check if kernel name appears to be demangled (has C++ syntax)."""
     return "(" in name or "<" in name
@@ -264,32 +349,42 @@ def _assert_statistics_match(df1, df2, name1, name2):
     ), f"Total duration mismatch: {name1}={total_duration_1}, {name2}={total_duration_2}"
 
 
-def test_summary_truncate_kernels(csv_kernels_truncated, csv_kernels_full):
+def test_summary_truncate_kernels(csv_kernels_truncated, csv_kernels_full, json_data):
     """
     Test that --truncate-kernels flag only affects kernel names, not statistics.
 
     This test verifies:
     1. Full kernel names and truncated kernel names are valid
     2. Statistics (calls, duration) are preserved between truncated and full summaries
+    3. Names match the JSON source of truth exactly
     """
 
     _assert_demangled_names(csv_kernels_full)
     _assert_truncated_names(csv_kernels_truncated)
     _assert_statistics_match(csv_kernels_truncated, csv_kernels_full, "truncated", "full")
 
+    # Verify against JSON source of truth
+    _verify_names_match_json(csv_kernels_full, json_data, "full")
+    _verify_names_match_json(csv_kernels_truncated, json_data, "truncated")
 
-def test_summary_mangled_kernels(csv_kernels_mangled, csv_kernels_full):
+
+def test_summary_mangled_kernels(csv_kernels_mangled, csv_kernels_full, json_data):
     """
     Test that --mangled-kernels flag only affects kernel names, not statistics.
 
     This test verifies:
     1. Full kernel names and mangled kernel names are valid
     2. Statistics (calls, duration) are preserved between mangled and demangled summaries
+    3. Names match the JSON source of truth exactly
     """
 
     _assert_demangled_names(csv_kernels_full)
     _assert_mangled_names(csv_kernels_mangled)
     _assert_statistics_match(csv_kernels_mangled, csv_kernels_full, "mangled", "full")
+
+    # Verify against JSON source of truth
+    _verify_names_match_json(csv_kernels_full, json_data, "full")
+    _verify_names_match_json(csv_kernels_mangled, json_data, "mangled")
 
 
 if __name__ == "__main__":
