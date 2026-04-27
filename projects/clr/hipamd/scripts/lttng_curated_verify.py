@@ -18,8 +18,12 @@ Usage:
     python3 lttng_curated_verify.py \\
         --yaml   path/to/curated_apis.yaml \\
         --header path/to/hip_runtime_api.h \\
+        [--header path/to/another_header.h ...] \\
         [--out-sidecar path/to/sigs.json] \\
         [--extra-arg=-I/some/include] [--extra-arg=...]
+
+`--header` may be repeated; declarations from all headers are unioned
+before checking YAML APIs (e.g. HSA needs hsa.h + hsa_ext_amd.h).
 """
 import argparse, json, os, sys
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -108,38 +112,44 @@ def _is_compatible(c_type, dsl_type, canonical_type=None, is_enum=False):
     return False
 
 
-def parse_header(header_path, extra_args):
-    """Use libclang to parse a header and return
+def parse_headers(header_paths, extra_args):
+    """Parse one or more headers; return a unioned
     {api_name: [(name, c_type, canonical_type, is_enum), ...]}.
 
     We capture the typedef spelling (c_type), the canonical spelling
     (canonical_type, e.g. `ihipStream_t *` for `hipStream_t`), and an
     is_enum flag so the type-compat checker can recognize typedef'd
     enums whose spelling lacks the `enum` keyword.
+
+    On duplicate api_name across headers (shouldn't happen for HSA, but
+    defend against it), the LATER header wins and a warning is emitted.
     """
     try:
         from clang import cindex
     except ImportError:
         sys.exit("ERROR: libclang Python bindings not installed. Try: pip install libclang")
-    args = ['-x', 'c++', '-std=c++17']
-    args += extra_args
+    args = ['-x', 'c++', '-std=c++17'] + list(extra_args)
     idx = cindex.Index.create()
-    tu = idx.parse(header_path, args=args)
-    out = {}
-    for n in tu.cursor.walk_preorder():
-        if n.kind != cindex.CursorKind.FUNCTION_DECL:
-            continue
-        params = []
-        for arg in n.get_arguments():
-            ct = arg.type
-            canon = ct.get_canonical()
-            is_enum = canon.kind == cindex.TypeKind.ENUM
-            params.append((arg.spelling, ct.spelling, canon.spelling, is_enum))
-        out[n.spelling] = params
-    return out
+    union = {}
+    for hp in header_paths:
+        tu = idx.parse(hp, args=args)
+        for n in tu.cursor.walk_preorder():
+            if n.kind != cindex.CursorKind.FUNCTION_DECL:
+                continue
+            params = []
+            for arg in n.get_arguments():
+                ct = arg.type
+                canon = ct.get_canonical()
+                is_enum = canon.kind == cindex.TypeKind.ENUM
+                params.append((arg.spelling, ct.spelling, canon.spelling, is_enum))
+            if n.spelling in union and union[n.spelling] != params:
+                print(f"WARN: {n.spelling}: declaration in {hp} differs from "
+                      f"earlier header; using {hp}", file=sys.stderr)
+            union[n.spelling] = params
+    return union
 
 
-def verify(yaml_path, header_path, extra_args, out_sidecar=None):
+def verify(yaml_path, header_paths, extra_args, out_sidecar=None):
     # Parser-level errors (INOUT, over-budget, unknown type/dir, etc.)
     # are spec §8.3 hard errors. Surface them with a clean ERROR: line
     # rather than letting the traceback escape, since this script is a
@@ -149,13 +159,13 @@ def verify(yaml_path, header_path, extra_args, out_sidecar=None):
     except (ParseError, BudgetError) as e:
         print(f"ERROR: {e}", file=sys.stderr)
         return 1
-    header_decls = parse_header(header_path, extra_args)
+    header_decls = parse_headers(header_paths, extra_args)
     errors = []
     warnings = []
     for api in apis:
         name = api['api']
         if name not in header_decls:
-            errors.append(f"{name}: not declared in {header_path}")
+            errors.append(f"{name}: not declared in any of {header_paths}")
             continue
         hdr_params = header_decls[name]
         yaml_args = api['args']
@@ -226,14 +236,19 @@ def verify(yaml_path, header_path, extra_args, out_sidecar=None):
             json.dump(sidecar, f, indent=2, sort_keys=True)
         print(f"wrote signature sidecar: {out_sidecar} "
               f"({len(sidecar)} APIs)", file=sys.stderr)
-    print(f"OK: {len(apis)} curated APIs verified against {header_path}")
+    print(f"OK: {len(apis)} curated APIs verified against "
+          f"{len(header_paths)} header(s)")
     return 0
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--yaml',   required=True)
-    ap.add_argument('--header', required=True)
+    ap.add_argument('--header', required=True, action='append',
+                    help='Header file to verify against. May be specified '
+                         'multiple times; declarations from all headers are '
+                         'unioned before checking YAML APIs (e.g. HSA needs '
+                         'both hsa.h and hsa_ext_amd.h).')
     ap.add_argument('--extra-arg', action='append', default=[])
     ap.add_argument('--out-sidecar', default=None,
                     help='Optional path to dump verified API signatures as JSON '

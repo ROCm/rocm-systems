@@ -5,6 +5,8 @@ sys.path.insert(0, HERE)
 
 VERIFY = os.path.join(HERE, 'lttng_curated_verify.py')
 HEADER = os.path.join(HERE, 'testdata', 'fake_hip_header.h')
+HSA_BASE = os.path.join(HERE, 'testdata', 'fake_hsa_base.h')
+HSA_EXT  = os.path.join(HERE, 'testdata', 'fake_hsa_ext.h')
 
 def _run_verify(yaml_text, expect_pass, extra_cmd=None):
     """Write yaml_text to a temp file, invoke verifier, return (rc, output)."""
@@ -156,6 +158,136 @@ def test_sidecar_emission():
             f"expected void** for ptr arg, got {params[0]['c_type']!r}"
     finally:
         os.unlink(sidecar_path)
+
+def _run_verify_multi(yaml_text, headers, expect_pass):
+    """Like _run_verify but accepts multiple --header arguments."""
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
+        f.write(yaml_text); yaml_path = f.name
+    try:
+        cmd = ['python3', VERIFY, '--yaml', yaml_path]
+        for h in headers:
+            cmd += ['--header', h]
+        r = subprocess.run(cmd, capture_output=True, text=True)
+        if expect_pass:
+            assert r.returncode == 0, f"expected pass, got rc={r.returncode}\n{r.stderr}"
+        else:
+            assert r.returncode != 0, f"expected fail\n{r.stdout}"
+        return r.returncode, r.stdout + r.stderr
+    finally:
+        os.unlink(yaml_path)
+
+def test_multi_header_base_only_passes():
+    """An API declared in hsa.h verifies when both --header values are given."""
+    yaml_text = """
+- api: hsa_signal_create
+  category: hsa_signals
+  args:
+    - {name: initial_value, type: int64,  dir: IN}
+    - {name: num_consumers, type: uint32, dir: IN}
+    - {name: consumers,     type: ptr,    dir: IN}
+    - {name: signal,        type: handle, dir: OUT}
+"""
+    _run_verify_multi(yaml_text, [HSA_BASE, HSA_EXT], expect_pass=True)
+
+def test_multi_header_extension_only_passes():
+    """An API declared only in hsa_ext_amd.h verifies via the union."""
+    yaml_text = """
+- api: hsa_amd_signal_create
+  category: hsa_signals
+  args:
+    - {name: initial_value, type: int64,  dir: IN}
+    - {name: num_consumers, type: uint32, dir: IN}
+    - {name: consumers,     type: ptr,    dir: IN}
+    - {name: attributes,    type: uint64, dir: IN}
+    - {name: signal,        type: handle, dir: OUT}
+"""
+    _run_verify_multi(yaml_text, [HSA_BASE, HSA_EXT], expect_pass=True)
+
+def test_multi_header_mixed_passes():
+    """Both APIs in one YAML, spanning both headers — passes."""
+    yaml_text = """
+- api: hsa_signal_create
+  category: hsa_signals
+  args:
+    - {name: initial_value, type: int64,  dir: IN}
+    - {name: num_consumers, type: uint32, dir: IN}
+    - {name: consumers,     type: ptr,    dir: IN}
+    - {name: signal,        type: handle, dir: OUT}
+- api: hsa_amd_signal_create
+  category: hsa_signals
+  args:
+    - {name: initial_value, type: int64,  dir: IN}
+    - {name: num_consumers, type: uint32, dir: IN}
+    - {name: consumers,     type: ptr,    dir: IN}
+    - {name: attributes,    type: uint64, dir: IN}
+    - {name: signal,        type: handle, dir: OUT}
+"""
+    _run_verify_multi(yaml_text, [HSA_BASE, HSA_EXT], expect_pass=True)
+
+def test_multi_header_undeclared_api_fails():
+    """API not declared in any of the supplied headers — hard error."""
+    yaml_text = """
+- api: hsa_amd_nonexistent
+  category: hsa_signals
+  args: []
+"""
+    _, output = _run_verify_multi(yaml_text, [HSA_BASE, HSA_EXT], expect_pass=False)
+    assert 'hsa_amd_nonexistent' in output
+
+def test_multi_header_sidecar_works():
+    """Sidecar emission must work with multi-header verifier (regression
+    guard for C13: Task 4.5 multi-header rewrite must not drop the
+    --out-sidecar parameter introduced by Task 4)."""
+    import json
+    yaml_text = """
+- api: hsa_signal_create
+  category: hsa_signals
+  args:
+    - {name: initial_value, type: int64,  dir: IN}
+    - {name: num_consumers, type: uint32, dir: IN}
+    - {name: consumers,     type: ptr,    dir: IN}
+    - {name: signal,        type: handle, dir: OUT}
+- api: hsa_amd_signal_create
+  category: hsa_signals
+  args:
+    - {name: initial_value, type: int64,  dir: IN}
+    - {name: num_consumers, type: uint32, dir: IN}
+    - {name: consumers,     type: ptr,    dir: IN}
+    - {name: attributes,    type: uint64, dir: IN}
+    - {name: signal,        type: handle, dir: OUT}
+"""
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
+        f.write(yaml_text)
+        yaml_path = f.name
+    sidecar_path = yaml_path + '.sidecar.json'
+    try:
+        cmd = ['python3', VERIFY,
+               '--yaml',   yaml_path,
+               '--header', HSA_BASE,
+               '--header', HSA_EXT,
+               '--out-sidecar', sidecar_path]
+        r = subprocess.run(cmd, capture_output=True, text=True)
+        assert r.returncode == 0, f"verifier failed:\n{r.stderr}"
+        assert os.path.exists(sidecar_path), "sidecar JSON file not created"
+        with open(sidecar_path) as f:
+            data = json.load(f)
+        # Both APIs present.
+        assert 'hsa_signal_create' in data
+        assert 'hsa_amd_signal_create' in data
+        # Each API has non-empty list of {name, c_type} dicts.
+        for api in ('hsa_signal_create', 'hsa_amd_signal_create'):
+            assert len(data[api]) > 0
+            for arg in data[api]:
+                assert 'name' in arg
+                assert 'c_type' in arg
+        # Spot-check one arg.
+        signal_args = data['hsa_signal_create']
+        names = [a['name'] for a in signal_args]
+        assert 'signal' in names
+    finally:
+        os.unlink(yaml_path)
+        if os.path.exists(sidecar_path):
+            os.unlink(sidecar_path)
 
 if __name__ == '__main__':
     import inspect
