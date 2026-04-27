@@ -108,7 +108,7 @@ TEST_P(test_sdk_callbacks_multiplexing_t, DISABLED_ProvidedCountersNotAvailable_
 
     constexpr rocprofiler_dispatch_counting_service_data_t dispatch_data = {};
     rocprofiler_counter_config_id_t                        config{m_invalid_config_id};
-    m_sdk_callbacks->dispatch_callback(dispatch_data, &config, &m_tool_data);
+    m_sdk_callbacks->dispatch_callback(dispatch_data, &config, m_tool_data.get());
 
     EXPECT_EQ(config.handle, m_invalid_config_id);
 }
@@ -191,7 +191,7 @@ TEST_F(test_sdk_callbacks_t, ProvidedCallbackTracingRecordInMemory_StoresCodeObj
     record.phase                                 = ROCPROFILER_CALLBACK_PHASE_LOAD;
     record.payload                               = &payload;
 
-    m_sdk_callbacks->code_object_tracing_callback(record, &m_tool_data);
+    m_sdk_callbacks->code_object_tracing_callback(record, m_tool_data.get());
 
     m_tool_data->pc_sampling_collector;
 }
@@ -221,7 +221,7 @@ uint64_t test_sdk_callbacks_t::dispatch_kernel_with_dispatch_info(const kernel_d
     dispatch_data.dispatch_info.group_segment_size             = dispatch_info.LDS_memory_size;
     dispatch_data.dispatch_info.agent_id.handle                = 0xff;
     rocprofiler_counter_config_id_t config{m_invalid_config_id};
-    m_sdk_callbacks->dispatch_callback(dispatch_data, &config, &m_tool_data);
+    m_sdk_callbacks->dispatch_callback(dispatch_data, &config, m_tool_data.get());
     return config.handle;
 }
 
@@ -250,7 +250,7 @@ void test_sdk_callbacks_t::invoke_record_callback(uint64_t           counter_id,
 
     m_tool_data->counter_id_name_map[counter_id] = counter_name;
 
-    m_sdk_callbacks->record_callback(dispatch_data, record_data.data(), record_data.size(), &m_tool_data);
+    m_sdk_callbacks->record_callback(dispatch_data, record_data.data(), record_data.size(), m_tool_data.get());
 
     const auto query_record_info = m_sdk_wrapper->get_query_counter_record_info();
     EXPECT_EQ(m_tool_data->counter_records.size(), record_data.size());
@@ -273,7 +273,7 @@ void test_sdk_callbacks_t::invoke_tool_tracing_callback(uint64_t kernel_id, cons
 
     payload.kernel_id   = kernel_id;
     payload.kernel_name = kernel_name.c_str();
-    m_sdk_callbacks->tool_tracing_callback(record, &m_tool_data);
+    m_sdk_callbacks->tool_tracing_callback(record, m_tool_data.get());
 }
 
 std::string test_sdk_callbacks_t::convert_counters_per_pmc_to_str(

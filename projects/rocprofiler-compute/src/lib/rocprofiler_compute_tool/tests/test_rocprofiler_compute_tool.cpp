@@ -228,7 +228,7 @@ void test_rocprofiler_compute_tool_t::TearDown()
 
 tool_data_t* test_rocprofiler_compute_tool_t::get_tool_data(const rocprofiler_tool_configure_result_t* cfg)
 {
-    return (static_cast<std::unique_ptr<tool_data_t>*>(cfg->tool_data))->get();
+    return static_cast<tool_data_t*>(cfg->tool_data);
 }
 
 void test_rocprofiler_compute_tool_t::compare_counter_config_ids(const std::vector<uint64_t>& expected,

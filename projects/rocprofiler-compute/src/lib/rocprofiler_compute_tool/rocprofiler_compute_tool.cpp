@@ -3,6 +3,7 @@
 
 #include "rocprofiler_compute_tool.h"
 
+#include "gsl_assert.h"
 #include "input_parameters.h"
 #include "sdk_callbacks.h"
 #include "sdk_wrapper.h"
@@ -16,8 +17,9 @@
 using namespace rocprofiler_compute_tool;
 
 static std::shared_ptr<input_parameters_t> g_input_parameters = std::make_shared<env_input_parameters_t>();
-static std::shared_ptr<sdk_wrapper_t> g_sdk_wrapper = std::make_shared<sdk_wrapper_impl_t>();
-static std::shared_ptr<sdk_callbacks_t> g_sdk_callbacks = std::make_shared<sdk_callbacks_impl_t>(g_sdk_wrapper);
+static std::shared_ptr<sdk_wrapper_t>   g_sdk_wrapper   = std::make_shared<sdk_wrapper_impl_t>();
+static std::shared_ptr<sdk_callbacks_t> g_sdk_callbacks = std::make_shared<sdk_callbacks_impl_t>(
+    g_sdk_wrapper);
 static std::shared_ptr<counters_writer_t> g_counters_writer = std::make_shared<csv_counters_writer_t>();
 static std::shared_ptr<rocprofiler_tool_configure_result_t> g_cfg;
 
@@ -134,6 +136,7 @@ void generate_output(tool_data_t* tool_data)
 
 void tool_fini(void* user_data)
 {
+    Expects(user_data)
     assert(user_data);
     std::clog << "[rocprofiler-compute] In tool fini\n";
     rocprofiler_stop_context(get_client_ctx());
@@ -252,8 +255,7 @@ rocprofiler_tool_configure_result_t* rocprofiler_configure(uint32_t             
             rocprofiler_tool_configure_result_t{sizeof(rocprofiler_tool_configure_result_t),
                                                 &tool_init,
                                                 &tool_fini,
-                                                static_cast<void*>(new std::unique_ptr<tool_data_t>(
-                                                    std::move(tool_data)))});
+                                                tool_data.release()});
 
     return g_cfg.get();
 }

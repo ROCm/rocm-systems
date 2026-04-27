@@ -22,9 +22,10 @@ sdk_callbacks_impl_t::sdk_callbacks_impl_t(const std::shared_ptr<sdk_wrapper_t>&
 }
 
 void sdk_callbacks_impl_t::dispatch_callback(rocprofiler_dispatch_counting_service_data_t dispatch_data,
-                                         rocprofiler_counter_config_id_t*             config,
-                                         void* callback_data_args)
+                                             rocprofiler_counter_config_id_t* config,
+                                             void*                            callback_data_args)
 {
+    Expects(callback_data_args);
     auto kernel_id = dispatch_data.dispatch_info.kernel_id;
     auto agent_id  = dispatch_data.dispatch_info.agent_id.handle;
 
@@ -37,16 +38,10 @@ void sdk_callbacks_impl_t::dispatch_callback(rocprofiler_dispatch_counting_servi
         kernel_dispatch_count = count;
     }
 
-    // static cast tool
-    auto*        tool_data_ptr = static_cast<std::unique_ptr<tool_data_t>*>(callback_data_args);
-    tool_data_t* tool;
-    {
-        std::lock_guard<std::mutex> lock(tool_data_ptr->get()->mut);
-        tool = tool_data_ptr->get();
-    }
+    auto* tool_data = static_cast<tool_data_t*>(callback_data_args);
 
     // kernel filtering
-    if (!is_targeted_dispatch(tool, kernel_id, kernel_dispatch_count))
+    if (!is_targeted_dispatch(tool_data, kernel_id, kernel_dispatch_count))
     {
         return;
     }
@@ -54,30 +49,31 @@ void sdk_callbacks_impl_t::dispatch_callback(rocprofiler_dispatch_counting_servi
     // check cache for existing profile for this agent
     auto search_profile_cache = [&]()
     {
-        if (auto pos = m_profile_cache_per_agent.find(agent_id); pos != m_profile_cache_per_agent.end())
+        if (const auto pos = m_profile_cache_per_agent.find(agent_id);
+            pos != m_profile_cache_per_agent.end())
             return true;
         return false;
     };
 
     auto set_config_from_cache = [&]()
     {
-        if (tool->iteration_multiplexing_mode != iteration_multiplexing_mode_t::DISABLED &&
+        if (tool_data->iteration_multiplexing_mode != iteration_multiplexing_mode_t::DISABLED &&
             m_iteration_multiplexing_per_agent.find(agent_id) == m_iteration_multiplexing_per_agent.end())
         {
             // First time setting up iteration multiplexing data for this agent
             m_iteration_multiplexing_per_agent[agent_id] = iteration_multiplexing_dispatch_record_t{};
-            if (tool->iteration_multiplexing_mode == iteration_multiplexing_mode_t::SIMPLE)
+            if (tool_data->iteration_multiplexing_mode == iteration_multiplexing_mode_t::SIMPLE)
             {
                 m_iteration_multiplexing_per_agent[agent_id].config = -1;  // so first increment sets to 0
             }
         }
 
-        kernel_dispatch_info_t dispatch_info{dispatch_data.dispatch_info.kernel_id,
-                                             dispatch_data.dispatch_info.queue_id.handle,
-                                             dispatch_data.dispatch_info.workgroup_size,
-                                             dispatch_data.dispatch_info.grid_size,
-                                             dispatch_data.dispatch_info.group_segment_size};
-        switch (tool->iteration_multiplexing_mode)
+        const kernel_dispatch_info_t dispatch_info{dispatch_data.dispatch_info.kernel_id,
+                                                   dispatch_data.dispatch_info.queue_id.handle,
+                                                   dispatch_data.dispatch_info.workgroup_size,
+                                                   dispatch_data.dispatch_info.grid_size,
+                                                   dispatch_data.dispatch_info.group_segment_size};
+        switch (tool_data->iteration_multiplexing_mode)
         {
         case iteration_multiplexing_mode_t::DISABLED:
             if (search_profile_cache())
@@ -127,14 +123,14 @@ void sdk_callbacks_impl_t::dispatch_callback(rocprofiler_dispatch_counting_servi
             return;
 
         default:
-            throw std::runtime_error("[" + std::string(__FUNCTION__) +
+            throw std::runtime_error(std::string("[") + __FUNCTION__ +
                                      "] Unsupported iteration multiplexing mode");
         }
     };
 
     {
         auto rlock = std::shared_lock{m_mutex};
-        if ((tool->iteration_multiplexing_mode == iteration_multiplexing_mode_t::DISABLED) &&
+        if ((tool_data->iteration_multiplexing_mode == iteration_multiplexing_mode_t::DISABLED) &&
             search_profile_cache())
         {
             *config = m_profile_cache_per_agent[agent_id][0];
@@ -150,14 +146,19 @@ void sdk_callbacks_impl_t::dispatch_callback(rocprofiler_dispatch_counting_servi
         return;
     }
 
-    create_counter_collection_profile(tool, dispatch_data.dispatch_info.agent_id, m_profile_cache_per_agent);
+    create_counter_collection_profile(tool_data,
+                                      dispatch_data.dispatch_info.agent_id,
+                                      m_profile_cache_per_agent);
 
     // Return the profile to collect those counters for this dispatch
     set_config_from_cache();
 }
 
-bool sdk_callbacks_impl_t::is_targeted_dispatch(const tool_data_t* tool, uint64_t kernel_id, uint64_t kernel_iteration)
+bool sdk_callbacks_impl_t::is_targeted_dispatch(const tool_data_t* tool,
+                                                uint64_t           kernel_id,
+                                                uint64_t           kernel_iteration)
 {
+    Expects(tool);
     if (!tool->target_kernel_ids.empty() && !tool->target_kernel_ids.count(kernel_id))
         return false;
 
@@ -177,6 +178,7 @@ void sdk_callbacks_impl_t::create_counter_collection_profile(
     rocprofiler_agent_id_t                                                      agent_id,
     std::unordered_map<uint64_t, std::vector<rocprofiler_counter_config_id_t>>& profile_cache) const
 {
+    Expects(tool);
     // get counters to collect
     std::set<std::set<std::string>> counters_to_collect;
     for (const std::string& counters_str : split_by_regex(tool->requested_counters, "[,]"))
@@ -280,16 +282,13 @@ void sdk_callbacks_impl_t::create_counter_collection_profile(
 }
 
 void sdk_callbacks_impl_t::record_callback(rocprofiler_dispatch_counting_service_data_t dispatch_data,
-                                       rocprofiler_counter_record_t*                record_data,
-                                       size_t                                       record_count,
-                                       void* callback_data_args)
+                                           rocprofiler_counter_record_t* record_data,
+                                           size_t                        record_count,
+                                           void*                         callback_data_args)
 {
-    auto*        tool_data_ptr = static_cast<std::unique_ptr<tool_data_t>*>(callback_data_args);
-    tool_data_t* tool;
-    {
-        std::lock_guard<std::mutex> lock(tool_data_ptr->get()->mut);
-        tool = tool_data_ptr->get();
-    }
+    Expects(record_data);
+    Expects(callback_data_args)
+    auto* tool_data = static_cast<tool_data_t*>(callback_data_args);
 
     // For each counter, write: dispatch_id, counter_id, counter_name,
     // counter_value
@@ -298,36 +297,32 @@ void sdk_callbacks_impl_t::record_callback(rocprofiler_dispatch_counting_service
         rocprofiler_counter_id_t counter_id{};
         m_sdk_wrapper->query_record_counter_id(record_data[i].id, &counter_id);
 
-        // Store the counter info record in tool_data
-        counter_info_record_t record{dispatch_data.dispatch_info.dispatch_id,
-                                     dispatch_data.dispatch_info.agent_id.handle,
-                                     dispatch_data.dispatch_info.kernel_id,
-                                     dispatch_data.dispatch_info.group_segment_size,
-                                     counter_id.handle,
-                                     tool->counter_id_name_map[counter_id.handle],
-                                     record_data[i].counter_value};
         {
-            std::lock_guard<std::mutex> lock(tool->mut);
-            tool->counter_records.push_back(std::move(record));
+            counter_info_record_t record{dispatch_data.dispatch_info.dispatch_id,
+                                         dispatch_data.dispatch_info.agent_id.handle,
+                                         dispatch_data.dispatch_info.kernel_id,
+                                         dispatch_data.dispatch_info.group_segment_size,
+                                         counter_id.handle,
+                                         tool_data->counter_id_name_map[counter_id.handle],
+                                         record_data[i].counter_value};
+            std::scoped_lock      lock(tool_data->mut);
+            tool_data->counter_records.push_back(std::move(record));
         }
     }
 }
 
 void sdk_callbacks_impl_t::tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
-                                             void*                                 callback_data)
+                                                 void* callback_data)
 {
     if (record.phase == ROCPROFILER_CALLBACK_PHASE_LOAD &&
         record.kind == ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT &&
         record.operation == ROCPROFILER_CODE_OBJECT_DEVICE_KERNEL_SYMBOL_REGISTER)
     {
-        auto* data = static_cast<kernel_symbol_data_t*>(record.payload);
-        // check if regex can be found in kernel name matches regex from tool data,
-        // if matches store kernel id
-        auto* tool_data_ptr = static_cast<std::unique_ptr<tool_data_t>*>(callback_data);
-        auto* tool          = tool_data_ptr->get();
+        auto* data      = static_cast<kernel_symbol_data_t*>(record.payload);
+        auto* tool_data = static_cast<tool_data_t*>(callback_data);
         // Lock before modifying target_kernel_ids
-        std::lock_guard<std::mutex> lock(tool->mut);
-        if (!tool->kernel_filter_include_regex.empty())
+        std::scoped_lock lock(tool_data->mut);
+        if (!tool_data->kernel_filter_include_regex.empty())
         {
             try
             {
@@ -335,23 +330,23 @@ void sdk_callbacks_impl_t::tool_tracing_callback(rocprofiler_callback_tracing_re
                 auto kernel_name     = cxa_demangle(data->kernel_name, &demangle_status);
                 kernel_name          = truncate_name(kernel_name);
 
-                std::regex re(tool->kernel_filter_include_regex);
+                std::regex re(tool_data->kernel_filter_include_regex);
                 if (!kernel_name.empty() && std::regex_search(kernel_name, re))
                 {
-                    tool->target_kernel_ids.insert(data->kernel_id);
+                    tool_data->target_kernel_ids.insert(data->kernel_id);
                 }
             }
             catch (const std::regex_error& e)
             {
                 std::cerr << "[rocprofiler-compute] [" << __FUNCTION__
                           << "] ERROR: Invalid regex in ROCPROF_KERNEL_FILTER_INCLUDE_REGEX: "
-                          << tool->kernel_filter_include_regex << " : " << e.what() << std::endl;
+                          << tool_data->kernel_filter_include_regex << " : " << e.what() << std::endl;
             }
         }
         // If no regex specified, collect for all kernels
         else
         {
-            tool->target_kernel_ids.insert(data->kernel_id);
+            tool_data->target_kernel_ids.insert(data->kernel_id);
         }
     }
 }
@@ -359,8 +354,8 @@ void sdk_callbacks_impl_t::tool_tracing_callback(rocprofiler_callback_tracing_re
 #ifdef DISABLED_CODE
 // reference code from SDK (to be deleted after implementation
 void sdk_callbacks_impl_t::code_object_tracing_callback(rocprofiler_callback_tracing_record_t record,
-                                                    rocprofiler_user_data_t*              user_data,
-                                                    void*                                 data)
+                                                        rocprofiler_user_data_t* user_data,
+                                                        void*                    data)
 {
     if (record.kind == ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT &&
         record.operation == ROCPROFILER_CODE_OBJECT_LOAD)
@@ -444,8 +439,9 @@ void sdk_callbacks_impl_t::code_object_tracing_callback(rocprofiler_callback_tra
 #endif
 
 void sdk_callbacks_impl_t::code_object_tracing_callback(rocprofiler_callback_tracing_record_t record,
-                                                    void* data)
+                                                        void* data)
 {
+    Expects(data);
 }
 
 std::string sdk_callbacks_impl_t::truncate_name(std::string_view name)
@@ -573,7 +569,7 @@ std::string sdk_callbacks_impl_t::cxa_demangle(const std::string& mangled_name, 
 }
 
 std::vector<std::string> sdk_callbacks_impl_t::split_by_regex(const std::string& s,
-                                                          const std::string& regex_pattern)
+                                                              const std::string& regex_pattern)
 {
     std::vector<std::string> tokens;
     std::regex               re(regex_pattern);
