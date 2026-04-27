@@ -5,8 +5,8 @@
 
 #include "binary/dwarf_entry.hpp"
 #include "binary/symbol.hpp"
+#include "common/defines.h"
 #include "core/binary/fwd.hpp"
-#include "core/defines.hpp"
 #include "library/causal/fwd.hpp"
 
 #include <timemory/hash/types.hpp>

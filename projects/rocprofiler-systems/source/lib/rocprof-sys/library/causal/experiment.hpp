@@ -5,8 +5,8 @@
 
 #include "binary/dwarf_entry.hpp"
 #include "binary/symbol.hpp"
+#include "common/defines.h"
 #include "core/containers/c_array.hpp"
-#include "core/defines.hpp"
 #include "core/utility.hpp"
 #include "library/causal/components/backtrace.hpp"
 #include "library/causal/components/progress_point.hpp"

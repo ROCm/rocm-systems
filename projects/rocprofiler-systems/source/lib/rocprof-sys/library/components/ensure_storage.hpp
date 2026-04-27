@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "core/defines.hpp"
+#include "common/defines.h"
 
 #include <timemory/backends/threading.hpp>
 #include <timemory/mpl/type_traits.hpp>

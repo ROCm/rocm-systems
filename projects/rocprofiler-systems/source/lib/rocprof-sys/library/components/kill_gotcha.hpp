@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "core/defines.hpp"
+#include "common/defines.h"
 
 #include <timemory/components/base.hpp>
 #include <timemory/components/gotcha/backends.hpp>

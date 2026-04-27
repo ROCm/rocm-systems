@@ -3,9 +3,9 @@
 
 #pragma once
 
+#include "common/defines.h"
 #include "core/common.hpp"
 #include "core/concepts.hpp"
-#include "core/defines.hpp"
 #include "core/perfetto.hpp"
 #include "core/state.hpp"
 #include "core/utility.hpp"
