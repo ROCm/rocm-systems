@@ -5218,6 +5218,7 @@ def hsa_handle_placeholder(arg_name):
 
 print('#include <hsa/hsa.h>')
 print('#include <hsa/hsa_ext_amd.h>')
+print('#include <hsa/hsa_api_trace.h>')
 # NOTE: PLACEHOLDER_OVERRIDES above provides per-API per-arg substitutions
 # for parameters (e.g., function pointers) where the generic DSL-type
 # placeholder won't compile.
