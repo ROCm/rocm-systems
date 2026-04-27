@@ -547,6 +547,135 @@ TEST(thread_trace, restart_after_overflow)
         << "Should have more total callbacks than just overflow events";
 }
 
+// Verifies the destructor force-wake path: while the producer is blocked on
+// its submit signal, set WORKER_FLAG_DESTRUCTOR and store 0 to the signal.
+// The producer must wake, observe the destructor flag, and exit WITHOUT
+// invoking query_buffer_status_fn (which on a real GPU would consume stale
+// state because the GPU has not actually completed the query packet).
+TEST(thread_trace, destructor_force_wake)
+{
+    using namespace rocprofiler;
+    thread_trace::test_init();
+
+    const hsa::AgentCache* agent = nullptr;
+    {
+        auto& agents = hsa::get_queue_controller()->get_supported_agents();
+        for(const auto& [_, _agent] : agents)
+        {
+            auto* rocp = _agent.get_rocp_agent();
+            if(rocp && rocp->type == ROCPROFILER_AGENT_TYPE_GPU)
+            {
+                agent = &_agent;
+                break;
+            }
+        }
+    }
+    if(agent == nullptr) GTEST_SKIP() << "No GPU agent available";
+
+    auto running_flag =
+        std::make_shared<std::atomic<int>>(thread_trace::WORKER_FLAG_RUNNING);
+
+    auto params              = thread_trace::thread_trace_parameter_pack{};
+    params.triple_buffering  = true;
+    params.buffer_size       = thread_trace::MOCK_BUFFER_SIZE;
+    params.shader_cb_fn      = [](rocprofiler_agent_id_t,
+                             int64_t,
+                             void*,
+                             size_t,
+                             rocprofiler_thread_trace_shader_data_flags_t,
+                             rocprofiler_user_data_t) {};
+    params.callback_userdata = rocprofiler_user_data_t{};
+
+    auto factory = std::make_unique<aql::ThreadTraceAQLPacketFactory>(
+        *agent, params, *thread_trace::table.core_, *thread_trace::table.amd_ext_);
+    auto control_packet = factory->construct_control_packet();
+
+    // Track whether query_buffer_status_fn ever runs after we set the
+    // destructor flag. If the producer's worker_flag recheck is correct it
+    // should NOT run between the force-wake and the producer's exit.
+    std::atomic<int> query_calls_total{0};
+    std::atomic<int> query_calls_after_destructor{0};
+    auto             query_fn =
+        [&]() -> std::optional<hsa::sqtt_buffer_status_t> {
+        query_calls_total.fetch_add(1);
+        if(running_flag->load() == thread_trace::WORKER_FLAG_DESTRUCTOR)
+            query_calls_after_destructor.fetch_add(1);
+        return std::nullopt;
+    };
+
+    auto buffer_packet =
+        thread_trace::make_mock_packets(control_packet->GetHandle(), query_fn);
+
+    // Mock submit that RESETS the completion signal to 1 so the producer's
+    // signal_wait actually blocks (production behavior). The destructor then
+    // unblocks it by storing 0.
+    auto mock_submit_blocking =
+        [](const thread_trace::att_queue_t&,
+           hsa_ext_amd_aql_pm4_packet_t*,
+           hsa_signal_t* completion) {
+            if(completion) thread_trace::signal_reset(*completion);
+        };
+
+    auto mock_queue       = thread_trace::make_mock_queue(*agent);
+    mock_queue->submit_fn = mock_submit_blocking;
+
+    auto worker_data   = std::make_shared<thread_trace::triple_buffer_shared_data_t>();
+    worker_data->queue = mock_queue.get();
+
+    worker_data->producer_submit_signal = thread_trace::make_signal();
+
+    for(size_t i = 0; i < worker_data->buffers.size(); i++)
+        worker_data->buffers.at(i).memory = mock_queue->triple_buffer_memory.at(i);
+
+    auto start_signal = std::shared_ptr<hsa_signal_t>(
+        new hsa_signal_t{thread_trace::signal_create()}, [](hsa_signal_t* s) {
+            thread_trace::signal_destroy(*s);
+            delete s;
+        });
+    worker_data->start_pkt_signal = start_signal;
+
+    auto producer_data             = thread_trace::triple_buffer_producer_data_t{};
+    producer_data.producer_running = running_flag;
+    producer_data.start_pkt_signal = start_signal;
+    producer_data.control_packet   = std::move(control_packet);
+    producer_data.copy_data_fn     = thread_trace::copy_data_mock;
+    producer_data.shared           = worker_data;
+    producer_data.buffer_packet    = std::move(buffer_packet);
+
+    auto producer = std::thread{thread_trace::producer_loop, std::move(producer_data)};
+
+    // Let the producer reach its blocking signal_wait on producer_submit_signal.
+    // The mock_submit_blocking resets the signal to 1 on first submit, after
+    // which signal_wait (waits for ==0) blocks indefinitely until something
+    // stores 0 to it.
+    while(query_calls_total.load() < 1 && running_flag->load() != thread_trace::WORKER_FLAG_DESTRUCTOR)
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+
+    // Producer should now be parked on signal_wait(*producer_submit_signal)
+    // after submitting the next query packet. Give it a moment to settle.
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    int calls_before_destructor = query_calls_total.load();
+
+    // Trigger destructor wake path: set flag, then store 0 to the signal.
+    running_flag->store(thread_trace::WORKER_FLAG_DESTRUCTOR);
+    auto* core = hsa::get_core_table();
+    ASSERT_NE(core, nullptr);
+    core->hsa_signal_store_screlease_fn(*worker_data->producer_submit_signal, 0);
+    core->hsa_signal_store_screlease_fn(*start_signal, 0);
+
+    // Producer must exit promptly via the worker_flag recheck.
+    producer.join();
+
+    // The producer may have advanced one more iteration before parking, but
+    // it must NOT run query_buffer_status_fn after we set the destructor
+    // flag (the recheck after signal_wait should bail before reaching it).
+    EXPECT_EQ(query_calls_after_destructor.load(), 0)
+        << "query_buffer_status_fn ran " << query_calls_after_destructor.load()
+        << " time(s) after WORKER_FLAG_DESTRUCTOR was set; the post-signal_wait "
+           "recheck failed to bail out (calls before destructor: "
+        << calls_before_destructor << ", total: " << query_calls_total.load() << ")";
+}
+
 TEST(thread_trace, buffer_alternation)
 {
     rocprofiler::thread_trace::test_init();
