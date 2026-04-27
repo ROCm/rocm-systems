@@ -341,6 +341,69 @@ if(HIP_ENABLE_LTTNG_UST)
         ${CMAKE_CURRENT_LIST_DIR}/lttng)
     target_link_libraries(amdhip64 PRIVATE PkgConfig::LTTNG_UST ${CMAKE_DL_LIBS})
 
+    # ---- Curated parameter-capture: opt-in regeneration target ----
+    # Per spec §9.1: default build does NOT regenerate. The custom command
+    # is wired only to the manual `regenerate-lttng-curated` target so the
+    # build never requires Python, PyYAML, or libclang. Generated headers
+    # AND the verifier signature sidecar JSON are checked in (§3.2). CI
+    # runs codegen + `git diff --exit-code` to catch YAML drift.
+    #
+    # The regeneration is a two-step pipeline (debate-review C10 fix):
+    #   1. Verifier  --out-sidecar=<JSON>   (needs libclang + headers)
+    #   2. Codegen   --sigs=<JSON>          (pure Python, reads JSON)
+    # Codegen consumes the sidecar to emit provider-correct OUT-handle
+    # helper signatures (HIP void** vs HSA hsa_signal_t* with .handle).
+    # The sidecar JSON is checked into git alongside the generated
+    # headers so the build never needs libclang at compile time.
+    find_package(Python3 QUIET COMPONENTS Interpreter)
+    if(Python3_FOUND)
+        set(_CURATED_YAML  ${CMAKE_CURRENT_LIST_DIR}/../scripts/curated_apis.yaml)
+        set(_CURATED_SIGS  ${CMAKE_CURRENT_LIST_DIR}/../scripts/curated_apis_sigs.json)
+        set(_CURATED_TP_H  ${CMAKE_CURRENT_LIST_DIR}/lttng/rocm_hip_curated_tp.h)
+        set(_CURATED_EMIT_H ${CMAKE_CURRENT_LIST_DIR}/lttng/rocm_trace_emit_curated.h)
+        if(EXISTS ${_CURATED_YAML})
+            # Step 1: verifier produces the signature sidecar JSON.
+            # Pinned to /opt/rocm/include layout — override via env.
+            add_custom_command(
+                OUTPUT ${_CURATED_SIGS}
+                COMMAND ${Python3_EXECUTABLE}
+                        ${CMAKE_CURRENT_LIST_DIR}/../scripts/lttng_curated_verify.py
+                        --yaml         ${_CURATED_YAML}
+                        --header       /opt/rocm/include/hip/hip_runtime_api.h
+                        --extra-arg    -I/opt/rocm/include
+                        --extra-arg    -D__HIP_PLATFORM_AMD__=1
+                        --out-sidecar  ${_CURATED_SIGS}
+                DEPENDS ${_CURATED_YAML}
+                        ${CMAKE_CURRENT_LIST_DIR}/../scripts/lttng_curated_verify.py
+                COMMENT "Verifying HIP curated YAML + emitting signature sidecar"
+            )
+            # Step 2: codegen reads the sidecar.
+            add_custom_command(
+                OUTPUT ${_CURATED_TP_H} ${_CURATED_EMIT_H}
+                COMMAND ${Python3_EXECUTABLE}
+                        ${CMAKE_CURRENT_LIST_DIR}/../scripts/lttng_curated_codegen.py
+                        --yaml      ${_CURATED_YAML}
+                        --sigs      ${_CURATED_SIGS}
+                        --provider  rocm_hip
+                        --status-type hipError_t
+                        --status-success hipSuccess
+                        --out-tp    ${_CURATED_TP_H}
+                        --out-emit  ${_CURATED_EMIT_H}
+                DEPENDS ${_CURATED_YAML}
+                        ${_CURATED_SIGS}
+                        ${CMAKE_CURRENT_LIST_DIR}/../scripts/lttng_curated_codegen.py
+                        ${CMAKE_CURRENT_LIST_DIR}/../scripts/lttng_curated_lib.py
+                COMMENT "Regenerating LTTng curated tracepoints (HIP)"
+            )
+            # Manual target — NOT a dependency of amdhip64. Default build
+            # consumes the checked-in headers + sidecar directly.
+            add_custom_target(regenerate-lttng-curated
+                              DEPENDS ${_CURATED_TP_H} ${_CURATED_EMIT_H} ${_CURATED_SIGS})
+        endif()
+    else()
+        message(STATUS "Python3 not found; LTTng curated regeneration target unavailable.")
+    endif()
+
     # Per-packet AQL kernel-dispatch tracepoint lives at the HIP CLR packet-
     # write site (rocclr/device/rocm/rocvirtual.cpp). rocclr is built as a
     # static archive and linked into amdhip64; the tracepoint emit symbols
