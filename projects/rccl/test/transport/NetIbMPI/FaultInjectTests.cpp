@@ -325,4 +325,78 @@ TEST_F(NetIbMPITest, FaultInjCastSlowQpRebalances) {
     MPI_Barrier(MPI_COMM_WORLD);
 }
 
+// =============================================================================
+// Test: FaultInjCastDelayDataIntegrity
+//
+// CAST path. Inject 2 ms delay on QP 0, run 50 sends.
+// Verifies: data integrity is preserved despite the artificial per-QP delay.
+//
+// Unlike FaultInjCastSlowQpRebalances, this test does not aim to trigger
+// the RTT timer; it only confirms that usleep in the send path does not
+// corrupt or drop data.
+// =============================================================================
+TEST_F(NetIbMPITest, FaultInjCastDelayDataIntegrity) {
+    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit))
+        << "Test requires exactly " << kExactTwoProcesses << " processes";
+
+    const int rank = MPIEnvironment::world_rank;
+
+    CAST_ENV_CHECK_OR_SKIP();
+    net_ = &netIbCast;
+    AssertInitAndGetDevices(nullptr);
+
+    void* listenComm = nullptr;
+    void* sendComm   = nullptr;
+    void* recvComm   = nullptr;
+    SetupCastConnection(/*dev=*/0, &listenComm, &sendComm, &recvComm);
+
+    constexpr int    kNMsgs  = 50;
+    constexpr size_t kMsgSz  = 8192;
+    const size_t     kBufSz  = static_cast<size_t>(kNMsgs) * kMsgSz;
+    constexpr int    kBaseTag = 5000;
+
+    std::vector<char> sendBuf(kBufSz), recvBuf(kBufSz);
+    for (size_t i = 0; i < kBufSz; i++) sendBuf[i] = static_cast<char>((i * 7 + 3) & 0xFF);
+    memset(recvBuf.data(), 0, kBufSz);
+
+    void* comm    = (rank == 0) ? recvComm : sendComm;
+    char* regBuf  = (rank == 0) ? recvBuf.data() : sendBuf.data();
+    void* mhandle = nullptr;
+    ASSERT_EQ(RegisterMemory(comm, regBuf, kBufSz, NCCL_PTR_HOST, &mhandle), ncclSuccess);
+
+    const int actualNqps = GetActualNqps(sendComm, recvComm, regBuf, kMsgSz, kBaseTag - 1, mhandle);
+    ASSERT_GT(actualNqps, 0);
+
+    if (rank == 1) {
+        ASSERT_EQ(ncclIbCastFaultSetQpDelay(sendComm, /*qpIdx=*/0, /*delayUs=*/2000), ncclSuccess);
+    }
+
+    CastDoBatchSendRecv(rank, sendComm, recvComm, sendBuf.data(), recvBuf.data(),
+                        kMsgSz, kNMsgs, kBaseTag, mhandle);
+
+    if (rank == 1) {
+        ASSERT_EQ(ncclIbCastFaultClear(sendComm), ncclSuccess);
+    }
+
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    if (rank == 0) {
+        // recvBuf must match the pattern rank 1 sent.
+        // Both ranks initialise sendBuf with the same deterministic pattern,
+        // so rank 0's sendBuf is a valid reference without extra MPI traffic.
+        EXPECT_EQ(memcmp(recvBuf.data(), sendBuf.data(), kBufSz), 0)
+            << "data corruption with 2 ms QP 0 delay (50 sends)";
+    }
+
+    ASSERT_EQ(DeregisterMemory(comm, mhandle), ncclSuccess);
+    if (rank == 0) {
+        ASSERT_EQ(CloseRecvComm(recvComm), ncclSuccess);
+        ASSERT_EQ(CloseListenComm(listenComm), ncclSuccess);
+    } else {
+        ASSERT_EQ(CloseSendComm(sendComm), ncclSuccess);
+    }
+    MPI_Barrier(MPI_COMM_WORLD);
+}
+
 #endif /* MPI_TESTS_ENABLED && ENABLE_FAULT_INJECTION */
