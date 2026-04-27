@@ -32,6 +32,7 @@
 #endif
 #include "lib/common/container/stable_vector.hpp"
 #include "lib/common/demangle.hpp"
+#include "lib/common/logging.hpp"
 
 #include <fmt/format.h>
 

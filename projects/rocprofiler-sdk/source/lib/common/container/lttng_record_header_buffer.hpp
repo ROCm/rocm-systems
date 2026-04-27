@@ -95,6 +95,8 @@ struct lttng_record_header_buffer
     auto is_full() const;
 
 private:
+    static uint64_t make_record_hash(uint32_t category, uint32_t kind);
+
     void emit(uint32_t category, uint32_t kind, uint64_t hash, size_t size, size_t alignment);
 
 private:
@@ -225,7 +227,7 @@ bool
 lttng_record_header_buffer::emplace(uint32_t category, uint32_t kind, Tp& value)
 {
     auto ret = m_buffer.emplace(category, kind, value);
-    if(ret) emit(category, kind, typeid(Tp).hash_code(), sizeof(Tp), alignof(Tp));
+    if(ret) emit(category, kind, make_record_hash(category, kind), sizeof(Tp), alignof(Tp));
     return ret;
 }
 

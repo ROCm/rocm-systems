@@ -45,6 +45,15 @@ lttng_record_header_buffer::operator=(lttng_record_header_buffer&& rhs) noexcept
     return *this;
 }
 
+uint64_t
+lttng_record_header_buffer::make_record_hash(uint32_t category, uint32_t kind)
+{
+    auto record     = rocprofiler_record_header_t{};
+    record.category = category;
+    record.kind     = kind;
+    return record.hash;
+}
+
 void
 lttng_record_header_buffer::emit(uint32_t category,
                                  uint32_t kind,

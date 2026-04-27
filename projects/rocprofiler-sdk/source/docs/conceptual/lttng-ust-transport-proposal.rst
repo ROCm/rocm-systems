@@ -63,13 +63,16 @@ rocprofiler-sdk payloads.
 Expected Tradeoffs
 ------------------
 
-When no LTTng session is active, the hot path should be close to one enabled
-flag load plus one unlikely branch per event. When a session is active, the
-producer writes into LTTng's user-space CTF buffers and the out-of-process
-consumer drains completed sub-buffers asynchronously. This is a good match for
-generic out-of-process subscription, but it is not free: it adds the
-``liblttng-ust`` dependency and does not directly satisfy the existing
-in-process callback ABI without the local buffer kept by this POC.
+When no LTTng session is active, the ideal tracepoint model is close to one
+enabled flag load plus one unlikely branch per event. The measured POC still
+shows producer-side overhead, especially with multiple producers, because every
+record takes the normal rocprofiler-sdk buffer path and then calls the LTTng-UST
+tracepoint. When a session is active, the producer writes into LTTng's user-space
+CTF buffers and the out-of-process consumer drains completed sub-buffers
+asynchronously. This is a good match for generic out-of-process subscription,
+but it is not free: it adds the ``liblttng-ust`` dependency and does not directly
+satisfy the existing in-process callback ABI without the local buffer kept by
+this POC.
 
 Compatibility Problem
 ---------------------
