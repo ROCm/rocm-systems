@@ -1,0 +1,21 @@
+# Minimal fixture for codegen golden tests. Two APIs covering the all-IN
+# and OUT-param patterns. Exercises three DSL types: ptr, size, enum,
+# handle, plus a status-returning vs pointer-returning shape.
+- api: hipMemcpyAsync
+  category: memory
+  args:
+    - {name: dst,       type: ptr,    dir: IN}
+    - {name: src,       type: ptr,    dir: IN}
+    - {name: sizeBytes, type: size,   dir: IN}
+    - {name: kind,      type: enum,   dir: IN}
+    - {name: stream,    type: handle, dir: IN}
+
+- api: hipMalloc
+  category: memory
+  args:
+    - {name: ptr,  type: ptr,  dir: OUT}
+    - {name: size, type: size, dir: IN}
+
+- api: hipDeviceSynchronize
+  category: streams
+  args: []

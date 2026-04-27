@@ -1,0 +1,89 @@
+# LTTng curated parameter-capture: verifier gate.
+#
+# Per spec §9.3 this gate runs on every PR that touches the curated
+# YAML, the verifier scripts, or this workflow itself. The verifier
+# (libclang) confirms that the YAML signatures match the actual
+# HIP/HSA header signatures, AND regenerating the sidecar JSON yields
+# byte-identical output to the checked-in copy. Catches header-side
+# type changes for OUT-handle params (per debate-review C10 fix --
+# a missed sidecar update would mis-generate helper signatures
+# without this check).
+#
+name: LTTng Curated Gates
+
+on:
+  pull_request:
+    paths:
+      - 'projects/clr/hipamd/scripts/curated_apis.yaml'
+      - 'projects/clr/hipamd/scripts/curated_apis_sigs.json'
+      - 'projects/clr/hipamd/scripts/lttng_curated_verify.py'
+      - 'projects/clr/hipamd/scripts/lttng_curated_lib.py'
+      - 'projects/rocr-runtime/runtime/hsa-runtime/scripts/curated_apis.yaml'
+      - 'projects/rocr-runtime/runtime/hsa-runtime/scripts/curated_apis_sigs.json'
+      - 'projects/rocr-runtime/runtime/hsa-runtime/scripts/lttng_curated_verify.py'
+      - 'projects/rocr-runtime/runtime/hsa-runtime/scripts/lttng_curated_lib.py'
+      - '.github/workflows/lttng-curated-gates.yml'
+  push:
+    branches: [develop]
+
+permissions:
+  contents: read
+
+jobs:
+  verify-gate:
+    name: Verifier (libclang vs YAML) + sidecar drift
+    runs-on: ubuntu-latest
+    container:
+      # Use the project's standard ROCm image so HIP headers are present
+      # at /opt/rocm/include for libclang to parse. Adjust to whichever
+      # ROCm image the project's other CI jobs use.
+      image: rocm/dev-ubuntu-24.04:latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: |
+            projects/clr/hipamd/scripts
+            projects/rocr-runtime/runtime/hsa-runtime/scripts
+            .github/workflows
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.12"
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pyyaml libclang
+
+      - name: Verify HIP YAML against headers + diff sidecar
+        # Verifier rewrites the sidecar JSON; if a header changed in a
+        # way that affects an OUT-handle's libclang-resolved C type, the
+        # sidecar diff catches it.
+        run: |
+          python3 projects/clr/hipamd/scripts/lttng_curated_verify.py \
+            --yaml projects/clr/hipamd/scripts/curated_apis.yaml \
+            --header /opt/rocm/include/hip/hip_runtime_api.h \
+            --extra-arg=-D__HIP_PLATFORM_AMD__=1 \
+            --extra-arg=-I/opt/rocm/include \
+            --out-sidecar projects/clr/hipamd/scripts/curated_apis_sigs.json
+          git diff --exit-code -- \
+            projects/clr/hipamd/scripts/curated_apis_sigs.json
+
+      - name: Verify HSA YAML against headers + diff sidecar
+        # Same shape as the HIP verify step above but with three --header
+        # args (Task 4.5 multi-header support): hsa.h + hsa_ext_amd.h +
+        # hsa_api_trace.h (the third declares hsa_amd_queue_intercept_create
+        # per Task 15a). The --out-sidecar + diff catches header-side
+        # OUT-handle type changes per the C10 fix.
+        run: |
+          python3 projects/rocr-runtime/runtime/hsa-runtime/scripts/lttng_curated_verify.py \
+            --yaml projects/rocr-runtime/runtime/hsa-runtime/scripts/curated_apis.yaml \
+            --header /opt/rocm/include/hsa/hsa.h \
+            --header /opt/rocm/include/hsa/hsa_ext_amd.h \
+            --header /opt/rocm/include/hsa/hsa_api_trace.h \
+            --extra-arg=-I/opt/rocm/include \
+            --out-sidecar projects/rocr-runtime/runtime/hsa-runtime/scripts/curated_apis_sigs.json
+          git diff --exit-code -- \
+            projects/rocr-runtime/runtime/hsa-runtime/scripts/curated_apis_sigs.json
