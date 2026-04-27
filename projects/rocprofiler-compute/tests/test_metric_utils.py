@@ -30,6 +30,7 @@ from utils.metrics.expression import (
     update_normal_unit_string,
 )
 from utils.metrics.metric_evaluator import MetricEvaluator
+from utils.metrics.pmc_data_cache import PmcDataCache
 from utils.utils_common import calc_builtin_var
 
 # =============================================================================
@@ -262,7 +263,7 @@ class TestEvaluationPipeline:
         """
         if metric_fields is None:
             metric_fields = {
-                "Value": "to_sum(raw_pmc_df['SQ_WAVES'])",
+                "Value": "to_sum(pmc_df['SQ_WAVES'])",
                 "Average": None,
             }
 
@@ -307,7 +308,7 @@ class TestEvaluationPipeline:
         """eval_metric with debug=True invokes debug_row_tracker and writes back."""
         metric_df, dfs, dfs_type, sys_info, raw_pmc_df = self._build_eval_metric_inputs(
             metric_fields={
-                "Value": "to_sum(raw_pmc_df['SQ_WAVES'])",
+                "Value": "to_sum(pmc_df['SQ_WAVES'])",
             }
         )
         with (
@@ -335,7 +336,7 @@ class TestEvaluationPipeline:
         """eval_metric writes the computed Value back to the metric DataFrame."""
         metric_df, dfs, dfs_type, sys_info, raw_pmc_df = self._build_eval_metric_inputs(
             metric_fields={
-                "Value": "to_sum(raw_pmc_df['SQ_WAVES'])",
+                "Value": "to_sum(pmc_df['SQ_WAVES'])",
             }
         )
         with patch("utils.metrics.evaluation_pipeline.BUILD_IN_VARS", {}):
@@ -354,8 +355,8 @@ class TestEvaluationPipeline:
         metric_df, dfs, dfs_type, sys_info, _ = self._build_eval_metric_inputs(
             metric_fields={
                 "Value": (
-                    "to_sum(raw_pmc_df['SQ_INST_LEVEL_VMEM_ACCUM']) / "
-                    "to_sum(raw_pmc_df['SQ_INSTS_VMEM'])"
+                    "to_sum(pmc_df['SQ_INST_LEVEL_VMEM_ACCUM']) / "
+                    "to_sum(pmc_df['SQ_INSTS_VMEM'])"
                 ),
             }
         )
@@ -404,21 +405,33 @@ class TestMetricEvaluator:
 
     def test_eval_expression_returns_na_when_eval_returns_none(self):
         """eval_expression returns 'N/A' when the evaluated expression yields None."""
-        metric_evaluator = MetricEvaluator({}, {}, {})
+        metric_evaluator = MetricEvaluator(
+            PmcDataCache(pd.DataFrame()),
+            {},
+            {},
+        )
         with patch("builtins.eval") as mock_eval, patch("builtins.compile"):
             mock_eval.return_value = None
             assert metric_evaluator.eval_expression("Mock Metric") == "N/A"
 
     def test_eval_expression_returns_na_when_eval_returns_nan(self):
         """eval_expression returns 'N/A' when the evaluated expression yields NaN."""
-        metric_evaluator = MetricEvaluator({}, {}, {})
+        metric_evaluator = MetricEvaluator(
+            PmcDataCache(pd.DataFrame()),
+            {},
+            {},
+        )
         with patch("builtins.eval") as mock_eval, patch("builtins.compile"):
             mock_eval.return_value = np.nan
             assert metric_evaluator.eval_expression("Mock Metric") == "N/A"
 
     def test_eval_expression_returns_na_when_eval_raises_type_error(self):
         """eval_expression returns 'N/A' when eval raises a TypeError."""
-        metric_evaluator = MetricEvaluator({}, {}, {})
+        metric_evaluator = MetricEvaluator(
+            PmcDataCache(pd.DataFrame()),
+            {},
+            {},
+        )
         with patch("builtins.eval") as mock_eval, patch("builtins.compile"):
             mock_eval.side_effect = TypeError("Mock exception")
             assert metric_evaluator.eval_expression("Mock Metric") == "N/A"
@@ -427,21 +440,33 @@ class TestMetricEvaluator:
         self,
     ):
         """eval_expression returns 'N/A' for empirical_peak NameError lookups."""
-        metric_evaluator = MetricEvaluator({}, {}, {})
+        metric_evaluator = MetricEvaluator(
+            PmcDataCache(pd.DataFrame()),
+            {},
+            {},
+        )
         with patch("builtins.eval") as mock_eval, patch("builtins.compile"):
             mock_eval.side_effect = NameError("empirical_peak")
             assert metric_evaluator.eval_expression("Mock Metric") == "N/A"
 
     def test_eval_expression_returns_na_when_eval_raises_key_error(self):
         """eval_expression returns 'N/A' when eval raises a KeyError."""
-        metric_evaluator = MetricEvaluator({}, {}, {})
+        metric_evaluator = MetricEvaluator(
+            PmcDataCache(pd.DataFrame()),
+            {},
+            {},
+        )
         with patch("builtins.eval") as mock_eval, patch("builtins.compile"):
             mock_eval.side_effect = KeyError("Some KeyError")
             assert metric_evaluator.eval_expression("Mock Metric") == "N/A"
 
     def test_eval_expression_returns_na_when_eval_raises_attribute_error(self):
         """eval_expression returns 'N/A' for a generic AttributeError."""
-        metric_evaluator = MetricEvaluator({}, {}, {})
+        metric_evaluator = MetricEvaluator(
+            PmcDataCache(pd.DataFrame()),
+            {},
+            {},
+        )
         with (
             patch("builtins.eval") as mock_eval,
             patch("builtins.compile"),
@@ -454,7 +479,11 @@ class TestMetricEvaluator:
         self,
     ):
         """eval_expression returns 'N/A' for a NoneType.get AttributeError."""
-        metric_evaluator = MetricEvaluator({}, {}, {})
+        metric_evaluator = MetricEvaluator(
+            PmcDataCache(pd.DataFrame()),
+            {},
+            {},
+        )
         with patch("builtins.eval") as mock_eval, patch("builtins.compile"):
             mock_eval.side_effect = AttributeError(
                 "'NoneType' object has no attribute 'get'"
@@ -462,9 +491,9 @@ class TestMetricEvaluator:
             assert metric_evaluator.eval_expression("Mock Metric") == "N/A"
 
     def _make_evaluator(self, columns, sys_vars=None):
-        """Build a MetricEvaluator from the given raw_pmc columns and sys_vars."""
+        """Build a MetricEvaluator from flat raw_pmc columns and sys_vars."""
         raw_pmc_df = pd.DataFrame(columns)
-        return MetricEvaluator(raw_pmc_df, sys_vars or {}, {})
+        return MetricEvaluator(PmcDataCache(raw_pmc_df), sys_vars or {}, {})
 
     def _to_eval_str(self, equation):
         """Run a YAML-style equation through build_eval_string."""
@@ -568,12 +597,12 @@ class TestMetricEvaluator:
         )
 
     def test_build_eval_string_rewrites_accum_alias_as_flat_column_lookup(self):
-        """`*_ACCUM` aliases become flat ``raw_pmc_df['<alias>']`` lookups."""
+        """`*_ACCUM` aliases become flat ``pmc_df['<alias>']`` lookups."""
         eval_str = self._to_eval_str(
             "SUM(SQ_INST_LEVEL_VMEM_ACCUM) / SUM(SQ_INSTS_VMEM)"
         )
-        assert "raw_pmc_df['SQ_INST_LEVEL_VMEM_ACCUM']" in eval_str
-        assert "raw_pmc_df['SQ_INSTS_VMEM']" in eval_str
+        assert "pmc_df['SQ_INST_LEVEL_VMEM_ACCUM']" in eval_str
+        assert "pmc_df['SQ_INSTS_VMEM']" in eval_str
 
     def test_eval_expression_resolves_accum_alias_column(self):
         """SUM(<alias>_ACCUM) / SUM(...) returns the expected ratio for flat data."""
