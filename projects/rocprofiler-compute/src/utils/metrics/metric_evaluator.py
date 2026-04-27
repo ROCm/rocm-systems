@@ -25,6 +25,7 @@ from utils.metrics.aggregation import (
     to_sum,
 )
 from utils.metrics.noise_clamper import to_noise_clamp
+from utils.metrics.pmc_data_cache import PmcDataCache
 
 
 class MetricEvaluator:
@@ -32,11 +33,11 @@ class MetricEvaluator:
 
     def __init__(
         self,
-        raw_pmc_df: pd.DataFrame,
+        pmc_cache: PmcDataCache,
         sys_vars: dict[str, Any],
         empirical_peaks: dict[str, Any],
     ) -> None:
-        self.raw_pmc_df = raw_pmc_df
+        self.pmc_cache = pmc_cache
         self.sys_vars = sys_vars
         self.empirical_peaks = empirical_peaks
 
@@ -45,7 +46,7 @@ class MetricEvaluator:
         try:
             # Create comprehensive local context
             local_expr_context: dict[str, Any] = {}
-            local_expr_context.update({"raw_pmc_df": self.raw_pmc_df})
+            local_expr_context.update({"pmc_df": self.pmc_cache})
             local_expr_context.update(self.sys_vars)
             local_expr_context.update(self.empirical_peaks)
 

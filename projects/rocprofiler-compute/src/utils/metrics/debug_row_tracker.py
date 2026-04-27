@@ -12,12 +12,11 @@ from __future__ import annotations
 import re
 from typing import TYPE_CHECKING, Any, Optional
 
-import pandas as pd
-
 from utils.logger import console_warning
 
 if TYPE_CHECKING:
     from utils.metrics.metric_evaluator import MetricEvaluator
+    from utils.metrics.pmc_data_cache import PmcDataCache
 
 
 _MAX_DEBUG_ROWS = 5
@@ -70,22 +69,21 @@ def _print_debug_global_vars(row_expr: str, metric_evaluator: MetricEvaluator) -
 
 def _extract_column_data(
     col_name: str,
-    raw_pmc_df: pd.DataFrame,
+    pmc_cache: PmcDataCache,
 ) -> Optional[list[Any]]:
-    """Extract column data from a dataframe raw_pmc_df."""
-    if col_name not in raw_pmc_df.columns:
+    """Extract column data from a flat PmcDataCache."""
+    if col_name not in pmc_cache:
         return None
-    series = raw_pmc_df[col_name]
-    return series.tolist() if hasattr(series, "tolist") else list(series)
+    return pmc_cache[col_name].tolist()
 
 
 def _collect_debug_column_data(
     row_expr: str,
-    raw_pmc_df: pd.DataFrame,
+    pmc_cache: PmcDataCache,
 ) -> tuple[list[tuple[str, Optional[list[Any]]]], int]:
     """Collect column data and compute alignment width for debug output."""
     matched_cols = re.findall(
-        r"raw_pmc_df\[[\"'](\w+)[\"']\]",
+        r"pmc_df\[[\"']([^\"']+)[\"']\]",
         row_expr,
     )
     seen: set[str] = set()
@@ -97,8 +95,8 @@ def _collect_debug_column_data(
             continue
         seen.add(col_name)
         try:
-            column_data = _extract_column_data(col_name, raw_pmc_df)
-            label = f"raw_pmc_df['{col_name}']"
+            column_data = _extract_column_data(col_name, pmc_cache)
+            label = f"pmc_df['{col_name}']"
             rows_to_print.append((label, column_data))
             if column_data is not None:
                 display = column_data[:_MAX_DEBUG_ROWS]
@@ -132,14 +130,14 @@ def _print_debug_column_data(
 def _print_debug_inputs(
     row_expr: str,
     metric_evaluator: MetricEvaluator,
-    raw_pmc_df: pd.DataFrame,
+    pmc_cache: PmcDataCache,
     show_inputs: bool,
 ) -> None:
     """Print input variables and column data for debug output."""
     print("Inputs:")
     if show_inputs:
         _print_debug_global_vars(row_expr, metric_evaluator)
-        rows_to_print, global_width = _collect_debug_column_data(row_expr, raw_pmc_df)
+        rows_to_print, global_width = _collect_debug_column_data(row_expr, pmc_cache)
         _print_debug_column_data(rows_to_print, global_width)
     else:
         print("  The same as above.")
@@ -160,7 +158,7 @@ def debug_row_tracker(
     expr: str,
     row_expr: str,
     metric_evaluator: MetricEvaluator,
-    raw_pmc_df: pd.DataFrame,
+    pmc_cache: PmcDataCache,
     *,
     show_inputs: bool = True,
 ) -> None:
@@ -170,10 +168,10 @@ def debug_row_tracker(
         expr: The original metric expression (for display purposes).
         row_expr: The fully substituted expression to evaluate.
         metric_evaluator: The MetricEvaluator instance for expression evaluation.
-        raw_pmc_df: Raw PMC data (flat single-index DataFrame).
+        pmc_cache: Flat per-call PmcDataCache (Series-valued).
         show_inputs: Whether to show input variable values (default: True).
     """
     print("~" * 40 + "\nExpression:")
     print(f"{expr} = {row_expr}")
-    _print_debug_inputs(row_expr, metric_evaluator, raw_pmc_df, show_inputs)
+    _print_debug_inputs(row_expr, metric_evaluator, pmc_cache, show_inputs)
     _print_debug_output(row_expr, metric_evaluator)

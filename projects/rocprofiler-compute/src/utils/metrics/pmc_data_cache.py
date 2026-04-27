@@ -7,18 +7,16 @@ from __future__ import annotations
 
 import pandas as pd
 
-from utils import schema
-
 
 class PmcDataCache:
     """
     Hardware counter data cache.
 
-    Keys are column names;
-    values are ``pd.Series``.
-    The ``pmc_perf`` top-level contributes every column as is;
-    each non-``pmc_perf`` top-level contributes its only
-    ``SQ_ACCUM_PREV_HIRES`` column under the key ``{coll_level}_ACCUM``.
+    Wraps a flat single-index PMC DataFrame so each column is exposed as a
+    ``pd.Series`` via mapping-style access. The upstream
+    ``_create_single_df_pmc`` already produces the canonical flat layout
+    (with ``<bucket>_ACCUM`` columns) so this class is a thin lookup-free
+    accessor on top of it.
     """
 
     def __init__(self, raw_pmc_df: pd.DataFrame) -> None:
@@ -32,16 +30,5 @@ class PmcDataCache:
 
     @staticmethod
     def _flatten(raw_pmc_df: pd.DataFrame) -> dict[str, pd.Series]:
-        """Flatten the MultiIndex DataFrame into a dict of column-name to Series."""
-        cache: dict[str, pd.Series] = {}
-        top_levels = raw_pmc_df.columns.get_level_values(0).unique()
-
-        for level in top_levels:
-            level_df = raw_pmc_df[level]
-            if level == schema.PMC_PERF_FILE_PREFIX:
-                for column_name in level_df.columns:
-                    cache[column_name] = level_df[column_name]
-            elif "SQ_ACCUM_PREV_HIRES" in level_df.columns:
-                cache[f"{level}_ACCUM"] = level_df["SQ_ACCUM_PREV_HIRES"]
-
-        return cache
+        """Cache each column of the flat single-index PMC DataFrame as a Series."""
+        return {col: raw_pmc_df[col] for col in raw_pmc_df.columns}
