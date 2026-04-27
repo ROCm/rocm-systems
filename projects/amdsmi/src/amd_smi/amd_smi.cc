@@ -5216,9 +5216,7 @@ amdsmi_status_t amdsmi_get_power_info(amdsmi_processor_handle processor_handle,
   // default the sensor_ind here to 0
   amdsmi_status_t status2 = smi_amdgpu_get_power_cap(gpu_device, 0, &power_limit);
   if (status2 == AMDSMI_STATUS_SUCCESS) {
-    // sysfs power1_cap reports in microwatts; convert to watts
-    constexpr int kMicrowattsPerWatt = 1000000;
-    info->power_limit = static_cast<uint32_t>(power_limit / kMicrowattsPerWatt);
+    info->power_limit = static_cast<uint32_t>(power_limit);
   } else if (status2 == AMDSMI_STATUS_NOT_SUPPORTED) {
     status = AMDSMI_STATUS_SUCCESS;
   }
