@@ -495,7 +495,7 @@ The default rules are:
 * Skip instrumenting large shared libraries
 
   * Processing a large amount of functions for instrumentation is expensive in time.
-    By default, to reduce this cost, libraries with more than 10000 functions are excluded.
+    By default, to reduce this cost, libraries with more than 20000 functions are excluded.
     This limit can be modified with the ``--max-library-functions`` option. Setting it to ``0`` disables the limit.
 
 * Skip instrumenting dynamic call-sites (such as function pointers)
