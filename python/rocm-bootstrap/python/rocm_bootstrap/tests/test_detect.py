@@ -1,13 +1,15 @@
 """Tests for rocm_bootstrap.detect — GPU detection via faked _platform I/O.
 
 Every test patches _platform functions through the FakePlatform fixture,
-injecting realistic sysfs content. No real filesystem access occurs.
+injecting realistic sysfs content and clinfo output. No real filesystem
+access or subprocess calls occur.
 """
 
 import pytest
 
 from rocm_bootstrap.detect import (
     DetectedGpu,
+    _parse_clinfo_output,
     _parse_kfd_properties,
     detect_gpus,
     detect_gfx_targets,
@@ -19,7 +21,7 @@ from rocm_bootstrap.targets import (
     lookup_target,
     parse_gfx_target_version,
 )
-from rocm_bootstrap.tests.conftest import FakePlatform
+from rocm_bootstrap.tests.conftest import FakePlatform, clinfo_output
 
 
 # ---------------------------------------------------------------------------
@@ -339,3 +341,139 @@ class TestCliMutualExclusion:
     def test_unique_and_verbose_conflict(self, fake_platform: FakePlatform):
         with pytest.raises(SystemExit):
             main(["--unique", "--verbose"])
+
+
+# ---------------------------------------------------------------------------
+# clinfo parser unit tests
+# ---------------------------------------------------------------------------
+
+
+class TestParseClinfo:
+    def test_single_gpu(self):
+        gfx1100 = lookup_target("gfx1100")
+        text = clinfo_output(gfx1100, board_name="AMD Radeon PRO W7900")
+        gpus = _parse_clinfo_output(text)
+        assert len(gpus) == 1
+        assert gpus[0].target is gfx1100
+        assert gpus[0].node_id == 0
+
+    def test_two_identical_gpus(self):
+        gfx1100 = lookup_target("gfx1100")
+        text = clinfo_output(gfx1100, gfx1100, board_name="AMD Radeon PRO W7900")
+        gpus = _parse_clinfo_output(text)
+        assert len(gpus) == 2
+        assert all(g.target is gfx1100 for g in gpus)
+        assert gpus[0].node_id == 0
+        assert gpus[1].node_id == 1
+
+    def test_two_different_gpus(self):
+        gfx1100 = lookup_target("gfx1100")
+        gfx1151 = lookup_target("gfx1151")
+        text = clinfo_output(gfx1100, gfx1151)
+        gpus = _parse_clinfo_output(text)
+        assert len(gpus) == 2
+        assert gpus[0].target is gfx1100
+        assert gpus[1].target is gfx1151
+
+    def test_empty_output(self):
+        assert _parse_clinfo_output("") == []
+
+    def test_no_gpu_devices(self):
+        text = "Number of devices:\t\t 0\n"
+        assert _parse_clinfo_output(text) == []
+
+    def test_cpu_device_skipped(self):
+        text = (
+            "  Device Type:\t\t CL_DEVICE_TYPE_CPU\n"
+            "  Name:\t\t\t not_a_gpu\n"
+        )
+        assert _parse_clinfo_output(text) == []
+
+    def test_unknown_target_skipped(self):
+        text = (
+            "  Device Type:\t\t CL_DEVICE_TYPE_GPU\n"
+            "  Name:\t\t\t gfx_unknown_9999\n"
+        )
+        assert _parse_clinfo_output(text) == []
+
+    def test_unknown_target_does_not_break_subsequent(self):
+        gfx1100 = lookup_target("gfx1100")
+        text = (
+            "  Device Type:\t\t CL_DEVICE_TYPE_GPU\n"
+            "  Name:\t\t\t gfx_unknown_9999\n"
+            "  Device Type:\t\t CL_DEVICE_TYPE_GPU\n"
+            "  Name:\t\t\t gfx1100\n"
+        )
+        gpus = _parse_clinfo_output(text)
+        assert len(gpus) == 1
+        assert gpus[0].target is gfx1100
+        assert gpus[0].node_id == 0
+
+    @pytest.mark.parametrize("target", ALL_TARGETS, ids=lambda t: t.name)
+    def test_all_targets_parseable(self, target: GfxTarget):
+        text = clinfo_output(target)
+        gpus = _parse_clinfo_output(text)
+        assert len(gpus) == 1
+        assert gpus[0].target is target
+
+    def test_pci_id_not_set(self):
+        """clinfo does not provide KFD-style device_id, so pci_id is None."""
+        text = clinfo_output(lookup_target("gfx1100"))
+        gpus = _parse_clinfo_output(text)
+        assert gpus[0].pci_id is None
+
+
+# ---------------------------------------------------------------------------
+# clinfo detection integration (via detect_gpus fallback)
+# ---------------------------------------------------------------------------
+
+
+class TestClinfoFallback:
+    def test_clinfo_used_when_kfd_empty(self, fake_platform: FakePlatform):
+        """When KFD returns no GPUs, clinfo is tried as fallback."""
+        gfx1151 = lookup_target("gfx1151")
+        fake_platform.set_clinfo(clinfo_output(gfx1151))
+        gpus = detect_gpus()
+        assert len(gpus) == 1
+        assert gpus[0].target is gfx1151
+
+    def test_kfd_takes_precedence_over_clinfo(self, fake_platform: FakePlatform):
+        """When KFD detects GPUs, clinfo is not used."""
+        gfx942 = lookup_target("gfx942")
+        gfx1100 = lookup_target("gfx1100")
+        fake_platform.add_cpu_node(0)
+        fake_platform.add_gpu_node(1, gfx942)
+        # clinfo reports a different GPU — should be ignored
+        fake_platform.set_clinfo(clinfo_output(gfx1100))
+        gpus = detect_gpus()
+        assert len(gpus) == 1
+        assert gpus[0].target is gfx942
+
+    def test_clinfo_empty_returns_empty(self, fake_platform: FakePlatform):
+        """When both KFD and clinfo return nothing, result is empty."""
+        fake_platform.set_clinfo("")
+        assert detect_gpus() == []
+
+    def test_clinfo_with_env_disable(self, fake_platform: FakePlatform):
+        """Disable flag takes precedence over clinfo."""
+        fake_platform.set_clinfo(
+            clinfo_output(lookup_target("gfx1100"))
+        )
+        fake_platform.set_env("ROCM_BOOTSTRAP_DISABLE_DETECTION", "1")
+        assert detect_gpus() == []
+
+    def test_clinfo_two_gpus_via_detect(self, fake_platform: FakePlatform):
+        gfx1100 = lookup_target("gfx1100")
+        fake_platform.set_clinfo(
+            clinfo_output(gfx1100, gfx1100, board_name="AMD Radeon PRO W7900")
+        )
+        gpus = detect_gpus()
+        assert len(gpus) == 2
+        assert all(g.target is gfx1100 for g in gpus)
+
+    def test_clinfo_dedup_via_detect_gfx_targets(self, fake_platform: FakePlatform):
+        gfx1100 = lookup_target("gfx1100")
+        fake_platform.set_clinfo(clinfo_output(gfx1100, gfx1100))
+        targets = detect_gfx_targets()
+        assert len(targets) == 1
+        assert targets[0] is gfx1100
