@@ -798,7 +798,7 @@ install(
 # counter grouping inspector tool
 install(
     FILES tools/counter_grouping_inspector.py
-    DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
+    DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}/tools
     COMPONENT main
 )
 
