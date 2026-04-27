@@ -1,21 +1,13 @@
-# LTTng curated parameter-capture: drift + verifier gates.
+# LTTng curated parameter-capture: verifier gate.
 #
-# Per spec §9.1 / §9.3 these gates run on every PR that touches the
-# curated YAML, the codegen/verify scripts, the generated tracepoint
-# headers, or this workflow itself. The gates ensure:
-#
-#   1. Drift gate (no libclang): regenerating the per-API headers from
-#      the checked-in YAML + sidecar JSON yields byte-identical output
-#      to the checked-in headers. Catches stale codegen output after a
-#      YAML edit that didn't run `cmake --build build/clr --target
-#      regenerate-lttng-curated`.
-#
-#   2. Verifier gate (libclang): the YAML signatures match the actual
-#      HIP header signatures, AND regenerating the sidecar JSON yields
-#      byte-identical output to the checked-in copy. Catches header-side
-#      type changes for OUT-handle params (per debate-review C10 fix --
-#      a missed sidecar update would mis-generate helper signatures
-#      without this check).
+# Per spec §9.3 this gate runs on every PR that touches the curated
+# YAML, the verifier scripts, or this workflow itself. The verifier
+# (libclang) confirms that the YAML signatures match the actual
+# HIP/HSA header signatures, AND regenerating the sidecar JSON yields
+# byte-identical output to the checked-in copy. Catches header-side
+# type changes for OUT-handle params (per debate-review C10 fix --
+# a missed sidecar update would mis-generate helper signatures
+# without this check).
 #
 name: LTTng Curated Gates
 
@@ -24,14 +16,12 @@ on:
     paths:
       - 'projects/clr/hipamd/scripts/curated_apis.yaml'
       - 'projects/clr/hipamd/scripts/curated_apis_sigs.json'
-      - 'projects/clr/hipamd/scripts/lttng_curated_*.py'
-      - 'projects/clr/hipamd/src/lttng/rocm_hip_curated_tp.h'
-      - 'projects/clr/hipamd/src/lttng/rocm_trace_emit_curated.h'
+      - 'projects/clr/hipamd/scripts/lttng_curated_verify.py'
+      - 'projects/clr/hipamd/scripts/lttng_curated_lib.py'
       - 'projects/rocr-runtime/runtime/hsa-runtime/scripts/curated_apis.yaml'
       - 'projects/rocr-runtime/runtime/hsa-runtime/scripts/curated_apis_sigs.json'
-      - 'projects/rocr-runtime/runtime/hsa-runtime/scripts/lttng_curated_*.py'
-      - 'projects/rocr-runtime/runtime/hsa-runtime/lttng/rocm_hsa_curated_tp.h'
-      - 'projects/rocr-runtime/runtime/hsa-runtime/lttng/rocm_trace_emit_curated.h'
+      - 'projects/rocr-runtime/runtime/hsa-runtime/scripts/lttng_curated_verify.py'
+      - 'projects/rocr-runtime/runtime/hsa-runtime/scripts/lttng_curated_lib.py'
       - '.github/workflows/lttng-curated-gates.yml'
   push:
     branches: [develop]
@@ -40,62 +30,6 @@ permissions:
   contents: read
 
 jobs:
-  drift-gate:
-    name: Codegen drift (HIP + HSA)
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          sparse-checkout: |
-            projects/clr/hipamd/scripts
-            projects/clr/hipamd/src/lttng
-            projects/rocr-runtime/runtime/hsa-runtime/scripts
-            projects/rocr-runtime/runtime/hsa-runtime/lttng
-            .github/workflows
-
-      - name: Set up Python
-        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
-        with:
-          python-version: "3.12"
-
-      - name: Install Python dependencies
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install pyyaml
-
-      - name: Regenerate HIP curated headers from checked-in sidecar and diff
-        # Drift gate runs WITHOUT libclang -- it consumes the checked-in
-        # curated_apis_sigs.json sidecar, regenerates the headers, and
-        # asserts byte-identity. The sidecar itself is regenerated +
-        # diffed by the verify-gate (which has libclang).
-        run: |
-          python3 projects/clr/hipamd/scripts/lttng_curated_codegen.py \
-            --yaml projects/clr/hipamd/scripts/curated_apis.yaml \
-            --sigs projects/clr/hipamd/scripts/curated_apis_sigs.json \
-            --provider rocm_hip \
-            --status-type hipError_t --status-success hipSuccess \
-            --out-tp projects/clr/hipamd/src/lttng/rocm_hip_curated_tp.h \
-            --out-emit projects/clr/hipamd/src/lttng/rocm_trace_emit_curated.h
-          git diff --exit-code -- \
-            projects/clr/hipamd/src/lttng/rocm_hip_curated_tp.h \
-            projects/clr/hipamd/src/lttng/rocm_trace_emit_curated.h
-
-      - name: Regenerate HSA curated headers from checked-in sidecar and diff
-        # Same shape as the HIP step above but for the HSA provider.
-        # Provider name `rocm_hsa`; HSA status type and success sentinel.
-        run: |
-          python3 projects/rocr-runtime/runtime/hsa-runtime/scripts/lttng_curated_codegen.py \
-            --yaml projects/rocr-runtime/runtime/hsa-runtime/scripts/curated_apis.yaml \
-            --sigs projects/rocr-runtime/runtime/hsa-runtime/scripts/curated_apis_sigs.json \
-            --provider rocm_hsa \
-            --status-type hsa_status_t --status-success HSA_STATUS_SUCCESS \
-            --out-tp projects/rocr-runtime/runtime/hsa-runtime/lttng/rocm_hsa_curated_tp.h \
-            --out-emit projects/rocr-runtime/runtime/hsa-runtime/lttng/rocm_trace_emit_curated.h
-          git diff --exit-code -- \
-            projects/rocr-runtime/runtime/hsa-runtime/lttng/rocm_hsa_curated_tp.h \
-            projects/rocr-runtime/runtime/hsa-runtime/lttng/rocm_trace_emit_curated.h
-
   verify-gate:
     name: Verifier (libclang vs YAML) + sidecar drift
     runs-on: ubuntu-latest
@@ -126,8 +60,7 @@ jobs:
       - name: Verify HIP YAML against headers + diff sidecar
         # Verifier rewrites the sidecar JSON; if a header changed in a
         # way that affects an OUT-handle's libclang-resolved C type, the
-        # sidecar diff catches it (and the drift-gate would then mis-
-        # generate the helper signature without this check).
+        # sidecar diff catches it.
         run: |
           python3 projects/clr/hipamd/scripts/lttng_curated_verify.py \
             --yaml projects/clr/hipamd/scripts/curated_apis.yaml \
