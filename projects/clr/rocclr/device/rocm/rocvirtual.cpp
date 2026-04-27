@@ -1464,18 +1464,10 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const std::vector<uint8_t>& flatPack
         const uint8_t pktType =
             extractAqlBits(hdr, HSA_PACKET_HEADER_TYPE, HSA_PACKET_HEADER_WIDTH_TYPE);
         if (timestamp_ != nullptr) {
-          // Assign a profiling signal when safe to do so:
-          //   !pre_patched — normal (non-graph) path, always safe.
-          //   pre_patched  — graph path: ApplyHwEventPatches already placed HW event
-          //                  signals on segment-boundary barrier packets (handle != 0);
-          //                  non-boundary kernel-dispatch packets still have handle == 0
-          //                  and need a signal so ExtractSignalTiming can call
-          //                  addTimestamps and ReportActivity fires per graph node.
-          //                  Never touch barrier packets here (handle != 0 guard) to
-          //                  avoid breaking inter-segment sync.
-          if (!pre_patched ||
-              (pktType == HSA_PACKET_TYPE_KERNEL_DISPATCH &&
-               slot->completion_signal.handle == 0)) {
+          // When pre_patched, skip any slot whose completion_signal was already
+          // written by ApplyHwEventPatches (non-zero means pre-patched).
+          bool has_prepatched_signal = pre_patched && (slot->completion_signal.handle != 0);
+          if (!has_prepatched_signal) {
             slot->completion_signal =
                 Barriers().ActiveSignal(kInitSignalValueOne, timestamp_, true);
             if (pktType == HSA_PACKET_TYPE_KERNEL_DISPATCH) {
