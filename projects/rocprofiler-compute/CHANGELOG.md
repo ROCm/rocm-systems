@@ -8,11 +8,15 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Added ``--bench-only`` profile mode option to run the roofline microbenchmark standalone (without profiling an application or collecting performance counters). No application run is required. Useful for regenerating ``roofline.csv`` in an existing workload directory or running the microbenchmark on systems where only HIP is available. ``--bench-only`` is mutually exclusive with ``--block``, ``--set``, ``--roof-only``, and ``--no-roof``.
 * Added backward compatibility for live attach mode to work with older ROCm 7.x.x releases.
-* Added per-operator stats (calls, dispatch min/max/mean) and a flat operator summary table to ``--experimental analyze --list-torch-operators`` / ``--torch-operator`` output.
 
 ### Changed
 
 * Changed ratio metric aggregation from `AVG(A/B)` (arithmetic mean of per-dispatch ratios) to `SUM(A)/SUM(B)` (ratio of totals) across all analysis YAML configurations and all GPU architectures. `SUM(A)/SUM(B)` is a weighted average where each dispatch contributes proportionally to its denominator magnitude (duration, access count, cycle count). Single-dispatch workloads are unaffected (mathematically identical). Multi-dispatch workloads with different kernels or varying durations will see corrected values.
+
+* Added operator statistics in the analysis output of torch operators profiling. Added the following statistics for every torch operators and its children:
+    * Number of invocations
+    * Number of kernel dispatches
+    * Min/Max/Mean and Total duration of kernel dispatches
 
 ### Removed
 
