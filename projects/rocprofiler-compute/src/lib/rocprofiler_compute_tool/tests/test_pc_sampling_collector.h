@@ -7,5 +7,5 @@
 class test_pc_sampling_collector_t : public ::testing::Test
 {
 protected:
-	rocprofiler_compute_tool::pc_sampling_collector_impl_t m_pc_sampling_collector;
+	rocprofiler_compute_tool::pc_sampling_collector_impl_t::Ptr m_pc_sampling_collector;
 };

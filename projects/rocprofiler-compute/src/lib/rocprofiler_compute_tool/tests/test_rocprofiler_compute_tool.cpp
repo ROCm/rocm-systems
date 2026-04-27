@@ -42,8 +42,7 @@ TEST_F(test_rocprofiler_compute_tool_t, ProvidedNonEmptyOutputPath_ReturnsItExte
 {
     const auto cfg       = rocprofiler_configure(1, "", 1, &m_client_id);
     const auto tool_data = get_tool_data(cfg);
-    EXPECT_TRUE(tool_data->output_filename.find(m_env_parameters->get_output_path()) !=
-                std::string::npos);
+    EXPECT_TRUE(tool_data->output_filename.find(m_env_parameters->get_output_path()) != std::string::npos);
     EXPECT_TRUE(tool_data->output_filename.find(
                     std::to_string(getpid()) + "_native_counter_collection.csv") != std::string::npos);
 }
@@ -227,16 +226,13 @@ TEST_F(test_rocprofiler_compute_tool_t, OnDispatchCallback_ForwardsToSdkCallback
 
 TEST_F(test_rocprofiler_compute_tool_t, OnRecordCallback_ForwardsToSdkCallbacks)
 {
-    tool_data_t tool_data{};
-    tool_data.sdk_callbacks = m_sdk_callbacks;
-
     rocprofiler_dispatch_counting_service_data_t dispatch_data{};
     dispatch_data.dispatch_info.kernel_id = 7;
     rocprofiler_counter_record_t      record{};
     constexpr size_t                  record_count = 1;
     constexpr rocprofiler_user_data_t user_data{};
 
-    record_callback(dispatch_data, &record, record_count, user_data, &tool_data);
+    record_callback(dispatch_data, &record, record_count, user_data, &m_tool_data);
 
     const auto& calls = m_sdk_callbacks->get_record_callback_info();
     EXPECT_EQ(calls.size(), 1);
@@ -253,40 +249,55 @@ TEST_F(test_rocprofiler_compute_tool_t, OnToolTracingCallback_ForwardsToSdkCallb
     rocprofiler_callback_tracing_record_t record{};
     record.kind = ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT;
 
-    tool_tracing_callback(record, nullptr, &tool_data);
+    tool_tracing_callback(m_pc_sampling_record, nullptr, &m_tool_data);
 
     const auto& calls = m_sdk_callbacks->get_tracing_callback_info();
     EXPECT_EQ(calls.size(), 1);
     EXPECT_EQ(calls[0].record.kind, record.kind);
 }
 
-TEST_F(test_rocprofiler_compute_tool_t, OnCodeObjectTracingCallback_ForwardsToSdkCallbacks)
+TEST_F(test_rocprofiler_compute_tool_t, OnCodeObjectTracingIfPcSamplingEnabled_ForwardsToSdkCallbacks)
 {
-    tool_data_t tool_data{};
-    tool_data.pc_sampling_collector.wlock([&](auto& ptr) { ptr = m_pc_sampling_collector; });
+    m_payload.code_object_id = 1;
+    m_env_parameters->set_pc_sampling_mode("host_trap");
+    code_object_tracing_callback(m_pc_sampling_record, nullptr, &m_tool_data);
 
-    rocprofiler_callback_tracing_code_object_load_data_t payload = {};
-    payload.code_object_id                                       = 0xfe;
-    const auto record = create_code_object_load_info_with_payload(payload);
-
-    code_object_tracing_callback(record, nullptr, &tool_data);
+    m_payload.code_object_id = 2;
+    m_env_parameters->set_pc_sampling_mode("stochastic");
+    code_object_tracing_callback(m_pc_sampling_record, nullptr, &m_tool_data);
 
     const auto& calls = m_pc_sampling_collector->get_on_code_object_load_info();
-    EXPECT_EQ(calls.size(), 1);
-    EXPECT_EQ(calls[0].code_object_id, payload.code_object_id);
+    EXPECT_EQ(calls.size(), 2);
+    EXPECT_EQ(calls[0].code_object_id, 1);
+    EXPECT_EQ(calls[1].code_object_id, 2);
+}
+
+TEST_F(test_rocprofiler_compute_tool_t, OnCodeObjectTracingIfPcSamplingDisabled_DoesntForwardToSdkCallbacks)
+{
+    m_env_parameters->set_pc_sampling_mode("disabled");
+    code_object_tracing_callback(m_pc_sampling_record, nullptr, &m_tool_data);
+
+    const auto& calls = m_pc_sampling_collector->get_on_code_object_load_info();
+    EXPECT_EQ(calls.size(), 0);
 }
 
 //////////////////////////////////////////////////////////////////////////
 /// test_rocprofiler_compute_tool_t
 void test_rocprofiler_compute_tool_t::SetUp()
 {
-    m_env_parameters      = std::make_shared<mock_env_parameters_t>();
+    m_payload.code_object_id = 1;
+    m_pc_sampling_record     = create_code_object_load_info_with_payload(m_payload);
+
+    m_env_parameters        = std::make_shared<mock_env_parameters_t>();
     m_sdk_wrapper           = std::make_shared<mock_sdk_wrapper_t>();
     m_counters_writer       = std::make_shared<mock_counters_writer_t>();
     m_sdk_callbacks         = std::make_shared<mock_sdk_callbacks_t>();
     m_pc_sampling_collector = std::make_shared<mock_pc_sampling_collector_t>();
 
-    test_knobs::set_input_parameters(m_env_parameters);
+    m_tool_data.pc_sampling_collector.wlock([&](auto& ptr) { ptr = m_pc_sampling_collector; });
+    m_tool_data.sdk_callbacks = m_sdk_callbacks;
+
+    test_knobs::set_env_parameters(m_env_parameters);
     test_knobs::set_sdk_wrapper(m_sdk_wrapper);
     test_knobs::set_csv_writer(m_counters_writer);
 }
@@ -327,7 +338,7 @@ rocprofiler_callback_tracing_record_t test_rocprofiler_compute_tool_t::create_co
     record.kind                                  = ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT;
     record.operation                             = ROCPROFILER_CODE_OBJECT_LOAD;
     record.phase                                 = ROCPROFILER_CALLBACK_PHASE_LOAD;
-    record.payload                               = &payload;
+    record.payload                               = &m_payload;
 
     return record;
 }

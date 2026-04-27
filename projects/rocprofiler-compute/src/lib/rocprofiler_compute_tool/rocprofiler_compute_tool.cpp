@@ -4,7 +4,7 @@
 #include "rocprofiler_compute_tool.h"
 
 #include "gsl_assert.h"
-#include "input_parameters.h"
+#include "env_parameters.h"
 #include "sdk_callbacks.h"
 #include "sdk_wrapper.h"
 
@@ -21,7 +21,7 @@ static std::shared_ptr<sdk_wrapper_t> g_sdk_wrapper = std::make_shared<sdk_wrapp
 static std::shared_ptr<counters_writer_t> g_counters_writer = std::make_shared<csv_counters_writer_t>();
 static std::shared_ptr<rocprofiler_tool_configure_result_t> g_cfg;
 
-void test_knobs::set_input_parameters(const std::shared_ptr<env_parameters_t>& input_parameters)
+void test_knobs::set_env_parameters(const std::shared_ptr<env_parameters_t>& input_parameters)
 {
     g_input_parameters = input_parameters;
 }

@@ -4,6 +4,7 @@
 #include <rocprofiler-sdk/rocprofiler.h>
 
 #include <memory>
+#include <string>
 
 namespace rocprofiler_compute_tool
 {
@@ -26,6 +27,7 @@ public:
 class pc_sampling_collector_impl_t : public pc_sampling_collector_t
 {
 public:
+    pc_sampling_collector_impl_t();
     void on_code_object_load(const rocprofiler_callback_tracing_code_object_load_data_t& info) override;
 };
 }  // namespace rocprofiler_compute_tool
