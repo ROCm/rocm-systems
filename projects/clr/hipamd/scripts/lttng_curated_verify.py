@@ -49,6 +49,9 @@ C_TO_DSL = {
     'uint32_t':                {'uint32', 'enum'},
     'int64_t':                 {'int64'},
     'uint64_t':                {'uint64'},
+    # HSA's hsa_signal_value_t typedef'd to int64_t under HSA_LARGE_MODEL,
+    # but libclang canonicalizes to plain `long` (LP64). Accept both.
+    'long':                    {'int64'},
     # Narrow integer types are upper-compatible with the wider DSL
     # uint32 type (used for hipMemsetD8/D16's `value` param). The
     # helper signature widens to uint32_t.
@@ -79,6 +82,9 @@ HANDLE_TYPE_PATTERNS = (
     'ihipGraph', 'hipGraphExec', 'hipGraphNode',
     'hipUserObject_t',
     'hsa_signal_t', 'hsa_queue_t', 'hsa_agent_t',
+    # HSA value-type handles (struct foo_s) — match against the canonical
+    # `hsa_amd_memory_pool_s` form too.
+    'hsa_amd_memory_pool_t', 'hsa_amd_memory_pool_s',
 )
 
 def _type_is_handle(c_type):
