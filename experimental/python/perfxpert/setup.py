@@ -10,16 +10,17 @@ Behavior:
 * Pre-build (``build_py``), pre-editable-install (``develop`` /
   ``editable_wheel``): invoke the build script if the bundled binary
   is missing OR older than the patch series.
-* If ``bun`` is not on PATH: DO NOT download build tooling during
-  ``pip install``. Emit a warning and skip the bundled opencode build.
-  Install still succeeds —
-  only ``perfxpert-code`` is affected; library + analyze + MCP paths
-  all work regardless.
+* If ``bun`` is not on PATH: bootstrap bun into the user's home directory
+  and add it to PATH for this build. If the OS-level prerequisites needed
+  for that bootstrap are missing, fail with distro-specific package-manager
+  guidance instead of silently producing a broken ``perfxpert-code``.
 * Opt-out via ``PERFXPERT_SKIP_BUNDLED_BUILD=1`` — useful in
-  tightly-sandboxed CI where network isn't available.
+  tightly-sandboxed CI where network isn't available and the interactive
+  ``perfxpert-code`` TUI is intentionally not being built.
 * The setup hook will initialize the repo-pinned opencode submodule
-  when possible. If the source tree is missing that submodule, it warns
-  and skips rather than cloning a mutable upstream tag during install.
+  when possible. If the source tree is missing that submodule, it fails
+  with an actionable message rather than cloning a mutable upstream tag
+  during install.
 """
 
 from __future__ import annotations
@@ -87,24 +88,126 @@ _PATCHES_DIR = _HERE / ".patches"
 _OPENCODE_DIR = _HERE / "opencode"
 _SKIP_ENV = "PERFXPERT_SKIP_BUNDLED_BUILD"
 _SKIP_OPENCODE_FETCH_ENV = "PERFXPERT_SKIP_OPENCODE_FETCH"
+_DEFAULT_BUN_INSTALL_URL = "https://bun.sh/install"
+
+
+def _package_manager_prereq_hint() -> str:
+    return (
+        "Install the OS prerequisites first:\n"
+        "  Ubuntu 22.04 / 24.04:\n"
+        "    apt install -y curl git unzip python3-venv python3-pip\n"
+        "  RHEL 9:\n"
+        "    command -v curl >/dev/null || dnf install -y curl\n"
+        "    dnf install -y git unzip python3.11 python3.11-pip\n"
+        "  RHEL 10:\n"
+        "    command -v curl >/dev/null || dnf install -y curl\n"
+        "    dnf install -y git unzip python3 python3-pip\n"
+        "  SLES 15:\n"
+        "    zypper install -y curl git unzip python311 python311-pip\n"
+    )
+
+
+def _missing_tools(tools: tuple[str, ...]) -> list[str]:
+    missing: list[str] = []
+    for tool in tools:
+        if shutil.which(tool) is None:
+            missing.append(tool)
+    return missing
+
+
+def _missing_build_prereqs() -> list[str]:
+    return _missing_tools(("bash", "git"))
+
+
+def _missing_bun_bootstrap_prereqs() -> list[str]:
+    return _missing_tools(("bash", "curl", "unzip"))
+
+
+def _missing_os_prereqs() -> list[str]:
+    return _missing_tools(("bash", "curl", "git", "unzip"))
+
+
+def _fail_build(message: str) -> None:
+    print(
+        f"[perfxpert/setup.py] ERROR: {message}\n\n{_package_manager_prereq_hint()}",
+        file=sys.stderr,
+    )
+    raise SystemExit(1)
+
+
+def _run_bun_install_script(env: dict[str, str]) -> int:
+    url = os.environ.get("PERFXPERT_BUN_INSTALL_URL", _DEFAULT_BUN_INSTALL_URL)
+    missing = _missing_bun_bootstrap_prereqs()
+    if missing:
+        _fail_build(
+            "missing OS prerequisites for bun bootstrap: "
+            + ", ".join(missing)
+            + "."
+        )
+    curl = shutil.which("curl")
+    bash = shutil.which("bash")
+    assert curl is not None
+    assert bash is not None
+
+    curl_proc = subprocess.Popen(
+        [curl, "-fsSL", url],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        env=env,
+        text=False,
+    )
+    assert curl_proc.stdout is not None
+    bash_proc = subprocess.run(
+        [bash],
+        stdin=curl_proc.stdout,
+        env=env,
+        check=False,
+    )
+    curl_proc.stdout.close()
+    _, curl_stderr = curl_proc.communicate()
+    if curl_proc.returncode != 0:
+        sys.stderr.write(curl_stderr.decode("utf-8", errors="replace"))
+        return curl_proc.returncode
+    return bash_proc.returncode
 
 
 def _ensure_bun_on_path() -> str | None:
     """Return a PATH env string that includes an available bun binary.
 
-    Returns ``None`` if bun is unavailable. The setup hook deliberately
-    refuses to download build tooling during ``pip install``.
+    Bootstraps bun into ``$BUN_INSTALL`` when needed so ``pip install`` can
+    produce the bundled patched ``perfxpert-code`` binary end to end.
     """
     existing = shutil.which("bun")
     if existing:
         return os.environ.get("PATH", "")
+    missing = _missing_bun_bootstrap_prereqs()
+    if missing:
+        _fail_build(
+            "missing OS prerequisites for bun bootstrap: "
+            + ", ".join(missing)
+            + "."
+        )
+
+    bun_install = os.environ.get("BUN_INSTALL") or str(Path.home() / ".bun")
+    env = os.environ.copy()
+    env["BUN_INSTALL"] = bun_install
+
     print(
-        "[perfxpert/setup.py] bun not on PATH — refusing to download build "
-        "tooling during pip install. Install bun manually before building "
-        "the bundled opencode binary.",
+        "[perfxpert/setup.py] bun not on PATH — bootstrapping bun so the "
+        "bundled patched opencode binary is built during pip install.",
         file=sys.stderr,
     )
-    return None
+    rc = _run_bun_install_script(env)
+    if rc != 0:
+        _fail_build(f"bun bootstrap failed with exit code {rc}.")
+
+    bun_path = str(Path(bun_install) / "bin")
+    path = os.environ.get("PATH", "")
+    if bun_path not in path.split(os.pathsep):
+        path = bun_path + os.pathsep + path if path else bun_path
+    if shutil.which("bun", path=path) is None:
+        _fail_build(f"bun bootstrap finished but bun is unavailable under {bun_path}.")
+    return path
 
 
 # ---------------------------------------------------------------------------
@@ -190,7 +293,7 @@ def _ensure_opencode_checkout() -> bool:
     if os.environ.get(_SKIP_OPENCODE_FETCH_ENV, "").strip() in {"1", "true", "yes"}:
         print(
             f"[perfxpert/setup.py] {_SKIP_OPENCODE_FETCH_ENV}=1 — "
-            "not fetching opencode source; bundled build will be skipped.",
+            "not fetching opencode source.",
             file=sys.stderr,
         )
         return False
@@ -256,7 +359,8 @@ def _ensure_opencode_checkout() -> bool:
         "[perfxpert/setup.py] WARNING: opencode/ is empty and setup.py will "
         "not clone from the network during install. Initialize the pinned "
         f"submodule first (`git submodule update --init --depth 1 -- {rel_hint}`) "
-        "or set PERFXPERT_OPENCODE_PATH at runtime.",
+        "or use scripts/pip-install-from-git.sh so pip scopes submodule init "
+        "to the PerfXpert opencode submodule.",
         file=sys.stderr,
     )
     return False
@@ -272,7 +376,7 @@ def _opencode_build_needed() -> tuple[bool, str]:
     if os.environ.get(_SKIP_ENV, "").strip() in {"1", "true", "yes"}:
         return False, f"{_SKIP_ENV}=1 — skipping bundled opencode build"
     if not _BUILD_SCRIPT.is_file():
-        return False, f"build script missing ({_BUILD_SCRIPT}); nothing to do"
+        return True, f"build script missing ({_BUILD_SCRIPT})"
     # Rebuild when the binary is missing OR older than the newest patch.
     if not _BUNDLE_PATH.is_file():
         return True, "bundled opencode binary missing — building"
@@ -289,6 +393,18 @@ def _run_opencode_build() -> None:
     print(f"[perfxpert/setup.py] opencode build: {reason}", file=sys.stderr)
     if not should_build:
         return
+    if not _BUILD_SCRIPT.is_file():
+        _fail_build(
+            f"required bundled opencode build script is missing: {_BUILD_SCRIPT}. "
+            f"Set {_SKIP_ENV}=1 only if this build intentionally excludes perfxpert-code."
+        )
+    missing = _missing_build_prereqs()
+    if missing:
+        _fail_build(
+            "missing OS prerequisites for bundled perfxpert-code build: "
+            + ", ".join(missing)
+            + "."
+        )
     # Belt-and-suspenders: the opencode source tree is normally populated
     # by the enclosing git submodule init, but when the user invokes
     # `scripts/pip-install-from-git.sh` (or sets `submodule.active`
@@ -296,24 +412,13 @@ def _run_opencode_build() -> None:
     # be missing here. Check + fetch on-demand before the build script
     # tries to find package.json.
     if not _ensure_opencode_checkout():
-        print(
-            "[perfxpert/setup.py] WARNING: opencode source tree unavailable — "
-            "bundled opencode binary NOT built. Library + analyze + MCP "
-            "paths still work; `perfxpert-code` will exit with a helpful "
-            "error at first launch.",
-            file=sys.stderr,
+        _fail_build(
+            "opencode source tree unavailable. The default perfxpert-code "
+            "path requires the repo-pinned opencode submodule."
         )
-        return
     build_path = _ensure_bun_on_path()
     if build_path is None:
-        print(
-            "[perfxpert/setup.py] WARNING: bun not available — "
-            "bundled opencode binary NOT built. Library + analyze + MCP "
-            "paths still work; `perfxpert-code` will prompt to install "
-            "bun at first launch.",
-            file=sys.stderr,
-        )
-        return
+        _fail_build("bun is unavailable after bootstrap.")
     env = os.environ.copy()
     env["PATH"] = build_path
     result = subprocess.run(
@@ -323,12 +428,9 @@ def _run_opencode_build() -> None:
         check=False,
     )
     if result.returncode != 0:
-        # Don't fail the install — leave a clear breadcrumb.
-        print(
-            f"[perfxpert/setup.py] WARNING: build-bundled-opencode.sh exited "
-            f"{result.returncode}. `perfxpert-code` won't launch until you run "
-            f"`bash {_BUILD_SCRIPT.relative_to(_HERE)}` successfully.",
-            file=sys.stderr,
+        _fail_build(
+            f"build-bundled-opencode.sh exited {result.returncode}; "
+            "bundled perfxpert-code was not produced."
         )
 
 

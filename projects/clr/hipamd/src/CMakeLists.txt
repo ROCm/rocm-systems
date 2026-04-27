@@ -310,7 +310,7 @@ endif()
 if(HIP_ENABLE_ROCPROFILER_REGISTER)
     find_package(rocprofiler-register REQUIRED
         HINTS $ENV{rocprofiler_register_ROOT} $ENV{ROCPROFILER_REGISTER_ROOT} ${CMAKE_INSTALL_PREFIX}
-        PATHS /opt/rocm)
+        PATHS ${ROCM_PATH})
 
     # don't use HIP_VERSION_PATCH because it is too large (> 100) for rocprofiler register
     target_compile_definitions(amdhip64 PRIVATE HIP_ROCPROFILER_REGISTER=1

@@ -11,8 +11,8 @@
 #include <gmock/gmock.h>
 
 namespace hipFile {
-class MStatsServer : public StatsServer {
-    ContextOverride<StatsServer> co;
+class MStatsServer : public IStatsServer {
+    ContextOverride<IStatsServer> co;
 
 public:
     MStatsServer() : co{this}

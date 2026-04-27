@@ -8,7 +8,6 @@
 #include "alloc.h"
 #include "collectives.h"
 #include "common_kernel.h"
-#include "common.h"
 #include <cuda_runtime.h>
 
 #if defined(__gfx950__)

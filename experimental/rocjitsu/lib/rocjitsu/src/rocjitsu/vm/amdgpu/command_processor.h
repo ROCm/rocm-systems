@@ -112,6 +112,9 @@ public:
   /// sees the new ring without tearing.
   void update_queue(uint32_t queue_id, uint64_t ring_base_va, uint32_t ring_size);
 
+  /// @brief Set the execution plugin group (shared ownership).
+  void set_plugin_group(std::shared_ptr<ExecutionPluginGroup> pg) { plugin_group_ = pg ? pg : ExecutionPluginGroup::empty_group(); }
+
   /// @brief Register a compute unit that this CP can dispatch to.
   ///
   /// @details Creates a dispatch OUT port for the CU and registers an on_idle
@@ -244,6 +247,8 @@ private:
 
   /// @brief Protects hw_queues_ (accessed from both the polling thread and register_queue).
   std::mutex hw_queue_mutex_;
+
+  std::shared_ptr<ExecutionPluginGroup> plugin_group_ = ExecutionPluginGroup::empty_group();
 
   uint64_t read_gpu_u64(uint64_t va) const;
   void stop_doorbell_monitor();

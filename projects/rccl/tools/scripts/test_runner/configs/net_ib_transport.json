@@ -113,6 +113,26 @@
           "name": "NetIB_Conn_CloseWithoutWaiting",
           "description": "Close connection without waiting for transfer completion",
           "test_filter": "NetIbMPITest.CloseWithoutWaitingForCompletion"
+        },
+        {
+          "name": "NetIB_Conn_MultipleSequential",
+          "description": "Multiple sequential listen/connect/close cycles",
+          "test_filter": "NetIbMPITest.MultipleSequentialConnections"
+        },
+        {
+          "name": "NetIB_Conn_ListenCloseListen",
+          "description": "Close listener mid-handshake and re-listen on same port",
+          "test_filter": "NetIbMPITest.ListenCloseListen"
+        },
+        {
+          "name": "NetIB_Conn_MultipleSimultaneousListens",
+          "description": "Multiple concurrent listeners on different handles",
+          "test_filter": "NetIbMPITest.MultipleSimultaneousListens"
+        },
+        {
+          "name": "NetIB_Conn_RapidConnectDisconnect",
+          "description": "Rapid repeated connect/disconnect cycles for resource leak detection",
+          "test_filter": "NetIbMPITest.RapidConnectDisconnect"
         }
       ]
     },
@@ -176,6 +196,26 @@
           "name": "NetIB_Xfer_MultipleSequential",
           "description": "Multiple sequential send/recv on the same connection",
           "test_filter": "NetIbMPITest.MultipleSequentialTransfers"
+        },
+        {
+          "name": "NetIB_Xfer_DifferentMemoryTypes",
+          "description": "Send/recv with mixed host and GPU memory buffers",
+          "test_filter": "NetIbMPITest.SendRecvDifferentMemoryTypes"
+        },
+        {
+          "name": "NetIB_Xfer_MultipleSizesFusion",
+          "description": "Send/recv multiple buffer sizes through fused vNIC",
+          "test_filter": "NetIbMPITest.SendRecvMultipleSizesFusion"
+        },
+        {
+          "name": "NetIB_Xfer_MultipleOutstanding",
+          "description": "Multiple outstanding send/recv requests in flight simultaneously",
+          "test_filter": "NetIbMPITest.MultipleOutstandingSendRecv"
+        },
+        {
+          "name": "NetIB_Xfer_Multidirectional",
+          "description": "Concurrent bidirectional transfers across multiple connections",
+          "test_filter": "NetIbMPITest.MultidirectionalTransfer"
         }
       ]
     },
@@ -205,6 +245,11 @@
           "name": "NetIB_VDev_InvalidProps",
           "description": "Reject makeVDevice with ndevs=0 (ncclInvalidUsage)",
           "test_filter": "NetIbMPITest.MakeVirtualDeviceInvalidProps"
+        },
+        {
+          "name": "NetIB_VDev_MergeMultipleDevices",
+          "description": "Merge more than two physical IB NICs into a single virtual device",
+          "test_filter": "NetIbMPITest.MergeMultipleDevices"
         }
       ]
     },

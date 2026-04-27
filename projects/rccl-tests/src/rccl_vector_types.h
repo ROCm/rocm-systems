@@ -4,8 +4,8 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-#ifndef _VECTOR_TYPES_H_
-#define _VECTOR_TYPES_H_
+#ifndef RCCL_VECTOR_TYPES_H_
+#define RCCL_VECTOR_TYPES_H_
 
 #include <cuda_runtime.h>
 
@@ -86,4 +86,4 @@ __device__ __forceinline__ uint4 vectorAdd(uint4 a, uint4 b) {
   return make_uint4(a.x + b.x, a.y + b.y, a.z + b.z, a.w + b.w);
 }
 
-#endif // _VECTOR_TYPES_H_
+#endif // RCCL_VECTOR_TYPES_H_
