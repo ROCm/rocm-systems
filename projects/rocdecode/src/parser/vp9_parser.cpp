@@ -236,7 +236,7 @@ ParserResult Vp9VideoParser::NotifyNewSequence(Vp9UncompressedHeader *p_uncomp_h
     video_format_params_.display_area.bottom = p_uncomp_header->frame_size.frame_height;
     video_format_params_.bitrate = 0;
 
-    // Dispaly aspect ratio
+    // Display aspect ratio
     int disp_width = (video_format_params_.display_area.right - video_format_params_.display_area.left);
     int disp_height = (video_format_params_.display_area.bottom - video_format_params_.display_area.top);
     int gcd = std::__gcd(disp_width, disp_height); // greatest common divisor
@@ -582,7 +582,7 @@ ParserResult Vp9VideoParser::ParseUncompressedHeader(uint8_t *p_stream, size_t s
     p_uncomp_header->header_size_in_bytes = Parser::ReadBits(p_stream, offset, 16);
 
     // Arbitrary size change is only supported on key frames. For other frame types, particularly inter-coded frames, only size down is
-    // supported where the existing surface can be re-used.
+    // supported where the existing surface can be reused.
     if (pic_width_ != p_uncomp_header->frame_size.frame_width || pic_height_ != p_uncomp_header->frame_size.frame_height) {
         pic_width_ = p_uncomp_header->frame_size.frame_width;
         pic_height_ = p_uncomp_header->frame_size.frame_height;

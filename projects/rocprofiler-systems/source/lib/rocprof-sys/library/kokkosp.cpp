@@ -6,10 +6,10 @@
 #include "library/kokkosp.hpp"
 
 #include "api.hpp"
+#include "common/defines.h"
 #include "core/agent_manager.hpp"
 #include "core/components/fwd.hpp"
 #include "core/config.hpp"
-#include "core/defines.hpp"
 #include "core/node_info.hpp"
 #include "core/perfetto.hpp"
 #include "core/trace_cache/cache_manager.hpp"
