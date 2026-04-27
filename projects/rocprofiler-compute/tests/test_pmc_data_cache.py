@@ -13,38 +13,29 @@ class TestPmcDataCache:
     """Tests for utils.metrics.pmc_data_cache.PmcDataCache."""
 
     def _make_pmc_perf_only_df(self):
-        """Build a MultiIndex DataFrame whose only top-level is pmc_perf."""
-        return pd.concat(
-            {
-                "pmc_perf": pd.DataFrame({
-                    "SQ_WAVES": [100, 200, 150],
-                    "GRBM_GUI_ACTIVE": [1000, 2000, 1500],
-                })
-            },
-            axis=1,
-        )
+        """Build a flat DataFrame matching `_create_single_df_pmc` output."""
+        return pd.DataFrame({
+            "SQ_WAVES": [100, 200, 150],
+            "GRBM_GUI_ACTIVE": [1000, 2000, 1500],
+        })
 
     def _make_two_level_df(self):
-        """MultiIndex DataFrame with pmc_perf and one SQ_INST_LEVEL_VMEM level."""
-        return pd.concat(
-            {
-                "pmc_perf": pd.DataFrame({
-                    "Kernel_Name": ["k", "k"],
-                    "Dispatch_ID": [0, 1],
-                    "SQ_WAVES": [100, 200],
-                    "SQ_INSTS_VMEM": [10, 20],
-                }),
-                "SQ_INST_LEVEL_VMEM": pd.DataFrame({
-                    "Kernel_Name": ["k", "k"],
-                    "Dispatch_ID": [0, 1],
-                    "SQ_ACCUM_PREV_HIRES": [50, 70],
-                }),
-            },
-            axis=1,
-        )
+        """Flat DataFrame whose accumulator column is already canonically named.
+
+        Upstream `soc_base.py` renames bucket-level `SQ_ACCUM_PREV_HIRES` columns
+        to `<bucket>_ACCUM` before the per-call DataFrame reaches PmcDataCache,
+        so this fixture mirrors that post-rename layout.
+        """
+        return pd.DataFrame({
+            "Kernel_Name": ["k", "k"],
+            "Dispatch_ID": [0, 1],
+            "SQ_WAVES": [100, 200],
+            "SQ_INSTS_VMEM": [10, 20],
+            "SQ_INST_LEVEL_VMEM_ACCUM": [50, 70],
+        })
 
     def test_pmc_perf_columns_lift_to_flat_keys(self):
-        """Every pmc_perf column appears at its natural name as a pd.Series."""
+        """Every column of the flat DataFrame is exposed as a pd.Series."""
         cache = PmcDataCache(self._make_pmc_perf_only_df())
         assert "SQ_WAVES" in cache
         assert "GRBM_GUI_ACTIVE" in cache
@@ -57,8 +48,8 @@ class TestPmcDataCache:
         assert isinstance(grbm, pd.Series)
         assert grbm.tolist() == [1000, 2000, 1500]
 
-    def test_accum_rename_for_non_pmc_perf_levels(self):
-        """SQ_ACCUM_PREV_HIRES from non-pmc_perf levels is renamed to {level}_ACCUM."""
+    def test_accum_alias_column_is_passed_through(self):
+        """Pre-renamed `<bucket>_ACCUM` columns are exposed under their flat name."""
         cache = PmcDataCache(self._make_two_level_df())
 
         assert "SQ_INST_LEVEL_VMEM_ACCUM" in cache
@@ -66,7 +57,8 @@ class TestPmcDataCache:
         assert isinstance(accum_series, pd.Series)
         assert accum_series.tolist() == [50, 70]
 
-        # The original SQ_ACCUM_PREV_HIRES name is not exposed; only the renamed key is.
+        # The legacy `SQ_ACCUM_PREV_HIRES` column name is no longer present
+        # because the upstream renamer has already canonicalized it.
         assert "SQ_ACCUM_PREV_HIRES" not in cache
 
     def test_missing_key_raises_keyerror(self):
@@ -80,23 +72,14 @@ class TestPmcDataCache:
         cache = PmcDataCache(self._make_pmc_perf_only_df())
         assert ("UNKNOWN_COUNTER" in cache) is False
 
-    def test_level_with_no_accum_column_is_skipped(self):
-        """A non-pmc_perf level missing SQ_ACCUM_PREV_HIRES contributes nothing."""
-        df_without_accum = pd.concat(
-            {
-                "pmc_perf": pd.DataFrame({
-                    "Kernel_Name": ["k", "k"],
-                    "Dispatch_ID": [0, 1],
-                    "SQ_WAVES": [100, 200],
-                    "SQ_INSTS_VMEM": [10, 20],
-                }),
-                "SQ_INST_LEVEL_VMEM": pd.DataFrame({
-                    "Kernel_Name": ["k", "k"],
-                    "Dispatch_ID": [0, 1],
-                }),
-            },
-            axis=1,
-        )
+    def test_dataframe_without_accum_alias_does_not_synthesize_one(self):
+        """A flat DataFrame missing any `_ACCUM` alias doesn't gain one in the cache."""
+        df_without_accum = pd.DataFrame({
+            "Kernel_Name": ["k", "k"],
+            "Dispatch_ID": [0, 1],
+            "SQ_WAVES": [100, 200],
+            "SQ_INSTS_VMEM": [10, 20],
+        })
         cache = PmcDataCache(df_without_accum)
         assert "SQ_WAVES" in cache
         assert "SQ_INST_LEVEL_VMEM_ACCUM" not in cache
