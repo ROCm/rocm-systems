@@ -7,7 +7,6 @@
 
 #include "p2p_cast.h"
 #include "common_cast.h"
-#include "compiler.h"
 #include "p2p_resiliency_cast.h"
 
 NCCL_PARAM(IbArThreshold, "IB_AR_THRESHOLD", -2);

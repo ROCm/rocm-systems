@@ -8,6 +8,13 @@
 #include "common_cast.h"
 #include "p2p_resiliency_recovery_cast.h"
 
+// RCCL's pciPathToInt64 (defined in graph/topo.cc) takes 4 args; NCCL 2.30 callers use 2.
+// Declare the 4-arg version and provide a 2-arg shim.
+ncclResult_t pciPathToInt64(char* path, int offset, int minOffset, int64_t* id);
+static ncclResult_t pciPathToInt64(char* path, int64_t* id) {
+  return pciPathToInt64(path, (int)strlen(path), 0, id);
+}
+
 NCCL_PARAM(IbPciRelaxedOrdering, "IB_PCI_RELAXED_ORDERING", 2);
 NCCL_PARAM(IbAdaptiveRouting, "IB_ADAPTIVE_ROUTING", -2);
 NCCL_PARAM(IbDataDirect,"IB_DATA_DIRECT",1);
@@ -391,7 +398,7 @@ ncclResult_t ncclIbInitDevices(ncclDebugLogger_t logFunction, ncclProfilerCallba
                    ncclIbDevs[ncclNIbDevs].pciPath, ncclIbDevs[ncclNIbDevs].ar, ncclIbDevs[ncclNIbDevs].oooRqSize);
 
               ncclIbAsyncThread = std::thread(ncclIbAsyncThreadMain, ncclIbDevs + ncclNIbDevs);
-              ncclSetThreadName(ncclIbAsyncThread, "NCCL IbAsync %2d", ncclNIbDevs);
+              ncclSetThreadName(ncclIbAsyncThread.native_handle(), "NCCL IbAsync %2d", ncclNIbDevs);
               ncclIbAsyncThread.detach();
 
               ncclNIbDevs++;
@@ -486,8 +493,6 @@ ncclResult_t ncclIbGetPhysProperties(int dev, ncclNetProperties_t* props) {
   props->maxP2pBytes = NCCL_MAX_NET_SIZE_BYTES;
   props->maxCollBytes = MAX_COLLNET_SIZE;
   props->maxMultiRequestSize = 1;
-  props->railId = NCCL_NET_ID_UNDEF;
-  props->planeId = NCCL_NET_ID_UNDEF;
   return ncclSuccess;
 }
 
