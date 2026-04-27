@@ -408,7 +408,17 @@ def crash_risk(api):
     if 'Launch' in n or n.endswith('Kernel'):
         return 1
     return 0
-apis = sorted(parse_yaml_file('$YAML'), key=lambda a: (crash_risk(a), a['api']))
+# Sort: forked APIs first (any order by crash_risk), then INLINE_APIs last.
+# Inline APIs touch the parent's HIP runtime state directly; running them
+# AFTER all forks have completed avoids two failure modes:
+#   1. Earlier inline call queues async work; subsequent fork() child can
+#      hang waiting on it (the worker thread that would complete it
+#      doesn't exist in the child).
+#   2. fork() during inline-queued state corrupts the inline path.
+def sort_key(a):
+    inline_last = 1 if a['api'] in INLINE_APIS else 0
+    return (inline_last, crash_risk(a), a['api'])
+apis = sorted(parse_yaml_file('$YAML'), key=sort_key)
 for idx, api in enumerate(apis):
     name = api['api']
     if name in RUNTIME_SKIP:
