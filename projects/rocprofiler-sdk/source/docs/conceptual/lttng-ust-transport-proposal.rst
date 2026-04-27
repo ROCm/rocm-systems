@@ -71,6 +71,25 @@ generic out-of-process subscription, but it is not free: it adds the
 ``liblttng-ust`` dependency and does not directly satisfy the existing
 in-process callback ABI without the local buffer kept by this POC.
 
+Compatibility Problem
+---------------------
+
+LTTng introduces a packaging and backward-compatibility risk that the SDK does
+not control. During active-session benchmarking, the host installation had
+``lttng-tools`` 2.13 but ``liblttng-ctl0`` 2.14. That mixed userspace stack made
+the client and session daemon disagree on control command IDs: ``lttng create``
+failed with ``Session name not found`` even though the session daemon was
+spawned.
+
+The benchmark worked only after avoiding the system installation and running a
+complete matching LTTng 2.14 stack extracted under ``/tmp/lttng-2.14`` with
+isolated ``LTTNG_HOME`` and ``XDG_RUNTIME_DIR`` directories. A production
+rocprofiler-sdk LTTng transport would need to treat this as a real compatibility
+problem: it should validate the LTTng client, session daemon, consumer daemon,
+and libraries as a matched stack, document supported version ranges, and fail
+with a clear diagnostic when the installed LTTng control-plane ABI is
+inconsistent.
+
 Design Position
 ---------------
 
