@@ -18,7 +18,7 @@
 } while (0)
 
 int main() {
-    // Per spec §4.1 testable success criteria:
+    // Coverage of the lane-encoding contract documented in rocm_dim3_pack.h.
 
     // test_dim3_packed_normal_range
     EXPECT_EQ(ROCM_DIM3_PACK(dim3(1, 2, 3)),

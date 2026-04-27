@@ -2,17 +2,16 @@
 # LTTng coverage gate (HIP).
 #
 # 1. Symbol coverage: diff the public HIP symbols exported from
-#    libamdhip64.so against the AST-migration inventory (one or more TSV
-#    files written by lttng_migrate.py). Fails the build on any exported
-#    HIP symbol that wasn't migrated AND isn't in the exemption file.
+#    libamdhip64.so against the migration inventory (one or more TSV
+#    files). Fails the build on any exported HIP symbol that wasn't
+#    migrated AND isn't in the exemption file.
 #
 # 2. Body-content coverage (defense-in-depth): for each migrated symbol,
 #    locate its function body in the source TUs and require:
 #      - >=1 rocm_trace_emit_hip_api_enter call
 #      - AND (>=1 ROCM_TRACE_RET_*/ROCR_TRACE_API_RET_* macro
 #        OR    >=1 rocm_trace_emit_hip_api_exit_* call)
-#    The migrator should always produce balanced wrappers; this guards
-#    against accidental drift (hand edits, partial reverts).
+#    Guards against drift (hand edits, partial reverts).
 #    By default body-content failures are reported as WARNINGs only.
 #    Set `LTTNG_COVERAGE_STRICT=1` in the environment to make them fatal.
 #
@@ -78,11 +77,10 @@ if [ -n "$MISSING" ]; then
     echo "FAIL: $NMISS exported HIP symbols are NOT in the LTTng migration inventory:"
     printf '  %s\n' $MISSING
     echo ""
-    echo "These symbols are exported from $SO but lttng_migrate.py did not"
-    echo "rewrite their wrapper bodies. Either:"
-    echo "  - extend the migrator (e.g. add a return-type to classify())"
-    echo "  - add the wrappers to a source file the migrator scans"
-    echo "  - explicitly exempt the symbol with a known-list (only after review)"
+    echo "These symbols are exported from $SO but their wrapper bodies"
+    echo "are not in the LTTng migration inventory. Either:"
+    echo "  - migrate the wrapper (insert enter/exit emit + __rocm_corr)"
+    echo "  - explicitly exempt the symbol via lttng_coverage_exemptions.txt"
     exit 1
 fi
 
@@ -122,7 +120,7 @@ if [ "$BODY_RC" -ne 0 ]; then
 fi
 
 # ---------------------------------------------------------------------------
-# 3. Curated-args coverage gate (spec §8.2)
+# 3. Curated-args coverage gate
 # ---------------------------------------------------------------------------
 # Skipped silently when curated_apis.yaml is absent (allows gradual
 # rollout; the gate becomes mandatory once any API is curated).
@@ -142,10 +140,10 @@ if [ -f "$CURATED_YAML" ]; then
         exit 1
     fi
 
-    # Body-content scan (spec §8.2): each curated wrapper body must have
-    # the sentinel, a _CURATED macro invocation, and (for APIs with any
-    # IN/INOUT arg) at least one __rocm_in_ local. See
-    # lttng_coverage_check.py:gate_curated for the implementation.
+    # Body-content scan: each curated wrapper body must have the sentinel,
+    # a _CURATED macro invocation, and (for APIs with any IN/INOUT arg) at
+    # least one __rocm_in_ local. See lttng_coverage_check.py:gate_curated
+    # for the implementation.
     set +e
     python3 "$SCRIPT_DIR/lttng_coverage_check.py" curated \
         --src-dir "$SRC_DIR" \

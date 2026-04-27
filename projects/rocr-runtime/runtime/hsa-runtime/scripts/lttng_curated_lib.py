@@ -1,19 +1,15 @@
 """Shared parser/validator library for the LTTng curated-args DSL.
 
-Used by:
-  - lttng_curated_codegen.py   (generates tracepoint header + emit helpers)
-  - lttng_curated_verify.py    (libclang vs YAML drift check; CI gate)
-  - lttng_migrate.py           (selects _CURATED vs _CURATED_NOARGS macro variants)
+Used by the coverage gate (lttng_coverage_check.py / lttng_coverage_gate.sh)
+and by the unit tests (test_lttng_curated_lib.py). PyYAML is the only
+third-party dependency.
 
-Schema and field-budget rules are normative per:
-  docs/superpowers/specs/2026-04-26-lttng-curated-args-design.md §4.
-
-The library has NO libclang dependency — that is isolated to the verifier
-script. PyYAML is the only third-party dependency.
+Schema, field-budget rules, and the INOUT-not-supported-in-v1 rule are
+normative for the curated-args DSL.
 """
 import yaml
 
-# ---- DSL vocabulary (spec §4.1) ----
+# ---- DSL vocabulary ----
 DSL_TYPES = frozenset([
     'handle', 'ptr', 'device_ptr', 'size',
     'int32', 'uint32', 'int64', 'uint64',
@@ -25,16 +21,16 @@ ALLOWED_CATEGORIES = frozenset([
     'hsa_queues', 'hsa_signals', 'hsa_memory',
 ])
 
-# Per spec §4.4: budget is 10 LTTng fields total including corr_id => 9 payload max.
+# Field budget: at most 10 LTTng fields total including corr_id => 9 payload.
 PAYLOAD_BUDGET = 9
 
-# Type expansion (spec §4.4).
+# Type expansion (number of payload fields each DSL type emits).
 TYPE_EXPANSION = {
     'dim3': 3, 'dim3_packed': 1,
     # All others expand to 1.
 }
 
-# Direction expansion (spec §4.4): INOUT contributes 2 (input + <name>_out).
+# Direction expansion: INOUT contributes 2 (input + <name>_out).
 DIR_EXPANSION = {'IN': 1, 'OUT': 1, 'INOUT': 2}
 
 
@@ -55,7 +51,7 @@ def _dir_expand(arg):
 
 def expanded_field_count(api):
     """Return total payload field count (excluding corr_id) after both
-    type-expansion and direction-expansion (spec §4.4 normative rule)."""
+    type-expansion and direction-expansion."""
     return sum(_type_expand(a) * _dir_expand(a) for a in api['args'])
 
 
@@ -80,11 +76,11 @@ def _validate_arg(arg, api_name):
         raise ParseError(
             f"{api_name} arg {arg['name']}: unknown dir {arg['dir']!r}; "
             f"valid: {sorted(ALLOWED_DIRS)}")
-    # Spec §4.4 INOUT-out-of-scope-v1: hard error in codegen + verifier.
+    # INOUT is out-of-scope for v1; model the parameter as IN or OUT instead.
     if arg['dir'] == 'INOUT':
         raise ParseError(
-            f"{api_name} arg {arg['name']}: dir: INOUT is out-of-scope for v1 "
-            f"(spec §4.4 'INOUT scope (v1)'); model as IN or OUT instead")
+            f"{api_name} arg {arg['name']}: dir: INOUT is out-of-scope for v1; "
+            f"model as IN or OUT instead")
 
 
 def validate_api(api):
@@ -102,8 +98,8 @@ def validate_api(api):
     if n > PAYLOAD_BUDGET:
         raise BudgetError(
             f"{api['api']}: payload has {n} fields, exceeds budget of "
-            f"{PAYLOAD_BUDGET} (spec §4.4). Apply mitigation: type as "
-            f"dim3_packed and/or omit low-value args.")
+            f"{PAYLOAD_BUDGET}. Apply mitigation: type as dim3_packed "
+            f"and/or omit low-value args.")
 
 
 def parse_yaml_text(text):

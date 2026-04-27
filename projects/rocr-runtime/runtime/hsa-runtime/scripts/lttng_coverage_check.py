@@ -23,12 +23,10 @@ Subcommands:
                 not fail the gate; the symbol-coverage gate vouches for
                 them upstream.
 
-  curated       Curated-args body-content gate (spec §8.2). For each
-                API listed in --yaml, locate the wrapper body that
-                contains the '/* __ROCM_CURATED__: <name> */' sentinel
-                and require:
-                  - a curated _CURATED macro invocation matching the
-                    spec §8.2 regex
+  curated       Curated-args body-content gate. For each API listed in
+                --yaml, locate the wrapper body that contains the
+                '/* __ROCM_CURATED__: <name> */' sentinel and require:
+                  - a curated _CURATED macro invocation
                   - if the API has at least one IN/INOUT arg, at least
                     one '__rocm_in_' local in the body
 
@@ -183,8 +181,8 @@ def gate_body(args):
 # Subcommand: curated
 # ---------------------------------------------------------------------------
 
-# Spec §8.2 regex matcher for all six HIP curated-macro variants plus
-# the HSA mirror (so the same gate works for hsa_table_interface.cpp).
+# Regex matcher for all six HIP curated-macro variants plus the HSA mirror
+# (so the same gate works for hsa_table_interface.cpp).
 _CURATED_MACRO_RE = re.compile(
     r'(?:ROCM_TRACE_RET|ROCR_TRACE_API_RET)_(?:STATUS|PTR|VOID)_CURATED'
     r'(?:_HSA)?(?:_NOARGS)?\s*\(')

@@ -274,9 +274,9 @@ lttng destroy "$SESSION_NAME" >/dev/null
 DUMP="$WORK/trace.txt"
 babeltrace2 "$TRACE_DIR" > "$DUMP"
 
-# Per spec: assert each <api>_args event appears at least once.
+# Assert each <api>_args event appears at least once.
 # Use process substitution (< <(...)) instead of pipe-into-while so the
-# MISSING counter accumulates in the parent shell (C5 fix).
+# MISSING counter accumulates in the parent shell.
 # APIs in the SKIP set (mirrored to harness above) are reported as SKIP
 # rather than FAIL since the harness intentionally does not call them.
 SKIP_RE='^(hsa_amd_queue_intercept_create)$'

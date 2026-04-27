@@ -2,7 +2,7 @@
 # LTTng coverage gate (HSA).
 #
 # 1. Symbol coverage: diff the public HSA symbols exported from
-#    libhsa-runtime64.so against the LTTng AST-migration inventory.
+#    libhsa-runtime64.so against the LTTng migration inventory.
 #    Fails the build on any miss.
 #
 # 2. Body-content coverage (defense-in-depth): for each migrated HSA
@@ -10,9 +10,8 @@
 #      - >=1 rocm_trace_emit_hsa_api_enter call
 #      - AND (>=1 ROCR_TRACE_API_RET_* macro
 #        OR    >=1 rocm_trace_emit_hsa_api_exit_* call)
-#    The migrator should always produce balanced wrappers; this guards
-#    against accidental drift. WARN by default; set
-#    LTTNG_COVERAGE_STRICT=1 to make body-content gaps fatal.
+#    Guards against drift (hand edits, partial reverts). WARN by default;
+#    set LTTNG_COVERAGE_STRICT=1 to make body-content gaps fatal.
 #
 # Usage:
 #   lttng_coverage_gate.sh <path/to/libhsa-runtime64.so> <inventory.txt>
@@ -181,7 +180,7 @@ PY
 fi
 
 # ---------------------------------------------------------------------------
-# 3. HSA curated-args coverage gate (spec §8.2)
+# 3. HSA curated-args coverage gate
 # ---------------------------------------------------------------------------
 # Skipped silently when curated_apis.yaml is absent (allows gradual
 # rollout; the gate becomes mandatory once any API is curated).
@@ -201,8 +200,8 @@ if [ -f "$CURATED_YAML" ]; then
         exit 1
     fi
 
-    # Body-content scan (spec §8.2): each curated wrapper body must have
-    # the sentinel, a _CURATED_HSA macro invocation, and (for APIs with
+    # Body-content scan: each curated wrapper body must have the sentinel,
+    # a _CURATED_HSA macro invocation, and (for APIs with
     # any IN/INOUT arg) at least one __rocm_in_ local. The shared
     # lttng_coverage_check.py:gate_curated regex matches both HIP
     # (_CURATED) and HSA (_CURATED_HSA) variants, so the same script

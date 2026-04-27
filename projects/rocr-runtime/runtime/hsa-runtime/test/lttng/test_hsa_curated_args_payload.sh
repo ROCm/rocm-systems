@@ -6,8 +6,8 @@
 #    hsa_amd_memory_pool_allocate_args plus generic enter/exit_status.
 # 3. Builds + runs a tiny HSA program with known argument values.
 # 4. Asserts the typed args events appear with correct payload values.
-# 5. Asserts generic enter/exit_status still fire (augment-not-replace
-#    per spec §6.2).
+# 5. Asserts generic enter/exit_status still fire (typed _args augments,
+#    never replaces).
 #
 # Usage: test_hsa_curated_args_payload.sh [<libhsa-runtime64-build-dir>]
 set -euo pipefail
@@ -159,7 +159,7 @@ else
     echo "  WARN  hsa_amd_memory_pool_allocate_args not in trace (no GPU/pool present?)"
 fi
 
-# D. Generic enter/exit_status preserved (augment-not-replace per spec §6.2).
+# D. Generic enter/exit_status preserved (typed _args augments, never replaces).
 N_ENTER=$(grep -c 'rocm_hsa:hsa_api_enter' "$DUMP" || true)
 N_EXIT=$(grep -c 'rocm_hsa:hsa_api_exit_status' "$DUMP" || true)
 if [ "$N_ENTER" -ge 2 ] && [ "$N_EXIT" -ge 2 ]; then

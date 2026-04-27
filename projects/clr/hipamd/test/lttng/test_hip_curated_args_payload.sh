@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# End-to-end payload test for curated _args events (Phase E: 3 APIs).
+# End-to-end payload test for curated _args events (3 APIs).
 #
 # 1. Spins up a per-user lttng-sessiond.
 # 2. Enables rocm_hip:hipMemcpyAsync_args, rocm_hip:hipMalloc_args,
@@ -7,7 +7,8 @@
 # 3. Builds + runs a tiny program with known argument values.
 # 4. Asserts the typed args events appear with correct payload values.
 # 5. Asserts pointer-returning APIs still get hip_api_exit_ptr (NOT
-#    exit_status), matching the spec §6.2 generic-exit preservation rule.
+#    exit_status); the typed args event augments the generic exit, never
+#    replaces it.
 #
 # Usage: test_hip_curated_args_payload.sh [<libamdhip64-build-dir>]
 set -euo pipefail
@@ -21,7 +22,8 @@ fi
 WORK="$(mktemp -d)"
 SESSION_NAME="hip-lttng-curated-payload-$$"
 
-# Isolated sessiond (avoid host-wide pkill races per debate-review C5).
+# Isolated sessiond (scoped LTTNG_HOME and pidfile; avoid host-wide
+# pkill races against other concurrent test sessiond instances).
 export LTTNG_HOME="$WORK/lttng_home"
 mkdir -p "$LTTNG_HOME"
 SESSIOND_PIDFILE="$WORK/sessiond.pid"
@@ -154,7 +156,7 @@ else
     FAIL=$((FAIL+1))
 fi
 
-# D. Generic exit events still fire (augment-not-replace per spec §6.2).
+# D. Generic exit events still fire (typed _args augments, never replaces).
 # When hipMemcpyAsync segfaults its exit doesn't fire, so the bound is 2
 # in that case; otherwise 3.
 N_ENTER=$(grep -c 'rocm_hip:hip_api_enter' "$DUMP" || true)

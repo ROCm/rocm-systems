@@ -52,28 +52,21 @@ template <> hipError_t HandleException<hipError_t>() {
 }  // namespace hip
 
 #define TRY try {
-/* CATCH/CATCHRET: must call rocp_reg_auto_pop() before returning so that the
- * shared TLS corr_id slot pushed by emit_hip_api_enter is restored even on
- * the exception path. Otherwise the slot would stay pushed for the rest of
- * the thread's lifetime, leaking the exception-throwing API's corr_id into
- * every subsequent HSA tracepoint as parent_corr_id. */
+/* CATCH/CATCHRET: call rocp_reg_auto_pop() on the exception path so the
+ * shared TLS corr_id slot pushed by emit_hip_api_enter is restored. The
+ * exit tracepoint is intentionally NOT emitted on this path -- consumers
+ * see hip_api_enter without a matching hip_api_exit_status and interpret
+ * that as "exception thrown". */
 #define CATCH } catch(...) { rocp_reg_auto_pop(); return hip::HandleException<hipError_t>(); }
 #define CATCHRET(RETURN_TYPE) } catch(...) { rocp_reg_auto_pop(); return hip::HandleException<RETURN_TYPE>(); }
 
-/* Typed exit macros used by the AST-migrated wrappers (see
- * scripts/lttng_migrate.py). The wrapper body declares the corr id and
- * emits the enter tracepoint as its very first statement (inserted by the
- * AST pass), so __rocm_corr is in scope when these macros expand at the
- * return site.
- *
- *   STATUS variant: hipError_t / int / bool. Captures status as int32_t.
- *   PTR    variant: any pointer return type. Captures pointer as uint64_t.
- *   VOID   variant: void return. Captures function name + corr only.
- *
- * Exception paths (via TRY/CATCH/CATCHRET) do NOT emit the exit tracepoint;
- * that's an accepted limitation - the caller will see hip_api_enter without
- * a matching hip_api_exit_status, which the consumer can interpret as
- * "exception thrown". */
+/* Typed exit macros. Each wrapper body declares __rocm_corr and emits the
+ * enter tracepoint as its first statement; these macros expand at the
+ * return site and emit the matching exit tracepoint:
+ *   STATUS variant: hipError_t / int / bool returns; status captured as int32_t.
+ *   PTR    variant: pointer returns; pointer captured as uint64_t.
+ *   VOID   variant: void returns; function name + corr only.
+ */
 #define ROCM_TRACE_RET_STATUS(EXPR)                                            \
     do {                                                                       \
         const auto __rocm_rv = (EXPR);                                         \
@@ -96,23 +89,20 @@ template <> hipError_t HandleException<hipError_t>() {
         return;                                                                \
     } while (0)
 
-/* ---------- Curated parameter-capture variants (spec §6.2) ----------
- * Six macros: STATUS / PTR / VOID, each with a captured-args form and a
- * _NOARGS form. The migrator selects _NOARGS iff the curated API has zero
- * captured args. Helper signature invariant: every helper takes
- *   (uint64_t corr_id, <captured-args...>, hipError_t status)
- * even when captured-args is empty. Status comes from:
- *   - STATUS variants: macro-evaluated __rocm_status from the call's expr
- *   - PTR variants:    synthesized from null-vs-non-null retval
- *   - VOID variants:   literal hipSuccess
+/* ---------- Curated parameter-capture variants ----------
+ * Six macros: STATUS / PTR / VOID returns, each with a captured-args form
+ * and a _NOARGS form (used for curated APIs with zero captured args).
+ * Every typed helper takes (uint64_t corr_id, <captured-args...>,
+ * hipError_t status) -- status comes from the call's return expression
+ * (STATUS), is synthesized from null-vs-non-null retval (PTR), or is
+ * literal hipSuccess (VOID).
  *
- * Generic exit events (hip_api_exit_status / _ptr / _void) are still
- * emitted by these macros — the typed _args event AUGMENTS the existing
- * generic event, never replaces it (spec §1, §2).
+ * The typed _args event AUGMENTS the generic exit event
+ * (hip_api_exit_status / _ptr / _void); it never replaces it.
  */
 
 /* Captured-args variants. __VA_ARGS__ is non-empty by construction (the
- * migrator emits the _NOARGS form for zero-arg APIs). */
+ * _NOARGS variants are used for zero-arg APIs). */
 #define ROCM_TRACE_RET_STATUS_CURATED(api, expr, corr, ...)                  \
     do {                                                                     \
         const hipError_t __rocm_status = (expr);                             \
@@ -140,8 +130,8 @@ template <> hipError_t HandleException<hipError_t>() {
         return;                                                              \
     } while (0)
 
-/* Zero-captured-args variants. Avoids any empty-__VA_ARGS__ expansion
- * (the codebase mixes C++14/17/20 — see spec §6.2 _NOARGS rationale). */
+/* Zero-captured-args variants. Separate macros to avoid empty
+ * __VA_ARGS__ expansion in the captured-args macros above. */
 #define ROCM_TRACE_RET_STATUS_CURATED_NOARGS(api, expr, corr)                \
     do {                                                                     \
         const hipError_t __rocm_status = (expr);                             \

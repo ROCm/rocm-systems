@@ -67,15 +67,10 @@ static inline uint8_t rocm_trace_sniff_packet_type(
 #include <atomic>
 #include "rocm_hsa_tp.h"
 
-/* Runtime-wide kill switch defined in rocm_trace_init.cpp. Set true when
- * ROCM_LTTNG_UST_DISABLE=1 or when running in a non-default link namespace
- * (dlmopen mitigation). When true every emit helper short-circuits before
- * touching any LTTng state OR the auto-stack -- enter and exit both check
- * the same flag so the depth stays balanced.
- *
- * The symbol is named per-DSO (`rocm_hsa_...` in libhsa-runtime64,
- * `rocm_hip_...` in libamdhip64) so ELF symbol interposition cannot
- * cross-bind the two runtimes' flags. */
+/* Runtime-wide kill switch defined in rocm_trace_init.cpp. When true,
+ * every emit helper short-circuits before touching LTTng state or the
+ * auto-stack -- enter and exit both check the same flag so the auto-stack
+ * depth stays balanced. */
 extern std::atomic<bool> rocm_hsa_trace_g_disabled;
 
 #ifndef ROCM_TRACE_DISABLED_DEFINED
@@ -86,13 +81,11 @@ static inline bool rocm_trace_disabled(void) {
 #endif
 
 /* HSA emit_enter: capture parent_corr_id (= the active slot value BEFORE
- * the push) and emit with it as the new field. The push then makes the
- * HSA call's own corr_id the active slot value, so any nested HSA / non-HSA
- * tracepoints see this HSA call as their parent.
- *
- * The push always runs regardless of tracepoint enable state so that nested
- * tracepoints (which may be enabled even when this one is not) see correct
- * parent values. The matching pop happens in the exit emit helpers. */
+ * the push), then push this call's corr_id so any nested HSA / non-HSA
+ * tracepoints see this call as their parent. The push runs regardless of
+ * this tracepoint's enable state so nested (possibly enabled) tracepoints
+ * still get correct parent values; the matching pop happens in the exit
+ * emit helpers. */
 static inline void rocm_trace_emit_hsa_api_enter(const char* api_name,
                                                  uint64_t    corr_id) {
     if (rocm_trace_disabled()) return;
@@ -109,9 +102,8 @@ static inline void rocm_trace_emit_hsa_api_exit_status(const char* api_name,
                                                        uint64_t    corr_id,
                                                        int32_t     status) {
     if (rocm_trace_disabled()) return;
-    /* Pop first, then read active. The post-pop active value equals the
-     * pre-push parent, so the exit event's parent_corr_id matches the
-     * matching enter event's parent_corr_id. */
+    /* Pop first, then read active: post-pop active == pre-push parent, so
+     * the exit event's parent_corr_id matches the matching enter's. */
     rocp_reg_auto_pop();
     const uint64_t parent = rocp_reg_active_corr_id_get();
     if (lttng_ust_tracepoint_enabled(rocm_hsa, hsa_api_exit_status)) {
@@ -173,15 +165,11 @@ static inline void rocm_trace_emit_hsa_api_exit_void(const char* api_name,
     }
 }
 
-/* Doorbell ring: mints a fresh self_corr for the doorbell event itself so
- * that the schema's `corr_id` field uniquely identifies this doorbell
- * occurrence (rather than aliasing the surrounding HSA wrapper's corr_id,
- * which would make corr_id == parent_corr_id). parent_corr_id carries
- * whatever is active on the calling thread at emit time -- when called
- * from within an HSA wrapper this is the wrapper's own corr_id (which
- * was pushed by emit_hsa_api_enter); outside any wrapper context it's
- * the slot's last-written value (or 0). Pattern mirrors
- * rocm_trace_emit_hip_aql_kernel_dispatch_submit. */
+/* Doorbell ring: mints a fresh self_corr so the schema's `corr_id`
+ * uniquely identifies this doorbell occurrence (would otherwise alias the
+ * surrounding HSA wrapper's corr_id and make corr_id == parent_corr_id).
+ * parent_corr_id is the surrounding HSA wrapper's corr_id when called
+ * from within one, or 0 otherwise. */
 static inline void rocm_trace_emit_hsa_doorbell_ring(uint32_t queue_id,
                                                      int64_t  write_idx,
                                                      uint8_t  packet_type) {
@@ -208,7 +196,7 @@ static inline void rocm_trace_emit_hsa_intercept_packets(uint32_t queue_id,
     }
 }
 
-/* Curated per-API typed emit helpers. Generated; see spec §5.2. */
+/* Curated per-API typed emit helpers (generated header). */
 #include "rocm_trace_emit_curated.h"
 
 #else /* !HSA_ENABLE_LTTNG_UST */

@@ -1,22 +1,19 @@
 #!/usr/bin/env bash
-# HSA LTTng invariant tests (post-debate-review).
+# HSA LTTng invariant tests.
 #
 # Asserts semantic invariants beyond the symbol smoke checks in
 # test_hsa_api_tracepoints.sh:
 #
-#   I1. Enter/exit balance per (pid, tid):
-#         count(hsa_api_enter) == sum(_exit_status, _ptr, _void, _u64, _i64)
-#       Catches missed exit emits (e.g. for pure-void no-return wrappers
-#       that were silently un-paired before debate-review C1).
+#   I1. Enter/exit balance: count(hsa_api_enter) ==
+#         sum(_exit_status, _ptr, _void, _u64, _i64). Catches missed exit
+#         emits (especially for pure-void no-return wrappers).
 #
-#   I2. 64-bit return preservation (HARD ASSERTION, after C4 fix):
-#         after submitting N packets with hsa_queue_add_write_index_relaxed,
-#         the next hsa_queue_load_write_index_relaxed must produce a
+#   I2. 64-bit return preservation: after submitting N packets with
+#         hsa_queue_add_write_index_relaxed, the next
+#         hsa_queue_load_write_index_relaxed must produce a
 #         hsa_api_exit_u64 event whose retval matches the expected value
-#         exactly. Proves _u64 events are emitted instead of (truncated)
-#         _status events for queue index ops, AND the value is preserved.
-#         Also requires at least one hsa_api_exit_i64 from a signal_load
-#         call, proving _i64 path works.
+#         exactly. Also requires at least one hsa_api_exit_i64 from a
+#         signal_load call, proving _i64 path works.
 #
 #   I3. Doorbell uniqueness: covered by the HIP invariants test
 #       (test_hip_invariants.sh), which fires real doorbells via

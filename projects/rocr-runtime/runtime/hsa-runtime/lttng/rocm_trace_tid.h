@@ -2,14 +2,10 @@
  * SPDX-License-Identifier: MIT
  *
  * Thin wrappers over librocprofiler-register's correlation API. The TLS
- * slot used to be `static __thread` (TU-local) here, which prevented
- * cross-runtime same-thread propagation. The slot has been hoisted to
- * librocprofiler-register/correlation.h so HIP and HSA share it via the
- * dynamic linker.
- *
- * When HIP enters an instrumented API and pushes its corr_id, HSA's
- * downstream tracepoints fired on the same thread now read the same slot
- * and emit the HIP corr_id as `parent_corr_id`.
+ * corr-id slot lives in librocprofiler-register/correlation.h so HIP and
+ * HSA share it via the dynamic linker -- when HIP pushes its corr_id on
+ * entry, HSA tracepoints fired on the same thread emit it as
+ * `parent_corr_id`.
  */
 #ifndef ROCM_TRACE_TID_H_
 #define ROCM_TRACE_TID_H_

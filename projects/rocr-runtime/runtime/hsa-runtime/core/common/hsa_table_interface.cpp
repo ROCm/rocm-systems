@@ -46,10 +46,10 @@
 #include "lttng/rocm_trace_emit.h"
 #include "lttng/rocm_trace_tid.h"
 
-/* Three typed exit macros mirror Phase 2's HIP-side. The libclang AST
- * migration in scripts/lttng_migrate.py inserts the matching macro
- * into each wrapper based on the wrapper's return type. __rocm_corr is
- * declared at the top of each migrated wrapper body by the same pass. */
+/* Typed exit macros (mirror of HIP's hip_table_interface.cpp). Each
+ * wrapper body declares __rocm_corr and emits the enter tracepoint as
+ * its first statement; these macros expand at the return site and emit
+ * the matching exit tracepoint based on the wrapper's return type. */
 #define ROCR_TRACE_API_RET_STATUS(EXPR)                                        \
     do {                                                                       \
         const auto __rocm_rv = (EXPR);                                         \
@@ -90,23 +90,20 @@
         return __rocm_rv;                                                      \
     } while (0)
 
-/* ---------- HSA curated parameter-capture variants (spec §6.2 / §6.5)
- * Six macros: STATUS / PTR / VOID, each with a captured-args form and a
- * _NOARGS form. The migrator selects _NOARGS iff the curated API has zero
- * captured args. Helper signature invariant: every helper takes
- *   (uint64_t corr_id, <captured-args...>, hsa_status_t status)
- * even when captured-args is empty. Status comes from:
- *   - STATUS variants: macro-evaluated __rocm_status from the call's expr
- *   - PTR variants:    synthesized from null-vs-non-null retval (rare on HSA)
- *   - VOID variants:   literal HSA_STATUS_SUCCESS
+/* ---------- HSA curated parameter-capture variants ----------
+ * Six macros: STATUS / PTR / VOID returns, each with a captured-args form
+ * and a _NOARGS form (used for curated APIs with zero captured args).
+ * Every typed helper takes (uint64_t corr_id, <captured-args...>,
+ * hsa_status_t status) -- status comes from the call's return expression
+ * (STATUS), is synthesized from null-vs-non-null retval (PTR; rare on HSA),
+ * or is literal HSA_STATUS_SUCCESS (VOID).
  *
- * Generic exit events (hsa_api_exit_status / _ptr / _void) are still
- * emitted by these macros — the typed _args event AUGMENTS the existing
- * generic event, never replaces it (spec §1, §2).
+ * The typed _args event AUGMENTS the generic exit event
+ * (hsa_api_exit_status / _ptr / _void); it never replaces it.
  */
 
 /* Captured-args variants. __VA_ARGS__ is non-empty by construction (the
- * migrator emits the _NOARGS form for zero-arg APIs). */
+ * _NOARGS variants are used for zero-arg APIs). */
 #define ROCR_TRACE_API_RET_STATUS_CURATED_HSA(api, expr, corr, ...)            \
     do {                                                                       \
         const hsa_status_t __rocm_status = (expr);                             \
@@ -135,8 +132,8 @@
         return;                                                                \
     } while (0)
 
-/* Zero-captured-args variants. Mirrors HIP's _NOARGS rationale (mixed
- * C++ standard surface; avoid empty-__VA_ARGS__ expansion). */
+/* Zero-captured-args variants. Separate macros to avoid empty
+ * __VA_ARGS__ expansion in the captured-args macros above. */
 #define ROCR_TRACE_API_RET_STATUS_CURATED_HSA_NOARGS(api, expr, corr)          \
     do {                                                                       \
         const hsa_status_t __rocm_status = (expr);                             \

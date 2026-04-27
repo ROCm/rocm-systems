@@ -1,7 +1,7 @@
 /* Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
  * SPDX-License-Identifier: MIT
  *
- * dim3 packing macro for LTTng curated tracepoints. See spec §4.1.
+ * dim3 packing macro for LTTng curated tracepoints.
  *
  * Lane layout (64-bit packed value):
  *   bits  0..31  : x  (full 32 bits)
@@ -11,10 +11,9 @@
  *                  z >= 0x8000 is treated as overflow because the lane is
  *                  intentionally 15 bits to keep bit 63 unambiguous)
  *
- * Branch-light: no error/abort path, only saturating arithmetic. Overflow
- * is a degraded-data signal, not an error. Consumers MUST treat any packed
- * value with bit 63 set as "true y and/or z is unknown but >= the
- * lane-saturated value" per spec §4.1 overflow policy.
+ * Branch-light: only saturating arithmetic, no abort path. Overflow is a
+ * degraded-data signal: consumers MUST treat any value with bit 63 set as
+ * "true y and/or z is unknown but >= the lane-saturated value".
  */
 #ifndef ROCM_DIM3_PACK_H_
 #define ROCM_DIM3_PACK_H_

@@ -1,5 +1,4 @@
 # Curated HIP APIs for typed parameter capture.
-# Source of truth — see docs/superpowers/specs/2026-04-26-lttng-curated-args-design.md.
 #
 # Schema:
 #   - api: string (must match HIP header function name exactly)
@@ -10,15 +9,14 @@
 # DSL types: handle | ptr | device_ptr | size | int32 | uint32 | int64 |
 #            uint64 | float | enum | bool | dim3 | dim3_packed | cstring
 #
-# Direction: IN (captured at entry, emitted at exit) | OUT (deref'd at exit)
-# INOUT is rejected by codegen + verifier in v1 — see spec §4.4.
+# Direction: IN (captured at entry, emitted at exit) | OUT (deref'd at exit).
+# INOUT is rejected in v1.
 #
 # Field budget: each API may have at most 9 payload fields after corr_id.
 # Use `dim3_packed` instead of `dim3` to fit high-arity launch APIs.
 #
-# Phase 14 expansion: full ~72-API set per spec Appendix A.
-# Names are validated against /opt/rocm/include/hip/hip_runtime_api.h via
-# libclang in the verifier (spec §8.3); the verifier is the CI gate.
+# Names are validated against the HIP header signature by a libclang-based
+# drift verifier (stacked PR2).
 
 # ============================================================
 # A.1 HIP streams + sync (12)
@@ -178,10 +176,10 @@
     - {name: numDevices,       type: int32,  dir: IN}
     - {name: flags,            type: uint32, dir: IN}
 
-# hipModuleLaunchKernel: header has individual gridDimX/Y/Z + blockDimX/Y/Z uint32s
-# (NOT dim3 args), so dim3_packed is not applicable to those. Per spec §4.4
-# omission mitigation, drop the 6 dim params and keep f/sharedMemBytes/stream/
-# kernelParams/extra = 5 payload fields.
+# hipModuleLaunchKernel: header has individual gridDimX/Y/Z + blockDimX/Y/Z
+# uint32s (NOT dim3 args), so dim3_packed is not applicable to those.
+# Drop the 6 dim params to fit the budget; keep f, sharedMemBytes, stream,
+# kernelParams, extra = 5 payload fields.
 - api: hipModuleLaunchKernel
   category: kernel_launch
   args:

@@ -61,7 +61,7 @@ def test_rejects_unknown_dir():
     raise AssertionError("expected ParseError")
 
 def test_rejects_inout_v1():
-    """Per spec §4.4: dir: INOUT is hard-error in v1."""
+    """dir: INOUT is hard-error in v1."""
     try:
         parse_yaml_text("""
 - api: foo
@@ -73,7 +73,7 @@ def test_rejects_inout_v1():
         return
     raise AssertionError("expected ParseError")
 
-# ---- Field-budget calculation (spec §4.4) ----
+# ---- Field-budget calculation ----
 
 def test_field_count_simple():
     api = {'api': 'foo', 'category': 'memory', 'args': [
@@ -96,7 +96,7 @@ def test_field_count_dim3_packed_is_1():
     assert expanded_field_count(api) == 1
 
 def test_field_count_hipLaunchKernel_natural():
-    """Spec §4.4 high-arity table: hipLaunchKernel natural = 10 payload."""
+    """High-arity case: hipLaunchKernel natural = 10 payload (over budget)."""
     api = {'api': 'hipLaunchKernel', 'category': 'kernel_launch', 'args': [
         {'name': 'function_address', 'type': 'ptr',    'dir': 'IN'},
         {'name': 'numBlocks',        'type': 'dim3',   'dir': 'IN'},
@@ -109,7 +109,7 @@ def test_field_count_hipLaunchKernel_natural():
     assert expanded_field_count(api) == 10
 
 def test_field_count_hipLaunchKernel_packed():
-    """Spec §4.4: with dim3_packed mitigation, payload = 6."""
+    """With dim3_packed mitigation, payload = 6 (within budget)."""
     api = {'api': 'hipLaunchKernel', 'category': 'kernel_launch', 'args': [
         {'name': 'function_address', 'type': 'ptr',         'dir': 'IN'},
         {'name': 'numBlocks',        'type': 'dim3_packed', 'dir': 'IN'},
@@ -129,7 +129,7 @@ def test_validate_under_budget_passes():
     validate_api(api)  # no raise
 
 def test_validate_over_budget_raises():
-    """Spec §4.4: codegen aborts on >9 payload fields."""
+    """Validation aborts on >9 payload fields."""
     api = {'api': 'foo', 'category': 'kernel_launch', 'args': [
         {'name': f'a{i}', 'type': 'uint32', 'dir': 'IN'} for i in range(10)
     ]}

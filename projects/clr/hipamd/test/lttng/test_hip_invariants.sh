@@ -1,28 +1,23 @@
 #!/usr/bin/env bash
-# HIP LTTng invariant tests (post-debate-review).
+# HIP LTTng invariant tests.
 #
 # Beyond the smoke tests in test_hip_api_tracepoints.sh, this script asserts
 # semantic invariants of the trace produced by a tiny HIP program:
 #
-#   I1. Enter/exit balance per (pid, tid):
-#         count(hip_api_enter) == sum(hip_api_exit_status, _ptr, _void)
-#       per (pid, tid). Catches missed exit emits (e.g. if a wrapper
-#       returned through a non-RET macro path).
+#   I1. Enter/exit balance: count(hip_api_enter) ==
+#         sum(hip_api_exit_status, _ptr, _void). Catches missed exit emits.
 #
-#   I2. Doorbell uniqueness (after debate-review C6 fix):
-#         all hsa_doorbell_ring events have distinct corr_id values
-#         within a single run. Was previously aliased to parent_corr_id.
-#         (Validated only when HSA tracepoints are also captured.)
+#   I2. Doorbell uniqueness: every hsa_doorbell_ring event has a distinct
+#         corr_id within a single run (validated only when HSA tracepoints
+#         are also captured).
 #
-#   I3. dispatch_idx field removed (after debate-review C5 fix):
-#         hip_aql_kernel_dispatch_submit events must NOT contain a
-#         dispatch_idx field.
+#   I3. hip_aql_kernel_dispatch_submit must NOT carry a dispatch_idx field.
 #
-#   I4. Parent propagation for HIP -> HSA chain (hard assertion):
-#         after a hipLaunchKernel call, at least one HSA event AND at
-#         least one hip_aql_kernel_dispatch_submit must carry the
-#         hipLaunch's corr_id as parent_corr_id. Catches a regression
-#         in shared-TLS slot propagation between HIP and HSA.
+#   I4. Parent propagation for HIP -> HSA chain: after a hipLaunchKernel
+#         call, at least one hip_kernel_dispatch_enqueue AND at least one
+#         hip_aql_kernel_dispatch_submit must carry the launch's corr_id as
+#         parent_corr_id. Catches regressions in the shared-TLS slot
+#         propagation between HIP and HSA.
 #
 # Usage:
 #   test_hip_invariants.sh [<libamdhip64-build-dir>]
@@ -146,9 +141,9 @@ else
 fi
 
 # ---- I3: dispatch_idx field removed -----------------------------------------
-# After C5 fix, the hip_aql_kernel_dispatch_submit event schema has no
-# dispatch_idx field. Babeltrace2 prints all fields per event; if the
-# field is present a substring match will succeed.
+# The hip_aql_kernel_dispatch_submit event schema has no dispatch_idx
+# field. Babeltrace2 prints all fields per event; if the field is present
+# a substring match will succeed.
 KD_COUNT=$(grep -c 'rocm_hip:hip_aql_kernel_dispatch_submit:' "$LOG" || true)
 if [ "$KD_COUNT" -gt 0 ]; then
     if grep -q 'rocm_hip:hip_aql_kernel_dispatch_submit:.*dispatch_idx' "$LOG"; then
@@ -172,9 +167,9 @@ fi
 # Cross-runtime propagation INTO HSA events is ALSO checked, but only as
 # INFO: HSA api_enter events under deep call chains have intermediate
 # parents (HSA-on-HSA), and on high-CPU-count hosts the per-CPU sub-buffer
-# constraints (Phase 0 finding #3) frequently drop the first-level HSA
-# events with parent=launch. The HIP-side dispatch events are the
-# reliable indicator that propagation works end-to-end.
+# constraints frequently drop the first-level HSA events with
+# parent=launch. The HIP-side dispatch events are the reliable indicator
+# that propagation works end-to-end.
 LAUNCH_CORR=$(grep 'rocm_hip:hip_api_enter:.*hipLaunchKernel' "$LOG" \
     | head -1 \
     | sed -n 's/.*corr_id = \([0-9]\+\),.*/\1/p')

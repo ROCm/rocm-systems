@@ -1,5 +1,5 @@
-# HSA curated APIs. Source of truth — see spec §A.6.
-# Schema: same as HIP curated_apis.yaml; see spec §4.
+# HSA curated APIs for typed parameter capture.
+# Schema is the same as the HIP equivalent (projects/clr/hipamd/scripts/curated_apis.yaml).
 
 - api: hsa_queue_create
   category: hsa_queues
@@ -87,11 +87,10 @@
 - api: hsa_amd_memory_async_copy_on_engine
   category: hsa_memory
   notes: |
-    Drops dep_signals from YAML to fit budget per spec §4.4 high-arity
-    table. _on_engine adds engine_id + force_copy_on_sdma to the base
-    async_copy shape, totaling 11 fields including corr_id; dropping
-    dep_signals brings it to 10 (the limit). engine_id is an enum
-    (typedef enum hsa_amd_sdma_engine_id_t).
+    Drops dep_signals from YAML to fit the field budget. _on_engine adds
+    engine_id + force_copy_on_sdma to the base async_copy shape, totaling
+    11 fields including corr_id; dropping dep_signals brings it to 10
+    (the limit). engine_id is an enum (typedef enum hsa_amd_sdma_engine_id_t).
   args:
     - {name: dst,                 type: ptr,    dir: IN}
     - {name: dst_agent,           type: handle, dir: IN}

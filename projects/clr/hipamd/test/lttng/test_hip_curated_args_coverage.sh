@@ -317,10 +317,10 @@ PER_API_LOCALS = {
 }
 
 # Full call-expression overrides for APIs whose YAML omits required header
-# args (per spec §4.4 omission mitigation). hipModuleLaunchKernel YAML has
-# only 5 args (f, sharedMemBytes, stream, kernelParams, extra); the real
-# header signature has 7 (gridDimX/Y/Z, blockDimX/Y/Z), so we can't build
-# the call from per-arg placeholders. Note kernelParams and extra are both
+# args to fit the field budget. hipModuleLaunchKernel YAML has only 5 args
+# (f, sharedMemBytes, stream, kernelParams, extra); the real header
+# signature has 7 (gridDimX/Y/Z, blockDimX/Y/Z), so we can't build the
+# call from per-arg placeholders. Note kernelParams and extra are both
 # nullptr — the kernel takes no args.
 CALL_OVERRIDES = {
     'hipModuleLaunchKernel':

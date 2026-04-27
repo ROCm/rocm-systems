@@ -2,8 +2,8 @@
 # End-to-end validation of the rocm_hip LTTng tracepoints.
 #
 # 1. Spins up a per-user lttng-sessiond.
-# 2. Enables rocm_hip:* tracepoints with the channel mode from the
-#    architecture spec (--discard, conservative subbuf sizing).
+# 2. Enables rocm_hip:* tracepoints with --discard and conservative
+#    sub-buffer sizing.
 # 3. Builds and runs a tiny HIP program that calls 3 well-known APIs
 #    (hipMalloc, hipFree, hipGetDevice) and launches a no-op kernel.
 # 4. Parses the resulting CTF trace with babeltrace2 and asserts each
@@ -40,10 +40,9 @@ cleanup() {
 trap cleanup EXIT
 
 # Tiny HIP program: 3 status-returning APIs + a no-op kernel launch.
-# The kernel launch is conditional on EXPECT_DISPATCH=1 to keep the
-# Phase 2 (API-only) check independent of Phase 3 (kernel dispatch). When
-# EXPECT_DISPATCH=1 the launch is required to emit
-# rocm_hip:hip_kernel_dispatch_enqueue.
+# When EXPECT_DISPATCH=1 the launch is required to emit
+# rocm_hip:hip_kernel_dispatch_enqueue (otherwise the API-only assertions
+# stand on their own).
 cat > "$WORK/tiny.hip.cpp" <<'EOF'
 #include <hip/hip_runtime.h>
 #include <stdio.h>
@@ -102,9 +101,8 @@ for i in 1 2 3 4 5; do
 done
 lttng create "$SESSION_NAME" --output="$WORK/trace"
 
-# Enable a per-CPU userspace channel with conservative sizing
-# (Phase 0 finding #3: stock channel sizing overflows /dev/shm on hosts
-# with high CPU count).
+# Enable a per-CPU userspace channel with conservative sizing (stock
+# channel sizing overflows /dev/shm on hosts with high CPU count).
 lttng enable-channel --userspace --discard \
     --subbuf-size=4096 --num-subbuf=2 default
 
@@ -139,13 +137,12 @@ for api in hipMalloc hipFree hipGetDevice; do
     fi
 done
 
-# Phase 3 assertion: kernel dispatch enqueue tracepoint.
+# Kernel dispatch enqueue tracepoint. Soft assertion by default; set
+# EXPECT_DISPATCH=1 to make it fatal.
 if grep -q 'rocm_hip:hip_kernel_dispatch_enqueue' "$LOG"; then
     echo "  OK: hip_kernel_dispatch_enqueue observed"
 else
-    echo "  WARN: hip_kernel_dispatch_enqueue not observed (Phase 3 not yet landed?)" >&2
-    # Phase 2 only - don't fail on this. Phase 3 will turn this into a hard
-    # assertion by setting EXPECT_DISPATCH=1 in the env.
+    echo "  WARN: hip_kernel_dispatch_enqueue not observed" >&2
     if [ "${EXPECT_DISPATCH:-0}" = "1" ]; then
         FAIL=1
     fi

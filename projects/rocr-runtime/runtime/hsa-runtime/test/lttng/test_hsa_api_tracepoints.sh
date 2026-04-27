@@ -94,10 +94,9 @@ done
 # ============================================================
 SESSION_API="hsa-api-test-$$"
 lttng create "$SESSION_API" --output="$TRACE_DIR/trace_api" >/dev/null
-# Per the channel-mode commitment: discard policy.
-# Sub-buffer sizing: per Phase 0 finding #1, container hosts with /dev/shm
-# limited to 64 MiB and ~224 CPUs need a much smaller channel than
-# LTTng's default (524288 B x 4 sub-buffers per CPU). 4 KiB x 2 fits.
+# Discard policy + conservative sub-buffer sizing: container hosts with
+# /dev/shm limited to 64 MiB and ~224 CPUs need a much smaller channel
+# than LTTng's default (524288 B x 4 sub-buffers per CPU). 4 KiB x 2 fits.
 lttng enable-channel --userspace --discard --subbuf-size=4096 --num-subbuf=2 default >/dev/null
 lttng enable-event --userspace -c default 'rocm_hsa:hsa_api_enter,rocm_hsa:hsa_api_exit_status,rocm_hsa:hsa_api_exit_ptr,rocm_hsa:hsa_api_exit_void' >/dev/null
 lttng start "$SESSION_API" >/dev/null
