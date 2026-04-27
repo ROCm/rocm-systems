@@ -1362,14 +1362,12 @@ void DsSwizzleB32Vds::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     uint32_t src_lane;
     if (offset & 0x8000) {
-      // QDMode: swizzle within 4-lane quads.
       uint32_t and_mask = offset & 0x1F;
       uint32_t or_mask = (offset >> 5) & 0x1F;
       uint32_t xor_mask = (offset >> 10) & 0x1F;
       src_lane = ((lane & and_mask) | or_mask) ^ xor_mask;
       src_lane = (lane & ~0x3) | (src_lane & 0x3); // stay in quad
     } else {
-      // BitMode: full-wave swizzle.
       uint32_t and_mask = offset & 0x1F;
       uint32_t or_mask = (offset >> 5) & 0x1F;
       uint32_t xor_mask = (offset >> 10) & 0x1F;
@@ -3508,7 +3506,6 @@ void DsPermuteB32Vds::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint32_t vb = wf.vgpr_alloc().base;
   uint32_t offset = inst_.offset0 | (inst_.offset1 << 8);
-  // Pre-read all data0 values from every lane.
   uint32_t src_data[64];
   for (uint32_t i = 0; i < wf.wf_size(); ++i)
     src_data[i] = cu.read_vgpr(vb + inst_.data0, i);
@@ -3544,7 +3541,6 @@ void DsBpermuteB32Vds::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint32_t vb = wf.vgpr_alloc().base;
   uint32_t offset = inst_.offset0 | (inst_.offset1 << 8);
-  // Pre-read all data0 values from every lane.
   uint32_t src_data[64];
   for (uint32_t i = 0; i < wf.wf_size(); ++i)
     src_data[i] = cu.read_vgpr(vb + inst_.data0, i);

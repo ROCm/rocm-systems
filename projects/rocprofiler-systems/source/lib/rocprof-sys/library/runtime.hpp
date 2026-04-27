@@ -4,8 +4,8 @@
 #pragma once
 
 #include "api.hpp"
+#include "common/defines.h"
 #include "core/common.hpp"
-#include "core/defines.hpp"
 #include "core/state.hpp"
 #include "core/timemory.hpp"
 #include "library/causal/components/causal_gotcha.hpp"

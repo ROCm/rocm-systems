@@ -3,10 +3,10 @@
 
 #pragma once
 
+#include "common/defines.h"
 #include "core/common.hpp"
 #include "core/components/fwd.hpp"
 #include "core/containers/static_vector.hpp"
-#include "core/defines.hpp"
 #include "core/timemory.hpp"
 #include "library/thread_data.hpp"
 
