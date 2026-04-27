@@ -1464,14 +1464,18 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const std::vector<uint8_t>& flatPack
         const uint8_t pktType =
             extractAqlBits(hdr, HSA_PACKET_HEADER_TYPE, HSA_PACKET_HEADER_WIDTH_TYPE);
         if (timestamp_ != nullptr) {
-          // For pre-patched graph packets do NOT overwrite completion_signal.
-          // ApplyHwEventPatches already placed HW event signals on segment-boundary
-          // packets; all other packets intentionally have signal.handle == 0.
-          // Overwriting those zeros breaks the segment-sync plan and causes
-          // hipStreamSynchronize to hang when profiling is enabled.
-          // The correlation_id was already patched into reserved2 by
-          // EnqueueSegmentedGraph before this function is called, so skip it here too.
-          if (!pre_patched) {
+          // Assign a profiling signal when safe to do so:
+          //   !pre_patched — normal (non-graph) path, always safe.
+          //   pre_patched  — graph path: ApplyHwEventPatches already placed HW event
+          //                  signals on segment-boundary barrier packets (handle != 0);
+          //                  non-boundary kernel-dispatch packets still have handle == 0
+          //                  and need a signal so ExtractSignalTiming can call
+          //                  addTimestamps and ReportActivity fires per graph node.
+          //                  Never touch barrier packets here (handle != 0 guard) to
+          //                  avoid breaking inter-segment sync.
+          if (!pre_patched ||
+              (pktType == HSA_PACKET_TYPE_KERNEL_DISPATCH &&
+               slot->completion_signal.handle == 0)) {
             slot->completion_signal =
                 Barriers().ActiveSignal(kInitSignalValueOne, timestamp_, true);
             if (pktType == HSA_PACKET_TYPE_KERNEL_DISPATCH) {
