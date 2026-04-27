@@ -866,12 +866,14 @@ static constexpr uint32_t kEvt_track_uuid = 11;
 static constexpr uint32_t kEvt_name       = 23;  // string name (direct)
 static constexpr uint32_t kEvt_categories = 22;  // repeated string
 static constexpr uint32_t kEvt_dbg_ann          = 4;   // repeated DebugAnnotation
-static constexpr uint32_t kEvt_flow_ids          = 47;  // repeated uint64 (packed) — flow starts here
-static constexpr uint32_t kEvt_term_flow_ids     = 48;  // repeated uint64 (packed) — flow ends here
-static constexpr uint32_t kEvt_flow_ids_old      = 36;  // deprecated alias — emitted for compatibility
-static constexpr uint32_t kEvt_term_flow_ids_old = 42;  // deprecated alias — emitted for compatibility
-static constexpr uint32_t kEvt_TYPE_BEGIN = 1;
-static constexpr uint32_t kEvt_TYPE_END   = 2;
+static constexpr uint32_t kEvt_legacy_event = 6;   // TrackEvent.legacy_event (LegacyEvent msg)
+static constexpr uint32_t kEvt_TYPE_BEGIN   = 1;
+static constexpr uint32_t kEvt_TYPE_END     = 2;
+
+// LegacyEvent (legacy_event.proto) — used for Chrome-format flow arrows (ph='s'/'f')
+static constexpr uint32_t kLeg_phase    = 2;   // int32 — Chrome phase char ('s'=115, 'f'=102)
+static constexpr uint32_t kLeg_id       = 6;   // uint64 — unscoped flow binding id
+static constexpr uint32_t kLeg_flow_dir = 13;  // uint32 — FlowDirection: OUT=1, IN=2
 
 // DebugAnnotation (debug_annotation.proto)
 static constexpr uint32_t kAnn_name    = 10;  // string name (direct, non-interned)
@@ -928,13 +930,32 @@ static void EmitTrackDesc(std::string& out, uint64_t uuid, uint64_t parent,
   AppendPacket(out, pkt);
 }
 
+// Emit a Chrome-format flow arrow event (ph='s' or ph='f') as a LegacyEvent instant.
+// Mirrors the JSON writer's {"ph":"s"} / {"ph":"f"} events — known to work in Perfetto UI.
+static void EmitFlowEvent(std::string& out, uint64_t uuid, uint64_t ts_ns,
+                           uint64_t fid, bool is_start) {
+  ProtoMsg leg;
+  leg.u32(kLeg_phase,    is_start ? 115u : 102u);  // 's' or 'f'
+  leg.u64(kLeg_id,       fid);
+  leg.u32(kLeg_flow_dir, is_start ? 1u   : 2u);    // FLOW_OUT or FLOW_IN
+  ProtoMsg evt;
+  evt.u64(kEvt_track_uuid, uuid);
+  evt.msg(kEvt_legacy_event, leg);
+  ProtoMsg pkt;
+  pkt.u64(kPkt_timestamp, ts_ns);
+  pkt.msg(kPkt_track_event, evt);
+  pkt.u32(kPkt_seq_id, kGlobalSeq);
+  pkt.u32(kPkt_seq_flags, kSeqFlag_Cleared);
+  AppendPacket(out, pkt);
+}
+
 static void EmitSlice(std::string& out, uint64_t uuid, uint32_t /*seq_id*/,
                        uint64_t ts_ns, uint64_t dur_ns,
                        const std::string& name, const std::string& cat,
                        const std::vector<std::pair<std::string,std::string>>& anns,
                        const std::vector<uint64_t>& out_flows = {},
                        const std::vector<uint64_t>& in_flows  = {}) {
-  // BEGIN — flow_ids (field 47) start here, terminating_flow_ids (field 48) end here
+  // BEGIN
   {
     ProtoMsg evt;
     evt.u32(kEvt_type, kEvt_TYPE_BEGIN);
@@ -947,10 +968,6 @@ static void EmitSlice(std::string& out, uint64_t uuid, uint32_t /*seq_id*/,
       ann.str(kAnn_str_val, a.second);
       evt.msg(kEvt_dbg_ann, ann);
     }
-    evt.packed_u64(kEvt_flow_ids,          out_flows);
-    evt.packed_u64(kEvt_term_flow_ids,     in_flows);
-    evt.packed_u64(kEvt_flow_ids_old,      out_flows);
-    evt.packed_u64(kEvt_term_flow_ids_old, in_flows);
     ProtoMsg pkt;
     pkt.u64(kPkt_timestamp, ts_ns);
     pkt.msg(kPkt_track_event, evt);
@@ -958,6 +975,9 @@ static void EmitSlice(std::string& out, uint64_t uuid, uint32_t /*seq_id*/,
     pkt.u32(kPkt_seq_flags, kSeqFlag_Cleared);
     AppendPacket(out, pkt);
   }
+  // Flow events — separate packets, matching JSON writer's ph='s'/'f' approach
+  for (uint64_t fid : out_flows) EmitFlowEvent(out, uuid, ts_ns,           fid, true);
+  for (uint64_t fid : in_flows)  EmitFlowEvent(out, uuid, ts_ns,           fid, false);
   // END
   {
     ProtoMsg evt;
@@ -1023,18 +1043,16 @@ void WriteProtoTraceImpl(const char* filepath) {
   }
   for (auto& kv : alloc_map) if (kv.second.end_ns == 0) kv.second.end_ns = t_end;
 
-  // ── Pass 2: pre-assign GPU→memory flow IDs ───────────────────────────────
-  // For each GPU op that references a known allocation, assign a flow_id now.
-  // Stored as: alloc_in_flows[ptr] = [fid, fid, ...] (terminating at that alloc slice)
-  //            gpu_op_out_flows[(chunk,slot,op_ordinal)] = [fid, ...]
+  // ── Pass 2: pre-assign flow IDs ──────────────────────────────────────────
+  // CPU→GPU: CPU slice emits ph='s', GPU slice emits ph='f' (forward in time).
+  // Memory→GPU: alloc slice emits ph='s' (at alloc time), GPU slice emits ph='f'
+  //   (at GPU time > alloc time). Arrow goes forward: Memory → GPU op that used it.
   uint64_t flow_id = 1;
-  // key = (chunk_idx<<32)|slot_in_chunk, value = outgoing flow ids from CPU slice (cpu→gpu)
-  std::unordered_map<uint64_t, uint64_t> cpu_gpu_flow;  // record slot → cpu→gpu fid
-  // per-alloc incoming flows
-  std::unordered_map<uint64_t, std::vector<uint64_t>> alloc_in_flows;
-  // per-(record_slot, op_ordinal) outgoing flows (gpu→mem)
-  // key = record_slot * 1000 + op_ordinal (ordinal capped at 999)
-  std::unordered_map<uint64_t, std::vector<uint64_t>> gpu_out_flows;
+  std::unordered_map<uint64_t, uint64_t> cpu_gpu_flow;   // record slot → cpu→gpu fid
+  // alloc_out_flows[ptr]  = fids where memory slice emits ph='s' (arrow starts at alloc)
+  std::unordered_map<uint64_t, std::vector<uint64_t>> alloc_out_flows;
+  // gpu_recv_flows[slot*1000+op_ord] = fids where GPU slice emits ph='f' (arrow ends at GPU op)
+  std::unordered_map<uint64_t, std::vector<uint64_t>> gpu_recv_flows;
 
   for (size_t c = 0; c < g_records.size(); ++c) {
     HipApiRecordExt* chunk = g_records[c];
@@ -1062,8 +1080,8 @@ void WriteProtoTraceImpl(const char* filepath) {
           if (alloc_map.find(ptr) == alloc_map.end()) return;
           seen[nseen++] = ptr;
           uint64_t fid = flow_id++;
-          gpu_out_flows[key].push_back(fid);
-          alloc_in_flows[ptr].push_back(fid);
+          gpu_recv_flows[key].push_back(fid);
+          alloc_out_flows[ptr].push_back(fid);
         };
         if (gop.op == OP_ID_DISPATCH && gop.kernel_args && gop.kernel_args_size > 0) {
           const uint8_t* p = gop.kernel_args, *end = p + gop.kernel_args_size;
@@ -1146,7 +1164,6 @@ void WriteProtoTraceImpl(const char* filepath) {
   // Hoisted out of the per-record inner loop to avoid repeated heap allocs.
   std::vector<std::pair<std::string,std::string>> gpu_anns;
   std::vector<uint64_t> in_flows_vec;
-  std::vector<uint64_t> out_flows_vec;
   for (size_t c = 0; c < g_records.size(); ++c) {
     HipApiRecordExt* chunk = g_records[c];
     size_t base  = c * kChunkSize;
@@ -1262,18 +1279,16 @@ void WriteProtoTraceImpl(const char* filepath) {
           }
         }
 
-        // CPU→GPU incoming on first op
+        // GPU emits ph='f' for: CPU→GPU flow AND memory→GPU flows (all terminate here)
         in_flows_vec.clear();
         if (first_op && cfit != cpu_gpu_flow.end()) in_flows_vec.push_back(cfit->second);
         first_op = false;
-
-        // GPU→memory outgoing
-        out_flows_vec.clear();
-        auto ofit = gpu_out_flows.find(slot * 1000 + op_ord);
-        if (ofit != gpu_out_flows.end()) out_flows_vec = ofit->second;
+        auto rfit = gpu_recv_flows.find(slot * 1000 + op_ord);
+        if (rfit != gpu_recv_flows.end())
+          in_flows_vec.insert(in_flows_vec.end(), rfit->second.begin(), rfit->second.end());
         ++op_ord;
 
-        EmitSlice(out, gpu_uuid, 0, g_ts, g_dur, gpu_name, "gpu", gpu_anns, out_flows_vec, in_flows_vec);
+        EmitSlice(out, gpu_uuid, 0, g_ts, g_dur, gpu_name, "gpu", gpu_anns, {}, in_flows_vec);
       };
 
       if (rec.gpu.gpu_op_count > 0) {
@@ -1298,10 +1313,11 @@ void WriteProtoTraceImpl(const char* filepath) {
     std::string alloc_name = std::string(ptrbuf) + " (" + sizebuf + ")";
     std::vector<std::pair<std::string,std::string>> anns;
     anns.push_back({"ptr", ptrbuf}); anns.push_back({"size", std::to_string(ai.size)});
-    std::vector<uint64_t> in_flows;
-    auto afit = alloc_in_flows.find(ptr);
-    if (afit != alloc_in_flows.end()) in_flows = afit->second;
-    EmitSlice(out, mem_uuid, 0, ai.start_ns, dur_ns, alloc_name, "memory", anns, {}, in_flows);
+    // Memory slice emits ph='s' (flow starts here at alloc time, arrow points forward to GPU op)
+    std::vector<uint64_t> out_flows;
+    auto afit = alloc_out_flows.find(ptr);
+    if (afit != alloc_out_flows.end()) out_flows = afit->second;
+    EmitSlice(out, mem_uuid, 0, ai.start_ns, dur_ns, alloc_name, "memory", anns, out_flows, {});
   }
 
   std::ofstream f(filepath, std::ios::binary);
