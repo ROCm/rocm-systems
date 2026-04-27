@@ -1641,6 +1641,12 @@ write_rocpd(
             }
         }
 
+        auto counter_dim_map = std::unordered_map<uint64_t, std::unordered_map<uint64_t, size_t>>{};
+        for(const auto& itr : tool_metadata.agent_counter_info)
+            for(const auto& aitr : itr.second)
+                for(const auto& dim : aitr.spm_dimensions)
+                    counter_dim_map[aitr.id.handle][dim.id] = dim.instance_size;
+
         for(auto ditr : spm_collection_gen)
         {
             for(const auto& record : spm_collection_gen.get(ditr))
@@ -1651,28 +1657,53 @@ write_rocpd(
                 auto evt_id = dispatch_evt_ids.at(dispatch_id);
                 for(const auto& count : record.read())
                 {
-                    get_insert_statement(
-                        db,
-                        "rocpd_pmc_event{{uuid}}",
-                        {
-                            insert_value("id", idx++),
-                            insert_value("event_id", evt_id),
-                            insert_value("pmc_id", count.id.handle),
-                            insert_value("value", count.value),
-                            insert_value("timestamp", count.timestamp),
-                            insert_value(
-                                "xcc",
-                                counters::rec_to_dim_pos(count.instance_id,
-                                                         counters::ROCPROFILER_DIMENSION_XCC)),
-                            insert_value("shader_engine",
-                                         counters::rec_to_dim_pos(
-                                             count.instance_id,
-                                             counters::ROCPROFILER_DIMENSION_SHADER_ENGINE)),
-                            insert_value(
-                                "instance",
-                                counters::rec_to_dim_pos(count.instance_id,
-                                                         counters::ROCPROFILER_DIMENSION_INSTANCE)),
-                        });
+                    const auto& dims     = counter_dim_map[count.id.handle];
+                    auto        se_it    = dims.find(counters::ROCPROFILER_DIMENSION_SHADER_ENGINE);
+                    auto        inst_it  = dims.find(counters::ROCPROFILER_DIMENSION_INSTANCE);
+                    bool        has_se   = se_it != dims.end() && se_it->second > 1;
+                    bool        has_inst = inst_it != dims.end();
+                    if(has_se && has_inst)
+                    {
+                        get_insert_statement(
+                            db,
+                            "rocpd_pmc_event{{uuid}}",
+                            {insert_value("id", idx++),
+                             insert_value("event_id", evt_id),
+                             insert_value("pmc_id", count.id.handle),
+                             insert_value("value", count.value),
+                             insert_value("timestamp", count.timestamp),
+                             insert_value(
+                                 "xcc",
+                                 counters::rec_to_dim_pos(count.instance_id,
+                                                          counters::ROCPROFILER_DIMENSION_XCC)),
+
+                             insert_value("shader_engine",
+                                          counters::rec_to_dim_pos(
+                                              count.instance_id,
+                                              counters::ROCPROFILER_DIMENSION_SHADER_ENGINE)),
+
+                             insert_value(
+                                 "instance",
+                                 counters::rec_to_dim_pos(count.instance_id,
+                                                          counters::ROCPROFILER_DIMENSION_INSTANCE))
+
+                            });
+                    }
+                    else
+                    {
+                        get_insert_statement(
+                            db,
+                            "rocpd_pmc_event{{uuid}}",
+                            {insert_value("id", idx++),
+                             insert_value("event_id", evt_id),
+                             insert_value("pmc_id", count.id.handle),
+                             insert_value("value", count.value),
+                             insert_value("timestamp", count.timestamp),
+                             insert_value(
+                                 "xcc",
+                                 counters::rec_to_dim_pos(count.instance_id,
+                                                          counters::ROCPROFILER_DIMENSION_XCC))});
+                    }
                 }
             }
         }

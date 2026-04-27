@@ -23,6 +23,7 @@
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/aql/helpers.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
+#include "lib/rocprofiler-sdk/counters/evaluate_ast.hpp"
 #include "lib/rocprofiler-sdk/counters/id_decode.hpp"
 #include "lib/rocprofiler-sdk/counters/metrics.hpp"
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
@@ -76,6 +77,11 @@ rocprofiler_spm_create_counter_config(rocprofiler_agent_id_t           agent_id,
     auto        metrics_map = rocprofiler::counters::loadMetrics();
     const auto& id_map      = metrics_map->id_to_metric;
 
+    auto              asts       = rocprofiler::counters::get_ast_map();
+    auto              agent_name = std::string(agent->name);
+    const auto* const agent_ast =
+        rocprofiler::common::get_val(asts->arch_to_counter_asts, agent_name);
+
     for(size_t i = 0; i < counters_count; i++)
     {
         auto& counter_id       = counters_list[i];
@@ -86,12 +92,48 @@ rocprofiler_spm_create_counter_config(rocprofiler_agent_id_t           agent_id,
         // Don't add duplicates
         if(!already_added.emplace(metric_ptr->id()).second) continue;
 
-        if(!rocprofiler::counters::checkValidMetric(std::string(agent->name), *metric_ptr) ||
+        if(!rocprofiler::counters::checkValidMetric(agent_name, *metric_ptr) ||
            !rocprofiler::counters::isSupportSpm(*metric_ptr, agent->id))
         {
             return ROCPROFILER_STATUS_ERROR_METRIC_NOT_VALID_FOR_AGENT;
         }
+
         config->metrics.push_back(*metric_ptr);
+
+        // Derived metric: resolve base hw counters, store AST for decode-time evaluation
+        if(!metric_ptr->expression().empty())
+        {
+            auto req_counters = rocprofiler::counters::get_required_hardware_counters(
+                asts->arch_to_counter_asts, agent_name, *metric_ptr);
+
+            if(!req_counters) return ROCPROFILER_STATUS_ERROR_COUNTER_NOT_FOUND;
+
+            for(const auto& base : *req_counters)
+            {
+                // Constants are not collected via hardware
+                if(base.event().empty() && base.expression().empty())
+                {
+                    config->required_special_counters.insert(base);
+                    continue;
+                }
+                config->required_hw_counters.insert(base);
+            }
+
+            // Build EvaluateAST for this derived metric
+            if(agent_ast)
+            {
+                const auto* ast_ptr = rocprofiler::common::get_val(*agent_ast, metric_ptr->name());
+                if(ast_ptr)
+                {
+                    config->derived.push_back({*metric_ptr, *ast_ptr, *req_counters});
+                }
+            }
+        }
+        else
+        {
+            // Basic hardware counter — also add to hw counters for collection
+            config->required_hw_counters.insert(*metric_ptr);
+        }
     }
 
     for(size_t i = 0; i < parameters_count; i++)
@@ -111,6 +153,10 @@ rocprofiler_spm_create_counter_config(rocprofiler_agent_id_t           agent_id,
             {
                 if(!already_added.emplace(metric.id()).second) continue;
                 config->metrics.push_back(metric);
+            }
+            for(const auto& hw : existing->required_hw_counters)
+            {
+                config->required_hw_counters.insert(hw);
             }
         }
     }

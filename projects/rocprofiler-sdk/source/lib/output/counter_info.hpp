@@ -45,18 +45,22 @@ using counter_dimension_info_vec_t = std::vector<rocprofiler_counter_record_dime
 
 using spm_config_vec_t            = std::vector<rocprofiler_spm_available_configuration_t>;
 using agent_spm_config_info_map_t = std::unordered_map<rocprofiler_agent_id_t, spm_config_vec_t>;
-struct tool_counter_info : rocprofiler_counter_info_v1_t
+struct tool_counter_info : rocprofiler_counter_info_v2_t
 {
-    using parent_type = rocprofiler_counter_info_v1_t;
+    using parent_type = rocprofiler_counter_info_v2_t;
 
     tool_counter_info(rocprofiler_agent_id_t         _agent_id,
                       parent_type                    _info,
                       counter_dimension_id_vec_t&&   _dim_ids,
-                      counter_dimension_info_vec_t&& _dim_info)
+                      counter_dimension_info_vec_t&& _dim_info,
+                      counter_dimension_id_vec_t&&   _spm_dim_ids,
+                      counter_dimension_info_vec_t&& _spm_dim_info)
     : parent_type{_info}
     , agent_id{_agent_id}
     , dimension_ids{std::move(_dim_ids)}
     , dimensions{std::move(_dim_info)}
+    , spm_dimension_ids{std::move(_spm_dim_ids)}
+    , spm_dimensions{std::move(_spm_dim_info)}
     {}
 
     ~tool_counter_info()                            = default;
@@ -65,9 +69,11 @@ struct tool_counter_info : rocprofiler_counter_info_v1_t
     tool_counter_info& operator=(const tool_counter_info&) = default;
     tool_counter_info& operator=(tool_counter_info&&) noexcept = default;
 
-    rocprofiler_agent_id_t       agent_id      = {};
-    counter_dimension_id_vec_t   dimension_ids = {};
-    counter_dimension_info_vec_t dimensions    = {};
+    rocprofiler_agent_id_t       agent_id          = {};
+    counter_dimension_id_vec_t   dimension_ids     = {};
+    counter_dimension_info_vec_t dimensions        = {};
+    counter_dimension_id_vec_t   spm_dimension_ids = {};
+    counter_dimension_info_vec_t spm_dimensions    = {};
 };
 
 using counter_info_vec_t       = std::vector<tool_counter_info>;
@@ -165,7 +171,7 @@ void
 save(ArchiveT& ar, const ::rocprofiler::tool::tool_counter_info& data)
 {
     SAVE_DATA_FIELD(agent_id);
-    cereal::save(ar, static_cast<const rocprofiler_counter_info_v1_t&>(data));
+    cereal::save(ar, static_cast<const rocprofiler_counter_info_v2_t&>(data));
 }
 
 #undef SAVE_DATA_FIELD

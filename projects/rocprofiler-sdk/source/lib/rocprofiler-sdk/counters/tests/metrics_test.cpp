@@ -317,3 +317,71 @@ TEST(metrics, check_public_api_query)
         }
     }
 }
+
+TEST(metrics, check_api_query_v2)
+{
+    auto        metrics_map = rocprofiler::counters::loadMetrics();
+    const auto& id_map      = metrics_map->id_to_metric;
+    for(const auto& [id, metric] : id_map)
+    {
+        rocprofiler_counter_info_v2_t info = {};
+
+        auto status = rocprofiler_query_counter_info(
+            {.handle = id}, ROCPROFILER_COUNTER_INFO_VERSION_2, static_cast<void*>(&info));
+
+        if(status == ROCPROFILER_STATUS_ERROR_AGENT_NOT_FOUND) continue;
+
+        ASSERT_EQ(status, ROCPROFILER_STATUS_SUCCESS);
+        EXPECT_EQ(std::string(info.name ? info.name : ""), metric.name());
+        EXPECT_EQ(info.size, sizeof(rocprofiler_counter_info_v2_t));
+
+        // PMC dimensions should be present (same as v1)
+        for(size_t i = 0; i < info.dimensions_count; i++)
+        {
+            EXPECT_GT(info.dimensions[i]->instance_size, 0u);
+            EXPECT_TRUE(info.dimensions[i]->name != nullptr);
+        }
+
+        if(!info.spm_support)
+        {
+            EXPECT_EQ(info.spm_dimensions, nullptr);
+            EXPECT_EQ(info.spm_dimensions_count, 0u);
+            EXPECT_EQ(info.spm_dimensions_instances, nullptr);
+            EXPECT_EQ(info.spm_dimensions_instances_count, 0u);
+        }
+        else
+        {
+            for(size_t i = 0; i < info.spm_dimensions_count; i++)
+            {
+                EXPECT_GT(info.spm_dimensions[i]->instance_size, 0u);
+                EXPECT_TRUE(info.spm_dimensions[i]->name != nullptr);
+            }
+
+            size_t spm_instance_count = 0;
+            for(size_t i = 0; i < info.spm_dimensions_count; i++)
+            {
+                if(spm_instance_count == 0)
+                    spm_instance_count = info.spm_dimensions[i]->instance_size;
+                else if(info.spm_dimensions[i]->instance_size > 0)
+                    spm_instance_count *= info.spm_dimensions[i]->instance_size;
+            }
+            EXPECT_EQ(info.spm_dimensions_instances_count, spm_instance_count);
+
+            std::set<std::vector<size_t>> spm_dim_permutations;
+            for(size_t i = 0; i < info.spm_dimensions_instances_count; i++)
+            {
+                std::vector<size_t> dim_ids;
+                for(size_t j = 0; j < info.spm_dimensions_count; j++)
+                {
+                    dim_ids.push_back(rocprofiler::counters::rec_to_dim_pos(
+                        info.spm_dimensions_instances[i]->instance_id,
+                        static_cast<
+                            rocprofiler::counters::rocprofiler_profile_counter_instance_types>(
+                            info.spm_dimensions[j]->id)));
+                }
+                ASSERT_TRUE(spm_dim_permutations.insert(dim_ids).second);
+            }
+            ASSERT_EQ(spm_instance_count, spm_dim_permutations.size());
+        }
+    }
+}

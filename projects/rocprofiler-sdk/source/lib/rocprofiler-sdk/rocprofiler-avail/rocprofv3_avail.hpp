@@ -64,6 +64,20 @@ counter_dimension(uint64_t     counter_handle,
                   uint64_t*    dimension_instance) ROCPROFILER_EXPORT;
 
 size_t
+get_number_of_spm_dimensions(uint64_t counter_handle) ROCPROFILER_EXPORT;
+
+void
+spm_counter_dimension_ids(uint64_t  counter_handle,
+                          uint64_t* dimension_ids,
+                          size_t    num_dimensions) ROCPROFILER_EXPORT;
+
+void
+spm_counter_dimension(uint64_t     counter_handle,
+                      uint64_t     dimension_handle,
+                      const char** dimension_name,
+                      uint64_t*    dimension_instance) ROCPROFILER_EXPORT;
+
+size_t
 get_number_of_pc_sample_configs(uint64_t agent_handle) ROCPROFILER_EXPORT;
 
 size_t

@@ -130,12 +130,14 @@ process_agent_counters(rocprofiler_agent_id_t    agent_id,
 
             for(size_t i = 0; i < num_counters; ++i)
             {
-                auto _info     = rocprofiler_counter_info_v1_t{};
-                auto _dim_ids  = std::vector<rocprofiler_counter_dimension_id_t>{};
-                auto _dim_info = std::vector<rocprofiler_counter_record_dimension_info_t>{};
+                auto _info         = rocprofiler_counter_info_v2_t{};
+                auto _dim_ids      = std::vector<rocprofiler_counter_dimension_id_t>{};
+                auto _dim_info     = std::vector<rocprofiler_counter_record_dimension_info_t>{};
+                auto _spm_dim_ids  = std::vector<rocprofiler_counter_dimension_id_t>{};
+                auto _spm_dim_info = std::vector<rocprofiler_counter_record_dimension_info_t>{};
 
                 ROCPROFILER_CHECK(rocprofiler_query_counter_info(
-                    counters[i], ROCPROFILER_COUNTER_INFO_VERSION_1, &_info));
+                    counters[i], ROCPROFILER_COUNTER_INFO_VERSION_2, &_info));
 
                 if(counters_set_data != nullptr && counters_set_data->count(_info.name) == 0)
                     continue;
@@ -155,8 +157,19 @@ process_agent_counters(rocprofiler_agent_id_t    agent_id,
                     _dim_info.emplace_back(*_info.dimensions[j]);
                 }
 
-                agent_counter_info_data->at(id).emplace_back(
-                    id, _info, std::move(_dim_ids), std::move(_dim_info));
+                for(uint64_t j = 0; j < _info.spm_dimensions_count; ++j)
+                {
+                    if(_info.spm_dimensions[j] == nullptr) continue;
+                    _spm_dim_ids.emplace_back(_info.spm_dimensions[j]->id);
+                    _spm_dim_info.emplace_back(*_info.spm_dimensions[j]);
+                }
+
+                agent_counter_info_data->at(id).emplace_back(id,
+                                                             _info,
+                                                             std::move(_dim_ids),
+                                                             std::move(_dim_info),
+                                                             std::move(_spm_dim_ids),
+                                                             std::move(_spm_dim_info));
             }
 
             return ROCPROFILER_STATUS_SUCCESS;

@@ -24,6 +24,10 @@
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
+#include "lib/rocprofiler-sdk/counters/evaluate_ast.hpp"
+#include "lib/rocprofiler-sdk/counters/id_decode.hpp"
+#include "lib/rocprofiler-sdk/counters/metrics.hpp"
+#include "lib/rocprofiler-sdk/counters/parser/reader.hpp"
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
 #include "lib/rocprofiler-sdk/hsa/aql_packet.hpp"
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
@@ -31,6 +35,7 @@
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
 #include "lib/rocprofiler-sdk/kernel_dispatch/profiling_time.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
+#include "lib/rocprofiler-sdk/spm/decode.hpp"
 #include "lib/rocprofiler-sdk/spm/dispatch_handlers.hpp"
 
 #include <rocprofiler-sdk/dispatch_counting_service.h>
@@ -47,8 +52,10 @@
 #include <hsa/hsa_ext_amd.h>
 
 #include <cstdint>
+#include <map>
 #include <sstream>
 #include <tuple>
+#include <unordered_map>
 
 using namespace rocprofiler::counters;
 using namespace rocprofiler;
@@ -138,6 +145,50 @@ findSPMDeviceMetrics(const hsa::AgentCache& agent, const std::unordered_set<std:
         auto rocp_agent = CHECK_NOTNULL(agent.get_rocp_agent());
 
         if((metrics.count(counter.name()) > 0 || metrics.empty()) &&
+           rocprofiler::counters::isSupportSpm(counter, rocp_agent->id))
+        {
+            ret.push_back(counter);
+        }
+    }
+    return ret;
+}
+
+auto
+findSPMDerivedMetrics(const hsa::AgentCache& agent)
+{
+    std::vector<counters::Metric> ret;
+    auto                          mets         = counters::loadMetrics();
+    const auto&                   all_counters = mets->arch_to_metric;
+
+    const auto* gfx_metrics = common::get_val(all_counters, std::string(agent.name()));
+    if(!gfx_metrics) return ret;
+
+    for(const auto& counter : *gfx_metrics)
+    {
+        auto rocp_agent = CHECK_NOTNULL(agent.get_rocp_agent());
+        if(!counter.expression().empty() &&
+           rocprofiler::counters::isSupportSpm(counter, rocp_agent->id))
+        {
+            ret.push_back(counter);
+        }
+    }
+    return ret;
+}
+
+auto
+findSPMBasicMetrics(const hsa::AgentCache& agent)
+{
+    std::vector<counters::Metric> ret;
+    auto                          mets         = counters::loadMetrics();
+    const auto&                   all_counters = mets->arch_to_metric;
+
+    const auto* gfx_metrics = common::get_val(all_counters, std::string(agent.name()));
+    if(!gfx_metrics) return ret;
+
+    for(const auto& counter : *gfx_metrics)
+    {
+        auto rocp_agent = CHECK_NOTNULL(agent.get_rocp_agent());
+        if(counter.expression().empty() && !counter.event().empty() &&
            rocprofiler::counters::isSupportSpm(counter, rocp_agent->id))
         {
             ret.push_back(counter);
@@ -804,4 +855,530 @@ TEST(spm_core, public_api_iterate_agents)
     registration::set_init_status(1);
     registration::finalize();
     context::pop_client(1);
+}
+
+TEST(spm_core, derived_metrics_supported)
+{
+    ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
+    test_init();
+    ASSERT_TRUE(hsa::get_queue_controller() != nullptr);
+    auto agents = hsa::get_queue_controller()->get_supported_agents();
+    ASSERT_GT(agents.size(), 0);
+
+    for(const auto& [_, agent] : agents)
+    {
+        auto derived = findSPMDerivedMetrics(agent);
+        auto basic   = findSPMBasicMetrics(agent);
+
+        // There should be some basic metrics
+        ASSERT_FALSE(basic.empty()) << "No basic SPM metrics found for " << agent.name();
+
+        // If there are derived metrics, verify they are truly derived
+        // and have at least one base hw counter
+        auto asts       = counters::get_ast_map();
+        auto agent_name = std::string(agent.name());
+        for(const auto& m : derived)
+        {
+            EXPECT_FALSE(m.expression().empty())
+                << "Derived metric " << m.name() << " should have an expression";
+
+            auto req_counters =
+                counters::get_required_hardware_counters(asts->arch_to_counter_asts, agent_name, m);
+            ASSERT_TRUE(req_counters)
+                << "Derived metric " << m.name() << " should have resolvable base counters";
+
+            bool has_hw_counter = false;
+            for(const auto& base : *req_counters)
+            {
+                if(!base.event().empty())
+                {
+                    has_hw_counter = true;
+                    break;
+                }
+            }
+            EXPECT_TRUE(has_hw_counter)
+                << "Derived metric " << m.name() << " should have at least one base hw counter";
+        }
+    }
+}
+
+TEST(spm_core, derived_config_creation)
+{
+    ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
+    test_init();
+    ASSERT_TRUE(hsa::get_queue_controller() != nullptr);
+    auto agents = hsa::get_queue_controller()->get_supported_agents();
+    ASSERT_GT(agents.size(), 0);
+
+    for(const auto& [_, agent] : agents)
+    {
+        auto derived = findSPMDerivedMetrics(agent);
+        if(derived.empty()) continue;
+
+        // Try to create a config with a derived metric
+        auto& metric = derived.front();
+
+        rocprofiler_counter_config_id_t cfg_id = {.handle = 0};
+        rocprofiler_counter_id_t        id     = {.handle = metric.id()};
+
+        std::vector<rocprofiler_spm_parameters_t*> input_params{};
+        rocprofiler_spm_parameters_t               param{
+            .size  = sizeof(rocprofiler_spm_parameters_t),
+            .type  = ROCPROFILER_SPM_PARAMETER_TYPE_SAMPLE_INTERVAL_SCLK_CYCLES,
+            .value = 1200};
+        input_params.push_back(&param);
+
+        ROCPROFILER_CALL(rocprofiler_spm_create_counter_config(agent.get_rocp_agent()->id,
+                                                               &id,
+                                                               1,
+                                                               input_params.data(),
+                                                               input_params.size(),
+                                                               &cfg_id),
+                         "Unable to create profile with derived metric");
+        auto profile = spm::get_spm_counter_config(cfg_id);
+        ASSERT_TRUE(profile);
+
+        // Verify the config has derived metric + AST pairs
+        EXPECT_FALSE(profile->derived.empty())
+            << "Config should contain derived metric + AST pairs";
+
+        // Verify user-requested metrics includes the derived metric
+        EXPECT_FALSE(profile->metrics.empty()) << "Config should contain user-requested metrics";
+
+        // Verify base hw counters were resolved
+        EXPECT_FALSE(profile->required_hw_counters.empty())
+            << "Config should contain resolved base hw counters for the derived metric";
+
+        // Verify all resolved hw counters are basic (have events, no expressions)
+        for(const auto& base : profile->required_hw_counters)
+        {
+            EXPECT_FALSE(base.event().empty())
+                << "Base hw counter " << base.name() << " should have a hardware event";
+        }
+    }
+}
+
+TEST(spm_core, iterate_includes_derived)
+{
+    ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
+    test_init();
+
+    registration::init_logging();
+    registration::set_init_status(-1);
+    context::push_client(1);
+    auto agents = hsa::get_queue_controller()->get_supported_agents();
+    for(const auto& [_, agent] : agents)
+    {
+        auto derived = findSPMDerivedMetrics(agent);
+        if(derived.empty()) continue;
+
+        std::set<uint64_t> from_api{};
+        ROCPROFILER_CALL(
+            rocprofiler_iterate_spm_supported_counters(
+                agent.get_rocp_agent()->id,
+                [](rocprofiler_agent_id_t,
+                   rocprofiler_counter_id_t* counters,
+                   size_t                    num_counters,
+                   void*                     user_data) {
+                    auto* vec = static_cast<std::set<uint64_t>*>(user_data);
+                    for(size_t i = 0; i < num_counters; i++)
+                    {
+                        vec->insert(counters::get_base_metric_from_counter_id(counters[i]));
+                    }
+                    return ROCPROFILER_STATUS_SUCCESS;
+                },
+                static_cast<void*>(&from_api)),
+            "Could not fetch supported counters");
+
+        // Verify that derived metrics appear in the iteration results
+        for(const auto& dm : derived)
+        {
+            EXPECT_TRUE(from_api.count(dm.id()) > 0)
+                << "Derived metric " << dm.name() << " (id=" << dm.id()
+                << ") should appear in iterate_spm_supported_counters";
+        }
+    }
+    registration::set_init_status(1);
+    registration::finalize();
+    context::pop_client(1);
+}
+
+namespace
+{
+auto
+findSPMUnsupportedDerivedMetrics(const hsa::AgentCache& agent)
+{
+    std::vector<counters::Metric> ret;
+    auto                          mets         = counters::loadMetrics();
+    const auto&                   all_counters = mets->arch_to_metric;
+
+    const auto* gfx_metrics = common::get_val(all_counters, std::string(agent.name()));
+    if(!gfx_metrics) return ret;
+
+    for(const auto& counter : *gfx_metrics)
+    {
+        auto rocp_agent = CHECK_NOTNULL(agent.get_rocp_agent());
+        if(!counter.expression().empty() &&
+           !rocprofiler::counters::isSupportSpm(counter, rocp_agent->id) &&
+           rocprofiler::counters::checkValidMetric(std::string(agent.name()), counter))
+        {
+            ret.push_back(counter);
+        }
+    }
+    return ret;
+}
+}  // namespace
+
+TEST(spm_core, derived_config_mixed_basic_and_derived)
+{
+    ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
+    test_init();
+
+    registration::init_logging();
+    registration::set_init_status(-1);
+    context::push_client(1);
+    auto agents = hsa::get_queue_controller()->get_supported_agents();
+    for(const auto& [_, agent] : agents)
+    {
+        auto basic   = findSPMBasicMetrics(agent);
+        auto derived = findSPMDerivedMetrics(agent);
+        if(basic.empty() || derived.empty()) continue;
+
+        rocprofiler_counter_id_t ids[2] = {{.handle = basic.front().id()},
+                                           {.handle = derived.front().id()}};
+
+        rocprofiler_counter_config_id_t            cfg_id = {.handle = 0};
+        std::vector<rocprofiler_spm_parameters_t*> input_params{};
+        rocprofiler_spm_parameters_t               param{
+            .size  = sizeof(rocprofiler_spm_parameters_t),
+            .type  = ROCPROFILER_SPM_PARAMETER_TYPE_SAMPLE_INTERVAL_SCLK_CYCLES,
+            .value = 1200};
+        input_params.push_back(&param);
+
+        ROCPROFILER_CALL(rocprofiler_spm_create_counter_config(agent.get_rocp_agent()->id,
+                                                               ids,
+                                                               2,
+                                                               input_params.data(),
+                                                               input_params.size(),
+                                                               &cfg_id),
+                         "Unable to create mixed config");
+
+        auto profile = spm::get_spm_counter_config(cfg_id);
+        ASSERT_TRUE(profile);
+
+        EXPECT_EQ(profile->metrics.size(), 2)
+            << "Config should contain both basic and derived metrics";
+        EXPECT_FALSE(profile->derived.empty()) << "Config should contain derived metric AST pairs";
+        EXPECT_FALSE(profile->required_hw_counters.empty())
+            << "Config should contain resolved base hw counters";
+    }
+    registration::set_init_status(1);
+    registration::finalize();
+    context::pop_client(1);
+}
+
+TEST(spm_core, unsupported_derived_rejected)
+{
+    ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
+    test_init();
+
+    registration::init_logging();
+    registration::set_init_status(-1);
+    context::push_client(1);
+    auto agents       = hsa::get_queue_controller()->get_supported_agents();
+    bool found_unsupported = false;
+    for(const auto& [_, agent] : agents)
+    {
+        auto unsupported = findSPMUnsupportedDerivedMetrics(agent);
+        if(unsupported.empty()) continue;
+        found_unsupported = true;
+
+        rocprofiler_counter_id_t        id     = {.handle = unsupported.front().id()};
+        rocprofiler_counter_config_id_t cfg_id = {.handle = 0};
+
+        std::vector<rocprofiler_spm_parameters_t*> input_params{};
+        rocprofiler_spm_parameters_t               param{
+            .size  = sizeof(rocprofiler_spm_parameters_t),
+            .type  = ROCPROFILER_SPM_PARAMETER_TYPE_SAMPLE_INTERVAL_SCLK_CYCLES,
+            .value = 1200};
+        input_params.push_back(&param);
+
+        auto status = rocprofiler_spm_create_counter_config(
+            agent.get_rocp_agent()->id, &id, 1, input_params.data(), input_params.size(), &cfg_id);
+        EXPECT_NE(status, ROCPROFILER_STATUS_SUCCESS)
+            << "Unsupported derived metric " << unsupported.front().name()
+            << " should be rejected for SPM";
+    }
+    registration::set_init_status(1);
+    registration::finalize();
+    context::pop_client(1);
+    if(!found_unsupported)
+        GTEST_SKIP() << "No unsupported derived metrics found on this architecture";
+}
+
+TEST(spm_core, derived_config_incremental)
+{
+    ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
+    test_init();
+
+    registration::init_logging();
+    registration::set_init_status(-1);
+    context::push_client(1);
+    auto agents = hsa::get_queue_controller()->get_supported_agents();
+    for(const auto& [_, agent] : agents)
+    {
+        auto basic   = findSPMBasicMetrics(agent);
+        auto derived = findSPMDerivedMetrics(agent);
+        if(basic.empty() || derived.empty()) continue;
+
+        std::vector<rocprofiler_spm_parameters_t*> input_params{};
+        rocprofiler_spm_parameters_t               param{
+            .size  = sizeof(rocprofiler_spm_parameters_t),
+            .type  = ROCPROFILER_SPM_PARAMETER_TYPE_SAMPLE_INTERVAL_SCLK_CYCLES,
+            .value = 1200};
+        input_params.push_back(&param);
+
+        // Config 1: basic counter only
+        rocprofiler_counter_id_t        basic_id = {.handle = basic.front().id()};
+        rocprofiler_counter_config_id_t cfg_id1  = {.handle = 0};
+        ROCPROFILER_CALL(rocprofiler_spm_create_counter_config(agent.get_rocp_agent()->id,
+                                                               &basic_id,
+                                                               1,
+                                                               input_params.data(),
+                                                               input_params.size(),
+                                                               &cfg_id1),
+                         "Unable to create basic config");
+
+        // Config 2: add derived metric incrementally
+        rocprofiler_counter_id_t        derived_id = {.handle = derived.front().id()};
+        rocprofiler_counter_config_id_t cfg_id2    = cfg_id1;
+        ROCPROFILER_CALL(rocprofiler_spm_create_counter_config(agent.get_rocp_agent()->id,
+                                                               &derived_id,
+                                                               1,
+                                                               input_params.data(),
+                                                               input_params.size(),
+                                                               &cfg_id2),
+                         "Unable to create incremental config");
+
+        auto profile2 = spm::get_spm_counter_config(cfg_id2);
+        ASSERT_TRUE(profile2);
+
+        EXPECT_GE(profile2->metrics.size(), 2) << "Incremental config should contain both metrics";
+        EXPECT_FALSE(profile2->derived.empty())
+            << "Incremental config should contain derived metric AST";
+    }
+    registration::set_init_status(1);
+    registration::finalize();
+    context::pop_client(1);
+}
+
+TEST(spm_core, compute_derived_empty_inputs)
+{
+    spm::spm_counter_config   config{};
+    rocprofiler_dispatch_id_t dispatch_id = 1;
+    rocprofiler_agent_id_t    agent_id    = {.handle = 1};
+
+    // Allocate a minimal spm_desc_v0_t
+    std::vector<char> buf(sizeof(spm::spm_desc_v0_t));
+    auto&             desc_v0 = *reinterpret_cast<spm::spm_desc_v0_t*>(buf.data());
+    desc_v0                   = spm::spm_desc_v0_t{};
+
+    // Empty samples → empty output
+    {
+        spm::spm_sample_vec                           samples;
+        std::vector<rocprofiler_spm_counter_record_t> out_records;
+        spm::compute_spm_derived_metrics(
+            samples, desc_v0, 0, config, dispatch_id, agent_id, out_records);
+        EXPECT_TRUE(out_records.empty());
+    }
+
+    // Empty derived in config → empty output
+    {
+        spm::spm_sample_vec samples;
+        samples.push_back(spm::spm_sample_t{.timestamp = 100, .value = 42, .index = 0});
+        std::vector<rocprofiler_spm_counter_record_t> out_records;
+        spm::compute_spm_derived_metrics(
+            samples, desc_v0, 0, config, dispatch_id, agent_id, out_records);
+        EXPECT_TRUE(out_records.empty());
+    }
+}
+
+TEST(spm_core, compute_derived_reduce_sum)
+{
+    // Build synthetic metrics for a reduce(SQ_WAVES, sum) expression
+    std::unordered_map<std::string, Metric> metrics = {
+        {"SQ_WAVES", Metric("gfx9", "SQ_WAVES", "SQ", "1", "a", "", "", 10)}};
+
+    // Parse the reduce(SQ_WAVES, sum) expression
+    RawAST* raw_ast = nullptr;
+    auto*   lexbuf  = yy_scan_string("reduce(SQ_WAVES,sum)");
+    yyparse(&raw_ast);
+    ASSERT_TRUE(raw_ast);
+
+    auto ast = EvaluateAST({.handle = 20}, metrics, *raw_ast, "gfx9");
+    yy_delete_buffer(lexbuf);
+    delete raw_ast;
+
+    // Build spm_counter_config with the derived metric
+    auto derived_metric =
+        Metric("gfx9", "TEST_DERRIVED", "", "", "a", "reduce(SQ_WAVES,sum)", "", 20);
+    auto base_metric = Metric("gfx9", "SQ_WAVES", "SQ", "1", "a", "", "", 10);
+
+    spm::spm_counter_config config{};
+    config.derived.push_back({derived_metric, ast, {base_metric}});
+
+    // Allocate spm_desc_v0_t + 1 event entry
+    constexpr size_t  num_events = 1;
+    std::vector<char> buf(sizeof(spm::spm_desc_v0_t) +
+                          num_events * sizeof(spm::spm_counter_instance_t));
+    auto&             desc_v0 = *reinterpret_cast<spm::spm_desc_v0_t*>(buf.data());
+    desc_v0                   = spm::spm_desc_v0_t{};
+    desc_v0.num_events        = num_events;
+
+    // Populate event: counter ID with base metric 10
+    rocprofiler_counter_id_t base_counter_id = {.handle = 0};
+    counters::set_base_metric_in_counter_id(base_counter_id, 10);
+    desc_v0.events()[0] = spm::spm_counter_instance_t{.id = base_counter_id, .instance = 0};
+
+    // Build samples: 3 shader engines at the same timestamp
+    spm::spm_sample_vec samples;
+    samples.push_back(spm::spm_sample_t{
+        .timestamp = 100, .value = 10, .index = 0, .shader_engine = 0, .is_global = false});
+    samples.push_back(spm::spm_sample_t{
+        .timestamp = 100, .value = 20, .index = 0, .shader_engine = 1, .is_global = false});
+    samples.push_back(spm::spm_sample_t{
+        .timestamp = 100, .value = 30, .index = 0, .shader_engine = 2, .is_global = false});
+
+    rocprofiler_dispatch_id_t dispatch_id = 1;
+    rocprofiler_agent_id_t    agent_id    = {.handle = 1};
+
+    std::vector<rocprofiler_spm_counter_record_t> out_records;
+    spm::compute_spm_derived_metrics(
+        samples, desc_v0, 0, config, dispatch_id, agent_id, out_records);
+
+    ASSERT_FALSE(out_records.empty()) << "Should produce at least one derived record";
+    EXPECT_EQ(out_records.front().timestamp, 100u);
+    EXPECT_EQ(out_records.front().dispatch_id, dispatch_id);
+
+    // Sum of 10+20+30 = 60
+    double total = 0;
+    for(const auto& rec : out_records)
+    {
+        total += rec.value;
+        EXPECT_EQ(rec.timestamp, 100u);
+    }
+    EXPECT_DOUBLE_EQ(total, 60.0);
+}
+
+TEST(spm_core, compute_derived_missing_base)
+{
+    // Configure a derived metric requiring SQ_WAVES + TCC_HIT
+    std::unordered_map<std::string, Metric> metrics = {
+        {"SQ_WAVES", Metric("gfx9", "SQ_WAVES", "SQ", "1", "a", "", "", 10)},
+        {"TCC_HIT", Metric("gfx9", "TCC_HIT", "TCC", "2", "b", "", "", 11)}};
+
+    RawAST* raw_ast = nullptr;
+    auto*   lexbuf  = yy_scan_string("SQ_WAVES+TCC_HIT");
+    yyparse(&raw_ast);
+    ASSERT_TRUE(raw_ast);
+
+    auto ast = EvaluateAST({.handle = 20}, metrics, *raw_ast, "gfx9");
+    yy_delete_buffer(lexbuf);
+    delete raw_ast;
+
+    auto derived_metric = Metric("gfx9", "TEST_DERRIVED", "", "", "a", "SQ_WAVES+TCC_HIT", "", 20);
+    auto base_a         = Metric("gfx9", "SQ_WAVES", "SQ", "1", "a", "", "", 10);
+    auto base_b         = Metric("gfx9", "TCC_HIT", "TCC", "2", "b", "", "", 11);
+
+    spm::spm_counter_config config{};
+    config.derived.push_back({derived_metric, ast, {base_a, base_b}});
+
+    // Only put SQ_WAVES in the event map — TCC_HIT is missing
+    constexpr size_t  num_events = 1;
+    std::vector<char> buf(sizeof(spm::spm_desc_v0_t) +
+                          num_events * sizeof(spm::spm_counter_instance_t));
+    auto&             desc_v0 = *reinterpret_cast<spm::spm_desc_v0_t*>(buf.data());
+    desc_v0                   = spm::spm_desc_v0_t{};
+    desc_v0.num_events        = num_events;
+
+    rocprofiler_counter_id_t base_a_counter_id = {.handle = 0};
+    counters::set_base_metric_in_counter_id(base_a_counter_id, 10);
+    desc_v0.events()[0] = spm::spm_counter_instance_t{.id = base_a_counter_id, .instance = 0};
+
+    // Provide samples only for SQ_WAVES
+    spm::spm_sample_vec samples;
+    samples.push_back(spm::spm_sample_t{
+        .timestamp = 100, .value = 42, .index = 0, .shader_engine = 0, .is_global = false});
+
+    rocprofiler_dispatch_id_t dispatch_id = 1;
+    rocprofiler_agent_id_t    agent_id    = {.handle = 1};
+
+    std::vector<rocprofiler_spm_counter_record_t> out_records;
+    spm::compute_spm_derived_metrics(
+        samples, desc_v0, 0, config, dispatch_id, agent_id, out_records);
+
+    EXPECT_TRUE(out_records.empty())
+        << "Should skip derived metric when a required base metric is missing";
+}
+
+TEST(spm_core, compute_derived_multiple_timestamps)
+{
+    std::unordered_map<std::string, Metric> metrics = {
+        {"SQ_WAVES", Metric("gfx9", "SQ_WAVES", "SQ", "1", "a", "", "", 10)}};
+
+    RawAST* raw_ast = nullptr;
+    auto*   lexbuf  = yy_scan_string("reduce(SQ_WAVES,sum)");
+    yyparse(&raw_ast);
+    ASSERT_TRUE(raw_ast);
+
+    auto ast = EvaluateAST({.handle = 20}, metrics, *raw_ast, "gfx9");
+    yy_delete_buffer(lexbuf);
+    delete raw_ast;
+
+    auto derived_metric =
+        Metric("gfx9", "TEST_DERRIVED", "", "", "a", "reduce(SQ_WAVES,sum)", "", 20);
+    auto base_metric = Metric("gfx9", "SQ_WAVES", "SQ", "1", "a", "", "", 10);
+
+    spm::spm_counter_config config{};
+    config.derived.push_back({derived_metric, ast, {base_metric}});
+
+    constexpr size_t  num_events = 1;
+    std::vector<char> buf(sizeof(spm::spm_desc_v0_t) +
+                          num_events * sizeof(spm::spm_counter_instance_t));
+    auto&             desc_v0 = *reinterpret_cast<spm::spm_desc_v0_t*>(buf.data());
+    desc_v0                   = spm::spm_desc_v0_t{};
+    desc_v0.num_events        = num_events;
+
+    rocprofiler_counter_id_t base_counter_id = {.handle = 0};
+    counters::set_base_metric_in_counter_id(base_counter_id, 10);
+    desc_v0.events()[0] = spm::spm_counter_instance_t{.id = base_counter_id, .instance = 0};
+
+    // Two timestamps, each with 2 shader engines
+    spm::spm_sample_vec samples;
+    samples.push_back(spm::spm_sample_t{
+        .timestamp = 100, .value = 10, .index = 0, .shader_engine = 0, .is_global = false});
+    samples.push_back(spm::spm_sample_t{
+        .timestamp = 100, .value = 20, .index = 0, .shader_engine = 1, .is_global = false});
+    samples.push_back(spm::spm_sample_t{
+        .timestamp = 200, .value = 5, .index = 0, .shader_engine = 0, .is_global = false});
+    samples.push_back(spm::spm_sample_t{
+        .timestamp = 200, .value = 15, .index = 0, .shader_engine = 1, .is_global = false});
+
+    rocprofiler_dispatch_id_t dispatch_id = 1;
+    rocprofiler_agent_id_t    agent_id    = {.handle = 1};
+
+    std::vector<rocprofiler_spm_counter_record_t> out_records;
+    spm::compute_spm_derived_metrics(
+        samples, desc_v0, 0, config, dispatch_id, agent_id, out_records);
+
+    // Expect records for both timestamps
+    std::map<uint64_t, double> ts_totals;
+    for(const auto& rec : out_records)
+    {
+        ts_totals[rec.timestamp] += rec.value;
+    }
+
+    ASSERT_EQ(ts_totals.size(), 2u) << "Should have records for 2 timestamps";
+    EXPECT_DOUBLE_EQ(ts_totals[100], 30.0);
+    EXPECT_DOUBLE_EQ(ts_totals[200], 20.0);
 }

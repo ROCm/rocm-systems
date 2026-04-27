@@ -382,7 +382,7 @@ def write_spm_counters_csv(importData, config) -> None:
         "vgpr_count",
         "accum_vgpr_count",
         "sgpr_count",
-        "counter_name || '[XCC: ' || xcc || ', SE: ' || shader_engine || ', Instance: ' || instance || ']' AS counter_name",
+        "CASE WHEN shader_engine IS NULL AND instance IS NULL THEN counter_name || '[XCC: ' || xcc || ']' WHEN shader_engine IS NULL THEN counter_name || '[XCC: ' || xcc || ', Instance: ' || instance || ']' WHEN instance IS NULL THEN counter_name || '[XCC: ' || xcc || ', SE: ' || shader_engine || ']' ELSE counter_name || '[XCC: ' || xcc || ', SE: ' || shader_engine || ', Instance: ' || instance || ']' END AS counter_name",
         "pmc_id AS Counter_Id",
         "value AS Counter_Value",
         "timestamp AS Timestamp",

@@ -132,6 +132,11 @@ setCustomCounterDefinition(const CustomCounterDefinition& def);
 
 bool
 isSupportSpm(const Metric& metric, rocprofiler_agent_id_t agent_id);
+
+class EvaluateAST;
+
+bool
+isSPMSupportExpression(const EvaluateAST& node);
 }  // namespace counters
 }  // namespace rocprofiler
 

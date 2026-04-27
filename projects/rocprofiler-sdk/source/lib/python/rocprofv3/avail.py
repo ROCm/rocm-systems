@@ -42,6 +42,9 @@ def build_counter_string(obj):
     counter_str += "\n" + "{:20}:\t{}".format("SPM", spm_support)
     counter_str += "\n" + "{:20}:\t".format("Dimensions")
     counter_str += " ".join(dim.__str__() for dim in obj.dimensions)
+    if obj.spm_support and obj.spm_dimensions:
+        counter_str += "\n" + "{:20}:\t".format("SPM Dimensions")
+        counter_str += " ".join(dim.__str__() for dim in obj.spm_dimensions)
     return counter_str
 
 
@@ -76,6 +79,7 @@ class counter:
         counter_dimensions,
         is_hw_constant,
         spm_support,
+        spm_dimensions=None,
     ):
         self.name = counter_name
         self.counter_handle = counter_handle
@@ -83,6 +87,7 @@ class counter:
         self.dimensions = counter_dimensions
         self.is_hw_constant = is_hw_constant
         self.spm_support = spm_support
+        self.spm_dimensions = spm_dimensions or []
 
     def get_as_dict(self):
         return dict(zip((self.columns), [self.name, self.description]))
@@ -106,6 +111,7 @@ class derived_counter(counter):
         counter_dimensions,
         is_hw_constant,
         spm_support,
+        spm_dimensions=None,
     ):
         super().__init__(
             counter_handle,
@@ -114,6 +120,7 @@ class derived_counter(counter):
             counter_dimensions,
             is_hw_constant,
             spm_support,
+            spm_dimensions=spm_dimensions,
         )
         self.expression = counter_expression
 
@@ -137,6 +144,7 @@ class basic_counter(counter):
         counter_dimensions,
         is_hw_constant,
         spm_support,
+        spm_dimensions=None,
     ):
         super().__init__(
             counter_handle,
@@ -145,6 +153,7 @@ class basic_counter(counter):
             counter_dimensions,
             is_hw_constant,
             spm_support,
+            spm_dimensions=spm_dimensions,
         )
         self.block = counter_block
 
@@ -376,6 +385,45 @@ def get_dimensions(counter_handle):
     return dimensions
 
 
+def get_spm_dimensions(counter_handle):
+    lib = get_library()
+    lib.get_number_of_spm_dimensions.argtypes = [ctypes.c_ulong]
+    lib.get_number_of_spm_dimensions.restype = ctypes.c_ulong
+    num_dims = lib.get_number_of_spm_dimensions(counter_handle)
+
+    if num_dims == 0:
+        return []
+
+    lib.spm_counter_dimension_ids.argtypes = [
+        ctypes.c_ulong,
+        ctypes.c_ulong * num_dims,
+        ctypes.c_uint,
+    ]
+    dims_ids = (ctypes.c_ulong * num_dims)()
+    lib.spm_counter_dimension.argtypes = [
+        ctypes.c_ulong,
+        ctypes.c_ulong,
+        ctypes.POINTER(ctypes.c_char_p),
+        ctypes.POINTER(ctypes.c_uint),
+    ]
+    lib.spm_counter_dimension_ids(counter_handle, dims_ids, num_dims)
+    dimensions = []
+    for dim_id in list(dims_ids):
+        dimension_name = ctypes.c_char_p()
+        dimension_instance = ctypes.c_uint()
+        lib.spm_counter_dimension(
+            counter_handle,
+            dim_id,
+            ctypes.byref(dimension_name),
+            ctypes.byref(dimension_instance),
+        )
+        dim = dimension(
+            dim_id, get_string_value(dimension_name), dimension_instance.value
+        )
+        dimensions.append(dim)
+    return dimensions
+
+
 def get_counters_helper(is_spm=False):
     agent_counters = {}
     agents = get_agent_handles()
@@ -453,6 +501,8 @@ def get_counter_info(counter_handle):
         ctypes.byref(spm_support),
     )
 
+    spm_dims = get_spm_dimensions(counter_handle) if spm_support.value else []
+
     if is_derived.value == 1:
         lib.counter_expression.argtypes = [
             ctypes.c_ulong,
@@ -469,6 +519,7 @@ def get_counter_info(counter_handle):
             dimensions,
             is_hw_constant,
             spm_support,
+            spm_dimensions=spm_dims,
         )
 
     elif not is_hw_constant.value:
@@ -484,6 +535,7 @@ def get_counter_info(counter_handle):
             dimensions,
             is_hw_constant,
             spm_support,
+            spm_dimensions=spm_dims,
         )
     else:
         return counter(
@@ -493,6 +545,7 @@ def get_counter_info(counter_handle):
             [],
             is_hw_constant.value,
             spm_support,
+            spm_dimensions=spm_dims,
         )
 
 

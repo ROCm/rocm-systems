@@ -27,6 +27,7 @@
 #include "lib/rocprofiler-sdk/aql/helpers.hpp"
 #include "lib/rocprofiler-sdk/aql/packet_construct.hpp"
 #include "lib/rocprofiler-sdk/counters/evaluate_ast.hpp"
+#include "lib/rocprofiler-sdk/counters/metrics.hpp"
 
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/rocprofiler.h>
@@ -93,7 +94,7 @@ getBlockDimensions(rocprofiler_agent_id_t agent_id, const Metric& metric)
 namespace
 {
 metric_dims
-generate_dimensions(rocprofiler_agent_id_t agent_id)
+generate_dimensions(rocprofiler_agent_id_t agent_id, bool spm = false)
 {
     std::unordered_map<uint64_t, std::vector<MetricDimension>> dims;
 
@@ -106,13 +107,37 @@ generate_dimensions(rocprofiler_agent_id_t agent_id)
         rocprofiler::common::get_val(asts->arch_to_counter_asts, std::string(agent->name));
     if(!arch_asts) return {.id_to_dim = dims};
 
+    auto        metrics_map = spm ? counters::loadMetrics() : nullptr;
+    const auto* id_map      = metrics_map ? &metrics_map->id_to_metric : nullptr;
+
     for(const auto& [metric, ast] : *arch_asts)
     {
         auto ast_copy = ast;
         try
         {
             // Generate dimensions for this specific agent
-            dims.emplace(ast.out_id().handle, ast_copy.set_dimensions(agent_id));
+            auto metric_dims_v = ast_copy.set_dimensions(agent_id);
+
+            if(spm && id_map)
+            {
+                auto base_metric_id    = counters::get_base_metric_from_counter_id(ast.out_id());
+                const auto* metric_ptr = rocprofiler::common::get_val(*id_map, base_metric_id);
+                if(metric_ptr && isSupportSpm(*metric_ptr, agent_id))
+                {
+                    if(!metric_ptr->expression().empty())
+                    {
+                        metric_dims_v.clear();
+                        metric_dims_v.emplace_back(dimension_map().at(ROCPROFILER_DIMENSION_XCC),
+                                                   agent->num_xcc,
+                                                   ROCPROFILER_DIMENSION_XCC);
+                    }
+                    dims.emplace(ast.out_id().handle, std::move(metric_dims_v));
+                }
+            }
+            else
+            {
+                dims.emplace(ast.out_id().handle, std::move(metric_dims_v));
+            }
         } catch(std::runtime_error& e)
         {
             ROCP_FATAL << metric << " has improper dimensions"
@@ -124,11 +149,18 @@ generate_dimensions(rocprofiler_agent_id_t agent_id)
 }  // namespace
 
 std::shared_ptr<const metric_dims>
-get_dimension_cache(rocprofiler_agent_id_t agent_id, bool reload)
+get_dimension_cache(rocprofiler_agent_id_t agent_id, bool reload, bool spm)
 {
     using DimSync = common::Synchronized<
         std::unordered_map<rocprofiler_agent_id_t, std::shared_ptr<const metric_dims>>>;
-    static DimSync*& dim_data = common::static_object<DimSync>::construct();
+    struct pmc_dim_tag
+    {};
+    struct spm_dim_tag
+    {};
+    static DimSync*& pmc_dim_data = common::static_object<DimSync, pmc_dim_tag>::construct();
+    static DimSync*& spm_dim_data = common::static_object<DimSync, spm_dim_tag>::construct();
+
+    auto*& dim_data = spm ? spm_dim_data : pmc_dim_data;
 
     if(!dim_data) return nullptr;
 
@@ -139,8 +171,8 @@ get_dimension_cache(rocprofiler_agent_id_t agent_id, bool reload)
 
     if(needs_generation)
     {
-        return dim_data->wlock([agent_id](auto& data) -> std::shared_ptr<const metric_dims> {
-            auto new_dims  = std::make_shared<const metric_dims>(generate_dimensions(agent_id));
+        return dim_data->wlock([agent_id, spm](auto& data) -> std::shared_ptr<const metric_dims> {
+            auto new_dims = std::make_shared<const metric_dims>(generate_dimensions(agent_id, spm));
             data[agent_id] = new_dims;
             return new_dims;
         });

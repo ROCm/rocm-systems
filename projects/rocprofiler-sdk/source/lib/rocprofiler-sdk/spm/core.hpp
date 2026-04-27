@@ -24,6 +24,7 @@
 
 #include "lib/rocprofiler-sdk/aql/packet_construct.hpp"
 #include "lib/rocprofiler-sdk/context/correlation_id.hpp"
+#include "lib/rocprofiler-sdk/counters/evaluate_ast.hpp"
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
 #include "lib/rocprofiler-sdk/hsa/aql_packet.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue.hpp"
@@ -65,10 +66,26 @@ struct spm_counter_config
 {
     const rocprofiler_agent_t*    agent = nullptr;
     std::vector<counters::Metric> metrics{};
+    // HW counters that must be collected to compute the above
+    // metrics (derived metrics are broken down into hw counters
+    // in this set).
+    std::set<counters::Metric> required_hw_counters{};
+    // Counters that are not hardware based but based on either a
+    // static value (such as those in agent)
+    std::set<counters::Metric> required_special_counters{};
+    struct derived_metric_info
+    {
+        counters::Metric           metric;
+        counters::EvaluateAST      ast;
+        std::set<counters::Metric> req_counters;
+    };
+    // Derived metrics paired with their evaluation ASTs and precomputed required counters
+    std::vector<derived_metric_info> derived{};
 
     std::vector<rocprofiler_spm_parameters_t> spm_parameters{};
 
     rocprofiler_counter_config_id_t id{.handle = 0};
+    std::atomic<uint32_t>           active_dispatches{0};
     // A packet cache of AQL packets. This allows reuse of AQL packets (preventing costly
     // allocation of new packets/destruction).
     common::Synchronized<std::vector<std::unique_ptr<rocprofiler::hsa::AQLPacket>>> packets;

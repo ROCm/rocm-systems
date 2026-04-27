@@ -43,6 +43,8 @@
 
 #include <fmt/core.h>
 
+#include <type_traits>
+
 namespace rocprofiler
 {
 namespace counters
@@ -165,8 +167,11 @@ rocprofiler_query_counter_info(rocprofiler_counter_id_t              counter_id,
         return false;
     };
 
-    auto dim_info = [&](auto& out_struct, rocprofiler_agent_id_t agent_id) {
-        auto dim_ptr = counters::get_dimension_cache(agent_id);
+    auto dim_info = [&](auto& out_struct, rocprofiler_agent_id_t agent_id, bool spm = false) {
+        using out_type = std::decay_t<decltype(out_struct)>;
+        if(spm && !out_struct.spm_support) return false;
+
+        auto dim_ptr = counters::get_dimension_cache(agent_id, false, spm);
         if(!dim_ptr) return false;
 
         // Use base metric ID for dimension lookup
@@ -187,11 +192,29 @@ rocprofiler_query_counter_info(rocprofiler_counter_id_t              counter_id,
         {
             // Can be 0 if the counter is not known by AQLProfile. This is the case
             // if it was added in a later version of AQLProfile.
+            if constexpr(std::is_same_v<out_type, rocprofiler_counter_info_v2_t>)
+            {
+                if(spm)
+                {
+                    out_struct.spm_dimensions       = nullptr;
+                    out_struct.spm_dimensions_count = 0;
+                    return true;
+                }
+            }
             out_struct.dimensions       = nullptr;
             out_struct.dimensions_count = 0;
             return true;
         }
 
+        if constexpr(std::is_same_v<out_type, rocprofiler_counter_info_v2_t>)
+        {
+            if(spm)
+            {
+                out_struct.spm_dimensions       = counters::get_static_ptr_array(_dim_info);
+                out_struct.spm_dimensions_count = _dim_info.size();
+                return true;
+            }
+        }
         out_struct.dimensions       = counters::get_static_ptr_array(_dim_info);
         out_struct.dimensions_count = _dim_info.size();
         return true;
@@ -199,12 +222,14 @@ rocprofiler_query_counter_info(rocprofiler_counter_id_t              counter_id,
 
     // Construct all possible permutations of instance ids. This is every instance
     // that can be returned by the counter across all dimensions.
-    auto dim_permutations = [&](auto& out_struct) {
+    auto dim_permutations = [&](auto& out_struct, bool spm = false) {
+        using out_type = std::decay_t<decltype(out_struct)>;
         // Find an agent that supports this metric for dimension lookup
         auto agent_id = counters::get_first_agent_for_metric(counter_id);
         if(agent_id == rocprofiler::sdk::null_agent_id) return false;
+        if(spm && !out_struct.spm_support) return false;
 
-        auto dim_ptr = counters::get_dimension_cache(agent_id);
+        auto dim_ptr = counters::get_dimension_cache(agent_id, false, spm);
         if(!dim_ptr) return false;
         // Use base metric ID for dimension lookup
         const auto* dims =
@@ -260,6 +285,15 @@ rocprofiler_query_counter_info(rocprofiler_counter_id_t              counter_id,
         }
         if(instances.empty())
         {
+            if constexpr(std::is_same_v<out_type, rocprofiler_counter_info_v2_t>)
+            {
+                if(spm)
+                {
+                    out_struct.spm_dimensions_instances       = nullptr;
+                    out_struct.spm_dimensions_instances_count = 0;
+                    return true;
+                }
+            }
             out_struct.dimensions_instances       = nullptr;
             out_struct.dimensions_instances_count = 0;
             return true;
@@ -285,9 +319,18 @@ rocprofiler_query_counter_info(rocprofiler_counter_id_t              counter_id,
             instance.counter_id = counters::rec_to_counter_id(instance.instance_id).handle;
             instance.size       = rocprofiler_counter_record_dimension_instance_v1_info_t_rt_size;
         }
+
+        if constexpr(std::is_same_v<out_type, rocprofiler_counter_info_v2_t>)
+        {
+            if(spm)
+            {
+                out_struct.spm_dimensions_instances = counters::get_static_ptr_array(instances);
+                out_struct.spm_dimensions_instances_count = instances.size();
+                return true;
+            }
+        }
         out_struct.dimensions_instances       = counters::get_static_ptr_array(instances);
         out_struct.dimensions_instances_count = instances.size();
-        out_struct.size                       = sizeof(rocprofiler_counter_info_v1_t);
         return true;
     };
 
@@ -299,6 +342,7 @@ rocprofiler_query_counter_info(rocprofiler_counter_id_t              counter_id,
         }
         return false;
     };
+
     switch(version)
     {
         case ROCPROFILER_COUNTER_INFO_VERSION_0:
@@ -323,6 +367,36 @@ rocprofiler_query_counter_info(rocprofiler_counter_id_t              counter_id,
             if(!dim_permutations(_out_struct)) return ROCPROFILER_STATUS_ERROR_DIM_NOT_FOUND;
             spm_info(_out_struct);
 
+            _out_struct.size = sizeof(rocprofiler_counter_info_v1_t);
+            return ROCPROFILER_STATUS_SUCCESS;
+        }
+        break;
+        case ROCPROFILER_COUNTER_INFO_VERSION_2:
+        {
+            auto& _out_struct = *static_cast<rocprofiler_counter_info_v2_t*>(info);
+
+            if(!base_info(_out_struct)) return ROCPROFILER_STATUS_ERROR_COUNTER_NOT_FOUND;
+
+            auto agent_id = counters::get_first_agent_for_metric(counter_id);
+            if(agent_id.handle == 0) return ROCPROFILER_STATUS_ERROR_AGENT_NOT_FOUND;
+
+            if(!dim_info(_out_struct, agent_id)) return ROCPROFILER_STATUS_ERROR_DIM_NOT_FOUND;
+            if(!dim_permutations(_out_struct)) return ROCPROFILER_STATUS_ERROR_DIM_NOT_FOUND;
+            spm_info(_out_struct);
+
+            if(!_out_struct.spm_support)
+            {
+                _out_struct.spm_dimensions                 = nullptr;
+                _out_struct.spm_dimensions_count           = 0;
+                _out_struct.spm_dimensions_instances       = nullptr;
+                _out_struct.spm_dimensions_instances_count = 0;
+            }
+            else
+            {
+                dim_info(_out_struct, agent_id, true);
+                dim_permutations(_out_struct, true);
+            }
+            _out_struct.size = sizeof(rocprofiler_counter_info_v2_t);
             return ROCPROFILER_STATUS_SUCCESS;
         }
         break;

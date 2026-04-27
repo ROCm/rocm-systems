@@ -21,6 +21,7 @@
 // THE SOFTWARE.
 
 #include "metrics.hpp"
+#include "evaluate_ast.hpp"
 #include "id_decode.hpp"
 
 #include "lib/common/filesystem.hpp"
@@ -456,18 +457,92 @@ Metric::Metric(const std::string&,  // Get rid of this...
     }
 }
 
+namespace
+{
+void
+collect_leaf_blocks(const EvaluateAST& node, std::set<std::string>& blocks)
+{
+    if(node.children().empty())
+    {
+        const auto& blk = node.metric().block();
+        if(!blk.empty()) blocks.insert(blk);
+        return;
+    }
+    for(const auto& child : node.children())
+        collect_leaf_blocks(child, blocks);
+}
+}  // namespace
+
+bool
+isSPMSupportExpression(const EvaluateAST& node)
+{
+    auto blocks = std::set<std::string>{};
+    collect_leaf_blocks(node, blocks);
+    return blocks.size() <= 1;
+}
+
 bool
 isSupportSpm(const Metric& metric, rocprofiler_agent_id_t agent_id)
 {
-    if(metric.event().empty()) return false;
     const auto* sym = rocprofiler::spm::construct_spm_interface();
     if(!sym) return false;
-    auto aql_agent       = *CHECK_NOTNULL(rocprofiler::agent::get_aql_agent((agent_id)));
-    auto query_info      = rocprofiler::aql::get_query_info(agent_id, metric);
-    auto pmc_event       = aqlprofile_pmc_event_t{};
-    pmc_event.block_name = static_cast<hsa_ven_amd_aqlprofile_block_name_t>(query_info.id);
-    pmc_event.event_id   = static_cast<uint32_t>(std::stoul(metric.event().c_str(), nullptr));
-    return sym->spm_is_event_supported(aql_agent, pmc_event);
+
+    // Basic hardware counter: check directly via aqlprofile
+    if(!metric.event().empty())
+    {
+        auto aql_agent       = *CHECK_NOTNULL(rocprofiler::agent::get_aql_agent((agent_id)));
+        auto query_info      = rocprofiler::aql::get_query_info(agent_id, metric);
+        auto pmc_event       = aqlprofile_pmc_event_t{};
+        pmc_event.block_name = static_cast<hsa_ven_amd_aqlprofile_block_name_t>(query_info.id);
+        pmc_event.event_id   = static_cast<uint32_t>(std::stoul(metric.event().c_str(), nullptr));
+        return sym->spm_is_event_supported(aql_agent, pmc_event);
+    }
+
+    // Derived counter: check if all required base hw counters are SPM-supported
+    if(!metric.expression().empty())
+    {
+        const auto* agent = rocprofiler::agent::get_agent(agent_id);
+        if(!agent) return false;
+
+        auto       asts       = get_ast_map();
+        auto       agent_name = std::string(agent->name);
+        const auto req_counters =
+            get_required_hardware_counters(asts->arch_to_counter_asts, agent_name, metric);
+
+        if(!req_counters) return false;
+
+        const auto* agent_ast =
+            rocprofiler::common::get_val(asts->arch_to_counter_asts, agent_name);
+        if(agent_ast)
+        {
+            const auto* counter_ast = rocprofiler::common::get_val(*agent_ast, metric.name());
+            if(counter_ast && !isSPMSupportExpression(*counter_ast)) return false;
+        }
+
+        auto aql_agent      = *CHECK_NOTNULL(rocprofiler::agent::get_aql_agent(agent_id));
+        bool has_hw_counter = false;
+
+        for(const auto& base : *req_counters)
+        {
+            // Skip constants (agent properties like CU_NUM, SE_NUM) -
+            // they have no event and no expression, injected at eval time
+            if(base.event().empty() && base.expression().empty()) continue;
+
+            // Each base counter must have a hardware event
+            if(base.event().empty()) return false;
+
+            auto query_info      = rocprofiler::aql::get_query_info(agent_id, base);
+            auto pmc_event       = aqlprofile_pmc_event_t{};
+            pmc_event.block_name = static_cast<hsa_ven_amd_aqlprofile_block_name_t>(query_info.id);
+            pmc_event.event_id   = static_cast<uint32_t>(std::stoul(base.event().c_str(), nullptr));
+            if(!sym->spm_is_event_supported(aql_agent, pmc_event)) return false;
+
+            has_hw_counter = true;
+        }
+        return has_hw_counter;
+    }
+
+    return false;
 }
 
 }  // namespace counters

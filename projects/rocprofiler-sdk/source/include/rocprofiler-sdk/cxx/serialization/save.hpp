@@ -1293,6 +1293,36 @@ save(ArchiveT& ar, rocprofiler_counter_info_v1_t data)
 
 template <typename ArchiveT>
 void
+save(ArchiveT& ar, rocprofiler_counter_info_v2_t data)
+{
+    ROCP_SDK_SAVE_DATA_FIELD(id);
+    ROCP_SDK_SAVE_DATA_BITFIELD("is_constant", is_constant);
+    ROCP_SDK_SAVE_DATA_BITFIELD("is_derived", is_derived);
+    ROCP_SDK_SAVE_DATA_BITFIELD("spm_support", spm_support);
+    ROCP_SDK_SAVE_DATA_CSTR(name);
+    ROCP_SDK_SAVE_DATA_CSTR(description);
+    ROCP_SDK_SAVE_DATA_CSTR(block);
+    ROCP_SDK_SAVE_DATA_CSTR(expression);
+
+    ROCP_SDK_SAVE_VALUE(
+        "dimensions",
+        rocprofiler::sdk::container::make_c_array(data.dimensions, data.dimensions_count));
+
+    ROCP_SDK_SAVE_VALUE("instances",
+                        rocprofiler::sdk::container::make_c_array(data.dimensions_instances,
+                                                                  data.dimensions_instances_count));
+
+    ROCP_SDK_SAVE_VALUE(
+        "spm_dimensions",
+        rocprofiler::sdk::container::make_c_array(data.spm_dimensions, data.spm_dimensions_count));
+
+    ROCP_SDK_SAVE_VALUE("spm_instances",
+                        rocprofiler::sdk::container::make_c_array(
+                            data.spm_dimensions_instances, data.spm_dimensions_instances_count));
+}
+
+template <typename ArchiveT>
+void
 save(ArchiveT& ar, rocprofiler_counter_dimension_info_t data)
 {
     ROCP_SDK_SAVE_DATA_CSTR(dimension_name);

@@ -93,8 +93,6 @@ rocprofiler_add_integration_validate_test(
          ${CMAKE_CURRENT_BINARY_DIR}/out_spm/pmc_results.json
          --spm-json
          ${CMAKE_CURRENT_BINARY_DIR}/out_spm/spm_results.json
-         --rocpd-input
-         ${CMAKE_CURRENT_BINARY_DIR}/out_spm/spm_results.db
          --counter-csv
          ${CMAKE_CURRENT_BINARY_DIR}/out_spm/rocpd_csv/out_spm_counter_collection_trace.csv
     CONFIG pytest.ini
@@ -102,6 +100,74 @@ rocprofiler_add_integration_validate_test(
     LABELS "integration-tests"
     FIXTURES_REQUIRED
         "rocprofv3-test-spm-execute;rocprofv3-test-spm-compare-to-pmc;rocprofv3-test-spm-rocpd-csv-generation"
+    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+    DISABLED ${IS_DISABLED})
+
+# SPM derived metrics (mixed basic + derived)
+set(DERIVED_COUNTER_LIST TA_FLAT_READ_WAVEFRONTS_sum SQ_WAVES)
+
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-spm-derived-execute
+    COMMAND
+        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --spm-beta-enabled=on --spm
+        ${DERIVED_COUNTER_LIST} --spm-sample-interval-unit sclk_cycles
+        --spm-sample-interval 1200 --kernel-trace -d
+        ${CMAKE_CURRENT_BINARY_DIR}/out_spm_derived --output-format json rocpd -o
+        spm_derived -- $<TARGET_FILE:simple-transpose>
+    DEPENDS simple-transpose
+    TIMEOUT 60
+    LABELS "integration-tests"
+    ENVIRONMENT "${PRELOAD_ENV}"
+    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+    DISABLED ${IS_DISABLED})
+
+# SPM derived-only (test filtering of implicit base counters)
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-spm-derived-only-execute
+    COMMAND
+        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --spm-beta-enabled=on --spm
+        TA_FLAT_READ_WAVEFRONTS_sum --spm-sample-interval-unit sclk_cycles
+        --spm-sample-interval 1200 --kernel-trace -d
+        ${CMAKE_CURRENT_BINARY_DIR}/out_spm_derived_only --output-format json rocpd -o
+        spm_derived_only -- $<TARGET_FILE:simple-transpose>
+    DEPENDS simple-transpose
+    TIMEOUT 60
+    LABELS "integration-tests"
+    ENVIRONMENT "${PRELOAD_ENV}"
+    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+    DISABLED ${IS_DISABLED})
+
+# rocpd CSV generation for derived-only
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-spm-derived-rocpd-csv-generation
+    COMMAND
+        ${Python3_EXECUTABLE} -m rocpd convert -f csv -d
+        ${CMAKE_CURRENT_BINARY_DIR}/out_spm_derived_only/rocpd_csv -i
+        ${CMAKE_CURRENT_BINARY_DIR}/out_spm_derived_only/spm_derived_only_results.db
+    DEPENDS rocprofiler-sdk::rocprofv3
+    TIMEOUT 60
+    LABELS "integration-tests"
+    ENVIRONMENT "${rocprofv3-spm-rocpd-env}"
+    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+    FIXTURES_SETUP rocprofv3-test-spm-derived-rocpd-csv-generation
+    FIXTURES_REQUIRED rocprofv3-test-spm-derived-only-execute
+    DISABLED ${IS_DISABLED})
+
+# Validate derived metric results
+rocprofiler_add_integration_validate_test(
+    rocprofv3-test-spm-derived-validate
+    TEST_PATHS validate.py
+    ARGS --spm-derived-json
+         ${CMAKE_CURRENT_BINARY_DIR}/out_spm_derived/spm_derived_results.json
+         --spm-derived-only-json
+         ${CMAKE_CURRENT_BINARY_DIR}/out_spm_derived_only/spm_derived_only_results.json
+         --spm-derived-csv
+         ${CMAKE_CURRENT_BINARY_DIR}/out_spm_derived_only/rocpd_csv/out_spm_counter_collection_trace.csv
+    CONFIG pytest.ini
+    COPY conftest.py
+    LABELS "integration-tests"
+    FIXTURES_REQUIRED
+        "rocprofv3-test-spm-derived-execute;rocprofv3-test-spm-derived-only-execute;rocprofv3-test-spm-derived-rocpd-csv-generation"
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
     DISABLED ${IS_DISABLED})
 

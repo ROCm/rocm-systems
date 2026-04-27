@@ -46,6 +46,11 @@ class CounterPacketConstruct;
 class ThreadTraceAQLPacketFactory;
 }  // namespace aql
 
+namespace spm
+{
+struct spm_counter_config;
+}  // namespace spm
+
 namespace hsa
 {
 #define HSA_AMD_INTERFACE_VERSION                                                                  \
@@ -305,6 +310,7 @@ public:
     void                                             populate_after() override;
     bool                                             valid() const { return is_valid; }
     const spm::spm_interface*                        sym = nullptr;
+    rocprofiler_counter_config_id_t                  config_id{};
     std::vector<aqlprofile_pmc_event_t>              aql_events{};
     std::vector<aqlprofile_spm_parameter_t>          aql_params{};
 

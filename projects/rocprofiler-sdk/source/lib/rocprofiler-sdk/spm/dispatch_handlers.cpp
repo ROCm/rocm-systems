@@ -151,7 +151,9 @@ pre_kernel_call(const context::context*                                  ctx,
         spm_pkt->populate_after();
 
         spm_pkt->dispatch_data = dispatch_data;
-        spm_pkt->user_data     = *user_data;
+        spm_pkt->config_id     = prof_config->id;
+        prof_config->active_dispatches.fetch_add(1);
+        spm_pkt->user_data = *user_data;
         if(info->buffer)
             spm_pkt->buffer = info->buffer;
         else
@@ -232,8 +234,11 @@ post_kernel_call(const context::context*                           ctx,
         }
     });
     if(rel_pkt)
+    {
+        prof_config->active_dispatches.fetch_sub(1);
         prof_config->packets.wlock(
             [&](auto& pkt_vector) { pkt_vector.emplace_back(std::move(rel_pkt)); });
+    }
 }
 }  // namespace spm
 }  // namespace rocprofiler

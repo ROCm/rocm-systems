@@ -452,6 +452,7 @@ typedef enum rocprofiler_counter_info_version_id_t
     ROCPROFILER_COUNTER_INFO_VERSION_NONE,
     ROCPROFILER_COUNTER_INFO_VERSION_0,  ///< @see ::rocprofiler_counter_info_v0_t
     ROCPROFILER_COUNTER_INFO_VERSION_1,  ///< @see ::rocprofiler_counter_info_v1_t
+    ROCPROFILER_COUNTER_INFO_VERSION_2,  ///< @see ::rocprofiler_counter_info_v2_t
     ROCPROFILER_COUNTER_INFO_VERSION_LAST,
 } rocprofiler_counter_info_version_id_t;
 

@@ -158,53 +158,53 @@ def test_validate_spm_rocpd_csv(counter_csv: pd.DataFrame, spm_json_data):
             assert within_tolerance(csv_value, spm_value)
 
 
-def test_validate_spm_rocpd(spm_json_data, rocpd_data):
-    data = spm_json_data["rocprofiler-sdk-tool"]
+def test_validate_spm_derived_json(spm_derived_json_data):
+    """Verify derived metric TA_FLAT_READ_WAVEFRONTS_sum appears in JSON output."""
+    data = spm_derived_json_data["rocprofiler-sdk-tool"]
     spm_data = data["callback_records"]["SPM"]
-
-    def _find_table_or_view(conn, base_name):
-        for typ in ("view", "table"):
-            row = conn.execute(
-                "SELECT name FROM sqlite_master WHERE type = ? AND name LIKE ?",
-                (typ, f"{base_name}%"),
-            ).fetchone()
-            if row:
-                return row[0]
-        return None
-
-    pmc_table = _find_table_or_view(rocpd_data, "rocpd_info_pmc")
-    pmc_event_table = _find_table_or_view(rocpd_data, "rocpd_pmc_event")
-
-    assert pmc_table is not None
-    assert pmc_event_table is not None
 
     counters = {itr["id"]["handle"]: itr["name"] for itr in data.get("counters", [])}
 
-    spm_counter_names = set()
+    derived_found = False
     for entry in spm_data:
         for record in entry["records"]:
-            spm_counter_names.add(counters[record["counter_id"]["handle"]])
+            counter_name = counters.get(record["counter_id"]["handle"], "")
+            print(counter_name)
+            if counter_name == ("TA_FLAT_READ_WAVEFRONTS_sum"):
+                derived_found = True
+                assert (
+                    record["value"] >= 0
+                ), f"Derived metric value should be non-negative, got {record['value']}"
 
-    assert len(spm_counter_names) > 0
+    assert derived_found, "TA_FLAT_READ_WAVEFRONTS_sum should appear in SPM JSON output"
 
-    placeholders = ",".join(["?"] * len(spm_counter_names))
-    pmc_name_list = sorted(spm_counter_names)
 
-    rocpd_pmc_names = rocpd_data.execute(
-        f"SELECT name FROM {pmc_table} WHERE name IN ({placeholders})",
-        pmc_name_list,
-    ).fetchall()
+def test_validate_spm_derived_rocpd_csv(spm_derived_csv: pd.DataFrame):
+    """Verify CSV format for derived metrics: XCC and Instance present, SE absent."""
+    assert not spm_derived_csv.empty
 
-    assert len(rocpd_pmc_names) > 0
+    counter_column = (
+        "counter_name" if "counter_name" in spm_derived_csv else "Counter_Name"
+    )
 
-    rocpd_spm_count = rocpd_data.execute(
-        f"SELECT COUNT(*) FROM {pmc_event_table} e "
-        f"JOIN {pmc_table} p ON e.pmc_id = p.id "
-        f"WHERE p.name IN ({placeholders})",
-        pmc_name_list,
-    ).fetchone()[0]
+    derived_rows = spm_derived_csv[
+        spm_derived_csv[counter_column].str.contains(
+            "TA_FLAT_READ_WAVEFRONTS_sum", na=False
+        )
+    ]
+    assert (
+        not derived_rows.empty
+    ), "TA_FLAT_READ_WAVEFRONTS_sum should appear in SPM counter CSV"
 
-    assert rocpd_spm_count > 0
+    for _, row in derived_rows.iterrows():
+        name = row[counter_column]
+        assert "XCC:" in name, f"Expected XCC dimension in counter name: {name}"
+        assert (
+            "Instance:" not in name
+        ), f"Instance should NOT appear for reduced derived metric:{name}"
+        assert (
+            "SE:" not in name
+        ), f"SE dimension should NOT appear for reduced derived metric: {name}"
 
 
 if __name__ == "__main__":

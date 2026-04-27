@@ -22,6 +22,7 @@
 
 #pragma once
 
+#include <rocprofiler-sdk/experimental/spm.h>
 #include <rocprofiler-sdk/fwd.h>
 
 #include <cstddef>
@@ -32,6 +33,7 @@ namespace rocprofiler
 {
 namespace spm
 {
+struct spm_counter_config;
 struct spm_sample_t
 {
     uint64_t timestamp{0};
@@ -96,6 +98,15 @@ decode_cb(uint64_t timestamp, uint64_t value, uint64_t index, int shader_engine,
 
 void
 aql_data_callback(size_t len, void* data, size_t data_len, int flags, void* userdata);
+
+void
+compute_spm_derived_metrics(const spm_sample_vec&                          samples,
+                            spm_desc_v0_t&                                 desc_v0,
+                            size_t                                         xcc_id,
+                            const spm_counter_config&                      config,
+                            rocprofiler_dispatch_id_t                      dispatch_id,
+                            rocprofiler_agent_id_t                         agent_id,
+                            std::vector<rocprofiler_spm_counter_record_t>& out_records);
 
 }  // namespace spm
 }  // namespace rocprofiler

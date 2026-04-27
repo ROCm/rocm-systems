@@ -144,6 +144,45 @@ typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_counter_info_v1_t
 } rocprofiler_counter_info_v1_t;
 
 /**
+ * @brief (experimental) Counter info struct version 2. Extends version 1 with
+ * SPM-specific dimension information.
+ */
+typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_counter_info_v2_t
+{
+    uint64_t                 size;  ///< Size of this structure. Used for versioning and validation.
+    rocprofiler_counter_id_t id;    ///< Id of this counter
+    const char*              name;  ///< Name of the counter
+    const char*              description;      ///< Description of the counter
+    const char*              block;            ///< Block of the counter (non-derived only)
+    const char*              expression;       ///< Counter expression (derived counters only)
+    uint8_t                  is_constant : 1;  ///< If this counter is HW constant
+    uint8_t                  is_derived  : 1;  ///< If this counter is a derived counter
+    uint8_t                  spm_support : 1;  ///< If this counter supports SPM
+
+    uint64_t                                                     dimensions_count;
+    const rocprofiler_counter_record_dimension_info_t**          dimensions;
+    uint64_t                                                     dimensions_instances_count;
+    const rocprofiler_counter_record_dimension_instance_info_t** dimensions_instances;
+
+    uint64_t                                                     spm_dimensions_count;
+    const rocprofiler_counter_record_dimension_info_t**          spm_dimensions;
+    uint64_t                                                     spm_dimensions_instances_count;
+    const rocprofiler_counter_record_dimension_instance_info_t** spm_dimensions_instances;
+
+    /// @var spm_dimensions_count
+    /// @brief Number of SPM-specific dimensions for the counter. 0 if spm_support is false.
+    ///
+    /// @var spm_dimensions
+    /// @brief SPM dimension information of the counter. nullptr if spm_support is false.
+    ///
+    /// @var spm_dimensions_instances_count
+    /// @brief Number of unique SPM instances for this counter. 0 if spm_support is false.
+    ///
+    /// @var spm_dimensions_instances
+    /// @brief Array of pointers to SPM instance info structs. nullptr if spm_support is false.
+} rocprofiler_counter_info_v2_t;
+
+/**
  * @brief (experimental) Query counter id information from record_id.
  *
  * @param [in] id record id from rocprofiler_counter_record_t

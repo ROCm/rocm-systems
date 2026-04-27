@@ -236,6 +236,45 @@ counter_dimension(uint64_t     counter_handle,
 }
 
 size_t
+get_number_of_spm_dimensions(uint64_t counter_handle)
+{
+    const auto* counter_info = get_counter_info(rocprofiler_counter_id_t{counter_handle});
+    return counter_info->spm_dimensions_count;
+}
+
+void
+spm_counter_dimension_ids(uint64_t counter_handle, uint64_t* dimension_ids, size_t num_dimensions)
+{
+    const auto* counter_info = get_counter_info(rocprofiler_counter_id_t{counter_handle});
+    if(num_dimensions != counter_info->spm_dimension_ids.size())
+        ROCP_FATAL << "Invalid counter handle";
+    auto dimensions = std::vector<uint64_t>{};
+    std::for_each(counter_info->spm_dimension_ids.begin(),
+                  counter_info->spm_dimension_ids.end(),
+                  [&dimensions](auto& dimension) { dimensions.emplace_back(dimension); });
+    std::copy(dimensions.begin(), dimensions.end(), dimension_ids);
+}
+
+void
+spm_counter_dimension(uint64_t     counter_handle,
+                      uint64_t     dimension_handle,
+                      const char** dimension_name,
+                      uint64_t*    dimension_instance)
+{
+    const auto* counter_info = get_counter_info(rocprofiler_counter_id_t{counter_handle});
+
+    for(const auto& dim : counter_info->spm_dimensions)
+    {
+        if(dim.id == dimension_handle)
+        {
+            *dimension_name     = dim.name;
+            *dimension_instance = dim.instance_size;
+            return;
+        }
+    }
+}
+
+size_t
 get_number_of_pc_sample_configs(uint64_t agent_handle)
 {
     auto pc_sampling_config =

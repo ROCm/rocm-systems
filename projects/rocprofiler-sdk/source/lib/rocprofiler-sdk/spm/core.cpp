@@ -127,6 +127,7 @@ SpmCounterController::spm_destroy_profile(rocprofiler_counter_config_id_t id)
     return _configs.wlock([&](auto& data) {
         auto itr = data.find(id);
         if(itr == data.end()) return ROCPROFILER_STATUS_ERROR_PROFILE_NOT_FOUND;
+        if(itr->second->active_dispatches.load() > 0) return ROCPROFILER_STATUS_ERROR_NOT_AVAILABLE;
         if(data.erase(id) != 1) return ROCPROFILER_STATUS_ERROR;
         return ROCPROFILER_STATUS_SUCCESS;
     });
@@ -138,7 +139,7 @@ SpmCounterController::spm_destroy_profile(rocprofiler_counter_config_id_t id)
 std::shared_ptr<spm_counter_config>
 SpmCounterController::get_profile_cfg(rocprofiler_counter_config_id_t id)
 {
-    std::shared_ptr<spm_counter_config> cfg = nullptr;
+    auto cfg = std::shared_ptr<spm_counter_config>{};
     _configs.rlock([&](const auto& map) {
         auto it = map.find(id);
         if(it != map.end()) cfg = it->second;
@@ -175,7 +176,8 @@ get_spm_packet(const std::shared_ptr<spm_counter_callback_info>& info,
         // If we do not have a packet in the cache, create one.
         ret_pkt = rocprofiler::aql::spm_construct_packet(
             profile->agent->id,
-            std::vector<counters::Metric>{profile->metrics.begin(), profile->metrics.end()},
+            std::vector<counters::Metric>{profile->required_hw_counters.begin(),
+                                          profile->required_hw_counters.end()},
             profile->spm_parameters);
     };
 
@@ -192,8 +194,10 @@ get_spm_packet(const std::shared_ptr<spm_counter_callback_info>& info,
 rocprofiler_status_t
 create_spm_counter_profile(std::shared_ptr<spm_counter_config> config)
 {
-    auto status = ROCPROFILER_STATUS_SUCCESS;
-    if(status = rocprofiler::aql::spm_can_collect(config->agent->id, config->metrics);
+    auto status          = ROCPROFILER_STATUS_SUCCESS;
+    auto hw_counters_vec = std::vector<counters::Metric>{config->required_hw_counters.begin(),
+                                                         config->required_hw_counters.end()};
+    if(status = rocprofiler::aql::spm_can_collect(config->agent->id, hw_counters_vec);
        status != ROCPROFILER_STATUS_SUCCESS)
     {
         return status;
