@@ -341,6 +341,7 @@ void TbufferLoadFormatD16XMtbuf::execute_impl(amdgpu::Wavefront &wf) {
   d->elem_size = 2;
   d->num_elems = 1;
   d->is_load = true;
+  d->d16_lo = true;
   d->mtype = amdgpu::mtype_from_flags_gfx940(inst_.sc0, inst_.sc1, inst_.nt);
   d->non_temporal = inst_.nt;
   mtbuf_calculate_addresses(inst_, wf, *d);
@@ -371,6 +372,7 @@ void TbufferLoadFormatD16XyMtbuf::execute_impl(amdgpu::Wavefront &wf) {
   d->elem_size = 2;
   d->num_elems = 2;
   d->is_load = true;
+  d->d16_lo = true;
   d->mtype = amdgpu::mtype_from_flags_gfx940(inst_.sc0, inst_.sc1, inst_.nt);
   d->non_temporal = inst_.nt;
   mtbuf_calculate_addresses(inst_, wf, *d);
@@ -401,6 +403,7 @@ void TbufferLoadFormatD16XyzMtbuf::execute_impl(amdgpu::Wavefront &wf) {
   d->elem_size = 2;
   d->num_elems = 3;
   d->is_load = true;
+  d->d16_lo = true;
   d->mtype = amdgpu::mtype_from_flags_gfx940(inst_.sc0, inst_.sc1, inst_.nt);
   d->non_temporal = inst_.nt;
   mtbuf_calculate_addresses(inst_, wf, *d);
@@ -431,6 +434,7 @@ void TbufferLoadFormatD16XyzwMtbuf::execute_impl(amdgpu::Wavefront &wf) {
   d->elem_size = 2;
   d->num_elems = 4;
   d->is_load = true;
+  d->d16_lo = true;
   d->mtype = amdgpu::mtype_from_flags_gfx940(inst_.sc0, inst_.sc1, inst_.nt);
   d->non_temporal = inst_.nt;
   mtbuf_calculate_addresses(inst_, wf, *d);

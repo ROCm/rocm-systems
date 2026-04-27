@@ -302,15 +302,6 @@ void exec_f32(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uint32_t K, u
         float acc = (const_acc != ACC_FROM_VGPR)
                         ? std::bit_cast<float>(const_acc)
                         : std::bit_cast<float>(cu.read_vgpr(s2 + out.reg, out.lane));
-        // Debug: log initial acc for output (0,0)
-        if (row == 0 && col == 0 && b == 0) {
-          static uint32_t mfma_trace_count = 0;
-          if (++mfma_trace_count <= 5)
-            util::Logger::vm([&](auto &os) {
-              os << std::format("MFMA exec_f32: s2={} reg={} lane={} acc_init={} (raw={:#x})", s2,
-                                out.reg, out.lane, acc, cu.read_vgpr(s2 + out.reg, out.lane));
-            });
-        }
         for (uint32_t k = 0; k < K; ++k) {
           auto al = input_loc(M, K, B, row, k, b, in_bits);
           auto bl = input_loc(N, K, B, col, k, b, in_bits);
@@ -322,15 +313,6 @@ void exec_f32(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uint32_t K, u
             bl.lane = permute_b_lane(bl.lane, blgp);
           float a_val = ea(cu, s0, al);
           float b_val = eb(cu, s1, bl);
-          if (row == 0 && col <= 1 && b == 0) {
-            static uint32_t dbg_count = 0;
-            if (++dbg_count <= 40)
-              util::Logger::vm([&](auto &os) {
-                os << std::format("MFMA D[{},{}] K[{}]: A(v{},L{})={} B(v{},L{})={} blgp={}", row,
-                                  col, k, al.vgpr_offset, al.lane, a_val, bl.vgpr_offset, bl.lane,
-                                  b_val, blgp);
-              });
-          }
           acc += a_val * b_val;
         }
         results.push_back({out.reg, out.lane, std::bit_cast<uint32_t>(acc)});

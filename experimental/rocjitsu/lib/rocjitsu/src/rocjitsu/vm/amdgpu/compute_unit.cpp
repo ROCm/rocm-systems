@@ -89,10 +89,12 @@ std::unique_ptr<ComputeUnitCore> ComputeUnitCore::create(std::string name, const
 Wavefront *ComputeUnitCore::dispatch_wf(uint32_t wg_id, uint64_t pc, uint32_t sgprs,
                                         uint32_t vgprs) {
   assert(wfs_.size() == config_.num_wf_slots && "wavefront slots not properly initialized");
-  // Free register allocations from previously halted wavefronts before claiming a new slot.
-  // Without this, completed wavefronts' SGPR/VGPR blocks remain allocated and each new
-  // dispatch wastes a fresh block rather than reusing the freed ones.
-  retire_halted_wfs();
+  // Free register allocations from previously halted wavefronts before claiming
+  // a new slot. This is needed so SGPR/VGPR blocks can be reused. However, we
+  // must NOT reset the LDS allocator here — that would zero next_lds_alloc_
+  // between WF dispatches of the same WG, causing concurrent WGs to share
+  // the same LDS base. The LDS reset is handled separately by the CP.
+  retire_halted_wfs_no_lds_reset();
   // Find an idle slot.
   size_t slot = config_.num_wf_slots;
   for (size_t i = 0; i < wfs_.size(); ++i) {
@@ -159,6 +161,17 @@ void ComputeUnitCore::reset_all_wf() {
   }
 }
 
+void ComputeUnitCore::retire_halted_wfs_no_lds_reset() {
+  for (auto &w : wfs_) {
+    if (w->is_halted() && w->sgpr_alloc().count > 0) {
+      sgpr_file_.free(w->sgpr_alloc().base);
+      free_vgprs(w->vgpr_alloc().base);
+      w->trace_inst_count_ = 0;
+      w->reset();
+    }
+  }
+}
+
 void ComputeUnitCore::retire_halted_wfs() {
   for (auto &w : wfs_) {
     if (w->is_halted() && w->sgpr_alloc().count > 0) {
@@ -176,6 +189,9 @@ void ComputeUnitCore::retire_halted_wfs() {
       w->trace_inst_count_ = 0;
       w->reset();
     }
+  }
+  if (!has_active_wfs()) {
+    reset_lds_alloc();
   }
 }
 
@@ -207,6 +223,7 @@ bool ComputeUnitCore::can_accept_workgroup(uint32_t num_wfs) const {
     return false;
   }
 
+  // LDS capacity is checked during allocate_lds() at dispatch time.
   return true;
 }
 
@@ -389,21 +406,25 @@ bool ComputeUnitCore::step() {
                         active->exec(), active->wf_id());
   });
 
-  // Per-instruction trace: snapshot registers and flags for wf0.
+  // Per-instruction trace: snapshot registers and flags for wf0 (and wf2 first 100).
   if constexpr (util::Logger::group_enabled(util::Logger::GROUP_VM)) {
-    if (active->wf_id() == 0 && active->trace_inst_count_ <= 2000 && active->num_vgprs_ >= 32) {
+    if (((active->wf_id() == 0 && active->trace_inst_count_ <= 2000) ||
+         (active->wf_id() == 2 && active->trace_inst_count_ <= 100)) &&
+        active->num_vgprs_ >= 32) {
       util::Logger::vm([&](auto &os) {
         uint32_t sb = active->sgpr_alloc().base;
         uint32_t vb = active->vgpr_alloc().base;
-        os << std::format(
-            "EXECUTE #{} pc={:#x} {} w={:08x},{:08x}"
-            " s[0:7]={:x},{:x},{:x},{:x},{:x},{:x},{:x},{:x}"
-            " s[8:15]={:x},{:x},{:x},{:x},{:x},{:x},{:x},{:x}",
-            active->trace_inst_count_, active->pc, inst->mnemonic(), words[0], words[1],
-            read_sgpr(sb), read_sgpr(sb + 1), read_sgpr(sb + 2), read_sgpr(sb + 3),
-            read_sgpr(sb + 4), read_sgpr(sb + 5), read_sgpr(sb + 6), read_sgpr(sb + 7),
-            read_sgpr(sb + 8), read_sgpr(sb + 9), read_sgpr(sb + 10), read_sgpr(sb + 11),
-            read_sgpr(sb + 12), read_sgpr(sb + 13), read_sgpr(sb + 14), read_sgpr(sb + 15));
+        os << std::format("{} wg[{}] wf[{}] EXECUTE #{} pc={:#x} {} w={:08x},{:08x}",
+                          this->full_path(), active->wg_id(), active->wf_id(),
+                          active->trace_inst_count_, active->pc, inst->mnemonic(), words[0],
+                          words[1]);
+        os << std::format(" s[0:7]={:x},{:x},{:x},{:x},{:x},{:x},{:x},{:x}"
+                          " s[8:15]={:x},{:x},{:x},{:x},{:x},{:x},{:x},{:x}",
+                          read_sgpr(sb), read_sgpr(sb + 1), read_sgpr(sb + 2), read_sgpr(sb + 3),
+                          read_sgpr(sb + 4), read_sgpr(sb + 5), read_sgpr(sb + 6),
+                          read_sgpr(sb + 7), read_sgpr(sb + 8), read_sgpr(sb + 9),
+                          read_sgpr(sb + 10), read_sgpr(sb + 11), read_sgpr(sb + 12),
+                          read_sgpr(sb + 13), read_sgpr(sb + 14), read_sgpr(sb + 15));
         os << std::format(
             " s[16:31]={:x},{:x},{:x},{:x},{:x},{:x},{:x},{:x}"
             ",{:x},{:x},{:x},{:x},{:x},{:x},{:x},{:x}"

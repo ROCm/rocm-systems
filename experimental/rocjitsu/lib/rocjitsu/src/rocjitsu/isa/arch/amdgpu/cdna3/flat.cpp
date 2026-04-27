@@ -276,6 +276,7 @@ void FlatStoreByteD16HiFlat::execute_impl(amdgpu::Wavefront &wf) {
     if (!(exec & (1ULL << lane)))
       continue;
     uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.data, lane);
+    val0 >>= 16;
     d->store_data[lane * 1 + 0] = static_cast<uint8_t>(val0);
   }
   set_data(std::move(d));
@@ -340,6 +341,7 @@ void FlatStoreShortD16HiFlat::execute_impl(amdgpu::Wavefront &wf) {
     if (!(exec & (1ULL << lane)))
       continue;
     uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.data, lane);
+    val0 >>= 16;
     std::memcpy(&d->store_data[lane * 2 + 0], &val0, 2);
   }
   set_data(std::move(d));
@@ -514,6 +516,7 @@ void FlatLoadUbyteD16Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->elem_size = 1;
   d->num_elems = 1;
   d->is_load = true;
+  d->d16_lo = true;
   d->mtype = amdgpu::mtype_from_flags_gfx940(inst_.sc0, inst_.sc1, inst_.nt);
   d->non_temporal = inst_.nt;
   flat_calculate_addresses(inst_, wf, *d);
@@ -538,6 +541,7 @@ void FlatLoadUbyteD16HiFlat::execute_impl(amdgpu::Wavefront &wf) {
   d->elem_size = 1;
   d->num_elems = 1;
   d->is_load = true;
+  d->d16_hi = true;
   d->mtype = amdgpu::mtype_from_flags_gfx940(inst_.sc0, inst_.sc1, inst_.nt);
   d->non_temporal = inst_.nt;
   flat_calculate_addresses(inst_, wf, *d);
@@ -563,6 +567,7 @@ void FlatLoadSbyteD16Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = true;
   d->sign_extend = true;
+  d->d16_lo = true;
   d->mtype = amdgpu::mtype_from_flags_gfx940(inst_.sc0, inst_.sc1, inst_.nt);
   d->non_temporal = inst_.nt;
   flat_calculate_addresses(inst_, wf, *d);
@@ -588,6 +593,7 @@ void FlatLoadSbyteD16HiFlat::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = true;
   d->sign_extend = true;
+  d->d16_hi = true;
   d->mtype = amdgpu::mtype_from_flags_gfx940(inst_.sc0, inst_.sc1, inst_.nt);
   d->non_temporal = inst_.nt;
   flat_calculate_addresses(inst_, wf, *d);
@@ -612,6 +618,7 @@ void FlatLoadShortD16Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->elem_size = 2;
   d->num_elems = 1;
   d->is_load = true;
+  d->d16_lo = true;
   d->mtype = amdgpu::mtype_from_flags_gfx940(inst_.sc0, inst_.sc1, inst_.nt);
   d->non_temporal = inst_.nt;
   flat_calculate_addresses(inst_, wf, *d);
@@ -636,6 +643,7 @@ void FlatLoadShortD16HiFlat::execute_impl(amdgpu::Wavefront &wf) {
   d->elem_size = 2;
   d->num_elems = 1;
   d->is_load = true;
+  d->d16_hi = true;
   d->mtype = amdgpu::mtype_from_flags_gfx940(inst_.sc0, inst_.sc1, inst_.nt);
   d->non_temporal = inst_.nt;
   flat_calculate_addresses(inst_, wf, *d);

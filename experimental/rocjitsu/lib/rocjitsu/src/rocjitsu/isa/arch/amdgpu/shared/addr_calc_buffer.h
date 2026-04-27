@@ -37,6 +37,9 @@ void mubuf_calculate_addresses(const MubufInst &inst, amdgpu::Wavefront &wf, Vec
   uint64_t exec = wf.exec();
   d.lane_mask = exec;
   d.exec_mask = exec;
+  d.wg_id = wf.wg_id();
+  d.wf_id = wf.wf_id();
+  d.cu_path = wf.cu().full_path();
   uint32_t sb = wf.sgpr_alloc().base + inst.srsrc * 4;
   uint32_t srd0 = cu.read_sgpr(sb);
   uint32_t srd1 = cu.read_sgpr(sb + 1);
@@ -52,13 +55,15 @@ void mubuf_calculate_addresses(const MubufInst &inst, amdgpu::Wavefront &wf, Vec
   // included in the bounds comparison, but IS added to the final address.
   uint32_t num_records = srd2;
   util::Logger::vm([&](auto &os) {
-    static uint64_t mubuf_count = 0;
-    if (base_addr == 0 || ++mubuf_count <= 40)
-      os << std::format("MUBUF addr: srsrc=s[{}:{}] srd=[{:#x},{:#x},{:#x},{:#x}] base={:#x}"
+    uint32_t wgid = wf.wg_id();
+    if (wgid == 0)
+      os << std::format("{} wg[{}] wf[{}] MUBUF addr: srsrc=s[{}:{}]"
+                        " srd=[{:#x},{:#x},{:#x},{:#x}] base={:#x}"
                         " soff={:#x} offset={:#x} offen={} idxen={} vaddr=v{}"
                         " num_records={}",
-                        inst.srsrc * 4, inst.srsrc * 4 + 3, srd0, srd1, srd2, srd3, base_addr,
-                        soffset_val, inst.offset, inst.offen, inst.idxen, inst.vaddr, num_records);
+                        wf.cu().full_path(), wf.wg_id(), wf.wf_id(), inst.srsrc * 4,
+                        inst.srsrc * 4 + 3, srd0, srd1, srd2, srd3, base_addr, soffset_val,
+                        inst.offset, inst.offen, inst.idxen, inst.vaddr, num_records);
   });
   // GFX9 MUBUF address calculation per ISA Table 42 / Section 9.1.5.2:
   //
@@ -93,33 +98,31 @@ void mubuf_calculate_addresses(const MubufInst &inst, amdgpu::Wavefront &wf, Vec
     // OOB check.
     bool oob;
     if (oob_raw) {
-      oob = (offset_part + soffset_val) >= num_records;
+      oob = offset_part >= num_records;
     } else if (stride > 0) {
       oob = index >= num_records;
     } else {
       oob = offset_part >= num_records;
     }
-    if (num_records == 0 || oob) {
+    if (oob) {
       d.lane_mask &= ~(1ULL << lane);
       d.per_lane_addr[lane] = 0;
     } else {
-      d.per_lane_addr[lane] = base_addr + total_offset;
+      d.per_lane_addr[lane] = (base_addr + total_offset) & 0xFFFFFFFFFFFFULL;
     }
   }
   // Per-lane address trace: log the first 4 active lanes so we can verify
   // that each lane's voffset (and thus effective address) is correct.
   util::Logger::vm([&](auto &os) {
-    static uint64_t lane_trace_count = 0;
-    if (++lane_trace_count > 80)
+    static uint64_t pl_count = 0;
+    if (wf.wg_id() != 0 && ++pl_count > 500)
       return;
-    os << std::format("MUBUF per-lane: stride={} oob_raw={}", stride, oob_raw);
-    uint64_t rm = d.lane_mask;
-    int cnt = 0;
-    while (rm && cnt < 4) {
-      uint32_t ln = std::countr_zero(rm);
-      rm &= rm - 1;
-      os << std::format(" L{}:addr={:#x}", ln, d.per_lane_addr[ln]);
-      ++cnt;
+    os << std::format("{} wg[{}] wf[{}] MUBUF per-lane: stride={} oob_raw={}", wf.cu().full_path(),
+                      wf.wg_id(), wf.wf_id(), stride, oob_raw);
+    for (uint32_t ln = 0; ln < wf.wf_size(); ++ln) {
+      if (!(d.lane_mask & (1ULL << ln)))
+        continue;
+      os << std::format(" L{}:{:#x}", ln, d.per_lane_addr[ln]);
     }
     os << std::format(" exec={:#x} lane_mask={:#x}", exec, d.lane_mask);
   });
@@ -137,6 +140,9 @@ void mtbuf_calculate_addresses(const MtbufInst &inst, amdgpu::Wavefront &wf, Vec
   uint64_t exec = wf.exec();
   d.lane_mask = exec;
   d.exec_mask = exec;
+  d.wg_id = wf.wg_id();
+  d.wf_id = wf.wf_id();
+  d.cu_path = wf.cu().full_path();
   uint32_t sb = wf.sgpr_alloc().base + inst.srsrc * 4;
   uint32_t srd0 = cu.read_sgpr(sb);
   uint32_t srd1 = cu.read_sgpr(sb + 1);
@@ -166,17 +172,17 @@ void mtbuf_calculate_addresses(const MtbufInst &inst, amdgpu::Wavefront &wf, Vec
     uint64_t total_offset = static_cast<uint64_t>(index) * stride + offset_part + soffset_val;
     bool oob;
     if (oob_raw) {
-      oob = (offset_part + soffset_val) >= num_records;
+      oob = offset_part >= num_records;
     } else if (stride > 0) {
       oob = index >= num_records;
     } else {
       oob = offset_part >= num_records;
     }
-    if (num_records == 0 || oob) {
+    if (oob) {
       d.lane_mask &= ~(1ULL << lane);
       d.per_lane_addr[lane] = 0;
     } else {
-      d.per_lane_addr[lane] = base_addr + total_offset;
+      d.per_lane_addr[lane] = (base_addr + total_offset) & 0xFFFFFFFFFFFFULL;
     }
   }
 }

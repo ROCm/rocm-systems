@@ -5,7 +5,6 @@
 // See lib/python/amdisa/README.md for regeneration instructions.
 
 #include "rocjitsu/isa/arch/amdgpu/rdna3_5/ldsdir.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/execute_shared.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "util/data_types.h"
 #include "util/except.h"
@@ -29,7 +28,7 @@ LdsParamLoadLdsdir::LdsParamLoadLdsdir(const MachineInst *inst)
 }
 
 void LdsParamLoadLdsdir::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_lds_param_load_ldsdir(*this, wf);
+  (void)wf; // Interpolation/LDS-direct: no-op in compute simulation.
 }
 
 LdsDirectLoadLdsdir::LdsDirectLoadLdsdir(const MachineInst *inst)
@@ -42,7 +41,7 @@ LdsDirectLoadLdsdir::LdsDirectLoadLdsdir(const MachineInst *inst)
 }
 
 void LdsDirectLoadLdsdir::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_lds_direct_load_ldsdir(*this, wf);
+  (void)wf; // Interpolation/LDS-direct: no-op in compute simulation.
 }
 
 } // namespace rdna3_5

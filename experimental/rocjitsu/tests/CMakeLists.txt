@@ -68,6 +68,7 @@ set(RJ_KMD_PRELOAD_ENV
     "LD_PRELOAD=$<TARGET_FILE:rocjitsu_kmd_shim>"
     "RJ_CONFIG=${CMAKE_SOURCE_DIR}/configs/amdgpu_cdna4_kmd.json"
     "RJ_SCHEMA=${CMAKE_SOURCE_DIR}/schemas/simulation_config.fbs"
+    "HSA_ENABLE_SDMA=1"
 )
 
 # --- rocminfo test (requires rocminfo binary + HSA runtime + LD_PRELOAD) ---
@@ -219,6 +220,13 @@ if(HIPCC_EXECUTABLE AND HSA_RUNTIME64)
             Rect_64x1x64 Rect_7x11x13 AlphaBeta BetaZero)
             rj_add_hip_test_case(hip_gemm_test "RocblasGemmTest.${TC}")
         endforeach()
+        # Large SDMA stress test — 48 MB H2D transfer, needs extended timeout.
+        # Large GEMM stress test — validates SDMA + LDS isolation for big K.
+        add_test(NAME "RocblasGemmTest.Large_2048x2048"
+            COMMAND ${GEMM_BIN} --gtest_filter=RocblasGemmTest.Large_2048x2048)
+        set_tests_properties("RocblasGemmTest.Large_2048x2048" PROPERTIES
+            ENVIRONMENT "${RJ_KMD_PRELOAD_ENV}"
+            TIMEOUT 600)
         foreach(I RANGE 0 4)
             rj_add_hip_test_case(hip_gemm_test "RocblasGemmFuzz.Iter${I}")
         endforeach()
@@ -228,6 +236,7 @@ if(HIPCC_EXECUTABLE AND HSA_RUNTIME64)
             "LD_PRELOAD=$<TARGET_FILE:rocjitsu_kmd_shim>"
             "RJ_CONFIG=${CMAKE_SOURCE_DIR}/configs/amdgpu_cdna3_kmd.json"
             "RJ_SCHEMA=${CMAKE_SOURCE_DIR}/schemas/simulation_config.fbs"
+            "HSA_ENABLE_SDMA=1"
         )
         foreach(TC IN ITEMS
             Tiny_2x2x3 Square_16x16 Square_32x32 Rect_7x11x13)

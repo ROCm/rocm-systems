@@ -7157,7 +7157,16 @@ VPackB32F16Vop3::VPackB32F16Vop3(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void VPackB32F16Vop3::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void VPackB32F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t s0 = src0.read_lane(wf, lane) & 0xFFFF;
+    uint32_t s1 = src1.read_lane(wf, lane) & 0xFFFF;
+    vdst.write_lane(wf, lane, s0 | (s1 << 16));
+  }
+}
 
 VCvtPkNormI16F16Vop3::VCvtPkNormI16F16Vop3(const MachineInst *inst)
     : Vop3("v_cvt_pk_norm_i16_f16", reinterpret_cast<const OpEncoding *>(inst),

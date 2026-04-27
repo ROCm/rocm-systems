@@ -468,6 +468,7 @@ void ScratchLoadD16U8Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   d->elem_size = 1;
   d->num_elems = 1;
   d->is_load = true;
+  d->d16_lo = true;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
@@ -495,6 +496,7 @@ void ScratchLoadD16I8Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = true;
   d->sign_extend = true;
+  d->d16_lo = true;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
@@ -521,6 +523,7 @@ void ScratchLoadD16B16Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   d->elem_size = 2;
   d->num_elems = 1;
   d->is_load = true;
+  d->d16_lo = true;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
@@ -547,6 +550,7 @@ void ScratchLoadD16HiU8Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   d->elem_size = 1;
   d->num_elems = 1;
   d->is_load = true;
+  d->d16_hi = true;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
@@ -574,6 +578,7 @@ void ScratchLoadD16HiI8Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = true;
   d->sign_extend = true;
+  d->d16_hi = true;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
@@ -600,6 +605,7 @@ void ScratchLoadD16HiB16Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   d->elem_size = 2;
   d->num_elems = 1;
   d->is_load = true;
+  d->d16_hi = true;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
@@ -635,6 +641,7 @@ void ScratchStoreD16HiB8Vscratch::execute_impl(amdgpu::Wavefront &wf) {
     if (!(exec & (1ULL << lane)))
       continue;
     uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.vsrc, lane);
+    val0 >>= 16;
     d->store_data[lane * 1 + 0] = static_cast<uint8_t>(val0);
   }
   set_data(std::move(d));
@@ -669,6 +676,7 @@ void ScratchStoreD16HiB16Vscratch::execute_impl(amdgpu::Wavefront &wf) {
     if (!(exec & (1ULL << lane)))
       continue;
     uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.vsrc, lane);
+    val0 >>= 16;
     std::memcpy(&d->store_data[lane * 2 + 0], &val0, 2);
   }
   set_data(std::move(d));

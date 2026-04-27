@@ -102,6 +102,9 @@ public:
   /// @brief Clear all halted wavefront slots and free their register allocations.
   void retire_halted_wfs();
 
+  /// @brief Like retire_halted_wfs but without resetting the LDS allocator.
+  void retire_halted_wfs_no_lds_reset();
+
   /// @brief Check whether this CU can accept an entire workgroup.
   ///
   /// @details Queries the number of free wavefront slots and register file
@@ -186,6 +189,21 @@ public:
   /// @brief Return the Local Data Share (LDS).
   Lds &lds() { return lds_; }
 
+  /// @brief Clear LDS contents (zero-fill).
+  void clear_lds() { lds_.clear(); }
+
+  /// @brief Allocate a per-WG LDS region and return its base offset.
+  uint32_t allocate_lds(uint32_t size_bytes) {
+    uint32_t base = next_lds_alloc_;
+    uint32_t aligned = (size_bytes + 255u) & ~255u;
+    lds_.zero_range(base, aligned);
+    next_lds_alloc_ += aligned;
+    return base;
+  }
+
+  /// @brief Reset LDS allocation (called when all WFs retire).
+  void reset_lds_alloc() { next_lds_alloc_ = 0; }
+
   /// @brief Flush all per-CU caches and the shared L2 to backing store.
   ///
   /// @details L1 V$ uses write-through, so flush just invalidates. L2 flushes
@@ -199,13 +217,15 @@ public:
                           reinterpret_cast<uintptr_t>(this), l1_vector_.store_count(),
                           l1_vector_.store_active_count(), l1_vector_.store_l2_writes());
     });
+    l1_scalar_.writeback_all();
     l1_scalar_.invalidate_all();
     l1_vector_.flush_all();
     l2_->flush_all();
   }
 
-  /// @brief Flush only the per-CU L1 caches (invalidate, since L1 is write-through).
+  /// @brief Flush only the per-CU L1 caches.
   void flush_l1() {
+    l1_scalar_.writeback_all();
     l1_scalar_.invalidate_all();
     l1_vector_.flush_all();
   }
@@ -227,6 +247,9 @@ public:
     l1_vector_.set_l2(l2);
     global_mem_pipeline_.set_l2(l2);
   }
+
+  /// @brief Query SRAM ECC mode. When true, D16 loads zero unused VGPR bits.
+  bool sram_ecc() const { return sram_ecc_; }
 
   // Memory issue interface for instruction execute() bodies.
   //
@@ -385,6 +408,7 @@ protected:
   Config config_;
   GpuMemory *memory_;
   uint32_t wf_size_ = 0;
+  bool sram_ecc_ = false;
   std::unique_ptr<Decoder> decoder_;
   simdojo::RegisterFile<uint32_t> sgpr_file_{"sgpr"};
   std::vector<std::unique_ptr<Wavefront>> wfs_; ///< Pre-allocated wavefront slots.
@@ -394,6 +418,7 @@ protected:
   L1ScalarCache l1_scalar_;
   L1VectorCache l1_vector_;
   Lds lds_;
+  uint32_t next_lds_alloc_ = 0; ///< Next free LDS offset for per-WG allocation.
   ScalarMemPipeline scalar_mem_pipeline_;
   GlobalMemPipeline global_mem_pipeline_;
   LocalMemPipeline local_mem_pipeline_;
@@ -507,6 +532,7 @@ public:
     vgpr_file_.init(config.num_wf_slots * config.vgprs_per_wf, config.vgprs_per_wf);
     for (uint32_t i = 0; i < config.num_wf_slots; ++i)
       this->wfs_[i] = std::make_unique<IsaWavefront<Isa>>(*this, i);
+    this->sram_ecc_ = Isa::SRAM_ECC;
   }
 
   /// @returns Lane value from the VGPR file.
