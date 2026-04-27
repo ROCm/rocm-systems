@@ -1,0 +1,207 @@
+// Copyright (c) 2025-2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
+#include "rocjitsu/code/patch/code_object_patcher.h"
+
+#include "rocjitsu/code/amdgpu_code_object.h"
+#include "rocjitsu/code/amdgpu_elf.h"
+
+#include "rocjitsu/base/rj_compiler.h"
+RJ_DIAGNOSTIC_PUSH
+RJ_DIAGNOSTIC_IGNORE_PEDANTIC
+#include "hsa/AMDHSAKernelDescriptor.h"
+RJ_DIAGNOSTIC_POP
+
+#include <algorithm>
+#include <cassert>
+#include <cstring>
+#include <elf.h>
+
+namespace rocjitsu {
+
+CodeObjectPatcher::CodeObjectPatcher(const AmdGpuCodeObject &obj)
+    : image_(obj.image_data(), obj.image_data() + obj.image_size()), text_offset_(0),
+      text_size_(0) {
+  auto &text_secs = obj.text_sections();
+  if (!text_secs.empty()) {
+    text_offset_ = text_secs[0]->sectionOffset();
+    text_size_ = text_secs[0]->size();
+  }
+}
+
+std::span<uint8_t> CodeObjectPatcher::text_bytes() {
+  return {image_.data() + text_offset_, text_size_};
+}
+
+std::span<const uint8_t> CodeObjectPatcher::text_bytes() const {
+  return {image_.data() + text_offset_, text_size_};
+}
+
+void CodeObjectPatcher::overwrite_text(std::span<const uint8_t> new_text) {
+  assert(new_text.size() == text_size_ && "text size mismatch — cave body must fit in NOP padding");
+  std::memcpy(image_.data() + text_offset_, new_text.data(), new_text.size());
+}
+
+void CodeObjectPatcher::update_elf_flags(uint32_t new_flags) {
+  auto *ehdr = reinterpret_cast<Elf64_Ehdr *>(image_.data());
+  ehdr->e_flags = new_flags;
+}
+
+void CodeObjectPatcher::patch_kernel_descriptors_for_wave64() {
+  using KD = rocr::llvm::amdhsa::kernel_descriptor_t;
+  namespace kd = rocr::llvm::amdhsa;
+
+  auto *ehdr = reinterpret_cast<Elf64_Ehdr *>(image_.data());
+  auto *shdr = reinterpret_cast<Elf64_Shdr *>(image_.data() + ehdr->e_shoff);
+
+  for (int i = 0; i < ehdr->e_shnum; ++i) {
+    if (shdr[i].sh_type != SHT_SYMTAB)
+      continue;
+    auto *symtab = reinterpret_cast<Elf64_Sym *>(image_.data() + shdr[i].sh_offset);
+    int nsyms = shdr[i].sh_size / sizeof(Elf64_Sym);
+    auto *strtab_shdr = &shdr[shdr[i].sh_link];
+    auto *strtab = reinterpret_cast<const char *>(image_.data() + strtab_shdr->sh_offset);
+
+    for (int j = 0; j < nsyms; ++j) {
+      if (symtab[j].st_name == 0 || symtab[j].st_size != sizeof(KD))
+        continue;
+      const char *name = strtab + symtab[j].st_name;
+      size_t len = strlen(name);
+      if (len < 3 || strcmp(name + len - 3, ".kd") != 0)
+        continue;
+      uint16_t sec_idx = symtab[j].st_shndx;
+      if (sec_idx >= ehdr->e_shnum)
+        continue;
+      uint64_t file_off = shdr[sec_idx].sh_offset + (symtab[j].st_value - shdr[sec_idx].sh_addr);
+      if (file_off + sizeof(KD) > image_.size())
+        continue;
+
+      auto *kd = reinterpret_cast<KD *>(image_.data() + file_off);
+
+      // --- compute_pgm_rsrc1: translate GFX9 → GFX12 ---
+
+      // VGPR granularity: GFX9 wave64 uses granularity 8, RDNA4 wave64 uses 12.
+      // Actual VGPRs = (gran + 1) * arch_granularity.
+      // The translated code may use more VGPRs than the source due to instruction
+      // lowering (e.g., carry chain temporaries), so we conservatively round up
+      // and enforce a minimum of gran=1 (24 VGPRs) for RDNA4 Wave64.
+      uint32_t gfx9_vgpr_gran = AMDHSA_BITS_GET(
+          kd->compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT);
+      uint32_t actual_vgprs = (gfx9_vgpr_gran + 1) * 8;
+      uint32_t rdna4_vgpr_gran = std::max(1u, (actual_vgprs + 11) / 12 - 1);
+      AMDHSA_BITS_SET(kd->compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
+                      rdna4_vgpr_gran);
+
+      // SGPR granularity: on GFX10+, the field is ignored by hardware but must
+      // be set for the runtime. Use 0 (8 SGPRs) which matches native compilers.
+      AMDHSA_BITS_SET(kd->compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
+                      0);
+
+      // DX10_CLAMP and IEEE_MODE are deprecated on GFX12 — clear them.
+      AMDHSA_BITS_SET(kd->compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_ENABLE_DX10_CLAMP, 0);
+      AMDHSA_BITS_SET(kd->compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_ENABLE_IEEE_MODE, 0);
+
+      // Set GFX10+ required mode bits.
+      AMDHSA_BITS_SET(kd->compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_WGP_MODE, 1);
+      AMDHSA_BITS_SET(kd->compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_MEM_ORDERED, 1);
+      AMDHSA_BITS_SET(kd->compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_FWD_PROGRESS, 1);
+
+      // --- compute_pgm_rsrc3: translate GFX90A layout → GFX10+ layout ---
+      // GFX90A: [0:5]=ACCUM_OFFSET, [16]=TG_SPLIT
+      // GFX10+: [0:3]=SHARED_VGPR_COUNT, [4:9]=INST_PREF_SIZE
+      kd->compute_pgm_rsrc3 = 0;
+      AMDHSA_BITS_SET(kd->compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX10_PLUS_INST_PREF_SIZE, 2);
+
+      // --- kernel_code_properties: ensure Wave64 ---
+      AMDHSA_BITS_SET(kd->kernel_code_properties, kd::KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32,
+                      0);
+    }
+  }
+}
+
+std::vector<CodeObjectPatcher::WorkGroupIdInfo> CodeObjectPatcher::workgroup_id_info() const {
+  using KD = rocr::llvm::amdhsa::kernel_descriptor_t;
+  namespace kd = rocr::llvm::amdhsa;
+
+  std::vector<WorkGroupIdInfo> infos;
+
+  auto *ehdr = reinterpret_cast<const Elf64_Ehdr *>(image_.data());
+  auto *shdr = reinterpret_cast<const Elf64_Shdr *>(image_.data() + ehdr->e_shoff);
+
+  // Find the .text section's virtual address for offset calculation.
+  uint64_t text_vaddr = 0;
+  for (int i = 0; i < ehdr->e_shnum; ++i) {
+    if (shdr[i].sh_offset == text_offset_ && shdr[i].sh_size == text_size_) {
+      text_vaddr = shdr[i].sh_addr;
+      break;
+    }
+  }
+
+  for (int i = 0; i < ehdr->e_shnum; ++i) {
+    if (shdr[i].sh_type != SHT_SYMTAB)
+      continue;
+    auto *symtab = reinterpret_cast<const Elf64_Sym *>(image_.data() + shdr[i].sh_offset);
+    int nsyms = shdr[i].sh_size / sizeof(Elf64_Sym);
+    auto *strtab_shdr = &shdr[shdr[i].sh_link];
+    auto *strtab = reinterpret_cast<const char *>(image_.data() + strtab_shdr->sh_offset);
+
+    for (int j = 0; j < nsyms; ++j) {
+      if (symtab[j].st_name == 0 || symtab[j].st_size != sizeof(KD))
+        continue;
+      const char *name = strtab + symtab[j].st_name;
+      size_t len = strlen(name);
+      if (len < 3 || strcmp(name + len - 3, ".kd") != 0)
+        continue;
+      uint16_t sec_idx = symtab[j].st_shndx;
+      if (sec_idx >= ehdr->e_shnum)
+        continue;
+      uint64_t kd_file_off = shdr[sec_idx].sh_offset + (symtab[j].st_value - shdr[sec_idx].sh_addr);
+      if (kd_file_off + sizeof(KD) > image_.size())
+        continue;
+
+      const auto *kdp = reinterpret_cast<const KD *>(image_.data() + kd_file_off);
+      uint64_t kd_vaddr = symtab[j].st_value;
+      uint64_t entry_vaddr = kd_vaddr + kdp->kernel_code_entry_byte_offset;
+      uint64_t entry_text_off = entry_vaddr - text_vaddr;
+
+      uint32_t rsrc2 = kdp->compute_pgm_rsrc2;
+      uint16_t kcp = kdp->kernel_code_properties;
+
+      uint32_t sgpr = 0;
+      if (AMDHSA_BITS_GET(kcp, kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_PRIVATE_SEGMENT_BUFFER))
+        sgpr += 4;
+      if (AMDHSA_BITS_GET(kcp, kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_DISPATCH_PTR))
+        sgpr += 2;
+      if (AMDHSA_BITS_GET(kcp, kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_QUEUE_PTR))
+        sgpr += 2;
+      if (AMDHSA_BITS_GET(kcp, kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR))
+        sgpr += 2;
+      if (AMDHSA_BITS_GET(kcp, kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_DISPATCH_ID))
+        sgpr += 2;
+      if (AMDHSA_BITS_GET(kcp, kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_FLAT_SCRATCH_INIT))
+        sgpr += 2;
+      if (AMDHSA_BITS_GET(kcp, kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_PRIVATE_SEGMENT_SIZE))
+        sgpr += 1;
+
+      WorkGroupIdInfo info{entry_text_off, -1, -1, -1};
+      if (AMDHSA_BITS_GET(rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X))
+        info.sgpr_wg_id_x = static_cast<int8_t>(sgpr++);
+      if (AMDHSA_BITS_GET(rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Y))
+        info.sgpr_wg_id_y = static_cast<int8_t>(sgpr++);
+      if (AMDHSA_BITS_GET(rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Z))
+        info.sgpr_wg_id_z = static_cast<int8_t>(sgpr++);
+
+      infos.push_back(info);
+    }
+  }
+  return infos;
+}
+
+void CodeObjectPatcher::append_cave_body(std::span<const uint32_t> words) {
+  auto *bytes = reinterpret_cast<const uint8_t *>(words.data());
+  cave_body_.insert(cave_body_.end(), bytes, bytes + words.size() * 4);
+}
+
+std::vector<uint8_t> CodeObjectPatcher::emit() const { return image_; }
+
+} // namespace rocjitsu

@@ -447,7 +447,12 @@ class CodeGenerator:
                         f'if ({field_ref}) modifiers_ += "{mod.display}";'
                     )
 
-            size_line = ' size_ = sizeof(OpEncoding);'
+            has_op = any(f.name == 'op' for f in inst_enc.ucode_fields)
+            size_line = (' size_ = sizeof(OpEncoding);\n'
+                        '  raw_encoding_ = reinterpret_cast<const uint32_t *>(&inst_);\n'
+                        '  encoding_id_ = raw_encoding_[0] >> 23;')
+            if has_op:
+                size_line += '\n  opcode_ = inst_.op;'
             if size_condition is not None:
                 size_line += (
                     f' if ({size_condition})'
@@ -5155,6 +5160,33 @@ class CodeGenerator:
 
                     if _mem_sem and _mem_sem.semantic_class in _MEM_CLASSES:
                         ctor_body_parts.append('flags_ |= MEMORY_OP;')
+
+                    _waitcnt_names = {
+                        'S_WAITCNT', 'S_WAIT_LOADCNT', 'S_WAIT_STORECNT',
+                        'S_WAIT_EXPCNT', 'S_WAIT_DSCNT', 'S_WAIT_KMCNT',
+                        'S_WAIT_SAMPLECNT', 'S_WAIT_BVHCNT',
+                        'S_WAIT_LOADCNT_DSCNT', 'S_WAIT_STORECNT_DSCNT',
+                        'S_WAIT_IDLE', 'S_WAIT_ALU', 'S_WAIT_EVENT',
+                        'S_WAITCNT_VSCNT', 'S_WAITCNT_VMCNT',
+                        'S_WAITCNT_LGKMCNT', 'S_WAITCNT_EXPCNT',
+                        'S_WAITCNT_DEPCTR',
+                    }
+                    _barrier_names = {
+                        'S_BARRIER', 'S_BARRIER_SIGNAL', 'S_BARRIER_WAIT',
+                    }
+                    if inst.name in _waitcnt_names:
+                        ctor_body_parts.append('flags_ |= WAITCNT;')
+                    if inst.name in _barrier_names:
+                        ctor_body_parts.append('flags_ |= BARRIER;')
+
+                    if (inst.name.startswith('V_MFMA_')
+                            or inst.name.startswith('V_SMFMAC_')):
+                        ctor_body_parts.append('flags_ |= MFMA;')
+
+                    if inst.name in {'V_ACCVGPR_WRITE_B32',
+                                     'V_ACCVGPR_READ_B32',
+                                     'V_ACCVGPR_MOV_B32'}:
+                        ctor_body_parts.append('flags_ |= ACCVGPR;')
 
                     # Per-instruction size overrides (e.g., VOP3PX2 128-bit
                     # instructions decoded under 64-bit VOP3P_MFMA).

@@ -4995,6 +4995,7 @@ VAccvgprMovB32Vop1::VAccvgprMovB32Vop1(const MachineInst *inst)
     sdwa_dst_unused_ = sw->dst_unused;
     sdwa_clamp_ = sw->clamp;
   }
+  flags_ |= ACCVGPR;
 }
 
 void VAccvgprMovB32Vop1::execute_impl(amdgpu::Wavefront &wf) {
