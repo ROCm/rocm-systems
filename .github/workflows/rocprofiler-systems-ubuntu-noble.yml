@@ -73,7 +73,7 @@ jobs:
 
     - name: Install Packages
       timeout-minutes: 25
-      uses: nick-fields/retry@v3
+      uses: nick-fields/retry@ad984534de44a9489a53aefd81eb77f87c70dc60 #v4.0.0
       with:
         retry_wait_seconds: 30
         timeout_minutes: 25
@@ -242,7 +242,7 @@ jobs:
 
     - name: Install System Dependency Packages
       timeout-minutes: 25
-      uses: nick-fields/retry@v3
+      uses: nick-fields/retry@ad984534de44a9489a53aefd81eb77f87c70dc60 #v4.0.0
       with:
         retry_wait_seconds: 30
         timeout_minutes: 25
@@ -258,7 +258,7 @@ jobs:
 
     - name: Install ROCm 7.2
       timeout-minutes: 25
-      uses: nick-fields/retry@v3
+      uses: nick-fields/retry@ad984534de44a9489a53aefd81eb77f87c70dc60 #v4.0.0
       with:
         retry_wait_seconds: 30
         timeout_minutes: 25

@@ -17,6 +17,7 @@ import common
 import numpy as np
 import pandas as pd
 import pytest
+import yaml
 from scipy.stats import zscore
 
 # Runtime config options
@@ -148,25 +149,28 @@ common.check_resource_allocation()
 # Get soc info
 gpu_arch, soc = common.gpu_soc()
 
-# Discover available set options for the current GPU arch
-AVAILABLE_SETS = []
-if gpu_arch:
-    import yaml
 
-    _sets_rel = (
-        Path("rocprof_compute_soc")
+def get_available_sets_for_arch(gpu_arch):
+    """Return available set options for the given GPU arch,
+    or [] if gpu_arch is falsy."""
+    if not gpu_arch:
+        return []
+    if common.SRC not in sys.path:
+        sys.path.insert(0, common.SRC)
+    sets_file = (
+        Path(common.SRC)
+        / "rocprof_compute_soc"
         / "profile_configs"
         / "sets"
         / f"{gpu_arch}_sets.yaml"
     )
-    _sets_file = Path(common.SRC) / _sets_rel
-    if not _sets_file.exists():
-        _sets_file = Path(common.ROOT) / _sets_rel
-    if _sets_file.exists():
-        _data = yaml.safe_load(_sets_file.read_text())
-        AVAILABLE_SETS = [
-            s["set_option"] for s in _data.get("sets", []) if s.get("set_option")
-        ]
+    if not sets_file.exists():
+        return []
+    data = yaml.safe_load(sets_file.read_text())
+    return [s["set_option"] for s in data.get("sets", []) if s.get("set_option")]
+
+
+AVAILABLE_SETS = get_available_sets_for_arch(gpu_arch)
 
 # Set default profiler
 os.environ["ROCPROF"] = "rocprofiler-sdk"
@@ -1092,7 +1096,7 @@ def test_analyze_rocpd(
 
     # Open the sqlite database and assert the schema
     # Import Kernel from analysis_orm.py
-    sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+
     from utils.analysis_orm import (
         Dispatch,
         Kernel,
@@ -1141,11 +1145,6 @@ def test_roofline_workload_dir_not_set_error():
     This covers lines 113-117
     """
     skip_unsupported_roofline_soc()
-
-    import sys
-    from pathlib import Path
-
-    sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
     try:
         from roofline.roofline_main import Roofline
@@ -1319,6 +1318,88 @@ def test_roof_error_handling(binary_handler_profile_rocprof_compute):
     common.clean_output_dir(config["cleanup"], workload_dir)
 
 
+@pytest.mark.roofline_1
+def test_bench_only_basic(binary_handler_profile_rocprof_compute):
+    """
+    Test that --bench-only generates roofline.csv standalone (no application
+    profiling and no performance counter collection).
+    """
+    skip_unsupported_roofline_soc()
+
+    options = ["--device", "0", "--bench-only"]
+    workload_dir = common.get_output_dir()
+
+    returncode = binary_handler_profile_rocprof_compute(
+        config, workload_dir, options, check_success=True, roof=True
+    )
+
+    assert returncode == 0
+    roofline_csv = Path(workload_dir) / "roofline.csv"
+    assert roofline_csv.exists(), f"Expected {roofline_csv} to be created"
+    # Bench-only must not produce profiling artifacts (no perfmon/, no pmc_perf_*.csv)
+    assert not (Path(workload_dir) / "perfmon").exists()
+    assert not list(Path(workload_dir).glob("pmc_perf_*.csv"))
+
+    common.clean_output_dir(config["cleanup"], workload_dir)
+
+
+@pytest.mark.roofline_1
+@pytest.mark.parametrize(
+    "conflicting_options",
+    [
+        pytest.param(["--set", "compute_thruput_util"], id="set"),
+        pytest.param(["--block", "2"], id="block"),
+        pytest.param(["--roof-only"], id="roof_only"),
+    ],
+)
+def test_bench_only_mutual_exclusion(
+    binary_handler_profile_rocprof_compute, conflicting_options
+):
+    """
+    --bench-only must be rejected when paired with --set, --block, or --roof-only.
+    These options are profiling-oriented and meaningless for a standalone benchmark.
+    """
+    skip_unsupported_roofline_soc()
+
+    options = ["--device", "0", "--bench-only"] + conflicting_options
+    workload_dir = common.get_output_dir()
+
+    returncode = binary_handler_profile_rocprof_compute(
+        config, workload_dir, options, check_success=False, roof=True
+    )
+
+    assert returncode == 1, (
+        f"Expected --bench-only with {conflicting_options} to fail, "
+        f"but command exited with {returncode}"
+    )
+
+    common.clean_output_dir(config["cleanup"], workload_dir)
+
+
+@pytest.mark.roofline_1
+def test_bench_only_no_roof_mutual_exclusion(binary_handler_profile_rocprof_compute):
+    """
+    --bench-only must be rejected when combined with --no-roof, since the option
+    explicitly disables the roofline microbenchmark we are trying to run.
+    """
+    skip_unsupported_roofline_soc()
+
+    options = ["--device", "0", "--bench-only"]
+    workload_dir = common.get_output_dir()
+
+    # roof=False makes the fixture inject --no-roof automatically
+    returncode = binary_handler_profile_rocprof_compute(
+        config, workload_dir, options, check_success=False, roof=False
+    )
+
+    assert returncode == 1, (
+        "Expected --bench-only combined with --no-roof to fail, "
+        f"but command exited with {returncode}"
+    )
+
+    common.clean_output_dir(config["cleanup"], workload_dir)
+
+
 @pytest.mark.roofline_2
 def test_roofline_plot_points_data_generation():
     """
@@ -1330,8 +1411,6 @@ def test_roofline_plot_points_data_generation():
     - Cache level information
     """
     skip_unsupported_roofline_soc()
-
-    sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
     try:
         from roofline.roofline_main import Roofline
@@ -1432,8 +1511,6 @@ def test_roofline_bound_status_calculation():
     Memory Bound or Compute Bound based on their AI and performance vs ceilings.
     """
     skip_unsupported_roofline_soc()
-
-    sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
     try:
         from roofline.roofline_main import Roofline
@@ -1921,10 +1998,6 @@ def test_list_available_metrics_with_block(
 @pytest.mark.path
 def test_comprehensive_error_paths():
     """Simplified test for error path coverage"""
-    import sys
-    from pathlib import Path
-
-    sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
     from utils.metrics.expression import build_eval_string
     from utils.parser import build_comparable_columns
@@ -2197,12 +2270,7 @@ def test_live_attach_detach_pc_sampling(
 
 @pytest.mark.sets_func
 class TestSetsIntegration:
-    # Auto-discovered from the sets YAML for the current GPU arch.
-    # This integration test complements pre-commit validator
-    # (tools/validate_sets_metric_ids.py) by exercising the end-to-end
-    # runtime path: CLI arg parsing -> YAML loading -> counter file
-    # generation -> profiler invocation. It catches wiring bugs that
-    # static validation cannot.
+    # Ensure single pass for auto-discovered sets from YAML for the current GPU arch.
     @pytest.mark.parametrize("set_name", AVAILABLE_SETS, ids=lambda s: s)
     def test_set_profiling(
         self, binary_handler_profile_rocprof_compute, set_name, request

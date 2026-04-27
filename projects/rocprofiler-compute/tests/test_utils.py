@@ -6990,9 +6990,6 @@ class TestBuildMetricList:
 
     @classmethod
     def setup_class(cls):
-        import sys
-
-        sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
         from utils.utils_common import build_metric_list
 
         cls.build_metric_list = staticmethod(build_metric_list)

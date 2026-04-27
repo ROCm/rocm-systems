@@ -228,6 +228,11 @@ def get_num_pmc_file(output_dir):
     ])
 
 
+def strip_ansi(s: str) -> str:
+    ansi_escape = re.compile(r"\x1B[@-_][0-?]*[ -/]*[@-~]")
+    return ansi_escape.sub("", s)
+
+
 def gpu_soc():
     """Return (arch, model) from rocminfo, e.g. ('gfx942', 'MI300').
 

@@ -72,7 +72,7 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char** argv) {
   vector<amdsmi_socket_handle> sockets(socket_count);
 
   // Get the sockets of the system
-  ret = amdsmi_get_socket_handles(&socket_count, &sockets[0]);
+  ret = amdsmi_get_socket_handles(&socket_count, sockets.data());
   CHK_AMDSMI_RET(ret)
 
   cout << "Total Socket: " << socket_count << endl;
@@ -92,7 +92,8 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char** argv) {
     vector<amdsmi_processor_handle> plist(cpu_count);
 
     // Get the cpus for each socket
-    ret = amdsmi_get_processor_handles_by_type(sockets[i], processor_type, &plist[0], &cpu_count);
+    ret =
+        amdsmi_get_processor_handles_by_type(sockets[i], processor_type, plist.data(), &cpu_count);
     CHK_AMDSMI_RET(ret)
 
     // Set processor type as AMDSMI_PROCESSOR_TYPE_AMD_CPU_CORE
@@ -104,7 +105,7 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char** argv) {
     vector<amdsmi_processor_handle> core_list(core_count);
 
     // Get the cpu cores for each socket
-    ret = amdsmi_get_processor_handles_by_type(sockets[i], processor_type, &core_list[0],
+    ret = amdsmi_get_processor_handles_by_type(sockets[i], processor_type, core_list.data(),
                                                &core_count);
     CHK_AMDSMI_RET(ret)
 

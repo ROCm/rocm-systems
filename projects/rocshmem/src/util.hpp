@@ -34,8 +34,9 @@
 #include <vector>
 
 #include "rocshmem/rocshmem_config.h"  // NOLINT(build/include_subdir)
-#include "constants.hpp"
 #include "assembly.hpp"
+#include "bit.hpp"
+#include "constants.hpp"
 #include "log.hpp"
 
 namespace rocshmem {
@@ -245,24 +246,24 @@ extern std::vector<device_prop_t> device_properties;
   return __ballot(true);
 }
 
-[[maybe_unused]] __device__ __forceinline__ unsigned int get_active_lane_count(uint64_t active_lane_mask) {
-  return __popcll(active_lane_mask);
+[[maybe_unused]] __device__ __forceinline__ int get_active_lane_count(uint64_t active_lane_mask) {
+  return popcount(active_lane_mask);
 }
 
-[[maybe_unused]] __device__ __forceinline__ unsigned int get_active_lane_count() {
+[[maybe_unused]] __device__ __forceinline__ int get_active_lane_count() {
   return get_active_lane_count(get_active_lane_mask());
 }
 
-[[maybe_unused]] __device__ __forceinline__ unsigned int get_active_lane_num(uint64_t active_lane_mask) {
-  return __popcll(active_lane_mask & __lanemask_lt());
+[[maybe_unused]] __device__ __forceinline__ int get_active_lane_num(uint64_t active_lane_mask) {
+  return popcount(active_lane_mask & (__lanemask_eq() - 1));
 }
 
-[[maybe_unused]] __device__ __forceinline__ unsigned int get_active_lane_num() {
+[[maybe_unused]] __device__ __forceinline__ int get_active_lane_num() {
   return get_active_lane_num(get_active_lane_mask());
 }
 
 [[maybe_unused]] __device__ __forceinline__ int get_first_active_lane_id(uint64_t active_lane_mask) {
-  return __ffsll((unsigned long long int)active_lane_mask) - 1;
+  return countr_zero(active_lane_mask);
 }
 
 [[maybe_unused]] __device__ __forceinline__ int get_first_active_lane_id() {
@@ -275,6 +276,14 @@ extern std::vector<device_prop_t> device_properties;
 
 [[maybe_unused]] __device__ __forceinline__ bool is_first_active_lane() {
   return is_first_active_lane(get_active_lane_mask());
+}
+
+[[maybe_unused]] __device__ __forceinline__ int get_last_active_lane_id(uint64_t active_lane_mask) {
+  return bit_log2(active_lane_mask);
+}
+
+[[maybe_unused]] __device__ __forceinline__ int get_last_active_lane_id() {
+  return get_last_active_lane_id(get_active_lane_mask());
 }
 
 [[maybe_unused]] __device__ __forceinline__ bool is_last_active_lane(uint64_t active_lane_mask) {

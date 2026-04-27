@@ -142,7 +142,7 @@ bool Settings::create(bool fullProfile, const amd::Isa& isa, bool enableXNACK, b
         (gfxStepping == 0 || gfxStepping == 1 || gfxStepping == 2)))) {
     // Enable Barrier Value packet is only for MI2XX/300
     barrier_value_packet_ = true;
-    queue_pipe_dist_ = DEBUG_HIP_DYNAMIC_QUEUES == 2 ? true : false;
+    queue_pipe_dist_ = dynamic_queues_ >= 1;
   }
 
   if (gfxipMajor == 9 && gfxipMinor >= 4) {

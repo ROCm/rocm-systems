@@ -1,0 +1,170 @@
+# AMD GPU hardware specifications per architecture.
+# Source of truth for arch.lookup_peaks(). Extracted during the agentic refactor
+# from vendor-published reference data.
+#
+# CRITICAL CORRECTIONS (per CLAUDE.md):
+# - MI300X FP64 = 81.7 TFLOPS (NOT 163.4 which is FP32)
+# - CDNA4 (gfx950) doubled LDS to 160 KB/CU (was 64 KB on CDNA3)
+#
+# Phase-10 Live-Roofline extension: per-dtype peak arrays
+# (peak_fp16_tflops / peak_bf16_tflops / peak_fp8_tflops / peak_int8_tops)
+# and a ``mfma_flops_per_inst`` block. The roofline tool
+# (perfxpert.tools.roofline.plot_points) consumes these to place per-dtype
+# compute ceilings on the roofline chart and to weight MFMA instruction
+# counts into the FLOPs estimate.
+
+gfx908:
+  name: "MI100"
+  codename: "CDNA1"
+  peak_fp64_tflops: 11.5
+  peak_fp32_tflops: 23.1
+  peak_fp16_tflops: 184.6
+  peak_bf16_tflops: 92.3
+  peak_fp8_tflops: 0.0        # no FP8 MFMA on CDNA1
+  peak_int8_tops: 184.6
+  memory_bandwidth_tbs: 1.2
+  cu_count: 120
+  lds_kb: 64
+  lds_per_cu_kb: 64
+  wave_size: 64
+  max_vgprs_per_thread: 256
+  vgprs_per_simd: 512
+  simds_per_cu: 4
+  max_waves_per_simd: 8
+  ridge_point: 19.2  # FP32 vector peak / TB/s
+  mfma_flops_per_inst:
+    fp32: 128
+    fp16: 4096
+    bf16: 4096
+    fp8:  8192
+    int8: 8192
+
+gfx90a:
+  name: "MI250X"
+  codename: "CDNA2"
+  peak_fp64_tflops: 47.9
+  peak_fp32_tflops: 47.9
+  peak_fp16_tflops: 383.0
+  peak_bf16_tflops: 383.0
+  peak_fp8_tflops: 0.0        # no FP8 MFMA on CDNA2
+  peak_int8_tops: 383.0
+  memory_bandwidth_tbs: 3.2
+  cu_count: 220
+  lds_kb: 64
+  lds_per_cu_kb: 64
+  wave_size: 64
+  max_vgprs_per_thread: 256
+  vgprs_per_simd: 512
+  simds_per_cu: 4
+  max_waves_per_simd: 8
+  ridge_point: 15.0
+  mfma_flops_per_inst:
+    fp32: 128
+    fp16: 4096
+    bf16: 4096
+    fp8:  8192
+    int8: 8192
+
+gfx942:
+  name: "MI300X"
+  codename: "CDNA3"
+  peak_fp64_tflops: 81.7    # CORRECTED — NOT 163.4
+  peak_fp32_tflops: 163.4
+  peak_fp16_tflops: 1307.0
+  peak_bf16_tflops: 1307.0
+  peak_fp8_tflops: 2614.0
+  peak_int8_tops: 2614.0
+  memory_bandwidth_tbs: 5.3
+  cu_count: 304
+  lds_kb: 64
+  lds_per_cu_kb: 64
+  wave_size: 64
+  max_vgprs_per_thread: 256
+  vgprs_per_simd: 512
+  simds_per_cu: 4
+  max_waves_per_simd: 10
+  ridge_point: 30.8  # FP32 vector peak / TB/s; FP64 ridge is 15.4
+  mfma_flops_per_inst:
+    fp32: 128
+    fp16: 4096
+    bf16: 4096
+    fp8:  8192
+    int8: 8192
+
+gfx950:
+  name: "MI350X"
+  codename: "CDNA4"
+  peak_fp64_tflops: 161.0   # doubled vs CDNA3
+  peak_fp32_tflops: 161.0
+  peak_fp16_tflops: 2300.0
+  peak_bf16_tflops: 2300.0
+  peak_fp8_tflops: 4600.0
+  peak_int8_tops: 4600.0
+  memory_bandwidth_tbs: 8.0
+  cu_count: 256
+  lds_kb: 160               # DOUBLED vs CDNA3
+  lds_per_cu_kb: 160
+  wave_size: 64
+  max_vgprs_per_thread: 256
+  vgprs_per_simd: 512
+  simds_per_cu: 4
+  max_waves_per_simd: 10
+  ridge_point: 20.1
+  mfma_flops_per_inst:
+    fp32: 128
+    fp16: 4096
+    bf16: 4096
+    fp8:  8192
+    int8: 8192
+
+gfx1030:
+  name: "RX 6900 XT"
+  codename: "RDNA2"
+  peak_fp64_tflops: 0.7
+  peak_fp32_tflops: 23.0
+  peak_fp16_tflops: 46.0
+  peak_bf16_tflops: 0.0
+  peak_fp8_tflops: 0.0
+  peak_int8_tops: 0.0
+  memory_bandwidth_tbs: 0.512
+  cu_count: 80
+  lds_kb: 64
+  lds_per_cu_kb: 64
+  wave_size: 32
+  max_vgprs_per_thread: 256
+  vgprs_per_simd: 1024
+  simds_per_cu: 2
+  max_waves_per_simd: 16
+  ridge_point: 44.9
+  mfma_flops_per_inst:
+    fp32: 128
+    fp16: 256
+    bf16: 256
+    fp8:  0
+    int8: 0
+
+gfx1100:
+  name: "RX 7900 XTX"
+  codename: "RDNA3"
+  peak_fp64_tflops: 1.9
+  peak_fp32_tflops: 61.0
+  peak_fp16_tflops: 122.0
+  peak_bf16_tflops: 122.0
+  peak_fp8_tflops: 0.0
+  peak_int8_tops: 0.0
+  memory_bandwidth_tbs: 0.960
+  cu_count: 96
+  lds_kb: 128
+  lds_per_cu_kb: 64
+  wave_size: 32
+  max_vgprs_per_thread: 256
+  vgprs_per_simd: 1536
+  simds_per_cu: 2
+  max_waves_per_simd: 16
+  ridge_point: 63.5
+  mfma_flops_per_inst:
+    fp32: 128
+    fp16: 256
+    bf16: 256
+    fp8:  0
+    int8: 0

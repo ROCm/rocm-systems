@@ -635,6 +635,8 @@ class Graph {
   std::vector<std::pair<Node, Node>> GetEdges() const;
   /// Returns whether segment scheduling is enabled for this graph
   bool IsSegmentSchedulingEnabled() const { return use_segment_scheduling_; }
+  // Enable or disable segment scheduling for this graph
+  void SetSegmentScheduling(bool segmentScheduling) {use_segment_scheduling_ = segmentScheduling;}
   // returns the original graph ptr if cloned
   const Graph* getOriginalGraph() const { return pOriginalGraph_; }
   // Add user obj resource to graph
@@ -951,10 +953,11 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
   }
 
   ~GraphExec() {
-    for (auto streams : parallel_streams_) {
+    for (auto& streams : parallel_streams_) {
       for (auto stream : streams.second) {
         if (stream != nullptr) {
           stream->finish();
+          stream->vdev()->UnpinQueue();
           constexpr bool kForceDestroy = true;
           hip::Stream::Destroy(stream, kForceDestroy);
         }
@@ -1043,8 +1046,6 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
   GraphKernelArgManager* kernArgManager_ = nullptr;  //!< Kernel Arg manager for graph.
   bool hasHiddenHeap_ = false;  //!< Hidden heap indicator for Kernel node
   bool repeatLaunch_ = false;
-  //!< Track last launch stream to avoid redundant UpdateStreams
-  hip::Stream* lastLaunchStream_ = nullptr;
 
   // PacketBatch structure
   struct PacketBatch {

@@ -541,6 +541,30 @@ Kernel filtering
 Kernel filtering is based on the name of the kernels you want to isolate. Use a
 kernel name substring list to isolate desired kernels.
 
+.. important::
+
+   Kernel filtering is strongly recommended when profiling with
+   ``--iteration-multiplexing``. Without it, the tool collects counters for
+   **all** dispatched kernels, including incidental ones such as
+   ``__amd_rocclr_fillBufferAligned`` and ``__amd_rocclr_copyBuffer``. These
+   helper kernels are typically dispatched only a few times and do not have
+   enough dispatches to fill all counter sets, producing warnings such as:
+
+   .. code-block:: text
+
+      WARNING Insufficient number of kernel calls for kernels:
+      __amd_rocclr_fillBufferAligned
+
+   To avoid this, use ``-k`` to profile only the kernels you care about:
+
+   .. code-block:: shell-session
+
+      $ rocprof-compute profile -k <your_kernel> --iteration-multiplexing -- <app>
+
+   If you are unsure which kernel names your application dispatches, first run
+   a profile **without** ``--iteration-multiplexing`` and inspect the
+   output to identify the kernel names of interest.
+
 The following example demonstrates profiling isolating the kernel matching
 substring ``vecCopy``.
 
@@ -693,7 +717,7 @@ b) Otherwise, profile mode runs microbenchmarks and collects roofline performanc
 
 .. note::
 
-  ``--roof-only`` cannot be used with ``--block`` or ``--set`` options.
+  ``--roof-only`` cannot be used with ``--block``, ``--set``, or ``--bench-only`` options.
 
 Profile mode generates ``roofline.csv`` containing microbenchmark data. To generate
 roofline HTML plots, use ``rocprof-compute analyze`` on the profiling output directory
@@ -771,6 +795,50 @@ successfully.
    -rw-r--r-- 1 auser agroup   399 Mar 21 23:49 timestamps.csv
 
 To generate roofline HTML plots from this data, see :doc:`../analyze/mode`.
+
+
+Benchmark only
+--------------
+
+If you only want to run the roofline microbenchmark without profiling an application
+or collecting any performance counters, use the ``--bench-only`` option. No
+application run is required.
+
+This is useful for:
+
+* Re-generating ``roofline.csv`` in an existing workload directory without re-profiling.
+* Running the microbenchmark on a system where only HIP is available (no rocprofiler-sdk needed).
+
+.. note::
+
+  ``--bench-only`` cannot be used with ``--block``, ``--set``, ``--roof-only``, or ``--no-roof`` options.
+
+.. code-block:: shell-session
+
+   $ rocprof-compute profile --name my_bench --bench-only
+   ...
+   INFO [roofline] Running roofline microbenchmark on device 0
+   GPU Device 0 (gfx942) with 304 CUs: Profiling...
+   ...
+   GPU Benchmarking completed
+   INFO [roofline] Roofline data saved to workloads/my_bench/MI300X_A1/roofline.csv
+     Run 'rocprof-compute analyze -p workloads/my_bench/MI300X_A1' for charts
+
+To target a specific GPU device, use ``--device``:
+
+.. code-block:: shell-session
+
+   $ rocprof-compute profile --name my_bench --bench-only --device 2
+
+To regenerate benchmark data in an existing profiled workload directory, use
+``--output-directory`` to point at the workload path directly:
+
+.. code-block:: shell-session
+
+   $ rocprof-compute profile --bench-only --output-directory workloads/vcopy/MI300X_A1
+   ...
+   INFO [roofline] Roofline data saved to workloads/vcopy/MI300X_A1/roofline.csv
+     Run 'rocprof-compute analyze -p workloads/vcopy/MI300X_A1' for charts
 
 .. _torch-operator-mapping:
 
@@ -1111,11 +1179,11 @@ Iteration multiplexing feature comes with some caveats to be considered when pro
 
 * **Minimum number of kernel dispatches required**
 
-  When using iteration multiplexing it is recommended to filter by kernel(s) of interest and make sure these kernels are dispatched enough times (50 recommended) to cover all counter subsets (currently around 15); a warning is thrown for kernels with insufficient dispatch counts to warn the user about missing counter data for those kernels, and it is not possible to calculate some metrics for these kernels.
+  When using iteration multiplexing it is recommended to filter by kernel(s) of interest using ``-k`` (see :ref:`profiling-kernel-filtering`) and make sure these kernels are dispatched enough times (50 recommended) to cover all counter subsets (currently around 15); a warning is thrown for kernels with insufficient dispatch counts to warn the user about missing counter data for those kernels, and it is not possible to calculate some metrics for these kernels.
 
 * **Non-deterministic workloads**
 
-  Workloads which dispatch kernels with non-deterministic names and launch parameters may trigger warnings for insufficient dispatch counts because iteration multiplexing identifies unique kernels by their names and optionally by their launch parameters; this is especially true of large AI workloads that dispatch kernels non-deterministically based on the model layers being used for the current input, and in such cases kernel filtering of common kernels is recommended.
+  Workloads which dispatch kernels with non-deterministic names and launch parameters may trigger warnings for insufficient dispatch counts because iteration multiplexing identifies unique kernels by their names and optionally by their launch parameters; this is especially true of large AI workloads that dispatch kernels non-deterministically based on the model layers being used for the current input, and in such cases kernel filtering (``-k``, see :ref:`profiling-kernel-filtering`) of common kernels is recommended.
 
 Multi-rank profiling
 ========================

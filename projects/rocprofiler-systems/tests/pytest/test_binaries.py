@@ -65,6 +65,7 @@ ENV_VAR_TO_JSON_PATH: dict[str, str] = {
     "ROCPROFSYS_PROCESS_SAMPLING_FREQ": "domains.gpu.process_sampling_freq",
     "ROCPROFSYS_PROCESS_SAMPLING_DURATION": "domains.gpu.process_sampling_duration",
     "ROCPROFSYS_CPU_FREQ_ENABLED": "domains.cpu.cpu_freq_enabled",
+    "ROCPROFSYS_CPU_METRICS": "domains.cpu.metrics",
     # --- Domains: ROCm ---
     "ROCPROFSYS_ROCM_DOMAINS": "domains.rocm.api_domains",
     "ROCPROFSYS_ROCM_GROUP_BY_QUEUE": "domains.rocm.group_by_queue",
