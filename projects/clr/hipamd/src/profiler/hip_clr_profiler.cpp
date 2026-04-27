@@ -841,8 +841,9 @@ static constexpr uint32_t kPkt_track_desc     = 60;  // TrackDescriptor
 // kPkt_clock_snapshot (6) and kPkt_ts_clock_id (58) intentionally omitted —
 // we rely on Perfetto's default trace clock (no conversion needed).
 
-// sequence_flags values
-static constexpr uint32_t kSeqFlag_Cleared = 1;  // SEQ_INCREMENTAL_STATE_CLEARED
+// sequence_flags values (TracePacket.sequence_flags)
+static constexpr uint32_t kSeqFlag_Cleared    = 1;  // SEQ_INCREMENTAL_STATE_CLEARED
+static constexpr uint32_t kSeqFlag_NeedsState = 2;  // SEQ_NEEDS_INCREMENTAL_STATE
 
 // TrackDescriptor (track_descriptor.proto)
 static constexpr uint32_t kDesc_uuid    = 1;
@@ -861,11 +862,11 @@ static constexpr uint32_t kThrd_tid  = 2;
 static constexpr uint32_t kThrd_name = 5;
 
 // TrackEvent (track_event.proto)
-static constexpr uint32_t kEvt_type       = 9;
-static constexpr uint32_t kEvt_track_uuid = 11;
-static constexpr uint32_t kEvt_name       = 23;  // string name (direct)
-static constexpr uint32_t kEvt_categories = 22;  // repeated string
-static constexpr uint32_t kEvt_dbg_ann          = 4;   // repeated DebugAnnotation
+static constexpr uint32_t kEvt_type         = 9;
+static constexpr uint32_t kEvt_track_uuid   = 11;
+static constexpr uint32_t kEvt_name_iid     = 10;  // uint64 interned name reference
+static constexpr uint32_t kEvt_cat_iids     = 3;   // repeated uint64 interned category refs
+static constexpr uint32_t kEvt_dbg_ann      = 4;   // repeated DebugAnnotation
 static constexpr uint32_t kEvt_legacy_event = 6;   // TrackEvent.legacy_event (LegacyEvent msg)
 static constexpr uint32_t kEvt_TYPE_BEGIN   = 1;
 static constexpr uint32_t kEvt_TYPE_END     = 2;
@@ -876,9 +877,22 @@ static constexpr uint32_t kLeg_id       = 6;   // uint64 — unscoped flow bindi
 static constexpr uint32_t kLeg_flow_dir = 13;  // uint32 — FlowDirection: OUT=1, IN=2
 
 // DebugAnnotation (debug_annotation.proto)
-static constexpr uint32_t kAnn_name    = 10;  // string name (direct, non-interned)
-static constexpr uint32_t kAnn_uint    = 3;   // uint64 uint_value
-static constexpr uint32_t kAnn_str_val = 6;   // string string_value
+static constexpr uint32_t kAnn_name_iid = 1;   // uint64 interned name reference
+static constexpr uint32_t kAnn_uint     = 3;   // uint64 uint_value
+static constexpr uint32_t kAnn_str_val  = 6;   // string string_value
+
+// InternedData (interned_data.proto) in TracePacket — string intern table
+// Field layout from interned_data.proto:
+//   1 = event_categories (repeated EventCategory)
+//   2 = event_names      (repeated EventName)
+//   3 = debug_annotation_names (repeated DebugAnnotationName)
+static constexpr uint32_t kPkt_interned_data = 12;  // InternedData message
+static constexpr uint32_t kIData_cat_names   = 1;   // repeated EventCategory
+static constexpr uint32_t kIData_evt_names   = 2;   // repeated EventName
+static constexpr uint32_t kIData_ann_names   = 3;   // repeated DebugAnnotationName
+// EventName / DebugAnnotationName / EventCategory all share the same layout:
+static constexpr uint32_t kIName_iid  = 1;  // uint64 interned ID
+static constexpr uint32_t kIName_name = 2;  // string
 
 // ClockSnapshot — not used; we emit no clock_snapshot and no timestamp_clock_id.
 // Perfetto treats timestamps without a clock ID as nanoseconds on the default trace
@@ -926,7 +940,6 @@ static void EmitTrackDesc(std::string& out, uint64_t uuid, uint64_t parent,
   ProtoMsg pkt;
   pkt.msg(kPkt_track_desc, desc);
   pkt.u32(kPkt_seq_id, kGlobalSeq);
-  pkt.u32(kPkt_seq_flags, kSeqFlag_Cleared);
   AppendPacket(out, pkt);
 }
 
@@ -945,14 +958,15 @@ static void EmitFlowEvent(std::string& out, uint64_t uuid, uint64_t ts_ns,
   pkt.u64(kPkt_timestamp, ts_ns);
   pkt.msg(kPkt_track_event, evt);
   pkt.u32(kPkt_seq_id, kGlobalSeq);
-  pkt.u32(kPkt_seq_flags, kSeqFlag_Cleared);
   AppendPacket(out, pkt);
 }
 
+// name_iid / cat_iid / ann_key_iid: interned string IDs (0 = not interned, use direct string)
 static void EmitSlice(std::string& out, uint64_t uuid, uint32_t /*seq_id*/,
                        uint64_t ts_ns, uint64_t dur_ns,
-                       const std::string& name, const std::string& cat,
-                       const std::vector<std::pair<std::string,std::string>>& anns,
+                       const std::string& name, uint64_t name_iid,
+                       uint64_t cat_iid,
+                       const std::vector<std::pair<uint64_t,std::string>>& anns,
                        const std::vector<uint64_t>& out_flows = {},
                        const std::vector<uint64_t>& in_flows  = {}) {
   // BEGIN
@@ -960,24 +974,25 @@ static void EmitSlice(std::string& out, uint64_t uuid, uint32_t /*seq_id*/,
     ProtoMsg evt;
     evt.u32(kEvt_type, kEvt_TYPE_BEGIN);
     evt.u64(kEvt_track_uuid, uuid);
-    evt.str(kEvt_name, name);
-    if (!cat.empty()) evt.str(kEvt_categories, cat);
+    if (name_iid) evt.u64(kEvt_name_iid, name_iid);
+    else          evt.str(23 /*name direct*/, name);
+    if (cat_iid)  evt.u64(kEvt_cat_iids, cat_iid);
     for (const auto& a : anns) {
       ProtoMsg ann;
-      ann.str(kAnn_name, a.first);
-      ann.str(kAnn_str_val, a.second);
+      ann.u64(kAnn_name_iid, a.first);   // always interned for annotation keys
+      ann.str(kAnn_str_val,  a.second);
       evt.msg(kEvt_dbg_ann, ann);
     }
     ProtoMsg pkt;
     pkt.u64(kPkt_timestamp, ts_ns);
     pkt.msg(kPkt_track_event, evt);
     pkt.u32(kPkt_seq_id, kGlobalSeq);
-    pkt.u32(kPkt_seq_flags, kSeqFlag_Cleared);
+    pkt.u32(kPkt_seq_flags, kSeqFlag_NeedsState);  // packet uses interned IIDs
     AppendPacket(out, pkt);
   }
   // Flow events — separate packets, matching JSON writer's ph='s'/'f' approach
-  for (uint64_t fid : out_flows) EmitFlowEvent(out, uuid, ts_ns,           fid, true);
-  for (uint64_t fid : in_flows)  EmitFlowEvent(out, uuid, ts_ns,           fid, false);
+  for (uint64_t fid : out_flows) EmitFlowEvent(out, uuid, ts_ns, fid, true);
+  for (uint64_t fid : in_flows)  EmitFlowEvent(out, uuid, ts_ns, fid, false);
   // END
   {
     ProtoMsg evt;
@@ -987,7 +1002,6 @@ static void EmitSlice(std::string& out, uint64_t uuid, uint32_t /*seq_id*/,
     pkt.u64(kPkt_timestamp, ts_ns + dur_ns);
     pkt.msg(kPkt_track_event, evt);
     pkt.u32(kPkt_seq_id, kGlobalSeq);
-    pkt.u32(kPkt_seq_flags, kSeqFlag_Cleared);
     AppendPacket(out, pkt);
   }
 }
@@ -998,6 +1012,50 @@ void WriteProtoTraceImpl(const char* filepath) {
   std::string out;
 
   size_t total = g_rec_counter.load(std::memory_order_acquire);
+
+  // ── String intern table ───────────────────────────────────────────────────
+  // Assign a small integer IID to each unique string (event names, ann keys,
+  // categories). All interned strings are emitted once in a single InternedData
+  // packet before any events, replacing repeated full-string copies with 1-3
+  // byte varint references.
+  std::unordered_map<std::string, uint64_t> evt_iid_map;  // event name → iid
+  std::unordered_map<std::string, uint64_t> ann_iid_map;  // annotation key → iid
+  std::unordered_map<std::string, uint64_t> cat_iid_map;  // category → iid
+  uint64_t next_iid = 1;
+  auto intern_evt = [&](const std::string& s) -> uint64_t {
+    auto [it, ins] = evt_iid_map.emplace(s, 0);
+    if (ins) it->second = next_iid++;
+    return it->second;
+  };
+  auto intern_ann = [&](const std::string& s) -> uint64_t {
+    auto [it, ins] = ann_iid_map.emplace(s, 0);
+    if (ins) it->second = next_iid++;
+    return it->second;
+  };
+  auto intern_cat = [&](const std::string& s) -> uint64_t {
+    auto [it, ins] = cat_iid_map.emplace(s, 0);
+    if (ins) it->second = next_iid++;
+    return it->second;
+  };
+
+  // Pre-intern fixed strings used everywhere
+  const uint64_t kCatHip    = intern_cat("hip");
+  const uint64_t kCatGpu    = intern_cat("gpu");
+  const uint64_t kCatMemory = intern_cat("memory");
+  // Pre-intern common annotation keys
+  auto iid_queue_id   = intern_ann("queue_id");
+  auto iid_grid       = intern_ann("grid");
+  auto iid_block      = intern_ann("block");
+  auto iid_copy_kind  = intern_ann("copy_kind");
+  auto iid_bytes      = intern_ann("bytes");
+  auto iid_dst        = intern_ann("dst");
+  auto iid_src        = intern_ann("src");
+  auto iid_stream     = intern_ann("stream");
+  auto iid_ptr        = intern_ann("ptr");
+  auto iid_size_key   = intern_ann("size");
+  // Pre-intern karg index keys "0".."15"
+  std::array<uint64_t,16> iid_kidx;
+  for (int k = 0; k < 16; ++k) iid_kidx[k] = intern_ann(std::to_string(k));
 
   // ── Pass 1: build all maps needed before any emission ────────────────────
   std::unordered_map<uint64_t, uint32_t> tid_map;
@@ -1023,6 +1081,7 @@ void WriteProtoTraceImpl(const char* filepath) {
       t_end = std::max(t_end, rec.end_ns);
       compact_tid(rec.thread_id);
       if (rec.api_name) {
+        intern_evt(rec.api_name);  // pre-intern all event names in pass 1
         uint64_t ptr = reinterpret_cast<uintptr_t>(rec.memory1);
         if      (IsAllocApi(rec.api_name) && ptr) alloc_map[ptr] = {rec.start_ns, 0, rec.size};
         else if (IsFreeApi (rec.api_name) && ptr) {
@@ -1160,9 +1219,54 @@ void WriteProtoTraceImpl(const char* filepath) {
     }
   }
 
-  // ── Pass 3: emit events with embedded flow_ids on BEGIN ───────────────────
-  // Hoisted out of the per-record inner loop to avoid repeated heap allocs.
-  std::vector<std::pair<std::string,std::string>> gpu_anns;
+  // ── Pre-intern all dynamic event names so InternedData is complete ────────
+  // GPU dispatch: demangled kernel names from g_kernel_names
+  {
+    std::lock_guard<std::mutex> lk(g_kernel_names_mtx);
+    for (auto& kv : g_kernel_names) intern_evt(kv.second);
+  }
+  // GPU copy: all possible CopyKindName values
+  for (int k = 0; k <= 12; ++k) intern_evt(CopyKindName(static_cast<uint32_t>(k)));
+  intern_evt("Barrier");
+  // Memory alloc names: "0xADDR (SIZE unit)"
+  for (auto& kv : alloc_map) {
+    uint64_t ptr = kv.first;
+    const AllocInfoP& ai = kv.second;
+    char ptrbuf[32], sizebuf[32];
+    snprintf(ptrbuf, sizeof(ptrbuf), "0x%llx", static_cast<unsigned long long>(ptr));
+    if (ai.size >= 1024*1024)      snprintf(sizebuf,sizeof(sizebuf),"%.1f MB",ai.size/(1024.0*1024.0));
+    else if (ai.size >= 1024)      snprintf(sizebuf,sizeof(sizebuf),"%.1f KB",ai.size/1024.0);
+    else                           snprintf(sizebuf,sizeof(sizebuf),"%llu B",(unsigned long long)ai.size);
+    intern_evt(std::string(ptrbuf) + " (" + sizebuf + ")");
+  }
+
+  // ── Emit InternedData packet (all IIDs now known) ─────────────────────────
+  // One packet with SEQ_INCREMENTAL_STATE_CLEARED carries the full intern table.
+  // Must come before any event packets that reference IIDs.
+  {
+    ProtoMsg idata;
+    for (auto& kv : evt_iid_map) {
+      ProtoMsg e; e.u64(kIName_iid, kv.second); e.str(kIName_name, kv.first);
+      idata.msg(kIData_evt_names, e);
+    }
+    for (auto& kv : ann_iid_map) {
+      ProtoMsg e; e.u64(kIName_iid, kv.second); e.str(kIName_name, kv.first);
+      idata.msg(kIData_ann_names, e);
+    }
+    for (auto& kv : cat_iid_map) {
+      ProtoMsg e; e.u64(kIName_iid, kv.second); e.str(kIName_name, kv.first);
+      idata.msg(kIData_cat_names, e);
+    }
+    ProtoMsg pkt;
+    pkt.msg(kPkt_interned_data, idata);
+    pkt.u32(kPkt_seq_id, kGlobalSeq);
+    // Both flags: Cleared resets intern state, NeedsState marks this as an interned-data carrier
+    pkt.u32(kPkt_seq_flags, kSeqFlag_Cleared | kSeqFlag_NeedsState);
+    AppendPacket(out, pkt);
+  }
+
+  // ── Pass 3: emit events ───────────────────────────────────────────────────
+  std::vector<std::pair<uint64_t,std::string>> gpu_anns;
   std::vector<uint64_t> in_flows_vec;
   for (size_t c = 0; c < g_records.size(); ++c) {
     HipApiRecordExt* chunk = g_records[c];
@@ -1182,28 +1286,28 @@ void WriteProtoTraceImpl(const char* filepath) {
       auto cfit = cpu_gpu_flow.find(slot);
       if (cfit != cpu_gpu_flow.end()) cpu_out.push_back(cfit->second);
 
-      std::vector<std::pair<std::string,std::string>> cpu_anns;
+      std::vector<std::pair<uint64_t,std::string>> cpu_anns;
       {
         char buf[32];
         if (rec.memory1) {
           snprintf(buf, sizeof(buf), "0x%llx",
                    static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(rec.memory1)));
-          cpu_anns.push_back({"ptr", buf});
+          cpu_anns.push_back({iid_ptr, buf});
         }
         if (rec.memory2) {
           snprintf(buf, sizeof(buf), "0x%llx",
                    static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(rec.memory2)));
-          cpu_anns.push_back({"src", buf});
+          cpu_anns.push_back({iid_src, buf});
         }
         if (rec.size)
-          cpu_anns.push_back({"size", std::to_string(rec.size)});
+          cpu_anns.push_back({iid_size_key, std::to_string(rec.size)});
         if (rec.stream) {
           snprintf(buf, sizeof(buf), "0x%llx",
                    static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(rec.stream)));
-          cpu_anns.push_back({"stream", buf});
+          cpu_anns.push_back({iid_stream, buf});
         }
       }
-      EmitSlice(out, cpu_uuid, 0, ts_ns, dur_ns, rec.api_name, "hip", cpu_anns, cpu_out, {});
+      EmitSlice(out,cpu_uuid, 0, ts_ns, dur_ns, rec.api_name, intern_evt(rec.api_name), kCatHip, cpu_anns, cpu_out, {});
 
       // GPU op slices
       bool first_op = true;
@@ -1231,29 +1335,29 @@ void WriteProtoTraceImpl(const char* filepath) {
         gpu_anns.clear();
         {
           char buf[32];
-          gpu_anns.push_back({"queue_id", std::to_string(gop.queue_id)});
+          gpu_anns.push_back({iid_queue_id, std::to_string(gop.queue_id)});
           if (gop.op == OP_ID_DISPATCH && gop.grid_x) {
-            snprintf(buf, sizeof(buf), "%ux%ux%u", gop.grid_x, gop.grid_y, gop.grid_z); gpu_anns.push_back({"grid", buf});
-            snprintf(buf, sizeof(buf), "%ux%ux%u", gop.block_x, gop.block_y, gop.block_z); gpu_anns.push_back({"block", buf});
+            snprintf(buf, sizeof(buf), "%ux%ux%u", gop.grid_x, gop.grid_y, gop.grid_z); gpu_anns.push_back({iid_grid, buf});
+            snprintf(buf, sizeof(buf), "%ux%ux%u", gop.block_x, gop.block_y, gop.block_z); gpu_anns.push_back({iid_block, buf});
           }
           if (gop.op == OP_ID_COPY) {
-            gpu_anns.push_back({"copy_kind", CopyKindName(gop.copy_kind)});
-            gpu_anns.push_back({"bytes", std::to_string(gop.bytes)});
+            gpu_anns.push_back({iid_copy_kind, CopyKindName(gop.copy_kind)});
+            gpu_anns.push_back({iid_bytes, std::to_string(gop.bytes)});
             if (gop.dst) {
               snprintf(buf, sizeof(buf), "0x%llx",
                 static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(gop.dst)));
-              gpu_anns.push_back({"dst", buf});
+              gpu_anns.push_back({iid_dst, buf});
             }
             if (gop.src) {
               snprintf(buf, sizeof(buf), "0x%llx",
                 static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(gop.src)));
-              gpu_anns.push_back({"src", buf});
+              gpu_anns.push_back({iid_src, buf});
             }
           }
           if (rec.stream) {
             snprintf(buf, sizeof(buf), "0x%llx",
               static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(rec.stream)));
-            gpu_anns.push_back({"stream", buf});
+            gpu_anns.push_back({iid_stream, buf});
           }
         }
         // Kernel args — same positional format as JSON writer
@@ -1274,8 +1378,9 @@ void WriteProtoTraceImpl(const char* filepath) {
             } else {
               snprintf(vbuf, sizeof(vbuf), "(sz=%u)", sz);
             }
-            gpu_anns.push_back({std::to_string(kidx++), vbuf});
-            p += sz;
+            uint64_t key_iid = (kidx < 16) ? iid_kidx[kidx] : intern_ann(std::to_string(kidx));
+            gpu_anns.push_back({key_iid, vbuf});
+            ++kidx; p += sz;
           }
         }
 
@@ -1288,7 +1393,8 @@ void WriteProtoTraceImpl(const char* filepath) {
           in_flows_vec.insert(in_flows_vec.end(), rfit->second.begin(), rfit->second.end());
         ++op_ord;
 
-        EmitSlice(out, gpu_uuid, 0, g_ts, g_dur, gpu_name, "gpu", gpu_anns, {}, in_flows_vec);
+        uint64_t gpu_name_iid = intern_evt(gpu_name);
+        EmitSlice(out,gpu_uuid, 0, g_ts, g_dur, gpu_name, gpu_name_iid, kCatGpu, gpu_anns, {}, in_flows_vec);
       };
 
       if (rec.gpu.gpu_op_count > 0) {
@@ -1311,13 +1417,14 @@ void WriteProtoTraceImpl(const char* filepath) {
     else if (ai.size >= 1024)      snprintf(sizebuf,sizeof(sizebuf),"%.1f KB",ai.size/1024.0);
     else                           snprintf(sizebuf,sizeof(sizebuf),"%llu B",(unsigned long long)ai.size);
     std::string alloc_name = std::string(ptrbuf) + " (" + sizebuf + ")";
-    std::vector<std::pair<std::string,std::string>> anns;
-    anns.push_back({"ptr", ptrbuf}); anns.push_back({"size", std::to_string(ai.size)});
+    std::vector<std::pair<uint64_t,std::string>> anns;
+    anns.push_back({iid_ptr, ptrbuf}); anns.push_back({iid_size_key, std::to_string(ai.size)});
     // Memory slice emits ph='s' (flow starts here at alloc time, arrow points forward to GPU op)
     std::vector<uint64_t> out_flows;
     auto afit = alloc_out_flows.find(ptr);
     if (afit != alloc_out_flows.end()) out_flows = afit->second;
-    EmitSlice(out, mem_uuid, 0, ai.start_ns, dur_ns, alloc_name, "memory", anns, out_flows, {});
+    uint64_t alloc_name_iid = intern_evt(alloc_name);
+    EmitSlice(out,mem_uuid, 0, ai.start_ns, dur_ns, alloc_name, alloc_name_iid, kCatMemory, anns, out_flows, {});
   }
 
   std::ofstream f(filepath, std::ios::binary);

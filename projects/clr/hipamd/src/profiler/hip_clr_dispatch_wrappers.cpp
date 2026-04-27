@@ -17,6 +17,7 @@
 #include "hip_clr_profiler.hpp"
 #include "rocclr/os/os.hpp"
 #include "../hip_global.hpp"
+#include "../hip_graph_internal.hpp"
 
 #include <atomic>
 #include <vector>
@@ -1496,42 +1497,51 @@ static HipCopyKindExt GraphMemcpyKindToExt(hipMemcpyKind kind,
 
 // Capture kernel and memcpy node info from a graph, store per graphExec.
 // Called after a successful hipGraphInstantiate* — pGraphExec is already set.
+// Uses internal C++ graph APIs directly to avoid calling public HIP functions
+// from within a wrapper (which would clobber hipGetLastError and risk reentrancy).
 static void CaptureGraphExecNodes(hipGraphExec_t exec, hipGraph_t graph) {
   if (!exec || !graph) return;
-  size_t numNodes = 0;
-  g_next.hipGraphGetNodes_fn(graph, nullptr, &numNodes);
-  if (numNodes == 0) return;
-  std::vector<hipGraphNode_t> gnodes(numNodes);
-  g_next.hipGraphGetNodes_fn(graph, gnodes.data(), &numNodes);
+  auto* g = reinterpret_cast<hip::Graph*>(graph);
+  if (!hip::Graph::isGraphValid(g)) return;
+  const auto& nodes = g->GetNodes();
+  if (nodes.empty()) return;
+
   std::vector<HipGraphNodeInfoExt> infos;
-  for (auto gnode : gnodes) {
-    hipGraphNodeType type = hipGraphNodeTypeCount;
-    if (g_next.hipGraphNodeGetType_fn(gnode, &type) != hipSuccess) continue;
-    if (type == hipGraphNodeTypeKernel) {
-      hipKernelNodeParams kp{};
-      if (g_next.hipGraphKernelNodeGetParams_fn(gnode, &kp) != hipSuccess) continue;
-      if (!kp.func) continue;
-      hipFunction_t hfunc = nullptr;
-      if (g_next.hipGetFuncBySymbol_fn(&hfunc, kp.func) != hipSuccess || !hfunc) continue;
-      HipGraphNodeInfoExt info;
-      info.op      = HIP_OP_DISPATCH_EXT;
-      info.grid_x  = kp.gridDim.x;  info.grid_y  = kp.gridDim.y;  info.grid_z  = kp.gridDim.z;
-      info.block_x = kp.blockDim.x; info.block_y = kp.blockDim.y; info.block_z = kp.blockDim.z;
-      HipCaptureGraphNodeArgsExt(&info, hfunc, kp.kernelParams);
-      if (!info.kernel_name.empty()) infos.push_back(std::move(info));
-    } else if (type == hipGraphNodeTypeMemcpy) {
-      hipMemcpy3DParms mp{};
-      if (g_next.hipGraphMemcpyNodeGetParams_fn(gnode, &mp) != hipSuccess) continue;
-      bool src_arr = (mp.srcArray != nullptr);
-      bool dst_arr = (mp.dstArray != nullptr);
-      bool is_rect = (mp.extent.height > 1 || mp.extent.depth > 1);
-      HipGraphNodeInfoExt info;
-      info.op        = HIP_OP_COPY_EXT;
-      info.src       = src_arr ? nullptr : mp.srcPtr.ptr;
-      info.dst       = dst_arr ? nullptr : mp.dstPtr.ptr;
-      info.bytes     = mp.extent.width * mp.extent.height * mp.extent.depth;
-      info.copy_kind = GraphMemcpyKindToExt(mp.kind, src_arr, dst_arr, is_rect);
-      infos.push_back(std::move(info));
+  for (auto* node : nodes) {
+    if (!node) continue;
+    switch (node->GetType()) {
+      case hipGraphNodeTypeKernel: {
+        auto* knode = static_cast<hip::GraphKernelNode*>(node);
+        hipKernelNodeParams kp{};
+        knode->GetParams(&kp);
+        if (!kp.func) continue;
+        hipFunction_t hfunc = nullptr;
+        if (g_next.hipGetFuncBySymbol_fn(&hfunc, kp.func) != hipSuccess || !hfunc) continue;
+        HipGraphNodeInfoExt info;
+        info.op      = HIP_OP_DISPATCH_EXT;
+        info.grid_x  = kp.gridDim.x;  info.grid_y  = kp.gridDim.y;  info.grid_z  = kp.gridDim.z;
+        info.block_x = kp.blockDim.x; info.block_y = kp.blockDim.y; info.block_z = kp.blockDim.z;
+        HipCaptureGraphNodeArgsExt(&info, hfunc, kp.kernelParams);
+        if (!info.kernel_name.empty()) infos.push_back(std::move(info));
+        break;
+      }
+      case hipGraphNodeTypeMemcpy: {
+        auto* mnode = static_cast<hip::GraphMemcpyNode*>(node);
+        hipMemcpy3DParms mp{};
+        mnode->GetParams(&mp);
+        bool src_arr = (mp.srcArray != nullptr);
+        bool dst_arr = (mp.dstArray != nullptr);
+        bool is_rect = (mp.extent.height > 1 || mp.extent.depth > 1);
+        HipGraphNodeInfoExt info;
+        info.op        = HIP_OP_COPY_EXT;
+        info.src       = src_arr ? nullptr : mp.srcPtr.ptr;
+        info.dst       = dst_arr ? nullptr : mp.dstPtr.ptr;
+        info.bytes     = mp.extent.width * mp.extent.height * mp.extent.depth;
+        info.copy_kind = GraphMemcpyKindToExt(mp.kind, src_arr, dst_arr, is_rect);
+        infos.push_back(std::move(info));
+        break;
+      }
+      default: break;
     }
   }
   if (!infos.empty()) HipStoreGraphExecNodesExt(exec, std::move(infos));
