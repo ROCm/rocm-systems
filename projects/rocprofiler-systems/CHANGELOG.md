@@ -21,6 +21,7 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 - Post-run output summary during library finalization showing result file locations.
 - JSON schema file (`share/rocprofiler-systems/presets/schema.json`) for preset validation.
 - Documentation (`docs/how-to/instrumenting-rewriting-binary-application.rst`) describing what to do when Dyninst reports a "Failed to transform trace" error during instrumentation.
+- `--exe-only`, `--max-library-functions`, and `--exclude-all-internal-lib-paths` CLI arguments to `rocprof-sys-instrument` for controlling shared-library instrumentation and internal-library path filtering.
 
 ### Changed
 
@@ -28,6 +29,7 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 - `rocprof-sys-instrument` diagnostic file dumps (available, instrumented, excluded, coverage, overlapping) are now gated behind the `--dump-info` flag instead of being generated unconditionally.
 - Preset flags changed from `--balanced` to `--preset=balanced` syntax. The old `--<preset-name>` flags are still supported and handled within `preset_registry`.
 - Removed the `ROCPROFSYS_USE_ROCM` CMake option. ROCm is now required for building the ROCm Systems Profiler.
+- Removed `--parse-all-modules` from `rocprof-sys-instrument`. The tool iterates through objects and modules to extract the functions by default.
 
 ### Resolved issues
 
