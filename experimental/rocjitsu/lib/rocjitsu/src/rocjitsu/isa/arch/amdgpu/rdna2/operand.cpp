@@ -790,6 +790,10 @@ uint32_t resolve_src_scalar(const amdgpu::Wavefront &wf, int ev) {
     return 0xC0800000u; // -4.0f
   if (ev == 248)
     return 0x3E22F983u; // 1/(2*pi)
+  if (ev == 249)
+    return 0u; // SRC_POPS_EXITING_WAVE_ID (not used in compute)
+  if (ev == 250)
+    return 0u; // NULL
   if (ev == 251)
     return wf.vcc() == 0 ? 1u : 0u; // VCCZ
   if (ev == 252)
