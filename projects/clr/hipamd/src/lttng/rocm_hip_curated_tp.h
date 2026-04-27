@@ -9,6 +9,8 @@
  *
  * Spec: docs/superpowers/specs/2026-04-26-lttng-curated-args-design.md
  */
+#if !defined(_ROCM_HIP_CURATED_TP_H) || defined(LTTNG_UST_TRACEPOINT_HEADER_MULTI_READ)
+#define _ROCM_HIP_CURATED_TP_H
 
 LTTNG_UST_TRACEPOINT_EVENT(
     rocm_hip, hipMemcpyAsync_args,
@@ -40,3 +42,6 @@ LTTNG_UST_TRACEPOINT_EVENT(
         lttng_ust_field_integer(uint64_t, corr_id, corr_id)
     )
 )
+
+
+#endif /* _ROCM_HIP_CURATED_TP_H */

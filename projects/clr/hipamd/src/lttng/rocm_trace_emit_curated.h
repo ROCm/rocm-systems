@@ -19,12 +19,15 @@
 
 #include <atomic>
 #include "rocm_hip_curated_tp.h"
-#include <hip/hip_runtime.h>
+#include <hip/hip_runtime_api.h>
 
 extern std::atomic<bool> rocm_hip_trace_g_disabled;
+#ifndef ROCM_TRACE_DISABLED_DEFINED
+#define ROCM_TRACE_DISABLED_DEFINED
 static inline bool rocm_trace_disabled(void) {
     return rocm_hip_trace_g_disabled.load(std::memory_order_relaxed);
 }
+#endif
 
         static inline void rocm_trace_emit_hipMemcpyAsync_args(
             uint64_t corr_id,

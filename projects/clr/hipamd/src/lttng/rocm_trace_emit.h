@@ -46,9 +46,12 @@
  * cross-bind the two runtimes' flags. */
 extern std::atomic<bool> rocm_hip_trace_g_disabled;
 
+#ifndef ROCM_TRACE_DISABLED_DEFINED
+#define ROCM_TRACE_DISABLED_DEFINED
 static inline bool rocm_trace_disabled(void) {
     return rocm_hip_trace_g_disabled.load(std::memory_order_relaxed);
 }
+#endif
 
 /* HIP emit_enter: capture parent_corr_id (= the active slot value BEFORE
  * the push) and emit it as the new parent_corr_id field. The push then
