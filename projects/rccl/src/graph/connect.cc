@@ -304,8 +304,11 @@ ncclResult_t ncclTreeBasePostset(struct ncclComm* comm,
   return ncclSuccess;
 }
 
-static void generateWaleckiEven(int nNodes, int channel, int* order) {
-  int m = nNodes - 1; // Number of rotating nodes
+static void generateWalecki(int nNodes, int channel, int* order) {
+  if (nNodes <= 0 || !order) return;
+
+  // For Walecki, if N is even, we treat it as (N-1) nodes + 1 fixed pivot
+  int m = (nNodes % 2) ? nNodes : (nNodes - 1) ;
   int left = 0;
   int right = m - 1;
 
@@ -320,22 +323,8 @@ static void generateWaleckiEven(int nNodes, int channel, int* order) {
     }
     order[i] = val;
   }
-  // The pivot node is always at the end
-  order[nNodes - 1] = nNodes - 1;
-}
-
-static void generateWaleckiOdd(int nNodes, int channel, int* order) {
-  int left = 0;
-  int right = nNodes - 1;
-
-  for (int i = 0; i < nNodes; i++) {
-    if (i % 2 == 0) {
-      order[i] = (left + channel) % nNodes;
-      left++;
-    } else {
-      order[i] = (right + channel) % nNodes;
-      right--;
-    }
+  if( nNodes % 2 == 0) {
+    order[nNodes - 1] = nNodes - 1;
   }
 }
 
@@ -359,10 +348,9 @@ static ncclResult_t generateGreedyNodeOrder(int nNodes, uint8_t nChannels, int* 
         return ncclSuccess;
     }
 
-    void (*ringGen)(int, int, int*) = (nNodes % 2 == 0) ? generateWaleckiEven : generateWaleckiOdd;
     if (nChannels <= (nNodes / 2)) {
         for (int c = 0; c < nChannels; c++) {
-            ringGen(nNodes, c, &nodeOrder[c * nNodes]);
+            generateWalecki(nNodes, c, &nodeOrder[c * nNodes]);
         }
         return ncclSuccess;
     }
@@ -383,7 +371,7 @@ static ncclResult_t generateGreedyNodeOrder(int nNodes, uint8_t nChannels, int* 
     int startNode = 0;
     for (int c = 0; c < nChannels; c++) {
         if (c < nNodes / 2) {
-            ringGen(nNodes, c, &nodeOrder[c * nNodes]);
+            generateWalecki(nNodes, c, &nodeOrder[c * nNodes]);
             for (int i = 0; i < nNodes; i++) {
                 int u = nodeOrder[c * nNodes + i];
                 int v = nodeOrder[c * nNodes + ((i + 1) % nNodes)];
@@ -1024,6 +1012,7 @@ static ncclResult_t repairMissingChannels(struct ncclTopoRanks** allTopoRanks, i
         allTopoRanks[r]->ringPrev[c] = allTopoRanks[r]->ringPrev[0];
         allTopoRanks[r]->ringSend[c] = allTopoRanks[r]->ringSend[0];
         allTopoRanks[r]->ringRecv[c] = allTopoRanks[r]->ringRecv[0];
+        INFO(NCCL_GRAPH, " ring graph copied from  channel 0 to %d  in repairMissingChannels", c);
       }
 
       // 2. TREE REPAIR: Trees use -1 as the 'None' sentinel
@@ -1032,6 +1021,7 @@ static ncclResult_t repairMissingChannels(struct ncclTopoRanks** allTopoRanks, i
         allTopoRanks[r]->treeToParent[c] = allTopoRanks[r]->treeToParent[0];
         allTopoRanks[r]->treeToChild0[c] = allTopoRanks[r]->treeToChild0[0];
         allTopoRanks[r]->treeToChild1[c] = allTopoRanks[r]->treeToChild1[0];
+        INFO(NCCL_GRAPH, " Tree graph copied from  channel 0 to %d in repairMissingChannels", c);
       }
     }
   }

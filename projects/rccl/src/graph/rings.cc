@@ -92,15 +92,10 @@ ncclResult_t ncclBuildRings(int nrings, int* rings, int rank, int nranks, int* p
 ncclResult_t rcclBuildRings(int nrings, int* rings, int rank, int nranks, int* prev, int* next) {
   // Use a stack-allocated buffer for O(N) validation.
   // If nranks > 1024, consider using malloc/free
+  if( (nrings < 0) || (rank < 0) ||  (nranks < 0) || ( rings == NULL) || (prev == NULL) || (next == NULL)) return ncclInvalidArgument;
   ncclResult_t res = ncclSuccess;
-  uint8_t found_stackalloc[1024];
-  uint8_t* found = found_stackalloc;
-  int heap_allocated = 0;
-  if(nranks > 1024) {
-    found = (uint8_t*)malloc(nranks * sizeof(uint8_t));
-    if (found == NULL) return ncclInternalError;
-    heap_allocated = 1;
-  }
+  uint8_t* found = (uint8_t*)malloc(nranks * sizeof(uint8_t));
+  if (found == NULL) return ncclInternalError;
 
   for (int r = 0; r < nrings; r++) {
     int* current_ring = rings + (r * nranks);
@@ -173,6 +168,6 @@ ncclResult_t rcclBuildRings(int nrings, int* rings, int rank, int nranks, int* p
     }
   }
 exit:
-  if(heap_allocated) free(found);
+  if(found) free(found);
   return res;
 }

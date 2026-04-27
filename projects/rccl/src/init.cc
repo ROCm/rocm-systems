@@ -122,6 +122,11 @@ std::unordered_map<ncclComm_t, rocshmem::rocshmem_team_t> ncclCommToRshmemTeam;
 // Turn off cheap fence for gfx942/gfx950
 RCCL_PARAM(Gfx9CheapFenceOff, "GFX9_CHEAP_FENCE_OFF", 0);
 
+/**
+ * Used on gfx1151 (StrixHalo) to set the nChannels for ncclTopoPreset before determining number of nodes. 
+ */
+RCCL_PARAM( InitChannels, "INIT_CHANNELS", -1) ;
+
 // GDRCOPY support: Off by default
 NCCL_PARAM(GdrCopyEnable, "GDRCOPY_ENABLE", 0);
 
@@ -1239,10 +1244,7 @@ static ncclResult_t initNvlDomainInfo(struct ncclComm* comm) {
 
   return ncclSuccess;
 }
-/**
- * Used on gfx1151 (StrixHalo) to set the nChannels for ncclTopoPreset before determining number of nodes. 
- */
-RCCL_PARAM( InitChannels, "INIT_CHANNELS", -1) ;
+
 static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* parent, uint64_t timers[TIMERS_INIT_COUNT]) {
   // We use 2 AllGathers
   // 1. { peerInfo, comm, compCap}
