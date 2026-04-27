@@ -149,7 +149,21 @@ if(HSA_RUNTIME64)
     message(STATUS "HSA init test enabled (found ${HSA_RUNTIME64})")
 
     # --- HSA translate test: CDNA4→RDNA4 on-device verification ---
+    # Requires both compiled device kernels AND an RDNA4 GPU on the host.
     if(HAS_DEVICE_KERNELS)
+        # Detect RDNA4 GPU at configure time via rocm_agent_enumerator.
+        find_program(ROCM_AGENT_ENUM rocm_agent_enumerator
+            HINTS /opt/rocm/bin ENV ROCM_PATH)
+        set(HAS_RDNA4_GPU FALSE)
+        if(ROCM_AGENT_ENUM)
+            execute_process(COMMAND ${ROCM_AGENT_ENUM}
+                OUTPUT_VARIABLE _agents OUTPUT_STRIP_TRAILING_WHITESPACE
+                ERROR_QUIET RESULT_VARIABLE _agent_rc)
+            if(_agent_rc EQUAL 0 AND _agents MATCHES "gfx120[01]")
+                set(HAS_RDNA4_GPU TRUE)
+            endif()
+        endif()
+
         add_executable(hsa_translate_test dbt/hsa_translate_test.cpp)
         target_include_directories(hsa_translate_test PRIVATE
             ${CMAKE_SOURCE_DIR}/lib/rocjitsu/include
@@ -165,12 +179,21 @@ if(HSA_RUNTIME64)
         add_dependencies(hsa_translate_test device_kernels)
         rj_configure_target(hsa_translate_test TEST)
 
-        add_test(NAME "HsaTranslateTest.TranslateAndDispatchVectorAdd"
-            COMMAND hsa_translate_test
-            WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
-        set_tests_properties("HsaTranslateTest.TranslateAndDispatchVectorAdd" PROPERTIES
-            TIMEOUT 30)
-        message(STATUS "HSA translate test enabled")
+        if(HAS_RDNA4_GPU)
+            add_test(NAME "HsaTranslateTest.TranslateAndDispatchVectorAdd"
+                COMMAND hsa_translate_test --gtest_filter=*VectorAdd*
+                WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+            set_tests_properties("HsaTranslateTest.TranslateAndDispatchVectorAdd" PROPERTIES
+                TIMEOUT 30)
+            add_test(NAME "HsaTranslateTest.TranslateAndDispatchMfma16x16"
+                COMMAND hsa_translate_test --gtest_filter=*Mfma16x16*
+                WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+            set_tests_properties("HsaTranslateTest.TranslateAndDispatchMfma16x16" PROPERTIES
+                TIMEOUT 60)
+            message(STATUS "HSA translate test enabled (RDNA4 GPU detected)")
+        else()
+            message(STATUS "HSA translate test built but NOT registered with CTest (no RDNA4 GPU)")
+        endif()
     endif()
 else()
     message(STATUS "HSA init test disabled (libhsa-runtime64 not found)")
@@ -221,6 +244,9 @@ if(HIPCC_EXECUTABLE AND HSA_RUNTIME64)
     rj_add_hip_test_case(hip_memcpy_test "HipMemcpyTest.RoundTripFloat")
     rj_add_hip_test_case(hip_memcpy_test "HipMemcpyTest.RoundTripInt")
     rj_add_hip_test_case(hip_memcpy_test "HipMemcpyTest.DeviceToDevice")
+    rj_add_hip_test_case(hip_memcpy_test "HipMemcpyTest.LargeCopy_16MB")
+    rj_add_hip_test_case(hip_memcpy_test "HipMemcpyTest.LargeCopy_256MB")
+    rj_add_hip_test_case(hip_memcpy_test "HipMemcpyTest.ReuseAfterFree")
     rj_add_hip_test(hip_vector_add_test)
 
     # --- rocBLAS GEMM test ---

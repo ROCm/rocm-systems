@@ -63,12 +63,14 @@ void CodeObjectPatcher::patch_kernel_descriptors_for_wave64() {
     auto *strtab = reinterpret_cast<const char *>(image_.data() + strtab_shdr->sh_offset);
 
     for (int j = 0; j < nsyms; ++j) {
-      if (symtab[j].st_name == 0 || symtab[j].st_size != sizeof(KD))
+      if (symtab[j].st_size != sizeof(KD))
         continue;
-      const char *name = strtab + symtab[j].st_name;
-      size_t len = strlen(name);
-      if (len < 3 || strcmp(name + len - 3, ".kd") != 0)
-        continue;
+      if (strtab_shdr->sh_size > 0 && symtab[j].st_name > 0) {
+        const char *name = strtab + symtab[j].st_name;
+        size_t len = strlen(name);
+        if (len >= 3 && strcmp(name + len - 3, ".kd") != 0)
+          continue;
+      }
       uint16_t sec_idx = symtab[j].st_shndx;
       if (sec_idx >= ehdr->e_shnum)
         continue;
@@ -81,13 +83,21 @@ void CodeObjectPatcher::patch_kernel_descriptors_for_wave64() {
       // --- compute_pgm_rsrc1: translate GFX9 → GFX12 ---
 
       // VGPR granularity: GFX9 wave64 uses granularity 8, RDNA4 wave64 uses 12.
-      // Actual VGPRs = (gran + 1) * arch_granularity.
-      // The translated code may use more VGPRs than the source due to instruction
-      // lowering (e.g., carry chain temporaries), so we conservatively round up
-      // and enforce a minimum of gran=1 (24 VGPRs) for RDNA4 Wave64.
+      // On CDNA3/4, AccVGPRs occupy the upper portion of the unified VGPR file.
+      // ACCUM_OFFSET in rsrc3 indicates where AccVGPRs start: (offset+1)*4.
+      // The translated code must allocate enough VGPRs for both ranges.
       uint32_t gfx9_vgpr_gran = AMDHSA_BITS_GET(
           kd->compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT);
       uint32_t actual_vgprs = (gfx9_vgpr_gran + 1) * 8;
+
+      uint32_t accum_offset =
+          AMDHSA_BITS_GET(kd->compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET);
+      if (accum_offset > 0)
+        actual_vgprs = (accum_offset + 1) * 4 + actual_vgprs;
+
+      // Semantic lowering (e.g., MFMA→WMMA) injects instructions that need
+      // temp VGPRs found via liveness analysis. Ensure enough headroom.
+      actual_vgprs = std::max(actual_vgprs, 128u);
       uint32_t rdna4_vgpr_gran = std::max(1u, (actual_vgprs + 11) / 12 - 1);
       AMDHSA_BITS_SET(kd->compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
                       rdna4_vgpr_gran);
@@ -146,12 +156,14 @@ std::vector<CodeObjectPatcher::WorkGroupIdInfo> CodeObjectPatcher::workgroup_id_
     auto *strtab = reinterpret_cast<const char *>(image_.data() + strtab_shdr->sh_offset);
 
     for (int j = 0; j < nsyms; ++j) {
-      if (symtab[j].st_name == 0 || symtab[j].st_size != sizeof(KD))
+      if (symtab[j].st_size != sizeof(KD))
         continue;
-      const char *name = strtab + symtab[j].st_name;
-      size_t len = strlen(name);
-      if (len < 3 || strcmp(name + len - 3, ".kd") != 0)
-        continue;
+      if (strtab_shdr->sh_size > 0 && symtab[j].st_name > 0) {
+        const char *name = strtab + symtab[j].st_name;
+        size_t len = strlen(name);
+        if (len >= 3 && strcmp(name + len - 3, ".kd") != 0)
+          continue;
+      }
       uint16_t sec_idx = symtab[j].st_shndx;
       if (sec_idx >= ehdr->e_shnum)
         continue;

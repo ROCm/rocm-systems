@@ -62,6 +62,24 @@ RegisterLiveness RegisterLiveness::compute(BasicBlock &block) {
     }
 
     result.live_sets_[inst_offset] = live;
+
+    // Track max SGPR for conservative SGPR allocation.
+    for (int i = 0; i < inst->num_src_operands(); ++i) {
+      const auto *op = inst->src_operand(i);
+      if (op) {
+        int v = op->encoding_value();
+        if (v >= 0 && v <= 105)
+          result.max_sgpr_ = std::max(result.max_sgpr_, static_cast<uint16_t>(v));
+      }
+    }
+    for (int i = 0; i < inst->num_dst_operands(); ++i) {
+      const auto *op = inst->dst_operand(i);
+      if (op) {
+        int v = op->encoding_value();
+        if (v >= 0 && v <= 105)
+          result.max_sgpr_ = std::max(result.max_sgpr_, static_cast<uint16_t>(v));
+      }
+    }
   }
 
   return result;
@@ -94,6 +112,22 @@ std::optional<uint16_t> RegisterLiveness::find_free_run(uint64_t offset, uint16_
     if (all_free)
       return base;
   }
+  return std::nullopt;
+}
+
+std::optional<uint16_t> RegisterLiveness::find_free_sgpr_pair(uint16_t search_start) const {
+  uint16_t base = std::max(search_start, static_cast<uint16_t>(max_sgpr_ + 1));
+  if (base % 2 != 0)
+    ++base; // even-align for s_mov_b64
+  if (base + 1 < 106)
+    return base;
+  return std::nullopt;
+}
+
+std::optional<uint16_t> RegisterLiveness::find_free_sgpr(uint16_t search_start) const {
+  uint16_t base = std::max(search_start, static_cast<uint16_t>(max_sgpr_ + 1));
+  if (base < 106)
+    return base;
   return std::nullopt;
 }
 
