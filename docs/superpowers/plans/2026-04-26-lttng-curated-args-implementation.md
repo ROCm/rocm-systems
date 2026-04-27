@@ -1950,6 +1950,17 @@ def test_multi_header_undeclared_api_fails():
 """
     _, output = _run_verify_multi(yaml_text, [HSA_BASE, HSA_EXT], expect_pass=False)
     assert 'hsa_amd_nonexistent' in output
+
+def test_multi_header_sidecar_works():
+    """Sidecar emission must work with multi-header verifier (regression
+    guard for C13 — earlier draft of the Task 4.5 rewrite dropped the
+    out_sidecar parameter from verify()/main(), breaking Task 3 codegen
+    and Task 15g's CMake regenerate target)."""
+    # Use both fake HSA headers from Task 4.5 fixtures + a small mixed YAML.
+    # Assert: rc==0 AND the sidecar JSON file is created with the expected
+    # top-level api keys ('hsa_signal_create', 'hsa_amd_signal_create')
+    # and each value is a list of {name, c_type} dicts.
+    pass  # implementation per existing test patterns in this file
 ```
 
 - [ ] **Step 3: Run tests, verify the new ones fail (single-header verifier doesn't support multi)**
@@ -2007,7 +2018,7 @@ def parse_headers(header_paths, extra_args):
 (4c) Update `verify()`:
 
 ```python
-def verify(yaml_path, header_paths, extra_args):
+def verify(yaml_path, header_paths, extra_args, out_sidecar=None):
     apis = parse_yaml_file(yaml_path)
     header_decls = parse_headers(header_paths, extra_args)
     # ... existing loop unchanged; the error message in the
@@ -2015,24 +2026,35 @@ def verify(yaml_path, header_paths, extra_args):
     if name not in header_decls:
         errors.append(f"{name}: not declared in any of {header_paths}")
         continue
-    # ... rest unchanged ...
+    # ... rest unchanged (including the Task 4 out_sidecar dump block —
+    # `if out_sidecar:` write JSON sidecar of {api: [{name, c_type}]}) ...
     print(f"OK: {len(apis)} curated APIs verified against {len(header_paths)} header(s)")
     return 0
 ```
 
-(4d) Update `main()` to pass the list:
+(4d) Update `main()` to pass the list AND preserve the `--out-sidecar`
+parameter Task 4 added. The argparse for `--out-sidecar` from Task 4 is
+unchanged here (re-shown for clarity); only `--header` flips to
+`action='append'` (4a above):
 
 ```python
-sys.exit(verify(args.yaml, args.header, args.extra_arg))
+ap.add_argument('--out-sidecar', default=None,
+                help='If provided, write {api: [{name, c_type}]} JSON sidecar '
+                     '(consumed by codegen for provider-aware OUT-handle emission '
+                     'and by the HSA CMake regenerate target).')
+sys.exit(verify(args.yaml, args.header, args.extra_arg,
+                out_sidecar=args.out_sidecar))
 ```
 
-- [ ] **Step 5: Run all tests, all 10 must pass**
+> Note: This rewrite preserves the `--out-sidecar` parameter introduced by Task 4. The sidecar JSON is required by Task 3's codegen for provider-aware OUT-handle emission and by Task 15g's HSA CMake regenerate target. Lost in the multi-header refactor would be a regression caught by `test_multi_header_sidecar_works` (added below).
+
+- [ ] **Step 5: Run all tests, all 11 must pass**
 
 ```bash
 python3 projects/clr/hipamd/scripts/test_lttng_curated_verify.py
 ```
 
-Expected: `PASS: 0 failures` across 10 tests (6 original + 4 new).
+Expected: `PASS: 0 failures` across 11 tests (6 original + 4 multi-header + 1 sidecar regression guard for C13).
 
 - [ ] **Step 6: Commit**
 
@@ -2048,9 +2070,12 @@ hsa_signal_create) and hsa_ext_amd.h (AMD extensions — hsa_amd_*).
 Single --header would always fail half the API set.
 
 Change --header to action='append' and union declarations from all
-supplied headers before name-lookup. Add 4 unit tests against fake
-HSA base + ext fixtures covering: base-only API verifies, ext-only
-API verifies, mixed YAML verifies, and undeclared API fails.
+supplied headers before name-lookup. Preserves the --out-sidecar
+parameter from Task 4 (verify() keeps out_sidecar=None kwarg; main()
+keeps args.out_sidecar wiring). Add 5 unit tests against fake HSA
+base + ext fixtures covering: base-only API verifies, ext-only API
+verifies, mixed YAML verifies, undeclared API fails, AND sidecar
+emission still works under multi-header (regression guard for C13).
 
 Required by Task 15 (HSA verify) — that task now invokes
   --header /opt/rocm/include/hsa/hsa.h
