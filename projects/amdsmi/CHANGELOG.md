@@ -11,7 +11,7 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Added GPU power management set command**.
   - New `amd-smi set --power-management ENABLED|DISABLED` to enable or disable GPU power management.
   - When power management is in 'auto' mode (default on some GPUs like gfx1151), the kernel driver may not mark the current clock level in sysfs files, causing `amd-smi static -C` to show N/A. Enabling power management forces clock levels to be fully reported.
-  - New API: `amdsmi_set_gpu_power_management_enabled()`.
+  - Implemented in the CLI by mapping ENABLED/DISABLED onto the existing `amdsmi_set_gpu_perf_level()` API (MANUAL/AUTO).
 
 - **Added VRAM and GTT tuning interface**.  
   - New `amd-smi static --mem-carveout` to view VRAM carveout options.
@@ -32,9 +32,6 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Resolved Issues
 
-- **Fixed `amd-smi static -C` showing N/A for MEM/DF/SOC/DCEF clocks on gfx1151 when idle**.
-  - Root cause: `get_frequencies()` in the rocm_smi layer discards valid frequency data when the kernel driver does not mark a current clock level with `*` in pp_dpm sysfs files (common in auto power management mode). Added a fallback in `amdsmi_get_clk_freq()` to read sysfs directly when the rocm_smi layer returns `AMDSMI_STATUS_UNEXPECTED_DATA`, preserving frequency level data.
-  
 - **Fixed `amd-smi metric` crashing with `TypeError` on MI300A when no CPU flags are specified**.  
   - When no CPU arguments are passed, `metric_cpu()` sets all boolean CPU args to `True` to display all available data. `--cpu-svi3-vr-controller-temp` takes a TYPE argument (and optional RAIL_INDEX) rather than a boolean flag — setting it to `True` caused a `TypeError` crash when the code tried to subscript it with `[0][0]`. Added `cpu_svi3_vr_controller_temp` to the show-all exclusion list, following the existing pattern for `cpu_lclk_dpm_level`, `cpu_io_bandwidth`, `cpu_dimm_sb_reg`, and similar argument-taking flags.
 

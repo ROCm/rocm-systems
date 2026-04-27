@@ -4420,12 +4420,6 @@ extern "C" {
     ) -> AmdsmiStatusT;
 }
 extern "C" {
-    pub fn amdsmi_set_gpu_power_management_enabled(
-        processor_handle: AmdsmiProcessorHandle,
-        enabled: bool,
-    ) -> AmdsmiStatusT;
-}
-extern "C" {
     pub fn amdsmi_get_clock_info(
         processor_handle: AmdsmiProcessorHandle,
         clk_type: AmdsmiClkTypeT,

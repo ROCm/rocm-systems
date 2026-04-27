@@ -3659,12 +3659,6 @@ try:
 except AttributeError:
     pass
 try:
-    amdsmi_set_gpu_power_management_enabled = _libraries['libamd_smi.so'].amdsmi_set_gpu_power_management_enabled
-    amdsmi_set_gpu_power_management_enabled.restype = amdsmi_status_t
-    amdsmi_set_gpu_power_management_enabled.argtypes = [amdsmi_processor_handle, ctypes.c_bool]
-except AttributeError:
-    pass
-try:
     amdsmi_get_clock_info = _libraries['libamd_smi.so'].amdsmi_get_clock_info
     amdsmi_get_clock_info.restype = amdsmi_status_t
     amdsmi_get_clock_info.argtypes = [amdsmi_processor_handle, amdsmi_clk_type_t, ctypes.POINTER(struct_amdsmi_clk_info_t)]
@@ -4684,8 +4678,7 @@ __all__ = \
     'amdsmi_init', 'amdsmi_init_flags_t',
     'amdsmi_init_gpu_event_notification', 'amdsmi_io_bw_encoding_t',
     'amdsmi_is_P2P_accessible',
-    'amdsmi_is_gpu_power_management_enabled',
-    'amdsmi_set_gpu_power_management_enabled', 'amdsmi_kfd_info_t',
+    'amdsmi_is_gpu_power_management_enabled', 'amdsmi_kfd_info_t',
     'amdsmi_link_id_bw_type_t', 'amdsmi_link_metrics_t',
     'amdsmi_link_status_t', 'amdsmi_link_type_t',
     'amdsmi_memory_page_status_t', 'amdsmi_memory_partition_config_t',

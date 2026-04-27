@@ -218,7 +218,6 @@ from .amdsmi_interface import amdsmi_get_gpu_metrics_info
 from .amdsmi_interface import amdsmi_get_gpu_partition_metrics_info
 from .amdsmi_interface import amdsmi_get_gpu_od_volt_curve_regions
 from .amdsmi_interface import amdsmi_is_gpu_power_management_enabled
-from .amdsmi_interface import amdsmi_set_gpu_power_management_enabled
 
 # # Performance Counters
 from .amdsmi_interface import amdsmi_gpu_counter_group_supported

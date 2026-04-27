@@ -3963,21 +3963,6 @@ def amdsmi_is_gpu_power_management_enabled(processor_handle: processor_handle_t)
     return is_power_management_enabled.value
 
 
-def amdsmi_set_gpu_power_management_enabled(
-    processor_handle: processor_handle_t, enabled: bool
-) -> None:
-    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
-        raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
-    if not isinstance(enabled, bool):
-        raise AmdSmiParameterException(enabled, bool)
-
-    _check_res(
-        amdsmi_wrapper.amdsmi_set_gpu_power_management_enabled(
-            processor_handle, ctypes.c_bool(enabled)
-        )
-    )
-
-
 def amdsmi_get_fw_info(processor_handle: processor_handle_t) -> Dict[str, List[Dict[str, str]]]:
     if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
         raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)

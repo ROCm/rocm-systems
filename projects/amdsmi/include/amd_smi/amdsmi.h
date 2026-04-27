@@ -6795,31 +6795,6 @@ amdsmi_status_t amdsmi_is_gpu_power_management_enabled(amdsmi_processor_handle p
                                                        bool* enabled);
 
 /**
- *  @brief Enable or disable GPU power management
- *
- *  @ingroup tagClkPowerPerfControl
- *
- *  @platform{gpu_bm_linux}
- *
- *  @details When power management is disabled (auto mode), certain sysfs files
- *  like pp_dpm_mclk may not be available and clock queries may return N/A.
- *  Enabling power management forces these sysfs files to become available.
- *  Internally this sets the performance level to MANUAL (to enable) or
- *  AUTO (to disable).
- *
- *  @note This function requires admin/sudo privileges
- *
- *  @param[in] processor_handle PF of a processor to configure
- *
- *  @param[in] enabled true to enable power management (forces sysfs
- *             availability), false to return to auto mode
- *
- *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
- */
-amdsmi_status_t amdsmi_set_gpu_power_management_enabled(amdsmi_processor_handle processor_handle,
-                                                        bool enabled);
-
-/**
  *  @brief Returns the measurements of the clocks in the GPU
  *         for the GFX and multimedia engines and Memory. This call
  *         reports the averages over 1s in MHz. It is not supported

@@ -1312,19 +1312,6 @@ class TestAmdSmiPython(unittest.TestCase):
         )
         return
 
-    def test_set_gpu_power_management_enabled(self):
-        self.common.print_func_name("")
-        self.common.Test_API_Per_GPU(
-            amdsmi_set_gpu_power_management_enabled=amdsmi.amdsmi_set_gpu_power_management_enabled,
-            enabled=True,
-        )
-        # Restore to auto mode
-        self.common.Test_API_Per_GPU(
-            amdsmi_set_gpu_power_management_enabled=amdsmi.amdsmi_set_gpu_power_management_enabled,
-            enabled=False,
-        )
-        return
-
     def test_reset_gpu(self):
         self.common.print_func_name("")
 

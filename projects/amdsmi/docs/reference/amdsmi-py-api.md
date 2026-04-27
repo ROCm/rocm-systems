@@ -2618,47 +2618,6 @@ except AmdSmiException as e:
     print(e)
 ```
 
-### amdsmi_set_gpu_power_management_enabled
-
-Description: Enable or disable GPU power management. When power management is
-disabled (auto mode), certain sysfs files like pp_dpm_mclk may not be available
-and clock queries may return N/A. Enabling power management forces these sysfs
-files to become available.
-
-Input parameters:
-
-* `processor_handle` GPU device to configure
-* `enabled` Bool true to enable power management, false to return to auto mode
-
-Output: None
-
-Exceptions that can be thrown by `amdsmi_set_gpu_power_management_enabled` function:
-
-* `AmdSmiLibraryException`
-* `AmdSmiParameterException`
-
-#### Possible Library Exceptions
-
-- `AMDSMI_STATUS_NO_PERM` - Permission denied, requires admin/sudo
-- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
-- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
-- `AMDSMI_STATUS_INVAL` - Invalid parameters
-
-Example:
-
-```python
-try:
-    devices = amdsmi_get_processor_handles()
-    if len(devices) == 0:
-        print("No GPUs on machine")
-    else:
-        for processor in devices:
-            amdsmi_set_gpu_power_management_enabled(processor, True)
-            print("Power management enabled")
-except AmdSmiException as e:
-    print(e)
-```
-
 ### amdsmi_get_npm_info
 
 Description: Returns Node Power Management (NPM) information including status,

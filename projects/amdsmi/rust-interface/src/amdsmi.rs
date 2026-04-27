@@ -5872,57 +5872,6 @@ pub fn amdsmi_is_gpu_power_management_enabled(
     Ok(enabled)
 }
 
-/// Enable or disable GPU power management.
-///
-/// When power management is disabled (auto mode), certain sysfs files like pp_dpm_mclk may not
-/// be available and clock queries may return N/A. Enabling power management forces these sysfs
-/// files to become available. Internally this sets the performance level to MANUAL (to enable)
-/// or AUTO (to disable).
-///
-/// # Arguments
-///
-/// * `processor_handle` - The processor handle for the GPU to configure.
-/// * `enabled` - `true` to enable power management (forces sysfs availability),
-///               `false` to return to auto mode.
-///
-/// # Example
-///
-/// ```rust
-/// # use amdsmi::*;
-/// #
-/// # fn main() {
-/// #   // Initialize the AMD SMI library
-/// #   amdsmi_init(AmdsmiInitFlagsT::AmdsmiInitAmdGpus).expect("Failed to initialize AMD SMI");
-/// #
-///     // Example processor_handle, assuming the number of processors is greater than zero
-///     let processor_handle = amdsmi_get_processor_handles!()[0];
-///
-///     // Enable GPU power management
-///     match amdsmi_set_gpu_power_management_enabled(processor_handle, true) {
-///         Ok(()) => println!("GPU power management enabled successfully"),
-///         Err(e) => panic!("Failed to set GPU power management: {}", e),
-///     }
-/// #
-/// #   // Shut down the AMD SMI library
-/// #   amdsmi_shut_down().expect("Failed to shut down AMD SMI");
-/// # }
-/// ```
-///
-/// # Errors
-///
-/// This function will return the error in [`AmdsmiStatusT`] if the underlying
-/// `amdsmi_wrapper::amdsmi_set_gpu_power_management_enabled` call fails.
-pub fn amdsmi_set_gpu_power_management_enabled(
-    processor_handle: AmdsmiProcessorHandle,
-    enabled: bool,
-) -> AmdsmiResult<()> {
-    call_unsafe!(amdsmi_wrapper::amdsmi_set_gpu_power_management_enabled(
-        processor_handle,
-        enabled
-    ));
-    Ok(())
-}
-
 /// Get the clock information for the device with the specified processor handle and clock type.
 ///
 /// Given a processor handle `processor_handle` and a clock type `clk_type`, this function retrieves the clock information

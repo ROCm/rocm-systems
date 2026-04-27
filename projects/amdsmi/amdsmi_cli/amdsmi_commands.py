@@ -1876,9 +1876,6 @@ class AMDSMICommands:
                             continue
                         freq_dict = {}
                         current_level = frequencies["current"]
-                        # UINT32_MAX indicates no current level is known (e.g., auto PM mode)
-                        if current_level == 0xFFFFFFFF:
-                            current_level = "N/A"
                         # Add current_level first for proper output ordering
                         freq_dict.update({"current_level": current_level})
                         # Add frequency_levels second
@@ -1905,18 +1902,6 @@ class AMDSMICommands:
                             "Failed to get clock info for gpu %s | %s", gpu_id, e.get_error_info()
                         )
                     clk_dict[clk] = freq_dict
-
-                # Check if any clocks have unknown current level (auto PM mode)
-                has_unknown_current = any(
-                    isinstance(clk_dict[k], dict) and clk_dict[k].get("current_level") == "N/A"
-                    for k in clk_dict
-                )
-                if has_unknown_current:
-                    logging.debug(
-                        "Some clock current levels are unavailable for gpu %s. "
-                        "This can occur when power management is in 'auto' mode.",
-                        gpu_id,
-                    )
 
                 static_dict["clock"] = clk_dict
             else:
@@ -3404,16 +3389,13 @@ class AMDSMICommands:
                     frequency_dict = amdsmi_interface.amdsmi_get_clk_freq(
                         args.gpu, amdsmi_interface.AmdSmiClkType.DF
                     )
-                    current_idx = frequency_dict["current"]
-                    freq_list = frequency_dict["frequency"]
-                    if isinstance(current_idx, int) and 0 <= current_idx < len(freq_list):
-                        current_fclk_clock = frequency_dict["frequency"][current_idx]
-                        current_fclk_clock = self.helpers.convert_SI_unit(
-                            current_fclk_clock, self.helpers.SI_Unit.MICRO
-                        )
-                        clocks["fclk_0"]["clk"] = self.helpers.unit_format(
-                            self.logger, current_fclk_clock, clock_unit
-                        )
+                    current_fclk_clock = frequency_dict["frequency"][frequency_dict["current"]]
+                    current_fclk_clock = self.helpers.convert_SI_unit(
+                        current_fclk_clock, self.helpers.SI_Unit.MICRO
+                    )
+                    clocks["fclk_0"]["clk"] = self.helpers.unit_format(
+                        self.logger, current_fclk_clock, clock_unit
+                    )
                 except (KeyError, amdsmi_exception.AmdSmiLibraryException) as e:
                     logging.debug("Failed to get fclk info for gpu %s | %s", gpu_id, e)
 
@@ -8307,6 +8289,7 @@ class AMDSMICommands:
                     getattr(args, "ptl_format", None) is not None,
                     getattr(args, "process_isolation", None) is not None,
                     getattr(args, "mem_carveout", None) is not None,
+                    getattr(args, "power_management", None) is not None,
                 ]
             ):
                 command = " ".join(sys.argv[1:])
@@ -8467,8 +8450,16 @@ class AMDSMICommands:
                 return
             if getattr(args, "power_management", None):
                 enabled = args.power_management == "ENABLED"
+                # Power management is mapped onto the existing perf-level API:
+                #   ENABLED  -> MANUAL (forces pp_dpm_* sysfs files to be present)
+                #   DISABLED -> AUTO (driver-controlled)
+                target_level = (
+                    amdsmi_interface.AmdSmiDevPerfLevel.MANUAL
+                    if enabled
+                    else amdsmi_interface.AmdSmiDevPerfLevel.AUTO
+                )
                 try:
-                    amdsmi_interface.amdsmi_set_gpu_power_management_enabled(args.gpu, enabled)
+                    amdsmi_interface.amdsmi_set_gpu_perf_level(args.gpu, target_level)
                 except amdsmi_exception.AmdSmiLibraryException as e:
                     if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
                         raise PermissionError("Command requires elevation") from e
