@@ -198,6 +198,8 @@ void Graph::ScheduleOneNode(Node start, int stream_id) {
     if (cur->GetType() == hipGraphNodeTypeGraph) {
       auto cgn   = reinterpret_cast<hip::ChildGraphNode*>(cur);
       auto child = cgn->GetChildGraph();
+      // Use same scheduling logic(classic or segment) as parent graph for child graph
+      child->SetSegmentScheduling(use_segment_scheduling_);
       hipError_t status = child->ScheduleNodes();
       (void)status;
       max_streams_ = std::max(max_streams_, child->max_streams_);

@@ -635,6 +635,8 @@ class Graph {
   std::vector<std::pair<Node, Node>> GetEdges() const;
   /// Returns whether segment scheduling is enabled for this graph
   bool IsSegmentSchedulingEnabled() const { return use_segment_scheduling_; }
+  // Enable or disable segment scheduling for this graph
+  void SetSegmentScheduling(bool segmentScheduling) {use_segment_scheduling_ = segmentScheduling;}
   // returns the original graph ptr if cloned
   const Graph* getOriginalGraph() const { return pOriginalGraph_; }
   // Add user obj resource to graph
