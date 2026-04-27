@@ -8,8 +8,8 @@
 #include "library/thread_info.hpp"
 #include "logger/debug.hpp"
 
-#include "spdlog/fmt/bundled/format.h"
-#include "spdlog/fmt/bundled/ranges.h"
+#include <spdlog/fmt/fmt.h>
+#include <spdlog/fmt/ranges.h>
 
 #include <cstddef>
 #include <cstdint>

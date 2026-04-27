@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "spdlog/fmt/bundled/format.h"
+#include <spdlog/fmt/fmt.h>
 
 #include <cstddef>
 #include <cstdint>
