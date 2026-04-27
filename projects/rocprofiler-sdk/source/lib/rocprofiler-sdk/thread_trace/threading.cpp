@@ -23,6 +23,7 @@
 // Implements the CPU-side producer/consumer loops that service ATT triple buffering.
 #include "lib/rocprofiler-sdk/thread_trace/threading.hpp"
 #include "lib/common/environment.hpp"
+#include "lib/common/scope_destructor.hpp"
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/internal_threading.hpp"
@@ -174,6 +175,17 @@ producer_loop(
     auto* submit_signal = parameters.shared->producer_submit_signal.get();
     ROCP_FATAL_IF(submit_signal == nullptr) << "producer_submit_signal not initialized";
 
+    // Scope guard: every exit path from producer_loop must signal the consumer
+    // to stop, otherwise stop_thread_trace's consumer.join() (called after
+    // producer.join()) will block forever. The consumer's wait_for predicate
+    // only returns true when running becomes false, so we must clear it AND
+    // notify the cv on EVERY return — including the destructor force-wake
+    // early returns below.
+    auto consumer_shutdown_guard = common::scope_destructor{[&]() {
+        parameters.shared->consumer_running.store(false);
+        write_cv.notify_all();
+    }};
+
     auto start_t0 = std::chrono::system_clock::now();
     bool do_sleep{false};
     // Wait until ATT start packets have been executed
@@ -315,8 +327,8 @@ producer_loop(
     }
     stop_trace();
     iterate_trace();
-    parameters.shared->consumer_running.store(false);
-    write_cv.notify_all();
+    // consumer_shutdown_guard runs on return: clears consumer_running and
+    // notifies write_cv so consumer_loop's wait_for predicate fires.
 
     auto end_t0 = std::chrono::system_clock::now();
     ROCP_INFO << "Total trace time: " << (end_t0 - start_t0).count() * 1E-9f << " s.";
