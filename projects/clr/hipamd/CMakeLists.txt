@@ -22,6 +22,7 @@ include(GNUInstallDirs)
 #  By default, CMake will search for a folder named vdi or ROCclr relative to the current path. Specify -DROCCLR_PATH=$ROCCLR_DIR if rocclr source is in obscure location.
 #  By default, CMake will search for a folder named opencl or ROCm-OpenCL-Runtime relative to the current path. Specify -DAMD_OPENCL_PATH=$OPENCL_DIR if opencl source is in obscure location.
 list(APPEND CMAKE_MODULE_PATH ${HIP_COMMON_DIR}/cmake)
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/src/cmake")
 
 
 #############################
@@ -29,6 +30,16 @@ list(APPEND CMAKE_MODULE_PATH ${HIP_COMMON_DIR}/cmake)
 #############################
 option(__HIP_ENABLE_PCH "Enable/Disable pre-compiled hip headers" ON)
 option(BUILD_SHARED_LIBS "Build the shared library" ON)
+option(ROCM_ENABLE_USDT "Enable USDT (sys/sdt.h) static tracepoints" OFF)
+
+if(ROCM_ENABLE_USDT)
+    find_package(Systemtap REQUIRED)
+    include_directories(${Systemtap_INCLUDE_DIR})
+    add_compile_definitions(ROCM_ENABLE_USDT=1)
+    message(STATUS "USDT static tracepoints: ENABLED (sys/sdt.h at ${Systemtap_INCLUDE_DIR})")
+else()
+    message(STATUS "USDT static tracepoints: disabled")
+endif()
 
 if(MSVC)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /Zi")

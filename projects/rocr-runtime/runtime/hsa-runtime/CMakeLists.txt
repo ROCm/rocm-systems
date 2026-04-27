@@ -93,6 +93,17 @@ if(NOT LibElf_FOUND)
   find_package(LibElf REQUIRED)
 endif()
 
+option(ROCM_ENABLE_USDT "Enable USDT (sys/sdt.h) static tracepoints" OFF)
+
+if(ROCM_ENABLE_USDT)
+    find_package(Systemtap REQUIRED)
+    include_directories(${Systemtap_INCLUDE_DIR})
+    add_compile_definitions(ROCM_ENABLE_USDT=1)
+    message(STATUS "HSA USDT static tracepoints: ENABLED (sys/sdt.h at ${Systemtap_INCLUDE_DIR})")
+else()
+    message(STATUS "HSA USDT static tracepoints: disabled")
+endif()
+
 ## Find AMD CUID library.
 set(AMDCUID_ROOT "/opt/amdcuid" CACHE PATH "Path to AMDCUID installation")
 find_library(AMDCUID_LIB
