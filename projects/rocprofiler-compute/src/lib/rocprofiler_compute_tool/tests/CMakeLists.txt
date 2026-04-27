@@ -11,6 +11,8 @@ add_executable(
     mocks.h
     mocks.cpp
     main.cpp
+	test_pc_sampling_collector.h
+	test_pc_sampling_collector.cpp
 )
 
 target_link_libraries(

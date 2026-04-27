@@ -5,7 +5,7 @@
 #include "mocks.h"
 #include "rocprofiler_compute_tool.h"
 
-#include <gtest/gtest.h>
+#include "gtest/gtest.h"
 
 using namespace rocprofiler_compute_tool;
 
