@@ -7,6 +7,10 @@ include(GoogleTest)
 
 set(buffering_sources buffering-serial.cpp buffering-parallel.cpp buffering-save-load.cpp)
 
+if(ROCPROFILER_EXPERIMENTAL_BPF_BUFFER)
+    list(APPEND buffering_sources bpf-buffer.cpp)
+endif()
+
 add_executable(buffering-tests)
 target_sources(buffering-tests PRIVATE ${buffering_sources})
 target_link_libraries(

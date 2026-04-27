@@ -139,6 +139,20 @@ bpf_record_header_buffer::load(std::fstream& fs)
     m_capacity = total_size;
     m_init     = true;
     fs.read(reinterpret_cast<char*>(m_ptr), m_capacity);
+
+    auto*  base   = static_cast<std::byte*>(m_ptr);
+    size_t offset = 0;
+    while(base && offset < write_count)
+    {
+        auto* slot = reinterpret_cast<slot_header*>(base + offset);
+        if(slot->total_size == 0 || offset + slot->total_size > write_count) break;
+
+        auto* record =
+            reinterpret_cast<rocprofiler_record_header_t*>(base + offset + slot->header_offset);
+        record->payload = base + offset + slot->payload_offset;
+        offset += slot->total_size;
+    }
+
     m_write_count.store(write_count, std::memory_order_release);
     m_record_count.store(record_count, std::memory_order_release);
 }

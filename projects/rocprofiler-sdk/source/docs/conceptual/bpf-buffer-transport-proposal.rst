@@ -80,6 +80,8 @@ Risks and follow-up work:
 
 * the prototype still takes a shared lock to keep flush and producers disjoint; a production version
   should move to explicit committed flags and drain only completed slots,
+* save/load paths must rebase in-slot payload pointers after remapping because serialized record
+  headers cannot safely keep process-local virtual addresses,
 * metadata overhead means effective payload capacity differs from the user-requested byte size, and
 * benchmarks must compare hot-path API tracing, kernel dispatch tracing, and lossless backpressure
   against the existing double-buffer implementation.

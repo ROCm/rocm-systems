@@ -291,7 +291,7 @@ bpf_record_header_buffer::process_record_headers(ClearRecordsT, FuncT&& functor,
 
         auto* record =
             reinterpret_cast<rocprofiler_record_header_t*>(base + offset + slot->header_offset);
-        if(record->hash > 0 && record->payload != nullptr) records.emplace_back(record);
+        if(record->payload != nullptr) records.emplace_back(record);
 
         offset += slot->total_size;
     }
