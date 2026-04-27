@@ -30,11 +30,11 @@
 #include <map>
 #include <string>
 
-#include "test_common.h"
 #include "amd_smi/amdsmi.h"
 #include "amd_smi/impl/amd_smi_utils.h"
 #include "libdrm/amdgpu_drm.h"
 #include "rocm_smi/rocm_smi_utils.h"
+#include "test_common.h"
 
 namespace {
 

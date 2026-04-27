@@ -26,8 +26,8 @@
 #include <cstdint>
 #include <iostream>
 
-#include "test_common.h"
 #include "amd_smi/amdsmi.h"
+#include "test_common.h"
 
 TestErrCntRead::TestErrCntRead() : TestBase() {
   set_title("AMDSMI Error Count Read Test");

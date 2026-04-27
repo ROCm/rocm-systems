@@ -53,8 +53,8 @@ message("")
 
 # Collect all sources under unit/ and functional/ recursively so adding a new
 # test file in any subdirectory requires no CMake change.
-file(GLOB_RECURSE unitSources     ${CMAKE_CURRENT_SOURCE_DIR}/unit/*.cc)
-file(GLOB_RECURSE functSources    ${CMAKE_CURRENT_SOURCE_DIR}/functional/*.cc)
+file(GLOB_RECURSE unitSources ${CMAKE_CURRENT_SOURCE_DIR}/unit/*.cc)
+file(GLOB_RECURSE functSources ${CMAKE_CURRENT_SOURCE_DIR}/functional/*.cc)
 
 set(TEST "amdsmitst")
 

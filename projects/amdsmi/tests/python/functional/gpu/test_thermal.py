@@ -26,8 +26,9 @@ import unittest
 
 # Allow direct execution: walk up to find the 'common/' package root
 import os as _os
+
 _d = _os.path.dirname(_os.path.abspath(__file__))
-while _d != _os.path.dirname(_d) and not _os.path.isdir(_os.path.join(_d, 'common')):
+while _d != _os.path.dirname(_d) and not _os.path.isdir(_os.path.join(_d, "common")):
     _d = _os.path.dirname(_d)
 sys.path.insert(0, _d)
 del _d, _os
@@ -166,7 +167,6 @@ class TestGpuThermal(unittest.TestCase):
 
     # integration
 
-
     def test_get_gpu_fan_rpms(self):
         self.common.print_func_name("")
         self.common.Test_API_Per_GPU(
@@ -189,12 +189,10 @@ class TestGpuThermal(unittest.TestCase):
         )
         return
 
+
 if __name__ == "__main__":
     if os.geteuid() != 0:
-        print(
-            "Warning: Some tests may require elevated privileges (sudo/root).\n",
-            file=sys.stderr,
-        )
+        print("Warning: Some tests may require elevated privileges (sudo/root).\n", file=sys.stderr)
     verbose = common.VERBOSITY_NORMAL
     if "-q" in sys.argv or "--quiet" in sys.argv:
         verbose = common.VERBOSITY_QUIET

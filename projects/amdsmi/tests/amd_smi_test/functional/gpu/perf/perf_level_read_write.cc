@@ -28,8 +28,8 @@
 #include <iostream>
 #include <map>
 
-#include "test_common.h"
 #include "amd_smi/amdsmi.h"
+#include "test_common.h"
 
 TestPerfLevelReadWrite::TestPerfLevelReadWrite() : TestBase() {
   set_title("AMDSMI Performance Level Read/Write Test");

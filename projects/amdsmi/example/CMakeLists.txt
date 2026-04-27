@@ -76,10 +76,9 @@ add_executable(ainic amd_smi_nic.cc)
 target_compile_definitions(ainic PRIVATE ENABLE_ESMI_LIB)
 # When amd-smi-lib is installed, NIC headers are under /opt/rocm/include.
 # When building from source (no install), fall back to the source tree.
-target_include_directories(ainic PRIVATE
-    ${ROCM_DIR}/include
-    ${ROCM_DIR}/include/amd_smi/impl/nic
-    ${CMAKE_SOURCE_DIR}/src/nic/ai-nic
+target_include_directories(
+    ainic
+    PRIVATE ${ROCM_DIR}/include ${ROCM_DIR}/include/amd_smi/impl/nic ${CMAKE_SOURCE_DIR}/src/nic/ai-nic
 )
 target_link_directories(ainic PRIVATE ${ROCM_DIR}/lib)
 target_link_libraries(ainic PRIVATE ${_AMDSMI_LINK_TARGET})

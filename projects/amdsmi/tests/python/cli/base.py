@@ -426,13 +426,33 @@ class TestCliBase(unittest.TestCase):
                 elif "clk_limit" in nameStr:
                     clock = self.metric_data["gpu_data"][gpu_index]["clock"]
                     if nameStr == "{clk_limit_sclk_min}":
-                        clk_type, clk_type_name, limit_type, clk_limit_name = "SCLK", "socclk_0", "MIN", "min_clk"
+                        clk_type, clk_type_name, limit_type, clk_limit_name = (
+                            "SCLK",
+                            "socclk_0",
+                            "MIN",
+                            "min_clk",
+                        )
                     elif nameStr == "{clk_limit_sclk_max}":
-                        clk_type, clk_type_name, limit_type, clk_limit_name = "SCLK", "socclk_0", "MAX", "max_clk"
+                        clk_type, clk_type_name, limit_type, clk_limit_name = (
+                            "SCLK",
+                            "socclk_0",
+                            "MAX",
+                            "max_clk",
+                        )
                     elif nameStr == "{clk_limit_mclk_min}":
-                        clk_type, clk_type_name, limit_type, clk_limit_name = "MCLK", "mem_0", "MAX", "min_clk"
+                        clk_type, clk_type_name, limit_type, clk_limit_name = (
+                            "MCLK",
+                            "mem_0",
+                            "MAX",
+                            "min_clk",
+                        )
                     elif nameStr == "{clk_limit_mclk_max}":
-                        clk_type, clk_type_name, limit_type, clk_limit_name = "MCLK", "mem_0", "MIN", "max_clk"
+                        clk_type, clk_type_name, limit_type, clk_limit_name = (
+                            "MCLK",
+                            "mem_0",
+                            "MIN",
+                            "max_clk",
+                        )
                     clk_type_limit_name = clock[clk_type_name][clk_limit_name]
                     if type(clk_type_limit_name) is dict:
                         value = clk_type_limit_name["value"]

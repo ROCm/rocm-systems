@@ -29,8 +29,8 @@
 #include <iostream>
 #include <string>
 
-#include "test_common.h"
 #include "amd_smi/amdsmi.h"
+#include "test_common.h"
 
 TestGPUBusyRead::TestGPUBusyRead() : TestBase() {
   set_title("AMDSMI GPU Busy Read Test");

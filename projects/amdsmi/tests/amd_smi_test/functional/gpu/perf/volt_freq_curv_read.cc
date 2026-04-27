@@ -27,8 +27,8 @@
 #include <iostream>
 #include <string>
 
-#include "test_common.h"
 #include "amd_smi/amdsmi.h"
+#include "test_common.h"
 
 TestVoltCurvRead::TestVoltCurvRead() : TestBase() {
   set_title("AMDSMI Voltage-Frequency Curve Read Test");

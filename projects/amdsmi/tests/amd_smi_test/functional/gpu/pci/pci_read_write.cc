@@ -29,8 +29,8 @@
 #include <iostream>
 #include <string>
 
-#include "test_common.h"
 #include "amd_smi/amdsmi.h"
+#include "test_common.h"
 
 TestPciReadWrite::TestPciReadWrite() : TestBase() {
   set_title("AMDSMI PCIe Bandwidth Read/Write Test");
