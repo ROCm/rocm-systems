@@ -101,4 +101,7 @@ static inline const char* ibvGetGidStr(union ibv_gid* gid, char* gidStr, size_t 
   return inet_ntop(AF_INET6, gid->raw, gidStr, strLen);
 }
 
+const char* ibvWcStatusStr(enum ibv_wc_status status);
+const char* ibvWcOpcodeStr(enum ibv_wc_opcode opcode);
+
 #endif //End include guard

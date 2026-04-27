@@ -29,6 +29,23 @@
 #define ENABLE_TIMER 0
 #include "timer.h"
 
+// NCCL 2.30 MR flag: suppress relaxed-ordering for a specific registration.
+// Callers in this codebase always pass 0 for mrFlags, so this is never set.
+#ifndef NCCL_NET_MR_FLAG_FORCE_SO
+#define NCCL_NET_MR_FLAG_FORCE_SO 0x1ULL
+#endif
+
+// Map NCCL 2.30 C++ atomic-style macros to GCC built-ins used in this codebase
+#ifndef COMPILER_ATOMIC_STORE
+#define COMPILER_ATOMIC_STORE(ptr, val, order) __atomic_store_n((ptr), (val), __ATOMIC_RELAXED)
+#endif
+#ifndef COMPILER_ATOMIC_LOAD
+#define COMPILER_ATOMIC_LOAD(ptr, order) __atomic_load_n((ptr), __ATOMIC_RELAXED)
+#endif
+#ifndef COMPILER_ATOMIC_FETCH_ADD
+#define COMPILER_ATOMIC_FETCH_ADD(ptr, val, order) __atomic_fetch_add((ptr), (val), __ATOMIC_RELAXED)
+#endif
+
 #include "ibvwrap.h"
 #include "mlx5/mlx5dvwrap.h"
 
@@ -236,13 +253,14 @@ struct ncclIbNetCommDevBase {
   struct ncclIbGidInfo gidInfo;
 };
 
-struct ncclIbSendFifo {
+struct alignas(64) ncclIbSendFifo {
   uint64_t addr;
   uint64_t size;
   uint32_t rkeys[NCCL_IB_MAX_DEVS_PER_NIC];
   uint32_t nreqs;
   uint32_t tag;
   uint64_t idx;
+  char padding[16];
 };
 
 struct ncclIbQpInitAttr {
