@@ -287,6 +287,7 @@ void test_rocprofiler_compute_tool_t::SetUp()
     m_sdk_wrapper      = std::make_shared<mock_sdk_wrapper_t>();
     m_counters_writer  = std::make_shared<mock_counters_writer_t>();
     m_sdk_callbacks    = std::make_shared<mock_sdk_callbacks_t>();
+    m_pc_sampling_collector = std::make_shared<mock_pc_sampling_collector_t>();
 
     test_knobs::set_input_parameters(m_input_parameters);
     test_knobs::set_sdk_wrapper(m_sdk_wrapper);
