@@ -32,7 +32,9 @@ THE SOFTWARE.
 #include <time.h>
 #include <unistd.h>
 #include <stdint.h>
-#include <sys/syscall.h>
+#include <thread>
+#include <sstream>
+#include <iomanip>
 
 #define MSG(X) std::clog << X << std::endl;
 #define MSG_NO_NEWLINE(X) std::clog << X;
@@ -52,7 +54,8 @@ enum RocDecLogLevel {
 
 #define GET_TIME_NS() ([]() -> uint64_t { struct timespec ts_; clock_gettime(CLOCK_MONOTONIC, &ts_); return static_cast<uint64_t>(ts_.tv_sec) * 1000000000LL + ts_.tv_nsec; }())
 #define FILENAME_ONLY (strrchr(__FILE__, '/') ? strrchr(__FILE__, '/') + 1 : __FILE__)
-#define MakeMsg(msg) ROCDEC_STR(FILENAME_ONLY) + ":" + ROCDEC_TOSTR(__LINE__) + ": " + ROCDEC_TOSTR(GET_TIME_NS() / 1000ULL) + ROCDEC_STR(" us: ") + ROCDEC_STR("[pid:") + ROCDEC_TOSTR(getpid()) + ROCDEC_STR(" tid:") + ROCDEC_TOSTR(syscall(SYS_gettid)) + ROCDEC_STR("] ") + ROCDEC_STR(__func__) + "(): " + msg
+#define GET_THREAD_ID() ([]() -> std::string { std::ostringstream oss; oss << "0x" << std::hex << std::setw(5) << std::setfill('0') << (std::hash<std::thread::id>{}(std::this_thread::get_id()) & 0xFFFFF); return oss.str(); }())
+#define MakeMsg(msg) ROCDEC_STR(FILENAME_ONLY) + ":" + ROCDEC_TOSTR(__LINE__) + ": " + ROCDEC_TOSTR(GET_TIME_NS() / 1000ULL) + ROCDEC_STR(" us: ") + ROCDEC_STR("[pid:") + ROCDEC_TOSTR(getpid()) + ROCDEC_STR(" tid: ") + GET_THREAD_ID() + ROCDEC_STR("] ") + ROCDEC_STR(__func__) + "(): " + msg
 
 #define OutputMsg(msg) std::cout << msg << std::endl
 #define OutputErrMsg(msg) std::cerr << msg << std::endl
@@ -96,16 +99,16 @@ public:
         if (logger_.GetLogLevel() >= kRocDecLogInfo) {
             start_time_ = GET_TIME_NS() / 1000ULL;
             OutputMsg("[" + ROCDEC_TOSTR(kRocDecLogInfo) + ", Info] " + ROCDEC_STR(filename_) + ":" + ROCDEC_TOSTR(line_) + ": " +
-                      ROCDEC_TOSTR(start_time_) + ROCDEC_STR(" us: ") + ROCDEC_STR("[pid:") + ROCDEC_TOSTR(getpid()) + ROCDEC_STR(" tid:") +
-                      ROCDEC_TOSTR(syscall(SYS_gettid)) + ROCDEC_STR("] ") + ROCDEC_STR(func_) + "(): entry ...");
+                      ROCDEC_TOSTR(start_time_) + ROCDEC_STR(" us: ") + ROCDEC_STR("[pid:") + ROCDEC_TOSTR(getpid()) + ROCDEC_STR(" tid: ") +
+                      GET_THREAD_ID() + ROCDEC_STR("] ") + ROCDEC_STR(func_) + "(): entry ...");
         }
     }
     ~RocDecFuncScopeLog() {
         if (logger_.GetLogLevel() >= kRocDecLogInfo) {
             uint64_t end_time = GET_TIME_NS() / 1000ULL;
             OutputMsg("[" + ROCDEC_TOSTR(kRocDecLogInfo) + ", Info] " + ROCDEC_STR(filename_) + ":" + ROCDEC_TOSTR(line_) + ": " +
-                      ROCDEC_TOSTR(end_time) + ROCDEC_STR(" us: ") + ROCDEC_STR("[pid:") + ROCDEC_TOSTR(getpid()) + ROCDEC_STR(" tid:") +
-                      ROCDEC_TOSTR(syscall(SYS_gettid)) + ROCDEC_STR("] ") + ROCDEC_STR(func_) + "(): exit (" +
+                      ROCDEC_TOSTR(end_time) + ROCDEC_STR(" us: ") + ROCDEC_STR("[pid:") + ROCDEC_TOSTR(getpid()) + ROCDEC_STR(" tid: ") +
+                      GET_THREAD_ID() + ROCDEC_STR("] ") + ROCDEC_STR(func_) + "(): exit (" +
                       ROCDEC_TOSTR(end_time - start_time_) + " us) ...");
         }
     }

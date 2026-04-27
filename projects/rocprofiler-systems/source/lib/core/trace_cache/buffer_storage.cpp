@@ -49,8 +49,9 @@ flush_worker_t::start(const pid_t& current_pid)
         throw std::runtime_error(_ss.str());
     }
 
-    m_worker_synchronization->origin_pid = current_pid;
-    m_worker_synchronization->is_running = true;
+    m_worker_synchronization->origin_pid    = current_pid;
+    m_worker_synchronization->exit_finished = false;
+    m_worker_synchronization->is_running    = true;
 
     m_flushing_thread = std::make_unique<std::thread>([&]() {
         LOG_TRACE("Flush worker thread started for pid={}",

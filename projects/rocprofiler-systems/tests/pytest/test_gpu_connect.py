@@ -10,7 +10,11 @@ import pytest
 from pathlib import Path
 from conftest import RocprofsysTest
 
-pytestmark = [pytest.mark.gpu, pytest.mark.xgmi, pytest.mark.ci_enable]
+pytestmark = [
+    pytest.mark.gpu,
+    pytest.mark.xgmi,
+    pytest.mark.rocm,
+]
 
 # =============================================================================
 # GPU connectivity fixtures
@@ -49,19 +53,19 @@ def gpu_connect_rules(validation_rules_dir: Path) -> list[Path]:
 
 @pytest.mark.multi_gpu(2)
 @pytest.mark.run_if_gpu_category("not apu or instinct")
-class TestGPUConnect(RocprofsysTest):
+class TestTransferBench(RocprofsysTest):
     """Tests for GPU connectivity tests."""
 
+    @pytest.mark.timeout(120)
     @pytest.mark.parametrize(
         "mode", [pytest.param("sys_run", marks=pytest.mark.rocpd("gpu_connect_env"))]
     )
-    def test_transferbench(self, mode, gpu_connect_env, gpu_connect_rules):
+    def test(self, mode, gpu_connect_env, gpu_connect_rules):
         result = self.run_test(
             mode,
             "transferBench",
             env=gpu_connect_env,
             check_target_arch=True,
-            timeout=120,
         )
         if "Error: No valid transfers created" in result.test_output:
             pytest.skip("No valid transfers created")

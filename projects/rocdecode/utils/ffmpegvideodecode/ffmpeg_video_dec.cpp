@@ -440,7 +440,7 @@ int FFMpegVideoDecoder::HandlePictureDisplay(RocdecParserDispInfo *pDispInfo) {
         }
     }
     // Copy chroma plane/s
-    // rocDec output gives pointer to luma and chroma pointers seperated for the decoded frame
+    // rocDec output gives pointer to luma and chroma pointers separated for the decoded frame
     uint8_t *p_frame_uv = p_dec_frame + dst_pitch * disp_height_;
     uint8_t *p_src_ptr_uv = static_cast<uint8_t *>(src_ptr[1]) + ((disp_rect_.top + crop_rect_.top) >> 1) * src_pitch[1] + ((disp_rect_.left + crop_rect_.left)>>1) * byte_per_pixel_ ;
     dst_pitch = chroma_width_ *  byte_per_pixel_;          
@@ -528,7 +528,7 @@ uint8_t* FFMpegVideoDecoder::GetFrame(int64_t *pts) {
 }
 
 bool FFMpegVideoDecoder::ReleaseFrame(int64_t pTimestamp, bool b_flushing) {
-    // if not flushing the buffers are re-used, so keep them
+    // if not flushing the buffers are reused, so keep them
     if (!b_flushing)  
         return true;
     else {
