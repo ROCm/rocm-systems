@@ -24,7 +24,7 @@ if(AIS_BUILD_DOCS)
     set(AIS_DOXYFILE ${AIS_DOC_PATH}/Doxyfile)
 
     # Create the Doxyfile from the input file
-    configure_file("docs/Doxyfile.in" ${AIS_DOXYFILE})
+    configure_file("docs/doxygen/Doxyfile.in" ${AIS_DOXYFILE})
 
     # Set the output directory
     set(DOXYGEN_OUT ${AIS_DOC_PATH})
