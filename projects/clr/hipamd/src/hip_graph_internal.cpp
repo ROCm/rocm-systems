@@ -5,9 +5,6 @@
  */
 
 #include "hip_graph_internal.hpp"
-#include "platform/activity.hpp"
-#include "platform/prof_protocol.h"
-#include <cstring>
 
 #define CASE_STRING(X, C)                                                                          \
   case X:                                                                                          \
