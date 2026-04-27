@@ -180,6 +180,47 @@ PY
     fi
 fi
 
+# ---------------------------------------------------------------------------
+# 3. HSA curated-args coverage gate (spec §8.2)
+# ---------------------------------------------------------------------------
+# Skipped silently when curated_apis.yaml is absent (allows gradual
+# rollout; the gate becomes mandatory once any API is curated).
+
+CURATED_YAML="$SCRIPT_DIR/curated_apis.yaml"
+if [ -f "$CURATED_YAML" ]; then
+    # Curated APIs (one per line). Drives the inventory-membership check
+    # below; the actual body-content scan lives in lttng_coverage_check.py.
+    python3 "$SCRIPT_DIR/lttng_coverage_check.py" list-curated \
+        --yaml "$CURATED_YAML" | sort -u > "$TMP_DIR/curated.txt"
+
+    # All inventoried wrappers (already in $TMP_DIR/migrated.txt from gate 1).
+    MISSING_FROM_INV="$(comm -23 "$TMP_DIR/curated.txt" "$TMP_DIR/migrated.txt" || true)"
+    if [ -n "$MISSING_FROM_INV" ]; then
+        echo "FAIL (curated): APIs in HSA curated_apis.yaml are missing from migration inventory:"
+        printf '  %s\n' $MISSING_FROM_INV
+        exit 1
+    fi
+
+    # Body-content scan (spec §8.2): each curated wrapper body must have
+    # the sentinel, a _CURATED_HSA macro invocation, and (for APIs with
+    # any IN/INOUT arg) at least one __rocm_in_ local. The shared
+    # lttng_coverage_check.py:gate_curated regex matches both HIP
+    # (_CURATED) and HSA (_CURATED_HSA) variants, so the same script
+    # serves both providers.
+    set +e
+    python3 "$SCRIPT_DIR/lttng_coverage_check.py" curated \
+        --src-dir "$HSA_ROOT" \
+        --yaml "$CURATED_YAML" \
+        > "$TMP_DIR/curated.log" 2>&1
+    CURATED_RC=$?
+    set -e
+    cat "$TMP_DIR/curated.log"
+    if [ "$CURATED_RC" -ne 0 ]; then
+        echo "FAIL: HSA curated-args coverage gate failed"
+        exit 1
+    fi
+fi
+
 N_MIGRATED=$(wc -l < "$TMP_DIR/migrated.txt")
 N_EXPORTED=$(wc -l < "$TMP_DIR/exported.txt")
 echo "PASS: all $N_EXPORTED exported HSA symbols migrated ($N_MIGRATED inventory entries)"
