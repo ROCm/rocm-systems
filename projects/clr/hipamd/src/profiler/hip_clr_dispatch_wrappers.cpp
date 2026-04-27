@@ -3050,6 +3050,8 @@ static hipError_t hipModuleLaunchCooperativeKernelLayer(hipFunction_t f, unsigne
   _rec->stream = stream;
   _rec->gpu.grid_x = gridDimX; _rec->gpu.grid_y = gridDimY; _rec->gpu.grid_z = gridDimZ;
   _rec->gpu.block_x = blockDimX; _rec->gpu.block_y = blockDimY; _rec->gpu.block_z = blockDimZ;
+  if (kernelParams)
+    HipCaptureKernelArgsExt(&_rec->gpu, f, kernelParams);
   auto _r = g_next.hipModuleLaunchCooperativeKernel_fn(f, gridDimX, gridDimY, gridDimZ, blockDimX, blockDimY, blockDimZ, sharedMemBytes, stream, kernelParams);
   _rec->end_ns = NowNs();
   return _r;
@@ -3902,6 +3904,13 @@ static hipError_t hipExtModuleLaunchKernelLayer(hipFunction_t f, uint32_t global
                                                  hipEvent_t stopEvent, uint32_t flags) {
   auto* _rec = HipGetActiveRecordExt(407u);
   _rec->stream = hStream;
+  // globalWorkSize = grid * localWorkSize (OpenCL convention)
+  _rec->gpu.block_x = localWorkSizeX;  _rec->gpu.block_y = localWorkSizeY;  _rec->gpu.block_z = localWorkSizeZ;
+  _rec->gpu.grid_x  = localWorkSizeX ? globalWorkSizeX / localWorkSizeX : 0;
+  _rec->gpu.grid_y  = localWorkSizeY ? globalWorkSizeY / localWorkSizeY : 0;
+  _rec->gpu.grid_z  = localWorkSizeZ ? globalWorkSizeZ / localWorkSizeZ : 0;
+  if (kernelParams)
+    HipCaptureKernelArgsExt(&_rec->gpu, f, kernelParams);
   auto _r = g_next.hipExtModuleLaunchKernel_fn(f, globalWorkSizeX, globalWorkSizeY, globalWorkSizeZ, localWorkSizeX, localWorkSizeY, localWorkSizeZ, sharedMemBytes, hStream, kernelParams, extra, startEvent, stopEvent, flags);
   _rec->end_ns = NowNs();
   return _r;
@@ -3917,6 +3926,12 @@ static hipError_t hipHccModuleLaunchKernelLayer(hipFunction_t f, uint32_t global
                                                  hipEvent_t stopEvent) {
   auto* _rec = HipGetActiveRecordExt(408u);
   _rec->stream = hStream;
+  _rec->gpu.block_x = localWorkSizeX;  _rec->gpu.block_y = localWorkSizeY;  _rec->gpu.block_z = localWorkSizeZ;
+  _rec->gpu.grid_x  = localWorkSizeX ? globalWorkSizeX / localWorkSizeX : 0;
+  _rec->gpu.grid_y  = localWorkSizeY ? globalWorkSizeY / localWorkSizeY : 0;
+  _rec->gpu.grid_z  = localWorkSizeZ ? globalWorkSizeZ / localWorkSizeZ : 0;
+  if (kernelParams)
+    HipCaptureKernelArgsExt(&_rec->gpu, f, kernelParams);
   auto _r = g_next.hipHccModuleLaunchKernel_fn(f, globalWorkSizeX, globalWorkSizeY, globalWorkSizeZ, localWorkSizeX, localWorkSizeY, localWorkSizeZ, sharedMemBytes, hStream, kernelParams, extra, startEvent, stopEvent);
   _rec->end_ns = NowNs();
   return _r;
