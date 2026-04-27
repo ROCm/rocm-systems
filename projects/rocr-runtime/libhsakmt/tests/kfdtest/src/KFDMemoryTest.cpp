@@ -1561,7 +1561,7 @@ void KFDMemoryTest::PtraceAccessInvisibleVram(int gpuNode) {
     // dstBuffer is cpu accessible gtt memory
     HsaMemoryBuffer dstBuffer(PAGE_SIZE, gpuNode);
 
-    ASSERT_SUCCESS_GPU(m_pAsm->RunAssembleBuf(ScratchCopyDwordIsa, isaBuffer.As<char*>()), gpuNode);
+    ASSERT_SUCCESS_GPU(m_pAsm->RunAssembleBuf(CopyDwordIsa, isaBuffer.As<char*>()), gpuNode);
 
     Dispatch dispatch0(isaBuffer);
     dispatch0.SetArgs(mem0, dstBuffer.As<void*>());

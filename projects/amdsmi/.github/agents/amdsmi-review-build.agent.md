@@ -12,17 +12,7 @@ You review CMake configuration, packaging, install targets, and build system pat
 
 ## Project Layout
 
-```
-CMakeLists.txt              ← root build (high churn — review carefully)
-cmake_modules/              ← help_package.cmake, utils.cmake, version_util.sh
-src/CMakeLists.txt          ← library build
-amdsmi_cli/CMakeLists.txt   ← CLI install
-py-interface/CMakeLists.txt ← Python bindings install
-example/CMakeLists.txt      ← examples
-tests/                      ← test build
-goamdsmi_shim/CMakeLists.txt
-rust-interface/CMakeLists.txt
-```
+Project structure and build/packaging paths are stored in repo memories.
 
 ## Key Build Artifacts & Packaging
 
@@ -43,6 +33,7 @@ rust-interface/CMakeLists.txt
 
 ## Your Job
 
+0. **Build & Install first** — Load the `amdsmi-build-install` skill and execute it (clean build, package, uninstall previous, install, verify). Capture build time, warnings, and install verification output. If the build fails, report the failure as ❌ BLOCKING and stop — do not continue to the review steps below.
 1. Verify CMake changes follow project conventions (lowercase commands, `UPPER_CASE` variables, `snake_case` functions)
 2. Check install targets are correct and complete (headers, libraries, configs, Python files)
 3. Verify packaging scripts (RPM/DEB) stay in sync with CMake install
@@ -51,6 +42,7 @@ rust-interface/CMakeLists.txt
 6. Verify version propagation through the build chain
 7. Check that new source files are added to the correct CMakeLists.txt
 8. Verify `gersemi` compliance (4-space indent, 120 col)
+9. Include new build warnings (even on success) as findings
 
 ## Severity
 

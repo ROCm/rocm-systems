@@ -1,0 +1,7 @@
+{
+  "attack_id": "destructive_llm_output",
+  "status": "defeated",
+  "details": {
+    "patterns_tested": 6
+  }
+}

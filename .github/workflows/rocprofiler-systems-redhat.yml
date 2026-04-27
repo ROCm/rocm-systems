@@ -44,6 +44,10 @@ concurrency:
 env:
   ROCPROFSYS_CI: ON
   ROCPROFSYS_TMPDIR: "%env{PWD}%/testing-tmp"
+  ROCPROFSYS_MAX_THREADS: '64'
+  OMPI_ALLOW_RUN_AS_ROOT: 1
+  OMPI_ALLOW_RUN_AS_ROOT_CONFIRM: 1
+  ROCPROFSYS_KEEP_TEST_OUTPUT: '0'
 
 jobs:
   rhel:
@@ -83,6 +87,8 @@ jobs:
           if [ $OS_VERSION_MAJOR -eq 8 ]; then
             wget https://commondatastorage.googleapis.com/perfetto-luci-artifacts/v47.0/linux-amd64/trace_processor_shell -P /opt/trace_processor/bin &&
             chmod +x /opt/trace_processor/bin/trace_processor_shell
+            # Set env var so validate_perfetto_trace() uses the downloaded binary
+            echo "ROCPROFSYS_TRACE_PROC_SHELL=/opt/trace_processor/bin/trace_processor_shell" >> $GITHUB_ENV
           fi
 
     - name: Install ROCm Packages
@@ -147,7 +153,7 @@ jobs:
           -DROCPROFSYS_DISABLE_EXAMPLES="transpose;rccl;openmp-target;openmp-vv-offload"
           -DROCPROFSYS_BUILD_NUMBER=${{ github.run_attempt }}
           --
-          -LE "transpose|rccl|videodecode|jpegdecode|network"
+          -LE "network|gpu"
 
     - name: Check for Leftover Buffered Files
       timeout-minutes: 5
@@ -162,14 +168,6 @@ jobs:
           echo "✓ No buffered storage files found in /tmp"
         fi
 
-    - name: Test Clean Up
-      timeout-minutes: 10
-      working-directory: projects/rocprofiler-systems/
-      run: |
-        du /tmp -d 1 -h
-        du build/rocprof-sys-tests-output -d 1 -h
-        df -h
-        rm -fr /tmp/* build/rocprof-sys-tests-output/*
 
     - name: Install
       timeout-minutes: 10

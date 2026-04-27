@@ -51,8 +51,8 @@ jobs:
         working-directory: projects/rocprofiler-systems/docker
         id: generate_matrix_ci_base
         run: |
-          MATRIX_CONTENT=$(cat containers-ci.yml | yq '.matrix' -I=0 -o=json)
-          echo "matrix_data=$MATRIX_CONTENT" >> $GITHUB_OUTPUT
+          DISTROS=$(cat containers-ci.yml | yq '.distros' -I=0 -o=json)
+          echo "matrix_data=$DISTROS" >> $GITHUB_OUTPUT
 
   rocprofiler-systems-ci-gfx:
     needs: prepare_matrix_ci

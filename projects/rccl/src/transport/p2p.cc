@@ -225,7 +225,7 @@ ncclResult_t p2pCanConnect(int* ret, struct ncclComm* comm, struct ncclTopoGraph
 // cuMem API support
 ncclResult_t ncclP2pAllocateShareableBuffer(size_t size, int refcount, ncclIpcDesc *ipcDesc, void **ptr) {
   if (ncclCuMemEnable()) {
-#if ROCM_VERSION >= 71200
+#if ROCM_VERSION >= 70000
     CUmemAllocationHandleType type = ncclCuMemHandleType;
 
     // cuMem API support
@@ -269,7 +269,7 @@ ncclResult_t ncclP2pFreeShareableBuffer(ncclIpcDesc *ipcDesc) {
 
 ncclResult_t ncclP2pImportShareableBuffer(struct ncclComm *comm, int peer, size_t size, ncclIpcDesc *ipcDesc, void **devMemPtr) {
   if (ncclCuMemEnable()) {
-#if ROCM_VERSION >= 71200
+#if ROCM_VERSION >= 70000
     // cuMem API support
     CUdeviceptr dptr = 0;
     CUmemAllocationHandleType type = ncclCuMemHandleType;
@@ -278,7 +278,11 @@ ncclResult_t ncclP2pImportShareableBuffer(struct ncclComm *comm, int peer, size_
     CUmemAllocationProp prop = {};
     size_t granularity = 0;
 
+#if defined(HIP_VMM_UNCACHED_MEMORY)
+    prop.type = hipMemAllocationTypeUncached;
+#else
     prop.type = CU_MEM_ALLOCATION_TYPE_PINNED;
+#endif
     prop.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
     prop.requestedHandleTypes = type;
     prop.location.id = comm->cudaDev;
@@ -356,7 +360,7 @@ static ncclResult_t p2pMap(struct ncclComm *comm, struct ncclProxyConnector* pro
         return ncclInternalError;
       }
       if (ncclCuMemEnable()) {
-#if ROCM_VERSION >= 71200
+#if ROCM_VERSION >= 70000
         // for intra-process ranks, we should map memHandle of the peers to increase refcount.
         // Otherwise, if peers abort and free the buffer, the rank can suffer invalid access.
         NCCLCHECK(ncclCuMemAllocAddr(devMem, &p2pBuff->ipcDesc.memHandle, p2pBuff->size));
@@ -889,7 +893,7 @@ ncclResult_t ret = ncclSuccess;
         // Get the mem handle for that buffer. It may have been allocated through cudaMalloc in which case we'll
         // get the CUDA legacy mem handle, or through cuMem*.
         if (ncclCuMemEnable()) {
-#if ROCM_VERSION >= 71200
+#if ROCM_VERSION >= 70000
           CUmemGenericAllocationHandle handle;
           if (CUPFN(cuMemRetainAllocationHandle(&handle, baseAddr)) != CUDA_SUCCESS) {
             // if cuMem* export fails, retry legacy export
@@ -1093,7 +1097,7 @@ static ncclResult_t p2pProxyRegister(struct ncclProxyConnection* connection, str
   struct p2pIpcExpInfo* ipcExpInfo = (struct p2pIpcExpInfo*)reqBuff;
   void* regAddr = NULL;
   ncclResult_t ret = ncclSuccess;
-#if ROCM_VERSION >= 71200
+#if ROCM_VERSION >= 70000
   bool mapped = false;
   bool imported = false;
   CUmemGenericAllocationHandle handle;
@@ -1111,7 +1115,7 @@ static ncclResult_t p2pProxyRegister(struct ncclProxyConnection* connection, str
     CUDACHECKGOTO(cudaIpcOpenMemHandle(&regAddr, ipcExpInfo->ipcDesc.devIpc, cudaIpcMemLazyEnablePeerAccess), ret, fail);
     regAddr = (void*)((uintptr_t)regAddr + ipcExpInfo->offset);
   } else {
-#if ROCM_VERSION >= 71200
+#if ROCM_VERSION >= 70000
     // cuMem import
     if (connection->sameProcess) {
       // if proxy is same process as request peer, we just need to map the handle.
@@ -1146,7 +1150,7 @@ exit:
   return ret;
 fail:
   if (!ipcExpInfo->legacyIpcCap) {
-#if ROCM_VERSION >= 71200
+#if ROCM_VERSION >= 70000
     if (mapped) CUCHECK(cuMemUnmap((CUdeviceptr)regAddr, ipcExpInfo->size));
     if (regAddr) CUCHECK(cuMemAddressFree((CUdeviceptr)regAddr, ipcExpInfo->size));
     if (imported) CUCHECK(cuMemRelease(handle));

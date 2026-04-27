@@ -351,7 +351,7 @@ struct PresentSwapChainInfo
     PresentMode presentMode;    ///< Chooses between windowed and fullscreen present.
     IImage*     pSrcImage;      ///< The image to be presented.
     ISwapChain* pSwapChain;     ///< The swap chain associated with the source image.
-    uint32      imageIndex;     ///< The index of the source image within the swap chain. Owership of this image
+    uint32      imageIndex;     ///< The index of the source image within the swap chain. Ownership of this image
                                 ///  index will be released back to the swap chain if this call succeeds.
     uint32      rectangleCount; ///< Number of valid rectangles in the pRectangles array.
     uint32      syncInterval;   ///< Applicable only when syncIntervalOverride is set
@@ -574,7 +574,7 @@ public:
     /// the presentable image index, eventually deadlocking the swap chain.
     ///
     /// Overall support for direct presents can be queried at platform creation time via supportNonSwapChainPresents
-    /// in @ref PlatformProperties.  Support for particular present modes is specifed via supportedDirectPresentModes
+    /// in @ref PlatformProperties.  Support for particular present modes is specified via supportedDirectPresentModes
     /// in @ref DeviceProperties.
     ///
     /// @note  Any images specified in presentInfo must be made resident before calling this function.

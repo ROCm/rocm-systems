@@ -45,6 +45,7 @@ add_executable(rocjitsu_tests
     waitcnt_counter_test.cpp
     instruction_execution_harness_test.cpp
     decode_execute_benchmark.cpp
+    execution_plugin_test.cpp
 )
 target_link_libraries(rocjitsu_tests PRIVATE
     ${RJ_OBJECT_LIBS} rocjitsu_kmd util flatbuffers Threads::Threads GTest::gtest_main)

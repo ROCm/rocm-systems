@@ -27,8 +27,6 @@ struct stop<rocprofsys::component::pthread_create_gotcha_t>
 {
     using type = rocprofsys::component::pthread_create_gotcha_t;
 
-    ROCPROFSYS_DEFAULT_OBJECT(stop)
-
     template <typename... Args>
     explicit stop(type&, Args&&...)
     {}

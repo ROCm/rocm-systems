@@ -418,6 +418,12 @@ bool rcclUseAllGatherDirect(struct ncclComm* comm, size_t& msgSize) {
     return false;
   }
 
+  // Multi-node Direct AllGather requires PXN
+  if (comm->nNodes > 1 && ncclPxnDisable(comm) != 0) {
+    INFO(NCCL_INIT, "RCCL DIRECT ALLGATHER disabled on multi-node due to PXN being disabled.");
+    return false;
+  }
+
   // Check if user explicitly set threshold
   static int userThresholdInput = -2;
   if (userThresholdInput == -2) {
@@ -563,7 +569,7 @@ void rcclSetWarpSpeedCUs(struct ncclComm* comm, int algo, int threadsPerBlock, i
 }
 
 bool rcclWarpSpeedSupported(struct ncclComm* comm, struct ncclKernelPlan* plan) {
-  if (!comm->topo->warpSpeedEnabled) {
+  if (!comm->topo->warpSpeedEnabled || plan->isSymColl) {
     return false;
   }
 
