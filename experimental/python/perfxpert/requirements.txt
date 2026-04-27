@@ -13,3 +13,4 @@ anthropic>=0.18
 openai>=1.0
 rich>=13.0
 litellm>=1.50
+python-dotenv>=1.2.2

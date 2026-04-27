@@ -58,6 +58,7 @@ dev  = [
     "pexpect>=4.8",
     "pytest-xdist>=3.5",    # parallel red-team / parity execution
     "hypothesis>=6.100",    # property-based fuzz for sanitizer
+    "tomli>=2.0; python_version<'3.11'",
     "rich>=13.0",           # exit-dashboard rendering (already a runtime dep; dev pin kept for parity)
 ]
 
