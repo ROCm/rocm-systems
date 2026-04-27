@@ -514,7 +514,7 @@ def test_install_uses_tomlkit_lazy_import_in_fallback(
     # `import tomlkit` + accesses an attr, we blow up loudly.
     _sys.modules["tomlkit"] = _Sentinel()  # type: ignore[assignment]
     try:
-        CodexAdapter().install(project_cwd, scope="project")
+        CodexAdapter().install(project_cwd, scope="user")
     finally:
         # Restore original tomlkit binding (or clear).
         if original is None:
@@ -538,9 +538,9 @@ def test_structured_edit_fallback_uses_tomlkit(
         _fake_codex_subprocess(add_exit=1, list_stdout=b""),
     )
 
-    CodexAdapter().install(project_cwd, scope="project")
-    # Project-scope config.toml should exist + contain mcp_servers.perfxpert.
-    cfg = project_cwd / ".codex" / "config.toml"
+    CodexAdapter().install(project_cwd, scope="user")
+    # User-scope fallback config.toml should exist + contain mcp_servers.perfxpert.
+    cfg = isolated_home / ".codex" / "config.toml"
     assert cfg.is_file()
     text = cfg.read_text()
     assert "[mcp_servers.perfxpert]" in text or "perfxpert" in text
