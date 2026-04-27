@@ -10,6 +10,7 @@
 #include "socket.h"
 #include "net.h"
 #include "net_ib_cast_inspect.h"
+#include "net_ib_fault_inject.h"
 #include "graph.h"
 #include "utils.h"
 #include "param.h"
@@ -1714,6 +1715,10 @@ struct alignas(32) ncclIbNetCommBase {
   struct ncclIbDevInfo remDevs[NCCL_IB_MAX_DEVS_PER_NIC];
   // statistics about the comm
   struct ncclIbStats stats;
+#ifdef ENABLE_FAULT_INJECTION
+  uint32_t faultQpDelayUs[NCCL_IB_MAX_QPS];
+  bool     faultQpError[NCCL_IB_MAX_QPS];
+#endif
 };
 
 struct ncclIbSendComm {
@@ -2931,6 +2936,42 @@ exit:
   return nqps;
 }
 
+/* ── Fault injection API (CAST path) ──────────────────────────────────── */
+#ifdef ENABLE_FAULT_INJECTION
+
+ncclResult_t ncclIbCastFaultSetQpDelay(void* sendComm, int qpIdx, uint32_t delayUs) {
+  if (!sendComm) return ncclInvalidArgument;
+  struct ncclIbSendComm* comm = (struct ncclIbSendComm*)sendComm;
+  if (qpIdx < 0 || qpIdx >= NCCL_IB_MAX_QPS) return ncclInvalidArgument;
+  comm->base.faultQpDelayUs[qpIdx] = delayUs;
+  return ncclSuccess;
+}
+
+ncclResult_t ncclIbCastFaultSetQpError(void* sendComm, int qpIdx, bool inject) {
+  if (!sendComm) return ncclInvalidArgument;
+  struct ncclIbSendComm* comm = (struct ncclIbSendComm*)sendComm;
+  if (qpIdx < 0 || qpIdx >= NCCL_IB_MAX_QPS) return ncclInvalidArgument;
+  comm->base.faultQpError[qpIdx] = inject;
+  return ncclSuccess;
+}
+
+ncclResult_t ncclIbCastFaultClear(void* sendComm) {
+  if (!sendComm) return ncclInvalidArgument;
+  struct ncclIbSendComm* comm = (struct ncclIbSendComm*)sendComm;
+  memset(comm->base.faultQpDelayUs, 0, sizeof(comm->base.faultQpDelayUs));
+  memset(comm->base.faultQpError, 0, sizeof(comm->base.faultQpError));
+  return ncclSuccess;
+}
+
+ncclResult_t ncclIbCastFaultGetFatalCount(void* sendComm, int* out) {
+  if (!sendComm || !out) return ncclInvalidArgument;
+  struct ncclIbSendComm* comm = (struct ncclIbSendComm*)sendComm;
+  *out = __atomic_load_n(&comm->base.stats.fatalErrorCount, __ATOMIC_ACQUIRE);
+  return ncclSuccess;
+}
+
+#endif /* ENABLE_FAULT_INJECTION */
+
 static ncclResult_t IbCastMultiSend(struct ncclIbSendComm* comm, int slot, int nqps, int qpIndex, bool wrrSched, bool use_write_op) {
   struct ncclIbRequest** reqs = comm->fifoReqs[slot];
   volatile struct ncclIbSendFifo* slots = comm->fifo[slot];
@@ -3086,6 +3127,16 @@ static ncclResult_t IbCastMultiSend(struct ncclIbSendComm* comm, int slot, int n
       void* pHandle = reqs[r]->pInfo[0].pHandle;
       NCCLCHECK(ncclProfilerFunction(&reqs[r]->pInfo[0].qpEventHandles[nEventHandles], ncclProfilerNetEventStart, pHandle, pluginId, &reqs[r]->pInfo[0].data));
       reqs[r]->pInfo[0].nEventHandles++;
+    }
+#endif
+#ifdef ENABLE_FAULT_INJECTION
+    {
+      const uint32_t faultDelay = comm->base.faultQpDelayUs[qpIndex];
+      if (faultDelay) usleep(faultDelay);
+      if (comm->base.faultQpError[qpIndex]) {
+        ncclIbStatsFatalError(&comm->base.stats);
+        return ncclSystemError;
+      }
     }
 #endif
     NCCLCHECK(wrap_ibv_post_send(qp->qp, comm->wrs, &bad_wr));

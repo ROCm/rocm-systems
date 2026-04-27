@@ -265,6 +265,10 @@ execute_process(
   WORKING_DIRECTORY ${RCCL_SRC_DIR}
 )
 execute_process(
+  COMMAND bash -c "sed -i 's/ncclIbFault/rocmIbFault/g' ${ROCM_NETIB_FILE}"
+  WORKING_DIRECTORY ${RCCL_SRC_DIR}
+)
+execute_process(
   COMMAND bash -c "sed -i 's/cuMemGetHandleForAddressRange/hipMemGetHandleForAddressRange/g' ${ROCM_NETIB_FILE}"
   WORKING_DIRECTORY ${RCCL_SRC_DIR}
 )

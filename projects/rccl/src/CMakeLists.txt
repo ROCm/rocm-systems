@@ -214,6 +214,8 @@ set(SRC_FILES
   include/plugin/net/net_v11.h
   include/plugin/profiler/net_ib_v1.h
   include/plugin/profiler/net_ib.h
+  include/net_ib_cast_inspect.h
+  include/net_ib_fault_inject.h
   include/plugin/profiler/net_socket_v1.h
   include/plugin/profiler/net_socket.h
   include/plugin/profiler/profiler_v1.h
