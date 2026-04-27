@@ -7,23 +7,22 @@
 #include <hip/hip_runtime.h>
 
 #include "hip_internal.hpp"
-#include "profiler/hip_clr_profiler.hpp"
 
 namespace hip {
 hipError_t hipProfilerStart() {
   HIP_INIT_API(hipProfilerStart);
 
-  HipProfilerEnableExt();
+  assert(0 && "Unimplemented");
 
-  HIP_RETURN(hipSuccess);
+  HIP_RETURN(hipErrorNotSupported);
 }
 
 
 hipError_t hipProfilerStop() {
   HIP_INIT_API(hipProfilerStop);
 
-  HipProfilerDisableExt();
+  assert(0 && "Unimplemented");
 
-  HIP_RETURN(hipSuccess);
+  HIP_RETURN(hipErrorNotSupported);
 }
 }  // namespace hip
