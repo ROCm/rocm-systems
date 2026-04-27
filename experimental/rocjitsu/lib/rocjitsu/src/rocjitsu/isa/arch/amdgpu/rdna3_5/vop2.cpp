@@ -110,6 +110,7 @@ void VDot2accF32F16Vop2::execute_impl(amdgpu::Wavefront &wf) {
     src_operands_[0] = dpp_src0_.get();
   }
   (void)wf;
+  throw util::UnimplementedInst(mnemonic());
 }
 
 VAddF32Vop2::VAddF32Vop2(const MachineInst *inst)
@@ -2610,6 +2611,7 @@ void VPkFmacF16Vop2::execute_impl(amdgpu::Wavefront &wf) {
     src_operands_[0] = dpp_src0_.get();
   }
   (void)wf;
+  throw util::UnimplementedInst(mnemonic());
 }
 
 } // namespace rdna3_5

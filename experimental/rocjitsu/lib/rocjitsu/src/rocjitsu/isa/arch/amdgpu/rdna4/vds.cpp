@@ -407,7 +407,10 @@ DsMskorB32Vds::DsMskorB32Vds(const MachineInst *inst)
   num_dst_ = 0;
 }
 
-void DsMskorB32Vds::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void DsMskorB32Vds::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 DsStoreB32Vds::DsStoreB32Vds(const MachineInst *inst)
     : Vds("ds_store_b32", reinterpret_cast<const OpEncoding *>(inst),
@@ -625,7 +628,10 @@ DsNopVds::DsNopVds(const MachineInst *inst)
   num_dst_ = 0;
 }
 
-void DsNopVds::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void DsNopVds::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 DsAddF32Vds::DsAddF32Vds(const MachineInst *inst)
     : Vds("ds_add_f32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<DsAddF32Vds>()),
@@ -1140,7 +1146,10 @@ DsMskorRtnB32Vds::DsMskorRtnB32Vds(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void DsMskorRtnB32Vds::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void DsMskorRtnB32Vds::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 DsStorexchgRtnB32Vds::DsStorexchgRtnB32Vds(const MachineInst *inst)
     : Vds("ds_storexchg_rtn_b32", reinterpret_cast<const OpEncoding *>(inst),
@@ -1579,7 +1588,10 @@ DsConsumeVds::DsConsumeVds(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void DsConsumeVds::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void DsConsumeVds::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 DsAppendVds::DsAppendVds(const MachineInst *inst)
     : Vds("ds_append", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<DsAppendVds>()),
@@ -1589,7 +1601,10 @@ DsAppendVds::DsAppendVds(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void DsAppendVds::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void DsAppendVds::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 DsAddU64Vds::DsAddU64Vds(const MachineInst *inst)
     : Vds("ds_add_u64", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<DsAddU64Vds>()),
@@ -2000,7 +2015,10 @@ DsMskorB64Vds::DsMskorB64Vds(const MachineInst *inst)
   num_dst_ = 0;
 }
 
-void DsMskorB64Vds::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void DsMskorB64Vds::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 DsStoreB64Vds::DsStoreB64Vds(const MachineInst *inst)
     : Vds("ds_store_b64", reinterpret_cast<const OpEncoding *>(inst),
@@ -2677,7 +2695,10 @@ DsMskorRtnB64Vds::DsMskorRtnB64Vds(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void DsMskorRtnB64Vds::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void DsMskorRtnB64Vds::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 DsStorexchgRtnB64Vds::DsStorexchgRtnB64Vds(const MachineInst *inst)
     : Vds("ds_storexchg_rtn_b64", reinterpret_cast<const OpEncoding *>(inst),
@@ -3574,11 +3595,26 @@ DsLoadAddtidB32Vds::DsLoadAddtidB32Vds(const MachineInst *inst)
 
 void DsLoadAddtidB32Vds::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = true;
-  ds_calculate_addresses(inst_, wf, *d);
+  {
+    uint64_t exec = wf.exec();
+    d->lane_mask = exec;
+    d->exec_mask = exec;
+    d->wg_id = wf.wg_id();
+    d->wf_id = wf.wf_id();
+    d->cu_path = wf.cu().full_path();
+    uint32_t offset = (static_cast<uint32_t>(inst_.offset1) << 8) | inst_.offset0;
+    uint32_t m0 = wf.m0();
+    uint32_t ds_stride_bytes = ((m0 >> 16) & 0x1FF) * 4;
+    for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+      if (!(exec & (1ULL << lane)))
+        continue;
+      d->per_lane_addr[lane] = lane * ds_stride_bytes + offset + wf.lds_base();
+    }
+  }
   set_data(std::move(d));
 }
 
@@ -3666,7 +3702,10 @@ DsBpermuteFiB32Vds::DsBpermuteFiB32Vds(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void DsBpermuteFiB32Vds::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void DsBpermuteFiB32Vds::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 DsStoreB96Vds::DsStoreB96Vds(const MachineInst *inst)
     : Vds("ds_store_b96", reinterpret_cast<const OpEncoding *>(inst),
@@ -3754,7 +3793,10 @@ DsBvhStackPush4Pop1RtnB32Vds::DsBvhStackPush4Pop1RtnB32Vds(const MachineInst *in
   num_dst_ = 2;
 }
 
-void DsBvhStackPush4Pop1RtnB32Vds::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void DsBvhStackPush4Pop1RtnB32Vds::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 DsBvhStackPush8Pop1RtnB32Vds::DsBvhStackPush8Pop1RtnB32Vds(const MachineInst *inst)
     : Vds("ds_bvh_stack_push8_pop1_rtn_b32", reinterpret_cast<const OpEncoding *>(inst),
@@ -3772,7 +3814,10 @@ DsBvhStackPush8Pop1RtnB32Vds::DsBvhStackPush8Pop1RtnB32Vds(const MachineInst *in
   num_dst_ = 2;
 }
 
-void DsBvhStackPush8Pop1RtnB32Vds::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void DsBvhStackPush8Pop1RtnB32Vds::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 DsBvhStackPush8Pop2RtnB64Vds::DsBvhStackPush8Pop2RtnB64Vds(const MachineInst *inst)
     : Vds("ds_bvh_stack_push8_pop2_rtn_b64", reinterpret_cast<const OpEncoding *>(inst),
@@ -3790,7 +3835,10 @@ DsBvhStackPush8Pop2RtnB64Vds::DsBvhStackPush8Pop2RtnB64Vds(const MachineInst *in
   num_dst_ = 2;
 }
 
-void DsBvhStackPush8Pop2RtnB64Vds::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void DsBvhStackPush8Pop2RtnB64Vds::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 DsLoadB96Vds::DsLoadB96Vds(const MachineInst *inst)
     : Vds("ds_load_b96", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<DsLoadB96Vds>()),

@@ -695,7 +695,10 @@ ScratchLoadBlockVscratch::ScratchLoadBlockVscratch(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void ScratchLoadBlockVscratch::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void ScratchLoadBlockVscratch::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 ScratchStoreBlockVscratch::ScratchStoreBlockVscratch(const MachineInst *inst)
     : Vscratch("scratch_store_block", reinterpret_cast<const OpEncoding *>(inst),
@@ -710,7 +713,10 @@ ScratchStoreBlockVscratch::ScratchStoreBlockVscratch(const MachineInst *inst)
   num_dst_ = 0;
 }
 
-void ScratchStoreBlockVscratch::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void ScratchStoreBlockVscratch::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 } // namespace rdna4
 } // namespace rocjitsu

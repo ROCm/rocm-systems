@@ -5,6 +5,7 @@
 // See lib/python/amdisa/README.md for regeneration instructions.
 
 #include "rocjitsu/isa/arch/amdgpu/rdna4/sopp.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/execute_shared.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "util/data_types.h"
 #include "util/except.h"
@@ -290,7 +291,7 @@ SWakeupSopp::SWakeupSopp(const MachineInst *inst)
   num_dst_ = 0;
 }
 
-void SWakeupSopp::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SWakeupSopp::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_wakeup_sopp(*this, wf); }
 
 SSetprioSopp::SSetprioSopp(const MachineInst *inst)
     : Sopp("s_setprio", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SSetprioSopp>()),
@@ -352,7 +353,9 @@ STtracedataSopp::STtracedataSopp(const MachineInst *inst)
   num_dst_ = 0;
 }
 
-void STtracedataSopp::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void STtracedataSopp::execute_impl(amdgpu::Wavefront &wf) {
+  amdgpu::execute_s_ttracedata_sopp(*this, wf);
+}
 
 STtracedataImmSopp::STtracedataImmSopp(const MachineInst *inst)
     : Sopp("s_ttracedata_imm", reinterpret_cast<const OpEncoding *>(inst),
@@ -372,7 +375,9 @@ SIcacheInvSopp::SIcacheInvSopp(const MachineInst *inst)
   num_dst_ = 0;
 }
 
-void SIcacheInvSopp::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SIcacheInvSopp::execute_impl(amdgpu::Wavefront &wf) {
+  amdgpu::execute_s_icache_inv_sopp(*this, wf);
+}
 
 SWaitLoadcntSopp::SWaitLoadcntSopp(const MachineInst *inst)
     : Sopp("s_wait_loadcnt", reinterpret_cast<const OpEncoding *>(inst),

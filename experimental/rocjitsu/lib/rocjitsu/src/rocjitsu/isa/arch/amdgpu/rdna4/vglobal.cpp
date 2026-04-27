@@ -693,7 +693,10 @@ GlobalLoadAddtidB32Vglobal::GlobalLoadAddtidB32Vglobal(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void GlobalLoadAddtidB32Vglobal::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void GlobalLoadAddtidB32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 GlobalStoreAddtidB32Vglobal::GlobalStoreAddtidB32Vglobal(const MachineInst *inst)
     : Vglobal("global_store_addtid_b32", reinterpret_cast<const OpEncoding *>(inst),
@@ -706,7 +709,10 @@ GlobalStoreAddtidB32Vglobal::GlobalStoreAddtidB32Vglobal(const MachineInst *inst
   num_dst_ = 0;
 }
 
-void GlobalStoreAddtidB32Vglobal::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void GlobalStoreAddtidB32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 GlobalInvVglobal::GlobalInvVglobal(const MachineInst *inst)
     : Vglobal("global_inv", reinterpret_cast<const OpEncoding *>(inst),
@@ -715,7 +721,10 @@ GlobalInvVglobal::GlobalInvVglobal(const MachineInst *inst)
   num_dst_ = 0;
 }
 
-void GlobalInvVglobal::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void GlobalInvVglobal::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 GlobalWbVglobal::GlobalWbVglobal(const MachineInst *inst)
     : Vglobal("global_wb", reinterpret_cast<const OpEncoding *>(inst),
@@ -724,7 +733,10 @@ GlobalWbVglobal::GlobalWbVglobal(const MachineInst *inst)
   num_dst_ = 0;
 }
 
-void GlobalWbVglobal::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void GlobalWbVglobal::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 GlobalAtomicSwapB32Vglobal::GlobalAtomicSwapB32Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_swap_b32", reinterpret_cast<const OpEncoding *>(inst),
@@ -1771,7 +1783,10 @@ GlobalWbinvVglobal::GlobalWbinvVglobal(const MachineInst *inst)
   num_dst_ = 0;
 }
 
-void GlobalWbinvVglobal::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void GlobalWbinvVglobal::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 GlobalAtomicCondSubU32Vglobal::GlobalAtomicCondSubU32Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_cond_sub_u32", reinterpret_cast<const OpEncoding *>(inst),
@@ -1900,7 +1915,10 @@ GlobalLoadBlockVglobal::GlobalLoadBlockVglobal(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void GlobalLoadBlockVglobal::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void GlobalLoadBlockVglobal::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 GlobalStoreBlockVglobal::GlobalStoreBlockVglobal(const MachineInst *inst)
     : Vglobal("global_store_block", reinterpret_cast<const OpEncoding *>(inst),
@@ -1915,7 +1933,10 @@ GlobalStoreBlockVglobal::GlobalStoreBlockVglobal(const MachineInst *inst)
   num_dst_ = 0;
 }
 
-void GlobalStoreBlockVglobal::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void GlobalStoreBlockVglobal::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 GlobalAtomicAddF32Vglobal::GlobalAtomicAddF32Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_add_f32", reinterpret_cast<const OpEncoding *>(inst),
@@ -1968,7 +1989,10 @@ GlobalLoadTrB128Vglobal::GlobalLoadTrB128Vglobal(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void GlobalLoadTrB128Vglobal::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void GlobalLoadTrB128Vglobal::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 GlobalLoadTrB64Vglobal::GlobalLoadTrB64Vglobal(const MachineInst *inst)
     : Vglobal("global_load_tr_b64", reinterpret_cast<const OpEncoding *>(inst),
@@ -1983,7 +2007,10 @@ GlobalLoadTrB64Vglobal::GlobalLoadTrB64Vglobal(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void GlobalLoadTrB64Vglobal::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void GlobalLoadTrB64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 GlobalAtomicPkAddF16Vglobal::GlobalAtomicPkAddF16Vglobal(const MachineInst *inst)
     : Vglobal("global_atomic_pk_add_f16", reinterpret_cast<const OpEncoding *>(inst),

@@ -319,8 +319,45 @@ void exec_f32(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uint32_t K, u
       }
     }
   }
-  for (const auto &r : results)
+  bool has_nan = false;
+  for (const auto &r : results) {
     cu.write_vgpr(dst + r.reg, r.lane, r.val);
+    float fval = std::bit_cast<float>(r.val);
+    if (std::isnan(fval) || std::isinf(fval))
+      has_nan = true;
+  }
+  if (has_nan) {
+    util::Logger::vm([&](auto &os) {
+      os << std::format("MFMA_NAN_DETECTED dst=v{} s0=v{} s1=v{} s2=v{} M={} N={} K={}", dst, s0,
+                        s1, s2, M, N, K);
+      for (const auto &r : results) {
+        float fval = std::bit_cast<float>(r.val);
+        if (std::isnan(fval) || std::isinf(fval))
+          os << std::format("\n[rj log VM]   reg={} lane={} val={:#x}({}) "
+                            "a=[{:#x},{:#x}] b=[{:#x},{:#x}]",
+                            r.reg, r.lane, r.val, fval, cu.read_vgpr(s0, r.lane),
+                            cu.read_vgpr(s0 + 1, r.lane), cu.read_vgpr(s1, r.lane),
+                            cu.read_vgpr(s1 + 1, r.lane));
+      }
+    });
+  }
+  util::Logger::vm([&](auto &os) {
+    static thread_local uint64_t mfma_count = 0;
+    if (++mfma_count > 30)
+      return;
+    os << std::format("MFMA_F32 #{} M={} N={} K={} B={} dst=v{} s0=v{} s1=v{} s2=v{}", mfma_count,
+                      M, N, K, B, dst, s0, s1, s2);
+    for (uint32_t ln : {0u, 1u, 4u, 8u, 16u, 31u, 32u, 48u, 63u}) {
+      os << std::format("\n[rj log VM]   L{}: s0=[{:#x},{:#x},{:#x},{:#x}]"
+                        " s1=[{:#x},{:#x},{:#x},{:#x}]"
+                        " out=[{:#x},{:#x},{:#x},{:#x}]",
+                        ln, cu.read_vgpr(s0, ln), cu.read_vgpr(s0 + 1, ln),
+                        cu.read_vgpr(s0 + 2, ln), cu.read_vgpr(s0 + 3, ln), cu.read_vgpr(s1, ln),
+                        cu.read_vgpr(s1 + 1, ln), cu.read_vgpr(s1 + 2, ln),
+                        cu.read_vgpr(s1 + 3, ln), cu.read_vgpr(dst, ln), cu.read_vgpr(dst + 1, ln),
+                        cu.read_vgpr(dst + 2, ln), cu.read_vgpr(dst + 3, ln));
+    }
+  });
 }
 
 /// Scaled MFMA execute for f32 output with FP8/FP6/FP4 input (VOP3PX2).
