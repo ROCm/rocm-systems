@@ -10,10 +10,10 @@
 ncclResult_t ncclIbRegMrDmaBufInternal2(ncclIbNetCommDevBase* base, void* data, size_t size, int type, uint64_t offset, int fd, uint64_t mrFlags, ibv_mr** mhandle) {
   static thread_local uintptr_t pageSize = 0;
   if (pageSize == 0) pageSize = sysconf(_SC_PAGESIZE);
-  struct ncclIbMrCache* cache = &ncclIbDevs[base->ibDevN].mrCache;
+  struct ncclIbMrCache* cache = &IbCastDevs[base->ibDevN].mrCache;
   uintptr_t addr = (uintptr_t)data & -pageSize;
   size_t pages = ((uintptr_t)data + size - addr + pageSize-1)/pageSize;
-  std::lock_guard<std::mutex> lock(ncclIbDevs[base->ibDevN].mutex);
+  std::lock_guard<std::mutex> lock(IbCastDevs[base->ibDevN].mutex);
   for (int slot=0; /*true*/; slot++) {
     if (slot == cache->population || addr < cache->slots[slot].addr) { // didn't find in cache
       if (cache->population == cache->capacity) { // must grow cache
@@ -23,11 +23,11 @@ ncclResult_t ncclIbRegMrDmaBufInternal2(ncclIbNetCommDevBase* base, void* data, 
       // Deregister / register
       struct ibv_mr* mr;
       unsigned int flags = IBV_ACCESS_LOCAL_WRITE|IBV_ACCESS_REMOTE_WRITE|IBV_ACCESS_REMOTE_READ|IBV_ACCESS_REMOTE_ATOMIC;
-      bool relaxedOrdering = ncclIbRelaxedOrderingEnabled && (mrFlags & NCCL_NET_MR_FLAG_FORCE_SO) == 0;
+      bool relaxedOrdering = IbCastRelaxedOrderingEnabled && (mrFlags & NCCL_NET_MR_FLAG_FORCE_SO) == 0;
       if (relaxedOrdering) flags |= IBV_ACCESS_RELAXED_ORDERING;
       if (fd != -1) {
         /* DMA-BUF support */
-        if (!ncclIbDevs[base->ibDevN].capsProvider.mlx5.dataDirect) {
+        if (!IbCastDevs[base->ibDevN].capsProvider.mlx5.dataDirect) {
           NCCLCHECK(wrap_ibv_reg_dmabuf_mr(&mr, base->pd, offset, pages*pageSize, addr, fd, flags));
         } else {
           NCCLCHECK(wrap_mlx5dv_reg_dmabuf_mr(&mr, base->pd, offset, pages*pageSize, addr, fd, flags, MLX5DV_REG_DMABUF_ACCESS_DATA_DIRECT));
@@ -88,8 +88,8 @@ ncclResult_t IbCastRegMr(void* comm, void* data, size_t size, int type, void** m
 }
 
 ncclResult_t IbCastDeregMrInternal(ncclIbNetCommDevBase* base, ibv_mr* mhandle) {
-  struct ncclIbMrCache* cache = &ncclIbDevs[base->ibDevN].mrCache;
-  std::lock_guard<std::mutex> lock(ncclIbDevs[base->ibDevN].mutex);
+  struct ncclIbMrCache* cache = &IbCastDevs[base->ibDevN].mrCache;
+  std::lock_guard<std::mutex> lock(IbCastDevs[base->ibDevN].mutex);
   for (int i=0; i < cache->population; i++) {
     if (mhandle == cache->slots[i].mr) {
       if (0 == --cache->slots[i].refs) {
