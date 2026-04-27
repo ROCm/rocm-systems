@@ -13,19 +13,24 @@ def test_run_is_execution_class():
     assert profile_runner.run.__tool_class__ == ToolClass.EXECUTION
 
 
-def test_run_rejects_unknown_flag(tmp_path: Path):
+def test_run_rejects_unknown_flag_before_tool_check(tmp_path: Path, monkeypatch):
+    require_tool = mock.MagicMock(side_effect=AssertionError("require_tool reached"))
+    monkeypatch.setattr("perfxpert.tools.profile_runner.require_tool", require_tool)
+
     with pytest.raises(profile_runner.RocprofFlagError) as exc:
         profile_runner.run(
             argv=["rocprofv3", "--totally-fake-flag", "--", "./app"],
             cwd=tmp_path,
         )
     assert "--totally-fake-flag" in str(exc.value)
+    require_tool.assert_not_called()
 
 
 def test_run_accepts_known_flags(tmp_path: Path, monkeypatch):
     fake = mock.MagicMock(return_value=mock.MagicMock(
         returncode=0, stdout=b"", stderr=b""
     ))
+    monkeypatch.setattr("perfxpert.tools.profile_runner.require_tool", mock.MagicMock())
     monkeypatch.setattr("perfxpert.tools.profile_runner.subprocess.run", fake)
 
     result = profile_runner.run(
@@ -38,13 +43,17 @@ def test_run_accepts_known_flags(tmp_path: Path, monkeypatch):
     assert kwargs.get("shell", False) is False
 
 
-def test_run_rejects_shell_injection_in_args(tmp_path: Path):
+def test_run_rejects_shell_injection_in_args_before_tool_check(tmp_path: Path, monkeypatch):
     from perfxpert.tools._safety import ShellMetacharError
+    require_tool = mock.MagicMock(side_effect=AssertionError("require_tool reached"))
+    monkeypatch.setattr("perfxpert.tools.profile_runner.require_tool", require_tool)
+
     with pytest.raises(ShellMetacharError):
         profile_runner.run(
             argv=["rocprofv3", "--sys-trace", "--", "./app;rm -rf ~"],
             cwd=tmp_path,
         )
+    require_tool.assert_not_called()
 
 
 def test_run_strips_api_keys_from_env(tmp_path: Path, monkeypatch):
@@ -55,6 +64,7 @@ def test_run_strips_api_keys_from_env(tmp_path: Path, monkeypatch):
         return mock.MagicMock(returncode=0, stdout=b"", stderr=b"")
 
     monkeypatch.setattr("perfxpert.tools.profile_runner.subprocess.run", fake_run)
+    monkeypatch.setattr("perfxpert.tools.profile_runner.require_tool", mock.MagicMock())
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-should-not-leak")
 
     profile_runner.run(argv=["rocprofv3", "--sys-trace", "--", "./app"], cwd=tmp_path)
@@ -73,6 +83,7 @@ def test_run_respects_timeout(tmp_path: Path, monkeypatch):
         raise _sp.TimeoutExpired(cmd=a[0], timeout=kw.get("timeout", 10))
 
     monkeypatch.setattr("perfxpert.tools.profile_runner.subprocess.run", raise_timeout)
+    monkeypatch.setattr("perfxpert.tools.profile_runner.require_tool", mock.MagicMock())
     with pytest.raises(_sp.TimeoutExpired):
         profile_runner.run(
             argv=["rocprofv3", "--sys-trace", "--", "./app"],

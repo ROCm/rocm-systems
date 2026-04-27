@@ -3,9 +3,9 @@
 
 #pragma once
 
+#include "common/defines.h"
 #include "core/common.hpp"
 #include "core/concepts.hpp"
-#include "core/defines.hpp"
 #include "core/perfetto.hpp"
 #include "core/state.hpp"
 #include "core/utility.hpp"
@@ -202,8 +202,6 @@ using perfetto_event_context_t = ::rocprofsys::tracing::perfetto_event_context_t
 template <typename Tp>
 struct annotate<perfetto_event_context_t, Tp>
 {
-    TIMEMORY_DEFAULT_OBJECT(annotate)
-
     auto operator()(Tp& obj, perfetto_event_context_t& _ctx) const
     {
         return sfinae(obj, 0, _ctx);
@@ -267,8 +265,6 @@ template <typename Tp>
 struct perfetto_annotate : annotate<perfetto_event_context_t, Tp>
 {
     using base_type = annotate<perfetto_event_context_t, Tp>;
-
-    TIMEMORY_DEFAULT_OBJECT(perfetto_annotate)
 
     auto operator()(Tp& obj, perfetto_event_context_t& _ctx) const
     {

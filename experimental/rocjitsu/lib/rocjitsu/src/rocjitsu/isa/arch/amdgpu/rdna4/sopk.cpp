@@ -28,8 +28,7 @@ SMovkI32Sopk::SMovkI32Sopk(const MachineInst *inst)
 }
 
 void SMovkI32Sopk::execute_impl(amdgpu::Wavefront &wf) {
-  sdst.write_scalar(wf, static_cast<uint32_t>(
-                            static_cast<int32_t>(static_cast<int16_t>(simm16.encoding_value_))));
+  amdgpu::execute_s_movk_i32_sopk(*this, wf);
 }
 
 SVersionSopk::SVersionSopk(const MachineInst *inst)
