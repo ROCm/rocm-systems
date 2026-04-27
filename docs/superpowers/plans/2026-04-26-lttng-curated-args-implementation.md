@@ -1194,8 +1194,16 @@ def emit_emit_h(provider, apis, status_type, status_success, yaml_path, yaml_sha
 #include <stdint.h>
 #include <stddef.h>
 #include "rocm_trace_tid.h"
-#include "rocm_dim3_pack.h"
+""")
+    # Only include rocm_dim3_pack.h if any API uses dim3 or dim3_packed.
+    # HSA APIs use no dim3 types and the HSA tree has no rocm_dim3_pack.h,
+    # so emitting this include unconditionally would break the HSA build.
+    needs_dim3 = any(a['type'] in ('dim3', 'dim3_packed')
+                     for api in apis for a in api['args'])
+    if needs_dim3:
+        out.append('#include "rocm_dim3_pack.h"\n')
 
+    out.append(f"""
 #if defined({enable_macro}) && {enable_macro}
 
 #include <atomic>
@@ -4496,7 +4504,7 @@ Find the `HSA_ENABLE_LTTNG_UST` enable branch in the existing emit.h (`grep -n '
 #include "rocm_trace_emit_curated.h"
 ```
 
-The generated `rocm_trace_emit_curated.h` already includes `rocm_dim3_pack.h` and the curated tp.h transitively, so no extra includes are needed here.
+The generated `rocm_trace_emit_curated.h` includes the curated tp.h transitively, so no extra includes are needed here. (Note: `rocm_dim3_pack.h` is NOT included for HSA — codegen emits that include only when at least one API uses `dim3`/`dim3_packed`, and no HSA API does. The HSA tree therefore needs no `rocm_dim3_pack.h`.)
 
 - [ ] **Step 4: Build `hsa-runtime64` to verify the includes are wellformed**
 
