@@ -2,6 +2,7 @@
 # SPDX-License-Identifier:  MIT
 
 import argparse
+import re
 import shlex
 import shutil
 import sys
@@ -26,8 +27,89 @@ from utils.utils_common import (
     is_only_pc_sampling,
     print_status,
 )
+from utils.utils_exceptions import (
+    ExecutableNotFoundError,
+    NoScriptInCommandError,
+    PythonScriptNotFoundError,
+)
 from utils.utils_profile import gen_sysinfo, pc_sampling_prof, run_prof
 from vendored import yaml
+
+
+def _find_python_script_index(argv: list[str]) -> tuple[Optional[int], Optional[str]]:
+    """Locate the script argument in a Python command, skipping interpreter flags.
+
+    Returns (script_index, skip_flag).  skip_flag is the flag string ("-c"/"-m")
+    when injection should be skipped, or None when a script position was found
+    (or no arguments remain).
+    """
+    skip_next = False
+    for i, token in enumerate(argv[1:], start=1):
+        if skip_next:
+            skip_next = False
+            continue
+        if token in ("-c", "-m"):
+            return None, token
+        if token in ("-W", "-X"):
+            skip_next = True
+            continue
+        if token.startswith("-"):
+            continue
+        return i, None
+    return None, None
+
+
+def _prepare_torch_trace_injection(
+    remaining: list[str],
+    resolved_exec_path: Path,
+    is_python: bool,
+    script_index: Optional[int],
+    skip_flag: Optional[str],
+) -> None:
+    """Rewrite the workload command to inject ROCTX markers for --torch-trace.
+
+    Mutates *remaining* in-place.  Three cases:
+      1. Explicit Python interpreter  — insert inject_roctx.py before the script.
+      2. Direct .py script execution  — prepend sys.executable + inject_roctx.py.
+      3. Non-Python binary            — warn and leave the command untouched.
+    """
+    inject_script = Path(__file__).parent.parent / "utils" / "inject_roctx.py"
+    if not inject_script.exists():
+        console_error(
+            f"Cannot find inject_roctx.py at {inject_script}. "
+            "Please verify your installation."
+        )
+
+    if is_python:
+        if skip_flag:
+            console_warning(
+                f"Cannot inject ROCTX markers into 'python {skip_flag}' "
+                "invocations. Launching workload as-is; "
+                "--torch-trace may have no effect."
+            )
+        elif not Path(remaining[script_index]).is_file():
+            raise PythonScriptNotFoundError(remaining[script_index])
+        else:
+            remaining.insert(script_index, str(inject_script))
+    elif resolved_exec_path.suffix in (".py", ".pyw", ".pyc", ".pyo"):
+        remaining.insert(0, str(inject_script))
+        remaining.insert(0, sys.executable)
+    else:
+        console_warning(
+            "Command does not look like a Python entry point, "
+            "skipping ROCTX auto-injection and launching workload as-is. "
+            "Ensure the binary already initializes PyTorch/ROCTX markers, "
+            "otherwise --torch-trace will have no effect."
+        )
+
+    if (resolved_exec_path.parent / "_internal").is_dir():
+        console_warning(
+            "Workload appears to be a self-contained binary. "
+            "Such bundles typically ship private ROCm/HSA libraries, which "
+            "prevents --torch-trace from collecting data. "
+            "Rebuild without packaging libhsa/libhip or "
+            "adjust LD_LIBRARY_PATH to /opt/rocm before profiling."
+        )
 
 
 class RocProfCompute_Base:
@@ -104,55 +186,28 @@ class RocProfCompute_Base:
             # Ensure that command points to an executable
             exec_candidate = shutil.which(args.remaining[0])
             if not exec_candidate:
-                console_error(
-                    f"Your command {args.remaining[0]} doesn't point to a executable. "
-                    "Please verify."
-                )
+                raise ExecutableNotFoundError(args.remaining[0])
             resolved_exec_path = Path(exec_candidate).resolve()
 
-            # Appending a wrapper for injecting roctx-markers
+            # Detect bare Python interpreter (no script, no -c/-m) regardless
+            # of --torch-trace — this always hangs the profiler.
+            is_python = re.match(r"^python[0-9.]*$", resolved_exec_path.name)
+            script_index: Optional[int] = None
+            skip_flag: Optional[str] = None
+            if is_python:
+                script_index, skip_flag = _find_python_script_index(args.remaining)
+                if script_index is None and skip_flag is None:
+                    raise NoScriptInCommandError(args.remaining)
+
             if getattr(args, "torch_trace", False):
-                # Find the inject_roctx.py script in src/utils
-                inject_script = (
-                    Path(__file__).parent.parent / "utils" / "inject_roctx.py"
+                _prepare_torch_trace_injection(
+                    args.remaining,
+                    resolved_exec_path,
+                    bool(is_python),
+                    script_index,
+                    skip_flag,
                 )
-                if not inject_script.exists():
-                    console_error(
-                        f"Cannot find inject_roctx.py at {inject_script}. "
-                        "Please verify your installation."
-                    )
-
-                # Case 1: Explicit python command (python, python3, etc.)
-                if args.remaining[0].startswith("python"):
-                    # Insert inject_roctx.py after the python interpreter
-                    args.remaining.insert(1, str(inject_script))
-                # Case 2: Direct Python script execution (./main.py, /path/to/script.py)
-                elif args.remaining[0].endswith((".py", ".pyw", ".pyc", ".pyo")):
-                    # Use current Python interpreter
-                    args.remaining.insert(0, str(inject_script))
-                    args.remaining.insert(0, sys.executable)
-                else:
-                    console_warning(
-                        "Command does not look like a Python entry point, "
-                        "skipping ROCTX auto-injection and launching workload as-is."
-                    )
-                    console_warning(
-                        "Ensure the binary already initializes PyTorch/ROCTX markers, "
-                        "otherwise --torch-trace will have no effect."
-                    )
-
-                if (
-                    resolved_exec_path
-                    and (resolved_exec_path.parent / "_internal").is_dir()
-                ):
-                    console_warning(
-                        "Workload appears to be a self-contained binary. "
-                        "Such bundles typically ship private ROCm/HSA libraries, which "
-                        "prevents --torch-trace from collecting data."
-                        "Rebuild without packaging libhsa/libhip or "
-                        "adjust LD_LIBRARY_PATH to /opt/rocm) before profiling."
-                    )
-            args.remaining = " ".join(args.remaining)
+            args.remaining = shlex.join(args.remaining)
         elif not args.attach_pid:
             console_error(
                 "Profiling command required. Pass application executable after -- "
@@ -278,7 +333,7 @@ class RocProfCompute_Base:
             console_log("Filtered sections: All")
 
         # Run profiling on each input file
-        input_files = sorted(Path(args.path).glob("perfmon/*.txt"))
+        input_files = sorted(Path(args.path).glob("perfmon/pmc_perf_*.yaml"))
         total_runs = len(input_files)
 
         if total_runs == 0 and is_only_pc_sampling(args.filter_blocks):
@@ -294,6 +349,9 @@ class RocProfCompute_Base:
         native_tool_path = None
         # Native counter collection tool is only compatible with
         # rocprofiler-sdk public API for ROCm version >= 7.x.x
+
+        # PC sampling only profile does not need native tool
+
         # Do not use native tool in attach
         # mode until we figure out how multiple tools can attach
         # TODO: Figure out how multiple tools can attach
@@ -302,6 +360,7 @@ class RocProfCompute_Base:
             and not args.no_native_tool
             and int(self._soc._mspec.rocm_version.split(".")[0]) >= 7
             and not args.attach_pid
+            and not is_only_pc_sampling(args.filter_blocks)
         ):
             # Use native counter collection tool
             # Use lib* glob pattern to handle CMAKE_INSTALL_LIBDIR variations
@@ -397,37 +456,6 @@ class RocProfCompute_Base:
 
         total_profiling_time = 0.0
 
-        for fname in input_files:
-            # Kernel filtering (in-place replacement)
-            if not args.kernel == None:
-                success, output = capture_subprocess_output([
-                    "sed",
-                    "-i",
-                    "-r",
-                    f"s%^(kernel:).*%kernel: {','.join(self.__args.kernel)}%g",
-                    str(fname),
-                ])
-                # log output from profile filtering
-                if not success:
-                    console_error(output)
-                else:
-                    console_debug(output)
-
-            # Dispatch filtering (inplace replacement)
-            if args.dispatch is not None:
-                success, output = capture_subprocess_output([
-                    "sed",
-                    "-i",
-                    "-r",
-                    f"s%^(range:).*%range: {' '.join(self.__args.dispatch)}%g",
-                    str(fname),
-                ])
-                # log output from profile filtering
-                if not success:
-                    console_error(output)
-                else:
-                    console_debug(output)
-
         if args.iteration_multiplexing is not None:
             if native_tool_path is None:
                 console_error(
@@ -495,7 +523,7 @@ class RocProfCompute_Base:
             )
             return
 
-        total_runs = len(list(Path(args.path).glob("perfmon/*.txt")))
+        total_runs = len(list(Path(args.path).glob("perfmon/pmc_perf_*.yaml")))
 
         console_log(f"[Run {total_runs + 1}/{total_runs + 1}][PC sampling profile run]")
 

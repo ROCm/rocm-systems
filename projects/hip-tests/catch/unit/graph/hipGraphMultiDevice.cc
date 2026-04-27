@@ -52,7 +52,7 @@ HIP_TEST_CASE(Unit_hipGraphMultiDevice) {
   int nGpus = 0;
   HIP_CHECK(hipGetDeviceCount(&nGpus));
   if (nGpus < 2) {
-    fprintf(stderr, "Need at least 2 GPUs, skipped!\n");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
     return;
   }
   hipStream_t streamdev1, streamdev2;

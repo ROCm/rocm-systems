@@ -1,0 +1,105 @@
+# Hardware counter catalog — raw counter definitions by hardware block.
+# Source: llm-reference-guide.md §"Hardware Counter Reference" (lines 718-825).
+# Used by tools/counters.lookup_info() to describe individual counters and by
+# tools/counters.validate_for_gpu() to enforce per-block limits.
+
+# GRBM — Global Register Bus Manager (system-wide)
+- name: GRBM_COUNT
+  block: GRBM
+  unit: cycles
+  description: "Total GRBM clock cycles; used as a denominator for cumulative counters"
+
+- name: GRBM_GUI_ACTIVE
+  block: GRBM
+  unit: cycles
+  description: "Cycles while the graphics/compute pipeline is active; GPU utilization = GRBM_GUI_ACTIVE / GRBM_COUNT"
+
+# SQ — Shader Sequencer (per compute unit, aggregated)
+- name: SQ_WAVES
+  block: SQ
+  unit: count
+  description: "Cumulative wavefront dispatches; time-averaged occupancy ~= SQ_WAVES / GRBM_COUNT"
+
+- name: SQ_INSTS_VALU
+  block: SQ
+  unit: count
+  description: "Vector ALU instructions issued"
+
+- name: SQ_INSTS_VMEM_RD
+  block: SQ
+  unit: count
+  description: "Vector memory read instructions issued"
+
+- name: SQ_INSTS_VMEM_WR
+  block: SQ
+  unit: count
+  description: "Vector memory write instructions issued"
+
+- name: SQ_INSTS_LDS
+  block: SQ
+  unit: count
+  description: "LDS (shared memory) instructions issued"
+
+- name: SQ_WAVE_CYCLES
+  block: SQ
+  unit: cycles
+  description: "Aggregate wavefront active cycles"
+
+# TCP — Texture Cache Per-CU (Vector L1)
+- name: TCP_TOTAL_CACHE_ACCESSES
+  block: TCP
+  unit: count
+  description: "Total L1 vector cache accesses"
+
+- name: TCP_TCC_READ_REQ
+  block: TCP
+  unit: count
+  description: "Read requests from TCP to TCC (L2)"
+
+- name: TCP_TCC_WRITE_REQ
+  block: TCP
+  unit: count
+  description: "Write requests from TCP to TCC (L2)"
+
+# TCC — Texture Cache Controller (L2 cache)
+- name: TCC_HIT
+  block: TCC
+  unit: count
+  description: "L2 cache hits"
+
+- name: TCC_MISS
+  block: TCC
+  unit: count
+  description: "L2 cache misses"
+
+- name: TCC_EA0_RDREQ
+  block: TCC
+  unit: count
+  description: "Read requests from L2 to HBM (External Agent 0)"
+
+- name: TCC_EA0_WRREQ
+  block: TCC
+  unit: count
+  description: "Write requests from L2 to HBM (External Agent 0)"
+
+- name: TCC_EA0_WRREQ_64B
+  block: TCC
+  unit: count
+  description: "64-byte write requests from L2 to HBM"
+
+- name: TCC_BUBBLE
+  block: TCC
+  unit: cycles
+  description: "L2-to-HBM pipeline bubble cycles (component of FETCH_SIZE derivation)"
+
+# TA — Texture Address (vector address path)
+- name: TA_TA_BUSY
+  block: TA
+  unit: cycles
+  description: "Texture address unit active cycles"
+
+# TD — Texture Data (vector data path)
+- name: TD_TD_BUSY
+  block: TD
+  unit: cycles
+  description: "Texture data unit active cycles"

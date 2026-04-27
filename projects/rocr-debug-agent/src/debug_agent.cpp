@@ -58,6 +58,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <shared_mutex>
 #include <string>
 #include <thread>
 #include <type_traits>
@@ -112,6 +113,8 @@ bool g_precise_emmory{ false };
 bool g_precise_alu_exceptions{ false };
 bool g_lazy{ true };
 bool g_delay_loading{ false };
+
+static std::shared_mutex g_r_debug_r_state_mutex;
 
 /* Global state accessed by the dbgapi callbacks.  */
 std::optional<amd_dbgapi_breakpoint_id_t> g_rbrk_breakpoint_id;
@@ -1078,6 +1081,20 @@ process_dbgapi_events (amd_dbgapi_process_id_t process_id, bool all_wavefronts,
 
   if (need_print_waves)
     {
+      if (g_delay_loading)
+        {
+          amd_dbgapi_breakpoint_action_t bpaction;
+          {
+            std::unique_lock<std::shared_mutex> lock (g_r_debug_r_state_mutex);
+            DBGAPI_CHECK (amd_dbgapi_report_breakpoint_hit (
+                g_rbrk_breakpoint_id.value (), 0, &bpaction));
+          }
+
+          if (bpaction == AMD_DBGAPI_BREAKPOINT_ACTION_HALT)
+            process_dbgapi_events (process_id, all_wavefronts,
+                                   code_object_map);
+        }
+
       /* With --lazy,-z, code objects may not have been opened yet.
          Open them now so we can resolve PCs to code objects.  */
       for (auto it = code_object_map.begin (); it != code_object_map.end ();)
@@ -1606,19 +1623,29 @@ hsa_status_t
 debug_agent_hsa_executable_freeze (hsa_executable_t executable,
                                    const char *options)
 {
-  auto v = original_hsa_executable_freeze (executable, options);
+  hsa_status_t retval;
+  {
+    std::shared_lock<std::shared_mutex> lock (g_r_debug_r_state_mutex);
+    retval = original_hsa_executable_freeze (executable, options);
+  }
 
-  get_worker_thread ().update_code_object_list ();
-  return v;
+  if (!g_delay_loading)
+    get_worker_thread ().update_code_object_list ();
+  return retval;
 }
 
 hsa_status_t
 debug_agent_hsa_executable_destroy (hsa_executable_t executable)
 {
-  auto v = original_hsa_executable_destroy (executable);
+  hsa_status_t retval;
+  {
+    std::shared_lock<std::shared_mutex> lock (g_r_debug_r_state_mutex);
+    retval = original_hsa_executable_destroy (executable);
+  }
 
-  get_worker_thread ().update_code_object_list ();
-  return v;
+  if (!g_delay_loading)
+    get_worker_thread ().update_code_object_list ();
+  return retval;
 }
 
 } /* namespace.  */

@@ -214,15 +214,15 @@ void SignalingOperationsTester::verifyResults(size_t size) {
         switch (_type) {
           case PutSignalTestType:
           case PutSignalNBITestType:
-            expected_value += ((args.skip + args.loop) * args.wg_size * args.num_wgs);
+            expected_value += ((args.skip + num_loops) * args.wg_size * args.num_wgs);
             break;
           case WGPutSignalTestType:
           case WGPutSignalNBITestType:
-            expected_value += ((args.skip + args.loop) * args.num_wgs);
+            expected_value += ((args.skip + num_loops) * args.num_wgs);
             break;
           case WAVEPutSignalTestType:
           case WAVEPutSignalNBITestType:
-            expected_value += ((args.skip + args.loop) * args.num_wgs * num_warps);
+            expected_value += ((args.skip + num_loops) * args.num_wgs * num_warps);
             break;
           default:
             fprintf(stderr, "Invalid Test\n");

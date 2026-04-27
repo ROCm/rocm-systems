@@ -72,7 +72,7 @@ namespace {
       // Coverity reports that the callee treats &ring->next as an array.  However, due to the use of
       // FanSymmetric<1>, only the first element is ever accessed, so it's fine.
       // coverity[callee_ptr_arith:FALSE]
-      Primitives<T, RedOp, FanSymmetric<1>, 0, Proto, 0>
+      Primitives<T, RedOp, FanSymmetric<1>, 1, Proto, 0>
         prims(tid, workNthreads, &ring->prev, &ring->next, inputBuf, outputBuf, work->redOpArg, 0, work->connIndex, work->connIndex, work);
 
 #if defined(ENABLE_NPKIT)

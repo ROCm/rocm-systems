@@ -1,24 +1,5 @@
-// MIT License
-//
-// Copyright (c) 2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "core/trace_cache/sample_type.hpp"
 
@@ -421,58 +402,6 @@ TEST_F(sample_type_test, pmc_event_with_sample_type_identifier)
               type_identifier_t::pmc_event_with_sample);
 }
 
-TEST_F(sample_type_test, cpu_freq_sample_serialize_deserialize)
-{
-    std::vector<uint8_t> freqs_data = { 100, 150, 200, 180, 190, 195, 185, 170 };
-    cpu_freq_sample      original(80000, 1024, 2048, 4096, 500, 100, 1000000, 500000,
-                                  freqs_data);
-
-    serialize(buffer.data(), original);
-
-    uint8_t* buffer_ptr   = buffer.data();
-    auto     deserialized = deserialize<cpu_freq_sample>(buffer_ptr);
-
-    EXPECT_EQ(deserialized.timestamp, original.timestamp);
-    EXPECT_EQ(deserialized.page_rss, original.page_rss);
-    EXPECT_EQ(deserialized.virt_mem_usage, original.virt_mem_usage);
-    EXPECT_EQ(deserialized.peak_rss, original.peak_rss);
-    EXPECT_EQ(deserialized.context_switch_count, original.context_switch_count);
-    EXPECT_EQ(deserialized.page_faults, original.page_faults);
-    EXPECT_EQ(deserialized.user_mode_time, original.user_mode_time);
-    EXPECT_EQ(deserialized.kernel_mode_time, original.kernel_mode_time);
-    EXPECT_EQ(deserialized.freqs.size(), original.freqs.size());
-    EXPECT_EQ(deserialized.freqs, original.freqs);
-}
-
-TEST_F(sample_type_test, cpu_freq_sample_get_size)
-{
-    std::vector<uint8_t> freqs_data = { 100, 150, 200, 180, 190, 195, 185, 170 };
-    cpu_freq_sample      sample(80000, 1024, 2048, 4096, 500, 100, 1000000, 500000,
-                                freqs_data);
-
-    size_t expected_size = sizeof(uint64_t) + sizeof(int64_t) * 7 + sizeof(size_t) + 8;
-
-    EXPECT_EQ(get_size(sample), expected_size);
-}
-
-TEST_F(sample_type_test, cpu_freq_sample_type_identifier)
-{
-    EXPECT_EQ(cpu_freq_sample::type_identifier, type_identifier_t::cpu_freq_sample);
-}
-
-TEST_F(sample_type_test, cpu_freq_sample_empty_freqs)
-{
-    std::vector<uint8_t> empty_freqs;
-    cpu_freq_sample      original(0, 0, 0, 0, 0, 0, 0, 0, empty_freqs);
-
-    serialize(buffer.data(), original);
-
-    uint8_t* buffer_ptr   = buffer.data();
-    auto     deserialized = deserialize<cpu_freq_sample>(buffer_ptr);
-
-    EXPECT_TRUE(deserialized.freqs.empty());
-}
-
 TEST_F(sample_type_test, backtrace_region_sample_serialize_deserialize)
 {
     backtrace_region_sample original(1, 999, "Thread:999", "my_function", 90000, 95000,
@@ -540,7 +469,7 @@ TEST_F(sample_type_test, type_identifier_enum_values)
     EXPECT_EQ(static_cast<uint32_t>(type_identifier_t::memory_copy), 0x0004);
     EXPECT_EQ(static_cast<uint32_t>(type_identifier_t::memory_alloc), 0x0005);
     EXPECT_EQ(static_cast<uint32_t>(type_identifier_t::gpu_pmc_sample), 0x0006);
-    EXPECT_EQ(static_cast<uint32_t>(type_identifier_t::cpu_freq_sample), 0x0007);
+    EXPECT_EQ(static_cast<uint32_t>(type_identifier_t::cpu_pmc_sample), 0x0007);
     EXPECT_EQ(static_cast<uint32_t>(type_identifier_t::backtrace_region_sample), 0x0008);
     EXPECT_EQ(static_cast<uint32_t>(type_identifier_t::fragmented_space), 0xFFFF);
 }
@@ -581,12 +510,6 @@ TEST_F(sample_type_test, pmc_event_with_sample_default_constructor)
     EXPECT_EQ(sample.type_identifier, type_identifier_t::pmc_event_with_sample);
 }
 
-TEST_F(sample_type_test, cpu_freq_sample_default_constructor)
-{
-    cpu_freq_sample sample;
-    EXPECT_EQ(sample.type_identifier, type_identifier_t::cpu_freq_sample);
-}
-
 TEST_F(sample_type_test, backtrace_region_sample_default_constructor)
 {
     backtrace_region_sample sample;
@@ -610,4 +533,117 @@ TEST_F(sample_type_test, kernel_dispatch_sample_large_values)
     EXPECT_EQ(deserialized.thread_id, UINT64_MAX);
     EXPECT_EQ(deserialized.private_segment_size, UINT32_MAX);
     EXPECT_EQ(deserialized.grid_size_z, UINT32_MAX);
+}
+
+TEST_F(sample_type_test, kfd_sample_default_constructor)
+{
+    kfd_sample sample;
+    EXPECT_EQ(sample.type_identifier, type_identifier_t::kfd_sample);
+}
+
+TEST_F(sample_type_test, kfd_sample_serialize_deserialize_page_fault)
+{
+    kfd_sample original(1234,                              // thread_id
+                        "PAGE_FAULT_READ_FAULT_MIGRATED",  // name
+                        100000,                            // start_timestamp
+                        200000,                            // end_timestamp
+                        "0;;uint64_t;;address;;0x7f4a00001000;;"
+                        "1;;string;;agent;;5;;",        // args_str
+                        "rocm_kfd_page_fault",          // category
+                        "KFD Page Fault [GPU 0]",       // track_name
+                        "{}",                           // event_metadata
+                        0,                              // device_id
+                        static_cast<uint8_t>(1),        // device_type (GPU)
+                        "rocm_kfd_page_fault",          // pmc_info_name
+                        139637276676096.0,              // value
+                        std::optional<int64_t>(1234));  // system_tid
+
+    serialize(buffer.data(), original);
+
+    uint8_t* buffer_ptr   = buffer.data();
+    auto     deserialized = deserialize<kfd_sample>(buffer_ptr);
+
+    EXPECT_EQ(deserialized.thread_id, original.thread_id);
+    EXPECT_EQ(deserialized.name, original.name);
+    EXPECT_EQ(deserialized.start_timestamp, original.start_timestamp);
+    EXPECT_EQ(deserialized.end_timestamp, original.end_timestamp);
+    EXPECT_EQ(deserialized.args_str, original.args_str);
+    EXPECT_EQ(deserialized.category, original.category);
+    EXPECT_EQ(deserialized.track_name, original.track_name);
+    EXPECT_EQ(deserialized.event_metadata, original.event_metadata);
+    EXPECT_EQ(deserialized.device_id, original.device_id);
+    EXPECT_EQ(deserialized.device_type, original.device_type);
+    EXPECT_EQ(deserialized.pmc_info_name, original.pmc_info_name);
+    EXPECT_DOUBLE_EQ(deserialized.value, original.value);
+    EXPECT_EQ(deserialized.system_tid, original.system_tid);
+}
+
+TEST_F(sample_type_test, kfd_sample_serialize_deserialize_page_migrate)
+{
+    kfd_sample original(5678, "PAGE_MIGRATE_PAGEFAULT_GPU", 300000, 500000,
+                        "0;;uint64_t;;start_address;;0x7fb100000000;;"
+                        "1;;uint64_t;;end_address;;0x7fb100200000;;"
+                        "2;;string;;src_agent;;1;;"
+                        "3;;string;;dst_agent;;2;;"
+                        "4;;string;;prefetch_agent;;null;;"
+                        "5;;string;;preferred_agent;;null;;"
+                        "6;;int;;error_code;;0;;",
+                        "rocm_kfd_page_migrate", "KFD Page Migrate [GPU 0->CPU 0]", "{}",
+                        0, static_cast<uint8_t>(1), "rocm_kfd_page_migrate", 2097152.0,
+                        std::optional<int64_t>(5678));
+
+    serialize(buffer.data(), original);
+
+    uint8_t* buffer_ptr   = buffer.data();
+    auto     deserialized = deserialize<kfd_sample>(buffer_ptr);
+
+    EXPECT_EQ(deserialized.thread_id, original.thread_id);
+    EXPECT_EQ(deserialized.name, original.name);
+    EXPECT_EQ(deserialized.start_timestamp, original.start_timestamp);
+    EXPECT_EQ(deserialized.end_timestamp, original.end_timestamp);
+    EXPECT_EQ(deserialized.args_str, original.args_str);
+    EXPECT_EQ(deserialized.category, original.category);
+    EXPECT_EQ(deserialized.track_name, original.track_name);
+    EXPECT_EQ(deserialized.device_id, original.device_id);
+    EXPECT_EQ(deserialized.device_type, original.device_type);
+    EXPECT_EQ(deserialized.pmc_info_name, original.pmc_info_name);
+    EXPECT_DOUBLE_EQ(deserialized.value, original.value);
+    EXPECT_EQ(deserialized.system_tid, original.system_tid);
+}
+
+TEST_F(sample_type_test, kfd_sample_serialize_deserialize_instant_event)
+{
+    kfd_sample original(9999, "DROPPED_EVENTS", 400000, 400000,
+                        "0;;uint64_t;;count;;42;;", "rocm_kfd_event_dropped_events",
+                        "KFD Dropped Events", "{}", 0, static_cast<uint8_t>(1),
+                        "rocm_kfd_event_dropped_events", 42.0,
+                        std::optional<int64_t>(9999));
+
+    serialize(buffer.data(), original);
+
+    uint8_t* buffer_ptr   = buffer.data();
+    auto     deserialized = deserialize<kfd_sample>(buffer_ptr);
+
+    EXPECT_EQ(deserialized.start_timestamp, deserialized.end_timestamp);
+    EXPECT_EQ(deserialized.name, "DROPPED_EVENTS");
+    EXPECT_EQ(deserialized.category, "rocm_kfd_event_dropped_events");
+    EXPECT_DOUBLE_EQ(deserialized.value, 42.0);
+}
+
+TEST_F(sample_type_test, kfd_sample_get_size)
+{
+    kfd_sample original(1234, "PAGE_FAULT", 100000, 200000,
+                        "0;;uint64_t;;address;;0x1000;;", "rocm_kfd_page_fault",
+                        "KFD Page Fault [GPU 0]", "{}", 0, 1, "rocm_kfd_page_fault",
+                        4096.0, std::optional<int64_t>(1234));
+
+    auto size = get_size(original);
+    EXPECT_GT(size, 0u);
+
+    serialize(buffer.data(), original);
+
+    uint8_t* buffer_ptr   = buffer.data();
+    auto     deserialized = deserialize<kfd_sample>(buffer_ptr);
+    EXPECT_EQ(deserialized.name, original.name);
+    EXPECT_EQ(deserialized.category, original.category);
 }

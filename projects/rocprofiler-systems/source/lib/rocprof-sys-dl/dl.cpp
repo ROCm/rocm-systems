@@ -288,6 +288,8 @@ struct ROCPROFSYS_INTERNAL_API indirect
         ROCPROFSYS_DLSYM(rocprofsys_progress_f, m_omnihandle, "rocprofsys_progress");
         ROCPROFSYS_DLSYM(rocprofsys_annotated_progress_f, m_omnihandle,
                          "rocprofsys_annotated_progress");
+        ROCPROFSYS_DLSYM(rocprofsys_register_pause_callbacks_f, m_omnihandle,
+                         "rocprofsys_external_register_pause_callbacks");
 
         ROCPROFSYS_DLSYM(kokkosp_print_help_f, m_omnihandle, "kokkosp_print_help");
         ROCPROFSYS_DLSYM(kokkosp_parse_args_f, m_omnihandle, "kokkosp_parse_args");
@@ -394,6 +396,7 @@ public:
     void (*rocprofsys_progress_f)(const char*)                                 = nullptr;
     void (*rocprofsys_annotated_progress_f)(const char*, rocprofsys_annotation_t*,
                                             size_t)                            = nullptr;
+    void (*rocprofsys_register_pause_callbacks_f)(void (*)(), void (*)())      = nullptr;
 
     // librocprof-sys-user functions
     int (*rocprofsys_user_configure_f)(int, user_cb_t, user_cb_t*) = nullptr;
@@ -866,6 +869,13 @@ extern "C"
     {
         return ROCPROFSYS_DL_INVOKE(get_indirect().rocprofsys_annotated_progress_f, _name,
                                     _annotations, _annotation_count);
+    }
+
+    void rocprofsys_external_register_pause_callbacks(void (*pause_fn)(),
+                                                      void (*resume_fn)())
+    {
+        ROCPROFSYS_DL_INVOKE(get_indirect().rocprofsys_register_pause_callbacks_f,
+                             pause_fn, resume_fn);
     }
 
     void rocprofsys_set_instrumented(int _mode)

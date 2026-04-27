@@ -16,7 +16,13 @@ from config import rocprof_compute_home
 from rocprof_compute_analyze.analysis_base import OmniAnalyze_Base
 from utils import utils_analysis
 from utils.analysis_orm import Database, get_views
-from utils.logger import console_debug, console_error, console_warning, demarcate
+from utils.file_io import process_pc_sampling_kernel_trace
+from utils.logger import (
+    console_debug,
+    console_error,
+    console_warning,
+    demarcate,
+)
 from utils.parser import (
     PC_SAMPLING_NOT_ISSUE_PREFIX,
     CodeTransformer,
@@ -35,7 +41,7 @@ from utils.parser import (
 )
 from utils.roofline_calc import (
     CACHE_HIERARCHY,
-    MFMA_DATATYPES,
+    MATRIX_DATATYPES,
     PEAK_OPS_DATATYPES,
     SUPPORTED_DATATYPES,
 )
@@ -55,6 +61,7 @@ class db_analysis(OmniAnalyze_Base):
                 "Creation of analysis database is only supported "
                 "for profiling data with rocpd output format."
             )
+
         self._roofline_ceilings_per_workload = self.calc_roofline_ceilings()
         self._pc_sampling_data_per_workload = self.calc_pc_sampling_data()
         self._pmc_df_per_workload = self.calc_pmc_df_data()
@@ -286,6 +293,9 @@ class db_analysis(OmniAnalyze_Base):
         args = self.get_args()
 
         for workload_path in self._runs.keys():
+            if not (Path(workload_path) / "pmc_perf.csv").exists():
+                continue
+
             pmc_df = utils_analysis.process_rocpd_csv(
                 pd.read_csv(Path(workload_path) / "pmc_perf.csv")
             )
@@ -304,7 +314,9 @@ class db_analysis(OmniAnalyze_Base):
 
             pmc_df_per_workload[workload_path] = raw_pmc["pmc_perf"]
 
-        console_debug("Collected dispatch data")
+        if pmc_df_per_workload:
+            console_debug("Collected dispatch data")
+
         return pmc_df_per_workload
 
     def calc_roofline_ceilings(self) -> dict[str, dict[str, Any]]:
@@ -329,7 +341,7 @@ class db_analysis(OmniAnalyze_Base):
                         keys.append(f"{dtype}Flops")
                     elif dtype.startswith("I"):
                         keys.append(f"{dtype}Ops")
-                if dtype in MFMA_DATATYPES:
+                if dtype in MATRIX_DATATYPES:
                     if dtype.startswith("F") or dtype.startswith("B"):
                         # FP16 -> F16
                         dtype = dtype.replace("FP", "F")
@@ -571,7 +583,7 @@ class db_analysis(OmniAnalyze_Base):
         kernel_values_data = {}
         workload_values_data = {}
 
-        for workload_path in self._runs.keys():
+        for workload_path in self._pmc_df_per_workload.keys():
             pmc_df = self._pmc_df_per_workload[workload_path]
             expression_template = self._metric_expression_data_per_workload[
                 workload_path
@@ -612,7 +624,9 @@ class db_analysis(OmniAnalyze_Base):
                 )
             )
 
-        console_debug("Calculated kernel-level and workload-level metric values")
+        if kernel_values_data or workload_values_data:
+            console_debug("Calculated kernel-level and workload-level metric values")
+
         return kernel_values_data, workload_values_data
 
     def calc_metrics_data(
@@ -621,7 +635,7 @@ class db_analysis(OmniAnalyze_Base):
         metrics_info_data_per_workload: dict[str, pd.DataFrame] = {}
         metric_expression_data_per_workload: dict[str, pd.DataFrame] = {}
 
-        for workload_path in self._runs.keys():
+        for workload_path in self._pmc_df_per_workload.keys():
             gfx_arch = self._runs[workload_path].sys_info.iloc[0]["gpu_arch"]
             # for example 201 -> Wavefront
             table_names_map = dict()
@@ -680,26 +694,40 @@ class db_analysis(OmniAnalyze_Base):
             metrics_info_data_per_workload[workload_path] = metrics_info_df
             metric_expression_data_per_workload[workload_path] = expression_df
 
-        console_debug("Collected metrics data")
+        if metrics_info_data_per_workload or metric_expression_data_per_workload:
+            console_debug("Collected metrics data")
+
         return metrics_info_data_per_workload, metric_expression_data_per_workload
 
     def calc_dispatch_data(self) -> dict[str, pd.DataFrame]:
         dispatch_data_per_workload: dict[str, pd.DataFrame] = {}
 
         for workload_path in self._runs.keys():
-            dispatch_df = pd.DataFrame([
-                {
-                    "dispatch_id": row.Dispatch_ID,
-                    "kernel_name": row.Kernel_Name,
-                    "gpu_id": row.GPU_ID,
-                    "start_timestamp": row.Start_Timestamp,
-                    "end_timestamp": row.End_Timestamp,
-                }
-                for row in self._pmc_df_per_workload[workload_path].itertuples()
-            ])
-            dispatch_data_per_workload[workload_path] = dispatch_df
+            if self.pc_sampling_only():
+                trace_df = process_pc_sampling_kernel_trace(workload_path)
+                trace_df = pd.DataFrame({
+                    "dispatch_id": trace_df["Dispatch_Id"],
+                    "kernel_name": trace_df["Kernel_Name"],
+                    "gpu_id": trace_df["GPU_ID"],
+                    "start_timestamp": trace_df["Start_Timestamp"],
+                    "end_timestamp": trace_df["End_Timestamp"],
+                })
+                dispatch_data_per_workload[workload_path] = trace_df
+            else:
+                dispatch_data_per_workload[workload_path] = pd.DataFrame([
+                    {
+                        "dispatch_id": row.Dispatch_ID,
+                        "kernel_name": row.Kernel_Name,
+                        "gpu_id": row.GPU_ID,
+                        "start_timestamp": row.Start_Timestamp,
+                        "end_timestamp": row.End_Timestamp,
+                    }
+                    for row in self._pmc_df_per_workload[workload_path].itertuples()
+                ])
 
-        console_debug("Calculated dispatch data")
+        if dispatch_data_per_workload:
+            console_debug("Calculated dispatch data")
+
         return dispatch_data_per_workload
 
     def apply_pmc_filters(self) -> dict[str, pd.DataFrame]:
@@ -743,7 +771,9 @@ class db_analysis(OmniAnalyze_Base):
                     ]
             pmc_df_per_workload[workload_path] = pmc_df
 
-        console_debug("Applied analysis mode filters")
+        if pmc_df_per_workload:
+            console_debug("Applied analysis mode filters")
+
         return pmc_df_per_workload
 
     def calc_roofline_data(self) -> tuple[dict[str, pd.DataFrame], dict[str, dict]]:
@@ -751,7 +781,7 @@ class db_analysis(OmniAnalyze_Base):
         roofline_data_per_kernel: dict[str, pd.DataFrame] = {}
         roofline_data_per_workload: dict[str, dict] = {}
 
-        for workload_path in self._runs.keys():
+        for workload_path in self._pmc_df_per_workload.keys():
             pmc_df = self._pmc_df_per_workload[workload_path].copy()
             sys_info = self._runs[workload_path].sys_info.iloc[0].to_dict()
             gfx_arch = sys_info["gpu_arch"]

@@ -1,24 +1,5 @@
-// MIT License
-//
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "library/components/pthread_gotcha.hpp"
 #include "core/config.hpp"
@@ -45,8 +26,6 @@ template <>
 struct stop<rocprofsys::component::pthread_create_gotcha_t>
 {
     using type = rocprofsys::component::pthread_create_gotcha_t;
-
-    ROCPROFSYS_DEFAULT_OBJECT(stop)
 
     template <typename... Args>
     explicit stop(type&, Args&&...)
@@ -112,6 +91,20 @@ void
 pthread_gotcha::stop()
 {
     get_bundle()->stop();
+}
+
+void
+pthread_gotcha::pause()
+{
+    ::rocprofsys::component::pthread_mutex_gotcha::pause();
+    ::rocprofsys::component::pthread_create_gotcha::pause();
+}
+
+void
+pthread_gotcha::resume()
+{
+    ::rocprofsys::component::pthread_mutex_gotcha::resume();
+    ::rocprofsys::component::pthread_create_gotcha::resume();
 }
 
 std::set<pthread_gotcha::native_handle_t>

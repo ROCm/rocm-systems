@@ -271,6 +271,15 @@ write_perfetto(
         return &pmc_info.at(pmc_id);
     };
 
+    auto read_region_args = [&conn, &process, &ocfg](uint64_t region_id) {
+        if(!ocfg.annotate_args) return std::vector<types::region_arg>{};
+
+        return rocpd::read_sql_query<types::region_arg>(
+            conn,
+            fmt::format(
+                "SELECT * FROM region_args WHERE guid='{}' AND id={}", process.guid, region_id));
+    };
+
     {
         for(auto ditr : memory_copy_gen)
             for(const auto& itr : memory_copy_gen.get(ditr))
@@ -437,6 +446,7 @@ write_perfetto(
 
                 auto _pmc_events = read_pmc_events(itr.event_id);
                 auto _event      = (ocfg.annotate_kfd) ? read_event(itr.event_id) : types::event{};
+                auto _args       = read_region_args(itr.id);
 
                 auto _category = ::perfetto::DynamicCategory{get_category_string(itr.category)};
                 TRACE_EVENT_BEGIN(
@@ -496,6 +506,11 @@ write_perfetto(
                                     },
                                     _extdata.kfd.value().record);
                             }
+                        }
+
+                        for(const auto& a : _args)
+                        {
+                            rocprofiler::sdk::add_perfetto_annotation(ctx, a.name, a.value);
                         }
                     });
 

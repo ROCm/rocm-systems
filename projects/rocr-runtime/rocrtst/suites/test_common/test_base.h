@@ -85,8 +85,13 @@ class TestBase : public rocrtst::BaseRocR {
   // @Brief: Emit close output string only.  For tests with custom close.
   void ClosePrint(void);
 
+  bool Skip() const { return skip_; }
+
+  void markAsSkip() { skip_ = true; }
+
  private:
   std::string description_;
+  bool skip_;
 };
 
 #endif  // ROCRTST_SUITES_TEST_COMMON_TEST_BASE_H_

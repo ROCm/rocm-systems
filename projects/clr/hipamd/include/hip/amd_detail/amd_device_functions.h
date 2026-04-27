@@ -662,20 +662,6 @@ __device__ inline __hip_uint64_t __lanemask_eq() {
   return mask;
 }
 
-
-__device__ inline void* __local_to_generic(void* p) { return p; }
-
-#ifdef __HIP_DEVICE_COMPILE__
-__device__ inline void* __get_dynamicgroupbaseptr() {
-  // Get group segment base pointer.
-  return (char*)__local_to_generic((void*)__to_local(__builtin_amdgcn_groupstaticsize()));
-}
-#else
-__device__ void* __get_dynamicgroupbaseptr();
-#endif  // __HIP_DEVICE_COMPILE__
-
-__device__ inline void* __amdgcn_get_dynamicgroupbaseptr() { return __get_dynamicgroupbaseptr(); }
-
 // Memory Fence Functions
 __device__ inline static void __threadfence() { __builtin_amdgcn_fence(__ATOMIC_SEQ_CST, "agent"); }
 

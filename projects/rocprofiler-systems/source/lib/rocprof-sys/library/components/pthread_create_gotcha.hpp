@@ -1,29 +1,10 @@
-// MIT License
-//
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
+#include "common/defines.h"
 #include "core/common.hpp"
-#include "core/defines.hpp"
 #include "core/timemory.hpp"
 #include "library/thread_data.hpp"
 
@@ -67,8 +48,6 @@ struct pthread_create_gotcha : tim::component::base<pthread_create_gotcha, void>
         wrapper_config m_config  = {};
     };
 
-    ROCPROFSYS_DEFAULT_OBJECT(pthread_create_gotcha)
-
     // string id for component
     static std::string label() { return "pthread_create_gotcha"; }
 
@@ -76,6 +55,9 @@ struct pthread_create_gotcha : tim::component::base<pthread_create_gotcha, void>
     static void configure();
     static void shutdown();
     static void shutdown(int64_t);
+
+    static void pause();
+    static void resume();
 
     // pthread_create
     int operator()(pthread_t* thread, const pthread_attr_t* attr,
@@ -88,7 +70,8 @@ private:
 
     static std::set<native_handle_t> get_native_handles();
 
-    wrappee_t m_wrappee = &pthread_create;
+    wrappee_t         m_wrappee = &pthread_create;
+    static std::mutex s_mutex;
 };
 
 using pthread_create_gotcha_t =
