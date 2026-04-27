@@ -20,6 +20,7 @@
   `ROCSHMEM_VENDOR_PATCH_VERSION`
 * Added vendor string and backend metadata to `rocshmem_info` output
 * Added `ROCSHMEM_TEAM_WORLD` for the device code
+* Added `ROCSHMEM_TEAM_SHARED` predefined team for PEs sharing a common memory domain (same node)
 * Added new environment variables:
   * `OVERRIDE_NIC_FIRMWARE_CHECK`
   * `ROCSHMEM_GDA_NUM_QPS_PER_PE_DEFAULT_CTX`

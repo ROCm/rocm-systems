@@ -3,8 +3,8 @@
 
 #pragma once
 
+#include "common/defines.h"
 #include "core/config.hpp"
-#include "core/defines.hpp"
 #include "core/demangler.hpp"
 #include "core/state.hpp"
 #include "core/timemory.hpp"

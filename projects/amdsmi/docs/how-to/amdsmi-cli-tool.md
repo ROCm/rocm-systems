@@ -109,6 +109,11 @@ details for usage.
 
 Lists GPU information.
 
+```{note}
+`amd-smi list -e` is useful for mapping physical-to-logical GPU IDs.
+The `oam_id` field identifies the physical board slot in multi-GPU OAM chassis.
+```
+
 ```shell-session
 ~$ amd-smi list --help
 usage: amd-smi list [-h] [--json | --csv] [--file FILE] [--loglevel LEVEL]
@@ -121,8 +126,8 @@ GPU with some basic information for each VF.
 
 List Arguments:
   -h, --help               show this help message and exit
-  -e                       Enumeration mapping to other features.
-                               Includes CARD, RENDER, HSA_ID, HIP_ID, and HIP_UUID.
+  -e, --enumeration        Enumeration mapping to other features.
+                               Includes CARD, RENDER, HSA_ID, HIP_ID, HIP_UUID, and OAM_ID.
 
 Device Arguments:
   -g, --gpu GPU [GPU ...]  Select a GPU ID, BDF, or UUID from the possible choices:

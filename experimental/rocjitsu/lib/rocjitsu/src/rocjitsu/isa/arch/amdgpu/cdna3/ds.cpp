@@ -6,6 +6,7 @@
 
 #include "rocjitsu/isa/arch/amdgpu/cdna3/ds.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna3/addr_calc.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/execute_shared.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx940_cache_flags.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx9_cache_flags.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
@@ -1817,34 +1818,7 @@ DsSwizzleB32Ds::DsSwizzleB32Ds(const MachineInst *inst)
 }
 
 void DsSwizzleB32Ds::execute_impl(amdgpu::Wavefront &wf) {
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t vb = wf.vgpr_alloc().base;
-  uint32_t src_data[64];
-  for (uint32_t i = 0; i < wf.wf_size(); ++i)
-    src_data[i] = cu.read_vgpr(vb + inst_.data0, i);
-  uint32_t offset = inst_.offset0 | (inst_.offset1 << 8);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t src_lane;
-    if (offset & 0x8000) {
-      // QDMode: swizzle within 4-lane quads.
-      uint32_t and_mask = offset & 0x1F;
-      uint32_t or_mask = (offset >> 5) & 0x1F;
-      uint32_t xor_mask = (offset >> 10) & 0x1F;
-      src_lane = ((lane & and_mask) | or_mask) ^ xor_mask;
-      src_lane = (lane & ~0x3) | (src_lane & 0x3); // stay in quad
-    } else {
-      // BitMode: full-wave swizzle.
-      uint32_t and_mask = offset & 0x1F;
-      uint32_t or_mask = (offset >> 5) & 0x1F;
-      uint32_t xor_mask = (offset >> 10) & 0x1F;
-      src_lane = ((lane & and_mask) | or_mask) ^ xor_mask;
-    }
-    if (src_lane < wf.wf_size())
-      cu.write_vgpr(vb + inst_.vdst, lane, src_data[src_lane]);
-  }
+  amdgpu::execute_ds_swizzle_b32_ds(*this, wf);
 }
 
 DsPermuteB32Ds::DsPermuteB32Ds(const MachineInst *inst)
@@ -1862,26 +1836,7 @@ DsPermuteB32Ds::DsPermuteB32Ds(const MachineInst *inst)
 }
 
 void DsPermuteB32Ds::execute_impl(amdgpu::Wavefront &wf) {
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t vb = wf.vgpr_alloc().base;
-  uint32_t offset = inst_.offset0 | (inst_.offset1 << 8);
-  // Pre-read all data0 values from every lane.
-  uint32_t src_data[64];
-  for (uint32_t i = 0; i < wf.wf_size(); ++i)
-    src_data[i] = cu.read_vgpr(vb + inst_.data0, i);
-  uint32_t tmp[64] = {};
-  for (uint32_t i = 0; i < wf.wf_size(); ++i) {
-    if (!(exec & (1ULL << i)))
-      continue;
-    uint32_t addr_val = cu.read_vgpr(vb + inst_.addr, i);
-    uint32_t dst_lane = ((addr_val + offset) / 4) % wf.wf_size();
-    tmp[dst_lane] = src_data[i];
-  }
-  for (uint32_t i = 0; i < wf.wf_size(); ++i) {
-    if (exec & (1ULL << i))
-      cu.write_vgpr(vb + inst_.vdst, i, tmp[i]);
-  }
+  amdgpu::execute_ds_permute_b32_ds(*this, wf);
 }
 
 DsBpermuteB32Ds::DsBpermuteB32Ds(const MachineInst *inst)
@@ -1899,25 +1854,7 @@ DsBpermuteB32Ds::DsBpermuteB32Ds(const MachineInst *inst)
 }
 
 void DsBpermuteB32Ds::execute_impl(amdgpu::Wavefront &wf) {
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t vb = wf.vgpr_alloc().base;
-  uint32_t offset = inst_.offset0 | (inst_.offset1 << 8);
-  // Pre-read all data0 values from every lane.
-  uint32_t src_data[64];
-  for (uint32_t i = 0; i < wf.wf_size(); ++i)
-    src_data[i] = cu.read_vgpr(vb + inst_.data0, i);
-  uint32_t tmp[64] = {};
-  for (uint32_t i = 0; i < wf.wf_size(); ++i) {
-    uint32_t addr_val = cu.read_vgpr(vb + inst_.addr, i);
-    uint32_t src_lane = ((addr_val + offset) / 4) % wf.wf_size();
-    if (exec & (1ULL << src_lane))
-      tmp[i] = src_data[src_lane];
-  }
-  for (uint32_t i = 0; i < wf.wf_size(); ++i) {
-    if (exec & (1ULL << i))
-      cu.write_vgpr(vb + inst_.vdst, i, tmp[i]);
-  }
+  amdgpu::execute_ds_bpermute_b32_ds(*this, wf);
 }
 
 DsAddU64Ds::DsAddU64Ds(const MachineInst *inst)
