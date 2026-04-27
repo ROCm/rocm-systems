@@ -690,6 +690,14 @@ def load_pc_sampling_data(
 
     pc_sampling_method = None
 
+    # Resolve PID-stamped prefix (e.g. "ps_file" -> "ps_file_4510")
+    matches = sorted(
+        Path(dir_path).glob(f"{file_prefix}_*_kernel_trace.csv"),
+        key=lambda p: p.stat().st_mtime,
+    )
+    if matches:
+        file_prefix = matches[-1].name[: -len("_kernel_trace.csv")]
+
     # NB:
     #  - The default file name is subject to changes from rocprofv3
     #  - Prioritize stochastic
