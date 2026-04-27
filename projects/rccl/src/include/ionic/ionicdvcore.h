@@ -36,11 +36,15 @@ enum ionic_dv_qp_transport_mode {
   IONIC_DV_QPT_TRANSPORT_MRC
 };
 
-struct ionic_qp_init_attr_ex {
+struct ionic_dv_qp_init_attr_ex {
   /* One or more flags of enum ionic_qp_init_attr_mask */
   uint32_t comp_mask;
   /* One or more flags of enum ionic_qp_init_attr_flags */
   uint32_t ionic_flags;
+  /* enum ionic_dv_qp_transport_mode */
+  enum ionic_dv_qp_transport_mode     transport_mode;
+  /* number of RCQ paths */
+  uint8_t     num_rcq_paths;
 };
 
 #endif  // NCCL_IONICDV_CORE_H_

@@ -64,7 +64,8 @@ ncclResult_t wrap_ionicdv_qp_set_gda(struct ibv_qp *qp, bool enable_send, bool e
   IONICDV_INT_CHECK_RET_ERRNO(ionicdvSymbols, ionicdv_internal_qp_set_gda, ionicdv_internal_qp_set_gda(qp, enable_send, enable_recv), 0, "ionic_dv_qp_set_gda");
 }
 
-ncclResult_t wrap_ionicdv_create_qp_ex(struct ibv_context *context, struct ibv_qp_init_attr_ex *qp_attr, struct ionic_qp_init_attr_ex *ionic_qp_attr, struct ibv_qp **qp) {
+ncclResult_t wrap_ionicdv_create_qp_ex(struct ibv_context *context, struct ibv_qp_init_attr_ex *qp_attr, struct ionic_dv_qp_init_attr_ex *ionic_qp_attr, struct ibv_qp **qp) {
+  INFO(NCCL_NET, "wrap_ionicdv_create_qp_ex: sz ibv_qp_init_attr_ex: %d, ionic_dv_qp_init_attr_ex: %d", sizeof(struct ibv_qp_init_attr_ex), sizeof(struct ionic_dv_qp_init_attr_ex));
   IONICDV_PTR_CHECK_ERRNO(ionicdvSymbols, ionicdv_internal_create_qp_ex, ionicdv_internal_create_qp_ex(context, qp_attr, ionic_qp_attr), *qp, NULL, "ionic_dv_create_qp_ex");
 }
 

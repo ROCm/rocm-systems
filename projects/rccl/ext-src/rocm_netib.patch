@@ -259,7 +259,7 @@
 +    qpInitAttrEx.comp_mask = IBV_QP_INIT_ATTR_PD;
 +    qpInitAttrEx.pd        = base->pd;
 +
-+    struct ionic_qp_init_attr_ex ionicQpAttr;
++    struct ionic_dv_qp_init_attr_ex ionicQpAttr;
 +    memset(&ionicQpAttr, 0, sizeof(ionicQpAttr));
 +    ionicQpAttr.comp_mask    = IONIC_DV_QP_INIT_ATTR_MASK_FLAGS;
 +    ionicQpAttr.ionic_flags  = IONIC_DV_CREATE_QP_TYPE_RCCL;
