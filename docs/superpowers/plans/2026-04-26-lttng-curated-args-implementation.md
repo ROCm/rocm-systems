@@ -4053,6 +4053,7 @@ All four must pass. The coverage test will now exercise all ~72 curated APIs.
 
 ```bash
 git add projects/clr/hipamd/scripts/curated_apis.yaml \
+        projects/clr/hipamd/scripts/curated_apis_sigs.json \
         projects/clr/hipamd/src/lttng/rocm_hip_curated_tp.h \
         projects/clr/hipamd/src/lttng/rocm_trace_emit_curated.h \
         projects/clr/hipamd/src/hip_table_interface.cpp
@@ -4062,6 +4063,10 @@ Adds streams (12), events (7), kernel launch + module (11),
 memory (26), graphs (16) per spec Appendix A. dim3_packed mitigation
 applied to hipLaunchKernel/hipExtLaunchKernel/hipModuleLaunchKernel/
 hipExtModuleLaunchKernel families per §4.4.
+
+Regenerates curated_apis_sigs.json sidecar via
+regenerate-lttng-curated so downstream consumers see the full API set
+(was stale 3-API stub).
 
 Verifier passes (libclang vs header), coverage gate passes (every API
 has sentinel + IN-locals + _CURATED macro), payload test passes
