@@ -212,6 +212,19 @@ TraceControlAQLPacket::TraceControlAQLPacket(const TraceMemoryPool&          _tr
     clear();
 };
 
+SQTTBufferingPackets::SQTTBufferingPackets(aqlprofile_handle_t _handle,
+                                           int                 _shader_engine_id,
+                                           test_skip_init_t /*tag*/)
+: handle(_handle)
+, shader_engine_id(_shader_engine_id)
+, query_buffer_status_fn(nullptr)
+{
+    // Test-only constructor: skip the real aqlprofile_dl call. The test is
+    // required to overwrite query_buffer_status_fn before producer_loop runs.
+    // query_status and buffer_swap remain default-constructed because the
+    // mock submit path ignores them.
+}
+
 SQTTBufferingPackets::SQTTBufferingPackets(aqlprofile_handle_t _handle, int _shader_engine_id)
 : handle(_handle)
 , shader_engine_id(_shader_engine_id)

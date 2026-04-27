@@ -110,12 +110,16 @@ mock_query_trampoline(hsa::SQTTBufferingPackets& self)
     return it->second();
 }
 
-// Constructs a SQTTBufferingPackets in production mode then swaps the function
-// pointer so the test's lambda drives query_buffer_status.
+// Constructs a SQTTBufferingPackets via the test-skip-init constructor so we
+// never call the real aqlprofile get_buffer_packets path (which requires a
+// real GPU + valid trace handle and was the source of the CI abort at
+// aql_packet.cpp:237). The test's lambda drives query_buffer_status via the
+// function-pointer hook.
 inline std::unique_ptr<hsa::SQTTBufferingPackets>
 make_mock_packets(aqlprofile_handle_t handle, query_status_t query)
 {
-    auto pkt                    = std::make_unique<hsa::SQTTBufferingPackets>(handle, 0);
+    auto pkt = std::make_unique<hsa::SQTTBufferingPackets>(
+        handle, 0, hsa::SQTTBufferingPackets::test_skip_init);
     mock_query_map()[pkt.get()] = std::move(query);
     pkt->query_buffer_status_fn = &mock_query_trampoline;
     return pkt;

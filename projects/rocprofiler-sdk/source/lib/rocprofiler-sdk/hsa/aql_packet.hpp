@@ -252,7 +252,16 @@ struct SQTTBufferingPackets
 {
     using query_buffer_status_fn_t = std::optional<sqtt_buffer_status_t> (*)(SQTTBufferingPackets&);
 
+    // Tag type used by tests to construct an SQTTBufferingPackets without
+    // calling into aqlprofile_dl->get_buffer_packets_fn (which requires a
+    // real GPU + valid trace handle). The test must overwrite
+    // query_buffer_status_fn before the producer thread starts.
+    struct test_skip_init_t
+    {};
+    static constexpr test_skip_init_t test_skip_init{};
+
     SQTTBufferingPackets(aqlprofile_handle_t handle, int shader_engine_id);
+    SQTTBufferingPackets(aqlprofile_handle_t handle, int shader_engine_id, test_skip_init_t);
 
     void reset_current_buffer() { current_buffer = 0; };
 
