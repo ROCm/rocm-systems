@@ -61,11 +61,27 @@ _CURATED_IN_CAST_TMPL = {
     'dim3_packed': '({arg})',
 }
 
+# Provider-specific overrides for the IN-cast templates. HIP handles
+# are pointer typedefs (e.g. `hipStream_t = ihipStream_t*`), so the
+# uintptr_t cast in the default table above works. HSA handles are
+# value-type structs with a single `.handle` uint64_t member; reading
+# that member is the canonical way to get the integer-valued handle
+# (cf. HSA spec §2.3 "opaque handles"), and the (uintptr_t) cast on
+# the struct itself is not legal.
+_CURATED_IN_CAST_OVERRIDES = {
+    'hsa': {
+        'handle': '(uint64_t)(({arg}).handle)',
+    },
+}
 
-def _captured_arg_expr(arg, ident):
+
+def _captured_arg_expr(arg, ident, provider='hip'):
     """Cast `ident` (typically '__rocm_in_<name>' or the OUT param name)
     to the helper's formal-param type per the DSL `arg`."""
-    tmpl = _CURATED_IN_CAST_TMPL.get(arg['type'], '({arg})')
+    overrides = _CURATED_IN_CAST_OVERRIDES.get(provider, {})
+    tmpl = overrides.get(arg['type'])
+    if tmpl is None:
+        tmpl = _CURATED_IN_CAST_TMPL.get(arg['type'], '({arg})')
     return tmpl.format(arg=ident)
 
 
@@ -228,7 +244,8 @@ def overlay(provider, source_path, yaml_path, include_path, extra_includes=None)
             for a in api['args']:
                 if a['dir'] == 'IN':
                     captured.append(
-                        _captured_arg_expr(a, f'__rocm_in_{a["name"]}'))
+                        _captured_arg_expr(a, f'__rocm_in_{a["name"]}',
+                                           provider=provider))
                 elif a['dir'] == 'OUT':
                     # OUT args are passed by-pointer; helper deref's the
                     # pointer to read the value at exit time. Most OUT
