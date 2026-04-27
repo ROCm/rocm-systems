@@ -5036,7 +5036,7 @@ CI catches drift via the lttng-curated-gates.yml workflow (Task 13.5)."
 
 - [ ] **Step 1: Write the HSA payload test**
 
-The HSA payload test is structurally identical to Task 13's HIP version but exercises HSA APIs. Pick three representative APIs: `hsa_signal_create` (OUT-param), `hsa_signal_destroy` (single-IN-arg), and `hsa_amd_memory_pool_allocate` (OUT + IN args). Create `projects/rocr-runtime/runtime/hsa-runtime/test/lttng/test_hsa_curated_args_payload.sh`:
+The HSA payload test is structurally identical to Task 13's HIP version but exercises HSA APIs. Pick two representative APIs: `hsa_signal_create` (OUT-param) and `hsa_signal_destroy` (single-IN-arg). These two are sufficient to exercise the OUT-param + single-IN-arg payload encodings end-to-end without needing a memory-pool init sequence (agent iteration, pool iteration). Memory-pool / agent-typed APIs (e.g., `hsa_amd_memory_pool_allocate`) are covered by the all-API coverage test in Step 2 below, which exercises every curated HSA API by name. Create `projects/rocr-runtime/runtime/hsa-runtime/test/lttng/test_hsa_curated_args_payload.sh`:
 
 ```bash
 #!/usr/bin/env bash
