@@ -578,9 +578,9 @@ hipError_t hipDeviceSetSharedMemConfig(hipSharedMemConfig config) { const uint64
   ROCM_TRACE_RET_STATUS(hip::GetHipDispatchTable()->hipDeviceSetSharedMemConfig_fn(config));
   CATCH;
 }
-hipError_t hipDeviceSynchronize(void) { const uint64_t __rocm_corr = rocm_trace_next_corr_id(); rocm_trace_emit_hip_api_enter(__func__, __rocm_corr);
+hipError_t hipDeviceSynchronize(void) { const uint64_t __rocm_corr = rocm_trace_next_corr_id(); rocm_trace_emit_hip_api_enter(__func__, __rocm_corr); /* __ROCM_CURATED__: hipDeviceSynchronize */
   TRY;
-  ROCM_TRACE_RET_STATUS(hip::GetHipDispatchTable()->hipDeviceSynchronize_fn());
+  ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipDeviceSynchronize, hip::GetHipDispatchTable()->hipDeviceSynchronize_fn(), __rocm_corr);
   CATCH;
 }
 hipError_t hipDeviceTotalMem(size_t* bytes, hipDevice_t device) { const uint64_t __rocm_corr = rocm_trace_next_corr_id(); rocm_trace_emit_hip_api_enter(__func__, __rocm_corr);
@@ -1499,9 +1499,9 @@ extern "C" hipError_t hipLaunchKernel(const void* function_address, dim3 numBloc
                                                         args, sharedMemBytes, stream));
   CATCH;
 }
-hipError_t hipMalloc(void** ptr, size_t size) { const uint64_t __rocm_corr = rocm_trace_next_corr_id(); rocm_trace_emit_hip_api_enter(__func__, __rocm_corr);
+hipError_t hipMalloc(void** ptr, size_t size) { const uint64_t __rocm_corr = rocm_trace_next_corr_id(); rocm_trace_emit_hip_api_enter(__func__, __rocm_corr); /* __ROCM_CURATED__: hipMalloc */ int const __rocm_in_size = size;
   TRY;
-  ROCM_TRACE_RET_STATUS(hip::GetHipDispatchTable()->hipMalloc_fn(ptr, size));
+  ROCM_TRACE_RET_STATUS_CURATED(hipMalloc, hip::GetHipDispatchTable()->hipMalloc_fn(ptr, size), __rocm_corr, ptr, __rocm_in_size);
   CATCH;
 }
 hipError_t hipMalloc3D(hipPitchedPtr* pitchedDevPtr, hipExtent extent) { const uint64_t __rocm_corr = rocm_trace_next_corr_id(); rocm_trace_emit_hip_api_enter(__func__, __rocm_corr);
@@ -1831,9 +1831,9 @@ hipError_t hipMemcpy3DAsync(const struct hipMemcpy3DParms* p, hipStream_t stream
   CATCH;
 }
 hipError_t hipMemcpyAsync(void* dst, const void* src, size_t sizeBytes, hipMemcpyKind kind,
-                          hipStream_t stream) { const uint64_t __rocm_corr = rocm_trace_next_corr_id(); rocm_trace_emit_hip_api_enter(__func__, __rocm_corr);
+                          hipStream_t stream) { const uint64_t __rocm_corr = rocm_trace_next_corr_id(); rocm_trace_emit_hip_api_enter(__func__, __rocm_corr); /* __ROCM_CURATED__: hipMemcpyAsync */ void * const __rocm_in_dst = dst; const void * const __rocm_in_src = src; int const __rocm_in_sizeBytes = sizeBytes; hipMemcpyKind const __rocm_in_kind = kind; hipStream_t const __rocm_in_stream = stream;
   TRY;
-  ROCM_TRACE_RET_STATUS(hip::GetHipDispatchTable()->hipMemcpyAsync_fn(dst, src, sizeBytes, kind, stream));
+  ROCM_TRACE_RET_STATUS_CURATED(hipMemcpyAsync, hip::GetHipDispatchTable()->hipMemcpyAsync_fn(dst, src, sizeBytes, kind, stream), __rocm_corr, __rocm_in_dst, __rocm_in_src, __rocm_in_sizeBytes, __rocm_in_kind, __rocm_in_stream);
   CATCH;
 }
 hipError_t hipMemcpyAtoH(void* dst, hipArray_t srcArray, size_t srcOffset, size_t count) { const uint64_t __rocm_corr = rocm_trace_next_corr_id(); rocm_trace_emit_hip_api_enter(__func__, __rocm_corr);
