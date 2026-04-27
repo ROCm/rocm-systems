@@ -51,7 +51,8 @@ rocprofiler_add_integration_execute_test(
     TIMEOUT 45
     LABELS "integration-tests;pc-sampling;pause-resume"
     ENVIRONMENT "${roctx-pause-resume-env}"
-    SKIP_REGULAR_EXPRESSION "PC sampling unavailable|PC sampling configuration is not supported"
+    SKIP_REGULAR_EXPRESSION
+        "PC sampling unavailable|PC sampling configuration is not supported"
     DISABLED "${IS_PC_SAMPLING_DISABLED}"
     FIXTURES_SETUP rocprofv3-test-roctx-pause-resume-pc-sampling)
 
@@ -66,5 +67,6 @@ rocprofiler_add_integration_validate_test(
     LABELS "integration-tests;pc-sampling;pause-resume"
     FIXTURES_REQUIRED rocprofv3-test-roctx-pause-resume-pc-sampling
     FAIL_REGULAR_EXPRESSION "AssertionError"
-    SKIP_REGULAR_EXPRESSION "PC sampling unavailable|PC sampling configuration is not supported"
+    SKIP_REGULAR_EXPRESSION
+        "PC sampling unavailable|PC sampling configuration is not supported"
     DISABLED "${IS_PC_SAMPLING_DISABLED}")
