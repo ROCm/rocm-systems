@@ -26,7 +26,7 @@ jobs:
     name: Build
     runs-on:
       - self-hosted
-      - ${{ vars.RUNNER_TYPE }}
+      - mi450-golden-u24
     continue-on-error: true
     strategy:
       max-parallel: 10
@@ -169,7 +169,7 @@ jobs:
     needs: debian-buildinstall
     runs-on:
       - self-hosted
-      - ${{ vars.RUNNER_TYPE }}
+      - mi450-golden-u24
     continue-on-error: true
     strategy:
       max-parallel: 10
@@ -401,7 +401,7 @@ jobs:
     name: Build
     runs-on:
       - self-hosted
-      - ${{ vars.RUNNER_TYPE }}
+      - mi450-golden-u24
     continue-on-error: true
     strategy:
       max-parallel: 10
@@ -637,7 +637,7 @@ jobs:
     needs: [rpm-buildinstall, debian-test]
     runs-on:
       - self-hosted
-      - ${{ vars.RUNNER_TYPE }}
+      - mi450-golden-u24
     continue-on-error: true
     strategy:
       max-parallel: 10
