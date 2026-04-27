@@ -6,7 +6,6 @@
 import re
 from pathlib import Path
 
-
 def get_version_info(filepath):
     with open(filepath, "r") as f:
         content = f.read()
@@ -48,4 +47,34 @@ suppress_warnings = ["etoc.toctree"]
 external_toc_path = "./sphinx/_toc.yml"
 
 external_projects_current_project = "amdcuid"
-extensions = ["rocm_docs"]
+extensions = ["rocm_docs", "rocm_docs.doxygen"]
+
+doxygen_root = "doxygen"
+doxysphinx_enabled = True
+doxygen_project = {
+    "name": "AMD CUID C API reference",
+    "path": "doxygen/docBin/xml",
+}
+
+
+def generate_doxyfile(app, _):
+    doxyfile_in = Path(app.confdir) / doxygen_root / "Doxyfile.in"
+    doxyfile_out = Path(app.confdir) / doxygen_root / "Doxyfile"
+
+    if not doxyfile_in.exists():
+        from sphinx.errors import ConfigError
+
+        raise ConfigError(f"Missing Doxyfile.in at {doxyfile_in}")
+
+    with open(doxyfile_in) as f:
+        content = f.read()
+
+    content = content.replace("@PROJECT_NUMBER@", version_number)
+
+    with open(doxyfile_out, "w") as f:
+        f.write(content)
+
+
+def setup(app):
+    app.connect("config-inited", generate_doxyfile, priority=100)
+    return {"parallel_read_safe": True, "parallel_write_safe": True}
