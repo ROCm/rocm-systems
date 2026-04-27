@@ -1370,10 +1370,7 @@ BufferWbl2Mubuf::BufferWbl2Mubuf(const MachineInst *inst)
   num_dst_ = 0;
 }
 
-void BufferWbl2Mubuf::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
-}
+void BufferWbl2Mubuf::execute_impl(amdgpu::Wavefront &wf) { wf.cu().l1_scalar().invalidate_all(); }
 
 BufferInvMubuf::BufferInvMubuf(const MachineInst *inst)
     : Mubuf("buffer_inv", reinterpret_cast<const OpEncoding *>(inst),
@@ -1382,10 +1379,7 @@ BufferInvMubuf::BufferInvMubuf(const MachineInst *inst)
   num_dst_ = 0;
 }
 
-void BufferInvMubuf::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
-}
+void BufferInvMubuf::execute_impl(amdgpu::Wavefront &wf) { wf.cu().l1_scalar().invalidate_all(); }
 
 BufferAtomicSwapMubuf::BufferAtomicSwapMubuf(const MachineInst *inst)
     : Mubuf("buffer_atomic_swap", reinterpret_cast<const OpEncoding *>(inst),

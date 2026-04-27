@@ -21,6 +21,7 @@
 #include "rocjitsu/vm/execution_plugin.h"
 #include "simdojo/components/register_file.h"
 #include "simdojo/components/vector_reg.h"
+#include "util/bit.h"
 #include "util/log.h"
 
 #include "simdojo/sim/component.h"
@@ -111,8 +112,9 @@ public:
   /// blocks without modifying any state. The command processor calls this
   /// before dispatching to guarantee all-or-nothing workgroup placement.
   /// @param num_wfs Number of wavefronts in the workgroup.
-  /// @returns true if the CU has enough free slots and registers.
-  bool can_accept_workgroup(uint32_t num_wfs) const;
+  /// @param lds_bytes LDS bytes required by the workgroup.
+  /// @returns true if the CU has enough free slots, registers, and LDS.
+  bool can_accept_workgroup(uint32_t num_wfs, uint32_t lds_bytes = 0) const;
 
   /// @brief Execute work until the next scheduling boundary.
   ///
@@ -195,7 +197,7 @@ public:
   /// @brief Allocate a per-WG LDS region and return its base offset.
   uint32_t allocate_lds(uint32_t size_bytes) {
     uint32_t base = next_lds_alloc_;
-    uint32_t aligned = (size_bytes + 255u) & ~255u;
+    uint32_t aligned = util::align_up(size_bytes, 256u);
     lds_.zero_range(base, aligned);
     next_lds_alloc_ += aligned;
     return base;

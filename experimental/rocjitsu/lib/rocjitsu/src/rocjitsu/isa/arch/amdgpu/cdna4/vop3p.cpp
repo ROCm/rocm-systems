@@ -1359,21 +1359,39 @@ void VPkFmaF32Vop3p::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint64_t raw0 = src0.read_lane64(wf, lane);
-    uint64_t raw1 = src1.read_lane64(wf, lane);
-    uint64_t raw2 = src2.read_lane64(wf, lane);
+    uint32_t s0_lo_w = src0.read_lane(wf, lane);
+    uint32_t s0_hi_w =
+        (src0.encoding_value_ >= 256 && src0.encoding_value_ <= 511)
+            ? wf.cu().read_vgpr(wf.vgpr_alloc().base +
+                                    static_cast<uint32_t>(src0.encoding_value_ - 256) + 1,
+                                lane)
+            : s0_lo_w;
+    uint32_t s1_lo_w = src1.read_lane(wf, lane);
+    uint32_t s1_hi_w =
+        (src1.encoding_value_ >= 256 && src1.encoding_value_ <= 511)
+            ? wf.cu().read_vgpr(wf.vgpr_alloc().base +
+                                    static_cast<uint32_t>(src1.encoding_value_ - 256) + 1,
+                                lane)
+            : s1_lo_w;
+    uint32_t s2_lo_w = src2.read_lane(wf, lane);
+    uint32_t s2_hi_w =
+        (src2.encoding_value_ >= 256 && src2.encoding_value_ <= 511)
+            ? wf.cu().read_vgpr(wf.vgpr_alloc().base +
+                                    static_cast<uint32_t>(src2.encoding_value_ - 256) + 1,
+                                lane)
+            : s2_lo_w;
     bool sel0_lo = (inst_.op_sel >> 0) & 1;
     bool sel1_lo = (inst_.op_sel >> 1) & 1;
     bool sel2_lo = (inst_.op_sel >> 2) & 1;
     bool sel0_hi = (inst_.op_sel_hi >> 0) & 1;
     bool sel1_hi = (inst_.op_sel_hi >> 1) & 1;
     bool sel2_hi = inst_.op_sel_hi_2;
-    float a_lo = std::bit_cast<float>(static_cast<uint32_t>(sel0_lo ? (raw0 >> 32) : raw0));
-    float a_hi = std::bit_cast<float>(static_cast<uint32_t>(sel0_hi ? (raw0 >> 32) : raw0));
-    float b_lo = std::bit_cast<float>(static_cast<uint32_t>(sel1_lo ? (raw1 >> 32) : raw1));
-    float b_hi = std::bit_cast<float>(static_cast<uint32_t>(sel1_hi ? (raw1 >> 32) : raw1));
-    float c_lo = std::bit_cast<float>(static_cast<uint32_t>(sel2_lo ? (raw2 >> 32) : raw2));
-    float c_hi = std::bit_cast<float>(static_cast<uint32_t>(sel2_hi ? (raw2 >> 32) : raw2));
+    float a_lo = std::bit_cast<float>(sel0_lo ? s0_hi_w : s0_lo_w);
+    float a_hi = std::bit_cast<float>(sel0_hi ? s0_hi_w : s0_lo_w);
+    float b_lo = std::bit_cast<float>(sel1_lo ? s1_hi_w : s1_lo_w);
+    float b_hi = std::bit_cast<float>(sel1_hi ? s1_hi_w : s1_lo_w);
+    float c_lo = std::bit_cast<float>(sel2_lo ? s2_hi_w : s2_lo_w);
+    float c_hi = std::bit_cast<float>(sel2_hi ? s2_hi_w : s2_lo_w);
     if (inst_.neg & 1)
       a_lo = -a_lo;
     if (inst_.neg & 2)
@@ -1410,16 +1428,28 @@ void VPkMulF32Vop3p::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint64_t raw0 = src0.read_lane64(wf, lane);
-    uint64_t raw1 = src1.read_lane64(wf, lane);
+    uint32_t s0_lo_w = src0.read_lane(wf, lane);
+    uint32_t s0_hi_w =
+        (src0.encoding_value_ >= 256 && src0.encoding_value_ <= 511)
+            ? wf.cu().read_vgpr(wf.vgpr_alloc().base +
+                                    static_cast<uint32_t>(src0.encoding_value_ - 256) + 1,
+                                lane)
+            : s0_lo_w;
+    uint32_t s1_lo_w = src1.read_lane(wf, lane);
+    uint32_t s1_hi_w =
+        (src1.encoding_value_ >= 256 && src1.encoding_value_ <= 511)
+            ? wf.cu().read_vgpr(wf.vgpr_alloc().base +
+                                    static_cast<uint32_t>(src1.encoding_value_ - 256) + 1,
+                                lane)
+            : s1_lo_w;
     bool sel0_lo = (inst_.op_sel >> 0) & 1;
     bool sel1_lo = (inst_.op_sel >> 1) & 1;
     bool sel0_hi = (inst_.op_sel_hi >> 0) & 1;
     bool sel1_hi = (inst_.op_sel_hi >> 1) & 1;
-    float a_lo = std::bit_cast<float>(static_cast<uint32_t>(sel0_lo ? (raw0 >> 32) : raw0));
-    float a_hi = std::bit_cast<float>(static_cast<uint32_t>(sel0_hi ? (raw0 >> 32) : raw0));
-    float b_lo = std::bit_cast<float>(static_cast<uint32_t>(sel1_lo ? (raw1 >> 32) : raw1));
-    float b_hi = std::bit_cast<float>(static_cast<uint32_t>(sel1_hi ? (raw1 >> 32) : raw1));
+    float a_lo = std::bit_cast<float>(sel0_lo ? s0_hi_w : s0_lo_w);
+    float a_hi = std::bit_cast<float>(sel0_hi ? s0_hi_w : s0_lo_w);
+    float b_lo = std::bit_cast<float>(sel1_lo ? s1_hi_w : s1_lo_w);
+    float b_hi = std::bit_cast<float>(sel1_hi ? s1_hi_w : s1_lo_w);
     if (inst_.neg & 1)
       a_lo = -a_lo;
     if (inst_.neg & 2)
@@ -1452,16 +1482,28 @@ void VPkAddF32Vop3p::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint64_t raw0 = src0.read_lane64(wf, lane);
-    uint64_t raw1 = src1.read_lane64(wf, lane);
+    uint32_t s0_lo_w = src0.read_lane(wf, lane);
+    uint32_t s0_hi_w =
+        (src0.encoding_value_ >= 256 && src0.encoding_value_ <= 511)
+            ? wf.cu().read_vgpr(wf.vgpr_alloc().base +
+                                    static_cast<uint32_t>(src0.encoding_value_ - 256) + 1,
+                                lane)
+            : s0_lo_w;
+    uint32_t s1_lo_w = src1.read_lane(wf, lane);
+    uint32_t s1_hi_w =
+        (src1.encoding_value_ >= 256 && src1.encoding_value_ <= 511)
+            ? wf.cu().read_vgpr(wf.vgpr_alloc().base +
+                                    static_cast<uint32_t>(src1.encoding_value_ - 256) + 1,
+                                lane)
+            : s1_lo_w;
     bool sel0_lo = (inst_.op_sel >> 0) & 1;
     bool sel1_lo = (inst_.op_sel >> 1) & 1;
     bool sel0_hi = (inst_.op_sel_hi >> 0) & 1;
     bool sel1_hi = (inst_.op_sel_hi >> 1) & 1;
-    float a_lo = std::bit_cast<float>(static_cast<uint32_t>(sel0_lo ? (raw0 >> 32) : raw0));
-    float a_hi = std::bit_cast<float>(static_cast<uint32_t>(sel0_hi ? (raw0 >> 32) : raw0));
-    float b_lo = std::bit_cast<float>(static_cast<uint32_t>(sel1_lo ? (raw1 >> 32) : raw1));
-    float b_hi = std::bit_cast<float>(static_cast<uint32_t>(sel1_hi ? (raw1 >> 32) : raw1));
+    float a_lo = std::bit_cast<float>(sel0_lo ? s0_hi_w : s0_lo_w);
+    float a_hi = std::bit_cast<float>(sel0_hi ? s0_hi_w : s0_lo_w);
+    float b_lo = std::bit_cast<float>(sel1_lo ? s1_hi_w : s1_lo_w);
+    float b_hi = std::bit_cast<float>(sel1_hi ? s1_hi_w : s1_lo_w);
     if (inst_.neg & 1)
       a_lo = -a_lo;
     if (inst_.neg & 2)
@@ -1496,12 +1538,22 @@ void VPkMovB32Vop3p::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint64_t raw0 = src0.read_lane64(wf, lane);
-    uint64_t raw1 = src1.read_lane64(wf, lane);
-    uint32_t lo =
-        (inst_.op_sel & 1) ? static_cast<uint32_t>(raw0 >> 32) : static_cast<uint32_t>(raw0);
-    uint32_t hi =
-        (inst_.op_sel_hi & 2) ? static_cast<uint32_t>(raw1 >> 32) : static_cast<uint32_t>(raw1);
+    uint32_t s0_lo_w = src0.read_lane(wf, lane);
+    uint32_t s0_hi_w =
+        (src0.encoding_value_ >= 256 && src0.encoding_value_ <= 511)
+            ? wf.cu().read_vgpr(wf.vgpr_alloc().base +
+                                    static_cast<uint32_t>(src0.encoding_value_ - 256) + 1,
+                                lane)
+            : s0_lo_w;
+    uint32_t s1_lo_w = src1.read_lane(wf, lane);
+    uint32_t s1_hi_w =
+        (src1.encoding_value_ >= 256 && src1.encoding_value_ <= 511)
+            ? wf.cu().read_vgpr(wf.vgpr_alloc().base +
+                                    static_cast<uint32_t>(src1.encoding_value_ - 256) + 1,
+                                lane)
+            : s1_lo_w;
+    uint32_t lo = (inst_.op_sel & 1) ? s0_hi_w : s0_lo_w;
+    uint32_t hi = (inst_.op_sel_hi & 2) ? s1_hi_w : s1_lo_w;
     vdst.write_lane64(wf, lane, static_cast<uint64_t>(lo) | (static_cast<uint64_t>(hi) << 32));
   }
 }
