@@ -45,13 +45,17 @@ PLACEHOLDERS = {
 }
 
 # Per-API per-arg overrides for parameters where the DSL-type placeholder
-# won't compile (e.g., function pointers). The DSL 'ptr' type emits
+# won't compile (e.g., function pointers, strongly-typed enums that lack
+# implicit-int conversion). The DSL 'ptr' type emits
 # reinterpret_cast<void*>(0x1000), which is not convertible to a
-# function-pointer parameter type. Add an entry here for each such arg;
-# the verifier in Task 12 / Task 15g will reject stale entries that no
-# longer correspond to a curated API arg.
+# function-pointer parameter type; the DSL 'enum' type emits literal '0'
+# which fails for enums declared without an int conversion. Add an entry
+# here for each such arg; the verifier in Task 12 / Task 15g will reject
+# stale entries that no longer correspond to a curated API arg.
 PLACEHOLDER_OVERRIDES = {
     'hipStreamAddCallback': {'callback': 'nullptr', 'userData': 'nullptr'},
+    'hipMemcpyAsync':       {'kind': 'hipMemcpyHostToDevice'},
+    'hipMemcpy':            {'kind': 'hipMemcpyHostToDevice'},
 }
 
 def placeholder_for(api_name, arg):
