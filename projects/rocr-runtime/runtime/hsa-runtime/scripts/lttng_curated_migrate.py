@@ -73,12 +73,16 @@ _CURATED_IN_CAST_TMPL = {
 # `->handle` rather than `.handle`. The override is a callable so it
 # can dispatch on the libclang-resolved C type.
 def _hsa_handle_in_cast(arg, ident, c_type):
-    """For HSA handle IN-args, choose '.handle' (value type) or
-    '->handle' (pointer-to-struct) based on whether the param type is
-    a pointer. c_type is the libclang spelling, e.g. 'hsa_agent_t' or
-    'hsa_queue_t *'."""
+    """For HSA handle IN-args, choose the correct extraction based on
+    the libclang-resolved param type:
+      - Value-type opaque handles (hsa_agent_t, hsa_signal_t, etc.):
+        the struct has a single .handle member -- access it directly.
+      - Pointer-to-struct (hsa_queue_t*): the underlying struct is the
+        full hsa_queue_s and has NO .handle member; the pointer value
+        itself IS the queue identity, so cast pointer to uint64_t.
+    """
     if c_type and '*' in c_type:
-        return f'(uint64_t)(({ident})->handle)'
+        return f'(uint64_t)(uintptr_t)({ident})'
     return f'(uint64_t)(({ident}).handle)'
 
 
