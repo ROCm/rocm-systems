@@ -77,7 +77,7 @@ RocJpegStatus RocJpegDecoder::InitializeDecoder() {
     RocJpegStatus rocjpeg_status = ROCJPEG_STATUS_SUCCESS;
     rocjpeg_status = InitHIP(device_id_);
     if (rocjpeg_status != ROCJPEG_STATUS_SUCCESS) {
-        ERR("ERROR: Failed to initilize the HIP!");
+        ERR("ERROR: Failed to initialize the HIP!");
         return rocjpeg_status;
     }
     if (backend_ == ROCJPEG_BACKEND_HARDWARE) {

@@ -1161,7 +1161,6 @@ class CodeGenerator:
             L.append(f'  uint64_t exec = wf.exec();')
             L.append(f'  uint32_t vb = wf.vgpr_alloc().base;')
             L.append(f'  uint32_t offset = inst_.offset0 | (inst_.offset1 << 8);')
-            L.append(f'  // Pre-read all data0 values from every lane.')
             L.append(f'  uint32_t src_data[64];')
             L.append(f'  for (uint32_t i = 0; i < wf.wf_size(); ++i)')
             L.append(f'    src_data[i] = cu.read_vgpr(vb + inst_.data0, i);')
@@ -1223,14 +1222,12 @@ class CodeGenerator:
             L.append(f'    if (!(exec & (1ULL << lane))) continue;')
             L.append(f'    uint32_t src_lane;')
             L.append(f'    if (offset & 0x8000) {{')
-            L.append(f'      // QDMode: swizzle within 4-lane quads.')
             L.append(f'      uint32_t and_mask = offset & 0x1F;')
             L.append(f'      uint32_t or_mask = (offset >> 5) & 0x1F;')
             L.append(f'      uint32_t xor_mask = (offset >> 10) & 0x1F;')
             L.append(f'      src_lane = ((lane & and_mask) | or_mask) ^ xor_mask;')
             L.append(f'      src_lane = (lane & ~0x3) | (src_lane & 0x3);  // stay in quad')
             L.append(f'    }} else {{')
-            L.append(f'      // BitMode: full-wave swizzle.')
             L.append(f'      uint32_t and_mask = offset & 0x1F;')
             L.append(f'      uint32_t or_mask = (offset >> 5) & 0x1F;')
             L.append(f'      uint32_t xor_mask = (offset >> 10) & 0x1F;')
@@ -3788,7 +3785,6 @@ class CodeGenerator:
                 L.append(f'    }}')
                 L.append(f'    int32_t acc0 = static_cast<int32_t>({s2}.read_lane(wf, lane));')
                 L.append(f'    {d}.write_lane(wf, lane, static_cast<uint32_t>(acc0 + dot));')
-                L.append(f'    // Additional result registers would require cross-lane data')
             else:
                 # FP8/BF8 variants: input_type is e.g. "BF8_BF8", "BF8_FP8", etc.
                 _FP8_CONV = {'BF8': 'util::bf8_e5m2_to_f32', 'FP8': 'util::fp8_e4m3_to_f32'}
@@ -4406,16 +4402,32 @@ class CodeGenerator:
         'vector_swap',
         # Vector readlane/writelane/readfirstlane access encoding fields:
         'vector_readlane', 'vector_writelane', 'vector_readfirstlane',
+        # Vector compares have different executions between RDNA and CDNA
+        'vector_cmpx', 'vector_cmpx_class',
     })
 
-    def _can_share_execute(self, mnemonic: str) -> bool:
+    def _can_share_execute(self, mnemonic: str, encoding_name: str) -> bool:
         """Check if an instruction's execute() body can be shared across ISAs.
+
+        Args:
+            mnemonic: Instruction mnemonic (e.g., 'v_mov_b32')
+            encoding_name: Encoding name (e.g., 'ENC_VOP1', 'ENC_VOP3').
+                Used for family_shared lookup; the same mnemonic can have
+                different encodings with different sharing characteristics.
+
+        Returns:
+            True if instruction is universal or family_shared on ≥2 ISAs.
 
         An instruction is shareable if:
         1. It exists on 2+ ISAs with the same semantic class (family_shared
            or universal in the shared_plan).
         2. Its semantic class is profile-independent (no mtype/coherency calls).
         3. The current ISA is one of the ISAs that share this instruction.
+
+        Lookup strategy:
+        - Universal instructions: looked up by mnemonic only (encoding-agnostic)
+        - Family-shared instructions: looked up by (mnemonic, encoding_name) key
+        - Searches all families; returns True on first shareable match
         """
         if self.shared_plan is None:
             return False
@@ -4426,13 +4438,16 @@ class CodeGenerator:
             if info.semantic_class in self._NON_SHAREABLE_CLASSES:
                 return False
             return arch in info.isa_names and len(info.isa_names) >= 2
-        # Check family_shared
+        # Check family_shared (direct lookup using composite key)
+        inst_key = (mnemonic, encoding_name)
         for fam_insts in self.shared_plan.family_shared.values():
-            if mnemonic in fam_insts:
-                info = fam_insts[mnemonic]
+            if inst_key in fam_insts:
+                info = fam_insts[inst_key]
                 if info.semantic_class in self._NON_SHAREABLE_CLASSES:
                     return False
-                return arch in info.isa_names and len(info.isa_names) >= 2
+                if arch in info.isa_names and len(info.isa_names) >= 2:
+                    return True
+                # Continue searching other families (same mnemonic+encoding can appear in multiple families)
         return False
 
     def gen_insts(self) -> None:
@@ -4740,7 +4755,7 @@ class CodeGenerator:
                                 '    src_operands_[0] = dpp_src0_.get();\n'
                                 '  }\n'
                             )
-                        can_share = self._can_share_execute(inst.mnemonic)
+                        can_share = self._can_share_execute(inst.mnemonic, enc.enc_name)
                         if can_share:
                             enc_key = enc.enc_name.lower().replace('enc_', '')
                             tmpl_name = f'{inst.mnemonic}_{enc_key}'
@@ -4838,7 +4853,7 @@ class CodeGenerator:
                 # any instruction in this encoding delegates to a template.
                 if self.shared_plan is not None:
                     has_shared = any(
-                        self._can_share_execute(i.mnemonic)
+                        self._can_share_execute(i.mnemonic, enc.enc_name)
                         for i in all_insts
                         if self.semantics and i.name in self.semantics.instructions
                     )

@@ -1,6 +1,6 @@
 # Run ShellCheck (https://www.shellcheck.net/) over shell scripts
 
-name: hipfile-ShellCheck
+name: "hipFile ShellCheck"
 
 on:
   push:

@@ -1,7 +1,7 @@
 /*
  ***********************************************************************************************************************
  *
- *  Copyright (c) 2015-2025 Advanced Micro Devices, Inc. All Rights Reserved.
+ *  Copyright (c) Advanced Micro Devices, Inc., or its affiliates. All rights reserved.
  *
  *  Permission is hereby granted, free of charge, to any person obtaining a copy
  *  of this software and associated documentation files (the "Software"), to deal
@@ -149,7 +149,7 @@ public:
     /// Increases maximum capacity to the number of elements in the vector, plus the specified increment amount.
     /// Equivalent to this->Reserve(this->NumElements() + amount);
     ///
-    /// @param [in] amount Number of items beyond the current element count to increas the capacity to.
+    /// @param [in] amount Number of items beyond the current element count to increase the capacity to.
     ///
     /// @returns Result ErrorOutOfMemory if the operation failed.
     Result Grow(uint32 amount) { return Reserve(NumElements() + amount); }

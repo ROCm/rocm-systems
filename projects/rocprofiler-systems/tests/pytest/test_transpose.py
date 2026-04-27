@@ -24,7 +24,12 @@ import pytest
 from pathlib import Path
 from conftest import RocprofsysTest
 
-pytestmark = [pytest.mark.transpose, pytest.mark.gpu, pytest.mark.ci_enable]
+pytestmark = [
+    pytest.mark.transpose,
+    pytest.mark.gpu,
+    pytest.mark.ci_enable,  # TODO: Deprecate once TheRock switches to CTest
+    pytest.mark.rocm,
+]
 
 from rocprofsys import (
     GPUInfo,
@@ -109,7 +114,18 @@ class TestTranspose(RocprofsysTest):
     LOOPS_RUN_ARGS = ["2", "100", "50"]
 
     @pytest.mark.parametrize(
-        "mode", ["baseline", "binary_rewrite", "runtime_instrument", "sys_run"]
+        "mode",
+        [
+            "baseline",
+            "binary_rewrite",
+            pytest.param(
+                "runtime_instrument",
+                marks=pytest.mark.ci_disable(
+                    "all"
+                ),  # TODO: Deprecate once TheRock switches to CTest
+            ),
+            "sys_run",
+        ],
     )
     def test(self, mode, transpose_env, num_processes):
         result = self.run_test(
@@ -119,12 +135,14 @@ class TestTranspose(RocprofsysTest):
             rewrite_args=self.REWRITE_ARGS,
             runtime_args=self.RUNTIME_ARGS,
             check_target_arch=True,
-            mpi_ranks=num_processes,
+            launcher="mpi",
+            num_procs=num_processes,
         )
         self.assert_regex(result)
         if mode != "baseline":
             self.assert_perfetto(result)
 
+    @pytest.mark.timeout(120)
     @pytest.mark.rocpd("transpose_env")
     def test_sampling(self, transpose_env, transpose_rules, num_processes):
         result = self.run_test(
@@ -132,8 +150,8 @@ class TestTranspose(RocprofsysTest):
             target="transpose",
             env=transpose_env,
             check_target_arch=True,
-            timeout=120,
-            mpi_ranks=num_processes,
+            launcher="mpi",
+            num_procs=num_processes,
         )
         self.assert_regex(result)
         self.assert_perfetto(
@@ -143,7 +161,13 @@ class TestTranspose(RocprofsysTest):
         )
         self.assert_rocpd(result, rules_files=transpose_rules)
 
-    @pytest.mark.parametrize("mode", ["sampling", "sys_run"])
+    @pytest.mark.parametrize(
+        "mode",
+        [
+            pytest.param("sampling", marks=pytest.mark.timeout(120)),
+            pytest.param("sys_run"),
+        ],
+    )
     def test_two_kernels(self, mode, transpose_env):
         result = self.run_test(
             mode,
@@ -151,11 +175,10 @@ class TestTranspose(RocprofsysTest):
             env=transpose_env,
             run_args=self.TWO_KERNELS_RUN_ARGS,
             check_target_arch=True,
-            sampling_timeout=120,
-            sys_run_timeout=300,
         )
         self.assert_regex(result)
 
+    @pytest.mark.timeout(120)
     @pytest.mark.loops
     @pytest.mark.parametrize("mode", ["sampling", "binary_rewrite"])
     def test_loops(self, mode, transpose_env):
@@ -166,7 +189,6 @@ class TestTranspose(RocprofsysTest):
             rewrite_args=self.LOOPS_REWRITE_ARGS,
             run_args=self.LOOPS_RUN_ARGS,
             check_target_arch=True,
-            timeout=120,
         )
         self.assert_regex(
             result,
@@ -174,6 +196,7 @@ class TestTranspose(RocprofsysTest):
             rewrite_fail_regex=["0 instrumented loops in procedure transpose"],
         )
 
+    @pytest.mark.timeout(120)
     @pytest.mark.parametrize("mode", ["sampling", "sys_run"])
     @pytest.mark.parametrize(
         "iterations,tile_dim,block_rows",
@@ -191,7 +214,33 @@ class TestTranspose(RocprofsysTest):
             run_args=[str(iterations), str(tile_dim), str(block_rows)],
             fail_message=f"Config ({iterations}, {tile_dim}, {block_rows}) failed",
             check_target_arch=True,
-            timeout=120,
+        )
+        self.assert_regex(result)
+
+    @pytest.mark.rocm_min_version("7.0")
+    @pytest.mark.hip_stream
+    @pytest.mark.timeout(120)
+    @pytest.mark.parametrize("mode", ["sampling", "sys_run"])
+    @pytest.mark.parametrize(
+        "type",
+        [
+            pytest.param("group-by-queue", marks=pytest.mark.group_by_queue),
+            pytest.param("group-by-stream", marks=pytest.mark.group_by_stream),
+        ],
+    )
+    def test_hip_stream(self, mode, type, num_processes):
+        if type == "group-by-queue":
+            env = {"ROCPROFSYS_ROCM_GROUP_BY_QUEUE": "YES"}
+        else:
+            env = {"ROCPROFSYS_ROCM_GROUP_BY_QUEUE": "NO"}
+
+        result = self.run_test(
+            mode,
+            "transpose",
+            env=env,
+            check_target_arch=True,
+            launcher="mpi",
+            num_procs=num_processes,
         )
         self.assert_regex(result)
 
@@ -204,25 +253,31 @@ class TestTranspose(RocprofsysTest):
 @pytest.mark.mpi_optional("transpose")
 @pytest.mark.rocprofiler
 @pytest.mark.parametrize("mode", ["sampling", "binary_rewrite"])
+@pytest.mark.class_name("transpose-rocprofiler")
 class TestTransposeROCProfiler(RocprofsysTest):
     REWRITE_ARGS = ["-e", "-v", "2", "-E", "uniform_int_distribution"]
 
+    @pytest.mark.timeout(120)
     def test(self, mode, rocprofiler_env, gpu_info, num_processes):
         result = self.run_test(
             mode,
             "transpose",
             env=rocprofiler_env,
             check_target_arch=True,
-            timeout=120,
-            mpi_ranks=num_processes,
+            launcher="mpi",
+            num_procs=num_processes,
         )
         self.assert_regex(result)
         # Counter file device ID depends on GPU topology, search across IDs 0-9
+        counter_files = []
         for pattern in gpu_info.expected_counter_files:
-            if not any(result.output_dir.glob(pattern)):
-                pytest.fail(
-                    f"No counter file matching '{pattern}' found in {result.output_dir}"
-                )
+            matches = list(result.output_dir.glob(pattern))
+            counter_files.extend(matches if matches else [result.output_dir / pattern])
+        self.assert_file_exists(
+            counter_files,
+            description="Counter file",
+            subtest_name="Counter file check",
+        )
         if mode == "sampling":
             self.assert_perfetto(
                 result,
