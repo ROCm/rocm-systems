@@ -15,9 +15,10 @@ message("--------Share Install Prefix: " ${SHARE_INSTALL_PREFIX})
 message("--------Cpack_include_toplevel_directory: " ${CPACK_INCLUDE_TOPLEVEL_DIRECTORY})
 message("--------CPACK_COMPONENT_INCLUDE_TOPLEVEL_DIRECTORY: " ${CPACK_COMPONENT_INCLUDE_TOPLEVEL_DIRECTORY})
 
-# copy python test files into shared directory
+# Install the new tests/python/ tree into the legacy python_unittest/ path so that
+# old invocations (e.g. .../python_unittest/unit_tests.py -v) continue to work.
 install(
-    DIRECTORY ./
+    DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/../python/
     DESTINATION ${SHARE_INSTALL_PREFIX}/tests/python_unittest/
     COMPONENT ${TESTS_COMPONENT}
     USE_SOURCE_PERMISSIONS

@@ -1,6 +1,11 @@
-# How to Python Unit Tests
+# How to Run AMD SMI Python Tests
 ## Overview
-We use Python's default Python unittest testing framework. You can read more about it here [Python unittest v3.8](https://docs.python.org/3.8/library/unittest.html).
+We use Python's default unittest framework. See [Python unittest v3.8](https://docs.python.org/3.8/library/unittest.html).
+
+Tests are organized into three suites:
+- **unit** — no hardware required (BDF parsing, pure logic)
+- **integration** — requires live hardware; tests GPU/CPU/NIC/IFoE APIs by component
+- **cli** — tests the `amd-smi` CLI output
 
 ## Warning to Users
 AMD SMI Python API tests are subject to change. These tests are currently a work in progress and may not work on your system.
