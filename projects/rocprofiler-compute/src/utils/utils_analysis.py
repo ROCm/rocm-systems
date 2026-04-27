@@ -523,7 +523,7 @@ def impute_counters_iteration_multiplex(
         result_dfs.append(
             pd.concat(group_dfs, ignore_index=True)
             if group_dfs
-            else pd.DataFrame(df.columns)
+            else pd.DataFrame(columns=df.columns)
         )
 
     final_df = pd.concat(result_dfs, keys=coll_levels, axis=1, copy=False)

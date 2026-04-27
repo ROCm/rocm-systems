@@ -1238,13 +1238,10 @@ def test_impute_counters_iteration_multiplex_empty_dataframe():
     df_empty = make_multilevel_df(data_empty)
     result = utils.impute_counters_iteration_multiplex(df_empty, "kernel")
 
-    # Result is a fallback DataFrame, not actual data.
-    # It has a single column ("file1", 0) containing 15 column name strings.
+    # Empty-group fallback preserves the input schema with zero rows.
     assert isinstance(result, pd.DataFrame)
-    assert list(result.columns) == [("file1", 0)]
-    assert len(result) == 15
-    assert "Dispatch_ID" in result[("file1", 0)].values
-    assert "C1" in result[("file1", 0)].values
+    assert list(result.columns) == list(df_empty.columns)
+    assert len(result) == 0
 
 
 def test_impute_counters_iteration_multiplex_all_counters_nan():
@@ -1275,15 +1272,10 @@ def test_impute_counters_iteration_multiplex_all_counters_nan():
     df_all_nan = make_multilevel_df(data_all_nan)
     result = utils.impute_counters_iteration_multiplex(df_all_nan, "kernel")
 
-    # Group was dropped (no valid counters) -- fallback DataFrame returned.
+    # Group was dropped (no valid counters) -- empty schema-aligned frame.
     assert isinstance(result, pd.DataFrame)
-    assert list(result.columns) == [("file1", 0)]
-    assert len(result) == 15
-
-    # Original dispatch data is absent from the result
-    assert 1 not in result[("file1", 0)].values
-    assert 2 not in result[("file1", 0)].values
-    assert 3 not in result[("file1", 0)].values
+    assert list(result.columns) == list(df_all_nan.columns)
+    assert len(result) == 0
 
 
 def test_impute_counters_iteration_multiplex_no_counter_columns():
@@ -1312,14 +1304,10 @@ def test_impute_counters_iteration_multiplex_no_counter_columns():
     df_no_counters = make_multilevel_df(data_no_counters)
     result = utils.impute_counters_iteration_multiplex(df_no_counters, "kernel")
 
-    # Group was dropped (no counter columns exist) -- fallback DataFrame returned.
+    # Group was dropped (no counter columns exist) -- empty schema-aligned frame.
     assert isinstance(result, pd.DataFrame)
-    assert list(result.columns) == [("file1", 0)]
-    assert len(result) == 13
-
-    # No counter column names in the fallback values
-    assert "C1" not in result[("file1", 0)].values
-    assert "C2" not in result[("file1", 0)].values
+    assert list(result.columns) == list(df_no_counters.columns)
+    assert len(result) == 0
 
 
 def test_impute_counters_iteration_multiplex_unrecognized_policy():
