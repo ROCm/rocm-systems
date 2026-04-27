@@ -204,7 +204,7 @@ endif()
 
 find_program(HIPCC_EXECUTABLE hipcc PATHS /opt/rocm/bin ENV ROCM_PATH PATH_SUFFIXES bin)
 if(HIPCC_EXECUTABLE AND HSA_RUNTIME64)
-    set(GTEST_INC ${CMAKE_SOURCE_DIR}/third_party/googletest-src/googletest/include)
+    set(GTEST_INC ${googletest_SOURCE_DIR}/googletest/include)
     set(GTEST_LIB_DIR ${CMAKE_BINARY_DIR}/lib)
 
     # Helper: build a HIP test with hipcc + gtest
