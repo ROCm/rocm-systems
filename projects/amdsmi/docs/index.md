@@ -58,6 +58,7 @@ AMD SMI is the successor to [ROCm SMI](https://github.com/ROCm/rocm-systems/tree
 * [GPU violations](./conceptual/gpu-violations.md)
 * [Performance determinism](./conceptual/perf-determinism.md)
 * [Reliability, availability, serviceability](./conceptual/ras.md)
+* [Test suite design](./conceptual/test-design.md)
 :::
 
 :::{grid-item-card} Tutorials

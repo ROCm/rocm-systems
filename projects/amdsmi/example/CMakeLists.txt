@@ -34,30 +34,13 @@ endif()
 include(GNUInstallDirs)
 
 # add package search paths
-# ../../../ should resolve to /opt/rocm or another rocm install path
-# fall back to ROCM_DIR
-list(APPEND CMAKE_PREFIX_PATH ../../../ ${ROCM_DIR})
-list(APPEND CMAKE_LIBRARY_PATH ${ROCM_DIR}/${CMAKE_INSTALL_LIBDIR})
-
-#
-# Parent project already defined: amd_smi / amd_smi_static. No need to find_package()
-# Standalone build (cmake -S example): targets are absent so, use an installed amd_smi package
-if(TARGET amd_smi OR TARGET amd_smi_static)
-    if(TARGET amd_smi_static)
-        set(_AMDSMI_LINK_TARGET amd_smi_static)
-    else()
-        set(_AMDSMI_LINK_TARGET amd_smi)
-    endif()
-    message(STATUS "amdsmi examples: Using in-tree target: '${_AMDSMI_LINK_TARGET}' ")
-else()
+# When built as a subdirectory of the main project, the amd_smi target is already
+# available so find_package is not needed.  When built standalone (outside the
+# main project), search the build tree, the ROCm install prefix, or ROCM_DIR.
+if(NOT TARGET amd_smi AND NOT TARGET amd_smi_static)
+    list(APPEND CMAKE_PREFIX_PATH ${CMAKE_BINARY_DIR} ../../../ ${ROCM_DIR})
+    list(APPEND CMAKE_LIBRARY_PATH ${ROCM_DIR}/${CMAKE_INSTALL_LIBDIR})
     find_package(amd_smi CONFIG REQUIRED)
-    # When both shared and static are built (BUILD_BOTH_LIBS), prefer static for examples.
-    if(TARGET amd_smi_static)
-        set(_AMDSMI_LINK_TARGET amd_smi_static)
-    else()
-        set(_AMDSMI_LINK_TARGET amd_smi)
-    endif()
-    message(STATUS "amdsmi examples: From find_package() and installed prefix ")
 endif()
 
 find_package(Threads REQUIRED)
@@ -89,12 +72,17 @@ if(ENABLE_ESMI_LIB)
     target_compile_definitions(${ESMI_SAMPLE_EXE} PUBLIC ENABLE_ESMI_LIB)
 endif()
 
-set(SMI_AINIC_EXAMPLE_EXE "amd_smi_ainic_ex")
-add_executable(${SMI_AINIC_EXAMPLE_EXE} amd_smi_nic.cc)
-target_compile_definitions(${SMI_AINIC_EXAMPLE_EXE} PRIVATE ENABLE_ESMI_LIB)
-target_include_directories(${SMI_AINIC_EXAMPLE_EXE} PRIVATE ${ROCM_DIR}/include ${CMAKE_SOURCE_DIR}/src/nic/ai-nic)
-target_link_libraries(${SMI_AINIC_EXAMPLE_EXE} PRIVATE ${_AMDSMI_LINK_TARGET})
-target_link_directories(${SMI_AINIC_EXAMPLE_EXE} PRIVATE ${ROCM_DIR}/lib)
+add_executable(ainic amd_smi_nic.cc)
+target_compile_definitions(ainic PRIVATE ENABLE_ESMI_LIB)
+# When amd-smi-lib is installed, NIC headers are under /opt/rocm/include.
+# When building from source (no install), fall back to the source tree.
+target_include_directories(ainic PRIVATE
+    ${ROCM_DIR}/include
+    ${ROCM_DIR}/include/amd_smi/impl/nic
+    ${CMAKE_SOURCE_DIR}/src/nic/ai-nic
+)
+target_link_directories(ainic PRIVATE ${ROCM_DIR}/lib)
+target_link_libraries(ainic PRIVATE ${_AMDSMI_LINK_TARGET})
 
 set(SMI_FABRIC_EXAMPLE_EXE "amd_smi_fabric_ex")
 add_executable(${SMI_FABRIC_EXAMPLE_EXE} "amd_smi_fabric_example.cc")

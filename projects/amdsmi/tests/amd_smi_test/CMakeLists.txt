@@ -51,18 +51,22 @@ message("--------Proj Lib Dir: " ${PROJECT_BINARY_DIR}/lib)
 message("--------Proj Exe Dir: " ${PROJECT_BINARY_DIR}/bin)
 message("")
 
-# Other source directories
-aux_source_directory(${CMAKE_CURRENT_SOURCE_DIR}/functional functionalSources)
+# Collect all sources under unit/ and functional/ recursively so adding a new
+# test file in any subdirectory requires no CMake change.
+file(GLOB_RECURSE unitSources     ${CMAKE_CURRENT_SOURCE_DIR}/unit/*.cc)
+file(GLOB_RECURSE functSources    ${CMAKE_CURRENT_SOURCE_DIR}/functional/*.cc)
 
 set(TEST "amdsmitst")
 
 # Source files
 aux_source_directory(${CMAKE_CURRENT_SOURCE_DIR} tstSources)
 # Header file include path
-include_directories(${TEST} ${CMAKE_CURRENT_SOURCE_DIR}/.. ${ROCM_INC_DIR}/..)
+# ${CMAKE_CURRENT_SOURCE_DIR} (= tests/amd_smi_test/) lets test_base.h, test_common.h, and
+# test_utils.h be included as "test_base.h" from any subdirectory depth.
+include_directories(${TEST} ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/.. ${ROCM_INC_DIR}/..)
 
 # Build rules
-add_executable(${TEST} ${tstSources} ${functionalSources})
+add_executable(${TEST} ${tstSources} ${unitSources} ${functSources})
 # Absolute path to the committed mock CPER fixtures (functional/mock_values).
 target_compile_definitions(${TEST} PRIVATE AMDSMI_TEST_MOCK_DIR="${CMAKE_CURRENT_SOURCE_DIR}/functional/mock_values")
 target_link_libraries(
