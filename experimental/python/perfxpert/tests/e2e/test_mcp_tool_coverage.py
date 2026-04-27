@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import json
 import subprocess
-from pathlib import Path
+import sys
 from typing import Any, Dict
 
 import pytest
@@ -25,18 +25,9 @@ import pytest
 # Helpers — copied from test_mcp_protocol.py pattern
 # ---------------------------------------------------------------------------
 
-def _perfxpert_mcp_path() -> Path:
-    """Locate the perfxpert-mcp entry point."""
-    result = subprocess.run(
-        ["which", "perfxpert-mcp"],
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode == 0:
-        return Path(result.stdout.strip())
-    raise RuntimeError(
-        "perfxpert-mcp not found in PATH. Install with: pip install -e ."
-    )
+def _perfxpert_mcp_cmd() -> list[str]:
+    """Launch the MCP server from the checkout under test."""
+    return [sys.executable, "-m", "mcp_server.server"]
 
 
 class MCPClient:
@@ -113,9 +104,8 @@ def _call_tool(client: MCPClient, tool_name: str, arguments: Dict[str, Any]) -> 
 @pytest.fixture
 def mcp_proc():
     """Start a fresh perfxpert-mcp process for the test."""
-    mcp_path = _perfxpert_mcp_path()
     proc = subprocess.Popen(
-        [str(mcp_path)],
+        _perfxpert_mcp_cmd(),
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,

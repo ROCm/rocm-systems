@@ -23,7 +23,10 @@ def test_patch_apply_rejects_symlink_escape(outcomes_dir, tmp_path: Path) -> Non
 
     # Create a symlink INSIDE project_root pointing OUTSIDE
     link = project_root / "looks_local.cpp"
-    os.symlink(outside, link)
+    try:
+        os.symlink(outside, link)
+    except OSError as exc:
+        pytest.skip(f"symlink creation unavailable on this host: {exc}")
 
     with pytest.raises(PathConfinementError):
         patch_apply(

@@ -146,6 +146,7 @@ if [ "$_tool" = "mcp__perfxpert__intent_classify" ]; then
   fi
   _state_file="$(dirname "$0")/../.perfxpert-gate-state.${_sid}.json"
   printf '{"sentinel":"__GATE_SENTINEL__"}\n' > "$_state_file"
+  chmod 0644 "$_state_file" 2>/dev/null || true
 fi
 # Non-blocking exit.
 exit 0

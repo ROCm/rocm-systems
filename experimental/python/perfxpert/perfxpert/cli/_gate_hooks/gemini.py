@@ -128,6 +128,7 @@ if [ "$_tool" = "mcp_perfxpert_intent_classify" ]; then
   mkdir -p "$_state_dir"
   _state_file="${_state_dir}/perfxpert-gate-${_sid}.json"
   printf '{"sentinel":"__GATE_SENTINEL__"}\n' > "$_state_file"
+  chmod 0644 "$_state_file" 2>/dev/null || true
 fi
 
 printf '%s\n' '{"decision":"allow"}'

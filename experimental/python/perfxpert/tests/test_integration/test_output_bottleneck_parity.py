@@ -25,7 +25,7 @@ def _render_all_formats(db_path: Path, tmp_path: Path) -> dict[str, str]:
         cfg = output_config.output_config(output_file="report", output_path=str(out_dir))
         conn = RocpdImportData([str(db_path)])
         analyze_mod._execute_agentic(conn, config=cfg, output_format=fmt)
-        rendered[fmt] = (out_dir / f"report{ext}").read_text()
+        rendered[fmt] = (out_dir / f"report{ext}").read_text(encoding="utf-8")
     return rendered
 
 

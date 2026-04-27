@@ -365,7 +365,12 @@ class GeminiAdapter:
                 if isinstance(context, dict):
                     filenames = context.get("fileName")
                     if isinstance(filenames, list):
-                        filtered = [f for f in filenames if str(f) != str(agents)]
+                        relative_agents = agents.relative_to(cwd).as_posix()
+                        filtered = [
+                            f
+                            for f in filenames
+                            if str(f) not in {str(agents), relative_agents}
+                        ]
                         if len(filtered) != len(filenames):
                             context["fileName"] = filtered
                             actions.append("list-removed context.fileName entry")
@@ -505,7 +510,7 @@ class GeminiAdapter:
             raise PartialInstall(
                 f"{settings}['context']['fileName'] must be a list"
             )
-        new_entry = str(agents)
+        new_entry = agents.relative_to(_cwd).as_posix()
         if new_entry not in existing_files:
             existing_files.append(new_entry)
 

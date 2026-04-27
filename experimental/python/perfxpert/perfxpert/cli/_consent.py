@@ -58,6 +58,9 @@ def _xdg_config_home() -> Path:
     override = os.environ.get("XDG_CONFIG_HOME", "").strip()
     if override:
         return Path(override)
+    home = os.environ.get("HOME", "").strip()
+    if home:
+        return Path(home) / ".config"
     return Path.home() / ".config"
 
 

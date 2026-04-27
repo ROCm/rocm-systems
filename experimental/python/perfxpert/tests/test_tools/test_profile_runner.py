@@ -80,7 +80,10 @@ def test_validate_argv_accepts_safe_value_flags(argv):
 def test_validate_argv_rejects_symlink_output_escape(tmp_path: Path):
     outside = tmp_path.parent / "outside-profile-output"
     outside.mkdir(exist_ok=True)
-    (tmp_path / "escape").symlink_to(outside, target_is_directory=True)
+    try:
+        (tmp_path / "escape").symlink_to(outside, target_is_directory=True)
+    except OSError as exc:
+        pytest.skip(f"symlink creation unavailable on this host: {exc}")
 
     with pytest.raises(profile_runner.RocprofFlagError):
         profile_runner._validate_argv(

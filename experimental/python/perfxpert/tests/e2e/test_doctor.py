@@ -50,15 +50,15 @@ def test_doctor_succeeds_and_emits_all_clean_token():
         assert exit_code == 0, f"exit={exit_code}\noutput: {out}"
         assert "ALL CLEAN" in out, out
     assert "perfxpert" in out
-    assert re.search(r"✓|✗|\[OK\]|\[FAIL\]", out), out
+    assert re.search(r"✓|✗|\[OK\]|\[FAIL\]|\bOK\b|\bFAIL\b", out), out
 
 
 def test_doctor_emits_expected_lines():
     """Doctor output should contain expected status lines in canonical format."""
     exit_code, out = _run_doctor()
     # These patterns should always be present (regardless of whether all checks pass)
-    ok = r"(?:✓|\[OK\])"
-    fail = r"(?:✗|\[FAIL\])"
+    ok = r"(?:✓|\[OK\]|OK)"
+    fail = r"(?:✗|\[FAIL\]|FAIL)"
     essential_patterns = [
         rf"{ok} perfxpert \d+\.\d+\.\d+",
         rf"{ok} Python 3\.\d+",
@@ -76,7 +76,7 @@ def test_doctor_has_no_leading_whitespace_on_primary_lines():
     """Sub-lines (unconfigured providers) start with 2 spaces; primary lines don't."""
     exit_code, out = _run_doctor()
     for line in out.splitlines():
-        if line.startswith(("✓", "⚠", "✗", "[OK]", "[WARN]", "[FAIL]")):
+        if line.startswith(("✓", "⚠", "✗", "[OK]", "[WARN]", "[FAIL]", "OK ", "WARN ", "FAIL ")):
             assert not line.startswith(" "), f"leading whitespace on primary: {line!r}"
 
 

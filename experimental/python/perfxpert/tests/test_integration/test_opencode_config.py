@@ -15,26 +15,26 @@ def test_config_dir_exists():
 
 
 def test_opencode_json_is_valid_and_has_amd_branding():
-    data = json.loads((CONFIG_DIR / "opencode.json").read_text())
+    data = json.loads((CONFIG_DIR / "opencode.json").read_text(encoding="utf-8"))
     assert data["$schema"] == "https://opencode.ai/config.json"
     assert data["mcp"]["perfxpert"]["command"] == ["perfxpert-mcp"]
 
 
 def test_theme_json_is_valid():
-    theme = json.loads((CONFIG_DIR / "amd-theme.json").read_text())
+    theme = json.loads((CONFIG_DIR / "amd-theme.json").read_text(encoding="utf-8"))
     assert "palette" in theme
     assert theme["palette"]["primary"] == "#ED1C24"  # AMD red
 
 
 def test_mcp_json_configures_perfxpert_mcp():
-    mcp = json.loads((CONFIG_DIR / "mcp.json").read_text())
+    mcp = json.loads((CONFIG_DIR / "mcp.json").read_text(encoding="utf-8"))
     assert "mcpServers" in mcp
     assert "perfxpert" in mcp["mcpServers"]
     assert mcp["mcpServers"]["perfxpert"]["command"] == "perfxpert-mcp"
 
 
 def test_agents_md_is_nontrivial():
-    agents = (CONFIG_DIR / "AGENTS.md").read_text()
+    agents = (CONFIG_DIR / "AGENTS.md").read_text(encoding="utf-8")
     assert len(agents) > 500
     assert "perfxpert" in agents.lower()
     assert "mcp" in agents.lower()
@@ -43,5 +43,5 @@ def test_agents_md_is_nontrivial():
 
 
 def test_theme_has_prompt_prefix_branding():
-    theme = json.loads((CONFIG_DIR / "amd-theme.json").read_text())
+    theme = json.loads((CONFIG_DIR / "amd-theme.json").read_text(encoding="utf-8"))
     assert "ROCm PerfXpert" in theme.get("prompt_prefix", "")

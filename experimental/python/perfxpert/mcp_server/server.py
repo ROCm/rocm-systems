@@ -85,6 +85,19 @@ def _fn_to_tool_schema(name: str, fn: Callable) -> Tool:
 def _annotation_to_json_type(ann) -> str:
     if ann is inspect.Parameter.empty:
         return "string"
+    if isinstance(ann, str):
+        normalized = ann.strip().lower()
+        if normalized in {"str", "string"}:
+            return "string"
+        if normalized in {"int", "float"}:
+            return "number"
+        if normalized == "bool":
+            return "boolean"
+        if normalized.startswith(("list", "typing.list")):
+            return "array"
+        if normalized.startswith(("dict", "typing.dict")):
+            return "object"
+        return "string"
     if ann is str:
         return "string"
     if ann in (int, float):
@@ -105,6 +118,13 @@ def _annotation_to_json_schema(ann) -> Dict[str, Any]:
     for objects, else the tool is rejected. We infer element type from parametric
     hints (List[str], Dict[str, int]) when present, else default to string.
     """
+    if isinstance(ann, str):
+        normalized = ann.strip().lower()
+        if normalized.startswith(("list", "typing.list")):
+            return {"type": "array", "items": {"type": "string"}}
+        if normalized.startswith(("dict", "typing.dict")):
+            return {"type": "object", "additionalProperties": True}
+
     origin = getattr(ann, "__origin__", None)
     args = getattr(ann, "__args__", ()) or ()
 

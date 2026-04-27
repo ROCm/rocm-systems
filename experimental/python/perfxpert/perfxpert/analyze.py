@@ -1844,7 +1844,10 @@ def _execute_agentic(
         os.makedirs(config.output_path, exist_ok=True)
         with open(output_file, "w", encoding="utf-8") as f:
             f.write(output)
-        print(f"Analysis written to: {output_file}")
+        display_output_file = (
+            output_file.replace(os.sep, "/") if os.sep != "/" else output_file
+        )
+        print(f"Analysis written to: {display_output_file}")
         if output_format == "text":
             print(
                 "Tip: use --format webview for an interactive HTML report, "

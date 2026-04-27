@@ -136,7 +136,7 @@ def test_webview_has_single_doctype_after_roofline_section(tmp_path, monkeypatch
     analyze_mod._execute_agentic(
         conn, config=cfg, output_format="webview", source_dir=None,
     )
-    out = (out_dir / "report.html").read_text()
+    out = (out_dir / "report.html").read_text(encoding="utf-8")
 
     assert out.count("<!DOCTYPE html>") == 1
     assert out.count("</body>") == 1

@@ -83,7 +83,7 @@ def _render(
         source_dir=str(source_dir) if source_dir else None,
     )
     ext = {"json": ".json", "markdown": ".md", "webview": ".html", "text": ".txt"}[fmt]
-    return (out_dir / f"report{ext}").read_text()
+    return (out_dir / f"report{ext}").read_text(encoding="utf-8")
 
 
 # ---------------------------------------------------------------------------

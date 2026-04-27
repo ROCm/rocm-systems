@@ -33,6 +33,8 @@ def main(argv=None):
     import argparse
     import sys
 
+    _configure_stdio()
+
     from . import analyze
     from . import output_config
     from .connection import PerfxpertConnection
@@ -259,6 +261,20 @@ def main(argv=None):
     else:
         parser.print_help()
         sys.exit(1)
+
+
+def _configure_stdio() -> None:
+    """Avoid UnicodeEncodeError on non-UTF-8 Windows consoles/pipes."""
+    import sys
+
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is None:
+            continue
+        try:
+            reconfigure(errors="replace")
+        except (OSError, ValueError):
+            pass
 
 
 def _check_version() -> tuple[bool, str]:

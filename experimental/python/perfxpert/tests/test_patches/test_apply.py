@@ -20,6 +20,10 @@ _OPENCODE_DIR = _PERFXPERT_ROOT / "opencode"
 _SCRIPT = _PERFXPERT_ROOT / "scripts" / "apply-opencode-patches.sh"
 _PATCH_DIR = _PERFXPERT_ROOT / ".patches"
 _BUILD_SCRIPT = _PERFXPERT_ROOT / "scripts" / "build-bundled-opencode.sh"
+_POSIX_SCRIPT_TEST = pytest.mark.skipif(
+    os.name == "nt",
+    reason="apply-opencode-patches.sh is exercised by POSIX shell CI",
+)
 
 
 def _run(cmd: list[str], *, cwd: Path) -> subprocess.CompletedProcess[str]:
@@ -124,6 +128,7 @@ def test_every_patch_has_a_target() -> None:
             )
 
 
+@_POSIX_SCRIPT_TEST
 def test_apply_script_check_only_succeeds_with_matching_manifest(tmp_path: Path) -> None:
     repo, patch_path = _init_fake_repo(tmp_path)
     manifest = patch_path.parent / "SHA256SUMS"
@@ -147,6 +152,7 @@ def test_apply_script_check_only_succeeds_with_matching_manifest(tmp_path: Path)
     assert "manifest OK" in result.stdout
 
 
+@_POSIX_SCRIPT_TEST
 def test_apply_script_rejects_missing_manifest_entry(tmp_path: Path) -> None:
     repo, patch_path = _init_fake_repo(tmp_path)
     manifest = patch_path.parent / "SHA256SUMS"
@@ -167,6 +173,7 @@ def test_apply_script_rejects_missing_manifest_entry(tmp_path: Path) -> None:
     assert "patch manifest is empty" in result.stderr
 
 
+@_POSIX_SCRIPT_TEST
 def test_apply_script_rejects_checksum_mismatch(tmp_path: Path) -> None:
     repo, patch_path = _init_fake_repo(tmp_path)
     manifest = patch_path.parent / "SHA256SUMS"

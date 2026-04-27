@@ -14,9 +14,12 @@ test file, since the file now lives at
 experimental/python/perfxpert/tests/test_docs_tooling/test_ship_readiness.py).
 """
 
+import os
 import subprocess
 import sys
 from pathlib import Path
+
+import pytest
 
 _REPO_ROOT = Path(__file__).resolve().parents[5]
 _SCRIPTS = _REPO_ROOT / "experimental" / "python" / "perfxpert" / "scripts"
@@ -24,6 +27,10 @@ _LINT_SH = _SCRIPTS / "lint.sh"
 _LINK_CHECKER = _SCRIPTS / "link-checker.py"
 _TEST_SAMPLES = _SCRIPTS / "test-samples.py"
 _PERFXPERT_ROOT = "experimental/python/perfxpert"
+_POSIX_DOCS_TOOLING_TEST = pytest.mark.skipif(
+    os.name == "nt",
+    reason="docs shell/sample readiness runs under POSIX shell CI",
+)
 
 
 def _fmt(result: subprocess.CompletedProcess) -> str:
@@ -35,6 +42,7 @@ def _fmt(result: subprocess.CompletedProcess) -> str:
     )
 
 
+@_POSIX_DOCS_TOOLING_TEST
 def test_lint_sh_strict_exits_clean():
     """scripts/lint.sh --strict must exit 0 with no banned-string hits."""
     result = subprocess.run(
@@ -61,6 +69,7 @@ def test_link_checker_strict_exits_clean():
     )
 
 
+@_POSIX_DOCS_TOOLING_TEST
 def test_test_samples_strict_exits_clean():
     """scripts/test-samples.py --strict must report no non-executable samples."""
     result = subprocess.run(

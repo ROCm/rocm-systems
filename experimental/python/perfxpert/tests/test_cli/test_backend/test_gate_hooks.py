@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 import subprocess
 from pathlib import Path
 
@@ -206,8 +207,15 @@ def test_claude_gate_render_script_has_substitutions() -> None:
 
 
 def _run_shell_hook(script_path: Path, payload: dict[str, str]) -> subprocess.CompletedProcess[str]:
+    if os.name == "nt":
+        resolved = script_path.resolve()
+        drive = resolved.drive.rstrip(":").lower()
+        rest = resolved.as_posix()[len(f"{resolved.drive}") :].lstrip("/")
+        script_arg = f"/mnt/{drive}/{rest}"
+    else:
+        script_arg = str(script_path)
     return subprocess.run(
-        ["bash", str(script_path)],
+        ["bash", script_arg],
         input=json.dumps(payload),
         capture_output=True,
         text=True,
@@ -215,11 +223,29 @@ def _run_shell_hook(script_path: Path, payload: dict[str, str]) -> subprocess.Co
     )
 
 
+def _read_shell_file(path: Path) -> str:
+    if os.name != "nt":
+        return path.read_text()
+
+    resolved = path.resolve()
+    drive = resolved.drive.rstrip(":").lower()
+    rest = resolved.as_posix()[len(f"{resolved.drive}") :].lstrip("/")
+    path_arg = f"/mnt/{drive}/{rest}"
+    result = subprocess.run(
+        ["bash", "-lc", f"cat {shlex.quote(path_arg)}"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    return result.stdout
+
+
 def test_claude_gate_pretool_rejects_invalid_session_id(tmp_path: Path) -> None:
     hooks_dir = tmp_path / ".claude" / "hooks"
     hooks_dir.mkdir(parents=True)
     script_path = hooks_dir / "perfxpert-gate.sh"
-    script_path.write_text(claude_hook.render_gate_script())
+    script_path.write_text(claude_hook.render_gate_script(), newline="\n")
     script_path.chmod(0o755)
 
     result = _run_shell_hook(
@@ -238,8 +264,8 @@ def test_claude_gate_valid_session_id_lifts_gate(tmp_path: Path) -> None:
     hooks_dir.mkdir(parents=True)
     pre_path = hooks_dir / "perfxpert-gate.sh"
     post_path = hooks_dir / "perfxpert-gate-post.sh"
-    pre_path.write_text(claude_hook.render_gate_script())
-    post_path.write_text(claude_hook.render_post_script())
+    pre_path.write_text(claude_hook.render_gate_script(), newline="\n")
+    post_path.write_text(claude_hook.render_post_script(), newline="\n")
     pre_path.chmod(0o755)
     post_path.chmod(0o755)
 
@@ -268,7 +294,7 @@ def test_claude_gate_posttool_ignores_invalid_session_id(tmp_path: Path) -> None
     hooks_dir = tmp_path / ".claude" / "hooks"
     hooks_dir.mkdir(parents=True)
     script_path = hooks_dir / "perfxpert-gate-post.sh"
-    script_path.write_text(claude_hook.render_post_script())
+    script_path.write_text(claude_hook.render_post_script(), newline="\n")
     script_path.chmod(0o755)
 
     result = _run_shell_hook(
@@ -420,7 +446,7 @@ def test_gemini_gate_valid_session_id_lifts_gate(tmp_path: Path) -> None:
     assert post_result.returncode == 0
     state_file = proj / ".gemini" / "runtime" / f"perfxpert-gate-{session_id}.json"
     assert state_file.is_file()
-    assert GATE_STATE_LIFTED_SENTINEL in state_file.read_text()
+    assert GATE_STATE_LIFTED_SENTINEL in _read_shell_file(state_file)
 
     pre_result = _run_shell_hook(
         proj / ".gemini" / "hooks" / "perfxpert-gate.sh",

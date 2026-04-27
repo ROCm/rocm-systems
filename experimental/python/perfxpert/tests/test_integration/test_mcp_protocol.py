@@ -16,25 +16,16 @@ the server in isolation, avoiding MCP SDK client dependencies.
 
 import json
 import subprocess
+import sys
 import time
-from pathlib import Path
 from typing import Any, Dict
 
 import pytest
 
 
-def _perfxpert_mcp_path() -> Path:
-    """Locate the perfxpert-mcp entry point."""
-    result = subprocess.run(
-        ["which", "perfxpert-mcp"],
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode == 0:
-        return Path(result.stdout.strip())
-    raise RuntimeError(
-        "perfxpert-mcp not found in PATH. Install with: pip install -e ."
-    )
+def _perfxpert_mcp_cmd() -> list[str]:
+    """Launch the MCP server from the checkout under test."""
+    return [sys.executable, "-m", "mcp_server.server"]
 
 
 class MCPClient:
@@ -84,9 +75,8 @@ class MCPClient:
 @pytest.fixture
 def mcp_proc():
     """Start a fresh perfxpert-mcp process."""
-    mcp_path = _perfxpert_mcp_path()
     proc = subprocess.Popen(
-        [str(mcp_path)],
+        _perfxpert_mcp_cmd(),
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,

@@ -10,6 +10,7 @@ from unittest import mock
 import pytest
 
 from perfxpert import analyze as analyze_mod
+from perfxpert import output_config
 
 
 @pytest.fixture
@@ -116,10 +117,23 @@ def _analysis_payload():
         ("webview", ["<!DOCTYPE html>", "tile_mfma_loop", "Tune MFMA tile sizes"]),
     ],
 )
-def test_execute_agentic_runs_analysis_and_formats_reports(fmt, expected_fragments, capsys):
+def test_execute_agentic_runs_analysis_and_formats_reports(
+    fmt,
+    expected_fragments,
+    capsys,
+    monkeypatch,
+    tmp_path,
+):
     """Database-backed CLI analysis must route through the public API root."""
     fake_input = mock.Mock()
     fake_input._paths = ["/tmp/fake.db"]
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    cfg = None
+    if fmt != "text":
+        cfg = output_config.output_config(
+            output_file=f"report-{fmt}",
+            output_path=str(tmp_path),
+        )
 
     with mock.patch("perfxpert.api.agent_root", return_value=_root_output()) as agent_root:
         with mock.patch(
@@ -128,6 +142,7 @@ def test_execute_agentic_runs_analysis_and_formats_reports(fmt, expected_fragmen
         ) as build_payload:
             analyze_mod._execute_agentic(
                 input=fake_input,
+                config=cfg,
                 output_format=fmt,
                 prompt="why is matmul slow?",
                 llm_provider="openai",
@@ -143,8 +158,12 @@ def test_execute_agentic_runs_analysis_and_formats_reports(fmt, expected_fragmen
             )
 
     captured = capsys.readouterr()
+    rendered = captured.out
+    if fmt != "text":
+        ext = {"json": ".json", "markdown": ".md", "webview": ".html"}[fmt]
+        rendered = (tmp_path / f"report-{fmt}{ext}").read_text(encoding="utf-8")
     for fragment in expected_fragments:
-        assert fragment in captured.out
+        assert fragment in rendered
     agent_root.assert_called_once()
     root_kwargs = agent_root.call_args.kwargs
     assert root_kwargs["user_query"] == "why is matmul slow?"
@@ -172,22 +191,26 @@ def test_execute_agentic_runs_analysis_and_formats_reports(fmt, expected_fragmen
     )
 
 
-def test_execute_agentic_renders_structured_json_from_analysis_outputs(capsys):
+def test_execute_agentic_renders_structured_json_from_analysis_outputs(tmp_path):
     """JSON output should come from the canonical analysis formatter stack."""
     fake_input = mock.Mock()
     fake_input._paths = ["/tmp/fake.db"]
+    cfg = output_config.output_config(output_file="report", output_path=str(tmp_path))
 
     with mock.patch("perfxpert.api.agent_root", return_value=_root_output()):
         with mock.patch(
             "perfxpert.analysis.payload.build_analysis_payload",
             return_value=_analysis_payload(),
         ):
-            analyze_mod._execute_agentic(input=fake_input, format="json")
+            analyze_mod._execute_agentic(
+                input=fake_input,
+                config=cfg,
+                output_format="json",
+            )
 
-    captured = capsys.readouterr()
     import json
 
-    payload = json.loads(captured.out)
+    payload = json.loads((tmp_path / "report.json").read_text(encoding="utf-8"))
     assert payload["summary"]["primary_bottleneck"] == "compute"
     assert payload["hotspots"][0]["name"] == "tile_mfma_loop"
     assert payload["recommendations"][0]["issue"] == "Tune MFMA tile sizes"
@@ -255,7 +278,10 @@ def test_legacy_symbols_are_absent():
         importlib.import_module("perfxpert.ai_analysis")
 
 
-def test_execute_agentic_json_output_parity_across_airgap_and_llm(capsys):
+def test_execute_agentic_json_output_parity_across_airgap_and_llm(
+    monkeypatch,
+    tmp_path,
+):
     """Product-surface parity guard for ``perfxpert analyze`` JSON output.
 
     Airgap and LLM mode may differ in narrative phrasing, but the rendered
@@ -264,6 +290,7 @@ def test_execute_agentic_json_output_parity_across_airgap_and_llm(capsys):
     """
     fake_input = mock.Mock()
     fake_input._paths = ["/tmp/fake.db"]
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
 
     airgap_root = _root_output()
     airgap_root["narrative"] = "Airgap narrative."
@@ -283,18 +310,30 @@ def test_execute_agentic_json_output_parity_across_airgap_and_llm(capsys):
         ):
             analyze_mod._execute_agentic(
                 input=fake_input,
+                config=output_config.output_config(
+                    output_file="airgap",
+                    output_path=str(tmp_path),
+                ),
                 output_format="json",
                 enable_llm=False,
             )
-            airgap_payload = json.loads(capsys.readouterr().out)
+            airgap_payload = json.loads(
+                (tmp_path / "airgap.json").read_text(encoding="utf-8")
+            )
 
             analyze_mod._execute_agentic(
                 input=fake_input,
+                config=output_config.output_config(
+                    output_file="llm",
+                    output_path=str(tmp_path),
+                ),
                 output_format="json",
                 enable_llm=True,
                 llm_provider="openai",
             )
-            llm_payload = json.loads(capsys.readouterr().out)
+            llm_payload = json.loads(
+                (tmp_path / "llm.json").read_text(encoding="utf-8")
+            )
 
     assert seen_calls[0]["airgap"] is True
     assert seen_calls[1]["airgap"] is False

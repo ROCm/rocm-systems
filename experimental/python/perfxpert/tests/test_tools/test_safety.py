@@ -31,7 +31,10 @@ def test_confine_to_project_root_resolves_symlink_escape(tmp_path: Path):
     """Symlink pointing outside the project root must be rejected."""
     outside = tmp_path.parent / "outside_target"
     outside.write_text("hi")
-    (tmp_path / "link").symlink_to(outside)
+    try:
+        (tmp_path / "link").symlink_to(outside)
+    except OSError as exc:
+        pytest.skip(f"symlink creation unavailable on this host: {exc}")
     with pytest.raises(_safety.PathConfinementError):
         _safety.confine_to_project_root(tmp_path, "link")
 

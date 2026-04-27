@@ -9,11 +9,17 @@ import stat
 import subprocess
 from pathlib import Path
 
+import pytest
+
 _APP_ROOT = Path(__file__).resolve().parents[2]
 _README = _APP_ROOT / "README.md"
 _GETTING_STARTED = _APP_ROOT / "docs" / "guides" / "getting-started.md"
 _AGENTIC_MODE = _APP_ROOT / "docs" / "guides" / "agentic-mode.md"
 _INSTALL_WRAPPER = _APP_ROOT / "scripts" / "pip-install-from-git.sh"
+_POSIX_INSTALL_WRAPPER_TEST = pytest.mark.skipif(
+    os.name == "nt",
+    reason="pip-install-from-git.sh behavior is exercised by POSIX shell CI",
+)
 
 
 def _write_executable(path: Path, body: str) -> None:
@@ -40,6 +46,7 @@ def test_install_wrapper_exists_and_is_non_empty() -> None:
     )
 
 
+@_POSIX_INSTALL_WRAPPER_TEST
 def test_install_wrapper_help_mentions_supported_prereqs() -> None:
     result = subprocess.run(
         ["/bin/bash", str(_INSTALL_WRAPPER), "--help"],
@@ -65,6 +72,7 @@ def test_install_wrapper_help_mentions_supported_prereqs() -> None:
     assert 'REF=<SHA>; curl -fsSL "https://raw.githubusercontent.com/ROCm/rocm-systems/${REF}/experimental/python/perfxpert/scripts/pip-install-from-git.sh" | bash -s -- "${REF}"' in result.stdout
 
 
+@_POSIX_INSTALL_WRAPPER_TEST
 def test_install_wrapper_help_works_from_stdin() -> None:
     result = subprocess.run(
         ["/bin/bash", "-lc", f"/bin/bash -s -- --help < {shlex.quote(str(_INSTALL_WRAPPER))}"],
@@ -188,6 +196,7 @@ def test_provider_docs_keep_private_endpoint_contract_current() -> None:
         assert "ROCPD_LLM_PRIVATE" not in text
 
 
+@_POSIX_INSTALL_WRAPPER_TEST
 def test_install_wrapper_reports_missing_prereqs_when_package_manager_unavailable(tmp_path: Path) -> None:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
@@ -215,6 +224,7 @@ def test_install_wrapper_reports_missing_prereqs_when_package_manager_unavailabl
     assert "zypper install -y curl git unzip python311 python311-pip" in result.stderr
 
 
+@_POSIX_INSTALL_WRAPPER_TEST
 def test_install_wrapper_installs_missing_prereqs_with_apt_get(tmp_path: Path) -> None:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
@@ -292,6 +302,7 @@ exit 0
     ]
 
 
+@_POSIX_INSTALL_WRAPPER_TEST
 def test_install_wrapper_dnf_keeps_existing_curl_provider(tmp_path: Path) -> None:
     """RHEL/UBI images can provide `curl` through curl-minimal.
 
@@ -373,6 +384,7 @@ exit 0
     ]
 
 
+@_POSIX_INSTALL_WRAPPER_TEST
 def test_install_wrapper_rejects_python_older_than_310(tmp_path: Path) -> None:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
@@ -408,6 +420,7 @@ exit 99
     assert "no supported package manager found" in result.stderr
 
 
+@_POSIX_INSTALL_WRAPPER_TEST
 def test_install_wrapper_fails_when_python_m_pip_is_missing(tmp_path: Path) -> None:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
@@ -447,6 +460,7 @@ exit 99
     assert "zypper install -y curl git unzip python311 python311-pip" in result.stderr
 
 
+@_POSIX_INSTALL_WRAPPER_TEST
 def test_install_wrapper_rejects_externally_managed_python(tmp_path: Path) -> None:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
@@ -500,6 +514,7 @@ exit 99
     assert "zypper install -y curl git unzip python311 python311-pip" in result.stderr
 
 
+@_POSIX_INSTALL_WRAPPER_TEST
 def test_install_wrapper_reports_ready_bundle_from_pip_build(tmp_path: Path) -> None:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
@@ -560,6 +575,7 @@ exit 99
     assert "bundled patched perfxpert-code ready" in result.stderr
 
 
+@_POSIX_INSTALL_WRAPPER_TEST
 def test_install_wrapper_fails_when_bundled_opencode_is_missing_after_install(tmp_path: Path) -> None:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
@@ -616,6 +632,7 @@ exit 99
     assert "bundled patched opencode binary was not produced" in result.stderr
 
 
+@_POSIX_INSTALL_WRAPPER_TEST
 def test_install_wrapper_prefers_active_python_before_versioned_fallbacks(tmp_path: Path) -> None:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
@@ -712,6 +729,7 @@ exit 99
     assert chosen.read_text(encoding="utf-8").strip() == "python"
 
 
+@_POSIX_INSTALL_WRAPPER_TEST
 def test_install_wrapper_falls_back_to_supported_versioned_python(tmp_path: Path) -> None:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()

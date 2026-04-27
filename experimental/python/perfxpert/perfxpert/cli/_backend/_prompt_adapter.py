@@ -309,7 +309,7 @@ def atomic_write(path: Path, content: str, *, backup: bool = True) -> None:
 
     tmp = path.with_suffix(path.suffix + ".tmp")
     # Write + fsync to survive a mid-write crash.
-    with open(tmp, "w", encoding="utf-8") as fh:
+    with open(tmp, "w", encoding="utf-8", newline="\n") as fh:
         fh.write(content)
         fh.flush()
         try:

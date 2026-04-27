@@ -20,7 +20,7 @@ def _scan_tree(root: Path) -> list:
     for py in root.rglob("*.py"):
         if py.name in ALLOWED:
             continue
-        tree = ast.parse(py.read_text(), filename=str(py))
+        tree = ast.parse(py.read_text(encoding="utf-8"), filename=str(py))
         if any(_is_sdk_import(node) for node in ast.walk(tree)):
             violators.append(str(py))
     return violators
