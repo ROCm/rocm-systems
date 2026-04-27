@@ -47,14 +47,18 @@ int main() {
     int* dev_ptr = nullptr;
     hipMalloc(&dev_ptr, 4096);
 
+    // hipDeviceSynchronize — zero-arg API. Called BEFORE hipMemcpyAsync
+    // because hipMemcpyAsync triggers blit-kernel JIT which can segfault
+    // on systems where the device-side bitcode is missing the new
+    // __amd_streamOps{Increment,Decrement} externs (env issue, not LTTng).
+    // Reordering ensures hipDeviceSynchronize_args fires regardless.
+    hipDeviceSynchronize();
+
     // hipMemcpyAsync from a known src ptr to dev_ptr, KNOWN size 1024,
     // KNOWN kind hipMemcpyHostToDevice (=1), default stream (NULL).
     char host_buf[1024];
     memset(host_buf, 0, sizeof(host_buf));
     hipMemcpyAsync(dev_ptr, host_buf, 1024, hipMemcpyHostToDevice, nullptr);
-
-    // hipDeviceSynchronize — zero-arg API.
-    hipDeviceSynchronize();
 
     hipFree(dev_ptr);
     return 0;
