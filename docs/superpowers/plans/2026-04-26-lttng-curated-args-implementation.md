@@ -5194,6 +5194,28 @@ def placeholder_for(api_name, arg):
         return overrides[arg['name']]
     return PLACEHOLDERS.get(arg['type'], '0')
 
+def hsa_handle_placeholder(arg_name):
+    """Map an HSA handle arg name to a default-initialized handle expression.
+
+    The harness only knows the DSL 'handle' type, not the underlying C struct
+    name, so we dispatch on arg name. New curated APIs that introduce a new
+    HSA handle struct (e.g., hsa_amd_memory_pool_t) require a new entry here.
+
+    NOTE: A more robust long-term fix is to plumb the verifier sidecar's
+    c_type field (added in C10) into this generator and emit
+    `<c_type>{}` directly. That removes this name-based dispatch entirely.
+    """
+    if 'agent' in arg_name:
+        return 'hsa_agent_t{}'
+    if arg_name == 'queue':
+        return 'hsa_queue_t*{}'
+    if 'pool' in arg_name:
+        return 'hsa_amd_memory_pool_t{}'
+    if 'completion_signal' in arg_name or arg_name == 'signal':
+        return 'hsa_signal_t{}'
+    # Default: zero-initialized signal handle.
+    return 'hsa_signal_t{}'
+
 print('#include <hsa/hsa.h>')
 print('#include <hsa/hsa_ext_amd.h>')
 # NOTE: PLACEHOLDER_OVERRIDES above provides per-API per-arg substitutions
@@ -5210,10 +5232,11 @@ for api in parse_yaml_file('$YAML'):
         elif a['name'] in PLACEHOLDER_OVERRIDES.get(name, {}):
             args.append(PLACEHOLDER_OVERRIDES[name][a['name']])
         elif a['type'] == 'handle':
-            # Pass a default-initialized handle struct via a cast.
-            args.append('hsa_agent_t{}' if 'agent' in a['name']
-                        else ('hsa_queue_t*{}' if a['name'] == 'queue'
-                              else 'hsa_signal_t{}'))
+            # Pass a default-initialized handle struct. Dispatched by arg
+            # name because the DSL collapses all HSA handle structs to
+            # 'handle'. See hsa_handle_placeholder() for the mapping and
+            # for a note on the verifier-sidecar-based long-term fix.
+            args.append(hsa_handle_placeholder(a['name']))
         else:
             args.append(placeholder_for(name, a))
     # Wrap in a try/catch-equivalent: HSA APIs return status, never throw.
