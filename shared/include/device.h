@@ -1,5 +1,5 @@
-#ifndef _WSL_INC_WDDM_DEVICE_H_
-#define _WSL_INC_WDDM_DEVICE_H_
+#ifndef _WSL_SHARED_INC_DEVICE_H_
+#define _WSL_SHARED_INC_DEVICE_H_
 
 #include <memory>
 #include <vector>
