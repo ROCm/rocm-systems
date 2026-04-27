@@ -38,6 +38,29 @@ def detect_slurm(cfg):
     nodelist = os.environ.get("SLURM_NODELIST") or os.environ.get(
         "SLURM_JOB_NODELIST", ""
     )
+
+    # Some shells inherit only SLURM_JOB_ID (e.g. salloc env propagated
+    # through a sub-shell, an editor/agent, or `srun --export=NONE`).
+    # In that case recover the nodelist by querying the live allocation.
+    if not nodelist:
+        job_id = os.environ.get("SLURM_JOB_ID") or os.environ.get(
+            "SLURM_JOBID", ""
+        )
+        if job_id and shutil.which("squeue"):
+            result = subprocess.run(
+                ["squeue", "-j", job_id, "-h", "-o", "%N"],
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            )
+            if result.returncode == 0:
+                nodelist = result.stdout.decode(
+                    "utf-8", errors="replace"
+                ).strip()
+                if nodelist:
+                    log_verbose(
+                        "Recovered SLURM_NODELIST={} from "
+                        "SLURM_JOB_ID={} via squeue".format(nodelist, job_id)
+                    )
+
     if not nodelist:
         # No SLURM allocation; fall back to whatever hostfile exists.
         return
