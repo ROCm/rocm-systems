@@ -841,9 +841,6 @@ Modification:
         avg: SUM(TCC_EA0_RDREQ_32B_sum * 32 + TCC_EA0_RDREQ_64B_sum * 64 + TCC_EA0_RDREQ_128B_sum * 128) / SUM(End_Timestamp - Start_Timestamp)
         min: MIN((((TCC_EA0_RDREQ_32B_sum * 32) + (TCC_EA0_RDREQ_64B_sum * 64) + (TCC_EA0_RDREQ_128B_sum * 128)) / (End_Timestamp - Start_Timestamp)))
         max: MAX((((TCC_EA0_RDREQ_32B_sum * 32) + (TCC_EA0_RDREQ_64B_sum * 64) + (TCC_EA0_RDREQ_128B_sum * 128)) / (End_Timestamp - Start_Timestamp)))
-    - Remote Read Traffic:
-        min: MIN(100 * NOISE_CLAMP(TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_DRAM_sum, TCC_EA0_RDREQ_sum) / TCC_EA0_RDREQ_sum)
-        max: MAX(100 * NOISE_CLAMP(TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_DRAM_sum, TCC_EA0_RDREQ_sum) / TCC_EA0_RDREQ_sum)
 - Panel Config:
     id: 1700
   metric_table:

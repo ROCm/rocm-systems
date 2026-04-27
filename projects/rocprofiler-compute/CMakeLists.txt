@@ -412,6 +412,14 @@ add_test(
         tests/test_metric_validation.py ${WORKING_DIR_OPTION}
 )
 
+add_test(
+    NAME test_native_tool_finder
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
+        --junitxml=tests/test_native_tool_finder.xml ${COV_OPTION}
+        tests/test_native_tool_finder.py ${WORKING_DIR_OPTION}
+)
+
 set_tests_properties(
     test_profile_kernel_execution
     test_profile_dispatch
@@ -497,13 +505,13 @@ add_test(
         ${WORKING_DIR_OPTION}
 )
 
-# RDNA3.5 memory chart CLI (Rich) — no GPU required
+# Memory chart CLI renderers (gfx9 plotille + gfx11 Rich) — no GPU required
 add_test(
-    NAME test_mem_chart_gfx11
+    NAME test_mem_chart
     COMMAND
         ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
-        --junitxml=tests/test_mem_chart_gfx11.xml ${COV_OPTION}
-        tests/test_mem_chart_gfx11.py ${WORKING_DIR_OPTION}
+        --junitxml=tests/test_mem_chart.xml ${COV_OPTION} tests/test_mem_chart.py
+        ${WORKING_DIR_OPTION}
 )
 
 add_test(
@@ -535,6 +543,18 @@ add_test(
     COMMAND
         ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
         --junitxml=tests/test_analysis_db.xml ${COV_OPTION} tests/test_analysis_db.py
+        ${WORKING_DIR_OPTION}
+)
+
+# -----------------------------------
+# Metrics unit tests
+# -----------------------------------
+
+add_test(
+    NAME test_metric_utils
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
+        --junitxml=tests/test_metric_utils.xml ${COV_OPTION} tests/test_metric_utils.py
         ${WORKING_DIR_OPTION}
 )
 
@@ -667,11 +687,12 @@ if(${ENABLE_COVERAGE})
         test_pc_sampling
         test_analyze_commands
         test_analyze_workloads
+        test_metric_utils
         test_L1_cache_counters
         test_num_xcds_spec_class
         test_num_xcds_cli_output
         test_utils
-        test_mem_chart_gfx11
+        test_mem_chart
         test_roofline_calc_ai_analyze
         test_data_imputation
         test_autogen_config
@@ -875,21 +896,23 @@ if(NOT SKIP_NATIVE_TOOL_BUILD)
 else()
     # Install source files for runtime compilation
     install(
-        FILES src/lib/rocprofiler_compute_tool.cpp src/lib/helper.cpp src/lib/helper.hpp
+        DIRECTORY src/lib/
         DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}/lib
         COMPONENT main
+        PATTERN "_build" EXCLUDE
+        PATTERN "tests" EXCLUDE
     )
 endif()
 
-# top-level symlink for bin/rocprof-compute
+# top-level bin/rocprof-compute launcher (re-execs into libexec entrypoint)
+configure_file(
+    ${PROJECT_SOURCE_DIR}/cmake/${EXECUTABLE_NAME}.in
+    ${PROJECT_BINARY_DIR}/${EXECUTABLE_NAME}
+    @ONLY
+)
 install(
-    CODE
-        "execute_process(
-    COMMAND bash -c \"set -e
-    cd \$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}
-    mkdir -p ${CMAKE_INSTALL_BINDIR}
-    ln -sf ../${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}/${EXECUTABLE_NAME} ${CMAKE_INSTALL_BINDIR}/${EXECUTABLE_NAME}
-    \")"
+    PROGRAMS ${PROJECT_BINARY_DIR}/${EXECUTABLE_NAME}
+    DESTINATION ${CMAKE_INSTALL_BINDIR}
     COMPONENT main
 )
 

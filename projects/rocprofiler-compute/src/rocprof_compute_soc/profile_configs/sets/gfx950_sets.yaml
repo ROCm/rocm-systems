@@ -5,8 +5,8 @@ sets:
   metric:
   - 11.2.2: SALU Utilization
   - 11.2.3: VALU Utilization
-  - 11.2.5: VMEM Utilization
-  - 11.2.6: Branch Utilization
+  - 11.2.6: VMEM Utilization
+  - 11.2.7: Branch Utilization
 - title: Compute Throughput FLOPS
   set_option: compute_thruput_flops
   description: Placeholder
@@ -23,8 +23,8 @@ sets:
   metric:
   - 2.1.18: Theoretical LDS Bandwidth
   - 2.1.19: LDS Bank Conflicts/Access
-  - 16.1.2: Utilization
-  - 17.1.0: Utilization
+  - 16.1.2: vL1D Cache Utilization
+  - 17.1.0: L2 Cache Utilization
 - title: Launch Stats
   set_option: launch_stats
   description: Placeholder
