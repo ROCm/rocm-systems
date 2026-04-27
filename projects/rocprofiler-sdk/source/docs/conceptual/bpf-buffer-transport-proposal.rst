@@ -26,6 +26,15 @@ kernel ``BPF_MAP_TYPE_RINGBUF``. ROCprofiler-SDK buffered tracing producers and 
 in-process, so using a kernel BPF map would add file descriptors, syscalls, kernel feature checks,
 and dependency or permission questions without removing a process boundary.
 
+Decision criteria
+-----------------
+
+Transport recommendations in this proposal family are ranked by lowest
+producer-side time overhead first. Memory footprint is the second criterion and
+is used to choose between designs that are close on producer time. This ordering
+keeps the dispatch/API hot path as the primary constraint while still accounting
+for long-running tools with many active buffers.
+
 Current buffer behavior
 -----------------------
 
@@ -108,13 +117,110 @@ layout intact.
 Recommendation
 --------------
 
-The lowest-footprint proposal is Option D because it changes only the current implementation. The best
-balance for a draft implementation is Option B: it demonstrates the BPF buffer idea while avoiding a
-kernel BPF dependency and preserving the SDK ABI. The fastest design for sustained high-rate tracing
-is Option C, but it should be treated as a second-stage design because its thread lifecycle and flush
-ordering semantics are more invasive than a buffer backend swap.
+Using the required ordering, Option C is the strongest long-term direction
+because per-thread or per-producer shards remove shared producer contention from
+the hot path. Option B is still useful as a narrower BPF-style draft because it
+shows how much footprint can be saved by colocating record headers and payloads
+without changing the public callback ABI. Option D is the least invasive and
+lowest review-risk path, but it is not the recommended performance direction
+unless implementation risk outweighs producer overhead.
 
-Use this draft to answer one question first: does the BPF-style in-process slot layout reduce producer
-overhead enough to justify replacing the current header-vector buffer? If benchmark data does not show
-a meaningful win, the safer path is to tune the current double buffer and keep BPF maps out of the
-in-process data path.
+Use this draft to answer one question first: does the BPF-style in-process slot
+layout reduce producer overhead enough to justify replacing the current
+header-vector buffer when compared with the faster per-producer ring proposal?
+If benchmark data shows that BPF-style storage wins mainly on footprint but not
+on producer time, keep it as a fallback or intermediate transport rather than
+the primary rocprofiler-sdk buffer direction.
+
+Benchmark note
+--------------
+
+The cross-proposal microbenchmark uses one unit for time, nanoseconds per
+record, and one unit for footprint, MiB. With 64-byte payload records and 131072
+records per round, the BPF-style buffer reduces storage from 136.07 MiB to
+12.01 MiB, but it does not beat the per-producer ring on producer time:
+
+.. list-table::
+   :header-rows: 1
+
+   * - Producers
+     - Transport
+     - Emit ns/record
+     - Total ns/record
+     - Storage MiB
+     - Max RSS MiB
+   * - 1
+     - Current
+     - 24.518
+     - 27.016
+     - 136.07
+     - 141.81
+   * - 1
+     - BPF-style
+     - 17.299
+     - 31.173
+     - 12.01
+     - 17.83
+   * - 1
+     - Ring shared mmap
+     - 4.335
+     - 5.909
+     - 12.00
+     - 17.91
+   * - 1
+     - LTTng-UST inactive
+     - 29.520
+     - 31.953
+     - 136.07
+     - 141.81
+   * - 4
+     - Current
+     - 243.692
+     - 246.250
+     - 136.07
+     - 141.96
+   * - 4
+     - BPF-style
+     - 167.720
+     - 180.740
+     - 12.01
+     - 17.97
+   * - 4
+     - Ring shared mmap
+     - 5.970
+     - 9.315
+     - 12.02
+     - 17.79
+   * - 4
+     - LTTng-UST inactive
+     - 288.077
+     - 290.512
+     - 136.07
+     - 141.84
+   * - 16
+     - Current
+     - 260.940
+     - 263.424
+     - 136.07
+     - 142.28
+   * - 16
+     - BPF-style
+     - 150.954
+     - 167.847
+     - 12.01
+     - 18.00
+   * - 16
+     - Ring shared mmap
+     - 5.519
+     - 11.174
+     - 12.06
+     - 18.04
+   * - 16
+     - LTTng-UST inactive
+     - 294.816
+     - 297.481
+     - 136.07
+     - 142.29
+
+The resulting recommendation is ring first for lowest overhead, then BPF-style
+when low footprint is the stronger secondary constraint.
