@@ -7,8 +7,9 @@
 #ifndef _NCCL_DEVICE_GIN_BARRIER__FUNCS_H_
 #define _NCCL_DEVICE_GIN_BARRIER__FUNCS_H_
 #include "gin_barrier__types.h"
+#include "comm__types.h"
 
-#if __CUDACC__ && !defined(__HIP_PLATFORM_AMD__)
+#if __CUDACC__
 template<typename Coop>
 NCCL_DEVICE_INLINE ncclGinBarrierSession<Coop>::ncclGinBarrierSession(
     Coop coop, ncclGin net, ncclTeam team, ncclGinBarrierHandle handle, uint32_t barrierIndex
@@ -36,7 +37,7 @@ NCCL_DEVICE_INLINE ncclGinBarrierSession<Coop>::~ncclGinBarrierSession() {
 }
 #endif
 
-#if __CUDACC__ && !defined(__HIP_PLATFORM_AMD__)
+#if __CUDACC__
 template<typename Coop>
 NCCL_DEVICE_INLINE void ncclGinBarrierSession<Coop>::sync(Coop, cuda::memory_order ord, ncclGinFenceLevel fence) {
   this->coop.sync();

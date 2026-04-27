@@ -7,7 +7,9 @@
 #ifndef _NCCL_GIN_DEVICE_HOST_COMMON_H_
 #define _NCCL_GIN_DEVICE_HOST_COMMON_H_
 
+#if !defined(__HIP_PLATFORM_AMD__)
 #include <cuda.h>
+#endif
 #include "../net_device.h"
 #include "../core_tmp.h"  // for ncclGin{Signal|Counter}_t
 

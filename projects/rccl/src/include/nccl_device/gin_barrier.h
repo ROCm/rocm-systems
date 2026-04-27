@@ -30,9 +30,7 @@ struct ncclGinBarrierSession: ncclGinBarrierSession_internal<Coop> {
 
   ncclGinBarrierSession(ncclGinBarrierSession const&) = delete; // Sessions are not copyable
 
-#if !defined(__HIP_PLATFORM_AMD__)
   NCCL_DEVICE_INLINE void sync(Coop, cuda::memory_order, ncclGinFenceLevel);
-#endif
 };
 #endif
 

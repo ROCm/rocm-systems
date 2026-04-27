@@ -7,19 +7,13 @@
 #ifndef _NCCL_DEVICE_GIN_PROXY_H_
 #define _NCCL_DEVICE_GIN_PROXY_H_
 
-#if defined(__HIP_PLATFORM_AMD__)
-// GIN proxy is not supported on HIP
-#else // !__HIP_PLATFORM_AMD__
-
-#if defined(__HIP_PLATFORM_AMD__)
-// GIN proxy is not supported on HIP
-#else // !__HIP_PLATFORM_AMD__
-
 //#include <config.h>
 
 #include <cstdint>
+#if !defined(__HIP_PLATFORM_AMD__)
 #include <cuda_runtime.h>
 #include <cooperative_groups.h>
+#endif
 #include "nccl.h"
 #include "nccl_device/utility.h"
 #include "../gin_device_host_common.h"
@@ -58,10 +52,14 @@ NCCL_DEVICE_INLINE void postGfd(Coop coop, ncclGinProxyGpuCtx_t* proxyCtx, ncclG
     while (queueSize <= idx - ci.load(cuda::memory_order_relaxed)) {
     }
     idx &= queueSize - 1;
-// 4x16 byte store with the write-through cache hint
+// 4x16 byte store
 #pragma unroll
     for (uint8_t i = 0; i < 4; i++) {
+#if defined(__HIP_PLATFORM_AMD__)
+      *((uint4*)&q[idx] + i) = ((uint4*)gfd)[i];
+#else
       __stwt((uint4*)&q[idx] + i, ((uint4*)gfd)[i]);
+#endif
     }
   }
 }
@@ -239,9 +237,5 @@ struct ncclGinApi_PutValue<NCCL_NET_DEVICE_GIN_PROXY> {
                                    signalOp, signalOpArg, false, 0, required, given);
   }
 };
-
-#endif // !__HIP_PLATFORM_AMD__
-
-#endif // !__HIP_PLATFORM_AMD__
 
 #endif

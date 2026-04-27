@@ -255,6 +255,28 @@ NCCL_HOST_DEVICE_INLINE constexpr int toAtomicBuiltinOrder(std::memory_order ord
     default: return __ATOMIC_SEQ_CST;
   }
 }
+
+NCCL_HOST_DEVICE_INLINE constexpr cuda::memory_order acquireOrderOf(cuda::memory_order ord) {
+  return ord == cuda::memory_order_release ? cuda::memory_order_relaxed :
+         ord == cuda::memory_order_acq_rel ? cuda::memory_order_acquire :
+         ord;
+}
+NCCL_HOST_DEVICE_INLINE constexpr cuda::memory_order releaseOrderOf(cuda::memory_order ord) {
+  return ord == cuda::memory_order_acquire ? cuda::memory_order_relaxed :
+         ord == cuda::memory_order_acq_rel ? cuda::memory_order_release :
+         ord;
+}
+
+NCCL_HOST_DEVICE_INLINE constexpr cuda::memory_order toCudaOrder(std::memory_order ord) {
+  switch (ord) {
+    case std::memory_order_relaxed: return cuda::memory_order_relaxed;
+    case std::memory_order_acquire: return cuda::memory_order_acquire;
+    case std::memory_order_release: return cuda::memory_order_release;
+    case std::memory_order_acq_rel: return cuda::memory_order_acq_rel;
+    case std::memory_order_seq_cst: return cuda::memory_order_seq_cst;
+    default: return cuda::memory_order_seq_cst;
+  }
+}
 #else
 NCCL_HOST_DEVICE_INLINE constexpr cuda::memory_order acquireOrderOf(cuda::memory_order ord) {
   return ord == cuda::memory_order_release ? cuda::memory_order_relaxed :

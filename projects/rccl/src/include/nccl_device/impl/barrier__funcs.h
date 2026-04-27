@@ -91,17 +91,16 @@ NCCL_DEVICE_INLINE void ncclBarrierSession<Coop>::sync(Coop, std::memory_order o
 NCCL_DEVICE_INLINE void ncclBarrierSession<Coop>::sync(Coop, cuda::memory_order ord, ncclGinFenceLevel fence) {
 #endif
   if (this->innerLsaBar.present) {
-#if __HIP_PLATFORM_AMD__
-    this->innerLsaBar.thing.sync(this->coop, ord);
-#else
     this->innerLsaBar.thing.sync(this->coop, this->outerGinBar.present ? nccl::utility::releaseOrderOf(ord) : ord);
-#endif
   }
-#if !defined(__HIP_PLATFORM_AMD__)
   if (this->outerGinBar.present) {
-    this->outerGinBar.thing.sync(this->coop, this->innerLsaBar.present ? nccl::utility::acquireOrderOf(ord) : ord, fence);
-  }
+#if __HIP_PLATFORM_AMD__
+    auto ginOrd = nccl::utility::toCudaOrder(this->innerLsaBar.present ? nccl::utility::acquireOrderOf(ord) : ord);
+#else
+    auto ginOrd = this->innerLsaBar.present ? nccl::utility::acquireOrderOf(ord) : ord;
 #endif
+    this->outerGinBar.thing.sync(this->coop, ginOrd, fence);
+  }
 }
 #endif
 
