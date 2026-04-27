@@ -1,0 +1,56 @@
+# Metric interpretation thresholds — used by classification tools to label
+# a measurement as high/medium/low priority.
+# Source: llm-reference-guide.md §"GPU Utilization Interpretation" (line 854)
+# and §"Wave Occupancy Interpretation" (lines 865-893).
+#
+# Interpretation: a measurement >= "high" is GOOD (green); between "medium" and
+# "high" is yellow; < "low" is RED (high-priority optimization opportunity).
+
+gpu_utilization_pct:
+  high: 0.90       # > 90% is excellent
+  medium: 0.70     # 70-90% is acceptable
+  low: 0.50        # < 50% is poor — strong optimization opportunity
+  unit: fraction
+  description: "GRBM_GUI_ACTIVE / GRBM_COUNT; measures kernel-side GPU busyness"
+
+wave_occupancy_pct:
+  high: 0.75       # > 75% of max waves/CU
+  medium: 0.50     # 50-75% acceptable
+  low: 0.25        # < 25% very poor; VGPRs/LDS likely too high
+  unit: fraction
+  description: "Avg waves per CU normalized to theoretical max (128 on CDNA3)"
+
+avg_waves_per_cu:
+  high: 24         # ~75% of 32 max-per-EU on CDNA3
+  medium: 16       # 50%
+  low: 8           # 25% — latency-bound signature
+  unit: waves
+  description: "SQ_WAVES / GRBM_COUNT (time-averaged)"
+
+valu_utilization_pct:
+  high: 0.70       # compute-bound VALU signature
+  medium: 0.40
+  low: 0.20
+  unit: fraction
+  description: "SQ_INSTS_VALU / total_cycles; compute-bound if > 0.70"
+
+mfma_utilization_pct:
+  high: 0.50       # compute-bound MFMA signature (matrix workloads)
+  medium: 0.25
+  low: 0.10
+  unit: fraction
+  description: "MFMA instruction throughput as fraction of peak"
+
+hbm_bandwidth_utilization:
+  high: 0.70       # near-peak HBM bandwidth — memory-bound confirmed
+  medium: 0.40
+  low: 0.20
+  unit: fraction-of-peak
+  description: "Achieved HBM BW / peak HBM BW; >0.70 = HBM-bound"
+
+l2_hit_rate:
+  high: 0.90
+  medium: 0.70
+  low: 0.50        # < 50% L2 hit rate indicates working-set larger than L2
+  unit: fraction
+  description: "TCC_HIT / (TCC_HIT + TCC_MISS)"

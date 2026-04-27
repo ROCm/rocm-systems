@@ -1,0 +1,32 @@
+# rocprofv3-specific counter collection rules and isolation requirements.
+# Source: llm-reference-guide.md §"Hardware Counter Per-Block Limits" (lines 14-65)
+#         and CLAUDE.md §"Hardware Counter Per-Block Limits (error code 38)".
+#
+# These rules encode the behavior enforced by analyze.py:_split_pmc_into_passes()
+# and source_analyzer.py:_pmc_commands().
+
+isolation_rules:
+  - rule: "FETCH_SIZE requires its own dedicated pass"
+    counters: ["FETCH_SIZE"]
+    reason: "FETCH_SIZE expands to 3 TCC hardware counters (TCC_BUBBLE + TCC_EA0_RDREQ + GRBM_GUI_ACTIVE). Combining with other TCC counters or WRITE_SIZE triggers error 38."
+    severity: error
+
+  - rule: "WRITE_SIZE requires its own dedicated pass"
+    counters: ["WRITE_SIZE"]
+    reason: "WRITE_SIZE expands to 2 TCC hardware counters (TCC_EA0_WRREQ + TCC_EA0_WRREQ_64B). Combining with other TCC counters or FETCH_SIZE triggers error 38."
+    severity: error
+
+  - rule: "FETCH_SIZE and WRITE_SIZE MUST NOT share a pass"
+    counters: ["FETCH_SIZE", "WRITE_SIZE"]
+    reason: "Together they consume 5 TCC hardware counters across 32 TCC channel instances (MI300X) — exceeds TCC per-pass limit."
+    severity: error
+
+  - rule: "FETCH_SIZE/WRITE_SIZE MUST NOT share a pass with any SQ counter"
+    counters: ["FETCH_SIZE", "WRITE_SIZE"]
+    reason: "Derived TCC counters must be isolated from SQ counters; mixing causes error 38 on all CDNA GPUs."
+    severity: error
+
+error_codes:
+  "38":
+    message: "Request exceeds the capabilities of the hardware to collect"
+    remedy: "Split counter list into multiple passes, ensuring per-block limits and TCC-derived isolation rules are satisfied"

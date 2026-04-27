@@ -159,7 +159,7 @@ protected:
 
     /*! \brief Function to parse frame sync syntax (frame_sync_code(), 6.2.1)
      * \param [in] p_stream Pointer to the bit stream
-     * \param [inout] offset Bit offset
+     * \param [in,out] offset Bit offset
      * \param [out] p_uncomp_header Pointer to uncompressed header struct
      * \return <tt>ParserResult</tt>
      */
@@ -167,7 +167,7 @@ protected:
 
     /*! \brief Function to parse color config syntax (color_config(), 6.2.2)
      * \param [in] p_stream Pointer to the bit stream
-     * \param [inout] offset Bit offset
+     * \param [in,out] offset Bit offset
      * \param [out] p_uncomp_header Pointer to uncompressed header struct
      * \return <tt>ParserResult</tt>
      */
@@ -175,7 +175,7 @@ protected:
 
     /*! \brief Function to parse frame size syntax (frame_size(), 6.2.3)
      * \param [in] p_stream Pointer to the bit stream
-     * \param [inout] offset Bit offset
+     * \param [in,out] offset Bit offset
      * \param [out] p_uncomp_header Pointer to uncompressed header struct
      *  \return None
      */
@@ -183,7 +183,7 @@ protected:
 
     /*! \brief Function to parse render size syntax (frame_size(), 6.2.4)
      * \param [in] p_stream Pointer to the bit stream
-     * \param [inout] offset Bit offset
+     * \param [in,out] offset Bit offset
      * \param [out] p_uncomp_header Pointer to uncompressed header struct
      *  \return None
      */
@@ -191,14 +191,14 @@ protected:
 
     /*! \brief Function to parse frame size with refs syntax (frame_size_with_refs(), 6.2.5)
      * \param [in] p_stream Pointer to the bit stream
-     * \param [inout] offset Bit offset
+     * \param [in,out] offset Bit offset
      * \param [out] p_uncomp_header Pointer to uncompressed header struct
      *  \return None
      */
     void FrameSizeWithRefs(const uint8_t *p_stream, size_t &offset, Vp9UncompressedHeader *p_uncomp_header);
 
     /*! \brief Function to calculate 8x8 and 64x64 block columns and rows of the frame (compute_image_size(), 6.2.6)
-     * \param [inout] p_uncomp_header Pointer to uncompressed header struct
+     * \param [in,out] p_uncomp_header Pointer to uncompressed header struct
      * \return None
      */
     void ComputeImageSize(Vp9UncompressedHeader *p_uncomp_header);
@@ -210,7 +210,7 @@ protected:
 
     /*! \brief Function to parse loop filter params syntax (loop_filter_params(), 6.2.8)
      * \param [in] p_stream Pointer to the bit stream
-     * \param [inout] offset Bit offset
+     * \param [in,out] offset Bit offset
      * \param [out] p_uncomp_header Pointer to uncompressed header struct
      *  \return None
      */
@@ -218,7 +218,7 @@ protected:
 
     /*! \brief Function to parse quantization params syntax (quantization_params(), 6.2.9)
      * \param [in] p_stream Pointer to the bit stream
-     * \param [inout] offset Bit offset
+     * \param [in,out] offset Bit offset
      * \param [out] p_uncomp_header Pointer to uncompressed header struct
      *  \return None
      */
@@ -226,14 +226,14 @@ protected:
 
     /*! \brief Function to parse delta quantizer syntax (read_delta_q(), 6.2.10)
      * \param [in] p_stream Pointer to the bit stream
-     * \param [inout] offset Bit offset
+     * \param [in,out] offset Bit offset
      * \return <tt>int8_t</tt>
      */
     int8_t ReadDeltaQ(const uint8_t *p_stream, size_t &offset);
 
     /*! \brief Function to parse segmentation params syntax (segmentation_params(), 6.2.11)
      * \param [in] p_stream Pointer to the bit stream
-     * \param [inout] offset Bit offset
+     * \param [in,out] offset Bit offset
      * \param [out] p_uncomp_header Pointer to uncompressed header struct
      * \return <tt>ParserResult</tt>
      */
@@ -241,14 +241,14 @@ protected:
 
     /*! \brief Function to parse probability syntax (read_delta_q(), 6.2.12)
      * \param [in] p_stream Pointer to the bit stream
-     * \param [inout] offset Bit offset
+     * \param [in,out] offset Bit offset
      * \return <tt>uint8_t</tt>
      */
     uint8_t ReadProb(const uint8_t *p_stream, size_t &offset);
 
     /*! \brief Function to parse tile info syntax (tile_info(), 6.2.13)
      * \param [in] p_stream Pointer to the bit stream
-     * \param [inout] offset Bit offset
+     * \param [in,out] offset Bit offset
      * \param [out] p_uncomp_header Pointer to uncompressed header struct
      * \return <tt>ParserResult</tt>
      */

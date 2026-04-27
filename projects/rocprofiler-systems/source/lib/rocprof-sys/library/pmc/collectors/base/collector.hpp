@@ -213,8 +213,9 @@ struct collector
         const auto current_timestamp = static_cast<uint64_t>(timestamp);
         for(const auto& entry : m_device_entries)
         {
-            auto      device_id   = entry.device->get_index();
-            auto      device_name = entry.device->get_name();
+            auto device_id   = entry.device->get_index();
+            auto device_name = entry.device->get_name();
+
             metrics_t zero_metrics{};
 
             CacheApi::store_sample(device_id, device_name, m_enabled_metrics,
