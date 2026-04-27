@@ -20,6 +20,7 @@
 #include <fcntl.h>
 #include <linux/memfd.h>
 #include <mutex>
+#include <signal.h>
 #include <string>
 #include <string_view>
 #include <sys/mman.h>
@@ -31,6 +32,27 @@
 using rocjitsu::SimulatedDriver;
 
 namespace {
+
+void rj_sigsegv_handler(int sig, siginfo_t *info, void *ctx) {
+  auto *uc = static_cast<ucontext_t *>(ctx);
+  void *fault_addr = info->si_addr;
+  uint64_t pc = 0;
+#ifdef __x86_64__
+  pc = uc->uc_mcontext.gregs[REG_RIP];
+#endif
+  fprintf(stderr, "\n[rj CRASH] SIGSEGV at addr=%p pc=%#lx sig=%d code=%d\n", fault_addr, pc, sig,
+          info->si_code);
+  // Re-raise to get default behavior (core dump)
+  signal(SIGSEGV, SIG_DFL);
+  raise(SIGSEGV);
+}
+
+__attribute__((constructor)) void rj_install_signal_handler() {
+  struct sigaction sa{};
+  sa.sa_sigaction = rj_sigsegv_handler;
+  sa.sa_flags = SA_SIGINFO;
+  sigaction(SIGSEGV, &sa, nullptr);
+}
 
 // Tracks fds opened by sysfs redirects so that relative openat() calls from the
 // same dirfd can also be redirected. Maps fd → the redirected absolute path that

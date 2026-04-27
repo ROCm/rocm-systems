@@ -1275,7 +1275,8 @@ def _derive_mubuf(name: str) -> InstructionSemantics | None:
     upper = name.upper()
     # Buffer cache control instructions.
     if upper in ('BUFFER_WBINVL1', 'BUFFER_WBINVL1_SC', 'BUFFER_WBINVL1_VOL',
-                 'BUFFER_GL0_INV', 'BUFFER_GL1_INV'):
+                 'BUFFER_GL0_INV', 'BUFFER_GL1_INV',
+                 'BUFFER_WBL2', 'BUFFER_INV'):
         return InstructionSemantics(name, 'dcache_inv')
     if '_ATOMIC_' in upper:
         for prefix in ('BUFFER_ATOMIC_',):

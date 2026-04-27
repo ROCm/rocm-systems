@@ -240,6 +240,15 @@ constexpr inline bool is_power_of_2(T val) {
   return std::has_single_bit(val);
 }
 
+/// @brief Round @p val up to the next multiple of @p alignment.
+/// @param alignment Must be a power of 2.
+template <typename T>
+  requires metaprogramming::IsUnsignedInt<T>
+constexpr inline T align_up(T val, T alignment) {
+  assert(std::has_single_bit(alignment));
+  return (val + alignment - 1) & ~(alignment - 1);
+}
+
 } // namespace util
 
 #endif // UTIL_BIT_H_

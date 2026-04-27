@@ -83,8 +83,19 @@ public:
   /// @param val Value to write.
   virtual void write_scalar64(amdgpu::Wavefront &wf, uint64_t val) const;
 
+  /// @brief Set a delegate operand that overrides read methods.
+  ///
+  /// @details Used by DPP/SDWA substitution to redirect reads through a
+  /// DppOperand without changing the member variable's type.
+  void set_delegate(Operand *d) { delegate_ = d; }
+  void clear_delegate() { delegate_ = nullptr; }
+  Operand *delegate() const { return delegate_; }
+
   int size_bits_ = 0;
   int encoding_value_ = 0;
+
+private:
+  Operand *delegate_ = nullptr;
 };
 
 /// @brief ISA-parameterized operand that adds an ISA-specific operand type tag.
