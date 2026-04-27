@@ -296,6 +296,7 @@ def generate_dashboard_script(args):
     MEMCHECK = 1 if args.memcheck is not None else 0
     SUBMIT = 0 if args.disable_cdash else 1
     STRICT_SUBMIT = 1 if args.require_cdash_submission else 0
+    TEST_ONLY = 1 if args.test_only else 0
     ARGN = "${ARGN}"
     SUBMIT_ERR = "${_cdash_submit_err}"
     REPO_SOURCE_DIR = (
@@ -342,7 +343,40 @@ def generate_dashboard_script(args):
 
     STAGES = ";".join([itr.upper() for itr in args.stages])
 
-    _script += f"""
+    # Generate different script based on test-only mode
+    if args.test_only:
+        # Test-only mode: skip configure/build, just run tests on pre-built binaries
+        _script += f"""
+        set(STAGES "{STAGES}")
+        # Test-only mode: start dashboard and run tests without configure/build
+        ctest_start({DASHBOARD_MODE})
+        dashboard_submit(PARTS Start RETURN_VALUE _submit_ret)
+
+        if("TEST" IN_LIST STAGES)
+            if("{MEMCHECK}" GREATER 0)
+                ctest_memcheck(BUILD "{BINARY_DIR}" RETURN_VALUE _test_ret)
+                dashboard_submit(PARTS Test RETURN_VALUE _submit_ret)
+            else()
+                ctest_test(BUILD "{BINARY_DIR}" RETURN_VALUE _test_ret)
+                dashboard_submit(PARTS Test RETURN_VALUE _submit_ret)
+            endif()
+
+            handle_error("Testing" _test_ret)
+        endif()
+
+        if("{CODECOV}" GREATER 0 AND "COVERAGE" IN_LIST STAGES)
+            ctest_coverage(
+                BUILD "{BINARY_DIR}"
+                RETURN_VALUE _coverage_ret
+                CAPTURE_CMAKE_ERROR _coverage_err)
+            dashboard_submit(PARTS Coverage RETURN_VALUE _submit_ret)
+        endif()
+
+        dashboard_submit(PARTS Done RETURN_VALUE _submit_ret)
+        """
+    else:
+        # Normal mode: configure, build, and optionally test
+        _script += f"""
         set(STAGES "{STAGES}")
         ctest_start({DASHBOARD_MODE})
         ctest_update(SOURCE "{REPO_SOURCE_DIR}" RETURN_VALUE _update_ret
@@ -371,6 +405,8 @@ def generate_dashboard_script(args):
                 ctest_test(BUILD "{BINARY_DIR}" RETURN_VALUE _test_ret)
                 dashboard_submit(PARTS Test RETURN_VALUE _submit_ret)
             endif()
+
+            handle_error("Testing" _test_ret)
         endif()
 
         if("{CODECOV}" GREATER 0 AND "COVERAGE" IN_LIST STAGES)
@@ -380,8 +416,6 @@ def generate_dashboard_script(args):
                 CAPTURE_CMAKE_ERROR _coverage_err)
             dashboard_submit(PARTS Coverage RETURN_VALUE _submit_ret)
         endif()
-
-        handle_error("Testing" _test_ret)
 
         dashboard_submit(PARTS Done RETURN_VALUE _submit_ret)
         """
@@ -410,6 +444,16 @@ def parse_cdash_args(args):
 
     parser.add_argument(
         "-n", "--name", help="Job name", default=None, type=str, required=True
+    )
+    parser.add_argument(
+        "--build-only",
+        help="Only run configure and build stages (skip tests). Reports build results to CDash.",
+        action="store_true",
+    )
+    parser.add_argument(
+        "--test-only",
+        help="Only run test stage (skip build). Reports test results to CDash. Requires pre-built binaries.",
+        action="store_true",
     )
     parser.add_argument("-s", "--site", help="Site name", default=SITE, type=str)
     parser.add_argument(
@@ -560,6 +604,22 @@ def parse_args(args=None):
             data[index].append(itr)
 
     cdash_args = parse_cdash_args(input_args)
+
+    # Handle --build-only and --test-only flags
+    if cdash_args.build_only and cdash_args.test_only:
+        raise ValueError("Cannot specify both --build-only and --test-only")
+
+    if cdash_args.build_only:
+        # Only run configure and build stages, skip tests
+        cdash_args.stages = ["Start", "Update", "Configure", "Build", "Submit"]
+        sys.stderr.write("Build-only mode: stages set to Start, Update, Configure, Build, Submit\n")
+        sys.stderr.flush()
+
+    if cdash_args.test_only:
+        # Only run test stage, skip build (requires pre-built binaries)
+        cdash_args.stages = ["Start", "Test", "Submit"]
+        sys.stderr.write("Test-only mode: stages set to Start, Test, Submit\n")
+        sys.stderr.flush()
 
     if cdash_args.run_attempt > 1:
         os.environ["ROCPROFILER_LOG_LEVEL"] = "info"

@@ -80,23 +80,25 @@ env:
   INSTALL_NIGHTLY_ROCM: "true"
 
   CI_MODE: ${{ github.event_name == 'schedule' && 'Nightly' || 'Continuous' }}
-
-
 jobs:
+  # =============================================================================
+  # BUILD JOBS - Run on CPU runners to avoid blocking GPU queues
+  # =============================================================================
+
   # -----------------------------------------------------------------------------
-  # Ubuntu / DEB job(s)
+  # Ubuntu / DEB Build job(s)
   # -----------------------------------------------------------------------------
-  core-deb:
-    name: Core • ${{ matrix.system.gpu }} • ${{ matrix.system.os }}
+  build-deb:
+    name: Build • ${{ matrix.system.gpu }} • ${{ matrix.system.os }}
     strategy:
       fail-fast: false
       matrix:
         system:
           # TEMPORARILY DISABLED: navi3/navi4 jobs pending CI stabilization
-          # - { gpu: 'navi4', runner: 'rocprofiler-navi4-dind', os: 'ubuntu-22.04', build-type: 'RelWithDebInfo', ci-flags: '--linter clang-tidy', gpu-target: 'gfx120X' }
-          # - { gpu: 'navi3', runner: 'rocprofiler-navi3-dind', os: 'ubuntu-22.04', build-type: 'RelWithDebInfo', ci-flags: '--linter clang-tidy', gpu-target: 'gfx110X' }
-          - { gpu: 'mi325', runner: 'linux-gfx942-1gpu-ossci-rocm', os: 'ubuntu-22.04', build-type: 'RelWithDebInfo', ci-flags: '--linter clang-tidy', gpu-target: 'gfx94X' }
-    runs-on: ${{ matrix.system.runner }}
+          # - { gpu: 'navi4', os: 'ubuntu-22.04', build-type: 'RelWithDebInfo', ci-flags: '--linter clang-tidy', gpu-target: 'gfx120X' }
+          # - { gpu: 'navi3', os: 'ubuntu-22.04', build-type: 'RelWithDebInfo', ci-flags: '--linter clang-tidy', gpu-target: 'gfx110X' }
+          - { gpu: 'mi325', os: 'ubuntu-22.04', build-type: 'RelWithDebInfo', ci-flags: '--linter clang-tidy', gpu-target: 'gfx94X' }
+    runs-on: ubuntu-latest
     container:
       image: docker.io/rocm/rocprofiler-private:${{ matrix.system.os }}-${{ matrix.system.gpu-target }}-latest
       credentials:
@@ -104,10 +106,6 @@ jobs:
         password: ${{ secrets.ROCPROFILER_AZURE_CI_PASS }}
       env:
         DEBIAN_FRONTEND: noninteractive
-      # --env-file /etc/podinfo/gha-gpu-isolation-settings - Required for GPU isolation on OSSCI MIXXX runners
-      options:
-        --privileged
-        --env-file /etc/podinfo/gha-gpu-isolation-settings
     env:
       GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
       CORE_EXT_RUNNER: mi325
@@ -118,6 +116,7 @@ jobs:
         with:
           sparse-checkout: |
             .github/actions/rocprofiler-sdk-util
+
             projects/rocprofiler-sdk
             projects/aqlprofile
             projects/rocprofiler-register
@@ -136,7 +135,6 @@ jobs:
           git config --global --add safe.directory '*'
           git submodule status --recursive | awk '{print $1,$2}' > .git-submodules-status
           echo "hash=$(sha256sum .git-submodules-status | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
-          # collect submodule paths for cache 'path'
           git config --file .gitmodules --get-regexp path | awk '{print $2}' > .git-submodule-paths
           { echo "paths<<EOF"; cat .git-submodule-paths; echo "EOF"; } >> "$GITHUB_OUTPUT"
 
@@ -197,16 +195,10 @@ jobs:
           enable-rocjpeg-build: ${{ env.ENABLE_ROCJPEG_BUILD }}
           enable-rocprof-trace-decoder-build: 'true'
           install-nightly-rocm: ${{ env.INSTALL_NIGHTLY_ROCM }}
-          ccache-key: ccache-${{ matrix.system.os }}-${{ matrix.system.runner }}-${{ matrix.system.gpu }}
+          ccache-key: ccache-${{ matrix.system.os }}-build-deb-${{ matrix.system.gpu }}
           ccache-variant: ccache
 
-      - name: Enable PC Sampling
-        if: ${{ contains(matrix.system.gpu, 'mi200') || contains(matrix.system.gpu, 'mi300a') }}
-        shell: bash
-        working-directory: projects/rocprofiler-sdk
-        run: echo 'ROCPROFILER_PC_SAMPLING_BETA_ENABLED=1' >> $GITHUB_ENV
-
-      - name: Configure, Build, and Test
+      - name: Configure and Build (no tests)
         timeout-minutes: 45
         shell: bash
         working-directory: projects/rocprofiler-sdk
@@ -215,12 +207,13 @@ jobs:
           PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:$HOME/.local/bin:$PATH \
           python3 ./source/scripts/run-ci.py \
             -B build \
-            --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.system.os }}-${{ matrix.system.gpu }}-core \
+            --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.system.os }}-${{ matrix.system.gpu }}-core-build \
             --build-jobs 16 \
             --mode ${CI_MODE} \
-            --site ${{ matrix.system.runner }} \
+            --site build-deb-cpu \
             --gpu-targets ${{ env.GPU_TARGETS }} \
             --run-attempt ${{ github.run_attempt }} \
+            --build-only \
             ${{ matrix.system.ci-flags }} -- \
             -DROCPROFILER_DEP_ROCMCORE=ON \
             -DROCPROFILER_BUILD_DOCS=OFF \
@@ -231,11 +224,7 @@ jobs:
             -DCPACK_PACKAGING_INSTALL_PREFIX="$(realpath ${{ env.ROCM_PATH }})" \
             -DPython3_EXECUTABLE=$(which python3) \
             -DCMAKE_PREFIX_PATH='${{ env.ROCM_PATH }};${{ env.ROCM_PATH }}/llvm' \
-            ${{ env.GLOBAL_CMAKE_OPTIONS }} \
-            -- \
-            --parallel 4 \
-            -LE "${${{ matrix.system.gpu }}_EXCLUDE_LABEL_REGEX}" \
-            -E  "${${{ matrix.system.gpu }}_EXCLUDE_TESTS_REGEX}"
+            ${{ env.GLOBAL_CMAKE_OPTIONS }}
 
       - name: Install
         if: ${{ contains(matrix.system.gpu, env.CORE_EXT_RUNNER) }}
@@ -254,6 +243,133 @@ jobs:
           export LD_LIBRARY_PATH=${{ env.ROCM_PATH }}/lib:${{ env.ROCM_PATH }}/llvm/lib:$LD_LIBRARY_PATH
           export PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:$PATH
           cmake --build build --target package --parallel 16
+
+      - name: Create build artifact tarball
+        shell: bash
+        working-directory: projects/rocprofiler-sdk
+        run: |
+          # Create a tarball of the build directory and installed SDK for testing
+          tar -czf rocprofiler-sdk-build-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.gz \
+            build/ \
+            samples/ \
+            tests/
+
+      - name: Create ROCM dependencies tarball
+        shell: bash
+        run: |
+          # Create a tarball of /opt/rocm and /opt/rocprofiler-sdk for test job
+          tar -czf rocm-deps-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.gz \
+            -C /opt rocm rocprofiler-sdk || tar -czf rocm-deps-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.gz -C /opt rocm
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-deb-${{ matrix.system.os }}-${{ matrix.system.gpu }}
+          path: |
+            projects/rocprofiler-sdk/rocprofiler-sdk-build-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.gz
+            projects/rocprofiler-sdk/build/*.deb
+            projects/rocprofiler-sdk/build/*.rpm
+            projects/rocprofiler-sdk/build/*.tgz
+          retention-days: 1
+
+      - name: Upload ROCM dependencies
+        uses: actions/upload-artifact@v4
+        with:
+          name: rocm-deps-deb-${{ matrix.system.os }}-${{ matrix.system.gpu }}
+          path: rocm-deps-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.gz
+          retention-days: 1
+
+  # -----------------------------------------------------------------------------
+  # Ubuntu / DEB Test job(s) - Run on GPU runners
+  # -----------------------------------------------------------------------------
+  test-deb:
+    name: Test • ${{ matrix.system.gpu }} • ${{ matrix.system.os }}
+    needs: build-deb
+    strategy:
+      fail-fast: false
+      matrix:
+        system:
+          # TEMPORARILY DISABLED: navi3/navi4 jobs pending CI stabilization
+          # - { gpu: 'navi4', runner: 'rocprofiler-navi4-dind', os: 'ubuntu-22.04', gpu-target: 'gfx120X' }
+          # - { gpu: 'navi3', runner: 'rocprofiler-navi3-dind', os: 'ubuntu-22.04', gpu-target: 'gfx110X' }
+          - { gpu: 'mi325', runner: 'linux-gfx942-1gpu-ossci-rocm', os: 'ubuntu-22.04', gpu-target: 'gfx94X' }
+    runs-on: ${{ matrix.system.runner }}
+    container:
+      image: docker.io/rocm/rocprofiler-private:${{ matrix.system.os }}-${{ matrix.system.gpu-target }}-latest
+      credentials:
+        username: ${{ secrets.ROCPROFILER_AZURE_CI_USER }}
+        password: ${{ secrets.ROCPROFILER_AZURE_CI_PASS }}
+      env:
+        DEBIAN_FRONTEND: noninteractive
+      # --env-file /etc/podinfo/gha-gpu-isolation-settings - Required for GPU isolation on OSSCI MIXXX runners
+      options:
+        --privileged
+        --env-file /etc/podinfo/gha-gpu-isolation-settings
+    env:
+      GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
+      CORE_EXT_RUNNER: mi325
+      GPU_RUNNER: ${{ matrix.system.gpu }}
+    steps:
+      - name: Clone ROCProfiler SDK (for test scripts)
+        uses: actions/checkout@v6
+        with:
+          sparse-checkout: |
+            projects/rocprofiler-sdk
+          submodules: false
+          set-safe-directory: true
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: build-deb-${{ matrix.system.os }}-${{ matrix.system.gpu }}
+          path: artifacts/
+
+      - name: Download ROCM dependencies
+        uses: actions/download-artifact@v4
+        with:
+          name: rocm-deps-deb-${{ matrix.system.os }}-${{ matrix.system.gpu }}
+          path: deps/
+
+      - name: Extract build artifacts
+        shell: bash
+        run: |
+          cd projects/rocprofiler-sdk
+          tar -xzf ../../artifacts/rocprofiler-sdk-build-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.gz
+
+      - name: Extract ROCM dependencies
+        shell: bash
+        run: |
+          cd /opt
+          tar -xzf $GITHUB_WORKSPACE/deps/rocm-deps-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.gz
+
+      - name: Install requirements
+        timeout-minutes: 5
+        shell: bash
+        working-directory: projects/rocprofiler-sdk
+        run: |
+          git config --global --add safe.directory '*'
+          apt-get update
+          apt-get install -y python3-pip
+          python3 -m pip install -U --user -r requirements.txt
+
+      - name: Enable PC Sampling
+        if: ${{ contains(matrix.system.gpu, 'mi200') || contains(matrix.system.gpu, 'mi300a') }}
+        shell: bash
+        working-directory: projects/rocprofiler-sdk
+        run: echo 'ROCPROFILER_PC_SAMPLING_BETA_ENABLED=1' >> $GITHUB_ENV
+
+      - name: Run Tests
+        timeout-minutes: 30
+        shell: bash
+        working-directory: projects/rocprofiler-sdk
+        run: |
+          export LD_LIBRARY_PATH=${{ env.ROCM_PATH }}/lib:${{ env.ROCM_PATH }}/llvm/lib:$LD_LIBRARY_PATH
+          export PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:$HOME/.local/bin:$PATH
+          ctest --test-dir build \
+            --output-on-failure \
+            --parallel 4 \
+            -LE "${${{ matrix.system.gpu }}_EXCLUDE_LABEL_REGEX}" \
+            -E  "${${{ matrix.system.gpu }}_EXCLUDE_TESTS_REGEX}"
 
       - name: Test Install Build
         if: ${{ contains(matrix.system.gpu, env.CORE_EXT_RUNNER) }}
@@ -280,11 +396,11 @@ jobs:
           export LD_LIBRARY_PATH=${{ env.ROCM_PATH }}/lib:${{ env.ROCM_PATH }}/llvm/lib:$LD_LIBRARY_PATH
           export PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:$HOME/.local/bin:$PATH
           export PATH=${PATH}:/usr/local/sbin:/usr/sbin:/sbin
-          ls -la
-          ls -la ./build
-          dpkg --force-all -i ./build/rocprofiler-sdk-roctx_*.deb
-          dpkg --force-all -i ./build/rocprofiler-sdk-rocpd_*.deb
-          for i in $(ls -S ./build/rocprofiler-sdk*.deb | egrep -v 'roctx|rocpd'); do dpkg --force-all -i ${i}; done;
+          dpkg --force-all -i ../../artifacts/*.deb 2>/dev/null || true
+          # Re-install in correct order
+          dpkg --force-all -i ../../artifacts/rocprofiler-sdk-roctx_*.deb || true
+          dpkg --force-all -i ../../artifacts/rocprofiler-sdk-rocpd_*.deb || true
+          for i in $(ls -S ../../artifacts/rocprofiler-sdk*.deb 2>/dev/null | grep -Ev 'roctx|rocpd'); do dpkg --force-all -i ${i} || true; done
 
       - name: Test Installed Packages
         if: ${{ contains(matrix.system.gpu, env.CORE_EXT_RUNNER) }}
@@ -303,36 +419,32 @@ jobs:
 
       - name: Archive production artifacts
         if: ${{ github.event_name == 'workflow_dispatch' && contains(matrix.system.gpu, env.CORE_EXT_RUNNER) }}
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v4
         with:
           name: installers-deb
           path: |
-            ${{github.workspace}}/build/*.deb
-            ${{github.workspace}}/build/*.rpm
-            ${{github.workspace}}/build/*.tgz
+            artifacts/*.deb
+            artifacts/*.rpm
+            artifacts/*.tgz
 
   # -----------------------------------------------------------------------------
-  # RHEL/SLES (RPM) job(s)
+  # RHEL/SLES (RPM) Build job(s)
   # -----------------------------------------------------------------------------
-  core-rpm:
-    name: Core • ${{ matrix.system.gpu }} • ${{ matrix.system.os }}
+  build-rpm:
+    name: Build • ${{ matrix.system.gpu }} • ${{ matrix.system.os }}
     strategy:
       fail-fast: false
       matrix:
         system:
-          - { os: 'rhel-8.8', runner: 'linux-gfx942-1gpu-ossci-rocm', gpu: 'mi325', gpu-target: 'gfx94X', build-type: 'RelWithDebInfo', ci-flags: '' }
-          - { os: 'rhel-9.5', runner: 'linux-gfx942-1gpu-ossci-rocm', gpu: 'mi325', gpu-target: 'gfx94X', build-type: 'RelWithDebInfo', ci-flags: '' }
-          - { os: 'sles-15.6', runner: 'linux-gfx942-1gpu-ossci-rocm', gpu: 'mi325', gpu-target: 'gfx94X', build-type: 'RelWithDebInfo', ci-flags: '' }
-    runs-on: ${{ matrix.system.runner }}
+          - { os: 'rhel-8.8', gpu: 'mi325', gpu-target: 'gfx94X', build-type: 'RelWithDebInfo', ci-flags: '' }
+          - { os: 'rhel-9.5', gpu: 'mi325', gpu-target: 'gfx94X', build-type: 'RelWithDebInfo', ci-flags: '' }
+          - { os: 'sles-15.6', gpu: 'mi325', gpu-target: 'gfx94X', build-type: 'RelWithDebInfo', ci-flags: '' }
+    runs-on: ubuntu-latest
     container:
       image: docker.io/rocm/rocprofiler-private:${{ matrix.system.os }}-${{ matrix.system.gpu-target }}-latest
       credentials:
         username: ${{ secrets.ROCPROFILER_AZURE_CI_USER }}
         password: ${{ secrets.ROCPROFILER_AZURE_CI_PASS }}
-      # --env-file /etc/podinfo/gha-gpu-isolation-settings - Required for GPU isolation on OSSCI MIXXX runners
-      options:
-        --privileged
-        --env-file /etc/podinfo/gha-gpu-isolation-settings
     env:
       GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
       OS_TYPE: ${{ matrix.system.os }}
@@ -409,17 +521,10 @@ jobs:
           enable-aqlprofile-build: ${{ env.ENABLE_AQLPROFILE_BUILD }}
           enable-rocprof-trace-decoder-build: 'true'
           install-nightly-rocm: ${{ env.INSTALL_NIGHTLY_ROCM }}
-          ccache-key: ccache-${{ matrix.system.os }}-${{ matrix.system.runner }}-${{ matrix.system.gpu }}
+          ccache-key: ccache-${{ matrix.system.os }}-build-rpm-${{ matrix.system.gpu }}
           ccache-variant: sccache
 
-      - name: Enable PC Sampling
-        if: ${{ contains(matrix.system.gpu, 'mi200') || contains(matrix.system.gpu, 'mi300a') }}
-        shell: bash
-        working-directory: projects/rocprofiler-sdk
-        run:
-            echo 'ROCPROFILER_PC_SAMPLING_BETA_ENABLED=1' >> $GITHUB_ENV
-
-      - name: Configure, Build, and Test
+      - name: Configure and Build (no tests)
         timeout-minutes: 45
         shell: bash
         working-directory: projects/rocprofiler-sdk
@@ -427,12 +532,13 @@ jobs:
           source ${{ env.PYTHON_VENV_ACTIVATE }}
           export PATH=~/.local/bin:/opt/rh/gcc-toolset-11/root/usr/bin:$PATH
           python3 ./source/scripts/run-ci.py -B build \
-            --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.system.os }}-${{ matrix.system.gpu }}-core \
+            --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.system.os }}-${{ matrix.system.gpu }}-core-build \
             --mode ${CI_MODE} \
             --build-jobs 16 \
-            --site ${{ matrix.system.runner }} \
+            --site build-rpm-cpu \
             --gpu-targets ${{ env.GPU_TARGETS }} \
             --run-attempt ${{ github.run_attempt }} \
+            --build-only \
             ${{ matrix.system.ci-flags }} \
             -- \
             -DROCPROFILER_DEP_ROCMCORE=ON \
@@ -441,25 +547,136 @@ jobs:
             -DCMAKE_BUILD_TYPE=${{ matrix.system.build-type }} \
             -DCMAKE_PREFIX_PATH='${{ env.ROCM_PATH }};${{ env.ROCM_PATH }}/llvm' \
             -DPython3_EXECUTABLE=$(which python3) \
-            ${{ env.GLOBAL_CMAKE_OPTIONS }} \
-            -- \
-            --parallel 4 \
-            -LE "${${{ matrix.system.gpu }}_EXCLUDE_LABEL_REGEX}" \
-            -E "${${{ matrix.system.gpu }}_EXCLUDE_TESTS_REGEX}"
+            ${{ env.GLOBAL_CMAKE_OPTIONS }}
 
-  sanitizers:
-    name: ${{ matrix.system.sanitizer }} • ${{ matrix.system.gpu }} • ${{ matrix.system.os }}
+      - name: Create build artifact tarball
+        shell: bash
+        working-directory: projects/rocprofiler-sdk
+        run: |
+          tar -czf rocprofiler-sdk-build-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.gz \
+            build/ \
+            ${{ env.PYTHON_VENV_PATH }}/
+
+      - name: Create ROCM dependencies tarball
+        shell: bash
+        run: |
+          tar -czf rocm-deps-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.gz \
+            -C /opt rocm || echo "Warning: could not create rocm deps tarball"
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-rpm-${{ matrix.system.os }}-${{ matrix.system.gpu }}
+          path: |
+            projects/rocprofiler-sdk/rocprofiler-sdk-build-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.gz
+          retention-days: 1
+
+      - name: Upload ROCM dependencies
+        uses: actions/upload-artifact@v4
+        with:
+          name: rocm-deps-rpm-${{ matrix.system.os }}-${{ matrix.system.gpu }}
+          path: rocm-deps-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.gz
+          retention-days: 1
+
+  # -----------------------------------------------------------------------------
+  # RHEL/SLES (RPM) Test job(s) - Run on GPU runners
+  # -----------------------------------------------------------------------------
+  test-rpm:
+    name: Test • ${{ matrix.system.gpu }} • ${{ matrix.system.os }}
+    needs: build-rpm
     strategy:
       fail-fast: false
       matrix:
         system:
-          - { sanitizer: 'AddressSanitizer', os: 'ubuntu-22.04', runner: 'linux-mi325-8gpu-ossci-rocm-sandbox', gpu: 'mi325', gpu-target: 'gfx94X', build-type: 'RelWithDebInfo' }
-          - { sanitizer: 'ThreadSanitizer', os: 'ubuntu-22.04', runner: 'linux-mi325-8gpu-ossci-rocm-sandbox', gpu: 'mi325', gpu-target: 'gfx94X', build-type: 'RelWithDebInfo' }
-          - { sanitizer: 'LeakSanitizer', os: 'ubuntu-22.04', runner: 'linux-mi325-8gpu-ossci-rocm-sandbox', gpu: 'mi325', gpu-target: 'gfx94X', build-type: 'RelWithDebInfo' }
-          - { sanitizer: 'UndefinedBehaviorSanitizer', os: 'ubuntu-22.04', runner: 'linux-mi325-8gpu-ossci-rocm-sandbox', gpu: 'mi325', gpu-target: 'gfx94X', build-type: 'RelWithDebInfo' }
+          - { os: 'rhel-8.8', runner: 'linux-gfx942-1gpu-ossci-rocm', gpu: 'mi325', gpu-target: 'gfx94X' }
+          - { os: 'rhel-9.5', runner: 'linux-gfx942-1gpu-ossci-rocm', gpu: 'mi325', gpu-target: 'gfx94X' }
+          - { os: 'sles-15.6', runner: 'linux-gfx942-1gpu-ossci-rocm', gpu: 'mi325', gpu-target: 'gfx94X' }
+    runs-on: ${{ matrix.system.runner }}
+    container:
+      image: docker.io/rocm/rocprofiler-private:${{ matrix.system.os }}-${{ matrix.system.gpu-target }}-latest
+      credentials:
+        username: ${{ secrets.ROCPROFILER_AZURE_CI_USER }}
+        password: ${{ secrets.ROCPROFILER_AZURE_CI_PASS }}
+      # --env-file /etc/podinfo/gha-gpu-isolation-settings - Required for GPU isolation on OSSCI MIXXX runners
+      options:
+        --privileged
+        --env-file /etc/podinfo/gha-gpu-isolation-settings
+    env:
+      GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
+      OS_TYPE: ${{ matrix.system.os }}
+      GPU_RUNNER: ${{ matrix.system.gpu }}
+    steps:
+      - name: Clone ROCProfiler SDK (for test scripts)
+        uses: actions/checkout@v6
+        with:
+          sparse-checkout: |
+            projects/rocprofiler-sdk
+          submodules: false
+          set-safe-directory: true
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: build-rpm-${{ matrix.system.os }}-${{ matrix.system.gpu }}
+          path: artifacts/
+
+      - name: Download ROCM dependencies
+        uses: actions/download-artifact@v4
+        with:
+          name: rocm-deps-rpm-${{ matrix.system.os }}-${{ matrix.system.gpu }}
+          path: deps/
+
+      - name: Extract build artifacts
+        shell: bash
+        run: |
+          cd projects/rocprofiler-sdk
+          tar -xzf ../../artifacts/rocprofiler-sdk-build-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.gz
+
+      - name: Extract ROCM dependencies
+        shell: bash
+        run: |
+          cd /opt
+          tar -xzf $GITHUB_WORKSPACE/deps/rocm-deps-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.gz || echo "Warning: rocm deps extraction failed"
+
+      - name: Enable PC Sampling
+        if: ${{ contains(matrix.system.gpu, 'mi200') || contains(matrix.system.gpu, 'mi300a') }}
+        shell: bash
+        working-directory: projects/rocprofiler-sdk
+        run: echo 'ROCPROFILER_PC_SAMPLING_BETA_ENABLED=1' >> $GITHUB_ENV
+
+      - name: Run Tests
+        timeout-minutes: 30
+        shell: bash
+        working-directory: projects/rocprofiler-sdk
+        run: |
+          source ${{ env.PYTHON_VENV_ACTIVATE }} || true
+          export PATH=~/.local/bin:/opt/rh/gcc-toolset-11/root/usr/bin:$PATH
+          ctest --test-dir build \
+            --output-on-failure \
+            --parallel 4 \
+            -LE "${${{ matrix.system.gpu }}_EXCLUDE_LABEL_REGEX}" \
+            -E "${${{ matrix.system.gpu }}_EXCLUDE_TESTS_REGEX}"
+
+  # =============================================================================
+  # SANITIZER JOBS - Split into build (CPU) and test (GPU)
+  # =============================================================================
+
+  # -----------------------------------------------------------------------------
+  # Sanitizers Build job(s) - Run on CPU runners
+  # -----------------------------------------------------------------------------
+  build-sanitizers:
+    name: Build • ${{ matrix.system.sanitizer }} • ${{ matrix.system.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        system:
+          - { sanitizer: 'AddressSanitizer', os: 'ubuntu-22.04', gpu: 'mi325', gpu-target: 'gfx94X', build-type: 'RelWithDebInfo' }
+          - { sanitizer: 'ThreadSanitizer', os: 'ubuntu-22.04', gpu: 'mi325', gpu-target: 'gfx94X', build-type: 'RelWithDebInfo' }
+          - { sanitizer: 'LeakSanitizer', os: 'ubuntu-22.04', gpu: 'mi325', gpu-target: 'gfx94X', build-type: 'RelWithDebInfo' }
+          - { sanitizer: 'UndefinedBehaviorSanitizer', os: 'ubuntu-22.04', gpu: 'mi325', gpu-target: 'gfx94X', build-type: 'RelWithDebInfo' }
 
     if: ${{ contains(github.event_name, 'pull_request') }}
-    runs-on: ${{ matrix.system.runner }}
+    runs-on: ubuntu-latest
     container:
       image: docker.io/rocm/rocprofiler-private:${{ matrix.system.os }}-${{ matrix.system.gpu-target }}-latest
       credentials:
@@ -467,14 +684,7 @@ jobs:
         password: ${{ secrets.ROCPROFILER_AZURE_CI_PASS }}
       env:
         DEBIAN_FRONTEND: noninteractive
-      # --env-file /etc/podinfo/gha-gpu-isolation-settings - Required for GPU isolation on OSSCI MIXXX runners
-      options:
-        --privileged
-        --cap-add SYS_PTRACE
-        --security-opt seccomp=unconfined
-        --env-file /etc/podinfo/gha-gpu-isolation-settings
 
-    # define this for containers
     env:
       GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
       GCC_COMPILER_VERSION: 12
@@ -538,12 +748,6 @@ jobs:
         python3 -m pip install -U --user -r requirements.txt
         python3 -m pip install -U --user cmake==3.24.0
 
-    - name: Enable PC Sampling
-      if: ${{ contains(matrix.system.gpu, 'mi200') || contains(matrix.system.gpu, 'mi300a') }}
-      shell: bash
-      working-directory: projects/rocprofiler-sdk
-      run: echo 'ROCPROFILER_PC_SAMPLING_BETA_ENABLED=1' >> $GITHUB_ENV
-
     - name: Build ROCProfiler SDK Dependencies
       uses: ./.github/actions/rocprofiler-sdk-util
       with:
@@ -556,30 +760,153 @@ jobs:
         enable-aqlprofile-build: ${{ env.ENABLE_AQLPROFILE_BUILD }}
         enable-rocprof-trace-decoder-build: 'true'
         install-nightly-rocm: ${{ env.INSTALL_NIGHTLY_ROCM }}
-        ccache-key: ccache-${{ matrix.system.os }}-${{ matrix.system.runner }}-${{ matrix.system.gpu }}-${{ matrix.system.sanitizer}}
+        ccache-key: ccache-${{ matrix.system.os }}-build-sanitizers-${{ matrix.system.gpu }}-${{ matrix.system.sanitizer }}
         ccache-variant: ccache
 
-    - name: Configure, Build, and Test
+    - name: Configure and Build (no tests)
       timeout-minutes: 45
       shell: bash
       working-directory: projects/rocprofiler-sdk
-      run:
-        sudo sysctl -w vm.mmap_rnd_bits=28;
-        export PATH="$HOME/.local/bin:$PATH";
-        python3 ./source/scripts/run-ci.py -B build
-          --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.system.os }}-${{ matrix.system.gpu }}-${{ matrix.system.sanitizer }}
-          --build-jobs 16
-          --site ${{ matrix.system.runner }}
-          --gpu-targets ${{ env.GPU_TARGETS }}
-          --memcheck ${{ matrix.system.sanitizer }}
-          --run-attempt ${{ github.run_attempt }}
-          --
+      run: |
+        export PATH="$HOME/.local/bin:$PATH"
+        python3 ./source/scripts/run-ci.py -B build \
+          --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.system.os }}-${{ matrix.system.gpu }}-${{ matrix.system.sanitizer }}-build \
+          --build-jobs 16 \
+          --site build-sanitizers-cpu \
+          --gpu-targets ${{ env.GPU_TARGETS }} \
+          --memcheck ${{ matrix.system.sanitizer }} \
+          --run-attempt ${{ github.run_attempt }} \
+          --build-only \
+          -- \
           -DROCPROFILER_INTERNAL_RCCL_API_TRACE=ON \
-          -DCMAKE_BUILD_TYPE=${{ matrix.system.build-type }}
-          -DCMAKE_INSTALL_PREFIX="${{ env.ROCM_PATH }}"
-          -DCMAKE_PREFIX_PATH='${{ env.ROCM_PATH }};${{ env.ROCM_PATH }}/llvm'
-          -DPython3_EXECUTABLE=$(which python3)
+          -DCMAKE_BUILD_TYPE=${{ matrix.system.build-type }} \
+          -DCMAKE_INSTALL_PREFIX="${{ env.ROCM_PATH }}" \
+          -DCMAKE_PREFIX_PATH='${{ env.ROCM_PATH }};${{ env.ROCM_PATH }}/llvm' \
+          -DPython3_EXECUTABLE=$(which python3) \
           ${{ env.GLOBAL_CMAKE_OPTIONS }}
-          --
-          -LE "${${{ matrix.system.gpu }}_EXCLUDE_LABEL_REGEX}"
+
+    - name: Create build artifact tarball
+      shell: bash
+      working-directory: projects/rocprofiler-sdk
+      run: |
+        tar -czf rocprofiler-sdk-build-${{ matrix.system.os }}-${{ matrix.system.gpu }}-${{ matrix.system.sanitizer }}.tar.gz \
+          build/
+
+    - name: Create ROCM dependencies tarball
+      shell: bash
+      run: |
+        tar -czf rocm-deps-${{ matrix.system.os }}-${{ matrix.system.gpu }}-${{ matrix.system.sanitizer }}.tar.gz \
+          -C /opt rocm || echo "Warning: could not create rocm deps tarball"
+
+    - name: Upload build artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: build-sanitizers-${{ matrix.system.os }}-${{ matrix.system.gpu }}-${{ matrix.system.sanitizer }}
+        path: |
+          projects/rocprofiler-sdk/rocprofiler-sdk-build-${{ matrix.system.os }}-${{ matrix.system.gpu }}-${{ matrix.system.sanitizer }}.tar.gz
+        retention-days: 1
+
+    - name: Upload ROCM dependencies
+      uses: actions/upload-artifact@v4
+      with:
+        name: rocm-deps-sanitizers-${{ matrix.system.os }}-${{ matrix.system.gpu }}-${{ matrix.system.sanitizer }}
+        path: rocm-deps-${{ matrix.system.os }}-${{ matrix.system.gpu }}-${{ matrix.system.sanitizer }}.tar.gz
+        retention-days: 1
+
+  # -----------------------------------------------------------------------------
+  # Sanitizers Test job(s) - Run on GPU runners
+  # -----------------------------------------------------------------------------
+  test-sanitizers:
+    name: Test • ${{ matrix.system.sanitizer }} • ${{ matrix.system.gpu }} • ${{ matrix.system.os }}
+    needs: build-sanitizers
+    strategy:
+      fail-fast: false
+      matrix:
+        system:
+          - { sanitizer: 'AddressSanitizer', os: 'ubuntu-22.04', runner: 'linux-gfx942-1gpu-ossci-rocm', gpu: 'mi325', gpu-target: 'gfx94X' }
+          - { sanitizer: 'ThreadSanitizer', os: 'ubuntu-22.04', runner: 'linux-gfx942-1gpu-ossci-rocm', gpu: 'mi325', gpu-target: 'gfx94X' }
+          - { sanitizer: 'LeakSanitizer', os: 'ubuntu-22.04', runner: 'linux-gfx942-1gpu-ossci-rocm', gpu: 'mi325', gpu-target: 'gfx94X' }
+          - { sanitizer: 'UndefinedBehaviorSanitizer', os: 'ubuntu-22.04', runner: 'linux-gfx942-1gpu-ossci-rocm', gpu: 'mi325', gpu-target: 'gfx94X' }
+
+    if: ${{ contains(github.event_name, 'pull_request') }}
+    runs-on: ${{ matrix.system.runner }}
+    container:
+      image: docker.io/rocm/rocprofiler-private:${{ matrix.system.os }}-${{ matrix.system.gpu-target }}-latest
+      credentials:
+        username: ${{ secrets.ROCPROFILER_AZURE_CI_USER }}
+        password: ${{ secrets.ROCPROFILER_AZURE_CI_PASS }}
+      env:
+        DEBIAN_FRONTEND: noninteractive
+      # --env-file /etc/podinfo/gha-gpu-isolation-settings - Required for GPU isolation on OSSCI MIXXX runners
+      options:
+        --privileged
+        --cap-add SYS_PTRACE
+        --security-opt seccomp=unconfined
+        --env-file /etc/podinfo/gha-gpu-isolation-settings
+
+    env:
+      GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
+      GCC_COMPILER_VERSION: 12
+      GPU_RUNNER: ${{ matrix.system.gpu }}
+
+    steps:
+    - name: Clone ROCProfiler SDK (for test scripts)
+      uses: actions/checkout@v6
+      with:
+        sparse-checkout: |
+          projects/rocprofiler-sdk
+        submodules: false
+        set-safe-directory: true
+
+    - name: Download build artifacts
+      uses: actions/download-artifact@v4
+      with:
+        name: build-sanitizers-${{ matrix.system.os }}-${{ matrix.system.gpu }}-${{ matrix.system.sanitizer }}
+        path: artifacts/
+
+    - name: Download ROCM dependencies
+      uses: actions/download-artifact@v4
+      with:
+        name: rocm-deps-sanitizers-${{ matrix.system.os }}-${{ matrix.system.gpu }}-${{ matrix.system.sanitizer }}
+        path: deps/
+
+    - name: Extract build artifacts
+      shell: bash
+      run: |
+        cd projects/rocprofiler-sdk
+        tar -xzf ../../artifacts/rocprofiler-sdk-build-${{ matrix.system.os }}-${{ matrix.system.gpu }}-${{ matrix.system.sanitizer }}.tar.gz
+
+    - name: Extract ROCM dependencies
+      shell: bash
+      run: |
+        cd /opt
+        tar -xzf $GITHUB_WORKSPACE/deps/rocm-deps-${{ matrix.system.os }}-${{ matrix.system.gpu }}-${{ matrix.system.sanitizer }}.tar.gz || echo "Warning: rocm deps extraction failed"
+
+    - name: Install requirements
+      timeout-minutes: 5
+      shell: bash
+      working-directory: projects/rocprofiler-sdk
+      run: |
+        git config --global --add safe.directory '*'
+        apt-get update
+        apt-get install -y python3-pip libasan8 libtsan2
+        python3 -m pip install -U --user -r requirements.txt
+
+    - name: Enable PC Sampling
+      if: ${{ contains(matrix.system.gpu, 'mi200') || contains(matrix.system.gpu, 'mi300a') }}
+      shell: bash
+      working-directory: projects/rocprofiler-sdk
+      run: echo 'ROCPROFILER_PC_SAMPLING_BETA_ENABLED=1' >> $GITHUB_ENV
+
+    - name: Run Tests
+      timeout-minutes: 30
+      shell: bash
+      working-directory: projects/rocprofiler-sdk
+      run: |
+        sudo sysctl -w vm.mmap_rnd_bits=28
+        export PATH="$HOME/.local/bin:$PATH"
+        ctest --test-dir build \
+          --output-on-failure \
+          --parallel 4 \
+          -LE "${${{ matrix.system.gpu }}_EXCLUDE_LABEL_REGEX}" \
           -E "${${{ matrix.system.gpu }}_EXCLUDE_TESTS_REGEX}"
