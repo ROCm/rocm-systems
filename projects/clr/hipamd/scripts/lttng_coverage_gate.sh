@@ -210,5 +210,121 @@ if [ "$BODY_RC" -ne 0 ]; then
     fi
 fi
 
+# ---------------------------------------------------------------------------
+# 3. Curated-args coverage gate (spec §8.2)
+# ---------------------------------------------------------------------------
+# Skipped silently when curated_apis.yaml is absent (allows gradual
+# rollout; the gate becomes mandatory once any API is curated).
+
+CURATED_YAML="$SCRIPT_DIR/curated_apis.yaml"
+if [ -f "$CURATED_YAML" ]; then
+    # Curated APIs (one per line).
+    python3 -c "
+import sys
+sys.path.insert(0, '$SCRIPT_DIR')
+from lttng_curated_lib import parse_yaml_file
+for a in parse_yaml_file('$CURATED_YAML'):
+    print(a['api'])
+" | sort -u > "$WORK/curated.txt"
+
+    # All inventoried wrappers (already in $WORK/migrated.txt from gate 1).
+    MISSING_FROM_INV="$(comm -23 "$WORK/curated.txt" "$WORK/migrated.txt" || true)"
+    if [ -n "$MISSING_FROM_INV" ]; then
+        echo "FAIL (curated): APIs in curated_apis.yaml are missing from migration inventory:"
+        printf '  %s\n' $MISSING_FROM_INV
+        exit 1
+    fi
+
+    # Body-content scan: for each curated API, the wrapper body must
+    # contain the sentinel AND a curated-macro invocation matching the
+    # regex from spec §8.2. APIs with at least one IN/INOUT arg must
+    # additionally contain at least one __rocm_in_ local.
+    PYTHON_CURATED_GATE="$(cat <<'PY'
+import os, re, sys
+sys.path.insert(0, sys.argv[3])
+from lttng_curated_lib import parse_yaml_file
+
+src_dir   = sys.argv[1]
+yaml_path = sys.argv[2]
+
+apis = parse_yaml_file(yaml_path)
+files = []
+for root, _, fs in os.walk(src_dir):
+    for fn in fs:
+        if fn.endswith('.cpp'):
+            p = os.path.join(root, fn)
+            with open(p, 'rb') as fh:
+                files.append((p, fh.read().decode('utf-8', errors='replace')))
+
+# Spec §8.2 regex matcher for all six HIP curated-macro variants plus
+# the HSA mirror (so the same gate works for hsa_table_interface.cpp).
+MACRO_RE = re.compile(
+    r'(?:ROCM_TRACE_RET|ROCR_TRACE_API_RET)_(?:STATUS|PTR|VOID)_CURATED'
+    r'(?:_HSA)?(?:_NOARGS)?\s*\(')
+
+def find_body(text, name):
+    pat = re.compile(r'\b' + re.escape(name) + r'\s*\(')
+    for m in pat.finditer(text):
+        depth = 0
+        i = m.end() - 1
+        while i < len(text):
+            if text[i] == '(': depth += 1
+            elif text[i] == ')':
+                depth -= 1
+                if depth == 0:
+                    j = text.find('{', i)
+                    if j < 0: break
+                    bdepth = 0; k = j
+                    while k < len(text):
+                        if text[k] == '{': bdepth += 1
+                        elif text[k] == '}':
+                            bdepth -= 1
+                            if bdepth == 0:
+                                return text[j:k+1]
+                        k += 1
+                    break
+            i += 1
+    return None
+
+failures = []
+for api in apis:
+    name = api['api']
+    sentinel = f'/* __ROCM_CURATED__: {name} */'
+    body = None
+    for path, text in files:
+        b = find_body(text, name)
+        if b and sentinel in b:
+            body = b
+            break
+    if body is None:
+        failures.append(f'{name}: no wrapper body found containing sentinel {sentinel!r}')
+        continue
+    if not MACRO_RE.search(body):
+        failures.append(f'{name}: sentinel present but no _CURATED macro invocation')
+        continue
+    # IN-local check, only when the API has at least one IN/INOUT arg.
+    has_in = any(a['dir'] in ('IN', 'INOUT') for a in api['args'])
+    if has_in and '__rocm_in_' not in body:
+        failures.append(f'{name}: has IN args but no __rocm_in_ locals in body')
+
+if failures:
+    for f in failures:
+        print(f'  CURATED FAIL: {f}')
+    sys.exit(1)
+print(f'CURATED: {len(apis)} curated APIs verified')
+PY
+)"
+    set +e
+    python3 -c "$PYTHON_CURATED_GATE" "$SRC_DIR" "$CURATED_YAML" "$SCRIPT_DIR" \
+        > "$WORK/curated.log" 2>&1
+    CURATED_RC=$?
+    set -e
+    cat "$WORK/curated.log"
+    if [ "$CURATED_RC" -ne 0 ]; then
+        echo "FAIL: curated-args coverage gate failed"
+        exit 1
+    fi
+fi
+
 NTOTAL="$(wc -l < "$WORK/exported.txt")"
 echo "PASS: all $NTOTAL exported HIP symbols migrated"
