@@ -5,10 +5,10 @@
 
 #include "subscriber.hpp"
 #include "trigger.hpp"
+#include "vote_entry.hpp"
 
 #include <atomic>
 #include <mutex>
-#include <unordered_map>
 #include <vector>
 
 namespace rocprofsys::control
@@ -34,9 +34,9 @@ public:
     void attach(trigger& trig);
 
     /// Called by triggers when their vote changes. Recomputes the resolved
-    /// state under the unanimous-active policy (any paused vote -> paused);
-    /// fires pause/resume callbacks only on transitions.
-    void publish(const trigger& trig, vote v);
+    /// state (any-paused-wins) and fires pause/resume callbacks only on
+    /// transitions.
+    void publish(const trigger& trig, vote new_vote);
 
     /// If the session is currently paused, fire pause on all subscribers
     /// to reflect the initial state. Subscribers default to "running", so
@@ -49,15 +49,15 @@ public:
     }
 
 private:
-    std::unordered_map<const trigger*, vote> m_votes;
-    std::vector<subscriber>                  m_subscribers;
-    std::atomic<bool>                        m_active{ true };
+    std::vector<vote_entry> m_votes;
+    std::vector<subscriber> m_subscribers;
+    std::atomic<bool>       m_active{ true };
 
     std::mutex m_votes_mutex;
     std::mutex m_subscribers_mutex;
 
-    bool resolve_locked() const;
-    void notify_pause();
-    void notify_resume();
+    [[nodiscard]] bool resolve_locked() const noexcept;
+    void               notify_pause();
+    void               notify_resume();
 };
 }  // namespace rocprofsys::control
