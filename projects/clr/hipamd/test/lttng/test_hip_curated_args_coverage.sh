@@ -226,6 +226,49 @@ PLACEHOLDER_OVERRIDES = {
 # set so the assertion loop can mark them SKIP rather than FAIL.
 RUNTIME_SKIP = {k for k, v in PLACEHOLDER_OVERRIDES.items() if v is None}
 
+# APIs that MUST run inline (NOT inside fork()). HIP's background helper
+# threads (queue/copy/event-monitor) are not duplicated by fork(); a
+# child process inherits the FD and shared-memory state but no threads,
+# leaving the runtime unable to service async work submitted from the
+# child. APIs that depend on background threads — kernel launch, memcpy,
+# memset, event-record, stream lifecycle — silently fail (event-record
+# returns success but its trace event never emits because some internal
+# code path bails before reaching the curated-args emit point) when
+# called from a forked child.
+#
+# With real resources these APIs do NOT crash inline (verified
+# empirically: standalone test calling each succeeds with rc=0), so
+# inline execution is safe.
+#
+# This set must be kept in sync with the empirical FAIL list — add an API
+# here if it consistently misses its _args event in the child but works
+# standalone with real resources.
+INLINE_APIS = {
+    'hipStreamCreateWithFlags',
+    'hipStreamCreateWithPriority',
+    'hipStreamDestroy',
+    'hipEventRecord',
+    'hipLaunchKernel',
+    'hipExtLaunchKernel',
+    'hipGraphLaunch',
+    'hipMemcpy',
+    'hipMemcpyAsync',
+    'hipMemcpyDtoH',
+    'hipMemcpyHtoD',
+    'hipMemcpyDtoD',
+    'hipMemcpyDtoHAsync',
+    'hipMemcpyHtoDAsync',
+    'hipMemcpyDtoDAsync',
+    'hipMemcpyPeer',
+    'hipMemcpyPeerAsync',
+    'hipMemset',
+    'hipMemsetAsync',
+    'hipMemsetD8',
+    'hipMemsetD16',
+    'hipMemsetD32',
+    'hipMemPrefetchAsync',
+}
+
 # Per-API local declarations + initializations to inject INSIDE the
 # lambda body, before the API call. Used for free/destroy APIs whose
 # resource cannot safely come from the shared real_* pool (see Free/
@@ -405,6 +448,19 @@ for idx, api in enumerate(apis):
             call_args.append(f'&{slot}')
         else:
             call_args.append(placeholder_for(name, a))
+    if name in INLINE_APIS:
+        # Run inline (NOT in fork). HIP background threads are lost
+        # across fork() and these APIs depend on them; calling from a
+        # child either silently bails or hangs. Inline execution with
+        # real resources is empirically safe.
+        print(f'    {{')
+        for d in out_decls:
+            print(f'    {d}')
+        if name in PER_API_LOCALS:
+            print(f'        {PER_API_LOCALS[name]}')
+        print(f'        try {{ {name}({", ".join(call_args)}); }} catch(...) {{}}')
+        print(f'    }}')
+        continue
     # Emit decls + call inside a lambda passed to call_isolated().
     # The OUT scratch slots (`_out_<idx>_<j>`) must live inside the
     # lambda so they're owned by the forked child's stack frame.
