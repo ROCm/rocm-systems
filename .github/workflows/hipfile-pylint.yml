@@ -1,6 +1,6 @@
 # Run pylint over the Python files
 
-name: hipfile-pylint
+name: "hipFile pylint"
 
 on:
   push:

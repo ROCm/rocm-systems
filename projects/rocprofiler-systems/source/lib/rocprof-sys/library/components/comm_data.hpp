@@ -3,9 +3,9 @@
 
 #pragma once
 
+#include "common/defines.h"
 #include "core/common.hpp"
 #include "core/components/fwd.hpp"
-#include "core/defines.hpp"
 #include "core/timemory.hpp"
 #include "library/components/category_region.hpp"
 
@@ -68,8 +68,6 @@ struct comm_data : base<comm_data, void>
         static constexpr auto value = "comm_data";
         static constexpr auto label = "UCX Comm Send";
     };
-
-    ROCPROFSYS_DEFAULT_OBJECT(comm_data)
 
     static void preinit();
     static void configure();

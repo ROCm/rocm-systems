@@ -453,15 +453,11 @@ def _run_doctor():
 
 def _get_version():
     try:
-        from importlib.metadata import version
+        from perfxpert import __version__
 
-        return version("perfxpert")
-    except (ImportError, ModuleNotFoundError):
-        # importlib.metadata not available (Python < 3.8 edge case)
-        return "0.1.0"
-    except ValueError:
-        # Package not installed / metadata lookup failed
-        return "0.1.0"
+        return __version__
+    except ImportError:
+        return "0+unknown"
 
 
 if __name__ == "__main__":

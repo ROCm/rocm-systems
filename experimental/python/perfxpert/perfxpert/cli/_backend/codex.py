@@ -149,10 +149,9 @@ class CodexAdapter:
     )
     min_version: str | None = "0.7.0"
     known_schema_versions: tuple[str, ...] = ("0.7.x",)
-    # Codex's MCP tool name wire format is `mcp_<server>_<tool>` per
-    # the April 2026 observed behavior. verify_mcp_live() probes the
-    # actual wire format and warns on drift (plan B1).
-    tool_name_template: str = "mcp_perfxpert_{tool}"
+    # Codex exposes MCP tools using the same namespace form surfaced in
+    # backend sessions: `mcp__<server>__<tool>`.
+    tool_name_template: str = "mcp__perfxpert__{tool}"
     spawn_strategy: Literal["execvpe", "subprocess"] = "execvpe"
 
     _PERFXPERT_DIR = ".perfxpert"  # legacy cleanup only
@@ -632,12 +631,22 @@ class CodexAdapter:
         config_toml: Path,
         scope: Literal["project", "user"],
     ) -> None:
-        """Primary: `codex mcp add perfxpert -- perfxpert-mcp`.
+        """Register the PerfXpert MCP server for the effective scope.
 
-        Fallback: lazy-import `tomlkit` and add/merge
-        `[mcp_servers.perfxpert]` into `config_toml` directly
-        (preserves comments + unknown keys).
+        Project scope edits `<cwd>/.codex/config.toml` directly because
+        `codex mcp add` targets the default Codex config. User scope
+        still prefers `codex mcp add`, then falls back to a structured
+        direct TOML edit.
         """
+        if scope == "project":
+            # `codex mcp add` writes the default Codex config, while a
+            # trusted project launch depends on the project-scoped layer.
+            # Always write the project entry directly so a stale/global
+            # perfxpert listing cannot make install pass with no tools
+            # exposed in the launched session.
+            self._structured_edit_config_toml(config_toml)
+            return
+
         binary = shutil.which(self.binary_name)
 
         # 1) Idempotency: skip if already registered.
@@ -728,7 +737,15 @@ class CodexAdapter:
             "editing codex config.toml directly"
         )
 
-        config_toml.parent.mkdir(parents=True, exist_ok=True)
+        config_dir = config_toml.parent
+        try:
+            config_dir.mkdir(parents=True, exist_ok=True)
+        except FileExistsError as exc:
+            raise ConfigClobber(
+                f"{config_dir} exists but is not a directory. Move it "
+                f"aside (for example: `mv {config_dir} "
+                f"{config_dir}.bak`) and re-run perfxpert-code codex."
+            ) from exc
         existing = (
             config_toml.read_text(encoding="utf-8")
             if config_toml.is_file()
@@ -748,15 +765,19 @@ class CodexAdapter:
                     f"{config_toml} already has [mcp_servers.perfxpert] "
                     f"with command {cmd!r}; refuse to overwrite."
                 )
-            # Same entry — idempotent no-op.
-            return
+            entry = existing_entry
+        else:
+            entry = tomlkit_mod.table()
+            servers["perfxpert"] = entry
 
-        entry = tomlkit_mod.table()
         entry["command"] = "perfxpert-mcp"
         entry["args"] = tomlkit_mod.array()
         entry["enabled"] = True
+        entry["required"] = True
         entry["startup_timeout_sec"] = 10
-        servers["perfxpert"] = entry
+        for filter_key in ("enabled_tools", "disabled_tools"):
+            if filter_key in entry:
+                del entry[filter_key]
 
         pa.atomic_write(config_toml, tomlkit_mod.dumps(doc))
 
@@ -1088,6 +1109,7 @@ class CodexAdapter:
                 tool_name_template=self.tool_name_template,
                 known_tools=_KNOWN_TOOLS,
                 reject_language=True,
+                discovery_tools=("tool_search", "tool_search_tool"),
             )
         return pa.render_prompt(
             bundled_source,
@@ -1095,6 +1117,7 @@ class CodexAdapter:
             tool_name_template=self.tool_name_template,
             known_tools=_KNOWN_TOOLS,
             reject_language=True,
+            discovery_tools=("tool_search", "tool_search_tool"),
         )
 
     def _stage_codex_prompt_file(
