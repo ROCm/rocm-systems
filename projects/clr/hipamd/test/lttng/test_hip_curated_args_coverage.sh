@@ -76,8 +76,13 @@ PLACEHOLDER_OVERRIDES = {
     'hipMemAdvise':                      {'advice': 'hipMemAdviseSetReadMostly',
                                           'dev_ptr':'real_device_ptr'},
 
+    # Stream APIs — destroy needs a private stream so it doesn't kill
+    # the shared `real_stream` for sibling forks (see Free/Destroy
+    # comment below: HIP/GPU resources are NOT COW-protected).
+    'hipStreamDestroy':          {'stream': '_local_dest_stream'},
+
     # Event APIs — `handle` args here are events, not streams.
-    'hipEventDestroy':           {'event':  'real_event'},
+    'hipEventDestroy':           {'event':  '_local_dest_event'},
     'hipEventRecord':            {'event':  'real_event',
                                   'stream': 'real_stream'},
     'hipEventSynchronize':       {'event':  'real_event'},
@@ -120,13 +125,17 @@ PLACEHOLDER_OVERRIDES = {
     # Memory hints
     'hipMemPrefetchAsync': {'dev_ptr': 'real_device_ptr'},
 
-    # Free APIs — pass real allocations. Each runs in a forked child
-    # (call_isolated), so the free does NOT affect the parent's resource
-    # set used by subsequent APIs.
-    'hipFree':       {'ptr':     '(void*)real_device_ptr'},
-    'hipFreeAsync':  {'dev_ptr': '(void*)real_device_ptr'},
-    'hipFreeHost':   {'ptr':     '(void*)real_host_pinned'},
-    'hipHostFree':   {'ptr':     '(void*)real_host_pinned'},
+    # Free / Destroy APIs — allocate a FRESH resource inside the
+    # lambda so the destruction doesn't touch the shared parent's
+    # `real_*` resources. fork() COW protects the parent's *handle
+    # variables*, but the underlying HIP/GPU allocation is owned by
+    # the runtime (kernel/driver state shared across fork) — freeing
+    # it in the child WILL invalidate the same GPU pointer in
+    # subsequent siblings. Hence: allocate-locally in lambda.
+    'hipFree':       {'ptr':     '_local_free_dev'},
+    'hipFreeAsync':  {'dev_ptr': '_local_free_dev'},
+    'hipFreeHost':   {'ptr':     '_local_free_host'},
+    'hipHostFree':   {'ptr':     '_local_free_host'},
 
     # Graph APIs — `graph` and `graphExec`/`hGraphExec` are real handles;
     # `pDependencies` is `const hipGraphNode_t*` (NOT a generic pointer);
@@ -135,7 +144,7 @@ PLACEHOLDER_OVERRIDES = {
     # implicit-convert to those typed pointer params, so we override them
     # with `nullptr` (the API may return an error code, but the args
     # event still fires because emit happens after the impl returns).
-    'hipGraphDestroy':                  {'graph':         'real_graph'},
+    'hipGraphDestroy':                  {'graph':         '_local_dest_graph'},
     'hipGraphAddKernelNode':            {'graph':         'real_graph',
                                          'pDependencies': 'nullptr',
                                          'pNodeParams':   'nullptr'},
@@ -165,7 +174,7 @@ PLACEHOLDER_OVERRIDES = {
                                          'node':       'real_graph_node',
                                          'dst':        '(void*)real_device_ptr',
                                          'src':        '(const void*)real_host_buf'},
-    'hipGraphExecDestroy':              {'graphExec':  'real_graph_exec'},
+    'hipGraphExecDestroy':              {'graphExec':  '_local_dest_graph_exec'},
     # hipGraphInstantiate: pErrorNode is `hipGraphNode_t*`, pLogBuffer is
     # `char*`, both should be nullptr (we don't want a real error-node out
     # ptr — the YAML marks them IN even though they're really OUT
@@ -216,6 +225,31 @@ PLACEHOLDER_OVERRIDES = {
 # APIs explicitly skipped at runtime (None entries above). Surfaced as a
 # set so the assertion loop can mark them SKIP rather than FAIL.
 RUNTIME_SKIP = {k for k, v in PLACEHOLDER_OVERRIDES.items() if v is None}
+
+# Per-API local declarations + initializations to inject INSIDE the
+# lambda body, before the API call. Used for free/destroy APIs whose
+# resource cannot safely come from the shared real_* pool (see Free/
+# Destroy comment in PLACEHOLDER_OVERRIDES). Each entry is a multi-line
+# C++ snippet (no trailing newline) that introduces named locals
+# referenced by PLACEHOLDER_OVERRIDES above.
+PER_API_LOCALS = {
+    # Free APIs: allocate a private buffer, then free it.
+    'hipFree':       'void* _local_free_dev = nullptr; hipMalloc(&_local_free_dev, 64);',
+    'hipFreeAsync':  'void* _local_free_dev = nullptr; hipMalloc(&_local_free_dev, 64);',
+    'hipFreeHost':   'void* _local_free_host = nullptr; hipHostMalloc(&_local_free_host, 64, 0);',
+    'hipHostFree':   'void* _local_free_host = nullptr; hipHostMalloc(&_local_free_host, 64, 0);',
+
+    # Stream / event / graph destroy: create a private handle, then destroy.
+    'hipStreamDestroy':    'hipStream_t _local_dest_stream = nullptr; hipStreamCreate(&_local_dest_stream);',
+    'hipEventDestroy':     'hipEvent_t _local_dest_event = nullptr; hipEventCreate(&_local_dest_event);',
+    'hipGraphDestroy':     'hipGraph_t _local_dest_graph = nullptr; hipGraphCreate(&_local_dest_graph, 0);',
+    'hipGraphExecDestroy': 'hipGraph_t _local_dg = nullptr; hipGraphCreate(&_local_dg, 0); '
+                           'hipKernelNodeParams _kp = {}; _kp.func = (void*)noop_kernel; '
+                           '_kp.gridDim = dim3(1,1,1); _kp.blockDim = dim3(1,1,1); '
+                           'hipGraphNode_t _ln = nullptr; hipGraphAddKernelNode(&_ln, _local_dg, nullptr, 0, &_kp); '
+                           'hipGraphExec_t _local_dest_graph_exec = nullptr; '
+                           'hipGraphInstantiate(&_local_dest_graph_exec, _local_dg, nullptr, nullptr, 0);',
+}
 
 # Full call-expression overrides for APIs whose YAML omits required header
 # args (per spec §4.4 omission mitigation). Currently empty: the only
@@ -379,6 +413,11 @@ for idx, api in enumerate(apis):
         # out_decls already include their own 4-space indent; nest them
         # one extra level (8 spaces total) for readability inside lambda.
         print(f'    {d}')
+    if name in PER_API_LOCALS:
+        # Inject per-API local declarations (e.g., a private allocation
+        # for a Free/Destroy API). Emitted before the API call so the
+        # local names are in scope.
+        print(f'        {PER_API_LOCALS[name]}')
     print(f'        {name}({", ".join(call_args)});')
     print(f'    }});')
 print('    return 0;')
