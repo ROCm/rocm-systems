@@ -96,6 +96,79 @@ template <> hipError_t HandleException<hipError_t>() {
         return;                                                                \
     } while (0)
 
+/* ---------- Curated parameter-capture variants (spec §6.2) ----------
+ * Six macros: STATUS / PTR / VOID, each with a captured-args form and a
+ * _NOARGS form. The migrator selects _NOARGS iff the curated API has zero
+ * captured args. Helper signature invariant: every helper takes
+ *   (uint64_t corr_id, <captured-args...>, hipError_t status)
+ * even when captured-args is empty. Status comes from:
+ *   - STATUS variants: macro-evaluated __rocm_status from the call's expr
+ *   - PTR variants:    synthesized from null-vs-non-null retval
+ *   - VOID variants:   literal hipSuccess
+ *
+ * Generic exit events (hip_api_exit_status / _ptr / _void) are still
+ * emitted by these macros — the typed _args event AUGMENTS the existing
+ * generic event, never replaces it (spec §1, §2).
+ */
+
+/* Captured-args variants. __VA_ARGS__ is non-empty by construction (the
+ * migrator emits the _NOARGS form for zero-arg APIs). */
+#define ROCM_TRACE_RET_STATUS_CURATED(api, expr, corr, ...)                  \
+    do {                                                                     \
+        const hipError_t __rocm_status = (expr);                             \
+        rocm_trace_emit_##api##_args((corr), __VA_ARGS__, __rocm_status);    \
+        rocm_trace_emit_hip_api_exit_status(__func__,                        \
+            (corr), (int32_t)__rocm_status);                                 \
+        return __rocm_status;                                                \
+    } while (0)
+
+#define ROCM_TRACE_RET_PTR_CURATED(api, ptr_type, expr, corr, ...)           \
+    do {                                                                     \
+        ptr_type const __rocm_ptr = (expr);                                  \
+        const hipError_t __rocm_status =                                     \
+            (__rocm_ptr != nullptr) ? hipSuccess : hipErrorOutOfMemory;      \
+        rocm_trace_emit_##api##_args((corr), __VA_ARGS__, __rocm_status);    \
+        rocm_trace_emit_hip_api_exit_ptr(__func__, (corr), __rocm_ptr);      \
+        return __rocm_ptr;                                                   \
+    } while (0)
+
+#define ROCM_TRACE_RET_VOID_CURATED(api, expr, corr, ...)                    \
+    do {                                                                     \
+        (expr);                                                              \
+        rocm_trace_emit_##api##_args((corr), __VA_ARGS__, hipSuccess);       \
+        rocm_trace_emit_hip_api_exit_void(__func__, (corr));                 \
+        return;                                                              \
+    } while (0)
+
+/* Zero-captured-args variants. Avoids any empty-__VA_ARGS__ expansion
+ * (the codebase mixes C++14/17/20 — see spec §6.2 _NOARGS rationale). */
+#define ROCM_TRACE_RET_STATUS_CURATED_NOARGS(api, expr, corr)                \
+    do {                                                                     \
+        const hipError_t __rocm_status = (expr);                             \
+        rocm_trace_emit_##api##_args((corr), __rocm_status);                 \
+        rocm_trace_emit_hip_api_exit_status(__func__,                        \
+            (corr), (int32_t)__rocm_status);                                 \
+        return __rocm_status;                                                \
+    } while (0)
+
+#define ROCM_TRACE_RET_PTR_CURATED_NOARGS(api, ptr_type, expr, corr)         \
+    do {                                                                     \
+        ptr_type const __rocm_ptr = (expr);                                  \
+        const hipError_t __rocm_status =                                     \
+            (__rocm_ptr != nullptr) ? hipSuccess : hipErrorOutOfMemory;     \
+        rocm_trace_emit_##api##_args((corr), __rocm_status);                 \
+        rocm_trace_emit_hip_api_exit_ptr(__func__, (corr), __rocm_ptr);      \
+        return __rocm_ptr;                                                   \
+    } while (0)
+
+#define ROCM_TRACE_RET_VOID_CURATED_NOARGS(api, expr, corr)                  \
+    do {                                                                     \
+        (expr);                                                              \
+        rocm_trace_emit_##api##_args((corr), hipSuccess);                    \
+        rocm_trace_emit_hip_api_exit_void(__func__, (corr));                 \
+        return;                                                              \
+    } while (0)
+
 extern "C" hipError_t __hipPopCallConfiguration(dim3* gridDim, dim3* blockDim, size_t* sharedMem,
                                                 hipStream_t* stream) { const uint64_t __rocm_corr = rocm_trace_next_corr_id(); rocm_trace_emit_hip_api_enter(__func__, __rocm_corr);
   TRY;
