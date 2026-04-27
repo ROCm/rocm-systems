@@ -155,12 +155,15 @@ def find_wrapper_body(text, fn_name):
     return None
 
 
-def overlay(provider, source_path, yaml_path, include_path):
+def overlay(provider, source_path, yaml_path, include_path, extra_includes=None):
     cfg = PROVIDER_CONFIG[provider]
     apis = {a['api']: a for a in parse_yaml_file(yaml_path)}
 
     # Use libclang to get param-type info for wrapper signatures.
     args = ['-x', 'c++', '-std=c++17', '-I', include_path] + cfg['default_extra_args']
+    if extra_includes:
+        for p in extra_includes:
+            args += ['-I', p]
     idx = cindex.Index.create()
     tu = idx.parse(source_path, args=args)
     param_types = {}  # fn_name -> {pname: ptype}
@@ -287,9 +290,13 @@ def main():
     ap.add_argument('--source', required=True)
     ap.add_argument('--curated-yaml', required=True)
     ap.add_argument('--include-path', default='/opt/rocm/include')
+    ap.add_argument('--extra-include', action='append', default=[],
+                    help='Additional -I path; may be repeated. Useful '
+                         'for HSA wrappers that #include "inc/..." paths '
+                         'relative to the project source root.')
     args = ap.parse_args()
     sys.exit(overlay(args.provider, args.source, args.curated_yaml,
-                     args.include_path))
+                     args.include_path, args.extra_include))
 
 
 if __name__ == '__main__':
