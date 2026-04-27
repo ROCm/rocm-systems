@@ -3,6 +3,7 @@
 
 #include "session.hpp"
 
+#include <algorithm>
 #include <mutex>
 #include <utility>
 
@@ -33,7 +34,7 @@ void
 session::attach(trigger& trig)
 {
     std::scoped_lock const lk{ m_votes_mutex };
-    m_votes[&trig] = trig.initial_vote();
+    m_votes.push_back({ trig.name(), trig.initial_vote() });
     m_active.store(resolve_locked(), std::memory_order_relaxed);
 }
 
@@ -45,15 +46,23 @@ session::force_initial_pause()
 }
 
 void
-session::publish(const trigger& trig, vote v)
+session::publish(const trigger& trig, vote new_vote)
 {
     bool was_active = false;
     bool now_active = false;
     {
         std::scoped_lock const lk{ m_votes_mutex };
-        was_active     = m_active.load(std::memory_order_relaxed);
-        m_votes[&trig] = v;
-        now_active     = resolve_locked();
+        was_active = m_active.load(std::memory_order_relaxed);
+
+        const auto name = trig.name();
+        auto       it   = std::find_if(m_votes.begin(), m_votes.end(),
+                                       [name](const vote_entry& e) { return e.name == name; });
+        if(it == m_votes.end())
+            m_votes.push_back({ name, new_vote });
+        else
+            it->current_vote = new_vote;
+
+        now_active = resolve_locked();
         m_active.store(now_active, std::memory_order_relaxed);
     }
 
@@ -64,15 +73,14 @@ session::publish(const trigger& trig, vote v)
         notify_pause();
 }
 
-// Unanimous-active: paused iff at least one trigger voted paused.
-// Abstain votes are ignored. With no votes (no triggers attached), the
-// session is active by default.
+// Any paused vote pauses the session. Abstain is ignored.
+// With no votes the session is active by default.
 bool
-session::resolve_locked() const
+session::resolve_locked() const noexcept
 {
-    for(const auto& [trig, v] : m_votes)
+    for(const auto& entry : m_votes)
     {
-        if(v == vote::paused) return false;
+        if(entry.current_vote == vote::paused) return false;
     }
     return true;
 }
