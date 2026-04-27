@@ -1312,7 +1312,13 @@ hipError_t ihipHostRegister(void* hostPtr, size_t sizeBytes, unsigned int flags)
       if (devMem != nullptr) {
         void* vAddr = reinterpret_cast<void*>(devMem->virtualAddress());
         if (hostPtr != vAddr) {
-          amdDevice->AddDevMemObj(vAddr, mem);
+          if (IS_WINDOWS) {
+            amdDevice->AddDevMemObj(vAddr, mem);
+          } else {
+            if (amd::MemObjMap::FindMemObj(vAddr) == nullptr) {
+              amd::MemObjMap::AddMemObj(vAddr, mem);
+            }
+          }
         }
       }
     }
@@ -1352,7 +1358,13 @@ hipError_t ihipHostUnregister(void* hostPtr) {
       if (devMem != nullptr) {
         void* vAddr = reinterpret_cast<void*>(devMem->virtualAddress());
         if (vAddr != hostPtr) {
-          amdDevice->RemoveDevMemObj(vAddr);
+          if (IS_WINDOWS) {
+            amdDevice->RemoveDevMemObj(vAddr);
+          } else {
+            if (amd::MemObjMap::FindMemObj(vAddr)) {
+              amd::MemObjMap::RemoveMemObj(vAddr);
+            }
+          }
         }
       }
     }

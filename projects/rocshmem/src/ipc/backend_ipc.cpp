@@ -121,6 +121,8 @@ void IPCBackend::init() {
 
   setup_team_world();
 
+  setup_team_shared();
+
   TeamInfo *tinfo = team_tracker.get_team_world()->tinfo_wrt_world;
 
   default_context_proxy_ = IPCDefaultContextProxyT(this, tinfo);
@@ -139,8 +141,12 @@ IPCBackend::~IPCBackend() {
   // Close IPC handles for remote heap bases
   ipcImpl.ipcHostStop();
 
-  auto *team_world{team_tracker.get_team_world()};
-  team_world->~Team();
+  auto *team_shared{static_cast<IPCTeam*>(team_tracker.get_team_shared())};
+  team_shared->~IPCTeam();
+  CHECK_HIP(hipFree(team_shared));
+
+  auto *team_world{static_cast<IPCTeam*>(team_tracker.get_team_world())};
+  team_world->~IPCTeam();
   CHECK_HIP(hipFree(team_world));
 
   CHECK_HIP(hipFree(ctx_array));
@@ -214,6 +220,20 @@ void IPCBackend::setup_team_world() {
    */
   host::ROCSHMEM_TEAM_WORLD = reinterpret_cast<rocshmem_team_t>(team_world);
   set_team_world_device(host::ROCSHMEM_TEAM_WORLD);
+}
+
+void IPCBackend::setup_team_shared() {
+  TeamInfo team_info_wrt_parent(nullptr, 0, 1, num_pes);
+  TeamInfo team_info_wrt_world(nullptr, 0, 1, num_pes);
+
+  IPCTeam *team_shared{nullptr};
+  CHECK_HIP(hipMalloc(&team_shared, sizeof(IPCTeam)));
+  new (team_shared) IPCTeam(this, team_info_wrt_parent, team_info_wrt_world,
+                             num_pes, my_pe, backend_comm, 1);
+  team_tracker.set_team_shared(team_shared);
+
+  host::ROCSHMEM_TEAM_SHARED = reinterpret_cast<rocshmem_team_t>(team_shared);
+  set_team_shared_device(host::ROCSHMEM_TEAM_SHARED);
 }
 
 void IPCBackend::team_destroy(rocshmem_team_t team) {
@@ -558,8 +578,8 @@ void IPCBackend::teams_init() {
 
   memset(team_pool_bitmask_, 0, team_bitmask_size_);
   memset(team_reduced_bitmask_, 0, team_bitmask_size_);
-  /* Set all to available except the 0th one (reserved for TEAM_WORLD) */
-  for (int bit_i = 1; bit_i < max_num_teams; bit_i++) {
+  /* Set all to available except reserved teams (TEAM_WORLD and TEAM_SHARED) */
+  for (int bit_i = TeamTracker::NUM_RESERVED_TEAMS; bit_i < max_num_teams; bit_i++) {
     int byte_i = bit_i / CHAR_BIT;
 
     team_pool_bitmask_[byte_i] |= 1 << (bit_i % CHAR_BIT);

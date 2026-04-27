@@ -1,3 +1,6 @@
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier:  MIT
+
 // Copied from https://github.com/benrichard-amd/rocflop/tree/82f197e12314bab694fc70451a2b495b4f51bf90
 
 #include <iostream>
@@ -51,8 +54,8 @@ template<typename T> __global__ void fma_throughput(vec4<T>* buffer, int count)
     ptr[tid] = value0 + value1 + value2 + value3;
 }
 
-// MFMA instructions are available on selected CDNA targets, but not on gfx1151.
-#if !defined(__gfx906__) && !defined(__gfx1151__)
+// MFMA instructions are available on selected CDNA targets, but not on gfx906, gfx1151, or gfx1250.
+#if !defined(__gfx906__) && !defined(__gfx1151__) && !defined(__gfx1250__)
 __global__ void matmul_fp16_throughput(vec4<float16>* inputs, vec4<float>* outputs, int count)
 {
     int grid_size = gridDim.x * blockDim.x;
@@ -110,11 +113,11 @@ __global__ void matmul_fp32_throughput(float* inputs, vec4<float>* outputs, int 
 
     outputs[tid] = accum0 + accum1 + accum2 + accum3;
 }
-#endif // !defined(__gfx906__) && !defined(__gfx1151__)
+#endif // !defined(__gfx906__) && !defined(__gfx1151__) && !defined(__gfx1250__)
 
 // SMFMAC (Sparse MFMA) instructions are only available on selected CDNA targets,
-// and are not available on gfx1151.
-#if !defined(__gfx906__) && !defined(__gfx908__) && !defined(__gfx90a__) && !defined(__gfx1151__)
+// and this block is excluded on gfx906, gfx908, gfx90a, gfx1151, and gfx1250.
+#if !defined(__gfx906__) && !defined(__gfx908__) && !defined(__gfx90a__) && !defined(__gfx1151__) && !defined(__gfx1250__)
 __global__ void sparse_matmul_fp16_throughput(vec4<float16>* input0, vec8<float16>* input1, vec4<float>* outputs, int count)
 {
     int grid_size = gridDim.x * blockDim.x;
@@ -150,7 +153,7 @@ __global__ void sparse_matmul_fp16_throughput(vec4<float16>* input0, vec8<float1
 
     outputs[tid] = accum0 + accum1 + accum2 + accum3;
 }
-#endif // !defined(__gfx906__) && !defined(__gfx908__) && !defined(__gfx90a__) && !defined(__gfx1151__)
+#endif // !defined(__gfx906__) && !defined(__gfx908__) && !defined(__gfx90a__) && !defined(__gfx1151__) && !defined(__gfx1250__)
 
 int g_current_device = -1;
 
@@ -270,7 +273,7 @@ template<typename T> double fma_throughput_test(int device, int count, int runs 
     return flops;
 }
 
-#if !defined(__gfx906__) && !defined(__gfx1151__)
+#if !defined(__gfx906__) && !defined(__gfx1151__) && !defined(__gfx1250__)
 template<typename matT, typename accumT> double matmul_throughput_test(int device, int count, int runs = 1)
 {
     const int wave_size = 64;
@@ -326,9 +329,9 @@ template<typename matT, typename accumT> double matmul_throughput_test(int devic
 
     return flops;
 }
-#endif // !defined(__gfx906__) && !defined(__gfx1151__)
+#endif // !defined(__gfx906__) && !defined(__gfx1151__) && !defined(__gfx1250__)
 
-#if !defined(__gfx906__) && !defined(__gfx908__) && !defined(__gfx90a__) && !defined(__gfx1151__)
+#if !defined(__gfx906__) && !defined(__gfx908__) && !defined(__gfx90a__) && !defined(__gfx1151__) && !defined(__gfx1250__)
 template<typename matT, typename accumT> double sparse_matmul_throughput_test(int device, int count, int runs = 1)
 {
     const int wave_size = 64;
@@ -382,7 +385,7 @@ template<typename matT, typename accumT> double sparse_matmul_throughput_test(in
 
     return flops;
 }
-#endif // !defined(__gfx906__) && !defined(__gfx908__) && !defined(__gfx90a__) && !defined(__gfx1151__)
+#endif // !defined(__gfx906__) && !defined(__gfx908__) && !defined(__gfx90a__) && !defined(__gfx1151__) && !defined(__gfx1250__)
 
 struct Result {
     int device = -1;
@@ -458,8 +461,8 @@ Result run_tests(int device, int runs, uint32_t mask)
         res.valu_int32 = fma_throughput_test<int>(device, 4096, runs);
     }
 
-#if !defined(__gfx906__) && !defined(__gfx1151__)
-    // MFMA available on gfx908+ (excludes gfx906 with rev=6)
+#if !defined(__gfx906__) && !defined(__gfx1151__) && !defined(__gfx1250__)
+    // MFMA available on gfx908+ (excludes gfx906 with rev=6, gfx1151, and gfx1250)
     bool has_mfma = arch.major == 0x9 && (arch.minor >= 0x4 || (arch.minor == 0 && arch.rev >= 8));
 
     if(mask & MATRIX_FP16) {
@@ -478,7 +481,7 @@ Result run_tests(int device, int runs, uint32_t mask)
         }
     }
 #else
-    // MFMA not available when compiling for gfx906 or gfx1151
+    // MFMA not available when compiling for gfx906, gfx1151, or gfx1250
     if(mask & MATRIX_FP16) {
         res.mfma_fp16 = 0;
     }
@@ -487,7 +490,7 @@ Result run_tests(int device, int runs, uint32_t mask)
     }
 #endif
 
-#if !defined(__gfx906__) && !defined(__gfx908__) && !defined(__gfx90a__) && !defined(__gfx1151__)
+#if !defined(__gfx906__) && !defined(__gfx908__) && !defined(__gfx90a__) && !defined(__gfx1151__) && !defined(__gfx1250__)
     if(mask & SMATRIX_FP16) {
         // SMFMAC only available on gfx940 (MI300) and later, not on gfx906, gfx908, or gfx90a
         if(arch.major == 0x9 && arch.minor >= 0x4) {
@@ -497,7 +500,7 @@ Result run_tests(int device, int runs, uint32_t mask)
         }
     }
 #else
-    // SMFMAC not available when compiling for gfx906, gfx908, gfx90a, or gfx1151
+    // SMFMAC not available when compiling for gfx906, gfx908, gfx90a, gfx1151, gfx1250
     if(mask & SMATRIX_FP16) {
         res.smfmac_fp16 = 0;
     }

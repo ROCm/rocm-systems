@@ -208,6 +208,18 @@ class ROBackend : public Backend {
   ROTeamProxyT *team_world_proxy_;
 
   /**
+   * @brief Allocate and initialize team shared.
+   *
+   * TEAM_SHARED contains the PEs that share a common memory domain
+   * (same node). Must be called after initIPC() since membership
+   * is determined from ipcImpl.pes_with_ipc_avail. Computes real
+   * pe_start/stride from the PE list; set to ROCSHMEM_TEAM_INVALID
+   * when IPC is disabled or when node-local ranks are not uniformly
+   * strided.
+   */
+  void setup_team_shared();
+
+  /**
    * @brief Workers used to poll on the device network request queues.
    */
   std::thread worker_thread{};

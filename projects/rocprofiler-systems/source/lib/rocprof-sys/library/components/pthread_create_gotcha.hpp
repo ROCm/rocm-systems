@@ -3,8 +3,8 @@
 
 #pragma once
 
+#include "common/defines.h"
 #include "core/common.hpp"
-#include "core/defines.hpp"
 #include "core/timemory.hpp"
 #include "library/thread_data.hpp"
 
@@ -47,8 +47,6 @@ struct pthread_create_gotcha : tim::component::base<pthread_create_gotcha, void>
         void*          m_arg     = nullptr;
         wrapper_config m_config  = {};
     };
-
-    ROCPROFSYS_DEFAULT_OBJECT(pthread_create_gotcha)
 
     // string id for component
     static std::string label() { return "pthread_create_gotcha"; }

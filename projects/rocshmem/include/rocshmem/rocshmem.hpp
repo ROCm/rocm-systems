@@ -363,10 +363,11 @@ __host__ int rocshmem_team_split_strided(rocshmem_team_t parent_team,
  * is undefined. This call will destroy only the shareable contexts
  * created from the referenced team.
  *
- * @param[in] team The team to destroy. The behavior is undefined if
- *                 the input team is ROCSHMEM_TEAM_WORLD or any other
- *                 invalid team. If the input is ROCSHMEM_TEAM_INVALID,
- *                 this function will not perform any operation.
+ * @param[in] team The team to destroy.
+ *                 ROCSHMEM_TEAM_INVALID, ROCSHMEM_TEAM_WORLD, and
+ *                 ROCSHMEM_TEAM_SHARED are silently ignored (no-op).
+ *                 Passing a handle that was already destroyed or
+ *                 never created results in undefined behavior.
  *
  * @return None.
  */
