@@ -2,10 +2,15 @@
 # Build static AQLProfile library
 #
 
+configure_file(${CMAKE_CURRENT_LIST_DIR}/version.h.in
+               ${CMAKE_CURRENT_BINARY_DIR}/version.h @ONLY)
+
 if(NOT ROCPROFILER_BUILD_AQLPROFILE)
     rocprofiler_add_interface_library(
         rocprofiler-sdk-aqlprofile "Interface library to external AQLProfile library"
         INTERNAL)
+    target_include_directories(rocprofiler-sdk-aqlprofile
+                               INTERFACE $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/source>)
     target_link_libraries(
         rocprofiler-sdk-aqlprofile
         INTERFACE $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-aqlprofile-external>)
@@ -13,9 +18,6 @@ if(NOT ROCPROFILER_BUILD_AQLPROFILE)
 endif()
 
 rocprofiler_deactivate_clang_tidy()
-
-configure_file(${CMAKE_CURRENT_LIST_DIR}/version.h.in
-               ${CMAKE_CURRENT_BINARY_DIR}/version.h @ONLY)
 
 add_library(rocprofiler-sdk-aqlprofile STATIC)
 add_library(rocprofiler-sdk::rocprofiler-sdk-aqlprofile ALIAS rocprofiler-sdk-aqlprofile)
