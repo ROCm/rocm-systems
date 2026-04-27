@@ -19,16 +19,16 @@ int IbCastRelaxedOrderingEnabled = 0;
 
 ncclProfilerCallback_t IbCastProfilerFunction;
 
-NCCL_PARAM(IbSplitDataOnQps, "IB_SPLIT_DATA_ON_QPS", 0);
-NCCL_PARAM(IbPrepostReceiveWorkRequests, "IB_PREPOST_RECEIVE_WORK_REQUESTS", -2);
-NCCL_PARAM(IbAsyncEvents,"IB_RETURN_ASYNC_EVENTS",1);
-extern int ncclParamIbReceiverSideMatchingScheme();
-extern int ncclParamIbOooRq();
-extern int ncclParamIbResiliencyPortFailover();
+NCCL_PARAM(IbCastSplitDataOnQps, "IB_SPLIT_DATA_ON_QPS", 0);
+NCCL_PARAM(IbCastPrepostReceiveWorkRequests, "IB_PREPOST_RECEIVE_WORK_REQUESTS", -2);
+NCCL_PARAM(IbCastAsyncEvents,"IB_RETURN_ASYNC_EVENTS",1);
+extern int ncclParamIbCastReceiverSideMatchingScheme();
+extern int ncclParamIbCastOooRq();
+extern int ncclParamIbCastResiliencyPortFailover();
 
 
 ncclResult_t IbCastStatsCheckFatalCount(struct ncclIbStats* stat, const char* funcName) {
-  if (ncclParamIbAsyncEvents() && COMPILER_ATOMIC_LOAD(&stat->fatalErrorCount, std::memory_order_relaxed)) {
+  if (ncclParamIbCastAsyncEvents() && COMPILER_ATOMIC_LOAD(&stat->fatalErrorCount, std::memory_order_relaxed)) {
     WARN("communicator encountered a fatal error (detected in %s)", funcName);
     return ncclSystemError;
   }
@@ -57,17 +57,17 @@ ncclResult_t IbCastBaseCommInit(struct ncclIbNetCommBase* baseComm, bool isSend)
     memset(&baseComm->qps[i].rtsAttr, 0, sizeof(baseComm->qps[i].rtsAttr));
   }
   baseComm->nqps = -1;
-  baseComm->splitDataOnQps = ncclParamIbSplitDataOnQps();
+  baseComm->splitDataOnQps = ncclParamIbCastSplitDataOnQps();
   baseComm->nDataQps = -1;
   baseComm->isSend = isSend;
   baseComm->ready = 0;
 
   NCCLCHECK(IbCastResiliencyInit(baseComm, &baseComm->resiliency));
-  baseComm->recvMatchingScheme = ncclParamIbReceiverSideMatchingScheme() == -2 ? BY_INDEX : ncclParamIbReceiverSideMatchingScheme();
+  baseComm->recvMatchingScheme = ncclParamIbCastReceiverSideMatchingScheme() == -2 ? BY_INDEX : ncclParamIbCastReceiverSideMatchingScheme();
 
-  if (ncclParamIbOooRq() || (ncclParamIbResiliencyPortFailover() == 1)) {
+  if (ncclParamIbCastOooRq() || (ncclParamIbCastResiliencyPortFailover() == 1)) {
     baseComm->recvMatchingScheme = BY_ID;
-    if (ncclParamIbReceiverSideMatchingScheme() == BY_INDEX) {
+    if (ncclParamIbCastReceiverSideMatchingScheme() == BY_INDEX) {
       INFO(NCCL_NET, "NET/IB: %s: Overriding matching scheme to ID-based (%d)", __func__, BY_ID);
     }
   }
@@ -84,16 +84,16 @@ ncclResult_t IbCastRecvCommInit(struct ncclIbRecvComm* recvComm) {
     .num_sge = 0
   };
 
-  recvComm->prepostReceiveWorkRequests = (ncclParamIbPrepostReceiveWorkRequests() == -2) ? false : ncclParamIbPrepostReceiveWorkRequests();
+  recvComm->prepostReceiveWorkRequests = (ncclParamIbCastPrepostReceiveWorkRequests() == -2) ? false : ncclParamIbCastPrepostReceiveWorkRequests();
 
   if (recvComm->base.resiliency) {
-    if (ncclParamIbPrepostReceiveWorkRequests() == 0) {
+    if (ncclParamIbCastPrepostReceiveWorkRequests() == 0) {
       INFO(NCCL_NET, "NET/IB: %s: Overriding pre-posting to true (1).", __func__);
     }
     recvComm->prepostReceiveWorkRequests = true;
   }
-  if (ncclParamIbOooRq()) {
-    if (ncclParamIbPrepostReceiveWorkRequests() == 0) {
+  if (ncclParamIbCastOooRq()) {
+    if (ncclParamIbCastPrepostReceiveWorkRequests() == 0) {
       INFO(NCCL_NET, "NET/IB: %s: OOO RQ is enabled, Overriding pre-posting to true (1).", __func__);
     }
     recvComm->prepostReceiveWorkRequests = true;

@@ -9,19 +9,19 @@
 #include "common_cast.h"
 #include "p2p_resiliency_cast.h"
 
-NCCL_PARAM(IbGidIndex, "IB_GID_INDEX", -1);
-NCCL_PARAM(IbRoutableFlidIbGidIndex, "IB_ROUTABLE_FLID_GID_INDEX", 1);
-NCCL_PARAM(IbRoceVersionNum, "IB_ROCE_VERSION_NUM", 2);
-NCCL_PARAM(IbTimeout, "IB_TIMEOUT", 20);
-NCCL_PARAM(IbRetryCnt, "IB_RETRY_CNT", 7);
-NCCL_PARAM(IbPkey, "IB_PKEY", 0);
-NCCL_PARAM(IbUseInline, "IB_USE_INLINE", 0);
-NCCL_PARAM(IbSl, "IB_SL", -1);
-NCCL_PARAM(IbTc, "IB_TC", -1);
-NCCL_PARAM(IbFifoTc, "IB_FIFO_TC", -1);
-NCCL_PARAM(IbEceEnable,"IB_ECE_ENABLE",1);
+NCCL_PARAM(IbCastGidIndex, "IB_GID_INDEX", -1);
+NCCL_PARAM(IbCastRoutableFlidIbGidIndex, "IB_ROUTABLE_FLID_GID_INDEX", 1);
+NCCL_PARAM(IbCastRoceVersionNum, "IB_ROCE_VERSION_NUM", 2);
+NCCL_PARAM(IbCastTimeout, "IB_TIMEOUT", 20);
+NCCL_PARAM(IbCastRetryCnt, "IB_RETRY_CNT", 7);
+NCCL_PARAM(IbCastPkey, "IB_PKEY", 0);
+NCCL_PARAM(IbCastUseInline, "IB_USE_INLINE", 0);
+NCCL_PARAM(IbCastSl, "IB_SL", -1);
+NCCL_PARAM(IbCastTc, "IB_TC", -1);
+NCCL_PARAM(IbCastFifoTc, "IB_FIFO_TC", -1);
+NCCL_PARAM(IbCastEceEnable,"IB_ECE_ENABLE",1);
 
-extern int64_t ncclParamIbOooRq();
+extern int64_t ncclParamIbCastOooRq();
 
 struct ncclIbDevExtraProps {
   bool oooRq;
@@ -53,7 +53,7 @@ struct ncclIbHandle {
   struct ncclIbCommStage stage; // Used by the other side when connecting
 };
 
-NCCL_PARAM(IbQpsPerConn, "IB_QPS_PER_CONNECTION", 1);
+NCCL_PARAM(IbCastQpsPerConn, "IB_QPS_PER_CONNECTION", 1);
 
 ncclResult_t IbCastInitCommDevBase(int ibDevN, struct ncclIbNetCommDevBase* base, void* cq_context, int cqSize) {
   base->ibDevN = ibDevN;
@@ -290,7 +290,7 @@ ncclResult_t IbCastGetGidIndex(struct ibv_context *context, uint8_t portNum, str
   //for IB, choose GID Index that will have routable FLID if present
   if (portAttr->link_layer == IBV_LINK_LAYER_INFINIBAND) {
     union ibv_gid gid;
-    int routableGidIndex = ncclParamIbRoutableFlidIbGidIndex();
+    int routableGidIndex = ncclParamIbCastRoutableFlidIbGidIndex();
     if (routableGidIndex < gidTblLen) {
       NCCLCHECK(wrap_ibv_query_gid(context, portNum, routableGidIndex, &gid));
       if (IbCastExtractFlid(&gid) != 0) {
@@ -303,13 +303,13 @@ ncclResult_t IbCastGetGidIndex(struct ibv_context *context, uint8_t portNum, str
   }
 
   //for ROCE
-  *gidIndex = ncclParamIbGidIndex();
+  *gidIndex = ncclParamIbCastGidIndex();
   if (*gidIndex >= 0) {
     return ncclSuccess;
   }
 
   sa_family_t userAddrFamily = envIbAddrFamily();
-  int userRoceVersion = ncclParamIbRoceVersionNum();
+  int userRoceVersion = ncclParamIbCastRoceVersionNum();
   int prefixlen;
   void *prefix = envIbAddrRange(userAddrFamily, &prefixlen);
 
@@ -345,7 +345,7 @@ static ncclResult_t ncclIbCreateQpMlx5(struct ncclIbQpCreateAttr* createQpAttrs,
   qpInitAttr.cap.max_send_wr = createQpAttrs->maxSendWorkRequest;
   qpInitAttr.cap.max_send_sge = 1;
   qpInitAttr.cap.max_recv_sge = 1;
-  qpInitAttr.cap.max_inline_data = ncclParamIbUseInline() ? sizeof(struct ncclIbSendFifo) : 0;
+  qpInitAttr.cap.max_inline_data = ncclParamIbCastUseInline() ? sizeof(struct ncclIbSendFifo) : 0;
 
   qpInitAttr.comp_mask = IBV_QP_INIT_ATTR_PD;
   qpInitAttr.pd = createQpAttrs->pd;
@@ -374,7 +374,7 @@ ncclResult_t IbCastQpCreate(struct ncclIbQp* qp, struct ncclIbQpCreateAttr* crea
   qpInitAttr.cap.max_send_wr = createQpAttrs->maxSendWorkRequest;
   qpInitAttr.cap.max_send_sge = 1;
   qpInitAttr.cap.max_recv_sge = 1;
-  qpInitAttr.cap.max_inline_data = ncclParamIbUseInline() ? sizeof(struct ncclIbSendFifo) : 0;
+  qpInitAttr.cap.max_inline_data = ncclParamIbCastUseInline() ? sizeof(struct ncclIbSendFifo) : 0;
   NCCLCHECK(wrap_ibv_create_qp(&qp->qp, createQpAttrs->pd, &qpInitAttr));
   return ncclSuccess;
 }
@@ -519,7 +519,7 @@ static ncclResult_t IbCastSenderQpsCreate(ncclIbSendComm* comm, struct ncclIbCon
     qpCreateAttrs.pd = commDev->base.pd;
     qpCreateAttrs.qpContext = &comm->base.stats;
 
-    if (ibDev->ibProvider == IB_PROVIDER_MLX5 && ncclParamIbOooRq()) {
+    if (ibDev->ibProvider == IB_PROVIDER_MLX5 && ncclParamIbCastOooRq()) {
       if (ibDev->ar == 0) {
         WARN("NET/IB: %s: OOO RQ is force enabled but AR is not enabled, which is required for OOO RQ (device=%s)", __func__, ibDev->devName);
         return ncclInternalError;
@@ -541,7 +541,7 @@ static ncclResult_t IbCastSenderQpsCreate(ncclIbSendComm* comm, struct ncclIbCon
         IbCastNDevs,
         IbCastNMergedDevs,
         localQp->qp->qp_num,
-        (uint16_t)ncclParamIbPkey(),
+        (uint16_t)ncclParamIbCastPkey(),
         commDev->base.pd,
         qpCreateAttrs.oooRq);
     localQp->devIndex = devIndex;
@@ -553,12 +553,12 @@ static ncclResult_t IbCastSenderQpsCreate(ncclIbSendComm* comm, struct ncclIbCon
     // Transition the QP to INIT state
     struct ncclIbQpInitAttr* initAttr = &localQp->initAttr;
     initAttr->state = IBV_QPS_INIT;
-    initAttr->pkeyIndex = ncclParamIbPkey();
+    initAttr->pkeyIndex = ncclParamIbCastPkey();
     initAttr->portNum = ibDev->portNum;
     initAttr->qpAccessFlags = IBV_ACCESS_REMOTE_WRITE;
     NCCLCHECK(IbCastQpInit(localQp));
 
-    if (ncclParamIbEceEnable()) {
+    if (ncclParamIbCastEceEnable()) {
       // Query ECE (Enhanced Connection Establishment) capabilities and
       // populate the initial ECE into the metadata structure that is sent to
       // the remote (receiver) side.
@@ -623,8 +623,8 @@ static ncclResult_t IbCastSenderQpsToRts(ncclIbSendComm* comm, struct ncclIbConn
     rtrAttr->localGidIndex = commDev->base.gidInfo.localGidIndex;
     NCCLCHECK(IbCastQpRtr(localQp));
     struct ncclIbQpRtsAttr* rtsAttr = &localQp->rtsAttr;
-    rtsAttr->timeout = ncclParamIbTimeout();
-    rtsAttr->retryCnt = ncclParamIbRetryCnt();
+    rtsAttr->timeout = ncclParamIbCastTimeout();
+    rtsAttr->retryCnt = ncclParamIbCastRetryCnt();
     NCCLCHECK(IbCastQpRts(localQp));
   }
 
@@ -725,8 +725,8 @@ ib_recv_dev_list:
   mergedDev = IbCastMergedDevs + dev;
   comm->base.vProps = mergedDev->vProps;
   int localNqps, remoteNqps;
-  localNqps  = ncclParamIbQpsPerConn() * comm->base.vProps.ndevs; // We must have at least 1 qp per-device
-  remoteNqps = ncclParamIbQpsPerConn() * remoteVProps.ndevs;
+  localNqps  = ncclParamIbCastQpsPerConn() * comm->base.vProps.ndevs; // We must have at least 1 qp per-device
+  remoteNqps = ncclParamIbCastQpsPerConn() * remoteVProps.ndevs;
   comm->base.nqps = remoteNqps > localNqps ? remoteNqps : localNqps; // Select max nqps (local or remote)
 
   comm->base.nDataQps = std::max(comm->base.vProps.ndevs, remoteVProps.ndevs);
@@ -740,7 +740,7 @@ ib_recv_dev_list:
   // Sender's CQ size needs to accomodate the upper bound of number of send
   // requests multiplied by the number of QPs used per request.
   int cqSize;
-  cqSize = NET_IB_MAX_REQUESTS*ncclParamIbQpsPerConn();
+  cqSize = NET_IB_MAX_REQUESTS*ncclParamIbCastQpsPerConn();
   for (int i = 0; i < comm->base.vProps.ndevs; i++) {
     int ibDevN = comm->base.vProps.devs[i];
     if (comm->base.resiliency) {
@@ -817,8 +817,8 @@ ib_recv_dev_list:
   }
   trafficClass = IbCastGetTrafficClass(ctx);
   meta.addr = (uint64_t)comm->ctsFifo;
-  meta.sl = (ncclParamIbSl() != -1) ? ncclParamIbSl() : (trafficClass != NCCL_NET_TRAFFIC_CLASS_UNDEF) ? trafficClass : NCCL_IB_SL_DEFAULT;
-  meta.tc = (ncclParamIbTc() != -1) ? ncclParamIbTc() : (trafficClass != NCCL_NET_TRAFFIC_CLASS_UNDEF) ? trafficClass : NCCL_IB_TC_DEFAULT;
+  meta.sl = (ncclParamIbCastSl() != -1) ? ncclParamIbCastSl() : (trafficClass != NCCL_NET_TRAFFIC_CLASS_UNDEF) ? trafficClass : NCCL_IB_SL_DEFAULT;
+  meta.tc = (ncclParamIbCastTc() != -1) ? ncclParamIbCastTc() : (trafficClass != NCCL_NET_TRAFFIC_CLASS_UNDEF) ? trafficClass : NCCL_IB_TC_DEFAULT;
   strncpy(meta.devName, mergedDev->devName, MAX_MERGED_DEV_NAME);
 
   stage->state = ncclIbCommStateSend;
@@ -900,7 +900,7 @@ fail:
   goto exit;
 }
 
-NCCL_PARAM(IbWarnRailLocal, "IB_WARN_RAIL_LOCAL", 0);
+NCCL_PARAM(IbCastWarnRailLocal, "IB_WARN_RAIL_LOCAL", 0);
 
 ncclResult_t IbCastCheckVProps(ncclNetVDeviceProps_t* vProps1, ncclNetVDeviceProps_t* vProps2) {
   ncclNetVDeviceProps_t  outVProps = {0};
@@ -923,7 +923,7 @@ ncclResult_t IbCastCheckVProps(ncclNetVDeviceProps_t* vProps1, ncclNetVDevicePro
   }
 
   // In the case that at least one side has a fused NIC but there are no matching physical NICs, we should check if the user wants this
-  if (ncclParamIbWarnRailLocal() && outVProps.ndevs < maxVProps->ndevs) {
+  if (ncclParamIbCastWarnRailLocal() && outVProps.ndevs < maxVProps->ndevs) {
     char local[128];
     int cursor = 1;
     snprintf(local, sizeof(local), "%d", vProps1->devs[0]);
@@ -985,7 +985,7 @@ static ncclResult_t IbCastReceiverQpsCreateToRts(ncclIbRecvComm* rComm, struct n
     if (rComm->base.resiliency) {
       IbCastResiliencyDataRqSizeGet(rComm->base.resiliency, devIndex, &qpCreateAttrs.maxRecvWorkRequest);
     }
-    if (ibDev->ibProvider == IB_PROVIDER_MLX5 && ncclParamIbOooRq()) {
+    if (ibDev->ibProvider == IB_PROVIDER_MLX5 && ncclParamIbCastOooRq()) {
       if (ibDev->ar == 0) {
         WARN("NET/IB: %s: OOO RQ is force enabled but AR is not enabled, which is required for OOO RQ (device=%s)", __func__, ibDev->devName);
         return ncclInternalError;
@@ -1013,7 +1013,7 @@ static ncclResult_t IbCastReceiverQpsCreateToRts(ncclIbRecvComm* rComm, struct n
         IbCastNDevs,
         IbCastNMergedDevs,
         localQp->qp->qp_num,
-        (uint16_t)ncclParamIbPkey(),
+        (uint16_t)ncclParamIbCastPkey(),
         rCommDev->base.pd,
         qpCreateAttrs.oooRq);
 
@@ -1023,7 +1023,7 @@ static ncclResult_t IbCastReceiverQpsCreateToRts(ncclIbRecvComm* rComm, struct n
     // Transition the QP to INIT state
     struct ncclIbQpInitAttr* initAttr = &localQp->initAttr;
     initAttr->state = IBV_QPS_INIT;
-    initAttr->pkeyIndex = ncclParamIbPkey();
+    initAttr->pkeyIndex = ncclParamIbCastPkey();
     initAttr->portNum = ibDev->portNum;
     // Remote Atomic operations are used for GIN! REMOTE_READ is required for GIN Get (RDMA READ).
     initAttr->qpAccessFlags = IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_ATOMIC | IBV_ACCESS_REMOTE_READ;
@@ -1045,7 +1045,7 @@ static ncclResult_t IbCastReceiverQpsCreateToRts(ncclIbRecvComm* rComm, struct n
     struct ncclIbQpRtrAttr *rtrAttr = &localQp->rtrAttr;
     rtrAttr->mtu = ibDev->portAttr.active_mtu;
     rtrAttr->linkLayer = remDevInfo->link_layer;
-    rtrAttr->tc = (remDevInfo->link_layer == IBV_LINK_LAYER_ETHERNET && ncclParamIbFifoTc() != -1) ? ncclParamIbFifoTc() : remMeta->tc;
+    rtrAttr->tc = (remDevInfo->link_layer == IBV_LINK_LAYER_ETHERNET && ncclParamIbCastFifoTc() != -1) ? ncclParamIbCastFifoTc() : remMeta->tc;
     rtrAttr->sl = remMeta->sl;
     rtrAttr->remoteQpNum = remQpInfo->qpn;
     rtrAttr->remoteLid = remDevInfo->lid;
@@ -1055,8 +1055,8 @@ static ncclResult_t IbCastReceiverQpsCreateToRts(ncclIbRecvComm* rComm, struct n
     rtrAttr->localGidIndex = rCommDev->base.gidInfo.localGidIndex;
     NCCLCHECK(IbCastQpRtr(localQp));
     struct ncclIbQpRtsAttr* rtsAttr = &localQp->rtsAttr;
-    rtsAttr->timeout = ncclParamIbTimeout();
-    rtsAttr->retryCnt = ncclParamIbRetryCnt();
+    rtsAttr->timeout = ncclParamIbCastTimeout();
+    rtsAttr->retryCnt = ncclParamIbCastRetryCnt();
     NCCLCHECK(IbCastQpRts(localQp));
 
     // Query the reduced ECE by the device and storing it in the local QP info
@@ -1094,7 +1094,7 @@ static ncclResult_t IbCastReceiverQpsCreateToRts(ncclIbRecvComm* rComm, struct n
           IbCastNDevs,
           IbCastNMergedDevs,
           rCommDev->gpuFlush.qp.qp->qp_num,
-          (uint16_t)ncclParamIbPkey(),
+          (uint16_t)ncclParamIbCastPkey(),
           rCommDev->base.pd);
 
       ncclIbQp* flushQp = &rCommDev->gpuFlush.qp;
@@ -1102,7 +1102,7 @@ static ncclResult_t IbCastReceiverQpsCreateToRts(ncclIbRecvComm* rComm, struct n
       // Transition the QP to INIT state
       struct ncclIbQpInitAttr* initAttr = &flushQp->initAttr;
       initAttr->state = IBV_QPS_INIT;
-      initAttr->pkeyIndex = ncclParamIbPkey();
+      initAttr->pkeyIndex = ncclParamIbCastPkey();
       initAttr->portNum = ibDev->portNum;
       initAttr->qpAccessFlags = IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ;
       NCCLCHECK(IbCastQpInit(flushQp));
@@ -1122,8 +1122,8 @@ static ncclResult_t IbCastReceiverQpsCreateToRts(ncclIbRecvComm* rComm, struct n
       rtrAttr->localGidIndex = rCommDev->base.gidInfo.localGidIndex;
       NCCLCHECK(IbCastQpRtr(flushQp));
       struct ncclIbQpRtsAttr* rtsAttr = &flushQp->rtsAttr;
-      rtsAttr->timeout = ncclParamIbTimeout();
-      rtsAttr->retryCnt = ncclParamIbRetryCnt();
+      rtsAttr->timeout = ncclParamIbCastTimeout();
+      rtsAttr->retryCnt = ncclParamIbCastRetryCnt();
       NCCLCHECK(IbCastQpRts(flushQp));
     }
   }
@@ -1155,7 +1155,7 @@ ncclResult_t IbCastReceiverPrePostReceiveWorkRequests(struct ncclIbRecvComm* rec
   return ncclSuccess;
 }
 
-NCCL_PARAM(IbGdrFlushDisable, "GDR_FLUSH_DISABLE", 0);
+NCCL_PARAM(IbCastGdrFlushDisable, "GDR_FLUSH_DISABLE", 0);
 
 ncclResult_t IbCastAccept(void* listenComm, void** recvComm, ncclNetDeviceHandle_t** /*recvDevComm*/) {
   ncclResult_t ret = ncclSuccess;
@@ -1222,8 +1222,8 @@ ib_recv_dev_list:
   rComm->base.vProps = mergedDev->vProps;
   memcpy(stage->buffer, &rComm->base.vProps, sizeof(ncclNetVDeviceProps_t));
   int localNqps, remoteNqps;
-  localNqps  = ncclParamIbQpsPerConn() * rComm->base.vProps.ndevs; // We must have at least 1 qp per-device
-  remoteNqps = ncclParamIbQpsPerConn() * remoteVProps.ndevs;
+  localNqps  = ncclParamIbCastQpsPerConn() * rComm->base.vProps.ndevs; // We must have at least 1 qp per-device
+  remoteNqps = ncclParamIbCastQpsPerConn() * remoteVProps.ndevs;
   rComm->base.nqps = remoteNqps > localNqps ? remoteNqps : localNqps; // Select max nqps (local or remote)
 
   rComm->base.nDataQps = std::max(rComm->base.vProps.ndevs, remoteVProps.ndevs);
@@ -1277,7 +1277,7 @@ ib_recv:
   // up to 2 completions (one for the CTS message and one for the completion
   // of a receive request) per QP, in the worst case.
   int cqSize;
-  cqSize = 2*NET_IB_MAX_REQUESTS*ncclParamIbQpsPerConn();
+  cqSize = 2*NET_IB_MAX_REQUESTS*ncclParamIbCastQpsPerConn();
   for (int i = 0; i < rComm->base.vProps.ndevs; i++) {
     rCommDev = rComm->devs + i;
     ibDevN = rComm->base.vProps.devs[i];
@@ -1324,7 +1324,7 @@ ib_recv:
   // Determine if Flush is enabled for this Comm. Must be done before creating
   // QPs. If Flush is enabled, extra QPs will be created for Flush operations.
   rComm->flushEnabled = ((IbCastGdrSupport() == ncclSuccess || IbCastDmaBufSupport(lComm->dev) == ncclSuccess)
-                            && (ncclParamIbGdrFlushDisable() == 0)) ? 1 : 0;
+                            && (ncclParamIbCastGdrFlushDisable() == 0)) ? 1 : 0;
 
   NCCLCHECKGOTO(IbCastReceiverQpsCreateToRts(rComm, &remMeta, &meta), ret, fail);
   if (rComm->prepostReceiveWorkRequests) {
@@ -1348,7 +1348,7 @@ ib_recv:
     meta.devs[i].rkey = rCommDev->cmplsRecordsMr->rkey;
 
   }
-  if (ncclParamIbUseInline()) rComm->remCtsFifo.flags = IBV_SEND_INLINE;
+  if (ncclParamIbCastUseInline()) rComm->remCtsFifo.flags = IBV_SEND_INLINE;
 
   for (int i = 0; i < rComm->base.vProps.ndevs; i++) {
     rCommDev = rComm->devs + i;

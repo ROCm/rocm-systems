@@ -55,13 +55,13 @@ NCCL_PARAM(GinGdakiQpDepth, "GIN_GDAKI_QP_DEPTH", 128);
 NCCL_PARAM(GinGdakiMaxDestRdAtomic, "GIN_GDAKI_MAX_DEST_RD_ATOMIC", -2);
 NCCL_PARAM(GinGdakiMaxQpRdAtomic, "GIN_GDAKI_MAX_QP_RD_ATOMIC", -2);
 NCCL_PARAM(GinErrorQuerySec, "GIN_ERROR_QUERY_SEC", 10);
-extern int64_t ncclParamIbTimeout();
-extern int64_t ncclParamIbRetryCnt();
-extern int64_t ncclParamIbPkey();
-extern int64_t ncclParamIbSl();
-extern int64_t ncclParamIbTc();
-extern int64_t ncclParamIbPciRelaxedOrdering();
-extern int64_t ncclParamIbDataDirect();
+extern int64_t ncclParamIbCastTimeout();
+extern int64_t ncclParamIbCastRetryCnt();
+extern int64_t ncclParamIbCastPkey();
+extern int64_t ncclParamIbCastSl();
+extern int64_t ncclParamIbCastTc();
+extern int64_t ncclParamIbCastPciRelaxedOrdering();
+extern int64_t ncclParamIbCastDataDirect();
 extern int64_t ncclParamDmaBufEnable();
 
 static const int NCCL_IB_SL_DEFAULT = 0;
@@ -75,7 +75,7 @@ static inline bool gdakiRelaxedOrderingEnabled() {
   std::lock_guard<std::mutex> lock(lockMutex);
 
   if (!hasCheckedRelaxedOrdering) {
-    int roMode = ncclParamIbPciRelaxedOrdering();
+    int roMode = ncclParamIbCastPciRelaxedOrdering();
     ncclResult_t r = ncclInternalError;
     if (roMode == 1 || roMode == 2) {
       // Query IBVERBS_1.8 API - needed for IBV_ACCESS_RELAXED_ORDERING support
@@ -101,7 +101,7 @@ static ncclResult_t gdakiRegMrDmaBuf(struct ibv_mr **mr, struct ibv_pd *pd, void
   ALIGN_SIZE(aligned_size, host_page_size);
 
 #if CUDA_VERSION >= 12080
-  if (ncclParamIbDataDirect()) {
+  if (ncclParamIbCastDataDirect()) {
     status = pfn_cuMemGetHandleForAddressRange((void *)&dmabuf_fd, (CUdeviceptr)addr, aligned_size,
                                                CU_MEM_RANGE_HANDLE_TYPE_DMA_BUF_FD,
                                                CU_MEM_RANGE_FLAG_DMA_BUF_MAPPING_TYPE_PCIE);
@@ -407,9 +407,9 @@ static ncclResult_t gdakiConnectQp(struct gdaki_context *ctx, struct doca_gpu_ve
   DOCACHECKGOTO(doca_verbs_qp_attr_set_sq_psn(verbs_qp_attr, 0), status, destroy_verbs_qp_attr);
   DOCACHECKGOTO(doca_verbs_qp_attr_set_port_num(verbs_qp_attr, ctx->port_num),
                 status, destroy_verbs_qp_attr);
-  DOCACHECKGOTO(doca_verbs_qp_attr_set_ack_timeout(verbs_qp_attr, ncclParamIbTimeout()),
+  DOCACHECKGOTO(doca_verbs_qp_attr_set_ack_timeout(verbs_qp_attr, ncclParamIbCastTimeout()),
                 status, destroy_verbs_qp_attr);
-  DOCACHECKGOTO(doca_verbs_qp_attr_set_retry_cnt(verbs_qp_attr, ncclParamIbRetryCnt()),
+  DOCACHECKGOTO(doca_verbs_qp_attr_set_retry_cnt(verbs_qp_attr, ncclParamIbCastRetryCnt()),
                 status, destroy_verbs_qp_attr);
   DOCACHECKGOTO(doca_verbs_qp_attr_set_rnr_retry(verbs_qp_attr, 7), status,
                 destroy_verbs_qp_attr);
@@ -429,7 +429,7 @@ static ncclResult_t gdakiConnectQp(struct gdaki_context *ctx, struct doca_gpu_ve
                 status, destroy_verbs_qp_attr);
   DOCACHECKGOTO(doca_verbs_qp_attr_set_dest_qp_num(verbs_qp_attr, exch_info->qpn),
                 status, destroy_verbs_qp_attr);
-  DOCACHECKGOTO(doca_verbs_qp_attr_set_pkey_index(verbs_qp_attr, ncclParamIbPkey()),
+  DOCACHECKGOTO(doca_verbs_qp_attr_set_pkey_index(verbs_qp_attr, ncclParamIbCastPkey()),
                 status, destroy_verbs_qp_attr);
 
   DOCACHECKGOTO(doca_verbs_qp_modify(
@@ -524,8 +524,8 @@ ncclResult_t ncclGinGdakiCreateContext(void *collComm, int nSignals, int nCounte
   GdakiGlobalGPUBufferTable<uint64_t> *counters_table = new GdakiGlobalGPUBufferTable<uint64_t>();
   GdakiGlobalGPUBufferTable<uint64_t> *signals_table = new GdakiGlobalGPUBufferTable<uint64_t>();
 
-  const int ib_sl = (ncclParamIbSl() != -1) ? ncclParamIbSl() : (trafficClass != NCCL_NET_TRAFFIC_CLASS_UNDEF) ? trafficClass : NCCL_IB_SL_DEFAULT;
-  const int ib_tc = (ncclParamIbTc() != -1) ? ncclParamIbTc() : (trafficClass != NCCL_NET_TRAFFIC_CLASS_UNDEF) ? trafficClass : NCCL_IB_TC_DEFAULT;
+  const int ib_sl = (ncclParamIbCastSl() != -1) ? ncclParamIbCastSl() : (trafficClass != NCCL_NET_TRAFFIC_CLASS_UNDEF) ? trafficClass : NCCL_IB_SL_DEFAULT;
+  const int ib_tc = (ncclParamIbCastTc() != -1) ? ncclParamIbCastTc() : (trafficClass != NCCL_NET_TRAFFIC_CLASS_UNDEF) ? trafficClass : NCCL_IB_TC_DEFAULT;
   int ib_gid_index = 0;
 
   NCCLCHECK(cComm->getProperties(cComm->dev, &props));
