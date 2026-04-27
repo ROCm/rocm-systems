@@ -7,7 +7,7 @@
 #ifndef RCCL_TEST_NET_IB_FAULT_INJECT_HPP_
 #define RCCL_TEST_NET_IB_FAULT_INJECT_HPP_
 
-#ifdef MPI_TESTS_ENABLED
+#if defined(MPI_TESTS_ENABLED) && defined(ENABLE_FAULT_INJECTION)
 
 /*
  * Re-export the shared fault injection API declarations from the library's
@@ -16,6 +16,6 @@
  */
 #include "net_ib_fault_inject.h"
 
-#endif /* MPI_TESTS_ENABLED */
+#endif /* MPI_TESTS_ENABLED && ENABLE_FAULT_INJECTION */
 
 #endif /* RCCL_TEST_NET_IB_FAULT_INJECT_HPP_ */
