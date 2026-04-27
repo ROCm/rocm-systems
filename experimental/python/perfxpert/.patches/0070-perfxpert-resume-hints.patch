@@ -1,0 +1,105 @@
+diff --git a/packages/opencode/src/acp/agent.ts b/packages/opencode/src/acp/agent.ts
+index f12328153..a4e0b5bb9 100644
+--- a/packages/opencode/src/acp/agent.ts
++++ b/packages/opencode/src/acp/agent.ts
+@@ -534,7 +534,7 @@ export class Agent implements ACPAgent {
+     log.info("initialize", { protocolVersion: params.protocolVersion })
+ 
+     const authMethod: AuthMethod = {
+-      description: "Run `opencode auth login` in the terminal",
++      description: "Run `perfxpert-code auth login` in the terminal",
+       name: "Login with opencode",
+       id: "opencode-login",
+     }
+diff --git a/packages/opencode/src/cli/cmd/tui/feature-plugins/home/tips-view.tsx b/packages/opencode/src/cli/cmd/tui/feature-plugins/home/tips-view.tsx
+index 6e01cf720..f94cbbaa3 100644
+--- a/packages/opencode/src/cli/cmd/tui/feature-plugins/home/tips-view.tsx
++++ b/packages/opencode/src/cli/cmd/tui/feature-plugins/home/tips-view.tsx
+@@ -105,17 +105,17 @@ const TIPS = [
+   "Add {highlight}.ts{/highlight} files to {highlight}.opencode/plugin/{/highlight} for event hooks",
+   "Use plugins to send OS notifications when sessions complete",
+   "Create a plugin to prevent OpenCode from reading sensitive files",
+-  "Use {highlight}opencode run{/highlight} for non-interactive scripting",
+-  "Use {highlight}opencode --continue{/highlight} to resume the last session",
+-  "Use {highlight}opencode run -f file.ts{/highlight} to attach files via CLI",
++  "Use {highlight}perfxpert-code run{/highlight} for non-interactive scripting",
++  "Use {highlight}perfxpert-code --continue{/highlight} to resume the last session",
++  "Use {highlight}perfxpert-code run -f file.ts{/highlight} to attach files via CLI",
+   "Use {highlight}--format json{/highlight} for machine-readable output in scripts",
+-  "Run {highlight}opencode serve{/highlight} for headless API access to OpenCode",
+-  "Use {highlight}opencode run --attach{/highlight} to connect to a running server",
+-  "Run {highlight}opencode upgrade{/highlight} to update to the latest version",
+-  "Run {highlight}opencode auth list{/highlight} to see all configured providers",
+-  "Run {highlight}opencode agent create{/highlight} for guided agent creation",
++  "Run {highlight}perfxpert-code serve{/highlight} for headless API access to PerfXpert",
++  "Use {highlight}perfxpert-code run --attach{/highlight} to connect to a running server",
++  "Run {highlight}perfxpert-code upgrade{/highlight} to update to the latest version",
++  "Run {highlight}perfxpert-code auth list{/highlight} to see all configured providers",
++  "Run {highlight}perfxpert-code agent create{/highlight} for guided agent creation",
+   "Use {highlight}/opencode{/highlight} in GitHub issues/PRs to trigger AI actions",
+-  "Run {highlight}opencode github install{/highlight} to set up the GitHub workflow",
++  "Run {highlight}perfxpert-code github install{/highlight} to set up the GitHub workflow",
+   "Comment {highlight}/opencode fix this{/highlight} on issues to auto-create PRs",
+   "Comment {highlight}/oc{/highlight} on PR code lines for targeted code reviews",
+   'Use {highlight}"theme": "system"{/highlight} to match your terminal\'s colors',
+@@ -135,7 +135,7 @@ const TIPS = [
+   "Run {highlight}/unshare{/highlight} to remove a session from public access",
+   "Permission {highlight}doom_loop{/highlight} prevents infinite tool call loops",
+   "Permission {highlight}external_directory{/highlight} protects files outside project",
+-  "Run {highlight}opencode debug config{/highlight} to troubleshoot configuration",
++  "Run {highlight}perfxpert-code debug config{/highlight} to troubleshoot configuration",
+   "Use {highlight}--print-logs{/highlight} flag to see detailed logs in stderr",
+   "Press {highlight}Ctrl+X G{/highlight} or {highlight}/timeline{/highlight} to jump to specific messages",
+   "Press {highlight}Ctrl+X H{/highlight} to toggle code block visibility in messages",
+diff --git a/packages/opencode/src/cli/cmd/tui/routes/session/index.tsx b/packages/opencode/src/cli/cmd/tui/routes/session/index.tsx
+index ccca4d1eb..b10f254cd 100644
+--- a/packages/opencode/src/cli/cmd/tui/routes/session/index.tsx
++++ b/packages/opencode/src/cli/cmd/tui/routes/session/index.tsx
+@@ -271,7 +271,7 @@ export function Session() {
+         `${logo[3] ?? ""}`,
+         ``,
+         `  ${weak("Session")}${UI.Style.TEXT_NORMAL_BOLD}${title}${UI.Style.TEXT_NORMAL}`,
+-        `  ${weak("Continue")}${UI.Style.TEXT_NORMAL_BOLD}opencode -s ${session()?.id}${UI.Style.TEXT_NORMAL}`,
++        `  ${weak("Continue")}${UI.Style.TEXT_NORMAL_BOLD}perfxpert-code -s ${session()?.id}${UI.Style.TEXT_NORMAL}`,
+         ``,
+       ].join("\n"),
+     )
+diff --git a/packages/opencode/src/cli/error.ts b/packages/opencode/src/cli/error.ts
+index f286b5166..a59f0aeca 100644
+--- a/packages/opencode/src/cli/error.ts
++++ b/packages/opencode/src/cli/error.ts
+@@ -32,7 +32,7 @@ export function FormatError(input: unknown) {
+     return [
+       `Model not found: ${data?.providerID}/${data?.modelID}`,
+       ...(suggestions.length ? ["Did you mean: " + suggestions.join(", ")] : []),
+-      `Try: \`opencode models\` to list available models`,
++      `Try: \`perfxpert-code models\` to list available models`,
+       `Or check your config (opencode.json) provider/model names`,
+     ].join("\n")
+   }
+diff --git a/packages/opencode/src/provider/error.ts b/packages/opencode/src/provider/error.ts
+index a2409559f..0b705064e 100644
+--- a/packages/opencode/src/provider/error.ts
++++ b/packages/opencode/src/provider/error.ts
+@@ -74,7 +74,7 @@ function message(providerID: ProviderID, e: APICallError) {
+     // provide a human-readable message instead of dumping raw markup
+     if (/^\s*<!doctype|^\s*<html/i.test(e.responseBody)) {
+       if (e.statusCode === 401) {
+-        return "Unauthorized: request was blocked by a gateway or proxy. Your authentication token may be missing or expired — try running `opencode auth login <your provider URL>` to re-authenticate."
++        return "Unauthorized: request was blocked by a gateway or proxy. Your authentication token may be missing or expired — try running `perfxpert-code auth login <your provider URL>` to re-authenticate."
+       }
+       if (e.statusCode === 403) {
+         return "Forbidden: request was blocked by a gateway or proxy. You may not have permission to access this resource — check your account and provider settings."
+diff --git a/packages/opencode/src/provider/provider.ts b/packages/opencode/src/provider/provider.ts
+index 51aca21c7..d23992007 100644
+--- a/packages/opencode/src/provider/provider.ts
++++ b/packages/opencode/src/provider/provider.ts
+@@ -743,7 +743,7 @@ function custom(dep: CustomDep): Record<string, CustomLoader> {
+       if (!apiToken) {
+         throw new Error(
+           "CLOUDFLARE_API_TOKEN (or CF_AIG_TOKEN) is required for Cloudflare AI Gateway. " +
+-            "Set it via environment variable or run `opencode auth cloudflare-ai-gateway`.",
++            "Set it via environment variable or run `perfxpert-code auth cloudflare-ai-gateway`.",
+         )
+       }
+ 

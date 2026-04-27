@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "core/defines.hpp"
+#include "common/defines.h"
 
 #include <cstdint>
 #include <string>

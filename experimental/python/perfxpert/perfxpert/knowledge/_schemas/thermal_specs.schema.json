@@ -1,0 +1,27 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "description": "Phase-10 Feature B per-arch thermal envelope + throttle thresholds. Consumed by gpu_runtime_monitor.analyze_thermal.",
+  "required": ["version", "architectures"],
+  "properties": {
+    "version": {"type": "integer", "minimum": 1},
+    "architectures": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["gfx_id", "name", "tjmax_c", "tj_throttle_margin_c", "tdp_w"],
+        "properties": {
+          "gfx_id": {"type": "string"},
+          "name": {"type": "string"},
+          "tjmax_c": {"type": "number", "minimum": 0},
+          "tj_throttle_margin_c": {"type": "number", "minimum": 0},
+          "tdp_w": {"type": "number", "minimum": 0},
+          "tdp_headroom_pct": {"type": "number", "minimum": 0, "maximum": 1.0},
+          "hbm_tjmax_c": {"type": "number", "minimum": 0}
+        }
+      }
+    },
+    "verdict_buckets": {"type": "object"},
+    "notes": {"type": "string"}
+  }
+}

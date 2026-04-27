@@ -3,8 +3,8 @@
 
 #pragma once
 
+#include "common/defines.h"
 #include "core/common.hpp"
-#include "core/defines.hpp"
 #include "core/timemory.hpp"
 
 #if defined(_MSC_VER)
@@ -39,8 +39,6 @@ struct vaapi_gotcha : tim::component::base<vaapi_gotcha, void>
     using gotcha_data  = tim::component::gotcha_data;
     using exit_func_t  = void (*)(int);
     using abort_func_t = void (*)();
-
-    ROCPROFSYS_DEFAULT_OBJECT(vaapi_gotcha)
 
     // string id for component
     static std::string label() { return "vaapi_gotcha"; }

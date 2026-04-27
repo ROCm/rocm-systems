@@ -1511,7 +1511,7 @@ static ncclResult_t proxyConnInit(struct ncclProxyLocalPeer* peer, struct ncclPr
 }
 
 static ncclResult_t proxyQueryFd(struct ncclProxyState* proxyState, int rank, void *opId, int rmtFd) {
-#if ROCM_VERSION >= 71200
+#if ROCM_VERSION >= 70000
   struct ncclIpcSocket ipcSock = { 0 };
   uint64_t hash = (uint64_t) opId;
   ncclResult_t ret = ncclSuccess;
@@ -1534,7 +1534,7 @@ static ncclResult_t proxyGetFd(struct ncclProxyState* proxyState, int rank, void
    uint64_t handle
 #endif
 ) {
-#if ROCM_VERSION >= 71200
+#if ROCM_VERSION >= 70000
   // cuMem API support
   ncclResult_t ret = ncclSuccess;
   struct ncclIpcSocket ipcSock = { 0 };

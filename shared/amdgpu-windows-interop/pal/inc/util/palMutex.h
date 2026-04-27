@@ -145,7 +145,7 @@ public:
     /// Defines RWLockData as a Windows RWLOCK
     typedef SRWLOCK RWLockData;
     RWLock() noexcept : m_osRWLock {} { InitializeSRWLock(&m_osRWLock); }
-    ~RWLock() noexcept { /* No Win32 destory function */ };
+    ~RWLock() noexcept { /* No Win32 destroy function */ };
 #else
     /// Defines RWLockData as a unix pthread_rwlock_t
     typedef pthread_rwlock_t  RWLockData;

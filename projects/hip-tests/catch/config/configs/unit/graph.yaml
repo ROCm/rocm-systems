@@ -388,6 +388,9 @@ graph:
   Unit_hipGraphAddChildGraphNode_CmplxNstGrph_MultGPU:
     <<: *level_2
     tags: [multigpu, node]
+  Unit_hipGraphAddChildGraphNode_CmplxGrph_SchedLogic:
+    <<: *level_2
+    tags: [node]
   Unit_hipGraphNodeGetType_Negative:
     <<: *level_2
     tags: [query]
