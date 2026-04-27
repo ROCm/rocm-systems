@@ -561,7 +561,7 @@ operator+=(float4& a, const float4& b)
 // Macro for collecting CU/SM GFX kernel is running on
 #if defined(__gfx1100__) || defined(__gfx1101__) || defined(__gfx1102__) ||              \
     defined(__gfx1150__) || defined(__gfx1151__) || defined(__gfx1200__) ||              \
-    defined(__gfx1201__)
+    defined(__gfx1201__) || defined(__gfx1250__)
 #    define GetHwId(hwId) hwId = 0
 #elif defined(__NVCC__)
 #    define GetHwId(hwId) asm("mov.u32 %0, %smid;" : "=r"(hwId))

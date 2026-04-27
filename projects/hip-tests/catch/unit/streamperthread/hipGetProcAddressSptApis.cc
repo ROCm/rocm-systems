@@ -605,8 +605,6 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_spt_Memset) {
  *  - HIP_VERSION >= 6.2
  */
 HIP_TEST_CASE(Unit_hipGetProcAddress_spt_Memset2D3D) {
-  CHECK_IMAGE_SUPPORT
-
   void* hipMemset2D_spt_ptr = nullptr;
   void* hipMemset2DAsync_spt_ptr = nullptr;
   void* hipMemset3D_spt_ptr = nullptr;
@@ -1861,8 +1859,6 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_spt_Memcpy2D) {
  *  - HIP_VERSION >= 6.2
  */
 HIP_TEST_CASE(Unit_hipGetProcAddress_spt_Memcpy3D) {
-  CHECK_IMAGE_SUPPORT
-
   void* hipMemcpy3D_spt_ptr = nullptr;
   void* hipMemcpy3DAsync_spt_ptr = nullptr;
 
