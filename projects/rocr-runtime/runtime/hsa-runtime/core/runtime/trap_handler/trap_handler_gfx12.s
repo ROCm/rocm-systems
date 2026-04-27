@@ -176,7 +176,7 @@
 //   gfx12.5
 //     { ttmp1, ttmp0 } = TrapID[3:0], 0[2:0], PC[56:0]
 //     ttmp11 = 0[7:0], DebugEnabled[0], SQ_WAVE_XNACK_STATE_PRIV[18],
-//              SQ_WAVE_XNACK_STATE_PRIV[16], SQ_WAVE_STATE_PRIV[6:0], 0[13:0]
+//              SQ_WAVE_XNACK_STATE_PRIV[16], SQ_WAVE_XNACK_STATE_PRIV[6:0], 0[13:0]
 //
 //     ttmp12 = SQ_WAVE_STATE_PRIV (Private wave state register value).
 //     ttmp14 = TMA[31:0] - TMA_LO (Trap Memory Argument Low - base address for trap handler data, low 32 bits).
@@ -223,7 +223,7 @@
   s_branch          .profile_trap_handlers
 
 .check_stochastic:
-  s_getreg_b32      ttmp2, hwreg(HW_REG_EXCP_FLAG_PRIV)     // EXCP_FLAG_PRIV.b10=stochastic_sample_trap
+  // ttmp2 already contains HW_REG_EXCP_FLAG_PRIV from .check_hosttrap
   s_bitcmp1_b32     ttmp2, SQ_WAVE_EXCP_FLAG_PRIV_PERF_SNAPSHOT_SHIFT // Test Performance Snapshot bit.
 
   s_cbranch_scc0    .handle_sw_trap                       // If not Stochastic, continue to check trap ID
@@ -753,7 +753,10 @@
   s_sendmsg_rtn_b32 ttmp13, sendmsg(MSG_RTN_GET_SE_AID_ID)
   v_and_b32         v2, 0xFFF3FFFF, v2                        // Clear SE_ID bits [19:18] in v2 while waiting
   s_wait_kmcnt      0
-  
+
+  // Cache the full SE_AID_ID in v3 to avoid a second message later (for XCC_ID extraction)
+  v_writelane_b32   v3, ttmp13, 0
+
   // Extract and position SE_ID bits
   s_bfe_u32         ttmp13, ttmp13, (0 | (2 << 16))      // Extract lower 2 bits from the SE_ID[3:0] from ttmp13
   s_lshl_b32        ttmp13, ttmp13, 18                   // Shift to bit position 18
@@ -765,7 +768,7 @@
 
   // The following is still true
   // v[0:1] = &buffer[local_entry]
-  // v[2:3] = free
+  // v2 = free, v3 = cached SE_AID_ID (gfx12.5+), free (gfx12.0)
   // ttmp[2:3] holds backup of original shader's v[0:1]
   // ttmp[4:5] holds backup of original shader's v[2:3]
   // ttmp[10:11] holds original shader's information (save/restore)
@@ -785,8 +788,8 @@
   // Chiplet (XCC_ID) resides in MSG_RTN_GET_SE_AID_ID[19:16].
   // NOTE: on gfx12.0 there are no chiplets
 
-  s_sendmsg_rtn_b32 ttmp13, sendmsg(MSG_RTN_GET_SE_AID_ID)
-  s_wait_kmcnt      0
+  // Reuse SE_AID_ID value cached in v3 to avoid redundant message traffic
+  v_readlane_b32    ttmp13, v3, 0
 
   s_bfe_u32         ttmp13, ttmp13, (16 | (3 << 16)) // Extract lower 3 bits from Virtual_XCC_ID[19:16]
   s_lshl_b32        ttmp13, ttmp13, 8                // Shift to bit position [10:8]
@@ -954,6 +957,7 @@
 
   s_load_b32        ttmp5, ttmp[14:15], SAMPLE_OFF_WATERMARK_FIELD, scope:SCOPE_CU            // load watermark threshold into ttmp5
   v_readlane_b32    ttmp4, v0, 0                            // Get previous written count
+  s_add_u32         ttmp4, ttmp4, 1                         // Find current sample count (previous + 1)
   s_wait_kmcnt      0                                       // wait for watermark to load
 
   // Check if we should signal the host (only trap handler instances that observes ttmp4 == tmp5 signals host)
