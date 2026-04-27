@@ -866,15 +866,17 @@ static constexpr uint32_t kEvt_track_uuid = 11;
 static constexpr uint32_t kEvt_name       = 23;  // string name (direct)
 static constexpr uint32_t kEvt_categories = 22;  // repeated string
 static constexpr uint32_t kEvt_dbg_ann          = 4;   // repeated DebugAnnotation
-static constexpr uint32_t kEvt_flow_ids          = 47;  // repeated uint64 (packed) — flow starts here (new field; 36 is old/deprecated)
-static constexpr uint32_t kEvt_term_flow_ids     = 48;  // repeated uint64 (packed) — flow ends here  (new field; 42 is old/deprecated)
+static constexpr uint32_t kEvt_flow_ids          = 47;  // repeated uint64 (packed) — flow starts here
+static constexpr uint32_t kEvt_term_flow_ids     = 48;  // repeated uint64 (packed) — flow ends here
+static constexpr uint32_t kEvt_flow_ids_old      = 36;  // deprecated alias — emitted for compatibility
+static constexpr uint32_t kEvt_term_flow_ids_old = 42;  // deprecated alias — emitted for compatibility
 static constexpr uint32_t kEvt_TYPE_BEGIN = 1;
 static constexpr uint32_t kEvt_TYPE_END   = 2;
 
 // DebugAnnotation (debug_annotation.proto)
-static constexpr uint32_t kAnn_name    = 10;  // string name (direct)
-static constexpr uint32_t kAnn_uint    = 4;   // uint64 uint_value
-static constexpr uint32_t kAnn_str_val = 7;   // string string_value
+static constexpr uint32_t kAnn_name    = 10;  // string name (direct, non-interned)
+static constexpr uint32_t kAnn_uint    = 3;   // uint64 uint_value
+static constexpr uint32_t kAnn_str_val = 6;   // string string_value
 
 // ClockSnapshot — not used; we emit no clock_snapshot and no timestamp_clock_id.
 // Perfetto treats timestamps without a clock ID as nanoseconds on the default trace
@@ -945,8 +947,10 @@ static void EmitSlice(std::string& out, uint64_t uuid, uint32_t /*seq_id*/,
       ann.str(kAnn_str_val, a.second);
       evt.msg(kEvt_dbg_ann, ann);
     }
-    evt.packed_u64(kEvt_flow_ids,      out_flows);
-    evt.packed_u64(kEvt_term_flow_ids, in_flows);
+    evt.packed_u64(kEvt_flow_ids,          out_flows);
+    evt.packed_u64(kEvt_term_flow_ids,     in_flows);
+    evt.packed_u64(kEvt_flow_ids_old,      out_flows);
+    evt.packed_u64(kEvt_term_flow_ids_old, in_flows);
     ProtoMsg pkt;
     pkt.u64(kPkt_timestamp, ts_ns);
     pkt.msg(kPkt_track_event, evt);
@@ -1162,11 +1166,25 @@ void WriteProtoTraceImpl(const char* filepath) {
       if (cfit != cpu_gpu_flow.end()) cpu_out.push_back(cfit->second);
 
       std::vector<std::pair<std::string,std::string>> cpu_anns;
-      if (rec.stream) {
+      {
         char buf[32];
-        snprintf(buf, sizeof(buf), "0x%llx",
-                 static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(rec.stream)));
-        cpu_anns.push_back({"stream", buf});
+        if (rec.memory1) {
+          snprintf(buf, sizeof(buf), "0x%llx",
+                   static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(rec.memory1)));
+          cpu_anns.push_back({"ptr", buf});
+        }
+        if (rec.memory2) {
+          snprintf(buf, sizeof(buf), "0x%llx",
+                   static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(rec.memory2)));
+          cpu_anns.push_back({"src", buf});
+        }
+        if (rec.size)
+          cpu_anns.push_back({"size", std::to_string(rec.size)});
+        if (rec.stream) {
+          snprintf(buf, sizeof(buf), "0x%llx",
+                   static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(rec.stream)));
+          cpu_anns.push_back({"stream", buf});
+        }
       }
       EmitSlice(out, cpu_uuid, 0, ts_ns, dur_ns, rec.api_name, "hip", cpu_anns, cpu_out, {});
 
@@ -1194,23 +1212,31 @@ void WriteProtoTraceImpl(const char* filepath) {
         } else { gpu_name = "Barrier"; }
 
         gpu_anns.clear();
-        if (gop.op == OP_ID_DISPATCH && gop.grid_x) {
-          char buf[64];
-          snprintf(buf, sizeof(buf), "%ux%ux%u", gop.grid_x, gop.grid_y, gop.grid_z); gpu_anns.push_back({"grid", buf});
-          snprintf(buf, sizeof(buf), "%ux%ux%u", gop.block_x, gop.block_y, gop.block_z); gpu_anns.push_back({"block", buf});
-        }
-        if (gop.op == OP_ID_COPY && gop.bytes) {
-          gpu_anns.push_back({"copy_kind", CopyKindName(gop.copy_kind)});
-          gpu_anns.push_back({"bytes", std::to_string(gop.bytes)});
-          if (gop.dst) {
-            char buf[32]; snprintf(buf, sizeof(buf), "0x%llx",
-              static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(gop.dst)));
-            gpu_anns.push_back({"dst", buf});
+        {
+          char buf[32];
+          gpu_anns.push_back({"queue_id", std::to_string(gop.queue_id)});
+          if (gop.op == OP_ID_DISPATCH && gop.grid_x) {
+            snprintf(buf, sizeof(buf), "%ux%ux%u", gop.grid_x, gop.grid_y, gop.grid_z); gpu_anns.push_back({"grid", buf});
+            snprintf(buf, sizeof(buf), "%ux%ux%u", gop.block_x, gop.block_y, gop.block_z); gpu_anns.push_back({"block", buf});
           }
-          if (gop.src) {
-            char buf[32]; snprintf(buf, sizeof(buf), "0x%llx",
-              static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(gop.src)));
-            gpu_anns.push_back({"src", buf});
+          if (gop.op == OP_ID_COPY) {
+            gpu_anns.push_back({"copy_kind", CopyKindName(gop.copy_kind)});
+            gpu_anns.push_back({"bytes", std::to_string(gop.bytes)});
+            if (gop.dst) {
+              snprintf(buf, sizeof(buf), "0x%llx",
+                static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(gop.dst)));
+              gpu_anns.push_back({"dst", buf});
+            }
+            if (gop.src) {
+              snprintf(buf, sizeof(buf), "0x%llx",
+                static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(gop.src)));
+              gpu_anns.push_back({"src", buf});
+            }
+          }
+          if (rec.stream) {
+            snprintf(buf, sizeof(buf), "0x%llx",
+              static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(rec.stream)));
+            gpu_anns.push_back({"stream", buf});
           }
         }
         // Kernel args — same positional format as JSON writer
