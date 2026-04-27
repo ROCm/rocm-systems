@@ -455,7 +455,9 @@ if( BUILD_SHARED_LIBS )
                           --header       /opt/rocm/include/hsa/hsa.h
                           --header       /opt/rocm/include/hsa/hsa_ext_amd.h
                           --header       /opt/rocm/include/hsa/hsa_api_trace.h
-                          --extra-arg    -I/opt/rocm/include
+                          # `--extra-arg=-I...` form (single token) so argparse
+                          # doesn't mis-parse `-I/...` as a new option.
+                          --extra-arg=-I/opt/rocm/include
                           --out-sidecar  ${_HSA_CURATED_SIGS}
                   DEPENDS ${_HSA_CURATED_YAML}
                           ${CMAKE_CURRENT_SOURCE_DIR}/scripts/lttng_curated_verify.py

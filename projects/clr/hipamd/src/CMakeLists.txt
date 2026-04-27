@@ -370,8 +370,10 @@ if(HIP_ENABLE_LTTNG_UST)
                         ${CMAKE_CURRENT_LIST_DIR}/../scripts/lttng_curated_verify.py
                         --yaml         ${_CURATED_YAML}
                         --header       /opt/rocm/include/hip/hip_runtime_api.h
-                        --extra-arg    -I/opt/rocm/include
-                        --extra-arg    -D__HIP_PLATFORM_AMD__=1
+                        # `--extra-arg=-foo` form (single token) so argparse
+                        # doesn't mis-parse `-foo` as a new option.
+                        --extra-arg=-I/opt/rocm/include
+                        --extra-arg=-D__HIP_PLATFORM_AMD__=1
                         --out-sidecar  ${_CURATED_SIGS}
                 DEPENDS ${_CURATED_YAML}
                         ${CMAKE_CURRENT_LIST_DIR}/../scripts/lttng_curated_verify.py
