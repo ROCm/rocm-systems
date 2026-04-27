@@ -713,7 +713,11 @@ int SimulatedDriver::free_memory_ioctl(void *arg) {
         imported_dmabufs_.erase(dmabuf_it);
       }
     }
-    if (alloc.host_ptr) {
+    // For FMM (user_va) allocations, keep the host-page mapping alive until
+    // the process actually munmaps the VA. ROCR's caching allocator and
+    // PyTorch's block pool reuse freed handles without unmapping, so dropping
+    // the mapping here causes the GPU to read zeros on reuse.
+    if (alloc.host_ptr && !alloc.user_va) {
       if (auto *mem = soc_.memory())
         mem->unmap_host_pages(alloc.gpu_va, alloc.size);
     }

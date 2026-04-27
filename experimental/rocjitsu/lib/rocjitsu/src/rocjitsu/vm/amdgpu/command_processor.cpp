@@ -1095,7 +1095,7 @@ void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint
         rpos = wpos;
         continue;
       }
-      uint32_t count = (dw(1) & 0x3FFFFF) + 1;
+      uint32_t count = (dw(1) & 0x3FFFFFF) + 1;
       uint64_t src = static_cast<uint64_t>(dw(3)) | (static_cast<uint64_t>(dw(4)) << 32);
       uint64_t dst = static_cast<uint64_t>(dw(5)) | (static_cast<uint64_t>(dw(6)) << 32);
       if (header & (1u << 28)) {
@@ -1158,7 +1158,7 @@ void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint
     case sdma::OP_CONST_FILL: {
       uint64_t addr = static_cast<uint64_t>(dw(1)) | (static_cast<uint64_t>(dw(2)) << 32);
       uint32_t data = dw(3);
-      uint32_t count = (dw(4) & 0x3FFFFF) + 1;
+      uint32_t count = (dw(4) & 0x3FFFFFF) + 1;
       uint32_t fillsize = (header >> 30) & 0x3;
       auto *dst = reinterpret_cast<uint8_t *>(addr);
       if (fillsize == 2) { // 32-bit fill
@@ -1184,7 +1184,7 @@ void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint
         rpos = wpos;
         continue;
       }
-      uint32_t count = (dw(3) & 0x3FFFFF) + 1;
+      uint32_t count = (dw(3) & 0x3FFFFFF) + 1;
       uint64_t addr = static_cast<uint64_t>(dw(1)) | (static_cast<uint64_t>(dw(2)) << 32);
       if (addr > 0x1000 && rpos + 4 + count <= wpos) {
         auto *dst = reinterpret_cast<uint32_t *>(addr);
