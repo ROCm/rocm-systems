@@ -90,6 +90,81 @@
         return __rocm_rv;                                                      \
     } while (0)
 
+/* ---------- HSA curated parameter-capture variants (spec §6.2 / §6.5)
+ * Six macros: STATUS / PTR / VOID, each with a captured-args form and a
+ * _NOARGS form. The migrator selects _NOARGS iff the curated API has zero
+ * captured args. Helper signature invariant: every helper takes
+ *   (uint64_t corr_id, <captured-args...>, hsa_status_t status)
+ * even when captured-args is empty. Status comes from:
+ *   - STATUS variants: macro-evaluated __rocm_status from the call's expr
+ *   - PTR variants:    synthesized from null-vs-non-null retval (rare on HSA)
+ *   - VOID variants:   literal HSA_STATUS_SUCCESS
+ *
+ * Generic exit events (hsa_api_exit_status / _ptr / _void) are still
+ * emitted by these macros — the typed _args event AUGMENTS the existing
+ * generic event, never replaces it (spec §1, §2).
+ */
+
+/* Captured-args variants. __VA_ARGS__ is non-empty by construction (the
+ * migrator emits the _NOARGS form for zero-arg APIs). */
+#define ROCR_TRACE_API_RET_STATUS_CURATED_HSA(api, expr, corr, ...)            \
+    do {                                                                       \
+        const hsa_status_t __rocm_status = (expr);                             \
+        rocm_trace_emit_##api##_args((corr), __VA_ARGS__, __rocm_status);      \
+        rocm_trace_emit_hsa_api_exit_status(__func__,                          \
+            (corr), static_cast<int32_t>(__rocm_status));                      \
+        return __rocm_status;                                                  \
+    } while (0)
+
+#define ROCR_TRACE_API_RET_PTR_CURATED_HSA(api, ptr_type, expr, corr, ...)     \
+    do {                                                                       \
+        ptr_type const __rocm_ptr = (expr);                                    \
+        const hsa_status_t __rocm_status =                                     \
+            (__rocm_ptr != nullptr) ? HSA_STATUS_SUCCESS                       \
+                                    : HSA_STATUS_ERROR_OUT_OF_RESOURCES;       \
+        rocm_trace_emit_##api##_args((corr), __VA_ARGS__, __rocm_status);      \
+        rocm_trace_emit_hsa_api_exit_ptr(__func__, (corr), __rocm_ptr);        \
+        return __rocm_ptr;                                                     \
+    } while (0)
+
+#define ROCR_TRACE_API_RET_VOID_CURATED_HSA(api, expr, corr, ...)              \
+    do {                                                                       \
+        (expr);                                                                \
+        rocm_trace_emit_##api##_args((corr), __VA_ARGS__, HSA_STATUS_SUCCESS); \
+        rocm_trace_emit_hsa_api_exit_void(__func__, (corr));                   \
+        return;                                                                \
+    } while (0)
+
+/* Zero-captured-args variants. Mirrors HIP's _NOARGS rationale (mixed
+ * C++ standard surface; avoid empty-__VA_ARGS__ expansion). */
+#define ROCR_TRACE_API_RET_STATUS_CURATED_HSA_NOARGS(api, expr, corr)          \
+    do {                                                                       \
+        const hsa_status_t __rocm_status = (expr);                             \
+        rocm_trace_emit_##api##_args((corr), __rocm_status);                   \
+        rocm_trace_emit_hsa_api_exit_status(__func__,                          \
+            (corr), static_cast<int32_t>(__rocm_status));                      \
+        return __rocm_status;                                                  \
+    } while (0)
+
+#define ROCR_TRACE_API_RET_PTR_CURATED_HSA_NOARGS(api, ptr_type, expr, corr)   \
+    do {                                                                       \
+        ptr_type const __rocm_ptr = (expr);                                    \
+        const hsa_status_t __rocm_status =                                     \
+            (__rocm_ptr != nullptr) ? HSA_STATUS_SUCCESS                       \
+                                    : HSA_STATUS_ERROR_OUT_OF_RESOURCES;       \
+        rocm_trace_emit_##api##_args((corr), __rocm_status);                   \
+        rocm_trace_emit_hsa_api_exit_ptr(__func__, (corr), __rocm_ptr);        \
+        return __rocm_ptr;                                                     \
+    } while (0)
+
+#define ROCR_TRACE_API_RET_VOID_CURATED_HSA_NOARGS(api, expr, corr)            \
+    do {                                                                       \
+        (expr);                                                                \
+        rocm_trace_emit_##api##_args((corr), HSA_STATUS_SUCCESS);              \
+        rocm_trace_emit_hsa_api_exit_void(__func__, (corr));                   \
+        return;                                                                \
+    } while (0)
+
 static const HsaApiTable* hsaApiTable;
 static const CoreApiTable* coreApiTable;
 static const AmdExtTable* amdExtTable;
