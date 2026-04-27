@@ -15,5 +15,17 @@ set(containers_headers
 set(containers_sources ring_buffer.cpp record_header_buffer.cpp ring_buffer.cpp
                        small_vector.cpp)
 
+if(ROCPROFILER_EXPERIMENTAL_LTTNG_BUFFER_TRANSPORT)
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(LTTNG_UST REQUIRED IMPORTED_TARGET lttng-ust)
+    list(APPEND containers_headers lttng_record_header_buffer.hpp
+                lttng_record_header_buffer_tracepoints.h)
+    list(APPEND containers_sources lttng_record_header_buffer.cpp)
+endif()
+
 target_sources(rocprofiler-sdk-common-library PRIVATE ${containers_sources}
                                                       ${containers_headers})
+
+if(ROCPROFILER_EXPERIMENTAL_LTTNG_BUFFER_TRANSPORT)
+    target_link_libraries(rocprofiler-sdk-common-library PRIVATE PkgConfig::LTTNG_UST)
+endif()

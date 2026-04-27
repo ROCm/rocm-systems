@@ -101,6 +101,10 @@ rocprofiler_add_option(
     "Enable warnings for experimental features but hide with -Wno-deprecated-declarations (this ensures that experimental warning message does not break macros)"
     OFF
     ADVANCED)
+rocprofiler_add_option(
+    ROCPROFILER_EXPERIMENTAL_LTTNG_BUFFER_TRANSPORT
+    "Use experimental LTTng-UST shadow emission for rocprofiler buffers" OFF
+    ADVANCED)
 rocprofiler_add_option(ROCPROFILER_BUILD_DEPRECATED_WARNINGS
                        "Enable warnings for use of deprecated features" OFF ADVANCED)
 

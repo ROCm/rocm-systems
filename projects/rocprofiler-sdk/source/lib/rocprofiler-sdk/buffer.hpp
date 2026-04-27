@@ -25,7 +25,11 @@
 #include <rocprofiler-sdk/buffer.h>
 #include <rocprofiler-sdk/fwd.h>
 
-#include "lib/common/container/record_header_buffer.hpp"
+#if defined(ROCPROFILER_EXPERIMENTAL_LTTNG_BUFFER_TRANSPORT)
+#    include "lib/common/container/lttng_record_header_buffer.hpp"
+#else
+#    include "lib/common/container/record_header_buffer.hpp"
+#endif
 #include "lib/common/container/stable_vector.hpp"
 #include "lib/common/demangle.hpp"
 
@@ -44,7 +48,11 @@ namespace buffer
 {
 struct instance
 {
+#if defined(ROCPROFILER_EXPERIMENTAL_LTTNG_BUFFER_TRANSPORT)
+    using buffer_t = common::container::lttng_record_header_buffer;
+#else
     using buffer_t                       = common::container::record_header_buffer;
+#endif
     static constexpr auto size           = 2;  // double buffering
     static constexpr auto sync_wait_usec = std::chrono::microseconds{10};
 

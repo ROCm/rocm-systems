@@ -92,6 +92,7 @@ subtrees:
   - caption: Conceptual
     entries:
     - file: conceptual/comparing-with-legacy-tools
+    - file: conceptual/lttng-ust-transport-proposal
   - caption: License
     entries:
     - file: license
