@@ -27,7 +27,7 @@ extern int ncclParamIbOooRq();
 extern int ncclParamIbResiliencyPortFailover();
 
 
-ncclResult_t ncclIbStatsCheckFatalCount(struct ncclIbStats* stat, const char* funcName) {
+ncclResult_t IbCastStatsCheckFatalCount(struct ncclIbStats* stat, const char* funcName) {
   if (ncclParamIbAsyncEvents() && COMPILER_ATOMIC_LOAD(&stat->fatalErrorCount, std::memory_order_relaxed)) {
     WARN("communicator encountered a fatal error (detected in %s)", funcName);
     return ncclSystemError;
@@ -35,7 +35,7 @@ ncclResult_t ncclIbStatsCheckFatalCount(struct ncclIbStats* stat, const char* fu
   return ncclSuccess;
 }
 
-struct ncclIbNetCommDevBase* ncclIbGetNetCommDevBase(ncclIbNetCommBase* base, int devIndex) {
+struct ncclIbNetCommDevBase* IbCastGetNetCommDevBase(ncclIbNetCommBase* base, int devIndex) {
   if (base->isSend) {
     struct ncclIbSendComm* sComm = (struct ncclIbSendComm*) base;
     return &sComm->devs[devIndex].base;
@@ -45,7 +45,7 @@ struct ncclIbNetCommDevBase* ncclIbGetNetCommDevBase(ncclIbNetCommBase* base, in
   }
 }
 
-ncclResult_t ncclIbBaseCommInit(struct ncclIbNetCommBase* baseComm, bool isSend) {
+ncclResult_t IbCastBaseCommInit(struct ncclIbNetCommBase* baseComm, bool isSend) {
   for (int i = 0; i < NCCL_IB_MAX_QPS; i++) {
     baseComm->qps[i].devIndex= -1;
     baseComm->qps[i].remDevIdx= -1;
@@ -62,7 +62,7 @@ ncclResult_t ncclIbBaseCommInit(struct ncclIbNetCommBase* baseComm, bool isSend)
   baseComm->isSend = isSend;
   baseComm->ready = 0;
 
-  NCCLCHECK(ncclIbResiliencyInit(baseComm, &baseComm->resiliency));
+  NCCLCHECK(IbCastResiliencyInit(baseComm, &baseComm->resiliency));
   baseComm->recvMatchingScheme = ncclParamIbReceiverSideMatchingScheme() == -2 ? BY_INDEX : ncclParamIbReceiverSideMatchingScheme();
 
   if (ncclParamIbOooRq() || (ncclParamIbResiliencyPortFailover() == 1)) {
@@ -75,8 +75,8 @@ ncclResult_t ncclIbBaseCommInit(struct ncclIbNetCommBase* baseComm, bool isSend)
   return ncclSuccess;
 }
 
-ncclResult_t ncclIbRecvCommInit(struct ncclIbRecvComm* recvComm) {
-  NCCLCHECK(ncclIbBaseCommInit(&recvComm->base, false));
+ncclResult_t IbCastRecvCommInit(struct ncclIbRecvComm* recvComm) {
+  NCCLCHECK(IbCastBaseCommInit(&recvComm->base, false));
   recvComm->ibRecvWorkRequest = {
     .wr_id = NCCL_IB_RECV_WR_ID_DUMMY,
     .next = NULL,
@@ -103,13 +103,13 @@ ncclResult_t ncclIbRecvCommInit(struct ncclIbRecvComm* recvComm) {
   return ncclSuccess;
 }
 
-ncclResult_t ncclIbSendCommInit(struct ncclIbSendComm* sendComm) {
-  NCCLCHECK(ncclIbBaseCommInit(&sendComm->base, true));
+ncclResult_t IbCastSendCommInit(struct ncclIbSendComm* sendComm) {
+  NCCLCHECK(IbCastBaseCommInit(&sendComm->base, true));
   return ncclSuccess;
 }
 
 std::thread ncclIbAsyncThread;
-void* ncclIbAsyncThreadMain(void* args) {
+void* IbCastAsyncThreadMain(void* args) {
   struct ncclIbDev* dev = (struct ncclIbDev*)args;
   while (1) {
     struct ibv_async_event event;
@@ -123,19 +123,19 @@ void* ncclIbAsyncThreadMain(void* args) {
     case IBV_EVENT_DEVICE_FATAL:
       // the above is device fatal error
       WARN("NET/IB : %s:%d async fatal event: %s", dev->devName, dev->portNum, str);
-      ncclIbDevFatalError(dev);
+      IbCastDevFatalError(dev);
       break;
     case IBV_EVENT_CQ_ERR:
       // the above is a CQ fatal error
       WARN("NET/IB : %s:%d async fatal event on CQ (%p): %s", dev->devName, dev->portNum, cq, str);
-      ncclIbCqFatalError(cq);
+      IbCastCqFatalError(cq);
       break;
     case IBV_EVENT_QP_FATAL:
     case IBV_EVENT_QP_REQ_ERR:
     case IBV_EVENT_QP_ACCESS_ERR:
       // the above are QP fatal errors
       WARN("NET/IB : %s:%d async fatal event on QP (%p): %s", dev->devName, dev->portNum, qp, str);
-      ncclIbQpFatalError(qp);
+      IbCastQpFatalError(qp);
       break;
     case IBV_EVENT_SRQ_ERR:
       // SRQ are not used in NCCL
@@ -172,25 +172,25 @@ void* ncclIbAsyncThreadMain(void* args) {
 
 ncclNet_t ncclNetIb = {
   "IB",
-  ncclIbInit,
-  ncclIbDevices,
-  ncclIbGetProperties,
-  ncclIbListen,
-  ncclIbConnect,
-  ncclIbAccept,
-  ncclIbRegMr,
-  ncclIbRegMrDmaBuf,
-  ncclIbDeregMr,
-  ncclIbIsend,
-  ncclIbIrecv,
-  ncclIbIflush,
-  ncclIbTest,
-  ncclIbCloseSend,
-  ncclIbCloseRecv,
-  ncclIbCloseListen,
+  IbCastInit,
+  IbCastDevices,
+  IbCastGetProperties,
+  IbCastListen,
+  IbCastConnect,
+  IbCastAccept,
+  IbCastRegMr,
+  IbCastRegMrDmaBuf,
+  IbCastDeregMr,
+  IbCastIsend,
+  IbCastIrecv,
+  IbCastIflush,
+  IbCastTest,
+  IbCastCloseSend,
+  IbCastCloseRecv,
+  IbCastCloseListen,
   NULL /* getDeviceMr */,
   NULL /* irecvConsumed */,
-  ncclIbMakeVDevice,
-  ncclIbFinalize,
-  ncclIbSetNetAttr,
+  IbCastMakeVDevice,
+  IbCastFinalize,
+  IbCastSetNetAttr,
 };

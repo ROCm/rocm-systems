@@ -21,7 +21,7 @@ static void ibGdrSupportInitOnce() {
 }
 
 // Returns ncclSuccess if any of the peermem modules are loaded.
-ncclResult_t ncclIbGdrSupport() {
+ncclResult_t IbCastGdrSupport() {
   static std::once_flag once;
   std::call_once(once, ibGdrSupportInitOnce);
   if (!ncclIbGdrModuleLoaded)
@@ -35,7 +35,7 @@ static void ibPeerMemSupportInitOnce() {
 }
 
 // Returns ncclSuccess if nvidia_peermem module is loaded. Does not check legacy implementations of nv_peer_mem (e.g. nv_mem, nv_mem_nc)
-ncclResult_t ncclIbPeerMemSupport() {
+ncclResult_t IbCastPeerMemSupport() {
   static std::once_flag once;
   std::call_once(once, ibPeerMemSupportInitOnce);
   if (!ncclIbPeerMemModuleLoaded)
@@ -71,7 +71,7 @@ failure:
 // Returns :
 // ncclSuccess : DMA-BUF support is available
 // ncclSystemError : DMA-BUF is not supported by the kernel
-ncclResult_t ncclIbDmaBufSupport(int dev) {
+ncclResult_t IbCastDmaBufSupport(int dev) {
   static std::once_flag onces[MAX_IB_DEVS];
   // init the device only once
   ibDmaSupportInitDev = dev;
