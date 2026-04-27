@@ -348,8 +348,7 @@ user_ring_record_header_buffer::process_record_headers(ClearRecordsT, FuncT&& fu
 
                 auto* record = reinterpret_cast<rocprofiler_record_header_t*>(
                     base + offset + slot->header_offset);
-                if(slot->flags > 0 && record->hash > 0 && record->payload != nullptr)
-                    records.emplace_back(record);
+                if(slot->flags > 0 && record->payload != nullptr) records.emplace_back(record);
 
                 offset += slot->total_size;
             }

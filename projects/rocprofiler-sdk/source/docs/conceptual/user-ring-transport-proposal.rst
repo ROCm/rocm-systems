@@ -128,7 +128,11 @@ The POC backend uses ``user_ring_record_header_buffer`` as the internal storage
 type when ``ROCPROFILER_EXPERIMENTAL_USER_RING_BUFFER=ON``. Each producer thread
 lazily creates one shard for each logical buffer object. The shard uses
 page-aligned process-private memory by default and stores the slot header,
-``rocprofiler_record_header_t``, and payload in one contiguous slot.
+``rocprofiler_record_header_t``, and payload in one contiguous slot. The POC
+still keeps drain and reset disjoint from producers with the existing buffer
+synchronization; a production backend should replace that with committed-slot
+state, consumer cursors, and lifecycle reclamation that does not require
+excluding all producers during normal drains.
 
 Out-of-process backend
 ======================

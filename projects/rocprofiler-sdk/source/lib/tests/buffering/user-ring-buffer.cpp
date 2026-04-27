@@ -137,6 +137,27 @@ TEST(user_ring_buffer, parallel_per_thread_shards)
     EXPECT_EQ(seen.load(), num_records);
 }
 
+TEST(user_ring_buffer, zero_hash_records_are_delivered)
+{
+    auto buffer = user_ring_buffer_t{4096};
+    auto record = make_record(2, 3);
+
+    ASSERT_TRUE(buffer.emplace(uint64_t{0}, record));
+
+    auto num_headers = buffer.process_record_headers(std::true_type{}, [&](auto&& records) {
+        ASSERT_EQ(records.size(), 1);
+        auto* header = records.at(0);
+        ASSERT_NE(header, nullptr);
+        ASSERT_EQ(header->hash, 0);
+        auto* payload = static_cast<test_record*>(header->payload);
+        ASSERT_NE(payload, nullptr);
+        EXPECT_EQ(payload->checksum, make_record(payload->tid, payload->index).checksum);
+    });
+
+    EXPECT_EQ(num_headers, 1);
+    EXPECT_TRUE(buffer.is_empty());
+}
+
 TEST(user_ring_buffer, save_load)
 {
     constexpr auto num_records = 64;
