@@ -596,29 +596,46 @@ def test_detect_rocprof_sdk(monkeypatch):
     assert any("rocprof_cmd is rocprofiler-sdk" in log_entry for log_entry in logs)
 
 
+def make_dummy_process(*, lines=(), returncode=0, poll_pending_first=False):
+    """Fake subprocess.Popen for capture_subprocess_output tests."""
+
+    class Stdout:
+        def __init__(self):
+            self.iter = iter(lines)
+
+        def readline(self):
+            return next(self.iter, "")
+
+        def fileno(self):
+            return 1
+
+        def close(self):
+            pass
+
+    class Process:
+        def __init__(self):
+            self.stdout = Stdout()
+            self.poll_pending = poll_pending_first
+
+        def poll(self):
+            if self.poll_pending:
+                self.poll_pending = False
+                return None
+            return returncode
+
+        def wait(self):
+            return returncode
+
+    return Process()
+
+
 def test_capture_subprocess_output_with_new_env(monkeypatch):
     """
     Test capture_subprocess_output with custom environment variables.
     Verifies that new_env parameter is properly passed to subprocess.
     """
 
-    class DummyProcess:
-        def __init__(self):
-            self.stdout = type(
-                "MockStdout", (), {"readline": lambda: "", "fileno": lambda: 1}
-            )()
-            self._poll_count = 0
-
-        def poll(self):
-            if self._poll_count == 0:
-                self._poll_count += 1
-                return None
-            return 0
-
-        def wait(self):
-            return 0
-
-    dummy_process = DummyProcess()
+    dummy_process = make_dummy_process(poll_pending_first=True)
     popen_calls = []
 
     def dummy_popen(*args, **kwargs):
@@ -626,18 +643,6 @@ def test_capture_subprocess_output_with_new_env(monkeypatch):
         return dummy_process
 
     monkeypatch.setattr("subprocess.Popen", dummy_popen)
-
-    class DummySelector:
-        def register(self, fileobj, event, callback):
-            pass
-
-        def select(self, timeout=1):
-            return []
-
-        def close(self):
-            pass
-
-    monkeypatch.setattr("selectors.DefaultSelector", DummySelector)
     monkeypatch.setattr("utils.utils_common.console_log", lambda *a, **k: None)
     monkeypatch.setattr("utils.logger.console_debug", lambda *a, **k: None)
 
@@ -655,31 +660,7 @@ def test_capture_subprocess_output_profile_mode(monkeypatch):
     Verifies different behavior when profiling mode is active.
     """
 
-    class DummyProcess:
-        def __init__(self):
-            self.stdout = type(
-                "MockStdout", (), {"readline": lambda: "", "fileno": lambda: 1}
-            )()
-
-        def poll(self):
-            return 0
-
-        def wait(self):
-            return 0
-
-    monkeypatch.setattr("subprocess.Popen", lambda *a, **k: DummyProcess())
-
-    class DummySelector:
-        def register(self, fileobj, event, callback):
-            pass
-
-        def select(self, timeout=1):
-            return []
-
-        def close(self):
-            pass
-
-    monkeypatch.setattr("selectors.DefaultSelector", DummySelector)
+    monkeypatch.setattr("subprocess.Popen", lambda *a, **k: make_dummy_process())
     monkeypatch.setattr("utils.utils_common.console_log", lambda *a, **k: None)
     monkeypatch.setattr("utils.logger.console_debug", lambda *a, **k: None)
 
@@ -696,66 +677,10 @@ def test_capture_subprocess_output_failure(monkeypatch):
     Test capture_subprocess_output returns
     (False, output) when subprocess exits with nonzero code.
     """
-    lines = ["fail\n"]
-
-    class DummyStdout:
-        def __init__(self, lines):
-            self._lines = lines
-            self._idx = 0
-
-        def readline(self):
-            if self._idx < len(self._lines):
-                val = self._lines[self._idx]
-                self._idx += 1
-                return val
-            return ""
-
-    class DummyProcess:
-        def __init__(self):
-            self.stdout = DummyStdout(lines)
-            self._poll_count = 0
-
-        def poll(self):
-            if self._poll_count == 0:
-                self._poll_count += 1
-                return None
-            return 1
-
-        def wait(self):
-            return 1
-
-    dummy_process = DummyProcess()
-
-    def dummy_popen(*args, **kwargs):
-        return dummy_process
-
-    monkeypatch.setattr("subprocess.Popen", dummy_popen)
-
-    class DummySelector:
-        def __init__(self):
-            self._registered = []
-
-        def register(self, fileobj, event, callback):
-            self._registered.append((fileobj, event, callback))
-
-        def select(self):
-            if hasattr(self, "_called"):
-                return []
-            self._called = True
-            key_obj = type(
-                "Key",
-                (),
-                {
-                    "data": staticmethod(self._registered[0][2]),
-                    "fileobj": self._registered[0][0],
-                },
-            )()
-            return [(key_obj, 1)]
-
-        def close(self):
-            pass
-
-    monkeypatch.setattr("selectors.DefaultSelector", DummySelector)
+    dummy_process = make_dummy_process(
+        lines=["fail\n"], returncode=1, poll_pending_first=True
+    )
+    monkeypatch.setattr("subprocess.Popen", lambda *a, **k: dummy_process)
     monkeypatch.setattr("utils.utils_common.console_log", lambda *a, **k: None)
     monkeypatch.setattr("utils.logger.console_debug", lambda *a, **k: None)
 
@@ -766,72 +691,30 @@ def test_capture_subprocess_output_failure(monkeypatch):
 
 def test_capture_subprocess_output_unicode_decode(monkeypatch):
     """
-    Test capture_subprocess_output handles
-    UnicodeDecodeError in handle_output gracefully.
+    Test capture_subprocess_output handles bad bytes from the child without
+    crashing. errors="replace" on Popen substitutes invalid bytes with the
+    Unicode replacement character (\\ufffd), so readline never raises.
     """
 
-    class DummyStdout:
-        def __init__(self):
-            self._called = False
+    popen_calls = []
 
-        def readline(self):
-            if not self._called:
-                self._called = True
-                raise UnicodeDecodeError("utf-8", b"", 0, 1, "reason")
-            return ""
-
-    class DummyProcess:
-        def __init__(self):
-            self.stdout = DummyStdout()
-            self._poll_count = 0
-
-        def poll(self):
-            if self._poll_count == 0:
-                self._poll_count += 1
-                return None
-            return 0
-
-        def wait(self):
-            return 0
-
-    dummy_process = DummyProcess()
-
+    # Lines as the TextIOWrapper would yield them after error replacement:
+    # bad bytes show up as �, not as exceptions.
     def dummy_popen(*args, **kwargs):
-        return dummy_process
+        popen_calls.append(kwargs)
+        return make_dummy_process(lines=["good line\n", "bad � byte\n"])
 
     monkeypatch.setattr("subprocess.Popen", dummy_popen)
-
-    class DummySelector:
-        def __init__(self):
-            self._registered = []
-
-        def register(self, fileobj, event, callback):
-            self._registered.append((fileobj, event, callback))
-
-        def select(self):
-            if hasattr(self, "_called"):
-                return []
-            self._called = True
-            key_obj = type(
-                "Key",
-                (),
-                {
-                    "data": staticmethod(self._registered[0][2]),
-                    "fileobj": self._registered[0][0],
-                },
-            )()
-            return [(key_obj, 1)]
-
-        def close(self):
-            pass
-
-    monkeypatch.setattr("selectors.DefaultSelector", DummySelector)
     monkeypatch.setattr("utils.utils_common.console_log", lambda *a, **k: None)
     monkeypatch.setattr("utils.logger.console_debug", lambda *a, **k: None)
 
     success, output = utils_common.capture_subprocess_output(["echo", "test"])
+
     assert success is True
-    assert output == ""
+    assert "good line" in output
+    assert "�" in output
+    # Popen must request "replace" error handling so bad bytes never raise.
+    assert popen_calls[0].get("errors") == "replace"
 
 
 # =============================================================================
@@ -2234,20 +2117,9 @@ def test_capture_subprocess_output_with_logging_disabled(monkeypatch):
     Test capture_subprocess_output with enable_logging=False doesn't call console_log.
     """
 
-    class DummyProcess:
-        def __init__(self):
-            self.stdout = io.StringIO("test output\n")
-
-        def poll(self):
-            return 0
-
-        def wait(self):
-            return 0
-
-    monkeypatch.setattr("subprocess.Popen", lambda *a, **k: DummyProcess())
     monkeypatch.setattr(
-        "selectors.DefaultSelector",
-        lambda: mock.Mock(register=mock.Mock(), select=lambda: [], close=mock.Mock()),
+        "subprocess.Popen",
+        lambda *a, **k: make_dummy_process(lines=["test output\n"]),
     )
 
     log_calls = []
