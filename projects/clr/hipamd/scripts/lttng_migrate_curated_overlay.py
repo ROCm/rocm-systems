@@ -34,6 +34,35 @@ from lttng_curated_lib import parse_yaml_file
 from clang import cindex
 
 
+# Cast templates per DSL type (must match HELPER_PARAM_TYPE in
+# lttng_curated_codegen.py — the helper's formal-param types). Mirrors
+# the table in lttng_migrate.py so the two scripts produce identical
+# call-site expressions.
+_CURATED_IN_CAST_TMPL = {
+    'handle':      '(uint64_t)(uintptr_t)({arg})',
+    'ptr':         '({arg})',
+    'device_ptr':  '(uint64_t)({arg})',
+    'size':        '({arg})',
+    'int32':       '({arg})',
+    'uint32':      '({arg})',
+    'int64':       '({arg})',
+    'uint64':      '({arg})',
+    'float':       '({arg})',
+    'enum':        '(int32_t)({arg})',
+    'bool':        '({arg})',
+    'cstring':     '({arg})',
+    'dim3':        '({arg})',
+    'dim3_packed': '({arg})',
+}
+
+
+def _captured_arg_expr(arg, ident):
+    """Cast `ident` (typically '__rocm_in_<name>' or the OUT param name)
+    to the helper's formal-param type per the DSL `arg`."""
+    tmpl = _CURATED_IN_CAST_TMPL.get(arg['type'], '({arg})')
+    return tmpl.format(arg=ident)
+
+
 # Provider-specific configuration. Adding a new provider means adding one
 # entry here and updating the --provider choices.
 PROVIDER_CONFIG = {
@@ -178,11 +207,14 @@ def overlay(provider, source_path, yaml_path, include_path):
             cls, expr = m.group(1), m.group(2)
             macro_start = bstart + m.start(0)
             macro_end = bstart + m.end(0)
-            # Build captured-args list.
+            # Build captured-args list. IN args may need a cast (e.g.
+            # handle → uint64_t) to match the helper's formal-param type.
+            # OUT args are passed by-pointer (helper deref's), no cast.
             captured = []
             for a in api['args']:
                 if a['dir'] == 'IN':
-                    captured.append(f'__rocm_in_{a["name"]}')
+                    captured.append(
+                        _captured_arg_expr(a, f'__rocm_in_{a["name"]}'))
                 elif a['dir'] == 'OUT':
                     captured.append(a['name'])
             if cls == 'STATUS':

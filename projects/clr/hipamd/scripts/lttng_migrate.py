@@ -96,19 +96,44 @@ def load_curated(yaml_path):
     return {a['api']: a for a in parse_yaml_file(yaml_path)}
 
 
+# Cast templates per DSL type (must match HELPER_PARAM_TYPE in
+# lttng_curated_codegen.py — these are the helper's formal-param types).
+# OUT args are passed by-pointer (helper deref's), so no per-type cast at
+# the call site; IN args may need a cast at the macro-expansion site
+# (e.g. hipStream_t → uint64_t for handle types).
+_CURATED_IN_CAST_TMPL = {
+    'handle':      '(uint64_t)(uintptr_t)({arg})',
+    'ptr':         '({arg})',           # helper takes const void*
+    'device_ptr':  '(uint64_t)({arg})',
+    'size':        '({arg})',           # size_t passes as size_t
+    'int32':       '({arg})',
+    'uint32':      '({arg})',
+    'int64':       '({arg})',
+    'uint64':      '({arg})',
+    'float':       '({arg})',
+    'enum':        '(int32_t)({arg})',
+    'bool':        '({arg})',
+    'cstring':     '({arg})',
+    'dim3':        '({arg})',
+    'dim3_packed': '({arg})',
+}
+
+
 def _captured_args_for_curated(api):
-    """Return list of captured-arg names from the YAML, in YAML order.
-    For the migrator's macro emit we pass each captured arg's wrapper
-    parameter name (which equals the YAML name per the §4 binding rule).
-    OUT-only and INOUT args are passed differently: OUT passes the
-    pointer parameter directly (helper deref's at the right time); IN
-    passes the captured local __rocm_in_<name>."""
+    """Return list of captured-arg expressions from the YAML, in YAML order.
+
+    For IN args we pass the captured local __rocm_in_<name>, casted as
+    necessary for the helper's formal-param type (e.g. handle →
+    uint64_t). For OUT args we pass the wrapper's original out-pointer
+    parameter directly; the helper deref's it gated by status.
+    """
     result = []
     for a in api['args']:
         if a['dir'] == 'IN':
-            result.append(f'__rocm_in_{a["name"]}')
+            local = f'__rocm_in_{a["name"]}'
+            tmpl = _CURATED_IN_CAST_TMPL.get(a['type'], '({arg})')
+            result.append(tmpl.format(arg=local))
         elif a['dir'] == 'OUT':
-            # Helper expects the original out-pointer parameter.
             result.append(a['name'])
         # INOUT is rejected by the parser.
     return result
