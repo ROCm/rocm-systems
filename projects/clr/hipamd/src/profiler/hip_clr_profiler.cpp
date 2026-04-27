@@ -41,6 +41,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
+#include <iomanip>
 #include <mutex>
 #include <thread>
 #include <map>
@@ -387,6 +388,7 @@ void WriteJsonTraceImpl(const char* filepath) {
 
   const char* path = (filepath && filepath[0]) ? filepath : "hip_clr_trace.json";
   std::ofstream trace(path, std::fstream::out);
+  trace << std::fixed << std::setprecision(3);
   if (!trace.is_open()) return;
 
   const char* kGpuEvents[] = {"Dispatch", "Copy", "Barrier", "Unknown"};
@@ -417,7 +419,20 @@ void WriteJsonTraceImpl(const char* filepath) {
   };
   // Key = device pointer (uint64_t cast of void*)
   std::unordered_map<uint64_t, AllocInfo> alloc_map;
-  // First pass: populate alloc_map.
+  // First pass: find base_ns (earliest timestamp) and populate alloc_map.
+  // base_ns is subtracted from every ts so values stay small (avoids JS float64
+  // precision loss for large absolute ns timestamps in the Perfetto UI).
+  uint64_t base_ns = UINT64_MAX;
+  for (size_t c = 0; c < g_records.size(); ++c) {
+    HipApiRecordExt* chunk = g_records[c];
+    size_t base  = c * kChunkSize;
+    size_t valid = (total > base) ? std::min(total - base, kChunkSize) : 0;
+    for (size_t i = 0; i < valid; ++i) {
+      if (chunk[i].start_ns && chunk[i].start_ns < base_ns)
+        base_ns = chunk[i].start_ns;
+    }
+  }
+  if (base_ns == UINT64_MAX) base_ns = 0;
   for (size_t c = 0; c < g_records.size(); ++c) {
     HipApiRecordExt* chunk = g_records[c];
     size_t base  = c * kChunkSize;
@@ -474,9 +489,9 @@ void WriteJsonTraceImpl(const char* filepath) {
     for (size_t i = 0; i < valid; ++i) {
       const HipApiRecordExt& rec = chunk[i];
 
-      uint64_t s_time  = rec.start_ns / 1000;  // ns → µs
-      uint64_t dur_us  = (rec.end_ns > rec.start_ns)
-                         ? std::max(uint64_t{1}, (rec.end_ns - rec.start_ns) / 1000) : 1;
+      double s_time  = (rec.start_ns - base_ns) / 1000.0;
+      double dur_us  = (rec.end_ns > rec.start_ns)
+                       ? std::max(0.001, (rec.end_ns - rec.start_ns) / 1000.0) : 0.001;
 
       if (!first) trace << ",";
       first = false;
@@ -518,9 +533,9 @@ void WriteJsonTraceImpl(const char* filepath) {
         uint32_t op_idx  = gop.op < 3 ? gop.op : 3;
         int sdma = (op_idx == OP_ID_COPY) &&
                    hipCopyKindIsSDMAExt(static_cast<HipCopyKindExt>(gop.copy_kind)) ? 1 : 0;
-        uint64_t gpu_dur = (gop.end_ns > gop.begin_ns)
-                           ? std::max(uint64_t{1}, (gop.end_ns - gop.begin_ns) / 1000) : 1;
-        uint64_t gpu_ts  = gop.begin_ns / 1000;
+        double gpu_dur = (gop.end_ns > gop.begin_ns)
+                         ? std::max(0.001, (gop.end_ns - gop.begin_ns) / 1000.0) : 0.001;
+        double gpu_ts  = (gop.begin_ns > base_ns) ? (gop.begin_ns - base_ns) / 1000.0 : 0.0;
         uint64_t gpu_tid = gop.queue_id * 2 + sdma;
 
         const char* gpu_name_cstr = (op_idx == OP_ID_COPY) ? CopyKindName(gop.copy_kind)
@@ -663,9 +678,9 @@ void WriteJsonTraceImpl(const char* filepath) {
     uint64_t ptr   = kv.first;
     const AllocInfo& ai = kv.second;
     uint64_t mem_tid = alloc_tid(ptr);
-    uint64_t ts_us   = ai.start_ns / 1000;
-    uint64_t end_us  = ai.end_ns   / 1000;
-    uint64_t dur_us  = (end_us > ts_us) ? (end_us - ts_us) : 1;
+    double ts_us   = (ai.start_ns > base_ns) ? (ai.start_ns - base_ns) / 1000.0 : 0.0;
+    double end_us  = (ai.end_ns   > base_ns) ? (ai.end_ns   - base_ns) / 1000.0 : 0.0;
+    double dur_us  = (end_us > ts_us) ? (end_us - ts_us) : 0.001;
     char ptrbuf[32];
     snprintf(ptrbuf, sizeof(ptrbuf), "0x%llx",
              static_cast<unsigned long long>(ptr));
