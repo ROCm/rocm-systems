@@ -1456,15 +1456,42 @@ def test_arg_name_mismatch_fails():
     _, output = _run_verify(yaml_text, expect_pass=False)
     assert 'WRONG_NAME' in output
 
-def test_arg_count_mismatch_fails():
+def test_header_param_omission_warns_but_passes():
+    """Spec §4.4 + §8.3: omitting low-value header parameters from YAML
+    is allowed (e.g., hsa_amd_memory_async_copy_on_engine drops
+    dep_signals to fit field budget). Verifier should pass with an
+    informational warning."""
     yaml_text = """
 - api: hipMemcpyAsync
   category: memory
   args:
-    - {name: dst, type: ptr, dir: IN}
+    - {name: dst,       type: ptr,    dir: IN}
+    - {name: src,       type: ptr,    dir: IN}
+    - {name: sizeBytes, type: size,   dir: IN}
+    # kind and stream intentionally omitted (would be a real-world
+    # field-budget mitigation if this API were over budget)
+"""
+    rc, output = _run_verify(yaml_text, expect_pass=True)
+    # Should warn about the two omitted header params.
+    assert 'kind' in output or 'stream' in output, \
+        f"expected omission warnings, got:\n{output}"
+
+def test_extra_yaml_arg_fails():
+    """An arg in YAML that doesn't exist in the header is a hard error
+    (typo / stale name detection)."""
+    yaml_text = """
+- api: hipMemcpyAsync
+  category: memory
+  args:
+    - {name: dst,           type: ptr,    dir: IN}
+    - {name: src,           type: ptr,    dir: IN}
+    - {name: sizeBytes,     type: size,   dir: IN}
+    - {name: kind,          type: enum,   dir: IN}
+    - {name: stream,        type: handle, dir: IN}
+    - {name: NONEXISTENT,   type: int32,  dir: IN}
 """
     _, output = _run_verify(yaml_text, expect_pass=False)
-    assert 'arg count' in output.lower() or 'expected' in output.lower()
+    assert 'NONEXISTENT' in output
 
 def test_inout_rejected():
     """Spec §4.4 v1: dir: INOUT is hard error in verifier."""
@@ -1536,15 +1563,15 @@ declarations via libclang. Per spec §8.3.
 
 Hard errors (exit 1):
 - API listed in YAML but not declared in the header.
-- Arg count mismatch between YAML and header.
-- Arg name mismatch (positional binding intentionally not supported per §4).
+- YAML arg name not present in header (typo / stale name detection).
+- Type mismatch on included args per spec §4.1.
 - Arg type mismatch per the type-vocabulary mapping (§4.1) — including
   uint32 used for a C bool parameter (must be the bool DSL type).
 - Over-budget API (§4.4 — re-checked via lttng_curated_lib).
 - dir: INOUT (§4.4 INOUT-out-of-scope-v1).
 
-Informational only (exit 0 with warning):
-- Header parameter declared but not in YAML (partial coverage by design).
+Informational warning (does NOT cause exit 1):
+- Header parameter declared but not in YAML (intentional omission per spec §4.4 mitigation).
 
 Usage:
     python3 lttng_curated_verify.py \\
