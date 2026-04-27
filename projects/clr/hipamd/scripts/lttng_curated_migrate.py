@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Overlay the curated-args extension onto an already-migrated wrapper TU.
+"""Curated-args migrator: applies curated transforms to already-migrated source.
 
 Idempotent: skips wrappers that already have the __ROCM_CURATED__ sentinel.
 
@@ -17,7 +17,7 @@ Provider-agnostic: takes --provider hip|hsa and selects:
 - default include flags (HIP needs -D__HIP_PLATFORM_AMD__=1)
 
 Usage:
-    python3 lttng_migrate_curated_overlay.py \\
+    python3 lttng_curated_migrate.py \\
         --provider hip \\
         --source path/to/hip_table_interface.cpp \\
         --curated-yaml path/to/curated_apis.yaml \\
