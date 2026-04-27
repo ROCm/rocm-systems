@@ -17,9 +17,7 @@
 using namespace rocprofiler_compute_tool;
 
 static std::shared_ptr<input_parameters_t> g_input_parameters = std::make_shared<env_input_parameters_t>();
-static std::shared_ptr<sdk_wrapper_t>   g_sdk_wrapper   = std::make_shared<sdk_wrapper_impl_t>();
-static std::shared_ptr<sdk_callbacks_t> g_sdk_callbacks = std::make_shared<sdk_callbacks_impl_t>(
-    g_sdk_wrapper);
+static std::shared_ptr<sdk_wrapper_t>     g_sdk_wrapper   = std::make_shared<sdk_wrapper_impl_t>();
 static std::shared_ptr<counters_writer_t> g_counters_writer = std::make_shared<csv_counters_writer_t>();
 static std::shared_ptr<rocprofiler_tool_configure_result_t> g_cfg;
 
@@ -68,7 +66,7 @@ void dispatch_callback(rocprofiler_dispatch_counting_service_data_t dispatch_dat
 {
     Expects(callback_data_args);
     auto* tool_data = static_cast<tool_data_t*>(callback_data_args);
-    g_sdk_callbacks->dispatch_callback(dispatch_data, config, *tool_data);
+    tool_data->sdk_callbacks->dispatch_callback(dispatch_data, config, *tool_data);
 }
 
 void record_callback(rocprofiler_dispatch_counting_service_data_t dispatch_data,
@@ -79,7 +77,7 @@ void record_callback(rocprofiler_dispatch_counting_service_data_t dispatch_data,
 {
     Expects(callback_data_args);
     auto* tool_data = static_cast<tool_data_t*>(callback_data_args);
-    g_sdk_callbacks->record_callback(dispatch_data, record_data, record_count, *tool_data);
+    tool_data->sdk_callbacks->record_callback(dispatch_data, record_data, record_count, *tool_data);
 }
 
 void tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
@@ -88,7 +86,7 @@ void tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
 {
     Expects(callback_data);
     auto* tool_data = static_cast<tool_data_t*>(callback_data);
-    g_sdk_callbacks->tool_tracing_callback(record, *tool_data);
+    tool_data->sdk_callbacks->tool_tracing_callback(record, *tool_data);
 }
 
 int tool_init(rocprofiler_client_finalize_t, void* user_data)
@@ -173,6 +171,7 @@ std::unique_ptr<tool_data_t> create_tool_data(rocprofiler_client_id_t* /*id*/)
 {
     auto tool_data = std::make_unique<tool_data_t>();
 
+    tool_data->sdk_callbacks   = std::make_shared<sdk_callbacks_impl_t>(g_sdk_wrapper);
     tool_data->output_filename = generate_output_filename(g_input_parameters->get_output_path());
 
     // ROCPROF_COUNTERS env. var. is a string like "pmc: counter1 counter2 ..."

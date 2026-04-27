@@ -75,6 +75,8 @@ struct counter_info_record_t
     double      counter_value = 0.;
 };
 
+class sdk_callbacks_t;
+
 struct tool_data_t
 {
     std::mutex                                 mut{};
@@ -87,6 +89,7 @@ struct tool_data_t
     std::set<uint64_t>                         target_kernel_ids{};
     iteration_multiplexing_mode_t iteration_multiplexing_mode{iteration_multiplexing_mode_t::DISABLED};
     rocprof_compute::synchronized_t<pc_sampling_collector_t> pc_sampling_collector;
+    std::shared_ptr<sdk_callbacks_t>           sdk_callbacks{};
 };
 
 class sdk_callbacks_t
