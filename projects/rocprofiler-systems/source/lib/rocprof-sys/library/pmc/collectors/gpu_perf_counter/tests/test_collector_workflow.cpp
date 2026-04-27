@@ -196,6 +196,17 @@ protected:
         get_captured_samples().clear();
         mock = std::make_shared<MockDriver>();
         MockDriverFactory::set_mock(mock);
+
+        // On ROCm < 7.0, device.hpp decodes record.id via query_record_counter_id.
+        // Tests use record.id equal to counter_id.handle, so the mock mirrors that.
+        // Not invoked on ROCm >= 7.0 (different code path in device.hpp).
+        ON_CALL(*mock, query_record_counter_id(_, _))
+            .WillByDefault([](rocprofiler_counter_instance_id_t record_id,
+                              rocprofiler_counter_id_t*         counter_id) {
+                counter_id->handle = record_id;
+                return ROCPROFILER_STATUS_SUCCESS;
+            });
+        EXPECT_CALL(*mock, query_record_counter_id(_, _)).Times(::testing::AnyNumber());
     }
 
     void TearDown() override

@@ -261,6 +261,13 @@ shutdown()
     }
 
     is_initialized() = false;
+    // Reset SDK PMC globals so that postfork_parent_reinit() (shutdown→setup) does
+    // not leave dangling shared_ptr/unique_ptr views into the destroyed collector.
+    // Guard matches the construction site to keep the build matrix consistent.
+#if ROCPROFSYS_ROCM_VERSION >= 60400
+    g_gpu_perf_counter_collector.reset();
+    g_gpu_perf_counter_provider.reset();
+#endif
 }
 
 void
@@ -310,6 +317,13 @@ postfork_child_cleanup()
     }
     g_collector_slices.clear();
 #if ROCPROFSYS_ROCM_VERSION >= 60400
+    // Stop the SDK context (via provider) before resetting the globals so the
+    // child process does not inherit a running rocprofiler context.
+    // slice.shutdown() above already invoked provider->shutdown()->stop() for any
+    // slices that were registered; the explicit stop here handles the case where
+    // register_gpu_perf_counter_source ran but setup()/shutdown() were never called
+    // in the child (globals set, no slice present).
+    if(g_gpu_perf_counter_provider) g_gpu_perf_counter_provider->stop();
     g_gpu_perf_counter_collector.reset();
     g_gpu_perf_counter_provider.reset();
 #endif
@@ -333,6 +347,10 @@ postfork_parent_reinit()
 }
 
 #if ROCPROFSYS_ROCM_VERSION >= 60400
+// Intentionally a second-phase setup called after rocprofiler initializes (outside of
+// setup()), because the rocprofiler context and agent list are not available at
+// setup() time. shutdown() symmetrically stops and resets the provider/collector
+// globals created here.
 void
 prefork_lock_sampler()
 {

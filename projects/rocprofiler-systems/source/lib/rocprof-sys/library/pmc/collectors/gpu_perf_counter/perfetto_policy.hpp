@@ -13,7 +13,6 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <map>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -37,10 +36,10 @@ struct gpu_perf_counter_perfetto_device_data
     std::unordered_map<counter_id_t, size_t>                       counter_tracks;
 };
 
-inline std::map<size_t, gpu_perf_counter_perfetto_device_data>&
+inline std::unordered_map<size_t, gpu_perf_counter_perfetto_device_data>&
 get_perfetto_data()
 {
-    static std::map<size_t, gpu_perf_counter_perfetto_device_data> data;
+    static std::unordered_map<size_t, gpu_perf_counter_perfetto_device_data> data;
     return data;
 }
 

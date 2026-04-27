@@ -36,9 +36,17 @@ using collectors::gpu_perf_counter::dimension_position;
 struct driver
 {
     using counter_config_id_t          = rocprofiler_counter_config_id_t;
+    using counter_id_t                 = rocprofiler_counter_id_t;
     using counter_record_t             = rocprofiler_counter_record_t;
     using device_counting_agent_cb_t   = rocprofiler_device_counting_agent_cb_t;
     using device_counting_service_cb_t = rocprofiler_device_counting_service_cb_t;
+    using available_counters_cb_t      = rocprofiler_available_counters_cb_t;
+    using context_id_t                 = rocprofiler_context_id_t;
+    using agent_id_t                   = rocprofiler_agent_id_t;
+    using buffer_id_t                  = rocprofiler_buffer_id_t;
+    using status_t                     = rocprofiler_status_t;
+
+    static agent_id_t make_agent_id(uint64_t handle) { return agent_id_t{ handle }; }
 
     static rocprofiler_status_t create_context(rocprofiler_context_id_t* context)
     {

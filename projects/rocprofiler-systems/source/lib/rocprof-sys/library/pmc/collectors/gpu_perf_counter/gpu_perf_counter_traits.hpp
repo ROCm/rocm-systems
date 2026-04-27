@@ -76,6 +76,10 @@ struct gpu_perf_counter_traits
         enabled_metrics_t supported_metrics;
     };
 
+    // Device filtering is the caller's responsibility: the agent list passed into
+    // register_gpu_perf_counter_source is already filtered upstream, so the
+    // Settings parameter is unused here. It is retained because the base
+    // collector's traits_check probe instantiates the two-parameter signature.
     template <typename Settings, typename Provider>
     [[nodiscard]] static std::vector<device_entry> enumerate_devices(
         std::shared_ptr<Provider> provider)
