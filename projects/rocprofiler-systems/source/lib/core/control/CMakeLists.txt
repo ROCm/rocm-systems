@@ -14,6 +14,7 @@ set(control_headers
     ${CMAKE_CURRENT_LIST_DIR}/subscriber.hpp
     ${CMAKE_CURRENT_LIST_DIR}/trigger.hpp
     ${CMAKE_CURRENT_LIST_DIR}/triggers/roctx.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/triggers/time_window.hpp
     ${CMAKE_CURRENT_LIST_DIR}/vote_entry.hpp
 )
 
