@@ -447,6 +447,25 @@ if( BUILD_SHARED_LIBS )
               # headers (Task 4.5 multi-header support): hsa.h + hsa_ext_amd.h +
               # hsa_api_trace.h (the third declares hsa_amd_queue_intercept_create
               # per Task 15a).
+              # Auto-detect libclang's resource dir (where stddef.h lives)
+              # by querying the python clang module. Without this, libclang
+              # may resolve `size_t` to a narrower type (e.g. `int`) in
+              # environments where the default sysroot is incomplete,
+              # producing spurious sidecar drift on regen.
+              execute_process(
+                  COMMAND ${Python3_EXECUTABLE} -c "from clang import cindex; \
+import os, glob; \
+candidates = glob.glob('/usr/lib/llvm-*/lib/clang/*/include'); \
+print(candidates[-1] if candidates else '')"
+                  OUTPUT_VARIABLE _HSA_LIBCLANG_RESDIR
+                  OUTPUT_STRIP_TRAILING_WHITESPACE
+                  ERROR_QUIET)
+              set(_HSA_VERIFY_EXTRA_INCLUDES
+                  --extra-arg=-I/opt/rocm/include)
+              if(_HSA_LIBCLANG_RESDIR)
+                  list(APPEND _HSA_VERIFY_EXTRA_INCLUDES
+                       --extra-arg=-I${_HSA_LIBCLANG_RESDIR})
+              endif()
               add_custom_command(
                   OUTPUT ${_HSA_CURATED_SIGS}
                   COMMAND ${Python3_EXECUTABLE}
@@ -457,7 +476,7 @@ if( BUILD_SHARED_LIBS )
                           --header       /opt/rocm/include/hsa/hsa_api_trace.h
                           # `--extra-arg=-I...` form (single token) so argparse
                           # doesn't mis-parse `-I/...` as a new option.
-                          --extra-arg=-I/opt/rocm/include
+                          ${_HSA_VERIFY_EXTRA_INCLUDES}
                           --out-sidecar  ${_HSA_CURATED_SIGS}
                   DEPENDS ${_HSA_CURATED_YAML}
                           ${CMAKE_CURRENT_SOURCE_DIR}/scripts/lttng_curated_verify.py
