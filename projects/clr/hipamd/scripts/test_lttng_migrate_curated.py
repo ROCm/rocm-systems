@@ -92,6 +92,36 @@ def test_curated_emit():
     assert 'ROCM_TRACE_RET_STATUS_CURATED(hipMalloc,' in out, out
     assert 'ROCM_TRACE_RET_STATUS_CURATED_NOARGS(hipDeviceSynchronize,' in out, out
 
+    # C6 regression: IN-locals must use 'auto const' so that C++14+ type
+    # deduction preserves the wrapper's actual parameter type. Previously
+    # we used the libclang-resolved type, which silently truncated size_t
+    # to int when system headers weren't available, corrupting any
+    # allocation/copy >= 2^31 bytes at the assignment line.
+    assert 'auto const __rocm_in_sizeBytes' in out, \
+        f"Expected 'auto const __rocm_in_sizeBytes' in migrator output " \
+        f"for type safety:\n{out}"
+    assert 'auto const __rocm_in_size' in out, \
+        f"Expected 'auto const __rocm_in_size' in migrator output for " \
+        f"type safety:\n{out}"
+    # Negative assertions: narrow-typed IN-locals are forbidden for size args.
+    assert 'int const __rocm_in_sizeBytes' not in out, \
+        f"REGRESSION (C6): int-typed IN-local for size_t parameter " \
+        f"sizeBytes:\n{out}"
+    assert 'int const __rocm_in_size' not in out, \
+        f"REGRESSION (C6): int-typed IN-local for size_t parameter size:\n{out}"
+    # Stronger guard: every IN-local declaration must be ' auto const '.
+    # Catch any future regression where a libclang-resolved type leaks
+    # into the IN-local declaration (the leading space is part of the
+    # migrator's emission template).
+    import re
+    for m in re.finditer(r'__rocm_in_\w+\s*=', out):
+        # Look at the ~30 chars preceding each IN-local assignment.
+        start = max(0, m.start() - 32)
+        prefix = out[start:m.start()]
+        assert 'auto const ' in prefix, \
+            f"REGRESSION (C6): IN-local '{m.group(0)}' not declared as " \
+            f"'auto const'; preceding context: {prefix!r}\n{out}"
+
     print('PASS')
 
 

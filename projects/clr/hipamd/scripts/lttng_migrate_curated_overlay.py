@@ -194,11 +194,16 @@ def overlay(provider, source_path, yaml_path, include_path):
         for a in api['args']:
             if a['dir'] == 'IN':
                 pname = a['name']
-                pty = ptypes.get(pname)
-                if pty is None:
+                if pname not in ptypes:
                     sys.exit(f'{fn}: arg {pname!r} not in wrapper params '
                              f'{list(ptypes)}')
-                in_locals.append(f' {pty} const __rocm_in_{pname} = {pname};')
+                # Use 'auto const' rather than the libclang-resolved type:
+                # when system headers are not available, libclang may
+                # resolve typedefs like size_t to a narrower type (e.g.
+                # int), which would silently truncate the value at the
+                # assignment line. C++14+ type deduction preserves the
+                # wrapper's actual parameter type.
+                in_locals.append(f' auto const __rocm_in_{pname} = {pname};')
         insertion = sentinel + ''.join(in_locals)
         edits.append((insert_off, insert_off, insertion))
 

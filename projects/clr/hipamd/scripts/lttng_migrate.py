@@ -445,9 +445,14 @@ def migrate_file(source_path: str, include_path: str, extra_args: list,
                         raise SystemExit(
                             f"{n.spelling}: curated arg {pname!r} not in "
                             f"wrapper params {list(param_types)}")
-                    pty = param_types[pname]
+                    # Use 'auto const' rather than the libclang-resolved
+                    # type: when system headers are not available, libclang
+                    # may resolve typedefs like size_t to a narrower type
+                    # (e.g. int), which would silently truncate the value
+                    # at the assignment line. C++14+ type deduction
+                    # preserves the wrapper's actual parameter type.
                     in_locals.append(
-                        f' {pty} const __rocm_in_{pname} = {pname};')
+                        f' auto const __rocm_in_{pname} = {pname};')
             block = block + sentinel + ''.join(in_locals)
         edits.append((insert_off, insert_off, block.encode('utf-8')))
 
