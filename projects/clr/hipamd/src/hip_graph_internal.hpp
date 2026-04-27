@@ -2897,17 +2897,23 @@ class GraphMemAllocNode final : public GraphNode {
 
   virtual GraphNode* clone() const final { return new GraphMemAllocNode(*this); }
 
-  void ReleaseCachedMapping(MemoryPool* pool) {
+  void ReleaseCachedMapping(MemoryPool* pool, hip::Stream* launch_stream = nullptr) {
     if (!mapped_) return;
     auto sub_obj = amd::MemObjMap::FindMemObj(node_params_.dptr);
     if (sub_obj != nullptr) {
       auto* phys = sub_obj->getUserData().phys_mem_obj;
-      auto device_id = phys ? phys->getUserData().deviceId : 0;
-      auto* stream = g_devices[device_id]->NullStream();
+      hip::Stream* stream = launch_stream;
+      if (stream == nullptr) {
+        auto device_id = phys ? phys->getUserData().deviceId : 0;
+        stream = g_devices[device_id]->NullStream();
+      }
       auto cmd = new amd::VirtualMapCommand(
           *stream, amd::Command::EventWaitList{},
           node_params_.dptr, sub_obj->getSize(), nullptr);
       cmd->enqueue();
+      if (launch_stream == nullptr) {
+        cmd->awaitCompletion();
+      }
       cmd->release();
       if (phys != nullptr && pool != nullptr) {
         pool->DecrementRefCount(phys);

@@ -2244,7 +2244,7 @@ hipError_t GraphExec::Run(hip::Stream* launch_stream) {
       auto* pool = parentGraph->Device()->GetGraphMemoryPool();
       for (auto* node : topoOrder_) {
         if (node->GetType() == hipGraphNodeTypeMemAlloc) {
-          static_cast<GraphMemAllocNode*>(node)->ReleaseCachedMapping(pool);
+          static_cast<GraphMemAllocNode*>(node)->ReleaseCachedMapping(pool, launch_stream);
         }
       }
       parentGraph->FreeAllMemory(launch_stream);
