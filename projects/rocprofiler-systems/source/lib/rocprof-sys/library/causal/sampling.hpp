@@ -3,8 +3,8 @@
 
 #pragma once
 
+#include "common/defines.h"
 #include "core/concepts.hpp"
-#include "core/defines.hpp"
 
 #include <cstdint>
 #include <memory>
