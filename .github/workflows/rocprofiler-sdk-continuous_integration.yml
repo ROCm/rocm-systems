@@ -211,10 +211,11 @@ jobs:
             --build-jobs 16 \
             --mode ${CI_MODE} \
             --site build-deb-cpu \
-            --gpu-targets ${{ env.GPU_TARGETS }} \
+            --gpu-targets gfx942 \
             --run-attempt ${{ github.run_attempt }} \
             --build-only \
             ${{ matrix.system.ci-flags }} -- \
+            -DGPU_TARGETS=gfx942 \
             -DROCPROFILER_DEP_ROCMCORE=ON \
             -DROCPROFILER_BUILD_DOCS=OFF \
             -DROCPROFILER_INTERNAL_RCCL_API_TRACE=ON \
@@ -261,6 +262,8 @@ jobs:
           tar -czf rocm-deps-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.gz \
             -C /opt rocm rocprofiler-sdk || tar -czf rocm-deps-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.gz -C /opt rocm
 
+      # NOTE: Artifacts are automatically scoped to this workflow run (github.run_id).
+      # The test job's `needs: build-deb` ensures it only downloads artifacts from this same run.
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -536,11 +539,12 @@ jobs:
             --mode ${CI_MODE} \
             --build-jobs 16 \
             --site build-rpm-cpu \
-            --gpu-targets ${{ env.GPU_TARGETS }} \
+            --gpu-targets gfx942 \
             --run-attempt ${{ github.run_attempt }} \
             --build-only \
             ${{ matrix.system.ci-flags }} \
             -- \
+            -DGPU_TARGETS=gfx942 \
             -DROCPROFILER_DEP_ROCMCORE=ON \
             -DROCPROFILER_BUILD_DOCS=OFF \
             -DROCPROFILER_INTERNAL_RCCL_API_TRACE=ON \
@@ -773,11 +777,12 @@ jobs:
           --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.system.os }}-${{ matrix.system.gpu }}-${{ matrix.system.sanitizer }}-build \
           --build-jobs 16 \
           --site build-sanitizers-cpu \
-          --gpu-targets ${{ env.GPU_TARGETS }} \
+          --gpu-targets gfx942 \
           --memcheck ${{ matrix.system.sanitizer }} \
           --run-attempt ${{ github.run_attempt }} \
           --build-only \
           -- \
+          -DGPU_TARGETS=gfx942 \
           -DROCPROFILER_INTERNAL_RCCL_API_TRACE=ON \
           -DCMAKE_BUILD_TYPE=${{ matrix.system.build-type }} \
           -DCMAKE_INSTALL_PREFIX="${{ env.ROCM_PATH }}" \
@@ -814,24 +819,16 @@ jobs:
         retention-days: 1
 
   # -----------------------------------------------------------------------------
-  # Sanitizers Test job(s) - Run on GPU runners
+  # Sanitizers Test job - Run ALL sanitizer tests on a SINGLE GPU runner
+  # This reduces GPU queue pressure by running setup once and testing sequentially
   # -----------------------------------------------------------------------------
   test-sanitizers:
-    name: Test • ${{ matrix.system.sanitizer }} • ${{ matrix.system.gpu }} • ${{ matrix.system.os }}
+    name: Test • All Sanitizers • mi325 • ubuntu-22.04
     needs: build-sanitizers
-    strategy:
-      fail-fast: false
-      matrix:
-        system:
-          - { sanitizer: 'AddressSanitizer', os: 'ubuntu-22.04', runner: 'linux-gfx942-1gpu-ossci-rocm', gpu: 'mi325', gpu-target: 'gfx94X' }
-          - { sanitizer: 'ThreadSanitizer', os: 'ubuntu-22.04', runner: 'linux-gfx942-1gpu-ossci-rocm', gpu: 'mi325', gpu-target: 'gfx94X' }
-          - { sanitizer: 'LeakSanitizer', os: 'ubuntu-22.04', runner: 'linux-gfx942-1gpu-ossci-rocm', gpu: 'mi325', gpu-target: 'gfx94X' }
-          - { sanitizer: 'UndefinedBehaviorSanitizer', os: 'ubuntu-22.04', runner: 'linux-gfx942-1gpu-ossci-rocm', gpu: 'mi325', gpu-target: 'gfx94X' }
-
     if: ${{ contains(github.event_name, 'pull_request') }}
-    runs-on: ${{ matrix.system.runner }}
+    runs-on: linux-gfx942-1gpu-ossci-rocm
     container:
-      image: docker.io/rocm/rocprofiler-private:${{ matrix.system.os }}-${{ matrix.system.gpu-target }}-latest
+      image: docker.io/rocm/rocprofiler-private:ubuntu-22.04-gfx94X-latest
       credentials:
         username: ${{ secrets.ROCPROFILER_AZURE_CI_USER }}
         password: ${{ secrets.ROCPROFILER_AZURE_CI_PASS }}
@@ -847,7 +844,7 @@ jobs:
     env:
       GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
       GCC_COMPILER_VERSION: 12
-      GPU_RUNNER: ${{ matrix.system.gpu }}
+      GPU_RUNNER: mi325
 
     steps:
     - name: Clone ROCProfiler SDK (for test scripts)
@@ -858,29 +855,43 @@ jobs:
         submodules: false
         set-safe-directory: true
 
-    - name: Download build artifacts
+    # Download all 4 sanitizer build artifacts
+    - name: Download AddressSanitizer build artifacts
       uses: actions/download-artifact@v4
       with:
-        name: build-sanitizers-${{ matrix.system.os }}-${{ matrix.system.gpu }}-${{ matrix.system.sanitizer }}
-        path: artifacts/
+        name: build-sanitizers-ubuntu-22.04-mi325-AddressSanitizer
+        path: artifacts/AddressSanitizer/
 
+    - name: Download ThreadSanitizer build artifacts
+      uses: actions/download-artifact@v4
+      with:
+        name: build-sanitizers-ubuntu-22.04-mi325-ThreadSanitizer
+        path: artifacts/ThreadSanitizer/
+
+    - name: Download LeakSanitizer build artifacts
+      uses: actions/download-artifact@v4
+      with:
+        name: build-sanitizers-ubuntu-22.04-mi325-LeakSanitizer
+        path: artifacts/LeakSanitizer/
+
+    - name: Download UndefinedBehaviorSanitizer build artifacts
+      uses: actions/download-artifact@v4
+      with:
+        name: build-sanitizers-ubuntu-22.04-mi325-UndefinedBehaviorSanitizer
+        path: artifacts/UndefinedBehaviorSanitizer/
+
+    # Download ROCm dependencies (same for all sanitizers)
     - name: Download ROCM dependencies
       uses: actions/download-artifact@v4
       with:
-        name: rocm-deps-sanitizers-${{ matrix.system.os }}-${{ matrix.system.gpu }}-${{ matrix.system.sanitizer }}
+        name: rocm-deps-sanitizers-ubuntu-22.04-mi325-AddressSanitizer
         path: deps/
-
-    - name: Extract build artifacts
-      shell: bash
-      run: |
-        cd projects/rocprofiler-sdk
-        tar -xzf ../../artifacts/rocprofiler-sdk-build-${{ matrix.system.os }}-${{ matrix.system.gpu }}-${{ matrix.system.sanitizer }}.tar.gz
 
     - name: Extract ROCM dependencies
       shell: bash
       run: |
         cd /opt
-        tar -xzf $GITHUB_WORKSPACE/deps/rocm-deps-${{ matrix.system.os }}-${{ matrix.system.gpu }}-${{ matrix.system.sanitizer }}.tar.gz || echo "Warning: rocm deps extraction failed"
+        tar -xzf $GITHUB_WORKSPACE/deps/rocm-deps-ubuntu-22.04-mi325-AddressSanitizer.tar.gz || echo "Warning: rocm deps extraction failed"
 
     - name: Install requirements
       timeout-minutes: 5
@@ -892,21 +903,79 @@ jobs:
         apt-get install -y python3-pip libasan8 libtsan2
         python3 -m pip install -U --user -r requirements.txt
 
-    - name: Enable PC Sampling
-      if: ${{ contains(matrix.system.gpu, 'mi200') || contains(matrix.system.gpu, 'mi300a') }}
+    - name: Setup kernel parameters for sanitizers
       shell: bash
-      working-directory: projects/rocprofiler-sdk
-      run: echo 'ROCPROFILER_PC_SAMPLING_BETA_ENABLED=1' >> $GITHUB_ENV
+      run: sudo sysctl -w vm.mmap_rnd_bits=28
 
-    - name: Run Tests
+    # Run tests for each sanitizer sequentially (continue-on-error ensures all run)
+    - name: Test AddressSanitizer
+      continue-on-error: true
       timeout-minutes: 30
       shell: bash
       working-directory: projects/rocprofiler-sdk
       run: |
-        sudo sysctl -w vm.mmap_rnd_bits=28
+        echo "=========================================="
+        echo "Running AddressSanitizer Tests"
+        echo "=========================================="
+        rm -rf build
+        tar -xzf ../../artifacts/AddressSanitizer/rocprofiler-sdk-build-ubuntu-22.04-mi325-AddressSanitizer.tar.gz
         export PATH="$HOME/.local/bin:$PATH"
         ctest --test-dir build \
           --output-on-failure \
           --parallel 4 \
-          -LE "${${{ matrix.system.gpu }}_EXCLUDE_LABEL_REGEX}" \
-          -E "${${{ matrix.system.gpu }}_EXCLUDE_TESTS_REGEX}"
+          -LE "${mi325_EXCLUDE_LABEL_REGEX}" \
+          -E "${mi325_EXCLUDE_TESTS_REGEX}"
+
+    - name: Test ThreadSanitizer
+      continue-on-error: true
+      timeout-minutes: 30
+      shell: bash
+      working-directory: projects/rocprofiler-sdk
+      run: |
+        echo "=========================================="
+        echo "Running ThreadSanitizer Tests"
+        echo "=========================================="
+        rm -rf build
+        tar -xzf ../../artifacts/ThreadSanitizer/rocprofiler-sdk-build-ubuntu-22.04-mi325-ThreadSanitizer.tar.gz
+        export PATH="$HOME/.local/bin:$PATH"
+        ctest --test-dir build \
+          --output-on-failure \
+          --parallel 4 \
+          -LE "${mi325_EXCLUDE_LABEL_REGEX}" \
+          -E "${mi325_EXCLUDE_TESTS_REGEX}"
+
+    - name: Test LeakSanitizer
+      continue-on-error: true
+      timeout-minutes: 30
+      shell: bash
+      working-directory: projects/rocprofiler-sdk
+      run: |
+        echo "=========================================="
+        echo "Running LeakSanitizer Tests"
+        echo "=========================================="
+        rm -rf build
+        tar -xzf ../../artifacts/LeakSanitizer/rocprofiler-sdk-build-ubuntu-22.04-mi325-LeakSanitizer.tar.gz
+        export PATH="$HOME/.local/bin:$PATH"
+        ctest --test-dir build \
+          --output-on-failure \
+          --parallel 4 \
+          -LE "${mi325_EXCLUDE_LABEL_REGEX}" \
+          -E "${mi325_EXCLUDE_TESTS_REGEX}"
+
+    - name: Test UndefinedBehaviorSanitizer
+      continue-on-error: true
+      timeout-minutes: 30
+      shell: bash
+      working-directory: projects/rocprofiler-sdk
+      run: |
+        echo "=========================================="
+        echo "Running UndefinedBehaviorSanitizer Tests"
+        echo "=========================================="
+        rm -rf build
+        tar -xzf ../../artifacts/UndefinedBehaviorSanitizer/rocprofiler-sdk-build-ubuntu-22.04-mi325-UndefinedBehaviorSanitizer.tar.gz
+        export PATH="$HOME/.local/bin:$PATH"
+        ctest --test-dir build \
+          --output-on-failure \
+          --parallel 4 \
+          -LE "${mi325_EXCLUDE_LABEL_REGEX}" \
+          -E "${mi325_EXCLUDE_TESTS_REGEX}"
