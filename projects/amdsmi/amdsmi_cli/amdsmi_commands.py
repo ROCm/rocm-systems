@@ -1878,6 +1878,12 @@ class AMDSMICommands:
                             continue
                         freq_dict = {}
                         current_level = frequencies["current"]
+                        # The driver returns UINT32_MAX when no current DPM level is
+                        # tracked (common on APU clock domains such as MEM/FCLK/SOC
+                        # whose PMFW does not expose a discrete current index).
+                        # Surface that as "N/A" instead of leaking the raw sentinel.
+                        if current_level == 0xFFFFFFFF:
+                            current_level = "N/A"
                         # Add current_level first for proper output ordering
                         freq_dict.update({"current_level": current_level})
                         # Add frequency_levels second
@@ -1904,6 +1910,19 @@ class AMDSMICommands:
                             "Failed to get clock info for gpu %s | %s", gpu_id, e.get_error_info()
                         )
                     clk_dict[clk] = freq_dict
+
+                # Log a single diagnostic line when one or more clock domains have
+                # no current level (helps support distinguish driver issues from
+                # expected PMFW behaviour in 'auto' mode).
+                if any(
+                    isinstance(v, dict) and v.get("current_level") == "N/A"
+                    for v in clk_dict.values()
+                ):
+                    logging.debug(
+                        "Some clock current levels are unavailable for gpu %s. "
+                        "This can occur when power management is in 'auto' mode.",
+                        gpu_id,
+                    )
 
                 static_dict["clock"] = clk_dict
             else:
@@ -3394,13 +3413,19 @@ class AMDSMICommands:
                     frequency_dict = amdsmi_interface.amdsmi_get_clk_freq(
                         args.gpu, amdsmi_interface.AmdSmiClkType.DF
                     )
-                    current_fclk_clock = frequency_dict["frequency"][frequency_dict["current"]]
-                    current_fclk_clock = self.helpers.convert_SI_unit(
-                        current_fclk_clock, self.helpers.SI_Unit.MICRO
-                    )
-                    clocks["fclk_0"]["clk"] = self.helpers.unit_format(
-                        self.logger, current_fclk_clock, clock_unit
-                    )
+                    # Bounds-check the current index: the driver may return
+                    # UINT32_MAX (or any out-of-range value) when no current
+                    # FCLK level is tracked, which would otherwise raise
+                    # IndexError and leave fclk_0 unpopulated.
+                    current_idx = frequency_dict["current"]
+                    freq_list = frequency_dict["frequency"]
+                    if isinstance(current_idx, int) and 0 <= current_idx < len(freq_list):
+                        current_fclk_clock = self.helpers.convert_SI_unit(
+                            freq_list[current_idx], self.helpers.SI_Unit.MICRO
+                        )
+                        clocks["fclk_0"]["clk"] = self.helpers.unit_format(
+                            self.logger, current_fclk_clock, clock_unit
+                        )
                 except (KeyError, amdsmi_exception.AmdSmiLibraryException) as e:
                     logging.debug("Failed to get fclk info for gpu %s | %s", gpu_id, e)
 

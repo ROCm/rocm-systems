@@ -80,6 +80,11 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Fixed `cu_occupancy` displaying `0%` instead of `N/A` when file is unavailable**.  
   - Process `cu_occupancy` is now initialized to `INVALID` instead of zero, so `amd-smi process` displays `N/A` rather than a misleading `0%` when the sysfs file is not accessible.
 
+- **Fixed `amd-smi static -C` exposing the raw `UINT32_MAX` (`4294967295`) sentinel as the current DPM level**.  
+  - Some clock domains (notably MEM/FCLK/SOC on APUs such as Strix Halo) have no discrete current level tracked by PMFW; the driver returns `UINT32_MAX` for those. The CLI now reports `CURRENT_LEVEL: N/A` instead of leaking the sentinel value.
+  - The FCLK lookup in `amd-smi metric --clock` is now bounds-checked, preventing an `IndexError` and the resulting empty `fclk_0` output when the driver returns an out-of-range current index.
+  - Added a single `logging.debug` line summarising when one or more clock domains have no current level to make the condition easier to identify in support logs.
+
 ### Changed
 
 - **Renamed `lc_perf_other_end_recovery` to `lc_perf_other_end_recovery_count` in `amd-smi metric` CLI output for unification**.  
