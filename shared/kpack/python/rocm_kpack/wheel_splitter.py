@@ -626,7 +626,9 @@ class WheelSplitter:
         self.compression = compression
         self.compression_level = compression_level
         self.verbose = verbose
-        self.jobs = max(1, jobs)
+        # Windows ProcessPoolExecutor caps at 61 (WaitForMultipleObjects limit).
+        max_jobs = 61 if os.name == "nt" else jobs
+        self.jobs = max(1, min(jobs, max_jobs))
         self.generate_variant_wheel = generate_variant_wheel
         self.variant_label = variant_label
 
