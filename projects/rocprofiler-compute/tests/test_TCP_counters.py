@@ -45,7 +45,7 @@ def load_metrics(csv_file_path):
     return metrics_data
 
 
-soc = test_utils.gpu_soc()
+_, soc = test_utils.gpu_soc()
 
 
 @pytest.mark.L1_cache

@@ -103,10 +103,9 @@ def run(
         ShellMetacharError on metachar-bearing token.
         subprocess.TimeoutExpired on timeout.
     """
-    # Check external dependencies
+    _validate_argv(argv)
     require_tool("rocprofv3")
 
-    _validate_argv(argv)
     proc = subprocess.run(
         argv,
         shell=False,

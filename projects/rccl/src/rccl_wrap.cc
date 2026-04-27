@@ -569,7 +569,7 @@ void rcclSetWarpSpeedCUs(struct ncclComm* comm, int algo, int threadsPerBlock, i
 }
 
 bool rcclWarpSpeedSupported(struct ncclComm* comm, struct ncclKernelPlan* plan) {
-  if (!comm->topo->warpSpeedEnabled) {
+  if (!comm->topo->warpSpeedEnabled || plan->isSymColl) {
     return false;
   }
 

@@ -4,13 +4,14 @@
 import argparse
 import csv
 import ctypes
+import errno
 import glob
 import io
 import locale
 import os
+import pty
 import re
 import select
-import selectors
 import shutil
 import subprocess
 import sys
@@ -37,26 +38,6 @@ from vendored import yaml
 # Global constants
 METRIC_ID_RE = re.compile(pattern=r"^\d{1,2}(?:\.\d{1,2}){0,2}$")
 
-SUPPORTED_DENOM: dict[str, str] = {
-    "per_wave": "SQ_WAVES",
-    "per_cycle": "$GRBM_GUI_ACTIVE_PER_XCD",
-    "per_second": "((End_Timestamp - Start_Timestamp) / 1000000000)",
-    "per_kernel": "1",
-}
-
-# Build-in defined in mongodb variables:
-BUILD_IN_VARS: dict[str, str] = {
-    "GRBM_GUI_ACTIVE_PER_XCD": "(GRBM_GUI_ACTIVE / $num_xcd)",
-    "GRBM_COUNT_PER_XCD": "(GRBM_COUNT / $num_xcd)",
-    "GRBM_SPI_BUSY_PER_XCD": "(GRBM_SPI_BUSY / $num_xcd)",
-    "numActiveCUs": "TO_INT(MIN(ROUND(SUM(4 * SQ_BUSY_CU_CYCLES) / \
-        SUM($GRBM_GUI_ACTIVE_PER_XCD), 0) / $max_waves_per_cu * 8 + \
-        MIN(MOD(ROUND(SUM(4 * SQ_BUSY_CU_CYCLES) / \
-        SUM($GRBM_GUI_ACTIVE_PER_XCD), 0), $max_waves_per_cu), 8), $cu_per_gpu))",
-    "kernelBusyCycles": "ROUND(AVG((((End_Timestamp - Start_Timestamp) / \
-        1000) * $max_sclk)), 0)",
-    "hbmBandwidth": "($max_mclk / 1000 * 32 * $num_hbm_channels)",
-}
 
 # Supported expression field names for metric tables
 SUPPORTED_FIELD: list[str] = [
@@ -459,9 +440,6 @@ def capture_subprocess_output(
     profileMode: bool = False,
     enable_logging: bool = True,
 ) -> tuple[bool, str]:
-    # Start subprocess
-    # bufsize = 1 means output is line buffered
-    # universal_newlines = True is required for line buffering
     sanitized_env = (
         None
         if new_env is None
@@ -471,51 +449,44 @@ def capture_subprocess_output(
         }
     )
 
-    process = (
-        subprocess.Popen(
+    # Use a PTY in profile mode to prevent instrumentation output from
+    # being interleaved with workload output.
+    if profileMode:
+        pty_parent_fd, pty_child_fd = pty.openpty()
+        stdout_arg = pty_child_fd
+        stderr_arg = pty_child_fd
+    else:
+        stdout_arg = subprocess.PIPE
+        stderr_arg = subprocess.STDOUT
+
+    # env=None is Popen's default (inherit parent env).
+    try:
+        process = subprocess.Popen(
             subprocess_args,
-            bufsize=1,
             stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
+            stdout=stdout_arg,
+            stderr=stderr_arg,
             universal_newlines=True,
-        )
-        if sanitized_env == None
-        else subprocess.Popen(
-            subprocess_args,
-            bufsize=1,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            universal_newlines=True,
+            errors="replace",
             env=sanitized_env,
         )
-    )
+    except BaseException:
+        # Close PTY fds if Popen fails.
+        if profileMode:
+            os.close(pty_parent_fd)
+            os.close(pty_child_fd)
+        raise
 
-    # Create callback function for process output
+    if profileMode:
+        # Close the child end; parent only reads. errors="replace" skips
+        # bad bytes instead of crashing the read loop.
+        os.close(pty_child_fd)
+        process_stdout = os.fdopen(pty_parent_fd, "r", errors="replace")
+    else:
+        process_stdout = process.stdout
+
+    # Create buffer for captured process output
     buf = io.StringIO()
-
-    def handle_output(stream: io.TextIOWrapper, _mask) -> None:
-        try:
-            # Because the process' output is line buffered, there's only ever one
-            # line to read when this function is called
-            line = stream.readline()
-            if not line:
-                return
-            buf.write(line)
-            if enable_logging:
-                if profileMode:
-                    console_log(get_rocprof_cmd(), line.strip(), indent_level=1)
-                else:
-                    console_log(line.strip())
-        except UnicodeDecodeError:
-            # Skip this line
-            pass
-
-    # Register callback for an "available for read" event from subprocess' stdout stream
-    selector = selectors.DefaultSelector()
-    if process.stdout is not None:
-        selector.register(process.stdout, selectors.EVENT_READ, handle_output)
 
     def forward_input() -> None:
         """
@@ -554,19 +525,30 @@ def capture_subprocess_output(
     input_thread = threading.Thread(target=forward_input, daemon=True)
     input_thread.start()
 
-    # Loop until subprocess is terminated
-    while process.poll() is None:
-        # Wait for events and handle them with their registered callbacks
-        events = selector.select()
-        for key, mask in events:
-            callback = key.data
-            callback(key.fileobj, mask)
+    # Read until the child closes its end. Pipes signal EOF with an empty
+    # string; PTYs signal it with OSError(EIO). The two never overlap.
+    while True:
+        try:
+            line = process_stdout.readline()
+        except OSError as e:
+            if e.errno == errno.EIO:
+                break
+            raise
+        if not line:
+            break
+        buf.write(line)
+        if not enable_logging:
+            continue
+        if profileMode:
+            console_log(get_rocprof_cmd(), line.strip(), indent_level=1)
+        else:
+            console_log(line.strip())
 
+    process_stdout.close()
     input_thread.join(timeout=1)
 
     # Get process return code
     return_code = process.wait()
-    selector.close()
 
     success = return_code == 0
 
