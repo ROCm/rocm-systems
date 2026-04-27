@@ -2,37 +2,34 @@
 # Ref: llm-reference-guide.md lines 695-714.
 # Used by: occupancy.lookup_waves_per_eu(vgpr_count, gfx_id)
 
-# CDNA3 (MI300X, gfx942) — 256 VGPRs per EU per thread
+# CDNA3 (MI300X, gfx942) — 512 regular VGPRs/EU, capped at 8 waves/EU
 gfx942:
-  - {max_vgprs: 32,  waves_per_eu: 8}
-  - {max_vgprs: 40,  waves_per_eu: 6}
-  - {max_vgprs: 48,  waves_per_eu: 5}
-  - {max_vgprs: 64,  waves_per_eu: 4}
-  - {max_vgprs: 80,  waves_per_eu: 3}
-  - {max_vgprs: 128, waves_per_eu: 2}
-  - {max_vgprs: 256, waves_per_eu: 1}
+  - {max_vgprs: 64,  waves_per_eu: 8}
+  - {max_vgprs: 80,  waves_per_eu: 6}
+  - {max_vgprs: 96,  waves_per_eu: 5}
+  - {max_vgprs: 128, waves_per_eu: 4}
+  - {max_vgprs: 160, waves_per_eu: 3}
+  - {max_vgprs: 256, waves_per_eu: 2}
 
-# CDNA4 (MI350X, gfx950) — same VGPR table as CDNA3 but LDS doubled
+# CDNA4 (MI350X, gfx950) — same 512-VGPR/EU occupancy basis as CDNA3
 gfx950:
-  - {max_vgprs: 32,  waves_per_eu: 8}
-  - {max_vgprs: 40,  waves_per_eu: 6}
-  - {max_vgprs: 48,  waves_per_eu: 5}
-  - {max_vgprs: 64,  waves_per_eu: 4}
-  - {max_vgprs: 80,  waves_per_eu: 3}
-  - {max_vgprs: 128, waves_per_eu: 2}
-  - {max_vgprs: 256, waves_per_eu: 1}
+  - {max_vgprs: 64,  waves_per_eu: 8}
+  - {max_vgprs: 80,  waves_per_eu: 6}
+  - {max_vgprs: 96,  waves_per_eu: 5}
+  - {max_vgprs: 128, waves_per_eu: 4}
+  - {max_vgprs: 160, waves_per_eu: 3}
+  - {max_vgprs: 256, waves_per_eu: 2}
 
-# CDNA2 (MI250X, gfx90a) — 256 VGPRs
+# CDNA2 (MI250X, gfx90a) — 512 regular VGPRs/EU, capped at 8 waves/EU
 gfx90a:
-  - {max_vgprs: 32,  waves_per_eu: 8}
-  - {max_vgprs: 40,  waves_per_eu: 6}
-  - {max_vgprs: 48,  waves_per_eu: 5}
-  - {max_vgprs: 64,  waves_per_eu: 4}
-  - {max_vgprs: 80,  waves_per_eu: 3}
-  - {max_vgprs: 128, waves_per_eu: 2}
-  - {max_vgprs: 256, waves_per_eu: 1}
+  - {max_vgprs: 64,  waves_per_eu: 8}
+  - {max_vgprs: 80,  waves_per_eu: 6}
+  - {max_vgprs: 96,  waves_per_eu: 5}
+  - {max_vgprs: 128, waves_per_eu: 4}
+  - {max_vgprs: 160, waves_per_eu: 3}
+  - {max_vgprs: 256, waves_per_eu: 2}
 
-# CDNA1 (MI100, gfx908) — 256 VGPRs
+# CDNA1 (MI100, gfx908) — 256 regular VGPRs/EU plus separate AccVGPRs
 gfx908:
   - {max_vgprs: 32,  waves_per_eu: 8}
   - {max_vgprs: 40,  waves_per_eu: 6}
