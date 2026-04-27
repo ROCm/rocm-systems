@@ -69,6 +69,7 @@ def _submodule_initialized() -> bool:
     return (_OPENCODE_DIR / ".git").exists() or (_OPENCODE_DIR / "package.json").exists()
 
 
+@_POSIX_SCRIPT_TEST
 @pytest.mark.skipif(
     not _submodule_initialized(),
     reason="opencode submodule not initialized; run `git submodule update --init`",

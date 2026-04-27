@@ -53,7 +53,14 @@ def test_binary_path_from_env(monkeypatch):
 def test_binary_path_from_shutil_which(monkeypatch):
     monkeypatch.delenv("PERFXPERT_OPENCODE_PATH", raising=False)
     monkeypatch.delenv("PERFXPERT_IN_OPENCODE_SESSION", raising=False)
+    import perfxpert.cli.opencode_launcher as opencode_launcher
     from perfxpert.providers.opencode_provider import OpencodeProvider
+
+    monkeypatch.setattr(
+        opencode_launcher,
+        "resolve_opencode_binary",
+        lambda: (_ for _ in ()).throw(FileNotFoundError("missing")),
+    )
     with patch(
         "perfxpert.providers.opencode_provider.shutil.which",
         return_value="/opt/bin/opencode",
