@@ -2970,7 +2970,7 @@ def test_torch_trace_profile(
 
     # 14. Source locations sorted by descending total duration
     location_durations = re.findall(
-        r"^(\S+:\d+)\s+\(dispatches:\s+\d+,\s+total:\s+([\d.]+)\s+(ms|us)\)",
+        r"^(\S+:\d+)\s+\(dispatches:\s+\d+,\s+total:\s+([\d.]+)\s+(ms|us)",
         list_output,
         re.MULTILINE,
     )
