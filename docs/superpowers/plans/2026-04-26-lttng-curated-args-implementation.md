@@ -3586,7 +3586,26 @@ PLACEHOLDERS = {
     'cstring':     '"x"',
 }
 
+# Per-API per-arg overrides for parameters where the DSL-type placeholder
+# won't compile (e.g., function pointers). The DSL 'ptr' type emits
+# reinterpret_cast<void*>(0x1000), which is not convertible to a
+# function-pointer parameter type. Add an entry here for each such arg;
+# the verifier in Task 12 / Task 15g will reject stale entries that no
+# longer correspond to a curated API arg.
+PLACEHOLDER_OVERRIDES = {
+    'hipStreamAddCallback': {'callback': 'nullptr', 'userData': 'nullptr'},
+}
+
+def placeholder_for(api_name, arg):
+    overrides = PLACEHOLDER_OVERRIDES.get(api_name, {})
+    if arg['name'] in overrides:
+        return overrides[arg['name']]
+    return PLACEHOLDERS[arg['type']]
+
 print('#include <hip/hip_runtime.h>')
+# NOTE: PLACEHOLDER_OVERRIDES above provides per-API per-arg substitutions
+# for parameters (e.g., function pointers) where the generic DSL-type
+# placeholder won't compile.
 print('int main() {')
 for api in parse_yaml_file('$YAML'):
     name = api['api']
@@ -3596,7 +3615,7 @@ for api in parse_yaml_file('$YAML'):
             # Allocate a stack slot for the OUT arg.
             call_args.append('nullptr')  # simplified — real impl would alloc
         else:
-            call_args.append(PLACEHOLDERS[a['type']])
+            call_args.append(placeholder_for(name, a))
     print(f'    try {{ {name}({", ".join(call_args)}); }} catch(...) {{}}')
 print('    return 0;')
 print('}')
@@ -5040,8 +5059,29 @@ PLACEHOLDERS = {
     'cstring':     '"x"',
 }
 
+# Per-API per-arg overrides for parameters where the DSL-type placeholder
+# won't compile (e.g., function pointers). The DSL 'ptr' type emits
+# (void*)0x1000, which is not convertible to a function-pointer parameter
+# type such as hsa_queue_create's `callback`
+# (void (*)(hsa_status_t, hsa_queue_t*, void*)). Add an entry here for
+# each such arg; the verifier in Task 15g will reject stale entries that
+# no longer correspond to a curated API arg.
+PLACEHOLDER_OVERRIDES = {
+    'hsa_queue_create':                {'callback': 'nullptr', 'data': 'nullptr'},
+    'hsa_amd_queue_intercept_create':  {'callback': 'nullptr', 'data': 'nullptr'},
+}
+
+def placeholder_for(api_name, arg):
+    overrides = PLACEHOLDER_OVERRIDES.get(api_name, {})
+    if arg['name'] in overrides:
+        return overrides[arg['name']]
+    return PLACEHOLDERS.get(arg['type'], '0')
+
 print('#include <hsa/hsa.h>')
 print('#include <hsa/hsa_ext_amd.h>')
+# NOTE: PLACEHOLDER_OVERRIDES above provides per-API per-arg substitutions
+# for parameters (e.g., function pointers) where the generic DSL-type
+# placeholder won't compile.
 print('int main() {')
 print('    hsa_init();')
 for api in parse_yaml_file('$YAML'):
@@ -5050,13 +5090,15 @@ for api in parse_yaml_file('$YAML'):
     for a in api['args']:
         if a['dir'] == 'OUT':
             args.append('NULL')
+        elif a['name'] in PLACEHOLDER_OVERRIDES.get(name, {}):
+            args.append(PLACEHOLDER_OVERRIDES[name][a['name']])
         elif a['type'] == 'handle':
             # Pass a default-initialized handle struct via a cast.
             args.append('hsa_agent_t{}' if 'agent' in a['name']
                         else ('hsa_queue_t*{}' if a['name'] == 'queue'
                               else 'hsa_signal_t{}'))
         else:
-            args.append(PLACEHOLDERS.get(a['type'], '0'))
+            args.append(placeholder_for(name, a))
     # Wrap in a try/catch-equivalent: HSA APIs return status, never throw.
     print(f'    {name}({", ".join(args)});')
 print('    hsa_shut_down();')
