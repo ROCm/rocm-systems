@@ -171,12 +171,15 @@ fi
 # E. corr_id linkage: each _args event must share a corr_id with a matching
 #    enter and exit event from the same call. Spot-check hipMemcpyAsync if
 #    its _args fired; otherwise fall back to hipMalloc.
-ARGS_CORR=$(grep 'rocm_hip:hipMemcpyAsync_args' "$DUMP" | head -1 | \
-            sed -n 's/.*corr_id = \([0-9]*\).*/\1/p')
+# Wrap pipelines in `|| true` because `set -o pipefail` would otherwise
+# abort the script if grep finds no match (which is expected when the
+# environment trips on hipMemcpyAsync; the fallback handles that case).
+ARGS_CORR=$( (grep 'rocm_hip:hipMemcpyAsync_args' "$DUMP" || true) | head -1 | \
+             sed -n 's/.*corr_id = \([0-9]*\).*/\1/p' )
 LINK_API="hipMemcpyAsync"
 if [ -z "$ARGS_CORR" ]; then
-    ARGS_CORR=$(grep 'rocm_hip:hipMalloc_args' "$DUMP" | head -1 | \
-                sed -n 's/.*corr_id = \([0-9]*\).*/\1/p')
+    ARGS_CORR=$( (grep 'rocm_hip:hipMalloc_args' "$DUMP" || true) | head -1 | \
+                 sed -n 's/.*corr_id = \([0-9]*\).*/\1/p' )
     LINK_API="hipMalloc"
 fi
 if [ -n "$ARGS_CORR" ] && \
