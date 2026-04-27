@@ -34,6 +34,10 @@ import os
 import sys
 from clang import cindex
 
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+from lttng_curated_lib import parse_yaml_file, IN_ARG_KIND
+
 
 # ---------------------------------------------------------------------------
 # Return-type classification
@@ -76,6 +80,38 @@ def classify(return_type_spelling: str) -> str:
             f'or extend classify() to handle this case.'
         )
     return 'STRUCT'
+
+
+# ---------------------------------------------------------------------------
+# Curated APIs (spec §6) - sentinel + IN-locals + _CURATED macro routing
+# ---------------------------------------------------------------------------
+
+CURATED_SENTINEL_PREFIX = b'/* __ROCM_CURATED__:'
+
+
+def load_curated(yaml_path):
+    """Returns {api_name: api_dict} or {} if path is None/missing."""
+    if not yaml_path or not os.path.exists(yaml_path):
+        return {}
+    return {a['api']: a for a in parse_yaml_file(yaml_path)}
+
+
+def _captured_args_for_curated(api):
+    """Return list of captured-arg names from the YAML, in YAML order.
+    For the migrator's macro emit we pass each captured arg's wrapper
+    parameter name (which equals the YAML name per the §4 binding rule).
+    OUT-only and INOUT args are passed differently: OUT passes the
+    pointer parameter directly (helper deref's at the right time); IN
+    passes the captured local __rocm_in_<name>."""
+    result = []
+    for a in api['args']:
+        if a['dir'] == 'IN':
+            result.append(f'__rocm_in_{a["name"]}')
+        elif a['dir'] == 'OUT':
+            # Helper expects the original out-pointer parameter.
+            result.append(a['name'])
+        # INOUT is rejected by the parser.
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -163,11 +199,15 @@ EXIT_VOID_SNIPPET = (
 MIGRATION_MARKER = 'const uint64_t __rocm_corr = rocm_trace_next_corr_id();'  # presence => already migrated
 
 
-def rewrite_return_stmt(src: bytes, ret_node: cindex.Cursor, cls: str) -> tuple:
+def rewrite_return_stmt(src: bytes, ret_node: cindex.Cursor, cls: str,
+                        curated_api: dict = None) -> tuple:
     """Compute (start, end, replacement) edit for rewriting a return stmt.
 
     Input source like `return EXPR;` becomes `ROCM_TRACE_RET_X(EXPR);`.
     For VOID returns with no expression: `return;` -> emit + return.
+
+    If `curated_api` is non-None, emit the matching _CURATED / _CURATED_NOARGS
+    variant (spec §6.2) instead of the plain ROCM_TRACE_RET_X.
     """
     ext = ret_node.extent
     start = ext.start.offset
@@ -181,47 +221,81 @@ def rewrite_return_stmt(src: bytes, ret_node: cindex.Cursor, cls: str) -> tuple:
 
     snippet = src[start:end].decode('utf-8', errors='strict')
     # Strip the leading 'return' keyword and the trailing ';'.
-    # snippet is one of:
-    #   'return EXPR;'   (status / ptr)
-    #   'return;'        (void)
-    #   'return EXPR ;'  (rare whitespace variant - handled by strip)
     s = snippet.strip()
     if not s.startswith('return'):
         raise SystemExit(
             f'rewrite_return_stmt: expected return stmt, got {snippet!r}')
-    # remove 'return' keyword
     inner = s[len('return'):].rstrip(';').strip()
 
+    if curated_api is None:
+        # Existing non-curated path — emit ROCM_TRACE_RET_<cls>.
+        if cls == 'STATUS':
+            if not inner:
+                raise SystemExit(
+                    f'STATUS wrapper has bare `return;` (wrapper not status?): '
+                    f'{snippet!r}')
+            repl = f'ROCM_TRACE_RET_STATUS({inner});'
+        elif cls == 'PTR':
+            if not inner:
+                raise SystemExit(
+                    f'PTR wrapper has bare `return;`: {snippet!r}')
+            repl = f'ROCM_TRACE_RET_PTR({inner});'
+        elif cls == 'VOID':
+            if inner:
+                repl = f'ROCM_TRACE_RET_VOID({inner});'
+            else:
+                repl = f'rocm_trace_emit_hip_api_exit_void(__func__, __rocm_corr); return;'
+        elif cls == 'STRUCT':
+            if not inner:
+                raise SystemExit(
+                    f'STRUCT wrapper has bare `return;`: {snippet!r}')
+            repl = (f'do {{ auto __rocm_rv = ({inner}); '
+                    f'rocm_trace_emit_hip_api_exit_void(__func__, __rocm_corr); '
+                    f'return __rocm_rv; }} while (0);')
+        else:
+            raise AssertionError(cls)
+        return (start, end, repl.encode('utf-8'))
+
+    # Curated path. Pick _CURATED vs _CURATED_NOARGS by captured arg count.
+    captured = _captured_args_for_curated(curated_api)
+    api = curated_api['api']
     if cls == 'STATUS':
         if not inner:
-            raise SystemExit(
-                f'STATUS wrapper has bare `return;` (wrapper not status?): '
-                f'{snippet!r}')
-        repl = f'ROCM_TRACE_RET_STATUS({inner});'
+            raise SystemExit(f'{api}: STATUS curated wrapper has bare return')
+        if captured:
+            args_str = ', '.join(captured)
+            repl = (f'ROCM_TRACE_RET_STATUS_CURATED({api}, {inner}, '
+                    f'__rocm_corr, {args_str});')
+        else:
+            repl = (f'ROCM_TRACE_RET_STATUS_CURATED_NOARGS({api}, {inner}, '
+                    f'__rocm_corr);')
     elif cls == 'PTR':
         if not inner:
-            raise SystemExit(
-                f'PTR wrapper has bare `return;`: {snippet!r}')
-        repl = f'ROCM_TRACE_RET_PTR({inner});'
-    elif cls == 'VOID':
-        if inner:
-            # `return EXPR;` in a void function (e.g. `return foo();` where
-            # foo returns void). Use VOID variant which handles this.
-            repl = f'ROCM_TRACE_RET_VOID({inner});'
+            raise SystemExit(f'{api}: PTR curated wrapper has bare return')
+        # PTR macro takes ptr_type as second arg. Use auto for the wrapper's
+        # actual return type.
+        ptr_type = 'auto'
+        if captured:
+            args_str = ', '.join(captured)
+            repl = (f'ROCM_TRACE_RET_PTR_CURATED({api}, {ptr_type}, {inner}, '
+                    f'__rocm_corr, {args_str});')
         else:
-            # bare `return;`
-            repl = f'rocm_trace_emit_hip_api_exit_void(__func__, __rocm_corr); return;'
+            repl = (f'ROCM_TRACE_RET_PTR_CURATED_NOARGS({api}, {ptr_type}, '
+                    f'{inner}, __rocm_corr);')
+    elif cls == 'VOID':
+        inner_expr = inner if inner else ''
+        if captured:
+            args_str = ', '.join(captured)
+            repl = (f'ROCM_TRACE_RET_VOID_CURATED({api}, {inner_expr}, '
+                    f'__rocm_corr, {args_str});')
+        else:
+            repl = (f'ROCM_TRACE_RET_VOID_CURATED_NOARGS({api}, {inner_expr}, '
+                    f'__rocm_corr);')
     elif cls == 'STRUCT':
-        # struct return-by-value: capture the rvalue, emit exit_void with the
-        # corr id, then return the rvalue. Cannot use ROCM_TRACE_RET_STATUS
-        # because the value isn't int32-coercible. The auto deduction here
-        # works for any C++ struct.
-        if not inner:
-            raise SystemExit(
-                f'STRUCT wrapper has bare `return;`: {snippet!r}')
-        repl = (f'do {{ auto __rocm_rv = ({inner}); '
-                f'rocm_trace_emit_hip_api_exit_void(__func__, __rocm_corr); '
-                f'return __rocm_rv; }} while (0);')
+        # STRUCT-returning curated wrappers are not supported in v1.
+        raise SystemExit(
+            f'{api}: STRUCT-returning curated wrappers not supported in v1; '
+            f'remove from curated_apis.yaml')
     else:
         raise AssertionError(cls)
     return (start, end, repl.encode('utf-8'))
@@ -246,8 +320,15 @@ def _detect_resource_dir() -> str:
 
 
 def migrate_file(source_path: str, include_path: str, extra_args: list,
-                 inventory_path: str, dry_run: bool = False) -> dict:
-    """Migrate one source file in place. Returns dict {name: classification}."""
+                 inventory_path: str, dry_run: bool = False,
+                 curated: dict = None) -> dict:
+    """Migrate one source file in place. Returns dict {name: classification}.
+
+    If `curated` is a non-empty {api_name: api_dict}, wrappers in the set
+    additionally get the __ROCM_CURATED__ sentinel + __rocm_in_<arg> locals
+    + _CURATED macro routing per spec §6.
+    """
+    curated = curated or {}
     args = ['-x', 'c++', '-std=c++17', '-D__HIP_PLATFORM_AMD__=1']
     res_dir = _detect_resource_dir()
     if res_dir and not any(a.startswith('-resource-dir') for a in extra_args):
@@ -320,15 +401,38 @@ def migrate_file(source_path: str, include_path: str, extra_args: list,
                 f'{n.spelling}: expected {{ at offset {open_brace_off}, '
                 f'found {src[open_brace_off:open_brace_off+5]!r}')
         insert_off = open_brace_off + 1
-        edits.append((insert_off, insert_off,
-                      ENTER_SNIPPET.encode('utf-8')))
+
+        # Build the per-wrapper insertion block: ENTER_SNIPPET, optionally
+        # followed by the curated sentinel and IN-locals. Combining them
+        # into a single edit avoids reverse-order ambiguity when both
+        # would target the same offset.
+        curated_api = curated.get(n.spelling)
+        block = ENTER_SNIPPET
+        if curated_api is not None:
+            sentinel = f' /* __ROCM_CURATED__: {n.spelling} */'
+            in_locals = []
+            param_types = {arg.spelling: arg.type.spelling
+                           for arg in n.get_arguments()}
+            for a in curated_api['args']:
+                if a['dir'] == 'IN':
+                    pname = a['name']
+                    if pname not in param_types:
+                        raise SystemExit(
+                            f"{n.spelling}: curated arg {pname!r} not in "
+                            f"wrapper params {list(param_types)}")
+                    pty = param_types[pname]
+                    in_locals.append(
+                        f' {pty} const __rocm_in_{pname} = {pname};')
+            block = block + sentinel + ''.join(in_locals)
+        edits.append((insert_off, insert_off, block.encode('utf-8')))
 
         # Find every return stmt in the body (excluding macro-expanded ones).
         returns = []
         find_return_stmts(body, returns, body_extent, src)
 
         for r in returns:
-            edits.append(rewrite_return_stmt(src, r, cls))
+            edits.append(rewrite_return_stmt(src, r, cls,
+                                             curated_api=curated_api))
 
         # For VOID wrappers with no return stmt, inject the exit emit
         # immediately before the closing brace.
@@ -384,11 +488,19 @@ def main():
                     help='Path to write the migration inventory (TSV)')
     ap.add_argument('--dry-run', action='store_true',
                     help='Print rewritten source to stdout, do not modify file')
+    ap.add_argument('--curated-yaml', default=None,
+                    help='Path to curated_apis.yaml; if provided, curated '
+                         'APIs get sentinel + IN-locals + _CURATED macro '
+                         'routing per spec §6.')
     args = ap.parse_args()
+    curated = load_curated(args.curated_yaml)
     inv = migrate_file(args.source, args.include_path, args.extra_arg,
-                       args.inventory, dry_run=args.dry_run)
-    print(f'Migrated {len(inv)} wrappers; inventory at {args.inventory}',
-          file=sys.stderr)
+                       args.inventory, dry_run=args.dry_run,
+                       curated=curated)
+    msg = f'Migrated {len(inv)} wrappers; inventory at {args.inventory}'
+    if curated:
+        msg += f' (curated routing for {len(curated)} APIs)'
+    print(msg, file=sys.stderr)
 
 
 if __name__ == '__main__':
