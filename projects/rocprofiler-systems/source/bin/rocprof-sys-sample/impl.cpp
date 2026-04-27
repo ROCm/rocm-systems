@@ -1,5 +1,5 @@
 // Copyright (c) Advanced Micro Devices, Inc.
-// SPDX-License-Identifier:  MIT
+// SPDX-License-Identifier: MIT
 
 #include "rocprof-sys-sample.hpp"
 
@@ -452,6 +452,19 @@ PROFILING WORKFLOW:
                 update_mode::REPLACE, ":", updated_envs, original_envs);
             rocprofsys::common::update_env(
                 _env, env::SAMPLING_DURATION, p.get<double>("duration"),
+                update_mode::REPLACE, ":", updated_envs, original_envs);
+        });
+
+    parser
+        .add_argument({ "--selected-regions" },
+                      "Comma-separated list of roctx region names. When set, only "
+                      "activity inside matching roctx regions is traced (matched against "
+                      "roctxRangeStartA message)")
+        .count(1)
+        .dtype("string")
+        .action([&](parser_t& p) {
+            rocprofsys::common::update_env(
+                _env, env::SELECTED_REGIONS, p.get<std::string>("selected-regions"),
                 update_mode::REPLACE, ":", updated_envs, original_envs);
         });
 

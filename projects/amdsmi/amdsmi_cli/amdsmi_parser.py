@@ -1493,7 +1493,7 @@ class AMDSMIParser(argparse.ArgumentParser):
                             \nIn virtualization environments, it can also list VFs associated to each\
                             \nGPU with some basic information for each VF."
         enumeration_help = "Enumeration mapping to other features.\
-                            \n    Includes CARD, RENDER, HSA_ID, HIP_ID, and HIP_UUID."
+                            \n    Includes CARD, RENDER, HSA_ID, HIP_ID, HIP_UUID, and OAM_ID"
 
         # Create list subparser
         list_parser = subparsers.add_parser(
@@ -1504,7 +1504,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         list_parser.set_defaults(func=func)
 
         # Create -e subparser
-        list_parser.add_argument("-e", action="store_true", help=enumeration_help)
+        list_parser.add_argument("-e", "--enumeration", action="store_true", help=enumeration_help)
 
         # Add Universal Arguments
         self._add_device_arguments(list_parser, required=False)

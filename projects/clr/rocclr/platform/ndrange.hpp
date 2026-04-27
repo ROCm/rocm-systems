@@ -113,34 +113,86 @@ struct LaunchParams {
   NDRange global_;           //!< Total number of work-items in N-dims
   NDRange local_;            //!< Number of work-items in N-dims in a workgroup.
   uint32_t sharedMemBytes_;  //!< Shared Memory bytes
+  NDRange cluster_;          //!< Total number of clusters in N-dims
+  NDRange grid_;             //!< Total number of workgroups in grid in N-dims.
+  bool hipParams_;           //!< If this is launched through hipParams_
   bool validConfig_;         //!< Flag will be set to false when config is not correct.
 
   LaunchParams(size_t globalX, size_t globalY, size_t globalZ, uint32_t localX,
-               uint32_t localY, uint32_t localZ, uint32_t sharedMemBytes)
-      : global_(globalX, globalY, globalZ),
-        local_(localX, localY, localZ),
-        sharedMemBytes_(sharedMemBytes),
-        validConfig_(true) {}
+               uint32_t localY, uint32_t localZ, uint32_t sharedMemBytes, uint32_t clusterX = 1,
+               uint32_t clusterY = 1, uint32_t clusterZ = 1, uint32_t gridX = 1, uint32_t gridY = 1,
+               uint32_t gridZ = 1, bool hipParams = false) : global_(globalX, globalY, globalZ),
+               local_(localX, localY, localZ), sharedMemBytes_ (sharedMemBytes),
+               cluster_(clusterX, clusterY, clusterZ), grid_(gridX, gridY, gridZ),
+               hipParams_(hipParams), validConfig_(true) {
+
+    if (hipParams_) {
+      // if this is launched through HIPLaunchParams, then we need to check the global does not
+      // take up more than 32 bits, the max we are allowed to launch in the backend.
+      if (global_[0] > std::numeric_limits<uint32_t>::max()
+          || global_[1] > std::numeric_limits<uint32_t>::max()
+          || global_[2] > std::numeric_limits<uint32_t>::max()) {
+          validConfig_ = false;
+      }
+    } else {
+      // Non HIPLaunchParams, App directly calculated the global and local size,
+      // manually deduce the grid (total blocks) size.
+      if (local_[0] == 0 || local_[1] == 0 ||local_[2] == 0) {
+        validConfig_ = false;
+        return;
+      }
+      grid_[0] = global_[0] / local_[0];
+      grid_[1] = global_[1] / local_[1];
+      grid_[2] = global_[2] / local_[2];
+    }
+
+    // If cluster parameters is set, then check if it is divisble by grid (total blocks).
+    if (clusterX > 1 || clusterY > 1 || clusterZ > 1) {
+      if (!CheckClusterDivisibility(clusterX, clusterY, clusterZ)) {
+        validConfig_ = false;
+      }
+    }
+  }
+
+  bool CheckClusterDivisibility(uint32_t clusterX, uint32_t clusterY, uint32_t clusterZ) {
+    // With cluster launch, the total number of blocks or threads the work is launched doesnt
+    // change, except that the work is launch into different CU/WGP's under the same shader engine.
+    // So, the grid values are basically split among different CUs based on cluster dims, hence
+    // grid dims has to be divisble by cluster dims.
+    if ((grid_[0] % clusterX != 0) || (grid_[1] % clusterY != 0) || (grid_[2] % clusterZ != 0)) {
+      return false;
+    }
+    return true;
+  }
+
+  //! Sometimes we receive cluster launch info from kernel, not through HIP launch kernel APIs.
+  bool UpdateClusterLaunchParams(uint32_t clusterX, uint32_t clusterY, uint32_t clusterZ) {
+    // If cluster parameters are not > 1, we dont need to update since it is the default value set.
+    if (clusterX > 1 || clusterY > 1 || clusterZ > 1) {
+      if (!CheckClusterDivisibility(clusterX, clusterY, clusterZ)) {
+        return false;
+      }
+      cluster_[0] = clusterX; cluster_[1] = clusterY; cluster_[2] = clusterZ;
+    }
+    return true;
+  }
 
   bool IsValidConfig() const { return validConfig_; }
 };
 
 //! Structure to store launch parameters in HIP Style (global and local size needs computation).
 struct HIPLaunchParams : public LaunchParams {
- public:
-  HIPLaunchParams(uint32_t gridX, uint32_t gridY, uint32_t gridZ, uint32_t blockX, uint32_t blockY,
-                  uint32_t blockZ, uint32_t sharedMemBytes, uint32_t globalX_remainder = 0,
-                  uint32_t globalY_remainder = 0, uint32_t globalZ_remainder = 0)
-      : LaunchParams(static_cast<size_t>(gridX) * blockX + globalX_remainder,
-                     static_cast<size_t>(gridY) * blockY + globalY_remainder,
-                     static_cast<size_t>(gridZ) * blockZ + globalZ_remainder, blockX, blockY,
-                     blockZ, sharedMemBytes) {
-    if (global_[0] > std::numeric_limits<uint32_t>::max() ||
-        global_[1] > std::numeric_limits<uint32_t>::max() ||
-        global_[2] > std::numeric_limits<uint32_t>::max()) {
-      validConfig_ = false;
-    }
-  }
+
+  HIPLaunchParams(uint32_t gridX, uint32_t gridY, uint32_t gridZ, uint32_t blockX,
+                  uint32_t blockY, uint32_t blockZ, uint32_t sharedMemBytes,
+                  uint32_t globalX_remainder = 0, uint32_t globalY_remainder = 0,
+                  uint32_t globalZ_remainder = 0, uint32_t clusterX = 1,
+                  uint32_t clusterY = 1, uint32_t clusterZ = 1)
+                  : LaunchParams(static_cast<uint32_t>(gridX) * blockX + globalX_remainder,
+                                 static_cast<uint32_t>(gridY) * blockY + globalY_remainder,
+                                 static_cast<uint32_t>(gridZ) * blockZ + globalZ_remainder,
+                                 blockX, blockY, blockZ, sharedMemBytes, clusterX, clusterY,
+                                 clusterZ, gridX, gridY, gridZ, true /*hipParams*/) {}
 };
 
 //! A container for the local and global worksizes.
@@ -150,18 +202,21 @@ class NDRangeContainer : public HeapObject {
   NDRange offset_;           //!< Global work-item offset.
   NDRange global_;           //!< Total number of work-items in N-dims
   NDRange local_;            //!< Number of work-items in N-dims in a workgroup.
+  NDRange cluster_;          //!< Number of Cluster in N-dims across work group.
 
  public:
   /*! \brief Construct a new nd-range container with the given local
    *  and global worksizes in \a nDimensions dimensions.
    */
   NDRangeContainer(size_t dimensions, const size_t* globalWorkOffset, const size_t* globalWorkSize,
-                   const size_t* localWorkSize)
-      : dimensions_(dimensions), offset_(dimensions), global_(dimensions), local_(dimensions) {
+                   const size_t* localWorkSize, const size_t* clusterWorkSize = nullptr)
+      : dimensions_(dimensions), offset_(dimensions), global_(dimensions), local_(dimensions), 
+        cluster_(dimensions) {
     for (size_t i = 0; i < dimensions; ++i) {
       offset_[i] = globalWorkOffset != NULL ? globalWorkOffset[i] : 0;
       global_[i] = globalWorkSize[i];
       local_[i] = localWorkSize[i];
+      cluster_[i] = clusterWorkSize != nullptr ? clusterWorkSize[i] : 1;
     }
   }
 
@@ -187,6 +242,9 @@ class NDRangeContainer : public HeapObject {
   //! Return the local worksize.
   const NDRange& local() const { return local_; }
   NDRange& local() { return local_; }
+  //! Return the cluster worksize.
+  const NDRange& cluster() const { return cluster_; }
+  NDRange& cluster() { return cluster_; }
 };
 
 

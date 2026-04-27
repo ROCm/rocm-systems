@@ -37,8 +37,6 @@
 #include <rocprofiler-sdk/ompt/api_args.h>
 #include <rocprofiler-sdk/ompt/omp-tools.h>
 
-#include <glog/logging.h>
-
 #include <cstddef>
 #include <cstdint>
 #include <unordered_map>

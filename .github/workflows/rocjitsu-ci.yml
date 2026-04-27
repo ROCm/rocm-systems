@@ -1,0 +1,57 @@
+# CI for rocjitsu (experimental/rocjitsu).
+#
+# Runs on PRs and pushes that touch experimental/rocjitsu/**, plus manual
+# dispatch. Uses sparse checkout so only rocjitsu sources are fetched.
+#
+# All tests run on the CPU emulator — no GPU hardware required.
+# HIP device kernels are compiled with vanilla clang++ (AMDGPU backend).
+#
+# Jobs:
+#   build-test  - clang (Release), build + ctest
+
+name: rocjitsu CI
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - "experimental/rocjitsu/**"
+  push:
+    branches: [develop]
+    paths:
+      - "experimental/rocjitsu/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-test:
+    name: Linux (clang, Release)
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout rocjitsu sources
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: experimental/rocjitsu
+          sparse-checkout-cone-mode: true
+
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y ninja-build clang libdrm-dev
+
+      - name: Configure
+        env:
+          CC: clang
+          CXX: clang++
+        run: >
+          cmake -B build -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_CXX_FLAGS="-Werror"
+          -DRJ_BUILD_GUI=OFF
+          experimental/rocjitsu
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure --timeout 120

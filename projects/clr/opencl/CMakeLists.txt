@@ -16,10 +16,6 @@ option(BUILD_ICD "Enable building OpenCL ICD Loader" OFF)
 option(EMU_ENV "Enable building for emulation environment" OFF)
 option(ENABLE_ADDRESS_SANITIZER "Option to enable ASAN build" OFF)
 
-# find amdocl lib and OpenCL ICD lib
-set(CMAKE_INSTALL_RPATH "$ORIGIN;$ORIGIN/../lib/opencl;$ORIGIN/../lib")
-set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
-
 # Add flags to generate PDB files with full symbolic information
 if(MSVC)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /Zi")
@@ -84,7 +80,7 @@ install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/khronos/headers/opencl2.2/CL"
 # Packaging steps
 #############################
 if(NOT WIN32)
-find_package(ROCM QUIET CONFIG PATHS /opt/rocm)
+find_package(ROCM QUIET CONFIG PATHS ${ROCM_PATH})
 if(ROCM_FOUND)
   include(ROCMSetupVersion)
   rocm_setup_version( VERSION "2.0.0" )
@@ -123,7 +119,7 @@ if(DEFINED ENV{ROCM_LIBPATCH_VERSION})
   message("Using CPACK_PACKAGE_VERSION ${CPACK_PACKAGE_VERSION}")
 endif()
 
-set(CPACK_PACKAGING_INSTALL_PREFIX "/opt/rocm" CACHE PATH "Package Installation path for OpenCL")
+set(CPACK_PACKAGING_INSTALL_PREFIX "${ROCM_PATH}" CACHE PATH "Package Installation path for OpenCL")
 
 configure_file(
   packaging/amdocl64.icd

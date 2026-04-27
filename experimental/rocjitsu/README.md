@@ -1,14 +1,23 @@
 # rocjitsu: ROCm&trade; Just-in-Time Suite
 
+[![rocjitsu CI](https://github.com/ROCm/rocm-systems/actions/workflows/rocjitsu-ci.yml/badge.svg)](https://github.com/ROCm/rocm-systems/actions/workflows/rocjitsu-ci.yml)
+
 rocjitsu is a set of simulation, virtualization, and instrumentation tools for ROCm&trade; AMD GPU
 applications.
 
 ## Supported architectures
 
-| Architecture | ISA | Status |
+| Architecture | ISA Family | Status |
 |---|---|---|
+| CDNA1&trade; (gfx908) | GFX9 | Experimental |
+| CDNA2&trade; (gfx90a) | GFX9 | Experimental |
 | CDNA3&trade; (gfx94x) | GFX9 | Experimental |
 | CDNA4&trade; (gfx950) | GFX9 | Experimental |
+| RDNA1&trade; (gfx1010) | GFX10 | Experimental |
+| RDNA2&trade; (gfx1030) | GFX10 | Experimental |
+| RDNA3&trade; (gfx1100) | GFX11 | Experimental |
+| RDNA3.5&trade; (gfx1150) | GFX11 | Experimental |
+| RDNA4&trade; (gfx1200) | GFX12 | Experimental |
 | RISC-V RV32I/RV64I | RV32IMAFDC | Experimental |
 
 ## Features
@@ -57,6 +66,7 @@ lib/
       vm/               Virtual machine layer
         amdgpu/         AMD GPU hardware model (CU, SE, XCD, caches, pipelines)
         risc_v/         RISC-V hart model
+      kmd/linux/        KMD emulation: LD_PRELOAD interposer + simulated KFD driver
 lib/python/amdisa/      ISA code generation toolchain
 cmake/                  CMake modules (rj_configure_target, rj_add_object_library, rj_add_device_kernel)
 schemas/                FlatBuffers schemas (simulation_config, checkpoint)
@@ -65,7 +75,8 @@ tools/
   simgui/               Optional simulation GUI
 tests/                  Google Test suite + scaling test
   kernels/              HIP device kernels for integration testing
-scripts/                Utility scripts (clang_format.sh)
+scripts/                Utility scripts (clang_format.sh, install-git-hooks.sh)
+  git-hooks/            Tracked git hook scripts (installed via install-git-hooks.sh)
 ```
 
 ## Prerequisites
@@ -78,6 +89,12 @@ scripts/                Utility scripts (clang_format.sh)
 
 Third-party dependencies (Google Test, FlatBuffers, GLFW, Dear ImGui, imnodes,
 ImPlot) are fetched automatically via CMake `FetchContent`.
+
+On Debian/Ubuntu systems, building the gui requires these development packages:
+
+```bash
+sudo apt install libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev
+```
 
 ## Building
 
@@ -113,7 +130,43 @@ cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DRJ_SANITIZER=ubsan
 cmake -B build -G Ninja -DRJ_CLANG_TIDY=ON
 ```
 
+## Git hooks for developers
+
+A pre-commit hook is provided to enforce that any staged `.cpp`/`.h` file
+under `experimental/rocjitsu` is clang-format-clean. The hook is a no-op
+for commits that do not touch that directory, so it is safe to install in
+the parent rocm-systems repo.
+
+Install once per clone:
+
+```bash
+./scripts/install-git-hooks.sh
+```
+
+This symlinks `scripts/git-hooks/pre-commit` into the enclosing repo's
+hooks directory. The installer refuses to overwrite an existing
+`pre-commit` hook; pass `--force` to replace it.
+
+If a commit is rejected, run the formatter, re-stage the affected files,
+and commit again:
+
+```bash
+bash scripts/clang_format.sh
+git add <reformatted files>   # or `git add -u` if they are already tracked
+git commit
+```
+
+The hook can be bypassed with `git commit --no-verify` (a built-in git
+escape hatch).
+
 ## Running tests
+
+If CMake fails while configuring or building the test targets on Debian/Ubuntu,
+install the GLFW X11 development headers first:
+
+```bash
+sudo apt install libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev
+```
 
 ```bash
 # Via CTest
@@ -132,6 +185,33 @@ ctest --test-dir build
 Device kernel tests (matmul, vector_add) require an ROCm installation with
 `amdclang++`. When `amdclang++` is not found, these tests are automatically
 disabled at build time.
+
+## Running ROCm workloads on the simulated GPU
+
+`librocjitsu_kmd.so` is an LD_PRELOAD interposer that makes the real ROCm
+runtime (ROCR + HIP) run against the simulated GPU instead of a physical one.
+It intercepts `/dev/kfd` and the KFD sysfs topology, routing all KFD ioctls
+to the simulator.
+
+```bash
+# Required environment variables
+export RJ_CONFIG=configs/amdgpu_cdna4.json
+export RJ_SCHEMA=schemas/simulation_config.fbs
+
+# Run an HSA application
+LD_PRELOAD=build/lib/rocjitsu/src/rocjitsu/kmd/librocjitsu_kmd.so \
+  ./my_hsa_app
+
+# Run a HIP application
+LD_PRELOAD=build/lib/rocjitsu/src/rocjitsu/kmd/librocjitsu_kmd.so \
+  ./my_hip_app
+
+# Run the bundled HSA/HIP integration tests
+ctest --test-dir build/tests -R "HsaTest|HipMemcpy|HipVectorAdd" -V
+```
+
+The interposer is Linux-only. It requires no kernel modules and no physical
+AMD GPU.
 
 ## Configuration
 
@@ -172,17 +252,36 @@ See `configs/amdgpu_cdna4.json` for the full CDNA4 topology configuration.
 ## Regenerating ISA files
 
 The instruction files (e.g., CDNA4&trade;) under `lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu/cdna4/`
-are autogenerated from the MR ISA XML specification. To regenerate:
+are autogenerated from the MR ISA XML specification. To regenerate with shared execute
+templates across all supported ISAs:
 
 ```bash
-python -m amdisa --gen-all \
+python -m amdisa --gen-all --gen-shared-execute \
   -o lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu \
-  path/to/amdgpu_isa_cdna4.xml
+  --multi \
+    cdna1:path/to/amdgpu_isa_cdna1.xml \
+    cdna2:path/to/amdgpu_isa_cdna2.xml \
+    cdna3:path/to/amdgpu_isa_cdna3.xml \
+    cdna4:path/to/amdgpu_isa_cdna4.xml \
+    rdna1:path/to/amdgpu_isa_rdna1.xml \
+    rdna2:path/to/amdgpu_isa_rdna2.xml \
+    rdna3:path/to/amdgpu_isa_rdna3.xml \
+    rdna3_5:path/to/amdgpu_isa_rdna3_5.xml \
+    rdna4:path/to/amdgpu_isa_rdna4.xml
 bash scripts/clang_format.sh
 ```
 
+**Important:** Use `--multi` mode with all 9 ISAs to enable cross-ISA analysis and
+shared execute template generation. This maximizes code deduplication by generating
+shared templates for instructions that have identical semantics across multiple ISAs.
+
+Single-ISA mode (`--gen-all` without `--multi`) will generate inline execute bodies
+without shared templates, resulting in larger files with duplicated code.
+
 Hand-written files (`isa.h`, `insts.h`, `mfma_exec.h`, `addr_calc.h/.cpp`) are
 not overwritten by the generator.
+
+You can find the MR ISA in the artifacts directory.
 
 ## Usage examples
 

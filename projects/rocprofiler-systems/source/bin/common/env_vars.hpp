@@ -1,5 +1,5 @@
 // Copyright (c) Advanced Micro Devices, Inc.
-// SPDX-License-Identifier:  MIT
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -31,7 +31,7 @@ constexpr std::string_view PERFETTO_BUFFER_SIZE_KB = "ROCPROFSYS_PERFETTO_BUFFER
 constexpr std::string_view PERFETTO_FILL_POLICY    = "ROCPROFSYS_PERFETTO_FILL_POLICY";
 constexpr std::string_view PERFETTO_BACKEND        = "ROCPROFSYS_PERFETTO_BACKEND";
 constexpr std::string_view PERFETTO_FLUSH_PERIOD = "ROCPROFSYS_PERFETTO_FLUSH_PERIOD_MS";
-constexpr std::string_view TRACE_REGION          = "ROCPROFSYS_TRACE_REGION";
+constexpr std::string_view SELECTED_REGIONS      = "ROCPROFSYS_SELECTED_REGIONS";
 constexpr std::string_view TRACE_THREAD_LOCKS    = "ROCPROFSYS_TRACE_THREAD_LOCKS";
 constexpr std::string_view TRACE_THREAD_RW_LOCKS = "ROCPROFSYS_TRACE_THREAD_RW_LOCKS";
 constexpr std::string_view TRACE_THREAD_SPIN_LOCKS = "ROCPROFSYS_TRACE_THREAD_SPIN_LOCKS";
@@ -78,7 +78,8 @@ constexpr std::string_view ROCM_DOMAINS        = "ROCPROFSYS_ROCM_DOMAINS";
 constexpr std::string_view ROCM_GROUP_BY_QUEUE = "ROCPROFSYS_ROCM_GROUP_BY_QUEUE";
 
 // --- Domains: CPU ---
-constexpr std::string_view CPU_FREQ = "ROCPROFSYS_CPU_FREQ";
+constexpr std::string_view CPU_FREQ    = "ROCPROFSYS_CPU_FREQ";
+constexpr std::string_view CPU_METRICS = "ROCPROFSYS_CPU_METRICS";
 
 // --- Domains: Parallel runtimes ---
 constexpr std::string_view USE_MPIP    = "ROCPROFSYS_USE_MPIP";

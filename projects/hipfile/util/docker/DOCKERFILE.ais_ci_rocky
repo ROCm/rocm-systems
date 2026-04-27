@@ -9,7 +9,7 @@ LABEL org.opencontainers.image.source=https://github.com/ROCm/hipFile
 # Brings ROCKY_VERSION in-scope
 ARG ROCKY_MAJOR_VERSION
 ARG ROCKY_VERSION
-ARG ROCM_VERSION=7.2.0
+ARG ROCM_VERSION=7.2.2
 
 # If the target ROCm Version on the package repository is non-standard, you can forcibly
 # set the ROCm version used in the package repo URL.

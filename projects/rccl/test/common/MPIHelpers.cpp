@@ -11,15 +11,31 @@
     #include "MPITestCore.hpp"
     #include "MPIEnvironment.hpp"
     #include <cerrno>
+    #include <cstdlib>
     #include <cstring>
     #include <fcntl.h>
+    #include <fstream>
     #include <hip/hip_runtime.h>
     #include <iostream>
     #include <mpi.h>
+    #include <sstream>
+    #include <sys/stat.h>
     #include <unistd.h>
 
 namespace MPIHelpers
 {
+namespace
+{
+    std::string sliceFromOffset(const std::string& full, std::uintmax_t off)
+    {
+        if(off >= full.size())
+        {
+            return {};
+        }
+        return full.substr(static_cast<std::size_t>(off));
+    }
+} // namespace
+
 
 // ============================================================================
 // FileDescriptor Implementation
@@ -170,16 +186,6 @@ void setupGPU(int world_rank)
 // Per-Rank Logging
 // ============================================================================
 
-std::string getRankLogFilePath(int rank, pid_t pid)
-{
-    return "rccl_test_rank_" + std::to_string(rank) + "_" + std::to_string(pid) + ".log";
-}
-
-std::string getRankLogFilePath(int rank)
-{
-    return getRankLogFilePath(rank, ::getpid());
-}
-
 std::optional<RankLogConfig> setupRankLogging(int rank)
 {
     const auto* env_value                = std::getenv("RCCL_MPI_LOG_ALL_RANKS");
@@ -205,14 +211,14 @@ std::optional<RankLogConfig> setupRankLogging(int rank)
         if(per_rank_logging_enabled)
         {
             // Per-rank logging enabled: Redirect to log file
-            // Include PID for uniqueness across test runs
-            config.log_file_path = getRankLogFilePath(rank);
+            const auto log_filename
+                = std::string{"rccl_test_rank_"} + std::to_string(rank) + ".log";
 
-            const auto log_fd = ::open(config.log_file_path.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
+            const auto log_fd = ::open(log_filename.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
 
             if(log_fd < 0)
             {
-                TEST_WARN("Rank %d: Failed to create log file: %s", rank, config.log_file_path.c_str());
+                TEST_WARN("Rank %d: Failed to create log file: %s", rank, log_filename.c_str());
                 return std::nullopt;
             }
 
@@ -226,7 +232,7 @@ std::optional<RankLogConfig> setupRankLogging(int rank)
             }
 
             // Debug: Write initial marker to log file (AFTER redirection)
-            TEST_INFO("===== LOG FILE FOR RANK %d (PID %d) =====", rank, ::getpid());
+            TEST_INFO("===== LOG FILE FOR RANK %d =====", rank);
         }
         else
         {
@@ -262,31 +268,31 @@ std::optional<RankLogConfig> setupRankLogging(int rank)
         return std::nullopt; // Rank 0 outputs to console normally
     }
 
-    // Create log file for rank 0 (include PID for uniqueness)
-    config.log_file_path = getRankLogFilePath(rank);
+    // Create log file for rank 0
+    const auto log_filename = std::string{"rccl_test_rank_"} + std::to_string(rank) + ".log";
 
     // Debug: Print to stderr BEFORE creating log file
-    TEST_TRACE("Rank %d (rank 0 tee mode) opening log file: %s", rank, config.log_file_path.c_str());
+    TEST_TRACE("Rank %d (rank 0 tee mode) opening log file: %s", rank, log_filename.c_str());
 
-    const auto log_fd = ::open(config.log_file_path.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    const auto log_fd = ::open(log_filename.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
 
     if(log_fd < 0)
     {
-        TEST_WARN("Rank %d: Failed to create log file: %s", rank, config.log_file_path.c_str());
+        TEST_WARN("Rank %d: Failed to create log file: %s", rank, log_filename.c_str());
         return std::nullopt;
     }
 
     config.log_fd = FileDescriptor{log_fd};
 
     // Debug: Write initial marker directly to log file (BEFORE redirection)
-    std::string marker = "===== LOG FILE FOR RANK 0 (TEE MODE, PID " + std::to_string(::getpid()) + ") =====\n";
-    [[maybe_unused]] auto written = ::write(log_fd, marker.c_str(), marker.size());
+    const char*           marker  = "===== LOG FILE FOR RANK 0 (TEE MODE) =====\n";
+    [[maybe_unused]] auto written = ::write(log_fd, marker, std::strlen(marker));
 
     // Rank 0 with per-rank logging: Output to BOTH console AND log file (tee behavior)
     // Print banner before redirection
     TEST_INFO("Per-Rank Logging ENABLED (RCCL_MPI_LOG_ALL_RANKS=1)");
-    TEST_INFO("Rank 0     : Output to BOTH console AND %s", config.log_file_path.c_str());
-    TEST_INFO("Ranks 1-N  : Output redirected to rccl_test_rank_<N>_<PID>.log");
+    TEST_INFO("Rank 0     : Output to BOTH console AND %s", log_filename.c_str());
+    TEST_INFO("Ranks 1-N  : Output redirected to rccl_test_rank_<N>.log");
     TEST_INFO("Location   : Log files created in current working directory");
 
     // Save original stdout/stderr for tee thread
@@ -338,6 +344,170 @@ std::optional<RankLogConfig> setupRankLogging(int rank)
     return config;
 }
 
+std::string getRankLogFilePath(int rank)
+{
+    return std::string{"rccl_test_rank_"} + std::to_string(rank) + ".log";
+}
+
+std::uintmax_t getFileSizeBytes(const std::string& path)
+{
+    struct stat st
+    {
+    };
+    if(::stat(path.c_str(), &st) != 0)
+    {
+        return 0;
+    }
+    return static_cast<std::uintmax_t>(st.st_size);
+}
+
+std::string readTextFile(const std::string& path)
+{
+    std::ifstream file(path);
+    if(!file.is_open())
+    {
+        TEST_WARN("Could not open file: %s", path.c_str());
+        return "";
+    }
+    std::ostringstream ss;
+    ss << file.rdbuf();
+    return ss.str();
+}
+
+std::string readRankLogFile(int rank)
+{
+    std::fflush(stdout);
+    std::fflush(stderr);
+    return readTextFile(getRankLogFilePath(rank));
+}
+
+TestLogAssertionOptions makeNcclDebugFileAssertionOptions(int mpi_rank)
+{
+    TestLogAssertionOptions o;
+    o.mpi_rank                  = mpi_rank;
+    o.capture_nccl_debug_file   = true;
+    o.read_per_rank_stderr_log = false;
+    return o;
+}
+
+TestLogAssertionOptions makePerRankStderrAssertionOptions(int mpi_rank)
+{
+    TestLogAssertionOptions o;
+    o.mpi_rank                  = mpi_rank;
+    o.capture_nccl_debug_file   = false;
+    o.read_per_rank_stderr_log = true;
+    return o;
+}
+
+TestLogAssertionOptions makeCombinedAssertionLogOptions(int mpi_rank)
+{
+    TestLogAssertionOptions o;
+    o.mpi_rank                  = mpi_rank;
+    o.capture_nccl_debug_file   = true;
+    o.read_per_rank_stderr_log = true;
+    return o;
+}
+
+TestLogAssertionContext::TestLogAssertionContext(const TestLogAssertionOptions& opts)
+    : opts_(opts)
+    , capture_nccl_(opts.capture_nccl_debug_file)
+    , read_per_rank_(opts.read_per_rank_stderr_log)
+{
+    const int rank = opts.mpi_rank;
+
+    if(capture_nccl_)
+    {
+        if(opts_.nccl_debug_file_path.empty())
+        {
+            nccl_path_ = std::string{"/tmp/rccl_assert_nccl_rank_"} + std::to_string(rank) + "_pid_"
+                         + std::to_string(::getpid()) + ".log";
+            auto_nccl_path_ = true;
+        }
+        else
+        {
+            nccl_path_      = opts_.nccl_debug_file_path;
+            auto_nccl_path_ = false;
+        }
+
+        const char* prev = std::getenv("NCCL_DEBUG_FILE");
+        if(prev != nullptr)
+        {
+            saved_nccl_debug_env_     = prev;
+            saved_nccl_debug_present_ = true;
+        }
+        if(::setenv("NCCL_DEBUG_FILE", nccl_path_.c_str(), 1) != 0)
+        {
+            TEST_WARN("Rank %d: setenv NCCL_DEBUG_FILE failed", rank);
+        }
+        else
+        {
+            env_modified_ = true;
+        }
+
+        if(opts_.isolate_new_output)
+        {
+            nccl_start_offset_ = getFileSizeBytes(nccl_path_);
+        }
+    }
+
+    if(read_per_rank_)
+    {
+        if(opts_.isolate_new_output)
+        {
+            std::fflush(stdout);
+            std::fflush(stderr);
+            per_rank_start_offset_ = getFileSizeBytes(getRankLogFilePath(rank));
+        }
+    }
+}
+
+TestLogAssertionContext::~TestLogAssertionContext()
+{
+    if(env_modified_)
+    {
+        if(saved_nccl_debug_present_)
+        {
+            (void)::setenv("NCCL_DEBUG_FILE", saved_nccl_debug_env_.c_str(), 1);
+        }
+        else
+        {
+            (void)::unsetenv("NCCL_DEBUG_FILE");
+        }
+    }
+
+    if(capture_nccl_ && !nccl_path_.empty())
+    {
+        const bool unlink_it = (auto_nccl_path_ && opts_.unlink_auto_generated_nccl_path)
+                               || (!auto_nccl_path_ && opts_.unlink_explicit_nccl_path);
+        if(unlink_it)
+        {
+            (void)::unlink(nccl_path_.c_str());
+        }
+    }
+}
+
+std::string TestLogAssertionContext::readNcclDebugLog() const
+{
+    if(!capture_nccl_)
+    {
+        return {};
+    }
+    const std::string full = readTextFile(nccl_path_);
+    return opts_.isolate_new_output ? sliceFromOffset(full, nccl_start_offset_) : full;
+}
+
+std::string TestLogAssertionContext::readPerRankStderrLog() const
+{
+    if(!read_per_rank_)
+    {
+        return {};
+    }
+    std::fflush(stdout);
+    std::fflush(stderr);
+    const std::string full = readTextFile(getRankLogFilePath(opts_.mpi_rank));
+    return opts_.isolate_new_output ? sliceFromOffset(full, per_rank_start_offset_) : full;
+}
+
 void restoreRankLogging(RankLogConfig& config)
 {
     // Only restore if we actually redirected (have saved stdout/stderr)
@@ -374,194 +544,6 @@ void restoreRankLogging(RankLogConfig& config)
         // Close pipe read end
         config.pipe_read_fd.reset();
     }
-}
-
-// ============================================================================
-// StderrCapture Implementation
-// ============================================================================
-
-StderrCapture::StderrCapture()
-    : m_savedStderr(-1), m_tempFd(-1), m_capturing(false)
-{
-}
-
-StderrCapture::~StderrCapture()
-{
-    stop();
-}
-
-bool StderrCapture::start()
-{
-    if(m_capturing)
-    {
-        return true; // Already capturing
-    }
-
-    // Create temp file for capturing stderr
-    char tmpPath[] = "/tmp/rccl_stderr_XXXXXX";
-    m_tempFd = ::mkstemp(tmpPath);
-    if(m_tempFd < 0)
-    {
-        return false;
-    }
-    m_tempPath = tmpPath;
-
-    // Redirect stderr to temp file
-    std::fflush(stderr);
-    m_savedStderr = ::dup(STDERR_FILENO);
-    if(m_savedStderr < 0)
-    {
-        ::close(m_tempFd);
-        ::unlink(m_tempPath.c_str());
-        m_tempFd = -1;
-        return false;
-    }
-
-    if(::dup2(m_tempFd, STDERR_FILENO) < 0)
-    {
-        ::close(m_savedStderr);
-        ::close(m_tempFd);
-        ::unlink(m_tempPath.c_str());
-        m_savedStderr = -1;
-        m_tempFd      = -1;
-        return false;
-    }
-
-    m_capturing = true;
-    return true;
-}
-
-void StderrCapture::stop()
-{
-    if(!m_capturing)
-    {
-        return;
-    }
-
-    // Restore stderr
-    std::fflush(stderr);
-    ::dup2(m_savedStderr, STDERR_FILENO);
-    ::close(m_savedStderr);
-    m_savedStderr = -1;
-
-    // Read captured output
-    ::lseek(m_tempFd, 0, SEEK_SET);
-    char    buf[4096];
-    ssize_t n;
-    while((n = ::read(m_tempFd, buf, sizeof(buf) - 1)) > 0)
-    {
-        buf[n] = '\0';
-        m_capturedOutput += buf;
-    }
-
-    // Cleanup temp file
-    ::close(m_tempFd);
-    ::unlink(m_tempPath.c_str());
-    m_tempFd    = -1;
-    m_capturing = false;
-}
-
-const std::string& StderrCapture::getOutput() const
-{
-    return m_capturedOutput;
-}
-
-bool StderrCapture::hasPattern(const std::string& pattern) const
-{
-    return m_capturedOutput.find(pattern) != std::string::npos;
-}
-
-void StderrCapture::reset()
-{
-    stop();
-    m_capturedOutput.clear();
-}
-
-bool StderrCapture::isCapturing() const
-{
-    return m_capturing;
-}
-
-// ============================================================================
-// StderrCaptureScope Implementation
-// ============================================================================
-
-StderrCaptureScope::StderrCaptureScope(StderrCapture& capture)
-    : m_capture(capture)
-{
-    m_capture.reset();
-    m_capture.start();
-}
-
-StderrCaptureScope::~StderrCaptureScope()
-{
-    m_capture.stop();
-}
-
-// ============================================================================
-// NCCL Debug Environment Helpers
-// ============================================================================
-
-std::string getNCCLDebugLevel()
-{
-    const char* level = std::getenv("NCCL_DEBUG");
-    return level ? std::string(level) : "";
-}
-
-std::string getNCCLDebugSubsystems()
-{
-    const char* subsys = std::getenv("NCCL_DEBUG_SUBSYS");
-    return subsys ? std::string(subsys) : "";
-}
-
-bool isNCCLDebugEnabled(const std::string& subsystem, const std::string& minLevel)
-{
-    const std::string level = getNCCLDebugLevel();
-    if(level.empty())
-    {
-        return false;
-    }
-
-    // Check if debug level meets minimum requirement
-    // Level hierarchy: WARN < INFO < TRACE
-    auto levelRank = [](const std::string& lvl) -> int {
-        if(lvl == "TRACE")
-            return 3;
-        if(lvl == "INFO")
-            return 2;
-        if(lvl == "WARN")
-            return 1;
-        return 0;
-    };
-
-    if(levelRank(level) < levelRank(minLevel))
-    {
-        return false;
-    }
-
-    // If no specific subsystem requested, any debug level is enough
-    if(subsystem.empty())
-    {
-        return true;
-    }
-
-    // Check if subsystem is enabled
-    const std::string subsystems = getNCCLDebugSubsystems();
-
-    // If NCCL_DEBUG_SUBSYS is not set, all subsystems are enabled
-    if(subsystems.empty())
-    {
-        return true;
-    }
-
-    // Check for "ALL" which enables all subsystems
-    if(subsystems.find("ALL") != std::string::npos)
-    {
-        return true;
-    }
-
-    // Check if specific subsystem is in the list
-    return subsystems.find(subsystem) != std::string::npos;
 }
 
 } // namespace MPIHelpers
