@@ -138,6 +138,7 @@ EXTRA_C_ARGS = {
 
 print('#include <hsa/hsa.h>')
 print('#include <hsa/hsa_ext_amd.h>')
+print('#include <hsa/hsa_api_trace.h>')
 print('#include <stdint.h>')
 print('#include <stdio.h>')
 print('#include <stdlib.h>')
