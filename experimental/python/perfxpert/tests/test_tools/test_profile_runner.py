@@ -42,10 +42,46 @@ def test_validate_argv_rejects_unsafe_path_values(argv):
     [
         ["rocprofv3", "-d", "out", "-o", "results", "--", "./app"],
         ["rocprofv3", "--output-dir=out", "--pmc", "SQ_WAVES", "--", "./app"],
+        ["rocprofv3", "--pmc", "SQ_WAVES", "GRBM_COUNT", "-d", "out", "--", "./app"],
+        ["rocprofv3", "--att", "--att-library-path", "/opt/rocm/lib", "--", "./app"],
+        [
+            "rocprofv3",
+            "--pc-sampling-beta-enabled",
+            "--pc-sampling-method",
+            "stochastic",
+            "--pc-sampling-unit",
+            "cycles",
+            "--pc-sampling-interval",
+            "1048576",
+            "--",
+            "./app",
+        ],
+        [
+            "rocprofv3",
+            "--pc-sampling-beta-enabled",
+            "1",
+            "--pc-sampling-method=host_trap",
+            "--pc-sampling-unit=time",
+            "--pc-sampling-interval=1",
+            "--",
+            "./app",
+        ],
     ],
 )
 def test_validate_argv_accepts_safe_value_flags(argv):
     profile_runner._validate_argv(argv)
+
+
+def test_validate_argv_rejects_symlink_output_escape(tmp_path: Path):
+    outside = tmp_path.parent / "outside-profile-output"
+    outside.mkdir(exist_ok=True)
+    (tmp_path / "escape").symlink_to(outside, target_is_directory=True)
+
+    with pytest.raises(profile_runner.RocprofFlagError):
+        profile_runner._validate_argv(
+            ["rocprofv3", "-d", "escape", "--", "./app"],
+            cwd=tmp_path,
+        )
 
 
 @pytest.mark.parametrize(
@@ -53,6 +89,12 @@ def test_validate_argv_accepts_safe_value_flags(argv):
     [
         ["rocprofv3", "--output-dir", "--", "./app"],
         ["rocprofv3", "--sys-trace=true", "--", "./app"],
+        ["rocprofv3", "--pmc", "--", "./app"],
+        ["rocprofv3", "--pc-sampling", "stochastic", "--", "./app"],
+        ["rocprofv3", "--pc-sampling-method", "timer", "--", "./app"],
+        ["rocprofv3", "--pc-sampling-unit", "warps", "--", "./app"],
+        ["rocprofv3", "--pc-sampling-interval", "fast", "--", "./app"],
+        ["rocprofv3", "--pc-sampling-beta-enabled", "maybe", "--", "./app"],
         ["rocprofv3", "out", "--", "./app"],
     ],
 )

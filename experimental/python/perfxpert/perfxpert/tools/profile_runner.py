@@ -16,7 +16,11 @@ from pathlib import Path
 from typing import Any, Dict, List, Set
 
 from perfxpert.tools._class import ToolClass, tool_class
-from perfxpert.tools._safety import build_safe_env, reject_shell_metachars
+from perfxpert.tools._safety import (
+    build_safe_env,
+    confine_to_project_root,
+    reject_shell_metachars,
+)
 from perfxpert.tools._tooldep import require_tool
 
 
@@ -44,8 +48,9 @@ _ROCPROFV3_VALUE_FLAGS: Set[str] = {
     "--att-simd-select",
     "--att-buffer-size",
     "--att-activity",
-    "--pc-sampling",
-    "--pmc",
+    "--pc-sampling-method",
+    "--pc-sampling-unit",
+    "--pc-sampling-interval",
     "-d",
     "--output-dir",
     "-o",
@@ -53,37 +58,101 @@ _ROCPROFV3_VALUE_FLAGS: Set[str] = {
     "--pid",
 }
 
-_ROCPROFV3_PATH_VALUE_FLAGS: Set[str] = {
-    "--att-library-path",
+_ROCPROFV3_MULTI_VALUE_FLAGS: Set[str] = {
+    "--pmc",
+}
+
+_ROCPROFV3_OPTIONAL_BOOL_VALUE_FLAGS: Set[str] = {
+    "--pc-sampling-beta-enabled",
+}
+
+_ROCPROFV3_OUTPUT_PATH_VALUE_FLAGS: Set[str] = {
     "-d",
     "--output-dir",
     "-o",
     "--output",
 }
 
-_ROCPROFV3_FLAGS: Set[str] = _ROCPROFV3_NO_VALUE_FLAGS | _ROCPROFV3_VALUE_FLAGS | {"--"}
+_ROCPROFV3_LIBRARY_PATH_VALUE_FLAGS: Set[str] = {
+    "--att-library-path",
+}
+
+_ROCPROFV3_FLAGS: Set[str] = (
+    _ROCPROFV3_NO_VALUE_FLAGS
+    | _ROCPROFV3_VALUE_FLAGS
+    | _ROCPROFV3_MULTI_VALUE_FLAGS
+    | _ROCPROFV3_OPTIONAL_BOOL_VALUE_FLAGS
+    | {"--"}
+)
 _WINDOWS_DRIVE_RE = re.compile(r"^[A-Za-z]:")
+_BOOL_VALUES = {"1", "0", "true", "false", "on", "off", "yes", "no"}
+_PC_SAMPLING_METHODS = {"stochastic", "host_trap"}
+_PC_SAMPLING_UNITS = {"instructions", "cycles", "time"}
 
 
 class RocprofFlagError(Exception):
     """Raised when argv contains a rocprofv3 flag not in the allowlist."""
 
 
-def _validate_path_value(flag: str, value: str) -> None:
-    """Reject rocprofv3 path values that cannot be project-confined later."""
+def _validate_output_path_value(flag: str, value: str, cwd: Path | None) -> None:
+    """Reject rocprofv3 output paths that are not confined to cwd."""
     normalized = value.replace("\\", "/")
-    if not value or value.startswith(("~", "/", "\\")) or _WINDOWS_DRIVE_RE.match(value):
+    if (
+        not value
+        or value.startswith(("~", "/", "\\"))
+        or _WINDOWS_DRIVE_RE.match(value)
+    ):
+        raise RocprofFlagError(f"unsafe path value for {flag}: {value!r}")
+    if cwd is None and ".." in normalized.split("/"):
+        raise RocprofFlagError(f"unsafe path value for {flag}: {value!r}")
+    if cwd is not None:
+        try:
+            confine_to_project_root(Path(cwd), value)
+        except Exception as e:
+            raise RocprofFlagError(f"unsafe path value for {flag}: {value!r}") from e
+
+
+def _validate_library_path_value(flag: str, value: str) -> None:
+    """Reject malformed rocprofv3 library search paths without project confinement."""
+    normalized = value.replace("\\", "/")
+    if not value or value.startswith(("~", "\\")) or _WINDOWS_DRIVE_RE.match(value):
         raise RocprofFlagError(f"unsafe path value for {flag}: {value!r}")
     if ".." in normalized.split("/"):
         raise RocprofFlagError(f"unsafe path value for {flag}: {value!r}")
 
 
-def _validate_argv(argv: List[str]) -> None:
+def _validate_value(flag: str, value: str, cwd: Path | None) -> None:
+    if not value:
+        raise RocprofFlagError(f"rocprofv3 flag requires a value: {flag!r}")
+    if flag in _ROCPROFV3_OUTPUT_PATH_VALUE_FLAGS:
+        _validate_output_path_value(flag, value, cwd)
+    elif flag in _ROCPROFV3_LIBRARY_PATH_VALUE_FLAGS:
+        _validate_library_path_value(flag, value)
+    elif flag == "--pc-sampling-method" and value.lower() not in _PC_SAMPLING_METHODS:
+        raise RocprofFlagError(f"invalid value for {flag}: {value!r}")
+    elif flag == "--pc-sampling-unit" and value.lower() not in _PC_SAMPLING_UNITS:
+        raise RocprofFlagError(f"invalid value for {flag}: {value!r}")
+    elif flag == "--pc-sampling-interval":
+        try:
+            if int(value) <= 0:
+                raise ValueError
+        except ValueError as e:
+            raise RocprofFlagError(f"invalid value for {flag}: {value!r}") from e
+
+
+def _validate_bool_value(flag: str, value: str) -> None:
+    if value.lower() not in _BOOL_VALUES:
+        raise RocprofFlagError(f"invalid boolean value for {flag}: {value!r}")
+
+
+def _validate_argv(argv: List[str], *, cwd: Path | None = None) -> None:
     """Sanitize + allowlist-check every token."""
     if not argv:
         raise ValueError("argv must not be empty")
     if argv[0] != "rocprofv3":
         raise ValueError(f"argv[0] must be 'rocprofv3', got {argv[0]!r}")
+    for tok in argv:
+        reject_shell_metachars(tok)
 
     # Split at `--`; before it are rocprofv3 flags, after it is the target app.
     try:
@@ -108,6 +177,30 @@ def _validate_argv(argv: List[str]) -> None:
             if key in _ROCPROFV3_NO_VALUE_FLAGS:
                 if has_inline_value:
                     raise RocprofFlagError(f"rocprofv3 flag does not take a value: {tok!r}")
+            elif key in _ROCPROFV3_MULTI_VALUE_FLAGS:
+                if has_inline_value:
+                    values = [tok.split("=", 1)[1]]
+                else:
+                    values = []
+                    while (
+                        i + 1 < len(rocprof_tokens)
+                        and not rocprof_tokens[i + 1].startswith("-")
+                    ):
+                        i += 1
+                        values.append(rocprof_tokens[i])
+                if not values:
+                    raise RocprofFlagError(f"rocprofv3 flag requires a value: {tok!r}")
+                for value in values:
+                    _validate_value(key, value, cwd)
+            elif key in _ROCPROFV3_OPTIONAL_BOOL_VALUE_FLAGS:
+                if has_inline_value:
+                    _validate_bool_value(key, tok.split("=", 1)[1])
+                elif (
+                    i + 1 < len(rocprof_tokens)
+                    and not rocprof_tokens[i + 1].startswith("-")
+                ):
+                    i += 1
+                    _validate_bool_value(key, rocprof_tokens[i])
             else:
                 if has_inline_value:
                     value = tok.split("=", 1)[1]
@@ -118,15 +211,10 @@ def _validate_argv(argv: List[str]) -> None:
                     if value.startswith("-"):
                         raise RocprofFlagError(f"rocprofv3 flag requires a value: {tok!r}")
                     i += 1
-                if key in _ROCPROFV3_PATH_VALUE_FLAGS:
-                    _validate_path_value(key, value)
+                _validate_value(key, value, cwd)
         else:
             raise RocprofFlagError(f"unexpected rocprofv3 value without flag: {tok!r}")
         i += 1
-
-    # Sanitize every token (including target app path + args)
-    for tok in argv:
-        reject_shell_metachars(tok)
 
     # target tokens consumed for sanitization only; no allowlist on them
 
@@ -149,7 +237,7 @@ def run(
         ShellMetacharError on metachar-bearing token.
         subprocess.TimeoutExpired on timeout.
     """
-    _validate_argv(argv)
+    _validate_argv(argv, cwd=cwd)
     require_tool("rocprofv3")
 
     proc = subprocess.run(
