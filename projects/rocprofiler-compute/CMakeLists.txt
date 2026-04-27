@@ -413,6 +413,14 @@ endif()
 #         tests/test_metric_validation.py ${WORKING_DIR_OPTION}
 # )
 
+add_test(
+    NAME test_native_tool_finder
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
+        --junitxml=tests/test_native_tool_finder.xml ${COV_OPTION}
+        tests/test_native_tool_finder.py ${WORKING_DIR_OPTION}
+)
+
 set_tests_properties(
     test_profile_kernel_execution
     test_profile_dispatch
@@ -872,9 +880,11 @@ if(NOT SKIP_NATIVE_TOOL_BUILD)
 else()
     # Install source files for runtime compilation
     install(
-        FILES src/lib/rocprofiler_compute_tool.cpp src/lib/helper.cpp src/lib/helper.hpp
+        DIRECTORY src/lib/
         DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}/lib
         COMPONENT main
+        PATTERN "_build" EXCLUDE
+        PATTERN "tests" EXCLUDE
     )
 endif()
 
