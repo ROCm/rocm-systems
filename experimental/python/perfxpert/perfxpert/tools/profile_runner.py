@@ -36,6 +36,7 @@ _ROCPROFV3_NO_VALUE_FLAGS: Set[str] = {
     "--hsa-trace",
     "--stats",
     "--att",
+    "--pc-sampling",
     "--process-sync",
     "--list-avail",
     "--list-counters",

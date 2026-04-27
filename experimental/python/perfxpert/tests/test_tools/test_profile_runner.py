@@ -41,6 +41,7 @@ def test_validate_argv_rejects_unsafe_path_values(argv):
     "argv",
     [
         ["rocprofv3", "-d", "out", "-o", "results", "--", "./app"],
+        ["rocprofv3", "--pc-sampling", "--", "./app"],
         ["rocprofv3", "--output-dir=out", "--pmc", "SQ_WAVES", "--", "./app"],
         ["rocprofv3", "--pmc", "SQ_WAVES", "GRBM_COUNT", "-d", "out", "--", "./app"],
         ["rocprofv3", "--att", "--att-library-path", "/opt/rocm/lib", "--", "./app"],
