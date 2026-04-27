@@ -1,7 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
-"""Unit tests for utils.metrics.pmc_data_cache.PmcDataCache (Phase 1)."""
+"""Unit tests for utils.metrics.pmc_data_cache.PmcDataCache."""
 
 import pandas as pd
 import pytest
