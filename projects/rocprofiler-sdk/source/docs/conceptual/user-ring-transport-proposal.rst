@@ -274,10 +274,9 @@ Benchmark snapshot
 
 The cross-proposal microbenchmark uses one unit for time, nanoseconds per
 record, and one unit for footprint, MiB. It uses 64-byte payload records, 131072
-records per round, and 15 rounds. The LTTng row is the measurable
-no-active-session path; active-session measurement is still blocked on this test
-host because ``lttng create`` fails in the local session-daemon control path
-after spawning ``lttng-sessiond``.
+records per round, and 15 rounds. The active LTTng rows were measured with a
+locally extracted matching LTTng 2.14 userspace stack because the host install
+mixed ``lttng-tools`` 2.13 with ``liblttng-ctl`` 2.14.
 
 .. list-table::
    :header-rows: 1
@@ -318,12 +317,12 @@ after spawning ``lttng-sessiond``.
      - 12.00
      - 17.91
    * - 1
-     - LTTng-UST inactive
-     - 29.520
-     - 2.433
-     - 31.953
+     - LTTng-UST active
+     - 141.760
+     - 2.719
+     - 144.479
      - 136.07
-     - 141.81
+     - 157.90
    * - 4
      - Current
      - 243.692
@@ -353,12 +352,12 @@ after spawning ``lttng-sessiond``.
      - 12.02
      - 17.79
    * - 4
-     - LTTng-UST inactive
-     - 288.077
-     - 2.435
-     - 290.512
+     - LTTng-UST active
+     - 501.102
+     - 2.192
+     - 503.294
      - 136.07
-     - 141.84
+     - 180.27
    * - 16
      - Current
      - 260.940
@@ -388,17 +387,17 @@ after spawning ``lttng-sessiond``.
      - 12.06
      - 18.04
    * - 16
-     - LTTng-UST inactive
-     - 294.816
-     - 2.665
-     - 297.481
+     - LTTng-UST active
+     - 563.533
+     - 2.330
+     - 565.863
      - 136.07
-     - 142.29
+     - 203.93
 
 Based on lowest overhead first, the shared-mmap ring is the best common
 in-process and out-of-process direction in this benchmark. It is within roughly
 the same memory band as the BPF-style buffer and is far below the current
-backend and inactive LTTng-UST shadow path on producer time.
+backend and active LTTng-UST shadow path on producer time.
 
 Migration plan
 ==============
