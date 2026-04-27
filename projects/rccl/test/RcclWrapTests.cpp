@@ -1354,7 +1354,7 @@ check_sticky:
         << "CUCHECKGOTO must clear sticky HIP error after failure";
 }
 
-TEST(Rcclwrap, AllrcclUseAllGatherDirectNodeCountTests)
+TEST(Rcclwrap, RcclUseAllGatherDirectNodeCountTests)
 {
     TEST_INFO("=== Starting Process-Isolated rcclUseAllGatherDirect Node Count Tests ===");
 
