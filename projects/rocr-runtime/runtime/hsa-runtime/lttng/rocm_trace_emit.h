@@ -78,9 +78,12 @@ static inline uint8_t rocm_trace_sniff_packet_type(
  * cross-bind the two runtimes' flags. */
 extern std::atomic<bool> rocm_hsa_trace_g_disabled;
 
+#ifndef ROCM_TRACE_DISABLED_DEFINED
+#define ROCM_TRACE_DISABLED_DEFINED
 static inline bool rocm_trace_disabled(void) {
     return rocm_hsa_trace_g_disabled.load(std::memory_order_relaxed);
 }
+#endif
 
 /* HSA emit_enter: capture parent_corr_id (= the active slot value BEFORE
  * the push) and emit with it as the new field. The push then makes the
@@ -204,6 +207,9 @@ static inline void rocm_trace_emit_hsa_intercept_packets(uint32_t queue_id,
                                 parent);
     }
 }
+
+/* Curated per-API typed emit helpers. Generated; see spec §5.2. */
+#include "rocm_trace_emit_curated.h"
 
 #else /* !HSA_ENABLE_LTTNG_UST */
 
