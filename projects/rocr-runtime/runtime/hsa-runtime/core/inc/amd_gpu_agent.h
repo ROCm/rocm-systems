@@ -957,6 +957,7 @@ class GpuAgent : public GpuAgentInt {
   //   - Host buffer is partitioned: XCC N writes to [N * per_xcc_size, (N+1) * per_xcc_size)
   //   - A lockless multi-producer queue is not needed (single producer per XCC)
   struct alignas(64) per_xcc_pcs_data_t {
+    pcs_sampling_data_t* device_data;         // This XCC's device buffer region
     os::Thread thread;                        // Thread handle for this XCC
     uint32_t which_buffer;                    // Current buffer selector (0 or 1)
     hsa_signal_t done_sig0;                   // Signal for buffer 0 completion
@@ -964,12 +965,13 @@ class GpuAgent : public GpuAgentInt {
     std::atomic<uint64_t> host_write_offset;  // Write offset into host buffer
     std::atomic<uint64_t> host_read_offset;   // Read offset from host buffer
     std::mutex host_buffer_mutex;             // Serializes this XCC's thread vs PcSamplingFlush()
+    uint8_t* host_buffer_begin;               // Cached: start of this XCC's host buffer partition
+    std::atomic<size_t> lost_sample_count;    // Per-XCC lost sample counter
   };
 
   typedef struct {
     /* Per-XCC architecture for reduced atomic contention */
     uint32_t num_xcc;                       // Number of XCCs on this device
-    pcs_sampling_data_t** device_data;      // Array of pointers (size = num_xcc)
     pcs_sampling_data_t* device_data_base;  // Base of contiguous allocation
 
     /* Per-XCC host buffers */
@@ -977,10 +979,16 @@ class GpuAgent : public GpuAgentInt {
     size_t host_buffer_size;
     size_t per_xcc_host_buffer_size;  // Cached: host_buffer_size / num_xcc
     size_t samples_per_trap_buffer;   // Cached: trap buffer capacity in samples (from device init)
-    std::atomic<size_t> lost_sample_count;  // Thread-safe lost sample counter
 
     /* Per-XCC data array - cache-line aligned AoS for optimal cache behavior */
     per_xcc_pcs_data_t* xcc_data;  // Array of per-XCC structs (size = num_xcc)
+
+    /* PM4 fallback for non-large-BAR systems (CPU cannot access VRAM directly) */
+    bool use_pm4_fallback;           // true if large-BAR not available
+    uint64_t* old_val;               // Staging area for PM4 atomic return value
+    uint32_t* cmd_data;              // PM4 command buffer
+    size_t cmd_data_sz;              // PM4 command buffer size
+    hsa_signal_t exec_pm4_signal;    // Signal for PM4 completion
 
     pcs::PcsRuntime::PcSamplingSession* session;
   } pcs_data_t;
@@ -993,10 +1001,15 @@ class GpuAgent : public GpuAgentInt {
   // @brief Per-XCC thread function for PC sampling (monitors one XCC's device buffers)
   void PcSamplingThreadPerXCC(pcs_data_t& pcs_data, uint32_t xcc_id, const char* thread_name);
 
-  // @brief Flush device buffers for per-XCC PC sampling architecture
+  // @brief Flush device buffers for per-XCC PC sampling architecture (CPU atomic path)
   hsa_status_t PcSamplingFlushDeviceBuffersPerXCC(pcs_data_t* pcs_data,
                                                   pcs::PcsRuntime::PcSamplingSession& session,
                                                   uint32_t xcc_id);
+
+  // @brief Flush device buffers using PM4 commands (fallback for non-large-BAR systems)
+  hsa_status_t PcSamplingFlushDeviceBuffersPerXCC_PM4(pcs_data_t* pcs_data,
+                                                      pcs::PcsRuntime::PcSamplingSession& session,
+                                                      uint32_t xcc_id);
 
   // @brief device handle
   amdgpu_device_handle ldrm_dev_;
