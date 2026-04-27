@@ -1421,9 +1421,9 @@ def test_time_unit_conversion_to_seconds(sample_time_data, original_ns_values):
     expected_min = original_ns_values["Min"] / time_units["s"]
     expected_max = original_ns_values["Max"] / time_units["s"]
 
-    assert abs(converted_df.loc[0, "Avg"] - expected_avg) < 1e-10
-    assert abs(converted_df.loc[0, "Min"] - expected_min) < 1e-10
-    assert abs(converted_df.loc[0, "Max"] - expected_max) < 1e-10
+    assert converted_df.loc[0, "Avg"] == pytest.approx(expected_avg, abs=1e-10)
+    assert converted_df.loc[0, "Min"] == pytest.approx(expected_min, abs=1e-10)
+    assert converted_df.loc[0, "Max"] == pytest.approx(expected_max, abs=1e-10)
 
     assert converted_df.loc[1, "Unit"] == "Cycle"
     assert converted_df.loc[2, "Unit"] == "Count"
@@ -1441,9 +1441,9 @@ def test_time_unit_conversion_to_milliseconds(sample_time_data, original_ns_valu
     expected_min = original_ns_values["Min"] / time_units["ms"]
     expected_max = original_ns_values["Max"] / time_units["ms"]
 
-    assert abs(converted_df.loc[0, "Avg"] - expected_avg) < 1e-6
-    assert abs(converted_df.loc[0, "Min"] - expected_min) < 1e-6
-    assert abs(converted_df.loc[0, "Max"] - expected_max) < 1e-6
+    assert converted_df.loc[0, "Avg"] == pytest.approx(expected_avg, abs=1e-6)
+    assert converted_df.loc[0, "Min"] == pytest.approx(expected_min, abs=1e-6)
+    assert converted_df.loc[0, "Max"] == pytest.approx(expected_max, abs=1e-6)
 
 
 @pytest.mark.time_unit_conversion
@@ -1458,9 +1458,9 @@ def test_time_unit_conversion_to_microseconds(sample_time_data, original_ns_valu
     expected_min = original_ns_values["Min"] / time_units["us"]
     expected_max = original_ns_values["Max"] / time_units["us"]
 
-    assert abs(converted_df.loc[0, "Avg"] - expected_avg) < 1e-3
-    assert abs(converted_df.loc[0, "Min"] - expected_min) < 1e-3
-    assert abs(converted_df.loc[0, "Max"] - expected_max) < 1e-3
+    assert converted_df.loc[0, "Avg"] == pytest.approx(expected_avg, abs=1e-3)
+    assert converted_df.loc[0, "Min"] == pytest.approx(expected_min, abs=1e-3)
+    assert converted_df.loc[0, "Max"] == pytest.approx(expected_max, abs=1e-3)
 
 
 @pytest.mark.time_unit_conversion
@@ -1471,9 +1471,15 @@ def test_time_unit_conversion_to_nanoseconds(sample_time_data, original_ns_value
 
     assert converted_df.loc[0, "Unit"] == "ns"
 
-    assert abs(converted_df.loc[0, "Avg"] - original_ns_values["Avg"]) < 1e-10
-    assert abs(converted_df.loc[0, "Min"] - original_ns_values["Min"]) < 1e-10
-    assert abs(converted_df.loc[0, "Max"] - original_ns_values["Max"]) < 1e-10
+    assert converted_df.loc[0, "Avg"] == pytest.approx(
+        original_ns_values["Avg"], abs=1e-10
+    )
+    assert converted_df.loc[0, "Min"] == pytest.approx(
+        original_ns_values["Min"], abs=1e-10
+    )
+    assert converted_df.loc[0, "Max"] == pytest.approx(
+        original_ns_values["Max"], abs=1e-10
+    )
 
 
 @pytest.mark.time_unit_conversion
@@ -1517,7 +1523,7 @@ def test_conversion_with_missing_columns(sample_time_data, original_ns_values):
 
     assert converted_df.loc[0, "Unit"] == "ms"
     expected_avg = original_ns_values["Avg"] / time_units["ms"]
-    assert abs(converted_df.loc[0, "Avg"] - expected_avg) < 1e-6
+    assert converted_df.loc[0, "Avg"] == pytest.approx(expected_avg, abs=1e-6)
 
 
 @pytest.mark.time_unit_conversion
@@ -1538,9 +1544,9 @@ def test_mathematical_correctness_all_units(sample_time_data, original_ns_values
         expected_min = original_ns_values["Min"] / divisor
         expected_max = original_ns_values["Max"] / divisor
 
-        assert abs(converted_df.loc[0, "Avg"] - expected_avg) < 1e-10
-        assert abs(converted_df.loc[0, "Min"] - expected_min) < 1e-10
-        assert abs(converted_df.loc[0, "Max"] - expected_max) < 1e-10
+        assert converted_df.loc[0, "Avg"] == pytest.approx(expected_avg, abs=1e-10)
+        assert converted_df.loc[0, "Min"] == pytest.approx(expected_min, abs=1e-10)
+        assert converted_df.loc[0, "Max"] == pytest.approx(expected_max, abs=1e-10)
         assert converted_df.loc[0, "Unit"] == target_unit
 
 
@@ -1568,9 +1574,9 @@ def test_integration_conversion_flow():
         converted_df = sample_df
 
     assert converted_df.loc[0, "Unit"] == "ms"
-    assert abs(converted_df.loc[0, "Avg"] - 3.44664) < 1e-5
-    assert abs(converted_df.loc[0, "Min"] - 1.76925) < 1e-5
-    assert abs(converted_df.loc[0, "Max"] - 12.53212) < 1e-5
+    assert converted_df.loc[0, "Avg"] == pytest.approx(3.44664, abs=1e-5)
+    assert converted_df.loc[0, "Min"] == pytest.approx(1.76925, abs=1e-5)
+    assert converted_df.loc[0, "Max"] == pytest.approx(12.53212, abs=1e-5)
 
 
 @pytest.mark.time_unit_integration
@@ -1592,7 +1598,7 @@ def test_show_all_with_time_unit_conversion():
         assert converted_df.loc[0, "Unit"] == time_unit
 
         expected_avg = 3446.64 / time_units[time_unit]
-        assert abs(converted_df.loc[0, "Avg"] - expected_avg) < 1e-10
+        assert converted_df.loc[0, "Avg"] == pytest.approx(expected_avg, abs=1e-10)
 
 
 @pytest.mark.time_unit_edge_cases
@@ -1766,7 +1772,7 @@ def test_create_df_kernel_top_stats_returns_valid_dataframes(
         assert kernel_top_df.index[0] == 0
 
         # Test percentage sum is approximately 100%
-        assert abs(kernel_top_df["Percent"].sum() - 100.0) < 0.01
+        assert kernel_top_df["Percent"].sum() == pytest.approx(100.0, abs=0.01)
 
 
 @pytest.mark.misc
