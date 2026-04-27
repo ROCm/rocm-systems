@@ -17,7 +17,9 @@
 #include "core/concepts.hpp"
 #include "core/config.hpp"
 #include "core/constraint.hpp"
+#include "core/control/clocks/steady.hpp"
 #include "core/control/session.hpp"
+#include "core/control/triggers/time_window.hpp"
 #include "core/cpu.hpp"
 #include "core/gpu.hpp"
 #include "core/locking.hpp"
@@ -417,6 +419,23 @@ invoke_external_resume_callbacks()
         _fn();
 }
 
+using trace_window_t =
+    rocprofsys::control::triggers::time_window<rocprofsys::control::clocks::steady>;
+
+// File-scope owners for the TRACE_DELAY/DURATION trigger. Constructed on
+// demand inside the init lambda when get_trace_specs() is non-empty;
+// stopped from rocprofsys_finalize_hidden so the worker thread is joined
+// while the session is still alive.
+rocprofsys::control::clocks::steady g_trace_window_clock;
+std::unique_ptr<trace_window_t>     g_trace_window;
+
+void
+stop_trace_window()
+{
+    if(g_trace_window) g_trace_window->stop();
+    g_trace_window.reset();
+}
+
 }  // namespace
 
 extern "C" void
@@ -679,6 +698,21 @@ rocprofsys_init_tooling_hidden(void)
                 { &process_sampler::pause, &process_sampler::resume, "process_sampler" });
             session->subscribe({ &invoke_external_pause_callbacks,
                                  &invoke_external_resume_callbacks, "external" });
+
+            if(auto _trace_specs = constraint::get_trace_specs(); !_trace_specs.empty())
+            {
+                const auto& _spec = _trace_specs.front();
+                const auto  _delay =
+                    std::chrono::nanoseconds{ static_cast<int64_t>(_spec.delay * 1.0e9) };
+                const auto _dur = std::chrono::nanoseconds{ static_cast<int64_t>(
+                    _spec.duration * 1.0e9) };
+                g_trace_window  = std::make_unique<trace_window_t>(
+                    *session, g_trace_window_clock,
+                    trace_window_t::config{ _delay, _dur });
+
+                session->attach(*g_trace_window);
+                g_trace_window->start();
+            }
 
             session->force_initial_pause();
         }
@@ -1245,6 +1279,7 @@ rocprofsys_finalize_hidden(void)
 
     _output_registry.print_summary();
 
+    stop_trace_window();
     categories::shutdown();
 
     _finalization.stop();

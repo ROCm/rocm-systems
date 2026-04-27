@@ -15,7 +15,6 @@
 
 #include <cstdint>
 #include <ctime>
-#include <functional>
 #include <set>
 #include <string>
 #include <vector>
@@ -24,26 +23,6 @@ namespace rocprofsys
 {
 namespace constraint
 {
-struct spec;
-
-struct stages
-{
-    using functor_t = std::function<bool(const spec&)>;
-
-    stages();
-
-    stages(const stages&)                = default;
-    stages(stages&&) noexcept            = default;
-    stages& operator=(const stages&)     = default;
-    stages& operator=(stages&&) noexcept = default;
-
-    functor_t init    = [](const spec&) { return true; };
-    functor_t wait    = [](const spec&) { return true; };
-    functor_t start   = [](const spec&) { return true; };
-    functor_t collect = [](const spec&) { return true; };
-    functor_t stop    = [](const spec&) { return true; };
-};
-
 struct clock_identifier
 {
     int              value    = -1;
@@ -83,8 +62,6 @@ struct spec
     spec& operator=(const spec&)     = default;
     spec& operator=(spec&&) noexcept = default;
 
-    void operator()(const stages&) const;
-
     double           delay    = 0.0;
     double           duration = 0.0;
     std::uint64_t    count    = 0;
@@ -97,8 +74,5 @@ get_valid_clock_ids();
 
 std::vector<spec>
 get_trace_specs();
-
-stages
-get_trace_stages();
 }  // namespace constraint
 }  // namespace rocprofsys

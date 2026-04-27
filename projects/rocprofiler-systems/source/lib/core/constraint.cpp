@@ -4,7 +4,6 @@
 #include "constraint.hpp"
 #include "common/delimit.hpp"
 #include "config.hpp"
-#include "state.hpp"
 #include "utility.hpp"
 
 #include "logger/debug.hpp"
@@ -15,7 +14,6 @@
 #include <cstdint>
 #include <ratio>
 #include <string>
-#include <thread>
 #include <type_traits>
 
 namespace rocprofsys
@@ -24,10 +22,6 @@ namespace constraint
 {
 namespace
 {
-constexpr uint64_t nsec_per_usec = 1'000ULL;
-constexpr uint64_t nsec_per_msec = 1'000'000ULL;
-constexpr uint64_t nsec_per_sec  = 1'000'000'000ULL;
-
 using clock_type    = std::chrono::high_resolution_clock;
 using duration_type = std::chrono::duration<double, std::nano>;
 
@@ -93,52 +87,7 @@ find_clock_identifier(const Tp& _v)
     throw std::runtime_error(fmt::format("Unknown clock id {}: {}. Valid choices: {}",
                                          _descript, _v, fmt::join(_choices, "")));
 }
-
-void
-sleep(std::uint64_t _n)
-{
-    std::this_thread::sleep_for(std::chrono::nanoseconds{ _n });
-}
-
-timespec
-get_timespec(clockid_t clock_id) noexcept
-{
-    struct timespec _ts;
-    clock_gettime(clock_id, &_ts);
-    return _ts;
-}
-
-template <typename Tp = std::uint64_t, typename Precision = std::nano>
-Tp
-get_clock_now(clockid_t clock_id) noexcept
-{
-    constexpr Tp factor = (Precision::den == std::nano::den)
-                              ? 1
-                              : (Precision::den / static_cast<Tp>(std::nano::den));
-    auto         _ts    = get_timespec(clock_id);
-    return (_ts.tv_sec * std::nano::den + _ts.tv_nsec) * factor;
-}
 }  // namespace
-
-//--------------------------------------------------------------------------------------//
-//
-//  stages implementation
-//
-//--------------------------------------------------------------------------------------//
-
-stages::stages()
-: init{ [](const spec&) { return get_state() < State::Finalized; } }
-, wait{ [](const spec& _spec) {
-    sleep(std::min<std::uint64_t>(100 * nsec_per_msec, _spec.delay * nsec_per_sec));
-    return get_state() < State::Finalized;
-} }
-, start{ [](const spec&) { return get_state() < State::Finalized; } }
-, collect{ [](const spec& _spec) {
-    sleep(std::min<std::uint64_t>(100 * nsec_per_msec, _spec.duration * nsec_per_sec));
-    return get_state() < State::Finalized;
-} }
-, stop{ [](const spec&) { return get_state() < State::Finalized; } }
-{}
 
 //--------------------------------------------------------------------------------------//
 //
@@ -234,45 +183,6 @@ spec::spec(const std::string& _line)
     if(_delim.size() > 3) clock_id = find_clock_identifier(_delim.at(3));
 }
 
-void
-spec::operator()(const stages& _stages) const
-{
-    auto _n = repeat;
-    if(_n < 1) _n = std::numeric_limits<std::uint64_t>::max();
-
-    while(get_state() < State::Active)
-        sleep(1 * nsec_per_usec);
-
-    for(std::uint64_t i = 0; i < _n; ++i)
-    {
-        auto _spec = spec{ clock_id, delay, duration, i, repeat };
-        auto _wait = [_spec](const auto& _func, auto _dur) {
-            auto _ret = true;
-            auto _now = get_clock_now(_spec.clock_id.value);
-            auto _del = (_dur * nsec_per_sec);
-            auto _end = _now + _del;
-            while(get_clock_now(_spec.clock_id.value) < _end && (_ret = _func(_spec)))
-            {
-            }
-            return _ret;
-        };
-
-        LOG_DEBUG("Executing constraint spec {} of {} :: delay: {:.3f}, "
-                  "duration: {:.3f}, clock: {}",
-                  i, _spec.repeat, _spec.delay, _spec.duration,
-                  _spec.clock_id.as_string());
-        if(_stages.init(_spec) && _wait(_stages.wait, _spec.delay) &&
-           _stages.start(_spec) && _wait(_stages.collect, _spec.duration) &&
-           _stages.stop(_spec))
-        {
-        }
-        else
-        {
-            break;
-        }
-    }
-}
-
 //--------------------------------------------------------------------------------------//
 //
 //  global usage functions
@@ -315,26 +225,6 @@ get_trace_specs()
                 _v.emplace_back(itr);
         }
     }
-
-    return _v;
-}
-
-stages
-get_trace_stages()
-{
-    auto _v = stages{};
-
-    _v.init = [](const spec&) { return get_state() < State::Finalized; };
-    _v.wait = [](const spec& _spec) {
-        sleep(std::min<std::uint64_t>(100 * nsec_per_msec, _spec.delay * nsec_per_sec));
-        return get_state() < State::Finalized;
-    };
-    _v.start   = [](const spec&) { return get_state() < State::Finalized; };
-    _v.collect = [](const spec& _spec) {
-        sleep(std::min<std::uint64_t>(100 * nsec_per_msec, _spec.duration * nsec_per_sec));
-        return get_state() < State::Finalized;
-    };
-    _v.stop = [](const spec&) { return get_state() < State::Finalized; };
 
     return _v;
 }
