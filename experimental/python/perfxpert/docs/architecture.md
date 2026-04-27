@@ -23,7 +23,7 @@ flowchart TD
     root["Root<br/>intent router"]
     analysis["Analysis<br/>classifies bottlenecks + gathers metrics"]
     recommendation["Recommendation<br/>hands off to specialists"]
-    correctness["Correctness<br/>summarizes gate verdicts"]
+    correctness["Correctness<br/>narrates immutable gate verdicts"]
   end
 
   compute["compute_specialist"]
@@ -96,11 +96,14 @@ All five verified nightly via `.github/workflows/perfxpert-nightly.yml`.
 user  →  perfxpert analyze -i trace.db
         → perfxpert.agents.runtime.build_session(...)
         → session.run_root(RootInput(...))
-        → agent runtime (Root → Analysis → bottleneck.classify …)
-        → Recommendation hands off to specialist
-        → Correctness runs 5 gates
+        → RootOutput + deterministic analysis payload
         → formatters → text / json / markdown / html
 ```
+
+Recommendation is exercised on optimize flows. Gate-cascade middleware
+and Correctness are exercised on verify / code-change evaluation flows.
+Those paths are not part of the default `perfxpert analyze` summary
+path above.
 
 ### Interactive / backend TUIs
 
@@ -151,11 +154,15 @@ Level 0 — Knowledge YAML (PR)         pytest tests/test_knowledge
 
 ## Correctness gates (spec §5)
 
-1. **Claims** — magnitude within proven_optimizations range
-2. **Sakana** — hardware-counter sanity
-3. **Schema** — output shape valid
-4. **Regression** — no hot kernel regressed > 5% (weighted-geomean definition)
-5. **Correctness** — semantic preservation (structural)
+Current gate names match `perfxpert/runtime/gate_cascade.py`; see
+[architecture/gate-cascade.md](architecture/gate-cascade.md) for the
+full reject conditions and verdict semantics.
+
+1. **Compile** — reject on build failure
+2. **SOL sanity (anti-Sakana)** — reject implausible claimed speedups
+3. **Bitwise / Numeric** — reject output drift beyond tolerance
+4. **Regression (weighted-geomean)** — return `regressed` on total, tail, or hot-kernel regressions
+5. **Test Anchors** — when `candidate_binary` is present, reject if previously passing anchor tests now fail
 
 ## What's NOT in this diagram
 
