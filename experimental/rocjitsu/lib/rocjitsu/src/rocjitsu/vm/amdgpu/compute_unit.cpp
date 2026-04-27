@@ -217,6 +217,7 @@ void ComputeUnitCore::tick_pipelines() {
 }
 
 void ComputeUnitCore::route_memory_inst(Instruction *inst, Wavefront &wf) {
+  plugin_group_->onAmdgpuRouteMemoryInstruction(*inst);
   switch (inst->data()->tag()) {
   case SCALAR_MEM:
     scalar_mem_pipeline_.issue(inst, wf);
@@ -313,6 +314,7 @@ bool ComputeUnitCore::step() {
         }
       }
       if (all_at_barrier) {
+        plugin_group_->onAmdgpuBarrierResolved(wg);
         for (auto &w2 : wfs_)
           if (w2->wg_id() == wg && w2->state() == WfState::BARRIER)
             w2->set_state(WfState::RUNNING);
@@ -421,6 +423,8 @@ bool ComputeUnitCore::step() {
       });
     }
   }
+
+  plugin_group_->onAmdgpuExecuteInstruction(active->pc, *inst);
 
   execute_instruction(inst, *active);
 
