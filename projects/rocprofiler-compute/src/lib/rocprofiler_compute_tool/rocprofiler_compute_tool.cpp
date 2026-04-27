@@ -17,7 +17,7 @@
 using namespace rocprofiler_compute_tool;
 
 static std::shared_ptr<input_parameters_t> g_input_parameters = std::make_shared<env_input_parameters_t>();
-static std::shared_ptr<sdk_wrapper_t>     g_sdk_wrapper   = std::make_shared<sdk_wrapper_impl_t>();
+static std::shared_ptr<sdk_wrapper_t> g_sdk_wrapper = std::make_shared<sdk_wrapper_impl_t>();
 static std::shared_ptr<counters_writer_t> g_counters_writer = std::make_shared<csv_counters_writer_t>();
 static std::shared_ptr<rocprofiler_tool_configure_result_t> g_cfg;
 
@@ -90,14 +90,19 @@ void tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
 }
 
 void code_object_tracing_callback(rocprofiler_callback_tracing_record_t record,
-                                                        rocprofiler_user_data_t* user_data,
-                                                        void*                    data)
+                                  rocprofiler_user_data_t*              user_data,
+                                  void*                                 data)
 {
     Expects(data);
-    auto* tool_data = static_cast<tool_data_t*>(data);
-    tool_data->pc_sampling_collector.wlock([&](auto& collector) {
-        collector->on_code_object_load(record);
-    });
+    Expects(record.payload);
+    if (record.kind == ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT &&
+        record.operation == ROCPROFILER_CODE_OBJECT_LOAD && record.phase == ROCPROFILER_CALLBACK_PHASE_LOAD)
+    {
+        auto* tool_data = static_cast<tool_data_t*>(data);
+        auto* obj_data = static_cast<rocprofiler_callback_tracing_code_object_load_data_t*>(record.payload);
+        tool_data->pc_sampling_collector.rlock([&](const pc_sampling_collector_t::Ptr& collector)
+                                               { collector->on_code_object_load(*obj_data); });
+    }
 }
 
 int tool_init(rocprofiler_client_finalize_t, void* user_data)
@@ -129,14 +134,14 @@ void generate_output(tool_data_t& tool_data)
     if (!tool_data.target_kernel_ids.empty())
     {
         tool_data.counter_records.erase(std::remove_if(tool_data.counter_records.begin(),
-                                                        tool_data.counter_records.end(),
-                                                        [&tool_data](const counter_info_record_t& record)
-                                                        {
-                                                            return tool_data.target_kernel_ids.find(
-                                                                       record.kernel_id) ==
-                                                                   tool_data.target_kernel_ids.end();
-                                                        }),
-                                         tool_data.counter_records.end());
+                                                       tool_data.counter_records.end(),
+                                                       [&tool_data](const counter_info_record_t& record)
+                                                       {
+                                                           return tool_data.target_kernel_ids.find(
+                                                                      record.kernel_id) ==
+                                                                  tool_data.target_kernel_ids.end();
+                                                       }),
+                                        tool_data.counter_records.end());
     }
     if (tool_data.counter_records.empty())
     {
@@ -151,8 +156,7 @@ void generate_output(tool_data_t& tool_data)
 
 void tool_fini(void* user_data)
 {
-    Expects(user_data)
-    std::clog << "[rocprofiler-compute] In tool fini\n";
+    Expects(user_data) std::clog << "[rocprofiler-compute] In tool fini\n";
     rocprofiler_stop_context(get_client_ctx());
 
     auto* tool_data_ptr = static_cast<tool_data_t*>(user_data);

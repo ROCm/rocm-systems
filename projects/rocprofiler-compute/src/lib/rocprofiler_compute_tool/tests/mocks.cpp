@@ -3,6 +3,7 @@
 #include "mocks.h"
 
 #include "gsl_assert.h"
+using namespace rocprofiler_compute_tool;
 
 const char* mock_input_parameters_t::get_output_path()
 {
@@ -179,7 +180,7 @@ const std::vector<mock_sdk_wrapper_t::query_counter_record_info_t>&
 
 /////////////////////////////////////////////////////////////////////////
 // mock_counters_writer_t
-void mock_counters_writer_t::write_counters(const rocprofiler_compute_tool::tool_data_t& tool_data)
+void mock_counters_writer_t::write_counters(const tool_data_t& tool_data)
 {
     write_counters_info_t args;
     for (const auto& counter : tool_data.counter_records)
@@ -199,7 +200,7 @@ const std::vector<mock_counters_writer_t::write_counters_info_t>& mock_counters_
 // mock_sdk_callbacks_t
 void mock_sdk_callbacks_t::dispatch_callback(rocprofiler_dispatch_counting_service_data_t dispatch_data,
                                              rocprofiler_counter_config_id_t* config,
-                                             rocprofiler_compute_tool::tool_data_t& /*tool_data*/)
+                                             tool_data_t& /*tool_data*/)
 {
     m_dispatch_callback_info.push_back({dispatch_data, config});
 }
@@ -207,13 +208,13 @@ void mock_sdk_callbacks_t::dispatch_callback(rocprofiler_dispatch_counting_servi
 void mock_sdk_callbacks_t::record_callback(rocprofiler_dispatch_counting_service_data_t dispatch_data,
                                            rocprofiler_counter_record_t* record_data,
                                            size_t                        record_count,
-                                           rocprofiler_compute_tool::tool_data_t& /*tool_data*/)
+                                           tool_data_t& /*tool_data*/)
 {
     m_record_callback_info.push_back({dispatch_data, record_data, record_count});
 }
 
 void mock_sdk_callbacks_t::tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
-                                                 rocprofiler_compute_tool::tool_data_t& /*tool_data*/)
+                                                 tool_data_t& /*tool_data*/)
 {
     m_tracing_callback_info.push_back({record});
 }
@@ -233,12 +234,13 @@ const std::vector<mock_sdk_callbacks_t::tracing_callback_info_t>& mock_sdk_callb
     return m_tracing_callback_info;
 }
 
-void mock_pc_sampling_collector_t::on_code_object_load(const rocprofiler_callback_tracing_record_t& record)
+void mock_pc_sampling_collector_t::on_code_object_load(
+    const rocprofiler_callback_tracing_code_object_load_data_t& info)
 {
-    m_on_code_object_load_info.push_back({});
+    m_on_code_object_load_info.push_back(info);
 }
 
-const std::vector<mock_pc_sampling_collector_t::on_code_object_load_info_t>&
+const std::vector<rocprofiler_callback_tracing_code_object_load_data_t>&
     mock_pc_sampling_collector_t::get_on_code_object_load_info() const
 {
     return m_on_code_object_load_info;

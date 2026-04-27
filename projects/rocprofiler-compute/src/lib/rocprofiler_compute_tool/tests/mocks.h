@@ -3,9 +3,9 @@
 #pragma once
 #include "counters_writer.h"
 #include "input_parameters.h"
+#include "pc_sampling_collector.h"
 #include "sdk_callbacks.h"
 #include "sdk_wrapper.h"
-#include "pc_sampling_collector.h"
 
 class mock_input_parameters_t : public rocprofiler_compute_tool::input_parameters_t
 {
@@ -84,8 +84,8 @@ public:
 
     // Test functions
     void set_available_counters(const std::vector<std::string>& counter_names);
-    const std::vector<uint64_t>&                       get_created_contexts() const;
-    const std::vector<uint64_t>&                       get_started_contexts() const;
+    const std::vector<uint64_t>&                         get_created_contexts() const;
+    const std::vector<uint64_t>&                         get_started_contexts() const;
     const std::vector<dispatch_counting_service_info_t>& get_dispatch_counting_service_info() const;
     const std::vector<create_counter_config_info_t>&     get_create_counter_config_info() const;
     const std::vector<query_counter_record_info_t>&      get_query_counter_record_info() const;
@@ -93,12 +93,12 @@ public:
 private:
     std::vector<rocprofiler_counter_id_t> get_counters() const;
 
-    std::vector<uint64_t>                       m_created_contexts;
-    std::vector<uint64_t>                       m_started_contexts;
+    std::vector<uint64_t>                         m_created_contexts;
+    std::vector<uint64_t>                         m_started_contexts;
     std::vector<dispatch_counting_service_info_t> m_dispatch_counting_service_info;
     std ::vector<create_counter_config_info_t>    m_create_counter_config_info;
     std::vector<query_counter_record_info_t>      m_query_counter_record_info;
-    std::vector<std::string>                    m_counter_names;
+    std::vector<std::string>                      m_counter_names;
 };
 
 class mock_counters_writer_t : public rocprofiler_compute_tool::counters_writer_t
@@ -150,7 +150,6 @@ public:
     void tool_tracing_callback(rocprofiler_callback_tracing_record_t  record,
                                rocprofiler_compute_tool::tool_data_t& tool_data) override;
 
-
     // Test accessors
     const std::vector<dispatch_callback_info_t>& get_dispatch_callback_info() const;
     const std::vector<record_callback_info_t>&   get_record_callback_info() const;
@@ -165,13 +164,9 @@ private:
 class mock_pc_sampling_collector_t : public rocprofiler_compute_tool::pc_sampling_collector_t
 {
 public:
-    struct on_code_object_load_info_t
-    {
-        uint32_t dummy;
-    };
-    void on_code_object_load(const rocprofiler_callback_tracing_record_t& record) override;
-    const std::vector<on_code_object_load_info_t>& get_on_code_object_load_info() const;
+    void on_code_object_load(const rocprofiler_callback_tracing_code_object_load_data_t& info) override;
+    const std::vector<rocprofiler_callback_tracing_code_object_load_data_t>& get_on_code_object_load_info() const;
 
 private:
-    std::vector<on_code_object_load_info_t> m_on_code_object_load_info = {};
+    std::vector<rocprofiler_callback_tracing_code_object_load_data_t> m_on_code_object_load_info = {};
 };

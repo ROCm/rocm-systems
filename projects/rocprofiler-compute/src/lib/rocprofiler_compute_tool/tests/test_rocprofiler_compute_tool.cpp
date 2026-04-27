@@ -268,15 +268,20 @@ TEST_F(test_rocprofiler_compute_tool_t, OnCodeObjectTracingCallback_ForwardsToSd
         [&](auto& ptr)
         { ptr = m_pc_sampling_collector; });
 
+    rocprofiler_callback_tracing_code_object_load_data_t payload = {};
+    payload.code_object_id                                       = 0xfe;
+
     rocprofiler_callback_tracing_record_t record = {};
     record.kind                                  = ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT;
     record.operation                             = ROCPROFILER_CODE_OBJECT_LOAD;
     record.phase                                 = ROCPROFILER_CALLBACK_PHASE_LOAD;
+    record.payload                               = &payload;
 
     code_object_tracing_callback(record, nullptr, &tool_data);
 
     const auto& calls = m_pc_sampling_collector->get_on_code_object_load_info();
     EXPECT_EQ(calls.size(), 1);
+    EXPECT_EQ(calls[0].code_object_id, payload.code_object_id);
 }
 
 //////////////////////////////////////////////////////////////////////////
