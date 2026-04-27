@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/vm/amdgpu/memory_pipeline.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/ds_transpose.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/l1_scalar_cache.h"
 #include "rocjitsu/vm/amdgpu/l1_vector_cache.h"
@@ -479,6 +480,8 @@ void LocalMemPipeline::initiate_access(Instruction &inst, Wavefront &wf) {
 
 void LocalMemPipeline::complete_access(Instruction &inst, Wavefront &wf) {
   auto &d = *inst.data_as<VectorMemState>();
+  if (d.transpose != 0)
+    transpose_response(d);
   vector_complete(d, wf.cu());
 
   // DS dual-access (ds_read2/ds_write2): write the second access results.

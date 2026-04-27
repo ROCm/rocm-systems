@@ -5,6 +5,7 @@
 // See lib/python/amdisa/README.md for regeneration instructions.
 
 #include "rocjitsu/isa/arch/amdgpu/cdna1/sopp.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/execute_shared.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "util/data_types.h"
 #include "util/except.h"
@@ -53,7 +54,7 @@ SWakeupSopp::SWakeupSopp(const MachineInst *inst)
   num_dst_ = 0;
 }
 
-void SWakeupSopp::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SWakeupSopp::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_wakeup_sopp(*this, wf); }
 
 SCbranchScc0Sopp::SCbranchScc0Sopp(const MachineInst *inst)
     : Sopp("s_cbranch_scc0", reinterpret_cast<const OpEncoding *>(inst),
@@ -253,7 +254,9 @@ SIcacheInvSopp::SIcacheInvSopp(const MachineInst *inst)
   num_dst_ = 0;
 }
 
-void SIcacheInvSopp::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SIcacheInvSopp::execute_impl(amdgpu::Wavefront &wf) {
+  amdgpu::execute_s_icache_inv_sopp(*this, wf);
+}
 
 SIncperflevelSopp::SIncperflevelSopp(const MachineInst *inst)
     : Sopp("s_incperflevel", reinterpret_cast<const OpEncoding *>(inst),
@@ -284,7 +287,9 @@ STtracedataSopp::STtracedataSopp(const MachineInst *inst)
   num_dst_ = 0;
 }
 
-void STtracedataSopp::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void STtracedataSopp::execute_impl(amdgpu::Wavefront &wf) {
+  amdgpu::execute_s_ttracedata_sopp(*this, wf);
+}
 
 SCbranchCdbgsysSopp::SCbranchCdbgsysSopp(const MachineInst *inst)
     : Sopp("s_cbranch_cdbgsys", reinterpret_cast<const OpEncoding *>(inst),

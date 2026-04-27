@@ -5,6 +5,7 @@
 // See lib/python/amdisa/README.md for regeneration instructions.
 
 #include "rocjitsu/isa/arch/amdgpu/rdna3_5/sop1.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/execute_shared.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "util/data_types.h"
 #include "util/except.h"
@@ -423,7 +424,10 @@ SBitreplicateB64B32Sop1::SBitreplicateB64B32Sop1(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void SBitreplicateB64B32Sop1::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SBitreplicateB64B32Sop1::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 SAbsI32Sop1::SAbsI32Sop1(const MachineInst *inst)
     : Sop1("s_abs_i32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SAbsI32Sop1>()),
@@ -1330,7 +1334,10 @@ SMovrelsB32Sop1::SMovrelsB32Sop1(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void SMovrelsB32Sop1::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SMovrelsB32Sop1::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 SMovrelsB64Sop1::SMovrelsB64Sop1(const MachineInst *inst)
     : Sop1("s_movrels_b64", reinterpret_cast<const OpEncoding *>(inst),
@@ -1347,7 +1354,10 @@ SMovrelsB64Sop1::SMovrelsB64Sop1(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void SMovrelsB64Sop1::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SMovrelsB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 SMovreldB32Sop1::SMovreldB32Sop1(const MachineInst *inst)
     : Sop1("s_movreld_b32", reinterpret_cast<const OpEncoding *>(inst),
@@ -1364,7 +1374,10 @@ SMovreldB32Sop1::SMovreldB32Sop1(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void SMovreldB32Sop1::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SMovreldB32Sop1::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 SMovreldB64Sop1::SMovreldB64Sop1(const MachineInst *inst)
     : Sop1("s_movreld_b64", reinterpret_cast<const OpEncoding *>(inst),
@@ -1381,7 +1394,10 @@ SMovreldB64Sop1::SMovreldB64Sop1(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void SMovreldB64Sop1::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SMovreldB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 SMovrelsd2B32Sop1::SMovrelsd2B32Sop1(const MachineInst *inst)
     : Sop1("s_movrelsd_2_b32", reinterpret_cast<const OpEncoding *>(inst),
@@ -1398,7 +1414,10 @@ SMovrelsd2B32Sop1::SMovrelsd2B32Sop1(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void SMovrelsd2B32Sop1::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SMovrelsd2B32Sop1::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 SGetpcB64Sop1::SGetpcB64Sop1(const MachineInst *inst)
     : Sop1("s_getpc_b64", reinterpret_cast<const OpEncoding *>(inst),
@@ -1459,7 +1478,7 @@ SRfeB64Sop1::SRfeB64Sop1(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void SRfeB64Sop1::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SRfeB64Sop1::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_rfe_b64_sop1(*this, wf); }
 
 SSendmsgRtnB32Sop1::SSendmsgRtnB32Sop1(const MachineInst *inst)
     : Sop1("s_sendmsg_rtn_b32", reinterpret_cast<const OpEncoding *>(inst),
@@ -1476,7 +1495,10 @@ SSendmsgRtnB32Sop1::SSendmsgRtnB32Sop1(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void SSendmsgRtnB32Sop1::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SSendmsgRtnB32Sop1::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 SSendmsgRtnB64Sop1::SSendmsgRtnB64Sop1(const MachineInst *inst)
     : Sop1("s_sendmsg_rtn_b64", reinterpret_cast<const OpEncoding *>(inst),
@@ -1493,7 +1515,10 @@ SSendmsgRtnB64Sop1::SSendmsgRtnB64Sop1(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void SSendmsgRtnB64Sop1::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SSendmsgRtnB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 SCeilF32Sop1::SCeilF32Sop1(const MachineInst *inst)
     : Sop1("s_ceil_f32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SCeilF32Sop1>()),

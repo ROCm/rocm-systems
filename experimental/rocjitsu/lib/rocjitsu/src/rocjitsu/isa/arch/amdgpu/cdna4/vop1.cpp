@@ -809,6 +809,7 @@ void VCvtOffF32I4Vop1::execute_impl(amdgpu::Wavefront &wf) {
     src_operands_[0] = dpp_src0_.get();
   }
   (void)wf;
+  throw util::UnimplementedInst(mnemonic());
 }
 
 VCvtF32F64Vop1::VCvtF32F64Vop1(const MachineInst *inst)
@@ -3338,6 +3339,7 @@ void VScreenPartition4seB32Vop1::execute_impl(amdgpu::Wavefront &wf) {
     src_operands_[0] = dpp_src0_.get();
   }
   (void)wf;
+  throw util::UnimplementedInst(mnemonic());
 }
 
 VMovB64Vop1::VMovB64Vop1(const MachineInst *inst)
@@ -4776,6 +4778,7 @@ void VCvtNormI16F16Vop1::execute_impl(amdgpu::Wavefront &wf) {
     src_operands_[0] = dpp_src0_.get();
   }
   (void)wf;
+  throw util::UnimplementedInst(mnemonic());
   if (sdwa_clamp_) {
     uint64_t ex = wf.exec();
     uint32_t vb = wf.vgpr_alloc().base;
@@ -4838,6 +4841,7 @@ void VCvtNormU16F16Vop1::execute_impl(amdgpu::Wavefront &wf) {
     src_operands_[0] = dpp_src0_.get();
   }
   (void)wf;
+  throw util::UnimplementedInst(mnemonic());
   if (sdwa_clamp_) {
     uint64_t ex = wf.exec();
     uint32_t vb = wf.vgpr_alloc().base;
@@ -4900,6 +4904,7 @@ void VSatPkU8I16Vop1::execute_impl(amdgpu::Wavefront &wf) {
     src_operands_[0] = dpp_src0_.get();
   }
   (void)wf;
+  throw util::UnimplementedInst(mnemonic());
 }
 
 VSwapB32Vop1::VSwapB32Vop1(const MachineInst *inst)
@@ -5175,6 +5180,7 @@ void VCvtPkF32Fp8Vop1::execute_impl(amdgpu::Wavefront &wf) {
     src_operands_[0] = dpp_src0_.get();
   }
   (void)wf;
+  throw util::UnimplementedInst(mnemonic());
 }
 
 VCvtPkF32Bf8Vop1::VCvtPkF32Bf8Vop1(const MachineInst *inst)
@@ -5225,6 +5231,7 @@ void VCvtPkF32Bf8Vop1::execute_impl(amdgpu::Wavefront &wf) {
     src_operands_[0] = dpp_src0_.get();
   }
   (void)wf;
+  throw util::UnimplementedInst(mnemonic());
 }
 
 VPrngB32Vop1::VPrngB32Vop1(const MachineInst *inst)
@@ -5324,7 +5331,17 @@ void VPermlane16SwapB32Vop1::execute_impl(amdgpu::Wavefront &wf) {
     dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
     src_operands_[0] = dpp_src0_.get();
   }
-  (void)wf;
+  uint32_t tmp_dst[64] = {}, tmp_src[64] = {};
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    tmp_dst[lane] = vdst.read_lane(wf, lane);
+    tmp_src[lane] = src0.read_lane(wf, lane);
+  }
+  for (uint32_t lane = 0; lane < 16; ++lane) {
+    if (lane + 16 >= wf.wf_size())
+      break;
+    src0.write_lane(wf, lane, tmp_dst[lane + 16]);
+    vdst.write_lane(wf, lane + 16, tmp_src[lane]);
+  }
 }
 
 VPermlane32SwapB32Vop1::VPermlane32SwapB32Vop1(const MachineInst *inst)
@@ -5374,7 +5391,17 @@ void VPermlane32SwapB32Vop1::execute_impl(amdgpu::Wavefront &wf) {
     dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
     src_operands_[0] = dpp_src0_.get();
   }
-  (void)wf;
+  uint32_t tmp_dst[64] = {}, tmp_src[64] = {};
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    tmp_dst[lane] = vdst.read_lane(wf, lane);
+    tmp_src[lane] = src0.read_lane(wf, lane);
+  }
+  for (uint32_t lane = 0; lane < 32; ++lane) {
+    if (lane + 32 >= wf.wf_size())
+      break;
+    src0.write_lane(wf, lane, tmp_dst[lane + 32]);
+    vdst.write_lane(wf, lane + 32, tmp_src[lane]);
+  }
 }
 
 VCvtF32Bf16Vop1::VCvtF32Bf16Vop1(const MachineInst *inst)

@@ -22,6 +22,8 @@ from amdisa import (
 )
 from amdisa import xml_schema as xs
 from amdisa.cross_isa import CrossIsaAnalyzer
+from amdisa.legalization import LegalizationGenerator
+from amdisa.legalization_codegen import emit_all as emit_legalization
 from amdisa.semantics import derive_all_semantics
 
 _PROFILES = {
@@ -117,6 +119,28 @@ def _run_multi(args) -> None:
 
     # Single unified shared execute header — no per-encoding stubs needed.
 
+    # Legalization table generation (--gen-legalization).
+    if args.gen_legalization:
+        leg_gen = LegalizationGenerator(specs)
+        pairs = args.legalization_pairs
+        if pairs:
+            pair_list = []
+            for p in pairs:
+                s, d = p.split('->')
+                pair_list.append((s.strip(), d.strip()))
+        else:
+            pair_list = None
+        results = leg_gen.generate_all(pair_list)
+        leg_output = args.legalization_output or args.output or '.'
+        generated = emit_legalization(leg_output, results)
+        for src, dst, entries in results:
+            counts = leg_gen.summary(entries)
+            print(f'  {src} -> {dst}: {len(entries)} entries '
+                  f'({counts["identity"]} identity, {counts["substitute"]} substitute, '
+                  f'{counts["lower"]} lower, {counts["expand"]} expand, '
+                  f'{counts["illegal"]} illegal)', file=sys.stderr)
+        print(f'Generated {len(generated)} files in {leg_output}', file=sys.stderr)
+
 
 def main() -> None:
     """Parse an AMD GPU ISA XML spec and generate C++ sources."""
@@ -179,6 +203,23 @@ def main() -> None:
         "--gen-shared-execute",
         action="store_true",
         help="Generate shared/execute_*.h template headers (requires --multi).",
+    )
+    arg_parser.add_argument(
+        "--gen-legalization",
+        action="store_true",
+        help="Generate C++ legalization tables for DBT (requires --multi).",
+    )
+    arg_parser.add_argument(
+        "--legalization-output",
+        metavar="DIR",
+        help="Output directory for legalization tables (defaults to -o value).",
+    )
+    arg_parser.add_argument(
+        "--legalization-pairs",
+        nargs='+',
+        metavar='SRC->DST',
+        help="Restrict legalization to specific pairs (e.g., cdna3->cdna4). "
+             "Default: all supported pairs from the loaded ISAs.",
     )
     args = arg_parser.parse_args()
 

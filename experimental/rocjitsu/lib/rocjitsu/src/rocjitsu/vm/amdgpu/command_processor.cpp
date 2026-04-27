@@ -760,13 +760,15 @@ void CommandProcessor::process_aql_packet(const hsa_kernel_dispatch_packet_t &pk
     os << std::format("CP: dispatch \"{}\" entry_pc={:#x} kernarg={:#x}"
                       " wgs={} wfs/wg={} grid=[{},{},{}] wg=[{},{},{}]"
                       " sgprs={} vgprs={} user_sgprs={} kcp={:#x} signal={:#x}"
-                      " setup={} grid_wgs=({},{},{})",
+                      " setup={} grid_wgs=({},{},{})"
+                      " enable_vgpr_wid={} packed_tid={}",
                       sym.empty() ? "?" : sym, entry_pc,
                       reinterpret_cast<uint64_t>(pkt.kernarg_address), total_wgs, wfs_per_wg,
                       pkt.grid_size_x, pkt.grid_size_y, pkt.grid_size_z, pkt.workgroup_size_x,
                       pkt.workgroup_size_y, pkt.workgroup_size_z, dp.sgprs_per_wf, dp.vgprs_per_wf,
                       dp.num_user_sgprs, dp.kernel_code_properties, dp.completion_signal, num_dims,
-                      dp.grid_wgs_x, dp.grid_wgs_y, dp.grid_wgs_z);
+                      dp.grid_wgs_x, dp.grid_wgs_y, dp.grid_wgs_z, dp.enable_vgpr_workitem_id,
+                      packed_tid_);
     os << std::format("\n[rj log VM] CP: LDS: kd.group_seg={} pkt.group_seg={} dp.group_seg={}"
                       " kd.private_seg={} pkt.private_seg={}",
                       kd.group_segment_fixed_size, pkt.group_segment_size,

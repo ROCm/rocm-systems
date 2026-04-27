@@ -724,8 +724,11 @@ class CodeGenerator:
         self._enc_name = enc_name
         L = []  # output lines
 
-        if cls == 'nop':
+        if cls == 'true_nop':
             return '  (void)wf;'
+
+        if cls == 'nop':
+            return '  (void)wf;\n throw util::UnimplementedInst(mnemonic());'
 
         if cls == 'endpgm':
             # Use end() instead of halt() to drain outstanding memory ops.
@@ -1075,6 +1078,21 @@ class CodeGenerator:
         if cls == 'vector_bitop3':
             return self._gen_vector_bitop3(dst_ops, src_ops, dtype)
 
+        if cls == 'vector_permlane16_swap':
+            return self._gen_vector_permlane_swap(dst_ops, src_ops, stride=16)
+
+        if cls == 'vector_permlane32_swap':
+            return self._gen_vector_permlane_swap(dst_ops, src_ops, stride=32)
+
+        if cls == 'vector_permlane16':
+            return self._gen_vector_permlane(dst_ops, src_ops, op, cross=False)
+
+        if cls == 'vector_permlanex16':
+            return self._gen_vector_permlane(dst_ops, src_ops, op, cross=True)
+
+        if cls == 'vector_permlane64':
+            return self._gen_vector_permlane64(dst_ops, src_ops)
+
         # ----- VOP3P: packed / dot / mix / MFMA -----
         if cls == 'pk_binop':
             return self._gen_pk_binop(dst_ops, src_ops, op, dtype)
@@ -1136,7 +1154,9 @@ class CodeGenerator:
         if cls in ('buffer_store', 'tbuffer_store'):
             return self._gen_buffer_store(dst_ops, src_ops, sem, cls)
 
-        if cls in ('ds_read', 'ds_read2', 'ds_write', 'ds_write2'):
+        if cls in ('ds_read', 'ds_read2', 'ds_write', 'ds_write2',
+                   'ds_read_addtid', 'ds_write_addtid',
+                   'ds_read_tr_b16', 'ds_read_tr_b8', 'ds_read_tr_b4', 'ds_read_tr_b6'):
             gds_guard = ''
             if self._enc_has_field('gds'):
                 gds_guard = ('  if (inst_.gds)\n'
@@ -1147,6 +1167,14 @@ class CodeGenerator:
                 return gds_guard + self._gen_ds_read2(dst_ops, src_ops, sem)
             if cls == 'ds_write':
                 return gds_guard + self._gen_ds_write(dst_ops, src_ops, sem)
+            if cls == 'ds_write2':
+                return gds_guard + self._gen_ds_write2(dst_ops, src_ops, sem)
+            if cls == 'ds_read_addtid':
+                return gds_guard + self._gen_ds_read_addtid(dst_ops, src_ops, sem)
+            if cls == 'ds_write_addtid':
+                return gds_guard + self._gen_ds_write_addtid(dst_ops, src_ops, sem)
+            if cls.startswith('ds_read_tr_'):
+                return gds_guard + self._gen_ds_read_tr(dst_ops, src_ops, sem)
             return gds_guard + self._gen_ds_write2(dst_ops, src_ops, sem)
 
         if cls == 'dcache_inv':
@@ -1664,25 +1692,112 @@ class CodeGenerator:
         return '\n'.join(L)
 
     def _gen_vector_bitop3(self, dst: list[str], src: list[str], dtype: str | None) -> str:
-        """Generate V_BITOP3_B32/B16 body: 3-input LUT-based bitwise operation."""
+        """Generate V_BITOP3_B32/B16 body: 3-input LUT-based bitwise operation.
+
+        The 8-bit truth table is packed into the VOP3 modifier fields:
+          truth_table = (omod << 6) | (abs << 3) | neg
+        NOT from any source operand value. Source modifiers are not applied.
+
+        Index bit ordering:
+          bit 2 = src0, bit 1 = src1, bit 0 = src2
+        """
+        nbits = '16' if dtype == 'b16' else '32'
         L = []
+        L.append('  uint8_t truth_table = static_cast<uint8_t>')
+        L.append('      ((inst_.omod << 6) | (inst_.abs << 3) | inst_.neg);')
         L.append('  uint64_t exec = wf.exec();')
         L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
         L.append('    if (!(exec & (1ULL << lane))) continue;')
         L.append(f'    uint32_t a = {src[0]}.read_lane(wf, lane);')
         L.append(f'    uint32_t b = {src[1]}.read_lane(wf, lane);')
         L.append(f'    uint32_t c = {src[2]}.read_lane(wf, lane);')
-        # The truth table (LUT) is the third source operand (typically an inline
-        # constant). For each bit position, index = {c_bit, b_bit, a_bit} selects
-        # the output bit from the 8-bit LUT.
-        nbits = '16' if dtype == 'b16' else '32'
-        L.append(f'    uint32_t lut = c & 0xFF;')
         L.append(f'    uint32_t result = 0;')
         L.append(f'    for (int i = 0; i < {nbits}; ++i) {{')
-        L.append('      uint32_t idx = ((a >> i) & 1) | (((b >> i) & 1) << 1) | (((c >> i) & 1) << 2);')
-        L.append('      result |= ((lut >> idx) & 1) << i;')
+        L.append('      uint32_t idx = (((a >> i) & 1) << 2) | (((b >> i) & 1) << 1) | ((c >> i) & 1);')
+        L.append('      result |= ((truth_table >> idx) & 1) << i;')
         L.append('    }')
         L.append(f'    {dst[0]}.write_lane(wf, lane, result);')
+        L.append('  }')
+        return '\n'.join(L)
+
+    def _gen_vector_permlane_swap(self, dst: list[str], src: list[str],
+                                   stride: int) -> str:
+        """Generate V_PERMLANE{16,32}_SWAP_B32.
+
+        For each lane N in [0..stride-1]:
+          tmp = src0[N]
+          src0[N]        ← vdst[N + stride]
+          vdst[N+stride] ← tmp
+        vdst[0..stride-1] and src0[stride..] are UNCHANGED.
+        EXEC mask is IGNORED.
+        Both vdst and src0 are outputs (LLVM: returns {vdst_new, src0_new}).
+        """
+        L = []
+        L.append('  uint32_t tmp_dst[64] = {}, tmp_src[64] = {};')
+        L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
+        L.append(f'    tmp_dst[lane] = {dst[0]}.read_lane(wf, lane);')
+        L.append(f'    tmp_src[lane] = {dst[1]}.read_lane(wf, lane);')
+        L.append('  }')
+        L.append(f'  for (uint32_t lane = 0; lane < {stride}; ++lane) {{')
+        L.append(f'    if (lane + {stride} >= wf.wf_size()) break;')
+        L.append(f'    {dst[1]}.write_lane(wf, lane, tmp_dst[lane + {stride}]);')
+        L.append(f'    {dst[0]}.write_lane(wf, lane + {stride}, tmp_src[lane]);')
+        L.append('  }')
+        return '\n'.join(L)
+
+    def _gen_vector_permlane(self, dst: list[str], src: list[str],
+                              op: str | None, cross: bool) -> str:
+        """Generate V_PERMLANE16_B32 / V_PERMLANEX16_B32 (imm and var forms).
+
+        For each lane i, read from lane (i & ~0xF) | selector[i & 0xF].
+        Immediate form: selector from src1 (low 16 lanes) / src2 (high 16 lanes),
+          each is a 4-bit field per sub-lane packed into a scalar.
+        Var form: selector from low 4 bits of src2 VGPR per lane.
+        For permlanex16 (cross=True), XOR bit 4 into the source lane to
+        enable cross-16-group fetches.
+        """
+        is_var = (op == 'var')
+        L = []
+        L.append('  constexpr bool fi = false, bound_ctrl = false;')
+        L.append('  uint64_t exec = wf.exec();')
+        L.append('  uint32_t snap[64];')
+        L.append('  for (uint32_t i = 0; i < wf.wf_size(); ++i)')
+        L.append(f'    snap[i] = {src[0]}.read_lane(wf, i);')
+        L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
+        L.append('    if (!(exec & (1ULL << lane))) continue;')
+        if is_var:
+            L.append(f'    uint32_t sel = {src[1]}.read_lane(wf, lane) & 0xF;')
+        else:
+            L.append(f'    uint32_t sel_word = (lane < 32)')
+            L.append(f'        ? {src[1]}.read_scalar(wf)')
+            L.append(f'        : {src[2]}.read_scalar(wf);')
+            L.append('    uint32_t sub = lane & 0xF;')
+            L.append('    uint32_t sel = (sel_word >> (sub * 2)) & 0xF;')
+        xor_bit = ' ^ 0x10' if cross else ''
+        L.append(f'    uint32_t src_lane = (lane & ~0xFu) | ((sel{xor_bit}) & 0xFu);')
+        L.append('    if (src_lane >= wf.wf_size()) continue;')
+        L.append('    bool src_active = (exec & (1ULL << src_lane)) != 0;')
+        L.append('    if (!src_active && !fi) {')
+        L.append('      if (bound_ctrl)')
+        L.append(f'        {dst[0]}.write_lane(wf, lane, 0);')
+        L.append('      continue;')
+        L.append('    }')
+        L.append(f'    {dst[0]}.write_lane(wf, lane, snap[src_lane]);')
+        L.append('  }')
+        return '\n'.join(L)
+
+    def _gen_vector_permlane64(self, dst: list[str], src: list[str]) -> str:
+        """Generate V_PERMLANE64_B32: swap lane i with lane i ^ 32."""
+        L = []
+        L.append('  uint64_t exec = wf.exec();')
+        L.append('  uint32_t snap[64];')
+        L.append('  for (uint32_t i = 0; i < wf.wf_size(); ++i)')
+        L.append(f'    snap[i] = {src[0]}.read_lane(wf, i);')
+        L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
+        L.append('    if (!(exec & (1ULL << lane))) continue;')
+        L.append('    uint32_t partner = lane ^ 32;')
+        L.append('    if (partner < wf.wf_size())')
+        L.append(f'      {dst[0]}.write_lane(wf, lane, snap[partner]);')
         L.append('  }')
         return '\n'.join(L)
 
@@ -4162,6 +4277,18 @@ class CodeGenerator:
                          else 'amdgpu::WaitCounterType::LGKMCNT',
             'ds_atomic': 'amdgpu::WaitCounterType::DSCNT' if is_gfx11_plus
                          else 'amdgpu::WaitCounterType::LGKMCNT',
+            'ds_read_addtid': 'amdgpu::WaitCounterType::DSCNT' if is_gfx11_plus
+                              else 'amdgpu::WaitCounterType::LGKMCNT',
+            'ds_write_addtid': 'amdgpu::WaitCounterType::DSCNT' if is_gfx11_plus
+                               else 'amdgpu::WaitCounterType::LGKMCNT',
+            'ds_read_tr_b16': 'amdgpu::WaitCounterType::DSCNT' if is_gfx11_plus
+                              else 'amdgpu::WaitCounterType::LGKMCNT',
+            'ds_read_tr_b8': 'amdgpu::WaitCounterType::DSCNT' if is_gfx11_plus
+                             else 'amdgpu::WaitCounterType::LGKMCNT',
+            'ds_read_tr_b4': 'amdgpu::WaitCounterType::DSCNT' if is_gfx11_plus
+                             else 'amdgpu::WaitCounterType::LGKMCNT',
+            'ds_read_tr_b6': 'amdgpu::WaitCounterType::DSCNT' if is_gfx11_plus
+                             else 'amdgpu::WaitCounterType::LGKMCNT',
         }
         return _MAP.get(sem_class)
 
@@ -4469,6 +4596,90 @@ class CodeGenerator:
             L.append('  d->d16_hi = true;')
         if sem.d16_lo:
             L.append('  d->d16_lo = true;')
+        L.append('  ds_calculate_addresses(inst_, wf, *d);')
+        L.append('  set_data(std::move(d));')
+        return '\n'.join(L)
+
+    def _gen_ds_read_addtid(self, dst: list[str], src: list[str],
+                            sem: InstructionSemantics) -> str:
+        """ds_read_addtid_b32: addr = thread_id * M0[24:16] * 4 + offset."""
+        L = []
+        L.append('  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);')
+        L.append(f'  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;')
+        L.append(f'  d->elem_size = {sem.elem_size};')
+        L.append(f'  d->num_elems = {sem.num_elems};')
+        L.append('  d->is_load = true;')
+        L.append('  {')
+        L.append('    uint64_t exec = wf.exec();')
+        L.append('    d->lane_mask = exec; d->exec_mask = exec;')
+        L.append('    d->wg_id = wf.wg_id(); d->wf_id = wf.wf_id();')
+        L.append('    d->cu_path = wf.cu().full_path();')
+        L.append('    uint32_t offset = (static_cast<uint32_t>(inst_.offset1) << 8) | inst_.offset0;')
+        L.append('    uint32_t m0 = wf.m0();')
+        L.append('    uint32_t ds_stride_bytes = ((m0 >> 16) & 0x1FF) * 4;')
+        L.append('    for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
+        L.append('      if (!(exec & (1ULL << lane))) continue;')
+        L.append('      d->per_lane_addr[lane] = lane * ds_stride_bytes + offset + wf.lds_base();')
+        L.append('    }')
+        L.append('  }')
+        L.append('  set_data(std::move(d));')
+        return '\n'.join(L)
+
+    def _gen_ds_write_addtid(self, dst: list[str], src: list[str],
+                             sem: InstructionSemantics) -> str:
+        """ds_write_addtid_b32: addr = thread_id * M0[24:16] * 4 + offset."""
+        L = []
+        L.append('  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);')
+        L.append(f'  d->elem_size = {sem.elem_size};')
+        L.append(f'  d->num_elems = {sem.num_elems};')
+        L.append('  d->is_load = false;')
+        L.append('  {')
+        L.append('    uint64_t exec = wf.exec();')
+        L.append('    d->lane_mask = exec; d->exec_mask = exec;')
+        L.append('    d->wg_id = wf.wg_id(); d->wf_id = wf.wf_id();')
+        L.append('    d->cu_path = wf.cu().full_path();')
+        L.append('    uint32_t offset = (static_cast<uint32_t>(inst_.offset1) << 8) | inst_.offset0;')
+        L.append('    uint32_t m0 = wf.m0();')
+        L.append('    uint32_t ds_stride_bytes = ((m0 >> 16) & 0x1FF) * 4;')
+        L.append('    for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
+        L.append('      if (!(exec & (1ULL << lane))) continue;')
+        L.append('      d->per_lane_addr[lane] = lane * ds_stride_bytes + offset + wf.lds_base();')
+        L.append('    }')
+        L.append('  }')
+        L.append('  auto &cu = wf.cu();')
+        L.append('  uint64_t exec = wf.exec();')
+        L.append(f'  d->store_data.resize(wf.wf_size() * {sem.elem_size});')
+        L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
+        L.append('    if (!(exec & (1ULL << lane))) continue;')
+        L.append(f'    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0, lane);')
+        L.append(f'    std::memcpy(&d->store_data[lane * {sem.elem_size}], &val0, {sem.elem_size});')
+        L.append('  }')
+        L.append('  set_data(std::move(d));')
+        return '\n'.join(L)
+
+    def _gen_ds_read_tr(self, dst: list[str], src: list[str],
+                        sem: InstructionSemantics) -> str:
+        """ds_read_b64_tr_b16 etc: DS read + cross-lane transpose post-processing.
+
+        Uses the standard DS read pipeline (MEMORY_OP) with elem_size=4,
+        num_elems=2 (for B64) or 3 (for B96). Sets d->transpose to signal
+        the memory pipeline to apply the cross-lane shuffle after the raw read.
+        """
+        # TR_B4=1, TR_B6=2, TR_B8=3, TR_B16=4
+        tr_map = {
+            'ds_read_tr_b4': (4, 2, 1),   # elem_size=4, num_elems=2, transpose=1
+            'ds_read_tr_b6': (4, 3, 2),   # elem_size=4, num_elems=3, transpose=2
+            'ds_read_tr_b8': (4, 2, 3),   # elem_size=4, num_elems=2, transpose=3
+            'ds_read_tr_b16': (4, 2, 4),  # elem_size=4, num_elems=2, transpose=4
+        }
+        esz, ne, tr_kind = tr_map.get(sem.semantic_class, (4, 2, 4))
+        L = []
+        L.append('  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);')
+        L.append(f'  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;')
+        L.append(f'  d->elem_size = {esz};')
+        L.append(f'  d->num_elems = {ne};')
+        L.append('  d->is_load = true;')
+        L.append(f'  d->transpose = {tr_kind};')
         L.append('  ds_calculate_addresses(inst_, wf, *d);')
         L.append('  set_data(std::move(d));')
         return '\n'.join(L)
@@ -4833,6 +5044,8 @@ class CodeGenerator:
                         'buffer_load', 'buffer_store', 'buffer_atomic',
                         'tbuffer_load', 'tbuffer_store',
                         'ds_read', 'ds_read2', 'ds_write', 'ds_write2', 'ds_atomic',
+                        'ds_read_addtid', 'ds_write_addtid',
+                        'ds_read_tr_b16', 'ds_read_tr_b8', 'ds_read_tr_b4', 'ds_read_tr_b6',
                     })
                     ctor_body_parts = list(opnd_body)
                     ctor_body_parts.append(f'num_src_ = {src_idx};')
@@ -5331,6 +5544,8 @@ class CodeGenerator:
             '',
             '#include "rocjitsu/vm/amdgpu/wavefront.h"',
             '#include "rocjitsu/vm/amdgpu/compute_unit.h"',
+            '#include "rocjitsu/vm/amdgpu/mem_state.h"',
+            '#include "rocjitsu/isa/arch/amdgpu/shared/addr_calc_scalar.h"',
             '#include "rocjitsu/isa/arch/amdgpu/shared/transcendental.h"',
             '#include "util/data_types.h"',
             '#include "util/except.h"',

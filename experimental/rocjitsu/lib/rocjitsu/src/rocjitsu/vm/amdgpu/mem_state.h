@@ -91,6 +91,7 @@ struct VectorMemState : DynamicInstState {
   std::string cu_path;                 ///< CU full path (for trace output).
   std::vector<uint8_t> response_data;
   std::vector<uint8_t> store_data;
+  uint8_t transpose = 0; ///< DS transpose kind (0=none, see ds_transpose.h).
 
   /// @brief DS dual-access support (ds_write2/ds_read2).
   ///

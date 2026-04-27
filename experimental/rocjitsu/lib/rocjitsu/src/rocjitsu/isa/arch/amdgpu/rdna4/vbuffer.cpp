@@ -37,7 +37,10 @@ BufferLoadFormatXVbuffer::BufferLoadFormatXVbuffer(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void BufferLoadFormatXVbuffer::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void BufferLoadFormatXVbuffer::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 BufferLoadFormatXyVbuffer::BufferLoadFormatXyVbuffer(const MachineInst *inst)
     : Vbuffer("buffer_load_format_xy", reinterpret_cast<const OpEncoding *>(inst),
@@ -54,7 +57,10 @@ BufferLoadFormatXyVbuffer::BufferLoadFormatXyVbuffer(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void BufferLoadFormatXyVbuffer::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void BufferLoadFormatXyVbuffer::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 BufferLoadFormatXyzVbuffer::BufferLoadFormatXyzVbuffer(const MachineInst *inst)
     : Vbuffer("buffer_load_format_xyz", reinterpret_cast<const OpEncoding *>(inst),
@@ -71,7 +77,10 @@ BufferLoadFormatXyzVbuffer::BufferLoadFormatXyzVbuffer(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void BufferLoadFormatXyzVbuffer::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void BufferLoadFormatXyzVbuffer::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 BufferLoadFormatXyzwVbuffer::BufferLoadFormatXyzwVbuffer(const MachineInst *inst)
     : Vbuffer("buffer_load_format_xyzw", reinterpret_cast<const OpEncoding *>(inst),
@@ -88,7 +97,10 @@ BufferLoadFormatXyzwVbuffer::BufferLoadFormatXyzwVbuffer(const MachineInst *inst
   num_dst_ = 1;
 }
 
-void BufferLoadFormatXyzwVbuffer::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void BufferLoadFormatXyzwVbuffer::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 BufferStoreFormatXVbuffer::BufferStoreFormatXVbuffer(const MachineInst *inst)
     : Vbuffer("buffer_store_format_x", reinterpret_cast<const OpEncoding *>(inst),
@@ -105,7 +117,10 @@ BufferStoreFormatXVbuffer::BufferStoreFormatXVbuffer(const MachineInst *inst)
   num_dst_ = 0;
 }
 
-void BufferStoreFormatXVbuffer::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void BufferStoreFormatXVbuffer::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 BufferStoreFormatXyVbuffer::BufferStoreFormatXyVbuffer(const MachineInst *inst)
     : Vbuffer("buffer_store_format_xy", reinterpret_cast<const OpEncoding *>(inst),
@@ -122,7 +137,10 @@ BufferStoreFormatXyVbuffer::BufferStoreFormatXyVbuffer(const MachineInst *inst)
   num_dst_ = 0;
 }
 
-void BufferStoreFormatXyVbuffer::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void BufferStoreFormatXyVbuffer::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 BufferStoreFormatXyzVbuffer::BufferStoreFormatXyzVbuffer(const MachineInst *inst)
     : Vbuffer("buffer_store_format_xyz", reinterpret_cast<const OpEncoding *>(inst),
@@ -139,7 +157,10 @@ BufferStoreFormatXyzVbuffer::BufferStoreFormatXyzVbuffer(const MachineInst *inst
   num_dst_ = 0;
 }
 
-void BufferStoreFormatXyzVbuffer::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void BufferStoreFormatXyzVbuffer::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 BufferStoreFormatXyzwVbuffer::BufferStoreFormatXyzwVbuffer(const MachineInst *inst)
     : Vbuffer("buffer_store_format_xyzw", reinterpret_cast<const OpEncoding *>(inst),
@@ -156,7 +177,10 @@ BufferStoreFormatXyzwVbuffer::BufferStoreFormatXyzwVbuffer(const MachineInst *in
   num_dst_ = 0;
 }
 
-void BufferStoreFormatXyzwVbuffer::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void BufferStoreFormatXyzwVbuffer::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 BufferLoadD16FormatXVbuffer::BufferLoadD16FormatXVbuffer(const MachineInst *inst)
     : Vbuffer("buffer_load_d16_format_x", reinterpret_cast<const OpEncoding *>(inst),
@@ -173,7 +197,10 @@ BufferLoadD16FormatXVbuffer::BufferLoadD16FormatXVbuffer(const MachineInst *inst
   num_dst_ = 1;
 }
 
-void BufferLoadD16FormatXVbuffer::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void BufferLoadD16FormatXVbuffer::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 BufferLoadD16FormatXyVbuffer::BufferLoadD16FormatXyVbuffer(const MachineInst *inst)
     : Vbuffer("buffer_load_d16_format_xy", reinterpret_cast<const OpEncoding *>(inst),
@@ -190,7 +217,10 @@ BufferLoadD16FormatXyVbuffer::BufferLoadD16FormatXyVbuffer(const MachineInst *in
   num_dst_ = 1;
 }
 
-void BufferLoadD16FormatXyVbuffer::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void BufferLoadD16FormatXyVbuffer::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 BufferLoadD16FormatXyzVbuffer::BufferLoadD16FormatXyzVbuffer(const MachineInst *inst)
     : Vbuffer("buffer_load_d16_format_xyz", reinterpret_cast<const OpEncoding *>(inst),
@@ -207,7 +237,10 @@ BufferLoadD16FormatXyzVbuffer::BufferLoadD16FormatXyzVbuffer(const MachineInst *
   num_dst_ = 1;
 }
 
-void BufferLoadD16FormatXyzVbuffer::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void BufferLoadD16FormatXyzVbuffer::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 BufferLoadD16FormatXyzwVbuffer::BufferLoadD16FormatXyzwVbuffer(const MachineInst *inst)
     : Vbuffer("buffer_load_d16_format_xyzw", reinterpret_cast<const OpEncoding *>(inst),
@@ -224,7 +257,10 @@ BufferLoadD16FormatXyzwVbuffer::BufferLoadD16FormatXyzwVbuffer(const MachineInst
   num_dst_ = 1;
 }
 
-void BufferLoadD16FormatXyzwVbuffer::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void BufferLoadD16FormatXyzwVbuffer::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 BufferStoreD16FormatXVbuffer::BufferStoreD16FormatXVbuffer(const MachineInst *inst)
     : Vbuffer("buffer_store_d16_format_x", reinterpret_cast<const OpEncoding *>(inst),
@@ -241,7 +277,10 @@ BufferStoreD16FormatXVbuffer::BufferStoreD16FormatXVbuffer(const MachineInst *in
   num_dst_ = 0;
 }
 
-void BufferStoreD16FormatXVbuffer::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void BufferStoreD16FormatXVbuffer::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 BufferStoreD16FormatXyVbuffer::BufferStoreD16FormatXyVbuffer(const MachineInst *inst)
     : Vbuffer("buffer_store_d16_format_xy", reinterpret_cast<const OpEncoding *>(inst),
@@ -258,7 +297,10 @@ BufferStoreD16FormatXyVbuffer::BufferStoreD16FormatXyVbuffer(const MachineInst *
   num_dst_ = 0;
 }
 
-void BufferStoreD16FormatXyVbuffer::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void BufferStoreD16FormatXyVbuffer::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 BufferStoreD16FormatXyzVbuffer::BufferStoreD16FormatXyzVbuffer(const MachineInst *inst)
     : Vbuffer("buffer_store_d16_format_xyz", reinterpret_cast<const OpEncoding *>(inst),
@@ -275,7 +317,10 @@ BufferStoreD16FormatXyzVbuffer::BufferStoreD16FormatXyzVbuffer(const MachineInst
   num_dst_ = 0;
 }
 
-void BufferStoreD16FormatXyzVbuffer::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void BufferStoreD16FormatXyzVbuffer::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 BufferStoreD16FormatXyzwVbuffer::BufferStoreD16FormatXyzwVbuffer(const MachineInst *inst)
     : Vbuffer("buffer_store_d16_format_xyzw", reinterpret_cast<const OpEncoding *>(inst),
@@ -292,7 +337,10 @@ BufferStoreD16FormatXyzwVbuffer::BufferStoreD16FormatXyzwVbuffer(const MachineIn
   num_dst_ = 0;
 }
 
-void BufferStoreD16FormatXyzwVbuffer::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void BufferStoreD16FormatXyzwVbuffer::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 BufferLoadU8Vbuffer::BufferLoadU8Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_load_u8", reinterpret_cast<const OpEncoding *>(inst),
@@ -1013,7 +1061,10 @@ BufferLoadD16HiFormatXVbuffer::BufferLoadD16HiFormatXVbuffer(const MachineInst *
   num_dst_ = 1;
 }
 
-void BufferLoadD16HiFormatXVbuffer::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void BufferLoadD16HiFormatXVbuffer::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 BufferStoreD16HiFormatXVbuffer::BufferStoreD16HiFormatXVbuffer(const MachineInst *inst)
     : Vbuffer("buffer_store_d16_hi_format_x", reinterpret_cast<const OpEncoding *>(inst),
@@ -1030,7 +1081,10 @@ BufferStoreD16HiFormatXVbuffer::BufferStoreD16HiFormatXVbuffer(const MachineInst
   num_dst_ = 0;
 }
 
-void BufferStoreD16HiFormatXVbuffer::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void BufferStoreD16HiFormatXVbuffer::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 BufferAtomicSwapB32Vbuffer::BufferAtomicSwapB32Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_atomic_swap_b32", reinterpret_cast<const OpEncoding *>(inst),
@@ -2346,7 +2400,10 @@ TbufferLoadFormatXVbuffer::TbufferLoadFormatXVbuffer(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void TbufferLoadFormatXVbuffer::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void TbufferLoadFormatXVbuffer::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 TbufferLoadFormatXyVbuffer::TbufferLoadFormatXyVbuffer(const MachineInst *inst)
     : Vbuffer("tbuffer_load_format_xy", reinterpret_cast<const OpEncoding *>(inst),
@@ -2363,7 +2420,10 @@ TbufferLoadFormatXyVbuffer::TbufferLoadFormatXyVbuffer(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void TbufferLoadFormatXyVbuffer::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void TbufferLoadFormatXyVbuffer::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 TbufferLoadFormatXyzVbuffer::TbufferLoadFormatXyzVbuffer(const MachineInst *inst)
     : Vbuffer("tbuffer_load_format_xyz", reinterpret_cast<const OpEncoding *>(inst),
@@ -2380,7 +2440,10 @@ TbufferLoadFormatXyzVbuffer::TbufferLoadFormatXyzVbuffer(const MachineInst *inst
   num_dst_ = 1;
 }
 
-void TbufferLoadFormatXyzVbuffer::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void TbufferLoadFormatXyzVbuffer::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 TbufferLoadFormatXyzwVbuffer::TbufferLoadFormatXyzwVbuffer(const MachineInst *inst)
     : Vbuffer("tbuffer_load_format_xyzw", reinterpret_cast<const OpEncoding *>(inst),
@@ -2397,7 +2460,10 @@ TbufferLoadFormatXyzwVbuffer::TbufferLoadFormatXyzwVbuffer(const MachineInst *in
   num_dst_ = 1;
 }
 
-void TbufferLoadFormatXyzwVbuffer::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void TbufferLoadFormatXyzwVbuffer::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 TbufferStoreFormatXVbuffer::TbufferStoreFormatXVbuffer(const MachineInst *inst)
     : Vbuffer("tbuffer_store_format_x", reinterpret_cast<const OpEncoding *>(inst),
@@ -2414,7 +2480,10 @@ TbufferStoreFormatXVbuffer::TbufferStoreFormatXVbuffer(const MachineInst *inst)
   num_dst_ = 0;
 }
 
-void TbufferStoreFormatXVbuffer::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void TbufferStoreFormatXVbuffer::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 TbufferStoreFormatXyVbuffer::TbufferStoreFormatXyVbuffer(const MachineInst *inst)
     : Vbuffer("tbuffer_store_format_xy", reinterpret_cast<const OpEncoding *>(inst),
@@ -2431,7 +2500,10 @@ TbufferStoreFormatXyVbuffer::TbufferStoreFormatXyVbuffer(const MachineInst *inst
   num_dst_ = 0;
 }
 
-void TbufferStoreFormatXyVbuffer::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void TbufferStoreFormatXyVbuffer::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 TbufferStoreFormatXyzVbuffer::TbufferStoreFormatXyzVbuffer(const MachineInst *inst)
     : Vbuffer("tbuffer_store_format_xyz", reinterpret_cast<const OpEncoding *>(inst),
@@ -2448,7 +2520,10 @@ TbufferStoreFormatXyzVbuffer::TbufferStoreFormatXyzVbuffer(const MachineInst *in
   num_dst_ = 0;
 }
 
-void TbufferStoreFormatXyzVbuffer::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void TbufferStoreFormatXyzVbuffer::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 TbufferStoreFormatXyzwVbuffer::TbufferStoreFormatXyzwVbuffer(const MachineInst *inst)
     : Vbuffer("tbuffer_store_format_xyzw", reinterpret_cast<const OpEncoding *>(inst),
@@ -2465,7 +2540,10 @@ TbufferStoreFormatXyzwVbuffer::TbufferStoreFormatXyzwVbuffer(const MachineInst *
   num_dst_ = 0;
 }
 
-void TbufferStoreFormatXyzwVbuffer::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void TbufferStoreFormatXyzwVbuffer::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 TbufferLoadD16FormatXVbuffer::TbufferLoadD16FormatXVbuffer(const MachineInst *inst)
     : Vbuffer("tbuffer_load_d16_format_x", reinterpret_cast<const OpEncoding *>(inst),
@@ -2482,7 +2560,10 @@ TbufferLoadD16FormatXVbuffer::TbufferLoadD16FormatXVbuffer(const MachineInst *in
   num_dst_ = 1;
 }
 
-void TbufferLoadD16FormatXVbuffer::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void TbufferLoadD16FormatXVbuffer::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 TbufferLoadD16FormatXyVbuffer::TbufferLoadD16FormatXyVbuffer(const MachineInst *inst)
     : Vbuffer("tbuffer_load_d16_format_xy", reinterpret_cast<const OpEncoding *>(inst),
@@ -2499,7 +2580,10 @@ TbufferLoadD16FormatXyVbuffer::TbufferLoadD16FormatXyVbuffer(const MachineInst *
   num_dst_ = 1;
 }
 
-void TbufferLoadD16FormatXyVbuffer::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void TbufferLoadD16FormatXyVbuffer::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 TbufferLoadD16FormatXyzVbuffer::TbufferLoadD16FormatXyzVbuffer(const MachineInst *inst)
     : Vbuffer("tbuffer_load_d16_format_xyz", reinterpret_cast<const OpEncoding *>(inst),
@@ -2516,7 +2600,10 @@ TbufferLoadD16FormatXyzVbuffer::TbufferLoadD16FormatXyzVbuffer(const MachineInst
   num_dst_ = 1;
 }
 
-void TbufferLoadD16FormatXyzVbuffer::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void TbufferLoadD16FormatXyzVbuffer::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 TbufferLoadD16FormatXyzwVbuffer::TbufferLoadD16FormatXyzwVbuffer(const MachineInst *inst)
     : Vbuffer("tbuffer_load_d16_format_xyzw", reinterpret_cast<const OpEncoding *>(inst),
@@ -2533,7 +2620,10 @@ TbufferLoadD16FormatXyzwVbuffer::TbufferLoadD16FormatXyzwVbuffer(const MachineIn
   num_dst_ = 1;
 }
 
-void TbufferLoadD16FormatXyzwVbuffer::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void TbufferLoadD16FormatXyzwVbuffer::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 TbufferStoreD16FormatXVbuffer::TbufferStoreD16FormatXVbuffer(const MachineInst *inst)
     : Vbuffer("tbuffer_store_d16_format_x", reinterpret_cast<const OpEncoding *>(inst),
@@ -2550,7 +2640,10 @@ TbufferStoreD16FormatXVbuffer::TbufferStoreD16FormatXVbuffer(const MachineInst *
   num_dst_ = 0;
 }
 
-void TbufferStoreD16FormatXVbuffer::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void TbufferStoreD16FormatXVbuffer::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 TbufferStoreD16FormatXyVbuffer::TbufferStoreD16FormatXyVbuffer(const MachineInst *inst)
     : Vbuffer("tbuffer_store_d16_format_xy", reinterpret_cast<const OpEncoding *>(inst),
@@ -2567,7 +2660,10 @@ TbufferStoreD16FormatXyVbuffer::TbufferStoreD16FormatXyVbuffer(const MachineInst
   num_dst_ = 0;
 }
 
-void TbufferStoreD16FormatXyVbuffer::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void TbufferStoreD16FormatXyVbuffer::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 TbufferStoreD16FormatXyzVbuffer::TbufferStoreD16FormatXyzVbuffer(const MachineInst *inst)
     : Vbuffer("tbuffer_store_d16_format_xyz", reinterpret_cast<const OpEncoding *>(inst),
@@ -2584,7 +2680,10 @@ TbufferStoreD16FormatXyzVbuffer::TbufferStoreD16FormatXyzVbuffer(const MachineIn
   num_dst_ = 0;
 }
 
-void TbufferStoreD16FormatXyzVbuffer::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void TbufferStoreD16FormatXyzVbuffer::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 TbufferStoreD16FormatXyzwVbuffer::TbufferStoreD16FormatXyzwVbuffer(const MachineInst *inst)
     : Vbuffer("tbuffer_store_d16_format_xyzw", reinterpret_cast<const OpEncoding *>(inst),
@@ -2601,7 +2700,10 @@ TbufferStoreD16FormatXyzwVbuffer::TbufferStoreD16FormatXyzwVbuffer(const Machine
   num_dst_ = 0;
 }
 
-void TbufferStoreD16FormatXyzwVbuffer::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void TbufferStoreD16FormatXyzwVbuffer::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 } // namespace rdna4
 } // namespace rocjitsu

@@ -430,7 +430,10 @@ DsMskorB32Ds::DsMskorB32Ds(const MachineInst *inst)
   num_dst_ = 0;
 }
 
-void DsMskorB32Ds::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void DsMskorB32Ds::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 DsWriteB32Ds::DsWriteB32Ds(const MachineInst *inst)
     : Ds("ds_write_b32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<DsWriteB32Ds>()),
@@ -693,7 +696,10 @@ DsNopDs::DsNopDs(const MachineInst *inst)
   num_dst_ = 0;
 }
 
-void DsNopDs::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void DsNopDs::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 DsAddF32Ds::DsAddF32Ds(const MachineInst *inst)
     : Ds("ds_add_f32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<DsAddF32Ds>()),
@@ -1266,7 +1272,10 @@ DsMskorRtnB32Ds::DsMskorRtnB32Ds(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void DsMskorRtnB32Ds::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void DsMskorRtnB32Ds::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 DsWrxchgRtnB32Ds::DsWrxchgRtnB32Ds(const MachineInst *inst)
     : Ds("ds_wrxchg_rtn_b32", reinterpret_cast<const OpEncoding *>(inst),
@@ -1547,7 +1556,10 @@ DsWrapRtnB32Ds::DsWrapRtnB32Ds(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void DsWrapRtnB32Ds::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void DsWrapRtnB32Ds::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 DsAddRtnF32Ds::DsAddRtnF32Ds(const MachineInst *inst)
     : Ds("ds_add_rtn_f32", reinterpret_cast<const OpEncoding *>(inst),
@@ -2318,7 +2330,10 @@ DsMskorB64Ds::DsMskorB64Ds(const MachineInst *inst)
   num_dst_ = 0;
 }
 
-void DsMskorB64Ds::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void DsMskorB64Ds::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 DsWriteB64Ds::DsWriteB64Ds(const MachineInst *inst)
     : Ds("ds_write_b64", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<DsWriteB64Ds>()),
@@ -3285,7 +3300,10 @@ DsMskorRtnB64Ds::DsMskorRtnB64Ds(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void DsMskorRtnB64Ds::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void DsMskorRtnB64Ds::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 DsWrxchgRtnB64Ds::DsWrxchgRtnB64Ds(const MachineInst *inst)
     : Ds("ds_wrxchg_rtn_b64", reinterpret_cast<const OpEncoding *>(inst),
@@ -3712,7 +3730,10 @@ DsGwsSemaReleaseAllDs::DsGwsSemaReleaseAllDs(const MachineInst *inst)
   num_dst_ = 0;
 }
 
-void DsGwsSemaReleaseAllDs::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void DsGwsSemaReleaseAllDs::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 DsGwsInitDs::DsGwsInitDs(const MachineInst *inst)
     : Ds("ds_gws_init", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<DsGwsInitDs>()),
@@ -3722,7 +3743,10 @@ DsGwsInitDs::DsGwsInitDs(const MachineInst *inst)
   num_dst_ = 0;
 }
 
-void DsGwsInitDs::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void DsGwsInitDs::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 DsGwsSemaVDs::DsGwsSemaVDs(const MachineInst *inst)
     : Ds("ds_gws_sema_v", reinterpret_cast<const OpEncoding *>(inst),
@@ -3731,7 +3755,10 @@ DsGwsSemaVDs::DsGwsSemaVDs(const MachineInst *inst)
   num_dst_ = 0;
 }
 
-void DsGwsSemaVDs::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void DsGwsSemaVDs::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 DsGwsSemaBrDs::DsGwsSemaBrDs(const MachineInst *inst)
     : Ds("ds_gws_sema_br", reinterpret_cast<const OpEncoding *>(inst),
@@ -3742,7 +3769,10 @@ DsGwsSemaBrDs::DsGwsSemaBrDs(const MachineInst *inst)
   num_dst_ = 0;
 }
 
-void DsGwsSemaBrDs::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void DsGwsSemaBrDs::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 DsGwsSemaPDs::DsGwsSemaPDs(const MachineInst *inst)
     : Ds("ds_gws_sema_p", reinterpret_cast<const OpEncoding *>(inst),
@@ -3751,7 +3781,10 @@ DsGwsSemaPDs::DsGwsSemaPDs(const MachineInst *inst)
   num_dst_ = 0;
 }
 
-void DsGwsSemaPDs::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void DsGwsSemaPDs::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 DsGwsBarrierDs::DsGwsBarrierDs(const MachineInst *inst)
     : Ds("ds_gws_barrier", reinterpret_cast<const OpEncoding *>(inst),
@@ -3762,7 +3795,10 @@ DsGwsBarrierDs::DsGwsBarrierDs(const MachineInst *inst)
   num_dst_ = 0;
 }
 
-void DsGwsBarrierDs::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void DsGwsBarrierDs::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 DsReadAddtidB32Ds::DsReadAddtidB32Ds(const MachineInst *inst)
     : Ds("ds_read_addtid_b32", reinterpret_cast<const OpEncoding *>(inst),
@@ -3778,11 +3814,26 @@ void DsReadAddtidB32Ds::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.gds)
     throw util::UnimplementedInst(mnemonic());
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = true;
-  ds_calculate_addresses(inst_, wf, *d);
+  {
+    uint64_t exec = wf.exec();
+    d->lane_mask = exec;
+    d->exec_mask = exec;
+    d->wg_id = wf.wg_id();
+    d->wf_id = wf.wf_id();
+    d->cu_path = wf.cu().full_path();
+    uint32_t offset = (static_cast<uint32_t>(inst_.offset1) << 8) | inst_.offset0;
+    uint32_t m0 = wf.m0();
+    uint32_t ds_stride_bytes = ((m0 >> 16) & 0x1FF) * 4;
+    for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+      if (!(exec & (1ULL << lane)))
+        continue;
+      d->per_lane_addr[lane] = lane * ds_stride_bytes + offset + wf.lds_base();
+    }
+  }
   set_data(std::move(d));
 }
 
@@ -3794,7 +3845,10 @@ DsConsumeDs::DsConsumeDs(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void DsConsumeDs::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void DsConsumeDs::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 DsAppendDs::DsAppendDs(const MachineInst *inst)
     : Ds("ds_append", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<DsAppendDs>()),
@@ -3804,7 +3858,10 @@ DsAppendDs::DsAppendDs(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void DsAppendDs::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void DsAppendDs::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 DsOrderedCountDs::DsOrderedCountDs(const MachineInst *inst)
     : Ds("ds_ordered_count", reinterpret_cast<const OpEncoding *>(inst),
@@ -3817,7 +3874,10 @@ DsOrderedCountDs::DsOrderedCountDs(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void DsOrderedCountDs::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void DsOrderedCountDs::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 DsWriteB96Ds::DsWriteB96Ds(const MachineInst *inst)
     : Ds("ds_write_b96", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<DsWriteB96Ds>()),
