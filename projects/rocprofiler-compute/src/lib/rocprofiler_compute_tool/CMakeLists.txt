@@ -16,6 +16,7 @@ add_library(
     sdk_wrapper.cpp
 	pc_sampling_collector.h
 	pc_sampling_collector.cpp
+	tool_data.h
 )
 
 target_include_directories(${target} PUBLIC .)

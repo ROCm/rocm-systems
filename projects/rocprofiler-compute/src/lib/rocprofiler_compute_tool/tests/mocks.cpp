@@ -177,10 +177,10 @@ const std::vector<mock_sdk_wrapper_t::query_counter_record_info_t>& mock_sdk_wra
 
 /////////////////////////////////////////////////////////////////////////
 // mock_counters_writer_t
-void mock_counters_writer_t::write_counters(rocprofiler_compute_tool::tool_data_t* tool_data)
+void mock_counters_writer_t::write_counters(const rocprofiler_compute_tool::tool_data_t& tool_data)
 {
     write_counters_info_t args;
-    for (const auto& counter : tool_data->counter_records)
+    for (const auto& counter : tool_data.counter_records)
     {
         args.counter_ids.push_back(counter.counter_id);
         args.kernel_id.push_back(counter.kernel_id);

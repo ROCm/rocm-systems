@@ -110,29 +110,29 @@ int tool_init(rocprofiler_client_finalize_t, void* user_data)
     return 0;
 }
 
-void generate_output(tool_data_t* tool_data)
+void generate_output(tool_data_t& tool_data)
 {
     // Dispatches before the kernel to be filtered was registered may have been
     // profiled. Remove any records whose kernel id does not match the
     // target_kernel_ids
-    if (!tool_data->target_kernel_ids.empty())
+    if (!tool_data.target_kernel_ids.empty())
     {
-        tool_data->counter_records.erase(std::remove_if(tool_data->counter_records.begin(),
-                                                        tool_data->counter_records.end(),
-                                                        [tool_data](const counter_info_record_t& record)
+        tool_data.counter_records.erase(std::remove_if(tool_data.counter_records.begin(),
+                                                        tool_data.counter_records.end(),
+                                                        [&tool_data](const counter_info_record_t& record)
                                                         {
-                                                            return tool_data->target_kernel_ids.find(
+                                                            return tool_data.target_kernel_ids.find(
                                                                        record.kernel_id) ==
-                                                                   tool_data->target_kernel_ids.end();
+                                                                   tool_data.target_kernel_ids.end();
                                                         }),
-                                         tool_data->counter_records.end());
+                                         tool_data.counter_records.end());
     }
-    if (tool_data->counter_records.empty())
+    if (tool_data.counter_records.empty())
     {
         return;
     }
     // Write collected counter records and clean up
-    if (!tool_data->output_filename.empty())
+    if (!tool_data.output_filename.empty())
     {
         g_counters_writer->write_counters(tool_data);
     }
@@ -141,12 +141,11 @@ void generate_output(tool_data_t* tool_data)
 void tool_fini(void* user_data)
 {
     Expects(user_data)
-    assert(user_data);
     std::clog << "[rocprofiler-compute] In tool fini\n";
     rocprofiler_stop_context(get_client_ctx());
 
-    auto* tool_data_ptr = static_cast<std::unique_ptr<tool_data_t>*>(user_data);
-    generate_output(tool_data_ptr->get());
+    auto* tool_data_ptr = static_cast<tool_data_t*>(user_data);
+    generate_output(*tool_data_ptr);
 
     delete tool_data_ptr;
 }

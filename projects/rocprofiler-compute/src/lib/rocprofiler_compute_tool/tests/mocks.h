@@ -111,7 +111,7 @@ public:
         std::vector<uint64_t> kernel_id;
     };
 
-    void write_counters(rocprofiler_compute_tool::tool_data_t* tool_data) override;
+    void write_counters(const rocprofiler_compute_tool::tool_data_t& tool_data) override;
     const std::vector<write_counters_info_t>& get_write_counters_info() const;
 
 private:
