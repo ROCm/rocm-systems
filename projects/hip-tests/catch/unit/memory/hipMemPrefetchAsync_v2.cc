@@ -93,6 +93,7 @@ HIP_TEST_CASE(Unit_hipMemPrefetchAsync_v2_Device_Host) {
 
       copyDataKernel<<<1, N, 0, stream>>>(devArr, memPtr);
       HIP_CHECK(hipGetLastError());
+      HIP_CHECK(hipStreamSynchronize(stream));
 
       int hostArr[N];
       HIP_CHECK(hipMemcpy(hostArr, devArr, Nbytes, hipMemcpyDeviceToHost));
