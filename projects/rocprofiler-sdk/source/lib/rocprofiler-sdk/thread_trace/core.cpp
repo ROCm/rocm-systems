@@ -297,11 +297,12 @@ ThreadTracerAgent::start_thread_trace(std::shared_ptr<std::atomic<int>> _flag)
 
         auto producer_data             = triple_buffer_producer_data_t{};
         producer_data.producer_running = worker_flag;
-        producer_data.start_pkt_signal = shared_signal;
         producer_data.control_packet   = std::move(control_packet_copy);
         producer_data.copy_data_fn     = copy_data_sync;
         producer_data.shared           = worker_data;
         producer_data.buffer_packet    = std::move(buffer_packet);
+        // start_pkt_signal lives on worker_data->start_pkt_signal (set above);
+        // producer_loop reads parameters.shared->start_pkt_signal.
 
         auto consumer_data        = triple_buffer_consumer_data_t{};
         consumer_data.callback_fn = params.shader_cb_fn;
@@ -338,11 +339,17 @@ ThreadTracerAgent::stop_thread_trace()
         int expected = WORKER_FLAG_RUNNING;
         worker_flag->compare_exchange_strong(expected, WORKER_FLAG_STOP);
 
+        // Capture this BEFORE we null out worker_flag so the post-join cleanup
+        // can decide whether to tear down the HSA queue (DESTRUCTOR branch
+        // requires it; see comment near queue.reset() below).
+        const bool worker_flag_was_destructor =
+            worker_flag && worker_flag->load() == WORKER_FLAG_DESTRUCTOR;
+
         // If we're in forcible-teardown mode, force-wake any signal_wait inside
         // the producer thread by storing 0 to its blocking signals. HSA permits
         // this in MULTI queue mode; the producer rechecks worker_flag and
         // bails out.
-        if(worker_flag && worker_flag->load() == WORKER_FLAG_DESTRUCTOR && shared_data)
+        if(worker_flag_was_destructor && shared_data)
         {
             auto* core = hsa::get_core_table();
             if(core)
@@ -358,7 +365,30 @@ ThreadTracerAgent::stop_thread_trace()
         if(consumer.joinable()) consumer.join();
         active_traces.fetch_sub(1);
         worker_flag = nullptr;
-        // Release the signals' lifetime now that no one is waiting on them.
+
+        // Lifetime ordering for the destructor force-wake path:
+        //
+        // The destructor manually stores 0 into producer_submit_signal to wake
+        // the producer's signal_wait. That same signal may still be installed
+        // as the completion_signal of an outstanding AQL packet on the GPU
+        // queue (see default_submit in hsa_util.cpp). If we release shared_data
+        // here while the HSA queue is still alive, the producer_submit_signal
+        // gets destroyed (signal_destroy waits for EQ 0, which is already
+        // satisfied by the manual store) and the GPU may later complete the
+        // packet by writing into a destroyed signal handle.
+        //
+        // To prevent that use-after-free, destroy the HSA queue FIRST. The
+        // ROCR queue_destroy path drains/aborts in-flight packets so that no
+        // further completion_signal writes can happen, and only then is it
+        // safe to drop the shared signal references.
+        //
+        // We only do this in the DESTRUCTOR branch because graceful stop
+        // already drains via stop_trace()/iterate_trace() in producer_loop and
+        // we want the queue to remain reusable for any future start.
+        if(worker_flag_was_destructor) queue.reset();
+
+        // Release the signals' lifetime now that no one is waiting on them
+        // and (in the DESTRUCTOR case) no GPU packet can write to them.
         shared_data = nullptr;
         return nullptr;
     }
