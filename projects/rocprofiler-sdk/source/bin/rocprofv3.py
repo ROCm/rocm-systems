@@ -937,6 +937,7 @@ For attachment profiling of running processes:
         help="""When --pid is used, attach to the target process and all of its descendant processes. Enabled by default; use --attach-children=false to attach only to the specified PID.""",
         default=True,
     )
+
     add_parser_bool_argument(
         advanced_options,
         "--attach-sync-output",
