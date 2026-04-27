@@ -19,7 +19,6 @@
 
 #include <atomic>
 #include "rocm_hip_curated_tp.h"
-#include <hip/hip_runtime_api.h>
 
 extern std::atomic<bool> rocm_hip_trace_g_disabled;
 #ifndef ROCM_TRACE_DISABLED_DEFINED

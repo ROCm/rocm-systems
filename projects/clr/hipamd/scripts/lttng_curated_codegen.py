@@ -400,19 +400,23 @@ def emit_emit_h(provider, apis, status_type, status_success, yaml_path, yaml_sha
 #include <atomic>
 #include "{provider}_curated_tp.h"
 """)
-    if provider == 'rocm_hip':
-        # Use hip_runtime_api.h (host-only) rather than the full
-        # hip_runtime.h. The full header pulls in device-side code that
-        # contains static-inline functions referencing enum constants
-        # whose definitions are not yet visible at the include point
-        # when this header is reached via the rocm_trace_emit.h chain
-        # (causes 'hipHostMallocDefault was not declared in this scope'
-        # at hip_runtime_api.h:~10598). hip_runtime_api.h is sufficient
-        # for the host-only types we need (hipError_t, hipSuccess,
-        # hipMemcpyKind, hipStream_t, dim3).
-        out.append('#include <hip/hip_runtime_api.h>\n')
-    else:
-        out.append('#include <hsa/hsa.h>\n#include <hsa/hsa_ext_amd.h>\n')
+    # NOTE: We intentionally do NOT include the provider-side runtime
+    # headers (<hip/hip_runtime_api.h> or <hsa/hsa.h>) from this generated
+    # file. The helper signatures use provider types (hipError_t,
+    # hipMemcpyKind, hipStream_t, hsa_status_t, hsa_signal_t, ...) but
+    # any TU that calls these helpers necessarily already has those
+    # types in scope (they are HIP/HSA API wrapper bodies). Including
+    # the runtime header here causes:
+    #   - HIP: 'Must define exactly one of __HIP_PLATFORM_AMD__ or
+    #     __HIP_PLATFORM_NVIDIA__' in TUs that don't set the define
+    #     (e.g. rocclr internals) plus a chain of hipHost* enum
+    #     not-declared errors when host-only inline functions in
+    #     hip_runtime_api.h reference enums whose forward-decl /
+    #     definition order is wrong at this transitive include point.
+    #   - HSA: similar transitive include / namespace pollution.
+    # The right contract is: callers must have the provider headers in
+    # scope before #including rocm_trace_emit.h. All existing wrappers
+    # already do.
 
     # Reuse the same disabled flag as the existing generic helpers.
     # The rocm_trace_disabled() inline definition is guarded with
