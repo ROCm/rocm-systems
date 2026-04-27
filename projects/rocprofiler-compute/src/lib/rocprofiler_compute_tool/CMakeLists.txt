@@ -10,8 +10,8 @@ add_library(
     counters_writer.cpp
     sdk_callbacks.h
     sdk_callbacks.cpp
-    input_parameters.h
-    input_parameters.cpp
+    env_parameters.h
+    env_parameters.cpp
     sdk_wrapper.h
     sdk_wrapper.cpp
 	pc_sampling_collector.h
