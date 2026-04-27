@@ -6,13 +6,33 @@
 #include "sdk_wrapper.h"
 
 #include <rocprofiler-sdk/registration.h>
+#include <rocprofiler-sdk/rocprofiler.h>
 
 #include <memory>
 
+// Tool entry point. Therefore, must be outside of namespace.
 rocprofiler_tool_configure_result_t* rocprofiler_configure(uint32_t                 version,
                                                            const char*              runtime_version,
                                                            uint32_t                 priority,
                                                            rocprofiler_client_id_t* id);
+
+namespace rocprofiler_compute_tool
+{
+void dispatch_callback(rocprofiler_dispatch_counting_service_data_t dispatch_data,
+                       rocprofiler_counter_config_id_t*             config,
+                       rocprofiler_user_data_t*                     user_data,
+                       void*                                        callback_data_args);
+
+void record_callback(rocprofiler_dispatch_counting_service_data_t dispatch_data,
+                     rocprofiler_counter_record_t*                record_data,
+                     size_t                                       record_count,
+                     rocprofiler_user_data_t                      user_data,
+                     void*                                        callback_data_args);
+
+void tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
+                           rocprofiler_user_data_t*              user_data,
+                           void*                                 callback_data);
+}  // namespace rocprofiler_compute_tool
 
 namespace rocprofiler_compute_tool::test_knobs
 {

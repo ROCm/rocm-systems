@@ -117,3 +117,52 @@ public:
 private:
     std::vector<write_counters_info_t> m_write_counters_args;
 };
+
+class mock_sdk_callbacks_t : public rocprofiler_compute_tool::sdk_callbacks_t
+{
+public:
+    struct dispatch_callback_info_t
+    {
+        rocprofiler_dispatch_counting_service_data_t dispatch_data{};
+        rocprofiler_counter_config_id_t*             config = nullptr;
+    };
+
+    struct record_callback_info_t
+    {
+        rocprofiler_dispatch_counting_service_data_t dispatch_data{};
+        rocprofiler_counter_record_t*                record_data  = nullptr;
+        size_t                                       record_count = 0;
+    };
+
+    struct tracing_callback_info_t
+    {
+        rocprofiler_callback_tracing_record_t record{};
+    };
+
+    void dispatch_callback(rocprofiler_dispatch_counting_service_data_t dispatch_data,
+                           rocprofiler_counter_config_id_t*             config,
+                           rocprofiler_compute_tool::tool_data_t&       tool_data) override;
+
+    void record_callback(rocprofiler_dispatch_counting_service_data_t dispatch_data,
+                         rocprofiler_counter_record_t*                record_data,
+                         size_t                                       record_count,
+                         rocprofiler_compute_tool::tool_data_t&       tool_data) override;
+
+    void tool_tracing_callback(rocprofiler_callback_tracing_record_t  record,
+                               rocprofiler_compute_tool::tool_data_t& tool_data) override;
+
+    void code_object_tracing_callback(rocprofiler_callback_tracing_record_t  record,
+                                      rocprofiler_compute_tool::tool_data_t& tool_data) override;
+
+    // Test accessors
+    const std::vector<dispatch_callback_info_t>& get_dispatch_callback_info() const;
+    const std::vector<record_callback_info_t>&   get_record_callback_info() const;
+    const std::vector<tracing_callback_info_t>&  get_tracing_callback_info() const;
+    int                                          get_code_object_callback_call_count() const;
+
+private:
+    std::vector<dispatch_callback_info_t> m_dispatch_callback_info;
+    std::vector<record_callback_info_t>   m_record_callback_info;
+    std::vector<tracing_callback_info_t>  m_tracing_callback_info;
+    int                                   m_code_object_callback_call_count = 0;
+};

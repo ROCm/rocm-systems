@@ -192,7 +192,8 @@ TEST_F(test_rocprofiler_compute_tool_t, OnFiniWithNonEmptyCounterRecords_WritesC
     EXPECT_EQ(m_counters_writer->get_write_counters_info()[0].counter_ids, std::vector{counter_id});
 }
 
-TEST_F(test_rocprofiler_compute_tool_t, OnFiniWithNonEmptyCountersAndKernelFiltering_WriteOnlyFilteredCounters)
+TEST_F(test_rocprofiler_compute_tool_t,
+       OnFiniWithNonEmptyCountersAndKernelFiltering_WriteOnlyFilteredCounters)
 {
     const auto         cfg        = rocprofiler_configure(1, "", 1, &m_client_id);
     const auto         tool_data  = get_tool_data(cfg);
@@ -208,6 +209,58 @@ TEST_F(test_rocprofiler_compute_tool_t, OnFiniWithNonEmptyCountersAndKernelFilte
     EXPECT_EQ(m_counters_writer->get_write_counters_info()[0].kernel_id, std::vector{kernel_id0});
 }
 
+TEST_F(test_rocprofiler_compute_tool_t, OnDispatchCallback_ForwardsToSdkCallbacks)
+{
+    tool_data_t tool_data{};
+    tool_data.sdk_callbacks = m_sdk_callbacks;
+
+    rocprofiler_dispatch_counting_service_data_t dispatch_data{};
+    dispatch_data.dispatch_info.kernel_id = 42;
+    rocprofiler_counter_config_id_t config{};
+
+    dispatch_callback(dispatch_data, &config, nullptr, &tool_data);
+
+    const auto& calls = m_sdk_callbacks->get_dispatch_callback_info();
+    ASSERT_EQ(calls.size(), 1);
+    EXPECT_EQ(calls[0].dispatch_data.dispatch_info.kernel_id, dispatch_data.dispatch_info.kernel_id);
+    EXPECT_EQ(calls[0].config, &config);
+}
+
+TEST_F(test_rocprofiler_compute_tool_t, OnRecordCallback_ForwardsToSdkCallbacks)
+{
+    tool_data_t tool_data{};
+    tool_data.sdk_callbacks = m_sdk_callbacks;
+
+    rocprofiler_dispatch_counting_service_data_t dispatch_data{};
+    dispatch_data.dispatch_info.kernel_id = 7;
+    rocprofiler_counter_record_t      record{};
+    constexpr size_t                  record_count = 1;
+    constexpr rocprofiler_user_data_t user_data{};
+
+    record_callback(dispatch_data, &record, record_count, user_data, &tool_data);
+
+    const auto& calls = m_sdk_callbacks->get_record_callback_info();
+    ASSERT_EQ(calls.size(), 1);
+    EXPECT_EQ(calls[0].dispatch_data.dispatch_info.kernel_id, dispatch_data.dispatch_info.kernel_id);
+    EXPECT_EQ(calls[0].record_data, &record);
+    EXPECT_EQ(calls[0].record_count, record_count);
+}
+
+TEST_F(test_rocprofiler_compute_tool_t, OnToolTracingCallback_ForwardsToSdkCallbacks)
+{
+    tool_data_t tool_data{};
+    tool_data.sdk_callbacks = m_sdk_callbacks;
+
+    rocprofiler_callback_tracing_record_t record{};
+    record.kind = ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT;
+
+    tool_tracing_callback(record, nullptr, &tool_data);
+
+    const auto& calls = m_sdk_callbacks->get_tracing_callback_info();
+    ASSERT_EQ(calls.size(), 1);
+    EXPECT_EQ(calls[0].record.kind, record.kind);
+}
+
 //////////////////////////////////////////////////////////////////////////
 /// test_rocprofiler_compute_tool_t
 void test_rocprofiler_compute_tool_t::SetUp()
@@ -215,6 +268,7 @@ void test_rocprofiler_compute_tool_t::SetUp()
     m_input_parameters = std::make_shared<mock_input_parameters_t>();
     m_sdk_wrapper      = std::make_shared<mock_sdk_wrapper_t>();
     m_counters_writer  = std::make_shared<mock_counters_writer_t>();
+    m_sdk_callbacks    = std::make_shared<mock_sdk_callbacks_t>();
 
     test_knobs::set_input_parameters(m_input_parameters);
     test_knobs::set_sdk_wrapper(m_sdk_wrapper);
@@ -232,7 +286,7 @@ tool_data_t* test_rocprofiler_compute_tool_t::get_tool_data(const rocprofiler_to
 }
 
 void test_rocprofiler_compute_tool_t::compare_counter_config_ids(const std::vector<uint64_t>& expected,
-                                                            const std::vector<uint64_t>& actual)
+                                                                 const std::vector<uint64_t>& actual)
 {
     EXPECT_EQ(expected.size(), actual.size());
     for (size_t i = 0; i < expected.size(); ++i)
@@ -242,7 +296,7 @@ void test_rocprofiler_compute_tool_t::compare_counter_config_ids(const std::vect
 }
 
 counter_info_record_t test_rocprofiler_compute_tool_t::create_counter_record(uint64_t counter_id,
-                                                                        uint64_t kernel_id)
+                                                                             uint64_t kernel_id)
 {
     counter_info_record_t record = {};
     record.counter_id            = counter_id;

@@ -192,3 +192,59 @@ const std::vector<mock_counters_writer_t::write_counters_info_t>& mock_counters_
 {
     return m_write_counters_args;
 }
+
+/////////////////////////////////////////////////////////////////////////
+// mock_sdk_callbacks_t
+void mock_sdk_callbacks_t::dispatch_callback(
+    rocprofiler_dispatch_counting_service_data_t dispatch_data,
+    rocprofiler_counter_config_id_t*             config,
+    rocprofiler_compute_tool::tool_data_t& /*tool_data*/)
+{
+    m_dispatch_callback_info.push_back({dispatch_data, config});
+}
+
+void mock_sdk_callbacks_t::record_callback(
+    rocprofiler_dispatch_counting_service_data_t dispatch_data,
+    rocprofiler_counter_record_t*                record_data,
+    size_t                                       record_count,
+    rocprofiler_compute_tool::tool_data_t& /*tool_data*/)
+{
+    m_record_callback_info.push_back({dispatch_data, record_data, record_count});
+}
+
+void mock_sdk_callbacks_t::tool_tracing_callback(
+    rocprofiler_callback_tracing_record_t  record,
+    rocprofiler_compute_tool::tool_data_t& /*tool_data*/)
+{
+    m_tracing_callback_info.push_back({record});
+}
+
+void mock_sdk_callbacks_t::code_object_tracing_callback(
+    rocprofiler_callback_tracing_record_t /*record*/,
+    rocprofiler_compute_tool::tool_data_t& /*tool_data*/)
+{
+    ++m_code_object_callback_call_count;
+}
+
+const std::vector<mock_sdk_callbacks_t::dispatch_callback_info_t>&
+    mock_sdk_callbacks_t::get_dispatch_callback_info() const
+{
+    return m_dispatch_callback_info;
+}
+
+const std::vector<mock_sdk_callbacks_t::record_callback_info_t>&
+    mock_sdk_callbacks_t::get_record_callback_info() const
+{
+    return m_record_callback_info;
+}
+
+const std::vector<mock_sdk_callbacks_t::tracing_callback_info_t>&
+    mock_sdk_callbacks_t::get_tracing_callback_info() const
+{
+    return m_tracing_callback_info;
+}
+
+int mock_sdk_callbacks_t::get_code_object_callback_call_count() const
+{
+    return m_code_object_callback_call_count;
+}
