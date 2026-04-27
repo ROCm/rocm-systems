@@ -39,7 +39,7 @@ NCCL_PARAM(IbDevicePciOrder, "IB_DEVICE_PCI_ORDER", 1);
 extern int64_t ncclParamIbArThreshold();
 
 // Returns 0 if this is the path of two VFs of the same physical device
-static int ncclIbMatchVfPath(char* path1, char* path2) {
+static int IbCastMatchVfPath(char* path1, char* path2) {
   // Merge multi-port NICs into the same PCI device
   if (ncclParamIbMergeVfs()) {
     return strncmp(path1, path2, strlen(path1)-4) == 0;
@@ -48,7 +48,7 @@ static int ncclIbMatchVfPath(char* path1, char* path2) {
   }
 }
 
-static int ncclIbCompareDevs(const void* dev1, const void* dev2) {
+static int IbCastCompareDevs(const void* dev1, const void* dev2) {
   // Compare devices using the last component of the PCI path.
   // Note: fullPciPath is never NULL but empty if not found by realpath.
   char* path1 = ((struct ncclIbDev*)dev1)->fullPciPath;
@@ -64,7 +64,7 @@ static int ncclIbCompareDevs(const void* dev1, const void* dev2) {
   return (id1 < id2) ? -1 : ((id1 == id2) ? 0 : 1);
 }
 
-static ncclResult_t ncclIbGetPciPath(char* devName, char** path, char* fullPath) {
+static ncclResult_t IbCastGetPciPath(char* devName, char** path, char* fullPath) {
   char devicePath[PATH_MAX];
   snprintf(devicePath, PATH_MAX, "/sys/class/infiniband/%s/device", devName);
   char* p = realpath(devicePath, NULL);
@@ -86,13 +86,13 @@ static ncclResult_t ncclIbGetPciPath(char* devName, char** path, char* fullPath)
   return ncclSuccess;
 }
 
-static ncclResult_t ncclIbGetRealPort(char* pciPath, int* realPort, int devIdx) {
+static ncclResult_t IbCastGetRealPort(char* pciPath, int* realPort, int devIdx) {
   *realPort = 0;
   if (pciPath == NULL) return ncclSuccess;
   // Keep the real port aside (the ibv port is always 1 on recent cards)
   // Count only devices before the current device index to assign unique port numbers
   for (int d = 0; d < devIdx; d++) {
-    if (ncclIbMatchVfPath(pciPath, ncclIbDevs[d].pciPath)) (*realPort)++;
+    if (IbCastMatchVfPath(pciPath, ncclIbDevs[d].pciPath)) (*realPort)++;
   }
   return ncclSuccess;
 }
@@ -115,15 +115,15 @@ static int firstBitSet(int val, int max) {
   while (i<max && ((val & (1<<i)) == 0)) i++;
   return i;
 }
-static int ncclIbWidth(int width) {
+static int IbCastWidth(int width) {
   return ibvWidths[firstBitSet(width, sizeof(ibvWidths)/sizeof(int)-1)];
 }
-static int ncclIbSpeed(int speed) {
+static int IbCastSpeed(int speed) {
   return ibvSpeeds[firstBitSet(speed, sizeof(ibvSpeeds)/sizeof(int)-1)];
 }
 
 // Determine whether RELAXED_ORDERING is enabled and possible
-static int ncclIbRelaxedOrderingCapable(void) {
+static int IbCastRelaxedOrderingCapable(void) {
   int roMode = ncclParamIbPciRelaxedOrdering();
   ncclResult_t r = ncclInternalError;
   if (roMode == 1 || roMode == 2) {
@@ -156,7 +156,7 @@ failure:
 extern int64_t ncclParamIbPrepostReceiveWorkRequests();
 extern int64_t ncclParamIbReceiverSideMatchingScheme();
 
-static ncclResult_t ncclIbQueryOooRqSize(struct ibv_context* ibvCtx, const char *devName, uint32_t* oooRqSize) {
+static ncclResult_t IbCastQueryOooRqSize(struct ibv_context* ibvCtx, const char *devName, uint32_t* oooRqSize) {
   ncclResult_t ret;
   if (!oooRqSize) return ncclInvalidArgument;
   *oooRqSize = 0;
@@ -178,7 +178,7 @@ fail:
   return ncclInternalError;
 }
 
-ncclResult_t ncclIbMakeVDeviceInternal(int* d, ncclNetVDeviceProps_t* props) {
+ncclResult_t IbCastMakeVDeviceInternal(int* d, ncclNetVDeviceProps_t* props) {
   if (ncclParamIbMergeNics() == 0 && props->ndevs > 1) {
     INFO(NCCL_NET, "NET/IB : Skipping makeVDevice, NCCL_IB_MERGE_NICS=0");
     return ncclInvalidUsage;
@@ -233,14 +233,14 @@ ncclResult_t ncclIbMakeVDeviceInternal(int* d, ncclNetVDeviceProps_t* props) {
   return ncclSuccess;
 }
 
-ncclResult_t ncclIbMakeVDevice(int* d, ncclNetVDeviceProps_t* props) {
+ncclResult_t IbCastMakeVDevice(int* d, ncclNetVDeviceProps_t* props) {
   std::lock_guard<std::mutex> lock(ncclIbMutex);
-  ncclResult_t res = ncclIbMakeVDeviceInternal(d, props);
+  ncclResult_t res = IbCastMakeVDeviceInternal(d, props);
   return res;
 
 }
 
-ncclResult_t ncclIbSetNetAttr(void *ctx, ncclNetAttr_t *netAttr) {
+ncclResult_t IbCastSetNetAttr(void *ctx, ncclNetAttr_t *netAttr) {
   (void)ctx;
   (void)netAttr;
   return ncclSuccess;
@@ -251,13 +251,13 @@ const char* ibProviderName[] = {
   "Mlx5",
 };
 
-ncclResult_t ncclIbFinalizeDevices(void) {
+ncclResult_t IbCastFinalizeDevices(void) {
   netRefCount--;
   return ncclSuccess;
 }
 
 extern int64_t ncclIbArThreshold;
-ncclResult_t ncclIbInitDevices(ncclDebugLogger_t logFunction, ncclProfilerCallback_t profFunction) {
+ncclResult_t IbCastInitDevices(ncclDebugLogger_t logFunction, ncclProfilerCallback_t profFunction) {
   ncclResult_t ret = ncclSuccess;
   if (netRefCount++) return ret;
   ncclProfilerFunction = profFunction;
@@ -308,7 +308,7 @@ ncclResult_t ncclIbInitDevices(ncclDebugLogger_t logFunction, ncclProfilerCallba
         uint32_t oooRqSize = 0;
         enum ncclIbProvider ibProvider = wrap_mlx5dv_is_supported(devices[d]) ? IB_PROVIDER_MLX5 : IB_PROVIDER_NONE;
         if (ibProvider == IB_PROVIDER_MLX5 && ncclParamIbOooRq()) {
-          NCCLCHECKGOTO(ncclIbQueryOooRqSize(context, devices[d]->name, &oooRqSize), ret, fail);
+          NCCLCHECKGOTO(IbCastQueryOooRqSize(context, devices[d]->name, &oooRqSize), ret, fail);
         }
 
         int nPorts = 0;
@@ -363,16 +363,16 @@ ncclResult_t ncclIbInitDevices(ncclDebugLogger_t logFunction, ncclProfilerCallba
               ncclIbDevs[ncclNIbDevs].link = portAttr.link_layer;
               if (portAttr.active_speed_ex) {
                 // A non-zero active_speed_ex indicates XDR rate (0x100) or higher
-                ncclIbDevs[ncclNIbDevs].speed = ncclIbSpeed(portAttr.active_speed_ex) * ncclIbWidth(portAttr.active_width);
+                ncclIbDevs[ncclNIbDevs].speed = IbCastSpeed(portAttr.active_speed_ex) * IbCastWidth(portAttr.active_width);
               } else {
-                ncclIbDevs[ncclNIbDevs].speed = ncclIbSpeed(portAttr.active_speed) * ncclIbWidth(portAttr.active_width);
+                ncclIbDevs[ncclNIbDevs].speed = IbCastSpeed(portAttr.active_speed) * IbCastWidth(portAttr.active_width);
               }
               ncclIbDevs[ncclNIbDevs].context = context;
               ncclIbDevs[ncclNIbDevs].pdRefs = 0;
               ncclIbDevs[ncclNIbDevs].pd = NULL;
               // for dev==1 (data direct device), pciPath is given by mlx5
               strncpy(ncclIbDevs[ncclNIbDevs].devName, devices[d]->name, MAXNAMESIZE);
-              NCCLCHECKGOTO(ncclIbGetPciPath(ncclIbDevs[ncclNIbDevs].devName, (dev == 1) ? NULL : &ncclIbDevs[ncclNIbDevs].pciPath, ncclIbDevs[ncclNIbDevs].fullPciPath), ret, fail);
+              NCCLCHECKGOTO(IbCastGetPciPath(ncclIbDevs[ncclNIbDevs].devName, (dev == 1) ? NULL : &ncclIbDevs[ncclNIbDevs].pciPath, ncclIbDevs[ncclNIbDevs].fullPciPath), ret, fail);
               if (dev == 1) {
                 snprintf(ncclIbDevs[ncclNIbDevs].devName, MAXNAMESIZE, "%s_dma", devices[d]->name);
                 NCCLCHECK(ncclCalloc(&ncclIbDevs[ncclNIbDevs].pciPath, PATH_MAX));
@@ -385,7 +385,7 @@ ncclResult_t ncclIbInitDevices(ncclDebugLogger_t logFunction, ncclProfilerCallba
               ncclIbDevs[ncclNIbDevs].mrCache.capacity = 0;
               ncclIbDevs[ncclNIbDevs].mrCache.population = 0;
               ncclIbDevs[ncclNIbDevs].mrCache.slots = NULL;
-              NCCLCHECK(ncclIbStatsInit(&ncclIbDevs[ncclNIbDevs].stats));
+              NCCLCHECK(IbCastStatsInit(&ncclIbDevs[ncclNIbDevs].stats));
 
               // Enable ADAPTIVE_ROUTING by default on IB networks
               // But allow it to be overloaded by an env parameter
@@ -397,7 +397,7 @@ ncclResult_t ncclIbInitDevices(ncclDebugLogger_t logFunction, ncclProfilerCallba
                    ncclIbDevs[ncclNIbDevs].portNum, NCCL_IB_LLSTR(portAttr.link_layer), ibProviderName[ncclIbDevs[ncclNIbDevs].ibProvider], ncclIbDevs[ncclNIbDevs].speed, context,
                    ncclIbDevs[ncclNIbDevs].pciPath, ncclIbDevs[ncclNIbDevs].ar, ncclIbDevs[ncclNIbDevs].oooRqSize);
 
-              ncclIbAsyncThread = std::thread(ncclIbAsyncThreadMain, ncclIbDevs + ncclNIbDevs);
+              ncclIbAsyncThread = std::thread(IbCastAsyncThreadMain, ncclIbDevs + ncclNIbDevs);
               ncclSetThreadName(ncclIbAsyncThread.native_handle(), "NCCL IbAsync %2d", ncclNIbDevs);
               ncclIbAsyncThread.detach();
 
@@ -414,7 +414,7 @@ ncclResult_t ncclIbInitDevices(ncclDebugLogger_t logFunction, ncclProfilerCallba
       INFO(NCCL_INIT|NCCL_NET, "NET/IB : No device found.");
     }
     // Determine whether RELAXED_ORDERING is enabled and possible
-    ncclIbRelaxedOrderingEnabled = ncclIbRelaxedOrderingCapable();
+    ncclIbRelaxedOrderingEnabled = IbCastRelaxedOrderingCapable();
 
     // Default value for ncclIbArThreshold is 8192
     if (ncclParamIbArThreshold() != -2) {
@@ -425,12 +425,12 @@ ncclResult_t ncclIbInitDevices(ncclDebugLogger_t logFunction, ncclProfilerCallba
       }
     }
     // sort devices to ensure a consistent order across nodes
-    if (ncclParamIbDevicePciOrder()) qsort(ncclIbDevs, ncclNIbDevs, sizeof(struct ncclIbDev), ncclIbCompareDevs);
+    if (ncclParamIbDevicePciOrder()) qsort(ncclIbDevs, ncclNIbDevs, sizeof(struct ncclIbDev), IbCastCompareDevs);
     // Once sorted, get the realPort ID and create the virtual devices.
     // Doing it after sorting ensures that devices will have consistent realPort ids across nodes.
     char line[2048] = "";
     for (int d = 0; d < ncclNIbDevs; d++) {
-      NCCLCHECKGOTO(ncclIbGetRealPort(ncclIbDevs[d].pciPath, &ncclIbDevs[d].realPort, d), ret, fail);
+      NCCLCHECKGOTO(IbCastGetRealPort(ncclIbDevs[d].pciPath, &ncclIbDevs[d].realPort, d), ret, fail);
       snprintf(line + strlen(line), sizeof(line) - strlen(line), " [%d]%s:%d/%s", d, ncclIbDevs[d].devName, ncclIbDevs[d].portNum, NCCL_IB_LLSTR(ncclIbDevs[d].link));
 
       // Add this plain physical device to the list of virtual devices (after sorting)
@@ -438,7 +438,7 @@ ncclResult_t ncclIbInitDevices(ncclDebugLogger_t logFunction, ncclProfilerCallba
       ncclNetVDeviceProps_t vProps = {0};
       vProps.ndevs = 1;
       vProps.devs[0] = d;
-      NCCLCHECK(ncclIbMakeVDeviceInternal(&vDev, &vProps));
+      NCCLCHECK(IbCastMakeVDeviceInternal(&vDev, &vProps));
     }
     char addrline[SOCKET_NAME_MAXLEN+1];
     INFO(NCCL_INIT | NCCL_NET, "NET/IB : Using%s %s; OOB %s:%s", line, ncclIbRelaxedOrderingEnabled ? "[RO]" : "", ncclIbIfName, ncclSocketToString(&ncclIbIfAddr, addrline));
@@ -449,23 +449,23 @@ fail:
   goto exit;
 }
 
-ncclResult_t ncclIbInit(void** ctx, uint64_t commId, ncclNetCommConfig_t* config, ncclDebugLogger_t logFunction, ncclProfilerCallback_t profFunction) {
+ncclResult_t IbCastInit(void** ctx, uint64_t commId, ncclNetCommConfig_t* config, ncclDebugLogger_t logFunction, ncclProfilerCallback_t profFunction) {
   ncclResult_t ret = ncclSuccess;
   ncclNetCommConfig_t* netCommConfig = nullptr;
-  NCCLCHECK(ncclIbInitDevices(logFunction, profFunction));
-  NCCLCHECK(ncclIbPortRecoveryThreadStart());
+  NCCLCHECK(IbCastInitDevices(logFunction, profFunction));
+  NCCLCHECK(IbCastPortRecoveryThreadStart());
   NCCLCHECK(ncclCalloc(&netCommConfig, 1));
   netCommConfig->trafficClass = config->trafficClass;
   *ctx = (void *)netCommConfig;
   return ret;
 }
 
-ncclResult_t ncclIbDevices(int* ndev) {
+ncclResult_t IbCastDevices(int* ndev) {
   *ndev = ncclNMergedIbDevs;
   return ncclSuccess;
 }
 
-ncclResult_t ncclIbGetPhysProperties(int dev, ncclNetProperties_t* props) {
+ncclResult_t IbCastGetPhysProperties(int dev, ncclNetProperties_t* props) {
   struct ncclIbDev* ibDev = ncclIbDevs + dev;
   std::lock_guard<std::mutex> lock(ibDev->mutex);
   props->name = ibDev->devName;
@@ -473,11 +473,11 @@ ncclResult_t ncclIbGetPhysProperties(int dev, ncclNetProperties_t* props) {
   props->pciPath = ibDev->pciPath;
   props->guid = ibDev->guid;
   props->ptrSupport = NCCL_PTR_HOST;
-  if (ncclIbGdrSupport() == ncclSuccess) {
+  if (IbCastGdrSupport() == ncclSuccess) {
     props->ptrSupport |= NCCL_PTR_CUDA; // GDR support via nv_peermem
   }
   props->regIsGlobal = 1;
-  if (ncclIbDmaBufSupport(dev) == ncclSuccess) {
+  if (IbCastDmaBufSupport(dev) == ncclSuccess) {
     props->ptrSupport |= NCCL_PTR_DMABUF; // GDR support via DMA-BUF
   }
   props->forceFlush = 0;
@@ -496,22 +496,22 @@ ncclResult_t ncclIbGetPhysProperties(int dev, ncclNetProperties_t* props) {
   return ncclSuccess;
 }
 
-ncclResult_t ncclIbGetProperties(int dev, ncclNetProperties_t* props) {
+ncclResult_t IbCastGetProperties(int dev, ncclNetProperties_t* props) {
   if (dev >= ncclNMergedIbDevs) {
     WARN("NET/IB : Requested properties for vNic %d, only %d vNics have been created", dev, ncclNMergedIbDevs);
     return ncclInvalidUsage;
   }
   struct ncclIbMergedDev* mergedDev = ncclIbMergedDevs + dev;
   // Take the rest of the properties from an arbitrary sub-device (should be the same)
-  NCCLCHECK(ncclIbGetPhysProperties(mergedDev->vProps.devs[0], props));
+  NCCLCHECK(IbCastGetPhysProperties(mergedDev->vProps.devs[0], props));
   props->name = mergedDev->devName;
   props->speed = mergedDev->speed;
   memcpy(&props->vProps, &mergedDev->vProps, sizeof(ncclNetVDeviceProps_t));
   return ncclSuccess;
 }
 
-ncclResult_t ncclIbFinalize(void* ctx) {
+ncclResult_t IbCastFinalize(void* ctx) {
   free(ctx);
-  NCCLCHECK(ncclIbPortRecoveryThreadStop());
-  return ncclIbFinalizeDevices();
+  NCCLCHECK(IbCastPortRecoveryThreadStop());
+  return IbCastFinalizeDevices();
 }

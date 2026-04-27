@@ -66,13 +66,13 @@ struct ncclIbConnectionMetadata {
   int sl;
 };
 
-ncclResult_t ncclIbQpCreate(struct ncclIbQp* qp, struct ncclIbQpCreateAttr* createQpAttrs);
-ncclResult_t ncclIbQpInit(struct ncclIbQp* qp);
-ncclResult_t ncclIbQpRtr(struct ncclIbQp* qp);
-ncclResult_t ncclIbQpRts(struct ncclIbQp* qp);
-ncclResult_t ncclIbQpReset(struct ncclIbQp* qp);
-ncclResult_t ncclIbQpError(struct ncclIbQp* qp);
+ncclResult_t IbCastQpCreate(struct ncclIbQp* qp, struct ncclIbQpCreateAttr* createQpAttrs);
+ncclResult_t IbCastQpInit(struct ncclIbQp* qp);
+ncclResult_t IbCastQpRtr(struct ncclIbQp* qp);
+ncclResult_t IbCastQpRts(struct ncclIbQp* qp);
+ncclResult_t IbCastQpReset(struct ncclIbQp* qp);
+ncclResult_t IbCastQpError(struct ncclIbQp* qp);
 
-ncclResult_t ncclIbPostReceiveWorkRequestsOnQp(struct ncclIbRecvComm* recvComm, ncclIbQp* dataQp);
+ncclResult_t IbCastPostReceiveWorkRequestsOnQp(struct ncclIbRecvComm* recvComm, ncclIbQp* dataQp);
 
 #endif // NET_IB_CONNECT_H_

@@ -61,14 +61,14 @@ ncclResult_t ncclIbRegMrDmaBufInternal2(ncclIbNetCommDevBase* base, void* data, 
 }
 
 /* DMA-BUF support */
-ncclResult_t ncclIbRegMrDmaBufInternal(void* comm, void* data, size_t size, int type, uint64_t offset, int fd, uint64_t mrFlags, void** mhandle) {
+ncclResult_t IbCastRegMrDmaBufInternal(void* comm, void* data, size_t size, int type, uint64_t offset, int fd, uint64_t mrFlags, void** mhandle) {
   ncclResult_t ret = ncclSuccess;
   assert(size > 0);
   struct ncclIbNetCommBase* base = (struct ncclIbNetCommBase*) comm;
   struct ncclIbMrHandle* mhandleWrapper = (struct ncclIbMrHandle*) malloc(sizeof(struct ncclIbMrHandle));
   for (int i = 0; i < base->vProps.ndevs; i++) {
     // Each ncclIbNetCommDevBase is at different offset in send and recv netComms
-    struct ncclIbNetCommDevBase* devComm = ncclIbGetNetCommDevBase(base, i);
+    struct ncclIbNetCommDevBase* devComm = IbCastGetNetCommDevBase(base, i);
     NCCLCHECKGOTO(ncclIbRegMrDmaBufInternal2(devComm, data, size, type, offset, fd, mrFlags, mhandleWrapper->mrs + i), ret, fail);
   }
   *mhandle = (void*) mhandleWrapper;
@@ -79,15 +79,15 @@ fail:
   goto exit;
 }
 
-ncclResult_t ncclIbRegMrDmaBuf(void* comm, void* data, size_t size, int type, uint64_t offset, int fd, void** mhandle) {
-  return ncclIbRegMrDmaBufInternal(comm, data, size, type, offset, fd, 0ULL, mhandle);
+ncclResult_t IbCastRegMrDmaBuf(void* comm, void* data, size_t size, int type, uint64_t offset, int fd, void** mhandle) {
+  return IbCastRegMrDmaBufInternal(comm, data, size, type, offset, fd, 0ULL, mhandle);
 }
 
-ncclResult_t ncclIbRegMr(void* comm, void* data, size_t size, int type, void** mhandle) {
-  return ncclIbRegMrDmaBufInternal(comm, data, size, type, 0ULL, -1, 0, mhandle);
+ncclResult_t IbCastRegMr(void* comm, void* data, size_t size, int type, void** mhandle) {
+  return IbCastRegMrDmaBufInternal(comm, data, size, type, 0ULL, -1, 0, mhandle);
 }
 
-ncclResult_t ncclIbDeregMrInternal(ncclIbNetCommDevBase* base, ibv_mr* mhandle) {
+ncclResult_t IbCastDeregMrInternal(ncclIbNetCommDevBase* base, ibv_mr* mhandle) {
   struct ncclIbMrCache* cache = &ncclIbDevs[base->ibDevN].mrCache;
   std::lock_guard<std::mutex> lock(ncclIbDevs[base->ibDevN].mutex);
   for (int i=0; i < cache->population; i++) {
@@ -108,15 +108,15 @@ ncclResult_t ncclIbDeregMrInternal(ncclIbNetCommDevBase* base, ibv_mr* mhandle) 
   return ncclInternalError;
 }
 
-ncclResult_t ncclIbDeregMr(void* comm, void* mhandle) {
+ncclResult_t IbCastDeregMr(void* comm, void* mhandle) {
   if (mhandle == NULL) return ncclSuccess;
 
   struct ncclIbMrHandle* mhandleWrapper = (struct ncclIbMrHandle*) mhandle;
   struct ncclIbNetCommBase* base = (struct ncclIbNetCommBase*) comm;
   for (int i = 0; i < base->vProps.ndevs; i++) {
     // Each ncclIbNetCommDevBase is at different offset in send and recv netComms
-    struct ncclIbNetCommDevBase* devComm = ncclIbGetNetCommDevBase(base, i);
-    NCCLCHECK(ncclIbDeregMrInternal(devComm, mhandleWrapper->mrs[i]));
+    struct ncclIbNetCommDevBase* devComm = IbCastGetNetCommDevBase(base, i);
+    NCCLCHECK(IbCastDeregMrInternal(devComm, mhandleWrapper->mrs[i]));
   }
   free(mhandleWrapper);
   return ncclSuccess;
