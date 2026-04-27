@@ -423,6 +423,28 @@ def _status_symbol(kind: str, stream=None) -> str:
     return glyph
 
 
+def _stream_safe_text(text: str, stream=None) -> str:
+    """Return text that can be encoded by the target stream."""
+    import sys
+
+    stream = stream or sys.stdout
+    encoding = getattr(stream, "encoding", None) or "utf-8"
+    try:
+        text.encode(encoding)
+        return text
+    except UnicodeEncodeError:
+        fallback = text.translate(str.maketrans({"—": "-", "–": "-"}))
+        return fallback.encode(encoding, errors="replace").decode(encoding)
+
+
+def _doctor_print(text: str = "", stream=None) -> None:
+    """Print a doctor line without assuming UTF-8 stdout."""
+    import sys
+
+    stream = stream or sys.stdout
+    print(_stream_safe_text(text, stream), file=stream)
+
+
 def _run_doctor():
     """Run all health checks and print results in canonical format."""
     import sys
@@ -443,28 +465,35 @@ def _run_doctor():
         symbol = _status_symbol(kind, sys.stdout)
         if not ok and kind == "fail":
             all_ok = False
-        print(f"{symbol} {msg}")
+        _doctor_print(f"{symbol} {msg}", sys.stdout)
 
     # Check LLM providers
     configured, unconfigured = _check_llm_providers()
     all_ok = all_ok and len(configured) > 0  # at least one provider configured
     configured_str = ", ".join(configured) if configured else "(none)"
     unconfigured_str = ", ".join(unconfigured) if unconfigured else "(all configured)"
-    print(f"{_status_symbol('ok', sys.stdout)} {len(configured)}/5 LLM providers configured ({configured_str})")
+    _doctor_print(
+        f"{_status_symbol('ok', sys.stdout)} "
+        f"{len(configured)}/5 LLM providers configured ({configured_str})",
+        sys.stdout,
+    )
     if unconfigured:
-        print(f"  {len(unconfigured)}/5 providers unconfigured ({unconfigured_str}) — see README")
+        _doctor_print(
+            f"  {len(unconfigured)}/5 providers unconfigured ({unconfigured_str}) — see README",
+            sys.stdout,
+        )
 
     # Report active mode
-    print()
-    print(_report_active_mode())
+    _doctor_print(stream=sys.stdout)
+    _doctor_print(_report_active_mode(), sys.stdout)
 
     # Final status
-    print()
+    _doctor_print(stream=sys.stdout)
     if all_ok:
-        print(f"{_status_symbol('ok', sys.stdout)} ALL CLEAN")
+        _doctor_print(f"{_status_symbol('ok', sys.stdout)} ALL CLEAN", sys.stdout)
         return 0
     else:
-        print(f"{_status_symbol('fail', sys.stdout)} Issues found — see above")
+        _doctor_print(f"{_status_symbol('fail', sys.stdout)} Issues found — see above", sys.stdout)
         return 1
 
 
