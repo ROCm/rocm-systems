@@ -14,6 +14,29 @@ Usage:
         --status-success hipSuccess           \\
         --out-tp    path/to/rocm_hip_curated_tp.h \\
         --out-emit  path/to/rocm_trace_emit_curated.h
+
+CI usage (wired into .github/workflows/lttng-curated-gates.yml by Task 13.5):
+
+    # Drift gate: codegen output (consuming checked-in sidecar) must
+    # match checked-in headers. Runs without libclang.
+    python3 projects/clr/hipamd/scripts/lttng_curated_codegen.py \\
+        --yaml projects/clr/hipamd/scripts/curated_apis.yaml \\
+        --sigs projects/clr/hipamd/scripts/curated_apis_sigs.json \\
+        --provider rocm_hip --status-type hipError_t --status-success hipSuccess \\
+        --out-tp projects/clr/hipamd/src/lttng/rocm_hip_curated_tp.h \\
+        --out-emit projects/clr/hipamd/src/lttng/rocm_trace_emit_curated.h
+    git diff --exit-code -- 'projects/clr/hipamd/src/lttng/rocm_hip_curated_tp.h' \\
+                            'projects/clr/hipamd/src/lttng/rocm_trace_emit_curated.h'
+
+    # Verifier gate: YAML signatures must match HIP headers; also
+    # rewrites curated_apis_sigs.json so a header-side signature change
+    # for an OUT-handle param is caught by the diff (C10 fix).
+    python3 projects/clr/hipamd/scripts/lttng_curated_verify.py \\
+        --yaml projects/clr/hipamd/scripts/curated_apis.yaml \\
+        --header /opt/rocm/include/hip/hip_runtime_api.h \\
+        --extra-arg=-D__HIP_PLATFORM_AMD__=1 --extra-arg=-I/opt/rocm/include \\
+        --out-sidecar projects/clr/hipamd/scripts/curated_apis_sigs.json
+    git diff --exit-code -- 'projects/clr/hipamd/scripts/curated_apis_sigs.json'
 """
 import argparse, hashlib, os, sys, textwrap
 HERE = os.path.dirname(os.path.abspath(__file__))
