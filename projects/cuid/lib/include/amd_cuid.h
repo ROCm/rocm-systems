@@ -150,7 +150,7 @@ typedef enum {
  * The order of the handles in the list is unspecified and may vary between calls.
  *
  * @param[out] handles Pointer to an array of CUID handles. This will be set to nullptr if no devices are found.
- * @param[in/out] count On input, the number of elements the buffer pointed to by @p handles can hold.
+ * @param[in,out] count On input, the number of elements the buffer pointed to by @p handles can hold.
  *                      On output, the actual number of elements written or required if the buffer is too small.
  *
  * @return AMDCUID_STATUS_SUCCESS on success,
@@ -283,7 +283,7 @@ typedef enum {
  * @param[in] handle The CUID handle of the device to query.
  * @param[in] query The property to query (see amdcuid_query_t).
  * @param[out] data Pointer to a buffer where the queried data will be stored.
- * @param[in/out] length On input, the size in bytes of the buffer pointed to by @p data.
+ * @param[in,out] length On input, the size in bytes of the buffer pointed to by @p data.
  *                       On output, the actual size in bytes of the data written or required.
  * @return AMDCUID_STATUS_SUCCESS on success
  *         AMDCUID_STATUS_DEVICE_NOT_FOUND if the handle is invalid,
