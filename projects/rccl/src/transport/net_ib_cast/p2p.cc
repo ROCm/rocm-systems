@@ -9,11 +9,11 @@
 #include "common_cast.h"
 #include "p2p_resiliency_cast.h"
 
-NCCL_PARAM(IbArThreshold, "IB_AR_THRESHOLD", -2);
+NCCL_PARAM(IbCastArThreshold, "IB_AR_THRESHOLD", -2);
 int64_t IbCastArThreshold = 8192;
 
 // By default, use ncclIbRequestMatchingScheme::BY_INDEX matching scheme.
-NCCL_PARAM(IbReceiverSideMatchingScheme, "IB_RECEIVER_SIDE_MATCHING_SCHEME", -2);
+NCCL_PARAM(IbCastReceiverSideMatchingScheme, "IB_RECEIVER_SIDE_MATCHING_SCHEME", -2);
 
 const char* IbCastReqTypeStr[] = { "Unused", "Send", "Recv", "Flush", "IPut" };
 

@@ -7,16 +7,16 @@
 #include "p2p_resiliency_recovery_cast.h"
 #include <list>
 
-NCCL_PARAM(IbResiliencyPortRecovery, "IB_RESILIENCY_PORT_RECOVERY", 0);
-NCCL_PARAM(IbResiliencyPortRecoveryStartDelay, "IB_RESILIENCY_PORT_RECOVERY_START_DELAY", 200); // In milliseconds
-NCCL_PARAM(IbResiliencyPortRecoveryAliveMsgBatchInterval, "IB_RESILIENCY_PORT_RECOVERY_ALIVE_MSG_BATCH_INTERVAL", 500); // In milliseconds
-NCCL_PARAM(IbResiliencyPortRecoveryAliveMsgBatchSize, "IB_RESILIENCY_PORT_RECOVERY_ALIVE_MSG_BATCH_SIZE", 5);
-NCCL_PARAM(IbResiliencyPortRecoveryAliveMsgSequenceSize, "IB_RESILIENCY_PORT_RECOVERY_ALIVE_MSG_SEQUENCE_SIZE", 5);
-NCCL_PARAM(IbResiliencyPortRecoveryAliveMsgTimeout, "IB_RESILIENCY_PORT_RECOVERY_ALIVE_MSG_TIMEOUT", 4000); // In milliseconds
-NCCL_PARAM(IbResiliencyPortRecoveryAckTimeout, "IB_RESILIENCY_PORT_RECOVERY_ACK_TIMEOUT", 5000); // In milliseconds
-NCCL_PARAM(IbResiliencyPortRecoveryAttemptsMax, "IB_RESILIENCY_PORT_RECOVERY_ATTEMPTS_MAX", 5);
+NCCL_PARAM(IbCastResiliencyPortRecovery, "IB_RESILIENCY_PORT_RECOVERY", 0);
+NCCL_PARAM(IbCastResiliencyPortRecoveryStartDelay, "IB_RESILIENCY_PORT_RECOVERY_START_DELAY", 200); // In milliseconds
+NCCL_PARAM(IbCastResiliencyPortRecoveryAliveMsgBatchInterval, "IB_RESILIENCY_PORT_RECOVERY_ALIVE_MSG_BATCH_INTERVAL", 500); // In milliseconds
+NCCL_PARAM(IbCastResiliencyPortRecoveryAliveMsgBatchSize, "IB_RESILIENCY_PORT_RECOVERY_ALIVE_MSG_BATCH_SIZE", 5);
+NCCL_PARAM(IbCastResiliencyPortRecoveryAliveMsgSequenceSize, "IB_RESILIENCY_PORT_RECOVERY_ALIVE_MSG_SEQUENCE_SIZE", 5);
+NCCL_PARAM(IbCastResiliencyPortRecoveryAliveMsgTimeout, "IB_RESILIENCY_PORT_RECOVERY_ALIVE_MSG_TIMEOUT", 4000); // In milliseconds
+NCCL_PARAM(IbCastResiliencyPortRecoveryAckTimeout, "IB_RESILIENCY_PORT_RECOVERY_ACK_TIMEOUT", 5000); // In milliseconds
+NCCL_PARAM(IbCastResiliencyPortRecoveryAttemptsMax, "IB_RESILIENCY_PORT_RECOVERY_ATTEMPTS_MAX", 5);
 
-extern int64_t ncclParamIbPkey();
+extern int64_t ncclParamIbCastPkey();
 
 // Used to convert milliseconds to nanoseconds
 #define MSEC_TO_NSEC 1000000ULL
@@ -331,7 +331,7 @@ ncclResult_t IbCastPortRecoverySenderQpsCreate(struct ncclIbResiliency* resCtx, 
     // Transition the QP to INIT state
     struct ncclIbQpInitAttr* initAttr = &localQp->initAttr;
     initAttr->state = IBV_QPS_INIT;
-    initAttr->pkeyIndex = ncclParamIbPkey();
+    initAttr->pkeyIndex = ncclParamIbCastPkey();
     initAttr->portNum = ibDev->portNum;
     // Recovery QPs on the sender side do not require any remote permissions.
     initAttr->qpAccessFlags = IBV_ACCESS_LOCAL_WRITE;
@@ -400,7 +400,7 @@ ncclResult_t IbCastPortRecoveryReceiverQpsCreateToRts(struct ncclIbResiliency* r
     // Transition the QP to INIT state
     struct ncclIbQpInitAttr* initAttr = &localQp->initAttr;
     initAttr->state = IBV_QPS_INIT;
-    initAttr->pkeyIndex = ncclParamIbPkey();
+    initAttr->pkeyIndex = ncclParamIbCastPkey();
     initAttr->portNum = ibDev->portNum;
     // Recovery QPs on the receiver side do not require any remote permissions.
     // Sender is expected to only use RDMA Send with Immediate operations
@@ -676,7 +676,7 @@ enum ncclIbPortRecoveryStateProgressResult {
 static inline ncclResult_t IbCastPortRecoveryPostAliveMessages(struct ncclIbPortRecoveryContext* recoveryContext, bool* success) {
   struct ibv_send_wr *bad_wr = NULL;
   struct ibv_send_wr wr[NCCL_IB_RESILIENCY_PORT_RECOVERY_ALIVE_MSG_BATCH_SIZE_MAX];
-  int nMsgsToPost = ncclParamIbResiliencyPortRecoveryAliveMsgSequenceSize();
+  int nMsgsToPost = ncclParamIbCastResiliencyPortRecoveryAliveMsgSequenceSize();
   if (nMsgsToPost > NCCL_IB_RESILIENCY_PORT_RECOVERY_ALIVE_MSG_BATCH_SIZE_MAX) {
     WARN("NET/IB: %s: Requested alive message batch size %d exceeds maximum supported %d", __func__, nMsgsToPost, NCCL_IB_RESILIENCY_PORT_RECOVERY_ALIVE_MSG_BATCH_SIZE_MAX);
     return ncclInternalError;
@@ -743,7 +743,7 @@ static inline ncclResult_t IbCastPortRecoveryProgressAliveMessagesSender(ncclIbP
   if (!recoveryContext->send.aliveMsgPosted) {
     // Check if sender should send a new batch of alive messages
     uint64_t now = clockNano();
-    if (now - recoveryContext->timeLastMsg < ncclParamIbResiliencyPortRecoveryAliveMsgBatchInterval() * MSEC_TO_NSEC) {
+    if (now - recoveryContext->timeLastMsg < ncclParamIbCastResiliencyPortRecoveryAliveMsgBatchInterval() * MSEC_TO_NSEC) {
       *outResult = ncclIbPortRecoveryStateProgressResultInProgress;
       return ncclSuccess;
     }
@@ -786,7 +786,7 @@ static inline ncclResult_t IbCastPortRecoveryProgressAliveMessagesReceiver(ncclI
       *outResult = ncclIbPortRecoveryStateProgressResultFailed;
       return ncclSuccess;
     }
-    if (recoveryContext->recv.nInOrderMsgsReceived > ncclParamIbResiliencyPortRecoveryAliveMsgSequenceSize()) {
+    if (recoveryContext->recv.nInOrderMsgsReceived > ncclParamIbCastResiliencyPortRecoveryAliveMsgSequenceSize()) {
       // Received enough in-order alive messages. Draining the CQ from any
       // remaining alive messages and proceeding to restore QPs and post ACK.
       // Draining is important to ensure that if the receiver goes back to the
@@ -813,10 +813,10 @@ static inline ncclResult_t IbCastPortRecoveryProgressAliveMessagesReceiver(ncclI
       *outResult = ncclIbPortRecoveryStateProgressResultInProgress;
     } else {
       uint64_t now = clockNano();
-      if (now - recoveryContext->timeLastMsg > ncclParamIbResiliencyPortRecoveryAliveMsgTimeout() * MSEC_TO_NSEC) {
+      if (now - recoveryContext->timeLastMsg > ncclParamIbCastResiliencyPortRecoveryAliveMsgTimeout() * MSEC_TO_NSEC) {
         recoveryContext->nFailedAttempts++;
         INFO(NCCL_NET, "NET/IB: %s: Alive message sequence timeout for device %d (%s comm=%p, failedAttempts=%d)", __func__, recoveryContext->devIndex, recoveryContext->resCtx->baseComm->isSend ? "send" : "recv", recoveryContext->resCtx->baseComm, recoveryContext->nFailedAttempts);
-        if (recoveryContext->nFailedAttempts >= ncclParamIbResiliencyPortRecoveryAttemptsMax()) {
+        if (recoveryContext->nFailedAttempts >= ncclParamIbCastResiliencyPortRecoveryAttemptsMax()) {
           INFO(NCCL_NET, "NET/IB: %s: Recovery for device %d failed due to max attempts reached (%s comm=%p)", __func__, recoveryContext->devIndex, recoveryContext->resCtx->baseComm->isSend ? "send" : "recv", recoveryContext->resCtx->baseComm);
           *outResult = ncclIbPortRecoveryStateProgressResultFailed;
           return ncclSuccess;
@@ -838,10 +838,10 @@ static inline ncclResult_t IbCastPortRecoveryProgressAliveMessagesReceiver(ncclI
       *outResult = ncclIbPortRecoveryStateProgressResultGoToNextState;
     } else {
       uint64_t now = clockNano();
-      if (now - recoveryContext->timeLastMsg > ncclParamIbResiliencyPortRecoveryAckTimeout() * MSEC_TO_NSEC) {
+      if (now - recoveryContext->timeLastMsg > ncclParamIbCastResiliencyPortRecoveryAckTimeout() * MSEC_TO_NSEC) {
         recoveryContext->nFailedAttempts++;
         INFO(NCCL_NET, "NET/IB: %s: ACK message timeout for device %d (%s comm=%p, failedAttempts=%d)", __func__, recoveryContext->devIndex, recoveryContext->resCtx->baseComm->isSend ? "send" : "recv", recoveryContext->resCtx->baseComm, recoveryContext->nFailedAttempts);
-        if (recoveryContext->nFailedAttempts >= ncclParamIbResiliencyPortRecoveryAttemptsMax()) {
+        if (recoveryContext->nFailedAttempts >= ncclParamIbCastResiliencyPortRecoveryAttemptsMax()) {
           INFO(NCCL_NET, "NET/IB: %s: Recovery for device %d failed due to max attempts reached (%s comm=%p)", __func__, recoveryContext->devIndex, recoveryContext->resCtx->baseComm->isSend ? "send" : "recv", recoveryContext->resCtx->baseComm);
           *outResult = ncclIbPortRecoveryStateProgressResultFailed;
           return ncclSuccess;
@@ -906,10 +906,10 @@ static inline ncclResult_t IbCastPortRecoveryProgressAckSender(ncclIbPortRecover
     if (!recoveryContext->ackReceived) {
       // Check if the timer timed out waiting for ack
       uint64_t now = clockNano();
-      if (now - recoveryContext->timeLastMsg > ncclParamIbResiliencyPortRecoveryAckTimeout() * MSEC_TO_NSEC) {
+      if (now - recoveryContext->timeLastMsg > ncclParamIbCastResiliencyPortRecoveryAckTimeout() * MSEC_TO_NSEC) {
         recoveryContext->nFailedAttempts++;
         INFO(NCCL_NET, "NET/IB: %s: Port recovery attempt #%d failed for devIndex=%d (comm=%p)", __func__, recoveryContext->nFailedAttempts, recoveryContext->devIndex, recoveryContext->resCtx->baseComm);
-        if (recoveryContext->nFailedAttempts >= ncclParamIbResiliencyPortRecoveryAttemptsMax()) {
+        if (recoveryContext->nFailedAttempts >= ncclParamIbCastResiliencyPortRecoveryAttemptsMax()) {
           INFO(NCCL_NET, "NET/IB: %s: Recovery for device %d failed due to max attempts reached (send comm=%p)", __func__, recoveryContext->devIndex, recoveryContext->resCtx->baseComm);
           *outResult = ncclIbPortRecoveryStateProgressResultFailed;
           return ncclSuccess;
@@ -968,10 +968,10 @@ static inline ncclResult_t IbCastPortRecoveryProgressAckReceiver(ncclIbPortRecov
   if (!recoveryContext->ackReceived) {
     // Check if the timer timed out waiting for ack
     uint64_t now = clockNano();
-    if (now - recoveryContext->timeLastMsg > ncclParamIbResiliencyPortRecoveryAckTimeout() * MSEC_TO_NSEC) {
+    if (now - recoveryContext->timeLastMsg > ncclParamIbCastResiliencyPortRecoveryAckTimeout() * MSEC_TO_NSEC) {
       recoveryContext->nFailedAttempts++;
       INFO(NCCL_NET, "NET/IB: %s: Port recovery attempt #%d failed for devIndex=%d (comm=%p)", __func__, recoveryContext->nFailedAttempts, recoveryContext->devIndex, recoveryContext->resCtx->baseComm);
-      if (recoveryContext->nFailedAttempts >= ncclParamIbResiliencyPortRecoveryAttemptsMax()) {
+      if (recoveryContext->nFailedAttempts >= ncclParamIbCastResiliencyPortRecoveryAttemptsMax()) {
         *outResult = ncclIbPortRecoveryStateProgressResultFailed;
         return ncclSuccess;
       }
@@ -1028,7 +1028,7 @@ static inline ncclResult_t IbCastPortRecoveryContextProgress(ncclIbPortRecoveryC
 
   if (recoveryContext->state == ncclIbPortRecoveryStateInit) {
     uint64_t now = clockNano();
-    if (now - recoveryContext->timeInit < ncclParamIbResiliencyPortRecoveryStartDelay() * MSEC_TO_NSEC) {
+    if (now - recoveryContext->timeInit < ncclParamIbCastResiliencyPortRecoveryStartDelay() * MSEC_TO_NSEC) {
       *outDone = false;
       return ncclSuccess;
     }
@@ -1223,7 +1223,7 @@ ncclResult_t IbCastPortRecoveryClose(struct ncclIbResiliency* resCtx) {
 }
 
 ncclResult_t IbCastPortRecoveryThreadStart() {
-  if (ncclParamIbResiliencyPortRecovery() == 0) {
+  if (ncclParamIbCastResiliencyPortRecovery() == 0) {
     return ncclSuccess;
   }
 
@@ -1243,7 +1243,7 @@ ncclResult_t IbCastPortRecoveryThreadStart() {
 }
 
 ncclResult_t IbCastPortRecoveryThreadStop() {
-  if (ncclParamIbResiliencyPortRecovery() == 0) {
+  if (ncclParamIbCastResiliencyPortRecovery() == 0) {
     return ncclSuccess;
   }
 

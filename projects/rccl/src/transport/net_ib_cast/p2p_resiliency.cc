@@ -10,13 +10,13 @@
 #include "connect_cast.h" // For IbCastQpCreate()
 #include "p2p_resiliency_recovery_cast.h"
 
-NCCL_PARAM(IbResiliencyPortFailover, "IB_RESILIENCY_PORT_FAILOVER", 0);
-NCCL_PARAM(IbResiliencyPortFailoverMaxAttempts, "IB_RESILIENCY_PORT_FAILOVER_MAX_ATTEMPTS", 1);
-NCCL_PARAM(IbResiliencyPortFailoverProbeDelay, "IB_RESILIENCY_PORT_FAILOVER_PROBE_DELAY", 10); // In milliseconds
+NCCL_PARAM(IbCastResiliencyPortFailover, "IB_RESILIENCY_PORT_FAILOVER", 0);
+NCCL_PARAM(IbCastResiliencyPortFailoverMaxAttempts, "IB_RESILIENCY_PORT_FAILOVER_MAX_ATTEMPTS", 1);
+NCCL_PARAM(IbCastResiliencyPortFailoverProbeDelay, "IB_RESILIENCY_PORT_FAILOVER_PROBE_DELAY", 10); // In milliseconds
 
-extern int64_t ncclParamIbPkey();
-extern int64_t ncclParamIbRetryCnt();
-extern int64_t ncclParamIbTimeout();
+extern int64_t ncclParamIbCastPkey();
+extern int64_t ncclParamIbCastRetryCnt();
+extern int64_t ncclParamIbCastTimeout();
 
 #define MSEC_TO_NSEC 1000000ULL
 
@@ -394,15 +394,15 @@ static ncclResult_t IbCastResiliencyHandleProbeCompleted(struct ncclIbResiliency
 static ncclResult_t IbCastResiliencyProbePost(struct ncclIbResiliencySend* sendResCtx, struct ncclIbResiliencyRequestSend* failedSendRequest) {
   assert(failedSendRequest->state == ncclIbResiliencyRequestStatePending);
 
-  if (failedSendRequest->failedAttempts > ncclParamIbResiliencyPortFailoverMaxAttempts()) {
-    WARN("NET/IB: %s: Maximum number of probing attempts (%ld) reached for request %p (id=%ld). Cannot post another probe.", __func__, ncclParamIbResiliencyPortFailoverMaxAttempts(), failedSendRequest->request, failedSendRequest->request->id);
+  if (failedSendRequest->failedAttempts > ncclParamIbCastResiliencyPortFailoverMaxAttempts()) {
+    WARN("NET/IB: %s: Maximum number of probing attempts (%ld) reached for request %p (id=%ld). Cannot post another probe.", __func__, ncclParamIbCastResiliencyPortFailoverMaxAttempts(), failedSendRequest->request, failedSendRequest->request->id);
     return ncclRemoteError;
   }
 
   // Get current time and calculate elapsed time since error
   uint64_t currentTime = clockNano();
   uint64_t elapsedTime = currentTime - failedSendRequest->errorInfo.time;
-  uint64_t requiredWaitTime = ncclParamIbResiliencyPortFailoverProbeDelay() * MSEC_TO_NSEC;
+  uint64_t requiredWaitTime = ncclParamIbCastResiliencyPortFailoverProbeDelay() * MSEC_TO_NSEC;
 
   if (elapsedTime < requiredWaitTime) {
     return ncclSuccess;
@@ -524,7 +524,7 @@ static ncclResult_t IbCastResiliencyProbeProgress(struct ncclIbResiliencySend* s
 ncclResult_t IbCastResiliencyInit(struct ncclIbNetCommBase* baseComm, struct ncclIbResiliency** resCtx) {
   assert(baseComm != NULL);
   assert(resCtx != NULL);
-  if (ncclParamIbResiliencyPortFailover() == 0) {
+  if (ncclParamIbCastResiliencyPortFailover() == 0) {
     INFO(NCCL_NET, "NET/IB: %s: Resiliency is disabled on the %s communicator (comm=%p)", __func__, baseComm->isSend ? "send" : "recv", baseComm);
     *resCtx = NULL;
     return ncclSuccess;
@@ -731,7 +731,7 @@ ncclResult_t IbCastResiliencySenderCreateQps(struct ncclIbResiliency* resCtx, st
     // Transition the QP to INIT state
     struct ncclIbQpInitAttr* initAttr = &localQp->initAttr;
     initAttr->state = IBV_QPS_INIT;
-    initAttr->pkeyIndex = ncclParamIbPkey();
+    initAttr->pkeyIndex = ncclParamIbCastPkey();
     initAttr->portNum = ibDev->portNum;
     // Probing QPs on the sender side do not require any remote permissions.
     initAttr->qpAccessFlags = IBV_ACCESS_LOCAL_WRITE;
@@ -775,8 +775,8 @@ ncclResult_t IbCastResiliencySenderQpsToRts(struct ncclIbResiliency* resCtx, str
     NCCLCHECK(IbCastQpRtr(localQp));
 
     struct ncclIbQpRtsAttr* rtsAttr = &localQp->rtsAttr;
-    rtsAttr->timeout = ncclParamIbTimeout();
-    rtsAttr->retryCnt = ncclParamIbRetryCnt();
+    rtsAttr->timeout = ncclParamIbCastTimeout();
+    rtsAttr->retryCnt = ncclParamIbCastRetryCnt();
     NCCLCHECK(IbCastQpRts(localQp));
     INFO(NCCL_NET, "NET/IB: %s: Send to RTS done on probing QP (index=%d, qp_num=%u, dest_qp_num=%u, deviceIndex=%d, comm=%p)", __func__, localQpIndex, localQp->qp->qp_num, rtrAttr->remoteQpNum, localDevIndex, resCtx->baseComm);
   }
@@ -815,7 +815,7 @@ ncclResult_t IbCastResiliencyReceiverQpsCreateToRts(struct ncclIbResiliency* res
     // Transition the QP to INIT state
     struct ncclIbQpInitAttr* initAttr = &localQp->initAttr;
     initAttr->state = IBV_QPS_INIT;
-    initAttr->pkeyIndex = ncclParamIbPkey();
+    initAttr->pkeyIndex = ncclParamIbCastPkey();
     initAttr->portNum = ibDev->portNum;
     // On the receiver side, probing QPs do not need to send/receive any messages.
     // They are only used as targets of RDMA Read operations.
@@ -838,8 +838,8 @@ ncclResult_t IbCastResiliencyReceiverQpsCreateToRts(struct ncclIbResiliency* res
     NCCLCHECK(IbCastQpRtr(localQp));
 
     struct ncclIbQpRtsAttr* rtsAttr = &localQp->rtsAttr;
-    rtsAttr->timeout = ncclParamIbTimeout();
-    rtsAttr->retryCnt = ncclParamIbRetryCnt();
+    rtsAttr->timeout = ncclParamIbCastTimeout();
+    rtsAttr->retryCnt = ncclParamIbCastRetryCnt();
     NCCLCHECK(IbCastQpRts(localQp));
     INFO(NCCL_NET, "NET/IB: %s: Recv to RTS done on probing QP (index=%d, qp_num=%u, dest_qp_num=%u, deviceIndex=%d, comm=%p)", __func__, localQpIndex, localQp->qp->qp_num, rtrAttr->remoteQpNum, localDevIndex, resCtx->baseComm);
   }
