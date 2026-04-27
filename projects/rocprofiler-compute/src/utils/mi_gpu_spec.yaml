@@ -377,6 +377,11 @@ mi_gpu_spec:
             GL2C: 4
         models:
           - gpu_model: strix_halo
+            rev_id: 212
+            chip_ids:
+              physical: 5510
+          - gpu_model: gorgon_halo
+            rev_id: 203
             chip_ids:
               physical: 5510
   #########################################################

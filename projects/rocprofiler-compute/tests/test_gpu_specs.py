@@ -276,6 +276,15 @@ def test_get_gpu_model_none_result():
 
 
 @pytest.mark.misc
+def test_get_gpu_model_gfx1151_uses_rev_id():
+    """gfx1151 model lookup should resolve shared chip IDs by revision ID."""
+    from src.utils.mi_gpu_spec import MIGPUSpecs
+
+    assert MIGPUSpecs.get_gpu_model("gfx1151", None, "212") == "STRIX_HALO"
+    assert MIGPUSpecs.get_gpu_model("gfx1151", None, "203") == "GORGON_HALO"
+
+
+@pytest.mark.misc
 def test_get_num_xcds_no_compute_partition_data():
     """Test get_num_xcds when no compute partition data found - covers lines 307-309"""
     from src.utils.mi_gpu_spec import MIGPUSpecs

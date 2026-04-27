@@ -19,6 +19,7 @@ class MIGPUSpecs:
     _gpu_model_dict: dict[str, list[str]] = {}  # key: gpu_arch
     _num_xcds_dict: dict[str, dict[str, int]] = {}  # key: gpu_model
     _chip_id_dict: dict[int, str] = {}  # key: chip_id (int)
+    _gpu_rev_id_dict: dict[tuple[str, int], str] = {}  # key: (gpu_arch, rev_id)
     _perfmon_config: dict[str, Any] = {}  # key: gpu_arch
 
     # key: gpu_arch, used for gpu archs containing only one gpu model and
@@ -105,6 +106,7 @@ class MIGPUSpecs:
 
                 for models in archs.get("models", []):
                     curr_gpu_model = models["gpu_model"]
+                    curr_rev_id = models.get("rev_id")
 
                     cls._all_gpu_models.append(curr_gpu_model)
                     cls._gpu_model_dict[curr_gpu_arch].append(curr_gpu_model)
@@ -121,6 +123,10 @@ class MIGPUSpecs:
                         )
                     if "chip_ids" in models and "virtual" in models["chip_ids"]:
                         cls._chip_id_dict[models["chip_ids"]["virtual"]] = (
+                            curr_gpu_model
+                        )
+                    if curr_rev_id is not None:
+                        cls._gpu_rev_id_dict[(curr_gpu_arch, int(curr_rev_id))] = (
                             curr_gpu_model
                         )
 
@@ -187,9 +193,12 @@ class MIGPUSpecs:
 
     @classmethod
     def get_gpu_model(
-        cls, gpu_arch: Optional[str], chip_id: Optional[str] = None
+        cls,
+        gpu_arch: Optional[str],
+        chip_id: Optional[str] = None,
+        rev_id: Optional[str] = None,
     ) -> Optional[str]:
-        if not gpu_arch and not chip_id:
+        if not gpu_arch and not chip_id and not rev_id:
             return None
 
         # Check that gpu_model_dict is populated first
@@ -201,16 +210,28 @@ class MIGPUSpecs:
 
         gpu_arch_lower = gpu_arch.lower()
 
-        # Handle gfx942 with chip_id mapping
+        gpu_model: Optional[str] = None
+
+        # Handle architectures that depend on chip-id or revision-id mapping.
         if gpu_arch_lower not in ("gfx908", "gfx90a"):
+            if rev_id is not None:
+                try:
+                    rev_id_int = int(str(rev_id), 0)
+                except ValueError:
+                    console_warning(f"No valid rev id provided: {rev_id}")
+                else:
+                    gpu_model = cls._gpu_rev_id_dict.get((gpu_arch_lower, rev_id_int))
+
             if chip_id and chip_id.isdigit():
                 chip_id_int = int(chip_id)
-                if chip_id_int in cls._chip_id_dict:
+                if gpu_model:
+                    pass
+                elif chip_id_int in cls._chip_id_dict:
                     gpu_model = cls._chip_id_dict[chip_id_int]
                 else:
                     console_warning(f"No gpu model found for chip id: {chip_id}")
                     return None
-            else:
+            elif not gpu_model:
                 console_warning(f"No valid chip id provided: {chip_id}")
                 return None
 

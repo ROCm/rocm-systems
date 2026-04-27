@@ -235,7 +235,7 @@ class OmniSoC_Base:
             self._mspec.gpu_series = mi_gpu_specs.get_gpu_series(self._mspec.gpu_arch)
         # specify gpu model name for gfx942 hardware
         self._mspec.gpu_model = mi_gpu_specs.get_gpu_model(
-            self._mspec.gpu_arch, self._mspec.gpu_chip_id
+            self._mspec.gpu_arch, self._mspec.gpu_chip_id, self._mspec.gpu_rev_id
         )
 
         if not self._mspec.gpu_model:

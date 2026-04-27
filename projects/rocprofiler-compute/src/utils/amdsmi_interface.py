@@ -5,6 +5,7 @@ import os
 import sys
 from collections.abc import Iterator
 from contextlib import contextmanager
+from typing import Optional
 
 from utils.logger import (
     console_debug,
@@ -105,6 +106,25 @@ def get_gpu_model() -> tuple[str, str, str]:
             error = e
     console_warning(f"Error getting gpu model info: {error}")
     return ("N/A", "N/A", "N/A")
+
+
+def get_gpu_revision_id() -> Optional[str]:
+    """Get the GPU revision ID from amd-smi ASIC info."""
+    amdsmi = import_amdsmi_module()
+    error = None
+    for device in get_device_handles():
+        try:
+            asic_info = amdsmi.amdsmi_get_gpu_asic_info(device)
+            for key in ("rev_id", "revision_id", "device_rev_id", "asic_revision"):
+                rev_id = asic_info.get(key)
+                if rev_id is not None:
+                    console_debug(f"GPU revision ID: {rev_id}")
+                    return str(rev_id)
+            raise KeyError("No GPU revision ID in asic info")
+        except Exception as e:
+            error = e
+    console_warning(f"Error getting GPU revision ID: {error}")
+    return None
 
 
 def get_gpu_vbios_part_number() -> str:

@@ -23,6 +23,7 @@ from utils.amdsmi_interface import (
     get_amdgpu_driver_version,
     get_gpu_compute_partition,
     get_gpu_memory_partition,
+    get_gpu_revision_id,
     get_gpu_vbios_part_number,
     get_gpu_vram_size,
 )
@@ -192,6 +193,7 @@ def generate_machine_specs(
             vbios=gpu_info["vbios"],
             compute_partition=gpu_info["compute_partition"],
             memory_partition=gpu_info["memory_partition"],
+            gpu_rev_id=gpu_info["gpu_rev_id"],
             gpu_arch=soc_info["gpu_arch"],
             gpu_chip_id=soc_info["gpu_chip_id"],
         )
@@ -215,7 +217,10 @@ def generate_machine_specs(
         specs.gpu_model = specs.gpu_model or ""
     else:
         specs.gpu_model = (
-            mi_gpu_specs.get_gpu_model(specs.gpu_arch, specs.gpu_chip_id) or ""
+            mi_gpu_specs.get_gpu_model(
+                specs.gpu_arch, specs.gpu_chip_id, specs.gpu_rev_id
+            )
+            or ""
         )
     specs.num_xcd = str(
         mi_gpu_specs.get_num_xcds(
@@ -278,10 +283,12 @@ def extract_gpu_info(gpu_arch: Optional[str]) -> dict[str, Any]:
         "vbios": None,
         "compute_partition": None,
         "memory_partition": None,
+        "gpu_rev_id": None,
     }
 
     with amdsmi_ctx():
         result["vbios"] = get_gpu_vbios_part_number()
+        result["gpu_rev_id"] = get_gpu_revision_id()
         if is_partition_supported:
             result["compute_partition"] = get_gpu_compute_partition()
             result["memory_partition"] = get_gpu_memory_partition()
@@ -300,9 +307,9 @@ def extract_gpu_info(gpu_arch: Optional[str]) -> dict[str, Any]:
             console_warning("Cannot detect memory partition from amd-smi.")
 
     console_debug(
-        f"vbios is {result['vbios']}, compute partition is "
-        f"{result['compute_partition']}, memory partition is "
-        f"{result['memory_partition']}"
+        f"vbios is {result['vbios']}, rev id is {result['gpu_rev_id']}, "
+        f"compute partition is {result['compute_partition']}, memory partition "
+        f"is {result['memory_partition']}"
     )
 
     return result
@@ -546,6 +553,15 @@ class MachineSpecs:
         metadata={
             "doc": "The Chip ID of the accelerators/GPUs in the system.",
             "name": "Chip ID",
+            "optional": True,
+            "show_in_table": True,
+        },
+    )
+    gpu_rev_id: Optional[str] = field(
+        default=None,
+        metadata={
+            "doc": "The revision ID of the accelerators/GPUs in the system.",
+            "name": "Rev ID",
             "optional": True,
             "show_in_table": True,
         },
