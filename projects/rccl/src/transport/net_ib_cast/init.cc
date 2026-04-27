@@ -15,12 +15,12 @@ static ncclResult_t pciPathToInt64(char* path, int64_t* id) {
   return pciPathToInt64(path, (int)strlen(path), 0, id);
 }
 
-NCCL_PARAM(IbPciRelaxedOrdering, "IB_PCI_RELAXED_ORDERING", 2);
-NCCL_PARAM(IbAdaptiveRouting, "IB_ADAPTIVE_ROUTING", -2);
-NCCL_PARAM(IbDataDirect,"IB_DATA_DIRECT",1);
+NCCL_PARAM(IbCastPciRelaxedOrdering, "IB_PCI_RELAXED_ORDERING", 2);
+NCCL_PARAM(IbCastAdaptiveRouting, "IB_ADAPTIVE_ROUTING", -2);
+NCCL_PARAM(IbCastDataDirect,"IB_DATA_DIRECT",1);
 
 // default to 0 to disable ooo rq, if set to 1, ooo rq will be enabled or failed
-NCCL_PARAM(IbOooRq,"IB_OOO_RQ", 0)
+NCCL_PARAM(IbCastOooRq,"IB_OOO_RQ", 0)
 
 static std::mutex IbCastMutex;
 
@@ -31,17 +31,17 @@ static std::mutex IbCastMutex;
 // context support is added to the plugin the ref counter can be removed.
 static int netRefCount;
 
-NCCL_PARAM(IbDisable, "IB_DISABLE", 0);
-NCCL_PARAM(IbMergeVfs, "IB_MERGE_VFS", 1);
-NCCL_PARAM(IbMergeNics, "IB_MERGE_NICS", 1);
-NCCL_PARAM(IbDevicePciOrder, "IB_DEVICE_PCI_ORDER", 1);
+NCCL_PARAM(IbCastDisable, "IB_DISABLE", 0);
+NCCL_PARAM(IbCastMergeVfs, "IB_MERGE_VFS", 1);
+NCCL_PARAM(IbCastMergeNics, "IB_MERGE_NICS", 1);
+NCCL_PARAM(IbCastDevicePciOrder, "IB_DEVICE_PCI_ORDER", 1);
 
-extern int64_t ncclParamIbArThreshold();
+extern int64_t ncclParamIbCastArThreshold();
 
 // Returns 0 if this is the path of two VFs of the same physical device
 static int IbCastMatchVfPath(char* path1, char* path2) {
   // Merge multi-port NICs into the same PCI device
-  if (ncclParamIbMergeVfs()) {
+  if (ncclParamIbCastMergeVfs()) {
     return strncmp(path1, path2, strlen(path1)-4) == 0;
   } else {
     return strncmp(path1, path2, strlen(path1)-1) == 0;
@@ -76,7 +76,7 @@ static ncclResult_t IbCastGetPciPath(char* devName, char** path, char* fullPath)
     // Merge multi-port NICs into the same PCI device
     p[strlen(p)-1] = '0';
     // Also merge virtual functions (VF) into the same device
-    if (ncclParamIbMergeVfs()) p[strlen(p)-3] = p[strlen(p)-4] = '0';
+    if (ncclParamIbCastMergeVfs()) p[strlen(p)-3] = p[strlen(p)-4] = '0';
   }
   if (path) {
     *path = p;
@@ -124,7 +124,7 @@ static int IbCastSpeed(int speed) {
 
 // Determine whether RELAXED_ORDERING is enabled and possible
 static int IbCastRelaxedOrderingCapable(void) {
-  int roMode = ncclParamIbPciRelaxedOrdering();
+  int roMode = ncclParamIbCastPciRelaxedOrdering();
   ncclResult_t r = ncclInternalError;
   if (roMode == 1 || roMode == 2) {
     // Query IBVERBS_1.8 API - needed for IBV_ACCESS_RELAXED_ORDERING support
@@ -153,15 +153,15 @@ failure:
   return false;
 }
 
-extern int64_t ncclParamIbPrepostReceiveWorkRequests();
-extern int64_t ncclParamIbReceiverSideMatchingScheme();
+extern int64_t ncclParamIbCastPrepostReceiveWorkRequests();
+extern int64_t ncclParamIbCastReceiverSideMatchingScheme();
 
 static ncclResult_t IbCastQueryOooRqSize(struct ibv_context* ibvCtx, const char *devName, uint32_t* oooRqSize) {
   ncclResult_t ret;
   if (!oooRqSize) return ncclInvalidArgument;
   *oooRqSize = 0;
 
-  if (ncclParamIbOooRq() == 0) return ncclSuccess;
+  if (ncclParamIbCastOooRq() == 0) return ncclSuccess;
 
   // out-of-order recv prerequisite: device capability
   struct mlx5dv_context dvCtx;
@@ -179,7 +179,7 @@ fail:
 }
 
 ncclResult_t IbCastMakeVDeviceInternal(int* d, ncclNetVDeviceProps_t* props) {
-  if (ncclParamIbMergeNics() == 0 && props->ndevs > 1) {
+  if (ncclParamIbCastMergeNics() == 0 && props->ndevs > 1) {
     INFO(NCCL_NET, "NET/IB : Skipping makeVDevice, NCCL_IB_MERGE_NICS=0");
     return ncclInvalidUsage;
   }
@@ -261,7 +261,7 @@ ncclResult_t IbCastInitDevices(ncclDebugLogger_t logFunction, ncclProfilerCallba
   ncclResult_t ret = ncclSuccess;
   if (netRefCount++) return ret;
   IbCastProfilerFunction = profFunction;
-  if (ncclParamIbDisable()) return ncclInternalError;
+  if (ncclParamIbCastDisable()) return ncclInternalError;
   static int shownIbHcaEnv = 0;
   if(wrap_ibv_symbols() != ncclSuccess) { return ncclInternalError; }
   if(wrap_mlx5dv_symbols() != ncclSuccess) { INFO(NCCL_NET, "NET/IB : Failed to open mlx5dv symbols. Advance features like CX-8 Direct-NIC will be disabled."); }
@@ -307,7 +307,7 @@ ncclResult_t IbCastInitDevices(ncclDebugLogger_t logFunction, ncclProfilerCallba
 
         uint32_t oooRqSize = 0;
         enum ncclIbProvider ibProvider = wrap_mlx5dv_is_supported(devices[d]) ? IB_PROVIDER_MLX5 : IB_PROVIDER_NONE;
-        if (ibProvider == IB_PROVIDER_MLX5 && ncclParamIbOooRq()) {
+        if (ibProvider == IB_PROVIDER_MLX5 && ncclParamIbCastOooRq()) {
           NCCLCHECKGOTO(IbCastQueryOooRqSize(context, devices[d]->name, &oooRqSize), ret, fail);
         }
 
@@ -337,14 +337,14 @@ ncclResult_t IbCastInitDevices(ncclDebugLogger_t logFunction, ncclProfilerCallba
             if (devCount == -1) {
               devCount = 1;
               devOffset = 0;
-              if (ncclParamIbDataDirect() > 0 && ibProvider == IB_PROVIDER_MLX5 && ncclMlx5dvDmaBufCapable(context)) {
+              if (ncclParamIbCastDataDirect() > 0 && ibProvider == IB_PROVIDER_MLX5 && ncclMlx5dvDmaBufCapable(context)) {
                 int pathLen = strlen(dataDirectDevicePath);
                 ncclResult_t res = wrap_mlx5dv_get_data_direct_sysfs_path(context, dataDirectDevicePath + pathLen, sizeof(dataDirectDevicePath) - pathLen);
                 if (res == ncclSuccess) {
                   // data direct devices are exposed twice: with the C2C + PCIe link and with the data direct link
                   devCount = 2;
                   // by default only expose the data direct NIC (devOffset = 1), unless set to 2 by the user
-                  devOffset = (ncclParamIbDataDirect() == 2) ? 0 : 1;
+                  devOffset = (ncclParamIbCastDataDirect() == 2) ? 0 : 1;
                   INFO(NCCL_INIT | NCCL_NET, "NET/IB: Data Direct DMA Interface is detected for device %s", devices[d]->name);
                 } else if (res == ncclInvalidArgument) {
                   TRACE(NCCL_NET, "NET/IB: Device %s does not support Data Direct DMA.", devices[d]->name);
@@ -390,7 +390,7 @@ ncclResult_t IbCastInitDevices(ncclDebugLogger_t logFunction, ncclProfilerCallba
               // Enable ADAPTIVE_ROUTING by default on IB networks
               // But allow it to be overloaded by an env parameter
               IbCastDevs[IbCastNDevs].ar = (portAttr.link_layer == IBV_LINK_LAYER_INFINIBAND) ? 1 : 0;
-              if (ncclParamIbAdaptiveRouting() != -2) IbCastDevs[IbCastNDevs].ar = ncclParamIbAdaptiveRouting();
+              if (ncclParamIbCastAdaptiveRouting() != -2) IbCastDevs[IbCastNDevs].ar = ncclParamIbCastAdaptiveRouting();
 
 
               INFO(NCCL_NET, "NET/IB: [%d] %s:%s:%d/%s provider=%s speed=%d context=%p pciPath=%s ar=%d oooRqSize=%d", d, devices[d]->name, devices[d]->dev_name,
@@ -417,15 +417,15 @@ ncclResult_t IbCastInitDevices(ncclDebugLogger_t logFunction, ncclProfilerCallba
     IbCastRelaxedOrderingEnabled = IbCastRelaxedOrderingCapable();
 
     // Default value for IbCastArThreshold is 8192
-    if (ncclParamIbArThreshold() != -2) {
-      if (ncclParamIbOooRq()) {
+    if (ncclParamIbCastArThreshold() != -2) {
+      if (ncclParamIbCastOooRq()) {
         INFO(NCCL_NET, "NET/IB: OOO RQ is enabled, AR threshold will be ignored.");
       } else {
-        IbCastArThreshold = ncclParamIbArThreshold();  // set explicitly by user
+        IbCastArThreshold = ncclParamIbCastArThreshold();  // set explicitly by user
       }
     }
     // sort devices to ensure a consistent order across nodes
-    if (ncclParamIbDevicePciOrder()) qsort(IbCastDevs, IbCastNDevs, sizeof(struct ncclIbDev), IbCastCompareDevs);
+    if (ncclParamIbCastDevicePciOrder()) qsort(IbCastDevs, IbCastNDevs, sizeof(struct ncclIbDev), IbCastCompareDevs);
     // Once sorted, get the realPort ID and create the virtual devices.
     // Doing it after sorting ensures that devices will have consistent realPort ids across nodes.
     char line[2048] = "";
