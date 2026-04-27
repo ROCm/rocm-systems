@@ -443,98 +443,29 @@ hsaKmtCreateQueue(HSAuint32 NodeId, HSA_QUEUE_TYPE Type,
                     hqd_idx, g_wddm_lite_dev.hw.queues[hqd_idx].doorbell_index,
                     g_wddm_lite_dev.hw.queues[hqd_idx].doorbell_index * 8);
 
-            /* === NOP AQL packet test (VRAM-based, matching tinygrad) ===
-             * Use VRAM ring at offset 7MB (within system aperture, VMID 0).
-             * This bypasses GART entirely. If this works, the issue was
-             * GART/VMID1 access. */
-            if (hqd_idx == 0) {
-                /* Use VRAM at offset 7MB for NOP test ring + control */
-                ULONGLONG nop_vram_off = 7 * 1024 * 1024;
-                ULONGLONG nop_ring_mc = g_wddm_lite_dev.hw.gmc.vram_start + nop_vram_off;
-                ULONGLONG nop_rptr_mc = nop_ring_mc + 0x1000;
-                ULONGLONG nop_wptr_mc = nop_ring_mc + 0x2000;
-                ULONGLONG nop_eop_mc  = nop_ring_mc + 0x3000;
-                ULONGLONG nop_mqd_mc  = nop_ring_mc + 0x4000;
+            /* === In-place AQL barrier test ===
+             * Write a barrier_and AQL packet to the ALREADY-PROGRAMMED queue
+             * ring buffer (GART-mapped), set WPTR, and ring doorbell.
+             * This tests if MEC processes the existing HQD without reprogramming. */
+            if (hqd_idx == 0 && QueueAddress &&
+                s_queues[slot].wptr.cpu_addr) {
+                /* Write AQL barrier_and packet to the existing ring buffer.
+                 * The queue is already programmed as AQL with GART addresses.
+                 * QueueAddress is the CPU mapping of the ring buffer from ROCR. */
+                volatile ULONG *ring = (volatile ULONG *)QueueAddress;
+                volatile ULONG *wptr_mem = (volatile ULONG *)s_queues[slot].wptr.cpu_addr;
+                volatile ULONG *rptr_mem = (volatile ULONG *)s_queues[slot].rptr.cpu_addr;
 
-                /* Map VRAM for NOP test */
-                AMDGPU_ESCAPE_MAP_BAR_DATA nop_map;
-                memset(&nop_map, 0, sizeof(nop_map));
-                nop_map.Header.Command = AMDGPU_ESCAPE_MAP_BAR;
-                nop_map.Header.Size = sizeof(nop_map);
-                nop_map.BarIndex = 0; /* BAR0 = VRAM */
-                nop_map.Offset = nop_vram_off;
-                nop_map.Length = 0x5000;
-                if (wddm_lite_escape(&g_wddm_lite_dev, &nop_map, sizeof(nop_map)) != 0 ||
-                    !nop_map.MappedAddress) {
-                    pr_warn("hsaKmtCreateQueue: NOP VRAM mapping failed\n");
-                } else {
-                UCHAR *nop_cpu = (UCHAR *)nop_map.MappedAddress;
-                memset(nop_cpu, 0, 0x5000);
+                /* AQL barrier_and packet (64 bytes = 16 DWORDs):
+                 * header = type=BARRIER_AND(4) | barrier=1(bit8) | acquire=0 | release=0
+                 * Rest = zeros (no signals to wait on) */
+                memset((void *)ring, 0, 64);
+                ring[0] = (4) | (1 << 8); /* header: type=4, barrier=1 */
+                MemoryBarrier();
 
-                /* Write NOP AQL barrier packet at ring offset 0 */
-                volatile USHORT *nop_hdr = (volatile USHORT *)(nop_cpu);
-                nop_hdr[0] = (4) | (1 << 8); /* type=BARRIER_AND, barrier=1 */
-
-                /* Build MQD for VMID 0 VRAM-based ring */
-                volatile ULONG *nop_mqd = (volatile ULONG *)(nop_cpu + 0x4000);
-                /* MQD header (tinygrad: 0xC0310800) — MEC reads from memory */
-                nop_mqd[0] = 0xC0310800;
-                nop_mqd[128] = (ULONG)(nop_mqd_mc & 0xFFFFFFFC);
-                nop_mqd[129] = (ULONG)(nop_mqd_mc >> 32);
-                nop_mqd[130] = 0; /* active=0 (set later) */
-                nop_mqd[131] = 0; /* vmid=0 */
-                nop_mqd[132] = (0x55 << 8) | 1; /* persistent_state: preload_size=0x55, preload_req=1 (matching tinygrad) */
-                nop_mqd[133] = 2; /* pipe_priority */
-                nop_mqd[134] = 0xF; /* queue_priority */
-                nop_mqd[135] = 0x111; /* cp_hqd_quantum (tinygrad value) */
-                /* PQ base = ring_addr >> 8 */
-                nop_mqd[136] = (ULONG)((nop_ring_mc >> 8) & 0xFFFFFFFF);
-                nop_mqd[137] = (ULONG)(nop_ring_mc >> 40);
-                nop_mqd[138] = 0; /* rptr */
-                nop_mqd[139] = (ULONG)(nop_rptr_mc & 0xFFFFFFFF);
-                nop_mqd[140] = (ULONG)(nop_rptr_mc >> 32);
-                nop_mqd[141] = (ULONG)(nop_wptr_mc & 0xFFFFFFFF);
-                nop_mqd[142] = (ULONG)((nop_wptr_mc >> 32) & 0xFFFF);
-                /* doorbell: index 3, dword offset 6, shifted */
-                nop_mqd[143] = (1 << 30) | (6 << 2); /* DOORBELL_EN | OFFSET=6<<2=24=0x18 */
-                /* PQ_CONTROL matching tinygrad for AQL:
-                 * queue_size=9, rptr_block_size=5, unord_dispatch=0,
-                 * AQL: queue_full_en=1 (bit 26), slot_based_wptr=2 (bits [24:23]),
-                 * priv_state=1 (bit 30), kmd_queue=1 (bit 31), no_update_rptr=1 (bit 28) */
-                nop_mqd[145] = (9 << 0)       /* QUEUE_SIZE */
-                             | (5 << 8)       /* RPTR_BLOCK_SIZE (tinygrad: 5) */
-                             | (1 << 26)      /* QUEUE_FULL_EN (AQL) */
-                             | (2 << 23)      /* SLOT_BASED_WPTR (AQL) */
-                             | (1 << 30)      /* PRIV_STATE */
-                             | (1u << 31)     /* KMD_QUEUE */
-                             | (1 << 28);     /* NO_UPDATE_RPTR */
-                /* EOP */
-                nop_mqd[152] = (ULONG)((nop_eop_mc >> 8) & 0xFFFFFFFF);
-                nop_mqd[153] = (ULONG)(nop_eop_mc >> 40);
-                nop_mqd[154] = 9;
-                /* IB control: min_ib_avail_size=3 (tinygrad) */
-                nop_mqd[149] = (3 << 20); /* CP_HQD_IB_CONTROL */
-                /* HQ_STATUS0 = 0x20004000 (tinygrad magic value) */
-                nop_mqd[160] = 0x20004000; /* CP_HQD_HQ_STATUS0 */
-                /* MQD_CONTROL: priv_state=1 (bit 8) */
-                nop_mqd[162] = (1 << 8); /* CP_MQD_CONTROL */
-                /* AQL control */
-                nop_mqd[181] = 1;
-                /* Static thread mgmt: all SEs enabled */
-                for (int se = 0; se < 8; se++)
-                    nop_mqd[163 + se] = 0xFFFFFFFF; /* compute_static_thread_mgmt_se0-7 (approximate offsets) */
-                /* WPTR = 15 (1 AQL pkt - 1, matching tinygrad) */
-                nop_mqd[182] = 15;
-                nop_mqd[183] = 0;
-
-                /* Program HQD via bulk MQD copy */
-                extern void gpu_program_hqd_from_mqd(struct WddmLiteDevice *dev,
-                    ULONG me, ULONG pipe, ULONG queue, volatile ULONG *mqd);
-                gpu_program_hqd_from_mqd(&g_wddm_lite_dev, 1, 0, 0, nop_mqd);
-
-                /* Set WPTR in poll address */
-                volatile ULONG *nop_wptr = (volatile ULONG *)(nop_cpu + 0x2000);
-                nop_wptr[0] = 15;
+                /* Set WPTR = 1 (one AQL packet submitted, slot_based) in memory */
+                wptr_mem[0] = 1;
+                wptr_mem[1] = 0;
                 MemoryBarrier();
 
                 /* HDP flush + doorbell */
@@ -542,32 +473,47 @@ hsaKmtCreateQueue(HSAuint32 NodeId, HSA_QUEUE_TYPE Type,
                 ULONG db_off = g_wddm_lite_dev.hw.queues[hqd_idx].doorbell_index * 8;
                 volatile ULONGLONG *db = (volatile ULONGLONG *)
                     ((UCHAR *)g_wddm_lite_dev.doorbell_base + db_off);
-                pr_info("hsaKmtCreateQueue: VRAM NOP test — doorbell at 0x%x, val=15\n", db_off);
-                *db = 15;
+                pr_info("hsaKmtCreateQueue: AQL barrier test, doorbell=0x%x\n",
+                        db_off);
+                *db = 1;
                 MemoryBarrier();
 
-                /* Wait for RPTR */
-                volatile ULONG *nop_rptr = (volatile ULONG *)(nop_cpu + 0x1000);
+                /* Wait for RPTR to advance */
                 for (int poll = 0; poll < 100; poll++) {
                     Sleep(10);
-                    if (nop_rptr[0] != 0) {
-                        pr_info("hsaKmtCreateQueue: VRAM NOP test PASSED! "
+                    if (rptr_mem[0] != 0) {
+                        pr_info("hsaKmtCreateQueue: AQL barrier test PASSED! "
                                 "RPTR=%u after %d ms\n",
-                                nop_rptr[0], (poll + 1) * 10);
+                                rptr_mem[0], (poll + 1) * 10);
                         break;
                     }
                     if (poll == 99) {
-                        extern ULONG gpu_read_hqd_wptr(struct WddmLiteDevice *dev,
-                            ULONG me, ULONG pipe, ULONG queue);
-                        ULONG w = gpu_read_hqd_wptr(&g_wddm_lite_dev, 1, 0, 0);
-                        /* Check GFXHUB fault */
+                        /* Read HQD state for diagnostics */
+                        extern ULONG gc0_rreg(struct WddmLiteDevice *dev, ULONG reg);
+                        extern ULONG gc1_rreg(struct WddmLiteDevice *dev, ULONG reg);
+                        extern void grbm_select(struct WddmLiteDevice *dev,
+                            ULONG me, ULONG pipe, ULONG queue, ULONG vmid);
+                        extern void grbm_select_reset(struct WddmLiteDevice *dev);
+
+                        grbm_select(&g_wddm_lite_dev, 1, 0, 0, 0);
+                        ULONG reg_rptr = gc0_rreg(&g_wddm_lite_dev, 0x1fb3);
+                        ULONG reg_wptr = gc0_rreg(&g_wddm_lite_dev, 0x1fdf);
+                        ULONG hq_stat = gc0_rreg(&g_wddm_lite_dev, 0x1fc9);
+                        ULONG mec_ip = gc1_rreg(&g_wddm_lite_dev, 0x2903);
+                        ULONG mec_cntl = gc1_rreg(&g_wddm_lite_dev, 0x2904);
+                        grbm_select_reset(&g_wddm_lite_dev);
+
                         extern ULONG gpu_check_gfxhub_fault(struct WddmLiteDevice *dev);
                         ULONG fault = gpu_check_gfxhub_fault(&g_wddm_lite_dev);
-                        pr_warn("hsaKmtCreateQueue: VRAM NOP test FAILED — "
-                                "RPTR=0 after 1000ms. HQD WPTR=%u FAULT=0x%08x\n", w, fault);
+
+                        pr_warn("hsaKmtCreateQueue: AQL barrier test FAILED — "
+                                "mem_RPTR=%u reg_RPTR=%u reg_WPTR=%u "
+                                "HQ_STAT=0x%08x MEC_IP=0x%08x CNTL=0x%08x "
+                                "FAULT=0x%08x\n",
+                                rptr_mem[0], reg_rptr, reg_wptr,
+                                hq_stat, mec_ip, mec_cntl, fault);
                     }
                 }
-                } /* end else (VRAM mapped OK) */
             }
         }
     } else {

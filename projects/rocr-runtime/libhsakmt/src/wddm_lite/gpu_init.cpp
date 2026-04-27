@@ -1932,25 +1932,18 @@ static int load_fw_rs64(struct PspRingContext *ctx, const char *fw_dir,
     }
 
     struct GfxFirmwareHeaderV2 *hdr = (struct GfxFirmwareHeaderV2 *)buf;
-    pr_info("psp_ring: %s: header v%u.%u, "
-            "code_offset=0x%x code_size=%u, "
-            "data_offset=0x%x data_size=%u, "
-            "ucode_start=0x%08x_%08x\n",
+    pr_info("psp_ring: %s: header v%u.%u, hdr_size=%u\n",
             filename,
             hdr->header_version_major, hdr->header_version_minor,
-            hdr->ucode_offset_bytes, hdr->ucode_size_bytes,
-            hdr->data_offset_bytes, hdr->data_size_bytes,
-            hdr->ucode_start_addr_hi, hdr->ucode_start_addr_lo);
-
-    /* Extract ucode start address for MEC programming */
-    if (out_ucode_start && hdr->header_version_major >= 2) {
-        *out_ucode_start = ((ULONGLONG)hdr->ucode_start_addr_hi << 32) |
-                           hdr->ucode_start_addr_lo;
-    }
+            hdr->header_size_bytes);
 
     /*
      * For v2.0 headers, we have separate code and data sections.
-     * For v1.x headers, fall back to ucode_array_offset_bytes.
+     * For v1.x (MES) headers, the layout differs: an extra data_version
+     * field at +0x2C shifts data_size/data_offset/ucode_start by 4 bytes.
+     *
+     * v2 layout: +0x2C=data_size  +0x30=data_off  +0x34=start_lo +0x38=start_hi
+     * v1 layout: +0x2C=data_ver   +0x30=data_size +0x34=data_off +0x38=start_lo +0x3C=start_hi
      */
     ULONG code_offset, code_size, data_offset, data_size;
 
@@ -1959,15 +1952,45 @@ static int load_fw_rs64(struct PspRingContext *ctx, const char *fw_dir,
         code_size = hdr->ucode_size_bytes;
         data_offset = hdr->data_offset_bytes;
         data_size = hdr->data_size_bytes;
+
+        /* v2: ucode_start at DWORDs 13/14 (offsets 0x34/0x38) */
+        if (out_ucode_start && file_len >= 0x3C) {
+            ULONG *raw = (ULONG *)buf;
+            ULONGLONG start = ((ULONGLONG)raw[14] << 32) | raw[13];
+            if (start != 0) {
+                *out_ucode_start = start;
+                pr_info("psp_ring: %s: ucode_start = 0x%08x_%08x\n",
+                        filename, raw[14], raw[13]);
+            }
+        }
     } else {
-        /* v1.x fallback: load entire ucode array as code, no separate data.
-         * MES v1.0 firmware (mes_firmware_header_v1_0) packages code+data
-         * as a single blob in common_ucode_size_bytes, matching amdgpu
-         * behavior where ucode_size = common_header.ucode_size_bytes. */
-        code_offset = hdr->ucode_array_offset_bytes;
-        code_size = hdr->common_ucode_size_bytes;
-        data_offset = 0;
-        data_size = 0;
+        /* v1.x MES header (mes_firmware_header_v1_0):
+         *   +0x24: mes_ucode_size_bytes (code size)
+         *   +0x28: mes_ucode_offset_bytes (code offset)
+         *   +0x2C: mes_ucode_data_version (extra field!)
+         *   +0x30: mes_ucode_data_size_bytes (data/stack size)
+         *   +0x34: mes_ucode_data_offset_bytes (data/stack offset)
+         *   +0x38: mes_uc_start_addr_lo
+         *   +0x3C: mes_uc_start_addr_hi
+         */
+        ULONG *raw = (ULONG *)buf;
+        code_offset = raw[10]; /* +0x28 */
+        code_size = raw[9];    /* +0x24 */
+        data_size = raw[12];   /* +0x30 */
+        data_offset = raw[13]; /* +0x34 */
+
+        pr_info("psp_ring: %s: v1 MES header: code=%u@0x%x data=%u@0x%x\n",
+                filename, code_size, code_offset, data_size, data_offset);
+
+        /* v1: ucode_start at DWORDs 14/15 (offsets 0x38/0x3C) */
+        if (out_ucode_start && file_len >= 0x40) {
+            ULONGLONG start = ((ULONGLONG)raw[15] << 32) | raw[14];
+            if (start != 0 && start != 0xFFFFFFFFFFFFFFFFULL) {
+                *out_ucode_start = start;
+                pr_info("psp_ring: %s: ucode_start = 0x%08x_%08x\n",
+                        filename, raw[15], raw[14]);
+            }
+        }
     }
 
     /* Load code section */
@@ -2928,39 +2951,10 @@ int gpu_psp_load_all_fw(struct WddmLiteDevice *dev, const char *fw_dir)
         }
     }
 
-    /* MES KIQ firmware (RS64 — code + data/stack) */
-    pr_info("psp_ring: === Loading MES KIQ firmware (RS64) ===\n");
-    {
-        ULONG mes1_stacks[] = { GFX_FW_TYPE_MES_KIQ_STACK };
-        ret = load_fw_rs64(&ctx, fw_dir, "gc_12_0_1_mes1.bin",
-                            GFX_FW_TYPE_CP_MES_KIQ, mes1_stacks, 1, NULL);
-        if (ret != 0) {
-            pr_warn("psp_ring: MES KIQ load failed (continuing)\n");
-            load_failures++;
-        }
-    }
-
-    /* MES firmware — PSP type is GFX_FW_TYPE_CP_MES (33), NOT RS64_MES (76).
-     * amdgpu_psp_get_fw_type() maps AMDGPU_UCODE_ID_CP_MES → type 33.
-     * Type 76 is rejected by PSP with TEE_ERROR_BAD_PARAMETERS.
-     * GFX12 uses unified MES (gc_12_0_1_uni_mes.bin) by default. */
-    pr_info("psp_ring: === Loading MES firmware ===\n");
-    {
-#define GFX_FW_TYPE_CP_MES       33
-#define GFX_FW_TYPE_MES_STACK_V1 34
-        ULONG mes_stacks[] = { GFX_FW_TYPE_MES_STACK_V1 };
-        ret = load_fw_rs64(&ctx, fw_dir, "gc_12_0_1_uni_mes.bin",
-                            GFX_FW_TYPE_CP_MES, mes_stacks, 1, NULL);
-        if (ret != 0) {
-            pr_info("psp_ring: trying legacy gc_12_0_1_mes.bin\n");
-            ret = load_fw_rs64(&ctx, fw_dir, "gc_12_0_1_mes.bin",
-                                GFX_FW_TYPE_CP_MES, mes_stacks, 1, NULL);
-        }
-        if (ret != 0) {
-            pr_warn("psp_ring: MES load failed (continuing)\n");
-            load_failures++;
-        }
-    }
+    /* MES firmware is loaded AFTER AUTOLOAD_RLC (see below).
+     * Critical: loading MES before AUTOLOAD causes AUTOLOAD to distribute
+     * MES to TMR and lock IC_BASE. Loading after AUTOLOAD keeps IC_BASE
+     * writable so we can point it to our own VRAM/GART copy. */
 
     /* PSP Trusted Applications (TA — RAS, HDCP, DTM) */
     pr_info("psp_ring: === Loading TA firmware ===\n");
@@ -2974,9 +2968,10 @@ int gpu_psp_load_all_fw(struct WddmLiteDevice *dev, const char *fw_dir)
         }
     }
 
-    /* AUTOLOAD_RLC — sent as part of the PSP ring sequence.
-     * amdgpu sends this as the LAST PSP command before SMU init.
-     * It triggers asynchronous firmware distribution by RLC. */
+    /* AUTOLOAD_RLC — triggers asynchronous firmware distribution by RLC.
+     * CRITICAL: MES must be loaded AFTER this, not before. Loading MES
+     * before AUTOLOAD causes AUTOLOAD to distribute MES to TMR and lock
+     * IC_BASE/MDBASE. Loading after keeps IC_BASE writable. */
     pr_info("psp_ring: === Sending AUTOLOAD_RLC ===\n");
     ret = psp_ring_autoload_rlc(&ctx);
     if (ret != 0) {
@@ -2984,6 +2979,42 @@ int gpu_psp_load_all_fw(struct WddmLiteDevice *dev, const char *fw_dir)
         load_failures++;
     } else {
         pr_info("psp_ring: AUTOLOAD_RLC sent OK\n");
+    }
+
+    /* === MES firmware: loaded AFTER AUTOLOAD_RLC ===
+     * This matches the amdgpu kernel driver and tinygrad sequence.
+     * With MES loaded post-AUTOLOAD, IC_BASE is not set by AUTOLOAD
+     * and remains writable for us to point at our own VRAM/GART copy. */
+#define GFX_FW_TYPE_CP_MES       33
+#define GFX_FW_TYPE_MES_STACK_V1 34
+
+    pr_info("psp_ring: === Loading MES KIQ firmware (post-AUTOLOAD) ===\n");
+    {
+        ULONG mes1_stacks[] = { GFX_FW_TYPE_MES_KIQ_STACK };
+        ret = load_fw_rs64(&ctx, fw_dir, "gc_12_0_1_mes1.bin",
+                            GFX_FW_TYPE_CP_MES_KIQ, mes1_stacks, 1,
+                            &dev->hw.gfx.mes_kiq_ucode_start);
+        if (ret != 0) {
+            pr_warn("psp_ring: MES KIQ load failed (continuing)\n");
+            load_failures++;
+        }
+    }
+
+    pr_info("psp_ring: === Loading MES firmware (post-AUTOLOAD) ===\n");
+    {
+        ULONG mes_stacks[] = { GFX_FW_TYPE_MES_STACK_V1 };
+        ret = load_fw_rs64(&ctx, fw_dir, "gc_12_0_1_uni_mes.bin",
+                            GFX_FW_TYPE_CP_MES, mes_stacks, 1,
+                            &dev->hw.gfx.mes_ucode_start);
+        if (ret != 0) {
+            pr_info("psp_ring: trying legacy gc_12_0_1_mes.bin\n");
+            ret = load_fw_rs64(&ctx, fw_dir, "gc_12_0_1_mes.bin",
+                                GFX_FW_TYPE_CP_MES, mes_stacks, 1, NULL);
+        }
+        if (ret != 0) {
+            pr_warn("psp_ring: MES load failed (continuing)\n");
+            load_failures++;
+        }
     }
 
     pr_info("psp_ring: firmware staging complete "
@@ -3793,8 +3824,23 @@ static void gfxhub_init_system_aperture(struct WddmLiteDevice *dev)
         gfxhub_wreg(dev, regGCMC_VM_SYSTEM_APERTURE_LOW_ADDR,
                     (ULONG)(aperture_low >> 18));
     }
-    gfxhub_wreg(dev, regGCMC_VM_SYSTEM_APERTURE_HIGH_ADDR,
-                (ULONG)(gmc->vram_end >> 18));
+    /* System aperture HIGH must cover GART range, not just VRAM.
+     * VRAM ends at vram_end but GART sits right above it.
+     * MEC with VMID=0 uses the system aperture for all accesses,
+     * so queue ring buffers in GART must be within the aperture. */
+    {
+        ULONGLONG aperture_high = gmc->vram_end;
+        if (gmc->gart_start + gmc->gart_size > aperture_high)
+            aperture_high = gmc->gart_start + gmc->gart_size;
+        gfxhub_wreg(dev, regGCMC_VM_SYSTEM_APERTURE_HIGH_ADDR,
+                    (ULONG)(aperture_high >> 18));
+        pr_info("gpu_gmc: GFXHUB sys aperture HIGH extended: "
+                "vram_end=0x%llx gart_end=0x%llx → HIGH=0x%08x (covers to 0x%llx)\n",
+                (unsigned long long)gmc->vram_end,
+                (unsigned long long)(gmc->gart_start + gmc->gart_size),
+                (ULONG)(aperture_high >> 18),
+                (unsigned long long)((((ULONGLONG)(ULONG)(aperture_high >> 18)) + 1) << 18));
+    }
 
     gfxhub_wreg(dev, regGCMC_VM_SYSTEM_APERTURE_DEFAULT_ADDR_LSB,
                 (ULONG)(gmc->dummy_page_bus_addr >> 12));
@@ -4808,6 +4854,17 @@ int gpu_smu_enable_features(struct WddmLiteDevice *dev)
         int msg_ret = gpu_smu_send_msg(dev, PPSMC_MSG_EnableAllSmuFeatures, 0);
         if (msg_ret == 0) {
             pr_info("gpu_smu: *** EnableAllSmuFeatures SUCCEEDED via send_msg! ***\n");
+            /* CRITICAL: EnableAllSmuFeatures ENABLES GFXOFF. We must send
+             * DisallowGfxOff immediately to prevent GC power-gating.
+             * Without this, GFXOFF kicks in ~200ms later and kills MEC. */
+            pr_info("gpu_smu: sending DisallowGfxOff after EnableAllSmuFeatures...\n");
+            int gfxoff_ret = gpu_smu_send_msg(dev, PPSMC_MSG_DisallowGfxOff, 0);
+            if (gfxoff_ret == 0) {
+                pr_info("gpu_smu: DisallowGfxOff SUCCEEDED — GFXOFF disabled\n");
+            } else {
+                pr_warn("gpu_smu: DisallowGfxOff FAILED (ret=%d) — "
+                        "GFXOFF may power-gate GC!\n", gfxoff_ret);
+            }
             dev->hw.gfxoff_disabled = TRUE;
             return 0;
         }
@@ -5155,8 +5212,10 @@ void gpu_enable_gfxoff(struct WddmLiteDevice *dev)
  * (GFXOFF or BAR mapping issue), but SMN indirect always works.
  */
 
-/* GC base_index 1 register access (for GRBM, RLC, MEC, SH_MEM) */
-static ULONG gc1_rreg(struct WddmLiteDevice *dev, ULONG reg)
+/* GC base_index 1 register access (for GRBM, RLC, MEC, SH_MEM).
+ * Uses SMN indirect by default. For per-pipe registers (MES IC_BASE etc.),
+ * use gc1_mmio_wreg/rreg which go through direct MMIO + grbm_select. */
+ULONG gc1_rreg(struct WddmLiteDevice *dev, ULONG reg)
 {
     return gpu_smn_rreg(dev, dev->hw.ip.gc_base1 + reg);
 }
@@ -5166,13 +5225,42 @@ static void gc1_wreg(struct WddmLiteDevice *dev, ULONG reg, ULONG val)
     gpu_smn_wreg(dev, dev->hw.ip.gc_base1 + reg, val);
 }
 
+/* Direct MMIO access for GC base1 registers.
+ * Required for per-pipe registers where grbm_select context matters.
+ * SMN indirect bypasses grbm_select, so writes to per-pipe registers
+ * don't target the selected pipe. */
+static ULONG gc1_mmio_rreg(struct WddmLiteDevice *dev, ULONG reg)
+{
+    ULONG offset = (dev->hw.ip.gc_base1 + reg) * 4;
+    return wddm_lite_read_reg32(dev, offset);
+}
+
+static void gc1_mmio_wreg(struct WddmLiteDevice *dev, ULONG reg, ULONG val)
+{
+    ULONG offset = (dev->hw.ip.gc_base1 + reg) * 4;
+    wddm_lite_write_reg32(dev, offset, val);
+}
+
+/* Direct MMIO for GC base0 registers (CP_HQD_*, CP_STAT, etc.) */
+static ULONG gc0_mmio_rreg(struct WddmLiteDevice *dev, ULONG reg)
+{
+    ULONG offset = (dev->hw.ip.gc_base + reg) * 4;
+    return wddm_lite_read_reg32(dev, offset);
+}
+
+static void gc0_mmio_wreg(struct WddmLiteDevice *dev, ULONG reg, ULONG val)
+{
+    ULONG offset = (dev->hw.ip.gc_base + reg) * 4;
+    wddm_lite_write_reg32(dev, offset, val);
+}
+
 /* GC base_index 0 register access (for CP_HQD, CP_STAT, GRBM_SOFT_RESET) */
-static ULONG gc0_rreg(struct WddmLiteDevice *dev, ULONG reg)
+ULONG gc0_rreg(struct WddmLiteDevice *dev, ULONG reg)
 {
     return gpu_smn_rreg(dev, dev->hw.ip.gc_base + reg);
 }
 
-static void gc0_wreg(struct WddmLiteDevice *dev, ULONG reg, ULONG val)
+void gc0_wreg(struct WddmLiteDevice *dev, ULONG reg, ULONG val)
 {
     gpu_smn_wreg(dev, dev->hw.ip.gc_base + reg, val);
 }
@@ -5298,7 +5386,7 @@ static void gc0_wreg(struct WddmLiteDevice *dev, ULONG reg, ULONG val)
 
 /* ---- GRBM select (target specific ME/pipe/queue for HQD writes) ---- */
 
-static void grbm_select(struct WddmLiteDevice *dev,
+void grbm_select(struct WddmLiteDevice *dev,
                          ULONG me, ULONG pipe, ULONG queue, ULONG vmid)
 {
     ULONG val = 0;
@@ -5307,12 +5395,14 @@ static void grbm_select(struct WddmLiteDevice *dev,
     val |= (vmid & 0xF) << 4;     /* VMID [7:4] */
     val |= (queue & 0x7) << 8;    /* QUEUEID [10:8] */
 
-    gc1_wreg(dev, regGRBM_GFX_CNTL, val);
+    /* Use direct MMIO for GRBM_GFX_CNTL — SMN indirect doesn't affect
+     * the per-pipe register routing for subsequent MMIO accesses. */
+    gc1_mmio_wreg(dev, regGRBM_GFX_CNTL, val);
 }
 
-static void grbm_select_reset(struct WddmLiteDevice *dev)
+void grbm_select_reset(struct WddmLiteDevice *dev)
 {
-    gc1_wreg(dev, regGRBM_GFX_CNTL, 0);
+    gc1_mmio_wreg(dev, regGRBM_GFX_CNTL, 0);
 }
 
 
@@ -6342,21 +6432,59 @@ int gpu_gfx_init(struct WddmLiteDevice *dev)
      *   MES_HALT = bit 30
      * ================================================================ */
     if (dev->hw.gfx.rlc_bootload_status & 0x80000000) {
-        /* MES start address from firmware header:
-         * mes_uc_start_addr = 0x00080000_00000000 (both pipes)
-         * After >> 2: lo=0x00000000, hi=0x00020000
-         *
-         * Try both the header value and 0x0 to see which works. */
-        ULONG mes_pc_lo = 0x00000000;
-        ULONG mes_pc_hi = 0x00020000;
+        /* MES PC_START from firmware headers (per-pipe).
+         * Pipe 0 = scheduler (uni_mes), Pipe 1 = KIQ (mes1).
+         * If not cached (e.g. PSP load was skipped), read directly from files. */
+        ULONGLONG mes_start[2] = {
+            dev->hw.gfx.mes_ucode_start,      /* pipe 0: uni_mes */
+            dev->hw.gfx.mes_kiq_ucode_start,   /* pipe 1: mes1 (KIQ) */
+        };
 
-        /* Check env var to try PC_START=0 instead */
-        char mes_pc_zero[32] = {};
-        GetEnvironmentVariableA("HSAKMT_MES_PC_ZERO", mes_pc_zero, sizeof(mes_pc_zero));
-        if (mes_pc_zero[0] == '1') {
-            mes_pc_hi = 0;
-            pr_info("gpu_gfx: MES PC_START override → 0x0 (HSAKMT_MES_PC_ZERO=1)\n");
+        /* Read MES firmware headers if not cached */
+        if (mes_start[0] == 0 || mes_start[1] == 0) {
+            char fw_dir[260] = {};
+            GetEnvironmentVariableA("HSAKMT_FW_DIR", fw_dir, sizeof(fw_dir));
+            /* Strip trailing whitespace — Windows cmd "set VAR=val &&" leaves
+             * a trailing space before the && separator. */
+            for (int i = (int)strlen(fw_dir) - 1; i >= 0 && (fw_dir[i] == ' ' || fw_dir[i] == '\t'); i--)
+                fw_dir[i] = '\0';
+            if (fw_dir[0]) {
+                const char *mes_files[2] = {
+                    "gc_12_0_1_uni_mes.bin",  /* pipe 0 */
+                    "gc_12_0_1_mes1.bin",     /* pipe 1 */
+                };
+                for (int mi = 0; mi < 2; mi++) {
+                    if (mes_start[mi] != 0) continue;
+                    char path[520];
+                    snprintf(path, sizeof(path), "%s\\%s", fw_dir, mes_files[mi]);
+                    FILE *f = fopen(path, "rb");
+                    if (f) {
+                        ULONG hdr[16];
+                        if (fread(hdr, 4, 16, f) == 16) {
+                            /* v1 MES header: ucode_start at DWORDs 14/15
+                             * (offsets 0x38/0x3C). NOT 13/14 like v2. */
+                            USHORT ver_major = (USHORT)(hdr[2] & 0xFFFF);
+                            ULONGLONG start;
+                            if (ver_major >= 2) {
+                                start = ((ULONGLONG)hdr[14] << 32) | hdr[13];
+                            } else {
+                                start = ((ULONGLONG)hdr[15] << 32) | hdr[14];
+                            }
+                            if (start != 0) {
+                                mes_start[mi] = start;
+                                pr_info("gpu_gfx: MES pipe%d start from %s: 0x%08x_%08x\n",
+                                        mi, mes_files[mi],
+                                        (ULONG)(start >> 32), (ULONG)(start & 0xFFFFFFFF));
+                            }
+                        }
+                        fclose(f);
+                    }
+                }
+            }
         }
+        pr_info("gpu_gfx: MES ucode_start: pipe0=0x%llx pipe1=0x%llx\n",
+                (unsigned long long)mes_start[0],
+                (unsigned long long)mes_start[1]);
 
 #define regCP_MES_PRGRM_CNTR_START_MES    0x2800
 #define regCP_MES_PRGRM_CNTR_START_HI_MES 0x289d
@@ -6396,74 +6524,337 @@ int gpu_gfx_init(struct WddmLiteDevice *dev)
          * which does HALT + INVALIDATE_ICACHE + RESET on ALL pipes. Without
          * icache invalidation, MES reads stale cache data and never executes. */
 
-        /* Step 1: Disable MES — matching mes_v12_0_enable(adev, false) */
+        /* Read MES CNTL state from AUTOLOAD */
         {
-            ULONG cntl = gc1_rreg(dev, regCP_MES_CNTL_MES);
-            cntl &= ~(MES_PIPE0_ACTIVE | MES_PIPE1_ACTIVE);
-            cntl |= MES_INVALIDATE_ICACHE | MES_PIPE0_RESET | MES_PIPE1_RESET | MES_HALT;
-            gc1_wreg(dev, regCP_MES_CNTL_MES, cntl);
-            pr_info("gpu_gfx: MES disabled (HALT+ICACHE_INVALIDATE+RESET): CNTL=0x%08x\n", cntl);
-        }
-
-        /* Step 2: Set PC_START for both pipes (matching set_ucode_start_addr) */
-        for (ULONG mes_pipe = 0; mes_pipe < 2; mes_pipe++) {
-            grbm_select(dev, 3, mes_pipe, 0, 0);
-            gc1_wreg(dev, regCP_MES_PRGRM_CNTR_START_MES, mes_pc_lo);
-            gc1_wreg(dev, regCP_MES_PRGRM_CNTR_START_HI_MES, mes_pc_hi);
+            grbm_select(dev, 3, 0, 0, 0);
+            ULONG cntl = gc1_mmio_rreg(dev, regCP_MES_CNTL_MES);
+            pr_info("gpu_gfx: MES CNTL from AUTOLOAD = 0x%08x "
+                    "(halt=%d, p0_active=%d, p1_active=%d)\n",
+                    cntl, (cntl >> 30) & 1, (cntl >> 26) & 1, (cntl >> 27) & 1);
             grbm_select_reset(dev);
         }
 
-        /* Step 3: Enable MES — matching mes_v12_0_enable(adev, true) */
+        /* Step 2: Load MES firmware to GART buffers.
+         * After AUTOLOAD, MES firmware is in TMR (Trusted Memory Region).
+         * But TMR contents may not survive VFIO FLR. amdgpu loads MES
+         * firmware to GART buffers (mes_v12_0_load_microcode) so MES
+         * fetches from accessible memory. We do the same.
+         *
+         * Layout: allocate DMA pages for each pipe's firmware,
+         * GART-map them, copy firmware code, set IC_BASE to GART addr. */
+        ULONGLONG mes_ic_base[2] = {0, 0};
+        {
+            char fw_dir[260] = {};
+            GetEnvironmentVariableA("HSAKMT_FW_DIR", fw_dir, sizeof(fw_dir));
+            /* Strip trailing whitespace (Windows cmd "set" quirk) */
+            for (int i = (int)strlen(fw_dir) - 1; i >= 0 && (fw_dir[i] == ' ' || fw_dir[i] == '\t'); i--)
+                fw_dir[i] = '\0';
+            const char *mes_files[2] = {
+                "gc_12_0_1_uni_mes.bin",  /* pipe 0: scheduler */
+                "gc_12_0_1_mes1.bin",     /* pipe 1: KIQ */
+            };
+
+            for (int mi = 0; mi < 2; mi++) {
+                char path[520];
+                snprintf(path, sizeof(path), "%s\\%s", fw_dir, mes_files[mi]);
+                FILE *f = fopen(path, "rb");
+                if (!f) {
+                    pr_warn("gpu_gfx: cannot open %s for GART load\n", path);
+                    continue;
+                }
+                fseek(f, 0, SEEK_END);
+                long fsize = ftell(f);
+                fseek(f, 0, SEEK_SET);
+
+                /* Read header to get ucode_array_offset and ucode_size */
+                ULONG hdr[20];
+                if (fread(hdr, 4, 20, f) != 20) {
+                    fclose(f);
+                    continue;
+                }
+                /* v1 header: ucode_array_offset at DWORD 6 (0x18),
+                 * common_ucode_size at DWORD 5 (0x14) */
+                ULONG fw_offset = hdr[6];   /* ucode_array_offset_bytes */
+                ULONG fw_size = hdr[5];     /* common_ucode_size_bytes */
+
+                if (fw_offset == 0 || fw_size == 0 ||
+                    fw_offset + fw_size > (ULONG)fsize) {
+                    pr_warn("gpu_gfx: bad MES fw header: off=0x%x size=%u fsize=%ld\n",
+                            fw_offset, fw_size, fsize);
+                    fclose(f);
+                    continue;
+                }
+
+                /* Read firmware blob */
+                UCHAR *fw_buf = (UCHAR *)malloc(fw_size);
+                if (!fw_buf) { fclose(f); continue; }
+                fseek(f, fw_offset, SEEK_SET);
+                if (fread(fw_buf, 1, fw_size, f) != fw_size) {
+                    free(fw_buf); fclose(f); continue;
+                }
+                fclose(f);
+
+                /* Allocate DMA pages for firmware (contiguous, 4KB aligned) */
+                ULONG num_pages = (fw_size + 4095) / 4096;
+                AMDGPU_ESCAPE_ALLOC_MEMORY_DATA alloc;
+                memset(&alloc, 0, sizeof(alloc));
+                alloc.Header.Command = AMDGPU_ESCAPE_ALLOC_MEMORY;
+                alloc.Header.Size = sizeof(alloc);
+                alloc.SizeInBytes = num_pages * 4096;
+                alloc.Flags = AMDGPU_MEM_TYPE_SYSTEM | AMDGPU_MEM_FLAG_HOST_ACCESS |
+                              AMDGPU_MEM_FLAG_UNCACHED;
+                if (wddm_lite_escape(dev, &alloc, sizeof(alloc)) != 0 ||
+                    !alloc.CpuAddress) {
+                    pr_warn("gpu_gfx: MES pipe%d DMA alloc failed (%u pages)\n",
+                            mi, num_pages);
+                    free(fw_buf);
+                    continue;
+                }
+
+                /* Copy firmware to DMA buffer */
+                memcpy(alloc.CpuAddress, fw_buf, fw_size);
+                /* Zero remaining bytes in last page */
+                if (fw_size < num_pages * 4096)
+                    memset((UCHAR *)alloc.CpuAddress + fw_size, 0,
+                           num_pages * 4096 - fw_size);
+                free(fw_buf);
+
+                /* Get physical addresses for GART mapping */
+                ULONGLONG *phys_addrs = (ULONGLONG *)malloc(num_pages * sizeof(ULONGLONG));
+                if (!phys_addrs) continue;
+
+                AMDGPU_ESCAPE_GET_PHYS_PAGES_DATA phys;
+                for (ULONG pg = 0; pg < num_pages; pg++) {
+                    memset(&phys, 0, sizeof(phys));
+                    phys.Header.Command = AMDGPU_ESCAPE_GET_PHYS_PAGES;
+                    phys.Header.Size = sizeof(phys);
+                    phys.Handle = alloc.Handle;
+                    phys.PageOffset = pg;
+                    if (wddm_lite_escape(dev, &phys, sizeof(phys)) != 0 ||
+                        phys.NumPages == 0) {
+                        pr_warn("gpu_gfx: MES pipe%d GET_PHYS_PAGES failed pg=%u\n",
+                                mi, pg);
+                        phys_addrs[pg] = 0;
+                    } else {
+                        phys_addrs[pg] = phys.PhysAddrs[0];
+                    }
+                }
+
+                /* GART-map all pages */
+                ULONGLONG gpu_addr = gpu_gart_map(dev, phys_addrs, num_pages);
+                free(phys_addrs);
+
+                if (gpu_addr == 0) {
+                    pr_warn("gpu_gfx: MES pipe%d GART map failed\n", mi);
+                    continue;
+                }
+
+                mes_ic_base[mi] = gpu_addr;
+                pr_info("gpu_gfx: MES pipe%d firmware loaded to GART: "
+                        "gpu=0x%llx size=%u (%u pages)\n",
+                        mi, (unsigned long long)gpu_addr, fw_size, num_pages);
+            }
+        }
+
+        /* Step 3: Enable MES — matching kernel mes_v12_0 sequence:
+         *   a) mes_v12_0_load_microcode: set IC_BASE_CNTL=0 per pipe
+         *   b) mes_v12_0_enable(false): halt all pipes
+         *   c) mes_v12_0_set_ucode_start_addr: set PC_START per pipe
+         *   d) mes_v12_0_enable(true): activate all pipes
+         */
+#define regCP_MES_RS64_INSTR_PNTR_MES  0x2803
+#define regCP_MES_RS64_GP0_LO_MES      0x2808
+#define regCP_MES_RS64_GP0_HI_MES      0x2809
+#define regCP_MES_RS64_GP4_MES         0x2810
+
+        /* Step 3a: Set IC_BASE_CNTL=0 and dump AUTOLOAD state per pipe.
+         * IC_BASE_CNTL=0 means: use VMID 0 for instruction cache access
+         * (passthrough, no translation). Without this, MES can't fetch code. */
         for (ULONG mes_pipe = 0; mes_pipe < 2; mes_pipe++) {
             grbm_select(dev, 3, mes_pipe, 0, 0);
 
-            /* Diagnostic: read IC_BASE/MDBASE/MIBOUND set by RLC AUTOLOAD */
-            ULONG ic_lo = gc1_rreg(dev, regCP_MES_IC_BASE_LO);
-            ULONG ic_hi = gc1_rreg(dev, regCP_MES_IC_BASE_HI);
-            ULONG md_lo = gc1_rreg(dev, regCP_MES_MDBASE_LO_REG);
-            ULONG md_hi = gc1_rreg(dev, regCP_MES_MDBASE_HI_REG);
-            ULONG mibound = gc1_rreg(dev, regCP_MES_MIBOUND_LO);
-            ULONG mdbound = gc1_rreg(dev, regCP_MES_MDBOUND_LO);
+            /* Read AUTOLOAD state */
+            ULONG ic_lo = gc1_mmio_rreg(dev, regCP_MES_IC_BASE_LO);
+            ULONG ic_hi = gc1_mmio_rreg(dev, regCP_MES_IC_BASE_HI);
+            ULONG ic_cntl = gc1_mmio_rreg(dev, regCP_MES_IC_BASE_CNTL);
+            ULONG md_lo = gc1_mmio_rreg(dev, regCP_MES_MDBASE_LO_REG);
+            ULONG md_hi = gc1_mmio_rreg(dev, regCP_MES_MDBASE_HI_REG);
+            ULONG mibound = gc1_mmio_rreg(dev, regCP_MES_MIBOUND_LO);
+            ULONG mdbound = gc1_mmio_rreg(dev, regCP_MES_MDBOUND_LO);
+            ULONG pc_lo = gc1_mmio_rreg(dev, regCP_MES_PRGRM_CNTR_START_MES);
+            ULONG pc_hi = gc1_mmio_rreg(dev, regCP_MES_PRGRM_CNTR_START_HI_MES);
+            pr_info("gpu_gfx: MES pipe%u AUTOLOAD: IC=0x%08x_%08x IC_CNTL=0x%x "
+                    "MD=0x%08x_%08x MIBOUND=0x%x MDBOUND=0x%x PC=0x%08x_%08x\n",
+                    mes_pipe, ic_hi, ic_lo, ic_cntl,
+                    md_hi, md_lo, mibound, mdbound, pc_hi, pc_lo);
 
-            pr_info("gpu_gfx: MES pipe%u BEFORE enable: IC_BASE=0x%08x_%08x "
-                    "MDBASE=0x%08x_%08x MIBOUND=0x%08x MDBOUND=0x%08x\n",
-                    mes_pipe, ic_hi, ic_lo, md_hi, md_lo, mibound, mdbound);
+            /* Set IC_BASE_CNTL=0 — critical for instruction fetch via VMID 0 */
+            gc1_mmio_wreg(dev, regCP_MES_IC_BASE_CNTL, 0);
+            if (ic_cntl != 0) {
+                pr_info("gpu_gfx: MES pipe%u IC_BASE_CNTL cleared: 0x%x -> 0\n",
+                        mes_pipe, ic_cntl);
+            }
 
-            /* Set IC_BASE_CNTL=0 (matching mes_v12_0_load_microcode) */
-            gc1_wreg(dev, regCP_MES_IC_BASE_CNTL, 0);
+            /* Invalidate MES instruction cache (kernel mes_v12_0_load_microcode).
+             * Without this, MES reads stale cache from before AUTOLOAD. */
+#define regCP_MES_IC_OP_CNTL  0x2820
+            {
+                gc1_mmio_wreg(dev, regCP_MES_IC_OP_CNTL, 0x1); /* INVALIDATE_CACHE */
+                for (int iv = 0; iv < 100; iv++) {
+                    ULONG op = gc1_mmio_rreg(dev, regCP_MES_IC_OP_CNTL);
+                    if ((op & 0x1) == 0) {
+                        pr_info("gpu_gfx: MES pipe%u icache invalidated (%d polls)\n",
+                                mes_pipe, iv);
+                        break;
+                    }
+                    Sleep(1);
+                }
+                /* Prime the icache after invalidation */
+                gc1_mmio_wreg(dev, regCP_MES_IC_OP_CNTL, 0x10); /* PRIME_ICACHE */
+                for (int iv = 0; iv < 100; iv++) {
+                    ULONG op = gc1_mmio_rreg(dev, regCP_MES_IC_OP_CNTL);
+                    if (op & 0x20) { /* ICACHE_PRIMED */
+                        pr_info("gpu_gfx: MES pipe%u icache primed (%d polls)\n",
+                                mes_pipe, iv);
+                        break;
+                    }
+                    Sleep(1);
+                }
+            }
 
-            /* Set MIBOUND=0x1FFFFF and MDBOUND=0x7FFFF (matching amdgpu) */
-            gc1_wreg(dev, regCP_MES_MIBOUND_LO, 0x1FFFFF);
-            gc1_wreg(dev, regCP_MES_MDBOUND_LO, 0x7FFFF);
+            /* Try to redirect IC_BASE to GART (unencrypted firmware copy).
+             * On VFIO, TMR firmware may be encrypted/inaccessible.
+             * The kernel always sets IC_BASE to its own VRAM/GART copy. */
+            if (mes_ic_base[mes_pipe] != 0) {
+                /* Code sizes: pipe0=197280, pipe1=87376 */
+                ULONG code_sz = (mes_pipe == 0) ? 197280 : 87376;
+                ULONG data_sz = 524288;  /* Same for both pipes */
 
-            /* Assert pipe reset (matching mes_v12_0_enable per-pipe) */
-            ULONG cntl = gc1_rreg(dev, regCP_MES_CNTL_MES);
+                ULONG new_ic_lo = (ULONG)(mes_ic_base[mes_pipe] & 0xFFFFFFFF);
+                ULONG new_ic_hi = (ULONG)(mes_ic_base[mes_pipe] >> 32);
+                gc1_mmio_wreg(dev, regCP_MES_IC_BASE_LO, new_ic_lo);
+                gc1_mmio_wreg(dev, regCP_MES_IC_BASE_HI, new_ic_hi);
+                gc1_mmio_wreg(dev, regCP_MES_MIBOUND_LO, code_sz - 1);
+
+                /* Data section follows code contiguously in GART blob */
+                ULONGLONG md_addr = mes_ic_base[mes_pipe] + code_sz;
+                gc1_mmio_wreg(dev, regCP_MES_MDBASE_LO_REG,
+                              (ULONG)(md_addr & 0xFFFFFFFF));
+                gc1_mmio_wreg(dev, regCP_MES_MDBASE_HI_REG,
+                              (ULONG)(md_addr >> 32));
+                gc1_mmio_wreg(dev, regCP_MES_MDBOUND_LO, data_sz - 1);
+
+                /* Readback to check if writes took effect */
+                ULONG rb_ic_lo = gc1_mmio_rreg(dev, regCP_MES_IC_BASE_LO);
+                ULONG rb_ic_hi = gc1_mmio_rreg(dev, regCP_MES_IC_BASE_HI);
+                ULONG rb_md_lo = gc1_mmio_rreg(dev, regCP_MES_MDBASE_LO_REG);
+                ULONG rb_md_hi = gc1_mmio_rreg(dev, regCP_MES_MDBASE_HI_REG);
+                if (rb_ic_lo == new_ic_lo && rb_ic_hi == new_ic_hi) {
+                    pr_info("gpu_gfx: MES pipe%u IC_BASE -> GART: 0x%08x_%08x "
+                            "MD -> 0x%08x_%08x\n",
+                            mes_pipe, rb_ic_hi, rb_ic_lo, rb_md_hi, rb_md_lo);
+                } else {
+                    pr_info("gpu_gfx: MES pipe%u IC_BASE WRITE-LOCKED "
+                            "(wrote 0x%08x_%08x, got 0x%08x_%08x)\n",
+                            mes_pipe, new_ic_hi, new_ic_lo, rb_ic_hi, rb_ic_lo);
+                }
+            }
+
+            grbm_select_reset(dev);
+        }
+
+        /* Step 3b: Disable all MES pipes — matching mes_v12_0_enable(false).
+         * The full disable (halt+reset+icache_inval) is needed because
+         * PSP restores firmware header's PC_START during enable, which
+         * is the correct virtual entry point for TMR firmware. The RS64
+         * processor has internal virtual memory that maps these addresses
+         * to TMR. Without this sequence, MES doesn't start. */
+        {
+            ULONG cntl = gc1_mmio_rreg(dev, regCP_MES_CNTL_MES);
+            cntl &= ~(MES_PIPE0_ACTIVE | MES_PIPE1_ACTIVE);
+            cntl |= MES_INVALIDATE_ICACHE | MES_PIPE0_RESET | MES_PIPE1_RESET | MES_HALT;
+            gc1_mmio_wreg(dev, regCP_MES_CNTL_MES, cntl);
+            pr_info("gpu_gfx: MES disabled: CNTL=0x%08x (halt+icache_inval+reset)\n", cntl);
+        }
+
+        /* Step 3c: Write PC_START per pipe.
+         *
+         * Use the firmware header's ucode_start >> 2. Despite IC_BASE
+         * being locked to TMR, this value causes the HQD to start
+         * consuming (tested empirically). The hardware relationship
+         * between IC_BASE, PC_START and instruction fetch is complex
+         * (RS64 has internal virtual memory). */
+        for (ULONG mes_pipe = 0; mes_pipe < 2; mes_pipe++) {
+            grbm_select(dev, 3, mes_pipe, 0, 0);
+
+            ULONGLONG ucode_start = mes_start[mes_pipe];
+            if (ucode_start == 0)
+                ucode_start = 0xFFFFFFFFF0005000ULL;
+            ULONGLONG pc_addr = ucode_start >> 2;
+            ULONG pc_lo = (ULONG)(pc_addr & 0xFFFFFFFF);
+            ULONG pc_hi = (ULONG)(pc_addr >> 32);
+
+            gc1_mmio_wreg(dev, regCP_MES_PRGRM_CNTR_START_MES, pc_lo);
+            gc1_mmio_wreg(dev, regCP_MES_PRGRM_CNTR_START_HI_MES, pc_hi);
+
+            pr_info("gpu_gfx: MES pipe%u PC_START = 0x%08x_%08x "
+                    "(ucode_start=0x%llx)\n",
+                    mes_pipe, pc_hi, pc_lo,
+                    (unsigned long long)ucode_start);
+
+            grbm_select_reset(dev);
+        }
+
+        /* Step 3d: Enable all MES pipes — matching mes_v12_0_enable(true).
+         * For each pipe: assert pipe reset, then activate (clear halt/reset). */
+        for (ULONG mes_pipe = 0; mes_pipe < 2; mes_pipe++) {
+            grbm_select(dev, 3, mes_pipe, 0, 0);
+
+            /* Assert pipe reset (matches kernel: set reset bit per pipe) */
+            ULONG cntl = gc1_mmio_rreg(dev, regCP_MES_CNTL_MES);
             if (mes_pipe == 0)
                 cntl |= MES_PIPE0_RESET;
             else
                 cntl |= MES_PIPE1_RESET;
-            gc1_wreg(dev, regCP_MES_CNTL_MES, cntl);
+            gc1_mmio_wreg(dev, regCP_MES_CNTL_MES, cntl);
 
-            /* Set PC_START (redundant but matches amdgpu enable sequence) */
-            gc1_wreg(dev, regCP_MES_PRGRM_CNTR_START_MES, mes_pc_lo);
-            gc1_wreg(dev, regCP_MES_PRGRM_CNTR_START_HI_MES, mes_pc_hi);
-
-            /* Activate: pipe 0 alone first, then pipe 0+1 together
-             * (matching amdgpu mes_v12_0_enable loop behavior) */
-            ULONG activate = MES_PIPE0_ACTIVE;
+            /* Activate: write CNTL starting from 0, set only ACTIVE bits.
+             * This clears HALT, PIPE_RESET, INVALIDATE_ICACHE simultaneously. */
+            ULONG new_cntl = MES_PIPE0_ACTIVE;
             if (mes_pipe == 1)
-                activate |= MES_PIPE1_ACTIVE;
-            gc1_wreg(dev, regCP_MES_CNTL_MES, activate);
+                new_cntl |= MES_PIPE1_ACTIVE;
+            gc1_mmio_wreg(dev, regCP_MES_CNTL_MES, new_cntl);
 
-            pr_info("gpu_gfx: MES pipe%u enabled (PC_START=0x%08x_%08x, "
-                    "CNTL=0x%08x)\n",
-                    mes_pipe, mes_pc_hi, mes_pc_lo, activate);
+            /* Wait and check IP */
+            Sleep(200);
+            ULONG ip_after = gc1_mmio_rreg(dev, regCP_MES_RS64_INSTR_PNTR_MES);
+            ULONG cntl_after = gc1_mmio_rreg(dev, regCP_MES_CNTL_MES);
+            ULONG pc_after_lo = gc1_mmio_rreg(dev, regCP_MES_PRGRM_CNTR_START_MES);
+            ULONG pc_after_hi = gc1_mmio_rreg(dev, regCP_MES_PRGRM_CNTR_START_HI_MES);
+            pr_info("gpu_gfx: MES pipe%u enabled: PC=0x%08x_%08x CNTL=0x%08x IP=0x%08x\n",
+                    mes_pipe, pc_after_hi, pc_after_lo, cntl_after, ip_after);
 
             grbm_select_reset(dev);
         }
 
-        /* Wait 500ms for MES KIQ to initialize */
-        Sleep(500);
+        /* Wait for MES KIQ to initialize — poll every 100ms for 5 seconds */
+        pr_info("gpu_gfx: waiting for MES to initialize...\n");
+        for (int mw = 0; mw < 50; mw++) {
+            Sleep(100);
+            grbm_select(dev, 3, 1, 0, 0);
+            ULONG mes_ip = gc1_mmio_rreg(dev, regCP_MES_RS64_INSTR_PNTR_MES);
+            grbm_select_reset(dev);
+            if (mw % 10 == 0) {
+                pr_info("gpu_gfx: MES KIQ t+%dms: IP=0x%08x\n",
+                        (mw + 1) * 100, mes_ip);
+            }
+            /* Check if MES advanced past 0x800 */
+            if (mes_ip != 0 && mes_ip != 0x800) {
+                pr_info("gpu_gfx: MES KIQ ACTIVE at IP=0x%08x after %dms!\n",
+                        mes_ip, (mw + 1) * 100);
+                break;
+            }
+        }
 
         /* Check GFXHUB fault after MES enable */
         {
@@ -6627,66 +7018,79 @@ int gpu_gfx_init(struct WddmLiteDevice *dev)
             pr_info("gpu_gfx: programming MES KIQ HQD (ring=0x%llx)\n",
                     (unsigned long long)kiq_ring_mc);
 
+            /* Use MMIO for ALL HQD register writes — grbm_select is MMIO,
+             * so per-pipe context only works with MMIO register access. */
             grbm_select(dev, 3, kiq_pipe, 0, 0);
             {
                 /* Disable doorbell first */
-                gc0_wreg(dev, regCP_HQD_PQ_DOORBELL_CONTROL, 0);
+                gc0_mmio_wreg(dev, regCP_HQD_PQ_DOORBELL_CONTROL, 0);
 
                 /* MQD base */
-                gc0_wreg(dev, 0x1fa7 /* CP_MQD_BASE_ADDR */, (ULONG)(kiq_mqd_mc & 0xFFFFFFFF));
-                gc0_wreg(dev, 0x1fa7 + 1, (ULONG)(kiq_mqd_mc >> 32));
+                gc0_mmio_wreg(dev, 0x1fa7 /* CP_MQD_BASE_ADDR */, (ULONG)(kiq_mqd_mc & 0xFFFFFFFF));
+                gc0_mmio_wreg(dev, 0x1fa7 + 1, (ULONG)(kiq_mqd_mc >> 32));
 
                 /* MQD control: VMID=0 */
-                gc0_wreg(dev, 0x1fac + 1 /* CP_MQD_CONTROL */, 0);
+                gc0_mmio_wreg(dev, 0x1fac + 1 /* CP_MQD_CONTROL */, 0);
 
                 /* PQ base (ring buffer address >> 8) */
-                gc0_wreg(dev, regCP_HQD_PQ_BASE, (ULONG)((kiq_ring_mc >> 8) & 0xFFFFFFFF));
-                gc0_wreg(dev, regCP_HQD_PQ_BASE + 1, (ULONG)(kiq_ring_mc >> 40));
+                gc0_mmio_wreg(dev, regCP_HQD_PQ_BASE, (ULONG)((kiq_ring_mc >> 8) & 0xFFFFFFFF));
+                gc0_mmio_wreg(dev, regCP_HQD_PQ_BASE + 1, (ULONG)(kiq_ring_mc >> 40));
 
                 /* RPTR report addr */
-                gc0_wreg(dev, regCP_HQD_PQ_RPTR_REPORT_ADDR, (ULONG)(kiq_rptr_mc & 0xFFFFFFFF));
-                gc0_wreg(dev, regCP_HQD_PQ_RPTR_REPORT_ADDR_HI, (ULONG)(kiq_rptr_mc >> 32));
+                gc0_mmio_wreg(dev, regCP_HQD_PQ_RPTR_REPORT_ADDR, (ULONG)(kiq_rptr_mc & 0xFFFFFFFF));
+                gc0_mmio_wreg(dev, regCP_HQD_PQ_RPTR_REPORT_ADDR_HI, (ULONG)(kiq_rptr_mc >> 32));
 
                 /* WPTR poll addr */
-                gc0_wreg(dev, regCP_HQD_PQ_WPTR_POLL_ADDR, (ULONG)(kiq_wptr_mc & 0xFFFFFFFF));
-                gc0_wreg(dev, regCP_HQD_PQ_WPTR_POLL_ADDR_HI, (ULONG)((kiq_wptr_mc >> 32) & 0xFFFF));
+                gc0_mmio_wreg(dev, regCP_HQD_PQ_WPTR_POLL_ADDR, (ULONG)(kiq_wptr_mc & 0xFFFFFFFF));
+                gc0_mmio_wreg(dev, regCP_HQD_PQ_WPTR_POLL_ADDR_HI, (ULONG)((kiq_wptr_mc >> 32) & 0xFFFF));
 
-                /* PQ control: ring_size=log2(4096/4)-1=9, PRIV_STATE=1, KMD_QUEUE=1,
-                 * NO_UPDATE_RPTR=1, UNORD_DISPATCH=1 */
-                ULONG pq_ctrl = (9 << 0)     /* QUEUE_SIZE = log2(1024 dwords) - 1 */
-                              | (9 << 8)      /* RPTR_BLOCK_SIZE = log2(4096/4)-1 = 9 */
+                /* PQ control */
+                ULONG pq_ctrl = (9 << 0)     /* QUEUE_SIZE */
+                              | (9 << 8)      /* RPTR_BLOCK_SIZE */
                               | (1 << 13)     /* UNORD_DISPATCH */
                               | (1 << 30)     /* PRIV_STATE */
                               | (1u << 31)    /* KMD_QUEUE */
                               | (1 << 28);    /* NO_UPDATE_RPTR */
-                gc0_wreg(dev, regCP_HQD_PQ_CONTROL, pq_ctrl);
+                gc0_mmio_wreg(dev, regCP_HQD_PQ_CONTROL, pq_ctrl);
 
-                /* Doorbell: DOORBELL_OFFSET = dword_offset << SHIFT */
-                ULONG db_ctrl = (1 << 30) /* DOORBELL_EN */
-                              | (kiq_doorbell_dword << DOORBELL_OFFSET_SHIFT);
-                gc0_wreg(dev, regCP_HQD_PQ_DOORBELL_CONTROL, db_ctrl);
+                /* Doorbell */
+                ULONG db_ctrl = (1 << 30) | (kiq_doorbell_dword << DOORBELL_OFFSET_SHIFT);
+                gc0_mmio_wreg(dev, regCP_HQD_PQ_DOORBELL_CONTROL, db_ctrl);
 
                 /* VMID = 0 */
-                gc0_wreg(dev, 0x1fac /* CP_HQD_VMID */, 0);
+                gc0_mmio_wreg(dev, 0x1fac /* CP_HQD_VMID */, 0);
 
-                /* Persistent state: PRELOAD_SIZE=0x55 (matching amdgpu) */
-                gc0_wreg(dev, 0x1fab /* CP_HQD_PERSISTENT_STATE */, 0x55 << 8 | 1);
+                /* Persistent state */
+                gc0_mmio_wreg(dev, 0x1fab /* CP_HQD_PERSISTENT_STATE */, 0x55 << 8 | 1);
 
                 /* EOP buffer */
-                gc0_wreg(dev, 0x1fc3 /* CP_HQD_EOP_BASE_ADDR */, (ULONG)((kiq_eop_mc >> 8) & 0xFFFFFFFF));
-                gc0_wreg(dev, 0x1fc3 + 1, (ULONG)(kiq_eop_mc >> 40));
-                gc0_wreg(dev, 0x1fc5 /* CP_HQD_EOP_CONTROL */, 9); /* log2(4096/4)-1 */
+                gc0_mmio_wreg(dev, 0x1fc3 /* CP_HQD_EOP_BASE_ADDR */, (ULONG)((kiq_eop_mc >> 8) & 0xFFFFFFFF));
+                gc0_mmio_wreg(dev, 0x1fc3 + 1, (ULONG)(kiq_eop_mc >> 40));
+                gc0_mmio_wreg(dev, 0x1fc5 /* CP_HQD_EOP_CONTROL */, 9);
 
                 /* Activate */
-                gc0_wreg(dev, regCP_HQD_ACTIVE, 1);
+                gc0_mmio_wreg(dev, regCP_HQD_ACTIVE, 1);
             }
             grbm_select_reset(dev);
 
             /* Verify KIQ HQD activation */
             grbm_select(dev, 3, kiq_pipe, 0, 0);
-            ULONG kiq_active = gc0_rreg(dev, regCP_HQD_ACTIVE);
+            ULONG kiq_active = gc0_mmio_rreg(dev, regCP_HQD_ACTIVE);
             grbm_select_reset(dev);
-            pr_info("gpu_gfx: MES KIQ HQD ACTIVE = %u\n", kiq_active & 1);
+            /* Also verify PQ_BASE and doorbell via MMIO readback */
+            grbm_select(dev, 3, kiq_pipe, 0, 0);
+            ULONG kiq_pq_lo = gc0_mmio_rreg(dev, regCP_HQD_PQ_BASE);
+            ULONG kiq_pq_hi = gc0_mmio_rreg(dev, regCP_HQD_PQ_BASE + 1);
+            ULONG kiq_db = gc0_mmio_rreg(dev, regCP_HQD_PQ_DOORBELL_CONTROL);
+            ULONG kiq_wptr_poll = gc0_mmio_rreg(dev, regCP_HQD_PQ_WPTR_POLL_ADDR);
+            ULONG kiq_wptr_poll_hi = gc0_mmio_rreg(dev, regCP_HQD_PQ_WPTR_POLL_ADDR_HI);
+            ULONG kiq_pq_ctl = gc0_mmio_rreg(dev, regCP_HQD_PQ_CONTROL);
+            grbm_select_reset(dev);
+            pr_info("gpu_gfx: MES KIQ HQD ACTIVE=%u PQ_BASE=0x%08x_%08x "
+                    "DB_CTL=0x%08x WPTR_POLL=0x%04x_%08x PQ_CTL=0x%08x\n",
+                    kiq_active & 1, kiq_pq_hi, kiq_pq_lo,
+                    kiq_db, kiq_wptr_poll_hi, kiq_wptr_poll,
+                    kiq_pq_ctl);
 
             /* Test: try writing 0xDEADBEEF to first DWORD of ring and see
              * if it survives (VRAM access verification) */
@@ -6750,17 +7154,25 @@ int gpu_gfx_init(struct WddmLiteDevice *dev)
             /* DW42-49: osssys_base[8] — IH base */
             hw_res[42] = dev->hw.ip.ih_base;
 
-            /* DW50: api_status (output, leave 0) */
+            /* DW50-53: struct MES_API_STATUS (16 bytes = 4 DWORDs)
+             * The kernel sets api_completion_fence_addr and _value here.
+             * When MES completes the command, it writes fence_value to
+             * fence_addr. Driver polls fence_addr for the expected value. */
+            hw_res[50] = (ULONG)(kiq_fence_mc & 0xFFFFFFFF);  /* fence_addr_lo */
+            hw_res[51] = (ULONG)(kiq_fence_mc >> 32);          /* fence_addr_hi */
+            hw_res[52] = 1;  /* fence_value_lo (completion marker) */
+            hw_res[53] = 0;  /* fence_value_hi */
 
-            /* DW51: flags bitfield */
-            hw_res[51] = (1 << 0)   /* disable_reset */
-                       | (1 << 2)   /* disable_mes_log */
+            /* DW54: flags bitfield (was incorrectly at DW51!) */
+            hw_res[54] = (1 << 0)   /* disable_reset */
                        | (1 << 1)   /* use_different_vmid_compute */
+                       | (1 << 2)   /* disable_mes_log */
+                       | (1 << 6)   /* enable_level_process_quantum_check */
                        | (1 << 10)  /* enable_reg_active_poll */
-                       | (1 << 6);  /* enable_level_process_quantum_check */
+                       | (1 << 19); /* unmapped_doorbell_handling (2 bits, value=1) */
 
-            /* DW52: oversubscription_timer */
-            hw_res[52] = 50;
+            /* DW55: oversubscription_timer (was incorrectly at DW52!) */
+            hw_res[55] = 50;
 
             /* Write SET_HW_RESOURCES to KIQ ring */
             memcpy((void *)kiq_ring, hw_res, sizeof(hw_res));
@@ -6822,8 +7234,19 @@ int gpu_gfx_init(struct WddmLiteDevice *dev)
             grbm_select_reset(dev);
             pr_info("gpu_gfx: MES KIQ WPTR also written via MMIO\n");
 
-            /* Wait for MES to process SET_HW_RESOURCES */
-            Sleep(100);
+            /* Wait for MES to process SET_HW_RESOURCES.
+             * Poll the fence address for the expected value (1). */
+            for (int fw = 0; fw < 50; fw++) {
+                Sleep(100);
+                MemoryBarrier();
+                if (kiq_fence[0] == 1) {
+                    pr_info("gpu_gfx: SET_HW_RESOURCES completed after %d ms\n",
+                            (fw + 1) * 100);
+                    break;
+                }
+                if (fw == 49)
+                    pr_warn("gpu_gfx: SET_HW_RESOURCES fence timeout (5s)\n");
+            }
 
             /* Check MES execution state + additional diagnostic registers */
             grbm_select(dev, 3, kiq_pipe, 0, 0);
@@ -6889,6 +7312,239 @@ mes_done:
         (void)0; /* label must be followed by a statement */
     } else {
         pr_info("gpu_gfx: skipping MES enable (AUTOLOAD not complete)\n");
+    }
+
+    /* Final MEC health check before returning */
+    {
+        grbm_select(dev, 1, 0, 0, 0);
+        ULONG mec_ip_final = gc1_rreg(dev, regCP_MEC_RS64_INSTR_PNTR);
+        ULONG mec_cntl_final = gc1_rreg(dev, regCP_MEC_RS64_CNTL);
+        grbm_select_reset(dev);
+        pr_info("gpu_gfx: FINAL MEC state: IP=0x%08x CNTL=0x%08x\n",
+                mec_ip_final, mec_cntl_final);
+    }
+
+    /* ================================================================
+     * Direct MEC Dispatch Test
+     * MEC is running with RS64 firmware. Test if it processes a
+     * directly-programmed HQD + AQL barrier packet without MES.
+     * Uses GART-mapped ring buffer, RPTR, WPTR, EOP buffers.
+     * ================================================================ */
+    {
+        grbm_select(dev, 1, 0, 0, 0);
+        ULONG mec_ip_test = gc1_rreg(dev, regCP_MEC_RS64_INSTR_PNTR);
+        grbm_select_reset(dev);
+
+        /* Forward declaration — defined later in this file */
+        extern ULONG gpu_check_gfxhub_fault(struct WddmLiteDevice *dev);
+
+        if (mec_ip_test != 0 && mec_ip_test != 0x800) {
+            pr_info("gpu_gfx: === MEC DIRECT DISPATCH TEST (IP=0x%08x) ===\n",
+                    mec_ip_test);
+
+            /* Allocate 5 DMA pages:
+             *   page 0-1: ring buffer (8KB)
+             *   page 2:   RPTR writeback
+             *   page 3:   WPTR writeback
+             *   page 4:   EOP buffer */
+            #define TEST_NUM_PAGES 5
+            ULONGLONG test_phys[TEST_NUM_PAGES] = {};
+            void *test_cpu[TEST_NUM_PAGES] = {};
+
+            int alloc_ok = 1;
+            for (int pg = 0; pg < TEST_NUM_PAGES; pg++) {
+                AMDGPU_ESCAPE_ALLOC_MEMORY_DATA alloc;
+                memset(&alloc, 0, sizeof(alloc));
+                alloc.Header.Command = AMDGPU_ESCAPE_ALLOC_MEMORY;
+                alloc.Header.Size = sizeof(alloc);
+                alloc.SizeInBytes = 4096;
+                alloc.Flags = AMDGPU_MEM_TYPE_SYSTEM |
+                              AMDGPU_MEM_FLAG_HOST_ACCESS |
+                              AMDGPU_MEM_FLAG_UNCACHED;
+                if (wddm_lite_escape(dev, &alloc, sizeof(alloc)) != 0 ||
+                    !alloc.CpuAddress) {
+                    alloc_ok = 0; break;
+                }
+                test_cpu[pg] = alloc.CpuAddress;
+                memset(test_cpu[pg], 0, 4096);
+
+                AMDGPU_ESCAPE_GET_PHYS_PAGES_DATA phys;
+                memset(&phys, 0, sizeof(phys));
+                phys.Header.Command = AMDGPU_ESCAPE_GET_PHYS_PAGES;
+                phys.Header.Size = sizeof(phys);
+                phys.Handle = alloc.Handle;
+                phys.PageOffset = 0;
+                if (wddm_lite_escape(dev, &phys, sizeof(phys)) != 0 ||
+                    phys.NumPages == 0) {
+                    alloc_ok = 0; break;
+                }
+                test_phys[pg] = phys.PhysAddrs[0];
+            }
+
+            if (alloc_ok) {
+                /* GART-map all pages */
+                ULONGLONG test_gpu = gpu_gart_map(dev, test_phys, TEST_NUM_PAGES);
+                if (test_gpu) {
+                    ULONGLONG ring_gpu = test_gpu;           /* pages 0-1 */
+                    ULONGLONG rptr_gpu = test_gpu + 0x2000;  /* page 2 */
+                    ULONGLONG wptr_gpu = test_gpu + 0x3000;  /* page 3 */
+                    ULONGLONG eop_gpu  = test_gpu + 0x4000;  /* page 4 */
+
+                    volatile ULONG *ring = (volatile ULONG *)test_cpu[0];
+                    volatile ULONG *rptr_mem = (volatile ULONG *)test_cpu[2];
+                    volatile ULONG *wptr_mem = (volatile ULONG *)test_cpu[3];
+
+                    /* Build MQD */
+                    ULONG mqd[256];
+                    memset(mqd, 0, sizeof(mqd));
+                    mqd[0] = 0xC0310800;  /* header */
+                    mqd[11] = 1;          /* pipeline_stat_enable */
+                    mqd[23] = 0xFFFFFFFF; mqd[24] = 0xFFFFFFFF; /* SE0/1 */
+                    mqd[26] = 0xFFFFFFFF; mqd[27] = 0xFFFFFFFF; /* SE2/3 */
+                    mqd[32] = 0x00000007; /* misc_reserved */
+
+                    ULONGLONG mqd_gpu = test_gpu; /* reuse ring page as MQD area... */
+                    /* Actually, MQD needs its own page. Use the ring as both. */
+                    /* For test, use a simple non-AQL PM4 queue (simpler encoding). */
+
+                    /* HQD registers at MQD offset 128 */
+                    mqd[128] = (ULONG)(test_gpu) & 0xFFFFFFFC;       /* MQD base lo */
+                    mqd[129] = (ULONG)(test_gpu >> 32);               /* MQD base hi */
+                    mqd[130] = 1;       /* ACTIVE=1 (will be set separately) */
+                    mqd[131] = 0;       /* VMID=0 */
+                    mqd[132] = (0x55 << 8) | 1;  /* persistent_state */
+                    mqd[133] = 0x2;     /* pipe_priority */
+                    mqd[134] = 0xF;     /* queue_priority */
+                    mqd[135] = 0x111;   /* quantum */
+
+                    /* Ring buffer */
+                    mqd[136] = (ULONG)((ring_gpu >> 8) & 0xFFFFFFFF);
+                    mqd[137] = (ULONG)((ring_gpu >> 40) & 0xFFFFFFFF);
+                    mqd[138] = 0;  /* RPTR = 0 */
+                    mqd[139] = (ULONG)(rptr_gpu & 0xFFFFFFFC);
+                    mqd[140] = (ULONG)((rptr_gpu >> 32) & 0xFFFF);
+                    mqd[141] = (ULONG)(wptr_gpu & 0xFFFFFFF8);
+                    mqd[142] = (ULONG)((wptr_gpu >> 32) & 0xFFFF);
+
+                    /* Doorbell: use MEC ring 0 doorbell index.
+                     * GFX12: DOORBELL_EN at bit 30, DOORBELL_OFFSET at bits [25:2] */
+                    ULONG test_db_idx = 0x03; /* AMDGPU_NAVI10_DOORBELL_MEC_RING0 */
+                    mqd[143] = ((test_db_idx * 2) << 2) | (1 << 30);
+
+                    /* PQ control: 8KB ring = 2048 DWORDs, log2=11, field=11-2=9.
+                     * Use PM4 mode (not AQL) for simplest possible test. */
+                    mqd[145] = (9 & 0x3F) | (5 << 8);  /* queue_size=9, rptr_block_size=5 */
+                    /* NO AQL flags — pure PM4 mode */
+
+                    mqd[149] = 0x3 << 20;  /* IB control */
+                    mqd[160] = 0x20004000; /* HQ_STATUS0 */
+                    mqd[162] = (1 << 8);   /* mqd_control: priv_state=1 */
+                    mqd[181] = 0;          /* AQL control = 0 (PM4 mode) */
+
+                    /* EOP buffer */
+                    mqd[165] = (ULONG)((eop_gpu >> 8) & 0xFFFFFFFF);
+                    mqd[166] = (ULONG)((eop_gpu >> 40) & 0xFFFFFFFF);
+                    mqd[167] = 6; /* eop_size for 4KB */
+
+                    /* WPTR = 0 */
+                    mqd[182] = 0;
+                    mqd[183] = 0;
+
+                    /* Record MEC IP before HQD programming */
+                    grbm_select(dev, 1, 0, 0, 0);
+                    ULONG ip_before = gc1_rreg(dev, regCP_MEC_RS64_INSTR_PNTR);
+                    grbm_select_reset(dev);
+
+                    /* Program HQD via bulk register copy */
+                    pr_info("gpu_gfx: TEST: Programming HQD me=1 pipe=0 q=0\n");
+                    grbm_select(dev, 1, 0, 0, 0);
+                    gc0_wreg(dev, regCP_HQD_ACTIVE, 0);
+                    for (ULONG i = 0; i < 56; i++)
+                        gc0_wreg(dev, 0x1fa9 + i, mqd[128 + i]);
+                    gc0_wreg(dev, regCP_HQD_ACTIVE, 1);
+                    grbm_select_reset(dev);
+                    gpu_hdp_flush(dev);
+
+                    /* Check MEC health after HQD programming */
+                    Sleep(100);
+                    grbm_select(dev, 1, 0, 0, 0);
+                    ULONG ip_after_hqd = gc1_rreg(dev, regCP_MEC_RS64_INSTR_PNTR);
+                    ULONG cntl_after = gc1_rreg(dev, regCP_MEC_RS64_CNTL);
+                    ULONG hqd_active_rb = gc0_rreg(dev, regCP_HQD_ACTIVE);
+                    grbm_select_reset(dev);
+
+                    pr_info("gpu_gfx: TEST: MEC after HQD: IP=0x%08x (was 0x%08x) "
+                            "CNTL=0x%08x HQD_ACTIVE=%u\n",
+                            ip_after_hqd, ip_before, cntl_after, hqd_active_rb);
+
+                    if (ip_after_hqd == 0) {
+                        pr_err("gpu_gfx: TEST: MEC CRASHED after HQD programming!\n");
+                    } else {
+                        /* Write PM4 NOP packet (8 bytes = 2 DWORDs).
+                         * Type 3, opcode 0x10 (NOP), count=0 (1 DWORD body). */
+                        memset((void *)ring, 0, 4096);
+                        ring[0] = 0xC0001000; /* type3, opcode=NOP(0x10), count=0 */
+                        ring[1] = 0x00000000; /* NOP body */
+                        MemoryBarrier();
+
+                        /* Set WPTR = 8 (8 bytes = 2 DWORDs of PM4 data) */
+                        wptr_mem[0] = 8;  /* byte offset for PM4 WPTR */
+                        wptr_mem[1] = 0;
+                        MemoryBarrier();
+
+                        /* HDP flush + doorbell */
+                        gpu_hdp_flush(dev);
+                        ULONG db_off = test_db_idx * 8;
+                        volatile ULONGLONG *db = (volatile ULONGLONG *)
+                            ((UCHAR *)dev->doorbell_base + db_off);
+                        pr_info("gpu_gfx: TEST: Writing PM4 NOP doorbell at offset 0x%x, WPTR=8\n",
+                                db_off);
+                        *db = 8;
+                        MemoryBarrier();
+
+                        /* Wait for RPTR to advance (expect 8 for 2-DWORD PM4 NOP) */
+                        for (int poll = 0; poll < 50; poll++) {
+                            Sleep(20);
+                            ULONG mem_rptr = rptr_mem[0];
+                            if (mem_rptr != 0) {
+                                pr_info("gpu_gfx: TEST: *** DISPATCH SUCCESS! *** "
+                                        "RPTR=%u after %d ms\n",
+                                        mem_rptr, (poll + 1) * 20);
+                                break;
+                            }
+                            if (poll % 10 == 9) {
+                                grbm_select(dev, 1, 0, 0, 0);
+                                ULONG mec_ip_poll = gc1_rreg(dev,
+                                    regCP_MEC_RS64_INSTR_PNTR);
+                                ULONG reg_rptr = gc0_rreg(dev, regCP_HQD_PQ_RPTR);
+                                grbm_select_reset(dev);
+                                pr_info("gpu_gfx: TEST: t+%dms RPTR=%u "
+                                        "reg_RPTR=%u MEC_IP=0x%08x\n",
+                                        (poll + 1) * 20, rptr_mem[0],
+                                        reg_rptr, mec_ip_poll);
+                            }
+                        }
+
+                        /* Final state */
+                        grbm_select(dev, 1, 0, 0, 0);
+                        ULONG final_ip = gc1_rreg(dev, regCP_MEC_RS64_INSTR_PNTR);
+                        ULONG final_rptr = gc0_rreg(dev, regCP_HQD_PQ_RPTR);
+                        ULONG final_wptr = gc0_rreg(dev, regCP_HQD_PQ_WPTR_LO);
+                        grbm_select_reset(dev);
+                        ULONG fault = gpu_check_gfxhub_fault(dev);
+                        pr_info("gpu_gfx: TEST: FINAL MEC_IP=0x%08x reg_RPTR=%u "
+                                "reg_WPTR=%u mem_RPTR=%u FAULT=0x%08x\n",
+                                final_ip, final_rptr, final_wptr,
+                                rptr_mem[0], fault);
+                    }
+                } else {
+                    pr_warn("gpu_gfx: TEST: GART map failed\n");
+                }
+            } else {
+                pr_warn("gpu_gfx: TEST: DMA alloc failed\n");
+            }
+            pr_info("gpu_gfx: === MEC DIRECT DISPATCH TEST END ===\n");
+        }
     }
 
     dev->hw.gfx_initialized = TRUE;
@@ -7096,6 +7752,16 @@ int gpu_setup_compute_queue(struct WddmLiteDevice *dev,
     ULONG queue = queue_idx % 4;
     ULONG doorbell_index = DOORBELL_MEC_RING_START + queue_idx;
 
+    /* Check MEC health at queue setup entry */
+    {
+        grbm_select(dev, 1, 0, 0, 0);
+        ULONG mec_ip_entry = gc1_rreg(dev, regCP_MEC_RS64_INSTR_PNTR);
+        ULONG mec_cntl_entry = gc1_rreg(dev, regCP_MEC_RS64_CNTL);
+        grbm_select_reset(dev);
+        pr_info("gpu_queue: MEC at queue setup entry: IP=0x%08x CNTL=0x%08x\n",
+                mec_ip_entry, mec_cntl_entry);
+    }
+
     pr_info("gpu_queue: setting up queue %u (pipe=%u, queue=%u, aql=%d, doorbell=0x%x)\n",
             queue_idx, pipe, queue, aql, doorbell_index);
     pr_info("gpu_queue: ring=0x%llx size=0x%x rptr=0x%llx wptr=0x%llx\n",
@@ -7297,6 +7963,14 @@ int gpu_setup_compute_queue(struct WddmLiteDevice *dev,
     /* Activate the queue (must be after bulk copy, tinygrad does this separately) */
     gc0_wreg(dev, regCP_HQD_ACTIVE, 1);
 
+    /* Check MEC right after HQD activation (still in grbm_select me=1) */
+    {
+        ULONG mec_ip_post_hqd = gc1_rreg(dev, regCP_MEC_RS64_INSTR_PNTR);
+        ULONG mec_cntl_post_hqd = gc1_rreg(dev, regCP_MEC_RS64_CNTL);
+        pr_info("gpu_queue: MEC after HQD activate: IP=0x%08x CNTL=0x%08x\n",
+                mec_ip_post_hqd, mec_cntl_post_hqd);
+    }
+
     /* Deselect GRBM */
     grbm_select_reset(dev);
 
@@ -7372,20 +8046,22 @@ int gpu_setup_compute_queue(struct WddmLiteDevice *dev,
                     queue_idx, rptr_before, wptr_lo_before, status_before);
         }
 
-        /* Diagnostic: after HQD activation, wait 200ms and re-read registers.
-         * This checks if MEC's internal state changes after activation. */
+        /* Diagnostic: granular MEC state polling after HQD activation */
         if (queue_idx == 0) {
-            Sleep(200);
-            grbm_select(dev, 1, pipe, queue, 0);
-            ULONG rptr2 = gc0_rreg(dev, regCP_HQD_PQ_RPTR);
-            ULONG wptr2 = gc0_rreg(dev, regCP_HQD_PQ_WPTR_LO);
-            ULONG st2 = gc0_rreg(dev, regCP_HQD_HQ_STATUS0);
-            ULONG mec_ip = gc1_rreg(dev, 0x2903);  /* MEC INSTR_PNTR */
-            grbm_select_reset(dev);
-            ULONG fault2 = gfxhub_rreg(dev, regGCVM_L2_PROTECTION_FAULT_STATUS_LO32);
-            pr_info("gpu_queue: q0 after 200ms: RPTR=%u WPTR=%u STATUS=0x%08x "
-                    "MEC_IP=0x%x FAULT=0x%x\n",
-                    rptr2, wptr2, st2, mec_ip, fault2);
+            ULONG poll_times[] = {1, 5, 10, 20, 50, 100, 200};
+            ULONG prev_time = 0;
+            for (int pi = 0; pi < 7; pi++) {
+                Sleep(poll_times[pi] - prev_time);
+                prev_time = poll_times[pi];
+                grbm_select(dev, 1, 0, 0, 0);
+                ULONG ip = gc1_rreg(dev, regCP_MEC_RS64_INSTR_PNTR);
+                ULONG cntl = gc1_rreg(dev, regCP_MEC_RS64_CNTL);
+                ULONG rptr2 = gc0_rreg(dev, regCP_HQD_PQ_RPTR);
+                grbm_select_reset(dev);
+                pr_info("gpu_queue: q0 t+%ums: MEC_IP=0x%08x CNTL=0x%08x RPTR=%u\n",
+                        poll_times[pi], ip, cntl, rptr2);
+                if (ip == 0 && pi > 0) break;  /* MEC died, stop polling */
+            }
         }
 
         /* Check for VM faults after queue activation */

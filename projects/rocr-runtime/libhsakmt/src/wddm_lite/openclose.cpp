@@ -325,10 +325,12 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtOpenKFD(void)
                 /* Check SOS status to determine GPU state */
                 ULONG sos_status = 0;
                 BOOLEAN did_mode1_reset = FALSE;
+                BOOLEAN sos_was_alive_at_boot = FALSE;
                 if (g_wddm_lite_dev.hw.ip.mp0_base != 0 &&
                     g_wddm_lite_dev.hw.ip.nbio_base1 != 0) {
                     sos_status = gpu_smn_rreg(&g_wddm_lite_dev,
                         g_wddm_lite_dev.hw.ip.mp0_base + 0x0091);
+                    sos_was_alive_at_boot = (sos_status != 0);
                 }
 
                 /* Step 1: Mode1 reset (optional) */
@@ -384,13 +386,14 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtOpenKFD(void)
                     }
                 }
 
-                /* Step 2b: Mode1 reset NOW (SOS should be alive).
-                 * amdgpu ALWAYS does Mode1 reset. It clears all hardware to
-                 * a known state. Without Mode1, VBIOS hardware state persists
-                 * and conflicts with fresh firmware (EnableAllSmuFeatures hangs).
-                 * The old code only did Mode1 if SOS was already alive at boot.
-                 * We now do Mode1 after loading SOS, matching amdgpu's behavior. */
-                if (g_wddm_lite_dev.hw.psp_sos_alive && !did_mode1_reset) {
+                /* Step 2b: Mode1 reset (only if VBIOS state was present).
+                 * Mode1 clears VBIOS hardware state that conflicts with fresh
+                 * firmware (EnableAllSmuFeatures hangs without it).
+                 * Only needed when SOS was alive at boot (VBIOS ran). On cold
+                 * boot (SOS not alive), VFIO FLR already provides clean state
+                 * and mode1 after fresh SOS load kills PSP without recovery. */
+                if (g_wddm_lite_dev.hw.psp_sos_alive && !did_mode1_reset
+                    && sos_was_alive_at_boot) {
                     char skip_reset[32] = {};
                     GetEnvironmentVariableA("HSAKMT_SKIP_MODE1_RESET",
                         skip_reset, sizeof(skip_reset));

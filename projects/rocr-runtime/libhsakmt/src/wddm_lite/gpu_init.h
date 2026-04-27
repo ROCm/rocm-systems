@@ -98,6 +98,8 @@ struct GpuGfxState {
     ULONGLONG   pfp_ucode_start;    /* PFP program counter start */
     ULONGLONG   me_ucode_start;     /* ME program counter start */
     ULONGLONG   mec_ucode_start;    /* MEC program counter start */
+    ULONGLONG   mes_ucode_start;    /* MES (scheduler, pipe 0) start */
+    ULONGLONG   mes_kiq_ucode_start;/* MES KIQ (pipe 1) start */
 
     /* Saved MEC firmware bytes (for GART-based loading when AUTOLOAD fails) */
     UCHAR      *mec_fw_code;        /* Firmware code section */
