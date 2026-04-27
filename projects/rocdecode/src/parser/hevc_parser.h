@@ -186,7 +186,7 @@ protected:
     ParserResult ParsePps(uint8_t *nalu, size_t size);
 
     /*! \brief Function to parse Profiles, Tiers and Levels
-     * \param [out] ptl A pointer of <tt>HevcProfileTierLevel</tt> for the output from teh parsed stream
+     * \param [out] ptl A pointer of <tt>HevcProfileTierLevel</tt> for the output from the parsed stream
      * \param [in] profile_present_flag Input of <tt>bool</tt> - 1 specifies profile information is present, else 0
      * \param [in] max_num_sub_layers_minus1 Input of <tt>uint32_t</tt> - plus 1 specifies the maximum number of temporal sub-layers that may be present
      * \param [in] nalu A pointer of <tt>uint8_t</tt> for the input stream to be parsed
@@ -197,7 +197,7 @@ protected:
     void ParsePtl(HevcProfileTierLevel *ptl, bool profile_present_flag, uint32_t max_num_sub_layers_minus1, uint8_t *nalu, size_t size, size_t &offset);
     
     /*! \brief Function to parse Sub Layer Hypothetical Reference Decoder Parameters
-     * \param [out] sub_hrd A pointer of <tt>HevcSubLayerHrdParameters</tt> for the output from teh parsed stream
+     * \param [out] sub_hrd A pointer of <tt>HevcSubLayerHrdParameters</tt> for the output from the parsed stream
      * \param [in] cpb_cnt Input of <tt>uint32_t</tt> - specifies the coded picture buffer count in a HRD buffer
      * \param [in] sub_pic_hrd_params_present_flag Input of <tt>bool</tt> - 1 specifies sub layer HRD information is present, else 0
      * \param [in] nalu A pointer of <tt>uint8_t</tt> for the input stream to be parsed
@@ -273,7 +273,7 @@ protected:
      */
     ParserResult ParseSliceHeader(uint8_t *nalu, size_t size, HevcSliceSegHeader *p_slice_header);
 
-    /*! \brief Function to calculate the picture order count of the current picture. Once per picutre. (8.3.1)
+    /*! \brief Function to calculate the picture order count of the current picture. Once per picture. (8.3.1)
      */
     void CalculateCurrPoc();
 

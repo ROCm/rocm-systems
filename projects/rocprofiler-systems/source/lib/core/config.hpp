@@ -303,6 +303,9 @@ get_sampling_duration();
 std::string
 get_sampling_cpus();
 
+std::string
+get_cpu_metrics();
+
 std::set<int64_t>
 get_sampling_cputime_tids();
 
