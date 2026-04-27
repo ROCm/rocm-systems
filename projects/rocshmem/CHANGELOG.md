@@ -1,5 +1,7 @@
 # Changelog for rocSHMEM
-## Unreleased - rocSHMEM 3.3.0 for ROCm x.x.x
+## Unreleased - rocSHMEM x.x.x for ROCm x.x.x
+
+## rocSHMEM 3.4.0 for ROCm 7.13
 ### Added
 * Added new APIs:
    * `rocshmem_quiet_on_stream`
