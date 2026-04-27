@@ -328,8 +328,9 @@ class TestRocprofilerSystemsInstrument(RocprofsysTest):
         self.assert_regex(result, pass_regex=pass_regex)
         self.assert_file_exists(result.output_dir / "instrumentation" / "user.log")
 
+    @pytest.mark.timeout(100)
     def test_exe_only(self, rocprof_config):
-        """Test that when --exe-only is set, all shared lib are excluded."""
+        """Test that when --exe-only is set, all shared libs are excluded."""
         try:
             transpose = rocprof_config.get_target_executable("transpose")
         except FileNotFoundError:
@@ -345,6 +346,7 @@ class TestRocprofilerSystemsInstrument(RocprofsysTest):
             result, pass_regex=[r"\[filter\] skipping shared lib 'lib.*' \(\--exe-only\)"]
         )
 
+    @pytest.mark.timeout(100)
     def test_max_library_functions(self, rocprof_config):
         """Test that --max-library-functions excludes large libraries.
 
@@ -366,6 +368,7 @@ class TestRocprofilerSystemsInstrument(RocprofsysTest):
             pass_regex=[r"\[filter\] skipping shared lib 'libomptarget"],
         )
 
+    @pytest.mark.timeout(100)
     def test_max_library_functions_bypass(self, rocprof_config):
         """Test that --max-library-functions is bypassed by module include regex."""
         try:
