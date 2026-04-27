@@ -8191,7 +8191,7 @@ inline void execute_v_div_fmas_f32_vop3([[maybe_unused]] Inst &inst,
       s2 = -s2;
     float result = std::fma(s0, s1, s2);
     if (vcc & (1ULL << lane)) {
-      result = std::ldexp(result, 128);
+      result = std::ldexp(result, 32);
     }
     inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(result));
   }
@@ -8222,7 +8222,7 @@ inline void execute_v_div_fmas_f64_vop3([[maybe_unused]] Inst &inst,
       s2 = -s2;
     double result = std::fma(s0, s1, s2);
     if (vcc & (1ULL << lane)) {
-      result = std::ldexp(result, 1024);
+      result = std::ldexp(result, 64);
     }
     inst.vdst.write_lane64(wf, lane, std::bit_cast<uint64_t>(result));
   }
@@ -8246,17 +8246,35 @@ inline void execute_v_div_scale_f32_vop3([[maybe_unused]] Inst &inst,
     if (inst.inst_.neg & (1u << 2))
       s2 = -s2;
     float result = s0;
-    bool needs_scale = false;
-    if (!std::isnan(s1) && !std::isnan(s2) && !std::isinf(s1) && !std::isinf(s2) && s1 != 0.0f &&
-        s2 != 0.0f) {
-      int exp1, exp2;
+    bool set_vcc = false;
+    if (s2 == 0.0f || s1 == 0.0f) {
+      result = std::numeric_limits<float>::quiet_NaN();
+    } else {
+      int exp1 = 0, exp2 = 0;
       std::frexp(s1, &exp1);
       std::frexp(s2, &exp2);
-      needs_scale = std::abs(exp1 - exp2) > 100;
-      if (needs_scale)
-        result = std::ldexp(s0, exp2 > exp1 ? 128 : -128);
+      if (exp2 - exp1 >= 96) {
+        set_vcc = true;
+        if (s0 == s1)
+          result = std::ldexp(s0, 64);
+      } else if (std::fpclassify(s1) == FP_SUBNORMAL) {
+        result = std::ldexp(s0, 64);
+      } else if (std::fpclassify(1.0 / static_cast<double>(s1)) == FP_SUBNORMAL &&
+                 std::fpclassify(s2 / s1) == FP_SUBNORMAL) {
+        set_vcc = true;
+        if (s0 == s1)
+          result = std::ldexp(s0, 64);
+      } else if (std::fpclassify(1.0 / static_cast<double>(s1)) == FP_SUBNORMAL) {
+        result = std::ldexp(s0, -64);
+      } else if (std::fpclassify(s2 / s1) == FP_SUBNORMAL) {
+        set_vcc = true;
+        if (s0 == s2)
+          result = std::ldexp(s0, 64);
+      } else if (exp2 <= 23) {
+        result = std::ldexp(s0, 64);
+      }
     }
-    if (needs_scale)
+    if (set_vcc)
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
@@ -8283,17 +8301,35 @@ inline void execute_v_div_scale_f64_vop3([[maybe_unused]] Inst &inst,
     if (inst.inst_.neg & (1u << 2))
       s2 = -s2;
     double result = s0;
-    bool needs_scale = false;
-    if (!std::isnan(s1) && !std::isnan(s2) && !std::isinf(s1) && !std::isinf(s2) && s1 != 0.0 &&
-        s2 != 0.0) {
-      int exp1, exp2;
+    bool set_vcc = false;
+    if (s2 == 0.0 || s1 == 0.0) {
+      result = std::numeric_limits<double>::quiet_NaN();
+    } else {
+      int exp1 = 0, exp2 = 0;
       std::frexp(s1, &exp1);
       std::frexp(s2, &exp2);
-      needs_scale = std::abs(exp1 - exp2) > 768;
-      if (needs_scale)
-        result = std::ldexp(s0, exp2 > exp1 ? 1024 : -1024);
+      if (exp2 - exp1 >= 768) {
+        set_vcc = true;
+        if (s0 == s1)
+          result = std::ldexp(s0, 128);
+      } else if (std::fpclassify(s1) == FP_SUBNORMAL) {
+        result = std::ldexp(s0, 128);
+      } else if (std::fpclassify(1.0 / s1) == FP_SUBNORMAL &&
+                 std::fpclassify(s2 / s1) == FP_SUBNORMAL) {
+        set_vcc = true;
+        if (s0 == s1)
+          result = std::ldexp(s0, 128);
+      } else if (std::fpclassify(1.0 / s1) == FP_SUBNORMAL) {
+        result = std::ldexp(s0, -128);
+      } else if (std::fpclassify(s2 / s1) == FP_SUBNORMAL) {
+        set_vcc = true;
+        if (s0 == s2)
+          result = std::ldexp(s0, 128);
+      } else if (exp2 <= 53) {
+        result = std::ldexp(s0, 128);
+      }
     }
-    if (needs_scale)
+    if (set_vcc)
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);

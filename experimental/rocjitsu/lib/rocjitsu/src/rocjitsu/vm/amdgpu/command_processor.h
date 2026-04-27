@@ -113,7 +113,9 @@ public:
   void update_queue(uint32_t queue_id, uint64_t ring_base_va, uint32_t ring_size);
 
   /// @brief Set the execution plugin group (shared ownership).
-  void set_plugin_group(std::shared_ptr<ExecutionPluginGroup> pg) { plugin_group_ = pg ? pg : ExecutionPluginGroup::empty_group(); }
+  void set_plugin_group(std::shared_ptr<ExecutionPluginGroup> pg) {
+    plugin_group_ = pg ? pg : ExecutionPluginGroup::empty_group();
+  }
 
   /// @brief Register a compute unit that this CP can dispatch to.
   ///

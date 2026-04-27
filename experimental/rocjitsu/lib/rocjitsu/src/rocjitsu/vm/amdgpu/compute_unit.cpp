@@ -420,6 +420,14 @@ bool ComputeUnitCore::step() {
             read_vgpr(vb + 11, 0), read_vgpr(vb + 12, 0), read_vgpr(vb + 13, 0),
             read_vgpr(vb + 14, 0), read_vgpr(vb + 15, 0), active->read_scc(), active->vcc(),
             active->exec());
+        if (active->num_sgprs_ >= 80)
+          os << std::format(
+              " s[64:79]={:x},{:x},{:x},{:x},{:x},{:x},{:x},{:x}"
+              ",{:x},{:x},{:x},{:x},{:x},{:x},{:x},{:x}",
+              read_sgpr(sb + 64), read_sgpr(sb + 65), read_sgpr(sb + 66), read_sgpr(sb + 67),
+              read_sgpr(sb + 68), read_sgpr(sb + 69), read_sgpr(sb + 70), read_sgpr(sb + 71),
+              read_sgpr(sb + 72), read_sgpr(sb + 73), read_sgpr(sb + 74), read_sgpr(sb + 75),
+              read_sgpr(sb + 76), read_sgpr(sb + 77), read_sgpr(sb + 78), read_sgpr(sb + 79));
       });
     }
   }

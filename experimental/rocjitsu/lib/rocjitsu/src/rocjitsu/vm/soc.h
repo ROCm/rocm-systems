@@ -7,11 +7,11 @@
 #ifndef ROCJITSU_VM_SOC_H_
 #define ROCJITSU_VM_SOC_H_
 
-#include "rocjitsu/vm/execution_plugin.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/hbm_controller.h"
 #include "rocjitsu/vm/amdgpu/iod.h"
 #include "rocjitsu/vm/amdgpu/xcd.h"
+#include "rocjitsu/vm/execution_plugin.h"
 
 #include "simdojo/sim/component.h"
 #include "simdojo/sim/exec_mode.h"

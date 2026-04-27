@@ -3797,6 +3797,7 @@ void VCmpxClassF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (match)
       result |= (1ULL << lane);
   }
+  wf.set_vcc(result);
   wf.set_exec(result);
 }
 
@@ -3870,6 +3871,7 @@ void VCmpxClassF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (match)
       result |= (1ULL << lane);
   }
+  wf.set_vcc(result);
   wf.set_exec(result);
 }
 
@@ -3943,6 +3945,7 @@ void VCmpxClassF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (match)
       result |= (1ULL << lane);
   }
+  wf.set_vcc(result);
   wf.set_exec(result);
 }
 

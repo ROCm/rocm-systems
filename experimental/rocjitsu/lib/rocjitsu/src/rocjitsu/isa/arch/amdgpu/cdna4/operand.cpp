@@ -1211,6 +1211,8 @@ uint32_t vgpr_index(OperandType opr_type, int ev) {
   if (opr_type == OperandType::OPR_SRC_ACCVGPR) {
     if (ev >= OpSelSrcAccvgpr::OPR_SRC_ACCVGPR_ACC_MIN)
       return 256 + static_cast<uint32_t>(ev - OpSelSrcAccvgpr::OPR_SRC_ACCVGPR_ACC_MIN);
+    if (ev >= 256)
+      return 256 + static_cast<uint32_t>(ev - 256);
     return 256 + static_cast<uint32_t>(ev);
   }
   if (opr_type == OperandType::OPR_SRC_VGPR_OR_ACCVGPR) {

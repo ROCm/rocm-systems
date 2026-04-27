@@ -9,9 +9,11 @@
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "util/data_types.h"
 #include "util/except.h"
+#include "util/log.h"
 #include <algorithm>
 #include <bit>
 #include <cmath>
+#include <format>
 #include <limits>
 
 namespace rocjitsu {
