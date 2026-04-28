@@ -743,7 +743,7 @@ static const auto AMDGpuMetricsBaseSchema = details::AMDGpuMetricSchemaMapType_t
          details::AMDGpuMetricAttributeInstance_t(
              "Accumulation Counter", "Counter for accumulated metrics",
              details::AMDGpuMetricAttributeId_t::ACCUMULATION_COUNTER,
-             details::AMDGpuMetricAttributeType_t::TYPE_UINT32,
+             details::AMDGpuMetricAttributeType_t::TYPE_UINT64,
              details::AMDGpuMetricUnitType_t::COUNT_ACCUMULATOR),
          static_cast<details::AMDGpuMetricAttributeValue_t>(0)}},
 
