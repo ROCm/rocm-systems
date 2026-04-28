@@ -82,6 +82,17 @@ add_test(
         ${CMAKE_SOURCE_DIR}/cmake/scripts/check_sampling_public_headers.cmake
 )
 
+# ── NFR-PORT-3: platform_guard compile-fail test ─────────────────────────────
+# Runs as cmake -P (script mode). The script uses execute_process to drive a
+# sub-cmake build — try_compile is not available in script mode.
+add_test(
+    NAME sampling-platform-guard-non-linux-compile-fail
+    COMMAND
+        ${CMAKE_COMMAND} -DSAMPLING_INCLUDE=${CMAKE_CURRENT_SOURCE_DIR}/include
+        -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER} -DCMAKE_COMMAND=${CMAKE_COMMAND} -P
+        ${CMAKE_SOURCE_DIR}/cmake/scripts/check_sampling_platform_guard.cmake
+)
+
 # ── Tests ─────────────────────────────────────────────────────────────────────
 if(BUILD_TESTING)
     add_subdirectory(tests)
