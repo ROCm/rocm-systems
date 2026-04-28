@@ -1906,8 +1906,8 @@ def test_analyze_torch_trace_list_operators_MI350(
     assert "torch.nn.functional.relu" in output
     assert "torch.nn.functional.linear" in output
     assert "torch.ones_like" in output
-    assert "kernel_launches:" in output
-    assert "total_duration:" in output
+    assert "dispatches:" in output
+    assert "total:" in output
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
@@ -1931,8 +1931,8 @@ def test_analyze_torch_trace_filter_operator_MI350(
 
     assert "Matched PyTorch Operators:" in output
     assert "relu" in output
-    assert "kernel_launches:" in output
-    assert "total_duration:" in output
+    assert "dispatches:" in output
+    assert "total:" in output
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
@@ -2003,7 +2003,7 @@ def test_analyze_torch_trace_hierarchy_path_MI350(
 
     assert "Matched PyTorch Operators:" in output
     assert "torch.relu" in output
-    assert "kernel_launches:" in output
+    assert "dispatches:" in output
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
@@ -2027,6 +2027,6 @@ def test_analyze_torch_trace_torch_prefix_MI350(
 
     assert "Matched PyTorch Operators:" in output
     assert "torch.relu" in output
-    assert "kernel_launches:" in output
+    assert "dispatches:" in output
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
