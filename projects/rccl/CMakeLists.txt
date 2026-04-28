@@ -175,33 +175,6 @@ endif()
 # Determine which GPU architectures to build for
 set(GPU_TARGETS "${DEFAULT_GPUS}" CACHE STRING "Target default GPUs if GPU_TARGETS is not defined.")
 
-# For ASAN builds, only one GPU target is supported to avoid clang-offload-bundler
-# v2 size limits. ASAN-instrumented device code is 2-3x larger, and even with
-# compression, multiple architectures exceed bundler limits.
-if (BUILD_ADDRESS_SANITIZER)
-  list(LENGTH GPU_TARGETS num_gpu_targets)
-  if (GPU_TARGETS STREQUAL DEFAULT_GPUS)
-    # User didn't specify GPU_TARGETS, default to local GPU
-    if (COMMAND rocm_local_targets)
-      rocm_local_targets(GPU_TARGETS)
-      list(GET GPU_TARGETS 0 GPU_TARGETS)  # Use only first local GPU target
-      message(STATUS "ASAN build: GPU_TARGETS not specified, defaulting to local GPU: ${GPU_TARGETS}")
-    else()
-	 message(FATAL_ERROR "ASAN builds only support a single GPU_TARGET, rocm_local_targets failed."
-				 "Please specify -DGPU_TARGETS=<single_target>. "
-							 "Currently specified: ${GPU_TARGETS}")
-    endif()
-  elseif (num_gpu_targets GREATER 1)
-    # User specified multiple targets - not supported for ASAN
-    message(FATAL_ERROR "ASAN builds only support a single GPU_TARGET to avoid bundler size limits. "
-			 "Please specify -DGPU_TARGETS=<single_target>. "
-			 "Currently specified: ${GPU_TARGETS}")
-  else()
-    # User specified exactly one target - use it
-    message(STATUS "ASAN build: using specified GPU target: ${GPU_TARGETS}")
-  endif()
-endif()
-
 # ROCM NetIB patch
 include(cmake/rocmIb.cmake)
 

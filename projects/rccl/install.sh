@@ -496,6 +496,14 @@ if [[ "${build_package}" == true ]]; then
     check_exit_code "$?"
 fi
 
+# For ASAN builds, preload the shared ASAN runtime so librccl.so symbols resolve
+if [[ "${build_address_sanitizer}" == true ]]; then
+    ASAN_LIB=$("${ROCM_PATH:-/opt/rocm}/bin/amdclang++" -print-file-name=libclang_rt.asan-x86_64.so 2>/dev/null)
+    if [[ -f "${ASAN_LIB}" ]]; then
+        export LD_PRELOAD="${ASAN_LIB}${LD_PRELOAD:+:$LD_PRELOAD}"
+    fi
+fi
+
 # Optionally, run RCCL-UnitTests, if they're enabled.
 if [[ "${run_tests}" == true ]]; then
     if [[ ! -x "./test/rccl-UnitTests" ]]; then
