@@ -69,6 +69,7 @@ class LinuxAmdgpuLiteTransport final : public DirectQueuePlatform {
 
   hsa_status_t MapBar(uint32_t bar_index, uint64_t bar_size,
                       void** cpu, uint64_t* mapped_size) const;
+  void ResolveFramebufferBase();
   void UnmapBars();
 
   std::string devnode_;
@@ -77,6 +78,7 @@ class LinuxAmdgpuLiteTransport final : public DirectQueuePlatform {
   uint16_t vendor_id_ = 0;
   uint16_t device_id_ = 0;
   uint64_t framebuffer_base_ = 0;
+  uint64_t vram_bar_phys_ = 0;
   uint64_t vram_size_ = 0;
   uint64_t visible_vram_size_ = 0;
   uint32_t mmio_bar_index_ = 0;

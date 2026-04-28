@@ -26,8 +26,10 @@ namespace lite {
 namespace {
 
 constexpr uint32_t kGcBase0 = 0x1260;
+constexpr uint32_t kMmhubBase0 = 0x1A000;
 constexpr uint32_t kNbioBase2 = 0xD20;
 
+constexpr uint32_t regMMMC_VM_FB_LOCATION_BASE = 0x0554;
 constexpr uint32_t regRCC_DEV0_EPF0_RCC_DOORBELL_APER_EN = 0x00c0;
 constexpr uint32_t regGDC_S2A0_S2A_DOORBELL_ENTRY_0_CTRL = 0x01cb;
 constexpr uint32_t regGDC_S2A0_S2A_DOORBELL_ENTRY_3_CTRL = 0x01ce;
@@ -85,7 +87,8 @@ hsa_status_t LinuxAmdgpuLiteTransport::Open() {
   mmio_bar_index_ = info.mmio_bar_index;
   vram_bar_index_ = info.vram_bar_index;
   doorbell_bar_index_ = info.doorbell_bar_index;
-  framebuffer_base_ = info.bars[info.vram_bar_index].phys_addr;
+  vram_bar_phys_ = info.bars[info.vram_bar_index].phys_addr;
+  framebuffer_base_ = vram_bar_phys_;
 
   hsa_status_t status =
       MapBar(mmio_bar_index_, info.bars[mmio_bar_index_].size, &mmio_bar_,
@@ -103,6 +106,8 @@ hsa_status_t LinuxAmdgpuLiteTransport::Open() {
     return status;
   }
 
+  ResolveFramebufferBase();
+
   return HSA_STATUS_SUCCESS;
 }
 
@@ -115,6 +120,7 @@ void LinuxAmdgpuLiteTransport::Close() {
   vendor_id_ = 0;
   device_id_ = 0;
   framebuffer_base_ = 0;
+  vram_bar_phys_ = 0;
   vram_size_ = 0;
   visible_vram_size_ = 0;
 }
@@ -228,6 +234,11 @@ hsa_status_t LinuxAmdgpuLiteTransport::AllocVram(
   buffer->handle = args.handle;
   buffer->size = size;
   buffer->gpu_addr = args.gpu_addr;
+  if (framebuffer_base_ != 0 && vram_bar_phys_ != 0 &&
+      args.gpu_addr >= vram_bar_phys_ &&
+      args.gpu_addr - vram_bar_phys_ < vram_bar_size_) {
+    buffer->gpu_addr = framebuffer_base_ + (args.gpu_addr - vram_bar_phys_);
+  }
   buffer->mmap_offset = args.mmap_offset;
   buffer->cpu = cpu;
   return HSA_STATUS_SUCCESS;
@@ -364,6 +375,18 @@ hsa_status_t LinuxAmdgpuLiteTransport::MapBar(uint32_t bar_index,
   *cpu = ptr;
   *mapped_size = bar_size;
   return HSA_STATUS_SUCCESS;
+}
+
+void LinuxAmdgpuLiteTransport::ResolveFramebufferBase() {
+  if (mmio_bar_ == nullptr) return;
+
+  uint32_t fb = 0;
+  if (ReadMmio32(kMmhubBase0, regMMMC_VM_FB_LOCATION_BASE, &fb) != HSA_STATUS_SUCCESS) {
+    return;
+  }
+
+  const uint64_t mc_base = static_cast<uint64_t>(fb & 0x00FFFFFFu) << 24;
+  if (mc_base != 0) framebuffer_base_ = mc_base;
 }
 
 void LinuxAmdgpuLiteTransport::UnmapBars() {
