@@ -20,3 +20,15 @@
 - Rebuild succeeded; rerunning BinaryTranslatorE2E chained MFMA and HSA MFMA dispatch tests.
 - Result: BinaryTranslatorE2E.MfmaChainedUnrolledReusesAccumulator passed. HsaTranslateTest.TranslateAndDispatchMfma16x16 and TranslateAndDispatchMfmaChainedUnrolled both passed 10 iterations with 0 mismatches.
 - Next: commit MFMA fix, then add an LDS read/write loop fixture and HSA dispatch coverage for loop translation.
+
+## LDS loop feature
+- Starting LDS read/write loop fixture. Plan: add HIP kernel under tests/kernels, register it in tests/kernels/CMakeLists.txt, and add focused HSA translated dispatch coverage using group_segment_size.
+- Added tests/kernels/lds_loop.hip with a 4-iteration LDS write/barrier/read/barrier loop and deterministic shifted-lane accumulation.
+
+## LDS loop fixture
+- Added `tests/kernels/lds_loop.hip`, a one-workgroup LDS read/write loop with barriers on both sides of a loop-carried LDS read.
+- Registered the kernel in `tests/kernels/CMakeLists.txt` and added `HsaTranslateTest.TranslateAndDispatchLdsLoop` to compare translated dispatch output against a CPU simulation.
+- Next: build `kernel_lds_loop` and run the focused HSA translate dispatch test.
+- Built with `ninja -C build kernel_lds_loop tests/hsa_translate_test`.
+- Verified with `./build/tests/hsa_translate_test --gtest_filter='HsaTranslateTest.TranslateAndDispatchLdsLoop'`; passed in 71 ms.
+- Committing this feature before starting the shared-memory matmul loop without MFMA.
