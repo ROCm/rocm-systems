@@ -44,6 +44,10 @@
 #include <iomanip>
 #include <mutex>
 #include <thread>
+#if !defined(_WIN32)
+#include <sys/syscall.h>
+#include <unistd.h>
+#endif
 #include <map>
 #include <unordered_map>
 #include <unordered_set>
@@ -412,9 +416,7 @@ void WriteJsonTraceImpl(const char* filepath) {
   std::unordered_map<int, std::unordered_set<uint64_t>> device_gpu_tids;
   // Map (device_id, gpu_tid) -> last seen hipStream_t for lane labeling.
   std::map<std::pair<int,uint64_t>, hipStream_t> gpu_tid_stream;
-  // Map raw hash thread ids to compact sequential ints (JS safe-integer limit)
-  std::unordered_map<uint64_t, uint32_t> tid_map;
-  uint32_t next_tid = 0;
+  std::unordered_set<uint64_t> tid_set;  // unique CPU thread ids seen
   uint64_t flow_id  = 0;  // unique id for each CPU→GPU flow arrow pair
   bool first = true;
   // Compact lane index per unique stream (same scheme as pftrace writer).
@@ -498,15 +500,6 @@ void WriteJsonTraceImpl(const char* filepath) {
     return (ptr >> 12) & 0xFFFFF;
   };
 
-  auto compact_tid = [&](uint64_t raw) -> uint32_t {
-    auto it = tid_map.find(raw);
-    if (it != tid_map.end()) return it->second;
-    uint32_t id = next_tid++;
-    tid_map[raw] = id;
-    return id;
-  };
-
-
   for (size_t c = 0; c < g_records.size(); ++c) {
     HipApiRecordExt* chunk = g_records[c];
     size_t base  = c * kChunkSize;
@@ -515,6 +508,7 @@ void WriteJsonTraceImpl(const char* filepath) {
 
     for (size_t i = 0; i < valid; ++i) {
       const HipApiRecordExt& rec = chunk[i];
+      tid_set.insert(rec.thread_id);
 
       double s_time  = (rec.start_ns - base_ns) / 1000.0;
       double dur_us  = (rec.end_ns > rec.start_ns)
@@ -523,9 +517,8 @@ void WriteJsonTraceImpl(const char* filepath) {
       if (!first) trace << ",";
       first = false;
 
-      uint32_t ctid = compact_tid(rec.thread_id);
       trace << "\n{\"name\":\"" << rec.api_name
-            << "\",\"ph\":\"X\",\"pid\":1024,\"tid\":" << ctid
+            << "\",\"ph\":\"X\",\"pid\":1024,\"tid\":" << rec.thread_id
             << ",\"ts\":" << s_time << ",\"dur\":" << dur_us;
       {
         bool first_cpu_arg = true;
@@ -595,7 +588,7 @@ void WriteJsonTraceImpl(const char* filepath) {
         uint64_t fid = (has_ts && emit_host_arrow) ? flow_id++ : 0;
         if (has_ts && emit_host_arrow)
           trace << ",\n{\"ph\":\"s\",\"id\":" << fid
-                << ",\"pid\":1024,\"tid\":" << ctid
+                << ",\"pid\":1024,\"tid\":" << rec.thread_id
                 << ",\"ts\":" << s_time << ",\"name\":\"dep\"}";
         // GPU X event.
         trace << ",\n{\"name\":\"" << gpu_name
@@ -791,10 +784,10 @@ void WriteJsonTraceImpl(const char* filepath) {
           << ",\"args\":{\"sort_index\":999}}";
   }
 
-  // Emit CPU thread name metadata using the same compact tid mapping
-  for (auto& kv : tid_map) {
-    trace << ",\n{\"name\":\"thread_name\",\"ph\":\"M\",\"pid\":1024,\"tid\":" << kv.second
-          << ",\"args\":{\"name\":\"HIP Thread " << kv.second << "\"}}";
+  // Emit CPU thread name metadata using kernel thread IDs
+  for (uint64_t tid : tid_set) {
+    trace << ",\n{\"name\":\"thread_name\",\"ph\":\"M\",\"pid\":1024,\"tid\":" << tid
+          << ",\"args\":{\"name\":\"HIP Thread " << tid << "\"}}";
   }
 
   // Returns {targetId, hip_device_index} for a given HSA device_id.
@@ -1894,8 +1887,12 @@ HipApiRecordExt* HipGetActiveRecordExt(uint32_t api_id) {
   HipApiRecordExt* rec = &g_records[idx][slot % kChunkSize];
   rec->api_name    = (api_id < kHipApiNamesCountExt) ? kHipApiNamesExt[api_id] : "unknown";
   rec->_flags_u64  = 0;
-  rec->thread_id   = static_cast<uint64_t>(
-      std::hash<std::thread::id>{}(std::this_thread::get_id()));
+#if defined(_WIN32)
+  rec->thread_id   = std::hash<std::thread::id>{}(std::this_thread::get_id());
+#else
+  static thread_local uint64_t cached_tid = static_cast<uint64_t>(syscall(SYS_gettid));
+  rec->thread_id   = cached_tid;
+#endif
 
   // Tell the HIP runtime to tag the next GPU command with this slot index.
   // Mirrors: next_layer.hipRegisterTracerId(slot) in the reference tracer.
