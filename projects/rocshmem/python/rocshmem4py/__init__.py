@@ -301,10 +301,18 @@ def init_with_mpi(mpi_comm: Optional[Any] = None):
 def init_with_torch(group: Optional[Any] = None,
                     backend: str = 'cpu:gloo,cuda:nccl',
                     init_method: Optional[str] = None):
-    """Initialize rocSHMEM using torch.distributed for coordination.
+    """Initialize rocSHMEM using ``torch.distributed`` for coordination.
 
-    The RO backend requires MPI-launched processes (``mpirun``).
-    OpenMPI env vars are auto-mapped to torch.distributed equivalents.
+    Works under both ``torchrun`` and ``mpirun`` for IPC / GDA backends.
+    The RO backend additionally requires an ``mpirun`` launch so that the
+    OpenMPI launcher exports the ``OMPI_COMM_WORLD_*`` env vars rocSHMEM
+    expects; ``torchrun`` alone is not sufficient for RO. ``OMPI_COMM_WORLD_*``
+    env vars (when present) are auto-mapped to the ``RANK`` / ``WORLD_SIZE``
+    / ``LOCAL_RANK`` variables ``torch.distributed`` reads.
+
+    For the launcher x backend matrix and the structural reason RO requires
+    ``mpirun``, see the project README:
+    https://github.com/ROCm/rocm-systems/blob/develop/projects/rocshmem/python/README.md#troubleshooting
     """
     try:
         import torch

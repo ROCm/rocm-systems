@@ -195,93 +195,68 @@ rocshmem4py.rocshmem_finalize()
 | `ROCSHMEM_SIGNAL_ADD` | impl-defined | Signal add op enum |
 | `ROCSHMEM_CMP_EQ/NE/GT/GE/LT/LE` | impl-defined | Signal wait compare enums |
 
-## Testing
-
-Canonical test sources live in `python/tests/`.
-When `BUILD_PYTHON_TESTS=ON`, CMake installs those test assets into the test package.
-
-The RO backend **must be launched with `mpirun`** — UCX/OMPI runtime must be
-present. Within an `mpirun` launch you may choose either `init_with_torch()`
-(uses `torch.distributed` for the rocSHMEM unique-id exchange) or
-`init_with_mpi()` (uses `mpi4py`). `torchrun` alone is **not** sufficient for
-the RO backend.
-
-Non-RO backends (IPC / GDA) have no MPI runtime dependency and should be
-launched with `torchrun`.
-
-Use `launch_test.sh` (backend-aware) or invoke the launcher directly:
+## Running the tests
 
 ```bash
-# RO backend (default, via mpirun)
+# IPC / GDA backend (any AMD multi-GPU node)
+torchrun --standalone --nproc_per_node=2 -m pytest tests/ -v
+
+# RO backend (must use mpirun)
 ./launch_test.sh -n 2 -c "pytest tests/ -v"
-
-# IPC / GDA backend (via torchrun)
-./launch_test.sh -l torchrun -n 2 -c "pytest tests/ -v"
-
-# Direct mpirun (RO)
-mpirun --allow-run-as-root -n 2 \
-  -mca pml ucx -mca osc ucx \
-  -x ROCSHMEM_HEAP_SIZE=536870912 \
-  -x LD_LIBRARY_PATH \
-  -x WORLD_SIZE=2 \
-  python3 -m pytest tests/ -v
-
-# Direct torchrun (IPC / GDA)
-torchrun --standalone --nnodes=1 --nproc_per_node=2 \
-  -m pytest tests/ -v
 ```
 
-If you hit rendezvous port conflicts under `torchrun`, set `MASTER_PORT`
-(or `ROCSHMEM_MASTER_PORT`) explicitly.
-
-### Test Files
-
-| File | Scope |
-|---|---|
-| `test_smoke.py` | Single- and multi-PE torch-free tests via ctypes + HIP: `rocshmem_create_buffer`, `SymmetricBuffer` lifecycle, H2D/D2H roundtrip, stream-based put/get, `rocshmem_get_peer_buffer` |
-| `test_basic.py` | Single-PE: constants, `SymmetricBuffer`, `interop.torch` tensor helpers, barrier |
-| `test_collective.py` | Multi-PE: stream-based put/get, stream barriers, peer views, `interop.torch` RMA wrappers (data-verified) |
-
-### Design: the wheel and its tests are backend-agnostic
-
-`_rocshmem4py` statically links `librocshmem.a` at build time against a
-specific rocSHMEM install, but its **source** contains no backend-specific
-`#ifdef`s — the same extension source builds cleanly against any rocSHMEM
-backend (RO / IPC / GDA). No compile-time backend macros leak into the
-Python API.
-
-The tests follow the same principle: they exercise the **binding layer**
-(argument passing, tensor / `__cuda_array_interface__` round-trips,
-`SymmetricBuffer` RAII, PyTorch integration) through the portable rocSHMEM
-surface that every backend implements:
-
-- `rocshmem_barrier_all` / `rocshmem_barrier_all_on_stream`
-- `rocshmem_putmem_on_stream` / `rocshmem_getmem_on_stream`
-- `rocshmem_putmem_signal_on_stream` / `rocshmem_signal_wait_until_on_stream`
-- `rocshmem_ptr` / `rocshmem_create_buffer` / `rocshmem_get_peer_buffer`
+Test source layout, the full launcher &times; backend &times; init-tier
+matrix used by `conftest.py`, and CI-author guidance live in the test
+suite's own README:
+<https://github.com/ROCm/rocm-systems/blob/develop/projects/rocshmem/python/tests/README.md>.
 
 ## Troubleshooting
 
-**ImportError**: Ensure rocSHMEM libraries are in `LD_LIBRARY_PATH`:
+| Symptom | Cause | Fix |
+|---|---|---|
+| `ImportError: _rocshmem4py` | rocSHMEM not on the loader path | `export LD_LIBRARY_PATH=$ROCSHMEM_HOME/lib:$ROCM_PATH/lib:$LD_LIBRARY_PATH` |
+| CMake cannot find rocSHMEM at build time | `ROCSHMEM_HOME` unset | `export ROCSHMEM_HOME=/path/to/rocshmem/build` before `pip install -e .` |
+| Link error: `recompile with -fPIC` | `librocshmem.a` built without PIC | Rebuild rocSHMEM with `-DCMAKE_POSITION_INDEPENDENT_CODE=ON` |
+| MPI / UCX import or runtime errors | OpenMPI not built with UCX | Use an OpenMPI install with UCX and point `OMPI_DIR` at it |
+| `Unsupported configuration to initialize rocSHMEM. Please initialize the MPI library using MPI_Init first` | RO backend launched under `torchrun` &mdash; see *"RO backend requires `mpirun`"* below | Launch with `mpirun` (you can keep `init_with_torch()`), or build an IPC/GDA-only rocSHMEM if you don't need inter-node RDMA |
+| Rendezvous / port conflict under `torchrun` | Default `MASTER_PORT=29500` already taken | Set `MASTER_PORT` (or `ROCSHMEM_MASTER_PORT`) to a free port |
+
+### RO backend requires `mpirun`
+
+This is a structural property of rocSHMEM's C library, not a packaging
+gap in `rocshmem4py`: `library_init_subcomm` (in `src/rocshmem.cpp`)
+requires either `MPI_Initialized()` to be true or the OpenMPI launcher
+env var `OMPI_COMM_WORLD_SIZE` to be set. `mpirun`/`prterun` exports
+those env vars; `torchrun` does not. Pre-importing `mpi4py` is **not** a
+workaround &mdash; it makes `MPI_Initialized()` return true, which then
+routes the C library through a subgroup-creation path
+(`MPI_Group_incl` + `MPI_Comm_create_group`) across processes that live
+in disjoint singleton MPI universes, and that crashes inside OMPI's PMIx
+wireup. Use `mpirun` for RO; `init_with_torch()` itself still works
+under `mpirun`, so you keep the `torch.distributed` unique-id exchange
+and only the launcher changes.
+
+### Diagnosing which rocSHMEM backend you actually linked
+
+A pre-built `_rocshmem4py.so` (or any wheel you might pick up later)
+statically links *one* rocSHMEM backend. When initialization fails in
+ways that look backend-specific, two checks pin down which one:
+
 ```bash
-export LD_LIBRARY_PATH=$ROCSHMEM_HOME/lib:$ROCM_PATH/lib:$LD_LIBRARY_PATH
+# What backend does the rocSHMEM install at $ROCSHMEM_HOME advertise?
+"${ROCSHMEM_HOME}/bin/rocshmem_info" | grep "Vendor String"
+
+# Which backend's code is actually linked into the loaded extension?
+nm -D --defined-only "$(python -c 'import _rocshmem4py; print(_rocshmem4py.__file__)')" \
+  | grep -E " T _ZN8rocshmem(9RO|10IPC|10GDA)Backend" | head
 ```
 
-**CMake cannot find rocSHMEM**: Set `ROCSHMEM_HOME`:
-```bash
-export ROCSHMEM_HOME=/path/to/rocshmem/build
-```
-
-**Link error mentions `recompile with -fPIC`**: Build `rocshmem` with PIC enabled
-when linking its static archive into `_rocshmem4py`:
-```bash
-cmake -S /path/to/rocshmem -B /path/to/rocshmem/build \
-  -DCMAKE_POSITION_INDEPENDENT_CODE=ON
-cmake --build /path/to/rocshmem/build --parallel
-cmake --install /path/to/rocshmem/build
-```
-
-**MPI / UCX issues**: Ensure OpenMPI is built with UCX support and `OMPI_DIR` points to it.
+The auto-detect order is IPC &rarr; GDA &rarr; RO; force a specific one
+with `ROCSHMEM_BACKEND=ipc` if the build supports it. The same
+`_rocshmem4py` source builds against any backend &mdash; there are no
+backend `#ifdef`s in the binding layer &mdash; so two wheels with
+identical Python APIs can behave differently at runtime depending on
+how the C library was configured.
 
 ## License
 

@@ -2,15 +2,41 @@ cmake_minimum_required(VERSION 3.16)
 
 ###############################################################################
 # ROCM/HIP Configuration
+#
+# Two supported layouts:
+#   1. Standard ROCm install:  hipcc at ${ROCM_PATH}/bin/hipcc
+#                              HIP at  ${ROCM_PATH}/{include,lib,lib/cmake/hip}
+#   2. TheRock toolchain:      hipcc at ${THEROCK_TOOLCHAIN_ROOT}/lib/llvm/bin/hipcc
+#                              HIP at  ${THEROCK_TOOLCHAIN_ROOT}/{include,lib,lib/cmake/hip}
+#
 ###############################################################################
+if(DEFINED ENV{THEROCK_TOOLCHAIN_ROOT} AND NOT THEROCK_TOOLCHAIN_ROOT)
+  set(THEROCK_TOOLCHAIN_ROOT "$ENV{THEROCK_TOOLCHAIN_ROOT}" CACHE PATH "TheRock toolchain root")
+endif()
+
 if(DEFINED ENV{ROCM_PATH})
   set(ROCM_PATH "$ENV{ROCM_PATH}" CACHE STRING "ROCm install directory")
+elseif(THEROCK_TOOLCHAIN_ROOT)
+  set(ROCM_PATH "${THEROCK_TOOLCHAIN_ROOT}" CACHE STRING "ROCm install directory")
 else()
   set(ROCM_PATH "/opt/rocm" CACHE STRING "ROCm install directory")
 endif()
 
+# Locate hipcc; prefer ROCM_PATH/bin then TheRock's lib/llvm/bin layout.
+find_program(HIPCC_EXECUTABLE hipcc
+             PATHS
+               ${ROCM_PATH}/bin
+               ${THEROCK_TOOLCHAIN_ROOT}/lib/llvm/bin
+             NO_DEFAULT_PATH)
+
+if(NOT HIPCC_EXECUTABLE)
+  message(FATAL_ERROR "hipcc not found under ${ROCM_PATH}/bin or "
+                      "${THEROCK_TOOLCHAIN_ROOT}/lib/llvm/bin. "
+                      "Set ROCM_PATH or THEROCK_TOOLCHAIN_ROOT.")
+endif()
+
 # CMake chooses the compiler during project(), so set it first.
-set(CMAKE_CXX_COMPILER "${ROCM_PATH}/bin/hipcc" CACHE FILEPATH "C++ compiler")
+set(CMAKE_CXX_COMPILER "${HIPCC_EXECUTABLE}" CACHE FILEPATH "C++ compiler")
 project(rocshmem4py LANGUAGES CXX)
 
 find_package(Python3 COMPONENTS Interpreter Development REQUIRED)
@@ -35,17 +61,32 @@ set(CMAKE_CXX_FLAGS_RELEASE "-O3")
 # Find Dependencies
 ###############################################################################
 
-# Find HIP
-list(APPEND CMAKE_PREFIX_PATH ${ROCM_PATH} ${ROCM_PATH}/hip ${ROCM_PATH}/lib/cmake/hip)
-find_package(hip QUIET CONFIG HINTS ${ROCM_PATH}/lib/cmake/hip)
+# Find HIP. Probe both ROCM_PATH and THEROCK_TOOLCHAIN_ROOT layouts.
+list(APPEND CMAKE_PREFIX_PATH
+     ${ROCM_PATH} ${ROCM_PATH}/hip ${ROCM_PATH}/lib/cmake/hip)
+if(THEROCK_TOOLCHAIN_ROOT)
+  list(APPEND CMAKE_PREFIX_PATH
+       ${THEROCK_TOOLCHAIN_ROOT}
+       ${THEROCK_TOOLCHAIN_ROOT}/lib/cmake/hip)
+endif()
+find_package(hip QUIET CONFIG
+             HINTS ${ROCM_PATH}/lib/cmake/hip
+                   ${THEROCK_TOOLCHAIN_ROOT}/lib/cmake/hip)
 if(hip_FOUND)
   message(STATUS "HIP found: ${HIP_VERSION}")
 else()
   message(STATUS "HIP package not found via find_package, using manual configuration")
-  set(HIP_INCLUDE_DIRS "${ROCM_PATH}/include")
+  if(EXISTS "${ROCM_PATH}/include/hip")
+    set(HIP_ROOT_DIR "${ROCM_PATH}")
+  elseif(THEROCK_TOOLCHAIN_ROOT AND EXISTS "${THEROCK_TOOLCHAIN_ROOT}/include/hip")
+    set(HIP_ROOT_DIR "${THEROCK_TOOLCHAIN_ROOT}")
+  else()
+    set(HIP_ROOT_DIR "${ROCM_PATH}")
+  endif()
+  set(HIP_INCLUDE_DIRS "${HIP_ROOT_DIR}/include")
   set(HIP_LIBRARIES "amdhip64")
   include_directories(${HIP_INCLUDE_DIRS})
-  link_directories(${ROCM_PATH}/lib)
+  link_directories(${HIP_ROOT_DIR}/lib)
 endif()
 
 # Find pybind11
@@ -122,6 +163,11 @@ target_include_directories(_rocshmem4py PRIVATE
   ${Python3_INCLUDE_DIRS}
   ${ROCM_PATH}/include
 )
+if(THEROCK_TOOLCHAIN_ROOT)
+  target_include_directories(_rocshmem4py PRIVATE
+    ${THEROCK_TOOLCHAIN_ROOT}/include
+  )
+endif()
 
 find_package(MPI QUIET)
 

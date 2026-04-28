@@ -39,6 +39,10 @@ class CMakeBuild(build_ext):
         ]
         if "ROCM_PATH" in os.environ:
             cmake_args.append(f'-DROCM_PATH={os.environ["ROCM_PATH"]}')
+        if "THEROCK_TOOLCHAIN_ROOT" in os.environ:
+            cmake_args.append(
+                f'-DTHEROCK_TOOLCHAIN_ROOT={os.environ["THEROCK_TOOLCHAIN_ROOT"]}'
+            )
         if "ROCSHMEM_HOME" in os.environ:
             cmake_args.append(f'-DROCSHMEM_HOME={os.environ["ROCSHMEM_HOME"]}')
 
