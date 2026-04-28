@@ -266,11 +266,11 @@ extern size_t EncodeAsFilename(
 
 /// Generate a log filename.
 ///
-/// @param [inout] pFilenameBuffer   Buffer to hold the filename.
-/// @param         maxSize           Max size of the pFilenameBuffer.
-/// @param         nextPost          The next write position.
-/// @param [in]    pExt              The filename extension.
-/// @param         logDuplicate      Log duplicate objects.
+/// @param [in,out] pFilenameBuffer   Buffer to hold the filename.
+/// @param          maxSize           Max size of the pFilenameBuffer.
+/// @param          nextPost          The next write position.
+/// @param [in]     pExt              The filename extension.
+/// @param          logDuplicate      Log duplicate objects.
 extern void GenLogFilename(
     char*             pFilenameBuffer,
     size_t            maxSize,

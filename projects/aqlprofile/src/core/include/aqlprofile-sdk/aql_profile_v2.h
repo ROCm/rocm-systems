@@ -596,30 +596,18 @@ typedef struct
 
 typedef enum
 {
-    AQLPROFILE_SPM_PARAMETER_TYPE_NONE = 0,
-    AQLPROFILE_SPM_PARAMETER_TYPE_BUFFER_SIZE,
-    AQLPROFILE_SPM_PARAMETER_TYPE_SAMPLE_INTERVAL_SCLK_CYCLES,
-    AQLPROFILE_SPM_PARAMETER_TYPE_SAMPLE_INTERVAL_REFCLK_CYCLES,
+    AQLPROFILE_SPM_PARAMETER_TYPE_BUFFER_SIZE = 0,
+    AQLPROFILE_SPM_PARAMETER_TYPE_SAMPLE_INTERVAL,
     AQLPROFILE_SPM_PARAMETER_TYPE_TIMEOUT,
     AQLPROFILE_SPM_PARAMETER_TYPE_SAMPLE_MODE,
     AQLPROFILE_SPM_PARAMETER_TYPE_LAST,
 } aqlprofile_spm_parameter_type_t;
 
-
 typedef enum
 {
-    AQLPROFILE_SPM_PARAMETER_SAMPLE_MODE_NONE = 0,
-    AQLPROFILE_SPM_PARAMETER_SAMPLE_MODE_SCLK,
-    AQLPROFILE_SPM_PARAMETER_SAMPLE_MODE_REFCLK,
+    AQLPROFILE_SPM_PARAMETER_SAMPLE_MODE_SCLK = 0,
+    AQLPROFILE_SPM_PARAMETER_SAMPLE_MODE_REFCLK
 } aqlprofile_spm_parameter_interval_mode_t;
-
-
-typedef struct aqlprofile_spm_available_configuration_t
-{
-    aqlprofile_spm_parameter_type_t        type =  AQLPROFILE_SPM_PARAMETER_TYPE_NONE;
-    uint64_t                               min_interval = 0;
-    uint64_t                               max_interval = 0;
-} aqlprofile_spm_available_configuration_t;
 
 typedef struct
 {
@@ -761,14 +749,6 @@ aqlprofile_spm_decode_query(aqlprofile_spm_buffer_desc_t  desc,
 
 bool
 aqlprofile_spm_is_event_supported(aqlprofile_agent_handle_t agent, aqlprofile_pmc_event_t event);
-
-typedef hsa_status_t (*aqlprofile_spm_available_configurations_cb_t)(
-    const aqlprofile_spm_available_configuration_t*    config,
-    size_t                                         num_config,
-    void*                                         user_data);
-
-hsa_status_t
-aqlprofile_spm_query_agent_capabilities(aqlprofile_agent_handle_t agent, aqlprofile_spm_available_configurations_cb_t cb, void* userdata);
 
 #ifdef __cplusplus
 }

@@ -3,8 +3,8 @@
 
 #pragma once
 
+#include "common/defines.h"
 #include "core/common.hpp"
-#include "core/defines.hpp"
 #include "core/timemory.hpp"
 
 #include <timemory/components/gotcha/backends.hpp>
@@ -40,8 +40,6 @@ struct blocking_gotcha : comp::base<blocking_gotcha, void>
         sigsuspend_idx            = 17,
         indexes_max               = gotcha_capacity - 1,
     };
-
-    ROCPROFSYS_DEFAULT_OBJECT(blocking_gotcha)
 
     // string id for component
     static std::string label();

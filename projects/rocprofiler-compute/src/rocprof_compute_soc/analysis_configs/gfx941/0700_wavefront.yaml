@@ -84,32 +84,32 @@ Panel Config:
           max: MAX($GRBM_GUI_ACTIVE_PER_XCD)
           unit: Cycles
         Instructions per wavefront:
-          avg: AVG((SQ_INSTS / SQ_WAVES))
+          avg: SUM(SQ_INSTS) / SUM(SQ_WAVES)
           min: MIN((SQ_INSTS / SQ_WAVES))
           max: MAX((SQ_INSTS / SQ_WAVES))
           unit: Instructions per Wavefront
         Wave Cycles:
-          avg: AVG(((4 * SQ_WAVE_CYCLES) / $denom))
+          avg: SUM(4 * SQ_WAVE_CYCLES) / SUM($denom)
           min: MIN(((4 * SQ_WAVE_CYCLES) / $denom))
           max: MAX(((4 * SQ_WAVE_CYCLES) / $denom))
           unit: (Cycles + $normUnit)
         Dependency Wait Cycles:
-          avg: AVG(((4 * SQ_WAIT_ANY) / $denom))
+          avg: SUM(4 * SQ_WAIT_ANY) / SUM($denom)
           min: MIN(((4 * SQ_WAIT_ANY) / $denom))
           max: MAX(((4 * SQ_WAIT_ANY) / $denom))
           unit: (Cycles + $normUnit)
         Issue Wait Cycles:
-          avg: AVG(((4 * SQ_WAIT_INST_ANY) / $denom))
+          avg: SUM(4 * SQ_WAIT_INST_ANY) / SUM($denom)
           min: MIN(((4 * SQ_WAIT_INST_ANY) / $denom))
           max: MAX(((4 * SQ_WAIT_INST_ANY) / $denom))
           unit: (Cycles + $normUnit)
         Active Cycles:
-          avg: AVG(((4 * SQ_ACTIVE_INST_ANY) / $denom))
+          avg: SUM(4 * SQ_ACTIVE_INST_ANY) / SUM($denom)
           min: MIN(((4 * SQ_ACTIVE_INST_ANY) / $denom))
           max: MAX(((4 * SQ_ACTIVE_INST_ANY) / $denom))
           unit: (Cycles + $normUnit)
         Wavefront Occupancy:
-          avg: AVG((SQ_ACCUM_PREV_HIRES / $GRBM_GUI_ACTIVE_PER_XCD))
+          avg: SUM(SQ_ACCUM_PREV_HIRES) / SUM($GRBM_GUI_ACTIVE_PER_XCD)
           min: MIN((SQ_ACCUM_PREV_HIRES / $GRBM_GUI_ACTIVE_PER_XCD))
           max: MAX((SQ_ACCUM_PREV_HIRES / $GRBM_GUI_ACTIVE_PER_XCD))
           unit: Wavefronts

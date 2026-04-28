@@ -144,7 +144,7 @@
 *| 5.0     | Update network protocol to allow specifying status flags at registration time, and add system message.   |
 *|         | to indicate when a driver has been halted. Additionally, this changes the format of the client           |
 *|         | registration packets so as to better detect version mismatch. It also fixes the ClientManangement typo.  |
-*| 4.0     | Refactor interface so as to better delineate between system protcols/client protocols, as well as add    |
+*| 4.0     | Refactor interface so as to better delineate between system protocols/client protocols, as well as add   |
 *|         | ability to query protocol availability. Requires version bump, so also formally deprecated               |
 *|         | Result::Timeout and ClientStatusFlags::ProfilingEnabled, as well as moved entire SessionProtocol         |
 *|         | namespace out of the public headers.                                                                     |

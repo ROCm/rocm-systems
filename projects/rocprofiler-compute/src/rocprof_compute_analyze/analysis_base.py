@@ -23,6 +23,7 @@ from utils.logger import (
     console_warning,
     demarcate,
 )
+from utils.metrics.expression import build_metric_value_string
 from utils.utils_analysis import (
     impute_counters_iteration_multiplex,
     is_workload_empty,
@@ -97,15 +98,23 @@ def detect_missing_counters(
             kernels_with_missing_counters.append(kernel_name)
 
     if kernels_with_missing_counters:
-        kernels_with_missing_counters = list(set(kernels_with_missing_counters))
+        unique_kernels = list(set(kernels_with_missing_counters))
+        kernel_list = "\n\n".join(
+            f"  Kernel {i}: {name}" for i, name in enumerate(unique_kernels, start=1)
+        )
         console_warning(
             "join_prof",
             (
-                f"Insufficient number of kernel calls for kernels: "
-                f"{', '.join(kernels_with_missing_counters)} "
+                f"Insufficient number of kernel calls for kernels:\n\n"
+                f"{kernel_list}\n\n"
                 f"to collect all counters using iteration multiplexing. "
-                f"Please use kernel filtering and exclude the above kernels "
-                f"or turn off iteration multiplexing."
+                f"These kernels do not have enough dispatches to fill all "
+                f"{num_files} counter sets. Use kernel filtering (-k) to "
+                f"profile only the kernels of interest, e.g.: "
+                f"rocprof-compute profile -k <your_kernel> "
+                f"--iteration-multiplexing -- <app>. "
+                f"Alternatively, remove --iteration-multiplexing to use "
+                f"application replay instead."
             ),
         )
 
@@ -194,7 +203,7 @@ class OmniAnalyze_Base:
         target_filter = normalization_filter or args.normal_unit
 
         for arch_config in self._arch_configs.values():
-            parser.build_metric_value_string(
+            build_metric_value_string(
                 arch_config.dfs,
                 arch_config.dfs_type,
                 target_filter,
