@@ -11,7 +11,7 @@ Analyzing PC sampling data on CDNA3 and CDNA4 GPU architectures
 Program Counter (PC) sampling periodically samples waves running on a compute unit (CU) and reports whether the sampled wave issued an instruction in the sampled cycle. If the wave couldn't proceed to issue an instruction, a stall reason is recorded.
 In addition to the wave's state, PC sampling captures the state of the sampled SIMD's arbiter (also referred to as the `scheduler <https://rocm.docs.amd.com/projects/rocprofiler-compute/en/latest/conceptual/pipeline-descriptions.html#scheduler>`_). The term arbiter is used in accordance with the PC sampling data fields. The arbiter state indicates whether any wavefront on the SIMD was issued to a given pipeline during the given cycle, and if so, whether that instruction began execution.
 
-PC sampling on the CDNA3 (AMD Instinct™ MI300 Series) and CDNA4 (AMD Instinct MI350 Series) architectures primarily focuses on the frontend of shader execution, examining which waves are running and what prevents them from issuing instructions. It provides a limited view of the backend (execution pipelines), examining whether they are stalled and back-pressuring the front-end, but not the underlying cause of the stall. For the list of pipelines available on the CDNA3 and CDNA4 architecture, see :ref:`execution-pipelines`.
+PC sampling on the CDNA3 (AMD Instinct™ MI300 Series) and CDNA4 (AMD Instinct MI350 Series) architectures primarily focuses on the frontend of shader execution, examining which waves are running and what prevents them from issuing instructions. It provides a limited view of the backend (execution pipelines), examining whether they are stalled and backpressuring the frontend, but not the underlying cause of the stall. For the list of pipelines available on the CDNA3 and CDNA4 architecture, see :ref:`execution-pipelines`.
 
 Stall reasons
 ==============
@@ -39,7 +39,7 @@ The following table lists the stall reasons:
     - The sampled wave is issuing an internal instruction, such as a ``NOP``.
 
   * - BARRIER_WAIT
-    - The sampled wave is waiting at a barrier for the other waves in the workgroup to reach there.
+    - The sampled wave is waiting at a barrier for the other waves in the workgroup to reach that barrier.
 
   * - ARBITER_NOT_WIN
     - The sampled wave isn't selected to issue instructions. This typically occurs when multiple waves compete to issue instructions of the same type (served by the same execution pipeline) simultaneously. Only one wave wins the arbitration. For more information about wave arbitration, see `Scheduler documentation <https://rocm.docs.amd.com/projects/rocprofiler-compute/en/latest/conceptual/pipeline-descriptions.html#scheduler>`_.
@@ -188,4 +188,4 @@ Pipeline backpressuring can occur due to the following conditions:
 
 - **Oversubscription:** When a pipeline is oversubscribed, it might start backpressuring waves. Some pipes can accept only a limited number of outstanding instructions at a time. When that limit is exceeded, the pipe stops accepting new instructions and backpressures waves trying to issue instructions.
 
-- **long-latency instructions:** Backpressuring can also occur without pipeline oversubscription. For example, waves issuing instructions targeting different pipelines tend to cause no contention. However, some instructions, such as MFMA operations and vector transcendentals, are long-latency and require multiple quad-cycles to execute. If a wave attempts to issue long-latency instructions back-to-back, the pipe might backpressure it.
+- **long-latency instructions:** Backpressuring can also occur without pipeline oversubscription. For example, waves issuing instructions targeting different pipelines don't tend to cause contention. However, some instructions, such as MFMA operations and vector transcendentals, are long latency and require multiple quad-cycles to execute. If a wave attempts to issue long-latency instructions back-to-back, the pipe might backpressure it.
