@@ -3,7 +3,6 @@
 
 #include <stdint.h>
 #include <stddef.h>
-#include "rocm_trace_tid.h"
 
 /* Packet-type values matching the schema in rocm_hsa_tp.h */
 enum {
@@ -64,6 +63,11 @@ static inline uint8_t rocm_trace_sniff_packet_type(
 
 #if defined(HSA_ENABLE_LTTNG_UST) && HSA_ENABLE_LTTNG_UST
 
+/* rocm_trace_tid.h transitively includes <rocprofiler-register/correlation.h>
+ * which is only on the include path when LTTng is enabled. The no-op stubs
+ * in the #else branch don't use anything from rocm_trace_tid.h, so this
+ * include lives inside the LTTng guard. */
+#include "rocm_trace_tid.h"
 #include <atomic>
 #include "rocm_hsa_tp.h"
 

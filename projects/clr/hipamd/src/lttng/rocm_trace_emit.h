@@ -17,10 +17,14 @@
 #define ROCM_HIP_TRACE_EMIT_H_
 
 #include <stdint.h>
-#include "rocm_trace_tid.h"
 
 #if defined(HIP_ENABLE_LTTNG_UST) && HIP_ENABLE_LTTNG_UST
 
+/* rocm_trace_tid.h transitively includes <rocprofiler-register/correlation.h>
+ * which is only on the include path when LTTng is enabled. The no-op stubs
+ * in the #else branch don't use anything from rocm_trace_tid.h, so this
+ * include lives inside the LTTng guard. */
+#include "rocm_trace_tid.h"
 #include <atomic>
 #include "rocm_hip_tp.h"
 
