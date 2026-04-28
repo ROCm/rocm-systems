@@ -133,8 +133,19 @@ process_agent_counters(rocprofiler_agent_id_t    agent_id,
                 auto _dim_ids  = std::vector<rocprofiler_counter_dimension_id_t>{};
                 auto _dim_info = std::vector<rocprofiler_counter_record_dimension_info_t>{};
 
-                ROCPROFILER_CHECK(rocprofiler_query_counter_info(
-                    counters[i], ROCPROFILER_COUNTER_INFO_VERSION_1, &_info));
+                auto _status = rocprofiler_query_counter_info(
+                    counters[i], ROCPROFILER_COUNTER_INFO_VERSION_1, &_info);
+                if(_status != ROCPROFILER_STATUS_SUCCESS)
+                {
+                    ROCP_ERROR << fmt::format(
+                        "[{}] rocprofiler_query_counter_info( counters[{}], "
+                        "ROCPROFILER_COUNTER_INFO_VERSION_1, &_info) returned {} :: {}",
+                        __FUNCTION__,
+                        i,
+                        rocprofiler_get_status_name(_status),
+                        rocprofiler_get_status_string(_status));
+                    std::exit(EXIT_FAILURE);
+                }
 
                 if(counters_set_data != nullptr && counters_set_data->count(_info.name) == 0)
                     continue;
@@ -193,20 +204,28 @@ metadata::metadata(inprocess)
 , node_data{read_node_info()}
 , command_line{common::read_command_line(getpid())}
 {
-    ROCPROFILER_CHECK(rocprofiler_query_available_agents(
+    auto _status = rocprofiler_query_available_agents(
         ROCPROFILER_AGENT_INFO_VERSION_0,
         [](rocprofiler_agent_version_t, const void** _agents, size_t _num_agents, void* _data) {
             auto* _agents_v = static_cast<agent_info_vec_t*>(_data);
             _agents_v->reserve(_num_agents);
             for(size_t i = 0; i < _num_agents; ++i)
             {
-                auto* agent = static_cast<const rocprofiler_agent_v0_t*>(_agents[i]);
+                const auto* agent = static_cast<const rocprofiler_agent_v0_t*>(_agents[i]);
                 _agents_v->emplace_back(*agent);
             }
             return ROCPROFILER_STATUS_SUCCESS;
         },
         sizeof(rocprofiler_agent_v0_t),
-        &agents));
+        &agents);
+    if(_status != ROCPROFILER_STATUS_SUCCESS)
+    {
+        ROCP_ERROR << fmt::format("[{}] rocprofiler_query_available_agents(...) returned {} :: {}",
+                                  __FUNCTION__,
+                                  rocprofiler_get_status_name(_status),
+                                  rocprofiler_get_status_string(_status));
+        std::exit(EXIT_FAILURE);
+    }
 
     {
         auto _gpu_agents = std::vector<agent_info*>{};
@@ -313,10 +332,13 @@ metadata::init(inprocess_with_counters&& data)
             name_v           = pmc_counter.substr(0, pos);
             auto device_id_s = pmc_counter.substr(pos + device_qualifier.length());
 
-            ROCP_FATAL_IF(device_id_s.empty() ||
-                          device_id_s.find_first_not_of("0123456789") != std::string::npos)
-                << fmt::format("Invalid device qualifier format (expected ':device=N') in '{}'",
-                               pmc_counter);
+            if(device_id_s.empty() ||
+               device_id_s.find_first_not_of("0123456789") != std::string::npos)
+            {
+                ROCP_ERROR << fmt::format(
+                    "Invalid device qualifier format (expected ':device=N') in '{}'", pmc_counter);
+                std::exit(EXIT_FAILURE);
+            }
 
             auto device_id_l = std::stol(device_id_s);
             if(gpu_index_to_counters_map.find(device_id_l) == gpu_index_to_counters_map.end())
@@ -432,7 +454,17 @@ const tool_counter_info*
 metadata::get_counter_info(uint64_t instance_id) const
 {
     auto _counter_id = rocprofiler_counter_id_t{.handle = 0};
-    ROCPROFILER_CHECK(rocprofiler_query_record_counter_id(instance_id, &_counter_id));
+    auto _status     = rocprofiler_query_record_counter_id(instance_id, &_counter_id);
+    if(_status != ROCPROFILER_STATUS_SUCCESS)
+    {
+        ROCP_ERROR << fmt::format(
+            "[{}] rocprofiler_query_record_counter_id({}, &_counter_id) returned {} :: {}",
+            __FUNCTION__,
+            instance_id,
+            rocprofiler_get_status_name(_status),
+            rocprofiler_get_status_string(_status));
+        std::exit(EXIT_FAILURE);
+    }
     return get_counter_info(_counter_id);
 }
 
@@ -784,8 +816,11 @@ agent_index
 metadata::get_agent_index(rocprofiler_agent_id_t id, agent_indexing index) const
 {
     const auto* _agent = get_agent(id);
-    ROCP_FATAL_IF(!_agent) << "Information of the agent with handle: " << id.handle
-                           << " is not present";
+    if(!_agent)
+    {
+        ROCP_ERROR << "Information of the agent with handle: " << id.handle << " is not present";
+        std::exit(EXIT_FAILURE);
+    }
 
     // stringify agent type
     auto get_type = [_agent]() -> std::string_view {
