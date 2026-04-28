@@ -426,14 +426,33 @@ hsa_status_t KfdDriver::UpdateQueue(HSA_QUEUEID queue_id, uint32_t queue_pct,
 hsa_status_t KfdDriver::SetQueueProfilingBuffer(HSA_QUEUEID queue_id, void* buffer_base,
                                                 uint32_t num_records,
                                                 volatile uint32_t* wptr_host_addr) const {
-  if (core::Runtime::runtime_singleton_->thunkLoader()->pfn_hsaKmtSetQueueProfilingBuffer ==
-      nullptr)
-    return static_cast<hsa_status_t>(HSA_STATUS_ERROR_NOT_SUPPORTED);
-  if (core::Runtime::runtime_singleton_->thunkLoader()
-          ->pfn_hsaKmtSetQueueProfilingBuffer(queue_id, buffer_base, num_records, wptr_host_addr) !=
-      HSAKMT_STATUS_SUCCESS)
-    return static_cast<hsa_status_t>(HSA_STATUS_ERROR_NOT_SUPPORTED);
-  return HSA_STATUS_SUCCESS;
+  // C9: distinguish missing-symbol (the substrate genuinely lacks the
+  // entrypoint - permanent, agent should be marked unsupported) from a
+  // concrete thunk failure (transient / per-call). Conflating both into
+  // NOT_SUPPORTED interacts badly with the C5 caching logic in
+  // AqlQueue::SetProfiling, which uses NOT_SUPPORTED to permanently
+  // disable profiling on the agent.
+  auto* loader = core::Runtime::runtime_singleton_->thunkLoader();
+  if (loader->pfn_hsaKmtSetQueueProfilingBuffer == nullptr)
+    return HSA_STATUS_ERROR_NOT_SUPPORTED;
+
+  HSAKMT_STATUS st = loader->pfn_hsaKmtSetQueueProfilingBuffer(
+      queue_id, buffer_base, num_records, wptr_host_addr);
+  switch (st) {
+    case HSAKMT_STATUS_SUCCESS:
+      return HSA_STATUS_SUCCESS;
+    case HSAKMT_STATUS_INVALID_PARAMETER:
+      return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+    case HSAKMT_STATUS_NOT_SUPPORTED:
+      // The substrate exports the symbol but the kernel/asic refused -
+      // treat as permanently unsupported on this agent.
+      return HSA_STATUS_ERROR_NOT_SUPPORTED;
+    default:
+      // Generic / transient thunk failure (e.g. HSAKMT_STATUS_ERROR,
+      // HSAKMT_STATUS_NO_MEMORY). Do NOT return NOT_SUPPORTED here -
+      // that would permanently disable the agent in the C5 cache path.
+      return HSA_STATUS_ERROR;
+  }
 }
 
 hsa_status_t KfdDriver::SetQueueCUMask(HSA_QUEUEID queue_id, uint32_t cu_mask_count,
