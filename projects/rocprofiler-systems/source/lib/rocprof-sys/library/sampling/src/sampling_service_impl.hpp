@@ -233,14 +233,10 @@ sampling_service<Policies>::setup(int64_t tid)
     }
     if(sigs.empty()) return {};
 
-    LOG_DEBUG("Configuring sampler for thread {}", tid);
+    // L02 — matches legacy: "Requesting allocator for sampler on thread {}"
+    LOG_DEBUG("Requesting allocator for sampler on thread {}", tid);
 
-    // Log the "will be triggered" message for each signal (SI-7).
-    for(auto sig : sigs)
-    {
-        LOG_INFO("[SIG{}] Sampler for thread {} will be triggered by signal {}", sig, tid,
-                 sig);
-    }
+    LOG_DEBUG("Configuring sampler for thread {}", tid);
 
     // Create per-thread state, record signal set, mark running (C-2).
     registry_.emplace(tid);
@@ -325,11 +321,17 @@ template <class Policies>
 void
 sampling_service<Policies>::post_process()
 {
+    // L30 — matches legacy: "Stopping sampling components..."
+    LOG_DEBUG("Stopping sampling components...");
+
     sample_parser   parser;
     symbol_resolver resolver;
 
     // Track any exception to re-throw after cleanup.
     std::exception_ptr pending_exc;
+
+    size_t total_samples = 0;
+    size_t total_threads = 0;
 
     // Per-thread fan-out: drain offload → parse → report_writer + perfetto_sink +
     // trace_sink. DEC-9: offload.read() must precede report_writer.write*(). DEC-9:
@@ -342,10 +344,24 @@ sampling_service<Policies>::post_process()
     {
         if(pending_exc) break;  // skip remaining tids after first failure
 
+        // L24 — matches legacy: "Getting sampler data for thread {}..."
+        LOG_DEBUG("Getting sampler data for thread {}...", tid);
+
         auto records = offload_.read(tid);
+        // L25 — matches legacy: "Sampler data for thread {} has {} initial entries..."
+        LOG_DEBUG("Sampler data for thread {} has {} initial entries...", tid,
+                  records.size());
         LOG_DEBUG("[post_process] tid={} offload returned {} records", tid,
                   records.size());
-        if(records.empty()) continue;
+        if(records.empty())
+        {
+            // L22 — matches legacy: "...skipped (no sampler)" — here means no offload
+            // data
+            LOG_DEBUG(
+                "Post-processing sampling entries for thread {} skipped (no sampler)",
+                tid);
+            continue;
+        }
 
         // Split TIMER vs OVERFLOW records.
         // First TIMER record is the init/base record (provides beg_ns for sample1).
@@ -361,6 +377,21 @@ sampling_service<Policies>::post_process()
                 overflow_raw.push_back(r);
         }
 
+        size_t valid_count = timer_raw.size() + overflow_raw.size();
+        if(valid_count == 0)
+        {
+            // L27 — matches legacy: "...zero valid entries out of {}... (skipped)"
+            LOG_DEBUG("Sampler data for thread {} has zero valid entries out of "
+                      "{}... (skipped)",
+                      tid, records.size());
+        }
+        else
+        {
+            // L26 — matches legacy: "Sampler data for thread {} has {} valid entries..."
+            LOG_DEBUG("Sampler data for thread {} has {} valid entries...", tid,
+                      valid_count);
+        }
+
         try
         {
             if(timer_raw.size() >= 2)
@@ -372,10 +403,15 @@ sampling_service<Policies>::post_process()
                     parser.parse_timer(tid, init_rec, tail, pause_registry_);
                 if(!timer_samples.empty())
                 {
+                    total_samples += timer_samples.size();
                     // R-A1: resolve raw PCs to symbol names post-signal.
                     for(auto& s : timer_samples)
                         for(auto& f : s.stack)
                             if(f.name.empty()) f.name = resolver.resolve(f.address);
+                    // L43 — matches legacy: "[{}] Post-processing data for native
+                    // report..." (was "timemory" in legacy — changed per requirements
+                    // note)
+                    LOG_DEBUG("[{}] Post-processing data for native report...", tid);
                     report_writer_.write_timer_samples(tid, timer_samples);
                     perfetto_sink_.emit_timer(tid, nullptr, timer_samples);
                     trace_sink_.store_timer(tid, timer_samples);
@@ -388,19 +424,35 @@ sampling_service<Policies>::post_process()
                     parser.parse_overflow(tid, overflow_raw, pause_registry_);
                 if(!overflow_samples.empty())
                 {
+                    total_samples += overflow_samples.size();
                     for(auto& s : overflow_samples)
                         for(auto& f : s.stack)
                             if(f.name.empty()) f.name = resolver.resolve(f.address);
+                    // L43 — matches legacy for overflow path
+                    LOG_DEBUG("[{}] Post-processing data for native report...", tid);
                     report_writer_.write_overflow_samples(tid, overflow_samples);
                     perfetto_sink_.emit_overflow(tid, nullptr, overflow_samples);
                     trace_sink_.store_overflow(tid, overflow_samples);
                 }
             }
+
+            if(valid_count > 0) ++total_threads;
         } catch(...)
         {
             pending_exc = std::current_exception();
         }
     }
+
+    // L28 — matches legacy: "Destroying samplers and allocators..."
+    LOG_DEBUG("Destroying samplers and allocators...");
+
+    // L29 — matches legacy: "Collected {} samples from {} threads... {} samples out of
+    // {} were taken while within instrumented routines"
+    // Note: the new impl does not track internal vs external samples; both counts are
+    // equal here (all samples are external in the new model — no instrumentation guard).
+    LOG_DEBUG("Collected {} samples from {} threads... {} samples out of {} "
+              "were taken while within instrumented routines",
+              total_samples, total_threads, total_samples, total_samples);
 
     // Final teardown: open output files (production), flush writer, reset offload.
     // DEC-9 ordering: open → flush → reset.

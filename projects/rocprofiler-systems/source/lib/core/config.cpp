@@ -1393,23 +1393,33 @@ get_sampling_signals(int64_t tid)
 
         // Per-TID filter (AC-4): when the respective TID set is non-empty,
         // only include the signal for TIDs that are in the allowed set.
+        // L04 fires when a signal is excluded for this thread (matches legacy behavior).
         if(get_use_sampling_cputime())
         {
             auto cpu_tids = get_sampling_cputime_tids();
             if(cpu_tids.empty() || cpu_tids.count(tid) > 0)
                 _v.emplace(get_sampling_cputime_signal());
+            else
+                LOG_DEBUG("Disabling SIG{} from thread {}", get_sampling_cputime_signal(),
+                          tid);
         }
         if(get_use_sampling_realtime())
         {
             auto rt_tids = get_sampling_realtime_tids();
             if(rt_tids.empty() || rt_tids.count(tid) > 0)
                 _v.emplace(get_sampling_realtime_signal());
+            else
+                LOG_DEBUG("Disabling SIG{} from thread {}",
+                          get_sampling_realtime_signal(), tid);
         }
         if(get_use_sampling_overflow())
         {
             auto ovfl_tids = get_sampling_overflow_tids();
             if(ovfl_tids.empty() || ovfl_tids.count(tid) > 0)
                 _v.emplace(get_sampling_overflow_signal());
+            else
+                LOG_DEBUG("Disabling SIG{} from thread {}",
+                          get_sampling_overflow_signal(), tid);
         }
     }
 

@@ -82,24 +82,35 @@ sampling_service<default_sampling_policies>::setup_production_wiring(
     // AC-1: arm realtime timer if subscribed (independent of cputime — DEC-3).
     if(sigs.count(rt_sig) > 0)
     {
+        double rt_freq = rocprofsys::get_sampling_realtime_freq();
         rt_slot.emplace();
-        rt_slot->configure(tid, sys_tid, rt_sig, CLOCK_REALTIME,
-                           rocprofsys::get_sampling_realtime_freq(),
+        rt_slot->configure(tid, sys_tid, rt_sig, CLOCK_REALTIME, rt_freq,
                            rocprofsys::get_sampling_realtime_delay());
         rt_slot->start();
         LOG_DEBUG("thread {} realtime timer armed={} (sig={})", tid, rt_slot->is_armed(),
                   rt_sig);
+        // L06 — matches legacy: "[SIG{}] Sampler for thread {} will be triggered {:.1f}x
+        // per second of {}-time (every {:.3e} milliseconds)..."
+        double rt_period_ms = (rt_freq > 0.0) ? (1000.0 / rt_freq) : 0.0;
+        LOG_INFO("[SIG{}] Sampler for thread {} will be triggered {:.1f}x per "
+                 "second of {}-time (every {:.3e} milliseconds)...",
+                 rt_sig, tid, rt_freq, "wall", rt_period_ms);
     }
     // AC-2: arm cputime timer if subscribed (independent of realtime — DEC-3).
     if(sigs.count(cpu_sig) > 0)
     {
+        double cpu_freq = rocprofsys::get_sampling_cputime_freq();
         cpu_slot.emplace();
-        cpu_slot->configure(tid, sys_tid, cpu_sig, CLOCK_THREAD_CPUTIME_ID,
-                            rocprofsys::get_sampling_cputime_freq(),
+        cpu_slot->configure(tid, sys_tid, cpu_sig, CLOCK_THREAD_CPUTIME_ID, cpu_freq,
                             rocprofsys::get_sampling_cputime_delay());
         cpu_slot->start();
         LOG_DEBUG("thread {} cputime timer armed={} (sig={} sys_tid={})", tid,
                   cpu_slot->is_armed(), cpu_sig, sys_tid);
+        // L06 — matches legacy: same pattern for CPU-time
+        double cpu_period_ms = (cpu_freq > 0.0) ? (1000.0 / cpu_freq) : 0.0;
+        LOG_INFO("[SIG{}] Sampler for thread {} will be triggered {:.1f}x per "
+                 "second of {}-time (every {:.3e} milliseconds)...",
+                 cpu_sig, tid, cpu_freq, "CPU", cpu_period_ms);
     }
 
     if(sigs.count(ovfl_sig) > 0)
@@ -108,8 +119,8 @@ sampling_service<default_sampling_policies>::setup_production_wiring(
         auto            event_name_opt = rocprofsys::get_setting_value<std::string>(
             "ROCPROFSYS_SAMPLING_OVERFLOW_EVENT");
         std::string event_name = event_name_opt.value_or("PERF_COUNT_SW_CPU_CLOCK");
-        rocprofsys::perf::config_overflow_sampling(
-            pe_attr, event_name, rocprofsys::get_sampling_overflow_freq());
+        double      ovfl_freq  = rocprofsys::get_sampling_overflow_freq();
+        rocprofsys::perf::config_overflow_sampling(pe_attr, event_name, ovfl_freq);
         pe_attr.sample_type   = PERF_SAMPLE_IP | PERF_SAMPLE_CALLCHAIN;
         pe_attr.wakeup_events = 1;
 
@@ -118,6 +129,11 @@ sampling_service<default_sampling_policies>::setup_production_wiring(
         ovfl_slot->start();
         LOG_DEBUG("thread {} overflow armed={} (sig={})", tid, ovfl_slot->is_open(),
                   ovfl_sig);
+        // L05 — matches legacy: "[SIG{}] Sampler for thread {} will be triggered every
+        // {:.1f} {} events..."
+        LOG_INFO("[SIG{}] Sampler for thread {} will be triggered every {:.1f} "
+                 "{} events...",
+                 ovfl_sig, tid, ovfl_freq, event_name);
     }
 
     // Start the duration controller once on the main thread (tid==0).

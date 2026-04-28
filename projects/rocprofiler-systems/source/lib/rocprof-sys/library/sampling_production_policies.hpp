@@ -128,8 +128,6 @@ private:
 
         if(records.empty()) return;
 
-        LOG_DEBUG("Offloading {} records for thread {}", records.size(), tid);
-
         std::lock_guard<std::mutex> lk{ m_mutex };
 
         if(!m_stream.is_open())
@@ -137,7 +135,9 @@ private:
             auto tmp = config::get_tmp_file("sampling");
             if(!tmp)
             {
-                LOG_CRITICAL("[tmpfile_offload_store] no tmp file for sampling offload");
+                // L12 — matches legacy exactly
+                LOG_CRITICAL("sampling allocator tries to offload buffer of samples but "
+                             "rocprof-sys was configured to not use temporary files");
                 return;
             }
             m_path = tmp->filename;
@@ -148,10 +148,27 @@ private:
                                       std::ios::app);
             if(!m_stream.is_open())
             {
-                LOG_CRITICAL("[tmpfile_offload_store] cannot open {}", m_path);
+                // L10 — matches legacy: "Error opening sampling offload temporary file
+                // '{}'"
+                LOG_CRITICAL("Error opening sampling offload temporary file '{}'",
+                             m_path);
                 return;
             }
         }
+
+        if(!m_stream.good())
+        {
+            // L14 — matches legacy: "temporary file for offloading buffer is in an
+            // invalid state during offload for thread {}"
+            LOG_CRITICAL("temporary file for offloading buffer is in an invalid state "
+                         "during offload for thread {}",
+                         tid);
+            return;
+        }
+
+        // L11 — matches legacy: "Offloading {} samples for thread {} to {}"
+        LOG_DEBUG("Offloading {} samples for thread {} to {}", records.size(), tid,
+                  m_path);
 
         m_stream.seekp(0, std::ios::end);
         auto offset = m_stream.tellp();
@@ -173,14 +190,45 @@ public:
         std::lock_guard<std::mutex>   lk{ m_mutex };
         std::vector<backtrace_record> result;
 
-        auto it = m_offsets.find(tid);
-        if(it == m_offsets.end() || !m_stream.is_open()) return result;
+        if(!m_stream.is_open() && m_path.empty())
+        {
+            // L15 — matches legacy: no tmp file was ever opened (disabled path)
+            LOG_WARNING("[sampling] returning no data because using temporary files is "
+                        "disabled");
+            return result;
+        }
 
+        if(!m_stream.is_open() && !m_path.empty())
+        {
+            // L16 — matches legacy: file was used but stream is no longer open
+            LOG_WARNING(
+                "[sampling] returning no data because the offload file no longer exists");
+            return result;
+        }
+
+        auto it = m_offsets.find(tid);
+        if(it == m_offsets.end()) return result;
+
+        // L13 — matches legacy: offload entry exists but file has been closed/removed
+        if(!m_stream.good())
+        {
+            LOG_CRITICAL("sampling allocator tried to offload buffer of samples for "
+                         "thread {} but the offload file does not exist",
+                         tid);
+            return result;
+        }
+
+        size_t loaded_count = 0;
         for(auto file_offset : it->second)
         {
             m_stream.clear();
             m_stream.seekg(file_offset);
-            if(!m_stream.good()) continue;
+            if(!m_stream.good())
+            {
+                // L17 — matches legacy: "[sampling] {} failed to open" (seek failed)
+                LOG_WARNING("[sampling] {} failed to open", m_path);
+                continue;
+            }
 
             int64_t  stored_tid = 0;
             uint64_t n          = 0;
@@ -188,12 +236,29 @@ public:
             m_stream.read(reinterpret_cast<char*>(&n), sizeof(n));
             if(!m_stream.good() || n == 0) continue;
 
+            if(stored_tid != tid)
+            {
+                // L18 — matches legacy: "[sampling] file position {} returned {} instead
+                // of (expected) {}"
+                LOG_WARNING("[sampling] file position {} returned {} instead of "
+                            "(expected) {}",
+                            static_cast<uintptr_t>(file_offset), stored_tid, tid);
+                continue;
+            }
+
             size_t base = result.size();
             result.resize(base + n);
             m_stream.read(reinterpret_cast<char*>(result.data() + base),
                           static_cast<std::streamsize>(n * sizeof(backtrace_record)));
-            if(!m_stream.good()) result.resize(base);  // drop partial read
+            if(!m_stream.good())
+                result.resize(base);  // drop partial read
+            else
+                loaded_count += n;
         }
+
+        // L19 — matches legacy: "[sampling] Loaded {} samples for thread {}"
+        LOG_DEBUG("[sampling] Loaded {} samples for thread {}", loaded_count, tid);
+
         return result;
     }
 
@@ -237,6 +302,10 @@ class real_trace_cache_sink
 public:
     void store_timer(int64_t tid, std::vector<timer_sample> const& samples)
     {
+        // L44 — matches legacy: "[{}] Post-processing metrics for rocpd..."
+        LOG_DEBUG("[{}] Post-processing metrics for rocpd...", tid);
+        // L01 — matches legacy: "[{}] Storing sampling data to trace cache..."
+        LOG_DEBUG("[{}] Storing sampling data to trace cache...", tid);
         LOG_DEBUG("[real_trace_cache_sink] store_timer: tid={} samples={}", tid,
                   samples.size());
         if(samples.empty()) return;
@@ -279,6 +348,8 @@ public:
 
     void store_overflow(int64_t tid, std::vector<overflow_sample> const& samples)
     {
+        // L01 — matches legacy: "[{}] Storing sampling data to trace cache..."
+        LOG_DEBUG("[{}] Storing sampling data to trace cache...", tid);
         LOG_DEBUG("[real_trace_cache_sink] store_overflow: tid={} samples={}", tid,
                   samples.size());
         if(samples.empty()) return;
@@ -360,6 +431,11 @@ public:
         if(!config::get_use_perfetto()) return;
         if(samples.empty()) return;
 
+        // L41 — matches legacy: "[{}] Post-processing metrics for perfetto..."
+        LOG_DEBUG("[{}] Post-processing metrics for perfetto...", tid);
+        // L42 — matches legacy: "[{}] Post-processing backtraces for perfetto..."
+        LOG_DEBUG("[{}] Post-processing backtraces for perfetto...", tid);
+
         const auto& thread_inf = thread_info::get(tid, SequentTID);
         if(!thread_inf) return;
 
@@ -419,6 +495,11 @@ public:
     {
         if(!config::get_use_perfetto()) return;
         if(samples.empty()) return;
+
+        // L41 — matches legacy: "[{}] Post-processing metrics for perfetto..."
+        LOG_DEBUG("[{}] Post-processing metrics for perfetto...", tid);
+        // L42 — matches legacy: "[{}] Post-processing backtraces for perfetto..."
+        LOG_DEBUG("[{}] Post-processing backtraces for perfetto...", tid);
 
         const auto& thread_inf = thread_info::get(tid, SequentTID);
         if(!thread_inf) return;
