@@ -413,6 +413,27 @@ bool drain_one_queue(queue_drain_state& qs, bool force_emit) {
 
   bool any = false;
   while (pass_consumed < pass_budget) {
+    // Cheap kill-switch pre-check (review C4): tested at the very top of
+    // the per-record body, BEFORE any slot mutation. translate_gpu_ts
+    // performs a linear interpolation under the agent's clock-cache
+    // lock, so doing it 1× per record × kRingSlots in the disable-race
+    // window is wasted work the emit helper would discard anyway. The
+    // helper's own kill-switch check still runs (defense in depth).
+    //
+    // Position rationale: this check MUST sit before the record_type
+    // load + slot memset (below) so that bailing here leaves the slot
+    // intact and `qs.next_idx` still pointing at it. If we zeroed the
+    // slot first and then bailed, the slot would be permanently
+    // destroyed (FW had already written it, and the wptr cursor stays
+    // put), and on the next drain pass the sentinel scan would observe
+    // rt == 0 at next_idx and stop — stranding any later FW-written
+    // records until the ring wraps and FW rewrites the broken slot.
+    // Today no runtime API toggles the kill switch (it is set-once at
+    // construction in lttng/rocm_trace_init.cpp), so the wedge is not
+    // currently reachable, but ordering this check before slot mutation
+    // removes the latent footgun for any future runtime-toggle path.
+    if (!force_emit && rocm_trace_disabled()) break;
+
     const uint64_t slot = qs.next_idx & qs.ring_mask;
     auto* rec = reinterpret_cast<mec_dispatch_record_16*>(
         static_cast<char*>(qs.ring_base) + slot * kSlotStride);
@@ -467,7 +488,8 @@ bool drain_one_queue(queue_drain_state& qs, bool force_emit) {
     //
     // record_type narrowing uint32 -> uint8: current FW values are
     // 1 and 2 and the on-the-wire schema field is uint8_t. The
-    // sentinel-zero check above (rt == 0 at line ~439) already filters
+    // sentinel-zero check above (rt == 0 immediately after the acquire load)
+    // already filters
     // empty slots before this point, so rt is known non-zero at the
     // cast site — the truncation hazard is NOT sentinel collision
     // (no on-the-wire 0 can be produced here). The only hazard is two
@@ -476,14 +498,6 @@ bool drain_one_queue(queue_drain_state& qs, bool force_emit) {
     // widen the schema (and the cast) when (and only when) such a FW
     // revision exists.
     //
-    // Cheap pre-check: if neither force_emit nor a non-disabled state
-    // applies the emit will be discarded inside the helper, so skip
-    // the (lock-acquiring) translate_gpu_ts call. translate_gpu_ts
-    // performs a linear interpolation under the agent's clock-cache
-    // lock; doing it 1× per record × kRingSlots in the disable-race
-    // window is wasted work the helper would discard anyway. The
-    // helper's own kill-switch check still runs (defense in depth).
-    if (!force_emit && rocm_trace_disabled()) break;
     // Use the captured queue-independent translation callable — Queue
     // may be destroyed mid-pass even though the shared_ptr keeps qs
     // alive.
