@@ -97,7 +97,7 @@ struct ncclDevRedOpFull {
 };
 
 #ifdef __HIP_DEVICE_COMPILE__
-#include "rccl_ptr.h"
+#include "device/rccl_ptr.h"
 #endif
 
 union ncclLLFifoLine {
@@ -125,7 +125,7 @@ union ncclLLFifoLine {
   #define WARP_SIZE 32
   #endif
   #if defined (__gfx950__)
-  #define NCCL_MAX_NTHREADS 256
+  #define NCCL_MAX_NTHREADS 512
   #else
   #define NCCL_MAX_NTHREADS 256
   #endif

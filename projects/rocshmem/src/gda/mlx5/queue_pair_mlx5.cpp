@@ -22,12 +22,10 @@
  * IN THE SOFTWARE.
  *****************************************************************************/
 
-#include "log.hpp"
-#include "bit.hpp"
-#include "util.hpp"
-
-#include "gda/endian.hpp"
 #include "gda/queue_pair.hpp"
+#include "util.hpp"
+#include "containers/free_list_impl.hpp"
+#include "gda/endian.hpp"
 
 namespace rocshmem {
 
@@ -88,95 +86,101 @@ __device__ void QueuePair::mlx5_ring_doorbell(uint64_t sq_post, const gda_mlx5_w
   // ring doorbell by storing first 8B of WQE to the doorbell register
   __hip_atomic_store(&bf->db_reg, db_val, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_SYSTEM);
 
-  LOGD_TRACE("SQ: posted WQEs with dbrec(%p)=%x (%hu), dbreg(%p)=%lx (%x, %x)",
-             mlx5_sq.dbrec, be_sq_wqebb_counter, sq_wqebb_counter,
-             &bf->db_reg, db_val.val, db_val.wqe_header.opmod_idx_opcode, db_val.wqe_header.qpn_ds);
+#if defined(DEBUG)
+  printf("SQ: posted WQEs with dbrec(%p)=%x (%hu), dbreg(%p)=%lx (%x, %x)\n",
+         mlx5_sq.dbrec, be_sq_wqebb_counter, sq_wqebb_counter,
+         &bf->db_reg, db_val.val, db_val.wqe_header.opmod_idx_opcode, db_val.wqe_header.qpn_ds);
+#endif
 }
 
-[[maybe_unused]] __attribute__((noinline))
-__device__ void QueuePair::mlx5_print_cqe_error(const mlx5_cqe64* cqe, uint8_t opcode) {
+__device__ void QueuePair::mlx5_check_cqe_error(const mlx5_cqe64* cqe) {
   const mlx5_err_cqe* err_cqe = reinterpret_cast<const mlx5_err_cqe*>(cqe);
+  const char* cqe_syndrome_string = "";
   uint8_t syndrome = 0x0;
 
+  uint8_t op_own = __hip_atomic_load(&cqe->op_own, __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_SYSTEM);
+  uint8_t owner = op_own & MLX5_CQE_OWNER_MASK;
+  uint8_t opcode = op_own >> 4;
+
   switch (opcode) {
+  case MLX5_CQE_REQ:
+    // everything okay
+    return;
   case MLX5_CQE_RESP_WR_IMM:
   case MLX5_CQE_RESP_SEND:
   case MLX5_CQE_RESP_SEND_IMM:
   case MLX5_CQE_RESP_SEND_INV:
     // (valid) responder completion?!
-    LOGD_ERROR("CQ: unexpected responder completion (%x)", opcode);
+    printf("CQ: unexpected responder completion (%x)\n", opcode);
     break;
   case MLX5_CQE_RESIZE_CQ:
   case MLX5_CQE_NO_PACKET:
-    LOGD_ERROR("CQ: unexpected completion type (%x)", opcode);
+    printf("CQ: unexpected completion type (%x)\n", opcode);
     break;
   case MLX5_CQE_SIG_ERR:
-    LOGD_ERROR("CQ: unexpected signature error (%x)", opcode);
+    printf("CQ: unexpected signature error (%x)\n", opcode);
     break;
   case MLX5_CQE_REQ_ERR:
-    syndrome = __hip_atomic_load(&err_cqe->syndrome, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM);
+    syndrome = __hip_atomic_load(&err_cqe->syndrome, __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_SYSTEM);
     switch (syndrome) {
     case MLX5_CQE_SYNDROME_LOCAL_LENGTH_ERR:
-      LOGD_ERROR("CQ requester error LOCAL_LENGTH_ERR (%x)", syndrome);
+      cqe_syndrome_string = "LOCAL_LENGTH_ERR";
       break;
     case MLX5_CQE_SYNDROME_LOCAL_QP_OP_ERR:
-      LOGD_ERROR("CQ requester error LOCAL_QP_OP_ERR (%x)", syndrome);
+      cqe_syndrome_string = "LOCAL_QP_OP_ERR";
       break;
     case MLX5_CQE_SYNDROME_LOCAL_PROT_ERR:
-      LOGD_ERROR("CQ requester error LOCAL_PROT_ERR (%x)", syndrome);
+      cqe_syndrome_string = "LOCAL_PROT_ERR";
       break;
     case MLX5_CQE_SYNDROME_WR_FLUSH_ERR:
-      LOGD_ERROR("CQ requester error WR_FLUSH_ERR (%x)", syndrome);
+      cqe_syndrome_string = "WR_FLUSH_ERR";
       break;
     case MLX5_CQE_SYNDROME_MW_BIND_ERR:
-      LOGD_ERROR("CQ requester error MW_BIND_ERR (%x)", syndrome);
+      cqe_syndrome_string = "MW_BIND_ERR";
       break;
     case MLX5_CQE_SYNDROME_BAD_RESP_ERR:
-      LOGD_ERROR("CQ requester error BAD_RESP_ERR (%x)", syndrome);
+      cqe_syndrome_string = "BAD_RESP_ERR";
       break;
     case MLX5_CQE_SYNDROME_LOCAL_ACCESS_ERR:
-      LOGD_ERROR("CQ requester error LOCAL_ACCESS_ERR (%x)", syndrome);
+      cqe_syndrome_string = "LOCAL_ACCESS_ERR";
       break;
     case MLX5_CQE_SYNDROME_REMOTE_INVAL_REQ_ERR:
-      LOGD_ERROR("CQ requester error REMOTE_INVAL_REQ_ERR (%x)", syndrome);
+      cqe_syndrome_string = "REMOTE_INVAL_REQ_ERR";
       break;
     case MLX5_CQE_SYNDROME_REMOTE_ACCESS_ERR:
-      LOGD_ERROR("CQ requester error REMOTE_ACCESS_ERR (%x)", syndrome);
+      cqe_syndrome_string = "REMOTE_ACCESS_ERR";
       break;
     case MLX5_CQE_SYNDROME_REMOTE_OP_ERR:
-      LOGD_ERROR("CQ requester error REMOTE_OP_ERR (%x)", syndrome);
+      cqe_syndrome_string = "REMOTE_OP_ERR";
       break;
     case MLX5_CQE_SYNDROME_TRANSPORT_RETRY_EXC_ERR:
-      LOGD_ERROR("CQ requester error TRANSPORT_RETRY_EXC_ERR (%x)", syndrome);
+      cqe_syndrome_string = "TRANSPORT_RETRY_EXC_ERR";
       break;
     case MLX5_CQE_SYNDROME_RNR_RETRY_EXC_ERR:
-      LOGD_ERROR("CQ requester error RNR_RETRY_EXC_ERR (%x)", syndrome);
+      cqe_syndrome_string = "RNR_RETRY_EXC_ERR";
       break;
     case MLX5_CQE_SYNDROME_REMOTE_ABORTED_ERR:
-      LOGD_ERROR("CQ requester error REMOTE_ABORTED_ERR (%x)", syndrome);
+      cqe_syndrome_string = "REMOTE_ABORTED_ERR";
       break;
     default:
-      LOGD_ERROR("CQ requester error unknown syndrome type (%x)", syndrome);
+      cqe_syndrome_string = "unknown syndrome type";
       break;
     }
+    printf("CQ requester error: %s (%x)\n", cqe_syndrome_string, syndrome);
     break;
   case MLX5_CQE_RESP_ERR:
-    LOGD_ERROR("CQ: unexpected responder error (%x)", opcode);
+    printf("CQ: unexpected responder error (%x)\n", opcode);
     break;
-  case MLX5_CQE_INVALID: {
-    uint8_t owner = __hip_atomic_load(&cqe->op_own, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM)
-                    & MLX5_CQE_OWNER_MASK;
-    LOGD_ERROR("CQ: invalid completion (%x), check owner bit = %u?", opcode, owner);
+  case MLX5_CQE_INVALID:
+    printf("CQ: invalid completion (%x), check owner bit = %u?\n", opcode, owner);
     break;
-  }
   default:
-    LOGD_ERROR("CQ: unknown completion type (%x)", opcode);
+    printf("CQ: unknown completion type (%x)\n", opcode);
     break;
   }
   abort();
 }
 
-// precondition: called with all active lanes using different QPs
 __device__ void QueuePair::mlx5_poll_cq_until(uint16_t requested_available_slots) {
   uint16_t sq_depth = mlx5_sq.depth;
 
@@ -206,13 +210,14 @@ __device__ void QueuePair::mlx5_poll_cq_until(uint16_t requested_available_slots
 
     // CQEs are initially invalid, retry until we see a valid CQE
     if (opcode == MLX5_CQE_INVALID) {
-      LOGD_TRACE("CQ: invalid completion (%x)", opcode);
+#if defined(DEBUG)
+      printf("CQ: invalid completion (%x)\n", opcode);
+#endif
       continue;
     }
 
-#if defined(BUILD_DEBUG_DEVICE)
-    if (opcode != MLX5_CQE_REQ)
-      mlx5_print_cqe_error(cqe, opcode);
+#if defined(DEBUG)
+    mlx5_check_cqe_error(cqe);
 #endif
 
     /* sq_tail is an index to the next free WQE i.e. counts number of posted WQEs
@@ -239,8 +244,8 @@ __device__ void QueuePair::mlx5_poll_cq_until(uint16_t requested_available_slots
   }
 }
 
-// precondition: called with all active lanes using different QPs
-__device__ void QueuePair::mlx5_quiet() {
+// can be called with all active lanes using any number of different QPs, don't assume anything
+__device__ void QueuePair::mlx5_quiet(ActiveWFInfo &wf_info) {
   mlx5_poll_cq_until(mlx5_sq.depth);
 }
 
@@ -253,9 +258,17 @@ __device__ void QueuePair::mlx5_quiet_single() {
 }
 
 // can be called with all active lanes using any number of different QPs, don't assume anything
-__device__ void QueuePair::mlx5_post_wqe_rma(int32_t length, uintptr_t laddr, uintptr_t raddr,
-                                             uint8_t opcode, ActiveWFInfo &wf_info) {
-  if (wf_info.is_pe_group_last) {
+__device__ void QueuePair::mlx5_post_wqe_rma(int32_t length, uintptr_t laddr,
+    uintptr_t raddr, uint8_t opcode, ActiveWFInfo &wf_info) {
+  /**
+   * since the leader needs to write the first 8 bytes of the LAST WQE to the
+   * doorbell register, it's easier if the LAST thread is the leader; does this
+   * have any performance implications?
+   */
+  // TODO: change the leader to first active lane-id, since leader is already calcualted
+  bool is_leader = (wf_info.pe_group_logical_lane_id == wf_info.num_pe_group_lanes - 1);
+
+  if (is_leader) {
     // get SQ lock
     acquire_lock(&mlx5_sq.lock);
     // poll until we have enough WQEBB for all lanes using this QP
@@ -276,7 +289,7 @@ __device__ void QueuePair::mlx5_post_wqe_rma(int32_t length, uintptr_t laddr, ui
   // copy to SQ
   mlx5_sq.buf[sq_idx] = wqe;
 
-  if (wf_info.is_pe_group_last) {
+  if (is_leader) {
     // increment post counter
     mlx5_sq.post += wf_info.num_pe_group_lanes;
     // we are the last thread in the wavefront, so we have the last WQE posted
@@ -286,9 +299,9 @@ __device__ void QueuePair::mlx5_post_wqe_rma(int32_t length, uintptr_t laddr, ui
   }
 }
 
-// precondition: called with all active lanes using different QPs
-__device__ void QueuePair::mlx5_post_wqe_rma_single(int32_t length, uintptr_t laddr, uintptr_t raddr,
-                                                    uint8_t opcode, bool ring_db) {
+// called with all active lanes using different QPs
+__device__ void QueuePair::mlx5_post_wqe_rma_single(int32_t length,
+    uintptr_t laddr, uintptr_t raddr, uint8_t opcode, bool ring_db) {
   // get SQ lock
   acquire_lock(&mlx5_sq.lock);
   // poll until we have enough space for at least one WQE
@@ -320,14 +333,18 @@ __device__ void QueuePair::mlx5_post_wqe_rma_single(int32_t length, uintptr_t la
   release_lock(&mlx5_sq.lock);
 }
 
-/* can be called with all active lanes using any number of different QPs, don't assume anything
- * assumes that `fetching' is constant across all lanes using the same QP
- * TODO: make `fetching' a template parameter */
+// can be called with all active lanes using any number of different QPs, don't assume anything
 __device__ uint64_t QueuePair::mlx5_post_wqe_amo([[maybe_unused]] int32_t length,
-                                                 uintptr_t raddr, uint8_t opcode,
-                                                 int64_t atomic_data, int64_t atomic_cmp,
-                                                 bool fetching, ActiveWFInfo &wf_info) {
-  if (wf_info.is_pe_group_last) {
+    uintptr_t raddr, uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp,
+    bool fetching, ActiveWFInfo &wf_info) {
+  /**
+   * since the leader needs to write the first 8 bytes of the LAST WQE to the
+   * doorbell register, it's easier if the LAST thread is the leader; does this
+   * have any performance implications? 
+   */
+  // TODO: change the leader to first active lane-id, since leader is already calcualted
+  bool is_leader = (wf_info.pe_group_logical_lane_id == wf_info.num_pe_group_lanes - 1);
+  if (is_leader) {
     // get SQ lock
     acquire_lock(&mlx5_sq.lock);
     // poll until we have enough WQEBB for all lanes using this QP
@@ -355,7 +372,7 @@ __device__ uint64_t QueuePair::mlx5_post_wqe_amo([[maybe_unused]] int32_t length
   // copy to SQ
   mlx5_sq.buf[sq_idx] = wqe;
 
-  if (wf_info.is_pe_group_last) {
+  if (is_leader) {
     // increment post and fetching atomic counters
     mlx5_sq.post += wf_info.num_pe_group_lanes;
     if (fetching) {
@@ -365,20 +382,19 @@ __device__ uint64_t QueuePair::mlx5_post_wqe_amo([[maybe_unused]] int32_t length
     mlx5_ring_doorbell(mlx5_sq.post, wqe);
     // release SQ lock
     release_lock(&mlx5_sq.lock);
-    // wait until fetch completes
-    if (fetching) {
-      mlx5_quiet_single();
-    }
+  }
+
+  if (fetching) {
+    mlx5_quiet(wf_info);
   }
 
   return fetching ? *atomic_laddr : 0;
 }
 
-// precondition: called with all active lanes using different QPs
+// called with all active lanes using different QPs
 __device__ uint64_t QueuePair::mlx5_post_wqe_amo_single([[maybe_unused]] int32_t length,
-                                                        uintptr_t raddr, uint8_t opcode,
-                                                        int64_t atomic_data, int64_t atomic_cmp,
-                                                        bool fetching) {
+    uintptr_t raddr, uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp,
+    bool fetching) {
   // get SQ lock
   acquire_lock(&mlx5_sq.lock);
   // poll until we have enough space for at least one WQE
@@ -410,11 +426,11 @@ __device__ uint64_t QueuePair::mlx5_post_wqe_amo_single([[maybe_unused]] int32_t
   if (fetching) {
     fetching_atomic_idx += 1;
   }
-  // ring doorbell for this WQE
+  // ring doorbell for this WQE (note: need to check this for correctness)
   mlx5_ring_doorbell(mlx5_sq.post, wqe);
   // release SQ lock
   release_lock(&mlx5_sq.lock);
-  // wait until fetch completes
+
   if (fetching) {
     mlx5_quiet_single();
   }

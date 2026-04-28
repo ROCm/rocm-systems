@@ -36,7 +36,6 @@
 static char ncclIbIfName[MAX_IF_NAME_SIZE+1];
 static union ncclSocketAddress ncclIbIfAddr;
 
-	
 static ncclNetCommConfig_t ibContext;
 
 struct ncclIbMr {
@@ -271,7 +270,7 @@ static void* ncclIbAsyncThreadMain(void* args) {
     case IBV_EVENT_CLIENT_REREGISTER:
     case IBV_EVENT_SRQ_LIMIT_REACHED:
       // the above are non-fatal
-      WARN("NET/IB : %s:%d Got non-fatal async event: %s(%d)", dev->devName, dev->portNum, str, event.event_type);
+      WARN("NET/IB : %s:%d Got async event: %s", dev->devName, dev->portNum, str);
       break;
     case IBV_EVENT_COMM_EST:
       break;
@@ -762,6 +761,7 @@ ncclResult_t ncclIbMakeVDeviceInternal(int* d, ncclNetVDeviceProps_t* props) {
   ncclIbMergedDev tmp;
   memset(&tmp,0,sizeof(tmp));
   bool used[MAX_IB_DEVS] = {0};
+
   for (int i = 0; i < props->ndevs; i++) {
     if( props->devs[i]  < 0 || props->devs[i] >= ncclNIbDevs ) {
       WARN("NET/IB : Cannot use physical device %d, max %d", props->devs[i], ncclNIbDevs);
@@ -808,6 +808,7 @@ ncclResult_t ncclIbMakeVDeviceInternal(int* d, ncclNetVDeviceProps_t* props) {
            dev0->devName, numa0, dev->devName, numa_i);
       break;
     }
+
     char root_i[8];
     ncclIbGetPciRootFromPath(dev->pciPath, root_i, sizeof(root_i));
     if (strcmp(root_i, root0) != 0) {
@@ -844,9 +845,9 @@ static ncclResult_t ncclIbFinalizeDevices(void) {
   return ncclSuccess;
 }
 
-static ncclResult_t ncclIbInitDevices(ncclDebugLogger_t logFunction, ncclProfilerCallback_t profFunction) {
+static ncclResult_t ncclIbInitDevices(ncclDebugLogger_t /*logFunction*/, ncclProfilerCallback_t profFunction) {
+  if (netRefCount++) return ncclSuccess;
   ncclResult_t ret = ncclSuccess;
-  if (netRefCount++) return ret;
   ncclProfilerFunction = profFunction;
   if (ncclParamIbDisable()) return ncclInternalError;
   static int shownIbHcaEnv = 0;
@@ -983,6 +984,7 @@ static ncclResult_t ncclIbInitDevices(ncclDebugLogger_t logFunction, ncclProfile
               PTHREADCHECKGOTO(pthread_create(&ncclIbAsyncThread, NULL, ncclIbAsyncThreadMain, ncclIbDevs + ncclNIbDevs), "pthread_create", ret, fail);
               ncclSetThreadName(ncclIbAsyncThread, "NCCL IbAsync %2d", ncclNIbDevs);
               PTHREADCHECKGOTO(pthread_detach(ncclIbAsyncThread), "pthread_detach", ret, fail); // will not be pthread_join()'d
+
               ncclNIbDevs++;
               nPorts++;
             }
@@ -1303,7 +1305,8 @@ struct ncclIbGidInfo {
 #define NCCL_NET_IB_REQ_RECV 2
 #define NCCL_NET_IB_REQ_FLUSH 3
 #define NCCL_NET_IB_REQ_GIN_IPUT 4
-const char* reqTypeStr[] = { "Unused", "Send", "Recv", "Flush", "IPut" };
+#define NCCL_NET_IB_REQ_FAILED 5
+const char* reqTypeStr[] = { "Unused", "Send", "Recv", "Flush", "IPut", "Failed" };
 
 #define MAX_QPS_PER_REQ 8
 struct ncclProfilerInfo {
@@ -1732,9 +1735,6 @@ ib_recv_dev_list:
     // Prepare GIN Put Signal scratchpad (for RDMA Atomic result)
     NCCLCHECKGOTO(wrap_ibv_reg_mr(&commDev->putSignalScratchpadMr, commDev->base.pd, &comm->putSignalScratchpad, sizeof(comm->putSignalScratchpad), IBV_ACCESS_LOCAL_WRITE), ret, fail);
 
-    // Prepare GIN Put Signal scratchpad (for RDMA Atomic result)
-    NCCLCHECKGOTO(wrap_ibv_reg_mr(&commDev->putSignalScratchpadMr, commDev->base.pd, &comm->putSignalScratchpad, sizeof(comm->putSignalScratchpad), IBV_ACCESS_LOCAL_WRITE), ret, fail);
-
     // Prepare my fifo
     NCCLCHECKGOTO(wrap_ibv_reg_mr(&commDev->fifoMr, commDev->base.pd, comm->fifo, sizeof(struct ncclIbSendFifo)*MAX_REQUESTS*NCCL_NET_IB_MAX_RECVS, IBV_ACCESS_LOCAL_WRITE|IBV_ACCESS_REMOTE_WRITE|IBV_ACCESS_REMOTE_READ), ret, fail);
     devInfo->fifoRkey = commDev->fifoMr->rkey;
@@ -1754,13 +1754,13 @@ ib_recv_dev_list:
           INFO(NCCL_NET,"NET/IB: %s %d IbDev %d Port %d qpn %d mtu %d LID %d subnet-prefix %lu  FLID %d fifoRkey=0x%x fifoLkey=0x%x",
                comm->base.vProps.ndevs > 2 ? "NCCL MergedDev" : "NCCL Dev",
                dev, commDev->base.ibDevN, ibDev->portNum, meta.qpInfo[q].qpn, devInfo->mtu, devInfo->lid,
-               (uint64_t)devInfo->gid.global.subnet_prefix, ncclIbExtractFlid(&devInfo->gid), devInfo->fifoRkey, commDev->fifoMr->lkey);
+               devInfo->gid.global.subnet_prefix, ncclIbExtractFlid(&devInfo->gid), devInfo->fifoRkey, commDev->fifoMr->lkey);
         } else { // RoCE
           INFO(NCCL_NET,"NET/IB: %s %d IbDev %d Port %d qpn %d mtu %d GID %ld (%lX/%lX) fifoRkey=0x%x fifoLkey=0x%x",
                comm->base.vProps.ndevs > 2 ? "NCCL MergedDev" : "NCCL Dev", dev,
                commDev->base.ibDevN, ibDev->portNum, meta.qpInfo[q].qpn, devInfo->mtu,
                (int64_t)commDev->base.gidInfo.localGidIndex,
-               (uint64_t)devInfo->gid.global.subnet_prefix, devInfo->gid.global.interface_id, devInfo->fifoRkey, commDev->fifoMr->lkey);
+               devInfo->gid.global.subnet_prefix, devInfo->gid.global.interface_id, devInfo->fifoRkey, commDev->fifoMr->lkey);
         }
         // Log ECE info
         if (meta.qpInfo[q].ece_supported) {
@@ -2296,7 +2296,7 @@ ncclResult_t ncclIbFreeRequest(struct ncclIbRequest* r) {
 
 ncclResult_t ncclIbTest(void* request, int* done, int* size);
 
-ncclResult_t ncclIbRegMrDmaBufInternal2(ncclIbNetCommDevBase* base, void* data, size_t size, int type, uint64_t offset, int fd, uint64_t mrFlags, ibv_mr** mhandle) {
+ncclResult_t ncclIbRegMrDmaBufInternal(ncclIbNetCommDevBase* base, void* data, size_t size, int type, uint64_t offset, int fd, ibv_mr** mhandle) {
   static __thread uintptr_t pageSize = 0;
   if (pageSize == 0) pageSize = sysconf(_SC_PAGESIZE);
   struct ncclIbMrCache* cache = &ncclIbDevs[base->ibDevN].mrCache;
@@ -2311,9 +2311,8 @@ ncclResult_t ncclIbRegMrDmaBufInternal2(ncclIbNetCommDevBase* base, void* data, 
       }
       // Deregister / register
       struct ibv_mr* mr;
-      unsigned int flags = IBV_ACCESS_LOCAL_WRITE|IBV_ACCESS_REMOTE_WRITE|IBV_ACCESS_REMOTE_READ|IBV_ACCESS_REMOTE_ATOMIC;
-      bool relaxedOrdering = ncclIbRelaxedOrderingEnabled && (mrFlags & NCCL_NET_MR_FLAG_FORCE_SO) == 0;
-      if (relaxedOrdering) flags |= IBV_ACCESS_RELAXED_ORDERING;
+      unsigned int flags = IBV_ACCESS_LOCAL_WRITE|IBV_ACCESS_REMOTE_WRITE|IBV_ACCESS_REMOTE_READ;
+      if (ncclIbRelaxedOrderingEnabled) flags |= IBV_ACCESS_RELAXED_ORDERING;
       if (fd != -1) {
         /* DMA-BUF support */
         if (!ncclIbDevs[base->ibDevN].capsProvider.mlx5.dataDirect) {
@@ -2322,7 +2321,7 @@ ncclResult_t ncclIbRegMrDmaBufInternal2(ncclIbNetCommDevBase* base, void* data, 
           NCCLCHECK(wrap_mlx5dv_reg_dmabuf_mr(&mr, base->pd, offset, pages*pageSize, addr, fd, flags, MLX5DV_REG_DMABUF_ACCESS_DATA_DIRECT));
         }
       } else {
-        if (relaxedOrdering) {
+        if (ncclIbRelaxedOrderingEnabled) {
           // Use IBVERBS_1.8 API - needed for IBV_ACCESS_RELAXED_ORDERING support
           NCCLCHECK(wrap_ibv_reg_mr_iova2(&mr, base->pd, (void*)addr, pages*pageSize, addr, flags));
         }
@@ -2360,7 +2359,7 @@ struct ncclIbNetCommDevBase* ncclIbGetNetCommDevBase(ncclIbNetCommBase* base, in
 }
 
 /* DMA-BUF support */
-ncclResult_t ncclIbRegMrDmaBufInternal(void* comm, void* data, size_t size, int type, uint64_t offset, int fd, uint64_t mrFlags, void** mhandle) {
+ncclResult_t ncclIbRegMrDmaBuf(void* comm, void* data, size_t size, int type, uint64_t offset, int fd, void** mhandle) {
   ncclResult_t ret = ncclSuccess;
   assert(size > 0);
   struct ncclIbNetCommBase* base = (struct ncclIbNetCommBase*) comm;
@@ -2372,7 +2371,7 @@ ncclResult_t ncclIbRegMrDmaBufInternal(void* comm, void* data, size_t size, int 
   for (int i = 0; i < base->vProps.ndevs; i++) {
     // Each ncclIbNetCommDevBase is at different offset in send and recv netComms
     struct ncclIbNetCommDevBase* devComm = ncclIbGetNetCommDevBase(base, i);
-    NCCLCHECKGOTO(ncclIbRegMrDmaBufInternal2(devComm, data, size, type, offset, fd, mrFlags, mhandleWrapper->mrs + i), ret, fail);
+    NCCLCHECKGOTO(ncclIbRegMrDmaBufInternal(devComm, data, size, type, offset, fd, mhandleWrapper->mrs + i), ret, fail);
   }
   *mhandle = (void*) mhandleWrapper;
 exit:
@@ -2382,11 +2381,8 @@ fail:
   goto exit;
 }
 
-ncclResult_t ncclIbRegMrDmaBuf(void* comm, void* data, size_t size, int type, uint64_t offset, int fd, void** mhandle) {
-  return ncclIbRegMrDmaBufInternal(comm, data, size, type, offset, fd, 0ULL, mhandle);
-}
 ncclResult_t ncclIbRegMr(void* comm, void* data, size_t size, int type, void** mhandle) {
-  return ncclIbRegMrDmaBufInternal(comm, data, size, type, 0ULL, -1, 0, mhandle);
+  return ncclIbRegMrDmaBuf(comm, data, size, type, 0ULL, -1, mhandle);
 }
 
 ncclResult_t ncclIbDeregMrInternal(ncclIbNetCommDevBase* base, ibv_mr* mhandle) {
@@ -2777,7 +2773,7 @@ ncclResult_t ncclIbPostFifo(struct ncclIbRecvComm* comm, int n, void** data, siz
     return ret;
   }
 
-  TRACE(NCCL_VERBS, "Posted send wr_id=%lu, wr_indx=%d, qp_num=%d, src_nic=%d, dst_nic=%d, dlid=%u, opcode=%d, send_flags=%d, imm_data=%d, remote_addr=%lx, rkey=%x, length=%d, lkey=%x",
+  TRACE(NCCL_VERBS, "Posted send wr_id=%lu, wr_indx=%d, qp_num=%d, src_nic=%d, dst_nic=%d, dlid=%lu, opcode=%d, send_flags=%d, imm_data=%d, remote_addr=%lx, rkey=%x, length=%d, lkey=%x",
         wr.wr_id, 0, ctsQp->qp->qp_num, comm->devs[ctsQp->devIndex].base.ibDevN, comm->base.remDevs[ctsQp->remDevIdx].ibv_dev_index, comm->base.remDevs[ctsQp->remDevIdx].lid,
         wr.opcode, wr.send_flags, wr.imm_data, wr.wr.rdma.remote_addr, wr.wr.rdma.rkey, wr.sg_list ? wr.sg_list->length : 0, wr.sg_list ? wr.sg_list->lkey : 0);
 
@@ -2793,7 +2789,6 @@ ncclResult_t ncclIbIrecv(void* recvComm, int n, void** data, size_t* sizes, int*
   struct ibv_recv_wr wr;
   struct ibv_recv_wr* bad_wr = NULL;
   int nqps = 0;
-
   if (comm->base.ready == 0) {
     WARN("NET/IB: ncclIbIrecv() called when comm->base.ready == 0");
     *request = NULL;
@@ -2858,26 +2853,26 @@ ncclResult_t ncclIbIrecv(void* recvComm, int n, void** data, size_t* sizes, int*
   return ncclSuccess;
 
 fail:
-  ncclIbStatsFatalError(&comm->base.stats);
-  if (req) {
-    // If events were added (IBV ops posted), we can't free immediately -
-    // completions may still arrive. Mark as failed and return it so
-    // caller can call Test to drain completions.
-    if (ncclIbRequestHasEvents(req)) {
-      req->type = NCCL_NET_IB_REQ_FAILED;
-      *request = req;
-      // Return success so caller proceeds to call Test() which will drain
-      // completions. The fatal error is recorded in stats and will be
-      // caught on the next operation.
-      return ncclSuccess;
-    } else {
-      ncclIbFreeRequest(req);
-      *request = NULL;
-    }
+ncclIbStatsFatalError(&comm->base.stats);
+if (req) {
+  // If events were added (IBV ops posted), we can't free immediately -
+  // completions may still arrive. Mark as failed and return it so
+  // caller can call Test to drain completions.
+  if (ncclIbRequestHasEvents(req)) {
+    req->type = NCCL_NET_IB_REQ_FAILED;
+    *request = req;
+    // Return success so caller proceeds to call Test() which will drain
+    // completions. The fatal error is recorded in stats and will be
+    // caught on the next operation.
+    return ncclSuccess;
   } else {
+    ncclIbFreeRequest(req);
     *request = NULL;
   }
-  return ret;
+} else {
+  *request = NULL;
+}
+return ret;
 }
 
 ncclResult_t ncclIbIflush(void* recvComm, int n, void** data, int* sizes, void** mhandles, void** request) {
@@ -2886,7 +2881,6 @@ ncclResult_t ncclIbIflush(void* recvComm, int n, void** data, int* sizes, void**
   struct ncclIbRequest* req = NULL;
   struct ncclIbMrHandle* mhandle = NULL;
   int last = -1;
-
   for (int i=0; i<n; i++) if (sizes[i]) last = i;
   if (comm->flushEnabled == 0 || last == -1) return ncclSuccess;
 
@@ -2942,26 +2936,26 @@ ncclResult_t ncclIbIflush(void* recvComm, int n, void** data, int* sizes, void**
   return ncclSuccess;
 
 fail:
-  ncclIbStatsFatalError(&comm->base.stats);
-  if (req) {
-    // If events were added (IBV ops posted), we can't free immediately -
-    // completions may still arrive. Mark as failed and return it so
-    // caller can call Test to drain completions.
-    if (ncclIbRequestHasEvents(req)) {
-      req->type = NCCL_NET_IB_REQ_FAILED;
-      *request = req;
-      // Return success so caller proceeds to call Test() which will drain
-      // completions. The fatal error is recorded in stats and will be
-      // caught on the next operation.
-      return ncclSuccess;
-    } else {
-      ncclIbFreeRequest(req);
-      *request = NULL;
-    }
+ncclIbStatsFatalError(&comm->base.stats);
+if (req) {
+  // If events were added (IBV ops posted), we can't free immediately -
+  // completions may still arrive. Mark as failed and return it so
+  // caller can call Test to drain completions.
+  if (ncclIbRequestHasEvents(req)) {
+    req->type = NCCL_NET_IB_REQ_FAILED;
+    *request = req;
+    // Return success so caller proceeds to call Test() which will drain
+    // completions. The fatal error is recorded in stats and will be
+    // caught on the next operation.
+    return ncclSuccess;
   } else {
+    ncclIbFreeRequest(req);
     *request = NULL;
   }
-  return ret;
+} else {
+  *request = NULL;
+}
+return ret;
 }
 
 #define HCA_NAME(req, index) ((req)->devBases[(index)]->pd->context->device->name)
@@ -2978,15 +2972,15 @@ static int getReqQpIndex(struct ncclIbRequest* req, int request, int qpNumber) {
 
 ncclResult_t ncclIbTest(void* request, int* done, int* sizes) {
   struct ncclIbRequest *r = (struct ncclIbRequest*)request;
+  *done = 0;
   ncclResult_t ret = ncclSuccess;
   int failDevIdx = -1;
-  *done = 0;
   while (1) {
     NCCLCHECKGOTO(ncclIbStatsCheckFatalCount(&r->base->stats,__func__), ret, fail);
     if (r->events[0] == 0 && r->events[1] == 0 && r->events[2] == 0 && r->events[3] == 0) {
       TRACE(NCCL_NET, "r=%p done", r);
       *done = 1;
-      // If this was a failed request, we were just draining completions.
+            // If this was a failed request, we were just draining completions.
       // Now that all events are done, free and return success.
       if (r->type == NCCL_NET_IB_REQ_FAILED) {
         NCCLCHECK(ncclIbFreeRequest(r));
@@ -3058,9 +3052,7 @@ ncclResult_t ncclIbTest(void* request, int* done, int* sizes) {
                 ncclSocketToString(&addr, line), ibvWcStatusStr(wc->status), wc->status,
                 ibvWcOpcodeStr(wc->opcode), wc->opcode, reqSize, wc->vendor_err, reqTypeStr[r->type],
                 localGidStr ?  " localGid ":"", localGidString, remoteGidStr ? " remoteGids":"", remoteGidString, hcaName);
-            ret = ncclRemoteError;
-            failDevIdx = i;
-            goto fail;
+            return ncclRemoteError;
           }
 
           union ncclSocketAddress addr;
@@ -3077,9 +3069,7 @@ ncclResult_t ncclIbTest(void* request, int* done, int* sizes) {
               struct ncclIbRequest* sendReq = r->base->reqs+((wc->wr_id >> (j*8)) & 0xff);
               if ((sendReq->events[i] <= 0)) {
                 WARN("NET/IB: sendReq(%p)->events={%d,%d,%d,%d}, i=%d, j=%d <= 0", sendReq, sendReq->events[0], sendReq->events[1], sendReq->events[2], sendReq->events[3], i, j);
-                ret = ncclInternalError;
-                failDevIdx = i;
-                goto fail;
+                return ncclInternalError;
               }
               sendReq->events[i]--;
 #ifdef NCCL_ENABLE_NET_PROFILING
@@ -3092,9 +3082,7 @@ ncclResult_t ncclIbTest(void* request, int* done, int* sizes) {
             if (req && wc->opcode == IBV_WC_RECV_RDMA_WITH_IMM) {
               if (req->type != NCCL_NET_IB_REQ_RECV) {
                 WARN("NET/IB: wc->opcode == IBV_WC_RECV_RDMA_WITH_IMM and req->type=%d", req->type);
-                ret = ncclInternalError;
-                failDevIdx = i;
-                goto fail;
+                return ncclInternalError;
               }
               if (req->nreqs == 1) {
                 req->recv.sizes[0] = wc->imm_data;
@@ -3123,8 +3111,7 @@ ncclResult_t ncclIbTest(void* request, int* done, int* sizes) {
     // If no CQEs found on any device, return and come back later
     if (totalWrDone == 0) return ncclSuccess;
   }
-
-fail:
+  fail:
   // Mark connection and device as fatal
   ncclIbStatsFatalError(&r->base->stats);
   if (failDevIdx >= 0 && r->devBases[failDevIdx] != NULL) {
@@ -3539,7 +3526,7 @@ ncclResult_t ncclGinIbProxyRegMrSymDmaBuf(void* collComm, void* data, size_t siz
   struct ncclIbGinProxyMrHandle *ginMrHandle;
   NCCLCHECK(ncclCalloc(&ginMrHandle, 1));
 
-  NCCLCHECKNOWARN(ncclIbRegMrDmaBufInternal(cComm->recvComm, data, size, type, offset, fd, mr_flags, (void **)&ginMrHandle->mrHandle), NCCL_NET);
+  NCCLCHECKNOWARN(ncclIbRegMrDmaBuf(cComm->recvComm, data, size, type, offset, fd, (void**)&ginMrHandle->mrHandle), NCCL_NET);
 
   NCCLCHECK(ncclCalloc(&ginMrHandle->base_vas, cComm->nranks));
   NCCLCHECK(ncclCalloc(&ginMrHandle->rkeys, cComm->nranks));

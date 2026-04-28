@@ -69,16 +69,19 @@ enum class ThreadScope: int {
 
 class ActiveWFInfo {
  public:
-  uint64_t    activemask{0};                  // Mask of active threads in the wavefront
-  uint64_t    pe_group_mask{0};               // Mask of active threads with the same PE
-  int         pe{-1};                         // PE for the threads in pe_group_mask
-  int         num_pe_group_lanes{0};          // Number of active lanes in pe_group_mask
-  int         pe_group_logical_lane_id{0};    // Logical lane id of this thread in pe_group_mask
-  int         pe_group_first_phys_lane_id{0}; // Physical lane id of first thread in pe_group_mask
-  int         pe_group_last_phys_lane_id{0};  // Physical lane id of last thread in pe_group_mask
-  ThreadScope scope{ThreadScope::thread};     // Threading scope
-  bool        is_pe_group_first{false};       // True if this is the first thread in pe_group_mask
-  bool        is_pe_group_last{false};        // True if this is the last thread in pe_group_mask
+  uint64_t     activemask{0};
+
+  int          pe{-1};
+  ThreadScope  scope{ThreadScope::thread};
+  uint64_t     pe_group_mask{0};
+  // Number of active lanes in the wave with the same PE
+  uint8_t      num_pe_group_lanes{0};
+  // Logical lane id within the group of threads with the same PE.
+  uint8_t      pe_group_logical_lane_id{0};
+  // True if this thread is the leader of the group of threads with the same PE.
+  bool         is_pe_group_leader{false};
+  // Physical lane id of the leader of the group of threads with the same PE.
+  uint64_t     pe_group_leader_phys_lane_id{0};
 
   __device__ explicit ActiveWFInfo(int pe, ThreadScope scope = ThreadScope::thread)
       : pe(pe), scope(scope) {
@@ -91,8 +94,7 @@ class ActiveWFInfo {
         pe_group_mask       = __match_any_sync(activemask, pe);
         num_pe_group_lanes  = get_active_lane_count(pe_group_mask);
         pe_group_logical_lane_id = get_active_lane_num(pe_group_mask);
-        pe_group_first_phys_lane_id = get_first_active_lane_id(pe_group_mask);
-        pe_group_last_phys_lane_id  = get_last_active_lane_id(pe_group_mask);
+        pe_group_leader_phys_lane_id = get_first_active_lane_id(pe_group_mask);
         break;
       }
       // Only thread 0 issues the WQE, so the group is just that thread
@@ -101,12 +103,10 @@ class ActiveWFInfo {
         pe_group_mask       = 1;
         num_pe_group_lanes  = 1;
         pe_group_logical_lane_id = get_active_lane_num(activemask);
-        pe_group_first_phys_lane_id = 0;
-        pe_group_last_phys_lane_id  = 0;
+        pe_group_leader_phys_lane_id = 0;
       }
     }
-    is_pe_group_first = (pe_group_logical_lane_id == 0);
-    is_pe_group_last  = (pe_group_logical_lane_id == num_pe_group_lanes - 1);
+    is_pe_group_leader  = (pe_group_logical_lane_id == 0);
   }
 
   // used in CAS based atomic operations at thread scope
@@ -116,10 +116,8 @@ class ActiveWFInfo {
     pe_group_mask       = __match_any_sync(activemask, pe);
     num_pe_group_lanes  = get_active_lane_count(pe_group_mask);
     pe_group_logical_lane_id = get_active_lane_num(pe_group_mask);
-    pe_group_first_phys_lane_id = get_first_active_lane_id(pe_group_mask);
-    pe_group_last_phys_lane_id  = get_last_active_lane_id(pe_group_mask);
-    is_pe_group_first   = (pe_group_logical_lane_id == 0);
-    is_pe_group_last    = (pe_group_logical_lane_id == num_pe_group_lanes - 1);
+    is_pe_group_leader  = (pe_group_logical_lane_id == 0);
+    pe_group_leader_phys_lane_id = get_first_active_lane_id(pe_group_mask);
     scope               = _scope;
     pe                  = _pe;
   }
@@ -127,14 +125,15 @@ class ActiveWFInfo {
   __device__ void printInfo() {
     printf("PE: %d, Scope: %d, activemask: %llx, "
            "pe_group_mask: %llx, num_pe_group_lanes: %d, "
-           "thread_id: %u, pe_group_logical_lane_id: %d, "
-           "is_pe_group_first: %d, pe_group_first_phys_lane_id: %d, "
-           "is_pe_group_last: %d, pe_group_last_phys_lane_id: %d\n",
-           pe, static_cast<int>(scope), static_cast<unsigned long long>(activemask),
-           static_cast<unsigned long long>(pe_group_mask), num_pe_group_lanes,
-           threadIdx.x, pe_group_logical_lane_id,
-           static_cast<int>(is_pe_group_first), pe_group_first_phys_lane_id,
-           static_cast<int>(is_pe_group_last), pe_group_last_phys_lane_id);
+           "thread_id: %u, "
+           "pe_group_logical_lane_id: %d, is_pe_group_leader: %d, "
+           "pe_group_leader_phys_lane_id: %llx\n",
+           pe, static_cast<int>(scope),
+           static_cast<unsigned long long>(activemask),
+           static_cast<unsigned long long>(pe_group_mask),
+           num_pe_group_lanes, threadIdx.x, (int)pe_group_logical_lane_id,
+           is_pe_group_leader,
+           static_cast<unsigned long long>(pe_group_leader_phys_lane_id));
   }
 };
 
@@ -297,7 +296,7 @@ class QueuePair {
       uintptr_t raddr, uint8_t opcode, ActiveWFInfo &wf_info);
   __device__ void mlx5_post_wqe_rma_single(int32_t size, uintptr_t laddr,
       uintptr_t raddr, uint8_t opcode, bool ring_db);
-  __device__ void mlx5_quiet();
+  __device__ void mlx5_quiet(ActiveWFInfo &wf_info);
   __device__ void mlx5_quiet_single();
 #endif
 #if defined(GDA_BNXT)
@@ -318,7 +317,7 @@ class QueuePair {
 
   __device__ void bnxt_post_wqe_rma_single(int32_t size, uintptr_t laddr,
       uintptr_t raddr, uint8_t opcode, bool ring_db);
-  __device__ void bnxt_quiet();
+  __device__ void bnxt_quiet(ActiveWFInfo &wf_info);
   __device__ void bnxt_quiet_single();
 #endif
 #if defined(GDA_IONIC)
@@ -360,7 +359,7 @@ class QueuePair {
   struct bnxt_device_sq bnxt_sq;
 
   __device__ void bnxt_poll_cq_until(uint32_t requested_available_slots);
-  [[maybe_unused]] __device__ __attribute__((noinline)) void bnxt_print_cqe_error(uint8_t status);
+  __device__ void bnxt_check_cqe_error(struct bnxt_re_req_cqe *cqe);
 
   /* GDAProvider::BNXT END */
 
@@ -370,7 +369,7 @@ class QueuePair {
   gda_mlx5_device_sq mlx5_sq;
 
   __device__ void mlx5_poll_cq_until(uint16_t requested_available_slots);
-  [[maybe_unused]] __device__ __attribute__((noinline)) void mlx5_print_cqe_error(const mlx5_cqe64* cqe, uint8_t opcode);
+  __device__ void mlx5_check_cqe_error(const mlx5_cqe64* cqe);
 
   /* GDAProvider::MLX5 END */
 
@@ -461,7 +460,7 @@ class QueuePair {
 
   static constexpr uint32_t FETCHING_ATOMIC_CNT{1024};
   static_assert(FETCHING_ATOMIC_CNT % WF_SIZE == 0);
-  using FreeListT = FreeList<uint64_t*>;
+  using FreeListT = FreeList<uint64_t*, HIPAllocator>;
   FreeListT* fetching_atomic_freelist{nullptr};
 
   HIPAllocator allocator{};

@@ -28,7 +28,6 @@
 #include "rocshmem/rocshmem_config.h"  // NOLINT(build/include_subdir)
 #include "rocshmem/rocshmem.hpp"
 #include "context_ipc_device.hpp"
-#include "log.hpp"
 #include "util.hpp"
 #include "ipc_team.hpp"
 #include "rocshmem_calc.hpp"
@@ -405,7 +404,7 @@ __device__ int IPCContext::reduce(rocshmem_team_t team, T *dest,
         }
       }
     } else {
-      LOGD_WARN("Unsupported reduction size for IPC conduit.");
+      GPU_DPRINTF("Unsupported reduction size for IPC conduit.\n");
       return ROCSHMEM_ERROR;
     }
   }
@@ -479,7 +478,8 @@ __device__ void IPCContext::alltoallv([[maybe_unused]] rocshmem_team_t team,
                                       [[maybe_unused]] const size_t dest_displs[],
                                       [[maybe_unused]] T *source, [[maybe_unused]] const size_t source_nelems[],
                                       [[maybe_unused]] const size_t source_displs[]) {
-  LOGD_ERROR_ABORT("ipc:alltoallv not implemented");
+  printf("rocshmem::ipc:alltoallv not implemented\n");
+  abort();
 }
 
 template <typename T>

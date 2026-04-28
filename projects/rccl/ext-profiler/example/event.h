@@ -49,7 +49,7 @@ struct netPlugin {
 };
 
 struct kernelCh {
-  uint64_t type;
+  uint8_t type;
   uint8_t channelId;
   struct taskEventBase* parent;
   double startTs;

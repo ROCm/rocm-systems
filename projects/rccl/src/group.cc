@@ -18,6 +18,8 @@
 #include "profiler.h"
 #include "nvtx.h"
 
+#include "msccl/msccl_lifecycle.h"
+
 using namespace rccl;
 
 #define GROUP_MAX_RECLAIM_STEPS 10
@@ -97,7 +99,10 @@ ncclResult_t ncclAsyncJobComplete(struct ncclAsyncJob* job) {
 
 NCCL_API(ncclResult_t, ncclGroupStart);
 ncclResult_t ncclGroupStart_impl() {
-  NCCLCHECK(Recorder::instance().record(rrGroupStart, ncclGroupDepth));
+  if (!mscclIsCaller())
+  {
+    NCCLCHECK(Recorder::instance().record(rrGroupStart, ncclGroupDepth));
+  }
   ncclResult_t ret = ncclSuccess;
   NCCL_NVTX3_FUNC_RANGE;
 
@@ -108,12 +113,18 @@ ncclResult_t ncclGroupStart_impl() {
 
 ncclResult_t ncclGroupStartInternal() {
   ncclGroupDepth++;
+  if (mscclAvailable() && !mscclIsCaller()) {
+    NCCLCHECK(mscclGroupStart());
+  }
   return ncclSuccess;
 }
 
 NCCL_API(ncclResult_t, ncclGroupEnd);
 ncclResult_t ncclGroupEnd_impl() {
-  NCCLCHECK(Recorder::instance().record(rrGroupEnd, ncclGroupDepth));
+  if (!mscclIsCaller())
+  {
+    NCCLCHECK(Recorder::instance().record(rrGroupEnd, ncclGroupDepth));
+  }
   ncclResult_t ret = ncclSuccess;
   NCCL_NVTX3_FUNC_RANGE;
   NCCLCHECKGOTO(ncclGroupEndInternal(), ret, exit);
@@ -124,7 +135,10 @@ exit:
 
 NCCL_API(ncclResult_t, ncclGroupSimulateEnd, ncclSimInfo_t* simInfo);
 ncclResult_t ncclGroupSimulateEnd(ncclSimInfo_t* simInfo) {
-  Recorder::instance().record(ncclGroupDepth, simInfo);
+  if (!mscclIsCaller())
+  {
+    Recorder::instance().record(ncclGroupDepth, simInfo);
+  }
   ncclResult_t ret = ncclSuccess;
   NCCL_NVTX3_FUNC_RANGE;
   NCCLCHECKGOTO(ncclGroupEndInternal(simInfo), ret, exit);
@@ -157,9 +171,6 @@ ncclResult_t ncclP2PPreconnectFunc(struct ncclAsyncJob* job_) {
   NCCLCHECK(ncclTransportP2pSetup(comm, NULL, 1));
   if (comm->p2pNet) NCCLCHECK(ncclTransportP2pSetup(comm, NULL, NCCL_CONN_IDX_P2P_NET));
   if (mode != cudaStreamCaptureModeRelaxed) CUDACHECK(cudaThreadExchangeStreamCaptureMode(&mode));
-  INFO(NCCL_INIT, "rank %d/%d cudaDev %d nvmlDev %d busId %#llx commId 0x%016llx Send/Recv P2P transport setup complete (p2pNet=%d)",
-    comm->rank, comm->nRanks, comm->cudaDev, comm->nvmlDev,
-    (unsigned long long)comm->busId, (unsigned long long)comm->commHash, comm->p2pNet ? 1 : 0);
   return ncclSuccess;
 }
 
@@ -700,6 +711,10 @@ ncclResult_t ncclGroupEndInternal(ncclSimInfo_t* simInfo) {
     goto exit;
   }
 
+  if (mscclAvailable() && !mscclIsCaller()) {
+    NCCLCHECK(mscclGroupEnd());
+  }
+  
   if (ncclProfilerApiState.profilerGroupDepth > 0) {
     ncclProfilerApiState.profilerGroupDepth--;
   }

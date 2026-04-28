@@ -89,7 +89,6 @@ if(BUILD_TESTS)
     ${GTEST_INCLUDE_DIRS}
     ${PROJECT_BINARY_DIR}/include # for generated rccl.h header
     ${PROJECT_BINARY_DIR}/hipify/src/include  # for rccl_bfloat16.h
-    ${PROJECT_BINARY_DIR}/hipify/src/include/nccl_device  # for rccl_ptr.h
     ${PROJECT_BINARY_DIR}/hipify/gensrc # for rccl_bfloat16.h
     ${PROJECT_BINARY_DIR}/hipify/src # for graph/topo.h
     ${PROJECT_BINARY_DIR}/hipify/src/include/plugin # for recorder tests, nccl_tuner.h
@@ -201,18 +200,12 @@ if(BUILD_TESTS)
       BitOpsTests.cpp
       CommTests.cpp
       EnqueueCountTests.cpp
-      device/TestOp128.cpp
       common/main_fixtures.cpp
       common/EnvVars.cpp
       common/ProcessIsolatedTestRunner.cpp
-      common/TestChecks.cpp
     )
 
     add_executable(rccl-UnitTestsFixtures ${TEST_FIXTURE_SOURCE_FILES})
-
-    target_include_directories(rccl-UnitTestsFixtures PRIVATE
-      ${PROJECT_BINARY_DIR}/hipify/src/device
-    )
   endif()
 
   # rccl-UnitTestsFixturesDebug: Tests that access internal symbols compiled into
@@ -270,8 +263,7 @@ if(BUILD_TESTS)
       transport/P2pMPITests.cpp
       transport/NetMPITests.cpp
       transport/ShmMPITests.cpp
-      transport/NetIbMPI/GeneralTests.cpp
-      transport/NetIbMPI/NicFusionTests.cpp
+      transport/NetIbMPITests.cpp
       ImplicitLaunchOrderMPITests.cpp
       RegistrationMPITests.cpp
     )

@@ -37,10 +37,10 @@ namespace rocshmem {
  ******************************* WAVE FREE LIST ******************************
  *****************************************************************************/
 
-template <typename TYPE>
+template <typename TYPE, typename ALLOCATOR = HIPDefaultFinegrainedAllocator>
 class AtomicWFQueue {
 
-  using MutexProxyType = ABQLBlockMutexProxy;
+  using MutexProxyType = ABQLBlockMutexProxy<ALLOCATOR>;
   using MutexType = ABQLBlockMutex;
 
   /**
@@ -92,7 +92,7 @@ class AtomicWFQueue {
    * @param allocator Allocator to use for allocating internal structures of the
    * AtomicWFQueue.
    */
-  explicit AtomicWFQueue(const MemoryAllocator& allocator = *get_default_allocator());
+  explicit AtomicWFQueue(const ALLOCATOR& allocator = ALLOCATOR());
 
   /**
    * @brief Destroy the AtomicWFQueue object
@@ -288,7 +288,7 @@ class AtomicWFQueue {
    * @brief Internal memory allocator used to create internal structures of
    * the AtomicWFQueue.
    */
-  MemoryAllocator allocator_{};
+  ALLOCATOR allocator_{};
 
   /**
    * @brief Points to the index of first element in the AtomicWFQueue.
@@ -326,18 +326,16 @@ class AtomicWFQueue {
   MutexProxyType enqueue_mutex_;
 };
 
-template <typename TYPE>
+template <typename ALLOCATOR, typename TYPE>
 class AtomicWFQueueProxy {
-  using AtomicWFQueueT = AtomicWFQueue<TYPE>;
-  using ProxyT = DeviceProxy<HIPAllocator, AtomicWFQueueT>;
+  using AtomicWFQueueT = AtomicWFQueue<TYPE, ALLOCATOR>;
+  using ProxyT = DeviceProxy<ALLOCATOR, AtomicWFQueueT>;
 
  public:
   __host__ __device__ AtomicWFQueueT* get() { return proxy_.get(); }
 
-  explicit AtomicWFQueueProxy(const MemoryAllocator& alloc = HIPAllocator(),
-                              size_t num_elems = 1)
-      : allocator_{alloc}, proxy_{num_elems} {
-    new (proxy_.get()) AtomicWFQueueT(allocator_);
+  AtomicWFQueueProxy(size_t num_elems = 1) : proxy_{num_elems} {
+    new (proxy_.get()) AtomicWFQueueT();
   }
 
   AtomicWFQueueProxy(const AtomicWFQueueProxy& other) = delete;
@@ -355,7 +353,6 @@ class AtomicWFQueueProxy {
   }
 
  private:
-  MemoryAllocator allocator_{};
   ProxyT proxy_{};
 };
 }  // namespace rocshmem

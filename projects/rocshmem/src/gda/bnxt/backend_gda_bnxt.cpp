@@ -23,7 +23,6 @@
  *****************************************************************************/
 
 #include "gda/backend_gda.hpp"
-#include "log.hpp"
 #include "util.hpp"
 #include <unistd.h> // getpagesize()
 
@@ -35,10 +34,6 @@ void GDABackend::bnxt_initialize_gpu_qp(QueuePair* gpu_qp, int conn_num) {
   struct bnxt_re_dv_qp dv_qp;
   struct ibv_qp *ib_qp;
   int err;
-
-  NicDevice &nic = nic_for_qp(conn_num);
-  int pe = conn_num % num_pes;
-  int nic_idx = nic_idx_for_qp(conn_num);
 
   ib_qp = qps[conn_num];
 
@@ -68,23 +63,24 @@ void GDABackend::bnxt_initialize_gpu_qp(QueuePair* gpu_qp, int conn_num) {
   gpu_qp->bnxt_sq.depth      = bnxt_qps[conn_num].mem_info.sq_slots;
 
   if ((gpu_qp->bnxt_sq.depth % BNXT_RE_STATIC_WQE_BB) != 0) {
-    LOG_WARN("SQ depth not divisible by BNXT_RE_STATIC_WQE_BB. "
-             "There may be runtime errors.");
+    fprintf(stderr,
+            "[WARNING] SQ depth not divisible by BNXT_RE_STATIC_WQE_BB. "
+            "There may be runtime errors.\n");
   }
 
   gpu_qp->bnxt_sq.id          = ib_qp->qp_num;
   gpu_qp->bnxt_sq.msntbl      = bnxt_qps[conn_num].msntbl;
   gpu_qp->bnxt_sq.msn_tbl_sz  = bnxt_qps[conn_num].msn_tbl_sz;
   gpu_qp->bnxt_sq.psn_sz_log2 = std::log2(bnxt_qps[conn_num].mem_info.sq_psn_sz);
-  gpu_qp->bnxt_sq.mtu         = ibv_mtu_to_int(nic.portinfo.active_mtu);
+  gpu_qp->bnxt_sq.mtu         = ibv_mtu_to_int(portinfo.active_mtu);
 
   /* Export DB */
   CHECK_HIP(hipHostRegister(bnxt_qps[conn_num].db_region_attr->dbr, getpagesize(), hipHostRegisterDefault));
   CHECK_HIP(hipHostGetDevicePointer((void**) &gpu_qp->bnxt_dbr, bnxt_qps[conn_num].db_region_attr->dbr, 0));
 
   /* Export Memory Keys */
-  gpu_qp->lkey = nic.heap_mr->lkey;
-  gpu_qp->rkey = heap_rkey[pe * num_nics_ + nic_idx];
+  gpu_qp->lkey = heap_mr->lkey;
+  gpu_qp->rkey = heap_rkey[conn_num % num_pes];
 
   /* Export Inline Threshold */
   gpu_qp->inline_threshold = inline_threshold;
@@ -102,11 +98,9 @@ void GDABackend::bnxt_create_cqs(int cqe) {
 
   /* Create SCQs */
   for (size_t i = 0; i < qps.size(); i++) {
-    auto *ctx = nic_for_qp(i).context;
-
     /* Allocate SCQ mem */
     memset(&cq_attr, 0, sizeof(struct bnxt_re_dv_cq_attr));
-    bnxt_scqs[i].handle = bnxt_re_dv.cq_mem_alloc(ctx, cqe, &cq_attr);
+    bnxt_scqs[i].handle = bnxt_re_dv.cq_mem_alloc(context, cqe, &cq_attr);
     CHECK_NNULL(bnxt_scqs[i].handle, "bnxt_re_dv_cq_mem_alloc (SCQ)");
 
     /* We must force this to a value of 1 to use CQE Compression */
@@ -132,7 +126,7 @@ void GDABackend::bnxt_create_cqs(int cqe) {
     umem_attr.access_flags = IBV_ACCESS_LOCAL_WRITE;
     umem_attr.dmabuf_fd    = dmabuf_enabled ? bnxt_scqs[i].dmabuf_fd : 0;
 
-    bnxt_scqs[i].umem_handle = bnxt_re_dv.umem_reg(ctx, &umem_attr);
+    bnxt_scqs[i].umem_handle = bnxt_re_dv.umem_reg(context, &umem_attr);
     CHECK_NNULL(bnxt_scqs[i].umem_handle, "bnxt_re_dv_umem_reg(scq_buf)");
 
     /* Create SCQ */
@@ -141,17 +135,15 @@ void GDABackend::bnxt_create_cqs(int cqe) {
     cq_init_attr.umem_handle = bnxt_scqs[i].umem_handle;
     cq_init_attr.ncqe        = cq_attr.ncqe;
 
-    bnxt_scqs[i].cq = bnxt_re_dv.create_cq(ctx, &cq_init_attr);
-    CHECK_NNULL(bnxt_scqs[i].cq, "bnxt_re_dv_create_cq (SCQ)");
+    bnxt_scqs[i].cq = bnxt_re_dv.create_cq(context, &cq_init_attr);
+    CHECK_NNULL(bnxt_scqs[i].cq, "bnxt_re_dv_create_cq (SCQ) ");
   }
 
   /* Create RCQs */
   for (size_t i = 0; i < qps.size(); i++) {
-    auto *ctx = nic_for_qp(i).context;
-
     /* Allocate RCQ mem */
     memset(&cq_attr, 0, sizeof(struct bnxt_re_dv_cq_attr));
-    bnxt_rcqs[i].handle = bnxt_re_dv.cq_mem_alloc(ctx, cqe, &cq_attr);
+    bnxt_rcqs[i].handle = bnxt_re_dv.cq_mem_alloc(context, cqe, &cq_attr);
     CHECK_NNULL(bnxt_rcqs[i].handle, "bnxt_re_dv_cq_mem_alloc (RCQ)");
 
     /* Allocate RCQ UMEM */
@@ -174,7 +166,7 @@ void GDABackend::bnxt_create_cqs(int cqe) {
     umem_attr.access_flags = IBV_ACCESS_LOCAL_WRITE;
     umem_attr.dmabuf_fd    = dmabuf_enabled ? bnxt_rcqs[i].dmabuf_fd : 0;
 
-    bnxt_rcqs[i].umem_handle = bnxt_re_dv.umem_reg(ctx, &umem_attr);
+    bnxt_rcqs[i].umem_handle = bnxt_re_dv.umem_reg(context, &umem_attr);
     CHECK_NNULL(bnxt_rcqs[i].umem_handle, "bnxt_re_dv_umem_reg(rcq_buf)");
 
     /* Create RCQ */
@@ -183,7 +175,7 @@ void GDABackend::bnxt_create_cqs(int cqe) {
     cq_init_attr.umem_handle = bnxt_rcqs[i].umem_handle;
     cq_init_attr.ncqe        = cq_attr.ncqe;
 
-    bnxt_rcqs[i].cq = bnxt_re_dv.create_cq(ctx, &cq_init_attr);
+    bnxt_rcqs[i].cq = bnxt_re_dv.create_cq(context, &cq_init_attr);
     CHECK_NNULL(bnxt_rcqs[i].cq, "bnxt_re_dv_create_cq (RCQ)");
   }
 }
@@ -202,10 +194,6 @@ void GDABackend::bnxt_create_qps(int sq_length) {
   int dmabuf_enabled = ibv.is_dmabuf_supported();
 
   for (size_t i = 0; i < qps.size(); i++) {
-    NicDevice &nic = nic_for_qp(i);
-    auto *ctx = nic.context;
-    auto *pd  = nic.pd_orig;
-
     /* IB QP Init Attr */
     memset(&ib_qp_attr, 0, sizeof(struct ibv_qp_init_attr));
     ib_qp_attr.send_cq             = bnxt_scqs[i].cq;
@@ -220,7 +208,7 @@ void GDABackend::bnxt_create_qps(int sq_length) {
 
     /* Alloc qp_mem_info */
     memset(&bnxt_qps[i].mem_info, 0, sizeof(struct bnxt_re_dv_qp_mem_info));
-    err = bnxt_re_dv.qp_mem_alloc(pd, &ib_qp_attr, &bnxt_qps[i].mem_info);
+    err = bnxt_re_dv.qp_mem_alloc(pd_orig, &ib_qp_attr, &bnxt_qps[i].mem_info);
     CHECK_ZERO(err, "bnxt_re_dv_qp_mem_alloc");
 
     /* Alloc SQ */
@@ -249,7 +237,7 @@ void GDABackend::bnxt_create_qps(int sq_length) {
     umem_attr.access_flags = IBV_ACCESS_LOCAL_WRITE;
     umem_attr.dmabuf_fd    = dmabuf_enabled ? bnxt_qps[i].sq_dmabuf_fd : 0;
 
-    sq_umem_handle = bnxt_re_dv.umem_reg(ctx, &umem_attr);
+    sq_umem_handle = bnxt_re_dv.umem_reg(context, &umem_attr);
     CHECK_NNULL(sq_umem_handle, "bnxt_re_dv_umem_reg(sq)");
 
     /* Alloc RQ */
@@ -272,11 +260,11 @@ void GDABackend::bnxt_create_qps(int sq_length) {
     umem_attr.access_flags = IBV_ACCESS_LOCAL_WRITE;
     umem_attr.dmabuf_fd    = dmabuf_enabled ? bnxt_qps[i].rq_dmabuf_fd : 0;
 
-    rq_umem_handle = bnxt_re_dv.umem_reg(ctx, &umem_attr);
+    rq_umem_handle = bnxt_re_dv.umem_reg(context, &umem_attr);
     CHECK_NNULL(rq_umem_handle, "bnxt_re_dv_umem_reg(rq)");
 
     /* Alloc DPI */
-    bnxt_qps[i].db_region_attr = bnxt_re_dv.alloc_db_region(ctx);
+    bnxt_qps[i].db_region_attr = bnxt_re_dv.alloc_db_region(context);
     CHECK_NNULL(bnxt_qps[i].db_region_attr, "bnxt_re_dv_alloc_db_region");
 
     /* IB DV QP Init Attr */
@@ -306,7 +294,7 @@ void GDABackend::bnxt_create_qps(int sq_length) {
     bnxt_qps[i].attr.comp_mask      = bnxt_qps[i].mem_info.comp_mask;
 
     /* Alloc QP */
-    qps[i] = bnxt_re_dv.create_qp(pd, &bnxt_qps[i].attr);
+    qps[i] = bnxt_re_dv.create_qp(pd_orig, &bnxt_qps[i].attr);
     CHECK_NNULL(qps[i], "bnxt_re_dv_create_qp");
   }
 }
@@ -318,7 +306,7 @@ void* GDABackend::bnxt_dv_dlopen() {
     // Try hard-coded PATH
     dv_handle = dlopen("/usr/local/lib/libbnxt_re.so", RTLD_LAZY);
     if (!dv_handle) {
-      LOG_TRACE("Could not open libbnxt_re.so. Returning");
+      DPRINTF("Could not open libbnxt_re.so. Returning\n");
     }
   }
   return dv_handle;

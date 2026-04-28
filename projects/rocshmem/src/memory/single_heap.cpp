@@ -25,7 +25,7 @@
 #include "single_heap.hpp"
 
 #include <sstream>
-#include "log.hpp"
+#include "util.hpp"
 
 #include "dlmalloc.hpp"
 #include "default_allocator.hpp"
@@ -45,17 +45,13 @@ SingleHeap::SingleHeap() {
     heap_mem_ = new HeapMemoryType<HIPAllocatorUncached>(envvar::heap_size.get_value());
   }
 #if defined USE_HEAP_DEVICE_VMM_POSIX
-  else if (allocator->type == AllocatorTypeVMMPosix) {
+  else if (allocator->type == AllocatorTypeVMM) {
     heap_mem_ = new HeapMemoryType<HIPAllocatorVMMPosixFd>(envvar::heap_size.get_value());
   }
 #endif
-#if defined USE_HEAP_DEVICE_VMM_FABRIC
-  else if (allocator->type == AllocatorTypeVMMFabric) {
-    heap_mem_ = new HeapMemoryType<HIPAllocatorVMMFabric>(envvar::heap_size.get_value());
-  }
-#endif
   else {
-    LOG_ERROR_ABORT("Unknown allocator type");
+    printf("Unknown allocator type\n");
+    abort();
   }
   assert(heap_mem_ != nullptr);
 
@@ -67,17 +63,13 @@ SingleHeap::SingleHeap() {
     strat_ = new DLAllocatorStrategy<HeapMemoryType<HIPAllocatorUncached>>(reinterpret_cast<HeapMemoryType<HIPAllocatorUncached> *>(heap_mem_));
   }
 #if defined USE_HEAP_DEVICE_VMM_POSIX
-  else if (heap_mem_->type_ == AllocatorTypeVMMPosix){
+  else if (heap_mem_->type_ == AllocatorTypeVMM){
     strat_ = new DLAllocatorStrategy<HeapMemoryType<HIPAllocatorVMMPosixFd>>(reinterpret_cast<HeapMemoryType<HIPAllocatorVMMPosixFd> *>(heap_mem_));
   }
 #endif
-#if defined USE_HEAP_DEVICE_VMM_FABRIC
-  else if (heap_mem_->type_ == AllocatorTypeVMMFabric){
-    strat_ = new DLAllocatorStrategy<HeapMemoryType<HIPAllocatorVMMFabric>>(reinterpret_cast<HeapMemoryType<HIPAllocatorVMMFabric> *>(heap_mem_));
-  }
-#endif
   else {
-    LOG_ERROR_ABORT("Unknown allocator type");
+    printf("Unknown allocator type\n");
+    abort();
   }
 }
 

@@ -24,7 +24,6 @@
 
 #include "ibv_wrapper.hpp"
 #include "envvar.hpp"
-#include "log.hpp"
 #include "util.hpp"
 #include "memory/default_allocator.hpp"
 
@@ -48,14 +47,14 @@ IBVWrapper::IBVWrapper() {
     ibv_handle = dlopen("/usr/lib/x86_64-linux-gnu/libibverbs.so", RTLD_NOW);
 
     if (!ibv_handle) {
-      LOG_WARN("Could not open libibverbs. Disabled.");
+      DPRINTF("Could not open libibverbs. Disabled.\n");
       return;
     }
   }
 
   err = init_function_table();
   if (err != ROCSHMEM_SUCCESS) {
-    LOG_WARN("Could not construct InfiniBand Verbs function table. Disabled.");
+    DPRINTF("Could not construct InfiniBand Verbs function table. Disabled.\n");
     return;
   }
 
@@ -87,13 +86,13 @@ void IBVWrapper::init_dmabuf_support_flag() {
   }
 
   if (ibv.reg_dmabuf_mr == NULL) {
-    LOG_TRACE("ibv_reg_dmabuf_mr not present in verbs library");
+    DPRINTF("ibv_reg_dmabuf_mr not present in verbs library");
     dmabuf_is_supported = 0;
     return;
   }
 
   if (uname(&utsname) == -1) {
-    LOG_TRACE("could not get kernel name");
+    DPRINTF("could not get kernel name");
     dmabuf_is_supported = 0;
     return;
   }
@@ -102,7 +101,7 @@ void IBVWrapper::init_dmabuf_support_flag() {
            "/boot/config-%s", utsname.release);
   fp = fopen(kernel_conf_file, "r");
   if (fp == NULL) {
-    LOG_TRACE("could not open kernel conf file %s error: %m",
+    DPRINTF("could not open kernel conf file %s error: %m",
             kernel_conf_file);
     dmabuf_is_supported = 0;
     return;
@@ -230,13 +229,13 @@ struct ibv_mr* IBVWrapper::reg_mr(struct ibv_pd* pd, void* addr, size_t length, 
     uint64_t offset = 0;
     int fd = 0;
 
-    LOG_TRACE("Using ibv_reg_dmabuf_mr()");
+    DPRINTF("Using ibv_reg_dmabuf_mr()\n");
 
     // Use provided allocator or fall back to default allocator
     HIPAllocator* alloc = (allocator != nullptr) ? allocator : get_default_allocator();
     hipError_t err = alloc->GetDmabufHandle(addr, length, &fd, &offset);
     if (err != hipSuccess) {
-      LOG_ERROR("Failed to get dmabuf handle: %s", hipGetErrorString(err));
+      fprintf(stderr, "Failed to get dmabuf handle: %s\n", hipGetErrorString(err));
       return nullptr;
     }
 
@@ -246,7 +245,7 @@ struct ibv_mr* IBVWrapper::reg_mr(struct ibv_pd* pd, void* addr, size_t length, 
 
     return mr;
   } else {
-    LOG_TRACE("Using ibv_reg_mr(%p, %zd)", addr, length);
+    DPRINTF("Using ibv_reg_mr()\n");
 
     // Passthrough function for ibv_reg_mr macro in verbs.h
     int is_access_const = __builtin_constant_p(((int)(access) & IBV_ACCESS_OPTIONAL_RANGE) == 0);

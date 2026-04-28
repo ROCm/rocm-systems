@@ -468,4 +468,5 @@ ncclResult_t ncclProxyStop(struct ncclComm* comm);
 ncclResult_t ncclProxyShmUnlink(struct ncclComm* comm);
 ncclResult_t ncclProxyDestroy(struct ncclComm* comm);
 
+ncclResult_t mscclSaveProxy(struct ncclComm* comm, struct ncclChannel* channel, int type, int peer, struct ncclProxyOp* op, int connIndex);
 #endif

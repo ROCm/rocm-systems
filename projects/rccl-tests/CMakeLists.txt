@@ -39,8 +39,7 @@ set(DEFAULT_GPUS
       gfx1102
       gfx1151
       gfx1200
-      gfx1201
-      gfx1250)
+      gfx1201)
 
 # Get additional packages required
 include(CheckIncludeFiles)

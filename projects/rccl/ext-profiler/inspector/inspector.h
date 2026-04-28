@@ -139,7 +139,6 @@ struct inspectorCollInfo {
   uint32_t nChannels;
   uint32_t nKernelChStarted;
   uint32_t nKernelChCompleted;
-  bool collStopFired;  // RCCL: set when ncclProfileColl stop fires; guards dump trigger ordering
   pthread_rwlock_t guard;
   struct inspectorKernelChInfo kernelCh[MAX_CHANNELS];
   struct inspectorEventTrkCollInfo collEvtTrk;

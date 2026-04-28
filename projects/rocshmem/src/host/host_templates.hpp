@@ -27,7 +27,6 @@
 
 #include "rocshmem/rocshmem_config.h"  // NOLINT(build/include_subdir)
 #include "host_helpers.hpp"
-#include "log.hpp"
 #include "memory/window_info.hpp"
 #include "team.hpp"
 
@@ -39,21 +38,21 @@ namespace rocshmem {
 template <typename T>
 __host__ void HostInterface::p(T* dest, T value, int pe,
                                WindowInfo* window_info) {
-  LOG_API("host::p (dest=%p, pe=%d)", dest, pe);
+  DPRINTF("Function: host_p\n");
   putmem(dest, &value, sizeof(T), pe, window_info);
 }
 
 template <typename T>
 __host__ void HostInterface::put(T* dest, const T* source, size_t nelems,
                                  int pe, WindowInfo* window_info) {
-  LOG_API("host::put (dest=%p, source=%p, nelems=%zd, pe=%d)", dest, source, nelems, pe);
+  DPRINTF("Function: host_put\n");
   putmem(dest, source, sizeof(T) * nelems, pe, window_info);
 }
 
 template <typename T>
 __host__ void HostInterface::put_nbi(T* dest, const T* source, size_t nelems,
                                      int pe, WindowInfo* window_info) {
-  LOG_API("host::put_nbi (dest=%p, source=%p, nelems=%zd, pe=%d)", dest, source, nelems, pe);
+  DPRINTF("Function: host_put_nbi\n");
   putmem_nbi(dest, source, sizeof(T) * nelems, pe, window_info);
 }
 
@@ -63,7 +62,7 @@ __host__ T HostInterface::g(const T* source, int pe, WindowInfo* window_info) {
   if (!window_info_mpi) {
     abort();
   }
-  LOG_API("host::g (source=%p, pe=%d)", source, pe);
+  DPRINTF("Function: host_g\n");
 
   T ret{};
 
@@ -83,14 +82,14 @@ __host__ T HostInterface::g(const T* source, int pe, WindowInfo* window_info) {
 template <typename T>
 __host__ void HostInterface::get(T* dest, const T* source, size_t nelems,
                                  int pe, WindowInfo* window_info) {
-  LOG_API("host::get (dest=%p, source=%p, nelems=%zd, pe=%d)", dest, source, nelems, pe);
+  DPRINTF("Function: host_get\n");
   getmem(dest, source, sizeof(T) * nelems, pe, window_info);
 }
 
 template <typename T>
 __host__ void HostInterface::get_nbi(T* dest, const T* source, size_t nelems,
                                      int pe, WindowInfo* window_info) {
-  LOG_API("host::get_nbi (dest=%p, source=%p, nelems=%zd, pe=%d)", dest, source, nelems, pe);
+  DPRINTF("Function: host_get_nbi\n");
   getmem_nbi(dest, source, sizeof(T) * nelems, pe, window_info);
 }
 
@@ -122,7 +121,7 @@ __host__ MPI_Comm HostInterface::get_mpi_comm(int pe_start, int log_pe_stride,
 
   auto it{comm_map.find(key)};
   if (it != comm_map.end()) {
-    LOG_TRACE("Using cached communicator");
+    DPRINTF("Using cached communicator\n");
     return it->second;
   }
 
@@ -151,7 +150,7 @@ __host__ MPI_Comm HostInterface::get_mpi_comm(int pe_start, int log_pe_stride,
   /*
    * Cache the new communicator
    */
-  LOG_TRACE("Created a new communicator. Now caching it");
+  DPRINTF("Created a new communicator. Now caching it\n");
   comm_map.insert(std::pair<ActiveSetKey, MPI_Comm>(key, active_set_comm));
 
   return active_set_comm;
@@ -161,7 +160,7 @@ template <typename T>
 __host__ void HostInterface::broadcast_internal(MPI_Comm mpi_comm, T* dest,
                                                 const T* source, int nelems,
                                                 int pe_root) {
-  LOG_API("host::broadcast_internal (dest=%p, source=%p, nelems=%d, pe_root=%d)", dest, source, nelems, pe_root);
+  DPRINTF("Function: host_broadcast_internal\n");
 
   /*
    * Choose the right pointer for my buffer depending
@@ -194,7 +193,7 @@ __host__ void HostInterface::broadcast(T* dest, const T* source, int nelems,
                                        int pe_root, int pe_start,
                                        int log_pe_stride, int pe_size,
                                        [[maybe_unused]] long* p_sync) {
-  LOG_API("host::broadcast (dest=%p, source=%p, nelems=%d, pe_root=%d)", dest, source, nelems, pe_root);
+  DPRINTF("Function: host_broadcast\n");
 
   /*
    * Get an MPI communicator for active set of PEs
@@ -212,7 +211,7 @@ template <typename T>
 __host__ void HostInterface::broadcast(rocshmem_team_t team, T* dest,
                                        const T* source, int nelems,
                                        int pe_root) {
-  LOG_API("host::broadcast (dest=%p, source=%p, nelems=%d, pe_root=%d)", dest, source, nelems, pe_root);
+  DPRINTF("Function: Team-based host_broadcast\n");
 
   /*
    * Get the MPI communicator of this team
@@ -242,15 +241,15 @@ __host__ inline MPI_Op HostInterface::get_mpi_op(ROCSHMEM_OP Op) {
     case ROCSHMEM_XOR:
       return MPI_BXOR;
     default:
-      LOG_ERROR_ABORT("Unknown rocSHMEM op MPI conversion %d", Op);
+      fprintf(stderr, "Unknown rocSHMEM op MPI conversion %d\n", Op);
+      abort();
       return 0;
   }
 }
 
 template <typename T>
 __host__ inline MPI_Datatype HostInterface::get_mpi_type() {
-  LOG_ERROR("Unknown or unimplemented datatype");
-  return 0;
+  fprintf(stderr, "Unknown or unimplemented datatype \n");
 }
 
 #define GET_MPI_TYPE(T, MPI_T)                                    \
@@ -352,7 +351,7 @@ __host__ T HostInterface::amo_fetch_cas(void* dst, T value, T cond, int pe,
 template <typename T, ROCSHMEM_OP Op>
 __host__ void HostInterface::to_all_internal(MPI_Comm mpi_comm, T* dest,
                                              const T* source, int nreduce) {
-  LOG_API("host::to_all_internal (dest=%p, source=%p, nreduce=%d)", dest, source, nreduce);
+  DPRINTF("Function: host_to_all_internal\n");
 
   MPI_Op mpi_op{get_mpi_op(Op)};
 
@@ -380,7 +379,7 @@ __host__ void HostInterface::to_all(T* dest, const T* source, int nreduce,
                                     int pe_start, int log_pe_stride,
                                     int pe_size, [[maybe_unused]] T* p_wrk,
                                     [[maybe_unused]] long* p_sync) {
-  LOG_API("host::to_all (dest=%p, source=%p, nreduce=%d)", dest, source, nreduce);
+  DPRINTF("Function: host_to_all\n");
 
   /*
    * Get an MPI communicator for active set of PEs
@@ -397,7 +396,7 @@ __host__ void HostInterface::to_all(T* dest, const T* source, int nreduce,
 template <typename T, ROCSHMEM_OP Op>
 __host__ int HostInterface::reduce(rocshmem_team_t team, T* dest,
                                     const T* source, int nreduce) {
-  LOG_API("host::reduce (dest=%p, source=%p, nreduce=%d)", dest, source, nreduce);
+  DPRINTF("Function: Team-based host_reduce\n");
 
   /*
    * Get the MPI communicator of this team
@@ -471,7 +470,7 @@ __host__ void HostInterface::wait_until(T *ivars, int cmp, T val,
   if (!window_info_mpi) {
     abort();
   }
-  LOG_API("host::wait_until (ivars=%p, cmp=%d)", ivars, cmp);
+  DPRINTF("Function: host_wait_until\n");
 
   /*
    * Find the offset of this memory in the window
@@ -529,7 +528,7 @@ __host__ size_t HostInterface::wait_until_any(T* ivars, size_t nelems,
                                               const int *status,
                                               int cmp, T val,
                                               WindowInfo* window_info) {
-  LOG_API("host::wait_until_any (ivars=%p, nelems=%zd, cmp=%d)", ivars, nelems, cmp);
+  DPRINTF("Function: host_wait_until_any\n");
 
   // zero nelems error condition
   if (!nelems) {
@@ -561,7 +560,7 @@ __host__ void HostInterface::wait_until_all(T* ivars, size_t nelems,
                                             const int *status,
                                             int cmp, T val,
                                             WindowInfo* window_info) {
-  LOG_API("host::wait_until_all (ivars=%p, nelems=%zd, cmp=%d)", ivars, nelems, cmp);
+  DPRINTF("Function: host_wait_until_all\n");
 
   // zero nelems error condition
   if (!nelems) {
@@ -590,7 +589,7 @@ __host__ size_t HostInterface::wait_until_some(T* ivars, size_t nelems,
                                              const int *status,
                                              int cmp, T val,
                                              WindowInfo* window_info) {
-  LOG_API("host::wait_until_some (ivars=%p, nelems=%zd, cmp=%d)", ivars, nelems, cmp);
+  DPRINTF("Function: host_wait_until_some\n");
 
   // zero nelems error condition
   if (!nelems) {
@@ -627,7 +626,7 @@ __host__ void HostInterface::wait_until_all_vector(T* ivars, size_t nelems,
                                                    const int *status,
                                                    int cmp, T* vals,
                                                    WindowInfo* window_info) {
-  LOG_API("host::wait_until_all_vector (ivars=%p, nelems=%zd, cmp=%d)", ivars, nelems, cmp);
+  DPRINTF("Function: host_wait_until_all_vector\n");
 
   // zero nelems error condition
   if (!nelems) {
@@ -655,7 +654,7 @@ __host__ size_t HostInterface::wait_until_any_vector(T* ivars, size_t nelems,
                                                      const int *status,
                                                      int cmp, T* vals,
                                                      WindowInfo* window_info) {
-  LOG_API("host::wait_until_any_vector (ivars=%p, nelems=%zd, cmp=%d)", ivars, nelems, cmp);
+  DPRINTF("Function: host_wait_until_any_vector\n");
 
   // zero nelems error condition
   if (!nelems) {
@@ -689,7 +688,7 @@ __host__ size_t HostInterface::wait_until_some_vector(T* ivars, size_t nelems,
                                                       const int *status,
                                                       int cmp, T* vals,
                                                       WindowInfo* window_info) {
-  LOG_API("host::wait_until_some_vector (ivars=%p, nelems=%zd, cmp=%d)", ivars, nelems, cmp);
+  DPRINTF("Function: host_wait_until_some_vector\n");
 
   // zero nelems error condition
   if (!nelems) {
@@ -728,7 +727,7 @@ __host__ int HostInterface::test(T* ivars, int cmp, T val,
   if (!window_info_mpi) {
     abort();
   }
-  LOG_API("host::test (ivars=%p, cmp=%d)", ivars, cmp);
+  DPRINTF("Function: host_test\n");
 
   /*
    * Find the offset of this memory in the window

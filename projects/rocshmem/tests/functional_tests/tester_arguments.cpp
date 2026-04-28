@@ -229,8 +229,6 @@ void TesterArguments::get_arguments() {
     // On-stream tests - support any number of PEs
     case TeamAlltoallmemOnStreamTestType:
     case BarrierAllOnStreamTestType:
-    case QuietOnStreamTestType:
-    case SyncAllOnStreamTestType:
     case TeamBroadcastmemOnStreamTestType:
     case GetmemOnStreamTestType:
     case PutmemOnStreamTestType:
@@ -246,7 +244,6 @@ void TesterArguments::get_arguments() {
     case FloodFAddTestType:
     case FloodWaitAmoTestType:
     case DeviceBitcodeTestType:
-    case TeamCtxSharedInfraTestType:
       requires_two_pes = false;
       break;
     default:

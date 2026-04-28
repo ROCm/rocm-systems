@@ -34,7 +34,6 @@
 #include <iostream>
 
 #include "envvar.hpp"
-#include "log.hpp"
 #include "utils.hpp"
 #include "util.hpp"
 
@@ -115,7 +114,7 @@ uint64_t computeHostHash(void) {
 
   // Make sure the string is terminated
   hostHash[sizeof(hostHash) - 1] = '\0';
-  LOG_TRACE("unique hostname '%s'", hostHash);
+  DPRINTF("unique hostname '%s'", hostHash);
   return getHash(hostHash, strlen(hostHash));
 }
 
@@ -143,7 +142,7 @@ uint64_t computePidHash(void) {
   if (len < 0) len = 0;
 
   pname[plen + len] = '\0';
-  LOG_TRACE("unique PID '%s'", pname);
+  DPRINTF("unique PID '%s'", pname);
 
   return getHash(pname, strlen(pname));
 }
@@ -255,7 +254,7 @@ void Timer::reset() { set(timeout_); }
 
 void Timer::print(const std::string& name) {
   auto us = elapsed();
-  LOG_INFO("%s : %ld", name.c_str(), us);
+  printf("%s : %ld\n", name.c_str(), us);
 }
 
 ScopedTimer::ScopedTimer(const std::string& name) : name_(name) {}

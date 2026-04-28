@@ -10,6 +10,8 @@
 #include "core__funcs.h"
 #include "comm__types.h"
 
+#define __CUDACC__ 0
+
 #if __cplusplus
 
 template<typename T>

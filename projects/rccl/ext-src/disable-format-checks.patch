@@ -1,0 +1,15 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index a94b634..09ca1fa 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -92,7 +92,9 @@ else()
+ endif()
+
+ # Format targets
+-include(${PROJECT_SOURCE_DIR}/cmake/AddFormatTargets.cmake)
++if(MSCCLPP_ENABLE_FORMAT_CHECKS)
++  include(${PROJECT_SOURCE_DIR}/cmake/AddFormatTargets.cmake)
++endif()
+
+ # Find ibverbs and libnuma
+ find_package(IBVerbs)

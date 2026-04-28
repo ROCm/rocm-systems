@@ -23,8 +23,6 @@
  *****************************************************************************/
 
 #include "hip_allocator.hpp"
-#include "log.hpp"
-#include "hip_allocator_vmm_common.hpp"
 
 #if HIP_VERSION >= 70000000
 
@@ -43,19 +41,78 @@ std::map<void*, HIPAllocatorVMMPosixFd::VMMAllocationInfo> HIPAllocatorVMMPosixF
 
 hipError_t HIPAllocatorVMMPosixFd::VMMAlloc(void** ptr, size_t size)
 {
-  VMMCommonAllocationInfo common_info;
-  hipError_t err = VMMAllocCommon(ptr, size, hipMemHandleTypePosixFileDescriptor, &common_info);
+  hipError_t err;
+  hipMemGenericAllocationHandle_t handle;
+  hipMemAllocationProp prop = {};
+#if HIP_VERSION < 7020000
+  prop.type = hipMemAllocationTypePinned;
+#else
+  prop.type = hipMemAllocationTypeUncached;
+#endif
+  prop.location.type = hipMemLocationTypeDevice;
+
+  // Get current device ID
+  int device_id;
+  err = hipGetDevice(&device_id);
+  if (err != hipSuccess) return err;
+
+  prop.location.id = device_id;
+  prop.requestedHandleTypes = hipMemHandleTypePosixFileDescriptor;
+
+  // Get allocation granularity
+  size_t granularity;
+  err = hipMemGetAllocationGranularity(&granularity, &prop, hipMemAllocationGranularityMinimum);
+  if (err != hipSuccess) return err;
+
+  // Round up size to granularity
+  size_t alloc_size = ((size + granularity - 1) / granularity) * granularity;
+
+  // Create memory handle
+  err = hipMemCreate(&handle, alloc_size, &prop, 0);
+  if (err != hipSuccess) return err;
+
+  // Reserve address space
+  void* dev_ptr = nullptr;
+  err = hipMemAddressReserve(&dev_ptr, alloc_size, 0, 0, 0);
   if (err != hipSuccess) {
+    (void)hipMemRelease(handle);
     return err;
   }
 
-  // Store allocator-specific metadata
-  VMMAllocationInfo info;
-  info.handle = common_info.handle;
-  info.size = common_info.size;
-  info.exported_fd = -1;  // Not yet exported
-  allocations_[*ptr] = info;
+  // Map memory
+  err = hipMemMap(dev_ptr, alloc_size, 0, handle, 0);
+  if (err != hipSuccess) {
+    (void)hipMemAddressFree(dev_ptr, alloc_size);
+    (void)hipMemRelease(handle);
+    return err;
+  }
 
+  // Set access permissions
+  hipMemAccessDesc accessDesc[2];
+  accessDesc[0].location.type = hipMemLocationTypeDevice;
+  accessDesc[0].location.id = device_id;
+  accessDesc[0].flags = hipMemAccessFlagsProtReadWrite;
+
+  accessDesc[1].location.type = hipMemLocationTypeHost;
+  accessDesc[1].location.id = 0;
+  accessDesc[1].flags = hipMemAccessFlagsProtReadWrite;
+
+  err = hipMemSetAccess(dev_ptr, alloc_size, accessDesc, 2);
+  if (err != hipSuccess) {
+    (void)hipMemUnmap(dev_ptr, alloc_size);
+    (void)hipMemAddressFree(dev_ptr, alloc_size);
+    (void)hipMemRelease(handle);
+    return err;
+  }
+
+  // Success - store allocation info and set output pointer
+  VMMAllocationInfo info;
+  info.handle = handle;
+  info.size = alloc_size;
+  info.exported_fd = -1;  // Not yet exported
+  allocations_[dev_ptr] = info;
+
+  *ptr = dev_ptr;
   return hipSuccess;
 }
 
@@ -72,19 +129,27 @@ hipError_t HIPAllocatorVMMPosixFd::VMMFree(void* ptr)
   }
 
   VMMAllocationInfo& info = it->second;
+  hipError_t err;
 
   // Close exported fd if it was exported for IPC
   if (info.exported_fd != -1) {
     close(info.exported_fd);
   }
 
-  // Convert to common allocation info
-  VMMCommonAllocationInfo common_info;
-  common_info.handle = info.handle;
-  common_info.size = info.size;
+  // Unmap memory
+  err = hipMemUnmap(ptr, info.size);
+  if (err != hipSuccess) {
+    return err;
+  }
 
-  // Use common free function
-  hipError_t err = VMMFreeCommon(ptr, &common_info);
+  // Free address space
+  err = hipMemAddressFree(ptr, info.size);
+  if (err != hipSuccess) {
+    return err;
+  }
+
+  // Release handle
+  err = hipMemRelease(info.handle);
   if (err != hipSuccess) {
     return err;
   }
@@ -96,7 +161,7 @@ hipError_t HIPAllocatorVMMPosixFd::VMMFree(void* ptr)
 }
 
 HIPAllocatorVMMPosixFd::HIPAllocatorVMMPosixFd() : HIPAllocator(VMMAlloc, VMMFree) {
-  type = AllocatorTypeVMMPosix;
+  type = AllocatorTypeVMM;
 
   // Check Linux kernel version (recommends >= 6.8)
   struct utsname kernel_info;
@@ -104,8 +169,9 @@ HIPAllocatorVMMPosixFd::HIPAllocatorVMMPosixFd() : HIPAllocator(VMMAlloc, VMMFre
     int major = 0, minor = 0;
     if (sscanf(kernel_info.release, "%d.%d", &major, &minor) == 2) {
       if (major < 6 || (major == 6 && minor < 8)) {
-        LOG_WARN("Linux kernel version %d.%d may not work correctly with VMM POSIX allocator. "
-                 "Kernel version 6.8 or higher is recommended.", major, minor);
+        fprintf(stderr, "ROCSHMEM_WARNING: Linux kernel version %d.%d may not work correctly with VMM POSIX allocator. "
+                "Kernel version 6.8 or higher is recommended.\n",
+                major, minor);
       }
     }
   }
@@ -113,16 +179,18 @@ HIPAllocatorVMMPosixFd::HIPAllocatorVMMPosixFd() : HIPAllocator(VMMAlloc, VMMFre
   // Allow other processes to trace this process for pidfd_getfd syscall
   // This avoids the need for CAP_SYS_PTRACE capability
   if (prctl(PR_SET_PTRACER, PR_SET_PTRACER_ANY, 0, 0, 0) != 0) {
-    LOG_WARN("Failed to set PR_SET_PTRACER: %s. "
-             "IPC operations may require CAP_SYS_PTRACE capability.", strerror(errno));
+    fprintf(stderr, "ROCSHMEM_WARNING: Failed to set PR_SET_PTRACER: %s. "
+            "IPC operations may require CAP_SYS_PTRACE capability.\n",
+            strerror(errno));
   }
 
   // Check if the device supports VMM
   int device_id;
   hipError_t err = hipGetDevice(&device_id);
   if (err != hipSuccess) {
-    LOG_ERROR_ABORT("Failed to get current device for VMM support check: %s",
-                    hipGetErrorString(err));
+    fprintf(stderr, "ROCSHMEM_ERROR: Failed to get current device for VMM support check: %s\n",
+            hipGetErrorString(err));
+    abort();
   }
 
   int vmm_supported = 0;
@@ -130,14 +198,17 @@ HIPAllocatorVMMPosixFd::HIPAllocatorVMMPosixFd() : HIPAllocator(VMMAlloc, VMMFre
                                hipDeviceAttributeVirtualMemoryManagementSupported,
                                device_id);
   if (err != hipSuccess) {
-    LOG_ERROR_ABORT("Failed to query VMM support attribute: %s",
-                    hipGetErrorString(err));
+    fprintf(stderr, "ROCSHMEM_ERROR: Failed to query VMM support attribute: %s\n",
+            hipGetErrorString(err));
+    abort();
   }
 
   if (!vmm_supported) {
-    LOG_ERROR_ABORT("Virtual Memory Management (VMM) is not supported on device %d. "
-                    "The USE_HEAP_DEVICE_VMM_POSIX allocator requires a GPU with VMM support. "
-                    "Please use a different memory allocator.", device_id);
+    fprintf(stderr, "ROCSHMEM_ERROR: Virtual Memory Management (VMM) is not supported on device %d. "
+            "The USE_HEAP_DEVICE_VMM_POSIX allocator requires a GPU with VMM support. "
+            "Please use a different memory allocator.\n",
+            device_id);
+    abort();
   }
 }
 
@@ -153,7 +224,7 @@ hipError_t HIPAllocatorVMMPosixFd::GetIpcHandle(void *dev_ptr, void *handle)
     return hipErrorInvalidValue;
   }
 
-  HIPIpcMemHandlePosix_t* posix_handle = reinterpret_cast<HIPIpcMemHandlePosix_t*>(handle);
+  hipIpcMemHandlePosix_t* posix_handle = reinterpret_cast<hipIpcMemHandlePosix_t*>(handle);
   hipError_t err;
 
   // Check if we already exported this allocation
@@ -186,7 +257,7 @@ hipError_t HIPAllocatorVMMPosixFd::OpenIpcHandle(void **dev_ptr, void *handle)
     return hipErrorInvalidValue;
   }
 
-  HIPIpcMemHandlePosix_t* posix_handle = reinterpret_cast<HIPIpcMemHandlePosix_t*>(handle);
+  hipIpcMemHandlePosix_t* posix_handle = reinterpret_cast<hipIpcMemHandlePosix_t*>(handle);
   int fd = static_cast<int>(posix_handle->fd);
   int pid = static_cast<int>(posix_handle->pid);
   size_t size = posix_handle->size;
@@ -196,10 +267,10 @@ hipError_t HIPAllocatorVMMPosixFd::OpenIpcHandle(void **dev_ptr, void *handle)
   int pid_fd = static_cast<int>(syscall(__NR_pidfd_open, pid, 0));
   if (pid_fd == -1) {
     int err_code = errno;
-    LOG_ERROR("pidfd_open failed for pid %d: %s (errno=%d). "
-              "A common reason is lacking CAP_SYS_PTRACE capability. "
-              "You can resolve it e.g. with `sudo setcap 'cap_sys_ptrace=ep' <executable>`",
-              pid, strerror(err_code), err_code);
+    fprintf(stderr, "pidfd_open failed for pid %d: %s (errno=%d)\n",
+            pid, strerror(err_code), err_code);
+    fprintf(stderr, "A common reason is lacking CAP_SYS_PTRACE capability.\n");
+    fprintf(stderr, "You can resolve it e.g. with `sudo setcap 'cap_sys_ptrace=ep' <executable>` \n");
     return hipErrorInvalidValue;
   }
 
@@ -207,10 +278,10 @@ hipError_t HIPAllocatorVMMPosixFd::OpenIpcHandle(void **dev_ptr, void *handle)
   int open_fd = static_cast<int>(syscall(__NR_pidfd_getfd, pid_fd, fd, 0));
   if (open_fd == -1) {
     int err_code = errno;
-    LOG_ERROR("pidfd_getfd failed for pid %d, fd %d: %s (errno=%d). "
-              "A common reason is lacking CAP_SYS_PTRACE capability. "
-              "You can resolve it e.g. with `sudo setcap 'cap_sys_ptrace=ep' <executable>`",
-              pid, fd, strerror(err_code), err_code);
+    fprintf(stderr, "pidfd_getfd failed for pid %d, fd %d: %s (errno=%d)\n",
+            pid, fd, strerror(err_code), err_code);
+    fprintf(stderr, "A common reason is lacking CAP_SYS_PTRACE capability\n");
+    fprintf(stderr, "You can resolve it e.g. with `sudo setcap 'cap_sys_ptrace=ep' <executable>` \n");
     close(pid_fd);
     return hipErrorInvalidValue;
   }
@@ -332,7 +403,7 @@ hipError_t HIPAllocatorVMMPosixFd::CloseIpcHandle(void *dev_ptr)
 
 size_t HIPAllocatorVMMPosixFd::GetIpcHandleSize()
 {
-  return sizeof(HIPIpcMemHandlePosix_t);
+  return sizeof(hipIpcMemHandlePosix_t);
 }
 
 HIPIpcHandleVec* HIPAllocatorVMMPosixFd::AllocateIpcHandleVec(int num_elems)
@@ -344,19 +415,34 @@ HIPIpcHandleVec* HIPAllocatorVMMPosixFd::AllocateIpcHandleVec(int num_elems)
 
 hipError_t HIPAllocatorVMMPosixFd::GetDmabufHandle(void *dev_ptr, size_t size, int *dmabuf_fd, uint64_t *dmabuf_offset)
 {
+  if (dev_ptr == nullptr || dmabuf_fd == nullptr || dmabuf_offset == nullptr) {
+    return hipErrorInvalidValue;
+  }
+
   // Find allocation info
   auto it = allocations_.find(dev_ptr);
   if (it == allocations_.end()) {
     return hipErrorInvalidValue;
   }
 
-  // Convert to common allocation info
-  VMMCommonAllocationInfo common_info;
-  common_info.handle = it->second.handle;
-  common_info.size = it->second.size;
+  // Verify size doesn't exceed allocation size
+  if (size > it->second.size) {
+    return hipErrorInvalidValue;
+  }
 
-  // Use common dmabuf export function
-  return VMMGetDmabufHandleCommon(dev_ptr, size, &common_info, dmabuf_fd, dmabuf_offset);
+  // Export the VMM handle to a shareable file descriptor (dmabuf)
+  int fd;
+  hipError_t err = hipMemExportToShareableHandle(&fd, it->second.handle,
+                                                 hipMemHandleTypePosixFileDescriptor, 0);
+  if (err != hipSuccess) {
+    return err;
+  }
+
+  // For VMM allocations, the offset is always 0 since we're exporting the base allocation
+  *dmabuf_fd = fd;
+  *dmabuf_offset = 0;
+
+  return hipSuccess;
 }
 
 }  // namespace rocshmem

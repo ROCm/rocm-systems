@@ -31,6 +31,7 @@
 #include "TestChecks.hpp"
 #include <cstdlib>
 #include <sstream>
+#include <fstream>
 
 #ifdef MPI_TESTS_ENABLED
 
@@ -178,12 +179,24 @@ protected:
         return (graphReg && std::string(graphReg) == "1");
     }
 
-    bool isPerRankLoggingEnabled() { return MPIHelpers::isPerRankLoggingEnabled(); }
+    bool isPerRankLoggingEnabled()
+    {
+        const char* env = getenv("RCCL_MPI_LOG_ALL_RANKS");
+        return (env && std::string(env) == "1");
+    }
 
     // Log File Access
     std::string readRankLogFile()
     {
-        return MPIHelpers::readRankLogFile(getTestMpiRank());
+        std::string logPath = MPIHelpers::getRankLogFilePath(getTestMpiRank());
+        std::ifstream file(logPath);
+        if (!file.is_open()) {
+            TEST_WARN("Could not open rank log file: %s", logPath.c_str());
+            return "";
+        }
+        std::ostringstream ss;
+        ss << file.rdbuf();
+        return ss.str();
     }
 
     REGLogChecker getLogChecker()

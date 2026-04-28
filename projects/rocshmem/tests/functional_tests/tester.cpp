@@ -38,7 +38,6 @@
 #include "default_ctx_primitive_tester.hpp"
 #include "barrier_all_tester.hpp"
 #include "barrier_all_on_stream_tester.hpp"
-#include "quiet_on_stream_tester.hpp"
 #include "empty_tester.hpp"
 #include "getmem_on_stream_tester.hpp"
 #include "putmem_on_stream_tester.hpp"
@@ -69,7 +68,6 @@
 #include "flood_amo_tester.hpp"
 #include "hipmodule_init_tester.hpp"
 #include "device_bitcode_tester.hpp"
-#include "library_info_tester.hpp"
 
 #include "backend_bc.hpp"
 extern Backend* backend;
@@ -170,98 +168,99 @@ Tester::~Tester() {
 std::vector<Tester*> Tester::create(TesterArguments args) {
   int rank = args.myid;
   std::vector<Tester*> testers;
-  std::string test_name;
+
+  if (rank == 0) std::cout << "### Creating Test: ";
 
   BackendType backend_type = get_backend_type();
   TestType type = (TestType)args.algorithm;
 
   switch (type) {
     case InitTestType:
-      test_name = "Init";
+      if (rank == 0) std::cout << "Init ###" << std::endl;
       testers.push_back(new EmptyTester(args));
-      break;
+      return testers;
     case GetTestType:
-      test_name = "Blocking Gets";
+      if (rank == 0) std::cout << "Blocking Gets ###" << std::endl;
       testers.push_back(new PrimitiveTester(args));
-      break;
+      return testers;
     case GetNBITestType:
-      test_name = "Non-Blocking Gets";
+      if (rank == 0) std::cout << "Non-Blocking Gets ###" << std::endl;
       testers.push_back(new PrimitiveTester(args));
-      break;
+      return testers;
     case PutTestType:
-      test_name = "Blocking Puts";
+      if (rank == 0) std::cout << "Blocking Puts ###" << std::endl;
       testers.push_back(new PrimitiveTester(args));
-      break;
+      return testers;
     case PutNBITestType:
-      test_name = "Non-Blocking Puts";
+      if (rank == 0) std::cout << "Non-Blocking Puts ###" << std::endl;
       testers.push_back(new PrimitiveTester(args));
-      break;
+      return testers;
     case DefaultCTXGetTestType:
-      test_name = "Default context Blocking Gets";
+      if (rank == 0)
+        std::cout << "Default context Blocking Gets ###" << std::endl;
       testers.push_back(new DefaultCTXPrimitiveTester(args));
-      break;
+      return testers;
     case DefaultCTXGetNBITestType:
-      test_name = "Default context Non-Blocking Gets";
+      if (rank == 0)
+        std::cout << "Default context Non-Blocking Gets ###" << std::endl;
       testers.push_back(new DefaultCTXPrimitiveTester(args));
-      break;
+      return testers;
     case DefaultCTXPutTestType:
-      test_name = "Default context Blocking Puts";
+      if (rank == 0)
+        std::cout << "Default context Blocking Puts ###" << std::endl;
       testers.push_back(new DefaultCTXPrimitiveTester(args));
-      break;
+      return testers;
     case DefaultCTXPutNBITestType:
-      test_name = "Default context Non-Blocking Puts";
+      if (rank == 0)
+        std::cout << "Default context Non-Blocking Puts ###" << std::endl;
       testers.push_back(new DefaultCTXPrimitiveTester(args));
-      break;
+      return testers;
     case TeamCtxInfraTestType:
-      test_name = "Team Ctx Infra test";
+      if (rank == 0) std::cout << "Team Ctx Infra test ###" << std::endl;
       testers.push_back(new TeamCtxInfraTester(args));
-      break;
+      return testers;
     case TeamCtxInfraTestSingleType:
-      test_name = "Team Ctx Infra Single test";
+      if (rank == 0) std::cout << "Team Ctx Infra Single test ###" << std::endl;
       args.team_type = ROCSHMEM_TEST_TEAM_SINGLE;
       testers.push_back(new TeamCtxInfraTester(args));
-      break;
+      return testers;
     case TeamCtxInfraTestBlockType:
-      test_name = "Team Ctx Infra Block test";
+      if (rank == 0) std::cout << "Team Ctx Infra Block test ###" << std::endl;
       args.team_type = ROCSHMEM_TEST_TEAM_BLOCK;
       testers.push_back(new TeamCtxInfraTester(args));
-      break;
+      return testers;
     case TeamCtxInfraTestOddEvenType:
-      test_name = "Team Ctx Infra Odd-Even test";
+      if (rank == 0) std::cout << "Team Ctx Infra Odd-Even test ###" << std::endl;
       args.team_type = ROCSHMEM_TEST_TEAM_ODDEVEN;
       testers.push_back(new TeamCtxInfraTester(args));
-      break;
-    case TeamCtxSharedInfraTestType:
-      test_name = "Team Ctx Infra Shared test";
-      args.team_type = ROCSHMEM_TEST_TEAM_SHARED;
-      testers.push_back(new TeamCtxInfraTester(args));
-      break;
+      return testers;
     case TeamCtxGetTestType:
-      test_name = "Blocking Team Ctx Gets";
+      if (rank == 0) std::cout << "Blocking Team Ctx Gets ###" << std::endl;
       testers.push_back(new TeamCtxPrimitiveTester(args));
-      break;
+      return testers;
     case TeamCtxGetNBITestType:
-      test_name = "Non-Blocking Team Ctx Gets";
+      if (rank == 0) std::cout << "Non-Blocking Team Ctx Gets ###" << std::endl;
       testers.push_back(new TeamCtxPrimitiveTester(args));
-      break;
+      return testers;
     case TeamCtxPutTestType:
-      test_name = "Blocking Team Ctx Puts";
+      if (rank == 0) std::cout << "Blocking Team Ctx Puts ###" << std::endl;
       testers.push_back(new TeamCtxPrimitiveTester(args));
-      break;
+      return testers;
     case TeamCtxPutNBITestType:
-      test_name = "Non-Blocking Team Ctx Puts";
+      if (rank == 0) std::cout << "Non-Blocking Team Ctx Puts ###" << std::endl;
       testers.push_back(new TeamCtxPrimitiveTester(args));
-      break;
+      return testers;
     case PTestType:
-      test_name = "P Test";
+      if (rank == 0) std::cout << "P Test ###" << std::endl;
       testers.push_back(new PrimitiveTester(args));
-      break;
+      return testers;
     case GTestType:
-      test_name = "G Test";
+      if (rank == 0) std::cout << "G Test ###" << std::endl;
       testers.push_back(new PrimitiveTester(args));
-      break;
+      return testers;
     case TeamReductionTestType:
-      test_name = "All-to-All Team-based Reduction";
+      if (rank == 0)
+        std::cout << "All-to-All Team-based Reduction ###" << std::endl;
       testers.push_back(new TeamReductionTester<float, ROCSHMEM_SUM>(
           args,
           [](float& f1, float& f2) {
@@ -275,9 +274,11 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
                                                    ", Expect " +
                                                    std::to_string(n_pes));
           }));
-      break;
+      return testers;
     case TeamBroadcastTestType:
-      test_name = "Team Broadcast Test";
+      if (rank == 0) {
+        std::cout << "Team Broadcast Test ###" << std::endl;
+      }
       testers.push_back(new TeamBroadcastTester<int64_t>(args));
       testers.push_back(new TeamBroadcastTester<int>(args));
       testers.push_back(new TeamBroadcastTester<long long>(args));
@@ -285,53 +286,58 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
       testers.push_back(new TeamBroadcastTester<double>(args));
       testers.push_back(new TeamBroadcastTester<char>(args));
       testers.push_back(new TeamBroadcastTester<unsigned char>(args));
-      break;
+      return testers;
     case TeamAllToAllTestType:
-      test_name = "Alltoall Test";
+      if (rank == 0) {
+        std::cout << "Alltoall Test ###" << std::endl;
+      }
       testers.push_back(new TeamAlltoallTester<float>(args));
-      break;
+      return testers;
     case TeamAllToAllvTestType:
-      test_name = "Alltoallv Test";
+      if (rank == 0) {
+        std::cout << "Alltoallv Test ###" << std::endl;
+      }
       testers.push_back(new TeamAlltoallvTester<float>(args));
-      break;
+      return testers;
     case TeamAlltoallmemOnStreamTestType:
-      test_name = "Alltoallmem_On_Stream";
+      if (rank == 0)
+        std::cout << "Alltoallmem_On_Stream ###" << std::endl;
       testers.push_back(new TeamAlltoallmemOnStreamTester(args));
-      break;
+      return testers;
     case BarrierAllOnStreamTestType:
-      test_name = "Barrier_All_On_Stream";
+      if (rank == 0)
+        std::cout << "Barrier_All_On_Stream ###" << std::endl;
       testers.push_back(new BarrierAllOnStreamTester(args));
-      break;
-    case QuietOnStreamTestType:
-      test_name = "Quiet_On_Stream";
-      testers.push_back(new QuietOnStreamTester(args));
-      break;
-    case SyncAllOnStreamTestType:
-      test_name = "Sync_All_On_Stream";
-      testers.push_back(new BarrierAllOnStreamTester(args, SYNC_ALL_OP));
-      break;
+      return testers;
     case TeamBroadcastmemOnStreamTestType:
-      test_name = "Broadcastmem_On_Stream";
+      if (rank == 0)
+        std::cout << "Broadcastmem_On_Stream ###" << std::endl;
       testers.push_back(new TeamBroadcastmemOnStreamTester(args));
-      break;
+      return testers;
     case GetmemOnStreamTestType:
-      test_name = "Getmem_On_Stream";
+      if (rank == 0)
+        std::cout << "Getmem_On_Stream ###" << std::endl;
       testers.push_back(new GetmemOnStreamTester(args));
-      break;
+      return testers;
     case PutmemOnStreamTestType:
-      test_name = "Putmem_On_Stream";
+      if (rank == 0)
+        std::cout << "Putmem_On_Stream ###" << std::endl;
       testers.push_back(new PutmemOnStreamTester(args));
-      break;
+      return testers;
     case PutmemSignalOnStreamTestType:
-      test_name = "Putmem_Signal_On_Stream";
+      if (rank == 0)
+        std::cout << "Putmem_Signal_On_Stream ###" << std::endl;
       testers.push_back(new PutmemSignalOnStreamTester(args));
-      break;
+      return testers;
     case SignalWaitUntilOnStreamTestType:
-      test_name = "Signal_Wait_Until_On_Stream";
+      if (rank == 0)
+        std::cout << "Signal_Wait_Until_On_Stream ###" << std::endl;
       testers.push_back(new SignalWaitUntilOnStreamTester(args));
-      break;
+      return testers;
     case TeamFCollectTestType:
-      test_name = "Fcollect Test";
+      if (rank == 0) {
+        std::cout << "Fcollect Test ###" << std::endl;
+      }
       testers.push_back(new TeamFcollectTester<int64_t>(args));
       testers.push_back(new TeamFcollectTester<int>(args));
       testers.push_back(new TeamFcollectTester<long long>(args));
@@ -339,312 +345,304 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
       testers.push_back(new TeamFcollectTester<double>(args));
       testers.push_back(new TeamFcollectTester<char>(args));
       testers.push_back(new TeamFcollectTester<unsigned char>(args));
-      break;
+      return testers;
     case AMO_FAddTestType:
-      test_name = "AMO Fetch_Add";
+      if (rank == 0) std::cout << "AMO Fetch_Add ###" << std::endl;
       testers.push_back(new AMOStandardTester<long long>(args));
       testers.push_back(new AMOStandardTester<long>(args));
       if (BackendType::GDA_BACKEND != backend_type) // not implemented for GDA
         testers.push_back(new AMOStandardTester<int>(args));
-      break;
+      return testers;
     case AMO_FIncTestType:
-      test_name = "AMO Fetch_Inc";
+      if (rank == 0) std::cout << "AMO Fetch_Inc ###" << std::endl;
       testers.push_back(new AMOStandardTester<long long>(args));
       testers.push_back(new AMOStandardTester<long>(args));
       if (BackendType::GDA_BACKEND != backend_type) // not implemented for GDA
         testers.push_back(new AMOStandardTester<int>(args));
-      break;
+      return testers;
     case AMO_FetchTestType:
-      test_name = "AMO Fetch";
+      if (rank == 0) std::cout << "AMO Fetch ###" << std::endl;
       testers.push_back(new AMOExtendedTester<long long>(args));
       testers.push_back(new AMOExtendedTester<long>(args));
       if (BackendType::GDA_BACKEND != backend_type) // not implemented for GDA
         testers.push_back(new AMOExtendedTester<int>(args));
-      break;
+      return testers;
     case AMO_FCswapTestType:
-      test_name = "AMO Fetch_CSWAP";
+      if (rank == 0) std::cout << "AMO Fetch_CSWAP ###" << std::endl;
       testers.push_back(new AMOStandardTester<long long>(args));
       testers.push_back(new AMOStandardTester<long>(args));
       if (BackendType::GDA_BACKEND != backend_type) // not implemented for GDA
         testers.push_back(new AMOStandardTester<int>(args));
-      break;
+      return testers;
     case AMO_AddTestType:
-      test_name = "AMO Add";
+      if (rank == 0) std::cout << "AMO Add ###" << std::endl;
       testers.push_back(new AMOStandardTester<long long>(args));
       testers.push_back(new AMOStandardTester<long>(args));
       if (BackendType::GDA_BACKEND != backend_type) // not implemented for GDA
         testers.push_back(new AMOStandardTester<int>(args));
-      break;
+      return testers;
     case AMO_SetTestType:
-      test_name = "AMO Set";
+      if (rank == 0) std::cout << "AMO Set ###" << std::endl;
       testers.push_back(new AMOExtendedTester<long long>(args));
       testers.push_back(new AMOExtendedTester<long>(args));
       if (BackendType::GDA_BACKEND != backend_type) // not implemented for GDA
         testers.push_back(new AMOExtendedTester<int>(args));
-      break;
+      return testers;
     case AMO_SwapTestType:
-      test_name = "AMO Swap";
+      if (rank == 0) std::cout << "AMO Swap ###" << std::endl;
       testers.push_back(new AMOExtendedTester<long long>(args));
       testers.push_back(new AMOExtendedTester<long>(args));
       if (BackendType::GDA_BACKEND != backend_type) // not implemented for GDA
         testers.push_back(new AMOExtendedTester<int>(args));
-      break;
+      return testers;
     case AMO_FetchAndTestType:
-      test_name = "AMO Fetch And";
+      if (rank == 0) std::cout << "AMO Fetch And ###" << std::endl;
       testers.push_back(new AMOBitwiseTester<unsigned long long>(args));
       testers.push_back(new AMOBitwiseTester<unsigned long>(args));
       if (BackendType::GDA_BACKEND != backend_type) // not implemented for GDA
         testers.push_back(new AMOBitwiseTester<unsigned int>(args));
-      break;
+      return testers;
     case AMO_AndTestType:
-      test_name = "AMO And";
+      if (rank == 0) std::cout << "AMO And ###" << std::endl;
       testers.push_back(new AMOBitwiseTester<unsigned long long>(args));
       testers.push_back(new AMOBitwiseTester<unsigned long>(args));
       if (BackendType::GDA_BACKEND != backend_type) // not implemented for GDA
         testers.push_back(new AMOBitwiseTester<unsigned int>(args));
-      break;
+      return testers;
     case AMO_FetchOrTestType:
-      test_name = "AMO Fetch Or";
+      if (rank == 0) std::cout << "AMO Fetch Or ###" << std::endl;
       testers.push_back(new AMOBitwiseTester<unsigned long long>(args));
       testers.push_back(new AMOBitwiseTester<unsigned long>(args));
       if (BackendType::GDA_BACKEND != backend_type) // not implemented for GDA
         testers.push_back(new AMOBitwiseTester<unsigned int>(args));
-      break;
+      return testers;
     case AMO_OrTestType:
-      test_name = "AMO Or";
+      if (rank == 0) std::cout << "AMO Or ###" << std::endl;
       testers.push_back(new AMOBitwiseTester<unsigned long long>(args));
       testers.push_back(new AMOBitwiseTester<unsigned long>(args));
       if (BackendType::GDA_BACKEND != backend_type) // not implemented for GDA
         testers.push_back(new AMOBitwiseTester<unsigned int>(args));
-      break;
+      return testers;
     case AMO_FetchXorTestType:
-      test_name = "AMO Fetch Xor";
+      if (rank == 0) std::cout << "AMO Fetch Xor ###" << std::endl;
       testers.push_back(new AMOBitwiseTester<unsigned long long>(args));
       testers.push_back(new AMOBitwiseTester<unsigned long>(args));
       if (BackendType::GDA_BACKEND != backend_type) // not implemented for GDA
         testers.push_back(new AMOBitwiseTester<unsigned int>(args));
-      break;
+      return testers;
     case AMO_XorTestType:
-      test_name = "AMO Xor";
+      if (rank == 0) std::cout << "AMO Xor ###" << std::endl;
       testers.push_back(new AMOBitwiseTester<unsigned long long>(args));
       testers.push_back(new AMOBitwiseTester<unsigned long>(args));
       if (BackendType::GDA_BACKEND != backend_type) // not implemented for GDA
         testers.push_back(new AMOBitwiseTester<unsigned int>(args));
-      break;
+      return testers;
     case AMO_IncTestType:
-      test_name = "AMO Inc";
+      if (rank == 0) std::cout << "AMO Inc ###" << std::endl;
       testers.push_back(new AMOStandardTester<long long>(args));
       testers.push_back(new AMOStandardTester<long>(args));
       if (BackendType::GDA_BACKEND != backend_type) // not implemented for GDA
         testers.push_back(new AMOStandardTester<int>(args));
-      break;
+      return testers;
     case PingPongTestType:
-      test_name = "PingPong";
+      if (rank == 0) std::cout << "PingPong ###" << std::endl;
       testers.push_back(new PingPongTester(args));
-      break;
+      return testers;
     case PingAllTestType:
-      test_name = "PingAll";
+      if (rank == 0) std::cout << "PingAll ###" << std::endl;
       testers.push_back(new PingAllTester(args));
-      break;
+      return testers;
     case BarrierAllTestType:
-      test_name = "Barrier_All";
+      if (rank == 0) std::cout << "Barrier_All ###" << std::endl;
       testers.push_back(new BarrierAllTester(args));
-      break;
+      return testers;
     case WAVEBarrierAllTestType:
-      test_name = "WAVE Barrier_All";
+      if (rank == 0) std::cout << "WAVE Barrier_All ###" << std::endl;
       testers.push_back(new BarrierAllTester(args));
-      break;
+      return testers;
     case WGBarrierAllTestType:
-      test_name = "WG Barrier_All";
+      if (rank == 0) std::cout << "WG Barrier_All ###" << std::endl;
       testers.push_back(new BarrierAllTester(args));
-      break;
+      return testers;
     case TeamBarrierTestType:
-      test_name = "Team Barrier Test";
+      if (rank == 0) std::cout << "Team Barrier Test ###" << std::endl;
       testers.push_back(new TeamBarrierTester(args));
-      break;
+      return testers;
     case TeamWAVEBarrierTestType:
-      test_name = "Team WAVE Barrier Test";
+      if (rank == 0) std::cout << "Team WAVE Barrier Test ###" << std::endl;
       testers.push_back(new TeamBarrierTester(args));
-      break;
+      return testers;
     case TeamWGBarrierTestType:
-      test_name = "Team WG Barrier Test";
+      if (rank == 0) std::cout << "Team WG Barrier Test ###" << std::endl;
       testers.push_back(new TeamBarrierTester(args));
-      break;
+      return testers;
     case SyncAllTestType:
-      test_name = "SyncAll";
+      if (rank == 0) std::cout << "SyncAll ###" << std::endl;
       testers.push_back(new SyncAllTester(args));
-      break;
+      return testers;
     case WAVESyncAllTestType:
-      test_name = "WAVE SyncAll";
+      if (rank == 0) std::cout << "WAVE SyncAll ###" << std::endl;
       testers.push_back(new SyncAllTester(args));
-      break;
+      return testers;
     case WGSyncAllTestType:
-      test_name = "WG SyncAll";
+      if (rank == 0) std::cout << "WG SyncAll ###" << std::endl;
       testers.push_back(new SyncAllTester(args));
-      break;
+      return testers;
     case TeamSyncTestType:
-      test_name = "Team Sync";
+      if (rank == 0) std::cout << "Team Sync ###" << std::endl;
       testers.push_back(new TeamSyncTester(args));
-      break;
+      return testers;
     case TeamWAVESyncTestType:
-      test_name = "Team WAVE Sync";
+      if (rank == 0) std::cout << "Team WAVE Sync ###" << std::endl;
       testers.push_back(new TeamSyncTester(args));
-      break;
+      return testers;
     case TeamWGSyncTestType:
-      test_name = "Team WG Sync";
+      if (rank == 0) std::cout << "Team WG Sync ###" << std::endl;
       testers.push_back(new TeamSyncTester(args));
-      break;
+      return testers;
     case RandomAccessTestType:
-      test_name = "Random_Access";
+      if (rank == 0) std::cout << "Random_Access ###" << std::endl;
       testers.push_back(new RandomAccessTester(args));
-      break;
+      return testers;
     case ShmemPtrTestType:
-      test_name = "Shmem_Ptr";
+      if (rank == 0) std::cout << "Shmem_Ptr ###" << std::endl;
       testers.push_back(new ShmemPtrTester(args));
-      break;
+      return testers;
     case WGGetTestType:
-      test_name = "Blocking WG level Gets";
+      if (rank == 0)
+        std::cout << "Blocking WG level Gets ###" << std::endl;
       testers.push_back(new WorkGroupPrimitiveTester(args));
-      break;
+      return testers;
     case WGGetNBITestType:
-      test_name = "Non-Blocking WG level Gets";
+      if (rank == 0)
+        std::cout << "Non-Blocking WG level Gets ###" << std::endl;
       testers.push_back(new WorkGroupPrimitiveTester(args));
-      break;
+      return testers;
     case WGPutTestType:
-      test_name = "Blocking WG level Puts";
+      if (rank == 0)
+        std::cout << "Blocking WG level Puts ###" << std::endl;
       testers.push_back(new WorkGroupPrimitiveTester(args));
-      break;
+      return testers;
     case WGPutNBITestType:
-      test_name = "Non-Blocking WG level Puts";
+      if (rank == 0)
+        std::cout << "Non-Blocking WG level Puts ###" << std::endl;
       testers.push_back(new WorkGroupPrimitiveTester(args));
-      break;
+      return testers;
     case PutNBIMRTestType:
-      test_name = "Non-Blocking Put message rate";
+      if (rank == 0)
+        std::cout << "Non-Blocking Put message rate ###" << std::endl;
       testers.push_back(new PrimitiveMRTester(args));
-      break;
+      return testers;
     case WAVEGetTestType:
-      test_name = "Blocking WAVE level Gets";
+      if (rank == 0)
+        std::cout << "Blocking WAVE level Gets ###" << std::endl;
       testers.push_back(new WaveFrontPrimitiveTester(args));
-      break;
+      return testers;
     case WAVEGetNBITestType:
-      test_name = "Non-Blocking WAVE level Gets";
+      if (rank == 0)
+        std::cout << "Non-Blocking WAVE level Gets ###" << std::endl;
       testers.push_back(new WaveFrontPrimitiveTester(args));
-      break;
+      return testers;
     case WAVEPutTestType:
-      test_name = "Blocking WAVE level Puts";
+      if (rank == 0)
+        std::cout << "Blocking WAVE level Puts ###" << std::endl;
       testers.push_back(new WaveFrontPrimitiveTester(args));
-      break;
+      return testers;
     case WAVEPutNBITestType:
-      test_name = "Non-Blocking WAVE level Puts";
+      if (rank == 0)
+        std::cout << "Non-Blocking WAVE level Puts ###" << std::endl;
       testers.push_back(new WaveFrontPrimitiveTester(args));
-      break;
+      return testers;
     case PutSignalTestType:
-      test_name = "Putmem Signal";
+      if (rank == 0) std::cout << "Putmem Signal ###" << std::endl;
       testers.push_back(new SignalingOperationsTester(args, ROCSHMEM_SIGNAL_SET));
       testers.push_back(new SignalingOperationsTester(args, ROCSHMEM_SIGNAL_ADD));
-      break;
+      return testers;
     case WGPutSignalTestType:
-      test_name = "WG Putmem Signal";
+      if (rank == 0) std::cout << "WG Putmem Signal ###" << std::endl;
       testers.push_back(new SignalingOperationsTester(args, ROCSHMEM_SIGNAL_SET));
       testers.push_back(new SignalingOperationsTester(args, ROCSHMEM_SIGNAL_ADD));
-      break;
+      return testers;
     case WAVEPutSignalTestType:
-      test_name = "Wave Putmem Signal";
+      if (rank == 0) std::cout << "Wave Putmem Signal ###" << std::endl;
       testers.push_back(new SignalingOperationsTester(args, ROCSHMEM_SIGNAL_SET));
       testers.push_back(new SignalingOperationsTester(args, ROCSHMEM_SIGNAL_ADD));
-      break;
+      return testers;
     case PutSignalNBITestType:
-      test_name = "Non-Blocking Putmem Signal";
+      if (rank == 0) std::cout << "Non-Blocking Putmem Signal ###" << std::endl;
       testers.push_back(new SignalingOperationsTester(args, ROCSHMEM_SIGNAL_SET));
       testers.push_back(new SignalingOperationsTester(args, ROCSHMEM_SIGNAL_ADD));
-      break;
+      return testers;
     case WGPutSignalNBITestType:
-      test_name = "Non-Blocking WG Putmem Signal";
+      if (rank == 0) std::cout << "Non-Blocking WG Putmem Signal ###" << std::endl;
       testers.push_back(new SignalingOperationsTester(args, ROCSHMEM_SIGNAL_SET));
       testers.push_back(new SignalingOperationsTester(args, ROCSHMEM_SIGNAL_ADD));
-      break;
+      return testers;
     case WAVEPutSignalNBITestType:
-      test_name = "Non-Blocking Wave Putmem Signal";
+      if (rank == 0) std::cout << "Non-Blocking Wave Putmem Signal ###" << std::endl;
       testers.push_back(new SignalingOperationsTester(args, ROCSHMEM_SIGNAL_SET));
       testers.push_back(new SignalingOperationsTester(args, ROCSHMEM_SIGNAL_ADD));
-      break;
+      return testers;
     case SignalFetchTestType:
-      test_name = "Signal Fetch";
+      if (rank == 0) std::cout << "Signal Fetch ###" << std::endl;
       testers.push_back(new SignalingOperationsTester(args));
-      break;
+      return testers;
     case WGSignalFetchTestType:
-      test_name = "WG Signal Fetch";
+      if (rank == 0) std::cout << "WG Signal Fetch ###" << std::endl;
       testers.push_back(new SignalingOperationsTester(args));
-      break;
+      return testers;
     case WAVESignalFetchTestType:
-      test_name = "Wave Signal Fetch";
+      if (rank == 0) std::cout << "Wave Signal Fetch ###" << std::endl;
       testers.push_back(new SignalingOperationsTester(args));
-      break;
+      return testers;
     case FloodPutTestType:
-      test_name = "Flood Put (multidirectional)";
+      if (rank == 0) std::cout << "Flood Put (multidirectional) ###" << std::endl;
       testers.push_back(new FloodTester(args));
-      break;
+      return testers;
     case FloodPutNBITestType:
-      test_name = "Flood Non-Blocking Put (multidirectional)";
+      if (rank == 0) std::cout << "Flood Non-Blocking Put (multidirectional) ###" << std::endl;
       testers.push_back(new FloodTester(args));
-      break;
+      return testers;
     case FloodPTestType:
-      test_name = "Flood P (multidirectional)";
+      if (rank == 0) std::cout << "Flood P (multidirectional) ###" << std::endl;
       testers.push_back(new FloodTester(args));
-      break;
+      return testers;
     case FloodGetTestType:
-      test_name = "Flood Get (multidirectional)";
+      if (rank == 0) std::cout << "Flood Get (multidirectional) ###" << std::endl;
       testers.push_back(new FloodTester(args));
-      break;
+      return testers;
     case FloodGetNBITestType:
-      test_name = "Flood Non-Blocking Get (multidirectional)";
+      if (rank == 0) std::cout << "Flood Non-Blocking Get (multidirectional) ###" << std::endl;
       testers.push_back(new FloodTester(args));
-      break;
+      return testers;
     case FloodGTestType:
-      test_name = "Flood G (multidirectional)";
+      if (rank == 0) std::cout << "Flood G (multidirectional) ###" << std::endl;
       testers.push_back(new FloodTester(args));
-      break;
+      return testers;
     case HipModuleInitTestType:
-      test_name = "HIP Module Init Test";
+      if (rank == 0) std::cout << "HIP Module Init Test ###" << std::endl;
       testers.push_back(new HipModuleInitTester(args));
-      break;
+      return testers;
     case FloodAddTestType:
-      test_name = "Flood Add (multidirectional)";
+      if (rank == 0) std::cout << "Flood Add (multidirectional) ###" << std::endl;
       testers.push_back(new FloodAmoTester(args));
-      break;
+      return testers;
     case FloodFAddTestType:
-      test_name = "Flood FAdd (multidirectional)";
+      if (rank == 0) std::cout << "Flood FAdd (multidirectional) ###" << std::endl;
       testers.push_back(new FloodAmoTester(args));
-      break;
+      return testers;
     case FloodWaitAmoTestType:
-      test_name = "Flood WaitAdd (multidirectional)";
+      if (rank == 0) std::cout << "Flood WaitAdd (multidirectional) ###" << std::endl;
       testers.push_back(new FloodAmoTester(args));
-      break;
+      return testers;
     case DeviceBitcodeTestType:
-      test_name = "Device Bitcode Test";
+      if (rank == 0) std::cout << "Device Bitcode Test ###" << std::endl;
       testers.push_back(new DeviceBitcodeTester(args));
-      break;
-    case LibraryInfoTestType:
-      test_name = "Library Info Test";
-      testers.push_back(new LibraryInfoTester(args));
-      break;
+      return testers;
     default:
-      test_name = "Empty";
-      break;
+      if (rank == 0) std::cout << "Empty Test ###" << std::endl;
+      return testers;
   }
-
-  if (rank == 0) {
-    const char* backend_str =
-        (backend_type == BackendType::IPC_BACKEND) ? "ipc" :
-        (backend_type == BackendType::RO_BACKEND)  ? "ro"  : "gda";
-    std::cout << "### Creating Test:\t" << test_name
-              << "\tB=" << backend_str
-              << " PE=" << args.numprocs
-              << " W=" << args.num_wgs
-              << " Z=" << args.wg_size
-              << " ###" << std::endl;
-  }
-
   return testers;
 }
 
@@ -712,8 +710,7 @@ void Tester::execute() {
     if (_type != TeamCtxInfraTestType       &&
         _type != TeamCtxInfraTestSingleType &&
         _type != TeamCtxInfraTestBlockType  &&
-        _type != TeamCtxInfraTestOddEvenType &&
-        _type != TeamCtxSharedInfraTestType ) {
+        _type != TeamCtxInfraTestOddEvenType ) {
       print(size);
     }
   }
@@ -735,7 +732,6 @@ bool Tester::peLaunchesKernel() {
     case TeamCtxInfraTestSingleType:
     case TeamCtxInfraTestBlockType:
     case TeamCtxInfraTestOddEvenType:
-    case TeamCtxSharedInfraTestType:
     case TeamAllToAllTestType:
     case TeamAllToAllvTestType:
     case TeamFCollectTestType:
@@ -756,8 +752,6 @@ bool Tester::peLaunchesKernel() {
     case TeamWGBarrierTestType:
     case TeamAlltoallmemOnStreamTestType:
     case BarrierAllOnStreamTestType:
-    case QuietOnStreamTestType:
-    case SyncAllOnStreamTestType:
     case TeamBroadcastmemOnStreamTestType:
     case GetmemOnStreamTestType:
     case PutmemOnStreamTestType:
@@ -789,7 +783,7 @@ void Tester::print(uint64_t size) {
   }
 
   /**
-   * Calculate total amount of data transferred
+   * Calculate total amount of data transfered
    */
   size_t total_size = size_factor * size * num_timed_msgs;
   size_t volume = total_size / num_loops;

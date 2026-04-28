@@ -7,6 +7,9 @@
 #ifndef _NCCL_DEVICE_UTILITY_H_
 #define _NCCL_DEVICE_UTILITY_H_
 
+#undef __CUDACC__
+#define __CUDACC__ 0
+
 #if __CUDACC__
   #define NCCL_DEVICE_INLINE __device__ __forceinline__
   #define NCCL_HOST_DEVICE_INLINE __host__ __device__ __forceinline__
@@ -28,11 +31,7 @@
 #include <stdbool.h>
 
 #if __CUDACC__
-#if __HIP_PLATFORM_AMD__
-#include <atomic>
-#else
-#include <cuda/atomic>
-#endif
+// #include <cuda/atomic>
 #endif
 
 #if __cplusplus
@@ -40,7 +39,7 @@ namespace nccl {
 namespace utility {
 
 template<typename T>
-NCCL_HOST_DEVICE_INLINE T&& declval() noexcept {
+T&& declval() noexcept {
   static_assert(sizeof(T)!=sizeof(T), "You can't evaluate declval.");
 }
 
@@ -246,12 +245,11 @@ NCCL_DEVICE_INLINE cuda::memory_order acquireOrderOf(cuda::memory_order ord) {
          ord == cuda::memory_order_acq_rel ? cuda::memory_order_acquire :
          ord;
 }
-NCCL_HOST_DEVICE_INLINE constexpr cuda::memory_order releaseOrderOf(cuda::memory_order ord) {
+NCCL_DEVICE_INLINE cuda::memory_order releaseOrderOf(cuda::memory_order ord) {
   return ord == cuda::memory_order_acquire ? cuda::memory_order_relaxed :
          ord == cuda::memory_order_acq_rel ? cuda::memory_order_release :
          ord;
 }
-#endif
 #endif
 
 #if __CUDACC__
