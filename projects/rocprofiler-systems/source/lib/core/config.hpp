@@ -4,7 +4,7 @@
 #pragma once
 
 #include "common.hpp"
-#include "defines.hpp"
+#include "common/defines.h"
 #include "state.hpp"
 #include "timemory.hpp"
 
@@ -302,6 +302,9 @@ get_sampling_duration();
 
 std::string
 get_sampling_cpus();
+
+std::string
+get_cpu_metrics();
 
 std::set<int64_t>
 get_sampling_cputime_tids();

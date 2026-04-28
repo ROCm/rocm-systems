@@ -1,6 +1,7 @@
 ARG DISTRO=ubuntu
 ARG VERSION=22.04
-FROM ${DISTRO}:${VERSION}
+ARG BASE_IMAGE=${DISTRO}:${VERSION}
+FROM ${BASE_IMAGE}
 
 ENV HOME=/root
 ENV LANG=C.UTF-8
@@ -88,6 +89,26 @@ RUN if [ -n "$GPU_TYPE" ] && [ -n "$GPU_TARBALL" ]; then \
         pip install awscli --break-system-packages; \
         aws s3 cp "s3://therock-nightly-tarball/${GPU_TARBALL}" rocm-${VERSION}-${GPU_TYPE}.tar.gz --no-sign-request; \
         mv rocm-${VERSION}-${GPU_TYPE}.tar.gz /opt/rocm-${VERSION}-${GPU_TYPE}.tar.gz; \
+    fi
+
+ARG ROCM_VERSION=""
+RUN if [ -n "${ROCM_VERSION}" ]; then \
+        ROCM_MAJOR=$(echo ${ROCM_VERSION} | cut -d. -f1) && \
+        ROCM_MINOR=$(echo ${ROCM_VERSION} | cut -d. -f2) && \
+        ROCM_VERSN=$(( (ROCM_MAJOR*10000)+(ROCM_MINOR*100) )) && \
+        OS_CODENAME=$(grep '^VERSION_CODENAME=' /etc/os-release | cut -d'=' -f2) && \
+        if [ "${OS_CODENAME}" = "bookworm" ]; then OS_CODENAME=jammy; fi && \
+        wget -q https://repo.radeon.com/amdgpu-install/${ROCM_VERSION}/ubuntu/${OS_CODENAME}/amdgpu-install_${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1_all.deb && \
+        DEBIAN_FRONTEND=noninteractive apt-get install -y --allow-downgrades \
+            -o Dpkg::Options::="--force-confnew" \
+            ./amdgpu-install_${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1_all.deb && \
+        rm -f ./amdgpu-install_*.deb && \
+        apt-get update && \
+        if [ ! -d /opt/rocm ]; then \
+            apt-get install -y rocm-dev; \
+        fi && \
+        apt-get install -y rocdecode-dev libavformat-dev libavcodec-dev libomp-dev libopenmpi-dev && \
+        apt-get autoclean; \
     fi
 
 ENV LC_ALL=C.UTF-8

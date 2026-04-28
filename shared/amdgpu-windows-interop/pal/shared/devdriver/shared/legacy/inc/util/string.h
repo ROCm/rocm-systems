@@ -31,7 +31,7 @@
 namespace DevDriver
 {
 // A String class that stores the string inline with a compile-time maximum size.
-// This class facilitiates passing bounded sized C Strings around without dynamic allocation. It has POD semantics
+// This class facilitates passing bounded sized C Strings around without dynamic allocation. It has POD semantics
 // when copied or passed by value into functions, and can be stored in a vector.
 template<size_t FixedSize>
 class FixedString

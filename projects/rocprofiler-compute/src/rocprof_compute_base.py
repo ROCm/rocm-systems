@@ -3,8 +3,10 @@
 
 import argparse
 import importlib
+import shutil
 import socket
 import sys
+import tempfile
 import time
 from pathlib import Path
 from typing import Any, Optional
@@ -12,6 +14,7 @@ from typing import Any, Optional
 import config
 from argparser import omniarg_parser
 from rocprof_compute_soc.soc_base import OmniSoC_Base
+from roofline.run_benchmark import run_roofline_benchmark
 from utils.logger import (
     console_debug,
     console_error,
@@ -40,6 +43,7 @@ from utils.utils_common import (
     replace_rank,
     resolve_rocm_library_path,
     set_locale_encoding,
+    validate_roofline_csv,
 )
 from utils.utils_exceptions import WorkloadCommandError
 from utils.utils_profile import get_submodules
@@ -85,7 +89,8 @@ class RocProfCompute:
         self.handle_list_args()
 
         if self.__mode == "profile":
-            self.detect_profiler()
+            if not getattr(self.__args, "bench_only", False):
+                self.detect_profiler()
         elif self.__mode == "analyze":
             self.detect_analyze()
 
@@ -146,21 +151,7 @@ class RocProfCompute:
                 "rocprof-compute requires you to pass a valid mode. Detected None."
             )
 
-        block = False
-        if (hasattr(self.__args, "filter_metrics") and self.__args.filter_metrics) or (
-            hasattr(self.__args, "filter_blocks") and self.__args.filter_blocks
-        ):
-            block = True
-
-        if self.__args.list_metrics is not None and block:
-            console_error("Cannot use --list-metrics with --blocks")
-        if self.__args.list_blocks is not None and block:
-            console_error("Cannot use --list-blocks with --blocks")
-        if (
-            hasattr(self.__args, "list_available_metrics")
-            and self.__args.list_available_metrics
-        ) and block:
-            console_error("Cannot use --list-available-metrics with --blocks")
+        self._validate_list_option_exclusions()
 
         # Validate block 30 requires --membw-analysis and --experimental
         filter_list: list[str] = []
@@ -181,6 +172,9 @@ class RocProfCompute:
                         f'To use "-b {block_input}", you must also specify: '
                         f"--membw-analysis --experimental"
                     )
+
+        if self.__mode == "profile":
+            self._validate_profile_mode_arguments()
 
         # fallback to csv output format, if rocpd public api not available
         if self.__mode == "profile" and self.__args.format_rocprof_output == "rocpd":
@@ -332,6 +326,68 @@ class RocProfCompute:
 
     def handle_analyze_args(self) -> None:
         """Handle analyze-specific argument processing"""
+        args = self.__args
+        torch_operator = args.torch_operator
+        list_torch_operators = args.list_torch_operators
+
+        if torch_operator is not None or list_torch_operators:
+            if args.gui is not None:
+                console_error(
+                    "torch trace",
+                    "--torch-operator and --list-torch-operators are not "
+                    "supported in --gui mode. Please remove --gui or run "
+                    "without the torch-operator flags.",
+                )
+            if args.tui:
+                console_error(
+                    "torch trace",
+                    "--torch-operator and --list-torch-operators are not "
+                    "supported in --tui mode. Please remove --tui or run "
+                    "without the torch-operator flags.",
+                )
+            if args.spatial_multiplexing:
+                console_error(
+                    "torch trace",
+                    "--torch-operator and --list-torch-operators do not yet "
+                    "support multi-node analysis via --spatial-multiplexing. "
+                    "Please remove one of these options.",
+                )
+            if args.output_format != "stdout":
+                console_error(
+                    "torch trace",
+                    "--torch-operator and --list-torch-operators are only "
+                    "supported with --output-format stdout (the default). "
+                    "The matched operator call tree is printed directly to "
+                    "stdout and is not captured in txt, csv, or db output. "
+                    "Remove the --output-format option or drop the "
+                    "torch-operator flags.",
+                )
+
+            if torch_operator is not None:
+                if args.list_stats:
+                    console_warning(
+                        "torch trace",
+                        "--torch-operator is ignored by --list-stats; the "
+                        "full kernel stats table will be shown regardless "
+                        "of the operator filter.",
+                    )
+                if args.list_nodes:
+                    console_warning(
+                        "torch trace",
+                        "--torch-operator is ignored by --list-nodes; the "
+                        "node enumeration does not respect the operator "
+                        "filter.",
+                    )
+                if list_torch_operators:
+                    console_warning(
+                        "torch trace",
+                        "--torch-operator is ignored when "
+                        "--list-torch-operators is used; the full operator "
+                        "tree will be shown. Drop --list-torch-operators to "
+                        "apply the operator filter to the analysis, or drop "
+                        "--torch-operator to list all operators.",
+                    )
+
         # Block all filters during spatial-multiplexing
         if self.__args.spatial_multiplexing:
             self.__args.gpu_id = None
@@ -476,6 +532,10 @@ class RocProfCompute:
 
         self.replace_parameters_in_output_directory()
 
+        if self.__args.bench_only:
+            self._run_bench_only()
+            return
+
         self.load_soc_specs()
 
         # instantiate desired profiler
@@ -515,6 +575,96 @@ class RocProfCompute:
 
         post_duration = int(time_end_post - time_end_prof)
         console_debug(f'time taken for "post_processing" was {post_duration} seconds')
+
+    def _validate_profile_mode_arguments(self) -> None:
+        """Validate that the profile-mode invocation is internally consistent.
+
+        Covers the mutual exclusion among action-selection flags
+        (--block, --set, --roof-only, --bench-only) and the
+        --bench-only / --no-roof conflict.
+        """
+        args = self.__args
+        if (
+            sum((
+                bool(getattr(args, "filter_blocks", None)),
+                bool(getattr(args, "set_selected", None)),
+                bool(getattr(args, "roof_only", False)),
+                bool(getattr(args, "bench_only", False)),
+            ))
+            > 1
+        ):
+            console_error(
+                "--block, --set, --roof-only, and --bench-only"
+                " are mutually exclusive options."
+                " Please use only one of them."
+            )
+
+        if getattr(args, "bench_only", False) and getattr(args, "no_roof", False):
+            console_error("--bench-only cannot be used with --no-roof.")
+
+    def _validate_list_option_exclusions(self) -> None:
+        """Validate that list/discovery options aren't combined with --block.
+        Applies to both profile and analyze mode.
+        """
+        args = self.__args
+        block_active = bool(
+            getattr(args, "filter_blocks", None)
+            or getattr(args, "filter_metrics", None)
+        )
+        if not block_active:
+            return
+
+        if args.list_metrics is not None:
+            console_error("Cannot use --list-metrics with --blocks")
+        if args.list_blocks is not None:
+            console_error("Cannot use --list-blocks with --blocks")
+        if getattr(args, "list_available_metrics", False):
+            console_error("Cannot use --list-available-metrics with --blocks")
+
+    @demarcate
+    def _run_bench_only(self) -> None:
+        """Run standalone roofline microbenchmark execution.
+
+        The microbenchmark is written to a temp location first and only
+        promoted to the workload directory after passing validation.
+        """
+        output_dir = Path(self.__args.output_directory)
+        if not output_dir.exists():
+            output_dir.mkdir(parents=True, exist_ok=True)
+
+        setup_file_handler(self.__args.loglevel, str(output_dir))
+
+        roofline_csv = output_dir / "roofline.csv"
+        existing_roofline = roofline_csv.is_file()
+        console_log(
+            "roofline",
+            f"Running roofline microbenchmark on device {self.__args.device}",
+        )
+
+        with tempfile.TemporaryDirectory(prefix="rocprof_bench_") as tmp_dir:
+            tmp_csv = Path(tmp_dir) / "roofline.csv"
+            try:
+                run_roofline_benchmark(self.__args.device, tmp_csv)
+            except Exception as e:
+                console_error(f"Benchmark execution failed: {e}")
+
+            is_valid, error_message = validate_roofline_csv(tmp_dir)
+            if not is_valid:
+                console_error(
+                    f"Invalid roofline.csv: {error_message}",
+                    exit=False,
+                )
+                return
+
+            shutil.move(str(tmp_csv), str(roofline_csv))
+
+        if existing_roofline:
+            console_warning(f"Overwrote existing {roofline_csv}")
+
+        console_log(
+            "roofline",
+            f"Roofline data saved to {roofline_csv}",
+        )
 
     @demarcate
     def run_analysis(self) -> None:

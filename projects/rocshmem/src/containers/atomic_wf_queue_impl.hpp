@@ -34,11 +34,11 @@ namespace rocshmem {
  ******************************* WAVE FREE LIST ******************************
  *****************************************************************************/
 
-template <typename TYPE, typename ALLOCATOR>
-AtomicWFQueue<TYPE, ALLOCATOR>::~AtomicWFQueue() {}
+template <typename TYPE>
+AtomicWFQueue<TYPE>::~AtomicWFQueue() {}
 
-template <typename TYPE, typename ALLOCATOR>
-__host__ void AtomicWFQueue<TYPE, ALLOCATOR>::deallocate_queue() {
+template <typename TYPE>
+__host__ void AtomicWFQueue<TYPE>::deallocate_queue() {
   if (queue_ != nullptr) {
     allocator_.deallocate((void*)queue_);
     queue_ = nullptr;
@@ -49,12 +49,13 @@ __host__ void AtomicWFQueue<TYPE, ALLOCATOR>::deallocate_queue() {
   tail_ = 0;
 }
 
-template <typename TYPE, typename ALLOCATOR>
-AtomicWFQueue<TYPE, ALLOCATOR>::AtomicWFQueue(const ALLOCATOR& allocator)
-    : allocator_{allocator}, head_{0}, tail_{0}, size_{0}, curr_size_{0} {}
+template <typename TYPE>
+AtomicWFQueue<TYPE>::AtomicWFQueue(const MemoryAllocator& allocator)
+    : allocator_{allocator}, head_{0}, tail_{0}, size_{0}, curr_size_{0},
+      dequeue_mutex_{allocator}, enqueue_mutex_{allocator} {}
 
-template <typename TYPE, typename ALLOCATOR>
-__host__ void AtomicWFQueue<TYPE, ALLOCATOR>::allocate_queue(
+template <typename TYPE>
+__host__ void AtomicWFQueue<TYPE>::allocate_queue(
   unsigned int size) {
 
   size_ = size;
@@ -65,8 +66,8 @@ __host__ void AtomicWFQueue<TYPE, ALLOCATOR>::allocate_queue(
                       sizeof(TYPE) * size_);
 }
 
-template <typename TYPE, typename ALLOCATOR>
-__host__ void AtomicWFQueue<TYPE, ALLOCATOR>::push(const TYPE& val) {
+template <typename TYPE>
+__host__ void AtomicWFQueue<TYPE>::push(const TYPE& val) {
   if (curr_size_ < size_) {
     queue_[tail_] = val;
     tail_ = (tail_ + 1) % size_;
@@ -78,9 +79,9 @@ __host__ void AtomicWFQueue<TYPE, ALLOCATOR>::push(const TYPE& val) {
   }
 }
 
-template <typename TYPE, typename ALLOCATOR>
+template <typename TYPE>
 __device__ unsigned int
-AtomicWFQueue<TYPE, ALLOCATOR>::active_logical_lane_id() {
+AtomicWFQueue<TYPE>::active_logical_lane_id() {
   uint64_t ballot{__ballot(1)};
   uint64_t my_physical_lane_id{__lane_id()};
   uint64_t all_ones_mask = -1;
@@ -91,8 +92,8 @@ AtomicWFQueue<TYPE, ALLOCATOR>::active_logical_lane_id() {
   return my_logical_lane_id; 
 }
 
-template <typename TYPE, typename ALLOCATOR>
-__device__ TYPE AtomicWFQueue<TYPE, ALLOCATOR>::broadcast_lds(
+template <typename TYPE>
+__device__ TYPE AtomicWFQueue<TYPE>::broadcast_lds(
   bool lowest_active, TYPE value) {
 
   /**
@@ -110,8 +111,8 @@ __device__ TYPE AtomicWFQueue<TYPE, ALLOCATOR>::broadcast_lds(
   return value_per_warp[wavefront_id];
 }
 
-template <typename TYPE, typename ALLOCATOR>
-__device__ void AtomicWFQueue<TYPE, ALLOCATOR>::enqueue(const TYPE& val) {
+template <typename TYPE>
+__device__ void AtomicWFQueue<TYPE>::enqueue(const TYPE& val) {
   unsigned int my_active_lane_id {active_logical_lane_id()};
   bool is_lowest_active_lane {my_active_lane_id == 0};
   if (is_lowest_active_lane) {
@@ -135,8 +136,8 @@ __device__ void AtomicWFQueue<TYPE, ALLOCATOR>::enqueue(const TYPE& val) {
   }
 }
 
-template <typename TYPE, typename ALLOCATOR>
-__device__ TYPE AtomicWFQueue<TYPE, ALLOCATOR>::dequeue() {
+template <typename TYPE>
+__device__ TYPE AtomicWFQueue<TYPE>::dequeue() {
   TYPE ret_val {TYPE()};
   unsigned int my_active_lane_id {active_logical_lane_id()};
   bool is_lowest_active_lane {my_active_lane_id == 0};

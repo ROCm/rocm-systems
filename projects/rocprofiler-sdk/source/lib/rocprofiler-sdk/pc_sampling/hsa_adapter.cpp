@@ -56,16 +56,19 @@ namespace
 const PCSAgentSession*
 get_pcs_session_of(hsa_agent_t hsa_agent)
 {
-    // TODO: optimize this
-    auto* service = get_configured_pc_sampling_service().load();
-    for(const auto& [_, agent_session] : service->agent_sessions)
-    {
-        if(agent_session->hsa_agent->handle == hsa_agent.handle)
-        {
-            return agent_session.get();
-        }
-    }
-    return nullptr;
+    return get_global_pc_sampling_sessions().rlock(
+        [hsa_agent](const auto& sessions) -> const PCSAgentSession* {
+            // Linear search by hsa_agent.handle (O(n) where n is typically 1-8 GPUs)
+            // TODO: Think about providing mapping for O(1) if optimization is needed.
+            for(const auto& [_, agent_session] : sessions)
+            {
+                if(agent_session->hsa_agent && agent_session->hsa_agent->handle == hsa_agent.handle)
+                {
+                    return agent_session.get();
+                }
+            }
+            return nullptr;
+        });
 }
 
 // Called just before the dispatch packet is put inside the real hardware queue.
@@ -134,9 +137,10 @@ kernel_completion_cb(const rocprofiler_agent_t* rocp_agent,
     // Check if the PC sampling service is configured on this agent.
     if(!is_pc_sample_service_configured(rocp_agent->id)) return;
 
-    auto* service = get_configured_pc_sampling_service().load();
-    assert(service);
-    auto* agent_session = service->agent_sessions.at(rocp_agent->id).get();
+    auto* agent_session = get_agent_session(rocp_agent->id);
+    ROCP_FATAL_IF(agent_session == nullptr)
+        << "No PC sampling sessions configured for the agent where kernel completion "
+           "has been intercepted";
     // Mark the correlation ID as completed
     agent_session->cid_manager->cid_async_activity_completed(session.correlation_id);
 }

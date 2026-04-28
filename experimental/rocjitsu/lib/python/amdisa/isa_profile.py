@@ -373,6 +373,7 @@ _MUBUF_MODIFIERS = [
     EncodingModifier('sc0'),
     EncodingModifier('sc1'),
     EncodingModifier('nt'),
+    EncodingModifier('lds'),
 ]
 
 _MTBUF_MODIFIERS = [
@@ -403,6 +404,7 @@ _MUBUF_MODIFIERS_GLC = [
     EncodingModifier('offset', is_offset=True),
     EncodingModifier('glc'),
     EncodingModifier('slc'),
+    EncodingModifier('lds'),
 ]
 
 _MTBUF_MODIFIERS_GLC = [
@@ -437,6 +439,7 @@ _MUBUF_MODIFIERS_GLC_DLC = [
     EncodingModifier('glc'),
     EncodingModifier('dlc'),
     EncodingModifier('slc'),
+    EncodingModifier('lds'),
 ]
 
 _MTBUF_MODIFIERS_GLC_DLC = [

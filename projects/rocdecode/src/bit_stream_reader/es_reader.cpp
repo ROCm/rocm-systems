@@ -320,7 +320,7 @@ int RocVideoESParser::GetPicDataAvcHevc(uint8_t **p_pic_data, int *pic_size) {
                 CheckHevcNalForSlice(next_start_code_offset_, &slice_nal_flag, &first_slice_flag); // peek the next NAL
             }
             if (slice_nal_flag && first_slice_flag) {
-                // Between two pictures, we can have non-slice NAL units which are associated with the next picutre
+                // Between two pictures, we can have non-slice NAL units which are associated with the next picture
                 if (curr_pic_end_ < pic_data_size_) {
                     next_pic_start_ = curr_pic_end_;
                 }

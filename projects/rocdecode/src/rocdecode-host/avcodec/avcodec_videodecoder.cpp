@@ -241,7 +241,7 @@ rocDecStatus AvcodecVideoDecoder::SubmitDecode(RocdecPicParamsHost *pPicParams) 
     AVPacket *av_pkt = av_packets_[av_pkt_cnt_];
     std::pair<uint8_t *, int> *packet_data = &av_packet_data_[av_pkt_cnt_];
     if (pPicParams->bitstream_data_len > packet_data->second) {
-        void *new_pkt_data = av_realloc(av_pkt->data, (pPicParams->bitstream_data_len + MAX_AV_PACKET_DATA_SIZE));  // add more to avoid frequence reallocation
+        void *new_pkt_data = av_realloc(av_pkt->data, (pPicParams->bitstream_data_len + MAX_AV_PACKET_DATA_SIZE));  // add more to avoid frequent reallocation
         if (!new_pkt_data) {
             ErrorLog(g_rocdec_logger, "ERROR: couldn't allocate packet data");
             FunctionExitLog(g_rocdec_logger);
