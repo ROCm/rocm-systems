@@ -1582,17 +1582,26 @@ hsa_status_t AqlQueue::GetCUMasking(uint32_t num_cu_mask_count, uint32_t* cu_mas
 hsa_status_t AqlQueue::SetProfiling(bool enabled) {
   std::lock_guard<std::mutex> lock(scratch_lock_);
 
-  // Spec §4 step 2 (lines 548-564) REQUIRES the
-  // AMD_QUEUE_PROPERTIES_ENABLE_PROFILING bit be set BEFORE the KFD
-  // ioctl that publishes dispatch_log_base into the MQD; reversing the
-  // order would let an AQL packet processed in the gap between buffer-
-  // publish and bit-set produce a record with invalid timestamps. We
-  // therefore set the bit first on enable. C4: but on every failure
-  // path BELOW the bit flip we MUST roll it back via
-  // Queue::SetProfiling(false), so the spec §4a invariant ("bit set iff
-  // refcount > 0") is preserved on failed enables.
-  Queue::SetProfiling(enabled);
-  if (enabled) agent_->CheckClockTicks();
+  // Bit-flip ordering rules:
+  //   - ENABLE: bit MUST be set BEFORE the KFD ioctl that publishes
+  //     dispatch_log_base into the MQD (spec §4 step 2, lines 548-564).
+  //     Otherwise an AQL packet processed in the gap between buffer-
+  //     publish and bit-set would produce a record with invalid
+  //     timestamps. C4: on any enable failure below the bit flip we
+  //     MUST roll it back via Queue::SetProfiling(false) so spec §4a's
+  //     "bit set iff refcount > 0" invariant holds on failed enables.
+  //   - DISABLE: bit MUST be cleared AFTER KFD has been told to drop
+  //     the buffer and the MQD has been republished (spec §4
+  //     lines 401-402: "KFD DISABLE, then clear the profiling bit,
+  //     then free the buffer"). C6: clearing the bit while the MQD
+  //     still references the dispatch-record buffer would leave FW in
+  //     an undefined state for the gap.
+  // We therefore set the bit early on enable, but defer the bit clear
+  // on disable until after the buffer has been unpublished from KFD/MQD.
+  if (enabled) {
+    Queue::SetProfiling(true);
+    agent_->CheckClockTicks();
+  }
 
   if (enabled && !dispatch_record_buffer_) {
     constexpr uint32_t num_records = 65536;
@@ -1646,23 +1655,36 @@ hsa_status_t AqlQueue::SetProfiling(bool enabled) {
   }
 
   if (!enabled && dispatch_record_buffer_) {
-    // C1 fix: order matters. We MUST tell KFD to drop the buffer
-    // (libhsakmt SetQueueProfilingBuffer with addr=0) AND publish that to
-    // FW (Suspend/Resume runs the UPDATE_QUEUE ioctl that flushes the MQD)
+    // C1 + C6: order matters in BOTH directions on the disable path.
+    //
+    // C1: We MUST tell KFD to drop the buffer (libhsakmt
+    // SetQueueProfilingBuffer with addr=0) AND publish that to FW
+    // (Suspend/Resume runs the UPDATE_QUEUE ioctl that flushes the MQD)
     // BEFORE we free the buffer. Otherwise FW may still hold the old
     // buffer address in MQD and continue writing into freed host memory.
     //
-    // 1. Clear KFD-side profiling-buffer registration. C3: capture status
-    //    so callers can observe a libhsakmt teardown failure, but we
-    //    still proceed with the host-side free — leaving the host
-    //    buffer alive after a teardown failure is strictly worse (the
-    //    buffer would leak with no path to reach it again).
+    // C6: We MUST also keep the AMD_QUEUE_PROPERTIES_ENABLE_PROFILING
+    // bit SET while KFD/FW still has the dispatch-record buffer wired
+    // up. Per spec §4 (lines 401-402: "KFD DISABLE, then clear the
+    // profiling bit, then free the buffer"), the bit-clear must follow
+    // the MQD republish, otherwise the FW sees the old buffer address
+    // in MQD but the bit is already clear — undefined per the FW
+    // contract.
+    //
+    // 1. Clear KFD-side profiling-buffer registration. C3: capture
+    //    status so callers can observe a libhsakmt teardown failure,
+    //    but we still proceed with the host-side free — leaving the
+    //    host buffer alive after a teardown failure is strictly worse
+    //    (the buffer would leak with no path to reach it again).
     hsa_status_t buf_status =
         agent_->driver().SetQueueProfilingBuffer(queue_id_, nullptr, 0, nullptr);
     // 2. Flush MQD via UPDATE_QUEUE so FW observes addr=0.
     Suspend();
     Resume();
-    // 3. NOW it is safe to free the host-side buffer.
+    // 3. C6: NOW it is safe to clear the profiling bit — MQD no longer
+    //    references the buffer.
+    Queue::SetProfiling(false);
+    // 4. NOW it is safe to free the host-side buffer (C1).
     agent_->system_deallocator()(dispatch_record_buffer_);
     dispatch_record_buffer_ = nullptr;
     dispatch_record_buffer_size_ = 0;
@@ -1670,6 +1692,12 @@ hsa_status_t AqlQueue::SetProfiling(bool enabled) {
     return buf_status;
   }
 
+  // Idempotent disable with no buffer (or never enabled): just reflect
+  // the requested state on the bit. Safe because there is no MQD
+  // reference to the dispatch-record buffer to invalidate.
+  if (!enabled) {
+    Queue::SetProfiling(false);
+  }
   return HSA_STATUS_SUCCESS;
 }
 
