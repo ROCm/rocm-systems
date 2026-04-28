@@ -9,7 +9,7 @@ using namespace rocprofiler_compute_tool;
 
 TEST_F(test_sdk_callbacks_t, ProvidedSameKernelWithMultiplexingDisabled_DispatchCbReturnsFirstPmc)
 {
-    m_tool_data->iteration_multiplexing_mode = iteration_multiplexing_mode_t::DISABLED;
+    m_tool_data->iteration_multiplexing_mode = IterationMultiplexingMode::Disabled;
     const auto config_index_0 = dispatch_kernel_with_id(1, m_counters_pmc0, m_counters_pmc1);
     const auto config_index_1 = dispatch_kernel_with_id(1, m_counters_pmc0, m_counters_pmc1);
 
@@ -20,7 +20,7 @@ TEST_F(test_sdk_callbacks_t, ProvidedSameKernelWithMultiplexingDisabled_Dispatch
 
 TEST_F(test_sdk_callbacks_t, ProvidedDifferentKernelsWithMultiplexingDisabled_DispatchCbReturnsFirstPmc)
 {
-    m_tool_data->iteration_multiplexing_mode = iteration_multiplexing_mode_t::DISABLED;
+    m_tool_data->iteration_multiplexing_mode = IterationMultiplexingMode::Disabled;
     const auto config_index_0 = dispatch_kernel_with_id(1, m_counters_pmc0, m_counters_pmc1);
     const auto config_index_1 = dispatch_kernel_with_id(2, m_counters_pmc0, m_counters_pmc1);
 
@@ -31,7 +31,7 @@ TEST_F(test_sdk_callbacks_t, ProvidedDifferentKernelsWithMultiplexingDisabled_Di
 
 TEST_F(test_sdk_callbacks_t, ProvidedSameKernelWithKernelMultiplexing_DispatchCbReturnsEachPmc)
 {
-    m_tool_data->iteration_multiplexing_mode = iteration_multiplexing_mode_t::KERNEL;
+    m_tool_data->iteration_multiplexing_mode = IterationMultiplexingMode::Kernel;
     const auto config_index_0 = dispatch_kernel_with_id(1, m_counters_pmc0, m_counters_pmc1);
     const auto config_index_1 = dispatch_kernel_with_id(1, m_counters_pmc0, m_counters_pmc1);
 
@@ -44,7 +44,7 @@ TEST_F(test_sdk_callbacks_t, ProvidedSameKernelWithKernelMultiplexing_DispatchCb
 
 TEST_F(test_sdk_callbacks_t, ProvidedDifferentKernelsWithKernelMultiplexing_DispatchCbReturnsFirstPmc)
 {
-    m_tool_data->iteration_multiplexing_mode = iteration_multiplexing_mode_t::KERNEL;
+    m_tool_data->iteration_multiplexing_mode = IterationMultiplexingMode::Kernel;
     const auto config_index_0 = dispatch_kernel_with_id(1, m_counters_pmc0, m_counters_pmc1);
     const auto config_index_1 = dispatch_kernel_with_id(2, m_counters_pmc0, m_counters_pmc1);
     const auto config_index_2 = dispatch_kernel_with_id(1, m_counters_pmc0, m_counters_pmc1);
@@ -59,7 +59,7 @@ TEST_F(test_sdk_callbacks_t, ProvidedDifferentKernelsWithKernelMultiplexing_Disp
 
 TEST_F(test_sdk_callbacks_t, ProvidedSameKernelSameParamsWithLaunchMultiplexing_DispatchCbReturnsEachPmc)
 {
-    m_tool_data->iteration_multiplexing_mode = iteration_multiplexing_mode_t::LAUNCH;
+    m_tool_data->iteration_multiplexing_mode = IterationMultiplexingMode::Launch;
     constexpr kernel_dispatch_info_t info    = {1, 2, {3, 3, 3}, {4, 4, 4}, 5};
 
     const auto config_index_0 = dispatch_kernel_with_dispatch_info(info, m_counters_pmc0, m_counters_pmc1);
@@ -73,7 +73,7 @@ TEST_F(test_sdk_callbacks_t, ProvidedSameKernelSameParamsWithLaunchMultiplexing_
 TEST_F(test_sdk_callbacks_t,
        ProvidedSameKernelDifferentParamsWithLaunchMultiplexing_DispatchCbReturnsSamePmc)
 {
-    m_tool_data->iteration_multiplexing_mode   = iteration_multiplexing_mode_t::LAUNCH;
+    m_tool_data->iteration_multiplexing_mode   = IterationMultiplexingMode::Launch;
     kernel_dispatch_info_t info                = {1, 2, {3, 3, 3}, {4, 4, 4}, 5};
     const auto&            created_config_info = m_sdk_wrapper->get_create_counter_config_info();
 
@@ -317,9 +317,9 @@ void test_sdk_callbacks_multiplexing_t::SetUp()
 INSTANTIATE_TEST_SUITE_P(
     Multiplexing,
     test_sdk_callbacks_multiplexing_t,
-    ::testing::Values(rocprofiler_compute_tool::iteration_multiplexing_mode_t::DISABLED,
-                      rocprofiler_compute_tool::iteration_multiplexing_mode_t::KERNEL,
-                      rocprofiler_compute_tool::iteration_multiplexing_mode_t::LAUNCH));
+    ::testing::Values(rocprofiler_compute_tool::IterationMultiplexingMode::Disabled,
+                      rocprofiler_compute_tool::IterationMultiplexingMode::Kernel,
+                      rocprofiler_compute_tool::IterationMultiplexingMode::Launch));
 
 //////////////////////////////////////////////////////////////////////////
 /// test_sdk_callbacks_kernel_filtering_t

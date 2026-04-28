@@ -10,16 +10,21 @@
 #include <set>
 #include <string>
 
+using pc_sampling_collector_ptr =
+    rocprof_compute::synchronized_t<pc_sampling_collector::pc_sampling_collector_t::Ptr>;
+
+using PcSamplingMode = pc_sampling_collector::PcSamplingMode;
+
 namespace rocprofiler_compute_tool
 {
 class sdk_callbacks_t;
 
-enum class iteration_multiplexing_mode_t
+enum class IterationMultiplexingMode
 {
-    DISABLED,
-    SIMPLE,
-    KERNEL,
-    LAUNCH
+    Disabled,
+    Simple,
+    Kernel,
+    Launch
 };
 
 struct kernel_dispatch_info_t
@@ -72,6 +77,8 @@ struct counter_info_record_t
 
 struct tool_data_t
 {
+    IterationMultiplexingMode iteration_multiplexing_mode{IterationMultiplexingMode::Disabled};
+    PcSamplingMode                             pc_sampling_mode{PcSamplingMode::Disabled};
     std::mutex                                 mut{};
     std::string                                output_filename{};
     std::unordered_map<uint64_t, std::string>  counter_id_name_map{};
@@ -80,8 +87,7 @@ struct tool_data_t
     std::vector<std::pair<uint64_t, uint64_t>> kernel_filter_ranges{};
     std::vector<counter_info_record_t>         counter_records;
     std::set<uint64_t>                         target_kernel_ids{};
-    iteration_multiplexing_mode_t iteration_multiplexing_mode{iteration_multiplexing_mode_t::DISABLED};
-    rocprof_compute::synchronized_t<pc_sampling_collector_t::Ptr> pc_sampling_collector;
-    std::shared_ptr<sdk_callbacks_t>                              sdk_callbacks{};
+    pc_sampling_collector_ptr                  pc_sampling_collector;
+    std::shared_ptr<sdk_callbacks_t>           sdk_callbacks{};
 };
 }  // namespace rocprofiler_compute_tool

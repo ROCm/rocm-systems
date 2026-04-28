@@ -6,7 +6,7 @@
 #include <memory>
 #include <string>
 
-namespace rocprofiler_compute_tool
+namespace pc_sampling_collector
 {
 
 enum class PcSamplingMode : uint8_t
@@ -30,4 +30,4 @@ public:
     pc_sampling_collector_impl_t();
     void on_code_object_load(const rocprofiler_callback_tracing_code_object_load_data_t& info) override;
 };
-}  // namespace rocprofiler_compute_tool
+}  // namespace pc_sampling_collector

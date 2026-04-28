@@ -15,6 +15,7 @@
 #include <sstream>
 
 using namespace rocprofiler_compute_tool;
+using namespace pc_sampling_collector;
 
 static std::shared_ptr<env_parameters_t> g_input_parameters = std::make_shared<env_parameters_impl_t>();
 static std::shared_ptr<sdk_wrapper_t> g_sdk_wrapper = std::make_shared<sdk_wrapper_impl_t>();
@@ -49,13 +50,13 @@ static rocprofiler_context_id_t& get_client_ctx()
     return ctx;
 }
 
-iteration_multiplexing_mode_t iteration_multiplexing_mode(const std::string& mode)
+IterationMultiplexingMode iteration_multiplexing_mode(const std::string& mode)
 {
     if (mode == "kernel")
-        return iteration_multiplexing_mode_t::KERNEL;
+        return IterationMultiplexingMode::Kernel;
     if (mode == "kernel_launch_params")
-        return iteration_multiplexing_mode_t::LAUNCH;
-    return iteration_multiplexing_mode_t::DISABLED;
+        return IterationMultiplexingMode::Launch;
+    return IterationMultiplexingMode::Disabled;
 }
 
 PcSamplingMode pc_sampling_mode(const std::string& mode)

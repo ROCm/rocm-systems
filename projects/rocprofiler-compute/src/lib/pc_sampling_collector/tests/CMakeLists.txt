@@ -13,6 +13,7 @@ target_link_libraries(
     ${target}
     PRIVATE pc-sampling-collector gtest_main gmock gsl_assert fmt::fmt
 )
+target_include_directories(${target} PUBLIC .)
 
 add_test(NAME ${target} COMMAND ${target})
 

@@ -34,13 +34,13 @@ protected:
 
 class test_sdk_callbacks_multiplexing_t
     : public test_sdk_callbacks_t
-    , public testing::WithParamInterface<rocprofiler_compute_tool::iteration_multiplexing_mode_t>
+    , public testing::WithParamInterface<rocprofiler_compute_tool::IterationMultiplexingMode>
 {
 protected:
     void SetUp() override;
 
-    rocprofiler_compute_tool::iteration_multiplexing_mode_t m_multiplexing_mode =
-        rocprofiler_compute_tool::iteration_multiplexing_mode_t::DISABLED;
+    rocprofiler_compute_tool::IterationMultiplexingMode m_multiplexing_mode =
+        rocprofiler_compute_tool::IterationMultiplexingMode::Disabled;
 };
 
 struct kernel_filtering_test_params_t

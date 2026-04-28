@@ -164,7 +164,7 @@ private:
     std::vector<tracing_callback_info_t>  m_tracing_callback_info;
 };
 
-class mock_pc_sampling_collector_t : public rocprofiler_compute_tool::pc_sampling_collector_t
+class mock_pc_sampling_collector_t : public pc_sampling_collector::pc_sampling_collector_t
 {
 public:
     void on_code_object_load(const rocprofiler_callback_tracing_code_object_load_data_t& info) override;
