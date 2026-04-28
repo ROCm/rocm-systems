@@ -267,8 +267,19 @@ std::unordered_map<uint32_t, core::Queue*> g_known_queues;
 // Side-map for the QueueProfilingAcquire/Release refcount (spec §4a). One
 // entry per Queue* that has ever had at least one acquire. Looked up under
 // g_owners_mu.
+//
+// **Lifetime contract.** Entries are held via std::shared_ptr because
+// QueueProfilingAcquire / QueueProfilingRelease intentionally drop
+// g_owners_mu before locking the per-entry mutex (the per-entry lock can
+// be held across SetProfiling(), which we don't want to do under the
+// global map mutex). Without shared ownership, on_queue_destroy could
+// erase the map entry between our map-lookup and our per-entry-lock,
+// freeing the queue_profiling_owners object out from under us. Copying
+// the shared_ptr while still holding g_owners_mu pins the entry alive
+// until the API call's local shared_ptr drops, even if on_queue_destroy
+// concurrently erases the map slot.
 std::mutex g_owners_mu;
-std::unordered_map<core::Queue*, std::unique_ptr<queue_profiling_owners>> g_owners;
+std::unordered_map<core::Queue*, std::shared_ptr<queue_profiling_owners>> g_owners;
 
 // Per-agent "no-dispatch-log" mark. If the KFD ioctl returns ENOTSUP for any
 // queue on a given agent, that agent is added here and subsequent
@@ -520,20 +531,25 @@ void wait_for_idle(core::Queue* q) {
 // Profiling-bit refcount (spec §4a).
 // ============================================================================
 
-queue_profiling_owners* get_or_create_owners(core::Queue* q) {
+std::shared_ptr<queue_profiling_owners> get_or_create_owners(core::Queue* q) {
   // Caller holds g_owners_mu.
   auto it = g_owners.find(q);
-  if (it != g_owners.end()) return it->second.get();
+  if (it != g_owners.end()) return it->second;
   auto inserted = g_owners.emplace(
-      q, std::unique_ptr<queue_profiling_owners>(new queue_profiling_owners()));
-  return inserted.first->second.get();
+      q, std::make_shared<queue_profiling_owners>());
+  return inserted.first->second;
 }
 
 }  // namespace
 
 hsa_status_t QueueProfilingAcquire(core::Queue* q) {
   if (q == nullptr) return HSA_STATUS_ERROR_INVALID_QUEUE;
-  queue_profiling_owners* owners = nullptr;
+  // Pin the entry alive across the per-entry lock acquire by copying the
+  // shared_ptr out under g_owners_mu. Even if on_queue_destroy erases the
+  // map slot between here and the lock_guard below, this local shared_ptr
+  // keeps the queue_profiling_owners object alive (spec §4a + lifetime
+  // contract on g_owners). See C4 fix.
+  std::shared_ptr<queue_profiling_owners> owners;
   {
     std::lock_guard<std::mutex> lk(g_owners_mu);
     owners = get_or_create_owners(q);
@@ -553,7 +569,8 @@ hsa_status_t QueueProfilingAcquire(core::Queue* q) {
 
 hsa_status_t QueueProfilingRelease(core::Queue* q) {
   if (q == nullptr) return HSA_STATUS_ERROR_INVALID_QUEUE;
-  queue_profiling_owners* owners = nullptr;
+  // See QueueProfilingAcquire for the shared_ptr lifetime rationale (C4).
+  std::shared_ptr<queue_profiling_owners> owners;
   {
     std::lock_guard<std::mutex> lk(g_owners_mu);
     auto it = g_owners.find(q);
@@ -562,7 +579,7 @@ hsa_status_t QueueProfilingRelease(core::Queue* q) {
       // failure without modifying state.
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
     }
-    owners = it->second.get();
+    owners = it->second;
   }
   std::lock_guard<std::mutex> lk(owners->m);
   if (owners->refcount == 0) {
