@@ -92,7 +92,7 @@ namespace device {
     extern "C" __constant__ rocshmem_team_t
     __attribute__((visibility("default"))) ROCSHMEM_TEAM_WORLD = nullptr;
     extern "C" __constant__ rocshmem_team_t
-    __attribute__((visibility("default"))) ROCSHMEM_TEAM_SHARED = nullptr;
+    __attribute__((visibility("default"), used)) ROCSHMEM_TEAM_SHARED = nullptr;
 }
 
 #if defined(ENABLE_IPC_BITCODE)

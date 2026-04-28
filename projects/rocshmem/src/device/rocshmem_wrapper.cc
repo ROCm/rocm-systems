@@ -513,4 +513,27 @@ WRAP_WAIT(unsigned long, ulong)
 WRAP_WAIT(unsigned long long, ulonglong)
 WRAP_WAIT(uint64_t, uint64)
 
+// Only support reduce on team = 0 (ROCSHMEM_TEAM_WORLD)
+#define WRAP_REDUCE_OP(T, TNAME, OP)                                           \
+  ROCSHMEM_DEVICE_API int rocshmem_##TNAME##_##OP##_reduce_wg(                 \
+      int team, T *dest, const T *source, int nreduce) {                       \
+    if (team != 0) return rocshmem::ROCSHMEM_ERROR;                            \
+    return rocshmem::rocshmem_ctx_##TNAME##_##OP##_reduce_wg(                  \
+        rocshmem::ROCSHMEM_CTX_DEFAULT,                                        \
+        rocshmem::device::ROCSHMEM_TEAM_WORLD, dest, source, nreduce);         \
+  }
+
+#define WRAP_REDUCE_ARITH(T, TNAME)                                            \
+  WRAP_REDUCE_OP(T, TNAME, sum)                                                \
+  WRAP_REDUCE_OP(T, TNAME, min)                                                \
+  WRAP_REDUCE_OP(T, TNAME, max)                                                \
+  WRAP_REDUCE_OP(T, TNAME, prod)
+
+WRAP_REDUCE_ARITH(short, short)
+WRAP_REDUCE_ARITH(int, int)
+WRAP_REDUCE_ARITH(long, long)
+WRAP_REDUCE_ARITH(long long, longlong)
+WRAP_REDUCE_ARITH(float, float)
+WRAP_REDUCE_ARITH(double, double)
+
 }
