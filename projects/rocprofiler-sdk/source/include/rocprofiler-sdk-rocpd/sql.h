@@ -26,7 +26,6 @@
 #include <rocprofiler-sdk-rocpd/types.h>
 
 #include <stdint.h>
-#include <cstdint>
 
 ROCPD_EXTERN_C_INIT
 
@@ -97,6 +96,7 @@ typedef struct ROCPD_EXPERIMENTAL rocpd_sql_schema_jinja_variables_t
  * @param [in] engine Schema conforms to this SQL database engine
  * @param [in] kind Schema category
  * @param [in] options Schema options included in content
+ * @param [in] schema_version Schema version triplet (schema_version_triplet) being requested
  * @param [in] variables Jinja variables which were substituted
  * @param [in] schema_path Filesystem path to base schema file
  * @param [in] schema_content SQL schema content is pass to database

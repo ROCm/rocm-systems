@@ -12,6 +12,6 @@ foreach(_FILE ${rocpd_schemas})
         COPYONLY)
     install(
         FILES ${PROJECT_BINARY_DIR}/share/rocprofiler-sdk-rocpd/versions/3.0.0/${_FILE}
-        DESTINATION share/rocprofiler-sdk-rocpd
+        DESTINATION share/rocprofiler-sdk-rocpd/versions/3.0.0
         COMPONENT rocpd)
 endforeach()

@@ -69,7 +69,7 @@ def test_load_all_schema_versions():
     from rocpd.schema import RocpdSchema, get_supported_schema_versions
     import re
 
-    def schema_version_from_metadata_sql(sql: str) -> str | None:
+    def schema_version_from_metadata_sql(sql: str):
         m = re.search(
             r'\(\s*"schema_version"\s*,\s*"([^"]*)"\s*\)',
             sql,

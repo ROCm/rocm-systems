@@ -88,6 +88,7 @@ class RocpdSchema:
 
     def write_schema(self, connection):
         connection.executescript(self.tables)
+        connection.executescript(self.metadata)
         connection.executescript(self.indexes)
         connection.executescript(self.views)
 
