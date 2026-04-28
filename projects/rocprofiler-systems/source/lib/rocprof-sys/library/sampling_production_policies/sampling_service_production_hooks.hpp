@@ -73,28 +73,31 @@ sampling_service<default_sampling_policies>::setup_production_wiring(
     int   rt_sig    = rocprofsys::get_sampling_realtime_signal();
     int   cpu_sig   = rocprofsys::get_sampling_cputime_signal();
     int   ovfl_sig  = rocprofsys::get_sampling_overflow_signal();
-    auto& trig_slot = state->timer_trigger();
+    auto& rt_slot   = state->realtime_trigger();
+    auto& cpu_slot  = state->cputime_trigger();
     auto& ovfl_slot = state->overflow_trigger();
 
+    // AC-1: arm realtime timer if subscribed (independent of cputime — DEC-3).
     if(sigs.count(rt_sig) > 0)
     {
-        trig_slot.emplace();
-        trig_slot->configure(tid, sys_tid, rt_sig, CLOCK_REALTIME,
-                             rocprofsys::get_sampling_realtime_freq(),
-                             rocprofsys::get_sampling_realtime_delay());
-        trig_slot->start();
-        LOG_DEBUG("thread {} timer armed={} (realtime sig={})", tid,
-                  trig_slot->is_armed(), rt_sig);
+        rt_slot.emplace();
+        rt_slot->configure(tid, sys_tid, rt_sig, CLOCK_REALTIME,
+                           rocprofsys::get_sampling_realtime_freq(),
+                           rocprofsys::get_sampling_realtime_delay());
+        rt_slot->start();
+        LOG_DEBUG("thread {} realtime timer armed={} (sig={})", tid, rt_slot->is_armed(),
+                  rt_sig);
     }
-    else if(sigs.count(cpu_sig) > 0)
+    // AC-2: arm cputime timer if subscribed (independent of realtime — DEC-3).
+    if(sigs.count(cpu_sig) > 0)
     {
-        trig_slot.emplace();
-        trig_slot->configure(tid, sys_tid, cpu_sig, CLOCK_THREAD_CPUTIME_ID,
-                             rocprofsys::get_sampling_cputime_freq(),
-                             rocprofsys::get_sampling_cputime_delay());
-        trig_slot->start();
-        LOG_DEBUG("thread {} timer armed={} (cputime sig={} sys_tid={})", tid,
-                  trig_slot->is_armed(), cpu_sig, sys_tid);
+        cpu_slot.emplace();
+        cpu_slot->configure(tid, sys_tid, cpu_sig, CLOCK_THREAD_CPUTIME_ID,
+                            rocprofsys::get_sampling_cputime_freq(),
+                            rocprofsys::get_sampling_cputime_delay());
+        cpu_slot->start();
+        LOG_DEBUG("thread {} cputime timer armed={} (sig={} sys_tid={})", tid,
+                  cpu_slot->is_armed(), cpu_sig, sys_tid);
     }
 
     if(sigs.count(ovfl_sig) > 0)

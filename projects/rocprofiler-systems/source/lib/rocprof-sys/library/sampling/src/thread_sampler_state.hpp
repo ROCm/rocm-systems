@@ -55,13 +55,23 @@ public:
     }
 
     // ----- trigger accessors (DEC-3) -----
-    [[nodiscard]] std::optional<timer_trigger_t>& timer_trigger() noexcept
+    // realtime_trigger: CLOCK_REALTIME POSIX timer (AC-1).
+    [[nodiscard]] std::optional<timer_trigger_t>& realtime_trigger() noexcept
     {
-        return timer_trigger_;
+        return realtime_trigger_;
     }
-    [[nodiscard]] std::optional<timer_trigger_t> const& timer_trigger() const noexcept
+    [[nodiscard]] std::optional<timer_trigger_t> const& realtime_trigger() const noexcept
     {
-        return timer_trigger_;
+        return realtime_trigger_;
+    }
+    // cputime_trigger: CLOCK_THREAD_CPUTIME_ID POSIX timer (AC-2).
+    [[nodiscard]] std::optional<timer_trigger_t>& cputime_trigger() noexcept
+    {
+        return cputime_trigger_;
+    }
+    [[nodiscard]] std::optional<timer_trigger_t> const& cputime_trigger() const noexcept
+    {
+        return cputime_trigger_;
     }
     [[nodiscard]] std::optional<overflow_trigger_t>& overflow_trigger() noexcept
     {
@@ -145,7 +155,8 @@ public:
 
 private:
     std::set<int>                     signal_types_;
-    std::optional<timer_trigger_t>    timer_trigger_;
+    std::optional<timer_trigger_t>    realtime_trigger_;
+    std::optional<timer_trigger_t>    cputime_trigger_;
     std::optional<overflow_trigger_t> overflow_trigger_;
     sample_ring_buffer<RING_CAPACITY> ring_buffer_;
     std::atomic<bool>                 running_{ false };

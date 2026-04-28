@@ -43,6 +43,13 @@ get_sampling_signals(int64_t _tid = 0);
 bool
 get_use_causal();
 
+// Per-signal-set per-TID filters (R-3 fix surface).
+// Empty set means "all threads" (no filter).
+std::set<int64_t>
+get_sampling_cputime_tids();
+std::set<int64_t>
+get_sampling_realtime_tids();
+
 }  // namespace config
 }  // namespace rocprofsys
 

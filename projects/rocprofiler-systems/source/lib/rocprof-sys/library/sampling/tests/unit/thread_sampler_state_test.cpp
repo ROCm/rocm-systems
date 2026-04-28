@@ -28,11 +28,18 @@ TEST(thread_sampler_state, default_constructed_is_not_running)
     EXPECT_FALSE(state.is_running()) << "thread_sampler_state must start not-running";
 }
 
-TEST(thread_sampler_state, default_constructed_has_no_timer_trigger)
+TEST(thread_sampler_state, default_constructed_has_no_realtime_trigger)
 {
     test_state state;
-    EXPECT_FALSE(state.timer_trigger().has_value())
-        << "timer_trigger must be absent before configure";
+    EXPECT_FALSE(state.realtime_trigger().has_value())
+        << "realtime_trigger must be absent before configure";
+}
+
+TEST(thread_sampler_state, default_constructed_has_no_cputime_trigger)
+{
+    test_state state;
+    EXPECT_FALSE(state.cputime_trigger().has_value())
+        << "cputime_trigger must be absent before configure";
 }
 
 TEST(thread_sampler_state, default_constructed_has_no_overflow_trigger)
@@ -219,14 +226,22 @@ TEST(thread_sampler_state, increment_dropped_increases_count)
         << "dropped_count must equal number of increments";
 }
 
-// ─── thread_sampler_state: timer_trigger emplace-in-optional ─────────────────
+// ─── thread_sampler_state: realtime_trigger / cputime_trigger emplace ───────
 
-TEST(thread_sampler_state, timer_trigger_can_be_emplaced)
+TEST(thread_sampler_state, realtime_trigger_can_be_emplaced)
 {
     test_state state;
-    state.timer_trigger().emplace();
-    EXPECT_TRUE(state.timer_trigger().has_value())
-        << "timer_trigger must be present after emplace";
+    state.realtime_trigger().emplace();
+    EXPECT_TRUE(state.realtime_trigger().has_value())
+        << "realtime_trigger must be present after emplace";
+}
+
+TEST(thread_sampler_state, cputime_trigger_can_be_emplaced)
+{
+    test_state state;
+    state.cputime_trigger().emplace();
+    EXPECT_TRUE(state.cputime_trigger().has_value())
+        << "cputime_trigger must be present after emplace";
 }
 
 TEST(thread_sampler_state, overflow_trigger_can_be_emplaced)

@@ -1373,7 +1373,7 @@ get_use_sampling_cputime()
 }
 
 std::set<int>
-get_sampling_signals(int64_t)
+get_sampling_signals(int64_t tid)
 {
     auto _v = std::set<int>{};
     if(get_use_causal())
@@ -1391,9 +1391,26 @@ get_sampling_signals(int64_t)
             set_setting_value("ROCPROFSYS_SAMPLING_CPUTIME", true);
         }
 
-        if(get_use_sampling_cputime()) _v.emplace(get_sampling_cputime_signal());
-        if(get_use_sampling_realtime()) _v.emplace(get_sampling_realtime_signal());
-        if(get_use_sampling_overflow()) _v.emplace(get_sampling_overflow_signal());
+        // Per-TID filter (AC-4): when the respective TID set is non-empty,
+        // only include the signal for TIDs that are in the allowed set.
+        if(get_use_sampling_cputime())
+        {
+            auto cpu_tids = get_sampling_cputime_tids();
+            if(cpu_tids.empty() || cpu_tids.count(tid) > 0)
+                _v.emplace(get_sampling_cputime_signal());
+        }
+        if(get_use_sampling_realtime())
+        {
+            auto rt_tids = get_sampling_realtime_tids();
+            if(rt_tids.empty() || rt_tids.count(tid) > 0)
+                _v.emplace(get_sampling_realtime_signal());
+        }
+        if(get_use_sampling_overflow())
+        {
+            auto ovfl_tids = get_sampling_overflow_tids();
+            if(ovfl_tids.empty() || ovfl_tids.count(tid) > 0)
+                _v.emplace(get_sampling_overflow_signal());
+        }
     }
 
     return _v;

@@ -23,13 +23,20 @@ sample_parser::parse_timer(int64_t tid, backtrace_record const& init_rec,
     std::vector<timer_sample> result;
     result.reserve(raw.size());
 
-    uint64_t last_ts = init_rec.timestamp_ns;
+    uint64_t last_ts     = init_rec.timestamp_ns;
+    int64_t  last_cpu_ns = init_rec.metrics.cpu_ns;
 
     for(auto const& rec : raw)
     {
-        uint64_t beg = last_ts;
-        uint64_t end = rec.timestamp_ns;
-        last_ts      = end;
+        uint64_t beg        = last_ts;
+        uint64_t end        = rec.timestamp_ns;
+        int64_t  cur_cpu_ns = static_cast<int64_t>(rec.metrics.cpu_ns);
+
+        last_ts = end;
+        // Advance last_cpu_ns unconditionally so skipped records do not inflate
+        // the delta of the next surviving sample (mirrors how last_ts advances).
+        int64_t cpu_delta = cur_cpu_ns - last_cpu_ns;
+        last_cpu_ns       = cur_cpu_ns;
 
         if(end <= beg) continue;  // clock skew / tie — skip
 
@@ -37,11 +44,15 @@ sample_parser::parse_timer(int64_t tid, backtrace_record const& init_rec,
         if(pause_reg.spans_pause_interval(beg, end)) continue;
 
         timer_sample s;
-        s.tid     = tid;
-        s.beg_ns  = beg;
-        s.end_ns  = end;
-        s.metrics = rec.metrics;
-        s.stack   = frames_from_pcs(rec);
+        s.tid    = tid;
+        s.beg_ns = beg;
+        s.end_ns = end;
+        s.stack  = frames_from_pcs(rec);
+
+        // cpu_ns is the delta: CPU time consumed during this sample interval.
+        s.metrics        = rec.metrics;
+        s.metrics.cpu_ns = cpu_delta;
+
         result.push_back(std::move(s));
     }
 

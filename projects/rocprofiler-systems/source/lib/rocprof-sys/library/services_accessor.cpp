@@ -60,6 +60,7 @@ thread_local int64_t tl_logical_tid      = -1;
 // All state accessed through thread-local pointers — zero mutexes in handler (NFR-TS-2).
 
 #    include <csignal>
+#    include <ctime>
 #    include <libunwind.h>
 #    include <ucontext.h>
 
@@ -116,6 +117,18 @@ rocprofsys_sampling_signal_handler(int sig, siginfo_t* /*info*/, void* ucontext)
                 rec.raw_pcs[rec.pc_count++] = static_cast<uintptr_t>(ip);
                 if(unw_step(&cursor) <= 0) break;
             }
+        }
+    }
+
+    // Capture per-thread CPU time (async-signal-safe per POSIX.1-2017 §2.4.3).
+    // Bit 0 of metrics.valid marks cpu_ns as populated.
+    {
+        struct timespec _cputime_ts;
+        if(clock_gettime(CLOCK_THREAD_CPUTIME_ID, &_cputime_ts) == 0)
+        {
+            rec.metrics.cpu_ns =
+                _cputime_ts.tv_sec * INT64_C(1'000'000'000) + _cputime_ts.tv_nsec;
+            rec.metrics.valid.set(0);
         }
     }
 

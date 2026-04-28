@@ -50,6 +50,12 @@ set(_sampling_test_sources
     # Real-filesystem integration test: verify set_streams() + ofstream actually creates files
     # on disk (catches silent open-failure bugs in open_report_writer_streams).
     integration/native_report_writer_realfs_test.cpp
+    # TDD red tests for R-1: cpu_clock always empty (signal handler + parser + writer fix).
+    unit/metrics_population_test.cpp
+    # TDD red tests for AC-2: realtime+cputime trigger mutual-exclusion (else-if → if fix).
+    unit/trigger_mutual_exclusion_test.cpp
+    # TDD red tests for R-3 / AC-4: per-TID cputime signal filter not enforced.
+    unit/per_tid_cputime_filter_test.cpp
 )
 
 # Linux-only smoke tests for real OS-backed implementations.

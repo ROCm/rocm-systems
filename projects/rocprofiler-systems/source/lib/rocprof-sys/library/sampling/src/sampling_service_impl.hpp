@@ -286,9 +286,10 @@ sampling_service<Policies>::shutdown(int64_t tid)
 
     if(auto* state = registry_.at(tid))
     {
-        // Stop the POSIX timer before stopping the running flag so no new signals
-        // are delivered after stop() clears the running flag.
-        if(state->timer_trigger().has_value()) state->timer_trigger()->stop();
+        // Stop all POSIX timers before clearing the running flag so no new signals
+        // are delivered after stop() (DEC-3: separate realtime + cputime slots).
+        if(state->realtime_trigger().has_value()) state->realtime_trigger()->stop();
+        if(state->cputime_trigger().has_value()) state->cputime_trigger()->stop();
         if(state->overflow_trigger().has_value()) state->overflow_trigger()->stop();
 
         state->stop();

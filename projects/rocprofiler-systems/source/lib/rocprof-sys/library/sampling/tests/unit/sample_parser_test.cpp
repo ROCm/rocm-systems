@@ -227,3 +227,59 @@ TEST(sample_parser, max_depth_stack_record_parsed_without_crash)
     EXPECT_NO_THROW(parser.parse_timer(0, init_rec, raw, pause_reg))
         << "Parsing max-depth (64 PC) records must not throw";
 }
+
+// ─── R-1 fix: cpu_ns propagated as delta, not absolute ───────────────────────
+
+TEST(sample_parser, cpu_ns_in_metrics_propagated_as_delta)
+{
+    sample_parser                       parser;
+    fake_clock                          clock;
+    pause_interval_registry<fake_clock> pause_reg(clock);
+
+    // init_rec: cpu_ns=1000, valid bit 0 set.
+    backtrace_record init_rec = make_record(0, 100);
+    init_rec.metrics.cpu_ns   = 1000;
+    init_rec.metrics.valid.set(0);
+
+    // raw[0]: cpu_ns=1200 → delta=200; raw[1]: cpu_ns=1500 → delta=300.
+    backtrace_record r0 = make_record(0, 200);
+    r0.metrics.cpu_ns   = 1200;
+    r0.metrics.valid.set(0);
+
+    backtrace_record r1 = make_record(0, 300);
+    r1.metrics.cpu_ns   = 1500;
+    r1.metrics.valid.set(0);
+
+    std::vector<backtrace_record> raw = { r0, r1 };
+
+    auto result = parser.parse_timer(0, init_rec, raw, pause_reg);
+
+    ASSERT_EQ(result.size(), 2U);
+    EXPECT_EQ(result.at(0).metrics.cpu_ns, 200)
+        << "cpu_ns must be delta (1200-1000=200), not absolute";
+    EXPECT_EQ(result.at(1).metrics.cpu_ns, 300)
+        << "cpu_ns must be delta (1500-1200=300), not absolute";
+    EXPECT_TRUE(result.at(0).metrics.valid.any())
+        << "valid bitset must be carried forward";
+    EXPECT_TRUE(result.at(1).metrics.valid.any())
+        << "valid bitset must be carried forward";
+}
+
+TEST(sample_parser, cpu_ns_zero_when_metrics_invalid)
+{
+    sample_parser                       parser;
+    fake_clock                          clock;
+    pause_interval_registry<fake_clock> pause_reg(clock);
+
+    // Records with valid=0 (zero-initialized) — cpu_ns stays 0.
+    backtrace_record init_rec = make_record(0, 100);
+    backtrace_record r0       = make_record(0, 200);
+
+    std::vector<backtrace_record> raw = { r0 };
+
+    auto result = parser.parse_timer(0, init_rec, raw, pause_reg);
+
+    ASSERT_EQ(result.size(), 1U);
+    EXPECT_FALSE(result.at(0).metrics.valid.any())
+        << "valid bitset must stay clear when records carry invalid metrics";
+}
