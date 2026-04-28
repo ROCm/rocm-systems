@@ -279,7 +279,7 @@ void GDABackend::setup_host_ctx() {
 
 void GDABackend::setup_default_ctx() {
   TeamInfo *tinfo = team_tracker.get_team_world()->tinfo_wrt_world;
-  default_context_proxy_ = GDADefaultContextProxyT(this, tinfo, gda_provider);
+  default_context_proxy_ = GDADefaultContextProxy(this, tinfo, gda_provider);
 }
 
 void GDABackend::log_ctx_nics([[maybe_unused]] unsigned int ctx_id,

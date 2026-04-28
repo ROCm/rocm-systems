@@ -262,7 +262,7 @@ class ROBackend : public Backend {
    *
    * @note Internal data ownership is managed by the proxy
    */
-  DefaultContextProxyT default_context_proxy_;  // init handled in constructor
+  DefaultContextProxy default_context_proxy_;  // init handled in constructor
 
   /**
    * @brief Controls how many thread blocks are monitored by polling thread.
