@@ -63,6 +63,7 @@ Module structure order (strictly):
 
 Additional rules:
 - Public functions appear **before** private helpers in every file.
+- `_` prefix marks privacy for module-level helpers and class members only — do not use it for helpers in test files (`test_*.py`), which are not imported.
 - Use `is None` / `is not None` — never `== None` or `!= None`.
 
 ## What NOT to Generate
