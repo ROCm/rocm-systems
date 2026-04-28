@@ -778,10 +778,12 @@ hsa_status_t Runtime::GetSystemInfo(hsa_system_info_t attribute, void* value) {
         setFlag(HSA_EXTENSION_IMAGES);
       }
 
+#if !defined(__APPLE__)
       if (os::LibHandle lib = os::LoadLib(kAqlProfileLib)) {
         os::CloseLib(lib);
         setFlag(HSA_EXTENSION_AMD_AQLPROFILE);
       }
+#endif
 
       setFlag(HSA_EXTENSION_AMD_PROFILER);
 
