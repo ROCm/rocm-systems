@@ -53,6 +53,22 @@ if(HIP_PLATFORM STREQUAL "amd" )
               DESTINATION ${CMAKE_INSTALL_LIBDIR}
               COMPONENT ${COMPONENT_NAME})
 
+   # Vendored LTTng-UST + userspace-rcu .so files. libamdhip64 finds
+   # these at runtime via RPATH $ORIGIN/lttng; without them in the
+   # package, the loader would fall back to a system lttng-ust (or
+   # fail). LTTNG_VENDORED_LIB_DIR is set by the include() of
+   # cmake/VendorLttng.cmake from hipamd/src/CMakeLists.txt — only
+   # populated when HIP_ENABLE_LTTNG_UST=ON, hence the guard.
+   if(HIP_ENABLE_LTTNG_UST AND DEFINED LTTNG_VENDORED_LIB_DIR)
+      install(DIRECTORY ${LTTNG_VENDORED_LIB_DIR}/
+              DESTINATION ${CMAKE_INSTALL_LIBDIR}/lttng
+              COMPONENT ${COMPONENT_NAME}
+              USE_SOURCE_PERMISSIONS
+              FILES_MATCHING
+              PATTERN "liblttng*.so*"
+              PATTERN "liburcu*.so*")
+   endif()
+
 #TODO:This do not belong in BINARY package.
 #Keeping it as is for now
 install(FILES ${CMAKE_BINARY_DIR}/hipamd/share/hip/.hipInfo DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT binary)

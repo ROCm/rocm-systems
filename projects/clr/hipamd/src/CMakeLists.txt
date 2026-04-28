@@ -371,16 +371,9 @@ if(HIP_ENABLE_LTTNG_UST)
         BUILD_RPATH   "${LTTNG_VENDORED_LIB_DIR}"
         INSTALL_RPATH "\$ORIGIN/lttng:\$ORIGIN")
 
-    # Install the vendored .so files alongside libamdhip64.so under
-    # ${CMAKE_INSTALL_LIBDIR}/lttng. The version-suffixed symlinks must
-    # be preserved so the dynamic loader resolves NEEDED entries that
-    # reference e.g. liblttng-ust.so.1 instead of the unsuffixed name.
-    install(DIRECTORY ${LTTNG_VENDORED_LIB_DIR}/
-            DESTINATION ${CMAKE_INSTALL_LIBDIR}/lttng
-            USE_SOURCE_PERMISSIONS
-            FILES_MATCHING
-            PATTERN "liblttng*.so*"
-            PATTERN "liburcu*.so*")
+    # NB: install rule for the vendored .so files lives in
+    # hipamd/packaging/CMakeLists.txt under COMPONENT binary so the
+    # files end up in the .deb/.rpm alongside libamdhip64.so.
 
     # Per-packet AQL kernel-dispatch tracepoint lives at the HIP CLR packet-
     # write site (rocclr/device/rocm/rocvirtual.cpp). rocclr is built as a

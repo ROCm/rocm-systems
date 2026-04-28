@@ -455,9 +455,10 @@ if( BUILD_SHARED_LIBS )
       # symlinks are preserved so NEEDED entries that reference e.g.
       # liblttng-ust.so.1 resolve correctly. NB: when both HIP and HSA
       # are installed to the same prefix this writes the same files
-      # twice; CMake's install rule is idempotent so this is harmless.
+      # twice; CMake's install rule is idempotent so that is harmless.
       install(DIRECTORY ${LTTNG_VENDORED_LIB_DIR}/
               DESTINATION ${CMAKE_INSTALL_LIBDIR}/lttng
+              COMPONENT binary
               USE_SOURCE_PERMISSIONS
               FILES_MATCHING
               PATTERN "liblttng*.so*"
