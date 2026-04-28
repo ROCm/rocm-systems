@@ -276,37 +276,33 @@ result = (args[0].max() if len(args) == 1 and isinstance(args[0], pd.Series)
 
 ### 3. Improving Testability
 
-**Good:** Separate calculation from I/O
+See [I/O and Computation Separation](#io-and-computation-separation) for the
+canonical pattern: keep computation pure and confine I/O to thin wrappers so
+the computation can be exercised with in-memory inputs.
+
+**Good:** Pure computation is trivially testable
 
 ```python
-def compute_file_hash(filepath: Path) -> str:
-    """Compute MD5 hash of a file."""
-    md5 = hashlib.md5()
-    with open(filepath, "rb") as f:
-        for chunk in iter(lambda: f.read(4096), b""):
-            md5.update(chunk)
-    return md5.hexdigest()
+def compute_md5(data: bytes) -> str:
+    """Pure computation — testable with any byte payload."""
+    return hashlib.md5(data).hexdigest()
 
-# Pure function — easily tested with any file path
+def hash_file(filepath: Path) -> str:
+    """Thin I/O wrapper around the pure computation."""
+    return compute_md5(filepath.read_bytes())
 ```
 
-**Bad:** Mixing I/O and computation
+**Bad:** Bundling unrelated work makes everything hard to test
 
 ```python
 def process_and_hash_file(filepath: Path) -> tuple:
-    """Does too much — hard to unit test."""
-    md5 = hashlib.md5()
-    with open(filepath, "rb") as f:
-        data = f.read()
-        md5.update(data)
-
-    # Also validates
-    is_valid = validate_data(data)
-
-    # Also transforms
-    transformed = transform_data(data)
-
-    return md5.hexdigest(), is_valid, transformed
+    """Does too much — hash, validate, and transform are all entangled."""
+    data = filepath.read_bytes()
+    return (
+        hashlib.md5(data).hexdigest(),
+        validate_data(data),
+        transform_data(data),
+    )
 ```
 
 ## When NOT to Extract Helper Functions
@@ -635,7 +631,7 @@ def create_filtered_stats(df_in, filter_nodes, ...) -> None:
 
 - Module structure order: docstring → imports (stdlib → third-party → local, sorted within each group) → constants → public functions → private helpers → classes.
 - Public functions appear **before** private helpers in every file.
-- The `_` prefix marks privacy for module-level helpers and class members only — do not use it for helpers in test files (`test_*.py`), which are not imported.
+- The `_` prefix marks privacy for module-level helpers and class members only — do not use it for helpers in test files (`test_*.py`). Test modules are imported only by pytest for collection and should not import each other (use `conftest.py` for shared fixtures), so there is no internal API to mark private.
 - Use `is None` / `is not None` — never `== None` or `!= None`.
 
 ### None Comparisons
