@@ -390,13 +390,20 @@ __device__ __forceinline__ bool is_last_active_lane() {
 #define LOAD(VAR) __atomic_load_n((VAR), __ATOMIC_SEQ_CST)
 #define STORE(DST, SRC) __atomic_store_n((DST), (SRC), __ATOMIC_SEQ_CST)
 
+enum class MemcpyKind { Put, Get };
+
+template <MemcpyKind Kind = MemcpyKind::Put>
 [[maybe_unused]] __device__ __forceinline__ void memcpy_lane(void* dst, void* src, size_t size) {
   uint8_t* dst_bytes{static_cast<uint8_t*>(dst)};
   uint8_t* src_bytes{static_cast<uint8_t*>(src)};
 
   for (size_t i = 16; i >= 1; i >>= 1) {
     while (size >= i) {
-      store_asm(src_bytes, dst_bytes, i);
+      if constexpr (Kind == MemcpyKind::Put) {
+        put_asm(src_bytes, dst_bytes, i);
+      } else {
+        get_asm(src_bytes, dst_bytes, i);
+      }
       src_bytes += i;
       dst_bytes += i;
       size -= i;
@@ -404,6 +411,7 @@ __device__ __forceinline__ bool is_last_active_lane() {
   }
 }
 
+template <MemcpyKind Kind = MemcpyKind::Put>
 [[maybe_unused]] __device__ __forceinline__ void memcpy_wg(void* dst, void* src, size_t size) {
   int thread_id{get_flat_block_id()};
   int block_size{get_flat_block_size()};
@@ -428,7 +436,11 @@ __device__ __forceinline__ bool is_last_active_lane() {
       src_bytes += i * j;
       dst_bytes += i * j;
 
-      store_asm(src_bytes, dst_bytes, j);
+      if constexpr (Kind == MemcpyKind::Put) {
+        put_asm(src_bytes, dst_bytes, j);
+      } else {
+        get_asm(src_bytes, dst_bytes, j);
+      }
     }
     size -= cpy_size * j;
     dst_def += cpy_size * j;
@@ -436,6 +448,7 @@ __device__ __forceinline__ bool is_last_active_lane() {
   }
 }
 
+template <MemcpyKind Kind = MemcpyKind::Put>
 [[maybe_unused]] __device__ __forceinline__ void memcpy_wave(void* dst, void* src, size_t size) {
   int wave_tid = get_flat_block_id() % WF_SIZE;
   int wave_size{wave_SZ()};
@@ -460,7 +473,11 @@ __device__ __forceinline__ bool is_last_active_lane() {
       src_bytes += i * j;
       dst_bytes += i * j;
 
-      store_asm(src_bytes, dst_bytes, j);
+      if constexpr (Kind == MemcpyKind::Put) {
+        put_asm(src_bytes, dst_bytes, j);
+      } else {
+        get_asm(src_bytes, dst_bytes, j);
+      }
     }
     size -= cpy_size * j;
     dst_def += cpy_size * j;
