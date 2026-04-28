@@ -793,19 +793,25 @@ print_analysis_result(const std::vector<std::vector<procedure_id>>& failing_subs
         if(subset.size() == 1)
         {
             const auto& p = subset.front();
-            verbprintf(0, "[analysis]   subset %zu singleton: library=%s function=%s\n",
-                       i + 1, p.library_name.c_str(), p.function_name.c_str());
+            verbprintf(0, "[analysis]   subset %zu single procedure:\n", i + 1);
+            verbprintf(0, "[analysis]     source: %s\n", p.library_name.c_str());
+            verbprintf(0, "[analysis]     function: %s\n", p.function_name.c_str());
             continue;
         }
 
-        verbprintf(0, "[analysis]   subset %zu cooperative procedures: %zu\n", i + 1,
+        verbprintf(0, "[analysis]   subset %zu grouped procedures: %zu\n", i + 1,
                    subset.size());
+        verbprintf(0, "[analysis]     This subset fails together; individual procedures "
+                      "inside it may not fail on their own.\n");
         for(const auto& p : subset)
         {
-            verbprintf(0, "[analysis]     cooperative: library=%s function=%s\n",
-                       p.library_name.c_str(), p.function_name.c_str());
+            verbprintf(0, "[analysis]     procedure:\n");
+            verbprintf(0, "[analysis]       source: %s\n", p.library_name.c_str());
+            verbprintf(0, "[analysis]       function: %s\n", p.function_name.c_str());
         }
     }
+    verbprintf(0, "[analysis] Excluding these functions from instrumentation via "
+                  "--function-exclude is recommended\n");
 }
 
 void
@@ -876,10 +882,8 @@ run_insertion_analysis(fmodset_t& instrumented_module_functions)
                             state.fallback_failing_subsets.end());
     print_analysis_result(reported_subsets);
 
-    verbprintf(0, "[analysis] Excluding the functions from instrumentation via "
-                  "--function-exclude is recommended\n");
     _wc.stop();
-    verbprintf(0, "[analysis] total wall-clock time: %.3f sec\n", _wc.get());
+    verbprintf(0, "[analysis] total time taken: %.3f sec\n", _wc.get());
 }
 
 }  // namespace analysis
