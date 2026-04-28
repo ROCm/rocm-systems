@@ -69,6 +69,10 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     # and NFR-TS-5 (signals blocked before state torn down in child).
     # Uses real fork() — Linux-only.
     list(APPEND _sampling_test_sources integration/fork_integration_test.cpp)
+    # NOTE: real_overflow_trigger_test.cpp is NOT in the OBJECT library.
+    # It links perf::perf_event symbols from rocprofiler-systems-object-library
+    # which the unit test binary must not link (TSan deadlock on atexit).
+    # It lives in its own standalone binary below.
 endif()
 
 # ── Async-signal-safety regression test ──────────────────────────────────────
@@ -125,6 +129,7 @@ target_link_libraries(
         rocprof-sys-sampling-library
         rocprof-sys-sampling-test-doubles
         rocprofiler-systems-googletest-library
+        rocprofiler-systems-interface-library
 )
 
 target_include_directories(
@@ -164,6 +169,110 @@ if(TARGET rocprofiler-systems-core-library)
     set_tests_properties(
         rocprof-sys-sampling-config-integration-tests
         PROPERTIES LABELS "sampling;integration;config;r3" TIMEOUT 60
+    )
+endif()
+
+# ── I-15 production hooks integration test (Task #17) ────────────────────────
+# Tests the observable outcome of shutdown_production_wiring (TLS cleared).
+# Links librocprofiler-systems-static (contains thread_info, tracing, perf, TLS state)
+# and real config, so it must NOT include config_stubs.cpp.
+# Uses configure_settings(false) to avoid recursive_init_error.
+if(TARGET rocprofiler-systems-core-library AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    add_executable(
+        rocprof-sys-sampling-production-hooks-tests
+        integration/sampling_service_production_hooks_test.cpp
+    )
+    target_link_libraries(
+        rocprof-sys-sampling-production-hooks-tests
+        PRIVATE
+            rocprof-sys-sampling-library
+            rocprofiler-systems::librocprofiler-systems-static
+            rocprofiler-systems::rocprofiler-systems-interface-library
+            GTest::gtest
+    )
+    target_include_directories(
+        rocprof-sys-sampling-production-hooks-tests
+        PRIVATE
+            ${PROJECT_SOURCE_DIR}/source/lib
+            ${PROJECT_SOURCE_DIR}/source/lib/rocprof-sys
+    )
+    add_test(
+        NAME rocprof-sys-sampling-production-hooks-tests
+        COMMAND rocprof-sys-sampling-production-hooks-tests
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+    )
+    set_tests_properties(
+        rocprof-sys-sampling-production-hooks-tests
+        PROPERTIES LABELS "sampling;integration;production-hooks;i15" TIMEOUT 60
+    )
+endif()
+
+# ── I-15 real_perfetto_sink integration test (Task #17) ──────────────────────
+# Tests the empty-sample guard and perfetto-disabled early-return path.
+# Requires rocprofiler-systems-binary (real_perfetto_sink, perfetto headers).
+if(TARGET rocprofiler-systems-core-library AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    add_executable(
+        rocprof-sys-sampling-perfetto-sink-tests
+        integration/real_perfetto_sink_test.cpp
+    )
+    target_link_libraries(
+        rocprof-sys-sampling-perfetto-sink-tests
+        PRIVATE
+            rocprof-sys-sampling-library
+            rocprofiler-systems::librocprofiler-systems-static
+            rocprofiler-systems::rocprofiler-systems-interface-library
+            GTest::gtest
+    )
+    target_include_directories(
+        rocprof-sys-sampling-perfetto-sink-tests
+        PRIVATE
+            ${PROJECT_SOURCE_DIR}/source/lib
+            ${PROJECT_SOURCE_DIR}/source/lib/rocprof-sys
+    )
+    add_test(
+        NAME rocprof-sys-sampling-perfetto-sink-tests
+        COMMAND rocprof-sys-sampling-perfetto-sink-tests
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+    )
+    set_tests_properties(
+        rocprof-sys-sampling-perfetto-sink-tests
+        PROPERTIES LABELS "sampling;integration;perfetto-sink;i15" TIMEOUT 60
+    )
+endif()
+
+# ── I-15 real_overflow_trigger smoke test (Task #17) ─────────────────────────
+# Separate binary: real_overflow_trigger.hpp instantiates perf::perf_event inline
+# methods (start/stop/close/is_open/~perf_event) that are defined in library/perf.cpp
+# inside rocprofiler-systems-object-library.  The main unit test binary must NOT link
+# that library (TSan deadlock on atexit), so this lives in its own binary.
+if(TARGET rocprofiler-systems-core-library AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    add_executable(
+        rocprof-sys-sampling-overflow-trigger-tests
+        unit/real_overflow_trigger_test.cpp
+    )
+    target_link_libraries(
+        rocprof-sys-sampling-overflow-trigger-tests
+        PRIVATE
+            rocprof-sys-sampling-library
+            rocprofiler-systems::librocprofiler-systems-static
+            rocprofiler-systems::rocprofiler-systems-interface-library
+            GTest::gtest
+            GTest::gtest_main
+    )
+    target_include_directories(
+        rocprof-sys-sampling-overflow-trigger-tests
+        PRIVATE
+            ${PROJECT_SOURCE_DIR}/source/lib
+            ${PROJECT_SOURCE_DIR}/source/lib/rocprof-sys
+    )
+    add_test(
+        NAME rocprof-sys-sampling-overflow-trigger-tests
+        COMMAND rocprof-sys-sampling-overflow-trigger-tests
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+    )
+    set_tests_properties(
+        rocprof-sys-sampling-overflow-trigger-tests
+        PROPERTIES LABELS "sampling;unit;overflow-trigger;i15" TIMEOUT 30
     )
 endif()
 
