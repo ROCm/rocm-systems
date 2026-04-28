@@ -40,6 +40,12 @@ inline constexpr int ELFABIVERSION_AMDGPU_HSA_V6 = 4;
 inline constexpr Elf_Half EM_X86_64 = 62;
 inline constexpr Elf_Half EM_AMDGPU = 224;
 
+inline constexpr Elf_Half ET_REL = 1;
+inline constexpr Elf_Half ET_DYN = 3;
+
+inline constexpr Elf_Half SHN_UNDEF = 0;
+inline constexpr Elf_Half SHN_ABS = 0xfff1;
+
 inline constexpr uint32_t EF_AMDGPU_MACH = 0x0ff;
 inline constexpr uint32_t EF_AMDGPU_MACH_NONE = 0;
 inline constexpr uint32_t EF_AMDGPU_MACH_AMDGCN_GFX908 = 0x30;
@@ -84,9 +90,17 @@ inline constexpr uint32_t SHT_NULL = 0;
 inline constexpr uint32_t SHT_PROGBITS = 1;
 inline constexpr uint32_t SHT_SYMTAB = 2;
 inline constexpr uint32_t SHT_STRTAB = 3;
+inline constexpr uint32_t SHT_RELA = 4;
 inline constexpr uint32_t SHT_NOTE = 7;
 inline constexpr uint32_t SHT_NOBITS = 8; // ELF spec: section occupies no file space (e.g. .bss)
+inline constexpr uint32_t SHT_REL = 9;
 inline constexpr uint32_t SHT_DYNSYM = 11;
+
+inline constexpr uint64_t SHF_WRITE = 1u << 0;
+inline constexpr uint64_t SHF_ALLOC = 1u << 1;
+inline constexpr uint64_t SHF_EXECINSTR = 1u << 2;
+
+inline constexpr uint32_t PT_LOAD = 1;
 
 /// @brief AMDGPU vendor specific notes for Code Object V3.
 inline constexpr uint32_t NT_AMDGPU_METADATA = 32;

@@ -7,6 +7,7 @@
 #ifndef ROCJITSU_CODE_CODE_OBJECT_H_
 #define ROCJITSU_CODE_CODE_OBJECT_H_
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -66,6 +67,10 @@ public:
   /// @returns Section virtual address, or 0 if not set.
   virtual uint64_t vaddr() const { return 0; }
 
+  /// @brief Raw ELF section flags.
+  /// @returns Section flags from sh_flags, or 0 when not backed by ELF metadata.
+  virtual uint64_t flags() const { return 0; }
+
   /// @brief Raw section data.
   /// @returns Pointer to the section contents, or nullptr if empty.
   const char *data() const { return data_.get(); }
@@ -100,6 +105,12 @@ public:
   /// @brief .text sections containing executable machine code.
   /// @returns Vector of pointers to .text sections.
   const std::vector<const Section *> &text_sections() const { return text_sections_; }
+
+  /// @brief All executable code sections in load/disassembly order.
+  /// @details This includes `.text` plus DBT-generated executable sections such
+  /// as `.rj_translations`. Use `text_sections()` only when offsets must remain
+  /// relative to the original `.text` section.
+  const std::vector<const Section *> &code_sections() const { return code_sections_; }
 
   /// @brief .rodata sections containing read-only data.
   /// @returns Vector of pointers to .rodata sections.
@@ -184,6 +195,7 @@ protected:
   std::unique_ptr<Header> header_;
   std::vector<std::unique_ptr<Section>> sections_;
   std::vector<const Section *> text_sections_;
+  std::vector<const Section *> code_sections_;
   std::vector<const Section *> rodata_sections_;
 };
 
