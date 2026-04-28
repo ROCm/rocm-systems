@@ -3,8 +3,8 @@
 
 #include "library/runtime.hpp"
 #include "api.hpp"
+#include "common/defines.h"
 #include "core/config.hpp"
-#include "core/defines.hpp"
 #include "core/utility.hpp"
 #include "library/thread_data.hpp"
 #include "library/thread_info.hpp"

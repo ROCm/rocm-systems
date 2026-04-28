@@ -110,10 +110,11 @@ module per backend. Every gate-hook installer satisfies three rules:
 
 3. **Reject non-perfxpert tool calls until lift.** Until
    `perfxpert_intent_classify` has been invoked in the current
-   session, every non-`mcp_perfxpert_*` tool call is denied with a
+   session, every non-PerfXpert MCP tool call is denied with a
    user-visible reason matching the opencode fork patch 0020
    `retryWith` message ("call `intent_classify` first"). This keeps
-   the UX identical across backends.
+   the UX identical across backends while allowing each backend to use
+   its own MCP wire-name format.
 
 The three `LiveCheckReport.gate_hook_installed` states encode these
 outcomes: `None` = probe skipped, `False` = surface unsupported

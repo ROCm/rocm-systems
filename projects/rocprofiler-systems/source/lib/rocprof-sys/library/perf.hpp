@@ -3,8 +3,8 @@
 
 #pragma once
 
+#include "common/defines.h"
 #include "core/containers/c_array.hpp"
-#include "core/defines.hpp"
 #include "core/locking.hpp"
 #include "core/perf.hpp"
 

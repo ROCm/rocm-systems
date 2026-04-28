@@ -4,7 +4,7 @@
 #pragma once
 
 #include "common.hpp"
-#include "defines.hpp"
+#include "common/defines.h"
 #include "state.hpp"
 #include "timemory.hpp"
 

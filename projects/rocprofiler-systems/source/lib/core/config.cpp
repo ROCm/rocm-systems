@@ -6,7 +6,6 @@
 #include "common/defines.h"
 #include "common/static_object.hpp"
 #include "constraint.hpp"
-#include "defines.hpp"
 #include "gpu.hpp"
 #include "logger/logger.hpp"
 #include "mproc.hpp"
