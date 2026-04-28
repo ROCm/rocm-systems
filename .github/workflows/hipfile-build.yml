@@ -6,6 +6,7 @@ env:
   AIS_INPUT_BUILD_ID: ${{ inputs.build_id }}
   AIS_INPUT_CI_IMAGE: ${{ inputs.ci_image }}
   AIS_INPUT_CXX_COMPILER: ${{ inputs.cxx_compiler }}
+  AIS_INPUT_CXX_STANDARD: ${{ inputs.cxx_standard }}
   AIS_INPUT_JOB_DESIGNATOR: ${{ inputs.job_designator }}
   AIS_INPUT_PLATFORM: ${{ inputs.platform }}
   AIS_INPUT_UPLOAD_ARTIFACTS: ${{ inputs.upload_artifacts }}
@@ -19,7 +20,7 @@ env:
   AIS_PKG_TYPE: ${{ inputs.platform == 'ubuntu' && 'DEB' || 'RPM' }}
   AIS_INPUT_ROCM_VERSION: ${{ inputs.rocm_version }}
   # Code coverage report only vetted to work for amdclang++ on Ubuntu
-  AIS_USE_CODE_COVERAGE: ${{ inputs.cxx_compiler == 'amdclang++' && inputs.platform == 'ubuntu' }}
+  AIS_USE_CODE_COVERAGE: ${{ inputs.cxx_compiler == 'amdclang++' && inputs.platform == 'ubuntu' && inputs.generate_coverage }}
   AIS_HIP_ARCHITECTURES: gfx950;gfx1201;gfx1200;gfx1101;gfx1100;gfx1030;gfx942;gfx90a;gfx908
 
 on:
@@ -36,6 +37,15 @@ on:
       cxx_compiler:
         required: true
         type: string
+      cxx_standard:
+        required: false
+        type: number
+        default: 17
+      generate_coverage:
+        default: true
+        description: "Allow coverage to be generated"
+        required: false
+        type: boolean
       job_designator:
         description: "Qualifies the type of job building hipFile"
         required: false
@@ -70,9 +80,8 @@ permissions:
   packages: read
 
 jobs:
-
   compile_on_AMD:
-    name: compile_on_AMD (${{ inputs.cxx_compiler }})
+    name: compile_on_AMD (${{ inputs.cxx_compiler }} C++${{ inputs.cxx_standard}})
     outputs:
       ais_hipfile_pkg_dev_filename: ${{ steps.pkg-metadata.outputs.AIS_HIPFILE_PKG_DEV_FILENAME }}
       ais_hipfile_pkg_filename: ${{ steps.pkg-metadata.outputs.AIS_HIPFILE_PKG_FILENAME }}
@@ -95,7 +104,7 @@ jobs:
         # We should expect that there are multiple instances of this job with different cxx_compilers.
         # On non-pull_request triggering workflows, AIS_PR_NUMBER may be empty.
         run: |
-          echo "AIS_CONTAINER_NAME=${AIS_PR_NUMBER:=${GITHUB_RUN_ID}}_${GITHUB_JOB}_${AIS_INPUT_PLATFORM}_${AIS_INPUT_ROCM_VERSION}_${AIS_SAFE_COMPILER_NAME}" >> "${GITHUB_ENV}"
+          echo "AIS_CONTAINER_NAME=${AIS_PR_NUMBER:=${GITHUB_RUN_ID}}_${GITHUB_JOB}_${AIS_INPUT_PLATFORM}_${AIS_INPUT_ROCM_VERSION}_${AIS_SAFE_COMPILER_NAME}_${AIS_INPUT_CXX_STANDARD}" >> "${GITHUB_ENV}"
       - name: Fetching code repository...
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -151,6 +160,7 @@ jobs:
               cmake \
                 -DCMAKE_BUILD_TYPE=Debug \
                 -DCMAKE_CXX_COMPILER="${_AIS_INPUT_CXX_COMPILER}" \
+                -DAIS_CXX_STANDARD="${{ env.AIS_INPUT_CXX_STANDARD }}" \
                 -DCMAKE_CXX_FLAGS="-Werror" \
                 -DCMAKE_HIP_ARCHITECTURES="${{ env.AIS_HIP_ARCHITECTURES }}" \
                 -DCMAKE_HIP_PLATFORM=amd \

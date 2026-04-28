@@ -514,7 +514,7 @@ class GDABackend : public Backend {
   /**
    * @brief A free-list containing contexts.
    */
-  FreeListProxy<HIPAllocator, GDAContext *> ctx_free_list{};
+  FreeListProxy<GDAContext *> ctx_free_list{};
 
   /**
    * @brief The bitmask representing the availability of teams in the pool
