@@ -184,10 +184,10 @@ def pytest_addoption(parser):
     parser.addoption(
         "--coverage-seed",
         type=int,
-        default=None,
+        default=random.randrange(2**32),
         help=(
             "RNG seed for test_torch_trace_coverage operator sampling "
-            "(default: random 32-bit seed)"
+            "(default: a fresh random 32-bit seed per pytest invocation)"
         ),
     )
     parser.addoption(
@@ -196,23 +196,10 @@ def pytest_addoption(parser):
         default=100,
         help=(
             "ATen operator sample budget for test_torch_trace_coverage. "
-            "Structural entries (nn.Module / Optimizer / torch.autograd / "
-            "torch.distributed / torch.cuda surfaces) are always included; "
-            "this budget caps only the random ATen sample (default: 100)."
+            "Structural entries are always included; this budget caps "
+            "only the random ATen sample (default: 100)."
         ),
     )
-
-
-@pytest.fixture
-def torch_trace_coverage_sampling(request):
-    """Return ``(seed, sample_budget)`` for ``test_random_operator_kernel_coverage``."""
-    seed = request.config.getoption("--coverage-seed")
-    if seed is None:
-        seed = random.randrange(2**32)
-    n = request.config.getoption("--coverage-n")
-    if n < 0:
-        pytest.fail("--coverage-n must be non-negative")
-    return seed, n
 
 
 @pytest.fixture(autouse=True)
