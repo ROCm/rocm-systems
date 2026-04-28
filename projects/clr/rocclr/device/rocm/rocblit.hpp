@@ -211,6 +211,7 @@ class DmaBlitManager : public device::HostBlitManager {
     amd::Memory* pinnedMem_;  //!< Pinned Memory
     size_t copySize_;         //!< last copy size
   };
+
   //! Synchronizes the blit operations if necessary
   inline void synchronize() const;
 

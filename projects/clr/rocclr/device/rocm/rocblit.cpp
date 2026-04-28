@@ -604,12 +604,19 @@ inline void DmaBlitManager::resolveAgents(const Memory& srcMem, const Memory& ds
                                           address srcAddr, address dstAddr,
                                           hsa_agent_t& srcAgent, hsa_agent_t& dstAgent) const {
   if (&srcMem.dev() == &dstMem.dev()) {
-    // Same device -- detect agents from memory access type
-    srcAgent = srcMem.isHostMemDirectAccess() ? dev().getCpuAgent() : dev().getBackendDevice();
-    dstAgent = dstMem.isHostMemDirectAccess() ? dev().getCpuAgent() : dev().getBackendDevice();
+    // Different devices -- use each memory's device backend agent
+    srcAgent = srcMem.dev().getBackendDevice();
+    dstAgent = dstMem.dev().getBackendDevice();
+  } else {
+    // Use agents stored in memory objects during creation
+    srcAgent = srcMem.getOwningAgent();
+    dstAgent = dstMem.getOwningAgent();
 
-    // IPC/VMM-imported buffers: the runtime doesn't know the real owning agent,
-    // so query pointer_info to resolve the true agent.
+  }
+
+  // Handle invalid agent (shouldn't happen if create() properly initialized)
+  if (srcAgent.handle == 0) {
+    srcAgent = srcMem.isHostMemDirectAccess() ? dev().getCpuAgent() : dev().getBackendDevice();
     if (static_cast<const amd::Memory*>(srcMem.owner())->ipcShared() ||
         static_cast<const amd::Memory*>(srcMem.owner())->vmmImported()) {
       hsa_amd_pointer_info_t info = {sizeof(hsa_amd_pointer_info_t)};
@@ -618,6 +625,9 @@ inline void DmaBlitManager::resolveAgents(const Memory& srcMem, const Memory& ds
         srcAgent = info.agentOwner;
       }
     }
+  }
+  if (dstAgent.handle == 0) {
+    dstAgent = dstMem.isHostMemDirectAccess() ? dev().getCpuAgent() : dev().getBackendDevice();
     if (static_cast<const amd::Memory*>(dstMem.owner())->ipcShared() ||
         static_cast<const amd::Memory*>(dstMem.owner())->vmmImported()) {
       hsa_amd_pointer_info_t info = {sizeof(hsa_amd_pointer_info_t)};
@@ -625,10 +635,6 @@ inline void DmaBlitManager::resolveAgents(const Memory& srcMem, const Memory& ds
         dstAgent = info.agentOwner;
       }
     }
-  } else {
-    // Different devices -- use each memory's device backend agent
-    srcAgent = srcMem.dev().getBackendDevice();
-    dstAgent = dstMem.dev().getBackendDevice();
   }
 }
 
