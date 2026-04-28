@@ -228,6 +228,19 @@ class RocprofsysConfig:
         for key, value in os.environ.items():
             if key.startswith(("OMPI_", "ROCPROFSYS_")):
                 env[key] = value
+
+        # Forward sanitizer runtime options so pytest-launched binaries honor
+        # the suppression files / exitcode set by the CI workflow.
+        for key in (
+            "ASAN_OPTIONS",
+            "LSAN_OPTIONS",
+            "UBSAN_OPTIONS",
+            "TSAN_OPTIONS",
+            "ASAN_SYMBOLIZER_PATH",
+        ):
+            if key in os.environ:
+                env[key] = os.environ[key]
+
         return env
 
     def get_base_environment(self) -> dict[str, str]:
