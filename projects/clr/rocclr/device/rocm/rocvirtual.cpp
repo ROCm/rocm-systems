@@ -1289,11 +1289,16 @@ bool VirtualGPU::dispatchGenericAqlPacket(AqlPacket* packet, uint16_t header, ui
                          Hsa::queue_load_read_index_scacquire(gpu_queue_), index,
                          virtual_pipe_prefix);
   }
-  // Optimization for native AQL path in windows has problems with PM4 emulation,
-  // skipping the doorbel will not wake up the AQL worker thread
-  //if (IS_WINDOWS && !dev().IsPm4Emulation() && (blocking || !hasPendingDispatch_))
-  {
+  // Optimization for native AQL path in Windows has problems with PM4 emulation,
+  // skipping the doorbell will not wake up the AQL worker thread
+  uint32_t skip_limit = DEBUG_CLR_DOORBELL_SKIP;
+  bool ring_doorbell = IS_LINUX || dev().IsPm4Emulation() || blocking ||
+                       (skippedDispatches_ >= skip_limit);
+  if (ring_doorbell) {
     Hsa::signal_store_screlease(gpu_queue_->doorbell_signal, index);
+    skippedDispatches_ = 0;
+  } else {
+    ++skippedDispatches_;
   }
 
   // Mark the flag indicating if a dispatch is outstanding.
@@ -1729,6 +1734,7 @@ bool VirtualGPU::releaseGpuMemoryFence(bool skip_cpu_wait) {
     // Dispatch barrier packet into the queue
     dispatchBarrierPacket(kBarrierPacketHeader);
     hasPendingDispatch_ = false;
+    skippedDispatches_ = 0;
     retainExternalSignals_ = false;
   }
 
@@ -1773,6 +1779,7 @@ VirtualGPU::VirtualGPU(Device& device, bool profiling, bool cooperative,
   timestamp_ = nullptr;
   command_ = nullptr;
   hasPendingDispatch_ = false;
+  skippedDispatches_ = 0;
   profiling_ = profiling;
   cooperative_ = cooperative;
 

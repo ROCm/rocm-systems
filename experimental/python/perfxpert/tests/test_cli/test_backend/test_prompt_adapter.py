@@ -61,6 +61,17 @@ def test_render_substitutes_tool_names_gemini() -> None:
     assert "mcp_perfxpert_intent_classify" in out
 
 
+def test_render_substitutes_tool_names_codex() -> None:
+    out = pa.render_prompt(
+        SOURCE,
+        backend="codex",
+        tool_name_template="mcp__perfxpert__{tool}",
+        known_tools=TOOLS,
+        reject_language=False,
+    )
+    assert "mcp__perfxpert__intent_classify" in out
+
+
 def test_render_strips_non_target_backend_blocks() -> None:
     out = pa.render_prompt(
         SOURCE,
@@ -90,6 +101,36 @@ def test_render_includes_rejection_stanza_when_true() -> None:
     assert "WILL BE REJECTED" in out
     # Rejection stanza references the rendered classify tool name.
     assert "mcp__perfxpert__intent_classify" in out
+
+
+def test_render_rejects_native_fallback_when_gate_tool_missing() -> None:
+    out = pa.render_prompt(
+        SOURCE,
+        backend="codex",
+        tool_name_template="mcp__perfxpert__{tool}",
+        known_tools=TOOLS,
+        reject_language=True,
+    )
+    assert "not available or not exposed" in out
+    assert "STOP with a PerfXpert configuration error" in out
+    assert "SSH" in out
+    assert "remote-host" in out
+    assert "builds, or profiling commands" in out
+
+
+def test_render_allows_discovery_tool_before_gate_when_requested() -> None:
+    out = pa.render_prompt(
+        SOURCE,
+        backend="codex",
+        tool_name_template="mcp__perfxpert__{tool}",
+        known_tools=TOOLS,
+        reject_language=True,
+        discovery_tools=("tool_search", "tool_search_tool"),
+    )
+    assert "`mcp__perfxpert__intent_classify` or one of the discovery-only" in out
+    assert "`tool_search`, `tool_search_tool`" in out
+    assert "solely to search for the PerfXpert classify/workflow MCP tools" in out
+    assert "otherwise STOP with a PerfXpert configuration error" in out
 
 
 def test_render_omits_rejection_stanza_when_false() -> None:

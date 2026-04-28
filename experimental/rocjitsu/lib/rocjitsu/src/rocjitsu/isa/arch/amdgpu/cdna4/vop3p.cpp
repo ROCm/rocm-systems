@@ -1770,7 +1770,6 @@ void VSmfmacI3216x16x128I8Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
     }
     int32_t acc0 = static_cast<int32_t>(src2.read_lane(wf, lane));
     vdst.write_lane(wf, lane, static_cast<uint32_t>(acc0 + dot));
-    // Additional result registers would require cross-lane data
   }
 }
 
@@ -2143,7 +2142,6 @@ void VSmfmacI3232x32x64I8Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
     }
     int32_t acc0 = static_cast<int32_t>(src2.read_lane(wf, lane));
     vdst.write_lane(wf, lane, static_cast<uint32_t>(acc0 + dot));
-    // Additional result registers would require cross-lane data
   }
 }
 
@@ -3053,7 +3051,6 @@ void VSmfmacI3216x16x64I8Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
     }
     int32_t acc0 = static_cast<int32_t>(src2.read_lane(wf, lane));
     vdst.write_lane(wf, lane, static_cast<uint32_t>(acc0 + dot));
-    // Additional result registers would require cross-lane data
   }
 }
 
@@ -3091,7 +3088,6 @@ void VSmfmacI3232x32x32I8Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
     }
     int32_t acc0 = static_cast<int32_t>(src2.read_lane(wf, lane));
     vdst.write_lane(wf, lane, static_cast<uint32_t>(acc0 + dot));
-    // Additional result registers would require cross-lane data
   }
 }
 

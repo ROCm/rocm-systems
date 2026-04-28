@@ -4,10 +4,10 @@
 #pragma once
 
 #include "binary/analysis.hpp"
+#include "common/defines.h"
 #include "core/binary/fwd.hpp"
 #include "core/containers/c_array.hpp"
 #include "core/containers/static_vector.hpp"
-#include "core/defines.hpp"
 #include "core/utility.hpp"
 #include "library/causal/fwd.hpp"
 #include "library/thread_data.hpp"
