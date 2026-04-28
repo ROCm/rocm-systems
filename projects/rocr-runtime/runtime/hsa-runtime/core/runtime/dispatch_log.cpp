@@ -306,7 +306,11 @@ bool probe_substrate_version() {
   // KFD 1.22. Older kernels will silently ignore the trailing UPDATE_QUEUE
   // bytes (or worse, return -ENOTTY because of the _IOWR-encoded size
   // mismatch on related ioctls), so this version gate is mandatory.
-  return args.major_version >= 1 && args.minor_version >= 22;
+  // Accept any KFD whose ABI is at-or-after 1.22. A naive
+  // (major>=1 && minor>=22) check would reject a hypothetical KFD 2.0
+  // (which has minor==0). Compare lexicographically instead.
+  return args.major_version > 1 ||
+         (args.major_version == 1 && args.minor_version >= 22);
 }
 #else
 bool probe_substrate_version() { return false; }
