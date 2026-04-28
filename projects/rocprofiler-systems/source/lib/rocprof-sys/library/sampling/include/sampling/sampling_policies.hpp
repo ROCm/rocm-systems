@@ -6,6 +6,8 @@
 // DEC-6: sampling_policies_traits struct grouping.
 // sampling_service is templated on one Policies type rather than 10 separate parameters.
 
+#include "sampling/policies/policy_checks.hpp"
+
 namespace rocprofsys::sampling
 {
 

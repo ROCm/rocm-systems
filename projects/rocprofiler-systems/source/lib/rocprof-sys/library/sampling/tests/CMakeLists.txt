@@ -59,6 +59,8 @@ set(_sampling_test_sources
     unit/sampling_trace_legacy_test.cpp
     # NFR-T-7: golden-file byte-exact diff for native_report_writer TSV output (Task #14).
     unit/native_report_writer_golden_test.cpp
+    # Task #15: C++17 detection-idiom policy concept checks.
+    unit/policy_concept_checks_test.cpp
 )
 
 # Linux-only smoke tests for real OS-backed implementations.

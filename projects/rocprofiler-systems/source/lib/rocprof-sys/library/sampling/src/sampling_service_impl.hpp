@@ -40,7 +40,38 @@ sampling_service<Policies>::sampling_service()
     duration_disabled_ = true;
     block_samples();
 })
-{}
+{
+    using namespace detail;
+    static_assert(is_clock_policy_v<clock>, "Policies::clock must satisfy ClockPolicy "
+                                            "(requires now_ns() and now_steady())");
+    static_assert(is_timer_trigger_policy_v<timer_trigger>,
+                  "Policies::timer_trigger must satisfy TimerTriggerPolicy "
+                  "(requires start(), stop(), is_armed())");
+    static_assert(is_overflow_trigger_policy_v<overflow_trigger>,
+                  "Policies::overflow_trigger must satisfy OverflowTriggerPolicy "
+                  "(requires start(), stop(), is_open())");
+    static_assert(is_signal_dispatcher_policy_v<signal_dispatcher>,
+                  "Policies::signal_dispatcher must satisfy SignalDispatcherPolicy "
+                  "(requires sigmask(int, void const*, void*))");
+    static_assert(is_unwinder_policy_v<unwinder>,
+                  "Policies::unwinder must satisfy UnwinderPolicy "
+                  "(requires unwind(void const*) and static valid_pc(uintptr_t))");
+    static_assert(is_emitter_policy_v<offload>,
+                  "Policies::offload must satisfy EmitterPolicy "
+                  "(requires read(), tids(), reset(), erase())");
+    static_assert(is_trace_sink_policy_v<trace_sink>,
+                  "Policies::trace_sink must satisfy TraceSinkPolicy "
+                  "(requires store_timer() and store_overflow())");
+    static_assert(is_perfetto_sink_policy_v<perfetto_sink>,
+                  "Policies::perfetto_sink must satisfy PerfettoSinkPolicy "
+                  "(requires emit_timer() and emit_overflow())");
+    static_assert(is_report_writer_policy_v<report_writer>,
+                  "Policies::report_writer must satisfy ReportWriterPolicy "
+                  "(requires write_timer_samples(), write_overflow_samples(), flush())");
+    static_assert(is_fatal_error_policy_v<fatal_error>,
+                  "Policies::fatal_error must satisfy FatalErrorPolicy "
+                  "(requires non-void type with fatal() template method)");
+}
 
 template <class Policies>
 sampling_service<Policies>::~sampling_service() = default;
