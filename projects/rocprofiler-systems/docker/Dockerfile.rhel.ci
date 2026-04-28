@@ -12,6 +12,9 @@ SHELL [ "/bin/bash", "-c" ]
 
 ENV PATH=/usr/lib64/openmpi/bin:/usr/local/bin:${PATH}
 
+# Dyninst needs GCC >= 10; RHEL 8 base is GCC 8 — use gcc-toolset on el8 only (install step below).
+ARG GCC_TOOLSET_VERSION=10
+
 ARG EXTRA_PACKAGES=""
 ARG ELFUTILS_DOWNLOAD_VERSION="0.188"
 ARG BOOST_DOWNLOAD_VERSION="1.79.0"
@@ -20,11 +23,25 @@ ARG NJOBS="8"
 RUN echo "* soft memlock unlimited" >> /etc/security/limits.conf && \
     echo "* hard memlock unlimited" >> /etc/security/limits.conf
 
-RUN yum groupinstall -y "Development Tools" && \
+RUN OS_VERSION_MAJOR=$(grep '^VERSION_ID=' /etc/os-release | cut -d'=' -f2 | tr -d '"' | cut -d'.' -f1) && \
     yum install -y epel-release && crb enable && \
-    yum install -y --allowerasing chrpath cmake curl dpkg-devel gmock-devel gtest-devel \
-        iproute json-devel ninja-build numactl-devel openmpi-devel papi-devel \
-        python3-devel python3-pip sqlite-devel wget which vim zlib-devel ucx-devel && \
+    yum install -y --allowerasing \
+        autoconf automake chrpath cmake curl dpkg-devel elfutils-devel flex git glibc-devel \
+        gmock-devel gtest-devel iproute json-devel libdwarf-devel libdrm-devel libtool make \
+        ninja-build numactl-devel openmpi-devel papi-devel pkgconf pkgconf-m4 \
+        pkgconf-pkg-config python3-devel python3-pip redhat-rpm-config rpm-build rpm-sign \
+        sqlite-devel strace ucx-devel vim wget which zlib-devel && \
+    if [ "${OS_VERSION_MAJOR}" -eq 8 ]; then \
+        yum install -y gcc-toolset-${GCC_TOOLSET_VERSION}-binutils gcc-toolset-${GCC_TOOLSET_VERSION}-gcc gcc-toolset-${GCC_TOOLSET_VERSION}-gcc-c++ gcc-toolset-${GCC_TOOLSET_VERSION}-gcc-gfortran && \
+        _TS=/opt/rh/gcc-toolset-${GCC_TOOLSET_VERSION}/root/usr/bin && \
+        ln -sf "${_TS}/gcc" /usr/local/bin/gcc && \
+        ln -sf "${_TS}/g++" /usr/local/bin/g++ && \
+        ln -sf "${_TS}/gcc" /usr/local/bin/cc && \
+        ln -sf "${_TS}/g++" /usr/local/bin/c++ && \
+        ln -sf "${_TS}/gfortran" /usr/local/bin/gfortran; \
+    else \
+        yum install -y binutils gcc gcc-c++ gcc-gfortran; \
+    fi && \
     yum clean all && \
     python3 -m pip install --upgrade pip && \
     python3 -m pip install 'cmake==3.25' perfetto

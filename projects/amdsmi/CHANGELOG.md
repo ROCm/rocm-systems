@@ -88,9 +88,26 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - CLI help text and memory partition change warnings no longer reference `amd-smi reset -r` for driver reloading.
   - Users are now directed to use `sudo modprobe -r amdgpu && sudo modprobe amdgpu` to reload the driver after partition changes.
 
+- **Changed CPU power APIs to return values in milliwatts (mW) for higher precision**.  
+  - Removed lossy integer rounding (`(mW + 500) / 1000`) from 6 CPU power get APIs. Values are now
+    returned in milliwatts directly from the ESMI library, preserving sub-watt precision.
+  - **C API**: Output parameter type remains `uint32_t*`, but the unit changed from watts to milliwatts (mW).
+    - `amdsmi_get_cpu_socket_power`
+    - `amdsmi_get_cpu_socket_power_cap`
+    - `amdsmi_get_cpu_socket_power_cap_max`
+    - `amdsmi_get_cpu_pwr_efficiency_mode` (ppt_limit field)
+    - `amdsmi_get_cpu_core_ccd_power`
+    - `amdsmi_get_cpu_sdps_limit`
+  - **Python API (breaking)**: These functions now return `int` (milliwatts) instead of `str` (e.g., `"240 Watts"`).
+    Callers that parsed the string output must update to handle the numeric return value.
+  - **CLI output**: Power values now display with milliwatt precision (e.g., `240.500 Watts`).
+  - Added missing null-pointer validation for output parameters in `amdsmi_get_cpu_socket_power_cap`
+    and `amdsmi_get_cpu_socket_power_cap_max`.
+  - Updated header documentation to specify milliwatt units for all affected get and set API parameters.
+
 - **Changed power APIs to have consistent output parameter types**.  
   - Modified 6 cpu power API's to have consistent output power types. All set and get API's have uint32_t output values.
-  - Modified get and set API's that had double output types to have uint32_t output types.
+  - Modified get and set API's that had double output types to have uint32_t output types in milliwatts (mW).
     - amdsmi_get_cpu_socket_power(amdsmi_processor_handle processor_handle, uint32_t* ppower);
     - amdsmi_get_cpu_socket_power_cap(amdsmi_processor_handle processor_handle, uint32_t* pcap);
     - amdsmi_get_cpu_socket_power_cap_max(amdsmi_processor_handle processor_handle, uint32_t* pmax);

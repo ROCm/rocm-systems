@@ -33,15 +33,16 @@ ROCPD_PRESETS = ["workload-trace"]
 # ============================================================================
 
 
+@pytest.mark.sampling
+@pytest.mark.class_name("sample-presets")
 class TestSamplePresets(RocprofsysTest):
-    @pytest.mark.sampling
+    @pytest.mark.timeout(60)
     @pytest.mark.parametrize("preset", PRESETS)
     def test_preset(self, preset):
         result = self.run_test(
             "baseline",
             target="rocprof-sys-sample",
             run_args=[f"--preset={preset}", "-v", "2", "--", "ls"],
-            timeout=60,
             fail_on_not_found=True,
         )
         self.assert_regex(
@@ -49,7 +50,7 @@ class TestSamplePresets(RocprofsysTest):
             pass_regex=[f"Preset:        {preset}"],
         )
 
-    @pytest.mark.sampling
+    @pytest.mark.timeout(60)
     @pytest.mark.gpu
     @pytest.mark.rocpd
     @pytest.mark.parametrize("preset", ROCPD_PRESETS)
@@ -58,7 +59,6 @@ class TestSamplePresets(RocprofsysTest):
             "baseline",
             target="rocprof-sys-sample",
             run_args=[f"--preset={preset}", "-v", "2", "--", "ls"],
-            timeout=60,
             fail_on_not_found=True,
         )
         self.assert_regex(
@@ -72,15 +72,16 @@ class TestSamplePresets(RocprofsysTest):
 # ============================================================================
 
 
+@pytest.mark.timeout(60)
+@pytest.mark.sys_run
+@pytest.mark.class_name("run-presets")
 class TestRunPresets(RocprofsysTest):
-    @pytest.mark.sys_run
     @pytest.mark.parametrize("preset", PRESETS)
     def test_preset(self, preset):
         result = self.run_test(
             "baseline",
             target="rocprof-sys-run",
             run_args=[f"--preset={preset}", "-v", "2", "--", "ls"],
-            timeout=60,
             fail_on_not_found=True,
         )
         self.assert_regex(
@@ -88,7 +89,6 @@ class TestRunPresets(RocprofsysTest):
             pass_regex=[f"Preset:        {preset}"],
         )
 
-    @pytest.mark.sys_run
     @pytest.mark.gpu
     @pytest.mark.rocpd
     @pytest.mark.parametrize("preset", ROCPD_PRESETS)
@@ -97,7 +97,6 @@ class TestRunPresets(RocprofsysTest):
             "baseline",
             target="rocprof-sys-run",
             run_args=[f"--preset={preset}", "-v", "2", "--", "ls"],
-            timeout=60,
             fail_on_not_found=True,
         )
         self.assert_regex(
@@ -111,6 +110,8 @@ class TestRunPresets(RocprofsysTest):
 # ============================================================================
 
 
+@pytest.mark.timeout(60)
+@pytest.mark.class_name("sample-domain-flags")
 class TestSampleDomainFlags(RocprofsysTest):
     @pytest.mark.sampling
     def test_gpu(self):
@@ -118,7 +119,6 @@ class TestSampleDomainFlags(RocprofsysTest):
             "baseline",
             target="rocprof-sys-sample",
             run_args=["--gpu", "-v", "2", "--", "ls"],
-            timeout=60,
             fail_on_not_found=True,
         )
         self.assert_regex(result, pass_regex=["ROCPROFSYS_USE_AMD_SMI=true"])
@@ -129,7 +129,6 @@ class TestSampleDomainFlags(RocprofsysTest):
             "baseline",
             target="rocprof-sys-sample",
             run_args=["--gpu=temp,power", "-v", "2", "--", "ls"],
-            timeout=60,
             fail_on_not_found=True,
         )
         self.assert_regex(result, pass_regex=["ROCPROFSYS_AMD_SMI_METRICS=temp,power"])
@@ -140,7 +139,6 @@ class TestSampleDomainFlags(RocprofsysTest):
             "baseline",
             target="rocprof-sys-sample",
             run_args=["--rocm=hip,kernel", "-v", "2", "--", "ls"],
-            timeout=60,
             fail_on_not_found=True,
         )
         self.assert_regex(
@@ -154,7 +152,6 @@ class TestSampleDomainFlags(RocprofsysTest):
             "baseline",
             target="rocprof-sys-sample",
             run_args=["--cpu=50", "-v", "2", "--", "ls"],
-            timeout=60,
             fail_on_not_found=True,
         )
         self.assert_regex(result, pass_regex=["ROCPROFSYS_SAMPLING_FREQ=50"])
@@ -165,7 +162,6 @@ class TestSampleDomainFlags(RocprofsysTest):
             "baseline",
             target="rocprof-sys-sample",
             run_args=["--parallel=mpi,openmp", "-v", "2", "--", "ls"],
-            timeout=60,
             fail_on_not_found=True,
         )
         self.assert_regex(result, pass_regex=["ROCPROFSYS_USE_MPIP=true"])
@@ -183,7 +179,6 @@ class TestSampleDomainFlags(RocprofsysTest):
                 "--",
                 "ls",
             ],
-            timeout=60,
             fail_on_not_found=True,
         )
         self.assert_regex(result, pass_regex=["ROCPROFSYS_AMD_SMI_METRICS=temp,power"])
@@ -194,6 +189,8 @@ class TestSampleDomainFlags(RocprofsysTest):
 # ============================================================================
 
 
+@pytest.mark.timeout(60)
+@pytest.mark.class_name("run-domain-flags")
 class TestRunDomainFlags(RocprofsysTest):
     @pytest.mark.sys_run
     def test_gpu(self):
@@ -201,7 +198,6 @@ class TestRunDomainFlags(RocprofsysTest):
             "baseline",
             target="rocprof-sys-run",
             run_args=["--gpu", "-v", "2", "--", "ls"],
-            timeout=60,
             fail_on_not_found=True,
         )
         self.assert_regex(result, pass_regex=["ROCPROFSYS_USE_AMD_SMI=true"])
@@ -212,7 +208,6 @@ class TestRunDomainFlags(RocprofsysTest):
             "baseline",
             target="rocprof-sys-run",
             run_args=["--gpu=temp,power", "-v", "2", "--", "ls"],
-            timeout=60,
             fail_on_not_found=True,
         )
         self.assert_regex(result, pass_regex=["ROCPROFSYS_AMD_SMI_METRICS=temp,power"])
@@ -223,7 +218,6 @@ class TestRunDomainFlags(RocprofsysTest):
             "baseline",
             target="rocprof-sys-run",
             run_args=["--rocm=hip,kernel", "-v", "2", "--", "ls"],
-            timeout=60,
             fail_on_not_found=True,
         )
         self.assert_regex(
@@ -237,7 +231,6 @@ class TestRunDomainFlags(RocprofsysTest):
             "baseline",
             target="rocprof-sys-run",
             run_args=["--cpu=50", "-v", "2", "--", "ls"],
-            timeout=60,
             fail_on_not_found=True,
         )
         self.assert_regex(result, pass_regex=["ROCPROFSYS_SAMPLING_FREQ=50"])
@@ -248,7 +241,6 @@ class TestRunDomainFlags(RocprofsysTest):
             "baseline",
             target="rocprof-sys-run",
             run_args=["--parallel=mpi,openmp", "-v", "2", "--", "ls"],
-            timeout=60,
             fail_on_not_found=True,
         )
         self.assert_regex(result, pass_regex=["ROCPROFSYS_USE_MPIP=true"])
@@ -266,7 +258,6 @@ class TestRunDomainFlags(RocprofsysTest):
                 "--",
                 "ls",
             ],
-            timeout=60,
             fail_on_not_found=True,
         )
         self.assert_regex(result, pass_regex=["ROCPROFSYS_AMD_SMI_METRICS=temp,power"])
@@ -277,6 +268,8 @@ class TestRunDomainFlags(RocprofsysTest):
 # ============================================================================
 
 
+@pytest.mark.timeout(30)
+@pytest.mark.class_name("export-config")
 class TestExportConfig(RocprofsysTest):
     @pytest.mark.sys_run
     def test_export_run(self):
@@ -284,7 +277,6 @@ class TestExportConfig(RocprofsysTest):
             "baseline",
             target="rocprof-sys-run",
             run_args=["--preset=balanced", "--export-config"],
-            timeout=30,
             fail_on_not_found=True,
         )
         self.assert_regex(result, pass_regex=['"name": "balanced"'])
@@ -295,7 +287,6 @@ class TestExportConfig(RocprofsysTest):
             "baseline",
             target="rocprof-sys-sample",
             run_args=["--preset=balanced", "--export-config"],
-            timeout=30,
             fail_on_not_found=True,
         )
         self.assert_regex(result, pass_regex=['"name": "balanced"'])
@@ -306,6 +297,8 @@ class TestExportConfig(RocprofsysTest):
 # ============================================================================
 
 
+@pytest.mark.timeout(30)
+@pytest.mark.class_name("preset-discovery")
 class TestPresetDiscovery(RocprofsysTest):
     @pytest.mark.sys_run
     def test_list_presets_run(self):
@@ -313,7 +306,6 @@ class TestPresetDiscovery(RocprofsysTest):
             "baseline",
             target="rocprof-sys-run",
             run_args=["--list-presets"],
-            timeout=30,
             fail_on_not_found=True,
         )
         self.assert_regex(result, pass_regex=["Available Presets:"])
@@ -324,7 +316,6 @@ class TestPresetDiscovery(RocprofsysTest):
             "baseline",
             target="rocprof-sys-sample",
             run_args=["--list-presets"],
-            timeout=30,
             fail_on_not_found=True,
         )
         self.assert_regex(result, pass_regex=["Available Presets:"])
@@ -335,7 +326,6 @@ class TestPresetDiscovery(RocprofsysTest):
             "baseline",
             target="rocprof-sys-run",
             run_args=["--explain=balanced"],
-            timeout=30,
             fail_on_not_found=True,
         )
         self.assert_regex(result, pass_regex=["Preset: balanced"])
@@ -346,7 +336,6 @@ class TestPresetDiscovery(RocprofsysTest):
             "baseline",
             target="rocprof-sys-sample",
             run_args=["--explain=balanced"],
-            timeout=30,
             fail_on_not_found=True,
         )
         self.assert_regex(result, pass_regex=["Preset: balanced"])

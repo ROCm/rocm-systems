@@ -1,5 +1,6 @@
-# Per-block hardware counter limits — AMD GPUs allow only N counters from the
-# same hardware block per rocprofv3 pass. Exceeding a limit yields error code 38.
+# Per-block counter collection limits observed through rocprofv3. These are
+# PerfXpert tool/runtime guardrails, not vendor-published GPU peak specs.
+# Exceeding a limit yields rocprofv3 error code 38 in the guarded paths.
 # Source: llm-reference-guide.md §"Hardware Counter Per-Block Limits" (lines 10-65).
 
 per_block_limits:
