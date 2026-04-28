@@ -1,0 +1,22 @@
+# Derived metrics — computed from raw hardware counters, not measured directly.
+# Source: llm-reference-guide.md §"FETCH_SIZE and WRITE_SIZE — Derived Metrics"
+# (lines 810-825) and CLAUDE.md §"Hardware Counter Per-Block Limits".
+#
+# All `components` entries must exist in counter_catalog.yaml (enforced by
+# aggregate cross-reference test in test_yaml_schemas.py — Task 15).
+
+- name: FETCH_SIZE
+  components: ["TCC_BUBBLE", "TCC_EA0_RDREQ", "GRBM_GUI_ACTIVE"]
+  formula: "sum(TCC_EA0_RDREQ[0..31]) * 32 bytes / 1024"
+  unit: KiB
+  hw_counter_cost: 3
+  block: TCC
+  description: "Bytes fetched from HBM per kernel; HBM read BW = FETCH_SIZE * 1024 / kernel_duration_ns"
+
+- name: WRITE_SIZE
+  components: ["TCC_EA0_WRREQ", "TCC_EA0_WRREQ_64B"]
+  formula: "sum(TCC_EA0_WRREQ[0..31]) * 32 bytes / 1024"
+  unit: KiB
+  hw_counter_cost: 2
+  block: TCC
+  description: "Bytes written to HBM per kernel; HBM write BW = WRITE_SIZE * 1024 / kernel_duration_ns"

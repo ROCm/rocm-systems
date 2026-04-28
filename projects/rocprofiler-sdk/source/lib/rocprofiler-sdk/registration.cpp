@@ -784,7 +784,7 @@ invoke_client_detaches()
 
             hsa::async_copy_sync();
             hsa::queue_controller_sync();
-            pc_sampling::service_sync();
+            pc_sampling::service_sync(itr->internal_client_id);
 
             auto _fini_status = get_fini_status();
             if(_fini_status == 0) set_fini_status(-1);
@@ -826,7 +826,7 @@ invoke_client_finalizer(rocprofiler_client_id_t client_id)
 
                 hsa::async_copy_sync();
                 hsa::queue_controller_sync();
-                pc_sampling::service_sync();
+                pc_sampling::service_sync(itr->internal_client_id);
 
                 auto _fini_status = get_fini_status();
                 if(_fini_status == 0) set_fini_status(-1);

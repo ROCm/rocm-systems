@@ -33,7 +33,6 @@
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/cxx/details/tokenize.hpp>
 
-#include "glog/logging.h"
 #include "yaml-cpp/exceptions.h"
 #include "yaml-cpp/node/convert.h"
 #include "yaml-cpp/node/detail/impl.h"

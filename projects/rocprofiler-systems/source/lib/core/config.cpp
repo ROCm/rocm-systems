@@ -1,31 +1,11 @@
-// MIT License
-//
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "config.hpp"
 #include "amd_smi.hpp"
 #include "common/defines.h"
 #include "common/static_object.hpp"
 #include "constraint.hpp"
-#include "defines.hpp"
 #include "gpu.hpp"
 #include "logger/logger.hpp"
 #include "mproc.hpp"
@@ -529,10 +509,19 @@ configure_settings(bool _init)
 
     ROCPROFSYS_CONFIG_SETTING(
         std::string, "ROCPROFSYS_SAMPLING_CPUS",
-        "CPUs to collect frequency information for. Values should be separated by commas "
-        "and can be explicit or ranges, e.g. 0,1,5-8. An empty value implies 'all' and "
-        "'none' suppresses all CPU frequency sampling",
+        "CPU socket (physical package) IDs for CPU PMC sampling. Values should be "
+        "separated by commas and can be explicit or ranges, e.g. 0,1. Selects which "
+        "CPU sockets to monitor; all cores on a selected socket are always sampled. "
+        "An empty value or 'all' enables all sockets; 'none' disables CPU PMC sampling",
         std::string{ "none" }, "process_sampling");
+
+    ROCPROFSYS_CONFIG_SETTING(
+        std::string, "ROCPROFSYS_CPU_METRICS",
+        "CPU metrics to collect. Comma-separated tokens: frequency, load, memory "
+        "(page_rss+virt_mem+peak_rss), ctx_switches, page_faults, cpu_time "
+        "(user_time+kernel_time). Fine-grained: page_rss, virt_mem, peak_rss, "
+        "user_time, kernel_time. Special: all, none",
+        std::string{ "all" }, "process_sampling");
 
     ROCPROFSYS_CONFIG_SETTING(std::string, "ROCPROFSYS_SAMPLING_AINICS",
                               "AI NICs to query when ROCPROFSYS_USE_AMD_SMI=ON. NIC "
@@ -2327,6 +2316,14 @@ std::string
 get_sampling_cpus()
 {
     auto _v = get_config()->find("ROCPROFSYS_SAMPLING_CPUS");
+    return static_cast<tim::tsettings<std::string>&>(*_v->second).get();
+}
+
+std::string
+get_cpu_metrics()
+{
+    auto _v = get_config()->find("ROCPROFSYS_CPU_METRICS");
+    if(_v == get_config()->end()) return "all";
     return static_cast<tim::tsettings<std::string>&>(*_v->second).get();
 }
 

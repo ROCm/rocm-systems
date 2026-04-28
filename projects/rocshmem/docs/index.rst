@@ -22,13 +22,20 @@ The rocSHMEM public repository is located within the ROCm Systems Super Repo at 
       * :doc:`Compile and run applications <./compile_and_run>`
       * :doc:`Using the Docker container <./docker>`
 
+  .. grid-item-card:: Library constants
+
+      * :doc:`Library constants <./library_constants>`
+
+  .. grid-item-card:: Environment variables
+
+      * :doc:`Environment variables <./env_variables>`
+
   .. grid-item-card:: API reference
 
       * :doc:`Library setup, exit, and query routines <./api/init>`
       * :doc:`Memory management routines <./api/memory_management>`
       * :doc:`Team management routines <./api/teams>`
       * :doc:`Context management routines <./api/ctx>`
-      * :doc:`Environment variables <./api/env_variables>`
       * :doc:`Remote memory access routines <./api/rma>`
       * :doc:`Atomic memory operations <./api/amo>`
       * :doc:`Signaling operations <./api/sigops>`

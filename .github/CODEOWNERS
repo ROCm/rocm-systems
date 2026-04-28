@@ -105,4 +105,13 @@
 /projects/rocr-runtime/**/*.rst                                       @kentrussell @dayatsin-amd @ROCm/rocm-documentation
 /projects/rocr-runtime/**/.readthedocs.yaml                           @kentrussell @dayatsin-amd @ROCm/rocm-documentation
 
+/projects/rocdecode/**/*.md                                           @ROCm/rocdecode-docs-reviewers
+/projects/rocdecode/**/*.rst                                          @ROCm/rocdecode-docs-reviewers
+/projects/rocdecode/**/.readthedocs.yaml                              @ROCm/rocdecode-docs-reviewers
+
+/projects/rocjpeg/**/*.md                                             @ROCm/rocjpeg-docs-reviewers
+/projects/rocjpeg/**/*.rst                                            @ROCm/rocjpeg-docs-reviewers
+/projects/rocjpeg/**/.readthedocs.yaml                                @ROCm/rocjpeg-docs-reviewers
+
+
 /projects/rocprof-trace-decoder/**/*.md                               @ROCm/rocm-devtools-team @ROCm/rocm-documentation

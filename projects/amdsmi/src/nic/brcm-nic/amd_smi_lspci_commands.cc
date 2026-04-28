@@ -34,29 +34,42 @@
 
 #include "amd_smi/impl/amd_smi_utils.h"
 
+static bool is_valid_bdf(const std::string& bdf) {
+  // Validate BDF format: DDDD:BB:DD.F or BB:DD.F
+  static const std::regex bdf_re("^([0-9a-fA-F]{4}:)?[0-9a-fA-F]{2}:[0-9a-fA-F]{2}\\.[0-7]$");
+  return std::regex_match(bdf, bdf_re);
+}
+
 amdsmi_status_t get_lspci_device_data(std::string bdf_str, std::string search_key,
                                       std::string& version) {
+  if (!is_valid_bdf(bdf_str)) {
+    std::ostringstream ss;
+    ss << __PRETTY_FUNCTION__ << " | Invalid BDF: " << bdf_str;
+    LOG_ERROR(ss);
+    return AMDSMI_STATUS_INVAL;
+  }
+
   std::string lspci_data;
-  std::string command = "lspci -s " + bdf_str + " -vv | grep -i '" + search_key + "'";
+  // Only pass the validated BDF to the shell; filter by search_key in C++
+  std::string command = "lspci -s " + bdf_str + " -vv";
 
   if (smi_brcm_execute_cmd_get_data(command, &lspci_data) != AMDSMI_STATUS_SUCCESS) {
     std::ostringstream ss;
     ss << __PRETTY_FUNCTION__ << " | "
-       << "Failed to execute command: lspci -s " << bdf_str << " -vv | grep -i " << search_key
-       << ".";
+       << "Failed to execute command: lspci -s " << bdf_str << " -vv";
     LOG_ERROR(ss);
 
     return AMDSMI_STATUS_NOT_SUPPORTED;
   }
 
-  int pos = lspci_data.find(search_key);
+  auto pos = lspci_data.find(search_key);
   if (pos != std::string::npos) {
-    version = lspci_data.erase(0, lspci_data.find(search_key) + search_key.length());
-    if (!version.empty() && version[version.length() - 1] == '\n') {
-      version.erase(version.length() - 1);
-    }
-  } else
+    auto value_start = pos + search_key.length();
+    auto line_end = lspci_data.find('\n', value_start);
+    version = lspci_data.substr(value_start, line_end - value_start);
+  } else {
     version = "N/A";
+  }
 
   return AMDSMI_STATUS_SUCCESS;
 }
@@ -87,7 +100,7 @@ amdsmi_status_t get_lspci_root_switch(amdsmi_bdf_t device_bdf, amdsmi_bdf_t* swi
   while (std::getline(lines, line)) {
     if (line.find("LSI PCIe Switch management endpoint") != std::string::npos) {
       // get Bus
-      bus_pos = line.rfind(']----');
+      bus_pos = line.rfind("]----");
       if (bus_pos == std::string::npos) {
         // Check if the Bus position is not found, then continue to the next line
         continue;

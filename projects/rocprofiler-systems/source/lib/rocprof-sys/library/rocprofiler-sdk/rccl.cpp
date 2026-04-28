@@ -1,5 +1,5 @@
 // Copyright (c) Advanced Micro Devices, Inc.
-// SPDX-License-Identifier:  MIT
+// SPDX-License-Identifier: MIT
 
 #include "library/rocprofiler-sdk/rccl.hpp"
 #include "library/rocprofiler-sdk/rccl_internal.hpp"

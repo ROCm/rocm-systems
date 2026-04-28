@@ -9,7 +9,7 @@
 
 #include <type_traits>
 
-#include "device/rccl_ptr.h"
+#include "rccl_ptr.h"
 
 inline __device__ void load128(const uint64_t* ptr, uint64_t &v0, uint64_t &v1) {
 #if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS

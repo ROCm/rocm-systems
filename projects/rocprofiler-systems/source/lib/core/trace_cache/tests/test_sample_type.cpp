@@ -1,24 +1,5 @@
-// MIT License
-//
-// Copyright (c) 2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "core/trace_cache/sample_type.hpp"
 
@@ -421,58 +402,6 @@ TEST_F(sample_type_test, pmc_event_with_sample_type_identifier)
               type_identifier_t::pmc_event_with_sample);
 }
 
-TEST_F(sample_type_test, cpu_freq_sample_serialize_deserialize)
-{
-    std::vector<uint8_t> freqs_data = { 100, 150, 200, 180, 190, 195, 185, 170 };
-    cpu_freq_sample      original(80000, 1024, 2048, 4096, 500, 100, 1000000, 500000,
-                                  freqs_data);
-
-    serialize(buffer.data(), original);
-
-    uint8_t* buffer_ptr   = buffer.data();
-    auto     deserialized = deserialize<cpu_freq_sample>(buffer_ptr);
-
-    EXPECT_EQ(deserialized.timestamp, original.timestamp);
-    EXPECT_EQ(deserialized.page_rss, original.page_rss);
-    EXPECT_EQ(deserialized.virt_mem_usage, original.virt_mem_usage);
-    EXPECT_EQ(deserialized.peak_rss, original.peak_rss);
-    EXPECT_EQ(deserialized.context_switch_count, original.context_switch_count);
-    EXPECT_EQ(deserialized.page_faults, original.page_faults);
-    EXPECT_EQ(deserialized.user_mode_time, original.user_mode_time);
-    EXPECT_EQ(deserialized.kernel_mode_time, original.kernel_mode_time);
-    EXPECT_EQ(deserialized.freqs.size(), original.freqs.size());
-    EXPECT_EQ(deserialized.freqs, original.freqs);
-}
-
-TEST_F(sample_type_test, cpu_freq_sample_get_size)
-{
-    std::vector<uint8_t> freqs_data = { 100, 150, 200, 180, 190, 195, 185, 170 };
-    cpu_freq_sample      sample(80000, 1024, 2048, 4096, 500, 100, 1000000, 500000,
-                                freqs_data);
-
-    size_t expected_size = sizeof(uint64_t) + sizeof(int64_t) * 7 + sizeof(size_t) + 8;
-
-    EXPECT_EQ(get_size(sample), expected_size);
-}
-
-TEST_F(sample_type_test, cpu_freq_sample_type_identifier)
-{
-    EXPECT_EQ(cpu_freq_sample::type_identifier, type_identifier_t::cpu_freq_sample);
-}
-
-TEST_F(sample_type_test, cpu_freq_sample_empty_freqs)
-{
-    std::vector<uint8_t> empty_freqs;
-    cpu_freq_sample      original(0, 0, 0, 0, 0, 0, 0, 0, empty_freqs);
-
-    serialize(buffer.data(), original);
-
-    uint8_t* buffer_ptr   = buffer.data();
-    auto     deserialized = deserialize<cpu_freq_sample>(buffer_ptr);
-
-    EXPECT_TRUE(deserialized.freqs.empty());
-}
-
 TEST_F(sample_type_test, backtrace_region_sample_serialize_deserialize)
 {
     backtrace_region_sample original(1, 999, "Thread:999", "my_function", 90000, 95000,
@@ -540,7 +469,7 @@ TEST_F(sample_type_test, type_identifier_enum_values)
     EXPECT_EQ(static_cast<uint32_t>(type_identifier_t::memory_copy), 0x0004);
     EXPECT_EQ(static_cast<uint32_t>(type_identifier_t::memory_alloc), 0x0005);
     EXPECT_EQ(static_cast<uint32_t>(type_identifier_t::gpu_pmc_sample), 0x0006);
-    EXPECT_EQ(static_cast<uint32_t>(type_identifier_t::cpu_freq_sample), 0x0007);
+    EXPECT_EQ(static_cast<uint32_t>(type_identifier_t::cpu_pmc_sample), 0x0007);
     EXPECT_EQ(static_cast<uint32_t>(type_identifier_t::backtrace_region_sample), 0x0008);
     EXPECT_EQ(static_cast<uint32_t>(type_identifier_t::fragmented_space), 0xFFFF);
 }
@@ -579,12 +508,6 @@ TEST_F(sample_type_test, pmc_event_with_sample_default_constructor)
 {
     pmc_event_with_sample sample;
     EXPECT_EQ(sample.type_identifier, type_identifier_t::pmc_event_with_sample);
-}
-
-TEST_F(sample_type_test, cpu_freq_sample_default_constructor)
-{
-    cpu_freq_sample sample;
-    EXPECT_EQ(sample.type_identifier, type_identifier_t::cpu_freq_sample);
 }
 
 TEST_F(sample_type_test, backtrace_region_sample_default_constructor)

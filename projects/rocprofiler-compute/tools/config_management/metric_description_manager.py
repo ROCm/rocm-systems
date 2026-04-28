@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Union
 
 import yaml
+from ruamel.yaml.scalarstring import SingleQuotedScalarString
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
@@ -50,45 +51,167 @@ def normalize_unit_for_docs(unit: str) -> str:
     return unit
 
 
-# Section to panel ID mapping for organizing descriptions
-SECTION_PANEL_MAP: dict[str, int] = {
-    "Wavefront launch stats": 701,
-    "Wavefront runtime stats": 702,
-    "Overall instruction mix": 1001,
-    "VALU arithmetic instruction mix": 1002,
-    "Matrix instruction mix": 1004,
-    "Compute Speed-of-Light": 1101,
-    "Pipeline statistics": 1102,
-    "Arithmetic operations": 1103,
-    "LDS Speed-of-Light": 1201,
-    "LDS Statistics": 1202,
-    "vL1D Speed-of-Light": 1601,
-    "Busy / stall metrics": 1501,
-    "Instruction counts": 1502,
-    "Spill / stack metrics": 1503,
-    "L1 Unified Translation Cache (UTCL1)": 1605,
-    "vL1D cache stall metrics": 1602,
-    "vL1D cache access metrics": 1603,
-    "Vector L1 data-return path or Texture Data (TD)": 1504,
-    "L2 Speed-of-Light": 1701,
-    "L2 cache accesses": 1703,
-    "L2-Fabric interface metrics": 1702,
-    "L2 - Fabric interface detailed metrics": 1706,
-    "L2 - Fabric Interface stalls": 1705,
-    "Scalar L1D Speed-of-Light": 1401,
-    "Scalar L1D cache accesses": 1402,
-    "Scalar L1D Cache - L2 Interface": 1403,
-    "L1I Speed-of-Light": 1301,
-    "L1I cache accesses": 1302,
-    "L1I <-> L2 interface": 1303,
-    "Workgroup manager utilizations": 601,
-    "Workgroup Manager - Resource Allocation": 602,
-    "Command processor fetcher (CPF)": 501,
-    "Command processor packet processor (CPC)": 502,
-    "System Speed-of-Light": 201,
+def format_yaml_scalar(value: str):
+    """Serialize descriptions like gfx942: inline scalars without block markers."""
+    if isinstance(value, str) and "\n" in value:
+        return re.sub(r"\s*\n\s*", " ", value).strip()
+    return value
+
+
+def normalize_docs_section_name(arch_name: str, section_name: str) -> str:
+    """Apply docs-only section name cleanup for selected architectures."""
+    if arch_name != "gfx1151":
+        return section_name
+
+    replacements = {
+        "Memory chart - TCP Cache (Vector L0)": "Memory chart - TCP Cache",
+        "Memory chart - GL1C Cache (L1)": "Memory chart - GL1C Cache",
+    }
+    return replacements.get(section_name, section_name)
+
+
+def normalize_docs_metric_name(arch_name: str, metric_name: str) -> str:
+    """Apply docs-only metric name cleanup for selected architectures."""
+    if arch_name != "gfx1151":
+        return metric_name
+
+    replacements = {
+        "TCP (L0) Cache Bandwidth": "TCP Cache Bandwidth",
+    }
+    return replacements.get(metric_name, metric_name)
+
+
+def normalize_docs_rst(arch_name: str, rst_text: str) -> str:
+    """Apply docs-only wording cleanup for selected architectures."""
+    if arch_name != "gfx1151" or not isinstance(rst_text, str):
+        return rst_text
+
+    replacements = {
+        "TCP (L0 vector cache)": "TCP cache",
+        "TCP (vector L0)": "TCP",
+        "GL1C (L1 cache)": "GL1C cache",
+        "TCP (L0)": "TCP",
+        "TCP (L0 Cache)": "TCP cache",
+        "GL1C (L1 Cache)": "GL1C cache",
+    }
+
+    for old_text, new_text in replacements.items():
+        rst_text = rst_text.replace(old_text, new_text)
+
+    return rst_text
+
+
+# All CDNA architectures share the same panel ID mapping.
+CDNA_PANEL_ID_TO_SECTION: dict[int, str] = {
+    201: "System Speed-of-Light",
+    501: "Command processor fetcher (CPF)",
+    502: "Command processor packet processor (CPC)",
+    601: "Workgroup manager utilizations",
+    602: "Workgroup Manager - Resource Allocation",
+    701: "Wavefront launch stats",
+    702: "Wavefront runtime stats",
+    1001: "Overall instruction mix",
+    1002: "VALU arithmetic instruction mix",
+    1004: "Matrix instruction mix",
+    1101: "Compute Speed-of-Light",
+    1102: "Pipeline statistics",
+    1103: "Arithmetic operations",
+    1201: "LDS Speed-of-Light",
+    1202: "LDS Statistics",
+    1301: "L1I Speed-of-Light",
+    1302: "L1I cache accesses",
+    1303: "L1I <-> L2 interface",
+    1401: "Scalar L1D Speed-of-Light",
+    1402: "Scalar L1D cache accesses",
+    1403: "Scalar L1D Cache - L2 Interface",
+    1501: "Busy / stall metrics",
+    1502: "Instruction counts",
+    1503: "Spill / stack metrics",
+    1504: "Vector L1 data-return path or Texture Data (TD)",
+    1601: "vL1D Speed-of-Light",
+    1602: "vL1D cache stall metrics",
+    1603: "vL1D cache access metrics",
+    1605: "L1 Unified Translation Cache (UTCL1)",
+    1701: "L2 Speed-of-Light",
+    1702: "L2-Fabric interface metrics",
+    1703: "L2 cache accesses",
+    1705: "L2 - Fabric Interface stalls",
+    1706: "L2 - Fabric interface detailed metrics",
 }
 
-PANEL_ID_TO_SECTION: dict[int, str] = {v: k for k, v in SECTION_PANEL_MAP.items()}
+# RDNA architectures reuse metric_table IDs with different meanings
+RDNA_PANEL_ID_TO_SECTION_BY_ARCH: dict[str, dict[int, str]] = {
+    "gfx1151": {
+        1: "Top Kernels",
+        2: "Dispatch List",
+        101: "System Info",
+        201: "System Speed-of-Light",
+        301: "Memory chart - Instruction Cache",
+        302: "Memory chart - Scalar Data Cache",
+        303: "Memory chart - TCP Cache (Vector L0)",
+        304: "Memory chart - LDS (Local Data Share)",
+        305: "Memory chart - TCP-GL1 Interface",
+        306: "Memory chart - GL1C Cache (L1)",
+        307: "Memory chart - GL1C-GL2 Interface",
+        308: "Memory chart - GL2C Cache (L2)",
+        309: "Memory chart - GCEA to System Memory",
+        401: "Roofline Performance Rates",
+        402: "Roofline Plot Points",
+        501: "CPC Utilization",
+        502: "CPC Interface Utilization",
+        503: "MEC Stall Cycles",
+        504: "CPC Memory Requests",
+        505: "MEC Instruction Cache",
+        601: "SPI Utilization",
+        602: "Wave Dispatch Statistics",
+        701: "WGP Utilization",
+        702: "Wavefront Launch Stats",
+        703: "Wave Dispatch",
+        704: "Wave Life",
+        705: "Wave Instruction Mix",
+        706: "VMEM Instruction Mix",
+        707: "LDS Instruction Mix",
+        709: "Wait State Analysis",
+        710: "WGP Instruction Cache",
+        711: "WGP Scalar Data Cache",
+        801: "TCP Utilization",
+        802: "TCP Request Statistics",
+        803: "TCP Cache Performance",
+        804: "TCP TCP-GL1 Interface",
+        805: "TCP Stalls",
+        1101: "GL1C Utilization",
+        1102: "GL1C Request Statistics",
+        1103: "GL1C Cache Performance",
+        1104: "GL1C-GL2 Interface",
+        1105: "GL1C Stalls",
+        1301: "GL2C Cache Performance",
+        1302: "GL2C Request Statistics",
+        1303: "GL2C Bandwidth",
+        1501: "DRAM Read Interface",
+        1502: "DRAM Write Interface",
+        1504: "System Arbiter (SARB)",
+        1505: "Return Interface",
+        1701: "GPU Utilization",
+        1702: "Shader Engine Utilization",
+    },
+}
+
+
+LEGACY_SECTION_ALIASES_BY_ARCH: dict[str, dict[str, str]] = {
+    "gfx1151": {
+        "GL1C GL1C-GL2 Interface": "GL1C-GL2 Interface",
+    },
+}
+
+
+def panel_id_to_section(arch_name: str, table_id: int | None) -> str | None:
+    """Resolve documentation section name for a metric_table id (arch-specific)."""
+    if table_id is None:
+        return None
+    rdna_map = RDNA_PANEL_ID_TO_SECTION_BY_ARCH.get(arch_name)
+    if rdna_map is not None:
+        return rdna_map.get(table_id)
+    return CDNA_PANEL_ID_TO_SECTION.get(table_id)
 
 
 def validate_rst_syntax(text: str) -> tuple[bool, str]:
@@ -132,6 +255,7 @@ def extract_descriptions_from_arch(
     Returns dict organized by section name.
     """
     arch_path = Path(arch_dir)
+    arch_name = arch_path.name
     descriptions_by_section: dict[str, dict[str, dict]] = {}
 
     for yaml_file in sorted(arch_path.glob("*.yaml")):
@@ -149,7 +273,7 @@ def extract_descriptions_from_arch(
             for key, value in ds.items():
                 if isinstance(value, dict) and "metric" in value:
                     table_id = value.get("id")
-                    section_name = PANEL_ID_TO_SECTION.get(table_id)
+                    section_name = panel_id_to_section(arch_name, table_id)
                     if not section_name:
                         continue
                     for metric_name, metric_data in value["metric"].items():
@@ -218,8 +342,8 @@ def update_per_arch_metrics_file(
         per_arch_descriptions[section] = {}
         for metric_name, desc_data in metrics.items():
             entry = {
-                "plain": desc_data.get("plain", ""),
-                "rst": desc_data.get("rst", ""),
+                "plain": format_yaml_scalar(desc_data.get("plain", "")),
+                "rst": format_yaml_scalar(desc_data.get("rst", "")),
             }
             if "unit" in desc_data:
                 entry["unit"] = desc_data["unit"]
@@ -234,8 +358,29 @@ def load_existing_per_arch(arch_name: str, per_arch_dir: Union[str, Path]) -> di
     per_arch_file = Path(per_arch_dir) / f"{arch_name}_metrics_description.yaml"
     if per_arch_file.exists():
         with open(per_arch_file, encoding="utf-8") as f:
-            return yaml.safe_load(f) or {}
+            return canonicalize_section_aliases(arch_name, yaml.safe_load(f) or {})
     return {}
+
+
+def canonicalize_section_aliases(arch_name: str, descriptions: dict) -> dict:
+    """Merge legacy section names into their canonical names."""
+    aliases = LEGACY_SECTION_ALIASES_BY_ARCH.get(arch_name)
+    if not aliases or not descriptions:
+        return descriptions
+
+    canonicalized: dict = {}
+    for section, metrics in descriptions.items():
+        canonical_section = aliases.get(section, section)
+
+        if canonical_section not in canonicalized:
+            canonicalized[canonical_section] = {}
+
+        existing_metrics = canonicalized[canonical_section]
+        for metric_name, metric_data in metrics.items():
+            if metric_name not in existing_metrics:
+                existing_metrics[metric_name] = metric_data
+
+    return canonicalized
 
 
 def preserve_manual_rst_edits(new_descriptions: dict, existing_per_arch: dict) -> dict:
@@ -334,15 +479,22 @@ def generate_docs_from_per_arch(
         # Transform: Keep only RST and unit fields for documentation
         docs_data = {}
         for section, metrics in per_arch_data.items():
-            docs_data[section] = {}
+            docs_section = normalize_docs_section_name(arch, section)
+            docs_data[docs_section] = {}
             for metric_name, metric_info in metrics.items():
+                docs_metric_name = normalize_docs_metric_name(arch, metric_name)
                 # Extract only RST and unit (drop 'plain' text)
                 entry = {}
                 if "rst" in metric_info:
-                    entry["rst"] = metric_info["rst"]
+                    entry["rst"] = SingleQuotedScalarString(
+                        normalize_docs_rst(
+                            arch,
+                            format_yaml_scalar(metric_info["rst"]),
+                        )
+                    )
                 if "unit" in metric_info:
                     entry["unit"] = metric_info["unit"]
-                docs_data[section][metric_name] = entry
+                docs_data[docs_section][docs_metric_name] = entry
 
         cm_utils.save_yaml(docs_data, dst_file)
         print(f"Generated: {dst_file}")
@@ -471,7 +623,7 @@ def main() -> int:
         ok = generate_docs_from_per_arch(
             args.per_arch_output,
             args.docs_output_dir,
-            target_archs=["gfx908", "gfx90a", "gfx942", "gfx950"],
+            target_archs=["gfx908", "gfx90a", "gfx942", "gfx950", "gfx1151"],
         )
         return 0 if ok else 1
 
