@@ -3796,7 +3796,19 @@ def amdsmi_get_gpu_ras_block_features_enabled(
 
 def amdsmi_get_gpu_process_list(
     processor_handle: processor_handle_t,
+    filter_idle: bool = False,
+    vram_threshold: int = 1024 * 1024,
 ) -> List[amdsmi_wrapper.amdsmi_proc_info_t]:
+    """Get list of processes using the GPU
+
+    Args:
+        processor_handle: GPU handle
+        filter_idle: If True, only return processes with meaningful GPU usage
+        vram_threshold: Minimum VRAM usage (bytes) to be considered active (default 1MB)
+
+    Returns:
+        List of process info dictionaries
+    """
     if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
         raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
 
@@ -3819,6 +3831,21 @@ def amdsmi_get_gpu_process_list(
         # Skip the amd-smi CLI process itself so it doesn't show up in output
         if pid == self_pid:
             continue
+
+        # Filter logic: only include if meaningful usage detected
+        if filter_idle:
+            vram_mem = process_list[index].memory_usage.vram_mem
+            gfx_usage = process_list[index].engine_usage.gfx
+            cu_occupancy = process_list[index].cu_occupancy
+            sdma_usage = process_list[index].sdma_usage
+
+            # Skip if ALL usage metrics are below threshold
+            # (Process is only in KFD's tracking but not actually using GPU)
+            if (vram_mem < vram_threshold and
+                gfx_usage == 0 and
+                cu_occupancy == 0 and
+                sdma_usage == 0):
+                continue
 
         process_name = process_list[index].name.decode("utf-8").strip()
         if process_name == "":

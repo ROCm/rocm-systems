@@ -6142,6 +6142,95 @@ class AMDSMICommands:
         if self.logger.is_json_format():
             self.logger.combine_arrays_to_json()
 
+    def _collect_all_gpu_processes(self, gpu_list):
+        """Collect process information from all GPUs for cross-GPU analysis
+
+        Args:
+            gpu_list: List of GPU handles
+
+        Returns:
+            dict: {gpu_handle: [process_info_list]}
+        """
+        all_processes = {}
+        for gpu_handle in gpu_list:
+            try:
+                # Get raw process list without filtering
+                process_list = amdsmi_interface.amdsmi_get_gpu_process_list(
+                    gpu_handle,
+                    filter_idle=False  # Need all processes for comparison
+                )
+                all_processes[gpu_handle] = process_list
+            except amdsmi_exception.AmdSmiLibraryException as e:
+                gpu_id = self.helpers.get_gpu_id_from_device_handle(gpu_handle)
+                logging.debug(f"Failed to get process list for GPU {gpu_id}: {e.get_error_info()}")
+                all_processes[gpu_handle] = []
+
+        return all_processes
+
+    def _identify_primary_gpu_per_pid(self, all_gpu_processes, vram_ratio_threshold=0.1):
+        """Identify which GPU each PID primarily uses based on VRAM allocation
+
+        Args:
+            all_gpu_processes: dict from _collect_all_gpu_processes
+            vram_ratio_threshold: Minimum ratio of VRAM to max VRAM to be considered significant (default 10%)
+
+        Returns:
+            dict: {pid: primary_gpu_handle} - only includes PIDs where assignment is clear
+        """
+        # First pass: collect max VRAM usage per PID across all GPUs
+        pid_vram_usage = {}  # {pid: {gpu_handle: vram_bytes}}
+
+        for gpu_handle, process_list in all_gpu_processes.items():
+            for process_info in process_list:
+                pid = process_info["pid"]
+                vram = process_info["memory_usage"]["vram_mem"]
+
+                if pid not in pid_vram_usage:
+                    pid_vram_usage[pid] = {}
+                pid_vram_usage[pid][gpu_handle] = vram
+
+        # Second pass: identify primary GPU for each PID
+        pid_primary_gpu = {}
+
+        for pid, gpu_vram_map in pid_vram_usage.items():
+            if len(gpu_vram_map) <= 1:
+                # PID only appears on one GPU, no filtering needed
+                continue
+
+            # Find GPU with maximum VRAM usage
+            max_vram = max(gpu_vram_map.values())
+
+            if max_vram == 0:
+                # No meaningful VRAM usage anywhere, skip this PID
+                continue
+
+            # Find which GPU has max VRAM
+            primary_gpu = None
+            for gpu_handle, vram in gpu_vram_map.items():
+                if vram == max_vram:
+                    primary_gpu = gpu_handle
+                    break
+
+            # Only assign primary GPU if the difference is significant
+            # (max VRAM is much higher than others)
+            other_gpus_significant = False
+            for gpu_handle, vram in gpu_vram_map.items():
+                if gpu_handle != primary_gpu:
+                    if vram >= max_vram * vram_ratio_threshold:
+                        # Another GPU has significant usage too
+                        other_gpus_significant = True
+                        break
+
+            if not other_gpus_significant:
+                # Clear primary GPU assignment
+                pid_primary_gpu[pid] = primary_gpu
+                logging.debug(
+                    f"PID {pid} primary GPU: {self.helpers.get_gpu_id_from_device_handle(primary_gpu)} "
+                    f"(VRAM: {max_vram / 1024**2:.1f} MB)"
+                )
+
+        return pid_primary_gpu
+
     def process(
         self,
         args,
@@ -6155,6 +6244,7 @@ class AMDSMICommands:
         watch=None,
         watch_time=None,
         iterations=None,
+        _pid_primary_gpu=None,
     ):
         """Get Process Information from the target GPU
 
@@ -6207,18 +6297,27 @@ class AMDSMICommands:
         # Handle multiple GPUs
         if isinstance(args.gpu, list):
             if len(args.gpu) > 1:
+                # For multiple GPUs, first collect all process info across GPUs
+                # to enable cross-GPU filtering (hide PIDs that appear on multiple GPUs
+                # but only actively use one)
+                all_gpu_processes = self._collect_all_gpu_processes(args.gpu)
+
+                # Build PID -> primary GPU mapping based on VRAM usage
+                pid_primary_gpu = self._identify_primary_gpu_per_pid(all_gpu_processes)
+
                 # Deepcopy gpus as recursion will destroy the gpu list
                 stored_gpus = []
                 for gpu in args.gpu:
                     stored_gpus.append(gpu)
 
-                # Store output from multiple devices
+                # Store output from multiple devices with cross-GPU filtering
                 for device_handle in args.gpu:
                     self.process(
                         args,
                         multiple_devices=True,
                         watching_output=watching_output,
                         gpu=device_handle,
+                        _pid_primary_gpu=pid_primary_gpu,  # Pass filtering info
                     )
 
                 # Reload original gpus
@@ -6249,13 +6348,31 @@ class AMDSMICommands:
 
         # Populate initial processes
         try:
-            process_list = amdsmi_interface.amdsmi_get_gpu_process_list(args.gpu)
+            # Don't filter at API level if we have cross-GPU filtering enabled
+            # (we need full data to compare across GPUs)
+            filter_idle = _pid_primary_gpu is None
+            process_list = amdsmi_interface.amdsmi_get_gpu_process_list(
+                args.gpu,
+                filter_idle=filter_idle,
+                vram_threshold=1024 * 1024  # 1MB threshold
+            )
         except amdsmi_exception.AmdSmiLibraryException as e:
             logging.debug("Failed to get process list for gpu %s | %s", gpu_id, e.get_error_info())
             raise e
 
         filtered_process_values = []
         for process_info in process_list:
+            # Cross-GPU filtering: skip PIDs that primarily belong to other GPUs
+            if _pid_primary_gpu is not None:
+                pid = process_info["pid"]
+                primary_gpu = _pid_primary_gpu.get(pid)
+
+                # If this PID's primary GPU is different, skip it on this GPU
+                if primary_gpu is not None and primary_gpu != args.gpu:
+                    logging.debug(
+                        f"Skipping PID {pid} on GPU {gpu_id} (primary GPU is {self.helpers.get_gpu_id_from_device_handle(primary_gpu)})"
+                    )
+                    continue
             process_info = {
                 "name": process_info["name"],
                 "pid": process_info["pid"],
