@@ -240,6 +240,30 @@ std::mutex g_lifecycle_mu;
 // drains). Holds one shared_ptr per active queue.
 std::unordered_map<uint32_t, std::shared_ptr<queue_drain_state>> g_active_queues;
 
+// Poller-only "live queue" side map (spec §4 enable/disable convergence).
+//
+// Distinct from g_active_queues: this tracks every Queue* known to the
+// dispatch_log subsystem (registered by on_queue_create, removed by
+// on_queue_destroy), regardless of whether dispatch logging is currently
+// enabled on it. The poller iterates this set under g_lifecycle_mu to drive
+// the §4 idempotent enable/disable passes:
+//
+//   - curr==true tick: for each Q in g_known_queues with
+//     dispatch_log_active==false, call enable_dispatch_log_for_queue(Q).
+//   - curr==false tick: for each Q in g_known_queues with
+//     dispatch_log_active==true, call disable_dispatch_log_for_queue(Q).
+//
+// **Lifetime contract.** The drainer NEVER reads this map (the
+// no-Queue*-in-drainer invariant of queue_drain_state — see spec §4 "Queue /
+// drain-state lifetime" — is therefore preserved). The poller and the
+// queue-create/destroy hooks all serialize on g_lifecycle_mu when touching
+// this map AND when calling enable/disable; on_queue_destroy removes from
+// g_known_queues BEFORE running the disable sequence, so the poller can
+// never observe a Queue* whose underlying core::Queue is being torn down by
+// the destroy thread (the destroy thread is forced to wait behind the
+// mutex if the poller is currently iterating).
+std::unordered_map<uint32_t, core::Queue*> g_known_queues;
+
 // Side-map for the QueueProfilingAcquire/Release refcount (spec §4a). One
 // entry per Queue* that has ever had at least one acquire. Looked up under
 // g_owners_mu.
@@ -462,14 +486,15 @@ bool drain_one_queue(queue_drain_state& qs, bool force_emit) {
 // shared_ptr from the registry and forwards to drain_one_queue with
 // force_emit=true. Per spec §4: serialization with the drainer thread
 // happens via qs.drain_mu inside drain_one_queue.
-void ts_drainer_drain_now(core::Queue* q) {
+//
+// _locked variant: caller holds g_lifecycle_mu. Used by the poller and by
+// disable_dispatch_log_for_queue_locked, both of which iterate registries
+// under the lifecycle mutex.
+void ts_drainer_drain_now_locked(core::Queue* q) {
   std::shared_ptr<queue_drain_state> qs_ptr;
-  {
-    std::lock_guard<std::mutex> lk(g_lifecycle_mu);
-    auto it = g_active_queues.find(queue_id_of(q));
-    if (it == g_active_queues.end()) return;
-    qs_ptr = it->second;
-  }
+  auto it = g_active_queues.find(queue_id_of(q));
+  if (it == g_active_queues.end()) return;
+  qs_ptr = it->second;
   if (qs_ptr) {
     drain_one_queue(*qs_ptr, /* force_emit = */ true);
   }
@@ -569,7 +594,10 @@ namespace {
 // once-per-queue at WARNING.
 // ============================================================================
 
-void enable_dispatch_log_for_queue(core::Queue* q) {
+// _locked variant. Caller holds g_lifecycle_mu. Used by the poller's enable
+// pass (which iterates g_known_queues under the mutex) and by on_queue_create
+// via the public wrapper below.
+void enable_dispatch_log_for_queue_locked(core::Queue* q) {
   if (q == nullptr) return;
 
   // Idempotence guard: skip if already active.
@@ -584,10 +612,7 @@ void enable_dispatch_log_for_queue(core::Queue* q) {
   if (!g_substrate_present.load(std::memory_order_relaxed)) return;
 
   // Per-agent "no-dispatch-log" filter.
-  {
-    std::lock_guard<std::mutex> lk(g_lifecycle_mu);
-    if (g_no_dispatch_log_agents.count(q->GetAgent()) > 0) return;
-  }
+  if (g_no_dispatch_log_agents.count(q->GetAgent()) > 0) return;
 
   // Step 1: alloc.
   ring_alloc_t alloc = alloc_ring_buffer();
@@ -611,6 +636,8 @@ void enable_dispatch_log_for_queue(core::Queue* q) {
   std::memset(hdr->reserved, 0, sizeof(hdr->reserved));
 
   // Step 2: acquire profiling ref FIRST (spec §5 ordering rationale).
+  // QueueProfilingAcquire takes g_owners_mu, NOT g_lifecycle_mu, so it's
+  // safe to call while holding g_lifecycle_mu.
   hsa_status_t s = QueueProfilingAcquire(q);
   if (s != HSA_STATUS_SUCCESS) {
     std::fprintf(stderr,
@@ -645,7 +672,6 @@ void enable_dispatch_log_for_queue(core::Queue* q) {
                  "(KFD ioctl) failed errno=%d\n",
                  queue_id_of(q), rc);
     if (rc == ENOTSUP) {
-      std::lock_guard<std::mutex> lk(g_lifecycle_mu);
       g_no_dispatch_log_agents.insert(q->GetAgent());
     }
     QueueProfilingRelease(q);
@@ -666,10 +692,7 @@ void enable_dispatch_log_for_queue(core::Queue* q) {
   qs->generation         = generation;
   qs->read_cursor        = 0;
 
-  {
-    std::lock_guard<std::mutex> lk(g_lifecycle_mu);
-    g_active_queues[qs->queue_id] = qs;
-  }
+  g_active_queues[qs->queue_id] = qs;
 
   // Ownership of the buffer now lives in qs (shared_ptr destructor frees it).
   // Suppress the local alloc bookkeeping so a later free_ring_buffer on
@@ -680,7 +703,13 @@ void enable_dispatch_log_for_queue(core::Queue* q) {
   q->dispatch_log_active.store(true, std::memory_order_release);
 }
 
-void disable_dispatch_log_for_queue(core::Queue* q) {
+// _locked variant. Caller holds g_lifecycle_mu. Used by the poller's
+// disable pass, by shutdown(), and by on_queue_destroy via the public
+// wrapper below. Note that wait_for_idle and the KFD ioctl run while
+// the lifecycle mutex is held; this is acceptable because the lifecycle
+// mutex is contended only by other lifecycle events (queue create/destroy,
+// poller ticks every 5 ms), not by per-dispatch hot paths.
+void disable_dispatch_log_for_queue_locked(core::Queue* q) {
   if (q == nullptr) return;
   if (!q->dispatch_log_active.load(std::memory_order_acquire)) return;
 
@@ -690,7 +719,7 @@ void disable_dispatch_log_for_queue(core::Queue* q) {
   wait_for_idle(q);
 
   // b. Final drain with force_emit=true (spec §6).
-  ts_drainer_drain_now(q);
+  ts_drainer_drain_now_locked(q);
 
   // c. KFD ioctl DISABLE (best-effort).
   (void)kfd_dispatch_log_op(KFD_DISPATCH_LOG_OP_DISABLE, q,
@@ -698,16 +727,14 @@ void disable_dispatch_log_for_queue(core::Queue* q) {
                             /*write_ptr_addr=*/0, /*generation=*/0);
 
   // d. Release profiling ref (clears the bit only if 1->0).
+  // QueueProfilingRelease takes g_owners_mu, NOT g_lifecycle_mu.
   QueueProfilingRelease(q);
 
   // e. Unregister from drainer registry. Drops the registry's shared_ptr
   //    ref. Buffer free is gated by shared_ptr destructor — if a drainer
   //    snapshot still holds a ref the destructor fires when that snapshot
   //    vector is destroyed (spec §4 lifetime protocol).
-  {
-    std::lock_guard<std::mutex> lk(g_lifecycle_mu);
-    g_active_queues.erase(queue_id_of(q));
-  }
+  g_active_queues.erase(queue_id_of(q));
 
   q->dispatch_log_active.store(false, std::memory_order_release);
 }
@@ -787,7 +814,6 @@ bool predicate_now() {
 }
 
 void ts_poller_loop() {
-  using clock = std::chrono::steady_clock;
   const auto tick_interval = std::chrono::milliseconds(5);
 
   while (!g_shutdown.load(std::memory_order_relaxed)) {
@@ -797,45 +823,38 @@ void ts_poller_loop() {
     if (curr) {
       start_drainer_if_needed();
 
-      // Snapshot Queue* set under the lifecycle mutex; we don't have a
-      // direct registry of all live queues independent of g_active_queues,
-      // so the enable pass relies on on_queue_create having seeded each
-      // newly-created queue. Already-active queues are skipped (idempotent).
-      // The on_queue_create hook does the heavy lifting; this branch's
-      // only remaining job is to flip the drainer on so it starts consuming.
-      // Nothing to iterate here without an external "all queues" list.
-      // (Spec §4: "for each existing Q with dispatch_log_active==false:
-      //  enable_dispatch_log_for_queue(Q)" — see Phase A note below.)
-      //
-      // Phase A LIMITATION: we do not currently maintain a registry of all
-      // *live* queues, only of all *active* (already-enabled) queues. The
-      // enable pass therefore cannot retroactively enable queues that were
-      // created BEFORE the enable edge. Spec §1 already documents this as
-      // the "post-enable dispatches only" semantics; queues that exist at
-      // enable time will not be retroactively enabled and their pre-enable
-      // dispatches simply produce no records. Queues created AFTER the
-      // enable edge are picked up via on_queue_create. A future revision
-      // can add a global "all live queues" registry to close this gap;
-      // it requires a hook in queue.cpp's base ctor/dtor.
+      // ENABLE pass (spec §4): for each known live queue Q with
+      // dispatch_log_active==false, run the per-queue ENABLE sequence.
+      // Iterates g_known_queues under the lifecycle mutex; on_queue_create
+      // and on_queue_destroy serialize on the same mutex, so the Queue*
+      // values we observe here cannot be torn down concurrently.
+      // enable_dispatch_log_for_queue_locked is itself a no-op for queues
+      // that are already active (idempotent enable).
+      std::lock_guard<std::mutex> lk(g_lifecycle_mu);
+      // Snapshot first so enable's per-queue work doesn't mutate the map
+      // we're iterating (g_active_queues is mutated, but g_known_queues
+      // is stable across enable for an existing queue — defensive copy
+      // anyway).
+      std::vector<core::Queue*> known;
+      known.reserve(g_known_queues.size());
+      for (auto& kv : g_known_queues) known.push_back(kv.second);
+      for (core::Queue* q : known) {
+        enable_dispatch_log_for_queue_locked(q);
+      }
     } else {
-      // Disable pass: spec §4 says "for each Q with dispatch_log_active:
-      // wait_for_idle, drain, KFD DISABLE, QueueProfilingRelease, mark
-      // inactive". This requires real Queue* values to call SetProfiling /
-      // wait_for_idle on, but g_active_queues is intentionally keyed by
-      // queue_id and stores no Queue* (spec §7 dangling-Queue prohibition).
-      //
-      // PHASE A LIMITATION: without a separate "queue_id -> Queue*" side
-      // map, the poller's disable-edge pass is a no-op. Cleanup still
-      // happens via on_queue_destroy when the queue is eventually
-      // destroyed, and on Phase A this is moot anyway because
-      // g_substrate_present is false (no queues ever become active).
-      //
-      // Wiring the disable pass requires either (a) a side map populated
-      // alongside g_active_queues, where Queue* lifetime is co-managed
-      // with the registry entry under g_lifecycle_mu, or (b) extending
-      // queue_drain_state with a weak handle that the disable path can
-      // upgrade only when the Queue is still alive. Both are deferred
-      // to Phase B per spec §13.
+      // DISABLE pass (spec §4 + §9 ROCM_LTTNG_UST_DISABLE row): for each
+      // known live queue Q with dispatch_log_active==true, run the
+      // per-queue DISABLE sequence (wait_for_idle, final drain, KFD
+      // DISABLE, QueueProfilingRelease, mark inactive). Idempotent over
+      // already-inactive queues. Required for kill-switch hygiene per
+      // spec §1039.
+      std::lock_guard<std::mutex> lk(g_lifecycle_mu);
+      std::vector<core::Queue*> known;
+      known.reserve(g_known_queues.size());
+      for (auto& kv : g_known_queues) known.push_back(kv.second);
+      for (core::Queue* q : known) {
+        disable_dispatch_log_for_queue_locked(q);
+      }
     }
 
     // Sleep until next tick.
@@ -869,11 +888,23 @@ void shutdown() {
   if (g_drainer_thread.joinable()) g_drainer_thread.join();
   g_drainer_running.store(false, std::memory_order_relaxed);
 
-  // Clear any remaining active-queue entries. By process-exit time the
-  // queue-destroy hooks should have converged, but be defensive: drop the
-  // registry's shared_ptr refs so the destructors free the buffers.
+  // Spec §4 process-exit cleanup: run the per-queue DISABLE sequence
+  // (wait_for_idle, final drain, KFD DISABLE, QueueProfilingRelease) for
+  // every queue still active at process exit. The poller is joined above
+  // so no other thread is touching g_known_queues / g_active_queues here;
+  // the lock is taken for consistency with the helpers' contract.
   {
     std::lock_guard<std::mutex> lk(g_lifecycle_mu);
+    std::vector<core::Queue*> known;
+    known.reserve(g_known_queues.size());
+    for (auto& kv : g_known_queues) known.push_back(kv.second);
+    for (core::Queue* q : known) {
+      disable_dispatch_log_for_queue_locked(q);
+    }
+    g_known_queues.clear();
+    // Defensive: drop any remaining drainer refs (the disable sequence
+    // above should have removed them, but if a destroy hook racing with
+    // shutdown left dangling state, this releases the buffers).
     g_active_queues.clear();
     g_no_dispatch_log_agents.clear();
   }
@@ -893,19 +924,34 @@ void shutdown() {
 void on_queue_create(core::Queue* q) {
   if (q == nullptr) return;
 
-  // Spec §4 queue-create hot path: relaxed load, no lifecycle mutex.
+  // Register the queue in the poller's live-queue side map BEFORE running
+  // the enable sequence. Holding g_lifecycle_mu across both the registry
+  // insert and the enable serializes us against the poller (which iterates
+  // g_known_queues under the same mutex) and against on_queue_destroy.
   // The queue-create-vs-disable race is resolved by the idempotent disable
-  // convergence guarantee (every poll tick under curr=false runs the
-  // disable pass), not by additional locking here.
+  // convergence guarantee in spec §4: if curr flips to false between our
+  // load and the next poll tick, the disable pass will iterate
+  // g_known_queues (which now contains q) and clean up.
+  std::lock_guard<std::mutex> lk(g_lifecycle_mu);
+  g_known_queues[queue_id_of(q)] = q;
   if (G_tracepoint_enabled.load(std::memory_order_relaxed)) {
-    enable_dispatch_log_for_queue(q);
+    enable_dispatch_log_for_queue_locked(q);
   }
 }
 
 void on_queue_destroy(core::Queue* q) {
   if (q == nullptr) return;
-  if (q->dispatch_log_active.load(std::memory_order_acquire)) {
-    disable_dispatch_log_for_queue(q);
+
+  // Remove from g_known_queues BEFORE the disable sequence so the poller
+  // can never observe a Queue* whose underlying core::Queue is being torn
+  // down. Held across the disable so the poller's iterating thread is
+  // forced to wait behind the mutex if it currently holds it.
+  {
+    std::lock_guard<std::mutex> lk(g_lifecycle_mu);
+    g_known_queues.erase(queue_id_of(q));
+    if (q->dispatch_log_active.load(std::memory_order_acquire)) {
+      disable_dispatch_log_for_queue_locked(q);
+    }
   }
 
   // Drop the per-queue refcount entry. Safe to do unconditionally — if the
