@@ -56,39 +56,18 @@ DL::~DL()
 
 AQLProfileDL::AQLProfileDL()
 {
+    // Check if symbols are already available in the process before loading a new copy
+    get_buffer_packets_fn = reinterpret_cast<GetBufferPacketsFn*>(
+        dlsym(RTLD_DEFAULT, "aqlprofile_att_get_buffer_packets"));
+    update_buffer_status_fn = reinterpret_cast<UpdateBufferStatusFn*>(
+        dlsym(RTLD_DEFAULT, "aqlprofile_att_update_buffer_status"));
+
+    if(valid()) return;
+
     const char* lib_names[] = {
         "libhsa-amd-aqlprofile64.so",
         "libhsa-amd-aqlprofile64.so.1",
     };
-
-    // First check whether the library is already mapped into the process. We use
-    // RTLD_NOLOAD instead of dlsym(RTLD_DEFAULT, ...) so that locally-scoped
-    // copies (loaded with RTLD_LOCAL elsewhere) are also detected.
-    // RTLD_NOLOAD still bumps the refcount on success, so it must be paired with
-    // dlclose in the destructor just like a regular dlopen.
-    for(const char* lib_name : lib_names)
-    {
-        handle = dlopen(lib_name, RTLD_LAZY | RTLD_NOLOAD);
-        if(handle) break;
-    }
-
-    if(handle)
-    {
-        // Try to resolve the required symbols from the already-loaded library.
-        get_buffer_packets_fn = reinterpret_cast<GetBufferPacketsFn*>(
-            dlsym(handle, "aqlprofile_att_get_buffer_packets"));
-        update_buffer_status_fn = reinterpret_cast<UpdateBufferStatusFn*>(
-            dlsym(handle, "aqlprofile_att_update_buffer_status"));
-        if(valid()) return;
-
-        // The already-loaded library is a different version that lacks the
-        // symbols we need. Release the NOLOAD refcount and fall through to a
-        // fresh dlopen so we can try the canonical SONAME.
-        dlclose(handle);
-        handle                  = nullptr;
-        get_buffer_packets_fn   = nullptr;
-        update_buffer_status_fn = nullptr;
-    }
 
     for(const char* lib_name : lib_names)
     {
