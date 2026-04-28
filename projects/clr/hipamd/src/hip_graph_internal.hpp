@@ -847,7 +847,7 @@ class Graph {
   //! Increments the graph memory alloc node count
   void IncrementMemAllocNodeCount() { memalloc_nodes_++; }
   //! Decrements the graph memory alloc node count
-  void DecrementMemAllocNodeCount() { memalloc_nodes_--; }
+  void DecrementMemAllocNodeCount() { memalloc_nodes_ -= (memalloc_nodes_ > 0); }
   //! returns device object
   hip::Device* Device() { return device_; }
   bool IsLeafNodeSyncRequired() const {

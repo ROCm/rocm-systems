@@ -2946,7 +2946,7 @@ hipError_t hipDeviceGraphMemTrim(int device) {
   {
     std::scoped_lock lock(hip::GraphExec::graphExecSetLock_);
     for (auto* ge : hip::GraphExec::graphExecSet_) {
-      if (ge->Device() != g_devices[device] || ge->GetMemAllocNodeCount() > 0) {
+      if (ge->Device() != g_devices[device]) {
         continue;
       }
       ge->retain();
