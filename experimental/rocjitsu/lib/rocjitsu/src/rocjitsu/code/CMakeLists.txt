@@ -10,6 +10,7 @@ rj_add_object_library(rocjitsu_code
     dbt/rj_code_translate.cpp
     dbt/hazard_tracker.cpp
     dbt/lane_permutation.cpp
+    dbt/sdwa_lowering.cpp
     dbt/semantic_translator.cpp
     patch/code_object_patcher.cpp
 )

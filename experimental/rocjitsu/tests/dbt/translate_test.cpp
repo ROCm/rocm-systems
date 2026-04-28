@@ -320,11 +320,32 @@ TEST(WaitcntTranslator, EncodeVmcnt0EmitsLoadcntAndStorecnt) {
     uint8_t op = (w >> 16) & 0x7F;
     if (op == 64)
       has_loadcnt = true;
-    if (op == 73)
+    if (op == 73) {
       has_storecnt_dscnt = true;
+      EXPECT_EQ(w & 0xFFFFu, 0x003Fu);
+    }
   }
   EXPECT_TRUE(has_loadcnt);
   EXPECT_TRUE(has_storecnt_dscnt);
+}
+
+TEST(WaitcntTranslator, EncodeLgkmcnt0WaitsDscntNotStorecnt) {
+  WaitcntValues v{0x3F, 0, 0x07};
+  auto words = encode_waitcnt_gfx12(v);
+
+  bool has_storecnt_dscnt = false;
+  bool has_kmcnt = false;
+  for (auto w : words) {
+    uint8_t op = (w >> 16) & 0x7F;
+    if (op == 73) {
+      has_storecnt_dscnt = true;
+      EXPECT_EQ(w & 0xFFFFu, 0x3F00u);
+    }
+    if (op == 71)
+      has_kmcnt = true;
+  }
+  EXPECT_TRUE(has_storecnt_dscnt);
+  EXPECT_TRUE(has_kmcnt);
 }
 
 // --- End-to-end BinaryTranslator integration tests ---
@@ -461,6 +482,15 @@ TEST(BinaryTranslatorE2E, LdsRoundtripLowersBarrierToRdna4SplitBarrier) {
   const auto *co = exec.code_object(ROCJITSU_CODE_TARGET_GFX950, 0);
   ASSERT_NE(co, nullptr);
 
+  bool saw_source_sdwa = false;
+  for (const auto *sec : co->text_sections()) {
+    const auto *data = reinterpret_cast<const uint32_t *>(sec->data());
+    const size_t words = sec->size() / sizeof(uint32_t);
+    for (size_t pc = 0; pc + 1 < words; ++pc)
+      saw_source_sdwa |= data[pc] == 0x240000F9u && data[pc + 1] == 0x00060603u;
+  }
+  ASSERT_TRUE(saw_source_sdwa) << "lds_roundtrip no longer exercises the CDNA4 SDWA lowering";
+
   BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA4);
   auto result = translator.translate(*co);
   ASSERT_FALSE(result.elf_bytes.empty());
@@ -468,6 +498,8 @@ TEST(BinaryTranslatorE2E, LdsRoundtripLowersBarrierToRdna4SplitBarrier) {
   bool saw_barrier_signal = false;
   bool saw_barrier_wait = false;
   bool saw_cdna4_barrier = false;
+  bool saw_cdna4_sdwa_first_word = false;
+  bool saw_cdna4_sdwa_modifier_word = false;
   rocjitsu::AmdGpuCodeObject translated_co(result.elf_bytes.data(), result.elf_bytes.size());
   for (const auto *sec : translated_co.text_sections()) {
     const auto *data = reinterpret_cast<const uint32_t *>(sec->data());
@@ -476,12 +508,16 @@ TEST(BinaryTranslatorE2E, LdsRoundtripLowersBarrierToRdna4SplitBarrier) {
       saw_barrier_signal |= data[pc] == 0xBE804EC1u; // s_barrier_signal -1
       saw_barrier_wait |= data[pc] == 0xBF94FFFFu;   // s_barrier_wait -1
       saw_cdna4_barrier |= data[pc] == 0xBF8A0000u;  // CDNA4 s_barrier
+      saw_cdna4_sdwa_first_word |= data[pc] == 0x240000F9u;
+      saw_cdna4_sdwa_modifier_word |= data[pc] == 0x00060603u;
     }
   }
 
   EXPECT_TRUE(saw_barrier_signal);
   EXPECT_TRUE(saw_barrier_wait);
   EXPECT_FALSE(saw_cdna4_barrier);
+  EXPECT_FALSE(saw_cdna4_sdwa_first_word);
+  EXPECT_FALSE(saw_cdna4_sdwa_modifier_word);
 }
 
 TEST(BinaryTranslatorE2E, TextSizesMatch) {

@@ -10,6 +10,7 @@
 #include "rocjitsu/code/dbt/generated/encoding_cdna4_to_rdna4.h"
 #include "rocjitsu/code/dbt/generated/legalization_cdna4_to_rdna4.h"
 #include "rocjitsu/code/dbt/generated/legalization_types.h"
+#include "rocjitsu/code/dbt/sdwa_lowering.h"
 #include "rocjitsu/code/dbt/semantic_translator.h"
 #include "rocjitsu/code/patch/code_object_patcher.h"
 #include "rocjitsu/code/patch/instruction_builder.h"
@@ -195,6 +196,26 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
         leg = legalization_lookup_(inst.encoding_id(), inst.opcode());
 
       const uint16_t dst_opcode = leg ? leg->target_opcode : inst.opcode();
+
+      if (guest_arch_ == ROCJITSU_CODE_ARCH_CDNA4 && host_arch_ == ROCJITSU_CODE_ARCH_RDNA4 &&
+          is_cdna4_vop2_sdwa_form(inst)) {
+        uint32_t ext_word = 0;
+        if (inst_size >= 8)
+          std::memcpy(&ext_word, text.data() + offset + 4, 4);
+        auto lowering = lower_cdna4_vop2_sdwa_to_rdna4(inst, offset, liveness, dst_opcode,
+                                                       ext_word);
+        if (!lowering.empty()) {
+          SemanticReplacement repl{offset, offset + inst_size, std::move(lowering)};
+          apply_semantic(repl, translated_text, patcher);
+        } else {
+          result.warnings.push_back("unsupported SDWA form: " + std::string(inst.disassemble()));
+          const uint32_t nop = build_s_nop(0, host_arch_);
+          for (uint32_t i = 0; i < inst_size; i += 4)
+            std::memcpy(translated_text.data() + offset + i, &nop, 4);
+        }
+        offset += inst_size;
+        continue;
+      }
 
       // Try semantic lowering for Expand and Lower actions.
       // For Expand: must lower (NOP-fill if unhandled).

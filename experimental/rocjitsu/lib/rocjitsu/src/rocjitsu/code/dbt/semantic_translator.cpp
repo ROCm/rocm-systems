@@ -69,9 +69,13 @@ std::vector<uint32_t> encode_waitcnt_gfx12(const WaitcntValues &vals) {
     words.push_back(make_gfx12_sopp(kOpWaitLoadcnt, std::min<uint16_t>(vals.vmcnt, 63)));
 
   if (need_storecnt || need_dscnt) {
-    const uint8_t sc = need_storecnt ? std::min<uint8_t>(vals.vmcnt, 15) : 15;
-    const uint8_t dc = need_dscnt ? std::min<uint8_t>(vals.lgkmcnt, 15) : 15;
-    words.push_back(make_gfx12_sopp(kOpWaitStorecntDscnt, (sc << 4) | dc));
+    // GFX12 packs STORECNT in SIMM16[13:8] and DSCNT in SIMM16[5:0].
+    // Use the relaxed max value for the counter that the original GFX9 wait
+    // did not constrain; otherwise a VM-only wait would accidentally wait DS,
+    // or an LGKM-only wait would accidentally wait vector stores.
+    const uint8_t sc = need_storecnt ? std::min<uint8_t>(vals.vmcnt, 63) : 63;
+    const uint8_t dc = need_dscnt ? std::min<uint8_t>(vals.lgkmcnt, 63) : 63;
+    words.push_back(make_gfx12_sopp(kOpWaitStorecntDscnt, (sc << 8) | dc));
   }
 
   if (need_kmcnt)
