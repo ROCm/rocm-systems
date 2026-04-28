@@ -20,35 +20,39 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include <gtest/gtest.h>
-#include "lib/aqlprofile/core/commandbuffermgr.hpp"
-#include <array>
-#include <climits>
+#pragma once
 
-using namespace aql_profile;
+/**
+ * @file source/lib/aqlprofile/aqlprofile.hpp
+ *
+ * @brief Handles the AQLProfile interface for when using internal vs. external AQLProfile
+ */
 
-namespace
-{
-struct DummyBuffer
-{
-    std::array<char, 4096> data;
-};
+#if !defined(ROCPROFILER_EXTERNAL_AQLPROFILE)
+#    define ROCPROFILER_EXTERNAL_AQLPROFILE 0
+#endif
 
-TEST(CommandBufferMgrTest, BasicPrefixAndSize)
+#define ROCPROFILER_INTERNAL_AQLPROFILE_INCLUDE 1
+#include "lib/aqlprofile/aql_profile_v2.h"
+#undef ROCPROFILER_INTERNAL_AQLPROFILE_INCLUDE
+
+#if ROCPROFILER_EXTERNAL_AQLPROFILE == 0
+#    include "lib/aqlprofile/util/hsa_rsrc_factory.h"
+#else
+
+extern "C" struct HsaApiTable;
+
+namespace rocprofiler
 {
-    DummyBuffer      buf;
-    CommandBufferMgr mgr(buf.data.data(), sizeof(buf.data));
-    // Should not throw and should have a nonzero size
-    EXPECT_GT(mgr.GetSize(), 0u);
+namespace aqlprofile
+{
+template <typename Tp>
+inline void
+hsa_rsrc_factory_init(Tp* /*hsa_api_table*/)
+{
+    // External AQLProfile library - no internal initialization
 }
+}  // namespace aqlprofile
+}  // namespace rocprofiler
 
-TEST(CommandBufferMgrTest, FinalizeThrowsOnSmallData)
-{
-    DummyBuffer      buf;
-    CommandBufferMgr mgr(buf.data.data(), sizeof(buf.data));
-    mgr.SetPreSize(128);
-    // Finalize with data_size <= precmds_size should throw
-    EXPECT_THROW(mgr.Finalize(64), aql_profile_exc_msg);
-}
-
-}  // namespace
+#endif

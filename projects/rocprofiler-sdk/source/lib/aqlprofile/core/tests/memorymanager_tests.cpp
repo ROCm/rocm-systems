@@ -20,7 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "core/memorymanager.hpp"
+#include "lib/aqlprofile/core/memorymanager.hpp"
 #include "gtest/gtest.h"
 #include <cstring>
 
