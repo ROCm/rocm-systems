@@ -170,7 +170,7 @@ ncclResult_t rcclOverrideChannels(struct ncclComm* comm, ncclFunc_t coll, size_t
     return ncclSuccess;
   }
 
-  if (comm->nRanks == comm->nNodes) {
+  if ((comm->nRanks == comm->nNodes) && !IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx1151")) {
     INFO(NCCL_TUNING, "RCCL tuning model channel thresholds not applied for single GPU per node case");
     return ncclSuccess;
   }
