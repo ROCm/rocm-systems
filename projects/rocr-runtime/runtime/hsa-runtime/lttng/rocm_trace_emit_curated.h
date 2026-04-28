@@ -16,8 +16,18 @@
 
 #include <stdint.h>
 #include <stddef.h>
-#include <hsa/hsa.h>
-#include <hsa/hsa_ext_amd.h>
+/* HSA headers: the rocr-runtime source layout has these flat in
+ * runtime/hsa-runtime/inc/ (not under an hsa/ subdir), and that directory
+ * is on the include path while building libhsa-runtime64. The angle-bracket
+ * <hsa/hsa.h> form is what consumers see after install; this internal
+ * tracepoint emit header is only included from within rocr-runtime's own
+ * compile units, so use the quoted form so the in-tree build works.
+ *
+ * NOTE: When the codegen (split into stacked PR2) is regenerated, ensure
+ * this is preserved: the curated codegen for HSA must emit "hsa.h" /
+ * "hsa_ext_amd.h" rather than <hsa/hsa.h> / <hsa/hsa_ext_amd.h>. */
+#include "hsa.h"
+#include "hsa_ext_amd.h"
 
 #if defined(HSA_ENABLE_LTTNG_UST) && HSA_ENABLE_LTTNG_UST
 
