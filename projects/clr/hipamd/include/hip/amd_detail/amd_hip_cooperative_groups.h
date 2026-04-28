@@ -749,7 +749,8 @@ __CG_QUALIFIER__ void thread_group::sync() const {
     }
   }
 #if __has_builtin(__builtin_amdgcn_s_wait_asynccnt)
-  __builtin_amdgcn_s_wait_asynccnt(0);
+  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_s_wait_asynccnt))
+    __builtin_amdgcn_s_wait_asynccnt(0);
 #endif
 }
 

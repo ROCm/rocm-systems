@@ -91,7 +91,9 @@ template <int pattern> __device__ static inline float __hip_ds_swizzlef_N(float 
 
 template <int dpp_ctrl, int row_mask, int bank_mask, bool bound_ctrl>
 __device__ static inline int __hip_move_dpp_N(int src) {
-  return __builtin_amdgcn_mov_dpp(src, dpp_ctrl, row_mask, bank_mask, bound_ctrl);
+  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_mov_dpp))
+    return __builtin_amdgcn_mov_dpp(src, dpp_ctrl, row_mask, bank_mask, bound_ctrl);
+  return src;  // Fallback for SPIR-V compile-time check; DPP is always available at runtime
 }
 
 inline __device__ const struct {

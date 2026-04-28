@@ -154,14 +154,11 @@ __CG_STATIC_QUALIFIER__ void dispatch_async_memcpy(const TyGroup& group, TyElem*
 }
 #endif
 
-template <class TyGroup, typename TyElem, typename TySize, size_t Hint = alignof(TyElem)>
-__CG_STATIC_QUALIFIER__ void memcpy_async_bytes(const TyGroup& group, TyElem* __restrict__ dst,
-                                                const TyElem* __restrict__ src,
-                                                const TySize& count) {
-#if __has_builtin(__builtin_amdgcn_global_store_async_from_lds_b128) and                           \
-    __has_builtin(__builtin_amdgcn_global_load_async_to_lds_b128)
-  details::dispatch_async_memcpy(group, dst, src, count);
-#else
+template <class TyGroup, typename TyElem, typename TySize>
+__CG_STATIC_QUALIFIER__ void memcpy_async_bytes_fallback(const TyGroup& group,
+                                                         TyElem* __restrict__ dst,
+                                                         const TyElem* __restrict__ src,
+                                                         const TySize& count) {
   // Traditional Copy since we do not have memcpy_async builtins
   // Partition the memory in group of segments which each thread will copy portion of
   // Similar to what we do in accelerated copy
@@ -180,6 +177,20 @@ __CG_STATIC_QUALIFIER__ void memcpy_async_bytes(const TyGroup& group, TyElem* __
       ((unsigned char*)dst)[i] = ((unsigned char*)src)[i];
     }
   }
+}
+
+template <class TyGroup, typename TyElem, typename TySize, size_t Hint = alignof(TyElem)>
+__CG_STATIC_QUALIFIER__ void memcpy_async_bytes(const TyGroup& group, TyElem* __restrict__ dst,
+                                                const TyElem* __restrict__ src,
+                                                const TySize& count) {
+#if __has_builtin(__builtin_amdgcn_global_store_async_from_lds_b128) and                           \
+    __has_builtin(__builtin_amdgcn_global_load_async_to_lds_b128)
+  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_global_load_async_to_lds_b128))
+    details::dispatch_async_memcpy(group, dst, src, count);
+  else
+    details::memcpy_async_bytes_fallback(group, dst, src, count);
+#else
+  details::memcpy_async_bytes_fallback(group, dst, src, count);
 #endif
 }
 }  // namespace details

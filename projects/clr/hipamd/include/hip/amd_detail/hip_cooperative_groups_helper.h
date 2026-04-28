@@ -231,14 +231,18 @@ __CG_STATIC_QUALIFIER__ void barrier_arrive() {
   __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup");
 #if __has_builtin(__builtin_amdgcn_s_barrier_signal) &&                                            \
     __has_builtin(__builtin_amdgcn_s_barrier_wait)
-  __builtin_amdgcn_s_barrier_signal(-1);  // -1 is workgroup barriers
+  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_s_barrier_signal))
+    __builtin_amdgcn_s_barrier_signal(-1);  // -1 is workgroup barriers
 #endif  // __builtin_amdgcn_s_barrier_signal && __builtin_amdgcn_s_barrier_wait
 }
 
 __CG_STATIC_QUALIFIER__ void barrier_wait() {
 #if __has_builtin(__builtin_amdgcn_s_barrier_signal) &&                                            \
     __has_builtin(__builtin_amdgcn_s_barrier_wait)
-  __builtin_amdgcn_s_barrier_wait(-1);
+  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_s_barrier_wait))
+    __builtin_amdgcn_s_barrier_wait(-1);
+  else
+    __builtin_amdgcn_s_barrier();
 #else
   __builtin_amdgcn_s_barrier();
 #endif  // __builtin_amdgcn_s_barrier_signal && __builtin_amdgcn_s_barrier_wait
@@ -283,7 +287,10 @@ __CG_STATIC_QUALIFIER__ void sync() {
   __builtin_amdgcn_fence(__ATOMIC_RELEASE, "cluster");
 #if __has_builtin(__builtin_amdgcn_s_cluster_barrier)
   // Generates a signal + wait combination for cluster barrier
-  __builtin_amdgcn_s_cluster_barrier();
+  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_s_cluster_barrier))
+    __builtin_amdgcn_s_cluster_barrier();
+  else
+    __builtin_amdgcn_s_barrier();  // fallback to s_barrier if device does not support clusters
 #else
   __builtin_amdgcn_s_barrier();  // fallback to s_barrier if device does not support clusters
 #endif
@@ -294,20 +301,25 @@ __CG_STATIC_QUALIFIER__ void barrier_arrive() {
   __builtin_amdgcn_fence(__ATOMIC_RELEASE, "cluster");
 #if __has_builtin(__builtin_amdgcn_s_barrier_signal) and                                           \
     __has_builtin(__builtin_amdgcn_s_barrier_wait)
-  bool isfirst = __builtin_amdgcn_s_barrier_signal_isfirst(-1);  // -1 is workgroup barrier
-  __builtin_amdgcn_s_barrier_wait(-1);
+  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_s_barrier_signal)) {
+    bool isfirst = __builtin_amdgcn_s_barrier_signal_isfirst(-1);  // -1 is workgroup barrier
+    __builtin_amdgcn_s_barrier_wait(-1);
 
-  if (isfirst) {
-    // Signal the cluster barrier, -3 means user cluster barrier
-    __builtin_amdgcn_s_barrier_signal(-3);
+    if (isfirst) {
+      // Signal the cluster barrier, -3 means user cluster barrier
+      __builtin_amdgcn_s_barrier_signal(-3);
+    }
   }
 #endif
 }
 
 __CG_STATIC_QUALIFIER__ void barrier_wait() {
 #if __has_builtin(__builtin_amdgcn_s_barrier_wait)
-  // wait on the cluster barrier, -3 means user cluster barrier
-  __builtin_amdgcn_s_barrier_wait(-3);
+  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_s_barrier_wait))
+    // wait on the cluster barrier, -3 means user cluster barrier
+    __builtin_amdgcn_s_barrier_wait(-3);
+  else
+    __builtin_amdgcn_s_barrier();  // Fall back to s_barrier
 #else
   __builtin_amdgcn_s_barrier();  // Fall back to s_barrier
 #endif
@@ -316,21 +328,21 @@ __CG_STATIC_QUALIFIER__ void barrier_wait() {
 
 __CG_STATIC_QUALIFIER__ dim3 block_index() {
 #if __has_builtin(__builtin_amdgcn_cluster_workgroup_id_x)
-  return dim3(__builtin_amdgcn_cluster_workgroup_id_x(), __builtin_amdgcn_cluster_workgroup_id_y(),
-              __builtin_amdgcn_cluster_workgroup_id_z());
-#else
-  return dim3{0, 0, 0};
+  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cluster_workgroup_id_x))
+    return dim3(__builtin_amdgcn_cluster_workgroup_id_x(), __builtin_amdgcn_cluster_workgroup_id_y(),
+                __builtin_amdgcn_cluster_workgroup_id_z());
 #endif
+  return dim3{0, 0, 0};
 }
 
 __CG_STATIC_QUALIFIER__ dim3 dim_blocks() {
 #if __has_builtin(__builtin_amdgcn_cluster_workgroup_max_id_x)
-  return dim3(__builtin_amdgcn_cluster_workgroup_max_id_x() + 1,
-              __builtin_amdgcn_cluster_workgroup_max_id_y() + 1,
-              __builtin_amdgcn_cluster_workgroup_max_id_z() + 1);
-#else
-  return dim3{1, 1, 1};
+  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cluster_workgroup_max_id_x))
+    return dim3(__builtin_amdgcn_cluster_workgroup_max_id_x() + 1,
+                __builtin_amdgcn_cluster_workgroup_max_id_y() + 1,
+                __builtin_amdgcn_cluster_workgroup_max_id_z() + 1);
 #endif
+  return dim3{1, 1, 1};
 }
 
 __CG_STATIC_QUALIFIER__ unsigned int block_rank() {
@@ -347,10 +359,10 @@ __CG_STATIC_QUALIFIER__ dim3 thread_index() {
 
 __CG_STATIC_QUALIFIER__ unsigned int num_blocks() {
 #if __has_builtin(__builtin_amdgcn_cluster_workgroup_max_flat_id)
-  return __builtin_amdgcn_cluster_workgroup_max_flat_id() + 1;
-#else
-  return 1;
+  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cluster_workgroup_max_flat_id))
+    return __builtin_amdgcn_cluster_workgroup_max_flat_id() + 1;
 #endif
+  return 1;
 }
 
 __CG_STATIC_QUALIFIER__ dim3 dim_threads() {
@@ -373,19 +385,19 @@ __CG_STATIC_QUALIFIER__ unsigned int thread_rank() {
 
 template <typename T> __CG_STATIC_QUALIFIER__ T* map_shared_rank(T* in, int rank) {
 #if __has_builtin(__builtin_amdgcn_map_shared_rank)
-  return (T*)(__builtin_amdgcn_map_shared_rank((void*)in, rank));
-#else
-  return nullptr;
+  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_map_shared_rank))
+    return (T*)(__builtin_amdgcn_map_shared_rank((void*)in, rank));
 #endif
+  return nullptr;
 }
 
 __CG_STATIC_QUALIFIER__ unsigned int query_shared_rank(const void* in) {
 #if __has_builtin(__builtin_amdgcn_query_shared_rank)
-  return static_cast<unsigned int>(
-      __builtin_amdgcn_query_shared_rank((__attribute__((address_space(11))) const void*)in));
-#else
-  return 0;
+  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_query_shared_rank))
+    return static_cast<unsigned int>(
+        __builtin_amdgcn_query_shared_rank((__attribute__((address_space(11))) const void*)in));
 #endif
+  return 0;
 }
 }  // namespace cluster
 }  // namespace internal
