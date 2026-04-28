@@ -353,6 +353,16 @@ if(HIP_ENABLE_LTTNG_UST)
     target_include_directories(amdhip64 PRIVATE
         ${CMAKE_CURRENT_LIST_DIR}/lttng
         ${LTTNG_VENDORED_INCLUDE_DIR})
+    # Explicitly add the vendored lib directory to the link search path.
+    # pkg_check_modules(IMPORTED_TARGET) generated PkgConfig::LTTNG_UST from
+    # the stub .pc file written at configure time; in some pkg-config / CMake
+    # combinations the -L directive in the stub is dropped from the imported
+    # target's interface (the .so files do not exist yet at configure time
+    # because the ExternalProject builds them later), leaving only -llttng-ust
+    # / -llttng-ust-common in the link line and the linker fails with
+    # "cannot find -llttng-ust". Adding the directory directly guarantees
+    # the search path is present at link time.
+    target_link_directories(amdhip64 PRIVATE ${LTTNG_VENDORED_LIB_DIR})
     target_link_libraries(amdhip64 PRIVATE PkgConfig::LTTNG_UST ${CMAKE_DL_LIBS})
 
     # Build amdhip64 only after the vendored libs exist (the .pc query

@@ -454,6 +454,16 @@ if( BUILD_SHARED_LIBS )
           ${CMAKE_CURRENT_SOURCE_DIR}/lttng
           ${LTTNG_VENDORED_INCLUDE_DIR}
           ${ROCR_LTTNG_EXTRA_INCLUDES})
+      # Explicitly add the vendored lib directory to the link search path.
+      # pkg_check_modules(IMPORTED_TARGET) generated PkgConfig::LTTNG_UST from
+      # the stub .pc file written at configure time; in some pkg-config / CMake
+      # combinations the -L directive in the stub is dropped from the imported
+      # target's interface (the .so files do not exist yet at configure time
+      # because the ExternalProject builds them later), leaving only -llttng-ust
+      # / -llttng-ust-common in the link line and the linker fails with
+      # "cannot find -llttng-ust". Adding the directory directly guarantees
+      # the search path is present at link time.
+      target_link_directories(${CORE_RUNTIME_TARGET} PRIVATE ${LTTNG_VENDORED_LIB_DIR})
       target_link_libraries(${CORE_RUNTIME_TARGET} PRIVATE
           PkgConfig::LTTNG_UST ${CMAKE_DL_LIBS})
       set(HSA_DEP_LTTNG_UST ON CACHE INTERNAL "")
