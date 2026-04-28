@@ -77,11 +77,20 @@ class IpcOnImpl {
 
   __device__ void ipcGpuInit(Backend *gpu_backend, Context *ctx, int thread_id);
 
-  __device__ void ipcCopy(void *dst, void *src, size_t size);
+  template <MemcpyKind Kind = MemcpyKind::Put>
+  __device__ void ipcCopy(void *dst, void *src, size_t size) {
+    memcpy_lane<Kind>(dst, src, size);
+  }
 
-  __device__ void ipcCopy_wg(void *dst, void *src, size_t size);
+  template <MemcpyKind Kind = MemcpyKind::Put>
+  __device__ void ipcCopy_wg(void *dst, void *src, size_t size) {
+    memcpy_wg<Kind>(dst, src, size);
+  }
 
-  __device__ void ipcCopy_wave(void *dst, void *src, size_t size);
+  template <MemcpyKind Kind = MemcpyKind::Put>
+  __device__ void ipcCopy_wave(void *dst, void *src, size_t size) {
+    memcpy_wave<Kind>(dst, src, size);
+  }
 
   template <detail::atomic::rocshmem_memory_scope scope = detail::atomic::memory_scope_system,
             detail::atomic::rocshmem_memory_order order = detail::atomic::memory_order_seq_cst>
@@ -191,11 +200,17 @@ class IpcOffImpl {
   __device__ void ipcGpuInit(Backend *rocshmem_handle, Context *ctx,
                              int thread_id) {}
 
-  __device__ void ipcCopy(void *dst, void *src, size_t size) {}
+  template <MemcpyKind Kind = MemcpyKind::Put>
+  __device__ void ipcCopy([[maybe_unused]] void *dst, [[maybe_unused]] void *src,
+                          [[maybe_unused]] size_t size) {}
 
-  __device__ void ipcCopy_wg(void *dst, void *src, size_t size) {}
+  template <MemcpyKind Kind = MemcpyKind::Put>
+  __device__ void ipcCopy_wg([[maybe_unused]] void *dst, [[maybe_unused]] void *src,
+                             [[maybe_unused]] size_t size) {}
 
-  __device__ void ipcCopy_wave(void *dst, void *src, size_t size) {}
+  template <MemcpyKind Kind = MemcpyKind::Put>
+  __device__ void ipcCopy_wave([[maybe_unused]] void *dst, [[maybe_unused]] void *src,
+                               [[maybe_unused]] size_t size) {}
 
   template <detail::atomic::rocshmem_memory_scope scope = detail::atomic::memory_scope_system,
             detail::atomic::rocshmem_memory_order order = detail::atomic::memory_order_seq_cst>
