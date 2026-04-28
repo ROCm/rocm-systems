@@ -43,7 +43,8 @@ public:
 
         if(batch.empty()) return;
 
-        LOG_DEBUG("Offloading {} records for thread {}", batch.size(), tid);
+        LOG_DEBUG("[trace_cache_offload_adapter] write: tid={} records={}", tid,
+                  batch.size());
 
         std::lock_guard<std::mutex> lk{ m_mutex };
         auto&                       store = m_store[tid];
