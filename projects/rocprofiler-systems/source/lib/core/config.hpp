@@ -414,6 +414,12 @@ private:
 std::shared_ptr<tmp_file>
 get_tmp_file(std::string _basename, std::string _ext = "dat");
 
+// Returns the absolute output path for a named sampling report file.
+// Equivalent to tim::settings::compose_output_filename(name, ext) but without
+// requiring callers to include core/timemory.hpp.
+std::string
+get_sampling_output_filepath(std::string_view name, std::string_view ext = ".tsv");
+
 CausalBackend
 get_causal_backend();
 

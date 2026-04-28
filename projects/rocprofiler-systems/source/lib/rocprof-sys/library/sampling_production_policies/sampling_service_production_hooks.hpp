@@ -16,7 +16,6 @@
 #include "core/config.hpp"
 #include "core/perf.hpp"
 #include "core/state.hpp"
-#include "core/timemory.hpp"
 #include "core/trace_cache/cache_manager.hpp"
 #include "library/thread_info.hpp"
 
@@ -24,6 +23,7 @@
 #include <sys/types.h>
 #include <unistd.h>
 
+#include <filesystem>
 #include <fstream>
 
 namespace rocprofsys::sampling
@@ -165,11 +165,6 @@ sampling_service<default_sampling_policies>::shutdown_production_wiring(int64_t 
 // Opens sampling_wall_clock.tsv, sampling_cpu_clock.tsv, sampling_percent.tsv,
 // and trip_count.tsv in the configured output directory, then injects them into
 // report_writer_ so flush() has real file handles.
-//
-// Uses tim::filepath::open() which creates parent directories on demand —
-// matching the pattern used by coverage.cpp and causal/experiment.cpp.
-// Raw std::ofstream::open() does NOT create parent dirs, causing failures when
-// the output directory is created lazily by another sink (Bug 1 regression).
 
 template <>
 inline void
@@ -177,10 +172,15 @@ sampling_service<default_sampling_policies>::open_report_writer_streams()
 {
     // Ofstreams are kept alive as members so report_writer_ can hold non-owning
     // pointers until flush() completes.
-    auto open = [](std::ofstream& ofs, std::string const& name) {
-        auto path = tim::settings::compose_output_filename(name, ".tsv");
-        if(!tim::filepath::open(ofs, path))
-            LOG_CRITICAL("[native_report_writer] cannot open {}", path);
+    auto open = [](std::ofstream& ofs, std::string_view name) {
+        auto path = rocprofsys::get_sampling_output_filepath(name);
+        if(!path.empty())
+        {
+            auto parent = std::filesystem::path{ path }.parent_path();
+            if(!parent.empty()) std::filesystem::create_directories(parent);
+        }
+        ofs.open(path);
+        if(!ofs.is_open()) LOG_CRITICAL("[native_report_writer] cannot open {}", path);
     };
 
     if(!m_tsv_wall.is_open()) open(m_tsv_wall, "sampling_wall_clock");

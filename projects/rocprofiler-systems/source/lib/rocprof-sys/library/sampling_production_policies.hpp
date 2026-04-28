@@ -5,7 +5,7 @@
 
 // Production-complete definitions for all 10 sampling policy types.
 // This header lives in library/ because the six "heavy" policies depend on
-// main-library symbols (perf.hpp, tracing.hpp, trace_cache, timemory).
+// main-library symbols (perf.hpp, tracing.hpp, trace_cache, thread_info).
 //
 // The four "light" policies (steady_clock, real_signal_dispatcher,
 // real_timer_trigger, libunwind_unwinder) are defined in their own headers
@@ -40,7 +40,6 @@
 // ── Main-library deps (only valid in main-lib TUs) ───────────────────────
 #include "core/components/fwd.hpp"
 #include "core/config.hpp"
-#include "core/timemory.hpp"
 #include "core/trace_cache/cache_manager.hpp"
 #include "core/trace_cache/sample_type.hpp"
 #include "library/runtime.hpp"
@@ -57,6 +56,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <fstream>
 #include <functional>
 #include <mutex>
@@ -141,8 +141,8 @@ private:
             }
             m_path = tmp->filename;
             // Ensure the parent directory exists before opening the fstream.
-            auto parent = m_path.substr(0, m_path.rfind('/'));
-            if(!parent.empty()) filepath::makedir(parent);
+            auto parent = std::filesystem::path{ m_path }.parent_path();
+            if(!parent.empty()) std::filesystem::create_directories(parent);
             m_stream.open(m_path, std::ios::binary | std::ios::in | std::ios::out |
                                       std::ios::app);
             if(!m_stream.is_open())

@@ -2926,6 +2926,17 @@ get_tmp_file(std::string _basename, std::string _ext)
     return _existing_files.at(_fname);
 }
 
+std::string
+get_sampling_output_filepath(std::string_view name, std::string_view ext)
+{
+    auto _cfg       = settings::compose_filename_config{};
+    _cfg.use_suffix = settings::use_output_suffix();
+    _cfg.suffix     = settings::default_process_suffix();
+    _cfg.make_dir   = false;
+    return settings::compose_output_filename(std::string{ name }, std::string{ ext },
+                                             _cfg);
+}
+
 CausalBackend
 get_causal_backend()
 {
