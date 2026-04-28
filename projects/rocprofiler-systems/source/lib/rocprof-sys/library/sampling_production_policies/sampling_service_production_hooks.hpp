@@ -114,7 +114,7 @@ sampling_service<default_sampling_policies>::setup_production_wiring(
         pe_attr.wakeup_events = 1;
 
         ovfl_slot.emplace();
-        ovfl_slot->configure(tid, sys_tid, ovfl_sig, &pe_attr);
+        ovfl_slot->configure(tid, sys_tid, ovfl_sig, &pe_attr, fatal_);
         ovfl_slot->start();
         LOG_DEBUG("thread {} overflow armed={} (sig={})", tid, ovfl_slot->is_open(),
                   ovfl_sig);

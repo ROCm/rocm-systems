@@ -14,6 +14,17 @@
 using namespace rocprofsys::sampling;
 using namespace rocprofsys::sampling::test;
 
+// Noop fatal policy for existing write()-call tests that don't exercise failure paths.
+struct noop_fatal_policy
+{
+    template <class... Args>
+    [[noreturn]] void fatal(char const*, int, std::string_view, Args const&...) noexcept
+    {
+        std::abort();
+    }
+};
+static noop_fatal_policy g_noop_fatal;
+
 // ─── AC-15: in_memory_offload round-trip ────────────────────────────────────────
 
 TEST(offload, in_memory_round_trip_produces_same_record_sequence)
@@ -35,7 +46,7 @@ TEST(offload, in_memory_round_trip_produces_same_record_sequence)
         ring.try_push(rec);
     }
 
-    offload.write<8>(tid, ring);
+    offload.write<8>(tid, ring, g_noop_fatal);
     auto records = offload.read(tid);
 
     ASSERT_EQ(records.size(), 3U);
@@ -54,7 +65,7 @@ TEST(offload, empty_ring_produces_empty_read)
     in_memory_offload     offload;
     sample_ring_buffer<8> ring;
 
-    offload.write<8>(0, ring);
+    offload.write<8>(0, ring, g_noop_fatal);
     auto records = offload.read(0);
 
     EXPECT_TRUE(records.empty())
@@ -76,7 +87,7 @@ TEST(offload, reset_clears_all_tids)
     backtrace_record      rec;
     rec.tid = 1;
     ring.try_push(rec);
-    offload.write<4>(1, ring);
+    offload.write<4>(1, ring, g_noop_fatal);
 
     offload.reset();
     EXPECT_TRUE(offload.read(1).empty()) << "reset() must clear all stored records";
@@ -103,7 +114,7 @@ TEST(offload, write_preserves_timestamp_ordering)
 
     ring.try_push(r0);
     ring.try_push(r1);
-    offload.write<4>(2, ring);
+    offload.write<4>(2, ring, g_noop_fatal);
 
     auto records = offload.read(2);
     ASSERT_EQ(records.size(), 2U);

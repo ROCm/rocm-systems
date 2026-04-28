@@ -39,7 +39,10 @@ public:
     // Configure: take the already-populated perf_event_attr, open the fd,
     // and arm for signal delivery to this thread.
     // attr must point to a perf_event_attr (cast from caller's void const*).
-    void configure(int64_t /*tid*/, pid_t sys_tid, int signum, void const* attr) noexcept
+    // FatalErrorPolicy::fatal() is called on perf_event_open failure (NFR-FM-2, EC-3).
+    template <class FatalErrorPolicy>
+    void configure(int64_t /*tid*/, pid_t sys_tid, int signum, void const* attr,
+                   FatalErrorPolicy& fatal)
     {
         if(!attr) return;
 
@@ -49,9 +52,8 @@ public:
         auto err = m_event.open(pe, sys_tid, -1);
         if(err)
         {
-            LOG_CRITICAL("real_overflow_trigger: perf_event_open failed: {}", *err);
-            m_open = false;
-            return;
+            fatal.fatal(__FILE__, __LINE__,
+                        "real_overflow_trigger: perf_event_open failed: {}", *err);
         }
 
         m_event.set_ready_signal(signum);

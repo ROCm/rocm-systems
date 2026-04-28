@@ -302,7 +302,7 @@ sampling_service<Policies>::shutdown(int64_t tid)
 
         // Drain any remaining ring-buffer records to the offload store.
         // Safe here: signals are blocked and in-flight count is zero.
-        offload_.write(tid, state->ring_buffer());
+        offload_.write(tid, state->ring_buffer(), fatal_);
     }
 
     // Clear thread-local signal-handler pointers so a stale signal after

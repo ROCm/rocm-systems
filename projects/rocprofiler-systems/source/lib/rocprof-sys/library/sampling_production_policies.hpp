@@ -95,21 +95,22 @@ public:
 class tmpfile_offload_store
 {
 public:
-    template <size_t N>
-    void write(int64_t tid, sample_ring_buffer<N>& buf) noexcept
+    // FatalErrorPolicy::fatal() is called on I/O failure (NFR-FM-2).
+    template <size_t N, class FatalErrorPolicy>
+    void write(int64_t tid, sample_ring_buffer<N>& buf, FatalErrorPolicy& fatal) noexcept
     {
         try
         {
             write_impl(tid, buf);
         } catch(std::exception const& e)
         {
-            LOG_CRITICAL("[tmpfile_offload_store] write failed for tid {}: {}", tid,
-                         e.what());
+            fatal.fatal(__FILE__, __LINE__,
+                        "[tmpfile_offload_store] write failed for tid {}: {}", tid,
+                        e.what());
         } catch(...)
         {
-            LOG_CRITICAL(
-                "[tmpfile_offload_store] write failed for tid {} (unknown exception)",
-                tid);
+            fatal.fatal(__FILE__, __LINE__,
+                        "[tmpfile_offload_store] write failed for tid {} (unknown)", tid);
         }
     }
 

@@ -23,9 +23,19 @@ struct overflow_trigger_call
 
 struct mock_overflow_trigger
 {
-    // accept attr as opaque void const* — callers pass perf_event_attr* transparently
-    void configure(int64_t tid, pid_t sys_tid, int signum, void const* /*attr*/) noexcept
+    // accept attr as opaque void const* — callers pass perf_event_attr* transparently.
+    // FatalErrorPolicy& is passed so failures can route through the policy seam
+    // (NFR-FM-2).
+    template <class FatalErrorPolicy>
+    void configure(int64_t tid, pid_t sys_tid, int signum, void const* /*attr*/,
+                   FatalErrorPolicy& fatal)
     {
+        if(fail_next_configure)
+        {
+            fail_next_configure = false;
+            fatal.fatal(__FILE__, __LINE__,
+                        "mock_overflow_trigger: scripted configure failure");
+        }
         m_calls.push_back({ tid, sys_tid, signum });
         m_open = true;
     }
@@ -35,8 +45,9 @@ struct mock_overflow_trigger
     [[nodiscard]] bool is_open() const noexcept { return m_open; }
 
     std::vector<overflow_trigger_call> m_calls;
-    bool                               m_open  = false;
-    bool                               m_armed = false;
+    bool                               m_open              = false;
+    bool                               m_armed             = false;
+    bool                               fail_next_configure = false;
 };
 
 }  // namespace rocprofsys::sampling::test

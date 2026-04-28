@@ -57,8 +57,12 @@ TEST(fatal_error_policy, sampling_fatal_error_carries_file_and_line)
 // The signal_mask_guard routes pthread_sigmask errors through fatal_error_policy.
 // We test this with a recording_signal_dispatcher that returns EINVAL on demand.
 
+#include "doubles/in_memory_offload.hpp"
+#include "doubles/mock_overflow_trigger.hpp"
 #include "doubles/test_sampling_policies.hpp"
+#include "doubles/throwing_fatal_error_policy.hpp"
 #include "sampling/sampling_service.hpp"
+#include "sampling/src/sample_ring_buffer.hpp"
 
 #ifdef sigmask
 #    undef sigmask
@@ -81,4 +85,32 @@ TEST(fatal_error_policy, sigmask_failure_calls_fatal_policy_through_service)
     // fatal_.fatal() on non-zero return, the throwing_fatal_error_policy will throw.
     EXPECT_THROW(svc.block_signals(), sampling_fatal_error)
         << "pthread_sigmask failure must route through fatal_error_policy";
+}
+
+// ─── NFR-FM-2: overflow trigger configure failure → fatal_error_policy ───────
+
+TEST(fatal_error_policy, overflow_trigger_configure_failure_calls_fatal_policy)
+{
+    // The overflow trigger policy must accept a FatalErrorPolicy& and call fatal()
+    // on failure instead of just LOG_CRITICAL.
+    mock_overflow_trigger       trigger;
+    throwing_fatal_error_policy fatal;
+    trigger.fail_next_configure = true;
+
+    EXPECT_THROW(trigger.configure(0, 0, SIGRTMIN, nullptr, fatal), sampling_fatal_error)
+        << "overflow trigger configure failure must route through fatal_error_policy";
+}
+
+// ─── NFR-FM-2: offload write failure → fatal_error_policy ───────────────────
+
+TEST(fatal_error_policy, offload_write_failure_calls_fatal_policy)
+{
+    // The offload write() must accept a FatalErrorPolicy& and call fatal() on failure.
+    in_memory_offload           offload;
+    throwing_fatal_error_policy fatal;
+    offload.fail_next_write = true;
+
+    rocprofsys::sampling::sample_ring_buffer<8> ring;
+    EXPECT_THROW(offload.write(0, ring, fatal), sampling_fatal_error)
+        << "offload write failure must route through fatal_error_policy";
 }

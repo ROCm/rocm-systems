@@ -16,9 +16,15 @@ namespace rocprofsys::sampling::test
 
 struct in_memory_offload
 {
-    template <size_t N>
-    void write(int64_t tid, sample_ring_buffer<N>& buf) noexcept
+    // FatalErrorPolicy& param wires write failures through the policy seam (NFR-FM-2).
+    template <size_t N, class FatalErrorPolicy>
+    void write(int64_t tid, sample_ring_buffer<N>& buf, FatalErrorPolicy& fatal)
     {
+        if(fail_next_write)
+        {
+            fail_next_write = false;
+            fatal.fatal(__FILE__, __LINE__, "in_memory_offload: scripted write failure");
+        }
         while(true)
         {
             auto opt = buf.pop();
@@ -57,6 +63,7 @@ struct in_memory_offload
     std::unordered_map<int64_t, std::vector<backtrace_record>> m_store;
     std::vector<std::string>                                   call_log;
     int                                                        reset_count{ 0 };
+    bool                                                       fail_next_write{ false };
 };
 
 }  // namespace rocprofsys::sampling::test
