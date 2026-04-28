@@ -567,12 +567,12 @@ def clear_rank_env(monkeypatch):
 
 
 def skip_unsupported_roofline_soc():
-    if soc in {"MI100", "STRIX_HALO"}:
+    if soc in {"MI100", "RDNA35_HALO"}:
         pytest.skip(f"Roofline is not supported on {soc}")
 
 
-def is_strix_halo_soc():
-    return soc == "STRIX_HALO"
+def is_rdna35_halo_soc():
+    return soc == "RDNA35_HALO"
 
 
 # --
@@ -1725,7 +1725,7 @@ def test_roof_sort_kernels(
 
 @pytest.mark.section
 def test_lds_section(binary_handler_profile_rocprof_compute):
-    lds_block = "3" if is_strix_halo_soc() else "12"
+    lds_block = "3" if is_rdna35_halo_soc() else "12"
     options = ["--block", lds_block]
     workload_dir = test_utils.get_output_dir()
     _ = binary_handler_profile_rocprof_compute(
@@ -1751,7 +1751,7 @@ def test_lds_section(binary_handler_profile_rocprof_compute):
 
 @pytest.mark.section
 def test_instmix_memchart_section(binary_handler_profile_rocprof_compute):
-    instmix_block = "7" if is_strix_halo_soc() else "10"
+    instmix_block = "7" if is_rdna35_halo_soc() else "10"
     options = ["--block", instmix_block, "3"]
     workload_dir = test_utils.get_output_dir()
     _ = binary_handler_profile_rocprof_compute(
@@ -1771,7 +1771,7 @@ def test_instmix_memchart_section(binary_handler_profile_rocprof_compute):
     assert test_utils.check_file_pattern(
         "- '3'", f"{workload_dir}/profiling_config.yaml"
     )
-    instmix_counter = "SQ_INSTS_FLAT" if is_strix_halo_soc() else "TA_FLAT_WAVEFRONTS"
+    instmix_counter = "SQ_INSTS_FLAT" if is_rdna35_halo_soc() else "TA_FLAT_WAVEFRONTS"
     results_files = Path(workload_dir).glob("results_*.csv")
     assert any(
         test_utils.check_file_pattern(instmix_counter, str(f)) for f in results_files
@@ -1786,7 +1786,7 @@ def test_instmix_memchart_section(binary_handler_profile_rocprof_compute):
 
 @pytest.mark.section
 def test_lds_sol_section(binary_handler_profile_rocprof_compute):
-    lds_sol_block = "3" if is_strix_halo_soc() else "12.1"
+    lds_sol_block = "3" if is_rdna35_halo_soc() else "12.1"
     options = ["--block", lds_sol_block]
     workload_dir = test_utils.get_output_dir()
     _ = binary_handler_profile_rocprof_compute(
@@ -1804,7 +1804,7 @@ def test_lds_sol_section(binary_handler_profile_rocprof_compute):
         f"- '{lds_sol_block}'", f"{workload_dir}/profiling_config.yaml"
     )
     lds_sol_counter = (
-        "SQC_LDS_IDX_ACTIVE" if is_strix_halo_soc() else "SQ_ACTIVE_INST_LDS"
+        "SQC_LDS_IDX_ACTIVE" if is_rdna35_halo_soc() else "SQ_ACTIVE_INST_LDS"
     )
     results_files = Path(workload_dir).glob("results_*.csv")
     assert any(
@@ -1815,7 +1815,7 @@ def test_lds_sol_section(binary_handler_profile_rocprof_compute):
 
 @pytest.mark.section
 def test_instmix_section_global_write_kernel(binary_handler_profile_rocprof_compute):
-    instmix_block = "7" if is_strix_halo_soc() else "10"
+    instmix_block = "7" if is_rdna35_halo_soc() else "10"
     options = ["-k", "global_write", "--block", instmix_block]
     custom_config = dict(config)
     custom_config["kernel_name_1"] = "global_write"
@@ -1841,7 +1841,7 @@ def test_instmix_section_global_write_kernel(binary_handler_profile_rocprof_comp
         "- global_write", f"{workload_dir}/profiling_config.yaml"
     )
     kernel_counter = (
-        "SQ_INSTS_FLAT_STORE" if is_strix_halo_soc() else "TA_FLAT_WAVEFRONTS"
+        "SQ_INSTS_FLAT_STORE" if is_rdna35_halo_soc() else "TA_FLAT_WAVEFRONTS"
     )
     results_files = Path(workload_dir).glob("results_*.csv")
     assert any(
@@ -2213,7 +2213,7 @@ class TestSetsIntegration:
         assert test_utils.get_num_pmc_file(workload_dir) == 1
 
         memory_metrics = (
-            ["2.1.18", "17.1.0"] if is_strix_halo_soc() else ["16.1.2", "17.1.0"]
+            ["2.1.18", "17.1.0"] if is_rdna35_halo_soc() else ["16.1.2", "17.1.0"]
         )
         for metric_id in memory_metrics:
             assert metric_id in open(Path(workload_dir) / "log.txt").read(), (

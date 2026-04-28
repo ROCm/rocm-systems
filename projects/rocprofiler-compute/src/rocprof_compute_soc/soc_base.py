@@ -269,7 +269,7 @@ class OmniSoC_Base:
             console_warning(f'Unknown GPU model detected: "{gpu_model}".')
             return
 
-        return gpu_model.upper()
+        return gpu_model if gpu_model != gpu_model.lower() else gpu_model.upper()
 
     def _adjust_mi300_model(self, gpu_model: str, gpu_arch: str) -> str:
         """
