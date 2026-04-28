@@ -387,10 +387,14 @@ class AqlQueue : public core::Queue, private core::LocalSignal, public core::Doo
 
   // MEC firmware-assisted dispatch profiling ring buffer.
   // Allocated by SetProfiling(true), freed by SetProfiling(false) and the dtor.
-  // The buffer is allocated as kRecordCount * 40 bytes (NOT * sizeof(mec_dispatch_record)
-  // == 16) to satisfy the host kernel's BO size validation in
-  // kfd_process_queue_manager.c (`buf_byte_size = count * 40`). The MEC firmware
-  // only writes 16 bytes per slot; the trailing 24 bytes per slot are unused.
+  // The buffer is allocated oversized at kRecordCount * 40 bytes purely to
+  // satisfy the host kernel's BO-size validation in
+  // kfd_process_queue_manager.c (`buf_byte_size = count * 40`). The active
+  // FW/drainer ring uses the 16-byte FW record stride
+  // (sizeof(mec_dispatch_record_16) == 16): FW writes records at 16-byte
+  // stride and the drainer reads them at 16-byte stride. The extra
+  // allocation tail beyond kRecordCount * 16 is unused/reserved and is
+  // not part of the ring.
   // The host-side wptr that the cpc_tracing precedent allocated has been
   // dropped: the substrate has no path to publish that address to FW (KFD
   // ABI lacks a wptr_addr field), so consumers locate fresh records via

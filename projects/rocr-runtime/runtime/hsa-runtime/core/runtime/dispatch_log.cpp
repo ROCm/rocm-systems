@@ -144,11 +144,13 @@ struct queue_drain_state {
   std::function<uint64_t(uint64_t /* gpu_ts */)> translate_gpu_ts;
 
   // NON-OWNING ring view. The buffer is owned by AqlQueue::dispatch_record_buffer_;
-  // do not free here. The kernel-side BO is `ring_records * 40` bytes
-  // (host KFD enforces the 40-byte slot stride — see
-  // amd/amdkfd/kfd_process_queue_manager.c:633 `buf_byte_size = count * 40`).
-  // FW writes 16 bytes per slot; the trailing 24 bytes per slot are FW-owned
-  // and reserved for future per-slot metadata.
+  // do not free here. The kernel-side BO is allocated oversized at
+  // `ring_records * 40` bytes purely to satisfy host KFD BO-size validation
+  // (amd/amdkfd/kfd_process_queue_manager.c:633 `buf_byte_size = count * 40`).
+  // The active FW/drainer ring uses the 16-byte FW record stride
+  // (kSlotStride): FW writes records at 16-byte stride and the drainer
+  // reads them at 16-byte stride. The extra allocation tail beyond
+  // `ring_records * 16` is unused/reserved and is not part of the ring.
   void*    ring_base    = nullptr;     // host-virtual base of the FW record area
   uint32_t ring_records = 0;           // power-of-2 slot count (e.g. 65536)
   uint32_t ring_mask    = 0;           // ring_records - 1, for slot indexing
