@@ -929,7 +929,8 @@ TEST(HsaTranslateTest, TranslateAndDispatchMatmulSharedLoop) {
 }
 
 static void run_mfma16x16_dispatch(const char *kernel_name, const char *symbol_name,
-                                   float golden_scale, const char *dump_path, const char *label) {
+                                   float golden_scale, const char *dump_path, const char *label,
+                                   uint32_t k_dim = 16, uint32_t group_segment_size = 0) {
   // 1. Translate a CDNA4 16x16 MFMA fixture to RDNA4.
   Executable exec(kernel_path(kernel_name));
   ASSERT_TRUE(exec.is_valid());
@@ -992,15 +993,16 @@ static void run_mfma16x16_dispatch(const char *kernel_name, const char *symbol_n
   // 3. Allocate 16x16 FP16 inputs and FP32 output.
   constexpr uint32_t M = 16;
   constexpr uint32_t N = 16;
-  constexpr uint32_t K = 16;
-  constexpr size_t ab_size = M * K * sizeof(uint16_t); // FP16
-  constexpr size_t c_size = M * N * sizeof(float);     // FP32
+  const uint32_t K = k_dim;
+  const size_t a_size = M * K * sizeof(uint16_t);  // FP16
+  const size_t b_size = K * N * sizeof(uint16_t);  // FP16
+  constexpr size_t c_size = M * N * sizeof(float); // FP32
 
   auto gpu_pool = find_pool(gpu, HSA_AMD_SEGMENT_GLOBAL);
   uint16_t *A_dev = nullptr, *B_dev = nullptr;
   float *C_dev = nullptr;
-  hsa_amd_memory_pool_allocate(gpu_pool, ab_size, 0, reinterpret_cast<void **>(&A_dev));
-  hsa_amd_memory_pool_allocate(gpu_pool, ab_size, 0, reinterpret_cast<void **>(&B_dev));
+  hsa_amd_memory_pool_allocate(gpu_pool, a_size, 0, reinterpret_cast<void **>(&A_dev));
+  hsa_amd_memory_pool_allocate(gpu_pool, b_size, 0, reinterpret_cast<void **>(&B_dev));
   hsa_amd_memory_pool_allocate(gpu_pool, c_size, 0, reinterpret_cast<void **>(&C_dev));
   ASSERT_NE(A_dev, nullptr);
   ASSERT_NE(B_dev, nullptr);
@@ -1078,8 +1080,8 @@ static void run_mfma16x16_dispatch(const char *kernel_name, const char *symbol_n
     for (auto &v : B_host)
       v = f32_to_f16(dist(rng));
 
-    ASSERT_EQ(hsa_memory_copy(A_dev, A_host.data(), ab_size), HSA_STATUS_SUCCESS);
-    ASSERT_EQ(hsa_memory_copy(B_dev, B_host.data(), ab_size), HSA_STATUS_SUCCESS);
+    ASSERT_EQ(hsa_memory_copy(A_dev, A_host.data(), a_size), HSA_STATUS_SUCCESS);
+    ASSERT_EQ(hsa_memory_copy(B_dev, B_host.data(), b_size), HSA_STATUS_SUCCESS);
     std::vector<float> C_zero(M * N, 0.0f);
     ASSERT_EQ(hsa_memory_copy(C_dev, C_zero.data(), c_size), HSA_STATUS_SUCCESS);
 
@@ -1103,6 +1105,7 @@ static void run_mfma16x16_dispatch(const char *kernel_name, const char *symbol_n
     aql->grid_size_x = 64;
     aql->grid_size_y = 1;
     aql->grid_size_z = 1;
+    aql->group_segment_size = group_segment_size;
     aql->kernel_object = kernel_object;
     aql->kernarg_address = kernarg;
     aql->completion_signal = signal;
@@ -1171,6 +1174,12 @@ TEST(HsaTranslateTest, TranslateAndDispatchMfma16x16) {
 TEST(HsaTranslateTest, TranslateAndDispatchMfmaChainedUnrolled) {
   run_mfma16x16_dispatch("mfma_chained_unrolled", "mfma_chained_unrolled.kd", 2.0f,
                          "/tmp/translated_mfma_chained_unrolled.co", "MFMA chained unrolled");
+}
+
+TEST(HsaTranslateTest, TranslateAndDispatchMatmulSharedMfmaLoop) {
+  run_mfma16x16_dispatch("matmul_shared_mfma_loop", "matmul_shared_mfma_loop.kd", 1.0f,
+                         "/tmp/translated_matmul_shared_mfma_loop.co", "shared-memory MFMA loop",
+                         32, 1024);
 }
 
 #endif // HAS_HOST_AMDGPU

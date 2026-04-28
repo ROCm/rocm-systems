@@ -41,3 +41,15 @@
 - Built with `ninja -C build kernel_matmul_shared_loop tests/hsa_translate_test`.
 - Verified with `./build/tests/hsa_translate_test --gtest_filter='HsaTranslateTest.TranslateAndDispatchMatmulSharedLoop'`; passed in 72 ms.
 - Committing this feature before starting the shared-memory MFMA matmul loop.
+
+## Shared-memory matmul loop with MFMA
+- Added `tests/kernels/matmul_shared_mfma_loop.hip`, a 64-lane 16x32 by 32x16 matmul that stages each 16-wide K tile through LDS and feeds LDS fragments into `__builtin_amdgcn_mfma_f32_16x16x16f16`.
+- Extended the existing MFMA HSA dispatch helper so it can test K=32 inputs and set a nonzero group segment size for shared memory.
+- Registered `kernel_matmul_shared_mfma_loop` in `tests/kernels/CMakeLists.txt`.
+- Added `HsaTranslateTest.TranslateAndDispatchMatmulSharedMfmaLoop`.
+- Next: build `kernel_matmul_shared_mfma_loop` and run the focused translated dispatch test.
+- Built with `ninja -C build kernel_matmul_shared_mfma_loop tests/hsa_translate_test`.
+- Verified with `./build/tests/hsa_translate_test --gtest_filter='HsaTranslateTest.TranslateAndDispatchMatmulSharedMfmaLoop'`; passed in 76 ms with 10 iterations and 0 mismatches.
+- Reran existing MFMA dispatch coverage with `./build/tests/hsa_translate_test --gtest_filter='HsaTranslateTest.TranslateAndDispatchMfma16x16:HsaTranslateTest.TranslateAndDispatchMfmaChainedUnrolled'`; both passed with 10 iterations and 0 mismatches.
+- All requested implementation items are now complete. Next optional step is a broader HSA translate regression run if requested.
+- Initial commit attempt was blocked by the clang-format hook on `tests/dbt/hsa_translate_test.cpp`; ran `bash scripts/clang_format.sh` and re-staged the same feature files.
