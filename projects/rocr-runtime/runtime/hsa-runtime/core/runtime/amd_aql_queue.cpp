@@ -1582,10 +1582,15 @@ hsa_status_t AqlQueue::GetCUMasking(uint32_t num_cu_mask_count, uint32_t* cu_mas
 hsa_status_t AqlQueue::SetProfiling(bool enabled) {
   std::lock_guard<std::mutex> lock(scratch_lock_);
 
-  // The base-class flip of AMD_QUEUE_PROPERTIES_ENABLE_PROFILING cannot
-  // fail. Apply unconditionally so the AQL queue properties bit always
-  // reflects the requested state, even if the dispatch-record buffer
-  // wiring fails below.
+  // Spec §4 step 2 (lines 548-564) REQUIRES the
+  // AMD_QUEUE_PROPERTIES_ENABLE_PROFILING bit be set BEFORE the KFD
+  // ioctl that publishes dispatch_log_base into the MQD; reversing the
+  // order would let an AQL packet processed in the gap between buffer-
+  // publish and bit-set produce a record with invalid timestamps. We
+  // therefore set the bit first on enable. C4: but on every failure
+  // path BELOW the bit flip we MUST roll it back via
+  // Queue::SetProfiling(false), so the spec §4a invariant ("bit set iff
+  // refcount > 0") is preserved on failed enables.
   Queue::SetProfiling(enabled);
   if (enabled) agent_->CheckClockTicks();
 
@@ -1605,6 +1610,10 @@ hsa_status_t AqlQueue::SetProfiling(bool enabled) {
     if (dispatch_record_buffer_ == nullptr) {
       // C3: report allocation failure to the caller so it can mark the
       // queue/agent as no-dispatch-log.
+      // C4: roll back the profiling-bit flip so we don't leave the queue
+      // in a "bit set but no buffer" state that QueueProfilingAcquire
+      // didn't refcount.
+      Queue::SetProfiling(false);
       return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
     }
     memset(dispatch_record_buffer_, 0, buf_size);
@@ -1614,8 +1623,9 @@ hsa_status_t AqlQueue::SetProfiling(bool enabled) {
     // C3: propagate libhsakmt registration failures. KfdDriver::
     // SetQueueProfilingBuffer can return HSA_STATUS_ERROR_NOT_SUPPORTED
     // (no thunk symbol) or wrap an HSAKMT failure. On failure unwind the
-    // partial state — free the buffer, reset cached fields — so the
-    // queue is left exactly as it was before the enable attempt.
+    // partial state — free the buffer, reset cached fields, AND (C4)
+    // roll back the profiling-bit flip — so the queue is left exactly
+    // as it was before the enable attempt.
     hsa_status_t buf_status = agent_->driver().SetQueueProfilingBuffer(
         queue_id_, dispatch_record_buffer_, num_records, &dispatch_record_wptr_);
     if (buf_status != HSA_STATUS_SUCCESS) {
@@ -1623,6 +1633,7 @@ hsa_status_t AqlQueue::SetProfiling(bool enabled) {
       dispatch_record_buffer_ = nullptr;
       dispatch_record_buffer_size_ = 0;
       dispatch_record_wptr_ = 0;
+      Queue::SetProfiling(false);  // C4: roll back bit
       return buf_status;
     }
     // Suspend/Resume is fatal-by-assert in current HSA code (see
