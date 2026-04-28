@@ -428,10 +428,32 @@ if( BUILD_SHARED_LIBS )
       set(ENV{PKG_CONFIG_PATH} "${LTTNG_VENDORED_PKGCONFIG}:$ENV{PKG_CONFIG_PATH}")
       pkg_check_modules(LTTNG_UST REQUIRED IMPORTED_TARGET lttng-ust>=2.13)
 
+      # rocm_trace_tid.h includes <rocprofiler-register/correlation.h>, which
+      # provides the shared TLS slot used for cross-runtime corr-id propagation
+      # (HIP push -> HSA emit on the same thread). The non-REQUIRED
+      # find_package(rocprofiler-register) above brings in the include path
+      # via the imported target when found. In superproject builds (e.g. TheRock)
+      # where rocprofiler-register's CMake config is not on CMAKE_PREFIX_PATH at
+      # HSA configure time, fall back to the in-tree source location of the
+      # header (rocprofiler-register lives as a sibling project under projects/).
+      # The TLS symbols themselves resolve at runtime through the dynamic linker
+      # (HSA already links with --unresolved-symbols=ignore-in-shared-libs)
+      # because librocprofiler-register.so is loaded into the same process.
+      set(ROCR_LTTNG_EXTRA_INCLUDES "")
+      if(NOT rocprofiler-register_FOUND)
+        set(_rocp_reg_intree_inc
+            "${CMAKE_CURRENT_SOURCE_DIR}/../../../rocprofiler-register/source/include")
+        if(EXISTS "${_rocp_reg_intree_inc}/rocprofiler-register/correlation.h")
+          message(STATUS "ROCR LTTng-UST: using in-tree rocprofiler-register headers at ${_rocp_reg_intree_inc}")
+          list(APPEND ROCR_LTTNG_EXTRA_INCLUDES "${_rocp_reg_intree_inc}")
+        endif()
+      endif()
+
       target_compile_definitions(${CORE_RUNTIME_TARGET} PRIVATE HSA_ENABLE_LTTNG_UST=1)
       target_include_directories(${CORE_RUNTIME_TARGET} PRIVATE
           ${CMAKE_CURRENT_SOURCE_DIR}/lttng
-          ${LTTNG_VENDORED_INCLUDE_DIR})
+          ${LTTNG_VENDORED_INCLUDE_DIR}
+          ${ROCR_LTTNG_EXTRA_INCLUDES})
       target_link_libraries(${CORE_RUNTIME_TARGET} PRIVATE
           PkgConfig::LTTNG_UST ${CMAKE_DL_LIBS})
       set(HSA_DEP_LTTNG_UST ON CACHE INTERNAL "")
