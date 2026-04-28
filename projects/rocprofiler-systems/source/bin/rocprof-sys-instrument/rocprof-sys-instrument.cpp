@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocprof-sys-instrument.hpp"
+#include "analysis.hpp"
 #include "common/defines.h"
 #include "common/join.hpp"
 #include "common/path.hpp"
@@ -93,6 +94,7 @@ bool   instr_print                  = false;
 bool   simulate                     = false;
 bool   include_uninstr              = false;
 bool   include_internal_linked_libs = false;
+bool   debug_analysis               = false;
 int    verbose_level   = tim::get_env<int>("ROCPROFSYS_VERBOSE_INSTRUMENT", 0);
 int    num_log_entries = tim::get_env<int>(
     "ROCPROFSYS_LOG_COUNT", tim::get_env<bool>("ROCPROFSYS_CI", false) ? 20 : 50);
@@ -732,6 +734,15 @@ main(int argc, char** argv)
         .dtype("boolean")
         .max_count(1)
         .action([](parser_t& p) { include_uninstr = p.get<bool>("all-functions"); });
+    parser
+        .add_argument(
+            { "--debug-analysis" },
+            "Opt-in debugging mode for finalizeInsertionSet crashes. When enabled, "
+            "rocprof-sys launches subprocess trials to bisect the queued functions "
+            "and report the smallest failing singleton or cooperative subset. ")
+        .dtype("boolean")
+        .max_count(1)
+        .action([](parser_t& p) { debug_analysis = p.get<bool>("debug-analysis"); });
 
     parser.add_argument({ "" }, "");
     parser.add_argument({ "[SYMBOL SELECTION OPTIONS]" }, "");
@@ -2323,7 +2334,49 @@ main(int argc, char** argv)
     {
         verbprintf(2, "Finalizing insertion set...\n");
         bool modified = true;
-        bool success  = addr_space->finalizeInsertionSet(true, &modified);
+        auto insertion_set_result =
+            analysis::finalize_insertion_set(addr_space, &modified, debug_analysis);
+        bool success = (insertion_set_result == analysis::guarded_result::pass);
+
+        // We only care about signaled results. If it is a normal failure, the backup
+        // batch insertion method will be used. No signal handling would be needed there.
+        if(insertion_set_result == analysis::guarded_result::signaled)
+        {
+            if(analysis::is_analysis_child())
+            {
+                verbprintf(0,
+                           "(analysis) Child finalizeInsertionSet crashed; exiting with "
+                           "code %d so parent can record the failure\n",
+                           analysis::CHILD_ANALYSIS_EXIT);
+                std::_Exit(analysis::CHILD_ANALYSIS_EXIT);
+            }
+
+            if(!debug_analysis)
+            {
+                errprintf(0, "finalizeInsertionSet crashed. This may be due to dyninst "
+                             "failing to instrument one or more functions. "
+                             "Re-run with '--debug-analysis' to bisect the queued "
+                             "functions and report the offending procedure subset.\n\n");
+                std::exit(EXIT_FAILURE);
+            }
+
+            verbprintf(0, "finalizeInsertionSet crashed; running analysis via fork+exec "
+                          "subprocesses...\n");
+            analysis::run_analysis(analysis_type::insertion_set,
+                                   instrumented_module_functions);
+            verbprintf(0, "Analysis complete; exiting with code %d\n", EXIT_FAILURE);
+            std::exit(EXIT_FAILURE);
+        }
+
+        // Skip the rest of the pipeline
+        if(insertion_set_result == analysis::guarded_result::pass &&
+           analysis::is_analysis_child())
+        {
+            verbprintf(0, "(analysis) finalize succeeded; exiting cleanly so parent "
+                          "records this subset as safe\n");
+            std::_Exit(EXIT_SUCCESS);
+        }
+
         if(!success)
         {
             verbprintf(

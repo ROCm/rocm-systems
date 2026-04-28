@@ -15,6 +15,8 @@ target_sources(
     rocprofiler-systems-instrument
     PRIVATE
         ${CMAKE_CURRENT_LIST_DIR}/details.cpp
+        ${CMAKE_CURRENT_LIST_DIR}/analysis.cpp
+        ${CMAKE_CURRENT_LIST_DIR}/analysis.hpp
         ${CMAKE_CURRENT_LIST_DIR}/function_signature.cpp
         ${CMAKE_CURRENT_LIST_DIR}/function_signature.hpp
         ${CMAKE_CURRENT_LIST_DIR}/fwd.hpp
