@@ -9,14 +9,19 @@
 #ifndef ROCM_HSA_TRACE_EMIT_CURATED_H_
 #define ROCM_HSA_TRACE_EMIT_CURATED_H_
 
+// NOTE: When the codegen is regenerated (via PR2's lttng_curated_codegen.py),
+// ensure "rocm_trace_tid.h" is emitted INSIDE the *_ENABLE_LTTNG_UST guard.
+// The unconditional include breaks Windows builds where rocprofiler-register
+// is not on the include path. See PR #5475 CI fix history.
+
 #include <stdint.h>
 #include <stddef.h>
-#include "rocm_trace_tid.h"
 #include <hsa/hsa.h>
 #include <hsa/hsa_ext_amd.h>
 
 #if defined(HSA_ENABLE_LTTNG_UST) && HSA_ENABLE_LTTNG_UST
 
+#include "rocm_trace_tid.h"
 #include <atomic>
 #include "rocm_hsa_curated_tp.h"
 

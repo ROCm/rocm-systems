@@ -9,9 +9,13 @@
 #ifndef ROCM_HIP_TRACE_EMIT_CURATED_H_
 #define ROCM_HIP_TRACE_EMIT_CURATED_H_
 
+// NOTE: When the codegen is regenerated (via PR2's lttng_curated_codegen.py),
+// ensure "rocm_trace_tid.h" is emitted INSIDE the *_ENABLE_LTTNG_UST guard.
+// The unconditional include breaks Windows builds where rocprofiler-register
+// is not on the include path. See PR #5475 CI fix history.
+
 #include <stdint.h>
 #include <stddef.h>
-#include "rocm_trace_tid.h"
 /* Force the AMD platform define so the host-only HIP runtime header is
  * self-contained. rocclr internal TUs that pull in rocm_trace_emit.h
  * (e.g. device/rocm/rocvirtual.cpp) don't set this themselves. This
@@ -24,6 +28,7 @@
 
 #if defined(HIP_ENABLE_LTTNG_UST) && HIP_ENABLE_LTTNG_UST
 
+#include "rocm_trace_tid.h"
 #include <atomic>
 #include "rocm_hip_curated_tp.h"
 
