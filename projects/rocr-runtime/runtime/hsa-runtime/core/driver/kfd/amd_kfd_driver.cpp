@@ -432,9 +432,14 @@ hsa_status_t KfdDriver::SetQueueProfilingBuffer(HSA_QUEUEID queue_id, void* buff
   // NOT_SUPPORTED interacts badly with the C5 caching logic in
   // AqlQueue::SetProfiling, which uses NOT_SUPPORTED to permanently
   // disable profiling on the agent.
+  // HSA_STATUS_ERROR_NOT_SUPPORTED lives in an unnamed enum in
+  // hsa_ext_amd.h (separate from hsa_status_t), so it requires an
+  // explicit static_cast to hsa_status_t. The other HSA_STATUS_*
+  // constants here are members of the hsa_status_t typedef'd enum
+  // and can be returned directly.
   auto* loader = core::Runtime::runtime_singleton_->thunkLoader();
   if (loader->pfn_hsaKmtSetQueueProfilingBuffer == nullptr)
-    return HSA_STATUS_ERROR_NOT_SUPPORTED;
+    return static_cast<hsa_status_t>(HSA_STATUS_ERROR_NOT_SUPPORTED);
 
   HSAKMT_STATUS st = loader->pfn_hsaKmtSetQueueProfilingBuffer(
       queue_id, buffer_base, num_records, wptr_host_addr);
@@ -446,7 +451,7 @@ hsa_status_t KfdDriver::SetQueueProfilingBuffer(HSA_QUEUEID queue_id, void* buff
     case HSAKMT_STATUS_NOT_SUPPORTED:
       // The substrate exports the symbol but the kernel/asic refused -
       // treat as permanently unsupported on this agent.
-      return HSA_STATUS_ERROR_NOT_SUPPORTED;
+      return static_cast<hsa_status_t>(HSA_STATUS_ERROR_NOT_SUPPORTED);
     default:
       // Generic / transient thunk failure (e.g. HSAKMT_STATUS_ERROR,
       // HSAKMT_STATUS_NO_MEMORY). Do NOT return NOT_SUPPORTED here -
