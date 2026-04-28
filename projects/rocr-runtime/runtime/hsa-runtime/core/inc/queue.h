@@ -45,6 +45,7 @@
 #ifndef HSA_RUNTME_CORE_INC_COMMAND_QUEUE_H_
 #define HSA_RUNTME_CORE_INC_COMMAND_QUEUE_H_
 
+#include <atomic>
 #include <sstream>
 
 #include "core/common/shared.h"
@@ -465,6 +466,21 @@ class Queue : public Checked<0xFA3906A679F9DB49> {
   // @brief Attributes specifically for counted queue types
   uint32_t use_count;
   bool is_counted_queue;
+
+  // ---------------------------------------------------------------------------
+  // dispatch_log scaffolding (Phase A, spec §4 / §8). Read by the
+  // ts_drainer/ts_poller threads in dispatch_log.cpp to know which queues
+  // currently have a firmware dispatch log set up. Written only by the
+  // dispatch_log subsystem (poller enable/disable pass + on_queue_create /
+  // on_queue_destroy hooks). Does NOT participate in queue ownership.
+  //
+  // dispatch_log_state is an opaque pointer reserved for future use as a
+  // direct handle to the per-queue refcount + drain-state book-keeping
+  // owned by dispatch_log.cpp. Phase A leaves this nullptr because the
+  // refcount and drain-state are looked up via side-maps keyed on
+  // core::Queue*; the field is added now to avoid an ABI change later.
+  std::atomic<bool> dispatch_log_active{false};
+  void* dispatch_log_state{nullptr};
 
   typedef void* rtti_t;
 

@@ -65,6 +65,7 @@
 #include "core/inc/amd_core_dump.hpp"
 #include "core/inc/amd_cpu_agent.h"
 #include "core/inc/amd_gpu_agent.h"
+#include "core/inc/dispatch_log.h"
 #include "core/inc/amd_memory_region.h"
 #include "core/inc/amd_topology.h"
 #include "core/inc/exceptions.h"
@@ -2421,6 +2422,13 @@ hsa_status_t Runtime::Load() {
   // Load tools libraries
   LoadTools();
 
+  // Initialize the LTTng dispatch-log scaffolding (spec 2026-04-27 §8).
+  // LoadTools() already invoked __rocm_hsa_tp_init(); we run dispatch_log::init()
+  // immediately after so the poller thread observes a fully-initialized
+  // tracepoint provider. Phase A: probes for the KFD substrate (currently
+  // absent — the poller stays in its no-op path until the substrate lands).
+  rocr::dispatch_log::init();
+
   // Initialize libdrm helper function
   CheckVirtualMemApiSupport();
 
@@ -2434,6 +2442,12 @@ hsa_status_t Runtime::Load() {
 }
 
 void Runtime::Unload() {
+  // Tear down LTTng dispatch-log scaffolding (spec 2026-04-27 §8). Run BEFORE
+  // queue/agent destruction so the disable edge for any still-active queues
+  // has live agents to translate timestamps against. Joins the poller and
+  // (lazily-spawned) drainer threads.
+  rocr::dispatch_log::shutdown();
+
   // Close IPC socket server
   if (ipc_sock_server_conns_.size())
     IPCClientImport(os::GetProcessId(), IPC_SOCK_SERVER_CONN_CLOSE_HANDLE,

@@ -144,6 +144,51 @@ LTTNG_UST_TRACEPOINT_EVENT(
 /* Curated per-API typed tracepoint events (generated header). */
 #include "rocm_hsa_curated_tp.h"
 
+/* kernel_dispatch_complete: emitted by the firmware-dispatch-log drainer
+ * thread (NOT the application thread) when a kernel dispatch's START and
+ * END timestamp records have been paired. dispatch_idx is the low 32 bits
+ * of the AQL read_dispatch_id at the FW's moment of dispatch processing;
+ * stream-side joiners against rocm_hsa:hsa_doorbell_ring MUST mask the
+ * doorbell write_idx to 32 bits before comparing. start_ts and end_ts are
+ * host-domain (system clock) timestamps; the drainer translates the
+ * FW-written GPU clock via the queue's agent's existing TranslateTime
+ * infrastructure before emit. self_corr is freshly minted per emission;
+ * parent_corr_id is always 0 (the drainer thread has no API context —
+ * real parent recovery is consumer-side via the doorbell join). See
+ * Phase A spec §6 for full rationale. */
+LTTNG_UST_TRACEPOINT_EVENT(
+    rocm_hsa, kernel_dispatch_complete,
+    LTTNG_UST_TP_ARGS(uint32_t, queue_id, uint32_t, dispatch_idx,
+                      uint64_t, start_ts, uint64_t, end_ts,
+                      uint64_t, self_corr, uint64_t, parent_corr_id),
+    LTTNG_UST_TP_FIELDS(
+        lttng_ust_field_integer(uint32_t, queue_id, queue_id)
+        lttng_ust_field_integer(uint32_t, dispatch_idx, dispatch_idx)
+        lttng_ust_field_integer(uint64_t, start_ts, start_ts)
+        lttng_ust_field_integer(uint64_t, end_ts, end_ts)
+        lttng_ust_field_integer(uint64_t, corr_id, self_corr)
+        lttng_ust_field_integer(uint64_t, parent_corr_id, parent_corr_id)
+    )
+)
+
+/* kernel_dispatch_drop: fired once per ring-overrun event when the firmware
+ * dispatch-log writer outpaced the drainer. bytes_lost is (fw_wptr -
+ * read_cursor) at the moment overrun was detected — the worst-case
+ * "how far behind the drainer fell" measure, NOT the strictly-unrecoverable
+ * overrun amount. The strictly-lost portion is bytes_lost - ring_bytes;
+ * the remainder is still resident in the ring but skipped because the
+ * drainer cannot tell which records the FW just overwrote. Reserved
+ * strictly for ring-overrun loss; per-queue enable failures are reported
+ * via stderr WARNING (see Phase A spec §5). */
+LTTNG_UST_TRACEPOINT_EVENT(
+    rocm_hsa, kernel_dispatch_drop,
+    LTTNG_UST_TP_ARGS(uint32_t, queue_id, uint64_t, bytes_lost),
+    LTTNG_UST_TP_FIELDS(
+        lttng_ust_field_integer(uint32_t, queue_id, queue_id)
+        lttng_ust_field_integer(uint64_t, bytes_lost, bytes_lost)
+    )
+)
+
 #endif /* _ROCM_HSA_TP_H */
 
 #include <lttng/tracepoint-event.h>

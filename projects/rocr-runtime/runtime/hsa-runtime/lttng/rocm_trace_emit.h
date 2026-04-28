@@ -203,6 +203,50 @@ static inline void rocm_trace_emit_hsa_intercept_packets(uint32_t queue_id,
 /* Curated per-API typed emit helpers (generated header). */
 #include "rocm_trace_emit_curated.h"
 
+/* kernel_dispatch_complete emit helper. Called ONLY by the firmware-dispatch-
+ * log drainer thread (NOT the application thread) from
+ * dispatch_log::drain_one_queue. force_emit=true bypasses the per-tracepoint
+ * lttng_ust_tracepoint_enabled() guard but NOT the rocm_trace_disabled()
+ * kill switch. The bypass is REQUIRED for the disable-edge final drain (Phase
+ * A spec §4): by the time final drain runs, the user has already disabled
+ * the tracepoint (that disablement is what triggered the disable edge), so
+ * the steady-state guard would otherwise return false and the
+ * "END records the firmware has already written before wait_for_idle returns
+ * are emitted" loss guarantee would be unachievable. Steady-state drainer
+ * passes always pass force_emit=false. parent_corr_id is always 0 because
+ * the drainer thread has no API context (real parent is recovered consumer-
+ * side via the rocm_hsa:hsa_doorbell_ring join on (queue_id, dispatch_idx)).
+ */
+static inline void rocm_trace_emit_hsa_kernel_dispatch_complete(
+    uint32_t queue_id, uint32_t dispatch_idx,
+    uint64_t start_ts_sys, uint64_t end_ts_sys,
+    bool     force_emit /* default false at call site via wrapper */) {
+    if (rocm_trace_disabled()) return;
+    if (force_emit ||
+        lttng_ust_tracepoint_enabled(rocm_hsa, kernel_dispatch_complete)) {
+        const uint64_t self_corr = rocp_reg_next_corr_id();
+        lttng_ust_do_tracepoint(rocm_hsa, kernel_dispatch_complete,
+                                queue_id, dispatch_idx,
+                                start_ts_sys, end_ts_sys,
+                                self_corr, /* parent_corr_id */ (uint64_t)0);
+    }
+}
+
+/* kernel_dispatch_drop emit helper. Called by the drainer when a ring-overrun
+ * is detected (fw_wptr - read_cursor > ring_bytes). Reserved strictly for
+ * ring-overrun loss; per-queue enable failures use stderr WARNING per spec
+ * §5. force_emit not supported here: drop events are always observed via
+ * the tracepoint-enabled gate, since they only fire while the drainer is
+ * actively consuming a ring (i.e. while the tracepoint is enabled). */
+static inline void rocm_trace_emit_hsa_kernel_dispatch_drop(uint32_t queue_id,
+                                                            uint64_t bytes_lost) {
+    if (rocm_trace_disabled()) return;
+    if (lttng_ust_tracepoint_enabled(rocm_hsa, kernel_dispatch_drop)) {
+        lttng_ust_do_tracepoint(rocm_hsa, kernel_dispatch_drop,
+                                queue_id, bytes_lost);
+    }
+}
+
 #else /* !HSA_ENABLE_LTTNG_UST */
 
 static inline void rocm_trace_emit_hsa_api_enter(const char* a, uint64_t c) {
@@ -228,6 +272,14 @@ static inline void rocm_trace_emit_hsa_doorbell_ring(uint32_t a, int64_t b, uint
 }
 static inline void rocm_trace_emit_hsa_intercept_packets(uint32_t a, uint64_t b, uint32_t c, uint8_t d) {
     (void)a; (void)b; (void)c; (void)d;
+}
+static inline void rocm_trace_emit_hsa_kernel_dispatch_complete(uint32_t a, uint32_t b,
+                                                                uint64_t c, uint64_t d,
+                                                                bool e) {
+    (void)a; (void)b; (void)c; (void)d; (void)e;
+}
+static inline void rocm_trace_emit_hsa_kernel_dispatch_drop(uint32_t a, uint64_t b) {
+    (void)a; (void)b;
 }
 
 #endif

@@ -49,6 +49,7 @@
 
 #include "core/inc/runtime.h"
 #include "core/inc/agent.h"
+#include "core/inc/dispatch_log.h"
 #include "core/inc/host_queue.h"
 #include "core/inc/isa.h"
 #include "core/inc/memory_region.h"
@@ -754,6 +755,15 @@ hsa_status_t hsa_queue_create(
 
   assert(cmd_queue != nullptr && "Queue not returned but status was success.\n");
   *queue = core::Queue::Convert(cmd_queue);
+
+  // LTTng dispatch-log scaffolding (spec 2026-04-27 §4 queue-create hook).
+  // Called immediately after the queue is visible to the caller. If the
+  // tracepoint is currently enabled, runs the per-queue ENABLE sequence
+  // synchronously on this thread (bounded latency: one alloc + one ioctl
+  // + MQD-flush). No-op when G_tracepoint_enabled is false (the steady
+  // state).
+  rocr::dispatch_log::on_queue_create(cmd_queue);
+
   return status;
 
   CATCH;
@@ -804,6 +814,15 @@ hsa_status_t hsa_queue_destroy(hsa_queue_t* queue) {
   IS_BAD_PTR(queue);
   core::Queue* cmd_queue = core::Queue::Convert(queue);
   IS_VALID(cmd_queue);
+
+  // LTTng dispatch-log scaffolding (spec 2026-04-27 §4 queue-destroy hook).
+  // Run BEFORE Destroy() so the disable edge can still safely access the
+  // queue (final drain + KFD ioctl DISABLE + QueueProfilingRelease + buffer
+  // unregister). The drain-state ring buffer remains alive past Destroy()
+  // for as long as any concurrent drainer-snapshot ref outlives the
+  // registry removal — see spec §4 lifetime protocol.
+  rocr::dispatch_log::on_queue_destroy(cmd_queue);
+
   cmd_queue->Destroy();
   return HSA_STATUS_SUCCESS;
   CATCH;
