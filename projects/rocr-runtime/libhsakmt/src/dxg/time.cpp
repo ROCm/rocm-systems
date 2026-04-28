@@ -41,17 +41,8 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtGetClockCounters(HSAuint32 NodeId,
   assert(device_);
   device_->GetClockCounters(&Counters->GPUClockCounter, &Counters->CPUClockCounter);
 
-  // CPUClockCounter is captured atomically with GPUClockCounter by
-  // D3DKMTQueryClockCalibration and is in QPC ticks.  Use it as SystemClockCounter
-  // so TranslateTime() works in QPC ticks, which rocvirtual then converts to ns
-  // correctly via ticksToTime_ = 1e9 / QueryPerformanceFrequency().
-#if defined(_WIN32)
-  Counters->SystemClockCounter = Counters->CPUClockCounter;
-  Counters->SystemClockFrequencyHz = rocr::os::SystemClockFrequency();
-#else
   Counters->SystemClockCounter = rocr::os::TimeNanos();
   Counters->SystemClockFrequencyHz = 1000000000;
-#endif
 
   return result;
 }
