@@ -1528,15 +1528,15 @@ static void CaptureGraphExecNodes(hipGraphExec_t exec, hipGraph_t graph) {
         hipFunction_t hfunc = nullptr;
         if (g_next.hipGetFuncBySymbol_fn(&hfunc, kp.func) != hipSuccess || !hfunc) continue;
         HipGraphNodeInfoExt info;
-        info.op      = HIP_OP_DISPATCH_EXT;
-        info.grid_x  = kp.gridDim.x;
-        info.grid_y  = kp.gridDim.y;
-        info.grid_z  = kp.gridDim.z;
-        info.block_x = kp.blockDim.x;
-        info.block_y = kp.blockDim.y;
-        info.block_z = kp.blockDim.z;
+        info.gpu.op      = HIP_OP_DISPATCH_EXT;
+        info.gpu.grid_x  = kp.gridDim.x;
+        info.gpu.grid_y  = kp.gridDim.y;
+        info.gpu.grid_z  = kp.gridDim.z;
+        info.gpu.block_x = kp.blockDim.x;
+        info.gpu.block_y = kp.blockDim.y;
+        info.gpu.block_z = kp.blockDim.z;
         HipCaptureGraphNodeArgsExt(&info, hfunc, kp.kernelParams);
-        if (!info.kernel_name.empty()) {
+        if (info.gpu.kernel_name != nullptr) {
           infos.push_back(std::move(info));
         }
         break;
@@ -1549,11 +1549,11 @@ static void CaptureGraphExecNodes(hipGraphExec_t exec, hipGraph_t graph) {
         bool dst_arr = (mp.dstArray != nullptr);
         bool is_rect = (mp.extent.height > 1 || mp.extent.depth > 1);
         HipGraphNodeInfoExt info;
-        info.op        = HIP_OP_COPY_EXT;
-        info.src       = src_arr ? nullptr : mp.srcPtr.ptr;
-        info.dst       = dst_arr ? nullptr : mp.dstPtr.ptr;
-        info.bytes     = mp.extent.width * mp.extent.height * mp.extent.depth;
-        info.copy_kind = GraphMemcpyKindToExt(mp.kind, src_arr, dst_arr, is_rect);
+        info.gpu.op        = HIP_OP_COPY_EXT;
+        info.gpu.src       = src_arr ? nullptr : mp.srcPtr.ptr;
+        info.gpu.dst       = dst_arr ? nullptr : mp.dstPtr.ptr;
+        info.gpu.bytes     = mp.extent.width * mp.extent.height * mp.extent.depth;
+        info.gpu.copy_kind = GraphMemcpyKindToExt(mp.kind, src_arr, dst_arr, is_rect);
         infos.push_back(std::move(info));
         break;
       }

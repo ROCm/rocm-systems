@@ -84,10 +84,13 @@ inline bool IsProfilingActive() {
 using activity_callback_t = int(*)(activity_domain_t, uint32_t, void*);
 std::atomic<activity_callback_t> g_prev_callback{nullptr};
 
-// Kernel name interning table — maps the raw ar->kernel_name pointer (valid only
-// during the callback) to an owned std::string copy that outlives the kernel object.
-// Keyed by pointer so the JSON writer can look up the copy from rec->gpu.kernel_name.
-std::unordered_map<const char*, std::string> g_kernel_names;
+// Kernel name interning table — maps mangled name string to an owned copy.
+// Keyed by value (std::string) so both the HSA activity callback path and the
+// graph-node instantiation path can intern names into the same table.
+// Values start as the mangled name and are replaced with demangled in
+// PreDemangleKernelNames().  Pointers into values (std::string::c_str()) are
+// stable for the lifetime of the map entry (unordered_map never moves values).
+std::unordered_map<std::string, std::string> g_kernel_names;
 std::mutex                                   g_kernel_names_mtx;
 
 // Chunks of HipApiRecordExt.  Must be reserved to at least kMaxChunks before any
@@ -243,18 +246,20 @@ int HipActivityCallbackExt(activity_domain_t domain, uint32_t op_id, void* data)
       auto it = g_graph_exec_nodes.find(reinterpret_cast<uintptr_t>(exec));
       if (it != g_graph_exec_nodes.end() && ar->kernel_name) {
         for (const auto& ni : it->second) {
-          if (ni.kernel_name == ar->kernel_name) {
-            gact->grid_x = ni.grid_x;
-            gact->grid_y = ni.grid_y;
-            gact->grid_z = ni.grid_z;
-            gact->block_x = ni.block_x;
-            gact->block_y = ni.block_y;
-            gact->block_z = ni.block_z;
-            if (ni.kernel_args && ni.kernel_args_size > 0) {
-              uint8_t* copy = new uint8_t[ni.kernel_args_size];
-              std::memcpy(copy, ni.kernel_args, ni.kernel_args_size);
+          if (ni.gpu.op == HIP_OP_DISPATCH_EXT &&
+              ni.gpu.kernel_name &&
+              strcmp(ni.gpu.kernel_name, ar->kernel_name) == 0) {
+            gact->grid_x  = ni.gpu.grid_x;
+            gact->grid_y  = ni.gpu.grid_y;
+            gact->grid_z  = ni.gpu.grid_z;
+            gact->block_x = ni.gpu.block_x;
+            gact->block_y = ni.gpu.block_y;
+            gact->block_z = ni.gpu.block_z;
+            if (ni.gpu.kernel_args && ni.gpu.kernel_args_size > 0) {
+              uint8_t* copy = new uint8_t[ni.gpu.kernel_args_size];
+              std::memcpy(copy, ni.gpu.kernel_args, ni.gpu.kernel_args_size);
               gact->kernel_args      = copy;
-              gact->kernel_args_size = ni.kernel_args_size;
+              gact->kernel_args_size = ni.gpu.kernel_args_size;
             }
             break;
           }
@@ -279,9 +284,11 @@ int HipActivityCallbackExt(activity_domain_t domain, uint32_t op_id, void* data)
       if (it != g_graph_exec_nodes.end()) {
         HipCopyKindExt ck = static_cast<HipCopyKindExt>(gact->copy_kind);
         for (const auto& ni : it->second) {
-          if (ni.op == HIP_OP_COPY_EXT && ni.copy_kind == ck && ni.bytes == gact->bytes) {
-            gact->src = ni.src;
-            gact->dst = ni.dst;
+          if (ni.gpu.op == HIP_OP_COPY_EXT &&
+              static_cast<HipCopyKindExt>(ni.gpu.copy_kind) == ck &&
+              ni.gpu.bytes == gact->bytes) {
+            gact->src = ni.gpu.src;
+            gact->dst = ni.gpu.dst;
             break;
           }
         }
@@ -926,6 +933,25 @@ static void AppendPacket(std::string& out, const ProtoMsg& pkt) {
   out += wrapper.buf;
 }
 
+// Sorted packet accumulator — collects (timestamp_ns, serialized_packet) pairs.
+// After all events are collected, sort by timestamp and flush to output.
+// This ensures the packet stream is monotonically non-decreasing in timestamp,
+// which Perfetto requires for correct rendering within a trusted_packet_sequence.
+using SortedPktList = std::vector<std::pair<uint64_t, std::string>>;
+
+static void AppendSorted(SortedPktList& pkts, uint64_t ts_ns, const ProtoMsg& pkt) {
+  ProtoMsg wrapper;
+  wrapper.msg(1, pkt);
+  pkts.emplace_back(ts_ns, std::move(wrapper.buf));
+}
+
+static void FlushSorted(std::string& out, SortedPktList& pkts) {
+  std::stable_sort(pkts.begin(), pkts.end(),
+                   [](const auto& a, const auto& b) { return a.first < b.first; });
+  for (auto& kv : pkts) out += kv.second;
+  pkts.clear();
+}
+
 // All track events share a single sequence (cleared by the ClockSnapshot packet).
 static constexpr uint32_t kGlobalSeq = 1;
 
@@ -957,10 +983,7 @@ static void EmitTrackDesc(std::string& out, uint64_t uuid, uint64_t parent,
 }
 
 // ================================================================================================
-static void EmitFlowEvent(std::string& out, uint64_t uuid, uint64_t ts_ns,
-                           uint64_t fid, bool is_start) {
-  // Emit a Chrome-format flow arrow event (ph='s' or ph='f') as a LegacyEvent instant.
-  // Mirrors the JSON writer's {"ph":"s"} / {"ph":"f"} events — known to work in Perfetto UI.
+static ProtoMsg MakeFlowEventPkt(uint64_t uuid, uint64_t ts_ns, uint64_t fid, bool is_start) {
   ProtoMsg leg;
   leg.u32(kLeg_phase,    is_start ? 115u : 102u);  // 's' or 'f'
   leg.u64(kLeg_id,       fid);
@@ -972,7 +995,19 @@ static void EmitFlowEvent(std::string& out, uint64_t uuid, uint64_t ts_ns,
   pkt.u64(kPkt_timestamp, ts_ns);
   pkt.msg(kPkt_track_event, evt);
   pkt.u32(kPkt_seq_id, kGlobalSeq);
-  AppendPacket(out, pkt);
+  return pkt;
+}
+
+static void EmitFlowEvent(std::string& out, uint64_t uuid, uint64_t ts_ns,
+                           uint64_t fid, bool is_start) {
+  // Emit a Chrome-format flow arrow event (ph='s' or ph='f') as a LegacyEvent instant.
+  // Mirrors the JSON writer's {"ph":"s"} / {"ph":"f"} events — known to work in Perfetto UI.
+  AppendPacket(out, MakeFlowEventPkt(uuid, ts_ns, fid, is_start));
+}
+
+static void EmitFlowEventSorted(SortedPktList& pkts, uint64_t uuid, uint64_t ts_ns,
+                                 uint64_t fid, bool is_start) {
+  AppendSorted(pkts, ts_ns, MakeFlowEventPkt(uuid, ts_ns, fid, is_start));
 }
 
 // ================================================================================================
@@ -1018,6 +1053,51 @@ static void EmitSlice(std::string& out, uint64_t uuid, uint32_t /*seq_id*/,
     pkt.msg(kPkt_track_event, evt);
     pkt.u32(kPkt_seq_id, kGlobalSeq);
     AppendPacket(out, pkt);
+  }
+}
+
+// Sorted variant: collects BEGIN, flow events, and END into pkts keyed by their timestamps.
+// Caller must call FlushSorted(out, pkts) after all events are accumulated.
+static void EmitSliceSorted(SortedPktList& pkts, uint64_t uuid,
+                             uint64_t ts_ns, uint64_t dur_ns,
+                             const std::string& name, uint64_t name_iid,
+                             uint64_t cat_iid,
+                             const std::vector<std::pair<uint64_t,std::string>>& anns,
+                             const std::vector<uint64_t>& out_flows = {},
+                             const std::vector<uint64_t>& in_flows  = {}) {
+  // BEGIN
+  {
+    ProtoMsg evt;
+    evt.u32(kEvt_type, kEvt_TYPE_BEGIN);
+    evt.u64(kEvt_track_uuid, uuid);
+    if (name_iid) evt.u64(kEvt_name_iid, name_iid);
+    else          evt.str(23 /*name direct*/, name);
+    if (cat_iid)  evt.u64(kEvt_cat_iids, cat_iid);
+    for (const auto& a : anns) {
+      ProtoMsg ann;
+      ann.u64(kAnn_name_iid, a.first);
+      ann.str(kAnn_str_val,  a.second);
+      evt.msg(kEvt_dbg_ann, ann);
+    }
+    ProtoMsg pkt;
+    pkt.u64(kPkt_timestamp, ts_ns);
+    pkt.msg(kPkt_track_event, evt);
+    pkt.u32(kPkt_seq_id, kGlobalSeq);
+    pkt.u32(kPkt_seq_flags, kSeqFlag_NeedsState);
+    AppendSorted(pkts, ts_ns, pkt);
+  }
+  for (uint64_t fid : out_flows) EmitFlowEventSorted(pkts, uuid, ts_ns, fid, true);
+  for (uint64_t fid : in_flows)  EmitFlowEventSorted(pkts, uuid, ts_ns, fid, false);
+  // END
+  {
+    ProtoMsg evt;
+    evt.u32(kEvt_type, kEvt_TYPE_END);
+    evt.u64(kEvt_track_uuid, uuid);
+    ProtoMsg pkt;
+    pkt.u64(kPkt_timestamp, ts_ns + dur_ns);
+    pkt.msg(kPkt_track_event, evt);
+    pkt.u32(kPkt_seq_id, kGlobalSeq);
+    AppendSorted(pkts, ts_ns + dur_ns, pkt);
   }
 }
 
@@ -1291,6 +1371,12 @@ void WriteProtoTraceImpl(const char* filepath) {
   }
 
   // ── Pass 3: emit events ───────────────────────────────────────────────────
+  // Collect all event packets into a sorted list keyed by timestamp, then flush
+  // in order. Perfetto requires monotonically non-decreasing timestamps within a
+  // trusted_packet_sequence; without sorting, long-duration events (e.g.
+  // hipLaunchKernel) would emit their END packet before short events that ran later
+  // but are stored in later slots, causing visual crossing in the Perfetto UI.
+  SortedPktList sorted_pkts;
   std::vector<std::pair<uint64_t,std::string>> gpu_anns;
   std::vector<uint64_t> in_flows_vec;
   for (size_t c = 0; c < g_records.size(); ++c) {
@@ -1304,7 +1390,7 @@ void WriteProtoTraceImpl(const char* filepath) {
       uint32_t ctid     = compact_tid(rec.thread_id);
       uint64_t cpu_uuid = CpuThreadUuid(ctid);
       uint64_t ts_ns    = rec.start_ns;
-      uint64_t dur_ns   = (rec.end_ns > rec.start_ns) ? (rec.end_ns - rec.start_ns) : 1000;
+      uint64_t dur_ns   = (rec.end_ns > rec.start_ns) ? (rec.end_ns - rec.start_ns) : 1;
 
       // CPU→GPU outgoing flow on CPU BEGIN
       std::vector<uint64_t> cpu_out;
@@ -1332,8 +1418,8 @@ void WriteProtoTraceImpl(const char* filepath) {
           cpu_anns.push_back({iid_stream, buf});
         }
       }
-      EmitSlice(out, cpu_uuid, 0, ts_ns, dur_ns, rec.api_name,
-                intern_evt(rec.api_name), kCatHip, cpu_anns, cpu_out, {});
+      EmitSliceSorted(sorted_pkts, cpu_uuid, ts_ns, dur_ns, rec.api_name,
+                      intern_evt(rec.api_name), kCatHip, cpu_anns, cpu_out, {});
 
       // GPU op slices
       bool first_op = true;
@@ -1345,7 +1431,7 @@ void WriteProtoTraceImpl(const char* filepath) {
         uint64_t gtid     = gop.queue_id * 2 + sdma;
         uint64_t gpu_uuid = GpuThreadUuid(static_cast<int>(gop.device_id), gtid);
         uint64_t g_ts     = gop.begin_ns;
-        uint64_t g_dur    = (gop.end_ns > gop.begin_ns) ? (gop.end_ns - gop.begin_ns) : 1000;
+        uint64_t g_dur    = (gop.end_ns > gop.begin_ns) ? (gop.end_ns - gop.begin_ns) : 1;
 
         std::string gpu_name;
         if (gop.op == OP_ID_DISPATCH && gop.kernel_name) {
@@ -1423,8 +1509,8 @@ void WriteProtoTraceImpl(const char* filepath) {
         ++op_ord;
 
         uint64_t gpu_name_iid = intern_evt(gpu_name);
-        EmitSlice(out, gpu_uuid, 0, g_ts, g_dur, gpu_name,
-                  gpu_name_iid, kCatGpu, gpu_anns, {}, in_flows_vec);
+        EmitSliceSorted(sorted_pkts, gpu_uuid, g_ts, g_dur, gpu_name,
+                        gpu_name_iid, kCatGpu, gpu_anns, {}, in_flows_vec);
       };
 
       if (rec.gpu.gpu_op_count > 0) {
@@ -1440,7 +1526,7 @@ void WriteProtoTraceImpl(const char* filepath) {
     const AllocInfoP& ai = kv.second;
     uint64_t mem_tid  = (ptr >> 12) & 0xFFFFF;
     uint64_t mem_uuid = MemThreadUuid(mem_tid);
-    uint64_t dur_ns   = (ai.end_ns > ai.start_ns) ? (ai.end_ns - ai.start_ns) : 1000;
+    uint64_t dur_ns   = (ai.end_ns > ai.start_ns) ? (ai.end_ns - ai.start_ns) : 1;
     char ptrbuf[32], sizebuf[32];
     snprintf(ptrbuf, sizeof(ptrbuf), "0x%llx", static_cast<unsigned long long>(ptr));
     if (ai.size >= 1024 * 1024) {
@@ -1458,9 +1544,11 @@ void WriteProtoTraceImpl(const char* filepath) {
     auto afit = alloc_out_flows.find(ptr);
     if (afit != alloc_out_flows.end()) out_flows = afit->second;
     uint64_t alloc_name_iid = intern_evt(alloc_name);
-    EmitSlice(out, mem_uuid, 0, ai.start_ns, dur_ns, alloc_name,
-              alloc_name_iid, kCatMemory, anns, out_flows, {});
+    EmitSliceSorted(sorted_pkts, mem_uuid, ai.start_ns, dur_ns, alloc_name,
+                    alloc_name_iid, kCatMemory, anns, out_flows, {});
   }
+
+  FlushSorted(out, sorted_pkts);
 
   std::ofstream f(filepath, std::ios::binary);
   if (f.is_open()) f.write(out.data(), out.size());
@@ -1594,8 +1682,9 @@ const std::vector<HipGraphNodeInfoExt>* HipGetGraphExecNodesExt(hipGraphExec_t e
 }
 
 // ================================================================================================
-// Capture args (and kernel name) for one graph kernel node.
-// Mirrors HipCaptureKernelArgsExt but writes into HipGraphNodeInfoExt.
+// Capture kernel name and args for one graph kernel node into info->gpu.
+// Interns the mangled name into g_kernel_names and stores a stable const char*
+// in info->gpu.kernel_name.  Writes the arg blob into info->gpu.kernel_args/size.
 // args may be NULL (stream-captured graphs may expose NULL kp.kernelParams).
 void HipCaptureGraphNodeArgsExt(HipGraphNodeInfoExt* info, hipFunction_t func, void** args) {
   if (!info || !func) return;
@@ -1603,13 +1692,20 @@ void HipCaptureGraphNodeArgsExt(HipGraphNodeInfoExt* info, hipFunction_t func, v
   amd::Kernel* kernel = hip::asKernel(func);
   if (!kernel) return;
 
-  // Store mangled name for matching in the callback (always, even if args==NULL).
-  // kernel->name() may include a trailing '\0' in the std::string content; strip it.
+  // Intern the mangled name into g_kernel_names (same table used by the callback
+  // and the trace writers).  Strip any trailing '\0' from the CLR std::string.
+  // Pointers into unordered_map values are stable — store c_str() directly.
   {
     const std::string& raw = kernel->name();
     size_t len = raw.size();
-    while (len > 0 && raw[len-1] == '\0') --len;
-    info->kernel_name.assign(raw.data(), len);
+    while (len > 0 && raw[len - 1] == '\0') {
+      --len;
+    }
+    std::string name(raw.data(), len);
+    std::lock_guard<std::mutex> lk(g_kernel_names_mtx);
+    auto [it, ok] = g_kernel_names.emplace(name, name);
+    (void)ok;
+    info->gpu.kernel_name = it->second.c_str();
   }
 
   if (!args) return;
@@ -1619,8 +1715,9 @@ void HipCaptureGraphNodeArgsExt(HipGraphNodeInfoExt* info, hipFunction_t func, v
   if (nparams == 0) return;
 
   size_t total = 0;
-  for (uint32_t i = 0; i < nparams; ++i)
+  for (uint32_t i = 0; i < nparams; ++i) {
     total += sizeof(uint32_t) + sig.at(i).size_;
+  }
 
   uint8_t* blob = new uint8_t[total];
   uint8_t* p = blob;
@@ -1629,15 +1726,16 @@ void HipCaptureGraphNodeArgsExt(HipGraphNodeInfoExt* info, hipFunction_t func, v
     uint32_t val_size = static_cast<uint32_t>(desc.size_);
     std::memcpy(p, &val_size, sizeof(uint32_t));
     p += sizeof(uint32_t);
-    if (args[i])
+    if (args[i]) {
       std::memcpy(p, args[i], val_size);
-    else
+    } else {
       std::memset(p, 0, val_size);
+    }
     p += val_size;
   }
 
-  info->kernel_args      = blob;
-  info->kernel_args_size = static_cast<uint32_t>(total);
+  info->gpu.kernel_args      = blob;
+  info->gpu.kernel_args_size = static_cast<uint32_t>(total);
 }
 
 // ================================================================================================
