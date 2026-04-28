@@ -141,11 +141,13 @@ private:
     // Production wiring hooks — no-op in the generic template.
     // Explicit full specializations for default_sampling_policies are provided in
     // library/sampling_production_policies/sampling_service_production_hooks.hpp
-    // and do the TLS wiring, timer arming, and thread-info early-return guards.
+    // and do the TLS wiring, timer arming, thread-info guards, and PMC delegation.
     bool setup_check_thread_guards(int64_t tid);
     void setup_production_wiring(int64_t tid, thread_sampler_state<Policies>* state,
                                  std::set<int> const& sigs);
     void shutdown_production_wiring(int64_t tid);
+    void postfork_production_parent_reinit();
+    void postfork_production_child_cleanup();
 
     // Called at the start of post_process() before flush().
     // Production specialization opens the TSV output files and calls

@@ -439,16 +439,60 @@ template <class Policies>
 void
 sampling_service<Policies>::postfork_parent_reinit()
 {
-    // AC-17: delegates to pmc::postfork_parent_reinit() when applicable.
-    // Stub: to be implemented in Phase J (caller migration).
+    // AC-17: parent process — timers survive fork() per POSIX, so no re-arming needed.
+    // Delegate to the PMC layer when process sampling is active (production hook).
+    postfork_production_parent_reinit();
 }
 
 template <class Policies>
 void
 sampling_service<Policies>::postfork_child_cleanup()
 {
-    // AC-17: delegates to pmc::postfork_child_cleanup() when applicable.
-    // Stub: to be implemented in Phase J.
+    // NFR-TS-5: block sampling signals on the calling thread BEFORE touching any state
+    // so no signal handler fires against partially-destroyed per-thread state in the
+    // child.
+    {
+        std::set<int> all_sigs;
+        registry_.each([&all_sigs](int64_t /*tid*/, thread_sampler_state<Policies>& s) {
+            for(int sig : s.signal_types())
+                all_sigs.insert(sig);
+        });
+        if(!all_sigs.empty()) block_signals(all_sigs);
+    }
+
+    // Stop all POSIX timers across all threads — inherited file descriptors must be
+    // closed in the child to avoid interfering with the parent's timer delivery.
+    registry_.each([](int64_t /*tid*/, thread_sampler_state<Policies>& s) {
+        if(s.realtime_trigger().has_value()) s.realtime_trigger()->stop();
+        if(s.cputime_trigger().has_value()) s.cputime_trigger()->stop();
+        if(s.overflow_trigger().has_value()) s.overflow_trigger()->stop();
+    });
+
+    // Drop all per-thread state without calling post_process (AC-20).
+    registry_.reset();
+
+    // Delegate to the PMC layer when process sampling is active (production hook).
+    postfork_production_child_cleanup();
+
+    LOG_DEBUG("[postfork_child_cleanup] child process sampling state released");
+}
+
+// ── postfork production hooks — no-op generic definitions ─────────────────
+
+template <class Policies>
+void
+sampling_service<Policies>::postfork_production_parent_reinit()
+{
+    // No-op in generic template. Production specialization for
+    // default_sampling_policies calls pmc::postfork_parent_reinit() when applicable.
+}
+
+template <class Policies>
+void
+sampling_service<Policies>::postfork_production_child_cleanup()
+{
+    // No-op in generic template. Production specialization for
+    // default_sampling_policies calls pmc::postfork_child_cleanup() when applicable.
 }
 
 // ── Production wiring hooks — generic (no-op) definitions ─────────────────

@@ -17,6 +17,7 @@
 #include "core/perf.hpp"
 #include "core/state.hpp"
 #include "core/trace_cache/cache_manager.hpp"
+#include "library/pmc/sampler.hpp"
 #include "library/thread_info.hpp"
 
 #include <linux/perf_event.h>
@@ -189,6 +190,32 @@ sampling_service<default_sampling_policies>::open_report_writer_streams()
     if(!m_tsv_trip.is_open()) open(m_tsv_trip, "trip_count");
 
     report_writer_.set_streams(&m_tsv_wall, &m_tsv_cpu, &m_tsv_pct, &m_tsv_trip);
+}
+
+// ── postfork production hooks ──────────────────────────────────────────────
+
+template <>
+inline void
+sampling_service<default_sampling_policies>::postfork_production_parent_reinit()
+{
+    if(rocprofsys::config::get_use_process_sampling() &&
+       rocprofsys::config::get_use_amd_smi())
+    {
+        LOG_DEBUG("[postfork_parent_reinit] delegating to pmc::postfork_parent_reinit");
+        rocprofsys::pmc::postfork_parent_reinit();
+    }
+}
+
+template <>
+inline void
+sampling_service<default_sampling_policies>::postfork_production_child_cleanup()
+{
+    if(rocprofsys::config::get_use_process_sampling() &&
+       rocprofsys::config::get_use_amd_smi())
+    {
+        LOG_DEBUG("[postfork_child_cleanup] delegating to pmc::postfork_child_cleanup");
+        rocprofsys::pmc::postfork_child_cleanup();
+    }
 }
 
 }  // namespace rocprofsys::sampling
