@@ -612,24 +612,39 @@ inline void DmaBlitManager::resolveAgents(const Memory& srcMem, const Memory& ds
     // so query pointer_info to resolve the true agent.
     if (static_cast<const amd::Memory*>(srcMem.owner())->ipcShared() ||
         static_cast<const amd::Memory*>(srcMem.owner())->vmmImported()) {
-      hsa_amd_pointer_info_t info = {sizeof(hsa_amd_pointer_info_t)};
-      if (HSA_STATUS_SUCCESS ==
-          Hsa::pointer_info(const_cast<address>(srcAddr), &info, nullptr, nullptr, nullptr)) {
-        srcAgent = info.agentOwner;
-      }
+      srcAgent = getCachedOrQueryAgent(srcMem.owner(), srcAddr);
     }
     if (static_cast<const amd::Memory*>(dstMem.owner())->ipcShared() ||
         static_cast<const amd::Memory*>(dstMem.owner())->vmmImported()) {
-      hsa_amd_pointer_info_t info = {sizeof(hsa_amd_pointer_info_t)};
-      if (HSA_STATUS_SUCCESS == Hsa::pointer_info(dstAddr, &info, nullptr, nullptr, nullptr)) {
-        dstAgent = info.agentOwner;
-      }
+      dstAgent = getCachedOrQueryAgent(dstMem.owner(), dstAddr);
     }
   } else {
     // Different devices -- use each memory's device backend agent
     srcAgent = srcMem.dev().getBackendDevice();
     dstAgent = dstMem.dev().getBackendDevice();
   }
+}
+
+// ================================================================================================
+// Helper to get cached agent or query and cache it on first access
+inline hsa_agent_t DmaBlitManager::getCachedOrQueryAgent(
+    const amd::Memory* mem, address addr) const {
+  // Check if already cached (handle != 0 means cached)
+  if (mem->getUserData().cached_agent_.handle != 0) {
+    return mem->getUserData().cached_agent_;
+  }
+
+  // Not cached - query HSA runtime
+  hsa_amd_pointer_info_t info = {sizeof(hsa_amd_pointer_info_t)};
+  if (HSA_STATUS_SUCCESS ==
+      Hsa::pointer_info(addr, &info, nullptr, nullptr, nullptr)) {
+    // Cache the result (const_cast safe - we're modifying cached data)
+    const_cast<amd::Memory*>(mem)->getUserData().cached_agent_ = info.agentOwner;
+    return info.agentOwner;
+  }
+
+  // Fallback if query fails
+  return dev().getBackendDevice();
 }
 
 // ================================================================================================

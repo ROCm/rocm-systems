@@ -14,6 +14,12 @@
 #include "platform/interop.hpp"
 #include "device/device.hpp"
 
+#if defined(ROCR_DYN_DLL) || defined(ROCR_STATIC_OPEN)
+#include "hsa.h"
+#else
+#include "hsa/hsa.h"
+#endif
+
 #include <atomic>
 #include <utility>
 #include <vector>
@@ -152,6 +158,7 @@ class Memory : public amd::RuntimeObject {
     size_t depth_ = 0;   //!< Depth value
 
     bool sync_mem_ops_ = false;  //!< Memops sync, when set synchronize all mem operations.
+    hsa_agent_t cached_agent_ = {0};  //!< Cached owning agent (0 = not yet cached)
   };
 
  protected:
@@ -412,6 +419,7 @@ class Memory : public amd::RuntimeObject {
   uint32_t getUniqueId() { return uniqueId_; }
   //! save the user data during memory allocation
   UserData& getUserData() { return userData_; }
+  const UserData& getUserData() const { return userData_; }
 
   //! find if memory object is Arena memory
   virtual bool isArena() { return false; }

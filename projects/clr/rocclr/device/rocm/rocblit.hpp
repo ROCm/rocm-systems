@@ -234,6 +234,9 @@ class DmaBlitManager : public device::HostBlitManager {
                             address srcAddr, address dstAddr,
                             hsa_agent_t& srcAgent, hsa_agent_t& dstAgent) const;
 
+  //! Helper to get cached agent or query and cache it on first access
+  inline hsa_agent_t getCachedOrQueryAgent(const amd::Memory* mem, address addr) const;
+
   //! Assits in transferring data from Host to Local or vice versa
   //! taking into account the Hsail profile supported by Hsa Agent
   bool hsaCopy(const Memory& srcMemory, const Memory& dstMemory, const amd::Coord3D& srcOrigin,
