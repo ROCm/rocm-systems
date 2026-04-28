@@ -47,7 +47,7 @@ struct procedure_id
 
 // Wrapper around finalizeInsertionSet(). In debug-analysis mode, SIGSEGV/SIGBUS
 // are caught so fork+exec child trials can report failing subsets; otherwise the
-// call is left unguarded so the normal process signal handler can report the crash
+// call only prepends a diagnostic before forwarding crashes to the normal handler
 guarded_result
 finalize_insertion_set(address_space_t* addr_space, bool* modified_out = nullptr,
                        bool debug_analysis = false);

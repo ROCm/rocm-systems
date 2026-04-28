@@ -45,6 +45,12 @@ struct family_group_candidate
 
 thread_local sigjmp_buf            guarded_signal_jmp_buf{};
 thread_local volatile sig_atomic_t guarded_signal_caught = 0;
+thread_local const char*           signal_message        = nullptr;
+thread_local std::size_t           signal_message_length = 0;
+thread_local struct sigaction signal_message_old_segv
+{};
+thread_local struct sigaction signal_message_old_bus
+{};
 
 // timemory signal handling is termination-oriented, we need to recover
 extern "C" void
@@ -52,6 +58,65 @@ guarded_signal_handler(int sig, siginfo_t* /*info*/, void* /*ucontext*/)
 {
     guarded_signal_caught = sig;
     siglongjmp(guarded_signal_jmp_buf, 1);
+}
+
+extern "C" void
+signal_message_handler(int sig, siginfo_t* info, void* ucontext)
+{
+    if(signal_message && signal_message_length > 0)
+        write(STDERR_FILENO, signal_message, signal_message_length);
+
+    auto* previous = (sig == SIGBUS) ? &signal_message_old_bus : &signal_message_old_segv;
+    if((previous->sa_flags & SA_SIGINFO) != 0 && previous->sa_sigaction)
+    {
+        previous->sa_sigaction(sig, info, ucontext);
+        _exit(128 + sig);
+    }
+
+    if(previous->sa_handler != SIG_DFL && previous->sa_handler != SIG_IGN &&
+       previous->sa_handler)
+    {
+        previous->sa_handler(sig);
+        _exit(128 + sig);
+    }
+
+    sigaction(sig, previous, nullptr);
+    kill(getpid(), sig);
+    _exit(128 + sig);
+}
+
+// Runs an operation with a temporary message-only signal handler. If the operation
+// crashes, the message is written first and then the previous handler, typically
+// timemory's backtrace handler, receives the original signal context.
+template <typename FuncT>
+guarded_result
+run_with_signal_message(const char* msg, FuncT&& func)
+{
+    signal_message        = msg;
+    signal_message_length = (msg) ? std::strlen(msg) : 0;
+
+    struct sigaction new_sa
+    {};
+    std::memset(&new_sa, 0, sizeof(new_sa));
+    new_sa.sa_sigaction = &signal_message_handler;
+    new_sa.sa_flags     = SA_SIGINFO | SA_NODEFER;
+    sigemptyset(&new_sa.sa_mask);
+
+    sigaction(SIGSEGV, &new_sa, &signal_message_old_segv);
+    sigaction(SIGBUS, &new_sa, &signal_message_old_bus);
+
+    struct restore_signal_handlers
+    {
+        ~restore_signal_handlers()
+        {
+            sigaction(SIGSEGV, &signal_message_old_segv, nullptr);
+            sigaction(SIGBUS, &signal_message_old_bus, nullptr);
+            signal_message        = nullptr;
+            signal_message_length = 0;
+        }
+    } restore;
+
+    return std::forward<FuncT>(func)();
 }
 
 // Runs an operation with temporary SIGSEGV/SIGBUS handlers so analysis can report
@@ -510,7 +575,16 @@ finalize_insertion_set(address_space_t* addr_space, bool* modified_out,
         return ok ? guarded_result::pass : guarded_result::fail;
     };
 
-    if(!debug_analysis) return finalize();
+    if(!debug_analysis)
+    {
+        static constexpr const char* finalize_crash_msg =
+            "[rocprof-sys][exe] Error! finalizeInsertionSet crashed. This may be due "
+            "to dyninst failing to instrument one or more functions.\n"
+            "[rocprof-sys][exe] Re-run with '--debug-analysis' to bisect the queued "
+            "functions and report "
+            "the offending procedure subset.\n";
+        return run_with_signal_message(finalize_crash_msg, finalize);
+    }
 
     return run_with_signal_guard("finalizeInsertionSet", finalize, [modified_out]() {
         if(modified_out) *modified_out = false;
@@ -729,7 +803,7 @@ run_insertion_analysis(fmodset_t& instrumented_module_functions)
     print_analysis_result(reported_subsets);
 
     verbprintf(0, "[analysis] Excluding the functions from instrumentation via "
-                  "--function-exclude is recommended") _wc.stop();
+                  "--function-exclude is recommended\n") _wc.stop();
     verbprintf(0, "[analysis] total wall-clock time: %.3f sec\n", _wc.get());
 }
 

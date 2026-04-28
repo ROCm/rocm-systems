@@ -2351,15 +2351,6 @@ main(int argc, char** argv)
                 std::_Exit(analysis::CHILD_ANALYSIS_EXIT);
             }
 
-            if(!debug_analysis)
-            {
-                errprintf(0, "finalizeInsertionSet crashed. This may be due to dyninst "
-                             "failing to instrument one or more functions. "
-                             "Re-run with '--debug-analysis' to bisect the queued "
-                             "functions and report the offending procedure subset.\n\n");
-                std::exit(EXIT_FAILURE);
-            }
-
             verbprintf(0, "finalizeInsertionSet crashed; running analysis via fork+exec "
                           "subprocesses...\n");
             analysis::run_analysis(analysis_type::insertion_set,
