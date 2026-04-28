@@ -98,12 +98,15 @@ def detect_missing_counters(
             kernels_with_missing_counters.append(kernel_name)
 
     if kernels_with_missing_counters:
-        kernels_with_missing_counters = list(set(kernels_with_missing_counters))
+        unique_kernels = list(set(kernels_with_missing_counters))
+        kernel_list = "\n\n".join(
+            f"  Kernel {i}: {name}" for i, name in enumerate(unique_kernels, start=1)
+        )
         console_warning(
             "join_prof",
             (
-                f"Insufficient number of kernel calls for kernels: "
-                f"{', '.join(kernels_with_missing_counters)} "
+                f"Insufficient number of kernel calls for kernels:\n\n"
+                f"{kernel_list}\n\n"
                 f"to collect all counters using iteration multiplexing. "
                 f"These kernels do not have enough dispatches to fill all "
                 f"{num_files} counter sets. Use kernel filtering (-k) to "
