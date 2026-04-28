@@ -68,11 +68,12 @@ namespace dispatch_log {
 // format). The 16-byte record format is the MEC firmware contract.
 //
 // The buffer layout was originally defined as `header + ring data`. The
-// firmware-dispatch-ring infrastructure imported from cpc_tracing instead
-// hands the drainer a flat ring of N records and a separately-located
-// uint32_t firmware write pointer (not embedded in the buffer). The
-// header and DISPATCH_LOG_VERSION are no longer used; they are retained
-// here only as historical constants for now and may be removed.
+// current substrate instead hands the drainer a flat ring of N records
+// at the 16-byte FW record stride, with no host-visible FW write pointer:
+// the drainer locates fresh records via sentinel scan over per-slot
+// record_type and advances a host-managed monotonic cursor. The header
+// and DISPATCH_LOG_VERSION are no longer used; they are retained here
+// only as historical constants for now and may be removed.
 // -----------------------------------------------------------------------------
 
 // Number of FW dispatch records per queue ring buffer. Must match

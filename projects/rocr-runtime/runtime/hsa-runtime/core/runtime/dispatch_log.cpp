@@ -587,17 +587,18 @@ namespace {
 // ============================================================================
 // Per-queue ENABLE / DISABLE sequences (spec §5).
 //
-// New flow (post cpc_tracing infrastructure import):
+// Flow:
 //   1. Skip non-AQL / non-GPU queues.
 //   2. Skip if substrate is absent or agent is on the no-dispatch-log list.
 //   3. QueueProfilingAcquire -> AqlQueue::SetProfiling(true) -> alloc
 //      buffer + KFD UPDATE_QUEUE with the new trailing fields.
-//   4. AqlQueue::GetProfilingDispatchRecords to read back the buffer base,
-//      total bytes, and FW wptr pointer.
-//   5. Register a non-owning queue_drain_state in g_active_queues.
-//
-// The previous Phase A path's bespoke buffer alloc + placeholder KFD ioctl
-// has been removed entirely.
+//   4. AqlQueue::GetProfilingDispatchRecords to read back the buffer base
+//      and the FW-record-stride capacity in bytes (record_count * 16).
+//      The substrate publishes no host-visible FW write pointer; consumers
+//      locate fresh records via sentinel scan over per-slot record_type.
+//   5. Register a non-owning queue_drain_state in g_active_queues with
+//      next_idx = 0 (the host-managed monotonic record cursor used by
+//      the sentinel-scan drainer).
 // ============================================================================
 
 void enable_dispatch_log_for_queue_locked(core::Queue* q) {
