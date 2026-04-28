@@ -98,6 +98,7 @@ typedef enum rocDecVideoCodec_enum {
 //! \ingroup group_amd_rocdecode
 //! Video surface format enums used for output format of decoded output
 //! These enums are used in RocDecoderCreateInfo structure
+//! Note: 3-plane surface formats are not currently supported, they may be supported in the future.
 /*********************************************************************************/
 typedef enum rocDecVideoSurfaceFormat_enum {
     rocDecVideoSurfaceFormat_NV12 = 0,         /**< Semi-Planar YUV [Y plane followed by interleaved UV plane] */
@@ -124,6 +125,7 @@ typedef enum rocDecVideoSurfaceFormat_enum {
 //! \ingroup group_amd_rocdecode
 //! Chroma format enums
 //! These enums are used in ROCDCODECREATEINFO and RocdecDecodeCaps structures
+//! Note: The 422/444 chroma formats are not currently supported, they may be supported in the future.
 /**************************************************************************************************************/
 typedef enum rocDecVideoChromaFormat_enum {
     rocDecVideoChromaFormat_Monochrome = 0, /**< MonoChrome */
