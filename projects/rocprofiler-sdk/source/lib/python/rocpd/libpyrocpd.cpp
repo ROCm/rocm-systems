@@ -410,7 +410,7 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
 
     pyrocpd.def(
         "list_schema_versions",
-        [](rocpd_sql_engine_t engine, py::object hints_opt) -> py::list {
+        [](rocpd_sql_engine_t engine, const py::object& hints_opt) -> py::list {
             std::vector<std::string> storage;
             std::vector<const char*> hints;
             if(!hints_opt.is_none())

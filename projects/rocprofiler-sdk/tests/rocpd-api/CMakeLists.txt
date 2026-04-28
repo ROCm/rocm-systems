@@ -12,7 +12,13 @@ find_package(rocprofiler-sdk REQUIRED)
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 
 set(rocpd-api-schema-path "${CMAKE_BINARY_DIR}/share/rocprofiler-sdk-rocpd")
-set(rocpd-api-env "ROCPD_SCHEMA_PATH=${rocpd-api-schema-path}")
+set(rocpd-api-site-packages
+    "${rocprofiler-sdk_LIB_DIR}/python${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR}/site-packages"
+    )
+set(rocpd-api-env
+    "ROCPD_SCHEMA_PATH=${rocpd-api-schema-path}"
+    "PYTHONPATH=${ROCPROFILER_SDK_TESTS_BINARY_DIR}/pytest-packages:${rocpd-api-site-packages}"
+    )
 
 ################################################################################
 # Main test: run C++ rocpd-api-test (rocpd_get_version + rocpd_sql_load_schema)
@@ -29,13 +35,6 @@ rocprofiler_add_integration_execute_test(
 ################################################################################
 # Optional: pytest-based schema validation (same API via Python rocpd module)
 ################################################################################
-set(rocpd-api-rocpd-pythonpath
-    "${rocprofiler-sdk_LIB_DIR}/python${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR}/site-packages"
-    )
-set(rocpd-api-pythonpath-list "${ROCPROFILER_SDK_TESTS_BINARY_DIR}/pytest-packages"
-                              "${rocpd-api-rocpd-pythonpath}")
-list(JOIN rocpd-api-pythonpath-list ":" rocpd-api-pythonpath)
-list(APPEND rocpd-api-env "PYTHONPATH=${rocpd-api-pythonpath}")
 
 rocprofiler_add_integration_execute_test(
     rocpd-api-python-interface-test
@@ -55,6 +54,7 @@ rocprofiler_add_integration_validate_test(
     TIMEOUT 45
     LABELS "integration-tests;rocpd"
     PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
-    ENVIRONMENT "${rocpd-api-env}"
+    ENVIRONMENT "ROCPD_SCHEMA_PATH=${rocpd-api-schema-path}"
+    PYTHON_PATH "${rocpd-api-site-packages}"
     FIXTURES_REQUIRED rocpd-api-python-interface
     DEPENDS rocprofiler-sdk::rocprofv3)

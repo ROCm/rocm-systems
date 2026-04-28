@@ -9,7 +9,8 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# rocprofiler-sdk-rocpd is built in-tree (source/lib/rocprofiler-sdk-rocpd)
+find_package(rocprofiler-sdk-rocpd REQUIRED)
+
 add_executable(rocpd-api-test)
 target_sources(rocpd-api-test PRIVATE rocpd-api-test.cpp)
 target_compile_options(rocpd-api-test PRIVATE -W -Wall -Wextra)

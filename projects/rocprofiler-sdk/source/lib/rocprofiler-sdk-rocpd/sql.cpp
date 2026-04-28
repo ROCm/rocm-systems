@@ -53,6 +53,18 @@
 #include <initializer_list>
 #include <unordered_map>
 
+bool
+operator==(rocpd_version_triplet_t lhs, rocpd_version_triplet_t rhs)
+{
+    return std::tie(lhs.major, lhs.minor, lhs.patch) == std::tie(rhs.major, rhs.minor, rhs.patch);
+}
+
+bool
+operator<(rocpd_version_triplet_t lhs, rocpd_version_triplet_t rhs)
+{
+    return std::tie(lhs.major, lhs.minor, lhs.patch) < std::tie(rhs.major, rhs.minor, rhs.patch);
+}
+
 namespace rocpd
 {
 namespace sql
@@ -226,18 +238,6 @@ load_version_file_map(const std::string&       _schema_paths,
 }  // namespace
 }  // namespace sql
 }  // namespace rocpd
-
-bool
-operator==(rocpd_version_triplet_t lhs, rocpd_version_triplet_t rhs)
-{
-    return std::tie(lhs.major, lhs.minor, lhs.patch) == std::tie(rhs.major, rhs.minor, rhs.patch);
-}
-
-bool
-operator<(rocpd_version_triplet_t lhs, rocpd_version_triplet_t rhs)
-{
-    return std::tie(lhs.major, lhs.minor, lhs.patch) < std::tie(rhs.major, rhs.minor, rhs.patch);
-}
 
 extern "C" {
 rocpd_status_t
