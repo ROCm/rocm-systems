@@ -46,6 +46,7 @@ constexpr uint32_t regCP_HQD_PQ_WPTR_HI = 0x1fe0;
 constexpr uint32_t regCP_HQD_DEQUEUE_STATUS = 0x1fe8;
 
 constexpr uint32_t kCpHqdPersistentStateDefault = 0x0be05501;
+constexpr uint32_t kCpHqdDequeueResetWaves = 0x2;
 
 constexpr uint64_t kDirectComputeBaseOffset = 0x1900000;
 constexpr uint64_t kDirectComputeStride = 0x40000;
@@ -132,7 +133,8 @@ hsa_status_t ReclaimActiveHqd(const DirectQueuePlatform& platform,
                    "hqd=%u active=0x%x\n",
                    TracePrefix(options), queue.queue_index, pipe, hqd_queue, active);
     }
-    platform.WriteMmio32(kGcBase0, regCP_HQD_DEQUEUE_REQUEST, 1);
+    platform.WriteMmio32(kGcBase0, regCP_HQD_DEQUEUE_REQUEST,
+                         kCpHqdDequeueResetWaves);
     uint32_t now_active = active;
     for (uint32_t i = 0; i < 1000; ++i) {
       platform.ReadMmio32(kGcBase0, regCP_HQD_ACTIVE, &now_active);
@@ -516,7 +518,8 @@ hsa_status_t DestroyDirectQueue(const DirectQueuePlatform& platform,
   }
 
   if (options.use_firmware_dequeue) {
-    platform.WriteMmio32(kGcBase0, regCP_HQD_DEQUEUE_REQUEST, 1);
+    platform.WriteMmio32(kGcBase0, regCP_HQD_DEQUEUE_REQUEST,
+                         kCpHqdDequeueResetWaves);
     for (uint32_t i = 0; i < 100; ++i) {
       platform.ReadMmio32(kGcBase0, regCP_HQD_ACTIVE, &active);
       if (active == 0) break;

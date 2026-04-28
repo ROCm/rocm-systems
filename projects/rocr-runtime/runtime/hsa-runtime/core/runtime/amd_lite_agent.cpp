@@ -159,9 +159,9 @@ hsa_status_t LiteGpuAgent::QueueCreate(size_t size, hsa_queue_type32_t queue_typ
                                        uint32_t, uint32_t,
                                        bool metadata_queue,
                                        core::Queue** queue) {
+  (void)metadata_queue;
   if (queue == nullptr) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   *queue = nullptr;
-  if (metadata_queue) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   if (queue_type != HSA_QUEUE_TYPE_SINGLE && queue_type != HSA_QUEUE_TYPE_MULTI) {
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }

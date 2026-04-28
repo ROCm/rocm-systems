@@ -57,7 +57,9 @@ bool UseDirectQueueDequeue() {
   if (EnvEnabled("ROCR_AMDGPU_LITE_DIRECT_QUEUE_DISABLE_DEQUEUE")) return false;
   const char* value = std::getenv("ROCR_AMDGPU_LITE_DIRECT_QUEUE_DEQUEUE");
   if (value != nullptr && value[0] != '\0') return std::strcmp(value, "0") != 0;
-  return true;
+  // The lite Linux bring-up path has no KFD/MES teardown assist yet; direct
+  // disable is the repeatable path under passthrough.
+  return false;
 }
 bool SkipDirectQueueDestroy() {
   return EnvEnabled("ROCR_AMDGPU_LITE_DIRECT_QUEUE_SKIP_DESTROY");

@@ -385,6 +385,15 @@ void SurfaceGpuList(const std::vector<GpuNodeSelection>& gpu_list, bool xnack_mo
       if (core::Runtime::runtime_singleton_->flag().enable_dtif())
         core::g_use_interrupt_wait = false;
 
+#if defined(__linux__)
+      if (selection.driver_type == core::DriverType::LINUX_AMDGPU_LITE) {
+        // amdgpu_lite does not provide the KFD event ioctls used by
+        // InterruptSignal. Follow the userspace-driver path and use CPU-side
+        // polling/default signals until a lite IRQ backend is wired up.
+        core::g_use_interrupt_wait = false;
+      }
+#endif
+
       if (core::Runtime::runtime_singleton_->thunkLoader()->IsDXG()) {
         core::Runtime::runtime_singleton_->flag().disable_image(true);
 #if defined(_WIN32)

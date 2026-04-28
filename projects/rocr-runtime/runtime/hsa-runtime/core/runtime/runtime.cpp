@@ -1981,6 +1981,8 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
             break;
           }
           init_age = false;
+        } else if (polling && !finish) {
+          os::uSleep(20);
         }
       }
     }
