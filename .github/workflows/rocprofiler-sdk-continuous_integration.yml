@@ -369,8 +369,15 @@ jobs:
         run: |
           export LD_LIBRARY_PATH=${{ env.ROCM_PATH }}/lib:${{ env.ROCM_PATH }}/llvm/lib:$LD_LIBRARY_PATH
           export PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:$HOME/.local/bin:$PATH
-          ctest --test-dir build \
-            --output-on-failure \
+          python3 ./source/scripts/run-ci.py -B build \
+            --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.system.os }}-${{ matrix.system.gpu }}-core-test \
+            --mode ${CI_MODE} \
+            --site test-deb-gpu \
+            --gpu-targets gfx942 \
+            --run-attempt ${{ github.run_attempt }} \
+            --test-only \
+            -- \
+            -- \
             --parallel 4 \
             -LE "${${{ matrix.system.gpu }}_EXCLUDE_LABEL_REGEX}" \
             -E  "${${{ matrix.system.gpu }}_EXCLUDE_TESTS_REGEX}"
@@ -388,8 +395,28 @@ jobs:
           export LD_LIBRARY_PATH=/opt/rocprofiler-sdk/lib:${LD_LIBRARY_PATH}
           cmake --build build-samples --target all --parallel 16
           cmake --build build-tests --target all --parallel 16
-          ctest --test-dir build-samples -LE "${${{ matrix.system.gpu }}_EXCLUDE_LABEL_REGEX}" -E "${${{ matrix.system.gpu }}_EXCLUDE_TESTS_REGEX}" --output-on-failure
-          ctest --test-dir build-tests   -LE "${${{ matrix.system.gpu }}_EXCLUDE_LABEL_REGEX}" -E "${${{ matrix.system.gpu }}_EXCLUDE_TESTS_REGEX}" --output-on-failure
+          python3 ./source/scripts/run-ci.py -B build-samples \
+            --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.system.os }}-${{ matrix.system.gpu }}-install-samples-test \
+            --mode ${CI_MODE} \
+            --site test-deb-gpu \
+            --gpu-targets gfx942 \
+            --run-attempt ${{ github.run_attempt }} \
+            --test-only \
+            -- \
+            -- \
+            -LE "${${{ matrix.system.gpu }}_EXCLUDE_LABEL_REGEX}" \
+            -E "${${{ matrix.system.gpu }}_EXCLUDE_TESTS_REGEX}"
+          python3 ./source/scripts/run-ci.py -B build-tests \
+            --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.system.os }}-${{ matrix.system.gpu }}-install-tests-test \
+            --mode ${CI_MODE} \
+            --site test-deb-gpu \
+            --gpu-targets gfx942 \
+            --run-attempt ${{ github.run_attempt }} \
+            --test-only \
+            -- \
+            -- \
+            -LE "${${{ matrix.system.gpu }}_EXCLUDE_LABEL_REGEX}" \
+            -E "${${{ matrix.system.gpu }}_EXCLUDE_TESTS_REGEX}"
 
       - name: Install Packages
         if: ${{ contains(matrix.system.gpu, env.CORE_EXT_RUNNER) }}
@@ -418,8 +445,28 @@ jobs:
           CMAKE_PREFIX_PATH=${{ env.ROCM_PATH }} cmake -B build-tests-deb -DGPU_TARGETS="gfx942" -DCMAKE_HIP_ARCHITECTURES="gfx942" ${{ env.ROCM_PATH }}/share/rocprofiler-sdk/tests
           cmake --build build-samples-deb --target all --parallel 16
           cmake --build build-tests-deb --target all --parallel 16
-          ctest --test-dir build-samples-deb -LE "${${{ matrix.system.gpu }}_EXCLUDE_LABEL_REGEX}" -E "${${{ matrix.system.gpu }}_EXCLUDE_TESTS_REGEX}" --output-on-failure
-          ctest --test-dir build-tests-deb   -LE "${${{ matrix.system.gpu }}_EXCLUDE_LABEL_REGEX}" -E "${${{ matrix.system.gpu }}_EXCLUDE_TESTS_REGEX}" --output-on-failure
+          python3 ./source/scripts/run-ci.py -B build-samples-deb \
+            --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.system.os }}-${{ matrix.system.gpu }}-deb-samples-test \
+            --mode ${CI_MODE} \
+            --site test-deb-gpu \
+            --gpu-targets gfx942 \
+            --run-attempt ${{ github.run_attempt }} \
+            --test-only \
+            -- \
+            -- \
+            -LE "${${{ matrix.system.gpu }}_EXCLUDE_LABEL_REGEX}" \
+            -E "${${{ matrix.system.gpu }}_EXCLUDE_TESTS_REGEX}"
+          python3 ./source/scripts/run-ci.py -B build-tests-deb \
+            --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.system.os }}-${{ matrix.system.gpu }}-deb-tests-test \
+            --mode ${CI_MODE} \
+            --site test-deb-gpu \
+            --gpu-targets gfx942 \
+            --run-attempt ${{ github.run_attempt }} \
+            --test-only \
+            -- \
+            -- \
+            -LE "${${{ matrix.system.gpu }}_EXCLUDE_LABEL_REGEX}" \
+            -E "${${{ matrix.system.gpu }}_EXCLUDE_TESTS_REGEX}"
 
       - name: Archive production artifacts
         if: ${{ github.event_name == 'workflow_dispatch' && contains(matrix.system.gpu, env.CORE_EXT_RUNNER) }}
@@ -657,8 +704,15 @@ jobs:
         run: |
           source ${{ env.PYTHON_VENV_ACTIVATE }} || true
           export PATH=~/.local/bin:/opt/rh/gcc-toolset-11/root/usr/bin:$PATH
-          ctest --test-dir build \
-            --output-on-failure \
+          python3 ./source/scripts/run-ci.py -B build \
+            --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.system.os }}-${{ matrix.system.gpu }}-core-test \
+            --mode ${CI_MODE} \
+            --site test-rpm-gpu \
+            --gpu-targets gfx942 \
+            --run-attempt ${{ github.run_attempt }} \
+            --test-only \
+            -- \
+            -- \
             --parallel 4 \
             -LE "${${{ matrix.system.gpu }}_EXCLUDE_LABEL_REGEX}" \
             -E "${${{ matrix.system.gpu }}_EXCLUDE_TESTS_REGEX}"
@@ -924,8 +978,16 @@ jobs:
         rm -rf build
         tar -xzf ../../artifacts/AddressSanitizer/rocprofiler-sdk-build-ubuntu-22.04-mi325-AddressSanitizer.tar.gz
         export PATH="$HOME/.local/bin:$PATH"
-        ctest --test-dir build \
-          --output-on-failure \
+        python3 ./source/scripts/run-ci.py -B build \
+          --name ${{ github.repository }}-${{ github.ref_name }}-ubuntu-22.04-mi325-AddressSanitizer-test \
+          --mode ${CI_MODE} \
+          --site test-sanitizers-gpu \
+          --gpu-targets gfx942 \
+          --memcheck AddressSanitizer \
+          --run-attempt ${{ github.run_attempt }} \
+          --test-only \
+          -- \
+          -- \
           --parallel 4 \
           -LE "${mi325_EXCLUDE_LABEL_REGEX}" \
           -E "${mi325_EXCLUDE_TESTS_REGEX}"
@@ -943,8 +1005,16 @@ jobs:
         rm -rf build
         tar -xzf ../../artifacts/ThreadSanitizer/rocprofiler-sdk-build-ubuntu-22.04-mi325-ThreadSanitizer.tar.gz
         export PATH="$HOME/.local/bin:$PATH"
-        ctest --test-dir build \
-          --output-on-failure \
+        python3 ./source/scripts/run-ci.py -B build \
+          --name ${{ github.repository }}-${{ github.ref_name }}-ubuntu-22.04-mi325-ThreadSanitizer-test \
+          --mode ${CI_MODE} \
+          --site test-sanitizers-gpu \
+          --gpu-targets gfx942 \
+          --memcheck ThreadSanitizer \
+          --run-attempt ${{ github.run_attempt }} \
+          --test-only \
+          -- \
+          -- \
           --parallel 4 \
           -LE "${mi325_EXCLUDE_LABEL_REGEX}" \
           -E "${mi325_EXCLUDE_TESTS_REGEX}"
@@ -962,8 +1032,16 @@ jobs:
         rm -rf build
         tar -xzf ../../artifacts/LeakSanitizer/rocprofiler-sdk-build-ubuntu-22.04-mi325-LeakSanitizer.tar.gz
         export PATH="$HOME/.local/bin:$PATH"
-        ctest --test-dir build \
-          --output-on-failure \
+        python3 ./source/scripts/run-ci.py -B build \
+          --name ${{ github.repository }}-${{ github.ref_name }}-ubuntu-22.04-mi325-LeakSanitizer-test \
+          --mode ${CI_MODE} \
+          --site test-sanitizers-gpu \
+          --gpu-targets gfx942 \
+          --memcheck LeakSanitizer \
+          --run-attempt ${{ github.run_attempt }} \
+          --test-only \
+          -- \
+          -- \
           --parallel 4 \
           -LE "${mi325_EXCLUDE_LABEL_REGEX}" \
           -E "${mi325_EXCLUDE_TESTS_REGEX}"
@@ -981,8 +1059,16 @@ jobs:
         rm -rf build
         tar -xzf ../../artifacts/UndefinedBehaviorSanitizer/rocprofiler-sdk-build-ubuntu-22.04-mi325-UndefinedBehaviorSanitizer.tar.gz
         export PATH="$HOME/.local/bin:$PATH"
-        ctest --test-dir build \
-          --output-on-failure \
+        python3 ./source/scripts/run-ci.py -B build \
+          --name ${{ github.repository }}-${{ github.ref_name }}-ubuntu-22.04-mi325-UndefinedBehaviorSanitizer-test \
+          --mode ${CI_MODE} \
+          --site test-sanitizers-gpu \
+          --gpu-targets gfx942 \
+          --memcheck UndefinedBehaviorSanitizer \
+          --run-attempt ${{ github.run_attempt }} \
+          --test-only \
+          -- \
+          -- \
           --parallel 4 \
           -LE "${mi325_EXCLUDE_LABEL_REGEX}" \
           -E "${mi325_EXCLUDE_TESTS_REGEX}"

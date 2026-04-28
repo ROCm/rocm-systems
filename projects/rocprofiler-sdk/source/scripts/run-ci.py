@@ -31,6 +31,7 @@ import socket
 import shutil
 import argparse
 import multiprocessing
+import subprocess
 
 # this constant is used to define CTEST_PROJECT_NAME
 # and default value for CTEST_SUBMIT_URL
@@ -355,7 +356,7 @@ def generate_dashboard_script(args):
         if("TEST" IN_LIST STAGES)
             if("{MEMCHECK}" GREATER 0)
                 ctest_memcheck(BUILD "{BINARY_DIR}" RETURN_VALUE _test_ret)
-                dashboard_submit(PARTS Test RETURN_VALUE _submit_ret)
+                dashboard_submit(PARTS MemCheck RETURN_VALUE _submit_ret)
             else()
                 ctest_test(BUILD "{BINARY_DIR}" RETURN_VALUE _test_ret)
                 dashboard_submit(PARTS Test RETURN_VALUE _submit_ret)
@@ -400,7 +401,7 @@ def generate_dashboard_script(args):
         if("TEST" IN_LIST STAGES)
             if("{MEMCHECK}" GREATER 0)
                 ctest_memcheck(BUILD "{BINARY_DIR}" RETURN_VALUE _test_ret)
-                dashboard_submit(PARTS Test RETURN_VALUE _submit_ret)
+                dashboard_submit(PARTS MemCheck RETURN_VALUE _submit_ret)
             else()
                 ctest_test(BUILD "{BINARY_DIR}" RETURN_VALUE _test_ret)
                 dashboard_submit(PARTS Test RETURN_VALUE _submit_ret)
@@ -620,7 +621,9 @@ def parse_args(args=None):
     if cdash_args.test_only:
         # Only run test stage, skip build (requires pre-built binaries)
         cdash_args.stages = ["Start", "Test", "Submit"]
-        sys.stderr.write("Test-only mode: stages set to Start, Test, Submit\n")
+        sys.stderr.write(
+            f"Test-only mode: stages set to {', '.join(cdash_args.stages)}\n"
+        )
         sys.stderr.flush()
 
     if cdash_args.run_attempt > 1:
@@ -663,8 +666,6 @@ def parse_args(args=None):
 
 
 def run(*args, **kwargs):
-    import subprocess
-
     return subprocess.run(*args, **kwargs)
 
 
