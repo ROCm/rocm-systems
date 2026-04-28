@@ -36,7 +36,7 @@ The following table lists the stall reasons:
     - The sampled wave is waiting due to memory dependency (``waitcnt``).
 
   * - INTERNAL_INSTRUCTION
-    - The sampled wave is issuing an internal instruction such as a ``NOP``.
+    - The sampled wave is issuing an internal instruction, such as a ``NOP``.
 
   * - BARRIER_WAIT
     - The sampled wave is waiting at a barrier for the other waves in the workgroup to reach there.
