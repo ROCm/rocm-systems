@@ -508,6 +508,20 @@ bool drain_one_queue(queue_drain_state& qs, bool force_emit) {
     rocm_trace_emit_hsa_kernel_dispatch_drop(queue_id_to_wire(qs.queue_id),
                                              fw_wptr - qs.read_cursor);
     qs.read_cursor = fw_wptr - qs.ring_bytes;
+
+    // C7 fix: across an overrun event, ALL previously cached STARTs are
+    // suspect. The drainer cannot tell which records the FW just overwrote
+    // (spec §7 / drop tracepoint semantics), so any pending START whose
+    // matching END was in the skipped range would either (a) leak in this
+    // map indefinitely or (b) be incorrectly mispaired with a future END
+    // if dispatch_idx wraps (uint32_t, ~4 billion dispatches).
+    //
+    // Trade-off: a START that was preserved across the overrun whose END
+    // arrives AFTER this point will now be reported as an orphan END and
+    // silently skipped by the END branch below. This is acceptable
+    // conservative behavior — the dispatch's complete record was already
+    // effectively lost the moment the FW outpaced us.
+    qs.pending_starts.clear();
   }
 
   while (qs.read_cursor < fw_wptr) {
