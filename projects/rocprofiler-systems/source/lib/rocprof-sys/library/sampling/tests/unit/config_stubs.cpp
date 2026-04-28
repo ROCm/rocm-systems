@@ -55,5 +55,11 @@ get_sampling_realtime_tids()
     return {};
 }
 
+bool
+get_use_sampling_trace_legacy()
+{
+    return false;
+}
+
 }  // namespace config
 }  // namespace rocprofsys

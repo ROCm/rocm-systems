@@ -322,6 +322,12 @@ get_sampling_overflow_tids();
 bool
 get_sampling_include_inlines();
 
+// Variant 2 / Task #26: when true, emit_resolved_to_trace_cache() also calls
+// real_perfetto_sink::emit_* directly (in addition to trace_cache path).
+// Default: false. Env: ROCPROFSYS_SAMPLING_TRACE_LEGACY.
+bool
+get_use_sampling_trace_legacy();
+
 size_t
 get_num_threads_hint();
 

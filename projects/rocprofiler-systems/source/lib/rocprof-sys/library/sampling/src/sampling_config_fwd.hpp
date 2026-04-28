@@ -50,6 +50,12 @@ get_sampling_cputime_tids();
 std::set<int64_t>
 get_sampling_realtime_tids();
 
+// Variant 2 / Task #26: when true, also call real_perfetto_sink::emit_*
+// directly from emit_resolved_to_trace_cache() in addition to the trace_cache path.
+// Default: false (trace_cache-only). Env: ROCPROFSYS_SAMPLING_TRACE_LEGACY.
+bool
+get_use_sampling_trace_legacy();
+
 }  // namespace config
 }  // namespace rocprofsys
 

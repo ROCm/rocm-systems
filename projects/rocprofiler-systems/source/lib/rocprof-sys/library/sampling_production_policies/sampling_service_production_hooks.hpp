@@ -291,6 +291,8 @@ sampling_service<default_sampling_policies>::emit_resolved_to_trace_cache(int64_
             overflow_raw.push_back(r);
     }
 
+    const bool legacy = rocprofsys::get_use_sampling_trace_legacy();
+
     // Parse + resolve + emit timer samples.
     if(timer_raw.size() >= 2)
     {
@@ -348,6 +350,9 @@ sampling_service<default_sampling_policies>::emit_resolved_to_trace_cache(int64_
                     ++depth;
                 }
             }
+
+            // Legacy path: also emit via perfetto_sink when opt-in flag is set.
+            if(legacy) perfetto_sink_.emit_timer(tid, nullptr, timer_samples);
         }
     }
 
@@ -406,6 +411,9 @@ sampling_service<default_sampling_policies>::emit_resolved_to_trace_cache(int64_
                     ++depth;
                 }
             }
+
+            // Legacy path: also emit via perfetto_sink when opt-in flag is set.
+            if(legacy) perfetto_sink_.emit_overflow(tid, nullptr, overflow_samples);
         }
     }
 

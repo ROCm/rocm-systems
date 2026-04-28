@@ -618,6 +618,13 @@ configure_settings(bool _init)
                               false, "sampling", "data", "advanced");
 
     ROCPROFSYS_CONFIG_SETTING(
+        bool, "ROCPROFSYS_SAMPLING_TRACE_LEGACY",
+        "When enabled, emit sampling data directly via the Perfetto sink in addition to "
+        "the trace_cache pipeline (Variant 2). Default off: trace_cache-only path. "
+        "Set to 1 to also emit legacy Perfetto tracks from shutdown(tid).",
+        false, "sampling", "advanced");
+
+    ROCPROFSYS_CONFIG_SETTING(
         size_t, "ROCPROFSYS_SAMPLING_ALLOCATOR_SIZE",
         "The number of sampled threads handled by an allocator running in a background "
         "thread. Each thread that is sampled communicates with an allocator running in a "
@@ -2391,6 +2398,13 @@ bool
 get_sampling_include_inlines()
 {
     static auto _v = get_config()->find("ROCPROFSYS_SAMPLING_INCLUDE_INLINES");
+    return static_cast<tim::tsettings<bool>&>(*_v->second).get();
+}
+
+bool
+get_use_sampling_trace_legacy()
+{
+    static auto _v = get_config()->find("ROCPROFSYS_SAMPLING_TRACE_LEGACY");
     return static_cast<tim::tsettings<bool>&>(*_v->second).get();
 }
 
