@@ -8,9 +8,11 @@
 #include "library/causal/experiment.hpp"
 #include "library/causal/sampling.hpp"
 #include "library/runtime.hpp"
+#include "library/sampling_production_policies.hpp"
 #include "library/thread_data.hpp"
 #include "library/thread_info.hpp"
 #include "library/tracing.hpp"
+#include "sampling/services.hpp"
 
 #include "logger/debug.hpp"
 
@@ -99,12 +101,12 @@ delay::process()
         }
         else if(get_global() > get_local())
         {
-            ::rocprofsys::causal::sampling::pause();
+            ::rocprofsys::services::causal_sampling().pause();
             auto _beg = tracing::now();
             std::this_thread::sleep_for(
                 std::chrono::nanoseconds{ get_global() - get_local() });
             get_local() += (tracing::now() - _beg);
-            ::rocprofsys::causal::sampling::resume();
+            ::rocprofsys::services::causal_sampling().resume();
         }
     }
     else

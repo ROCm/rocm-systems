@@ -14,9 +14,10 @@
 #include "library/causal/sample_data.hpp"
 #include "library/perf.hpp"
 #include "library/runtime.hpp"
-#include "library/sampling.hpp"
+#include "library/sampling_production_policies.hpp"
 #include "library/thread_data.hpp"
 #include "library/thread_info.hpp"
+#include "sampling/services.hpp"
 
 #include <timemory/macros.hpp>
 #include <timemory/mpl/types.hpp>
@@ -463,7 +464,7 @@ pause(ScopeT)
 {
     static_assert(
         tim::is_one_of<ScopeT,
-                       type_list<scope::thread_scope, scope::process_scope>>::value,
+                       tim::type_list<scope::thread_scope, scope::process_scope>>::value,
         "Unsupported scope");
 
     if constexpr(std::is_same<ScopeT, scope::thread_scope>::value)
@@ -503,7 +504,7 @@ resume(ScopeT)
 {
     static_assert(
         tim::is_one_of<ScopeT,
-                       type_list<scope::thread_scope, scope::process_scope>>::value,
+                       tim::type_list<scope::thread_scope, scope::process_scope>>::value,
         "Unsupported scope");
 
     if constexpr(std::is_same<ScopeT, scope::thread_scope>::value)
@@ -549,7 +550,7 @@ block_signals(std::set<int> _signals)
     if(_signals.empty()) _signals = get_signal_types(threading::get_id());
     if(_signals.empty()) return;
 
-    ::rocprofsys::sampling::block_signals(_signals);
+    rocprofsys::services::causal_sampling().block_signals(_signals);
 }
 
 void
@@ -558,7 +559,7 @@ unblock_signals(std::set<int> _signals)
     if(_signals.empty()) _signals = get_signal_types(threading::get_id());
     if(_signals.empty()) return;
 
-    ::rocprofsys::sampling::unblock_signals(_signals);
+    rocprofsys::services::causal_sampling().unblock_signals(_signals);
 }
 
 void

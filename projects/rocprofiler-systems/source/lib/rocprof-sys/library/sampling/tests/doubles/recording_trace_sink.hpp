@@ -1,0 +1,67 @@
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
+#pragma once
+
+#include "sampling/data/overflow_sample.hpp"
+#include "sampling/data/timer_sample.hpp"
+
+#include <cstdint>
+#include <vector>
+
+namespace rocprofsys::sampling::test
+{
+
+struct recording_trace_sink
+{
+    // Satisfies TraceSinkPolicy: store_timer + store_overflow.
+    // Records tid and sample count; no core/ dependency introduced.
+
+    void store_timer(int64_t tid, std::vector<timer_sample> const& samples)
+    {
+        m_timer_records.push_back({ tid, static_cast<int>(samples.size()) });
+    }
+
+    void store_overflow(int64_t tid, std::vector<overflow_sample> const& samples)
+    {
+        m_overflow_records.push_back({ tid, static_cast<int>(samples.size()) });
+    }
+
+    struct call_record
+    {
+        int64_t tid;
+        int     sample_count;
+    };
+
+    [[nodiscard]] auto const& timer_records() const noexcept { return m_timer_records; }
+    [[nodiscard]] auto const& overflow_records() const noexcept
+    {
+        return m_overflow_records;
+    }
+    void clear() noexcept
+    {
+        m_timer_records.clear();
+        m_overflow_records.clear();
+    }
+
+    // Total samples forwarded across all calls (convenience for assertions).
+    [[nodiscard]] size_t total_timer_samples() const noexcept
+    {
+        size_t n = 0;
+        for(auto const& r : m_timer_records)
+            n += static_cast<size_t>(r.sample_count);
+        return n;
+    }
+    [[nodiscard]] size_t total_overflow_samples() const noexcept
+    {
+        size_t n = 0;
+        for(auto const& r : m_overflow_records)
+            n += static_cast<size_t>(r.sample_count);
+        return n;
+    }
+
+    std::vector<call_record> m_timer_records;
+    std::vector<call_record> m_overflow_records;
+};
+
+}  // namespace rocprofsys::sampling::test

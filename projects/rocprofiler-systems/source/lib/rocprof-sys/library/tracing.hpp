@@ -15,7 +15,6 @@
 #include "core/utility.hpp"
 #include "library/causal/sampling.hpp"
 #include "library/runtime.hpp"
-#include "library/sampling.hpp"
 #include "library/thread_data.hpp"
 #include "library/tracing/annotation.hpp"
 
@@ -50,7 +49,7 @@ namespace tracing
 {
 using interval_data_instances           = thread_data<std::vector<bool>>;
 using hash_value_t                      = tim::hash_value_t;
-using perfetto_annotate_component_types = tim::mpl::available_t<type_list<
+using perfetto_annotate_component_types = tim::mpl::available_t<tim::type_list<
     comp::cpu_clock, comp::cpu_util, comp::kernel_mode_time, comp::num_major_page_faults,
     comp::num_minor_page_faults, comp::page_rss, comp::peak_rss, comp::papi_array_t,
     comp::papi_vector, comp::priority_context_switch, comp::voluntary_context_switch,

@@ -5,8 +5,11 @@
 #include "core/concepts.hpp"
 #include "core/config.hpp"
 #include "core/state.hpp"
+#include "core/utility.hpp"
+#include "library/sampling_production_policies.hpp"
 #include "library/thread_data.hpp"
 #include "library/thread_info.hpp"
+#include "sampling/services.hpp"
 
 #include <timemory/hash/types.hpp>
 #include <timemory/process/threading.hpp>
@@ -169,10 +172,11 @@ thread_init()
     static thread_local auto _thread_dtor = scope::destructor{ []() {
         if(get_state() != State::Finalized)
         {
+            auto _shut_tid = utility::get_thread_index();
             if(get_use_causal())
-                causal::sampling::shutdown();
+                services::causal_sampling().shutdown(_shut_tid);
             else if(get_use_sampling())
-                sampling::shutdown();
+                services::sampling().shutdown(_shut_tid);
             auto& _thr_bundle = thread_data<thread_bundle_t>::instance();
             if(_thr_bundle && _thr_bundle->get<comp::wall_clock>() &&
                _thr_bundle->get<comp::wall_clock>()->get_is_running())
@@ -233,9 +237,15 @@ thread_init()
             {
                 ROCPROFSYS_SCOPED_SAMPLING_ON_CHILD_THREADS(false);
                 if(_use_causal)
-                    causal::sampling::setup();
+                {
+                    auto _sigs = services::causal_sampling().setup(_idx);
+                    services::causal_sampling().unblock_signals(_sigs);
+                }
                 else if(_use_sampling)
-                    sampling::setup();
+                {
+                    auto _sigs = services::sampling().setup(_idx);
+                    services::sampling().unblock_signals(_sigs);
+                }
             }
             return (_use_causal || _use_sampling);
         }

@@ -8,10 +8,10 @@
 #include "core/config.hpp"
 #include "core/perfetto.hpp"
 #include "core/state.hpp"
+#include "library/components/backtrace.hpp"
 #include "library/components/ensure_storage.hpp"
 #include "library/perf.hpp"
 #include "library/runtime.hpp"
-#include "library/sampling.hpp"
 #include "library/thread_info.hpp"
 
 #include <timemory/backends/papi.hpp>

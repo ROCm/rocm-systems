@@ -9,10 +9,11 @@
 #include "library/causal/delay.hpp"
 #include "library/components/category_region.hpp"
 #include "library/runtime.hpp"
-#include "library/sampling.hpp"
+#include "library/sampling_production_policies.hpp"
 #include "library/thread_data.hpp"
 #include "library/thread_info.hpp"
 #include "library/tracing.hpp"
+#include "sampling/services.hpp"
 
 #include <timemory/backends/threading.hpp>
 #include <timemory/components/macros.hpp>
@@ -181,13 +182,13 @@ pthread_create_gotcha::wrapper::operator()() const
         {
             if(m_config.enable_causal)
             {
-                causal::sampling::block_signals(_signals);
-                causal::sampling::shutdown();
+                services::causal_sampling().block_signals(_signals);
+                services::causal_sampling().shutdown(_tid);
             }
             else if(m_config.enable_sampling)
             {
-                sampling::block_signals(_signals);
-                sampling::shutdown();
+                services::sampling().block_signals(_signals);
+                services::sampling().shutdown(_tid);
             }
         }
 
@@ -250,15 +251,15 @@ pthread_create_gotcha::wrapper::operator()() const
                     causal::delay::get_local(_parent_info->index_data->sequent_value);
             _is_sampling = true;
             ROCPROFSYS_SCOPED_SAMPLING_ON_CHILD_THREADS(false);
-            _signals = causal::sampling::setup();
-            causal::sampling::unblock_signals();
+            _signals = services::causal_sampling().setup(_tid);
+            services::causal_sampling().unblock_signals(_signals);
         }
         else if(m_config.enable_sampling)
         {
             _is_sampling = true;
             ROCPROFSYS_SCOPED_SAMPLING_ON_CHILD_THREADS(false);
-            _signals = sampling::setup();
-            sampling::unblock_signals();
+            _signals = services::sampling().setup(_tid);
+            services::sampling().unblock_signals(_signals);
         }
     }
     else if(m_config.offset)

@@ -1,6 +1,7 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "library/components/backtrace.hpp"
 #include "core/common.hpp"
 #include "core/components/fwd.hpp"
 #include "core/config.hpp"
@@ -9,7 +10,6 @@
 #include "core/state.hpp"
 #include "library/components/ensure_storage.hpp"
 #include "library/runtime.hpp"
-#include "library/sampling.hpp"
 
 #include <timemory/backends/papi.hpp>
 #include <timemory/backends/threading.hpp>

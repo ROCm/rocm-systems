@@ -29,6 +29,8 @@ target_link_libraries(
         rocprofiler-systems::rocprofiler-systems-binary
         $<$<TARGET_EXISTS:rocprofiler-systems-bin-common>:rocprofiler-systems::rocprofiler-systems-bin-common>
         rocprofiler-systems::rocprofiler-systems-interface-library
+        # Sampling unit + integration tests folded in; stress + bench stay separate.
+        rocprof-sys-sampling-tests-objs
 )
 
 target_include_directories(

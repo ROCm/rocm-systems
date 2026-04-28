@@ -20,8 +20,10 @@
 #include "library/causal/sampling.hpp"
 #include "library/causal/selected_entry.hpp"
 #include "library/runtime.hpp"
+#include "library/sampling_production_policies.hpp"
 #include "library/thread_data.hpp"
 #include "library/thread_info.hpp"
+#include "sampling/services.hpp"
 
 #include <timemory/data/atomic_ring_buffer.hpp>
 #include <timemory/hash/types.hpp>
@@ -506,7 +508,7 @@ perform_experiment_impl(std::shared_ptr<std::promise<void>> _started)  // NOLINT
                           "(elapsed: {} seconds)...",
                           _duration_sec,
                           std::chrono::duration_cast<duration_sec_t>(_elapsed).count());
-                causal::sampling::post_process();
+                services::causal_sampling().post_process();
                 return true;
             }
         }
@@ -1074,7 +1076,7 @@ finish_experimenting()
             std::chrono::seconds{ 5 });
         perform_experiment_impl_completed.reset();
     }
-    sampling::post_process();
+    services::sampling().post_process();
     experiment::save_experiments();
 }
 }  // namespace causal

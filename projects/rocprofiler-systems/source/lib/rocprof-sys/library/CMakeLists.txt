@@ -7,10 +7,12 @@ set(library_sources
     ${CMAKE_CURRENT_LIST_DIR}/perf.cpp
     ${CMAKE_CURRENT_LIST_DIR}/process_sampler.cpp
     ${CMAKE_CURRENT_LIST_DIR}/runtime.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/sampling.cpp
     ${CMAKE_CURRENT_LIST_DIR}/thread_deleter.cpp
     ${CMAKE_CURRENT_LIST_DIR}/thread_info.cpp
     ${CMAKE_CURRENT_LIST_DIR}/tracing.cpp
+    # services_accessor.cpp instantiates default_sampling_service with production policies.
+    # Lives here (not in sampling/) because it depends on main-lib symbols.
+    ${CMAKE_CURRENT_LIST_DIR}/services_accessor.cpp
 )
 
 set(library_headers
@@ -20,7 +22,7 @@ set(library_headers
     ${CMAKE_CURRENT_LIST_DIR}/rocm.hpp
     ${CMAKE_CURRENT_LIST_DIR}/rocprofiler-sdk.hpp
     ${CMAKE_CURRENT_LIST_DIR}/runtime.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/sampling.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/sampling_production_policies.hpp
     ${CMAKE_CURRENT_LIST_DIR}/thread_data.hpp
     ${CMAKE_CURRENT_LIST_DIR}/thread_deleter.hpp
     ${CMAKE_CURRENT_LIST_DIR}/thread_info.hpp
@@ -45,10 +47,10 @@ add_subdirectory(causal)
 add_subdirectory(components)
 add_subdirectory(coverage)
 add_subdirectory(tracing)
+add_subdirectory(sampling)
 
 set(ndebug_sources
     ${CMAKE_CURRENT_LIST_DIR}/components/mpi_gotcha.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/components/backtrace_metrics.cpp
     ${CMAKE_CURRENT_LIST_DIR}/kokkosp.cpp
 )
 

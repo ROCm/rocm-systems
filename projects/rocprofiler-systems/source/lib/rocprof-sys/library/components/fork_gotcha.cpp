@@ -7,9 +7,11 @@
 #include "core/perfetto.hpp"
 #include "core/perfetto_fwd.hpp"
 #include "core/state.hpp"
+#include "core/utility.hpp"
 #include "library/components/fork_gotcha.hpp"
 #include "library/runtime.hpp"
-#include "library/sampling.hpp"
+#include "library/sampling_production_policies.hpp"
+#include "sampling/services.hpp"
 
 #include <timemory/backends/process.hpp>
 #include <timemory/backends/threading.hpp>
@@ -63,7 +65,7 @@ prefork_setup()
                 "may result is segmentation fault");
     // TIMEMORY_CONDITIONAL_DEMANGLED_BACKTRACE(get_debug_env(), 16);
 
-    if(config::get_use_sampling()) sampling::block_samples();
+    if(config::get_use_sampling()) services::sampling().block_samples();
 
     rocprofsys::categories::disable_categories(config::get_enabled_categories());
 
@@ -81,11 +83,11 @@ postfork_parent()
     // Reinitialize AMD SMI in parent process to get fresh device handles before
     // unblocking the shutdown/setup transition. AMD SMI device handles may be corrupted
     // after fork.
-    if(config::get_use_sampling()) sampling::postfork_parent_reinit();
+    if(config::get_use_sampling()) services::sampling().postfork_parent_reinit();
 
     rocprofsys::categories::enable_categories(config::get_enabled_categories());
 
-    if(config::get_use_sampling()) sampling::unblock_samples();
+    if(config::get_use_sampling()) services::sampling().unblock_samples();
 
     // prevent re-entry until prefork has been called
     postfork_parent_lock = true;
@@ -107,12 +109,13 @@ postfork_child()
     set_state(State::Finalized);
 
     // Clean up AMD SMI in child process before other shutdowns
-    if(config::get_use_sampling()) sampling::postfork_child_cleanup();
+    if(config::get_use_sampling()) services::sampling().postfork_child_cleanup();
 
     settings::enabled() = false;
     settings::verbose() = -127;
     settings::debug()   = false;
-    rocprofsys::sampling::shutdown();
+    services::sampling().enter_child_process_mode();
+    services::sampling().shutdown(utility::get_thread_index());
     rocprofsys::categories::shutdown();
     set_thread_state(::rocprofsys::ThreadState::Disabled);
 

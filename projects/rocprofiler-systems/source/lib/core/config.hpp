@@ -3,6 +3,10 @@
 
 #pragma once
 
+// Sentinel: sampling_config_fwd.hpp uses this to avoid re-declaring functions that
+// core/config.hpp already declares (avoids default-arg and return-type conflicts).
+#define ROCPROFSYS_CORE_CONFIG_HPP_INCLUDED 1
+
 #include "common.hpp"
 #include "defines.hpp"
 #include "state.hpp"

@@ -45,7 +45,6 @@ using functor_t = std::function<void(Tp...)>;
 using default_functor_t = functor_t<const char*>;
 
 struct backtrace;
-struct backtrace_metrics;
 struct backtrace_timestamp;
 struct backtrace_wall_clock
 {};
@@ -102,7 +101,6 @@ ROCPROFSYS_DEFINE_CONCRETE_TRAIT(is_available, component::comm_data, false_type)
 #if(!defined(TIMEMORY_USE_LIBUNWIND) || TIMEMORY_USE_LIBUNWIND == 0)
 ROCPROFSYS_DEFINE_CONCRETE_TRAIT(is_available, category::sampling, false_type)
 ROCPROFSYS_DEFINE_CONCRETE_TRAIT(is_available, component::backtrace, false_type)
-ROCPROFSYS_DEFINE_CONCRETE_TRAIT(is_available, component::backtrace_metrics, false_type)
 ROCPROFSYS_DEFINE_CONCRETE_TRAIT(is_available, component::backtrace_timestamp, false_type)
 ROCPROFSYS_DEFINE_CONCRETE_TRAIT(is_available, component::sampling_wall_clock, false_type)
 ROCPROFSYS_DEFINE_CONCRETE_TRAIT(is_available, component::sampling_cpu_clock, false_type)
