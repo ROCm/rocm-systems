@@ -909,7 +909,7 @@ struct make_string_literal<N, C0, Cs...>
 {
 };
 
-static constexpr size_t MAX_STRING_LITERAL_LENGTH = 32;
+static constexpr size_t MAX_STRING_LITERAL_LENGTH = 64;
 
 template <size_t N>
 constexpr char
