@@ -248,7 +248,7 @@ class IPCBackend : public Backend {
   /**
    * @brief A free-list containing contexts.
    */
-  FreeListProxy<HIPAllocator, IPCContext *> ctx_free_list{};
+  FreeListProxy<IPCContext *> ctx_free_list{};
 
   /**
    * @brief The bitmask representing the availability of teams in the pool

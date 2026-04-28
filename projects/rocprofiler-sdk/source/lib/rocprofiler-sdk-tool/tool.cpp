@@ -1628,8 +1628,8 @@ att_shader_data_callback(rocprofiler_agent_id_t  agent,
     std::string output_filename = get_output_filename(tool::get_config(), filename.str(), ".att");
 
     output_stream.stream->write(reinterpret_cast<char*>(se_data), data_size);
-    tool_metadata->att_filenames[dispatch_id].first = agent;
-    tool_metadata->att_filenames[dispatch_id].second.emplace_back(output_filename);
+    auto key = tool::att_dispatch_agent_key_t{dispatch_id, agent.handle};
+    tool_metadata->att_filenames[key].emplace_back(output_filename);
 }
 
 rocprofiler_thread_trace_control_flags_t
@@ -3095,18 +3095,18 @@ generate_output(cleanup_mode _cleanup_mode)
             perf.emplace_back(ss.str());
         }
 
-        for(auto& [dispatch_id, att_filename_data] : tool_metadata->att_filenames)
+        for(auto& [key, att_files] : tool_metadata->att_filenames)
         {
-            std::string formats = "json,csv";
+            auto [dispatch_id, agent_handle] = key;
+            std::string formats              = "json,csv";
 
             auto ui_name = std::stringstream{};
-            ui_name << fmt::format("ui_output_agent_{}_dispatch_{}",
-                                   std::to_string(att_filename_data.first.handle),
-                                   dispatch_id);
+            ui_name << fmt::format(
+                "ui_output_agent_{}_dispatch_{}", std::to_string(agent_handle), dispatch_id);
             auto out_path = fmt::format("{}/{}", output_path, ui_name.str());
             auto in_path  = std::string(".");
 
-            decoder.parse(in_path, out_path, att_filename_data.second, codeobj, perf, formats);
+            decoder.parse(in_path, out_path, att_files, codeobj, perf, formats);
         }
     }
 

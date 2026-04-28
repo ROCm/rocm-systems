@@ -25,8 +25,6 @@ You are an automated code review orchestrator for the **amd-smi** project (AMD S
 
 ### Orchestration
 
-**Model selection:** By default, each subagent specifies `model: "Claude Sonnet 4.6"` in its frontmatter and runs on that model. If the user passes the `inherit` modifier, ignore the subagents' frontmatter `model` field and let them inherit whatever model the orchestrator is running on (i.e., whatever you selected in the VS Code model picker).
-
 **Always-on subagents:** `amdsmi-review-build` and `amdsmi-review-style` run in every review mode (comprehensive, focused, fast) in addition to the requested subagents.
 
 **Skip rules:**
@@ -63,8 +61,8 @@ After step 7, proceed to rebuttal:
    - The triage summary from step 1
 3. **Reconciliation** — Process the skeptic's rebuttal:
    - For each challenge the skeptic raised: accept (adjust the finding) or reject (keep your triage, note the disagreement)
-   - Add a `## Rebuttal Round` section to the output showing challenges raised and your resolution
-4. **Final synthesis** — Produce the standard template with the additional rebuttal section appended before the Conclusion
+   - Track every change (severity adjustment, dismissal, new finding added) for the Rebuttal Adjustments table
+4. **Final synthesis** — Produce the standard template. Findings table reflects post-reconciliation severities. Append a Rebuttal Adjustments section listing only the changes the rebuttal produced (omit the section entirely if no changes).
 
 ## Status & Severity
 
@@ -102,7 +100,6 @@ Every comprehensive review **must** include a PR splitting assessment.
 
 **Output format:**
 
-```markdown
 ## PR Split Assessment
 
 **Verdict:** ✂️ RECOMMEND SPLIT / ✅ SINGLE PR OK
@@ -113,7 +110,6 @@ Every comprehensive review **must** include a PR splitting assessment.
 | 2 | [title] | [file list or pattern] | PR #1 | Low/Med/High |
 
 **Rationale:** [Why split helps or why single PR is fine]
-```
 
 ## Project Layout
 
@@ -121,9 +117,15 @@ Project structure, API cascade path, and build/test paths are stored in repo mem
 
 ## Review Output
 
-### Standard Template
+### Template Format
 
-```markdown
+The Findings table is the single source of truth — make Issue and Fix Options columns rich enough to stand alone. Do not produce per-finding paragraph writeups in addition to the table; if a finding needs more context than the row provides, add a one-line bullet directly beneath the table referencing the F-number.
+
+Omit any of these sections entirely when they have nothing to report:
+- **PR Split Assessment** — omit when verdict is ✅ SINGLE PR OK and there's nothing more to say than that. If kept, omit the proposed-PRs table when verdict is ✅ SINGLE PR OK.
+- **Rebuttal Adjustments** — omit when the rebuttal round produced no changes (no severity adjustments, no dismissals, no new findings).
+- **Unresolved Comments** — omit when there are no unresolved PR comments.
+
 # [Review Type] Review: [branch-name]
 
 **Branch:** `branch-name` → `base` | **Type:** [type] | **Date:** YYYY-MM-DD | **Commits:** N
@@ -132,86 +134,58 @@ Project structure, API cascade path, and build/test paths are stored in repo mem
 **Status:** ✅ PASS / ❌ FAIL | **Time:** Xm Ys | **Warnings:** N
 [If failed: which step failed and error summary. If passed with warnings: list warnings.]
 
-## Analysis Details
+## PR Split Assessment
 
-<details><summary>Expand full analysis (N findings across M files)</summary>
+**Verdict:** ✂️ RECOMMEND SPLIT / ✅ SINGLE PR OK
 
-### Findings (Round 1 — pre-rebuttal)
+| # | Proposed PR | Files | Dependency | Risk |
+|---|------------|-------|------------|------|
+| 1 | [title] | [file list or pattern] | None / PR #N | Low/Med/High |
+| 2 | [title] | [file list or pattern] | PR #1 | Low/Med/High |
 
-For each finding, include severity, explanation, impact, and fix options.
-For simple fixes (typos, clear logic errors, missing imports):
+**Rationale:** [Why split helps or why single PR is fine. Omit the table when verdict is ✅ SINGLE PR OK.]
 
-**[F-N] [Severity]: [Issue Title]** (`file:line`)
-- Explanation and impact
-- **Fix:** [the one correct fix]
+## Rebuttal Adjustments
 
-For findings with multiple valid approaches:
+| # | Finding | Change | Skeptic's Challenge | Resolution |
+|---|---------|--------|---------------------|------------|
+| R-1 | F-3 | ❌ → ⚠️ | [challenge] | Accepted — [reason] |
+| R-2 | F-7 (new) | Added | [missed issue] | Added to Findings as F-7 |
 
-**[F-N] [Severity]: [Issue Title]** (`file:line`)
-- Explanation and impact
-- **Option A:** [approach] — *tradeoff*
-- **Option B:** [approach] — *tradeoff*
-- **Recommended:** Option [X] because [reason]
+## Findings
 
-## Rebuttal
+All severities reflect post-rebuttal reconciliation. Sort rows by severity: ❌ first, then ⚠️, 💡, 📋.
 
-Include this section only when running in thorough/rebuttal mode.
+| # | ! | Source | Location | Issue | Fix Options | ✅ Rec |
+|---|---|--------|----------|-------|-------------|--------|
+| F-1 | ❌ | security, arch | [file.cc](path/file.cc#L42), [:55](path/file.cc#L55), [:68](path/file.cc#L68) | [concise issue + impact] | A: [approach] — *tradeoff* · B: [approach] — *tradeoff* | A |
+| F-2 | ❌ | style | [file.h](path/file.h#L10), [other.h](path/other.h#L20) | [concise issue + impact] | A: [approach] · B: [approach] | B |
+| F-3 | ⚠️ | tests | [file.cc](path/file.cc#L100) | [concise issue + impact] | [single fix] | — |
+| F-4 | ⚠️ | arch | [file.py](path/file.py#L200) | [concise issue] — Resolves with F-1 | — | — |
+| F-5 | 💡 | style | [file.h](path/file.h#L50) | [concise issue] | [single fix] | — |
+| F-6 | 📋 | perf | [file.py](path/file.py) | [concise issue] | [future work description] | — |
 
-### Challenges Raised
-
-| # | Finding | Original Sev | Triage Decision | Skeptic's Challenge | Resolution |
-|---|---------|-------------|-----------------|---------------------|------------|
-| R-1 | F-3 | ❌ | Downgraded to ⚠️ | [challenge] | Accepted / Rejected — [reason] |
-
-### Missed Issues from Rebuttal
-Any new issues the skeptic identified that Round 1 missed. Assign them F-numbers (continuing the sequence) and add them to the Final Findings table below.
-
-</details>
-
-## Final Findings
-
-All severities reflect post-rebuttal reconciliation. For findings with multiple valid approaches, options are listed inline with ✅ marking the recommended option.
-
-| # | Sev | Location | Issue | Fix Options | ✅ Rec |
-|---|-----|----------|-------|-------------|--------|
-| F-1 | ❌ | [file.cc](path/file.cc#L42), [:55](path/file.cc#L55), [:68](path/file.cc#L68) | [issue title] | A: [approach] · B: [approach] | A |
-| F-2 | ⚠️ | [file.cc](path/file.cc#L100) | [issue title] | [single fix] | — |
-| F-3 | ❌ | [file.h](path/file.h#L10), [other.h](path/other.h#L20) | [issue title] | A: [approach] · B: [approach] | B |
-| F-4 | 💡 | [file.h](path/file.h#L50) | [issue title] | [single fix] | — |
-| F-5 | ⚠️ | [file.py](path/file.py#L200) | [issue title] | Resolves with F-1 at C layer | — |
-| F-6 | 📋 | [file.py](path/file.py) | [issue title] | [future work description] | — |
+[Optional: one-line bullets here for findings that genuinely need extra context, prefixed with the F-number]
 
 **Rules:**
-- Location uses markdown links: `[file.cc](path/file.cc#L42)` for VS Code clickable hyperlinks
-- Multiple locations in the same file: `[file.cc](path/file.cc#L42), [:55](path/file.cc#L55)`
-- Multiple files: `[file.h](path/file.h#L10), [other.h](path/other.h#L20)`
-- Use workspace-relative paths in the link target, display name is just the filename
-- Combine findings that hit the same line range (e.g., "6 sites" with comma-separated links)
-- Findings that resolve via another finding say "Resolves with #N"
-- Single-fix findings leave ✅ Rec as `—`
+- `Source`: subagent(s) that reported it (security, arch, style, tests, perf, docs, build, skeptic)
+- `Location`: markdown links with workspace-relative paths — same file: `[:55](path/file.cc#L55)`, cross-file: separate links
+- `Issue`: one sentence stating the problem and its impact. For findings that resolve via another, append "— Resolves with F-N" and leave Fix Options as `—`
+- `Fix Options`: single fix or `A: ... · B: ...` for multi-option; tradeoffs in *italics*
+- `✅ Rec`: recommended fix letter, or `—` for single-fix findings
 
 ## Unresolved Comments
 
-Check for unresolved PR comments. For each:
-- Summarize the comment and the reviewer's concern
-- Deep-dive into the underlying issue
-- If it overlaps with a finding above, cross-reference: "Related to F-N"
-- Provide 2-3 concrete options for resolution with tradeoffs
-- Recommend one option
+Check for unresolved PR comments. Cross-reference findings with "Related to F-N" when relevant.
 
 | # | Comment | Location | Related Finding | Fix Options | ✅ Rec |
 |---|---------|----------|-----------------|-------------|--------|
 | C-1 | [summary] | [file.cc](path/file.cc#L42) | F-N or — | A: [approach] · B: [approach] | A |
 
-Omit this subsection if there are no unresolved comments.
+Omit this section entirely if there are no unresolved comments.
 
 ## Conclusion
-**PR Split:** ✂️ RECOMMEND SPLIT / ✅ SINGLE PR OK — [table if splitting recommended]
-**Status: [Status Symbol] [STATUS]** | ❌ × N | ⚠️ × N | 💡 × N | 📋 × N | Unresolved Comments: N
-```
 
-### File Naming (when saving)
-
-Present reviews inline by default. Only save to file when explicitly requested.
-- PR: `reviews/pr_{NUMBER}[_{TYPE}].md`
-- Local: `reviews/local_{COUNTER}_{branch-name}[_{TYPE}].md` (counter: 001, 002, …; slashes → dashes)
+| PR Split | Status | ❌ | ⚠️ | 💡 | 📋 | Unresolved Comments |
+|----------|--------|-----|-----|-----|-----|---------------------|
+| ✂️ RECOMMEND SPLIT / ✅ SINGLE PR OK | [Status Symbol] [STATUS] | N | N | N | N | N |
