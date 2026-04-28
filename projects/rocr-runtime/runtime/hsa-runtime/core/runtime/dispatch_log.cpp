@@ -461,13 +461,32 @@ void free_ring_buffer(ring_alloc_t& a) {
 }
 
 // Snapshot: clone shared_ptrs out of g_active_queues under the lifecycle
-// mutex, return the vector. Drainer then iterates without holding the mutex.
+// mutex, return the vector. Drainer then iterates WITHOUT holding the
+// mutex (this is the only place where snapshotting matters: the drainer
+// runs on the data-plane hot path and must not block lifecycle ops, and
+// shared_ptr ownership keeps the entries alive across the unlocked loop).
 std::vector<std::shared_ptr<queue_drain_state>> snapshot_active_queues() {
   std::vector<std::shared_ptr<queue_drain_state>> out;
   std::lock_guard<std::mutex> lk(g_lifecycle_mu);
   out.reserve(g_active_queues.size());
   for (auto& kv : g_active_queues) out.push_back(kv.second);
   return out;
+}
+
+// Iterate g_known_queues under g_lifecycle_mu and invoke fn(queue_id, queue)
+// for each entry. C6 fix: replaces the previous "snapshot into vector then
+// iterate" pattern in ts_poller_loop / shutdown — the lock was already
+// held for the entire snapshot+iterate window, so the snapshot copy added
+// allocator pressure with no concurrency benefit. fn must NOT mutate
+// g_known_queues (the only legal mutators are on_queue_create /
+// on_queue_destroy, both of which take g_lifecycle_mu themselves and
+// therefore cannot run during this iteration). fn IS allowed to mutate
+// g_active_queues (e.g. enable_dispatch_log_for_queue_locked inserts,
+// disable_dispatch_log_for_queue_locked erases).
+template <typename F>
+void for_each_known_queue_locked(F&& fn) {
+  std::lock_guard<std::mutex> lk(g_lifecycle_mu);
+  for (auto& kv : g_known_queues) fn(kv.first, kv.second);
 }
 
 // ============================================================================
@@ -883,32 +902,23 @@ void ts_poller_loop() {
       // and on_queue_destroy serialize on the same mutex, so the Queue*
       // values we observe here cannot be torn down concurrently.
       // enable_dispatch_log_for_queue_locked is itself a no-op for queues
-      // that are already active (idempotent enable).
-      std::lock_guard<std::mutex> lk(g_lifecycle_mu);
-      // Snapshot first so enable's per-queue work doesn't mutate the map
-      // we're iterating (g_active_queues is mutated, but g_known_queues
-      // is stable across enable for an existing queue — defensive copy
-      // anyway).
-      std::vector<core::Queue*> known;
-      known.reserve(g_known_queues.size());
-      for (auto& kv : g_known_queues) known.push_back(kv.second);
-      for (core::Queue* q : known) {
-        enable_dispatch_log_for_queue_locked(q);
-      }
+      // that are already active (idempotent enable). C6: direct iteration,
+      // no per-tick snapshot allocation.
+      for_each_known_queue_locked(
+          [](uint64_t /*qid*/, core::Queue* q) {
+            enable_dispatch_log_for_queue_locked(q);
+          });
     } else {
       // DISABLE pass (spec §4 + §9 ROCM_LTTNG_UST_DISABLE row): for each
       // known live queue Q with dispatch_log_active==true, run the
       // per-queue DISABLE sequence (wait_for_idle, final drain, KFD
       // DISABLE, QueueProfilingRelease, mark inactive). Idempotent over
       // already-inactive queues. Required for kill-switch hygiene per
-      // spec §1039.
-      std::lock_guard<std::mutex> lk(g_lifecycle_mu);
-      std::vector<core::Queue*> known;
-      known.reserve(g_known_queues.size());
-      for (auto& kv : g_known_queues) known.push_back(kv.second);
-      for (core::Queue* q : known) {
-        disable_dispatch_log_for_queue_locked(q);
-      }
+      // spec §1039. C6: direct iteration, no per-tick snapshot allocation.
+      for_each_known_queue_locked(
+          [](uint64_t /*qid*/, core::Queue* q) {
+            disable_dispatch_log_for_queue_locked(q);
+          });
     }
 
     // Sleep until next tick.
@@ -946,15 +956,16 @@ void shutdown() {
   // (wait_for_idle, final drain, KFD DISABLE, QueueProfilingRelease) for
   // every queue still active at process exit. The poller is joined above
   // so no other thread is touching g_known_queues / g_active_queues here;
-  // the lock is taken for consistency with the helpers' contract.
+  // the lock is taken for consistency with the helpers' contract. C6:
+  // direct iteration via for_each_known_queue_locked, then a separate
+  // locked block for the post-iterate clears (we cannot clear inside the
+  // iteration callback because that would mutate the map mid-iteration).
+  for_each_known_queue_locked(
+      [](uint64_t /*qid*/, core::Queue* q) {
+        disable_dispatch_log_for_queue_locked(q);
+      });
   {
     std::lock_guard<std::mutex> lk(g_lifecycle_mu);
-    std::vector<core::Queue*> known;
-    known.reserve(g_known_queues.size());
-    for (auto& kv : g_known_queues) known.push_back(kv.second);
-    for (core::Queue* q : known) {
-      disable_dispatch_log_for_queue_locked(q);
-    }
     g_known_queues.clear();
     // Defensive: drop any remaining drainer refs (the disable sequence
     // above should have removed them, but if a destroy hook racing with
