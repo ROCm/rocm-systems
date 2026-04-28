@@ -13,12 +13,23 @@
 struct ncclBootstrapHandle {
   uint64_t magic;
   union ncclSocketAddress addr;
+  int nRanks;  // number of existing ranks; set by bootstrapGetUniqueId(handle, comm) for grow
 };
 static_assert(sizeof(struct ncclBootstrapHandle) <= sizeof(ncclUniqueId), "Bootstrap handle is too large to fit inside NCCL unique ID");
+
+// Tag used by bcastGrowHandle to push the rendezvous handle to boundary ranks.
+#define BOOTSTRAP_TAG_GROW_BOUNDARY (0x1 << 27)
 
 ncclResult_t bootstrapNetInit();
 ncclResult_t bootstrapCreateRoot(struct ncclBootstrapHandle* handle, bool idFromEnv);
 ncclResult_t bootstrapGetUniqueId(struct ncclBootstrapHandle* handle);
+// Comm-aware overload used by ncclCommGetUniqueId for grow. Derives the magic
+// deterministically from (comm->magic, comm->splitCount + 1).
+ncclResult_t bootstrapGetUniqueId(struct ncclBootstrapHandle* handle, struct ncclComm* comm);
+// Send (isRoot=true) or receive (isRoot=false) the grow rendezvous handle on
+// the parent comm's bootstrap. Root broadcasts to all other existing ranks;
+// non-root ranks receive with a wildcard peer (-1).
+ncclResult_t bcastGrowHandle(struct ncclBootstrapHandle* handle, struct ncclComm* parent, bool isRoot);
 ncclResult_t bootstrapInit(int nHandles, void* handle, struct ncclComm* comm);
 ncclResult_t bootstrapSplit(uint64_t magic, struct ncclComm* comm, struct ncclComm* parent, int color, int key, int* parentRanks);
 ncclResult_t bootstrapAllGather(void* commState, void* allData, int size);
