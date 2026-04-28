@@ -183,9 +183,9 @@ struct processor_config_t
 
 struct processor_storage_t
 {
-    std::shared_ptr<rocpd_processor_t>          rocpd_processor{ nullptr };
-    std::shared_ptr<perfetto_processor_t>       perfetto_processor{ nullptr };
-    std::shared_ptr<unified_memory_processor_t> unified_memory_processor{ nullptr };
+    std::shared_ptr<rocpd_processor_t>            rocpd_processor{ nullptr };
+    std::shared_ptr<perfetto_processor_t>         perfetto_processor{ nullptr };
+    std::shared_ptr<unified_memory_processor_t<>> unified_memory_processor{ nullptr };
 };
 
 using directory_files_t    = std::vector<std::string>;
@@ -428,9 +428,9 @@ configure_processors(const std::shared_ptr<sample_processor_t>&       _type_proc
         }
 
         processor_storage.unified_memory_processor =
-            std::make_shared<unified_memory_processor_t>(
-                _processor_config->_metadata_registry, _processor_config->_agent_manager,
-                _processor_config->_pid, output_dir, _output_registry);
+            std::make_shared<unified_memory_processor_t<>>(
+                _processor_config->_agent_manager, _processor_config->_pid, output_dir,
+                _output_registry);
         _type_processing->add_handler(*processor_storage.unified_memory_processor);
         LOG_DEBUG("Unified memory processor enabled for PID {} with output: {}",
                   _processor_config->_pid, output_dir);
