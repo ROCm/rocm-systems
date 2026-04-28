@@ -627,6 +627,26 @@ void disable_dispatch_log_for_queue_locked(core::Queue* q) {
   if (!q->dispatch_log_active.load(std::memory_order_acquire)) return;
 
   // Spec §4 disable-edge per-queue sequence.
+  //
+  // C2 fix: ordering between final-drain, drainer-snapshot poisoning,
+  // registry erase, and buffer release is critical. queue_drain_state
+  // stores NON-OWNING pointers into a buffer owned by AqlQueue; once
+  // QueueProfilingRelease triggers SetProfiling(false) the buffer is
+  // freed. A snapshot held by the drainer thread (snapshot_active_queues)
+  // pins the queue_drain_state alive but does NOT pin the buffer, so
+  // the drainer could dereference freed memory in drain_one_queue.
+  //
+  // We close that window by poisoning the snapshot-visible pointers
+  // under qs->drain_mu, then erasing from g_active_queues, and only
+  // then calling QueueProfilingRelease (which frees the buffer):
+  //
+  //   - drain_one_queue takes drain_mu first thing, then early-returns
+  //     on ring_base==nullptr || record_count==0. Any drainer that
+  //     hasn't started its pass for this queue yet will exit early.
+  //   - Any drainer already inside drain_one_queue holds drain_mu, so
+  //     the poisoning step blocks until it completes its current pass.
+  //     The buffer is not yet freed at that point (we haven't released
+  //     yet), so that pass is safe to finish.
 
   // a. wait_for_idle (bounded ≤ 100 ms).
   wait_for_idle(q);
@@ -634,17 +654,37 @@ void disable_dispatch_log_for_queue_locked(core::Queue* q) {
   // b. Final drain with force_emit=true (spec §6).
   ts_drainer_drain_now_locked(q);
 
-  // c. Release profiling ref. On the 1->0 edge AqlQueue::SetProfiling(false)
-  // clears the KFD profiling-buffer registration (UPDATE_QUEUE with addr=0)
-  // and frees the per-queue dispatch-record buffer. QueueProfilingRelease
-  // takes g_owners_mu, NOT g_lifecycle_mu.
-  QueueProfilingRelease(q);
+  // c. Look up the registered drain-state shared_ptr. After this we hold
+  //    a local ref so qs survives even after the registry erase below.
+  std::shared_ptr<queue_drain_state> qs_ptr;
+  {
+    auto it = g_active_queues.find(queue_id_of(q));
+    if (it != g_active_queues.end()) qs_ptr = it->second;
+  }
 
-  // d. Unregister from drainer registry. Drops the registry's shared_ptr
-  //    ref. The buffer is owned by AqlQueue (we just released it via
-  //    SetProfiling(false)); our queue_drain_state holds only non-owning
-  //    pointers, so the destructor is a no-op for buffer memory.
+  // d. Poison the non-owning pointers under drain_mu so any drainer
+  //    snapshot still in flight will exit drain_one_queue early. The
+  //    drain_mu acquire serializes with any in-progress drain pass.
+  if (qs_ptr) {
+    std::lock_guard<std::mutex> lk(qs_ptr->drain_mu);
+    qs_ptr->ring_base       = nullptr;
+    qs_ptr->fw_wptr_records = nullptr;
+    qs_ptr->record_count    = 0;
+    qs_ptr->record_mask     = 0;
+  }
+
+  // e. Unregister from drainer registry. Drops the registry's shared_ptr
+  //    ref. Any in-flight drainer snapshot still holds its own ref to
+  //    qs_ptr but its ring_base/fw_wptr_records are now nullptr.
   g_active_queues.erase(queue_id_of(q));
+
+  // f. Release profiling ref. On the 1->0 edge AqlQueue::SetProfiling(false)
+  //    clears the KFD profiling-buffer registration (UPDATE_QUEUE with
+  //    addr=0) and frees the per-queue dispatch-record buffer.
+  //    QueueProfilingRelease takes g_owners_mu, NOT g_lifecycle_mu.
+  //    By this point no drainer can dereference the buffer because
+  //    every snapshot's qs->ring_base is nullptr.
+  QueueProfilingRelease(q);
 
   q->dispatch_log_active.store(false, std::memory_order_release);
 }
