@@ -348,6 +348,17 @@ void for_each_known_queue_locked(F&& fn) {
 bool drain_one_queue(queue_drain_state& qs, bool force_emit) {
   std::lock_guard<std::mutex> lk(qs.drain_mu);
 
+  // KNOWN GAP (see dispatch_log.h banner + spec §10 dep #2 sub-bullet):
+  // qs.fw_wptr_records points at AqlQueue::dispatch_record_wptr_, a host-side
+  // uint32_t whose ADDRESS is NEVER published to KFD or firmware on the
+  // current substrate. libhsakmt's hsaKmtSetQueueProfilingBuffer discards
+  // the WptrHostAddr argument, and kfd_ioctl_update_queue_args has no
+  // wptr_addr field. Result: this counter stays at 0 forever, the
+  // `fw_extended == qs.read_record_cursor` early-out below always fires, and
+  // this loop is effectively DORMANT (the polling cost is still incurred,
+  // but no records are paired or emitted). The drainer will start producing
+  // records only after the substrate is extended (KFD ABI + FW contract) to
+  // publish wptr to firmware.
   if (qs.fw_wptr_records == nullptr || qs.ring_base == nullptr ||
       qs.record_count == 0) {
     return false;

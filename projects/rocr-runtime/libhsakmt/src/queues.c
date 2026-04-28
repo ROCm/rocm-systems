@@ -1151,7 +1151,36 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtSetQueueProfilingBuffer(HSA_QUEUEID QueueId,
 
 	q->dispatch_record_buffer_addr = (uintptr_t)BufferBase;
 	q->dispatch_record_buffer_size = NumRecords;
-	(void)WptrHostAddr; /* host-coherent wptr is plumbed by HSA via MQD path */
+	/*
+	 * KNOWN GAP — WptrHostAddr is intentionally discarded.
+	 *
+	 * The HSA dispatch_log drainer (rocr-runtime
+	 * core/runtime/dispatch_log.cpp) needs firmware to publish a
+	 * write-pointer counter into a host-visible address. AqlQueue
+	 * passes that address (&dispatch_record_wptr_) here, but:
+	 *   - struct kfd_ioctl_update_queue_args (the ioctl this cache feeds)
+	 *     has only dispatch_record_buffer_addr + dispatch_record_buffer_size
+	 *     (+ pad) — there is no wptr_addr field to forward to the kernel
+	 *     and onward into MQD setup.
+	 *   - The host kernel keeps any FW-visible wptr in MQD
+	 *     (e.g. v9_mqd::dispatch_record_buffer_wptr at offset 0x2F on
+	 *     gfx9), which is GPU-side and not host-readable through any
+	 *     current API.
+	 *
+	 * This precedent was carried over from the cpc_tracing branch, which
+	 * defined the WptrHostAddr parameter at the libhsakmt boundary
+	 * presumably with the intent that the KFD ABI would later be
+	 * extended to forward it. That extension never landed, and
+	 * cpc_tracing was never integration-tested end-to-end, so the gap
+	 * was never user-visible there. Until the KFD ABI gains a
+	 * wptr_addr field (or the firmware contract is changed to write
+	 * wptr to a known offset inside the ring buffer itself), the
+	 * dispatch_log drainer will be effectively dormant.
+	 *
+	 * See rocr-runtime core/inc/dispatch_log.h banner + spec §10
+	 * dependency #2 sub-bullet.
+	 */
+	(void)WptrHostAddr;
 
 	return HSAKMT_STATUS_SUCCESS;
 }

@@ -1708,6 +1708,14 @@ hsa_status_t AqlQueue::GetProfilingDispatchRecords(void** buffer_base, uint32_t*
   // Report the FW-record-stride sized capacity (16 bytes per record), NOT the
   // host-kernel oversized allocation. The drainer iterates 16-byte records.
   *buffer_size = dispatch_record_buffer_size_ * static_cast<uint32_t>(sizeof(mec_dispatch_record));
+  // KNOWN GAP (see core/inc/dispatch_log.h banner + spec §10 dep #2
+  // sub-bullet): this returns a HOST-SIDE address that firmware does NOT
+  // update on the current substrate. The address is plumbed through
+  // KfdDriver::SetQueueProfilingBuffer -> hsaKmtSetQueueProfilingBuffer,
+  // but libhsakmt discards it and the KFD ABI
+  // (kfd_ioctl_update_queue_args) has no wptr_addr field to forward it on
+  // to firmware. Consumers must understand that *write_ptr will stay 0
+  // until a substrate extension publishes wptr to FW.
   *write_ptr = &dispatch_record_wptr_;
   return HSA_STATUS_SUCCESS;
 }
