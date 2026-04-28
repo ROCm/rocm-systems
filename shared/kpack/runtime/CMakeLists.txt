@@ -32,7 +32,7 @@ target_include_directories(rocm_kpack
 target_link_libraries(rocm_kpack
     PRIVATE
         msgpack-cxx
-        zstd::libzstd
+        ${zstd_libzstd}
 )
 
 # Symbol visibility control

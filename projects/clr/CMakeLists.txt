@@ -17,14 +17,8 @@ if (CMAKE_CXX_COMPILER_ID STREQUAL "MSVC"
     endif()
     string(REPLACE "/GR" "" CMAKE_CXX_FLAGS ${CMAKE_CXX_FLAGS})
     string(REPLACE "/W3" "" CMAKE_CXX_FLAGS ${CMAKE_CXX_FLAGS})
-    if (CMAKE_BUILD_TYPE STREQUAL "Debug")
-        add_compile_options(/MTd)
-        add_compile_options(-D_ALLOW_ITERATOR_DEBUG_LEVEL_MISMATCH)
-    else()
-        if (AMD_COMPUTE_WIN)
-            add_compile_options(/MT)
-        endif()
-    endif()
+    add_compile_options($<$<CONFIG:Debug>:-D_ITERATOR_DEBUG_LEVEL=0>)
+    set(CMAKE_MSVC_RUNTIME_LIBRARY MultiThreaded)
     if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
         # Unlike when targeting MSFT's MSVC, when targeting clang-cl,
         # CMake does not add these automatically.  Add them ourselves.
@@ -67,13 +61,8 @@ message(STATUS "ROCM_PATH: ${ROCM_PATH}")
 # for compatibility: users are advised to pass HIP_PLATFORM explicitly.
 # Sets the HIP_PLATFORM variable in the parent scope.
 function(_hip_clr_auto_detect_hip_platform)
-    if (UNIX)
-      set(HIPCC_EXECUTABLE "hipcc")
-      set(HIPCONFIG_EXECUTABLE "hipconfig")
-    else()
-      set(HIPCC_EXECUTABLE "hipcc.exe")
-      set(HIPCONFIG_EXECUTABLE "hipconfig.exe")
-    endif()
+    set(HIPCC_EXECUTABLE "hipcc${CMAKE_EXECUTABLE_SUFFIX}")
+    set(HIPCONFIG_EXECUTABLE "hipconfig${CMAKE_EXECUTABLE_SUFFIX}")
 
     # Set default HIPCC_BIN_DIR to ${ROCM_PATH}/bin
     if(NOT DEFINED HIPCC_BIN_DIR AND UNIX)
@@ -93,9 +82,9 @@ function(_hip_clr_auto_detect_hip_platform)
                 RESULT_VARIABLE result
                 OUTPUT_STRIP_TRAILING_WHITESPACE)
 
-	    if(result AND NOT result EQUAL 0)
+            if(result AND NOT result EQUAL 0)
                 message(FATAL_ERROR "Failure trying to auto-detect HIP_PLATFORM via command: ${HIPCC_BIN_DIR}/${HIPCONFIG_EXECUTABLE} --platform: ${result}")
-	    endif()
+            endif()
 
             set(HIP_PLATFORM "${_detected_hip_platform}" PARENT_SCOPE)
         else()

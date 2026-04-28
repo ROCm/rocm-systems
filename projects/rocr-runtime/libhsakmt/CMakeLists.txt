@@ -295,11 +295,7 @@ else()
       ## Fall back to pre-built wkmi.lib
       set(WKMI_SRC_BUILD OFF CACHE INTERNAL "wkmi is built from source")
       message(STATUS "Using pre-built wkmi.lib (set WKMI_SRC_DIR to build from source)")
-      if(CMAKE_BUILD_TYPE STREQUAL "Debug")
-        set(WKMI_LIB_PATH ${CMAKE_CURRENT_SOURCE_DIR}/src/dxg/wkmi/win/dbg/wkmi.lib)
-      else()
-        set(WKMI_LIB_PATH ${CMAKE_CURRENT_SOURCE_DIR}/src/dxg/wkmi/win/rel/wkmi.lib)
-      endif()
+      set(WKMI_LIB_PATH ${CMAKE_CURRENT_SOURCE_DIR}/src/dxg/wkmi/win/rel/wkmi.lib)
       target_include_directories(${HSAKMT_TARGET} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src/dxg/wkmi)
       
       # Link wkmi.lib and ensure it's propagated to downstream targets (hsa-runtime64)

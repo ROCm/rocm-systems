@@ -21,10 +21,7 @@ set(NO_SI_SP3      "no" CACHE STRING "Disable using SP3")
 file(GLOB sources *.cpp *.hpp)
 
 add_library(amdhsacode STATIC ${sources})
-set_target_properties(amdhsacode PROPERTIES
-  MSVC_RUNTIME_LIBRARY          "MultiThreaded$<$<CONFIG:Debug>:Debug>"
-  POSITION_INDEPENDENT_CODE     ON
-)
+set_target_properties(amdhsacode PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "^(GNU|(Apple)?Clang)$")
   target_compile_options(amdhsacode PRIVATE

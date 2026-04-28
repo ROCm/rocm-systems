@@ -13,7 +13,7 @@ add_executable(
 )
 target_link_libraries(
     test_kpack_runtime
-    PRIVATE rocm_kpack msgpack-cxx zstd::libzstd GTest::gtest GTest::gtest_main
+    PRIVATE rocm_kpack msgpack-cxx ${zstd_libzstd} GTest::gtest GTest::gtest_main
 )
 # Include internal headers for white-box testing
 target_include_directories(

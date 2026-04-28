@@ -23,17 +23,11 @@ include(GNUInstallDirs)
 #  By default, CMake will search for a folder named opencl or ROCm-OpenCL-Runtime relative to the current path. Specify -DAMD_OPENCL_PATH=$OPENCL_DIR if opencl source is in obscure location.
 list(APPEND CMAKE_MODULE_PATH ${HIP_COMMON_DIR}/cmake)
 
-
 #############################
 # Options
 #############################
 option(__HIP_ENABLE_PCH "Enable/Disable pre-compiled hip headers" ON)
 option(BUILD_SHARED_LIBS "Build the shared library" ON)
-
-if(MSVC)
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /Zi")
-  set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} /DEBUG:FULL")
-endif()
 
 # Set default HIPCC_BIN_DIR to ${ROCM_PATH}/bin
 set(HIPCC_BIN_DIR "${ROCM_PATH}/bin" CACHE STRING "HIPCC and HIPCONFIG binary directories")
@@ -49,13 +43,8 @@ message(STATUS "HIP_COMMON_DIR found at ${HIP_COMMON_DIR}")
 message(STATUS "HIPNV_DIR found at ${HIPNV_DIR}")
 set(HIP_COMMON_INCLUDE_DIR ${HIP_COMMON_DIR}/include)
 set(HIP_COMMON_BIN_DIR ${HIP_COMMON_DIR}/bin)
-if (WIN32)
-  set(HIPCC_EXECUTABLE "hipcc.exe")
-  set(HIPCONFIG_EXECUTABLE "hipconfig.exe")
-else()
-  set(HIPCC_EXECUTABLE "hipcc")
-  set(HIPCONFIG_EXECUTABLE "hipconfig")
-endif()
+set(HIPCC_EXECUTABLE "hipcc${CMAKE_EXECUTABLE_SUFFIX}")
+set(HIPCONFIG_EXECUTABLE "hipconfig${CMAKE_EXECUTABLE_SUFFIX}")
 
 #############################
 # Setup config generation
@@ -87,7 +76,6 @@ endmacro()
 # Setup version information
 #############################
 find_package(Python3 COMPONENTS Interpreter REQUIRED)
-find_package(Git)
 
 set(ENV{HIP_PATH} "")
 file(STRINGS ${HIP_COMMON_DIR}/VERSION VERSION_LIST REGEX "^[0-9]+")

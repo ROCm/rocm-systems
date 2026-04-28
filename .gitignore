@@ -12,3 +12,6 @@
 # Visual Studio Code settings
 .vscode/
 /.rocshmem-worktree
+.idea/
+.depend/
+depend
