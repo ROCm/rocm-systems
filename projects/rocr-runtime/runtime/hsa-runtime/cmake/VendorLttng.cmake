@@ -490,9 +490,18 @@ ExternalProject_Add(urcu_vendored
     PREFIX            "${CMAKE_BINARY_DIR}/_deps/urcu-build"
     SOURCE_DIR        "${LTTNG_VENDORED_URCU_SRC}"
     BUILD_IN_SOURCE   1
+    # The source dir is a git submodule shared across multiple build trees
+    # (e.g. TheRock builds rocr-runtime twice — once as an amd-llvm runtimes
+    # ExternalProject and once as a standalone packaging sub-project — and
+    # both invoke this vendored build with different --prefix paths). Without
+    # cleaning, the .la files left behind by build #1 carry build #1's libdir
+    # baked in, and libtool refuses to install to build #2's libdir with
+    # "cannot install to a directory not ending in <build-1 libdir>".
+    # Run `make distclean` (best-effort: a fresh checkout has no Makefile) to
+    # wipe stale generated state before bootstrap+configure each invocation.
     CONFIGURE_COMMAND ${CMAKE_COMMAND} -E env
                       "ACLOCAL_PATH=${_lttng_aclocal_path}"
-                      sh -c "./bootstrap && ./configure \
+                      sh -c "{ make distclean >/dev/null 2>&1 || true; } && ./bootstrap && ./configure \
                           --prefix=${LTTNG_VENDORED_PREFIX} \
                           --libdir=${_lttng_libdir} \
                           --disable-static \
@@ -520,12 +529,14 @@ ExternalProject_Add(lttng_ust_vendored
     PREFIX            "${CMAKE_BINARY_DIR}/_deps/lttng-ust-build"
     SOURCE_DIR        "${LTTNG_VENDORED_UST_SRC}"
     BUILD_IN_SOURCE   1
+    # See urcu_vendored above: distclean wipes any stale build state from a
+    # prior build with a different --libdir so libtool's install can succeed.
     CONFIGURE_COMMAND ${CMAKE_COMMAND} -E env
                       "ACLOCAL_PATH=${_lttng_aclocal_path}"
                       "PKG_CONFIG_PATH=${LTTNG_VENDORED_PKGCONFIG}"
                       "CPPFLAGS=-I${LTTNG_VENDORED_INCLUDE_DIR}"
                       "LDFLAGS=-L${_lttng_libdir} -Wl,-rpath,${_lttng_libdir}"
-                      sh -c "./bootstrap && ./configure \
+                      sh -c "{ make distclean >/dev/null 2>&1 || true; } && ./bootstrap && ./configure \
                           --prefix=${LTTNG_VENDORED_PREFIX} \
                           --libdir=${_lttng_libdir} \
                           --disable-man-pages \
