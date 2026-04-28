@@ -66,7 +66,7 @@ class Queue {
 
   QueueDescProxyT queue_desc_proxy_{};
 
-  QueueElementProxyT queue_element_cache_proxy_{};
+  QueueElementProxy queue_element_cache_proxy_{};
 
   HdpProxy<HIPHostAllocator> hdp_proxy_{};
 

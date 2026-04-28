@@ -75,12 +75,13 @@ typedef struct queue_element {
   } ol2;
 } __attribute__((__aligned__(64))) queue_element_t;
 
-template <typename ALLOCATOR>
 class QueueElementProxy {
-  using ProxyT = DeviceProxy<ALLOCATOR, queue_element_t>;
+  using ProxyT = DeviceProxy<PosixAligned64Allocator, queue_element_t>;
 
  public:
-  QueueElementProxy(size_t num_elems = 1) : proxy_{num_elems} {
+  QueueElementProxy([[maybe_unused]] const PosixAligned64Allocator& alloc = PosixAligned64Allocator(),
+                    size_t num_elems = 1)
+    : proxy_{num_elems} {
     new (proxy_.get()) queue_element_t();
   }
 
@@ -99,8 +100,6 @@ class QueueElementProxy {
  private:
   ProxyT proxy_{};
 };
-
-using QueueElementProxyT = QueueElementProxy<PosixAligned64Allocator>;
 
 class QueueProxy {
   using ProxyT = DeviceProxy<HIPHostAllocator, queue_element_t *>;
