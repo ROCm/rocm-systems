@@ -18,11 +18,59 @@ namespace cooperative_groups {
 namespace impl {
   // these functions allow to make use of C++ function overloads, instead of having to code
   // a big if-constexpr according to operand type
-  template <bool Inclusive>
-  __device__ inline int scan_add(int val)
-  {
-    return __ockl_wfscan_add_i32(val, Inclusive);
-  }
+  #define GENERATE_SCAN_FUNC(OP, TYPE_ALIAS, TYPE) \
+  extern "C" __device__ __attribute__((const)) TYPE __ockl_wfscan_ ## OP ## _ ## TYPE_ALIAS(TYPE, bool);\
+\
+    template <bool Inclusive>\
+    __device__ inline TYPE scan_ ## OP(TYPE val)\
+    {\
+      return __ockl_wfscan_ ## OP ## _ ## TYPE_ALIAS(val, Inclusive);\
+    }
+
+  GENERATE_SCAN_FUNC(add, i32, int);
+  GENERATE_SCAN_FUNC(add, u32, unsigned int);
+
+  GENERATE_SCAN_FUNC(min, i32, int);
+  GENERATE_SCAN_FUNC(min, u32, unsigned int);
+
+  GENERATE_SCAN_FUNC(max, i32, int);
+  GENERATE_SCAN_FUNC(max, u32, unsigned int);
+
+  GENERATE_SCAN_FUNC(and, i32, int);
+  GENERATE_SCAN_FUNC(and, u32, unsigned int);
+
+  GENERATE_SCAN_FUNC(or, i32, int);
+  GENERATE_SCAN_FUNC(or, u32, unsigned int);
+
+  GENERATE_SCAN_FUNC(xor, i32, int);
+  GENERATE_SCAN_FUNC(xor, u32, unsigned int);
+
+
+#ifdef HIP_ENABLE_EXTRA_WARP_SYNC_TYPES
+  GENERATE_SCAN_FUNC(add, i64, long long);
+  GENERATE_SCAN_FUNC(add, u64, unsigned long long);
+  GENERATE_SCAN_FUNC(add, f32, float);
+  GENERATE_SCAN_FUNC(add, f64, double);
+
+  GENERATE_SCAN_FUNC(min, i64, long long);
+  GENERATE_SCAN_FUNC(min, u64, unsigned long long);
+  GENERATE_SCAN_FUNC(min, f32, float);
+  GENERATE_SCAN_FUNC(min, f64, double);
+
+  GENERATE_SCAN_FUNC(max, i64, long long);
+  GENERATE_SCAN_FUNC(max, u64, unsigned long long);
+  GENERATE_SCAN_FUNC(max, f32, float);
+  GENERATE_SCAN_FUNC(max, f64, double);
+
+  GENERATE_SCAN_FUNC(and, i64, long long);
+  GENERATE_SCAN_FUNC(and, u64, unsigned long long);
+
+  GENERATE_SCAN_FUNC(or, i64, long long);
+  GENERATE_SCAN_FUNC(or, u64, unsigned long long);
+
+  GENERATE_SCAN_FUNC(xor, i64, long long);
+  GENERATE_SCAN_FUNC(xor, u64, unsigned long long);
+#endif
 
   // not all types could be used with wfscan (e.g. user defined types), this predicate indicates whether that is the case
   template <typename T, typename = void>
@@ -81,12 +129,11 @@ __CG_QUALIFIER__ auto inclusive_scan(const TyGroup& group, TyVal&& val, TyFn&& o
 #ifdef __OPTIMIZE__  // at the time of this writing the ockl wfscan functions do not compile when
                      // using -O0
   if (impl::isTiledGroup<TyGroup>::value) {
-    if constexpr (__hip_internal::is_same<Op, cooperative_groups::plus<Val>>::value &&
-                  impl::has_scan_add<Val>::value) {
-      // for tiled_groups might know at compile time that whether we can call the ockl intrinsics or
-      // not; if the block tile is actually the whole warp
-      if (impl::tiledGroupSize<TyGroup>::value == warpSize) {
-        // TODO g-h-c check that his condition is compiled away by the compiler
+    // for tiled_groups we know at compile time that whether we can call the ockl intrinsics or
+    // not; if the block tile is actually the whole warp
+    if (impl::tiledGroupSize<TyGroup>::value == warpSize) {
+      if constexpr (__hip_internal::is_same<Op, cooperative_groups::plus<Val>>::value &&
+                    impl::has_scan_add<Val>::value) {
         return impl::scan_add<true>(val);
       }
     }
