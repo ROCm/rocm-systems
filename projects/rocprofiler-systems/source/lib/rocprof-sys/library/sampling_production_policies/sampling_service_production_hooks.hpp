@@ -26,6 +26,7 @@
 
 #include <filesystem>
 #include <fstream>
+#include <mutex>
 
 namespace rocprofsys::sampling
 {
@@ -143,6 +144,17 @@ sampling_service<default_sampling_policies>::setup_production_wiring(
                                      " Overflow (S) " + std::to_string(sys_id);
 
         auto& reg = trace_cache::get_metadata_registry();
+
+        // AC-16: register sampling category strings once per process.
+        static std::once_flag s_category_init;
+        std::call_once(s_category_init, [&reg]() {
+            reg.add_string("timer_sampling");
+            reg.add_string("overflow_sampling");
+        });
+
+        // AC-16: register thread info so rocpd has ppid/pid/tid for this thread.
+        reg.add_thread_info({ getppid(), getpid(), sys_id, 0, 0, "{}" });
+
         reg.add_track({ timer_track, sys_id, "{}" });
         reg.add_track({ overflow_track, sys_id, "{}" });
 
