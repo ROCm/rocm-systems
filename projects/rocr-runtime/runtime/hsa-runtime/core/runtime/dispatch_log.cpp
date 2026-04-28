@@ -579,22 +579,31 @@ void enable_dispatch_log_for_queue_locked(core::Queue* q) {
   // g_lifecycle_mu), so it's safe to call while holding g_lifecycle_mu.
   hsa_status_t s = QueueProfilingAcquire(q);
   if (s != HSA_STATUS_SUCCESS) {
-    // C3: now that QueueProfilingAcquire propagates the underlying
-    // SetProfiling status (allocation failure, libhsakmt
-    // SetQueueProfilingBuffer NOT_SUPPORTED, etc.), an error here means
-    // the agent's KFD/firmware substrate cannot accept a dispatch-record
-    // buffer for this queue. Mark the agent as no-dispatch-log so we
-    // don't retry every poll tick on every queue belonging to it (spec
-    // §5 unsupported-agent row, §9 unsupported-agent row). The refcount
-    // was not bumped (Acquire returns early on the 0->1 SetProfiling
-    // failure path), so no Release is needed.
+    // C5: distinguish substrate-absent from per-queue transient failures.
+    //
+    // Spec §5 (lines 604-609) only marks the agent as "no-dispatch-log"
+    // when the failure indicates the substrate itself does not support
+    // a dispatch-record buffer for queues on this agent — modeled as
+    // HSA_STATUS_ERROR_NOT_SUPPORTED in the AqlQueue status surface
+    // (KfdDriver returns NOT_SUPPORTED when the libhsakmt thunk symbol
+    // is absent). For other failures (allocation OOM, transient KFD
+    // errors), we just skip THIS queue/THIS tick and let later queues
+    // and later ticks retry. Marking the whole agent on a transient
+    // failure would permanently disable an otherwise-supported agent
+    // from a one-off resource pressure event. The refcount was not
+    // bumped (Acquire returns early on the 0->1 SetProfiling failure
+    // path), so no Release is needed.
+    const bool agent_unsupported = (s == HSA_STATUS_ERROR_NOT_SUPPORTED);
     std::fprintf(stderr,
                  "[hsa-runtime] dispatch_log: queue_id=%llu ENABLE step 1 "
-                 "(QueueProfilingAcquire) failed status=%d; marking agent "
-                 "as no-dispatch-log\n",
+                 "(QueueProfilingAcquire) failed status=%d%s\n",
                  static_cast<unsigned long long>(queue_id_of(q)),
-                 static_cast<int>(s));
-    g_no_dispatch_log_agents.insert(q->GetAgent());
+                 static_cast<int>(s),
+                 agent_unsupported ? "; marking agent as no-dispatch-log"
+                                   : "; per-queue skip (transient)");
+    if (agent_unsupported) {
+      g_no_dispatch_log_agents.insert(q->GetAgent());
+    }
     return;
   }
 
