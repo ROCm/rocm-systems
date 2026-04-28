@@ -408,7 +408,7 @@ void WriteJsonTraceImpl(const char* filepath) {
 
   size_t total      = g_rec_counter.load(std::memory_order_acquire);
   // Track only the (device_id, gpu_tid) pairs that actually received events.
-  // Key = device_id, Value = set of gpu tids (queue_id*2+sdma) with events.
+  // Key = device_id, Value = set of gpu tids (lane*2+sdma) with events.
   std::unordered_map<int, std::unordered_set<uint64_t>> device_gpu_tids;
   // Map (device_id, gpu_tid) -> last seen hipStream_t for lane labeling.
   std::map<std::pair<int,uint64_t>, hipStream_t> gpu_tid_stream;
@@ -417,6 +417,15 @@ void WriteJsonTraceImpl(const char* filepath) {
   uint32_t next_tid = 0;
   uint64_t flow_id  = 0;  // unique id for each CPU→GPU flow arrow pair
   bool first = true;
+  // Compact lane index per unique stream (same scheme as pftrace writer).
+  std::unordered_map<uintptr_t, uint64_t> stream_lane_idx;
+  uint64_t next_stream_lane = 0;
+  auto compact_stream_lane = [&](hipStream_t stream, uint64_t queue_id) -> uint64_t {
+    uintptr_t key = stream ? reinterpret_cast<uintptr_t>(stream) : (0x8000ULL | queue_id);
+    auto [it, ins] = stream_lane_idx.emplace(key, next_stream_lane);
+    if (ins) ++next_stream_lane;
+    return it->second;
+  };
 
   // ── Memory lifetime map ───────────────────────────────────────────────────
   // Built in a first pass over all records before emission.
@@ -428,8 +437,8 @@ void WriteJsonTraceImpl(const char* filepath) {
     uint64_t size;       // bytes
     uint64_t mem_fid;    // flow id for the "alloc→lifetime" arrow (filled later)
   };
-  // Key = device pointer (uint64_t cast of void*)
-  std::unordered_map<uint64_t, AllocInfo> alloc_map;
+  // Key = device pointer; value = all lifetime entries for that ptr (handles reuse).
+  std::unordered_map<uint64_t, std::vector<AllocInfo>> alloc_map;
   // First pass: find base_ns (earliest timestamp) and populate alloc_map.
   // base_ns is subtracted from every ts so values stay small (avoids JS float64
   // precision loss for large absolute ns timestamps in the Perfetto UI).
@@ -453,18 +462,23 @@ void WriteJsonTraceImpl(const char* filepath) {
       if (!rec.api_name) continue;
       uint64_t ptr = reinterpret_cast<uintptr_t>(rec.memory1);
       if (IsAllocApi(rec.api_name) && ptr) {
-        alloc_map[ptr] = AllocInfo{rec.start_ns, 0, rec.size, 0};
+        alloc_map[ptr].push_back(AllocInfo{rec.start_ns, 0, rec.size, 0});
       } else if (IsFreeApi(rec.api_name) && ptr) {
         auto it = alloc_map.find(ptr);
-        if (it != alloc_map.end() && it->second.end_ns == 0)
-          it->second.end_ns = rec.start_ns;
+        if (it != alloc_map.end()) {
+          // Close the most recent open (unfreed) lifetime for this ptr.
+          for (auto rit = it->second.rbegin(); rit != it->second.rend(); ++rit) {
+            if (rit->end_ns == 0) { rit->end_ns = rec.start_ns; break; }
+          }
+        }
       }
     }
   }
   // Close any allocations still live at trace end (hipFree never called).
   uint64_t trace_end_ns = 0;
   for (auto& kv : alloc_map)
-    if (kv.second.end_ns > trace_end_ns) trace_end_ns = kv.second.end_ns;
+    for (auto& ai : kv.second)
+      if (ai.end_ns > trace_end_ns) trace_end_ns = ai.end_ns;
   // Also check all record end times for a proper upper bound.
   for (size_t c = 0; c < g_records.size(); ++c) {
     HipApiRecordExt* chunk = g_records[c];
@@ -474,7 +488,8 @@ void WriteJsonTraceImpl(const char* filepath) {
       if (chunk[i].end_ns > trace_end_ns) trace_end_ns = chunk[i].end_ns;
   }
   for (auto& kv : alloc_map)
-    if (kv.second.end_ns == 0) kv.second.end_ns = trace_end_ns;
+    for (auto& ai : kv.second)
+      if (ai.end_ns == 0) ai.end_ns = trace_end_ns;
 
   // Assign a stable tid to each allocation: low 20 bits of ptr shifted right
   // by alignment (device allocs are typically 4KB-aligned, so bits 12+).
@@ -557,7 +572,8 @@ void WriteJsonTraceImpl(const char* filepath) {
         double gpu_dur = (gop.end_ns > gop.begin_ns)
                          ? std::max(0.001, (gop.end_ns - gop.begin_ns) / 1000.0) : 0.001;
         double gpu_ts  = (gop.begin_ns > base_ns) ? (gop.begin_ns - base_ns) / 1000.0 : 0.0;
-        uint64_t gpu_tid = gop.queue_id * 2 + sdma;
+        // Use compact lane index per stream so reused queue_ids appear on separate lanes.
+        uint64_t gpu_tid = compact_stream_lane(stream, gop.queue_id) * 2 + sdma;
 
         const char* gpu_name_cstr = (op_idx == OP_ID_COPY) ? CopyKindName(gop.copy_kind)
                                                             : kGpuEvents[op_idx];
@@ -660,6 +676,12 @@ void WriteJsonTraceImpl(const char* filepath) {
             for (int si = 0; si < nseen; ++si) if (seen[si] == ptr) return;
             auto it = alloc_map.find(ptr);
             if (it == alloc_map.end()) return;
+            // Find the lifetime entry that was live when this GPU op ran.
+            AllocInfo* ai_match = nullptr;
+            for (auto& ai : it->second)
+              if (ai.start_ns <= gop.begin_ns && (ai.end_ns == 0 || gop.begin_ns <= ai.end_ns))
+                { ai_match = &ai; break; }
+            if (!ai_match) return;
             seen[nseen++] = ptr;
             uint64_t afid    = flow_id++;
             uint64_t mem_tid = alloc_tid(ptr);
@@ -718,15 +740,14 @@ void WriteJsonTraceImpl(const char* filepath) {
   // ── Memory lifetime slices (pid 2048 "GPU Memory") ───────────────────────
   // One ph:"X" slice per allocation spanning malloc→free, on a per-ptr tid lane.
   for (auto& kv : alloc_map) {
-    uint64_t ptr   = kv.first;
-    const AllocInfo& ai = kv.second;
+    uint64_t ptr     = kv.first;
     uint64_t mem_tid = alloc_tid(ptr);
+    char ptrbuf[32];
+    snprintf(ptrbuf, sizeof(ptrbuf), "0x%llx", static_cast<unsigned long long>(ptr));
+    for (const AllocInfo& ai : kv.second) {
     double ts_us   = (ai.start_ns > base_ns) ? (ai.start_ns - base_ns) / 1000.0 : 0.0;
     double end_us  = (ai.end_ns   > base_ns) ? (ai.end_ns   - base_ns) / 1000.0 : 0.0;
     double dur_us  = (end_us > ts_us) ? (end_us - ts_us) : 0.001;
-    char ptrbuf[32];
-    snprintf(ptrbuf, sizeof(ptrbuf), "0x%llx",
-             static_cast<unsigned long long>(ptr));
     char sizebuf[32];
     if (ai.size >= 1024 * 1024)
       snprintf(sizebuf, sizeof(sizebuf), "%.1f MB", ai.size / (1024.0 * 1024.0));
@@ -740,13 +761,22 @@ void WriteJsonTraceImpl(const char* filepath) {
           << ",\"pid\":" << kMemPid << ",\"tid\":" << mem_tid
           << ",\"ts\":" << ts_us << ",\"dur\":" << dur_us
           << ",\"args\":{\"ptr\":\"" << ptrbuf << "\",\"size\":" << ai.size << "}}";
-    trace << ",\n{\"name\":\"thread_name\",\"ph\":\"M\""
-          << ",\"pid\":" << kMemPid << ",\"tid\":" << mem_tid
-          << ",\"args\":{\"name\":\"" << ptrbuf << " (" << sizebuf << ")\"}}";
+    } // end inner for (ai)
+    // Thread name label once per ptr (use size of first entry for the label).
+    if (!kv.second.empty()) {
+      const AllocInfo& ai0 = kv.second[0];
+      char sizebuf[32];
+      if (ai0.size >= 1024*1024) snprintf(sizebuf, sizeof(sizebuf), "%.1f MB", ai0.size/(1024.0*1024.0));
+      else if (ai0.size >= 1024)  snprintf(sizebuf, sizeof(sizebuf), "%.1f KB", ai0.size/1024.0);
+      else snprintf(sizebuf, sizeof(sizebuf), "%llu B", static_cast<unsigned long long>(ai0.size));
+      trace << ",\n{\"name\":\"thread_name\",\"ph\":\"M\""
+            << ",\"pid\":" << kMemPid << ",\"tid\":" << mem_tid
+            << ",\"args\":{\"name\":\"" << ptrbuf << " (" << sizebuf << ")\"}}";
+    }
   }
   if (!alloc_map.empty()) {
     uint64_t total_bytes = 0;
-    for (auto& kv : alloc_map) total_bytes += kv.second.size;
+    for (auto& kv : alloc_map) for (auto& ai : kv.second) total_bytes += ai.size;
     char total_sizebuf[32];
     if (total_bytes >= 1024 * 1024)
       snprintf(total_sizebuf, sizeof(total_sizebuf), "%.1f MB", total_bytes / (1024.0 * 1024.0));
@@ -767,20 +797,34 @@ void WriteJsonTraceImpl(const char* filepath) {
           << ",\"args\":{\"name\":\"HIP Thread " << kv.second << "\"}}";
   }
 
-  // Build device_id -> gfxip name map.
-  // Try device_id directly as HIP index; also try device_id-1 (some backends
-  // use 1-based device ids in activity records).
-  auto get_gfxip = [&](int idx) -> std::string {
-    if (idx < 0 || idx >= static_cast<int>(hip::g_devices.size())) return "";
-    auto* hdev = hip::g_devices[idx];
-    if (!hdev || hdev->devices().empty()) return "";
-    const char* tgt = hdev->devices()[0]->isa().targetId();
-    return (tgt && tgt[0]) ? std::string(tgt) : "";
+  // Returns {targetId, hip_device_index} for a given HSA device_id.
+  auto get_gfxip = [&](int dev_id) -> std::pair<std::string, int> {
+    for (int pass = 0; pass < 2; ++pass) {
+      for (size_t gi = 0; gi < hip::g_devices.size(); ++gi) {
+        auto* hdev = hip::g_devices[gi];
+        if (!hdev || hdev->devices().empty()) continue;
+        bool match = (pass == 0) ? (hdev->deviceId() == dev_id)
+                                 : (static_cast<int>(gi) == dev_id % static_cast<int>(hip::g_devices.size()));
+        if (!match) continue;
+        const char* tgt = hdev->devices()[0]->isa().targetId();
+        if (tgt && tgt[0]) return {std::string(tgt), static_cast<int>(gi)};
+      }
+    }
+    for (size_t gi = 0; gi < hip::g_devices.size(); ++gi) {
+      auto* hdev = hip::g_devices[gi];
+      if (!hdev || hdev->devices().empty()) continue;
+      const char* tgt = hdev->devices()[0]->isa().targetId();
+      if (tgt && tgt[0]) return {std::string(tgt), static_cast<int>(gi)};
+    }
+    return {"", -1};
   };
 
   // CPU process metadata (sort_index 0 so it appears first)
+  std::string proc_name, proc_path;
+  amd::Os::getAppPathAndFileName(proc_name, proc_path);
+  std::string cpu_label = proc_name.empty() ? "CPU HIP" : ("CPU HIP [" + proc_name + "]");
   trace << ",\n{\"name\":\"process_name\",\"ph\":\"M\",\"pid\":1024,"
-           "\"args\":{\"name\":\"CPU HIP\"}}";
+           "\"args\":{\"name\":\"" << cpu_label << "\"}}";
   trace << ",\n{\"name\":\"process_sort_index\",\"ph\":\"M\",\"pid\":1024,"
            "\"args\":{\"sort_index\":0}}";
 
@@ -790,9 +834,9 @@ void WriteJsonTraceImpl(const char* filepath) {
     int dev_id = kv.first;
     const auto& active_tids = kv.second;
 
-    std::string label = get_gfxip(dev_id);
-    if (label.empty()) label = get_gfxip(dev_id - 1);  // try 1-based offset
-    if (label.empty()) label = "GPU " + std::to_string(dev_id);
+    auto [gfxip, hip_idx] = get_gfxip(dev_id);
+    std::string label = gfxip.empty() ? ("GPU " + std::to_string(dev_id))
+                                      : (gfxip + " [Device " + std::to_string(hip_idx) + "]");
 
     trace << ",\n{\"name\":\"process_name\",\"ph\":\"M\",\"pid\":" << dev_id
           << ",\"args\":{\"name\":\"" << label << "\"}}";
@@ -1193,9 +1237,17 @@ void WriteProtoTraceImpl(const char* filepath) {
   };
   std::unordered_map<int, std::unordered_set<uint64_t>> device_gpu_tids;
   std::map<std::pair<int,uint64_t>, hipStream_t> gpu_tid_stream;
+  std::unordered_map<uintptr_t, uint64_t> stream_lane_idx;
+  uint64_t next_stream_lane = 0;
+  auto compact_stream_lane = [&](hipStream_t stream, uint64_t queue_id) -> uint64_t {
+    uintptr_t key = stream ? reinterpret_cast<uintptr_t>(stream) : (0x8000ULL | queue_id);
+    auto [it, ins] = stream_lane_idx.emplace(key, next_stream_lane);
+    if (ins) ++next_stream_lane;
+    return it->second;
+  };
 
   struct AllocInfoP { uint64_t start_ns, end_ns, size; };
-  std::unordered_map<uint64_t, AllocInfoP> alloc_map;
+  std::unordered_map<uint64_t, std::vector<AllocInfoP>> alloc_map;
 
   uint64_t t_end = 0;
   for (size_t c = 0; c < g_records.size(); ++c) {
@@ -1209,17 +1261,22 @@ void WriteProtoTraceImpl(const char* filepath) {
       if (rec.api_name) {
         intern_evt(rec.api_name);  // pre-intern all event names in pass 1
         uint64_t ptr = reinterpret_cast<uintptr_t>(rec.memory1);
-        if      (IsAllocApi(rec.api_name) && ptr) alloc_map[ptr] = {rec.start_ns, 0, rec.size};
-        else if (IsFreeApi (rec.api_name) && ptr) {
+        if (IsAllocApi(rec.api_name) && ptr) {
+          alloc_map[ptr].push_back({rec.start_ns, 0, rec.size});
+        } else if (IsFreeApi(rec.api_name) && ptr) {
           auto it = alloc_map.find(ptr);
-          if (it != alloc_map.end() && it->second.end_ns == 0) it->second.end_ns = rec.start_ns;
+          if (it != alloc_map.end()) {
+            for (auto rit = it->second.rbegin(); rit != it->second.rend(); ++rit)
+              if (rit->end_ns == 0) { rit->end_ns = rec.start_ns; break; }
+          }
         }
       }
       if (rec.gpu.gpu_op_count == 0) continue;
       auto scan = [&](const HipGpuActivityExt& gop) {
         int sdma = (gop.op == OP_ID_COPY) &&
                    hipCopyKindIsSDMAExt(static_cast<HipCopyKindExt>(gop.copy_kind)) ? 1 : 0;
-        uint64_t gtid = gop.queue_id * 2 + sdma;
+        uint64_t lane = compact_stream_lane(rec.stream, gop.queue_id);
+        uint64_t gtid = lane * 2 + sdma;
         device_gpu_tids[static_cast<int>(gop.device_id)].insert(gtid);
         if (rec.stream) gpu_tid_stream[{static_cast<int>(gop.device_id), gtid}] = rec.stream;
       };
@@ -1227,7 +1284,9 @@ void WriteProtoTraceImpl(const char* filepath) {
       for (const HipGpuActivityExt* n = rec.gpu.next; n; n = n->next) scan(*n);
     }
   }
-  for (auto& kv : alloc_map) if (kv.second.end_ns == 0) kv.second.end_ns = t_end;
+  for (auto& kv : alloc_map)
+    for (auto& ai : kv.second)
+      if (ai.end_ns == 0) ai.end_ns = t_end;
 
   // ── Pass 2: pre-assign flow IDs ──────────────────────────────────────────
   // CPU→GPU: CPU slice emits ph='s', GPU slice emits ph='f' (forward in time).
@@ -1307,24 +1366,41 @@ void WriteProtoTraceImpl(const char* filepath) {
   }
 
   // ── Emit ALL track descriptors before any events ──────────────────────────
-  auto get_gfxip = [&](int idx) -> std::string {
-    if (idx < 0 || idx >= static_cast<int>(hip::g_devices.size())) return "";
-    auto* hdev = hip::g_devices[idx];
-    if (!hdev || hdev->devices().empty()) return "";
-    const char* tgt = hdev->devices()[0]->isa().targetId();
-    return (tgt && tgt[0]) ? std::string(tgt) : "";
+  // Returns {targetId, hip_device_index} for a given HSA device_id.
+  auto get_gfxip = [&](int dev_id) -> std::pair<std::string, int> {
+    for (int pass = 0; pass < 2; ++pass) {
+      for (size_t gi = 0; gi < hip::g_devices.size(); ++gi) {
+        auto* hdev = hip::g_devices[gi];
+        if (!hdev || hdev->devices().empty()) continue;
+        bool match = (pass == 0) ? (hdev->deviceId() == dev_id)
+                                 : (static_cast<int>(gi) == dev_id % static_cast<int>(hip::g_devices.size()));
+        if (!match) continue;
+        const char* tgt = hdev->devices()[0]->isa().targetId();
+        if (tgt && tgt[0]) return {std::string(tgt), static_cast<int>(gi)};
+      }
+    }
+    for (size_t gi = 0; gi < hip::g_devices.size(); ++gi) {
+      auto* hdev = hip::g_devices[gi];
+      if (!hdev || hdev->devices().empty()) continue;
+      const char* tgt = hdev->devices()[0]->isa().targetId();
+      if (tgt && tgt[0]) return {std::string(tgt), static_cast<int>(gi)};
+    }
+    return {"", -1};
   };
 
-  EmitTrackDesc(out, CpuProcessUuid(), 0, "CPU HIP", 1024, -1, true);
+  std::string proc_name, proc_path;
+  amd::Os::getAppPathAndFileName(proc_name, proc_path);
+  std::string cpu_label = proc_name.empty() ? "CPU HIP" : ("CPU HIP [" + proc_name + "]");
+  EmitTrackDesc(out, CpuProcessUuid(), 0, cpu_label, 1024, -1, true);
   for (auto& kv : tid_map) {
     EmitTrackDesc(out, CpuThreadUuid(kv.second), CpuProcessUuid(),
                   "HIP Thread " + std::to_string(kv.second), 1024, int(kv.second), false);
   }
   for (auto& kv : device_gpu_tids) {
     int dev_id = kv.first;
-    std::string label = get_gfxip(dev_id);
-    if (label.empty()) label = get_gfxip(dev_id - 1);
-    if (label.empty()) label = "GPU " + std::to_string(dev_id);
+    auto [gfxip, hip_idx] = get_gfxip(dev_id);
+    std::string label = gfxip.empty() ? ("GPU " + std::to_string(dev_id))
+                                      : (gfxip + " [Device " + std::to_string(hip_idx) + "]");
     EmitTrackDesc(out, GpuProcessUuid(dev_id), 0, label, dev_id, -1, true);
     for (uint64_t gtid : kv.second) {
       bool is_sdma = (gtid & 1) != 0;
@@ -1343,7 +1419,7 @@ void WriteProtoTraceImpl(const char* filepath) {
   }
   if (!alloc_map.empty()) {
     uint64_t total_bytes = 0;
-    for (auto& kv : alloc_map) total_bytes += kv.second.size;
+    for (auto& kv : alloc_map) for (auto& ai : kv.second) total_bytes += ai.size;
     char lbl[64];
     if (total_bytes >= 1024*1024)
       snprintf(lbl, sizeof(lbl), "GPU Memory (%.1f MB total)", total_bytes/(1024.0*1024.0));
@@ -1356,13 +1432,13 @@ void WriteProtoTraceImpl(const char* filepath) {
       uint64_t mem_tid = (ptr >> 12) & 0xFFFFF;
       char ptrbuf[32], sizebuf[32];
       snprintf(ptrbuf, sizeof(ptrbuf), "0x%llx", static_cast<unsigned long long>(ptr));
-      const AllocInfoP& ai = kv.second;
-      if (ai.size >= 1024 * 1024) {
-        snprintf(sizebuf, sizeof(sizebuf), "%.1f MB", ai.size / (1024.0 * 1024.0));
-      } else if (ai.size >= 1024) {
-        snprintf(sizebuf, sizeof(sizebuf), "%.1f KB", ai.size / 1024.0);
+      uint64_t label_size = kv.second.empty() ? 0 : kv.second[0].size;
+      if (label_size >= 1024 * 1024) {
+        snprintf(sizebuf, sizeof(sizebuf), "%.1f MB", label_size / (1024.0 * 1024.0));
+      } else if (label_size >= 1024) {
+        snprintf(sizebuf, sizeof(sizebuf), "%.1f KB", label_size / 1024.0);
       } else {
-        snprintf(sizebuf, sizeof(sizebuf), "%llu B", (unsigned long long)ai.size);
+        snprintf(sizebuf, sizeof(sizebuf), "%llu B", (unsigned long long)label_size);
       }
       EmitTrackDesc(out, MemThreadUuid(mem_tid), MemProcessUuid(),
                     std::string(ptrbuf)+" ("+sizebuf+")", 2048, int(mem_tid), false);
@@ -1380,17 +1456,14 @@ void WriteProtoTraceImpl(const char* filepath) {
   intern_evt("Barrier");
   // Memory alloc names: "0xADDR (SIZE unit)"
   for (auto& kv : alloc_map) {
+    if (kv.second.empty()) continue;
     uint64_t ptr = kv.first;
-    const AllocInfoP& ai = kv.second;
+    uint64_t sz  = kv.second[0].size;
     char ptrbuf[32], sizebuf[32];
     snprintf(ptrbuf, sizeof(ptrbuf), "0x%llx", static_cast<unsigned long long>(ptr));
-    if (ai.size >= 1024 * 1024) {
-      snprintf(sizebuf, sizeof(sizebuf), "%.1f MB", ai.size / (1024.0 * 1024.0));
-    } else if (ai.size >= 1024) {
-      snprintf(sizebuf, sizeof(sizebuf), "%.1f KB", ai.size / 1024.0);
-    } else {
-      snprintf(sizebuf, sizeof(sizebuf), "%llu B", (unsigned long long)ai.size);
-    }
+    if (sz >= 1024 * 1024) snprintf(sizebuf, sizeof(sizebuf), "%.1f MB", sz / (1024.0 * 1024.0));
+    else if (sz >= 1024)   snprintf(sizebuf, sizeof(sizebuf), "%.1f KB", sz / 1024.0);
+    else                   snprintf(sizebuf, sizeof(sizebuf), "%llu B", (unsigned long long)sz);
     intern_evt(std::string(ptrbuf) + " (" + sizebuf + ")");
   }
 
@@ -1476,7 +1549,8 @@ void WriteProtoTraceImpl(const char* filepath) {
         if (gop.begin_ns == 0) { ++op_ord; return; }
         int sdma = (gop.op == OP_ID_COPY) &&
                    hipCopyKindIsSDMAExt(static_cast<HipCopyKindExt>(gop.copy_kind)) ? 1 : 0;
-        uint64_t gtid     = gop.queue_id * 2 + sdma;
+        uint64_t lane     = compact_stream_lane(rec.stream, gop.queue_id);
+        uint64_t gtid     = lane * 2 + sdma;
         uint64_t gpu_uuid = GpuThreadUuid(static_cast<int>(gop.device_id), gtid);
         uint64_t g_ts     = gop.begin_ns;
         uint64_t g_dur    = (gop.end_ns > gop.begin_ns) ? (gop.end_ns - gop.begin_ns) : 1;
@@ -1580,29 +1654,26 @@ void WriteProtoTraceImpl(const char* filepath) {
   // ── Memory lifetime slices with terminating flows ─────────────────────────
   for (auto& kv : alloc_map) {
     uint64_t ptr = kv.first;
-    const AllocInfoP& ai = kv.second;
     uint64_t mem_tid  = (ptr >> 12) & 0xFFFFF;
     uint64_t mem_uuid = MemThreadUuid(mem_tid);
-    uint64_t dur_ns   = (ai.end_ns > ai.start_ns) ? (ai.end_ns - ai.start_ns) : 1;
-    char ptrbuf[32], sizebuf[32];
+    char ptrbuf[32];
     snprintf(ptrbuf, sizeof(ptrbuf), "0x%llx", static_cast<unsigned long long>(ptr));
-    if (ai.size >= 1024 * 1024) {
-      snprintf(sizebuf, sizeof(sizebuf), "%.1f MB", ai.size / (1024.0 * 1024.0));
-    } else if (ai.size >= 1024) {
-      snprintf(sizebuf, sizeof(sizebuf), "%.1f KB", ai.size / 1024.0);
-    } else {
-      snprintf(sizebuf, sizeof(sizebuf), "%llu B", (unsigned long long)ai.size);
+    for (const AllocInfoP& ai : kv.second) {
+      uint64_t dur_ns = (ai.end_ns > ai.start_ns) ? (ai.end_ns - ai.start_ns) : 1;
+      char sizebuf[32];
+      if (ai.size >= 1024 * 1024) snprintf(sizebuf, sizeof(sizebuf), "%.1f MB", ai.size/(1024.0*1024.0));
+      else if (ai.size >= 1024)   snprintf(sizebuf, sizeof(sizebuf), "%.1f KB", ai.size/1024.0);
+      else                        snprintf(sizebuf, sizeof(sizebuf), "%llu B", (unsigned long long)ai.size);
+      std::string alloc_name = std::string(ptrbuf) + " (" + sizebuf + ")";
+      std::vector<std::pair<uint64_t,std::string>> anns;
+      anns.push_back({iid_ptr, ptrbuf}); anns.push_back({iid_size_key, std::to_string(ai.size)});
+      std::vector<uint64_t> out_flows;
+      auto afit = alloc_out_flows.find(ptr);
+      if (afit != alloc_out_flows.end()) out_flows = afit->second;
+      uint64_t alloc_name_iid = intern_evt(alloc_name);
+      EmitSliceSorted(sorted_pkts, mem_uuid, ai.start_ns, dur_ns, alloc_name,
+                      alloc_name_iid, kCatMemory, anns, out_flows, {});
     }
-    std::string alloc_name = std::string(ptrbuf) + " (" + sizebuf + ")";
-    std::vector<std::pair<uint64_t,std::string>> anns;
-    anns.push_back({iid_ptr, ptrbuf}); anns.push_back({iid_size_key, std::to_string(ai.size)});
-    // Memory slice emits ph='s' (flow starts here at alloc time, arrow points forward to GPU op)
-    std::vector<uint64_t> out_flows;
-    auto afit = alloc_out_flows.find(ptr);
-    if (afit != alloc_out_flows.end()) out_flows = afit->second;
-    uint64_t alloc_name_iid = intern_evt(alloc_name);
-    EmitSliceSorted(sorted_pkts, mem_uuid, ai.start_ns, dur_ns, alloc_name,
-                    alloc_name_iid, kCatMemory, anns, out_flows, {});
   }
 
   FlushSorted(out, sorted_pkts);

@@ -62,15 +62,24 @@ static std::atomic<bool> g_compiler_wrapped{false};
 // Saves grid/block in TLS so hipLaunchByPtrLayer can stamp them on its record.
 static hipError_t __hipPushCallConfigurationLayer(dim3 gridDim, dim3 blockDim,
                                                    size_t sharedMem, hipStream_t stream) {
+  // kHipApiNamesCountExt is out-of-range → api_name gets "unknown"; override below.
+  auto* _rec = HipGetActiveRecordExt(kHipApiNamesCountExt);
+  _rec->api_name = "__hipPushCallConfiguration";
   g_pushed_grid  = gridDim;
   g_pushed_block = blockDim;
-  return g_compiler_next.__hipPushCallConfiguration_fn(gridDim, blockDim, sharedMem, stream);
+  auto _r = g_compiler_next.__hipPushCallConfiguration_fn(gridDim, blockDim, sharedMem, stream);
+  _rec->end_ns = NowNs();
+  return _r;
 }
 
 // __hipPopCallConfiguration — completes the <<<>>> sequence; no dims needed here.
 static hipError_t __hipPopCallConfigurationLayer(dim3* gridDim, dim3* blockDim,
                                                   size_t* sharedMem, hipStream_t* stream) {
-  return g_compiler_next.__hipPopCallConfiguration_fn(gridDim, blockDim, sharedMem, stream);
+  auto* _rec = HipGetActiveRecordExt(kHipApiNamesCountExt);
+  _rec->api_name = "__hipPopCallConfiguration";
+  auto _r = g_compiler_next.__hipPopCallConfiguration_fn(gridDim, blockDim, sharedMem, stream);
+  _rec->end_ns = NowNs();
+  return _r;
 }
 
 // api_id = 0
@@ -3441,6 +3450,7 @@ static hipError_t hipStreamCopyAttributesLayer(hipStream_t dst, hipStream_t src)
 static hipError_t hipStreamCreateLayer(hipStream_t* stream) {
   auto* _rec = HipGetActiveRecordExt(351u);
   auto _r = g_next.hipStreamCreate_fn(stream);
+  if (_r == hipSuccess && stream) _rec->memory1 = reinterpret_cast<void*>(*stream);
   _rec->end_ns = NowNs();
   return _r;
 }
@@ -3449,6 +3459,7 @@ static hipError_t hipStreamCreateLayer(hipStream_t* stream) {
 static hipError_t hipStreamCreateWithFlagsLayer(hipStream_t* stream, unsigned int flags) {
   auto* _rec = HipGetActiveRecordExt(352u);
   auto _r = g_next.hipStreamCreateWithFlags_fn(stream, flags);
+  if (_r == hipSuccess && stream) _rec->memory1 = reinterpret_cast<void*>(*stream);
   _rec->end_ns = NowNs();
   return _r;
 }
@@ -3458,6 +3469,7 @@ static hipError_t hipStreamCreateWithPriorityLayer(hipStream_t* stream, unsigned
                                                     int priority) {
   auto* _rec = HipGetActiveRecordExt(353u);
   auto _r = g_next.hipStreamCreateWithPriority_fn(stream, flags, priority);
+  if (_r == hipSuccess && stream) _rec->memory1 = reinterpret_cast<void*>(*stream);
   _rec->end_ns = NowNs();
   return _r;
 }
