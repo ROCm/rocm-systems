@@ -909,7 +909,7 @@ struct make_string_literal<N, C0, Cs...>
 {
 };
 
-static constexpr size_t MAX_STRING_LITERAL_LENGTH = 32;
+static constexpr size_t MAX_STRING_LITERAL_LENGTH = 64;
 
 template <size_t N>
 constexpr char
@@ -953,7 +953,39 @@ string_literal_at_or (const char (&str)[N], size_t n, char value)
     utils::detail::string_literal_at_or ((s), 28, '\0'),                      \
     utils::detail::string_literal_at_or ((s), 29, '\0'),                      \
     utils::detail::string_literal_at_or ((s), 30, '\0'),                      \
-    utils::detail::string_literal_at_or ((s), 31, '\0')
+    utils::detail::string_literal_at_or ((s), 31, '\0'),                      \
+    utils::detail::string_literal_at_or ((s), 32, '\0'),                      \
+    utils::detail::string_literal_at_or ((s), 33, '\0'),                      \
+    utils::detail::string_literal_at_or ((s), 34, '\0'),                      \
+    utils::detail::string_literal_at_or ((s), 35, '\0'),                      \
+    utils::detail::string_literal_at_or ((s), 36, '\0'),                      \
+    utils::detail::string_literal_at_or ((s), 37, '\0'),                      \
+    utils::detail::string_literal_at_or ((s), 38, '\0'),                      \
+    utils::detail::string_literal_at_or ((s), 39, '\0'),                      \
+    utils::detail::string_literal_at_or ((s), 40, '\0'),                      \
+    utils::detail::string_literal_at_or ((s), 41, '\0'),                      \
+    utils::detail::string_literal_at_or ((s), 42, '\0'),                      \
+    utils::detail::string_literal_at_or ((s), 43, '\0'),                      \
+    utils::detail::string_literal_at_or ((s), 44, '\0'),                      \
+    utils::detail::string_literal_at_or ((s), 45, '\0'),                      \
+    utils::detail::string_literal_at_or ((s), 46, '\0'),                      \
+    utils::detail::string_literal_at_or ((s), 47, '\0'),                      \
+    utils::detail::string_literal_at_or ((s), 48, '\0'),                      \
+    utils::detail::string_literal_at_or ((s), 49, '\0'),                      \
+    utils::detail::string_literal_at_or ((s), 50, '\0'),                      \
+    utils::detail::string_literal_at_or ((s), 51, '\0'),                      \
+    utils::detail::string_literal_at_or ((s), 52, '\0'),                      \
+    utils::detail::string_literal_at_or ((s), 53, '\0'),                      \
+    utils::detail::string_literal_at_or ((s), 54, '\0'),                      \
+    utils::detail::string_literal_at_or ((s), 55, '\0'),                      \
+    utils::detail::string_literal_at_or ((s), 56, '\0'),                      \
+    utils::detail::string_literal_at_or ((s), 57, '\0'),                      \
+    utils::detail::string_literal_at_or ((s), 58, '\0'),                      \
+    utils::detail::string_literal_at_or ((s), 59, '\0'),                      \
+    utils::detail::string_literal_at_or ((s), 60, '\0'),                      \
+    utils::detail::string_literal_at_or ((s), 61, '\0'),                      \
+    utils::detail::string_literal_at_or ((s), 62, '\0'),                      \
+    utils::detail::string_literal_at_or ((s), 63, '\0')
 
 #define STRING_LITERAL(s)                                                     \
   utils::detail::make_string_literal<sizeof (s) - 1,                          \

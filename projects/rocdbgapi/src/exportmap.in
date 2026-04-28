@@ -102,6 +102,7 @@ global: amd_dbgapi_read_memory;
 global:	amd_dbgapi_address_dependency;
 } @AMD_DBGAPI_NAME@_0.78;
 
-@AMD_DBGAPI_NAME@_0.80 {
-global: amd_dbgapi_process_get_info;
+@AMD_DBGAPI_NAME@_0.81 {
+global: amd_dbgapi_set_group_segment_out_of_addr_range_exception;
+        amd_dbgapi_process_get_info;
 } @AMD_DBGAPI_NAME@_0.79;

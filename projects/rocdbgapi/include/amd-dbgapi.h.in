@@ -665,6 +665,12 @@ typedef unsigned long amd_dbgapi_DWORD;
  */
 #define AMD_DBGAPI_VERSION_0_80
 
+/**
+ * The function was introduced in version 0.81 of the interface and has the
+ * symbol version string of ``"@AMD_DBGAPI_NAME@_0.81"``.
+ */
+#define AMD_DBGAPI_VERSION_0_81
+
 /** @} */
 
 /** \ingroup callbacks_group
@@ -1889,6 +1895,13 @@ typedef enum
    * attribute is ::amd_dbgapi_segment_address_t.
    */
   AMD_DBGAPI_PROCESS_INFO_SIGNIFICANT_ADDRESS_BITS = 8,
+  /**
+   * Return if the architectures of all the agents of a process support
+   * reporting group segment out-of-address-range exceptions.  The type of this
+   * attribute is \p uint32_t with the values defined by
+   * ::amd_dbgapi_alu_exceptions_precision_t.
+   */
+  AMD_DBGAPI_PROCESS_INFO_GROUP_SEGMENT_OUT_OF_ADDR_RANGE_SUPPORTED = 9,
 } amd_dbgapi_process_info_t;
 
 /**
@@ -1942,7 +1955,7 @@ typedef enum
  */
 amd_dbgapi_status_t AMD_DBGAPI amd_dbgapi_process_get_info (
     amd_dbgapi_process_id_t process_id, amd_dbgapi_process_info_t query,
-    size_t value_size, void *value) AMD_DBGAPI_VERSION_0_80;
+    size_t value_size, void *value) AMD_DBGAPI_VERSION_0_81;
 
 /**
  * Attach to a process in order to provide debug control of the AMD GPUs it
@@ -1954,7 +1967,8 @@ amd_dbgapi_status_t AMD_DBGAPI amd_dbgapi_process_get_info (
  * The process progress is initialized to ::AMD_DBGAPI_PROGRESS_NORMAL.  All
  * agents accessed by the process are configured to
  * ::AMD_DBGAPI_MEMORY_PRECISION_NONE and
- * ::AMD_DBGAPI_ALU_EXCEPTIONS_PRECISION_NONE.
+ * ::AMD_DBGAPI_ALU_EXCEPTIONS_PRECISION_NONE and
+ * ::AMD_DBGAPI_GROUP_SEGMENT_EXCEPTIONS_NONE.
  *
  * When attaching to a live process, the client process handle must have been
  * associated with a native operating system process, and the
@@ -2056,7 +2070,8 @@ amd_dbgapi_status_t AMD_DBGAPI amd_dbgapi_process_attach (
  * displaced stepping buffer are stopped and the displaced stepping buffer
  * completed.  Any data watchpoints are removed.  All agents are configured to
  * ::AMD_DBGAPI_MEMORY_PRECISION_NONE and
- * ::AMD_DBGAPI_ALU_EXCEPTIONS_PRECISION_NONE.  Any waves in the stopped or
+ * ::AMD_DBGAPI_ALU_EXCEPTIONS_PRECISION_NONE and
+ * ::AMD_DBGAPI_GROUP_SEGMENT_EXCEPTIONS_NONE.  Any waves in the stopped or
  * single step state are resumed in non-single step mode.  Any pending events
  * for the process are discarded, and no further events will be generated for
  * the process.  If the process is in the frozen state, it is unfrozen.  The
@@ -6877,6 +6892,90 @@ amd_dbgapi_status_t AMD_DBGAPI amd_dbgapi_set_alu_exceptions_precision (
     amd_dbgapi_process_id_t process_id,
     amd_dbgapi_alu_exceptions_precision_t alu_exceptions_precision)
      AMD_DBGAPI_VERSION_0_77;
+
+/**
+ * Group segment exceptions reporting.
+ *
+ * Waves may issue multiple instructions and advance the program counter before
+ * a previous instruction that performs group segment memory has executed and
+ * reported an out-of-addr-range exception. This can result in a wave stopping
+ * due to an group segment out-of-addr-range exception beyond the instruction
+ * that originally triggered the condition.
+ *
+ * Some architectures allow hardware to be configured to always wait for group
+ * segment memory operations to complete before issuing to the next instruction.
+ * If an exception is raised by the instruction, the wave will stop at the
+ * instruction immediately following it.  Enabling this mode can make execution
+ * of waves slower.
+ *
+ * The ::AMD_DBGAPI_PROCESS_INFO_GROUP_SEGMENT_OUT_OF_ADDR_RANGE_SUPPORTED query
+ * can be used to determine if the architectures of all the agents of a process
+ * support controlling group segment out-of-addr-range exception reporting.
+ */
+typedef enum
+{
+  /**
+   * Group segment out-of-addr-range exceptions is not reported at any time
+   * after the instruction causing them have executed.
+   */
+  AMD_DBGAPI_GROUP_SEGMENT_EXCEPTIONS_NONE = 0,
+  /**
+   * When a group segment out-of-addr-range exception is delivered to the waves,
+   * the wave's PC is at the instruction following the one causing the exception
+   * to be raised if the hardware supports and is configured to always wait for
+   * group segment memory operations to complete before issuing to the next
+   * instruction which can cause waves to execute slower else it is delivered
+   * at any time after the instruction causing them have executed.
+   */
+  AMD_DBGAPI_GROUP_SEGMENT_EXCEPTIONS_OUT_OF_ADDR_RANGE = 1
+} amd_dbgapi_group_segment_out_of_addr_range_exception_t;
+
+/**
+ * Control group segment exceptions reporting.
+ *
+ * A process can set ::AMD_DBGAPI_GROUP_SEGMENT_EXCEPTIONS_NONE to disable
+ * group segment exception reporting.  Use the
+ * ::AMD_DBGAPI_PROCESS_INFO_GROUP_SEGMENT_OUT_OF_ADDR_RANGE_SUPPORTED query to
+ * determine if the architecture of all agents of the process supports the
+ * group segment out-of-addr-range exception mode.
+ *
+ * The group segment exception reporting is set independently for each process,
+ * and only affects the waves executing on the agents of that process.  The
+ * setting may be changed at any time, including when waves are executing, and
+ * takes effect immediately.
+ *
+ * \param[in] process_id The process being configured.
+ *
+ * \param[in] group_segment_out_of_addr_range_exception The group segment
+ * exception precision mode to set.
+ *
+ * \retval ::AMD_DBGAPI_STATUS_SUCCESS The function has been executed
+ * successfully and the agents of the process have been configured.
+ *
+ * \retval ::AMD_DBGAPI_STATUS_FATAL A fatal error occurred.  The library is
+ * left uninitialized.
+ *
+ * \retval ::AMD_DBGAPI_STATUS_ERROR_NOT_INITIALIZED The library is not
+ * initialized.  The library is left uninitialized and no configuration is
+ * changed.
+ *
+ * \retval ::AMD_DBGAPI_STATUS_ERROR_INVALID_PROCESS_ID \p process_id is
+ * invalid.  No configuration is changed.
+ *
+ * \retval ::AMD_DBGAPI_STATUS_ERROR_INVALID_ARGUMENT
+ * \p group_segment_out_of_addr_range_exception is an invalid value.  No
+ * configuration is changed.
+ *
+ * \retval ::AMD_DBGAPI_STATUS_ERROR_NOT_SUPPORTED The requested \p
+ * group_segment_out_of_addr_range_exception is not supported by the
+ * architecture of all the agents of \p process_id.  No configuration is
+ * changed.
+ */
+amd_dbgapi_status_t AMD_DBGAPI amd_dbgapi_set_group_segment_out_of_addr_range_exception (
+    amd_dbgapi_process_id_t process_id,
+    amd_dbgapi_group_segment_out_of_addr_range_exception_t 
+        group_segment_out_of_addr_range_exception)
+     AMD_DBGAPI_VERSION_0_81;
 
 /** @} */
 

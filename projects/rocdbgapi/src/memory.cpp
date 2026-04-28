@@ -1584,3 +1584,38 @@ amd_dbgapi_set_memory_precision (
          AMD_DBGAPI_STATUS_ERROR_NOT_SUPPORTED);
   TRACE_END ();
 }
+
+amd_dbgapi_status_t AMD_DBGAPI
+amd_dbgapi_set_group_segment_out_of_addr_range_exception (
+  amd_dbgapi_process_id_t process_id,
+  amd_dbgapi_group_segment_out_of_addr_range_exception_t
+    group_segment_out_of_addr_range_exception)
+{
+  TRACE_BEGIN (param_in (process_id),
+               param_in (group_segment_out_of_addr_range_exception));
+  TRY
+  {
+    if (!detail::is_initialized)
+      THROW (AMD_DBGAPI_STATUS_ERROR_NOT_INITIALIZED);
+
+    process_t *process = process_t::find (process_id);
+
+    if (process == nullptr)
+      THROW (AMD_DBGAPI_STATUS_ERROR_INVALID_PROCESS_ID);
+
+    if (group_segment_out_of_addr_range_exception
+          != AMD_DBGAPI_GROUP_SEGMENT_EXCEPTIONS_NONE
+        && group_segment_out_of_addr_range_exception
+             != AMD_DBGAPI_GROUP_SEGMENT_EXCEPTIONS_OUT_OF_ADDR_RANGE)
+      THROW (AMD_DBGAPI_STATUS_ERROR_INVALID_ARGUMENT);
+
+    process->set_group_segment_out_of_addr_range_exception (
+      group_segment_out_of_addr_range_exception
+      == AMD_DBGAPI_GROUP_SEGMENT_EXCEPTIONS_OUT_OF_ADDR_RANGE);
+  }
+  CATCH (AMD_DBGAPI_STATUS_ERROR_NOT_INITIALIZED,
+         AMD_DBGAPI_STATUS_ERROR_INVALID_PROCESS_ID,
+         AMD_DBGAPI_STATUS_ERROR_INVALID_ARGUMENT,
+         AMD_DBGAPI_STATUS_ERROR_NOT_SUPPORTED);
+  TRACE_END ();
+}

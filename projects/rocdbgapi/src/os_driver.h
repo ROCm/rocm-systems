@@ -135,6 +135,8 @@ struct os_agent_info_t
   bool precise_memory_supported{ false };
   /* indicates if precise ALU operations reporting is supported.  */
   bool precise_alu_exceptions_supported{ false };
+  /* indicates if LDS exceptions reporting is supported.  */
+  bool group_segment_out_of_addr_range_exception_supported{ false };
   /* indicates that the command process firmware is supported.  */
   bool firmware_supported{ false };
   /* indicates that the trap temporaries are always set up.  */
@@ -432,7 +434,8 @@ enum class os_wave_launch_mode_t : uint32_t
 enum class os_process_flags_t : uint32_t
 {
   precise_memory = 1 << 0,
-  precise_alu_exceptions = 1 << 1
+  precise_alu_exceptions = 1 << 1,
+  group_segment_out_of_addr_range_exception = 1 << 2,
 };
 template <> struct is_flag<os_process_flags_t> : std::true_type
 {

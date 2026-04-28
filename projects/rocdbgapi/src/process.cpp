@@ -172,6 +172,9 @@ process_t::detach ()
              state.  */
           set_precise_alu_exceptions (false);
 
+          /* Return LDS exceptions reporting to its default off state.  */
+          set_group_segment_out_of_addr_range_exception (false);
+
           /* Resume all the waves halted at launch.  */
           set_wave_launch_mode (os_wave_launch_mode_t::normal);
 
@@ -498,11 +501,11 @@ process_t::set_wave_launch_trap_override (os_wave_launch_trap_mask_t value,
 void
 process_t::set_precise_memory (bool enabled)
 {
-  if (!!(m_process_flags & os_process_flags_t::precise_memory) == enabled)
-    return;
-
   if (!m_supports_precise_memory)
     throw api_error_t (AMD_DBGAPI_STATUS_ERROR_NOT_SUPPORTED);
+
+  if (!!(m_process_flags & os_process_flags_t::precise_memory) == enabled)
+    return;
 
   auto new_flags = m_process_flags;
   if (enabled)
@@ -531,12 +534,12 @@ process_t::set_precise_memory (bool enabled)
 void
 process_t::set_precise_alu_exceptions (bool enabled)
 {
+  if (!m_supports_precise_alu_exceptions)
+    throw api_error_t (AMD_DBGAPI_STATUS_ERROR_NOT_SUPPORTED);
+
   if (!!(m_process_flags & os_process_flags_t::precise_alu_exceptions)
       == enabled)
     return;
-
-  if (!m_supports_precise_alu_exceptions)
-    throw api_error_t (AMD_DBGAPI_STATUS_ERROR_NOT_SUPPORTED);
 
   auto new_flags = m_process_flags;
   if (enabled)
@@ -560,6 +563,46 @@ process_t::set_precise_alu_exceptions (bool enabled)
       && status != AMD_DBGAPI_STATUS_SUCCESS)
     fatal_error ("os_driver::set_precise_alu_exceptions failed (%s)",
                  to_cstring (status));
+}
+
+void
+process_t::set_group_segment_out_of_addr_range_exception (bool enabled)
+{
+  if (!m_supports_group_segment_out_of_addr_range_exception)
+    throw api_error_t (AMD_DBGAPI_STATUS_ERROR_NOT_SUPPORTED);
+
+  if (!!(m_process_flags
+         & os_process_flags_t::group_segment_out_of_addr_range_exception)
+      == enabled)
+    return;
+
+  auto new_flags = m_process_flags;
+  if (enabled)
+    new_flags
+      = new_flags
+        | os_process_flags_t::group_segment_out_of_addr_range_exception;
+  else
+    new_flags
+      = new_flags
+        & ~os_process_flags_t::group_segment_out_of_addr_range_exception;
+
+  auto set_group_segment_out_of_addr_range_exception
+    = utils::make_scope_success ([=] () { m_process_flags = new_flags; });
+
+  /* If this is called before the runtime is loaded (or after the runtime is
+     unloaded), only record the setting in the process_t instance. The actual
+     change to the configuration will be done when the runtime is loaded and
+     the debug mode is activated.  */
+  if (m_runtime_state != AMD_DBGAPI_RUNTIME_STATE_LOADED_SUCCESS)
+    return;
+
+  amd_dbgapi_status_t status = os_driver ().set_process_flags (new_flags);
+
+  if (status != AMD_DBGAPI_STATUS_ERROR_PROCESS_EXITED
+      && status != AMD_DBGAPI_STATUS_SUCCESS)
+    fatal_error (
+      "os_driver::set_group_segment_out_of_addr_range_exception failed (%s)",
+      to_cstring (status));
 }
 
 std::vector<process_t *>
@@ -649,6 +692,7 @@ process_t::update_agents ()
 
   std::optional<bool> precise_memory_supported;
   std::optional<bool> precise_alu_exceptions_supported;
+  std::optional<bool> group_segment_out_of_addr_range_exception_supported;
 
   /* Add new agents to the process.  */
   for (auto &&agent_info : agent_infos)
@@ -690,6 +734,11 @@ process_t::update_agents ()
           precise_alu_exceptions_supported
             = precise_alu_exceptions_supported.value_or (true)
               && agent_info.precise_alu_exceptions_supported;
+          group_segment_out_of_addr_range_exception_supported
+            = group_segment_out_of_addr_range_exception_supported.value_or (
+                true)
+              && agent_info
+                   .group_segment_out_of_addr_range_exception_supported;
         }
     }
 
@@ -712,6 +761,8 @@ process_t::update_agents ()
   m_supports_precise_memory = precise_memory_supported.value_or (false);
   m_supports_precise_alu_exceptions
     = precise_alu_exceptions_supported.value_or (false);
+  m_supports_group_segment_out_of_addr_range_exception
+    = group_segment_out_of_addr_range_exception_supported.value_or (false);
 }
 
 void
@@ -1807,6 +1858,14 @@ process_t::get_info (amd_dbgapi_process_info_t query, size_t value_size,
                          : AMD_DBGAPI_MEMORY_PRECISION_NONE);
       return;
 
+    case AMD_DBGAPI_PROCESS_INFO_GROUP_SEGMENT_OUT_OF_ADDR_RANGE_SUPPORTED:
+      utils::get_info (
+        value_size, value,
+        m_supports_group_segment_out_of_addr_range_exception
+          ? AMD_DBGAPI_GROUP_SEGMENT_EXCEPTIONS_OUT_OF_ADDR_RANGE
+          : AMD_DBGAPI_GROUP_SEGMENT_EXCEPTIONS_NONE);
+      return;
+
     case AMD_DBGAPI_PROCESS_INFO_OS_ID:
       if (!m_os_process_id)
         throw api_error_t (AMD_DBGAPI_STATUS_ERROR_NOT_AVAILABLE);
@@ -2729,3 +2788,4 @@ amd_dbgapi_set_alu_exceptions_precision (
          AMD_DBGAPI_STATUS_ERROR_NOT_SUPPORTED);
   TRACE_END ();
 }
+
