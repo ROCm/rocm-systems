@@ -612,7 +612,9 @@ def parse_args(args=None):
     if cdash_args.build_only:
         # Only run configure and build stages, skip tests
         cdash_args.stages = ["Start", "Update", "Configure", "Build", "Submit"]
-        sys.stderr.write("Build-only mode: stages set to Start, Update, Configure, Build, Submit\n")
+        sys.stderr.write(
+            "Build-only mode: stages set to Start, Update, Configure, Build, Submit\n"
+        )
         sys.stderr.flush()
 
     if cdash_args.test_only:
