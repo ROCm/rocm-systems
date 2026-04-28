@@ -611,6 +611,42 @@ HIP_TEMPLATE_TEST_CASE(Unit_Thread_Block_Tile_Reduce_Basic, int)
   }
 }
 
+template <size_t TileSize>
+void __global__ partialSum(int* result)
+{
+   int sum = 1;
+   cg::thread_block mygroup = cg::this_thread_block();
+   auto mytile = cg::tiled_partition<TileSize>(mygroup);
+
+  if (threadIdx.x != warpSize - 1) {
+     *result = cg::reduce(mytile, sum, cg::plus<int>());
+  }
+}
+
+// Not all the threads of a tile have to participate in a reduce (unlike reduce sync operations)
+TEST_CASE(Unit_Thread_Block_Tile_Reduce_Non_Participating_Threads)
+{
+  LinearAllocGuard<int> h_result(LinearAllocs::malloc, sizeof(int));
+  LinearAllocGuard<int> d_result(LinearAllocs::hipMalloc, sizeof(int));
+  dim3 gridDim = { 1 };
+  dim3 blockDim = { static_cast<unsigned short>(getWarpSize()) };
+  void* devicePtr = d_result.ptr();
+  void* args[] = { &devicePtr };
+  void* kernelPtr = reinterpret_cast<void*>(getWarpSize() == 32?
+                    partialSum<32> :
+                    partialSum<64>);
+
+  HIP_CHECK(hipLaunchCooperativeKernel(kernelPtr, gridDim, blockDim, args, 0, nullptr));
+  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipMemcpy(h_result.host_ptr(), d_result.ptr(),
+                      h_result.size_bytes(), hipMemcpyDeviceToHost));
+  // because a thread did not participate; we get a partial sum
+  REQUIRE(*h_result.host_ptr() == getWarpSize() - 1);
+}*/
+
+// @extraMasks  when testing coalesced_threads, this can be use to simulate
+//              divergence
 template <size_t TileSize, class Functor, class T>
 void __global__ reduceKernel(T* output, const T* input)
 {
