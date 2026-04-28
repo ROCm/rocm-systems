@@ -315,15 +315,14 @@ HIP_TEST_CASE(Unit_hipMemPrefetchAsync_NonPageSz) {
   HIP_CHECK(hipMemPrefetchAsync(Hmm, (NumElms * sizeof(int) + 8), 0, strm));
   HIP_CHECK(hipStreamSynchronize(strm));
   MemPrftchAsyncKernel1<<<((NumElms + 2) / 32 + 1), 32, 0, strm>>>(Hmm, (NumElms + 2));
+  HIP_CHECK(hipMemPrefetchAsync(Hmm, (NumElms * sizeof(int) + 8), hipCpuDeviceId, strm));
   HIP_CHECK(hipStreamSynchronize(strm));
+  const auto expected = InitVal * InitVal;
   for (int i = 0; i < (NumElms + 2); ++i) {
-    if (Hmm[i] != (InitVal * InitVal)) {
-      WARN("Didnt receive expected output after kernel launch!!");
-      IfTestPassed = false;
-      break;
-    }
+    INFO("Index: " << i << " Expected: " << expected << " got: " << Hmm[i]);
+    // We do require before cleanup, if the test fails, we do not care about the leaks.
+    REQUIRE(expected == Hmm[i]);
   }
   HIP_CHECK(hipFree(Hmm));
   HIP_CHECK(hipStreamDestroy(strm));
-  REQUIRE(IfTestPassed);
 }

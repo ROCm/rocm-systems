@@ -63,10 +63,10 @@ static void VerifyDataOnDevice(int* data, hipStream_t stream) {
 
   constexpr int kBlockSize = 256;
   int num_blocks = (kTestBufferElements + kBlockSize - 1) / kBlockSize;
-
+  HIP_CHECK(hipMemPrefetchAsync(success_flag, sizeof(bool), 0, stream));
   VerifyDataKernel<<<num_blocks, kBlockSize, 0, stream>>>(data, kTestBufferElements, kTestValueBase,
                                                           success_flag);
-
+  HIP_CHECK(hipMemPrefetchAsync(success_flag, sizeof(bool), hipCpuDeviceId, stream));
   HIP_CHECK(hipStreamSynchronize(stream));
   REQUIRE(*success_flag == true);
   HIP_CHECK(hipFree(success_flag));
