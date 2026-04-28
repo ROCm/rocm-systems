@@ -84,6 +84,7 @@ inline constexpr uint32_t SHT_NULL = 0;
 inline constexpr uint32_t SHT_PROGBITS = 1;
 inline constexpr uint32_t SHT_SYMTAB = 2;
 inline constexpr uint32_t SHT_STRTAB = 3;
+inline constexpr uint32_t SHT_NOBITS = 8;
 inline constexpr uint32_t SHT_NOTE = 7;
 inline constexpr uint32_t SHT_DYNSYM = 11;
 

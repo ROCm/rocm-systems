@@ -242,17 +242,23 @@ void AmdGpuCodeObject::load_sections(std::ifstream &elf_file) {
     size_t max_len = shstrtab_data.size() - shdr.sh_name;
     std::string sec_name(&shstrtab_data[shdr.sh_name],
                          strnlen(&shstrtab_data[shdr.sh_name], max_len));
-    elf_file.seekg(static_cast<std::streamoff>(shdr.sh_offset + fatbin_offset_), std::ios::beg);
-    if (shdr.sh_offset + shdr.sh_size > image_.size()) {
-      is_valid_ = false;
-      return;
-    }
 
     auto sec_data = std::make_unique<char[]>(shdr.sh_size);
-    elf_file.read(sec_data.get(), static_cast<std::streamsize>(shdr.sh_size));
-    if (!elf_file) {
-      is_valid_ = false;
-      return;
+    // SHT_NOBITS sections reserve memory in the loaded image but have no bytes
+    // in the file. Some ROCm-produced objects use them for padding, so treating
+    // sh_offset + sh_size as a file-backed range incorrectly rejects valid ELFs.
+    if (shdr.sh_type != SHT_NOBITS) {
+      elf_file.seekg(static_cast<std::streamoff>(shdr.sh_offset + fatbin_offset_), std::ios::beg);
+      if (shdr.sh_offset + shdr.sh_size > image_.size()) {
+        is_valid_ = false;
+        return;
+      }
+
+      elf_file.read(sec_data.get(), static_cast<std::streamsize>(shdr.sh_size));
+      if (!elf_file) {
+        is_valid_ = false;
+        return;
+      }
     }
     sections_.emplace_back(std::make_unique<HsaSection>(sec_name, std::move(sec_data), shdr));
 
