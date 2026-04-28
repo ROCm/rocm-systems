@@ -85,6 +85,14 @@ public:
         m_store[tid].push_back(rec);
     }
 
+    // Remove all records for tid after emit_resolved_to_trace_cache() has processed them.
+    // Prevents double-emission when post_process() iterates offload_.tids() (Variant 2).
+    void erase(int64_t tid) noexcept
+    {
+        std::lock_guard<std::mutex> lk{ m_mutex };
+        m_store.erase(tid);
+    }
+
 private:
     mutable std::mutex                                         m_mutex;
     std::unordered_map<int64_t, std::vector<backtrace_record>> m_store;

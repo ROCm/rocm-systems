@@ -301,6 +301,12 @@ sampling_service<Policies>::shutdown(int64_t tid)
         offload_.write(tid, state->ring_buffer(), fatal_);
     }
 
+    // Variant 2 (Task #30): parse + resolve + emit to trace_cache immediately.
+    // No-op in generic template; production specialization reads from offload_,
+    // parses, resolves symbols, emits backtrace_region_sample, then clears
+    // the tid from offload_ to prevent double-emission in post_process().
+    emit_resolved_to_trace_cache(tid);
+
     // Clear thread-local signal-handler pointers so a stale signal after
     // state destruction is a no-op. No-op in generic template; explicit
     // specialization for default_sampling_policies clears tl_sampler_state_vp,
@@ -571,6 +577,17 @@ template <class Policies>
 void
 sampling_service<Policies>::shutdown_production_wiring(int64_t /*tid*/)
 {}
+
+template <class Policies>
+void
+sampling_service<Policies>::emit_resolved_to_trace_cache(int64_t /*tid*/)
+{
+    // No-op in generic template. Production specialization for
+    // default_sampling_policies reads raw records from offload_, parses with
+    // sample_parser, resolves symbols (dladdr + demangler), emits
+    // backtrace_region_sample to trace_cache::buffer_storage, then clears the
+    // tid from offload_ to prevent double-emission in post_process() (Variant 2).
+}
 
 template <class Policies>
 void

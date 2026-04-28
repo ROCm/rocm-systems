@@ -146,6 +146,12 @@ private:
     void setup_production_wiring(int64_t tid, thread_sampler_state<Policies>* state,
                                  std::set<int> const& sigs);
     void shutdown_production_wiring(int64_t tid);
+    // Variant 2 (Task #30): parse + resolve + emit ring records to trace_cache.
+    // Called from shutdown(tid) after offload_.write(). Generic template is a no-op.
+    // Production specialization: reads raw records from offload_, parses with
+    // sample_parser, resolves symbols, emits backtrace_region_sample to
+    // trace_cache::buffer_storage, then clears the tid from offload_.
+    void emit_resolved_to_trace_cache(int64_t tid);
     void postfork_production_parent_reinit();
     void postfork_production_child_cleanup();
 

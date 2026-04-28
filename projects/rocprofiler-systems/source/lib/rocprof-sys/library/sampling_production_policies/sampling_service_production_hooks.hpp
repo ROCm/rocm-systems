@@ -12,6 +12,8 @@
 // core/state.hpp, library/thread_info.hpp, linux/perf_event.h).
 
 #include "sampling/sampling_service.hpp"
+#include "sampling/src/sample_parser.hpp"
+#include "sampling/src/symbol_resolver.hpp"
 
 #include "core/config.hpp"
 #include "core/perf.hpp"
@@ -19,6 +21,10 @@
 #include "core/trace_cache/cache_manager.hpp"
 #include "library/pmc/sampler.hpp"
 #include "library/thread_info.hpp"
+
+#include "rocprofiler-systems/categories.h"
+
+#include <nlohmann/json.hpp>
 
 #include <linux/perf_event.h>
 #include <sys/types.h>
@@ -244,6 +250,167 @@ sampling_service<default_sampling_policies>::postfork_production_child_cleanup()
         LOG_DEBUG("[postfork_child_cleanup] delegating to pmc::postfork_child_cleanup");
         rocprofsys::pmc::postfork_child_cleanup();
     }
+}
+
+// ── emit_resolved_to_trace_cache ───────────────────────────────────────────
+// Variant 2 (Task #30): after draining the ring buffer in shutdown(tid), parse
+// and resolve the raw backtrace_records and emit backtrace_region_sample directly
+// to trace_cache::buffer_storage. Clears the tid from offload_ to prevent
+// double-emission when post_process() iterates offload_.tids().
+
+template <>
+inline void
+sampling_service<default_sampling_policies>::emit_resolved_to_trace_cache(int64_t tid)
+{
+    auto records = offload_.read(tid);
+    if(records.empty()) return;
+
+    const auto& info = thread_info::get(tid, SequentTID);
+    if(!info)
+    {
+        offload_.erase(tid);
+        return;
+    }
+
+    size_t sys_id = info->index_data->system_value;
+    size_t seq_id = info->index_data->sequent_value;
+
+    sample_parser   parser;
+    symbol_resolver resolver;
+
+    // Split TIMER vs OVERFLOW records.
+    std::vector<backtrace_record> timer_raw;
+    std::vector<backtrace_record> overflow_raw;
+    timer_raw.reserve(records.size());
+    overflow_raw.reserve(records.size());
+    for(auto const& r : records)
+    {
+        if(r.trigger == trigger_type::TIMER)
+            timer_raw.push_back(r);
+        else
+            overflow_raw.push_back(r);
+    }
+
+    // Parse + resolve + emit timer samples.
+    if(timer_raw.size() >= 2)
+    {
+        backtrace_record              init_rec = timer_raw.front();
+        std::vector<backtrace_record> tail(timer_raw.begin() + 1, timer_raw.end());
+        auto timer_samples = parser.parse_timer(tid, init_rec, tail, pause_registry_);
+
+        if(!timer_samples.empty())
+        {
+            for(auto& s : timer_samples)
+                for(auto& f : s.stack)
+                    if(f.name.empty()) f.name = resolver.resolve(f.address);
+
+            constexpr uint32_t category_id =
+                static_cast<uint32_t>(ROCPROFSYS_CATEGORY_TIMER_SAMPLING);
+            constexpr auto category_str = "timer_sampling";
+            std::string    track_name =
+                "Thread " + std::to_string(seq_id) + " (S) " + std::to_string(sys_id);
+
+            for(auto const& s : timer_samples)
+            {
+                if(!info->is_valid_lifetime({ s.beg_ns, s.end_ns })) continue;
+
+                int depth = 0;
+                for(auto const& frame : s.stack)
+                {
+                    std::string    name = frame.name.empty()
+                                              ? ("0x" + fmt::format("{:X}", frame.address))
+                                              : frame.name;
+                    nlohmann::json cs_j;
+                    cs_j["name"] = frame.name.empty() ? fmt::format("{:X}", frame.address)
+                                                      : frame.name;
+                    cs_j["pc"]   = fmt::format("{:X}", frame.address);
+                    cs_j["file"] = frame.location;
+                    nlohmann::json li_j;
+                    li_j["line_address"] = fmt::format("{:X}", frame.line_address);
+                    li_j["name"]         = cs_j["name"];
+                    if(!frame.inlines.empty())
+                    {
+                        nlohmann::json inlined;
+                        auto const&    top  = frame.inlines.front();
+                        inlined["name"]     = top.name;
+                        inlined["location"] = top.location;
+                        inlined["line"]     = std::to_string(top.line);
+                        li_j["inlined"]     = inlined;
+                    }
+                    nlohmann::json ext;
+                    ext["depth"] = depth;
+
+                    trace_cache::get_buffer_storage().store(
+                        trace_cache::backtrace_region_sample{
+                            category_id, static_cast<uint64_t>(sys_id), track_name, name,
+                            s.beg_ns, s.end_ns, category_str, cs_j.dump(), li_j.dump(),
+                            ext.dump() });
+                    ++depth;
+                }
+            }
+        }
+    }
+
+    // Parse + resolve + emit overflow samples.
+    if(!overflow_raw.empty())
+    {
+        auto overflow_samples = parser.parse_overflow(tid, overflow_raw, pause_registry_);
+
+        if(!overflow_samples.empty())
+        {
+            for(auto& s : overflow_samples)
+                for(auto& f : s.stack)
+                    if(f.name.empty()) f.name = resolver.resolve(f.address);
+
+            constexpr uint32_t category_id =
+                static_cast<uint32_t>(ROCPROFSYS_CATEGORY_OVERFLOW_SAMPLING);
+            constexpr auto category_str = "overflow_sampling";
+            std::string    track_name   = "Thread " + std::to_string(seq_id) +
+                                     " Overflow (S) " + std::to_string(sys_id);
+
+            for(auto const& s : overflow_samples)
+            {
+                if(!info->is_valid_lifetime({ s.beg_ns, s.end_ns })) continue;
+
+                int depth = 0;
+                for(auto const& frame : s.stack)
+                {
+                    std::string    name = frame.name.empty()
+                                              ? ("0x" + fmt::format("{:X}", frame.address))
+                                              : frame.name;
+                    nlohmann::json cs_j;
+                    cs_j["name"] = frame.name.empty() ? fmt::format("{:X}", frame.address)
+                                                      : frame.name;
+                    cs_j["pc"]   = fmt::format("{:X}", frame.address);
+                    cs_j["file"] = frame.location;
+                    nlohmann::json li_j;
+                    li_j["line_address"] = fmt::format("{:X}", frame.line_address);
+                    li_j["name"]         = cs_j["name"];
+                    if(!frame.inlines.empty())
+                    {
+                        nlohmann::json inlined;
+                        auto const&    top  = frame.inlines.front();
+                        inlined["name"]     = top.name;
+                        inlined["location"] = top.location;
+                        inlined["line"]     = std::to_string(top.line);
+                        li_j["inlined"]     = inlined;
+                    }
+                    nlohmann::json ext;
+                    ext["depth"] = depth;
+
+                    trace_cache::get_buffer_storage().store(
+                        trace_cache::backtrace_region_sample{
+                            category_id, static_cast<uint64_t>(sys_id), track_name, name,
+                            s.beg_ns, s.end_ns, category_str, cs_j.dump(), li_j.dump(),
+                            ext.dump() });
+                    ++depth;
+                }
+            }
+        }
+    }
+
+    // Clear processed tid from offload_ to prevent double-emission in post_process().
+    offload_.erase(tid);
 }
 
 }  // namespace rocprofsys::sampling

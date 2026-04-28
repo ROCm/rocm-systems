@@ -56,6 +56,8 @@ set(_sampling_test_sources
     unit/trigger_mutual_exclusion_test.cpp
     # TDD tests for trace_cache_offload_adapter (EmitterPolicy production type, Task #31).
     unit/trace_cache_offload_adapter_test.cpp
+    # TDD tests for emit_resolved_to_trace_cache hook + erase() (Variant 2, Task #30).
+    unit/emit_resolved_hook_test.cpp
 )
 
 # Linux-only smoke tests for real OS-backed implementations.
