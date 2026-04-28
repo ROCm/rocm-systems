@@ -147,8 +147,6 @@ __device__ void IPCContext::getmem_wave(void *dest, const void *source,
   uint64_t L_offset = const_cast<char *>(src_typed) - ipcImpl_.ipc_bases[my_pe];
   ipcImpl_.ipcCopy_wave(dest, ipcImpl_.ipc_bases[pe] + L_offset,
                         nelems, pe, /*blocking=*/true);
-  ipcImpl_.ipcFence<detail::atomic::memory_scope_wavefront,
-                    detail::atomic::memory_order_release>();
 }
 
 __device__ void IPCContext::putmem_nbi_wave(void *dest, const void *source,
@@ -176,8 +174,6 @@ __device__ void IPCContext::internal_getmem(void *dest, const void *source,
                                             size_t nelems, int pe) {
   const char *src_typed = reinterpret_cast<const char *>(source);
   uint64_t L_offset = const_cast<char *>(src_typed) - wrk_sync_pool_bases_[my_pe];
-  ipcImpl_.ipcFence<detail::atomic::memory_scope_system,
-                    detail::atomic::memory_order_acquire>();
   memcpy_lane<MemcpyKind::Get>(dest, wrk_sync_pool_bases_[pe] + L_offset, nelems);
   ipcImpl_.ipcFence<detail::atomic::memory_scope_workgroup,
                     detail::atomic::memory_order_release>();
@@ -196,8 +192,6 @@ __device__ void IPCContext::internal_getmem_wg(void *dest, const void *source,
                                      size_t nelems, int pe) {
   const char *src_typed = reinterpret_cast<const char *>(source);
   uint64_t L_offset = const_cast<char *>(src_typed) - wrk_sync_pool_bases_[my_pe];
-  ipcImpl_.ipcFence<detail::atomic::memory_scope_system,
-                    detail::atomic::memory_order_acquire>();
   memcpy_wg<MemcpyKind::Get>(dest, wrk_sync_pool_bases_[pe] + L_offset, nelems);
   ipcImpl_.ipcFence<detail::atomic::memory_scope_workgroup,
                     detail::atomic::memory_order_release>();
@@ -216,8 +210,6 @@ __device__ void IPCContext::internal_getmem_wave(void *dest,
                         const void *source, size_t nelems, int pe) {
   const char *src_typed = reinterpret_cast<const char *>(source);
   uint64_t L_offset = const_cast<char *>(src_typed) - wrk_sync_pool_bases_[my_pe];
-  ipcImpl_.ipcFence<detail::atomic::memory_scope_system,
-                    detail::atomic::memory_order_acquire>();
   memcpy_wave<MemcpyKind::Get>(dest, wrk_sync_pool_bases_[pe] + L_offset, nelems);
   ipcImpl_.ipcFence<detail::atomic::memory_scope_workgroup,
                     detail::atomic::memory_order_release>();
