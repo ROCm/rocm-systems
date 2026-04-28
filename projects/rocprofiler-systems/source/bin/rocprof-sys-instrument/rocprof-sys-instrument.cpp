@@ -1581,12 +1581,6 @@ main(int argc, char** argv)
         verbprintf(0, "Warning! No functions in application.\n");
     }
 
-    verbprintf(1, "\n");
-    verbprintf(1, "Found %zu functions in %zu modules across %zu objects\n",
-               functions.size(), modules.size(), objects.size());
-    for(auto* obj : objects)
-        verbprintf(1, "  [object] %s\n", obj->name().c_str());
-
     if(debug_print || verbose_level > 2)
     {
         module_function::reset_width();
