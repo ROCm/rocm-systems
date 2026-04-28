@@ -90,8 +90,11 @@ add_library(${GOAMDSMI_SHIM_TARGET} SHARED ${go_amd_smi_sources} ${go_amd_smi_he
 target_link_libraries(${GOAMDSMI_SHIM_TARGET} pthread rt m)
 
 target_link_libraries(${GOAMDSMI_SHIM_TARGET} amd_smi)
-target_link_libraries(${GOAMDSMI_SHIM_TARGET} -L${AMDSMI_DIR}/lib64)
-target_link_libraries(${GOAMDSMI_SHIM_TARGET} -L${AMDSMI_DIR}/lib)
+# Use GNUInstallDirs' CMAKE_INSTALL_LIBDIR so the search path follows the
+# system convention (lib64 on 64-bit RPM-based distros, lib elsewhere).
+# This avoids picking up 32-bit libraries from /lib on systems that have
+# both /lib and /lib64 populated.
+target_link_libraries(${GOAMDSMI_SHIM_TARGET} -L${AMDSMI_DIR}/${CMAKE_INSTALL_LIBDIR})
 
 ## Set the VERSION and SOVERSION values
 set_property(TARGET ${GOAMDSMI_SHIM_TARGET} PROPERTY SOVERSION "${VERSION_MAJOR}")
