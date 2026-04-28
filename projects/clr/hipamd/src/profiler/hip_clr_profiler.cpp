@@ -1501,6 +1501,41 @@ void HipCaptureKernelArgsExt(HipGpuActivityExt* gact, hipFunction_t func, void**
   gact->kernel_args_size = static_cast<uint32_t>(total);
 }
 
+void HipCaptureKernelArgsPackedExt(HipGpuActivityExt* gact, hipFunction_t func,
+                                    const void* kernargs, size_t kernargs_size) {
+  if (!gact || !func || !kernargs || kernargs_size == 0) return;
+
+  amd::Kernel* kernel = hip::asKernel(func);
+  if (!kernel) return;
+
+  const amd::KernelSignature& sig = kernel->signature();
+  uint32_t nparams = sig.numParameters();
+  if (nparams == 0) return;
+
+  // Build the same {size, bytes...} blob, reading each arg from its ABI offset.
+  size_t total = 0;
+  for (uint32_t i = 0; i < nparams; ++i)
+    total += sizeof(uint32_t) + sig.at(i).size_;
+
+  uint8_t* blob = new uint8_t[total];
+  uint8_t* p    = blob;
+  const uint8_t* buf = static_cast<const uint8_t*>(kernargs);
+  for (uint32_t i = 0; i < nparams; ++i) {
+    const amd::KernelParameterDescriptor& desc = sig.at(i);
+    uint32_t val_size = static_cast<uint32_t>(desc.size_);
+    std::memcpy(p, &val_size, sizeof(uint32_t));
+    p += sizeof(uint32_t);
+    if (desc.offset_ + desc.size_ <= kernargs_size)
+      std::memcpy(p, buf + desc.offset_, val_size);
+    else
+      std::memset(p, 0, val_size);
+    p += val_size;
+  }
+
+  gact->kernel_args      = blob;
+  gact->kernel_args_size = static_cast<uint32_t>(total);
+}
+
 // ============================================================
 // Graph exec node info storage
 // ============================================================

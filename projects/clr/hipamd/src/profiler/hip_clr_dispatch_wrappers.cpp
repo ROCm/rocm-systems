@@ -39,6 +39,19 @@ static std::atomic<bool> g_wrapped{false};
 static thread_local dim3 g_pushed_grid{};
 static thread_local dim3 g_pushed_block{};
 
+// Parse the `extra` array from hipModuleLaunchKernel / hipExtModuleLaunchKernel.
+// Format: { HIP_LAUNCH_PARAM_BUFFER_POINTER, ptr, HIP_LAUNCH_PARAM_BUFFER_SIZE, &size, END }
+// Returns true and sets out_ptr/out_size if the buffer is valid; false otherwise.
+static bool ParseKernelExtra(void** extra, const void*& out_ptr, size_t& out_size) {
+  if (!extra) return false;
+  if (extra[0] != HIP_LAUNCH_PARAM_BUFFER_POINTER) return false;
+  if (extra[2] != HIP_LAUNCH_PARAM_BUFFER_SIZE)    return false;
+  if (extra[4] != HIP_LAUNCH_PARAM_END)             return false;
+  out_ptr  = extra[1];
+  out_size = *reinterpret_cast<size_t*>(extra[3]);
+  return out_ptr != nullptr && out_size > 0;
+}
+
 
 // ── Compiler dispatch table hooks ────────────────────────────────────────────
 // __hipPushCallConfiguration / __hipPopCallConfiguration live in HipCompilerDispatchTable,
@@ -3076,8 +3089,13 @@ static hipError_t hipModuleLaunchKernelLayer(hipFunction_t f, unsigned int gridD
   _rec->stream = stream;
   _rec->gpu.grid_x = gridDimX; _rec->gpu.grid_y = gridDimY; _rec->gpu.grid_z = gridDimZ;
   _rec->gpu.block_x = blockDimX; _rec->gpu.block_y = blockDimY; _rec->gpu.block_z = blockDimZ;
-  if (kernelParams)
+  if (kernelParams) {
     HipCaptureKernelArgsExt(&_rec->gpu, f, kernelParams);
+  } else {
+    const void* kbuf; size_t ksz;
+    if (ParseKernelExtra(extra, kbuf, ksz))
+      HipCaptureKernelArgsPackedExt(&_rec->gpu, f, kbuf, ksz);
+  }
   auto _r = g_next.hipModuleLaunchKernel_fn(f, gridDimX, gridDimY, gridDimZ, blockDimX, blockDimY, blockDimZ, sharedMemBytes, stream, kernelParams, extra);
   _rec->end_ns = NowNs();
   return _r;
@@ -3909,8 +3927,13 @@ static hipError_t hipExtModuleLaunchKernelLayer(hipFunction_t f, uint32_t global
   _rec->gpu.grid_x  = localWorkSizeX ? globalWorkSizeX / localWorkSizeX : 0;
   _rec->gpu.grid_y  = localWorkSizeY ? globalWorkSizeY / localWorkSizeY : 0;
   _rec->gpu.grid_z  = localWorkSizeZ ? globalWorkSizeZ / localWorkSizeZ : 0;
-  if (kernelParams)
+  if (kernelParams) {
     HipCaptureKernelArgsExt(&_rec->gpu, f, kernelParams);
+  } else {
+    const void* kbuf; size_t ksz;
+    if (ParseKernelExtra(extra, kbuf, ksz))
+      HipCaptureKernelArgsPackedExt(&_rec->gpu, f, kbuf, ksz);
+  }
   auto _r = g_next.hipExtModuleLaunchKernel_fn(f, globalWorkSizeX, globalWorkSizeY, globalWorkSizeZ, localWorkSizeX, localWorkSizeY, localWorkSizeZ, sharedMemBytes, hStream, kernelParams, extra, startEvent, stopEvent, flags);
   _rec->end_ns = NowNs();
   return _r;
@@ -3930,8 +3953,13 @@ static hipError_t hipHccModuleLaunchKernelLayer(hipFunction_t f, uint32_t global
   _rec->gpu.grid_x  = localWorkSizeX ? globalWorkSizeX / localWorkSizeX : 0;
   _rec->gpu.grid_y  = localWorkSizeY ? globalWorkSizeY / localWorkSizeY : 0;
   _rec->gpu.grid_z  = localWorkSizeZ ? globalWorkSizeZ / localWorkSizeZ : 0;
-  if (kernelParams)
+  if (kernelParams) {
     HipCaptureKernelArgsExt(&_rec->gpu, f, kernelParams);
+  } else {
+    const void* kbuf; size_t ksz;
+    if (ParseKernelExtra(extra, kbuf, ksz))
+      HipCaptureKernelArgsPackedExt(&_rec->gpu, f, kbuf, ksz);
+  }
   auto _r = g_next.hipHccModuleLaunchKernel_fn(f, globalWorkSizeX, globalWorkSizeY, globalWorkSizeZ, localWorkSizeX, localWorkSizeY, localWorkSizeZ, sharedMemBytes, hStream, kernelParams, extra, startEvent, stopEvent);
   _rec->end_ns = NowNs();
   return _r;
