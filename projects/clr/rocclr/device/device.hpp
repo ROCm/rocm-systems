@@ -1843,6 +1843,9 @@ class Device : public RuntimeObject {
   ///! Allocates a device signal object
   virtual device::Signal* createSignal() const = 0;
 
+  ///! Allocates an IPC-capable signal, or returns nullptr if unsupported
+  virtual device::Signal* createIpcSignal() const { return nullptr; }
+
   //! Return true if initialized external API interop, otherwise false
   virtual bool bindExternalDevice(
       uint flags,             //!< Enum val. for ext.API type: GL, D3D10, etc.
