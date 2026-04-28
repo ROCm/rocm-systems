@@ -70,7 +70,7 @@ class HeapMemoryType : public HeapMemory {
    * @param[in] size User-specified size used as heap size
    */
   explicit HeapMemoryType(const MemoryAllocator& alloc, size_t size)
-      : allocator_{alloc}, up_{nullptr, Deleter(&allocator_)}, size_{size} {
+      : allocator_{alloc}, up_{nullptr, Deleter(alloc)}, size_{size} {
     char* temp;
     allocator_.allocate(reinterpret_cast<void**>(&temp), size_);
     assert(temp);
@@ -102,19 +102,19 @@ class HeapMemoryType : public HeapMemory {
  private:
   /**
    * @brief Wrap deallocator into a functor for up_ template.
+   *
+   * Stores allocator by value to avoid dangling pointer issues during move.
    */
   class Deleter {
    public:
-    Deleter() : a_{nullptr} {}
-    explicit Deleter(MemoryAllocator* alloc) : a_{alloc} {}
+    Deleter() = default;
+    explicit Deleter(const MemoryAllocator& alloc) : a_{alloc} {}
     void operator()(void* x) {
-      if (a_) {
-        a_->deallocate(x);
-      }
+      a_.deallocate(x);
     }
 
    private:
-    MemoryAllocator* a_;
+    MemoryAllocator a_{};
   };
 
   /**
