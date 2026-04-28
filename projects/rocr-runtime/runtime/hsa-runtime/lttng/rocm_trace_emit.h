@@ -203,31 +203,42 @@ static inline void rocm_trace_emit_hsa_intercept_packets(uint32_t queue_id,
 /* Curated per-API typed emit helpers (generated header). */
 #include "rocm_trace_emit_curated.h"
 
-/* kernel_dispatch_complete emit helper. Called ONLY by the firmware-dispatch-
+/* kernel_dispatch_record emit helper. Called ONLY by the firmware-dispatch-
  * log drainer thread (NOT the application thread) from
- * dispatch_log::drain_one_queue. force_emit=true bypasses the per-tracepoint
- * lttng_ust_tracepoint_enabled() guard but NOT the rocm_trace_disabled()
- * kill switch. The bypass is REQUIRED for the disable-edge final drain (Phase
- * A spec §4): by the time final drain runs, the user has already disabled
- * the tracepoint (that disablement is what triggered the disable edge), so
- * the steady-state guard would otherwise return false and the
- * "END records the firmware has already written before wait_for_idle returns
- * are emitted" loss guarantee would be unachievable. Steady-state drainer
- * passes always pass force_emit=false. parent_corr_id is always 0 because
- * the drainer thread has no API context (real parent is recovered consumer-
- * side via the rocm_hsa:hsa_doorbell_ring join on (queue_id, dispatch_idx)).
+ * dispatch_log::drain_one_queue. Emits one event per FW-written 16-byte
+ * record (no host-side START/END pairing — see rocm_hsa_tp.h
+ * kernel_dispatch_record doc comment for the consumer-side join contract).
+ *
+ * force_emit=true bypasses the per-tracepoint lttng_ust_tracepoint_enabled()
+ * guard but NOT the rocm_trace_disabled() kill switch. The bypass is
+ * REQUIRED for the disable-edge final drain (Phase A spec §4): by the time
+ * final drain runs, the user has already disabled the tracepoint (that
+ * disablement is what triggered the disable edge), so the steady-state
+ * guard would otherwise return false and the "records the firmware has
+ * already written before wait_for_idle returns are emitted" loss guarantee
+ * would be unachievable. Steady-state drainer passes always pass
+ * force_emit=false.
+ *
+ * gpu_ts_sys is the FW-written GPU clock already translated to the host
+ * system clock domain by the drainer (via the per-queue translate_gpu_ts
+ * callable). record_type is the raw FW-written tag, narrowed to uint8_t at
+ * the call site (current FW values are 1 and 2; see drain_one_queue).
+ *
+ * parent_corr_id is always 0 because the drainer thread has no API context
+ * (real parent is recovered consumer-side via the
+ * rocm_hsa:hsa_doorbell_ring join on (queue_id, dispatch_idx)).
  */
-static inline void rocm_trace_emit_hsa_kernel_dispatch_complete(
+static inline void rocm_trace_emit_hsa_kernel_dispatch_record(
     uint32_t queue_id, uint32_t dispatch_idx,
-    uint64_t start_ts_sys, uint64_t end_ts_sys,
+    uint64_t gpu_ts_sys, uint8_t record_type,
     bool     force_emit /* default false at call site via wrapper */) {
     if (rocm_trace_disabled()) return;
     if (force_emit ||
-        lttng_ust_tracepoint_enabled(rocm_hsa, kernel_dispatch_complete)) {
+        lttng_ust_tracepoint_enabled(rocm_hsa, kernel_dispatch_record)) {
         const uint64_t self_corr = rocp_reg_next_corr_id();
-        lttng_ust_do_tracepoint(rocm_hsa, kernel_dispatch_complete,
+        lttng_ust_do_tracepoint(rocm_hsa, kernel_dispatch_record,
                                 queue_id, dispatch_idx,
-                                start_ts_sys, end_ts_sys,
+                                gpu_ts_sys, record_type,
                                 self_corr, /* parent_corr_id */ (uint64_t)0);
     }
 }
@@ -279,9 +290,9 @@ static inline void rocm_trace_emit_hsa_doorbell_ring(uint32_t a, int64_t b, uint
 static inline void rocm_trace_emit_hsa_intercept_packets(uint32_t a, uint64_t b, uint32_t c, uint8_t d) {
     (void)a; (void)b; (void)c; (void)d;
 }
-static inline void rocm_trace_emit_hsa_kernel_dispatch_complete(uint32_t a, uint32_t b,
-                                                                uint64_t c, uint64_t d,
-                                                                bool e) {
+static inline void rocm_trace_emit_hsa_kernel_dispatch_record(uint32_t a, uint32_t b,
+                                                               uint64_t c, uint8_t d,
+                                                               bool e) {
     (void)a; (void)b; (void)c; (void)d; (void)e;
 }
 static inline void rocm_trace_emit_hsa_kernel_dispatch_drop(uint32_t a, uint64_t b) {

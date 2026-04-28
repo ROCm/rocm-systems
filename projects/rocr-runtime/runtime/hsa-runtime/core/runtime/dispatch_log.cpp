@@ -161,7 +161,6 @@ struct queue_drain_state {
   // slot whose record_type is non-zero, and zero the slot after consume
   // so a wraparound re-write is re-detectable. See drain_one_queue.
   uint64_t next_idx = 0;
-  std::unordered_map<uint32_t, uint64_t> pending_starts;
 
   // Per-queue drain mutex. Serializes drain_one_queue() (steady state) and
   // ts_drainer_drain_now() (synchronous final drain on the destroying /
@@ -176,7 +175,7 @@ struct queue_drain_state {
 
 // Spec §4 single source of truth for "should HSA be collecting kernel-dispatch
 // timestamps right now?". Folded predicate of !rocm_trace_disabled() &&
-// lttng_ust_tracepoint_enabled(rocm_hsa, kernel_dispatch_complete) &&
+// lttng_ust_tracepoint_enabled(rocm_hsa, kernel_dispatch_record) &&
 // g_substrate_present. Written only by ts_poller; read by on_queue_create
 // (relaxed, hot path) and ts_drainer.
 std::atomic<bool> G_tracepoint_enabled{false};
@@ -268,7 +267,7 @@ uint64_t queue_id_of(core::Queue* q) {
 }
 
 // Narrow the 64-bit internal queue_id to the 32-bit on-the-wire identifier
-// emitted by the rocm_hsa:kernel_dispatch_complete / kernel_dispatch_drop
+// emitted by the rocm_hsa:kernel_dispatch_record / kernel_dispatch_drop
 // LTTng tracepoints. Spec §6 / §14 fix the wire format at uint32_t for
 // payload size; consumers join with the low 32 bits of the masked AQL
 // doorbell write_idx (also 32-bit on-the-wire). This narrowing is
@@ -454,28 +453,33 @@ bool drain_one_queue(queue_drain_state& qs, bool force_emit) {
     // target.
     std::memset(rec, 0, kSlotStride);
 
-    if (rt == DISPATCH_LOG_RECORD_START) {
-      qs.pending_starts[dispatch_idx] = gpu_ts;
-    } else if (rt == DISPATCH_LOG_RECORD_END) {
-      auto it = qs.pending_starts.find(dispatch_idx);
-      if (it != qs.pending_starts.end()) {
-        const uint64_t start_gpu = it->second;
-        qs.pending_starts.erase(it);
+    // Emit one event per FW-written record. No host-side START/END
+    // pairing — consumer joins on (queue_id, dispatch_idx) and uses
+    // gpu_ts ordering or record_type semantics as it sees fit.
+    //
+    // Empirically on the gfx950 MEC firmware (gc_9_5_0_mec.bin):
+    // record_type==2 carries the earlier ts (dispatch start),
+    // record_type==1 carries the later ts (EOP / dispatch end). HSA
+    // emits both records as-is without taking a position on which is
+    // which — the FW contract is not formally versioned, and a
+    // consumer-side polarity decision is cheaper to update than a
+    // host-runtime release.
+    //
+    // record_type narrowing uint32 -> uint8: current FW values are
+    // 1 and 2 and the on-the-wire schema field is uint8_t. If a future
+    // FW adds a record_type beyond 255, the static_cast silently
+    // truncates; we accept this risk for the smaller payload and will
+    // widen the schema (and the cast) when (and only when) such a
+    // FW revision exists. Use the captured queue-independent
+    // translation callable — Queue may be destroyed mid-pass even
+    // though the shared_ptr keeps qs alive.
+    const uint64_t gpu_ts_sys = qs.translate_gpu_ts(gpu_ts);
 
-        // Use the captured queue-independent translation callable —
-        // Queue may be destroyed mid-pass even though the shared_ptr
-        // keeps qs alive.
-        const uint64_t start_sys = qs.translate_gpu_ts(start_gpu);
-        const uint64_t end_sys   = qs.translate_gpu_ts(gpu_ts);
-
-        // Narrow internal 64-bit queue_id at the tracepoint boundary
-        // (spec §6 / §14, C5 fix). dispatch_idx is 32-bit per FW contract.
-        rocm_trace_emit_hsa_kernel_dispatch_complete(
-            queue_id_to_wire(qs.queue_id), dispatch_idx, start_sys,
-            end_sys, force_emit);
-      }
-      // else: orphan END (matching START was lost). Silently skip.
-    }
+    // Narrow internal 64-bit queue_id at the tracepoint boundary
+    // (spec §6 / §14, C5 fix). dispatch_idx is 32-bit per FW contract.
+    rocm_trace_emit_hsa_kernel_dispatch_record(
+        queue_id_to_wire(qs.queue_id), dispatch_idx, gpu_ts_sys,
+        static_cast<uint8_t>(rt), force_emit);
 
     qs.next_idx += 1;
     pass_consumed += 1;
@@ -822,20 +826,20 @@ bool predicate_now() {
 #if defined(HSA_ENABLE_LTTNG_UST) && HSA_ENABLE_LTTNG_UST
   if (rocm_trace_disabled()) return false;
   if (!g_substrate_present.load(std::memory_order_relaxed)) {
-    if (lttng_ust_tracepoint_enabled(rocm_hsa, kernel_dispatch_complete)) {
+    if (lttng_ust_tracepoint_enabled(rocm_hsa, kernel_dispatch_record)) {
       bool warned = g_substrate_absent_warned.load(std::memory_order_relaxed);
       if (!warned && g_substrate_absent_warned.compare_exchange_strong(
                          warned, true)) {
         std::fprintf(stderr,
                      "[hsa-runtime] dispatch_log: tracepoint "
-                     "rocm_hsa:kernel_dispatch_complete is enabled, but the "
+                     "rocm_hsa:kernel_dispatch_record is enabled, but the "
                      "KFD substrate is not available on this kernel "
                      "(KFD minor version < 22). No events will be produced.\n");
       }
     }
     return false;
   }
-  return lttng_ust_tracepoint_enabled(rocm_hsa, kernel_dispatch_complete) != 0;
+  return lttng_ust_tracepoint_enabled(rocm_hsa, kernel_dispatch_record) != 0;
 #else
   return false;
 #endif

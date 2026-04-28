@@ -82,22 +82,26 @@ namespace dispatch_log {
 // for byte-offset wraparound.
 constexpr uint32_t DISPATCH_LOG_RECORD_COUNT = 65536;
 
-// Record-type tags written by FW into mec_dispatch_record_16::record_type.
-enum {
-  DISPATCH_LOG_RECORD_START = 1,
-  DISPATCH_LOG_RECORD_END   = 2,
-};
-
 // FW-written 16-byte record. Layout is fixed by the firmware contract.
 // Mirrors rocr::AMD::mec_dispatch_record from
 // core/inc/mec_dispatch_record.h, with the trailing 4-byte field treated
 // as the dispatch index (FW writes the per-queue monotonic dispatch idx
 // into the `reserved` slot per the cpc_tracing drainer's interpretation).
+//
+// `record_type` is FW-defined and intentionally left opaque to HSA: the
+// drainer does not interpret which value means dispatch start vs end and
+// emits one rocm_hsa:kernel_dispatch_record event per non-zero record
+// regardless of the tag value. Stream consumers that want paired
+// start/end semantics join records on (queue_id, dispatch_idx) and
+// either order by gpu_ts or apply their own FW-version-specific
+// record_type interpretation. Only record_type == 0 is reserved by HSA
+// itself: it marks an empty (host-pre-zeroed and not yet FW-written)
+// slot in the sentinel-scan drainer.
 #pragma pack(push, 1)
 struct mec_dispatch_record_16 {
   uint32_t ts_lo;          // GPU clock low 32 bits
   uint32_t ts_hi;          // GPU clock high 32 bits
-  uint32_t record_type;    // DISPATCH_LOG_RECORD_{START,END}
+  uint32_t record_type;    // FW-defined; 0 reserved as the empty sentinel
   uint32_t dispatch_idx;   // FW-written dispatch idx (mec_dispatch_record::reserved)
 };
 #pragma pack(pop)

@@ -144,28 +144,56 @@ LTTNG_UST_TRACEPOINT_EVENT(
 /* Curated per-API typed tracepoint events (generated header). */
 #include "rocm_hsa_curated_tp.h"
 
-/* kernel_dispatch_complete: emitted by the firmware-dispatch-log drainer
- * thread (NOT the application thread) when a kernel dispatch's START and
- * END timestamp records have been paired. dispatch_idx is the low 32 bits
- * of the AQL read_dispatch_id at the FW's moment of dispatch processing;
- * stream-side joiners against rocm_hsa:hsa_doorbell_ring MUST mask the
- * doorbell write_idx to 32 bits before comparing. start_ts and end_ts are
- * host-domain (system clock) timestamps; the drainer translates the
- * FW-written GPU clock via the queue's agent's existing TranslateTime
- * infrastructure before emit. self_corr is freshly minted per emission;
- * parent_corr_id is always 0 (the drainer thread has no API context —
- * real parent recovery is consumer-side via the doorbell join). See
- * Phase A spec §6 for full rationale. */
+/* kernel_dispatch_record: emitted by the firmware-dispatch-log drainer
+ * thread (NOT the application thread) once per FW-written 16-byte record.
+ *
+ * The MEC firmware writes two records per kernel dispatch: the two
+ * records share the same dispatch_idx and have different record_type
+ * values (currently 1 and 2). HSA does NOT interpret which record_type
+ * means start vs end; that interpretation is left to the stream
+ * consumer, which can:
+ *   (a) join records on (queue_id, dispatch_idx) to find pairs, and
+ *   (b) infer start vs end from gpu_ts ordering (smaller ts = start)
+ *       OR from record_type if the consumer has FW-version-specific
+ *       knowledge.
+ *
+ * Empirical observation on the gfx950 MEC firmware (gc_9_5_0_mec.bin)
+ * shows record_type==2 carries the EARLIER GPU clock (dispatch start)
+ * and record_type==1 carries the LATER GPU clock (EOP / dispatch end).
+ * This is OPPOSITE of what cpc_tracing's mec_dispatch_record.h comment
+ * claims. Rather than baking a host-side polarity decision against a
+ * non-versioned FW contract, HSA emits both records and lets the
+ * consumer decide. Future FW revisions that change the polarity (or add
+ * a third record_type) cost only a consumer change.
+ *
+ * gpu_ts is host-domain (system clock) translated from the FW-written
+ * GPU clock by HSA's existing GpuAgent::TranslateTime infrastructure
+ * (monotonic linear interpolation, so the relative ordering of any two
+ * records' timestamps is preserved by the translation).
+ *
+ * record_type is the raw value FW wrote (uint8_t — the FW field is
+ * 32 bits but the values seen so far fit in uint8_t and the on-the-wire
+ * payload size matters; see drain_one_queue for the narrowing).
+ *
+ * dispatch_idx is the low 32 bits of the AQL read_dispatch_id at the
+ * FW's moment of dispatch processing; stream-side joiners against
+ * rocm_hsa:hsa_doorbell_ring MUST mask the doorbell write_idx to 32
+ * bits before comparing.
+ *
+ * self_corr is freshly minted per emission so this event has its own
+ * identity; parent_corr_id is always 0 (the drainer thread has no API
+ * context — real parent recovery is consumer-side via the doorbell
+ * join). See Phase A spec §6 for full rationale. */
 LTTNG_UST_TRACEPOINT_EVENT(
-    rocm_hsa, kernel_dispatch_complete,
+    rocm_hsa, kernel_dispatch_record,
     LTTNG_UST_TP_ARGS(uint32_t, queue_id, uint32_t, dispatch_idx,
-                      uint64_t, start_ts, uint64_t, end_ts,
+                      uint64_t, gpu_ts, uint8_t, record_type,
                       uint64_t, self_corr, uint64_t, parent_corr_id),
     LTTNG_UST_TP_FIELDS(
         lttng_ust_field_integer(uint32_t, queue_id, queue_id)
         lttng_ust_field_integer(uint32_t, dispatch_idx, dispatch_idx)
-        lttng_ust_field_integer(uint64_t, start_ts, start_ts)
-        lttng_ust_field_integer(uint64_t, end_ts, end_ts)
+        lttng_ust_field_integer(uint64_t, gpu_ts, gpu_ts)
+        lttng_ust_field_integer(uint8_t, record_type, record_type)
         lttng_ust_field_integer(uint64_t, corr_id, self_corr)
         lttng_ust_field_integer(uint64_t, parent_corr_id, parent_corr_id)
     )
