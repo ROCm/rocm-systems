@@ -162,7 +162,13 @@ struct queue_profiling_owners {
 // rationale.
 // ============================================================================
 struct queue_drain_state {
-  uint32_t  queue_id = 0;
+  // Full 64-bit hsa_queue_t::id (see hsa.h). Internal ownership / lifetime
+  // maps key on this full id to avoid the high-32-bit collision risk
+  // flagged in C5 (two distinct live queues differing only in the high 32
+  // bits would have aliased a uint32_t key). The on-the-wire LTTng
+  // tracepoint payload still carries only the low 32 bits per spec §6/§14
+  // — we narrow at the rocm_trace_emit_* call sites, not here.
+  uint64_t  queue_id = 0;
 
   // Owned, queue-independent GPU->system time-translation callable.
   // Captured at register time so it remains callable even after the
@@ -235,10 +241,13 @@ std::atomic<bool> g_shutdown{false};
 // Acquired only briefly: enable/disable per-queue and snapshot-cloning.
 std::mutex g_lifecycle_mu;
 
-// Drainer registry (spec §4 lifetime protocol). Keyed by queue_id (the value
-// FW writes into the record dispatch_idx is per-queue, so queue_id distinguishes
-// drains). Holds one shared_ptr per active queue.
-std::unordered_map<uint32_t, std::shared_ptr<queue_drain_state>> g_active_queues;
+// Drainer registry (spec §4 lifetime protocol). Keyed by the full 64-bit
+// hsa_queue_t::id (the value FW writes into the record dispatch_idx is
+// per-queue, so queue_id distinguishes drains). Holds one shared_ptr per
+// active queue. See C5 fix: the LTTng tracepoint payload narrows this to
+// uint32_t at emit, but internal lifetime keys must stay 64-bit because
+// hsa_queue_t::id is uint64_t and unique over the application's lifetime.
+std::unordered_map<uint64_t, std::shared_ptr<queue_drain_state>> g_active_queues;
 
 // Poller-only "live queue" side map (spec §4 enable/disable convergence).
 //
@@ -262,7 +271,10 @@ std::unordered_map<uint32_t, std::shared_ptr<queue_drain_state>> g_active_queues
 // never observe a Queue* whose underlying core::Queue is being torn down by
 // the destroy thread (the destroy thread is forced to wait behind the
 // mutex if the poller is currently iterating).
-std::unordered_map<uint32_t, core::Queue*> g_known_queues;
+//
+// Keyed by full 64-bit hsa_queue_t::id (see g_active_queues commentary
+// above and C5 fix).
+std::unordered_map<uint64_t, core::Queue*> g_known_queues;
 
 // Side-map for the QueueProfilingAcquire/Release refcount (spec §4a). One
 // entry per Queue* that has ever had at least one acquire. Looked up under
@@ -308,10 +320,25 @@ std::atomic<uint64_t> g_generation_counter{1};
 // Helpers.
 // ============================================================================
 
-uint32_t queue_id_of(core::Queue* q) {
+// Full 64-bit hsa_queue_t::id (see hsa.h:2359-2361). Internal registries
+// (g_active_queues, g_known_queues) and queue_drain_state.queue_id all key
+// on this full value to avoid the high-32-bit collision risk flagged in
+// C5. The LTTng tracepoint payload narrows to the low 32 bits at the
+// emit call sites only.
+uint64_t queue_id_of(core::Queue* q) {
   // amd_queue_t.hsa_queue.id is set in the queue ctor (see e.g.
   // amd_aql_queue.cpp:298, host_queue.cpp:77).
-  return static_cast<uint32_t>(q->amd_queue_.hsa_queue.id);
+  return q->amd_queue_.hsa_queue.id;
+}
+
+// Narrow the 64-bit internal queue_id to the 32-bit on-the-wire identifier
+// emitted by the rocm_hsa:kernel_dispatch_complete / kernel_dispatch_drop
+// LTTng tracepoints. Spec §6 / §14 fix the wire format at uint32_t for
+// payload size; consumers join with the low 32 bits of the masked AQL
+// doorbell write_idx (also 32-bit on-the-wire). This narrowing is
+// deliberate and lossy: it must NOT be used for internal lookup.
+uint32_t queue_id_to_wire(uint64_t qid) {
+  return static_cast<uint32_t>(qid);
 }
 
 bool agent_is_gpu(core::Agent* a) {
@@ -374,7 +401,10 @@ int kfd_dispatch_log_op(uint32_t op, core::Queue* q,
   args.flags           = 0;
   // gpu_id: derive from agent if a GPU agent. Phase A leaves zero on failure.
   args.gpu_id          = 0;
-  args.queue_id        = queue_id_of(q);
+  // KFD ioctl arg field is uint32_t per the (Phase A placeholder) wire
+  // contract. Narrow internally; the struct field, not our internal map,
+  // dictates the width here.
+  args.queue_id        = queue_id_to_wire(queue_id_of(q));
   args.buffer_gpu_addr = buffer_gpu_addr;
   args.buffer_size     = buffer_size;
   args.write_ptr_addr  = write_ptr_addr;
@@ -454,7 +484,9 @@ bool drain_one_queue(queue_drain_state& qs, bool force_emit) {
 
   // Wraparound check (spec §6 bytes_lost field definition).
   if (fw_wptr - qs.read_cursor > qs.ring_bytes) {
-    rocm_trace_emit_hsa_kernel_dispatch_drop(qs.queue_id,
+    // Narrow internal 64-bit queue_id to the 32-bit on-the-wire id at the
+    // tracepoint boundary (spec §6 / §14, C5 fix).
+    rocm_trace_emit_hsa_kernel_dispatch_drop(queue_id_to_wire(qs.queue_id),
                                              fw_wptr - qs.read_cursor);
     qs.read_cursor = fw_wptr - qs.ring_bytes;
   }
@@ -482,8 +514,12 @@ bool drain_one_queue(queue_drain_state& qs, bool force_emit) {
         const uint64_t start_sys = qs.translate_gpu_ts(start_gpu);
         const uint64_t end_sys   = qs.translate_gpu_ts(gpu_ts);
 
+        // Narrow internal 64-bit queue_id at the tracepoint boundary
+        // (spec §6 / §14, C5 fix). dispatch_idx is already 32-bit per the
+        // FW record contract (mec_dispatch_record_16::dispatch_idx).
         rocm_trace_emit_hsa_kernel_dispatch_complete(
-            qs.queue_id, didx, start_sys, end_sys, force_emit);
+            queue_id_to_wire(qs.queue_id), didx, start_sys, end_sys,
+            force_emit);
       }
       // else: orphan END (start was lost to wraparound). Silently skip.
     }
@@ -635,9 +671,9 @@ void enable_dispatch_log_for_queue_locked(core::Queue* q) {
   ring_alloc_t alloc = alloc_ring_buffer();
   if (alloc.base == nullptr) {
     std::fprintf(stderr,
-                 "[hsa-runtime] dispatch_log: queue_id=%u ENABLE step 1 (alloc) "
+                 "[hsa-runtime] dispatch_log: queue_id=%llu ENABLE step 1 (alloc) "
                  "failed errno=%d\n",
-                 queue_id_of(q), errno);
+                 static_cast<unsigned long long>(queue_id_of(q)), errno);
     return;
   }
 
@@ -658,9 +694,10 @@ void enable_dispatch_log_for_queue_locked(core::Queue* q) {
   hsa_status_t s = QueueProfilingAcquire(q);
   if (s != HSA_STATUS_SUCCESS) {
     std::fprintf(stderr,
-                 "[hsa-runtime] dispatch_log: queue_id=%u ENABLE step 2 "
+                 "[hsa-runtime] dispatch_log: queue_id=%llu ENABLE step 2 "
                  "(QueueProfilingAcquire) failed status=%d\n",
-                 queue_id_of(q), static_cast<int>(s));
+                 static_cast<unsigned long long>(queue_id_of(q)),
+                 static_cast<int>(s));
     free_ring_buffer(alloc);
     return;
   }
@@ -685,9 +722,9 @@ void enable_dispatch_log_for_queue_locked(core::Queue* q) {
       generation);
   if (rc != 0) {
     std::fprintf(stderr,
-                 "[hsa-runtime] dispatch_log: queue_id=%u ENABLE step 3 "
+                 "[hsa-runtime] dispatch_log: queue_id=%llu ENABLE step 3 "
                  "(KFD ioctl) failed errno=%d\n",
-                 queue_id_of(q), rc);
+                 static_cast<unsigned long long>(queue_id_of(q)), rc);
     if (rc == ENOTSUP) {
       g_no_dispatch_log_agents.insert(q->GetAgent());
     }
