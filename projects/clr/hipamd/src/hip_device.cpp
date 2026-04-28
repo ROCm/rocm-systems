@@ -11,7 +11,6 @@
 #include "hip_internal.hpp"
 #include "hip_mempool_impl.hpp"
 #include "hip_platform.hpp"
-#include "device/devhostcall.hpp"
 
 #undef hipGetDeviceProperties
 #undef hipDeviceProp_t
@@ -135,9 +134,8 @@ void Device::AddSafeStream(Stream* event_stream, Stream* wait_stream) {
 
 // ================================================================================================
 void Device::Reset() {
-  // Disable all hostcalls
-  auto hostcallBuffer = dev->getOrCreateHostcallBuffer();
-  amd::disableHostcalls(hostcallBuffer);
+  auto* dev = devices()[0];
+  dev->destroyXferQueue();
 
   {
     std::scoped_lock lock(lock_);
@@ -151,7 +149,6 @@ void Device::Reset() {
   destroyAllStreams();
 
   // Clear hostcall allocations to avoid ~Device() accessing freed Memory objects later.
-  auto* dev = devices()[0];
   dev->ClearHostcallMemories();
 
   amd::MemObjMap::Purge(dev);

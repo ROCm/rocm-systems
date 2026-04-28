@@ -3972,8 +3972,9 @@ void callbackQueue(hsa_status_t status, hsa_queue_t* queue, void* data) {
   }
 }
 
-void* Device::getOrCreateHostcallBuffer() {
-  return xferQueue()->getOrCreateHostcallBuffer();
+void Device::destroyXferQueue() {
+  delete xferQueue_;
+  xferQueue_ = nullptr;
 }
 // ================================================================================================
 #if defined(__clang__)

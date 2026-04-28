@@ -2821,8 +2821,9 @@ amd::Memory* Device::ImportShareableVMMHandle(void* osHandle) {
   return amd_mem_obj;
 }
 
-void* Device::getOrCreateHostcallBuffer() {
-  return xferQueue()->getOrCreateHostcallBuffer();
+void Device::destroyXferQueue() {
+  delete xferQueue_;
+  xferQueue_ = nullptr;
 }
 
 }  // namespace amd::pal
