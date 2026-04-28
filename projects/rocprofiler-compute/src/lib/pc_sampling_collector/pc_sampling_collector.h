@@ -31,7 +31,7 @@ class pc_sampling_collector_impl_t : public pc_sampling_collector_t
 {
 public:
     pc_sampling_collector_impl_t(const std::shared_ptr<code_object_translator_t>& translator);
-    void on_code_object_load(const rocprofiler_callback_tracing_code_object_load_data_t& info) override;
+    void        on_code_object_load(const rocprofiler_callback_tracing_code_object_load_data_t& info) override;
 
 private:
     std::shared_ptr<code_object_translator_t> m_translator;

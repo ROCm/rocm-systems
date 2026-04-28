@@ -16,6 +16,7 @@ public:
                                  size_t   id,
                                  uint64_t load_addr,
                                  uint64_t mem_size) = 0;
+    virtual std::vector<size_t> get_code_object_ids() const = 0;
 
 };
 
@@ -29,8 +30,11 @@ public:
                          size_t   id,
                          uint64_t load_base,
                          uint64_t load_size) override;
+    std::vector<size_t> get_code_object_ids() const override;
+
 private:
     std::unique_ptr<rocprofiler::sdk::codeobj::disassembly::CodeobjAddressTranslate> m_translator;
+    std::vector<size_t> m_code_object_ids;
 };
 
 }  // namespace pc_sampling_collector

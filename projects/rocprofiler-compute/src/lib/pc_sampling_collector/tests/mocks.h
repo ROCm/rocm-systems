@@ -35,8 +35,10 @@ public:
 
     const std::vector<mem_code_object_info_t>&  get_mem_code_object_info() const;
     const std::vector<file_code_object_info_t>& get_file_code_object_info() const;
+    std::vector<size_t>                         get_code_object_ids() const override;
 
 private:
     std::vector<mem_code_object_info_t>  m_mem_code_obj_info;
     std::vector<file_code_object_info_t> m_file_code_obj_info;
+    std::vector<size_t>                  m_code_object_ids;
 };
