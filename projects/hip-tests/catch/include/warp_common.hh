@@ -12,6 +12,7 @@
 
 #include <hip_test_common.hh>
 #include <resource_guards.hh>
+#include <hip/cooperative_groups/hip_reduce.h>
 #include <hip/hip_cooperative_groups.h>
 #include <hip/hip_fp16.h>
 #include <random>
@@ -391,62 +392,89 @@ void genRandomBuffers(LinearAllocGuard<T>& d_buf,
   HIP_CHECK(hipMemcpy(d_buf.ptr(), buf.ptr(), numBytes, hipMemcpyHostToDevice));
 }
 
+enum class AggregationType { Reduce, InclusiveScan, ExclusiveScan};
+
 // given an operation produces the expected result of the warp-wide reduction
 // @mask indicates the lanes that will participate in the computation
+// @return the result in the highest lane
 template <class T, class Op>
-T calculateExpected(const T* input, Op& op, unsigned long long mask)
+T calculateExpected(T* output,
+                    const T* input,
+                    Op& op,
+                    unsigned long long mask,
+                    AggregationType aggType)
 {
   T result;
   int wavefrontSize = getWarpSize();
+  bool inclusive = aggType != AggregationType::ExclusiveScan;
 
-  if constexpr (std::is_same<Op, std::plus<T>>::value
-#if HT_AMD
-      || std::is_same<Op, cooperative_groups::plus<T>>::value
-#endif
-  ) {
-    T tmp[64] = { 0 };
+  std::memset(output, 0, 64 * sizeof(T));
 
+  if constexpr (std::is_same<Op, std::plus<T>>::value || std::is_same<Op, cooperative_groups::plus<T>>::value) {
     for (int i = 0; i < wavefrontSize; i++) {
-       if (mask & (1ul << i)) {
-         tmp[i] = input[i];
+       if (inclusive && mask & (1ul << i)) {
+         output[i] = input[i];
        }
     }
 
-    for (int modulo = 2; modulo <= wavefrontSize; modulo *= 2) {
-      for (int i = 0; i < wavefrontSize; i += modulo) {
-        int j = i + modulo / 2;
+    if (aggType == AggregationType::Reduce) {
+      for (int modulo = 2; modulo <= wavefrontSize; modulo *= 2) {
+        for (int i = 0; i < wavefrontSize; i += modulo) {
+          int j = i + modulo / 2;
 
-        if (j < wavefrontSize)
-          tmp[i] += tmp[j];
+          if (j < wavefrontSize)
+            output[i] += output[j];
+        }
       }
+
+      result = output[0];
+    } else {
+      for (int modulo = 2; modulo <= wavefrontSize; modulo *= 2) {
+        for (int i = 0; i < wavefrontSize; i += modulo) {
+          int j = i - modulo / 2;
+
+          if (j >= 0)
+            output[i] += output[j];
+        }
+      }
+      result = output[wavefrontSize];
     }
-    result = tmp[0];
-#if HT_AMD
   } else if constexpr (std::is_same<Op, cooperative_groups::less<T>>::value) {
     MinOp<T> minOp;
-    return calculateExpected(input, minOp, mask);
+    return calculateExpected(output, input, minOp, mask, aggType);
   } else if constexpr (std::is_same<Op, cooperative_groups::greater<T>>::value) {
     MaxOp<T> maxOp;
-    return calculateExpected(input, maxOp, mask);
+    return calculateExpected(output, input, maxOp, mask, aggType);
   } else if constexpr (std::is_same<Op, cooperative_groups::bit_xor<T>>::value) {
     std::bit_xor<T> xorOp;
-    return calculateExpected(input, xorOp, mask);
+    return calculateExpected(output, input, xorOp, mask, aggType);
   } else if constexpr (std::is_same<Op, cooperative_groups::bit_or<T>>::value) {
     std::bit_or<T> orOp;
-    return calculateExpected(input, orOp, mask);
+    return calculateExpected(output, input, orOp, mask, aggType);
   } else if constexpr (std::is_same<Op, cooperative_groups::bit_and<T>>::value) {
     std::bit_and<T> andOp;
-    return calculateExpected(input, andOp, mask);
-#endif
+    return calculateExpected(output, input, andOp, mask, aggType);
   } else {
     bool initialized = false;
 
+    std::memset(&result, 0, sizeof(T));
+
     for (int i = 0; i < wavefrontSize; i++) {
       if (mask & (1ul << i)) {
-        if (initialized)
-          result = op(input[i], result);
-        else {
-          result = input[i];
+        T arg;
+
+        std::memset(&arg, 0, sizeof(T));
+
+        if (inclusive) {
+          arg = input[i];
+        }
+
+        if (initialized) {
+          result = op(arg, result);
+          output[i] = result;
+        } else {
+          result = arg;
+          output[i] = result;
           initialized = true;
         }
       }
@@ -567,7 +595,7 @@ void runTestReduce(int iteration, Reduce reduce)
 
   while (numReduce < kNumReduces) {
     T* waveInput = &input.ptr()[numReduce * wavefrontSize];
-    T expected = calculateExpected<T>(waveInput, op, masks.ptr()[numReduce]);
+    T expected = calculateExpected<T>(waveInput, op, masks.ptr()[numReduce], AggregationType::Reduce);
     int lane = 0;
 
     while (lane < wavefrontSize) {

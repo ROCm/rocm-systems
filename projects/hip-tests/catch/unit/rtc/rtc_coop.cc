@@ -142,7 +142,7 @@ void runReduce(hiprtcProgram& prog) {
       if (tileSize <= wavefrontSize) {
         T expected;
         Op<T> op;
-        expected = calculateExpected(input.host_ptr(), op, mask);
+        expected = calculateExpected(input.host_ptr(), op, mask, AggregationType::Reduce);
         REQUIRE(output.host_ptr()[numTile * wavefrontSize + laneId] == expected);
       }
     }
