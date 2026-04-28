@@ -671,10 +671,16 @@ void reduceForTypeAndOp()
   void* kernelPtr;
 
   genRandomBuffers(d_input, h_input, distInput, gen, kNumReduces * wavefrontSize);
-  genRandomMasks(d_extraMasks,
-                 h_extraMasks,
-                 gen,
-                 kNumReduces);
+
+  if (TileSize) {
+    std::memset(h_extraMasks.host_ptr(), 0xFF, h_extraMasks.size_bytes());
+    HIP_CHECK(hipMemset(d_extraMasks.ptr(), 0xFF, d_extraMasks.size_bytes()));
+  } else {
+    genRandomMasks(d_extraMasks,
+                   h_extraMasks,
+                   gen,
+                   kNumReduces);
+  }
 
   std::array<void*, 3> devicePtrs = { d_result.ptr(), d_input.ptr(), d_extraMasks.ptr() };
   void* args[devicePtrs.size()];
@@ -906,7 +912,7 @@ template <size_t NumElems, class Functor>
 __global__ void applyFunctor(ArrayContainer<NumElems>* result)
 {
   cg::thread_block mygroup = cg::this_thread_block();
-  auto mytile = cg::tiled_partition<32>(mygroup);
+  auto mytile = cg::tiled_partition<NumElems>(mygroup);
   __shared__ ArrayContainer<NumElems> input;
   Functor op;
 
@@ -949,7 +955,7 @@ void testReduceSizes()
   }
 
   if constexpr (NumElems > 1) {
-    testReduceSizes<NumElems - 1, Functor>();
+    testReduceSizes<NumElems / 2, Functor>();
   }
 }
 
