@@ -1004,7 +1004,8 @@ get_procedures(image_t* app_image, std::vector<module_t*>* app_modules,
     {
         verbprintf(2, "No modules found, falling back to "
                       "app_image->getProcedures()...\n");
-        auto* _procs = app_image->getProcedures(include_uninstrumentable);
+        std::unique_ptr<std::vector<procedure_t*>> _procs{ app_image->getProcedures(
+            include_uninstrumentable) };
 
         _pr.stop();
         _wc.stop();
@@ -1024,7 +1025,8 @@ get_procedures(image_t* app_image, std::vector<module_t*>* app_modules,
     for(auto* mod : *app_modules)
     {
         if(!mod) continue;
-        auto* procs = mod->getProcedures(include_uninstrumentable);
+        std::unique_ptr<std::vector<procedure_t*>> procs{ mod->getProcedures(
+            include_uninstrumentable) };
         if(procs && !procs->empty())
             proclist.insert(proclist.end(), procs->begin(), procs->end());
     }

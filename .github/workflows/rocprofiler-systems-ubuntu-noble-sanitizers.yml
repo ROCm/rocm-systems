@@ -168,6 +168,7 @@ jobs:
             -DCMAKE_BUILD_TYPE=RelWithDebInfo \
             -DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems \
             -DROCPROFSYS_BUILD_TESTING=ON \
+            -DROCPROFSYS_USE_PYTESTS=ON \
             -DROCPROFSYS_USE_PYTHON=OFF \
             -DROCPROFSYS_USE_MPI=OFF \
             -DROCPROFSYS_USE_MPI_HEADERS=OFF \
