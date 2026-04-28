@@ -19,8 +19,8 @@ enum {
  * boolean alongside the value because 0 (ROCM_PKT_KERNEL_DISPATCH) is a
  * valid hint value, so it cannot also serve as the "unset" sentinel.
  * Consumed-on-read (valid is cleared back to 0). */
-static __thread uint8_t g_rocm_packet_type_hint;
-static __thread uint8_t g_rocm_packet_type_hint_valid;
+static thread_local uint8_t g_rocm_packet_type_hint;
+static thread_local uint8_t g_rocm_packet_type_hint_valid;
 static inline void rocm_trace_set_packet_type_hint(uint8_t t) {
     g_rocm_packet_type_hint = t;
     g_rocm_packet_type_hint_valid = 1;
