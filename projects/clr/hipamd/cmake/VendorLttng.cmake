@@ -35,20 +35,72 @@ if(NOT DEFINED LTTNG_VENDORED_UST_SRC)
                         "to the absolute path of the lttng-ust submodule.")
 endif()
 
-# Verify the submodules are actually checked out (a freshly-cloned repo
-# without `git submodule update --init` will have empty directories).
-if(NOT EXISTS "${LTTNG_VENDORED_URCU_SRC}/bootstrap")
-    message(FATAL_ERROR
-        "Vendored userspace-rcu submodule is not initialised at\n"
-        "    ${LTTNG_VENDORED_URCU_SRC}\n"
-        "Run: git submodule update --init --recursive")
-endif()
-if(NOT EXISTS "${LTTNG_VENDORED_UST_SRC}/bootstrap")
-    message(FATAL_ERROR
-        "Vendored lttng-ust submodule is not initialised at\n"
-        "    ${LTTNG_VENDORED_UST_SRC}\n"
-        "Run: git submodule update --init --recursive")
-endif()
+# Auto-init the vendored submodules if they're missing AND we're inside a
+# git working tree. TheRock CI (and similar aggregator builds) does
+# selective submodule init that doesn't include our nested external/
+# submodules; this block bridges that gap so the build "just works"
+# regardless of how the repo was checked out. Skipped if no .git is found
+# (e.g. tarball release) — the caller gets the same actionable error
+# message as before.
+function(_lttng_vendor_init_submodule abs_path display_name)
+    # Submodule is "present" if it has the autotools bootstrap script.
+    if(EXISTS "${abs_path}/bootstrap")
+        return()
+    endif()
+
+    # Walk up from abs_path looking for a .git entry (file or directory).
+    # That gives us the working-tree root that owns this submodule.
+    set(_repo_root "${abs_path}")
+    while(NOT _repo_root STREQUAL "/")
+        get_filename_component(_repo_root "${_repo_root}" DIRECTORY)
+        if(EXISTS "${_repo_root}/.git")
+            break()
+        endif()
+    endwhile()
+
+    if(NOT EXISTS "${_repo_root}/.git")
+        message(FATAL_ERROR
+            "Vendored ${display_name} submodule is not initialised at\n"
+            "    ${abs_path}\n"
+            "and we cannot auto-init because no .git was found walking up "
+            "from that path (this looks like a tarball release).\n"
+            "Please run: git submodule update --init --recursive ${abs_path}")
+    endif()
+
+    # Compute the submodule path relative to the discovered repo root —
+    # that's the form `git submodule update` accepts.
+    file(RELATIVE_PATH _rel "${_repo_root}" "${abs_path}")
+
+    find_program(GIT_EXECUTABLE git REQUIRED)
+    message(STATUS
+        "Vendored ${display_name} submodule is empty; "
+        "auto-initialising via git (repo root: ${_repo_root}, path: ${_rel}) ...")
+    execute_process(
+        COMMAND ${GIT_EXECUTABLE} submodule update --init --recursive ${_rel}
+        WORKING_DIRECTORY ${_repo_root}
+        RESULT_VARIABLE _rc
+        OUTPUT_VARIABLE _out
+        ERROR_VARIABLE  _err)
+    if(NOT _rc EQUAL 0)
+        message(FATAL_ERROR
+            "Failed to auto-init vendored ${display_name} submodule:\n"
+            "  rc:     ${_rc}\n"
+            "  stdout: ${_out}\n"
+            "  stderr: ${_err}\n"
+            "Please run manually from ${_repo_root}:\n"
+            "  git submodule update --init --recursive ${_rel}")
+    endif()
+    if(NOT EXISTS "${abs_path}/bootstrap")
+        message(FATAL_ERROR
+            "Auto-init of ${display_name} reported success but "
+            "${abs_path}/bootstrap is still missing. git output was:\n"
+            "  stdout: ${_out}\n"
+            "  stderr: ${_err}")
+    endif()
+endfunction()
+
+_lttng_vendor_init_submodule("${LTTNG_VENDORED_URCU_SRC}" "userspace-rcu")
+_lttng_vendor_init_submodule("${LTTNG_VENDORED_UST_SRC}"  "lttng-ust")
 
 set(LTTNG_VENDORED_PREFIX      "${CMAKE_BINARY_DIR}/_deps/lttng-prefix"
     CACHE INTERNAL "Vendored LTTng install prefix")
