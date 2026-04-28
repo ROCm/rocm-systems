@@ -26,6 +26,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include <libunwind.h>
 #include <linux/perf_event.h>
 #include <sys/types.h>
 #include <unistd.h>
@@ -281,7 +282,27 @@ sampling_service<default_sampling_policies>::emit_resolved_to_trace_cache(int64_
         {
             for(auto& s : timer_samples)
                 for(auto& f : s.stack)
-                    if(f.name.empty()) f.name = resolver.resolve(f.address);
+                    if(f.name.empty())
+                    {
+                        f.name = resolver.resolve(f.address);
+                        // TF-4: dladdr misses static binary symbols (e.g.
+                        // fib/run in parallel-overhead). Fall back to libunwind
+                        // proc-name lookup which reads ELF symtab directly.
+                        if(f.name.empty())
+                        {
+                            char       buf[512] = {};
+                            unw_word_t off      = 0;
+                            if(::unw_get_proc_name_by_ip(
+                                   unw_local_addr_space,
+                                   static_cast<unw_word_t>(f.address), buf, sizeof(buf),
+                                   &off, nullptr) == 0 &&
+                               buf[0] != '\0')
+                            {
+                                f.name = buf;
+                                resolver.inject(f.address, f.name);
+                            }
+                        }
+                    }
 
             constexpr uint32_t category_id =
                 static_cast<uint32_t>(ROCPROFSYS_CATEGORY_TIMER_SAMPLING);

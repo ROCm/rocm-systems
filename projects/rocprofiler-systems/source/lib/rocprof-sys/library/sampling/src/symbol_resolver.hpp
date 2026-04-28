@@ -8,6 +8,11 @@
 // rocprofsys::utility::demangler for cached demangling.
 // Safe to call at post_process time (not async-signal-safe — uses malloc).
 // Caches results so repeated resolution of the same PC is O(1).
+//
+// dladdr only finds dynamic-symbol-table entries (exported functions). For
+// static binary symbols (e.g. fib/run in parallel-overhead) callers should
+// fall back to a libunwind-based lookup at the call site — see
+// production hooks emit_resolved_to_trace_cache (TF-4).
 
 #include "core/demangler.hpp"
 
@@ -42,6 +47,14 @@ public:
 
         m_cache.emplace(pc, result);
         return result;
+    }
+
+    // Inject a name for a pc when the caller has a better lookup result
+    // (e.g. libunwind unw_get_proc_name_by_ip succeeded after dladdr failed).
+    void inject(uintptr_t pc, std::string const& name)
+    {
+        if(pc == 0 || name.empty()) return;
+        m_cache[pc] = m_demangler.demangle(name);
     }
 
 private:
