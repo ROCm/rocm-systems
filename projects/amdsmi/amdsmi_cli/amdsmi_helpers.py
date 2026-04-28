@@ -123,6 +123,7 @@ class AMDSMIHelpers:
             "sys": amdsmi_interface.AmdSmiClkType.SYS,
             "mem": amdsmi_interface.AmdSmiClkType.MEM,
             "df": amdsmi_interface.AmdSmiClkType.DF,
+            "fclk": amdsmi_interface.AmdSmiClkType.DF,
             "soc": amdsmi_interface.AmdSmiClkType.SOC,
             "dcef": amdsmi_interface.AmdSmiClkType.DCEF,
             # vclk and dclk currently do not support levels so average clk is given for frequency levels

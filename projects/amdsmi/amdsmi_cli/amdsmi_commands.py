@@ -150,7 +150,8 @@ class AMDSMICommands(
 
         if self.helpers.is_amd_hsmp_initialized():
             try:
-                self.cpu_handles = amdsmi_interface.amdsmi_get_cpusocket_handles()
+                ret = amdsmi_interface.amdsmi_get_cpu_handles()
+                self.cpu_handles = ret["processor_handles"]
             except amdsmi_exception.AmdSmiLibraryException as e:
                 if e.err_code in (
                     amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_INIT,
