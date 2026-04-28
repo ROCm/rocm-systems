@@ -1441,16 +1441,9 @@ void WriteProtoTraceImpl(const char* filepath) {
       uint64_t ts_ns    = rec.start_ns;
       uint64_t dur_ns   = (rec.end_ns > rec.start_ns) ? (rec.end_ns - rec.start_ns) : 1;
 
-      const bool is_graph_emit = rec.api_name &&
-                                 strncmp(rec.api_name, "hipGraphLaunch", 14) == 0;
       std::vector<uint64_t> cpu_out;
       auto cfit = cpu_gpu_flow.find(slot);
-      // For non-graph launches: emit FLOW_OUT on the CPU slice (standard dep arrow).
-      // For graph launches: skip cpu_out here; the FLOW_OUT will be emitted on the
-      // GPU track at the first node's begin time, so the arrow is fully GPU-anchored
-      // and doesn't visually overlap with a preceding graph launch's GPU execution.
-      if (cfit != cpu_gpu_flow.end() && !is_graph_emit)
-        cpu_out.push_back(cfit->second);
+      if (cfit != cpu_gpu_flow.end()) cpu_out.push_back(cfit->second);
 
       std::vector<std::pair<uint64_t,std::string>> cpu_anns;
       {
@@ -1554,16 +1547,9 @@ void WriteProtoTraceImpl(const char* filepath) {
           }
         }
 
-        // GPU emits ph='f' for: CPU→GPU flow AND memory→GPU flows (all terminate here).
-        // For graph launches the FLOW_OUT is placed on the CPU track at the GPU node's
-        // begin time (not at the CPU call time) so the arrow anchor doesn't fall inside
-        // the previous graph launch's GPU execution window.
+        // GPU emits ph='f' for: CPU→GPU flow AND memory→GPU flows (all terminate here)
         in_flows_vec.clear();
-        if (first_op && cfit != cpu_gpu_flow.end()) {
-          if (is_graph_emit)
-            EmitFlowEventSorted(sorted_pkts, cpu_uuid, g_ts, cfit->second, true);
-          in_flows_vec.push_back(cfit->second);
-        }
+        if (first_op && cfit != cpu_gpu_flow.end()) in_flows_vec.push_back(cfit->second);
         first_op = false;
         auto rfit = gpu_recv_flows.find(slot * 1000 + op_ord);
         if (rfit != gpu_recv_flows.end())
