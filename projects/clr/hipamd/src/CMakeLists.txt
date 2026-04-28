@@ -391,12 +391,18 @@ if(HIP_ENABLE_LTTNG_UST)
     # live in amdhip64 (via lttng/rocm_hip_tp.cpp), but rocvirtual.cpp needs
     # the include path, the HIP_ENABLE_LTTNG_UST macro, and the LTTng-UST
     # headers to compile the call sites. Apply all to the rocclr target here.
+    #
+    # rocm_trace_emit_curated.h transitively #include <hip/hip_runtime_api.h>
+    # for the HIP types in the per-API typed-emit signatures, so rocclr also
+    # needs ${HIP_COMMON_INCLUDE_DIR} on its include path. amdhip64 already
+    # gets it via the regular HIP common-include wiring; rocclr does not.
     if(TARGET rocclr)
         target_compile_definitions(rocclr PRIVATE HIP_ENABLE_LTTNG_UST=1)
         target_include_directories(rocclr PRIVATE
             ${CMAKE_CURRENT_LIST_DIR}/lttng
             ${LTTNG_VENDORED_INCLUDE_DIR}
-            ${LTTNG_UST_INCLUDE_DIRS})
+            ${LTTNG_UST_INCLUDE_DIRS}
+            ${HIP_COMMON_INCLUDE_DIR})
         add_dependencies(rocclr lttng_ust_vendored)
     endif()
 
