@@ -417,6 +417,40 @@ ncclResult_t bootstrapGetUniqueId(struct ncclBootstrapHandle* handle) {
   return ncclSuccess;
 }
 
+ncclResult_t bootstrapGetUniqueId(struct ncclBootstrapHandle* handle, struct ncclComm* comm) {
+  if (comm == NULL) return ncclInvalidArgument;
+  memset(handle, 0, sizeof(ncclBootstrapHandle));
+
+  if (ncclGetEnv("NCCL_COMM_ID") != NULL) {
+    WARN("ncclCommGetUniqueId should not be called when NCCL_COMM_ID is set");
+    return ncclInvalidUsage;
+  }
+
+  handle->magic = hashCombine(comm->magic, comm->splitCount + 1);
+  handle->nRanks = comm->nRanks;
+  memcpy(&handle->addr, &bootstrapNetIfAddr, sizeof(union ncclSocketAddress));
+  NCCLCHECK(bootstrapCreateRoot(handle, false));
+  return ncclSuccess;
+}
+
+ncclResult_t bcastGrowHandle(struct ncclBootstrapHandle* handle, struct ncclComm* parent, bool isRoot) {
+  if (parent == NULL || handle == NULL) {
+    WARN("bcastGrowHandle: parent comm and handle must be provided");
+    return ncclInvalidArgument;
+  }
+  if (parent->nRanks == 1) return ncclSuccess;
+
+  if (isRoot) {
+    for (int r = 0; r < parent->nRanks; ++r) {
+      if (r == parent->rank) continue;  // root keeps its local copy
+      NCCLCHECK(bootstrapSend(parent->bootstrap, r, BOOTSTRAP_TAG_GROW_BOUNDARY, handle, sizeof(*handle)));
+    }
+  } else {
+    NCCLCHECK(bootstrapRecv(parent->bootstrap, -1, BOOTSTRAP_TAG_GROW_BOUNDARY, handle, sizeof(*handle)));
+  }
+  return ncclSuccess;
+}
+
 struct unexConn {
   int peer;
   int tag;
@@ -661,7 +695,6 @@ ncclResult_t bootstrapInit(int nHandles, void* handles, struct ncclComm* comm) {
     // create socket for ring neightbor to contact mee
     NCCLCHECK(createListenSocket(comm, comm->magic, &STATE_LISTEN(state, socket), &info.connectInfo.addr, ncclSocketTypeBootstrap));
   }
-  // Create socket for root to contact me using the root's magic
   int curr_root = rootIdFromRank(rank, nranks, nHandles);
   NCCLCHECK(createListenSocket(comm, BOOTSTRAP_HANDLE(handles, curr_root)->magic, &listenSockRoot, &info.listenRootAddress, ncclSocketTypeBootstrap));
   BOOTSTRAP_PROF_CLOSE(timers[BOOTSTRAP_INIT_TIME_CREATE]);
@@ -688,7 +721,6 @@ ncclResult_t bootstrapInit(int nHandles, void* handles, struct ncclComm* comm) {
   info.rank = rank;
   info.iroot = curr_root;
   NCCLCHECK(sendToRoot(BOOTSTRAP_HANDLE(handles, curr_root), comm, &info));
-  // if needed, send the connection info to the previous root
   if (nHandles > 1 && isFirstFromRoot(rank, curr_root, nranks, nHandles)) {
     int prev_rank = BOOTSTRAP_PID(rank - 1, nranks);
     int prev_root = rootIdFromRank(prev_rank, nranks, nHandles);
@@ -698,7 +730,6 @@ ncclResult_t bootstrapInit(int nHandles, void* handles, struct ncclComm* comm) {
   }
   BOOTSTRAP_PROF_CLOSE(timers[BOOTSTRAP_INIT_TIME_SEND]);
 
-  // get info on my "next" rank in the bootstrap ring from root
   BOOTSTRAP_PROF_OPEN(timers[BOOTSTRAP_INIT_TIME_RECV]);
   NCCLCHECK(ncclSocketInit(&sock));
   NCCLCHECK(ncclSocketAccept(&sock, &listenSockRoot));
@@ -912,7 +943,7 @@ static ncclResult_t unexpectedDequeue(struct bootstrapState* state, int peer, in
   struct unexConn* prev = NULL;
   *found = 0;
   while (elem) {
-    if (elem->peer == peer && elem->tag == tag) {
+    if ((peer < 0 || elem->peer == peer) && elem->tag == tag) {
       if (prev == NULL) {
         state->unexpectedConnections = elem->next;
       } else {
@@ -957,7 +988,7 @@ static ncclResult_t socketAccept(void* commState, int peer, int tag, struct nccl
     NCCLCHECKGOTO(ncclSocketInit(sock), ret, fail);
     NCCLCHECKGOTO(ncclSocketAccept(sock, &STATE_LISTEN(state, peerSocket)), ret, fail);
     NCCLCHECKGOTO(socketRecv(sock, &ack, sizeof(struct socketAckInfo)), ret, fail);
-    if (ack.rank == peer && ack.tag == tag) return ncclSuccess;
+    if (ack.tag == tag && (peer < 0 || ack.rank == peer)) return ncclSuccess;
     NCCLCHECKGOTO(unexpectedEnqueue(state, ack.rank, ack.tag, sock), ret, fail);
   }
   return ncclSuccess;

@@ -13,12 +13,17 @@
 struct ncclBootstrapHandle {
   uint64_t magic;
   union ncclSocketAddress addr;
+  int nRanks;
 };
 static_assert(sizeof(struct ncclBootstrapHandle) <= sizeof(ncclUniqueId), "Bootstrap handle is too large to fit inside NCCL unique ID");
+
+#define BOOTSTRAP_TAG_GROW_BOUNDARY (0x1 << 27)
 
 ncclResult_t bootstrapNetInit();
 ncclResult_t bootstrapCreateRoot(struct ncclBootstrapHandle* handle, bool idFromEnv);
 ncclResult_t bootstrapGetUniqueId(struct ncclBootstrapHandle* handle);
+ncclResult_t bootstrapGetUniqueId(struct ncclBootstrapHandle* handle, struct ncclComm* comm);
+ncclResult_t bcastGrowHandle(struct ncclBootstrapHandle* handle, struct ncclComm* parent, bool isRoot);
 ncclResult_t bootstrapInit(int nHandles, void* handle, struct ncclComm* comm);
 ncclResult_t bootstrapSplit(uint64_t magic, struct ncclComm* comm, struct ncclComm* parent, int color, int key, int* parentRanks);
 ncclResult_t bootstrapAllGather(void* commState, void* allData, int size);
