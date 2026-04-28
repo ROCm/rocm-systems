@@ -502,7 +502,7 @@ ExternalProject_Add(urcu_vendored
     # configure each invocation.
     CONFIGURE_COMMAND ${CMAKE_COMMAND} -E env
                       "ACLOCAL_PATH=${_lttng_aclocal_path}"
-                      sh -c "{ make distclean >/dev/null 2>&1 || true; } && ./bootstrap && ./configure \
+                      sh -c "(make distclean >/dev/null 2>&1 || true) && ./bootstrap && ./configure \
                           --prefix=${LTTNG_VENDORED_PREFIX} \
                           --libdir=${_lttng_libdir} \
                           --disable-static \
@@ -537,7 +537,7 @@ ExternalProject_Add(lttng_ust_vendored
                       "PKG_CONFIG_PATH=${LTTNG_VENDORED_PKGCONFIG}"
                       "CPPFLAGS=-I${LTTNG_VENDORED_INCLUDE_DIR}"
                       "LDFLAGS=-L${_lttng_libdir} -Wl,-rpath,${_lttng_libdir}"
-                      sh -c "{ make distclean >/dev/null 2>&1 || true; } && ./bootstrap && ./configure \
+                      sh -c "(make distclean >/dev/null 2>&1 || true) && ./bootstrap && ./configure \
                           --prefix=${LTTNG_VENDORED_PREFIX} \
                           --libdir=${_lttng_libdir} \
                           --disable-man-pages \
