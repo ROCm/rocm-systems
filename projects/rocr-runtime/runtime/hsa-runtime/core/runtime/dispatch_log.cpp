@@ -41,7 +41,7 @@
 ////////////////////////////////////////////////////////////////////////////////
 
 // HSA-resident firmware-ring drainer with LTTng emission for kernel-dispatch
-// timestamps. Phase A scaffolding (spec 2026-04-27).
+// timestamps.
 //
 // This file implements:
 //   - The ts_poller control-plane thread (~5 ms tick, idempotent enable /
@@ -52,15 +52,15 @@
 //   - The QueueProfilingAcquire / Release refcount API (spec §4a).
 //   - The on_queue_create / on_queue_destroy hooks (spec §4 hooks).
 //
-// PHASE A NOTE (KFD substrate): the AMDKFD_IOC_PROFILER_DISPATCH_LOG ioctl
-// op number defined below is a *placeholder* — the kernel does not yet
-// recognize it (spec §10 dep #2). The init() probe therefore always sets
-// g_substrate_present=false on Phase A, which short-circuits the entire
-// data plane: the poller still ticks, but its enable pass treats every
-// queue as "no-op (substrate absent)" and never spawns the drainer. The
-// scaffolding compiles, links, and runs as a no-op against today's KFD.
-// When the real ioctl number lands, swap AMDKFD_IOC_PROFILER_DISPATCH_LOG
-// for the upstream value and the rest of the data plane is exercised.
+// SUBSTRATE NOTE: The KFD-side substrate is the existing
+// AMDKFD_IOC_UPDATE_QUEUE ioctl extended with dispatch_record_buffer_addr +
+// dispatch_record_buffer_size trailing fields (KFD minor version 22+).
+// The HSA-side AqlQueue::SetProfiling owns the per-queue buffer
+// allocation, the libhsakmt hsaKmtSetQueueProfilingBuffer call, and the
+// Suspend/Resume that flushes the MQD via UPDATE_QUEUE. The dispatch_log
+// path here just calls QueueProfilingAcquire/Release (which forward to
+// SetProfiling) and then queries hsa_amd_profiling_get_dispatch_records
+// to fetch the buffer info.
 
 #include "core/inc/dispatch_log.h"
 
@@ -75,7 +75,6 @@
 #include <memory>
 #include <mutex>
 #include <sys/ioctl.h>
-#include <sys/mman.h>
 #include <thread>
 #include <unordered_map>
 #include <unordered_set>
@@ -85,9 +84,11 @@
 #include <fcntl.h>
 #include <linux/types.h>
 #include <unistd.h>
+#include "hsakmt/linux/kfd_ioctl.h"
 #endif
 
 #include "core/inc/agent.h"
+#include "core/inc/amd_aql_queue.h"
 #include "core/inc/amd_gpu_agent.h"
 #include "core/inc/queue.h"
 #include "lttng/rocm_trace_emit.h"
@@ -96,50 +97,6 @@ namespace rocr {
 namespace dispatch_log {
 
 namespace {
-
-// ============================================================================
-// Phase A KFD ioctl placeholder. See file header note above and spec §10 dep
-// #2. The op number is a plausible scratch value; it is not the upstream
-// AMDKFD_IOC_PROFILER number. The probe at init() expects ENOTSUP / EINVAL
-// from today's kernel and disables the data plane via g_substrate_present.
-// ============================================================================
-#if defined(__linux__)
-
-#ifndef AMDKFD_IOCTL_BASE
-#define AMDKFD_IOCTL_BASE 'K'
-#endif
-
-// Plausible scratch op number. Real upstream allocation TBD.
-struct kfd_profiler_dispatch_log_args {
-  uint32_t op;             // PROBE / ENABLE / DISABLE / QUERY
-  uint32_t flags;
-  uint32_t gpu_id;
-  uint32_t queue_id;
-  uint64_t buffer_gpu_addr;
-  uint64_t buffer_size;
-  uint64_t write_ptr_addr;
-  uint64_t read_ptr_addr;
-  uint64_t generation;
-};
-
-// Op tags carried in kfd_profiler_dispatch_log_args::op.
-enum {
-  KFD_DISPATCH_LOG_OP_PROBE   = 0,
-  KFD_DISPATCH_LOG_OP_ENABLE  = 1,
-  KFD_DISPATCH_LOG_OP_DISABLE = 2,
-  KFD_DISPATCH_LOG_OP_QUERY   = 3,
-};
-
-// Scratch ioctl number 0xFE in the AMDKFD ioctl space. This is a placeholder
-// per spec §10 dep #2; the upstream KFD does not recognize it and will return
-// ENOTSUP / EINVAL, which is the documented Phase A path.
-#define AMDKFD_IOC_PROFILER_DISPATCH_LOG \
-  _IOWR(AMDKFD_IOCTL_BASE, 0xFE, struct kfd_profiler_dispatch_log_args)
-
-// Path used to probe KFD support at init().
-constexpr const char* kKfdDevicePath = "/dev/kfd";
-
-#endif  // __linux__
 
 // ============================================================================
 // Per-queue profiling-bit refcount (spec §4a). Each Queue gets one of these
@@ -155,19 +112,18 @@ struct queue_profiling_owners {
 
 // ============================================================================
 // queue_drain_state per spec §7. Held via std::shared_ptr from both the
-// drainer registry (g_active_queues) and per-pass snapshot vectors. The
-// destructor is what frees the ring buffer; freeing happens exactly once,
-// when the last shared_ptr ref is released. Deliberately stores NO Queue*
-// — see spec §4 "Queue / drain-state lifetime" for the dangling-Queue
-// rationale.
+// drainer registry (g_active_queues) and per-pass snapshot vectors. Stores
+// only NON-OWNING pointers into the buffer owned by AqlQueue (the buffer
+// is alloc'd by AqlQueue::SetProfiling(true) and freed by SetProfiling(false)
+// or the AqlQueue dtor). Deliberately stores NO Queue* — see spec §4
+// "Queue / drain-state lifetime" for the dangling-Queue rationale.
 // ============================================================================
 struct queue_drain_state {
   // Full 64-bit hsa_queue_t::id (see hsa.h). Internal ownership / lifetime
   // maps key on this full id to avoid the high-32-bit collision risk
-  // flagged in C5 (two distinct live queues differing only in the high 32
-  // bits would have aliased a uint32_t key). The on-the-wire LTTng
-  // tracepoint payload still carries only the low 32 bits per spec §6/§14
-  // — we narrow at the rocm_trace_emit_* call sites, not here.
+  // flagged in C5. The on-the-wire LTTng tracepoint payload still carries
+  // only the low 32 bits per spec §6/§14 — we narrow at the
+  // rocm_trace_emit_* call sites, not here.
   uint64_t  queue_id = 0;
 
   // Owned, queue-independent GPU->system time-translation callable.
@@ -178,23 +134,22 @@ struct queue_drain_state {
   // by value inside this callable is safe.
   std::function<uint64_t(uint64_t /* gpu_ts */)> translate_gpu_ts;
 
-  // Buffer ownership.
-  void*    buffer_base = nullptr;     // host-virtual base of the full alloc
-                                      // (header + data area). Freed by the
-                                      // destructor below.
-  size_t   buffer_total_bytes = 0;    // bytes to munmap / free()
+  // NON-OWNING ring view. The buffer is owned by AqlQueue::dispatch_record_buffer_;
+  // do not free here.
+  void*    ring_base    = nullptr;     // host-virtual base of the FW record area
+  uint32_t record_count = 0;           // power-of-2 number of 16-byte slots
+  uint32_t record_mask  = 0;           // record_count - 1, for slot indexing
 
-  void*    ring_base   = nullptr;     // = buffer_base + DISPATCH_LOG_HEADER_BYTES
-  uint32_t ring_bytes  = 0;           // power-of-2 size of the data area
-  uint32_t ring_mask   = 0;           // ring_bytes - 1
+  // FW-written 32-bit monotonic record counter. Lives outside the buffer
+  // (cpc_tracing infrastructure exposes it as a separate uint32_t* via
+  // hsa_amd_profiling_get_dispatch_records). Pointer is owned by AqlQueue.
+  volatile uint32_t* fw_wptr_records = nullptr;
 
-  volatile uint64_t* fw_wptr = nullptr;  // lives in the header at
-                                         // buffer_base + 0; FW-updated.
-
-  uint64_t generation = 0;
-
-  // Mutated only under drain_mu (see below).
-  uint64_t read_cursor = 0;
+  // Mutated only under drain_mu (see below). Host-extended 64-bit version
+  // of the FW record cursor; we extend the FW's uint32_t monotonic record
+  // counter into a uint64_t so wraparound across the 32-bit boundary doesn't
+  // confuse our overrun bookkeeping.
+  uint64_t read_record_cursor = 0;
   std::unordered_map<uint32_t, uint64_t> pending_starts;
 
   // Per-queue drain mutex. Serializes drain_one_queue() (steady state) and
@@ -202,17 +157,6 @@ struct queue_drain_state {
   // disable-edge thread). Per-queue scope, so other queues' drains are not
   // blocked.
   std::mutex drain_mu;
-
-  ~queue_drain_state() {
-    if (buffer_base != nullptr && buffer_total_bytes > 0) {
-#if defined(__linux__)
-      ::munmap(buffer_base, buffer_total_bytes);
-#else
-      std::free(buffer_base);
-#endif
-      buffer_base = nullptr;
-    }
-  }
 };
 
 // ============================================================================
@@ -226,11 +170,13 @@ struct queue_drain_state {
 // (relaxed, hot path) and ts_drainer.
 std::atomic<bool> G_tracepoint_enabled{false};
 
-// Set true once at init() if the KFD substrate probe succeeds. Phase A: this
-// stays false because the placeholder ioctl is unknown to today's KFD.
+// Set true if the KFD substrate version probe at init() reports a kernel
+// minor version >= 22 (the minor version that introduced the
+// dispatch_record_buffer_{addr,size} trailing fields on UPDATE_QUEUE).
+// Probed once at init via AMDKFD_IOC_GET_VERSION; never mutated afterwards.
 std::atomic<bool> g_substrate_present{false};
 
-// Phase A: latched true after we log the "substrate absent, tracepoint enable
+// Latched true after we log the "substrate absent, tracepoint enable
 // is a no-op" message once. Avoids spamming the user log on every poll tick.
 std::atomic<bool> g_substrate_absent_warned{false};
 
@@ -255,22 +201,7 @@ std::unordered_map<uint64_t, std::shared_ptr<queue_drain_state>> g_active_queues
 // dispatch_log subsystem (registered by on_queue_create, removed by
 // on_queue_destroy), regardless of whether dispatch logging is currently
 // enabled on it. The poller iterates this set under g_lifecycle_mu to drive
-// the §4 idempotent enable/disable passes:
-//
-//   - curr==true tick: for each Q in g_known_queues with
-//     dispatch_log_active==false, call enable_dispatch_log_for_queue(Q).
-//   - curr==false tick: for each Q in g_known_queues with
-//     dispatch_log_active==true, call disable_dispatch_log_for_queue(Q).
-//
-// **Lifetime contract.** The drainer NEVER reads this map (the
-// no-Queue*-in-drainer invariant of queue_drain_state — see spec §4 "Queue /
-// drain-state lifetime" — is therefore preserved). The poller and the
-// queue-create/destroy hooks all serialize on g_lifecycle_mu when touching
-// this map AND when calling enable/disable; on_queue_destroy removes from
-// g_known_queues BEFORE running the disable sequence, so the poller can
-// never observe a Queue* whose underlying core::Queue is being torn down by
-// the destroy thread (the destroy thread is forced to wait behind the
-// mutex if the poller is currently iterating).
+// the §4 idempotent enable/disable passes.
 //
 // Keyed by full 64-bit hsa_queue_t::id (see g_active_queues commentary
 // above and C5 fix).
@@ -293,14 +224,12 @@ std::unordered_map<uint64_t, core::Queue*> g_known_queues;
 std::mutex g_owners_mu;
 std::unordered_map<core::Queue*, std::shared_ptr<queue_profiling_owners>> g_owners;
 
-// Per-agent "no-dispatch-log" mark. If the KFD ioctl returns ENOTSUP for any
-// queue on a given agent, that agent is added here and subsequent
-// enable_dispatch_log_for_queue calls on queues belonging to it short-circuit
-// (spec §5 unsupported-agent row, §9 unsupported-agent row).
+// Per-agent "no-dispatch-log" mark. If GetProfilingDispatchRecords reports
+// NOT_INITIALIZED (or another error) for any queue on a given agent, that
+// agent is added here and subsequent enable_dispatch_log_for_queue calls on
+// queues belonging to it short-circuit (spec §5 unsupported-agent row,
+// §9 unsupported-agent row).
 std::unordered_set<core::Agent*> g_no_dispatch_log_agents;
-
-// KFD fd held open for the lifetime of the runtime. -1 if probe failed.
-int g_kfd_fd = -1;
 
 // Threads.
 std::thread g_poller_thread;
@@ -311,10 +240,6 @@ std::atomic<bool> g_drainer_running{false};
 // false and short-sleep (500 us) on idle. Notified on shutdown.
 std::mutex g_drainer_mu;
 std::condition_variable g_drainer_cv;
-
-// Monotonically incremented for every per-queue ENABLE so a stale FW write
-// to a freed buffer is detectable on the host side.
-std::atomic<uint64_t> g_generation_counter{1};
 
 // ============================================================================
 // Helpers.
@@ -362,103 +287,30 @@ std::function<uint64_t(uint64_t)> make_translate_gpu_ts(core::Queue* q) {
 }
 
 #if defined(__linux__)
-bool kfd_open_and_probe() {
-  if (g_kfd_fd != -1) return true;
+// Probe the KFD substrate version. Returns true iff the running kernel
+// reports KFD minor version >= 22 (the minor that introduced the
+// dispatch_record_buffer_{addr,size} trailing fields on UPDATE_QUEUE).
+//
+// This replaces the Phase A placeholder PROBE ioctl. We do NOT keep the
+// fd — the per-queue path uses HSA's own KFD handle via the AqlQueue
+// SetProfiling -> agent_->driver().SetQueueProfilingBuffer chain.
+bool probe_substrate_version() {
+  constexpr const char* kKfdDevicePath = "/dev/kfd";
   int fd = ::open(kKfdDevicePath, O_RDWR | O_CLOEXEC);
-  if (fd < 0) {
-    return false;
-  }
-  // Probe: zero-arg PROBE call. The Phase A ioctl is unknown to today's KFD
-  // and will return -1 / ENOTSUP / EINVAL; that is the documented Phase A
-  // result. If a future KFD recognizes the op, it should return 0.
-  struct kfd_profiler_dispatch_log_args args = {};
-  args.op    = KFD_DISPATCH_LOG_OP_PROBE;
-  args.flags = 0;
-  int rc = ::ioctl(fd, AMDKFD_IOC_PROFILER_DISPATCH_LOG, &args);
-  if (rc != 0) {
-    // Substrate absent — don't keep the fd around either. We use the runtime's
-    // own KFD fd for any future per-queue ioctls, so closing this probe fd is
-    // fine.
-    ::close(fd);
-    g_kfd_fd = -1;
-    return false;
-  }
-  g_kfd_fd = fd;
-  return true;
+  if (fd < 0) return false;
+  struct kfd_ioctl_get_version_args args = {};
+  int rc = ::ioctl(fd, AMDKFD_IOC_GET_VERSION, &args);
+  ::close(fd);
+  if (rc != 0) return false;
+  // The dispatch_record_buffer fields landed in the host kernel ABI at
+  // KFD 1.22. Older kernels will silently ignore the trailing UPDATE_QUEUE
+  // bytes (or worse, return -ENOTTY because of the _IOWR-encoded size
+  // mismatch on related ioctls), so this version gate is mandatory.
+  return args.major_version >= 1 && args.minor_version >= 22;
 }
 #else
-bool kfd_open_and_probe() { return false; }
+bool probe_substrate_version() { return false; }
 #endif
-
-// Issue an ENABLE / DISABLE ioctl. Returns 0 on success, errno on failure.
-int kfd_dispatch_log_op(uint32_t op, core::Queue* q,
-                        uint64_t buffer_gpu_addr, uint64_t buffer_size,
-                        uint64_t write_ptr_addr, uint64_t generation) {
-#if defined(__linux__)
-  if (g_kfd_fd < 0) return ENOTSUP;
-  struct kfd_profiler_dispatch_log_args args = {};
-  args.op              = op;
-  args.flags           = 0;
-  // gpu_id: derive from agent if a GPU agent. Phase A leaves zero on failure.
-  args.gpu_id          = 0;
-  // KFD ioctl arg field is uint32_t per the (Phase A placeholder) wire
-  // contract. Narrow internally; the struct field, not our internal map,
-  // dictates the width here.
-  args.queue_id        = queue_id_to_wire(queue_id_of(q));
-  args.buffer_gpu_addr = buffer_gpu_addr;
-  args.buffer_size     = buffer_size;
-  args.write_ptr_addr  = write_ptr_addr;
-  args.read_ptr_addr   = 0;  // host-managed locally
-  args.generation      = generation;
-  if (::ioctl(g_kfd_fd, AMDKFD_IOC_PROFILER_DISPATCH_LOG, &args) != 0) {
-    return errno != 0 ? errno : ENOTSUP;
-  }
-  return 0;
-#else
-  (void)op; (void)q; (void)buffer_gpu_addr; (void)buffer_size;
-  (void)write_ptr_addr; (void)generation;
-  return ENOTSUP;
-#endif
-}
-
-// Allocate the per-queue ring buffer. Phase A: page-aligned anonymous mmap.
-// In a future revision this should use the existing pinned-host allocator
-// from the agent so the buffer is GPU-visible without an explicit pin
-// (mirroring the AQL queue ring allocation pattern). The buffer total size
-// is DISPATCH_LOG_HEADER_BYTES + DISPATCH_LOG_RING_BYTES.
-struct ring_alloc_t {
-  void*  base;
-  size_t total_bytes;
-};
-ring_alloc_t alloc_ring_buffer() {
-  const size_t total = DISPATCH_LOG_HEADER_BYTES + DISPATCH_LOG_RING_BYTES;
-  ring_alloc_t out{nullptr, 0};
-#if defined(__linux__)
-  void* p = ::mmap(nullptr, total, PROT_READ | PROT_WRITE,
-                   MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-  if (p == MAP_FAILED) return out;
-  std::memset(p, 0, total);
-  out.base        = p;
-  out.total_bytes = total;
-#else
-  void* p = std::calloc(1, total);
-  if (p == nullptr) return out;
-  out.base        = p;
-  out.total_bytes = total;
-#endif
-  return out;
-}
-
-void free_ring_buffer(ring_alloc_t& a) {
-  if (a.base == nullptr) return;
-#if defined(__linux__)
-  ::munmap(a.base, a.total_bytes);
-#else
-  std::free(a.base);
-#endif
-  a.base = nullptr;
-  a.total_bytes = 0;
-}
 
 // Snapshot: clone shared_ptrs out of g_active_queues under the lifecycle
 // mutex, return the vector. Drainer then iterates WITHOUT holding the
@@ -475,13 +327,8 @@ std::vector<std::shared_ptr<queue_drain_state>> snapshot_active_queues() {
 
 // Iterate g_known_queues under g_lifecycle_mu and invoke fn(queue_id, queue)
 // for each entry. C6 fix: replaces the previous "snapshot into vector then
-// iterate" pattern in ts_poller_loop / shutdown — the lock was already
-// held for the entire snapshot+iterate window, so the snapshot copy added
-// allocator pressure with no concurrency benefit. fn must NOT mutate
-// g_known_queues (the only legal mutators are on_queue_create /
-// on_queue_destroy, both of which take g_lifecycle_mu themselves and
-// therefore cannot run during this iteration). fn IS allowed to mutate
-// g_active_queues (e.g. enable_dispatch_log_for_queue_locked inserts,
+// iterate" pattern. fn must NOT mutate g_known_queues. fn IS allowed to
+// mutate g_active_queues (e.g. enable_dispatch_log_for_queue_locked inserts,
 // disable_dispatch_log_for_queue_locked erases).
 template <typename F>
 void for_each_known_queue_locked(F&& fn) {
@@ -491,43 +338,57 @@ void for_each_known_queue_locked(F&& fn) {
 
 // ============================================================================
 // drain_one_queue (spec §7). Holds qs.drain_mu for the entire pass.
+//
+// Reads the FW-written uint32_t record counter, host-extends it to 64 bits
+// (so wrap of the FW counter doesn't confuse us across drain calls), then
+// walks new records from read_record_cursor up to the host-extended fw cursor.
+// Each record is 16 bytes; the slot index is (cursor & record_mask).
 // ============================================================================
 
 bool drain_one_queue(queue_drain_state& qs, bool force_emit) {
   std::lock_guard<std::mutex> lk(qs.drain_mu);
 
-  if (qs.fw_wptr == nullptr) return false;
+  if (qs.fw_wptr_records == nullptr || qs.ring_base == nullptr ||
+      qs.record_count == 0) {
+    return false;
+  }
 
-  const uint64_t fw_wptr = __atomic_load_n(qs.fw_wptr, __ATOMIC_ACQUIRE);
-  if (fw_wptr == qs.read_cursor) return false;
+  // Snapshot the FW's 32-bit monotonic record counter and host-extend it.
+  // The high 32 bits we add are taken from our last-known cursor: as long
+  // as we drain at least once per (2^32) records, this extension is correct.
+  // 65536 records buffered, so we'd lose data well before wrap-extension
+  // ambiguity matters.
+  const uint32_t fw_lo = __atomic_load_n(qs.fw_wptr_records, __ATOMIC_ACQUIRE);
+  uint64_t fw_extended = (qs.read_record_cursor & ~uint64_t(0xFFFFFFFFu)) | fw_lo;
+  if (fw_extended < qs.read_record_cursor) {
+    // Low 32 bits wrapped past us; bump the high half.
+    fw_extended += uint64_t(1) << 32;
+  }
+  if (fw_extended == qs.read_record_cursor) return false;
 
-  // Wraparound check (spec §6 bytes_lost field definition).
-  if (fw_wptr - qs.read_cursor > qs.ring_bytes) {
+  // Wraparound check (spec §6 bytes_lost field definition). With 65536
+  // records, an overrun means FW outpaced us by more than the buffer
+  // depth.
+  const uint64_t records_avail = fw_extended - qs.read_record_cursor;
+  if (records_avail > qs.record_count) {
     // Narrow internal 64-bit queue_id to the 32-bit on-the-wire id at the
-    // tracepoint boundary (spec §6 / §14, C5 fix).
-    rocm_trace_emit_hsa_kernel_dispatch_drop(queue_id_to_wire(qs.queue_id),
-                                             fw_wptr - qs.read_cursor);
-    qs.read_cursor = fw_wptr - qs.ring_bytes;
+    // tracepoint boundary (spec §6 / §14, C5 fix). Report the loss in
+    // bytes for compatibility with the existing tracepoint payload.
+    rocm_trace_emit_hsa_kernel_dispatch_drop(
+        queue_id_to_wire(qs.queue_id),
+        records_avail * sizeof(mec_dispatch_record_16));
+    qs.read_record_cursor = fw_extended - qs.record_count;
 
     // C7 fix: across an overrun event, ALL previously cached STARTs are
     // suspect. The drainer cannot tell which records the FW just overwrote
-    // (spec §7 / drop tracepoint semantics), so any pending START whose
-    // matching END was in the skipped range would either (a) leak in this
-    // map indefinitely or (b) be incorrectly mispaired with a future END
-    // if dispatch_idx wraps (uint32_t, ~4 billion dispatches).
-    //
-    // Trade-off: a START that was preserved across the overrun whose END
-    // arrives AFTER this point will now be reported as an orphan END and
-    // silently skipped by the END branch below. This is acceptable
-    // conservative behavior — the dispatch's complete record was already
-    // effectively lost the moment the FW outpaced us.
+    // (spec §7 / drop tracepoint semantics). Conservative: drop them.
     qs.pending_starts.clear();
   }
 
-  while (qs.read_cursor < fw_wptr) {
+  while (qs.read_record_cursor < fw_extended) {
+    const uint32_t slot = static_cast<uint32_t>(qs.read_record_cursor & qs.record_mask);
     const auto* rec = reinterpret_cast<const mec_dispatch_record_16*>(
-        static_cast<const char*>(qs.ring_base) +
-        (qs.read_cursor & qs.ring_mask));
+        static_cast<const char*>(qs.ring_base) + slot * sizeof(mec_dispatch_record_16));
 
     const uint64_t gpu_ts =
         (static_cast<uint64_t>(rec->ts_hi) << 32) | rec->ts_lo;
@@ -557,7 +418,7 @@ bool drain_one_queue(queue_drain_state& qs, bool force_emit) {
       // else: orphan END (start was lost to wraparound). Silently skip.
     }
 
-    qs.read_cursor += sizeof(mec_dispatch_record_16);
+    qs.read_record_cursor += 1;
   }
   return true;
 }
@@ -627,10 +488,9 @@ hsa_status_t QueueProfilingAcquire(core::Queue* q) {
   const uint32_t prev = owners->refcount;
   owners->refcount = prev + 1;
   if (prev == 0) {
-    // 0->1 transition: set the bit via the existing API. SetProfiling()
-    // forwards to AMD_HSA_BITS_SET on amd_queue_.queue_properties (the
-    // GPU-visible bit) and is the same path hsa_amd_profiling_set_profiler_enabled
-    // takes today (see queue.h:446 / amd_aql_queue.cpp:1559).
+    // 0->1 transition: enable profiling. AqlQueue::SetProfiling now also
+    // allocates the per-queue dispatch-record buffer and pushes it to KFD
+    // via hsaKmtSetQueueProfilingBuffer + Suspend/Resume (UPDATE_QUEUE).
     q->SetProfiling(true);
   }
   return HSA_STATUS_SUCCESS;
@@ -657,6 +517,9 @@ hsa_status_t QueueProfilingRelease(core::Queue* q) {
   }
   owners->refcount -= 1;
   if (owners->refcount == 0) {
+    // 1->0 transition: AqlQueue::SetProfiling(false) frees the per-queue
+    // dispatch-record buffer and clears the KFD profiling-buffer
+    // registration via UPDATE_QUEUE.
     q->SetProfiling(false);
   }
   return HSA_STATUS_SUCCESS;
@@ -667,135 +530,98 @@ namespace {
 // ============================================================================
 // Per-queue ENABLE / DISABLE sequences (spec §5).
 //
-// enable_dispatch_log_for_queue runs the per-queue all-or-nothing sequence:
-//   1. alloc buffer
-//   2. QueueProfilingAcquire (sets the bit if 0->1)
-//   3. KFD ioctl ENABLE
-//   4..6. (queue unmap/remap and MQD propagation are KFD-side; the ioctl
-//         encapsulates them)
-//   7. register in g_active_queues
+// New flow (post cpc_tracing infrastructure import):
+//   1. Skip non-AQL / non-GPU queues.
+//   2. Skip if substrate is absent or agent is on the no-dispatch-log list.
+//   3. QueueProfilingAcquire -> AqlQueue::SetProfiling(true) -> alloc
+//      buffer + KFD UPDATE_QUEUE with the new trailing fields.
+//   4. AqlQueue::GetProfilingDispatchRecords to read back the buffer base,
+//      total bytes, and FW wptr pointer.
+//   5. Register a non-owning queue_drain_state in g_active_queues.
 //
-// Each step has its own unwind on failure. On any failure: free buffer,
-// release any acquired profiling ref, leave dispatch_log_active=false, log
-// once-per-queue at WARNING.
+// The previous Phase A path's bespoke buffer alloc + placeholder KFD ioctl
+// has been removed entirely.
 // ============================================================================
 
-// _locked variant. Caller holds g_lifecycle_mu. Used by the poller's enable
-// pass (which iterates g_known_queues under the mutex) and by on_queue_create
-// via the public wrapper below.
 void enable_dispatch_log_for_queue_locked(core::Queue* q) {
   if (q == nullptr) return;
 
   // Idempotence guard: skip if already active.
   if (q->dispatch_log_active.load(std::memory_order_relaxed)) return;
 
-  // Only meaningful for GPU agents — host/soft queues have no MEC firmware
-  // to write records, so the KFD ioctl would either be rejected or be a
-  // no-op. Skip them outright.
+  // Only AqlQueue (hardware AQL queues on GPU agents) have the FW
+  // dispatch-record path. Host queues, soft queues, intercept queues
+  // wrapping a non-AqlQueue: silently skip.
   if (!agent_is_gpu(q->GetAgent())) return;
+  if (!AMD::AqlQueue::IsType(q)) return;
+  auto* aql_queue = static_cast<AMD::AqlQueue*>(q);
 
-  // Phase A short-circuit: substrate absent.
+  // Substrate / per-agent gate.
   if (!g_substrate_present.load(std::memory_order_relaxed)) return;
-
-  // Per-agent "no-dispatch-log" filter.
   if (g_no_dispatch_log_agents.count(q->GetAgent()) > 0) return;
 
-  // Step 1: alloc.
-  ring_alloc_t alloc = alloc_ring_buffer();
-  if (alloc.base == nullptr) {
-    std::fprintf(stderr,
-                 "[hsa-runtime] dispatch_log: queue_id=%llu ENABLE step 1 (alloc) "
-                 "failed errno=%d\n",
-                 static_cast<unsigned long long>(queue_id_of(q)), errno);
-    return;
-  }
-
-  const uint64_t generation = g_generation_counter.fetch_add(
-      1, std::memory_order_relaxed);
-
-  // Initialize the header now (host-side write before KFD publishes the
-  // buffer to FW). Layout per spec §5.
-  auto* hdr = reinterpret_cast<dispatch_log_header*>(alloc.base);
-  hdr->fw_wptr    = 0;
-  hdr->generation = generation;
-  hdr->version    = DISPATCH_LOG_VERSION;
-  std::memset(hdr->reserved, 0, sizeof(hdr->reserved));
-
-  // Step 2: acquire profiling ref FIRST (spec §5 ordering rationale).
-  // QueueProfilingAcquire takes g_owners_mu, NOT g_lifecycle_mu, so it's
-  // safe to call while holding g_lifecycle_mu.
+  // Step 1: enable profiling on the queue. This is the AqlQueue::SetProfiling
+  // call that allocates the dispatch-record buffer, calls
+  // hsaKmtSetQueueProfilingBuffer, and Suspends/Resumes the queue to flush
+  // the MQD via UPDATE_QUEUE. QueueProfilingAcquire takes g_owners_mu (not
+  // g_lifecycle_mu), so it's safe to call while holding g_lifecycle_mu.
   hsa_status_t s = QueueProfilingAcquire(q);
   if (s != HSA_STATUS_SUCCESS) {
     std::fprintf(stderr,
-                 "[hsa-runtime] dispatch_log: queue_id=%llu ENABLE step 2 "
+                 "[hsa-runtime] dispatch_log: queue_id=%llu ENABLE step 1 "
                  "(QueueProfilingAcquire) failed status=%d\n",
                  static_cast<unsigned long long>(queue_id_of(q)),
                  static_cast<int>(s));
-    free_ring_buffer(alloc);
     return;
   }
 
-  // Step 3: KFD ioctl ENABLE. buffer_gpu_addr points at the data area
-  // (after the header). Phase A: this currently always returns ENOTSUP
-  // since the substrate is absent — but g_substrate_present should have
-  // been false above and we'd have early-returned. Defense in depth:
-  // if we reach here the probe lied. Treat any failure as a per-queue
-  // failure per spec §5.
-  //
-  // NOTE: this Phase A scaffolding passes the host virtual address as the
-  // GPU address. Real implementation must pin the buffer via the existing
-  // HSA pinned-host allocator and pass the GPU-visible address. That hookup
-  // is left for Phase B once a real substrate exists.
-  const uint64_t host_base = reinterpret_cast<uint64_t>(alloc.base);
-  const int rc = kfd_dispatch_log_op(
-      KFD_DISPATCH_LOG_OP_ENABLE, q,
-      host_base + DISPATCH_LOG_HEADER_BYTES,    // FW data area base
-      DISPATCH_LOG_RING_BYTES,                  // data area size
-      host_base + 0,                            // fw_wptr lives in header
-      generation);
-  if (rc != 0) {
+  // Step 2: read back the per-queue ring buffer info from AqlQueue.
+  void* buf = nullptr;
+  uint32_t buf_bytes = 0;
+  volatile uint32_t* fw_wptr = nullptr;
+  hsa_status_t gs = aql_queue->GetProfilingDispatchRecords(&buf, &buf_bytes, &fw_wptr);
+  if (gs != HSA_STATUS_SUCCESS || buf == nullptr || buf_bytes == 0 || fw_wptr == nullptr) {
     std::fprintf(stderr,
-                 "[hsa-runtime] dispatch_log: queue_id=%llu ENABLE step 3 "
-                 "(KFD ioctl) failed errno=%d\n",
-                 static_cast<unsigned long long>(queue_id_of(q)), rc);
-    if (rc == ENOTSUP) {
-      g_no_dispatch_log_agents.insert(q->GetAgent());
-    }
+                 "[hsa-runtime] dispatch_log: queue_id=%llu ENABLE step 2 "
+                 "(GetProfilingDispatchRecords) failed status=%d\n",
+                 static_cast<unsigned long long>(queue_id_of(q)),
+                 static_cast<int>(gs));
+    g_no_dispatch_log_agents.insert(q->GetAgent());
     QueueProfilingRelease(q);
-    free_ring_buffer(alloc);
     return;
   }
 
-  // Step 7: register in the drainer registry.
+  // GetProfilingDispatchRecords reports buf_bytes = record_count * 16
+  // (the FW record-stride sized capacity). The kernel-side BO is
+  // oversized (count * 40) per the host KFD ABI; the drainer iterates
+  // 16-byte records.
+  const uint32_t record_count = buf_bytes / static_cast<uint32_t>(sizeof(mec_dispatch_record_16));
+  if (record_count == 0 || (record_count & (record_count - 1)) != 0) {
+    std::fprintf(stderr,
+                 "[hsa-runtime] dispatch_log: queue_id=%llu ENABLE step 2 "
+                 "GetProfilingDispatchRecords returned non-pow2 record_count=%u\n",
+                 static_cast<unsigned long long>(queue_id_of(q)), record_count);
+    g_no_dispatch_log_agents.insert(q->GetAgent());
+    QueueProfilingRelease(q);
+    return;
+  }
+
+  // Step 3: register in the drainer registry. NON-OWNING — buffer is
+  // owned by AqlQueue, freed on SetProfiling(false) or AqlQueue dtor.
   auto qs = std::make_shared<queue_drain_state>();
   qs->queue_id           = queue_id_of(q);
   qs->translate_gpu_ts   = make_translate_gpu_ts(q);
-  qs->buffer_base        = alloc.base;
-  qs->buffer_total_bytes = alloc.total_bytes;
-  qs->ring_base          = static_cast<char*>(alloc.base) + DISPATCH_LOG_HEADER_BYTES;
-  qs->ring_bytes         = static_cast<uint32_t>(DISPATCH_LOG_RING_BYTES);
-  qs->ring_mask          = qs->ring_bytes - 1;
-  qs->fw_wptr            = &hdr->fw_wptr;
-  qs->generation         = generation;
-  qs->read_cursor        = 0;
+  qs->ring_base          = buf;
+  qs->record_count       = record_count;
+  qs->record_mask        = record_count - 1;
+  qs->fw_wptr_records    = fw_wptr;
+  qs->read_record_cursor = 0;
 
   g_active_queues[qs->queue_id] = qs;
-
-  // Ownership of the buffer now lives in qs (shared_ptr destructor frees it).
-  // Suppress the local alloc bookkeeping so a later free_ring_buffer on
-  // `alloc` would be a no-op.
-  alloc.base        = nullptr;
-  alloc.total_bytes = 0;
 
   q->dispatch_log_active.store(true, std::memory_order_release);
 }
 
-// _locked variant. Caller holds g_lifecycle_mu. Used by the poller's
-// disable pass, by shutdown(), and by on_queue_destroy via the public
-// wrapper below. Note that wait_for_idle and the KFD ioctl run while
-// the lifecycle mutex is held; this is acceptable because the lifecycle
-// mutex is contended only by other lifecycle events (queue create/destroy,
-// poller ticks every 5 ms), not by per-dispatch hot paths.
 void disable_dispatch_log_for_queue_locked(core::Queue* q) {
   if (q == nullptr) return;
   if (!q->dispatch_log_active.load(std::memory_order_acquire)) return;
@@ -808,19 +634,16 @@ void disable_dispatch_log_for_queue_locked(core::Queue* q) {
   // b. Final drain with force_emit=true (spec §6).
   ts_drainer_drain_now_locked(q);
 
-  // c. KFD ioctl DISABLE (best-effort).
-  (void)kfd_dispatch_log_op(KFD_DISPATCH_LOG_OP_DISABLE, q,
-                            /*buffer_gpu_addr=*/0, /*buffer_size=*/0,
-                            /*write_ptr_addr=*/0, /*generation=*/0);
-
-  // d. Release profiling ref (clears the bit only if 1->0).
-  // QueueProfilingRelease takes g_owners_mu, NOT g_lifecycle_mu.
+  // c. Release profiling ref. On the 1->0 edge AqlQueue::SetProfiling(false)
+  // clears the KFD profiling-buffer registration (UPDATE_QUEUE with addr=0)
+  // and frees the per-queue dispatch-record buffer. QueueProfilingRelease
+  // takes g_owners_mu, NOT g_lifecycle_mu.
   QueueProfilingRelease(q);
 
-  // e. Unregister from drainer registry. Drops the registry's shared_ptr
-  //    ref. Buffer free is gated by shared_ptr destructor — if a drainer
-  //    snapshot still holds a ref the destructor fires when that snapshot
-  //    vector is destroyed (spec §4 lifetime protocol).
+  // d. Unregister from drainer registry. Drops the registry's shared_ptr
+  //    ref. The buffer is owned by AqlQueue (we just released it via
+  //    SetProfiling(false)); our queue_drain_state holds only non-owning
+  //    pointers, so the destructor is a no-op for buffer memory.
   g_active_queues.erase(queue_id_of(q));
 
   q->dispatch_log_active.store(false, std::memory_order_release);
@@ -860,26 +683,12 @@ void start_drainer_if_needed() {
 
 // ============================================================================
 // ts_poller_loop (spec §4 lifecycle state machine).
-//
-// Every 5 ms:
-//   1. Compute curr = !rocm_trace_disabled() && lttng_ust_tracepoint_enabled
-//                     (rocm_hsa, kernel_dispatch_complete) && g_substrate_present.
-//   2. Store G_tracepoint_enabled = curr.
-//   3. If curr=true: spawn drainer if needed; iterate registered queues,
-//      enable any not-yet-active.
-//   4. If curr=false: iterate registered queues, disable any still-active.
-//
-// Both branches run every tick (idempotent, not edge-triggered) — this is
-// the convergence guarantee for the queue-create-vs-disable race
-// (spec §4 "Queue-create vs. disable-pass race").
 // ============================================================================
 
 bool predicate_now() {
 #if defined(HSA_ENABLE_LTTNG_UST) && HSA_ENABLE_LTTNG_UST
   if (rocm_trace_disabled()) return false;
   if (!g_substrate_present.load(std::memory_order_relaxed)) {
-    // Phase A: log once that the substrate is missing so the user knows
-    // why an enabled tracepoint produces no events.
     if (lttng_ust_tracepoint_enabled(rocm_hsa, kernel_dispatch_complete)) {
       bool warned = g_substrate_absent_warned.load(std::memory_order_relaxed);
       if (!warned && g_substrate_absent_warned.compare_exchange_strong(
@@ -887,9 +696,8 @@ bool predicate_now() {
         std::fprintf(stderr,
                      "[hsa-runtime] dispatch_log: tracepoint "
                      "rocm_hsa:kernel_dispatch_complete is enabled, but the "
-                     "KFD substrate (AMDKFD_IOC_PROFILER_DISPATCH_LOG) is not "
-                     "available on this kernel. No events will be produced. "
-                     "(Phase A scaffolding; see spec §10 dep #2.)\n");
+                     "KFD substrate is not available on this kernel "
+                     "(KFD minor version < 22). No events will be produced.\n");
       }
     }
     return false;
@@ -912,30 +720,18 @@ void ts_poller_loop() {
 
       // ENABLE pass (spec §4): for each known live queue Q with
       // dispatch_log_active==false, run the per-queue ENABLE sequence.
-      // Iterates g_known_queues under the lifecycle mutex; on_queue_create
-      // and on_queue_destroy serialize on the same mutex, so the Queue*
-      // values we observe here cannot be torn down concurrently.
-      // enable_dispatch_log_for_queue_locked is itself a no-op for queues
-      // that are already active (idempotent enable). C6: direct iteration,
-      // no per-tick snapshot allocation.
       for_each_known_queue_locked(
           [](uint64_t /*qid*/, core::Queue* q) {
             enable_dispatch_log_for_queue_locked(q);
           });
     } else {
-      // DISABLE pass (spec §4 + §9 ROCM_LTTNG_UST_DISABLE row): for each
-      // known live queue Q with dispatch_log_active==true, run the
-      // per-queue DISABLE sequence (wait_for_idle, final drain, KFD
-      // DISABLE, QueueProfilingRelease, mark inactive). Idempotent over
-      // already-inactive queues. Required for kill-switch hygiene per
-      // spec §1039. C6: direct iteration, no per-tick snapshot allocation.
+      // DISABLE pass (spec §4 + §9 ROCM_LTTNG_UST_DISABLE row).
       for_each_known_queue_locked(
           [](uint64_t /*qid*/, core::Queue* q) {
             disable_dispatch_log_for_queue_locked(q);
           });
     }
 
-    // Sleep until next tick.
     std::this_thread::sleep_for(tick_interval);
   }
 }
@@ -947,13 +743,15 @@ void ts_poller_loop() {
 // ============================================================================
 
 void init() {
-  // KFD substrate probe. Phase A: this is expected to fail.
-  const bool present = kfd_open_and_probe();
+  // KFD substrate version probe via AMDKFD_IOC_GET_VERSION. We require
+  // KFD minor >= 22 (the version that introduced the
+  // dispatch_record_buffer_{addr,size} trailing fields on UPDATE_QUEUE).
+  const bool present = probe_substrate_version();
   g_substrate_present.store(present, std::memory_order_release);
 
   // Spawn poller unconditionally so the steady-state idle path is exercised
-  // even on Phase A (substrate absent). The poller's enable branch
-  // short-circuits via predicate_now() → false when substrate is missing.
+  // even when the substrate is missing. The poller's enable branch
+  // short-circuits via predicate_now() -> false in that case.
   g_shutdown.store(false, std::memory_order_relaxed);
   g_poller_thread = std::thread(ts_poller_loop);
 }
@@ -967,13 +765,8 @@ void shutdown() {
   g_drainer_running.store(false, std::memory_order_relaxed);
 
   // Spec §4 process-exit cleanup: run the per-queue DISABLE sequence
-  // (wait_for_idle, final drain, KFD DISABLE, QueueProfilingRelease) for
-  // every queue still active at process exit. The poller is joined above
-  // so no other thread is touching g_known_queues / g_active_queues here;
-  // the lock is taken for consistency with the helpers' contract. C6:
-  // direct iteration via for_each_known_queue_locked, then a separate
-  // locked block for the post-iterate clears (we cannot clear inside the
-  // iteration callback because that would mutate the map mid-iteration).
+  // (wait_for_idle, final drain, QueueProfilingRelease) for every queue
+  // still active at process exit.
   for_each_known_queue_locked(
       [](uint64_t /*qid*/, core::Queue* q) {
         disable_dispatch_log_for_queue_locked(q);
@@ -981,9 +774,6 @@ void shutdown() {
   {
     std::lock_guard<std::mutex> lk(g_lifecycle_mu);
     g_known_queues.clear();
-    // Defensive: drop any remaining drainer refs (the disable sequence
-    // above should have removed them, but if a destroy hook racing with
-    // shutdown left dangling state, this releases the buffers).
     g_active_queues.clear();
     g_no_dispatch_log_agents.clear();
   }
@@ -991,13 +781,6 @@ void shutdown() {
     std::lock_guard<std::mutex> lk(g_owners_mu);
     g_owners.clear();
   }
-
-#if defined(__linux__)
-  if (g_kfd_fd >= 0) {
-    ::close(g_kfd_fd);
-    g_kfd_fd = -1;
-  }
-#endif
 }
 
 void on_queue_create(core::Queue* q) {
@@ -1007,10 +790,6 @@ void on_queue_create(core::Queue* q) {
   // the enable sequence. Holding g_lifecycle_mu across both the registry
   // insert and the enable serializes us against the poller (which iterates
   // g_known_queues under the same mutex) and against on_queue_destroy.
-  // The queue-create-vs-disable race is resolved by the idempotent disable
-  // convergence guarantee in spec §4: if curr flips to false between our
-  // load and the next poll tick, the disable pass will iterate
-  // g_known_queues (which now contains q) and clean up.
   std::lock_guard<std::mutex> lk(g_lifecycle_mu);
   g_known_queues[queue_id_of(q)] = q;
   if (G_tracepoint_enabled.load(std::memory_order_relaxed)) {

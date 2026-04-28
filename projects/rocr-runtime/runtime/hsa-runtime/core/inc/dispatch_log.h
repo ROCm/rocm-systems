@@ -64,22 +64,21 @@ namespace dispatch_log {
 
 // -----------------------------------------------------------------------------
 // On-wire / in-buffer constants. See spec §5 (ring layout) and §6 (record
-// format). The 16-byte record format and 64-byte header layout are frozen at
-// version 1; future revisions bump DISPATCH_LOG_VERSION and the drainer
-// refuses to consume rings whose header version it does not recognize.
+// format). The 16-byte record format is the MEC firmware contract.
+//
+// The buffer layout was originally defined as `header + ring data`. The
+// firmware-dispatch-ring infrastructure imported from cpc_tracing instead
+// hands the drainer a flat ring of N records and a separately-located
+// uint32_t firmware write pointer (not embedded in the buffer). The
+// header and DISPATCH_LOG_VERSION are no longer used; they are retained
+// here only as historical constants for now and may be removed.
 // -----------------------------------------------------------------------------
 
-// Ring header is one cache line preceding the FW-written data area.
-constexpr size_t  DISPATCH_LOG_HEADER_BYTES = 64;
-
-// Header / record format version stamped into the ring header at ENABLE
-// and checked by the drainer on first access. Bump on any change to the
-// 16-byte record layout or the 64-byte header layout.
-constexpr uint32_t DISPATCH_LOG_VERSION = 1;
-
-// Power-of-2 size of the ring data area (NOT including the 64-byte header).
-// 4 MB matches the spec's typical-budget recommendation in §5.
-constexpr size_t  DISPATCH_LOG_RING_BYTES = 4 * 1024 * 1024;
+// Number of FW dispatch records per queue ring buffer. Must match
+// AqlQueue::SetProfiling's hard-coded num_records (currently 65536).
+// Power of 2 so masking is cheap; the drainer uses (kRecordCount - 1)
+// for byte-offset wraparound.
+constexpr uint32_t DISPATCH_LOG_RECORD_COUNT = 65536;
 
 // Record-type tags written by FW into mec_dispatch_record_16::record_type.
 enum {
@@ -87,31 +86,21 @@ enum {
   DISPATCH_LOG_RECORD_END   = 2,
 };
 
-// FW-written 16-byte record. Layout is fixed by the firmware contract: see
-// spec §6 for the field semantics and §14 glossary for the dispatch_idx
-// 32-bit width contract. Packed to 16 bytes with no implicit padding.
+// FW-written 16-byte record. Layout is fixed by the firmware contract.
+// Mirrors rocr::AMD::mec_dispatch_record from
+// core/inc/mec_dispatch_record.h, with the trailing 4-byte field treated
+// as the dispatch index (FW writes the per-queue monotonic dispatch idx
+// into the `reserved` slot per the cpc_tracing drainer's interpretation).
 #pragma pack(push, 1)
 struct mec_dispatch_record_16 {
   uint32_t ts_lo;          // GPU clock low 32 bits
   uint32_t ts_hi;          // GPU clock high 32 bits
   uint32_t record_type;    // DISPATCH_LOG_RECORD_{START,END}
-  uint32_t dispatch_idx;   // low 32 bits of AQL read_dispatch_id
+  uint32_t dispatch_idx;   // FW-written dispatch idx (mec_dispatch_record::reserved)
 };
 #pragma pack(pop)
 static_assert(sizeof(mec_dispatch_record_16) == 16,
               "mec_dispatch_record_16 must be exactly 16 bytes (FW contract)");
-
-// Ring header layout (B + 0 .. B + DISPATCH_LOG_HEADER_BYTES). FW writes
-// `fw_wptr`; HSA writes `generation` and `version` at ENABLE. See spec §5.
-struct dispatch_log_header {
-  volatile uint64_t fw_wptr;     // monotonic byte counter, FW-written
-  uint64_t          generation;  // bumped by HSA on each per-queue ENABLE
-  uint32_t          version;     // header/record-format version
-  uint32_t          reserved[11];
-};
-static_assert(sizeof(dispatch_log_header) == DISPATCH_LOG_HEADER_BYTES,
-              "dispatch_log_header must occupy exactly one cache line "
-              "(DISPATCH_LOG_HEADER_BYTES)");
 
 // -----------------------------------------------------------------------------
 // Lifecycle hooks. Called from Runtime::Load / Runtime::Unload and from the
