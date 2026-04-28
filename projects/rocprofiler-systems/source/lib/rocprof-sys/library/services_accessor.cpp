@@ -123,11 +123,11 @@ rocprofsys_sampling_signal_handler(int sig, siginfo_t* /*info*/, void* ucontext)
     // Capture per-thread CPU time (async-signal-safe per POSIX.1-2017 §2.4.3).
     // Bit 0 of metrics.valid marks cpu_ns as populated.
     {
-        struct timespec _cputime_ts;
+        struct timespec _cputime_ts = { 0, 0 };
         if(clock_gettime(CLOCK_THREAD_CPUTIME_ID, &_cputime_ts) == 0)
         {
             rec.metrics.cpu_ns =
-                _cputime_ts.tv_sec * INT64_C(1'000'000'000) + _cputime_ts.tv_nsec;
+                (_cputime_ts.tv_sec * INT64_C(1'000'000'000)) + _cputime_ts.tv_nsec;
             rec.metrics.valid.set(0);
         }
     }
