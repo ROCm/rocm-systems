@@ -602,7 +602,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_Thread_Block_Tile_Reduce_Basic, int)
 }
 
 template <size_t TileSize, class Functor, class T>
-void __global__ reduceKernel(T* output, const T* input, unsigned long long* extraMasks)
+void __global__ reduceKernel(T* output, const T* input)
 {
   int tid = threadIdx.x;
   int laneId = tid % warpSize;
@@ -611,17 +611,13 @@ void __global__ reduceKernel(T* output, const T* input, unsigned long long* extr
 
   for (int i = 0; i < kNumReduces; i++) {
     int idx = warpSize * i + laneId;
-    unsigned long long mask = extraMasks[i];
     T& result = output[idx];
 
-    if ((1ull << laneId) & mask) {
-      result = cg::reduce(mytile, input[idx], Functor());
-    } else {
-      result = 0;
-    }
+    result = cg::reduce(mytile, input[idx], Functor());
   }
 }
 
+// @extraMasks  used to simulate divergence when using coalesced_threads
 template <class Functor, class T>
 void __global__ reduceKernelCoalesced(T* output, const T* input, unsigned long long* extraMasks)
 {
@@ -673,9 +669,11 @@ void reduceForTypeAndOp()
   genRandomBuffers(d_input, h_input, distInput, gen, kNumReduces * wavefrontSize);
 
   if (TileSize) {
+    // tile block case
     std::memset(h_extraMasks.host_ptr(), 0xFF, h_extraMasks.size_bytes());
     HIP_CHECK(hipMemset(d_extraMasks.ptr(), 0xFF, d_extraMasks.size_bytes()));
   } else {
+    // coalesced_threads case
     genRandomMasks(d_extraMasks,
                    h_extraMasks,
                    gen,
