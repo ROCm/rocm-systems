@@ -170,8 +170,8 @@ void* IbCastAsyncThreadMain(void* args) {
   return NULL;
 }
 
-ncclNet_t ncclNetIb = {
-  "IB",
+ncclNet_t netIbCast = {
+  "IB-CAST",
   IbCastInit,
   IbCastDevices,
   IbCastGetProperties,
