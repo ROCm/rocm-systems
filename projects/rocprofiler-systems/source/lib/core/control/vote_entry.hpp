@@ -15,6 +15,7 @@ namespace rocprofsys::control
 struct vote_entry
 {
     std::string_view name;
+    scope            event_scope;
     vote             current_vote;
 };
 }  // namespace rocprofsys::control

@@ -34,10 +34,12 @@ public:
         clock_duration duration{};
     };
 
-    time_window(session& sess, Clock& clk, config cfg) noexcept
+    time_window(session& sess, Clock& clk, config cfg,
+                scope event_scope = scope::global) noexcept
     : m_session{ sess }
     , m_clock{ clk }
     , m_config{ cfg }
+    , m_scope{ event_scope }
     {}
 
     ~time_window() override { stop(); }
@@ -58,6 +60,8 @@ public:
         if(m_config.duration > clock_duration::zero()) return vote::active;
         return vote::abstain;
     }
+
+    [[nodiscard]] scope event_scope() const noexcept override { return m_scope; }
 
     /// Spawn the worker thread that advances the window through delay and
     /// duration phases. Idempotent: a second call is a no-op.
@@ -80,6 +84,7 @@ private:
     session&    m_session;
     Clock&      m_clock;
     config      m_config;
+    scope       m_scope;
     std::thread m_thread;
 
     [[nodiscard]] bool has_window() const noexcept

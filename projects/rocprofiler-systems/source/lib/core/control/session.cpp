@@ -4,11 +4,18 @@
 #include "session.hpp"
 
 #include <algorithm>
+#include <cstddef>
 #include <mutex>
 #include <utility>
 
 namespace rocprofsys::control
 {
+session::session() noexcept
+{
+    for(auto& a : m_active)
+        a.store(true, std::memory_order_relaxed);
+}
+
 void
 session::shutdown()
 {
@@ -19,7 +26,8 @@ session::shutdown()
     {
         std::scoped_lock const lk{ m_votes_mutex };
         m_votes.clear();
-        m_active.store(true, std::memory_order_relaxed);
+        for(auto& a : m_active)
+            a.store(true, std::memory_order_relaxed);
     }
 }
 
@@ -33,66 +41,80 @@ session::subscribe(subscriber sub)
 void
 session::attach(trigger& trig)
 {
+    const auto event_scope = trig.event_scope();
+
     std::scoped_lock const lk{ m_votes_mutex };
-    m_votes.push_back({ trig.name(), trig.initial_vote() });
-    m_active.store(resolve_locked(), std::memory_order_relaxed);
+    m_votes.push_back({ trig.name(), event_scope, trig.initial_vote() });
+    m_active[static_cast<std::size_t>(event_scope)].store(resolve_locked(event_scope),
+                                                          std::memory_order_relaxed);
 }
 
 void
 session::force_initial_pause()
 {
-    if(is_active()) return;
-    notify_pause();
+    std::scoped_lock const lk{ m_subscribers_mutex };
+    for(const auto& sub : m_subscribers)
+    {
+        const bool any_paused_for_sub =
+            std::any_of(sub.scopes.begin(), sub.scopes.end(),
+                        [this](scope s) { return !is_active(s); });
+
+        if(any_paused_for_sub && sub.on_pause) sub.on_pause();
+    }
 }
 
 void
 session::publish(const trigger& trig, vote new_vote)
 {
-    bool was_active = false;
-    bool now_active = false;
+    const auto event_scope = trig.event_scope();
+    const auto scope_idx   = static_cast<std::size_t>(event_scope);
+    const auto name        = trig.name();
+    bool       was_active  = false;
+    bool       now_active  = false;
     {
         std::scoped_lock const lk{ m_votes_mutex };
-        was_active = m_active.load(std::memory_order_relaxed);
+        was_active = m_active[scope_idx].load(std::memory_order_relaxed);
 
-        const auto name = trig.name();
-        auto       it   = std::find_if(m_votes.begin(), m_votes.end(),
-                                       [name](const vote_entry& e) { return e.name == name; });
+        auto it = std::find_if(m_votes.begin(), m_votes.end(),
+                               [name, event_scope](const vote_entry& e) {
+                                   return e.name == name && e.event_scope == event_scope;
+                               });
         if(it == m_votes.end())
-            m_votes.push_back({ name, new_vote });
+            m_votes.push_back({ name, event_scope, new_vote });
         else
             it->current_vote = new_vote;
 
-        now_active = resolve_locked();
-        m_active.store(now_active, std::memory_order_relaxed);
+        now_active = resolve_locked(event_scope);
+        m_active[scope_idx].store(now_active, std::memory_order_relaxed);
     }
 
     if(was_active == now_active) return;
     if(now_active)
-        notify_resume();
+        notify_resume(event_scope);
     else
-        notify_pause();
+        notify_pause(event_scope);
 }
 
-// Any paused vote pauses the session. Abstain is ignored.
-// With no votes the session is active by default.
+// Any paused vote (within the given scope) pauses the scope. Abstain is
+// ignored. With no votes for the scope, the scope is active by default.
 bool
-session::resolve_locked() const noexcept
+session::resolve_locked(scope event_scope) const noexcept
 {
     for(const auto& entry : m_votes)
     {
+        if(entry.event_scope != event_scope) continue;
         if(entry.current_vote == vote::paused) return false;
     }
     return true;
 }
 
 bool
-session::is_active_excluding(std::string_view name) const noexcept
+session::is_active_excluding(std::string_view name, scope event_scope) const noexcept
 {
-    // Cold path: typical caller (roctx marker gate) hits this only on the
-    // recording side after a fast atomic check, and there are 1-2 votes.
     std::scoped_lock const lk{ m_votes_mutex };
     for(const auto& entry : m_votes)
     {
+        if(entry.event_scope != event_scope) continue;
         if(entry.name == name) continue;
         if(entry.current_vote == vote::paused) return false;
     }
@@ -100,22 +122,26 @@ session::is_active_excluding(std::string_view name) const noexcept
 }
 
 void
-session::notify_pause()
+session::notify_pause(scope event_scope)
 {
     std::scoped_lock const lk{ m_subscribers_mutex };
     for(const auto& sub : m_subscribers)
     {
-        if(sub.on_pause) sub.on_pause();
+        const bool listens = std::find(sub.scopes.begin(), sub.scopes.end(),
+                                       event_scope) != sub.scopes.end();
+        if(listens && sub.on_pause) sub.on_pause();
     }
 }
 
 void
-session::notify_resume()
+session::notify_resume(scope event_scope)
 {
     std::scoped_lock const lk{ m_subscribers_mutex };
     for(const auto& sub : m_subscribers)
     {
-        if(sub.on_resume) sub.on_resume();
+        const bool listens = std::find(sub.scopes.begin(), sub.scopes.end(),
+                                       event_scope) != sub.scopes.end();
+        if(listens && sub.on_resume) sub.on_resume();
     }
 }
 }  // namespace rocprofsys::control

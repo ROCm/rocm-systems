@@ -7,7 +7,9 @@
 #include "trigger.hpp"
 #include "vote_entry.hpp"
 
+#include <array>
 #include <atomic>
+#include <cstddef>
 #include <mutex>
 #include <string_view>
 #include <vector>
@@ -17,7 +19,7 @@ namespace rocprofsys::control
 class session
 {
 public:
-    session()  = default;
+    session() noexcept;
     ~session() = default;
 
     session(const session&)            = delete;
@@ -29,41 +31,45 @@ public:
 
     void subscribe(subscriber sub);
 
-    /// Register a trigger and seed its initial vote.
-    /// Subscribers are NOT notified on initial registration; the resolved
-    /// initial state is reflected only in is_active().
+    /// Register a trigger and seed its initial vote into the trigger's scope.
+    /// Subscribers are NOT notified on initial registration.
     void attach(trigger& trig);
 
     /// Called by triggers when their vote changes. Recomputes the resolved
-    /// state (any-paused-wins) and fires pause/resume callbacks only on
-    /// transitions.
+    /// state for the trigger's scope (any-paused-wins) and fires pause/resume
+    /// on subscribers whose `scopes` contains that scope, only on transitions.
     void publish(const trigger& trig, vote new_vote);
 
-    /// If the session is currently paused, fire pause on all subscribers
-    /// to reflect the initial state. Subscribers default to "running", so
-    /// only the paused-initial case needs to be broadcast.
+    /// If any scope is currently paused, fire pause once on each subscriber
+    /// whose `scopes` overlaps a paused scope. Subscribers default to running,
+    /// so only the paused-initial case needs broadcasting. Each subscriber
+    /// is fired at most once even if multiple of its scopes are paused.
     void force_initial_pause();
 
-    [[nodiscard]] bool is_active() const noexcept
+    [[nodiscard]] bool is_active(scope event_scope = scope::global) const noexcept
     {
-        return m_active.load(std::memory_order_relaxed);
+        return m_active[static_cast<std::size_t>(event_scope)].load(
+            std::memory_order_relaxed);
     }
 
-    /// True iff every trigger except @p name has voted active or abstain.
-    /// Used by consumers (e.g. roctx_client's marker gate) that combine a
-    /// trigger-local rule with "no external trigger pausing us".
-    [[nodiscard]] bool is_active_excluding(std::string_view name) const noexcept;
+    /// True iff every trigger of @p event_scope except @p name has voted
+    /// active or abstain. Used by consumers (e.g. roctx_client's marker gate)
+    /// that combine a trigger-local rule with "no other trigger pausing us".
+    [[nodiscard]] bool is_active_excluding(
+        std::string_view name, scope event_scope = scope::global) const noexcept;
 
 private:
-    std::vector<vote_entry> m_votes;
-    std::vector<subscriber> m_subscribers;
-    std::atomic<bool>       m_active{ true };
+    static constexpr std::size_t scope_count = static_cast<std::size_t>(scope::count_);
+
+    std::vector<vote_entry>                    m_votes;
+    std::vector<subscriber>                    m_subscribers;
+    std::array<std::atomic<bool>, scope_count> m_active{};
 
     mutable std::mutex m_votes_mutex;
     std::mutex         m_subscribers_mutex;
 
-    [[nodiscard]] bool resolve_locked() const noexcept;
-    void               notify_pause();
-    void               notify_resume();
+    [[nodiscard]] bool resolve_locked(scope event_scope) const noexcept;
+    void               notify_pause(scope event_scope);
+    void               notify_resume(scope event_scope);
 };
 }  // namespace rocprofsys::control

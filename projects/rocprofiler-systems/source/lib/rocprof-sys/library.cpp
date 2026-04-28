@@ -422,16 +422,23 @@ invoke_external_resume_callbacks()
 using trace_window_t =
     rocprofsys::control::triggers::time_window<rocprofsys::control::clocks::steady>;
 
-// File-scope owners for the TRACE_DELAY/DURATION trigger. Constructed on
-// demand inside the init lambda when get_trace_specs() is non-empty;
-// stopped from rocprofsys_finalize_hidden so the worker thread is joined
-// while the session is still alive.
+// File-scope owners for time_window triggers. Constructed on demand inside
+// the init lambda; stopped from rocprofsys_finalize_hidden so the worker
+// threads are joined while the session is still alive.
+//
+// g_trace_window: TRACE_DELAY/DURATION (global scope - pauses everything)
+// g_sampling_dur_window: SAMPLING_DURATION (sampling_only scope - pauses
+//   only sampling-tagged subscribers)
 rocprofsys::control::clocks::steady g_trace_window_clock;
+rocprofsys::control::clocks::steady g_sampling_dur_window_clock;
 std::unique_ptr<trace_window_t>     g_trace_window;
+std::unique_ptr<trace_window_t>     g_sampling_dur_window;
 
 void
-stop_trace_window()
+stop_time_windows()
 {
+    if(g_sampling_dur_window) g_sampling_dur_window->stop();
+    g_sampling_dur_window.reset();
     if(g_trace_window) g_trace_window->stop();
     g_trace_window.reset();
 }
@@ -680,7 +687,11 @@ rocprofsys_init_tooling_hidden(void)
 
             session->subscribe(
                 { &rocprofiler_sdk::pause, &rocprofiler_sdk::resume, "rocm" });
-            session->subscribe({ &sampling::pause, &sampling::resume, "sampling" });
+            session->subscribe(
+                { &sampling::pause,
+                  &sampling::resume,
+                  "sampling",
+                  { control::scope::global, control::scope::sampling_only } });
             session->subscribe(
                 { &component::mpi_gotcha::pause, &component::mpi_gotcha::resume, "mpi" });
             session->subscribe(
@@ -710,8 +721,35 @@ rocprofsys_init_tooling_hidden(void)
                     *session, g_trace_window_clock,
                     trace_window_t::config{ _delay, _dur });
 
+                // Safety-net subscriber for category-traited recording paths
+                // (timemory storage, perfetto trace_events from callbacks not
+                // covered by a subsystem pause subscriber). Toggles the
+                // per-category runtime_enabled trait so those sites gate off
+                // during the delay/duration window. Only registered when a
+                // trace window is configured.
+                session->subscribe(
+                    { []() {
+                         categories::disable_categories(config::get_enabled_categories());
+                     },
+                      []() {
+                          categories::enable_categories(config::get_enabled_categories());
+                      },
+                      "trace_categories" });
+
                 session->attach(*g_trace_window);
                 g_trace_window->start();
+            }
+
+            if(const auto _samp_dur = config::get_sampling_duration(); _samp_dur > 0.0)
+            {
+                const auto _dur_ns =
+                    std::chrono::nanoseconds{ static_cast<int64_t>(_samp_dur * 1.0e9) };
+                g_sampling_dur_window = std::make_unique<trace_window_t>(
+                    *session, g_sampling_dur_window_clock,
+                    trace_window_t::config{ {}, _dur_ns }, control::scope::sampling_only);
+
+                session->attach(*g_sampling_dur_window);
+                g_sampling_dur_window->start();
             }
 
             session->force_initial_pause();
@@ -1279,7 +1317,7 @@ rocprofsys_finalize_hidden(void)
 
     _output_registry.print_summary();
 
-    stop_trace_window();
+    stop_time_windows();
     categories::shutdown();
 
     _finalization.stop();
