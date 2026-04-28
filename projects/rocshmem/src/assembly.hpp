@@ -205,54 +205,42 @@ __device__ __forceinline__ void put_asm([[maybe_unused]] uint8_t* src,
 #if defined(__gfx90a__)
       int16_t val16;
       asm volatile(
-          "flat_load_ubyte %0, %1,\n"
-          "s_waitcnt vmcnt(0)"
-          : "=v"(val16)
-          : "v"(src)
+          "flat_load_ubyte %0, %1, slc\n"
+          "s_waitcnt vmcnt(0)\n"
+          "global_store_byte %2, %0, off glc slc"
+          : "=&v"(val16)
+          : "v"(src), "v"(dst)
           : "memory");
-      asm volatile("flat_store_byte %0, %1, glc slc"
-                   :
-                   : "v"(dst), "v"(val16)
-                   : "memory");
 #endif
 #if defined(__gfx942__) || defined(__gfx950__)
       int16_t val16;
       asm volatile(
-          "flat_load_ubyte %0, %1,\n"
-          "s_waitcnt vmcnt(0)"
-          : "=v"(val16)
-          : "v"(src)
+          "flat_load_ubyte %0, %1, nt\n"
+          "s_waitcnt vmcnt(0)\n"
+          "global_store_byte %2, %0, off sc0 sc1"
+          : "=&v"(val16)
+          : "v"(src), "v"(dst)
           : "memory");
-      asm volatile("flat_store_byte %0, %1, sc0 sc1"
-                   :
-                   : "v"(dst), "v"(val16)
-                   : "memory");
 #endif
 #if defined(__gfx1100__)
       int32_t val32;
       asm volatile(
-          "flat_load_ubyte %0, %1,\n"
-          "s_waitcnt vmcnt(0)"
-          : "=v"(val32)
-          : "v"(src)
+          "flat_load_ubyte %0, %1, slc\n"
+          "s_waitcnt vmcnt(0)\n"
+          "global_store_byte %2, %0, off glc slc"
+          : "=&v"(val32)
+          : "v"(src), "v"(dst)
           : "memory");
-      asm volatile("flat_store_byte %0, %1, glc slc"
-                   :
-                   : "v"(dst), "v"(val32)
-                   : "memory");
 #endif
 #if defined(__gfx1201__)
       int32_t val32;
       asm volatile(
-          "flat_load_u8 %0, %1,\n"
-          "s_wait_loadcnt 0x0"
-          : "=v"(val32)
-          : "v"(src)
+          "flat_load_u8 %0, %1, th:TH_LOAD_NT\n"
+          "s_wait_loadcnt 0x0\n"
+          "global_store_b8 %2, %0, off scope:SCOPE_SYS"
+          : "=&v"(val32)
+          : "v"(src), "v"(dst)
           : "memory");
-      asm volatile("flat_store_b8 %0, %1, scope:SCOPE_SYS"
-                   :
-                   : "v"(dst), "v"(val32)
-                   : "memory");
 #endif
       break;
     }
@@ -260,58 +248,42 @@ __device__ __forceinline__ void put_asm([[maybe_unused]] uint8_t* src,
 #if defined(__gfx90a__)
       int16_t val16;
       asm volatile(
-          "flat_load_ushort %0, %1,\n"
-          "s_waitcnt vmcnt(0)"
-          : "=v"(val16)
-          : "v"(src)
+          "flat_load_ushort %0, %1, slc\n"
+          "s_waitcnt vmcnt(0)\n"
+          "global_store_short %2, %0, off glc slc"
+          : "=&v"(val16)
+          : "v"(src), "v"(dst)
           : "memory");
-      asm volatile("flat_store_short %0, %1, glc slc"
-                   :
-                   : "v"(dst), "v"(val16)
-                   : "memory");
 #endif
 #if defined(__gfx942__) || defined(__gfx950__)
       int16_t val16;
       asm volatile(
-          "flat_load_ushort %0, %1,\n"
-          "s_waitcnt vmcnt(0)"
-          : "=v"(val16)
-          : "v"(src)
+          "flat_load_ushort %0, %1, nt\n"
+          "s_waitcnt vmcnt(0)\n"
+          "global_store_short %2, %0, off sc0 sc1"
+          : "=&v"(val16)
+          : "v"(src), "v"(dst)
           : "memory");
-      asm volatile("flat_store_short %0, %1, sc0 sc1"
-                   :
-                   : "v"(dst), "v"(val16)
-                   : "memory");
 #endif
 #if defined(__gfx1100__)
-      // int16_t val16;
       int32_t val32;
       asm volatile(
-          "flat_load_ushort %0, %1,\n"
-          "s_waitcnt vmcnt(0)"
-          : "=v"(val32)
-          : "v"(src)
+          "flat_load_ushort %0, %1, slc\n"
+          "s_waitcnt vmcnt(0)\n"
+          "global_store_short %2, %0, off glc slc"
+          : "=&v"(val32)
+          : "v"(src), "v"(dst)
           : "memory");
-      // int32_t val32{static_cast<int32_t>(val16)};
-      asm volatile("flat_store_short %0, %1, glc slc"
-                   :
-                   : "v"(dst), "v"(val32)
-                   : "memory");
 #endif
 #if defined(__gfx1201__)
-      // int16_t val16;
       int32_t val32;
       asm volatile(
-          "flat_load_u16 %0, %1,\n"
-          "s_wait_loadcnt 0x0"
-          : "=v"(val32)
-          : "v"(src)
+          "flat_load_u16 %0, %1, th:TH_LOAD_NT\n"
+          "s_wait_loadcnt 0x0\n"
+          "global_store_b16 %2, %0, off scope:SCOPE_SYS"
+          : "=&v"(val32)
+          : "v"(src), "v"(dst)
           : "memory");
-      // int32_t val32{static_cast<int32_t>(val16)};
-      asm volatile("flat_store_b16 %0, %1, scope:SCOPE_SYS"
-                   :
-                   : "v"(dst), "v"(val32)
-                   : "memory");
 #endif
       break;
     }
@@ -319,41 +291,32 @@ __device__ __forceinline__ void put_asm([[maybe_unused]] uint8_t* src,
 #if defined(__gfx90a__) || defined(__gfx1100__)
       int32_t val32;
       asm volatile(
-          "flat_load_dword %0, %1,\n"
-          "s_waitcnt vmcnt(0)"
-          : "=v"(val32)
-          : "v"(src)
+          "flat_load_dword %0, %1, slc\n"
+          "s_waitcnt vmcnt(0)\n"
+          "global_store_dword %2, %0, off glc slc"
+          : "=&v"(val32)
+          : "v"(src), "v"(dst)
           : "memory");
-      asm volatile("flat_store_dword %0, %1, glc slc"
-                   :
-                   : "v"(dst), "v"(val32)
-                   : "memory");
 #endif
 #if defined(__gfx942__) || defined(__gfx950__)
       int32_t val32;
       asm volatile(
-          "flat_load_dword %0, %1,\n"
-          "s_waitcnt vmcnt(0)"
-          : "=v"(val32)
-          : "v"(src)
+          "flat_load_dword %0, %1, nt\n"
+          "s_waitcnt vmcnt(0)\n"
+          "global_store_dword %2, %0, off sc0 sc1"
+          : "=&v"(val32)
+          : "v"(src), "v"(dst)
           : "memory");
-      asm volatile("flat_store_dword %0, %1, sc0 sc1"
-                   :
-                   : "v"(dst), "v"(val32)
-                   : "memory");
 #endif
 #if defined(__gfx1201__)
       int32_t val32;
       asm volatile(
-          "flat_load_b32 %0, %1,\n"
-          "s_wait_loadcnt 0x0"
-          : "=v"(val32)
-          : "v"(src)
+          "flat_load_b32 %0, %1, th:TH_LOAD_NT\n"
+          "s_wait_loadcnt 0x0\n"
+          "global_store_b32 %2, %0, off scope:SCOPE_SYS"
+          : "=&v"(val32)
+          : "v"(src), "v"(dst)
           : "memory");
-      asm volatile("flat_store_b32 %0, %1, scope:SCOPE_SYS"
-                   :
-                   : "v"(dst), "v"(val32)
-                   : "memory");
 #endif
       break;
     }
@@ -361,39 +324,32 @@ __device__ __forceinline__ void put_asm([[maybe_unused]] uint8_t* src,
 #if defined(__gfx90a__) || defined(__gfx1100__)
       int64_t val64;
       asm volatile(
-          "flat_load_dwordx2 %0, %1,\n"
-          "s_waitcnt vmcnt(0)"
-          : "=v"(val64)
-          : "v"(src));
-      asm volatile("flat_store_dwordx2 %0, %1, glc slc"
-                   :
-                   : "v"(dst), "v"(val64)
-                   : "memory");
+          "flat_load_dwordx2 %0, %1, slc\n"
+          "s_waitcnt vmcnt(0)\n"
+          "global_store_dwordx2 %2, %0, off glc slc"
+          : "=&v"(val64)
+          : "v"(src), "v"(dst)
+          : "memory");
 #endif
 #if defined(__gfx942__) || defined(__gfx950__)
       int64_t val64;
       asm volatile(
-          "flat_load_dwordx2 %0, %1,\n"
-          "s_waitcnt vmcnt(0)"
-          : "=v"(val64)
-          : "v"(src));
-      asm volatile("flat_store_dwordx2 %0, %1, sc0 sc1 nt"
-                   :
-                   : "v"(dst), "v"(val64)
-                   : "memory");
+          "flat_load_dwordx2 %0, %1, nt\n"
+          "s_waitcnt vmcnt(0)\n"
+          "global_store_dwordx2 %2, %0, off sc0 sc1 nt"
+          : "=&v"(val64)
+          : "v"(src), "v"(dst)
+          : "memory");
 #endif
 #if defined(__gfx1201__)
       int64_t val64;
       asm volatile(
-          "flat_load_b64 %0, %1,\n"
-          "s_wait_loadcnt 0x0"
-          : "=v"(val64)
-          : "v"(src)
+          "flat_load_b64 %0, %1, th:TH_LOAD_NT\n"
+          "s_wait_loadcnt 0x0\n"
+          "global_store_b64 %2, %0, off th:TH_STORE_NT_RT scope:SCOPE_SYS"
+          : "=&v"(val64)
+          : "v"(src), "v"(dst)
           : "memory");
-      asm volatile("flat_store_b64 %0, %1, th:TH_STORE_NT_RT scope:SCOPE_SYS"
-                   :
-                   : "v"(dst), "v"(val64)
-                   : "memory");
 #endif
       break;
     }
@@ -401,41 +357,32 @@ __device__ __forceinline__ void put_asm([[maybe_unused]] uint8_t* src,
 #if defined(__gfx90a__) || defined(__gfx1100__)
       __int128_t val128;
       asm volatile(
-          "flat_load_dwordx4 %0, %1,\n"
-          "s_waitcnt vmcnt(0)"
-          : "=v"(val128)
-          : "v"(src)
+          "flat_load_dwordx4 %0, %1, slc\n"
+          "s_waitcnt vmcnt(0)\n"
+          "global_store_dwordx4 %2, %0, off glc slc"
+          : "=&v"(val128)
+          : "v"(src), "v"(dst)
           : "memory");
-      asm volatile("flat_store_dwordx4 %0, %1, glc slc"
-                   :
-                   : "v"(dst), "v"(val128)
-                   : "memory");
 #endif
 #if defined(__gfx942__) || defined(__gfx950__)
       __int128_t val128;
       asm volatile(
-          "flat_load_dwordx4 %0, %1,\n"
-          "s_waitcnt vmcnt(0)"
-          : "=v"(val128)
-          : "v"(src)
+          "flat_load_dwordx4 %0, %1, nt\n"
+          "s_waitcnt vmcnt(0)\n"
+          "global_store_dwordx4 %2, %0, off sc0 sc1 nt"
+          : "=&v"(val128)
+          : "v"(src), "v"(dst)
           : "memory");
-      asm volatile("flat_store_dwordx4 %0, %1, sc0 sc1 nt"
-                   :
-                   : "v"(dst), "v"(val128)
-                   : "memory");
 #endif
 #if defined(__gfx1201__)
       __int128_t val128;
       asm volatile(
-          "flat_load_b128 %0, %1,\n"
-          "s_wait_loadcnt 0x0"
-          : "=v"(val128)
-          : "v"(src)
+          "flat_load_b128 %0, %1, th:TH_LOAD_NT\n"
+          "s_wait_loadcnt 0x0\n"
+          "global_store_b128 %2, %0, off th:TH_STORE_NT_RT scope:SCOPE_SYS"
+          : "=&v"(val128)
+          : "v"(src), "v"(dst)
           : "memory");
-      asm volatile("flat_store_b128 %0, %1, th:TH_STORE_NT_RT scope:SCOPE_SYS"
-                   :
-                   : "v"(dst), "v"(val128)
-                   : "memory");
 #endif
       break;
     }
