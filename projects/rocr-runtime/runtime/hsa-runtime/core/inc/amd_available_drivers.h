@@ -52,6 +52,7 @@
 #endif
 
 #ifdef __linux__
+#include "core/inc/amd_lite_linux_driver.h"
 #include "core/inc/amd_xdna_driver.h"
 #endif
 

@@ -55,6 +55,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "core/inc/amd_lite_direct_queue.h"
 #include "core/inc/driver.h"
 #include "core/inc/memory_region.h"
 #include "macgpu.h"
@@ -89,20 +90,9 @@ namespace AMD {
 ///
 /// All of the above is TODO for follow-up commits. Stage 2B is just the
 /// skeleton.
-class MacOsDriver final : public core::Driver {
+class MacOsDriver final : public core::Driver, private lite::DirectQueuePlatform {
  public:
-  struct DirectComputeQueue {
-    uint32_t queue_id = 0;
-    uint32_t queue_index = 0;
-    uint32_t doorbell_index = 0;
-    uint32_t ring_size_bytes = 0;
-    uint64_t ring_gpu = 0;
-    uint64_t wptr = 0;
-    volatile uint32_t* ring_cpu = nullptr;
-    volatile uint64_t* wptr_cpu = nullptr;
-    volatile uint64_t* rptr_cpu = nullptr;
-    volatile uint64_t* doorbell_cpu = nullptr;
-  };
+  using DirectComputeQueue = lite::DirectQueueState;
 
   explicit MacOsDriver(std::string devnode_name);
 
@@ -212,15 +202,17 @@ class MacOsDriver final : public core::Driver {
   };
 
   hsa_status_t EnsureBarMappingsLocked();
-  hsa_status_t EnsureDoorbellApertureLocked();
-  hsa_status_t ReadMmio32(uint32_t base, uint32_t reg, uint32_t* value) const;
-  hsa_status_t WriteMmio32(uint32_t base, uint32_t reg, uint32_t value) const;
-  hsa_status_t SelectHqdLocked(uint32_t me, uint32_t pipe, uint32_t queue) const;
-  hsa_status_t WaitForDirectHqdIdleLocked(uint32_t pipe, uint32_t queue,
-                                          const char* phase) const;
-  hsa_status_t ActivateDirectComputeQueueLocked(DirectComputeQueue* queue);
-  void VramWrite32Locked(uint64_t offset, uint32_t value) const;
-  void ZeroVramLocked(uint64_t offset, uint64_t size) const;
+
+  hsa_status_t EnsureDoorbellAperture() const override;
+  hsa_status_t ReadMmio32(uint32_t base, uint32_t reg,
+                          uint32_t* value) const override;
+  hsa_status_t WriteMmio32(uint32_t base, uint32_t reg,
+                           uint32_t value) const override;
+  hsa_status_t ZeroGpuMemory(uint64_t offset, uint64_t size) const override;
+  hsa_status_t WriteGpuMemory32(uint64_t offset, uint32_t value) const override;
+  void* GpuMemoryCpuPointer(uint64_t offset) const override;
+  volatile uint64_t* DoorbellCpuPointer(uint32_t doorbell_index) const override;
+  void SleepUs(uint32_t usec) const override;
 
   // Opaque libmacgpu handle. nullptr until Open() succeeds.
   macgpu_device_t* dev_ = nullptr;

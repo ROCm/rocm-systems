@@ -252,12 +252,20 @@ if (APPLE)
   # wired into DiscoverGpu, since ISA registry + memory regions need
   # more plumbing first — tracked as follow-up).
   set ( SRCS core/driver/driver.cpp
+             core/driver/lite/amd_lite_direct_queue.cpp
              core/driver/macos/amd_macos_driver.cpp
              core/runtime/amd_macos_aql_queue.cpp
              core/runtime/amd_macos_agent.cpp )
 else()
   set ( SRCS core/driver/driver.cpp
-             core/driver/kfd/amd_kfd_driver.cpp )
+             core/driver/kfd/amd_kfd_driver.cpp
+             core/driver/lite/amd_lite_direct_queue.cpp )
+  if (UNIX AND NOT APPLE)
+    list(APPEND SRCS
+                core/driver/lite/linux/amd_lite_linux_driver.cpp
+                core/driver/lite/linux/amd_lite_linux_transport.cpp
+                core/runtime/amd_lite_agent.cpp)
+  endif()
 endif()
 list(APPEND SRCS
            core/util/small_heap.cpp

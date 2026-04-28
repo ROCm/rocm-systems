@@ -45,8 +45,12 @@
 #if defined(__APPLE__)
 #include "core/inc/amd_macos_agent.h"
 #endif
+#if defined(__linux__)
+#include "core/inc/amd_lite_agent.h"
+#endif
 
 #include <algorithm>
+#include <cstdlib>
 #include <cstring>
 #include <functional>
 
@@ -107,12 +111,31 @@ const std::array<std::function<hsa_status_t(std::unique_ptr<core::Driver>&)>,
 #ifdef HSAKMT_VIRTIO_ENABLED
         , KfdVirtioDriver::DiscoverDriver
 #endif
+        , LinuxAmdgpuLiteDriver::DiscoverDriver
 #elif __APPLE__
         MacOsDriver::DiscoverDriver
 #endif
 };
 
+#if defined(__linux__)
+bool EnvEnabled(const char* name) {
+  const char* value = std::getenv(name);
+  return value != nullptr && value[0] != '\0' && std::strcmp(value, "0") != 0;
+}
+#endif
+
 void DiscoverDrivers() {
+#if defined(__linux__)
+  if (EnvEnabled("ROCR_AMDGPU_LITE_ONLY")) {
+    std::unique_ptr<core::Driver> driver;
+    hsa_status_t ret = LinuxAmdgpuLiteDriver::DiscoverDriver(driver);
+    if (ret == HSA_STATUS_SUCCESS) {
+      core::Runtime::runtime_singleton_->RegisterDriver(std::move(driver));
+    }
+    return;
+  }
+#endif
+
   for (const auto& discover_driver_fn : discover_driver_funcs) {
     std::unique_ptr<core::Driver> driver;
     hsa_status_t ret = discover_driver_fn(driver);
@@ -153,6 +176,19 @@ std::string GpuNodeDescription(HSAuint32 node_id, const HsaNodeProperties& node_
   return ss.str();
 }
 
+bool UsesKfdGpuAgent(core::DriverType driver_type) {
+  if (driver_type == core::DriverType::KFD) return true;
+#if defined(HSAKMT_VIRTIO_ENABLED) && defined(__linux__)
+  if (driver_type == core::DriverType::KFD_VIRTIO) return true;
+#endif
+  return false;
+}
+
+struct GpuNodeSelection {
+  core::DriverType driver_type;
+  int32_t node_id;
+};
+
 void DiscoverCpu(HSAuint32 node_id, HsaNodeProperties& node_prop, core::DriverType driver_type) {
   CpuAgent* cpu = new CpuAgent(node_id, node_prop, driver_type);
   cpu->Enable();
@@ -176,6 +212,14 @@ GpuAgent* DiscoverGpu(HSAuint32 node_id, HsaNodeProperties& node_prop, bool xnac
     if (enabled) mg->Enable();
     core::Runtime::runtime_singleton_->RegisterAgent(mg, enabled);
     return reinterpret_cast<GpuAgent*>(mg);
+  }
+#endif
+#if defined(__linux__)
+  if (driver_type == core::DriverType::LINUX_AMDGPU_LITE) {
+    auto* lg = new LiteGpuAgent(node_id, driver_type);
+    if (enabled) lg->Enable();
+    core::Runtime::runtime_singleton_->RegisterAgent(lg, enabled);
+    return reinterpret_cast<GpuAgent*>(lg);
   }
 #endif
   (void)enabled;
@@ -319,23 +363,22 @@ void RegisterLinkInfo(const std::unique_ptr<core::Driver>& driver, uint32_t node
 /**
  * Process the list of Gpus that are surfaced to user
  */
-void SurfaceGpuList(std::vector<int32_t>& gpu_list, bool xnack_mode, bool enabled) {
+void SurfaceGpuList(const std::vector<GpuNodeSelection>& gpu_list, bool xnack_mode,
+                    bool enabled) {
   // Process user visible Gpu devices
-  const int32_t invalidIdx = -1;
-  int32_t list_sz = gpu_list.size();
   HsaNodeProperties node_prop = {0};
-  for (const auto& gpu_driver : core::Runtime::runtime_singleton_->AgentDrivers()) {
-    if (!core::Runtime::IsGPUDriver(gpu_driver->kernel_driver_type_)) {
-      continue;
-    }
+  for (const auto& selection : gpu_list) {
+    for (const auto& gpu_driver : core::Runtime::runtime_singleton_->AgentDrivers()) {
+      if (gpu_driver->kernel_driver_type_ != selection.driver_type) {
+        continue;
+      }
 
-    for (int32_t idx = 0; idx < list_sz; idx++) {
-      if (gpu_list[idx] == invalidIdx) {
-        break;
+      if (!core::Runtime::IsGPUDriver(gpu_driver->kernel_driver_type_)) {
+        continue;
       }
 
       // Obtain properties of the node
-      hsa_status_t ret = gpu_driver->GetNodeProperties(node_prop, gpu_list[idx]);
+      hsa_status_t ret = gpu_driver->GetNodeProperties(node_prop, selection.node_id);
       assert(ret == HSA_STATUS_SUCCESS && "Error in getting Node Properties");
 
       // disable interrupt signal for DTIF platform
@@ -364,7 +407,8 @@ void SurfaceGpuList(std::vector<int32_t>& gpu_list, bool xnack_mode, bool enable
       // Instantiate a Gpu device. The IO links
       // of this node have already been registered
       assert((node_prop.NumFComputeCores != 0) && "Improper node used for GPU device discovery.");
-      DiscoverGpu(gpu_list[idx], node_prop, xnack_mode, enabled, gpu_driver->kernel_driver_type_);
+      DiscoverGpu(selection.node_id, node_prop, xnack_mode, enabled,
+                  gpu_driver->kernel_driver_type_);
     }
   }
 }
@@ -383,11 +427,9 @@ bool BuildTopology() {
   /// ROCR_VISIBLE_DEVICES environment variable. Eventually this
   /// should be updated to allow for filtering other agents like
   /// AIEs.
-  RvdFilter rvdFilter;
   int32_t invalidIdx = -1;
-  uint32_t visibleCnt = 0;
-  std::vector<int32_t> gpu_usr_list;
-  std::vector<int32_t> gpu_disabled;
+  std::vector<GpuNodeSelection> gpu_usr_list;
+  std::vector<GpuNodeSelection> gpu_disabled;
   bool filter = RvdFilter::FilterDevices();
 
   // Get the system properties from each driver, populate the node properties list
@@ -422,6 +464,8 @@ bool BuildTopology() {
   // Traverse each driver's nodes and discover their agents.
   for (const auto& driver : rt->AgentDrivers()) {
     auto& node_props_vec = driver_node_props[driver->kernel_driver_type_];
+    RvdFilter rvdFilter;
+    std::vector<int32_t> gpu_usr_node_list;
 
     /// @todo: Add support for AIEs.
     // Query if env ROCR_VISIBLE_DEVICES is defined. If defined
@@ -429,9 +473,9 @@ bool BuildTopology() {
     if (filter && (core::Runtime::IsGPUDriver(driver->kernel_driver_type_))) {
       rvdFilter.BuildRvdTokenList();
       rvdFilter.BuildDeviceUuidList(node_props_vec);
-      visibleCnt = rvdFilter.BuildUsrDeviceList();
+      const uint32_t visibleCnt = rvdFilter.BuildUsrDeviceList();
       for (int32_t idx = 0; idx < visibleCnt; idx++) {
-        gpu_usr_list.push_back(invalidIdx);
+        gpu_usr_node_list.push_back(invalidIdx);
       }
     }
 
@@ -456,12 +500,12 @@ bool BuildTopology() {
         if (filter) {
           int32_t devRank = rvdFilter.GetUsrDeviceRank(kfdIdx);
           if (devRank != (-1)) {
-            gpu_usr_list[devRank] = node_id;
+            gpu_usr_node_list[devRank] = node_id;
           } else {
-            gpu_disabled.push_back(node_id);
+            gpu_disabled.push_back({driver->kernel_driver_type_, static_cast<int32_t>(node_id)});
           }
         } else {
-          gpu_usr_list.push_back(node_id);
+          gpu_usr_list.push_back({driver->kernel_driver_type_, static_cast<int32_t>(node_id)});
         }
         kfdIdx++;
       }
@@ -472,6 +516,11 @@ bool BuildTopology() {
       // not visible
       RegisterLinkInfo(driver, node_id, node_props.NumIOLinks);
       ++node_id;
+    }
+
+    for (int32_t node_id : gpu_usr_node_list) {
+      if (node_id == invalidIdx) break;
+      gpu_usr_list.push_back({driver->kernel_driver_type_, node_id});
     }
   }
 
@@ -497,6 +546,7 @@ bool BuildTopology() {
   // Front load the rec_sdma_eng_id_mask to check whether needs to override old mask
   bool rec_sdma_engine_override = false;
   for (auto& src_gpu : rt->gpu_agents()) {
+    if (!UsesKfdGpuAgent(src_gpu->driver().kernel_driver_type_)) continue;
     uint32_t src_id = src_gpu->node_id();
 
     // Set RecSdmaEngOverride to true for all gpus
@@ -524,8 +574,10 @@ bool BuildTopology() {
 
   // Register destination agents that can SDMA gang copy for source agents
   for (auto& src_gpu : rt->gpu_agents()) {
+    if (!UsesKfdGpuAgent(src_gpu->driver().kernel_driver_type_)) continue;
     uint32_t src_id = src_gpu->node_id();
     for (auto& dst_gpu : rt->gpu_agents()) {
+      if (!UsesKfdGpuAgent(dst_gpu->driver().kernel_driver_type_)) continue;
       uint32_t dst_id = dst_gpu->node_id();
       uint32_t gang_factor = 1, rec_sdma_eng_id_mask = 0;
 

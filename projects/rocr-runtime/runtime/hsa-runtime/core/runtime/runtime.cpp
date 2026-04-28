@@ -237,6 +237,12 @@ void Runtime::RegisterAgent(Agent* agent, bool Enabled) {
       // Linux-KFD-specific; key agents_by_gpuid_ by node_id on Darwin
       // until a cross-backend GpuID accessor exists.
       agents_by_gpuid_[agent->node_id()] = agent;
+#elif defined(__linux__)
+      if (agent->driver().kernel_driver_type_ == DriverType::LINUX_AMDGPU_LITE) {
+        agents_by_gpuid_[agent->node_id()] = agent;
+      } else {
+        agents_by_gpuid_[((AMD::GpuAgent*)agent)->KfdGpuID()] = agent;
+      }
 #else
       agents_by_gpuid_[((AMD::GpuAgent*)agent)->KfdGpuID()] = agent;
 #endif
@@ -788,6 +794,16 @@ hsa_status_t Runtime::GetSystemInfo(hsa_system_info_t attribute, void* value) {
     case HSA_AMD_SYSTEM_INFO_SVM_SUPPORTED: {
       bool ret = true;
       for (auto agent : gpu_agents_) {
+        if (
+#if defined(__APPLE__)
+            agent->driver().kernel_driver_type_ == DriverType::MACOS_DEXT ||
+#endif
+#if defined(__linux__)
+            agent->driver().kernel_driver_type_ == DriverType::LINUX_AMDGPU_LITE ||
+#endif
+            false) {
+          continue;
+        }
         AMD::GpuAgent* gpu = (AMD::GpuAgent*)agent;
         ret &= (gpu->properties().Capability.ui32.SVMAPISupported == 1);
       }

@@ -65,6 +65,9 @@ enum class DriverType {
 #ifdef HSAKMT_VIRTIO_ENABLED
   KFD_VIRTIO,
 #endif
+#if defined(__linux__)
+  LINUX_AMDGPU_LITE,
+#endif
 #if defined(__APPLE__)
   // macOS user-space GPU driver talking to a DriverKit extension
   // (PCIDriverKit → Thunderbolt AMD eGPU). See plans/macos-egpu-rocm-plan.md.
