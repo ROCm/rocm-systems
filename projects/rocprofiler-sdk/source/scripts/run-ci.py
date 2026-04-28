@@ -297,7 +297,6 @@ def generate_dashboard_script(args):
     MEMCHECK = 1 if args.memcheck is not None else 0
     SUBMIT = 0 if args.disable_cdash else 1
     STRICT_SUBMIT = 1 if args.require_cdash_submission else 0
-    TEST_ONLY = 1 if args.test_only else 0
     ARGN = "${ARGN}"
     SUBMIT_ERR = "${_cdash_submit_err}"
     REPO_SOURCE_DIR = (
@@ -446,12 +445,13 @@ def parse_cdash_args(args):
     parser.add_argument(
         "-n", "--name", help="Job name", default=None, type=str, required=True
     )
-    parser.add_argument(
+    mode_group = parser.add_mutually_exclusive_group()
+    mode_group.add_argument(
         "--build-only",
         help="Only run configure and build stages (skip tests). Reports build results to CDash.",
         action="store_true",
     )
-    parser.add_argument(
+    mode_group.add_argument(
         "--test-only",
         help="Only run test stage (skip build). Reports test results to CDash. Requires pre-built binaries.",
         action="store_true",
@@ -606,10 +606,6 @@ def parse_args(args=None):
 
     cdash_args = parse_cdash_args(input_args)
 
-    # Handle --build-only and --test-only flags
-    if cdash_args.build_only and cdash_args.test_only:
-        raise ValueError("Cannot specify both --build-only and --test-only")
-
     if cdash_args.build_only:
         # Only run configure and build stages, skip tests
         cdash_args.stages = ["Start", "Update", "Configure", "Build", "Submit"]
@@ -621,6 +617,8 @@ def parse_args(args=None):
     if cdash_args.test_only:
         # Only run test stage, skip build (requires pre-built binaries)
         cdash_args.stages = ["Start", "Test", "Submit"]
+        if cdash_args.coverage:
+            cdash_args.stages.insert(2, "Coverage")
         sys.stderr.write(
             f"Test-only mode: stages set to {', '.join(cdash_args.stages)}\n"
         )

@@ -251,7 +251,7 @@ jobs:
         working-directory: projects/rocprofiler-sdk
         run: |
           # Create a tarball of the build directory and installed SDK for testing
-          tar -czf rocprofiler-sdk-build-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.gz \
+          tar --zstd -cf rocprofiler-sdk-build-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.zst \
             build/ \
             samples/ \
             tests/
@@ -260,8 +260,8 @@ jobs:
         shell: bash
         run: |
           # Create a tarball of /opt/rocm and /opt/rocprofiler-sdk for test job
-          tar -czf rocm-deps-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.gz \
-            -C /opt rocm rocprofiler-sdk || tar -czf rocm-deps-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.gz -C /opt rocm
+          tar --zstd -cf rocm-deps-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.zst \
+            -C /opt rocm rocprofiler-sdk || tar --zstd -cf rocm-deps-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.zst -C /opt rocm
 
       # NOTE: Artifacts are automatically scoped to this workflow run (github.run_id).
       # The test job's `needs: build-deb` ensures it only downloads artifacts from this same run.
@@ -270,18 +270,20 @@ jobs:
         with:
           name: build-deb-${{ matrix.system.os }}-${{ matrix.system.gpu }}
           path: |
-            projects/rocprofiler-sdk/rocprofiler-sdk-build-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.gz
+            projects/rocprofiler-sdk/rocprofiler-sdk-build-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.zst
             projects/rocprofiler-sdk/build/*.deb
             projects/rocprofiler-sdk/build/*.rpm
             projects/rocprofiler-sdk/build/*.tgz
           retention-days: 1
+          compression-level: 0
 
       - name: Upload ROCM dependencies
         uses: actions/upload-artifact@v4
         with:
           name: rocm-deps-deb-${{ matrix.system.os }}-${{ matrix.system.gpu }}
-          path: rocm-deps-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.gz
+          path: rocm-deps-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.zst
           retention-days: 1
+          compression-level: 0
 
   # -----------------------------------------------------------------------------
   # Ubuntu / DEB Test job(s) - Run on GPU runners
@@ -338,13 +340,16 @@ jobs:
         shell: bash
         run: |
           cd projects/rocprofiler-sdk
-          tar -xzf ../../artifacts/rocprofiler-sdk-build-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.gz
+          apt-get update
+          apt-get install -y zstd
+          tar --zstd -xf ../../artifacts/rocprofiler-sdk-build-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.zst
 
       - name: Extract ROCM dependencies
         shell: bash
         run: |
+          rm -rf /opt/rocm /opt/rocm-* /opt/rocprofiler-sdk
           cd /opt
-          tar -xzf $GITHUB_WORKSPACE/deps/rocm-deps-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.gz
+          tar --zstd -xf $GITHUB_WORKSPACE/deps/rocm-deps-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.zst
 
       - name: Install requirements
         timeout-minutes: 5
@@ -427,11 +432,11 @@ jobs:
           export LD_LIBRARY_PATH=${{ env.ROCM_PATH }}/lib:${{ env.ROCM_PATH }}/llvm/lib:$LD_LIBRARY_PATH
           export PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:$HOME/.local/bin:$PATH
           export PATH=${PATH}:/usr/local/sbin:/usr/sbin:/sbin
-          dpkg --force-all -i ../../artifacts/*.deb 2>/dev/null || true
+          dpkg --force-all -i ../../artifacts/*.deb
           # Re-install in correct order
-          dpkg --force-all -i ../../artifacts/rocprofiler-sdk-roctx_*.deb || true
-          dpkg --force-all -i ../../artifacts/rocprofiler-sdk-rocpd_*.deb || true
-          for i in $(ls -S ../../artifacts/rocprofiler-sdk*.deb 2>/dev/null | grep -Ev 'roctx|rocpd'); do dpkg --force-all -i ${i} || true; done
+          dpkg --force-all -i ../../artifacts/rocprofiler-sdk-roctx_*.deb
+          dpkg --force-all -i ../../artifacts/rocprofiler-sdk-rocpd_*.deb
+          for i in $(ls -S ../../artifacts/rocprofiler-sdk*.deb 2>/dev/null | grep -Ev 'roctx|rocpd'); do dpkg --force-all -i ${i}; done
 
       - name: Test Installed Packages
         if: ${{ contains(matrix.system.gpu, env.CORE_EXT_RUNNER) }}
@@ -606,30 +611,32 @@ jobs:
         shell: bash
         working-directory: projects/rocprofiler-sdk
         run: |
-          tar -czf rocprofiler-sdk-build-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.gz \
+          tar --zstd -cf rocprofiler-sdk-build-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.zst \
             build/ \
             ${{ env.PYTHON_VENV_PATH }}/
 
       - name: Create ROCM dependencies tarball
         shell: bash
         run: |
-          tar -czf rocm-deps-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.gz \
-            -C /opt rocm || echo "Warning: could not create rocm deps tarball"
+          tar --zstd -cf rocm-deps-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.zst \
+            -C /opt rocm
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
           name: build-rpm-${{ matrix.system.os }}-${{ matrix.system.gpu }}
           path: |
-            projects/rocprofiler-sdk/rocprofiler-sdk-build-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.gz
+            projects/rocprofiler-sdk/rocprofiler-sdk-build-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.zst
           retention-days: 1
+          compression-level: 0
 
       - name: Upload ROCM dependencies
         uses: actions/upload-artifact@v4
         with:
           name: rocm-deps-rpm-${{ matrix.system.os }}-${{ matrix.system.gpu }}
-          path: rocm-deps-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.gz
+          path: rocm-deps-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.zst
           retention-days: 1
+          compression-level: 0
 
   # -----------------------------------------------------------------------------
   # RHEL/SLES (RPM) Test job(s) - Run on GPU runners
@@ -682,14 +689,16 @@ jobs:
       - name: Extract build artifacts
         shell: bash
         run: |
+          command -v zstd >/dev/null || dnf install -y zstd || zypper --non-interactive install zstd
           cd projects/rocprofiler-sdk
-          tar -xzf ../../artifacts/rocprofiler-sdk-build-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.gz
+          tar --zstd -xf ../../artifacts/rocprofiler-sdk-build-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.zst
 
       - name: Extract ROCM dependencies
         shell: bash
         run: |
+          rm -rf /opt/rocm /opt/rocm-* /opt/rocprofiler-sdk
           cd /opt
-          tar -xzf $GITHUB_WORKSPACE/deps/rocm-deps-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.gz || echo "Warning: rocm deps extraction failed"
+          tar --zstd -xf $GITHUB_WORKSPACE/deps/rocm-deps-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.zst
 
       - name: Enable PC Sampling
         if: ${{ contains(matrix.system.gpu, 'mi200') || contains(matrix.system.gpu, 'mi300a') }}
@@ -702,7 +711,11 @@ jobs:
         shell: bash
         working-directory: projects/rocprofiler-sdk
         run: |
-          source ${{ env.PYTHON_VENV_ACTIVATE }} || true
+          if [ ! -f "${{ env.PYTHON_VENV_ACTIVATE }}" ]; then
+            echo "::error::Python venv activation script not found: ${{ env.PYTHON_VENV_ACTIVATE }}"
+            exit 1
+          fi
+          source ${{ env.PYTHON_VENV_ACTIVATE }}
           export PATH=~/.local/bin:/opt/rh/gcc-toolset-11/root/usr/bin:$PATH
           python3 ./source/scripts/run-ci.py -B build \
             --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.system.os }}-${{ matrix.system.gpu }}-core-test \
@@ -851,29 +864,31 @@ jobs:
       shell: bash
       working-directory: projects/rocprofiler-sdk
       run: |
-        tar -czf rocprofiler-sdk-build-${{ matrix.system.os }}-${{ matrix.system.gpu }}-${{ matrix.system.sanitizer }}.tar.gz \
+        tar --zstd -cf rocprofiler-sdk-build-${{ matrix.system.os }}-${{ matrix.system.gpu }}-${{ matrix.system.sanitizer }}.tar.zst \
           build/
 
     - name: Create ROCM dependencies tarball
       shell: bash
       run: |
-        tar -czf rocm-deps-${{ matrix.system.os }}-${{ matrix.system.gpu }}-${{ matrix.system.sanitizer }}.tar.gz \
-          -C /opt rocm || echo "Warning: could not create rocm deps tarball"
+        tar --zstd -cf rocm-deps-${{ matrix.system.os }}-${{ matrix.system.gpu }}-${{ matrix.system.sanitizer }}.tar.zst \
+          -C /opt rocm
 
     - name: Upload build artifacts
       uses: actions/upload-artifact@v4
       with:
         name: build-sanitizers-${{ matrix.system.os }}-${{ matrix.system.gpu }}-${{ matrix.system.sanitizer }}
         path: |
-          projects/rocprofiler-sdk/rocprofiler-sdk-build-${{ matrix.system.os }}-${{ matrix.system.gpu }}-${{ matrix.system.sanitizer }}.tar.gz
+          projects/rocprofiler-sdk/rocprofiler-sdk-build-${{ matrix.system.os }}-${{ matrix.system.gpu }}-${{ matrix.system.sanitizer }}.tar.zst
         retention-days: 1
+        compression-level: 0
 
     - name: Upload ROCM dependencies
       uses: actions/upload-artifact@v4
       with:
         name: rocm-deps-sanitizers-${{ matrix.system.os }}-${{ matrix.system.gpu }}-${{ matrix.system.sanitizer }}
-        path: rocm-deps-${{ matrix.system.os }}-${{ matrix.system.gpu }}-${{ matrix.system.sanitizer }}.tar.gz
+        path: rocm-deps-${{ matrix.system.os }}-${{ matrix.system.gpu }}-${{ matrix.system.sanitizer }}.tar.zst
         retention-days: 1
+        compression-level: 0
 
   # -----------------------------------------------------------------------------
   # Sanitizers Test job - Run ALL sanitizer tests on a SINGLE GPU runner
@@ -947,8 +962,11 @@ jobs:
     - name: Extract ROCM dependencies
       shell: bash
       run: |
+        apt-get update
+        apt-get install -y zstd
+        rm -rf /opt/rocm /opt/rocm-* /opt/rocprofiler-sdk
         cd /opt
-        tar -xzf $GITHUB_WORKSPACE/deps/rocm-deps-ubuntu-22.04-mi325-AddressSanitizer.tar.gz || echo "Warning: rocm deps extraction failed"
+        tar --zstd -xf $GITHUB_WORKSPACE/deps/rocm-deps-ubuntu-22.04-mi325-AddressSanitizer.tar.zst
 
     - name: Install requirements
       timeout-minutes: 5
@@ -976,7 +994,7 @@ jobs:
         echo "Running AddressSanitizer Tests"
         echo "=========================================="
         rm -rf build
-        tar -xzf ../../artifacts/AddressSanitizer/rocprofiler-sdk-build-ubuntu-22.04-mi325-AddressSanitizer.tar.gz
+        tar --zstd -xf ../../artifacts/AddressSanitizer/rocprofiler-sdk-build-ubuntu-22.04-mi325-AddressSanitizer.tar.zst
         export PATH="$HOME/.local/bin:$PATH"
         python3 ./source/scripts/run-ci.py -B build \
           --name ${{ github.repository }}-${{ github.ref_name }}-ubuntu-22.04-mi325-AddressSanitizer-test \
@@ -1003,7 +1021,7 @@ jobs:
         echo "Running ThreadSanitizer Tests"
         echo "=========================================="
         rm -rf build
-        tar -xzf ../../artifacts/ThreadSanitizer/rocprofiler-sdk-build-ubuntu-22.04-mi325-ThreadSanitizer.tar.gz
+        tar --zstd -xf ../../artifacts/ThreadSanitizer/rocprofiler-sdk-build-ubuntu-22.04-mi325-ThreadSanitizer.tar.zst
         export PATH="$HOME/.local/bin:$PATH"
         python3 ./source/scripts/run-ci.py -B build \
           --name ${{ github.repository }}-${{ github.ref_name }}-ubuntu-22.04-mi325-ThreadSanitizer-test \
@@ -1030,7 +1048,7 @@ jobs:
         echo "Running LeakSanitizer Tests"
         echo "=========================================="
         rm -rf build
-        tar -xzf ../../artifacts/LeakSanitizer/rocprofiler-sdk-build-ubuntu-22.04-mi325-LeakSanitizer.tar.gz
+        tar --zstd -xf ../../artifacts/LeakSanitizer/rocprofiler-sdk-build-ubuntu-22.04-mi325-LeakSanitizer.tar.zst
         export PATH="$HOME/.local/bin:$PATH"
         python3 ./source/scripts/run-ci.py -B build \
           --name ${{ github.repository }}-${{ github.ref_name }}-ubuntu-22.04-mi325-LeakSanitizer-test \
@@ -1057,7 +1075,7 @@ jobs:
         echo "Running UndefinedBehaviorSanitizer Tests"
         echo "=========================================="
         rm -rf build
-        tar -xzf ../../artifacts/UndefinedBehaviorSanitizer/rocprofiler-sdk-build-ubuntu-22.04-mi325-UndefinedBehaviorSanitizer.tar.gz
+        tar --zstd -xf ../../artifacts/UndefinedBehaviorSanitizer/rocprofiler-sdk-build-ubuntu-22.04-mi325-UndefinedBehaviorSanitizer.tar.zst
         export PATH="$HOME/.local/bin:$PATH"
         python3 ./source/scripts/run-ci.py -B build \
           --name ${{ github.repository }}-${{ github.ref_name }}-ubuntu-22.04-mi325-UndefinedBehaviorSanitizer-test \
