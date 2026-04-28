@@ -385,7 +385,9 @@ TestRMAGet() {
   else echo "Skip:   get_* (AIROCSHMEM-120: RO get tests abort)"; fi
 
   ################################ User Buffer Tests ################################
-  if [[ $TEST != gda* ]]; then # AIROCSHMEM-383
+  # AIROCSHMEM-383 for GDA
+  # AIROCSHMEM-120 for RO
+  if [[ $TEST != gda* && $TEST != ro* ]]; then
     export LOCALBUFTYPE=host
     ExecTest  "getnbi"           2       32           128       512
     unset LOCALBUFTYPE
