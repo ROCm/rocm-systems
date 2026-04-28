@@ -21,6 +21,7 @@ Runtime guardrails:
 
 from __future__ import annotations
 
+import inspect
 import json
 import logging
 import os
@@ -193,12 +194,23 @@ def _resolve_model(provider: str) -> str:
 
     Precedence:
       1. ``PERFXPERT_AGENTS_MODEL_<PROVIDER>`` (e.g. ``..._OPENAI``)
-      2. ``PERFXPERT_LLM_MODEL`` (cross-provider override)
-      3. Built-in default from :data:`_DEFAULT_MODELS`
+      2. ``PERFXPERT_LLM_PRIVATE_MODEL`` for the private provider
+      3. ``PERFXPERT_LLM_MODEL`` (cross-provider override)
+      4. Built-in default from :data:`_DEFAULT_MODELS`
     """
     specific = os.environ.get(f"PERFXPERT_AGENTS_MODEL_{provider.upper()}")
+    provider_specific = (
+        os.environ.get("PERFXPERT_LLM_PRIVATE_MODEL")
+        if provider == "private"
+        else None
+    )
     generic = os.environ.get("PERFXPERT_LLM_MODEL")
-    model = specific or generic or _DEFAULT_MODELS.get(provider, _DEFAULT_MODELS["openai"])
+    model = (
+        specific
+        or provider_specific
+        or generic
+        or _DEFAULT_MODELS.get(provider, _DEFAULT_MODELS["openai"])
+    )
     if "/" in model:
         return model
     if provider == "anthropic":
@@ -230,15 +242,29 @@ def _build_sdk_run_config(provider: str) -> Any:
             provider_map.add_provider(provider, LitellmProvider())
         elif provider == "private":
             from agents.models.openai_provider import OpenAIProvider  # type: ignore[import-not-found]
+            from openai import AsyncOpenAI  # type: ignore[import-not-found]
+            import httpx
+
+            from perfxpert.providers.private_provider import _parse_headers, _verify_ssl_from_env
 
             base_url = (os.environ.get("PERFXPERT_LLM_PRIVATE_URL") or "").rstrip("/")
             if not base_url:
                 raise AuthError("private", "no endpoint configured (set PERFXPERT_LLM_PRIVATE_URL)")
+            try:
+                extra_headers = _parse_headers(os.environ.get("PERFXPERT_LLM_PRIVATE_HEADERS", ""))
+            except ValueError as exc:
+                raise AuthError("private", str(exc)) from exc
+            api_key = os.environ.get("PERFXPERT_LLM_PRIVATE_API_KEY") or "dummy"
+            openai_client = AsyncOpenAI(
+                api_key=api_key,
+                base_url=base_url,
+                default_headers=extra_headers or None,
+                http_client=httpx.AsyncClient(verify=_verify_ssl_from_env()),
+            )
             provider_map.add_provider(
                 "private",
                 OpenAIProvider(
-                    api_key=os.environ.get("PERFXPERT_LLM_PRIVATE_API_KEY") or "dummy",
-                    base_url=base_url,
+                    openai_client=openai_client,
                     use_responses=False,
                 ),
             )
@@ -343,6 +369,30 @@ def _sanitize_tool_name(name: str) -> str:
     return name.replace(".", "_")
 
 
+def _prepare_tool_callable_for_sdk(fn: Callable[..., Any], tool_name: str) -> Callable[..., Any]:
+    """Ensure SDK introspection has function metadata for bound callables."""
+    safe_name = _sanitize_tool_name(tool_name)
+    if inspect.isfunction(fn) or inspect.ismethod(fn):
+        if not getattr(fn, "__name__", None):
+            try:
+                setattr(fn, "__name__", safe_name)
+                setattr(fn, "__qualname__", safe_name)
+            except Exception:  # pragma: no cover - unusual callable object
+                pass
+        return fn
+
+    def _sdk_tool_wrapper(*args: Any, **kwargs: Any) -> Any:
+        return fn(*args, **kwargs)
+
+    _sdk_tool_wrapper.__name__ = safe_name
+    _sdk_tool_wrapper.__qualname__ = safe_name
+    try:
+        _sdk_tool_wrapper.__signature__ = inspect.signature(fn)  # type: ignore[attr-defined]
+    except (TypeError, ValueError):  # pragma: no cover - best effort
+        pass
+    return _sdk_tool_wrapper
+
+
 def _translate_tools(tools: List[ToolBinding]) -> List[Any]:
     """Wrap our ToolBinding list in openai-agents function_tool decorators.
 
@@ -356,9 +406,10 @@ def _translate_tools(tools: List[ToolBinding]) -> List[Any]:
     wrapped: List[Any] = []
     for tb in tools:
         try:
+            sdk_callable = _prepare_tool_callable_for_sdk(tb.fn, tb.name)
             wrapped.append(
                 sdk_function_tool(
-                    tb.fn,
+                    sdk_callable,
                     name_override=_sanitize_tool_name(tb.name),
                     # The SDK's introspection can be picky about third-party
                     # callables; relax strict mode so we don't 400 on schema
@@ -440,6 +491,40 @@ def _final_output_structured(run_result: Any) -> Optional[Dict[str, Any]]:
     return None
 
 
+def _structured_from_text(text: str) -> Optional[Dict[str, Any]]:
+    stripped = text.strip()
+    if not (stripped.startswith("{") and stripped.endswith("}")):
+        return None
+    try:
+        parsed = json.loads(stripped)
+    except (TypeError, ValueError):
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
+
+def _opencode_invoke(agent: "Agent", input_payload: Any) -> FakeProviderResponse:
+    from perfxpert.providers.opencode_provider import OpencodeProvider
+
+    instructions = agent.fence_text or (
+        f"You are the {agent.name} agent. "
+        "Follow the JSON payload contract defined in the perfxpert fence."
+    )
+    model = os.environ.get("PERFXPERT_AGENTS_MODEL_OPENCODE") or os.environ.get(
+        "PERFXPERT_LLM_MODEL"
+    )
+    response = OpencodeProvider().complete(
+        [{"role": "user", "content": _serialize_input(input_payload)}],
+        system=instructions,
+        model=model,
+    )
+    return FakeProviderResponse(
+        text=response.content,
+        tool_calls=[],
+        structured_output=_structured_from_text(response.content),
+        handoff=None,
+    )
+
+
 def _sdk_invoke(agent: "Agent", input_payload: Any, provider: str) -> FakeProviderResponse:
     """Invoke the openai-agents SDK Runner and return a FakeProviderResponse.
 
@@ -450,6 +535,9 @@ def _sdk_invoke(agent: "Agent", input_payload: Any, provider: str) -> FakeProvid
     The return type remains ``FakeProviderResponse`` so agents/runtime wiring
     is identical across mocked + live paths.
     """
+    if provider == "opencode":
+        return _opencode_invoke(agent, input_payload)
+
     if not _SDK_AVAILABLE or SdkAgent is None or SdkRunner is None or SdkRunConfig is None:
         raise RuntimeError(
             "OpenAI Agents SDK not installed; run `pip install openai-agents` "

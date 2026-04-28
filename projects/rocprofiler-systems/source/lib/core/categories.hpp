@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "defines.hpp"
+#include "common/defines.h"
 #include "rocprofiler-systems/categories.h"  // in rocprof-sys-user
 
 #if defined(TIMEMORY_PERFETTO_CATEGORIES)
