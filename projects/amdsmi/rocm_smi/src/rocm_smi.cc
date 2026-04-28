@@ -3144,6 +3144,10 @@ rsmi_status_t rsmi_dev_pci_bandwidth_set(uint32_t dv_ind, uint64_t bw_bitmask) {
       LOG_ERROR(restore_ss);
     }
     if (ret == RSMI_STATUS_UNKNOWN_ERROR) {
+      std::ostringstream unk_ss;
+      unk_ss << __PRETTY_FUNCTION__ << " | unmapped errno from writeDevInfo (errno=" << ret_i
+             << "); coercing UNKNOWN_ERROR -> NOT_SUPPORTED";
+      LOG_ERROR(unk_ss);
       return RSMI_STATUS_NOT_SUPPORTED;
     }
     return ret;
