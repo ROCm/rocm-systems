@@ -45,9 +45,12 @@
  * - 1.17 - Add SDMA queue creation with target SDMA engine ID
  * - 1.18 - Rename pad in set_memory_policy_args to misc_process_flag
  * - 1.19 - Add queue creation with metadata ring base address
+ * - 1.20..1.21 - (reserved)
+ * - 1.22 - Extend kfd_ioctl_update_queue_args with dispatch_record_buffer_{addr,size}
+ *          for MEC dispatch profiling ring buffer (host kernel ABI)
  */
 #define KFD_IOCTL_MAJOR_VERSION 1
-#define KFD_IOCTL_MINOR_VERSION 19
+#define KFD_IOCTL_MINOR_VERSION 22
 
 struct kfd_ioctl_get_version_args {
 	__u32 major_version;	/* from KFD */
@@ -98,6 +101,9 @@ struct kfd_ioctl_update_queue_args {
 	__u32 ring_size;		/* to KFD */
 	__u32 queue_percentage;	/* to KFD */
 	__u32 queue_priority;	/* to KFD */
+	__u64 dispatch_record_buffer_addr;	/* to KFD: GPU VA (0 = disable) */
+	__u32 dispatch_record_buffer_size;	/* to KFD: capacity in records */
+	__u32 pad;
 };
 
 struct kfd_ioctl_set_cu_mask_args {
