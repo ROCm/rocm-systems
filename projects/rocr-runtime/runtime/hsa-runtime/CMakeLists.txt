@@ -411,14 +411,57 @@ if( BUILD_SHARED_LIBS )
     ## unmodified.
     option(ROCR_ENABLE_LTTNG_UST "Build with LTTng-UST tracepoint emission" ON)
     if(ROCR_ENABLE_LTTNG_UST)
+      # Vendored LTTng-UST: built from the lttng-ust + userspace-rcu git
+      # submodules under projects/rocr-runtime/external/, installed into
+      # the build tree at <build>/_deps/lttng-prefix/, and shipped at
+      # runtime under /opt/rocm/lib/lttng/. libhsa-runtime64 picks them
+      # up via RPATH $ORIGIN/lttng (set below).
+      set(LTTNG_VENDORED_URCU_SRC
+          "${CMAKE_CURRENT_SOURCE_DIR}/../../external/userspace-rcu")
+      set(LTTNG_VENDORED_UST_SRC
+          "${CMAKE_CURRENT_SOURCE_DIR}/../../external/lttng-ust")
+      include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/VendorLttng.cmake)
+
       find_package(PkgConfig REQUIRED)
+      # Prepend the vendored .pc dir so pkg_check_modules picks it
+      # before any system lttng-ust the distro might also ship.
+      set(ENV{PKG_CONFIG_PATH} "${LTTNG_VENDORED_PKGCONFIG}:$ENV{PKG_CONFIG_PATH}")
       pkg_check_modules(LTTNG_UST REQUIRED IMPORTED_TARGET lttng-ust>=2.13)
+
       target_compile_definitions(${CORE_RUNTIME_TARGET} PRIVATE HSA_ENABLE_LTTNG_UST=1)
       target_include_directories(${CORE_RUNTIME_TARGET} PRIVATE
-          ${CMAKE_CURRENT_SOURCE_DIR}/lttng)
+          ${CMAKE_CURRENT_SOURCE_DIR}/lttng
+          ${LTTNG_VENDORED_INCLUDE_DIR})
       target_link_libraries(${CORE_RUNTIME_TARGET} PRIVATE
           PkgConfig::LTTNG_UST ${CMAKE_DL_LIBS})
       set(HSA_DEP_LTTNG_UST ON CACHE INTERNAL "")
+
+      # Build the runtime only after the vendored libs exist.
+      add_dependencies(${CORE_RUNTIME_TARGET} lttng_ust_vendored)
+
+      # RPATH:
+      #   BUILD_RPATH   — let in-tree tests find the vendored .so files.
+      #   INSTALL_RPATH — at /opt/rocm/lib/libhsa-runtime64.so, the
+      #                   vendored libs sit in /opt/rocm/lib/lttng/.
+      # We append rather than overwrite because rocr-runtime sets RPATH
+      # in several places; use APPEND to preserve any prior settings.
+      set_property(TARGET ${CORE_RUNTIME_TARGET} APPEND PROPERTY
+                   BUILD_RPATH "${LTTNG_VENDORED_LIB_DIR}")
+      set_property(TARGET ${CORE_RUNTIME_TARGET} APPEND PROPERTY
+                   INSTALL_RPATH "\$ORIGIN/lttng")
+
+      # Install the vendored .so files alongside libhsa-runtime64.so
+      # under ${CMAKE_INSTALL_LIBDIR}/lttng. The version-suffixed
+      # symlinks are preserved so NEEDED entries that reference e.g.
+      # liblttng-ust.so.1 resolve correctly. NB: when both HIP and HSA
+      # are installed to the same prefix this writes the same files
+      # twice; CMake's install rule is idempotent so this is harmless.
+      install(DIRECTORY ${LTTNG_VENDORED_LIB_DIR}/
+              DESTINATION ${CMAKE_INSTALL_LIBDIR}/lttng
+              USE_SOURCE_PERMISSIONS
+              FILES_MATCHING
+              PATTERN "liblttng*.so*"
+              PATTERN "liburcu*.so*")
 
       ## Symbol-coverage gate: post-build, diff the .so's exported HSA symbols
       ## against the migration inventory. Fail the build on any miss.
