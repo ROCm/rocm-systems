@@ -46,6 +46,10 @@ class VersionCommands:
             args.cpu_version = True
             args.nic_version = True
 
+        if not self.group_check_printed:
+            self.helpers.check_required_groups()
+            self.group_check_printed = True
+
         try:
             amdsmi_lib_version = amdsmi_interface.amdsmi_get_lib_version()
             amdsmi_lib_version_str = f"{amdsmi_lib_version['major']}.{amdsmi_lib_version['minor']}.{amdsmi_lib_version['release']}"
@@ -80,7 +84,8 @@ class VersionCommands:
             self.logger.output["amdgpu_version"] = gpu_version_str
         if args.cpu_version:
             try:
-                cpus = amdsmi_interface.amdsmi_get_cpusocket_handles()
+                ret = amdsmi_interface.amdsmi_get_cpu_handles()
+                cpus = ret["processor_handles"]
                 if isinstance(cpus, list) and len(cpus) > 0:
                     cpu_version_info = amdsmi_interface.amdsmi_get_cpu_hsmp_driver_version(cpus[0])
                     cpu_version_str = (

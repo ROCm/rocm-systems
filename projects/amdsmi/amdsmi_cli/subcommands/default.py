@@ -174,8 +174,9 @@ class DefaultCommands:
             # rest of power usage info; Will assume we're always trying to get PPT0 for now
             try:
                 power_cap_info = amdsmi_interface.amdsmi_get_power_cap_info(processor, 0)
+                socket_power_limit = power_cap_info["power_cap"]
                 socket_power_limit = self.helpers.convert_SI_unit(
-                    power_cap_info["power_cap"], AMDSMIHelpers.SI_Unit.MICRO
+                    socket_power_limit, AMDSMIHelpers.SI_Unit.MICRO
                 )
                 power_usage = {"current_power": current_power, "power_limit": socket_power_limit}
             except amdsmi_exception.AmdSmiLibraryException:
