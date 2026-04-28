@@ -207,6 +207,14 @@ class AqlQueue : public core::Queue, private core::LocalSignal, public core::Doo
   /// @brief Enables/Disables profiling overrides SetProfiling from core::Queue
   void SetProfiling(bool enabled) override;
 
+  /// @brief Get the per-queue MEC dispatch-record ring buffer info.
+  /// @details Returns the ring buffer base, total size in bytes, and a
+  /// pointer to the firmware-written wptr. Returns
+  /// HSA_STATUS_ERROR_NOT_INITIALIZED if profiling has not been enabled
+  /// on this queue.
+  hsa_status_t GetProfilingDispatchRecords(void** buffer_base, uint32_t* buffer_size,
+                                           volatile uint32_t** write_ptr) const;
+
   /// @brief Update signal value using Relaxed semantics
   void StoreRelaxed(hsa_signal_value_t value) override;
 
@@ -368,6 +376,16 @@ class AqlQueue : public core::Queue, private core::LocalSignal, public core::Doo
 
   struct metadata_prefetch_pkt_version dispatch_version_;
   struct metadata_prefetch_pkt_version barrier_version_;
+
+  // MEC firmware-assisted dispatch profiling ring buffer.
+  // Allocated by SetProfiling(true), freed by SetProfiling(false) and the dtor.
+  // The buffer is allocated as kRecordCount * 40 bytes (NOT * sizeof(mec_dispatch_record)
+  // == 16) to satisfy the host kernel's BO size validation in
+  // kfd_process_queue_manager.c (`buf_byte_size = count * 40`). The MEC firmware
+  // only writes 16 bytes per slot; the trailing 24 bytes per slot are unused.
+  void* dispatch_record_buffer_ = nullptr;
+  uint32_t dispatch_record_buffer_size_ = 0;     // record count (NOT bytes)
+  mutable volatile uint32_t dispatch_record_wptr_ = 0;
 
   // Shared event used for queue errors
   static __forceinline HsaEvent*& queue_event() {

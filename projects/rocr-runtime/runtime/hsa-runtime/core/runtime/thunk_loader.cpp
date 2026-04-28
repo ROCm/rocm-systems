@@ -171,6 +171,10 @@ namespace core {
       HSAKMT_PFN(hsaKmtUpdateQueue) = (HSAKMT_DEF(hsaKmtUpdateQueue)*)rocr::os::GetExportAddress(thunk_handle, "hsaKmtUpdateQueue");
       if (HSAKMT_PFN(hsaKmtUpdateQueue) == nullptr) goto LOAD_ERROR;
 
+      HSAKMT_PFN(hsaKmtSetQueueProfilingBuffer) =
+          (HSAKMT_DEF(hsaKmtSetQueueProfilingBuffer)*)rocr::os::GetExportAddress(thunk_handle, "hsaKmtSetQueueProfilingBuffer");
+      // Optional: not all thunks export this. Don't fail if missing.
+
       HSAKMT_PFN(hsaKmtDestroyQueue) = (HSAKMT_DEF(hsaKmtDestroyQueue)*)rocr::os::GetExportAddress(thunk_handle, "hsaKmtDestroyQueue");
       if (HSAKMT_PFN(hsaKmtDestroyQueue) == nullptr) goto LOAD_ERROR;
 
@@ -477,6 +481,8 @@ LOAD_ERROR:
       HSAKMT_PFN(hsaKmtCreateQueueExt) = (HSAKMT_DEF(hsaKmtCreateQueueExt)*)(&hsaKmtCreateQueueExt);
       HSAKMT_PFN(hsaKmtCreateQueueV2) = (HSAKMT_DEF(hsaKmtCreateQueueV2)*)(&hsaKmtCreateQueueV2);
       HSAKMT_PFN(hsaKmtUpdateQueue) = (HSAKMT_DEF(hsaKmtUpdateQueue)*)(&hsaKmtUpdateQueue);
+      HSAKMT_PFN(hsaKmtSetQueueProfilingBuffer) =
+          (HSAKMT_DEF(hsaKmtSetQueueProfilingBuffer)*)(&hsaKmtSetQueueProfilingBuffer);
       HSAKMT_PFN(hsaKmtDestroyQueue) = (HSAKMT_DEF(hsaKmtDestroyQueue)*)(&hsaKmtDestroyQueue);
       HSAKMT_PFN(hsaKmtSetQueueCUMask) = (HSAKMT_DEF(hsaKmtSetQueueCUMask)*)(&hsaKmtSetQueueCUMask);
       HSAKMT_PFN(hsaKmtSetMemoryPolicy) = (HSAKMT_DEF(hsaKmtSetMemoryPolicy)*)(&hsaKmtSetMemoryPolicy);

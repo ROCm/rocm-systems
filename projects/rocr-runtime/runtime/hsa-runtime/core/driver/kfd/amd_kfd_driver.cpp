@@ -53,6 +53,7 @@
 #include "core/inc/amd_gpu_agent.h"
 #include "core/inc/amd_memory_region.h"
 #include "core/inc/runtime.h"
+#include "core/inc/thunk_loader.h"
 
 #if defined(_WIN32)
 #include "loader/executable.hpp"
@@ -419,6 +420,19 @@ hsa_status_t KfdDriver::UpdateQueue(HSA_QUEUEID queue_id, uint32_t queue_pct,
                                     event)) != HSAKMT_STATUS_SUCCESS) {
     return HSA_STATUS_ERROR;
   }
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t KfdDriver::SetQueueProfilingBuffer(HSA_QUEUEID queue_id, void* buffer_base,
+                                                uint32_t num_records,
+                                                volatile uint32_t* wptr_host_addr) const {
+  if (core::Runtime::runtime_singleton_->thunkLoader()->pfn_hsaKmtSetQueueProfilingBuffer ==
+      nullptr)
+    return static_cast<hsa_status_t>(HSA_STATUS_ERROR_NOT_SUPPORTED);
+  if (core::Runtime::runtime_singleton_->thunkLoader()
+          ->pfn_hsaKmtSetQueueProfilingBuffer(queue_id, buffer_base, num_records, wptr_host_addr) !=
+      HSAKMT_STATUS_SUCCESS)
+    return static_cast<hsa_status_t>(HSA_STATUS_ERROR_NOT_SUPPORTED);
   return HSA_STATUS_SUCCESS;
 }
 

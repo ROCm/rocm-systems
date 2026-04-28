@@ -102,6 +102,8 @@ public:
                            HsaQueueResource& queue_resource) const override;
   hsa_status_t UpdateQueue(HSA_QUEUEID queue_id, uint32_t queue_pct, HSA::hsa_amd_queue_priority_internal_t priority,
                            void* queue_addr, uint64_t queue_size, HsaEvent* event) const override;
+  hsa_status_t SetQueueProfilingBuffer(HSA_QUEUEID queue_id, void* buffer_base, uint32_t num_records,
+                                       volatile uint32_t* wptr_host_addr) const override;
   hsa_status_t DestroyQueue(HSA_QUEUEID queue_id) const override;
   hsa_status_t SetQueueCUMask(HSA_QUEUEID queue_id, uint32_t cu_mask_count,
                               uint32_t* queue_cu_mask) const override;
