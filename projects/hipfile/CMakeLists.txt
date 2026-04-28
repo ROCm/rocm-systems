@@ -266,7 +266,19 @@ if(AIS_BUILD_AMD_DETAIL)
     message(STATUS "libmount include dir: ${LIBMOUNT_INCLUDE_DIR}")
     message(STATUS "libmount library:     ${LIBMOUNT_LIBRARY}")
 
-    find_package(Boost REQUIRED COMPONENTS program_options)
+    find_package(Boost COMPONENTS program_options)
+    if(NOT Boost_FOUND)
+        message(FATAL_ERROR
+            "Boost not found. "
+            "Please install: libboost-dev (Debian/Ubuntu) or boost-devel (RHEL/Rocky/SUSE)."
+        )
+    endif()
+    if(NOT Boost_PROGRAM_OPTIONS_FOUND)
+        message(FATAL_ERROR
+            "Boost.Program_options not found. "
+            "Please install: libboost-program-options-dev (Debian/Ubuntu) or boost-program-options-devel (RHEL/Rocky/SUSE)."
+        )
+    endif()
     message(STATUS "Boost include dir:    ${Boost_INCLUDE_DIRS}")
     message(STATUS "Boost libraries:      ${Boost_LIBRARIES}")
 endif()
