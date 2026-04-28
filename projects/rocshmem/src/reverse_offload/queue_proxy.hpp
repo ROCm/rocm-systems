@@ -31,6 +31,7 @@
 #include "commands_types.hpp"
 #include "profiler.hpp"
 #include "sync/abql_block_mutex.hpp"
+#include "memory/hip_allocator.hpp"
 
 namespace rocshmem {
 
@@ -101,10 +102,9 @@ class QueueElementProxy {
 
 using QueueElementProxyT = QueueElementProxy<PosixAligned64Allocator>;
 
-template <typename ALLOCATOR>
 class QueueProxy {
-  using ProxyT = DeviceProxy<ALLOCATOR, queue_element_t *>;
-  using ProxyPerBlockT = DeviceProxy<ALLOCATOR, queue_element_t>;
+  using ProxyT = DeviceProxy<HIPHostAllocator, queue_element_t *>;
+  using ProxyPerBlockT = DeviceProxy<HIPHostAllocator, queue_element_t>;
 
  public:
   /**
@@ -115,7 +115,8 @@ class QueueProxy {
    */
   QueueProxy() = default;
 
-  QueueProxy(size_t max_queues, size_t queue_size)
+  QueueProxy(size_t max_queues, size_t queue_size,
+             [[maybe_unused]] const HIPHostAllocator& alloc = HIPHostAllocator())
     : queue_proxy_{max_queues},
       per_block_queue_proxy_{queue_size * max_queues},
       max_queues_{max_queues}, queue_size_{queue_size},
@@ -124,7 +125,7 @@ class QueueProxy {
     auto **queue_array{queue_proxy_.get()};
     auto *per_block_queue{per_block_queue_proxy_.get()};
     for (size_t i{0}; i < max_queues_; i++) {
-      queue_array[i] = per_block_queue + i * queue_size;
+      queue_array[i] = per_block_queue + i * queue_size_;
     }
     size_t total_queue_element_bytes{sizeof(queue_element_t) *
                                      total_queue_elements_};
@@ -152,8 +153,6 @@ class QueueProxy {
 
   size_t total_queue_elements_{};
 };
-
-using QueueProxyT = QueueProxy<HIPHostAllocator>;
 
 }  // namespace rocshmem
 

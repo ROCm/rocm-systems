@@ -146,7 +146,7 @@ class ROBackend : public Backend {
   /**
    * @brief Handle to device memory fields.
    */
-  BackendProxyT backend_proxy{};
+  BackendProxy backend_proxy{};
 
   /**
    * @brief Handle to block resources
@@ -233,7 +233,7 @@ class ROBackend : public Backend {
   /**
    * @brief Pool of contexts for RO_NET
    */
-  WindowProxyT *ro_window_proxy_;
+  WindowProxy *ro_window_proxy_;
 
  protected:
   /**

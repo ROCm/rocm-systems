@@ -89,8 +89,8 @@ ROBackend::ROBackend(MPI_Comm comm)
 
   bp->heap_ptr = &heap;
 
-  ro_window_proxy_ = new WindowProxyT(&heap, transport_->get_world_comm(),
-                                      num_windows_);
+  ro_window_proxy_ = new WindowProxy(&heap, transport_->get_world_comm(),
+                                     num_windows_);
 
   bp->heap_window_info = ro_window_proxy_->get();
 
@@ -375,7 +375,7 @@ void ROBackend::ro_net_free_runtime() {
   }
   transport_->finalizeTransport();
 
-  ro_window_proxy_->~WindowProxyT();
+  ro_window_proxy_->~WindowProxy();
   team_world_proxy_->~ROTeamProxy<HIPAllocator>();
   transport_->~MPITransport();
   /*
