@@ -2603,9 +2603,18 @@ class AMDSMIParser(argparse.ArgumentParser):
                     metavar=("FRMT1,FRMT2"),
                 )
                 set_power_management_help = (
-                    "Enable or disable GPU power management.\n"
-                    "\tENABLED forces sysfs clock files to be available.\n"
-                    "\tDISABLED returns to auto mode."
+                    "Enable or disable user-managed GPU power management"
+                    " (overrides the driver's automatic DPM control).\n"
+                    "\tENABLED  -> manual DPM (equivalent to"
+                    " `--perf-level manual`); pp_dpm_* sysfs files"
+                    " report a discrete current level. Useful on gfx1151"
+                    " where 'auto' mode hides the current clock level.\n"
+                    "\tDISABLED -> auto DPM (equivalent to"
+                    " `--perf-level auto`); the driver picks levels"
+                    " dynamically (kernel default).\n"
+                    "\tThis is a two-state shortcut for the manual/auto"
+                    " modes of `--perf-level`; use `--perf-level` for"
+                    " other levels (low, high, profile_*)."
                 )
                 set_value_exclusive_group.add_argument(
                     "-E",

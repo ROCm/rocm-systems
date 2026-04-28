@@ -9,10 +9,11 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 ### Added
 
 - **Added GPU power management set command**.
-  - New `amd-smi set --power-management ENABLED|DISABLED` to enable or disable GPU power management.
-  - When power management is in 'auto' mode (default on some GPUs like gfx1151), the kernel driver may not mark the current clock level in sysfs files, causing `amd-smi static -C` to show N/A. Enabling power management forces clock levels to be fully reported.
-  - Implemented in the CLI by mapping ENABLED/DISABLED onto the existing `amdsmi_set_gpu_perf_level()` API (MANUAL/AUTO).
-  
+  - New `amd-smi set --power-management ENABLED|DISABLED` to enable or disable user-managed GPU power management.
+  - `ENABLED` maps to manual DPM (equivalent to `--perf-level manual`); `DISABLED` maps to auto DPM (equivalent to `--perf-level auto`). This is a two-state shortcut for the manual/auto modes of `--perf-level`.
+  - On some GPUs (e.g. gfx1151) the kernel driver does not mark the current clock level in `pp_dpm_*` sysfs files while in `auto` mode, causing `amd-smi static -C` to show `N/A`. Setting `--power-management ENABLED` forces clock levels to be fully reported.
+  - Implemented in the CLI on top of the existing `amdsmi_set_gpu_perf_level()` API (MANUAL/AUTO).
+
 - **Added APU metrics support (table versions 2.4 and 3.0)**.  
   - New `amdsmi_apu_metrics_t` struct accessible via `amdsmi_gpu_metrics_t.apu_metrics` pointer (non-null when APU-specific metrics are available).
   - **v2.4 metrics**:

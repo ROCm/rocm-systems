@@ -3389,7 +3389,7 @@ class AMDSMICommands:
                 except Exception as e:
                     logging.debug("Failed to get current_dclk0s for gpu %s | %s", gpu_id, e)
 
-                # Populate FCLK clock value; fclk not in gpu_metrics
+                # Populate FCLK clock value; fclk not present in gpu_metrics so use amdsmi_get_clk_freq
                 try:
                     frequency_dict = amdsmi_interface.amdsmi_get_clk_freq(
                         args.gpu, amdsmi_interface.AmdSmiClkType.DF

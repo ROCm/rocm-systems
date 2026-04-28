@@ -620,6 +620,10 @@ Set Arguments:
   -R, --process-isolation STATUS              Enable or disable the GPU process isolation on a per partition basis: 0 for disable and 1 for enable.
   --ptl-status STATUS                         Enable or disable the PTL on a GPU processor: 0 for disable and 1 for enable
   --ptl-format FRMT1,FRMT2                    Set the PTL format on a GPU processor. For example, --ptl-format I8,F32
+  -E, --power-management STATE                Enable or disable user-managed GPU power management (overrides the driver's automatic DPM control).
+                                                ENABLED  -> manual DPM (equivalent to `--perf-level manual`); pp_dpm_* sysfs files report a discrete current level. Useful on gfx1151 where 'auto' mode hides the current clock level.
+                                                DISABLED -> auto DPM (equivalent to `--perf-level auto`); the driver picks levels dynamically (kernel default).
+                                                This is a two-state shortcut for the manual/auto modes of `--perf-level`; use `--perf-level` for other levels (low, high, profile_*).
 
 CPU Arguments:
   --cpu-pwr-limit PWR_LIMIT                                      Set power limit for the given socket. Input parameter is power limit value.
