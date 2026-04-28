@@ -230,6 +230,9 @@ template <>
 inline void
 sampling_service<default_sampling_policies>::emit_resolved_to_trace_cache(int64_t tid)
 {
+    // L43 — refactor variant of legacy "[{}] Post-processing data for timemory..."
+    LOG_DEBUG("[{}] Post-processing data for native report...", tid);
+
     auto records = offload_.read(tid);
     if(records.empty()) return;
 
