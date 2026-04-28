@@ -113,6 +113,13 @@ ncclCommShrink_impl(ncclComm_t comm, int* excludeRanksList, int excludeRanksCoun
                     ncclConfig_t* config, int shrinkFlags);
 
 ncclResult_t
+ncclCommGetUniqueId_impl(ncclComm_t comm, ncclUniqueId* uniqueId);
+
+ncclResult_t
+ncclCommGrow_impl(ncclComm_t comm, int nRanks, const ncclUniqueId* uniqueId,
+                  int rank, ncclComm_t* newcomm, ncclConfig_t* config);
+
+ncclResult_t
 ncclCommSplit_impl(ncclComm_t comm, int color, int key, ncclComm_t* newcomm,
                    ncclConfig_t* config);
 
@@ -269,11 +276,13 @@ RCCL_ASSERT_OFFSET(rcclApiFuncTable, ncclCommWindowRegister_fn, 39);
 RCCL_ASSERT_OFFSET(rcclApiFuncTable, ncclCommWindowDeregister_fn, 40);
 RCCL_ASSERT_OFFSET(rcclApiFuncTable, ncclAlltoAll_fn, 41);
 RCCL_ASSERT_OFFSET(rcclApiFuncTable, ncclAlltoAllv_fn, 42);
+RCCL_ASSERT_OFFSET(rcclApiFuncTable, ncclCommGetUniqueId_fn, 43);
+RCCL_ASSERT_OFFSET(rcclApiFuncTable, ncclCommGrow_fn, 44);
 // DO NOT REORDER, ADD NEW ITEMS HERE
 
 #undef RCCL_ASSERT_OFFSET
 
-static_assert(sizeof(rcclApiFuncTable) == compute_table_size(43),
+static_assert(sizeof(rcclApiFuncTable) == compute_table_size(45),
               "Update table major/step version and add a new offset assertion if this "
               "fails to compile");
 
@@ -326,7 +335,9 @@ RcclGetFunctionTable_impl()
                                                &ncclCommWindowRegister_impl,
                                                &ncclCommWindowDeregister_impl,
                                                &ncclAlltoAll_impl,
-                                               &ncclAlltoAllv_impl
+                                               &ncclAlltoAllv_impl,
+                                               &ncclCommGetUniqueId_impl,
+                                               &ncclCommGrow_impl
                                                // DO NOT REORDER, ADD NEW ITEMS HERE
                                              };
 
@@ -480,6 +491,12 @@ NCCL_API(ncclResult_t, ncclCommWindowRegister, ncclComm_t comm, void* buff, size
          ncclWindow_t* win, int winFlags);
 
 NCCL_API(ncclResult_t, ncclCommWindowDeregister, ncclComm_t comm, ncclWindow_t win);
+
+NCCL_API(ncclResult_t, ncclCommGetUniqueId, ncclComm_t comm, ncclUniqueId* uniqueId);
+
+NCCL_API(ncclResult_t, ncclCommGrow, ncclComm_t comm, int nRanks,
+         const ncclUniqueId* uniqueId, int rank, ncclComm_t* newcomm,
+         ncclConfig_t* config);
 
 ncclResult_t
 ncclAllGather(const void* sendbuff, void* recvbuff, size_t sendcount,
@@ -787,4 +804,18 @@ ncclResult_t
 ncclCommWindowDeregister(ncclComm_t comm, ncclWindow_t win)
 {
     return ::rccl::RcclGetFunctionTable()->ncclCommWindowDeregister_fn(comm, win);
+}
+
+ncclResult_t
+ncclCommGetUniqueId(ncclComm_t comm, ncclUniqueId* uniqueId)
+{
+    return ::rccl::RcclGetFunctionTable()->ncclCommGetUniqueId_fn(comm, uniqueId);
+}
+
+ncclResult_t
+ncclCommGrow(ncclComm_t comm, int nRanks, const ncclUniqueId* uniqueId, int rank,
+             ncclComm_t* newcomm, ncclConfig_t* config)
+{
+    return ::rccl::RcclGetFunctionTable()->ncclCommGrow_fn(comm, nRanks, uniqueId, rank,
+                                                           newcomm, config);
 }

@@ -7,6 +7,8 @@
 #include <gtest/gtest.h>
 #include <rccl/rccl.h>
 
+#include <thread>
+
 #include "TestBed.hpp"
 #include "StandaloneUtils.hpp"
 
@@ -369,5 +371,150 @@ namespace RcclUnitTesting
     // Clean up comms
     for (auto& comm : comms)
       NCCLCHECK(ncclCommDestroy(comm));
+  }
+
+  /**
+   * \brief Grow a 1-rank communicator to 2 ranks and verify both newcomms work.
+   *        Existing rank 0 and new rank 1 rendezvous via ncclCommGetUniqueId,
+   *        perform an allreduce on the grown comm, then destroy cleanly.
+   * ******************************************************************************************/
+  TEST(Standalone, Grow_OneToTwo_CleanLifecycle)
+  {
+    int numDevices;
+    HIPCALL(hipGetDeviceCount(&numDevices));
+    if (numDevices < 2) {
+      GTEST_SKIP() << "This test requires at least 2 devices.";
+    }
+
+    ncclUniqueId initId, growId;
+    ncclComm_t comm0 = nullptr, newcomm0 = nullptr, newcomm1 = nullptr;
+    ncclResult_t res0 = ncclSuccess, res1 = ncclSuccess;
+
+    NCCLCHECK(ncclGetUniqueId(&initId));
+    NCCLCHECK(ncclCommInitRank(&comm0, 1, initId, 0));
+    NCCLCHECK(ncclCommGetUniqueId(comm0, &growId));
+
+    std::thread t1([&]() {
+      HIPCALL(hipSetDevice(1));
+      res1 = ncclCommGrow(nullptr, 2, &growId, 1, &newcomm1, nullptr);
+    });
+
+    HIPCALL(hipSetDevice(0));
+    res0 = ncclCommGrow(comm0, 2, &growId, -1, &newcomm0, nullptr);
+    t1.join();
+
+    ASSERT_EQ(res0, ncclSuccess);
+    ASSERT_EQ(res1, ncclSuccess);
+    ASSERT_NE(newcomm0, nullptr);
+    ASSERT_NE(newcomm1, nullptr);
+
+    // Verify the grown comm can perform collectives.
+    float *sbuf0, *rbuf0, *sbuf1, *rbuf1;
+    hipStream_t stream0, stream1;
+    HIPCALL(hipSetDevice(0));
+    HIPCALL(hipMalloc((void**)&sbuf0, sizeof(float)));
+    HIPCALL(hipMalloc((void**)&rbuf0, sizeof(float)));
+    HIPCALL(hipStreamCreate(&stream0));
+    HIPCALL(hipSetDevice(1));
+    HIPCALL(hipMalloc((void**)&sbuf1, sizeof(float)));
+    HIPCALL(hipMalloc((void**)&rbuf1, sizeof(float)));
+    HIPCALL(hipStreamCreate(&stream1));
+
+    NCCLCHECK(ncclGroupStart());
+    ASSERT_EQ(ncclAllReduce(sbuf0, rbuf0, 1, ncclFloat, ncclSum, newcomm0, stream0), ncclSuccess);
+    ASSERT_EQ(ncclAllReduce(sbuf1, rbuf1, 1, ncclFloat, ncclSum, newcomm1, stream1), ncclSuccess);
+    NCCLCHECK(ncclGroupEnd());
+
+    HIPCALL(hipSetDevice(0));
+    HIPCALL(hipStreamSynchronize(stream0));
+    HIPCALL(hipStreamDestroy(stream0));
+    HIPCALL(hipFree(sbuf0)); HIPCALL(hipFree(rbuf0));
+    HIPCALL(hipSetDevice(1));
+    HIPCALL(hipStreamSynchronize(stream1));
+    HIPCALL(hipStreamDestroy(stream1));
+    HIPCALL(hipFree(sbuf1)); HIPCALL(hipFree(rbuf1));
+
+    ASSERT_EQ(ncclCommDestroy(newcomm0), ncclSuccess);
+    ASSERT_EQ(ncclCommDestroy(newcomm1), ncclSuccess);
+    ASSERT_EQ(ncclCommDestroy(comm0), ncclSuccess);
+  }
+
+  /**
+   * \brief Passing newcomm=NULL must be rejected with ncclInvalidArgument
+   *        before any state is mutated. Does not require a GPU.
+   * ******************************************************************************************/
+  TEST(Standalone, Grow_NullNewcomm_Rejected)
+  {
+    ASSERT_EQ(ncclCommGrow(nullptr, 2, nullptr, 1, nullptr, nullptr), ncclInvalidArgument);
+  }
+
+  /**
+   * \brief An existing rank (comm != NULL) must pass rank=-1.
+   *        Passing any non-negative rank must be rejected with ncclInvalidArgument.
+   * ******************************************************************************************/
+  TEST(Standalone, Grow_ExistingRank_NonNegativeRank_Rejected)
+  {
+    int numDevices;
+    HIPCALL(hipGetDeviceCount(&numDevices));
+    if (numDevices < 1) {
+      GTEST_SKIP() << "This test requires at least 1 device.";
+    }
+
+    ncclUniqueId initId;
+    ncclComm_t comm = nullptr, newcomm = nullptr;
+    NCCLCHECK(ncclGetUniqueId(&initId));
+    NCCLCHECK(ncclCommInitRank(&comm, 1, initId, 0));
+
+    ncclUniqueId growId;
+    NCCLCHECK(ncclCommGetUniqueId(comm, &growId));
+
+    // rank=0 instead of -1 — must be rejected
+    ASSERT_EQ(ncclCommGrow(comm, 2, &growId, 0, &newcomm, nullptr), ncclInvalidArgument);
+
+    NCCLCHECK(ncclCommDestroy(comm));
+  }
+
+  /**
+   * \brief nRanks must be strictly greater than comm->nRanks for an existing rank.
+   *        Passing nRanks <= current nRanks must be rejected with ncclInvalidArgument.
+   * ******************************************************************************************/
+  TEST(Standalone, Grow_NRanksTooSmall_Rejected)
+  {
+    int numDevices;
+    HIPCALL(hipGetDeviceCount(&numDevices));
+    if (numDevices < 1) {
+      GTEST_SKIP() << "This test requires at least 1 device.";
+    }
+
+    ncclUniqueId initId;
+    ncclComm_t comm = nullptr, newcomm = nullptr;
+    NCCLCHECK(ncclGetUniqueId(&initId));
+    NCCLCHECK(ncclCommInitRank(&comm, 1, initId, 0));
+
+    ncclUniqueId growId;
+    NCCLCHECK(ncclCommGetUniqueId(comm, &growId));
+
+    // nRanks=1 equals current nRanks — must be rejected
+    ASSERT_EQ(ncclCommGrow(comm, 1, &growId, -1, &newcomm, nullptr), ncclInvalidArgument);
+
+    NCCLCHECK(ncclCommDestroy(comm));
+  }
+
+  /**
+   * \brief A new rank (comm=NULL) must provide a non-NULL uniqueId.
+   *        Passing uniqueId=NULL must be rejected with ncclInvalidArgument.
+   *        Does not require any rendezvous with an existing rank.
+   * ******************************************************************************************/
+  TEST(Standalone, Grow_NewRank_NullUniqueId_Rejected)
+  {
+    int numDevices;
+    HIPCALL(hipGetDeviceCount(&numDevices));
+    if (numDevices < 1) {
+      GTEST_SKIP() << "This test requires at least 1 device.";
+    }
+
+    ncclComm_t newcomm = nullptr;
+    // comm=NULL (new rank), uniqueId=NULL — must be rejected before any rendezvous
+    ASSERT_EQ(ncclCommGrow(nullptr, 2, nullptr, 1, &newcomm, nullptr), ncclInvalidArgument);
   }
 }

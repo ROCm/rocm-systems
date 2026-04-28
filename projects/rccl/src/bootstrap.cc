@@ -417,6 +417,68 @@ ncclResult_t bootstrapGetUniqueId(struct ncclBootstrapHandle* handle) {
   return ncclSuccess;
 }
 
+// comm-aware overload used by ncclCommGetUniqueId for grow.
+//
+// Mirrors NCCL upstream: derives the handle magic deterministically from
+// (comm->magic, splitCount + 1) so that all existing ranks can independently
+// recompute it after they bump splitCount in ncclCommGrow. Opens a fresh
+// rendezvous socket so new ranks have somewhere to dial in. NCCL_COMM_ID
+// must NOT be set in this path — the rendezvous address is owned by RCCL,
+// not the user.
+ncclResult_t bootstrapGetUniqueId(struct ncclBootstrapHandle* handle, struct ncclComm* comm) {
+  if (comm == NULL) return ncclInvalidArgument;
+  memset(handle, 0, sizeof(ncclBootstrapHandle));
+
+  if (ncclGetEnv("NCCL_COMM_ID") != NULL) {
+    WARN("ncclCommGetUniqueId should not be called when NCCL_COMM_ID is set");
+    return ncclInvalidUsage;
+  }
+
+  // splitCount is incremented in ncclCommGrow on all existing ranks; use +1
+  // here so the magic stamped now matches what existing ranks will derive
+  // post-increment. (NCCL uses childCount; RCCL uses splitCount — same role.)
+  handle->magic = hashCombine(comm->magic, comm->splitCount + 1);
+  handle->nRanks = comm->nRanks;
+  memcpy(&handle->addr, &bootstrapNetIfAddr, sizeof(union ncclSocketAddress));
+  NCCLCHECK(bootstrapCreateRoot(handle, false));
+  return ncclSuccess;
+}
+
+// Distribute the grow rendezvous handle from the calling rank (the "root" of
+// ncclCommGetUniqueId) to all OTHER existing ranks via the parent comm's
+// bootstrap.
+//
+// Deviation from NCCL upstream: NCCL only sends to ranks 0 and N-1, because
+// its bootstrapInit accepts nHandles=0 + parent and bootstraps non-boundary
+// ranks via parent->bootstrap (see NCCL bootstrap.cc lines ~700, 765-768,
+// 790-793). RCCL's bootstrapInit currently always rendezvous through the
+// handle's addr, so every existing rank needs a valid handle. We compensate
+// by broadcasting the full handle to all existing ranks here. Once
+// bootstrapInit is refactored to accept nHandles=0 + parent, this can be
+// narrowed to ranks 0 and N-1 to match NCCL exactly.
+//
+// Peer wildcard: receivers use peer = -1 because the root rank can be any
+// rank (not just rank 0); socketAccept/unexpectedDequeue treat peer < 0 as
+// "any sender".
+ncclResult_t bcastGrowHandle(struct ncclBootstrapHandle* handle, struct ncclComm* parent, bool isRoot) {
+  if (parent == NULL || handle == NULL) {
+    WARN("bcastGrowHandle: parent comm and handle must be provided");
+    return ncclInvalidArgument;
+  }
+  // Single-rank parent: caller already has the handle locally.
+  if (parent->nRanks == 1) return ncclSuccess;
+
+  if (isRoot) {
+    for (int r = 0; r < parent->nRanks; ++r) {
+      if (r == parent->rank) continue;  // root keeps its local copy
+      NCCLCHECK(bootstrapSend(parent->bootstrap, r, BOOTSTRAP_TAG_GROW_BOUNDARY, handle, sizeof(*handle)));
+    }
+  } else {
+    NCCLCHECK(bootstrapRecv(parent->bootstrap, -1, BOOTSTRAP_TAG_GROW_BOUNDARY, handle, sizeof(*handle)));
+  }
+  return ncclSuccess;
+}
+
 struct unexConn {
   int peer;
   int tag;
@@ -912,7 +974,8 @@ static ncclResult_t unexpectedDequeue(struct bootstrapState* state, int peer, in
   struct unexConn* prev = NULL;
   *found = 0;
   while (elem) {
-    if (elem->peer == peer && elem->tag == tag) {
+    // peer < 0 means wildcard (accept from any peer)
+    if ((peer < 0 || elem->peer == peer) && elem->tag == tag) {
       if (prev == NULL) {
         state->unexpectedConnections = elem->next;
       } else {
@@ -957,7 +1020,8 @@ static ncclResult_t socketAccept(void* commState, int peer, int tag, struct nccl
     NCCLCHECKGOTO(ncclSocketInit(sock), ret, fail);
     NCCLCHECKGOTO(ncclSocketAccept(sock, &STATE_LISTEN(state, peerSocket)), ret, fail);
     NCCLCHECKGOTO(socketRecv(sock, &ack, sizeof(struct socketAckInfo)), ret, fail);
-    if (ack.rank == peer && ack.tag == tag) return ncclSuccess;
+    // tag must match exactly; peer < 0 means wildcard (any sender)
+    if (ack.tag == tag && (peer < 0 || ack.rank == peer)) return ncclSuccess;
     NCCLCHECKGOTO(unexpectedEnqueue(state, ack.rank, ack.tag, sock), ret, fail);
   }
   return ncclSuccess;

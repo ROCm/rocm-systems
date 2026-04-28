@@ -2067,6 +2067,7 @@ struct ncclCommInitRankAsyncJob {
   struct ncclComm* parent;
   int color, key;
   int splitCount;
+  bool isGrow;   // true → grow path (bootstrapInit, not bootstrapSplit)
   // For Shrink
   int* excludeRanksList;
   int excludeRanksCount;
@@ -2203,7 +2204,32 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
   }
   timers[TIMER_INIT_KERNELS] = clockNano() - timers[TIMER_INIT_KERNELS];
 
-  if (job->parent) {
+  if (job->isGrow) {
+    // Grow path: use bootstrapInit. baseMagic must be derivable identically
+    // by every existing rank (so commHash matches across the whole grown
+    // comm). Boundary/all existing ranks that received the handle via
+    // bcastGrowHandle get baseMagic from handle->magic; ranks lacking a handle
+    // (would be NCCL non-boundary in nHandles=0 mode) fall back to
+    // hashCombine(parent->magic, parent->splitCount) — these MUST match
+    // because bootstrapGetUniqueId stamps magic = hashCombine(parent->magic,
+    // parent->splitCount + 1) and ncclCommGrow_impl bumps splitCount before
+    // we get here. (NCCL semantics, splitCount is RCCL's name for childCount.)
+    struct ncclBootstrapHandle* growHandle = (struct ncclBootstrapHandle*)job->commId;
+    uint64_t baseMagic = growHandle ? growHandle->magic
+                                    : hashCombine(job->parent->magic, job->parent->splitCount);
+    comm->commHash = commIdHash = hashCombine(baseMagic, (uint64_t)job->nranks);
+    timers[TIMER_INIT_ALLOC] = clockNano();
+    // NCCL passes NULL parent in the grow path: the grown comm is a fresh,
+    // independent communicator and must not share parent resources.
+    NCCLCHECKGOTO(commAlloc(comm, NULL, job->nranks, job->myrank), res, fail);
+    timers[TIMER_INIT_ALLOC] = clockNano() - timers[TIMER_INIT_ALLOC];
+    INFO(NCCL_INIT, "%s comm %p rank %d nranks %d cudaDev %d nvmlDev %d busId %lx parent %p splitCount %d commId 0x%llx - Init START", job->funcName,
+         comm, comm->rank, comm->nRanks, comm->cudaDev, comm->nvmlDev, comm->busId, job->parent, job->splitCount, commIdHash);
+    timers[TIMER_INIT_BOOTSTRAP] = clockNano();
+    NCCLCHECKGOTO(bootstrapInit(job->nId, (struct ncclBootstrapHandle*)job->commId, comm), res, fail);
+    timers[TIMER_INIT_BOOTSTRAP] = clockNano() - timers[TIMER_INIT_BOOTSTRAP];
+    comm->isGrow = true;
+  } else if (job->parent) {
     NCCLCHECKGOTO(ncclCalloc(&parentRanks, job->parent->nRanks), res, fail);
     if (job->excludeRanksCount) {
       NCCLCHECKGOTO(getParentRanks(job->parent->nRanks, job->parent->rank, job->excludeRanksList, job->excludeRanksCount, &job->nranks, &job->myrank, parentRanks), res, fail);
@@ -3357,6 +3383,172 @@ exit:
   (void)ncclGroupErrCheck(res);
   NCCLCHECK(ncclGroupEndInternal());
   return res;
+}
+
+NCCL_API(ncclResult_t, ncclCommGetUniqueId, ncclComm_t comm, ncclUniqueId* uniqueId);
+ncclResult_t ncclCommGetUniqueId_impl(ncclComm_t comm, ncclUniqueId* uniqueId) {
+  Recorder::instance().record(rrOtherCall, comm);
+  NCCLCHECK(CommCheck(comm, "CommGetUniqueId", "comm"));
+  NCCLCHECK(ncclCommEnsureReady(comm));
+  NCCLCHECK(PtrCheck(uniqueId, "CommGetUniqueId", "uniqueId"));
+
+  struct ncclBootstrapHandle growHandle;
+  // Magic = hashCombine(comm->magic, comm->splitCount + 1); creates fresh rendezvous root.
+  NCCLCHECK(bootstrapGetUniqueId(&growHandle, comm));
+  // Distribute to other existing ranks via parent's bootstrap.
+  NCCLCHECK(bcastGrowHandle(&growHandle, comm, /*isRoot=*/true));
+
+  memset(uniqueId, 0, sizeof(ncclUniqueId));
+  memcpy(uniqueId, &growHandle, sizeof(growHandle));
+  TRACE_CALL("ncclCommGetUniqueId(comm=%p, 0x%llx)", comm,
+             (unsigned long long)getHash(uniqueId->internal, NCCL_UNIQUE_ID_BYTES));
+  return ncclSuccess;
+}
+
+NCCL_API(ncclResult_t, ncclCommGrow, ncclComm_t comm, int nRanks, const ncclUniqueId* uniqueId, int rank, ncclComm_t* newcomm, ncclConfig_t* config);
+ncclResult_t ncclCommGrow_impl(ncclComm_t comm, int nRanks, const ncclUniqueId* uniqueId, int rank, ncclComm_t* newcomm, ncclConfig_t* config) {
+  Recorder::instance().record(rrOtherCall, comm);
+  ncclResult_t res = ncclSuccess;
+  bool isExistingRank = (comm != NULL);
+  struct ncclCommInitRankAsyncJob* job = NULL;
+  ncclComm_t newComm = NULL;
+  struct ncclBootstrapHandle recvHandle;
+  int cudaDev = -1;
+
+  // Argument validation up front, before any group/state changes.
+  if (newcomm == NULL) return ncclInvalidArgument;
+  *newcomm = NULL;
+  if (nRanks <= 0) {
+    WARN("ncclCommGrow: total ranks must be positive, got %d", nRanks);
+    return ncclInvalidArgument;
+  }
+  if (comm != NULL && nRanks <= comm->nRanks) {
+    WARN("ncclCommGrow: total ranks %d is less than current ranks %d", nRanks, comm->nRanks);
+    return ncclInvalidArgument;
+  }
+
+  NCCLCHECK(ncclGroupStartInternal());
+
+  if (isExistingRank) {
+    NCCLCHECKGOTO(CommCheck(comm, "ncclCommGrow", "comm"), res, exit);
+    NCCLCHECKGOTO(ncclCommEnsureReady(comm), res, exit);
+    if (rank != -1) {
+      WARN("ncclCommGrow: existing ranks must pass rank=-1, got %d", rank);
+      res = ncclInvalidArgument;
+      goto exit;
+    }
+
+    // Bump splitCount before deriving so every existing rank computes the
+    // same post-increment magic that bootstrapGetUniqueId stamped pre-bump.
+    // (NCCL increments childCount; same role.)
+    ++comm->splitCount;
+
+    if (uniqueId != NULL) {
+      // Root caller of ncclCommGetUniqueId — handle already in hand.
+      memcpy(&recvHandle, uniqueId, sizeof(recvHandle));
+    } else {
+      // Non-root existing rank: receive the handle and verify the magic
+      // matches what the root computed deterministically.
+      NCCLCHECKGOTO(bcastGrowHandle(&recvHandle, comm, /*isRoot=*/false), res, exit);
+      uint64_t expectedMagic = hashCombine(comm->magic, (uint64_t)comm->splitCount);
+      if (recvHandle.magic != expectedMagic) {
+        WARN("ncclCommGrow: magic mismatch from root, got 0x%lx expected 0x%lx",
+             (unsigned long)recvHandle.magic, (unsigned long)expectedMagic);
+        res = ncclInvalidArgument;
+        goto exit;
+      }
+      uniqueId = (const ncclUniqueId*)&recvHandle;
+    }
+  } else {
+    // === New rank path ===
+    if (rank < 0) {
+      WARN("ncclCommGrow: new ranks must pass valid rank >= 0, got %d", rank);
+      res = ncclInvalidArgument;
+      goto exit;
+    }
+    if (uniqueId == NULL) {
+      WARN("ncclCommGrow: new ranks must pass non-NULL uniqueId");
+      res = ncclInvalidArgument;
+      goto exit;
+    }
+    if (rank >= nRanks) {
+      WARN("ncclCommGrow: new rank %d exceeds total ranks %d", rank, nRanks);
+      res = ncclInvalidArgument;
+      goto exit;
+    }
+    rocmLibraryInit();
+    NCCLCHECKGOTO(ncclInit(), res, exit);
+    CUDACHECKGOTO(cudaGetDevice(&cudaDev), res, exit);
+    CUDACHECKGOTO(cudaFree(NULL), res, exit);
+  }
+
+  INFO(NCCL_INIT, "ncclCommGrow: %s rank creating new communicator with %d total ranks",
+       isExistingRank ? "existing" : "new", nRanks);
+
+  // Allocate a fresh comm for the grown communicator.
+  NCCLCHECKGOTO(ncclCalloc(&newComm, 1), res, fail);
+  newComm->startMagic = newComm->endMagic = NCCL_MAGIC;
+  NCCLCHECKGOTO(ncclCalloc(&newComm->abortFlag, 1), res, fail);
+  NCCLCHECKGOTO(ncclCudaHostCalloc(&newComm->abortFlagDev, 1), res, fail);
+  NCCLCHECKGOTO(ncclCalloc(&newComm->abortFlagRefCount, 1), res, fail);
+  *newComm->abortFlagRefCount = 1;
+
+  // Inherit parent config when an existing rank passes config==NULL; otherwise parse.
+  if (isExistingRank && config == NULL) {
+    NCCLCHECKGOTO(copyCommConfig(newComm, comm), res, fail);
+  } else {
+    NCCLCHECKGOTO(parseCommConfig(newComm, config), res, fail);
+  }
+
+  newComm->initState = ncclInProgress;
+  *newcomm = newComm;
+
+  NCCLCHECKGOTO(ncclCalloc(&job, 1), res, fail);
+  snprintf(job->funcName, NCCL_COMMINIT_FUNCNAME_LEN, "ncclCommGrow");
+  job->comm    = newComm;
+  job->newcomm = newcomm;
+  job->nranks  = nRanks;
+  job->isGrow  = true;
+  // RCCL deviation from NCCL: every existing rank carries the handle (because
+  // RCCL's bootstrapInit currently always rendezvous through it). NCCL passes
+  // nId=0 for non-boundary existing ranks. See bcastGrowHandle docs.
+  if (uniqueId != NULL) {
+    NCCLCHECKGOTO(ncclCalloc(&job->commId, 1), res, fail);
+    memcpy(job->commId, uniqueId, sizeof(ncclUniqueId));
+    job->nId = 1;
+  } else {
+    job->nId = 0;
+  }
+  if (isExistingRank) {
+    job->parent     = comm;
+    job->cudaDev    = comm->cudaDev;
+    job->myrank     = comm->rank;   // existing rank keeps its index
+    job->splitCount = comm->splitCount;
+  } else {
+    job->parent  = NULL;
+    job->cudaDev = cudaDev;
+    job->myrank  = rank;
+  }
+
+  // Pass the freshly-allocated newComm (not the parent): ncclAsyncLaunch
+  // dereferences this argument for destroyFlag/abortFlag, and for new-rank
+  // callers the parent is NULL. Mirrors ncclCommInitRankDev.
+  NCCLCHECKGOTO(ncclAsyncLaunch((struct ncclAsyncJob*)job, ncclCommInitRankFunc,
+                                /*undo=*/NULL, ncclCommInitJobFree, newComm), res, fail);
+
+exit:
+  (void)ncclGroupErrCheck(res);
+  NCCLCHECK(ncclGroupEndInternal());
+  return res;
+fail:
+  if (newComm) {
+    if (newComm->abortFlag) free(newComm->abortFlag);
+    if (newComm->abortFlagDev) (void)ncclCudaHostFree((void*)newComm->abortFlagDev);
+    if (newComm->abortFlagRefCount) free(newComm->abortFlagRefCount);
+    free(newComm);
+  }
+  if (newcomm) *newcomm = NULL;
+  goto exit;
 }
 
 NCCL_API(ncclResult_t, ncclCommSplit, ncclComm_t comm, int color, int key, ncclComm_t *newcomm, ncclConfig_t *config);
