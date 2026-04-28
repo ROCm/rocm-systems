@@ -5,10 +5,9 @@ myst:
     "keywords": "api, cuid, c, header, compute, unit, id, amd"
 ---
 
-# AMD CUID C API reference
+# CUID API library
 
-This section provides documentation for the AMD CUID C API defined in
-`amd_cuid.h`.
+Here are the files, globals, and data structures defined in `amd_cuid.h`:
 
 - {doc}`Files <../doxygen/docBin/html/files>`
 

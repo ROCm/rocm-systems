@@ -45,7 +45,9 @@ To build and install the CUID library from source, follow these steps:
     cmake ..
     make -j $(nproc)
 
-   Note that the default install directory is ``/opt/rocm/core``. However, you can choose a different directory using the ``-DCMAKE_INSTALL_PREFIX`` option:
+   .. note::
+
+      The default install directory is ``/opt/rocm/core``. However, you can choose a different directory using the ``-DCMAKE_INSTALL_PREFIX`` option.
 
 3. Configure the Daemon mode by setting the ``daemonize`` variable in the ``amdcuid_daemon.conf`` file in the ``daemon`` directory. Setting the ``daemonize`` variable to ``true`` installs a ``systemd`` service and a set of ``udev`` rules to detect devices and generate CUIDs for them automatically. Whereas, setting ``daemonize`` to ``false`` installs a cron job, which detects devices only during system boot and generates CUIDs for the devices found during system boot. The default setting is ``false``.
 

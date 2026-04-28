@@ -65,7 +65,7 @@ Depending on the device type, different device attributes (present in the CUID f
 
 - **PLATFORM:** The platform doesn't necessitate a key for association. Therefore, only the derived CUID is listed.
 
-Note that the attribute ``last_update`` represents the Unix timestamp for the last modification of the device's ``derived_cuid``.
+The attribute ``last_update`` represents the Unix timestamp for the last modification of the device's ``derived_cuid``.
 
 Privileged CUID file with primary CUIDs
 ========================================
