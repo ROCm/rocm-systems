@@ -57,6 +57,8 @@ set(_sampling_test_sources
     unit/emit_resolved_hook_test.cpp
     # TDD tests for ROCPROFSYS_SAMPLING_TRACE_LEGACY config accessor (Task #26).
     unit/sampling_trace_legacy_test.cpp
+    # NFR-T-7: golden-file byte-exact diff for native_report_writer TSV output (Task #14).
+    unit/native_report_writer_golden_test.cpp
 )
 
 # Linux-only smoke tests for real OS-backed implementations.
