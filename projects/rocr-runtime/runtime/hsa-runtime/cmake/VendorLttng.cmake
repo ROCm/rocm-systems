@@ -133,3 +133,33 @@ ExternalProject_Add(lttng_ust_vendored
                       "${_lttng_libdir}/liblttng-ust-common.so"
                       "${_lttng_libdir}/liblttng-ust-tracepoint.so"
                       "${LTTNG_VENDORED_PKGCONFIG}/lttng-ust.pc")
+
+# ---------------------------------------------------------------------
+# Post-install RPATH rewrite
+# ---------------------------------------------------------------------
+# autotools' libtool unconditionally bakes the build-tree --libdir as
+# RPATH on every installed .so. That path won't exist when the package
+# is installed to /opt/rocm/lib/lttng/. Rewrite each .so's RPATH to
+# $ORIGIN so the loader resolves intra-vendored references via the
+# installed directory itself.
+find_program(LTTNG_VENDORED_PATCHELF patchelf)
+if(NOT LTTNG_VENDORED_PATCHELF)
+    message(FATAL_ERROR
+        "patchelf is required to vendor LTTng-UST: the libtool-relinked "
+        "shared libraries have a build-tree RPATH baked in, and that "
+        "path will not exist at runtime once the package is installed. "
+        "patchelf rewrites the RPATH to $ORIGIN. Install patchelf and "
+        "re-run cmake (Debian/Ubuntu: apt-get install patchelf).")
+endif()
+
+# Wrap the install step with a CMake script that, after `make install`,
+# walks every .so and sets RPATH to $ORIGIN. We use ExternalProject's
+# step mechanism so this is part of the normal build dependency graph
+# and re-runs whenever the install step re-runs.
+ExternalProject_Add_Step(lttng_ust_vendored rpath_rewrite
+    COMMAND ${CMAKE_COMMAND}
+            -DLIB_DIR=${_lttng_libdir}
+            -DPATCHELF=${LTTNG_VENDORED_PATCHELF}
+            -P ${CMAKE_CURRENT_LIST_DIR}/VendorLttngRpath.cmake
+    DEPENDEES install
+    COMMENT   "Rewriting RPATH on vendored lttng-ust + urcu .so files to \$ORIGIN")
