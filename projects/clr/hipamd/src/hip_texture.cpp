@@ -144,6 +144,19 @@ hipError_t ihipCreateTextureObject(hipTextureObject_t* pTexObject, const hipReso
     return hipErrorInvalidValue;
   }
 
+  // CUDA divergence: CUDA supports normalizedCoords and linear filtering with
+  // Pitch2D resources natively. AMD GPU texture units require tiled memory layouts
+  // for these features, so Pitch2D (linear layout) is incompatible.
+  if (pResDesc->resType == hipResourceTypePitch2D) {
+    if (pTexDesc->normalizedCoords || pTexDesc->filterMode == hipFilterModeLinear) {
+      LogPrintfError(
+          "Pitch2D resources do not support normalizedCoords or linear filtering "
+          "on this platform (normalizedCoords=%d, filterMode=%d)",
+          pTexDesc->normalizedCoords, pTexDesc->filterMode);
+      return hipErrorNotSupported;
+    }
+  }
+
   // We don't program the max_ansio_ratio field in the the HW sampler SRD.
   if (pTexDesc->maxAnisotropy != 0) {
     return hipErrorNotSupported;
