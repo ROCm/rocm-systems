@@ -312,6 +312,21 @@
           "test_filter": "EnqueueCountTests.*"
         },
         {
+          "name": "DeviceOp128_PtrLoadStore",
+          "description": "Pointer-based volatile, relaxed, and acquire/release global load/store roundtrips",
+          "test_filter": "PackRoundtripTest.LdStVolatileGlobalPtr:PackRoundtripTest.LdStRelaxedSysGlobal:PackRoundtripTest.LdStAcquireReleaseSysGlobal:PackRoundtripTest.L2_VolatileGlobalPtr_MultiElement:PackRoundtripTest.CvtaFromGlobal"
+        },
+        {
+          "name": "DeviceOp128_SharedMem",
+          "description": "Shared memory pointer cast, 128-bit load/store, and misaligned load paths",
+          "test_filter": "PackRoundtripTest.ShmemCvtPtr:PackRoundtripTest.LoadStoreShmem128:PackRoundtripTest.LoadShmemMisaligned128_*"
+        },
+        {
+          "name": "DeviceOp128_LoadStorePack",
+          "description": "loadPack/storePack three internal paths (direct cast, funnel-shift, element-by-element) and boundary",
+          "test_filter": "PackRoundtripTest.LoadStorePack_*:PackRoundtripTest.L2_StorePackBoundary:PackRoundtripTest.Store16Load16Global_Direct"
+        },
+        {
           "name": "Fixtures_All",
           "description": "All release fixture tests"
         }
@@ -374,13 +389,6 @@
           "name": "XmlTest",
           "description": "XML topology parsing tests",
           "test_filter": "XmlTest.*"
-        },
-        {
-          "name": "FixturesDebug_All",
-          "description": "All debug fixture tests",
-          "env_variables": {
-            "NCCL_DEBUG": "TRACE"
-          }
         }
       ]
     },

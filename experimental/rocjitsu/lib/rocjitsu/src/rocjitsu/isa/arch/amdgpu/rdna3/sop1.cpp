@@ -65,8 +65,7 @@ SCmovB32Sop1::SCmovB32Sop1(const MachineInst *inst)
 }
 
 void SCmovB32Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  if (wf.read_scc())
-    sdst.write_scalar(wf, ssrc0.read_scalar(wf));
+  amdgpu::execute_s_cmov_b32_sop1(*this, wf);
 }
 
 SCmovB64Sop1::SCmovB64Sop1(const MachineInst *inst)
@@ -85,8 +84,7 @@ SCmovB64Sop1::SCmovB64Sop1(const MachineInst *inst)
 }
 
 void SCmovB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  if (wf.read_scc())
-    sdst.write_scalar64(wf, ssrc0.read_scalar64(wf));
+  amdgpu::execute_s_cmov_b64_sop1(*this, wf);
 }
 
 SBrevB32Sop1::SBrevB32Sop1(const MachineInst *inst)
@@ -252,9 +250,7 @@ SSextI32I8Sop1::SSextI32I8Sop1(const MachineInst *inst)
 }
 
 void SSextI32I8Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  uint32_t val = ssrc0.read_scalar(wf);
-  uint32_t result = static_cast<uint32_t>(static_cast<int32_t>(static_cast<int8_t>(val & 0xFF)));
-  sdst.write_scalar(wf, result);
+  amdgpu::execute_s_sext_i32_i8_sop1(*this, wf);
 }
 
 SSextI32I16Sop1::SSextI32I16Sop1(const MachineInst *inst)
@@ -293,9 +289,7 @@ SBitset0B32Sop1::SBitset0B32Sop1(const MachineInst *inst)
 }
 
 void SBitset0B32Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  uint32_t bit = ssrc0.read_scalar(wf);
-  uint32_t result = sdst.read_scalar(wf) & ~(1u << (bit & 31));
-  sdst.write_scalar(wf, result);
+  amdgpu::execute_s_bitset0_b32_sop1(*this, wf);
 }
 
 SBitset0B64Sop1::SBitset0B64Sop1(const MachineInst *inst)
@@ -315,9 +309,7 @@ SBitset0B64Sop1::SBitset0B64Sop1(const MachineInst *inst)
 }
 
 void SBitset0B64Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  uint32_t bit = ssrc0.read_scalar(wf);
-  uint64_t result = sdst.read_scalar64(wf) & ~(1ULL << (bit & 63));
-  sdst.write_scalar64(wf, result);
+  amdgpu::execute_s_bitset0_b64_sop1(*this, wf);
 }
 
 SBitset1B32Sop1::SBitset1B32Sop1(const MachineInst *inst)
@@ -337,9 +329,7 @@ SBitset1B32Sop1::SBitset1B32Sop1(const MachineInst *inst)
 }
 
 void SBitset1B32Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  uint32_t bit = ssrc0.read_scalar(wf);
-  uint32_t result = sdst.read_scalar(wf) | (1u << (bit & 31));
-  sdst.write_scalar(wf, result);
+  amdgpu::execute_s_bitset1_b32_sop1(*this, wf);
 }
 
 SBitset1B64Sop1::SBitset1B64Sop1(const MachineInst *inst)
@@ -359,9 +349,7 @@ SBitset1B64Sop1::SBitset1B64Sop1(const MachineInst *inst)
 }
 
 void SBitset1B64Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  uint32_t bit = ssrc0.read_scalar(wf);
-  uint64_t result = sdst.read_scalar64(wf) | (1ULL << (bit & 63));
-  sdst.write_scalar64(wf, result);
+  amdgpu::execute_s_bitset1_b64_sop1(*this, wf);
 }
 
 SBitreplicateB64B32Sop1::SBitreplicateB64B32Sop1(const MachineInst *inst)

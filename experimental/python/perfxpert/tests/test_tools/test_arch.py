@@ -11,8 +11,19 @@ def test_lookup_peaks_returns_structured_data_for_mi300x():
     assert peaks["name"] == "MI300X"
     assert peaks["peak_fp64_tflops"] == 81.7
     assert peaks["memory_bandwidth_tbs"] == 5.3
+    assert peaks["max_waves_per_simd"] == 8
     assert peaks["ridge_point"] == pytest.approx(30.8, rel=0.01)
     assert peaks["ridge_points"]["fp64"] == pytest.approx(15.4, rel=0.01)
+
+
+def test_lookup_peaks_returns_public_mi350x_values_for_gfx950():
+    peaks = arch.lookup_peaks("gfx950")
+    assert peaks["name"] == "MI350X"
+    assert peaks["peak_fp64_tflops"] == pytest.approx(72.1)
+    assert peaks["peak_fp32_tflops"] == pytest.approx(144.2)
+    assert peaks["memory_bandwidth_tbs"] == pytest.approx(8.0)
+    assert peaks["max_waves_per_simd"] == 8
+    assert peaks["ridge_point"] == pytest.approx(18.0, rel=0.01)
 
 
 def test_lookup_peaks_exposes_runtime_caps_for_occupancy_users():

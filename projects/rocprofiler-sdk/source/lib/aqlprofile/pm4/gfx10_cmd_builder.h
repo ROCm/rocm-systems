@@ -24,8 +24,8 @@
 #define SRC_PM4_GFX10_CMD_BUILDER_H_
 
 #include <assert.h>
-#include "def/gfx10_def.h"
-#include "pm4/cmd_builder.h"
+#include "lib/aqlprofile/def/gfx10_def.h"
+#include "lib/aqlprofile/pm4/cmd_builder.h"
 
 namespace pm4_builder
 {
