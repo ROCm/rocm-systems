@@ -12,6 +12,10 @@ leak:dyninst
 leak:tbb::
 leak:libtbb
 
+# OpenMP runtime (libgomp): worker threads, internal allocators
+leak:libgomp
+leak:gomp_
+
 # Boost - third-party library
 leak:boost::
 

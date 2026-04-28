@@ -208,9 +208,9 @@ jobs:
         run: |
           set -v
           du /tmp -d 1 -h
-          du build/rocprof-sys-tests-output -d 1 -h
+          du build/rocprof-sys-pytest-output -d 1 -h
           df -h
-          rm -fr /tmp/* build/rocprof-sys-tests-output/*
+          rm -fr /tmp/* build/rocprof-sys-pytest-output/*
 
       - name: CTest Artifacts
         if: failure()

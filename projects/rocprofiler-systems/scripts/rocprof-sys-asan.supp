@@ -20,6 +20,9 @@ interceptor_via_lib:libsymtabAPI.so
 # TBB
 interceptor_via_lib:libtbb.so
 
+# OpenMP runtime (libgomp): Dyninst spawns parallel sections internally
+interceptor_via_lib:libgomp.so
+
 # Boost
 interceptor_via_fun:boost::*
 
