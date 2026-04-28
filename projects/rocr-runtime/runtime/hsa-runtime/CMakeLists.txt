@@ -414,8 +414,8 @@ if( BUILD_SHARED_LIBS )
       # Vendored LTTng-UST: built from the lttng-ust + userspace-rcu git
       # submodules under projects/rocr-runtime/external/, installed into
       # the build tree at <build>/_deps/lttng-prefix/, and shipped at
-      # runtime under /opt/rocm/lib/lttng/. libhsa-runtime64 picks them
-      # up via RPATH $ORIGIN/lttng (set below).
+      # runtime under /opt/rocm/lib/ alongside libhsa-runtime64.so.
+      # libhsa-runtime64 picks them up via RPATH $ORIGIN (set below).
       set(LTTNG_VENDORED_URCU_SRC
           "${CMAKE_CURRENT_SOURCE_DIR}/../../external/userspace-rcu")
       set(LTTNG_VENDORED_UST_SRC
@@ -474,22 +474,43 @@ if( BUILD_SHARED_LIBS )
       # RPATH:
       #   BUILD_RPATH   — let in-tree tests find the vendored .so files.
       #   INSTALL_RPATH — at /opt/rocm/lib/libhsa-runtime64.so, the
-      #                   vendored libs sit in /opt/rocm/lib/lttng/.
+      #                   vendored libs sit directly in /opt/rocm/lib/.
       # We append rather than overwrite because rocr-runtime sets RPATH
       # in several places; use APPEND to preserve any prior settings.
       set_property(TARGET ${CORE_RUNTIME_TARGET} APPEND PROPERTY
                    BUILD_RPATH "${LTTNG_VENDORED_LIB_DIR}")
       set_property(TARGET ${CORE_RUNTIME_TARGET} APPEND PROPERTY
-                   INSTALL_RPATH "\$ORIGIN/lttng")
+                   INSTALL_RPATH "\$ORIGIN")
 
-      # Install the vendored .so files alongside libhsa-runtime64.so
-      # under ${CMAKE_INSTALL_LIBDIR}/lttng. The version-suffixed
-      # symlinks are preserved so NEEDED entries that reference e.g.
-      # liblttng-ust.so.1 resolve correctly. NB: when both HIP and HSA
-      # are installed to the same prefix this writes the same files
+      # Stage the vendored .so files into the same build-tree directory
+      # as libhsa-runtime64.so. This is what fixes downstream link
+      # failures (e.g. TheRock CI: rocFFT, rocRoller, rocprofiler-systems
+      # link against -lhsa-runtime64; the linker reads NEEDED entries
+      # like liblttng-ust.so.1 and resolves them via the same -L path
+      # used to find libhsa-runtime64.so). With the vendored .so files
+      # co-located in the build dir, no extra -rpath-link or downstream
+      # coordination is required. Mirrors the installed flat layout.
+      if(NOT WIN32)
+        add_custom_target(stage_vendored_lttng_for_${CORE_RUNTIME_TARGET} ALL
+            DEPENDS lttng_ust_vendored
+            COMMAND ${CMAKE_COMMAND} -E make_directory
+                    "$<TARGET_FILE_DIR:${CORE_RUNTIME_TARGET}>"
+            COMMAND sh -c "cp -P '${LTTNG_VENDORED_LIB_DIR}'/liblttng*.so* '${LTTNG_VENDORED_LIB_DIR}'/liburcu*.so* '$<TARGET_FILE_DIR:${CORE_RUNTIME_TARGET}>/' 2>/dev/null || true"
+            COMMENT "Staging vendored LTTng-UST .so files into ${CORE_RUNTIME_TARGET} build dir"
+            VERBATIM)
+        add_dependencies(${CORE_RUNTIME_TARGET} stage_vendored_lttng_for_${CORE_RUNTIME_TARGET})
+      endif()
+
+      # Install the vendored .so files directly under ${CMAKE_INSTALL_LIBDIR}
+      # alongside libhsa-runtime64.so (no lttng/ subdirectory). This lets
+      # downstream consumers that link -lhsa-runtime64 also resolve the
+      # NEEDED liblttng-ust.so.1 etc. via the same -L path. The version-
+      # suffixed symlinks are preserved so NEEDED entries that reference
+      # e.g. liblttng-ust.so.1 resolve correctly. NB: when both HIP and
+      # HSA are installed to the same prefix this writes the same files
       # twice; CMake's install rule is idempotent so that is harmless.
       install(DIRECTORY ${LTTNG_VENDORED_LIB_DIR}/
-              DESTINATION ${CMAKE_INSTALL_LIBDIR}/lttng
+              DESTINATION ${CMAKE_INSTALL_LIBDIR}
               COMPONENT binary
               USE_SOURCE_PERMISSIONS
               FILES_MATCHING

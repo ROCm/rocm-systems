@@ -54,14 +54,17 @@ if(HIP_PLATFORM STREQUAL "amd" )
               COMPONENT ${COMPONENT_NAME})
 
    # Vendored LTTng-UST + userspace-rcu .so files. libamdhip64 finds
-   # these at runtime via RPATH $ORIGIN/lttng; without them in the
-   # package, the loader would fall back to a system lttng-ust (or
-   # fail). LTTNG_VENDORED_LIB_DIR is set by the include() of
-   # cmake/VendorLttng.cmake from hipamd/src/CMakeLists.txt — only
-   # populated when HIP_ENABLE_LTTNG_UST=ON, hence the guard.
+   # these at runtime via RPATH $ORIGIN; without them in the package,
+   # the loader would fall back to a system lttng-ust (or fail).
+   # Installed flat under ${CMAKE_INSTALL_LIBDIR} (no lttng/ subdir) so
+   # downstream consumers that link -lamdhip64 also resolve the NEEDED
+   # liblttng-ust.so.1 etc. via the same -L path. LTTNG_VENDORED_LIB_DIR
+   # is set by the include() of cmake/VendorLttng.cmake from
+   # hipamd/src/CMakeLists.txt — only populated when
+   # HIP_ENABLE_LTTNG_UST=ON, hence the guard.
    if(HIP_ENABLE_LTTNG_UST AND DEFINED LTTNG_VENDORED_LIB_DIR)
       install(DIRECTORY ${LTTNG_VENDORED_LIB_DIR}/
-              DESTINATION ${CMAKE_INSTALL_LIBDIR}/lttng
+              DESTINATION ${CMAKE_INSTALL_LIBDIR}
               COMPONENT ${COMPONENT_NAME}
               USE_SOURCE_PERMISSIONS
               FILES_MATCHING
@@ -193,10 +196,10 @@ if(HIP_ENABLE_ROCPROFILER_REGISTER)
 endif()
 
 # LTTng-UST runtime libraries are now bundled inside the package under
-# ${CMAKE_INSTALL_LIBDIR}/lttng/ (see hipamd/src/CMakeLists.txt install
-# rule). libamdhip64.so resolves liblttng-ust.so.1 there via RPATH
-# $ORIGIN/lttng, so the .deb/.rpm no longer requires the host distro's
-# lttng-ust package to be installed.
+# ${CMAKE_INSTALL_LIBDIR}/ alongside libamdhip64.so (see
+# hipamd/packaging/CMakeLists.txt install rule above). libamdhip64.so
+# resolves liblttng-ust.so.1 there via RPATH $ORIGIN, so the .deb/.rpm
+# no longer requires the host distro's lttng-ust package to be installed.
 
 set(HIP_RUNTIME_DEB_STDPKG_DEPENDENCIES "libnuma1, libstdc++6, libc6")
 

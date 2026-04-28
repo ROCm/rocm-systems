@@ -4,7 +4,7 @@
 # autotools/libtool unconditionally embeds --libdir as the RPATH of
 # every installed .so. That path is the in-tree build prefix
 # (<build>/_deps/lttng-prefix/lib), which will not exist at runtime
-# when the libraries are repackaged under /opt/rocm/lib/lttng/.
+# when the libraries are repackaged under /opt/rocm/lib/.
 #
 # This script walks every .so in the vendored libdir and rewrites the
 # RPATH to $ORIGIN so the loader resolves transitive vendored deps

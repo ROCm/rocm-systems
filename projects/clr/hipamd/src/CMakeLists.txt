@@ -337,8 +337,8 @@ if(HIP_ENABLE_LTTNG_UST)
     # Vendored LTTng-UST: built from the lttng-ust + userspace-rcu git
     # submodules under projects/clr/external/, installed into the build
     # tree at <build>/_deps/lttng-prefix/, and shipped at runtime under
-    # /opt/rocm/lib/lttng/ (libamdhip64 picks them up via RPATH
-    # $ORIGIN/lttng — see set_target_properties below).
+    # /opt/rocm/lib/ alongside libamdhip64.so (libamdhip64 picks them
+    # up via RPATH $ORIGIN — see set_target_properties below).
     set(LTTNG_VENDORED_URCU_SRC "${CMAKE_CURRENT_LIST_DIR}/../../external/userspace-rcu")
     set(LTTNG_VENDORED_UST_SRC  "${CMAKE_CURRENT_LIST_DIR}/../../external/lttng-ust")
     include(${CMAKE_CURRENT_LIST_DIR}/../cmake/VendorLttng.cmake)
@@ -375,11 +375,31 @@ if(HIP_ENABLE_LTTNG_UST)
     #   BUILD_RPATH   — let in-tree tests find the vendored .so files at
     #                   <build>/_deps/lttng-prefix/lib/.
     #   INSTALL_RPATH — at /opt/rocm/lib/libamdhip64.so, the vendored
-    #                   libs sit in /opt/rocm/lib/lttng/. The literal
-    #                   $ORIGIN expands to /opt/rocm/lib at runtime.
+    #                   libs sit directly in /opt/rocm/lib/ (no lttng/
+    #                   subdir). The literal $ORIGIN expands to
+    #                   /opt/rocm/lib at runtime.
     set_target_properties(amdhip64 PROPERTIES
         BUILD_RPATH   "${LTTNG_VENDORED_LIB_DIR}"
-        INSTALL_RPATH "\$ORIGIN/lttng:\$ORIGIN")
+        INSTALL_RPATH "\$ORIGIN")
+
+    # Stage the vendored .so files into the same build-tree directory as
+    # libamdhip64.so. This is what fixes downstream link failures (e.g.
+    # TheRock CI: rocFFT, rocRoller, rocprofiler-systems link against
+    # -lamdhip64 / -lhsa-runtime64; the linker reads NEEDED entries like
+    # liblttng-ust.so.1 and resolves them via the same -L path used to
+    # find libamdhip64.so). With the vendored .so files co-located in
+    # the build dir, no extra -rpath-link or downstream coordination is
+    # required. Mirrors the installed flat layout under /opt/rocm/lib/.
+    if(NOT WIN32)
+        add_custom_target(stage_vendored_lttng_for_amdhip64 ALL
+            DEPENDS lttng_ust_vendored
+            COMMAND ${CMAKE_COMMAND} -E make_directory
+                    "$<TARGET_FILE_DIR:amdhip64>"
+            COMMAND sh -c "cp -P '${LTTNG_VENDORED_LIB_DIR}'/liblttng*.so* '${LTTNG_VENDORED_LIB_DIR}'/liburcu*.so* '$<TARGET_FILE_DIR:amdhip64>/' 2>/dev/null || true"
+            COMMENT "Staging vendored LTTng-UST .so files into amdhip64 build dir"
+            VERBATIM)
+        add_dependencies(amdhip64 stage_vendored_lttng_for_amdhip64)
+    endif()
 
     # NB: install rule for the vendored .so files lives in
     # hipamd/packaging/CMakeLists.txt under COMPONENT binary so the

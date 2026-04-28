@@ -522,7 +522,7 @@ ExternalProject_Add(urcu_vendored
 # bypasses pkg-config. The -Wl,-rpath embeds the vendored prefix into
 # the temporary build artefacts so internal test programs link cleanly;
 # the final installed .so files have RPATH stripped/replaced when the
-# top-level package install rule copies them to /opt/rocm/lib/lttng/.
+# top-level package install rule copies them to /opt/rocm/lib/.
 # bootstrap + configure run under one shell so ACLOCAL_PATH applies to
 # bootstrap and the build flags apply to configure.
 ExternalProject_Add(lttng_ust_vendored
@@ -557,7 +557,7 @@ ExternalProject_Add(lttng_ust_vendored
 # ---------------------------------------------------------------------
 # autotools' libtool unconditionally bakes the build-tree --libdir as
 # RPATH on every installed .so. That path won't exist when the package
-# is installed to /opt/rocm/lib/lttng/. Rewrite each .so's RPATH to
+# is installed to /opt/rocm/lib/. Rewrite each .so's RPATH to
 # $ORIGIN so the loader resolves intra-vendored references via the
 # installed directory itself.
 find_program(LTTNG_VENDORED_PATCHELF patchelf)
