@@ -49,7 +49,7 @@ namespace rocshmem {
     virtual __host__ __device__ char* get_ptr() = 0;
     virtual __host__ __device__ size_t get_size() = 0;
 
-    HIPAllocatorType type_;
+    AllocatorType type_;
   };
 
 
@@ -81,10 +81,8 @@ class HeapMemoryType : public HeapMemory {
      */
     ptr_ = up_.get();
 
-    // Get type from the actual HIPAllocator
-    // Safe since we know allocator is always HIPAllocator or derived
-    const HIPAllocator* hip_alloc = static_cast<const HIPAllocator*>(&allocator_);
-    type_ = hip_alloc->type;
+    // Get allocator type from the base class without unsafe casting
+    type_ = allocator_.get_type();
   }
 
   /**
