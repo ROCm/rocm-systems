@@ -1509,9 +1509,8 @@ hsa_status_t HSA_API hsa_amd_queue_iterate(
 }
 
 hsa_status_t HSA_API hsa_amd_profiling_get_dispatch_records(
-    hsa_queue_t* queue, void** buffer_base, uint32_t* buffer_size, volatile uint32_t** write_ptr) { const uint64_t __rocm_corr = rocm_trace_next_corr_id(); rocm_trace_emit_hsa_api_enter(__func__, __rocm_corr);
-  ROCR_TRACE_API_RET_STATUS(amdExtTable->hsa_amd_profiling_get_dispatch_records_fn(queue, buffer_base, buffer_size,
-                                                                                   write_ptr));
+    hsa_queue_t* queue, void** buffer_base, uint32_t* buffer_size) { const uint64_t __rocm_corr = rocm_trace_next_corr_id(); rocm_trace_emit_hsa_api_enter(__func__, __rocm_corr);
+  ROCR_TRACE_API_RET_STATUS(amdExtTable->hsa_amd_profiling_get_dispatch_records_fn(queue, buffer_base, buffer_size));
 }
 
 // Tools only table interfaces.

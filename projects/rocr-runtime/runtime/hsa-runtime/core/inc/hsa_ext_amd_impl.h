@@ -69,8 +69,7 @@ hsa_status_t hsa_amd_queue_iterate(hsa_status_t (*callback)(hsa_queue_t* queue, 
                                    void* data);
 
 hsa_status_t hsa_amd_profiling_get_dispatch_records(hsa_queue_t* queue, void** buffer_base,
-                                                    uint32_t* buffer_size,
-                                                    volatile uint32_t** write_ptr);
+                                                    uint32_t* buffer_size);
 
 // Mirrors Amd Extension Apis
 hsa_status_t

@@ -213,12 +213,15 @@ class AqlQueue : public core::Queue, private core::LocalSignal, public core::Doo
   hsa_status_t SetProfiling(bool enabled) override;
 
   /// @brief Get the per-queue MEC dispatch-record ring buffer info.
-  /// @details Returns the ring buffer base, total size in bytes, and a
-  /// pointer to the firmware-written wptr. Returns
+  /// @details Returns the ring buffer base and total size in bytes. The
+  /// substrate does NOT publish a host-visible firmware write pointer;
+  /// consumers must locate freshly-written records by scanning the ring
+  /// for a non-zero @c record_type sentinel (see
+  /// core/runtime/dispatch_log.cpp::drain_one_queue). Returns
   /// HSA_STATUS_ERROR_NOT_INITIALIZED if profiling has not been enabled
   /// on this queue.
-  hsa_status_t GetProfilingDispatchRecords(void** buffer_base, uint32_t* buffer_size,
-                                           volatile uint32_t** write_ptr) const;
+  hsa_status_t GetProfilingDispatchRecords(void** buffer_base,
+                                           uint32_t* buffer_size) const;
 
   /// @brief Update signal value using Relaxed semantics
   void StoreRelaxed(hsa_signal_value_t value) override;
@@ -388,9 +391,13 @@ class AqlQueue : public core::Queue, private core::LocalSignal, public core::Doo
   // == 16) to satisfy the host kernel's BO size validation in
   // kfd_process_queue_manager.c (`buf_byte_size = count * 40`). The MEC firmware
   // only writes 16 bytes per slot; the trailing 24 bytes per slot are unused.
+  // The host-side wptr that the cpc_tracing precedent allocated has been
+  // dropped: the substrate has no path to publish that address to FW (KFD
+  // ABI lacks a wptr_addr field), so consumers locate fresh records via
+  // sentinel scan over per-slot record_type — see
+  // core/runtime/dispatch_log.cpp::drain_one_queue.
   void* dispatch_record_buffer_ = nullptr;
   uint32_t dispatch_record_buffer_size_ = 0;     // record count (NOT bytes)
-  mutable volatile uint32_t dispatch_record_wptr_ = 0;
 
   // Shared event used for queue errors
   static __forceinline HsaEvent*& queue_event() {

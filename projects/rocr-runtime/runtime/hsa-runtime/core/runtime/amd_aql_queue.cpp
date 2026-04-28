@@ -365,7 +365,6 @@ AqlQueue::~AqlQueue() {
     agent_->system_deallocator()(dispatch_record_buffer_);
     dispatch_record_buffer_ = nullptr;
     dispatch_record_buffer_size_ = 0;
-    dispatch_record_wptr_ = 0;
   }
 
   // Remove this queue from the agent's AQL queue registry and clear the
@@ -1625,9 +1624,14 @@ hsa_status_t AqlQueue::SetProfiling(bool enabled) {
       Queue::SetProfiling(false);
       return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
     }
+    // The host kernel does NOT zero the dispatch-record BO (see
+    // amd/amdkfd/kfd_process_queue_manager.c — it only validates the
+    // user-supplied size and pins the BO). The drainer relies on
+    // record_type == 0 as the per-slot "empty" sentinel
+    // (core/runtime/dispatch_log.cpp::drain_one_queue), so we must
+    // explicitly zero the entire allocation here before exposing it to FW.
     memset(dispatch_record_buffer_, 0, buf_size);
     dispatch_record_buffer_size_ = num_records;
-    dispatch_record_wptr_ = 0;
 
     // C3: propagate libhsakmt registration failures. KfdDriver::
     // SetQueueProfilingBuffer can return HSA_STATUS_ERROR_NOT_SUPPORTED
@@ -1635,13 +1639,18 @@ hsa_status_t AqlQueue::SetProfiling(bool enabled) {
     // partial state — free the buffer, reset cached fields, AND (C4)
     // roll back the profiling-bit flip — so the queue is left exactly
     // as it was before the enable attempt.
+    //
+    // The trailing nullptr argument is the libhsakmt WptrHostAddr param.
+    // It is intentionally unused — the substrate has no path to forward
+    // it to FW (see libhsakmt/src/queues.c::hsaKmtSetQueueProfilingBuffer
+    // and core/runtime/dispatch_log.cpp::drain_one_queue for the
+    // sentinel-scan design that replaces it).
     hsa_status_t buf_status = agent_->driver().SetQueueProfilingBuffer(
-        queue_id_, dispatch_record_buffer_, num_records, &dispatch_record_wptr_);
+        queue_id_, dispatch_record_buffer_, num_records, nullptr);
     if (buf_status != HSA_STATUS_SUCCESS) {
       agent_->system_deallocator()(dispatch_record_buffer_);
       dispatch_record_buffer_ = nullptr;
       dispatch_record_buffer_size_ = 0;
-      dispatch_record_wptr_ = 0;
       Queue::SetProfiling(false);  // C4: roll back bit
       return buf_status;
     }
@@ -1688,7 +1697,6 @@ hsa_status_t AqlQueue::SetProfiling(bool enabled) {
     agent_->system_deallocator()(dispatch_record_buffer_);
     dispatch_record_buffer_ = nullptr;
     dispatch_record_buffer_size_ = 0;
-    dispatch_record_wptr_ = 0;
     return buf_status;
   }
 
@@ -1701,22 +1709,15 @@ hsa_status_t AqlQueue::SetProfiling(bool enabled) {
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t AqlQueue::GetProfilingDispatchRecords(void** buffer_base, uint32_t* buffer_size,
-                                                   volatile uint32_t** write_ptr) const {
+hsa_status_t AqlQueue::GetProfilingDispatchRecords(void** buffer_base,
+                                                   uint32_t* buffer_size) const {
   if (!dispatch_record_buffer_) return HSA_STATUS_ERROR_NOT_INITIALIZED;
   *buffer_base = dispatch_record_buffer_;
   // Report the FW-record-stride sized capacity (16 bytes per record), NOT the
-  // host-kernel oversized allocation. The drainer iterates 16-byte records.
+  // host-kernel oversized allocation. The drainer iterates 16-byte records
+  // and uses sentinel scan over per-slot record_type to locate fresh records
+  // (see core/runtime/dispatch_log.cpp::drain_one_queue).
   *buffer_size = dispatch_record_buffer_size_ * static_cast<uint32_t>(sizeof(mec_dispatch_record));
-  // KNOWN GAP (see core/inc/dispatch_log.h banner + spec §10 dep #2
-  // sub-bullet): this returns a HOST-SIDE address that firmware does NOT
-  // update on the current substrate. The address is plumbed through
-  // KfdDriver::SetQueueProfilingBuffer -> hsaKmtSetQueueProfilingBuffer,
-  // but libhsakmt discards it and the KFD ABI
-  // (kfd_ioctl_update_queue_args) has no wptr_addr field to forward it on
-  // to firmware. Consumers must understand that *write_ptr will stay 0
-  // until a substrate extension publishes wptr to FW.
-  *write_ptr = &dispatch_record_wptr_;
   return HSA_STATUS_SUCCESS;
 }
 

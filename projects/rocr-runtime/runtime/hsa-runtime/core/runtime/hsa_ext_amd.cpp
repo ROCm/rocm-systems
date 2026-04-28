@@ -684,17 +684,15 @@ hsa_status_t hsa_amd_queue_iterate(hsa_status_t (*callback)(hsa_queue_t* queue, 
 }
 
 hsa_status_t hsa_amd_profiling_get_dispatch_records(hsa_queue_t* queue, void** buffer_base,
-                                                    uint32_t* buffer_size,
-                                                    volatile uint32_t** write_ptr) {
+                                                    uint32_t* buffer_size) {
   TRY;
   IS_OPEN();
-  if (!queue || !buffer_base || !buffer_size || !write_ptr)
+  if (!queue || !buffer_base || !buffer_size)
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   core::Queue* cmd_queue = core::Queue::Convert(queue);
   IS_VALID(cmd_queue);
   if (!AqlQueue::IsType(cmd_queue)) return HSA_STATUS_ERROR_INVALID_QUEUE;
-  return static_cast<AqlQueue*>(cmd_queue)->GetProfilingDispatchRecords(buffer_base, buffer_size,
-                                                                        write_ptr);
+  return static_cast<AqlQueue*>(cmd_queue)->GetProfilingDispatchRecords(buffer_base, buffer_size);
   CATCH;
 }
 

@@ -4754,9 +4754,11 @@ hsa_status_t HSA_API hsa_amd_queue_iterate(
  *
  * @param[out] buffer_size Size of the ring buffer in bytes.
  *
- * @param[out] write_ptr Pointer to the firmware write index (record count,
- * monotonically incrementing). The caller computes the slot as
- * @c *write_ptr % (buffer_size / record_size).
+ * The substrate does NOT publish a host-visible firmware write pointer.
+ * Consumers must locate freshly-written records by scanning the ring for
+ * a non-zero @c record_type sentinel; see
+ * core/runtime/dispatch_log.cpp::drain_one_queue for the canonical
+ * sentinel-scan implementation.
  *
  * @retval ::HSA_STATUS_SUCCESS The ring buffer info has been returned.
  *
@@ -4771,8 +4773,7 @@ hsa_status_t HSA_API hsa_amd_queue_iterate(
 hsa_status_t HSA_API hsa_amd_profiling_get_dispatch_records(
     hsa_queue_t* queue,
     void** buffer_base,
-    uint32_t* buffer_size,
-    volatile uint32_t** write_ptr);
+    uint32_t* buffer_size);
 
 /** @} */
 
