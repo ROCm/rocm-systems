@@ -1611,13 +1611,22 @@ void AqlQueue::SetProfiling(bool enabled) {
   }
 
   if (!enabled && dispatch_record_buffer_) {
+    // C1 fix: order matters. We MUST tell KFD to drop the buffer
+    // (libhsakmt SetQueueProfilingBuffer with addr=0) AND publish that to
+    // FW (Suspend/Resume runs the UPDATE_QUEUE ioctl that flushes the MQD)
+    // BEFORE we free the buffer. Otherwise FW may still hold the old
+    // buffer address in MQD and continue writing into freed host memory.
+    //
+    // 1. Clear KFD-side profiling-buffer registration.
     agent_->driver().SetQueueProfilingBuffer(queue_id_, nullptr, 0, nullptr);
+    // 2. Flush MQD via UPDATE_QUEUE so FW observes addr=0.
+    Suspend();
+    Resume();
+    // 3. NOW it is safe to free the host-side buffer.
     agent_->system_deallocator()(dispatch_record_buffer_);
     dispatch_record_buffer_ = nullptr;
     dispatch_record_buffer_size_ = 0;
     dispatch_record_wptr_ = 0;
-    Suspend();
-    Resume();
   }
 }
 
