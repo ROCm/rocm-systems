@@ -1342,13 +1342,15 @@ def test_bench_only_basic(binary_handler_profile_rocprof_compute):
     )
 
     assert returncode == 0
-    roofline_csv = Path(workload_dir) / "roofline.csv"
+    workload_path = Path(workload_dir)
+    roofline_csv = workload_path / "roofline.csv"
     assert roofline_csv.exists(), f"Expected {roofline_csv} to be created"
-    # Bench-only must not produce profiling artifacts (no perfmon/, no pmc_perf_*.csv)
-    assert not (Path(workload_dir) / "perfmon").exists()
-    assert not list(Path(workload_dir).glob("pmc_perf_*.csv"))
-
-    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+    # Bench-only must not produce profiling artifacts
+    assert not (workload_path / "perfmon").exists()
+    assert not (workload_path / "sysinfo.csv").exists()
+    assert not (workload_path / "profiling_config.yaml").exists()
+    assert not list(workload_path.glob("results_*.csv"))
+    assert not list(workload_path.glob("pmc_perf_*.csv"))
 
 
 @pytest.mark.roofline_1

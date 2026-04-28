@@ -723,7 +723,8 @@ b) Otherwise, profile mode runs microbenchmarks and collects roofline performanc
   ``--roof-only`` cannot be used with ``--block``, ``--set``, or ``--bench-only`` options.
 
 Profile mode generates ``roofline.csv`` containing microbenchmark data. To generate
-roofline HTML plots, use ``rocprof-compute analyze`` on the profiling output directory
+roofline HTML plots, use ``rocprof-compute analyze`` on a profiling output directory
+that contains both ``roofline.csv`` and application performance counters
 (see :doc:`../analyze/mode`). Visualization options (``--sort``, ``--mem-level``,
 ``--roofline-data-type``) are available in analyze mode.
 
@@ -819,13 +820,6 @@ This is useful for:
 .. code-block:: shell-session
 
    $ rocprof-compute profile --name my_bench --bench-only
-   ...
-   INFO [roofline] Running roofline microbenchmark on device 0
-   GPU Device 0 (gfx942) with 304 CUs: Profiling...
-   ...
-   GPU Benchmarking completed
-   INFO [roofline] Roofline data saved to workloads/my_bench/MI300X_A1/roofline.csv
-     Run 'rocprof-compute analyze -p workloads/my_bench/MI300X_A1' for charts
 
 To target a specific GPU device, use ``--device``:
 
@@ -839,9 +833,20 @@ To regenerate benchmark data in an existing profiled workload directory, use
 .. code-block:: shell-session
 
    $ rocprof-compute profile --bench-only --output-directory workloads/vcopy/MI300X_A1
-   ...
-   INFO [roofline] Roofline data saved to workloads/vcopy/MI300X_A1/roofline.csv
-     Run 'rocprof-compute analyze -p workloads/vcopy/MI300X_A1' for charts
+
+.. note::
+
+   ``--bench-only`` writes ``roofline.csv`` only; rendering a roofline
+   chart additionally requires application performance counters from a
+   ``--roof-only`` (or regular profile) run. The intended workflow is to
+   profile first, then re-run ``--bench-only`` against that workload
+   later to refresh stale peak values before analyzing:
+
+   .. code-block:: shell-session
+
+      $ rocprof-compute profile --name vcopy --roof-only -- ./vcopy
+      $ rocprof-compute profile --bench-only --output-directory workloads/vcopy/MI300X_A1
+      $ rocprof-compute analyze --path workloads/vcopy/MI300X_A1
 
 .. _torch-operator-mapping:
 

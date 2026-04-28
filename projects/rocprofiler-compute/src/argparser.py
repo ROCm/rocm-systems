@@ -534,7 +534,10 @@ Examples:
         required=False,
         default=0,
         type=int,
-        help="\t\t\tTarget GPU device ID. (DEFAULT: 0)",
+        help=(
+            "\t\t\tTarget GPU device ID per amd-smi for roofline benchmarking"
+            " (Default: 0)"
+        ),
     )
 
     ## ----------------------------
