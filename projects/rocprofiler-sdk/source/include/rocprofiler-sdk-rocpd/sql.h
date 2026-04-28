@@ -150,42 +150,44 @@ rocpd_sql_load_schema(rocpd_sql_engine_t                        engine,
                       void* user_data) ROCPD_API ROCPD_NONNULL(6);
 
 /**
- * @brief (experimental) Result of ::rocpd_sql_list_schema_versions. The @p versions array is
- * heap-allocated by the library and must be released with ::rocpd_sql_free_schema_versions_list.
+ * @brief (experimental) Callback invoked by ::rocpd_iterate_schema_versions for each discovered
+ * set of schema versions.
+ *
+ * @param [in] engine SQL engine for which versions were resolved
+ * @param [in] versions Array of distinct schema version triplets, sorted ascending
+ * @param [in] num_versions Number of entries in @p versions (may be 0)
+ * @param [in] user_data User provided data passed through from ::rocpd_iterate_schema_versions
+ * @return ::rocpd_status_t Value returned by the callback is propagated back to the caller of
+ * ::rocpd_iterate_schema_versions
  */
-typedef struct ROCPD_EXPERIMENTAL rocpd_sql_schema_versions_list_t
-{
-    rocpd_version_triplet_t*
-             versions;  ///< Array of length @p count (may be nullptr when count is 0)
-    uint64_t count;     ///< Number of entries in @p versions
-} rocpd_sql_schema_versions_list_t;
+ROCPD_EXPERIMENTAL typedef rocpd_status_t (*rocpd_iterate_schema_versions_cb_t)(
+    rocpd_sql_engine_t             engine,
+    const rocpd_version_triplet_t* versions,
+    uint64_t                       num_versions,
+    void*                          user_data);
 
 /**
- * @brief (experimental) List distinct SQL schema versions declared in `versions.yml` for the
- * resolved schema search path (same resolution rules as ::rocpd_sql_load_schema).
+ * @brief (experimental) Invoke a callback with the list of distinct SQL schema versions declared
+ * in `versions.yml` for the resolved schema search path (same resolution rules as
+ * ::rocpd_sql_load_schema).
  *
  * @param [in] engine Must be ::ROCPD_SQL_ENGINE_SQLITE3 (reserved for future engines)
- * @param [in] schema_path_hints Optional `:`-joined search path prefixes (same as load_schema)
- * @param [in] num_schema_path_hints Length of @p schema_path_hints
- * @param [out] out_list Populated on success; call ::rocpd_sql_free_schema_versions_list when done
+ * @param [in] schema_path_hints Optional search path prefixes (same as ::rocpd_sql_load_schema)
+ * @param [in] num_schema_path_hints Length of @p schema_path_hints (same as
+ * ::rocpd_sql_load_schema)
+ * @param [in] callback Callback function invoked with the sorted list of schema versions
+ * @param [in] user_data Pointer passed back into @p callback
  * @return ::rocpd_status_t
- * @retval ROCPD_STATUS_SUCCESS List written (possibly empty if no `versions.yml` or no entries)
- * @retval ROCPD_STATUS_ERROR_INVALID_ARGUMENT @p out_list is nullptr
+ * @retval ROCPD_STATUS_SUCCESS Callback invoked successfully (possibly with @p num_versions == 0)
  * @retval ROCPD_STATUS_ERROR_SQL_INVALID_ENGINE Unsupported @p engine
- * @retval ROCPD_STATUS_ERROR Allocation failure
+ * @retval Any value returned by @p callback is propagated directly to the caller
  */
 ROCPD_EXPERIMENTAL rocpd_status_t
-rocpd_sql_list_schema_versions(rocpd_sql_engine_t                engine,
-                               const char**                      schema_path_hints,
-                               uint64_t                          num_schema_path_hints,
-                               rocpd_sql_schema_versions_list_t* out_list) ROCPD_API;
-
-/**
- * @brief (experimental) Release memory returned in ::rocpd_sql_schema_versions_list_t::versions.
- * Safe to call with a zero-initialized list or after a failed ::rocpd_sql_list_schema_versions.
- */
-ROCPD_EXPERIMENTAL void
-rocpd_sql_free_schema_versions_list(rocpd_sql_schema_versions_list_t* list) ROCPD_API;
+rocpd_iterate_schema_versions(rocpd_sql_engine_t                 engine,
+                              const char**                       schema_path_hints,
+                              uint64_t                           num_schema_path_hints,
+                              rocpd_iterate_schema_versions_cb_t callback,
+                              void* user_data) ROCPD_API ROCPD_NONNULL(4);
 
 /** @} */
 

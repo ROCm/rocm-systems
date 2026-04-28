@@ -22,14 +22,14 @@
 
 #define _GNU_SOURCE 1
 
-#include "format.hpp"
-
 #include "lib/common/environment.hpp"
 #include "lib/common/filesystem.hpp"
 #include "lib/common/logging.hpp"
 #include "lib/common/mpl.hpp"
 #include "lib/common/string_entry.hpp"
 #include "lib/common/utility.hpp"
+
+#include "lib/rocprofiler-sdk-rocpd/details/format.hpp"
 
 #include <rocprofiler-sdk-rocpd/rocpd.h>
 #include <rocprofiler-sdk-rocpd/sql.h>
@@ -187,23 +187,40 @@ load_version_file_map(const std::string&       _schema_paths,
     latest_version = rocpd_version_triplet_t{0, 0, 0};
     if(!_schema_versions_file) return;
 
-    auto versioning_contents = std::stringstream{};
-    ROCP_INFO << "Loading Schema Config: " << *_schema_versions_file;
-    auto ifs = std::ifstream{*_schema_versions_file};
-    versioning_contents << ifs.rdbuf();
-    auto yaml = YAML::Load(versioning_contents.str());
-    for(auto itr : yaml["rocprofiler-sdk-rocpd"]["rocpd_schemas"])
+    try
     {
-        auto version = itr["version"].as<std::string>();
-        for(const auto& fitr : yaml_kind_keys())
+        auto versioning_contents = std::stringstream{};
+        ROCP_INFO << "Loading Schema Config: " << *_schema_versions_file;
+        auto ifs = std::ifstream{*_schema_versions_file};
+        versioning_contents << ifs.rdbuf();
+        auto yaml = YAML::Load(versioning_contents.str());
+        for(auto itr : yaml["rocprofiler-sdk-rocpd"]["rocpd_schemas"])
         {
-            if(itr[fitr.first])
+            auto version = itr["version"].as<std::string>();
+            for(const auto& fitr : yaml_kind_keys())
             {
-                version_file_map[version][fitr.second] = itr[fitr.first].as<std::string>();
+                if(itr[fitr.first])
+                {
+                    version_file_map[version][fitr.second] = itr[fitr.first].as<std::string>();
 
-                latest_version = std::max(latest_version, get_version_triplet(version));
+                    latest_version = std::max(latest_version, get_version_triplet(version));
+                }
             }
         }
+    } catch(const YAML::Exception& e)
+    {
+        ROCP_ERROR << fmt::format(
+            "[rocprofiler-sdk-rocpd] Error loading schema versions file: '{}' : {}",
+            *_schema_versions_file,
+            e.what());
+        return;
+    } catch(const std::exception& e)
+    {
+        ROCP_ERROR << fmt::format(
+            "[rocprofiler-sdk-rocpd] Error loading schema versions file: '{}' : {}",
+            *_schema_versions_file,
+            e.what());
+        return;
     }
 }
 }  // namespace
@@ -250,7 +267,9 @@ rocpd_sql_load_schema(rocpd_sql_engine_t                        engine,
     }
 
     // Since API changed, crude attempt to detect invalid schema versions from older API
-    if(schema_version.major > 100 || schema_version.minor > 100 || schema_version.patch > 100)
+    if(ROCPD_VERSION_TRIPLET_TO_INT(
+           schema_version.major, schema_version.minor, schema_version.patch) >
+       ROCPD_VERSION_TRIPLET_TO_INT(99, 99, 99))
     {
         ROCP_ERROR << fmt::format("[rocprofiler-sdk-rocpd] Schema version is invalid: '{}.{}.{}'.",
                                   schema_version.major,
@@ -270,7 +289,11 @@ rocpd_sql_load_schema(rocpd_sql_engine_t                        engine,
 
     if(schema_version == rocpd_version_triplet_t{0, 0, 0}) schema_version = latest_version;
 
-    const auto kind_file_names = version_file_map[fmt::format("{}", schema_version)];
+    const auto version_key = fmt::format("{}", schema_version);
+    const auto version_itr = version_file_map.find(version_key);
+    if(version_itr == version_file_map.end()) return ROCPD_STATUS_ERROR_SQL_SCHEMA_INVALID_VERSION;
+
+    const auto& kind_file_names = version_itr->second;
 
     if(kind_file_names.count(kind) == 0) return ROCPD_STATUS_ERROR_SQL_INVALID_SCHEMA_KIND;
 
@@ -378,19 +401,12 @@ rocpd_sql_load_schema(rocpd_sql_engine_t                        engine,
 }
 
 rocpd_status_t
-rocpd_sql_list_schema_versions(rocpd_sql_engine_t                engine,
-                               const char**                      schema_path_hints,
-                               uint64_t                          num_schema_path_hints,
-                               rocpd_sql_schema_versions_list_t* out_list)
+rocpd_iterate_schema_versions(rocpd_sql_engine_t                 engine,
+                              const char**                       schema_path_hints,
+                              uint64_t                           num_schema_path_hints,
+                              rocpd_iterate_schema_versions_cb_t callback,
+                              void*                              user_data)
 {
-    if(out_list == nullptr)
-    {
-        return ROCPD_STATUS_ERROR_INVALID_ARGUMENT;
-    }
-
-    out_list->versions = nullptr;
-    out_list->count    = 0;
-
     switch(engine)
     {
         case ROCPD_SQL_ENGINE_SQLITE3:
@@ -412,8 +428,6 @@ rocpd_sql_list_schema_versions(rocpd_sql_engine_t                engine,
     rocpd::sql::load_version_file_map(_schema_paths, version_file_map, latest_version);
     (void) latest_version;
 
-    if(version_file_map.empty()) return ROCPD_STATUS_SUCCESS;
-
     auto sorted_versions = std::vector<std::string>{};
     sorted_versions.reserve(version_file_map.size());
     for(const auto& kv : version_file_map)
@@ -425,25 +439,11 @@ rocpd_sql_list_schema_versions(rocpd_sql_engine_t                engine,
                   return rocpd::sql::get_version_triplet(a) < rocpd::sql::get_version_triplet(b);
               });
 
-    const auto num_versions = sorted_versions.size();
-    auto*      versions     = static_cast<rocpd_version_triplet_t*>(
-        std::malloc(num_versions * sizeof(rocpd_version_triplet_t)));  // NOLINT
-    if(!versions) return ROCPD_STATUS_ERROR;
+    auto versions = std::vector<rocpd_version_triplet_t>{};
+    versions.reserve(sorted_versions.size());
+    for(const auto& v : sorted_versions)
+        versions.emplace_back(rocpd::sql::get_version_triplet(v));
 
-    for(size_t i = 0; i < num_versions; ++i)
-        versions[i] = rocpd::sql::get_version_triplet(sorted_versions[i]);
-
-    out_list->versions = versions;
-    out_list->count    = static_cast<uint64_t>(num_versions);
-    return ROCPD_STATUS_SUCCESS;
-}
-
-void
-rocpd_sql_free_schema_versions_list(rocpd_sql_schema_versions_list_t* list)
-{
-    if(list == nullptr) return;
-    std::free(list->versions);  // NOLINT
-    list->versions = nullptr;
-    list->count    = 0;
+    return callback(engine, versions.data(), static_cast<uint64_t>(versions.size()), user_data);
 }
 }

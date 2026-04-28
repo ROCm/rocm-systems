@@ -12,7 +12,7 @@ foreach(_NAMESPACE rocprofiler-sdk rocprofiler-sdk-rocpd)
     endforeach()
 endforeach()
 
-target_sources(rocprofiler-sdk-rocpd-shared-library PRIVATE format.hpp rocpd.cpp sql.cpp)
+target_sources(rocprofiler-sdk-rocpd-shared-library PRIVATE rocpd.cpp sql.cpp)
 
 target_include_directories(
     rocprofiler-sdk-rocpd-shared-library
@@ -45,3 +45,5 @@ install(
     DESTINATION ${CMAKE_INSTALL_LIBDIR}
     COMPONENT rocpd
     EXPORT rocprofiler-sdk-rocpd-targets)
+
+add_subdirectory(details)

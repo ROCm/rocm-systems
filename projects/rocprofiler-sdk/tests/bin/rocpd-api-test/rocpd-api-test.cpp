@@ -283,6 +283,18 @@ load_schema(rocpd_version_triplet_t requested_version)
     return EXIT_SUCCESS;
 }
 
+rocpd_status_t
+list_versions_callback(rocpd_sql_engine_t /*engine*/,
+                       const rocpd_version_triplet_t* versions,
+                       uint64_t                       num_versions,
+                       void*                          user_data)
+{
+    auto* out = static_cast<std::vector<rocpd_version_triplet_t>*>(user_data);
+    if(out == nullptr) return ROCPD_STATUS_ERROR_INVALID_ARGUMENT;
+    out->assign(versions, versions + num_versions);
+    return ROCPD_STATUS_SUCCESS;
+}
+
 std::vector<std::string>
 version_splitter(const std::string& version)
 {
@@ -480,29 +492,29 @@ main(int argc, char** argv)
     std::cout << "rocpd-api-test: rocpd_get_version OK (" << major << "." << minor << "." << patch
               << ")\n";
 
-    auto schema_versions_list          = rocpd_sql_schema_versions_list_t{};
     auto local_list_of_schema_versions = std::vector<rocpd_version_triplet_t>{};
 
     if(list_versions || load_all_schemas)
     {
-        status = rocpd_sql_list_schema_versions(
-            ROCPD_SQL_ENGINE_SQLITE3, nullptr, 0, &schema_versions_list);
+        status = rocpd_iterate_schema_versions(ROCPD_SQL_ENGINE_SQLITE3,
+                                               nullptr,
+                                               0,
+                                               list_versions_callback,
+                                               &local_list_of_schema_versions);
         if(status != ROCPD_STATUS_SUCCESS)
         {
-            std::cerr << "rocpd-api-test: rocpd_sql_list_schema_versions failed: "
+            std::cerr << "rocpd-api-test: rocpd_iterate_schema_versions failed: "
                       << rocpd_get_status_name(status) << "\n";
             return EXIT_FAILURE;
         }
-        std::cout << "rocpd-api-test: rocpd_sql_list_schema_versions OK ("
-                  << schema_versions_list.count << " versions)\n";
-        for(auto i = uint64_t{0}; i < schema_versions_list.count; ++i)
+        std::cout << "rocpd-api-test: rocpd_iterate_schema_versions OK ("
+                  << local_list_of_schema_versions.size() << " versions)\n";
+        for(auto i = size_t{0}; i < local_list_of_schema_versions.size(); ++i)
         {
-            std::cout << "  Version " << i << ": " << schema_versions_list.versions[i].major << "."
-                      << schema_versions_list.versions[i].minor << "."
-                      << schema_versions_list.versions[i].patch << "\n";
-            local_list_of_schema_versions.push_back(schema_versions_list.versions[i]);
+            std::cout << "  Version " << i << ": " << local_list_of_schema_versions[i].major << "."
+                      << local_list_of_schema_versions[i].minor << "."
+                      << local_list_of_schema_versions[i].patch << "\n";
         }
-        rocpd_sql_free_schema_versions_list(&schema_versions_list);
     }
 
     if(load_latest_schema)

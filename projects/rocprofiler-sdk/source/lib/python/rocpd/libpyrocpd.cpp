@@ -40,7 +40,6 @@
 #include "lib/output/output_stream.hpp"
 #include "lib/output/sql/common.hpp"
 #include "lib/output/timestamps.hpp"
-#include "rocprofiler-sdk-rocpd/types.h"
 
 #include <rocprofiler-sdk/agent.h>
 #include <rocprofiler-sdk/fwd.h>
@@ -53,6 +52,7 @@
 
 #include <rocprofiler-sdk-rocpd/rocpd.h>
 #include <rocprofiler-sdk-rocpd/sql.h>
+#include <rocprofiler-sdk-rocpd/types.h>
 
 #include <fmt/format.h>
 #include <fmt/ranges.h>
@@ -424,17 +424,21 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
                 }
             }
 
-            auto list = rocpd_sql_schema_versions_list_t{};
-            ROCPD_CHECK(rocpd_sql_list_schema_versions(
-                engine, hints.empty() ? nullptr : hints.data(), hints.size(), &list));
-
             py::list out{};
-            for(uint64_t i = 0; i < list.count; ++i)
-            {
-                const auto& v = list.versions[i];
-                out.append(py::str(fmt::format("{}.{}.{}", v.major, v.minor, v.patch)));
-            }
-            rocpd_sql_free_schema_versions_list(&list);
+            auto     _callback = [](rocpd_sql_engine_t /*engine*/,
+                                const rocpd_version_triplet_t* versions,
+                                uint64_t                       num_versions,
+                                void*                          user_data) -> rocpd_status_t {
+                auto* _out = static_cast<py::list*>(user_data);
+                for(uint64_t i = 0; i < num_versions; ++i)
+                {
+                    const auto& v = versions[i];
+                    _out->append(py::str(fmt::format("{}.{}.{}", v.major, v.minor, v.patch)));
+                }
+                return ROCPD_STATUS_SUCCESS;
+            };
+            ROCPD_CHECK(rocpd_iterate_schema_versions(
+                engine, hints.empty() ? nullptr : hints.data(), hints.size(), _callback, &out));
             return out;
         },
         py::arg("engine")            = ROCPD_SQL_ENGINE_SQLITE3,

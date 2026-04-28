@@ -36,7 +36,7 @@ from . import libpyrocpd
 
 class RocpdSchema:
 
-    def __init__(self, version="0.0.0", uuid="", guid=""):
+    def __init__(self, uuid="", guid="", version="0.0.0"):
 
         variables = libpyrocpd.schema_jinja_variables()
         variables.uuid = f"{uuid}"
