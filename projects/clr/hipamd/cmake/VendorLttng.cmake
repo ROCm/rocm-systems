@@ -125,7 +125,7 @@ ExternalProject_Add(lttng_ust_vendored
                       --disable-man-pages
                       --disable-static
                       --enable-shared
-                      --without-numa
+                      --disable-numa
                       --disable-examples
     BUILD_COMMAND     make -j${LTTNG_VENDORED_PARALLEL}
     INSTALL_COMMAND   make install
