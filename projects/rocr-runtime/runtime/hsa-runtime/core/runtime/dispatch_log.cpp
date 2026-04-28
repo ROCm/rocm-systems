@@ -397,8 +397,23 @@ bool drain_one_queue(queue_drain_state& qs, bool force_emit) {
   // Poisoned (disable in flight) or never-populated.
   if (qs.ring_base == nullptr || qs.ring_records == 0) return false;
 
+  // C9 (stage-2 review): bound each pass to one full ring sweep. The
+  // sentinel-scan loop exits only when it observes record_type == 0 for
+  // the current slot; if FW keeps the ring continuously non-empty, an
+  // unbounded loop here would let one queue monopolize ts_drainer (which
+  // walks queues sequentially under g_lifecycle_mu in
+  // ts_drainer_thread_main) and starve other queues, plus delay disable
+  // / shutdown paths that need drain_mu. Capping at ring_records slots
+  // (= one full ring sweep) preserves forward progress: at any instant
+  // FW can have at most ring_records unconsumed slots, so a full sweep
+  // always drains everything that was visible at pass start. Anything
+  // FW writes during the pass becomes the next pass's work — which is
+  // also the prior wptr-snapshot design's behaviour.
+  const uint64_t pass_budget = qs.ring_records;
+  uint64_t pass_consumed = 0;
+
   bool any = false;
-  while (true) {
+  while (pass_consumed < pass_budget) {
     const uint64_t slot = qs.next_idx & qs.ring_mask;
     auto* rec = reinterpret_cast<mec_dispatch_record_16*>(
         static_cast<char*>(qs.ring_base) + slot * kSlotStride);
@@ -463,6 +478,7 @@ bool drain_one_queue(queue_drain_state& qs, bool force_emit) {
     }
 
     qs.next_idx += 1;
+    pass_consumed += 1;
     any = true;
   }
   return any;
