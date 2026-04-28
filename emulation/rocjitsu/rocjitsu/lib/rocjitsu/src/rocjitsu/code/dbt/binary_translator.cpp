@@ -225,24 +225,11 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
 
   std::vector<uint8_t> translated_text(text.begin(), text.end());
 
-  // Find the end of actual code (after s_endpgm) to place the cave body
-  // in the NOP padding. Scan backwards from the end of .text for the first
-  // non-NOP instruction to determine where NOP padding starts.
-  uint64_t code_end = text.size();
-  {
-    const auto *data = reinterpret_cast<const uint32_t *>(text.data());
-    const size_t words = text.size() / 4;
-    // Scan backwards to find the last non-NOP word.
-    // s_nop encodes as 0xBF800000 on both CDNA4 and RDNA4.
-    for (size_t i = words; i > 0; --i) {
-      if (data[i - 1] != 0xBF800000) {
-        code_end = i * 4;
-        break;
-      }
-    }
-  }
-  // Align cave start to 4 bytes (already is, since instructions are 4-byte aligned).
-  patcher.set_cave_start(code_end);
+  // Code caves live in a separate executable section that is placed immediately
+  // after the original .text bytes. Treating that section as a .text-relative
+  // continuation keeps existing instruction addresses stable while avoiding any
+  // dependency on compiler-emitted NOP padding after s_endpgm.
+  patcher.set_cave_start(text.size());
 
   std::unordered_set<const BasicBlock *> translated_blocks;
   bool warned_shared_blocks = false;
@@ -323,28 +310,8 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
     }
   }
 
-  // Write cave body into the NOP padding at the end of .text.
-  // cave_start was set to the end of actual code (after s_endpgm).
-  // The cave body overwrites the NOP padding between code_end and text.size().
-  // TODO: When caves exceed available NOP padding, allocate a new .text section
-  // instead of asserting. For now, typical kernels have 256+ bytes of NOP padding
-  // which is sufficient for the current expansion rules.
-  const auto &cave = patcher.cave_body();
-  if (!cave.empty()) {
-    const uint64_t cave_start = patcher.cave_start();
-    const uint64_t text_size = static_cast<uint64_t>(text.size());
-    const uint64_t cave_size = static_cast<uint64_t>(cave.size());
-    const uint64_t available = cave_start <= text_size ? text_size - cave_start : 0;
-    if (cave_size > available) {
-      result.warnings.push_back("cave body (" + std::to_string(cave.size()) +
-                                " bytes) exceeds .text NOP padding (" + std::to_string(available) +
-                                " bytes available); leaving code object unchanged");
-      return leave_unchanged();
-    }
-    std::memcpy(translated_text.data() + cave_start, cave.data(), cave.size());
-  }
-
   patcher.overwrite_text(translated_text);
+  patcher.append_cave_section();
 
   if (target_mach_)
     patcher.update_elf_flags(target_mach_);

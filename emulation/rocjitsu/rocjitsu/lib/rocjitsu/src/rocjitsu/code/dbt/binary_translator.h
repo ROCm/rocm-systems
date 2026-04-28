@@ -105,9 +105,9 @@ private:
   /// @brief Apply a single semantic replacement to the translated text.
   ///
   /// @details If the replacement fits within the source byte range, writes
-  /// in-place with NOP padding. If it expands, writes a branch stub in-place
-  /// and appends the replacement body + return branch to the code cave via
-  /// the patcher.
+  /// in-place and pads any leftover source words. If it expands, writes a
+  /// branch stub in-place and appends the replacement body + return branch to
+  /// the .rj_translations code cave via the patcher.
   ///
   /// @param repl    The semantic replacement to apply.
   /// @param text    The translated text buffer (same size as original .text).
