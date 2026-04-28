@@ -50,6 +50,7 @@ struct ncclIbCommStage {
 struct ncclIbHandle {
   union ncclSocketAddress connectAddr; // Filled by the target
   uint64_t magic; // random number to help debugging
+  int isP2p;
   struct ncclIbCommStage stage; // Used by the other side when connecting
 };
 
@@ -1482,3 +1483,12 @@ ncclResult_t IbCastCloseListen(void* listenComm) {
   }
   return ncclSuccess;
 }
+
+ncclResult_t rcclCastNetP2pPolicy(void* handle, int isP2p) {
+  if (!handle) return ncclInvalidArgument;
+  struct ncclIbHandle* ibHandle = (struct ncclIbHandle*)handle;
+  if (ibHandle->magic != NCCL_SOCKET_MAGIC) return ncclInvalidArgument;
+  ibHandle->isP2p = isP2p;
+  return ncclSuccess;
+}
+
