@@ -4,7 +4,7 @@
 #pragma once
 
 #include "fake_clock.hpp"
-#include "in_memory_offload.hpp"
+#include "in_memory_emitter.hpp"
 #include "mock_overflow_trigger.hpp"
 #include "mock_timer_trigger.hpp"
 #include "mock_unwinder.hpp"
@@ -22,7 +22,7 @@ namespace rocprofsys::sampling::test
 struct test_sampling_policies
 {
     using unwinder          = mock_unwinder;
-    using offload           = in_memory_offload;
+    using offload           = in_memory_emitter;
     using trace_sink        = recording_trace_sink;
     using timer_trigger     = mock_timer_trigger;
     using overflow_trigger  = mock_overflow_trigger;

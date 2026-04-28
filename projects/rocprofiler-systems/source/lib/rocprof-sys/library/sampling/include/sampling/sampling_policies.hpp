@@ -29,7 +29,7 @@ struct sampling_policies_traits
 // Production types are Linux-only. Forward-declared here; defined in src/linux/.
 #if defined(__linux__)
 class libunwind_unwinder;
-class tmpfile_offload_store;
+class trace_cache_offload_adapter;
 class real_trace_cache_sink;
 class real_timer_trigger;
 class real_overflow_trigger;
@@ -40,9 +40,9 @@ class real_perfetto_sink;
 class real_fatal_error_policy;
 
 using default_sampling_policies = sampling_policies_traits<
-    libunwind_unwinder, tmpfile_offload_store, real_trace_cache_sink, real_timer_trigger,
-    real_overflow_trigger, steady_clock, real_signal_dispatcher, native_report_writer,
-    real_perfetto_sink, real_fatal_error_policy>;
+    libunwind_unwinder, trace_cache_offload_adapter, real_trace_cache_sink,
+    real_timer_trigger, real_overflow_trigger, steady_clock, real_signal_dispatcher,
+    native_report_writer, real_perfetto_sink, real_fatal_error_policy>;
 #else
 // Non-Linux: any TU that reaches this point gets a hard compile error (C-3 fix).
 // This fires on #include of sampling_policies.hpp on non-Linux even without

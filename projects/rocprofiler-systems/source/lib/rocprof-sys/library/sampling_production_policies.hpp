@@ -34,6 +34,10 @@
 #include "library/sampling_production_policies/real_overflow_trigger.hpp"
 #include "library/sampling_production_policies/real_timer_trigger.hpp"
 
+// ── EmitterPolicy (production) ────────────────────────────────────────────
+// Lightweight header — no libunwind / AMD-SMI deps; also included by test TUs.
+#include "library/sampling_production_policies/trace_cache_offload_adapter.hpp"
+
 // ── TSV report writer (no main-lib deps; test-accessible) ────────────────
 #include "sampling/src/native_report_writer.hpp"
 
@@ -607,10 +611,10 @@ tl_sampler_state()
 {
     return static_cast<default_state_t*>(tl_sampler_state_vp);
 }
-inline tmpfile_offload_store*
+inline trace_cache_offload_adapter*
 tl_offload()
 {
-    return static_cast<tmpfile_offload_store*>(tl_offload_vp);
+    return static_cast<trace_cache_offload_adapter*>(tl_offload_vp);
 }
 
 }  // namespace rocprofsys::sampling
