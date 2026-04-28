@@ -647,19 +647,37 @@ hsa_status_t hsa_amd_profiling_set_profiler_enabled(hsa_queue_t* queue, int enab
   CATCH;
 }
 
+// C8: snapshot the public handles of all AQL queues under each agent's
+// shared lock, then invoke the user callback OUTSIDE the lock. Holding
+// AqlQueuesMutex across an external callback risks deadlock if the
+// callback creates/destroys queues (which take the same mutex
+// exclusively), and the public API does not document a non-reentrancy
+// requirement.
+//
+// Note: handles in the snapshot may refer to queues that have been
+// destroyed by the time the callback runs. This is the same lifetime
+// caveat that already applies to any hsa_queue_t obtained from the
+// public API - callers must be prepared to validate / scope handles
+// against their own lifetime tracking.
 hsa_status_t hsa_amd_queue_iterate(hsa_status_t (*callback)(hsa_queue_t* queue, void* data),
                                    void* data) {
   TRY;
   IS_OPEN();
   if (!callback) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
+  std::vector<hsa_queue_t*> snapshot;
   for (core::Agent* agent : core::Runtime::runtime_singleton_->gpu_agents()) {
     auto* gpu = static_cast<AMD::GpuAgent*>(agent);
     std::shared_lock<std::shared_mutex> lock(gpu->AqlQueuesMutex());
-    for (auto* q : gpu->GetAqlQueues()) {
-      hsa_status_t st = callback(q->public_handle(), data);
-      if (st == HSA_STATUS_INFO_BREAK) return HSA_STATUS_SUCCESS;
-      if (st != HSA_STATUS_SUCCESS) return st;
-    }
+    const auto& queues = gpu->GetAqlQueues();
+    snapshot.reserve(snapshot.size() + queues.size());
+    for (auto* q : queues) snapshot.push_back(q->public_handle());
+  }
+
+  for (auto* h : snapshot) {
+    hsa_status_t st = callback(h, data);
+    if (st == HSA_STATUS_INFO_BREAK) return HSA_STATUS_SUCCESS;
+    if (st != HSA_STATUS_SUCCESS) return st;
   }
   return HSA_STATUS_SUCCESS;
   CATCH;
