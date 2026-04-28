@@ -31,6 +31,7 @@
 
 #include "../src/backend_bc.hpp"
 #include "../src/mpi_instance.hpp"
+#include "util_unit_test.hpp"
 
 namespace rocshmem {
 
@@ -66,6 +67,7 @@ class BufferRegisterTestFixture : public ::testing::Test {
     MockBackend* backend_;
 
     void SetUp() override {
+      set_gpu_ordinal();
       MPIInstance::mpilib_dl_init();
       backend_ = new MockBackend(MPI_COMM_WORLD);
     }
