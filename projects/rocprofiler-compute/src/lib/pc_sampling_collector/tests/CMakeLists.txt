@@ -7,6 +7,8 @@ add_executable(
     main.cpp
 	test_pc_sampling_collector.h
 	test_pc_sampling_collector.cpp
+	mocks.h
+	mocks.cpp
 )
 
 target_link_libraries(
