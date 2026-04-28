@@ -22,7 +22,7 @@
 
 #pragma once
 
-#include "lib/rocprofiler-sdk/aql/aql_profile_v2.h"
+#include "lib/aqlprofile/aqlprofile.hpp"
 #include "lib/rocprofiler-sdk/thread_trace/trace_decoder_api.h"
 
 namespace rocprofiler
