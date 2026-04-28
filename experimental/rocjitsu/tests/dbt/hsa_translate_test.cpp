@@ -178,7 +178,8 @@ TEST(HsaTranslateTest, TranslateAndDispatchVectorAdd) {
 
   hsa_memory_copy(A_dev, A_host.data(), buf_size);
   hsa_memory_copy(B_dev, B_host.data(), buf_size);
-  std::memset(C_dev, 0, buf_size);
+  std::vector<float> C_zero(N, 0.0f);
+  ASSERT_EQ(hsa_memory_copy(C_dev, C_zero.data(), buf_size), HSA_STATUS_SUCCESS);
 
   auto kernarg_pool = find_pool(cpu, HSA_AMD_SEGMENT_GLOBAL, true);
   void *kernarg = nullptr;
