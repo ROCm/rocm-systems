@@ -2210,28 +2210,19 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
   timers[TIMER_INIT_KERNELS] = clockNano() - timers[TIMER_INIT_KERNELS];
 
   if (job->isGrow) {
-    // Grow path: use bootstrapInit. baseMagic must be derivable identically
-    // by every existing rank (so commHash matches across the whole grown
-    // comm). Boundary/all existing ranks that received the handle via
-    // bcastGrowHandle get baseMagic from handle->magic; ranks lacking a handle
-    // (would be NCCL non-boundary in nHandles=0 mode) fall back to
-    // hashCombine(parent->magic, parent->splitCount) — these MUST match
-    // because bootstrapGetUniqueId stamps magic = hashCombine(parent->magic,
-    // parent->splitCount + 1) and ncclCommGrow_impl bumps splitCount before
-    // we get here. (NCCL semantics, splitCount is RCCL's name for childCount.)
     struct ncclBootstrapHandle* growHandle = (struct ncclBootstrapHandle*)job->commId;
     uint64_t baseMagic = growHandle ? growHandle->magic
-                                    : hashCombine(job->parent->magic, job->parent->splitCount);
+                                    : hashCombine(job->parent->magic, (uint64_t)job->parent->splitCount);
     comm->commHash = commIdHash = hashCombine(baseMagic, (uint64_t)job->nranks);
     timers[TIMER_INIT_ALLOC] = clockNano();
     NCCLCHECKGOTO(commAlloc(comm, NULL, job->nranks, job->myrank), res, fail);
     timers[TIMER_INIT_ALLOC] = clockNano() - timers[TIMER_INIT_ALLOC];
+    comm->isGrow = true;
     INFO(NCCL_INIT, "%s comm %p rank %d nranks %d cudaDev %d nvmlDev %d busId %lx parent %p splitCount %d commId 0x%llx - Init START", job->funcName,
          comm, comm->rank, comm->nRanks, comm->cudaDev, comm->nvmlDev, comm->busId, job->parent, job->splitCount, commIdHash);
     timers[TIMER_INIT_BOOTSTRAP] = clockNano();
-    NCCLCHECKGOTO(bootstrapInit(job->nId, (struct ncclBootstrapHandle*)job->commId, comm), res, fail);
+    NCCLCHECKGOTO(bootstrapInit(job->nId, (struct ncclBootstrapHandle*)job->commId, comm, job->parent), res, fail);
     timers[TIMER_INIT_BOOTSTRAP] = clockNano() - timers[TIMER_INIT_BOOTSTRAP];
-    comm->isGrow = true;
   } else if (job->parent) {
     NCCLCHECKGOTO(ncclCalloc(&parentRanks, job->parent->nRanks), res, fail);
     if (job->excludeRanksCount) {
@@ -2271,7 +2262,7 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
     INFO(NCCL_INIT, "%s comm %p rank %d nranks %d cudaDev %d nvmlDev %d busId %lx commId 0x%llx - Init START", job->funcName,
          comm, comm->rank, comm->nRanks, comm->cudaDev, comm->nvmlDev, comm->busId, commIdHash);
     timers[TIMER_INIT_BOOTSTRAP] = clockNano();
-    NCCLCHECKGOTO(bootstrapInit(job->nId, (struct ncclBootstrapHandle*)job->commId, comm), res, fail);
+    NCCLCHECKGOTO(bootstrapInit(job->nId, (struct ncclBootstrapHandle*)job->commId, comm, NULL), res, fail);
     timers[TIMER_INIT_BOOTSTRAP] = clockNano() - timers[TIMER_INIT_BOOTSTRAP];
   }
   comm->cudaArch = cudaArch;
@@ -3548,7 +3539,7 @@ ncclResult_t ncclCommGrow_impl(ncclComm_t comm, int nRanks, const ncclUniqueId* 
 
     if (uniqueId != NULL) {
       memcpy(&recvHandle, uniqueId, sizeof(recvHandle));
-    } else {
+    } else if (comm->nRanks > 1 && (comm->rank == 0 || comm->rank == comm->nRanks - 1)) {
       NCCLCHECKGOTO(bcastGrowHandle(&recvHandle, comm, /*isRoot=*/false), res, exit);
       uint64_t expectedMagic = hashCombine(comm->magic, (uint64_t)comm->splitCount);
       if (recvHandle.magic != expectedMagic) {
@@ -3606,12 +3597,16 @@ ncclResult_t ncclCommGrow_impl(ncclComm_t comm, int nRanks, const ncclUniqueId* 
   job->newcomm = newcomm;
   job->nranks  = nRanks;
   job->isGrow  = true;
-  if (uniqueId != NULL) {
-    NCCLCHECKGOTO(ncclCalloc(&job->commId, 1), res, fail);
-    memcpy(job->commId, uniqueId, sizeof(ncclUniqueId));
-    job->nId = 1;
-  } else {
-    job->nId = 0;
+  {
+    bool isBoundary = isExistingRank && (comm->rank == 0 || comm->rank == comm->nRanks - 1);
+    if (!isExistingRank || isBoundary) {
+      NCCLCHECKGOTO(ncclCalloc(&job->commId, 1), res, fail);
+      memcpy(job->commId, uniqueId, sizeof(ncclUniqueId));
+      job->nId = 1;
+    } else {
+      job->commId = NULL;
+      job->nId    = 0;
+    }
   }
   if (isExistingRank) {
     job->parent     = comm;

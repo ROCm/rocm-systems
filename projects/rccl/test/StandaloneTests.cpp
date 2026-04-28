@@ -707,6 +707,93 @@ namespace RcclUnitTesting
   }
 
   /**
+   * \brief Grow a 4-rank communicator to 5 ranks. Existing ranks 1 and 2 are
+   *        non-boundary in the parent — they MUST take the bootstrapInit
+   *        nHandles=0 + parent path that rendezvous via the parent ring.
+   *        Boundary ranks 0 and 3 receive the grow handle via bcastGrowHandle.
+   *        After grow, every rank performs an allreduce and verifies sum.
+   * ******************************************************************************************/
+  TEST(Standalone, Grow_FourToFive_NonBoundaryPath)
+  {
+    constexpr int kParent = 4;
+    constexpr int kChild  = 5;
+
+    int numDevices;
+    HIPCALL(hipGetDeviceCount(&numDevices));
+    if (numDevices < kChild) {
+      GTEST_SKIP() << "This test requires at least " << kChild << " devices.";
+    }
+
+    ncclUniqueId initId, growId;
+    NCCLCHECK(ncclGetUniqueId(&initId));
+
+    ncclComm_t parents[kParent] = {nullptr, nullptr, nullptr, nullptr};
+    ncclResult_t initRes[kParent] = {ncclSuccess, ncclSuccess, ncclSuccess, ncclSuccess};
+    std::thread initThreads[kParent];
+    for (int r = 0; r < kParent; ++r) {
+      initThreads[r] = std::thread([r, &parents, &initRes, &initId]() {
+        HIPCALL(hipSetDevice(r));
+        initRes[r] = ncclCommInitRank(&parents[r], kParent, initId, r);
+      });
+    }
+    for (int r = 0; r < kParent; ++r) initThreads[r].join();
+    for (int r = 0; r < kParent; ++r) ASSERT_EQ(initRes[r], ncclSuccess) << "rank " << r;
+
+    NCCLCHECK(ncclCommGetUniqueId(parents[0], &growId));
+
+    ncclComm_t children[kChild] = {nullptr, nullptr, nullptr, nullptr, nullptr};
+    ncclResult_t growRes[kChild] = {ncclSuccess, ncclSuccess, ncclSuccess, ncclSuccess, ncclSuccess};
+    std::thread growThreads[kChild];
+    for (int r = 0; r < kChild; ++r) {
+      growThreads[r] = std::thread([r, &parents, &children, &growRes, &growId]() {
+        HIPCALL(hipSetDevice(r));
+        if (r < kParent) {
+          growRes[r] = ncclCommGrow(parents[r], kChild, &growId, -1, &children[r], nullptr);
+        } else {
+          growRes[r] = ncclCommGrow(nullptr, kChild, &growId, r, &children[r], nullptr);
+        }
+      });
+    }
+    for (int r = 0; r < kChild; ++r) growThreads[r].join();
+    for (int r = 0; r < kChild; ++r) ASSERT_EQ(growRes[r], ncclSuccess) << "rank " << r;
+    for (int r = 0; r < kChild; ++r) ASSERT_NE(children[r], nullptr) << "rank " << r;
+
+    float* sbuf[kChild] = {nullptr};
+    float* rbuf[kChild] = {nullptr};
+    hipStream_t streams[kChild] = {0};
+    for (int r = 0; r < kChild; ++r) {
+      HIPCALL(hipSetDevice(r));
+      HIPCALL(hipMalloc((void**)&sbuf[r], sizeof(float)));
+      HIPCALL(hipMalloc((void**)&rbuf[r], sizeof(float)));
+      float v = static_cast<float>(r);
+      HIPCALL(hipMemcpy(sbuf[r], &v, sizeof(float), hipMemcpyHostToDevice));
+      HIPCALL(hipStreamCreate(&streams[r]));
+    }
+
+    NCCLCHECK(ncclGroupStart());
+    for (int r = 0; r < kChild; ++r) {
+      ASSERT_EQ(ncclAllReduce(sbuf[r], rbuf[r], 1, ncclFloat, ncclSum, children[r], streams[r]),
+                ncclSuccess) << "rank " << r;
+    }
+    NCCLCHECK(ncclGroupEnd());
+
+    constexpr float kExpected = 0.0f + 1.0f + 2.0f + 3.0f + 4.0f;
+    for (int r = 0; r < kChild; ++r) {
+      HIPCALL(hipSetDevice(r));
+      HIPCALL(hipStreamSynchronize(streams[r]));
+      float got = -1.0f;
+      HIPCALL(hipMemcpy(&got, rbuf[r], sizeof(float), hipMemcpyDeviceToHost));
+      ASSERT_FLOAT_EQ(got, kExpected) << "rank " << r;
+      HIPCALL(hipStreamDestroy(streams[r]));
+      HIPCALL(hipFree(sbuf[r]));
+      HIPCALL(hipFree(rbuf[r]));
+    }
+
+    for (int r = 0; r < kChild; ++r) ASSERT_EQ(ncclCommDestroy(children[r]), ncclSuccess);
+    for (int r = 0; r < kParent; ++r) ASSERT_EQ(ncclCommDestroy(parents[r]), ncclSuccess);
+  }
+
+  /**
    * \brief Passing newcomm=NULL must be rejected with ncclInvalidArgument
    *        before any state is mutated. Does not require a GPU.
    * ******************************************************************************************/
