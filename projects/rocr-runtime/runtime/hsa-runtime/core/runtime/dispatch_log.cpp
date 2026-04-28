@@ -667,8 +667,10 @@ void enable_dispatch_log_for_queue_locked(core::Queue* q) {
 
   // GetProfilingDispatchRecords reports buf_bytes = record_count * 16
   // (the FW record-stride sized capacity). The kernel-side BO is
-  // oversized (count * 40) per the host KFD ABI; the drainer iterates
-  // 40-byte slots and only interprets the first 16 bytes per slot.
+  // oversized at count * 40 to satisfy host KFD ABI validation, but the
+  // FW writes — and the drainer reads — at the 16-byte FW record stride
+  // (kSlotStride). See dispatch_log.cpp:390 and the slot addressing at
+  // dispatch_log.cpp:400-402.
   const uint32_t record_count = buf_bytes / static_cast<uint32_t>(sizeof(mec_dispatch_record_16));
   if (record_count == 0 || (record_count & (record_count - 1)) != 0) {
     std::fprintf(stderr,
