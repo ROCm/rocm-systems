@@ -45,6 +45,20 @@ std::vector<const Instruction *> instructions_in_order(BasicBlock &block) {
   return false;
 }
 
+void remove_vector_kills(RegisterSet &kills) {
+  for (size_t i = 0; i < ISA_MAX_VGPRS; ++i)
+    kills.erase({RegClass::VGPR, static_cast<uint16_t>(i), 1});
+  for (size_t i = 0; i < ISA_MAX_ACC_VGPRS; ++i)
+    kills.erase({RegClass::ACC_VGPR, static_cast<uint16_t>(i), 1});
+}
+
+[[nodiscard]] RegisterSet kill_defs(const InstDefUse &du) {
+  RegisterSet kills = du.defs;
+  if (du.has_exec_masked_vector_def)
+    remove_vector_kills(kills);
+  return kills;
+}
+
 } // namespace
 
 std::vector<const BasicBlock *>
@@ -77,10 +91,11 @@ LivenessAnalysis::LivenessAnalysis(const std::vector<std::unique_ptr<BasicBlock>
     auto &state = liveness_[i];
     for (const auto &inst : block.instructions()) {
       InstDefUse du(inst, wf_size);
+      RegisterSet kills = kill_defs(du);
       RegisterSet upward_uses = du.uses;
       upward_uses -= state.kill;
       state.gen |= upward_uses;
-      state.kill |= du.defs;
+      state.kill |= kills;
     }
   }
 
@@ -132,7 +147,8 @@ LivenessAnalysis::LivenessAnalysis(const std::vector<std::unique_ptr<BasicBlock>
     for (auto it = insts.rbegin(); it != insts.rend(); ++it) {
       const Instruction *inst = *it;
       InstDefUse du(*inst, wf_size);
-      live -= du.defs;
+      RegisterSet kills = kill_defs(du);
+      live -= kills;
       live |= du.uses;
       live_before_.emplace(inst, live);
     }

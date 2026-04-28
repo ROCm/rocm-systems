@@ -43,6 +43,11 @@ SCmovkI32Sopk::SCmovkI32Sopk(const MachineInst *inst)
   num_dst_ = 1;
 }
 
+void SCmovkI32Sopk::implicit_uses(uint8_t wf_size, std::vector<RegisterRef> &uses) const {
+  (void)wf_size;
+  uses.push_back(RegisterRef{RegClass::SCC, 0, 1});
+}
+
 void SCmovkI32Sopk::execute_impl(amdgpu::Wavefront &wf) {
   if (wf.read_scc())
     sdst.write_scalar(wf, static_cast<uint32_t>(
@@ -58,6 +63,11 @@ SCmpkEqI32Sopk::SCmpkEqI32Sopk(const MachineInst *inst)
   src_operands_[1] = &simm16;
   num_src_ = 2;
   num_dst_ = 0;
+}
+
+void SCmpkEqI32Sopk::implicit_defs(uint8_t wf_size, std::vector<RegisterRef> &defs) const {
+  (void)wf_size;
+  defs.push_back(RegisterRef{RegClass::SCC, 0, 1});
 }
 
 void SCmpkEqI32Sopk::execute_impl(amdgpu::Wavefront &wf) {
@@ -77,6 +87,11 @@ SCmpkLgI32Sopk::SCmpkLgI32Sopk(const MachineInst *inst)
   num_dst_ = 0;
 }
 
+void SCmpkLgI32Sopk::implicit_defs(uint8_t wf_size, std::vector<RegisterRef> &defs) const {
+  (void)wf_size;
+  defs.push_back(RegisterRef{RegClass::SCC, 0, 1});
+}
+
 void SCmpkLgI32Sopk::execute_impl(amdgpu::Wavefront &wf) {
   int32_t s0 = static_cast<int32_t>(sdst.read_scalar(wf));
   int32_t imm = static_cast<int16_t>(simm16.encoding_value_);
@@ -92,6 +107,11 @@ SCmpkGtI32Sopk::SCmpkGtI32Sopk(const MachineInst *inst)
   src_operands_[1] = &simm16;
   num_src_ = 2;
   num_dst_ = 0;
+}
+
+void SCmpkGtI32Sopk::implicit_defs(uint8_t wf_size, std::vector<RegisterRef> &defs) const {
+  (void)wf_size;
+  defs.push_back(RegisterRef{RegClass::SCC, 0, 1});
 }
 
 void SCmpkGtI32Sopk::execute_impl(amdgpu::Wavefront &wf) {
@@ -111,6 +131,11 @@ SCmpkGeI32Sopk::SCmpkGeI32Sopk(const MachineInst *inst)
   num_dst_ = 0;
 }
 
+void SCmpkGeI32Sopk::implicit_defs(uint8_t wf_size, std::vector<RegisterRef> &defs) const {
+  (void)wf_size;
+  defs.push_back(RegisterRef{RegClass::SCC, 0, 1});
+}
+
 void SCmpkGeI32Sopk::execute_impl(amdgpu::Wavefront &wf) {
   int32_t s0 = static_cast<int32_t>(sdst.read_scalar(wf));
   int32_t imm = static_cast<int16_t>(simm16.encoding_value_);
@@ -126,6 +151,11 @@ SCmpkLtI32Sopk::SCmpkLtI32Sopk(const MachineInst *inst)
   src_operands_[1] = &simm16;
   num_src_ = 2;
   num_dst_ = 0;
+}
+
+void SCmpkLtI32Sopk::implicit_defs(uint8_t wf_size, std::vector<RegisterRef> &defs) const {
+  (void)wf_size;
+  defs.push_back(RegisterRef{RegClass::SCC, 0, 1});
 }
 
 void SCmpkLtI32Sopk::execute_impl(amdgpu::Wavefront &wf) {
@@ -145,6 +175,11 @@ SCmpkLeI32Sopk::SCmpkLeI32Sopk(const MachineInst *inst)
   num_dst_ = 0;
 }
 
+void SCmpkLeI32Sopk::implicit_defs(uint8_t wf_size, std::vector<RegisterRef> &defs) const {
+  (void)wf_size;
+  defs.push_back(RegisterRef{RegClass::SCC, 0, 1});
+}
+
 void SCmpkLeI32Sopk::execute_impl(amdgpu::Wavefront &wf) {
   int32_t s0 = static_cast<int32_t>(sdst.read_scalar(wf));
   int32_t imm = static_cast<int16_t>(simm16.encoding_value_);
@@ -160,6 +195,11 @@ SCmpkEqU32Sopk::SCmpkEqU32Sopk(const MachineInst *inst)
   src_operands_[1] = &simm16;
   num_src_ = 2;
   num_dst_ = 0;
+}
+
+void SCmpkEqU32Sopk::implicit_defs(uint8_t wf_size, std::vector<RegisterRef> &defs) const {
+  (void)wf_size;
+  defs.push_back(RegisterRef{RegClass::SCC, 0, 1});
 }
 
 void SCmpkEqU32Sopk::execute_impl(amdgpu::Wavefront &wf) {
@@ -179,6 +219,11 @@ SCmpkLgU32Sopk::SCmpkLgU32Sopk(const MachineInst *inst)
   num_dst_ = 0;
 }
 
+void SCmpkLgU32Sopk::implicit_defs(uint8_t wf_size, std::vector<RegisterRef> &defs) const {
+  (void)wf_size;
+  defs.push_back(RegisterRef{RegClass::SCC, 0, 1});
+}
+
 void SCmpkLgU32Sopk::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t s0 = sdst.read_scalar(wf);
   uint32_t imm = static_cast<uint32_t>(static_cast<uint16_t>(simm16.encoding_value_));
@@ -194,6 +239,11 @@ SCmpkGtU32Sopk::SCmpkGtU32Sopk(const MachineInst *inst)
   src_operands_[1] = &simm16;
   num_src_ = 2;
   num_dst_ = 0;
+}
+
+void SCmpkGtU32Sopk::implicit_defs(uint8_t wf_size, std::vector<RegisterRef> &defs) const {
+  (void)wf_size;
+  defs.push_back(RegisterRef{RegClass::SCC, 0, 1});
 }
 
 void SCmpkGtU32Sopk::execute_impl(amdgpu::Wavefront &wf) {
@@ -213,6 +263,11 @@ SCmpkGeU32Sopk::SCmpkGeU32Sopk(const MachineInst *inst)
   num_dst_ = 0;
 }
 
+void SCmpkGeU32Sopk::implicit_defs(uint8_t wf_size, std::vector<RegisterRef> &defs) const {
+  (void)wf_size;
+  defs.push_back(RegisterRef{RegClass::SCC, 0, 1});
+}
+
 void SCmpkGeU32Sopk::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t s0 = sdst.read_scalar(wf);
   uint32_t imm = static_cast<uint32_t>(static_cast<uint16_t>(simm16.encoding_value_));
@@ -228,6 +283,11 @@ SCmpkLtU32Sopk::SCmpkLtU32Sopk(const MachineInst *inst)
   src_operands_[1] = &simm16;
   num_src_ = 2;
   num_dst_ = 0;
+}
+
+void SCmpkLtU32Sopk::implicit_defs(uint8_t wf_size, std::vector<RegisterRef> &defs) const {
+  (void)wf_size;
+  defs.push_back(RegisterRef{RegClass::SCC, 0, 1});
 }
 
 void SCmpkLtU32Sopk::execute_impl(amdgpu::Wavefront &wf) {
@@ -247,6 +307,11 @@ SCmpkLeU32Sopk::SCmpkLeU32Sopk(const MachineInst *inst)
   num_dst_ = 0;
 }
 
+void SCmpkLeU32Sopk::implicit_defs(uint8_t wf_size, std::vector<RegisterRef> &defs) const {
+  (void)wf_size;
+  defs.push_back(RegisterRef{RegClass::SCC, 0, 1});
+}
+
 void SCmpkLeU32Sopk::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t s0 = sdst.read_scalar(wf);
   uint32_t imm = static_cast<uint32_t>(static_cast<uint16_t>(simm16.encoding_value_));
@@ -262,6 +327,11 @@ SAddkI32Sopk::SAddkI32Sopk(const MachineInst *inst)
   src_operands_[1] = &simm16;
   num_src_ = 2;
   num_dst_ = 1;
+}
+
+void SAddkI32Sopk::implicit_defs(uint8_t wf_size, std::vector<RegisterRef> &defs) const {
+  (void)wf_size;
+  defs.push_back(RegisterRef{RegClass::SCC, 0, 1});
 }
 
 void SAddkI32Sopk::execute_impl(amdgpu::Wavefront &wf) {

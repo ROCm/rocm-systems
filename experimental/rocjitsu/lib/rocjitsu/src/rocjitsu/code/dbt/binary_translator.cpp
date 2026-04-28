@@ -16,9 +16,16 @@
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 
+#include "rocjitsu/base/rj_compiler.h"
+RJ_DIAGNOSTIC_PUSH
+RJ_DIAGNOSTIC_IGNORE_PEDANTIC
+#include "hsa/AMDHSAKernelDescriptor.h"
+RJ_DIAGNOSTIC_POP
+
 #include <cassert>
 #include <climits>
 #include <cstring>
+#include <optional>
 
 namespace rocjitsu {
 
@@ -37,6 +44,83 @@ LegalizationLookupFn select_legalization(rj_code_arch_t guest, rj_code_arch_t ho
     };
   }
   return nullptr;
+}
+
+[[nodiscard]] bool is_cdna_arch(rj_code_arch_t arch) {
+  return arch == ROCJITSU_CODE_ARCH_CDNA1 || arch == ROCJITSU_CODE_ARCH_CDNA2 ||
+         arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4;
+}
+
+[[nodiscard]] bool is_rdna_arch(rj_code_arch_t arch) {
+  return arch == ROCJITSU_CODE_ARCH_RDNA1 || arch == ROCJITSU_CODE_ARCH_RDNA2 ||
+         arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5 ||
+         arch == ROCJITSU_CODE_ARCH_RDNA4;
+}
+
+[[nodiscard]] std::optional<uint8_t>
+wavefront_size_from_kernel_descriptors(const AmdGpuCodeObject &obj) {
+  using KD = rocr::llvm::amdhsa::kernel_descriptor_t;
+  namespace kd = rocr::llvm::amdhsa;
+
+  const auto *image = reinterpret_cast<const uint8_t *>(obj.image_data());
+  const size_t image_size = obj.image_size();
+  if (image == nullptr || image_size < sizeof(Elf64_Ehdr))
+    return std::nullopt;
+
+  const auto *ehdr = reinterpret_cast<const Elf64_Ehdr *>(image);
+  if (ehdr->e_shoff + static_cast<uint64_t>(ehdr->e_shnum) * sizeof(Elf64_Shdr) > image_size)
+    return std::nullopt;
+
+  const auto *shdr = reinterpret_cast<const Elf64_Shdr *>(image + ehdr->e_shoff);
+  std::optional<uint8_t> wf_size;
+  for (int i = 0; i < ehdr->e_shnum; ++i) {
+    if (shdr[i].sh_type != SHT_SYMTAB && shdr[i].sh_type != SHT_DYNSYM)
+      continue;
+    if (shdr[i].sh_offset + shdr[i].sh_size > image_size)
+      continue;
+    if (shdr[i].sh_entsize == 0)
+      continue;
+
+    const auto *symtab = reinterpret_cast<const Elf64_Sym *>(image + shdr[i].sh_offset);
+    const size_t nsyms = shdr[i].sh_size / sizeof(Elf64_Sym);
+    for (size_t j = 0; j < nsyms; ++j) {
+      if (symtab[j].st_size != sizeof(KD))
+        continue;
+      const uint16_t sec_idx = symtab[j].st_shndx;
+      if (sec_idx >= ehdr->e_shnum)
+        continue;
+      if (symtab[j].st_value < shdr[sec_idx].sh_addr)
+        continue;
+
+      const uint64_t file_off =
+          shdr[sec_idx].sh_offset + (symtab[j].st_value - shdr[sec_idx].sh_addr);
+      if (file_off + sizeof(KD) > image_size)
+        continue;
+
+      const auto *desc = reinterpret_cast<const KD *>(image + file_off);
+      const bool wave32 = AMDHSA_BITS_GET(desc->kernel_code_properties,
+                                          kd::KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32);
+      if (!wave32)
+        return 64;
+      wf_size = 32;
+    }
+  }
+
+  return wf_size;
+}
+
+[[nodiscard]] uint8_t liveness_wavefront_size(const AmdGpuCodeObject &obj,
+                                              rj_code_arch_t guest_arch) {
+  if (is_cdna_arch(guest_arch))
+    return 64;
+
+  if (is_rdna_arch(guest_arch)) {
+    if (auto wf_size = wavefront_size_from_kernel_descriptors(obj))
+      return *wf_size;
+    return 32;
+  }
+
+  return 64;
 }
 
 } // namespace
@@ -70,7 +154,7 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
     return result;
   }
   auto blocks = BasicBlock::build(obj, *decoder);
-  LivenessAnalysis liveness(blocks, 64);
+  LivenessAnalysis liveness(blocks, liveness_wavefront_size(obj, guest_arch_));
 
   std::vector<uint8_t> translated_text(text.size(), 0);
 

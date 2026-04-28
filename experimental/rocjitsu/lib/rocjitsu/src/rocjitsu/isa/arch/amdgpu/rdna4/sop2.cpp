@@ -1502,6 +1502,11 @@ SCselectB32Sop2::SCselectB32Sop2(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
 }
 
+void SCselectB32Sop2::implicit_uses(uint8_t wf_size, std::vector<RegisterRef> &uses) const {
+  (void)wf_size;
+  uses.push_back(RegisterRef{RegClass::SCC, 0, 1});
+}
+
 void SCselectB32Sop2::execute_impl(amdgpu::Wavefront &wf) {
   sdst.write_scalar(wf, wf.read_scc() ? ssrc0.read_scalar(wf) : ssrc1.read_scalar(wf));
 }
@@ -1525,6 +1530,11 @@ SCselectB64Sop2::SCselectB64Sop2(const MachineInst *inst)
     ssrc1 = Operand(
         64, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+}
+
+void SCselectB64Sop2::implicit_uses(uint8_t wf_size, std::vector<RegisterRef> &uses) const {
+  (void)wf_size;
+  uses.push_back(RegisterRef{RegClass::SCC, 0, 1});
 }
 
 void SCselectB64Sop2::execute_impl(amdgpu::Wavefront &wf) {

@@ -33,6 +33,7 @@ class SCmovkI32Sopk : public Sopk {
 public:
   SCmovkI32Sopk(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(uint8_t wf_size, std::vector<RegisterRef> &uses) const override;
   Operand sdst;
   Operand simm16;
 };

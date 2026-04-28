@@ -31,6 +31,74 @@ from amdisa.gpuisa import InstEncoding, Instruction, IsaSpec, OperandNamePattern
 from amdisa.semantics import InstructionSemantics, SemanticsSpec
 
 
+def _exec_mask_ref_expr() -> str:
+    return (
+        'RegisterRef{RegClass::EXEC, 0, '
+        'static_cast<uint8_t>(wf_size > 32 ? 2 : 1)}'
+    )
+
+
+def _vcc_ref_expr() -> str:
+    return (
+        'RegisterRef{RegClass::VCC, 0, '
+        'static_cast<uint8_t>(wf_size > 32 ? 2 : 1)}'
+    )
+
+
+def _append_unique(refs: list[str], ref: str) -> None:
+    if ref not in refs:
+        refs.append(ref)
+
+
+def _implicit_def_ref_exprs(inst_sem: InstructionSemantics | None) -> list[str]:
+    refs: list[str] = []
+    if not inst_sem:
+        return refs
+
+    if (
+        (inst_sem.sets_scc and inst_sem.sets_scc != 'none')
+        or inst_sem.semantic_class == 'scalar_saveexec'
+        or inst_sem.semantic_class in (
+            'scalar_cmp',
+            'scalar_cmpk',
+            'scalar_bitcmp',
+            'scalar_addk',
+        )
+    ):
+        _append_unique(refs, 'RegisterRef{RegClass::SCC, 0, 1}')
+
+    if inst_sem.semantic_class in ('scalar_saveexec', 'scalar_wrexec'):
+        _append_unique(refs, _exec_mask_ref_expr())
+
+    return refs
+
+
+def _implicit_use_ref_exprs(inst_sem: InstructionSemantics | None) -> list[str]:
+    refs: list[str] = []
+    if not inst_sem:
+        return refs
+
+    cond = inst_sem.branch_condition
+    if inst_sem.semantic_class == 'cbranch' and cond:
+        if cond.startswith('exec'):
+            _append_unique(refs, _exec_mask_ref_expr())
+        elif cond.startswith('vcc'):
+            _append_unique(refs, _vcc_ref_expr())
+        elif cond.startswith('scc'):
+            _append_unique(refs, 'RegisterRef{RegClass::SCC, 0, 1}')
+
+    if inst_sem.semantic_class in ('scalar_saveexec', 'scalar_wrexec'):
+        _append_unique(refs, _exec_mask_ref_expr())
+
+    if inst_sem.semantic_class in ('scalar_cmov', 'scalar_cmovk', 'scalar_cselect'):
+        _append_unique(refs, 'RegisterRef{RegClass::SCC, 0, 1}')
+
+    if inst_sem.semantic_class == 'scalar_binop' and inst_sem.operation in ('addc', 'subb'):
+        _append_unique(refs, 'RegisterRef{RegClass::SCC, 0, 1}')
+
+    return refs
+
+
 @dataclass
 class CodegenConfig:
     """Configuration for C++ code generation paths and namespaces.
@@ -5065,6 +5133,8 @@ class CodeGenerator:
                          if op.operand_type == 'OPR_LABEL'),
                         None,
                     )
+                    implicit_def_refs = _implicit_def_ref_exprs(inst_sem)
+                    implicit_use_refs = _implicit_use_ref_exprs(inst_sem)
                     if (
                         inst_sem
                         and inst_sem.semantic_class in ('branch', 'cbranch')
@@ -5075,22 +5145,14 @@ class CodeGenerator:
                                 'std::optional<int64_t> branch_offset_bytes() const override'
                             )
                         )
-                    if (
-                        inst_sem
-                        and inst_sem.sets_scc
-                        and inst_sem.sets_scc != 'none'
-                    ):
+                    if implicit_def_refs:
                         public_members.append(
                             cgen.Statement(
                                 'void implicit_defs(uint8_t wf_size, '
                                 'std::vector<RegisterRef> &defs) const override'
                             )
                         )
-                    if (
-                        inst_sem
-                        and inst_sem.semantic_class == 'cbranch'
-                        and inst_sem.branch_condition
-                    ):
+                    if implicit_use_refs:
                         public_members.append(
                             cgen.Statement(
                                 'void implicit_uses(uint8_t wf_size, '
@@ -5395,47 +5457,42 @@ class CodeGenerator:
                             f'static_cast<int16_t>({label_operand}.encoding_value_)) * 4;\n'
                             f'}}'
                         ))
-                    if (
-                        inst_sem
-                        and inst_sem.sets_scc
-                        and inst_sem.sets_scc != 'none'
-                    ):
+                    implicit_def_refs = _implicit_def_ref_exprs(inst_sem)
+                    implicit_use_refs = _implicit_use_ref_exprs(inst_sem)
+                    if implicit_def_refs:
+                        wf_size_use = (
+                            ''
+                            if any('wf_size' in ref for ref in implicit_def_refs)
+                            else '  (void)wf_size;\n'
+                        )
+                        body = ''.join(
+                            f'  defs.push_back({ref});\n'
+                            for ref in implicit_def_refs
+                        )
                         class_func_impls.append(cgen.Line(
                             f'void {inst.fmt_name}::implicit_defs('
                             f'uint8_t wf_size, std::vector<RegisterRef> &defs) const {{\n'
-                            f'  (void)wf_size;\n'
-                            f'  defs.push_back(RegisterRef{{RegClass::SCC, 0, 1}});\n'
+                            f'{wf_size_use}'
+                            f'{body}'
                             f'}}'
                         ))
-                    if (
-                        inst_sem
-                        and inst_sem.semantic_class == 'cbranch'
-                        and inst_sem.branch_condition
-                    ):
-                        cond = inst_sem.branch_condition
-                        if cond.startswith('exec'):
-                            ref_expr = (
-                                'RegisterRef{RegClass::EXEC, 0, '
-                                'static_cast<uint8_t>(wf_size > 32 ? 2 : 1)}'
-                            )
-                        elif cond.startswith('vcc'):
-                            ref_expr = (
-                                'RegisterRef{RegClass::VCC, 0, '
-                                'static_cast<uint8_t>(wf_size > 32 ? 2 : 1)}'
-                            )
-                        elif cond.startswith('scc'):
-                            ref_expr = 'RegisterRef{RegClass::SCC, 0, 1}'
-                        else:
-                            ref_expr = ''
-                        if ref_expr:
-                            wf_size_use = '' if 'wf_size' in ref_expr else '  (void)wf_size;\n'
-                            class_func_impls.append(cgen.Line(
-                                f'void {inst.fmt_name}::implicit_uses('
-                                f'uint8_t wf_size, std::vector<RegisterRef> &uses) const {{\n'
-                                f'{wf_size_use}'
-                                f'  uses.push_back({ref_expr});\n'
-                                f'}}'
-                            ))
+                    if implicit_use_refs:
+                        wf_size_use = (
+                            ''
+                            if any('wf_size' in ref for ref in implicit_use_refs)
+                            else '  (void)wf_size;\n'
+                        )
+                        body = ''.join(
+                            f'  uses.push_back({ref});\n'
+                            for ref in implicit_use_refs
+                        )
+                        class_func_impls.append(cgen.Line(
+                            f'void {inst.fmt_name}::implicit_uses('
+                            f'uint8_t wf_size, std::vector<RegisterRef> &uses) const {{\n'
+                            f'{wf_size_use}'
+                            f'{body}'
+                            f'}}'
+                        ))
                     class_func_impls.append(exec_impl)
 
                 # Build include lists for .cpp files

@@ -29,8 +29,9 @@ public:
   /// @param wf_size Wavefront width in lanes; controls EXEC/VCC pair width.
   InstDefUse(const Instruction &inst, uint8_t wf_size);
 
-  RegisterSet defs; ///< Registers overwritten by the instruction.
-  RegisterSet uses; ///< Registers read before the instruction writes defs.
+  RegisterSet defs;                        ///< Registers overwritten by the instruction.
+  RegisterSet uses;                        ///< Registers read before the instruction writes defs.
+  bool has_exec_masked_vector_def = false; ///< True if any vector def is predicated by EXEC.
 };
 
 } // namespace rocjitsu

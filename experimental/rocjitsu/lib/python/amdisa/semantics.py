@@ -287,7 +287,8 @@ def _derive_sop1(name: str) -> InstructionSemantics | None:
     if m:
         op = m.group(1).lower()
         return InstructionSemantics(name, 'scalar_saveexec',
-                                   operation=op, data_type=m.group(2).lower())
+                                   operation=op, data_type=m.group(2).lower(),
+                                   sets_scc='nonzero')
     m = re.match(r'S_(\w+)_WREXEC_(B32|B64)', name)
     if m:
         op = m.group(1).lower()

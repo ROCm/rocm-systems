@@ -56,6 +56,11 @@ SCmovkI32Sopk::SCmovkI32Sopk(const MachineInst *inst)
   num_dst_ = 1;
 }
 
+void SCmovkI32Sopk::implicit_uses(uint8_t wf_size, std::vector<RegisterRef> &uses) const {
+  (void)wf_size;
+  uses.push_back(RegisterRef{RegClass::SCC, 0, 1});
+}
+
 void SCmovkI32Sopk::execute_impl(amdgpu::Wavefront &wf) {
   if (wf.read_scc())
     sdst.write_scalar(wf, static_cast<uint32_t>(

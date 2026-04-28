@@ -26,6 +26,7 @@ class SCmovkI32Sopk : public Sopk {
 public:
   SCmovkI32Sopk(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(uint8_t wf_size, std::vector<RegisterRef> &uses) const override;
   Operand sdst;
   Operand simm16;
 };
@@ -34,6 +35,7 @@ class SCmpkEqI32Sopk : public Sopk {
 public:
   SCmpkEqI32Sopk(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_defs(uint8_t wf_size, std::vector<RegisterRef> &defs) const override;
   Operand sdst;
   Operand simm16;
 };
@@ -42,6 +44,7 @@ class SCmpkLgI32Sopk : public Sopk {
 public:
   SCmpkLgI32Sopk(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_defs(uint8_t wf_size, std::vector<RegisterRef> &defs) const override;
   Operand sdst;
   Operand simm16;
 };
@@ -50,6 +53,7 @@ class SCmpkGtI32Sopk : public Sopk {
 public:
   SCmpkGtI32Sopk(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_defs(uint8_t wf_size, std::vector<RegisterRef> &defs) const override;
   Operand sdst;
   Operand simm16;
 };
@@ -58,6 +62,7 @@ class SCmpkGeI32Sopk : public Sopk {
 public:
   SCmpkGeI32Sopk(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_defs(uint8_t wf_size, std::vector<RegisterRef> &defs) const override;
   Operand sdst;
   Operand simm16;
 };
@@ -66,6 +71,7 @@ class SCmpkLtI32Sopk : public Sopk {
 public:
   SCmpkLtI32Sopk(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_defs(uint8_t wf_size, std::vector<RegisterRef> &defs) const override;
   Operand sdst;
   Operand simm16;
 };
@@ -74,6 +80,7 @@ class SCmpkLeI32Sopk : public Sopk {
 public:
   SCmpkLeI32Sopk(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_defs(uint8_t wf_size, std::vector<RegisterRef> &defs) const override;
   Operand sdst;
   Operand simm16;
 };
@@ -82,6 +89,7 @@ class SCmpkEqU32Sopk : public Sopk {
 public:
   SCmpkEqU32Sopk(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_defs(uint8_t wf_size, std::vector<RegisterRef> &defs) const override;
   Operand sdst;
   Operand simm16;
 };
@@ -90,6 +98,7 @@ class SCmpkLgU32Sopk : public Sopk {
 public:
   SCmpkLgU32Sopk(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_defs(uint8_t wf_size, std::vector<RegisterRef> &defs) const override;
   Operand sdst;
   Operand simm16;
 };
@@ -98,6 +107,7 @@ class SCmpkGtU32Sopk : public Sopk {
 public:
   SCmpkGtU32Sopk(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_defs(uint8_t wf_size, std::vector<RegisterRef> &defs) const override;
   Operand sdst;
   Operand simm16;
 };
@@ -106,6 +116,7 @@ class SCmpkGeU32Sopk : public Sopk {
 public:
   SCmpkGeU32Sopk(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_defs(uint8_t wf_size, std::vector<RegisterRef> &defs) const override;
   Operand sdst;
   Operand simm16;
 };
@@ -114,6 +125,7 @@ class SCmpkLtU32Sopk : public Sopk {
 public:
   SCmpkLtU32Sopk(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_defs(uint8_t wf_size, std::vector<RegisterRef> &defs) const override;
   Operand sdst;
   Operand simm16;
 };
@@ -122,6 +134,7 @@ class SCmpkLeU32Sopk : public Sopk {
 public:
   SCmpkLeU32Sopk(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_defs(uint8_t wf_size, std::vector<RegisterRef> &defs) const override;
   Operand sdst;
   Operand simm16;
 };
@@ -130,6 +143,7 @@ class SAddkI32Sopk : public Sopk {
 public:
   SAddkI32Sopk(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_defs(uint8_t wf_size, std::vector<RegisterRef> &defs) const override;
   Operand sdst;
   Operand simm16;
 };
