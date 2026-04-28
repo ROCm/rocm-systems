@@ -112,7 +112,9 @@ class FileHandle:
             os.close(self._fd)
             self._fd = None
 
-    def read(self, buffer: Buffer, size: int, file_offset: int, buffer_offset: int) -> int:
+    def read(
+        self, buffer: Buffer, size: int, file_offset: int, buffer_offset: int
+    ) -> int:
         if self._handle is None:
             raise RuntimeError("The FileHandle is not open.")
         bytes_read, extra_err = hipFileRead(
@@ -128,7 +130,9 @@ class FileHandle:
             raise HipFileException(-bytes_read, extra_err)
         return bytes_read
 
-    def write(self, buffer: Buffer, size: int, file_offset: int, buffer_offset: int) -> int:
+    def write(
+        self, buffer: Buffer, size: int, file_offset: int, buffer_offset: int
+    ) -> int:
         if self._handle is None:
             raise RuntimeError("The FileHandle is not open.")
         bytes_written, extra_err = hipFileWrite(

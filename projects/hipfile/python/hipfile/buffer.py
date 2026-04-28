@@ -18,7 +18,11 @@ if TYPE_CHECKING:
 class Buffer:
 
     @classmethod
-    def from_ctypes_void_p(cls, ctypes_void_p: c_void_p, length: int, flags: int) -> Buffer:
+    def from_ctypes_void_p(
+        cls, ctypes_void_p: c_void_p, length: int, flags: int
+    ) -> Buffer:
+        if ctypes_void_p.value is None:
+            raise ValueError("Cannot pass in a null pointer.")
         return cls(ctypes_void_p.value, length, flags)
 
     def __init__(self, buffer_ptr: int, length: int, flags: int) -> None:
