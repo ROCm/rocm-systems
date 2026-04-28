@@ -404,8 +404,9 @@ std::string LocateConfigFile() {
     }
   }
 
-  // Fallback: return install path even if not found
-  return "../share/rocrtst/platform_config.yaml";
+  // Fallback: return install path based on executable location
+  std::string exeDir = GetExecutableDir();
+  return exeDir + "/../share/rocrtst/platform_config.yaml";
 }
 
 // Load the specified kernel code from the specified file, inspect and fill
