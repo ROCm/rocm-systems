@@ -1503,6 +1503,17 @@ hsa_status_t HSA_API hsa_amd_signal_get_event_id(hsa_signal_t signal, uint32_t *
   ROCR_TRACE_API_RET_STATUS(amdExtTable->hsa_amd_signal_get_event_id_fn(signal, event_id));
 }
 
+hsa_status_t HSA_API hsa_amd_queue_iterate(
+    hsa_status_t (*callback)(hsa_queue_t* queue, void* data), void* data) { const uint64_t __rocm_corr = rocm_trace_next_corr_id(); rocm_trace_emit_hsa_api_enter(__func__, __rocm_corr);
+  ROCR_TRACE_API_RET_STATUS(amdExtTable->hsa_amd_queue_iterate_fn(callback, data));
+}
+
+hsa_status_t HSA_API hsa_amd_profiling_get_dispatch_records(
+    hsa_queue_t* queue, void** buffer_base, uint32_t* buffer_size, volatile uint32_t** write_ptr) { const uint64_t __rocm_corr = rocm_trace_next_corr_id(); rocm_trace_emit_hsa_api_enter(__func__, __rocm_corr);
+  ROCR_TRACE_API_RET_STATUS(amdExtTable->hsa_amd_profiling_get_dispatch_records_fn(queue, buffer_base, buffer_size,
+                                                                                   write_ptr));
+}
+
 // Tools only table interfaces.
 namespace rocr {
 

@@ -72,9 +72,10 @@
  * - 1.19 - hsa_amd_agent_preload
  * - 1.20 - Memory batch discard API: hsa_amd_svm_discard_batch_async
  * - 1.21 - hsa_amd_signal_get_event_id
+ * - 1.22 - hsa_amd_queue_iterate, hsa_amd_profiling_get_dispatch_records
  */
 #define HSA_AMD_INTERFACE_VERSION_MAJOR 1
-#define HSA_AMD_INTERFACE_VERSION_MINOR 21
+#define HSA_AMD_INTERFACE_VERSION_MINOR 22
 
 #ifdef __cplusplus
 extern "C" {
@@ -4719,6 +4720,59 @@ typedef enum hsa_amd_log_flag_s {
  * initialized.
  */
 hsa_status_t hsa_amd_enable_logging(uint8_t* flags, void* file);
+
+/**
+ * @brief Iterate over all live AQL queues across all GPU agents.
+ *
+ * @param[in] callback Function called once per queue. Return
+ * ::HSA_STATUS_INFO_BREAK to stop early, ::HSA_STATUS_SUCCESS to continue.
+ *
+ * @param[in] data User data forwarded to @p callback.
+ *
+ * @retval ::HSA_STATUS_SUCCESS Iteration completed or was stopped via
+ * ::HSA_STATUS_INFO_BREAK.
+ *
+ * @retval ::HSA_STATUS_ERROR_INVALID_ARGUMENT @p callback is NULL.
+ *
+ * @retval ::HSA_STATUS_ERROR_NOT_INITIALIZED The HSA runtime has not been
+ * initialized.
+ */
+hsa_status_t HSA_API hsa_amd_queue_iterate(
+    hsa_status_t (*callback)(hsa_queue_t* queue, void* data),
+    void* data);
+
+/**
+ * @brief Retrieve the MEC dispatch record ring buffer for a queue.
+ *
+ * The ring buffer is allocated by ::hsa_amd_profiling_set_profiler_enabled
+ * and is written by the MEC firmware for every dispatch when profiling is
+ * enabled.
+ *
+ * @param[in] queue Queue handle.
+ *
+ * @param[out] buffer_base Start of the ring buffer (GPU-visible system memory).
+ *
+ * @param[out] buffer_size Size of the ring buffer in bytes.
+ *
+ * @param[out] write_ptr Pointer to the firmware write index (record count,
+ * monotonically incrementing). The caller computes the slot as
+ * @c *write_ptr % (buffer_size / record_size).
+ *
+ * @retval ::HSA_STATUS_SUCCESS The ring buffer info has been returned.
+ *
+ * @retval ::HSA_STATUS_ERROR_NOT_INITIALIZED Profiling has not been enabled
+ * on this queue or the ring buffer was not allocated.
+ *
+ * @retval ::HSA_STATUS_ERROR_INVALID_ARGUMENT A parameter is NULL.
+ *
+ * @retval ::HSA_STATUS_ERROR_INVALID_QUEUE @p queue is not a hardware AQL
+ * queue.
+ */
+hsa_status_t HSA_API hsa_amd_profiling_get_dispatch_records(
+    hsa_queue_t* queue,
+    void** buffer_base,
+    uint32_t* buffer_size,
+    volatile uint32_t** write_ptr);
 
 /** @} */
 

@@ -485,6 +485,8 @@ void HsaApiTable::UpdateAmdExts() {
   amd_ext_api.hsa_amd_memory_async_batch_copy_fn = AMD::hsa_amd_memory_async_batch_copy;
   amd_ext_api.hsa_amd_agent_preload_fn = AMD::hsa_amd_agent_preload;
   amd_ext_api.hsa_amd_signal_get_event_id_fn = AMD::hsa_amd_signal_get_event_id;
+  amd_ext_api.hsa_amd_queue_iterate_fn = AMD::hsa_amd_queue_iterate;
+  amd_ext_api.hsa_amd_profiling_get_dispatch_records_fn = AMD::hsa_amd_profiling_get_dispatch_records;
 }
 
 void HsaApiTable::UpdateTools() {
