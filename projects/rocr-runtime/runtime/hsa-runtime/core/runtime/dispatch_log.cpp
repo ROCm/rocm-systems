@@ -402,21 +402,32 @@ bool drain_one_queue(queue_drain_state& qs, bool force_emit) {
         static_cast<char*>(qs.ring_base) + slot * kSlotStride);
 
     // Sentinel: record_type == 0 means "empty / not yet written by FW".
-    uint32_t rt = rec->record_type;
-    if (rt == 0) break;
-    // Defend against torn writes: re-read with an acquire fence so we are
-    // sure the rest of the record (timestamps, dispatch_idx) are visible
-    // before we consume them. If the slot is zero on the second read, the
-    // first read raced with FW's pre-publication zero state and we should
-    // wait for the next pass.
-    std::atomic_thread_fence(std::memory_order_acquire);
-    rt = rec->record_type;
+    //
+    // FW publish atomicity contract (per core/inc/mec_dispatch_record.h):
+    // each 16-byte mec_dispatch_record is written by a single GFX
+    // BUFFER_STORE_DWORDX4 (4 DWords = single TC write transaction). So
+    // any non-zero record_type observation implies the entire 16-byte
+    // record (ts_lo, ts_hi, record_type, dispatch_idx) is coherent. A
+    // partial / torn observation of "non-zero record_type but stale body"
+    // is not possible under that FW contract.
+    //
+    // We still use an acquire on the record_type load so the subsequent
+    // body loads (and the slot memset) are not reordered above it; this
+    // turns the type-load into a proper atomic acquire instead of a
+    // plain (data-racy) load on memory another agent writes
+    // concurrently. The body fields are read with relaxed atomicity for
+    // the same reason — to avoid UB from plain loads on FW-written
+    // memory — but no further fence is needed because the acquire on
+    // record_type already happens-before them.
+    uint32_t rt = __atomic_load_n(&rec->record_type, __ATOMIC_ACQUIRE);
     if (rt == 0) break;
 
     // Snapshot the rest of the record locally before zeroing the slot.
-    const uint32_t ts_lo        = rec->ts_lo;
-    const uint32_t ts_hi        = rec->ts_hi;
-    const uint32_t dispatch_idx = rec->dispatch_idx;
+    // Relaxed atomic loads suffice (see comment above) — the acquire on
+    // record_type above already orders these.
+    const uint32_t ts_lo        = __atomic_load_n(&rec->ts_lo, __ATOMIC_RELAXED);
+    const uint32_t ts_hi        = __atomic_load_n(&rec->ts_hi, __ATOMIC_RELAXED);
+    const uint32_t dispatch_idx = __atomic_load_n(&rec->dispatch_idx, __ATOMIC_RELAXED);
     const uint64_t gpu_ts       = (static_cast<uint64_t>(ts_hi) << 32) | ts_lo;
 
     // Zero the consumed slot so a wraparound rewrite by FW (next time
