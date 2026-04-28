@@ -176,13 +176,11 @@ if(HIP_ENABLE_ROCPROFILER_REGISTER)
    set(HIP_RUNTIME_ROCM_PKG_DEPENDENCIES "${HIP_RUNTIME_ROCM_PKG_DEPENDENCIES}, rocprofiler-register")
 endif()
 
-# Add LTTng-UST runtime dependency. The .so links against liblttng-ust.so.1
-# whenever HIP_ENABLE_LTTNG_UST=ON (the default), so the package must
-# declare the dep in the same PR that introduces the link dep.
-if(HIP_ENABLE_LTTNG_UST)
-   set(HIP_RUNTIME_DEB_LTTNG_DEPENDENCIES "liblttng-ust1 (>= 2.13)")
-   set(HIP_RUNTIME_RPM_LTTNG_DEPENDENCIES "lttng-ust >= 2.13")
-endif()
+# LTTng-UST runtime libraries are now bundled inside the package under
+# ${CMAKE_INSTALL_LIBDIR}/lttng/ (see hipamd/src/CMakeLists.txt install
+# rule). libamdhip64.so resolves liblttng-ust.so.1 there via RPATH
+# $ORIGIN/lttng, so the .deb/.rpm no longer requires the host distro's
+# lttng-ust package to be installed.
 
 set(HIP_RUNTIME_DEB_STDPKG_DEPENDENCIES "libnuma1, libstdc++6, libc6")
 
@@ -194,9 +192,6 @@ else()
 endif()
 
 set(CPACK_DEBIAN_BINARY_PACKAGE_DEPENDS "${HIP_RUNTIME_ROCM_PKG_DEPENDENCIES}, ${HIP_RUNTIME_DEB_STDPKG_DEPENDENCIES}")
-if(HIP_ENABLE_LTTNG_UST)
-   set(CPACK_DEBIAN_BINARY_PACKAGE_DEPENDS "${CPACK_DEBIAN_BINARY_PACKAGE_DEPENDS}, ${HIP_RUNTIME_DEB_LTTNG_DEPENDENCIES}")
-endif()
 
 set(CPACK_DEBIAN_BINARY_PACKAGE_PROVIDES "hip-rocclr (= ${CPACK_PACKAGE_VERSION})")
 set(CPACK_DEBIAN_BINARY_PACKAGE_REPLACES "hip-rocclr (= ${CPACK_PACKAGE_VERSION})")
@@ -219,9 +214,6 @@ else()
 endif()
 
 set(CPACK_RPM_BINARY_PACKAGE_REQUIRES "${HIP_RUNTIME_ROCM_PKG_DEPENDENCIES}, ${HIP_RUNTIME_RPM_STDPKG_DEPENDENCIES}")
-if(HIP_ENABLE_LTTNG_UST)
-   set(CPACK_RPM_BINARY_PACKAGE_REQUIRES "${CPACK_RPM_BINARY_PACKAGE_REQUIRES}, ${HIP_RUNTIME_RPM_LTTNG_DEPENDENCIES}")
-endif()
 
 set(CPACK_RPM_BINARY_PACKAGE_PROVIDES "hip-rocclr = ${HIP_BASE_VERSION}")
 set(CPACK_RPM_BINARY_PACKAGE_OBSOLETES "hip-rocclr = ${HIP_BASE_VERSION}")

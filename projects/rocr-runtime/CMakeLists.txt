@@ -115,12 +115,11 @@ if (HSA_DEP_ROCPROFILER_REGISTER)
   string(APPEND CPACK_RPM_BINARY_PACKAGE_REQUIRES " rocprofiler-register")
 endif()
 
-# LTTng-UST runtime dep — added in the same change as the link-dep so the
-# binary's NEEDED libliblttng-ust.so.1 entry always has a package guarantee.
-if (HSA_DEP_LTTNG_UST)
-  string(APPEND CPACK_DEBIAN_BINARY_PACKAGE_DEPENDS ", liblttng-ust1 (>= 2.13)")
-  string(APPEND CPACK_RPM_BINARY_PACKAGE_REQUIRES " lttng-ust >= 2.13")
-endif()
+# LTTng-UST runtime libraries are bundled inside the package under
+# ${CMAKE_INSTALL_LIBDIR}/lttng/ (see runtime/hsa-runtime/CMakeLists.txt
+# install rule). libhsa-runtime64.so resolves liblttng-ust.so.1 there
+# via RPATH $ORIGIN/lttng, so the package no longer requires a system
+# lttng-ust install.
 
 if (NOT DEFINED BUILD_THUNK_VIRTIO)
   set(BUILD_THUNK_VIRTIO OFF)
@@ -264,9 +263,7 @@ endif()
 if (HSA_DEP_ROCPROFILER_REGISTER)
   string(APPEND CPACK_DEBIAN_BINARY_PACKAGE_DEPENDS ", rocprofiler-register")
 endif()
-if (HSA_DEP_LTTNG_UST)
-  string(APPEND CPACK_DEBIAN_BINARY_PACKAGE_DEPENDS ", liblttng-ust1 (>= 2.13)")
-endif()
+# LTTng-UST: bundled vendored under ${CMAKE_INSTALL_LIBDIR}/lttng/.
 # Declare package relationships (hsa-ext-rocr-dev is a legacy package that we subsume)
 set(CPACK_DEBIAN_DEV_PACKAGE_BREAKS "hsa-ext-rocr-dev")
 
@@ -339,9 +336,7 @@ endif()
 if (HSA_DEP_ROCPROFILER_REGISTER)
   string(APPEND CPACK_RPM_BINARY_PACKAGE_REQUIRES " rocprofiler-register")
 endif()
-if (HSA_DEP_LTTNG_UST)
-  string(APPEND CPACK_RPM_BINARY_PACKAGE_REQUIRES " lttng-ust >= 2.13")
-endif()
+# LTTng-UST: bundled vendored under ${CMAKE_INSTALL_LIBDIR}/lttng/.
 
 if(NOT BUILD_SHARED_LIBS)
   # Suffix package name with static
