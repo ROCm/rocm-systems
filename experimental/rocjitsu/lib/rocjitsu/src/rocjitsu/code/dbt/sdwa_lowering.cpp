@@ -6,7 +6,7 @@
 
 #include "rocjitsu/code/dbt/sdwa_lowering.h"
 
-#include "rocjitsu/analysis/register_liveness.h"
+#include "rocjitsu/analysis/liveness.h"
 #include "rocjitsu/code/dbt/hazard_tracker.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna4/machine_insts.h"
 #include "rocjitsu/isa/instruction.h"
@@ -39,16 +39,15 @@ constexpr uint32_t kSdwaSelDword = 6;
   return (src0 & 0x1FFu) | ((vsrc1 & 0xFFu) << 9) | ((vdst & 0xFFu) << 17) | ((op & 0x3Fu) << 25);
 }
 
-[[nodiscard]] std::optional<uint8_t> find_free_vgpr(const RegisterLiveness &liveness,
+[[nodiscard]] std::optional<uint8_t> find_free_vgpr(const LivenessAnalysis &liveness,
                                                     uint64_t offset, uint8_t after = 0) {
-  for (uint16_t reg = after; reg < 256; ++reg) {
-    if (!liveness.is_live(offset, reg))
-      return static_cast<uint8_t>(reg);
-  }
-  return std::nullopt;
+  auto reg = liveness.find_free_run(offset, 1, after);
+  if (!reg || *reg > 255)
+    return std::nullopt;
+  return static_cast<uint8_t>(*reg);
 }
 
-[[nodiscard]] std::optional<uint8_t> choose_sdwa_extract_dst(const RegisterLiveness &liveness,
+[[nodiscard]] std::optional<uint8_t> choose_sdwa_extract_dst(const LivenessAnalysis &liveness,
                                                              uint64_t offset, uint8_t after,
                                                              std::optional<uint8_t> clobber_ok) {
   if (clobber_ok)
@@ -100,7 +99,7 @@ bool is_cdna4_vop2_sdwa_form(const Instruction &inst) {
 }
 
 std::vector<uint32_t> lower_cdna4_vop2_sdwa_to_rdna4(const Instruction &inst, uint64_t offset,
-                                                     const RegisterLiveness &liveness,
+                                                     const LivenessAnalysis &liveness,
                                                      uint16_t dst_opcode, uint32_t ext_word) {
   if (!is_cdna4_vop2_sdwa_form(inst))
     return {};

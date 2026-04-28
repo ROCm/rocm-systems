@@ -408,9 +408,11 @@ TEST(HsaTranslateTest, TranslateAndDispatchLdsRoundtrip) {
   hsa_shut_down();
 }
 
-TEST(HsaTranslateTest, TranslateAndDispatchMfma16x16) {
-  // 1. Translate CDNA4 matmul_mfma_16x16 → RDNA4.
-  Executable exec(kernel_path("matmul_mfma_16x16"));
+static void run_mfma16x16_dispatch(const char *kernel_name, const char *symbol_name,
+                                   float golden_scale, const char *dump_path,
+                                   const char *label) {
+  // 1. Translate a CDNA4 16x16 MFMA fixture to RDNA4.
+  Executable exec(kernel_path(kernel_name));
   ASSERT_TRUE(exec.is_valid());
   ASSERT_GT(exec.num_code_objects(ROCJITSU_CODE_TARGET_GFX950), 0u);
   const auto *co = exec.code_object(ROCJITSU_CODE_TARGET_GFX950, 0);
@@ -436,7 +438,7 @@ TEST(HsaTranslateTest, TranslateAndDispatchMfma16x16) {
 
   // Dump translated CO for offline inspection.
   {
-    auto *f = std::fopen("/tmp/translated_mfma16.co", "wb");
+    auto *f = std::fopen(dump_path, "wb");
     if (f) {
       std::fwrite(result.elf_bytes.data(), 1, result.elf_bytes.size(), f);
       std::fclose(f);
@@ -461,7 +463,7 @@ TEST(HsaTranslateTest, TranslateAndDispatchMfma16x16) {
   ASSERT_EQ(st, HSA_STATUS_SUCCESS);
 
   hsa_executable_symbol_t symbol{};
-  st = hsa_executable_get_symbol_by_name(executable, "matmul_mfma_16x16.kd", &gpu, &symbol);
+  st = hsa_executable_get_symbol_by_name(executable, symbol_name, &gpu, &symbol);
   ASSERT_EQ(st, HSA_STATUS_SUCCESS);
 
   uint64_t kernel_object = 0;
@@ -557,15 +559,18 @@ TEST(HsaTranslateTest, TranslateAndDispatchMfma16x16) {
     for (auto &v : B_host)
       v = f32_to_f16(dist(rng));
 
-    hsa_memory_copy(A_dev, A_host.data(), ab_size);
-    hsa_memory_copy(B_dev, B_host.data(), ab_size);
-    std::memset(C_dev, 0, c_size);
+    ASSERT_EQ(hsa_memory_copy(A_dev, A_host.data(), ab_size), HSA_STATUS_SUCCESS);
+    ASSERT_EQ(hsa_memory_copy(B_dev, B_host.data(), ab_size), HSA_STATUS_SUCCESS);
+    std::vector<float> C_zero(M * N, 0.0f);
+    ASSERT_EQ(hsa_memory_copy(C_dev, C_zero.data(), c_size), HSA_STATUS_SUCCESS);
 
     std::vector<float> C_golden(M * N, 0.0f);
     for (uint32_t i = 0; i < M; ++i)
       for (uint32_t j = 0; j < N; ++j)
         for (uint32_t k = 0; k < K; ++k)
           C_golden[i * N + j] += f16_to_f32(A_host[i * K + k]) * f16_to_f32(B_host[k * N + j]);
+    for (auto &v : C_golden)
+      v *= golden_scale;
 
     // Dispatch.
     uint64_t write_idx = hsa_queue_add_write_index_relaxed(queue, 1);
@@ -607,7 +612,7 @@ TEST(HsaTranslateTest, TranslateAndDispatchMfma16x16) {
     }
 
     if (mismatches > 0) {
-      std::fprintf(stderr, "\n=== MFMA 16x16 iter %d: %d mismatches ===\n", iter, mismatches);
+      std::fprintf(stderr, "\n=== %s iter %d: %d mismatches ===\n", label, iter, mismatches);
       for (uint32_t row = 0; row < M; ++row) {
         for (uint32_t col = 0; col < N; ++col) {
           uint32_t raw;
@@ -622,7 +627,7 @@ TEST(HsaTranslateTest, TranslateAndDispatchMfma16x16) {
     hsa_signal_store_relaxed(signal, 1); // reset for next iteration
   } // end fuzzing loop
 
-  std::fprintf(stderr, "\nMFMA 16x16: %d iterations, %d total mismatches\n", kNumIterations,
+  std::fprintf(stderr, "\n%s: %d iterations, %d total mismatches\n", label, kNumIterations,
                total_mismatches);
   EXPECT_EQ(total_mismatches, 0) << total_mismatches << " total mismatches across "
                                  << kNumIterations << " iterations";
@@ -637,6 +642,17 @@ TEST(HsaTranslateTest, TranslateAndDispatchMfma16x16) {
   hsa_executable_destroy(executable);
   hsa_code_object_reader_destroy(reader);
   hsa_shut_down();
+}
+
+TEST(HsaTranslateTest, TranslateAndDispatchMfma16x16) {
+  run_mfma16x16_dispatch("matmul_mfma_16x16", "matmul_mfma_16x16.kd", 1.0f,
+                         "/tmp/translated_mfma16.co", "MFMA 16x16");
+}
+
+TEST(HsaTranslateTest, TranslateAndDispatchMfmaChainedUnrolled) {
+  run_mfma16x16_dispatch("mfma_chained_unrolled", "mfma_chained_unrolled.kd", 2.0f,
+                         "/tmp/translated_mfma_chained_unrolled.co",
+                         "MFMA chained unrolled");
 }
 
 #endif // HAS_HOST_AMDGPU

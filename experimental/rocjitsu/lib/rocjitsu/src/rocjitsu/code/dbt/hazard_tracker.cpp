@@ -4,28 +4,42 @@
 #include "rocjitsu/code/dbt/hazard_tracker.h"
 
 namespace rocjitsu {
+namespace {
+
+[[nodiscard]] uint8_t encode_delay_instid(HazardTracker::Pipeline pipeline, uint8_t distance) {
+  // OPR_DELAY INSTID values are enumerated by the GFX12 ISA, not bit-packed
+  // as pipeline | distance. distance is zero-based in the tracker: 0 means the
+  // producer is the immediately preceding instruction, which is *_DEP_1.
+  switch (pipeline) {
+  case HazardTracker::Pipeline::VALU:
+    return distance < 4 ? static_cast<uint8_t>(1 + distance) : 0;
+  case HazardTracker::Pipeline::TRANS:
+    return distance < 3 ? static_cast<uint8_t>(5 + distance) : 0;
+  case HazardTracker::Pipeline::SALU:
+    return distance < 3 ? static_cast<uint8_t>(9 + distance) : 0;
+  case HazardTracker::Pipeline::None:
+    return 0;
+  }
+  return 0;
+}
+
+} // namespace
 
 void HazardTracker::maybe_insert_delay(std::vector<uint32_t> &words, Pipeline consumer) {
   if (consumer == Pipeline::None)
     return;
 
-  // s_delay_alu simm16: instid0[3:0] at bits[3:0], instid1[3:0] at bits[10:7].
-  // Each instid = pipeline[1:0] | (distance[2:0] << 2). 0 = no dependency.
-  uint16_t simm16 = 0;
-  for (int i = 0; i < 2; ++i) {
-    auto &s = slots_[i];
-    if (s.pipeline == Pipeline::None || s.distance > 4)
+  // s_delay_alu simm16: INSTID0 is bits[3:0]. INSTID1/INSTSKIP can describe a
+  // second delayed VALU instruction, but this tracker only models the next
+  // instruction. Emit one dependency for that instruction instead of packing an
+  // unmodeled second descriptor into the same wait.
+  for (auto &s : slots_) {
+    const uint8_t instid = encode_delay_instid(s.pipeline, s.distance);
+    if (instid == 0)
       continue;
-    uint8_t dep = static_cast<uint8_t>(s.pipeline) | (s.distance << 2);
-    if (i == 0)
-      simm16 |= dep;
-    else
-      simm16 |= (static_cast<uint16_t>(dep) << 7);
-  }
-
-  if (simm16 != 0) {
     constexpr uint8_t kSoppDelayAlu = 7;
-    words.push_back(pack_sopp(kSoppDelayAlu, simm16));
+    words.push_back(pack_sopp(kSoppDelayAlu, instid));
+    return;
   }
 }
 

@@ -35,9 +35,12 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
+#include <array>
 #include <bit>
 #include <cstdint>
 #include <cstring>
+#include <string_view>
 #include <vector>
 
 namespace rocjitsu {
@@ -267,8 +270,10 @@ CHECK_NO_ILLEGAL(rdna4_to_cdna4)
 } // namespace rocjitsu
 
 // --- WaitcntTranslator tests ---
+#include "rocjitsu/code/dbt/hazard_tracker.h"
 #include "rocjitsu/code/dbt/semantic_translator.h"
 
+using rocjitsu::HazardTracker;
 using rocjitsu::decode_waitcnt_gfx9;
 using rocjitsu::encode_waitcnt_gfx12;
 using rocjitsu::WaitcntValues;
@@ -348,12 +353,35 @@ TEST(WaitcntTranslator, EncodeLgkmcnt0WaitsDscntNotStorecnt) {
   EXPECT_TRUE(has_kmcnt);
 }
 
+TEST(HazardTracker, EncodesSaluDelayUsingRdna4InstidValue) {
+  std::vector<uint32_t> words;
+  HazardTracker hz;
+  hz.emit(words, 0x11111111u, HazardTracker::Pipeline::SALU);
+  hz.emit(words, 0x22222222u, HazardTracker::Pipeline::VALU);
+
+  ASSERT_EQ(words.size(), 3u);
+  EXPECT_EQ(words[1], rocjitsu::pack_sopp(7, 9));
+}
+
+TEST(HazardTracker, EmitsSingleCurrentInstructionDependency) {
+  std::vector<uint32_t> words;
+  HazardTracker hz;
+  hz.emit(words, 0x11111111u, HazardTracker::Pipeline::SALU);
+  hz.emit(words, 0x22222222u, HazardTracker::Pipeline::VALU);
+  hz.emit(words, 0x33333333u, HazardTracker::Pipeline::VALU);
+
+  ASSERT_EQ(words.size(), 5u);
+  EXPECT_EQ(words[3], rocjitsu::pack_sopp(7, 1));
+  EXPECT_EQ((words[3] >> 7) & 0xFu, 0u) << "INSTID1 must remain unused";
+}
+
 // --- End-to-end BinaryTranslator integration tests ---
 #ifdef HAS_DEVICE_KERNELS
 
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/dbt/binary_translator.h"
 #include "rocjitsu/code/executable.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna4/machine_insts.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 
@@ -518,6 +546,78 @@ TEST(BinaryTranslatorE2E, LdsRoundtripLowersBarrierToRdna4SplitBarrier) {
   EXPECT_FALSE(saw_cdna4_barrier);
   EXPECT_FALSE(saw_cdna4_sdwa_first_word);
   EXPECT_FALSE(saw_cdna4_sdwa_modifier_word);
+}
+
+TEST(BinaryTranslatorE2E, MfmaChainedUnrolledReusesAccumulator) {
+  Executable exec(kernel_path("mfma_chained_unrolled"));
+  ASSERT_TRUE(exec.is_valid());
+  ASSERT_GT(exec.num_code_objects(ROCJITSU_CODE_TARGET_GFX950), 0u);
+
+  const auto *co = exec.code_object(ROCJITSU_CODE_TARGET_GFX950, 0);
+  ASSERT_NE(co, nullptr);
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+
+  std::vector<rocjitsu::cdna4::Vop3pMfmaMachineInst> mfmas;
+  std::vector<std::array<uint32_t, 2>> source_mfma_words;
+  for (const auto *sec : co->text_sections()) {
+    const auto *data = reinterpret_cast<const uint32_t *>(sec->data());
+    const size_t words = sec->size() / sizeof(uint32_t);
+    size_t pc = 0;
+    while (pc < words) {
+      std::unique_ptr<rocjitsu::Instruction> inst(decoder->decode(&data[pc]));
+      ASSERT_NE(inst, nullptr) << "decode failed at word offset " << pc;
+      const bool is_target_mfma =
+          std::string_view(inst->mnemonic()) == "v_mfma_f32_16x16x16_f16";
+      if (is_target_mfma) {
+        ASSERT_EQ(inst->size(), 8);
+        rocjitsu::cdna4::Vop3pMfmaMachineInst mfma{};
+        std::memcpy(&mfma, inst->raw_encoding(), sizeof(mfma));
+        mfmas.push_back(mfma);
+        source_mfma_words.push_back({data[pc], data[pc + 1]});
+      }
+      pc += inst->size() / sizeof(uint32_t);
+    }
+  }
+
+  ASSERT_EQ(mfmas.size(), 2u);
+  EXPECT_EQ(mfmas[1].src2, mfmas[0].vdst + 256u)
+      << "second MFMA must consume the VGPR accumulator produced by the first";
+  EXPECT_EQ(mfmas[1].acc, mfmas[0].acc);
+  EXPECT_EQ(mfmas[1].acc_cd, mfmas[0].acc_cd);
+
+  BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA4);
+  auto result = translator.translate(*co);
+  ASSERT_FALSE(result.elf_bytes.empty());
+
+  rocjitsu::AmdGpuCodeObject translated_co(result.elf_bytes.data(), result.elf_bytes.size());
+  auto rdna4_decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_NE(rdna4_decoder, nullptr);
+
+  size_t wmma_count = 0;
+  for (const auto *sec : translated_co.text_sections()) {
+    const auto *data = reinterpret_cast<const uint32_t *>(sec->data());
+    const size_t words = sec->size() / sizeof(uint32_t);
+    for (size_t pc = 0; pc < words; ++pc) {
+      for (const auto &mfma_words : source_mfma_words) {
+        EXPECT_NE(data[pc], mfma_words[0])
+            << "translated output preserved a CDNA4 MFMA first word";
+        EXPECT_NE(data[pc], mfma_words[1])
+            << "translated output preserved a CDNA4 MFMA second word";
+      }
+    }
+
+    size_t pc = 0;
+    while (pc < words) {
+      std::unique_ptr<rocjitsu::Instruction> inst(rdna4_decoder->decode(&data[pc]));
+      ASSERT_NE(inst, nullptr) << "RDNA4 decode failed at word offset " << pc;
+      if (std::string_view(inst->mnemonic()) == "v_wmma_f32_16x16x16_f16")
+        ++wmma_count;
+      pc += inst->size() / sizeof(uint32_t);
+    }
+  }
+  EXPECT_EQ(wmma_count, 2u);
 }
 
 TEST(BinaryTranslatorE2E, TextSizesMatch) {

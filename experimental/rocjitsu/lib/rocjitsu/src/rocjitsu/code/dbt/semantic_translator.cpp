@@ -17,6 +17,7 @@
 #include <bit>
 #include <cassert>
 #include <cstring>
+#include <optional>
 #include <string_view>
 
 namespace rocjitsu {
@@ -270,8 +271,10 @@ std::vector<uint32_t> lower_mfma_f32_16x16x16_f16(const Instruction &inst,
   const uint16_t src1 = mfma.src1;
   const uint16_t src2 = mfma.src2;
 
-  if (src2 >= 256)
+  if (src2 >= 512)
     return {};
+  const bool has_vgpr_accumulator = src2 >= 256;
+  const uint16_t src2_vgpr = has_vgpr_accumulator ? src2 - 256 : 0;
 
   assert(src0 >= 256 && src1 >= 256 && "MFMA VGPR sources expected");
 
@@ -285,10 +288,21 @@ std::vector<uint32_t> lower_mfma_f32_16x16x16_f16(const Instruction &inst,
     return {};
   const uint8_t kTmpSgpr = static_cast<uint8_t>(*tmp_sgpr_opt);
 
-  auto free_reg = liveness.find_free_run(offset, 1, vdst + 4);
-  if (!free_reg)
+  const uint16_t temp_search_start =
+      has_vgpr_accumulator ? static_cast<uint16_t>(std::max<uint16_t>(vdst + 4, src2_vgpr + 4))
+                            : static_cast<uint16_t>(vdst + 4);
+  auto vaddr_reg = liveness.find_free_run(offset, 1, temp_search_start);
+  if (!vaddr_reg)
     return {};
-  const uint8_t vaddr = static_cast<uint8_t>(*free_reg);
+  const uint8_t vaddr = static_cast<uint8_t>(*vaddr_reg);
+
+  std::optional<uint16_t> acc_tmp_reg;
+  if (has_vgpr_accumulator) {
+    const uint16_t acc_search_start = static_cast<uint16_t>(vaddr + 1);
+    acc_tmp_reg = liveness.find_free_run(offset, 4, acc_search_start);
+    if (!acc_tmp_reg)
+      return {};
+  }
 
   std::vector<uint32_t> words;
 
@@ -328,9 +342,25 @@ std::vector<uint32_t> lower_mfma_f32_16x16x16_f16(const Instruction &inst,
 
   words.push_back(build_s_mov_b64(kExecLo, kExecSave));
 
+  uint16_t wmma_src2 = src2;
+  if (has_vgpr_accumulator) {
+    // Each translated MFMA preserves the CDNA/MFMA architectural layout at its
+    // instruction boundary. WMMA expects its accumulator operand in WMMA lane
+    // layout, so remap a chained accumulator source into temporaries before
+    // issuing this instruction-local WMMA lowering.
+    const uint8_t acc_tmp = static_cast<uint8_t>(*acc_tmp_reg);
+    for (int r = 0; r < 4; ++r) {
+      auto [w0, w1] = build_ds_bpermute(acc_tmp + r, vaddr, src2_vgpr + r);
+      words.push_back(w0);
+      words.push_back(w1);
+    }
+    words.push_back(pack_sopp(kOpWaitDscnt, 0));
+    wmma_src2 = 256 + acc_tmp;
+  }
+
   // WMMA: single pass, writes all 64 lanes in WMMA layout.
   {
-    auto [w0, w1] = build_vop3p(kOpWmmaF32_16x16x16_F16, vdst, src0, src1, src2);
+    auto [w0, w1] = build_vop3p(kOpWmmaF32_16x16x16_F16, vdst, src0, src1, wmma_src2);
     words.push_back(w0);
     words.push_back(w1);
   }
@@ -374,7 +404,7 @@ std::vector<uint32_t> expand_waitcnt(const Instruction &inst, uint32_t, uint64_t
 }
 
 std::vector<uint32_t> expand_s_barrier(const Instruction &inst, uint32_t, uint64_t,
-                                       const RegisterLiveness &, const LaneLayout *,
+                                       const LivenessAnalysis &, const LaneLayout *,
                                        const LaneLayout *) {
   if (std::string_view(inst.mnemonic()) != "s_barrier")
     return {};

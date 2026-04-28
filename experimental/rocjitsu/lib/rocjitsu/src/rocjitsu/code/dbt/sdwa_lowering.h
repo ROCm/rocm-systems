@@ -12,7 +12,7 @@
 namespace rocjitsu {
 
 class Instruction;
-class RegisterLiveness;
+class LivenessAnalysis;
 
 /// @brief Whether the instruction is a CDNA4 VOP2 SDWA alternate encoding.
 [[nodiscard]] bool is_cdna4_vop2_sdwa_form(const Instruction &inst);
@@ -23,7 +23,7 @@ class RegisterLiveness;
 /// must pass the SDWA extension dword from the original .text bytes.
 [[nodiscard]] std::vector<uint32_t>
 lower_cdna4_vop2_sdwa_to_rdna4(const Instruction &inst, uint64_t offset,
-                               const RegisterLiveness &liveness, uint16_t dst_opcode,
+                               const LivenessAnalysis &liveness, uint16_t dst_opcode,
                                uint32_t ext_word);
 
 } // namespace rocjitsu
