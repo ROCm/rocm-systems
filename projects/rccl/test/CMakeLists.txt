@@ -267,6 +267,7 @@ if(BUILD_TESTS)
       transport/NetIbMPITests.cpp
       ImplicitLaunchOrderMPITests.cpp
       RegistrationMPITests.cpp
+      GrowTests.cpp
     )
 
     add_executable(rccl-UnitTestsMPI ${MPI_TEST_SOURCE_FILES})
