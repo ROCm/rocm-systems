@@ -6,9 +6,11 @@
 
 #include "rocjitsu/code/dbt/semantic_translator.h"
 
+#include "rocjitsu/analysis/def_use_chain.h"
 #include "rocjitsu/code/basic_block.h"
 #include "rocjitsu/code/dbt/hazard_tracker.h"
 #include "rocjitsu/code/patch/instruction_builder.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna4/encodings.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna4/machine_insts.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna4/machine_insts.h"
 #include "rocjitsu/isa/instruction.h"
@@ -46,6 +48,63 @@ constexpr uint8_t kOpWaitLoadcnt = 64;
 constexpr uint8_t kOpWaitStorecntDscnt = 73;
 constexpr uint8_t kOpWaitKmcnt = 71;
 constexpr uint8_t kOpWaitExpcnt = 68;
+constexpr uint16_t kTtmp9Encoding = 117; // RDNA4 OPR_*_TTMP_MIN + 9.
+
+[[nodiscard]] bool is_sgpr_ref(const Operand *op, uint16_t sgpr) {
+  if (op == nullptr)
+    return false;
+  auto reg = op->to_register_ref(64);
+  return reg && reg->cls == RegClass::SGPR && reg->index <= sgpr && sgpr < reg->index + reg->width;
+}
+
+[[nodiscard]] bool replace_field(uint32_t &word, uint32_t shift, uint32_t width, uint16_t expected,
+                                 uint16_t replacement) {
+  const uint32_t mask = ((1u << width) - 1u) << shift;
+  const uint32_t old_value = (word & mask) >> shift;
+  if (old_value != expected)
+    return false;
+  word = (word & ~mask) | (static_cast<uint32_t>(replacement) << shift);
+  return true;
+}
+
+[[nodiscard]] bool patch_workgroup_src_operand(const Instruction &inst, uint32_t &w0, uint32_t &w1,
+                                               uint16_t old_sgpr, uint16_t ttmp_encoding) {
+  bool changed = false;
+
+  // This helper deliberately only patches source register fields in encodings
+  // with known layouts. Def/use chooses the semantic source operands; the raw
+  // bit edits below are just the current replacement mechanism until generated
+  // operand-field rewrite metadata exists.
+  if (dynamic_cast<const cdna4::Sop2 *>(&inst) != nullptr) { // ssrc0[7:0], ssrc1[15:8].
+    if (is_sgpr_ref(inst.src_operand(0), old_sgpr))
+      changed |= replace_field(w0, 0, 8, old_sgpr, ttmp_encoding);
+    if (is_sgpr_ref(inst.src_operand(1), old_sgpr))
+      changed |= replace_field(w0, 8, 8, old_sgpr, ttmp_encoding);
+  } else if (dynamic_cast<const cdna4::Sop1 *>(&inst) != nullptr) { // ssrc0[7:0].
+    if (is_sgpr_ref(inst.src_operand(0), old_sgpr))
+      changed |= replace_field(w0, 0, 8, old_sgpr, ttmp_encoding);
+  } else if (dynamic_cast<const cdna4::Sopc *>(&inst) != nullptr) { // ssrc0[7:0], ssrc1[15:8].
+    if (is_sgpr_ref(inst.src_operand(0), old_sgpr))
+      changed |= replace_field(w0, 0, 8, old_sgpr, ttmp_encoding);
+    if (is_sgpr_ref(inst.src_operand(1), old_sgpr))
+      changed |= replace_field(w0, 8, 8, old_sgpr, ttmp_encoding);
+  } else if (dynamic_cast<const cdna4::Vop2 *>(&inst) != nullptr ||
+             dynamic_cast<const cdna4::Vopc *>(&inst) != nullptr ||
+             dynamic_cast<const cdna4::Vop1 *>(&inst) != nullptr) {
+    // Scalar-capable src0 is in word0[8:0].
+    if (is_sgpr_ref(inst.src_operand(0), old_sgpr))
+      changed |= replace_field(w0, 0, 9, old_sgpr, ttmp_encoding);
+  } else if (dynamic_cast<const cdna4::Vop3 *>(&inst) != nullptr ||
+             dynamic_cast<const cdna4::Vop3p *>(&inst) != nullptr) {
+    // src0/src1/src2 are in word1[8:0], [17:9], [26:18].
+    for (int i = 0; i < inst.num_src_operands(); ++i) {
+      if (is_sgpr_ref(inst.src_operand(i), old_sgpr))
+        changed |= replace_field(w1, static_cast<uint32_t>(i * 9), 9, old_sgpr, ttmp_encoding);
+    }
+  }
+
+  return changed;
+}
 
 } // namespace
 
@@ -96,7 +155,8 @@ std::vector<uint32_t> encode_waitcnt_gfx12(const WaitcntValues &vals) {
 namespace {
 
 std::vector<uint32_t> lower_v_lshl_add_u64(const Instruction &inst,
-                                           [[maybe_unused]] rj_code_arch_t host_arch) {
+                                           [[maybe_unused]] rj_code_arch_t host_arch,
+                                           uint64_t offset, const LivenessAnalysis &liveness) {
   const auto *raw = inst.raw_encoding();
   if (!raw || inst.size() < 8)
     return {};
@@ -107,25 +167,34 @@ std::vector<uint32_t> lower_v_lshl_add_u64(const Instruction &inst,
   const uint16_t src0 = src.src0;
   const uint16_t src2 = src.src2;
 
-  constexpr uint16_t VCC_LO = 106;
+  auto carry_sgpr = liveness.find_free_sgpr(offset);
+  if (!carry_sgpr)
+    return {};
+
   std::vector<uint32_t> words;
 
-  // v_add_co_u32 vdst_lo, vcc_lo, src0_lo, src2_lo
+  // v_add_co_u32 vdst_lo, carry_sgpr, src0_lo, src2_lo
   {
-    const uint32_t w0 = (0x35u << 26) | (768u << 16) | (VCC_LO << 8) | vdst;
+    const uint32_t w0 =
+        (0x35u << 26) | (768u << 16) | (static_cast<uint32_t>(*carry_sgpr) << 8) | vdst;
     const uint32_t w1 = static_cast<uint32_t>(src0) | (static_cast<uint32_t>(src2) << 9);
     words.push_back(w0);
     words.push_back(w1);
   }
 
-  // s_wait_alu 0xFFFD
-  words.push_back(pack_sopp(8, 0xFFFD));
+  // The carry-out is a VALU-produced scalar destination consumed by the next
+  // VALU as a scalar source. Use a private SGPR carry instead of VCC: the guest
+  // v_lshl_add_u64 does not clobber VCC, and compare masks are often live
+  // across address calculation in loop/control-flow code.
+  constexpr uint16_t kWaitVaSdst = 0xF1FF;
+  words.push_back(pack_sopp(8, kWaitVaSdst));
 
-  // v_add_co_ci_u32 vdst_hi, vcc_lo, src0_hi, src2_hi, vcc_lo
+  // v_add_co_ci_u32 vdst_hi, carry_sgpr, src0_hi, src2_hi, carry_sgpr
   {
-    const uint32_t w0 = (0x35u << 26) | (288u << 16) | (VCC_LO << 8) | (vdst + 1);
+    const uint32_t w0 =
+        (0x35u << 26) | (288u << 16) | (static_cast<uint32_t>(*carry_sgpr) << 8) | (vdst + 1);
     const uint32_t w1 = static_cast<uint32_t>(src0 + 1) | (static_cast<uint32_t>(src2 + 1) << 9) |
-                        (static_cast<uint32_t>(VCC_LO) << 18);
+                        (static_cast<uint32_t>(*carry_sgpr) << 18);
     words.push_back(w0);
     words.push_back(w1);
   }
@@ -290,7 +359,7 @@ std::vector<uint32_t> lower_mfma_f32_16x16x16_f16(const Instruction &inst,
 
   const uint16_t temp_search_start =
       has_vgpr_accumulator ? static_cast<uint16_t>(std::max<uint16_t>(vdst + 4, src2_vgpr + 4))
-                            : static_cast<uint16_t>(vdst + 4);
+                           : static_cast<uint16_t>(vdst + 4);
   auto vaddr_reg = liveness.find_free_run(offset, 1, temp_search_start);
   if (!vaddr_reg)
     return {};
@@ -418,10 +487,10 @@ std::vector<uint32_t> expand_s_barrier(const Instruction &inst, uint32_t, uint64
           make_gfx12_sopp(kOpBarrierWait, kBarrierIdNeg1)};
 }
 
-std::vector<uint32_t> expand_v_lshl_add_u64(const Instruction &inst, uint32_t, uint64_t,
-                                            const LivenessAnalysis &, const LaneLayout *,
+std::vector<uint32_t> expand_v_lshl_add_u64(const Instruction &inst, uint32_t, uint64_t offset,
+                                            const LivenessAnalysis &liveness, const LaneLayout *,
                                             const LaneLayout *) {
-  return lower_v_lshl_add_u64(inst, ROCJITSU_CODE_ARCH_RDNA4);
+  return lower_v_lshl_add_u64(inst, ROCJITSU_CODE_ARCH_RDNA4, offset, liveness);
 }
 
 std::vector<uint32_t> expand_accvgpr_read(const Instruction &inst, uint32_t, uint64_t,
@@ -471,13 +540,12 @@ constexpr uint16_t kCdna4Op_v_lshl_add_u64 = 520;
 const TranslationRule kExpandRules_cdna4_to_rdna4[] = {
     {kCdna4Enc_SOPP, kCdna4Op_s_barrier, RuleAction::Expand, 0, 0, nullptr, expand_s_barrier,
      nullptr, nullptr},
-    {kCdna4Enc_SOPP, kCdna4Op_s_waitcnt, RuleAction::Expand, 0, 0, nullptr, expand_waitcnt,
-     nullptr, nullptr},
+    {kCdna4Enc_SOPP, kCdna4Op_s_waitcnt, RuleAction::Expand, 0, 0, nullptr, expand_waitcnt, nullptr,
+     nullptr},
     {kCdna4Enc_VOP3_v_lshl_add_u64, kCdna4Op_v_lshl_add_u64, RuleAction::Expand, 0, 0, nullptr,
      expand_v_lshl_add_u64, nullptr, nullptr},
     {kCdna4Enc_VOP3P, kCdna4Op_v_mfma_f32_16x16x16_f16, RuleAction::Expand, 0, 0, nullptr,
-     expand_mfma_f32_16x16x16_f16, &kMfmaF32_16x16x16_F16_Cdna4,
-     &kWmmaF32_16x16x16_F16_Rdna4},
+     expand_mfma_f32_16x16x16_f16, &kMfmaF32_16x16x16_F16_Cdna4, &kWmmaF32_16x16x16_F16_Rdna4},
     {kCdna4Enc_VOP3P, kCdna4Op_v_accvgpr_read, RuleAction::Expand, 0, 0, nullptr,
      expand_accvgpr_read, nullptr, nullptr},
     {kCdna4Enc_VOP3P, kCdna4Op_v_accvgpr_write, RuleAction::Expand, 0, 0, nullptr,
@@ -511,47 +579,52 @@ std::vector<uint32_t> SemanticTranslator::try_lower_expand(const Instruction &in
 
 // --- Workgroup ID rewrite ---
 
-std::vector<SemanticReplacement> SemanticTranslator::rewrite_workgroup_ids(
-    BasicBlock &block, std::span<const CodeObjectPatcher::WorkGroupIdInfo> wg_info,
-    std::span<const uint8_t> translated_text) const {
-  if (host_arch_ != ROCJITSU_CODE_ARCH_RDNA4 || wg_info.empty())
+std::vector<SemanticReplacement>
+SemanticTranslator::rewrite_workgroup_ids(BasicBlock &block,
+                                          std::span<WorkGroupRewriteState> wg_states,
+                                          std::span<const uint8_t> translated_text) const {
+  if (host_arch_ != ROCJITSU_CODE_ARCH_RDNA4 || wg_states.empty())
     return {};
 
   // RDNA4 delivers workgroup IDs via TTMP registers, not SGPRs.
-  constexpr uint8_t kTTMP9 = 117;                  // workgroup_id_x
   [[maybe_unused]] constexpr uint8_t kTTMP7 = 115; // workgroup_id_y (low16), _z (high16)
 
   std::vector<SemanticReplacement> result;
 
-  for (const auto &info : wg_info) {
+  for (auto &state : wg_states) {
+    const auto &info = state.info;
     if (info.sgpr_wg_id_x < 0)
       continue;
     const auto old_sgpr = static_cast<uint16_t>(info.sgpr_wg_id_x);
 
     uint64_t offset = block.start_offset();
     for (const auto &inst : block.instructions()) {
-      if (offset < info.entry_text_offset || offset + 8 > translated_text.size()) {
-        offset += inst.size();
-        continue;
-      }
-
-      if (inst.size() < 8) {
+      if (offset < info.entry_text_offset ||
+          offset + static_cast<uint64_t>(inst.size()) > translated_text.size()) {
         offset += inst.size();
         continue;
       }
 
       // Read the already-translated instruction words from translated_text.
-      uint32_t w0, w1;
+      uint32_t w0 = 0;
+      uint32_t w1 = 0;
       std::memcpy(&w0, translated_text.data() + offset, 4);
-      std::memcpy(&w1, translated_text.data() + offset + 4, 4);
+      if (inst.size() >= 8)
+        std::memcpy(&w1, translated_text.data() + offset + 4, 4);
 
-      // VOP3 word1 has src0 in bits[8:0]. Check if it matches the
-      // workgroup_id SGPR and substitute TTMP9.
-      uint16_t src0 = w1 & 0x1FF;
-      if (src0 == old_sgpr) {
-        uint32_t new_w1 = (w1 & ~0x1FFu) | kTTMP9;
-        result.push_back({offset, offset + static_cast<uint64_t>(inst.size()), {w0, new_w1}});
+      if (state.wg_id_x_live) {
+        bool changed = patch_workgroup_src_operand(inst, w0, w1, old_sgpr, kTtmp9Encoding);
+        if (changed) {
+          std::vector<uint32_t> words{w0};
+          if (inst.size() >= 8)
+            words.push_back(w1);
+          result.push_back({offset, offset + static_cast<uint64_t>(inst.size()), words});
+        }
       }
+
+      InstDefUse def_use(inst, 64);
+      if (def_use.defs.contains({RegClass::SGPR, old_sgpr, 1}))
+        state.wg_id_x_live = false;
 
       offset += inst.size();
     }

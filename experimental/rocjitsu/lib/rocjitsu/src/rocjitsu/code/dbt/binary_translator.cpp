@@ -202,8 +202,8 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
         uint32_t ext_word = 0;
         if (inst_size >= 8)
           std::memcpy(&ext_word, text.data() + offset + 4, 4);
-        auto lowering = lower_cdna4_vop2_sdwa_to_rdna4(inst, offset, liveness, dst_opcode,
-                                                       ext_word);
+        auto lowering =
+            lower_cdna4_vop2_sdwa_to_rdna4(inst, offset, liveness, dst_opcode, ext_word);
         if (!lowering.empty()) {
           SemanticReplacement repl{offset, offset + inst_size, std::move(lowering)};
           apply_semantic(repl, translated_text, patcher);
@@ -247,9 +247,13 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
   // Rewrite workgroup_id SGPR references to TTMP registers.
   // This runs after encoding translation so it reads from translated_text.
   auto wg_info = patcher.workgroup_id_info();
+  std::vector<SemanticTranslator::WorkGroupRewriteState> wg_states;
+  wg_states.reserve(wg_info.size());
+  for (const auto &info : wg_info)
+    wg_states.push_back({info, info.sgpr_wg_id_x >= 0});
   for (const auto &block : blocks) {
     auto wg_rewrites =
-        semantic_translator_->rewrite_workgroup_ids(*block, wg_info, translated_text);
+        semantic_translator_->rewrite_workgroup_ids(*block, wg_states, translated_text);
     for (const auto &repl : wg_rewrites)
       apply_semantic(repl, translated_text, patcher);
   }

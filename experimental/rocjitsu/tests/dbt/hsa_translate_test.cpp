@@ -19,6 +19,7 @@ RJ_DIAGNOSTIC_POP
 #include <gtest/gtest.h>
 
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <random>
@@ -345,15 +346,48 @@ TEST(HsaTranslateTest, TranslateAndDispatchCopyLoop) {
   hsa_amd_agents_allow_access(2, both, nullptr, kernarg);
   std::memset(kernarg, 0, 256);
 
-  struct __attribute__((packed)) KernArgs {
+  struct __attribute__((packed)) CopyLoopKernArgs {
     const float *A;
     float *C;
     uint32_t N;
+    uint32_t reserved0;
+    uint32_t hidden_block_count_x;
+    uint32_t hidden_block_count_y;
+    uint32_t hidden_block_count_z;
+    uint16_t hidden_group_size_x;
+    uint16_t hidden_group_size_y;
+    uint16_t hidden_group_size_z;
+    uint16_t hidden_remainder_x;
+    uint16_t hidden_remainder_y;
+    uint16_t hidden_remainder_z;
+    uint8_t reserved1[16];
+    uint64_t hidden_global_offset_x;
+    uint64_t hidden_global_offset_y;
+    uint64_t hidden_global_offset_z;
+    uint16_t hidden_grid_dims;
   };
-  auto *args = static_cast<KernArgs *>(kernarg);
+  static_assert(offsetof(CopyLoopKernArgs, hidden_block_count_x) == 24);
+  static_assert(offsetof(CopyLoopKernArgs, hidden_group_size_x) == 36);
+  static_assert(offsetof(CopyLoopKernArgs, hidden_global_offset_x) == 64);
+  static_assert(offsetof(CopyLoopKernArgs, hidden_grid_dims) == 88);
+
+  auto *args = static_cast<CopyLoopKernArgs *>(kernarg);
   args->A = A_dev;
   args->C = C_dev;
   args->N = N;
+  args->hidden_block_count_x = kDispatchedItems / 64;
+  args->hidden_block_count_y = 1;
+  args->hidden_block_count_z = 1;
+  args->hidden_group_size_x = 64;
+  args->hidden_group_size_y = 1;
+  args->hidden_group_size_z = 1;
+  args->hidden_remainder_x = 0;
+  args->hidden_remainder_y = 0;
+  args->hidden_remainder_z = 0;
+  args->hidden_global_offset_x = 0;
+  args->hidden_global_offset_y = 0;
+  args->hidden_global_offset_z = 0;
+  args->hidden_grid_dims = 1;
 
   hsa_queue_t *queue = nullptr;
   uint32_t queue_size = 0;
@@ -563,8 +597,7 @@ TEST(HsaTranslateTest, TranslateAndDispatchLdsRoundtrip) {
 }
 
 static void run_mfma16x16_dispatch(const char *kernel_name, const char *symbol_name,
-                                   float golden_scale, const char *dump_path,
-                                   const char *label) {
+                                   float golden_scale, const char *dump_path, const char *label) {
   // 1. Translate a CDNA4 16x16 MFMA fixture to RDNA4.
   Executable exec(kernel_path(kernel_name));
   ASSERT_TRUE(exec.is_valid());
@@ -805,8 +838,7 @@ TEST(HsaTranslateTest, TranslateAndDispatchMfma16x16) {
 
 TEST(HsaTranslateTest, TranslateAndDispatchMfmaChainedUnrolled) {
   run_mfma16x16_dispatch("mfma_chained_unrolled", "mfma_chained_unrolled.kd", 2.0f,
-                         "/tmp/translated_mfma_chained_unrolled.co",
-                         "MFMA chained unrolled");
+                         "/tmp/translated_mfma_chained_unrolled.co", "MFMA chained unrolled");
 }
 
 #endif // HAS_HOST_AMDGPU

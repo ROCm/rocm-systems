@@ -71,12 +71,23 @@ struct SemanticReplacement {
 /// binary search.
 class SemanticTranslator {
 public:
+  /// @brief Per-kernel state for workgroup-id value rewriting.
+  ///
+  /// @details CDNA delivers workgroup IDs in SGPRs at kernel entry, while RDNA4
+  /// exposes them through TTMP registers. The rewrite is value-based: source
+  /// uses of the entry SGPR are rewritten until def/use analysis sees a write
+  /// to that SGPR, after which the physical register holds an ordinary program
+  /// value and must not be rewritten in later blocks.
+  struct WorkGroupRewriteState {
+    CodeObjectPatcher::WorkGroupIdInfo info{};
+    bool wg_id_x_live = false;
+  };
+
   SemanticTranslator(rj_code_arch_t guest_arch, rj_code_arch_t host_arch);
 
   /// @brief Rewrite workgroup_id SGPR references to TTMP registers.
   [[nodiscard]] std::vector<SemanticReplacement>
-  rewrite_workgroup_ids(BasicBlock &block,
-                        std::span<const CodeObjectPatcher::WorkGroupIdInfo> wg_info,
+  rewrite_workgroup_ids(BasicBlock &block, std::span<WorkGroupRewriteState> wg_states,
                         std::span<const uint8_t> translated_text) const;
 
   /// @brief Try to expand/lower an instruction via the expand rules table.
