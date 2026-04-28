@@ -122,6 +122,11 @@ std::unordered_map<ncclComm_t, rocshmem::rocshmem_team_t> ncclCommToRshmemTeam;
 // Turn off cheap fence for gfx942/gfx950
 RCCL_PARAM(Gfx9CheapFenceOff, "GFX9_CHEAP_FENCE_OFF", 0);
 
+/**
+ * Used on gfx1151 (StrixHalo) to set the nChannels for ncclTopoPreset before determining number of nodes. 
+ */
+RCCL_PARAM( InitChannels, "INIT_CHANNELS", -1) ;
+
 // GDRCOPY support: Off by default
 NCCL_PARAM(GdrCopyEnable, "GDRCOPY_ENABLE", 0);
 
@@ -1468,6 +1473,23 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   NCCLCHECKGOTO(ncclTopoCompute(comm->topo, ringGraph), ret, fail);
   NCCLCHECKGOTO(ncclTopoPrintGraph(comm->topo, ringGraph), ret, fail);
 
+  if( IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx1151" ) ) {
+    /**
+     * GFX1151 (1 GPU/node): Uses Walecki + Greedy construction to generate 'nChannels'
+     * edge-disjoint Hamiltonian rings. For N nodes, N/2 perfect rings are guaranteed;
+     * additional channels are balanced via greedy heuristics to saturate Fat-Tree/Clos fabrics.
+     * Note: nNodes is only known AFTER bootstrapAllGather (Postset), but nChannels 
+     * is required during Preset. Therefore, nChannels cannot be auto-calculated 
+     * based on nNodes at this stage.
+     * Recommended: Set nChannels via environment variable (e.g., 6 channels for 
+     * optimal 4-node load balancing). Missing channel data is backfilled 
+     * by repairMissingChannels() during Postset.
+     * */
+    int numChannels = rcclParamInitChannels() > 0 ? rcclParamInitChannels() : 6 /* 2 X (comm->nNodes - 1)  */;
+    ringGraph->nChannels = std::max(ringGraph->minChannels, std::min(ringGraph->maxChannels,(int32_t) numChannels));
+  }
+  INFO(NCCL_INIT,"ringGraph->nChannels = %d ", ringGraph->nChannels);
+
   memset(treeGraph, 0, sizeof(struct ncclTopoGraph));
   treeGraph->id = 1;
   treeGraph->pattern = NCCL_TOPO_PATTERN_BALANCED_TREE;
@@ -1681,7 +1703,7 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
       INFO(NCCL_GRAPH, "CPUs with mixed vendors were detected.");
     }
   }
-
+  
   // Now that we know nNodes, alloc nodeRanks and compute localRanks for each node
   NCCLCHECKGOTO(ncclCalloc(&comm->nodeRanks, comm->nNodes), ret, fail);
   NCCLCHECKGOTO(ncclCalloc(&comm->rankToLocalRank, comm->nRanks), ret, fail);

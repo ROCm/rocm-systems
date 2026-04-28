@@ -98,7 +98,8 @@ class TestMPI(RocprofsysTest):
             "mpi-example",
             env=ENV,
             rewrite_args=REWRITE_ARGS,
-            mpi_ranks=2,
+            launcher="mpi",
+            num_procs=2,
         )
         self.assert_regex(
             result,
@@ -123,15 +124,15 @@ class TestMPI(RocprofsysTest):
         REWRITE_FAIL_REGEX = ["Script not found", "Failed to execute"]
         ENV = {
             "ROCPROFSYS_VERBOSE": "1",
-            "ROCPROFSYS_TRACE_LEGACY": "ON",
-            "ROCPROFSYS_PERFETTO_COMBINE_TRACES": "ON",
+            "ROCPROFSYS_MERGE_PERFETTO_FILES": "ON",
         }
         result = self.run_test(
             mode,
             "mpi-example",
             env=ENV,
             rewrite_args=REWRITE_ARGS,
-            mpi_ranks=2,
+            launcher="mpi",
+            num_procs=2,
         )
         self.assert_regex(
             result,
@@ -174,7 +175,8 @@ class TestMPIP(RocprofsysTest):
             env=mpip_env if target != "mpi-all2all" else mpip_all2all_env,
             rewrite_args=REWRITE_ARGS,
             run_args=RUN_ARGS,
-            mpi_ranks=2,
+            launcher="mpi",
+            num_procs=2,
         )
         self.assert_regex(result)
 
@@ -206,7 +208,8 @@ class TestMPIP(RocprofsysTest):
             "mpi-example",
             env=mpip_flat_env,
             rewrite_args=REWRITE_ARGS,
-            mpi_ranks=2,
+            launcher="mpi",
+            num_procs=2,
         )
         self.assert_regex(
             result,
