@@ -48,7 +48,7 @@ The following table lists the stall reasons:
     - The wave was ready to issue an instruction, which the arbiter then selected to issue. However, the execution pipeline backpressured the wave, preventing it from issuing instructions because it couldn't accept more instructions.
 
   * - OTHER
-    - Other reasons for stalling a wave such as recoverable page-fault (``XNACK``).
+    - Other reasons for stalling a wave, such as a recoverable page-fault (``XNACK``).
 
 Occupancy
 ==========
