@@ -34,5 +34,17 @@
       },
       "vendor": { "microsoft.com/VisualStudioRemoteSettings/CMake/2.0": { "remoteSourceRootDir": "$env{HOME}/.vs/$ms{projectDirName}" } }
     }
+  ],
+  "buildPresets": [
+    {
+      "name": "linux-debug-build",
+      "configurePreset": "linux-debug",
+      "jobs": 8
+    },
+    {
+      "name": "linux-release-build",
+      "configurePreset": "linux-release",
+      "jobs": 8
+    }
   ]
 }
