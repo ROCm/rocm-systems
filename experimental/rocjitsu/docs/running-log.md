@@ -32,3 +32,12 @@
 - Built with `ninja -C build kernel_lds_loop tests/hsa_translate_test`.
 - Verified with `./build/tests/hsa_translate_test --gtest_filter='HsaTranslateTest.TranslateAndDispatchLdsLoop'`; passed in 71 ms.
 - Committing this feature before starting the shared-memory matmul loop without MFMA.
+
+## Shared-memory matmul loop without MFMA
+- Added `tests/kernels/matmul_shared_loop.hip`, a 256-thread single-workgroup 16x32 by 32x16 matmul that stages two 16-wide K tiles through LDS and uses ordinary scalar multiply-add instructions.
+- Registered `kernel_matmul_shared_loop` in `tests/kernels/CMakeLists.txt`.
+- Added `HsaTranslateTest.TranslateAndDispatchMatmulSharedLoop` with deterministic float inputs and a CPU golden matmul.
+- Next: build `kernel_matmul_shared_loop` and run the focused translated dispatch test.
+- Built with `ninja -C build kernel_matmul_shared_loop tests/hsa_translate_test`.
+- Verified with `./build/tests/hsa_translate_test --gtest_filter='HsaTranslateTest.TranslateAndDispatchMatmulSharedLoop'`; passed in 72 ms.
+- Committing this feature before starting the shared-memory MFMA matmul loop.
