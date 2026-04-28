@@ -334,12 +334,53 @@ else()
 endif()
 
 if(HIP_ENABLE_LTTNG_UST)
+    # Vendored LTTng-UST: built from the lttng-ust + userspace-rcu git
+    # submodules under projects/clr/external/, installed into the build
+    # tree at <build>/_deps/lttng-prefix/, and shipped at runtime under
+    # /opt/rocm/lib/lttng/ (libamdhip64 picks them up via RPATH
+    # $ORIGIN/lttng — see set_target_properties below).
+    set(LTTNG_VENDORED_URCU_SRC "${CMAKE_CURRENT_LIST_DIR}/../../external/userspace-rcu")
+    set(LTTNG_VENDORED_UST_SRC  "${CMAKE_CURRENT_LIST_DIR}/../../external/lttng-ust")
+    include(${CMAKE_CURRENT_LIST_DIR}/../cmake/VendorLttng.cmake)
+
     find_package(PkgConfig REQUIRED)
+    # Prepend the vendored .pc dir so pkg_check_modules picks it before
+    # any system lttng-ust the distro might also ship.
+    set(ENV{PKG_CONFIG_PATH} "${LTTNG_VENDORED_PKGCONFIG}:$ENV{PKG_CONFIG_PATH}")
     pkg_check_modules(LTTNG_UST REQUIRED IMPORTED_TARGET lttng-ust>=2.13)
+
     target_compile_definitions(amdhip64 PRIVATE HIP_ENABLE_LTTNG_UST=1)
     target_include_directories(amdhip64 PRIVATE
-        ${CMAKE_CURRENT_LIST_DIR}/lttng)
+        ${CMAKE_CURRENT_LIST_DIR}/lttng
+        ${LTTNG_VENDORED_INCLUDE_DIR})
     target_link_libraries(amdhip64 PRIVATE PkgConfig::LTTNG_UST ${CMAKE_DL_LIBS})
+
+    # Build amdhip64 only after the vendored libs exist (the .pc query
+    # above happens at configure time, but the actual .so files are only
+    # produced when the lttng_ust_vendored ExternalProject runs at build
+    # time; without this dependency, the link step races the build).
+    add_dependencies(amdhip64 lttng_ust_vendored)
+
+    # RPATH:
+    #   BUILD_RPATH   — let in-tree tests find the vendored .so files at
+    #                   <build>/_deps/lttng-prefix/lib/.
+    #   INSTALL_RPATH — at /opt/rocm/lib/libamdhip64.so, the vendored
+    #                   libs sit in /opt/rocm/lib/lttng/. The literal
+    #                   $ORIGIN expands to /opt/rocm/lib at runtime.
+    set_target_properties(amdhip64 PROPERTIES
+        BUILD_RPATH   "${LTTNG_VENDORED_LIB_DIR}"
+        INSTALL_RPATH "\$ORIGIN/lttng:\$ORIGIN")
+
+    # Install the vendored .so files alongside libamdhip64.so under
+    # ${CMAKE_INSTALL_LIBDIR}/lttng. The version-suffixed symlinks must
+    # be preserved so the dynamic loader resolves NEEDED entries that
+    # reference e.g. liblttng-ust.so.1 instead of the unsuffixed name.
+    install(DIRECTORY ${LTTNG_VENDORED_LIB_DIR}/
+            DESTINATION ${CMAKE_INSTALL_LIBDIR}/lttng
+            USE_SOURCE_PERMISSIONS
+            FILES_MATCHING
+            PATTERN "liblttng*.so*"
+            PATTERN "liburcu*.so*")
 
     # Per-packet AQL kernel-dispatch tracepoint lives at the HIP CLR packet-
     # write site (rocclr/device/rocm/rocvirtual.cpp). rocclr is built as a
@@ -351,7 +392,9 @@ if(HIP_ENABLE_LTTNG_UST)
         target_compile_definitions(rocclr PRIVATE HIP_ENABLE_LTTNG_UST=1)
         target_include_directories(rocclr PRIVATE
             ${CMAKE_CURRENT_LIST_DIR}/lttng
+            ${LTTNG_VENDORED_INCLUDE_DIR}
             ${LTTNG_UST_INCLUDE_DIRS})
+        add_dependencies(rocclr lttng_ust_vendored)
     endif()
 
     # Symbol-coverage gate: every exported HIP/__hip text symbol from the
