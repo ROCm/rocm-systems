@@ -1288,7 +1288,6 @@ typedef struct {
  * @cond @tag{gpu_bm_linux} @tag{host} @tag{guest_windows} @endcond
  */
 typedef struct {
-<<<<<<< users/darren-amd/fix-power-limit-unit
   uint64_t socket_power;          //!< Current power usage in W {@linux_bm}, uW {@host}
   uint32_t current_socket_power;  //!< Current socket power in W {@linux_bm}, Linux only, Mi 300+
                                   //!< Series cards
@@ -1299,18 +1298,6 @@ typedef struct {
   uint64_t mem_voltage;           //!< MEM voltage measurement in mV {@linux_bm} or V {@host}
   uint32_t power_limit;           //!< The power limit in uW {@linux_bm}, Linux only
   uint32_t ubb_power;             //!< The UBB node power in W {@linux_bm}, MI350X+
-=======
-  uint64_t socket_power;         //!< Current power usage in W {@linux_bm}, uW {@host}
-  uint32_t current_socket_power; /**< Current socket power in W {@linux_bm}, Linux only, Mi 300+
-                                      Series cards */
-  uint32_t average_socket_power; /**< Average socket power in W {@linux_bm}, Linux only, Navi + Mi
-                                      200 and earlier Series cards */
-  uint64_t gfx_voltage;          //!< GFX voltage measurement in mV {@linux_bm} or V {@host}
-  uint64_t soc_voltage;          //!< SOC voltage measurement in mV {@linux_bm} or V {@host}
-  uint64_t mem_voltage;          //!< MEM voltage measurement in mV {@linux_bm} or V {@host}
-  uint32_t power_limit;          //!< The power limit in W {@linux_bm}, Linux only
-  uint32_t ubb_power;            //!< The UBB node power in W {@linux_bm}, MI350X+
->>>>>>> develop
   uint64_t reserved[18];
 } amdsmi_power_info_t;
 
