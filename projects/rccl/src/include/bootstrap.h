@@ -27,10 +27,14 @@ ncclResult_t bootstrapGetUniqueId(struct ncclBootstrapHandle* handle);
 // deterministically from (comm->magic, comm->splitCount + 1).
 ncclResult_t bootstrapGetUniqueId(struct ncclBootstrapHandle* handle, struct ncclComm* comm);
 // Send (isRoot=true) or receive (isRoot=false) the grow rendezvous handle on
-// the parent comm's bootstrap. Root broadcasts to all other existing ranks;
-// non-root ranks receive with a wildcard peer (-1).
+// the parent comm's bootstrap. Root sends only to boundary ranks (0 and N-1);
+// non-boundary existing ranks rendezvous via the parent ring inside
+// bootstrapInit and skip this entirely.
 ncclResult_t bcastGrowHandle(struct ncclBootstrapHandle* handle, struct ncclComm* parent, bool isRoot);
-ncclResult_t bootstrapInit(int nHandles, void* handle, struct ncclComm* comm);
+// parent: when non-NULL, identifies a grow operation. Non-boundary existing
+// ranks pass nHandles=0 and rendezvous via parent->bootstrap; boundary ranks
+// and new ranks pass nHandles=1 and use the rendezvous root socket.
+ncclResult_t bootstrapInit(int nHandles, void* handle, struct ncclComm* comm, struct ncclComm* parent);
 ncclResult_t bootstrapSplit(uint64_t magic, struct ncclComm* comm, struct ncclComm* parent, int color, int key, int* parentRanks);
 ncclResult_t bootstrapAllGather(void* commState, void* allData, int size);
 ncclResult_t bootstrapSend(void* commState, int peer, int tag, void* data, int size);
