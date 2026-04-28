@@ -15,6 +15,10 @@ subtrees:
   - url: https://github.com/ROCm/rocm-systems/blob/develop/projects/cuid/example/main.cc
     title: Sample program using CUID API
 
+- caption: API reference
+  entries:
+  - file: reference/amdcuid-c-api
+
 - caption: Conceptual
   entries:
   - file: conceptual/cuid_file

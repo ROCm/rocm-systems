@@ -73,7 +73,7 @@ The following table lists the CUID CLI tool options:
     -
       * Lists all devices with their primary CUIDs.
 
-      * used in conjunction with ``list`` or ``query-device`` option.
+      * Used in conjunction with ``list`` or ``query-device`` option.
 
       * Requires root privileges to run.
     - ``sudo /opt/rocm/core/bin/amdcuid_tool --list --show-primary``
@@ -114,49 +114,53 @@ To generate the CUIDs, use the ``--generate-cuid`` option:
 
   CUID registry refreshed successfully!
 
-Note that generating CUIDs requires root privileges, as protected hardware information is required to create the CUIDs.
+.. note::
+
+  Generating CUIDs requires root privileges, as protected hardware information is required to create the CUIDs.
 
 Managing hash key
 ------------------
 
 To generate publicly available CUIDs, the CUID library uses a hash key to process protected hardware information. Therefore, a hash key is created during CUID library installation and must be managed. While the key is auto-generated initially, users might want to use a key rotation system to remove stale keys and create new ones.
 
-To generate CUIDs using a new key, you can use the ``generate-key`` option while generating CUIDs:
+- To generate CUIDs using a new key, you can use the ``generate-key`` option while generating CUIDs:
 
-.. code-block:: shell
+  .. code-block:: shell
 
-  $ sudo /opt/rocm/core/bin/amdcuid_tool --generate-cuid --generate-key
-  Generating/refreshing CUID registry...
+    $ sudo /opt/rocm/core/bin/amdcuid_tool --generate-cuid --generate-key
+    Generating/refreshing CUID registry...
 
-  Generated new HMAC key.
-  Successfully generated: /tmp/cuid
-  Successfully generated: /tmp/priv_cuid
-  Discovered 290 device(s)
+    Generated new HMAC key.
+    Successfully generated: /tmp/cuid
+    Successfully generated: /tmp/priv_cuid
+    Discovered 290 device(s)
 
-  CUID registry refreshed successfully!
+    CUID registry refreshed successfully!
 
-To generate CUIDs using an existing key, use the ``set-key`` option and specify the path to the key file:
+- To generate CUIDs using an existing key, use the ``set-key`` option and specify the path to the key file:
 
-.. code-block:: shell
+  .. code-block:: shell
 
-  $ sudo /opt/rocm/core/bin/amdcuid_tool --generate-cuid --set-key /etc/path/to/my/key
-  Generating/refreshing CUID registry...
+    $ sudo /opt/rocm/core/bin/amdcuid_tool --generate-cuid --set-key /etc/path/to/my/key
+    Generating/refreshing CUID registry...
 
-  HMAC key loaded from: /etc/path/to/my/key
-  Successfully generated: /tmp/cuid
-  Successfully generated: /tmp/priv_cuid
-  Discovered 290 device(s)
+    HMAC key loaded from: /etc/path/to/my/key
+    Successfully generated: /tmp/cuid
+    Successfully generated: /tmp/priv_cuid
+    Discovered 290 device(s)
 
-  CUID registry refreshed successfully!
+    CUID registry refreshed successfully!
 
-Note that a new key will create new derived CUIDs for all the devices, while their primary CUIDs will always remain the same. For more information about primary and derived CUIDs, see :ref:`what-is-cuid`
+.. note::
+
+  A new key will create new derived CUIDs for all the devices, while their primary CUIDs will always remain the same. For more information about primary and derived CUIDs, see :ref:`what-is-cuid`
 
 Getting CUIDs
 --------------
 
-- Once CUIDs are generated for devices using the daemon or the CLI tool, you can query a specific device for its CUID or list all devices with their CUIDs.
+Once CUIDs are generated for devices using the daemon or the CLI tool, you can query a specific device for its CUID or list all devices with their CUIDs.
 
-  To list the CUIDs for all the devices on the system, use the ``--list`` option:
+- To list the CUIDs for all the devices on the system, use the ``--list`` option:
 
   .. code-block:: shell
 

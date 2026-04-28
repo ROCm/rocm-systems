@@ -32,6 +32,7 @@ The following table shows the corresponding bits for device-specific data, which
        * SMBIOS platform serial number.
 
        * ACPI or other architectural component identifier. If ACPI is unavailable, a software-generated fingerprint from proprietary individual marker is used.
+
        This serial number can be MSB 0-extended if smaller than 64 bits or truncated if larger.
 
    * - 64:71
