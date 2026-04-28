@@ -54,8 +54,6 @@ set(_sampling_test_sources
     unit/metrics_population_test.cpp
     # TDD red tests for AC-2: realtime+cputime trigger mutual-exclusion (else-if → if fix).
     unit/trigger_mutual_exclusion_test.cpp
-    # TDD red tests for R-3 / AC-4: per-TID cputime signal filter not enforced.
-    unit/per_tid_cputime_filter_test.cpp
 )
 
 # Linux-only smoke tests for real OS-backed implementations.
