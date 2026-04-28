@@ -254,20 +254,45 @@ if(USE_PROF_API)
   ")
   endif()
 
-  add_custom_command(OUTPUT ${PROF_API_NEWHDR}.i
-    COMMAND ${CMAKE_COMMAND} -E cat ${PROF_API_HDR} ${PROF_GL_HDR} > ${PROF_API_NEWHDR}
-    COMMAND ${CMAKE_C_COMPILER}
-        "-D$<JOIN:$<TARGET_PROPERTY:amdhip64,COMPILE_DEFINITIONS>,;-D>"
-        "-I$<JOIN:$<TARGET_PROPERTY:amdhip64,INCLUDE_DIRECTORIES>,;-I>"
-        "-DHIP_INCLUDE_HIP_HIP_RUNTIME_PT_API_H=1"
-        ${c_flags}
-        $<TARGET_PROPERTY:amdhip64,COMPILE_OPTIONS>
-        ${CPP_EXTRA_C_FLAGS}
-        -E ${PROF_API_NEWHDR} -o ${PROF_API_NEWHDR}.i
-    COMMAND_EXPAND_LISTS VERBATIM
-    IMPLICIT_DEPENDS C ${PROF_API_HDR} ${PROF_GL_HDR} ${PROF_API_DEPRECATED}
-    DEPENDS ${PROF_API_HDR} ${PROF_GL_HDR} ${PROF_API_DEPRECATED}
-    COMMENT "Generating new header from hip_runtime_api.h")
+  # Note: original command used shell redirect ">" which only works in a real
+  # POSIX shell. MSBuild on Windows passes this through CMD which mishandles
+  # it, and `cmake -E cat` itself does not accept output redirection. Use
+  # `cmake -E copy` + `cat A >> B` style via two cmake -E commands.
+  if(MSVC)
+    # MSVC cl.exe uses /P /Fi instead of -E -o for preprocess-to-file.
+    add_custom_command(OUTPUT ${PROF_API_NEWHDR}.i
+      COMMAND ${CMAKE_COMMAND} -E copy ${PROF_API_HDR} ${PROF_API_NEWHDR}
+      COMMAND ${CMAKE_COMMAND} -DSRC=${PROF_GL_HDR} -DDST=${PROF_API_NEWHDR}
+              -P "${CMAKE_CURRENT_SOURCE_DIR}/append_file.cmake"
+      COMMAND ${CMAKE_C_COMPILER}
+          "-D$<JOIN:$<TARGET_PROPERTY:amdhip64,COMPILE_DEFINITIONS>,;-D>"
+          "-I$<JOIN:$<TARGET_PROPERTY:amdhip64,INCLUDE_DIRECTORIES>,;-I>"
+          "-DHIP_INCLUDE_HIP_HIP_RUNTIME_PT_API_H=1"
+          ${c_flags}
+          $<TARGET_PROPERTY:amdhip64,COMPILE_OPTIONS>
+          ${CPP_EXTRA_C_FLAGS}
+          /P "/Fi${PROF_API_NEWHDR}.i" ${PROF_API_NEWHDR}
+      COMMAND_EXPAND_LISTS VERBATIM
+      DEPENDS ${PROF_API_HDR} ${PROF_GL_HDR} ${PROF_API_DEPRECATED}
+      COMMENT "Generating new header from hip_runtime_api.h (MSVC)")
+  else()
+    add_custom_command(OUTPUT ${PROF_API_NEWHDR}.i
+      COMMAND ${CMAKE_COMMAND} -E copy ${PROF_API_HDR} ${PROF_API_NEWHDR}
+      COMMAND ${CMAKE_COMMAND} -DSRC=${PROF_GL_HDR} -DDST=${PROF_API_NEWHDR}
+              -P "${CMAKE_CURRENT_SOURCE_DIR}/append_file.cmake"
+      COMMAND ${CMAKE_C_COMPILER}
+          "-D$<JOIN:$<TARGET_PROPERTY:amdhip64,COMPILE_DEFINITIONS>,;-D>"
+          "-I$<JOIN:$<TARGET_PROPERTY:amdhip64,INCLUDE_DIRECTORIES>,;-I>"
+          "-DHIP_INCLUDE_HIP_HIP_RUNTIME_PT_API_H=1"
+          ${c_flags}
+          $<TARGET_PROPERTY:amdhip64,COMPILE_OPTIONS>
+          ${CPP_EXTRA_C_FLAGS}
+          -E ${PROF_API_NEWHDR} -o ${PROF_API_NEWHDR}.i
+      COMMAND_EXPAND_LISTS VERBATIM
+      IMPLICIT_DEPENDS C ${PROF_API_HDR} ${PROF_GL_HDR} ${PROF_API_DEPRECATED}
+      DEPENDS ${PROF_API_HDR} ${PROF_GL_HDR} ${PROF_API_DEPRECATED}
+      COMMENT "Generating new header from hip_runtime_api.h")
+  endif()
 
   add_custom_command(OUTPUT ${PROF_API_STR}
     COMMAND ${Python3_EXECUTABLE} ${PROF_API_GEN} -v -t --priv ${PROF_API_NEWHDR}.i ${PROF_API_SRC} ${PROF_API_STR_IN} ${PROF_API_STR}
@@ -300,10 +325,15 @@ endif()
 
 target_compile_definitions(amdhip64 PUBLIC USE_PROF_API=1)
 
-if(WIN32 OR NOT BUILD_SHARED_LIBS)
-    # rocprofiler-register is not support on Windows
+if(NOT BUILD_SHARED_LIBS)
+    # rocprofiler-register is for the dynamic amdhip64 path
     set(HIP_ENABLE_ROCPROFILER_REGISTER OFF)
 else()
+  # On Windows, hsa-runtime is statically linked into amdhip64_X.dll and
+  # registers the populated HsaApiTable from inside Runtime::LoadTools().
+  # amdhip64 itself does not call rocprofiler-register on Windows; the link
+  # is purely transitive (rocprofiler-register::rocprofiler-register flows
+  # via the static hsa-runtime64 target).
   option(HIP_ENABLE_ROCPROFILER_REGISTER "Enable rocprofiler-register support" ON)
 endif()
 

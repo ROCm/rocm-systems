@@ -411,6 +411,21 @@ else()
     target_link_libraries ( ${CORE_RUNTIME_TARGET} PRIVATE hsakmt-staticdrm::hsakmt-staticdrm)
   else()
     target_link_libraries ( ${CORE_RUNTIME_TARGET} PRIVATE hsakmt-staticdrm::hsakmt-staticdrm)
+    # Static hsa-runtime64 on Windows is linked into amdhip64_X.dll.
+    # Pull in rocprofiler-register so Runtime::LoadTools() can register the
+    # populated HsaApiTable with name="hsa". rocprofiler-sdk consumes the
+    # registered table via dlopen-style resolution against amdhip64.
+    find_package(rocprofiler-register CONFIG QUIET)
+    if(rocprofiler-register_FOUND)
+      target_compile_definitions(${CORE_RUNTIME_TARGET} PRIVATE HSA_ROCPROFILER_REGISTER=1
+                                                                HSA_VERSION_MAJOR=${VERSION_MAJOR}
+                                                                HSA_VERSION_MINOR=${VERSION_MINOR}
+                                                                HSA_VERSION_PATCH=${VERSION_PATCH})
+      target_link_libraries(${CORE_RUNTIME_TARGET} PRIVATE rocprofiler-register::rocprofiler-register)
+      set(HSA_DEP_ROCPROFILER_REGISTER ON CACHE INTERNAL "")
+    else()
+      set(HSA_DEP_ROCPROFILER_REGISTER OFF CACHE INTERNAL "")
+    endif()
   endif()
 endif()#end BUILD_SHARED_LIBS
 

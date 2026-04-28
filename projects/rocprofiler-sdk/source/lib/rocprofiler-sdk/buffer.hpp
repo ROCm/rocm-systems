@@ -49,7 +49,11 @@ struct instance
     static constexpr auto sync_wait_usec = std::chrono::microseconds{10};
 
     mutable std::array<buffer_t, size>         buffers       = {};
-    mutable std::array<std::atomic_flag, size> syncer        = {false, false};  // r/w lock
+    // Note: pre-C++20, std::atomic_flag has no constructor that accepts a bool,
+    // so the brace-init `{false, false}` does not compile on MSVC. Default-init
+    // the array; instances are explicitly cleared in the ctor below (POC fix
+    // from double-buffer-poc/include/rocp_port/buffer.hpp).
+    mutable std::array<std::atomic_flag, size> syncer        = {};               // r/w lock
     mutable std::atomic<uint32_t>              buffer_idx    = {};              // array index
     mutable std::atomic<uint64_t>              drop_count    = {};
     uint64_t                                   watermark     = 0;

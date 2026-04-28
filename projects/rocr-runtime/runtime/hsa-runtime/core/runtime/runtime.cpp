@@ -53,6 +53,16 @@
 #define debug_warning(__VA_ARGS__)
 #endif
 
+#if defined(_WIN32)
+#  ifndef WIN32_LEAN_AND_MEAN
+#    define WIN32_LEAN_AND_MEAN
+#  endif
+#  ifndef NOMINMAX
+#    define NOMINMAX
+#  endif
+#  include <windows.h>
+#endif
+
 #include "core/inc/runtime.h"
 #include "core/inc/hsa_table_interface.h"
 #include "core/util/timer.h"
@@ -2660,7 +2670,12 @@ void Runtime::LoadTools() {
 
     if (rocp_reg_status != ROCP_REG_SUCCESS && flag().report_tool_register_failures()) {
       fprintf(stderr, "[hsa-runtime][%i] rocprofiler-register returned status code %i: %s\n",
-              getpid(), rocp_reg_status, rocprofiler_register_error_string(rocp_reg_status));
+#if defined(_WIN32)
+              static_cast<int>(GetCurrentProcessId()),
+#else
+              getpid(),
+#endif
+              rocp_reg_status, rocprofiler_register_error_string(rocp_reg_status));
     }
 
     bool allow_v1_registration = false;

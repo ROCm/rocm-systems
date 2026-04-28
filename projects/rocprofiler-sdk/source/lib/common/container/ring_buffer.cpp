@@ -26,7 +26,17 @@
 
 #include <fmt/format.h>
 
-#include <sys/mman.h>
+#if defined(_WIN32)
+#  ifndef WIN32_LEAN_AND_MEAN
+#    define WIN32_LEAN_AND_MEAN
+#  endif
+#  ifndef NOMINMAX
+#    define NOMINMAX
+#  endif
+#  include <windows.h>
+#else
+#  include <sys/mman.h>
+#endif
 #include <atomic>
 #include <cerrno>
 #include <cstddef>
@@ -96,7 +106,22 @@ ring_buffer::init(size_t _size)
     m_read_count  = 0;
     m_write_count = 0;
 
-    // Map twice the buffer size.
+    // Allocate the buffer storage. Linux uses mmap(MAP_ANONYMOUS|MAP_PRIVATE);
+    // Windows uses VirtualAlloc(MEM_RESERVE|MEM_COMMIT, PAGE_READWRITE) per
+    // double-buffer-poc/src/ring_buffer_win.cpp. The "twice the buffer size /
+    // mirror mapping" trick from the original Linux code is not used here:
+    // the request()/retrieve() paths handle wrap-around explicitly via
+    // _modulo / _offset, so a single contiguous backing region is sufficient
+    // on both platforms.
+#if defined(_WIN32)
+    m_ptr = ::VirtualAlloc(nullptr, m_size, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+    if(m_ptr == nullptr)
+    {
+        auto _err = ::GetLastError();
+        destroy();
+        ROCP_FATAL << fmt::format("VirtualAlloc failed with GetLastError={}", _err);
+    }
+#else
     if((m_ptr =
             mmap(nullptr, m_size, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0)) ==
        MAP_FAILED)
@@ -105,6 +130,7 @@ ring_buffer::init(size_t _size)
         auto _err = errno;
         ROCP_FATAL << fmt::format("mmap failed with errno {} :: {}", _err, strerror(_err));
     }
+#endif
 }
 
 void
@@ -112,9 +138,18 @@ ring_buffer::destroy()
 {
     if(m_ptr && m_init)
     {
-        // Unmap the mapped virtual memmory.
+        // Release the backing storage.
+#if defined(_WIN32)
+        if(::VirtualFree(m_ptr, 0, MEM_RELEASE) == 0)
+        {
+            std::fprintf(stderr,
+                         "ring_buffer: VirtualFree failed with GetLastError=%lu\n",
+                         static_cast<unsigned long>(::GetLastError()));
+        }
+#else
         auto ret = munmap(m_ptr, m_size);
         if(ret != 0) perror("ring_buffer: munmap failed");
+#endif
     }
     m_init        = false;
     m_size        = 0;

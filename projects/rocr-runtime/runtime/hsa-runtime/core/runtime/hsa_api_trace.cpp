@@ -511,4 +511,17 @@ class Init {
  public:
   Init() { rocr::core::LoadInitialHsaApiTable(); }
 };
+// On Windows MSVC, when hsa-runtime is statically linked into amdhip64_X.dll,
+// the linker drops object files whose externally-visible symbols are not
+// referenced. Mark this object with external linkage and use /INCLUDE: so the
+// linker keeps the TU and runs its dynamic initializer at DLL load time.
+//
+// On non-MSVC builds keep the original `static` storage class so we don't
+// pollute the global namespace with a new external symbol.
+#if defined(_MSC_VER)
+extern "C" Init LinkAtLoadOrFirstTranslationUnitAccess;
+Init LinkAtLoadOrFirstTranslationUnitAccess;
+#  pragma comment(linker, "/INCLUDE:LinkAtLoadOrFirstTranslationUnitAccess")
+#else
 static Init LinkAtLoadOrFirstTranslationUnitAccess;
+#endif

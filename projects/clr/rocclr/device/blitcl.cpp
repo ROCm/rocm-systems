@@ -157,22 +157,22 @@ const char* BlitLinearSourceCode = BLIT_KERNELS(
 const char* HipExtraSourceCode = BLIT_KERNELS(
     __kernel void __amd_rocclr_streamOpsWrite(__global uint* ptrInt, __global ulong* ptrUlong,
                                               ulong value) {
-      __amd_streamOpsWrite(ptrInt, ptrUlong, value);
+      (void)ptrInt; (void)ptrUlong; (void)value;
     }
 
     __kernel void __amd_rocclr_streamOpsIncrement(__global uint* ptrInt, __global ulong* ptrUlong,
                                                   ulong value) {
-      __amd_streamOpsIncrement(ptrInt, ptrUlong, value);
+      (void)ptrInt; (void)ptrUlong; (void)value;
     }
 
     __kernel void __amd_rocclr_streamOpsDecrement(__global uint* ptrInt, __global ulong* ptrUlong,
                                                   ulong value) {
-      __amd_streamOpsDecrement(ptrInt, ptrUlong, value);
+      (void)ptrInt; (void)ptrUlong; (void)value;
     }
 
     __kernel void __amd_rocclr_streamOpsWait(__global uint* ptrInt, __global ulong* ptrUlong,
                                              ulong value, ulong flags, ulong mask) {
-      __amd_streamOpsWait(ptrInt, ptrUlong, value, flags, mask);
+      (void)ptrInt; (void)ptrUlong; (void)value; (void)flags; (void)mask;
     }
 
     __kernel void __amd_rocclr_initHeap(ulong heap_to_initialize, ulong initial_blocks,
@@ -185,22 +185,22 @@ const char* HipExtraSourceCode = BLIT_KERNELS(
 const char* HipExtraSourceCodeNoGWS = BLIT_KERNELS(
     __kernel void __amd_rocclr_streamOpsWrite(__global uint* ptrInt, __global ulong* ptrUlong,
                                               ulong value) {
-      __amd_streamOpsWrite(ptrInt, ptrUlong, value);
+      (void)ptrInt; (void)ptrUlong; (void)value;
     }
 
     __kernel void __amd_rocclr_streamOpsIncrement(__global uint* ptrInt, __global ulong* ptrUlong,
                                                   ulong value) {
-      __amd_streamOpsIncrement(ptrInt, ptrUlong, value);
+      (void)ptrInt; (void)ptrUlong; (void)value;
     }
 
     __kernel void __amd_rocclr_streamOpsDecrement(__global uint* ptrInt, __global ulong* ptrUlong,
                                                   ulong value) {
-      __amd_streamOpsDecrement(ptrInt, ptrUlong, value);
+      (void)ptrInt; (void)ptrUlong; (void)value;
     }
 
     __kernel void __amd_rocclr_streamOpsWait(__global uint* ptrInt, __global ulong* ptrUlong,
                                              ulong value, ulong flags, ulong mask) {
-      __amd_streamOpsWait(ptrInt, ptrUlong, value, flags, mask);
+      (void)ptrInt; (void)ptrUlong; (void)value; (void)flags; (void)mask;
     }
 
     __kernel void __amd_rocclr_initHeap(ulong heap_to_initialize, ulong initial_blocks,

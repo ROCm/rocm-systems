@@ -34,4 +34,12 @@ set(ROCPROFILER_LIB_HSA_HEADERS
 target_sources(rocprofiler-sdk-object-library PRIVATE ${ROCPROFILER_LIB_HSA_SOURCES}
                                                       ${ROCPROFILER_LIB_HSA_HEADERS})
 
+# Windows-only: HSA symbol resolver against amdhip64_X.dll. Per user-locked
+# decision R7, the SDK does NOT link against any standalone hsa-runtime on
+# Windows -- it dlsyms the handful of HSA bootstrap functions it needs from
+# amdhip64 at start-up.
+if(WIN32)
+    target_sources(rocprofiler-sdk-object-library PRIVATE win_hsa_loader.cpp)
+endif()
+
 add_subdirectory(details)
