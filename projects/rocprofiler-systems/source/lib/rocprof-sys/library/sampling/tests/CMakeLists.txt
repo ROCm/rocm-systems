@@ -31,7 +31,6 @@ set(_sampling_test_sources
     unit/sample_parser_test.cpp
     unit/sampling_duration_controller_test.cpp
     unit/fatal_error_policy_test.cpp
-    unit/tmpfile_offload_store_test.cpp
     # unit/native_report_writer_test.cpp — retired: tested old CSV stub; replaced by
     # integration/native_report_writer_tsv_test.cpp for the new TSV interface (Phase H).
     unit/header_policy_test.cpp
@@ -41,8 +40,6 @@ set(_sampling_test_sources
     unit/thread_sampler_state_test.cpp
     # Integration sources (exercise full pipeline via test_sampling_policies)
     integration/full_pipeline_test.cpp
-    # TDD red tests for post_process() fan-out pipeline (code-writer implements)
-    integration/post_process_test.cpp
     # Signal handler invariants: re-entry guard, ring-full drop, in-flight counter (Phase G)
     unit/sampling_signal_handler_test.cpp
     # TSV writer correctness: header, pct_self, flat_scope, multi-thread (Phase H TDD red)

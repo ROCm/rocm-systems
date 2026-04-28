@@ -43,9 +43,9 @@ TEST(sampling_service_shutdown, shutdown_single_thread_returns_signal_set)
         << "shutdown() must return without crashing";
 }
 
-// ─── AC-20: child process — release without post_process ─────────────────────
+// ─── AC-20: child process — release without per-tid processing ────────────────
 
-TEST(sampling_service_shutdown, shutdown_in_child_does_not_call_post_process)
+TEST(sampling_service_shutdown, shutdown_in_child_skips_per_tid_processing)
 {
     test_service svc;
     svc.setup(0);
@@ -56,7 +56,7 @@ TEST(sampling_service_shutdown, shutdown_in_child_does_not_call_post_process)
 
     auto const& report = svc.report_writer_ref();
     EXPECT_TRUE(report.m_timer_counts.empty())
-        << "Child shutdown must not call post_process (timer_counts must be empty)";
+        << "Child shutdown must skip per-tid processing (timer_counts must be empty)";
     EXPECT_TRUE(report.m_overflow_counts.empty())
-        << "Child shutdown must not call post_process (overflow_counts must be empty)";
+        << "Child shutdown must skip per-tid processing (overflow_counts must be empty)";
 }

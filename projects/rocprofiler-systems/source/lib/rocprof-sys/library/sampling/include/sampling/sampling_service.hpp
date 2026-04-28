@@ -13,7 +13,6 @@
 
 #include <atomic>
 #include <cstdint>
-#include <fstream>
 #include <memory>
 #include <mutex>
 #include <set>
@@ -61,8 +60,6 @@ public:
     void pause();
     void resume();
 
-    void post_process();
-
     void postfork_parent_reinit();
     void postfork_child_cleanup();
 
@@ -85,7 +82,7 @@ public:
 
     // ----- production state setters -----
     // Called by postfork_child() to put the service into child-process mode, where
-    // shutdown() releases state without calling post_process (AC-20).
+    // shutdown() skips per-tid processing (AC-20).
     void enter_child_process_mode() noexcept { child_process_test_ = true; }
 
     // ----- test seams for state injection -----
@@ -121,13 +118,6 @@ private:
     thread_sampler_state_registry<Policies> registry_;
     sampling_duration_controller<clock>     duration_controller_;
 
-    // TSV output file handles — opened by open_report_writer_streams() in production.
-    // Stored here (not in native_report_writer) so they outlive flush().
-    std::ofstream m_tsv_wall;
-    std::ofstream m_tsv_cpu;
-    std::ofstream m_tsv_pct;
-    std::ofstream m_tsv_trip;
-
     std::atomic<bool> blocked_{ false };
     bool              duration_disabled_  = false;
     bool              causal_mode_test_   = false;
@@ -154,11 +144,6 @@ private:
     void emit_resolved_to_trace_cache(int64_t tid);
     void postfork_production_parent_reinit();
     void postfork_production_child_cleanup();
-
-    // Called at the start of post_process() before flush().
-    // Production specialization opens the TSV output files and calls
-    // report_writer_.set_streams(...) so flush() has real file handles.
-    void open_report_writer_streams();
 };
 
 #if defined(__linux__)

@@ -1123,13 +1123,6 @@ rocprofsys_finalize_hidden(void)
         }
     }
 
-    // ensure that all the MT instances are flushed
-    if(get_use_sampling())
-    {
-        LOG_DEBUG("Post-processing the sampling backtraces...");
-        services::sampling().post_process();
-    }
-
     auto _output_registry = output_file_registry{};
 
     if(get_use_causal())

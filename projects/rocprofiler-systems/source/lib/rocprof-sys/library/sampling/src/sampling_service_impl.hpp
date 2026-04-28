@@ -265,12 +265,8 @@ template <class Policies>
 std::set<int>
 sampling_service<Policies>::shutdown(int64_t tid)
 {
-    // AC-20: child process — release state without post-process.
-    if(child_process_test_)
-    {
-        // In child mode we do NOT call post_process; just return.
-        return {};
-    }
+    // AC-20: child process — release state without per-tid processing.
+    if(child_process_test_) return {};
 
     LOG_DEBUG("Stopping sampler for thread {}...", tid);
 
@@ -301,10 +297,9 @@ sampling_service<Policies>::shutdown(int64_t tid)
         offload_.write(tid, state->ring_buffer(), fatal_);
     }
 
-    // Variant 2 (Task #30): parse + resolve + emit to trace_cache immediately.
+    // Variant 2: parse + resolve + emit to trace_cache immediately.
     // No-op in generic template; production specialization reads from offload_,
-    // parses, resolves symbols, emits backtrace_region_sample, then clears
-    // the tid from offload_ to prevent double-emission in post_process().
+    // parses, resolves symbols, and emits backtrace_region_sample to trace_cache.
     emit_resolved_to_trace_cache(tid);
 
     // Clear thread-local signal-handler pointers so a stale signal after
@@ -319,176 +314,6 @@ sampling_service<Policies>::shutdown(int64_t tid)
 
     LOG_DEBUG("Sampler destroyed for thread {}...", tid);
     return sigs;
-}
-
-// ── post_process ──────────────────────────────────────────────────────────
-
-template <class Policies>
-void
-sampling_service<Policies>::post_process()
-{
-    // L30 — matches legacy: "Stopping sampling components..."
-    LOG_DEBUG("Stopping sampling components...");
-
-    sample_parser   parser;
-    symbol_resolver resolver;
-
-    // Track any exception to re-throw after cleanup.
-    std::exception_ptr pending_exc;
-
-    size_t total_samples = 0;
-    size_t total_threads = 0;
-
-    // Per-thread fan-out: drain offload → parse → report_writer + perfetto_sink +
-    // trace_sink. DEC-9: offload.read() must precede report_writer.write*(). DEC-9:
-    // offload.reset() must be called in all paths (exception safety). trace_sink_
-    // receives post-parse resolved samples (store_timer/store_overflow) so data_processor
-    // gets symbol names + real time ranges, not raw PC addresses. Use offload_.tids()
-    // instead of registry_.each() because shutdown() erases registry entries before
-    // post_process() runs.
-    for(int64_t tid : offload_.tids())
-    {
-        if(pending_exc) break;  // skip remaining tids after first failure
-
-        // L24 — matches legacy: "Getting sampler data for thread {}..."
-        LOG_DEBUG("Getting sampler data for thread {}...", tid);
-
-        auto records = offload_.read(tid);
-        // L25 — matches legacy: "Sampler data for thread {} has {} initial entries..."
-        LOG_DEBUG("Sampler data for thread {} has {} initial entries...", tid,
-                  records.size());
-        LOG_DEBUG("[post_process] tid={} offload returned {} records", tid,
-                  records.size());
-        if(records.empty())
-        {
-            // L22 — matches legacy: "...skipped (no sampler)" — here means no offload
-            // data
-            LOG_DEBUG(
-                "Post-processing sampling entries for thread {} skipped (no sampler)",
-                tid);
-            continue;
-        }
-
-        // Split TIMER vs OVERFLOW records.
-        // First TIMER record is the init/base record (provides beg_ns for sample1).
-        std::vector<backtrace_record> timer_raw;
-        std::vector<backtrace_record> overflow_raw;
-        timer_raw.reserve(records.size());
-        overflow_raw.reserve(records.size());
-        for(auto const& r : records)
-        {
-            if(r.trigger == trigger_type::TIMER)
-                timer_raw.push_back(r);
-            else
-                overflow_raw.push_back(r);
-        }
-
-        size_t valid_count = timer_raw.size() + overflow_raw.size();
-        if(valid_count == 0)
-        {
-            // L27 — matches legacy: "...zero valid entries out of {}... (skipped)"
-            LOG_DEBUG("Sampler data for thread {} has zero valid entries out of "
-                      "{}... (skipped)",
-                      tid, records.size());
-        }
-        else
-        {
-            // L26 — matches legacy: "Sampler data for thread {} has {} valid entries..."
-            LOG_DEBUG("Sampler data for thread {} has {} valid entries...", tid,
-                      valid_count);
-        }
-
-        try
-        {
-            if(timer_raw.size() >= 2)
-            {
-                backtrace_record              init_rec = timer_raw.front();
-                std::vector<backtrace_record> tail(timer_raw.begin() + 1,
-                                                   timer_raw.end());
-                auto                          timer_samples =
-                    parser.parse_timer(tid, init_rec, tail, pause_registry_);
-                if(!timer_samples.empty())
-                {
-                    total_samples += timer_samples.size();
-                    // R-A1: resolve raw PCs to symbol names post-signal.
-                    for(auto& s : timer_samples)
-                        for(auto& f : s.stack)
-                            if(f.name.empty()) f.name = resolver.resolve(f.address);
-                    // L43 — matches legacy: "[{}] Post-processing data for native
-                    // report..." (was "timemory" in legacy — changed per requirements
-                    // note)
-                    LOG_DEBUG("[{}] Post-processing data for native report...", tid);
-                    report_writer_.write_timer_samples(tid, timer_samples);
-                    perfetto_sink_.emit_timer(tid, nullptr, timer_samples);
-                    trace_sink_.store_timer(tid, timer_samples);
-                }
-            }
-
-            if(!overflow_raw.empty())
-            {
-                auto overflow_samples =
-                    parser.parse_overflow(tid, overflow_raw, pause_registry_);
-                if(!overflow_samples.empty())
-                {
-                    total_samples += overflow_samples.size();
-                    for(auto& s : overflow_samples)
-                        for(auto& f : s.stack)
-                            if(f.name.empty()) f.name = resolver.resolve(f.address);
-                    // L43 — matches legacy for overflow path
-                    LOG_DEBUG("[{}] Post-processing data for native report...", tid);
-                    report_writer_.write_overflow_samples(tid, overflow_samples);
-                    perfetto_sink_.emit_overflow(tid, nullptr, overflow_samples);
-                    trace_sink_.store_overflow(tid, overflow_samples);
-                }
-            }
-
-            if(valid_count > 0) ++total_threads;
-        } catch(...)
-        {
-            pending_exc = std::current_exception();
-        }
-    }
-
-    // L28 — matches legacy: "Destroying samplers and allocators..."
-    LOG_DEBUG("Destroying samplers and allocators...");
-
-    // L29 — matches legacy: "Collected {} samples from {} threads... {} samples out of
-    // {} were taken while within instrumented routines"
-    // Note: the new impl does not track internal vs external samples; both counts are
-    // equal here (all samples are external in the new model — no instrumentation guard).
-    LOG_DEBUG("Collected {} samples from {} threads... {} samples out of {} "
-              "were taken while within instrumented routines",
-              total_samples, total_threads, total_samples, total_samples);
-
-    // Final teardown: open output files (production), flush writer, reset offload.
-    // DEC-9 ordering: open → flush → reset.
-    // offload_.reset() must run even if flush() throws (C-15).
-    open_report_writer_streams();
-    try
-    {
-        report_writer_.flush();
-    } catch(...)
-    {
-        if(!pending_exc) pending_exc = std::current_exception();
-    }
-    offload_.reset();
-
-    // Propagate any exception from the fan-out loop or flush via fatal_error_policy
-    // so production callers get the noreturn abort and test doubles get
-    // sampling_fatal_error.
-    if(pending_exc)
-    {
-        try
-        {
-            std::rethrow_exception(pending_exc);
-        } catch(std::exception const& e)
-        {
-            fatal_.fatal(__FILE__, __LINE__, e.what());
-        } catch(...)
-        {
-            fatal_.fatal(__FILE__, __LINE__, "unknown exception in post_process fan-out");
-        }
-    }
 }
 
 // ── postfork_parent_reinit / postfork_child_cleanup ───────────────────────
@@ -526,7 +351,7 @@ sampling_service<Policies>::postfork_child_cleanup()
         if(s.overflow_trigger().has_value()) s.overflow_trigger()->stop();
     });
 
-    // Drop all per-thread state without calling post_process (AC-20).
+    // Drop all per-thread state without per-tid processing (AC-20).
     registry_.reset();
 
     // Delegate to the PMC layer when process sampling is active (production hook).
@@ -584,14 +409,8 @@ sampling_service<Policies>::emit_resolved_to_trace_cache(int64_t /*tid*/)
 {
     // No-op in generic template. Production specialization for
     // default_sampling_policies reads raw records from offload_, parses with
-    // sample_parser, resolves symbols (dladdr + demangler), emits
-    // backtrace_region_sample to trace_cache::buffer_storage, then clears the
-    // tid from offload_ to prevent double-emission in post_process() (Variant 2).
+    // sample_parser, resolves symbols (dladdr + demangler), and emits
+    // backtrace_region_sample to trace_cache::buffer_storage (Variant 2).
 }
-
-template <class Policies>
-void
-sampling_service<Policies>::open_report_writer_streams()
-{}
 
 }  // namespace rocprofsys::sampling

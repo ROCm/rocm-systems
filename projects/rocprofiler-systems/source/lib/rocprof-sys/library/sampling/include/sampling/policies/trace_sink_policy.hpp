@@ -9,11 +9,11 @@
 // Required member functions:
 //   void store_timer(int64_t tid, std::vector<timer_sample> const& samples);
 //       Push post-parse resolved timer samples to the trace cache.
-//       Called from post_process() after DWARF resolution.
+//       Called from emit_resolved_to_trace_cache() after symbol resolution.
 //
 //   void store_overflow(int64_t tid, std::vector<overflow_sample> const& samples);
 //       Push post-parse resolved overflow samples to the trace cache.
-//       Called from post_process() after DWARF resolution.
+//       Called from emit_resolved_to_trace_cache() after symbol resolution.
 //
 // Production: rocprofsys::sampling::real_trace_cache_sink
 //             - converts timer_sample/overflow_sample to

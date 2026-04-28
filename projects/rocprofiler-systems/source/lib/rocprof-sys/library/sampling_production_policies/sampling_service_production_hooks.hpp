@@ -30,8 +30,6 @@
 #include <sys/types.h>
 #include <unistd.h>
 
-#include <filesystem>
-#include <fstream>
 #include <mutex>
 
 namespace rocprofsys::sampling
@@ -194,36 +192,6 @@ sampling_service<default_sampling_policies>::shutdown_production_wiring(int64_t 
     tl_sampler_state_vp = nullptr;
     tl_offload_vp       = nullptr;
     tl_logical_tid      = -1;
-}
-
-// ── open_report_writer_streams ─────────────────────────────────────────────
-// Opens sampling_wall_clock.tsv, sampling_cpu_clock.tsv, sampling_percent.tsv,
-// and trip_count.tsv in the configured output directory, then injects them into
-// report_writer_ so flush() has real file handles.
-
-template <>
-inline void
-sampling_service<default_sampling_policies>::open_report_writer_streams()
-{
-    // Ofstreams are kept alive as members so report_writer_ can hold non-owning
-    // pointers until flush() completes.
-    auto open = [](std::ofstream& ofs, std::string_view name) {
-        auto path = rocprofsys::get_sampling_output_filepath(name);
-        if(!path.empty())
-        {
-            auto parent = std::filesystem::path{ path }.parent_path();
-            if(!parent.empty()) std::filesystem::create_directories(parent);
-        }
-        ofs.open(path);
-        if(!ofs.is_open()) LOG_CRITICAL("[native_report_writer] cannot open {}", path);
-    };
-
-    if(!m_tsv_wall.is_open()) open(m_tsv_wall, "sampling_wall_clock");
-    if(!m_tsv_cpu.is_open()) open(m_tsv_cpu, "sampling_cpu_clock");
-    if(!m_tsv_pct.is_open()) open(m_tsv_pct, "sampling_percent");
-    if(!m_tsv_trip.is_open()) open(m_tsv_trip, "trip_count");
-
-    report_writer_.set_streams(&m_tsv_wall, &m_tsv_cpu, &m_tsv_pct, &m_tsv_trip);
 }
 
 // ── postfork production hooks ──────────────────────────────────────────────

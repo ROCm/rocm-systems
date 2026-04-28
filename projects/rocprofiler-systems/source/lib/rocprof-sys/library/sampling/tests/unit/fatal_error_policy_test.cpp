@@ -57,7 +57,7 @@ TEST(fatal_error_policy, sampling_fatal_error_carries_file_and_line)
 // The signal_mask_guard routes pthread_sigmask errors through fatal_error_policy.
 // We test this with a recording_signal_dispatcher that returns EINVAL on demand.
 
-#include "doubles/in_memory_offload.hpp"
+#include "doubles/in_memory_emitter.hpp"
 #include "doubles/mock_overflow_trigger.hpp"
 #include "doubles/test_sampling_policies.hpp"
 #include "doubles/throwing_fatal_error_policy.hpp"
@@ -106,7 +106,7 @@ TEST(fatal_error_policy, overflow_trigger_configure_failure_calls_fatal_policy)
 TEST(fatal_error_policy, offload_write_failure_calls_fatal_policy)
 {
     // The offload write() must accept a FatalErrorPolicy& and call fatal() on failure.
-    in_memory_offload           offload;
+    in_memory_emitter           offload;
     throwing_fatal_error_policy fatal;
     offload.fail_next_write = true;
 

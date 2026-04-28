@@ -508,7 +508,6 @@ perform_experiment_impl(std::shared_ptr<std::promise<void>> _started)  // NOLINT
                           "(elapsed: {} seconds)...",
                           _duration_sec,
                           std::chrono::duration_cast<duration_sec_t>(_elapsed).count());
-                services::causal_sampling().post_process();
                 return true;
             }
         }
@@ -1076,7 +1075,6 @@ finish_experimenting()
             std::chrono::seconds{ 5 });
         perform_experiment_impl_completed.reset();
     }
-    services::sampling().post_process();
     experiment::save_experiments();
 }
 }  // namespace causal

@@ -15,7 +15,7 @@
 #include <gtest/gtest.h>
 
 #include "doubles/fake_clock.hpp"
-#include "doubles/in_memory_offload.hpp"
+#include "doubles/in_memory_emitter.hpp"
 #include "doubles/mock_overflow_trigger.hpp"
 #include "doubles/mock_timer_trigger.hpp"
 #include "doubles/mock_unwinder.hpp"
@@ -46,7 +46,7 @@ namespace
 struct stress_sampling_policies
 {
     using unwinder          = test::mock_unwinder;
-    using offload           = test::in_memory_offload;
+    using offload           = test::in_memory_emitter;
     using trace_sink        = test::recording_trace_sink;
     using timer_trigger     = test::mock_timer_trigger;
     using overflow_trigger  = test::mock_overflow_trigger;
