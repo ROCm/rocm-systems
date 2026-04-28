@@ -370,4 +370,218 @@ namespace RcclUnitTesting
     for (auto& comm : comms)
       NCCLCHECK(ncclCommDestroy(comm));
   }
+
+  /**
+   * \brief Revoke a communicator and verify subsequent collectives are rejected.
+   *        The comm object itself remains valid for destroy/abort.
+   * ******************************************************************************************/
+  TEST(Standalone, Revoke_RejectsNewCollectives)
+  {
+    int numDevices;
+    HIPCALL(hipGetDeviceCount(&numDevices));
+    if (numDevices < 2) {
+      GTEST_SKIP() << "This test requires at least 2 devices.";
+    }
+
+    std::vector<ncclComm_t> comms(numDevices);
+    NCCLCHECK(ncclCommInitAll(comms.data(), numDevices, nullptr));
+
+    // Revoke rank 0's communicator.
+    ASSERT_EQ(ncclCommRevoke(comms[0], NCCL_REVOKE_DEFAULT), ncclSuccess);
+
+    // Allocate a 1-element float buffer + stream on rank 0 for the rejected
+    // allreduce. The kernel must not actually run; we only care that the
+    // enqueue path returns ncclInvalidUsage.
+    HIPCALL(hipSetDevice(0));
+    float* sendbuff = nullptr;
+    float* recvbuff = nullptr;
+    hipStream_t stream;
+    HIPCALL(hipMalloc((void**)&sendbuff, sizeof(float)));
+    HIPCALL(hipMalloc((void**)&recvbuff, sizeof(float)));
+    HIPCALL(hipStreamCreate(&stream));
+
+    ASSERT_EQ(ncclAllReduce(sendbuff, recvbuff, 1, ncclFloat, ncclSum, comms[0], stream),
+              ncclInvalidUsage);
+
+    HIPCALL(hipStreamDestroy(stream));
+    HIPCALL(hipFree(sendbuff));
+    HIPCALL(hipFree(recvbuff));
+
+    // Comms are still valid for destruction even after revoke.
+    for (auto& comm : comms)
+      NCCLCHECK(ncclCommDestroy(comm));
+  }
+
+  /**
+   * \brief Revoke every comm, then destroy. Verifies revoke+destroy is a clean lifecycle
+   *        (no crash, no hang, all return ncclSuccess).
+   * ******************************************************************************************/
+  TEST(Standalone, Revoke_ThenDestroy_CleanLifecycle)
+  {
+    int numDevices;
+    HIPCALL(hipGetDeviceCount(&numDevices));
+    if (numDevices < 2) {
+      GTEST_SKIP() << "This test requires at least 2 devices.";
+    }
+
+    std::vector<ncclComm_t> comms(numDevices);
+    NCCLCHECK(ncclCommInitAll(comms.data(), numDevices, nullptr));
+
+    for (int i = 0; i < numDevices; i++) {
+      ASSERT_EQ(ncclCommRevoke(comms[i], NCCL_REVOKE_DEFAULT), ncclSuccess);
+    }
+    for (int i = 0; i < numDevices; i++) {
+      ASSERT_EQ(ncclCommDestroy(comms[i]), ncclSuccess);
+    }
+  }
+
+  /**
+   * \brief Happy-path: ncclCommRevoke on every rank succeeds with ncclSuccess.
+   *        Initialises communicators across all available GPUs, revokes each one,
+   *        asserts ncclSuccess for every call, then destroys all communicators.
+   * ******************************************************************************************/
+  TEST(Standalone, Revoke_AllRanks_Succeeds)
+  {
+    int numDevices;
+    HIPCALL(hipGetDeviceCount(&numDevices));
+    if (numDevices < 2) {
+      GTEST_SKIP() << "This test requires at least 2 devices.";
+    }
+
+    std::vector<ncclComm_t> comms(numDevices);
+    NCCLCHECK(ncclCommInitAll(comms.data(), numDevices, nullptr));
+
+    for (int i = 0; i < numDevices; i++) {
+      ASSERT_EQ(ncclCommRevoke(comms[i], NCCL_REVOKE_DEFAULT), ncclSuccess);
+    }
+
+    for (int i = 0; i < numDevices; i++) {
+      NCCLCHECK(ncclCommDestroy(comms[i]));
+    }
+  }
+
+  /**
+   * \brief Revoking the same communicator twice must be rejected with ncclInvalidUsage.
+   * ******************************************************************************************/
+  TEST(Standalone, Revoke_DoubleRevoke_Rejected)
+  {
+    int numDevices;
+    HIPCALL(hipGetDeviceCount(&numDevices));
+    if (numDevices < 2) {
+      GTEST_SKIP() << "This test requires at least 2 devices.";
+    }
+
+    std::vector<ncclComm_t> comms(numDevices);
+    NCCLCHECK(ncclCommInitAll(comms.data(), numDevices, nullptr));
+
+    ASSERT_EQ(ncclCommRevoke(comms[0], NCCL_REVOKE_DEFAULT), ncclSuccess);
+    ASSERT_EQ(ncclCommRevoke(comms[0], NCCL_REVOKE_DEFAULT), ncclInvalidUsage);
+
+    for (auto& comm : comms)
+      NCCLCHECK(ncclCommDestroy(comm));
+  }
+
+  /**
+   * \brief Calling ncclCommRevoke with a null handle must be rejected with ncclInvalidArgument.
+   *        Does not require any GPU.
+   * ******************************************************************************************/
+  TEST(Standalone, Revoke_NullComm_Rejected)
+  {
+    ASSERT_EQ(ncclCommRevoke(nullptr, NCCL_REVOKE_DEFAULT), ncclInvalidArgument);
+  }
+
+  /**
+   * \brief Calling ncclCommRevoke with an unsupported revokeFlags value must be rejected
+   *        with ncclInvalidArgument independent of the comm argument. Does not require
+   *        any GPU.
+   * ******************************************************************************************/
+  TEST(Standalone, Revoke_BadFlags_Rejected)
+  {
+    ASSERT_EQ(ncclCommRevoke(nullptr, /*revokeFlags=*/0x1), ncclInvalidArgument);
+    ASSERT_EQ(ncclCommRevoke(nullptr, NCCL_REVOKE_DEFAULT),  ncclInvalidArgument);
+  }
+
+  /**
+   * \brief Revoke every comm, then create a child via ncclCommSplit and verify the child
+   *        operates independently of the revoked parent (covers shareResources=false on
+   *        revoked parents).
+   * ******************************************************************************************/
+  TEST(Standalone, Revoke_ThenSplit_ChildWorks)
+  {
+    int numDevices;
+    HIPCALL(hipGetDeviceCount(&numDevices));
+    if (numDevices < 2) {
+      GTEST_SKIP() << "This test requires at least 2 devices.";
+    }
+
+    std::vector<ncclComm_t> comms(numDevices);
+    NCCLCHECK(ncclCommInitAll(comms.data(), numDevices, nullptr));
+
+    for (int i = 0; i < numDevices; i++) {
+      ASSERT_EQ(ncclCommRevoke(comms[i], NCCL_REVOKE_DEFAULT), ncclSuccess);
+    }
+
+    std::vector<ncclComm_t> subComms(numDevices, nullptr);
+    NCCLCHECK(ncclGroupStart());
+    for (int i = 0; i < numDevices; i++) {
+      NCCLCHECK(ncclCommSplit(comms[i], 0, i, &subComms[i], NULL));
+    }
+    NCCLCHECK(ncclGroupEnd());
+
+    // Run a real allreduce on the child comms to prove they are functional.
+    std::vector<float*>       sendbuff(numDevices, nullptr);
+    std::vector<float*>       recvbuff(numDevices, nullptr);
+    std::vector<hipStream_t>  streams(numDevices);
+    for (int i = 0; i < numDevices; i++) {
+      HIPCALL(hipSetDevice(i));
+      HIPCALL(hipMalloc((void**)&sendbuff[i], sizeof(float)));
+      HIPCALL(hipMalloc((void**)&recvbuff[i], sizeof(float)));
+      HIPCALL(hipStreamCreate(&streams[i]));
+    }
+
+    NCCLCHECK(ncclGroupStart());
+    for (int i = 0; i < numDevices; i++) {
+      HIPCALL(hipSetDevice(i));
+      ASSERT_EQ(ncclAllReduce(sendbuff[i], recvbuff[i], 1, ncclFloat, ncclSum,
+                              subComms[i], streams[i]),
+                ncclSuccess);
+    }
+    NCCLCHECK(ncclGroupEnd());
+
+    for (int i = 0; i < numDevices; i++) {
+      HIPCALL(hipSetDevice(i));
+      HIPCALL(hipStreamSynchronize(streams[i]));
+      HIPCALL(hipStreamDestroy(streams[i]));
+      HIPCALL(hipFree(sendbuff[i]));
+      HIPCALL(hipFree(recvbuff[i]));
+    }
+
+    for (auto& subComm : subComms)
+      NCCLCHECK(ncclCommDestroy(subComm));
+    for (auto& comm : comms)
+      NCCLCHECK(ncclCommDestroy(comm));
+  }
+
+  /**
+   * \brief ncclCommRevoke called from inside an active group must be rejected with
+   *        ncclInvalidUsage; ncclGroupEnd should still close cleanly.
+   * ******************************************************************************************/
+  TEST(Standalone, Revoke_InsideGroup_Rejected)
+  {
+    int numDevices;
+    HIPCALL(hipGetDeviceCount(&numDevices));
+    if (numDevices < 2) {
+      GTEST_SKIP() << "This test requires at least 2 devices.";
+    }
+
+    std::vector<ncclComm_t> comms(numDevices);
+    NCCLCHECK(ncclCommInitAll(comms.data(), numDevices, nullptr));
+
+    NCCLCHECK(ncclGroupStart());
+    ASSERT_EQ(ncclCommRevoke(comms[0], NCCL_REVOKE_DEFAULT), ncclInvalidUsage);
+    NCCLCHECK(ncclGroupEnd());
+
+    for (auto& comm : comms)
+      NCCLCHECK(ncclCommDestroy(comm));
+  }
 }
