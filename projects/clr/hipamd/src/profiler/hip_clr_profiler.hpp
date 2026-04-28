@@ -54,7 +54,7 @@ void HipCaptureKernelArgsExt(HipGpuActivityExt* gact, hipFunction_t func, void**
 // kernargs points to the contiguous ABI buffer; kernargs_size is its byte length.
 // Uses desc.offset_ from the kernel signature to locate each argument.
 void HipCaptureKernelArgsPackedExt(HipGpuActivityExt* gact, hipFunction_t func,
-                                    const void* kernargs, size_t kernargs_size);
+                                   const void* kernargs, size_t kernargs_size);
 
 // ============================================================
 // Graph node info — captured at hipGraphInstantiate time.

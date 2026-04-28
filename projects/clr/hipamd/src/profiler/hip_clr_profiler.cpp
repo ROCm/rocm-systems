@@ -57,9 +57,8 @@ bool demangleName(const std::string& mangledName, std::string& demangledName);
 extern "C" void hipRegisterTracerCallback(int (*function)(activity_domain_t domain,
                                                           uint32_t operation_id, void* data));
 
-// ============================================================
+// ================================================================================================
 // Internal state
-// ============================================================
 namespace {
 
 inline uint64_t NowNs() { return amd::Os::timeNanos(); }
@@ -104,9 +103,7 @@ std::mutex                    g_alloc_mtx;
 
 
 
-// ============================================================
-// Chunk lifecycle
-// ============================================================
+// ================================================================================================
 HipApiRecordExt* AllocChunk() {
   void* raw = ::operator new[](kChunkSize * sizeof(HipApiRecordExt));
   HipApiRecordExt* chunk = static_cast<HipApiRecordExt*>(raw);
@@ -114,6 +111,7 @@ HipApiRecordExt* AllocChunk() {
   return chunk;
 }
 
+// ================================================================================================
 void FreeChunk(HipApiRecordExt* chunk) {
   for (size_t i = 0; i < kChunkSize; ++i) {
     // Free spill node kernel_args blobs and the nodes themselves.
@@ -132,11 +130,10 @@ void FreeChunk(HipApiRecordExt* chunk) {
   ::operator delete[](static_cast<void*>(chunk));
 }
 
-// ============================================================
+// ================================================================================================
 // Convert internal CL_COMMAND_* kind to the public HipCopyKindExt enum.
 // Called once per copy activity record; result stored in record at capture time
 // so the public API and JSON writer never see raw OpenCL constants.
-// ============================================================
 static HipCopyKindExt ToCopyKindExt(uint32_t cl_kind) {
   switch (cl_kind) {
     case CL_COMMAND_WRITE_BUFFER:           return HIP_COPY_KIND_H2D_EXT;
@@ -344,9 +341,8 @@ int HipActivityCallbackExt(activity_domain_t domain, uint32_t op_id, void* data)
   return 0;
 }
 
-// ============================================================
-// JSON output — Chrome Trace Event format (matches reference GoogleTrace())
-// ============================================================
+
+// ================================================================================================
 static const char* CopyKindName(uint32_t kind) {
   switch (static_cast<HipCopyKindExt>(kind)) {
     case HIP_COPY_KIND_H2D_EXT:             return "H2D";
@@ -372,6 +368,7 @@ static bool IsFreeApi (const char* n) { return n && strncmp(n, "hipFree",   7) =
 
 // Pre-demangle all kernel names in g_kernel_names under a single lock acquisition.
 // Both writers call this once at the start so the per-event lookup needs no demangling.
+// ================================================================================================
 static void PreDemangleKernelNames() {
   std::lock_guard<std::mutex> lk(g_kernel_names_mtx);
   for (auto& kv : g_kernel_names) {
@@ -383,6 +380,7 @@ static void PreDemangleKernelNames() {
   }
 }
 
+// ================================================================================================
 void WriteJsonTraceImpl(const char* filepath) {
   PreDemangleKernelNames();
 
@@ -508,11 +506,13 @@ void WriteJsonTraceImpl(const char* filepath) {
         };
         if (rec.memory1) {
           cpu_sep();
-          trace << "\"ptr\":\"0x" << std::hex << reinterpret_cast<uintptr_t>(rec.memory1) << std::dec << "\"";
+          trace << "\"ptr\":\"0x" << std::hex
+                << reinterpret_cast<uintptr_t>(rec.memory1) << std::dec << "\"";
         }
         if (rec.memory2) {
           cpu_sep();
-          trace << "\"src\":\"0x" << std::hex << reinterpret_cast<uintptr_t>(rec.memory2) << std::dec << "\"";
+          trace << "\"src\":\"0x" << std::hex
+                << reinterpret_cast<uintptr_t>(rec.memory2) << std::dec << "\"";
         }
         if (rec.size) {
           cpu_sep();
@@ -520,7 +520,8 @@ void WriteJsonTraceImpl(const char* filepath) {
         }
         if (rec.stream) {
           cpu_sep();
-          trace << "\"stream\":\"0x" << std::hex << reinterpret_cast<uintptr_t>(rec.stream) << std::dec << "\"";
+          trace << "\"stream\":\"0x" << std::hex
+                << reinterpret_cast<uintptr_t>(rec.stream) << std::dec << "\"";
         }
         if (!first_cpu_arg) trace << "}";
       }
@@ -573,23 +574,28 @@ void WriteJsonTraceImpl(const char* filepath) {
         if (op_idx == OP_ID_DISPATCH && gop.grid_x) {
           sep();
           trace << "\"grid\":\"" << gop.grid_x << "x" << gop.grid_y << "x" << gop.grid_z << "\""
-                << ",\"block\":\"" << gop.block_x << "x" << gop.block_y << "x" << gop.block_z << "\"";
+                << ",\"block\":\"" << gop.block_x << "x" << gop.block_y << "x"
+                << gop.block_z << "\"";
         }
         if (op_idx == OP_ID_COPY) {
           sep();
-          trace << "\"copy_kind\":\"" << CopyKindName(gop.copy_kind) << "\",\"bytes\":" << gop.bytes;
+          trace << "\"copy_kind\":\"" << CopyKindName(gop.copy_kind)
+                << "\",\"bytes\":" << gop.bytes;
           if (gop.dst) {
             sep();
-            trace << "\"dst\":\"0x" << std::hex << reinterpret_cast<uintptr_t>(gop.dst) << std::dec << "\"";
+            trace << "\"dst\":\"0x" << std::hex
+                  << reinterpret_cast<uintptr_t>(gop.dst) << std::dec << "\"";
           }
           if (gop.src) {
             sep();
-            trace << "\"src\":\"0x" << std::hex << reinterpret_cast<uintptr_t>(gop.src) << std::dec << "\"";
+            trace << "\"src\":\"0x" << std::hex
+                  << reinterpret_cast<uintptr_t>(gop.src) << std::dec << "\"";
           }
         }
         if (stream) {
           sep();
-          trace << "\"stream\":\"0x" << std::hex << reinterpret_cast<uintptr_t>(stream) << std::dec << "\"";
+          trace << "\"stream\":\"0x" << std::hex
+                << reinterpret_cast<uintptr_t>(stream) << std::dec << "\"";
         }
         // Kernel args on GPU dispatch event (positional, same format as CPU record).
         if (op_idx == OP_ID_DISPATCH && gop.kernel_args && gop.kernel_args_size > 0) {
@@ -788,11 +794,12 @@ void WriteJsonTraceImpl(const char* filepath) {
   trace.close();
 }
 
-// Drain all GPU work on every device using the internal CLR path.
-// Mirrors hipDeviceSynchronize() without going through HIP_INIT_API or our
-// dispatch table wrappers, so no spurious profiling records are created and
-// there is no re-entrancy risk.
+// ================================================================================================
 static void DrainAllDevices() {
+  // Drain all GPU work on every device using the internal CLR path.
+  // Mirrors hipDeviceSynchronize() without going through HIP_INIT_API or our
+  // dispatch table wrappers, so no spurious profiling records are created and
+  // there is no re-entrancy risk.
   for (auto* dev : hip::g_devices) {
     constexpr bool kWaitForCpu = false;
     dev->SyncAllStreams(kWaitForCpu);
@@ -903,10 +910,15 @@ static constexpr uint32_t kIName_name = 2;  // string
 static uint64_t CpuProcessUuid()                        { return 0x1000ULL; }
 static uint64_t CpuThreadUuid(uint32_t tid)             { return 0x1000ULL << 20 | tid; }
 static uint64_t GpuProcessUuid(int dev)                 { return 0x2000ULL | uint64_t(dev); }
-static uint64_t GpuThreadUuid(int dev, uint64_t q_tid)  { return (0x2000ULL | uint64_t(dev)) << 20 | q_tid; }
+static uint64_t GpuThreadUuid(int dev, uint64_t q_tid) {
+  return (0x2000ULL | uint64_t(dev)) << 20 | q_tid;
+}
 static uint64_t MemProcessUuid()                        { return 0x3000ULL; }
-static uint64_t MemThreadUuid(uint64_t tid)             { return 0x3000ULL << 20 | (tid & 0xFFFFF); }
+static uint64_t MemThreadUuid(uint64_t tid) {
+  return 0x3000ULL << 20 | (tid & 0xFFFFF);
+}
 
+// ================================================================================================
 static void AppendPacket(std::string& out, const ProtoMsg& pkt) {
   // Each TracePacket is field 1 (length-delimited) of the Trace message.
   ProtoMsg wrapper;
@@ -917,6 +929,7 @@ static void AppendPacket(std::string& out, const ProtoMsg& pkt) {
 // All track events share a single sequence (cleared by the ClockSnapshot packet).
 static constexpr uint32_t kGlobalSeq = 1;
 
+// ================================================================================================
 static void EmitTrackDesc(std::string& out, uint64_t uuid, uint64_t parent,
                            const std::string& name,
                            int pid = -1, int tid = -1, bool is_process = false) {
@@ -943,10 +956,11 @@ static void EmitTrackDesc(std::string& out, uint64_t uuid, uint64_t parent,
   AppendPacket(out, pkt);
 }
 
-// Emit a Chrome-format flow arrow event (ph='s' or ph='f') as a LegacyEvent instant.
-// Mirrors the JSON writer's {"ph":"s"} / {"ph":"f"} events — known to work in Perfetto UI.
+// ================================================================================================
 static void EmitFlowEvent(std::string& out, uint64_t uuid, uint64_t ts_ns,
                            uint64_t fid, bool is_start) {
+  // Emit a Chrome-format flow arrow event (ph='s' or ph='f') as a LegacyEvent instant.
+  // Mirrors the JSON writer's {"ph":"s"} / {"ph":"f"} events — known to work in Perfetto UI.
   ProtoMsg leg;
   leg.u32(kLeg_phase,    is_start ? 115u : 102u);  // 's' or 'f'
   leg.u64(kLeg_id,       fid);
@@ -961,6 +975,7 @@ static void EmitFlowEvent(std::string& out, uint64_t uuid, uint64_t ts_ns,
   AppendPacket(out, pkt);
 }
 
+// ================================================================================================
 // name_iid / cat_iid / ann_key_iid: interned string IDs (0 = not interned, use direct string)
 static void EmitSlice(std::string& out, uint64_t uuid, uint32_t /*seq_id*/,
                        uint64_t ts_ns, uint64_t dur_ns,
@@ -1006,6 +1021,7 @@ static void EmitSlice(std::string& out, uint64_t uuid, uint32_t /*seq_id*/,
   }
 }
 
+// ================================================================================================
 void WriteProtoTraceImpl(const char* filepath) {
   PreDemangleKernelNames();
 
@@ -1091,7 +1107,8 @@ void WriteProtoTraceImpl(const char* filepath) {
       }
       if (rec.gpu.gpu_op_count == 0) continue;
       auto scan = [&](const HipGpuActivityExt& gop) {
-        int sdma = (gop.op==OP_ID_COPY) && hipCopyKindIsSDMAExt(static_cast<HipCopyKindExt>(gop.copy_kind)) ? 1 : 0;
+        int sdma = (gop.op == OP_ID_COPY) &&
+                   hipCopyKindIsSDMAExt(static_cast<HipCopyKindExt>(gop.copy_kind)) ? 1 : 0;
         uint64_t gtid = gop.queue_id * 2 + sdma;
         device_gpu_tids[static_cast<int>(gop.device_id)].insert(gtid);
         if (rec.stream) gpu_tid_stream[{static_cast<int>(gop.device_id), gtid}] = rec.stream;
@@ -1211,9 +1228,13 @@ void WriteProtoTraceImpl(const char* filepath) {
       char ptrbuf[32], sizebuf[32];
       snprintf(ptrbuf, sizeof(ptrbuf), "0x%llx", static_cast<unsigned long long>(ptr));
       const AllocInfoP& ai = kv.second;
-      if (ai.size >= 1024*1024)      snprintf(sizebuf,sizeof(sizebuf),"%.1f MB",ai.size/(1024.0*1024.0));
-      else if (ai.size >= 1024)      snprintf(sizebuf,sizeof(sizebuf),"%.1f KB",ai.size/1024.0);
-      else                           snprintf(sizebuf,sizeof(sizebuf),"%llu B",(unsigned long long)ai.size);
+      if (ai.size >= 1024 * 1024) {
+        snprintf(sizebuf, sizeof(sizebuf), "%.1f MB", ai.size / (1024.0 * 1024.0));
+      } else if (ai.size >= 1024) {
+        snprintf(sizebuf, sizeof(sizebuf), "%.1f KB", ai.size / 1024.0);
+      } else {
+        snprintf(sizebuf, sizeof(sizebuf), "%llu B", (unsigned long long)ai.size);
+      }
       EmitTrackDesc(out, MemThreadUuid(mem_tid), MemProcessUuid(),
                     std::string(ptrbuf)+" ("+sizebuf+")", 2048, int(mem_tid), false);
     }
@@ -1234,9 +1255,13 @@ void WriteProtoTraceImpl(const char* filepath) {
     const AllocInfoP& ai = kv.second;
     char ptrbuf[32], sizebuf[32];
     snprintf(ptrbuf, sizeof(ptrbuf), "0x%llx", static_cast<unsigned long long>(ptr));
-    if (ai.size >= 1024*1024)      snprintf(sizebuf,sizeof(sizebuf),"%.1f MB",ai.size/(1024.0*1024.0));
-    else if (ai.size >= 1024)      snprintf(sizebuf,sizeof(sizebuf),"%.1f KB",ai.size/1024.0);
-    else                           snprintf(sizebuf,sizeof(sizebuf),"%llu B",(unsigned long long)ai.size);
+    if (ai.size >= 1024 * 1024) {
+      snprintf(sizebuf, sizeof(sizebuf), "%.1f MB", ai.size / (1024.0 * 1024.0));
+    } else if (ai.size >= 1024) {
+      snprintf(sizebuf, sizeof(sizebuf), "%.1f KB", ai.size / 1024.0);
+    } else {
+      snprintf(sizebuf, sizeof(sizebuf), "%llu B", (unsigned long long)ai.size);
+    }
     intern_evt(std::string(ptrbuf) + " (" + sizebuf + ")");
   }
 
@@ -1307,14 +1332,16 @@ void WriteProtoTraceImpl(const char* filepath) {
           cpu_anns.push_back({iid_stream, buf});
         }
       }
-      EmitSlice(out,cpu_uuid, 0, ts_ns, dur_ns, rec.api_name, intern_evt(rec.api_name), kCatHip, cpu_anns, cpu_out, {});
+      EmitSlice(out, cpu_uuid, 0, ts_ns, dur_ns, rec.api_name,
+                intern_evt(rec.api_name), kCatHip, cpu_anns, cpu_out, {});
 
       // GPU op slices
       bool first_op = true;
       uint32_t op_ord = 0;
       auto emit_gpu = [&](const HipGpuActivityExt& gop) {
         if (gop.begin_ns == 0) { ++op_ord; return; }
-        int sdma = (gop.op==OP_ID_COPY) && hipCopyKindIsSDMAExt(static_cast<HipCopyKindExt>(gop.copy_kind)) ? 1 : 0;
+        int sdma = (gop.op == OP_ID_COPY) &&
+                   hipCopyKindIsSDMAExt(static_cast<HipCopyKindExt>(gop.copy_kind)) ? 1 : 0;
         uint64_t gtid     = gop.queue_id * 2 + sdma;
         uint64_t gpu_uuid = GpuThreadUuid(static_cast<int>(gop.device_id), gtid);
         uint64_t g_ts     = gop.begin_ns;
@@ -1337,8 +1364,10 @@ void WriteProtoTraceImpl(const char* filepath) {
           char buf[32];
           gpu_anns.push_back({iid_queue_id, std::to_string(gop.queue_id)});
           if (gop.op == OP_ID_DISPATCH && gop.grid_x) {
-            snprintf(buf, sizeof(buf), "%ux%ux%u", gop.grid_x, gop.grid_y, gop.grid_z); gpu_anns.push_back({iid_grid, buf});
-            snprintf(buf, sizeof(buf), "%ux%ux%u", gop.block_x, gop.block_y, gop.block_z); gpu_anns.push_back({iid_block, buf});
+            snprintf(buf, sizeof(buf), "%ux%ux%u", gop.grid_x, gop.grid_y, gop.grid_z);
+            gpu_anns.push_back({iid_grid, buf});
+            snprintf(buf, sizeof(buf), "%ux%ux%u", gop.block_x, gop.block_y, gop.block_z);
+            gpu_anns.push_back({iid_block, buf});
           }
           if (gop.op == OP_ID_COPY) {
             gpu_anns.push_back({iid_copy_kind, CopyKindName(gop.copy_kind)});
@@ -1394,7 +1423,8 @@ void WriteProtoTraceImpl(const char* filepath) {
         ++op_ord;
 
         uint64_t gpu_name_iid = intern_evt(gpu_name);
-        EmitSlice(out,gpu_uuid, 0, g_ts, g_dur, gpu_name, gpu_name_iid, kCatGpu, gpu_anns, {}, in_flows_vec);
+        EmitSlice(out, gpu_uuid, 0, g_ts, g_dur, gpu_name,
+                  gpu_name_iid, kCatGpu, gpu_anns, {}, in_flows_vec);
       };
 
       if (rec.gpu.gpu_op_count > 0) {
@@ -1413,9 +1443,13 @@ void WriteProtoTraceImpl(const char* filepath) {
     uint64_t dur_ns   = (ai.end_ns > ai.start_ns) ? (ai.end_ns - ai.start_ns) : 1000;
     char ptrbuf[32], sizebuf[32];
     snprintf(ptrbuf, sizeof(ptrbuf), "0x%llx", static_cast<unsigned long long>(ptr));
-    if (ai.size >= 1024*1024)      snprintf(sizebuf,sizeof(sizebuf),"%.1f MB",ai.size/(1024.0*1024.0));
-    else if (ai.size >= 1024)      snprintf(sizebuf,sizeof(sizebuf),"%.1f KB",ai.size/1024.0);
-    else                           snprintf(sizebuf,sizeof(sizebuf),"%llu B",(unsigned long long)ai.size);
+    if (ai.size >= 1024 * 1024) {
+      snprintf(sizebuf, sizeof(sizebuf), "%.1f MB", ai.size / (1024.0 * 1024.0));
+    } else if (ai.size >= 1024) {
+      snprintf(sizebuf, sizeof(sizebuf), "%.1f KB", ai.size / 1024.0);
+    } else {
+      snprintf(sizebuf, sizeof(sizebuf), "%llu B", (unsigned long long)ai.size);
+    }
     std::string alloc_name = std::string(ptrbuf) + " (" + sizebuf + ")";
     std::vector<std::pair<uint64_t,std::string>> anns;
     anns.push_back({iid_ptr, ptrbuf}); anns.push_back({iid_size_key, std::to_string(ai.size)});
@@ -1424,7 +1458,8 @@ void WriteProtoTraceImpl(const char* filepath) {
     auto afit = alloc_out_flows.find(ptr);
     if (afit != alloc_out_flows.end()) out_flows = afit->second;
     uint64_t alloc_name_iid = intern_evt(alloc_name);
-    EmitSlice(out,mem_uuid, 0, ai.start_ns, dur_ns, alloc_name, alloc_name_iid, kCatMemory, anns, out_flows, {});
+    EmitSlice(out, mem_uuid, 0, ai.start_ns, dur_ns, alloc_name,
+              alloc_name_iid, kCatMemory, anns, out_flows, {});
   }
 
   std::ofstream f(filepath, std::ios::binary);
@@ -1434,14 +1469,17 @@ void WriteProtoTraceImpl(const char* filepath) {
 // atexit handler — registered only when GPU_CLR_PROFILE_OUTPUT is set.
 // Runs before static destructors so HIP devices are still alive for DrainAllDevices().
 // Insert PID before the file extension: "trace.json" → "trace_1234.json"
+// ================================================================================================
 static std::string AddPidToPath(const std::string& path) {
   auto dot = path.rfind('.');
   std::string pid_str = "_" + std::to_string(amd::Os::getProcessId());
-  if (dot == std::string::npos)
+  if (dot == std::string::npos) {
     return path + pid_str;
+  }
   return path.substr(0, dot) + pid_str + path.substr(dot);
 }
 
+// ================================================================================================
 static void ProfilerAtExit() {
   // DrainAllDevices can crash on Windows KFD if streams are already partially
   // torn down when the atexit handler fires. GPU work has already completed by
@@ -1463,9 +1501,7 @@ struct HipClrProfilerFinalizer {
 
 }  // anonymous namespace
 
-// ============================================================
-// Kernel argument capture
-// ============================================================
+// ================================================================================================
 void HipCaptureKernelArgsExt(HipGpuActivityExt* gact, hipFunction_t func, void** args) {
   if (!gact || !func || !args) return;
 
@@ -1501,9 +1537,12 @@ void HipCaptureKernelArgsExt(HipGpuActivityExt* gact, hipFunction_t func, void**
   gact->kernel_args_size = static_cast<uint32_t>(total);
 }
 
+// ================================================================================================
 void HipCaptureKernelArgsPackedExt(HipGpuActivityExt* gact, hipFunction_t func,
-                                    const void* kernargs, size_t kernargs_size) {
-  if (!gact || !func || !kernargs || kernargs_size == 0) return;
+                                   const void* kernargs, size_t kernargs_size) {
+  if (!gact || !func || !kernargs || kernargs_size == 0) {
+    return;
+  }
 
   amd::Kernel* kernel = hip::asKernel(func);
   if (!kernel) return;
@@ -1536,14 +1575,13 @@ void HipCaptureKernelArgsPackedExt(HipGpuActivityExt* gact, hipFunction_t func,
   gact->kernel_args_size = static_cast<uint32_t>(total);
 }
 
-// ============================================================
-// Graph exec node info storage
-// ============================================================
+// ================================================================================================
 void HipStoreGraphExecNodesExt(hipGraphExec_t exec, std::vector<HipGraphNodeInfoExt> nodes) {
   std::lock_guard<std::mutex> lk(g_graph_exec_mtx);
   g_graph_exec_nodes[reinterpret_cast<uintptr_t>(exec)] = std::move(nodes);
 }
 
+// ================================================================================================
 void HipEraseGraphExecNodesExt(hipGraphExec_t exec) {
   std::lock_guard<std::mutex> lk(g_graph_exec_mtx);
   g_graph_exec_nodes.erase(reinterpret_cast<uintptr_t>(exec));
@@ -1555,6 +1593,7 @@ const std::vector<HipGraphNodeInfoExt>* HipGetGraphExecNodesExt(hipGraphExec_t e
   return (it != g_graph_exec_nodes.end()) ? &it->second : nullptr;
 }
 
+// ================================================================================================
 // Capture args (and kernel name) for one graph kernel node.
 // Mirrors HipCaptureKernelArgsExt but writes into HipGraphNodeInfoExt.
 // args may be NULL (stream-captured graphs may expose NULL kp.kernelParams).
@@ -1601,11 +1640,10 @@ void HipCaptureGraphNodeArgsExt(HipGraphNodeInfoExt* info, hipFunction_t func, v
   info->kernel_args_size = static_cast<uint32_t>(total);
 }
 
-// ============================================================
+// ================================================================================================
 // Called from each *Layer wrapper — mirrors reference GetActiveRecord().
 // Allocates a record slot, writes slot index into correlation_id TLS so the
 // GPU command that follows inherits it, stamps start_ns, returns the record.
-// ============================================================
 HipApiRecordExt* HipGetActiveRecordExt(uint32_t api_id) {
   size_t slot = g_rec_counter.fetch_add(1, std::memory_order_relaxed);
   size_t idx  = slot / kChunkSize;
@@ -1643,6 +1681,8 @@ namespace hip {
   const HipCompilerDispatchTable* GetHipCompilerDispatchTable();
 }
 
+
+// ================================================================================================
 // Shared helper — registers callback once and installs wrappers.
 static void EnsureCallbackAndWrappers() {
   {
@@ -1667,6 +1707,7 @@ static void EnsureCallbackAndWrappers() {
       const_cast<HipCompilerDispatchTable*>(hip::GetHipCompilerDispatchTable()));
 }
 
+// ================================================================================================
 void HipProfilerInitExt() {
   // Build the wrapper table once from the live dispatch table.
   HipProfilerBuildWrapperTableExt(const_cast<HipDispatchTable*>(hip::GetHipDispatchTable()));
@@ -1680,6 +1721,7 @@ void HipProfilerInitExt() {
   EnsureCallbackAndWrappers();
 }
 
+// ================================================================================================
 uint64_t HipProfilerEnableExt() {
   uint64_t start_id = g_rec_counter.load(std::memory_order_acquire);
   int prev = g_enable_refcount.fetch_add(1, std::memory_order_acq_rel);
@@ -1689,6 +1731,7 @@ uint64_t HipProfilerEnableExt() {
   return start_id;
 }
 
+// ================================================================================================
 uint64_t HipProfilerDisableExt() {
   int prev = g_enable_refcount.fetch_sub(1, std::memory_order_acq_rel);
   if (prev <= 0) {
@@ -1714,6 +1757,7 @@ uint64_t HipProfilerDisableExt() {
 // ============================================================
 extern "C" {
 
+// ================================================================================================
 hipError_t hipProfilerEnableExt(uint64_t* start_record_id, uint64_t state) {
   (void)state;  // reserved for future feature flags; ignored in this version
   uint64_t id = HipProfilerEnableExt();
@@ -1721,12 +1765,14 @@ hipError_t hipProfilerEnableExt(uint64_t* start_record_id, uint64_t state) {
   return hipSuccess;
 }
 
+// ================================================================================================
 hipError_t hipProfilerDisableExt(uint64_t* end_record_id) {
   uint64_t id = HipProfilerDisableExt();
   if (end_record_id) *end_record_id = id;
   return hipSuccess;
 }
 
+// ================================================================================================
 hipError_t hipProfilerGetRecordsExt(const HipApiRecordExt* const** chunks,
                                      size_t* chunk_count,
                                      size_t* chunk_size,

@@ -42,9 +42,9 @@ static thread_local dim3 g_pushed_block{};
 static bool ParseKernelExtra(void** extra, const void*& out_ptr, size_t& out_size) {
   if (!extra) return false;
   if (extra[0] != HIP_LAUNCH_PARAM_BUFFER_POINTER) return false;
-  if (extra[2] != HIP_LAUNCH_PARAM_BUFFER_SIZE)    return false;
-  if (extra[4] != HIP_LAUNCH_PARAM_END)             return false;
-  out_ptr  = extra[1];
+  if (extra[2] != HIP_LAUNCH_PARAM_BUFFER_SIZE) return false;
+  if (extra[4] != HIP_LAUNCH_PARAM_END) return false;
+  out_ptr = extra[1];
   out_size = *reinterpret_cast<size_t*>(extra[3]);
   return out_ptr != nullptr && out_size > 0;
 }
@@ -1529,10 +1529,16 @@ static void CaptureGraphExecNodes(hipGraphExec_t exec, hipGraph_t graph) {
         if (g_next.hipGetFuncBySymbol_fn(&hfunc, kp.func) != hipSuccess || !hfunc) continue;
         HipGraphNodeInfoExt info;
         info.op      = HIP_OP_DISPATCH_EXT;
-        info.grid_x  = kp.gridDim.x;  info.grid_y  = kp.gridDim.y;  info.grid_z  = kp.gridDim.z;
-        info.block_x = kp.blockDim.x; info.block_y = kp.blockDim.y; info.block_z = kp.blockDim.z;
+        info.grid_x  = kp.gridDim.x;
+        info.grid_y  = kp.gridDim.y;
+        info.grid_z  = kp.gridDim.z;
+        info.block_x = kp.blockDim.x;
+        info.block_y = kp.blockDim.y;
+        info.block_z = kp.blockDim.z;
         HipCaptureGraphNodeArgsExt(&info, hfunc, kp.kernelParams);
-        if (!info.kernel_name.empty()) infos.push_back(std::move(info));
+        if (!info.kernel_name.empty()) {
+          infos.push_back(std::move(info));
+        }
         break;
       }
       case hipGraphNodeTypeMemcpy: {
@@ -1554,7 +1560,9 @@ static void CaptureGraphExecNodes(hipGraphExec_t exec, hipGraph_t graph) {
       default: break;
     }
   }
-  if (!infos.empty()) HipStoreGraphExecNodesExt(exec, std::move(infos));
+  if (!infos.empty()) {
+    HipStoreGraphExecNodesExt(exec, std::move(infos));
+  }
 }
 
 // api_id = 160
@@ -3053,16 +3061,31 @@ static hipError_t hipModuleGetTexRefLayer(textureReference** texRef, hipModule_t
 }
 
 // api_id = 314
-static hipError_t hipModuleLaunchCooperativeKernelLayer(hipFunction_t f, unsigned int gridDimX, unsigned int gridDimY, unsigned int gridDimZ,
-    unsigned int blockDimX, unsigned int blockDimY, unsigned int blockDimZ,
-    unsigned int sharedMemBytes, hipStream_t stream, void** kernelParams) {
+static hipError_t hipModuleLaunchCooperativeKernelLayer(hipFunction_t f,
+                                                        unsigned int gridDimX,
+                                                        unsigned int gridDimY,
+                                                        unsigned int gridDimZ,
+                                                        unsigned int blockDimX,
+                                                        unsigned int blockDimY,
+                                                        unsigned int blockDimZ,
+                                                        unsigned int sharedMemBytes,
+                                                        hipStream_t stream,
+                                                        void** kernelParams) {
   auto* _rec = HipGetActiveRecordExt(314u);
   _rec->stream = stream;
-  _rec->gpu.grid_x = gridDimX; _rec->gpu.grid_y = gridDimY; _rec->gpu.grid_z = gridDimZ;
-  _rec->gpu.block_x = blockDimX; _rec->gpu.block_y = blockDimY; _rec->gpu.block_z = blockDimZ;
-  if (kernelParams)
+  _rec->gpu.grid_x  = gridDimX;
+  _rec->gpu.grid_y  = gridDimY;
+  _rec->gpu.grid_z  = gridDimZ;
+  _rec->gpu.block_x = blockDimX;
+  _rec->gpu.block_y = blockDimY;
+  _rec->gpu.block_z = blockDimZ;
+  if (kernelParams) {
     HipCaptureKernelArgsExt(&_rec->gpu, f, kernelParams);
-  auto _r = g_next.hipModuleLaunchCooperativeKernel_fn(f, gridDimX, gridDimY, gridDimZ, blockDimX, blockDimY, blockDimZ, sharedMemBytes, stream, kernelParams);
+  }
+  auto _r = g_next.hipModuleLaunchCooperativeKernel_fn(f,
+                                                       gridDimX, gridDimY, gridDimZ,
+                                                       blockDimX, blockDimY, blockDimZ,
+                                                       sharedMemBytes, stream, kernelParams);
   _rec->end_ns = NowNs();
   return _r;
 }
@@ -3077,23 +3100,33 @@ static hipError_t hipModuleLaunchCooperativeKernelMultiDeviceLayer(hipFunctionLa
 
 // api_id = 316
 static hipError_t hipModuleLaunchKernelLayer(hipFunction_t f, unsigned int gridDimX,
-                                              unsigned int gridDimY, unsigned int gridDimZ,
-                                              unsigned int blockDimX, unsigned int blockDimY,
-                                              unsigned int blockDimZ, unsigned int sharedMemBytes,
-                                              hipStream_t stream, void** kernelParams,
-                                              void** extra) {
+                                             unsigned int gridDimY, unsigned int gridDimZ,
+                                             unsigned int blockDimX, unsigned int blockDimY,
+                                             unsigned int blockDimZ,
+                                             unsigned int sharedMemBytes,
+                                             hipStream_t stream, void** kernelParams,
+                                             void** extra) {
   auto* _rec = HipGetActiveRecordExt(316u);
   _rec->stream = stream;
-  _rec->gpu.grid_x = gridDimX; _rec->gpu.grid_y = gridDimY; _rec->gpu.grid_z = gridDimZ;
-  _rec->gpu.block_x = blockDimX; _rec->gpu.block_y = blockDimY; _rec->gpu.block_z = blockDimZ;
+  _rec->gpu.grid_x  = gridDimX;
+  _rec->gpu.grid_y  = gridDimY;
+  _rec->gpu.grid_z  = gridDimZ;
+  _rec->gpu.block_x = blockDimX;
+  _rec->gpu.block_y = blockDimY;
+  _rec->gpu.block_z = blockDimZ;
   if (kernelParams) {
     HipCaptureKernelArgsExt(&_rec->gpu, f, kernelParams);
   } else {
-    const void* kbuf; size_t ksz;
-    if (ParseKernelExtra(extra, kbuf, ksz))
+    const void* kbuf;
+    size_t ksz;
+    if (ParseKernelExtra(extra, kbuf, ksz)) {
       HipCaptureKernelArgsPackedExt(&_rec->gpu, f, kbuf, ksz);
+    }
   }
-  auto _r = g_next.hipModuleLaunchKernel_fn(f, gridDimX, gridDimY, gridDimZ, blockDimX, blockDimY, blockDimZ, sharedMemBytes, stream, kernelParams, extra);
+  auto _r = g_next.hipModuleLaunchKernel_fn(f,
+                                            gridDimX, gridDimY, gridDimZ,
+                                            blockDimX, blockDimY, blockDimZ,
+                                            sharedMemBytes, stream, kernelParams, extra);
   _rec->end_ns = NowNs();
   return _r;
 }
@@ -3910,54 +3943,83 @@ static hipChannelFormatDesc hipCreateChannelDescLayer(int x, int y, int z, int w
 }
 
 // api_id = 407
-static hipError_t hipExtModuleLaunchKernelLayer(hipFunction_t f, uint32_t globalWorkSizeX,
-                                                 uint32_t globalWorkSizeY, uint32_t globalWorkSizeZ,
-                                                 uint32_t localWorkSizeX, uint32_t localWorkSizeY,
-                                                 uint32_t localWorkSizeZ, size_t sharedMemBytes,
-                                                 hipStream_t hStream, void** kernelParams,
-                                                 void** extra, hipEvent_t startEvent,
-                                                 hipEvent_t stopEvent, uint32_t flags) {
+static hipError_t hipExtModuleLaunchKernelLayer(hipFunction_t f,
+                                                uint32_t globalWorkSizeX,
+                                                uint32_t globalWorkSizeY,
+                                                uint32_t globalWorkSizeZ,
+                                                uint32_t localWorkSizeX,
+                                                uint32_t localWorkSizeY,
+                                                uint32_t localWorkSizeZ,
+                                                size_t sharedMemBytes,
+                                                hipStream_t hStream,
+                                                void** kernelParams,
+                                                void** extra,
+                                                hipEvent_t startEvent,
+                                                hipEvent_t stopEvent,
+                                                uint32_t flags) {
   auto* _rec = HipGetActiveRecordExt(407u);
   _rec->stream = hStream;
   // globalWorkSize = grid * localWorkSize (OpenCL convention)
-  _rec->gpu.block_x = localWorkSizeX;  _rec->gpu.block_y = localWorkSizeY;  _rec->gpu.block_z = localWorkSizeZ;
+  _rec->gpu.block_x = localWorkSizeX;
+  _rec->gpu.block_y = localWorkSizeY;
+  _rec->gpu.block_z = localWorkSizeZ;
   _rec->gpu.grid_x  = localWorkSizeX ? globalWorkSizeX / localWorkSizeX : 0;
   _rec->gpu.grid_y  = localWorkSizeY ? globalWorkSizeY / localWorkSizeY : 0;
   _rec->gpu.grid_z  = localWorkSizeZ ? globalWorkSizeZ / localWorkSizeZ : 0;
   if (kernelParams) {
     HipCaptureKernelArgsExt(&_rec->gpu, f, kernelParams);
   } else {
-    const void* kbuf; size_t ksz;
-    if (ParseKernelExtra(extra, kbuf, ksz))
+    const void* kbuf;
+    size_t ksz;
+    if (ParseKernelExtra(extra, kbuf, ksz)) {
       HipCaptureKernelArgsPackedExt(&_rec->gpu, f, kbuf, ksz);
+    }
   }
-  auto _r = g_next.hipExtModuleLaunchKernel_fn(f, globalWorkSizeX, globalWorkSizeY, globalWorkSizeZ, localWorkSizeX, localWorkSizeY, localWorkSizeZ, sharedMemBytes, hStream, kernelParams, extra, startEvent, stopEvent, flags);
+  auto _r = g_next.hipExtModuleLaunchKernel_fn(f,
+                                               globalWorkSizeX, globalWorkSizeY, globalWorkSizeZ,
+                                               localWorkSizeX, localWorkSizeY, localWorkSizeZ,
+                                               sharedMemBytes, hStream, kernelParams, extra,
+                                               startEvent, stopEvent, flags);
   _rec->end_ns = NowNs();
   return _r;
 }
 
 // api_id = 408
-static hipError_t hipHccModuleLaunchKernelLayer(hipFunction_t f, uint32_t globalWorkSizeX,
-                                                 uint32_t globalWorkSizeY, uint32_t globalWorkSizeZ,
-                                                 uint32_t localWorkSizeX, uint32_t localWorkSizeY,
-                                                 uint32_t localWorkSizeZ, size_t sharedMemBytes,
-                                                 hipStream_t hStream, void** kernelParams,
-                                                 void** extra, hipEvent_t startEvent,
-                                                 hipEvent_t stopEvent) {
+static hipError_t hipHccModuleLaunchKernelLayer(hipFunction_t f,
+                                                uint32_t globalWorkSizeX,
+                                                uint32_t globalWorkSizeY,
+                                                uint32_t globalWorkSizeZ,
+                                                uint32_t localWorkSizeX,
+                                                uint32_t localWorkSizeY,
+                                                uint32_t localWorkSizeZ,
+                                                size_t sharedMemBytes,
+                                                hipStream_t hStream,
+                                                void** kernelParams,
+                                                void** extra,
+                                                hipEvent_t startEvent,
+                                                hipEvent_t stopEvent) {
   auto* _rec = HipGetActiveRecordExt(408u);
   _rec->stream = hStream;
-  _rec->gpu.block_x = localWorkSizeX;  _rec->gpu.block_y = localWorkSizeY;  _rec->gpu.block_z = localWorkSizeZ;
+  _rec->gpu.block_x = localWorkSizeX;
+  _rec->gpu.block_y = localWorkSizeY;
+  _rec->gpu.block_z = localWorkSizeZ;
   _rec->gpu.grid_x  = localWorkSizeX ? globalWorkSizeX / localWorkSizeX : 0;
   _rec->gpu.grid_y  = localWorkSizeY ? globalWorkSizeY / localWorkSizeY : 0;
   _rec->gpu.grid_z  = localWorkSizeZ ? globalWorkSizeZ / localWorkSizeZ : 0;
   if (kernelParams) {
     HipCaptureKernelArgsExt(&_rec->gpu, f, kernelParams);
   } else {
-    const void* kbuf; size_t ksz;
-    if (ParseKernelExtra(extra, kbuf, ksz))
+    const void* kbuf;
+    size_t ksz;
+    if (ParseKernelExtra(extra, kbuf, ksz)) {
       HipCaptureKernelArgsPackedExt(&_rec->gpu, f, kbuf, ksz);
+    }
   }
-  auto _r = g_next.hipHccModuleLaunchKernel_fn(f, globalWorkSizeX, globalWorkSizeY, globalWorkSizeZ, localWorkSizeX, localWorkSizeY, localWorkSizeZ, sharedMemBytes, hStream, kernelParams, extra, startEvent, stopEvent);
+  auto _r = g_next.hipHccModuleLaunchKernel_fn(f,
+                                               globalWorkSizeX, globalWorkSizeY, globalWorkSizeZ,
+                                               localWorkSizeX, localWorkSizeY, localWorkSizeZ,
+                                               sharedMemBytes, hStream, kernelParams, extra,
+                                               startEvent, stopEvent);
   _rec->end_ns = NowNs();
   return _r;
 }
