@@ -375,9 +375,9 @@ void ROBackend::ro_net_free_runtime() {
   }
   transport_->finalizeTransport();
 
-  ro_window_proxy_->~WindowProxy();
-  team_world_proxy_->~ROTeamProxy();
-  transport_->~MPITransport();
+  delete ro_window_proxy_;
+  delete team_world_proxy_;
+  delete transport_;
   /*
    * Free the profiler statistics structure.
    */
