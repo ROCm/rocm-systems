@@ -960,6 +960,20 @@ if(ROCPROFSYS_BUILD_LIBUNWIND)
         FILES_MATCHING
         PATTERN "*${CMAKE_SHARED_LIBRARY_SUFFIX}*"
     )
+    # When libunwind is built from the submodule, point FindLibUnwind.cmake at it.
+    set(LibUnwind_ROOT
+        "${PROJECT_BINARY_DIR}/external/timemory/external/libunwind/install"
+        CACHE PATH
+        "Root of the bundled libunwind installation"
+    )
+endif()
+
+find_package(LibUnwind ${rocprofiler_systems_FIND_QUIETLY})
+if(LibUnwind_FOUND AND NOT TARGET LibUnwind::LibUnwind)
+    message(
+        FATAL_ERROR
+        "FindLibUnwind.cmake found libunwind but did not create the target"
+    )
 endif()
 
 rocprofiler_systems_restore_variables(

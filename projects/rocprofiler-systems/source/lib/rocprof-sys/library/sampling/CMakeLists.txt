@@ -56,9 +56,15 @@ target_link_libraries(
     PUBLIC rocprofiler-systems-logger
     PRIVATE rocprofiler-systems-interface-library
 )
-# LibUnwind::LibUnwind  -- add after cmake/Modules/FindLibUnwind.cmake
-# LibDw::LibDw          -- add after cmake/Modules/FindLibDw.cmake
-# PAPI::PAPI            -- already in rocprofiler-systems-interface-library
+
+if(TARGET LibUnwind::LibUnwind)
+    target_link_libraries(rocprof-sys-sampling-library PRIVATE LibUnwind::LibUnwind)
+endif()
+
+if(TARGET LibDW::LibDW)
+    target_link_libraries(rocprof-sys-sampling-library PRIVATE LibDW::LibDW)
+endif()
+# PAPI::PAPI -- already in rocprofiler-systems-interface-library
 
 # ── Inject objects into the main library ─────────────────────────────────────
 # The sampling library objects are injected into the main library's object set.
