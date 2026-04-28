@@ -490,15 +490,21 @@ if( BUILD_SHARED_LIBS )
       # used to find libhsa-runtime64.so). With the vendored .so files
       # co-located in the build dir, no extra -rpath-link or downstream
       # coordination is required. Mirrors the installed flat layout.
+      #
+      # PRE_LINK runs after object compilation but before the link step,
+      # so the vendored .so files are present when the linker resolves
+      # -llttng-ust via the target's link directory. Attaching to the
+      # core runtime target directly (rather than using
+      # add_custom_target + add_dependencies) avoids the cyclic
+      # dependency that arises when $<TARGET_FILE_DIR:...> is used in a
+      # separate custom target.
       if(NOT WIN32)
-        add_custom_target(stage_vendored_lttng_for_${CORE_RUNTIME_TARGET} ALL
-            DEPENDS lttng_ust_vendored
+        add_custom_command(TARGET ${CORE_RUNTIME_TARGET} PRE_LINK
             COMMAND ${CMAKE_COMMAND} -E make_directory
                     "$<TARGET_FILE_DIR:${CORE_RUNTIME_TARGET}>"
             COMMAND sh -c "cp -P '${LTTNG_VENDORED_LIB_DIR}'/liblttng*.so* '${LTTNG_VENDORED_LIB_DIR}'/liburcu*.so* '$<TARGET_FILE_DIR:${CORE_RUNTIME_TARGET}>/' 2>/dev/null || true"
             COMMENT "Staging vendored LTTng-UST .so files into ${CORE_RUNTIME_TARGET} build dir"
             VERBATIM)
-        add_dependencies(${CORE_RUNTIME_TARGET} stage_vendored_lttng_for_${CORE_RUNTIME_TARGET})
       endif()
 
       # Install the vendored .so files directly under ${CMAKE_INSTALL_LIBDIR}

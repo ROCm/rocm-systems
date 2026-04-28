@@ -390,15 +390,20 @@ if(HIP_ENABLE_LTTNG_UST)
     # find libamdhip64.so). With the vendored .so files co-located in
     # the build dir, no extra -rpath-link or downstream coordination is
     # required. Mirrors the installed flat layout under /opt/rocm/lib/.
+    #
+    # PRE_LINK runs after object compilation but before the link step,
+    # so the vendored .so files are present when the linker resolves
+    # -llttng-ust via the target's link directory. Attaching to the
+    # amdhip64 target directly (rather than using add_custom_target +
+    # add_dependencies) avoids the cyclic dependency that arises when
+    # $<TARGET_FILE_DIR:amdhip64> is used in a separate custom target.
     if(NOT WIN32)
-        add_custom_target(stage_vendored_lttng_for_amdhip64 ALL
-            DEPENDS lttng_ust_vendored
+        add_custom_command(TARGET amdhip64 PRE_LINK
             COMMAND ${CMAKE_COMMAND} -E make_directory
                     "$<TARGET_FILE_DIR:amdhip64>"
             COMMAND sh -c "cp -P '${LTTNG_VENDORED_LIB_DIR}'/liblttng*.so* '${LTTNG_VENDORED_LIB_DIR}'/liburcu*.so* '$<TARGET_FILE_DIR:amdhip64>/' 2>/dev/null || true"
             COMMENT "Staging vendored LTTng-UST .so files into amdhip64 build dir"
             VERBATIM)
-        add_dependencies(amdhip64 stage_vendored_lttng_for_amdhip64)
     endif()
 
     # NB: install rule for the vendored .so files lives in
