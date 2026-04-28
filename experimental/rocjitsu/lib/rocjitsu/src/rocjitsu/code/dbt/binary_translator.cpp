@@ -266,8 +266,13 @@ void BinaryTranslator::apply_semantic(const SemanticReplacement &repl, std::vect
 
   if (target_size <= source_size) {
     std::memcpy(text.data() + repl.start_offset, repl.target_words.data(), target_size);
-    if (target_size < source_size)
-      std::memset(text.data() + repl.start_offset + target_size, 0, source_size - target_size);
+    if (target_size < source_size) {
+      // 0x00000000 decodes as v_illegal on RDNA4, so any unused instruction
+      // slots in an in-place replacement must be filled with real host NOPs.
+      const uint32_t nop = build_s_nop(0, host_arch_);
+      for (uint64_t off = repl.start_offset + target_size; off < repl.end_offset; off += 4)
+        std::memcpy(text.data() + off, &nop, sizeof(nop));
+    }
     return;
   }
 
