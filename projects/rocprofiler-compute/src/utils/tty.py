@@ -21,6 +21,7 @@ from utils.utils_analysis import (
     NS_TO_MS,
     CallTreeNode,
     build_operator_summary,
+    calc_pct_of_peak,
     get_bw_scale_and_unit,
     simplify_kernel_name,
 )
@@ -42,34 +43,6 @@ KERNEL_NAME_WRAP_WIDTH = 40
 def wrap_kernel_name(name: str) -> str:
     """Wrap a kernel name at KERNEL_NAME_WRAP_WIDTH for table display."""
     return textwrap.fill(str(name), width=KERNEL_NAME_WRAP_WIDTH)
-
-
-def _recalculate_pct_of_peak(
-    df: pd.DataFrame,
-    idx: Any,  # noqa: ANN401
-    value_col: str,
-    peak_col: str,
-    pct_cols: list[str],
-    decimal: int,
-) -> None:
-    """Recalculate Pct of Peak = (value / peak) * 100 after BW scaling."""
-    for pct_col in pct_cols:
-        if pct_col not in df.columns:
-            continue
-        try:
-            val = df.loc[idx, value_col]
-            peak = df.loc[idx, peak_col]
-            if (
-                pd.notna(val)
-                and pd.notna(peak)
-                and val != "N/A"
-                and peak != "N/A"
-                and float(peak) != 0
-            ):
-                pct = (float(val) / float(peak)) * 100
-                df.loc[idx, pct_col] = round(pct, decimal)
-        except (ValueError, TypeError, ZeroDivisionError):
-            pass
 
 
 def scale_bw_columns(
@@ -118,7 +91,13 @@ def scale_bw_columns(
             except (ValueError, TypeError):
                 pass
 
-        _recalculate_pct_of_peak(df_copy, idx, value_col, peak_col, pct_cols, decimal)
+        for pct_col in pct_cols:
+            if pct_col in df_copy.columns:
+                pct = calc_pct_of_peak(
+                    df_copy.loc[idx, value_col], df_copy.loc[idx, peak_col]
+                )
+                if pct != "":
+                    df_copy.loc[idx, pct_col] = round(pct, decimal)
 
         df_copy.loc[idx, "Unit"] = unit
 

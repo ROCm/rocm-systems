@@ -20,7 +20,7 @@ from utils.metrics.noise_clamper import (
     get_noise_clamp_warnings,
     print_noise_clamp_summary,
 )
-from utils.mi_gpu_spec import mi_gpu_specs
+from utils.utils_analysis import calc_pct_of_peak
 from utils.utils_common import SUPPORTED_FIELD, calc_builtin_var
 from utils.utils_counter_defs import get_build_in_vars
 
@@ -238,15 +238,15 @@ def eval_metric(
 
 
 def compute_pct_of_peak(dfs: dict, dfs_type: dict) -> None:
-    """Derive Pct of Peak = 100 * value / peak for all metric tables.
-
-    The Pct of Peak column is inserted automatically when both a value
-    column (Value or Avg) and a peak column (Peak or Peak (Empirical))
-    are present in a metric table.
+    """
+    Reads the pop flag and, when *True*,
+    overwrites the cell with ``100 * value / peak``.
     """
     pop_col = "Pct of Peak"
     for df_id, df in dfs.items():
         if dfs_type[df_id] != "metric_table":
+            continue
+        if pop_col not in df.columns:
             continue
 
         # Detect value and peak columns by name
@@ -260,25 +260,21 @@ def compute_pct_of_peak(dfs: dict, dfs_type: dict) -> None:
             if "Peak (Empirical)" in df.columns
             else ("Peak" if "Peak" in df.columns else None)
         )
-        # Skip tables without both value and peak columns
         if not value_col or not peak_col:
             continue
 
-        # Place the new column immediately after the Peak column
-        peak_pos = df.columns.get_loc(peak_col)
-        df.insert(peak_pos + 1, pop_col, "")
+        # Read flags before casting column to object dtype
+        pop_flags = df[pop_col].copy()
+        df[pop_col] = df[pop_col].astype(object)
 
-        # Compute 100 * value / peak per row; leave empty for
-        # non-numeric entries (e.g. "N/A") or zero peak
         for idx in df.index:
-            val = df.loc[idx, value_col]
-            peak = df.loc[idx, peak_col]
-            try:
-                val_f = float(val)
-                peak_f = float(peak)
-                df.at[idx, pop_col] = (val_f / peak_f) * 100 if peak_f != 0 else ""
-            except (ValueError, TypeError):
+            pop_flag = pop_flags.loc[idx]
+            if pop_flag != True:  # noqa: E712
                 df.at[idx, pop_col] = ""
+                continue
+            df.at[idx, pop_col] = calc_pct_of_peak(
+                df.loc[idx, value_col], df.loc[idx, peak_col]
+            )
 
 
 def validate_dual_issue_metrics(

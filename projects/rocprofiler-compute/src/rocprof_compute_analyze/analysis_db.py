@@ -55,6 +55,7 @@ from utils.roofline_calc import (
     PEAK_OPS_DATATYPES,
     SUPPORTED_DATATYPES,
 )
+from utils.utils_analysis import calc_pct_of_peak
 from utils.utils_common import get_uuid, get_version
 from utils.utils_counter_defs import get_build_in_vars
 
@@ -86,6 +87,12 @@ class db_analysis(OmniAnalyze_Base):
             self._kernel_values_data_per_workload,
             self._workload_values_data_per_workload,
         ) = self.calc_expressions()
+        self._kernel_values_data_per_workload = self._derive_pop_values(
+            self._kernel_values_data_per_workload
+        )
+        self._workload_values_data_per_workload = self._derive_pop_values(
+            self._workload_values_data_per_workload
+        )
         self._roofline_data_per_kernel, self._roofline_data_per_workload = (
             self.calc_roofline_data()
         )
@@ -722,6 +729,60 @@ class db_analysis(OmniAnalyze_Base):
 
         return kernel_values_data, workload_values_data
 
+    def _derive_pop_values(
+        self,
+        values_data: dict[str, pd.DataFrame],
+    ) -> dict[str, pd.DataFrame]:
+        """Append Pct of Peak rows for metrics with pop: true."""
+        pop_col = "Pct of Peak"
+        for workload_path, values_df in values_data.items():
+            if values_df.empty:
+                continue
+
+            metrics_info = self._metrics_info_data_per_workload.get(workload_path)
+            if metrics_info is None or metrics_info.empty:
+                continue
+
+            pop_metrics = set(metrics_info.loc[metrics_info["pop"], "metric_id"])
+
+            candidates = values_df[
+                values_df["metric_id"].isin(pop_metrics)
+                & values_df["value_name"].isin([
+                    "Avg",
+                    "Value",
+                    "Peak",
+                    "Peak (Empirical)",
+                ])
+            ]
+            if candidates.empty:
+                continue
+
+            group_cols = ["metric_id"]
+            if "kernel_name" in values_df.columns:
+                group_cols.append("kernel_name")
+
+            new_rows = []
+            for _key, grp in candidates.groupby(group_cols):
+                vals = grp.set_index("value_name")["value"]
+                val = vals.get("Avg", vals.get("Value"))
+                peak = vals.get("Peak", vals.get("Peak (Empirical)"))
+                if val is None or peak is None:
+                    continue
+                pct = calc_pct_of_peak(val, peak)
+                if pct == "":
+                    continue
+                base = grp.iloc[0].to_dict()
+                base["value_name"] = pop_col
+                base["value"] = pct
+                new_rows.append(base)
+
+            if new_rows:
+                values_data[workload_path] = pd.concat(
+                    [values_df, pd.DataFrame(new_rows)], ignore_index=True
+                )
+
+        return values_data
+
     def calc_metrics_data(
         self,
     ) -> tuple[dict[str, pd.DataFrame], dict[str, pd.DataFrame]]:
@@ -748,6 +809,7 @@ class db_analysis(OmniAnalyze_Base):
                 "Xfer",
                 "Coherency",
                 "Transaction",
+                "Pct of Peak",
             ]
             metrics_info_df = pd.DataFrame([
                 {
@@ -755,6 +817,7 @@ class db_analysis(OmniAnalyze_Base):
                     "metric_id": metric_id,
                     "description": row.get("Description"),
                     "unit": row.get("Unit"),
+                    "pop": row.get("Pct of Peak") == True,  # noqa: E712
                     "table_name": table_names_map[int(metric_id.split(".")[0]) * 100],
                     "sub_table_name": table_names_map[
                         int(metric_id.split(".")[0]) * 100
