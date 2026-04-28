@@ -912,6 +912,7 @@ jobs:
 
     # Run tests for each sanitizer sequentially (continue-on-error ensures all run)
     - name: Test AddressSanitizer
+      id: asan
       continue-on-error: true
       timeout-minutes: 30
       shell: bash
@@ -930,6 +931,7 @@ jobs:
           -E "${mi325_EXCLUDE_TESTS_REGEX}"
 
     - name: Test ThreadSanitizer
+      id: tsan
       continue-on-error: true
       timeout-minutes: 30
       shell: bash
@@ -948,6 +950,7 @@ jobs:
           -E "${mi325_EXCLUDE_TESTS_REGEX}"
 
     - name: Test LeakSanitizer
+      id: lsan
       continue-on-error: true
       timeout-minutes: 30
       shell: bash
@@ -966,6 +969,7 @@ jobs:
           -E "${mi325_EXCLUDE_TESTS_REGEX}"
 
     - name: Test UndefinedBehaviorSanitizer
+      id: ubsan
       continue-on-error: true
       timeout-minutes: 30
       shell: bash
@@ -982,3 +986,54 @@ jobs:
           --parallel 4 \
           -LE "${mi325_EXCLUDE_LABEL_REGEX}" \
           -E "${mi325_EXCLUDE_TESTS_REGEX}"
+
+    # Summary step - report results and fail if any sanitizer failed
+    - name: Sanitizer Test Summary
+      if: always()
+      shell: bash
+      run: |
+        echo ""
+        echo "=========================================="
+        echo "         SANITIZER TEST SUMMARY"
+        echo "=========================================="
+        echo ""
+        
+        FAILED=0
+        
+        if [ "${{ steps.asan.outcome }}" == "success" ]; then
+          echo "✅ AddressSanitizer:            PASSED"
+        else
+          echo "❌ AddressSanitizer:            FAILED"
+          FAILED=1
+        fi
+        
+        if [ "${{ steps.tsan.outcome }}" == "success" ]; then
+          echo "✅ ThreadSanitizer:             PASSED"
+        else
+          echo "❌ ThreadSanitizer:             FAILED"
+          FAILED=1
+        fi
+        
+        if [ "${{ steps.lsan.outcome }}" == "success" ]; then
+          echo "✅ LeakSanitizer:               PASSED"
+        else
+          echo "❌ LeakSanitizer:               FAILED"
+          FAILED=1
+        fi
+        
+        if [ "${{ steps.ubsan.outcome }}" == "success" ]; then
+          echo "✅ UndefinedBehaviorSanitizer:  PASSED"
+        else
+          echo "❌ UndefinedBehaviorSanitizer:  FAILED"
+          FAILED=1
+        fi
+        
+        echo ""
+        echo "=========================================="
+        
+        if [ $FAILED -eq 1 ]; then
+          echo "❌ One or more sanitizer tests FAILED"
+          exit 1
+        else
+          echo "✅ All sanitizer tests PASSED"
+        fi
