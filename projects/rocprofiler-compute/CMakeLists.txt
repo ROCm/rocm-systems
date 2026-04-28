@@ -620,6 +620,18 @@ add_test(
         ${WORKING_DIR_OPTION}
 )
 
+# -----------------------------------
+# Rocpd data postprocess tests
+# -----------------------------------
+
+add_test(
+    NAME test_rocpd_data
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
+        --junitxml=tests/test_rocpd_data.xml ${COV_OPTION} tests/test_rocpd_data.py
+        ${WORKING_DIR_OPTION}
+)
+
 # ---------------------------------------
 # Pure csv compatibility layer for pandas
 # ---------------------------------------
@@ -686,6 +698,7 @@ if(${ENABLE_COVERAGE})
         test_autogen_config
         test_tui_components
         test_torch_trace
+        test_rocpd_data
     )
 
     string(REPLACE ";" ";" ALL_TESTS_STRING "${ALL_TEST_NAMES}")

@@ -75,8 +75,7 @@ def convert_dbs_to_csvs(
     # ID across DBs in a multi-pass workload.
     dispatch_groups: dict[tuple, int] = {}
     kernel_groups: dict[tuple, int] = {}
-    # Track header-written state across DBs so an empty or failed first DB
-    # does not leave subsequent DBs writing data without a header.
+    # Track header-written state across DBs.
     counter_header_written = False
     marker_header_written = False
     total_rows = 0
@@ -176,7 +175,7 @@ def update_rocpd_pmc_events(counter_info: list[dict], rocpd_db_path: str) -> Non
                     ),
                     values,
                 )
-    except OSError as e:
+    except sqlite3.Error as e:
         console_error(f"Database error while updating pmc_event table: {e}")
     except Exception as e:
         console_error(f"Unexpected error updating pmc_event table: {e}")
@@ -283,14 +282,14 @@ def _stream_db_marker_trace(
     """
     try:
         with closing(conn.execute(MARKER_API_TRACE_QUERY)) as cursor:
-            if cursor.description is None:
-                return header_written
             if not header_written:
                 writer.writerow([desc[0] for desc in cursor.description])
                 header_written = True
             writer.writerows(cursor)
+    except sqlite3.Error as exc:
+        console_error(f"Database error extracting marker trace from {db_path}: {exc}")
     except Exception as exc:
-        console_error(f"Error extracting marker trace from {db_path}: {exc}")
+        console_error(f"Unexpected error extracting marker trace from {db_path}: {exc}")
     return header_written
 
 
@@ -309,8 +308,6 @@ def _stream_db_counters(
     """
     try:
         with closing(conn.execute(COUNTERS_COLLECTION_QUERY)) as cursor:
-            if cursor.description is None:
-                return 0, header_written
             column_positions = {
                 desc[0]: idx for idx, desc in enumerate(cursor.description)
             }
@@ -327,7 +324,7 @@ def _stream_db_counters(
                 kernel_groups,
             )
             return _write_rows_to_csv_writers(regrouped, writers), header_written
-    except OSError as exc:
+    except sqlite3.Error as exc:
         console_error(f"Database error extracting counters from {db_path}: {exc}")
     except Exception as exc:
         console_error(f"Unexpected error extracting counters from {db_path}: {exc}")

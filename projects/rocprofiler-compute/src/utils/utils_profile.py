@@ -234,9 +234,18 @@ def run_prof(
             )
             shutil.rmtree(f"{workload_dir}/out", ignore_errors=True)
             return
+        console_warning(
+            "Intermediate results_*.csv generation from rocpd databases is "
+            "deprecated and will be replaced with automatic .db file "
+            "retention in a future release."
+        )
         if torch_trace_enabled:
             save_torch_trace_inputs(workload_dir, fbase, format_rocprof_output)
         if retain_rocpd_output:
+            console_warning(
+                "--retain-rocpd-output is deprecated and will be removed in "
+                "a future release. .db files will be retained automatically."
+            )
             for db_path in rocpd_db_paths:
                 pid = Path(db_path).stem.split("_")[0]
                 shutil.copyfile(
