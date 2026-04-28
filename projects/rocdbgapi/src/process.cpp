@@ -166,6 +166,9 @@ process_t::detach ()
              state.  */
           set_precise_alu_exceptions (false);
 
+          /* Return LDS exceptions reporting to its default off state.  */
+          set_lds_out_of_addr_range_exception (false);
+
           /* Resume all the waves halted at launch.  */
           set_wave_launch_mode (os_wave_launch_mode_t::normal);
 
@@ -523,6 +526,40 @@ process_t::set_precise_alu_exceptions (bool enabled)
                  to_cstring (status));
 }
 
+void
+process_t::set_lds_out_of_addr_range_exception (bool enabled)
+{
+  if (!!(m_process_flags & os_process_flags_t::lds_out_of_addr_range_exception)
+      == enabled)
+    return;
+
+  if (!m_supports_lds_out_of_addr_range_exception)
+    throw api_error_t (AMD_DBGAPI_STATUS_ERROR_NOT_SUPPORTED);
+
+  auto new_flags = m_process_flags;
+  if (enabled)
+    new_flags = new_flags | os_process_flags_t::lds_out_of_addr_range_exception;
+  else
+    new_flags = new_flags & ~os_process_flags_t::lds_out_of_addr_range_exception;
+
+  auto set_lds_out_of_addr_range_exception
+    = utils::make_scope_success ([=] () { m_process_flags = new_flags; });
+
+  /* If this is called before the runtime is loaded (or after the runtime is
+     unloaded), only record the setting in the process_t instance. The actual
+     change to the configuration will be done when the runtime is loaded and
+     the debug mode is activated.  */
+  if (m_runtime_state != AMD_DBGAPI_RUNTIME_STATE_LOADED_SUCCESS)
+    return;
+
+  amd_dbgapi_status_t status = os_driver ().set_process_flags (new_flags);
+
+  if (status != AMD_DBGAPI_STATUS_ERROR_PROCESS_EXITED
+      && status != AMD_DBGAPI_STATUS_SUCCESS)
+    fatal_error ("os_driver::set_lds_out_of_addr_range_exception failed (%s)",
+                 to_cstring (status));
+}
+
 std::vector<process_t *>
 process_t::match (amd_dbgapi_process_id_t process_id)
 {
@@ -610,6 +647,7 @@ process_t::update_agents ()
 
   std::optional<bool> precise_memory_supported;
   std::optional<bool> precise_alu_exceptions_supported;
+  std::optional<bool> lds_out_of_addr_range_exception_supported;
 
   /* Add new agents to the process.  */
   for (auto &&agent_info : agent_infos)
@@ -651,6 +689,8 @@ process_t::update_agents ()
           precise_alu_exceptions_supported
             = precise_alu_exceptions_supported.value_or (true)
               && agent_info.precise_alu_exceptions_supported;
+          lds_out_of_addr_range_exception_supported = lds_out_of_addr_range_exception_supported.value_or (true)
+                                     && agent_info.lds_out_of_addr_range_exception_supported;
         }
     }
 
@@ -673,6 +713,8 @@ process_t::update_agents ()
   m_supports_precise_memory = precise_memory_supported.value_or (false);
   m_supports_precise_alu_exceptions
     = precise_alu_exceptions_supported.value_or (false);
+  m_supports_lds_out_of_addr_range_exception
+    = lds_out_of_addr_range_exception_supported.value_or (false);
 }
 
 void
@@ -1764,6 +1806,13 @@ process_t::get_info (amd_dbgapi_process_info_t query, size_t value_size,
                          : AMD_DBGAPI_MEMORY_PRECISION_NONE);
       return;
 
+    case AMD_DBGAPI_PROCESS_INFO_LDS_OUT_OF_ADDR_RANGE_SUPPORTED:
+      utils::get_info (value_size, value,
+                       m_supports_lds_out_of_addr_range_exception
+                         ? AMD_DBGAPI_LDS_EXCEPTIONS_OUT_OF_ADDR_RANGE
+                         : AMD_DBGAPI_LDS_EXCEPTIONS_NONE);
+      return;
+
     case AMD_DBGAPI_PROCESS_INFO_OS_ID:
       if (!m_os_process_id)
         throw api_error_t (AMD_DBGAPI_STATUS_ERROR_NOT_AVAILABLE);
@@ -2679,6 +2728,37 @@ amd_dbgapi_set_alu_exceptions_precision (
 
     process->set_precise_alu_exceptions (
       alu_exceptions_precision == AMD_DBGAPI_ALU_EXCEPTIONS_PRECISION_PRECISE);
+  }
+  CATCH (AMD_DBGAPI_STATUS_ERROR_NOT_INITIALIZED,
+         AMD_DBGAPI_STATUS_ERROR_INVALID_PROCESS_ID,
+         AMD_DBGAPI_STATUS_ERROR_INVALID_ARGUMENT,
+         AMD_DBGAPI_STATUS_ERROR_NOT_SUPPORTED);
+  TRACE_END ();
+}
+
+amd_dbgapi_status_t AMD_DBGAPI
+amd_dbgapi_set_lds_out_of_addr_range_exception (
+  amd_dbgapi_process_id_t process_id,
+  amd_dbgapi_lds_out_of_addr_range_exception_t lds_out_of_addr_range_exception)
+{
+  TRACE_BEGIN (param_in (process_id), param_in (lds_out_of_addr_range_exception));
+  TRY
+  {
+    if (!detail::is_initialized)
+      THROW (AMD_DBGAPI_STATUS_ERROR_NOT_INITIALIZED);
+
+    process_t *process = process_t::find (process_id);
+
+    if (process == nullptr)
+      THROW (AMD_DBGAPI_STATUS_ERROR_INVALID_PROCESS_ID);
+
+    if (lds_out_of_addr_range_exception != AMD_DBGAPI_LDS_EXCEPTIONS_NONE
+        && lds_out_of_addr_range_exception
+             != AMD_DBGAPI_LDS_EXCEPTIONS_OUT_OF_ADDR_RANGE)
+      THROW (AMD_DBGAPI_STATUS_ERROR_INVALID_ARGUMENT);
+
+    process->set_lds_out_of_addr_range_exception (
+      lds_out_of_addr_range_exception == AMD_DBGAPI_LDS_EXCEPTIONS_OUT_OF_ADDR_RANGE);
   }
   CATCH (AMD_DBGAPI_STATUS_ERROR_NOT_INITIALIZED,
          AMD_DBGAPI_STATUS_ERROR_INVALID_PROCESS_ID,

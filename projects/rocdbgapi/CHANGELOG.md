@@ -3,6 +3,10 @@
 Full documentation for AMD Debugger API is available at
 [rocm.docs.amd.com/rocdbgapi](https://rocm.docs.amd.com/projects/ROCdbgapi/en/latest/index.html).
 
+## rocm-dbgapi-0.81 for ROCm-X
+### Added
+- Add support for setting LDS out-of-address range exception reporting.
+
 ## rocm-dbgapi-0.80 for ROCm-X
 ### Added
 - amd_dbgapi_process_get_info() adds a new query to get a mask spanning

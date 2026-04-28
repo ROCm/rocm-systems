@@ -624,6 +624,7 @@ to_string (amd_dbgapi_process_info_t process_info)
       CASE (PROCESS_INFO_CORE_STATE);
       CASE (PROCESS_INFO_PRECISE_ALU_EXCEPTIONS_SUPPORTED);
       CASE (PROCESS_INFO_SIGNIFICANT_ADDRESS_BITS);
+      CASE (PROCESS_INFO_LDS_OUT_OF_ADDR_RANGE_SUPPORTED);
     }
   return to_string (make_hex (process_info));
 }
@@ -658,6 +659,9 @@ to_string (detail::query_ref<amd_dbgapi_process_info_t> ref)
     case AMD_DBGAPI_PROCESS_INFO_SIGNIFICANT_ADDRESS_BITS:
       return to_string (
         make_ref (static_cast<const amd_dbgapi_segment_address_t *> (value)));
+    case AMD_DBGAPI_PROCESS_INFO_LDS_OUT_OF_ADDR_RANGE_SUPPORTED:
+      return to_string (make_ref (
+        static_cast<const amd_dbgapi_lds_out_of_addr_range_exception_t *> (value)));
     }
   fatal_error ("unhandled amd_dbgapi_process_info_t query (%s)",
                to_cstring (query));
@@ -1536,6 +1540,18 @@ to_string (amd_dbgapi_alu_exceptions_precision_t alu_exceptions_precision)
       CASE (ALU_EXCEPTIONS_PRECISION_PRECISE);
     }
   return to_string (make_hex (alu_exceptions_precision));
+}
+
+template <>
+std::string
+to_string (amd_dbgapi_lds_out_of_addr_range_exception_t lds_out_of_addr_range_exception)
+{
+  switch (lds_out_of_addr_range_exception)
+    {
+      CASE (LDS_EXCEPTIONS_NONE);
+      CASE (LDS_EXCEPTIONS_OUT_OF_ADDR_RANGE);
+    }
+  return to_string (make_hex (lds_out_of_addr_range_exception));
 }
 
 template <>

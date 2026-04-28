@@ -659,6 +659,12 @@ typedef unsigned long amd_dbgapi_DWORD;
  */
 #define AMD_DBGAPI_VERSION_0_80
 
+/**
+ * The function was introduced in version 0.81 of the interface and has the
+ * symbol version string of ``"@AMD_DBGAPI_NAME@_0.81"``.
+ */
+#define AMD_DBGAPI_VERSION_0_81
+
 /** @} */
 
 /** \ingroup callbacks_group
@@ -1852,6 +1858,13 @@ typedef enum
    */
   AMD_DBGAPI_PROCESS_INFO_PRECISE_ALU_EXCEPTIONS_SUPPORTED = 5,
   /**
+   * Return if the architectures of all the agents of a process support
+   * reporting LDS out-of-address-range exceptions.  The type of this
+   * attribute is \p uint32_t with the values defined by
+   * ::amd_dbgapi_alu_exceptions_precision_t.
+   */
+  AMD_DBGAPI_PROCESS_INFO_LDS_OUT_OF_ADDR_RANGE_SUPPORTED = 6,
+  /**
    * Native operating system process ID.  The type of this attribute is
    * ::amd_dbgapi_os_process_id_t.
    *
@@ -1864,7 +1877,7 @@ typedef enum
    * ::amd_dbgapi_process_get_info returns the
    * ::AMD_DBGAPI_STATUS_ERROR_NOT_AVAILABLE error.
    */
-  AMD_DBGAPI_PROCESS_INFO_OS_ID = 6,
+  AMD_DBGAPI_PROCESS_INFO_OS_ID = 7,
   /**
    * Return a blob containing the content to put in the state note when
    * generating a core dump.  The content of the note is allocated using the
@@ -1874,7 +1887,7 @@ typedef enum
    * If allocation fails, then ::amd_dbgapi_process_get_info returns the
    * ::AMD_DBGAPI_STATUS_ERROR_CLIENT_CALLBACK error.
    */
-  AMD_DBGAPI_PROCESS_INFO_CORE_STATE = 7,
+  AMD_DBGAPI_PROCESS_INFO_CORE_STATE = 8,
   /**
    * Return a bitmask of all the bits which are used in at least one of the
    * address spaces of each of the agents of the system.  It is legal for the
@@ -1882,7 +1895,7 @@ typedef enum
    * cleared before being returned back to the library.  The type of this
    * attribute is ::amd_dbgapi_segment_address_t.
    */
-  AMD_DBGAPI_PROCESS_INFO_SIGNIFICANT_ADDRESS_BITS = 8,
+  AMD_DBGAPI_PROCESS_INFO_SIGNIFICANT_ADDRESS_BITS = 9,
 } amd_dbgapi_process_info_t;
 
 /**
@@ -1948,7 +1961,8 @@ amd_dbgapi_status_t AMD_DBGAPI amd_dbgapi_process_get_info (
  * The process progress is initialized to ::AMD_DBGAPI_PROGRESS_NORMAL.  All
  * agents accessed by the process are configured to
  * ::AMD_DBGAPI_MEMORY_PRECISION_NONE and
- * ::AMD_DBGAPI_ALU_EXCEPTIONS_PRECISION_NONE.
+ * ::AMD_DBGAPI_ALU_EXCEPTIONS_PRECISION_NONE and
+ * ::AMD_DBGAPI_LDS_EXCEPTIONS_NONE.
  *
  * When attaching to a live process, the client process handle must have been
  * associated with a native operating system process, and the
@@ -2050,7 +2064,8 @@ amd_dbgapi_status_t AMD_DBGAPI amd_dbgapi_process_attach (
  * displaced stepping buffer are stopped and the displaced stepping buffer
  * completed.  Any data watchpoints are removed.  All agents are configured to
  * ::AMD_DBGAPI_MEMORY_PRECISION_NONE and
- * ::AMD_DBGAPI_ALU_EXCEPTIONS_PRECISION_NONE.  Any waves in the stopped or
+ * ::AMD_DBGAPI_ALU_EXCEPTIONS_PRECISION_NONE and
+ * ::AMD_DBGAPI_LDS_EXCEPTIONS_NONE.  Any waves in the stopped or
  * single step state are resumed in non-single step mode.  Any pending events
  * for the process are discarded, and no further events will be generated for
  * the process.  If the process is in the frozen state, it is unfrozen.  The
@@ -6871,6 +6886,29 @@ amd_dbgapi_status_t AMD_DBGAPI amd_dbgapi_set_alu_exceptions_precision (
     amd_dbgapi_process_id_t process_id,
     amd_dbgapi_alu_exceptions_precision_t alu_exceptions_precision)
      AMD_DBGAPI_VERSION_0_77;
+
+/**
+ * LDS exceptions reporting.
+ *
+ */
+typedef enum
+{
+  /**
+   */
+  AMD_DBGAPI_LDS_EXCEPTIONS_NONE = 0,
+  /**
+   */
+  AMD_DBGAPI_LDS_EXCEPTIONS_OUT_OF_ADDR_RANGE = 1
+} amd_dbgapi_lds_out_of_addr_range_exception_t;
+
+/**
+ * Control LDS exceptions reporting.
+ *
+ */
+amd_dbgapi_status_t AMD_DBGAPI amd_dbgapi_set_lds_out_of_addr_range_exception (
+    amd_dbgapi_process_id_t process_id,
+    amd_dbgapi_lds_out_of_addr_range_exception_t lds_out_of_addr_range_exception)
+     AMD_DBGAPI_VERSION_0_81;
 
 /** @} */
 
