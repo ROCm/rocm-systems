@@ -16,7 +16,7 @@ PC sampling on the CDNA3 (AMD Instinct™ MI300 Series) and CDNA4 (AMD Instinct 
 Stall reasons
 ==============
 
-The stall reason reported for a sample indicates why the sampled wave couldn't issue or execute an instruction during the given cycle. This contrasts with the arbiter state fields, which report the entire SIMD state. To learn more about arbiter state, see :ref:`arbiter_state`.
+The stall reason reported for a sample indicates why the sampled wave couldn't issue or execute an instruction during the given cycle. This contrasts with the arbiter state fields, which report the entire SIMD state. To learn more about the arbiter state, see :ref:`arbiter_state`.
 
 The following table lists the stall reasons:
 
