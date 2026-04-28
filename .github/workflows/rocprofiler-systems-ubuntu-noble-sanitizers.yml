@@ -89,12 +89,13 @@ jobs:
           max_attempts: 2
           command: |
             apt-get update &&
-            apt-get install -y autoconf autotools-dev bash-completion bison build-essential \
-              bzip2 chrpath cmake curl environment-modules flex gettext git-core gnupg2 \
-              gzip iproute2 libgmock-dev libgtest-dev libiberty-dev libpapi-dev libpfm4-dev \
-              libsqlite3-dev libtool locales lsb-release m4 ninja-build nlohmann-json3-dev \
-              python3-pip software-properties-common texinfo unzip wget vim zip zlib1g-dev \
-              libucx-dev ucx-utils libomp-dev libopenmpi-dev &&
+            apt-get install -y autoconf autotools-dev bash-completion binutils-dev bison \
+              build-essential bzip2 chrpath cmake curl environment-modules flex gettext \
+              git-core gnupg2 gzip iproute2 libboost-all-dev libdw-dev libdwarf-dev \
+              libelf-dev libgmock-dev libgtest-dev libiberty-dev libpapi-dev libpfm4-dev \
+              libsqlite3-dev libtbb-dev libtool locales lsb-release m4 ninja-build \
+              nlohmann-json3-dev python3-pip software-properties-common texinfo unzip wget \
+              vim zip zlib1g-dev libucx-dev ucx-utils libomp-dev libopenmpi-dev &&
             apt-get autoclean
 
       - name: Configure git safe directory
@@ -178,10 +179,10 @@ jobs:
             -DROCPROFSYS_SANITIZER_TYPE=${{ matrix.sanitizer-type }} \
             ${SANITIZER_CMAKE_FLAGS} \
             -DROCPROFSYS_BUILD_DYNINST=${{ matrix.build-dyninst }} \
-            -DROCPROFSYS_BUILD_BOOST=${{ matrix.build-dyninst }} \
-            -DROCPROFSYS_BUILD_TBB=${{ matrix.build-dyninst }} \
-            -DROCPROFSYS_BUILD_ELFUTILS=${{ matrix.build-dyninst }} \
-            -DROCPROFSYS_BUILD_LIBIBERTY=${{ matrix.build-dyninst }} \
+            -DROCPROFSYS_BUILD_BOOST=OFF \
+            -DROCPROFSYS_BUILD_TBB=OFF \
+            -DROCPROFSYS_BUILD_ELFUTILS=OFF \
+            -DROCPROFSYS_BUILD_LIBIBERTY=OFF \
             -DROCPROFSYS_MAX_THREADS=64 \
             -DROCPROFSYS_DISABLE_EXAMPLES="transpose;parallel-overhead;user-api;openmp;mpi;python;lulesh;rccl;causal;videodecode;jpegdecode;roctx;thread-limit;transferBench;hpc;shmem;scratch-memory;sdma_test" \
             -DROCPROFSYS_BUILD_NUMBER=1 \
