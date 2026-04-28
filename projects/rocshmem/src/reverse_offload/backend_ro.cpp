@@ -54,7 +54,7 @@ ROBackend::ROBackend(MPI_Comm comm)
 
   poll_block_count_ = envvar::max_num_contexts;
 
-  profiler_proxy_ = ProfilerProxyT(envvar::max_num_contexts);
+  profiler_proxy_ = ProfilerProxy(envvar::max_num_contexts);
 
   int device_id;
   CHECK_HIP(hipGetDevice(&device_id));
@@ -104,7 +104,7 @@ ROBackend::ROBackend(MPI_Comm comm)
 
   ROCSHMEM_HOST_CTX_DEFAULT.ctx_opaque = default_host_ctx.get();
 
-  team_world_proxy_ = new ROTeamProxy<HIPAllocator>(
+  team_world_proxy_ = new ROTeamProxy(
       this, transport_->get_world_comm(), my_pe, num_pes);
   team_tracker.set_team_world(team_world_proxy_->get());
 
@@ -376,7 +376,7 @@ void ROBackend::ro_net_free_runtime() {
   transport_->finalizeTransport();
 
   ro_window_proxy_->~WindowProxy();
-  team_world_proxy_->~ROTeamProxy<HIPAllocator>();
+  team_world_proxy_->~ROTeamProxy();
   transport_->~MPITransport();
   /*
    * Free the profiler statistics structure.
