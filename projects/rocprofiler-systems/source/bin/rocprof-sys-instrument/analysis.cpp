@@ -18,6 +18,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <fcntl.h>
 #include <fstream>
 #include <map>
 #include <set>
@@ -30,10 +31,11 @@ namespace analysis
 {
 namespace
 {
-using index_vec_t                    = std::vector<std::size_t>;
-using token_set_t                    = std::set<std::string>;
-using tokens_by_index_t              = std::map<std::size_t, token_set_t>;
-constexpr int exec_failure_exit_code = 127;
+using index_vec_t                     = std::vector<std::size_t>;
+using token_set_t                     = std::set<std::string>;
+using tokens_by_index_t               = std::map<std::size_t, token_set_t>;
+constexpr int exec_failure_exit_code  = 127;
+constexpr int signal_exit_code_offset = 128;  // shell convention for signal exits
 // Minimum length of a family token to be considered for grouping
 constexpr std::size_t min_family_token_length = 4;
 
@@ -43,13 +45,13 @@ struct family_group_candidate
     index_vec_t indices{};
 };
 
-thread_local sigjmp_buf            guarded_signal_jmp_buf{};
-thread_local volatile sig_atomic_t guarded_signal_caught = 0;
-thread_local const char*           signal_message        = nullptr;
-thread_local std::size_t           signal_message_length = 0;
-thread_local struct sigaction signal_message_old_segv
+sigjmp_buf            guarded_signal_jmp_buf{};
+volatile sig_atomic_t guarded_signal_caught = 0;
+const char*           signal_message        = nullptr;
+std::size_t           signal_message_length = 0;
+struct sigaction signal_message_old_segv
 {};
-thread_local struct sigaction signal_message_old_bus
+struct sigaction signal_message_old_bus
 {};
 
 // timemory signal handling is termination-oriented, we need to recover
@@ -64,30 +66,36 @@ extern "C" void
 signal_message_handler(int sig, siginfo_t* info, void* ucontext)
 {
     if(signal_message && signal_message_length > 0)
-        write(STDERR_FILENO, signal_message, signal_message_length);
+    {
+        auto written = write(STDERR_FILENO, signal_message, signal_message_length);
+        (void) written;
+    }
 
     auto* previous = (sig == SIGBUS) ? &signal_message_old_bus : &signal_message_old_segv;
     if((previous->sa_flags & SA_SIGINFO) != 0 && previous->sa_sigaction)
     {
         previous->sa_sigaction(sig, info, ucontext);
-        _exit(128 + sig);
+        // If the previous handler returns, preserve signal-style process status.
+        _exit(signal_exit_code_offset + sig);
     }
 
     if(previous->sa_handler != SIG_DFL && previous->sa_handler != SIG_IGN &&
        previous->sa_handler)
     {
         previous->sa_handler(sig);
-        _exit(128 + sig);
+        // If the previous handler returns, preserve signal-style process status.
+        _exit(signal_exit_code_offset + sig);
     }
 
     sigaction(sig, previous, nullptr);
     kill(getpid(), sig);
-    _exit(128 + sig);
+    _exit(signal_exit_code_offset + sig);
 }
 
 // Runs an operation with a temporary message-only signal handler. If the operation
 // crashes, the message is written first and then the previous handler, typically
-// timemory's backtrace handler, receives the original signal context.
+// timemory's backtrace handler, receives the original signal context. The message
+// must outlive the operation and any signal handling; use static storage.
 template <typename FuncT>
 guarded_result
 run_with_signal_message(const char* msg, FuncT&& func)
@@ -449,6 +457,7 @@ struct function_bisect_state
     std::vector<std::vector<procedure_id>> failing_subsets{};
     // Needed incase both disjoint subsets of a set fail
     std::vector<std::vector<procedure_id>> fallback_failing_subsets{};
+    bool                                   terminated = false;
 
     std::vector<procedure_id> to_procedures(const index_vec_t& subset) const
     {
@@ -499,6 +508,8 @@ struct function_bisect_state
 
     bool bisect(const index_vec_t& subset)
     {
+        if(terminated) return false;
+
         // The caller has already verified that this subset fails
         if(subset.size() == 1)
         {
@@ -512,14 +523,30 @@ struct function_bisect_state
 
         auto left_result  = run_subset(left);
         auto right_result = run_subset(right);
-        auto left_bad     = (left_result == trial_result::fail);
-        auto right_bad    = (right_result == trial_result::fail);
+        if(left_result == trial_result::unexpected ||
+           right_result == trial_result::unexpected)
+        {
+            terminated = true;
+            verbprintf(0, "[analysis] terminating analysis due to unexpected trial "
+                          "failure\n");
+            return false;
+        }
+        auto left_bad  = (left_result == trial_result::fail);
+        auto right_bad = (right_result == trial_result::fail);
 
         if(left_bad || right_bad)
         {
             bool found_precise_subset = false;
-            if(left_bad) found_precise_subset = bisect(left) || found_precise_subset;
-            if(right_bad) found_precise_subset = bisect(right) || found_precise_subset;
+            if(left_bad)
+            {
+                found_precise_subset = bisect(left) || found_precise_subset;
+                if(terminated) return false;
+            }
+            if(right_bad)
+            {
+                found_precise_subset = bisect(right) || found_precise_subset;
+                if(terminated) return false;
+            }
             return found_precise_subset;
         }
 
@@ -534,7 +561,16 @@ struct function_bisect_state
             verbprintf(0, "[analysis]   regroup candidate token='%s' size=%zu\n",
                        token.c_str(), grouped.size());
 
-            if(run_subset(grouped, false) == trial_result::fail)
+            auto grouped_result = run_subset(grouped, false);
+            if(grouped_result == trial_result::unexpected)
+            {
+                terminated = true;
+                verbprintf(0, "[analysis] terminating analysis due to unexpected "
+                              "regrouped trial failure\n");
+                return false;
+            }
+
+            if(grouped_result == trial_result::fail)
             {
                 verbprintf(0,
                            "[analysis]   -> regrouped family '%s' still crashes; "
@@ -609,14 +645,27 @@ run_trial(const std::vector<std::string>& parent_argv, const std::string& restri
     child_args.reserve(parent_argv.size() + 2);
 
     bool injected = false;
-    for(const auto& a : parent_argv)
+    for(std::size_t i = 0; i < parent_argv.size(); ++i)
     {
-        if(!injected && a == "--")
+        const auto& a = parent_argv.at(i);
+        if(a == "--")
         {
             child_args.emplace_back("-R");
             child_args.emplace_back(restrict_regex);
             injected = true;
+            child_args.insert(child_args.end(), parent_argv.begin() + i,
+                              parent_argv.end());
+            break;
         }
+
+        // Replace rocprof-sys function restrictions before "--" with this trial's
+        // subset regex
+        if(a == "-R" || a == "--function-restrict")
+        {
+            if(i + 1 < parent_argv.size() && parent_argv.at(i + 1) != "--") ++i;
+            continue;
+        }
+        if(a.rfind("--function-restrict=", 0) == 0) continue;
         child_args.emplace_back(a);
     }
     if(!injected)
@@ -636,7 +685,7 @@ run_trial(const std::vector<std::string>& parent_argv, const std::string& restri
     pid_t pid = fork();
     if(pid < 0)
     {
-        errprintf(0, "[analysis] fork failed: %s\n", std::strerror(errno));
+        verbprintf(0, "[analysis] fork failed: %s\n", std::strerror(errno));
         return trial_result::unexpected;
     }
 
@@ -670,7 +719,7 @@ run_trial(const std::vector<std::string>& parent_argv, const std::string& restri
         if(w < 0)
         {
             if(errno == EINTR) continue;
-            errprintf(0, "[analysis] waitpid failed: %s\n", std::strerror(errno));
+            verbprintf(0, "[analysis] waitpid failed: %s\n", std::strerror(errno));
             return trial_result::unexpected;
         }
         break;
@@ -690,8 +739,8 @@ run_trial(const std::vector<std::string>& parent_argv, const std::string& restri
         int code = WEXITSTATUS(status);
         if(code == 0) return trial_result::pass;
         if(code == CHILD_ANALYSIS_EXIT) return trial_result::fail;
-        errprintf(0, "[analysis] child pid=%d exited with unexpected code %d\n",
-                  (int) pid, code);
+        verbprintf(0, "[analysis] child pid=%d exited with unexpected code %d\n",
+                   (int) pid, code);
         return trial_result::unexpected;
     }
 
@@ -712,10 +761,11 @@ print_trial_result(size_t trial_idx, trial_result result, double elapsed_seconds
                        elapsed_seconds);
             break;
         case trial_result::unexpected:
-            errprintf(0,
-                      "[analysis]   An unexpected error occurred while running trial %zu "
-                      "(%.3f sec)\n",
-                      trial_idx, elapsed_seconds);
+            verbprintf(
+                0,
+                "[analysis]   An unexpected error occurred while running trial %zu "
+                "(%.3f sec)\n",
+                trial_idx, elapsed_seconds);
             break;
     }
 }
@@ -780,7 +830,7 @@ run_insertion_analysis(fmodset_t& instrumented_module_functions)
     auto parent_argv = read_proc_cmdline();
     if(parent_argv.empty())
     {
-        errprintf(0, "[analysis] could not read /proc/self/cmdline; aborting\n");
+        verbprintf(0, "[analysis] could not read /proc/self/cmdline; aborting\n");
         return;
     }
 
@@ -792,6 +842,21 @@ run_insertion_analysis(fmodset_t& instrumented_module_functions)
         root.emplace_back(i);
 
     state.bisect(root);  // Core
+    if(state.terminated)
+    {
+        verbprintf(0, "[analysis] analysis terminated before finding a failing subset\n");
+        return;
+    }
+
+    auto root_recorded_as_fallback = std::any_of(
+        state.fallback_failing_subsets.begin(), state.fallback_failing_subsets.end(),
+        [&queued](const auto& subset) { return subset.size() == queued.size(); });
+    if(root_recorded_as_fallback)
+    {
+        verbprintf(0, "[analysis] root set failed, but both halves and grouped candidate "
+                      "trials passed. The failure may not be due to individual functions "
+                      "alone.\n");
+    }
 
     // Singleton + name-regrouped subsets that fail
     auto reported_subsets = state.failing_subsets;
@@ -803,7 +868,8 @@ run_insertion_analysis(fmodset_t& instrumented_module_functions)
     print_analysis_result(reported_subsets);
 
     verbprintf(0, "[analysis] Excluding the functions from instrumentation via "
-                  "--function-exclude is recommended\n") _wc.stop();
+                  "--function-exclude is recommended\n");
+    _wc.stop();
     verbprintf(0, "[analysis] total wall-clock time: %.3f sec\n", _wc.get());
 }
 
