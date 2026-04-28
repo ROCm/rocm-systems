@@ -12,19 +12,6 @@ from pathlib import Path
 
 logging.basicConfig(level=logging.INFO)
 
-SCRIPT_DIR = Path(__file__).resolve().parent
-ROCM_PATH = Path(os.environ.get("ROCM_PATH", SCRIPT_DIR.parent.parent)).resolve()
-ROCM_BIN_DIR = Path(os.environ.get("ROCM_BIN_DIR", ROCM_PATH / "bin")).resolve()
-AMDGPU_FAMILIES = os.getenv("AMDGPU_FAMILIES")
-OS_TYPE = platform.system().lower()
-
-# GTest sharding.
-SHARD_INDEX = os.getenv("SHARD_INDEX", "1")
-TOTAL_SHARDS = os.getenv("TOTAL_SHARDS", "1")
-env = os.environ.copy()
-# GitHub Actions shard arrays are 1-indexed; GTest shard indexes are 0-indexed.
-env["GTEST_SHARD_INDEX"] = str(int(SHARD_INDEX) - 1)
-env["GTEST_TOTAL_SHARDS"] = str(TOTAL_SHARDS)
 
 # TODO(#3851): Excluded tests (flaky or disabled in CI).
 TEST_TO_IGNORE = {
@@ -75,17 +62,56 @@ QUICK_TESTS = [
     "rocrtstFunc.Memory_Atomic_Xchg_Test",
 ]
 
-exclude_filter = "-"
-if AMDGPU_FAMILIES in TEST_TO_IGNORE and OS_TYPE in TEST_TO_IGNORE[AMDGPU_FAMILIES]:
-    ignored_tests = TEST_TO_IGNORE[AMDGPU_FAMILIES][OS_TYPE]
-    exclude_filter += ":".join(ignored_tests)
 
-test_type = os.getenv("TEST_TYPE", "full")
-if test_type == "quick":
-    env["GTEST_FILTER"] = ":".join(QUICK_TESTS) + ":" + exclude_filter
-else:
-    env["GTEST_FILTER"] = exclude_filter
+def derive_rocm_path(script_dir: Path) -> Path:
+    for candidate in (script_dir, *script_dir.parents):
+        bin_dir = candidate / "bin"
+        if (bin_dir / "rocrtst64").is_file() or (bin_dir / "rocrtst64.exe").is_file():
+            return candidate
+    if script_dir.name == "rocrtst" and script_dir.parent.name == "share":
+        return script_dir.parent.parent
+    return script_dir.parent.parent
 
-cmd = ["./rocrtst64"]
-logging.info(f"++ Exec [{ROCM_BIN_DIR}]$ {shlex.join(cmd)}")
-subprocess.run(cmd, cwd=ROCM_BIN_DIR, check=True, env=env)
+
+def build_gtest_filter(
+    amdgpu_families: str | None, os_type: str, test_type: str
+) -> str:
+    exclude_filter = ""
+    if amdgpu_families in TEST_TO_IGNORE and os_type in TEST_TO_IGNORE[amdgpu_families]:
+        ignored_tests = TEST_TO_IGNORE[amdgpu_families][os_type]
+        exclude_filter = "-" + ":".join(ignored_tests)
+
+    if test_type == "quick":
+        return ":".join(QUICK_TESTS) + exclude_filter
+    return exclude_filter
+
+
+def main() -> None:
+    script_dir = Path(__file__).resolve().parent
+    rocm_path = Path(
+        os.environ.get("ROCM_PATH", derive_rocm_path(script_dir))
+    ).resolve()
+    rocm_bin_dir = Path(os.environ.get("ROCM_BIN_DIR", rocm_path / "bin")).resolve()
+
+    env = os.environ.copy()
+    # GitHub Actions shard arrays are 1-indexed; GTest shard indexes are 0-indexed.
+    env["GTEST_SHARD_INDEX"] = str(int(os.getenv("SHARD_INDEX", "1")) - 1)
+    env["GTEST_TOTAL_SHARDS"] = os.getenv("TOTAL_SHARDS", "1")
+
+    gtest_filter = build_gtest_filter(
+        os.getenv("AMDGPU_FAMILIES"),
+        platform.system().lower(),
+        os.getenv("TEST_TYPE", "full"),
+    )
+    if gtest_filter:
+        env["GTEST_FILTER"] = gtest_filter
+    else:
+        env.pop("GTEST_FILTER", None)
+
+    cmd = ["./rocrtst64"]
+    logging.info(f"++ Exec [{rocm_bin_dir}]$ {shlex.join(cmd)}")
+    subprocess.run(cmd, cwd=rocm_bin_dir, check=True, env=env)
+
+
+if __name__ == "__main__":
+    main()
