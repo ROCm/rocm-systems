@@ -38,6 +38,7 @@ rj_add_device_kernel(matmul_mfma_16x16 gfx950)
 rj_add_device_kernel(mfma_chained_unrolled gfx950)
 rj_add_device_kernel(matmul_tiled gfx950)
 rj_add_device_kernel(vector_add gfx950)
+rj_add_device_kernel(copy_loop gfx950)
 rj_add_device_kernel(lds_roundtrip gfx950)
 
 # Umbrella target for all device kernels.
@@ -48,6 +49,7 @@ add_custom_target(device_kernels DEPENDS
     kernel_mfma_chained_unrolled
     kernel_matmul_tiled
     kernel_vector_add
+    kernel_copy_loop
     kernel_lds_roundtrip
 )
 

@@ -177,23 +177,12 @@ std::vector<CodeObjectPatcher::WorkGroupIdInfo> CodeObjectPatcher::workgroup_id_
       uint64_t entry_text_off = entry_vaddr - text_vaddr;
 
       uint32_t rsrc2 = kdp->compute_pgm_rsrc2;
-      uint16_t kcp = kdp->kernel_code_properties;
 
-      uint32_t sgpr = 0;
-      if (AMDHSA_BITS_GET(kcp, kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_PRIVATE_SEGMENT_BUFFER))
-        sgpr += 4;
-      if (AMDHSA_BITS_GET(kcp, kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_DISPATCH_PTR))
-        sgpr += 2;
-      if (AMDHSA_BITS_GET(kcp, kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_QUEUE_PTR))
-        sgpr += 2;
-      if (AMDHSA_BITS_GET(kcp, kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR))
-        sgpr += 2;
-      if (AMDHSA_BITS_GET(kcp, kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_DISPATCH_ID))
-        sgpr += 2;
-      if (AMDHSA_BITS_GET(kcp, kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_FLAT_SCRATCH_INIT))
-        sgpr += 2;
-      if (AMDHSA_BITS_GET(kcp, kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_PRIVATE_SEGMENT_SIZE))
-        sgpr += 1;
+      // Workgroup ID SGPRs are allocated immediately after the user-SGPR
+      // region described by COMPUTE_PGM_RSRC2.USER_SGPR_COUNT. Do not
+      // reconstruct this from kernel_code_properties: code object v5 can
+      // request preloaded user SGPRs that are represented only in RSRC2.
+      uint32_t sgpr = AMDHSA_BITS_GET(rsrc2, kd::COMPUTE_PGM_RSRC2_USER_SGPR_COUNT);
 
       WorkGroupIdInfo info{entry_text_off, -1, -1, -1};
       if (AMDHSA_BITS_GET(rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X))

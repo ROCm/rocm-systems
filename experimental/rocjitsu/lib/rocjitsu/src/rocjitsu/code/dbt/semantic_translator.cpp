@@ -446,8 +446,19 @@ std::vector<uint32_t> expand_mfma_f32_16x16x16_f16(const Instruction &inst, uint
 }
 
 // ---------------------------------------------------------------------------
-// Expand rules table — sorted by src_opcode for binary search
+// Expand rules table — sorted by (src_encoding_id, src_opcode) for binary search
 // ---------------------------------------------------------------------------
+
+// CDNA4 encoding prefixes as reported by Instruction::encoding_id() (word0 >> 23).
+// Opcodes are only unique within one encoding. For example, SOPP:s_waitcnt and
+// SOP2:s_and_b32 both use opcode 12, so semantic rules must include the
+// encoding prefix to avoid expanding an unrelated instruction.
+constexpr uint16_t kCdna4Enc_SOPP = 0x17F;
+constexpr uint16_t kCdna4Enc_VOP3P = 0x1A7;
+// For VOP3, the current decoder key is still the raw top nine bits of word0,
+// so it includes the high opcode bits rather than only the six-bit VOP3
+// encoding field. Keep this constant tied to the concrete source instruction.
+constexpr uint16_t kCdna4Enc_VOP3_v_lshl_add_u64 = 0x1A4;
 
 // CDNA4 opcodes (from decoder: opcode_ = inst_.op)
 constexpr uint16_t kCdna4Op_s_barrier = 10;
@@ -458,16 +469,19 @@ constexpr uint16_t kCdna4Op_v_accvgpr_write = 89;
 constexpr uint16_t kCdna4Op_v_lshl_add_u64 = 520;
 
 const TranslationRule kExpandRules_cdna4_to_rdna4[] = {
-    {kCdna4Op_s_barrier, RuleAction::Expand, 0, 0, nullptr, expand_s_barrier, nullptr, nullptr},
-    {kCdna4Op_s_waitcnt, RuleAction::Expand, 0, 0, nullptr, expand_waitcnt, nullptr, nullptr},
-    {kCdna4Op_v_mfma_f32_16x16x16_f16, RuleAction::Expand, 0, 0, nullptr,
-     expand_mfma_f32_16x16x16_f16, &kMfmaF32_16x16x16_F16_Cdna4, &kWmmaF32_16x16x16_F16_Rdna4},
-    {kCdna4Op_v_accvgpr_read, RuleAction::Expand, 0, 0, nullptr, expand_accvgpr_read, nullptr,
-     nullptr},
-    {kCdna4Op_v_accvgpr_write, RuleAction::Expand, 0, 0, nullptr, expand_accvgpr_write, nullptr,
-     nullptr},
-    {kCdna4Op_v_lshl_add_u64, RuleAction::Expand, 0, 0, nullptr, expand_v_lshl_add_u64, nullptr,
-     nullptr},
+    {kCdna4Enc_SOPP, kCdna4Op_s_barrier, RuleAction::Expand, 0, 0, nullptr, expand_s_barrier,
+     nullptr, nullptr},
+    {kCdna4Enc_SOPP, kCdna4Op_s_waitcnt, RuleAction::Expand, 0, 0, nullptr, expand_waitcnt,
+     nullptr, nullptr},
+    {kCdna4Enc_VOP3_v_lshl_add_u64, kCdna4Op_v_lshl_add_u64, RuleAction::Expand, 0, 0, nullptr,
+     expand_v_lshl_add_u64, nullptr, nullptr},
+    {kCdna4Enc_VOP3P, kCdna4Op_v_mfma_f32_16x16x16_f16, RuleAction::Expand, 0, 0, nullptr,
+     expand_mfma_f32_16x16x16_f16, &kMfmaF32_16x16x16_F16_Cdna4,
+     &kWmmaF32_16x16x16_F16_Rdna4},
+    {kCdna4Enc_VOP3P, kCdna4Op_v_accvgpr_read, RuleAction::Expand, 0, 0, nullptr,
+     expand_accvgpr_read, nullptr, nullptr},
+    {kCdna4Enc_VOP3P, kCdna4Op_v_accvgpr_write, RuleAction::Expand, 0, 0, nullptr,
+     expand_accvgpr_write, nullptr, nullptr},
 };
 
 } // namespace
@@ -484,10 +498,12 @@ SemanticTranslator::SemanticTranslator(rj_code_arch_t guest, rj_code_arch_t host
 
 std::vector<uint32_t> SemanticTranslator::try_lower_expand(const Instruction &inst, uint64_t offset,
                                                            const LivenessAnalysis &liveness) const {
+  const uint16_t enc = inst.encoding_id();
   const uint16_t op = inst.opcode();
-  TranslationRule key{op, RuleAction::Expand, 0, 0, nullptr, nullptr, nullptr, nullptr};
+  TranslationRule key{enc, op, RuleAction::Expand, 0, 0, nullptr, nullptr, nullptr, nullptr};
   auto it = std::lower_bound(expand_rules_.begin(), expand_rules_.end(), key);
-  if (it != expand_rules_.end() && it->src_opcode == op && it->expand_fn)
+  if (it != expand_rules_.end() && it->src_encoding_id == enc && it->src_opcode == op &&
+      it->expand_fn)
     return it->expand_fn(inst, static_cast<uint32_t>(host_arch_), offset, liveness,
                          it->guest_layout, it->host_layout);
   return {};

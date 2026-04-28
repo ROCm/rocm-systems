@@ -67,7 +67,8 @@ struct SemanticReplacement {
 ///
 /// @details All expansion rules (waitcnt, MFMA→WMMA, AccVGPR, etc.) are
 /// registered as TranslationRule entries with RuleAction::Expand. The
-/// try_lower_expand() method looks up rules by opcode via binary search.
+/// try_lower_expand() method looks up rules by `(encoding_id, opcode)` via
+/// binary search.
 class SemanticTranslator {
 public:
   SemanticTranslator(rj_code_arch_t guest_arch, rj_code_arch_t host_arch);
@@ -89,7 +90,7 @@ public:
   [[nodiscard]] bool has_rules() const { return !expand_rules_.empty(); }
 
 private:
-  std::span<const TranslationRule> expand_rules_; ///< Sorted by src_opcode.
+  std::span<const TranslationRule> expand_rules_; ///< Sorted by (encoding_id, opcode).
   rj_code_arch_t host_arch_;
 };
 

@@ -32,6 +32,17 @@
 #include "rocjitsu/code/dbt/generated/legalization_rdna3_to_rdna4.h"
 #include "rocjitsu/code/dbt/generated/legalization_rdna4_to_cdna4.h"
 #include "rocjitsu/code/dbt/generated/legalization_types.h"
+#include "rocjitsu/code/amdgpu_elf.h"
+#include "rocjitsu/code/patch/code_object_patcher.h"
+#include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna4/operand.h"
+#include "rocjitsu/isa/instruction.h"
+
+#include "rocjitsu/base/rj_compiler.h"
+RJ_DIAGNOSTIC_PUSH
+RJ_DIAGNOSTIC_IGNORE_PEDANTIC
+#include "hsa/AMDHSAKernelDescriptor.h"
+RJ_DIAGNOSTIC_POP
 
 #include <gtest/gtest.h>
 
@@ -40,11 +51,54 @@
 #include <bit>
 #include <cstdint>
 #include <cstring>
+#include <span>
 #include <string_view>
 #include <vector>
 
 namespace rocjitsu {
 namespace {
+
+class DefUseTestInstruction : public Instruction {
+public:
+  DefUseTestInstruction(Operand &dst, Operand &src) : Instruction("def_use_test", nullptr) {
+    dst_operands_[0] = &dst;
+    src_operands_[0] = &src;
+    num_dst_ = 1;
+    num_src_ = 1;
+  }
+
+  void implicit_defs(uint8_t wf_size, std::vector<RegisterRef> &defs) const override {
+    (void)wf_size;
+    defs.push_back({RegClass::SCC, 0, 1});
+  }
+};
+
+uint64_t find_kernel_descriptor_file_offset(std::span<const uint8_t> image,
+                                            std::string_view symbol_name) {
+  auto *ehdr = reinterpret_cast<const Elf64_Ehdr *>(image.data());
+  auto *shdr = reinterpret_cast<const Elf64_Shdr *>(image.data() + ehdr->e_shoff);
+
+  for (int i = 0; i < ehdr->e_shnum; ++i) {
+    if (shdr[i].sh_type != SHT_SYMTAB)
+      continue;
+    auto *symtab = reinterpret_cast<const Elf64_Sym *>(image.data() + shdr[i].sh_offset);
+    const size_t nsyms = shdr[i].sh_size / sizeof(Elf64_Sym);
+    auto *strtab_shdr = &shdr[shdr[i].sh_link];
+    auto *strtab = reinterpret_cast<const char *>(image.data() + strtab_shdr->sh_offset);
+
+    for (size_t j = 0; j < nsyms; ++j) {
+      if (symtab[j].st_name >= strtab_shdr->sh_size)
+        continue;
+      std::string_view name(strtab + symtab[j].st_name);
+      if (name != symbol_name)
+        continue;
+      const uint16_t sec_idx = symtab[j].st_shndx;
+      return shdr[sec_idx].sh_offset + (symtab[j].st_value - shdr[sec_idx].sh_addr);
+    }
+  }
+
+  return 0;
+}
 
 TEST(CoherencyRemap, Gfx940ToGfx12AgentScope) {
   auto coh = remap_gfx940_to_gfx12({1, 0, 0});
@@ -395,6 +449,43 @@ using rocjitsu::BinaryTranslator;
 using rocjitsu::Decoder;
 using rocjitsu::Executable;
 
+TEST(CodeObjectPatcher, WorkgroupIdInfoUsesUserSgprCount) {
+  using namespace rocr::llvm::amdhsa;
+
+  Executable exec(kernel_path("copy_loop"));
+  ASSERT_TRUE(exec.is_valid());
+  ASSERT_GT(exec.num_code_objects(ROCJITSU_CODE_TARGET_GFX950), 0u);
+
+  const auto *co = exec.code_object(ROCJITSU_CODE_TARGET_GFX950, 0);
+  ASSERT_NE(co, nullptr);
+
+  std::vector<uint8_t> image(co->image_size());
+  std::memcpy(image.data(), co->image_data(), image.size());
+
+  const uint64_t kd_file_off =
+      rocjitsu::find_kernel_descriptor_file_offset(image, "copy_loop.kd");
+  ASSERT_NE(kd_file_off, 0u);
+  ASSERT_LE(kd_file_off + sizeof(kernel_descriptor_t), image.size());
+
+  auto *kd = reinterpret_cast<kernel_descriptor_t *>(image.data() + kd_file_off);
+  kd->kernel_code_properties = 0;
+  kd->compute_pgm_rsrc2 = 0;
+  AMDHSA_BITS_SET(kd->compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 12);
+  AMDHSA_BITS_SET(kd->compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X, 1);
+  AMDHSA_BITS_SET(kd->compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Y, 1);
+  AMDHSA_BITS_SET(kd->compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Z, 1);
+
+  rocjitsu::AmdGpuCodeObject mutated(image.data(), image.size());
+  ASSERT_TRUE(mutated.is_valid());
+  rocjitsu::CodeObjectPatcher patcher(mutated);
+  auto infos = patcher.workgroup_id_info();
+
+  ASSERT_EQ(infos.size(), 1u);
+  EXPECT_EQ(infos[0].sgpr_wg_id_x, 12);
+  EXPECT_EQ(infos[0].sgpr_wg_id_y, 13);
+  EXPECT_EQ(infos[0].sgpr_wg_id_z, 14);
+}
+
 TEST(BinaryTranslatorE2E, TranslateVectorAddCdna4ToRdna4) {
   Executable exec(kernel_path("vector_add"));
   ASSERT_TRUE(exec.is_valid()) << "Failed to load vector_add.o";
@@ -546,6 +637,62 @@ TEST(BinaryTranslatorE2E, LdsRoundtripLowersBarrierToRdna4SplitBarrier) {
   EXPECT_FALSE(saw_cdna4_barrier);
   EXPECT_FALSE(saw_cdna4_sdwa_first_word);
   EXPECT_FALSE(saw_cdna4_sdwa_modifier_word);
+}
+
+TEST(BinaryTranslatorE2E, CopyLoopHasControlFlowAndTranslates) {
+  Executable exec(kernel_path("copy_loop"));
+  ASSERT_TRUE(exec.is_valid());
+  ASSERT_GT(exec.num_code_objects(ROCJITSU_CODE_TARGET_GFX950), 0u);
+
+  const auto *co = exec.code_object(ROCJITSU_CODE_TARGET_GFX950, 0);
+  ASSERT_NE(co, nullptr);
+
+  auto cdna4_decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(cdna4_decoder, nullptr);
+
+  bool saw_source_branch = false;
+  bool saw_source_s_and_b32 = false;
+  for (const auto *sec : co->text_sections()) {
+    const auto *data = reinterpret_cast<const uint32_t *>(sec->data());
+    const size_t words = sec->size() / sizeof(uint32_t);
+    size_t pc = 0;
+    while (pc < words) {
+      std::unique_ptr<rocjitsu::Instruction> inst(cdna4_decoder->decode(&data[pc]));
+      ASSERT_NE(inst, nullptr) << "CDNA4 decode failed at word offset " << pc;
+      std::string_view mnemonic(inst->mnemonic());
+      saw_source_branch |= mnemonic == "s_branch" || mnemonic.starts_with("s_cbranch");
+      saw_source_s_and_b32 |= mnemonic == "s_and_b32";
+      pc += inst->size() / sizeof(uint32_t);
+    }
+  }
+  ASSERT_TRUE(saw_source_branch) << "copy_loop must exercise scalar control flow";
+  ASSERT_TRUE(saw_source_s_and_b32) << "copy_loop should mask the block size with s_and_b32";
+
+  BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA4);
+  auto result = translator.translate(*co);
+  ASSERT_FALSE(result.elf_bytes.empty());
+
+  rocjitsu::AmdGpuCodeObject translated_co(result.elf_bytes.data(), result.elf_bytes.size());
+  auto rdna4_decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_NE(rdna4_decoder, nullptr);
+
+  size_t inst_count = 0;
+  bool saw_translated_s_and_b32 = false;
+  for (const auto *sec : translated_co.text_sections()) {
+    const auto *data = reinterpret_cast<const uint32_t *>(sec->data());
+    const size_t words = sec->size() / sizeof(uint32_t);
+    size_t pc = 0;
+    while (pc < words) {
+      std::unique_ptr<rocjitsu::Instruction> inst(rdna4_decoder->decode(&data[pc]));
+      ASSERT_NE(inst, nullptr) << "RDNA4 decode failed at word offset " << pc;
+      saw_translated_s_and_b32 |= std::string_view(inst->mnemonic()) == "s_and_b32";
+      pc += inst->size() / sizeof(uint32_t);
+      ++inst_count;
+    }
+  }
+  EXPECT_GT(inst_count, 0u);
+  EXPECT_TRUE(saw_translated_s_and_b32)
+      << "SOP2:s_and_b32 shares opcode 12 with SOPP:s_waitcnt and must not use the waitcnt rule";
 }
 
 TEST(BinaryTranslatorE2E, MfmaChainedUnrolledReusesAccumulator) {
