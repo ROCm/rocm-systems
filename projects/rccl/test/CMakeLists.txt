@@ -297,6 +297,7 @@ if(BUILD_TESTS)
       RegistrationMPITests.cpp
       mem_manager/SuspendResumeMPITests.cpp
       RevokeMPITests.cpp
+      GrowMPITests.cpp
     )
 
     add_executable(rccl-UnitTestsMPI ${MPI_TEST_SOURCE_FILES})
