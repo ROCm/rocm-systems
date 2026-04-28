@@ -368,19 +368,26 @@ void for_each_known_queue_locked(F&& fn) {
 //      future wraparound re-write of the same slot can be re-detected),
 //      and process the START / END pairing as before.
 //
-// The 40-byte slot stride is enforced by the host kernel BO size check
-// (kfd_process_queue_manager.c:633 `buf_byte_size = count * 40` on
-// gbt350). FW only writes the first 16 bytes of each slot; the trailing
-// 24 bytes are FW-owned and reserved for future per-slot metadata. We
-// zero ALL 40 bytes when consuming a slot because FW's wraparound write
-// may rewrite the entire slot, including the trailing reserved region.
+// FW writes 16-byte mec_dispatch_record entries at 16-byte stride. The
+// host kernel BO size validation on the gbt350-installed KFD patch is
+// `count * 40` (kfd_process_queue_manager.c:633), which over-counts the
+// per-record stride — see upstream fix `kfd: validate dispatch record
+// buffer using 16-byte record size` (commit `03a8b58c3b96`,
+// 2026-04-08), which corrects the kernel side to `count * 16` to
+// match the firmware/SDK contract. We allocate `count * 40` so the
+// older host kernel's BO validation passes (forward-compatible with
+// the fix — bigger is fine), but FW writes records back-to-back at
+// 16-byte stride within that buffer. The drainer therefore reads at
+// 16-byte stride. The unused tail of the buffer (slots beyond
+// `count * 16` bytes) is never written by FW and never read by the
+// drainer.
 // ============================================================================
 
-// Host kernel-enforced per-slot stride for the dispatch-record BO. See
-// citation above. Hardcoded; ABI extensions that grow the slot will
-// require a coordinated update of this constant + AqlQueue::SetProfiling
-// alloc size.
-constexpr size_t kSlotStride = 40;
+// Per-record stride at which FW writes records into the buffer. Matches
+// `sizeof(mec_dispatch_record)` and is independent of the host kernel's
+// BO-size validation constant (which is `count * 40` today on gbt350,
+// `count * 16` after the upstream fix lands).
+constexpr size_t kSlotStride = 16;
 
 bool drain_one_queue(queue_drain_state& qs, bool force_emit) {
   std::lock_guard<std::mutex> lk(qs.drain_mu);
@@ -412,11 +419,11 @@ bool drain_one_queue(queue_drain_state& qs, bool force_emit) {
     const uint32_t dispatch_idx = rec->dispatch_idx;
     const uint64_t gpu_ts       = (static_cast<uint64_t>(ts_hi) << 32) | ts_lo;
 
-    // Zero the consumed slot so a wraparound rewrite by FW (next time the
-    // ring loops past this position) is re-detected as a fresh non-zero
-    // record_type. Zero the full kSlotStride — FW writes the whole slot,
-    // and the trailing 24 bytes per slot are reserved for future
-    // per-slot metadata that we do not interpret today.
+    // Zero the consumed slot so a wraparound rewrite by FW (next time
+    // the ring loops past this position) is re-detected as a fresh
+    // non-zero record_type. FW writes 16-byte records at 16-byte
+    // stride, so zeroing kSlotStride bytes resets the entire next-write
+    // target.
     std::memset(rec, 0, kSlotStride);
 
     if (rt == DISPATCH_LOG_RECORD_START) {
