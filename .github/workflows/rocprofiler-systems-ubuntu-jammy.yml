@@ -404,6 +404,8 @@ jobs:
       ROCPROFSYS_CI: 'ON'
       ROCPROFSYS_MAX_THREADS: '64'
       ROCM_PATH: /opt/rocm
+      OMPI_ALLOW_RUN_AS_ROOT: 1
+      OMPI_ALLOW_RUN_AS_ROOT_CONFIRM: 1
 
     steps:
     - *sparse-checkout

@@ -102,6 +102,14 @@ jobs:
             # Set env var so validate_perfetto_trace() uses the downloaded binary
             echo "ROCPROFSYS_TRACE_PROC_SHELL=/opt/trace_processor/bin/trace_processor_shell" >> $GITHUB_ENV
           fi
+          if [ $OS_VERSION_MAJOR -eq 10 ]; then
+            # RHEL 10 ships OpenMPI 5.x, whose PRRTE launcher consumes the '--'
+            # option-terminator that rocprof-sys-run requires. Install MPICH
+            # and put it ahead of OpenMPI on PATH so the test capability probe
+            # picks mpich's mpiexec instead.
+            dnf install -y --enablerepo=crb mpich mpich-devel
+            echo "/usr/lib64/mpich/bin" >> $GITHUB_PATH
+          fi
 
     - name: Configure, Build, and Test
       timeout-minutes: 115
