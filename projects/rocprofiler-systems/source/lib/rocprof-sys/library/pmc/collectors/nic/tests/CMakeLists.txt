@@ -8,6 +8,10 @@ target_link_libraries(
     PRIVATE rocprofiler-systems-googletest-library rocprofiler-systems-logger
 )
 
+if(ROCPROFSYS_BUILD_AINIC)
+    target_compile_definitions(pmc-nic-collector-tests PUBLIC ROCPROFSYS_BUILD_AINIC=1)
+endif()
+
 target_include_directories(
     pmc-nic-collector-tests
     PRIVATE

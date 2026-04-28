@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "core/config.hpp"
 #include "library/pmc/collectors/gpu/device.hpp"
 #include "library/pmc/collectors/gpu/gpu_driver.hpp"
 #include "library/pmc/collectors/gpu/types.hpp"
@@ -50,7 +51,7 @@ struct gpu_traits
     template <typename Settings>
     [[nodiscard]] static device_filter get_device_filter()
     {
-        return Settings::get_device_filter();
+        return Settings::get_device_filter(rocprofsys::get_sampling_gpus());
     }
 
     /**

@@ -1212,6 +1212,39 @@ typedef struct metrics_table_header_t metrics_table_header_t;
 #define RSMI_MAX_NUM_XCP 8
 
 /**
+ * @brief This should match kRSMI_MAX_NUM_HBM_STACKS;
+ * HBM_STACKS - High Bandwidth Memory, HBM stacks provide high
+ * memory bandwidth.
+ */
+#define RSMI_MAX_NUM_HBM_STACKS 12
+
+/**
+ * @brief This should match kRSMI_MAX_NUM_AID;
+ * AID - Active Interposer Die, part of the multi-die GPU
+ * architecture.
+ */
+#define RSMI_MAX_NUM_AID 2
+
+/**
+ * @brief This should match kRSMI_MAX_NUM_MID;
+ * MID - Multimedia IO Die, part of the multi-die GPU
+ * architecture.
+ */
+#define RSMI_MAX_NUM_MID 2
+
+/**
+ * @brief This should match kRSMI_MAX_NUM_CLKS_PER_AID;
+ * CLKS_PER_AID - Maximum number of clocks per AID.
+ */
+#define RSMI_MAX_NUM_CLKS_PER_AID 2
+
+/**
+ * @brief This should match kRSMI_MAX_NUM_CLKS_PER_MID;
+ * CLKS_PER_MID - Maximum number of clocks per MID.
+ */
+#define RSMI_MAX_NUM_CLKS_PER_MID 2
+
+/**
  * @brief The following structures hold the gpu statistics for a device.
  */
 struct amdgpu_xcp_metrics_t {
@@ -1239,6 +1272,11 @@ struct amdgpu_xcp_metrics_t {
   uint64_t gfx_below_host_limit_thm_acc[RSMI_MAX_NUM_XCC];
   uint64_t gfx_low_utilization_acc[RSMI_MAX_NUM_XCC];
   uint64_t gfx_below_host_limit_total_acc[RSMI_MAX_NUM_XCC];
+
+  /**
+   * v1.9 additions
+   */
+  uint16_t temperature_xcd[RSMI_MAX_NUM_XCC];
 };
 
 typedef struct {
@@ -1448,6 +1486,16 @@ typedef struct {
 
   /* XGMI link status(up/down) */
   uint16_t xgmi_link_status[RSMI_MAX_NUM_XGMI_LINKS];
+
+  /*
+   * v1.9 additions
+   */
+  uint16_t temperature_hbm_stacks[RSMI_MAX_NUM_HBM_STACKS];  //!< temperature of the HBM stacks in C
+  uint16_t temperature_mid[RSMI_MAX_NUM_MID];                //!< temperature of the MID in C
+  uint16_t temperature_aid[RSMI_MAX_NUM_AID];                //!< temperature of the AID in C
+
+  uint16_t current_uclk_aid[RSMI_MAX_NUM_CLKS_PER_AID];     //!< In MHz
+  uint16_t current_socclks_mid[RSMI_MAX_NUM_CLKS_PER_MID];  //!< In MHz
 
   /// \endcond
 } rsmi_gpu_metrics_t;

@@ -105,7 +105,7 @@ public:
     {
         if (m_pBuffer != reinterpret_cast<Item*>(m_localBuffer))
         {
-            // Destory dynamically allocated array, by destroying its objects and freeing memory.
+            // Destroy dynamically allocated array, by destroying its objects and freeing memory.
             PAL_SAFE_DELETE_ARRAY(m_pBuffer, m_pAllocator);
         }
         else if (!std::is_trivial<Item>::value)

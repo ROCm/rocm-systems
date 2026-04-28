@@ -402,7 +402,7 @@
   v_or_b32          v2, \s_scratch1, v2                       // OR the new SE_ID bits into v2
 
   // Construct and store chiplet_and_wave_id bitfield
-  // Bitfield layout: wave_in_wg[5:0] | reserved[7:6] | chiplet[10:8] | reserved[31:11]
+  // Bitfield layout: wave_in_wg[5:0] | reserved_wg[7:6] | chiplet[10:8] | reserved[31:11]
   s_sendmsg_rtn_b32 \s_scratch1, sendmsg(MSG_RTN_GET_SE_AID_ID)
   
   // Extract wave_in_wg while waiting for sendmsg
@@ -439,7 +439,7 @@
     // Save SCHED_MODE from ttmp1[27:26] into ttmp11[27:26]. We will restore it on exit
     s_andn2_b32         ttmp11, ttmp11, TTMP11_SCHED_MODE_MASK
     s_and_b32           ttmp2,  ttmp1, TTMP1_SCHED_MODE_MASK
-    s_or_b32            ttmp11, ttmp2, TTMP1_SCHED_MODE_MASK
+    s_or_b32            ttmp11, ttmp11, ttmp2
   .endif
   s_mov_b32           ttmp3, 0
 

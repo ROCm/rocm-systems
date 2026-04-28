@@ -8,6 +8,26 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Added
 
+- **Added `oam_id` to `amdsmi_enumeration_info_t`**.
+  - `amd-smi list -e` now displays `OAM_ID` (Physical XGMI ID / OAM ID).
+  - Added `--enumeration` as a long-form alias for `-e` in `amd-smi list`.
+
+- **Added support for GPU metrics v1.9 new fields**.  
+  - Added new temperature fields to `amdsmi_gpu_metrics_t`:
+    - `temperature_hbm_stacks` — per-stack HBM temperatures (°C)
+    - `temperature_mid` — per-MID temperatures (°C)
+    - `temperature_aid` — per-AID temperatures (°C)
+    - `temperature_xcd` — per-XCC compute die temperatures (°C)
+  - Added new per-die clock fields to `amdsmi_gpu_metrics_t`:
+    - `current_uclk_aid` — per-AID uclk (MHz)
+    - `current_socclks_mid` — per-MID SOC clock (MHz)
+  - Added new constants:
+    - `AMDSMI_MAX_NUM_HBM_STACKS` (12)
+    - `AMDSMI_MAX_NUM_AID` (2)
+    - `AMDSMI_MAX_NUM_MID` (2)
+    - `AMDSMI_MAX_NUM_CLKS_PER_AID` (2)
+    - `AMDSMI_MAX_NUM_CLKS_PER_MID` (2)
+
 - **Added VRAM and GTT tuning interface**.  
   - New `amd-smi static --mem-carveout` to view VRAM carveout options.
   - New `amd-smi set --mem-carveout` to change the VRAM carveout (APU).
@@ -62,13 +82,32 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Changed
 
+- **Renamed `lc_perf_other_end_recovery` to `lc_perf_other_end_recovery_count` in `amd-smi metric` CLI output for unification**.  
+
 - **Removed references to deprecated `amd-smi reset -r`**.  
   - CLI help text and memory partition change warnings no longer reference `amd-smi reset -r` for driver reloading.
   - Users are now directed to use `sudo modprobe -r amdgpu && sudo modprobe amdgpu` to reload the driver after partition changes.
 
+- **Changed CPU power APIs to return values in milliwatts (mW) for higher precision**.  
+  - Removed lossy integer rounding (`(mW + 500) / 1000`) from 6 CPU power get APIs. Values are now
+    returned in milliwatts directly from the ESMI library, preserving sub-watt precision.
+  - **C API**: Output parameter type remains `uint32_t*`, but the unit changed from watts to milliwatts (mW).
+    - `amdsmi_get_cpu_socket_power`
+    - `amdsmi_get_cpu_socket_power_cap`
+    - `amdsmi_get_cpu_socket_power_cap_max`
+    - `amdsmi_get_cpu_pwr_efficiency_mode` (ppt_limit field)
+    - `amdsmi_get_cpu_core_ccd_power`
+    - `amdsmi_get_cpu_sdps_limit`
+  - **Python API (breaking)**: These functions now return `int` (milliwatts) instead of `str` (e.g., `"240 Watts"`).
+    Callers that parsed the string output must update to handle the numeric return value.
+  - **CLI output**: Power values now display with milliwatt precision (e.g., `240.500 Watts`).
+  - Added missing null-pointer validation for output parameters in `amdsmi_get_cpu_socket_power_cap`
+    and `amdsmi_get_cpu_socket_power_cap_max`.
+  - Updated header documentation to specify milliwatt units for all affected get and set API parameters.
+
 - **Changed power APIs to have consistent output parameter types**.  
   - Modified 6 cpu power API's to have consistent output power types. All set and get API's have uint32_t output values.
-  - Modified get and set API's that had double output types to have uint32_t output types.
+  - Modified get and set API's that had double output types to have uint32_t output types in milliwatts (mW).
     - amdsmi_get_cpu_socket_power(amdsmi_processor_handle processor_handle, uint32_t* ppower);
     - amdsmi_get_cpu_socket_power_cap(amdsmi_processor_handle processor_handle, uint32_t* pcap);
     - amdsmi_get_cpu_socket_power_cap_max(amdsmi_processor_handle processor_handle, uint32_t* pmax);
