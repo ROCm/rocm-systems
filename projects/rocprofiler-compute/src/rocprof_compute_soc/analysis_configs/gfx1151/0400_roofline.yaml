@@ -31,7 +31,7 @@ Panel Config:
         VALU FLOPs (F64):
           value: SUM($wave_size * SQ_INSTS_VALU_DP_sum) / SUM(End_Timestamp - Start_Timestamp)
           unit: GFLOP/s
-          peak: $FP64Flops_empirical_peak
+          peak: ((($max_sclk * $cu_per_gpu) * ($simd_per_cu * $wave_size * 2) / 32) / 1000)
         GL2 Cache Bandwidth:
           # Note: GL1C-GL2 reads can be 32B, 64B, or 128B. Writes can be 32B or 64B.
           value: SUM(GL1C_GL2_REQ_READ_32B_sum*32 + GL1C_GL2_REQ_READ_64B_sum*64 + GL1C_GL2_REQ_READ_128B_sum*128 + GL1C_GL2_REQ_WRITE_32B_sum*32 + GL1C_GL2_REQ_WRITE_64B_sum*64) / SUM((End_Timestamp - Start_Timestamp) / 1e9)
@@ -75,57 +75,44 @@ Panel Config:
           unit: GFLOP/s
 
   metrics_description:
-    VALU FLOPs (F16): >-
-      The total 16-bit floating-point operations executed per second on the VALU.
-      Theoretical FP16 throughput is 2× the FP32 FMA peak (packed half on Navi3 / RDNA3-class VALU).
-      This is presented with the value of the peak empirical F16 FLOPs achievable
-      on the specific accelerator.
-    VALU FLOPs (F32): >-
-      The total 32-bit floating-point operations executed per second on the VALU.
-      Navi3 / RDNA3-class CUs sustain up to 128 V_FMA_F32 ops per cycle per CU
-      in wave64 mode; the roofline peak column uses empirically measured F32 throughput.
-      This is presented with the value of the peak empirical F32 FLOPs achievable
-      on the specific accelerator.
+    VALU FLOPs: >-
+      Floating-point operations per second on the VALU. Peak is based on
+      FP32 FMA single-issue (128 FLOPs/CU/cycle). VOPD dual-issue doubles
+      throughput: FP32 to 256, FP16 packed to 512 FLOPs/CU/cycle. Uses
+      aggregate instruction counter.
     VALU FLOPs (F64): >-
-      The total 64-bit floating-point operations executed per second on the VALU.
-      FP64 throughput is typically 1/16 or 1/32 of FP32 on RDNA3.5 consumer parts.
-      This is presented with the value of the peak empirical F64 FLOPs achievable
-      on the specific accelerator.
+      64-bit floating-point operations per second on the VALU. Peak is
+      4 FLOPs/CU/cycle (FP32 FMA rate / 32). Uses dedicated FP64 instruction
+      counter (SQ_INSTS_VALU_DP_sum). FP64 is 1/32 rate of FP32 on RDNA.
     GL2 Cache Bandwidth: >-
-      The number of bytes transferred between GL1C and GL2C per unit time.
-      GL2C is the last-level cache in RDNA3.5 before system memory.
-      The peak empirically measured bandwidth achievable on the specific accelerator
-      is displayed alongside for comparison.
+      Achieved bandwidth between the L1 and L2 caches. This represents L1 miss traffic
+      that must be serviced by L2. High bandwidth relative to peak may indicate
+      L1 cache pressure or poor data locality at the L1 level.
     GL1 Cache Bandwidth: >-
-      The number of bytes transferred between TCP (L0) and GL1C per unit time.
-      GL1C is the shared L1 cache within each Shader Engine.
-      The peak empirically measured bandwidth achievable on the specific accelerator
-      is displayed alongside for comparison.
+      Achieved bandwidth between the L0 (TCP) and L1 (GL1C) caches. This represents
+      L0 miss traffic. High bandwidth relative to peak may indicate cache pressure
+      at the L0 level or memory access patterns with poor locality.
     TCP (L0) Cache Bandwidth: >-
-      The number of bytes looked up in the TCP (Texture Cache Per-pipe) per unit time.
-      TCP is the L0 vector cache in RDNA3.5, one per WGP. The peak empirically
-      measured bandwidth achievable on the specific accelerator is displayed
-      alongside for comparison.
+      Achieved bandwidth at the L0 vector cache (TCP). This represents total data
+      requested by shader cores from the memory hierarchy. Compare against peak to
+      assess memory subsystem utilization.
     LDS Bandwidth: >-
-      Indicates the maximum amount of bytes that could have been loaded from,
-      stored to, or atomically updated in the LDS per unit time. RDNA3.5 has
-      32 LDS banks per CU. The peak empirically measured LDS bandwidth achievable
-      on the specific accelerator is displayed alongside for comparison.
+      Achieved bandwidth for Local Data Share memory operations. LDS provides
+      high-bandwidth, low-latency shared memory within a workgroup. Compare against
+      peak to identify if LDS bandwidth is limiting performance.
     AI TCP: >-
-      The Arithmetic Intensity (AI) relative to TCP (L0 Cache). It is the ratio
-      of total floating-point operations (FLOPs) to total bytes transferred
-      from TCP to the shader cores. This value is used as the x-coordinate
-      for the TCP roofline.
+      Arithmetic Intensity relative to the L0 cache (TCP). Higher values indicate
+      more compute operations per byte of data loaded, suggesting compute-bound
+      behavior. Lower values suggest memory-bound behavior limited by L0 bandwidth.
     AI GL1: >-
-      The Arithmetic Intensity (AI) relative to GL1C (L1 Cache). It is the ratio
-      of total floating-point operations (FLOPs) to total bytes transferred between
-      GL1C and TCP. This value is used as the x-coordinate for the GL1 roofline.
+      Arithmetic Intensity relative to the L1 cache (GL1C). This metric shows compute
+      density relative to L1 cache traffic. Kernels with high AI GL1 but low AI TCP
+      benefit from L0 cache locality.
     AI GL2: >-
-      The Arithmetic Intensity (AI) relative to GL2C (L2 Cache). It is the ratio
-      of total floating-point operations (FLOPs) to total bytes transferred between
-      GL2C and GL1C. This value is used as the x-coordinate for the GL2 roofline.
+      Arithmetic Intensity relative to the L2 cache (GL2C). This metric shows compute
+      density relative to L2 cache traffic. Higher values indicate better cache reuse
+      at L1, while lower values suggest significant L1 miss rates.
     Performance (GFLOPs): >-
-      The overall achieved performance, measured in GigaFLOPs per second (GFLOP/s).
-      This is calculated as the sum of all VALU floating-point operations divided
-      by the total execution time. This value is used as the y-coordinate for
-      the kernel's point on the Roofline plot.
+      Achieved compute throughput measured in billions of floating-point operations
+      per second. This value, combined with arithmetic intensity, determines the
+      kernel's position on the roofline chart for performance analysis.

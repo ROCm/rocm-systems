@@ -16,7 +16,7 @@
 Panel Config:
   id: 300
   title: RDNA3.5 Memory Chart
-  description: |-
+  description: >-
     Detailed memory hierarchy metrics for RDNA3.5, showing request counts,
     bandwidth, hit rates, and utilization at each cache level.
     Memory hierarchy: LDS/TCP (L0) -> GL1C (L1) -> GL2C (L2) -> System Memory via GCEA
@@ -341,70 +341,77 @@ Panel Config:
           unit: (Count + $normUnit)
 
   metrics_description:
-    ICache Utilization: |-
-      Definition: Percentage of cycles the instruction cache is busy.
-      Formula: 100 * SQC_ICACHE_BUSY_CYCLES_sum / SQ_BUSY_CYCLES_sum
+    ICache Utilization: >-
+      Percentage of shader busy cycles spent actively servicing instruction fetch requests.
+      High utilization indicates the instruction cache is keeping pace with shader execution.
+      Low utilization may indicate instruction cache misses causing stalls, or idle shaders.
 
-    ICache Hit Rate: |-
-      Definition: Share of instruction cache accesses that hit, using hit+miss as denominator.
-      Formula: 100 * SQC_ICACHE_HITS_sum / (SQC_ICACHE_HITS_sum + SQC_ICACHE_MISSES_sum)
-      when the denominator is non-zero. HITS/REQ alone can exceed 100% (per-SQ per-bank counters).
+    ICache Hit Rate: >-
+      Percentage of instruction cache accesses that are serviced from cache without fetching
+      from the L1 cache. High hit rates indicate good instruction locality. Low hit rates
+      may indicate large kernels exceeding instruction cache capacity or divergent branches.
 
-    ICache Miss Rate: |-
-      Definition: Share of instruction cache accesses that miss (same denominator as hit rate).
-      Formula: 100 * SQC_ICACHE_MISSES_sum / (SQC_ICACHE_HITS_sum + SQC_ICACHE_MISSES_sum)
+    ICache Miss Rate: >-
+      Percentage of instruction cache accesses that miss and require fetching from the L1
+      cache. High miss rates increase instruction fetch latency and may cause shader stalls.
+      Consider reducing kernel code size or improving branch coherence.
 
-    Dcache Utilization: |-
-      Definition: Percentage of cycles the scalar data cache is busy.
-      Formula: 100 * SQC_DCACHE_BUSY_CYCLES_sum / SQ_BUSY_CYCLES_sum
+    Dcache Utilization: >-
+      Percentage of shader busy cycles spent actively servicing scalar data cache requests.
+      The scalar data cache holds uniform data accessed by scalar instructions. High
+      utilization indicates active use of scalar memory operations.
 
-    Dcache Hit Rate: |-
-      Definition: Share of scalar data cache accesses that hit (hit+miss denominator).
-      Formula: 100 * SQC_DCACHE_HITS_sum / (SQC_DCACHE_HITS_sum + SQC_DCACHE_MISSES_sum)
-      when the denominator is non-zero.
+    Dcache Hit Rate: >-
+      Percentage of scalar data cache accesses that hit in cache. High hit rates indicate
+      efficient reuse of constant and uniform data. Low hit rates may indicate excessive
+      unique constant data or poor temporal locality.
 
-    TCP Hit Rate: |-
-      Definition: Percentage of TCP (L0 vector cache) requests that hit in cache.
-      Formula: 100 * (TCP_REQ_sum - TCP_REQ_MISS_sum) / TCP_REQ_sum
+    TCP Hit Rate: >-
+      Percentage of L0 vector cache (TCP) requests serviced from cache. TCP is the
+      first-level cache for vector memory operations. Higher hit rates reduce traffic
+      to the L1 cache and lower memory access latency for vector operations.
 
-    LDS Atomic Instructions: |-
-      Definition: Number of LDS atomic instructions executed.
-      Description: Atomic operations on Local Data Share memory with return values.
-      Formula: SQ_LDS_ATOMIC_RETURN_sum / $denom
+    LDS Atomic Instructions: >-
+      Number of atomic operations executed on Local Data Share memory. Atomic operations
+      provide thread-safe read-modify-write operations but may serialize if multiple
+      work-items access the same address.
 
-    LDS Bank Conflict Rate: |-
-      Definition: Percentage of LDS accesses that resulted in bank conflicts.
-      Description: Bank conflicts occur when multiple work-items access the same LDS bank simultaneously.
-      Formula: 100 * SQC_LDS_BANK_CONFLICT_sum / SQC_LDS_IDX_ACTIVE_sum
+    LDS Bank Conflict Rate: >-
+      Percentage of LDS accesses that experienced bank conflicts. Conflicts occur when
+      multiple work-items in a wavefront access different addresses in the same LDS bank.
+      High conflict rates reduce effective LDS bandwidth. Restructuring data layouts can help.
 
-    LDS Estimated Bandwidth: |-
-      Definition: Estimated LDS bandwidth based on active index cycles minus bank conflicts.
-      Description: RDNA3.5 has 32 LDS banks per CU, each capable of 4 bytes per cycle.
-      Formula: ((SQC_LDS_IDX_ACTIVE_sum - SQC_LDS_BANK_CONFLICT_sum) * 4 * 32) / time
+    LDS Estimated Bandwidth: >-
+      Estimated achieved bandwidth for Local Data Share operations. This reflects the
+      effective throughput after accounting for bank conflicts. RDNA 3.5 provides 32 LDS
+      banks per compute unit for high-bandwidth shared memory access.
 
-    GL1C Utilization: |-
-      Definition: Percentage of cycles the GL1C (L1 cache) is busy.
-      Formula: 100 * GL1C_BUSY_sum / GL1C_CYCLE_sum
+    GL1C Utilization: >-
+      Percentage of cycles the L1 cache (GL1C) is actively processing requests. GL1C is
+      shared across multiple workgroup processors within a shader engine. High utilization
+      indicates active memory traffic through the L1 cache.
 
-    GL1C Hit Rate: |-
-      Definition: Percentage of GL1C cache requests that hit.
-      Formula: 100 * (GL1C_REQ_sum - GL1C_REQ_MISS_sum) / GL1C_REQ_sum
+    GL1C Hit Rate: >-
+      Percentage of L1 cache requests that hit in cache. Higher hit rates reduce traffic
+      to the L2 cache and improve memory access latency. Low hit rates may indicate poor
+      data locality or working sets exceeding L1 capacity.
 
-    GL2C Hit Rate: |-
-      Definition: Percentage of GL2C (L2 cache) requests that hit.
-      Formula: 100 * GL2C_HIT_sum / (GL2C_HIT_sum + GL2C_MISS_sum)
+    GL2C Hit Rate: >-
+      Percentage of L2 cache requests that hit in cache. GL2C is the last-level cache
+      before system memory. High hit rates reduce memory bandwidth pressure. Low hit
+      rates cause traffic to system memory, increasing latency significantly.
 
-    SARB Utilization: |-
-      Definition: Percentage of cycles the System Arbiter (SARB) in GCEA (Graphics Core Efficiency Arbiter) was busy.
-      Description: SARB handles arbitration between the GPU and the system memory interface.
-      Formula: 100 * GCEA_SARB_BUSY_sum / GCEA_ALWAYS_COUNT_sum
+    SARB Utilization: >-
+      Percentage of cycles the System Arbiter is actively processing memory requests.
+      The arbiter handles traffic between the GPU caches and system memory interface.
+      High utilization indicates significant off-chip memory activity.
 
-    DRAM Read Bandwidth: |-
-      Definition: Bandwidth for read requests to system memory (DRAM).
-      Description: RDNA3.5 is an APU using DDR5/LPDDR5 system memory instead of HBM.
-      Formula: GCEA_RDRAM_SIZE_REQ_sum * 32 / time
+    DRAM Read Bandwidth: >-
+      Achieved read bandwidth to system memory. RDNA 3.5 APUs use DDR5/LPDDR5 system
+      memory. High read bandwidth indicates memory-intensive read patterns. This is
+      a key metric for identifying memory-bound workloads.
 
-    DRAM Write Bandwidth: |-
-      Definition: Bandwidth for write requests to system memory (DRAM).
-      Description: RDNA3.5 is an APU using DDR5/LPDDR5 system memory instead of HBM.
-      Formula: GCEA_WDRAM_SIZE_REQ_sum * 32 / time
+    DRAM Write Bandwidth: >-
+      Achieved write bandwidth to system memory. High write bandwidth indicates
+      write-intensive workloads. Combined with read bandwidth, this shows total
+      memory traffic between the GPU and system memory.

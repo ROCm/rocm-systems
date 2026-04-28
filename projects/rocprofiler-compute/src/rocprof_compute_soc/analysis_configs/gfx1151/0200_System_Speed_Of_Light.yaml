@@ -1,12 +1,23 @@
 # =============================================================================
 # RDNA3.5 (gfx1151) — System Speed-of-Light
 # Layout aligned with gfx950/0200_system_speed_of_light.yaml (throughput first,
-# then core/memory, then cache hierarchy). RDNA 3.5: FLOP rows use SQ_INSTS_VALU* (generic VALU
-# issue); WMMA is a separate ISA path and is not split out here.
+# then core/memory, then cache hierarchy). RDNA 3.5: FLOP rows use SQ_INSTS_VALU*
+# (aggregate VALU instruction counter—does not differentiate FP16/FP32/FP64).
+# WMMA is a separate ISA path and is not split out here.
 #
-# Public RDNA 3.5 context: dual-CU Work Group Processors (WGPs) and dual-issue VALU
-# peak is ~2× FP32 in public spec summaries; this panel uses a per-CU theoretical
-# model: 128 FP32 ops/CU/cycle and 256 FP16 ops/CU/cycle (wave64) for GFLOP/s peaks.
+# RDNA 3.5 wavefront model:
+#   - Supports both Wave32 (primary) and Wave64 wavefronts
+#   - Wavefront size is determined per-kernel at compile time
+#   - $wave_size comes from hardware specs (rocminfo); actual kernel wave size may vary
+#   - VALU FLOPs formula: $wave_size * SQ_INSTS_VALU_sum / time
+#
+# Peak theoretical model (per-CU basis):
+#   - FP32 FMA single-issue: 128 FLOPs/CU/cycle = $simd_per_cu(2) * $wave_size(32) * 2 (FMA)
+#   - FP32 VOPD dual-issue: 256 FLOPs/CU/cycle (V_DUAL_ADD_F32 + V_DUAL_MUL_F32)
+#   - FP16 packed FMA single-issue: 256 FLOPs/CU/cycle (2× FP32 due to packed ops)
+#   - FP16 packed VOPD dual-issue: 512 FLOPs/CU/cycle (V_DUAL_*_F16 pairings)
+#   - FP64 FMA: 4 FLOPs/CU/cycle = FP32 FMA / 32 (1/32 rate on RDNA)
+#   - Mixed FP32+FP16 dual-issue: 128+256 = 384 FLOPs/CU/cycle combined
 #
 # $cu_per_gpu = total Compute Unit count from sysinfo (NOT WGP count). On RDNA 3.5,
 # one WGP contains two CUs — CU count ≈ 2 × WGP count. Peaks scale with CUs.
@@ -139,70 +150,83 @@ Panel Config:
           pop: None
 
   metrics_description:
-    VALU FLOPs (FP16): |-
-      Sixteen-bit VALU throughput (GFLOP/s) from SQ_INSTS_VALU × 64 / kernel time.
-      Theoretical peak uses packed FP16 at 2× the FP32 per-CU rate:
-      max_sclk (MHz) × $cu_per_gpu × 256 / 1000 GFLOP/s.
-      Public RDNA 3.5 summaries cite dual-CU WGPs, dual-issue
-      VALU, and chip FP16 peak ~2× FP32; this formula is the same 2× relationship at
-      the per-CU model used here. $cu_per_gpu is total CU count, not WGP (1 WGP = 2 CUs on RDNA 3.5).
-    VALU FLOPs (FP32): |-
-      Thirty-two-bit VALU throughput (GFLOP/s) from SQ_INSTS_VALU × 64 / kernel time.
-      Theoretical peak: max_sclk (MHz) × $cu_per_gpu × 128 / 1000 GFLOP/s
-      (wave64 / dual-issue VALU class used for Navi3-style parts).
-      $cu_per_gpu is the total number of Compute Units from system info, not WGP count
-      (on RDNA 3.5, one WGP pairs two CUs).
-    IPC: |-
-      Instructions Per Cycle — ratio of instructions executed over busy cycles.
-      Calculated as (Total Instructions - Internal Instructions) / Busy Cycles.
-      Higher IPC indicates better instruction throughput.
-    Wavefront Occupancy: |-
-      Average wavefront occupancy proxy: SQ_WAVE_CYCLES_sum / SQ_BUSY_CYCLES_avr per sample,
-      where SQ_BUSY_CYCLES_avr is the mean of per–shader-engine SQ_BUSY_CYCLES (active-wave
-      cycles per SE). Peak is $max_waves_per_cu × $cu_per_gpu (theoretical in-flight cap).
-      Pct of peak scales the average against that ceiling.
-    L2 Cache Hit Rate: |-
-      GL2C last-level cache hit rate (same as Memory Chart / GL2C panel).
-      Formula: 100 * GL2C_HIT_sum / (GL2C_HIT_sum + GL2C_MISS_sum) when the denominator is non-zero.
-    L2-Fabric Read BW: |-
-      GL2C/EA read bandwidth from sized request counters (gl2c_perf_sel_ea_rdreq_32b/64B/96B/128B):
-      32·GL2C_EA_RDREQ_32B_sum + 64·GL2C_EA_RDREQ_64B_sum + 96·GL2C_EA_RDREQ_96B_sum + 128·GL2C_EA_RDREQ_128B_sum,
-      divided by kernel wall time. Sums over GL2C instances. Peak / % of peak are N/A (no sysinfo memory BW).
-    L2-Fabric Write BW: |-
-      GL2C/EA write bandwidth: GL2C_MC_WRREQ_sum is the EA write transaction count (32 B or 64 B per txn; the
-      spec names this path MC_WRREQ). Bandwidth = 32·(GL2C_MC_WRREQ_sum − GL2C_EA_WRREQ_64B_sum) + 64·GL2C_EA_WRREQ_64B_sum, over time.
-      Peak / % of peak are N/A (no sysinfo memory BW).
-    LDS Bank Conflicts: |-
-      Number of LDS bank conflicts. Peak / % of Peak are N/A for raw counts.
-    Wave Dependency Wait: |-
-      Percent of wave lifetime spent waiting for data dependencies (e.g. VMEM/LDS results).
-    Wave Issue Wait: |-
-      Percent of wave lifetime spent waiting for any instruction to be ready to issue.
-    TCP Cache Hit Rate: |-
-      Texture Cache Per-pipe (TCP) hit rate. TCP is the L0 vector cache in RDNA3.5.
-      Same as Memory Chart TCP Hit Rate: 100 * (TCP_REQ_sum - TCP_REQ_MISS_sum) / TCP_REQ_sum.
-    TCP Cache BW: |-
-      Same as Memory Chart “TCP Request Bandwidth” (table 303): TCP_REQ_sum × 64 B / kernel wall time.
-      Peak / % of peak are N/A (same as Memory Chart — no theoretical ceiling row).
-    GL1C Hit Rate: |-
-      GL1 Cache hit rate (same as Memory Chart / GL1C panel).
-      Formula: 100 * (GL1C_REQ_sum - GL1C_REQ_MISS_sum) / GL1C_REQ_sum when GL1C_REQ_sum != 0.
-    GL1C Read BW: |-
-      Same as Memory Chart table 307 “GL1C-GL2 Read Bandwidth”:
-      32·GL1C_GL2_REQ_READ_32B_sum + 64·GL1C_GL2_REQ_READ_64B_sum + 128·GL1C_GL2_REQ_READ_128B_sum, over time.
-      Peak / % of peak are N/A.
-    GL2C Cache BW: |-
-      Same as Memory Chart table 308 “GL2C Read Bandwidth”: sized client read bins plus 96 B compressed reads, over time.
-      Peak / % of peak are N/A.
-    Scalar Data Cache Hit Rate: |-
-      Same as Memory Chart Dcache Hit Rate: 100 * SQC_DCACHE_HITS_sum /
-      (SQC_DCACHE_HITS_sum + SQC_DCACHE_MISSES_sum) when the denominator is non-zero.
-    Scalar Data Cache BW: |-
-      Same as Memory Chart table 302 “Dcache-GL1 Read Bandwidth”: SQC_TC_DATA_READ_REQ_sum × 128 B / kernel time.
-      Peak / % of peak are N/A.
-    Instruction Cache Hit Rate: |-
-      Same as Memory Chart Icache Hit Rate: 100 * SQC_ICACHE_HITS_sum /
-      (SQC_ICACHE_HITS_sum + SQC_ICACHE_MISSES_sum) when the denominator is non-zero.
-    Instruction Cache BW: |-
-      Same as Memory Chart table 301 “ICache-GL1 Read Bandwidth”: SQC_TC_INST_REQ_sum × 128 B / kernel time.
-      Peak / % of peak are N/A.
+    VALU FLOPs: >-
+      Floating-point operations per second on the VALU. Peak is based on
+      FP32 FMA single-issue (128 FLOPs/CU/cycle). VOPD dual-issue doubles
+      throughput: FP32 to 256, FP16 packed to 512 FLOPs/CU/cycle. Uses
+      aggregate instruction counter.
+    VALU FLOPs (F64): >-
+      64-bit floating-point operations per second on the VALU. Peak is
+      4 FLOPs/CU/cycle (FP32 FMA rate / 32). Uses dedicated FP64 instruction
+      counter (SQ_INSTS_VALU_DP_sum). FP64 is 1/32 rate of FP32 on RDNA.
+    IPC: >-
+      Instructions executed per cycle, measuring overall instruction throughput efficiency.
+      Higher IPC indicates better utilization of the shader pipeline. Low IPC may indicate
+      stalls due to memory latency, register dependencies, or insufficient wavefront
+      occupancy to hide latencies.
+    Wavefront Occupancy: >-
+      Average number of wavefronts resident on the GPU during kernel execution. Higher
+      occupancy provides more opportunities to hide memory latency through wavefront
+      switching. However, maximum occupancy is not always optimal—excessive register or
+      LDS usage per wavefront may limit occupancy.
+    L2 Cache Hit Rate: >-
+      Percentage of L2 cache requests that are serviced from cache without accessing
+      system memory. Higher hit rates reduce memory bandwidth pressure and improve
+      performance. Low hit rates may indicate poor data locality or working sets that
+      exceed cache capacity.
+    L2-Fabric Read BW: >-
+      Read bandwidth between the L2 cache and the memory fabric/system memory. High
+      bandwidth utilization indicates memory-intensive read patterns. This metric helps
+      identify when memory bandwidth is a performance bottleneck.
+    L2-Fabric Write BW: >-
+      Write bandwidth between the L2 cache and the memory fabric/system memory. High
+      values indicate write-intensive workloads. Combined with read bandwidth, this
+      shows total memory traffic leaving the GPU caches.
+    LDS Bank Conflicts: >-
+      Number of Local Data Share bank conflicts during execution. Bank conflicts occur
+      when multiple work-items in a wavefront access the same LDS bank simultaneously,
+      causing serialized accesses. Reducing conflicts improves shared memory throughput.
+    Wave Dependency Wait: >-
+      Percentage of wavefront execution time spent waiting for data dependencies to
+      resolve, such as pending memory operations or prior instruction results. High
+      values indicate latency-bound execution that could benefit from increased
+      occupancy or reduced dependency chains.
+    Wave Issue Wait: >-
+      Percentage of wavefront execution time spent waiting for instructions to become
+      ready for issue. High values may indicate instruction cache misses, complex
+      control flow, or pipeline stalls preventing instruction dispatch.
+    TCP Cache Hit Rate: >-
+      Percentage of L0 vector cache (TCP) requests that hit in cache. The TCP cache
+      is the first-level cache for vector memory operations. High hit rates reduce
+      traffic to the L1 cache and improve memory access latency.
+    TCP Cache BW: >-
+      Bandwidth of requests to the L0 vector cache (TCP). This represents the rate
+      at which the shader cores are requesting data from the cache hierarchy.
+      High bandwidth indicates memory-intensive workloads.
+    GL1C Hit Rate: >-
+      Percentage of L1 cache (GL1C) requests that hit in cache. GL1C is shared
+      across multiple workgroup processors within a shader engine. Higher hit rates
+      reduce traffic to the L2 cache and improve performance.
+    GL1C Read BW: >-
+      Read bandwidth between L1 (GL1C) and L2 (GL2C) caches. This represents cache
+      miss traffic from L1 that must be serviced by L2. Lower values indicate
+      better L1 cache efficiency.
+    GL2C Cache BW: >-
+      Bandwidth of read operations at the L2 cache level. This metric shows
+      overall L2 cache utilization and helps identify memory subsystem bottlenecks.
+    Scalar Data Cache Hit Rate: >-
+      Percentage of scalar data cache accesses that hit in cache. The scalar cache
+      stores uniform data accessed by scalar instructions. High hit rates indicate
+      efficient reuse of constant and uniform data across wavefronts.
+    Scalar Data Cache BW: >-
+      Bandwidth of scalar data cache requests to the L1 cache. Scalar operations
+      load uniform data shared across all threads in a wavefront, making efficient
+      caching critical for performance.
+    Instruction Cache Hit Rate: >-
+      Percentage of instruction fetch requests that hit in the instruction cache.
+      High hit rates are essential for sustained instruction throughput. Low hit
+      rates may indicate large kernel code size or divergent control flow.
+    Instruction Cache BW: >-
+      Bandwidth of instruction cache requests to the L1 cache. High values may
+      indicate instruction cache pressure from large kernels or frequent
+      instruction cache misses.

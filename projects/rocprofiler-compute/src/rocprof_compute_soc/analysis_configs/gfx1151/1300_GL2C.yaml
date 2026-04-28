@@ -109,32 +109,42 @@ Panel Config:
           unit: Bytes/s
 
   metrics_description:
-    GL2C Hit Rate: |-
-      Percentage of GL2C requests that hit in the cache.
-      GL2C is the last-level cache before system memory.
-    GL2C Hits: |-
-      Number of requests that hit in the GL2C cache.
-    GL2C Misses: |-
-      Number of requests that missed in the GL2C cache and went to memory.
-    Total Requests: |-
-      Number of requests of all types to the GL2C cache (counter GL2C_REQ).
-      This is measured at the tag block (request path into GL2C tag / lookup).
-      Not guaranteed to equal Read + Write + Atomic; those use separate perf events and may omit or overlap
-      traffic relative to this aggregate.
-    Read Requests: |-
-      Number of read requests to the GL2C cache (GL2C_READ).
-    Write Requests: |-
-      Number of write requests to the GL2C cache (GL2C_WRITE).
-    Atomic Requests: |-
-      Number of atomic requests at the GL2C cache (GL2C_ATOMIC).
-    EA Read Requests (DRAM): |-
-      Number of GL2C/EA read requests destined for DRAM (memory controller).
-      gl2c_perf_sel_ea_rdreq_dram (GL2C_EA_RDREQ_DRAM). Reported values are summed over GL2C instances.
-    EA Write Requests (DRAM): |-
-      Number of GL2C/EA write requests destined for DRAM (memory controller).
-      gl2c_perf_sel_ea_wrreq_dram (GL2C_EA_WRREQ_DRAM). Reported values are summed over GL2C instances.
-    GL2C Read BW: |-
-      Read bandwidth from GL2C_READ_{32,64,128}_REQ byte accounting plus
-      GL2C_COMPRESSED_READ_96_REQ (96 B compressed reads). EA 96 B reads use GL2C_EA_RDREQ_96B.
-    GL2C Write BW: |-
-      Achieved write bandwidth at the GL2C level.
+    GL2C Hit Rate: >-
+      Percentage of L2 cache requests serviced from cache without accessing system memory.
+      GL2C is the last-level cache before system memory. Higher hit rates significantly
+      reduce memory bandwidth pressure and improve performance.
+    GL2C Hits: >-
+      Number of L2 cache requests that were serviced from cache. High hit counts relative
+      to total requests indicate effective caching. Low hit counts suggest memory-bound
+      workloads or poor data locality.
+    GL2C Misses: >-
+      Number of L2 cache requests that missed and required fetching from system memory.
+      High miss counts indicate heavy memory traffic. Consider improving data locality
+      or reducing working set size.
+    Total Requests: >-
+      Total number of requests received by the L2 cache from all L1 caches and other
+      clients. This represents the aggregate memory traffic at the last-level cache.
+    Read Requests: >-
+      Number of read requests to the L2 cache. High read counts indicate memory-intensive
+      load operations. Compare with hit rate to assess L2 cache effectiveness for reads.
+    Write Requests: >-
+      Number of write requests to the L2 cache. Write traffic includes stores and cache
+      writebacks from L1. High write counts indicate write-intensive workloads.
+    Atomic Requests: >-
+      Number of atomic memory operations processed by the L2 cache. Atomics provide
+      thread-safe memory access but may serialize at contended addresses. High counts
+      may impact performance.
+    EA Read Requests (DRAM): >-
+      Number of read requests forwarded from L2 cache to system memory. This represents
+      L2 miss traffic that must be serviced by DRAM. High counts indicate memory-bound
+      workloads.
+    EA Write Requests (DRAM): >-
+      Number of write requests forwarded from L2 cache to system memory. This includes
+      evictions and writebacks. High counts indicate write-intensive workloads consuming
+      memory bandwidth.
+    GL2C Read BW: >-
+      Achieved read bandwidth at the L2 cache level. This represents total read traffic
+      from L1 caches to L2. High bandwidth indicates memory-intensive read patterns.
+    GL2C Write BW: >-
+      Achieved write bandwidth at the L2 cache level. This represents total write traffic
+      from L1 caches to L2. High bandwidth indicates memory-intensive write patterns.
