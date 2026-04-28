@@ -232,12 +232,18 @@ static inline void rocm_trace_emit_hsa_kernel_dispatch_complete(
     }
 }
 
-/* kernel_dispatch_drop emit helper. Called by the drainer when a ring-overrun
- * is detected (fw_wptr - read_cursor > ring_bytes). Reserved strictly for
- * ring-overrun loss; per-queue enable failures use stderr WARNING per spec
- * §5. force_emit not supported here: drop events are always observed via
- * the tracepoint-enabled gate, since they only fire while the drainer is
- * actively consuming a ring (i.e. while the tracepoint is enabled). */
+/* kernel_dispatch_drop emit helper. The current sentinel-scan drainer
+ * (core/runtime/dispatch_log.cpp::drain_one_queue) cannot detect ring
+ * overruns because the substrate publishes no host-visible FW write
+ * pointer to compare against the host read cursor. As a result no code
+ * path emits this tracepoint today. The definition is retained so a
+ * future overrun-detection mechanism (e.g. a sequence-number gap check
+ * across slots, or a substrate extension that publishes wptr) can emit
+ * it without re-introducing the tracepoint definition. Per-queue enable
+ * failures use stderr WARNING per spec §5. force_emit not supported here:
+ * drop events would always be observed via the tracepoint-enabled gate,
+ * since they would only fire while the drainer is actively consuming a
+ * ring (i.e. while the tracepoint is enabled). */
 static inline void rocm_trace_emit_hsa_kernel_dispatch_drop(uint32_t queue_id,
                                                             uint64_t bytes_lost) {
     if (rocm_trace_disabled()) return;

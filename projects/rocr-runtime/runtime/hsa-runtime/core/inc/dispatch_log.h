@@ -43,54 +43,9 @@
 // HSA-resident firmware-ring drainer with LTTng emission for kernel-dispatch
 // timestamps. Public API surface for the dispatch_log subsystem. See
 // projects/rocr-runtime/runtime/hsa-runtime/core/runtime/dispatch_log.cpp
-// for the implementation, and the Phase A spec (2026-04-27) for the full
+// for the implementation (in particular the sentinel-scan design in
+// drain_one_queue), and the Phase A spec (2026-04-27) for the full
 // design contract.
-//
-// -----------------------------------------------------------------------------
-// KNOWN GAP — firmware write-pointer publication is NOT plumbed end-to-end.
-// -----------------------------------------------------------------------------
-//
-// The drainer (drain_one_queue, dispatch_log.cpp:348) consumes a uint32_t
-// "fw_wptr_records" counter that firmware is expected to update as it writes
-// records into the per-queue ring. AqlQueue allocates that counter on the
-// host side (`AqlQueue::dispatch_record_wptr_`, amd_aql_queue.cpp:1639) and
-// passes its address through:
-//
-//   AqlQueue::SetProfiling
-//     -> KfdDriver::SetQueueProfilingBuffer
-//       -> hsaKmtSetQueueProfilingBuffer(QueueId, BufferBase, NumRecords,
-//                                        WptrHostAddr)
-//
-// However, the libhsakmt implementation (libhsakmt/src/queues.c:1140-1156)
-// EXPLICITLY DISCARDS the WptrHostAddr argument: only the buffer base + size
-// are stored on the per-queue cache. The KFD ABI used to push that cache to
-// the kernel (kfd_ioctl_update_queue_args) has fields for
-// `dispatch_record_buffer_addr` and `dispatch_record_buffer_size` only — there
-// is no wptr_addr field, and the host kernel keeps any firmware-side wptr in
-// the MQD (e.g. v9_mqd::dispatch_record_buffer_wptr at offset 0x2F on gfx9),
-// which is GPU-side and not directly host-readable through any current API.
-//
-// Net effect: even on the supposedly-supported KFD substrate (the
-// "gbt350"-class branch this scaffolding was rewired against), firmware has
-// no published address into which it can update a host-visible record
-// counter, so `dispatch_record_wptr_` stays at 0 forever and the drainer is
-// EFFECTIVELY DORMANT. The polling cost is still incurred, but no records
-// are paired or emitted.
-//
-// Closing this gap requires one of:
-//   (a) Extending the KFD ABI to carry a wptr_addr (new
-//       kfd_ioctl_update_queue_args field + matching kernel + firmware
-//       contract update), or
-//   (b) Defining a firmware contract where the wptr lives at a known offset
-//       inside the ring buffer itself (e.g. the first 8 bytes), and updating
-//       both AqlQueue and the drainer to read from there.
-//
-// Either option is OUT OF SCOPE for this Phase A scaffolding PR. This PR
-// inherits the same gap from the cpc_tracing branch precedent — that branch
-// was never integration-tested end-to-end, which is why the gap was never
-// user-visible there. See spec §10 dependency #2 sub-bullet for the
-// canonical statement of this requirement.
-// -----------------------------------------------------------------------------
 
 #ifndef HSA_RUNTME_CORE_INC_DISPATCH_LOG_H_
 #define HSA_RUNTME_CORE_INC_DISPATCH_LOG_H_

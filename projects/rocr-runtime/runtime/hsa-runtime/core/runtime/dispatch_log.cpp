@@ -61,6 +61,15 @@
 // path here just calls QueueProfilingAcquire/Release (which forward to
 // SetProfiling) and then queries hsa_amd_profiling_get_dispatch_records
 // to fetch the buffer info.
+//
+// SENTINEL-SCAN DESIGN: The substrate publishes neither a host-readable FW
+// write pointer nor any other end-of-records marker. The drainer locates
+// fresh records by scanning the ring sequentially from a host-managed
+// monotonic cursor (next_idx). A slot whose record_type is 0 is "empty"
+// (FW writes record_type ∈ {1,2}, and the buffer is pre-zeroed at alloc
+// in AqlQueue::SetProfiling). After consuming a slot the drainer zeroes
+// it again so wraparound rewrites are re-detectable. See drain_one_queue
+// below for the canonical implementation.
 
 #include "core/inc/dispatch_log.h"
 
@@ -135,21 +144,21 @@ struct queue_drain_state {
   std::function<uint64_t(uint64_t /* gpu_ts */)> translate_gpu_ts;
 
   // NON-OWNING ring view. The buffer is owned by AqlQueue::dispatch_record_buffer_;
-  // do not free here.
+  // do not free here. The kernel-side BO is `ring_records * 40` bytes
+  // (host KFD enforces the 40-byte slot stride — see
+  // amd/amdkfd/kfd_process_queue_manager.c:633 `buf_byte_size = count * 40`).
+  // FW writes 16 bytes per slot; the trailing 24 bytes per slot are FW-owned
+  // and reserved for future per-slot metadata.
   void*    ring_base    = nullptr;     // host-virtual base of the FW record area
-  uint32_t record_count = 0;           // power-of-2 number of 16-byte slots
-  uint32_t record_mask  = 0;           // record_count - 1, for slot indexing
+  uint32_t ring_records = 0;           // power-of-2 slot count (e.g. 65536)
+  uint32_t ring_mask    = 0;           // ring_records - 1, for slot indexing
 
-  // FW-written 32-bit monotonic record counter. Lives outside the buffer
-  // (cpc_tracing infrastructure exposes it as a separate uint32_t* via
-  // hsa_amd_profiling_get_dispatch_records). Pointer is owned by AqlQueue.
-  volatile uint32_t* fw_wptr_records = nullptr;
-
-  // Mutated only under drain_mu (see below). Host-extended 64-bit version
-  // of the FW record cursor; we extend the FW's uint32_t monotonic record
-  // counter into a uint64_t so wraparound across the 32-bit boundary doesn't
-  // confuse our overrun bookkeeping.
-  uint64_t read_record_cursor = 0;
+  // Host-managed monotonic record cursor. Mutated only under drain_mu.
+  // Slot index is (next_idx & ring_mask). Sentinel-scan design: the
+  // substrate publishes no FW wptr, so we advance next_idx for every
+  // slot whose record_type is non-zero, and zero the slot after consume
+  // so a wraparound re-write is re-detectable. See drain_one_queue.
+  uint64_t next_idx = 0;
   std::unordered_map<uint32_t, uint64_t> pending_starts;
 
   // Per-queue drain mutex. Serializes drain_one_queue() (steady state) and
@@ -341,101 +350,102 @@ void for_each_known_queue_locked(F&& fn) {
 }
 
 // ============================================================================
-// drain_one_queue (spec §7). Holds qs.drain_mu for the entire pass.
+// drain_one_queue. Holds qs.drain_mu for the entire pass.
 //
-// Reads the FW-written uint32_t record counter, host-extends it to 64 bits
-// (so wrap of the FW counter doesn't confuse us across drain calls), then
-// walks new records from read_record_cursor up to the host-extended fw cursor.
-// Each record is 16 bytes; the slot index is (cursor & record_mask).
+// Sentinel-scan design: the substrate publishes no host-readable FW write
+// pointer (KFD `kfd_ioctl_update_queue_args` has only
+// dispatch_record_buffer_addr/size — see
+// /usr/src/amdgpu-*/include/uapi/linux/kfd_ioctl.h:99-108 on a host with
+// the gbt350 KFD). Instead, FW writes record_type ∈ {1, 2} into each slot
+// it produces; the host pre-zeroes the buffer at allocation
+// (AqlQueue::SetProfiling), so a slot whose record_type is 0 is "empty".
+//
+// We walk the ring sequentially from a host-managed monotonic cursor
+// (qs.next_idx). Each iteration:
+//   1. Read record_type for the slot at (next_idx & ring_mask).
+//   2. If 0, the ring tail has caught up — break and return.
+//   3. Otherwise snapshot the rest of the record, ZERO the slot (so a
+//      future wraparound re-write of the same slot can be re-detected),
+//      and process the START / END pairing as before.
+//
+// The 40-byte slot stride is enforced by the host kernel BO size check
+// (kfd_process_queue_manager.c:633 `buf_byte_size = count * 40` on
+// gbt350). FW only writes the first 16 bytes of each slot; the trailing
+// 24 bytes are FW-owned and reserved for future per-slot metadata. We
+// zero ALL 40 bytes when consuming a slot because FW's wraparound write
+// may rewrite the entire slot, including the trailing reserved region.
 // ============================================================================
+
+// Host kernel-enforced per-slot stride for the dispatch-record BO. See
+// citation above. Hardcoded; ABI extensions that grow the slot will
+// require a coordinated update of this constant + AqlQueue::SetProfiling
+// alloc size.
+constexpr size_t kSlotStride = 40;
 
 bool drain_one_queue(queue_drain_state& qs, bool force_emit) {
   std::lock_guard<std::mutex> lk(qs.drain_mu);
 
-  // KNOWN GAP (see dispatch_log.h banner + spec §10 dep #2 sub-bullet):
-  // qs.fw_wptr_records points at AqlQueue::dispatch_record_wptr_, a host-side
-  // uint32_t whose ADDRESS is NEVER published to KFD or firmware on the
-  // current substrate. libhsakmt's hsaKmtSetQueueProfilingBuffer discards
-  // the WptrHostAddr argument, and kfd_ioctl_update_queue_args has no
-  // wptr_addr field. Result: this counter stays at 0 forever, the
-  // `fw_extended == qs.read_record_cursor` early-out below always fires, and
-  // this loop is effectively DORMANT (the polling cost is still incurred,
-  // but no records are paired or emitted). The drainer will start producing
-  // records only after the substrate is extended (KFD ABI + FW contract) to
-  // publish wptr to firmware.
-  if (qs.fw_wptr_records == nullptr || qs.ring_base == nullptr ||
-      qs.record_count == 0) {
-    return false;
-  }
+  // Poisoned (disable in flight) or never-populated.
+  if (qs.ring_base == nullptr || qs.ring_records == 0) return false;
 
-  // Snapshot the FW's 32-bit monotonic record counter and host-extend it.
-  // The high 32 bits we add are taken from our last-known cursor: as long
-  // as we drain at least once per (2^32) records, this extension is correct.
-  // 65536 records buffered, so we'd lose data well before wrap-extension
-  // ambiguity matters.
-  const uint32_t fw_lo = __atomic_load_n(qs.fw_wptr_records, __ATOMIC_ACQUIRE);
-  uint64_t fw_extended = (qs.read_record_cursor & ~uint64_t(0xFFFFFFFFu)) | fw_lo;
-  if (fw_extended < qs.read_record_cursor) {
-    // Low 32 bits wrapped past us; bump the high half.
-    fw_extended += uint64_t(1) << 32;
-  }
-  if (fw_extended == qs.read_record_cursor) return false;
+  bool any = false;
+  while (true) {
+    const uint64_t slot = qs.next_idx & qs.ring_mask;
+    auto* rec = reinterpret_cast<mec_dispatch_record_16*>(
+        static_cast<char*>(qs.ring_base) + slot * kSlotStride);
 
-  // Wraparound check (spec §6 bytes_lost field definition). With 65536
-  // records, an overrun means FW outpaced us by more than the buffer
-  // depth.
-  const uint64_t records_avail = fw_extended - qs.read_record_cursor;
-  if (records_avail > qs.record_count) {
-    // Narrow internal 64-bit queue_id to the 32-bit on-the-wire id at the
-    // tracepoint boundary (spec §6 / §14, C5 fix). Report the loss in
-    // bytes for compatibility with the existing tracepoint payload.
-    rocm_trace_emit_hsa_kernel_dispatch_drop(
-        queue_id_to_wire(qs.queue_id),
-        records_avail * sizeof(mec_dispatch_record_16));
-    qs.read_record_cursor = fw_extended - qs.record_count;
+    // Sentinel: record_type == 0 means "empty / not yet written by FW".
+    uint32_t rt = rec->record_type;
+    if (rt == 0) break;
+    // Defend against torn writes: re-read with an acquire fence so we are
+    // sure the rest of the record (timestamps, dispatch_idx) are visible
+    // before we consume them. If the slot is zero on the second read, the
+    // first read raced with FW's pre-publication zero state and we should
+    // wait for the next pass.
+    std::atomic_thread_fence(std::memory_order_acquire);
+    rt = rec->record_type;
+    if (rt == 0) break;
 
-    // C7 fix: across an overrun event, ALL previously cached STARTs are
-    // suspect. The drainer cannot tell which records the FW just overwrote
-    // (spec §7 / drop tracepoint semantics). Conservative: drop them.
-    qs.pending_starts.clear();
-  }
+    // Snapshot the rest of the record locally before zeroing the slot.
+    const uint32_t ts_lo        = rec->ts_lo;
+    const uint32_t ts_hi        = rec->ts_hi;
+    const uint32_t dispatch_idx = rec->dispatch_idx;
+    const uint64_t gpu_ts       = (static_cast<uint64_t>(ts_hi) << 32) | ts_lo;
 
-  while (qs.read_record_cursor < fw_extended) {
-    const uint32_t slot = static_cast<uint32_t>(qs.read_record_cursor & qs.record_mask);
-    const auto* rec = reinterpret_cast<const mec_dispatch_record_16*>(
-        static_cast<const char*>(qs.ring_base) + slot * sizeof(mec_dispatch_record_16));
+    // Zero the consumed slot so a wraparound rewrite by FW (next time the
+    // ring loops past this position) is re-detected as a fresh non-zero
+    // record_type. Zero the full kSlotStride — FW writes the whole slot,
+    // and the trailing 24 bytes per slot are reserved for future
+    // per-slot metadata that we do not interpret today.
+    std::memset(rec, 0, kSlotStride);
 
-    const uint64_t gpu_ts =
-        (static_cast<uint64_t>(rec->ts_hi) << 32) | rec->ts_lo;
-
-    if (rec->record_type == DISPATCH_LOG_RECORD_START) {
-      qs.pending_starts[rec->dispatch_idx] = gpu_ts;
-    } else if (rec->record_type == DISPATCH_LOG_RECORD_END) {
-      auto it = qs.pending_starts.find(rec->dispatch_idx);
+    if (rt == DISPATCH_LOG_RECORD_START) {
+      qs.pending_starts[dispatch_idx] = gpu_ts;
+    } else if (rt == DISPATCH_LOG_RECORD_END) {
+      auto it = qs.pending_starts.find(dispatch_idx);
       if (it != qs.pending_starts.end()) {
         const uint64_t start_gpu = it->second;
-        const uint32_t didx = rec->dispatch_idx;
         qs.pending_starts.erase(it);
 
-        // Use the captured queue-independent translation callable. Spec §7
-        // explicitly forbids reaching through a Queue* here — Queue may be
-        // destroyed mid-pass even though the shared_ptr keeps qs alive.
+        // Use the captured queue-independent translation callable —
+        // Queue may be destroyed mid-pass even though the shared_ptr
+        // keeps qs alive.
         const uint64_t start_sys = qs.translate_gpu_ts(start_gpu);
         const uint64_t end_sys   = qs.translate_gpu_ts(gpu_ts);
 
         // Narrow internal 64-bit queue_id at the tracepoint boundary
-        // (spec §6 / §14, C5 fix). dispatch_idx is already 32-bit per the
-        // FW record contract (mec_dispatch_record_16::dispatch_idx).
+        // (spec §6 / §14, C5 fix). dispatch_idx is 32-bit per FW contract.
         rocm_trace_emit_hsa_kernel_dispatch_complete(
-            queue_id_to_wire(qs.queue_id), didx, start_sys, end_sys,
-            force_emit);
+            queue_id_to_wire(qs.queue_id), dispatch_idx, start_sys,
+            end_sys, force_emit);
       }
-      // else: orphan END (start was lost to wraparound). Silently skip.
+      // else: orphan END (matching START was lost). Silently skip.
     }
 
-    qs.read_record_cursor += 1;
+    qs.next_idx += 1;
+    any = true;
   }
-  return true;
+  return any;
 }
 
 // Synchronous final drain on the calling thread. Looks up the queue's
@@ -625,9 +635,8 @@ void enable_dispatch_log_for_queue_locked(core::Queue* q) {
   // Step 2: read back the per-queue ring buffer info from AqlQueue.
   void* buf = nullptr;
   uint32_t buf_bytes = 0;
-  volatile uint32_t* fw_wptr = nullptr;
-  hsa_status_t gs = aql_queue->GetProfilingDispatchRecords(&buf, &buf_bytes, &fw_wptr);
-  if (gs != HSA_STATUS_SUCCESS || buf == nullptr || buf_bytes == 0 || fw_wptr == nullptr) {
+  hsa_status_t gs = aql_queue->GetProfilingDispatchRecords(&buf, &buf_bytes);
+  if (gs != HSA_STATUS_SUCCESS || buf == nullptr || buf_bytes == 0) {
     std::fprintf(stderr,
                  "[hsa-runtime] dispatch_log: queue_id=%llu ENABLE step 2 "
                  "(GetProfilingDispatchRecords) failed status=%d\n",
@@ -641,7 +650,7 @@ void enable_dispatch_log_for_queue_locked(core::Queue* q) {
   // GetProfilingDispatchRecords reports buf_bytes = record_count * 16
   // (the FW record-stride sized capacity). The kernel-side BO is
   // oversized (count * 40) per the host KFD ABI; the drainer iterates
-  // 16-byte records.
+  // 40-byte slots and only interprets the first 16 bytes per slot.
   const uint32_t record_count = buf_bytes / static_cast<uint32_t>(sizeof(mec_dispatch_record_16));
   if (record_count == 0 || (record_count & (record_count - 1)) != 0) {
     std::fprintf(stderr,
@@ -656,13 +665,12 @@ void enable_dispatch_log_for_queue_locked(core::Queue* q) {
   // Step 3: register in the drainer registry. NON-OWNING — buffer is
   // owned by AqlQueue, freed on SetProfiling(false) or AqlQueue dtor.
   auto qs = std::make_shared<queue_drain_state>();
-  qs->queue_id           = queue_id_of(q);
-  qs->translate_gpu_ts   = make_translate_gpu_ts(q);
-  qs->ring_base          = buf;
-  qs->record_count       = record_count;
-  qs->record_mask        = record_count - 1;
-  qs->fw_wptr_records    = fw_wptr;
-  qs->read_record_cursor = 0;
+  qs->queue_id         = queue_id_of(q);
+  qs->translate_gpu_ts = make_translate_gpu_ts(q);
+  qs->ring_base        = buf;
+  qs->ring_records     = record_count;
+  qs->ring_mask        = record_count - 1;
+  qs->next_idx         = 0;
 
   g_active_queues[qs->queue_id] = qs;
 
@@ -688,7 +696,7 @@ void disable_dispatch_log_for_queue_locked(core::Queue* q) {
   // then calling QueueProfilingRelease (which frees the buffer):
   //
   //   - drain_one_queue takes drain_mu first thing, then early-returns
-  //     on ring_base==nullptr || record_count==0. Any drainer that
+  //     on ring_base==nullptr || ring_records==0. Any drainer that
   //     hasn't started its pass for this queue yet will exit early.
   //   - Any drainer already inside drain_one_queue holds drain_mu, so
   //     the poisoning step blocks until it completes its current pass.
@@ -714,15 +722,14 @@ void disable_dispatch_log_for_queue_locked(core::Queue* q) {
   //    drain_mu acquire serializes with any in-progress drain pass.
   if (qs_ptr) {
     std::lock_guard<std::mutex> lk(qs_ptr->drain_mu);
-    qs_ptr->ring_base       = nullptr;
-    qs_ptr->fw_wptr_records = nullptr;
-    qs_ptr->record_count    = 0;
-    qs_ptr->record_mask     = 0;
+    qs_ptr->ring_base    = nullptr;
+    qs_ptr->ring_records = 0;
+    qs_ptr->ring_mask    = 0;
   }
 
   // e. Unregister from drainer registry. Drops the registry's shared_ptr
   //    ref. Any in-flight drainer snapshot still holds its own ref to
-  //    qs_ptr but its ring_base/fw_wptr_records are now nullptr.
+  //    qs_ptr but its ring_base is now nullptr.
   g_active_queues.erase(queue_id_of(q));
 
   // f. Release profiling ref. On the 1->0 edge AqlQueue::SetProfiling(false)
