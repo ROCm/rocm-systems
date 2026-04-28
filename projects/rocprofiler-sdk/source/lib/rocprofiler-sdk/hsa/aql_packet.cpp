@@ -212,23 +212,9 @@ TraceControlAQLPacket::TraceControlAQLPacket(const TraceMemoryPool&          _tr
     clear();
 };
 
-SQTTBufferingPackets::SQTTBufferingPackets(aqlprofile_handle_t _handle,
-                                           int                 _shader_engine_id,
-                                           test_skip_init_t /*tag*/)
-: handle(_handle)
-, shader_engine_id(_shader_engine_id)
-{
-    // Test-only constructor: skip the real aqlprofile_dl call.
-    // query_buffer_status_fn defaults to nullptr (see aql_packet.hpp); the
-    // test is required to overwrite it before producer_loop runs.
-    // query_status and buffer_swap remain default-constructed because the
-    // mock submit path ignores them.
-}
-
 SQTTBufferingPackets::SQTTBufferingPackets(aqlprofile_handle_t _handle, int _shader_engine_id)
 : handle(_handle)
 , shader_engine_id(_shader_engine_id)
-, query_buffer_status_fn(&query_buffer_status_default)
 {
     auto* aqlprofile_dl = rocprofiler::thread_trace::get_aqlprofile_dl();
     if(!aqlprofile_dl || !aqlprofile_dl->valid())
@@ -257,7 +243,7 @@ SQTTBufferingPackets::SQTTBufferingPackets(aqlprofile_handle_t _handle, int _sha
 }
 
 std::optional<sqtt_buffer_status_t>
-query_buffer_status_default(SQTTBufferingPackets& self)
+SQTTBufferingPackets::query_buffer_status()
 {
     auto* aqlprofile_dl = rocprofiler::thread_trace::get_aqlprofile_dl();
     ROCP_FATAL_IF(!aqlprofile_dl || !aqlprofile_dl->valid())
@@ -265,21 +251,20 @@ query_buffer_status_default(SQTTBufferingPackets& self)
 
     auto ret = aqlprofile_att_buffer_status_t{};
 
-    auto status =
-        aqlprofile_dl->update_buffer_status_fn(&ret, self.handle, self.shader_engine_id, 0);
+    auto status = aqlprofile_dl->update_buffer_status_fn(&ret, handle, shader_engine_id, 0);
     CHECK_HSA(status, "failed to query ATT status");
 
     if(!ret.needs_swap) return {};
 
     // Ensure aqlprofile and SDK agrees on which is the current buffer
-    ROCP_CI_LOG_IF(ERROR, (self.current_buffer++) != ret.num_swaps)
+    ROCP_CI_LOG_IF(ERROR, (current_buffer++) != ret.num_swaps)
         << "Mismatch of AQL and SDK buffer states!";
 
     auto query     = sqtt_buffer_status_t{};
     query.data     = ret.data;
     query.size     = ret.read_size;
     query.gpu_full = ret.is_too_late;
-    query.packet   = self.buffer_swap.at(ret.num_swaps % self.buffer_swap.size());
+    query.packet   = buffer_swap.at(ret.num_swaps % buffer_swap.size());
 
     return query;
 }

@@ -23,7 +23,6 @@
 // Implements the CPU-side producer/consumer loops that service ATT triple buffering.
 #include "lib/rocprofiler-sdk/thread_trace/threading.hpp"
 #include "lib/common/environment.hpp"
-#include "lib/common/scope_destructor.hpp"
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/internal_threading.hpp"
@@ -64,10 +63,6 @@ struct trace_callback_data_t
 trace_callback_data_t
 iterate_data(aqlprofile_handle_t handle)
 {
-    // NOTE: This intentionally captures only the LAST callback invocation.
-    // In single-shader-engine triple-buffer mode, aqlprofile_att_iterate_data
-    // is expected to fire exactly once per call. If multi-SE triple-buffer
-    // support is added, this needs to accumulate chunks instead of overwriting.
     auto thread_trace_callback = [](uint32_t, void* buffer, uint64_t size, void* userdata) {
         auto& data = *static_cast<trace_callback_data_t*>(userdata);
         data.data  = buffer;
@@ -170,33 +165,12 @@ producer_loop(
     auto& read_index    = parameters.shared->read_index;
     auto& buffer_packet = *CHECK_NOTNULL(parameters.buffer_packet);
 
-    // Submit signal lives in shared state so stop_thread_trace can force-wake
-    // us out of any blocking signal_wait when WORKER_FLAG_DESTRUCTOR is set.
-    auto* submit_signal = parameters.shared->producer_submit_signal.get();
-    ROCP_FATAL_IF(submit_signal == nullptr) << "producer_submit_signal not initialized";
-
-    // Scope guard: every exit path from producer_loop must signal the consumer
-    // to stop, otherwise stop_thread_trace's consumer.join() (called after
-    // producer.join()) will block forever. The consumer's wait_for predicate
-    // only returns true when running becomes false, so we must clear it AND
-    // notify the cv on EVERY return — including the destructor force-wake
-    // early returns below.
-    auto consumer_shutdown_guard = common::scope_destructor{[&]() {
-        parameters.shared->consumer_running.store(false);
-        write_cv.notify_all();
-    }};
+    auto submit_signal = scoped_signal_t{};
 
     auto start_t0 = std::chrono::system_clock::now();
     bool do_sleep{false};
-    // Wait until ATT start packets have been executed.
-    // Use the shared start_pkt_signal so this is the same handle the destructor
-    // force-wakes via core.cpp's stop_thread_trace path.
-    signal_wait(*CHECK_NOTNULL(parameters.shared->start_pkt_signal));
-    if(worker_flag.load() == WORKER_FLAG_DESTRUCTOR)
-    {
-        ROCP_INFO << "Producer woken at start by destructor; bailing out";
-        return;
-    }
+    // Wait until ATT start packets have been executed
+    signal_wait(*CHECK_NOTNULL(parameters.start_pkt_signal));
 
     auto sleep_fn = [&]() {
         sched_yield();
@@ -216,7 +190,7 @@ producer_loop(
         // Perform the actual GPU->CPU memory copy into our triple-buffer slot
         if(!isHeader)
             parameters.copy_data_fn(
-                buffer.memory, src, near_cpu_v, hsa_agent_v, size, submit_signal);
+                buffer.memory, src, near_cpu_v, hsa_agent_v, size, &submit_signal.sig);
         else
             std::memcpy(buffer.memory, src, size);
 
@@ -233,16 +207,9 @@ producer_loop(
     };
 
     auto iterate_trace = [&]() {
-        // Wait consumer to catch up before adding to next buffer.
-        // WORKER_FLAG_STOP is the graceful shutdown path and we still want to
-        // drain the consumer; only WORKER_FLAG_DESTRUCTOR (forcible teardown)
-        // bypasses the drain so the producer can join during shutdown.
-        while(read_index < write_index && worker_flag.load() != WORKER_FLAG_DESTRUCTOR)
+        // Wait consumer to catch up before adding to next buffer
+        while(read_index < write_index)
             sleep_fn();
-
-        if(worker_flag.load() == WORKER_FLAG_DESTRUCTOR && read_index < write_index)
-            ROCP_WARNING << "iterate_trace bailing out with " << (write_index - read_index)
-                         << " un-drained buffer(s) due to forcible teardown";
 
         auto wptr = iterate_data(parameters.control_packet->GetHandle());
         buffer_packet.reset_current_buffer();
@@ -258,20 +225,10 @@ producer_loop(
         // PHASE 1: Poll SQTT buffer status
         // Send a query packet to the GPU asking if the trace buffer is full and ready to swap.
         // This is a non-blocking query that completes via signal.
-        att_queue_submit(queue, &buffer_packet.query_status, submit_signal);
-        signal_wait(*submit_signal);
+        att_queue_submit(queue, &buffer_packet.query_status, &submit_signal.sig);
+        signal_wait(submit_signal.sig);
 
-        // The destructor path force-wakes this signal_wait by storing 0.
-        // If we were woken that way, the GPU may not have processed the query
-        // packet yet, so query_buffer_status_fn would return stale/garbage
-        // data. Bail out before consuming it.
-        if(worker_flag.load() == WORKER_FLAG_DESTRUCTOR)
-        {
-            ROCP_INFO << "Producer woken at query signal by destructor; bailing out";
-            return;
-        }
-
-        if(auto status = buffer_packet.query_buffer_status_fn(buffer_packet))
+        if(auto status = buffer_packet.query_buffer_status())
         {
             ROCP_TRACE << "Sending buffer swap";
             // PHASE 2: Copy GPU buffer to CPU memory
@@ -279,7 +236,7 @@ producer_loop(
             // a) Submit a packet to trigger GPU-side buffer swap
             // b) Copy the full buffer from GPU memory to our CPU-side triple buffer
             // Query returned buffer full: Send packet to trigger a buffer swap
-            att_queue_submit(queue, &status->packet, submit_signal);
+            att_queue_submit(queue, &status->packet, &submit_signal.sig);
             ROCP_FATAL_IF(status->size != buffer_size)
                 << "GPU buffer overflow: " << status->size << " vs " << buffer_size;
 
@@ -315,22 +272,13 @@ producer_loop(
             // The status_query test verifies we immediately poll again after consuming a
             // buffer, so skip the backoff when a flip just occurred.
             do_sleep = false;
-            signal_wait(*submit_signal);
-
-            // Same destructor force-wake concern as the earlier signal_wait:
-            // bail before re-entering the loop body so we don't restart traces
-            // or submit further packets during teardown.
-            if(worker_flag.load() == WORKER_FLAG_DESTRUCTOR)
-            {
-                ROCP_INFO << "Producer woken at swap signal by destructor; bailing out";
-                return;
-            }
+            signal_wait(submit_signal.sig);
         }
     }
     stop_trace();
     iterate_trace();
-    // consumer_shutdown_guard runs on return: clears consumer_running and
-    // notifies write_cv so consumer_loop's wait_for predicate fires.
+    parameters.shared->consumer_running.store(false);
+    write_cv.notify_all();
 
     auto end_t0 = std::chrono::system_clock::now();
     ROCP_INFO << "Total trace time: " << (end_t0 - start_t0).count() * 1E-9f << " s.";

@@ -245,41 +245,26 @@ struct sqtt_buffer_status_t
     bool                         gpu_full{};
 };
 
-// Plain struct: all fields public, no virtual functions. Tests inject custom
-// behavior by overwriting the query_buffer_status_fn function pointer rather
-// than subclassing.
-struct SQTTBufferingPackets
+// Virtual members for mocking in tests
+class SQTTBufferingPackets
 {
-    using query_buffer_status_fn_t = std::optional<sqtt_buffer_status_t> (*)(SQTTBufferingPackets&);
-
-    // Tag type used by tests to construct an SQTTBufferingPackets without
-    // calling into aqlprofile_dl->get_buffer_packets_fn (which requires a
-    // real GPU + valid trace handle). The test must overwrite
-    // query_buffer_status_fn before the producer thread starts.
-    struct test_skip_init_t
-    {};
-    static constexpr test_skip_init_t test_skip_init{};
-
+public:
     SQTTBufferingPackets(aqlprofile_handle_t handle, int shader_engine_id);
-    SQTTBufferingPackets(aqlprofile_handle_t handle, int shader_engine_id, test_skip_init_t);
+    virtual ~SQTTBufferingPackets() = default;
+
+    hsa_ext_amd_aql_pm4_packet_t                query_status{};
+    virtual std::optional<sqtt_buffer_status_t> query_buffer_status();
 
     void reset_current_buffer() { current_buffer = 0; };
 
-    hsa_ext_amd_aql_pm4_packet_t              query_status{};
-    const aqlprofile_handle_t                 handle;
-    const int                                 shader_engine_id;
-    uint64_t                                  header{0};
+    const aqlprofile_handle_t handle;
+    const int                 shader_engine_id;
+    uint64_t                  header{0};
+
+private:
     size_t                                    current_buffer{0};
     std::vector<hsa_ext_amd_aql_pm4_packet_t> buffer_swap{};
-
-    // Defaulted to query_buffer_status_default; tests may override.
-    query_buffer_status_fn_t query_buffer_status_fn{nullptr};
 };
-
-// Production implementation of the buffer-status query. Calls into AQLProfile
-// to determine whether a buffer swap is needed and returns the swap packet.
-std::optional<sqtt_buffer_status_t>
-query_buffer_status_default(SQTTBufferingPackets& self);
 
 }  // namespace hsa
 }  // namespace rocprofiler
