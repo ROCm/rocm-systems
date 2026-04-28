@@ -34,6 +34,7 @@
 
 #include <gtest/gtest.h>
 #include <hsa/hsa.h>
+#include <yaml-cpp/yaml.h>
 
 #include <algorithm>
 #include <cstddef>
@@ -409,4 +410,89 @@ TEST(metrics, counter_info_v1_size_field)
                 << (info.name ? info.name : "<null>") << " (handle=" << counter.handle << ")";
         }
     }
+}
+
+TEST(metrics, validate_malformed_yaml)
+{
+    EXPECT_THROW(YAML::Load("rocprofiler-sdk:\n  counters: \"unclosed"), YAML::Exception);
+}
+
+TEST(metrics, validate_missing_top_key)
+{
+    auto error = counters::validateExtraCounterYAML(YAML::Load("wrong-key:\n  counters: []"));
+    EXPECT_TRUE(error.has_value());
+    EXPECT_NE(error->find("top-level"), std::string::npos);
+}
+
+TEST(metrics, validate_missing_counters)
+{
+    auto error = counters::validateExtraCounterYAML(YAML::Load("rocprofiler-sdk:\n  schema: 1"));
+    EXPECT_TRUE(error.has_value());
+}
+
+TEST(metrics, validate_missing_name)
+{
+    auto error = counters::validateExtraCounterYAML(YAML::Load(
+        "rocprofiler-sdk:\n  counters:\n  - definitions:\n    - architectures: [gfx942]"));
+    EXPECT_TRUE(error.has_value());
+}
+
+TEST(metrics, validate_empty_architectures)
+{
+    auto error = counters::validateExtraCounterYAML(YAML::Load(
+        "rocprofiler-sdk:\n  counters:\n  - name: T\n    definitions:\n    - architectures: "
+        "[]"));
+    EXPECT_TRUE(error.has_value());
+}
+
+TEST(metrics, validate_no_event_or_expr)
+{
+    auto error = counters::validateExtraCounterYAML(YAML::Load(
+        "rocprofiler-sdk:\n  counters:\n  - name: T\n    definitions:\n    - architectures: "
+        "[gfx942]"));
+    EXPECT_TRUE(error.has_value());
+}
+
+TEST(metrics, validate_event_needs_block)
+{
+    auto error = counters::validateExtraCounterYAML(
+        YAML::Load("rocprofiler-sdk:\n  counters:\n  - name: T\n    definitions:\n    - "
+                   "architectures: [gfx942]\n      event: E"));
+    EXPECT_TRUE(error.has_value());
+}
+
+TEST(metrics, validate_block_needs_event)
+{
+    auto error = counters::validateExtraCounterYAML(
+        YAML::Load("rocprofiler-sdk:\n  counters:\n  - name: T\n    definitions:\n    - "
+                   "architectures: [gfx942]\n      block: B"));
+    EXPECT_TRUE(error.has_value());
+}
+
+TEST(metrics, validate_valid_yaml)
+{
+    auto error = counters::validateExtraCounterYAML(
+        YAML::Load("rocprofiler-sdk:\n  counters:\n  - name: T\n    definitions:\n    - "
+                   "architectures: [gfx942]\n      expression: test"));
+    EXPECT_FALSE(error.has_value());
+}
+
+TEST(metrics, validate_duplicate_counter_same_arch)
+{
+    // Duplicate counter with same name and architecture should warn but not error
+    auto error = counters::validateExtraCounterYAML(YAML::Load(
+        "rocprofiler-sdk:\n  counters:\n  - name: DUP\n    definitions:\n    - architectures: "
+        "[gfx942]\n      expression: expr1\n  - name: DUP\n    definitions:\n    - architectures: "
+        "[gfx942]\n      expression: expr2"));
+    EXPECT_FALSE(error.has_value());  // Should not error, just warn
+}
+
+TEST(metrics, validate_duplicate_counter_different_arch)
+{
+    // Same counter name with different architectures should be valid
+    auto error = counters::validateExtraCounterYAML(YAML::Load(
+        "rocprofiler-sdk:\n  counters:\n  - name: MULTI\n    definitions:\n    - architectures: "
+        "[gfx906]\n      expression: expr1\n  - name: MULTI\n    definitions:\n    - "
+        "architectures: [gfx942]\n      expression: expr2"));
+    EXPECT_FALSE(error.has_value());
 }
