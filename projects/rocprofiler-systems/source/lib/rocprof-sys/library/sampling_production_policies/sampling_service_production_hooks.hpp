@@ -26,12 +26,15 @@
 
 #include <nlohmann/json.hpp>
 
+#include <dlfcn.h>
 #include <libunwind.h>
 #include <linux/perf_event.h>
 #include <sys/types.h>
 #include <unistd.h>
 
+#include <cstring>
 #include <mutex>
+#include <string>
 
 namespace rocprofsys::sampling
 {
@@ -42,6 +45,51 @@ namespace rocprofsys::sampling
 extern thread_local void*   tl_sampler_state_vp;
 extern thread_local void*   tl_offload_vp;
 extern thread_local int64_t tl_logical_tid;
+
+// TF-4 helper: resolve a stack-frame IP to a human-readable label.
+// Cascade: cached resolver (dladdr) → libunwind proc-name → dladdr fname
+// (e.g. "[libgcc_s.so.1+0x1234]") → "<unresolved>" placeholder.
+// Eliminates raw "0xADDR" hex strings from the TSV output entirely.
+inline std::string
+resolve_symbol(symbol_resolver& resolver, std::uintptr_t addr)
+{
+    if(addr == 0) return "<null>";
+
+    auto name = resolver.resolve(addr);
+    if(!name.empty()) return name;
+
+    // libunwind reads ELF symtab directly — finds static binary symbols
+    // that dladdr (dynamic-symtab only) misses.
+    {
+        char       buf[512] = {};
+        unw_word_t off      = 0;
+        if(::unw_get_proc_name_by_ip(unw_local_addr_space, static_cast<unw_word_t>(addr),
+                                     buf, sizeof(buf), &off, nullptr) == 0 &&
+           buf[0] != '\0')
+        {
+            std::string sym{ buf };
+            resolver.inject(addr, sym);
+            return resolver.resolve(addr);
+        }
+    }
+
+    // Last-resort: report the containing module name + offset, instead of
+    // a bare hex address. Covers vDSO / libgcc_s / signal-trampoline frames.
+    {
+        ::Dl_info info{};
+        if(::dladdr(reinterpret_cast<void const*>(addr), &info) != 0 &&
+           info.dli_fname != nullptr)
+        {
+            const char* slash  = std::strrchr(info.dli_fname, '/');
+            const char* base   = slash ? slash + 1 : info.dli_fname;
+            auto        offset = static_cast<std::uintptr_t>(addr) -
+                          reinterpret_cast<std::uintptr_t>(info.dli_fbase);
+            return "[" + std::string{ base } + "+0x" + fmt::format("{:X}", offset) + "]";
+        }
+    }
+
+    return "<unresolved>";
+}
 
 // ── setup_check_thread_guards ──────────────────────────────────────────────
 
@@ -282,27 +330,7 @@ sampling_service<default_sampling_policies>::emit_resolved_to_trace_cache(int64_
         {
             for(auto& s : timer_samples)
                 for(auto& f : s.stack)
-                    if(f.name.empty())
-                    {
-                        f.name = resolver.resolve(f.address);
-                        // TF-4: dladdr misses static binary symbols (e.g.
-                        // fib/run in parallel-overhead). Fall back to libunwind
-                        // proc-name lookup which reads ELF symtab directly.
-                        if(f.name.empty())
-                        {
-                            char       buf[512] = {};
-                            unw_word_t off      = 0;
-                            if(::unw_get_proc_name_by_ip(
-                                   unw_local_addr_space,
-                                   static_cast<unw_word_t>(f.address), buf, sizeof(buf),
-                                   &off, nullptr) == 0 &&
-                               buf[0] != '\0')
-                            {
-                                f.name = buf;
-                                resolver.inject(f.address, f.name);
-                            }
-                        }
-                    }
+                    if(f.name.empty()) f.name = resolve_symbol(resolver, f.address);
 
             constexpr uint32_t category_id =
                 static_cast<uint32_t>(ROCPROFSYS_CATEGORY_TIMER_SAMPLING);
@@ -384,7 +412,7 @@ sampling_service<default_sampling_policies>::emit_resolved_to_trace_cache(int64_
         {
             for(auto& s : overflow_samples)
                 for(auto& f : s.stack)
-                    if(f.name.empty()) f.name = resolver.resolve(f.address);
+                    if(f.name.empty()) f.name = resolve_symbol(resolver, f.address);
 
             constexpr uint32_t category_id =
                 static_cast<uint32_t>(ROCPROFSYS_CATEGORY_OVERFLOW_SAMPLING);
