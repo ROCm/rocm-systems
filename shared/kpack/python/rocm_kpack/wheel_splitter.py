@@ -342,6 +342,12 @@ def generate_device_metadata(
         f"Requires-Dist: {host_identity.name} == {host_identity.version}",
     ]
     for dep in device_requires_dist:
+        if "@GFXARCH@" in dep and bundle.level != rocm_bootstrap.PackagingLevel.TARGET:
+            # `@GFXARCH@` deps name per-target packages (e.g.
+            # rocm-sdk-device-<target>) which are only published for
+            # PackagingLevel.TARGET bundles. Family/sub-family device wheels
+            # are co-installed with a target wheel that carries those deps.
+            continue
         expanded = dep.replace("@GFXARCH@", bundle_key)
         lines.append(f"Requires-Dist: {expanded}")
     return "\n".join(lines) + "\n"
