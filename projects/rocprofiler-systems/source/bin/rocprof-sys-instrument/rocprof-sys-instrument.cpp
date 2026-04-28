@@ -2347,8 +2347,8 @@ main(int argc, char** argv)
                 verbprintf(0,
                            "(analysis) Child finalizeInsertionSet crashed; exiting with "
                            "code %d so parent can record the failure\n",
-                           analysis::CHILD_ANALYSIS_EXIT);
-                std::_Exit(analysis::CHILD_ANALYSIS_EXIT);
+                           analysis::child_analysis_exit_code);
+                _exit(analysis::child_analysis_exit_code);
             }
 
             verbprintf(0, "finalizeInsertionSet crashed; running analysis via fork+exec "
@@ -2365,7 +2365,7 @@ main(int argc, char** argv)
         {
             verbprintf(0, "(analysis) finalize succeeded; exiting cleanly so parent "
                           "records this subset as safe\n");
-            std::_Exit(EXIT_SUCCESS);
+            _exit(EXIT_SUCCESS);
         }
 
         if(!success)

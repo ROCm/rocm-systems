@@ -357,7 +357,7 @@ is_unhelpful_family_token(const std::string& token)
 
     // State-machine implementation names are broad and drown out useful tokens
     if(token.size() >= 5 && ((token.rfind("state") == token.size() - 5) ||
-                             (token.rfind("helper") == std::string::npos &&
+                             (token.find("helper") == std::string::npos &&
                               token.find("statementstate") != std::string::npos)))
         return true;
     return false;
@@ -591,7 +591,16 @@ procedure_id
 to_procedure_id(const module_function& mf)
 {
     procedure_id out{};
-    out.module_name   = mf.module_name;
+    out.library_name = "main executable";
+    if(mf.module && mf.module->isSharedLib())
+    {
+        if(auto* obj = mf.module->getObject())
+            out.library_name = obj->name();
+        else if(auto* lib = mf.module->libraryName())
+            out.library_name = lib;
+        else
+            out.library_name = mf.module_name;
+    }
     out.function_name = mf.function_name;
     return out;
 }
@@ -738,7 +747,7 @@ run_trial(const std::vector<std::string>& parent_argv, const std::string& restri
     {
         int code = WEXITSTATUS(status);
         if(code == 0) return trial_result::pass;
-        if(code == CHILD_ANALYSIS_EXIT) return trial_result::fail;
+        if(code == child_analysis_exit_code) return trial_result::fail;
         verbprintf(0, "[analysis] child pid=%d exited with unexpected code %d\n",
                    (int) pid, code);
         return trial_result::unexpected;
@@ -784,8 +793,8 @@ print_analysis_result(const std::vector<std::vector<procedure_id>>& failing_subs
         if(subset.size() == 1)
         {
             const auto& p = subset.front();
-            verbprintf(0, "[analysis]   subset %zu singleton: module=%s function=%s\n",
-                       i + 1, p.module_name.c_str(), p.function_name.c_str());
+            verbprintf(0, "[analysis]   subset %zu singleton: library=%s function=%s\n",
+                       i + 1, p.library_name.c_str(), p.function_name.c_str());
             continue;
         }
 
@@ -793,8 +802,8 @@ print_analysis_result(const std::vector<std::vector<procedure_id>>& failing_subs
                    subset.size());
         for(const auto& p : subset)
         {
-            verbprintf(0, "[analysis]     cooperative: function=%s\n",
-                       p.function_name.c_str());
+            verbprintf(0, "[analysis]     cooperative: library=%s function=%s\n",
+                       p.library_name.c_str(), p.function_name.c_str());
         }
     }
 }

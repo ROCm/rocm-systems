@@ -18,7 +18,7 @@ namespace analysis
 // Used to determine if the current process is child
 constexpr const char* child_analysis_env = "ROCPROFSYS_CHILD_ANALYSIS";
 // Indicate that the child process failed to handle the given subset
-constexpr int CHILD_ANALYSIS_EXIT = 42;
+constexpr int child_analysis_exit_code = 42;
 // Developer only var. Used to print the full logs of each child fork+exec subprocess
 constexpr const char* analysis_output_env = "ROCPROFSYS_ANALYSIS_OUTPUT";
 
@@ -41,7 +41,7 @@ enum class guarded_result
 // Stores minimal information from a module_function
 struct procedure_id
 {
-    string_t module_name   = {};
+    string_t library_name  = {};
     string_t function_name = {};
 };
 
