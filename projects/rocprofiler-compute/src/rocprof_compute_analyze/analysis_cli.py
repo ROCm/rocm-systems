@@ -15,6 +15,7 @@ from utils.roofline_calc import calc_ai_analyze
 from utils.utils_analysis import (
     build_call_trees,
     build_call_trees_with_kernel_ids,
+    build_operator_summary,
     process_torch_trace_output,
     write_torch_trace_consolidated_csv,
 )
@@ -371,6 +372,7 @@ class cli_analysis(OmniAnalyze_Base):
         print("Grouped by source location, sorted by total GPU kernel duration.")
         print(f"{'=' * 80}")
         tty.show_call_tree(call_trees)
+        tty.show_operator_summary(build_operator_summary(call_trees))
         print(f"{'=' * 80}")
 
         console_log(

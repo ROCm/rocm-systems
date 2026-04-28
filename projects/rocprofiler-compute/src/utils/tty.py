@@ -3,6 +3,7 @@
 
 import argparse
 import copy
+import math
 import shutil
 import textwrap
 from pathlib import Path
@@ -20,6 +21,7 @@ from utils.logger import console_error, console_log, console_warning
 from utils.utils_analysis import (
     NS_TO_MS,
     CallTreeNode,
+    build_operator_summary,
     get_bw_scale_and_unit,
     simplify_kernel_name,
 )
@@ -339,16 +341,46 @@ def list_torch_operators(
     print("Grouped by source location, sorted by total GPU kernel duration.")
     print(f"{'=' * 80}")
     show_call_tree(call_trees)
+    show_operator_summary(build_operator_summary(call_trees))
     print(f"\n{'=' * 80}")
 
 
-def format_stats(launches: int, duration_ms: float) -> str:
-    """Format launch count and duration as an inline parenthesized string."""
+def format_duration(duration_ms: Optional[float]) -> str:
+    """Format a duration in ms; switch to us below 0.01 ms; None/NaN render as N/A."""
+    if duration_ms is None:
+        return "N/A"
+    if isinstance(duration_ms, float) and math.isnan(duration_ms):
+        return "N/A"
     if duration_ms < 0.01:
-        formatted_duration = f"{duration_ms * 1000:.2f} us"
-    else:
-        formatted_duration = f"{duration_ms:.2f} ms"
-    return f"(kernel_launches: {launches}, total_duration: {formatted_duration})"
+        return f"{duration_ms * 1000:.2f} us"
+    return f"{duration_ms:.2f} ms"
+
+
+def format_node_stats(node: CallTreeNode) -> str:
+    """Format operator-node stats (calls, dispatches, total, dispatch_mean/min/max).
+
+    dispatch_mean / dispatch_min / dispatch_max are per kernel dispatch.
+    The "calls:" segment is omitted when invocation_ids is empty (location
+    roots and frames recorded without Context_Id).
+    """
+    mean_ms = (
+        node.mean_dispatch_ns * NS_TO_MS if node.mean_dispatch_ns is not None else None
+    )
+    min_ms = (
+        node.min_dispatch_ns * NS_TO_MS if node.min_dispatch_ns is not None else None
+    )
+    max_ms = (
+        node.max_dispatch_ns * NS_TO_MS if node.max_dispatch_ns is not None else None
+    )
+    calls_prefix = f"calls: {node.call_count}, " if len(node.invocation_ids) > 0 else ""
+    return (
+        f"({calls_prefix}"
+        f"dispatches: {node.kernel_launches}, "
+        f"total: {format_duration(node.total_duration_ms)}, "
+        f"dispatch_mean: {format_duration(mean_ms)}, "
+        f"dispatch_min: {format_duration(min_ms)}, "
+        f"dispatch_max: {format_duration(max_ms)})"
+    )
 
 
 def get_tree_wrap_width(min_width: int = 72, max_width: int = 120) -> int:
@@ -436,7 +468,7 @@ def show_call_tree(call_trees: dict[str, CallTreeNode]) -> None:
     for i, (location, root) in enumerate(sorted_locations):
         if i > 0:
             print(f"\n{'- ' * 40}")
-        stats = format_stats(root.kernel_launches, root.total_duration_ms)
+        stats = format_node_stats(root)
         print(f"\n{location} {stats}")
         for child in sorted(
             root.children.values(),
@@ -444,6 +476,80 @@ def show_call_tree(call_trees: dict[str, CallTreeNode]) -> None:
             reverse=True,
         ):
             print_operator_node(child)
+
+
+def show_operator_summary(summary_df: pd.DataFrame) -> None:
+    """Print a flat per-operator summary table alongside the call tree.
+
+    - Rendered as a fancy_grid bordered table via tabulate, matching the
+      rest of the analyze CLI.
+
+    - Operator column wraps long paths; numeric columns size to content.
+
+    - A header line above the table explains the aggregation so column
+      names can stay short.
+
+    - Time cells are formatted per-cell via format_duration (auto-switching
+      between ms and us). NaN renders as "N/A".
+    """
+    if summary_df is None or summary_df.empty:
+        print("\nOperator summary: (no operators with recorded dispatches)")
+        return
+
+    operator_name_wrap_width = 72
+
+    # (DataFrame column, display label) pairs. DataFrame names match the
+    # schema produced by build_operator_summary; display labels are short
+    # because the header line below explains the semantics and time cells
+    # self-label their unit.
+    column_map = [
+        ("Operator", "Operator"),
+        ("Calls", "Calls"),
+        ("Dispatches", "Dispatches"),
+        ("Total_GPU", "Total"),
+        ("Pct_Total_GPU", "% Total"),
+        ("Mean_Per_Call", "Mean/Call"),
+        ("Mean_Per_Dispatch", "Mean"),
+        ("Min_Dispatch", "Min"),
+        ("Max_Dispatch", "Max"),
+    ]
+    source_cols = [c for c, _ in column_map]
+    headers = [h for _, h in column_map]
+    time_cols = (
+        "Total_GPU",
+        "Mean_Per_Call",
+        "Mean_Per_Dispatch",
+        "Min_Dispatch",
+        "Max_Dispatch",
+    )
+
+    display_df = summary_df[source_cols].copy()
+    display_df["Operator"] = (
+        display_df["Operator"]
+        .astype(str)
+        .apply(lambda s: textwrap.fill(s, width=operator_name_wrap_width))
+    )
+    for col in time_cols:
+        display_df[col] = display_df[col].apply(format_duration)
+
+    # Time columns are pre-formatted strings; only % Total still needs floatfmt.
+    floatfmt = ("", "", "", "", ".2f", "", "", "", "")
+    colalign = ("left",) + ("right",) * (len(headers) - 1)
+
+    print(
+        "\nOperator summary (Min/Max/Mean are per-dispatch over the subtree; "
+        "sorted by Total):"
+    )
+    print(
+        tabulate(
+            display_df.values,
+            headers=headers,
+            tablefmt="fancy_grid",
+            floatfmt=floatfmt,
+            colalign=colalign,
+            missingval="N/A",
+        )
+    )
 
 
 def print_operator_node(
@@ -458,10 +564,13 @@ def print_operator_node(
     node_prefix = f"{indent}{branch_char}"
 
     if is_branching:
-        stats = format_stats(node.kernel_launches, node.total_duration_ms)
-        print_wrapped_tree_line(node_prefix, f"{node.name} {stats}")
+        print_wrapped_tree_line(node_prefix, f"{node.name} {format_node_stats(node)}")
     else:
-        print_wrapped_tree_line(node_prefix, node.name)
+        if len(node.invocation_ids) > 0:
+            suffix = f" (calls: {node.call_count})"
+        else:
+            suffix = ""
+        print_wrapped_tree_line(node_prefix, f"{node.name}{suffix}")
 
     # Build new parent_pipes for children
     if is_last:
@@ -492,7 +601,7 @@ def print_operator_node(
         id_suffix = f" (id {kernel_id})" if kernel_id is not None else ""
         display_name = simplify_kernel_name(kernel_name)
         total_ms = duration_ns * NS_TO_MS
-        stats = format_stats(launches, total_ms)
+        stats = f"(dispatches: {launches}, total: {format_duration(total_ms)})"
 
         # Last kernel gets └─, others get ├─
         kernel_is_last = i == len(node.kernels) - 1
