@@ -2,11 +2,7 @@
 // SPDX-License-Identifier:  MIT
 #pragma once
 #include <memory>
-
-namespace rocprofiler::sdk::codeobj::disassembly
-{
-class CodeobjAddressTranslate;
-}
+#include "rocprofiler-sdk/cxx/codeobj/code_printing.hpp"
 
 namespace rocm_compute
 {

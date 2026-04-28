@@ -83,7 +83,7 @@ struct tool_data_t
     std::vector<counter_info_record_t>         counter_records;
     std::set<uint64_t>                         target_kernel_ids{};
 
-    synchronized_t<pc_sampling_collector_t::Ptr> pc_sampling_collector;
+    synchronized_t<pc_sampling_collector_t::ptr> pc_sampling_collector;
     std::shared_ptr<sdk_callbacks_t>           sdk_callbacks{};
 };
 }  // namespace rocm_compute

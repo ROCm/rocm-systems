@@ -2,7 +2,6 @@
 // SPDX-License-Identifier:  MIT
 #include "code_object_translator.h"
 
-#include "rocprofiler-sdk/cxx/codeobj/code_printing.hpp"
 
 using namespace rocm_compute;
 

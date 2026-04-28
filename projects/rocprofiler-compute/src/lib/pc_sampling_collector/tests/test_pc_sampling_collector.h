@@ -2,10 +2,13 @@
 // SPDX-License-Identifier:  MIT
 #pragma once
 #include "pc_sampling_collector.h"
+#include "mocks.h"
 #include "gtest/gtest.h"
 
 class test_pc_sampling_collector_t : public ::testing::Test
 {
 protected:
-	rocm_compute::pc_sampling_collector_impl_t::Ptr m_pc_sampling_collector;
+	void SetUp() override;
+	std::shared_ptr<mock_code_object_translator_t> m_translator;
+	rocm_compute::pc_sampling_collector_impl_t::ptr m_pc_sampling_collector;
 };

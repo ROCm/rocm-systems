@@ -109,7 +109,7 @@ void code_object_tracing_callback(rocprofiler_callback_tracing_record_t record,
         {
             auto* tool_data = static_cast<tool_data_t*>(data);
             auto* obj_data = static_cast<rocprofiler_callback_tracing_code_object_load_data_t*>(record.payload);
-            tool_data->pc_sampling_collector.rlock([&](const pc_sampling_collector_t::Ptr& collector)
+            tool_data->pc_sampling_collector.rlock([&](const pc_sampling_collector_t::ptr& collector)
                                                    { collector->on_code_object_load(*obj_data); });
         }
     }

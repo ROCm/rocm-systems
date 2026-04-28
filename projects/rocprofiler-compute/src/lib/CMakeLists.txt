@@ -13,10 +13,16 @@ set(CMAKE_PREFIX_PATH $ENV{ROCM_PATH} "/opt/rocm/")
 
 find_package(
     rocprofiler-sdk
-    HINTS $ENV{ROCM_PATH}/lib/cmake /opt/rocm/lib/cmake
+    HINTS ${CMAKE_PREFIX_PATH}/opt/rocm/lib/cmake
     CONFIG
     REQUIRED
 )
+find_package(libdw REQUIRED)
+find_package(amd_comgr REQUIRED CONFIG
+    HINTS  ${CMAKE_PREFIX_PATH} 
+    PATHS  ${CMAKE_PREFIX_PATH} 
+    PATH_SUFFIXES lib/cmake/amd_comgr)
+
 
 add_subdirectory(external)
 add_subdirectory(rocprofiler_compute_tool)
