@@ -491,6 +491,7 @@ void WriteJsonTraceImpl(const char* filepath) {
     return id;
   };
 
+
   for (size_t c = 0; c < g_records.size(); ++c) {
     HipApiRecordExt* chunk = g_records[c];
     size_t base  = c * kChunkSize;
@@ -543,7 +544,13 @@ void WriteJsonTraceImpl(const char* filepath) {
       // Emit one GPU op event: flow start (ph:s) on CPU side, GPU X event,
       // flow finish (ph:t) on GPU side.  Dims and kernel args are read directly
       // from the HipGpuActivityExt struct (populated by HipActivityCallbackExt).
-      auto emit_gpu_op = [&](const HipGpuActivityExt& gop, hipStream_t stream) {
+      // Returns {gpu_tid, gpu_ts, has_ts} for chaining node→node flow arrows.
+      // emit_host_arrow: draw ph:s/ph:t dep arrow from CPU event to this GPU op.
+      //   For graph launches only the first op gets the host arrow; subsequent nodes
+      //   are connected via node→node graph arrows instead.
+      struct GpuOpInfo { uint64_t tid; double ts; bool has_ts; };
+      auto emit_gpu_op = [&](const HipGpuActivityExt& gop, hipStream_t stream,
+                             bool emit_host_arrow = true) -> GpuOpInfo {
         uint32_t op_idx  = gop.op < 3 ? gop.op : 3;
         int sdma = (op_idx == OP_ID_COPY) &&
                    hipCopyKindIsSDMAExt(static_cast<HipCopyKindExt>(gop.copy_kind)) ? 1 : 0;
@@ -569,8 +576,8 @@ void WriteJsonTraceImpl(const char* filepath) {
         // Only draw flow arrow when GPU timestamps are valid (begin_ns == 0
         // means ReportActivity never populated the record — no arrow to draw).
         const bool has_ts = (gop.begin_ns > 0);
-        uint64_t fid = has_ts ? flow_id++ : 0;
-        if (has_ts)
+        uint64_t fid = (has_ts && emit_host_arrow) ? flow_id++ : 0;
+        if (has_ts && emit_host_arrow)
           trace << ",\n{\"ph\":\"s\",\"id\":" << fid
                 << ",\"pid\":1024,\"tid\":" << ctid
                 << ",\"ts\":" << s_time << ",\"name\":\"dep\"}";
@@ -635,7 +642,7 @@ void WriteJsonTraceImpl(const char* filepath) {
           }
         }
         trace << "}}";
-        if (has_ts)
+        if (has_ts && emit_host_arrow)
           trace << ",\n{\"ph\":\"t\",\"id\":" << fid
                 << ",\"pid\":" << gop.device_id
                 << ",\"tid\":" << gpu_tid
@@ -679,14 +686,31 @@ void WriteJsonTraceImpl(const char* filepath) {
         }
 
         device_gpu_tids[static_cast<int>(gop.device_id)].insert(gpu_tid);
+        return GpuOpInfo{gpu_tid, gpu_ts, has_ts};
       };
 
       // Op-1 lives directly in rec.gpu; ops 2..N are in the spill linked list.
       // All dims and kernel args are now in each HipGpuActivityExt node.
+      const bool graph_launch = rec.api_name && strncmp(rec.api_name, "hipGraphLaunch", 14) == 0;
       if (rec.gpu.gpu_op_count > 0) {
-        emit_gpu_op(rec.gpu, rec.stream);
-        for (const HipGpuActivityExt* node = rec.gpu.next; node; node = node->next)
-          emit_gpu_op(*node, rec.stream);
+        GpuOpInfo prev = emit_gpu_op(rec.gpu, rec.stream, /*emit_host_arrow=*/true);
+
+        for (const HipGpuActivityExt* node = rec.gpu.next; node; node = node->next) {
+          GpuOpInfo cur = emit_gpu_op(*node, rec.stream, /*emit_host_arrow=*/false);
+          // Node→node flow arrow within this graph launch.
+          if (graph_launch && prev.has_ts && cur.has_ts) {
+            uint64_t gfid = flow_id++;
+            trace << ",\n{\"ph\":\"s\",\"id\":" << gfid
+                  << ",\"pid\":" << rec.gpu.device_id
+                  << ",\"tid\":" << prev.tid
+                  << ",\"ts\":" << prev.ts << ",\"name\":\"graph\",\"cat\":\"graph\"}";
+            trace << ",\n{\"ph\":\"f\",\"bp\":\"e\",\"id\":" << gfid
+                  << ",\"pid\":" << rec.gpu.device_id
+                  << ",\"tid\":" << cur.tid
+                  << ",\"ts\":" << cur.ts << ",\"name\":\"graph\",\"cat\":\"graph\"}";
+          }
+          prev = cur;
+        }
       }
     }
   }
@@ -1215,6 +1239,10 @@ void WriteProtoTraceImpl(const char* filepath) {
   std::unordered_map<uint64_t, std::vector<uint64_t>> alloc_out_flows;
   // gpu_recv_flows[slot*1000+op_ord] = fids where GPU slice emits ph='f' (arrow ends at GPU op)
   std::unordered_map<uint64_t, std::vector<uint64_t>> gpu_recv_flows;
+  // Graph node→node flows: sender op emits ph='s', next op emits ph='f'.
+  // Keyed by slot*1000+op_ord (same scheme as gpu_recv_flows).
+  std::unordered_map<uint64_t, uint64_t> graph_node_out_flows; // sender key → fid
+  std::unordered_map<uint64_t, uint64_t> graph_node_in_flows;  // receiver key → fid
 
   for (size_t c = 0; c < g_records.size(); ++c) {
     HipApiRecordExt* chunk = g_records[c];
@@ -1225,7 +1253,7 @@ void WriteProtoTraceImpl(const char* filepath) {
       if (!rec.api_name || rec.gpu.gpu_op_count == 0) continue;
       uint64_t slot = base + i;
 
-      // CPU→GPU flow (first op only, only when GPU timestamps valid)
+      const bool is_graph_rec = rec.api_name && strncmp(rec.api_name, "hipGraphLaunch", 14) == 0;
       if (rec.gpu.begin_ns > 0) {
         uint64_t fid = flow_id++;
         cpu_gpu_flow[slot] = fid;
@@ -1260,6 +1288,21 @@ void WriteProtoTraceImpl(const char* filepath) {
       };
       assign_mem_flows(rec.gpu);
       for (const HipGpuActivityExt* n = rec.gpu.next; n; n = n->next) assign_mem_flows(*n);
+
+      // Graph node→node flows (within this launch only).
+      if (is_graph_rec && rec.gpu.gpu_op_count >= 2) {
+        const HipGpuActivityExt* prev_op = &rec.gpu;
+        uint32_t prev_ord = 0;
+        for (const HipGpuActivityExt* cur_op = rec.gpu.next; cur_op; cur_op = cur_op->next) {
+          if (prev_op->begin_ns > 0 && cur_op->begin_ns > 0) {
+            uint64_t fid = flow_id++;
+            graph_node_out_flows[slot * 1000 + prev_ord]     = fid;
+            graph_node_in_flows [slot * 1000 + prev_ord + 1] = fid;
+          }
+          prev_op = cur_op;
+          ++prev_ord;
+        }
+      }
     }
   }
 
@@ -1398,10 +1441,16 @@ void WriteProtoTraceImpl(const char* filepath) {
       uint64_t ts_ns    = rec.start_ns;
       uint64_t dur_ns   = (rec.end_ns > rec.start_ns) ? (rec.end_ns - rec.start_ns) : 1;
 
-      // CPU→GPU outgoing flow on CPU BEGIN
+      const bool is_graph_emit = rec.api_name &&
+                                 strncmp(rec.api_name, "hipGraphLaunch", 14) == 0;
       std::vector<uint64_t> cpu_out;
       auto cfit = cpu_gpu_flow.find(slot);
-      if (cfit != cpu_gpu_flow.end()) cpu_out.push_back(cfit->second);
+      // For non-graph launches: emit FLOW_OUT on the CPU slice (standard dep arrow).
+      // For graph launches: skip cpu_out here; the FLOW_OUT will be emitted on the
+      // GPU track at the first node's begin time, so the arrow is fully GPU-anchored
+      // and doesn't visually overlap with a preceding graph launch's GPU execution.
+      if (cfit != cpu_gpu_flow.end() && !is_graph_emit)
+        cpu_out.push_back(cfit->second);
 
       std::vector<std::pair<uint64_t,std::string>> cpu_anns;
       {
@@ -1505,18 +1554,34 @@ void WriteProtoTraceImpl(const char* filepath) {
           }
         }
 
-        // GPU emits ph='f' for: CPU→GPU flow AND memory→GPU flows (all terminate here)
+        // GPU emits ph='f' for: CPU→GPU flow AND memory→GPU flows (all terminate here).
+        // For graph launches the FLOW_OUT is placed on the CPU track at the GPU node's
+        // begin time (not at the CPU call time) so the arrow anchor doesn't fall inside
+        // the previous graph launch's GPU execution window.
         in_flows_vec.clear();
-        if (first_op && cfit != cpu_gpu_flow.end()) in_flows_vec.push_back(cfit->second);
+        if (first_op && cfit != cpu_gpu_flow.end()) {
+          if (is_graph_emit)
+            EmitFlowEventSorted(sorted_pkts, cpu_uuid, g_ts, cfit->second, true);
+          in_flows_vec.push_back(cfit->second);
+        }
         first_op = false;
         auto rfit = gpu_recv_flows.find(slot * 1000 + op_ord);
         if (rfit != gpu_recv_flows.end())
           in_flows_vec.insert(in_flows_vec.end(), rfit->second.begin(), rfit->second.end());
+        // Graph node→node: this op receives from previous node
+        auto gnif = graph_node_in_flows.find(slot * 1000 + op_ord);
+        if (gnif != graph_node_in_flows.end()) in_flows_vec.push_back(gnif->second);
+
+        // Graph node→node: this op sends to next node
+        std::vector<uint64_t> out_flows_vec;
+        auto gnof = graph_node_out_flows.find(slot * 1000 + op_ord);
+        if (gnof != graph_node_out_flows.end()) out_flows_vec.push_back(gnof->second);
+
         ++op_ord;
 
         uint64_t gpu_name_iid = intern_evt(gpu_name);
         EmitSliceSorted(sorted_pkts, gpu_uuid, g_ts, g_dur, gpu_name,
-                        gpu_name_iid, kCatGpu, gpu_anns, {}, in_flows_vec);
+                        gpu_name_iid, kCatGpu, gpu_anns, out_flows_vec, in_flows_vec);
       };
 
       if (rec.gpu.gpu_op_count > 0) {
