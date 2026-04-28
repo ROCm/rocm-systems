@@ -86,12 +86,12 @@ Panel Config:
           avg: AVG(End_Timestamp - Start_Timestamp)
           unit: ns
           peak: N/A
-          pop: true
+          pop: false
         Kernel Time (Cycles):
           avg: AVG($GRBM_GUI_ACTIVE_PER_XCD)
           unit: Cycle
           peak: N/A
-          pop: true
+          pop: false
         SIMD Utilization:
           value: SUM(100 * SQ_BUSY_CU_CYCLES) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
           unit: Percent
@@ -101,4 +101,4 @@ Panel Config:
           value: GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu / (End_Timestamp - Start_Timestamp)
           unit: GHz
           peak: N/A
-          pop: true
+          pop: false

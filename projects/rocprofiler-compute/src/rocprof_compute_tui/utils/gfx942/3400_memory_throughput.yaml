@@ -158,10 +158,10 @@ Panel Config:
           avg: SUM(SQC_TC_INST_REQ * 64) / SUM(End_Timestamp - Start_Timestamp)
           unit: GB/s
           peak: N/A
-          pop: true
+          pop: false
         sL1D-L2 BW:
           value: SUM((SQC_TC_DATA_READ_REQ + SQC_TC_DATA_WRITE_REQ + SQC_TC_DATA_ATOMIC_REQ) * 64) /
             SUM(End_Timestamp - Start_Timestamp)
           unit: GB/s
           peak: N/A
-          pop: true
+          pop: false
