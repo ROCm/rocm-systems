@@ -1748,7 +1748,6 @@ TEST_F(DeviceTest, full_lifecycle_with_realistic_data)
  *
  * Objective: Verify SDMA usage percentage is computed correctly from deltas.
  */
-#if defined(AMD_SMI_SDMA_SUPPORTED) && AMD_SMI_SDMA_SUPPORTED == 1
 TEST_F(DeviceTest, sdma_delta_computation)
 {
     SetupAllMetricsSupported();
@@ -1775,7 +1774,6 @@ TEST_F(DeviceTest, sdma_delta_computation)
     EXPECT_GE(metrics2.sdma_usage, 0U);
     EXPECT_LE(metrics2.sdma_usage, 100U);
 }
-#endif
 
 // Sentinel-preservation regression tests (originally added in PR #5145).
 // These verify that the device layer copies arrays verbatim — including

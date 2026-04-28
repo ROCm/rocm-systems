@@ -131,10 +131,6 @@ public:
                 populate_if_supported(gpu_metrics.pcie.bandwidth.inst,
                                       raw.pcie.bandwidth.inst);
             }
-            if(m_supported_metrics.bits.sdma_usage)
-            {
-                gpu_metrics.sdma_usage = m_driver->get_raw_sdma_usage();
-            }
         } catch(const std::runtime_error& e)
         {
             LOG_DEBUG("GPU device [{}] metrics query failed: {}", m_index, e.what());
@@ -196,16 +192,14 @@ private:
             return m_supported_metrics.value != 0;
         }
 
-        // These fields are uint16_t in AMD SMI but widened in the POD; pass the
-        // 16-bit sentinel explicitly so detection still works after widening.
         m_supported_metrics.bits.current_socket_power =
             is_metric_supported(raw.current_socket_power, METRIC_VALUE_NOT_SUPPORTED_16);
         m_supported_metrics.bits.average_socket_power =
             is_metric_supported(raw.average_socket_power, METRIC_VALUE_NOT_SUPPORTED_16);
-        m_supported_metrics.bits.hotspot_temperature = is_metric_supported<int64_t>(
-            raw.hotspot_temperature, METRIC_VALUE_NOT_SUPPORTED_16);
-        m_supported_metrics.bits.edge_temperature = is_metric_supported<int64_t>(
-            raw.edge_temperature, METRIC_VALUE_NOT_SUPPORTED_16);
+        m_supported_metrics.bits.hotspot_temperature =
+            is_metric_supported(raw.hotspot_temperature, METRIC_VALUE_NOT_SUPPORTED_16);
+        m_supported_metrics.bits.edge_temperature =
+            is_metric_supported(raw.edge_temperature, METRIC_VALUE_NOT_SUPPORTED_16);
         m_supported_metrics.bits.gfx_activity =
             is_metric_supported(raw.gfx_activity, METRIC_VALUE_NOT_SUPPORTED_16);
         m_supported_metrics.bits.umc_activity =
@@ -258,16 +252,13 @@ private:
 
     void initialize_sdma_support()
     {
-#if defined(AMD_SMI_SDMA_SUPPORTED) && AMD_SMI_SDMA_SUPPORTED == 1
         m_supported_metrics.bits.sdma_usage = m_driver->is_sdma_supported() ? 1 : 0;
-#endif
     }
 
     void collect_sdma_metrics([[maybe_unused]] const enabled_metrics& enabled_cfg,
                               [[maybe_unused]] uint64_t               timestamp,
                               [[maybe_unused]] metrics&               out)
     {
-#if defined(AMD_SMI_SDMA_SUPPORTED) && AMD_SMI_SDMA_SUPPORTED == 1
         if(!enabled_cfg.bits.sdma_usage || !m_supported_metrics.bits.sdma_usage)
         {
             return;
@@ -293,7 +284,6 @@ private:
         {
             LOG_DEBUG("GPU device [{}] SDMA query failed: {}", m_index, e.what());
         }
-#endif
     }
 
     static std::string format_supported_metrics(const enabled_metrics& met)

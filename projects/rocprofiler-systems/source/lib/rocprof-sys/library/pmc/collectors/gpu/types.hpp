@@ -94,8 +94,8 @@ struct metrics
     uint32_t                             current_socket_power = 0;
     uint32_t                             average_socket_power = 0;
     uint64_t                             memory_usage         = 0;
-    int64_t                              hotspot_temperature  = 0;
-    int64_t                              edge_temperature     = 0;
+    uint32_t                             hotspot_temperature  = 0;
+    uint32_t                             edge_temperature     = 0;
     uint32_t                             gfx_activity         = 0;
     uint32_t                             umc_activity         = 0;
     uint32_t                             mm_activity          = 0;

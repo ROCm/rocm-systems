@@ -54,9 +54,9 @@ public:
         return usage;
     }
 
-#if defined(AMD_SMI_SDMA_SUPPORTED) && AMD_SMI_SDMA_SUPPORTED == 1
     [[nodiscard]] uint64_t get_raw_sdma_usage() const
     {
+#if defined(AMD_SMI_SDMA_SUPPORTED) && AMD_SMI_SDMA_SUPPORTED == 1
         uint32_t num_processes = 0;
         check(amdsmi_get_gpu_process_list(m_handle, &num_processes, nullptr),
               "get_gpu_process_list (count)");
@@ -76,15 +76,21 @@ public:
             cumulative += proc.sdma_usage;
         }
         return cumulative;
+#else
+        return 0;
+#endif
     }
 
     [[nodiscard]] bool is_sdma_supported() const noexcept
     {
+#if defined(AMD_SMI_SDMA_SUPPORTED) && AMD_SMI_SDMA_SUPPORTED == 1
         uint32_t num_processes = 0;
         return amdsmi_get_gpu_process_list(m_handle, &num_processes, nullptr) ==
                AMDSMI_STATUS_SUCCESS;
-    }
+#else
+        return false;
 #endif
+    }
 
 private:
     static void check(amdsmi_status_t status, const char* func)
