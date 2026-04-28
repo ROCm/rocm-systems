@@ -311,11 +311,22 @@ rocpd_processor_t::handle(const pmc_event_with_sample& _pmc)
 {
     auto track_primary_key = m_data_processor->insert_string(_pmc.track_name.c_str());
 
-    auto agent_primary_key =
-        m_agent_manager
-            ->get_agent_by_type_index(_pmc.device_id,
-                                      static_cast<agent_type>(_pmc.device_type))
-            .base_id;
+    // Per-thread CPU counters (TF-3: thread_cpu_time / thread_peak_memory /
+    // thread_context_switch / thread_page_fault) are not tied to a hardware
+    // agent — get_agent_by_type_index() throws for them. Insert the event +
+    // sample but skip the pmc_event row (which requires an agent FK).
+    int64_t agent_primary_key = -1;
+    try
+    {
+        agent_primary_key =
+            m_agent_manager
+                ->get_agent_by_type_index(_pmc.device_id,
+                                          static_cast<agent_type>(_pmc.device_type))
+                .base_id;
+    } catch(const std::exception&)
+    {
+        // No matching hardware agent — treat as a thread-scoped counter.
+    }
 
     auto event_id = m_data_processor->insert_event(
         track_primary_key, _pmc.stack_id, _pmc.parent_stack_id, _pmc.correlation_id,
@@ -323,9 +334,12 @@ rocpd_processor_t::handle(const pmc_event_with_sample& _pmc)
     m_data_processor->insert_sample(_pmc.track_name.c_str(), _pmc.timestamp_ns, event_id,
                                     "{}");
 
-    m_data_processor->insert_pmc_event(event_id, agent_primary_key,
-                                       _pmc.pmc_info_name.c_str(), _pmc.value,
-                                       _pmc.event_metadata.c_str());
+    if(agent_primary_key >= 0)
+    {
+        m_data_processor->insert_pmc_event(event_id, agent_primary_key,
+                                           _pmc.pmc_info_name.c_str(), _pmc.value,
+                                           _pmc.event_metadata.c_str());
+    }
 }
 
 void

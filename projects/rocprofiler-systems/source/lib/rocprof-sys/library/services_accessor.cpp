@@ -62,6 +62,7 @@ thread_local int64_t tl_logical_tid      = -1;
 #    include <csignal>
 #    include <ctime>
 #    include <libunwind.h>
+#    include <sys/resource.h>
 #    include <ucontext.h>
 
 extern "C" void
@@ -129,6 +130,25 @@ rocprofsys_sampling_signal_handler(int sig, siginfo_t* /*info*/, void* ucontext)
             rec.metrics.cpu_ns =
                 (_cputime_ts.tv_sec * INT64_C(1'000'000'000)) + _cputime_ts.tv_nsec;
             rec.metrics.valid.set(0);
+        }
+    }
+
+    // TF-3: capture per-thread rusage so emit_resolved_to_trace_cache can
+    // produce the legacy thread_peak_memory / thread_context_switch /
+    // thread_page_fault Perfetto counter tracks. RUSAGE_THREAD is a Linux
+    // extension; getrusage is a thin syscall wrapper and behaves like an
+    // async-signal-safe operation in glibc (matches the legacy
+    // backtrace_metrics::sample call from develop).
+    {
+        struct rusage _ru = {};
+        if(::getrusage(RUSAGE_THREAD, &_ru) == 0)
+        {
+            rec.metrics.mem_peak_kb = static_cast<int64_t>(_ru.ru_maxrss);
+            rec.metrics.ctx_swch    = static_cast<int64_t>(_ru.ru_nvcsw + _ru.ru_nivcsw);
+            rec.metrics.page_flt    = static_cast<int64_t>(_ru.ru_minflt + _ru.ru_majflt);
+            rec.metrics.valid.set(1);  // mem_peak_kb
+            rec.metrics.valid.set(2);  // ctx_swch
+            rec.metrics.valid.set(3);  // page_flt
         }
     }
 

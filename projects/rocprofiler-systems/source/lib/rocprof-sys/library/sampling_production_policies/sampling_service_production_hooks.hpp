@@ -398,6 +398,48 @@ sampling_service<default_sampling_policies>::emit_resolved_to_trace_cache(int64_
                 }
             }
 
+            // TF-3: per-thread process-sampling counter tracks
+            // (thread_cpu_time / thread_peak_memory / thread_context_switch /
+            // thread_page_fault). Mirrors legacy backtrace_metrics
+            // cache_backtrace_metrics_events. Each timer sample emits one
+            // pmc_event_with_sample per metric; perfetto_processor turns these
+            // into per-thread counter tracks.
+            const auto emit_thread_counter = [&](size_t      cat_enum,
+                                                 const char* track_prefix, uint64_t ts_ns,
+                                                 double value) {
+                std::string trk =
+                    std::string{ track_prefix } + " [" + std::to_string(seq_id) + "]";
+                trace_cache::get_buffer_storage().store(
+                    trace_cache::pmc_event_with_sample{
+                        cat_enum, trk, static_cast<size_t>(ts_ns), std::string{ "{}" },
+                        /*stack_id*/ 0, /*parent_stack_id*/ 0,
+                        /*correlation_id*/ 0, /*call_stack*/ std::string{},
+                        /*line_info*/ std::string{}, static_cast<uint32_t>(sys_id),
+                        /*device_type*/ uint8_t{ 0 }, std::string{ track_prefix }, value,
+                        std::optional<int64_t>{} });
+            };
+            for(auto const& s : timer_samples)
+            {
+                if(!info->is_valid_lifetime({ s.beg_ns, s.end_ns })) continue;
+                const uint64_t mid_ns = s.end_ns;
+                if(s.metrics.valid.test(0))
+                    emit_thread_counter(ROCPROFSYS_CATEGORY_THREAD_CPU_TIME,
+                                        "thread_cpu_time", mid_ns,
+                                        static_cast<double>(s.metrics.cpu_ns) * 1.0e-9);
+                if(s.metrics.valid.test(1))
+                    emit_thread_counter(
+                        ROCPROFSYS_CATEGORY_THREAD_PEAK_MEMORY, "thread_peak_memory",
+                        mid_ns, static_cast<double>(s.metrics.mem_peak_kb) / 1024.0);
+                if(s.metrics.valid.test(2))
+                    emit_thread_counter(ROCPROFSYS_CATEGORY_THREAD_CONTEXT_SWITCH,
+                                        "thread_context_switch", mid_ns,
+                                        static_cast<double>(s.metrics.ctx_swch));
+                if(s.metrics.valid.test(3))
+                    emit_thread_counter(ROCPROFSYS_CATEGORY_THREAD_PAGE_FAULT,
+                                        "thread_page_fault", mid_ns,
+                                        static_cast<double>(s.metrics.page_flt));
+            }
+
             // Legacy path: also emit via perfetto_sink when opt-in flag is set.
             if(legacy) perfetto_sink_.emit_timer(tid, nullptr, timer_samples);
         }
