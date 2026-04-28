@@ -6,7 +6,7 @@
 #include <sstream>
 #include <string>
 
-using namespace rocprofiler_compute_tool;
+using namespace rocm_compute;
 
 #define ROCPROFILER_CALL(result, msg)                                                                  \
     {                                                                                                  \

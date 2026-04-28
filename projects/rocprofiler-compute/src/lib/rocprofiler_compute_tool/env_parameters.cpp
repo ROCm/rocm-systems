@@ -4,7 +4,7 @@
 
 #include <string>
 
-using namespace rocprofiler_compute_tool;
+using namespace rocm_compute;
 
 const char* env_parameters_impl_t::get_output_path()
 {

@@ -3,7 +3,7 @@
 #include "mocks.h"
 
 #include "gsl_assert.h"
-using namespace rocprofiler_compute_tool;
+using namespace rocm_compute;
 
 const char* mock_env_parameters_t::get_output_path()
 {

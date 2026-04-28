@@ -3,7 +3,7 @@
 #pragma once
 #include <rocprofiler-sdk/rocprofiler.h>
 
-namespace rocprofiler_compute_tool
+namespace rocm_compute
 {
 class sdk_wrapper_t
 {
@@ -73,4 +73,4 @@ public:
     void query_record_counter_id(rocprofiler_counter_instance_id_t id,
                                  rocprofiler_counter_id_t*         counter_id) override;
 };
-}  // namespace rocprofiler_compute_tool
+}  // namespace rocm_compute

@@ -8,7 +8,7 @@ class test_sdk_callbacks_t : public ::testing::Test
 {
 protected:
     void SetUp() override;
-    uint64_t dispatch_kernel_with_dispatch_info(const rocprofiler_compute_tool::kernel_dispatch_info_t& dispatch_info,
+    uint64_t dispatch_kernel_with_dispatch_info(const rocm_compute::kernel_dispatch_info_t& dispatch_info,
                                                 const std::vector<std::string>& counters_pmc0,
                                                 const std::vector<std::string>& counters_pmc1) const;
 
@@ -25,8 +25,8 @@ protected:
                                                     const std::vector<std::string>& v1);
 
     std::shared_ptr<mock_sdk_wrapper_t>                                 m_sdk_wrapper;
-    std::shared_ptr<rocprofiler_compute_tool::sdk_callbacks_impl_t> m_sdk_callbacks;
-    std::unique_ptr<rocprofiler_compute_tool::tool_data_t>          m_tool_data;
+    std::shared_ptr<rocm_compute::sdk_callbacks_impl_t> m_sdk_callbacks;
+    std::unique_ptr<rocm_compute::tool_data_t>          m_tool_data;
     const std::vector<std::string> m_counters_pmc0     = {"counter0", "counter1"};
     const std::vector<std::string> m_counters_pmc1     = {"counter2"};
     const uint64_t                 m_invalid_config_id = ~0u;
@@ -34,13 +34,13 @@ protected:
 
 class test_sdk_callbacks_multiplexing_t
     : public test_sdk_callbacks_t
-    , public testing::WithParamInterface<rocprofiler_compute_tool::IterationMultiplexingMode>
+    , public testing::WithParamInterface<rocm_compute::IterationMultiplexingMode>
 {
 protected:
     void SetUp() override;
 
-    rocprofiler_compute_tool::IterationMultiplexingMode m_multiplexing_mode =
-        rocprofiler_compute_tool::IterationMultiplexingMode::Disabled;
+    rocm_compute::IterationMultiplexingMode m_multiplexing_mode =
+        rocm_compute::IterationMultiplexingMode::Disabled;
 };
 
 struct kernel_filtering_test_params_t

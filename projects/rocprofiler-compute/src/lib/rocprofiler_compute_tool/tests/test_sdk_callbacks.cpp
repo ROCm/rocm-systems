@@ -5,7 +5,7 @@
 #include "fmt/format.h"
 #include "rocprofiler_compute_tool.h"
 
-using namespace rocprofiler_compute_tool;
+using namespace rocm_compute;
 
 TEST_F(test_sdk_callbacks_t, ProvidedSameKernelWithMultiplexingDisabled_DispatchCbReturnsFirstPmc)
 {
@@ -317,9 +317,9 @@ void test_sdk_callbacks_multiplexing_t::SetUp()
 INSTANTIATE_TEST_SUITE_P(
     Multiplexing,
     test_sdk_callbacks_multiplexing_t,
-    ::testing::Values(rocprofiler_compute_tool::IterationMultiplexingMode::Disabled,
-                      rocprofiler_compute_tool::IterationMultiplexingMode::Kernel,
-                      rocprofiler_compute_tool::IterationMultiplexingMode::Launch));
+    ::testing::Values(rocm_compute::IterationMultiplexingMode::Disabled,
+                      rocm_compute::IterationMultiplexingMode::Kernel,
+                      rocm_compute::IterationMultiplexingMode::Launch));
 
 //////////////////////////////////////////////////////////////////////////
 /// test_sdk_callbacks_kernel_filtering_t

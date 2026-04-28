@@ -6,7 +6,7 @@
 #include "mocks.h"
 #include "rocprofiler_compute_tool.h"
 
-using namespace rocprofiler_compute_tool;
+using namespace rocm_compute;
 
 TEST_F(test_rocprofiler_compute_tool_t, ProvidedEmptyOutputPath_Throws)
 {

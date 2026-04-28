@@ -7,7 +7,7 @@
 #include "sdk_callbacks.h"
 #include "sdk_wrapper.h"
 
-class mock_env_parameters_t : public rocprofiler_compute_tool::env_parameters_t
+class mock_env_parameters_t : public rocm_compute::env_parameters_t
 {
 public:
     const char* get_output_path() override;
@@ -34,7 +34,7 @@ private:
     std::string m_pc_sampling_mode            = m_non_empty_str;
 };
 
-class mock_sdk_wrapper_t : public rocprofiler_compute_tool::sdk_wrapper_t
+class mock_sdk_wrapper_t : public rocm_compute::sdk_wrapper_t
 {
 public:
     struct dispatch_counting_service_info_t
@@ -104,7 +104,7 @@ private:
     std::vector<std::string>                      m_counter_names;
 };
 
-class mock_counters_writer_t : public rocprofiler_compute_tool::counters_writer_t
+class mock_counters_writer_t : public rocm_compute::counters_writer_t
 {
 public:
     struct write_counters_info_t
@@ -113,14 +113,14 @@ public:
         std::vector<uint64_t> kernel_id;
     };
 
-    void write_counters(const rocprofiler_compute_tool::tool_data_t& tool_data) override;
+    void write_counters(const rocm_compute::tool_data_t& tool_data) override;
     const std::vector<write_counters_info_t>& get_write_counters_info() const;
 
 private:
     std::vector<write_counters_info_t> m_write_counters_args;
 };
 
-class mock_sdk_callbacks_t : public rocprofiler_compute_tool::sdk_callbacks_t
+class mock_sdk_callbacks_t : public rocm_compute::sdk_callbacks_t
 {
 public:
     struct dispatch_callback_info_t
@@ -143,15 +143,15 @@ public:
 
     void dispatch_callback(rocprofiler_dispatch_counting_service_data_t dispatch_data,
                            rocprofiler_counter_config_id_t*             config,
-                           rocprofiler_compute_tool::tool_data_t&       tool_data) override;
+                           rocm_compute::tool_data_t&       tool_data) override;
 
     void record_callback(rocprofiler_dispatch_counting_service_data_t dispatch_data,
                          rocprofiler_counter_record_t*                record_data,
                          size_t                                       record_count,
-                         rocprofiler_compute_tool::tool_data_t&       tool_data) override;
+                         rocm_compute::tool_data_t&       tool_data) override;
 
     void tool_tracing_callback(rocprofiler_callback_tracing_record_t  record,
-                               rocprofiler_compute_tool::tool_data_t& tool_data) override;
+                               rocm_compute::tool_data_t& tool_data) override;
 
     // Test accessors
     const std::vector<dispatch_callback_info_t>& get_dispatch_callback_info() const;
@@ -164,7 +164,7 @@ private:
     std::vector<tracing_callback_info_t>  m_tracing_callback_info;
 };
 
-class mock_pc_sampling_collector_t : public pc_sampling_collector::pc_sampling_collector_t
+class mock_pc_sampling_collector_t : public rocm_compute::pc_sampling_collector_t
 {
 public:
     void on_code_object_load(const rocprofiler_callback_tracing_code_object_load_data_t& info) override;

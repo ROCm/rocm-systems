@@ -12,7 +12,7 @@
 #include <regex>
 #include <sstream>
 
-using namespace rocprofiler_compute_tool;
+using namespace rocm_compute;
 using kernel_symbol_data_t = rocprofiler_callback_tracing_code_object_kernel_symbol_register_data_t;
 
 sdk_callbacks_impl_t::sdk_callbacks_impl_t(const std::shared_ptr<sdk_wrapper_t>& sdk_wrapper)

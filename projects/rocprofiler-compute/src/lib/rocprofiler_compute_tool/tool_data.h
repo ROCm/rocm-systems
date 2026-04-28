@@ -10,12 +10,7 @@
 #include <set>
 #include <string>
 
-using pc_sampling_collector_ptr =
-    rocprof_compute::synchronized_t<pc_sampling_collector::pc_sampling_collector_t::Ptr>;
-
-using PcSamplingMode = pc_sampling_collector::PcSamplingMode;
-
-namespace rocprofiler_compute_tool
+namespace rocm_compute
 {
 class sdk_callbacks_t;
 
@@ -87,7 +82,8 @@ struct tool_data_t
     std::vector<std::pair<uint64_t, uint64_t>> kernel_filter_ranges{};
     std::vector<counter_info_record_t>         counter_records;
     std::set<uint64_t>                         target_kernel_ids{};
-    pc_sampling_collector_ptr                  pc_sampling_collector;
+
+    synchronized_t<pc_sampling_collector_t::Ptr> pc_sampling_collector;
     std::shared_ptr<sdk_callbacks_t>           sdk_callbacks{};
 };
-}  // namespace rocprofiler_compute_tool
+}  // namespace rocm_compute

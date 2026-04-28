@@ -10,12 +10,10 @@
 
 #include <unistd.h>
 
-#include <fstream>
 #include <iostream>
 #include <sstream>
 
-using namespace rocprofiler_compute_tool;
-using namespace pc_sampling_collector;
+using namespace rocm_compute;
 
 static std::shared_ptr<env_parameters_t> g_input_parameters = std::make_shared<env_parameters_impl_t>();
 static std::shared_ptr<sdk_wrapper_t> g_sdk_wrapper = std::make_shared<sdk_wrapper_impl_t>();
@@ -42,7 +40,7 @@ void test_knobs::reset_cfg()
     g_cfg.reset();
 }
 
-namespace rocprofiler_compute_tool
+namespace rocm_compute
 {
 static rocprofiler_context_id_t& get_client_ctx()
 {

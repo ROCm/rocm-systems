@@ -9,7 +9,7 @@
 #include <shared_mutex>
 #include <type_traits>
 
-namespace rocprof_compute
+namespace rocm_compute
 {
 inline namespace common
 {

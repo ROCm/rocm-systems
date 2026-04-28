@@ -5,7 +5,9 @@
 #include <fstream>
 #include <iostream>
 
-void rocprofiler_compute_tool::csv_counters_writer_t::write_counters(const tool_data_t& tool_data)
+using namespace rocm_compute;
+
+void csv_counters_writer_t::write_counters(const tool_data_t& tool_data)
 {
     std::ofstream ofs(tool_data.output_filename);
     if (!ofs.is_open())

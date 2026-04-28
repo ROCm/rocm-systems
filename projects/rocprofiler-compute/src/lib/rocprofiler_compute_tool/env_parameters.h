@@ -1,9 +1,8 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier:  MIT
 #pragma once
-#include "pc_sampling_collector.h"
 
-namespace rocprofiler_compute_tool
+namespace rocm_compute
 {
 class env_parameters_t
 {
@@ -27,4 +26,4 @@ public:
     const char* get_kernel_filter_range() override;
     const char* get_pc_sampling_mode() const override;
 };
-}  // namespace rocprofiler_compute_tool
+}  // namespace rocm_compute

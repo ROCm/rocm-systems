@@ -3,7 +3,7 @@
 #include "pc_sampling_collector.h"
 
 
-using namespace pc_sampling_collector;
+using namespace rocm_compute;
 
 pc_sampling_collector_impl_t::pc_sampling_collector_impl_t() {}
 

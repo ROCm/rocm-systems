@@ -3,7 +3,7 @@
 #pragma once
 #include "sdk_callbacks.h"
 
-namespace rocprofiler_compute_tool
+namespace rocm_compute
 {
 
 class counters_writer_t
@@ -18,4 +18,4 @@ class csv_counters_writer_t : public counters_writer_t
 public:
     void write_counters(const tool_data_t& tool_data) override;
 };
-}  // namespace rocprofiler_compute_tool
+}  // namespace rocm_compute

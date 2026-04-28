@@ -12,7 +12,7 @@
 #include <unordered_map>
 #include <vector>
 
-namespace rocprofiler_compute_tool
+namespace rocm_compute
 {
 
 class sdk_callbacks_t
@@ -70,4 +70,4 @@ private:
     static std::string cxa_demangle(const std::string& mangled_name, int* status);
     static std::vector<std::string> split_by_regex(const std::string& s, const std::string& regex_pattern);
 };
-}  // namespace rocprofiler_compute_tool
+}  // namespace rocm_compute
