@@ -69,7 +69,6 @@ jobs:
       ROCPROFSYS_CI: 'ON'
       ROCPROFSYS_MAX_THREADS: '64'
       ROCPROFSYS_KEEP_TEST_OUTPUT: '0'
-      ROCM_PATH: /opt/rocm
 
     steps:
     - &sparse-checkout
@@ -83,6 +82,7 @@ jobs:
       shell: bash
       run: |
         echo "/opt/rocm/bin" >> $GITHUB_PATH
+        echo "ROCM_PATH=/opt/rocm" >> $GITHUB_ENV
         echo "LD_LIBRARY_PATH=/opt/rocm/lib:${LD_LIBRARY_PATH}" >> $GITHUB_ENV
 
     - name: Install Packages
@@ -268,7 +268,6 @@ jobs:
       ROCPROFSYS_CI: 'ON'
       ROCPROFSYS_MAX_THREADS: '64'
       ROCPROFSYS_KEEP_TEST_OUTPUT: '0'
-      ROCM_PATH: /opt/rocm
 
     steps:
     - *sparse-checkout
@@ -277,6 +276,7 @@ jobs:
       shell: bash
       run: |
         echo "/opt/rocm/bin" >> $GITHUB_PATH
+        echo "ROCM_PATH=/opt/rocm" >> $GITHUB_ENV
         echo "LD_LIBRARY_PATH=/opt/rocm/lib:${LD_LIBRARY_PATH}" >> $GITHUB_ENV
 
     - name: Install System Dependency Packages
@@ -403,7 +403,6 @@ jobs:
       ROCPROFSYS_CAUSAL_BACKEND: perf
       ROCPROFSYS_CI: 'ON'
       ROCPROFSYS_MAX_THREADS: '64'
-      ROCM_PATH: /opt/rocm
       OMPI_ALLOW_RUN_AS_ROOT: 1
       OMPI_ALLOW_RUN_AS_ROOT_CONFIRM: 1
 
@@ -414,6 +413,7 @@ jobs:
       shell: bash
       run: |
         echo "/opt/rocm/bin" >> $GITHUB_PATH
+        echo "ROCM_PATH=/opt/rocm" >> $GITHUB_ENV
         echo "LD_LIBRARY_PATH=/opt/rocm/lib:${LD_LIBRARY_PATH}" >> $GITHUB_ENV
 
     - name: Install Packages
@@ -426,6 +426,8 @@ jobs:
         command: |
           cd projects/rocprofiler-systems/
           apt-get update &&
+          apt-get remove -y --purge 'libopenmpi-dev' 'libopenmpi3' 'openmpi-bin' 'openmpi-common' &&
+          apt-get autoremove -y --purge &&
           apt-get upgrade -y &&
           apt-get install -y libmpich-dev mpich &&
           apt-get autoclean

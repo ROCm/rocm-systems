@@ -64,7 +64,6 @@ jobs:
       ROCPROFSYS_CI: 'ON'
       ROCPROFSYS_MAX_THREADS: '64'
       ROCPROFSYS_KEEP_TEST_OUTPUT: '0'
-      ROCM_PATH: /opt/rocm
 
     steps:
     - &sparse-checkout
@@ -90,6 +89,7 @@ jobs:
       shell: bash
       run: |
         echo "/opt/rocm/bin" >> $GITHUB_PATH
+        echo "ROCM_PATH=/opt/rocm" >> $GITHUB_ENV
         echo "LD_LIBRARY_PATH=/opt/rocm/lib:${LD_LIBRARY_PATH}" >> $GITHUB_ENV
 
     - name: Configure, Build and Test
@@ -221,7 +221,6 @@ jobs:
       ROCPROFSYS_CI: 'ON'
       ROCPROFSYS_MAX_THREADS: '64'
       ROCPROFSYS_KEEP_TEST_OUTPUT: '0'
-      ROCM_PATH: /opt/rocm
 
     steps:
     - *sparse-checkout
@@ -230,6 +229,7 @@ jobs:
       shell: bash
       run: |
         echo "/opt/rocm/bin" >> $GITHUB_PATH
+        echo "ROCM_PATH=/opt/rocm" >> $GITHUB_ENV
         echo "LD_LIBRARY_PATH=/opt/rocm/lib:${LD_LIBRARY_PATH}" >> $GITHUB_ENV
 
     - name: Install System Dependency Packages
