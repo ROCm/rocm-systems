@@ -83,9 +83,23 @@ namespace dispatch_log {
 constexpr uint32_t DISPATCH_LOG_RECORD_COUNT = 65536;
 
 // Record-type tags written by FW into mec_dispatch_record_16::record_type.
+//
+// These constant values match the firmware's actual contract on this
+// substrate (verified empirically via graphbench end-to-end on gbt350,
+// 2026-04-28: the record with record_type==2's GPU timestamp is
+// consistently EARLIER than the record with record_type==1's GPU
+// timestamp by ~64 µs per dispatch — i.e. record_type==2 is the
+// dispatch-START record (written when MEC begins processing the AQL
+// packet) and record_type==1 is the dispatch-END / EOP record).
+//
+// Note: cpc_tracing's `core/inc/mec_dispatch_record.h` comment claims
+// the OPPOSITE (1=start, 2=end). The empirical contract on the
+// installed gfx950 MEC firmware (gc_9_5_0_mec.bin, mode 0640, dated
+// 2026-03-26) wins; cpc_tracing's comment is stale relative to the
+// shipped firmware.
 enum {
-  DISPATCH_LOG_RECORD_START = 1,
-  DISPATCH_LOG_RECORD_END   = 2,
+  DISPATCH_LOG_RECORD_START = 2,
+  DISPATCH_LOG_RECORD_END   = 1,
 };
 
 // FW-written 16-byte record. Layout is fixed by the firmware contract.
