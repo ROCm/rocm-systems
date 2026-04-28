@@ -167,7 +167,7 @@ TEST_CASE("Unit_hipGraphAllocNodeMemReuse_SameStream_SameSizes") {
  *  - The memory reuse optimization only works for exact size matches. Different sizes
  *    require separate physical allocations acquired directly from the OS.
  *  - This test creates three graphs with different allocation sizes and verifies that
- *    the high water mark reflects the sum of all allocations, NOT just the largest.
+ *    the current memory usage is sum of all 3 allocations for amd
  * Test source
  * ------------------------
  *  - /unit/graph/hipGraphAllocNodeMemReuse.cc
