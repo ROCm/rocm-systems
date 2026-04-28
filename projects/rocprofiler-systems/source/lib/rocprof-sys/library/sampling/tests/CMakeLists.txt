@@ -130,6 +130,41 @@ target_include_directories(
     PUBLIC ${PROJECT_SOURCE_DIR}/source/lib ${PROJECT_SOURCE_DIR}/source/lib/rocprof-sys
 )
 
+# ── R-3 integration test: real config per-TID signal filtering ───────────────
+# This test calls the REAL get_sampling_signals() from core/config.cpp, so it
+# must be a separate executable that does NOT include config_stubs.cpp.
+# It links rocprofiler-systems-core-library directly (available in the build tree
+# because this CMakeLists is included from a subdirectory of the project root).
+if(TARGET rocprofiler-systems-core-library)
+    add_executable(
+        rocprof-sys-sampling-config-integration-tests
+        integration/get_sampling_signals_integration_test.cpp
+    )
+    target_link_libraries(
+        rocprof-sys-sampling-config-integration-tests
+        PRIVATE
+            rocprof-sys-sampling-library
+            rocprofiler-systems-core-library
+            rocprofiler-systems::rocprofiler-systems-interface-library
+            GTest::gtest
+    )
+    target_include_directories(
+        rocprof-sys-sampling-config-integration-tests
+        PRIVATE
+            ${PROJECT_SOURCE_DIR}/source/lib
+            ${PROJECT_SOURCE_DIR}/source/lib/rocprof-sys
+    )
+    add_test(
+        NAME rocprof-sys-sampling-config-integration-tests
+        COMMAND rocprof-sys-sampling-config-integration-tests
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+    )
+    set_tests_properties(
+        rocprof-sys-sampling-config-integration-tests
+        PROPERTIES LABELS "sampling;integration;config;r3" TIMEOUT 60
+    )
+endif()
+
 # ── Stress test (TSAN, Linux only) ───────────────────────────────────────────
 # Kept as a separate binary: TSAN link flags are incompatible with the main binary.
 if(ROCPROFSYS_BUILD_SAMPLING_TSAN AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
