@@ -264,6 +264,7 @@ else()
     list(APPEND SRCS
                 core/driver/lite/linux/amd_lite_linux_driver.cpp
                 core/driver/lite/linux/amd_lite_linux_transport.cpp
+                core/runtime/amd_lite_aql_queue.cpp
                 core/runtime/amd_lite_agent.cpp)
   endif()
 endif()

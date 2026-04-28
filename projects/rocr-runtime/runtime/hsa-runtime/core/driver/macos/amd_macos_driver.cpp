@@ -613,7 +613,7 @@ hsa_status_t MacOsDriver::ReadDirectComputeRptr(const DirectComputeQueue& queue,
 
 hsa_status_t MacOsDriver::CreateQueue(uint32_t, HSA_QUEUE_TYPE, uint32_t,
                                       HSA::hsa_amd_queue_priority_internal_t,
-                                      uint32_t, void*, uint64_t, HsaEvent*,
+                                      uint32_t, void*, uint64_t, uint64_t, HsaEvent*,
                                       HsaQueueResource&) const {
   return HSA_STATUS_ERROR;
 }

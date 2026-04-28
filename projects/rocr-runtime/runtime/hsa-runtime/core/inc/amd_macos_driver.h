@@ -129,7 +129,8 @@ class MacOsDriver final : public core::Driver, private lite::DirectQueuePlatform
   hsa_status_t CreateQueue(uint32_t node_id, HSA_QUEUE_TYPE type, uint32_t queue_pct,
                            HSA::hsa_amd_queue_priority_internal_t priority,
                            uint32_t sdma_engine_id, void* queue_addr,
-                           uint64_t queue_size_bytes, HsaEvent* event,
+                           uint64_t queue_size_bytes,
+                           uint64_t queue_metadata_size_bytes, HsaEvent* event,
                            HsaQueueResource& queue_resource) const override;
   hsa_status_t DestroyQueue(HSA_QUEUEID queue_id) const override;
   hsa_status_t UpdateQueue(HSA_QUEUEID queue_id, uint32_t queue_pct,

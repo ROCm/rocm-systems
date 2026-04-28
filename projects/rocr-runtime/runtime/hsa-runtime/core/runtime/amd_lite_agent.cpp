@@ -18,6 +18,7 @@
 #include <cstdlib>
 #include <cstring>
 
+#include "core/inc/amd_lite_aql_queue.h"
 #include "core/inc/amd_lite_linux_driver.h"
 #include "core/inc/amd_memory_region.h"
 #include "core/inc/exceptions.h"
@@ -33,6 +34,8 @@ constexpr uint32_t kDefaultWavefrontSize = 32;
 constexpr uint32_t kDefaultLdsSize = 64 * 1024;
 constexpr uint32_t kDefaultMaxWavesPerSimd = 16;
 constexpr uint64_t kFallbackLocalMemSize = 256ull * 1024 * 1024;
+constexpr uint32_t kMinAqlSize = 0x40;
+constexpr uint32_t kMaxAqlSize = 0x20000;
 
 void CopyHsaString(void* value, const char* text) {
   constexpr size_t kHsaNameSize = 64;
@@ -150,13 +153,40 @@ hsa_status_t LiteGpuAgent::IterateCache(
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t LiteGpuAgent::QueueCreate(size_t, hsa_queue_type32_t, uint64_t,
-                                       core::HsaEventCallback, void*,
+hsa_status_t LiteGpuAgent::QueueCreate(size_t size, hsa_queue_type32_t queue_type,
+                                       uint64_t flags,
+                                       core::HsaEventCallback event_callback, void* data,
                                        uint32_t, uint32_t,
+                                       bool metadata_queue,
                                        core::Queue** queue) {
   if (queue == nullptr) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   *queue = nullptr;
-  return HSA_STATUS_ERROR;
+  if (metadata_queue) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  if (queue_type != HSA_QUEUE_TYPE_SINGLE && queue_type != HSA_QUEUE_TYPE_MULTI) {
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
+  if ((flags & HSA_AMD_QUEUE_CREATE_DEVICE_MEM_RING_BUF) != 0 ||
+      (flags & HSA_AMD_QUEUE_CREATE_DEVICE_MEM_QUEUE_DESCRIPTOR) != 0) {
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
+  if (!IsPowerOfTwo(size) || size < kMinAqlSize || size > kMaxAqlSize) {
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
+
+  auto* shared_queue = static_cast<core::SharedQueue*>(
+      core::Runtime::runtime_singleton_->system_allocator()(
+          sizeof(core::SharedQueue), MemoryRegion::GetPageSize(),
+          core::MemoryRegion::AllocateQueueObject, node_id()));
+  if (shared_queue == nullptr) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+  std::memset(shared_queue, 0, sizeof(*shared_queue));
+
+  try {
+    *queue = new LiteAqlQueue(shared_queue, this, size, flags, event_callback, data);
+  } catch (...) {
+    core::Runtime::runtime_singleton_->system_deallocator()(shared_queue);
+    throw;
+  }
+  return HSA_STATUS_SUCCESS;
 }
 
 hsa_status_t LiteGpuAgent::DmaCopy(void* dst, const void* src, size_t size) {

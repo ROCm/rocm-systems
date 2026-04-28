@@ -159,7 +159,7 @@ class MacGpuAgent : public GpuAgentInt {
   hsa_status_t QueueCreate(size_t size, hsa_queue_type32_t queue_type, uint64_t flags,
                            core::HsaEventCallback event_callback, void* data,
                            uint32_t private_segment_size, uint32_t group_segment_size,
-                           core::Queue** queue) override;
+                           bool metadata_queue, core::Queue** queue) override;
   hsa_status_t DmaCopy(void* dst, const void* src, size_t size) override;
   hsa_status_t DmaCopyStatus(core::Agent& dst_agent, core::Agent& src_agent,
                              uint32_t* engine_ids_mask) override;
