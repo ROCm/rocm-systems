@@ -50,6 +50,18 @@ public:
   /// @retval false The block falls through to the next.
   bool has_terminator() const { return has_terminator_; }
 
+  /// @brief Last instruction in the block, or nullptr for an empty block.
+  [[nodiscard]] const Instruction *terminator() const;
+
+  /// @brief CFG successor blocks.
+  ///
+  /// @details Edges are non-owning links between blocks returned by build().
+  /// They are valid as long as the returned vector owns the blocks.
+  [[nodiscard]] const std::vector<BasicBlock *> &successors() const { return successors_; }
+
+  /// @brief CFG predecessor blocks, inverse of successors().
+  [[nodiscard]] const std::vector<BasicBlock *> &predecessors() const { return predecessors_; }
+
   /// @brief Mutable access to the intrusive list of instructions.
   /// @returns Reference to the instruction list.
   InstructionList &instructions() { return instructions_; }
@@ -66,6 +78,7 @@ public:
 
 private:
   void add_instruction(std::unique_ptr<Instruction> inst);
+  void add_successor(BasicBlock &successor);
 
   uint64_t start_offset_;
   uint32_t size_ = 0;
@@ -73,6 +86,8 @@ private:
   bool has_terminator_ = false;
   InstructionList instructions_;
   std::vector<std::unique_ptr<Instruction>> storage_;
+  std::vector<BasicBlock *> successors_;
+  std::vector<BasicBlock *> predecessors_;
 };
 
 } // namespace rocjitsu

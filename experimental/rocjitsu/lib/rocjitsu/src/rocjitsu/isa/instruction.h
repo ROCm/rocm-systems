@@ -14,9 +14,11 @@
 #include <cassert>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 namespace rocjitsu {
 
@@ -170,10 +172,10 @@ public:
   /// @returns Encoding size in bytes.
   int size() const { return size_; }
 
-  /// @brief Whether this instruction is a branch.
-  /// @retval true The instruction has the BRANCH flag set.
-  /// @retval false The instruction is not a branch.
-  bool is_branch() const { return flags_ & BRANCH; }
+  /// @brief Whether this instruction is a direct branch.
+  /// @retval true The instruction has BRANCH or COND_BRANCH metadata.
+  /// @retval false The instruction is not a direct branch.
+  bool is_branch() const { return flags_ & (BRANCH | COND_BRANCH); }
 
   /// @brief Whether this instruction is a memory operation.
   /// @retval true The instruction has the MEMORY_OP flag set.
@@ -189,6 +191,34 @@ public:
   bool is_mfma() const { return flags_ & MFMA; }
 
   bool is_accvgpr() const { return flags_ & ACCVGPR; }
+
+  /// @brief Registers implicitly written by this instruction.
+  ///
+  /// @details Explicit operands are handled by InstDefUse. Generated ISA
+  /// subclasses override this for side effects such as SCC writes. The generic
+  /// base deliberately stays empty so analysis does not infer semantics from
+  /// display mnemonics.
+  virtual void implicit_defs(uint8_t wf_size, std::vector<RegisterRef> &defs) const {
+    (void)wf_size;
+    (void)defs;
+  }
+
+  /// @brief Registers implicitly read by this instruction.
+  ///
+  /// @details Generated ISA subclasses override this for condition registers
+  /// not encoded as explicit source operands, such as EXEC/VCC/SCC on scalar
+  /// conditional branches.
+  virtual void implicit_uses(uint8_t wf_size, std::vector<RegisterRef> &uses) const {
+    (void)wf_size;
+    (void)uses;
+  }
+
+  /// @brief Signed byte offset for a direct branch target.
+  ///
+  /// @details Generated ISA subclasses override this for direct branches whose
+  /// label operand is a signed instruction-count delta. Indirect branches and
+  /// non-branches return nullopt.
+  [[nodiscard]] virtual std::optional<int64_t> branch_offset_bytes() const { return std::nullopt; }
 
   /// @brief Raw encoding words of this instruction.
   /// @returns Pointer to the encoding words (size()/4 words), or nullptr if not set.

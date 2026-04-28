@@ -241,7 +241,7 @@ constexpr uint8_t kOpWmmaF32_16x16x16_F16 = 64;
 /// and XOR-48 for lanes 16-47.
 std::vector<uint32_t> lower_mfma_f32_16x16x16_f16(const Instruction &inst,
                                                   [[maybe_unused]] rj_code_arch_t host_arch,
-                                                  uint64_t offset, const RegisterLiveness &liveness,
+                                                  uint64_t offset, const LivenessAnalysis &liveness,
                                                   const LaneLayout *guest_layout,
                                                   const LaneLayout *host_layout) {
   const auto *raw = inst.raw_encoding();
@@ -261,12 +261,12 @@ std::vector<uint32_t> lower_mfma_f32_16x16x16_f16(const Instruction &inst,
 
   assert(src0 >= 256 && src1 >= 256 && "MFMA VGPR sources expected");
 
-  auto exec_save_opt = liveness.find_free_sgpr_pair();
+  auto exec_save_opt = liveness.find_free_sgpr_pair(offset);
   if (!exec_save_opt)
     return {};
   const uint8_t kExecSave = static_cast<uint8_t>(*exec_save_opt);
 
-  auto tmp_sgpr_opt = liveness.find_free_sgpr(kExecSave + 2);
+  auto tmp_sgpr_opt = liveness.find_free_sgpr(offset, kExecSave + 2);
   if (!tmp_sgpr_opt)
     return {};
   const uint8_t kTmpSgpr = static_cast<uint8_t>(*tmp_sgpr_opt);
@@ -351,7 +351,7 @@ std::vector<uint32_t> lower_accvgpr_write([[maybe_unused]] const Instruction &in
 // ---------------------------------------------------------------------------
 
 std::vector<uint32_t> expand_waitcnt(const Instruction &inst, uint32_t, uint64_t,
-                                     const RegisterLiveness &, const LaneLayout *,
+                                     const LivenessAnalysis &, const LaneLayout *,
                                      const LaneLayout *) {
   if (!inst.raw_encoding())
     return {};
@@ -360,26 +360,26 @@ std::vector<uint32_t> expand_waitcnt(const Instruction &inst, uint32_t, uint64_t
 }
 
 std::vector<uint32_t> expand_v_lshl_add_u64(const Instruction &inst, uint32_t, uint64_t,
-                                            const RegisterLiveness &, const LaneLayout *,
+                                            const LivenessAnalysis &, const LaneLayout *,
                                             const LaneLayout *) {
   return lower_v_lshl_add_u64(inst, ROCJITSU_CODE_ARCH_RDNA4);
 }
 
 std::vector<uint32_t> expand_accvgpr_read(const Instruction &inst, uint32_t, uint64_t,
-                                          const RegisterLiveness &, const LaneLayout *,
+                                          const LivenessAnalysis &, const LaneLayout *,
                                           const LaneLayout *) {
   return lower_accvgpr_read(inst, ROCJITSU_CODE_ARCH_RDNA4);
 }
 
 std::vector<uint32_t> expand_accvgpr_write(const Instruction &inst, uint32_t, uint64_t,
-                                           const RegisterLiveness &, const LaneLayout *,
+                                           const LivenessAnalysis &, const LaneLayout *,
                                            const LaneLayout *) {
   return lower_accvgpr_write(inst, ROCJITSU_CODE_ARCH_RDNA4);
 }
 
 std::vector<uint32_t> expand_mfma_f32_16x16x16_f16(const Instruction &inst, uint32_t arch,
                                                    uint64_t offset,
-                                                   const RegisterLiveness &liveness,
+                                                   const LivenessAnalysis &liveness,
                                                    const LaneLayout *guest,
                                                    const LaneLayout *host) {
   return lower_mfma_f32_16x16x16_f16(inst, static_cast<rj_code_arch_t>(arch), offset, liveness,
@@ -422,7 +422,7 @@ SemanticTranslator::SemanticTranslator(rj_code_arch_t guest, rj_code_arch_t host
 }
 
 std::vector<uint32_t> SemanticTranslator::try_lower_expand(const Instruction &inst, uint64_t offset,
-                                                           const RegisterLiveness &liveness) const {
+                                                           const LivenessAnalysis &liveness) const {
   const uint16_t op = inst.opcode();
   TranslationRule key{op, RuleAction::Expand, 0, 0, nullptr, nullptr, nullptr, nullptr};
   auto it = std::lower_bound(expand_rules_.begin(), expand_rules_.end(), key);

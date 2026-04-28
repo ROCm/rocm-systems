@@ -4963,6 +4963,10 @@ class CodeGenerator:
                     if self._enc_has_semantics(child):
                         has_sem = True
                 for inst in all_insts:
+                    inst_sem = (
+                        self.semantics.instructions.get(inst.name)
+                        if self.semantics else None
+                    )
                     # Resolve the instruction's own encoding field names.
                     # Instructions from alternate sub-encodings (e.g.,
                     # VOP3_SDST_ENC under ENC_VOP3) carry their original
@@ -5025,8 +5029,6 @@ class CodeGenerator:
                             )
                         elif opnd.name in inst_field_names:
                             opr_type = opnd.operand_type
-                            inst_sem = (self.semantics.instructions.get(inst.name)
-                                        if self.semantics else None)
                             if (inst_sem and inst_sem.accvgpr_srcs
                                     and opnd.is_input):
                                 opr_type = 'OPR_SRC_VGPR_OR_ACCVGPR'
@@ -5051,6 +5053,50 @@ class CodeGenerator:
                             'void execute_impl(amdgpu::Wavefront &wf)'
                         )
                     )
+                    # Dataflow and CFG metadata is emitted on the concrete ISA
+                    # instruction class, not inferred by generic analysis from
+                    # mnemonic strings. This follows docs/dbt_dbi_plan.md:
+                    # BasicBlock asks the virtual branch_offset_bytes() for
+                    # direct branch targets, and InstDefUse asks the virtual
+                    # implicit_defs/uses() for architectural registers that do
+                    # not appear in the explicit operand arrays.
+                    label_operand = next(
+                        (op.name for op in inst.operands
+                         if op.operand_type == 'OPR_LABEL'),
+                        None,
+                    )
+                    if (
+                        inst_sem
+                        and inst_sem.semantic_class in ('branch', 'cbranch')
+                        and label_operand
+                    ):
+                        public_members.append(
+                            cgen.Statement(
+                                'std::optional<int64_t> branch_offset_bytes() const override'
+                            )
+                        )
+                    if (
+                        inst_sem
+                        and inst_sem.sets_scc
+                        and inst_sem.sets_scc != 'none'
+                    ):
+                        public_members.append(
+                            cgen.Statement(
+                                'void implicit_defs(uint8_t wf_size, '
+                                'std::vector<RegisterRef> &defs) const override'
+                            )
+                        )
+                    if (
+                        inst_sem
+                        and inst_sem.semantic_class == 'cbranch'
+                        and inst_sem.branch_condition
+                    ):
+                        public_members.append(
+                            cgen.Statement(
+                                'void implicit_uses(uint8_t wf_size, '
+                                'std::vector<RegisterRef> &uses) const override'
+                            )
+                        )
                     # Embed the full mnemonic (with suffix) as a string literal
                     # so the encoding base gets a string_view to static storage.
                     rule = self.isa_spec.profile.mnemonic_rule(enc.enc_name)
@@ -5062,10 +5108,7 @@ class CodeGenerator:
                     ] + opnd_ctor_init
                     init_list = ', '.join(init_list_parts)
                     # Check if this is a memory instruction to set MEMORY_OP flag
-                    _mem_sem = (
-                        self.semantics.instructions.get(inst.name)
-                        if self.semantics else None
-                    )
+                    _mem_sem = inst_sem
                     _MEM_CLASSES = frozenset({
                         'smem_load', 'smem_store',
                         'flat_load', 'flat_store', 'flat_atomic',
@@ -5183,6 +5226,20 @@ class CodeGenerator:
 
                     if _mem_sem and _mem_sem.semantic_class in _MEM_CLASSES:
                         ctor_body_parts.append('flags_ |= MEMORY_OP;')
+                    # Control-flow flags drive BasicBlock splitting and CFG
+                    # edge construction. Keep this metadata generated from the
+                    # semantic classification so generic code does not have to
+                    # know AMDGPU instruction names or opcode values.
+                    if _mem_sem and _mem_sem.semantic_class == 'branch':
+                        ctor_body_parts.append('flags_ |= BRANCH;')
+                    if _mem_sem and _mem_sem.semantic_class == 'cbranch':
+                        ctor_body_parts.append('flags_ |= COND_BRANCH;')
+                    if _mem_sem and _mem_sem.semantic_class == 'endpgm':
+                        ctor_body_parts.append('flags_ |= PROGRAM_TERMINATOR;')
+                    if _mem_sem and _mem_sem.semantic_class in (
+                        'scalar_setpc', 'scalar_swappc', 'scalar_call',
+                    ):
+                        ctor_body_parts.append('flags_ |= INDIRECT_BRANCH;')
 
                     _waitcnt_names = {
                         'S_WAITCNT', 'S_WAIT_LOADCNT', 'S_WAIT_STORECNT',
@@ -5326,6 +5383,59 @@ class CodeGenerator:
 
                     inst_classes.append(s)
                     class_func_impls.append(class_ctor_impl)
+                    if (
+                        inst_sem
+                        and inst_sem.semantic_class in ('branch', 'cbranch')
+                        and label_operand
+                    ):
+                        class_func_impls.append(cgen.Line(
+                            f'std::optional<int64_t> '
+                            f'{inst.fmt_name}::branch_offset_bytes() const {{\n'
+                            f'  return static_cast<int64_t>('
+                            f'static_cast<int16_t>({label_operand}.encoding_value_)) * 4;\n'
+                            f'}}'
+                        ))
+                    if (
+                        inst_sem
+                        and inst_sem.sets_scc
+                        and inst_sem.sets_scc != 'none'
+                    ):
+                        class_func_impls.append(cgen.Line(
+                            f'void {inst.fmt_name}::implicit_defs('
+                            f'uint8_t wf_size, std::vector<RegisterRef> &defs) const {{\n'
+                            f'  (void)wf_size;\n'
+                            f'  defs.push_back(RegisterRef{{RegClass::SCC, 0, 1}});\n'
+                            f'}}'
+                        ))
+                    if (
+                        inst_sem
+                        and inst_sem.semantic_class == 'cbranch'
+                        and inst_sem.branch_condition
+                    ):
+                        cond = inst_sem.branch_condition
+                        if cond.startswith('exec'):
+                            ref_expr = (
+                                'RegisterRef{RegClass::EXEC, 0, '
+                                'static_cast<uint8_t>(wf_size > 32 ? 2 : 1)}'
+                            )
+                        elif cond.startswith('vcc'):
+                            ref_expr = (
+                                'RegisterRef{RegClass::VCC, 0, '
+                                'static_cast<uint8_t>(wf_size > 32 ? 2 : 1)}'
+                            )
+                        elif cond.startswith('scc'):
+                            ref_expr = 'RegisterRef{RegClass::SCC, 0, 1}'
+                        else:
+                            ref_expr = ''
+                        if ref_expr:
+                            wf_size_use = '' if 'wf_size' in ref_expr else '  (void)wf_size;\n'
+                            class_func_impls.append(cgen.Line(
+                                f'void {inst.fmt_name}::implicit_uses('
+                                f'uint8_t wf_size, std::vector<RegisterRef> &uses) const {{\n'
+                                f'{wf_size_use}'
+                                f'  uses.push_back({ref_expr});\n'
+                                f'}}'
+                            ))
                     class_func_impls.append(exec_impl)
 
                 # Build include lists for .cpp files
@@ -5697,11 +5807,78 @@ class CodeGenerator:
         )
         opnd_type_def_file.gen_code()
 
+    @staticmethod
+    def _reg_class_for_prefix(prefix: str) -> str | None:
+        """Map an MRISA register-name prefix to a DBT analysis register class."""
+        match prefix.lower():
+            case 's':
+                return 'RegClass::SGPR'
+            case 'v':
+                return 'RegClass::VGPR'
+            case 'acc':
+                return 'RegClass::ACC_VGPR'
+            case _:
+                return None
+
+    @staticmethod
+    def _named_register_ref_expr(name: str) -> str | None:
+        """Return a C++ RegisterRef expression for well-known named registers.
+
+        MRISA selector ranges already tell us about ordinary s/v/acc registers.
+        This helper covers singleton selector values such as EXEC_LO, VCC_HI,
+        M0, FLAT_SCRATCH_LO, and TTMP registers. It intentionally returns None
+        for XNACK_MASK and other names that are not yet represented in
+        RegClass; treating those as ordinary SGPRs would be less correct than
+        leaving them untracked until the analysis model grows that class.
+        """
+        normalized = name.upper()
+
+        if normalized == 'EXEC_LO':
+            return (
+                'RegisterRef{RegClass::EXEC, 0, '
+                'static_cast<uint8_t>(size_bits_ > 32 ? mask_width : 1)}'
+            )
+        if normalized == 'EXEC_HI':
+            return 'RegisterRef{RegClass::EXEC, 1, 1}'
+        if normalized == 'EXEC' or normalized == 'EXEC_ALL':
+            return 'RegisterRef{RegClass::EXEC, 0, mask_width}'
+        if normalized == 'VCC_LO':
+            return (
+                'RegisterRef{RegClass::VCC, 0, '
+                'static_cast<uint8_t>(size_bits_ > 32 ? mask_width : 1)}'
+            )
+        if normalized == 'VCC_HI':
+            return 'RegisterRef{RegClass::VCC, 1, 1}'
+        if normalized == 'VCC' or normalized == 'VCC_ALL':
+            return 'RegisterRef{RegClass::VCC, 0, mask_width}'
+        if normalized == 'SCC' or normalized == 'SRC_SCC':
+            return 'RegisterRef{RegClass::SCC, 0, 1}'
+        if normalized == 'M0':
+            return 'RegisterRef{RegClass::M0, 0, 1}'
+        if normalized == 'FLAT_SCRATCH_LO':
+            return (
+                'RegisterRef{RegClass::FLAT_SCRATCH, 0, '
+                'static_cast<uint8_t>(size_bits_ > 32 ? 2 : 1)}'
+            )
+        if normalized == 'FLAT_SCRATCH_HI':
+            return 'RegisterRef{RegClass::FLAT_SCRATCH, 1, 1}'
+        if normalized == 'FLAT_SCRATCH' or normalized == 'FLAT_SCRATCH_ALL':
+            return 'RegisterRef{RegClass::FLAT_SCRATCH, 0, 2}'
+        if normalized == 'PC' or normalized == 'PC_ALL':
+            return 'RegisterRef{RegClass::PC, 0, 1}'
+
+        ttmp = re.fullmatch(r'TTMP(\d+)', normalized)
+        if ttmp:
+            return f'RegisterRef{{RegClass::TTMP, {ttmp.group(1)}, reg_width}}'
+
+        return None
+
     def gen_operand(self) -> None:
         """Generate the ISA-specific Operand class with name resolution."""
         arch = self.isa_spec.arch_name
 
         switch_cases = []
+        ref_switch_cases = []
         opnd_types_with_selectors = set()
 
         for opnd_sel in self.isa_spec.opnd_selectors:
@@ -5712,6 +5889,7 @@ class CodeGenerator:
             )
 
             case_lines = []
+            ref_case_lines = []
             for pattern in opnd_sel.name_patterns:
                 if pattern.kind == OperandNamePattern.REG_RANGE:
                     case_lines.append(
@@ -5720,6 +5898,14 @@ class CodeGenerator:
                         f'return reg_name("{pattern.prefix}", '
                         f'encoding_value_ - {opsel_name}::{pattern.min_enum}, size_bits_);'
                     )
+                    reg_class = self._reg_class_for_prefix(pattern.prefix)
+                    if reg_class is not None:
+                        ref_case_lines.append(
+                            f'if (encoding_value_ >= {opsel_name}::{pattern.min_enum} && '
+                            f'encoding_value_ <= {opsel_name}::{pattern.max_enum}) '
+                            f'return RegisterRef{{{reg_class}, static_cast<uint16_t>('
+                            f'encoding_value_ - {opsel_name}::{pattern.min_enum}), reg_width}};'
+                        )
                 elif pattern.kind == OperandNamePattern.POS_INT:
                     case_lines.append(
                         f'if (encoding_value_ >= {opsel_name}::{pattern.min_enum} && '
@@ -5744,6 +5930,12 @@ class CodeGenerator:
                         f'if (encoding_value_ == {opsel_name}::{pattern.enum_name}) '
                         f'return "{pattern.operand_name}";'
                     )
+                    ref_expr = self._named_register_ref_expr(pattern.operand_name)
+                    if ref_expr is not None:
+                        ref_case_lines.append(
+                            f'if (encoding_value_ == {opsel_name}::{pattern.enum_name}) '
+                            f'return {ref_expr};'
+                        )
                 elif pattern.kind == OperandNamePattern.LITERAL:
                     case_lines.append(
                         f'if (encoding_value_ == {opsel_name}::{pattern.enum_name}) '
@@ -5755,6 +5947,12 @@ class CodeGenerator:
             switch_cases.append(
                 f'case OperandType::{opnd_sel.operand_type}: '
                 f'{{ {case_body} }}'
+            )
+            ref_case_lines.append('break;')
+            ref_case_body = ' '.join(ref_case_lines)
+            ref_switch_cases.append(
+                f'case OperandType::{opnd_sel.operand_type}: '
+                f'{{ {ref_case_body} }}'
             )
 
         no_sel_types = [
@@ -5792,12 +5990,27 @@ class CodeGenerator:
             f'}}'
         )
 
+        ref_switch_body = '\n'.join(ref_switch_cases)
+        ref_impl = (
+            f'std::optional<RegisterRef> Operand::to_register_ref(uint8_t wf_size) const {{\n'
+            f'const auto reg_width = static_cast<uint8_t>(size_bits_ > 32 ? size_bits_ / 32 : 1);\n'
+            f'const auto mask_width = static_cast<uint8_t>(wf_size > 32 ? 2 : 1);\n'
+            f'switch (opr_type_) {{\n'
+            f'{ref_switch_body}\n'
+            f'default:\n'
+            f'  break;\n'
+            f'}}\n'
+            f'return std::nullopt;\n'
+            f'}}'
+        )
+
         class_def = [
             cgen.Line(
                 'class Operand : public IsaOperand<Isa> {\n'
                 'public:\n'
                 'Operand(int size_bits, OperandType opr_type, int encoding_value);\n'
                 'std::string name() const override;\n'
+                'std::optional<RegisterRef> to_register_ref(uint8_t wf_size) const override;\n'
                 'uint32_t read_scalar(const amdgpu::Wavefront &wf) const override;\n'
                 'uint32_t read_lane(const amdgpu::Wavefront &wf, uint32_t lane) const override;\n'
                 'void write_scalar(amdgpu::Wavefront &wf, uint32_t val) const override;\n'
@@ -5818,6 +6031,7 @@ class CodeGenerator:
                 '}'
             ),
             cgen.Line(name_impl),
+            cgen.Line(ref_impl),
         ]
 
         reg_name_helper = cgen.Line(

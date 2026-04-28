@@ -1,6 +1,8 @@
 // Copyright (c) 2025-2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "rocjitsu/analysis/def_use_chain.h"
+#include "rocjitsu/analysis/register_set.h"
 #include "rocjitsu/code/dbt/encoding_translator.h"
 #include "rocjitsu/code/dbt/generated/encoding_cdna4_to_rdna4.h"
 #include "rocjitsu/code/dbt/generated/encoding_fields.h"
@@ -32,15 +34,33 @@
 #include "rocjitsu/code/dbt/generated/legalization_rdna3_to_rdna4.h"
 #include "rocjitsu/code/dbt/generated/legalization_rdna4_to_cdna4.h"
 #include "rocjitsu/code/dbt/generated/legalization_types.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna4/operand.h"
+#include "rocjitsu/isa/instruction.h"
 
 #include <gtest/gtest.h>
 
 #include <bit>
 #include <cstdint>
 #include <cstring>
+#include <vector>
 
 namespace rocjitsu {
 namespace {
+
+class DefUseTestInstruction : public Instruction {
+public:
+  DefUseTestInstruction(Operand &dst, Operand &src) : Instruction("def_use_test", nullptr) {
+    dst_operands_[0] = &dst;
+    src_operands_[0] = &src;
+    num_dst_ = 1;
+    num_src_ = 1;
+  }
+
+  void implicit_defs(uint8_t wf_size, std::vector<RegisterRef> &defs) const override {
+    (void)wf_size;
+    defs.push_back({RegClass::SCC, 0, 1});
+  }
+};
 
 TEST(CoherencyRemap, Gfx940ToGfx12AgentScope) {
   auto coh = remap_gfx940_to_gfx12({1, 0, 0});
@@ -261,6 +281,41 @@ CHECK_NO_ILLEGAL(rdna3_to_rdna4)
 CHECK_NO_ILLEGAL(rdna4_to_cdna4)
 
 #undef CHECK_NO_ILLEGAL
+
+TEST(RegisterSetAnalysis, KeepsRegisterClassesSeparate) {
+  RegisterSet set;
+  set.expand({RegClass::SGPR, 4, 1});
+
+  EXPECT_TRUE(set.contains({RegClass::SGPR, 4, 1}));
+  EXPECT_FALSE(set.contains({RegClass::VGPR, 4, 1}));
+  EXPECT_FALSE(set.contains({RegClass::ACC_VGPR, 4, 1}));
+}
+
+TEST(RegisterSetAnalysis, GeneratedCdna4OperandsMapToRegisterRefs) {
+  cdna4::Operand sgpr(32, cdna4::OperandType::OPR_SRC, cdna4::OpSelSrc::OPR_SRC_SGPR_MIN + 7);
+  cdna4::Operand vgpr(32, cdna4::OperandType::OPR_SRC, cdna4::OpSelSrc::OPR_SRC_VGPR_MIN + 7);
+  cdna4::Operand exec64(64, cdna4::OperandType::OPR_SRC, cdna4::OpSelSrc::OPR_SRC_EXEC_LO);
+  cdna4::Operand imm32(32, cdna4::OperandType::OPR_SIMM32, 123);
+
+  ASSERT_TRUE(sgpr.to_register_ref(64).has_value());
+  EXPECT_EQ(*sgpr.to_register_ref(64), (RegisterRef{RegClass::SGPR, 7, 1}));
+  ASSERT_TRUE(vgpr.to_register_ref(64).has_value());
+  EXPECT_EQ(*vgpr.to_register_ref(64), (RegisterRef{RegClass::VGPR, 7, 1}));
+  ASSERT_TRUE(exec64.to_register_ref(64).has_value());
+  EXPECT_EQ(*exec64.to_register_ref(64), (RegisterRef{RegClass::EXEC, 0, 2}));
+  EXPECT_FALSE(imm32.to_register_ref(64).has_value());
+}
+
+TEST(RegisterSetAnalysis, InstDefUseIncludesExplicitAndImplicitRegisters) {
+  cdna4::Operand dst(32, cdna4::OperandType::OPR_SDST, cdna4::OpSelSdst::OPR_SDST_SGPR_MIN);
+  cdna4::Operand src(32, cdna4::OperandType::OPR_SSRC, cdna4::OpSelSsrc::OPR_SSRC_SGPR_MIN);
+  DefUseTestInstruction inst(dst, src);
+
+  InstDefUse du(inst, 64);
+  EXPECT_TRUE(du.defs.contains({RegClass::SGPR, 0, 1}));
+  EXPECT_TRUE(du.defs.contains({RegClass::SCC, 0, 1}));
+  EXPECT_TRUE(du.uses.contains({RegClass::SGPR, 0, 1}));
+}
 
 } // namespace
 } // namespace rocjitsu

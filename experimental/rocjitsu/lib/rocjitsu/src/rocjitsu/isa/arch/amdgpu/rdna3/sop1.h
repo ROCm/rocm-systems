@@ -50,6 +50,7 @@ class SBrevB32Sop1 : public Sop1 {
 public:
   SBrevB32Sop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_defs(uint8_t wf_size, std::vector<RegisterRef> &defs) const override;
   Operand sdst;
   Operand ssrc0;
 };
@@ -58,6 +59,7 @@ class SBrevB64Sop1 : public Sop1 {
 public:
   SBrevB64Sop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_defs(uint8_t wf_size, std::vector<RegisterRef> &defs) const override;
   Operand sdst;
   Operand ssrc0;
 };
@@ -66,6 +68,7 @@ class SCtzI32B32Sop1 : public Sop1 {
 public:
   SCtzI32B32Sop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_defs(uint8_t wf_size, std::vector<RegisterRef> &defs) const override;
   Operand sdst;
   Operand ssrc0;
 };
@@ -74,6 +77,7 @@ class SCtzI32B64Sop1 : public Sop1 {
 public:
   SCtzI32B64Sop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_defs(uint8_t wf_size, std::vector<RegisterRef> &defs) const override;
   Operand sdst;
   Operand ssrc0;
 };
@@ -82,6 +86,7 @@ class SClzI32U32Sop1 : public Sop1 {
 public:
   SClzI32U32Sop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_defs(uint8_t wf_size, std::vector<RegisterRef> &defs) const override;
   Operand sdst;
   Operand ssrc0;
 };
@@ -90,6 +95,7 @@ class SClzI32U64Sop1 : public Sop1 {
 public:
   SClzI32U64Sop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_defs(uint8_t wf_size, std::vector<RegisterRef> &defs) const override;
   Operand sdst;
   Operand ssrc0;
 };
@@ -98,6 +104,7 @@ class SClsI32Sop1 : public Sop1 {
 public:
   SClsI32Sop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_defs(uint8_t wf_size, std::vector<RegisterRef> &defs) const override;
   Operand sdst;
   Operand ssrc0;
 };
@@ -106,6 +113,7 @@ class SClsI32I64Sop1 : public Sop1 {
 public:
   SClsI32I64Sop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_defs(uint8_t wf_size, std::vector<RegisterRef> &defs) const override;
   Operand sdst;
   Operand ssrc0;
 };
@@ -170,6 +178,7 @@ class SAbsI32Sop1 : public Sop1 {
 public:
   SAbsI32Sop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_defs(uint8_t wf_size, std::vector<RegisterRef> &defs) const override;
   Operand sdst;
   Operand ssrc0;
 };
@@ -178,6 +187,7 @@ class SBcnt0I32B32Sop1 : public Sop1 {
 public:
   SBcnt0I32B32Sop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_defs(uint8_t wf_size, std::vector<RegisterRef> &defs) const override;
   Operand sdst;
   Operand ssrc0;
 };
@@ -186,6 +196,7 @@ class SBcnt0I32B64Sop1 : public Sop1 {
 public:
   SBcnt0I32B64Sop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_defs(uint8_t wf_size, std::vector<RegisterRef> &defs) const override;
   Operand sdst;
   Operand ssrc0;
 };
@@ -194,6 +205,7 @@ class SBcnt1I32B32Sop1 : public Sop1 {
 public:
   SBcnt1I32B32Sop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_defs(uint8_t wf_size, std::vector<RegisterRef> &defs) const override;
   Operand sdst;
   Operand ssrc0;
 };
@@ -202,6 +214,7 @@ class SBcnt1I32B64Sop1 : public Sop1 {
 public:
   SBcnt1I32B64Sop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_defs(uint8_t wf_size, std::vector<RegisterRef> &defs) const override;
   Operand sdst;
   Operand ssrc0;
 };
@@ -210,6 +223,7 @@ class SQuadmaskB32Sop1 : public Sop1 {
 public:
   SQuadmaskB32Sop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_defs(uint8_t wf_size, std::vector<RegisterRef> &defs) const override;
   Operand sdst;
   Operand ssrc0;
 };
@@ -218,6 +232,7 @@ class SQuadmaskB64Sop1 : public Sop1 {
 public:
   SQuadmaskB64Sop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_defs(uint8_t wf_size, std::vector<RegisterRef> &defs) const override;
   Operand sdst;
   Operand ssrc0;
 };
@@ -226,6 +241,7 @@ class SWqmB32Sop1 : public Sop1 {
 public:
   SWqmB32Sop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_defs(uint8_t wf_size, std::vector<RegisterRef> &defs) const override;
   Operand sdst;
   Operand ssrc0;
 };
@@ -234,6 +250,7 @@ class SWqmB64Sop1 : public Sop1 {
 public:
   SWqmB64Sop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_defs(uint8_t wf_size, std::vector<RegisterRef> &defs) const override;
   Operand sdst;
   Operand ssrc0;
 };
@@ -242,6 +259,7 @@ class SNotB32Sop1 : public Sop1 {
 public:
   SNotB32Sop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_defs(uint8_t wf_size, std::vector<RegisterRef> &defs) const override;
   Operand sdst;
   Operand ssrc0;
 };
@@ -250,6 +268,7 @@ class SNotB64Sop1 : public Sop1 {
 public:
   SNotB64Sop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_defs(uint8_t wf_size, std::vector<RegisterRef> &defs) const override;
   Operand sdst;
   Operand ssrc0;
 };

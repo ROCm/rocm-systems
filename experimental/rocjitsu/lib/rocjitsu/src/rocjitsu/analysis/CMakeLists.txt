@@ -2,5 +2,7 @@
 # SPDX-License-Identifier: MIT
 
 rj_add_object_library(rocjitsu_analysis
-    register_liveness.cpp
+    def_use_chain.cpp
+    liveness.cpp
+    register_set.cpp
 )

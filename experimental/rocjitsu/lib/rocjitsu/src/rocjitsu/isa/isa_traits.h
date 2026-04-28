@@ -10,6 +10,7 @@
 #include "rocjitsu/base/api.h"
 
 #include <concepts>
+#include <cstddef>
 #include <cstdint>
 
 namespace rocjitsu {
@@ -61,6 +62,16 @@ concept HasAccVgpr = GpuIsa<Isa> && (Isa::MAX_ACC_VGPRS_PER_WF > 0);
 /// S_WAITCNT_VMCNT etc.  False only for RDNA4 which has no S_WAITCNT at all.
 template <typename Isa>
 concept HasMonolithicWaitcnt = GpuIsa<Isa> && (Isa::WAITCNT_LGKMCNT_MASK != 0);
+
+/// @brief Aggregate register capacities used by ISA-independent dataflow sets.
+///
+/// @details These are maxima across the AMDGPU ISA families compiled into this
+/// tree. Individual ISAs may expose fewer registers; using aggregate bitset
+/// sizes keeps RegisterSet independent of a specific source/target pair.
+inline constexpr size_t ISA_MAX_SGPRS = 128;
+inline constexpr size_t ISA_MAX_VGPRS = 256;
+inline constexpr size_t ISA_MAX_ACC_VGPRS = 256;
+inline constexpr size_t ISA_MAX_SPECIAL = 32;
 
 } // namespace rocjitsu
 

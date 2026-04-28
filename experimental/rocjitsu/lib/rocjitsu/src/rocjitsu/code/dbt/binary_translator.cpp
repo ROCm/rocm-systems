@@ -3,7 +3,7 @@
 
 #include "rocjitsu/code/dbt/binary_translator.h"
 
-#include "rocjitsu/analysis/register_liveness.h"
+#include "rocjitsu/analysis/liveness.h"
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/basic_block.h"
@@ -70,6 +70,7 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
     return result;
   }
   auto blocks = BasicBlock::build(obj, *decoder);
+  LivenessAnalysis liveness(blocks, 64);
 
   std::vector<uint8_t> translated_text(text.size(), 0);
 
@@ -93,8 +94,6 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
   patcher.set_cave_start(code_end);
 
   for (const auto &block : blocks) {
-    auto liveness = RegisterLiveness::compute(*block);
-
     uint64_t offset = block->start_offset();
     for (auto it = block->instructions().begin(); it != block->instructions().end(); ++it) {
       const auto &inst = *it;

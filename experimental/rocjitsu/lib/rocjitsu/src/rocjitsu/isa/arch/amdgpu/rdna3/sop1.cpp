@@ -109,6 +109,11 @@ SBrevB32Sop1::SBrevB32Sop1(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
 }
 
+void SBrevB32Sop1::implicit_defs(uint8_t wf_size, std::vector<RegisterRef> &defs) const {
+  (void)wf_size;
+  defs.push_back(RegisterRef{RegClass::SCC, 0, 1});
+}
+
 void SBrevB32Sop1::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t val = ssrc0.read_scalar(wf);
   uint32_t result = 0;
@@ -130,6 +135,11 @@ SBrevB64Sop1::SBrevB64Sop1(const MachineInst *inst)
     ssrc0 = Operand(
         64, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+}
+
+void SBrevB64Sop1::implicit_defs(uint8_t wf_size, std::vector<RegisterRef> &defs) const {
+  (void)wf_size;
+  defs.push_back(RegisterRef{RegClass::SCC, 0, 1});
 }
 
 void SBrevB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
@@ -156,6 +166,11 @@ SCtzI32B32Sop1::SCtzI32B32Sop1(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
 }
 
+void SCtzI32B32Sop1::implicit_defs(uint8_t wf_size, std::vector<RegisterRef> &defs) const {
+  (void)wf_size;
+  defs.push_back(RegisterRef{RegClass::SCC, 0, 1});
+}
+
 void SCtzI32B32Sop1::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t val = ssrc0.read_scalar(wf);
   uint32_t result =
@@ -177,6 +192,11 @@ SCtzI32B64Sop1::SCtzI32B64Sop1(const MachineInst *inst)
     ssrc0 = Operand(
         64, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+}
+
+void SCtzI32B64Sop1::implicit_defs(uint8_t wf_size, std::vector<RegisterRef> &defs) const {
+  (void)wf_size;
+  defs.push_back(RegisterRef{RegClass::SCC, 0, 1});
 }
 
 void SCtzI32B64Sop1::execute_impl(amdgpu::Wavefront &wf) {
@@ -202,6 +222,11 @@ SClzI32U32Sop1::SClzI32U32Sop1(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
 }
 
+void SClzI32U32Sop1::implicit_defs(uint8_t wf_size, std::vector<RegisterRef> &defs) const {
+  (void)wf_size;
+  defs.push_back(RegisterRef{RegClass::SCC, 0, 1});
+}
+
 void SClzI32U32Sop1::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t val = ssrc0.read_scalar(wf);
   uint32_t result =
@@ -223,6 +248,11 @@ SClzI32U64Sop1::SClzI32U64Sop1(const MachineInst *inst)
     ssrc0 = Operand(
         64, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+}
+
+void SClzI32U64Sop1::implicit_defs(uint8_t wf_size, std::vector<RegisterRef> &defs) const {
+  (void)wf_size;
+  defs.push_back(RegisterRef{RegClass::SCC, 0, 1});
 }
 
 void SClzI32U64Sop1::execute_impl(amdgpu::Wavefront &wf) {
@@ -247,6 +277,11 @@ SClsI32Sop1::SClsI32Sop1(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
 }
 
+void SClsI32Sop1::implicit_defs(uint8_t wf_size, std::vector<RegisterRef> &defs) const {
+  (void)wf_size;
+  defs.push_back(RegisterRef{RegClass::SCC, 0, 1});
+}
+
 void SClsI32Sop1::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t val = ssrc0.read_scalar(wf);
   int32_t sval = static_cast<int32_t>(val);
@@ -269,6 +304,11 @@ SClsI32I64Sop1::SClsI32I64Sop1(const MachineInst *inst)
     ssrc0 = Operand(
         64, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+}
+
+void SClsI32I64Sop1::implicit_defs(uint8_t wf_size, std::vector<RegisterRef> &defs) const {
+  (void)wf_size;
+  defs.push_back(RegisterRef{RegClass::SCC, 0, 1});
 }
 
 void SClsI32I64Sop1::execute_impl(amdgpu::Wavefront &wf) {
@@ -443,6 +483,11 @@ SAbsI32Sop1::SAbsI32Sop1(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
 }
 
+void SAbsI32Sop1::implicit_defs(uint8_t wf_size, std::vector<RegisterRef> &defs) const {
+  (void)wf_size;
+  defs.push_back(RegisterRef{RegClass::SCC, 0, 1});
+}
+
 void SAbsI32Sop1::execute_impl(amdgpu::Wavefront &wf) {
   int32_t val = static_cast<int32_t>(ssrc0.read_scalar(wf));
   uint32_t uval = static_cast<uint32_t>(val);
@@ -464,6 +509,11 @@ SBcnt0I32B32Sop1::SBcnt0I32B32Sop1(const MachineInst *inst)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+}
+
+void SBcnt0I32B32Sop1::implicit_defs(uint8_t wf_size, std::vector<RegisterRef> &defs) const {
+  (void)wf_size;
+  defs.push_back(RegisterRef{RegClass::SCC, 0, 1});
 }
 
 void SBcnt0I32B32Sop1::execute_impl(amdgpu::Wavefront &wf) {
@@ -488,6 +538,11 @@ SBcnt0I32B64Sop1::SBcnt0I32B64Sop1(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
 }
 
+void SBcnt0I32B64Sop1::implicit_defs(uint8_t wf_size, std::vector<RegisterRef> &defs) const {
+  (void)wf_size;
+  defs.push_back(RegisterRef{RegClass::SCC, 0, 1});
+}
+
 void SBcnt0I32B64Sop1::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t val = ssrc0.read_scalar64(wf);
   uint64_t result = static_cast<uint64_t>(std::popcount(~val));
@@ -508,6 +563,11 @@ SBcnt1I32B32Sop1::SBcnt1I32B32Sop1(const MachineInst *inst)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+}
+
+void SBcnt1I32B32Sop1::implicit_defs(uint8_t wf_size, std::vector<RegisterRef> &defs) const {
+  (void)wf_size;
+  defs.push_back(RegisterRef{RegClass::SCC, 0, 1});
 }
 
 void SBcnt1I32B32Sop1::execute_impl(amdgpu::Wavefront &wf) {
@@ -532,6 +592,11 @@ SBcnt1I32B64Sop1::SBcnt1I32B64Sop1(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
 }
 
+void SBcnt1I32B64Sop1::implicit_defs(uint8_t wf_size, std::vector<RegisterRef> &defs) const {
+  (void)wf_size;
+  defs.push_back(RegisterRef{RegClass::SCC, 0, 1});
+}
+
 void SBcnt1I32B64Sop1::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t val = ssrc0.read_scalar64(wf);
   uint64_t result = static_cast<uint64_t>(std::popcount(val));
@@ -552,6 +617,11 @@ SQuadmaskB32Sop1::SQuadmaskB32Sop1(const MachineInst *inst)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+}
+
+void SQuadmaskB32Sop1::implicit_defs(uint8_t wf_size, std::vector<RegisterRef> &defs) const {
+  (void)wf_size;
+  defs.push_back(RegisterRef{RegClass::SCC, 0, 1});
 }
 
 void SQuadmaskB32Sop1::execute_impl(amdgpu::Wavefront &wf) {
@@ -579,6 +649,11 @@ SQuadmaskB64Sop1::SQuadmaskB64Sop1(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
 }
 
+void SQuadmaskB64Sop1::implicit_defs(uint8_t wf_size, std::vector<RegisterRef> &defs) const {
+  (void)wf_size;
+  defs.push_back(RegisterRef{RegClass::SCC, 0, 1});
+}
+
 void SQuadmaskB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t val = ssrc0.read_scalar64(wf);
   uint64_t result = 0;
@@ -601,6 +676,11 @@ SWqmB32Sop1::SWqmB32Sop1(const MachineInst *inst)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+}
+
+void SWqmB32Sop1::implicit_defs(uint8_t wf_size, std::vector<RegisterRef> &defs) const {
+  (void)wf_size;
+  defs.push_back(RegisterRef{RegClass::SCC, 0, 1});
 }
 
 void SWqmB32Sop1::execute_impl(amdgpu::Wavefront &wf) {
@@ -627,6 +707,11 @@ SWqmB64Sop1::SWqmB64Sop1(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
 }
 
+void SWqmB64Sop1::implicit_defs(uint8_t wf_size, std::vector<RegisterRef> &defs) const {
+  (void)wf_size;
+  defs.push_back(RegisterRef{RegClass::SCC, 0, 1});
+}
+
 void SWqmB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t val = ssrc0.read_scalar64(wf);
   uint64_t result = 0;
@@ -651,6 +736,11 @@ SNotB32Sop1::SNotB32Sop1(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
 }
 
+void SNotB32Sop1::implicit_defs(uint8_t wf_size, std::vector<RegisterRef> &defs) const {
+  (void)wf_size;
+  defs.push_back(RegisterRef{RegClass::SCC, 0, 1});
+}
+
 void SNotB32Sop1::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t val = ssrc0.read_scalar(wf);
   uint32_t result = ~val;
@@ -670,6 +760,11 @@ SNotB64Sop1::SNotB64Sop1(const MachineInst *inst)
     ssrc0 = Operand(
         64, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+}
+
+void SNotB64Sop1::implicit_defs(uint8_t wf_size, std::vector<RegisterRef> &defs) const {
+  (void)wf_size;
+  defs.push_back(RegisterRef{RegClass::SCC, 0, 1});
 }
 
 void SNotB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
@@ -1441,6 +1536,7 @@ SSetpcB64Sop1::SSetpcB64Sop1(const MachineInst *inst)
     ssrc0 = Operand(
         64, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+  flags_ |= INDIRECT_BRANCH;
 }
 
 void SSetpcB64Sop1::execute_impl(amdgpu::Wavefront &wf) { wf.pc = ssrc0.read_scalar64(wf) - size_; }
@@ -1458,6 +1554,7 @@ SSwappcB64Sop1::SSwappcB64Sop1(const MachineInst *inst)
     ssrc0 = Operand(
         64, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+  flags_ |= INDIRECT_BRANCH;
 }
 
 void SSwappcB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
