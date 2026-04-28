@@ -11,6 +11,7 @@ set(trace_cache_tests_sources
     test_sample_type.cpp
     test_kfd_args.cpp
     test_rocpd_xcp_output.cpp
+    test_tsv_processor.cpp
 )
 
 add_library(trace-cache-tests OBJECT ${trace_cache_tests_sources})

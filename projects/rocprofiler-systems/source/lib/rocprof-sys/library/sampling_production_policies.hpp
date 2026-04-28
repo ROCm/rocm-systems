@@ -327,6 +327,7 @@ public:
         {
             if(!info->is_valid_lifetime({ s.beg_ns, s.end_ns })) continue;
 
+            int depth = 0;
             for(auto const& frame : s.stack)
             {
                 std::string name       = frame.name.empty()
@@ -334,6 +335,8 @@ public:
                                              : frame.name;
                 std::string call_stack = make_call_stack_json(frame);
                 std::string line_info  = make_line_info_json(frame);
+                // Locked extdata schema: { "depth": <int>, ... future fields ... }
+                std::string extdata = make_extdata_json(depth);
 
                 LOG_DEBUG("[real_trace_cache_sink] store_timer: tid={} frame='{}'", tid,
                           name);
@@ -341,7 +344,8 @@ public:
                     trace_cache::backtrace_region_sample{
                         category_id, static_cast<uint64_t>(sys_id), track_name, name,
                         s.beg_ns, s.end_ns, category_str, std::move(call_stack),
-                        std::move(line_info), "{}" });
+                        std::move(line_info), std::move(extdata) });
+                ++depth;
             }
         }
     }
@@ -371,6 +375,7 @@ public:
         {
             if(!info->is_valid_lifetime({ s.beg_ns, s.end_ns })) continue;
 
+            int depth = 0;
             for(auto const& frame : s.stack)
             {
                 std::string name       = frame.name.empty()
@@ -378,6 +383,8 @@ public:
                                              : frame.name;
                 std::string call_stack = make_call_stack_json(frame);
                 std::string line_info  = make_line_info_json(frame);
+                // Locked extdata schema: { "depth": <int>, ... future fields ... }
+                std::string extdata = make_extdata_json(depth);
 
                 LOG_DEBUG("[real_trace_cache_sink] store_overflow: tid={} frame='{}'",
                           tid, name);
@@ -385,7 +392,8 @@ public:
                     trace_cache::backtrace_region_sample{
                         category_id, static_cast<uint64_t>(sys_id), track_name, name,
                         s.beg_ns, s.end_ns, category_str, std::move(call_stack),
-                        std::move(line_info), "{}" });
+                        std::move(line_info), std::move(extdata) });
+                ++depth;
             }
         }
     }
@@ -414,6 +422,14 @@ private:
             inlined["line"]     = std::to_string(top.line);
             j["inlined"]        = inlined;
         }
+        return j.dump();
+    }
+
+    // Locked extdata schema: { "depth": <int>, ... future fields ... }
+    static std::string make_extdata_json(int depth)
+    {
+        nlohmann::json j;
+        j["depth"] = depth;
         return j.dump();
     }
 };
