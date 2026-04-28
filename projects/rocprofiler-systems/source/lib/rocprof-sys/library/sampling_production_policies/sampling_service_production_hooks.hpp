@@ -236,7 +236,13 @@ sampling_service<default_sampling_policies>::emit_resolved_to_trace_cache(int64_
     auto records = offload_.read(tid);
     if(records.empty()) return;
 
-    const auto& info = thread_info::get(tid, SequentTID);
+    // tid may be either an internal_value (when called from tracing.cpp /
+    // library.cpp via utility::get_thread_index()) or a sequent_value (when
+    // called from pthread_create_gotcha which uses _info->sequent_value). Try
+    // SequentTID lookup first, then InternalTID. See TF-2 (regression-report).
+    const auto* info_ptr = &thread_info::get(tid, SequentTID);
+    if(!*info_ptr) info_ptr = &thread_info::get(tid, InternalTID);
+    const auto& info = *info_ptr;
     if(!info)
     {
         offload_.erase(tid);
