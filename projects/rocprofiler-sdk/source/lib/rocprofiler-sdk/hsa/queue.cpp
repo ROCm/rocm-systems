@@ -498,6 +498,7 @@ struct fast_path_session_t
     rocprofiler_timestamp_t            enqueue_ts  = 0;
     rocprofiler_dispatch_id_t          dispatch_id = 0;
     rocprofiler_kernel_dispatch_info_t dispatch_info{};
+    tracing::tracing_data              tracing_data{};
 };
 
 bool
@@ -536,6 +537,27 @@ FastPathSignalHandler(hsa_signal_value_t /*signal_value*/, void* data)
            session->tid, dispatch_time.start, dispatch_time.end, session->dispatch_info}))
     {
         fast_path_counters().recorded.fetch_add(1, std::memory_order_relaxed);
+    }
+
+    if(!session->tracing_data.empty())
+    {
+        auto packet                                            = packet_data_t{};
+        packet.tracing_data                                    = std::move(session->tracing_data);
+        packet.kernel_packet.kernel_dispatch.completion_signal = session->signal;
+        packet.callback_record =
+            packet_data_t::callback_record_t{sizeof(packet_data_t::callback_record_t),
+                                             rocprofiler_timestamp_t{0},
+                                             rocprofiler_timestamp_t{0},
+                                             session->dispatch_info};
+
+        auto queue_info_session = queue_info_session_t{.queue          = *session->queue,
+                                                       .tid            = session->tid,
+                                                       .enqueue_ts     = session->enqueue_ts,
+                                                       .correlation_id = nullptr,
+                                                       .packet_data    = {}};
+        queue_info_session.packet_data.emplace_back(std::move(packet));
+        kernel_dispatch::dispatch_complete(
+            queue_info_session, queue_info_session.packet_data.front(), dispatch_time);
     }
     return false;
 }
@@ -645,6 +667,10 @@ FastPathWriteInterceptor(const void*                           packets,
     // unique sequence id for the dispatch
     static auto sequence_counter = std::atomic<rocprofiler_dispatch_id_t>{0};
     const auto  dispatch_id      = ++sequence_counter;
+    auto        tracing_data_v   = tracing::tracing_data{};
+    tracing::populate_contexts(ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH,
+                               ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH,
+                               tracing_data_v);
 
     constexpr auto kernel_dispatch_info_rt_size =
         common::compute_runtime_sizeof<rocprofiler_kernel_dispatch_info_t>();
@@ -665,14 +691,16 @@ FastPathWriteInterceptor(const void*                           packets,
                                         original_packet.grid_size_z},
         .reserved_padding     = {0}};
 
-    auto* session = new(std::nothrow) fast_path_session_t{.queue         = &queue,
-                                                          .signal        = signal,
-                                                          .wait_value    = wait_value,
-                                                          .owns_signal   = owns_signal,
-                                                          .tid           = common::get_tid(),
-                                                          .enqueue_ts    = common::timestamp_ns(),
-                                                          .dispatch_id   = dispatch_id,
-                                                          .dispatch_info = dispatch_info};
+    auto* session =
+        new(std::nothrow) fast_path_session_t{.queue         = &queue,
+                                              .signal        = signal,
+                                              .wait_value    = wait_value,
+                                              .owns_signal   = owns_signal,
+                                              .tid           = common::get_tid(),
+                                              .enqueue_ts    = common::timestamp_ns(),
+                                              .dispatch_id   = dispatch_id,
+                                              .dispatch_info = dispatch_info,
+                                              .tracing_data  = std::move(tracing_data_v)};
 
     if(!session)
     {
