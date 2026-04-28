@@ -1707,9 +1707,15 @@ void HipCaptureGraphNodeArgsExt(HipGraphNodeInfoExt* info, hipFunction_t func, v
     while (len > 0 && raw[len - 1] == '\0') {
       --len;
     }
-    std::string name(raw.data(), len);
+    std::string mangled(raw.data(), len);
+    // ar->kernel_name from the HSA callback is the demangled name, so store
+    // the demangled name here so fill_dispatch_info can match with a plain strcmp.
+    // demangleName is COMGR-based but safe here (not in the GPU callback).
+    std::string demangled;
+    if (!hip::helpers::demangleName(mangled, demangled))
+      demangled = mangled;  // fallback: store mangled if demangling fails
     std::lock_guard<std::mutex> lk(g_kernel_names_mtx);
-    auto [it, ok] = g_kernel_names.emplace(name, name);
+    auto [it, ok] = g_kernel_names.emplace(demangled, demangled);
     (void)ok;
     info->gpu.kernel_name = it->first.c_str();
   }

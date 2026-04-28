@@ -1536,6 +1536,13 @@ static void CaptureGraphExecNodes(hipGraphExec_t exec, hipGraph_t graph) {
         info.gpu.block_y = kp.blockDim.y;
         info.gpu.block_z = kp.blockDim.z;
         HipCaptureGraphNodeArgsExt(&info, hfunc, kp.kernelParams);
+        // For stream-captured graphs kp.kernelParams is NULL but kp.extra holds
+        // the packed buffer.  Try the packed path as a fallback.
+        if (info.gpu.kernel_args == nullptr && kp.extra) {
+          const void* kbuf; size_t ksz;
+          if (ParseKernelExtra(kp.extra, kbuf, ksz))
+            HipCaptureKernelArgsPackedExt(&info.gpu, hfunc, kbuf, ksz);
+        }
         if (info.gpu.kernel_name != nullptr) {
           infos.push_back(std::move(info));
         }
