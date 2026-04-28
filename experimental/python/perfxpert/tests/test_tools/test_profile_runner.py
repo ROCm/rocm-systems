@@ -26,6 +26,88 @@ def test_run_rejects_unknown_flag_before_tool_check(tmp_path: Path, monkeypatch)
     require_tool.assert_not_called()
 
 
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["rocprofv3", "--output-dir", "/etc", "--", "./app"],
+        ["rocprofv3", "--output-dir=/etc", "--", "./app"],
+        ["rocprofv3", "-d", "../outside", "--", "./app"],
+        ["rocprofv3", "-o", r"C:\Windows\Temp\out", "--", "./app"],
+        ["rocprofv3", "--att-library-path", "~/libatt.so", "--", "./app"],
+    ],
+)
+def test_validate_argv_rejects_unsafe_path_values(argv):
+    with pytest.raises(profile_runner.RocprofFlagError):
+        profile_runner._validate_argv(argv)
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["rocprofv3", "-d", "out", "-o", "results", "--", "./app"],
+        ["rocprofv3", "--pc-sampling", "--", "./app"],
+        ["rocprofv3", "--output-dir=out", "--pmc", "SQ_WAVES", "--", "./app"],
+        ["rocprofv3", "--pmc", "SQ_WAVES", "GRBM_COUNT", "-d", "out", "--", "./app"],
+        ["rocprofv3", "--att", "--att-library-path", "/opt/rocm/lib", "--", "./app"],
+        [
+            "rocprofv3",
+            "--pc-sampling-beta-enabled",
+            "--pc-sampling-method",
+            "stochastic",
+            "--pc-sampling-unit",
+            "cycles",
+            "--pc-sampling-interval",
+            "1048576",
+            "--",
+            "./app",
+        ],
+        [
+            "rocprofv3",
+            "--pc-sampling-beta-enabled",
+            "1",
+            "--pc-sampling-method=host_trap",
+            "--pc-sampling-unit=time",
+            "--pc-sampling-interval=1",
+            "--",
+            "./app",
+        ],
+    ],
+)
+def test_validate_argv_accepts_safe_value_flags(argv):
+    profile_runner._validate_argv(argv)
+
+
+def test_validate_argv_rejects_symlink_output_escape(tmp_path: Path):
+    outside = tmp_path.parent / "outside-profile-output"
+    outside.mkdir(exist_ok=True)
+    (tmp_path / "escape").symlink_to(outside, target_is_directory=True)
+
+    with pytest.raises(profile_runner.RocprofFlagError):
+        profile_runner._validate_argv(
+            ["rocprofv3", "-d", "escape", "--", "./app"],
+            cwd=tmp_path,
+        )
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["rocprofv3", "--output-dir", "--", "./app"],
+        ["rocprofv3", "--sys-trace=true", "--", "./app"],
+        ["rocprofv3", "--pmc", "--", "./app"],
+        ["rocprofv3", "--pc-sampling", "stochastic", "--", "./app"],
+        ["rocprofv3", "--pc-sampling-method", "timer", "--", "./app"],
+        ["rocprofv3", "--pc-sampling-unit", "warps", "--", "./app"],
+        ["rocprofv3", "--pc-sampling-interval", "fast", "--", "./app"],
+        ["rocprofv3", "--pc-sampling-beta-enabled", "maybe", "--", "./app"],
+        ["rocprofv3", "out", "--", "./app"],
+    ],
+)
+def test_validate_argv_rejects_malformed_value_flags(argv):
+    with pytest.raises(profile_runner.RocprofFlagError):
+        profile_runner._validate_argv(argv)
+
+
 def test_run_accepts_known_flags(tmp_path: Path, monkeypatch):
     fake = mock.MagicMock(return_value=mock.MagicMock(
         returncode=0, stdout=b"", stderr=b""
