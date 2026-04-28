@@ -1033,9 +1033,13 @@ perfetto_processor_t::handle(const cpu_pmc_sample& _cpu_sample)
 void
 perfetto_processor_t::handle([[maybe_unused]] const backtrace_region_sample& _bts)
 {
-    (_bts.category == trait::name<category::timer_sampling>::value)
-        ? write_sampling_track_data<category::timer_sampling>(_bts, m_use_annotations)
-        : write_sampling_track_data<category::overflow_sampling>(_bts, m_use_annotations);
+    if(_bts.category == trait::name<category::timer_sampling>::value)
+        write_sampling_track_data<category::timer_sampling>(_bts, m_use_annotations);
+    else if(_bts.category == trait::name<category::overflow_sampling>::value)
+        write_sampling_track_data<category::overflow_sampling>(_bts, m_use_annotations);
+    // "cputime_sampling": consumed by tsv_processor only — its timestamps are
+    // [0, cpu_ns], not anchored to the wall-clock timeline, so emitting to Perfetto
+    // would produce nonsense slices anchored at t=0.
 }
 
 void
