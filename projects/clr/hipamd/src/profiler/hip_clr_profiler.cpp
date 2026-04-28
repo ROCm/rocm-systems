@@ -214,7 +214,13 @@ int HipActivityCallbackExt(activity_domain_t domain, uint32_t op_id, void* data)
     // the owned copy in g_kernel_names::second (never gop.kernel_name directly).
     // Calling COMGR from within the GPU activity callback is unsafe (re-entrancy risk).
     std::lock_guard<std::mutex> lk(g_kernel_names_mtx);
-    g_kernel_names.emplace(ar->kernel_name, std::string{ar->kernel_name});
+    auto [it, ok] = g_kernel_names.emplace(ar->kernel_name, std::string{ar->kernel_name});
+    (void)ok;
+    // Store pointer into the key (mangled name), which is stable for the map's lifetime.
+    // The value (it->second) gets replaced with the demangled name at write time, so
+    // gop.kernel_name must point to the key — not the value — for find() to work after
+    // PreDemangleKernelNames() runs.
+    ar->kernel_name = it->first.c_str();
   }
 
   // Helper: populate dims and kernel args for a dispatch GPU op.
@@ -1705,7 +1711,7 @@ void HipCaptureGraphNodeArgsExt(HipGraphNodeInfoExt* info, hipFunction_t func, v
     std::lock_guard<std::mutex> lk(g_kernel_names_mtx);
     auto [it, ok] = g_kernel_names.emplace(name, name);
     (void)ok;
-    info->gpu.kernel_name = it->second.c_str();
+    info->gpu.kernel_name = it->first.c_str();
   }
 
   if (!args) return;
