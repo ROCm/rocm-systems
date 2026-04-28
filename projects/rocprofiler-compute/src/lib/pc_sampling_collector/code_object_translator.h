@@ -8,7 +8,7 @@ namespace rocprofiler::sdk::codeobj::disassembly
 class CodeobjAddressTranslate;
 }
 
-namespace pc_sampling_collector
+namespace rocm_compute
 {
 class code_object_translator_t
 {

@@ -4,7 +4,7 @@
 
 #include "rocprofiler-sdk/cxx/codeobj/code_printing.hpp"
 
-using namespace pc_sampling_collector;
+using namespace rocm_compute;
 
 code_object_translator_impl_t::code_object_translator_impl_t()
     : m_translator(std::make_unique<rocprofiler::sdk::codeobj::disassembly::CodeobjAddressTranslate>())
