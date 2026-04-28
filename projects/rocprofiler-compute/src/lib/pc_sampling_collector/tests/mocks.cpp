@@ -5,18 +5,18 @@
 void mock_code_object_translator_t::add_code_object(const char* filepath,
                                                     size_t      id,
                                                     uint64_t    load_addr,
-                                                    uint64_t    mem_size)
+                                                    uint64_t    load_size)
 {
-    m_file_code_obj_info.push_back({filepath, id, load_addr, mem_size});
+    m_file_code_obj_info.push_back({filepath, id, load_addr, load_size});
 }
 
-void mock_code_object_translator_t::add_code_object(const void* data,
-                                                    size_t      memory_size,
-                                                    size_t      id,
-                                                    uint64_t    load_addr,
-                                                    uint64_t    mem_size)
+void mock_code_object_translator_t::add_code_object(uint64_t memory_base,
+                                                    size_t   memory_size,
+                                                    size_t   id,
+                                                    uint64_t load_base,
+                                                    uint64_t load_size)
 {
-    m_mem_code_obj_info.push_back({const_cast<void*>(data), memory_size, id, load_addr, mem_size});
+    m_mem_code_obj_info.push_back({memory_base, memory_size, id, load_base, load_size});
 }
 
 const std::vector<mock_code_object_translator_t::mem_code_object_info_t>&

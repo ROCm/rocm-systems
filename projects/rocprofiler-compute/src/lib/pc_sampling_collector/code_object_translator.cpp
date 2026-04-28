@@ -14,10 +14,10 @@ void code_object_translator_impl_t::add_code_object(const char* filepath, size_t
 {
 }
 
-void code_object_translator_impl_t::add_code_object(const void* data,
-                                               size_t      memory_size,
-                                               size_t      id,
-                                               uint64_t    load_addr,
-                                               uint64_t    mem_size)
+void code_object_translator_impl_t::add_code_object(uint64_t memory_base,
+                                                    size_t   memory_size,
+                                                    size_t   id,
+                                                    uint64_t load_base,
+                                                    uint64_t load_size)
 {
 }
