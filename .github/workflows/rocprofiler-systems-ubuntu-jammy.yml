@@ -67,6 +67,8 @@ jobs:
       OMPI_ALLOW_RUN_AS_ROOT: 1
       OMPI_ALLOW_RUN_AS_ROOT_CONFIRM: 1
       ROCPROFSYS_CI: 'ON'
+      ROCPROFSYS_MAX_THREADS: '64'
+      ROCPROFSYS_KEEP_TEST_OUTPUT: '0'
 
     steps:
     - &sparse-checkout
@@ -89,6 +91,18 @@ jobs:
           apt-get upgrade -y &&
           apt-get install -y libomp-dev libopenmpi-dev ${{ matrix.compiler }} &&
           apt-get autoclean
+
+    - name: Install Python Test Dependencies
+      timeout-minutes: 10
+      shell: bash
+      working-directory: projects/rocprofiler-systems/
+      run: |
+        for env_dir in /opt/conda/envs/py3.{8,9,10,11}/; do
+          if [ -d "${env_dir}" ] && [ -x "${env_dir}bin/python3" ]; then
+            echo "Installing requirements into ${env_dir}"
+            "${env_dir}bin/python3" -m pip install -r requirements.txt
+          fi
+        done
 
     - name: Install ROCm Packages
       timeout-minutes: 25
@@ -174,7 +188,7 @@ jobs:
           -DROCPROFSYS_BUILD_NUMBER=${{ github.run_attempt }} \
           -DUSE_CLANG_OMP=OFF \
           -- \
-          -LE "transpose|rccl|videodecode|jpegdecode|network"
+          -LE "network|gpu"
 
     - name: Check for Leftover Buffered Files
       timeout-minutes: 5
@@ -189,15 +203,6 @@ jobs:
           echo "✓ No buffered storage files found in /tmp"
         fi
 
-    - name: Test Clean Up
-      timeout-minutes: 10
-      working-directory: projects/rocprofiler-systems/
-      run: |
-        set -v
-        du /tmp -d 1 -h
-        du build/rocprof-sys-tests-output -d 1 -h
-        df -h
-        rm -fr /tmp/* build/rocprof-sys-tests-output/*
 
     - name: Install
       timeout-minutes: 10
@@ -273,6 +278,8 @@ jobs:
       OMPI_ALLOW_RUN_AS_ROOT: 1
       OMPI_ALLOW_RUN_AS_ROOT_CONFIRM: 1
       ROCPROFSYS_CI: 'ON'
+      ROCPROFSYS_MAX_THREADS: '64'
+      ROCPROFSYS_KEEP_TEST_OUTPUT: '0'
 
     steps:
     - *sparse-checkout
@@ -292,6 +299,19 @@ jobs:
             binutils-dev libboost-all-dev libtbb-dev \
             libdw-dev libdwarf-dev libelf-dev libiberty-dev &&
           apt-get autoclean
+
+    - name: Install Python Test Dependencies
+      timeout-minutes: 10
+      shell: bash
+      working-directory: projects/rocprofiler-systems/
+      run: |
+        python3 -m pip install -r requirements.txt
+        for env_dir in /opt/conda/envs/py3.{8,9,10,11}/; do
+          if [ -d "${env_dir}" ] && [ -x "${env_dir}bin/python3" ]; then
+            echo "Installing requirements into ${env_dir}"
+            "${env_dir}bin/python3" -m pip install -r requirements.txt
+          fi
+        done
 
     - name: Install ROCm 7.2
       timeout-minutes: 25
@@ -355,7 +375,7 @@ jobs:
           -DROCPROFSYS_BUILD_NUMBER=${{ github.run_attempt }} \
           -DUSE_CLANG_OMP=${{ matrix.use-clang-omp }} \
           -- \
-          -LE "transpose|rccl|videodecode|jpegdecode|network"
+          -LE "network|gpu"
 
     - name: Install
       timeout-minutes: 10
@@ -406,6 +426,7 @@ jobs:
       ROCPROFSYS_VERBOSE: 2
       ROCPROFSYS_CAUSAL_BACKEND: perf
       ROCPROFSYS_CI: 'ON'
+      ROCPROFSYS_MAX_THREADS: '64'
 
     steps:
     - *sparse-checkout
@@ -423,6 +444,18 @@ jobs:
           apt-get upgrade -y &&
           apt-get install -y libomp-dev libmpich-dev mpich &&
           apt-get autoclean
+
+    - name: Install Python Test Dependencies
+      timeout-minutes: 10
+      shell: bash
+      working-directory: projects/rocprofiler-systems/
+      run: |
+        for env_dir in /opt/conda/envs/py3.{8,9,10,11}/; do
+          if [ -d "${env_dir}" ] && [ -x "${env_dir}bin/python3" ]; then
+            echo "Installing requirements into ${env_dir}"
+            "${env_dir}bin/python3" -m pip install -r requirements.txt
+          fi
+        done
 
     - name: Install ROCm Packages
       timeout-minutes: 25
@@ -481,8 +514,10 @@ jobs:
           -DROCPROFSYS_BUILD_HIDDEN_VISIBILITY=OFF \
           -DROCPROFSYS_USE_MPI=ON \
           -DROCPROFSYS_USE_PYTHON=ON \
+          -DROCPROFSYS_PYTHON_PREFIX=/opt/conda/envs \
+          -DROCPROFSYS_PYTHON_ENVS="py3.8;py3.9;py3.10;py3.11" \
           -DROCPROFSYS_MAX_THREADS=64 \
           -DROCPROFSYS_DISABLE_EXAMPLES="transpose;rccl;videodecode;jpegdecode;openmp" \
           -DROCPROFSYS_BUILD_NUMBER=${{ github.run_attempt }} \
           -- \
-          -LE "transpose|rccl|videodecode|jpegdecode|network"
+          -LE "network|gpu"

@@ -447,8 +447,8 @@ list(FILTER HIP_SOURCES EXCLUDE REGEX "gensrc/specialized/")
 # Device Linker: filter out device sources that are built by the pipeline
 #==================================================================================================
 if(ENABLE_DEVICE_LINKER)
-  # Remove per-collective .cpp files from gensrc/ (replaced by specialized pipeline)
-  list(FILTER HIP_SOURCES EXCLUDE REGEX "gensrc/[^/]*\\.cpp$")
+  # Remove per-collective .cpp files from gensrc/ and any subdirs (replaced by specialized/symmetric pipelines)
+  list(FILTER HIP_SOURCES EXCLUDE REGEX "gensrc/.*\\.cpp$")
   # Add back host-only generated files
   list(APPEND HIP_SOURCES "${GEN_DIR}/host_table.cpp")
   if(EXISTS "${GEN_DIR}/device_table.cpp")
@@ -458,7 +458,7 @@ if(ENABLE_DEVICE_LINKER)
   list(FILTER HIP_SOURCES EXCLUDE REGEX "common\\.cu\\.cpp$")
   list(FILTER HIP_SOURCES EXCLUDE REGEX "onerank\\.cu\\.cpp$")
   list(FILTER HIP_SOURCES EXCLUDE REGEX "collectives\\.cc$")
-  message(STATUS "Device Linker: filtered HIP_SOURCES (removed device .cpp, common.cu, onerank.cu, collectives.cc)")
+  message(STATUS "Device Linker: filtered HIP_SOURCES (removed device .cpp under gensrc/ + subdirs, common.cu, onerank.cu, collectives.cc)")
 endif()
 
 # Create an initial git_version.cpp file (that will be updated with latest git version)

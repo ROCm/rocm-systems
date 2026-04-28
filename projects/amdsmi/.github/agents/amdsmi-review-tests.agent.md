@@ -12,6 +12,7 @@ You review test coverage, quality, and patterns for the amd-smi project.
 
 **Load `amdsmi-python-style-guide` skill when reviewing Python test files.**
 **Load `amdsmi-test-runner` skill for test execution commands and expected outputs.**
+**Load `amdsmi-packaging-test` skill when reviewing packaging, install scripts, or wheel build changes.**
 
 ## Test Validation
 
