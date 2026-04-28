@@ -84,6 +84,11 @@ is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   one-liner still works for users who want it.
 
 ### Changed
+- **Codex gate discovery.** Codex-rendered gate prompts now allow only
+  `tool_search` / `tool_search_tool` as a discovery-only prelude when
+  the required PerfXpert MCP gate tools are deferred out of the initial
+  tool inventory; shell, SSH, build, edit, and profiling fallbacks
+  remain blocked until `perfxpert_intent_classify` returns.
 - **`--llm` providers.** All five providers —
   `anthropic`, `openai`, `ollama`, `private`, `opencode` — are
   selectable from the CLI **and** from `perfxpert.api.agent_root(...,

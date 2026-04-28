@@ -1842,7 +1842,7 @@ def _execute_agentic(
             base = base + _ext
         output_file = os.path.join(config.output_path, base)
         os.makedirs(config.output_path, exist_ok=True)
-        with open(output_file, "w") as f:
+        with open(output_file, "w", encoding="utf-8") as f:
             f.write(output)
         print(f"Analysis written to: {output_file}")
         if output_format == "text":

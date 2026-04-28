@@ -1,15 +1,18 @@
-#include "hsa_includes.h"
-#include "include/aqlprofile-sdk/aql_profile_v2.h"
-#include "include/spm_common.hpp"
-#include "memorymanager.hpp"
-#include "core/commandbuffermgr.hpp"
+//
+//
+//
+
+#include "lib/aqlprofile/hsa_includes.h"
+#include "lib/aqlprofile/aqlprofile.hpp"
+#include "lib/aqlprofile/core/spm_common.hpp"
+#include "lib/aqlprofile/core/memorymanager.hpp"
+#include "lib/aqlprofile/core/commandbuffermgr.hpp"
+
+#include "lib/aqlprofile/core/logger.h"
+#include "lib/aqlprofile/core/pm4_factory.h"
 
 #include <thread>
 #include <condition_variable>
-
-#include "core/logger.h"
-#include "core/pm4_factory.h"
-
 #include <map>
 #include <array>
 #include <shared_mutex>
@@ -76,12 +79,13 @@ inline static hsa_status_t
 HsaSpmSetDestBuffer(spm_set_dest_buffer_args& args)
 {
     if(args.hsa_agent.handle == 0) throw std::runtime_error("Invalid hsa agent");
-    return hsa_amd_spm_set_dest_buffer(args.hsa_agent,
-                                       args.buf_size,
-                                       &args.timeout,
-                                       &args.size_copied,
-                                       args.dest_buf,
-                                       &args.is_data_loss);
+    return rocprofiler::aqlprofile::get_amd_ext_table()->hsa_amd_spm_set_dest_buffer_fn(
+        args.hsa_agent,
+        args.buf_size,
+        &args.timeout,
+        &args.size_copied,
+        args.dest_buf,
+        &args.is_data_loss);
 }
 
 class ManagerThread
@@ -97,7 +101,7 @@ public:
         s->stop_cons_thread = false;
         s->stop_prod_thread = false;
 
-        status = hsa_amd_spm_acquire(s->hsa_agent);
+        status = rocprofiler::aqlprofile::get_amd_ext_table()->hsa_amd_spm_acquire_fn(s->hsa_agent);
         CHECKHSA(status, return );
 
         // This non-blocking (timeout = 0) HsaSpmSetDestBuffer() call will clear up all the
@@ -122,7 +126,7 @@ public:
         if(producer_thread.joinable()) producer_thread.join();
         if(consumer_thread.joinable()) consumer_thread.join();
 
-        hsa_amd_spm_release(this->agent);
+        rocprofiler::aqlprofile::get_amd_ext_table()->hsa_amd_spm_release_fn(this->agent);
     }
 
     hsa_status_t status = HSA_STATUS_ERROR;

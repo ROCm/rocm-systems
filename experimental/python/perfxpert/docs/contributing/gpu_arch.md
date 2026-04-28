@@ -17,35 +17,37 @@ test updates.
 ### Entry in `gpu_specs.yaml`
 
 ```yaml
-- gfx_id: "gfx950"
+gfx950:
   name: "MI350X"
-  family: "CDNA4"
-  compute_capability: 9.0
-  peak_fp32_tflops: 163.4
-  peak_fp64_tflops: 81.7
-  memory_bandwidth_gbs: 432
-  l2_cache_kb: 8192
-  lds_kb_per_cu: 160
-  num_cus: 152
-  wavefront_size: 64
-  vgpr_per_cu: 10240
-  sgpr_per_cu: 10240
-  lds_banks: 32
-  source: "AMD MI350X data sheet v1.0"
+  codename: "CDNA4"
+  peak_fp64_tflops: 72.1
+  peak_fp32_tflops: 144.2
+  peak_fp16_tflops: 2300.0
+  peak_bf16_tflops: 2300.0
+  peak_fp8_tflops: 4600.0
+  peak_int8_tops: 4600.0
+  memory_bandwidth_tbs: 8.0
+  cu_count: 256
+  lds_kb: 160
+  lds_per_cu_kb: 160
+  wave_size: 64
+  max_vgprs_per_thread: 256
+  vgprs_per_simd: 512
+  simds_per_cu: 4
+  max_waves_per_simd: 8
+  ridge_point: 18.0
 ```
 
 ### Entry in `vgpr_occupancy_tables.yaml`
 
 ```yaml
-- gfx_id: "gfx950"
-  tables:
-    - vgprs: 64
-      wave_occupancy: 0.5
-      waves_per_cu: 8
-    - vgprs: 128
-      wave_occupancy: 0.25
-      waves_per_cu: 4
-    # ... more entries
+gfx950:
+  - {max_vgprs: 64,  waves_per_eu: 8}
+  - {max_vgprs: 80,  waves_per_eu: 6}
+  - {max_vgprs: 96,  waves_per_eu: 5}
+  - {max_vgprs: 128, waves_per_eu: 4}
+  - {max_vgprs: 160, waves_per_eu: 3}
+  - {max_vgprs: 256, waves_per_eu: 2}
 ```
 
 ## Schema constraints (CI-enforced)
@@ -58,8 +60,9 @@ test updates.
 ## Key specs to get right
 
 - **MI300X FP64:** 81.7 TFLOPS (NOT 163.4 — that's FP32)
+- **MI300X occupancy:** 32 max waves/CU and 4 SIMDs/CU, so 8 waves/SIMD
 - **CDNA4 LDS:** 160 KB/CU (not 64)
-- **Compute capability:** must match Khronos / AMD numbering
+- **MI350X public peaks:** 72.1 FP64 TFLOPS, 144.2 FP32 TFLOPS, 8.0 TB/s HBM
 
 ## Tests you must add
 
@@ -79,8 +82,9 @@ Update `tests/test_knowledge/test_gpu_specs.py`:
 ## Common pitfalls
 
 - Don't confuse FP32 and FP64 TFLOPS (MI300X is 163.4 FP32, 81.7 FP64)
+- Don't use MI355X higher-bin peaks for the `gfx950` MI350X default unless you
+  explicitly split the SKU key first
 - VGPR table must be complete (cover typical code patterns: 64, 96, 128, 192, 256 at minimum)
-- Compute capability follows Khronos spec (e.g., CDNA1=9.0, CDNA2=9.0, CDNA3=9.0, CDNA4=9.0)
 - LDS must match official spec (check against latest AMD app notes)
 
 ## Related docs

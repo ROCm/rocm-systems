@@ -182,6 +182,16 @@ typedef enum {
 #define AMDSMI_MAX_NUM_XCP 8
 
 /**
+ * @brief APU metrics: max number of cores, L3, and IPUs
+ *
+ * @cond @tag{gpu_bm_linux} @endcond
+ */
+#define AMDSMI_APU_MAX_CORES 16  //!< v2_4 = 8, v3_0 = 16
+#define AMDSMI_APU_V24_CORES 8   //!< v2_4 core count
+#define AMDSMI_APU_MAX_L3 2      //!< v2_4
+#define AMDSMI_APU_MAX_IPU 8     //!< v3_0, average_ipu_activity[]
+
+/**
  * @brief Max Number of AFIDs that will be inside one cper entry
  *
  * @cond @tag{gpu_bm_linux} @tag{host} @tag{guest_windows} @endcond
@@ -2052,6 +2062,145 @@ typedef struct {
 } amdsmi_gpu_xcp_metrics_t;
 
 /**
+ * @brief APU metrics auxiliary data.
+ *
+ * This structure holds unified APU-specific metrics data derived from the
+ * underlying driver metrics table. It is attached via
+ * ::amdsmi_gpu_metrics_t.apu_metrics when APU-specific metrics are available.
+ *
+ * **Version Support:**
+ * - v2.4: format_revision == 2 && content_revision == 4
+ * - v3.0: format_revision == 3 && content_revision == 0
+ * Use ::amdsmi_gpu_metrics_t.common_header to identify which version populated
+ * the fields.
+ *
+ * **Sentinel Values:**
+ * Fields not applicable to the current version are initialized to the maximum value
+ * of their respective type: 0xFFFF for uint16_t fields, 0xFFFFFFFF for uint32_t fields,
+ * and UINT64_MAX for uint64_t fields. For example, on v3.0 hardware, v2.4-only fields
+ * like `average_mm_activity` and `temperature_l3` will contain 0xFFFF. Similarly,
+ * array elements beyond the version-specific count (e.g., elements 8-15 of
+ * `temperature_core` on v2.4) will contain 0xFFFF. However, uint32_t elements such as
+ * 'throttle_status' will contain 0xFFFFFFFF and UINT64_MAX for uint64_t elements such
+ * as 'indep_throttle_status'. Callers should check the version and treat maximum values
+ * as invalid/not applicable.
+ *
+ * @cond @tag{gpu_bm_linux} @endcond
+ */
+typedef struct {
+  /**
+   * @brief Temperature (instant)
+   */
+  uint16_t temperature_gfx;                         //!< v2_4, v3_0
+  uint16_t temperature_soc;                         //!< v2_4, v3_0
+  uint16_t temperature_core[AMDSMI_APU_MAX_CORES];  //!< v2_4[8], v3_0[16]
+  uint16_t temperature_l3[AMDSMI_APU_MAX_L3];       //!< v2_4
+  uint16_t temperature_skin;                        //!< v3_0
+
+  /**
+   * @brief Utilization
+   */
+  uint16_t average_gfx_activity;                            //!< v2_4, v3_0
+  uint16_t average_mm_activity;                             //!< v2_4
+  uint16_t average_vcn_activity;                            //!< v3_0
+  uint16_t average_ipu_activity[AMDSMI_APU_MAX_IPU];        //!< v3_0
+  uint16_t average_core_c0_activity[AMDSMI_APU_MAX_CORES];  //!< v3_0
+  uint16_t average_dram_reads;                              //!< v3_0 [MB/s]
+  uint16_t average_dram_writes;                             //!< v3_0
+  uint16_t average_ipu_reads;                               //!< v3_0
+  uint16_t average_ipu_writes;                              //!< v3_0
+
+  /**
+   * @brief Power [mW]
+   *
+   * All power fields in this struct are in milliwatts (mW) as reported by
+   * the APU firmware. Note: the top-level gpu_metrics_t.average_socket_power
+   * is converted to Watts; these APU sub-struct fields are NOT converted.
+   */
+  uint32_t average_socket_power;                      //!< v2_4[uint16_t], v3_0[uint32_t]
+  uint16_t average_cpu_power;                         //!< v2_4
+  uint16_t average_soc_power;                         //!< v2_4
+  uint32_t average_gfx_power;                         //!< v2_4[uint16_t], v3_0[uint32_t]
+  uint16_t average_core_power[AMDSMI_APU_MAX_CORES];  //!< v2_4[8], v3_0[16]
+  uint16_t average_ipu_power;                         //!< v3_0
+  uint32_t average_apu_power;                         //!< v3_0
+  uint32_t average_dgpu_power;                        //!< v3_0
+  uint32_t average_all_core_power;                    //!< v3_0
+  uint16_t average_sys_power;                         //!< v3_0
+  uint16_t stapm_power_limit;                         //!< v3_0
+  uint16_t current_stapm_power_limit;                 //!< v3_0
+
+  /**
+   * @brief Average clocks [MHz]
+   */
+  uint16_t average_gfxclk_frequency;  //!< v2_4, v3_0
+  uint16_t average_socclk_frequency;  //!< v2_4, v3_0
+  uint16_t average_uclk_frequency;    //!< v2_4, v3_0
+  uint16_t average_fclk_frequency;    //!< v2_4, v3_0
+  uint16_t average_vclk_frequency;    //!< v2_4, v3_0
+  uint16_t average_dclk_frequency;    //!< v2_4
+  uint16_t average_vpeclk_frequency;  //!< v3_0
+  uint16_t average_ipuclk_frequency;  //!< v3_0
+  uint16_t average_mpipu_frequency;   //!< v3_0
+
+  /**
+   * @brief Current clocks [MHz]
+   */
+  uint16_t current_gfxclk;                         //!< v2_4
+  uint16_t current_socclk;                         //!< v2_4
+  uint16_t current_uclk;                           //!< v2_4
+  uint16_t current_fclk;                           //!< v2_4
+  uint16_t current_vclk;                           //!< v2_4
+  uint16_t current_dclk;                           //!< v2_4
+  uint16_t current_coreclk[AMDSMI_APU_MAX_CORES];  //!< v2_4[8], v3_0[16]
+  uint16_t current_l3clk[AMDSMI_APU_MAX_L3];       //!< v2_4
+  uint16_t current_core_maxfreq;                   //!< v3_0
+  uint16_t current_gfx_maxfreq;                    //!< v3_0
+
+  /**
+   * @brief Throttle
+   */
+  uint32_t throttle_status;              //!< v2_4
+  uint64_t indep_throttle_status;        //!< v2_4
+  uint32_t throttle_residency_prochot;   //!< v3_0
+  uint32_t throttle_residency_spl;       //!< v3_0
+  uint32_t throttle_residency_fppt;      //!< v3_0
+  uint32_t throttle_residency_sppt;      //!< v3_0
+  uint32_t throttle_residency_thm_core;  //!< v3_0
+  uint32_t throttle_residency_thm_gfx;   //!< v3_0
+  uint32_t throttle_residency_thm_soc;   //!< v3_0
+
+  /**
+   * @brief Fan
+   */
+  uint16_t fan_pwm;  //!< v2_4
+
+  /**
+   * @brief Average temperature
+   */
+  uint16_t average_temperature_gfx;                         //!< v2_4
+  uint16_t average_temperature_soc;                         //!< v2_4
+  uint16_t average_temperature_core[AMDSMI_APU_MAX_CORES];  //!< v2_4
+  uint16_t average_temperature_l3[AMDSMI_APU_MAX_L3];       //!< v2_4
+
+  /**
+   * @brief Voltage [mV] / Current [mA]
+   */
+  uint16_t average_cpu_voltage;  //!< v2_4
+  uint16_t average_soc_voltage;  //!< v2_4
+  uint16_t average_gfx_voltage;  //!< v2_4
+  uint16_t average_cpu_current;  //!< v2_4
+  uint16_t average_soc_current;  //!< v2_4
+  uint16_t average_gfx_current;  //!< v2_4
+
+  /**
+   * @brief Other (v3_0)
+   */
+  uint32_t time_filter_alphavalue;  //!< v3_0; alpha filter time constant [us]
+
+} amdsmi_apu_metrics_t;
+
+/**
  * @brief Structure holds the gpu metrics values for a device
  *
  * This structure is extended to fit the needs of different GPU metric
@@ -2066,6 +2215,7 @@ typedef struct {
  *
  * @cond @tag{gpu_bm_linux} @endcond
  */
+
 typedef struct {
   amd_metrics_table_header_t common_header;
 
@@ -2259,6 +2409,39 @@ typedef struct {
 
   uint16_t current_uclk_aid[AMDSMI_MAX_NUM_CLKS_PER_AID];     //!< In MHz
   uint16_t current_socclks_mid[AMDSMI_MAX_NUM_CLKS_PER_MID];  //!< In MHz
+
+  /**
+   * @brief APU metrics auxiliary data
+   *
+   * This pointer is non-null only when the queried device reports APU-specific
+   * metrics (currently APU metrics table versions 2.4 or 3.0). Callers must
+   * validate it before dereferencing. For GPU (discrete) devices, this pointer
+   * will be nullptr.
+   *
+   * **Thread Safety and Lifetime:**
+   * The pointed-to storage uses thread-local storage and is invalidated by ANY
+   * subsequent call to amdsmi_get_gpu_metrics_info() or
+   * amdsmi_get_gpu_partition_metrics_info() made on the same thread, regardless
+   * of which device is queried. This means:
+   * - Querying device B invalidates the apu_metrics pointer from device A on
+   *   the same thread
+   * - Callers that need to retain APU metrics data across multiple queries MUST
+   *   copy the entire ::amdsmi_apu_metrics_t structure contents immediately
+   *   after the query
+   *
+   * **Version Detection:**
+   * Use ::common_header.format_revision and ::common_header.content_revision to
+   * determine which APU metrics version is active:
+   * - v2.4: format_revision == 2 && content_revision == 4
+   * - v3.0: format_revision == 3 && content_revision == 0
+   *
+   * **Field Validity:**
+   * Not all fields are valid for all versions. Fields contain sentinel value
+   * 0xFFFF (65535) when not populated for the current version. Refer to inline
+   * comments in ::amdsmi_apu_metrics_t for per-field version availability.
+   */
+  amdsmi_apu_metrics_t* apu_metrics;
+
 } amdsmi_gpu_metrics_t;
 
 /**
@@ -3711,7 +3894,7 @@ amdsmi_status_t amdsmi_get_supported_power_cap(amdsmi_processor_handle processor
  *
  *  @param[in]   processor_handle Cpu socket which to query
  *
- *  @param[out]  ppower - Input buffer to return socket power
+ *  @param[out]  ppower - Input buffer to return socket power in milliwatts (mW)
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
@@ -3727,7 +3910,7 @@ amdsmi_status_t amdsmi_get_cpu_socket_power(amdsmi_processor_handle processor_ha
  *
  *  @param[in]   processor_handle Cpu socket which to query
  *
- *  @param[out]  pcap - Input buffer to return power cap.
+ *  @param[out]  pcap - Input buffer to return power cap in milliwatts (mW)
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
@@ -3743,7 +3926,7 @@ amdsmi_status_t amdsmi_get_cpu_socket_power_cap(amdsmi_processor_handle processo
  *
  *  @param[in]   processor_handle Cpu socket which to query
  *
- *  @param[out]  pmax - Input buffer to return maximum power limit value
+ *  @param[out]  pmax - Input buffer to return maximum power limit value in milliwatts (mW)
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
@@ -3775,7 +3958,7 @@ amdsmi_status_t amdsmi_get_cpu_pwr_svi_telemetry_all_rails(amdsmi_processor_hand
  *
  *  @param[in]  processor_handle Cpu socket which to query
  *
- *  @param[in]  pcap - Input power limit value
+ *  @param[in]  pcap - Input power limit value in milliwatts (mW)
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
@@ -3796,6 +3979,7 @@ amdsmi_status_t amdsmi_set_cpu_socket_power_cap(amdsmi_processor_handle processo
  *  @param[in,out]  utilization - pointer to store utilization for balanced core modes (%)
  *
  *  @param[in,out]  ppt_limit - pointer to PPT (Package Power Tracking) limit value
+ *                              in milliwatts (mW)
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
@@ -3819,7 +4003,8 @@ amdsmi_status_t amdsmi_set_cpu_pwr_efficiency_mode(amdsmi_processor_handle proce
  *
  *  @param[out]  utilization - pointer to store utilization for balanced core modes (%)
  *
- *  @param[out]  ppt_limit - pointer to store PPT (Package Power Tracking) limit value in Watt
+ *  @param[out]  ppt_limit - pointer to store PPT (Package Power Tracking) limit value
+ *                           in milliwatts (mW)
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
@@ -3837,7 +4022,7 @@ amdsmi_status_t amdsmi_get_cpu_pwr_efficiency_mode(amdsmi_processor_handle proce
  *  @platform{cpu_bm}
  *
  *  @param[in]   processor_handle Cpu core which to query
- *  @param[out]  power - Input buffer to store power consumption in watts
+ *  @param[out]  power - Input buffer to store power consumption in milliwatts (mW)
  *
  *   @return ::amdsmi_status_t
  *           ::AMDSMI_STATUS_SUCCESS on successful register read, non-zero on failure
@@ -4542,6 +4727,15 @@ amdsmi_status_t amdsmi_get_gpu_metrics_header_info(amdsmi_processor_handle proce
  *  arguments and ::AMDSMI_STATUS_NOT_SUPPORTED if it is not supported with the
  *  provided arguments.
  *
+ *  **APU Metrics:**
+ *  When APU-specific metrics are available (APU metrics table v2.4 or v3.0),
+ *  @p pgpu_metrics->apu_metrics will point to thread-local library-owned storage.
+ *  This pointer is invalidated by ANY subsequent call to
+ *  ::amdsmi_get_gpu_metrics_info or ::amdsmi_get_gpu_partition_metrics_info on
+ *  the same thread, even for different devices. Callers must copy the entire
+ *  ::amdsmi_apu_metrics_t structure immediately after the call to preserve the data.
+ *  For non-APU devices, @p pgpu_metrics->apu_metrics will be nullptr.
+ *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
 amdsmi_status_t amdsmi_get_gpu_metrics_info(amdsmi_processor_handle processor_handle,
@@ -4565,6 +4759,15 @@ amdsmi_status_t amdsmi_get_gpu_metrics_info(amdsmi_processor_handle processor_ha
  *  ::AMDSMI_STATUS_INVAL if the function is supported with the provided,
  *  arguments and ::AMDSMI_STATUS_NOT_SUPPORTED if it is not supported with the
  *  provided arguments.
+ *
+ *  **APU Metrics:**
+ *  When APU-specific metrics are available (APU metrics table v2.4 or v3.0),
+ *  @p pgpu_metrics->apu_metrics will point to thread-local library-owned storage.
+ *  This pointer is invalidated by ANY subsequent call to
+ *  ::amdsmi_get_gpu_metrics_info or ::amdsmi_get_gpu_partition_metrics_info on
+ *  the same thread, even for different devices. Callers must copy the entire
+ *  ::amdsmi_apu_metrics_t structure immediately after the call to preserve the data.
+ *  For non-APU devices, @p pgpu_metrics->apu_metrics will be nullptr.
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
@@ -5994,7 +6197,7 @@ amdsmi_status_t amdsmi_get_minmax_bandwidth_between_processors(
  *
  *  @details Given a source processor handle @p processor_handle_src and
  *  a destination processor handle @p processor_handle_dst, and a pointer to an
- *  uint64_t @p hops and a pointer to an AMDSMI_INK_TYPE @p type,
+ *  uint64_t @p hops and a pointer to an ::amdsmi_link_type_t @p type,
  *  this function will write the number of hops and the connection type
  *  between the device @p processor_handle_src and @p processor_handle_dst to the memory
  *  pointed to by @p hops and @p type.
@@ -6006,7 +6209,7 @@ amdsmi_status_t amdsmi_get_minmax_bandwidth_between_processors(
  *  @param[in,out] hops A pointer to an uint64_t to which the
  *  hops for the connection should be written.
  *
- *  @param[in,out] type A pointer to an ::AMDSMI_LINK_TYPE to which the
+ *  @param[in,out] type A pointer to an ::amdsmi_link_type_t to which the
  *  type for the connection should be written.
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
@@ -7827,7 +8030,8 @@ amdsmi_status_t amdsmi_set_cpu_sdps_limit(amdsmi_processor_handle processor_hand
  *  @platform{cpu_bm}
  *
  *  @param[in]   processor_handle Processor handle for which to query the limit
- *  @param[out]  sdps_limit - Input buffer to receive the current SDPS limit value in watts
+ *  @param[out]  sdps_limit - Input buffer to receive the current SDPS limit value in
+ *                            milliwatts (mW)
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */

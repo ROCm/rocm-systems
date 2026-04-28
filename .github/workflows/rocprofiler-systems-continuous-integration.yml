@@ -93,6 +93,7 @@ jobs:
       ROCPROFSYS_CI: ON
       OMPI_ALLOW_RUN_AS_ROOT: 1
       OMPI_ALLOW_RUN_AS_ROOT_CONFIRM: 1
+      ROCPROFSYS_KEEP_TEST_OUTPUT: '0'
     permissions:
       packages: read
     container:
@@ -165,9 +166,16 @@ jobs:
           echo "ROCm installed to: ${{ env.ROCM_PATH }}"
           echo "✅ ROCm Installation Complete!"
 
+      - name: Install Python Test Dependencies
+        timeout-minutes: 10
+        shell: bash
+        working-directory: projects/rocprofiler-systems/
+        run: |
+          python3 -m pip install --break-system-packages -r requirements.txt
+
       - name: Configure, Build, and Test
         id: run_ci
-        timeout-minutes: 30
+        timeout-minutes: 60
         working-directory: projects/rocprofiler-systems
         run: |
           set -e
@@ -194,8 +202,7 @@ jobs:
             -DROCPROFSYS_USE_PYTHON=ON \
             -DROCPROFSYS_MAX_THREADS=64 \
             -- \
-            -L "rocm" \
-            -LE "rccl|runtime|ompvv"
+            -L "rocm"
 
       - name: Check for Leftover Buffered Files
         timeout-minutes: 5

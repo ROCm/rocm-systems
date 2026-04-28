@@ -14,10 +14,19 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
   - Supports all runtime types (HSA, HIP, ROCTX, RCCL, ROCDecode, ROCJpeg, etc.) automatically
   - No explicit late-start API calls required - works transparently
 
+**rocprofv3:**
+
+- `--att --selected-regions` now enables marker-controlled device thread trace
+  - Uses `roctxProfilerResume(0)` / `roctxProfilerPause(0)` to start and stop ATT collection at runtime
+  - Supports multiple resume/pause cycles, each producing separate trace output files
+  - Incompatible with `--att-consecutive-kernels`
+
 **Documentation:**
 
 - Added "Using Late-Loading" how-to guide with code examples
 - Documented late-loading workflow and integration with rocprofiler-register
+- Added marker-controlled thread tracing section to the thread trace how-to guide
+- Added cross-reference from ROCTx documentation to ATT with selected-regions
 
 ### Changed
 

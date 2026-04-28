@@ -3982,6 +3982,17 @@ rsmi_status_t rsmi_dev_energy_count_get(uint32_t dv_ind, uint64_t* power, float*
 
   *power = gpu_metrics.energy_accumulator;
   *timestamp = gpu_metrics.system_clock_counter;
+  // Some metrics tables leave energy_accumulator at the max-value sentinel when unavailable.
+  if (*power == std::numeric_limits<decltype(gpu_metrics.energy_accumulator)>::max()) {
+    ss << __PRETTY_FUNCTION__ << " | ======= end ======= "
+       << " | Failed "
+       << " | Device #: " << dv_ind
+       << " | Cause: energy accumulator is unavailable for this metrics table"
+       << " | Returning: " << amd::smi::getRSMIStatusString(RSMI_STATUS_NOT_SUPPORTED, false)
+       << " |";
+    LOG_INFO(ss);
+    return RSMI_STATUS_NOT_SUPPORTED;
+  }
   // hard-coded for now since all ASICs have same resolution. If it ASIC
   // dependent then this information should come from Kernel
   if (counter_resolution) *counter_resolution = kEnergyCounterResolution;
