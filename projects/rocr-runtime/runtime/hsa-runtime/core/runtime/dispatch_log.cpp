@@ -466,13 +466,27 @@ bool drain_one_queue(queue_drain_state& qs, bool force_emit) {
     // host-runtime release.
     //
     // record_type narrowing uint32 -> uint8: current FW values are
-    // 1 and 2 and the on-the-wire schema field is uint8_t. If a future
-    // FW adds a record_type beyond 255, the static_cast silently
-    // truncates; we accept this risk for the smaller payload and will
-    // widen the schema (and the cast) when (and only when) such a
-    // FW revision exists. Use the captured queue-independent
-    // translation callable — Queue may be destroyed mid-pass even
-    // though the shared_ptr keeps qs alive.
+    // 1 and 2 and the on-the-wire schema field is uint8_t. The
+    // sentinel-zero check above (rt == 0 at line ~439) already filters
+    // empty slots before this point, so rt is known non-zero at the
+    // cast site — the truncation hazard is NOT sentinel collision
+    // (no on-the-wire 0 can be produced here). The only hazard is two
+    // distinct future FW values that collide modulo 256 (e.g. 1 and
+    // 257); we accept this risk for the smaller payload and will
+    // widen the schema (and the cast) when (and only when) such a FW
+    // revision exists.
+    //
+    // Cheap pre-check: if neither force_emit nor a non-disabled state
+    // applies the emit will be discarded inside the helper, so skip
+    // the (lock-acquiring) translate_gpu_ts call. translate_gpu_ts
+    // performs a linear interpolation under the agent's clock-cache
+    // lock; doing it 1× per record × kRingSlots in the disable-race
+    // window is wasted work the helper would discard anyway. The
+    // helper's own kill-switch check still runs (defense in depth).
+    if (!force_emit && rocm_trace_disabled()) break;
+    // Use the captured queue-independent translation callable — Queue
+    // may be destroyed mid-pass even though the shared_ptr keeps qs
+    // alive.
     const uint64_t gpu_ts_sys = qs.translate_gpu_ts(gpu_ts);
 
     // Narrow internal 64-bit queue_id at the tracepoint boundary
