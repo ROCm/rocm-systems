@@ -56,13 +56,21 @@
 template <class T>
 void __atomic_load(const T* object, typename std::remove_volatile<T>::type* ret, int arg) {
   if constexpr (sizeof(T) == 8) {
-    *ret = InterlockedOr64(
+    *ret = static_cast<typename std::remove_volatile<T>::type>(InterlockedOr64(
       reinterpret_cast<volatile LONG64*>(const_cast<typename std::remove_const<T>::type*>(object)),
-      0);
-  } else {
-    *ret = InterlockedOr(
+      0));
+  } else if constexpr (sizeof(T) == 4) {
+    *ret = static_cast<typename std::remove_volatile<T>::type>(InterlockedOr(
       reinterpret_cast<volatile LONG*>(const_cast<typename std::remove_const<T>::type*>(object)),
-      0);
+      0));
+  } else if constexpr (sizeof(T) == 2) {
+    *ret = static_cast<typename std::remove_volatile<T>::type>(_InterlockedOr16(
+      reinterpret_cast<volatile SHORT*>(const_cast<typename std::remove_const<T>::type*>(object)),
+      0));
+  } else if constexpr (sizeof(T) == 1) {
+    *ret = static_cast<typename std::remove_volatile<T>::type>(_InterlockedOr8(
+      reinterpret_cast<volatile char*>(const_cast<typename std::remove_const<T>::type*>(object)),
+      0));
   }
 }
 
@@ -72,80 +80,138 @@ void __atomic_store(const T* object, typename std::remove_volatile<T>::type* val
     InterlockedExchange64(
       reinterpret_cast<volatile LONG64*>(const_cast<typename std::remove_const<T>::type*>(object)),
       *val);
-  } else {
+  } else if constexpr (sizeof(T) == 4) {
     InterlockedExchange(
       reinterpret_cast<volatile LONG*>(const_cast<typename std::remove_const<T>::type*>(object)),
       *val);
+  } else if constexpr (sizeof(T) == 2) {
+    // 16-bit store: use _InterlockedExchange16 so we do not widen to a 32-bit
+    // interlocked write that clobbers the adjacent 2 bytes. This was breaking
+    // the AQL packet header store in core::InterceptQueue::Submit on Windows
+    // (the wider write zeroed the setup field, which WSL DXG's AqlToPm4Thread
+    // then rejected with HSA_STATUS_ERROR_INVALID_PACKET_FORMAT, 0x100d).
+    _InterlockedExchange16(
+      reinterpret_cast<volatile SHORT*>(const_cast<typename std::remove_const<T>::type*>(object)),
+      static_cast<SHORT>(*val));
+  } else if constexpr (sizeof(T) == 1) {
+    _InterlockedExchange8(
+      reinterpret_cast<volatile char*>(const_cast<typename std::remove_const<T>::type*>(object)),
+      static_cast<char>(*val));
   }
 }
 
 template <class T>
 typename std::remove_volatile<T>::type __atomic_fetch_or(
     const T* object, typename std::remove_volatile<T>::type val, int arg) {
+  using U = typename std::remove_volatile<T>::type;
   if constexpr (sizeof(T) == 8) {
-    return InterlockedOr64(
+    return static_cast<U>(InterlockedOr64(
       reinterpret_cast<volatile LONG64*>(const_cast<typename std::remove_const<T>::type*>(object)),
-      val);
-  } else {
-    return InterlockedOr(
+      static_cast<LONG64>(val)));
+  } else if constexpr (sizeof(T) == 4) {
+    return static_cast<U>(InterlockedOr(
       reinterpret_cast<volatile LONG*>(const_cast<typename std::remove_const<T>::type*>(object)),
-      val);
+      static_cast<LONG>(val)));
+  } else if constexpr (sizeof(T) == 2) {
+    return static_cast<U>(_InterlockedOr16(
+      reinterpret_cast<volatile SHORT*>(const_cast<typename std::remove_const<T>::type*>(object)),
+      static_cast<SHORT>(val)));
+  } else if constexpr (sizeof(T) == 1) {
+    return static_cast<U>(_InterlockedOr8(
+      reinterpret_cast<volatile char*>(const_cast<typename std::remove_const<T>::type*>(object)),
+      static_cast<char>(val)));
   }
 }
 
 template <class T>
 typename std::remove_volatile<T>::type __atomic_fetch_and(
     const T* object, typename std::remove_volatile<T>::type val, int arg) {
+  using U = typename std::remove_volatile<T>::type;
   if constexpr (sizeof(T) == 8) {
-    return InterlockedAnd64(
+    return static_cast<U>(InterlockedAnd64(
       reinterpret_cast<volatile LONG64*>(const_cast<typename std::remove_const<T>::type*>(object)),
-      val);
-  } else {
-    return InterlockedAnd(
+      static_cast<LONG64>(val)));
+  } else if constexpr (sizeof(T) == 4) {
+    return static_cast<U>(InterlockedAnd(
         reinterpret_cast<volatile LONG*>(const_cast<typename std::remove_const<T>::type*>(object)),
-        val);
+        static_cast<LONG>(val)));
+  } else if constexpr (sizeof(T) == 2) {
+    return static_cast<U>(_InterlockedAnd16(
+        reinterpret_cast<volatile SHORT*>(const_cast<typename std::remove_const<T>::type*>(object)),
+        static_cast<SHORT>(val)));
+  } else if constexpr (sizeof(T) == 1) {
+    return static_cast<U>(_InterlockedAnd8(
+        reinterpret_cast<volatile char*>(const_cast<typename std::remove_const<T>::type*>(object)),
+        static_cast<char>(val)));
   }
 }
 
 template <class T>
 typename std::remove_volatile<T>::type __atomic_fetch_xor(
     const T* object, typename std::remove_volatile<T>::type val, int arg) {
+  using U = typename std::remove_volatile<T>::type;
   if constexpr (sizeof(T) == 8) {
-    return InterlockedXor64(
+    return static_cast<U>(InterlockedXor64(
       reinterpret_cast<volatile LONG64*>(const_cast<typename std::remove_const<T>::type*>(object)),
-      val);
-  } else {
-    return InterlockedXor(
+      static_cast<LONG64>(val)));
+  } else if constexpr (sizeof(T) == 4) {
+    return static_cast<U>(InterlockedXor(
       reinterpret_cast<volatile LONG*>(const_cast<typename std::remove_const<T>::type*>(object)),
-      val);
+      static_cast<LONG>(val)));
+  } else if constexpr (sizeof(T) == 2) {
+    return static_cast<U>(_InterlockedXor16(
+      reinterpret_cast<volatile SHORT*>(const_cast<typename std::remove_const<T>::type*>(object)),
+      static_cast<SHORT>(val)));
+  } else if constexpr (sizeof(T) == 1) {
+    return static_cast<U>(_InterlockedXor8(
+      reinterpret_cast<volatile char*>(const_cast<typename std::remove_const<T>::type*>(object)),
+      static_cast<char>(val)));
   }
 }
 
 template <class T>
 typename std::remove_volatile<T>::type __atomic_fetch_add(
     const T* object, typename std::remove_volatile<T>::type val, int arg) {
+  using U = typename std::remove_volatile<T>::type;
   if constexpr (sizeof(T) == 8) {
-    return InterlockedExchangeAdd64(
+    return static_cast<U>(InterlockedExchangeAdd64(
       reinterpret_cast<volatile LONG64*>(const_cast<typename std::remove_const<T>::type*>(object)),
-      val);
-  } else {
-    return InterlockedExchangeAdd(
+      static_cast<LONG64>(val)));
+  } else if constexpr (sizeof(T) == 4) {
+    return static_cast<U>(InterlockedExchangeAdd(
       reinterpret_cast<volatile LONG*>(const_cast<typename std::remove_const<T>::type*>(object)),
-      val);
+      static_cast<LONG>(val)));
+  } else if constexpr (sizeof(T) == 2) {
+    return static_cast<U>(_InterlockedExchangeAdd16(
+      reinterpret_cast<volatile SHORT*>(const_cast<typename std::remove_const<T>::type*>(object)),
+      static_cast<SHORT>(val)));
+  } else if constexpr (sizeof(T) == 1) {
+    return static_cast<U>(_InterlockedExchangeAdd8(
+      reinterpret_cast<volatile char*>(const_cast<typename std::remove_const<T>::type*>(object)),
+      static_cast<char>(val)));
   }
 }
 
 template <class T>
 typename std::remove_volatile<T>::type __atomic_fetch_sub(
     const T* object, typename std::remove_volatile<T>::type val, int arg) {
+  using U = typename std::remove_volatile<T>::type;
   if constexpr (sizeof(T) == 8) {
-    return InterlockedExchangeAdd64(
+    return static_cast<U>(InterlockedExchangeAdd64(
       reinterpret_cast<volatile LONG64*>(const_cast<typename std::remove_const<T>::type*>(object)),
-      val * (-1));
-  } else {
-    return InterlockedExchangeAdd(
+      -static_cast<LONG64>(val)));
+  } else if constexpr (sizeof(T) == 4) {
+    return static_cast<U>(InterlockedExchangeAdd(
       reinterpret_cast<volatile LONG*>(const_cast<typename std::remove_const<T>::type*>(object)),
-      val * (-1));
+      -static_cast<LONG>(val)));
+  } else if constexpr (sizeof(T) == 2) {
+    return static_cast<U>(_InterlockedExchangeAdd16(
+      reinterpret_cast<volatile SHORT*>(const_cast<typename std::remove_const<T>::type*>(object)),
+      static_cast<SHORT>(-static_cast<int>(val))));
+  } else if constexpr (sizeof(T) == 1) {
+    return static_cast<U>(_InterlockedExchangeAdd8(
+      reinterpret_cast<volatile char*>(const_cast<typename std::remove_const<T>::type*>(object)),
+      static_cast<char>(-static_cast<int>(val))));
   }
 }
 
@@ -155,20 +221,35 @@ void __atomic_compare_exchange(
     typename std::remove_volatile<T>::type* val, int arg0, int arg1, int arg2) {
   if constexpr (sizeof(T) == 8) {
     InterlockedCompareExchange64(reinterpret_cast<volatile LONG64*>(object),
-      *val, *expected);
-  } else {
+      static_cast<LONG64>(*val), static_cast<LONG64>(*expected));
+  } else if constexpr (sizeof(T) == 4) {
     InterlockedCompareExchange(reinterpret_cast<volatile LONG*>(object),
-      *val, *expected);
+      static_cast<LONG>(*val), static_cast<LONG>(*expected));
+  } else if constexpr (sizeof(T) == 2) {
+    _InterlockedCompareExchange16(reinterpret_cast<volatile SHORT*>(object),
+      static_cast<SHORT>(*val), static_cast<SHORT>(*expected));
+  } else if constexpr (sizeof(T) == 1) {
+    _InterlockedCompareExchange8(reinterpret_cast<volatile char*>(object),
+      static_cast<char>(*val), static_cast<char>(*expected));
   }
 }
 
 template <class T>
 void __atomic_exchange(T* object, typename std::remove_volatile<T>::type* val,
                        typename std::remove_volatile<T>::type* ret, int arg0) {
+  using U = typename std::remove_volatile<T>::type;
   if constexpr (sizeof(T) == 8) {
-    *ret = InterlockedExchange64(reinterpret_cast<volatile LONG64*>(object), *val);
-  } else {
-    *ret = InterlockedExchange(reinterpret_cast<volatile LONG*>(object), *val);
+    *ret = static_cast<U>(InterlockedExchange64(
+      reinterpret_cast<volatile LONG64*>(object), static_cast<LONG64>(*val)));
+  } else if constexpr (sizeof(T) == 4) {
+    *ret = static_cast<U>(InterlockedExchange(
+      reinterpret_cast<volatile LONG*>(object), static_cast<LONG>(*val)));
+  } else if constexpr (sizeof(T) == 2) {
+    *ret = static_cast<U>(_InterlockedExchange16(
+      reinterpret_cast<volatile SHORT*>(object), static_cast<SHORT>(*val)));
+  } else if constexpr (sizeof(T) == 1) {
+    *ret = static_cast<U>(_InterlockedExchange8(
+      reinterpret_cast<volatile char*>(object), static_cast<char>(*val)));
   }
 }
 

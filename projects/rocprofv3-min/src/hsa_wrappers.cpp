@@ -25,6 +25,7 @@
 
 #include <atomic>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <memory>
 #include <mutex>
@@ -322,6 +323,100 @@ static void our_packet_writer(const void* pkts, uint64_t pkt_count,
     }
 }
 
+static std::atomic<uint64_t> g_diag_writer_calls{0};
+static std::atomic<uint64_t> g_diag_pkts_forwarded{0};
+
+// Dump a 64-byte AQL packet: structured kernel-dispatch fields (assuming the
+// packet is a KERNEL_DISPATCH; fields are still valid bytes for any other type)
+// followed by the raw 64 bytes in hex. Used to compare what rocclr produces
+// across the InterceptQueue path vs the regular doorbell-hook path.
+static void dump_aql_packet(const char* tag, const void* pkt) {
+    const auto* d = static_cast<const hsa_kernel_dispatch_packet_t*>(pkt);
+    const uint8_t* b = static_cast<const uint8_t*>(pkt);
+    std::fprintf(stderr,
+        "[%s] hdr=0x%04x setup=0x%04x wg=%ux%ux%u grid=%ux%ux%u "
+        "priv=%u group=%u kobj=0x%llx kargs=%p comp_sig=0x%llx\n",
+        tag,
+        (unsigned)d->header, (unsigned)d->setup,
+        (unsigned)d->workgroup_size_x, (unsigned)d->workgroup_size_y, (unsigned)d->workgroup_size_z,
+        (unsigned)d->grid_size_x, (unsigned)d->grid_size_y, (unsigned)d->grid_size_z,
+        (unsigned)d->private_segment_size, (unsigned)d->group_segment_size,
+        (unsigned long long)d->kernel_object,
+        d->kernarg_address,
+        (unsigned long long)d->completion_signal.handle);
+    for (int row = 0; row < 4; ++row) {
+        std::fprintf(stderr, "[%s] hex %02x:", tag, row * 16);
+        for (int col = 0; col < 16; ++col) {
+            std::fprintf(stderr, " %02x", b[row * 16 + col]);
+        }
+        std::fprintf(stderr, "\n");
+    }
+}
+
+static void diag_packet_writer(const void* pkts, uint64_t pkt_count,
+                               uint64_t user_pkt_index, void* /*data*/,
+                               hsa_amd_queue_intercept_packet_writer writer)
+{
+    const uint64_t call_n = g_diag_writer_calls.fetch_add(1) + 1;
+    std::fprintf(stderr, "[diag-writer] call#%llu pkts=%llu user_idx=%llu\n",
+                 (unsigned long long)call_n,
+                 (unsigned long long)pkt_count,
+                 (unsigned long long)user_pkt_index);
+    if (pkt_count >= 1) {
+        dump_aql_packet("intercept-in", pkts);
+    }
+    // ROCPROFV3_DIAG_NO_FORWARD=1: skip writer() to test whether DXG's 0x100d
+    // is triggered by something OTHER than the bytes we forward (e.g., the
+    // wrapped queue's existence, or the InterceptQueue's async-doorbell
+    // signaling the wrapped queue independently).
+    const bool no_forward = []() {
+        const char* v = std::getenv("ROCPROFV3_DIAG_NO_FORWARD");
+        return v && v[0] == '1';
+    }();
+    if (no_forward) {
+        std::fprintf(stderr, "[diag-writer] call#%llu NO_FORWARD: skipping writer()\n",
+                     (unsigned long long)call_n);
+        return;
+    }
+    if (writer) {
+        writer(pkts, pkt_count);
+        g_diag_pkts_forwarded.fetch_add(pkt_count);
+        std::fprintf(stderr, "[diag-writer] call#%llu forwarded ok\n",
+                     (unsigned long long)call_n);
+    } else {
+        std::fprintf(stderr, "[diag-writer] call#%llu writer cb is NULL!\n",
+                     (unsigned long long)call_n);
+    }
+}
+
+static hsa_status_t W_hsa_queue_create_intercept(
+    hsa_agent_t agent, uint32_t size, hsa_queue_type32_t type,
+    void (*callback)(hsa_status_t status, hsa_queue_t* source, void* data), void* data,
+    uint32_t private_segment_size, uint32_t group_segment_size, hsa_queue_t** queue)
+{
+    auto fn = hsa_orig::amd_ext_snap.hsa_amd_queue_intercept_create_fn;
+    if (!fn) {
+        return hsa_orig::queue_create(agent, size, type, callback, data,
+                                      private_segment_size, group_segment_size, queue);
+    }
+
+    hsa_status_t st = fn(agent, size, type, callback, data,
+                        private_segment_size, group_segment_size, queue);
+    if (st != HSA_STATUS_SUCCESS || !queue || !*queue) return st;
+
+    auto reg = hsa_orig::amd_ext_snap.hsa_amd_queue_intercept_register_fn;
+    if (!reg) return st;
+
+    auto* qs = new QueueState{*queue, (*queue)->id, agent};
+    reg(*queue, &our_packet_writer, qs);
+
+    if (hsa_orig::profiling_set_enabled) {
+        hsa_orig::profiling_set_enabled(*queue, 1);
+    }
+
+    return st;
+}
+
 static hsa_status_t W_hsa_amd_queue_intercept_create(
     hsa_agent_t agent_handle, uint32_t size, hsa_queue_type32_t type,
     void (*callback)(hsa_status_t status, hsa_queue_t* source, void* data), void* data,
@@ -506,6 +601,8 @@ static void process_doorbell_range(DoorbellInfo* info, uint64_t from, uint64_t t
                              ((1u << HSA_PACKET_HEADER_WIDTH_TYPE) - 1u);
         if (type != HSA_PACKET_TYPE_KERNEL_DISPATCH) continue;
 
+        dump_aql_packet("doorbell-orig", slot);
+
         auto* ctx = new KernelCtx{};
         ctx->queue_id            = info->queue_id;
         ctx->agent_id            = info->agent.handle;
@@ -591,6 +688,17 @@ void install_hsa_wrappers(HsaApiTable* table) {
         if (hsa_orig::profiling_async_copy_enable) {
             hsa_orig::profiling_async_copy_enable(1);
         }
+        std::fprintf(stderr,
+            "[rocprofv3-min PREFLIGHT] amd_ext slots: "
+            "intercept_create=%p intercept_register=%p "
+            "signal_create=%p signal_async_handler=%p "
+            "profiling_get_dispatch=%p profiling_set_enabled=%p\n",
+            (void*)hsa_orig::amd_ext_snap.hsa_amd_queue_intercept_create_fn,
+            (void*)hsa_orig::amd_ext_snap.hsa_amd_queue_intercept_register_fn,
+            (void*)hsa_orig::amd_ext_snap.hsa_amd_signal_create_fn,
+            (void*)hsa_orig::amd_ext_snap.hsa_amd_signal_async_handler_fn,
+            (void*)hsa_orig::amd_ext_snap.hsa_amd_profiling_get_dispatch_time_fn,
+            (void*)hsa_orig::amd_ext_snap.hsa_amd_profiling_set_profiler_enabled_fn);
     }
     if (table->core_) {
         hsa_orig::core_snap            = *table->core_;
@@ -604,6 +712,11 @@ void install_hsa_wrappers(HsaApiTable* table) {
         hsa_orig::executable_freeze    = hsa_orig::core_snap.hsa_executable_freeze_fn;
         hsa_orig::iterate_agent_symbols = hsa_orig::core_snap.hsa_executable_iterate_agent_symbols_fn;
         hsa_orig::symbol_get_info      = hsa_orig::core_snap.hsa_executable_symbol_get_info_fn;
+        std::fprintf(stderr,
+            "[rocprofv3-min PREFLIGHT] core slots: "
+            "queue_create=%p queue_destroy=%p\n",
+            (void*)hsa_orig::core_snap.hsa_queue_create_fn,
+            (void*)hsa_orig::core_snap.hsa_queue_destroy_fn);
     }
 
     if (g_kernel_trace_enabled && table->amd_ext_) {
@@ -614,46 +727,53 @@ void install_hsa_wrappers(HsaApiTable* table) {
         }
     }
 
-    // Doorbell-store interception (Windows DXG path). Record every queue's
-    // doorbell signal; intercept stores to that signal to capture AQL packets
-    // at the moment they are released to the GPU. Avoids the WSL thunk's
-    // intercept-queue exception (status 0x1016).
+    // Mode toggle: ROCPROFV3_USE_INTERCEPT=1 → install W_hsa_queue_create_intercept
+    // (substitute intercept_create for queue_create, register diag_packet_writer).
+    // Otherwise → install regular W_hsa_queue_create + doorbell-store hooks.
+    // Both modes dump 64-byte AQL packets so the two captures can be diffed.
+    const bool use_intercept = []() {
+        const char* v = std::getenv("ROCPROFV3_USE_INTERCEPT");
+        return v && v[0] == '1';
+    }();
+    std::fprintf(stderr, "[rocprofv3-min] kernel-trace mode: %s\n",
+                 use_intercept ? "INTERCEPT" : "DOORBELL-HOOK");
+
     if (g_kernel_trace_enabled && table->core_) {
-        if (hsa_orig::queue_create) {
-            table->core_->hsa_queue_create_fn = &W_hsa_queue_create;
+        if (use_intercept) {
+            // Intercept path: route hsa_queue_create through our DIAG wrapper
+            // which calls hsa_amd_queue_intercept_create + intercept_register.
+            if (hsa_orig::queue_create &&
+                hsa_orig::amd_ext_snap.hsa_amd_queue_intercept_create_fn &&
+                hsa_orig::amd_ext_snap.hsa_amd_queue_intercept_register_fn) {
+                table->core_->hsa_queue_create_fn = &W_hsa_queue_create_intercept;
+            }
+            if (hsa_orig::queue_destroy) {
+                table->core_->hsa_queue_destroy_fn = &W_hsa_queue_destroy;
+            }
+        } else {
+            // Doorbell-hook path: keep regular queue_create, record every
+            // queue's doorbell, intercept signal_store stores to it.
+            if (hsa_orig::queue_create) {
+                table->core_->hsa_queue_create_fn = &W_hsa_queue_create;
+            }
+            if (hsa_orig::queue_destroy) {
+                table->core_->hsa_queue_destroy_fn = &W_hsa_queue_destroy;
+            }
+            if (hsa_orig::signal_store_screlease) {
+                table->core_->hsa_signal_store_screlease_fn = &W_hsa_signal_store_screlease;
+            }
+            if (hsa_orig::signal_store_relaxed) {
+                table->core_->hsa_signal_store_relaxed_fn = &W_hsa_signal_store_relaxed;
+            }
         }
-        if (hsa_orig::queue_destroy) {
-            table->core_->hsa_queue_destroy_fn = &W_hsa_queue_destroy;
-        }
-        if (hsa_orig::signal_store_screlease) {
-            table->core_->hsa_signal_store_screlease_fn = &W_hsa_signal_store_screlease;
-        }
-        if (hsa_orig::signal_store_relaxed) {
-            table->core_->hsa_signal_store_relaxed_fn = &W_hsa_signal_store_relaxed;
-        }
-        // Kernel-name resolution: capture GPU agents during iterate_agents,
-        // then enumerate symbols on each executable_freeze.
+
+        // Kernel-name resolution (same in both modes).
         if (hsa_orig::iterate_agents) {
             table->core_->hsa_iterate_agents_fn = &W_hsa_iterate_agents;
         }
         if (hsa_orig::executable_freeze && hsa_orig::iterate_agent_symbols &&
             hsa_orig::symbol_get_info) {
             table->core_->hsa_executable_freeze_fn = &W_hsa_executable_freeze;
-        }
-    }
-
-    // Substitute hsa_queue_create with intercept-queue-under-the-hood so that
-    // rocclr (which uses the regular constructor) still routes packets
-    // through our writer. Required for kernel-trace; also needed for
-    // memory-copy-trace when small hipMemcpy uses the blit-kernel path.
-    if (g_kernel_trace_enabled && table->core_) {
-        hsa_orig::queue_create  = hsa_orig::core_snap.hsa_queue_create_fn;
-        hsa_orig::queue_destroy = hsa_orig::core_snap.hsa_queue_destroy_fn;
-        if (hsa_orig::queue_create && hsa_orig::queue_intercept_create &&
-            hsa_orig::queue_intercept_register)
-        {
-            table->core_->hsa_queue_create_fn  = &W_hsa_queue_create;
-            table->core_->hsa_queue_destroy_fn = &W_hsa_queue_destroy;
         }
     }
 
