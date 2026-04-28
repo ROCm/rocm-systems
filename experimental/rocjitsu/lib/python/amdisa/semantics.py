@@ -350,6 +350,11 @@ def _derive_sop1(name: str) -> InstructionSemantics | None:
 # Map mnemonic stem (after stripping dtype) to operation name.
 _SOP2_OP_MAP = {
     'S_ADD': 'add', 'S_SUB': 'sub', 'S_ADDC': 'addc', 'S_SUBB': 'subb',
+    # RDNA4 spells the carry-out/carry-in scalar operations explicitly. Keep
+    # them in the same semantic classes as the legacy CDNA spellings so cross-ISA
+    # analysis can recognize the rename as a real equivalent, not a NOP.
+    'S_ADD_CO': 'add', 'S_SUB_CO': 'sub',
+    'S_ADD_CO_CI': 'addc', 'S_SUB_CO_CI': 'subb',
     'S_MIN': 'min', 'S_MAX': 'max', 'S_MUL': 'mul',
     'S_MUL_HI': 'mulhi', 'S_ABSDIFF': 'absdiff',
     'S_AND': 'and', 'S_OR': 'or', 'S_XOR': 'xor',

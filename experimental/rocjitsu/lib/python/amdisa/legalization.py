@@ -238,6 +238,20 @@ def _build_rename_map() -> dict[str, str]:
         _add(f'{prefix}MIN_F32', f'{prefix}MIN_NUM_F32')
         _add(f'{prefix}MAX_F32', f'{prefix}MAX_NUM_F32')
 
+    # --- RDNA4 no-carry VALU integer add/sub naming ---
+    for size in ('U16', 'U32', 'U64'):
+        _add(f'V_ADD_{size}', f'V_ADD_NC_{size}')
+        _add(f'V_SUB_{size}', f'V_SUB_NC_{size}')
+        _add(f'V_SUBREV_{size}', f'V_SUBREV_NC_{size}')
+
+    # --- RDNA4 scalar carry-out naming ---
+    _add('S_ADD_U32', 'S_ADD_CO_U32')
+    _add('S_SUB_U32', 'S_SUB_CO_U32')
+    _add('S_ADD_I32', 'S_ADD_CO_I32')
+    _add('S_SUB_I32', 'S_SUB_CO_I32')
+    _add('S_ADDC_U32', 'S_ADD_CO_CI_U32')
+    _add('S_SUBB_U32', 'S_SUB_CO_CI_U32')
+
     # --- Scalar bitwise renames (GFX9→GFX11): S_ANDN2→S_AND_NOT1, etc. ---
     for w in ('32', '64'):
         _add(f'S_ANDN2_B{w}', f'S_AND_NOT1_B{w}')
@@ -621,6 +635,16 @@ def _apply_domain_rules(
 
         if name.startswith('V_ACCVGPR_') and not dst_has_accvgpr:
             entry.action = LegalizationAction.expand(ExpansionKind.ACCVGPR)
+
+        # RDNA4 has V_ADD_NC_U16/V_SUB_NC_U16 only in VOP3 encoding. A CDNA4
+        # VOP2 source cannot be handled by the same-encoding translator: writing
+        # the VOP3 opcode into a VOP2 word would truncate it to an unrelated op.
+        # Keep these on the explicit unimplemented path until the DBT has an
+        # encoding-aware VOP2-to-VOP3 lowering.
+        if (src_isa == 'cdna4' and dst_isa == 'rdna4' and
+                entry.src_encoding == 'ENC_VOP2' and
+                name in ('V_ADD_U16', 'V_SUB_U16')):
+            entry.action = LegalizationAction.expand(ExpansionKind.CMP_REMOVED)
 
         # V_CMP_F_* (always-false) and V_CMP_TRU_* / V_CMPX_TRU_* (always-true)
         # are removed on GFX11+ (RDNA3/3.5/4). They have no target equivalent
