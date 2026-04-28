@@ -385,7 +385,7 @@ validateExtraCounterYAML(const YAML::Node& root)
                 if(seen_counter_arch_pairs.count(pair_key) != 0)
                 {
                     ROCP_WARNING << "Duplicate counter '" << name << "' for architecture '"
-                                 << arch_str << "' ignored";
+                                 << arch_str << "' detected";
                 }
                 seen_counter_arch_pairs.insert(pair_key);
             }
