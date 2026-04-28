@@ -20553,7 +20553,7 @@ inline constexpr InstructionLegalization kLegalization_rdna2_to_rdna3[] = {
     {9, 383, Action::Substitute, 38},
     {9, 383, Action::Identity, 9},
     {9, 383, Action::Lower, 21},
-    {10, 383, Action::Lower, 0},
+    {10, 383, Action::Substitute, 61},
     {10, 383, Action::Identity, 10},
     {10, 383, Action::Lower, 48},
     {11, 383, Action::Substitute, 1},

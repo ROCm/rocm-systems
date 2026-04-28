@@ -6,6 +6,8 @@
 
 #include <cstdint>
 
+#include "rocjitsu/code/rj_code.h"
+
 namespace rocjitsu {
 
 using Elf_Half = uint16_t;

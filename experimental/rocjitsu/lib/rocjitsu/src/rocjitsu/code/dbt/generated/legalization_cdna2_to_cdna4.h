@@ -12239,7 +12239,7 @@ inline constexpr InstructionLegalization kLegalization_cdna2_to_cdna4[] = {
     {8, 383, Action::Lower, 8},        {8, 383, Action::Lower, 8},
     {8, 383, Action::Identity, 8},     {9, 383, Action::Lower, 9},
     {9, 383, Action::Lower, 9},        {9, 383, Action::Identity, 9},
-    {10, 383, Action::Lower, 0},       {10, 383, Action::Lower, 10},
+    {10, 383, Action::Identity, 10},   {10, 383, Action::Lower, 10},
     {10, 383, Action::Identity, 10},   {11, 383, Action::Lower, 11},
     {11, 383, Action::Lower, 11},      {11, 383, Action::Identity, 11},
     {12, 383, Action::Lower, 12},      {12, 383, Action::Lower, 12},
