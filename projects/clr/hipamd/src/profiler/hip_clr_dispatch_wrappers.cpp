@@ -3,9 +3,6 @@
  *
  * SPDX-License-Identifier: MIT
  *
- * AUTO-GENERATED — do not edit by hand.
- * Regenerate with:  python generate_wrappers.py
- *
  * Dispatch table wrappers for the HIP CLR built-in profiling layer.
  * Pattern mirrors the reference hip_tracer.cpp:
  *   auto* record = HipGetActiveRecordExt(api_id);  // allocs slot, sets correlation_id TLS
