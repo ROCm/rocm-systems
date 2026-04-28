@@ -413,7 +413,6 @@ add_dependencies(copy_nccl_device_headers hipify_all)
 # This file is patched and transformed directly into HIPIFY_DIR, bypassing the hipify step
 list(APPEND HIP_SOURCES "${HIPIFY_DIR}/src/transport/net_ib_rocm.cc")
 
-
 # Generate device/host tables and all the collective functions that are going to be in librccl.so
 #==================================================================================================
 find_package(Python3 COMPONENTS Interpreter REQUIRED)
