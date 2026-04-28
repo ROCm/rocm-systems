@@ -30,6 +30,7 @@
 #include <utility>
 
 #include "hip_allocator.hpp"
+#include "default_allocator.hpp"
 
 /**
  * @file heap_memory.hpp
@@ -52,7 +53,6 @@ namespace rocshmem {
   };
 
 
-template <typename ALLOCATOR>
 class HeapMemoryType : public HeapMemory {
  public:
   /**
@@ -60,25 +60,31 @@ class HeapMemoryType : public HeapMemory {
    *
    * Uses default heap size specified in class body.
    */
-  HeapMemoryType() : HeapMemoryType(gibibyte_) {}
+  explicit HeapMemoryType(const MemoryAllocator& alloc = *get_default_allocator())
+      : HeapMemoryType(alloc, gibibyte_) {}
 
   /**
    * @brief Secondary constructor type
    *
-   * @param[in] User-specified size used as heap size
+   * @param[in] alloc Allocator to use for heap allocation
+   * @param[in] size User-specified size used as heap size
    */
-  explicit HeapMemoryType(size_t size) : size_{size} {
+  explicit HeapMemoryType(const MemoryAllocator& alloc, size_t size)
+      : allocator_{alloc}, up_{nullptr, Deleter(&allocator_)}, size_{size} {
     char* temp;
     allocator_.allocate(reinterpret_cast<void**>(&temp), size_);
     assert(temp);
-    std::unique_ptr<char, Deleter> up{temp};
-    up_ = std::move(up);
+    up_.reset(temp);
 
     /*
      * Set a c-style ptr for access by the device.
      */
     ptr_ = up_.get();
-    type_ = allocator_.type;
+
+    // Get type from the actual HIPAllocator
+    // Safe since we know allocator is always HIPAllocator or derived
+    const HIPAllocator* hip_alloc = static_cast<const HIPAllocator*>(&allocator_);
+    type_ = hip_alloc->type;
   }
 
   /**
@@ -97,25 +103,31 @@ class HeapMemoryType : public HeapMemory {
 
  private:
   /**
-   * @brief Template type member with allocate and deallocate methods.
-   */
-  ALLOCATOR allocator_{};
-
-  /**
    * @brief Wrap deallocator into a functor for up_ template.
    */
   class Deleter {
    public:
-    void operator()(void* x) { a_.deallocate(x); }
+    Deleter() : a_{nullptr} {}
+    explicit Deleter(MemoryAllocator* alloc) : a_{alloc} {}
+    void operator()(void* x) {
+      if (a_) {
+        a_->deallocate(x);
+      }
+    }
 
    private:
-    ALLOCATOR a_;
+    MemoryAllocator* a_;
   };
+
+  /**
+   * @brief Memory allocator with allocate and deallocate methods.
+   */
+  MemoryAllocator allocator_{};
 
   /**
    * @brief Owning pointer to heap memory.
    */
-  std::unique_ptr<char, Deleter> up_{nullptr};
+  std::unique_ptr<char, Deleter> up_;
 
   /**
    * @brief Named constant for a gibibyte.
