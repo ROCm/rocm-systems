@@ -12,8 +12,29 @@ Init priority
 """
 
 import os
+import sys
 import ctypes
+import faulthandler
 import pytest
+
+
+# DEBUG (drop before merge): faulthandler dump straight to stderr.
+def _enable_faulthandler_to_stderr() -> None:
+    rank = (
+        os.environ.get("OMPI_COMM_WORLD_RANK")
+        or os.environ.get("PMI_RANK")
+        or os.environ.get("RANK")
+        or "0"
+    )
+    faulthandler.enable(sys.stderr, all_threads=True)
+    print(
+        f"[conftest] rank={rank} faulthandler -> stderr",
+        file=sys.stderr,
+        flush=True,
+    )
+
+
+_enable_faulthandler_to_stderr()
 
 
 def _torch_available() -> bool:
@@ -94,6 +115,32 @@ def rocshmem_session():
     _rocshmem_initialized = True
 
     yield
+
+
+# DEBUG (drop before merge): emit every test-time exception to stderr immediately,
+# unconditionally, before pytest's reporter gets a chance to swallow it. Belt-and-
+# suspenders alongside `pytest -s` for the no-artifact-fetch case.
+def pytest_exception_interact(node, call, report):
+    rank = (
+        os.environ.get("OMPI_COMM_WORLD_RANK")
+        or os.environ.get("PMI_RANK")
+        or os.environ.get("RANK")
+        or "0"
+    )
+    print(
+        f"\n[conftest] rank={rank} EXCEPTION in {node.nodeid}:",
+        file=sys.stderr,
+        flush=True,
+    )
+    if call.excinfo is not None:
+        import traceback
+        traceback.print_exception(
+            call.excinfo.type,
+            call.excinfo.value,
+            call.excinfo.tb,
+            file=sys.stderr,
+        )
+        sys.stderr.flush()
 
 
 def pytest_sessionfinish(session, exitstatus):

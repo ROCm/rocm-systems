@@ -106,7 +106,9 @@ ExecPythonTest() {
         ${TIMEOUT:+--timeout "$TIMEOUT"}
         ${HOSTFILE:+--hostfile "$HOSTFILE"}
         --map-by numa
-        pytest $TEST_FILES -v --tb=short -rA --color=no
+        # DEBUG (drop before merge): -s disables pytest capture so prints/tracebacks
+        # reach the console before prterun kills peers; --tb=long for full frames.
+        pytest $TEST_FILES -v -s --tb=long -rA --color=no
       )
 
   local TEST_LOG_NAME="python_${TEST_NAME}_n${NUM_RANKS}"
