@@ -347,12 +347,18 @@ std::vector<uint32_t> lower_mfma_f32_16x16x16_f16(const Instruction &inst,
 
   assert(src0 >= 256 && src1 >= 256 && "MFMA VGPR sources expected");
 
-  auto exec_save_opt = liveness.find_free_sgpr_pair(offset);
+  // Prefer non-ABI SGPRs for injected lowering temporaries. Low SGPRs commonly
+  // carry kernarg/user pointers across matrix instructions, and generated
+  // operand metadata for some memory forms can under-report scalar address
+  // bases. Liveness still decides whether the chosen high SGPRs are dead.
+  constexpr uint16_t kInjectedSgprSearchStart = 8;
+  auto exec_save_opt = liveness.find_free_sgpr_pair(offset, kInjectedSgprSearchStart);
   if (!exec_save_opt)
     return {};
   const uint8_t kExecSave = static_cast<uint8_t>(*exec_save_opt);
 
-  auto tmp_sgpr_opt = liveness.find_free_sgpr(offset, kExecSave + 2);
+  auto tmp_sgpr_opt = liveness.find_free_sgpr(
+      offset, std::max<uint16_t>(static_cast<uint16_t>(kExecSave + 2), kInjectedSgprSearchStart));
   if (!tmp_sgpr_opt)
     return {};
   const uint8_t kTmpSgpr = static_cast<uint8_t>(*tmp_sgpr_opt);

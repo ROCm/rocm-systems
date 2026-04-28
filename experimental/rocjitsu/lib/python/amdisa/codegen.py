@@ -99,6 +99,33 @@ def _implicit_use_ref_exprs(inst_sem: InstructionSemantics | None) -> list[str]:
     return refs
 
 
+def _extra_implicit_use_ref_exprs(
+    inst: Instruction,
+    enc_name: str,
+    inst_field_names: set[str],
+) -> list[str]:
+    """Return generator-derived implicit uses missing from XML operands."""
+    refs: list[str] = []
+
+    # GFX9/CDNA FLAT, FLAT_GLBL, and FLAT_SCRATCH encodings carry a scalar
+    # address-base field in the binary encoding. Some MR ISA XML operands omit
+    # that field, but DBT liveness still needs to preserve the SGPR pair across
+    # semantic lowerings inserted between address setup and memory operations.
+    # Keep it implicit so generated disassembly remains driven by XML operands.
+    if (
+        enc_name.upper().startswith('ENC_FLAT')
+        and 'saddr' in inst_field_names
+        and all(op.name != 'saddr' for op in inst.operands)
+    ):
+        _append_unique(
+            refs,
+            'RegisterRef{RegClass::SGPR, '
+            'static_cast<uint16_t>(inst_.saddr), 2}',
+        )
+
+    return refs
+
+
 @dataclass
 class CodegenConfig:
     """Configuration for C++ code generation paths and namespaces.
@@ -5135,6 +5162,9 @@ class CodeGenerator:
                     )
                     implicit_def_refs = _implicit_def_ref_exprs(inst_sem)
                     implicit_use_refs = _implicit_use_ref_exprs(inst_sem)
+                    implicit_use_refs.extend(
+                        _extra_implicit_use_ref_exprs(inst, enc.enc_name, inst_field_names)
+                    )
                     if (
                         inst_sem
                         and inst_sem.semantic_class in ('branch', 'cbranch')
@@ -5459,6 +5489,9 @@ class CodeGenerator:
                         ))
                     implicit_def_refs = _implicit_def_ref_exprs(inst_sem)
                     implicit_use_refs = _implicit_use_ref_exprs(inst_sem)
+                    implicit_use_refs.extend(
+                        _extra_implicit_use_ref_exprs(inst, enc.enc_name, inst_field_names)
+                    )
                     if implicit_def_refs:
                         wf_size_use = (
                             ''
