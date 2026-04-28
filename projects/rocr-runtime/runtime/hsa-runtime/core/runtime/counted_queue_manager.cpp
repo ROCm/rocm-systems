@@ -83,7 +83,12 @@ core::Queue* CountedQueuePoolManager::FindOrCreateHardwareQueue(
   status = cmd_queue->SetPriority(priority);
   if (status != HSA_STATUS_SUCCESS) return nullptr;
 
-  cmd_queue->SetProfiling(true);
+  // C3: SetProfiling now returns hsa_status_t but the existing
+  // counted-queue path historically treats profiling-bit setup as
+  // best-effort. Ignore the return for behavioral parity; the buffer-
+  // wiring failure modes (libhsakmt SetQueueProfilingBuffer failure)
+  // do not regress correctness for these internal queues.
+  (void)cmd_queue->SetProfiling(true);
 
   // Add to pool
   pool.push_back(cmd_queue);

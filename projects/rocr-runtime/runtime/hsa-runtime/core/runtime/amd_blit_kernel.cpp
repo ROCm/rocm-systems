@@ -839,8 +839,10 @@ hsa_status_t BlitKernel::SubmitLinearFillCommand(void* ptr, uint32_t value,
 }
 
 hsa_status_t BlitKernel::EnableProfiling(bool enable) {
-  queue_->SetProfiling(enable);
-  return HSA_STATUS_SUCCESS;
+  // C3: SetProfiling now returns hsa_status_t. Propagate so a caller
+  // that fails to wire up the dispatch-record buffer (e.g. libhsakmt
+  // SetQueueProfilingBuffer NOT_SUPPORTED) sees the failure.
+  return queue_->SetProfiling(enable);
 }
 
 uint64_t BlitKernel::AcquireWriteIndex(uint32_t num_packet) {

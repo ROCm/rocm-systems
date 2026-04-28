@@ -204,8 +204,13 @@ class AqlQueue : public core::Queue, private core::LocalSignal, public core::Doo
                   hsa_fence_scope_t releaseFence = HSA_FENCE_SCOPE_NONE,
                   hsa_signal_t* signal = NULL) override;
 
-  /// @brief Enables/Disables profiling overrides SetProfiling from core::Queue
-  void SetProfiling(bool enabled) override;
+  /// @brief Enables/Disables profiling overrides SetProfiling from core::Queue.
+  /// @details Returns non-success if the dispatch-record buffer allocation,
+  /// libhsakmt SetQueueProfilingBuffer registration, or the UPDATE_QUEUE
+  /// flush fails. On enable failure all partial state is unwound (allocation
+  /// freed, cached fields reset). On disable failure the host-side buffer
+  /// is still freed (the FW-side state is best-effort).
+  hsa_status_t SetProfiling(bool enabled) override;
 
   /// @brief Get the per-queue MEC dispatch-record ring buffer info.
   /// @details Returns the ring buffer base, total size in bytes, and a

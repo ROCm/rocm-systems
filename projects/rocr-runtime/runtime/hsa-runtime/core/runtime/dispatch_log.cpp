@@ -486,13 +486,19 @@ hsa_status_t QueueProfilingAcquire(core::Queue* q) {
   }
   std::lock_guard<std::mutex> lk(owners->m);
   const uint32_t prev = owners->refcount;
-  owners->refcount = prev + 1;
   if (prev == 0) {
     // 0->1 transition: enable profiling. AqlQueue::SetProfiling now also
     // allocates the per-queue dispatch-record buffer and pushes it to KFD
     // via hsaKmtSetQueueProfilingBuffer + Suspend/Resume (UPDATE_QUEUE).
-    q->SetProfiling(true);
+    //
+    // C3: propagate status. If SetProfiling fails (allocation failure or
+    // libhsakmt registration failure on an unsupported kernel), do NOT
+    // bump the refcount — the queue is not in the profiling-enabled
+    // state and a subsequent release would be unbalanced.
+    hsa_status_t s = q->SetProfiling(true);
+    if (s != HSA_STATUS_SUCCESS) return s;
   }
+  owners->refcount = prev + 1;
   return HSA_STATUS_SUCCESS;
 }
 
@@ -520,7 +526,13 @@ hsa_status_t QueueProfilingRelease(core::Queue* q) {
     // 1->0 transition: AqlQueue::SetProfiling(false) frees the per-queue
     // dispatch-record buffer and clears the KFD profiling-buffer
     // registration via UPDATE_QUEUE.
-    q->SetProfiling(false);
+    //
+    // C3: propagate libhsakmt teardown status. The host-side buffer is
+    // freed unconditionally (see SetProfiling), so we cannot recover the
+    // resources by retrying — a non-success status here is informational
+    // for the caller (e.g. test harnesses) and not a state-corruption
+    // signal.
+    return q->SetProfiling(false);
   }
   return HSA_STATUS_SUCCESS;
 }
@@ -567,11 +579,22 @@ void enable_dispatch_log_for_queue_locked(core::Queue* q) {
   // g_lifecycle_mu), so it's safe to call while holding g_lifecycle_mu.
   hsa_status_t s = QueueProfilingAcquire(q);
   if (s != HSA_STATUS_SUCCESS) {
+    // C3: now that QueueProfilingAcquire propagates the underlying
+    // SetProfiling status (allocation failure, libhsakmt
+    // SetQueueProfilingBuffer NOT_SUPPORTED, etc.), an error here means
+    // the agent's KFD/firmware substrate cannot accept a dispatch-record
+    // buffer for this queue. Mark the agent as no-dispatch-log so we
+    // don't retry every poll tick on every queue belonging to it (spec
+    // §5 unsupported-agent row, §9 unsupported-agent row). The refcount
+    // was not bumped (Acquire returns early on the 0->1 SetProfiling
+    // failure path), so no Release is needed.
     std::fprintf(stderr,
                  "[hsa-runtime] dispatch_log: queue_id=%llu ENABLE step 1 "
-                 "(QueueProfilingAcquire) failed status=%d\n",
+                 "(QueueProfilingAcquire) failed status=%d; marking agent "
+                 "as no-dispatch-log\n",
                  static_cast<unsigned long long>(queue_id_of(q)),
                  static_cast<int>(s));
+    g_no_dispatch_log_agents.insert(q->GetAgent());
     return;
   }
 

@@ -637,9 +637,13 @@ hsa_status_t hsa_amd_profiling_set_profiler_enabled(hsa_queue_t* queue, int enab
   core::Queue* cmd_queue = core::Queue::Convert(queue);
   IS_VALID(cmd_queue);
 
-  cmd_queue->SetProfiling(enable);
-
-  return HSA_STATUS_SUCCESS;
+  // C3: SetProfiling now returns hsa_status_t. Allocation, libhsakmt
+  // SetQueueProfilingBuffer registration, and the cached-buffer teardown
+  // path can all surface failures (HSA_STATUS_ERROR_OUT_OF_RESOURCES,
+  // HSA_STATUS_ERROR_NOT_SUPPORTED, etc.); propagate so callers can act
+  // on them rather than silently believing profiling is enabled when
+  // KFD never accepted the buffer.
+  return cmd_queue->SetProfiling(enable);
   CATCH;
 }
 

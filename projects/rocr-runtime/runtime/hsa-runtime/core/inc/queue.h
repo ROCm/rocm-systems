@@ -444,9 +444,14 @@ class Queue : public Checked<0xFA3906A679F9DB49> {
                           hsa_fence_scope_t releaseFence = HSA_FENCE_SCOPE_NONE,
                           hsa_signal_t* signal = NULL) = 0;
 
-  virtual void SetProfiling(bool enabled) {
+  // C3: Returns status so callers can detect KFD/libhsakmt failures
+  // during the profiling-buffer enable path (see AqlQueue override). The
+  // base implementation only flips the AQL queue properties bit, which
+  // cannot fail, so it always returns SUCCESS.
+  virtual hsa_status_t SetProfiling(bool enabled) {
     AMD_HSA_BITS_SET(amd_queue_.queue_properties, AMD_QUEUE_PROPERTIES_ENABLE_PROFILING,
                      (enabled != 0));
+    return HSA_STATUS_SUCCESS;
   }
 
   /// @ brief Returns queue queries about the queue

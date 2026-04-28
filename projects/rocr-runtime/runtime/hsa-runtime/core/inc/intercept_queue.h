@@ -132,7 +132,7 @@ class QueueWrapper : public Queue {
                   hsa_signal_t* signal = NULL) override {
     wrapped->ExecutePM4(cmd_data, cmd_size_b, acquireFence, releaseFence, signal);
   }
-  void SetProfiling(bool enabled) override { wrapped->SetProfiling(enabled); }
+  hsa_status_t SetProfiling(bool enabled) override { return wrapped->SetProfiling(enabled); }
 
  protected:
   void do_set_public_handle(hsa_queue_t* handle) override {
