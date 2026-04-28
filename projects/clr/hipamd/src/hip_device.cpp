@@ -135,6 +135,10 @@ void Device::AddSafeStream(Stream* event_stream, Stream* wait_stream) {
 
 // ================================================================================================
 void Device::Reset() {
+  // Disable all hostcalls
+  auto hostcallBuffer = dev->getOrCreateHostcallBuffer();
+  amd::disableHostcalls(hostcallBuffer);
+
   {
     std::scoped_lock lock(lock_);
     auto pools_to_delete = std::exchange(mem_pools_, {});
@@ -149,10 +153,6 @@ void Device::Reset() {
   // Clear hostcall allocations to avoid ~Device() accessing freed Memory objects later.
   auto* dev = devices()[0];
   dev->ClearHostcallMemories();
-
-  // Disable all hostcalls
-  auto hostcallBuffer = dev->getOrCreateHostcallBuffer();
-  amd::disableHostcalls(hostcallBuffer);
 
   amd::MemObjMap::Purge(dev);
   Create();
