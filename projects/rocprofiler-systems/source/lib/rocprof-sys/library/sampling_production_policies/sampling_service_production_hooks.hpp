@@ -280,9 +280,15 @@ sampling_service<default_sampling_policies>::emit_resolved_to_trace_cache(int64_
             std::string    track_name =
                 "Thread " + std::to_string(seq_id) + " (S) " + std::to_string(sys_id);
 
+            constexpr uint32_t cpu_category_id =
+                static_cast<uint32_t>(ROCPROFSYS_CATEGORY_TIMER_SAMPLING);
+            constexpr auto cpu_category_str = "cputime_sampling";
+
             for(auto const& s : timer_samples)
             {
                 if(!info->is_valid_lifetime({ s.beg_ns, s.end_ns })) continue;
+
+                const bool has_cpu = s.metrics.valid.test(0) && s.metrics.cpu_ns > 0;
 
                 int depth = 0;
                 for(auto const& frame : s.stack)
@@ -310,11 +316,26 @@ sampling_service<default_sampling_policies>::emit_resolved_to_trace_cache(int64_
                     nlohmann::json ext;
                     ext["depth"] = depth;
 
+                    // Wall-clock timer sample.
                     trace_cache::get_buffer_storage().store(
                         trace_cache::backtrace_region_sample{
                             category_id, static_cast<uint64_t>(sys_id), track_name, name,
                             s.beg_ns, s.end_ns, category_str, cs_j.dump(), li_j.dump(),
                             ext.dump() });
+
+                    // CPU-time sample: emitted only when cpu_ns delta is available.
+                    // Duration encoded as [0, cpu_ns] so tsv_processor computes the
+                    // correct cpu-time duration from end_timestamp - start_timestamp.
+                    if(has_cpu)
+                    {
+                        trace_cache::get_buffer_storage().store(
+                            trace_cache::backtrace_region_sample{
+                                cpu_category_id, static_cast<uint64_t>(sys_id),
+                                track_name, name, uint64_t{ 0 },
+                                static_cast<uint64_t>(s.metrics.cpu_ns), cpu_category_str,
+                                cs_j.dump(), li_j.dump(), ext.dump() });
+                    }
+
                     ++depth;
                 }
             }

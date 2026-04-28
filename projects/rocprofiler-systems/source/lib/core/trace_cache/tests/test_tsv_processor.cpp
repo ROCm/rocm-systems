@@ -314,6 +314,59 @@ TEST(tsv_processor, multi_thread_rows_present_for_each_tid)
     EXPECT_TRUE(has_20);
 }
 
+// ── cputime_sampling category routes to cpu_agg, not wall_agg ───────────────
+
+TEST(tsv_processor, cputime_sampling_routes_to_cpu_clock_file)
+{
+    std::ostringstream wall, cpu, pct, trip;
+    tsv_processor_t    proc(wall, cpu, pct, trip);
+    proc.prepare_for_processing();
+    proc.handle(make_brs(1, "fn", 0, 1'000'000'000ULL, 0, "cputime_sampling"));
+    proc.finalize_processing();
+
+    auto cpu_rows = parse_data_rows(cpu.str());
+    ASSERT_EQ(cpu_rows.size(), 1U)
+        << "cputime_sampling must produce a row in cpu_clock.tsv";
+    EXPECT_EQ(cpu_rows[0][2], "fn");
+
+    auto wall_rows = parse_data_rows(wall.str());
+    EXPECT_TRUE(wall_rows.empty())
+        << "cputime_sampling must NOT appear in wall_clock.tsv";
+}
+
+TEST(tsv_processor, timer_sampling_does_not_route_to_cpu_clock)
+{
+    std::ostringstream wall, cpu, pct, trip;
+    tsv_processor_t    proc(wall, cpu, pct, trip);
+    proc.prepare_for_processing();
+    proc.handle(make_brs(1, "fn", 0, 1'000'000'000ULL, 0, "timer_sampling"));
+    proc.finalize_processing();
+
+    auto cpu_rows = parse_data_rows(cpu.str());
+    EXPECT_TRUE(cpu_rows.empty()) << "timer_sampling must NOT appear in cpu_clock.tsv";
+
+    auto wall_rows = parse_data_rows(wall.str());
+    ASSERT_EQ(wall_rows.size(), 1U) << "timer_sampling must appear in wall_clock.tsv";
+}
+
+TEST(tsv_processor, both_categories_can_coexist)
+{
+    std::ostringstream wall, cpu, pct, trip;
+    tsv_processor_t    proc(wall, cpu, pct, trip);
+    proc.prepare_for_processing();
+    proc.handle(make_brs(1, "wall_fn", 0, 1'000'000'000ULL, 0, "timer_sampling"));
+    proc.handle(make_brs(1, "cpu_fn", 0, 500'000'000ULL, 0, "cputime_sampling"));
+    proc.finalize_processing();
+
+    auto wall_rows = parse_data_rows(wall.str());
+    ASSERT_EQ(wall_rows.size(), 1U);
+    EXPECT_EQ(wall_rows[0][2], "wall_fn");
+
+    auto cpu_rows = parse_data_rows(cpu.str());
+    ASSERT_EQ(cpu_rows.size(), 1U);
+    EXPECT_EQ(cpu_rows[0][2], "cpu_fn");
+}
+
 // ── processor_t concept: non-AMD-SMI sample types must compile and be no-ops ──
 // Note: gpu_pmc_sample, ainic_pmc_sample, cpu_pmc_sample require AMD-SMI headers
 // and are not tested here. Their no-op overloads are provided in

@@ -101,7 +101,16 @@ public:
     : m_output_dir(std::move(output_dir))
     {}
 
-    void prepare_for_processing() { write_headers_(); }
+    void prepare_for_processing()
+    {
+        // In stream-injection mode the streams are already open; write headers now.
+        // In file-path mode the files are opened in finalize_processing() via
+        // open_files_if_needed_(), which calls write_headers_() after opening.
+        // Calling write_headers_() here in file-path mode would set
+        // m_headers_written=true before any file is open, causing headers to be silently
+        // skipped at finalize time.
+        if(m_wall_ptr) write_headers_();
+    }
 
     void finalize_processing()
     {
@@ -131,18 +140,22 @@ public:
             return;
         }
 
+        double dur_s =
+            static_cast<double>(sample.end_timestamp - sample.start_timestamp) * 1.0e-9;
+        row_key k{ sample.thread_id, depth, sample.name };
+
         if(sample.category == "timer_sampling")
         {
-            double dur_s =
-                static_cast<double>(sample.end_timestamp - sample.start_timestamp) *
-                1.0e-9;
-            row_key k{ sample.thread_id, depth, sample.name };
             accumulate_(m_wall_agg[k], dur_s);
             m_trip_agg[k]++;
 
             pct_key pk{ sample.thread_id, sample.name };
             m_pct_agg[pk].count++;
             m_pct_agg[pk].sum += dur_s;
+        }
+        else if(sample.category == "cputime_sampling")
+        {
+            accumulate_(m_cpu_agg[k], dur_s);
         }
         // overflow_sampling: future (task #22 wires overflow path)
     }
