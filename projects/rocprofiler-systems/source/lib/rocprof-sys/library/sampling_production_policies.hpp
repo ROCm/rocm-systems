@@ -113,7 +113,7 @@ public:
         size_t      sys_id = info->index_data->system_value;
         size_t      seq_id = info->index_data->sequent_value;
         std::string track_name =
-            "Thread " + std::to_string(seq_id) + " (S) " + std::to_string(sys_id);
+            "Thread " + std::to_string(seq_id) + " Timer (S) " + std::to_string(sys_id);
         constexpr uint32_t category_id =
             static_cast<uint32_t>(ROCPROFSYS_CATEGORY_TIMER_SAMPLING);
         constexpr auto category_str = "timer_sampling";

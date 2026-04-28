@@ -159,7 +159,7 @@ sampling_service<default_sampling_policies>::setup_production_wiring(
         size_t seq_id = thread_inf->index_data->sequent_value;
 
         std::string timer_track =
-            "Thread " + std::to_string(seq_id) + " (S) " + std::to_string(sys_id);
+            "Thread " + std::to_string(seq_id) + " Timer (S) " + std::to_string(sys_id);
         std::string overflow_track = "Thread " + std::to_string(seq_id) +
                                      " Overflow (S) " + std::to_string(sys_id);
 
@@ -277,8 +277,8 @@ sampling_service<default_sampling_policies>::emit_resolved_to_trace_cache(int64_
             constexpr uint32_t category_id =
                 static_cast<uint32_t>(ROCPROFSYS_CATEGORY_TIMER_SAMPLING);
             constexpr auto category_str = "timer_sampling";
-            std::string    track_name =
-                "Thread " + std::to_string(seq_id) + " (S) " + std::to_string(sys_id);
+            std::string track_name = "Thread " + std::to_string(seq_id) + " Timer (S) " +
+                                     std::to_string(sys_id);
 
             constexpr uint32_t cpu_category_id =
                 static_cast<uint32_t>(ROCPROFSYS_CATEGORY_TIMER_SAMPLING);
