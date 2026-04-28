@@ -42,9 +42,10 @@ void CodeObjectPatcher::overwrite_text(std::span<const uint8_t> new_text) {
   std::memcpy(image_.data() + text_offset_, new_text.data(), new_text.size());
 }
 
-void CodeObjectPatcher::update_elf_flags(uint32_t new_flags) {
+void CodeObjectPatcher::update_elf_flags(uint32_t new_mach) {
   auto *ehdr = reinterpret_cast<Elf64_Ehdr *>(image_.data());
-  ehdr->e_flags = new_flags;
+  // Preserve upper bits (XNACK, SRAMECC feature flags); only replace EF_AMDGPU_MACH in low byte.
+  ehdr->e_flags = (ehdr->e_flags & ~0xFFu) | (new_mach & 0xFFu);
 }
 
 void CodeObjectPatcher::patch_kernel_descriptors_for_wave64() {
@@ -52,20 +53,30 @@ void CodeObjectPatcher::patch_kernel_descriptors_for_wave64() {
   namespace kd = rocr::llvm::amdhsa;
 
   auto *ehdr = reinterpret_cast<Elf64_Ehdr *>(image_.data());
+  if (ehdr->e_shoff + static_cast<uint64_t>(ehdr->e_shnum) * sizeof(Elf64_Shdr) > image_.size())
+    return;
   auto *shdr = reinterpret_cast<Elf64_Shdr *>(image_.data() + ehdr->e_shoff);
 
   for (int i = 0; i < ehdr->e_shnum; ++i) {
     if (shdr[i].sh_type != SHT_SYMTAB)
       continue;
+    if (shdr[i].sh_offset + shdr[i].sh_size > image_.size())
+      continue;
     auto *symtab = reinterpret_cast<Elf64_Sym *>(image_.data() + shdr[i].sh_offset);
     int nsyms = shdr[i].sh_size / sizeof(Elf64_Sym);
+    if (shdr[i].sh_link >= ehdr->e_shnum)
+      continue;
     auto *strtab_shdr = &shdr[shdr[i].sh_link];
+    if (strtab_shdr->sh_offset + strtab_shdr->sh_size > image_.size())
+      continue;
     auto *strtab = reinterpret_cast<const char *>(image_.data() + strtab_shdr->sh_offset);
 
     for (int j = 0; j < nsyms; ++j) {
       if (symtab[j].st_size != sizeof(KD))
         continue;
       if (strtab_shdr->sh_size > 0 && symtab[j].st_name > 0) {
+        if (symtab[j].st_name >= strtab_shdr->sh_size)
+          continue;
         const char *name = strtab + symtab[j].st_name;
         size_t len = strlen(name);
         if (len >= 3 && strcmp(name + len - 3, ".kd") != 0)
@@ -136,6 +147,8 @@ std::vector<CodeObjectPatcher::WorkGroupIdInfo> CodeObjectPatcher::workgroup_id_
   std::vector<WorkGroupIdInfo> infos;
 
   auto *ehdr = reinterpret_cast<const Elf64_Ehdr *>(image_.data());
+  if (ehdr->e_shoff + static_cast<uint64_t>(ehdr->e_shnum) * sizeof(Elf64_Shdr) > image_.size())
+    return infos;
   auto *shdr = reinterpret_cast<const Elf64_Shdr *>(image_.data() + ehdr->e_shoff);
 
   // Find the .text section's virtual address for offset calculation.
@@ -150,15 +163,23 @@ std::vector<CodeObjectPatcher::WorkGroupIdInfo> CodeObjectPatcher::workgroup_id_
   for (int i = 0; i < ehdr->e_shnum; ++i) {
     if (shdr[i].sh_type != SHT_SYMTAB)
       continue;
+    if (shdr[i].sh_offset + shdr[i].sh_size > image_.size())
+      continue;
     auto *symtab = reinterpret_cast<const Elf64_Sym *>(image_.data() + shdr[i].sh_offset);
     int nsyms = shdr[i].sh_size / sizeof(Elf64_Sym);
+    if (shdr[i].sh_link >= ehdr->e_shnum)
+      continue;
     auto *strtab_shdr = &shdr[shdr[i].sh_link];
+    if (strtab_shdr->sh_offset + strtab_shdr->sh_size > image_.size())
+      continue;
     auto *strtab = reinterpret_cast<const char *>(image_.data() + strtab_shdr->sh_offset);
 
     for (int j = 0; j < nsyms; ++j) {
       if (symtab[j].st_size != sizeof(KD))
         continue;
       if (strtab_shdr->sh_size > 0 && symtab[j].st_name > 0) {
+        if (symtab[j].st_name >= strtab_shdr->sh_size)
+          continue;
         const char *name = strtab + symtab[j].st_name;
         size_t len = strlen(name);
         if (len >= 3 && strcmp(name + len - 3, ".kd") != 0)
@@ -177,23 +198,13 @@ std::vector<CodeObjectPatcher::WorkGroupIdInfo> CodeObjectPatcher::workgroup_id_
       uint64_t entry_text_off = entry_vaddr - text_vaddr;
 
       uint32_t rsrc2 = kdp->compute_pgm_rsrc2;
-      uint16_t kcp = kdp->kernel_code_properties;
 
-      uint32_t sgpr = 0;
-      if (AMDHSA_BITS_GET(kcp, kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_PRIVATE_SEGMENT_BUFFER))
-        sgpr += 4;
-      if (AMDHSA_BITS_GET(kcp, kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_DISPATCH_PTR))
-        sgpr += 2;
-      if (AMDHSA_BITS_GET(kcp, kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_QUEUE_PTR))
-        sgpr += 2;
-      if (AMDHSA_BITS_GET(kcp, kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR))
-        sgpr += 2;
-      if (AMDHSA_BITS_GET(kcp, kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_DISPATCH_ID))
-        sgpr += 2;
-      if (AMDHSA_BITS_GET(kcp, kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_FLAT_SCRATCH_INIT))
-        sgpr += 2;
-      if (AMDHSA_BITS_GET(kcp, kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_PRIVATE_SEGMENT_SIZE))
-        sgpr += 1;
+      // User SGPR count from compute_pgm_rsrc2 — this is the authoritative
+      // count set by the compiler, including preloaded kernel arguments.
+      // The enable_sgpr_* bits in kernel_code_properties describe which
+      // user SGPRs are enabled, but USER_SGPR_COUNT is the actual count
+      // used by CP/SPI to place system SGPRs after user SGPRs.
+      uint32_t sgpr = AMDHSA_BITS_GET(rsrc2, kd::COMPUTE_PGM_RSRC2_USER_SGPR_COUNT);
 
       WorkGroupIdInfo info{entry_text_off, -1, -1, -1};
       if (AMDHSA_BITS_GET(rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X))

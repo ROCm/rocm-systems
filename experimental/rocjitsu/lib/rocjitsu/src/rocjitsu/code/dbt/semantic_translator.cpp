@@ -52,6 +52,9 @@ std::vector<uint32_t> encode_waitcnt_gfx12(const WaitcntValues &vals) {
   std::vector<uint32_t> words;
 
   const bool need_loadcnt = (vals.vmcnt != 0x3F);
+  // GFX9 vmcnt is a unified counter for both loads and stores; GFX12 splits
+  // them. Conservative: emit storecnt whenever vmcnt is active, since we
+  // cannot distinguish load-only from store-only waits in the source.
   const bool need_storecnt = (vals.vmcnt != 0x3F);
   const bool need_kmcnt = (vals.lgkmcnt != 0x0F);
   const bool need_dscnt = (vals.lgkmcnt != 0x0F);
@@ -82,76 +85,8 @@ std::vector<uint32_t> encode_waitcnt_gfx12(const WaitcntValues &vals) {
 
 namespace {
 
-std::vector<uint32_t> lower_v_lshl_add_u64(const Instruction &inst,
-                                           [[maybe_unused]] rj_code_arch_t host_arch) {
-  const auto *raw = inst.raw_encoding();
-  if (!raw || inst.size() < 8)
-    return {};
-
-  cdna4::Vop3MachineInst src{};
-  std::memcpy(&src, raw, sizeof(src));
-  const uint16_t vdst = src.vdst;
-  const uint16_t src0 = src.src0;
-  const uint16_t src2 = src.src2;
-
-  constexpr uint16_t VCC_LO = 106;
-  std::vector<uint32_t> words;
-
-  // v_add_co_u32 vdst_lo, vcc_lo, src0_lo, src2_lo
-  {
-    const uint32_t w0 = (0x35u << 26) | (768u << 16) | (VCC_LO << 8) | vdst;
-    const uint32_t w1 = static_cast<uint32_t>(src0) | (static_cast<uint32_t>(src2) << 9);
-    words.push_back(w0);
-    words.push_back(w1);
-  }
-
-  // s_wait_alu 0xFFFD
-  words.push_back(pack_sopp(8, 0xFFFD));
-
-  // v_add_co_ci_u32 vdst_hi, vcc_lo, src0_hi, src2_hi, vcc_lo
-  {
-    const uint32_t w0 = (0x35u << 26) | (288u << 16) | (VCC_LO << 8) | (vdst + 1);
-    const uint32_t w1 = static_cast<uint32_t>(src0 + 1) | (static_cast<uint32_t>(src2 + 1) << 9) |
-                        (static_cast<uint32_t>(VCC_LO) << 18);
-    words.push_back(w0);
-    words.push_back(w1);
-  }
-
-  return words;
-}
-
-/// @brief Build a VOP1 v_mov_b32 instruction for RDNA4.
-/// @param vdst  Destination VGPR index (0-255).
-/// @param src0  Source operand (9-bit encoding: 256-511 for VGPR, 0-255 for SGPR/const).
-[[nodiscard]] constexpr uint32_t build_v_mov_b32(uint8_t vdst, uint16_t src0) {
-  return (0x3Fu << 25) | (static_cast<uint32_t>(vdst) << 17) | (1u << 9) | (src0 & 0x1FF);
-}
-
-/// @brief Lower v_accvgpr_read_b32 to v_mov_b32 or NOP on RDNA4.
-/// @details acc[N] = v[N+256] on the unified file. If dst aliases the unified
-/// src, emit NOP. Otherwise emit v_mov_b32.
-std::vector<uint32_t> lower_accvgpr_read(const Instruction &inst,
-                                         [[maybe_unused]] rj_code_arch_t host_arch) {
-  const auto *raw = inst.raw_encoding();
-  if (!raw || inst.size() < 8)
-    return {};
-
-  cdna4::Vop3pMachineInst src{};
-  std::memcpy(&src, raw, sizeof(src));
-
-  const uint16_t dst_vgpr = src.vdst;
-  const uint16_t src_acc = src.src0;
-  assert(src_acc >= 768 && src_acc <= 1023);
-  const uint16_t src_unified = src_acc - 512;
-
-  if (dst_vgpr == src_unified)
-    return {build_s_nop()};
-
-  return {build_v_mov_b32(static_cast<uint8_t>(dst_vgpr), 256 + src_unified)};
-}
-
 // ---------------------------------------------------------------------------
-// RDNA4 instruction builders
+// RDNA4 instruction builders (used by lowering functions below)
 // ---------------------------------------------------------------------------
 
 /// @brief Build VOP3P instruction word pair (packed math: WMMA, dot products).
@@ -204,6 +139,81 @@ build_vop3(uint16_t op, uint8_t vdst, uint16_t src0, uint16_t src1 = 0, uint16_t
   constexpr uint32_t kDsW0 = (0xB3u << 18) | (0x36u << 26);
   return {kDsW0, static_cast<uint32_t>(vaddr) | (static_cast<uint32_t>(vdata) << 8) |
                      (static_cast<uint32_t>(vdst) << 24)};
+}
+
+/// @brief Build a VOP1 v_mov_b32 instruction for RDNA4.
+[[nodiscard]] constexpr uint32_t build_v_mov_b32(uint8_t vdst, uint16_t src0) {
+  return (0x3Fu << 25) | (static_cast<uint32_t>(vdst) << 17) | (1u << 9) | (src0 & 0x1FF);
+}
+
+// ---------------------------------------------------------------------------
+// Instruction lowering functions
+// ---------------------------------------------------------------------------
+
+std::vector<uint32_t> lower_v_lshl_add_u64(const Instruction &inst,
+                                           [[maybe_unused]] rj_code_arch_t host_arch) {
+  const auto *raw = inst.raw_encoding();
+  if (!raw || inst.size() < 8)
+    return {};
+
+  cdna4::Vop3MachineInst src{};
+  std::memcpy(&src, raw, sizeof(src));
+  const uint16_t vdst = src.vdst;
+  const uint16_t src0 = src.src0;
+  const uint16_t src2 = src.src2;
+
+  constexpr uint16_t kVccLo = 106;
+  constexpr uint16_t kOpAddCoU32 = 768;
+  constexpr uint16_t kOpAddCoCiU32 = 288;
+  constexpr uint8_t kSoppWaitAlu = 8;
+
+  std::vector<uint32_t> words;
+
+  // v_add_co_u32 vdst_lo, vcc_lo, src0_lo, src2_lo
+  {
+    auto [w0, w1] = build_vop3(kOpAddCoU32, static_cast<uint8_t>(vdst), src0, src2);
+    w0 |= (kVccLo << 8); // sdst = vcc_lo
+    words.push_back(w0);
+    words.push_back(w1);
+  }
+
+  // s_wait_alu 0xFFFD — drain VALU→carry dependency
+  words.push_back(pack_sopp(kSoppWaitAlu, 0xFFFD));
+
+  // v_add_co_ci_u32 vdst_hi, vcc_lo, src0_hi, src2_hi, vcc_lo
+  {
+    auto [w0, w1] =
+        build_vop3(kOpAddCoCiU32, static_cast<uint8_t>(vdst + 1), static_cast<uint16_t>(src0 + 1),
+                   static_cast<uint16_t>(src2 + 1), kVccLo);
+    w0 |= (kVccLo << 8); // sdst = vcc_lo
+    words.push_back(w0);
+    words.push_back(w1);
+  }
+
+  return words;
+}
+
+/// @brief Lower v_accvgpr_read_b32 to v_mov_b32 or NOP on RDNA4.
+/// @details acc[N] = v[N+256] on the unified file. If dst aliases the unified
+/// src, emit NOP. Otherwise emit v_mov_b32.
+std::vector<uint32_t> lower_accvgpr_read(const Instruction &inst,
+                                         [[maybe_unused]] rj_code_arch_t host_arch) {
+  const auto *raw = inst.raw_encoding();
+  if (!raw || inst.size() < 8)
+    return {};
+
+  cdna4::Vop3pMachineInst src{};
+  std::memcpy(&src, raw, sizeof(src));
+
+  const uint16_t dst_vgpr = src.vdst;
+  const uint16_t src_acc = src.src0;
+  assert(src_acc >= 768 && src_acc <= 1023);
+  const uint16_t src_unified = src_acc - 512;
+
+  if (dst_vgpr == src_unified)
+    return {build_s_nop()};
+
+  return {build_v_mov_b32(static_cast<uint8_t>(dst_vgpr), 256 + src_unified)};
 }
 
 // ---------------------------------------------------------------------------
@@ -387,8 +397,13 @@ std::vector<uint32_t> expand_mfma_f32_16x16x16_f16(const Instruction &inst, uint
 }
 
 // ---------------------------------------------------------------------------
-// Expand rules table — sorted by src_opcode for binary search
+// Expand rules table — sorted by (src_encoding_id, src_opcode) for binary search
 // ---------------------------------------------------------------------------
+
+// CDNA4 encoding IDs (encoding_id = w0 >> 23, from CDNA4 instruction words)
+constexpr uint16_t kEncSopp = 0x17F;      // SOPP (0xBF8x → 0x17F)
+constexpr uint16_t kEncVop3 = 0x1A4;      // VOP3A (0xD2xx → 0x1A4)
+constexpr uint16_t kEncVop3pMfma = 0x1A7; // VOP3P-MFMA (0xD3xx → 0x1A7, also AccVGPR)
 
 // CDNA4 opcodes (from decoder: opcode_ = inst_.op)
 constexpr uint16_t kCdna4Op_s_waitcnt = 12;
@@ -397,16 +412,18 @@ constexpr uint16_t kCdna4Op_v_accvgpr_read = 88;
 constexpr uint16_t kCdna4Op_v_accvgpr_write = 89;
 constexpr uint16_t kCdna4Op_v_lshl_add_u64 = 520;
 
+// Table MUST be sorted by (src_encoding_id, src_opcode) for binary search.
 const TranslationRule kExpandRules_cdna4_to_rdna4[] = {
-    {kCdna4Op_s_waitcnt, RuleAction::Expand, 0, 0, nullptr, expand_waitcnt, nullptr, nullptr},
-    {kCdna4Op_v_mfma_f32_16x16x16_f16, RuleAction::Expand, 0, 0, nullptr,
+    {kEncSopp, kCdna4Op_s_waitcnt, RuleAction::Expand, 0, 0, nullptr, expand_waitcnt, nullptr,
+     nullptr},
+    {kEncVop3, kCdna4Op_v_lshl_add_u64, RuleAction::Expand, 0, 0, nullptr, expand_v_lshl_add_u64,
+     nullptr, nullptr},
+    {kEncVop3pMfma, kCdna4Op_v_mfma_f32_16x16x16_f16, RuleAction::Expand, 0, 0, nullptr,
      expand_mfma_f32_16x16x16_f16, &kMfmaF32_16x16x16_F16_Cdna4, &kWmmaF32_16x16x16_F16_Rdna4},
-    {kCdna4Op_v_accvgpr_read, RuleAction::Expand, 0, 0, nullptr, expand_accvgpr_read, nullptr,
-     nullptr},
-    {kCdna4Op_v_accvgpr_write, RuleAction::Expand, 0, 0, nullptr, expand_accvgpr_write, nullptr,
-     nullptr},
-    {kCdna4Op_v_lshl_add_u64, RuleAction::Expand, 0, 0, nullptr, expand_v_lshl_add_u64, nullptr,
-     nullptr},
+    {kEncVop3pMfma, kCdna4Op_v_accvgpr_read, RuleAction::Expand, 0, 0, nullptr, expand_accvgpr_read,
+     nullptr, nullptr},
+    {kEncVop3pMfma, kCdna4Op_v_accvgpr_write, RuleAction::Expand, 0, 0, nullptr,
+     expand_accvgpr_write, nullptr, nullptr},
 };
 
 } // namespace
@@ -423,10 +440,12 @@ SemanticTranslator::SemanticTranslator(rj_code_arch_t guest, rj_code_arch_t host
 
 std::vector<uint32_t> SemanticTranslator::try_lower_expand(const Instruction &inst, uint64_t offset,
                                                            const RegisterLiveness &liveness) const {
+  const uint16_t eid = inst.encoding_id();
   const uint16_t op = inst.opcode();
-  TranslationRule key{op, RuleAction::Expand, 0, 0, nullptr, nullptr, nullptr, nullptr};
+  TranslationRule key{eid, op, RuleAction::Expand, 0, 0, nullptr, nullptr, nullptr, nullptr};
   auto it = std::lower_bound(expand_rules_.begin(), expand_rules_.end(), key);
-  if (it != expand_rules_.end() && it->src_opcode == op && it->expand_fn)
+  if (it != expand_rules_.end() && it->src_encoding_id == eid && it->src_opcode == op &&
+      it->expand_fn)
     return it->expand_fn(inst, static_cast<uint32_t>(host_arch_), offset, liveness,
                          it->guest_layout, it->host_layout);
   return {};
@@ -441,16 +460,14 @@ std::vector<SemanticReplacement> SemanticTranslator::rewrite_workgroup_ids(
     return {};
 
   // RDNA4 delivers workgroup IDs via TTMP registers, not SGPRs.
-  constexpr uint8_t kTTMP9 = 117;                  // workgroup_id_x
-  [[maybe_unused]] constexpr uint8_t kTTMP7 = 115; // workgroup_id_y (low16), _z (high16)
+  // TTMP9 = workgroup_id_x (full 32 bits).
+  // TTMP7 = workgroup_id_y in bits[15:0], workgroup_id_z in bits[31:16].
+  constexpr uint8_t kTTMP9 = 117;
+  constexpr uint8_t kTTMP7 = 115;
 
   std::vector<SemanticReplacement> result;
 
   for (const auto &info : wg_info) {
-    if (info.sgpr_wg_id_x < 0)
-      continue;
-    const auto old_sgpr = static_cast<uint16_t>(info.sgpr_wg_id_x);
-
     uint64_t offset = block.start_offset();
     for (const auto &inst : block.instructions()) {
       if (offset < info.entry_text_offset || offset + 8 > translated_text.size()) {
@@ -463,16 +480,25 @@ std::vector<SemanticReplacement> SemanticTranslator::rewrite_workgroup_ids(
         continue;
       }
 
-      // Read the already-translated instruction words from translated_text.
       uint32_t w0, w1;
       std::memcpy(&w0, translated_text.data() + offset, 4);
       std::memcpy(&w1, translated_text.data() + offset + 4, 4);
 
-      // VOP3 word1 has src0 in bits[8:0]. Check if it matches the
-      // workgroup_id SGPR and substitute TTMP9.
+      // VOP3 word1 has src0 in bits[8:0]. Check if it matches any
+      // workgroup_id SGPR and substitute the corresponding TTMP.
+      // Only rewrite src0 — the workgroup_id SGPRs are consumed in
+      // s_mul/v_mul patterns where the ID appears as src0. Rewriting
+      // other operand slots risks false matches with unrelated SGPRs
+      // that happen to share the same encoding value.
       uint16_t src0 = w1 & 0x1FF;
-      if (src0 == old_sgpr) {
+      if (info.sgpr_wg_id_x >= 0 && src0 == static_cast<uint16_t>(info.sgpr_wg_id_x)) {
         uint32_t new_w1 = (w1 & ~0x1FFu) | kTTMP9;
+        result.push_back({offset, offset + static_cast<uint64_t>(inst.size()), {w0, new_w1}});
+      } else if (info.sgpr_wg_id_y >= 0 && src0 == static_cast<uint16_t>(info.sgpr_wg_id_y)) {
+        uint32_t new_w1 = (w1 & ~0x1FFu) | kTTMP7;
+        result.push_back({offset, offset + static_cast<uint64_t>(inst.size()), {w0, new_w1}});
+      } else if (info.sgpr_wg_id_z >= 0 && src0 == static_cast<uint16_t>(info.sgpr_wg_id_z)) {
+        uint32_t new_w1 = (w1 & ~0x1FFu) | kTTMP7;
         result.push_back({offset, offset + static_cast<uint64_t>(inst.size()), {w0, new_w1}});
       }
 

@@ -132,11 +132,14 @@ using ExpandFn = std::vector<uint32_t> (*)(const Instruction &inst, uint32_t arc
 
 /// @brief A single translation rule for one (source, target) instruction.
 ///
-/// @details Keyed by src_opcode for lookup via binary search. The expand_fn
-/// is called with the guest/host LaneLayout pointers for matrix instructions.
+/// @details Keyed by (src_encoding_id, src_opcode) for lookup via binary search.
+/// Different encoding formats can share the same opcode (e.g., SOPP s_waitcnt
+/// and SOP2 s_and_b32 both use opcode 12), so encoding_id is required to
+/// disambiguate.
 struct TranslationRule {
-  uint16_t src_opcode; ///< Source opcode (primary key for lookup).
-  RuleAction action;   ///< What kind of translation to apply.
+  uint16_t src_encoding_id; ///< Source encoding format ID (e.g., SOPP, VOP3P).
+  uint16_t src_opcode;      ///< Source opcode within the encoding format.
+  RuleAction action;        ///< What kind of translation to apply.
 
   uint16_t dst_opcode; ///< Target opcode (for Substitute).
 
@@ -148,10 +151,12 @@ struct TranslationRule {
   const LaneLayout *host_layout;  ///< Target matrix layout (for matrix Expand).
 
   constexpr auto operator<=>(const TranslationRule &rhs) const {
+    if (auto cmp = src_encoding_id <=> rhs.src_encoding_id; cmp != 0)
+      return cmp;
     return src_opcode <=> rhs.src_opcode;
   }
   constexpr bool operator==(const TranslationRule &rhs) const {
-    return src_opcode == rhs.src_opcode;
+    return src_encoding_id == rhs.src_encoding_id && src_opcode == rhs.src_opcode;
   }
 };
 

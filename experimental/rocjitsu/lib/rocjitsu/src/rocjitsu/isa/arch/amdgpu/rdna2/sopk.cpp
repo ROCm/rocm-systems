@@ -5,6 +5,7 @@
 // See lib/python/amdisa/README.md for regeneration instructions.
 
 #include "rocjitsu/isa/arch/amdgpu/rdna2/sopk.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/execute_shared.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "util/data_types.h"
 #include "util/except.h"
@@ -27,8 +28,7 @@ SMovkI32Sopk::SMovkI32Sopk(const MachineInst *inst)
 }
 
 void SMovkI32Sopk::execute_impl(amdgpu::Wavefront &wf) {
-  sdst.write_scalar(wf, static_cast<uint32_t>(
-                            static_cast<int32_t>(static_cast<int16_t>(simm16.encoding_value_))));
+  amdgpu::execute_s_movk_i32_sopk(*this, wf);
 }
 
 SVersionSopk::SVersionSopk(const MachineInst *inst)
@@ -57,9 +57,7 @@ SCmovkI32Sopk::SCmovkI32Sopk(const MachineInst *inst)
 }
 
 void SCmovkI32Sopk::execute_impl(amdgpu::Wavefront &wf) {
-  if (wf.read_scc())
-    sdst.write_scalar(wf, static_cast<uint32_t>(
-                              static_cast<int32_t>(static_cast<int16_t>(simm16.encoding_value_))));
+  amdgpu::execute_s_cmovk_i32_sopk(*this, wf);
 }
 
 SCmpkEqI32Sopk::SCmpkEqI32Sopk(const MachineInst *inst)
@@ -74,9 +72,7 @@ SCmpkEqI32Sopk::SCmpkEqI32Sopk(const MachineInst *inst)
 }
 
 void SCmpkEqI32Sopk::execute_impl(amdgpu::Wavefront &wf) {
-  int32_t s0 = static_cast<int32_t>(sdst.read_scalar(wf));
-  int32_t imm = static_cast<int16_t>(simm16.encoding_value_);
-  wf.write_scc(s0 == imm);
+  amdgpu::execute_s_cmpk_eq_i32_sopk(*this, wf);
 }
 
 SCmpkLgI32Sopk::SCmpkLgI32Sopk(const MachineInst *inst)
@@ -91,9 +87,7 @@ SCmpkLgI32Sopk::SCmpkLgI32Sopk(const MachineInst *inst)
 }
 
 void SCmpkLgI32Sopk::execute_impl(amdgpu::Wavefront &wf) {
-  int32_t s0 = static_cast<int32_t>(sdst.read_scalar(wf));
-  int32_t imm = static_cast<int16_t>(simm16.encoding_value_);
-  wf.write_scc(s0 != imm);
+  amdgpu::execute_s_cmpk_lg_i32_sopk(*this, wf);
 }
 
 SCmpkGtI32Sopk::SCmpkGtI32Sopk(const MachineInst *inst)
@@ -108,9 +102,7 @@ SCmpkGtI32Sopk::SCmpkGtI32Sopk(const MachineInst *inst)
 }
 
 void SCmpkGtI32Sopk::execute_impl(amdgpu::Wavefront &wf) {
-  int32_t s0 = static_cast<int32_t>(sdst.read_scalar(wf));
-  int32_t imm = static_cast<int16_t>(simm16.encoding_value_);
-  wf.write_scc(s0 > imm);
+  amdgpu::execute_s_cmpk_gt_i32_sopk(*this, wf);
 }
 
 SCmpkGeI32Sopk::SCmpkGeI32Sopk(const MachineInst *inst)
@@ -125,9 +117,7 @@ SCmpkGeI32Sopk::SCmpkGeI32Sopk(const MachineInst *inst)
 }
 
 void SCmpkGeI32Sopk::execute_impl(amdgpu::Wavefront &wf) {
-  int32_t s0 = static_cast<int32_t>(sdst.read_scalar(wf));
-  int32_t imm = static_cast<int16_t>(simm16.encoding_value_);
-  wf.write_scc(s0 >= imm);
+  amdgpu::execute_s_cmpk_ge_i32_sopk(*this, wf);
 }
 
 SCmpkLtI32Sopk::SCmpkLtI32Sopk(const MachineInst *inst)
@@ -142,9 +132,7 @@ SCmpkLtI32Sopk::SCmpkLtI32Sopk(const MachineInst *inst)
 }
 
 void SCmpkLtI32Sopk::execute_impl(amdgpu::Wavefront &wf) {
-  int32_t s0 = static_cast<int32_t>(sdst.read_scalar(wf));
-  int32_t imm = static_cast<int16_t>(simm16.encoding_value_);
-  wf.write_scc(s0 < imm);
+  amdgpu::execute_s_cmpk_lt_i32_sopk(*this, wf);
 }
 
 SCmpkLeI32Sopk::SCmpkLeI32Sopk(const MachineInst *inst)
@@ -159,9 +147,7 @@ SCmpkLeI32Sopk::SCmpkLeI32Sopk(const MachineInst *inst)
 }
 
 void SCmpkLeI32Sopk::execute_impl(amdgpu::Wavefront &wf) {
-  int32_t s0 = static_cast<int32_t>(sdst.read_scalar(wf));
-  int32_t imm = static_cast<int16_t>(simm16.encoding_value_);
-  wf.write_scc(s0 <= imm);
+  amdgpu::execute_s_cmpk_le_i32_sopk(*this, wf);
 }
 
 SCmpkEqU32Sopk::SCmpkEqU32Sopk(const MachineInst *inst)
@@ -176,9 +162,7 @@ SCmpkEqU32Sopk::SCmpkEqU32Sopk(const MachineInst *inst)
 }
 
 void SCmpkEqU32Sopk::execute_impl(amdgpu::Wavefront &wf) {
-  uint32_t s0 = sdst.read_scalar(wf);
-  uint32_t imm = static_cast<uint32_t>(static_cast<uint16_t>(simm16.encoding_value_));
-  wf.write_scc(s0 == imm);
+  amdgpu::execute_s_cmpk_eq_u32_sopk(*this, wf);
 }
 
 SCmpkLgU32Sopk::SCmpkLgU32Sopk(const MachineInst *inst)
@@ -193,9 +177,7 @@ SCmpkLgU32Sopk::SCmpkLgU32Sopk(const MachineInst *inst)
 }
 
 void SCmpkLgU32Sopk::execute_impl(amdgpu::Wavefront &wf) {
-  uint32_t s0 = sdst.read_scalar(wf);
-  uint32_t imm = static_cast<uint32_t>(static_cast<uint16_t>(simm16.encoding_value_));
-  wf.write_scc(s0 != imm);
+  amdgpu::execute_s_cmpk_lg_u32_sopk(*this, wf);
 }
 
 SCmpkGtU32Sopk::SCmpkGtU32Sopk(const MachineInst *inst)
@@ -210,9 +192,7 @@ SCmpkGtU32Sopk::SCmpkGtU32Sopk(const MachineInst *inst)
 }
 
 void SCmpkGtU32Sopk::execute_impl(amdgpu::Wavefront &wf) {
-  uint32_t s0 = sdst.read_scalar(wf);
-  uint32_t imm = static_cast<uint32_t>(static_cast<uint16_t>(simm16.encoding_value_));
-  wf.write_scc(s0 > imm);
+  amdgpu::execute_s_cmpk_gt_u32_sopk(*this, wf);
 }
 
 SCmpkGeU32Sopk::SCmpkGeU32Sopk(const MachineInst *inst)
@@ -227,9 +207,7 @@ SCmpkGeU32Sopk::SCmpkGeU32Sopk(const MachineInst *inst)
 }
 
 void SCmpkGeU32Sopk::execute_impl(amdgpu::Wavefront &wf) {
-  uint32_t s0 = sdst.read_scalar(wf);
-  uint32_t imm = static_cast<uint32_t>(static_cast<uint16_t>(simm16.encoding_value_));
-  wf.write_scc(s0 >= imm);
+  amdgpu::execute_s_cmpk_ge_u32_sopk(*this, wf);
 }
 
 SCmpkLtU32Sopk::SCmpkLtU32Sopk(const MachineInst *inst)
@@ -244,9 +222,7 @@ SCmpkLtU32Sopk::SCmpkLtU32Sopk(const MachineInst *inst)
 }
 
 void SCmpkLtU32Sopk::execute_impl(amdgpu::Wavefront &wf) {
-  uint32_t s0 = sdst.read_scalar(wf);
-  uint32_t imm = static_cast<uint32_t>(static_cast<uint16_t>(simm16.encoding_value_));
-  wf.write_scc(s0 < imm);
+  amdgpu::execute_s_cmpk_lt_u32_sopk(*this, wf);
 }
 
 SCmpkLeU32Sopk::SCmpkLeU32Sopk(const MachineInst *inst)
@@ -261,9 +237,7 @@ SCmpkLeU32Sopk::SCmpkLeU32Sopk(const MachineInst *inst)
 }
 
 void SCmpkLeU32Sopk::execute_impl(amdgpu::Wavefront &wf) {
-  uint32_t s0 = sdst.read_scalar(wf);
-  uint32_t imm = static_cast<uint32_t>(static_cast<uint16_t>(simm16.encoding_value_));
-  wf.write_scc(s0 <= imm);
+  amdgpu::execute_s_cmpk_le_u32_sopk(*this, wf);
 }
 
 SAddkI32Sopk::SAddkI32Sopk(const MachineInst *inst)
@@ -278,12 +252,7 @@ SAddkI32Sopk::SAddkI32Sopk(const MachineInst *inst)
 }
 
 void SAddkI32Sopk::execute_impl(amdgpu::Wavefront &wf) {
-  int32_t s0 = static_cast<int32_t>(sdst.read_scalar(wf));
-  int32_t imm = static_cast<int16_t>(simm16.encoding_value_);
-  int64_t wide = static_cast<int64_t>(s0) + static_cast<int64_t>(imm);
-  int32_t result = static_cast<int32_t>(wide);
-  sdst.write_scalar(wf, static_cast<uint32_t>(result));
-  wf.write_scc(wide != static_cast<int64_t>(result));
+  amdgpu::execute_s_addk_i32_sopk(*this, wf);
 }
 
 SMulkI32Sopk::SMulkI32Sopk(const MachineInst *inst)
@@ -298,9 +267,7 @@ SMulkI32Sopk::SMulkI32Sopk(const MachineInst *inst)
 }
 
 void SMulkI32Sopk::execute_impl(amdgpu::Wavefront &wf) {
-  int32_t s0 = static_cast<int32_t>(sdst.read_scalar(wf));
-  int32_t imm = static_cast<int16_t>(simm16.encoding_value_);
-  sdst.write_scalar(wf, static_cast<uint32_t>(s0 * imm));
+  amdgpu::execute_s_mulk_i32_sopk(*this, wf);
 }
 
 SGetregB32Sopk::SGetregB32Sopk(const MachineInst *inst)

@@ -30,12 +30,13 @@ EncodingTranslateFn select_encoding_translator(rj_code_arch_t guest, rj_code_arc
   return nullptr;
 }
 
+const InstructionLegalization *legalization_cdna4_to_rdna4(uint16_t enc_id, uint16_t opcode) {
+  return lookup(kLegalization_cdna4_to_rdna4, enc_id, opcode);
+}
+
 LegalizationLookupFn select_legalization(rj_code_arch_t guest, rj_code_arch_t host) {
-  if (guest == ROCJITSU_CODE_ARCH_CDNA4 && host == ROCJITSU_CODE_ARCH_RDNA4) {
-    return [](uint16_t enc_id, uint16_t opcode) -> const InstructionLegalization * {
-      return lookup(kLegalization_cdna4_to_rdna4, enc_id, opcode);
-    };
-  }
+  if (guest == ROCJITSU_CODE_ARCH_CDNA4 && host == ROCJITSU_CODE_ARCH_RDNA4)
+    return legalization_cdna4_to_rdna4;
   return nullptr;
 }
 
@@ -153,11 +154,19 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
   // Write cave body into the NOP padding at the end of .text.
   // cave_start was set to the end of actual code (after s_endpgm).
   // The cave body overwrites the NOP padding between code_end and text.size().
+  // TODO: When caves exceed available NOP padding, allocate a new .text section
+  // instead of asserting. For now, typical kernels have 256+ bytes of NOP padding
+  // which is sufficient for the current expansion rules.
   const auto &cave = patcher.cave_body();
   if (!cave.empty()) {
     const uint64_t cave_start = patcher.cave_start();
-    assert(cave_start + cave.size() <= text.size() && "cave body exceeds .text NOP padding");
-    std::memcpy(translated_text.data() + cave_start, cave.data(), cave.size());
+    if (cave_start + cave.size() > text.size()) {
+      result.warnings.push_back("cave body (" + std::to_string(cave.size()) +
+                                " bytes) exceeds .text NOP padding (" +
+                                std::to_string(text.size() - cave_start) + " bytes available)");
+    } else {
+      std::memcpy(translated_text.data() + cave_start, cave.data(), cave.size());
+    }
   }
 
   patcher.overwrite_text(translated_text);
@@ -188,7 +197,7 @@ void BinaryTranslator::apply_semantic(const SemanticReplacement &repl, std::vect
     return;
   }
 
-  const uint64_t cave_byte_offset = patcher.cave_start() + patcher.cave_offset();
+  const uint64_t cave_byte_offset = patcher.cave_start() + patcher.cave_body_size();
   const uint64_t stub_next = repl.start_offset + source_size;
   const uint64_t branch_pc = repl.start_offset;
 
@@ -237,22 +246,19 @@ void BinaryTranslator::handle_encoding(const Instruction &inst, uint64_t offset,
     return;
   }
 
-  // Append any trailing literal constant words that the encoding translator
-  // did not consume. Single-word formats (SOP1, SOP2, VOP1, VOP2, etc.) can
-  // have a 32-bit literal appended when a source operand is 0xFF. The
-  // encoding translator only translates the opcode word; the literal passes
-  // through unchanged. Read from the original text since raw_encoding()
-  // only covers the struct portion, not the trailing literal.
+  // Append trailing literal constant when the source instruction is larger
+  // than the translated encoding. This handles single-word formats (SOP1,
+  // SOP2, VOP1, VOP2, etc.) with a 32-bit literal appended when a source
+  // operand is 0xFF. The encoding translator returns the format's native
+  // word count; the literal is always one extra word beyond that.
+  // Guard: only append if the gap is exactly one word (the literal). Larger
+  // gaps would indicate a format mismatch, not a trailing literal.
   const uint32_t translated_bytes = tr.word_count * 4u;
   const uint32_t orig_bytes = inst.size();
-  if (translated_bytes < orig_bytes) {
-    const uint32_t literal_words = (orig_bytes - translated_bytes) / 4;
-    for (uint32_t i = 0; i < literal_words && tr.word_count < 3; ++i) {
-      uint32_t lit_offset = offset + translated_bytes + i * 4;
-      uint32_t lit_word;
-      std::memcpy(&lit_word, orig_text.data() + lit_offset, 4);
-      tr.words[tr.word_count++] = lit_word;
-    }
+  if (orig_bytes - translated_bytes == 4 && tr.word_count < 3) {
+    uint32_t lit_word;
+    std::memcpy(&lit_word, orig_text.data() + offset + translated_bytes, 4);
+    tr.words[tr.word_count++] = lit_word;
   }
 
   const uint32_t target_size = tr.word_count * 4u;

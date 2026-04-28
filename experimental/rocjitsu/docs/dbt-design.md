@@ -110,23 +110,30 @@ The semantic translator handles instructions and ABI conventions whose behavior 
 - **AccVGPR elimination:** `v_accvgpr_read/write` → `v_mov_b32` or NOP on the unified VGPR file.
 - **Future:** Additional MFMA shapes, transpose load replacement.
 
-### Rule-based translations
+### Unified rule dispatch
 
-Semantic translations matched by instruction flags use the `SemanticRule` table:
+All expansion rules (waitcnt, MFMA→WMMA, AccVGPR, v_lshl_add_u64) are registered as `TranslationRule` entries in a single table keyed by `(encoding_id, opcode)`:
 
 ```cpp
-struct SemanticRule {
-  const char *name;
-  uint64_t anchor_flags;   // Match against Instruction::flags()
-  TranslateFn translate;   // Produce SemanticReplacement on match
+struct TranslationRule {
+  uint16_t src_encoding_id; // Encoding format (e.g., SOPP, VOP3P)
+  uint16_t src_opcode;      // Opcode within the encoding
+  RuleAction action;        // Expand, Substitute, FieldRemap, Identity
+  ExpandFn expand_fn;       // Expansion generator function
+  const LaneLayout *guest_layout; // Source matrix layout (for MFMA)
+  const LaneLayout *host_layout;  // Target matrix layout (for WMMA)
 };
 ```
 
-Context-dependent translations (workgroup ID rewrite) use dedicated methods on `SemanticTranslator` that receive kernel-level context from `CodeObjectPatcher::WorkGroupIdInfo`.
+The `try_lower_expand()` method performs binary search over the sorted rule table. For matrix instructions, the `guest_layout` and `host_layout` pointers are passed to the expansion function, which uses `compute_lane_permutation()` to derive the cross-lane shuffle rather than hardcoding it.
 
-### Instruction lowering
+Context-dependent translations (workgroup ID rewrite) use a dedicated post-pass method that receives kernel-level context from `CodeObjectPatcher::WorkGroupIdInfo`.
 
-Instruction lowering handles `Action::Expand` from the legalization table — instructions with no target ISA equivalent that must be decomposed into a sequence of target instructions. The `try_lower_expand()` method on `SemanticTranslator` dispatches by mnemonic to per-instruction lowering functions defined in `semantic_translator.cpp`. As more lowering targets are added (MFMA, AccVGPR, etc.), they are added as functions in the same file.
+### Supporting infrastructure
+
+- **HazardTracker** (`code/dbt/hazard_tracker.h`): Auto-inserts GFX12 `s_delay_alu` instructions based on pipeline class annotations (VALU, SALU, TRANS). Each expansion function emits instructions through the tracker, which manages a 2-deep producer history and computes dependency fields.
+- **Lane permutation** (`code/dbt/lane_permutation.cpp`): Derives the XOR mask and lane range for MFMA→WMMA output remapping from `LaneLayout` descriptors. Adding new MFMA shapes requires only adding layout constants.
+- **SGPR allocation**: `RegisterLiveness` tracks the maximum SGPR index referenced in each block and provides `find_free_sgpr_pair()` / `find_free_sgpr()` for safe temp SGPR allocation in injected code.
 
 ---
 
@@ -134,12 +141,13 @@ Instruction lowering handles `Action::Expand` from the legalization table — in
 
 ### Register Liveness Analysis (`analysis/register_liveness.h`)
 
-Per-basic-block backward liveness analysis over VGPR indices (0-511, covering both VGPR and AccVGPR ranges in the unified file). Computed per-block before semantic and encoding passes. Provides:
+Per-basic-block backward liveness analysis over VGPR indices (0-511, covering both VGPR and AccVGPR ranges in the unified file) plus conservative SGPR max-tracking. Computed per-block before the per-instruction pass. Provides:
 
-- `is_live(offset, vgpr_index)` — query whether a register is live at an instruction
-- `find_free_run(offset, count)` — find consecutive free registers for operand expansion
+- `is_live(offset, vgpr_index)` — query whether a VGPR is live at an instruction
+- `find_free_run(offset, count)` — find consecutive free VGPRs for operand expansion
+- `find_free_sgpr_pair()` / `find_free_sgpr()` — allocate temp SGPRs above the highest referenced SGPR
 
-Used by the semantic translator for safe register remapping (AccVGPR elimination, MFMA→WMMA expansion). Lives at the top level of rocjitsu (not in `code/`) because it's general analysis infrastructure shared by DBT, DBI, and the simulator.
+Used by the semantic translator for safe register allocation in injected code (MFMA→WMMA expansion needs temp VGPRs and SGPRs). Lives at the top level of rocjitsu (not in `code/`) because it's general analysis infrastructure shared by DBT, DBI, and the simulator.
 
 ### Code Object Patcher (`code/patch/code_object_patcher.h`)
 
@@ -156,15 +164,16 @@ Provides ISA-parameterized helpers for encoding common instructions (`s_branch`,
 For each code object:
 
 1. **Decode:** Create a `Decoder` for the guest ISA and build basic blocks from the `.text` section.
-2. **Analyze:** Compute `RegisterLiveness` per basic block (backward scan for VGPR gen/kill sets).
-3. **Semantic pass:** For each basic block, run `SemanticTranslator::translate()` to handle waitcnt and other semantic rules. Apply `rewrite_workgroup_ids()` after encoding translation to fix ABI differences.
-4. **Encoding pass:** For each instruction not consumed by the semantic pass:
-   - Look up the legalization table for the (encoding_id, opcode) pair.
-   - If Identity or Substitute: call the encoding translator.
-   - If Expand: call `try_lower_expand()` for instruction lowering.
-   - If the result is larger than the source, create a code cave.
-5. **Patch:** Update ELF flags, translate kernel descriptors, write cave body into NOP padding.
+2. **Analyze:** Compute `RegisterLiveness` per basic block (backward scan for VGPR gen/kill sets, max SGPR tracking).
+3. **Per-instruction pass:** For each instruction in each basic block:
+   - Call `try_lower_expand(inst, offset, liveness)` — binary search the expand rules table by `(encoding_id, opcode)`. If a rule matches, the `ExpandFn` generates replacement instruction words using the `HazardTracker` for automatic `s_delay_alu` insertion and liveness-based register allocation for temp VGPRs/SGPRs.
+   - If no expand rule matched, look up the legalization table. If Identity or Substitute, call the encoding translator. If Expand with no handler, NOP-fill and emit a warning.
+   - If the replacement is larger than the source instruction, create a code cave (branch to NOP padding after `s_endpgm`, return branch at end of cave).
+4. **Workgroup ID rewrite:** Post-pass rewrites SGPR operands to TTMP registers for RDNA4 ABI.
+5. **Patch:** Update ELF flags, translate kernel descriptors (`compute_pgm_rsrc1/2/3`), write cave body.
 6. **Emit:** Return the modified ELF bytes.
+
+**Code cave sizing:** The cave body is placed in the NOP padding after `s_endpgm`. If the cave exceeds available padding, a warning is emitted. Future work will allocate a new `.text` section for large expansions.
 
 ---
 

@@ -44,6 +44,11 @@ RegisterLiveness RegisterLiveness::compute(BasicBlock &block) {
     offset += inst.size();
   }
 
+  // Intra-block liveness: the backward scan computes accurate gen/kill sets
+  // within this block. Without CFG edges, registers that are live-out to
+  // successor blocks are not tracked — find_free_run/find_free_sgpr callers
+  // should search above the kernel's active register range (e.g., above
+  // vdst + dst_vgprs) to avoid clobbering potentially live-out values.
   VgprLiveSet live;
 
   for (auto it = insts.rbegin(); it != insts.rend(); ++it) {

@@ -4910,12 +4910,14 @@ class CodeGenerator:
             if info.semantic_class in self._NON_SHAREABLE_CLASSES:
                 return False
             return arch in info.isa_names and len(info.isa_names) >= 2
-        # Check family_shared — a mnemonic may appear in multiple families
-        # (e.g., gfx9 and gfx10) with different encoding layouts. Search
-        # all families for the one that includes the current ISA.
+        # Check family_shared — keyed by (mnemonic, encoding_name) tuples.
+        # A mnemonic may appear in multiple families and with different
+        # encodings. Search all families for any entry matching this mnemonic
+        # that includes the current ISA.
         for fam_insts in self.shared_plan.family_shared.values():
-            if mnemonic in fam_insts:
-                info = fam_insts[mnemonic]
+            for (mn, enc_name), info in fam_insts.items():
+                if mn != mnemonic:
+                    continue
                 if info.semantic_class in self._NON_SHAREABLE_CLASSES:
                     return False
                 if arch in info.isa_names and len(info.isa_names) >= 2:

@@ -23,7 +23,6 @@
 #pragma once
 
 #include <cstdint>
-#include <functional>
 #include <memory>
 #include <span>
 #include <string>
@@ -53,8 +52,8 @@ struct InstructionLegalization;
 /// @param w2           Guest instruction word 2 (0 if ≤64-bit).
 /// @param dst_op       Target opcode (from legalization table).
 /// @returns TranslationResult with the encoded host instruction words.
-using EncodingTranslateFn = std::function<TranslationResult(
-    uint32_t encoding_id, uint32_t w0, uint32_t w1, uint32_t w2, uint16_t dst_op)>;
+using EncodingTranslateFn = TranslationResult (*)(uint32_t encoding_id, uint32_t w0, uint32_t w1,
+                                                  uint32_t w2, uint16_t dst_op);
 
 /// @brief Legalization lookup function type.
 ///
@@ -65,8 +64,8 @@ using EncodingTranslateFn = std::function<TranslationResult(
 /// @param encoding_id  Guest encoding format ID.
 /// @param opcode       Guest opcode within the encoding format.
 /// @returns Pointer to the legalization entry, or nullptr if not found.
-using LegalizationLookupFn =
-    std::function<const InstructionLegalization *(uint16_t encoding_id, uint16_t opcode)>;
+using LegalizationLookupFn = const InstructionLegalization *(*)(uint16_t encoding_id,
+                                                                uint16_t opcode);
 
 /// @brief Result of translating a code object.
 struct TranslatedCodeObject {

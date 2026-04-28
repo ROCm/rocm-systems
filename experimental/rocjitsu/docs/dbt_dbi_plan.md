@@ -2343,6 +2343,8 @@ After all instructions are processed, `translate()` calls `CodeObjectPatcher::ap
 
 #### 3.3.2 Code Cave Strategy
 
+> **Implementation note (current state):** The MVP implementation places cave bodies in the NOP padding after `s_endpgm` within the existing `.text` section, rather than in a separate `.rj_translations` section as described below. This works for kernels with sufficient NOP padding (typically 256+ bytes) but will not scale to large expansions. A runtime warning is emitted if the cave body exceeds available padding. The `.rj_translations` approach described below remains the target for production use.
+
 Size-expanding legalization (LOWER with size growth, all EXPAND) uses **code caves** to preserve the original `.text` layout. The invariant is:
 
 > Every word written in-place at the original instruction's location is exactly `inst.size() / 4` words — the returned replacement always has the same word count as the source instruction.
@@ -5166,22 +5168,20 @@ Note: `BranchFixup` is not needed for DBT — the code cave invariant (§3.3.2) 
 
 ---
 
-### Phase 11a: Semantic Translator Framework + MFMA→WMMA Rules (1 week) (framework ✅ DONE, MFMA rules pending)
+### Phase 11a: Semantic Translator Framework + MFMA→WMMA Rules (1 week) ✅ DONE
 
 **Depends on:** Phase 9 (BinaryTranslator skeleton)
 
-| Task | New Files |
-|---|---|
-| `SemanticTranslator` framework: `SemanticRule`, `SemanticAnchor`, `SemanticMatch` data structures; per-basic-block anchor scan; match/emit dispatch | `dbt/semantic_translator.h` |
-| CDNA4→RDNA4 semantic rules: `mfma_f16_16x16x16_with_tr_load`, `mfma_f16_32x32x16_with_tr_load`, `accvgpr_standalone`, `ds_read_tr_standalone` | `dbt/semantic_rules_cdna4_to_rdna4.h` |
-| Wire `SemanticTranslator` into `BinaryTranslator::translate()`: run semantic translation per-block before the per-instruction loop; mark consumed instructions | `dbt/binary_translator.h/.cpp` modifications |
-| Add `MFMA` and `ACCVGPR` flags to `InstFlags`; update `codegen.py` to annotate MFMA/AccVGPR instructions | `isa/instruction.h`, `amdisa/codegen.py` |
+**Implemented (differs from original plan):** The `SemanticRule` struct was implemented then replaced with a unified `TranslationRule` table keyed by `(encoding_id, opcode)`. All expansion rules (waitcnt, MFMA→WMMA, AccVGPR read/write, v_lshl_add_u64) are registered in one sorted table and dispatched via binary search in `try_lower_expand()`. No separate `SemanticAnchor`/`SemanticMatch` types — the unified `ExpandFn` signature handles all cases.
 
-**Tests:**
-- Semantic translator correctly identifies a `ds_read_b64_tr_b16` + `v_mfma_f32_16x16x16_f16` + `v_accvgpr_read` sequence in a test basic block.
-- Emit function produces valid RDNA4 instructions: `ds_load_b128` + `s_wait_loadcnt` + `v_wmma_f32_16x16x16_f16`.
-- AccVGPR standalone rule correctly remaps `v_accvgpr_write acc[N], v[M]` to `v_mov_b32 v[N+base], v[M]`.
-- Unrecognized MFMA instructions fall through to Phase 11b (Tier 1 software fallback).
+**MFMA→WMMA translation:** `v_mfma_f32_16x16x16_f16` → `v_wmma_f32_16x16x16_f16` with:
+- Lane permutation derived from `LaneLayout` descriptors via `compute_lane_permutation()`
+- ds_bpermute_b32 for XOR-48 lane remap at lanes 16-47
+- Liveness-based VGPR and SGPR allocation (`find_free_run`, `find_free_sgpr_pair`)
+- `HazardTracker` for automatic `s_delay_alu` insertion
+- Hardware-verified: 256/256 elements correct, 10 fuzzing iterations with random FP16 inputs on GFX1201
+
+**Key files:** `dbt/semantic_translator.h/.cpp`, `dbt/translation_rule.h`, `dbt/lane_permutation.cpp`, `dbt/hazard_tracker.h/.cpp`, `analysis/register_liveness.h/.cpp`
 
 ### Phase 11b: MFMA Software Fallback Stubs (1 week)
 

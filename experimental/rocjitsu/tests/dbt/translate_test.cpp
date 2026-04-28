@@ -1,6 +1,22 @@
 // Copyright (c) 2025-2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+/// @file translate_test.cpp
+/// @brief CPU-only unit tests for the DBT translation pipeline.
+///
+/// Tests encoding correctness, legalization table integrity, and structural
+/// properties of translated code objects — without requiring a GPU. Covers:
+///   - Coherency bit remapping (GFX940→GFX12, GFX9→GFX12)
+///   - Encoding field preservation across SOP1/SOP2/SOPP/SMEM/VOP3 formats
+///   - Decode-encode round-trip for CDNA4→RDNA4
+///   - Legalization table lookup and zero-ILLEGAL invariant across all ISA pairs
+///   - Waitcnt decode/encode (GFX9 monolithic → GFX12 split counters)
+///   - E2E binary translation: vector_add code object → translated ELF
+///     with valid RDNA4 instructions, correct ELF flags, no GFX9 waitcnt
+///
+/// These tests complement the hardware tests in hsa_translate_test.cpp which
+/// verify correctness on real RDNA4 GPUs.
+
 #include "rocjitsu/code/dbt/encoding_translator.h"
 #include "rocjitsu/code/dbt/generated/encoding_cdna4_to_rdna4.h"
 #include "rocjitsu/code/dbt/generated/encoding_fields.h"

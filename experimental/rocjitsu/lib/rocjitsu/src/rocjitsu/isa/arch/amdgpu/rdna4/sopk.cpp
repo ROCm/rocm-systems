@@ -5,6 +5,7 @@
 // See lib/python/amdisa/README.md for regeneration instructions.
 
 #include "rocjitsu/isa/arch/amdgpu/rdna4/sopk.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/execute_shared.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "util/data_types.h"
 #include "util/except.h"
@@ -27,8 +28,7 @@ SMovkI32Sopk::SMovkI32Sopk(const MachineInst *inst)
 }
 
 void SMovkI32Sopk::execute_impl(amdgpu::Wavefront &wf) {
-  sdst.write_scalar(wf, static_cast<uint32_t>(
-                            static_cast<int32_t>(static_cast<int16_t>(simm16.encoding_value_))));
+  amdgpu::execute_s_movk_i32_sopk(*this, wf);
 }
 
 SVersionSopk::SVersionSopk(const MachineInst *inst)
@@ -57,9 +57,7 @@ SCmovkI32Sopk::SCmovkI32Sopk(const MachineInst *inst)
 }
 
 void SCmovkI32Sopk::execute_impl(amdgpu::Wavefront &wf) {
-  if (wf.read_scc())
-    sdst.write_scalar(wf, static_cast<uint32_t>(
-                              static_cast<int32_t>(static_cast<int16_t>(simm16.encoding_value_))));
+  amdgpu::execute_s_cmovk_i32_sopk(*this, wf);
 }
 
 SAddkCoI32Sopk::SAddkCoI32Sopk(const MachineInst *inst)
@@ -91,9 +89,7 @@ SMulkI32Sopk::SMulkI32Sopk(const MachineInst *inst)
 }
 
 void SMulkI32Sopk::execute_impl(amdgpu::Wavefront &wf) {
-  int32_t s0 = static_cast<int32_t>(sdst.read_scalar(wf));
-  int32_t imm = static_cast<int16_t>(simm16.encoding_value_);
-  sdst.write_scalar(wf, static_cast<uint32_t>(s0 * imm));
+  amdgpu::execute_s_mulk_i32_sopk(*this, wf);
 }
 
 SGetregB32Sopk::SGetregB32Sopk(const MachineInst *inst)

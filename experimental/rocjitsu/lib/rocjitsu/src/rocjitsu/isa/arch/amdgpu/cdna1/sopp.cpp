@@ -25,7 +25,7 @@ SNopSopp::SNopSopp(const MachineInst *inst)
   num_dst_ = 0;
 }
 
-void SNopSopp::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SNopSopp::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_nop_sopp(*this, wf); }
 
 SEndpgmSopp::SEndpgmSopp(const MachineInst *inst)
     : Sopp("s_endpgm", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SEndpgmSopp>()) {
@@ -159,7 +159,9 @@ SBarrierSopp::SBarrierSopp(const MachineInst *inst)
   flags_ |= BARRIER;
 }
 
-void SBarrierSopp::execute_impl(amdgpu::Wavefront &wf) { wf.set_state(amdgpu::WfState::BARRIER); }
+void SBarrierSopp::execute_impl(amdgpu::Wavefront &wf) {
+  amdgpu::execute_s_barrier_sopp(*this, wf);
+}
 
 SSetkillSopp::SSetkillSopp(const MachineInst *inst)
     : Sopp("s_setkill", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SSetkillSopp>()),
@@ -169,7 +171,9 @@ SSetkillSopp::SSetkillSopp(const MachineInst *inst)
   num_dst_ = 0;
 }
 
-void SSetkillSopp::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SSetkillSopp::execute_impl(amdgpu::Wavefront &wf) {
+  amdgpu::execute_s_setkill_sopp(*this, wf);
+}
 
 SWaitcntSopp::SWaitcntSopp(const MachineInst *inst)
     : Sopp("s_waitcnt", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SWaitcntSopp>()),
@@ -196,7 +200,9 @@ SSethaltSopp::SSethaltSopp(const MachineInst *inst)
   num_dst_ = 0;
 }
 
-void SSethaltSopp::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SSethaltSopp::execute_impl(amdgpu::Wavefront &wf) {
+  amdgpu::execute_s_sethalt_sopp(*this, wf);
+}
 
 SSleepSopp::SSleepSopp(const MachineInst *inst)
     : Sopp("s_sleep", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SSleepSopp>()),
@@ -206,7 +212,7 @@ SSleepSopp::SSleepSopp(const MachineInst *inst)
   num_dst_ = 0;
 }
 
-void SSleepSopp::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SSleepSopp::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_sleep_sopp(*this, wf); }
 
 SSetprioSopp::SSetprioSopp(const MachineInst *inst)
     : Sopp("s_setprio", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SSetprioSopp>()),
@@ -216,7 +222,9 @@ SSetprioSopp::SSetprioSopp(const MachineInst *inst)
   num_dst_ = 0;
 }
 
-void SSetprioSopp::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SSetprioSopp::execute_impl(amdgpu::Wavefront &wf) {
+  amdgpu::execute_s_setprio_sopp(*this, wf);
+}
 
 SSendmsgSopp::SSendmsgSopp(const MachineInst *inst)
     : Sopp("s_sendmsg", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SSendmsgSopp>()),
@@ -226,7 +234,9 @@ SSendmsgSopp::SSendmsgSopp(const MachineInst *inst)
   num_dst_ = 0;
 }
 
-void SSendmsgSopp::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SSendmsgSopp::execute_impl(amdgpu::Wavefront &wf) {
+  amdgpu::execute_s_sendmsg_sopp(*this, wf);
+}
 
 SSendmsghaltSopp::SSendmsghaltSopp(const MachineInst *inst)
     : Sopp("s_sendmsghalt", reinterpret_cast<const OpEncoding *>(inst),
@@ -237,7 +247,9 @@ SSendmsghaltSopp::SSendmsghaltSopp(const MachineInst *inst)
   num_dst_ = 0;
 }
 
-void SSendmsghaltSopp::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SSendmsghaltSopp::execute_impl(amdgpu::Wavefront &wf) {
+  amdgpu::execute_s_sendmsghalt_sopp(*this, wf);
+}
 
 STrapSopp::STrapSopp(const MachineInst *inst)
     : Sopp("s_trap", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<STrapSopp>()),
@@ -247,7 +259,7 @@ STrapSopp::STrapSopp(const MachineInst *inst)
   num_dst_ = 0;
 }
 
-void STrapSopp::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void STrapSopp::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_trap_sopp(*this, wf); }
 
 SIcacheInvSopp::SIcacheInvSopp(const MachineInst *inst)
     : Sopp("s_icache_inv", reinterpret_cast<const OpEncoding *>(inst),
@@ -269,7 +281,9 @@ SIncperflevelSopp::SIncperflevelSopp(const MachineInst *inst)
   num_dst_ = 0;
 }
 
-void SIncperflevelSopp::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SIncperflevelSopp::execute_impl(amdgpu::Wavefront &wf) {
+  amdgpu::execute_s_incperflevel_sopp(*this, wf);
+}
 
 SDecperflevelSopp::SDecperflevelSopp(const MachineInst *inst)
     : Sopp("s_decperflevel", reinterpret_cast<const OpEncoding *>(inst),
@@ -280,7 +294,9 @@ SDecperflevelSopp::SDecperflevelSopp(const MachineInst *inst)
   num_dst_ = 0;
 }
 
-void SDecperflevelSopp::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SDecperflevelSopp::execute_impl(amdgpu::Wavefront &wf) {
+  amdgpu::execute_s_decperflevel_sopp(*this, wf);
+}
 
 STtracedataSopp::STtracedataSopp(const MachineInst *inst)
     : Sopp("s_ttracedata", reinterpret_cast<const OpEncoding *>(inst),
@@ -302,7 +318,9 @@ SCbranchCdbgsysSopp::SCbranchCdbgsysSopp(const MachineInst *inst)
   num_dst_ = 0;
 }
 
-void SCbranchCdbgsysSopp::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SCbranchCdbgsysSopp::execute_impl(amdgpu::Wavefront &wf) {
+  amdgpu::execute_s_cbranch_cdbgsys_sopp(*this, wf);
+}
 
 SCbranchCdbguserSopp::SCbranchCdbguserSopp(const MachineInst *inst)
     : Sopp("s_cbranch_cdbguser", reinterpret_cast<const OpEncoding *>(inst),
@@ -313,7 +331,9 @@ SCbranchCdbguserSopp::SCbranchCdbguserSopp(const MachineInst *inst)
   num_dst_ = 0;
 }
 
-void SCbranchCdbguserSopp::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SCbranchCdbguserSopp::execute_impl(amdgpu::Wavefront &wf) {
+  amdgpu::execute_s_cbranch_cdbguser_sopp(*this, wf);
+}
 
 SCbranchCdbgsysOrUserSopp::SCbranchCdbgsysOrUserSopp(const MachineInst *inst)
     : Sopp("s_cbranch_cdbgsys_or_user", reinterpret_cast<const OpEncoding *>(inst),
@@ -324,7 +344,9 @@ SCbranchCdbgsysOrUserSopp::SCbranchCdbgsysOrUserSopp(const MachineInst *inst)
   num_dst_ = 0;
 }
 
-void SCbranchCdbgsysOrUserSopp::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SCbranchCdbgsysOrUserSopp::execute_impl(amdgpu::Wavefront &wf) {
+  amdgpu::execute_s_cbranch_cdbgsys_or_user_sopp(*this, wf);
+}
 
 SCbranchCdbgsysAndUserSopp::SCbranchCdbgsysAndUserSopp(const MachineInst *inst)
     : Sopp("s_cbranch_cdbgsys_and_user", reinterpret_cast<const OpEncoding *>(inst),
@@ -335,7 +357,9 @@ SCbranchCdbgsysAndUserSopp::SCbranchCdbgsysAndUserSopp(const MachineInst *inst)
   num_dst_ = 0;
 }
 
-void SCbranchCdbgsysAndUserSopp::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SCbranchCdbgsysAndUserSopp::execute_impl(amdgpu::Wavefront &wf) {
+  amdgpu::execute_s_cbranch_cdbgsys_and_user_sopp(*this, wf);
+}
 
 SEndpgmSavedSopp::SEndpgmSavedSopp(const MachineInst *inst)
     : Sopp("s_endpgm_saved", reinterpret_cast<const OpEncoding *>(inst),
@@ -353,7 +377,9 @@ SSetGprIdxOffSopp::SSetGprIdxOffSopp(const MachineInst *inst)
   num_dst_ = 0;
 }
 
-void SSetGprIdxOffSopp::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SSetGprIdxOffSopp::execute_impl(amdgpu::Wavefront &wf) {
+  amdgpu::execute_s_set_gpr_idx_off_sopp(*this, wf);
+}
 
 SSetGprIdxModeSopp::SSetGprIdxModeSopp(const MachineInst *inst)
     : Sopp("s_set_gpr_idx_mode", reinterpret_cast<const OpEncoding *>(inst),
@@ -364,7 +390,9 @@ SSetGprIdxModeSopp::SSetGprIdxModeSopp(const MachineInst *inst)
   num_dst_ = 0;
 }
 
-void SSetGprIdxModeSopp::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SSetGprIdxModeSopp::execute_impl(amdgpu::Wavefront &wf) {
+  amdgpu::execute_s_set_gpr_idx_mode_sopp(*this, wf);
+}
 
 SEndpgmOrderedPsDoneSopp::SEndpgmOrderedPsDoneSopp(const MachineInst *inst)
     : Sopp("s_endpgm_ordered_ps_done", reinterpret_cast<const OpEncoding *>(inst),

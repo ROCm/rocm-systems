@@ -29,7 +29,7 @@ public:
 
   void append_cave_body(std::span<const uint32_t> words);
 
-  uint64_t cave_offset() const { return cave_body_.size(); }
+  uint64_t cave_body_size() const { return cave_body_.size(); }
 
   /// @brief Set the byte offset within .text where the cave body will be placed.
   /// This must be called before any apply_semantic() calls so branch offsets
