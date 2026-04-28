@@ -2938,23 +2938,36 @@ hipError_t hipDeviceGraphMemTrim(int device) {
   }
   auto* pool = g_devices[device]->GetGraphMemoryPool();
 
-  // Phase 1: Release all idle graph-cached VA mappings and decrement refcounts.
+  std::vector<hip::GraphExec*> retained_graph_execs;
+  // Phase 1: Collect eligible graph execs under graphExecSetLock_ and retain them
+  // so they remain valid after dropping the lock. Do not call ReleaseCachedMapping()
+  // while holding graphExecSetLock_ because it may enqueue/await GPU work and take
+  // the graph memory pool lock.
   {
     std::scoped_lock lock(hip::GraphExec::graphExecSetLock_);
     for (auto* ge : hip::GraphExec::graphExecSet_) {
-      if (ge->Device() != g_devices[device] ||
-          ge->GetMemAllocNodeCount() > 0) {
+      if (ge->Device() != g_devices[device] || ge->GetMemAllocNodeCount() > 0) {
         continue;
       }
-      for (auto* node : ge->GetNodes()) {
-        if (node->GetType() != hipGraphNodeTypeMemAlloc) continue;
-        auto* alloc_node = static_cast<hip::GraphMemAllocNode*>(node);
-        alloc_node->ReleaseCachedMapping(pool);
-      }
+      ge->retain();
+      retained_graph_execs.push_back(ge);
     }
   }
-
-  // Phase 2: All previously-refcounted entries now have refcount==0.
+  // Phase 2: Release all idle graph-cached VA mappings and decrement refcounts
+  // outside graphExecSetLock_.
+  for (auto* ge : retained_graph_execs) {
+    for (auto* node : ge->GetNodes()) {
+      if (node->GetType() != hipGraphNodeTypeMemAlloc) {
+        continue;
+      }
+      auto* alloc_node = static_cast<hip::GraphMemAllocNode*>(node);
+      alloc_node->ReleaseCachedMapping(pool);
+    }
+  }
+  for (auto* ge : retained_graph_execs) {
+    ge->release();
+  }
+  // Phase 3: All previously-refcounted entries now have refcount==0.
   pool->TrimTo(0);
 
   HIP_RETURN(hipSuccess);
