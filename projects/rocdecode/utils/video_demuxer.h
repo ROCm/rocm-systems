@@ -43,7 +43,7 @@ extern "C" {
 
 // Minimal critical logging for video_demuxer.h.
 // Matches the format produced by the full logger in src/commons.h:
-//   [0, Critical] filename:line: timestamp_us us: [pid:X tid:Y htid:0xZZZZZ] func(): message
+//   [0, Critical] filename:line: timestamp_us us: [pid:X tid:Y hashid:0xZZZZZ] func(): message
 #define DemuxCriticalLog(msg) \
     do { \
         struct timespec _ts_; \
@@ -56,7 +56,7 @@ extern "C" {
                   << (std::hash<std::thread::id>{}(std::this_thread::get_id()) & 0xFFFFF); \
         std::cerr << "[0, Critical] " << (_f_ ? _f_ + 1 : __FILE__) \
                   << ":" << __LINE__ << ": " << _us_ << " us: [pid:" \
-                  << getpid() << " tid:" << _tid_ << " htid:" << _htid_oss_.str() << "] " \
+                  << getpid() << " tid:" << _tid_ << " hashid:" << _htid_oss_.str() << "] " \
                   << __func__ << "(): " << (msg) << std::endl; \
     } while (0)
 
