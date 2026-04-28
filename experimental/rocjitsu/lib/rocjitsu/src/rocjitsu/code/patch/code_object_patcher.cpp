@@ -174,84 +174,8 @@ void CodeObjectPatcher::patch_kernel_descriptors_for_wave64(rj_code_arch_t targe
   }
 }
 
-std::vector<CodeObjectPatcher::WorkGroupIdInfo> CodeObjectPatcher::workgroup_id_info() const {
-  using KD = rocr::llvm::amdhsa::kernel_descriptor_t;
-  namespace kd = rocr::llvm::amdhsa;
-
-  std::vector<WorkGroupIdInfo> infos;
-
-  auto *ehdr = reinterpret_cast<const Elf64_Ehdr *>(image_.data());
-  if (ehdr->e_shoff + static_cast<uint64_t>(ehdr->e_shnum) * sizeof(Elf64_Shdr) > image_.size())
-    return infos;
-  auto *shdr = reinterpret_cast<const Elf64_Shdr *>(image_.data() + ehdr->e_shoff);
-
-  // Find the .text section's virtual address for offset calculation.
-  uint64_t text_vaddr = 0;
-  for (int i = 0; i < ehdr->e_shnum; ++i) {
-    if (shdr[i].sh_offset == text_offset_ && shdr[i].sh_size == text_size_) {
-      text_vaddr = shdr[i].sh_addr;
-      break;
-    }
-  }
-
-  for (int i = 0; i < ehdr->e_shnum; ++i) {
-    if (shdr[i].sh_type != SHT_SYMTAB)
-      continue;
-    if (shdr[i].sh_offset + shdr[i].sh_size > image_.size())
-      continue;
-    auto *symtab = reinterpret_cast<const Elf64_Sym *>(image_.data() + shdr[i].sh_offset);
-    int nsyms = shdr[i].sh_size / sizeof(Elf64_Sym);
-    if (shdr[i].sh_link >= ehdr->e_shnum)
-      continue;
-    auto *strtab_shdr = &shdr[shdr[i].sh_link];
-    if (strtab_shdr->sh_offset + strtab_shdr->sh_size > image_.size())
-      continue;
-    auto *strtab = reinterpret_cast<const char *>(image_.data() + strtab_shdr->sh_offset);
-
-    for (int j = 0; j < nsyms; ++j) {
-      if (symtab[j].st_size != sizeof(KD))
-        continue;
-      if (strtab_shdr->sh_size > 0 && symtab[j].st_name > 0) {
-        if (symtab[j].st_name >= strtab_shdr->sh_size)
-          continue;
-        const char *name = strtab + symtab[j].st_name;
-        size_t len = strlen(name);
-        if (len >= 3 && strcmp(name + len - 3, ".kd") != 0)
-          continue;
-      }
-      uint16_t sec_idx = symtab[j].st_shndx;
-      if (sec_idx >= ehdr->e_shnum)
-        continue;
-      uint64_t kd_file_off = shdr[sec_idx].sh_offset + (symtab[j].st_value - shdr[sec_idx].sh_addr);
-      if (kd_file_off + sizeof(KD) > image_.size())
-        continue;
-
-      const auto *kdp = reinterpret_cast<const KD *>(image_.data() + kd_file_off);
-      uint64_t kd_vaddr = symtab[j].st_value;
-      uint64_t entry_vaddr = kd_vaddr + kdp->kernel_code_entry_byte_offset;
-      uint64_t entry_text_off = entry_vaddr - text_vaddr;
-
-      uint32_t rsrc2 = kdp->compute_pgm_rsrc2;
-
-      // User SGPR count from compute_pgm_rsrc2 — this is the authoritative
-      // count set by the compiler, including preloaded kernel arguments.
-      // The enable_sgpr_* bits in kernel_code_properties describe which
-      // user SGPRs are enabled, but USER_SGPR_COUNT is the actual count
-      // used by CP/SPI to place system SGPRs after user SGPRs.
-      uint32_t sgpr = AMDHSA_BITS_GET(rsrc2, kd::COMPUTE_PGM_RSRC2_USER_SGPR_COUNT);
-
-      WorkGroupIdInfo info{entry_text_off, -1, -1, -1};
-      if (AMDHSA_BITS_GET(rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X))
-        info.sgpr_wg_id_x = static_cast<int8_t>(sgpr++);
-      if (AMDHSA_BITS_GET(rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Y))
-        info.sgpr_wg_id_y = static_cast<int8_t>(sgpr++);
-      if (AMDHSA_BITS_GET(rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Z))
-        info.sgpr_wg_id_z = static_cast<int8_t>(sgpr++);
-
-      infos.push_back(info);
-    }
-  }
-  return infos;
+std::vector<KernelDescriptorInfo> CodeObjectPatcher::kernel_descriptor_info() const {
+  return collect_kernel_descriptor_info(image_, text_offset_, text_size_);
 }
 
 void CodeObjectPatcher::append_cave_body(std::span<const uint32_t> words) {

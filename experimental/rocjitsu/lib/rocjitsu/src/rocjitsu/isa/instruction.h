@@ -14,6 +14,7 @@
 #include <cassert>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -41,7 +42,9 @@ enum InstFlags : uint64_t {
   /// @brief Matrix FMA instruction (v_mfma_*, v_smfmac_*).
   MFMA = (1ULL << 8),
   /// @brief AccVGPR move instruction (v_accvgpr_write, v_accvgpr_read, v_accvgpr_mov).
-  ACCVGPR = (1ULL << 9)
+  ACCVGPR = (1ULL << 9),
+  /// @brief Destination update is conditional and must not kill the old value.
+  PREDICATED_DEF = (1ULL << 10)
 };
 
 class BasicBlock;
@@ -170,10 +173,10 @@ public:
   /// @returns Encoding size in bytes.
   int size() const { return size_; }
 
-  /// @brief Whether this instruction is a branch.
-  /// @retval true The instruction has the BRANCH flag set.
-  /// @retval false The instruction is not a branch.
-  bool is_branch() const { return flags_ & BRANCH; }
+  /// @brief Whether this instruction is a direct branch.
+  /// @retval true The instruction has BRANCH or COND_BRANCH metadata.
+  /// @retval false The instruction is not a direct branch.
+  bool is_branch() const { return flags_ & (BRANCH | COND_BRANCH); }
 
   /// @brief Whether this instruction is a memory operation.
   /// @retval true The instruction has the MEMORY_OP flag set.
@@ -189,6 +192,13 @@ public:
   bool is_mfma() const { return flags_ & MFMA; }
 
   bool is_accvgpr() const { return flags_ & ACCVGPR; }
+
+  /// @brief Signed byte offset for a direct branch target.
+  ///
+  /// @details Generated ISA subclasses override this for direct branches whose
+  /// label operand is a signed instruction-count delta. Indirect branches and
+  /// non-branches return nullopt.
+  [[nodiscard]] virtual std::optional<int64_t> branch_offset_bytes() const { return std::nullopt; }
 
   /// @brief Raw encoding words of this instruction.
   /// @returns Pointer to the encoding words (size()/4 words), or nullptr if not set.
