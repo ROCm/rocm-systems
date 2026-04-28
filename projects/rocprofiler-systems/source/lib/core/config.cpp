@@ -48,6 +48,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <exception>
+#include <filesystem>
 #include <fstream>
 #include <limits>
 #include <linux/capability.h>
@@ -55,6 +56,7 @@
 #include <ostream>
 #include <sstream>
 #include <string>
+#include <system_error>
 #include <type_traits>
 #include <unistd.h>
 #include <utility>
@@ -2710,12 +2712,20 @@ tmp_file::~tmp_file()
 void
 tmp_file::touch() const
 {
-    if(!filepath::exists(filename))
-    {
-        // if the filepath does not exist, open in out mode to create it
-        auto _ofs = std::ofstream{};
-        filepath::open(_ofs, filename);
-    }
+    namespace fs = std::filesystem;
+
+    std::error_code _ec;
+    if(fs::exists(filename, _ec)) return;
+
+    // Pre-create parent directories with std::filesystem, which treats an
+    // already-existing directory as success. timemory's filepath::makedir
+    // races on EEXIST when multiple MPI ranks share a parent directory and
+    // can fail to create the file as a result.
+    auto _parent = fs::path{ filename }.parent_path();
+    if(!_parent.empty()) fs::create_directories(_parent, _ec);
+
+    auto _ofs = std::ofstream{};
+    filepath::open(_ofs, filename);
 }
 
 bool
