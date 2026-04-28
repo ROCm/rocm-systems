@@ -60,6 +60,10 @@ set(_sampling_test_sources
 # Gated at CMake level — no runtime GTEST_SKIP inside the file.
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     list(APPEND _sampling_test_sources unit/linux_impl_smoke_test.cpp)
+    # Fork integration tests: AC-17 (postfork_parent_reinit / postfork_child_cleanup)
+    # and NFR-TS-5 (signals blocked before state torn down in child).
+    # Uses real fork() — Linux-only.
+    list(APPEND _sampling_test_sources integration/fork_integration_test.cpp)
 endif()
 
 # ── Async-signal-safety regression test ──────────────────────────────────────
