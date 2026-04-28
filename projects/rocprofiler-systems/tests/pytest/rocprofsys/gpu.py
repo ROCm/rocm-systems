@@ -387,7 +387,9 @@ def get_target_gpu_arch(rocm_path: Path, target_path: Path) -> list[str]:
 def get_xnack_support(rocm_path: Optional[Path] = None) -> bool:
     """Check if a current GPU supports XNACK.
 
-    Runs rocminfo and checks if 'xnack' appears in the output.
+    Runs rocminfo and checks for the 'xnack+' target-ID qualifier. A bare
+    'xnack' substring would also match 'xnack-' GPUs (XNACK disabled), so
+    enable detection requires the trailing '+'.
     """
     rocminfo = get_rocminfo(rocm_path)
     if not rocminfo:
@@ -401,7 +403,7 @@ def get_xnack_support(rocm_path: Optional[Path] = None) -> bool:
             timeout=30,
         )
         if result.returncode == 0:
-            return "xnack" in result.stdout
+            return "xnack+" in result.stdout
     except (subprocess.TimeoutExpired, OSError):
         pass
 
