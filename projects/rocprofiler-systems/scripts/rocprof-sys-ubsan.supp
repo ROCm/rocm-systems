@@ -9,13 +9,13 @@
 # Lines starting with '#' are comments. Empty files are valid.
 
 # Dyninst - third-party binary instrumentation framework
-vptr:Dyninst::*
+vptr:Dyninst::
 
 # Boost - third-party library
-vptr:boost::*
+vptr:boost::
 
 # TBB - Intel Threading Building Blocks
-vptr:tbb::*
+vptr:tbb::
 
 # timemory - performance analysis toolkit
-vptr:tim::*
+vptr:tim::

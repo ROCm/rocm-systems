@@ -28,7 +28,7 @@ thread_deleter<void>::operator()() const
 
         if(!is_child_process()) component::pthread_create_gotcha::shutdown(_tid);
         set_thread_state(ThreadState::Completed);
-        if(get_state() == State::Active && !is_child_process() && _tid == 0)
+        if(get_state() < State::Finalized && !is_child_process() && _tid == 0)
             rocprofsys_finalize_hidden();
     }
     else

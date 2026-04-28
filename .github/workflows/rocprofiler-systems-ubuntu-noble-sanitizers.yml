@@ -56,7 +56,7 @@ jobs:
       matrix:
         compiler: ["g++"]
         build-dyninst: ["ON"]
-        sanitizer-type: ["address", "undefined"]
+        sanitizer-type: ["address", "undefined", "thread"]
     env:
       DEBIAN_FRONTEND: noninteractive
       OMPI_ALLOW_RUN_AS_ROOT: 1
@@ -82,7 +82,7 @@ jobs:
 
       - name: Install Packages
         timeout-minutes: 25
-        uses: nick-fields/retry@v3
+        uses: nick-fields/retry@ad984534de44a9489a53aefd81eb77f87c70dc60 # v4.0.0
         with:
           retry_wait_seconds: 30
           timeout_minutes: 25
