@@ -82,6 +82,9 @@ typedef struct { char internal[NCCL_UNIQUE_ID_BYTES]; /*!< Opaque array>*/} nccl
 #define NCCL_SHRINK_DEFAULT 0x00 /* shrink the parent communicator */
 #define NCCL_SHRINK_ABORT 0x01   /* First, terminate ongoing parent operations, and then shrink the parent communicator */
 
+/* ncclCommRevoke flags */
+#define NCCL_REVOKE_DEFAULT 0x00 /* default revoke behavior: quiesce in-flight work, reject new ops */
+
 /*! @defgroup   rccl_config_type Communicator Configuration
     @details    Structure that allows for customizing Communicator behavior via ncclCommInitRankConfig
     @{ */
@@ -279,6 +282,22 @@ ncclResult_t pncclCommDestroy(ncclComm_t comm);
 ncclResult_t  ncclCommAbort(ncclComm_t comm);
 /*! @cond       include_hidden */
 ncclResult_t pncclCommAbort(ncclComm_t comm);
+/*! @endcond */
+
+/*! @brief      Revoke a communicator without destroying it.
+    @details    Drains in-flight work, stops the proxy service, and rejects subsequently
+                enqueued collectives with ncclInvalidUsage. The communicator remains
+                valid as a parent for ncclCommSplit / ncclCommShrink / ncclCommGrow, or
+                may be torn down via ncclCommFinalize / ncclCommDestroy / ncclCommAbort.
+                Pass NCCL_REVOKE_DEFAULT for revokeFlags; other values are rejected
+                with ncclInvalidArgument.
+    @return     Result code. See @ref rccl_result_code for more details.
+
+    @param[in]  comm          Communicator to revoke
+    @param[in]  revokeFlags   Reserved; must be NCCL_REVOKE_DEFAULT */
+ncclResult_t  ncclCommRevoke(ncclComm_t comm, int revokeFlags);
+/*! @cond       include_hidden */
+ncclResult_t pncclCommRevoke(ncclComm_t comm, int revokeFlags);
 /*! @endcond */
 
 /*! @brief      Create one or more communicators from an existing one.

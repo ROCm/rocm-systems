@@ -109,6 +109,9 @@ ncclResult_t
 ncclCommAbort_impl(ncclComm_t comm);
 
 ncclResult_t
+ncclCommRevoke_impl(ncclComm_t comm, int revokeFlags);
+
+ncclResult_t
 ncclCommShrink_impl(ncclComm_t comm, int* excludeRanksList, int excludeRanksCount, ncclComm_t *newcomm,
                     ncclConfig_t* config, int shrinkFlags);
 
@@ -269,11 +272,12 @@ RCCL_ASSERT_OFFSET(rcclApiFuncTable, ncclCommWindowRegister_fn, 39);
 RCCL_ASSERT_OFFSET(rcclApiFuncTable, ncclCommWindowDeregister_fn, 40);
 RCCL_ASSERT_OFFSET(rcclApiFuncTable, ncclAlltoAll_fn, 41);
 RCCL_ASSERT_OFFSET(rcclApiFuncTable, ncclAlltoAllv_fn, 42);
+RCCL_ASSERT_OFFSET(rcclApiFuncTable, ncclCommRevoke_fn, 43);
 // DO NOT REORDER, ADD NEW ITEMS HERE
 
 #undef RCCL_ASSERT_OFFSET
 
-static_assert(sizeof(rcclApiFuncTable) == compute_table_size(43),
+static_assert(sizeof(rcclApiFuncTable) == compute_table_size(44),
               "Update table major/step version and add a new offset assertion if this "
               "fails to compile");
 
@@ -326,7 +330,8 @@ RcclGetFunctionTable_impl()
                                                &ncclCommWindowRegister_impl,
                                                &ncclCommWindowDeregister_impl,
                                                &ncclAlltoAll_impl,
-                                               &ncclAlltoAllv_impl
+                                               &ncclAlltoAllv_impl,
+                                               &ncclCommRevoke_impl
                                                // DO NOT REORDER, ADD NEW ITEMS HERE
                                              };
 
@@ -437,6 +442,8 @@ NCCL_API(ncclResult_t, ncclCommFinalize, ncclComm_t comm);
 NCCL_API(ncclResult_t, ncclCommDestroy, ncclComm_t comm);
 
 NCCL_API(ncclResult_t, ncclCommAbort, ncclComm_t comm);
+
+NCCL_API(ncclResult_t, ncclCommRevoke, ncclComm_t comm, int revokeFlags);
 
 NCCL_API(ncclResult_t, ncclCommShrink, ncclComm_t comm, int* excludeRanksList, int excludeRanksCount,
          ncclComm_t* newcomm, ncclConfig_t* config, int shrinkFlags);
@@ -675,6 +682,12 @@ ncclResult_t
 ncclCommAbort(ncclComm_t comm)
 {
     return ::rccl::RcclGetFunctionTable()->ncclCommAbort_fn(comm);
+}
+
+ncclResult_t
+ncclCommRevoke(ncclComm_t comm, int revokeFlags)
+{
+    return ::rccl::RcclGetFunctionTable()->ncclCommRevoke_fn(comm, revokeFlags);
 }
 
 ncclResult_t
