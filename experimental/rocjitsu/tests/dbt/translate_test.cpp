@@ -453,6 +453,37 @@ TEST(BinaryTranslatorE2E, NoGfx9WaitcntInOutput) {
   }
 }
 
+TEST(BinaryTranslatorE2E, LdsRoundtripLowersBarrierToRdna4SplitBarrier) {
+  Executable exec(kernel_path("lds_roundtrip"));
+  ASSERT_TRUE(exec.is_valid());
+  ASSERT_GT(exec.num_code_objects(ROCJITSU_CODE_TARGET_GFX950), 0u);
+
+  const auto *co = exec.code_object(ROCJITSU_CODE_TARGET_GFX950, 0);
+  ASSERT_NE(co, nullptr);
+
+  BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA4);
+  auto result = translator.translate(*co);
+  ASSERT_FALSE(result.elf_bytes.empty());
+
+  bool saw_barrier_signal = false;
+  bool saw_barrier_wait = false;
+  bool saw_cdna4_barrier = false;
+  rocjitsu::AmdGpuCodeObject translated_co(result.elf_bytes.data(), result.elf_bytes.size());
+  for (const auto *sec : translated_co.text_sections()) {
+    const auto *data = reinterpret_cast<const uint32_t *>(sec->data());
+    const size_t words = sec->size() / sizeof(uint32_t);
+    for (size_t pc = 0; pc < words; ++pc) {
+      saw_barrier_signal |= data[pc] == 0xBE804EC1u; // s_barrier_signal -1
+      saw_barrier_wait |= data[pc] == 0xBF94FFFFu;   // s_barrier_wait -1
+      saw_cdna4_barrier |= data[pc] == 0xBF8A0000u;  // CDNA4 s_barrier
+    }
+  }
+
+  EXPECT_TRUE(saw_barrier_signal);
+  EXPECT_TRUE(saw_barrier_wait);
+  EXPECT_FALSE(saw_cdna4_barrier);
+}
+
 TEST(BinaryTranslatorE2E, TextSizesMatch) {
   Executable exec(kernel_path("vector_add"));
   ASSERT_TRUE(exec.is_valid());

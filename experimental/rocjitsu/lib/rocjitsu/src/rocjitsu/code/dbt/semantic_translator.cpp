@@ -33,6 +33,14 @@ namespace {
   return std::bit_cast<uint32_t>(s);
 }
 
+[[nodiscard]] uint32_t make_gfx12_sop1(uint8_t op, uint8_t ssrc0) {
+  rdna4::Sop1MachineInst s{};
+  s.encoding = 0x17D;
+  s.op = op;
+  s.ssrc0 = ssrc0;
+  return std::bit_cast<uint32_t>(s);
+}
+
 constexpr uint8_t kOpWaitLoadcnt = 64;
 constexpr uint8_t kOpWaitStorecntDscnt = 73;
 constexpr uint8_t kOpWaitKmcnt = 71;
@@ -212,6 +220,8 @@ build_vop3(uint16_t op, uint8_t vdst, uint16_t src0, uint16_t src1 = 0, uint16_t
 
 constexpr uint8_t kSoppWaitIdle = 0x0A;
 constexpr uint8_t kOpWaitDscnt = 70;
+constexpr uint8_t kOpBarrierSignal = 78;
+constexpr uint8_t kOpBarrierWait = 20;
 
 // ---------------------------------------------------------------------------
 // RDNA4 operand encoding constants
@@ -359,6 +369,21 @@ std::vector<uint32_t> expand_waitcnt(const Instruction &inst, uint32_t, uint64_t
   return encode_waitcnt_gfx12(decode_waitcnt_gfx9(sopp.simm16));
 }
 
+std::vector<uint32_t> expand_s_barrier(const Instruction &inst, uint32_t, uint64_t,
+                                       const RegisterLiveness &, const LaneLayout *,
+                                       const LaneLayout *) {
+  if (std::string_view(inst.mnemonic()) != "s_barrier")
+    return {};
+
+  // CDNA4 has a single workgroup barrier instruction. RDNA4 split it into an
+  // arrival signal and a wait. Barrier id -1 is the architectural "normal"
+  // workgroup barrier used by LLVM when lowering a monolithic s_barrier.
+  constexpr uint8_t kInlineConstNeg1 = 193;
+  constexpr uint16_t kBarrierIdNeg1 = 0xFFFF;
+  return {make_gfx12_sop1(kOpBarrierSignal, kInlineConstNeg1),
+          make_gfx12_sopp(kOpBarrierWait, kBarrierIdNeg1)};
+}
+
 std::vector<uint32_t> expand_v_lshl_add_u64(const Instruction &inst, uint32_t, uint64_t,
                                             const LivenessAnalysis &, const LaneLayout *,
                                             const LaneLayout *) {
@@ -391,6 +416,7 @@ std::vector<uint32_t> expand_mfma_f32_16x16x16_f16(const Instruction &inst, uint
 // ---------------------------------------------------------------------------
 
 // CDNA4 opcodes (from decoder: opcode_ = inst_.op)
+constexpr uint16_t kCdna4Op_s_barrier = 10;
 constexpr uint16_t kCdna4Op_s_waitcnt = 12;
 constexpr uint16_t kCdna4Op_v_mfma_f32_16x16x16_f16 = 77;
 constexpr uint16_t kCdna4Op_v_accvgpr_read = 88;
@@ -398,6 +424,7 @@ constexpr uint16_t kCdna4Op_v_accvgpr_write = 89;
 constexpr uint16_t kCdna4Op_v_lshl_add_u64 = 520;
 
 const TranslationRule kExpandRules_cdna4_to_rdna4[] = {
+    {kCdna4Op_s_barrier, RuleAction::Expand, 0, 0, nullptr, expand_s_barrier, nullptr, nullptr},
     {kCdna4Op_s_waitcnt, RuleAction::Expand, 0, 0, nullptr, expand_waitcnt, nullptr, nullptr},
     {kCdna4Op_v_mfma_f32_16x16x16_f16, RuleAction::Expand, 0, 0, nullptr,
      expand_mfma_f32_16x16x16_f16, &kMfmaF32_16x16x16_F16_Cdna4, &kWmmaF32_16x16x16_F16_Rdna4},

@@ -259,6 +259,155 @@ TEST(HsaTranslateTest, TranslateAndDispatchVectorAdd) {
   hsa_shut_down();
 }
 
+TEST(HsaTranslateTest, TranslateAndDispatchLdsRoundtrip) {
+  Executable exec(kernel_path("lds_roundtrip"));
+  ASSERT_TRUE(exec.is_valid());
+  ASSERT_GT(exec.num_code_objects(ROCJITSU_CODE_TARGET_GFX950), 0u);
+  const auto *co = exec.code_object(ROCJITSU_CODE_TARGET_GFX950, 0);
+  ASSERT_NE(co, nullptr);
+
+  ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
+
+  hsa_agent_t gpu = find_gpu_agent();
+  ASSERT_NE(gpu.handle, 0u);
+
+  hsa_isa_t isa{};
+  hsa_agent_get_info(gpu, HSA_AGENT_INFO_ISA, &isa);
+  char isa_name[128] = {};
+  hsa_isa_get_info_alt(isa, HSA_ISA_INFO_NAME, isa_name);
+  ASSERT_TRUE(std::strstr(isa_name, "gfx1200") || std::strstr(isa_name, "gfx1201"))
+      << "Test requires RDNA4 GPU, found: " << isa_name;
+
+  const uint32_t target_mach = std::strstr(isa_name, "gfx1201") ? 0x4E : 0x48;
+  BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA4, target_mach);
+  auto result = translator.translate(*co);
+  ASSERT_FALSE(result.elf_bytes.empty());
+  ASSERT_TRUE(result.warnings.empty()) << "Translation warnings: " << result.warnings.front();
+
+  hsa_agent_t cpu = find_cpu_agent();
+
+  hsa_code_object_reader_t reader{};
+  auto st = hsa_code_object_reader_create_from_memory(result.elf_bytes.data(),
+                                                      result.elf_bytes.size(), &reader);
+  ASSERT_EQ(st, HSA_STATUS_SUCCESS);
+
+  hsa_executable_t executable{};
+  st = hsa_executable_create_alt(HSA_PROFILE_FULL, HSA_DEFAULT_FLOAT_ROUNDING_MODE_DEFAULT, nullptr,
+                                 &executable);
+  ASSERT_EQ(st, HSA_STATUS_SUCCESS);
+  st = hsa_executable_load_agent_code_object(executable, gpu, reader, nullptr, nullptr);
+  ASSERT_EQ(st, HSA_STATUS_SUCCESS);
+  st = hsa_executable_freeze(executable, nullptr);
+  ASSERT_EQ(st, HSA_STATUS_SUCCESS);
+
+  hsa_executable_symbol_t symbol{};
+  st = hsa_executable_get_symbol_by_name(executable, "lds_roundtrip.kd", &gpu, &symbol);
+  ASSERT_EQ(st, HSA_STATUS_SUCCESS);
+
+  uint64_t kernel_object = 0;
+  hsa_executable_symbol_get_info(symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_OBJECT, &kernel_object);
+  ASSERT_NE(kernel_object, 0u);
+
+  constexpr uint32_t N = 256;
+  constexpr size_t buf_size = N * sizeof(float);
+
+  auto gpu_pool = find_pool(gpu, HSA_AMD_SEGMENT_GLOBAL);
+  float *A_dev = nullptr, *C_dev = nullptr;
+  hsa_amd_memory_pool_allocate(gpu_pool, buf_size, 0, reinterpret_cast<void **>(&A_dev));
+  hsa_amd_memory_pool_allocate(gpu_pool, buf_size, 0, reinterpret_cast<void **>(&C_dev));
+  ASSERT_NE(A_dev, nullptr);
+  ASSERT_NE(C_dev, nullptr);
+
+  hsa_agent_t both[] = {cpu, gpu};
+  hsa_amd_agents_allow_access(2, both, nullptr, A_dev);
+  hsa_amd_agents_allow_access(2, both, nullptr, C_dev);
+
+  std::vector<float> A_host(N), C_zero(N, 0.0f), C_golden(N);
+  for (uint32_t i = 0; i < N; ++i)
+    A_host[i] = static_cast<float>(i) * 0.5f - 17.0f;
+  for (uint32_t i = 0; i < N; ++i)
+    C_golden[i] = (A_host[(i + 17) & 255] + 1.0f) + (A_host[i] + 1.0f);
+
+  ASSERT_EQ(hsa_memory_copy(A_dev, A_host.data(), buf_size), HSA_STATUS_SUCCESS);
+  ASSERT_EQ(hsa_memory_copy(C_dev, C_zero.data(), buf_size), HSA_STATUS_SUCCESS);
+
+  auto kernarg_pool = find_pool(cpu, HSA_AMD_SEGMENT_GLOBAL, true);
+  void *kernarg = nullptr;
+  hsa_amd_memory_pool_allocate(kernarg_pool, 16, 0, &kernarg);
+  ASSERT_NE(kernarg, nullptr);
+  hsa_amd_agents_allow_access(2, both, nullptr, kernarg);
+  std::memset(kernarg, 0, 16);
+
+  struct __attribute__((packed)) KernArgs {
+    const float *A;
+    float *C;
+  };
+  auto *args = static_cast<KernArgs *>(kernarg);
+  args->A = A_dev;
+  args->C = C_dev;
+
+  hsa_queue_t *queue = nullptr;
+  uint32_t queue_size = 0;
+  hsa_agent_get_info(gpu, HSA_AGENT_INFO_QUEUE_MAX_SIZE, &queue_size);
+  st = hsa_queue_create(gpu, queue_size, HSA_QUEUE_TYPE_SINGLE, nullptr, nullptr, UINT32_MAX,
+                        UINT32_MAX, &queue);
+  ASSERT_EQ(st, HSA_STATUS_SUCCESS);
+
+  hsa_signal_t signal{};
+  hsa_signal_create(1, 0, nullptr, &signal);
+
+  uint64_t write_idx = hsa_queue_add_write_index_relaxed(queue, 1);
+  auto *aql = static_cast<hsa_kernel_dispatch_packet_t *>(queue->base_address) +
+              (write_idx & (queue->size - 1));
+  std::memset(aql, 0, sizeof(*aql));
+  aql->setup = 1;
+  aql->workgroup_size_x = 256;
+  aql->workgroup_size_y = 1;
+  aql->workgroup_size_z = 1;
+  aql->grid_size_x = 256;
+  aql->grid_size_y = 1;
+  aql->grid_size_z = 1;
+  aql->group_segment_size = 1024;
+  aql->kernel_object = kernel_object;
+  aql->kernarg_address = kernarg;
+  aql->completion_signal = signal;
+
+  uint16_t header = HSA_PACKET_TYPE_KERNEL_DISPATCH << HSA_PACKET_HEADER_TYPE;
+  header |= 1 << HSA_PACKET_HEADER_BARRIER;
+  header |= HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_ACQUIRE_FENCE_SCOPE;
+  header |= HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_RELEASE_FENCE_SCOPE;
+  __atomic_store_n(reinterpret_cast<uint16_t *>(aql), header, __ATOMIC_RELEASE);
+  hsa_signal_store_relaxed(queue->doorbell_signal, write_idx);
+
+  hsa_signal_value_t val = hsa_signal_wait_scacquire(signal, HSA_SIGNAL_CONDITION_LT, 1,
+                                                     5'000'000'000ULL, HSA_WAIT_STATE_BLOCKED);
+  ASSERT_EQ(val, 0) << "Kernel dispatch timed out or failed";
+
+  std::vector<float> C_result(N);
+  ASSERT_EQ(hsa_memory_copy(C_result.data(), C_dev, buf_size), HSA_STATUS_SUCCESS);
+
+  int mismatches = 0;
+  for (uint32_t i = 0; i < N; ++i)
+    if (std::abs(C_result[i] - C_golden[i]) > 1e-5f)
+      ++mismatches;
+
+  if (mismatches > 0) {
+    std::fprintf(stderr, "\n=== LDS roundtrip: %d mismatches ===\n", mismatches);
+    for (uint32_t i = 0; i < 16; ++i)
+      std::fprintf(stderr, "  C[%u] got=% .8e expected=% .8e\n", i, C_result[i], C_golden[i]);
+  }
+  EXPECT_EQ(mismatches, 0) << mismatches << " element mismatches out of " << N;
+
+  hsa_signal_destroy(signal);
+  hsa_queue_destroy(queue);
+  hsa_amd_memory_pool_free(kernarg);
+  hsa_amd_memory_pool_free(A_dev);
+  hsa_amd_memory_pool_free(C_dev);
+  hsa_executable_destroy(executable);
+  hsa_code_object_reader_destroy(reader);
+  hsa_shut_down();
+}
+
 TEST(HsaTranslateTest, TranslateAndDispatchMfma16x16) {
   // 1. Translate CDNA4 matmul_mfma_16x16 → RDNA4.
   Executable exec(kernel_path("matmul_mfma_16x16"));

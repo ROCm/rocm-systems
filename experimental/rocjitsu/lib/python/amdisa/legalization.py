@@ -365,7 +365,10 @@ _WAITCNT_MODELS: dict[str, WaitcntModel] = {
     'rdna4': WaitcntModel.GFX12_SPLIT,
 }
 
-_SPLIT_BARRIER_ISAS = frozenset({'cdna4', 'rdna3', 'rdna3_5', 'rdna4'})
+# CDNA4/RDNA3/RDNA3.5 still use monolithic S_BARRIER. RDNA4 split the operation
+# into S_BARRIER_SIGNAL/S_BARRIER_WAIT, so older ISAs need barrier lowering when
+# targeting RDNA4.
+_SPLIT_BARRIER_ISAS = frozenset({'rdna4'})
 _SEPARATE_GLOBAL_ISAS = frozenset({
     'cdna3', 'cdna4', 'rdna1', 'rdna2', 'rdna3', 'rdna3_5', 'rdna4',
 })
