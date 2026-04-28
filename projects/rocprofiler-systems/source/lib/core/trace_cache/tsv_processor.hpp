@@ -211,10 +211,13 @@ private:
         auto open = [&](std::ofstream& ofs, const char* name) {
             ofs.open(m_output_dir + "/" + name);
         };
-        open(m_wall_ofs, "sampling_wall_clock.tsv");
-        open(m_cpu_ofs, "sampling_cpu_clock.tsv");
-        open(m_pct_ofs, "sampling_percent.tsv");
-        open(m_trip_ofs, "trip_count.tsv");
+        // Only open per-metric files that have data — avoids emitting empty
+        // header-only files for trigger types that were never enabled (e.g. W3
+        // overflow-only mode produces no wall_clock or cpu_clock samples).
+        if(!m_wall_agg.empty()) open(m_wall_ofs, "sampling_wall_clock.tsv");
+        if(!m_cpu_agg.empty()) open(m_cpu_ofs, "sampling_cpu_clock.tsv");
+        if(!m_pct_agg.empty()) open(m_pct_ofs, "sampling_percent.tsv");
+        if(!m_trip_agg.empty()) open(m_trip_ofs, "trip_count.tsv");
         if(m_wall_ofs.is_open()) m_wall_ptr = &m_wall_ofs;
         if(m_cpu_ofs.is_open()) m_cpu_ptr = &m_cpu_ofs;
         if(m_pct_ofs.is_open()) m_pct_ptr = &m_pct_ofs;
