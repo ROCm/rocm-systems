@@ -36,8 +36,6 @@ set(_sampling_test_sources
     unit/sample_parser_test.cpp
     unit/sampling_duration_controller_test.cpp
     unit/fatal_error_policy_test.cpp
-    # unit/native_report_writer_test.cpp — retired: tested old CSV stub; replaced by
-    # integration/native_report_writer_tsv_test.cpp for the new TSV interface (Phase H).
     unit/header_policy_test.cpp
     unit/pause_interval_registry_test.cpp
     unit/signal_set_test.cpp

@@ -40,8 +40,7 @@ BM_signal_handler_hot_path(benchmark::State& state)
         if(!pushed)
         {
             // Ring full — drain one entry (simulate the drop path).
-            backtrace_record dummy;
-            ring.try_pop(dummy);
+            (void) ring.pop();
             ring.try_push(rec);
         }
 
