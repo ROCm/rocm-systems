@@ -2,7 +2,7 @@
 // SPDX-License-Identifier:  MIT
 #pragma once
 #include "code_object_translator.h"
-#include "pc_samples_writer.h"
+#include "code_object_writer.h"
 
 #include <string>
 #include <unordered_map>
