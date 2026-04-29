@@ -46,18 +46,15 @@
 #define BOOTSTRAP_PID(i, n) (((i) + (n)) % (n))
 // returns the first rank associated to the root. must have root >=0
 // if root >= n_roots, it does NOT assume periodicity
-// offset shifts the rank-distribution window; ranks below offset have no root.
 static int firstRankFromRoot(int root, int n_ranks, int nRoots, int offset) {
   if (root == -1) return 0;
-  // only distribute the n_ranks - offset on the roots
   n_ranks -= offset;
   return offset + root * (n_ranks / nRoots) + std::min(root, n_ranks % nRoots);
 }
 // returns the root of a rank, must have rank >=0
 // if rank >= n_ranks, it does NOT assume periodicity
 static int rootIdFromRank(int rank, int nRanks, int nRoots, int offset) {
-  // ranks < offset have no root (id = -1); ranks above the offset get assigned to a root
-  if (nRoots == 0 || rank < offset) return -1;
+  if (nRoots == 0 || rank < offset) return -1; // ranks below offset use parent ring
   nRanks -= offset;
   rank   -= offset;
   int rmr = nRanks % nRoots; // rank mod root
@@ -80,7 +77,6 @@ static int nRankFromRoot(int root, int nRanks, int nRoots, int offset) {
 // return the local id of a given rank for a given root
 // root will be periodize, rank will not
 static int localIdFromRoot(int rank, int root, int nRanks, int nRoots, int offset) {
-  // any rank for root -1 has a local id that is the rank id
   if (root == -1) return rank;
   int ir = BOOTSTRAP_PID(root, nRoots);
   return rank - firstRankFromRoot(ir, nRanks, nRoots, offset);
@@ -316,8 +312,6 @@ static void* bootstrapRoot(void* rargs) {
       iroot = info.iroot;
       nroots = info.nroots;
       offset = info.offset;
-      // offset>0 (grow) automatically means we need the multiroot wrap-around: an
-      // extra info from the first local_id of the next root.
       n2send = nRankFromRoot(iroot, nranks, nroots, offset);
       nrecv = n2send + ((offset > 0 || nroots > 1) ? 1 : 0);
       NCCLCHECKGOTO(ncclCalloc(&rankInfo, nrecv), res, out);
@@ -437,14 +431,6 @@ ncclResult_t bootstrapGetUniqueId(struct ncclBootstrapHandle* handle) {
   return ncclSuccess;
 }
 
-// comm-aware overload used by ncclCommGetUniqueId for grow.
-//
-// Mirrors NCCL upstream: derives the handle magic deterministically from
-// (comm->magic, splitCount + 1) so that all existing ranks can independently
-// recompute it after they bump splitCount in ncclCommGrow. Opens a fresh
-// rendezvous socket so new ranks have somewhere to dial in. NCCL_COMM_ID
-// must NOT be set in this path — the rendezvous address is owned by RCCL,
-// not the user.
 ncclResult_t bootstrapGetUniqueId(struct ncclBootstrapHandle* handle, struct ncclComm* comm) {
   if (comm == NULL) return ncclInvalidArgument;
   memset(handle, 0, sizeof(ncclBootstrapHandle));
@@ -454,9 +440,7 @@ ncclResult_t bootstrapGetUniqueId(struct ncclBootstrapHandle* handle, struct ncc
     return ncclInvalidUsage;
   }
 
-  // splitCount is incremented in ncclCommGrow on all existing ranks; use +1
-  // here so the magic stamped now matches what existing ranks will derive
-  // post-increment. (NCCL uses childCount; RCCL uses splitCount — same role.)
+  // +1 anticipates the splitCount bump in ncclCommGrow_impl
   handle->magic = hashCombine(comm->magic, comm->splitCount + 1);
   handle->nRanks = comm->nRanks;
   memcpy(&handle->addr, &bootstrapNetIfAddr, sizeof(union ncclSocketAddress));
@@ -464,20 +448,11 @@ ncclResult_t bootstrapGetUniqueId(struct ncclBootstrapHandle* handle, struct ncc
   return ncclSuccess;
 }
 
-// Distribute the grow rendezvous handle from the calling rank (the "root" of
-// ncclCommGetUniqueId) to the boundary ranks of the parent comm (rank 0 and
-// rank N-1). Non-boundary existing ranks rendezvous via parent->bootstrap
-// inside bootstrapInit and never need the handle. This matches NCCL exactly.
-//
-// Peer wildcard: receivers use peer = -1 because the root rank can be any
-// rank (not just rank 0); socketAccept/unexpectedDequeue treat peer < 0 as
-// "any sender".
 ncclResult_t bcastGrowHandle(struct ncclBootstrapHandle* handle, struct ncclComm* parent, bool isRoot) {
   if (parent == NULL || handle == NULL) {
     WARN("bcastGrowHandle: parent and handle must be provided");
     return ncclInvalidArgument;
   }
-  // Single-rank parent: caller already has the handle locally.
   if (parent->nRanks == 1) return ncclSuccess;
 
   if (isRoot) {
@@ -486,8 +461,7 @@ ncclResult_t bcastGrowHandle(struct ncclBootstrapHandle* handle, struct ncclComm
     if (parent->rank != parent->nRanks - 1)
       NCCLCHECK(bootstrapSend(parent->bootstrap, parent->nRanks - 1, BOOTSTRAP_TAG_GROW_BOUNDARY, handle, sizeof(*handle)));
   } else if (parent->rank == 0 || parent->rank == parent->nRanks - 1) {
-    // Only boundary ranks receive — non-boundary existing ranks skip entirely.
-    NCCLCHECK(bootstrapRecv(parent->bootstrap, -1, BOOTSTRAP_TAG_GROW_BOUNDARY, handle, sizeof(*handle)));
+    NCCLCHECK(bootstrapRecv(parent->bootstrap, -1, BOOTSTRAP_TAG_GROW_BOUNDARY, handle, sizeof(*handle))); // peer=-1: wildcard (coordinator can be any rank)
   }
   return ncclSuccess;
 }
@@ -712,14 +686,10 @@ ncclResult_t bootstrapInit(int nHandles, void* handles, struct ncclComm* comm, s
   state->abortFlag = comm->abortFlag;
   state->net = comm->ncclNet;
   comm->bootstrap = state;
-  // Magic source: handles[0] for boundary/new ranks; for non-boundary existing
-  // ranks (handles==NULL) derive deterministically from parent so it matches
-  // what bootstrapGetUniqueId stamped pre-increment (splitCount was already
-  // bumped in ncclCommGrow_impl on every existing rank).
   if (handles != NULL) {
-    comm->magic = state->magic = BOOTSTRAP_HANDLE(handles, 0)->magic;
+    comm->magic = state->magic = BOOTSTRAP_HANDLE(handles, 0)->magic; // boundary + new ranks
   } else if (parent != NULL) {
-    comm->magic = state->magic = hashCombine(parent->magic, (uint64_t)parent->splitCount);
+    comm->magic = state->magic = hashCombine(parent->magic, (uint64_t)parent->splitCount); // non-boundary: derive same magic
   } else {
     WARN("bootstrapInit: handles and parent are both NULL");
     return ncclSystemError;
@@ -735,10 +705,7 @@ ncclResult_t bootstrapInit(int nHandles, void* handles, struct ncclComm* comm, s
   // fill up the info
   info.nranks = nranks;
   info.nroots = nHandles;
-  // For grow, the rendezvous root only sees the last existing rank and the
-  // new ranks; the rank distribution within the root is shifted by offset.
-  // Non-boundary existing ranks rendezvous via parent->bootstrap (no root).
-  int offset = 0;
+  int offset = 0; // ranks below offset skip root socket and use parent ring
   if (comm->isGrow) {
     if (parent != NULL) {
       offset = parent->nRanks - 1;
@@ -758,8 +725,6 @@ ncclResult_t bootstrapInit(int nHandles, void* handles, struct ncclComm* comm, s
     // create socket for ring neightbor to contact mee
     NCCLCHECK(createListenSocket(comm, comm->magic, &STATE_LISTEN(state, socket), &info.connectInfo.addr, ncclSocketTypeBootstrap));
   }
-  // Create socket for root to contact me using the root's magic.
-  // For grow non-boundary existing ranks, curr_root == -1: skip the root socket entirely.
   int curr_root = rootIdFromRank(rank, nranks, nHandles, offset);
   if (curr_root >= 0) {
     NCCLCHECK(createListenSocket(comm, BOOTSTRAP_HANDLE(handles, curr_root)->magic, &listenSockRoot, &info.listenRootAddress, ncclSocketTypeBootstrap));
@@ -791,34 +756,23 @@ ncclResult_t bootstrapInit(int nHandles, void* handles, struct ncclComm* comm, s
   if (curr_root >= 0) {
     NCCLCHECK(sendToRoot(BOOTSTRAP_HANDLE(handles, curr_root), comm, &info));
   }
-  // Grow: existing ranks 1..N-1 (in the new ring) hand their connect info to
-  // the previous existing rank via the parent ring. This is the parent-side
-  // half of the per-link handshake; the receiver picks it up below.
-  // Tag 0 matches NCCL; distinct from BOOTSTRAP_TAG_GROW_BOUNDARY which is
-  // used by bcastGrowHandle and runs to completion before bootstrapInit.
+  // Grow: hand connect info to left neighbor via parent ring
   if (parent != NULL && comm->isGrow && rank != 0) {
     NCCLCHECK(bootstrapSend(parent->bootstrap, rank - 1, 0,
                             &info.connectInfo, sizeof(info.connectInfo)));
   }
-  // if needed, send the connection info to the previous root.
-  // Grow with parent->nRanks > 1 is a special multiroot case; the new rank
-  // (the only one assigned to its root) must also notify the previous root
-  // (which owns the last existing rank) so the ring closes.
   if (((comm->isGrow && parent != NULL && parent->nRanks > 1) || nHandles > 1) &&
       isFirstFromRoot(rank, curr_root, nranks, nHandles, offset)) {
     int prev_rank = BOOTSTRAP_PID(rank - 1, nranks);
     int prev_root = rootIdFromRank(prev_rank, nranks, nHandles, offset);
     info.rank = prev_rank + 1; // my rank as seen by the previous root
     info.iroot = prev_root;
-    // Previous root may be -1 for an existing rank N-1: that handshake goes
-    // via the parent ring (bootstrapSend above) instead of the root socket.
     if (prev_root >= 0) {
       NCCLCHECK(sendToRoot(BOOTSTRAP_HANDLE(handles, prev_root), comm, &info));
     }
   }
   BOOTSTRAP_PROF_CLOSE(timers[BOOTSTRAP_INIT_TIME_SEND]);
 
-  // get info on my "next" rank in the bootstrap ring from root (if I have one)
   BOOTSTRAP_PROF_OPEN(timers[BOOTSTRAP_INIT_TIME_RECV]);
   if (curr_root >= 0) {
     NCCLCHECK(ncclSocketInit(&sock));
@@ -827,9 +781,7 @@ ncclResult_t bootstrapInit(int nHandles, void* handles, struct ncclComm* comm, s
     NCCLCHECK(ncclSocketClose(&sock));
     NCCLCHECK(ncclSocketClose(&listenSockRoot));
   }
-  // Grow: existing ranks 0..parent->nRanks-2 receive their next peer's
-  // connect info via the parent ring (overrides any root-derived nextPeer
-  // for ranks where both could fire — root only fires for boundary anyway).
+  // Grow: receive right neighbor's connect info via parent ring
   if (parent != NULL && comm->isGrow && rank != parent->nRanks - 1) {
     NCCLCHECK(bootstrapRecv(parent->bootstrap, rank + 1, 0,
                             &nextPeer, sizeof(nextPeer)));
@@ -1041,7 +993,6 @@ static ncclResult_t unexpectedDequeue(struct bootstrapState* state, int peer, in
   struct unexConn* prev = NULL;
   *found = 0;
   while (elem) {
-    // peer < 0 means wildcard (accept from any peer)
     if ((peer < 0 || elem->peer == peer) && elem->tag == tag) {
       if (prev == NULL) {
         state->unexpectedConnections = elem->next;
@@ -1087,7 +1038,6 @@ static ncclResult_t socketAccept(void* commState, int peer, int tag, struct nccl
     NCCLCHECKGOTO(ncclSocketInit(sock), ret, fail);
     NCCLCHECKGOTO(ncclSocketAccept(sock, &STATE_LISTEN(state, peerSocket)), ret, fail);
     NCCLCHECKGOTO(socketRecv(sock, &ack, sizeof(struct socketAckInfo)), ret, fail);
-    // tag must match exactly; peer < 0 means wildcard (any sender)
     if (ack.tag == tag && (peer < 0 || ack.rank == peer)) return ncclSuccess;
     NCCLCHECKGOTO(unexpectedEnqueue(state, ack.rank, ack.tag, sock), ret, fail);
   }
