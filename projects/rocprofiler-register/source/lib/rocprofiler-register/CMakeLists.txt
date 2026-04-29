@@ -6,7 +6,7 @@ add_library(rocprofiler-register::rocprofiler-register ALIAS rocprofiler-registe
 
 add_subdirectory(details)
 
-target_sources(rocprofiler-register PRIVATE rocprofiler_register.cpp correlation.cpp)
+target_sources(rocprofiler-register PRIVATE rocprofiler_register.cpp)
 
 if(ROCPROFILER_REGISTER_BUILD_TESTS)
     # make sure header is C-compatible
