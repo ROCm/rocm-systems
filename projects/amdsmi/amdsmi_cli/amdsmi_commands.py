@@ -176,6 +176,7 @@ class AMDSMICommands:
             version_args = argparse.Namespace()
             version_args.gpu_version = False
             version_args.cpu_version = False
+            version_args.nic_version = False
             self.version(version_args)
             sys.exit(-1)
 
