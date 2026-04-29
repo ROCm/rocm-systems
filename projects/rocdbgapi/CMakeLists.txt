@@ -76,27 +76,25 @@ include(CheckCXXSourceCompiles)
 string(TOUPPER "${PROJECT_NAME}" AMD_DBGAPI_NAME)
 string(REPLACE "-" "_" AMD_DBGAPI_NAME ${AMD_DBGAPI_NAME})
 
-string(TOUPPER "${CMAKE_BUILD_TYPE}" uppercase_CMAKE_BUILD_TYPE)
-
-option(THE_ROCK_BUILD "Satisfy TheRock's dependency on Threads" OFF)
-option(API_TRACING "Enable API tracing" ON)
-
-# Add an option to enable assertions even in non-debug builds.
-if(NOT uppercase_CMAKE_BUILD_TYPE STREQUAL "DEBUG")
-  option(ENABLE_ASSERTIONS "Enable assertions" OFF)
+# Set default for ENABLE_ASSERTIONS based on build type
+if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+  set(ENABLE_ASSERTIONS_DEFAULT ON)
 else()
-  option(ENABLE_ASSERTIONS "Enable assertions" ON)
+  set(ENABLE_ASSERTIONS_DEFAULT OFF)
 endif()
 
-# Allow building dbgapi as either a shared or static library,
-# depending on BUILD_SHARED_LIBS.
+# Configuration options
+option(THE_ROCK_BUILD "Satisfy TheRock's dependency on Threads" OFF)
+option(API_TRACING "Enable API tracing" ON)
+option(ENABLE_ASSERTIONS "Enable assertions" ${ENABLE_ASSERTIONS_DEFAULT})
+# Allow building dbgapi as either a shared or static library.
 # Note add_library internally checks BUILD_SHARED_LIBS, but CMake does
 # not define BUILD_SHARED_LIBS by default.  See
 # <https://cmake.org/cmake/help/latest/variable/BUILD_SHARED_LIBS.html>.
 option(BUILD_SHARED_LIBS "Build amd-dbgapi as a shared library" ON)
 
 if(ENABLE_ASSERTIONS)
-  if(NOT uppercase_CMAKE_BUILD_TYPE STREQUAL "DEBUG")
+  if(NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
     # Add -UNDEBUG to the CXXFLAGS (project is C++ only, no CFLAGS needed)
     add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-UNDEBUG>)
     # Remove -DNDEBUG from the CXXFLAGS
@@ -108,7 +106,7 @@ if(ENABLE_ASSERTIONS)
     endforeach()
   endif()
 else()
-  if(uppercase_CMAKE_BUILD_TYPE STREQUAL "DEBUG")
+  if(CMAKE_BUILD_TYPE STREQUAL "Debug")
     add_compile_definitions(NDEBUG)
   endif()
 endif()
