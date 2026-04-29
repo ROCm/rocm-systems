@@ -48,7 +48,11 @@ void code_object_writer_json_t::end_symbol()
     }));
 }
 
-void code_object_writer_json_t::write_instruction(const instruction_t& inst) {}
+void code_object_writer_json_t::write_instruction(const instruction_t& inst)
+{
+    Expects(m_code_object_closure_count != 0);
+    Expects(m_symbol_closure_count != 0);
+}
 
 std::string code_object_writer_json_t::get_result()
 {
