@@ -14,7 +14,7 @@ ncclResult_t  ncclMemAlloc_impl(void **ptr, size_t size) {
   NCCL_NVTX3_FUNC_RANGE;
   ncclResult_t ret = ncclSuccess;
 
-#if ROCM_VERSION >= 71200
+#if ROCM_VERSION >= 70000
   size_t memGran = 0;
   CUdevice currentDev;
   CUmemAllocationProp memprop = {};
@@ -39,7 +39,11 @@ ncclResult_t  ncclMemAlloc_impl(void **ptr, size_t size) {
     flag = 0;
     (void) CUPFN(cuDeviceGetAttribute(&flag, CU_DEVICE_ATTRIBUTE_HANDLE_TYPE_FABRIC_SUPPORTED, currentDev));
     if (flag) requestedHandleTypes |= CU_MEM_HANDLE_TYPE_FABRIC;
+#if defined(HIP_VMM_UNCACHED_MEMORY)
+    memprop.type = hipMemAllocationTypeUncached;
+#else
     memprop.type = CU_MEM_ALLOCATION_TYPE_PINNED;
+#endif
     memprop.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
     memprop.requestedHandleTypes = (CUmemAllocationHandleType) requestedHandleTypes;
     memprop.location.id = currentDev;
@@ -112,7 +116,7 @@ ncclResult_t  ncclMemFree_impl(void *ptr) {
   int saveDevice;
 
   CUDACHECK(cudaGetDevice(&saveDevice));
-#if ROCM_VERSION >= 71200
+#if ROCM_VERSION >= 70000
   CUdevice ptrDev = 0;
 
   if (ptr == NULL) goto fallback;

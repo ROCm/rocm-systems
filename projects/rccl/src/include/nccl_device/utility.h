@@ -7,9 +7,6 @@
 #ifndef _NCCL_DEVICE_UTILITY_H_
 #define _NCCL_DEVICE_UTILITY_H_
 
-#undef __CUDACC__
-#define __CUDACC__ 0
-
 #if __CUDACC__
   #define NCCL_DEVICE_INLINE __device__ __forceinline__
   #define NCCL_HOST_DEVICE_INLINE __host__ __device__ __forceinline__
@@ -31,7 +28,11 @@
 #include <stdbool.h>
 
 #if __CUDACC__
-// #include <cuda/atomic>
+#if __HIP_PLATFORM_AMD__
+#include <atomic>
+#else
+#include <cuda/atomic>
+#endif
 #endif
 
 #if __cplusplus
@@ -39,7 +40,7 @@ namespace nccl {
 namespace utility {
 
 template<typename T>
-T&& declval() noexcept {
+NCCL_HOST_DEVICE_INLINE T&& declval() noexcept {
   static_assert(sizeof(T)!=sizeof(T), "You can't evaluate declval.");
 }
 
@@ -219,25 +220,58 @@ NCCL_DEVICE_INLINE uint32_t idivRcp32_upto64(int x) {
 NCCL_DEVICE_INLINE void fenceAcquireGpu() {
   static __device__ int dummy;
   int tmp;
+#if __HIP_PLATFORM_AMD__
+  tmp = __atomic_load_n(&dummy, __ATOMIC_ACQUIRE);
+  __threadfence();
+#else
   asm volatile("ld.acquire.gpu.s32 %0,[%1];" : "=r"(tmp) : "l"(&dummy) : "memory");
+#endif
   dummy = tmp;
 }
 NCCL_DEVICE_INLINE void fenceReleaseGpu() {
+#if __HIP_PLATFORM_AMD__
+  __threadfence();
+#else
   cuda::atomic_thread_fence(cuda::memory_order_release, cuda::thread_scope_device);
+#endif
 }
 #endif
 
 #if __CUDACC__
-NCCL_DEVICE_INLINE cuda::memory_order acquireOrderOf(cuda::memory_order ord) {
+#if __HIP_PLATFORM_AMD__
+NCCL_HOST_DEVICE_INLINE constexpr std::memory_order acquireOrderOf(std::memory_order ord) {
+  return ord == std::memory_order_release ? std::memory_order_relaxed :
+         ord == std::memory_order_acq_rel ? std::memory_order_acquire :
+         ord;
+}
+
+NCCL_HOST_DEVICE_INLINE constexpr std::memory_order releaseOrderOf(std::memory_order ord) {
+  return ord == std::memory_order_acquire ? std::memory_order_relaxed :
+         ord == std::memory_order_acq_rel ? std::memory_order_release :
+         ord;
+}
+NCCL_HOST_DEVICE_INLINE constexpr int toAtomicBuiltinOrder(std::memory_order ord) {
+  switch (ord) {
+    case std::memory_order_relaxed: return __ATOMIC_RELAXED;
+    case std::memory_order_acquire: return __ATOMIC_ACQUIRE;
+    case std::memory_order_release: return __ATOMIC_RELEASE;
+    case std::memory_order_acq_rel: return __ATOMIC_ACQ_REL;
+    case std::memory_order_seq_cst: return __ATOMIC_SEQ_CST;
+    default: return __ATOMIC_SEQ_CST;
+  }
+}
+#else
+NCCL_HOST_DEVICE_INLINE constexpr cuda::memory_order acquireOrderOf(cuda::memory_order ord) {
   return ord == cuda::memory_order_release ? cuda::memory_order_relaxed :
          ord == cuda::memory_order_acq_rel ? cuda::memory_order_acquire :
          ord;
 }
-NCCL_DEVICE_INLINE cuda::memory_order releaseOrderOf(cuda::memory_order ord) {
+NCCL_HOST_DEVICE_INLINE constexpr cuda::memory_order releaseOrderOf(cuda::memory_order ord) {
   return ord == cuda::memory_order_acquire ? cuda::memory_order_relaxed :
          ord == cuda::memory_order_acq_rel ? cuda::memory_order_release :
          ord;
 }
+#endif
 #endif
 
 #if __CUDACC__

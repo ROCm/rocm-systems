@@ -1,24 +1,5 @@
-// MIT License
-//
-// Copyright (c) 2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 #include "core/trace_cache/cacheable.hpp"
@@ -44,7 +25,7 @@ enum class type_identifier_t : uint32_t
     memory_copy             = 0x0004,
     memory_alloc            = 0x0005,
     gpu_pmc_sample          = 0x0006,
-    cpu_freq_sample         = 0x0007,
+    cpu_pmc_sample          = 0x0007,
     backtrace_region_sample = 0x0008,
     scratch_memory          = 0x0009,
     ainic_pmc_sample        = 0x000A,
@@ -612,71 +593,6 @@ get_size(const pmc_event_with_sample& item)
         static_cast<uint64_t>(item.correlation_id), std::string_view(item.call_stack),
         std::string_view(item.line_info), item.device_id, item.device_type,
         std::string_view(item.pmc_info_name), item.value, item.system_tid);
-}
-
-struct cpu_freq_sample : cacheable_t
-{
-    static constexpr type_identifier_t type_identifier =
-        type_identifier_t::cpu_freq_sample;
-
-    cpu_freq_sample() = default;
-    cpu_freq_sample(size_t _timestamp, int64_t _page_rss, int64_t _virt_mem_usage,
-                    int64_t _peak_rss, int64_t _context_switch_count,
-                    int64_t _page_faults, int64_t _user_mode_time,
-                    int64_t _kernel_mode_time, std::vector<uint8_t> _freqs)
-    : timestamp(_timestamp)
-    , page_rss(_page_rss)
-    , virt_mem_usage(_virt_mem_usage)
-    , peak_rss(_peak_rss)
-    , context_switch_count(_context_switch_count)
-    , page_faults(_page_faults)
-    , user_mode_time(_user_mode_time)
-    , kernel_mode_time(_kernel_mode_time)
-    , freqs(std::move(_freqs))
-    {}
-
-    size_t               timestamp;
-    int64_t              page_rss;
-    int64_t              virt_mem_usage;
-    int64_t              peak_rss;
-    int64_t              context_switch_count;
-    int64_t              page_faults;
-    int64_t              user_mode_time;
-    int64_t              kernel_mode_time;
-    std::vector<uint8_t> freqs;
-};
-
-template <>
-inline void
-serialize(uint8_t* buffer, const cpu_freq_sample& item)
-{
-    utility::store_value(buffer, static_cast<uint64_t>(item.timestamp), item.page_rss,
-                         item.virt_mem_usage, item.peak_rss, item.context_switch_count,
-                         item.page_faults, item.user_mode_time, item.kernel_mode_time,
-                         item.freqs);
-}
-
-template <>
-inline cpu_freq_sample
-deserialize(uint8_t*& buffer)
-{
-    cpu_freq_sample item;
-    uint64_t        timestamp;
-    utility::parse_value(buffer, timestamp, item.page_rss, item.virt_mem_usage,
-                         item.peak_rss, item.context_switch_count, item.page_faults,
-                         item.user_mode_time, item.kernel_mode_time, item.freqs);
-    item.timestamp = timestamp;
-    return item;
-}
-
-template <>
-inline size_t
-get_size(const cpu_freq_sample& item)
-{
-    return utility::get_size(static_cast<uint64_t>(item.timestamp), item.page_rss,
-                             item.virt_mem_usage, item.peak_rss,
-                             item.context_switch_count, item.page_faults,
-                             item.user_mode_time, item.kernel_mode_time, item.freqs);
 }
 
 struct backtrace_region_sample : cacheable_t

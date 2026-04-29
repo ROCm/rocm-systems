@@ -1,30 +1,12 @@
-// MIT License
-//
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include <timemory/log/color.hpp>
 //
 //  above should always be included first
 //
 #include "api.hpp"
+#include "common/defines.h"
 #include "common/setup.hpp"
 #include "common/static_object.hpp"
 #include "core/agent.hpp"
@@ -35,7 +17,6 @@
 #include "core/config.hpp"
 #include "core/constraint.hpp"
 #include "core/cpu.hpp"
-#include "core/defines.hpp"
 #include "core/dynamic_library.hpp"
 #include "core/gpu.hpp"
 #include "core/locking.hpp"
@@ -56,7 +37,7 @@
 #include "library/components/mpi_gotcha.hpp"
 #include "library/components/numa_gotcha.hpp"
 #include "library/components/pthread_gotcha.hpp"
-#include "library/components/shmem_gotcha.hpp"
+#include "library/components/shmem_gotcha_policy.hpp"
 #include "library/components/ucx_gotcha.hpp"
 #include "library/components/vaapi_gotcha.hpp"
 #include "library/coverage.hpp"
@@ -270,7 +251,11 @@ struct fini_bundle
 {
     using data_type = std::tuple<Tp...>;
 
-    ROCPROFSYS_DEFAULT_OBJECT(fini_bundle)
+    fini_bundle()                                  = default;
+    fini_bundle(const fini_bundle&)                = default;
+    fini_bundle(fini_bundle&&) noexcept            = default;
+    fini_bundle& operator=(const fini_bundle&)     = default;
+    fini_bundle& operator=(fini_bundle&&) noexcept = default;
 
     fini_bundle(std::string_view _label)
     : m_label{ _label }
@@ -392,7 +377,8 @@ rocprofsys_preinit_cache()
     config::print_settings_json(_extdata_stream);
 
     trace_cache::get_metadata_registry().set_process(
-        { getpid(), getppid(), _command, "", escape_quotes(_extdata_stream.str()) });
+        { getpid(), getppid(), _command, "", escape_quotes(_extdata_stream.str()), 0,
+          0 });
 }
 
 void

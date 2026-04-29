@@ -22,21 +22,43 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-import itertools
 import sys
 import pytest
-import numpy as np
-import pandas as pd
 
 
-def test_validate_pc_sampling_exec_mask_manipulation_json(json_data):
+def test_validate_pc_sampling_roctx_pause_resume(json_data):
+    """
+    Minimal validation: verify that PC sampling still collects a non-trivial number of
+    v_mov_b32 samples (at least 100, comprising at least 30% of all samples) when
+    roctx pause/resume is used. This ensures that pause/resume does not silently
+    suppress or corrupt PC sampling data.
+    """
     data = json_data["rocprofiler-sdk-tool"]
-    # # validating JSON output
-    from rocprofiler_sdk.pc_sampling.exec_mask_manipulation.json import (
-        validate_json_exec_mask_manipulation,
-    )
 
-    validate_json_exec_mask_manipulation(data, pc_sampling_method="host_trap")
+    pc_sampling_key = "pc_sample_host_trap"
+    assert (
+        pc_sampling_key in data["buffer_records"]
+    ), f"No '{pc_sampling_key}' key found in buffer_records"
+
+    samples = data["buffer_records"][pc_sampling_key]
+    assert len(samples) > 0, "Expected at least one PC sampling record"
+
+    instructions = data["strings"]["pc_sample_instructions"]
+
+    v_mov_b32_count = 0
+    for sample in samples:
+        inst_index = sample["inst_index"]
+        if inst_index >= 0 and instructions[inst_index].startswith("v_mov_b32"):
+            v_mov_b32_count += 1
+
+    assert (
+        v_mov_b32_count >= 100
+    ), f"Expected at least 100 samples with v_mov_b32 instruction, got {v_mov_b32_count}"
+
+    v_mov_b32_ratio = v_mov_b32_count / len(samples)
+    assert (
+        v_mov_b32_ratio >= 0.30
+    ), f"Expected v_mov_b32 samples to be at least 30% of total, got {v_mov_b32_ratio:.2%}"
 
 
 if __name__ == "__main__":

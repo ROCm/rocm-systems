@@ -1,0 +1,15 @@
+# Copyright (c) 2026 Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
+[project]
+name = "rocjitsu-vllm"
+version = "0.1.0"
+description = "vLLM platform plugin for rocjitsu GPU simulator"
+requires-python = ">=3.10"
+
+[project.entry-points."vllm.platform_plugins"]
+rocjitsu = "rocjitsu_vllm.platform:rocjitsu_platform_plugin"
+
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"

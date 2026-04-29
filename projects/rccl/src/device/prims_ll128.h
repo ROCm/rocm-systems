@@ -140,7 +140,12 @@ private:
   }
   inline __device__ void postSend() {
     __atomic_signal_fence(__ATOMIC_SEQ_CST);
+#if defined(__gfx1250__)
+    // To be revisited for correctness and performance on gfx1250
+    asm volatile("s_wait_loadcnt 0x0\n\ts_wait_storecnt 0x0");
+#else
     asm volatile("s_waitcnt lgkmcnt(0) vmcnt(0)");
+#endif
     __atomic_signal_fence(__ATOMIC_SEQ_CST);
 
     if (sendConnTailPtr) {
