@@ -155,6 +155,78 @@ function(generate_build_info OUTPUT_VAR)
   set(${OUTPUT_VAR} ${build_info} PARENT_SCOPE)
 endfunction()
 
+# Configure libbacktrace support for the target
+# Tries find_package first (for TheRock builds), then compiler fallback
+function(configure_libbacktrace TARGET_NAME)
+  # First try find_package, as this is the preferred method when rocdbgapi is
+  # built within TheRock build platform.
+  find_package(libbacktrace CONFIG)
+
+  if(libbacktrace_FOUND)
+    # Fetch the include directory for libbacktrace.
+    get_property(LIBBACKTRACE_INCLUDE_DIR TARGET libbacktrace::libbacktrace PROPERTY INTERFACE_INCLUDE_DIRECTORIES)
+
+    # Enable libbacktrace in the sources.
+    target_compile_definitions(${TARGET_NAME} PRIVATE HAVE_BACKTRACE)
+
+    # Set up including the header in the compilation and linking against libbacktrace.
+    target_include_directories(${TARGET_NAME} PRIVATE ${LIBBACKTRACE_INCLUDE_DIR})
+    target_link_libraries(${TARGET_NAME} PRIVATE libbacktrace::libbacktrace)
+    return()
+  endif()
+
+  # If find_package didn't work, try compiler fallback (not on MSVC)
+  message(STATUS "[libbacktrace check] Could not find libbacktrace through find_package.")
+  if(NOT MSVC)
+    message(STATUS "[libbacktrace check] Trying compiler fallback.")
+
+    message(STATUS "[libbacktrace check] Executing command: ${CMAKE_CXX_COMPILER} ${CMAKE_CXX_FLAGS} --print-file-name libbacktrace.a")
+
+    # See if the compiler knows where libbacktrace.a is. It is worth mentioning
+    # that both gcc and llvm have the same behavior when --print-file-name is
+    # used but the compiler cannot locate the file anywhere. They output the
+    # filename passed as argument to --print-file-name unchanged.
+    #
+    # This makes it so the libbacktrace_check below will always pass. Though
+    # incorrect, this is somewhat harmless as we will call find_path and
+    # find_library later and we could end up finding includes and library
+    # depending on the system environment variables.
+    execute_process(
+      COMMAND ${CMAKE_CXX_COMPILER} ${CMAKE_CXX_FLAGS} --print-file-name libbacktrace.a
+      RESULT_VARIABLE libbacktrace_check
+      OUTPUT_VARIABLE libbacktrace_path
+      OUTPUT_STRIP_TRAILING_WHITESPACE
+    )
+    message(STATUS "[libbacktrace check] Command output: ${libbacktrace_path}")
+  else()
+    set(libbacktrace_check 1)
+  endif()
+
+  if(${libbacktrace_check} EQUAL 0)
+    cmake_path(GET libbacktrace_path PARENT_PATH BACKTRACE_PREFIX)
+    message(STATUS "[libbacktrace check] libbacktrace.a found at ${libbacktrace_path}")
+
+    find_path(BACKTRACE_INCLUDE_DIR backtrace-supported.h PATHS ${BACKTRACE_PREFIX}/include)
+    message(STATUS "[libbacktrace check] Looking for backtrace-supported.h in ${BACKTRACE_INCLUDE_DIR}")
+
+    if(BACKTRACE_INCLUDE_DIR)
+      find_library(BACKTRACE_LIB "backtrace" PATHS ${BACKTRACE_PREFIX})
+    endif()
+
+    if(BACKTRACE_LIB)
+      message(STATUS "[libbacktrace check] Library found at ${BACKTRACE_LIB}")
+
+      # Enable libbacktrace in the sources.
+      target_compile_definitions(${TARGET_NAME} PRIVATE HAVE_BACKTRACE)
+      # Set up including the header in the compilation and linking against libbacktrace.
+      target_include_directories(${TARGET_NAME} PRIVATE ${BACKTRACE_INCLUDE_DIR})
+      target_link_libraries(${TARGET_NAME} PRIVATE ${BACKTRACE_LIB})
+    endif()
+  else()
+    message(STATUS "[libbacktrace check] libbacktrace.a not found. Skipping.")
+  endif()
+endfunction()
+
 # =============================================================================
 # End Helper Functions
 # =============================================================================
@@ -271,80 +343,8 @@ if (MINGW)
   target_link_options(amd-dbgapi PRIVATE -static-libgcc -static-libstdc++)
 endif()
 
-# We use libbacktrace when it is available, so look for it.
-#
-# First try find_package, as this is the preferred method when rocdbgapi is
-# built within TheRock build platform.
-#
-# If that does not work, then fallback to using the compiler to tell us
-# where libbacktrace.a is.
-#
-# If both methods fail, then build without libbacktrace.
-find_package(libbacktrace CONFIG)
-
-if(libbacktrace_FOUND)
-  # Fetch the include directory for libbacktrace.
-  get_property(LIBBACKTRACE_INCLUDE_DIR TARGET libbacktrace::libbacktrace PROPERTY INTERFACE_INCLUDE_DIRECTORIES)
-
-  # Enable libbacktrace in the sources.
-  target_compile_definitions(amd-dbgapi PRIVATE HAVE_BACKTRACE)
-
-  # Set up including the header in the compilation and linking against
-  # libbacktrace.
-  target_include_directories(amd-dbgapi PRIVATE ${LIBBACKTRACE_INCLUDE_DIR})
-  target_link_libraries(amd-dbgapi PRIVATE libbacktrace::libbacktrace)
-else()
-  message(STATUS "[libbacktrace check] Could not find libbacktrace through find_package.")
-  if(NOT MSVC)
-    message(STATUS "[libbacktrace check] Trying compiler fallback.")
-
-    message(STATUS "[libbacktrace check] Executing command: ${CMAKE_CXX_COMPILER} ${CMAKE_CXX_FLAGS} --print-file-name libbacktrace.a")
-
-    # See if the compiler knows where libbacktrace.a is. It is worth mentioning
-    # that both gcc and llvm have the same behavior when --print-file-name is
-    # used but the compiler cannot locate the file anywhere. They output the
-    # filename passed as argument to --print-file-name unchanged.
-    #
-    # This makes it so the libbacktrace_check below will always pass. Though
-    # incorrect, this is somewhat harmless as we will call find_path and
-    # find_library later and we could end up finding includes and library
-    # depending on the system environment variables.
-    execute_process(
-      COMMAND ${CMAKE_CXX_COMPILER} ${CMAKE_CXX_FLAGS} --print-file-name libbacktrace.a
-      RESULT_VARIABLE libbacktrace_check
-      OUTPUT_VARIABLE libbacktrace_path
-      OUTPUT_STRIP_TRAILING_WHITESPACE
-    )
-    message(STATUS "[libbacktrace check] Command output: ${libbacktrace_path}")
-  else()
-    set(libbacktrace_check 1)
-  endif()
-
-  if(${libbacktrace_check} EQUAL 0)
-    cmake_path(GET libbacktrace_path PARENT_PATH BACKTRACE_PREFIX)
-    message(STATUS "[libbacktrace check] libbacktrace.a found at ${libbacktrace_path}")
-
-    find_path(BACKTRACE_INCLUDE_DIR backtrace-supported.h PATHS ${BACKTRACE_PREFIX}/include)
-    message(STATUS "[libbacktrace check] Looking for backtrace-supported.h in ${BACKTRACE_INCLUDE_DIR}")
-
-    if(BACKTRACE_INCLUDE_DIR)
-      find_library(BACKTRACE_LIB "backtrace" PATHS ${BACKTRACE_PREFIX})
-    endif()
-
-    if(BACKTRACE_LIB)
-      message(STATUS "[libbacktrace check] Library found at ${BACKTRACE_LIB}")
-
-      # Enable libbacktrace in the sources.
-      target_compile_definitions(amd-dbgapi PRIVATE HAVE_BACKTRACE)
-      # Set up including the header in the compilation and linking against
-      # libbacktrace.
-      target_include_directories(amd-dbgapi PRIVATE ${BACKTRACE_INCLUDE_DIR})
-      target_link_libraries(amd-dbgapi PRIVATE ${BACKTRACE_LIB})
-    endif()
-  else()
-    message(STATUS "[libbacktrace check] libbacktrace.a not found. Skipping.")
-  endif()
-endif()
+# Configure libbacktrace support (optional dependency)
+configure_libbacktrace(amd-dbgapi)
 
 if(API_TRACING)
   target_compile_definitions(amd-dbgapi PRIVATE WITH_API_TRACING)
