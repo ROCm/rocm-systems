@@ -7,7 +7,7 @@
 // production wiring hooks. These replace the ROCPROFSYS_INTERNAL_BUILD guards
 // that formerly lived in sampling/src/sampling_service_impl.hpp.
 //
-// Included from library/sampling_production_policies.hpp — never from the
+// Included from sampling/default_policies.hpp — never from the
 // sampling/ subtree. Requires main-lib headers (core/config.hpp, core/perf.hpp,
 // core/state.hpp, library/thread_info.hpp, linux/perf_event.h).
 

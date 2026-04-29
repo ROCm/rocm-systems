@@ -22,7 +22,7 @@
 #include <gtest/gtest.h>
 
 #include "core/config.hpp"
-#include "sampling_production_policies.hpp"
+#include "sampling/default_policies.hpp"
 
 #include "sampling/data/overflow_sample.hpp"
 #include "sampling/data/timer_sample.hpp"

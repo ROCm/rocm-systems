@@ -7,7 +7,7 @@
 // Wraps rocprofsys::perf::perf_event (library/perf.hpp) to deliver a signal
 // when a hardware counter overflows.
 //
-// Production-only: lives in library/sampling_production_policies/ and is
+// Production-only: lives in sampling/policies/ and is
 // never included by standalone test binaries. No ROCPROFSYS_INTERNAL_BUILD
 // guards needed here.
 

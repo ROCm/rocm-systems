@@ -8,12 +8,12 @@
 // Also owns the thread-local signal-handler state pointers and the
 // rocprofsys_sampling_signal_handler free function (ODR: exactly one definition).
 //
-// Lives in library/ so it can include library/sampling_production_policies.hpp which
+// Lives in library/ so it can include sampling/default_policies.hpp which
 // depends on main-library symbols (perf.hpp, tracing.hpp, trace_cache).
 // Must NOT be compiled into standalone test binaries.
 
 #if defined(__linux__)
-#    include "library/sampling_production_policies.hpp"
+#    include "sampling/default_policies.hpp"
 #endif
 
 #include "sampling/sampling_service.hpp"

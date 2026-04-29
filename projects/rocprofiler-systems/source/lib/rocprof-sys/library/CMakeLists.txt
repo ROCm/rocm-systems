@@ -22,7 +22,7 @@ set(library_headers
     ${CMAKE_CURRENT_LIST_DIR}/rocm.hpp
     ${CMAKE_CURRENT_LIST_DIR}/rocprofiler-sdk.hpp
     ${CMAKE_CURRENT_LIST_DIR}/runtime.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/sampling_production_policies.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/sampling/default_policies.hpp
     ${CMAKE_CURRENT_LIST_DIR}/thread_data.hpp
     ${CMAKE_CURRENT_LIST_DIR}/thread_deleter.hpp
     ${CMAKE_CURRENT_LIST_DIR}/thread_info.hpp

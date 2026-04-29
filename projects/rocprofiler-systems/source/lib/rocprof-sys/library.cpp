@@ -47,11 +47,11 @@
 #include "library/rocprofiler-sdk/roctx_client.hpp"
 #include "library/rocprofiler-sdk/trace_control.hpp"
 #include "library/runtime.hpp"
-#include "library/sampling_production_policies.hpp"
 #include "library/thread_data.hpp"
 #include "library/thread_info.hpp"
 #include "library/tracing.hpp"
 #include "rocprofiler-systems/categories.h"  // in rocprof-sys-user
+#include "sampling/default_policies.hpp"
 #include "sampling/sampling_service.hpp"
 
 #include <timemory/hash/types.hpp>

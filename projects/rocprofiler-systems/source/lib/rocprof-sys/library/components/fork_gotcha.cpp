@@ -10,7 +10,7 @@
 #include "core/utility.hpp"
 #include "library/components/fork_gotcha.hpp"
 #include "library/runtime.hpp"
-#include "library/sampling_production_policies.hpp"
+#include "sampling/default_policies.hpp"
 #include "sampling/sampling_service.hpp"
 
 #include <timemory/backends/process.hpp>

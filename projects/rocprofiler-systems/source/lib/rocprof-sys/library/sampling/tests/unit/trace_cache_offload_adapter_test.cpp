@@ -15,8 +15,8 @@
 
 // The adapter is in its own lightweight header so it is testable without
 // libunwind / AMD-SMI / thread_info dependencies.
-#include "library/sampling_production_policies/trace_cache_offload_adapter.hpp"
 #include "sampling/data/backtrace_record.hpp"
+#include "sampling/policies/trace_cache_offload_adapter.hpp"
 #include "sampling/src/sample_ring_buffer.hpp"
 
 using namespace rocprofsys::sampling;

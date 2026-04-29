@@ -82,7 +82,7 @@ endif()
 # Fails if any banned token appears outside an explicit ASYNC-SAFE-EXEMPT annotation.
 # This is a static-analysis regression net — not a runtime test.
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    set(_handler_tu "${CMAKE_CURRENT_SOURCE_DIR}/../sampling_production_policies.hpp")
+    set(_handler_tu "${CMAKE_CURRENT_SOURCE_DIR}/../default_policies.hpp")
 
     # Tokens banned inside the signal handler (not async-signal-safe).
     # Each must be on a line that does NOT also contain ASYNC-SAFE-EXEMPT.

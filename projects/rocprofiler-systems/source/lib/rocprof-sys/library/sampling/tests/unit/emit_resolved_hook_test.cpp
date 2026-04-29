@@ -15,8 +15,8 @@
 
 #include "doubles/in_memory_emitter.hpp"
 #include "doubles/test_sampling_policies.hpp"
-#include "library/sampling_production_policies/trace_cache_offload_adapter.hpp"
 #include "sampling/data/backtrace_record.hpp"
+#include "sampling/policies/trace_cache_offload_adapter.hpp"
 #include "sampling/sampling_service.hpp"
 #include "sampling/src/sample_ring_buffer.hpp"
 

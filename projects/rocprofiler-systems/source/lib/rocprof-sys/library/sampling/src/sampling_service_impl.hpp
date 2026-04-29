@@ -255,7 +255,7 @@ sampling_service<Policies>::setup(int64_t tid)
     // Production wiring: TLS pointer setup, timer arming, overflow trigger config.
     // No-op in the generic template; explicit specialization for
     // default_sampling_policies does the real work (requires main-lib headers; defined in
-    // library/sampling_production_policies/sampling_service_production_hooks.hpp).
+    // sampling/policies/sampling_service_production_hooks.hpp).
     setup_production_wiring(tid, state, sigs);
 
     // Block signals on the calling thread before the trigger is armed.
@@ -309,7 +309,7 @@ sampling_service<Policies>::shutdown(int64_t tid)
     // state destruction is a no-op. No-op in generic template; explicit
     // specialization for default_sampling_policies clears the typed
     // tl_state<default_sampling_policies>::sampler/offload/logical_tid (in
-    // library/sampling_production_policies/sampling_service_production_hooks.hpp).
+    // sampling/policies/sampling_service_production_hooks.hpp).
     shutdown_production_wiring(tid);
 
     // Destroy the per-thread state for this tid.
@@ -382,8 +382,8 @@ sampling_service<Policies>::postfork_production_child_cleanup()
 // ── Production wiring hooks — generic (no-op) definitions ─────────────────
 // These are called from setup() and shutdown(). The generic template does nothing;
 // explicit full specializations for default_sampling_policies live in
-// library/sampling_production_policies/sampling_service_production_hooks.hpp
-// and are included from library/sampling_production_policies.hpp.
+// sampling/policies/sampling_service_production_hooks.hpp
+// and are included from sampling/default_policies.hpp.
 
 template <class Policies>
 bool

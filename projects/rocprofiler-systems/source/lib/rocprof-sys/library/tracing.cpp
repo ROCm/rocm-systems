@@ -6,9 +6,9 @@
 #include "core/config.hpp"
 #include "core/state.hpp"
 #include "core/utility.hpp"
-#include "library/sampling_production_policies.hpp"
 #include "library/thread_data.hpp"
 #include "library/thread_info.hpp"
+#include "sampling/default_policies.hpp"
 #include "sampling/sampling_service.hpp"
 
 #include <timemory/hash/types.hpp>

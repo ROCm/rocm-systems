@@ -7,7 +7,7 @@
 // Uses timer_create(SIGEV_THREAD_ID) + timer_settime to deliver SIGRTMIN+N
 // to a specific thread.
 //
-// Production-only: lives in library/sampling_production_policies/ and is
+// Production-only: lives in sampling/policies/ and is
 // never included by standalone test binaries. No ROCPROFSYS_INTERNAL_BUILD
 // guards needed here.
 

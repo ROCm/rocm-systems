@@ -7,7 +7,7 @@
 #
 # Layering rule: this library has ZERO dependencies on main rocprof-sys library
 # symbols (perf.hpp, tracing.hpp, trace_cache, timemory). Those deps live in
-# library/sampling_production_policies.hpp and library/services_accessor.cpp.
+# library/sampling/default_policies.hpp and library/services_accessor.cpp.
 
 cmake_minimum_required(VERSION 3.21)
 

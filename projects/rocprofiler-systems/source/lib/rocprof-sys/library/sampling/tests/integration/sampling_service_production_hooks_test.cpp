@@ -19,13 +19,13 @@
 #include <gtest/gtest.h>
 
 #include "core/config.hpp"
-// sampling_production_policies.hpp provides ALL 10 policy types as complete definitions.
+// sampling/default_policies.hpp provides ALL 10 policy types as complete definitions.
 // Required because sampling_service_production_hooks.hpp instantiates the full
 // sampling_service<default_sampling_policies> specialization which needs every policy
 // type.
+#include "sampling/default_policies.hpp"
+#include "sampling/policies/sampling_service_production_hooks.hpp"
 #include "sampling/sampling_service.hpp"
-#include "sampling_production_policies.hpp"
-#include "sampling_production_policies/sampling_service_production_hooks.hpp"
 
 #include <cstdint>
 

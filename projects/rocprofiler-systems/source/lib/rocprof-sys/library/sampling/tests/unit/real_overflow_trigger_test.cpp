@@ -14,7 +14,7 @@
 
 #include <gtest/gtest.h>
 
-#include "library/sampling_production_policies/real_overflow_trigger.hpp"
+#include "sampling/policies/real_overflow_trigger.hpp"
 
 using namespace rocprofsys::sampling;
 

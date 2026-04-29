@@ -9,10 +9,10 @@
 #include "library/causal/delay.hpp"
 #include "library/components/category_region.hpp"
 #include "library/runtime.hpp"
-#include "library/sampling_production_policies.hpp"
 #include "library/thread_data.hpp"
 #include "library/thread_info.hpp"
 #include "library/tracing.hpp"
+#include "sampling/default_policies.hpp"
 #include "sampling/sampling_service.hpp"
 
 #include <timemory/backends/threading.hpp>

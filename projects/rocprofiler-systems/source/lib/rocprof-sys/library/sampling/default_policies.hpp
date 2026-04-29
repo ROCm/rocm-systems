@@ -21,12 +21,12 @@
 #include "sampling/src/linux/steady_clock.hpp"
 
 // ── Production-only trigger policies (not test-accessible) ───────────────────
-#include "library/sampling_production_policies/real_overflow_trigger.hpp"
-#include "library/sampling_production_policies/real_timer_trigger.hpp"
+#include "sampling/policies/real_overflow_trigger.hpp"
+#include "sampling/policies/real_timer_trigger.hpp"
 
 // ── EmitterPolicy (production) ───────────────────────────────────────────────
 // Lightweight header — no libunwind / AMD-SMI deps; also included by test TUs.
-#include "library/sampling_production_policies/trace_cache_offload_adapter.hpp"
+#include "sampling/policies/trace_cache_offload_adapter.hpp"
 
 // ── TSV report writer (no main-lib deps; test-accessible) ────────────────────
 #include "sampling/src/native_report_writer.hpp"
@@ -59,4 +59,4 @@ rocprofsys_sampling_signal_handler(int, siginfo_t*, void*);
 // sampling_service<default_sampling_policies>. Must be included after
 // sampling_service.hpp (which pulls in sampling_service_impl.hpp with the
 // generic no-op definitions) so the specializations are visible in this TU.
-#include "library/sampling_production_policies/sampling_service_production_hooks.hpp"
+#include "sampling/policies/sampling_service_production_hooks.hpp"
