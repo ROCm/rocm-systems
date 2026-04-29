@@ -3966,12 +3966,18 @@ void callbackQueue(hsa_status_t status, hsa_queue_t* queue, void* data) {
               errorMsg, status);
     }
 
-    // Core dumps generally provide limited value for OOM, so do not let
-    // DumpCoreFile() be the reason to abort in that case. OOM should still
-    // honor HIP_SKIP_ABORT_ON_GPU_ERROR consistently.
+    // Core dumps generally provide limited value for OOM or register overflow,
+    // so do not let DumpCoreFile() be the reason to abort in those cases. These
+    // errors should still honor HIP_SKIP_ABORT_ON_GPU_ERROR consistently.
     const bool is_oom = (status == HSA_STATUS_ERROR_OUT_OF_RESOURCES);
+    // EC_QUEUE_PACKET_DISPATCH_REGISTER_SIZE_INVALID is reported as
+    // HSA_STATUS_ERROR_INVALID_ISA. This is a deterministic dispatch-time
+    // failure (kernel exceeds hardware register limits), not a corruption
+    // or ISA mismatch. Treat it as recoverable: propagate to the caller as
+    // hipErrorLaunchFailure rather than aborting.
+    const bool is_register_overflow = (status == HSA_STATUS_ERROR_INVALID_ISA);
     const bool should_abort =
-      is_oom
+      (is_oom || is_register_overflow)
         ? !HIP_SKIP_ABORT_ON_GPU_ERROR
         : (amd::Os::DumpCoreFile() || !HIP_SKIP_ABORT_ON_GPU_ERROR);
 
