@@ -5,7 +5,9 @@ Agents call lookup_peaks(gfx_id) instead of embedding specs in prompts.
 
 Tool class: READ_ONLY (MCP-safe).
 
-See design spec Appendix A; knowledge/gpu_specs.yaml is the source of truth.
+Runtime-discovered local GPUs are preferred when available. The static
+knowledge table remains the offline fallback for non-local architectures and
+for fields ROCm tools do not expose on a given stack.
 """
 
 from __future__ import annotations
@@ -39,6 +41,48 @@ def _ridge_point_from_specs(specs: Dict[str, Any], dtype: str = "fp32") -> float
     if bandwidth_tbs <= 0:
         return float(specs.get("ridge_point") or 0.0)
     return round(peak_tflops / bandwidth_tbs, 1)
+
+
+def _runtime_specs_for_gfx(gfx_id: str) -> Dict[str, Any]:
+    from perfxpert.tools.gpu_discovery import runtime_specs_for_gfx
+
+    return runtime_specs_for_gfx(gfx_id) or {}
+
+
+def _merge_static_and_runtime_specs(
+    static_specs: Dict[str, Any],
+    runtime_specs: Dict[str, Any],
+) -> Dict[str, Any]:
+    result = dict(static_specs)
+    static_keys = set(result.keys())
+    spec_sources = {key: "gpu_specs.yaml" for key in result}
+
+    for key, value in runtime_specs.items():
+        if key == "spec_sources":
+            continue
+        if value is None or value == "":
+            continue
+        source = runtime_specs.get("spec_sources", {}).get(key, "runtime")
+        if (
+            key in result
+            and source.startswith("derived-from-")
+            and (
+                key.startswith("peak_")
+                or key in {"peak_int8_tops", "memory_bandwidth_tbs"}
+            )
+        ):
+            continue
+        result[key] = value
+        spec_sources[key] = source
+
+    if runtime_specs:
+        result["runtime_discovered"] = True
+        result["static_fallback_keys"] = sorted(static_keys - set(runtime_specs.keys()))
+    else:
+        result["runtime_discovered"] = False
+        result["static_fallback_keys"] = []
+    result["spec_sources"] = spec_sources
+    return result
 
 
 def lookup_ridge_point(gfx_id: str, dtype: str = "fp32") -> float:
@@ -88,11 +132,12 @@ def lookup_peaks(gfx_id: str) -> Dict[str, Any]:
         81.7
     """
     specs = _gpu_specs()
-    if gfx_id not in specs:
+    runtime_specs = _runtime_specs_for_gfx(gfx_id)
+    if gfx_id not in specs and not runtime_specs:
         known = ", ".join(sorted(specs.keys()))
         raise KeyError(f"Unknown gfx_id {gfx_id!r}; known archs: {known}")
 
-    result = dict(specs[gfx_id])
+    result = _merge_static_and_runtime_specs(specs.get(gfx_id, {}), runtime_specs)
     result["ridge_point"] = _ridge_point_from_specs(result, dtype="fp32")
     result["ridge_points"] = {
         dtype: _ridge_point_from_specs(result, dtype=dtype)

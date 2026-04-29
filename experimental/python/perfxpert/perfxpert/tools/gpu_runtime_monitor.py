@@ -16,10 +16,10 @@
 
 """gpu_runtime_monitor — parse pre-captured amd-smi / rocm-smi JSON logs.
 
-We do NOT shell out to ``amd-smi`` / ``rocm-smi`` at analyze time: users
-capture the JSON in advance (``amd-smi monitor --json > log.json``) and
-we ingest it offline. Eliminates the need for sudo, live sampling, and
-host-side privilege escalation inside analyze.
+This module does not shell out to ``amd-smi`` / ``rocm-smi`` for live
+monitoring logs: users capture the JSON in advance
+(``amd-smi monitor --json > log.json``) and we ingest it offline. Runtime
+hardware-spec discovery is handled separately by ``gpu_discovery``.
 
 Users can either pass the log path directly to the parsers or set
 ``PERFXPERT_GPU_MONITOR_LOG=<path>`` to let other modules auto-pick it up.
