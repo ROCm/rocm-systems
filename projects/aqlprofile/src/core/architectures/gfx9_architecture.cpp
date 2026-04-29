@@ -21,8 +21,10 @@
 // THE SOFTWARE.
 
 #include "core/architectures/gfx9_architecture.hpp"
-#include "gfxip/gfx9/gfx9_block_table.h"
-#include "gfxip/gfx9/gfx9_primitives.h"
+#include "core/factory_block_tables.h"
+// gfx9_def.h provides packet macros and block info structs.
+// It must be included before gfx9_cmd_builder.h.
+#include "def/gfx9_def.h"
 #include "pm4/gfx9_cmd_builder.h"
 
 namespace aql_profile {
@@ -84,11 +86,8 @@ void Gfx9Architecture::InitializeRegisterSchema() {
 }
 
 void Gfx9Architecture::InitializeBlockTable() {
-  // Use the existing GFX9 block table from gfx9_block_table.h
-  // This is a static array defined in the gfxip directory
-  extern const GpuBlockInfo* gfx9_block_table[AQLPROFILE_BLOCKS_NUMBER];
-  block_table_ = gfx9_block_table;
-  block_count_ = AQLPROFILE_BLOCKS_NUMBER;
+  block_table_ = GetGfx9BlockTable();
+  block_count_ = static_cast<uint32_t>(GetGfx9BlockTableSize());
 }
 
 const GpuBlockInfo* Gfx9Architecture::GetBlockInfo(uint32_t block_id) const {

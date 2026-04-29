@@ -25,6 +25,10 @@ set ( LIB_SRC
   ${LIB_DIR}/core/architecture_registry.cpp
   ${LIB_DIR}/core/hardware_architecture.cpp
   ${LIB_DIR}/core/pm4_factory_adapter.cpp
+  ${LIB_DIR}/pm4/gfx9_builders.cpp
+  ${LIB_DIR}/pm4/gfx10_builders.cpp
+  ${LIB_DIR}/pm4/gfx11_builders.cpp
+  ${LIB_DIR}/pm4/gfx12_builders.cpp
   ${LIB_DIR}/core/architectures/gfx9_architecture.cpp
   ${LIB_DIR}/core/architectures/gfx10_architecture.cpp
   ${LIB_DIR}/core/architectures/gfx11_architecture.cpp

@@ -42,6 +42,9 @@ class Gfx11Factory : public Pm4Factory {
   virtual int GetAccumLowID() const override { return 1; }
   virtual int GetAccumHiID() const override { return 1; }
 
+  static const GpuBlockInfo** GetBlockTable() { return block_table_; }
+  static size_t GetBlockTableSize() { return AQLPROFILE_BLOCKS_NUMBER; }
+
  protected:
   void Init(const AgentInfo* agent_info);
   static const GpuBlockInfo* block_table_[AQLPROFILE_BLOCKS_NUMBER];

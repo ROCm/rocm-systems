@@ -37,6 +37,9 @@ class Mi350Architecture : public Mi300Architecture {
   explicit Mi350Architecture(const AgentInfo* agent_info);
   virtual ~Mi350Architecture() = default;
 
+  // Architecture query
+  bool IsMI350() const override { return true; }
+
   // MI350-specific accumulator register IDs and SPM sample delay
   uint32_t GetAccumLowID() const override { return 1; }
   uint32_t GetAccumHiID() const override { return 200; }

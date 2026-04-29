@@ -20,33 +20,23 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#include "core/architectures/mi200_architecture.hpp"
-#include "core/factory_block_tables.h"
-#include "aqlprofile-sdk/aql_profile_v2.h"
+#ifndef SRC_PM4_GFX12_BUILDERS_HPP_
+#define SRC_PM4_GFX12_BUILDERS_HPP_
 
-namespace aql_profile {
+#include "pm4/cmd_builder.h"
+#include "pm4/pmc_builder.h"
+#include "pm4/spm_builder.h"
+#include "pm4/sqtt_builder.h"
 
-Mi200Architecture::Mi200Architecture(const AgentInfo* agent_info) {
-  InitializeConfig(agent_info);
-  InitializeRegisterSchema();
-  InitializeBlockTable();
-}
+struct AgentInfo;
 
-void Mi200Architecture::InitializeConfig(const AgentInfo* agent_info) {
-  Gfx9Architecture::InitializeConfig(agent_info);
+namespace pm4_builder_gfx12 {
 
-  config_.name = "MI200";
-  config_.has_spm_core1 = true;
-  config_.spm_sample_delay_max = 0x3e;
-}
+pm4_builder::CmdBuilder* MakeCmdBuilder();
+pm4_builder::PmcBuilder* MakePmcBuilder(const AgentInfo* agent_info, bool concurrent);
+pm4_builder::SpmBuilder* MakeSpmBuilder(const AgentInfo* agent_info);
+pm4_builder::SqttBuilder* MakeSqttBuilder(const AgentInfo* agent_info);
 
-void Mi200Architecture::InitializeBlockTable() {
-  // Gfx9Factory::block_table_ is the shared static GFX9 block table.
-  // Mi200Factory modifies block entries in-place (SDMA instance_count=5,
-  // UMC counter_count=9, etc.) so this pointer reflects those overrides
-  // once the factory has been constructed for this agent.
-  block_table_ = GetGfx9BlockTable();
-  block_count_ = static_cast<uint32_t>(GetGfx9BlockTableSize());
-}
+}  // namespace pm4_builder_gfx12
 
-}  // namespace aql_profile
+#endif  // SRC_PM4_GFX12_BUILDERS_HPP_

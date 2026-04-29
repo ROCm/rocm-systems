@@ -288,73 +288,83 @@ if (arch->IsMI300()) {
 }
 ```
 
-## Remaining Work
+## Completed Work
 
-### Phase 1: MI Series Architectures (Next Priority)
+### Phase 1: MI Series Architectures ✅
 
 **MI100Architecture** (extends Gfx9Architecture)
-- Override InitializeConfig(): Set has_spm_core1 = true
-- Override GetSpmSampleDelayMax(): Return 0x34
-- Override GetAccumLowID/HiID(): Return 1 and 158
+- `GetAccumLowID()=1`, `GetAccumHiID()=158`, `GetSpmSampleDelayMax()=0x34`
+- Block table delegated to `Gfx9Factory::block_table_`
 
 **MI200Architecture** (extends Gfx9Architecture)
-- Override InitializeConfig(): Set has_spm_core1 = true
-- Specialized SPM configuration
+- `GetAccumLowID()=1`, `GetAccumHiID()=185`, `GetSpmSampleDelayMax()=0x3e`
 
 **MI300Architecture** (extends Gfx9Architecture)
-- Override InitializeConfig(): Set aid_count = 4, xcc_count = 8
-- Override InitializeConfig(): Set has_aid_aware_counters = true
-- Specialized AID-aware counter logic
+- `GetAccumLowID()=1`, `GetAccumHiID()=184`, `GetSpmSampleDelayMax()=0x27`
+- `aid_count=4`, `xcc_count` from `agent_info->xcc_num`, `has_aid_aware_counters=true`
+- `GetBytesNeededForBlock()`: AID-aware blocks use `instance_count * sizeof(uint64_t)`
+  (no XCC multiplier)
 
 **MI350Architecture** (extends MI300Architecture)
-- Latest MI series features
-- Inherits MI300 multi-XCC/AID support
+- `GetAccumHiID()=200`, `GetSpmSampleDelayMax()=0x33`
+- Inherits multi-XCC/AID topology from MI300
 
-### Phase 2: Builder Refactoring
+### GFX12 / gfx1250 (MI450) Support ✅
+
+**Gfx12Architecture** (gfx1200/gfx1201)
+- Compiled with default `GFX12_VARIANT_1200`
+- Block table built from gfx1200 block info objects
+
+**Mi450Architecture** (gfx1250, extends Gfx12Architecture)
+- Compiled in a separate TU (`mi450_architecture.cpp`) with `#define GFX12_VARIANT 0x1250`
+  before any includes — isolates gfx1250 register definitions from gfx1200 ones
+- Block table uses gfx1250-specific entries: GCEA_SE, GL2A/GL2C (instance 8),
+  GC_CANE, GLARBA/GLARBC, ATCL2, GC_FFBM, GC_NHTTLB, GC_L2TLB, etc.
+
+### Phase 3: Factory Integration ✅
+
+**Pm4FactoryAdapter**
+- Bridges `HardwareArchitecture` to the `Pm4Factory` interface
+- `InitializeBuilders()` selects the correct `<CmdBuilder, Primitives>` template pair
+  based on `IsGFX9()/IsGFX10()/IsGFX11()/IsGFX12()`
+- gfx1250 (Mi450) still uses the legacy `Mi450Create` path for builders because
+  its primitives require `GFX12_VARIANT=0x1250` in a separate compilation unit
+
+**Pm4Factory::Create() integration**
+- `AQLPROFILE_USE_NEW_ARCH` environment variable enables the new path:
+  ```
+  CreateArchitectureForAgent() → Pm4FactoryAdapter(arch, agent_info)
+  ```
+- Falls through to legacy path for unrecognised architectures
+- Circular-include resolved: the two `Create` overloads (`hsa_agent_t` and
+  `aqlprofile_agent_handle_t`) moved from inline definitions in `pm4_factory.h`
+  into `pm4_factory.cpp`, which is the only TU that includes `pm4_factory_adapter.hpp`
+
+## Remaining Work
+
+### Builder Refactoring
 
 **Extract Components:**
 1. CounterAllocator - Assigns registers to events
 2. CommandSequencer - High-level command generation
 3. RegisterProgrammer - Converts to PM4 packets
-4. BufferManager - Command buffer layout
 
 **Refactor Builders:**
-1. PmcBuilder - Use CounterAllocator + CommandSequencer
+1. PmcBuilder - Remove hardcoded architecture checks
 2. SpmBuilder - Use RegisterSchema instead of primitives
 3. SqttBuilder - Remove hardcoded MI300 logic
-4. CmdBuilder - Query RegisterSchema for addresses
 
-### Phase 3: Factory Integration
+### Remove Legacy Factory Subclasses
 
-**Update Pm4Factory:**
-1. Constructor takes HardwareArchitecture pointer
-2. Delegate to architecture->CreateCmdBuilder()
-3. Remove factory subclasses (Gfx9Factory, etc.)
-4. Keep thin wrappers during migration
+Once `AQLPROFILE_USE_NEW_ARCH` is validated across all supported GPU families,
+the legacy Gfx9Factory / Mi100Factory / etc. classes can be removed.
 
-**Migration Strategy:**
-1. Parallel implementation with feature flag
-2. Toggle via AQLPROFILE_USE_NEW_ARCH environment variable
-3. Run tests with both old and new implementations
-4. Remove old code once validated
+### Block Schema Files (Optional)
 
-### Phase 4: Block Schema Files
+External JSON/YAML block definitions for runtime configuration without recompilation.
 
-**Create JSON schemas:**
-- `src/core/block_schemas/gfx9_blocks.json`
-- `src/core/block_schemas/gfx10_blocks.json`
-- `src/core/block_schemas/gfx11_blocks.json`
-- `src/core/block_schemas/mi300_blocks.json` (extends gfx9)
+### Full Integration Testing
 
-**Benefits:**
-- External block configuration
-- Easier auditing and modification
-- Version control friendly
-- Runtime validation possible
-
-### Phase 5: Full Integration & Testing
-
-**Test Execution:**
 ```bash
 # Build all tests
 cmake -B build -DAQLPROFILE_BUILD_TESTS=ON
@@ -372,9 +382,6 @@ ninja -C build
 ./build/pmc-builder-test
 ./build/spm-builder-test
 ./build/sqtt-builder-test
-
-# Integration tests
-./build/test/integration/aqlprofile-integration-test
 ```
 
 **Validation Criteria:**
@@ -395,17 +402,19 @@ ninja -C build
 4. **End-to-end example** - Complete PMC workflow
 5. **Documentation** - Architecture guide + summary
 
-### In Progress
+### Completed (additional)
 
-6. **MI series implementations** - Planned next
-7. **Builder refactoring** - Design complete, implementation pending
-8. **Factory integration** - Migration strategy defined
-9. **Full test validation** - Requires complete integration
+6. **MI series implementations** ✅ - Mi100/200/300/350 complete
+7. **GFX12 / gfx1250 (Mi450) support** ✅ - Separate TU with GFX12_VARIANT=0x1250
+8. **Factory integration** ✅ - AQLPROFILE_USE_NEW_ARCH gate, circular-include resolved
+9. **Pm4FactoryAdapter** ✅ - Full builder initialisation for GFX9/10/11/12 families
 
 ### Pending
 
-10. **Performance optimization** - After integration
-11. **Block schema files** - Future enhancement
+10. **Builder refactoring** - Design complete, implementation pending
+11. **Remove legacy factory subclasses** - After integration validation
+12. **Performance optimization** - After integration
+13. **Block schema files** - Future enhancement
 
 ## Impact Analysis
 
@@ -482,7 +491,7 @@ ninja -C build
 
 ## Timeline
 
-### Completed (Day 1)
+### Completed (Phase 1 - Day 1)
 
 - ✓ Base abstraction layer (4 classes)
 - ✓ Comprehensive tests (53 tests)
@@ -490,34 +499,28 @@ ninja -C build
 - ✓ End-to-end example (1 file)
 - ✓ Documentation (2 documents)
 
-### Estimated Remaining Work
+### Completed (subsequent phases)
 
-**Phase 1: MI Series** (1-2 days)
-- Implement Mi100/200/300/350Architecture
-- Specialized SPM and AID logic
-- Tests for MI variants
+- ✓ Mi100/Mi200/Mi300/Mi350 architectures (8 files)
+- ✓ Gfx12Architecture for gfx1200/gfx1201 (2 files)
+- ✓ Mi450Architecture for gfx1250 — separate TU with GFX12_VARIANT=0x1250 (2 files)
+- ✓ Pm4FactoryAdapter with full builder initialisation (2 files)
+- ✓ architecture_init.cpp — prefix dispatch for all families including gfx95/gfx125
+- ✓ AQLPROFILE_USE_NEW_ARCH feature flag wired into Pm4Factory::Create()
+- ✓ Circular-include resolved — Create() overloads moved to pm4_factory.cpp
 
-**Phase 2: Builder Refactoring** (3-4 days)
-- Extract component classes
-- Refactor existing builders
-- Update PM4 generation logic
+### Remaining
 
-**Phase 3: Factory Integration** (2 days)
-- Update Pm4Factory
-- Migration with feature flag
-- Backward compatibility
+**Builder Refactoring** (3-4 days)
+- Extract CounterAllocator, CommandSequencer, RegisterProgrammer
+- Refactor PmcBuilder/SpmBuilder/SqttBuilder to use RegisterSchema
 
-**Phase 4: Testing & Validation** (2-3 days)
-- Run full test suite
-- Integration testing
-- Performance benchmarking
+**Legacy Cleanup** (1 day, after integration validation)
+- Remove Gfx9Factory / Mi100Factory / etc. once new path is stable
 
-**Phase 5: Documentation & Cleanup** (1 day)
-- Update all docs
-- Code cleanup
-- Final review
-
-**Total Estimated: 9-12 days of focused development**
+**Testing & Validation** (2-3 days)
+- Full integration test across all GPU families
+- Performance benchmarking vs. legacy path
 
 ## Conclusion
 

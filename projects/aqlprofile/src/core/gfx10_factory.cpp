@@ -44,6 +44,9 @@ class Gfx10Factory : public Pm4Factory {
   virtual int GetAccumLowID() const override { return 1; };
   virtual int GetAccumHiID() const override { return 1; };
 
+  static const GpuBlockInfo** GetBlockTable() { return block_table_; }
+  static size_t GetBlockTableSize() { return AQLPROFILE_BLOCKS_NUMBER; }
+
  protected:
   // void ConstructTable(const AgentInfo* agent_info);
   void Init(const AgentInfo* agent_info);
@@ -103,5 +106,9 @@ Pm4Factory* Pm4Factory::Gfx10Create(const AgentInfo* agent_info) {
   if (p == NULL) throw aql_profile_exc_msg("Gfx10Factory allocation failed");
   return p;
 }
+
+// Free-standing accessors for the GFX10 block table (used by HardwareArchitecture layer)
+const GpuBlockInfo** GetGfx10BlockTable() { return Gfx10Factory::GetBlockTable(); }
+size_t GetGfx10BlockTableSize() { return Gfx10Factory::GetBlockTableSize(); }
 
 }  // namespace aql_profile

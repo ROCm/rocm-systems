@@ -26,9 +26,17 @@
 #include "pm4/spm_builder.h"
 #include "pm4/sqtt_builder.h"
 
+// Per-architecture builder factories (each compiled in its own TU to avoid
+// conflicting linux enum headers from different GFX generations).
+#include "pm4/gfx9_builders.hpp"
+#include "pm4/gfx10_builders.hpp"
+#include "pm4/gfx11_builders.hpp"
+#include "pm4/gfx12_builders.hpp"
+
 namespace aql_profile {
 
-Pm4FactoryAdapter::Pm4FactoryAdapter(HardwareArchitecture* architecture)
+Pm4FactoryAdapter::Pm4FactoryAdapter(HardwareArchitecture* architecture,
+                                     const AgentInfo* agent_info)
     : Pm4Factory(BlockInfoMap(nullptr, 0)),
       architecture_(architecture),
       concurrent_mode_(false),
@@ -37,43 +45,52 @@ Pm4FactoryAdapter::Pm4FactoryAdapter(HardwareArchitecture* architecture)
     throw aql_profile_exc_msg("Null architecture provided to Pm4FactoryAdapter");
   }
 
-  // Get modes from environment
   concurrent_mode_ = concurrent_create_mode_;
   static bool spm_kfd = getenv("ROCP_SPM_KFD_MODE") != NULL;
   spm_kfd_mode_ = spm_kfd;
 
-  InitializeBuilders();
+  InitializeBuilders(agent_info);
 }
 
 Pm4FactoryAdapter::~Pm4FactoryAdapter() {
-  // Note: architecture_ is owned by caller, don't delete it
-  // Builders are deleted by base class destructor
+  // architecture_ is owned by the caller; builders are deleted by the base class.
 }
 
-void Pm4FactoryAdapter::InitializeBuilders() {
-  // Create cmd builder from architecture
-  cmd_builder_ = architecture_->CreateCmdBuilder();
-  if (!cmd_builder_) {
-    throw aql_profile_exc_msg("Failed to create CmdBuilder from architecture");
+void Pm4FactoryAdapter::InitializeBuilders(const AgentInfo* agent_info) {
+  // Select the correct <CmdBuilder, Primitives> pair based on architecture family.
+  // The concurrent flag drives the PmcBuilder template specialisation.
+
+  if (architecture_->IsGFX9()) {
+    cmd_builder_  = pm4_builder_gfx9::MakeCmdBuilder();
+    pmc_builder_  = pm4_builder_gfx9::MakePmcBuilder(agent_info, concurrent_mode_);
+    spm_builder_  = pm4_builder_gfx9::MakeSpmBuilder(agent_info);
+    sqtt_builder_ = pm4_builder_gfx9::MakeSqttBuilder(agent_info);
+  } else if (architecture_->IsGFX10()) {
+    cmd_builder_  = pm4_builder_gfx10::MakeCmdBuilder();
+    pmc_builder_  = pm4_builder_gfx10::MakePmcBuilder(agent_info, concurrent_mode_);
+    spm_builder_  = pm4_builder_gfx10::MakeSpmBuilder(agent_info);
+    sqtt_builder_ = pm4_builder_gfx10::MakeSqttBuilder(agent_info);
+  } else if (architecture_->IsGFX11()) {
+    cmd_builder_  = pm4_builder_gfx11::MakeCmdBuilder();
+    pmc_builder_  = pm4_builder_gfx11::MakePmcBuilder(agent_info, concurrent_mode_);
+    spm_builder_  = pm4_builder_gfx11::MakeSpmBuilder(agent_info);
+    sqtt_builder_ = pm4_builder_gfx11::MakeSqttBuilder(agent_info);
+  } else if (architecture_->IsGFX12()) {
+    cmd_builder_  = pm4_builder_gfx12::MakeCmdBuilder();
+    pmc_builder_  = pm4_builder_gfx12::MakePmcBuilder(agent_info, concurrent_mode_);
+    spm_builder_  = pm4_builder_gfx12::MakeSpmBuilder(agent_info);
+    sqtt_builder_ = pm4_builder_gfx12::MakeSqttBuilder(agent_info);
+  } else {
+    throw aql_profile_exc_msg("Pm4FactoryAdapter: unsupported architecture family");
   }
-
-  // For now, builders still need to be created using old template system
-  // This will be refactored in a future phase
-  // We can't fully replace the builders yet because they're template-heavy
-  // and depend on architecture-specific primitives
-
-  // TODO: Refactor builders to use RegisterSchema and HardwareConfig
-  // For now, return nullptr and let existing code handle it
-  pmc_builder_ = nullptr;
-  spm_builder_ = nullptr;
-  sqtt_builder_ = nullptr;
 }
 
 gpu_id_t Pm4FactoryAdapter::MapToLegacyGpuId() const {
   if (architecture_->IsMI100()) return MI100_GPU_ID;
   if (architecture_->IsMI200()) return MI200_GPU_ID;
   if (architecture_->IsMI300()) return MI300_GPU_ID;
-  if (architecture_->IsGFX9()) return GFX9_GPU_ID;
+  if (architecture_->IsMI350()) return MI350_GPU_ID;
+  if (architecture_->IsGFX9())  return GFX9_GPU_ID;
   if (architecture_->IsGFX10()) return GFX10_GPU_ID;
   if (architecture_->IsGFX11()) return GFX11_GPU_ID;
   if (architecture_->IsGFX12()) return GFX12_GPU_ID;
@@ -138,19 +155,11 @@ int Pm4FactoryAdapter::GetNumWGPs() const {
 }
 
 int Pm4FactoryAdapter::GetAccumLowID() const {
-  try {
-    return architecture_->GetAccumLowID();
-  } catch (...) {
-    throw;
-  }
+  return architecture_->GetAccumLowID();
 }
 
 int Pm4FactoryAdapter::GetAccumHiID() const {
-  try {
-    return architecture_->GetAccumHiID();
-  } catch (...) {
-    throw;
-  }
+  return architecture_->GetAccumHiID();
 }
 
 }  // namespace aql_profile

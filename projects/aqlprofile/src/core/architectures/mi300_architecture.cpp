@@ -21,7 +21,8 @@
 // THE SOFTWARE.
 
 #include "core/architectures/mi300_architecture.hpp"
-#include "core/gfx9_factory.h"
+#include "core/factory_block_tables.h"
+#include "aqlprofile-sdk/aql_profile_v2.h"
 #include "def/gpu_block_info.h"
 
 namespace aql_profile {
@@ -48,8 +49,8 @@ void Mi300Architecture::InitializeBlockTable() {
   // Mi300Factory modifies block entries in-place (RPB/ATC instances, SDMA/UMC
   // per-AID instance counts, event_id_max overrides) so this pointer reflects
   // those overrides once the factory has been constructed for this agent.
-  block_table_ = Gfx9Factory::block_table_;
-  block_count_ = AQLPROFILE_BLOCKS_NUMBER;
+  block_table_ = GetGfx9BlockTable();
+  block_count_ = static_cast<uint32_t>(GetGfx9BlockTableSize());
 }
 
 size_t Mi300Architecture::GetBytesNeededForBlock(uint32_t block_id) const {

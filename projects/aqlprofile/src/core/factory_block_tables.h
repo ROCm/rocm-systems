@@ -20,33 +20,27 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#include "core/architectures/mi200_architecture.hpp"
-#include "core/factory_block_tables.h"
-#include "aqlprofile-sdk/aql_profile_v2.h"
+// Declarations for free-standing block table accessors provided by each GFX factory.
+// These allow the HardwareArchitecture layer to obtain the block tables without
+// including architecture-specific linux headers.
+
+#ifndef SRC_CORE_FACTORY_BLOCK_TABLES_H_
+#define SRC_CORE_FACTORY_BLOCK_TABLES_H_
+
+#include <stddef.h>
+#include "def/gpu_block_info.h"
 
 namespace aql_profile {
 
-Mi200Architecture::Mi200Architecture(const AgentInfo* agent_info) {
-  InitializeConfig(agent_info);
-  InitializeRegisterSchema();
-  InitializeBlockTable();
-}
+const GpuBlockInfo** GetGfx9BlockTable();
+size_t GetGfx9BlockTableSize();
 
-void Mi200Architecture::InitializeConfig(const AgentInfo* agent_info) {
-  Gfx9Architecture::InitializeConfig(agent_info);
+const GpuBlockInfo** GetGfx10BlockTable();
+size_t GetGfx10BlockTableSize();
 
-  config_.name = "MI200";
-  config_.has_spm_core1 = true;
-  config_.spm_sample_delay_max = 0x3e;
-}
-
-void Mi200Architecture::InitializeBlockTable() {
-  // Gfx9Factory::block_table_ is the shared static GFX9 block table.
-  // Mi200Factory modifies block entries in-place (SDMA instance_count=5,
-  // UMC counter_count=9, etc.) so this pointer reflects those overrides
-  // once the factory has been constructed for this agent.
-  block_table_ = GetGfx9BlockTable();
-  block_count_ = static_cast<uint32_t>(GetGfx9BlockTableSize());
-}
+const GpuBlockInfo** GetGfx11BlockTable();
+size_t GetGfx11BlockTableSize();
 
 }  // namespace aql_profile
+
+#endif  // SRC_CORE_FACTORY_BLOCK_TABLES_H_

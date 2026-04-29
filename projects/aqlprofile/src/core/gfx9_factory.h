@@ -40,6 +40,9 @@ class Gfx9Factory : public Pm4Factory {
 
   bool IsGFX9() const override { return true; }
 
+  static const GpuBlockInfo** GetBlockTable() { return block_table_; }
+  static size_t GetBlockTableSize() { return AQLPROFILE_BLOCKS_NUMBER; }
+
  protected:
   void Init(const AgentInfo* agent_info);
   static const GpuBlockInfo* block_table_[AQLPROFILE_BLOCKS_NUMBER];

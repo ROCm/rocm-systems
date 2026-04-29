@@ -114,4 +114,8 @@ Pm4Factory* Pm4Factory::Gfx9Create(const AgentInfo* agent_info) {
   return p;
 }
 
+// Free-standing accessor for the GFX9 block table (used by HardwareArchitecture layer)
+const GpuBlockInfo** GetGfx9BlockTable() { return Gfx9Factory::GetBlockTable(); }
+size_t GetGfx9BlockTableSize() { return Gfx9Factory::GetBlockTableSize(); }
+
 }  // namespace aql_profile

@@ -47,7 +47,7 @@ class Gfx10Architecture : public HardwareArchitecture {
   bool IsGFX10() const override { return true; }
 
   // GFX10 specific: Has GUS block
-  int GetNumWGPs() const override;
+  uint32_t GetNumWGPs() const override;
 
  protected:
   void InitializeConfig(const AgentInfo* agent_info);

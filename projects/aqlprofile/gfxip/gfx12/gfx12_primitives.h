@@ -25,6 +25,7 @@
 #define _GFX12_PRIMITIVES_H_
 
 #include <stdint.h>
+#include <cassert>
 #include <cstdint>
 
 // taken from gfx12_pm4defs.h

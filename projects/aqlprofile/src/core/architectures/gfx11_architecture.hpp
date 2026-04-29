@@ -47,7 +47,7 @@ class Gfx11Architecture : public HardwareArchitecture {
   bool IsGFX11() const override { return true; }
 
   // GFX11 specific
-  int GetNumWGPs() const override;
+  uint32_t GetNumWGPs() const override;
 
  protected:
   void InitializeConfig(const AgentInfo* agent_info);

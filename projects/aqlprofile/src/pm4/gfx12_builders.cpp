@@ -20,33 +20,32 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#include "core/architectures/mi200_architecture.hpp"
-#include "core/factory_block_tables.h"
-#include "aqlprofile-sdk/aql_profile_v2.h"
+#include "pm4/gfx12_builders.hpp"
+// gfx12_def.h must come before gfx12_cmd_builder.h to define packet macros
+#include "def/gfx12_def.h"
+#include "pm4/gfx12_cmd_builder.h"
+#include "pm4/pmc_builder.h"
+#include "pm4/spm_builder.h"
+#include "pm4/sqtt_builder.h"
 
-namespace aql_profile {
+namespace pm4_builder_gfx12 {
 
-Mi200Architecture::Mi200Architecture(const AgentInfo* agent_info) {
-  InitializeConfig(agent_info);
-  InitializeRegisterSchema();
-  InitializeBlockTable();
+pm4_builder::CmdBuilder* MakeCmdBuilder() {
+  return new pm4_builder::Gfx12CmdBuilder(nullptr);
 }
 
-void Mi200Architecture::InitializeConfig(const AgentInfo* agent_info) {
-  Gfx9Architecture::InitializeConfig(agent_info);
-
-  config_.name = "MI200";
-  config_.has_spm_core1 = true;
-  config_.spm_sample_delay_max = 0x3e;
+pm4_builder::PmcBuilder* MakePmcBuilder(const AgentInfo* agent_info, bool concurrent) {
+  if (concurrent)
+    return new pm4_builder::GpuPmcBuilder<pm4_builder::Gfx12CmdBuilder, gfx12_cntx_prim, true>(agent_info);
+  return new pm4_builder::GpuPmcBuilder<pm4_builder::Gfx12CmdBuilder, gfx12_cntx_prim, false>(agent_info);
 }
 
-void Mi200Architecture::InitializeBlockTable() {
-  // Gfx9Factory::block_table_ is the shared static GFX9 block table.
-  // Mi200Factory modifies block entries in-place (SDMA instance_count=5,
-  // UMC counter_count=9, etc.) so this pointer reflects those overrides
-  // once the factory has been constructed for this agent.
-  block_table_ = GetGfx9BlockTable();
-  block_count_ = static_cast<uint32_t>(GetGfx9BlockTableSize());
+pm4_builder::SpmBuilder* MakeSpmBuilder(const AgentInfo* agent_info) {
+  return new pm4_builder::GpuSpmBuilder<pm4_builder::Gfx12CmdBuilder, gfx12_cntx_prim>(agent_info);
 }
 
-}  // namespace aql_profile
+pm4_builder::SqttBuilder* MakeSqttBuilder(const AgentInfo* agent_info) {
+  return new pm4_builder::GpuSqttBuilder<pm4_builder::Gfx12CmdBuilder, gfx12_cntx_prim>(agent_info);
+}
+
+}  // namespace pm4_builder_gfx12

@@ -125,41 +125,41 @@ class Pm4Factory {
   static void Destroy();
 
   // Return gpu id
-  gpu_id_t GetGpuId() const { return gpu_id_; }
+  virtual gpu_id_t GetGpuId() const { return gpu_id_; }
   // Is pmc to be profiled concurrently?
-  bool IsConcurrent() const { return concurrent_mode_; }
+  virtual bool IsConcurrent() const { return concurrent_mode_; }
   // Is getting SPM data using driver public API?
-  bool SpmKfdMode() const { return spm_kfd_mode_; }
+  virtual bool SpmKfdMode() const { return spm_kfd_mode_; }
 
   // Return PM4 command builder
-  pm4_builder::CmdBuilder* GetCmdBuilder() const { return cmd_builder_; }
+  virtual pm4_builder::CmdBuilder* GetCmdBuilder() const { return cmd_builder_; }
   // Return PMC PM4 packets builder
-  pm4_builder::PmcBuilder* GetPmcBuilder() const { return pmc_builder_; }
+  virtual pm4_builder::PmcBuilder* GetPmcBuilder() const { return pmc_builder_; }
   // Return SPM PM4 packets builder
-  pm4_builder::SpmBuilder* GetSpmBuilder() const { return spm_builder_; }
+  virtual pm4_builder::SpmBuilder* GetSpmBuilder() const { return spm_builder_; }
   // Return SQTT PM4 packets builder
-  pm4_builder::SqttBuilder* GetSqttBuilder() const { return sqtt_builder_; }
+  virtual pm4_builder::SqttBuilder* GetSqttBuilder() const { return sqtt_builder_; }
 
   // Return Shader Engines number
-  uint32_t GetShaderEnginesNumber() const { return agent_info_->se_num; }
-  uint32_t GetShaderArraysNumber() const { return agent_info_->shader_arrays_per_se; }
-  uint32_t GetComputeUnitNumber() const { return agent_info_->cu_num; }
+  virtual uint32_t GetShaderEnginesNumber() const { return agent_info_->se_num; }
+  virtual uint32_t GetShaderArraysNumber() const { return agent_info_->shader_arrays_per_se; }
+  virtual uint32_t GetComputeUnitNumber() const { return agent_info_->cu_num; }
   // Return SQTT buffer alignment
-  uint32_t GetSQTTBufferAlignment() const { return 0x1000; }
-  const char* GetGFX() const { return agent_info_->name; }
+  virtual uint32_t GetSQTTBufferAlignment() const { return 0x1000; }
+  virtual const char* GetGFX() const { return agent_info_->name; }
   virtual bool IsGFX9() const { return false; }
   virtual bool IsGFX10() const { return false; }
   virtual bool IsGFX11() const { return false; }
   virtual bool IsGFX12() const { return false; }
   // Return number of XCC on the GPU
-  uint32_t GetXccNumber() const { return agent_info_->xcc_num; }
+  virtual uint32_t GetXccNumber() const { return agent_info_->xcc_num; }
   // Return number of XCC per AID
   uint32_t GetXccPerAid() const { return agent_info_->xcc_per_aid; }
 
   // SPM specific
   virtual uint32_t GetSpmSampleDelayMax() { return 0; }
 
-  const GpuBlockInfo* GetBlockInfo(const aqlprofile_pmc_event_t* event) const {
+  virtual const GpuBlockInfo* GetBlockInfo(const aqlprofile_pmc_event_t* event) const {
     const GpuBlockInfo* info = block_map_.Get(event->block_name);
     if (info == NULL) throw std::runtime_error("Bad Block");
     // Checking that the block index is in proper range
@@ -173,7 +173,7 @@ class Pm4Factory {
   }
 
   // Return block info foor a given event
-  const GpuBlockInfo* GetBlockInfo(const event_t* event) const {
+  virtual const GpuBlockInfo* GetBlockInfo(const event_t* event) const {
     const GpuBlockInfo* info = block_map_.Get(event->block_name);
     if (info == NULL) throw event_exception(std::string("Bad block, "), *event);
     // Checking that the block index is in proper range
@@ -188,7 +188,7 @@ class Pm4Factory {
   }
 
   // Return block info for a given block id
-  const GpuBlockInfo* GetBlockInfo(const uint32_t& block_id) const {
+  virtual const GpuBlockInfo* GetBlockInfo(const uint32_t& block_id) const {
     return block_map_.Get(block_id);
   }
 
@@ -212,7 +212,7 @@ class Pm4Factory {
   }
 
   // Return block id for a given block name string
-  uint32_t FindBlock(const char* name) const { return block_map_.Find(name); }
+  virtual uint32_t FindBlock(const char* name) const { return block_map_.Find(name); }
 
   /// Workaround for GFX11. PMC Builder overrides this.
   virtual int GetNumWGPs() const {
@@ -361,39 +361,6 @@ inline Pm4Factory* Pm4Factory::Create(const AgentInfo* agent_info, gpu_id_t gpu_
   if (it->second == NULL) throw aql_profile_exc_msg("Pm4Factory::Create() failed");
   it->second->gpu_id_ = gpu_id;
   return it->second;
-}
-
-// Create PM4 factory
-inline Pm4Factory* Pm4Factory::Create(const hsa_agent_t agent, bool concurrent) {
-  std::lock_guard<mutex_t> lck(mutex_);
-  const AgentInfo* agent_info = HsaRsrcFactory::Instance().GetAgentInfo(agent);
-  // Get GPU id for a given agent
-
-  hsa_status_t status = HSA_STATUS_ERROR;
-  std::vector<char> agent_name{};
-  agent_name.resize(64);
-  uint32_t device_id = 0;
-
-  // Getting GfxIP name
-  status = hsa_agent_get_info(agent, HSA_AGENT_INFO_NAME, agent_name.data());
-  if (status == HSA_STATUS_SUCCESS) {
-    // Getting DeviceId
-    hsa_agent_info_t attribute = static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_CHIP_ID);
-    status = hsa_agent_get_info(agent, attribute, &device_id);
-  }
-  if (status != HSA_STATUS_SUCCESS) {
-    throw aql_profile_exc_msg("Pm4Factory::Create() bad agent");
-  }
-
-  const gpu_id_t gpu_id = GetGpuId(agent_name.data());
-  return Pm4Factory::Create(agent_info, gpu_id, concurrent);
-}
-
-inline Pm4Factory* Pm4Factory::Create(aqlprofile_agent_handle_t agent_info, bool concurrent) {
-  const auto* info = GetAgentInfo(agent_info);
-  if (info == NULL) throw aql_profile_exc_val<uint64_t>("Bad agent handle", agent_info.handle);
-  const gpu_id_t gpu_id = GetGpuId(info->gfxip);
-  return Pm4Factory::Create(info, gpu_id, concurrent);
 }
 
 // Destroy PM4 factory

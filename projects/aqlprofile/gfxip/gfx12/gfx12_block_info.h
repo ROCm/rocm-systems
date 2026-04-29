@@ -23,6 +23,8 @@
 #ifndef _GFX12_BLOCKINFO_H_
 #define _GFX12_BLOCKINFO_H_
 
+#include "src/core/include/aqlprofile-sdk/aql_profile_v2.h"
+
 namespace gfxip {
 namespace gfx12 {
 #define __BLOCK_ID_HSA(block) HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_##block

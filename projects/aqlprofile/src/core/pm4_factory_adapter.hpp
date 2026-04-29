@@ -28,12 +28,14 @@
 
 namespace aql_profile {
 
-/// Adapter that allows Pm4Factory to use the new HardwareArchitecture system
-/// This provides backward compatibility during migration
+/// Adapter that bridges HardwareArchitecture to the Pm4Factory interface.
+/// Delegates topology queries and block lookups to the architecture object
+/// while delegating builder construction to the existing legacy path.
 class Pm4FactoryAdapter : public Pm4Factory {
  public:
-  /// Create factory using new architecture system
-  explicit Pm4FactoryAdapter(HardwareArchitecture* architecture);
+  /// Create factory using new architecture system.
+  /// architecture is owned by the caller and must outlive this adapter.
+  Pm4FactoryAdapter(HardwareArchitecture* architecture, const AgentInfo* agent_info);
   virtual ~Pm4FactoryAdapter();
 
   // Pm4Factory interface
@@ -73,11 +75,11 @@ class Pm4FactoryAdapter : public Pm4Factory {
   int GetAccumLowID() const override;
   int GetAccumHiID() const override;
 
-  // Access to architecture
+  // Access to underlying architecture
   const HardwareArchitecture* GetArchitecture() const { return architecture_; }
 
  private:
-  void InitializeBuilders();
+  void InitializeBuilders(const AgentInfo* agent_info);
   gpu_id_t MapToLegacyGpuId() const;
 
   HardwareArchitecture* architecture_;

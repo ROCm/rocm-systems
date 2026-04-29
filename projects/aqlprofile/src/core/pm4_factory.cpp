@@ -24,6 +24,10 @@
 
 #include <mutex>
 #include <shared_mutex>
+#include <vector>
+
+#include "core/architecture_init.hpp"
+#include "core/pm4_factory_adapter.hpp"
 
 namespace aql_profile {
 namespace {
@@ -89,6 +93,54 @@ aqlprofile_agent_handle_t RegisterAgent(const aqlprofile_agent_info_v1_t* agent_
 
 const AgentInfo* GetAgentInfo(aqlprofile_agent_handle_t agent_id) {
   return get_cache().get(agent_id.handle);
+}
+
+Pm4Factory* Pm4Factory::Create(const hsa_agent_t agent, bool concurrent) {
+  std::lock_guard<mutex_t> lck(mutex_);
+  const AgentInfo* agent_info = HsaRsrcFactory::Instance().GetAgentInfo(agent);
+
+  hsa_status_t status = HSA_STATUS_ERROR;
+  std::vector<char> agent_name{};
+  agent_name.resize(64);
+  uint32_t device_id = 0;
+
+  // Getting GfxIP name
+  status = hsa_agent_get_info(agent, HSA_AGENT_INFO_NAME, agent_name.data());
+  if (status == HSA_STATUS_SUCCESS) {
+    // Getting DeviceId
+    hsa_agent_info_t attribute = static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_CHIP_ID);
+    status = hsa_agent_get_info(agent, attribute, &device_id);
+  }
+  if (status != HSA_STATUS_SUCCESS) {
+    throw aql_profile_exc_msg("Pm4Factory::Create() bad agent");
+  }
+
+  static bool use_new_arch = getenv("AQLPROFILE_USE_NEW_ARCH") != NULL;
+  if (use_new_arch) {
+    concurrent_create_mode_ = concurrent;
+    HardwareArchitecture* arch = CreateArchitectureForAgent(agent_info);
+    if (arch) return new Pm4FactoryAdapter(arch, agent_info);
+    // Fall through to legacy path if architecture not recognised
+  }
+
+  const gpu_id_t gpu_id = GetGpuId(agent_name.data());
+  return Pm4Factory::Create(agent_info, gpu_id, concurrent);
+}
+
+Pm4Factory* Pm4Factory::Create(aqlprofile_agent_handle_t agent_info, bool concurrent) {
+  const auto* info = GetAgentInfo(agent_info);
+  if (info == NULL) throw aql_profile_exc_val<uint64_t>("Bad agent handle", agent_info.handle);
+
+  static bool use_new_arch = getenv("AQLPROFILE_USE_NEW_ARCH") != NULL;
+  if (use_new_arch) {
+    concurrent_create_mode_ = concurrent;
+    HardwareArchitecture* arch = CreateArchitectureForAgent(info);
+    if (arch) return new Pm4FactoryAdapter(arch, info);
+    // Fall through to legacy path if architecture not recognised
+  }
+
+  const gpu_id_t gpu_id = GetGpuId(info->gfxip);
+  return Pm4Factory::Create(info, gpu_id, concurrent);
 }
 
 }  // namespace aql_profile

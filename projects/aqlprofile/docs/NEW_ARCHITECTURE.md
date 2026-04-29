@@ -145,13 +145,39 @@ const auto* arch = registry.Lookup("gfx90a:sramecc+:xnack-");
    - gfx900, gfx902, gfx906
    - Base class for MI series
 
-2. **Gfx10Architecture** - RDNA 1
+2. **Mi100Architecture** - CDNA 1 (gfx908)
+   - Accumulator regs: low=1, hi=158; SPM delay max=0x34
+   - Extends Gfx9Architecture
+
+3. **Mi200Architecture** - CDNA 2 (gfx90a)
+   - Accumulator regs: low=1, hi=185; SPM delay max=0x3e
+   - Extends Gfx9Architecture
+
+4. **Mi300Architecture** - CDNA 3 (gfx940/941/942)
+   - Accumulator regs: low=1, hi=184; SPM delay max=0x27
+   - 4 AIDs, per-agent XCC count, AID-aware counter routing
+   - Extends Gfx9Architecture
+
+5. **Mi350Architecture** - CDNA 3.5 (gfx950)
+   - Accumulator regs: low=1, hi=200; SPM delay max=0x33
+   - Inherits multi-XCC/AID topology from Mi300Architecture
+   - Extends Mi300Architecture
+
+6. **Gfx10Architecture** - RDNA 1
    - gfx1010, gfx1011, gfx1012, gfx1030+
    - Introduces WGP concept
 
-3. **Gfx11Architecture** - RDNA 3
+7. **Gfx11Architecture** - RDNA 3
    - gfx1100, gfx1101, gfx1102, gfx1103
    - No SPM support
+
+8. **Gfx12Architecture** - RDNA 4 (gfx1200/gfx1201)
+   - Generic GFX12 baseline; compiled with GFX12_VARIANT_1200
+
+9. **Mi450Architecture** - CDNA 4 (gfx1250)
+   - Compiled in a separate translation unit with `GFX12_VARIANT=0x1250`
+   - gfx1250-specific block table (GCEA_SE, GL2A/GL2C, GC_CANE, ATCL2, etc.)
+   - Extends Gfx12Architecture
 
 ### Architecture Hierarchy
 
@@ -161,10 +187,12 @@ HardwareArchitecture (abstract)
 │   ├── Mi100Architecture (extends Gfx9)
 │   ├── Mi200Architecture (extends Gfx9)
 │   └── Mi300Architecture (extends Gfx9)
+│       └── Mi350Architecture (extends Mi300)
 ├── Gfx10Architecture
 ├── Gfx11Architecture
 │   └── Gfx115xArchitecture (extends Gfx11)
 └── Gfx12Architecture
+    └── Mi450Architecture (extends Gfx12, gfx1250)
 ```
 
 ## Usage Examples
@@ -229,23 +257,15 @@ To add support for a new GFX architecture (e.g., GFX13):
 class Gfx13Architecture : public HardwareArchitecture {
  public:
   explicit Gfx13Architecture(const AgentInfo* agent_info);
-  
-  // Implement HardwareArchitecture interface
-  const HardwareConfig& GetConfig() const override;
-  const RegisterSchema& GetRegisterSchema() const override;
-  // ... other methods
-  
+
   bool IsGFX13() const override { return true; }
+  uint32_t GetAccumLowID() const override { return 1; }
+  uint32_t GetAccumHiID() const override { return 1; }
 
  protected:
-  void InitializeConfig(const AgentInfo* agent_info);
-  void InitializeRegisterSchema();
-  void InitializeBlockTable();
-  
-  HardwareConfig config_;
-  RegisterSchema register_schema_;
-  const GpuBlockInfo** block_table_;
-  uint32_t block_count_;
+  void InitializeConfig(const AgentInfo* agent_info) override;
+  void InitializeRegisterSchema() override;
+  void InitializeBlockTable() override;
 };
 ```
 
@@ -254,6 +274,8 @@ class Gfx13Architecture : public HardwareArchitecture {
 `src/core/architectures/gfx13_architecture.cpp`:
 
 ```cpp
+#include "def/gfx13_def.h"  // provides gfx13_cntx_prim and block info objects
+
 Gfx13Architecture::Gfx13Architecture(const AgentInfo* agent_info) {
   InitializeConfig(agent_info);
   InitializeRegisterSchema();
@@ -262,48 +284,69 @@ Gfx13Architecture::Gfx13Architecture(const AgentInfo* agent_info) {
 
 void Gfx13Architecture::InitializeConfig(const AgentInfo* agent_info) {
   config_.gfxip = agent_info->gfxip;
-  config_.name = agent_info->name;
-  // Set topology from agent_info
-  config_.se_count = agent_info->se_num;
-  // ... more config
-  
-  // Set capabilities
-  config_.supports_pmc = true;
-  config_.supports_spm = true;
-  // ... more capabilities
+  config_.name  = agent_info->name;
+  config_.se_count         = agent_info->se_num;
+  config_.sa_per_se_count  = agent_info->shader_arrays_per_se;
+  config_.cu_count         = agent_info->cu_num;
+  config_.xcc_count        = 1;
 }
 
 void Gfx13Architecture::InitializeRegisterSchema() {
-  // Define GFX13-specific register addresses
-  register_schema_.DefineRegister(RegisterId::GRBM_GFX_INDEX, 0x1234);
+  // Populate from gfx13_cntx_prim addresses
+  using P = gfx13_cntx_prim;
+  register_schema_.DefineRegister(RegisterId::GRBM_GFX_INDEX,     P::GRBM_GFX_INDEX_offset);
+  register_schema_.DefineRegister(RegisterId::CP_PERFMON_CNTL,     P::CP_PERFMON_CNTL_offset);
   // ... more registers
 }
 
 void Gfx13Architecture::InitializeBlockTable() {
-  extern const GpuBlockInfo* gfx13_block_table[AQLPROFILE_BLOCKS_NUMBER];
-  block_table_ = gfx13_block_table;
+  // Build table from gfx13 block info objects declared in gfx13_def.h
+  static const GpuBlockInfo* table[AQLPROFILE_BLOCKS_NUMBER] = {};
+  // table[AQLPROFILE_BLOCK_NAME_FOO] = &FooCounterBlockInfo;
+  block_table_ = table;
   block_count_ = AQLPROFILE_BLOCKS_NUMBER;
 }
+```
 
-pm4_builder::CmdBuilder* Gfx13Architecture::CreateCmdBuilder() const {
-  return new pm4_builder::Gfx13CmdBuilder(nullptr);
+If gfx13 requires a separate `GFX13_VARIANT` compile-time macro (like gfx1250), split the
+block-table initialisation into a separate `.cpp` compiled with that define — see
+`mi450_architecture.cpp` as the pattern.
+
+### Step 3: Wire into the dispatch table
+
+In `src/core/architecture_init.cpp`, add a prefix entry and a creation branch:
+
+```cpp
+// In GetGfxIpPrefix() — more-specific prefixes must precede generic ones:
+{"gfx13", "gfx13"},
+
+// In CreateArchitectureForAgent():
+if (prefix == "gfx13") return new Gfx13Architecture(agent_info);
+```
+
+### Step 4: Add to CMakeLists.txt
+
+```cmake
+${LIB_DIR}/core/architectures/gfx13_architecture.cpp
+```
+
+### Step 5: Add builders to Pm4FactoryAdapter
+
+In `src/core/pm4_factory_adapter.cpp`, add a branch in `InitializeBuilders()`:
+
+```cpp
+} else if (architecture_->IsGFX13()) {
+  cmd_builder_ = new pm4_builder::Gfx13CmdBuilder(nullptr);
+  pmc_builder_ = new pm4_builder::GpuPmcBuilder<
+      pm4_builder::Gfx13CmdBuilder, gfx13_cntx_prim, false>(agent_info);
+  spm_builder_ = new pm4_builder::GpuSpmBuilder<
+      pm4_builder::Gfx13CmdBuilder, gfx13_cntx_prim>(agent_info);
+  sqtt_builder_ = new pm4_builder::GpuSqttBuilder<
+      pm4_builder::Gfx13CmdBuilder, gfx13_cntx_prim>(agent_info);
 }
 ```
 
-### Step 3: Register the Architecture
-
-In your initialization code:
-
-```cpp
-#include "core/architectures/gfx13_architecture.hpp"
-
-auto& registry = ArchitectureRegistry::Instance();
-registry.Register("gfx13", std::make_unique<Gfx13Architecture>(agent_info));
-```
-
-### Step 4: Test
-
-Run the comprehensive test suite:
+### Step 6: Test
 
 ```bash
 ninja -C build hardware-architecture-test
@@ -398,31 +441,42 @@ if (arch->IsMI300()) {
 
 ## Future Work
 
+### Completed Enhancements
+
+1. **MI Series Implementations** ✅
+   - Mi100Architecture (SPM core1, accum regs 1/158)
+   - Mi200Architecture (accum regs 1/185, SPM delay 0x3e)
+   - Mi300Architecture (AID-aware counters, 4 AIDs, per-agent XCC)
+   - Mi350Architecture (accum hi=200, SPM delay 0x33, extends Mi300)
+
+2. **GFX12 / gfx1250 (Mi450) support** ✅
+   - Gfx12Architecture for gfx1200/gfx1201
+   - Mi450Architecture compiled with `GFX12_VARIANT=0x1250` in a separate TU
+
+3. **Factory Integration** ✅
+   - `Pm4FactoryAdapter` bridges `HardwareArchitecture` → `Pm4Factory` interface
+   - `Pm4Factory::Create()` dispatches to new path when `AQLPROFILE_USE_NEW_ARCH` is set
+   - Circular-include resolved by moving the two `Create` overloads from the header
+     into `pm4_factory.cpp`
+
 ### Planned Enhancements
 
-1. **Block Schema Files**: JSON/YAML block definitions
-   - External block configuration
-   - Easier to audit and modify
-   - Version control friendly
-
-2. **MI Series Implementations**:
-   - Mi100Architecture (with SPM core1 support)
-   - Mi200Architecture (with optimizations)
-   - Mi300Architecture (with AID-aware counters)
-   - Mi350Architecture (latest features)
-
-3. **Builder Refactoring**:
+1. **Builder Refactoring**:
    - Extract CounterAllocator
    - Create CommandSequencer
    - Implement RegisterProgrammer
    - Simplify PmcBuilder/SpmBuilder/SqttBuilder
 
-4. **Factory Integration**:
-   - Update Pm4Factory to use HardwareArchitecture
-   - Remove factory subclasses
-   - Migrate existing code
+2. **Remove legacy factory subclasses**:
+   - Once the new path is validated, Gfx9Factory/Mi100Factory/etc. can be removed
+   - Requires full integration testing across all supported GPU families
 
-5. **Performance Optimization**:
+3. **Block Schema Files**: JSON/YAML block definitions
+   - External block configuration
+   - Easier to audit and modify
+   - Version control friendly
+
+4. **Performance Optimization**:
    - Cache frequently accessed data
    - Optimize register lookups
    - Profile hot paths
@@ -444,5 +498,5 @@ For questions or issues with the new architecture:
 
 ---
 
-**Last Updated**: 2026-04-15  
+**Last Updated**: 2026-04-29  
 **Authors**: Claude (Architecture Design), AMD ROCm Team (Original Implementation)
