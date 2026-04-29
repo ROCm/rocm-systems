@@ -86,7 +86,9 @@ _REVERSE_RENAMES: dict[str, str] = {v: k for k, v in FIELD_RENAMES.items()}
 # Encoding format pairing: which source encoding maps to which target
 # ---------------------------------------------------------------------------
 
-# Maps (src_enc_name -> dst_enc_name) for CDNA4 -> RDNA4
+# Maps (src_enc_name -> dst_enc_name) for CDNA4 -> RDNA4. RDNA4 introduced
+# new dedicated V-prefix encodings (VFLAT/VGLOBAL/VSCRATCH/VDS/VBUFFER) for
+# memory and LDS ops; CDNA's FLAT-family encodings translate into them.
 _CDNA4_TO_RDNA4_ENC_MAP: dict[str, str] = {
     'ENC_SOP1': 'ENC_SOP1',
     'ENC_SOP2': 'ENC_SOP2',
@@ -105,6 +107,12 @@ _CDNA4_TO_RDNA4_ENC_MAP: dict[str, str] = {
     'ENC_FLAT_GLBL': 'ENC_VGLOBAL',
     'ENC_FLAT_SCRATCH': 'ENC_VSCRATCH',
     'VOP3_SDST_ENC': 'VOP3_SDST_ENC',
+}
+
+# Lookup the right per-pair enc_map. New target ISAs are added by appending
+# entries here plus a corresponding _CDNA4_TO_<DST>_ENC_MAP definition above.
+_PAIR_ENC_MAPS: dict[tuple[str, str], dict[str, str]] = {
+    ('cdna4', 'rdna4'): _CDNA4_TO_RDNA4_ENC_MAP,
 }
 
 # ---------------------------------------------------------------------------
@@ -379,10 +387,12 @@ def generate_encoding_fields(all_specs, output_dir):
                 all_enc_names.add(enc.enc_name)
         for enc_name in spec.encoding_map:
             all_enc_names.add(enc_name)
-    # Also include all names referenced by the enc_map
-    for src, dst in _CDNA4_TO_RDNA4_ENC_MAP.items():
-        all_enc_names.add(src)
-        all_enc_names.add(dst)
+    # Also include all names referenced by any per-pair enc_map (so a struct
+    # exists even if the encoding only appears as a translation target).
+    for enc_map in _PAIR_ENC_MAPS.values():
+        for src, dst in enc_map.items():
+            all_enc_names.add(src)
+            all_enc_names.add(dst)
 
     # For each encoding format, collect field names from all ISAs that have it
     # and capture a representative dt_index (the encoding-format ID is universal
@@ -663,7 +673,11 @@ def generate_encoding_translators(src_spec, dst_spec, src_name, dst_name, output
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    enc_map = _CDNA4_TO_RDNA4_ENC_MAP
+    enc_map = _PAIR_ENC_MAPS.get((src_name, dst_name))
+    if enc_map is None:
+        print(f'warning: no encoding map for ({src_name}, {dst_name}); '
+              f'no translator will be generated', file=sys.stderr)
+        return []
     src_encs = [e.enc_name for e in src_spec.inst_encodings]
     dst_encs = [e.enc_name for e in dst_spec.inst_encodings]
     src_dts = _extract_dt_indices(src_spec, src_encs)
