@@ -36,7 +36,7 @@ const std::vector<size_t>& code_object_translator_impl_t::get_code_object_ids() 
     return m_code_object_ids;
 }
 
-std::vector<symbol_t> code_object_translator_impl_t::get_symbol_map(size_t object_id) const
+std::vector<symbol_t> code_object_translator_impl_t::get_symbols(size_t object_id) const
 {
     const auto& symbols = m_translator->getSymbolMap(object_id);
     std::vector<symbol_t> symbol_map;

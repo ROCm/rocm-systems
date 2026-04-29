@@ -41,17 +41,19 @@ void pc_sampling_collector_impl_t::write(pc_samples_writer_t& writer)
     for (const auto& id : m_translator->get_code_object_ids())
     {
         writer.start_code_obj(id);
-        const auto& symbols = m_translator->get_symbol_map(id);
+        const auto& symbols = m_translator->get_symbols(id);
         for (const auto& sym : symbols)
         {
-            uint64_t       pc  = sym.virtual_address;
-            const uint64_t end = sym.virtual_address + sym.size;
-            while (pc < end)
-            {
-                const auto& inst = m_translator->get_instruction(id, pc);
-                writer.write_instruction(sym, inst);
-                pc += inst.size;
-            }
+            writer.start_symbol(sym);
+            //uint64_t       pc  = sym.virtual_address;
+            //const uint64_t end = sym.virtual_address + sym.size;
+            //while (pc < end)
+            //{
+            //    const auto& inst = m_translator->get_instruction(id, pc);
+            //    writer.write_instruction(sym, inst);
+            //    pc += inst.size;
+            //}
+            writer.end_symbol();
         }
         writer.end_code_obj_desc(id);
     }

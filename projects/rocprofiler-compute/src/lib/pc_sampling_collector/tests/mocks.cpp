@@ -28,7 +28,7 @@ const std::vector<size_t>& mock_code_object_translator_t::get_code_object_ids() 
     return m_code_object_ids;
 }
 
-std::vector<symbol_t> mock_code_object_translator_t::get_symbol_map(size_t object_id) const
+std::vector<symbol_t> mock_code_object_translator_t::get_symbols(size_t object_id) const
 {
     if (const auto item = m_symbols_per_obj.find(object_id); item != m_symbols_per_obj.end())
     {
@@ -70,9 +70,18 @@ void mock_pc_samples_writer_t::end_code_obj_desc(size_t obj_id)
     m_ended_code_obj_desc_ids.push_back(obj_id);
 }
 
-void mock_pc_samples_writer_t::write_instruction(const symbol_t& sym, const instruction_t& inst)
+void mock_pc_samples_writer_t::start_symbol(const rocm_compute::symbol_t& symbol)
 {
-    m_symbol_descriptions.push_back(sym);
+    m_symbol_descriptions.push_back(symbol);
+}
+
+void mock_pc_samples_writer_t::end_symbol()
+{
+    ++m_end_symbol_count;
+}
+
+void mock_pc_samples_writer_t::write_instruction(const instruction_t& inst)
+{
     m_instructions.push_back(inst);
 }
 
@@ -99,4 +108,9 @@ const std::vector<symbol_t>& mock_pc_samples_writer_t::get_symbol_descriptions()
 const std::vector<instruction_t>& mock_pc_samples_writer_t::get_instruction_descriptions() const
 {
     return m_instructions;
+}
+
+uint32_t mock_pc_samples_writer_t::get_end_symbol_count() const
+{
+    return m_end_symbol_count;
 }

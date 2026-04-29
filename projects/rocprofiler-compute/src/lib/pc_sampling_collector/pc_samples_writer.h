@@ -12,8 +12,10 @@ class pc_samples_writer_t
 public:
     virtual ~pc_samples_writer_t()                       = default;
     virtual void        start_code_obj(size_t obj_id)    = 0;
-    virtual void        write_instruction(const symbol_t& sym, const instruction_t& inst) = 0;
     virtual void        end_code_obj_desc(size_t obj_id) = 0;
+    virtual void        start_symbol(const symbol_t& symbol) = 0;
+    virtual void        end_symbol() = 0;
+    virtual void        write_instruction(const instruction_t& inst) = 0;
     virtual std::string get_result()                     = 0;
 };
 }  // namespace rocm_compute

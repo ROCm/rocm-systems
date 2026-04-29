@@ -41,7 +41,7 @@ public:
                                                        uint64_t load_addr,
                                                        uint64_t mem_size)                   = 0;
     virtual const std::vector<size_t>& get_code_object_ids() const                          = 0;
-    virtual std::vector<symbol_t> get_symbol_map(size_t object_id) const               = 0;
+    virtual std::vector<symbol_t> get_symbols(size_t object_id) const               = 0;
     virtual instruction_t get_instruction(size_t object_id, uint64_t virtual_address) const = 0;
 };
 
@@ -58,7 +58,7 @@ public:
                          uint64_t load_size) override;
 
     const std::vector<size_t>& get_code_object_ids() const override;
-    std::vector<symbol_t> get_symbol_map(size_t object_id) const override;
+    std::vector<symbol_t> get_symbols(size_t object_id) const override;
     instruction_t get_instruction(size_t object_id, uint64_t virtual_address) const override;
 
 private:

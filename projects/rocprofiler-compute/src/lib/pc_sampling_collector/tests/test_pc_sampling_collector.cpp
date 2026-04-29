@@ -53,6 +53,18 @@ TEST_F(test_pc_sampling_collector_t, ProvidedCodeObjectSymbols_WritesThem)
     m_translator->add_symbols(m_file_info.code_object_id, symbols0);
     m_translator->add_symbols(m_mem_info.code_object_id, symbols1);
     m_pc_sampling_collector->write(*m_writer);
+    EXPECT_EQ(m_writer->get_symbol_descriptions().size(), 4);
+}
+
+TEST_F(test_pc_sampling_collector_t, DISABLED_ProvidedCodeObjectSymbols_WritesThem)
+{
+    m_pc_sampling_collector->on_code_object_load(m_file_info);
+    m_pc_sampling_collector->on_code_object_load(m_mem_info);
+    const std::vector<symbol_t> symbols0 = {{"name0", 0x10, 0x1000, 0x50}, {"name1", 0x20, 0x2000, 0x60}};
+    const std::vector<symbol_t> symbols1 = {{"name2", 0x11, 0x1001, 0x51}, {"name3", 0x21, 0x2001, 0x61}};
+    m_translator->add_symbols(m_file_info.code_object_id, symbols0);
+    m_translator->add_symbols(m_mem_info.code_object_id, symbols1);
+    m_pc_sampling_collector->write(*m_writer);
 }
 
 void test_pc_sampling_collector_t::SetUp()
