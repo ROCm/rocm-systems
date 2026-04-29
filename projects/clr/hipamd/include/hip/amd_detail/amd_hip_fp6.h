@@ -46,10 +46,13 @@ __FP6_HOST_DEVICE_STATIC__ __hip_fp6_storage_t __hip_cvt_bfloat16raw_to_fp6(
   __amd_bf16x32_storage_t in;
   __amd_fp6x32_storage_t out;
   in[0] = internal::hipbf16_to_bf16(x);
-  if (fp6_interpretation == __HIP_E2M3)
-    out = __builtin_amdgcn_cvt_scalef32_pk32_fp6_bf16(in, 1.0f /* scale */);
-  else if (fp6_interpretation == __HIP_E3M2)
-    out = __builtin_amdgcn_cvt_scalef32_pk32_bf6_bf16(in, 1.0f /* scale */);
+  if (fp6_interpretation == __HIP_E2M3) {
+    if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_scalef32_pk32_fp6_bf16))
+      out = __builtin_amdgcn_cvt_scalef32_pk32_fp6_bf16(in, 1.0f /* scale */);
+  } else if (fp6_interpretation == __HIP_E3M2) {
+    if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_scalef32_pk32_bf6_bf16))
+      out = __builtin_amdgcn_cvt_scalef32_pk32_bf6_bf16(in, 1.0f /* scale */);
+  }
   u.ui32 = out[0];
   return u.fp6[0];
 #else
@@ -74,10 +77,13 @@ __FP6_HOST_DEVICE_STATIC__ __hip_fp6x2_storage_t __hip_cvt_bfloat16raw2_to_fp6x2
   in[0] = internal::hipbf16_to_bf16(x.x);
   in[1] = internal::hipbf16_to_bf16(x.y);
   __amd_fp6x32_storage_t out;
-  if (fp6_interpretation == __HIP_E2M3)
-    out = __builtin_amdgcn_cvt_scalef32_pk32_fp6_bf16(in, 1.0f /* scale */);
-  else if (fp6_interpretation == __HIP_E3M2)
-    out = __builtin_amdgcn_cvt_scalef32_pk32_bf6_bf16(in, 1.0f /* scale */);
+  if (fp6_interpretation == __HIP_E2M3) {
+    if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_scalef32_pk32_fp6_bf16))
+      out = __builtin_amdgcn_cvt_scalef32_pk32_fp6_bf16(in, 1.0f /* scale */);
+  } else if (fp6_interpretation == __HIP_E3M2) {
+    if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_scalef32_pk32_bf6_bf16))
+      out = __builtin_amdgcn_cvt_scalef32_pk32_bf6_bf16(in, 1.0f /* scale */);
+  }
   u.ui32 = out[0];
   return u.fp6x2[0];
 #else
@@ -108,10 +114,13 @@ __hip_cvt_double_to_fp6(const double x, const __hip_fp6_interpretation_t fp6_int
   __amd_fp6x32_storage_t out;
   in1[0] = float(x);
   in2[0] = 0.0f;
-  if (fp6_interpretation_t == __HIP_E2M3)
-    out = __builtin_amdgcn_cvt_scalef32_2xpk16_fp6_f32(in1, in2, 1.0f /* scale */);
-  else if (fp6_interpretation_t == __HIP_E3M2)
-    out = __builtin_amdgcn_cvt_scalef32_2xpk16_bf6_f32(in1, in2, 1.0f /* scale */);
+  if (fp6_interpretation_t == __HIP_E2M3) {
+    if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_scalef32_2xpk16_fp6_f32))
+      out = __builtin_amdgcn_cvt_scalef32_2xpk16_fp6_f32(in1, in2, 1.0f /* scale */);
+  } else if (fp6_interpretation_t == __HIP_E3M2) {
+    if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_scalef32_2xpk16_bf6_f32))
+      out = __builtin_amdgcn_cvt_scalef32_2xpk16_bf6_f32(in1, in2, 1.0f /* scale */);
+  }
   u.ui32 = out[0];
   return u.fp6[0];
 #else
@@ -136,10 +145,13 @@ __hip_cvt_double2_to_fp6x2(const double2 x, const __hip_fp6_interpretation_t fp6
   __amd_fp6x32_storage_t out;
   in1[0] = float(x.x);
   in2[0] = float(x.y);
-  if (fp6_interpretation_t == __HIP_E2M3)
-    out = __builtin_amdgcn_cvt_scalef32_2xpk16_fp6_f32(in1, in2, 1.0f /* scale */);
-  else if (fp6_interpretation_t == __HIP_E3M2)
-    out = __builtin_amdgcn_cvt_scalef32_2xpk16_bf6_f32(in1, in2, 1.0f /* scale */);
+  if (fp6_interpretation_t == __HIP_E2M3) {
+    if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_scalef32_2xpk16_fp6_f32))
+      out = __builtin_amdgcn_cvt_scalef32_2xpk16_fp6_f32(in1, in2, 1.0f /* scale */);
+  } else if (fp6_interpretation_t == __HIP_E3M2) {
+    if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_scalef32_2xpk16_bf6_f32))
+      out = __builtin_amdgcn_cvt_scalef32_2xpk16_bf6_f32(in1, in2, 1.0f /* scale */);
+  }
   u.ui32 = out[0] & 0x3Fu;
   u.ui32 |= ((out[0] & 0xFC0u) << 2);
   return u.fp6x2[0];
@@ -169,10 +181,13 @@ __hip_cvt_float_to_fp6(const float x, const __hip_fp6_interpretation_t fp6_inter
   __amd_fp6x32_storage_t out;
   in1[0] = x;
   in2[0] = 0.0f;
-  if (fp6_interpretation_t == __HIP_E2M3)
-    out = __builtin_amdgcn_cvt_scalef32_2xpk16_fp6_f32(in1, in2, 1.0f /* scale */);
-  else if (fp6_interpretation_t == __HIP_E3M2)
-    out = __builtin_amdgcn_cvt_scalef32_2xpk16_bf6_f32(in1, in2, 1.0f /* scale */);
+  if (fp6_interpretation_t == __HIP_E2M3) {
+    if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_scalef32_2xpk16_fp6_f32))
+      out = __builtin_amdgcn_cvt_scalef32_2xpk16_fp6_f32(in1, in2, 1.0f /* scale */);
+  } else if (fp6_interpretation_t == __HIP_E3M2) {
+    if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_scalef32_2xpk16_bf6_f32))
+      out = __builtin_amdgcn_cvt_scalef32_2xpk16_bf6_f32(in1, in2, 1.0f /* scale */);
+  }
   u.ui32 = out[0];
   return u.fp6[0];
 #else
@@ -196,10 +211,13 @@ __hip_cvt_float2_to_fp6x2(const float2 x, const __hip_fp6_interpretation_t fp6_i
   __amd_fp6x32_storage_t out;
   in1[0] = x.x;
   in2[0] = x.y;
-  if (fp6_interpretation_t == __HIP_E2M3)
-    out = __builtin_amdgcn_cvt_scalef32_2xpk16_fp6_f32(in1, in2, 1.0f /* scale */);
-  else if (fp6_interpretation_t == __HIP_E3M2)
-    out = __builtin_amdgcn_cvt_scalef32_2xpk16_bf6_f32(in1, in2, 1.0f /* scale */);
+  if (fp6_interpretation_t == __HIP_E2M3) {
+    if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_scalef32_2xpk16_fp6_f32))
+      out = __builtin_amdgcn_cvt_scalef32_2xpk16_fp6_f32(in1, in2, 1.0f /* scale */);
+  } else if (fp6_interpretation_t == __HIP_E3M2) {
+    if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_scalef32_2xpk16_bf6_f32))
+      out = __builtin_amdgcn_cvt_scalef32_2xpk16_bf6_f32(in1, in2, 1.0f /* scale */);
+  }
   u.ui32 = out[0] & 0x3Fu;
   u.ui32 |= ((out[0] & 0xFC0u) << 2);
   return u.fp6x2[0];
@@ -223,10 +241,13 @@ __FP6_HOST_DEVICE_STATIC__ __half_raw __hip_cvt_fp6_to_halfraw(
   __amd_fp16x32_storage_t out;
   __amd_fp6x32_storage_t in;
   in[0] = (uint32_t)x;
-  if (fp6_interpretation_t == __HIP_E2M3)
-    out = __builtin_amdgcn_cvt_scalef32_pk32_f16_fp6(in, 1.0f);
-  else if (fp6_interpretation_t == __HIP_E3M2)
-    out = __builtin_amdgcn_cvt_scalef32_pk32_f16_bf6(in, 1.0f);
+  if (fp6_interpretation_t == __HIP_E2M3) {
+    if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_scalef32_pk32_f16_fp6))
+      out = __builtin_amdgcn_cvt_scalef32_pk32_f16_fp6(in, 1.0f);
+  } else if (fp6_interpretation_t == __HIP_E3M2) {
+    if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_scalef32_pk32_f16_bf6))
+      out = __builtin_amdgcn_cvt_scalef32_pk32_f16_bf6(in, 1.0f);
+  }
   ret.data = out[0];
 #else
   using namespace fcbx;
@@ -246,10 +267,13 @@ __FP6_HOST_DEVICE_STATIC__ __half2_raw __hip_cvt_fp6x2_to_halfraw2(
   __amd_fp6x32_storage_t in;
   in[0] = x & 0x3Fu;            // first 6 bits
   in[0] |= (x & 0x3F00u) >> 2;  // next 6 bits
-  if (fp6_interpretation_t == __HIP_E2M3)
-    out = __builtin_amdgcn_cvt_scalef32_pk32_f16_fp6(in, 1.0f);
-  else if (fp6_interpretation_t == __HIP_E3M2)
-    out = __builtin_amdgcn_cvt_scalef32_pk32_f16_bf6(in, 1.0f);
+  if (fp6_interpretation_t == __HIP_E2M3) {
+    if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_scalef32_pk32_f16_fp6))
+      out = __builtin_amdgcn_cvt_scalef32_pk32_f16_fp6(in, 1.0f);
+  } else if (fp6_interpretation_t == __HIP_E3M2) {
+    if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_scalef32_pk32_f16_bf6))
+      out = __builtin_amdgcn_cvt_scalef32_pk32_f16_bf6(in, 1.0f);
+  }
   ret.data = {out[0], out[1]};
 #else
   using namespace fcbx;
@@ -276,10 +300,13 @@ __hip_cvt_halfraw_to_fp6(const __half_raw x, const __hip_fp6_interpretation_t fp
   __amd_fp16x32_storage_t in;
   __amd_fp6x32_storage_t out;
   in[0] = x.data;
-  if (fp6_interpretation_t == __HIP_E2M3)
-    out = __builtin_amdgcn_cvt_scalef32_pk32_fp6_f16(in, 1.0f);
-  else if (fp6_interpretation_t == __HIP_E3M2)
-    out = __builtin_amdgcn_cvt_scalef32_pk32_bf6_f16(in, 1.0f);
+  if (fp6_interpretation_t == __HIP_E2M3) {
+    if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_scalef32_pk32_fp6_f16))
+      out = __builtin_amdgcn_cvt_scalef32_pk32_fp6_f16(in, 1.0f);
+  } else if (fp6_interpretation_t == __HIP_E3M2) {
+    if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_scalef32_pk32_bf6_f16))
+      out = __builtin_amdgcn_cvt_scalef32_pk32_bf6_f16(in, 1.0f);
+  }
   u.ui32 = out[0];
   return u.fp6[0];
 #else
@@ -305,10 +332,13 @@ __FP6_HOST_DEVICE_STATIC__ __hip_fp6x2_storage_t __hip_cvt_halfraw2_to_fp6x2(
   __amd_fp6x32_storage_t out;
   in[0] = x.data[0];
   in[1] = x.data[1];
-  if (fp6_interpretation_t == __HIP_E2M3)
-    out = __builtin_amdgcn_cvt_scalef32_pk32_fp6_f16(in, 1.0f);
-  else if (fp6_interpretation_t == __HIP_E3M2)
-    out = __builtin_amdgcn_cvt_scalef32_pk32_bf6_f16(in, 1.0f);
+  if (fp6_interpretation_t == __HIP_E2M3) {
+    if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_scalef32_pk32_fp6_f16))
+      out = __builtin_amdgcn_cvt_scalef32_pk32_fp6_f16(in, 1.0f);
+  } else if (fp6_interpretation_t == __HIP_E3M2) {
+    if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_scalef32_pk32_bf6_f16))
+      out = __builtin_amdgcn_cvt_scalef32_pk32_bf6_f16(in, 1.0f);
+  }
   u.ui32 = out[0] & 0x3Fu;
   u.ui32 |= ((out[0] & 0xFC0u) << 2);
   return u.fp6x2[0];
@@ -373,7 +403,8 @@ struct __hip_fp6_e2m3 {
     __amd_fp6x32_storage_t in;
     __amd_bf16x32_storage_t out;
     in[0] = (uint32_t)__x;
-    out = __builtin_amdgcn_cvt_scalef32_pk32_bf16_fp6(in, 1.0f /* scale */);
+    if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_scalef32_pk32_bf16_fp6))
+      out = __builtin_amdgcn_cvt_scalef32_pk32_bf16_fp6(in, 1.0f /* scale */);
     u.bf16 = out[0];
 #else
     using namespace fcbx;
@@ -386,7 +417,8 @@ struct __hip_fp6_e2m3 {
     __amd_fp6x32_storage_t in;
     __amd_floatx32_storage_t out;
     in[0] = (uint32_t)__x;
-    out = __builtin_amdgcn_cvt_scalef32_pk32_f32_fp6(in, 1.0f /* scale */);
+    if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_scalef32_pk32_f32_fp6))
+      out = __builtin_amdgcn_cvt_scalef32_pk32_f32_fp6(in, 1.0f /* scale */);
     auto ret = out[0];
 #else
     using namespace fcbx;
@@ -442,7 +474,8 @@ struct __hip_fp6_e3m2 {
     __amd_fp6x32_storage_t in;
     __amd_bf16x32_storage_t out;
     in[0] = (uint32_t)__x;
-    out = __builtin_amdgcn_cvt_scalef32_pk32_bf16_bf6(in, 1.0f /* scale */);
+    if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_scalef32_pk32_bf16_bf6))
+      out = __builtin_amdgcn_cvt_scalef32_pk32_bf16_bf6(in, 1.0f /* scale */);
     u.bf16 = out[0];
 #else
     using namespace fcbx;
@@ -455,7 +488,8 @@ struct __hip_fp6_e3m2 {
     __amd_fp6x32_storage_t in;
     __amd_floatx32_storage_t out;
     in[0] = (uint32_t)__x;
-    out = __builtin_amdgcn_cvt_scalef32_pk32_f32_bf6(in, 1.0f /* scale */);
+    if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_scalef32_pk32_f32_bf6))
+      out = __builtin_amdgcn_cvt_scalef32_pk32_f32_bf6(in, 1.0f /* scale */);
     auto ret = out[0];
 #else
     using namespace fcbx;
@@ -495,7 +529,8 @@ struct __hip_fp6x2_e2m3 {
     __amd_bf16x32_storage_t out;
     in[0] = __x & 0x3Fu;          // first 6 bits
     in[0] |= (__x & 0xFC00u) >> 2;  // next 6 bits
-    out = __builtin_amdgcn_cvt_scalef32_pk32_bf16_fp6(in, 1.0f /* scale */);
+    if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_scalef32_pk32_bf16_fp6))
+      out = __builtin_amdgcn_cvt_scalef32_pk32_bf16_fp6(in, 1.0f /* scale */);
     u.bf16x2 = {out[0], out[1]};
 #else
     using namespace fcbx;
@@ -511,7 +546,8 @@ struct __hip_fp6x2_e2m3 {
     __amd_floatx32_storage_t out;
     in[0] = __x & 0x3Fu;          // first 6 bits
     in[0] |= (__x & 0xFC00u) >> 2;  // next 6 bits
-    out = __builtin_amdgcn_cvt_scalef32_pk32_f32_fp6(in, 1.0f /* scale */);
+    if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_scalef32_pk32_f32_fp6))
+      out = __builtin_amdgcn_cvt_scalef32_pk32_f32_fp6(in, 1.0f /* scale */);
     __amd_floatx2_storage_t fp32x2 = {out[0], out[1]};
 #else
     using namespace fcbx;
@@ -555,7 +591,8 @@ struct __hip_fp6x2_e3m2 {
     __amd_bf16x32_storage_t out;
     in[0] = __x & 0x3Fu;          // first 6 bits
     in[0] |= (__x & 0xFC00u) >> 2;  // next 6 bits
-    out = __builtin_amdgcn_cvt_scalef32_pk32_bf16_bf6(in, 1.0f /* scale */);
+    if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_scalef32_pk32_bf16_bf6))
+      out = __builtin_amdgcn_cvt_scalef32_pk32_bf16_bf6(in, 1.0f /* scale */);
     u.bf16x2 = {out[0], out[1]};
 #else
     using namespace fcbx;
@@ -571,7 +608,8 @@ struct __hip_fp6x2_e3m2 {
     __amd_floatx32_storage_t out;
     in[0] = __x & 0x3Fu;          // first 6 bits
     in[0] |= (__x & 0xFC00u) >> 2;  // next 6 bits
-    out = __builtin_amdgcn_cvt_scalef32_pk32_f32_bf6(in, 1.0f /* scale */);
+    if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_scalef32_pk32_f32_bf6))
+      out = __builtin_amdgcn_cvt_scalef32_pk32_f32_bf6(in, 1.0f /* scale */);
     __amd_floatx2_storage_t fp32x2 = {out[0], out[1]};
 #else
     using namespace fcbx;
@@ -614,7 +652,8 @@ struct __hip_fp6x4_e2m3 {
     in[0] |= ((__x >> 8) & 0x3Fu) << 6;  // second 6 bits
     in[0] |= ((__x >> 16) & 0x3Fu) << 12;
     in[0] |= ((__x >> 24) & 0x3Fu) << 18;
-    out = __builtin_amdgcn_cvt_scalef32_pk32_f32_fp6(in, 1.0f /* scale */);
+    if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_scalef32_pk32_f32_fp6))
+      out = __builtin_amdgcn_cvt_scalef32_pk32_f32_fp6(in, 1.0f /* scale */);
     __amd_floatx2_storage_t fp32x2_1 = {out[0], out[1]};
     __amd_floatx2_storage_t fp32x2_2 = {out[2], out[3]};
 #else
@@ -662,7 +701,8 @@ struct __hip_fp6x4_e3m2 {
     in[0] |= ((__x >> 8) & 0x3Fu) << 6;  // second 6 bits
     in[0] |= ((__x >> 16) & 0x3Fu) << 12;
     in[0] |= ((__x >> 24) & 0x3Fu) << 18;
-    out = __builtin_amdgcn_cvt_scalef32_pk32_f32_bf6(in, 1.0f /* scale */);
+    if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_scalef32_pk32_f32_bf6))
+      out = __builtin_amdgcn_cvt_scalef32_pk32_f32_bf6(in, 1.0f /* scale */);
     __amd_floatx2_storage_t fp32x2_1 = {out[0], out[1]};
     __amd_floatx2_storage_t fp32x2_2 = {out[2], out[3]};
 #else
