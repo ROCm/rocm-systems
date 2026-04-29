@@ -7,22 +7,23 @@
 
 using namespace rocm_compute;
 
-void csv_counters_writer_t::write_counters(const tool_data_t& tool_data)
+void csv_counters_writer_t::write_counters(const std::string&                        output_file,
+                                           const std::vector<counter_info_record_t>& records)
 {
-    std::ofstream ofs(tool_data.output_filename);
+    std::ofstream ofs(output_file);
     if (!ofs.is_open())
     {
-        std::cerr << "Failed to open output file: " << tool_data.output_filename << std::endl;
+        std::cerr << "Failed to open output file: " << output_file << std::endl;
         return;
     }
     // Write header at the beginning of the file
     ofs << "dispatch_id,gpu_id,kernel_id,lds_per_workgroup,"
            "counter_id,counter_name,counter_value\n";
-    for (const auto& r : tool_data.counter_records)
+    for (const auto& r : records)
         ofs << r.dispatch_id << ',' << r.agent_id << "," << r.kernel_id << ',' << r.LDS_memory_size
             << ',' << r.counter_id << ',' << r.counter_name << ',' << r.counter_value << '\n';
     ofs.flush();
     std::clog << "[rocprofiler-compute] [" << __FUNCTION__
-              << "] Counter collection data has been written to: " << tool_data.output_filename
+              << "] Counter collection data has been written to: " << output_file
               << std::endl;
 }

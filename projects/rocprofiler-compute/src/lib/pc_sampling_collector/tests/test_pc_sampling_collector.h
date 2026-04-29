@@ -9,6 +9,7 @@ class test_pc_sampling_collector_t : public ::testing::Test
 {
 protected:
 	void SetUp() override;
+
 	std::shared_ptr<mock_code_object_translator_t> m_translator;
 	rocm_compute::pc_sampling_collector_impl_t::ptr m_pc_sampling_collector;
 };

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier:  MIT
 #pragma once
 #include "code_object_translator.h"
+#include "pc_samples_writer.h"
 
 #include <string>
 #include <vector>
@@ -41,4 +42,15 @@ private:
     std::vector<mem_code_object_info_t>  m_mem_code_obj_info;
     std::vector<file_code_object_info_t> m_file_code_obj_info;
     std::vector<size_t>                  m_code_object_ids;
+};
+
+class mock_pc_samples_writer_t : public rocm_compute::pc_samples_writer_t
+{
+public:
+    void        write() override;
+    std::string get_result() override;
+
+    uint32_t get_write_count();
+private:
+    uint32_t m_write_count = 0;
 };

@@ -8,7 +8,7 @@ add_library(
     pc_sampling_collector.cpp
     code_object_translator.h
     code_object_translator.cpp
-)
+ "pc_samples_writer.cpp")
 
 target_include_directories(${target} PUBLIC .)
 

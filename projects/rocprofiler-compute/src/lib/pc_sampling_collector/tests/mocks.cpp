@@ -37,3 +37,19 @@ std::vector<size_t> mock_code_object_translator_t::get_code_object_ids() const
 {
     return m_code_object_ids;
 }
+
+void mock_pc_samples_writer_t::write()
+{
+    ++m_write_count;
+}
+
+std::string mock_pc_samples_writer_t::get_result()
+{
+    return {};
+}
+
+uint32_t mock_pc_samples_writer_t::get_write_count()
+{
+    return m_write_count;
+}
+

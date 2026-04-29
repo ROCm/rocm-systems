@@ -160,7 +160,7 @@ void generate_output(tool_data_t& tool_data)
     // Write collected counter records and clean up
     if (!tool_data.output_filename.empty())
     {
-        g_counters_writer->write_counters(tool_data);
+        g_counters_writer->write_counters(tool_data.output_filename, tool_data.counter_records);
     }
 }
 

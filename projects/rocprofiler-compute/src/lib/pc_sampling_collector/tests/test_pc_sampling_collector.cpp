@@ -44,6 +44,20 @@ TEST_F(test_pc_sampling_collector_t, ProvidedMemoryCodeObject_PassesItToDecode)
     EXPECT_TRUE(file_info.empty());
 }
 
+TEST_F(test_pc_sampling_collector_t, ProvidedCodeObjectId_IsWritten)
+{
+    rocprofiler_callback_tracing_code_object_load_data_t info;
+    info.storage_type   = ROCPROFILER_CODE_OBJECT_STORAGE_TYPE_FILE;
+    info.uri            = "test_code_object.co";
+    info.code_object_id = 123;
+    info.load_base      = 0x1000;
+    info.load_size      = 0x2000;
+    m_pc_sampling_collector->on_code_object_load(info);
+    const auto code_object_ids = m_translator->get_code_object_ids();
+    EXPECT_EQ(code_object_ids.size(), 1);
+    EXPECT_EQ(code_object_ids[0], info.code_object_id);
+}
+
 void test_pc_sampling_collector_t::SetUp()
 {
     m_translator            = std::make_shared<mock_code_object_translator_t>();

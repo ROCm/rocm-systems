@@ -113,7 +113,9 @@ public:
         std::vector<uint64_t> kernel_id;
     };
 
-    void write_counters(const rocm_compute::tool_data_t& tool_data) override;
+    void write_counters(const std::string&                                      output_file,
+                        const std::vector<rocm_compute::counter_info_record_t>& tool_data) override;
+
     const std::vector<write_counters_info_t>& get_write_counters_info() const;
 
 private:
@@ -143,15 +145,15 @@ public:
 
     void dispatch_callback(rocprofiler_dispatch_counting_service_data_t dispatch_data,
                            rocprofiler_counter_config_id_t*             config,
-                           rocm_compute::tool_data_t&       tool_data) override;
+                           rocm_compute::tool_data_t&                   tool_data) override;
 
     void record_callback(rocprofiler_dispatch_counting_service_data_t dispatch_data,
                          rocprofiler_counter_record_t*                record_data,
                          size_t                                       record_count,
-                         rocm_compute::tool_data_t&       tool_data) override;
+                         rocm_compute::tool_data_t&                   tool_data) override;
 
-    void tool_tracing_callback(rocprofiler_callback_tracing_record_t  record,
-                               rocm_compute::tool_data_t& tool_data) override;
+    void tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
+                               rocm_compute::tool_data_t&            tool_data) override;
 
     // Test accessors
     const std::vector<dispatch_callback_info_t>& get_dispatch_callback_info() const;
