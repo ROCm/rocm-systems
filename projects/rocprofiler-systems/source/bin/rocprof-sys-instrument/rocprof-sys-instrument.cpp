@@ -2202,6 +2202,7 @@ main(int argc, char** argv)
     {
         for(auto* itr : _objs)
         {
+            if(itr->name().find("librocprof-sys") != std::string::npos) continue;
             try
             {
                 itr->insertFiniCallback(_fini_sequence);
