@@ -124,6 +124,30 @@ wavefront_size_from_kernel_descriptors(const AmdGpuCodeObject &obj) {
   return 64;
 }
 
+[[nodiscard]] bool
+uses_accvgpr_flat_global_memory(const std::vector<std::unique_ptr<BasicBlock>> &blocks) {
+  if (blocks.empty())
+    return false;
+
+  for (const auto &block : blocks) {
+    if (!block)
+      continue;
+    for (const auto &inst : block->instructions()) {
+      if (inst.encoding_id() != 0x1B8)
+        continue;
+      const auto *raw = inst.raw_encoding();
+      if (!raw || inst.size() < 8)
+        continue;
+      cdna4::FlatGlblMachineInst flat{};
+      std::memcpy(&flat, raw, sizeof(flat));
+      if (flat.acc != 0)
+        return true;
+    }
+  }
+
+  return false;
+}
+
 } // namespace
 
 BinaryTranslator::~BinaryTranslator() = default;
@@ -177,6 +201,9 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
   }
   // Align cave start to 4 bytes (already is, since instructions are 4-byte aligned).
   patcher.set_cave_start(code_end);
+  semantic_translator_->set_accum_offset_info(
+      uses_accvgpr_flat_global_memory(blocks) ? patcher.accum_offset_info()
+                                              : std::vector<SemanticTranslator::AccumOffsetInfo>{});
 
   for (const auto &block : blocks) {
     uint64_t offset = block->start_offset();

@@ -198,6 +198,62 @@ std::vector<CodeObjectPatcher::WorkGroupIdInfo> CodeObjectPatcher::workgroup_id_
   return infos;
 }
 
+std::vector<CodeObjectPatcher::AccumOffsetInfo> CodeObjectPatcher::accum_offset_info() const {
+  using KD = rocr::llvm::amdhsa::kernel_descriptor_t;
+  namespace kd = rocr::llvm::amdhsa;
+
+  std::vector<AccumOffsetInfo> infos;
+
+  auto *ehdr = reinterpret_cast<const Elf64_Ehdr *>(image_.data());
+  auto *shdr = reinterpret_cast<const Elf64_Shdr *>(image_.data() + ehdr->e_shoff);
+
+  uint64_t text_vaddr = 0;
+  for (int i = 0; i < ehdr->e_shnum; ++i) {
+    if (shdr[i].sh_offset == text_offset_ && shdr[i].sh_size == text_size_) {
+      text_vaddr = shdr[i].sh_addr;
+      break;
+    }
+  }
+
+  for (int i = 0; i < ehdr->e_shnum; ++i) {
+    if (shdr[i].sh_type != SHT_SYMTAB)
+      continue;
+    auto *symtab = reinterpret_cast<const Elf64_Sym *>(image_.data() + shdr[i].sh_offset);
+    int nsyms = shdr[i].sh_size / sizeof(Elf64_Sym);
+    auto *strtab_shdr = &shdr[shdr[i].sh_link];
+    auto *strtab = reinterpret_cast<const char *>(image_.data() + strtab_shdr->sh_offset);
+
+    for (int j = 0; j < nsyms; ++j) {
+      if (symtab[j].st_size != sizeof(KD))
+        continue;
+      if (strtab_shdr->sh_size > 0 && symtab[j].st_name > 0) {
+        const char *name = strtab + symtab[j].st_name;
+        size_t len = strlen(name);
+        if (len >= 3 && strcmp(name + len - 3, ".kd") != 0)
+          continue;
+      }
+      uint16_t sec_idx = symtab[j].st_shndx;
+      if (sec_idx >= ehdr->e_shnum)
+        continue;
+      uint64_t kd_file_off = shdr[sec_idx].sh_offset + (symtab[j].st_value - shdr[sec_idx].sh_addr);
+      if (kd_file_off + sizeof(KD) > image_.size())
+        continue;
+
+      const auto *kdp = reinterpret_cast<const KD *>(image_.data() + kd_file_off);
+      const uint64_t kd_vaddr = symtab[j].st_value;
+      const uint64_t entry_vaddr = kd_vaddr + kdp->kernel_code_entry_byte_offset;
+      const uint64_t entry_text_off = entry_vaddr - text_vaddr;
+
+      const uint32_t encoded =
+          AMDHSA_BITS_GET(kdp->compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET);
+      const uint16_t vgpr_base = encoded > 0 ? static_cast<uint16_t>((encoded + 1) * 4) : 0;
+      infos.push_back({entry_text_off, vgpr_base});
+    }
+  }
+
+  return infos;
+}
+
 void CodeObjectPatcher::append_cave_body(std::span<const uint32_t> words) {
   auto *bytes = reinterpret_cast<const uint8_t *>(words.data());
   cave_body_.insert(cave_body_.end(), bytes, bytes + words.size() * 4);

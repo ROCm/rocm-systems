@@ -21,6 +21,7 @@
 #include <cstring>
 #include <optional>
 #include <string_view>
+#include <utility>
 
 namespace rocjitsu {
 
@@ -213,7 +214,8 @@ std::vector<uint32_t> lower_v_lshl_add_u64(const Instruction &inst,
 /// @details acc[N] = v[N+256] on the unified file. If dst aliases the unified
 /// src, emit NOP. Otherwise emit v_mov_b32.
 std::vector<uint32_t> lower_accvgpr_read(const Instruction &inst,
-                                         [[maybe_unused]] rj_code_arch_t host_arch) {
+                                         [[maybe_unused]] rj_code_arch_t host_arch,
+                                         uint16_t accum_vgpr_base) {
   const auto *raw = inst.raw_encoding();
   if (!raw || inst.size() < 8)
     return {};
@@ -223,8 +225,9 @@ std::vector<uint32_t> lower_accvgpr_read(const Instruction &inst,
 
   const uint16_t dst_vgpr = src.vdst;
   const uint16_t src_acc = src.src0;
-  assert(src_acc >= 768 && src_acc <= 1023);
-  const uint16_t src_unified = src_acc - 512;
+  assert(src_acc >= 256 && src_acc <= 511);
+  const uint16_t src_unified =
+      static_cast<uint16_t>((accum_vgpr_base ? accum_vgpr_base : 0) + src_acc - 256);
 
   if (dst_vgpr == src_unified)
     return {build_s_nop()};
@@ -311,11 +314,15 @@ constexpr uint16_t kOpMbcntLo = 0x31F;
 constexpr uint16_t kOpMbcntHi = 0x320;
 
 // VOP2 opcodes (GFX12)
+constexpr uint8_t kOpAndB32 = 27;
 constexpr uint8_t kOpLshlrevB32 = 24;
 constexpr uint8_t kOpXorB32 = 29;
 
 // VOP3P opcodes (GFX12)
 constexpr uint8_t kOpWmmaF32_16x16x16_F16 = 64;
+
+// VGLOBAL opcodes (GFX12)
+constexpr uint8_t kOpGlobalStoreB128 = 29;
 
 /// @brief Lower v_mfma_f32_16x16x16_f16 to v_wmma_f32_16x16x16_f16 on RDNA4.
 ///
@@ -326,6 +333,7 @@ constexpr uint8_t kOpWmmaF32_16x16x16_F16 = 64;
 std::vector<uint32_t> lower_mfma_f32_16x16x16_f16(const Instruction &inst,
                                                   [[maybe_unused]] rj_code_arch_t host_arch,
                                                   uint64_t offset, const LivenessAnalysis &liveness,
+                                                  uint16_t accum_vgpr_base,
                                                   const LaneLayout *guest_layout,
                                                   const LaneLayout *host_layout) {
   const auto *raw = inst.raw_encoding();
@@ -339,11 +347,19 @@ std::vector<uint32_t> lower_mfma_f32_16x16x16_f16(const Instruction &inst,
   const uint16_t src0 = mfma.src0;
   const uint16_t src1 = mfma.src1;
   const uint16_t src2 = mfma.src2;
+  const uint16_t wmma_vdst = accum_vgpr_base ? static_cast<uint16_t>(accum_vgpr_base + vdst) : vdst;
 
-  if (src2 >= 512)
+  if ((src2 >= 512 && src2 < 768) || src2 > 1023)
     return {};
   const bool has_vgpr_accumulator = src2 >= 256;
-  const uint16_t src2_vgpr = has_vgpr_accumulator ? src2 - 256 : 0;
+  const uint16_t src2_index =
+      has_vgpr_accumulator
+          ? (src2 >= 768 ? static_cast<uint16_t>(src2 - 768) : static_cast<uint16_t>(src2 - 256))
+          : 0;
+  const uint16_t src2_vgpr =
+      has_vgpr_accumulator
+          ? static_cast<uint16_t>((accum_vgpr_base ? accum_vgpr_base : 0) + src2_index)
+          : 0;
 
   assert(src0 >= 256 && src1 >= 256 && "MFMA VGPR sources expected");
 
@@ -364,8 +380,8 @@ std::vector<uint32_t> lower_mfma_f32_16x16x16_f16(const Instruction &inst,
   const uint8_t kTmpSgpr = static_cast<uint8_t>(*tmp_sgpr_opt);
 
   const uint16_t temp_search_start =
-      has_vgpr_accumulator ? static_cast<uint16_t>(std::max<uint16_t>(vdst + 4, src2_vgpr + 4))
-                           : static_cast<uint16_t>(vdst + 4);
+      has_vgpr_accumulator ? static_cast<uint16_t>(std::max<uint16_t>(wmma_vdst + 8, src2_vgpr + 4))
+                           : static_cast<uint16_t>(wmma_vdst + 8);
   auto vaddr_reg = liveness.find_free_run(offset, 1, temp_search_start);
   if (!vaddr_reg)
     return {};
@@ -435,7 +451,8 @@ std::vector<uint32_t> lower_mfma_f32_16x16x16_f16(const Instruction &inst,
 
   // WMMA: single pass, writes all 64 lanes in WMMA layout.
   {
-    auto [w0, w1] = build_vop3p(kOpWmmaF32_16x16x16_F16, vdst, src0, src1, wmma_src2);
+    auto [w0, w1] = build_vop3p(kOpWmmaF32_16x16x16_F16, static_cast<uint8_t>(wmma_vdst), src0,
+                                src1, wmma_src2);
     words.push_back(w0);
     words.push_back(w1);
   }
@@ -445,7 +462,7 @@ std::vector<uint32_t> lower_mfma_f32_16x16x16_f16(const Instruction &inst,
 
   // ds_bpermute: remap WMMA output lanes 16-31 ↔ 32-47 to match MFMA layout.
   for (int r = 0; r < 4; ++r) {
-    auto [w0, w1] = build_ds_bpermute(vdst + r, vaddr, vdst + r);
+    auto [w0, w1] = build_ds_bpermute(wmma_vdst + r, vaddr, wmma_vdst + r);
     words.push_back(w0);
     words.push_back(w1);
   }
@@ -453,6 +470,72 @@ std::vector<uint32_t> lower_mfma_f32_16x16x16_f16(const Instruction &inst,
 
   words.push_back(build_s_mov_b64(kExecLo, kExecSave));
 
+  return words;
+}
+
+/// @brief Lower the Triton-emitted v_bitop3_b32 LUT 0x6c to RDNA4 VALU.
+/// @details LUT 0x6c is src1 ^ (src0 & src2). When vdst aliases src0, this can
+/// be lowered without a scratch register:
+///   vdst = src0 & src2
+///   vdst = src1 ^ vdst
+std::vector<uint32_t> lower_v_bitop3_b32(const Instruction &inst) {
+  const auto *raw = inst.raw_encoding();
+  if (!raw || inst.size() < 8)
+    return {};
+
+  cdna4::Vop3MachineInst bitop{};
+  std::memcpy(&bitop, raw, sizeof(bitop));
+
+  const uint8_t vdst = static_cast<uint8_t>(bitop.vdst);
+  const uint16_t truth_table =
+      static_cast<uint16_t>((bitop.omod << 6) | (bitop.abs << 3) | bitop.neg);
+  if (truth_table != 0x6Cu)
+    return {};
+
+  if (bitop.src0 != 256u + vdst)
+    return {};
+  if (bitop.src1 >= 512u || bitop.src2 >= 512u)
+    return {};
+
+  using P = HazardTracker::Pipeline;
+  HazardTracker hz;
+  std::vector<uint32_t> words;
+  hz.emit(words, build_vop2(kOpAndB32, vdst, bitop.src2, vdst), P::VALU);
+  hz.emit(words, build_vop2(kOpXorB32, vdst, bitop.src1, vdst), P::VALU);
+  return words;
+}
+
+/// @brief Lower a CDNA4 global_store_dwordx4 whose data source is AccVGPR.
+/// @details CDNA4 encodes the data VGPR index plus an acc bit. RDNA4 has only
+/// the unified VGPR field, so data must be shifted by the kernel's accumulator
+/// offset before encoding the VGLOBAL store.
+std::vector<uint32_t> lower_flat_glbl_acc_store_b128(const Instruction &inst,
+                                                     uint16_t accum_vgpr_base) {
+  if (accum_vgpr_base == 0)
+    return {};
+
+  const auto *raw = inst.raw_encoding();
+  if (!raw || inst.size() < 8)
+    return {};
+
+  cdna4::FlatGlblMachineInst src{};
+  std::memcpy(&src, raw, sizeof(src));
+  if (src.acc == 0)
+    return {};
+
+  rdna4::VglobalMachineInst dst{};
+  dst.encoding = 0xEE;
+  dst.op = kOpGlobalStoreB128;
+  dst.ioffset = src.offset;
+  dst.sve = src.sve;
+  dst.vaddr = src.addr;
+  dst.vsrc = static_cast<uint8_t>(accum_vgpr_base + src.data);
+  dst.saddr = src.saddr == 0x7F ? 0x7C : src.saddr;
+  dst.vdst = src.vdst;
+  dst.nv = 0;
+
+  std::vector<uint32_t> words(3);
+  std::memcpy(words.data(), &dst, sizeof(dst));
   return words;
 }
 
@@ -499,10 +582,16 @@ std::vector<uint32_t> expand_v_lshl_add_u64(const Instruction &inst, uint32_t, u
   return lower_v_lshl_add_u64(inst, ROCJITSU_CODE_ARCH_RDNA4, offset, liveness);
 }
 
+std::vector<uint32_t> expand_v_bitop3_b32(const Instruction &inst, uint32_t, uint64_t,
+                                          const LivenessAnalysis &, const LaneLayout *,
+                                          const LaneLayout *) {
+  return lower_v_bitop3_b32(inst);
+}
+
 std::vector<uint32_t> expand_accvgpr_read(const Instruction &inst, uint32_t, uint64_t,
                                           const LivenessAnalysis &, const LaneLayout *,
                                           const LaneLayout *) {
-  return lower_accvgpr_read(inst, ROCJITSU_CODE_ARCH_RDNA4);
+  return lower_accvgpr_read(inst, ROCJITSU_CODE_ARCH_RDNA4, 0);
 }
 
 std::vector<uint32_t> expand_accvgpr_write(const Instruction &inst, uint32_t, uint64_t,
@@ -516,7 +605,7 @@ std::vector<uint32_t> expand_mfma_f32_16x16x16_f16(const Instruction &inst, uint
                                                    const LivenessAnalysis &liveness,
                                                    const LaneLayout *guest,
                                                    const LaneLayout *host) {
-  return lower_mfma_f32_16x16x16_f16(inst, static_cast<rj_code_arch_t>(arch), offset, liveness,
+  return lower_mfma_f32_16x16x16_f16(inst, static_cast<rj_code_arch_t>(arch), offset, liveness, 0,
                                      guest, host);
 }
 
@@ -529,19 +618,23 @@ std::vector<uint32_t> expand_mfma_f32_16x16x16_f16(const Instruction &inst, uint
 // SOP2:s_and_b32 both use opcode 12, so semantic rules must include the
 // encoding prefix to avoid expanding an unrelated instruction.
 constexpr uint16_t kCdna4Enc_SOPP = 0x17F;
+constexpr uint16_t kCdna4Enc_FLAT_GLBL = 0x1B8;
 constexpr uint16_t kCdna4Enc_VOP3P = 0x1A7;
 // For VOP3, the current decoder key is still the raw top nine bits of word0,
 // so it includes the high opcode bits rather than only the six-bit VOP3
 // encoding field. Keep this constant tied to the concrete source instruction.
 constexpr uint16_t kCdna4Enc_VOP3_v_lshl_add_u64 = 0x1A4;
+constexpr uint16_t kCdna4Enc_VOP3_v_bitop3_b32 = 0x1A4;
 
 // CDNA4 opcodes (from decoder: opcode_ = inst_.op)
 constexpr uint16_t kCdna4Op_s_barrier = 10;
 constexpr uint16_t kCdna4Op_s_waitcnt = 12;
+constexpr uint16_t kCdna4Op_global_store_dwordx4 = 31;
 constexpr uint16_t kCdna4Op_v_mfma_f32_16x16x16_f16 = 77;
 constexpr uint16_t kCdna4Op_v_accvgpr_read = 88;
 constexpr uint16_t kCdna4Op_v_accvgpr_write = 89;
 constexpr uint16_t kCdna4Op_v_lshl_add_u64 = 520;
+constexpr uint16_t kCdna4Op_v_bitop3_b32 = 564;
 
 const TranslationRule kExpandRules_cdna4_to_rdna4[] = {
     {kCdna4Enc_SOPP, kCdna4Op_s_barrier, RuleAction::Expand, 0, 0, nullptr, expand_s_barrier,
@@ -550,6 +643,8 @@ const TranslationRule kExpandRules_cdna4_to_rdna4[] = {
      nullptr},
     {kCdna4Enc_VOP3_v_lshl_add_u64, kCdna4Op_v_lshl_add_u64, RuleAction::Expand, 0, 0, nullptr,
      expand_v_lshl_add_u64, nullptr, nullptr},
+    {kCdna4Enc_VOP3_v_bitop3_b32, kCdna4Op_v_bitop3_b32, RuleAction::Expand, 0, 0, nullptr,
+     expand_v_bitop3_b32, nullptr, nullptr},
     {kCdna4Enc_VOP3P, kCdna4Op_v_mfma_f32_16x16x16_f16, RuleAction::Expand, 0, 0, nullptr,
      expand_mfma_f32_16x16x16_f16, &kMfmaF32_16x16x16_F16_Cdna4, &kWmmaF32_16x16x16_F16_Rdna4},
     {kCdna4Enc_VOP3P, kCdna4Op_v_accvgpr_read, RuleAction::Expand, 0, 0, nullptr,
@@ -570,10 +665,42 @@ SemanticTranslator::SemanticTranslator(rj_code_arch_t guest, rj_code_arch_t host
     expand_rules_ = kExpandRules_cdna4_to_rdna4;
 }
 
+void SemanticTranslator::set_accum_offset_info(std::vector<AccumOffsetInfo> infos) {
+  std::ranges::sort(infos, {}, &AccumOffsetInfo::entry_text_offset);
+  accum_offsets_ = std::move(infos);
+}
+
+uint16_t SemanticTranslator::accum_vgpr_base_for_offset(uint64_t offset) const {
+  uint16_t base = 0;
+  for (const auto &info : accum_offsets_) {
+    if (info.entry_text_offset > offset)
+      break;
+    base = info.vgpr_base;
+  }
+  return base;
+}
+
 std::vector<uint32_t> SemanticTranslator::try_lower_expand(const Instruction &inst, uint64_t offset,
                                                            const LivenessAnalysis &liveness) const {
   const uint16_t enc = inst.encoding_id();
   const uint16_t op = inst.opcode();
+
+  if (enc == kCdna4Enc_VOP3P && op == kCdna4Op_v_mfma_f32_16x16x16_f16) {
+    return lower_mfma_f32_16x16x16_f16(inst, host_arch_, offset, liveness,
+                                       accum_vgpr_base_for_offset(offset),
+                                       &kMfmaF32_16x16x16_F16_Cdna4, &kWmmaF32_16x16x16_F16_Rdna4);
+  }
+
+  if (enc == kCdna4Enc_VOP3P && op == kCdna4Op_v_accvgpr_read) {
+    return lower_accvgpr_read(inst, host_arch_, accum_vgpr_base_for_offset(offset));
+  }
+
+  if (enc == kCdna4Enc_FLAT_GLBL && op == kCdna4Op_global_store_dwordx4) {
+    auto lowered = lower_flat_glbl_acc_store_b128(inst, accum_vgpr_base_for_offset(offset));
+    if (!lowered.empty())
+      return lowered;
+  }
+
   TranslationRule key{enc, op, RuleAction::Expand, 0, 0, nullptr, nullptr, nullptr, nullptr};
   auto it = std::lower_bound(expand_rules_.begin(), expand_rules_.end(), key);
   if (it != expand_rules_.end() && it->src_encoding_id == enc && it->src_opcode == op &&

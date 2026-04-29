@@ -83,7 +83,12 @@ public:
     bool wg_id_x_live = false;
   };
 
+  using AccumOffsetInfo = CodeObjectPatcher::AccumOffsetInfo;
+
   SemanticTranslator(rj_code_arch_t guest_arch, rj_code_arch_t host_arch);
+
+  /// @brief Set per-kernel AccVGPR placement from code-object descriptors.
+  void set_accum_offset_info(std::vector<AccumOffsetInfo> infos);
 
   /// @brief Rewrite workgroup_id SGPR references to TTMP registers.
   [[nodiscard]] std::vector<SemanticReplacement>
@@ -101,8 +106,11 @@ public:
   [[nodiscard]] bool has_rules() const { return !expand_rules_.empty(); }
 
 private:
+  [[nodiscard]] uint16_t accum_vgpr_base_for_offset(uint64_t offset) const;
+
   std::span<const TranslationRule> expand_rules_; ///< Sorted by (encoding_id, opcode).
   rj_code_arch_t host_arch_;
+  std::vector<AccumOffsetInfo> accum_offsets_;
 };
 
 } // namespace rocjitsu

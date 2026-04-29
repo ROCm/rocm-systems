@@ -29,3 +29,40 @@ function(rj_add_device_kernel name offload_arch)
     # Per-kernel target so dependents can reference it.
     add_custom_target(kernel_${name} DEPENDS ${out})
 endfunction()
+
+# Assemble a checked-in AMDGPU assembly fixture into a standalone code object.
+#
+# Usage: rj_add_amdgpu_asm_kernel(<name> <offload_arch>)
+#   name         - base name of the .s source (without extension)
+#   offload_arch - GPU target (e.g. gfx950)
+function(rj_add_amdgpu_asm_kernel name offload_arch)
+    set(src ${CMAKE_CURRENT_SOURCE_DIR}/${name}.s)
+    set(obj ${KERNEL_OUTPUT_DIR}/${name}.asm.o)
+    set(out ${KERNEL_OUTPUT_DIR}/${name}.hsaco)
+
+    add_custom_command(
+        OUTPUT ${obj}
+        COMMAND ${AMDCLANG}
+                -target amdgcn-amd-amdhsa
+                -mcpu=${offload_arch}
+                -x assembler
+                -c
+                -o ${obj} ${src}
+        DEPENDS ${src}
+        COMMENT "Assembling AMDGPU kernel: ${name} (${offload_arch})"
+    )
+
+    add_custom_command(
+        OUTPUT ${out}
+        COMMAND ${AMDCLANG}
+                -target amdgcn-amd-amdhsa
+                -mcpu=${offload_arch}
+                -nostdlib
+                -Wl,--no-undefined
+                -o ${out} ${obj}
+        DEPENDS ${obj}
+        COMMENT "Linking AMDGPU code object: ${name} (${offload_arch})"
+    )
+
+    add_custom_target(kernel_${name} DEPENDS ${out})
+endfunction()

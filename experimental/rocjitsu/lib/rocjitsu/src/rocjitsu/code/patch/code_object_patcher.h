@@ -49,9 +49,18 @@ public:
     int8_t sgpr_wg_id_z;        ///< SGPR index for workgroup_id_z, or -1 if not used.
   };
 
+  /// @brief Information about a kernel's AccVGPR placement in the unified file.
+  struct AccumOffsetInfo {
+    uint64_t entry_text_offset; ///< Kernel entry offset relative to .text start.
+    uint16_t vgpr_base;         ///< VGPR index where acc0 is placed, or 0 if not present.
+  };
+
   /// @brief Get workgroup_id SGPR assignments for each kernel.
   /// Parses the kernel descriptors to determine which SGPRs hold workgroup IDs.
   std::vector<WorkGroupIdInfo> workgroup_id_info() const;
+
+  /// @brief Get AccVGPR base assignments for each kernel.
+  std::vector<AccumOffsetInfo> accum_offset_info() const;
 
   std::vector<uint8_t> emit() const;
 

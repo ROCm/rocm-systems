@@ -201,12 +201,14 @@ def _build_rename_map() -> dict[str, str]:
         _add(f'DS_CMPST_{suffix}', f'DS_CMPSTORE_{suffix}')
 
     # --- DS read/write → load/store ---
-    for suffix in ('B32', 'B64', 'B128', 'B96',
+    for suffix in ('B8', 'B16', 'B32', 'B64', 'B128', 'B96',
                     'U8', 'I8', 'U16', 'I16', 'U8_D16', 'U8_D16_HI',
                     'I8_D16', 'I8_D16_HI', 'U16_D16', 'U16_D16_HI',
                     'I16_D16', 'I16_D16_HI', 'ADDTID_B32'):
         _add(f'DS_READ_{suffix}', f'DS_LOAD_{suffix}')
         _add(f'DS_WRITE_{suffix}', f'DS_STORE_{suffix}')
+        _add(f'ds_read_{suffix.lower()}', f'ds_load_{suffix.lower()}')
+        _add(f'ds_write_{suffix.lower()}', f'ds_store_{suffix.lower()}')
     # 2-address variants
     for suffix in ('B32', 'B64'):
         _add(f'DS_READ2_B32', f'DS_LOAD_2ADDR_B32')
@@ -217,6 +219,10 @@ def _build_rename_map() -> dict[str, str]:
         _add(f'DS_WRITE2_B64', f'DS_STORE_2ADDR_B64')
         _add(f'DS_WRITE2ST64_B32', f'DS_STORE_2ADDR_STRIDE64_B32')
         _add(f'DS_WRITE2ST64_B64', f'DS_STORE_2ADDR_STRIDE64_B64')
+        _add(f'ds_read2_{suffix.lower()}', f'ds_load_2addr_{suffix.lower()}')
+        _add(f'ds_read2st64_{suffix.lower()}', f'ds_load_2addr_stride64_{suffix.lower()}')
+        _add(f'ds_write2_{suffix.lower()}', f'ds_store_2addr_{suffix.lower()}')
+        _add(f'ds_write2st64_{suffix.lower()}', f'ds_store_2addr_stride64_{suffix.lower()}')
 
     # --- Float min/max → min_num/max_num (IEEE 754-2019 quiet NaN) ---
     for size in ('F16', 'F32', 'F64'):
