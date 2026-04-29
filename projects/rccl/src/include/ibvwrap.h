@@ -103,5 +103,6 @@ static inline const char* ibvGetGidStr(union ibv_gid* gid, char* gidStr, size_t 
 
 const char* ibvWcStatusStr(enum ibv_wc_status status);
 const char* ibvWcOpcodeStr(enum ibv_wc_opcode opcode);
+const char* ibvWrOpcodeStr(enum ibv_wr_opcode opcode);
 
 #endif //End include guard

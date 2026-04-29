@@ -134,6 +134,18 @@ struct alignas(64) ncclIbDev {
 extern struct ncclIbMergedDev IbCastMergedDevs[MAX_IB_VDEVS];
 extern struct ncclIbDev IbCastDevs[MAX_IB_DEVS];
 extern int IbCastRelaxedOrderingEnabled;
+extern bool IbCastUseInline;
+
+
+#define WR_IMM_RX_REQ_IDX_MASK  0xff
+#define WR_IMM_RX_REQ_IDX_SHIFT 24
+#define WR_IMM_SPLIT_DATA_FLAG  0x00800000
+#define WR_IMM_SIZE_MASK        0x007fffff
+extern int IbCastGdrFlushDisable;
+extern bool IbCastAinicRoce;
+extern bool rcclCtsInlineData;
+extern bool IbCastOffloadEnabled;
+extern int64_t rcclParamIbCastP2pDisableCts();
 
 #define NCCL_IB_LLSTR(ll) (((ll) == IBV_LINK_LAYER_INFINIBAND) ? "IB" : (((ll) == IBV_LINK_LAYER_ETHERNET) ? "RoCE" : "UNSPECIFIED"))
 
@@ -159,6 +171,7 @@ struct ncclIbDevInfo {
 
   //remote dev info
   union ibv_gid remoteGid;
+  int ibv_dev_index;
 };
 
 // Retain local RoCE address for error logging
@@ -190,6 +203,81 @@ extern const char* IbCastReqTypeStr[];
 // Maximal number of QPs a communicator can have for data transfers
 #define NCCL_IB_MAX_QPS 128
 
+struct ncclIbQpSchedParms {
+    bool enable;
+    bool wrrEnable;
+    uint64_t updateInterval; // in nsec
+    uint64_t resetInterval;  // in nsec
+    double weightNew;        // fractional weight applied to most recent RTT sample
+    uint32_t splitDataMin;   // in bytes
+    bool splitData;          // init from NCCL_IB_SPLIT_DATA_ON_QPS
+    bool doWrr;
+    bool resetRtt;
+    bool logEnable;
+    uint64_t logInterval;    // in nsec
+  };
+  extern struct ncclIbQpSchedParms castGlobalQpSchedParms;
+  
+  // Data about QP transmission
+  struct ncclIbQpTxData {
+    uint64_t startTimeNs;
+    uint64_t bytes;
+  };
+  
+  // For remapping work request ID so that additional info is avail at
+  // completion time of sends
+  struct ncclIbRemapWrId {
+    int state; // in use or unused
+    uint64_t origWrId;
+    int qpIndex;
+    struct ncclIbQpTxData tx;
+    struct ncclIbQpSchedParms parms;
+  };
+  
+  // Stats for scheduling QP transmissions
+  struct ncclIbQpTxStats {
+    uint64_t minRttSample;
+    uint64_t totRtt;
+    uint64_t numMeasurements;
+    double rtt;
+  };
+  
+  // Scratchpad for computing scheduler weights
+  struct ncclIbQpTxSchedScratchpad {
+    double rtt[NCCL_IB_MAX_QPS];
+  };
+  
+  // Scheduler for QP transmissions
+  struct ncclIbQpTxSched {
+    double weight;    // fraction of sub-chunk to be transmitted on QP
+    double minWeight; // min value of weight used
+    double maxWeight; // max value of weight used
+  };
+  
+  #define NCCL_IB_TARGET_TOT_TOKENS 100
+  
+  // Tokens for weighted round-robin QP scheduler
+  struct ncclIbRrTokens {
+    int totTokens;
+    int qpTokens[NCCL_IB_MAX_QPS];
+  };
+  
+  // Scheduler for weighted round-robin QP transmissions
+  struct ncclIbRrQpTxSched {
+    struct ncclIbRrTokens initTokens;
+    struct ncclIbRrTokens activeTokens;
+    int qpIndex;
+  };
+  
+  // QP scheduling descriptor
+  struct IbCastQpSchedDesc {
+    bool wrrSched;
+    int nqps;
+    int startQpIndex;
+    struct ncclIbQpSchedParms parms;
+};
+
+
 // Tracks data transfers between sender and receiver. A multi-recv/send uses a
 // single record.
 struct ncclIbRequestCompletionRecord {
@@ -219,6 +307,7 @@ struct ncclIbRequest {
   // device, the corresponding counter is decremented. When the counter reaches
   // zero it means that the request was fully completed on that device.
   int events[NCCL_IB_MAX_DEVS_PER_NIC];
+  int ctsEvents[NCCL_IB_MAX_DEVS_PER_NIC];
   // Array of pointers to the per-device base structures to make it easier to
   // poll the device's CQ when the request is tested for progress.
   // The pointers are initialized only for the devices that the request expects
@@ -229,6 +318,7 @@ struct ncclIbRequest {
 #endif
   uint64_t id;
   int nreqs;
+  struct IbCastQpSchedDesc desc;
   union {
     struct {
       int size;
@@ -268,8 +358,21 @@ struct alignas(64) ncclIbSendFifo {
   uint32_t nreqs;
   uint32_t tag;
   uint64_t idx;
-  char padding[16];
+  uint16_t rxReqIndex;
+  char padding[14];
 };
+
+#define MAX_INLINE_DATA_SIZE 24
+struct alignas(32) ncclIbSendFifoCtsInline {
+  uint64_t addr;
+  uint32_t rkeys[1];
+  int size;
+  uint8_t nreqs;
+  uint16_t rxReqIndex;
+  uint16_t tag;
+  uint32_t idx;
+  char padding[9];
+} __attribute__((packed));
 
 struct ncclIbQpInitAttr {
   ibv_qp_state state;
@@ -317,6 +420,7 @@ struct ncclIbQp {
   // The index of the device on the remote side to which this QP is connected
   // to.
   int remDevIdx;
+  int8_t ctsQpSlot;
 };
 
 // We need to support NCCL_NET_MAX_REQUESTS for each concurrent receive
@@ -364,6 +468,24 @@ struct alignas(32) ncclIbNetCommBase {
   // Array of pointers to the "actual" QPs that are used for data transfers.
   // The pointers point to QPs in the ncclIbNetCommBase::qps[] array.
   struct ncclIbQp* activeQps[NCCL_IB_MAX_QPS];
+
+  //NET-IB-CAST: QP scheduler state
+  struct ncclIbRemapWrId remapWrId[NET_IB_MAX_REQUESTS];
+  struct ncclIbQpTxStats qpTxStats[NCCL_IB_MAX_QPS];
+  uint64_t nextQpTxStatsResetNs;
+  struct ncclIbQpTxSched qpTxSched[NCCL_IB_MAX_QPS];
+  struct ncclIbRrQpTxSched rrQpTxSched;
+  bool qpTxSchedInit;
+  uint64_t nextQpTxSchedUpdateNs;
+  uint64_t nextSchedLogNs;
+  int remapHead;
+  uint64_t stagedParmsConEpoch;
+  bool schedParmsInit;
+  struct ncclIbQpSchedParms schedParms;
+  bool resetRttDone;
+  int qpIndex;
+  int rxPosts[NCCL_IB_MAX_QPS * NCCL_NET_IB_MAX_RECVS];
+
   uint64_t fifoHead;
   int nqps;
   int splitDataOnQps;
@@ -465,6 +587,7 @@ struct ncclIbSendComm {
   struct ncclIbRemCompletionsRecords remCmplsRecords;
   int ar; // Use adaptive routing when all merged devices have it enabled
   uint64_t putSignalScratchpad;
+  bool useCtsOffload;
 };
 // The SendFifo needs to be 32-byte aligned and each element needs
 // to be a 32-byte multiple, so that an entry does not get split and
@@ -472,13 +595,17 @@ struct ncclIbSendComm {
 static_assert((sizeof(struct ncclIbNetCommBase) % 32) == 0, "ncclIbNetCommBase size must be 32-byte multiple to ensure ctsFifo is at proper offset");
 static_assert((offsetof(struct ncclIbSendComm, ctsFifo) % 32) == 0, "ncclIbSendComm ctsFifo must be 32-byte aligned");
 static_assert((sizeof(struct ncclIbSendFifo) % 32) == 0, "ncclIbSendFifo element size must be 32-byte multiples");
+static_assert((sizeof(struct ncclIbSendFifoCtsInline) % 32) == 0, "ncclIbSendFifoCtsInline element size must be 32-byte multiples");
 static_assert((offsetof(struct ncclIbSendComm, sges) % 32) == 0, "sges must be 32-byte aligned");
 static_assert((offsetof(struct ncclIbSendComm, wrs) % 32) == 0, "wrs must be 32-byte aligned");
 
 struct ncclIbGpuFlush {
   struct ibv_mr* hostMr;
+  struct ibv_mr* gpuMr;
+  int* gpuFlushGpuMem;
   struct ibv_sge sge;
   struct ncclIbQp qp;
+  int dmabufFd;
 };
 
 // This structure describes the FIFO which the receiver uses when it sends CTS
@@ -538,6 +665,7 @@ struct ncclIbRecvComm {
   // To avoid allocation and memset on the data-path a single structure is used
   // and only the wr_id is updated before posting a receive work request.
   struct ibv_recv_wr ibRecvWorkRequest;
+  bool useCtsOffload;
 };
 static_assert((offsetof(struct ncclIbRecvComm, remCtsFifo) % 32) == 0, "ncclIbRecvComm ctsFifo must be 32-byte aligned");
 
@@ -579,6 +707,7 @@ ncclResult_t IbCastPeerMemSupport();
 ncclResult_t IbCastDmaBufSupport(int dev);
 
 void IbCastAddEvent(struct ncclIbRequest* req, int devIndex);
+void IbCastAddEventCTS(struct ncclIbRequest* req, int devIndex);
 ncclResult_t IbCastGetGidIndex(struct ibv_context *context, uint8_t portNum, struct ibv_port_attr* portAttr, int *gidIndex);
 ncclResult_t IbCastGetRequest(struct ncclIbNetCommBase* base, struct ncclIbRequest** req);
 ncclResult_t IbCastFreeRequest(struct ncclIbRequest* r);
@@ -612,5 +741,81 @@ ncclResult_t IbCastFinalizeDevices(void);
 ncclResult_t IbCastFinalize(void* ctx);
 ncclResult_t IbCastSetNetAttr(void *ctx, ncclNetAttr_t *netAttr);
 
+
+// AINIC-specific infrastructure
+#define NCCL_CTS_QP_SLOT_INVALID 0xFF
+
+// IB-CAST specific infrastructure
+#define NCCL_IB_MAX_QPS 128
+
+#define NSEC_PER_USEC           1000ULL
+#define NSEC_PER_MSEC           (NSEC_PER_USEC * 1000)
+#define NSEC_PER_SEC            (NSEC_PER_MSEC * 1000)
+#define NSEC_PER_MIN            (NSEC_PER_SEC * 60)
+
+#define QP_SCHED_RESET_MIN      NSEC_PER_MSEC
+#define QP_SCHED_RESET_NEVER    0
+
+#define QP_SCHED_UPDATE_MIN     NSEC_PER_USEC
+#define QP_SCHED_UPDATE_MAX     NSEC_PER_MIN
+
+#define QP_SCHED_WEIGHT_NONE    0
+#define QP_SCHED_WEIGHT_MIN     QP_SCHED_WEIGHT_NONE
+#define QP_SCHED_WEIGHT_MAX     1.0
+
+#define QP_SCHED_DISABLE        0
+#define QP_SCHED_ENABLE         1
+
+#define QP_SCHED_ENABLE_DEF             QP_SCHED_ENABLE
+#define QP_SCHED_WRR_ENABLE_DEF         QP_SCHED_ENABLE
+#define QP_SCHED_RESET_DEF              (NSEC_PER_SEC * 60)
+#define QP_SCHED_UPDATE_DEF             (NSEC_PER_USEC * 50)
+#define QP_SCHED_WEIGHT_DEF             QP_SCHED_WEIGHT_NONE
+#define QP_SCHED_SPLIT_DATA_MIN_DEF     (64 * 1024)
+#define QP_SCHED_LOG_DEF                NSEC_PER_SEC
+
+// CAST – each variable is accessible as RCCL_IB_QP_SCHED_* or NCCL_IB_QP_SCHED_*
+// Declarations only — definitions live in scheduler.cc to avoid duplicate symbols.
+extern int64_t rcclParamIbCastQpSchedEnable();
+extern int64_t rcclParamIbQpSchedWrrEnable();
+extern int64_t rcclParamIbQpSchedResetInterval();
+extern int64_t rcclParamIbQpSchedUpdateInterval();
+extern int64_t rcclParamIbQpSchedSplitDataMin();
+extern int64_t rcclParamIbQpSchedLogInterval();
+
+#define QP_SCHED_WEIGHT_ENV_VAR           "RCCL_IB_QP_SCHED_WEIGHT"
+#define QP_SCHED_WEIGHT_ENV_VAR_ALIAS     "NCCL_IB_QP_SCHED_WEIGHT"
+#define QP_SCHED_LOG_PATH_ENV_VAR         "RCCL_IB_QP_SCHED_LOG_PATH"
+#define QP_SCHED_LOG_PATH_ENV_VAR_ALIAS   "NCCL_IB_QP_SCHED_LOG_PATH"
+
+#define QP_SCHED_LOG_FILE_NAME_PREFIX	"cast_log_"
+#define NCCL_NET_IB_REMAP_UNUSED 0
+#define NCCL_NET_IB_REMAP_USED   1
+
+#define BITS_PER_BYTE 8
+#define MEG           1000000
+
+#define TIMESPEC_TO_NSEC(TS_PTR)                   \
+  ((((uint64_t) (TS_PTR)->tv_sec) * NSEC_PER_SEC) + \
+   ((uint64_t) (TS_PTR)->tv_nsec))
+
+  
+// Control block for staged dynamic scheduling parameters
+struct ncclIbQpSchedParmsCB {
+  ncclFunc_t collType;
+  size_t msgSz;
+  uint64_t prodEpoch;
+  struct ncclIbQpSchedParms parms;
+};
+
+ncclResult_t IbCastQpSchedInitParms(struct ncclIbQpSchedParms *parms);
+void IbCastLogSched(struct ncclIbSendComm *comm);
+void IbCastUpdateSchedParmsTry(struct ncclIbNetCommBase *base, int nreqs, int size);
+void IbCastQpSchedUpdateTx(struct ncclIbNetCommBase *base);
+void IbCastQpSchedUpdateTxStats(struct ncclIbRemapWrId *remap,
+  struct ncclIbNetCommBase *base);
+int IbCastQpSchedGetEffectiveTxNqps(struct ncclIbRequest* req, int *startQpIndex, bool *wrrSched);
+ncclResult_t IbCastQpSchedGetRemap(struct ncclIbNetCommBase* base, uint64_t wrId, int qpIndex, struct ncclIbRemapWrId** remap);
+ncclResult_t IbCastQpSchedFreeRemap(struct ncclIbRemapWrId* r);
 #endif
 
