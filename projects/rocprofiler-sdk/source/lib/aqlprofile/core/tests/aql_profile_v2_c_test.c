@@ -9,10 +9,9 @@
 int
 aql_profile_v2_c_compatibility_test(void)
 {
-    aqlprofile_att_buffer_status_t status = {0};
-    aqlprofile_spm_available_configuration_t config = {
-        AQLPROFILE_SPM_PARAMETER_TYPE_NONE, 0, 0};
-    aqlprofile_spm_decode_query_t query = AQLPROFILE_SPM_DECODE_QUERY_LAST;
+    aqlprofile_att_buffer_status_t           status = {0};
+    aqlprofile_spm_available_configuration_t config = {AQLPROFILE_SPM_PARAMETER_TYPE_NONE, 0, 0};
+    aqlprofile_spm_decode_query_t            query  = AQLPROFILE_SPM_DECODE_QUERY_LAST;
 
     (void) status;
     (void) config;

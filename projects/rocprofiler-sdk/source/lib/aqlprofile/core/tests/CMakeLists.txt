@@ -17,7 +17,8 @@ set(AQLPROFILE_CORE_TEST_SOURCES
 add_executable(aqlprofile-core-tests)
 
 target_sources(aqlprofile-core-tests PRIVATE ${AQLPROFILE_CORE_TEST_SOURCES})
-set_target_properties(aqlprofile-core-tests PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON)
+set_target_properties(aqlprofile-core-tests PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED
+                                                                     ON)
 
 target_link_libraries(
     aqlprofile-core-tests

@@ -11,7 +11,8 @@
 #include <vector>
 #include <memory>
 
-extern "C" int aql_profile_v2_c_compatibility_test(void);
+extern "C" int
+aql_profile_v2_c_compatibility_test(void);
 
 namespace aql_profile_v2_tests
 {
