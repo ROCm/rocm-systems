@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 # Copyright Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
@@ -46,7 +47,7 @@ def get_rocm_path(script_path: Path, rocm_path: Path | None) -> Path:
     ):
         return script_path.parents[3].resolve()
 
-    raise SystemExit("ROCM_PATH is required when the runner is not installed.")
+    raise RuntimeError("ROCM_PATH is required when the runner is not installed.")
 
 
 def resolve_executable(bin_dir: Path, name: str) -> Path:
@@ -55,7 +56,7 @@ def resolve_executable(bin_dir: Path, name: str) -> Path:
         candidate = bin_dir / f"{name}{suffix}"
         if candidate.exists():
             return candidate.resolve()
-    raise SystemExit(f"{name} was not found in {bin_dir}")
+    raise FileNotFoundError(f"{name} was not found in {bin_dir}")
 
 
 def get_visible_gpu_count(env: dict[str, str], bin_dir: Path) -> int:
@@ -83,7 +84,7 @@ def run_rccl_unit_tests(bin_dir: Path, work_dir: Path) -> None:
         logging.info("Skipping RCCL unit tests: <2 GPUs visible")
         return
 
-    env["HIP_VISIBLE_DEVICES"] = "2,3"
+    env.setdefault("HIP_VISIBLE_DEVICES", "0,1")
     env["UT_MIN_GPUS"] = "2"
     env["UT_MAX_GPUS"] = "2"
     env["UT_POW2_GPUS"] = "1"
