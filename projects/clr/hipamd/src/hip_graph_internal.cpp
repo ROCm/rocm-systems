@@ -241,6 +241,25 @@ void Graph::ScheduleOneNode(Node start, int stream_id) {
 }
 
 // ================================================================================================
+void Graph::DisableSegmentSchedulingRecursive() {
+  segments_.clear();
+  node_to_segment_id_.clear();
+  segments_per_level_.clear();
+  max_dependency_level_ = -1;
+  use_segment_scheduling_ = false;
+
+  for (auto node : vertices_) {
+    node->segment_id_ = -1;
+    if (node->GetType() == hipGraphNodeTypeGraph) {
+      auto child = reinterpret_cast<hip::ChildGraphNode*>(node)->GetChildGraph();
+      if (child != nullptr) {
+        child->DisableSegmentSchedulingRecursive();
+      }
+    }
+  }
+}
+
+// ================================================================================================
 hipError_t Graph::ScheduleNodes() {
   if (use_segment_scheduling_) {
     // Segment packet scheduling logic
@@ -251,13 +270,10 @@ hipError_t Graph::ScheduleNodes() {
     if (result == hipErrorNotReady) {
       ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_CODE,
               "[hipGraph] Falling back to classic scheduling for complex graph");
-      // Clear any partial segment data that might have been created
-      segments_.clear();
-      node_to_segment_id_.clear();
-      segments_per_level_.clear();
-      max_dependency_level_ = -1;
-      // Disable segment scheduling for this graph permanently
-      use_segment_scheduling_ = false;
+      // Clear segment state on this graph and all descendant child graphs
+      // so that classic ScheduleOneNode -> child->ScheduleNodes() assigns
+      // stream_id_ to every node at all nesting levels.
+      DisableSegmentSchedulingRecursive();
 
       // Continue to classic scheduling logic below
     } else {

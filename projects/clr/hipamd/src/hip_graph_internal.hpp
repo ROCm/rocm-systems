@@ -276,7 +276,12 @@ class GraphNode : public hipGraphNodeDOTAttribute {
   void SetStream(
       const std::vector<hip::Stream*>& streams  //!< A pool of streams to use in graph's execution
   ) {
-    assert(stream_id_ != -1 && "Stream ID wasn't initialized");
+    assert(stream_id_ >= 0 &&
+           static_cast<size_t>(stream_id_) < streams.size() &&
+           "Stream ID wasn't initialized or is out of bounds");
+    if (stream_id_ < 0 || static_cast<size_t>(stream_id_) >= streams.size()) {
+      stream_id_ = 0;
+    }
     stream_ = streams[stream_id_];
     // Reset the launch ID after the stream assignment
     launch_id_ = -1;
@@ -637,6 +642,10 @@ class Graph {
   bool IsSegmentSchedulingEnabled() const { return use_segment_scheduling_; }
   // Enable or disable segment scheduling for this graph
   void SetSegmentScheduling(bool segmentScheduling) {use_segment_scheduling_ = segmentScheduling;}
+  /// Recursively clears segment scheduling state on this graph and all
+  /// descendant child graphs, so that classic scheduling can assign
+  /// stream_id_ to every node.
+  void DisableSegmentSchedulingRecursive();
   // returns the original graph ptr if cloned
   const Graph* getOriginalGraph() const { return pOriginalGraph_; }
   // Add user obj resource to graph
