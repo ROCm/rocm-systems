@@ -324,35 +324,14 @@ jobs:
           ./amd_smi_nodrm_ex > /tmp/test-results-${{ matrix.os }}/amd_smi_nodrm_ex.log 2>&1 || echo 'amd_smi_nodrm_ex failed'
           echo "Example tests done"
 
-      - name: AMDSMI Test Results
+      - name: Upload AMDSMI Test Results
         if: always()
-        run: |
-          echo "Displaying AMDSMI test results for ${{ matrix.os }}"
-          cat /tmp/test-results-${{ matrix.os }}/amdsmi_tests.log || echo "No AMDSMI test results found for ${{ matrix.os }}"
-
-      - name: Integration Test Results
-        if: always()
-        run: |
-          echo "Displaying Integration test results for ${{ matrix.os }}"
-          cat /tmp/test-results-${{ matrix.os }}/integration_test_output.txt || echo "No integration test results found for ${{ matrix.os }}"
-
-      - name: Unit Test Results
-        if: always()
-        run: |
-          echo "Displaying Unit Test Results for ${{ matrix.os }}"
-          cat /tmp/test-results-${{ matrix.os }}/unit_test_output.txt || echo "No unit test results found for ${{ matrix.os }}"
-
-      - name: Example DRM Test Results
-        if: always()
-        run: |
-          echo "Displaying Example DRM test results for ${{ matrix.os }}"
-          cat /tmp/test-results-${{ matrix.os }}/amd_smi_drm_ex.log || echo "No DRM example test results found for ${{ matrix.os }}"
-
-      - name: Example NoDRM Test Results
-        if: always()
-        run: |
-          echo "Displaying Example NoDRM test results for ${{ matrix.os }}"
-          cat /tmp/test-results-${{ matrix.os }}/amd_smi_nodrm_ex.log || echo "No NoDRM example test results found for ${{ matrix.os }}"
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: amdsmi-test-results-${{ matrix.os }}
+          path: /tmp/test-results-${{ matrix.os }}/
+          if-no-files-found: warn
+          retention-days: 14
 
   rpm-buildinstall:
     name: Build
@@ -809,32 +788,11 @@ jobs:
           ./amd_smi_nodrm_ex > /tmp/test-results-${{ matrix.os }}/amd_smi_nodrm_ex.log 2>&1 || echo 'amd_smi_nodrm_ex failed'
           echo "Example tests done"
 
-      - name: AMDSMI Test Results
+      - name: Upload AMDSMI Test Results
         if: always()
-        run: |
-          echo "Displaying AMDSMI test results for ${{ matrix.os }}"
-          cat /tmp/test-results-${{ matrix.os }}/amdsmi_tests.log || echo "No AMDSMI test results found for ${{ matrix.os }}"
-
-      - name: Integration Test Results
-        if: always()
-        run: |
-          echo "Displaying Integration test results for ${{ matrix.os }}"
-          cat /tmp/test-results-${{ matrix.os }}/integration_test_output.txt || echo "No integration test results found for ${{ matrix.os }}"
-
-      - name: Unit Test Results
-        if: always()
-        run: |
-          echo "Displaying Unit Test Results for ${{ matrix.os }}"
-          cat /tmp/test-results-${{ matrix.os }}/unit_test_output.txt || echo "No unit test results found for ${{ matrix.os }}"
-
-      - name: Example DRM Test Results
-        if: always()
-        run: |
-          echo "Displaying Example DRM test results for ${{ matrix.os }}"
-          cat /tmp/test-results-${{ matrix.os }}/amd_smi_drm_ex.log || echo "No DRM example test results found for ${{ matrix.os }}"
-
-      - name: Example NoDRM Test Results
-        if: always()
-        run: |
-          echo "Displaying Example NoDRM test results for ${{ matrix.os }}"
-          cat /tmp/test-results-${{ matrix.os }}/amd_smi_nodrm_ex.log || echo "No NoDRM example test results found for ${{ matrix.os }}"
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: amdsmi-test-results-${{ matrix.os }}
+          path: /tmp/test-results-${{ matrix.os }}/
+          if-no-files-found: warn
+          retention-days: 14
