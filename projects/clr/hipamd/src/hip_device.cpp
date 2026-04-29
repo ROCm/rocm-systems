@@ -135,7 +135,6 @@ void Device::AddSafeStream(Stream* event_stream, Stream* wait_stream) {
 // ================================================================================================
 void Device::Reset() {
   auto* dev = devices()[0];
-  dev->destroyXferQueue();
 
   {
     std::scoped_lock lock(lock_);
@@ -147,6 +146,8 @@ void Device::Reset() {
   }
   flags_ = hipDeviceScheduleSpin;
   destroyAllStreams();
+
+  dev->destroyXferQueue();
 
   // Clear hostcall allocations to avoid ~Device() accessing freed Memory objects later.
   dev->ClearHostcallMemories();
