@@ -33,8 +33,8 @@
 
 namespace rocshmem {
 
-using AWF_Queue_statusT = AtomicWFQueue<volatile char*, HIPAllocator>;
-using AWF_Queue_ret_buffT = AtomicWFQueue<uint64_t*, HIPAllocator>;
+using AWF_Queue_statusT = AtomicWFQueue<volatile char*>;
+using AWF_Queue_ret_buffT = AtomicWFQueue<uint64_t*>;
 
 struct BlockHandle {
   ROStats profiler{};

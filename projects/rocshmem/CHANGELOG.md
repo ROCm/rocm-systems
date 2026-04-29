@@ -1,5 +1,7 @@
 # Changelog for rocSHMEM
-## Unreleased - rocSHMEM 3.3.0 for ROCm x.x.x
+## Unreleased - rocSHMEM 3.4.0 for ROCm x.x.x
+
+## Since last release (ROCm 7.12)
 ### Added
 * Added new APIs:
    * `rocshmem_quiet_on_stream`
@@ -18,8 +20,8 @@
   `ROCSHMEM_MAX_NAME_LEN`, `ROCSHMEM_VENDOR_STRING`, `ROCSHMEM_VERSION`,
   `ROCSHMEM_VENDOR_MAJOR_VERSION`, `ROCSHMEM_VENDOR_MINOR_VERSION`,
   `ROCSHMEM_VENDOR_PATCH_VERSION`
-* Added vendor string and backend metadata to `rocshmem_info` output
-* Added `ROCSHMEM_TEAM_WORLD` for the device code
+* Added vendor string and backend metadata to the `rocshmem_info` output
+* Added `ROCSHMEM_TEAM_WORLD` for device code
 * Added `ROCSHMEM_TEAM_SHARED` predefined team for PEs sharing a common memory domain (same node)
 * Added new environment variables:
   * `OVERRIDE_NIC_FIRMWARE_CHECK`
