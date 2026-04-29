@@ -278,6 +278,37 @@ class TestGenerateDeviceMetadata:
         )
         assert "Requires-Dist: some-dep-gfx1100 >= 2.0" in metadata
 
+    def test_gfxarch_dep_dropped_for_family(self):
+        # @GFXARCH@-templated deps name per-target packages (e.g.
+        # rocm-sdk-device-<target>) which only exist for TARGET-level
+        # bundles. Family/sub-family device wheels are co-installed with a
+        # target wheel that already carries those deps, so the line must be
+        # dropped here.
+        identity = WheelIdentity(
+            name="torch",
+            version="2.10.0+rocm7.13",
+            python_tag="cp313",
+            abi_tag="cp313",
+            platform_tag="manylinux_2_28_x86_64",
+            dist_info_name="torch-2.10.0+rocm7.13.dist-info",
+        )
+        family_metadata = generate_device_metadata(
+            identity,
+            "gfx11",
+            "amd-torch-device",
+            ["rocm-sdk-device-@GFXARCH@ == 7.13", "static-dep == 1.0"],
+        )
+        assert "rocm-sdk-device" not in family_metadata
+        assert "Requires-Dist: static-dep == 1.0" in family_metadata
+
+        sub_family_metadata = generate_device_metadata(
+            identity,
+            "gfx12_0",
+            "amd-torch-device",
+            ["rocm-sdk-device-@GFXARCH@ == 7.13"],
+        )
+        assert "rocm-sdk-device" not in sub_family_metadata
+
 
 class TestArchToBundleKey:
     def test_bare_arch(self):

@@ -286,9 +286,6 @@ void Sysfs::write_gpu_node(const std::string &nodes_dir, const GpuInfo &gpu) {
 }
 
 void Sysfs::write_drm_tree(const GpuInfo &gpu) {
-  // Generate /sys/class/drm/ equivalent for amdsmi and rocm_smi discovery.
-  // amdsmi scans /sys/class/drm/card<N>/ to find GPU devices, then reads
-  // /device/vendor, /device/device, and resolves renderD<M> from the dir.
   char tmpl[] = "/tmp/rocjitsu_drm_XXXXXX";
   char *dir = mkdtemp(tmpl);
   if (!dir)
@@ -296,21 +293,12 @@ void Sysfs::write_drm_tree(const GpuInfo &gpu) {
   drm_dir_ = dir;
 
   uint32_t render_minor = gpu.drm_render_minor;
-  std::string card_dir = drm_dir_ + "/card0";
-  std::string device_dir = card_dir + "/device";
-  std::string render_dir = drm_dir_ + "/renderD" + std::to_string(render_minor);
+  std::string render_name = "renderD" + std::to_string(render_minor);
 
-  make_dir(device_dir + "/drm");
-  make_dir(render_dir);
-
-  // PCI device identity files read by amdsmi.
   std::ostringstream vendor_hex, device_hex;
   vendor_hex << "0x" << std::hex << gpu.vendor_id << "\n";
   device_hex << "0x" << std::hex << gpu.device_id << "\n";
-  write_file(device_dir + "/vendor", vendor_hex.str());
-  write_file(device_dir + "/device", device_hex.str());
 
-  // uevent file used by udev-based discovery.
   uint32_t bus = (gpu.location_id >> 8) & 0xFF;
   uint32_t dev = (gpu.location_id >> 3) & 0x1F;
   uint32_t func = gpu.location_id & 0x7;
@@ -321,14 +309,18 @@ void Sysfs::write_drm_tree(const GpuInfo &gpu) {
          << std::dec << "PCI_SLOT_NAME=" << std::setw(4) << std::setfill('0') << std::hex
          << gpu.domain << ":" << std::setw(2) << std::setfill('0') << bus << ":" << std::setw(2)
          << std::setfill('0') << dev << "." << func << "\n";
-  write_file(device_dir + "/uevent", uevent.str());
 
-  // renderD<M> symlink inside device/drm/ — amdsmi uses this to map
-  // card<N> to the render node.
-  std::string render_name = "renderD" + std::to_string(render_minor);
-  make_dir(device_dir + "/drm/" + render_name);
+  // Both card0/ and renderD<M>/ need identical device/ subtrees so rsmi can
+  // resolve card↔render in either direction.
+  for (const std::string &entry_name : {std::string("card0"), render_name}) {
+    std::string device_dir = drm_dir_ + "/" + entry_name + "/device";
+    make_dir(device_dir + "/drm/card0");
+    make_dir(device_dir + "/drm/" + render_name);
+    write_file(device_dir + "/vendor", vendor_hex.str());
+    write_file(device_dir + "/device", device_hex.str());
+    write_file(device_dir + "/uevent", uevent.str());
+  }
 
-  // version file at the DRM root.
   write_file(drm_dir_ + "/version", "drm 1.1.0\n");
 }
 
@@ -341,6 +333,7 @@ std::string Sysfs::generate(const GpuInfo &gpu) {
     return {};
 
   topology_dir_ = dir;
+  gpu_info_ = gpu;
 
   write_generation_id();
   write_system_properties();
@@ -351,7 +344,6 @@ std::string Sysfs::generate(const GpuInfo &gpu) {
   write_cpu_node(nodes_dir);
   write_gpu_node(nodes_dir, gpu);
 
-  // Generate DRM sysfs tree for amdsmi/rocm_smi device discovery.
   write_drm_tree(gpu);
 
   return topology_dir_;

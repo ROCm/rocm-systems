@@ -450,6 +450,17 @@ enum OpSelVgprOrLds {
   OPR_VGPR_OR_LDS_VGPR_MAX = 511,
 };
 
+[[nodiscard]] constexpr bool is_vgpr_operand_type(OperandType t) {
+  switch (t) {
+  case OperandType::OPR_SRC_VGPR:
+  case OperandType::OPR_VGPR:
+  case OperandType::OPR_VGPR_OR_LDS:
+    return true;
+  default:
+    return false;
+  }
+}
+
 } // namespace rdna2
 } // namespace rocjitsu
 

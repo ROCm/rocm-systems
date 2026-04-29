@@ -342,6 +342,12 @@ def generate_device_metadata(
         f"Requires-Dist: {host_identity.name} == {host_identity.version}",
     ]
     for dep in device_requires_dist:
+        if "@GFXARCH@" in dep and bundle.level != rocm_bootstrap.PackagingLevel.TARGET:
+            # `@GFXARCH@` deps name per-target packages (e.g.
+            # rocm-sdk-device-<target>) which are only published for
+            # PackagingLevel.TARGET bundles. Family/sub-family device wheels
+            # are co-installed with a target wheel that carries those deps.
+            continue
         expanded = dep.replace("@GFXARCH@", bundle_key)
         lines.append(f"Requires-Dist: {expanded}")
     return "\n".join(lines) + "\n"
@@ -626,7 +632,9 @@ class WheelSplitter:
         self.compression = compression
         self.compression_level = compression_level
         self.verbose = verbose
-        self.jobs = max(1, jobs)
+        # Windows ProcessPoolExecutor caps at 61 (WaitForMultipleObjects limit).
+        max_jobs = 61 if os.name == "nt" else jobs
+        self.jobs = max(1, min(jobs, max_jobs))
         self.generate_variant_wheel = generate_variant_wheel
         self.variant_label = variant_label
 

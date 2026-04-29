@@ -129,9 +129,9 @@ __global__ void SignalFetchTest(int loop, int skip, long long int *start_time,
  *****************************************************************************/
 SignalingOperationsTester::SignalingOperationsTester(TesterArguments args)
   : Tester(args) {
-  s_buf = (char *)rocshmem_malloc(max_msg_size * args.wg_size);
-  r_buf = (char *)rocshmem_malloc(max_msg_size * args.wg_size);
-  sig_addr = (uint64_t *)rocshmem_malloc(sizeof(uint64_t));
+  s_buf = (char *)alloc_test_buffer(max_msg_size * args.wg_size, args.local_buf_type);
+  r_buf = (char *)alloc_test_buffer(max_msg_size * args.wg_size);
+  sig_addr = (uint64_t *)alloc_test_buffer(sizeof(uint64_t));
   CHECK_HIP(hipMallocManaged(&fetched_value, sizeof(uint64_t), hipMemAttachHost));
 }
 
@@ -142,9 +142,9 @@ SignalingOperationsTester::SignalingOperationsTester(TesterArguments args,
 }
 
 SignalingOperationsTester::~SignalingOperationsTester() {
-  rocshmem_free(s_buf);
-  rocshmem_free(r_buf);
-  rocshmem_free(sig_addr);
+  free_test_buffer(s_buf, args.local_buf_type);
+  free_test_buffer(r_buf);
+  free_test_buffer(sig_addr);
   CHECK_HIP(hipFree(fetched_value));
 }
 
