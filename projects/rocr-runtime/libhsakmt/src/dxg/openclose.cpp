@@ -446,7 +446,7 @@ bool hsakmtRuntime::InitHandleApertureSpace() {
 
             j++;
         }
-        pr_debug("handle aperture start %lx, size %lx\n", handle_aperture_start_, handle_aperture_size_);
+        pr_debug("handle aperture start %llx, size %llx\n", handle_aperture_start_, handle_aperture_size_);
         return true;
     }
 

@@ -769,7 +769,7 @@ void ImageManagerKv::printSRDDetailed(const uint32_t* srd) const {
   
   // Calculate full address (KV uses 40-bit shifted by 8)
   uint64_t base_addr = ((uint64_t)word1.bits.base_address_hi << 40) | ((uint64_t)word0.bits.base_address << 8);
-  printf("        → Full Base Address    = 0x%016lx\n", base_addr);
+  printf("        → Full Base Address    = 0x%016llx\n", base_addr);
   
   // WORD 2: WIDTH, HEIGHT, PERF_MOD, INTERLACED
   SQ_IMG_RSRC_WORD2 word2;

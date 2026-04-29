@@ -50,7 +50,9 @@
 #include <amdgpu_drm.h>
 #include <sys/mman.h>
 #else
+#ifdef _DEBUG
 #define debug_warning(__VA_ARGS__)
+#endif
 #endif
 
 #include "core/inc/runtime.h"
@@ -347,7 +349,7 @@ hsa_status_t Runtime::FreeMemory(void* ptr) {
     std::map<const void*, AllocationRegion>::iterator it = allocation_map_.find(ptr);
 
     if (it == allocation_map_.end()) {
-      debug_warning(false && "Can't find address in allocation map");
+      debug_warning(false, "Can't find address in allocation map");
       return HSA_STATUS_ERROR_INVALID_ALLOCATION;
     }
     region = it->second.region;
@@ -1929,7 +1931,7 @@ void Runtime::AsyncEventsPool::clear() {
     size_t capacity = 0;
     for (auto& block : block_list_) capacity += block.second;
     if (capacity != free_list_.size())
-      debug_print("Warning: Resource leak detected by AsyncEventsPool, %ld items leaked.\n",
+      debug_print("Warning: Resource leak detected by AsyncEventsPool, %lld items leaked.\n",
                   capacity - free_list_.size());
   }
 
@@ -2269,7 +2271,7 @@ void Runtime::PrintMemoryMapNear(void* ptr) {
       else if (region->IsLDS())
         kind = "LDS";
     }
-    fprintf(stderr, "%p, 0x%lx, %s\n", it->first, it->second.size, kind.c_str());
+    fprintf(stderr, "%p, 0x%llx, %s\n", it->first, it->second.size, kind.c_str());
     it++;
   }
   fprintf(stderr, "\n");
@@ -2286,14 +2288,14 @@ void Runtime::PrintMemoryMapNear(void* ptr) {
     hsa_status_t err = runtime_singleton_->PtrInfo(const_cast<void*>(it->first), &info, malloc,
                                                    &count, &canAccess, &block);
     if (err == HSA_STATUS_SUCCESS) {
-      fprintf(stderr, "PtrInfo:\n\tAddress: %p-%p/%p-%p\n\tSize: 0x%lx\n\tType: %u\n\tOwner: %p\n",
+      fprintf(stderr, "PtrInfo:\n\tAddress: %p-%p/%p-%p\n\tSize: 0x%llx\n\tType: %u\n\tOwner: %p\n",
               info.agentBaseAddress, (char*)info.agentBaseAddress + info.sizeInBytes,
               info.hostBaseAddress, (char*)info.hostBaseAddress + info.sizeInBytes, info.sizeInBytes,
               info.type, reinterpret_cast<void*>(info.agentOwner.handle));
       fprintf(stderr, "\tCanAccess: %u\n", count);
       for (int t = 0; t < count; t++)
         fprintf(stderr, "\t\t%p\n", reinterpret_cast<void*>(canAccess[t].handle));
-      fprintf(stderr, "\tIn block: %p, 0x%lx\n", block.base, block.length);
+      fprintf(stderr, "\tIn block: %p, 0x%llx\n", block.base, block.length);
       free(canAccess);
     }
     it++;
@@ -2367,7 +2369,7 @@ hsa_status_t Runtime::Load() {
      * This is not a failure, in some environments such as SRIOV, not all CPUID info is
      * exposed inside the guest
      */
-    debug_warning("Parsing CPUID failed.");
+    debug_warning(false, "Parsing CPUID failed.");
   }
 
   flag_.Refresh();
@@ -2398,7 +2400,7 @@ hsa_status_t Runtime::Load() {
   // Setup system clock frequency for the first time.
   if (sys_clock_freq_ == 0) {
     sys_clock_freq_ = os::SystemClockFrequency();
-    if (sys_clock_freq_ < 100000) debug_warning("System clock resolution is low.");
+    debug_warning(sys_clock_freq_ < 100000, "System clock resolution is low.");
   }
 
   BindErrorHandlers();
@@ -3689,7 +3691,7 @@ hsa_status_t Runtime::VMemoryAddressFree(void* va, size_t size) {
   std::map<const void*, AddressHandle>::iterator it = reserved_address_map_.find(va);
 
   if (it == reserved_address_map_.end()) {
-    debug_warning(false && "Can't find address in reserved address");
+    debug_warning(false, "Can't find address in reserved address");
     return HSA_STATUS_ERROR_INVALID_ALLOCATION;
   }
 
@@ -3738,7 +3740,7 @@ hsa_status_t Runtime::VMemoryHandleRelease(hsa_amd_vmem_alloc_handle_t memoryOnl
   auto memoryHandleIt = memory_handle_map_.find(MemoryHandle::Convert(memoryOnlyHandle));
 
   if (memoryHandleIt == memory_handle_map_.end()) {
-    debug_warning(false && "Can't find memory handle");
+    debug_warning(false, "Can't find memory handle");
     return HSA_STATUS_ERROR_INVALID_ALLOCATION;
   }
 
@@ -3772,18 +3774,18 @@ hsa_status_t Runtime::VMemoryHandleMap(void* va, size_t size, size_t in_offset,
   /* Confirm that this VA range has not been mapped yet */
   auto upperMappedHandleIt = mapped_handle_map_.upper_bound(va);
   if (upperMappedHandleIt != mapped_handle_map_.begin()) {
-    upperMappedHandleIt--;
-    if ((reinterpret_cast<const uint8_t*>(upperMappedHandleIt->first) + upperMappedHandleIt->second.size) > va)
+    --upperMappedHandleIt;
+    if ((static_cast<const uint8_t*>(upperMappedHandleIt->first) + upperMappedHandleIt->second.size) > va)
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
   auto lowerMappedHandleIt = mapped_handle_map_.lower_bound(va);
   if (lowerMappedHandleIt != mapped_handle_map_.end()) {
-    if (reinterpret_cast<uint8_t*>(va) + size > lowerMappedHandleIt->first) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+    if (static_cast<uint8_t*>(va) + size > lowerMappedHandleIt->first) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
 
   auto memoryHandleIt = memory_handle_map_.find(MemoryHandle::Convert(memoryOnlyHandle));
   if (memoryHandleIt == memory_handle_map_.end()) {
-    debug_warning(false && "Can't find memory handle");
+    debug_warning(false, "Can't find memory handle");
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
 
@@ -4177,7 +4179,7 @@ hsa_status_t Runtime::VMemoryExportShareableHandle(int* dmabuf_fd,
   *dmabuf_fd = -1;
   auto memoryHandle = memory_handle_map_.find(MemoryHandle::Convert(handle));
   if (memoryHandle == memory_handle_map_.end()) {
-    debug_warning(false && "Can't find memory handle");
+    debug_warning(false, "Can't find memory handle");
     return HSA_STATUS_ERROR_INVALID_ALLOCATION;
   }
 

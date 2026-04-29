@@ -229,19 +229,22 @@ target_sources(hiprtc PRIVATE ${HIPRTC_GEN_OBJ})
 target_compile_definitions(hiprtc PRIVATE __HIP_ENABLE_RTC)
 
 add_dependencies(hiprtc hiprtc-builtins)
+
 install(TARGETS hiprtc-builtins
   RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
   LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
   ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR})
 
-INSTALL(TARGETS hiprtc
+install(TARGETS hiprtc
   EXPORT hiprtc-targets
   RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
   LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
   ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
   PUBLIC_HEADER DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 
-INSTALL(EXPORT hiprtc-targets NAMESPACE hiprtc:: DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/hiprtc)
+install(EXPORT hiprtc-targets
+        NAMESPACE hiprtc::
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/hiprtc)
 
 #############################
 # hiprtc-config
@@ -251,19 +254,17 @@ include(CMakePackageConfigHelpers)
 configure_package_config_file(
   ${CMAKE_CURRENT_SOURCE_DIR}/cmake/hiprtc-config.cmake.in
   ${PROJECT_BINARY_DIR}/hiprtc-config.cmake
-  INSTALL_DESTINATION ${CONFIG_RTC_PACKAGE_INSTALL_DIR}
-  PATH_VARS LIB_INSTALL_DIR INCLUDE_INSTALL_DIR BIN_INSTALL_DIR)
+  INSTALL_DESTINATION ${CONFIG_RTC_PACKAGE_INSTALL_DIR})
 
 write_basic_package_version_file(
   ${PROJECT_BINARY_DIR}/hiprtc-config-version.cmake
   VERSION "${HIP_VERSION_MAJOR}.${HIP_VERSION_MINOR}.${HIP_VERSION_PATCH}"
   COMPATIBILITY SameMajorVersion)
 
-INSTALL(FILES ${HIP_COMMON_INCLUDE_DIR}/hip/hiprtc.h DESTINATION "include/hip")
+install(FILES ${HIP_COMMON_INCLUDE_DIR}/hip/hiprtc.h
+              ${HIP_COMMON_INCLUDE_DIR}/hip/hip_common.h
+        DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/hip")
 
-INSTALL(FILES ${HIP_COMMON_INCLUDE_DIR}/hip/hip_common.h DESTINATION "include/hip")
-
-INSTALL(
-  FILES ${PROJECT_BINARY_DIR}/hiprtc-config.cmake
-        ${PROJECT_BINARY_DIR}/hiprtc-config-version.cmake
-  DESTINATION ${CONFIG_RTC_PACKAGE_INSTALL_DIR})
+install(FILES ${PROJECT_BINARY_DIR}/hiprtc-config.cmake
+              ${PROJECT_BINARY_DIR}/hiprtc-config-version.cmake
+        DESTINATION ${CONFIG_RTC_PACKAGE_INSTALL_DIR})

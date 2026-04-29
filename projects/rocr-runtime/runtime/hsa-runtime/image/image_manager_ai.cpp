@@ -892,7 +892,7 @@ void ImageManagerAi::printSRDDetailed(const uint32_t* srd) const {
   
   // Calculate full address (GFX9 uses 40-bit shifted by 8)
   uint64_t base_addr = ((uint64_t)word1.f.base_address_hi << 32) | ((uint64_t)word0.f.base_address << 8);
-  printf("        → Full Base Address    = 0x%016lx\n", base_addr);
+  printf("        → Full Base Address    = 0x%016llx\n", base_addr);
   
   // WORD 2: WIDTH, HEIGHT, PERF_MOD
   sq_img_rsrc_word2_u word2;

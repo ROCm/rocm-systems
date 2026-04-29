@@ -78,27 +78,23 @@ The latest source for these projects are available in the `llvm project <https:/
 
 The runtime optionally supports use of the CMake user package registry. By default the registry is not modified. Set CMake variable ``EXPORT_TO_USER_PACKAGE_REGISTRY`` to ON to enable updating the package registry.
 
-To build, install, and produce packages on a system with standard ROCm packages installed, clone your copy of ROCR and run the following from ``src/``:
+To build, install, and produce packages on a system with standard ROCm packages installed, clone your copy of ROCR and run the following:
 
 .. code-block:: shell
 
-    mkdir build
-    cd build
-    cmake -DCMAKE_INSTALL_PREFIX=/opt/rocm ..
-    make
-    make install
-    make package
+    cmake -B build -S ./src/ [-G Ninja]
+    cmake --build build
+    cmake --install build --prefix <install_dir>
+    cpack --config build/CPackConfig.cmake
 
 Example with a custom installation path, build dependency path, and options:
 
 .. code-block:: shell
 
-    cmake -DIMAGE_SUPPORT=OFF \
+    cmake -B build -S ./src/ [-G Ninja]
+          -DIMAGE_SUPPORT=OFF \
           -DEXPORT_TO_USER_PACKAGE_REGISTRY=ON \
-          -DCMAKE_VERBOSE_MAKEFILE=1 \
-          -DCMAKE_PREFIX_PATH=<alternate path(s) to build dependencies> \
-          -DCMAKE_INSTALL_PATH=<custom install path for this build> \
-          ..
+          -DCMAKE_VERBOSE_MAKEFILE=1
 
 Alternatively, use ``ccmake`` and ``cmake-gui``:
 
@@ -106,12 +102,12 @@ Alternatively, use ``ccmake`` and ``cmake-gui``:
 
     mkdir build
     cd build
-    ccmake ..
+    ccmake ../src/
     press c to configure
     populate variables as desired
     press c again
     press g to generate and exit
-    make
+    cmake --build .
 
 Building against the runtime
 ---------------------------------

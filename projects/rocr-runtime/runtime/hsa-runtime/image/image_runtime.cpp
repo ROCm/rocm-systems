@@ -789,7 +789,7 @@ hsa_status_t ImageRuntime::CreateMipmapArrayHandle(
     debug_print("Populating mipmapped array SRD...");
     mipmap_array->printSRD();
     manager->printSRDDetailed(mipmap_array->srd);
-    debug_print("output handle = %lu", image_handle.handle);
+    debug_print("output handle = %llu", image_handle.handle);
   }
 
   return HSA_STATUS_SUCCESS;
@@ -799,7 +799,7 @@ hsa_status_t ImageRuntime::DestroyMipmapArrayHandle(
     const hsa_ext_image_t& image_handle) {
   const MipmappedArray* mipmap_array = MipmappedArray::Convert(image_handle.handle);
 
-  if (mipmap_array == NULL) {
+  if (mipmap_array == nullptr) {
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
 

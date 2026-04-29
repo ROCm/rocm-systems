@@ -1252,7 +1252,7 @@ void ImageManagerGfx12::printSRDDetailed(const uint32_t* srd) const {
 
   // Calculate full address (GFX12 uses 40-bit shifted by 8)
   uint64_t base_addr = ((uint64_t)word1.f.BASE_ADDRESS_HI << 40) | ((uint64_t)word0.f.BASE_ADDRESS << 8);
-  printf("        → Full Base Address    = 0x%016lx\n", base_addr);
+  printf("        → Full Base Address    = 0x%016llx\n", base_addr);
 
   // WORD 2: SQ_IMG_RSRC_WORD2
   SQ_IMG_RSRC_WORD2 word2;

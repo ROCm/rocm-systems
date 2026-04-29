@@ -969,7 +969,7 @@ uint64_t BlitKernel::PendingBytes() {
     }
     index++;
   }
-  debug_warning(false && "Race between PendingBytes and blit submission detected.");
+  debug_warning(false, "Race between PendingBytes and blit submission detected.");
   // Zero is a valid return in this case since the command which was last when the search started is
   // now complete.
   return 0;

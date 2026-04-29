@@ -306,12 +306,6 @@ else()
     endif()
   endif()
 
-  ## Define default paths and packages.
-  if( CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT )
-    set ( CMAKE_INSTALL_PREFIX "/opt/rocm" )
-  endif()
-  set ( CMAKE_INSTALL_PREFIX ${CMAKE_INSTALL_PREFIX} CACHE STRING "Default installation directory." FORCE )
-
   # Installs binaries and exports the library usage data to ${HSAKMT_TARGET}Targets
   if (NOT WIN32)
     install ( TARGETS ${HSAKMT_TARGET} EXPORT ${HSAKMT_TARGET}Targets

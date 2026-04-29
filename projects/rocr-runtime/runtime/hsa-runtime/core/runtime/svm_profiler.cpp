@@ -221,7 +221,7 @@ void SvmProfileControl::PollSmi() {
             uint64_t time;
             int pid;
             int offset = 0;
-            int args = sscanf(cursor, "%x %lu -%u%n", &event_id, &time, &pid, &offset);
+            int args = sscanf(cursor, "%x %llu -%u%n", &event_id, &time, &pid, &offset);
             assert(args == 3 && "Parsing error!");
 
             std::string detail;
@@ -234,7 +234,7 @@ void SvmProfileControl::PollSmi() {
                 uint32_t from, to;
                 uint32_t trigger = 0;
                 uint32_t fetch, pref;
-                args = sscanf(cursor, "@%lx(%x) %x->%x %x:%x %u", &addr, &size, &from, &to, &fetch,
+                args = sscanf(cursor, "@%llx(%x) %x->%x %x:%x %u", &addr, &size, &from, &to, &fetch,
                               &pref, &trigger);
                 assert(args == 7 && "Parsing error!");
 
@@ -254,7 +254,7 @@ void SvmProfileControl::PollSmi() {
                 uint32_t size;
                 uint32_t from, to;
                 uint32_t trigger;
-                args = sscanf(cursor, "@%lx(%x) %x->%x %u", &addr, &size, &from, &to, &trigger);
+                args = sscanf(cursor, "@%llx(%x) %x->%x %u", &addr, &size, &from, &to, &trigger);
                 assert(args == 5 && "Parsing error!");
 
                 addr *= 4096;
@@ -272,7 +272,7 @@ void SvmProfileControl::PollSmi() {
                 uint64_t addr;
                 uint32_t gpuid;
                 char mode;
-                args = sscanf(cursor, "@%lx(%x) %c", &addr, &gpuid, &mode);
+                args = sscanf(cursor, "@%llx(%x) %c", &addr, &gpuid, &mode);
 
                 addr *= 4096;
 
@@ -288,7 +288,7 @@ void SvmProfileControl::PollSmi() {
                 uint64_t addr;
                 uint32_t gpuid;
                 char mode;
-                args = sscanf(cursor, "@%lx(%x) %c", &addr, &gpuid, &mode);
+                args = sscanf(cursor, "@%llx(%x) %c", &addr, &gpuid, &mode);
                 assert(args == 3 && "Parsing error!");
 
                 addr *= 4096;
@@ -325,7 +325,7 @@ void SvmProfileControl::PollSmi() {
                 uint32_t size;
                 uint32_t gpuid;
                 uint32_t trigger;
-                args = sscanf(cursor, "@%lx(%x) %x %u", &addr, &size, &gpuid, &trigger);
+                args = sscanf(cursor, "@%llx(%x) %x %u", &addr, &size, &gpuid, &trigger);
                 assert(args == 4 && "Parsing error!");
 
                 addr *= 4096;

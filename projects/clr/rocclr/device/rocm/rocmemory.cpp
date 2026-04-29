@@ -192,7 +192,7 @@ hsa_status_t Memory::interopMapBuffer(hsa_handle_t fdn, hsa_interop_map_flag_t f
   hsa_agent_t agent = dev().getBackendDevice();
   size_t size;
   size_t metadata_size = 0;
-  void* metadata;
+  void* metadata = nullptr;
   auto fd = fdn;
   hsa_status_t status = Hsa::interop_map_buffer(1, &agent, fd, flags, &size, &interop_deviceMemory_,
 #if IS_WINDOWS
@@ -208,9 +208,8 @@ hsa_status_t Memory::interopMapBuffer(hsa_handle_t fdn, hsa_interop_map_flag_t f
   // if map_buffer wrote a legitimate SRD, copy it to amdImageDesc_
   // Note: Check if amdImageDesc_ is valid, because VA library maps linear planes of YUV image
   // as buffers for processing in HIP later
-  if ((amdImageDesc_ != nullptr) && (metadata_size != 0) &&
-      (reinterpret_cast<hsa_amd_image_descriptor_t*>(metadata)->deviceID ==
-       amdImageDesc_->deviceID)) {
+  if (amdImageDesc_ != nullptr && metadata_size != 0 && metadata != nullptr &&
+      static_cast<hsa_amd_image_descriptor_t*>(metadata)->deviceID == amdImageDesc_->deviceID) {
     memcpy(amdImageDesc_, metadata, metadata_size);
   }
   kind_ = MEMORY_KIND_INTEROP;

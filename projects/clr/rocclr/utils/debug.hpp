@@ -246,9 +246,9 @@ inline void warning(const char* msg) { amd::report_warning(msg); }
 
 #define ClTrace(level, mask) ClPrint(level, mask, "%s", __func__)
 
-#define LogInfo(msg) ClPrint(amd::LOG_INFO, amd::LOG_ALWAYS, msg)
-#define LogError(msg) ClPrint(amd::LOG_ERROR, amd::LOG_ALWAYS, msg)
-#define LogWarning(msg) ClPrint(amd::LOG_WARNING, amd::LOG_ALWAYS, msg)
+#define LogInfo(...) ClPrint(amd::LOG_INFO, amd::LOG_ALWAYS, __VA_ARGS__)
+#define LogError(...) ClPrint(amd::LOG_ERROR, amd::LOG_ALWAYS, __VA_ARGS__)
+#define LogWarning(...) ClPrint(amd::LOG_WARNING, amd::LOG_ALWAYS, __VA_ARGS__)
 
 #define LogPrintfDebug(format, ...) ClPrint(amd::LOG_DEBUG, amd::LOG_ALWAYS, format, ##__VA_ARGS__)
 #define LogPrintfError(format, ...) ClPrint(amd::LOG_ERROR, amd::LOG_ALWAYS, format, ##__VA_ARGS__)
