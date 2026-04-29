@@ -34,9 +34,10 @@ public:
                          uint64_t load_base,
                          uint64_t load_size) override;
 
-    const std::vector<mem_code_object_info_t>&  get_mem_code_object_info() const;
-    const std::vector<file_code_object_info_t>& get_file_code_object_info() const;
-    std::vector<size_t>                         get_code_object_ids() const override;
+    const std::vector<mem_code_object_info_t>&     get_mem_code_object_info() const;
+    const std::vector<file_code_object_info_t>&    get_file_code_object_info() const;
+    const std::vector<size_t>&                     get_code_object_ids() const override;
+    std::vector<rocm_compute::obj_symbol_t> get_symbol_map(size_t object_id) const override;
 
 private:
     std::vector<mem_code_object_info_t>  m_mem_code_obj_info;
@@ -50,7 +51,7 @@ public:
     void        write() override;
     std::string get_result() override;
 
-    uint32_t get_write_count();
+    uint32_t get_write_count() const;
 private:
     uint32_t m_write_count = 0;
 };

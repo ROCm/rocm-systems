@@ -37,6 +37,7 @@ void pc_sampling_collector_impl_t::write(pc_samples_writer_t& writer)
 {
     for (const auto& id : m_translator->get_code_object_ids())
     {
+        const auto& symbols = m_translator->get_symbol_map(id);
         // auto symbols = translator.getSymbolMap(id);  // vaddr -> { name, mem_size }
         // for (auto& [vaddr, sym] : symbols)
         //{

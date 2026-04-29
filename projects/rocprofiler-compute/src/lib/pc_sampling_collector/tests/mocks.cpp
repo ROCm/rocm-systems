@@ -33,9 +33,14 @@ const std::vector<mock_code_object_translator_t::file_code_object_info_t>&
     return m_file_code_obj_info;
 }
 
-std::vector<size_t> mock_code_object_translator_t::get_code_object_ids() const
+const std::vector<size_t>& mock_code_object_translator_t::get_code_object_ids() const
 {
     return m_code_object_ids;
+}
+
+std::vector<rocm_compute::obj_symbol_t> mock_code_object_translator_t::get_symbol_map(size_t object_id) const
+{
+    return {};
 }
 
 void mock_pc_samples_writer_t::write()
@@ -48,8 +53,7 @@ std::string mock_pc_samples_writer_t::get_result()
     return {};
 }
 
-uint32_t mock_pc_samples_writer_t::get_write_count()
+uint32_t mock_pc_samples_writer_t::get_write_count() const
 {
     return m_write_count;
 }
-
