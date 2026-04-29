@@ -510,6 +510,18 @@ int rocm_init();
 
 void rocm_memory_lock_to_fine_grain(void* ptr, size_t size, void** gpu_ptr, int gpu_id);
 
+// Return the first argument with the same type as T, forwarded as the same value category.
+template <typename T, typename Arg, typename... Rest>
+[[maybe_unused]] static inline constexpr auto&& get_arg(Arg&& arg, Rest&&... rest) {
+  if constexpr (std::is_same_v<T, Arg>) {
+    return std::forward<Arg>(arg);
+  } else {
+    static_assert(sizeof...(Rest) > 0, "type not found in argument list");
+    using GetArgT = decltype(get_arg<T>(std::forward<Rest>(rest)...));
+    return std::forward<GetArgT>(get_arg<T>(std::forward<Rest>(rest)...));
+  }
+}
+
 }  // namespace rocshmem
 
 #endif  // LIBRARY_SRC_UTIL_HPP_

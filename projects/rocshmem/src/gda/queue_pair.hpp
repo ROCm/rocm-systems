@@ -49,6 +49,8 @@
 #include "memory/hip_allocator.hpp"
 
 #include <map>
+#include <type_traits>
+#include <utility>
 
 namespace rocshmem {
 
@@ -117,7 +119,7 @@ class ActiveWFInfo {
     is_pe_group_last  = (pe_group_logical_lane_id == num_pe_group_lanes - 1);
   }
 
-  __device__ void printInfo() {
+  __device__ void printInfo() const {
     printf("PE: %d, Scope: %d, activemask: %llx, "
            "pe_group_mask: %llx, num_pe_group_lanes: %d, "
            "thread_id: %u, pe_group_logical_lane_id: %d, "
@@ -128,6 +130,34 @@ class ActiveWFInfo {
            threadIdx.x, pe_group_logical_lane_id,
            static_cast<int>(is_pe_group_first), pe_group_first_phys_lane_id,
            static_cast<int>(is_pe_group_last), pe_group_last_phys_lane_id);
+  }
+
+  template <typename F, typename... Args>
+  __device__ std::invoke_result_t<F, Args...> for_each_pe_group(F&& f, Args&&... args) const {
+    // need a dummy return value local for when F returns void
+    constexpr bool is_void_return = std::is_same_v<std::invoke_result_t<F, Args...>, void>;
+    using R = std::conditional_t<is_void_return, int, std::invoke_result_t<F, Args...>>;
+    [[maybe_unused]] R ret_val;
+
+    bool need_turn = true;
+    uint64_t turns = __ballot(need_turn);
+    while (turns) {
+      int first_lane = get_first_active_lane_id(turns);
+      int pe_turn = __shfl(pe, first_lane);
+      if (pe_turn == pe) {
+        // only executed once, so perfect forwarding via std::forward<T>() is safe
+        if constexpr (is_void_return) {
+          std::forward<F>(f)(std::forward<Args>(args)...);
+        } else {
+          ret_val = std::forward<F>(f)(std::forward<Args>(args)...);
+        }
+        need_turn = false;
+      }
+      turns = __ballot(need_turn);
+    }
+    if constexpr (!is_void_return) {
+      return ret_val;
+    }
   }
 };
 

@@ -38,6 +38,7 @@
 
 #include <hip/hip_runtime.h>
 #include <type_traits>
+#include <utility>
 
 namespace rocshmem {
 
@@ -92,6 +93,24 @@ __device__ void GDAContext::get_nbi(T *dest, const T *source, size_t nelems, int
 }
 
 // Atomics
+template <typename F, typename... Args>
+__device__ std::invoke_result_t<F, Args...>
+GDAContext::internal_amo_take_turns(F&& f, Args&&... args) {
+#if defined(GDA_MLX5)
+  if (gda_provider_ == GDAProvider::MLX5) {
+    return std::forward<F>(f)(std::forward<Args>(args)...);
+  } else
+#endif
+  {
+    // determine whether ActiveWFInfo argument is a const or non-const reference
+    constexpr bool is_arg_const = std::disjunction_v<std::is_same<const ActiveWFInfo&, Args>...>;
+    using wf_info_arg_t = std::conditional_t<is_arg_const, const ActiveWFInfo&, ActiveWFInfo&>;
+    // get the ActiveWFInfo argument so we can call F once for each PE-group
+    const ActiveWFInfo& wf_info = get_arg<wf_info_arg_t>(std::forward<Args>(args)...);
+    return wf_info.for_each_pe_group(std::forward<F>(f), std::forward<Args>(args)...);
+  }
+}
+
 template <typename T, typename Op>
 __device__ T GDAContext::internal_amo_fetch_op(void *dst, T value, int pe, uint32_t qp_index,
                                                [[maybe_unused]] const ActiveWFInfo& wf_info,
@@ -129,7 +148,9 @@ __device__ void GDAContext::amo_add(void *dst, T value, int pe) {
   uint64_t L_offset = reinterpret_cast<char *>(dst) - base_heap[my_pe];
   ActiveWFInfo wf_info{pe};
   uint32_t qp_index = get_qp_index(pe, wf_info);
-  qps[qp_index].atomic_nofetch(base_heap[pe] + L_offset, value, 0, wf_info);
+  internal_amo_take_turns([&qp = qps[qp_index]](auto&&... args) {
+      qp.atomic_nofetch(std::forward<decltype(args)>(args)...);
+    }, base_heap[pe] + L_offset, value, 0, wf_info);
 }
 
 template <typename T>
@@ -145,8 +166,10 @@ __device__ T GDAContext::amo_swap(void *dst, T value, int pe) {
   }
   ActiveWFInfo wf_info{pe};
   uint32_t qp_index = get_qp_index(pe, wf_info);
-  return internal_amo_fetch_op(dst, value, pe, qp_index, wf_info,
-                               []([[maybe_unused]] T prior_val, T value) { return value; });
+  return internal_amo_take_turns([this](auto&&... args) {
+      return this->internal_amo_fetch_op(std::forward<decltype(args)>(args)...,
+                                         []([[maybe_unused]] T prior_val, T value) { return value; });
+    }, dst, value, pe, qp_index, wf_info);
 }
 
 template <typename T>
@@ -157,8 +180,10 @@ __device__ T GDAContext::amo_fetch_and(void *dst, T value, int pe) {
   }
   ActiveWFInfo wf_info{pe};
   uint32_t qp_index = get_qp_index(pe, wf_info);
-  return internal_amo_fetch_op(dst, value, pe, qp_index, wf_info,
-                               [](T prior_val, T value) { return prior_val & value; });
+  return internal_amo_take_turns([this](auto&&... args) {
+      return this->internal_amo_fetch_op(std::forward<decltype(args)>(args)...,
+                                         [](T prior_val, T value) { return prior_val & value; });
+    }, dst, value, pe, qp_index, wf_info);
 }
 
 template <typename T>
@@ -174,8 +199,10 @@ __device__ T GDAContext::amo_fetch_or(void *dst, T value, int pe) {
   }
   ActiveWFInfo wf_info{pe};
   uint32_t qp_index = get_qp_index(pe, wf_info);
-  return internal_amo_fetch_op(dst, value, pe, qp_index, wf_info,
-                               [](T prior_val, T value) { return prior_val | value; });
+  return internal_amo_take_turns([this](auto&&... args) {
+      return this->internal_amo_fetch_op(std::forward<decltype(args)>(args)...,
+                                         [](T prior_val, T value) { return prior_val | value; });
+    }, dst, value, pe, qp_index, wf_info);
 }
 
 template <typename T>
@@ -191,8 +218,10 @@ __device__ T GDAContext::amo_fetch_xor(void *dst, T value, int pe) {
   }
   ActiveWFInfo wf_info{pe};
   uint32_t qp_index = get_qp_index(pe, wf_info);
-  return internal_amo_fetch_op(dst, value, pe, qp_index, wf_info,
-                               [](T prior_val, T value) { return prior_val ^ value; });
+  return internal_amo_take_turns([this](auto&&... args) {
+      return this->internal_amo_fetch_op(std::forward<decltype(args)>(args)...,
+                                         [](T prior_val, T value) { return prior_val ^ value; });
+    }, dst, value, pe, qp_index, wf_info);
 }
 
 template <typename T>
@@ -209,7 +238,9 @@ __device__ void GDAContext::amo_cas(void *dst, T value, T cond, int pe) {
   uint64_t L_offset = reinterpret_cast<char *>(dst) - base_heap[my_pe];
   ActiveWFInfo wf_info{pe};
   uint32_t qp_index = get_qp_index(pe, wf_info);
-  qps[qp_index].atomic_cas_nofetch(base_heap[pe] + L_offset, value, cond, wf_info);
+  internal_amo_take_turns([&qp = qps[qp_index]](auto&&... args) {
+      qp.atomic_cas_nofetch(std::forward<decltype(args)>(args)...);
+    }, base_heap[pe] + L_offset, value, cond, wf_info);
 }
 
 template <typename T>
@@ -221,7 +252,9 @@ __device__ T GDAContext::amo_fetch_add(void *dst, T value, int pe) {
   uint64_t L_offset = reinterpret_cast<char *>(dst) - base_heap[my_pe];
   ActiveWFInfo wf_info{pe};
   uint32_t qp_index = get_qp_index(pe, wf_info);
-  return qps[qp_index].atomic_fetch(base_heap[pe] + L_offset, value, 0, wf_info);
+  return internal_amo_take_turns([&qp = qps[qp_index]](auto&&... args) {
+      return qp.atomic_fetch(std::forward<decltype(args)>(args)...);
+    }, base_heap[pe] + L_offset, value, 0, wf_info);
 }
 
 template <typename T>
@@ -233,7 +266,9 @@ __device__ T GDAContext::amo_fetch_cas(void *dst, T value, T cond, int pe) {
   uint64_t L_offset = reinterpret_cast<char *>(dst) - base_heap[my_pe];
   ActiveWFInfo wf_info{pe};
   uint32_t qp_index = get_qp_index(pe, wf_info);
-  return qps[qp_index].atomic_cas(base_heap[pe] + L_offset, value, cond, wf_info);
+  return internal_amo_take_turns([&qp = qps[qp_index]](auto&&... args) {
+      return qp.atomic_cas(std::forward<decltype(args)>(args)...);
+    }, base_heap[pe] + L_offset, value, cond, wf_info);
 }
 
 // Collectives TODO: loosely adapted from IPC, needs review
@@ -900,7 +935,9 @@ __device__ void GDAContext::internal_amo_add(void *dst, T value, int pe, int qp_
     LOGD_ERROR_ABORT("gda:internal_amo_add only implemented for 64-bit types");
   }
   uint64_t L_offset = reinterpret_cast<char *>(dst) - base_heap[my_pe];
-  qps[qp_index].atomic_nofetch(base_heap[pe] + L_offset, value, 0, wf_info);
+  internal_amo_take_turns([&qp = qps[qp_index]](auto&&... args) {
+      qp.atomic_nofetch(std::forward<decltype(args)>(args)...);
+    }, base_heap[pe] + L_offset, value, 0, wf_info);
 }
 
 template <typename T>
@@ -911,7 +948,9 @@ __device__ T GDAContext::internal_amo_fetch_add(void *dst, T value, int pe, int 
     LOGD_ERROR_ABORT("gda:internal_amo_fetch_add only implemented for 64-bit types");
   }
   uint64_t L_offset = reinterpret_cast<char *>(dst) - base_heap[my_pe];
-  return qps[qp_index].atomic_fetch(base_heap[pe] + L_offset, value, 0, wf_info);
+  return internal_amo_take_turns([&qp = qps[qp_index]](auto&&... args) {
+      return qp.atomic_fetch(std::forward<decltype(args)>(args)...);
+    }, base_heap[pe] + L_offset, value, 0, wf_info);
 }
 
 template <typename T>
@@ -921,8 +960,10 @@ __device__ T GDAContext::internal_amo_swap(void *dst, T value, int pe, int qp_in
     //TODO: support types other than uint64_t
     LOGD_ERROR_ABORT("gda:internal_amo_swap only implemented for 64-bit types");
   }
-  return internal_amo_fetch_op(dst, value, pe, qp_index, wf_info,
-                               []([[maybe_unused]] T prior_val, T value) { return value; });
+  return internal_amo_take_turns([this](auto&&... args) {
+      return this->internal_amo_fetch_op(std::forward<decltype(args)>(args)...,
+                                         []([[maybe_unused]] T prior_val, T value) { return value; });
+    }, dst, value, pe, qp_index, wf_info);
 }
 
 /******************************************************************************
