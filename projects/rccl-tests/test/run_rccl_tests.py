@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 # Copyright Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
@@ -59,7 +60,7 @@ def get_rocm_path(script_path: Path, rocm_path: Path | None) -> Path:
     ):
         return script_path.parents[3].resolve()
 
-    raise SystemExit("ROCM_PATH is required when the runner is not installed.")
+    raise RuntimeError("ROCM_PATH is required when the runner is not installed.")
 
 
 def resolve_executable(bin_dir: Path, name: str) -> Path:
@@ -68,7 +69,7 @@ def resolve_executable(bin_dir: Path, name: str) -> Path:
         candidate = bin_dir / f"{name}{suffix}"
         if candidate.exists():
             return candidate.resolve()
-    raise SystemExit(f"{name} was not found in {bin_dir}")
+    raise FileNotFoundError(f"{name} was not found in {bin_dir}")
 
 
 def run_rccl_tests(bin_dir: Path, work_dir: Path) -> None:
