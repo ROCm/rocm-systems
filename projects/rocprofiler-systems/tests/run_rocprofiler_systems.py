@@ -1,8 +1,10 @@
+#!/usr/bin/env python3
 # Copyright Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
 import logging
 import os
+import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -62,7 +64,7 @@ def main() -> None:
         "--log-cli-level=info",
     ]
 
-    logging.info(f"++ Exec [{rocm_path}]$ {' '.join(cmd)}")
+    logging.info(f"++ Exec [{rocm_path}]$ {shlex.join(cmd)}")
     subprocess.run(cmd, cwd=rocm_path, check=True, env=env)
 
 
