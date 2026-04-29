@@ -141,7 +141,7 @@ struct ert_start_kernel_cmd {
   };
   /// @brief 1 mandatory CU mask, up to 4 optional CU masks, determined by @ref extra_cu_masks. Rest
   /// of data.
-  uint32_t data[] __counted_by(count);
+  uint32_t data[];
 };
 
 /// @brief Command chain packet.
@@ -159,7 +159,7 @@ struct ert_cmd_chain_data {
   uint32_t reserved[3];
   /// @brief BO handles of each command in the chain. The number of BO handles is determined by @ref
   /// command_count.
-  uint64_t data[] __counted_by(command_count);
+  uint64_t data[];
 };
 
 /// @brief XDNA device type.
@@ -985,7 +985,7 @@ hsa_status_t XdnaDriver::SubmitCmdChain(hsa_queue_t& q, HSA_QUEUEID& queue_id,
   bo_handles.erase(std::unique(bo_handles.begin(), bo_handles.end()), bo_handles.end());
 
   // Flush cache for the arguments.
-  for (uint32_t i = 0; i < num_pkts; ++i) {
+  for (uint64_t i = 0; i < num_pkts; ++i) {
     const auto pkt_idx = (first_pkt_idx + i) & mask;
     auto* pkt = queue + pkt_idx;
     FlushArguments(pkt);
@@ -1000,7 +1000,7 @@ hsa_status_t XdnaDriver::SubmitCmdChain(hsa_queue_t& q, HSA_QUEUEID& queue_id,
 
   // Flush cache for the arguments again to ensure visibility of any changes made by the AIE kernels
   // and fire completion signal for each packet.
-  for (uint32_t i = 0; i < num_pkts; ++i) {
+  for (uint64_t i = 0; i < num_pkts; ++i) {
     const auto pkt_idx = (first_pkt_idx + i) & mask;
     auto* pkt = queue + pkt_idx;
 
@@ -1199,5 +1199,5 @@ hsa_status_t XdnaDriver::GetQueueSaveAreaInfo(HSA_QUEUEID queue_id, void** addre
 
 hsa_status_t XdnaDriver::MakeMemoryUnresident(const void* mem) const { return HSA_STATUS_ERROR; }
 
-} // namespace AMD
-} // namespace rocr
+}  // namespace AMD
+}  // namespace rocr
