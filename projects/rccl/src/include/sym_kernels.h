@@ -115,5 +115,6 @@ extern int const ncclSymkKernelCount;
 extern void* const ncclSymkKernelList[];
 void* ncclSymkGetKernelPtr(ncclSymkKernelId kernelId, int/*ncclDevRedOp_t*/ red, ncclDataType_t ty);
 const char* ncclSymkKernelIdToString(int kernelId);
+bool rcclSymkKernelIdIsLL(int kernelId);
 
 #endif
