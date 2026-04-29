@@ -223,7 +223,7 @@ def retrieve_projects(args):
             subtrees = list(matched_subtrees)
 
         # If files changed but no subtree matched → evaluate all
-        if modified_paths and not subtrees:
+        if modified_paths and not subtrees and not check_rccl_changes(modified_paths):
             logging.info(
                 "Modified files did not match known subtrees, evaluating all projects"
             )
@@ -333,6 +333,7 @@ def run(args):
                 outputs["run_linux_rccl_ci"] = "false"
 
     set_github_output(outputs)
+    return outputs
 
 
 if __name__ == "__main__":
