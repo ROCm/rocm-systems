@@ -22,3 +22,8 @@ subtrees:
 - caption: Conceptual
   entries:
   - file: conceptual/cuid_file
+
+- caption: About
+  entries:
+  - file: license
+
