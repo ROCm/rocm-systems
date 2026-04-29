@@ -36,8 +36,15 @@ TEST_F(test_pc_sampling_collector_t, ProvidedCodeObjectId_IsStored)
     m_pc_sampling_collector->on_code_object_load(m_file_info);
     m_pc_sampling_collector->on_code_object_load(m_mem_info);
     m_pc_sampling_collector->write(*m_writer);
-    EXPECT_EQ(m_writer->get_obj_descriptions().size(), 2);
-    EXPECT_EQ(m_writer->get_end_code_obj_desc_count(), 2);
+    EXPECT_EQ(m_writer->get_started_code_obj_ids().size(), 2);
+    EXPECT_EQ(m_writer->get_ended_code_obj_desc_ids().size(), 2);
+}
+
+TEST_F(test_pc_sampling_collector_t, TODO)
+{
+    const std::vector<obj_symbol_t> symbols = {{"name0", 0x10, 0x1000, 0x50}, {"name1", 0x20, 0x2000, 0x60}};
+    m_translator->add_symbols(1, symbols);
+    m_pc_sampling_collector->write(*m_writer);
 }
 
 void test_pc_sampling_collector_t::SetUp()

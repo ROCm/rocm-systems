@@ -40,13 +40,13 @@ void pc_sampling_collector_impl_t::write(pc_samples_writer_t& writer)
 {
     for (const auto& id : m_translator->get_code_object_ids())
     {
+        writer.start_code_obj(id);
         const auto& symbols = m_translator->get_symbol_map(id);
         for (const auto& sym : symbols)
         {
-            writer.start_code_obj_desc(sym);
             write_instructions(id, sym);
-            writer.end_code_obj_desc();
         }
+        writer.end_code_obj_desc(id);
     }
 }
 
