@@ -31,20 +31,23 @@ void pc_sampling_collector_impl_t::on_code_object_load(
                                       info.load_base,
                                       info.load_size);
     }
-    // auto symbols = translator.getSymbolMap();  // vaddr -> { name, mem_size }
-    // for (auto& [vaddr, sym] : symbols)
-    //{
-    //     uint64_t pc = vaddr, end = vaddr + sym.mem_size;
-    //     while (pc < end)
-    //     {
-    //         auto inst = translator.get(pc);
-    //         std::cout << std::hex << pc << ": " << inst->inst << "\n";
-    //         pc += inst->size;
-    //     }
-    // }
 }
 
 void pc_sampling_collector_impl_t::write(pc_samples_writer_t& writer)
 {
-    writer.write();
+    for (const auto& id : m_translator->get_code_object_ids())
+    {
+        // auto symbols = translator.getSymbolMap(id);  // vaddr -> { name, mem_size }
+        // for (auto& [vaddr, sym] : symbols)
+        //{
+        //     uint64_t pc = vaddr, end = vaddr + sym.mem_size;
+        //     while (pc < end)
+        //     {
+        //         auto inst = translator.get(id, pc);
+        //         std::cout << std::hex << pc << ": " << inst->inst << "\n";
+        //         pc += inst->size;
+        //     }
+        // }
+        writer.write();
+    }
 }
