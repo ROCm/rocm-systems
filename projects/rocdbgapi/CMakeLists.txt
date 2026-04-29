@@ -69,8 +69,6 @@ project(
   DESCRIPTION "ROCm Debugger API"
 )
 
-include(CheckIncludeFile)
-include(CheckIncludeFiles)
 include(GNUInstallDirs)
 include(CheckCXXSourceCompiles)
 
