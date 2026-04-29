@@ -22,8 +22,13 @@ target_link_libraries(
 # Compiled as an OBJECT library so sources can be folded into the main
 # rocprof-sys-unit-tests binary without a separate executable.
 set(_sampling_test_sources
-    # Test-infrastructure stubs (config functions unavailable outside the full library)
-    unit/config_stubs.cpp
+    # Real config implementations are now linked in (the sampling library transitively
+    # pulls librocprof-sys-core via the PUBLIC interface-library link), so the previous
+    # config_stubs.cpp would multiply-define the same symbols. Tests use real config
+    # accessors which return the documented defaults when no settings file is loaded.
+    # Global gtest environment that primes rocprofsys::configure_settings(false) so
+    # the lifecycle's first config access does not hit recursive_init_error.
+    unit/sampling_test_env.cpp
     unit/sampling_service_setup_test.cpp
     unit/sampling_service_shutdown_test.cpp
     unit/sampling_service_pause_resume_test.cpp

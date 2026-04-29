@@ -1,15 +1,16 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-// TDD tests for Task #30: emit_resolved_to_trace_cache hook.
+// TDD tests for Task #30: emit_resolved hook (folded into sampling_service).
 //
 // Verifies that:
-//   1. emit_resolved_to_trace_cache() is called during shutdown(tid) (generic no-op).
-//   2. After shutdown(tid) with generic policies, offload_ records are still accessible
-//      (no-op hook leaves the store intact for post_process compatibility).
-//   3. trace_cache_offload_adapter::erase(tid) clears records for a tid without
+//   1. emit_resolved runs as part of shutdown(tid) and clears the offload store
+//      for that tid (no records remain after shutdown). The lifecycle hook is
+//      no longer policy-substitutable; sampling_service::do_emit_resolved owns
+//      the parse/resolve/erase sequence directly.
+//   2. trace_cache_offload_adapter::erase(tid) clears records for a tid without
 //      affecting other tids.
-//   4. in_memory_emitter provides the same erase() seam for test policies.
+//   3. in_memory_emitter provides the same erase() seam for test policies.
 
 #include <gtest/gtest.h>
 
@@ -23,13 +24,14 @@
 using namespace rocprofsys::sampling;
 using namespace rocprofsys::sampling::test;
 
-// ── Generic no-op hook: records remain in offload_ after shutdown() ───────────
+// ── shutdown(tid) drains the offload store via the folded emit_resolved ─────
 //
-// With test_sampling_policies (in_memory_emitter + no production specialization),
-// emit_resolved_to_trace_cache() is a no-op. Records injected before shutdown()
-// are NOT cleared by the hook — they remain available for post_process().
+// emit_resolved now lives directly on sampling_service (post-fold). For every
+// Policies bundle — including the test bundle — shutdown(tid) parses the raw
+// records and calls offload_.erase(tid) at the tail of do_emit_resolved.
+// Tests therefore observe the offload as empty for that tid after shutdown.
 
-TEST(emit_resolved_hook, generic_noop_leaves_offload_intact)
+TEST(emit_resolved_hook, shutdown_drains_offload_for_tid)
 {
     using svc_t = sampling_service<test_sampling_policies>;
     svc_t svc;
@@ -45,14 +47,11 @@ TEST(emit_resolved_hook, generic_noop_leaves_offload_intact)
     r.timestamp_ns = 200;
     svc.get_offload().inject(0, r);
 
-    // shutdown() calls emit_resolved_to_trace_cache() — no-op for generic template.
     svc.shutdown(0);
 
-    // Records must still be in offload_ (no-op hook did not clear them).
-    // post_process() can still read them.
     auto records = svc.get_offload().read(0);
-    EXPECT_EQ(records.size(), 2U)
-        << "generic emit_resolved_to_trace_cache() must not clear offload records";
+    EXPECT_TRUE(records.empty())
+        << "do_emit_resolved must erase the tid's offload records during shutdown";
 }
 
 // ── erase() removes records for a single tid without affecting others ─────────

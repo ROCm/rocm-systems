@@ -10,15 +10,10 @@
 #include <gtest/gtest.h>
 
 // real_timer_trigger lives in sampling/policies/ (production-only).
-// The smoke test provides a no-op stub for rocprofsys_sampling_signal_handler so that
-// start() can call sigaction() without requiring the full main-library link.
+// rocprofsys_sampling_signal_handler is provided by services_accessor.cpp from
+// the main rocprof-sys library which the unit-tests binary now links (the
+// production_hooks fold pulled in those symbols transitively).
 #include "sampling/policies/linux/real_timer_trigger.hpp"
-
-// Stub: satisfies the extern "C" declaration in real_timer_trigger.hpp.
-// The actual production handler is defined in services_accessor.cpp.
-extern "C" void
-rocprofsys_sampling_signal_handler(int, siginfo_t*, void*)
-{}
 
 // steady_clock and real_signal_dispatcher are small enough to define locally
 // (main_library_policies.hpp pulls timemory/config — incompatible with unit binary).
