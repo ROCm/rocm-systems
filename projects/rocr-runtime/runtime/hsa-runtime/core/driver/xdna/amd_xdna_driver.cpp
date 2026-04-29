@@ -918,6 +918,7 @@ hsa_status_t XdnaDriver::SubmitCmdChain(hsa_queue_t& q, HSA_QUEUEID& queue_id,
     cmd_bo_handles.push_back(cmd_bo_handle);
 
     auto* cmd = static_cast<ert_start_kernel_cmd*>(cmd_bo_handle.vaddr);
+    memset(cmd, 0, cmd_bytesize);
     cmd->state = ERT_START_CU;
     cmd->extra_cu_masks = 0;
     // The driver places a structure before each command in a command chain.
