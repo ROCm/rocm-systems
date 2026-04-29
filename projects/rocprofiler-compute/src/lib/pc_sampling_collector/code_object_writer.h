@@ -32,8 +32,8 @@ public:
     std::string get_result() override;
 
 private:
-    int32_t                          m_code_object_closure_count = 0;
-    int32_t                          m_symbol_closure_count      = 0;
+    int32_t m_code_object_closure_count = 0;
+    int32_t m_symbol_closure_count      = 0;
 
     size_t                  m_current_obj_id = 0;
     symbol_t                m_current_symbol{};

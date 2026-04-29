@@ -67,6 +67,34 @@ TEST_F(test_code_object_writer_t, ProvidedSymbolCallWithoutStartCodeObj_Throws)
     EXPECT_THROW(m_writer.start_symbol(rocm_compute::symbol_t{}), std::runtime_error);
 }
 
+TEST_F(test_code_object_writer_t, ProvidedWriteInstructionWithoutAnyScope_Throws)
+{
+    EXPECT_THROW(m_writer.write_instruction(rocm_compute::instruction_t{}), std::runtime_error);
+}
+
+TEST_F(test_code_object_writer_t, ProvidedWriteInstructionInsideCodeObjWithoutSymbol_Throws)
+{
+    m_writer.start_code_obj(0);
+    EXPECT_THROW(m_writer.write_instruction(rocm_compute::instruction_t{}), std::runtime_error);
+}
+
+TEST_F(test_code_object_writer_t, ProvidedWriteInstructionAfterEndSymbol_Throws)
+{
+    m_writer.start_code_obj(0);
+    m_writer.start_symbol(rocm_compute::symbol_t{});
+    m_writer.end_symbol();
+    EXPECT_THROW(m_writer.write_instruction(rocm_compute::instruction_t{}), std::runtime_error);
+}
+
+TEST_F(test_code_object_writer_t, ProvidedWriteInstructionAfterEndCodeObj_Throws)
+{
+    m_writer.start_code_obj(0);
+    m_writer.start_symbol(rocm_compute::symbol_t{});
+    m_writer.end_symbol();
+    m_writer.end_code_obj();
+    EXPECT_THROW(m_writer.write_instruction(rocm_compute::instruction_t{}), std::runtime_error);
+}
+
 TEST_F(test_code_object_writer_t, ProvidedCodeObjDesc_SerializesIt)
 {
     constexpr uint32_t id0 = 10;
