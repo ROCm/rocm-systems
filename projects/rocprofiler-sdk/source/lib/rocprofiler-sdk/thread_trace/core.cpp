@@ -300,8 +300,11 @@ DispatchThreadTracer::resource_init()
         auto cache = rocprofiler::agent::get_hsa_agent(rocp_agent);
         if(!cache.has_value())
         {
-            ROCP_TRACE << "Could not find HSA Agent for " << rocp_agent->id.handle
-                       << ". This agent maybe isolated by ROCR_VISIBLE_DEVICES env variable";
+            ROCP_CI_LOG_IF(TRACE, rocp_agent->runtime_visibility.hsa != 0)
+                << fmt::format("Could not find HSA Agent for agent-{} (handle={}, name={})",
+                               rocp_agent->node_id,
+                               rocp_agent->id.handle,
+                               rocp_agent->name);
             continue;
         }
         agents[*cache] = std::make_unique<ThreadTracerQueue>(it->second, rocp_agent->id);

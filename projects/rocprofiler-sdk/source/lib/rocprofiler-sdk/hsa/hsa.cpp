@@ -41,6 +41,7 @@
 #include <rocprofiler-sdk/hsa/core_api_id.h>
 #include <rocprofiler-sdk/hsa/table_id.h>
 
+#include <dlfcn.h>
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
@@ -662,6 +663,36 @@ update_table(const context::context_array_t& _contexts,
     }
 }
 
+template <size_t TableIdx, typename Tp, size_t OpIdx>
+void
+dlsym_table(Tp* _orig, std::integral_constant<size_t, OpIdx>)
+{
+    using table_type = typename hsa_table_lookup<TableIdx>::type;
+
+    if constexpr(std::is_same<table_type, Tp>::value)
+    {
+        auto _info = hsa_api_info<TableIdx, OpIdx>{};
+
+        // make sure we don't access a field that doesn't exist in input table
+        auto* _sym = dlsym(RTLD_DEFAULT, _info.name);
+        if(_sym)
+        {
+            ROCP_TRACE << "dlsym found symbol for " << _info.name;
+
+            // 1. get the sub-table containing the function pointer in original table
+            // 2. get reference to function pointer in sub-table in original table
+            // 3. update function pointer with dlsym result
+            auto& _table = _info.get_table(_orig);
+            auto& _func  = _info.get_table_func(_table);
+            _func        = reinterpret_cast<decltype(_func)>(_sym);
+        }
+        else
+        {
+            ROCP_INFO_IF(!_sym) << "dlsym did not find symbol for " << _info.name;
+        }
+    }
+}
+
 template <size_t TableIdx,
           typename LookupT = internal_table,
           typename Tp,
@@ -684,6 +715,15 @@ update_table(const context::context_array_t& _contexts,
     update_table<TableIdx>(_contexts, _orig, std::integral_constant<size_t, OpIdx>{});
     if constexpr(sizeof...(OpIdxTail) > 0)
         update_table<TableIdx>(_contexts, _orig, std::index_sequence<OpIdxTail...>{});
+}
+
+template <size_t TableIdx, typename Tp, size_t OpIdx, size_t... OpIdxTail>
+void
+dlsym_table(Tp* _orig, std::index_sequence<OpIdx, OpIdxTail...>)
+{
+    dlsym_table<TableIdx>(_orig, std::integral_constant<size_t, OpIdx>{});
+    if constexpr(sizeof...(OpIdxTail) > 0)
+        dlsym_table<TableIdx>(_orig, std::index_sequence<OpIdxTail...>{});
 }
 
 void
@@ -813,12 +853,22 @@ update_table(TableT* _orig, uint64_t _tbl_instance)
     }
 }
 
+template <typename TableT>
+void
+dlsym_table(TableT* _orig)
+{
+    constexpr auto TableIdx = hsa_table_id_lookup<TableT>::value;
+    if(_orig)
+        dlsym_table<TableIdx>(_orig, std::make_index_sequence<hsa_domain_info<TableIdx>::last>{});
+}
+
 using iterate_args_data_t = rocprofiler_callback_tracing_hsa_api_data_t;
 using iterate_args_cb_t   = rocprofiler_callback_tracing_operation_args_cb_t;
 
 #define INSTANTIATE_HSA_TABLE_FUNC(TABLE_TYPE, TABLE_IDX)                                           \
     template void                     copy_table<TABLE_TYPE>(TABLE_TYPE * _tbl, uint64_t _instv);   \
     template void                     update_table<TABLE_TYPE>(TABLE_TYPE * _tbl, uint64_t _instv); \
+    template void                     dlsym_table<TABLE_TYPE>(TABLE_TYPE * _tbl);                   \
     template const char*              name_by_id<TABLE_IDX>(uint32_t);                              \
     template uint32_t                 id_by_name<TABLE_IDX>(const char*);                           \
     template std::vector<uint32_t>    get_ids<TABLE_IDX>();                                         \

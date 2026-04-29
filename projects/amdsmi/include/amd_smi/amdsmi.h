@@ -1298,16 +1298,16 @@ typedef struct {
  * @cond @tag{gpu_bm_linux} @tag{host} @tag{guest_windows} @endcond
  */
 typedef struct {
-  uint64_t socket_power;         //!< Current power usage in W {@linux_bm}, uW {@host}
-  uint32_t current_socket_power; /**< Current socket power in W {@linux_bm}, Linux only, Mi 300+
-                                      Series cards */
-  uint32_t average_socket_power; /**< Average socket power in W {@linux_bm}, Linux only, Navi + Mi
-                                      200 and earlier Series cards */
-  uint64_t gfx_voltage;          //!< GFX voltage measurement in mV {@linux_bm} or V {@host}
-  uint64_t soc_voltage;          //!< SOC voltage measurement in mV {@linux_bm} or V {@host}
-  uint64_t mem_voltage;          //!< MEM voltage measurement in mV {@linux_bm} or V {@host}
-  uint32_t power_limit;          //!< The power limit in W {@linux_bm}, Linux only
-  uint32_t ubb_power;            //!< The UBB node power in W {@linux_bm}, MI350X+
+  uint64_t socket_power;          //!< Current power usage in W {@linux_bm}, uW {@host}
+  uint32_t current_socket_power;  //!< Current socket power in W {@linux_bm}, Linux only, Mi 300+
+                                  //!< Series cards
+  uint32_t average_socket_power;  //!< Average socket power in W {@linux_bm}, Linux only, Navi + Mi
+                                  //!< 200 and earlier Series cards
+  uint64_t gfx_voltage;           //!< GFX voltage measurement in mV {@linux_bm} or V {@host}
+  uint64_t soc_voltage;           //!< SOC voltage measurement in mV {@linux_bm} or V {@host}
+  uint64_t mem_voltage;           //!< MEM voltage measurement in mV {@linux_bm} or V {@host}
+  uint32_t power_limit;           //!< The power limit in uW {@linux_bm}, Linux only
+  uint32_t ubb_power;             //!< The UBB node power in W {@linux_bm}, MI350X+
   uint64_t reserved[18];
 } amdsmi_power_info_t;
 
@@ -6197,7 +6197,7 @@ amdsmi_status_t amdsmi_get_minmax_bandwidth_between_processors(
  *
  *  @details Given a source processor handle @p processor_handle_src and
  *  a destination processor handle @p processor_handle_dst, and a pointer to an
- *  uint64_t @p hops and a pointer to an AMDSMI_INK_TYPE @p type,
+ *  uint64_t @p hops and a pointer to an ::amdsmi_link_type_t @p type,
  *  this function will write the number of hops and the connection type
  *  between the device @p processor_handle_src and @p processor_handle_dst to the memory
  *  pointed to by @p hops and @p type.
@@ -6209,7 +6209,7 @@ amdsmi_status_t amdsmi_get_minmax_bandwidth_between_processors(
  *  @param[in,out] hops A pointer to an uint64_t to which the
  *  hops for the connection should be written.
  *
- *  @param[in,out] type A pointer to an ::AMDSMI_LINK_TYPE to which the
+ *  @param[in,out] type A pointer to an ::amdsmi_link_type_t to which the
  *  type for the connection should be written.
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
