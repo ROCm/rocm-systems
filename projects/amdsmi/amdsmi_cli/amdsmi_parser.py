@@ -1364,41 +1364,6 @@ class AMDSMIParser(argparse.ArgumentParser):
                 help=switch_help,
             )
 
-    def _add_brcm_nic_device_arguments(
-        self, subcommand_parser: argparse.ArgumentParser, nicMandatory=False, required=False
-    ):
-        # Device arguments help text
-        nic_help = (
-            f"Select a NIC ID, BDF, or UUID from the possible choices:\n{self.nic_choices_str}"
-        )
-        if nicMandatory:
-            nic_help = f"Select a NIC ID, BDF, or UUID from the possible choices:\n {self.nic_choices_str} Note: -nic, --brcm_nic is mandatory argument for this option.\n"
-        # Mutually Exclusive Args within the subparser
-        device_args = subcommand_parser.add_mutually_exclusive_group(required=required)
-
-        device_args.add_argument(
-            "-N", "--nic", action=self._nic_select(self.nic_choices), nargs="+", help=nic_help
-        )
-
-    def _add_brcm_switch_device_arguments(
-        self, subcommand_parser: argparse.ArgumentParser, switchMandatory=False, required=False
-    ):
-        # Device arguments help text
-        switch_help = f"Select a SWITCH ID, BDF, or UUID from the possible choices:\n{self.switch_choices_str}"
-        if switchMandatory:
-            switch_help = f"Select a SWITCH ID, BDF, or UUID from the possible choices:\n{self.switch_choices_str} Note: -switch, --brcm_switch is mandatory argument for this option.\n"
-
-        # Mutually Exclusive Args within the subparser
-        device_args = subcommand_parser.add_mutually_exclusive_group(required=required)
-
-        device_args.add_argument(
-            "-bs",
-            "--switch",
-            action=self._switch_select(self.switch_choices),
-            nargs="+",
-            help=switch_help,
-        )
-
     def _add_command_modifiers(self, subcommand_parser: argparse.ArgumentParser):
         json_help = "Displays output in JSON format"
         csv_help = "Displays output in CSV format"
@@ -1707,7 +1672,7 @@ class AMDSMIParser(argparse.ArgumentParser):
 
         # Optional arguments help text
         fw_list_help = "All FW list information"
-        nic_firmware_help = "BRCM NIC devices's Firmware attributes"
+        nic_firmware_help = "Broadcom NIC firmware attributes"
         err_records_help = "All error records information"
 
         # Create firmware subparser
@@ -1792,7 +1757,7 @@ class AMDSMIParser(argparse.ArgumentParser):
 
     def _add_metric_parser(self, subparsers: argparse._SubParsersAction, func):
         # Subparser help text
-        metric_help = "Gets metric/performance information about the specified GPU"
+        metric_help = "Gets metric/performance information about the specified GPU, NIC, or switch"
         metric_subcommand_help = f"{self.description}\n\nIf no GPU is specified, returns metric information for all GPUs on the system.\
                                 \nIf no metric argument is provided, all metric information will be displayed."
         metric_optionals_title = "Metric arguments"
@@ -1802,8 +1767,8 @@ class AMDSMIParser(argparse.ArgumentParser):
 
         # Help text for Arguments only Available on Linux Virtual OS and Baremetal platforms
         mem_usage_help = "Memory usage per block"
-        nic_metric_help = "Broadcom NIC's metrics attributes"
-        switch_metric_help = "Broadcom SWITCH's metrics attributes"
+        nic_metric_help = "Broadcom NIC metric attributes"
+        switch_metric_help = "Broadcom switch metric attributes"
 
         # Help text for Arguments only on Hypervisor and Baremetal platforms
         power_help = "Current power usage"
@@ -3034,8 +2999,8 @@ class AMDSMIParser(argparse.ArgumentParser):
         ecc_help = "Monitor ECC single bit, ECC double bit, and PCIe replay error counts"
         mem_usage_help = "Monitor memory usage in MB"
         pcie_bandwidth_help = "Monitor PCIe bandwidth in Mb/s"
-        nic_monitor_help = "BRCM NIC devices's Monitor attributes"
-        switch_monitor_help = "BRCM Switch devices's Monitor attributes"
+        nic_monitor_help = "Broadcom NIC monitor attributes"
+        switch_monitor_help = "Broadcom switch monitor attributes"
         process_help = "Enable Process information table below monitor output;\n    Process Name may require elevated permissions"
         violation_help = "Monitor power and thermal violation status (%%);\n    Only available for MI300 or newer ASICs"
 
