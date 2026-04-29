@@ -798,9 +798,7 @@ Device::~Device() {
 }
 
 bool Device::ValidateComgr() {
-  // use versioned comgr for HIP, unversioned for Opencl
-  const bool kComgrVersioned = amd::IS_HIP;
-  std::call_once(amd::Comgr::initialized, amd::Comgr::LoadLib, kComgrVersioned);
+  std::call_once(amd::Comgr::initialized, amd::Comgr::LoadLib);
   return amd::Comgr::IsReady();
 }
 
