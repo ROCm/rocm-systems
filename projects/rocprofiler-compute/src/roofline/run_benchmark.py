@@ -24,7 +24,7 @@ from pathlib import Path
 
 def run_roofline_benchmark(device_id: int, roofline_csv: Path) -> None:
     """Load device benchmark, execute, and save results to CSV."""
-    bench = load_bench([device_id])
+    bench = load_bench(device_id)
     benchmark_metrics = bench.run_benchmark(device_id)
     bench.dump_csv(benchmark_metrics, str(roofline_csv))
 
