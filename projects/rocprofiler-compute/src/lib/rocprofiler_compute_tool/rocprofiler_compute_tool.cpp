@@ -87,36 +87,36 @@ void record_callback(rocprofiler_dispatch_counting_service_data_t dispatch_data,
     tool_data->sdk_callbacks->record_callback(dispatch_data, record_data, record_count, *tool_data);
 }
 
-void tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
-                           rocprofiler_user_data_t* /*user_data*/,
-                           void* callback_data)
+void code_object_tracing_callback(rocprofiler_callback_tracing_record_t record,
+                                  rocprofiler_user_data_t* /*user_data*/,
+                                  void* callback_data)
 {
     Expects(callback_data);
     auto* tool_data = static_cast<tool_data_t*>(callback_data);
     if (record.kind == ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT &&
-        record.phase == ROCPROFILER_CALLBACK_PHASE_LOAD &&
-        record.operation == ROCPROFILER_CODE_OBJECT_DEVICE_KERNEL_SYMBOL_REGISTER)
+        record.phase == ROCPROFILER_CALLBACK_PHASE_LOAD)
     {
-        tool_data->sdk_callbacks->tool_tracing_callback(record, *tool_data);
-    }
-}
-
-void code_object_tracing_callback(rocprofiler_callback_tracing_record_t record,
-                                  rocprofiler_user_data_t*              user_data,
-                                  void*                                 data)
-{
-    Expects(data);
-    Expects(record.payload);
-    if (record.kind == ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT &&
-        record.phase == ROCPROFILER_CALLBACK_PHASE_LOAD && record.operation == ROCPROFILER_CODE_OBJECT_LOAD)
-    {
-        if (pc_sampling_mode(g_input_parameters->get_pc_sampling_mode()) != PcSamplingMode::Disabled)
+        switch (record.operation)
         {
-            auto* tool_data = static_cast<tool_data_t*>(data);
-            auto* obj_data  = static_cast<rocprofiler_callback_tracing_code_object_load_data_t*>(
-                record.payload);
-            tool_data->pc_sampling_collector.rlock([&](const pc_sampling_collector_t::ptr& collector)
-                                                   { collector->on_code_object_load(*obj_data); });
+        case ROCPROFILER_CODE_OBJECT_DEVICE_KERNEL_SYMBOL_REGISTER:
+        {
+            tool_data->sdk_callbacks->tool_tracing_callback(record, *tool_data);
+        }
+        break;
+        case ROCPROFILER_CODE_OBJECT_LOAD:
+        {
+            if (pc_sampling_mode(g_input_parameters->get_pc_sampling_mode()) != PcSamplingMode::Disabled)
+            {
+                Expects(record.payload);
+                auto* obj_data = static_cast<rocprofiler_callback_tracing_code_object_load_data_t*>(
+                    record.payload);
+                tool_data->pc_sampling_collector.rlock([&](const pc_sampling_collector_t::ptr& collector)
+                                                       { collector->on_code_object_load(*obj_data); });
+            }
+        }
+        break;
+        default:
+            break;
         }
     }
 }
@@ -135,7 +135,7 @@ int tool_init(rocprofiler_client_finalize_t, void* user_data)
                                                       ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT,
                                                       nullptr,
                                                       0,
-                                                      tool_tracing_callback,
+                                                      code_object_tracing_callback,
                                                       user_data);
     g_sdk_wrapper->start_context(get_client_ctx());
 

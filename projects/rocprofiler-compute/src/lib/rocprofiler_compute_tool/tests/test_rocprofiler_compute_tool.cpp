@@ -243,7 +243,7 @@ TEST_F(test_rocprofiler_compute_tool_t, OnRecordCallback_ForwardsToSdkCallbacks)
 
 TEST_F(test_rocprofiler_compute_tool_t, OnKernelSymbolRegisterOperation_ForwardsToSdkCallbacks)
 {
-    tool_tracing_callback(m_kernel_symbol_record, nullptr, &m_tool_data);
+    code_object_tracing_callback(m_kernel_symbol_record, nullptr, &m_tool_data);
 
     const auto& calls = m_sdk_callbacks->get_tracing_callback_info();
     EXPECT_EQ(calls.size(), 1);
