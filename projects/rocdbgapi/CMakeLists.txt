@@ -60,9 +60,14 @@
 # Threads (on request, see THE_ROCK_BUILD)
 
 
-cmake_minimum_required(VERSION 3.8)
+cmake_minimum_required(VERSION 3.21)
 
-project(amd-dbgapi VERSION 0.80.0)
+project(
+  amd-dbgapi
+  VERSION 0.80.0
+  LANGUAGES CXX
+  DESCRIPTION "ROCm Debugger API"
+)
 
 include(CheckIncludeFile)
 include(CheckIncludeFiles)
@@ -94,19 +99,15 @@ option(BUILD_SHARED_LIBS "Build amd-dbgapi as a shared library" ON)
 
 if(ENABLE_ASSERTIONS)
   if(NOT uppercase_CMAKE_BUILD_TYPE STREQUAL "DEBUG")
-    # Add -UNDEBUG to the CFLAGS and CXXFLAGS
-    add_compile_options(
-      $<$<OR:$<COMPILE_LANGUAGE:C>,$<COMPILE_LANGUAGE:CXX>>:-UNDEBUG>)
-    # Remove -DNDEBUG from the CFLAGS and CXXFLAGS
-    foreach (flags
-             CMAKE_C_FLAGS_RELEASE
-             CMAKE_C_FLAGS_RELWITHDEBINFO
-             CMAKE_C_FLAGS_MINSIZEREL
-             CMAKE_CXX_FLAGS_RELEASE
-             CMAKE_CXX_FLAGS_RELWITHDEBINFO
-             CMAKE_CXX_FLAGS_MINSIZEREL)
-      string (REGEX REPLACE "(^| )-D *NDEBUG($| )" " " "${flags}" "${${flags}}")
-     endforeach()
+    # Add -UNDEBUG to the CXXFLAGS (project is C++ only, no CFLAGS needed)
+    add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-UNDEBUG>)
+    # Remove -DNDEBUG from the CXXFLAGS
+    foreach(flags IN ITEMS
+            CMAKE_CXX_FLAGS_RELEASE
+            CMAKE_CXX_FLAGS_RELWITHDEBINFO
+            CMAKE_CXX_FLAGS_MINSIZEREL)
+      string(REGEX REPLACE "(^| )-D *NDEBUG($| )" " " "${flags}" "${${flags}}")
+    endforeach()
   endif()
 else()
   if(uppercase_CMAKE_BUILD_TYPE STREQUAL "DEBUG")
@@ -234,7 +235,7 @@ else()
   endif()
 
   if(${libbacktrace_check} EQUAL 0)
-    get_filename_component(BACKTRACE_PREFIX ${libbacktrace_path} DIRECTORY)
+    cmake_path(GET libbacktrace_path PARENT_PATH BACKTRACE_PREFIX)
     message(STATUS "[libbacktrace check] libbacktrace.a found at ${libbacktrace_path}")
 
     find_path(BACKTRACE_INCLUDE_DIR backtrace-supported.h PATHS ${BACKTRACE_PREFIX}/include)
@@ -319,7 +320,7 @@ find_package(amd_comgr REQUIRED CONFIG
   PATH_SUFFIXES
     lib/cmake/amd_comgr
 )
-MESSAGE(STATUS "Code Object Manager found at ${amd_comgr_DIR}.")
+message(STATUS "Code Object Manager found at ${amd_comgr_DIR}.")
 
 # Depending on how we're building rocdbgapi, we may have a dependency
 # on Threads coming from amd_comgr. If we've been instructed to include
@@ -356,7 +357,7 @@ function(get_imported_property TARGET_NAME PROPERTY_TYPE PROPERTY_VAR)
       set(SELECTED_CONFIG "${CMAKE_BUILD_TYPE_UPPER}")
       get_target_property(PROPERTY_VALUE ${TARGET_NAME} ${PROPERTY_TYPE}_${CMAKE_BUILD_TYPE_UPPER})
       set(${PROPERTY_VAR} ${PROPERTY_VALUE} PARENT_SCOPE)
-      MESSAGE(STATUS "Selected configuration for ${TARGET_NAME}: ${SELECTED_CONFIG} (matched CMAKE_BUILD_TYPE)")
+      message(STATUS "Selected configuration for ${TARGET_NAME}: ${SELECTED_CONFIG} (matched CMAKE_BUILD_TYPE)")
     endif()
   endif()
 
@@ -370,7 +371,7 @@ function(get_imported_property TARGET_NAME PROPERTY_TYPE PROPERTY_VAR)
       get_target_property(PROPERTY_VALUE ${TARGET_NAME} ${PROPERTY_TYPE}_${CONFIG_UPPER})
       if(NOT ${PROPERTY_VALUE} STREQUAL "${PROPERTY_TYPE}_${CONFIG_UPPER}-NOTFOUND")
         set(SELECTED_CONFIG ${CONFIG_UPPER})
-        MESSAGE(STATUS "Selected configuration for ${TARGET_NAME}: ${SELECTED_CONFIG}")
+        message(STATUS "Selected configuration for ${TARGET_NAME}: ${SELECTED_CONFIG}")
         set(${PROPERTY_VAR} ${PROPERTY_VALUE} PARENT_SCOPE)
         break()
       endif()
@@ -446,8 +447,9 @@ target_include_directories(amd-dbgapi
     $<INSTALL_INTERFACE:include>)
 
 if(NOT WIN32)
-  target_link_libraries(amd-dbgapi
-    PRIVATE -Wl,--version-script=${CMAKE_CURRENT_BINARY_DIR}/src/exportmap -Wl,--no-undefined)
+  target_link_options(amd-dbgapi
+    PRIVATE "LINKER:--version-script=${CMAKE_CURRENT_BINARY_DIR}/src/exportmap"
+    PRIVATE "LINKER:--no-undefined")
 endif()
 
 set(AMD_DBGAPI_CONFIG_NAME amd-dbgapi-config.cmake)
@@ -487,11 +489,13 @@ install(FILES
 # Generate the install-tree package.
 set(AMD_DBGAPI_PREFIX_CODE "
 # Derive absolute install prefix from config file path.
-get_filename_component(AMD_DBGAPI_PREFIX \"\${CMAKE_CURRENT_LIST_FILE}\" PATH)")
-string(REGEX REPLACE "/" ";" count "${AMD_DBGAPI_PACKAGE_PREFIX}")
-foreach(p ${count})
+cmake_path(GET CMAKE_CURRENT_LIST_FILE PARENT_PATH AMD_DBGAPI_PREFIX)")
+# Convert path to list to count components (e.g., "lib/cmake/amd-dbgapi" -> 3 components)
+# We need to traverse up the directory tree once for each path component
+string(REGEX REPLACE "/" ";" path_components "${AMD_DBGAPI_PACKAGE_PREFIX}")
+foreach(p IN LISTS path_components)
   set(AMD_DBGAPI_PREFIX_CODE "${AMD_DBGAPI_PREFIX_CODE}
-get_filename_component(AMD_DBGAPI_PREFIX \"\${AMD_DBGAPI_PREFIX}\" PATH)")
+cmake_path(GET AMD_DBGAPI_PREFIX PARENT_PATH AMD_DBGAPI_PREFIX)")
 endforeach()
 set(AMD_DBGAPI_TARGETS_PATH "\${AMD_DBGAPI_PREFIX}/${AMD_DBGAPI_PACKAGE_PREFIX}/${AMD_DBGAPI_TARGETS_NAME}")
 configure_file("cmake/${AMD_DBGAPI_CONFIG_NAME}.in"
