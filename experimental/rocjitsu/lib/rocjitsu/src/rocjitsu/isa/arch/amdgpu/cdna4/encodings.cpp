@@ -180,6 +180,8 @@ void Mubuf::build_modifiers(std::string &out) const {
     out += " sc1";
   if (inst->nt)
     out += " nt";
+  if (inst->lds)
+    out += " lds";
 }
 
 Mtbuf::Mtbuf(std::string_view mnemonic, const MtbufMachineInst *inst, ExecuteFn exec_fn)

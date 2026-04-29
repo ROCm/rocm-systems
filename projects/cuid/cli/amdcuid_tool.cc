@@ -59,7 +59,7 @@ void print_usage(const char* program_name) {
     std::cout << "  --set-key <key_file>         Set HMAC key from file (32 bytes, use with --generate-cuid)\n";
     std::cout << "  --notify-daemon              Notify daemon to refresh device registry (for udev integration)\n";
     std::cout << "  --list                       List all devices and their CUIDs\n";
-    std::cout << "  --type <type>                Filter by device type (gpu, cpu, nic, platform)\n";
+    std::cout << "  --type <type>                Filter by device type (gpu, cpu, nic, npu, platform)\n";
     std::cout << "                               Use with --list or --query-device\n";
     std::cout << "  --show-primary               Show primary CUIDs (requires root privileges)\n";
     std::cout << "                               Use with --list or --query-device\n";
@@ -93,6 +93,7 @@ const char* device_type_to_string(amdcuid_device_type_t type) {
         case AMDCUID_DEVICE_TYPE_CPU: return "CPU";
         case AMDCUID_DEVICE_TYPE_GPU: return "GPU";
         case AMDCUID_DEVICE_TYPE_NIC: return "NIC";
+        case AMDCUID_DEVICE_TYPE_NPU: return "NPU";
         case AMDCUID_DEVICE_TYPE_NONE: return "NONE";
         default: return "UNKNOWN";
     }
@@ -106,6 +107,7 @@ amdcuid_device_type_t string_to_device_type(const std::string& type_str) {
     if (upper == "CPU") return AMDCUID_DEVICE_TYPE_CPU;
     if (upper == "GPU") return AMDCUID_DEVICE_TYPE_GPU;
     if (upper == "NIC") return AMDCUID_DEVICE_TYPE_NIC;
+    if (upper == "NPU") return AMDCUID_DEVICE_TYPE_NPU;
     return AMDCUID_DEVICE_TYPE_NONE;
 }
 
@@ -262,7 +264,7 @@ int list_devices(bool show_primary, const std::string* filter_type) {
         filter_device_type = string_to_device_type(*filter_type);
         if (filter_device_type == AMDCUID_DEVICE_TYPE_NONE) {
             std::cerr << "Error: Unknown device type '" << *filter_type << "'" << std::endl;
-            std::cerr << "Valid types: platform, cpu, gpu, nic" << std::endl;
+            std::cerr << "Valid types: platform, cpu, gpu, nic, npu" << std::endl;
             return 1;
         }
     }
@@ -391,7 +393,7 @@ int query_device(const std::string& identifier, bool show_primary, const std::st
         device_type = string_to_device_type(*device_type_str);
         if (device_type == AMDCUID_DEVICE_TYPE_NONE) {
             std::cerr << "Error: Unknown device type '" << *device_type_str << "'" << std::endl;
-            std::cerr << "Valid types: platform, cpu, gpu, nic" << std::endl;
+            std::cerr << "Valid types: platform, cpu, gpu, nic, npu" << std::endl;
             return 1;
         }
     } else {
@@ -402,11 +404,16 @@ int query_device(const std::string& identifier, bool show_primary, const std::st
             device_type = AMDCUID_DEVICE_TYPE_NIC;
         } else if (identifier.find("/sys/class/drm/") != std::string::npos) {
             device_type = AMDCUID_DEVICE_TYPE_GPU;
+        } else if (identifier.find("/sys/class/accel/") != std::string::npos) {
+            device_type = AMDCUID_DEVICE_TYPE_NPU;
         }
     }
     
-    // Check if identifier looks like a BDF (contains ':' and '.')
-    bool is_bdf = (identifier.find(':') != std::string::npos && identifier.find('.') != std::string::npos);
+    // Check if identifier looks like a BDF (e.g., "0000:c6:00.1" or "c6:00.1").
+    // Must not start with '/' (which would indicate a sysfs path).
+    bool is_bdf = (!identifier.empty() && identifier[0] != '/' &&
+                   identifier.find(':') != std::string::npos &&
+                   identifier.find('.') != std::string::npos);
     
     if (is_bdf) {
         // Try as BDF

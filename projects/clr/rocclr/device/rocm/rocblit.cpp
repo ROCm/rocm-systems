@@ -672,6 +672,9 @@ bool DmaBlitManager::hsaCopyBatch(const std::vector<amd::BatchCopyOp>& copyOps,
   std::vector<hsa_amd_memory_copy_op_t> hsaCopyOps;
   hsaCopyOps.reserve(copyOps.size());
 
+  hsa_agent_t cpuAgent = dev().getCpuAgent();
+  hsa_agent_t backendDevice = dev().getBackendDevice();
+
   for (const auto& op : copyOps) {
     const Memory& srcMem = gpuMem(*op.srcMemory->getDeviceMemory(
         *op.srcMemory->getContext().devices()[0]));
@@ -684,6 +687,17 @@ bool DmaBlitManager::hsaCopyBatch(const std::vector<amd::BatchCopyOp>& copyOps,
     hsa_agent_t srcAgent;
     hsa_agent_t dstAgent;
     resolveAgents(srcMem, dstMem, src, dst, srcAgent, dstAgent);
+
+    // Normalize agents to ensure the calling device's SDMA engines are used,
+    // matching the rocrCopyBuffer agent selection logic.
+    if (srcAgent.handle != dstAgent.handle &&
+        srcAgent.handle != cpuAgent.handle && dstAgent.handle != cpuAgent.handle) {
+      // P2P: force calling device's backend as src_agent, peer as dst_agent.
+      // ROCr selects copy_agent from src_agent, so this ensures the calling
+      // device's SDMA engines are used.
+      dstAgent = (srcAgent.handle == backendDevice.handle) ? dstAgent : srcAgent;
+      srcAgent = backendDevice;
+    }
 
     hsa_amd_memory_copy_op_t hsaOp = {};
     hsaOp.version = HSA_AMD_MEMORY_COPY_OP_VERSION;

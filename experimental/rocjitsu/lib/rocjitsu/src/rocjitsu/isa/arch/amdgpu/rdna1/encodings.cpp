@@ -231,6 +231,8 @@ void Mubuf::build_modifiers(std::string &out) const {
     out += " dlc";
   if (inst->slc)
     out += " slc";
+  if (inst->lds)
+    out += " lds";
 }
 
 Mtbuf::Mtbuf(std::string_view mnemonic, const MtbufMachineInst *inst, ExecuteFn exec_fn)

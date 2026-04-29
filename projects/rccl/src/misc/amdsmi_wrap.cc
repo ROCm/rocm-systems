@@ -464,7 +464,14 @@ ncclResult_t amd_smi_getLinkInfo(int srcIndex, int dstIndex, amdsmi_link_type_t*
       ARSMI_linkInfo tinfo;
       ARSMICHECK(ARSMI_topo_get_link_info(srcIndex, dstIndex, &tinfo));
 
-      *type  = (amdsmi_link_type_t) tinfo.type;
+      // ARSMI_IO_LINK_TYPE and amdsmi_link_type_t are NOT value-compatible:
+      //   ARSMI: UNDEFINED=0, PCIEXPRESS=1, XGMI=2
+      //   amdsmi: INTERNAL=0, XGMI=1, PCIE=2, NOT_APPLICABLE=3, UNKNOWN=4
+      switch (tinfo.type) {
+        case ARSMI_IOLINK_TYPE_PCIEXPRESS: *type = AMDSMI_LINK_TYPE_PCIE; break;
+        case ARSMI_IOLINK_TYPE_XGMI:       *type = AMDSMI_LINK_TYPE_XGMI; break;
+        default:                           *type = AMDSMI_LINK_TYPE_UNKNOWN; break;
+      }
       if (*type == AMDSMI_LINK_TYPE_XGMI && (tinfo.weight == 15 ||
         tinfo.weight == 41 || tinfo.weight == 13)) {
         *hops = 1;

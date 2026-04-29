@@ -195,6 +195,15 @@ class IPCBackend : public Backend {
   void setup_team_world();
 
   /**
+   * @brief Allocate and initialize team shared.
+   *
+   * In the IPC backend all PEs are on the same node, so TEAM_SHARED
+   * contains the same set of PEs as TEAM_WORLD but uses its own
+   * pool slot and sync/work resources.
+   */
+  void setup_team_shared();
+
+  /**
    * @brief Initialize the resources required to support teams
    */
   void teams_init();
@@ -239,7 +248,7 @@ class IPCBackend : public Backend {
   /**
    * @brief A free-list containing contexts.
    */
-  FreeListProxy<HIPAllocator, IPCContext *> ctx_free_list{};
+  FreeListProxy<IPCContext *> ctx_free_list{};
 
   /**
    * @brief The bitmask representing the availability of teams in the pool

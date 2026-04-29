@@ -1,6 +1,6 @@
 # Run cmakelint over the CMake files
 
-name: hipfile-cmakelint
+name: "hipFile cmakelint"
 
 on:
   push:
