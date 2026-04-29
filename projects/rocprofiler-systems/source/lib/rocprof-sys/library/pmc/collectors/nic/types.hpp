@@ -49,8 +49,8 @@ union enabled_metrics
     uint32_t value = 0;
 };
 
-/// All 6 NIC RDMA metrics enabled (bits 0-5)
-static constexpr uint32_t ALL_NIC_METRICS = 0x3F;
+/// All 10 NIC RDMA metrics enabled (bits 0-5)
+static constexpr uint32_t ALL_NIC_METRICS = 0x3FF;
 
 /**
  * @brief Container for NIC RDMA metrics collected from AMD SMI.
