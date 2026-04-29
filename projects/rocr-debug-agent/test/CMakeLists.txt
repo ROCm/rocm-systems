@@ -251,3 +251,9 @@ install(
     DESTINATION tests/rocm-debug-agent
     COMPONENT tests
 )
+
+install(
+    PROGRAMS run_rocr_debug_agent.py
+    DESTINATION tests/rocm-debug-agent
+    COMPONENT tests
+)

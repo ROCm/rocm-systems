@@ -27,8 +27,8 @@ def parse_arguments() -> argparse.Namespace:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Environment Variables (used when CLI args are not provided):
-  THEROCK_BIN_DIR          Directory containing rocm-debug-agent-test
-  OUTPUT_ARTIFACTS_DIR     Directory containing run-test.py script
+  ROCM_PATH                ROCm install prefix containing tests/rocm-debug-agent
+  OUTPUT_ARTIFACTS_DIR     Fallback install prefix containing tests/rocm-debug-agent
         """,
     )
     parser.add_argument(
@@ -109,51 +109,36 @@ def validate_path(path: Path, path_type: str, must_exist: bool = True) -> Path:
 
 def get_default_paths() -> Dict[str, Path]:
     """
-    Get default paths from environment variables.
+    Get default paths from the installed test bundle.
 
     Returns:
         Dictionary containing 'test_bin' and 'test_script' paths.
 
     Raises:
-        SystemExit: If environment variables are not defined or paths cannot be resolved.
+        SystemExit: If paths cannot be resolved.
     """
-    therock_bin_dir_str = os.getenv("THEROCK_BIN_DIR")
-    artifacts_dir_str = os.getenv("OUTPUT_ARTIFACTS_DIR")
+    script_dir = Path(__file__).resolve().parent
+    candidate_dirs = [script_dir]
 
-    # Check if environment variables are defined.
-    if therock_bin_dir_str is None:
-        logger.error("[X] Error: THEROCK_BIN_DIR environment variable is not defined.")
-        sys.exit(1)
+    rocm_path = os.getenv("ROCM_PATH")
+    if rocm_path:
+        candidate_dirs.append(Path(rocm_path) / "tests" / "rocm-debug-agent")
 
-    if artifacts_dir_str is None:
-        logger.error(
-            "[X] Error: OUTPUT_ARTIFACTS_DIR environment variable is not defined."
-        )
-        sys.exit(1)
+    artifacts_dir = os.getenv("OUTPUT_ARTIFACTS_DIR")
+    if artifacts_dir:
+        candidate_dirs.append(Path(artifacts_dir) / "tests" / "rocm-debug-agent")
 
-    # Resolve and validate paths.
-    therock_bin_dir = validate_path(Path(therock_bin_dir_str), "THEROCK_BIN_DIR")
-    artifacts_dir = validate_path(Path(artifacts_dir_str), "OUTPUT_ARTIFACTS_DIR")
-
-    # Try the old testing script location first (for backwards compatibility).
-    test_bin = therock_bin_dir / "rocm-debug-agent-test"
-    test_script = artifacts_dir / "src" / "rocm-debug-agent-test" / "run-test.py"
-
-    if not test_script.exists():
-        # Fall back to the new testing script location (both binary and script
-        # in the same directory).
-        test_dir = artifacts_dir / "tests" / "rocm-debug-agent"
+    for test_dir in candidate_dirs:
         test_bin = test_dir / "rocm-debug-agent-test"
         test_script = test_dir / "run-test.py"
+        if test_bin.exists() and test_script.exists():
+            return {
+                "test_bin": validate_path(test_bin, "rocm-debug-agent-test"),
+                "test_script": validate_path(test_script, "run-test.py"),
+            }
 
-        if not test_script.exists():
-            logger.error("[X] Error: run-test.py not found.")
-            sys.exit(1)
-
-    return {
-        "test_bin": test_bin,
-        "test_script": test_script,
-    }
+    logger.error("[X] Error: rocm-debug-agent test bundle not found.")
+    sys.exit(1)
 
 
 def get_python_executable() -> str:
@@ -203,7 +188,8 @@ def print_section(
         inline (bool, optional):
             If True, print a single-line header with title inline (default: False).
         color (str, optional):
-            ANSI color escape code applied to both title and borders (default: None, no color).
+            ANSI color escape code applied to both title and borders
+            (default: None, no color).
 
             Examples:
                 "\033[92m" → Green
@@ -294,7 +280,8 @@ def run_tests(
         except subprocess.CalledProcessError as e:
             duration = time.perf_counter() - start_time
             logger.error(
-                f"[X] Attempt {attempt}/{max_retries} failed with exit code {e.returncode} "
+                f"[X] Attempt {attempt}/{max_retries} failed with exit code "
+                f"{e.returncode} "
                 f"after {duration:.2f}s"
             )
 
@@ -324,7 +311,7 @@ def main() -> None:
         rocr_debug_agent_test_script = validate_path(args.test_script, "--test-script")
     else:
         # Use default logic.
-        logger.info("Using default paths from environment variables.")
+        logger.info("Using default paths from the installed test bundle.")
         defaults = get_default_paths()
         rocr_debug_agent_test_bin = defaults["test_bin"]
         rocr_debug_agent_test_script = defaults["test_script"]
