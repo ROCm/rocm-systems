@@ -7,6 +7,8 @@ add_executable(
     main.cpp
 	test_pc_sampling_collector.h
 	test_pc_sampling_collector.cpp
+    test_code_object_writer.h
+    test_code_object_writer.cpp
 	mocks.h
 	mocks.cpp
 )
