@@ -309,4 +309,9 @@ if(BUILD_TESTS)
     rocm_install(TARGETS ${test_executable} COMPONENT tests)
   endforeach()
 
+  install(
+    PROGRAMS run_rccl.py
+    DESTINATION ${CMAKE_INSTALL_DATADIR}/rccl/tests
+    COMPONENT tests)
+
 endif()
