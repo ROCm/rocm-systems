@@ -35,7 +35,7 @@
 #include "pgen/test_pgen_sqtt.h"
 #include "simple_convolution/simple_convolution.h"
 
-char** pmc_argv(unsigned argc, const hsa_ven_amd_aqlprofile_event_t* events) {
+char** pmc_argv(unsigned argc, const aqlprofile_pmc_event_t* events) {
   const int argv_pmc_size = 32;
   static unsigned argc_pmc = 0;
   static char* argv_arr = NULL;
@@ -50,7 +50,7 @@ char** pmc_argv(unsigned argc, const hsa_ven_amd_aqlprofile_event_t* events) {
   for (unsigned i = 0; i < argc; ++i) {
     char* argv_ptr = argv_arr + (i * argv_pmc_size);
     snprintf(argv_ptr, argv_pmc_size, "%d:%d:%d", events[i].block_name, events[i].block_index,
-             events[i].counter_id);
+             events[i].event_id);
     argv_pmc[i] = argv_ptr;
   }
   argv_pmc[argc] = NULL;
@@ -91,7 +91,7 @@ int main(int argc, char* argv[]) {
   }
 
   TestHsa::HsaInstantiate();
-  const hsa_ven_amd_aqlprofile_event_t* events_arr;
+  const aqlprofile_pmc_event_t* events_arr;
 
   // Run simple convolution test
   if (pmc_enable) {
@@ -100,100 +100,100 @@ int main(int argc, char* argv[]) {
     } else if (!scan_enable) {
       int events_count = 0;
       if (TestHsa::HsaAgentName() == "gfx9") {
-        const hsa_ven_amd_aqlprofile_event_t events_arr1[] = {
-            {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SQ, 0, 2 /*CYCLES*/},
-            {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SQ, 0, 3 /*BUSY_CYCLES*/},
-            {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SQ, 0, 4 /*WAVES*/},
-            {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SQ, 0, 14 /*ITEMS*/},
-            {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SQ, 0, 47 /*WAVE_READY*/},
-            {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_TCC, 2, 1 /*CYCLE*/},
-            {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_TCC, 2, 3 /*REQ*/},
-            {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_TCC, 2, 22 /*WRITEBACK*/},
-            {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_CPC, 0, 0 /*ALWAYS_COUNT*/},
-            {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_CPC, 0, 8 /*ME1_STALL_WAIT_ON_RCIU_READ*/},
-            {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_MCVML2, 0, 0},  /*CYCLE*/
-            {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_MCVML2, 0, 2},  /*BANK0_PTE_CACHE_HITS*/
-            {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_MCVML2, 0, 7},  /*PDE0_CACHE_REQS*/
-            {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_MCVML2, 0, 8},  /*PDE0_CACHE_HITS*/
-            {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_MCVML2, 0, 13}, /*BANK0_4K_PTE_CACHE_MISSES*/
-            {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_MCVML2, 0, 14}, /*BANK0_BIGK_PTE_CACHE_HITS*/
-            {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_MCVML2, 0, 15}, /*BANK0_BIGK_PTE_CACHE_MISSES*/
-            {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_ATCL2, 0, 0},   /*CYCLE*/
-            {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_ATCL2, 0, 2},   /*BANK0_REQUESTS*/
+        const aqlprofile_pmc_event_t events_arr1[] = {
+            {0, 2 /*CYCLES*/, {}, HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SQ},
+            {0, 3 /*BUSY_CYCLES*/, {}, HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SQ},
+            {0, 4 /*WAVES*/, {}, HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SQ},
+            {0, 14 /*ITEMS*/, {}, HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SQ},
+            {0, 47 /*WAVE_READY*/, {}, HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SQ},
+            {2, 1 /*CYCLE*/, {}, HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_TCC},
+            {2, 3 /*REQ*/, {}, HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_TCC},
+            {2, 22 /*WRITEBACK*/, {}, HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_TCC},
+            {0, 0 /*ALWAYS_COUNT*/, {}, HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_CPC},
+            {0, 8 /*ME1_STALL_WAIT_ON_RCIU_READ*/, {}, HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_CPC},
+            {0, 0, {}, HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_MCVML2},  /*CYCLE*/
+            {0, 2, {}, HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_MCVML2},  /*BANK0_PTE_CACHE_HITS*/
+            {0, 7, {}, HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_MCVML2},  /*PDE0_CACHE_REQS*/
+            {0, 8, {}, HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_MCVML2},  /*PDE0_CACHE_HITS*/
+            {0, 13, {}, HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_MCVML2}, /*BANK0_4K_PTE_CACHE_MISSES*/
+            {0, 14, {}, HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_MCVML2}, /*BANK0_BIGK_PTE_CACHE_HITS*/
+            {0, 15, {}, HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_MCVML2}, /*BANK0_BIGK_PTE_CACHE_MISSES*/
+            {0, 0, {}, HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_ATCL2},   /*CYCLE*/
+            {0, 2, {}, HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_ATCL2},   /*BANK0_REQUESTS*/
         };
-        events_count = sizeof(events_arr1) / sizeof(hsa_ven_amd_aqlprofile_event_t);
+        events_count = sizeof(events_arr1) / sizeof(aqlprofile_pmc_event_t);
         events_arr = events_arr1;
       } else if (TestHsa::HsaAgentName() == "gfx12") {
-        const hsa_ven_amd_aqlprofile_event_t events_arr1[] = {
-            {(hsa_ven_amd_aqlprofile_block_name_t)AQLPROFILE_BLOCK_NAME_CHA, 0, 25 /*ALWAYS*/},
-            {(hsa_ven_amd_aqlprofile_block_name_t)AQLPROFILE_BLOCK_NAME_CHA, 0, 0 /*BUSY*/},
-            {(hsa_ven_amd_aqlprofile_block_name_t)AQLPROFILE_BLOCK_NAME_CHC, 0, 0 /*ALWAYS*/},
-            {(hsa_ven_amd_aqlprofile_block_name_t)AQLPROFILE_BLOCK_NAME_CHC, 0, 1 /*BUSY*/},
-            {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_CPC, 0, 0 /*ALWAYS*/},
-            {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_CPC, 0, 25 /*BUSY*/},
-            {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_CPF, 0, 0 /*ALWAYS*/},
-            {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_CPF, 0, 24 /*BUSY*/},
-            {(hsa_ven_amd_aqlprofile_block_name_t)AQLPROFILE_BLOCK_NAME_CPG, 0, 0 /*ALWAYS*/},
-            {(hsa_ven_amd_aqlprofile_block_name_t)AQLPROFILE_BLOCK_NAME_CPG, 0, 51 /*BUSY*/},
-            {(hsa_ven_amd_aqlprofile_block_name_t)AQLPROFILE_BLOCK_NAME_GC_UTCL2, 0, 1},
-            {(hsa_ven_amd_aqlprofile_block_name_t)AQLPROFILE_BLOCK_NAME_GC_VML2, 0, 5},
-            {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_GCEA, 0, 3},
-            {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_GCEA, 0, 4},
-            {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_GCR, 0, 6},
-            {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_GCR, 0, 22},
-            {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_GL2A, 0, 1 /*ALWAYS*/},
-            {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_GL2A, 0, 2 /*BUSY*/},
-            {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_GL2C, 0, 1 /*ALWAYS*/},
-            {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_GL2C, 0, 2 /*BUSY*/},
-            {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_GRBM, 0, 0 /*ALWAYS*/},
-            {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_GRBM, 0, 2 /*GUI_ACTIVE*/},
-            {(hsa_ven_amd_aqlprofile_block_name_t)AQLPROFILE_BLOCK_NAME_RLC, 0, 2},
-            {(hsa_ven_amd_aqlprofile_block_name_t)AQLPROFILE_BLOCK_NAME_RLC, 0, 5},
-            {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SDMA, 0, 0 /*ALWAYS*/},
-            {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SDMA, 0, 2 /*BUSY*/},
-            {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SDMA, 1, 0 /*ALWAYS*/},
-            {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SDMA, 1, 2 /*BUSY*/},
-            {(hsa_ven_amd_aqlprofile_block_name_t)AQLPROFILE_BLOCK_NAME_GC_UTCL1, 0, 1},
-            {(hsa_ven_amd_aqlprofile_block_name_t)AQLPROFILE_BLOCK_NAME_GC_UTCL1, 0, 2},
-            {(hsa_ven_amd_aqlprofile_block_name_t)AQLPROFILE_BLOCK_NAME_GCEA_SE, 0, 3},
-            {(hsa_ven_amd_aqlprofile_block_name_t)AQLPROFILE_BLOCK_NAME_GCEA_SE, 0, 4},
-            {(hsa_ven_amd_aqlprofile_block_name_t)AQLPROFILE_BLOCK_NAME_GRBMH, 0, 0 /*ALWAYS*/},
-            {(hsa_ven_amd_aqlprofile_block_name_t)AQLPROFILE_BLOCK_NAME_GRBMH, 0, 19},
-            {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SPI, 0, 46 /*CSN_BUSY*/},
-            {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SPI, 0, 47 /*CSN_NUM_THREADGROUPS*/},
-            {(hsa_ven_amd_aqlprofile_block_name_t)AQLPROFILE_BLOCK_NAME_SQG, 0,14 /*ALWAYS*/},
-            {(hsa_ven_amd_aqlprofile_block_name_t)AQLPROFILE_BLOCK_NAME_SQG, 0, 15 /*BUSY*/},
-            {(hsa_ven_amd_aqlprofile_block_name_t)AQLPROFILE_BLOCK_NAME_SQG, 0, 19 /*WAVES*/},
-            {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_GL1A, 0, 21 /*ALWAYS*/},
-            {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_GL1A, 0, 0 /*BUSY*/},
-            {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_GL1C, 0, 0 /*ALWAYS*/},
-            {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_GL1C, 0, 1 /*BUSY*/},
-            {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SQ, 0, 2 /*ALWAYS*/},
-            {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SQ, 0, 3 /*BUSY*/},
-            {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SQ, 0, 4 /*WAVES*/},
-            {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_TA, 0, 15 /*BUSY*/},
-            {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_TD, 0, 1 /*BUSY*/},
-            {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_TCP, 0, 96 /*BUSY*/},
-            {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_TCP, 0, 10 /*REQ_READ*/},
-            {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_TCP, 0, 14 /*REQ_WRITE*/},
-            {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_TCP, 1, 96 /*BUSY*/},
-            {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_TCP, 1, 10 /*REQ_READ*/},
-            {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_TCP, 1, 14 /*REQ_WRITE*/},
+        const aqlprofile_pmc_event_t events_arr1[] = {
+            {0, 25 /*ALWAYS*/, {}, (hsa_ven_amd_aqlprofile_block_name_t)AQLPROFILE_BLOCK_NAME_CHA},
+            {0, 0 /*BUSY*/, {}, (hsa_ven_amd_aqlprofile_block_name_t)AQLPROFILE_BLOCK_NAME_CHA},
+            {0, 0 /*ALWAYS*/, {}, (hsa_ven_amd_aqlprofile_block_name_t)AQLPROFILE_BLOCK_NAME_CHC},
+            {0, 1 /*BUSY*/, {}, (hsa_ven_amd_aqlprofile_block_name_t)AQLPROFILE_BLOCK_NAME_CHC},
+            {0, 0 /*ALWAYS*/, {}, HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_CPC},
+            {0, 25 /*BUSY*/, {}, HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_CPC},
+            {0, 0 /*ALWAYS*/, {}, HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_CPF},
+            {0, 24 /*BUSY*/, {}, HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_CPF},
+            {0, 0 /*ALWAYS*/, {}, (hsa_ven_amd_aqlprofile_block_name_t)AQLPROFILE_BLOCK_NAME_CPG},
+            {0, 51 /*BUSY*/, {}, (hsa_ven_amd_aqlprofile_block_name_t)AQLPROFILE_BLOCK_NAME_CPG},
+            {0, 1, {}, (hsa_ven_amd_aqlprofile_block_name_t)AQLPROFILE_BLOCK_NAME_GC_UTCL2},
+            {0, 5, {}, (hsa_ven_amd_aqlprofile_block_name_t)AQLPROFILE_BLOCK_NAME_GC_VML2},
+            {0, 3, {}, HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_GCEA},
+            {0, 4, {}, HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_GCEA},
+            {0, 6, {}, HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_GCR},
+            {0, 22, {}, HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_GCR},
+            {0, 1 /*ALWAYS*/, {}, HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_GL2A},
+            {0, 2 /*BUSY*/, {}, HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_GL2A},
+            {0, 1 /*ALWAYS*/, {}, HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_GL2C},
+            {0, 2 /*BUSY*/, {}, HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_GL2C},
+            {0, 0 /*ALWAYS*/, {}, HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_GRBM},
+            {0, 2 /*GUI_ACTIVE*/, {}, HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_GRBM},
+            {0, 2, {}, (hsa_ven_amd_aqlprofile_block_name_t)AQLPROFILE_BLOCK_NAME_RLC},
+            {0, 5, {}, (hsa_ven_amd_aqlprofile_block_name_t)AQLPROFILE_BLOCK_NAME_RLC},
+            {0, 0 /*ALWAYS*/, {}, HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SDMA},
+            {0, 2 /*BUSY*/, {}, HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SDMA},
+            {1, 0 /*ALWAYS*/, {}, HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SDMA},
+            {1, 2 /*BUSY*/, {}, HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SDMA},
+            {0, 1, {}, (hsa_ven_amd_aqlprofile_block_name_t)AQLPROFILE_BLOCK_NAME_GC_UTCL1},
+            {0, 2, {}, (hsa_ven_amd_aqlprofile_block_name_t)AQLPROFILE_BLOCK_NAME_GC_UTCL1},
+            {0, 3, {}, (hsa_ven_amd_aqlprofile_block_name_t)AQLPROFILE_BLOCK_NAME_GCEA_SE},
+            {0, 4, {}, (hsa_ven_amd_aqlprofile_block_name_t)AQLPROFILE_BLOCK_NAME_GCEA_SE},
+            {0, 0 /*ALWAYS*/, {}, (hsa_ven_amd_aqlprofile_block_name_t)AQLPROFILE_BLOCK_NAME_GRBMH},
+            {0, 19, {}, (hsa_ven_amd_aqlprofile_block_name_t)AQLPROFILE_BLOCK_NAME_GRBMH},
+            {0, 46 /*CSN_BUSY*/, {}, HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SPI},
+            {0, 47 /*CSN_NUM_THREADGROUPS*/, {}, HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SPI},
+            {0,14 /*ALWAYS*/, {}, (hsa_ven_amd_aqlprofile_block_name_t)AQLPROFILE_BLOCK_NAME_SQG},
+            {0, 15 /*BUSY*/, {}, (hsa_ven_amd_aqlprofile_block_name_t)AQLPROFILE_BLOCK_NAME_SQG},
+            {0, 19 /*WAVES*/, {}, (hsa_ven_amd_aqlprofile_block_name_t)AQLPROFILE_BLOCK_NAME_SQG},
+            {0, 21 /*ALWAYS*/, {}, HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_GL1A},
+            {0, 0 /*BUSY*/, {}, HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_GL1A},
+            {0, 0 /*ALWAYS*/, {}, HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_GL1C},
+            {0, 1 /*BUSY*/, {}, HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_GL1C},
+            {0, 2 /*ALWAYS*/, {}, HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SQ},
+            {0, 3 /*BUSY*/, {}, HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SQ},
+            {0, 4 /*WAVES*/, {}, HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SQ},
+            {0, 15 /*BUSY*/, {}, HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_TA},
+            {0, 1 /*BUSY*/, {}, HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_TD},
+            {0, 96 /*BUSY*/, {}, HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_TCP},
+            {0, 10 /*REQ_READ*/, {}, HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_TCP},
+            {0, 14 /*REQ_WRITE*/, {}, HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_TCP},
+            {1, 96 /*BUSY*/, {}, HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_TCP},
+            {1, 10 /*REQ_READ*/, {}, HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_TCP},
+            {1, 14 /*REQ_WRITE*/, {}, HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_TCP},
         };
-        events_count = sizeof(events_arr1) / sizeof(hsa_ven_amd_aqlprofile_event_t);
+        events_count = sizeof(events_arr1) / sizeof(aqlprofile_pmc_event_t);
         events_arr = events_arr1;
       } else {
-        const hsa_ven_amd_aqlprofile_event_t events_arr1[] = {
-            {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SQ, 0, 4 /*WAVES*/},
-            {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SQ, 0, 14 /*ITEMS*/},
-            {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SQ, 0, 47 /*WAVE_READY*/},
-            {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_TCC, 2, 1 /*CYCLE*/},
-            {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_TCC, 2, 3 /*REQS*/},
-            {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_TCC, 2, 22 /*WRITEBACK*/},
-            {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_CPC, 0, 0 /*ALWAYS_COUNT*/},
-            {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_CPC, 0, 8 /*ME1_STALL_WAIT_ON_RCIU_READ*/},
+        const aqlprofile_pmc_event_t events_arr1[] = {
+            {0, 4 /*WAVES*/, {}, HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SQ},
+            {0, 14 /*ITEMS*/, {}, HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SQ},
+            {0, 47 /*WAVE_READY*/, {}, HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SQ},
+            {2, 1 /*CYCLE*/, {}, HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_TCC},
+            {2, 3 /*REQS*/, {}, HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_TCC},
+            {2, 22 /*WRITEBACK*/, {}, HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_TCC},
+            {0, 0 /*ALWAYS_COUNT*/, {}, HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_CPC},
+            {0, 8 /*ME1_STALL_WAIT_ON_RCIU_READ*/, {}, HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_CPC},
         };
-        events_count = sizeof(events_arr1) / sizeof(hsa_ven_amd_aqlprofile_event_t);
+        events_count = sizeof(events_arr1) / sizeof(aqlprofile_pmc_event_t);
         events_arr = events_arr1;
       }
       ret_val = RunKernel<simple_convolution, TestPGenPmc<RUN_MODE> >(
@@ -207,7 +207,7 @@ int main(int argc, char* argv[]) {
             fflush(stdout);
             fprintf(stderr, " %d %d %d                 \r", i, j, k);
             fflush(stderr);
-            hsa_ven_amd_aqlprofile_event_t event = {(hsa_ven_amd_aqlprofile_block_name_t)i, j, k};
+            aqlprofile_pmc_event_t event = {j, k, {}, (hsa_ven_amd_aqlprofile_block_name_t)i};
             if (!RunKernel<simple_convolution, TestPGenPmc<RUN_MODE> >(1, pmc_argv(1, &event))) {
               if (k == 0) {
                 k = event_id_max + 1;
@@ -221,72 +221,72 @@ int main(int argc, char* argv[]) {
     }
   } else if (sdma_enable) {
     int events_count = 0;
-    const hsa_ven_amd_aqlprofile_event_t events_sdma[] = {
-        {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SDMA, 0, 17 /*MC_WR_COUNT*/},
-        {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SDMA, 0, 19 /*MC_RD_COUNT*/},
-        {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SDMA, 1, 17 /*MC_WR_COUNT*/},
-        {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SDMA, 1, 19 /*MC_RD_COUNT*/},
+    const aqlprofile_pmc_event_t events_sdma[] = {
+        {0, 17 /*MC_WR_COUNT*/, {}, HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SDMA},
+        {0, 19 /*MC_RD_COUNT*/, {}, HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SDMA},
+        {1, 17 /*MC_WR_COUNT*/, {}, HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SDMA},
+        {1, 19 /*MC_RD_COUNT*/, {}, HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SDMA},
     };
-    events_count = sizeof(events_sdma) / sizeof(hsa_ven_amd_aqlprofile_event_t);
+    events_count = sizeof(events_sdma) / sizeof(aqlprofile_pmc_event_t);
     ret_val = RunKernel<simple_convolution, TestPGenPmc<SETUP_MODE> >(
         events_count, pmc_argv(events_count, events_sdma));
   } else if (pmc_priv_enable) {
     int events_count = 0;
     if (TestHsa::HsaAgentName() == "gfx9") {
-      const hsa_ven_amd_aqlprofile_event_t events_arr1[] = {
-          {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_MCVML2, 0, 0},  /*CYCLE*/
-          {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_MCVML2, 0, 2},  /*BANK0_PTE_CACHE_HITS*/
-          {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_MCVML2, 0, 7},  /*PDE0_CACHE_REQS*/
-          {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_MCVML2, 0, 8},  /*PDE0_CACHE_HITS*/
-          {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_MCVML2, 0, 13}, /*BANK0_4K_PTE_CACHE_MISSES*/
-          {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_MCVML2, 0, 14}, /*BANK0_BIGK_PTE_CACHE_HITS*/
-          {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_MCVML2, 0, 15}, /*BANK0_BIGK_PTE_CACHE_MISSES*/
-          {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_MCVML2, 0, 0},  /*CYCLE*/
-          {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_ATCL2, 0, 0},   /*CYCLE*/
-          {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_ATCL2, 0, 2},   /**/
-          {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_ATC, 0, 0},     /*CYCLE*/
-          {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_ATC, 0, 2},     /**/
-          {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_ATC, 0, 7},     /**/
-          {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_ATC, 0, 8},     /**/
-          {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_GCEA, 0, 0},    /*CYCLE*/
-          {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_GCEA, 0, 2},    /*REQS_PER_CLIENT_GROUP*/
-          {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_RPB, 0, 0},     /*CYCLE*/
-          {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_RPB, 0, 2},     /**/
-          {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_RPB, 0, 7},     /**/
-          {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_RPB, 0, 8},     /**/
+      const aqlprofile_pmc_event_t events_arr1[] = {
+          {0, 0, {}, HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_MCVML2},  /*CYCLE*/
+          {0, 2, {}, HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_MCVML2},  /*BANK0_PTE_CACHE_HITS*/
+          {0, 7, {}, HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_MCVML2},  /*PDE0_CACHE_REQS*/
+          {0, 8, {}, HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_MCVML2},  /*PDE0_CACHE_HITS*/
+          {0, 13, {}, HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_MCVML2}, /*BANK0_4K_PTE_CACHE_MISSES*/
+          {0, 14, {}, HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_MCVML2}, /*BANK0_BIGK_PTE_CACHE_HITS*/
+          {0, 15, {}, HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_MCVML2}, /*BANK0_BIGK_PTE_CACHE_MISSES*/
+          {0, 0, {}, HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_MCVML2},  /*CYCLE*/
+          {0, 0, {}, HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_ATCL2},   /*CYCLE*/
+          {0, 2, {}, HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_ATCL2},   /**/
+          {0, 0, {}, HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_ATC},     /*CYCLE*/
+          {0, 2, {}, HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_ATC},     /**/
+          {0, 7, {}, HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_ATC},     /**/
+          {0, 8, {}, HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_ATC},     /**/
+          {0, 0, {}, HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_GCEA},    /*CYCLE*/
+          {0, 2, {}, HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_GCEA},    /*REQS_PER_CLIENT_GROUP*/
+          {0, 0, {}, HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_RPB},     /*CYCLE*/
+          {0, 2, {}, HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_RPB},     /**/
+          {0, 7, {}, HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_RPB},     /**/
+          {0, 8, {}, HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_RPB},     /**/
       };
-      events_count = sizeof(events_arr1) / sizeof(hsa_ven_amd_aqlprofile_event_t);
+      events_count = sizeof(events_arr1) / sizeof(aqlprofile_pmc_event_t);
       events_arr = events_arr1;
     } else {
-      const hsa_ven_amd_aqlprofile_event_t events_arr1[] = {
-          {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_MCVML2, 0, 0},  /*CYCLE*/
-          {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_MCVML2, 0, 2},  /*BANK0_PTE_CACHE_HITS*/
-          {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_MCARB, 0, 0},   /*CYCLE*/
-          {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_MCARB, 0, 1},   /*CORRECTABLE_GECC_ERR_CNT_CHAN0*/
-          {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_MCARB, 0, 2},   /*CORRECTABLE_GECC_ERR_CNT_CHAN1*/
-          {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_MCARB, 0, 3},   /*UNCORRECTABLE_GECC_ERR_CNT_CHAN0*/
-          {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_MCHUB, 0, 0},   /*CYCLE*/
-          {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_MCHUB, 0, 1},   /*ACPG_WRRET_VLD*/
-          {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_MCHUB, 0, 2},   /*ACPO_WRRET_VLD*/
-          {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_MCHUB, 0, 3},   /*IH_WRRET_VLD*/
-          {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_MCXBAR, 0, 0},  /*CYCLE*/
-          {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_MCXBAR, 0, 1},  /**/
-          {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_MCXBAR, 0, 2},  /**/
-          {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_MCXBAR, 0, 3},  /**/
-          {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_MCMCBVM, 0, 0}, /*CYCLE*/
-          {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_MCMCBVM, 0, 1}, /*TLB0_REQS*/
-          {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_MCMCBVM, 0, 2}, /*TLB0_HITS*/
-          {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_MCMCBVM, 0, 3}, /*TLB0_MISSES*/
-          {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_ATC, 0, 0},     /*CYCLE*/
-          {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_ATC, 0, 24},    /*ATCL2_L1_REQAS*/
-          {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_ATC, 0, 25},    /*ATCL2_BANK0_REQS*/
-          {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_ATC, 0, 26},    /*ATCL2_BANK0_HITS*/
-          {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_RPB, 0, 0},     /*CYCLE*/
-          {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_RPB, 0, 2},     /*RD_REQS_IN*/
-          {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_RPB, 0, 7},     /*WR_REQ_QUEUE2_IN*/
-          {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_RPB, 0, 8},     /*WR_REQ_QUEUE3_IN*/
+      const aqlprofile_pmc_event_t events_arr1[] = {
+          {0, 0, {}, HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_MCVML2},  /*CYCLE*/
+          {0, 2, {}, HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_MCVML2},  /*BANK0_PTE_CACHE_HITS*/
+          {0, 0, {}, HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_MCARB},   /*CYCLE*/
+          {0, 1, {}, HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_MCARB},   /*CORRECTABLE_GECC_ERR_CNT_CHAN0*/
+          {0, 2, {}, HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_MCARB},   /*CORRECTABLE_GECC_ERR_CNT_CHAN1*/
+          {0, 3, {}, HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_MCARB},   /*UNCORRECTABLE_GECC_ERR_CNT_CHAN0*/
+          {0, 0, {}, HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_MCHUB},   /*CYCLE*/
+          {0, 1, {}, HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_MCHUB},   /*ACPG_WRRET_VLD*/
+          {0, 2, {}, HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_MCHUB},   /*ACPO_WRRET_VLD*/
+          {0, 3, {}, HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_MCHUB},   /*IH_WRRET_VLD*/
+          {0, 0, {}, HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_MCXBAR},  /*CYCLE*/
+          {0, 1, {}, HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_MCXBAR},  /**/
+          {0, 2, {}, HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_MCXBAR},  /**/
+          {0, 3, {}, HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_MCXBAR},  /**/
+          {0, 0, {}, HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_MCMCBVM}, /*CYCLE*/
+          {0, 1, {}, HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_MCMCBVM}, /*TLB0_REQS*/
+          {0, 2, {}, HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_MCMCBVM}, /*TLB0_HITS*/
+          {0, 3, {}, HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_MCMCBVM}, /*TLB0_MISSES*/
+          {0, 0, {}, HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_ATC},     /*CYCLE*/
+          {0, 24, {}, HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_ATC},    /*ATCL2_L1_REQAS*/
+          {0, 25, {}, HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_ATC},    /*ATCL2_BANK0_REQS*/
+          {0, 26, {}, HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_ATC},    /*ATCL2_BANK0_HITS*/
+          {0, 0, {}, HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_RPB},     /*CYCLE*/
+          {0, 2, {}, HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_RPB},     /*RD_REQS_IN*/
+          {0, 7, {}, HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_RPB},     /*WR_REQ_QUEUE2_IN*/
+          {0, 8, {}, HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_RPB},     /*WR_REQ_QUEUE3_IN*/
       };
-      events_count = sizeof(events_arr1) / sizeof(hsa_ven_amd_aqlprofile_event_t);
+      events_count = sizeof(events_arr1) / sizeof(aqlprofile_pmc_event_t);
       events_arr = events_arr1;
     }
     ret_val = RunKernel<simple_convolution, TestPGenPmc<RUN_MODE> >(
@@ -297,18 +297,18 @@ int main(int argc, char* argv[]) {
     ret_val = RunKernel<simple_convolution, TestPGenPcsmp>(argc, argv);
   } else if (spm_enable) {
     int events_count = 0;
-    const hsa_ven_amd_aqlprofile_event_t events_spm[] = {
-        {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SQ, 0, 2 /*CYCLES*/},
-        {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SQ, 0, 4 /*WAVES*/},
-        {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SQ, 0, 14 /*ITEMS*/},
-        {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SPI, 0, 48 /*CSN_BUSY*/},
-        {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SPI, 0, 49 /*CSN_NUM_THREADGROUPS*/},
-        {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SPI, 0, 51 /*CSN_EVENT_WAVE*/},
-        {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SPI, 0, 47 /*CSN_WINDOW_VALID*/},
-        {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_CPC, 0, 0 /*ALWAYS_COUNT*/},
-        {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_CPC, 0, 8 /*SEL_ME1_STALL_WAIT_ON_RCIU_READ*/},
+    const aqlprofile_pmc_event_t events_spm[] = {
+        {0, 2 /*CYCLES*/, {}, HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SQ},
+        {0, 4 /*WAVES*/, {}, HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SQ},
+        {0, 14 /*ITEMS*/, {}, HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SQ},
+        {0, 48 /*CSN_BUSY*/, {}, HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SPI},
+        {0, 49 /*CSN_NUM_THREADGROUPS*/, {}, HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SPI},
+        {0, 51 /*CSN_EVENT_WAVE*/, {}, HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SPI},
+        {0, 47 /*CSN_WINDOW_VALID*/, {}, HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SPI},
+        {0, 0 /*ALWAYS_COUNT*/, {}, HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_CPC},
+        {0, 8 /*SEL_ME1_STALL_WAIT_ON_RCIU_READ*/, {}, HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_CPC},
     };
-    events_count = sizeof(events_spm) / sizeof(hsa_ven_amd_aqlprofile_event_t);
+    events_count = sizeof(events_spm) / sizeof(aqlprofile_pmc_event_t);
 
     ret_val = RunKernel<simple_convolution, TestPGenSpm>(
         events_count, pmc_argv(events_count, events_spm), spm_loops);
