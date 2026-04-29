@@ -18,7 +18,7 @@
 // ── Light policies (sampling/ — no main-lib deps) ────────────────────────────
 #include "sampling/src/linux/libunwind_unwinder.hpp"
 #include "sampling/src/linux/real_signal_dispatcher.hpp"
-#include "sampling/src/linux/steady_clock.hpp"
+#include "sampling/src/steady_clock.hpp"
 
 // ── Production-only trigger policies (not test-accessible) ───────────────────
 #include "sampling/policies/real_overflow_trigger.hpp"
