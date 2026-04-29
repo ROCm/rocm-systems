@@ -22,6 +22,12 @@ apt install -y curl git unzip python3-venv python3-pip
 python3 -m venv .venv
 . .venv/bin/activate
 
+# ⚠️ ANNOTATION: Node.js 14+ is required for building the bundled opencode TUI.
+# If you have Node < 14 (check with: node --version), the build will fail with
+# "SyntaxError: Unexpected token '.'" during the vite build step.
+# Install a newer Node version or use nvm to manage Node versions.
+# Alternatively, skip the bundled build with PERFXPERT_SKIP_BUNDLED_BUILD=1
+
 # Latest development build from ROCm/rocm-systems.
 REF=develop; curl -fsSL "https://raw.githubusercontent.com/ROCm/rocm-systems/${REF}/experimental/python/perfxpert/scripts/pip-install-from-git.sh" | bash -s -- "${REF}"
 ```

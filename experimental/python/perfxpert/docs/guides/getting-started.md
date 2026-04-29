@@ -34,6 +34,11 @@ silently producing a broken `perfxpert-code`.
 
 - Python 3.10+
 - `curl`, `git`, `unzip`, `python3-venv`, and `python3-pip` for GitHub installs.
+- **Node.js 14+** (required for building the bundled opencode TUI via Vite)
+  - Check version with `node --version`
+  - If Node < 14, the build will fail with "SyntaxError: Unexpected token '.'"
+  - Install via your package manager or use nvm to manage Node versions
+  - Alternative: Skip the bundled build with `PERFXPERT_SKIP_BUNDLED_BUILD=1`
 - On Ubuntu 24+ and other externally managed Python environments,
   create and activate a virtual environment before invoking pip.
 - `bun` on PATH, or `curl` + `unzip` so pip can bootstrap bun into the
