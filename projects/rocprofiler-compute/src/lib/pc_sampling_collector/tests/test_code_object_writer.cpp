@@ -22,6 +22,17 @@ TEST_F(test_code_object_writer_t, ProvidedEndCodeObjWithoutStart_Throws)
     EXPECT_THROW(m_writer.get_result(), std::runtime_error);
 }
 
+
+TEST_F(test_code_object_writer_t, ProvidedCodeObjDesc_SerializesIt)
+{
+    uint32_t id = 10;
+    m_writer.start_code_obj(id);
+    m_writer.end_code_obj_desc(id);
+    const auto& result = m_writer.get_result();
+    EXPECT_FALSE(result.empty());
+    EXPECT_TRUE(nlohmann::json::accept(result));
+}
+
 void test_code_object_writer_t::SetUp()
 {
 }
