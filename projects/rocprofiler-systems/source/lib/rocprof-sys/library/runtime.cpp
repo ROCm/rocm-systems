@@ -38,9 +38,6 @@ namespace rocprofsys
 {
 namespace
 {
-auto root_process_id =
-    get_env<pid_t>("ROCPROFSYS_ROOT_PROCESS", process::get_id(), false);
-
 auto&
 get_sampling_on_child_threads_history(int64_t _idx = utility::get_thread_index())
 {
@@ -252,21 +249,8 @@ set_sampling_on_all_future_threads(bool _v)
         get_sampling_on_child_threads_history(i).emplace_back(_v);
 }
 
-pid_t
-get_root_process_id()
-{
-    return root_process_id;
-}
-
-bool
-is_root_process()
-{
-    return (root_process_id == process::get_id());
-}
-
-bool
-is_child_process()
-{
-    return (root_process_id != process::get_id());
-}
+// get_root_process_id / is_root_process / is_child_process moved to
+// core/mproc.cpp so trace_cache::cache_manager (and any other core-only
+// caller) can resolve them without linking the main rocprof-sys library.
+// Declarations remain in library/runtime.hpp for backwards compatibility.
 }  // namespace rocprofsys

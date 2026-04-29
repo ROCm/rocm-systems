@@ -4,6 +4,7 @@
 #include "mproc.hpp"
 #include "common.hpp"
 
+#include <cstdlib>
 #include <fstream>
 #include <set>
 #include <sstream>
@@ -16,6 +17,50 @@
 
 namespace rocprofsys
 {
+namespace
+{
+// One-shot capture of the root process id at first observation. Honours the
+// ROCPROFSYS_ROOT_PROCESS environment override so that fork()'d children can
+// inherit the parent's id explicitly. The function-local static is initialised
+// the first time get_root_process_id() runs (before any fork()), guaranteeing
+// the value reflects the original process across the rest of its lifetime.
+pid_t
+init_root_process_id()
+{
+    if(const char* env = std::getenv("ROCPROFSYS_ROOT_PROCESS"); env != nullptr)
+    {
+        try
+        {
+            return static_cast<pid_t>(std::stoi(env));
+        } catch(...)
+        {
+            // Fall through to getpid() on parse failure — matches legacy behaviour
+            // where get_env<>() silently used the default on bad input.
+        }
+    }
+    return ::getpid();
+}
+}  // namespace
+
+pid_t
+get_root_process_id()
+{
+    static const pid_t root_pid = init_root_process_id();
+    return root_pid;
+}
+
+bool
+is_root_process()
+{
+    return (get_root_process_id() == ::getpid());
+}
+
+bool
+is_child_process()
+{
+    return (get_root_process_id() != ::getpid());
+}
+
 namespace mproc
 {
 std::set<int>

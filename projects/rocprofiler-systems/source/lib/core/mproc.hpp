@@ -8,6 +8,17 @@
 
 namespace rocprofsys
 {
+// Process-identity helpers. Defined in core/mproc.cpp so that core-only callers
+// (notably trace_cache::cache_manager) can link them without pulling in the
+// main rocprof-sys library. library/runtime.hpp re-declares the same trio so
+// pre-existing call-sites continue to compile unchanged.
+pid_t
+get_root_process_id();
+bool
+is_root_process();
+bool
+is_child_process();
+
 namespace mproc
 {
 // get the concurrent processes from /proc/<PPID>/task/<PPID>/children
