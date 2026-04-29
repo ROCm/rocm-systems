@@ -10,3 +10,11 @@ ais_add_executable(
     SRCS "aiscp.cpp"
     SYSINCLS ${HIPFILE_INCLUDE_PATH}
 )
+
+
+ais_add_executable(
+    NAME buffertofile
+    DEPS hipfile
+    SRCS "buffertofile.cpp"
+    SYSINCLS ${HIPFILE_INCLUDE_PATH}
+)
