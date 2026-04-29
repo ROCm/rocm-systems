@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 # Copyright Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
@@ -65,7 +66,7 @@ def get_rocm_path(
         if resolved_test_dir.parent.name == "libexec":
             return resolved_test_dir.parents[1].resolve()
 
-    raise SystemExit("ROCM_PATH is required when the runner is not installed.")
+    raise RuntimeError("ROCM_PATH is required when the runner is not installed.")
 
 
 def prepend_env_path(env: dict[str, str], key: str, paths: list[Path]) -> None:
