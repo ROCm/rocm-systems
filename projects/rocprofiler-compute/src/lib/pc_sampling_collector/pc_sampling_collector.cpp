@@ -45,14 +45,14 @@ void pc_sampling_collector_impl_t::write(pc_samples_writer_t& writer)
         for (const auto& sym : symbols)
         {
             writer.start_symbol(sym);
-            //uint64_t       pc  = sym.virtual_address;
-            //const uint64_t end = sym.virtual_address + sym.size;
-            //while (pc < end)
-            //{
-            //    const auto& inst = m_translator->get_instruction(id, pc);
-            //    writer.write_instruction(sym, inst);
-            //    pc += inst.size;
-            //}
+            uint64_t       pc  = sym.virtual_address;
+            const uint64_t end = sym.virtual_address + sym.size;
+            while (pc < end)
+            {
+                const auto& inst = m_translator->get_instruction(id, pc);
+                writer.write_instruction(inst);
+                pc += inst.size;
+            }
             writer.end_symbol();
         }
         writer.end_code_obj_desc(id);

@@ -48,6 +48,12 @@ void mock_code_object_translator_t::add_symbols(size_t object_id,
     m_symbols_per_obj[object_id] = symbols;
 }
 
+void mock_code_object_translator_t::add_instructions(
+    const std::vector<rocm_compute::instruction_t>& instructions)
+{
+    m_instructions = instructions;
+}
+
 const std::vector<mock_code_object_translator_t::mem_code_object_info_t>&
     mock_code_object_translator_t::get_mem_code_object_info() const
 {
