@@ -119,6 +119,33 @@ protected:
             [expected](size_t) { return expected; });
     }
 
+    ncclResult_t growByOneNcclConvention(ncclComm_t existingComm, int existingNRanks, ncclComm_t* outComm)
+    {
+        const int wr       = MPIEnvironment::world_rank;
+        const int newRank  = existingNRanks;
+        const int newTotal = existingNRanks + 1;
+
+        ncclUniqueId growId{};
+        if (wr == 0) {
+            RCCL_TEST_CHECK(ncclCommGetUniqueId(existingComm, &growId));
+        }
+        MPI_Bcast(&growId, sizeof(growId), MPI_BYTE, 0, MPI_COMM_WORLD);
+
+        if (wr < existingNRanks) {
+            if (wr == 0) {
+                RCCL_TEST_CHECK(ncclCommGrow(existingComm, newTotal, &growId, -1,
+                                             outComm, nullptr));
+            } else {
+                RCCL_TEST_CHECK(ncclCommGrow(existingComm, newTotal, nullptr, -1,
+                                             outComm, nullptr));
+            }
+        } else if (wr == newRank) {
+            RCCL_TEST_CHECK(ncclCommGrow(nullptr, newTotal, &growId, newRank,
+                                         outComm, nullptr));
+        }
+        return ncclSuccess;
+    }
+
     bool runSendRecvRing(ncclComm_t comm, int nRanksInComm)
     {
         if (!comm) return false;
@@ -171,28 +198,7 @@ protected:
     }
 };
 
-// --- Test 1: Single grow, AllReduce verification ---
-
-TEST_F(GrowMPITest, Grow_AllReduce)
-{
-    if (!validateTestPrerequisites(GrowTestConfig::kMinRanks)) {
-        GTEST_SKIP() << "Requires at least " << GrowTestConfig::kMinRanks << " MPI ranks";
-    }
-
-    const int wr        = MPIEnvironment::world_rank;
-    const int worldSize = MPIEnvironment::world_size;
-    const int existing  = worldSize - 1;
-
-    ASSERT_MPI_EQ(ncclSuccess, buildComm(existing, &initialComm_));
-    ASSERT_MPI_TRUE(wr >= existing || initialComm_ != nullptr);
-
-    ASSERT_MPI_EQ(ncclSuccess, growByOne(initialComm_, existing, &grownComm_));
-    ASSERT_MPI_NE(grownComm_, nullptr);
-
-    ASSERT_MPI_TRUE(runAllReduceAndVerify(grownComm_, worldSize));
-}
-
-// --- Test 2: Single grow, SendRecv ring verification ---
+// --- Single grow, SendRecv ring verification ---
 
 TEST_F(GrowMPITest, Grow_SendRecv)
 {
@@ -213,7 +219,7 @@ TEST_F(GrowMPITest, Grow_SendRecv)
     ASSERT_MPI_TRUE(runSendRecvRing(grownComm_, worldSize));
 }
 
-// --- Test 3: Double grow (N-2 -> N-1 -> N), AllReduce verification ---
+// --- Double grow (N-2 -> N-1 -> N), AllReduce verification ---
 
 TEST_F(GrowMPITest, DoubleGrow_AllReduce)
 {
@@ -242,7 +248,7 @@ TEST_F(GrowMPITest, DoubleGrow_AllReduce)
     ASSERT_MPI_TRUE(runAllReduceAndVerify(grownComm_, phase2));
 }
 
-// --- Test 4: Grow then abort ---
+// --- Grow then abort ---
 
 TEST_F(GrowMPITest, Grow_ThenAbort)
 {
@@ -268,9 +274,30 @@ TEST_F(GrowMPITest, Grow_ThenAbort)
     ASSERT_MPI_SUCCESS(MPI_Barrier(MPI_COMM_WORLD));
 }
 
-// --- Test 5: Grow then destroy ---
+// --- Coordinator-only uniqueId (NCCL convention) ---
 
-TEST_F(GrowMPITest, Grow_ThenDestroy)
+TEST_F(GrowMPITest, Grow_CoordinatorOnlyUniqueId)
+{
+    if (!validateTestPrerequisites(3)) {
+        GTEST_SKIP() << "Requires at least 3 MPI ranks";
+    }
+
+    const int wr        = MPIEnvironment::world_rank;
+    const int worldSize = MPIEnvironment::world_size;
+    const int existing  = worldSize - 1;
+
+    ASSERT_MPI_EQ(ncclSuccess, buildComm(existing, &initialComm_));
+    ASSERT_MPI_TRUE(wr >= existing || initialComm_ != nullptr);
+
+    ASSERT_MPI_EQ(ncclSuccess, growByOneNcclConvention(initialComm_, existing, &grownComm_));
+    ASSERT_MPI_NE(grownComm_, nullptr);
+
+    ASSERT_MPI_TRUE(runAllReduceAndVerify(grownComm_, worldSize));
+}
+
+// --- Rank preservation after grow ---
+
+TEST_F(GrowMPITest, Grow_RankPreservation)
 {
     if (!validateTestPrerequisites(GrowTestConfig::kMinRanks)) {
         GTEST_SKIP() << "Requires at least " << GrowTestConfig::kMinRanks << " MPI ranks";
@@ -286,11 +313,162 @@ TEST_F(GrowMPITest, Grow_ThenDestroy)
     ASSERT_MPI_EQ(ncclSuccess, growByOne(initialComm_, existing, &grownComm_));
     ASSERT_MPI_NE(grownComm_, nullptr);
 
+    int grownRank = -1, grownCount = -1;
+    ASSERT_MPI_EQ(ncclSuccess, ncclCommUserRank(grownComm_, &grownRank));
+    ASSERT_MPI_EQ(ncclSuccess, ncclCommCount(grownComm_, &grownCount));
+
+    ASSERT_MPI_EQ(grownCount, worldSize);
+
+    int expectedRank;
+    if (wr < existing) {
+        int originalRank = -1;
+        ASSERT_EQ(ncclSuccess, ncclCommUserRank(initialComm_, &originalRank));
+        expectedRank = originalRank;
+    } else {
+        expectedRank = existing;
+    }
+    ASSERT_MPI_EQ(grownRank, expectedRank);
+}
+
+// --- Config inheritance from parent ---
+
+TEST_F(GrowMPITest, Grow_ConfigInheritance)
+{
+    if (!validateTestPrerequisites(GrowTestConfig::kMinRanks)) {
+        GTEST_SKIP() << "Requires at least " << GrowTestConfig::kMinRanks << " MPI ranks";
+    }
+
+    const int wr        = MPIEnvironment::world_rank;
+    const int worldSize = MPIEnvironment::world_size;
+    const int existing  = worldSize - 1;
+
+    ncclUniqueId initId{};
+    if (wr == 0) {
+        ASSERT_EQ(ncclSuccess, ncclGetUniqueId(&initId));
+    }
+    MPI_Bcast(&initId, sizeof(initId), MPI_BYTE, 0, MPI_COMM_WORLD);
+
+    if (wr < existing) {
+        ncclConfig_t config = NCCL_CONFIG_INITIALIZER;
+        config.splitShare = 1;
+        ASSERT_EQ(ncclSuccess, ncclCommInitRankConfig(&initialComm_, existing, initId, wr, &config));
+    }
+
+    ASSERT_MPI_EQ(ncclSuccess, growByOne(initialComm_, existing, &grownComm_));
+    ASSERT_MPI_NE(grownComm_, nullptr);
+
+    ASSERT_MPI_TRUE(runAllReduceAndVerify(grownComm_, worldSize));
+}
+
+// --- Non-blocking grow ---
+
+TEST_F(GrowMPITest, Grow_NonBlocking)
+{
+    if (!validateTestPrerequisites(GrowTestConfig::kMinRanks)) {
+        GTEST_SKIP() << "Requires at least " << GrowTestConfig::kMinRanks << " MPI ranks";
+    }
+
+    const int wr        = MPIEnvironment::world_rank;
+    const int worldSize = MPIEnvironment::world_size;
+    const int existing  = worldSize - 1;
+
+    ASSERT_MPI_EQ(ncclSuccess, buildComm(existing, &initialComm_));
+    ASSERT_MPI_TRUE(wr >= existing || initialComm_ != nullptr);
+
+    ncclUniqueId growId{};
+    if (wr == 0) {
+        ASSERT_EQ(ncclSuccess, ncclCommGetUniqueId(initialComm_, &growId));
+    }
+    MPI_Bcast(&growId, sizeof(growId), MPI_BYTE, 0, MPI_COMM_WORLD);
+
+    ncclConfig_t nbConfig = NCCL_CONFIG_INITIALIZER;
+    nbConfig.blocking = 0;
+
+    if (wr < existing) {
+        ASSERT_EQ(ncclSuccess, ncclCommGrow(initialComm_, worldSize, &growId, -1,
+                                            &grownComm_, &nbConfig));
+    } else if (wr == existing) {
+        ASSERT_EQ(ncclSuccess, ncclCommGrow(nullptr, worldSize, &growId, wr,
+                                            &grownComm_, &nbConfig));
+    }
+
+    ASSERT_MPI_NE(grownComm_, nullptr);
+
+    ncclResult_t asyncErr = ncclInProgress;
+    constexpr int kMaxPollIter = 1000000;
+    for (int i = 0; i < kMaxPollIter && asyncErr == ncclInProgress; ++i) {
+        ASSERT_EQ(ncclSuccess, ncclCommGetAsyncError(grownComm_, &asyncErr));
+    }
+    ASSERT_MPI_EQ(asyncErr, ncclSuccess);
+
+    ASSERT_MPI_TRUE(runAllReduceAndVerify(grownComm_, worldSize));
+}
+
+// --- Destroy parent after grow, use grown comm ---
+
+TEST_F(GrowMPITest, Grow_ParentDestroyAfterGrow)
+{
+    if (!validateTestPrerequisites(GrowTestConfig::kMinRanks)) {
+        GTEST_SKIP() << "Requires at least " << GrowTestConfig::kMinRanks << " MPI ranks";
+    }
+
+    const int wr        = MPIEnvironment::world_rank;
+    const int worldSize = MPIEnvironment::world_size;
+    const int existing  = worldSize - 1;
+
+    ASSERT_MPI_EQ(ncclSuccess, buildComm(existing, &initialComm_));
+    ASSERT_MPI_TRUE(wr >= existing || initialComm_ != nullptr);
+
+    ASSERT_MPI_EQ(ncclSuccess, growByOne(initialComm_, existing, &grownComm_));
+    ASSERT_MPI_NE(grownComm_, nullptr);
+
+    ncclResult_t destroyRes = ncclSuccess;
+    if (initialComm_) {
+        destroyRes = ncclCommDestroy(initialComm_);
+        initialComm_ = nullptr;
+    }
+    ASSERT_MPI_EQ(ncclSuccess, destroyRes);
+
+    ASSERT_MPI_TRUE(runAllReduceAndVerify(grownComm_, worldSize));
+}
+
+// --- Grow then shrink (elastic cycle) ---
+
+TEST_F(GrowMPITest, Grow_ThenShrink)
+{
+    if (!validateTestPrerequisites(3)) {
+        GTEST_SKIP() << "Requires at least 3 MPI ranks";
+    }
+
+    const int wr        = MPIEnvironment::world_rank;
+    const int worldSize = MPIEnvironment::world_size;
+    const int existing  = worldSize - 1;
+
+    ASSERT_MPI_EQ(ncclSuccess, buildComm(existing, &initialComm_));
+    ASSERT_MPI_TRUE(wr >= existing || initialComm_ != nullptr);
+
+    ASSERT_MPI_EQ(ncclSuccess, growByOne(initialComm_, existing, &grownComm_));
+    ASSERT_MPI_NE(grownComm_, nullptr);
+
     ASSERT_MPI_TRUE(runAllReduceAndVerify(grownComm_, worldSize));
 
-    ASSERT_MPI_EQ(ncclSuccess, ncclCommDestroy(grownComm_));
-    grownComm_ = nullptr;
+    int lastRank = worldSize - 1;
+    ncclComm_t shrunkComm = nullptr;
+    ncclResult_t shrinkRes = ncclSuccess;
+    bool shrinkVerified = true;
 
+    if (wr != lastRank) {
+        shrinkRes = ncclCommShrink(grownComm_, &lastRank, 1, &shrunkComm, nullptr, NCCL_SHRINK_DEFAULT);
+        if (shrinkRes == ncclSuccess && shrunkComm != nullptr) {
+            shrinkVerified = runAllReduceAndVerify(shrunkComm, worldSize - 1);
+            (void)ncclCommDestroy(shrunkComm);
+        } else {
+            shrinkVerified = false;
+        }
+    }
+
+    ASSERT_MPI_EQ(ncclSuccess, shrinkRes);
+    ASSERT_MPI_TRUE(shrinkVerified);
     ASSERT_MPI_SUCCESS(MPI_Barrier(MPI_COMM_WORLD));
 }
 
