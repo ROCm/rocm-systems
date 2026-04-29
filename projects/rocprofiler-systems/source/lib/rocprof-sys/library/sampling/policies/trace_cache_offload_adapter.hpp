@@ -71,6 +71,9 @@ public:
     }
 
     // EmitterPolicy::reset — clear all stored records.
+    // noexcept: tests/unit/trace_cache_offload_adapter_test.cpp asserts this contract.
+    // std::mutex::lock can theoretically throw std::system_error, but not on a properly
+    // constructed POSIX mutex; the contract reflects that real-world guarantee.
     void reset() noexcept
     {
         std::lock_guard<std::mutex> lk{ m_mutex };
@@ -86,6 +89,8 @@ public:
 
     // Remove all records for tid after emit_resolved_to_trace_cache() has processed them.
     // Prevents double-emission when post_process() iterates offload_.tids() (Variant 2).
+    // noexcept: tests/unit/emit_resolved_hook_test.cpp asserts this contract (see also
+    // reset()).
     void erase(int64_t tid) noexcept
     {
         std::lock_guard<std::mutex> lk{ m_mutex };

@@ -86,13 +86,19 @@ ROCPROFSYS_DEFINE_POLICY_TRAIT(emitter, decltype(std::declval<T&>().read(int64_t
                                decltype(std::declval<T&>().reset()),
                                decltype(std::declval<T&>().erase(int64_t{})));
 
-// TraceSinkPolicy — store_timer / store_overflow with vector args.
+// TraceSinkPolicy — store_timer / store_overflow / store_thread_counters with vector
+// args. store_thread_counters is called unconditionally from
+// sampling_service_impl::do_emit_resolved; probing it here turns a malformed substitute
+// into a static_assert failure at construction rather than a confusing template
+// instantiation error in shutdown().
 ROCPROFSYS_DEFINE_POLICY_TRAIT(
     trace_sink,
     decltype(std::declval<T&>().store_timer(
         int64_t{}, std::declval<std::vector<timer_sample> const&>())),
     decltype(std::declval<T&>().store_overflow(
-        int64_t{}, std::declval<std::vector<overflow_sample> const&>())));
+        int64_t{}, std::declval<std::vector<overflow_sample> const&>())),
+    decltype(std::declval<T&>().store_thread_counters(
+        int64_t{}, std::declval<std::vector<timer_sample> const&>())));
 
 // PerfettoSinkPolicy — emit_timer / emit_overflow with vector args.
 ROCPROFSYS_DEFINE_POLICY_TRAIT(perfetto_sink,

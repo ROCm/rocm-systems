@@ -25,11 +25,19 @@ public:
     [[noreturn]] void fatal(char const* file, int line, std::string_view fmt_str,
                             Args const&... args) noexcept
     {
-        static std::mutex                 fatal_mtx;
-        std::lock_guard<std::mutex> const lock{ fatal_mtx };
+        // Mutex must live outside the template so every fatal<Args...> instantiation
+        // serializes through the same lock — DEC-5 single-mutex semantics.
+        std::lock_guard<std::mutex> const lock{ fatal_mutex() };
         auto const formatted = fmt::vformat(fmt_str, fmt::make_format_args(args...));
         LOG_CRITICAL("[{}:{}] fatal sampling error: {}", file, line, formatted);
         ::_Exit(1);
+    }
+
+private:
+    static std::mutex& fatal_mutex() noexcept
+    {
+        static std::mutex m;
+        return m;
     }
 };
 

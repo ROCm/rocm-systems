@@ -13,6 +13,8 @@
 #include "sampling/data/track_name.hpp"
 #include "sampling/policies/string_interner.hpp"
 
+#include <spdlog/fmt/fmt.h>
+
 #include <algorithm>
 #include <cstdint>
 #include <string>
@@ -88,7 +90,7 @@ private:
             for(auto const& frame : sample.stack)
             {
                 const char* name = m_interner.intern(
-                    frame.name.empty() ? ("0x" + std::to_string(frame.address))
+                    frame.name.empty() ? fmt::format("0x{:x}", frame.address)
                                        : frame.name);
                 tracing::push_perfetto_track(
                     category_tag, name, track, sample.beg_ns,
@@ -100,7 +102,7 @@ private:
                             tracing::add_perfetto_annotation(ctx, "end_ns",
                                                              sample.end_ns);
                             tracing::add_perfetto_annotation(
-                                ctx, "pc", "0x" + std::to_string(frame.address));
+                                ctx, "pc", fmt::format("0x{:x}", frame.address));
                         }
                     });
                 tracing::pop_perfetto_track(category_tag, name, track, sample.end_ns);
