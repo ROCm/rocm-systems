@@ -19,6 +19,11 @@ struct ncclIbQpCreateAttr {
   struct ibv_pd* pd;
   uint32_t maxRecvWorkRequest;
   uint32_t maxSendWorkRequest;
+  bool isDataQp;
+  bool isCtsEnabled;
+  int8_t ctsQpSlot;
+  int channelId;
+  int ibDevN;
 };
 
 // Per-QP connection metatdata
@@ -33,6 +38,7 @@ struct ncclIbQpInfo {
   // receiver side to have asymmetric device configuration, meaning the sender
   // and receiver can use different number of devices.
   int devIndex;
+  int ibv_dev_index;
 };
 
 struct ncclIbResiliencyInfo {
@@ -64,6 +70,7 @@ struct ncclIbConnectionMetadata {
   int ndevs;
   int tc;
   int sl;
+  int isP2p;
 };
 
 ncclResult_t IbCastQpCreate(struct ncclIbQp* qp, struct ncclIbQpCreateAttr* createQpAttrs);

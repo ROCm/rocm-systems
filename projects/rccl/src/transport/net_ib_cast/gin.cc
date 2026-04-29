@@ -134,11 +134,11 @@ static ncclResult_t ncclGinIbAllGather(struct ncclGinIbCollComm *cComm, void *sr
   int tag;
   int done;
 
-  NCCLCHECKGOTO(ncclNetIb.regMr(cComm->recvComm, recvBuf,
+  NCCLCHECKGOTO(netIbCast.regMr(cComm->recvComm, recvBuf,
                                 cComm->nranks * len, NCCL_PTR_HOST,
                                 &rMhandle),
                 status, out);
-  NCCLCHECKGOTO(ncclNetIb.regMr(cComm->sendComm, recvBuf,
+  NCCLCHECKGOTO(netIbCast.regMr(cComm->sendComm, recvBuf,
                                 cComm->nranks * len, NCCL_PTR_HOST,
                                 &sMhandle),
                 status, out);
@@ -151,23 +151,23 @@ static ncclResult_t ncclGinIbAllGather(struct ncclGinIbCollComm *cComm, void *sr
       rbuf = (void *)((uintptr_t)recvBuf + rpeer * len);
       tag = NCCL_GIN_IB_ALLGATHER_TAG;
       if (srequest == NULL)
-        NCCLCHECKGOTO(ncclNetIb.isend(cComm->sendComm,
+        NCCLCHECKGOTO(netIbCast.isend(cComm->sendComm,
                                       (void *)((uintptr_t)recvBuf + speer * len),
                                       len, tag, sMhandle, NULL, &srequest),
                       status, out);
       if (rrequest == NULL)
-        NCCLCHECKGOTO(ncclNetIb.irecv(cComm->recvComm, 1, &rbuf, &len,
+        NCCLCHECKGOTO(netIbCast.irecv(cComm->recvComm, 1, &rbuf, &len,
                                       &tag, &rMhandle, NULL, &rrequest),
                       status, out);
     }
     while (srequest || rrequest) {
       if (rrequest)
-        NCCLCHECKGOTO(ncclNetIb.test(rrequest, &done, NULL),
+        NCCLCHECKGOTO(netIbCast.test(rrequest, &done, NULL),
                       status, out);
       if (done)
         rrequest = NULL;
       if (srequest)
-        NCCLCHECKGOTO(ncclNetIb.test(srequest, &done, NULL),
+        NCCLCHECKGOTO(netIbCast.test(srequest, &done, NULL),
                       status, out);
       if (done)
         srequest = NULL;
@@ -177,10 +177,10 @@ static ncclResult_t ncclGinIbAllGather(struct ncclGinIbCollComm *cComm, void *sr
 
 out:
   if (rMhandle)
-    ncclNetIb.deregMr(cComm->recvComm, rMhandle);
+    netIbCast.deregMr(cComm->recvComm, rMhandle);
 
   if (sMhandle)
-    ncclNetIb.deregMr(cComm->sendComm, sMhandle);
+    netIbCast.deregMr(cComm->sendComm, sMhandle);
 
   return status;
 }
@@ -230,10 +230,10 @@ ncclResult_t ncclGinIbConnect(void *ctx, void *handles[], int nranks, int rank,
   do
   {
     if (cComm->sendComm == NULL) {
-      NCCLCHECK(ncclNetIb.connect(ctx, lComm->dev, handles[next], &cComm->sendComm, NULL));
+      NCCLCHECK(netIbCast.connect(ctx, lComm->dev, handles[next], &cComm->sendComm, NULL));
     }
     if (cComm->recvComm == NULL)
-      NCCLCHECK(ncclNetIb.accept(lComm, &cComm->recvComm, NULL));
+      NCCLCHECK(netIbCast.accept(lComm, &cComm->recvComm, NULL));
   } while (cComm->sendComm == NULL || cComm->recvComm == NULL);
 
   cComm->getProperties = (ncclResult_t(*)(int dev, void *props))IbCastGetProperties;
@@ -255,12 +255,12 @@ ncclResult_t ncclGinIbCloseColl(void* collComm) {
 
   struct ncclGinIbCollComm *cComm = cCommArray;
   if (cComm->recvComm) {
-    NCCLCHECK(ncclNetIb.closeRecv(cComm->recvComm));
+    NCCLCHECK(netIbCast.closeRecv(cComm->recvComm));
     cComm->recvComm = NULL;
   }
 
   if (cComm->sendComm) {
-    NCCLCHECK(ncclNetIb.closeSend(cComm->sendComm));
+    NCCLCHECK(netIbCast.closeSend(cComm->sendComm));
     cComm->sendComm = NULL;
   }
 
@@ -297,7 +297,7 @@ ncclResult_t ncclGinIbGdakiGetProperties(int dev, ncclNetProperties_t* props) {
 
 ncclResult_t ncclGinIbGdakiListen(void* ctx, int dev, void* opaqueHandle, void** listenComm) {
   std::lock_guard<std::mutex> lock(IbCastGinGdakiLockMutex);
-  return ncclNetIb.listen(ctx, IbCastGinGdakiDevIndexes[dev], opaqueHandle, listenComm);
+  return netIbCast.listen(ctx, IbCastGinGdakiDevIndexes[dev], opaqueHandle, listenComm);
 }
 
 ncclResult_t ncclGinIbGdakiConnect(void *ctx, void *handles[], int nranks, int rank,
@@ -378,7 +378,7 @@ ncclResult_t ncclGinIbProxyInit(void** ctx, uint64_t commId, ncclDebugLogger_t l
 }
 
 ncclResult_t ncclGinIbProxyGetProperties(int dev, ncclNetProperties_t* props) {
-  NCCLCHECK(ncclNetIb.getProperties(dev, props));
+  NCCLCHECK(netIbCast.getProperties(dev, props));
   props->netDeviceType = NCCL_NET_DEVICE_GIN_PROXY;
   return ncclSuccess;
 }
@@ -425,7 +425,7 @@ ncclResult_t ncclGinIbProxyCreateContext(void* collComm, ncclGinConfig_v13_t* co
   NCCLCHECKGOTO(ncclIbMalloc((void**)&handles, NCCL_NET_HANDLE_MAXSIZE*cComm->nranks), ret, end);
   handle = handles + NCCL_NET_HANDLE_MAXSIZE*cComm->rank;
 
-  NCCLCHECKGOTO(ncclNetIb.listen(cComm->ctx, cComm->dev, handle, &lComm), ret, end);
+  NCCLCHECKGOTO(netIbCast.listen(cComm->ctx, cComm->dev, handle, &lComm), ret, end);
   NCCLCHECKGOTO(cComm->allGather(cComm, handle, handles, NCCL_NET_HANDLE_MAXSIZE), ret, end);
 
   for (int c=0; c<config->nContexts; c++) {
@@ -439,9 +439,9 @@ ncclResult_t ncclGinIbProxyCreateContext(void* collComm, ncclGinConfig_v13_t* co
       int acceptPeer = (cComm->rank - i + nranks) % nranks;
       do {
         if (gc->fullSendComm[connectPeer] == NULL)
-          NCCLCHECKGOTO(ncclNetIb.connect(cComm->ctx, cComm->dev, handles+NCCL_NET_HANDLE_MAXSIZE*connectPeer, &gc->fullSendComm[connectPeer], NULL), ret, end);
+          NCCLCHECKGOTO(netIbCast.connect(cComm->ctx, cComm->dev, handles+NCCL_NET_HANDLE_MAXSIZE*connectPeer, &gc->fullSendComm[connectPeer], NULL), ret, end);
         if (gc->fullRecvComm[acceptPeer] == NULL)
-          NCCLCHECKGOTO(ncclNetIb.accept(lComm, &gc->fullRecvComm[acceptPeer], NULL), ret, end);
+          NCCLCHECKGOTO(netIbCast.accept(lComm, &gc->fullRecvComm[acceptPeer], NULL), ret, end);
       } while ((gc->fullSendComm[connectPeer] == NULL) ||
           (gc->fullRecvComm[acceptPeer] == NULL));
       NCCLCHECKGOTO(ncclGinIbP2PBarrier(cComm), ret, end);
@@ -450,7 +450,7 @@ ncclResult_t ncclGinIbProxyCreateContext(void* collComm, ncclGinConfig_v13_t* co
 
 end:
   free(handles);
-  if (lComm) ncclNetIb.closeListen(lComm);
+  if (lComm) netIbCast.closeListen(lComm);
   if (ret != ncclSuccess) free(ginProxyCtx);
   else *ginCtx = ginProxyCtx;
   return ret;
@@ -463,7 +463,7 @@ ncclResult_t ncclGinIbProxyDestroyContext(void* ginCtx) {
   for (int c=0; c<nContexts; c++) {
     if (gc[c].fullRecvComm) {
       for (int i=0; i<nranks; i++) {
-        NCCLCHECK(ncclNetIb.closeRecv(gc[c].fullRecvComm[i]));
+        NCCLCHECK(netIbCast.closeRecv(gc[c].fullRecvComm[i]));
       }
       free(gc[c].fullRecvComm);
       gc[c].fullRecvComm = NULL;
@@ -471,7 +471,7 @@ ncclResult_t ncclGinIbProxyDestroyContext(void* ginCtx) {
 
     if (gc[c].fullSendComm) {
       for (int i=0; i<nranks; i++) {
-        NCCLCHECK(ncclNetIb.closeSend(gc[c].fullSendComm[i]));
+        NCCLCHECK(netIbCast.closeSend(gc[c].fullSendComm[i]));
       }
       free(gc[c].fullSendComm);
       gc[c].fullSendComm = NULL;
@@ -507,7 +507,7 @@ ncclResult_t ncclGinIbProxyDeregMrSym(void* collComm, void* mhandle) {
   struct ncclGinIbCollComm *cComm = (struct ncclGinIbCollComm *)collComm;
   struct ncclIbGinProxyMrHandle *ginMrHandle = (struct ncclIbGinProxyMrHandle *)mhandle;
 
-  NCCLCHECK(ncclNetIb.deregMr(cComm->recvComm, ginMrHandle->mrHandle));
+  NCCLCHECK(netIbCast.deregMr(cComm->recvComm, ginMrHandle->mrHandle));
   free(ginMrHandle->base_vas);
   free(ginMrHandle->rkeys);
   free(ginMrHandle);

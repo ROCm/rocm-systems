@@ -29,7 +29,8 @@ extern int ncclParamIbCastResiliencyPortFailover();
 
 ncclResult_t IbCastStatsCheckFatalCount(struct ncclIbStats* stat, const char* funcName) {
   if (ncclParamIbCastAsyncEvents() && COMPILER_ATOMIC_LOAD(&stat->fatalErrorCount, std::memory_order_relaxed)) {
-    WARN("communicator encountered a fatal error (detected in %s)", funcName);
+    ERROR("RCCL encountered a communication fatal error (detected in %s)\n", funcName);
+    ERROR("RCCL cannot recover from this network failure and now exiting. Please check the network health.");
     return ncclSystemError;
   }
   return ncclSuccess;
