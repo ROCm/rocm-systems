@@ -20,125 +20,70 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include <array>
-#include <chrono>
-#include <cstring>
-#include <fstream>
-#include <iostream>
-#include <string>
-#include <unordered_map>
-
-#include "gfx10parser.h"
 #include "gfx10token.h"
+#include "gfx10parser.h"
 #include "trace_parser.hpp"
 
 namespace gfx10
 {
 
-const std::array<std::pair<int, int>, NAVI_TYPE_LAST> TokenLookupTable::time_bits = []()
-{
-    std::array<std::pair<int, int>, NAVI_TYPE_LAST> ret{};
-
-    ret.at(RdnaType::INST) = {4, 7};
-    ret.at(RdnaType::VALU_INST) = {3, 6};
-    ret.at(RdnaType::IMM_ONE) = {4, 7};
-    ret.at(RdnaType::IMMEDIATE) = {5, 8};
-    ret.at(RdnaType::WAVE_READY) = {5, 8};
-    ret.at(RdnaType::NEW_PC_GFX10) = {8, 11};
-    ret.at(RdnaType::WAVE_START) = {5, 7};
-    ret.at(RdnaType::WAVE_START_EXT) = {5, 7};
-    ret.at(RdnaType::WAVE_ALLOC) = {5, 8};
-    ret.at(RdnaType::WAVE_END) = {5, 8};
-    ret.at(RdnaType::SHADER_DATA) = {5, 8};
-    ret.at(RdnaType::SHADER_DATA_SHORT) = {5, 8};
-    ret.at(RdnaType::UTIL_COUNTER_GFX10) = {7, 9};
-    ret.at(RdnaType::TIME) = {4, 8};
-    ret.at(RdnaType::NOP) = {0, 0};
-    ret.at(RdnaType::MISC_GFX10) = {7, 16};
-    ret.at(RdnaType::EVENT) = {8, 11};
-    ret.at(RdnaType::EVENT_SYNC) = {8, 11};
-    ret.at(RdnaType::REG) = {4, 7};
-    ret.at(RdnaType::REG_INIT) = {7, 10};
-    ret.at(RdnaType::TIMESTAMP) = {16, 64};
-    ret.at(RdnaType::HEADER) = {0, 0};
-
-    return ret;
-}();
-
-static const std::vector<encoding_t> bit_encodings = {
-  // Target
-    {RdnaType::INST,               {0, 1, 0}               },
-    {RdnaType::VALU_INST,          {1, 1, 0}               },
-    {RdnaType::IMM_ONE,            {1, 0, 1, 1}            },
-    {RdnaType::IMMEDIATE,          {0, 0, 1, 0, 0}         },
-    {RdnaType::WAVE_READY,         {0, 0, 1, 0, 1}         },
-    {RdnaType::NEW_PC_GFX10,       {1, 0, 0, 0, 0, 1, 0}   },
- // global
-    {RdnaType::WAVE_START,         {0, 0, 1, 1, 0}         },
-    {RdnaType::WAVE_START_EXT,     {0, 0, 1, 1, 1}         },
-    {RdnaType::WAVE_ALLOC,         {1, 0, 1, 0, 0}         },
-    {RdnaType::WAVE_END,           {1, 0, 1, 0, 1}         },
-    {RdnaType::SHADER_DATA,        {0, 1, 1, 0, 0}         },
-    {RdnaType::SHADER_DATA_SHORT,  {0, 1, 1, 0, 1}         },
-    {RdnaType::UTIL_COUNTER_GFX10, {1, 0, 0, 0, 1, 1, 0}   },
- // reference
-    {RdnaType::TIME,               {0, 0, 0, 1}            },
-    {RdnaType::NOP,                {0, 0, 0, 0}            },
-    {RdnaType::MISC_GFX10,         {1, 0, 0, 0, 1, 0, 1}   },
-    {RdnaType::EVENT,              {1, 0, 0, 0, 0, 1, 1, 0}},
-    {RdnaType::EVENT_SYNC,         {1, 0, 0, 0, 0, 1, 1, 1}},
-
-    {RdnaType::REG,                {1, 0, 0, 1}            },
-    {RdnaType::REG_INIT,           {1, 0, 0, 0, 1, 1, 1}   },
-    {RdnaType::TIMESTAMP,          {1, 0, 0, 0, 0, 0, 0}   },
-    {RdnaType::HEADER,             {1, 0, 0, 0, 1, 0, 0}   }
+// GFX10 base token encodings. Each row defines one SQTT token type:
+//   {type, pattern, pattern_len, token_bit_length, time_begin, time_end}
+//
+// gfx11 and gfx12 inherit this table and override specific entries in their constructors.
+// To change a token's bit length or time field for a new generation, add an AddEncoding()
+// call in the subclass constructor — it overwrites all matching slots in-place.
+static constexpr encoding_t bit_encodings[] = {
+  // clang-format off
+ //                               type  pattern  plen  toklen  time_begin  time_end
+ // Target
+    {INST,               0b010,    3,  20,  4,  7},
+    {VALU_INST,          0b011,    3,  12,  3,  6},
+    {IMM_ONE,            0b1101,   4,  12,  4,  7},
+    {IMMEDIATE,          0b00100,  5,  24,  5,  8},
+    {WAVE_READY,         0b10100,  5,  24,  5,  8},
+    {NEW_PC_GFX10,       0b0100001,7,  64,  8, 11},
+ // Global
+    {WAVE_START,         0b01100,  5,  32,  5,  7},
+    {WAVE_START_EXT,     0b11100,  5,  48,  5,  7},
+    {WAVE_ALLOC,         0b00101,  5,  20,  5,  8},
+    {WAVE_END,           0b10101,  5,  20,  5,  8},
+    {SHADER_DATA,        0b00110,  5,  52,  5,  8},
+    {SHADER_DATA_SHORT,  0b10110,  5,  28,  5,  8},
+    {UTIL_COUNTER_GFX10, 0b0110001,7,  64,  7,  9},
+ // Reference
+    {TIME,               0b1000,   4,   8,  4,  8},
+    {NOP,                0b0000,   4,   4,  0,  0},
+    {MISC_GFX10,         0b1010001,7,  24,  7, 16},
+    {EVENT,              0b01100001,8, 24,  8, 11},
+    {EVENT_SYNC,         0b11100001,8, 32,  8, 11},
+    {REG,                0b1001,   4,  64,  4,  7},
+    {REG_INIT,           0b1110001,7,  64,  7, 10},
+    {TIMESTAMP,          0b0000001,7,  64, 16, 64},
+    {HEADER,             0b0010001,7,  64,  0,  0},
+  // clang-format on
 };
 
-static const std::array<uint8_t, 32> TOKEN_LEN = {
-    /*UNKNOWN*/ 8,
-    /*VALU_INST*/ 12,
-    /*IMM_ONE*/ 12,
-    /*IMMEDIATE*/ 24,
-    /*WAVE_READY*/ 24,
-    /*NEW_PC*/ 64,
-    /*WAVE_END*/ 20,
-    /*WAVE_START*/ 32,
-    /*WAVE_START_EXT*/ 48,
-    /*WAVE_ALLOC*/ 20,
-    /*SHADER_DATA*/ 52,
-    /*SHADER_DATA_SHORT*/ 28,
-    /*UTIL_COUNTER_GFX10*/ 64,
-    /*TIME*/ 8,
-    /*NOP*/ 4,
-    /*MISC*/ 24,
-    /*EVENT*/ 24,
-    /*EVENT_SYNC*/ 32,
-    /*REG*/ 64,
-    /*REG_INIT*/ 64,
-    /*TIMESTAMP*/ 64,
-    /*HEADER*/ 64,
-    /*INST*/ 20,
-    /*UTIL_COUNTER_GFX11*/ 64,
-};
-
-TokenLookupTable::TokenLookupTable() : std::array<uint8_t, 256>({})
+TokenLookupTable::TokenLookupTable() : std::array<token_info_t, 256>({})
 {
     for (const auto& encoding : bit_encodings) AddEncoding(encoding);
 }
 
-static uint32_t frombits(const std::vector<uint8_t>& vec)
-{
-    uint32_t res = 0;
-    for (int i = 0; i < vec.size(); i++) res |= vec[i] << i;
-    return res;
-}
-
+// Fills all 256-entry table slots whose low pattern_len bits equal pattern.
+// A 3-bit prefix fills 256/8 = 32 slots, a 7-bit prefix fills 2, an 8-bit prefix fills 1.
+// Later calls overwrite earlier ones, so subclass constructors can override inherited entries.
 void TokenLookupTable::AddEncoding(const encoding_t& encoding)
 {
-    int begin = frombits(encoding.bits);
-    int stepsize = 1 << encoding.bits.size();
+    int begin = encoding.pattern;
+    int stepsize = 1 << encoding.pattern_len;
 
-    for (int i = begin; i < 256; i += stepsize) data()[i] = encoding.type;
+    token_info_t info{};
+    info.type = encoding.type;
+    info.length = encoding.length;
+    info.time_begin = encoding.time_begin;
+    info.time_end = encoding.time_end;
+
+    for (int i = begin; i < 256; i += stepsize) data()[i] = info;
 }
 
 TokenGenerator::TokenGenerator(const uint8_t* _buffer, size_t size, int64_t _globaltime, int64_t _base_time) :
@@ -164,18 +109,18 @@ Token TokenGenerator::next()
 
         readOne_unsafe();
 
-        RdnaType type = (RdnaType) lookupbits.lookup(current);
+        auto& info = lookupbits.lookup(current);
+        RdnaType type = (RdnaType) info.type;
         if (type == RdnaType::NOP)
         {
             bits_toread = 4;
             continue;
         }
 
-        int token_len = TOKEN_LEN[type & 0x1F];
-        bits_toread = token_len;
+        bits_toread = info.length;
 
         int64_t real = 0;
-        globaltime = lookupbits.getTime(type, current, globaltime, real);
+        globaltime = lookupbits.getTime(info, current, globaltime, real);
 
         if (type == RdnaType::TIMESTAMP || type == RdnaType::TIME)
         {
@@ -213,18 +158,18 @@ Token TokenGenerator::next()
 
         readOne_safe();
 
-        RdnaType type = (RdnaType) lookupbits.lookup(current);
+        auto& info = lookupbits.lookup(current);
+        RdnaType type = (RdnaType) info.type;
         if (type == RdnaType::NOP)
         {
             bits_toread = 4;
             continue;
         }
 
-        int token_len = TOKEN_LEN[type & 0x1F];
-        bits_toread = token_len;
+        bits_toread = info.length;
 
         int64_t real = 0;
-        globaltime = lookupbits.getTime(type, current, globaltime, real);
+        globaltime = lookupbits.getTime(info, current, globaltime, real);
 
         if (type == RdnaType::TIMESTAMP || type == RdnaType::TIME)
         {

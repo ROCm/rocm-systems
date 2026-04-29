@@ -132,6 +132,7 @@ hsa_status_t _internal_aqlprofile_pmc_iterate_data(aqlprofile_handle_t handle,
 
   aql_profile::Pm4Factory* pm4_factory = aql_profile::Pm4Factory::Create(memorymgr->AgentHandle());
   const uint32_t xcc_num = pm4_factory->GetXccNumber();
+  const uint32_t xcc_per_aid = pm4_factory->GetXccPerAid();
 
   uint64_t* samples = reinterpret_cast<uint64_t*>(memorymgr->GetOutputBuf());
   uint64_t* buffer_end_location = samples + memorymgr->GetOutputBufSize() / sizeof(uint64_t);
@@ -145,8 +146,9 @@ hsa_status_t _internal_aqlprofile_pmc_iterate_data(aqlprofile_handle_t handle,
       if (!(pm4_factory->GetBlockInfo(event.block_name)->attr & CounterBlockUmcAttr)) continue;
 
 #if DEBUG_TRACE == 2
-      printf("DATA: sample index(%u) id(%u) bloc id(%u) index(%u) counter id(%u) res(%lu)\n",
-             sample_index, sample_id, p->block_name, p->block_index, p->counter_id, *samples);
+      std::clog << std::dec << "DATA: id(" << umc_sample_id << ") block id(" << event.block_name
+                << ") index(" << event.block_index << ") counter id(" << event.event_id << ") res("
+                << *samples << ")" << std::endl;
 #endif
 
       hsa_status_t status = callback(event, event.block_index, *samples, userdata);
@@ -162,6 +164,7 @@ hsa_status_t _internal_aqlprofile_pmc_iterate_data(aqlprofile_handle_t handle,
       if (samples >= buffer_end_location) return HSA_STATUS_ERROR;
 
       if (pm4_factory->GetBlockInfo(event.block_name)->attr & CounterBlockUmcAttr) continue;
+      if (pm4_factory->GetBlockInfo(event.block_name)->attr & CounterBlockGrbmaAttr) continue;
 
       // non-MI300A-AID counter event.
       uint32_t block_samples_count = pm4_factory->GetNumEvents(event.block_name);
@@ -170,14 +173,52 @@ hsa_status_t _internal_aqlprofile_pmc_iterate_data(aqlprofile_handle_t handle,
       size_t xcc_sample_count = attrib.get_num_instances() * block_samples_count;
       for (uint32_t blk = 0; blk < block_samples_count; ++blk) {
 #if DEBUG_TRACE == 2
-        printf("DATA: xcc(%u) blk(%u) bloc id(%u) index(%u) counter id(%u) res(%lu)\n", xcc_index,
-               blk, event.block_name, event.block_index, event.event_id, *samples);
+        std::clog << std::dec << "DATA: xcc(" << xcc_index << ") id(" << blk << ") block id("
+                  << event.block_name << ") index(" << event.block_index << ") counter id("
+                  << event.event_id << ") res(" << *samples << ")" << " @(" << samples << ")"
+                  << std::endl;
 #endif
         size_t xcc_sample_id = xcc_sample_count * xcc_index +
                                static_cast<size_t>(event.block_index) * block_samples_count + blk;
 
         if (!event.bInternal) {
           hsa_status_t status = callback(event, xcc_sample_id, *samples, userdata);
+          if (status == HSA_STATUS_INFO_BREAK)
+            return HSA_STATUS_SUCCESS;
+          else if (status != HSA_STATUS_SUCCESS)
+            return status;
+        }
+
+        samples++;
+      }
+    }
+
+  // AIGC blocks
+  for (uint32_t xcc_index = 0, aid_index = 0; xcc_index < xcc_num;
+       xcc_index += xcc_per_aid, aid_index++)
+    for (auto& event : events) {
+      // Skip non-AIGC blocks
+      if (!(pm4_factory->GetBlockInfo(event.block_name)->attr & CounterBlockGrbmaAttr)) continue;
+
+      if (samples >= buffer_end_location) return HSA_STATUS_ERROR;
+
+      // AIGC counter event.
+      uint32_t block_samples_count = pm4_factory->GetNumEvents(event.block_name);
+      const EventAttribDimension& attrib = EventAttribDimension::get(agent, event.block_name);
+      if (!attrib.get_num()) return HSA_STATUS_ERROR;
+      size_t aid_sample_count = attrib.get_num_instances() * block_samples_count;
+      for (uint32_t blk = 0; blk < block_samples_count; ++blk) {
+#if DEBUG_TRACE == 2
+        std::clog << std::dec << "DATA: xcc(" << xcc_index << ") id(" << blk << ") block id("
+                  << event.block_name << ") index(" << event.block_index << ") counter id("
+                  << event.event_id << ") res(" << *samples << ")" << " @(" << samples << ")"
+                  << std::endl;
+#endif
+        size_t aid_sample_id = aid_sample_count * aid_index +
+                               static_cast<size_t>(event.block_index) * block_samples_count + blk;
+
+        if (!event.bInternal) {
+          hsa_status_t status = callback(event, aid_sample_id, *samples, userdata);
           if (status == HSA_STATUS_INFO_BREAK)
             return HSA_STATUS_SUCCESS;
           else if (status != HSA_STATUS_SUCCESS)

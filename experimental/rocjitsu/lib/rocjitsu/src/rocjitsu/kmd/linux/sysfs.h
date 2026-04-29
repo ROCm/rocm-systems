@@ -97,6 +97,9 @@ public:
   /// @brief Get the generated DRM sysfs path (empty if not yet generated).
   const std::string &drm_path() const { return drm_dir_; }
 
+  /// @brief Get the GPU info used to generate the topology.
+  const GpuInfo &gpu_info() const { return gpu_info_; }
+
   /// @brief Reserved for future environment setup (currently a no-op).
   void setup_environment();
 
@@ -106,6 +109,7 @@ public:
 private:
   std::string topology_dir_;
   std::string drm_dir_;
+  GpuInfo gpu_info_{};
 
   void write_file(const std::string &path, const std::string &content);
   void make_dir(const std::string &path);
