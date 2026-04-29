@@ -7,11 +7,10 @@
 // Included from sampling_service.hpp after the class definition.
 // May use platform types (sigset_t, etc.) via the signal_dispatcher policy.
 
+#include "sampling/src/linux/signal_set.hpp"
 #include "sampling/src/pause_interval_registry.hpp"
 #include "sampling/src/sample_parser.hpp"
 #include "sampling/src/sampling_config_fwd.hpp"
-#include "sampling/src/signal_set.hpp"
-#include "sampling/src/symbol_resolver.hpp"
 
 #include "logger/debug.hpp"
 

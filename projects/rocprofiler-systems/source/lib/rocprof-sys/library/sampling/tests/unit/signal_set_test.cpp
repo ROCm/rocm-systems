@@ -7,7 +7,7 @@
 
 #include <gtest/gtest.h>
 
-#include "sampling/src/signal_set.hpp"
+#include "sampling/src/linux/signal_set.hpp"
 
 #include <csignal>
 #include <set>

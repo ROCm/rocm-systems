@@ -318,7 +318,7 @@ TEST(real_timer_trigger_smoke, start_then_stop_restores_armed_state)
 
 // ── symbol_resolver smoke tests ──────────────────────────────────────────────
 
-#include "sampling/src/symbol_resolver.hpp"
+#include "sampling/src/linux/symbol_resolver.hpp"
 
 TEST(symbol_resolver_smoke, resolve_libc_symbol_returns_nonempty_name)
 {

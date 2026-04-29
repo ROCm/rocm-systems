@@ -17,8 +17,8 @@
 #include "sampling/data/track_name.hpp"
 #include "sampling/policies/tl_state.hpp"
 #include "sampling/sampling_service.hpp"
+#include "sampling/src/linux/symbol_resolver.hpp"
 #include "sampling/src/sample_parser.hpp"
-#include "sampling/src/symbol_resolver.hpp"
 
 #include "core/config.hpp"
 #include "core/perf.hpp"

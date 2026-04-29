@@ -8,7 +8,7 @@
 #include <gtest/gtest.h>
 
 #include "doubles/throwing_fatal_error_policy.hpp"
-#include "sampling/src/signal_mask_guard.hpp"
+#include "sampling/src/linux/signal_mask_guard.hpp"
 
 #include <csignal>
 #include <set>
