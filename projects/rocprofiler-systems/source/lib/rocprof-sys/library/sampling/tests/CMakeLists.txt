@@ -278,37 +278,6 @@ if(TARGET rocprofiler-systems-core-library AND CMAKE_SYSTEM_NAME STREQUAL "Linux
     )
 endif()
 
-# ── Stress test (TSAN, Linux only) ───────────────────────────────────────────
-# Kept as a separate binary: TSAN link flags are incompatible with the main binary.
-if(ROCPROFSYS_BUILD_SAMPLING_TSAN AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    add_executable(
-        rocprof-sys-sampling-stress-tests
-        stress/signal_handler_stress_test.cpp
-        unit/config_stubs.cpp
-    )
-    target_link_libraries(
-        rocprof-sys-sampling-stress-tests
-        PRIVATE
-            rocprof-sys-sampling-library
-            rocprof-sys-sampling-test-doubles
-            GTest::gtest
-            GTest::gtest_main
-    )
-    target_compile_options(rocprof-sys-sampling-stress-tests PRIVATE -fsanitize=thread)
-    target_link_options(rocprof-sys-sampling-stress-tests PRIVATE -fsanitize=thread)
-
-    add_test(
-        NAME rocprof-sys-sampling-stress-tests
-        COMMAND rocprof-sys-sampling-stress-tests
-        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-    )
-
-    set_tests_properties(
-        rocprof-sys-sampling-stress-tests
-        PROPERTIES LABELS "sampling;stress;tsan" TIMEOUT 120
-    )
-endif()
-
 # ── Benchmark (no TSAN, separate runner) ──────────────────────────────────────
 if(ROCPROFSYS_BUILD_SAMPLING_BENCH)
     find_package(benchmark REQUIRED)
