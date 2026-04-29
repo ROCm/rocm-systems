@@ -30,7 +30,11 @@ TEST_F(test_code_object_writer_t, ProvidedCodeObjDesc_SerializesIt)
     m_writer.end_code_obj();
     const auto& result = m_writer.get_result();
     EXPECT_FALSE(result.empty());
-    EXPECT_TRUE(nlohmann::json::accept(result));
+    ASSERT_TRUE(nlohmann::json::accept(result));
+
+    const auto json = nlohmann::json::parse(result);
+    EXPECT_NE(json.find(std::to_string(id)), json.end())
+        << "expected code object id " << id << " to appear in: " << result;
 }
 
 void test_code_object_writer_t::SetUp()
