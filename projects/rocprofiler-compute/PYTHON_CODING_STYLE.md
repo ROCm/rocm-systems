@@ -163,7 +163,7 @@ Defining a function inside another function (a closure or nested `def`) hides it
 ### Rules
 
 - Do not produce nested functions unless the inner function is genuinely private to the outer scope and not reusable elsewhere.
-- Prefer module-level private helpers (prefixed `_`) over nested functions.
+- Always write module-level private helpers (prefixed `_`) over nested functions.
 
 ### Example
 
