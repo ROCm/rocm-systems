@@ -482,7 +482,7 @@ hsa_status_t KfdDriver::ExportMemoryHandle(const core::Agent& agent, const core:
       return HSA_STATUS_SUCCESS;
     }
 #endif
-    (void)export_offset;
+    (void)export_offset; 
     const auto& gpu_agent = static_cast<const GpuAgent&>(agent);
 
     HsaHandleExportDesc desc = {};
