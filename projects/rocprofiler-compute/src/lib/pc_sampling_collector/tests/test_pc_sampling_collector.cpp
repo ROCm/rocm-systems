@@ -36,7 +36,8 @@ TEST_F(test_pc_sampling_collector_t, ProvidedCodeObjectId_IsStored)
     m_pc_sampling_collector->on_code_object_load(m_file_info);
     m_pc_sampling_collector->on_code_object_load(m_mem_info);
     m_pc_sampling_collector->write(*m_writer);
-    EXPECT_EQ(m_writer->get_write_count(), 2);
+    EXPECT_EQ(m_writer->get_obj_descriptions().size(), 2);
+    EXPECT_EQ(m_writer->get_end_code_obj_desc_count(), 2);
 }
 
 void test_pc_sampling_collector_t::SetUp()

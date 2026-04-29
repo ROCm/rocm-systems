@@ -52,6 +52,5 @@ void pc_sampling_collector_impl_t::write(pc_samples_writer_t& writer)
                 pc += inst.size;
             }
         }
-        writer.write();
     }
 }

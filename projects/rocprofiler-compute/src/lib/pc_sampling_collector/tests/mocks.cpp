@@ -45,16 +45,19 @@ std::vector<obj_symbol_t> mock_code_object_translator_t::get_symbol_map(size_t o
     return {};
 }
 
-instruction_t mock_code_object_translator_t::get_instruction(
-    size_t   object_id,
-    uint64_t virtual_address) const
+instruction_t mock_code_object_translator_t::get_instruction(size_t object_id, uint64_t virtual_address) const
 {
     return {};
 }
 
-void mock_pc_samples_writer_t::write()
+void mock_pc_samples_writer_t::start_code_obj_desc(const obj_symbol_t& desc)
 {
-    ++m_write_count;
+    m_obj_descriptions.push_back(desc);
+}
+
+void mock_pc_samples_writer_t::end_code_obj_desc()
+{
+    ++m_end_code_obj_desc_count;
 }
 
 std::string mock_pc_samples_writer_t::get_result()
@@ -62,7 +65,12 @@ std::string mock_pc_samples_writer_t::get_result()
     return {};
 }
 
-uint32_t mock_pc_samples_writer_t::get_write_count() const
+const std::vector<obj_symbol_t>& mock_pc_samples_writer_t::get_obj_descriptions() const
 {
-    return m_write_count;
+    return m_obj_descriptions;
+}
+
+uint32_t mock_pc_samples_writer_t::get_end_code_obj_desc_count() const
+{
+    return m_end_code_obj_desc_count;
 }

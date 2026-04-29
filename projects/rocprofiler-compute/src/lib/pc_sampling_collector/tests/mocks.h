@@ -50,10 +50,13 @@ private:
 class mock_pc_samples_writer_t : public rocm_compute::pc_samples_writer_t
 {
 public:
-    void        write() override;
+    void        start_code_obj_desc(const rocm_compute::obj_symbol_t& desc) override;
+    void        end_code_obj_desc() override;
     std::string get_result() override;
 
-    uint32_t get_write_count() const;
+    const std::vector<rocm_compute::obj_symbol_t>& get_obj_descriptions() const;
+    uint32_t get_end_code_obj_desc_count() const;
 private:
-    uint32_t m_write_count = 0;
+    std::vector<rocm_compute::obj_symbol_t> m_obj_descriptions;
+    uint32_t m_end_code_obj_desc_count = 0;
 };
