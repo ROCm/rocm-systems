@@ -18,6 +18,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 import os
 from pathlib import Path
+import shlex
 import shutil
 import subprocess
 from typing import Optional
@@ -251,6 +252,12 @@ class BaseRunner(ABC):
                     cmd.insert(1, "--oversubscribe")
             except (subprocess.TimeoutExpired, OSError):
                 pass
+
+        if self.launcher is type(self).Launcher.SHMEM:
+            # oshrun on RHEL 10 / ROCm 7.x drops argv after `--`, so the wrapped
+            # binary receives no command and prints its usage banner. Wrapping
+            # the inner command in a single `bash -c` string preserves it.
+            return cmd + ["bash", "-c", shlex.join(command)]
 
         return cmd + command
 

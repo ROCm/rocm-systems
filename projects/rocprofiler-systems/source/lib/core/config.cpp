@@ -43,6 +43,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <cerrno>
 #include <csignal>
 #include <cstdint>
 #include <cstdio>
@@ -56,6 +57,7 @@
 #include <ostream>
 #include <sstream>
 #include <string>
+#include <sys/stat.h>
 #include <system_error>
 #include <type_traits>
 #include <unistd.h>
@@ -2712,17 +2714,30 @@ tmp_file::~tmp_file()
 void
 tmp_file::touch() const
 {
-    namespace fs = std::filesystem;
+    // Use POSIX primitives instead of std::filesystem here. Some downstream
+    // libraries (e.g. ROCm 6.3/6.4 librocprofiler-register.so) statically
+    // link libstdc++ and re-export std::filesystem::__cxx11::path symbols
+    // with default visibility. The dynamic linker then binds path methods to
+    // an ABI-incompatible copy and segfaults at the first call. POSIX stat()
+    // and mkdir() avoid that resolution path entirely. Multi-rank EEXIST
+    // races are tolerated by ignoring EEXIST on each segment.
 
-    std::error_code _ec;
-    if(fs::exists(filename, _ec)) return;
+    struct stat _st = {};
+    if(::stat(filename.c_str(), &_st) == 0) return;
 
-    // Pre-create parent directories with std::filesystem, which treats an
-    // already-existing directory as success. timemory's filepath::makedir
-    // races on EEXIST when multiple MPI ranks share a parent directory and
-    // can fail to create the file as a result.
-    auto _parent = fs::path{ filename }.parent_path();
-    if(!_parent.empty()) fs::create_directories(_parent, _ec);
+    auto _slash = filename.find_last_of('/');
+    if(_slash != std::string::npos && _slash > 0)
+    {
+        auto _parent = filename.substr(0, _slash);
+        for(std::string::size_type i = 1; i <= _parent.size(); ++i)
+        {
+            if(i == _parent.size() || _parent[i] == '/')
+            {
+                std::string _segment = _parent.substr(0, i);
+                if(::mkdir(_segment.c_str(), 0755) != 0 && errno != EEXIST) break;
+            }
+        }
+    }
 
     auto _ofs = std::ofstream{};
     filepath::open(_ofs, filename);
