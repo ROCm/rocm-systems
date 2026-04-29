@@ -29,6 +29,8 @@
 #include "team.hpp"
 #include "queue_pair.hpp"
 
+#include <type_traits>
+
 namespace rocshmem {
 
 class QueuePair;
@@ -354,6 +356,14 @@ class GDAContext : public Context {
   template <typename T>
   __device__ T internal_amo_swap(void *dst, T value, int pe, int qp_index,
       const ActiveWFInfo& wf_info);
+
+  /**
+   * @brief Call callable F with arguments Args... once for each PE-group.
+   * At least one of the arguments must be a reference to (possibly const-qualified) ActiveWFInfo.
+   * The mlx5 provider bypasses the take_turns code and calls F(Args...) directly.
+   */
+  template <typename F, typename... Args>
+  __device__ std::invoke_result_t<F, Args...> internal_amo_take_turns(F&& f, Args&&... args);
 
   /**
    * @brief Implement amo_fetch_op using a compare-and-swap loop.
