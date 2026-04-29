@@ -28,7 +28,7 @@ const std::vector<size_t>& mock_code_object_translator_t::get_code_object_ids() 
     return m_code_object_ids;
 }
 
-std::vector<obj_symbol_t> mock_code_object_translator_t::get_symbol_map(size_t object_id) const
+std::vector<symbol_t> mock_code_object_translator_t::get_symbol_map(size_t object_id) const
 {
     if (const auto item = m_symbols_per_obj.find(object_id); item != m_symbols_per_obj.end())
     {
@@ -43,7 +43,7 @@ instruction_t mock_code_object_translator_t::get_instruction(size_t object_id, u
 }
 
 void mock_code_object_translator_t::add_symbols(size_t object_id,
-                                                const std::vector<rocm_compute::obj_symbol_t>& symbols)
+                                                const std::vector<rocm_compute::symbol_t>& symbols)
 {
     m_symbols_per_obj[object_id] = symbols;
 }
@@ -70,6 +70,12 @@ void mock_pc_samples_writer_t::end_code_obj_desc(size_t obj_id)
     m_ended_code_obj_desc_ids.push_back(obj_id);
 }
 
+void mock_pc_samples_writer_t::write_instruction(const symbol_t& sym, const instruction_t& inst)
+{
+    m_symbol_descriptions.push_back(sym);
+    m_instructions.push_back(inst);
+}
+
 std::string mock_pc_samples_writer_t::get_result()
 {
     return {};
@@ -85,8 +91,12 @@ const std::vector<size_t>& mock_pc_samples_writer_t::get_ended_code_obj_desc_ids
     return m_ended_code_obj_desc_ids;
 }
 
-const std::vector<obj_symbol_t>& mock_pc_samples_writer_t::get_symbol_descriptions() const
+const std::vector<symbol_t>& mock_pc_samples_writer_t::get_symbol_descriptions() const
 {
     return m_symbol_descriptions;
 }
 
+const std::vector<instruction_t>& mock_pc_samples_writer_t::get_instruction_descriptions() const
+{
+    return m_instructions;
+}

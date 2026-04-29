@@ -259,7 +259,7 @@ rocprofiler_tool_configure_result_t* rocprofiler_configure(uint32_t             
                                                            uint32_t                 priority,
                                                            rocprofiler_client_id_t* id)
 {
-    // set the client name
+    // set the client kernel_name
     id->name = "[rocprofiler-compute]";
 
     // compute major/minor/patch version info

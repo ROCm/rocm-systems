@@ -345,9 +345,9 @@ void sdk_callbacks_impl_t::tool_tracing_callback(rocprofiler_callback_tracing_re
 
 std::string sdk_callbacks_impl_t::truncate_name(std::string_view name)
 {
-    // The function extracts the kernel name from
+    // The function extracts the kernel kernel_name from
     // input string. By using the iterators it finds the
-    // window in the string which contains only the kernel name.
+    // window in the string which contains only the kernel kernel_name.
     // For example 'Foo<int, float>::foo(a[], int (int))' -> 'foo'
     auto     rit         = name.rbegin();
     auto     rend        = name.rend();
@@ -410,17 +410,17 @@ std::string sdk_callbacks_impl_t::cxa_demangle(const std::string& mangled_name, 
 
     // PARAMETERS to __cxa_demangle
     //  mangled_name:
-    //      A NULL-terminated character string containing the name to be
+    //      A NULL-terminated character string containing the kernel_name to be
     //      demangled.
     //  buffer:
     //      A region of memory, allocated with malloc, of *length bytes, into
-    //      which the demangled name is stored. If output_buffer is not long
+    //      which the demangled kernel_name is stored. If output_buffer is not long
     //      enough, it is expanded using realloc. output_buffer may instead be
-    //      NULL; in that case, the demangled name is placed in a region of memory
+    //      NULL; in that case, the demangled kernel_name is placed in a region of memory
     //      allocated with malloc.
     //  _buflen:
     //      If length is non-NULL, the length of the buffer containing the
-    //      demangled name is placed in *length.
+    //      demangled kernel_name is placed in *length.
     //  status:
     //      *status is set to one of the following values
     size_t _demang_len = 0;
@@ -429,7 +429,7 @@ std::string sdk_callbacks_impl_t::cxa_demangle(const std::string& mangled_name, 
     {
     //  0 : The demangling operation succeeded.
     // -1 : A memory allocation failure occurred.
-    // -2 : mangled_name is not a valid name under the C++ ABI mangling rules.
+    // -2 : mangled_name is not a valid kernel_name under the C++ ABI mangling rules.
     // -3 : One of the arguments is invalid.
     case 0:
     {
