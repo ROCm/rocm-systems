@@ -250,9 +250,7 @@ class RocprofsysConfig:
         asan_library = os.environ.get("ASAN_LIBRARY")
         if asan_library:
             existing = os.environ.get("LD_PRELOAD", "")
-            env["LD_PRELOAD"] = (
-                f"{asan_library}:{existing}" if existing else asan_library
-            )
+            env["LD_PRELOAD"] = f"{asan_library}:{existing}" if existing else asan_library
 
         return env
 

@@ -400,6 +400,20 @@ set_property(
     PROPERTY INTERFACE_LINK_OPTIONS "-fno-sanitize=vptr"
 )
 
+# Source-level ignorelist for UBSan checks that do not support runtime
+# suppression (e.g. nonnull-attribute in third-party timemory headers).
+set(_ROCPROFSYS_UBSAN_IGNORELIST
+    "${PROJECT_SOURCE_DIR}/scripts/rocprof-sys-ubsan-ignorelist.txt"
+)
+# -fsanitize-ignorelist= is Clang-only; GCC has no source-level UBSan ignorelist.
+if(EXISTS "${_ROCPROFSYS_UBSAN_IGNORELIST}" AND CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    target_compile_options(
+        rocprofiler-systems-undefined-sanitizer
+        INTERFACE "-fsanitize-ignorelist=${_ROCPROFSYS_UBSAN_IGNORELIST}"
+    )
+endif()
+unset(_ROCPROFSYS_UBSAN_IGNORELIST)
+
 if(ROCPROFSYS_USE_SANITIZER)
     foreach(_TYPE ${ROCPROFSYS_SANITIZER_TYPE})
         if(TARGET rocprofiler-systems-${_TYPE}-sanitizer)
