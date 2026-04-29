@@ -300,14 +300,8 @@ FatBinaryInfo** StatCO::AddFatBinary(const void* data, bool& success) {
   std::scoped_lock lock(sclock_);
   module_to_hostModule_.insert(std::make_pair(&modules_[data], data));
 
-  if (!owner_.IsInitialized()) {
-    success = true;
-    return &modules_[data];
-  }
-
-  hipError_t err = DigestFatBinary(data, modules_[data]);
-
-  success = (err == hipSuccess);
+  // Defer loading: modules_[data] is nullptr, DigestFatBinary will handle it later
+  success = true;
   return &modules_[data];
 }
 
@@ -319,15 +313,8 @@ FatBinaryInfo** StatCO::AddKpackBinary(const void* hipk_metadata, const void* wr
   // This allows DigestFatBinary to access the wrapper and detect HIPK magic
   module_to_hostModule_.insert(std::make_pair(&modules_[wrapper_addr], wrapper_addr));
 
-  if (!owner_.IsInitialized()) {
-    // Deferred loading: modules_[wrapper_addr] is nullptr, DigestFatBinary will handle it later
-    success = true;
-    return &modules_[wrapper_addr];
-  }
-
-  // Immediate loading: call DigestFatBinary which handles kpack detection
-  hipError_t err = DigestFatBinary(wrapper_addr, modules_[wrapper_addr]);
-  success = (err == hipSuccess);
+  // Defer loading: modules_[wrapper_addr] is nullptr, DigestFatBinary will handle it later
+  success = true;
   return &modules_[wrapper_addr];
 }
 
