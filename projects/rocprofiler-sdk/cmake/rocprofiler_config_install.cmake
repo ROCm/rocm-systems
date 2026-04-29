@@ -31,7 +31,13 @@ install(
     DIRECTORY ${PROJECT_SOURCE_DIR}/tests
     DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PACKAGE_NAME}
     COMPONENT tests
-    USE_SOURCE_PERMISSIONS)
+    USE_SOURCE_PERMISSIONS
+    PATTERN "run_rocprofiler_sdk.py" EXCLUDE)
+
+install(
+    PROGRAMS ${PROJECT_SOURCE_DIR}/tests/run_rocprofiler_sdk.py
+    DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PACKAGE_NAME}/tests
+    COMPONENT tests)
 
 install(
     FILES ${PROJECT_SOURCE_DIR}/requirements.txt
