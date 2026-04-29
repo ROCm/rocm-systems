@@ -31,16 +31,30 @@ from pathlib import Path
 
 current_path = os.path.dirname(os.path.abspath(__file__))
 python_lib_path = f"{current_path}/../../share/amd_smi"
-sys.path.insert(0, python_lib_path)
-# Prioritize the library from this installation over any pip-installed version
+
 
 try:
     from amdsmi import amdsmi_interface, amdsmi_exception
 except ImportError as e:
-    print(f"Unhandled import error: {e}")
-    print("Failed to import the amdsmi Python library. Ensure it is installed in Python.")
-    print(f"Alternatively, verify that the library is in the path:\n{python_lib_path}")
-    sys.exit(1)
+    # If site-packages didn't have it, try the legacy /opt/rocm/share path.
+    if python_lib_path not in sys.path:
+        sys.path.insert(0, python_lib_path)
+        try:
+            from amdsmi import amdsmi_interface, amdsmi_exception
+        except ImportError:
+            pass
+        else:
+            # Silent by default -- legitimate fallback installs (postinst .pth
+            # missing, /opt/rocm/share path) shouldn't spam the CLI's stdout.
+            # Set AMDSMI_DEBUG_LOAD=1 to surface the fallback (matches the
+            # opt-in debug knob the wrapper uses for ctypes.CDLL traces).
+            if os.getenv("AMDSMI_DEBUG_LOAD"):
+                print(f"[amdsmi-cli] Imported amdsmi from fallback path {python_lib_path}")
+    if "amdsmi_interface" not in globals():
+        print(f"Unhandled import error: {e}")
+        print("Failed to import the amdsmi Python library. Ensure it is installed in Python.")
+        print(f"Alternatively, verify that the library is in the path:\n{python_lib_path}")
+        sys.exit(1)
 
 # Using basic python logging for user errors and development
 logging.basicConfig(format="%(levelname)s: %(message)s", level=logging.ERROR)  # User level logging
