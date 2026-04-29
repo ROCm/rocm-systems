@@ -406,32 +406,27 @@ configure_file(
   ${CMAKE_CURRENT_SOURCE_DIR}/amd-dbgapi.pc.in
   ${CMAKE_CURRENT_BINARY_DIR}/share/pkgconfig/amd-dbgapi.pc @ONLY)
 
-if(DEFINED ENV{ROCM_BUILD_ID})
-  # ROCM_BUILD_ID is set by the ROCm-CI build environment.
-  set(build_info $ENV{ROCM_BUILD_ID})
+set(build_info developer-build)
+
+if(DEFINED ENV{USER})
+  set(build_info ${build_info}-$ENV{USER})
+endif()
+
+find_package(Git)
+if(GIT_FOUND)
+  execute_process(
+    COMMAND ${GIT_EXECUTABLE} rev-parse --short HEAD
+    WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}"
+    OUTPUT_VARIABLE build_revision
+    ERROR_QUIET
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+  )
 else()
-  set(build_info developer-build)
+  message(STATUS "GIT not found")
+endif()
 
-  if(DEFINED ENV{USER})
-    set(build_info ${build_info}-$ENV{USER})
-  endif()
-
-  find_package(Git)
-  if(GIT_FOUND)
-    execute_process(
-      COMMAND ${GIT_EXECUTABLE} rev-parse --short HEAD
-      WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}"
-      OUTPUT_VARIABLE build_revision
-      ERROR_QUIET
-      OUTPUT_STRIP_TRAILING_WHITESPACE
-   )
-  else()
-    message(STATUS "GIT not found")
-  endif()
-
-  if(DEFINED build_revision)
-    set(build_info ${build_info}-git-${build_revision})
-  endif()
+if(DEFINED build_revision)
+  set(build_info ${build_info}-git-${build_revision})
 endif()
 
 target_link_libraries(amd-dbgapi PRIVATE amd_comgr ${CMAKE_DL_LIBS})
