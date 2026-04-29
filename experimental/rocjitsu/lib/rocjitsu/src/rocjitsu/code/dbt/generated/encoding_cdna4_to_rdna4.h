@@ -16,6 +16,11 @@
 #include "rocjitsu/isa/arch/amdgpu/rdna4/machine_insts.h"
 
 namespace rocjitsu {
+// Per-pair named namespace. Two pairs that share a source ISA
+// (e.g. cdna4->rdna3 and cdna4->rdna4) both emit decode_*_cdna4
+// helpers; isolating them per pair avoids ODR conflicts when
+// both headers are included in the same TU.
+namespace cdna4_to_rdna4 {
 
 inline Sop1Fields decode_sop1_cdna4(uint32_t w0) {
   auto src = std::bit_cast<rocjitsu::cdna4::Sop1MachineInst>(w0);
@@ -518,24 +523,6 @@ inline TranslationResult encode_vop3_sdst_enc_rdna4(const Vop3SdstEncFields &f, 
   return r;
 }
 
-inline constexpr uint32_t kEnc_SOP1 = 0x17D;
-inline constexpr uint32_t kEnc_SOP2 = 0x100;
-inline constexpr uint32_t kEnc_SOPC = 0x17E;
-inline constexpr uint32_t kEnc_SOPK = 0x160;
-inline constexpr uint32_t kEnc_SOPP = 0x17F;
-inline constexpr uint32_t kEnc_VOP1 = 0xFC;
-inline constexpr uint32_t kEnc_VOP2 = 0x0;
-inline constexpr uint32_t kEnc_VOPC = 0xF8;
-inline constexpr uint32_t kEnc_DS = 0x1B0;
-inline constexpr uint32_t kEnc_FLAT = 0x1B8;
-inline constexpr uint32_t kEnc_FLAT_GLBL = 0x1B8;
-inline constexpr uint32_t kEnc_FLAT_SCRATCH = 0x1B8;
-inline constexpr uint32_t kEnc_MUBUF = 0x1C0;
-inline constexpr uint32_t kEnc_SMEM = 0x180;
-inline constexpr uint32_t kEnc_VOP3 = 0x1A0;
-inline constexpr uint32_t kEnc_VOP3P = 0x1A7;
-inline constexpr uint32_t kEnc_VOP3_SDST_ENC = 0x1A2;
-
 inline TranslationResult translate_encoding_cdna4_to_rdna4(uint32_t encoding_id, uint32_t w0,
                                                            uint32_t w1,
                                                            [[maybe_unused]] uint32_t w2,
@@ -611,4 +598,5 @@ inline TranslationResult translate_encoding_cdna4_to_rdna4(uint32_t encoding_id,
   return {};
 }
 
+} // namespace cdna4_to_rdna4
 } // namespace rocjitsu

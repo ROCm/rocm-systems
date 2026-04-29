@@ -26,7 +26,7 @@ namespace {
 
 EncodingTranslateFn select_encoding_translator(rj_code_arch_t guest, rj_code_arch_t host) {
   if (guest == ROCJITSU_CODE_ARCH_CDNA4 && host == ROCJITSU_CODE_ARCH_RDNA4)
-    return translate_encoding_cdna4_to_rdna4;
+    return cdna4_to_rdna4::translate_encoding_cdna4_to_rdna4;
   return nullptr;
 }
 

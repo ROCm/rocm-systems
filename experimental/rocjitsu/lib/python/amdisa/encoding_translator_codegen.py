@@ -26,9 +26,28 @@ Usage::
 
 from __future__ import annotations
 
+import shutil
+import subprocess
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
+
+
+def _clang_format(path: Path) -> None:
+    """Run clang-format -i on path. Silent no-op if clang-format isn't on PATH.
+
+    The codegen emits 4-space indented bodies; project style is 2-space (set
+    by the .clang-format at the rocjitsu root). Always running clang-format
+    here keeps regenerated files diff-clean even when callers forget to run
+    it manually.
+    """
+    exe = shutil.which('clang-format')
+    if not exe:
+        print('warning: clang-format not found; emitted files may need manual '
+              'formatting', file=sys.stderr)
+        return
+    subprocess.run([exe, '-i', str(path)], check=True)
 
 if TYPE_CHECKING:
     from amdisa.gpuisa import InstEncoding, IsaSpec
@@ -316,18 +335,20 @@ def _fields_struct_name(enc_name: str) -> str:
 
 def _all_field_names_from_encodings(encodings):
     """Collect the union of all non-padding, non-encoding field names across
-    multiple ISAs' encodings for the same format."""
-    names = []
+    multiple ISAs' encodings for the same format.
+
+    Returned sorted alphabetically so the emitted struct layout is stable
+    across `--multi` argument orderings. Field order in these structs is
+    cosmetic (every read/write in the generated code is by name) but a
+    deterministic order avoids gratuitous diff churn on regeneration.
+    """
     seen = set()
     for enc in encodings:
         for f in enc.ucode_fields:
             if f.name.startswith('pad_') or f.name == 'encoding':
                 continue
-            canonical = FIELD_RENAMES.get(f.name, f.name)
-            if canonical not in seen:
-                seen.add(canonical)
-                names.append(canonical)
-    return names
+            seen.add(FIELD_RENAMES.get(f.name, f.name))
+    return sorted(seen)
 
 
 def _emit_fields_struct(enc_name, field_names):
@@ -364,26 +385,42 @@ def generate_encoding_fields(all_specs, output_dir):
         all_enc_names.add(dst)
 
     # For each encoding format, collect field names from all ISAs that have it
+    # and capture a representative dt_index (the encoding-format ID is universal
+    # across ISA variants - any spec that defines the encoding gives the same
+    # value).
     enc_fields: dict[str, list[str]] = {}
+    enc_dt_index: dict[str, int] = {}
     for enc_name in sorted(all_enc_names):
         encodings = []
+        rep_spec = None
         for _, spec, _ in all_specs:
             if enc_name in spec.encoding_map:
                 encodings.append(spec.encoding_map[enc_name])
+                if rep_spec is None:
+                    rep_spec = spec
         if encodings:
             enc_fields[enc_name] = _all_field_names_from_encodings(encodings)
+            enc_dt_index[enc_name] = _dt_index(encodings[0], rep_spec)
 
     lines = [_COPYRIGHT, '', '#pragma once', '',
              '#include <cstdint>', '',
              'namespace rocjitsu {', '']
+    # Emit universal encoding-format ID constants once. Per-pair translator
+    # headers reference these via #include "encoding_fields.h", so they MUST
+    # NOT redefine them at namespace scope (ODR violation when more than one
+    # per-pair header is included in the same translation unit).
+    for enc_name in sorted(enc_dt_index):
+        cn = enc_name.upper().replace('ENC_', '')
+        lines.append(f'inline constexpr uint32_t kEnc_{cn} = 0x{enc_dt_index[enc_name]:X};')
+    lines.append('')
     for enc_name in sorted(enc_fields):
         lines.extend(_emit_fields_struct(enc_name, enc_fields[enc_name]))
     lines += ['}  // namespace rocjitsu', '']
 
     path = output_dir / 'encoding_fields.h'
     path.write_text('\n'.join(lines))
+    _clang_format(path)
 
-    import sys
     print(f'Generated encoding_fields.h with {len(enc_fields)} field structs '
           f'from {len(all_specs)} ISAs', file=sys.stderr)
     return str(path)
@@ -514,14 +551,9 @@ def _emit_dispatch(translations, src_name, dst_name):
     for t in translations:
         val_groups.setdefault(t.src_dt_index, []).append(t)
 
+    # kEnc_* encoding-format IDs live in encoding_fields.h (universal across
+    # ISA variants). Per-pair translator headers must not redefine them.
     lines = []
-    seen: set[str] = set()
-    for t in translations:
-        cn = t.src_enc_name.upper().replace('ENC_', '')
-        if cn not in seen:
-            seen.add(cn)
-            lines.append(f'inline constexpr uint32_t kEnc_{cn} = 0x{t.src_dt_index:X};')
-    lines.append('')
 
     fn = f'translate_encoding_{src_name}_to_{dst_name}'
     lines.append(f'inline TranslationResult {fn}(')
@@ -646,13 +678,19 @@ def generate_encoding_translators(src_spec, dst_spec, src_name, dst_name, output
             skipped.append(de); continue
         src_enc = src_spec.encoding_map[se]
         dst_enc = dst_spec.encoding_map[de]
+        # The coherency remap targets GFX12-style scope/th fields. If the
+        # destination encoding lacks those fields (e.g. RDNA3 SMEM with
+        # glc/dlc), suppress the remap so the regular field-by-field copy
+        # path handles glc/dlc directly.
+        dst_field_names = {f.name for f in dst_enc.ucode_fields}
+        dst_has_scope_th = ('scope' in dst_field_names and 'th' in dst_field_names)
         translations.append(EncodingTranslation(
             src_enc_name=se, dst_enc_name=de,
             src_struct=_struct_name(se), dst_struct=_struct_name(de),
             src_bit_cnt=src_enc.bit_cnt, dst_bit_cnt=dst_enc.bit_cnt,
             mappings=_classify_fields(src_enc, dst_enc, se),
-            has_coherency_remap=(se in _COHERENCY_REMAP_ENCODINGS),
-            has_glc_remap=(se in _GLC_REMAP_ENCODINGS),
+            has_coherency_remap=(se in _COHERENCY_REMAP_ENCODINGS) and dst_has_scope_th,
+            has_glc_remap=(se in _GLC_REMAP_ENCODINGS) and dst_has_scope_th,
             src_dt_index=src_dts.get(se, 0),
             src_enc_field_bit_cnt=src_enc.enc_field_bit_cnt,
             dst_enc_field_val=dst_evs.get(de, 0),
@@ -674,7 +712,12 @@ def generate_encoding_translators(src_spec, dst_spec, src_name, dst_name, output
                   '#include "rocjitsu/code/dbt/encoding_translator.h"',
                   '#include "encoding_fields.h"',
                   '',
-                  'namespace rocjitsu {', '']
+                  'namespace rocjitsu {',
+                  '// Per-pair named namespace. Two pairs that share a source ISA',
+                  '// (e.g. cdna4->rdna3 and cdna4->rdna4) both emit decode_*_cdna4',
+                  '// helpers; isolating them per pair avoids ODR conflicts when',
+                  '// both headers are included in the same TU.',
+                  f'namespace {src_name}_to_{dst_name} {{', '']
 
     for t in translations:
         pair_lines.extend(_emit_decode_fn(t, src_ns, src_name))
@@ -682,12 +725,13 @@ def generate_encoding_translators(src_spec, dst_spec, src_name, dst_name, output
         pair_lines.extend(_emit_encode_fn(t, dst_ns, dst_name))
     pair_lines.extend(_emit_dispatch(translations, src_name, dst_name))
 
-    pair_lines += ['}  // namespace rocjitsu', '']
+    pair_lines += [f'}}  // namespace {src_name}_to_{dst_name}',
+                   '}  // namespace rocjitsu', '']
 
     pair_path = output_dir / f'encoding_{src_name}_to_{dst_name}.h'
     pair_path.write_text('\n'.join(pair_lines))
+    _clang_format(pair_path)
 
-    import sys
     print(f'Generated {len(translations)} encoding translators for '
           f'{src_name} -> {dst_name}', file=sys.stderr)
     print(f'  Header: {pair_path}', file=sys.stderr)
