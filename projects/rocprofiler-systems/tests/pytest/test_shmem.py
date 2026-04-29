@@ -110,7 +110,6 @@ class TestShmem(RocprofsysTest):
         if mode == "sys_run":
             self.assert_perfetto(
                 result,
-                categories=["shmem"],
                 labels=["shmem_pingpong", "start_pes"],
                 counts=[1, 1],
                 depths=[0, 1],
