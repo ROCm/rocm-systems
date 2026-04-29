@@ -224,7 +224,7 @@ class Database:
         Base.metadata.create_all(cls._engine)
         cls._session = sessionmaker(bind=cls._engine)()
         cls._db_name = db_name
-        console_debug(f"SQLite database initialized in memory (target file: {db_name})")
+        console_debug("SQLite database initialized in memory")
         return db_name
 
     @classmethod
@@ -238,6 +238,8 @@ class Database:
 
         try:
             cls._session.commit()
+            # Writing to disk is slow, so we built the database in memory.
+            # Now copy the finished database to disk in one step.
             memory_conn = cls._engine.raw_connection()
             disk_conn = sqlite3.connect(cls._db_name)
             memory_conn.backup(disk_conn)

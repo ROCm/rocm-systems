@@ -214,7 +214,7 @@ class db_analysis(OmniAnalyze_Base):
             console_warning(f"Created file: {db_name}")
 
     def _save_views_as_csv_files(self, csv_dir: Path) -> None:
-        """Execute view selects and write one CSV per view into ``csv_dir``."""
+        """Execute view selects and write one CSV per view into csv_dir."""
         csv_dir.mkdir(parents=True, exist_ok=True)
         session = Database.get_session()
         for view_name, stmt in get_view_definitions().items():
