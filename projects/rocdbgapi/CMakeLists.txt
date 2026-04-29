@@ -115,13 +115,12 @@ else()
   endif()
 endif()
 
-# Define this before amd-dbgapi.h is generated.  amd-dbgapi.h.in uses
+# Define this before amd-dbgapi.h is generated. amd-dbgapi.h.in uses
 # this to define the right export/import decorators in amd-dbgapi.h
 # for clients to use.
+set(AMD_DBGAPI_STATIC_LIB "0")
 if(NOT BUILD_SHARED_LIBS)
   set(AMD_DBGAPI_STATIC_LIB "1")
-else()
-  set(AMD_DBGAPI_STATIC_LIB "0")
 endif()
 
 configure_file(
