@@ -1281,7 +1281,7 @@ static ncclResult_t ncclP2pSchedule(struct ncclComm* comm) {
     int localRanks = nodeRanks[node].localRanks;
     if (localRanks % groupSize != 0 || localRanks < groupSize) groupSize = gcd(groupSize, nodeRanks[node].localRanks);
   }
-  comm->p2pSchedGroupSize = groupSize;
+  comm->p2pChannelShiftSize = groupSize;
 
   int local = comm->localRank % groupSize; // local id inside my group
   int group = comm->localRank / groupSize; // id of my group, incremented when going over the previous nodes
