@@ -37,10 +37,11 @@ TEST(sampling_service_shutdown, shutdown_single_thread_returns_signal_set)
     constexpr int64_t tid = 0;
     svc.setup(tid);
 
-    auto sigs = svc.shutdown(tid);
-
-    EXPECT_TRUE(sigs.empty() || !sigs.empty())
-        << "shutdown() must return without crashing";
+    // The contract under test is that shutdown() returns a std::set<int> of the
+    // signals that were subscribed for this tid; either empty (no triggers configured)
+    // or populated is acceptable. Reaching this assertion line proves shutdown()
+    // returned without throwing — the AC-6 promise.
+    EXPECT_NO_THROW({ [[maybe_unused]] auto sigs = svc.shutdown(tid); });
 }
 
 // ─── AC-20: child process — release without per-tid processing ────────────────

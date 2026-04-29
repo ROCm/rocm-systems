@@ -12,7 +12,6 @@
 // guards needed here.
 
 #include "library/perf.hpp"
-#include "logger/debug.hpp"
 
 #include <csignal>
 #include <cstdint>

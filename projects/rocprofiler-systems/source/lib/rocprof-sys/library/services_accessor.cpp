@@ -201,6 +201,14 @@ rocprofsys_sampling_signal_handler(int sig, siginfo_t* /*info*/, void* ucontext)
 
     // Unwind directly into rec.raw_pcs[] using the signal ucontext.
     {
+        // The handler receives a kernel-supplied ucontext_t* and reinterprets it
+        // as the libunwind unw_context_t. On Linux/glibc both are the same
+        // mcontext_t-bearing layout; the static_assert catches any future ABI
+        // skew (e.g. uClibc, musl, a libunwind major version bump) at compile time.
+        static_assert(sizeof(unw_context_t) == sizeof(ucontext_t),
+                      "unw_context_t / ucontext_t size mismatch — ucontext "
+                      "reinterpret_cast in the sampling signal handler is unsafe");
+
         unw_cursor_t  cursor = {};
         unw_context_t uctx   = {};
         if(ucontext)
