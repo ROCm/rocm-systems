@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 # Copyright Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
@@ -7,7 +8,6 @@ import platform
 import re
 import shlex
 import subprocess
-import sys
 from pathlib import Path
 
 logging.basicConfig(level=logging.INFO)
@@ -23,7 +23,7 @@ def derive_rocm_path(script_dir: Path) -> Path:
     return script_dir.parent.parent.parent
 
 
-def setup_env(env: dict[str, str], rocm_path: Path) -> None:
+def setup_env(env: dict[str, str], rocm_path: Path) -> bool:
     env["ROCM_PATH"] = str(rocm_path)
     logging.info(f"++ rocdecode setting ROCM_PATH={rocm_path}")
     if platform.system() == "Linux":
@@ -33,9 +33,10 @@ def setup_env(env: dict[str, str], rocm_path: Path) -> None:
             env["LD_LIBRARY_PATH"] = f"{hip_lib_path}:{env['LD_LIBRARY_PATH']}"
         else:
             env["LD_LIBRARY_PATH"] = str(hip_lib_path)
+        return True
     else:
         logging.info("++ rocdecode tests only supported on Linux")
-        sys.exit(0)
+        return False
 
 
 def execute_tests(env: dict[str, str], test_source_dir: Path, build_dir: Path) -> None:
@@ -48,7 +49,7 @@ def execute_tests(env: dict[str, str], test_source_dir: Path, build_dir: Path) -
     # machine. This serves two purposes:
     # 1. Verifies that the installed rocdecode headers and libraries are functional.
     # 2. Some test dependencies (e.g. video codec libraries) are not bundled in the
-    #    TheRock artifacts and must be linked from the system at build time.
+    #    installed test payload and must be linked from the system at build time.
     cmd = [
         "cmake",
         "-GNinja",
@@ -98,7 +99,8 @@ def main() -> None:
     build_dir = build_dir.resolve()
 
     env = os.environ.copy()
-    setup_env(env, rocm_path)
+    if not setup_env(env, rocm_path):
+        return
     execute_tests(env, test_source_dir, build_dir)
 
 
