@@ -45,6 +45,7 @@ set(DEFAULT_GPUS
 # Get additional packages required
 include(CheckIncludeFiles)
 include(CheckSymbolExists)
+include(GNUInstallDirs)
 include(cmake/Dependencies.cmake) # rocm-cmake, rocm_local_targets
 include(cmake/CheckSymbolExistsNoWarn.cmake)
 
@@ -205,6 +206,11 @@ set(ROCM_USE_DEV_COMPONENT OFF)  # This repo doesn't have a dev component
 
 # Add all of the tests
 add_subdirectory(src)
+
+rocm_install(
+    PROGRAMS test/run_rccl_tests.py
+    DESTINATION ${CMAKE_INSTALL_DATADIR}/rccl-tests/tests
+    COMPONENT tests)
 
 rocm_setup_version(VERSION "2.14.1")
 
