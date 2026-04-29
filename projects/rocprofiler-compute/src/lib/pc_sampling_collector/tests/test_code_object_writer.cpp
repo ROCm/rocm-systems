@@ -34,6 +34,34 @@ TEST_F(test_code_object_writer_t, ProvidedTwoEndCodeObjCalls_Throws)
     EXPECT_THROW(m_writer.end_code_obj(), std::runtime_error);
 }
 
+TEST_F(test_code_object_writer_t, ProvidedStartSymbolWithoutEnd_Throws)
+{
+    m_writer.start_code_obj(0);
+    m_writer.start_symbol(rocm_compute::symbol_t{});
+    EXPECT_THROW(m_writer.get_result(), std::runtime_error);
+}
+
+TEST_F(test_code_object_writer_t, ProvidedEndSymbolWithoutStart_Throws)
+{
+    m_writer.start_code_obj(0);
+    EXPECT_THROW(m_writer.end_symbol(), std::runtime_error);
+}
+
+TEST_F(test_code_object_writer_t, ProvidedTwoStartSymbolCalls_Throws)
+{
+    m_writer.start_code_obj(0);
+    m_writer.start_symbol(rocm_compute::symbol_t{});
+    EXPECT_THROW(m_writer.start_symbol(rocm_compute::symbol_t{}), std::runtime_error);
+}
+
+TEST_F(test_code_object_writer_t, ProvidedTwoEndSymbolCalls_Throws)
+{
+    m_writer.start_code_obj(0);
+    m_writer.start_symbol(rocm_compute::symbol_t{});
+    m_writer.end_symbol();
+    EXPECT_THROW(m_writer.end_symbol(), std::runtime_error);
+}
+
 TEST_F(test_code_object_writer_t, ProvidedCodeObjDesc_SerializesIt)
 {
     constexpr uint32_t id0 = 10;
