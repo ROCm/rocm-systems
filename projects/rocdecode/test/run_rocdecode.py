@@ -11,36 +11,23 @@ import sys
 from pathlib import Path
 
 logging.basicConfig(level=logging.INFO)
-THEROCK_BIN_DIR_STR = os.getenv("THEROCK_BIN_DIR")
-if THEROCK_BIN_DIR_STR is None:
-    logging.info(
-        "++ Error: env(THEROCK_BIN_DIR) is not set. Please set it before executing tests."
-    )
-    sys.exit(1)
-THEROCK_BIN_DIR = Path(THEROCK_BIN_DIR_STR)
-SCRIPT_DIR = Path(__file__).resolve().parent
-THEROCK_DIR = Path(
-    os.environ.get("THEROCK_DIR") or SCRIPT_DIR.parent.parent.parent
-).resolve()
-THEROCK_TEST_DIR = THEROCK_DIR / "build"
-
-ROCDECODE_TEST_PATH = str(
-    THEROCK_BIN_DIR.resolve().parent / "share" / "rocdecode" / "test"
-)
-if not os.path.isdir(ROCDECODE_TEST_PATH):
-    logging.info(f"++ Error: rocdecode tests not found in {ROCDECODE_TEST_PATH}")
-    sys.exit(1)
-else:
-    logging.info(f"++ INFO: rocdecode tests found in {ROCDECODE_TEST_PATH}")
-env = os.environ.copy()
 
 
-def setup_env(env):
-    ROCM_PATH = THEROCK_BIN_DIR.resolve().parent
-    env["ROCM_PATH"] = str(ROCM_PATH)
-    logging.info(f"++ rocdecode setting ROCM_PATH={ROCM_PATH}")
+def derive_rocm_path(script_dir: Path) -> Path:
+    if script_dir.name == "test" and script_dir.parent.name == "rocdecode":
+        if script_dir.parent.parent.name == "share":
+            return script_dir.parent.parent.parent
+    rocm_path = os.getenv("ROCM_PATH")
+    if rocm_path:
+        return Path(rocm_path)
+    return script_dir.parent.parent.parent
+
+
+def setup_env(env: dict[str, str], rocm_path: Path) -> None:
+    env["ROCM_PATH"] = str(rocm_path)
+    logging.info(f"++ rocdecode setting ROCM_PATH={rocm_path}")
     if platform.system() == "Linux":
-        hip_lib_path = THEROCK_BIN_DIR.resolve().parent / "lib"
+        hip_lib_path = rocm_path / "lib"
         logging.info(f"++ rocdecode setting LD_LIBRARY_PATH={hip_lib_path}")
         if "LD_LIBRARY_PATH" in env:
             env["LD_LIBRARY_PATH"] = f"{hip_lib_path}:{env['LD_LIBRARY_PATH']}"
@@ -51,10 +38,11 @@ def setup_env(env):
         sys.exit(0)
 
 
-def execute_tests(env):
-    rocdecode_test_dir = THEROCK_TEST_DIR / "rocdecode-test"
+def execute_tests(env: dict[str, str], test_source_dir: Path, build_dir: Path) -> None:
+    if not test_source_dir.is_dir():
+        raise FileNotFoundError(f"rocdecode tests not found in {test_source_dir}")
 
-    rocdecode_test_dir.mkdir(parents=True, exist_ok=True)
+    build_dir.mkdir(parents=True, exist_ok=True)
 
     # rocdecode tests are shipped as CMake source and must be built on the target
     # machine. This serves two purposes:
@@ -64,19 +52,19 @@ def execute_tests(env):
     cmd = [
         "cmake",
         "-GNinja",
-        ROCDECODE_TEST_PATH,
+        str(test_source_dir),
     ]
-    logging.info(f"++ Exec [{rocdecode_test_dir}]$ {shlex.join(cmd)}")
-    subprocess.run(cmd, cwd=rocdecode_test_dir, check=True, env=env)
+    logging.info(f"++ Exec [{build_dir}]$ {shlex.join(cmd)}")
+    subprocess.run(cmd, cwd=build_dir, check=True, env=env)
 
     cmd = [
         "ctest",
         "-N",
     ]
-    logging.info(f"++ Exec [{rocdecode_test_dir}]$ {shlex.join(cmd)}")
+    logging.info(f"++ Exec [{build_dir}]$ {shlex.join(cmd)}")
     ctest_list = subprocess.run(
         cmd,
-        cwd=rocdecode_test_dir,
+        cwd=build_dir,
         check=True,
         env=env,
         capture_output=True,
@@ -96,10 +84,23 @@ def execute_tests(env):
         "--extra-verbose",
         "--output-on-failure",
     ]
-    logging.info(f"++ Exec [{rocdecode_test_dir}]$ {shlex.join(cmd)}")
-    subprocess.run(cmd, cwd=rocdecode_test_dir, check=True, env=env)
+    logging.info(f"++ Exec [{build_dir}]$ {shlex.join(cmd)}")
+    subprocess.run(cmd, cwd=build_dir, check=True, env=env)
+
+
+def main() -> None:
+    script_dir = Path(__file__).resolve().parent
+    rocm_path = Path(
+        os.environ.get("ROCM_PATH", derive_rocm_path(script_dir))
+    ).resolve()
+    test_source_dir = rocm_path / "share" / "rocdecode" / "test"
+    build_dir = Path(os.environ.get("TEST_BUILD_DIR", Path.cwd() / "rocdecode-test"))
+    build_dir = build_dir.resolve()
+
+    env = os.environ.copy()
+    setup_env(env, rocm_path)
+    execute_tests(env, test_source_dir, build_dir)
 
 
 if __name__ == "__main__":
-    setup_env(env)
-    execute_tests(env)
+    main()
