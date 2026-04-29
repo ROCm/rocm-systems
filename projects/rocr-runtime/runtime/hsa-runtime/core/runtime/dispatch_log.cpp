@@ -46,8 +46,11 @@
 // This file implements:
 //   - The ts_poller control-plane thread (~5 ms tick, idempotent enable /
 //     disable passes per spec §4 lifecycle state machine).
-//   - The ts_drainer data-plane thread (adaptive cadence, snapshot-based
-//     drain per spec §7).
+//   - One drainer thread per active queue (spawned at enable, joined at
+//     disable). Each per-queue worker independently drains its own ring
+//     buffer at the FW's local write rate, so cross-queue serialization
+//     present in the prior single-shared-drainer design is eliminated.
+//     See spec §7.
 //   - Per-queue ENABLE / DISABLE sequences (spec §5 ordering).
 //   - The QueueProfilingAcquire / Release refcount API (spec §4a).
 //   - The on_queue_create / on_queue_destroy hooks (spec §4 hooks).
@@ -73,9 +76,9 @@
 
 #include "core/inc/dispatch_log.h"
 
+#include <atomic>
 #include <cerrno>
 #include <chrono>
-#include <condition_variable>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -87,7 +90,6 @@
 #include <thread>
 #include <unordered_map>
 #include <unordered_set>
-#include <vector>
 
 #if defined(__linux__)
 #include <fcntl.h>
@@ -121,11 +123,12 @@ struct queue_profiling_owners {
 
 // ============================================================================
 // queue_drain_state per spec §7. Held via std::shared_ptr from both the
-// drainer registry (g_active_queues) and per-pass snapshot vectors. Stores
-// only NON-OWNING pointers into the buffer owned by AqlQueue (the buffer
-// is alloc'd by AqlQueue::SetProfiling(true) and freed by SetProfiling(false)
-// or the AqlQueue dtor). Deliberately stores NO Queue* — see spec §4
-// "Queue / drain-state lifetime" for the dangling-Queue rationale.
+// drainer registry (g_active_queues) and the per-queue worker thread (which
+// holds its own ref by-value via per_queue_drain_loop). Stores only NON-OWNING
+// pointers into the buffer owned by AqlQueue (the buffer is alloc'd by
+// AqlQueue::SetProfiling(true) and freed by SetProfiling(false) or the
+// AqlQueue dtor). Deliberately stores NO Queue* — see spec §4 "Queue /
+// drain-state lifetime" for the dangling-Queue rationale.
 // ============================================================================
 struct queue_drain_state {
   // Full 64-bit hsa_queue_t::id (see hsa.h). Internal ownership / lifetime
@@ -162,11 +165,36 @@ struct queue_drain_state {
   // so a wraparound re-write is re-detectable. See drain_one_queue.
   uint64_t next_idx = 0;
 
-  // Per-queue drain mutex. Serializes drain_one_queue() (steady state) and
-  // ts_drainer_drain_now() (synchronous final drain on the destroying /
-  // disable-edge thread). Per-queue scope, so other queues' drains are not
-  // blocked.
+  // Per-queue drain mutex. Steady state: only the per-queue worker thread
+  // holds this (so it is technically redundant in today's design — the
+  // worker is the sole drainer for its queue). Retained as defense in
+  // depth against any future code path that calls drain_one_queue
+  // synchronously from another thread (e.g. a future
+  // synchronous-final-drain helper). Per-queue scope, so other queues'
+  // drains are not blocked.
   std::mutex drain_mu;
+
+  // Per-queue worker thread shutdown signal + handle. Set true and joined
+  // by disable_dispatch_log_for_queue_locked (and by the destructor as a
+  // defensive safety net in case any code path drops a queue_drain_state
+  // without joining first). The worker checks should_stop with acquire
+  // ordering each iteration; the disable path stores it with release
+  // ordering before joining.
+  std::atomic<bool> should_stop{false};
+  std::thread       worker;
+
+  // Defensive safety net. The disable / shutdown path is responsible for
+  // joining the worker explicitly; this destructor only fires if a
+  // queue_drain_state is dropped without anyone having done so (e.g. a
+  // future caller that constructs a qs but never registers it). std::thread's
+  // destructor calls std::terminate() on a still-joinable thread, so we
+  // signal stop and join here as a last-resort.
+  ~queue_drain_state() {
+    if (worker.joinable()) {
+      should_stop.store(true, std::memory_order_release);
+      worker.join();
+    }
+  }
 };
 
 // ============================================================================
@@ -177,7 +205,10 @@ struct queue_drain_state {
 // timestamps right now?". Folded predicate of !rocm_trace_disabled() &&
 // lttng_ust_tracepoint_enabled(rocm_hsa, kernel_dispatch_record) &&
 // g_substrate_present. Written only by ts_poller; read by on_queue_create
-// (relaxed, hot path) and ts_drainer.
+// (relaxed, hot path). Per-queue drainer workers do not gate on this flag
+// directly — they live for the lifetime of their queue's enable->disable
+// window, and the poller's disable pass is what stops them when the
+// predicate transitions to false.
 std::atomic<bool> G_tracepoint_enabled{false};
 
 // Set true if the KFD substrate version probe at init() reports a kernel
@@ -241,15 +272,9 @@ std::unordered_map<core::Queue*, std::shared_ptr<queue_profiling_owners>> g_owne
 // §9 unsupported-agent row).
 std::unordered_set<core::Agent*> g_no_dispatch_log_agents;
 
-// Threads.
+// Threads. Per-queue drainer threads (one per active queue) live inside
+// each queue_drain_state.worker; only the poller is global.
 std::thread g_poller_thread;
-std::thread g_drainer_thread;
-std::atomic<bool> g_drainer_running{false};
-
-// Drainer wakeup CV. Used to long-sleep (50 ms) when G_tracepoint_enabled is
-// false and short-sleep (500 us) on idle. Notified on shutdown.
-std::mutex g_drainer_mu;
-std::condition_variable g_drainer_cv;
 
 // ============================================================================
 // Helpers.
@@ -326,19 +351,6 @@ bool probe_substrate_version() {
 bool probe_substrate_version() { return false; }
 #endif
 
-// Snapshot: clone shared_ptrs out of g_active_queues under the lifecycle
-// mutex, return the vector. Drainer then iterates WITHOUT holding the
-// mutex (this is the only place where snapshotting matters: the drainer
-// runs on the data-plane hot path and must not block lifecycle ops, and
-// shared_ptr ownership keeps the entries alive across the unlocked loop).
-std::vector<std::shared_ptr<queue_drain_state>> snapshot_active_queues() {
-  std::vector<std::shared_ptr<queue_drain_state>> out;
-  std::lock_guard<std::mutex> lk(g_lifecycle_mu);
-  out.reserve(g_active_queues.size());
-  for (auto& kv : g_active_queues) out.push_back(kv.second);
-  return out;
-}
-
 // Iterate g_known_queues under g_lifecycle_mu and invoke fn(queue_id, queue)
 // for each entry. C6 fix: replaces the previous "snapshot into vector then
 // iterate" pattern. fn must NOT mutate g_known_queues. fn IS allowed to
@@ -399,15 +411,17 @@ bool drain_one_queue(queue_drain_state& qs, bool force_emit) {
   // C9 (stage-2 review): bound each pass to one full ring sweep. The
   // sentinel-scan loop exits only when it observes record_type == 0 for
   // the current slot; if FW keeps the ring continuously non-empty, an
-  // unbounded loop here would let one queue monopolize ts_drainer (which
-  // walks queues sequentially under g_lifecycle_mu in
-  // ts_drainer_thread_main) and starve other queues, plus delay disable
-  // / shutdown paths that need drain_mu. Capping at ring_records slots
-  // (= one full ring sweep) preserves forward progress: at any instant
-  // FW can have at most ring_records unconsumed slots, so a full sweep
-  // always drains everything that was visible at pass start. Anything
-  // FW writes during the pass becomes the next pass's work — which is
-  // also the prior wptr-snapshot design's behaviour.
+  // unbounded loop here would (under the prior single-shared-drainer
+  // design) starve other queues. With one worker per queue today the
+  // cross-queue starvation argument no longer applies, but the cap is
+  // still useful: it bounds the time between checks of qs.should_stop
+  // (and the helper's own kill-switch check below), so a disable
+  // transition does not have to wait for an unbounded FW write rate
+  // to drain. Capping at ring_records slots (= one full ring sweep)
+  // also preserves forward progress: at any instant FW can have at
+  // most ring_records unconsumed slots, so a full sweep always drains
+  // everything that was visible at pass start. Anything FW writes
+  // during the pass becomes the next pass's work.
   const uint64_t pass_budget = qs.ring_records;
   uint64_t pass_consumed = 0;
 
@@ -516,22 +530,43 @@ bool drain_one_queue(queue_drain_state& qs, bool force_emit) {
   return any;
 }
 
-// Synchronous final drain on the calling thread. Looks up the queue's
-// shared_ptr from the registry and forwards to drain_one_queue with
-// force_emit=true. Per spec §4: serialization with the drainer thread
-// happens via qs.drain_mu inside drain_one_queue.
+// Per-queue drain loop. One instance per active queue, spawned at enable
+// (enable_dispatch_log_for_queue_locked) and joined at disable
+// (disable_dispatch_log_for_queue_locked). The thread holds its
+// shared_ptr<queue_drain_state> by value, so qs is alive for the full
+// thread lifetime regardless of registry mutations elsewhere.
 //
-// _locked variant: caller holds g_lifecycle_mu. Used by the poller and by
-// disable_dispatch_log_for_queue_locked, both of which iterate registries
-// under the lifecycle mutex.
-void ts_drainer_drain_now_locked(core::Queue* q) {
-  std::shared_ptr<queue_drain_state> qs_ptr;
-  auto it = g_active_queues.find(queue_id_of(q));
-  if (it == g_active_queues.end()) return;
-  qs_ptr = it->second;
-  if (qs_ptr) {
-    drain_one_queue(*qs_ptr, /* force_emit = */ true);
+// Per-queue ownership eliminates cross-queue serialization: the previous
+// shared drainer iterated all queues sequentially under g_lifecycle_mu
+// snapshot, with a per-pass budget capped at qs.ring_records, so a
+// larger ring slowed the visit cycle to other queues. Each per-queue
+// worker now stays hot on its own ring at the FW's local write rate
+// without competing with other queues for thread time.
+//
+// Memory ordering on shutdown:
+//   - disable path: store should_stop = true with release, then join.
+//   - worker: load should_stop with acquire each iteration.
+//   - The release/acquire pair guarantees that the worker observes
+//     should_stop=true on its next loop check after the disable thread
+//     stores it (within the bounded sleep cadence). join() then waits
+//     for the worker's final-drain pass to complete.
+void per_queue_drain_loop(std::shared_ptr<queue_drain_state> qs) {
+  while (!qs->should_stop.load(std::memory_order_acquire)) {
+    const bool any = drain_one_queue(*qs, /* force_emit = */ false);
+    if (any) {
+      std::this_thread::yield();
+    } else {
+      // Same idle backoff as the prior shared drainer (500 us). Bounds
+      // the worst-case latency between the disable path setting
+      // should_stop and this thread observing it.
+      std::this_thread::sleep_for(std::chrono::microseconds(500));
+    }
   }
+  // Final drain after the stop signal so any FW records written between
+  // the last steady-state pass and the disable transition are emitted.
+  // force_emit=true bypasses the per-tracepoint enabled check inside the
+  // emission helper (spec §6) so disable does not lose pending records.
+  drain_one_queue(*qs, /* force_emit = */ true);
 }
 
 // ============================================================================
@@ -745,6 +780,21 @@ void enable_dispatch_log_for_queue_locked(core::Queue* q) {
 
   g_active_queues[qs->queue_id] = qs;
 
+  // Step 4: spawn the per-queue drainer worker AFTER registration. The
+  // worker holds its own shared_ptr<queue_drain_state> by value (passed
+  // into per_queue_drain_loop), so qs is alive for the full thread
+  // lifetime even if the registry entry is erased before the worker
+  // observes should_stop.
+  //
+  // Stack-size note: std::thread does not expose pthread_attr_setstacksize
+  // portably, so each worker uses the default pthread stack (typically
+  // 8 MiB virtual on glibc, lazily backed). With ~16 typical queues per
+  // process this costs ~128 MiB of virtual address space, which is fine
+  // for our hosts. Workloads pushing into the thousands-of-queues regime
+  // would need a pthread_create-based spawn helper to set a small (e.g.
+  // 64 KiB) stack; defer that until measured pressure exists.
+  qs->worker = std::thread(per_queue_drain_loop, qs);
+
   q->dispatch_log_active.store(true, std::memory_order_release);
 }
 
@@ -754,33 +804,23 @@ void disable_dispatch_log_for_queue_locked(core::Queue* q) {
 
   // Spec §4 disable-edge per-queue sequence.
   //
-  // C2 fix: ordering between final-drain, drainer-snapshot poisoning,
-  // registry erase, and buffer release is critical. queue_drain_state
-  // stores NON-OWNING pointers into a buffer owned by AqlQueue; once
-  // QueueProfilingRelease triggers SetProfiling(false) the buffer is
-  // freed. A snapshot held by the drainer thread (snapshot_active_queues)
-  // pins the queue_drain_state alive but does NOT pin the buffer, so
-  // the drainer could dereference freed memory in drain_one_queue.
+  // Per-queue drainer ordering: with one worker thread per queue (spawned
+  // in enable_dispatch_log_for_queue_locked), the disable path must
+  // signal stop and join the worker BEFORE freeing the buffer. The
+  // worker does its own final drain (force_emit=true) inside
+  // per_queue_drain_loop after observing should_stop, so a separate
+  // synchronous-final-drain step is no longer needed.
   //
-  // We close that window by poisoning the snapshot-visible pointers
-  // under qs->drain_mu, then erasing from g_active_queues, and only
-  // then calling QueueProfilingRelease (which frees the buffer):
-  //
-  //   - drain_one_queue takes drain_mu first thing, then early-returns
-  //     on ring_base==nullptr || ring_records==0. Any drainer that
-  //     hasn't started its pass for this queue yet will exit early.
-  //   - Any drainer already inside drain_one_queue holds drain_mu, so
-  //     the poisoning step blocks until it completes its current pass.
-  //     The buffer is not yet freed at that point (we haven't released
-  //     yet), so that pass is safe to finish.
+  // Pointer poisoning under drain_mu is retained as defense in depth
+  // against any future code path that calls drain_one_queue
+  // synchronously from another thread; today the worker is the sole
+  // drainer for this queue and is already joined by the time we reach
+  // that step, so the poisoning is a no-op-but-cheap belt-and-braces.
 
   // a. wait_for_idle (bounded ≤ 100 ms).
   wait_for_idle(q);
 
-  // b. Final drain with force_emit=true (spec §6).
-  ts_drainer_drain_now_locked(q);
-
-  // c. Look up the registered drain-state shared_ptr. After this we hold
+  // b. Look up the registered drain-state shared_ptr. After this we hold
   //    a local ref so qs survives even after the registry erase below.
   std::shared_ptr<queue_drain_state> qs_ptr;
   {
@@ -788,9 +828,30 @@ void disable_dispatch_log_for_queue_locked(core::Queue* q) {
     if (it != g_active_queues.end()) qs_ptr = it->second;
   }
 
-  // d. Poison the non-owning pointers under drain_mu so any drainer
-  //    snapshot still in flight will exit drain_one_queue early. The
-  //    drain_mu acquire serializes with any in-progress drain pass.
+  // c. Stop and join the per-queue worker thread. The worker performs
+  //    its own final drain (force_emit=true) after observing
+  //    should_stop, so all pending FW records are emitted before
+  //    join() returns. should_stop store uses release ordering;
+  //    the worker reads it with acquire on each iteration.
+  //
+  //    join() may throw on a programming error (worker is the current
+  //    thread, or the std::thread is not joinable). Both are
+  //    impossible here: this function is called from the poller /
+  //    on_queue_destroy / shutdown threads (never the worker), and
+  //    the worker was assigned to qs->worker in the enable path
+  //    immediately before flipping dispatch_log_active to true. If
+  //    join() ever does throw the C++ runtime calls std::terminate;
+  //    we have no recovery path beyond the diagnostic the runtime
+  //    will emit. (No exception handler here — propagating up to
+  //    the poller would not improve the situation.)
+  if (qs_ptr) {
+    qs_ptr->should_stop.store(true, std::memory_order_release);
+    if (qs_ptr->worker.joinable()) qs_ptr->worker.join();
+  }
+
+  // d. Poison the non-owning pointers under drain_mu (defense in depth;
+  //    see function-level comment). The worker is already joined by
+  //    this point, so drain_mu is uncontended.
   if (qs_ptr) {
     std::lock_guard<std::mutex> lk(qs_ptr->drain_mu);
     qs_ptr->ring_base    = nullptr;
@@ -799,51 +860,20 @@ void disable_dispatch_log_for_queue_locked(core::Queue* q) {
   }
 
   // e. Unregister from drainer registry. Drops the registry's shared_ptr
-  //    ref. Any in-flight drainer snapshot still holds its own ref to
-  //    qs_ptr but its ring_base is now nullptr.
+  //    ref. The worker's own shared_ptr (held by-value in
+  //    per_queue_drain_loop) is already released because the worker
+  //    has returned and joined.
   g_active_queues.erase(queue_id_of(q));
 
   // f. Release profiling ref. On the 1->0 edge AqlQueue::SetProfiling(false)
   //    clears the KFD profiling-buffer registration (UPDATE_QUEUE with
   //    addr=0) and frees the per-queue dispatch-record buffer.
   //    QueueProfilingRelease takes g_owners_mu, NOT g_lifecycle_mu.
-  //    By this point no drainer can dereference the buffer because
-  //    every snapshot's qs->ring_base is nullptr.
+  //    By this point the worker is joined so no thread can dereference
+  //    the buffer.
   QueueProfilingRelease(q);
 
   q->dispatch_log_active.store(false, std::memory_order_release);
-}
-
-// ============================================================================
-// ts_drainer_loop (spec §7).
-// ============================================================================
-
-void ts_drainer_loop() {
-  while (!g_shutdown.load(std::memory_order_relaxed)) {
-    if (!G_tracepoint_enabled.load(std::memory_order_relaxed)) {
-      std::unique_lock<std::mutex> lk(g_drainer_mu);
-      g_drainer_cv.wait_for(lk, std::chrono::milliseconds(50));
-      continue;
-    }
-
-    bool any_progress = false;
-    auto snapshot = snapshot_active_queues();
-    for (auto& qs_ptr : snapshot) {
-      any_progress |= drain_one_queue(*qs_ptr, /* force_emit = */ false);
-    }
-
-    if (any_progress) {
-      std::this_thread::yield();
-    } else {
-      std::this_thread::sleep_for(std::chrono::microseconds(500));
-    }
-  }
-}
-
-void start_drainer_if_needed() {
-  bool expected = false;
-  if (!g_drainer_running.compare_exchange_strong(expected, true)) return;
-  g_drainer_thread = std::thread(ts_drainer_loop);
 }
 
 // ============================================================================
@@ -881,10 +911,11 @@ void ts_poller_loop() {
     G_tracepoint_enabled.store(curr, std::memory_order_relaxed);
 
     if (curr) {
-      start_drainer_if_needed();
-
       // ENABLE pass (spec §4): for each known live queue Q with
       // dispatch_log_active==false, run the per-queue ENABLE sequence.
+      // Each enable spawns a per-queue drainer worker thread inside
+      // enable_dispatch_log_for_queue_locked; there is no longer any
+      // shared drainer to start.
       for_each_known_queue_locked(
           [](uint64_t /*qid*/, core::Queue* q) {
             enable_dispatch_log_for_queue_locked(q);
@@ -923,19 +954,27 @@ void init() {
 
 void shutdown() {
   g_shutdown.store(true, std::memory_order_release);
-  g_drainer_cv.notify_all();
 
+  // Join the poller first so no new per-queue workers can be spawned (the
+  // poller's enable pass is the only spawner) while we are tearing down
+  // the active set.
   if (g_poller_thread.joinable()) g_poller_thread.join();
-  if (g_drainer_thread.joinable()) g_drainer_thread.join();
-  g_drainer_running.store(false, std::memory_order_relaxed);
 
-  // Spec §4 process-exit cleanup: run the per-queue DISABLE sequence
-  // (wait_for_idle, final drain, QueueProfilingRelease) for every queue
-  // still active at process exit.
+  // Spec §4 process-exit cleanup: run the per-queue DISABLE sequence for
+  // every queue still active at process exit. disable_dispatch_log_for_
+  // queue_locked stops + joins each queue's worker thread before
+  // releasing its profiling buffer, so by the time these calls return
+  // every per-queue worker has finished its final drain.
   for_each_known_queue_locked(
       [](uint64_t /*qid*/, core::Queue* q) {
         disable_dispatch_log_for_queue_locked(q);
       });
+
+  // Drop any drain-state shared_ptrs still pinned by g_active_queues.
+  // The destructor on queue_drain_state defensively joins worker if it
+  // is still joinable (it should not be — disable above joined it
+  // already), so this is safe even if a queue somehow escaped the
+  // disable pass above.
   {
     std::lock_guard<std::mutex> lk(g_lifecycle_mu);
     g_known_queues.clear();

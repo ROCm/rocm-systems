@@ -115,12 +115,14 @@ static_assert(sizeof(mec_dispatch_record_16) == 16,
 // -----------------------------------------------------------------------------
 
 // Called once from Runtime::Load. Probes for KFD substrate support and spawns
-// the ts_poller thread. The drainer thread is spawned lazily by ts_poller on
-// the first enable edge (spec §9 LTTng-OFF row).
+// the ts_poller thread. Per-queue drainer worker threads are spawned by the
+// poller (or by on_queue_create) on each per-queue enable edge — one worker
+// per active queue, joined on its disable edge (spec §7).
 void init();
 
-// Called once from Runtime::Unload. Runs the disable edge for every active
-// queue, then joins the poller and (if running) drainer threads.
+// Called once from Runtime::Unload. Joins the poller, then runs the disable
+// edge for every active queue, which stops + joins each per-queue drainer
+// worker.
 void shutdown();
 
 // Called immediately AFTER a queue becomes visible via hsa_queue_create. If
