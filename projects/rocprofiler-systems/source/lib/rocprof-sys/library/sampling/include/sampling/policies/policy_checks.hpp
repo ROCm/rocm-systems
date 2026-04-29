@@ -129,6 +129,23 @@ struct is_fatal_error_policy<
 template <typename T>
 inline constexpr bool is_fatal_error_policy_v = is_fatal_error_policy<T>::value;
 
+// ProductionHooksPolicy — bool check_thread_guards(int64_t).
+// Service-templated hooks (setup_wiring/shutdown_wiring/emit_resolved/postfork_*)
+// cannot be checked at definition time without an instantiation context;
+// they are exercised by the sampling_service_production_hooks_test integration
+// suite instead.
+ROCPROFSYS_DEFINE_POLICY_TRAIT(
+    production_hooks,
+    decltype(static_cast<bool>(std::declval<T&>().check_thread_guards(int64_t{}))));
+
+// TestHooksPolicy — three constexpr-ish override probes consulted by the
+// service alongside its own production state.
+ROCPROFSYS_DEFINE_POLICY_TRAIT(
+    test_hooks,
+    decltype(static_cast<bool>(std::declval<T const&>().override_duration_disabled())),
+    decltype(static_cast<bool>(std::declval<T const&>().override_causal_mode())),
+    decltype(static_cast<bool>(std::declval<T const&>().override_child_process())));
+
 }  // namespace rocprofsys::sampling::detail
 
 #undef ROCPROFSYS_DEFINE_POLICY_TRAIT

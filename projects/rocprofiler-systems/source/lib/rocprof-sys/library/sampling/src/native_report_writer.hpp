@@ -251,17 +251,18 @@ private:
             }
 
             out << k.tid << '\t' << k.depth << '\t' << k.label << '\t' << v.count << '\t'
-                << fmt6(v.sum) << '\t' << fmt6(mean) << '\t' << fmt6(v.min_v) << '\t'
-                << fmt6(v.max_v) << '\t' << fmt6(var) << '\t' << fmt6(stddev) << '\t'
-                << fmt6(ps) << '\n';
+                << fmt_fixed<6>(v.sum) << '\t' << fmt_fixed<6>(mean) << '\t'
+                << fmt_fixed<6>(v.min_v) << '\t' << fmt_fixed<6>(v.max_v) << '\t'
+                << fmt_fixed<6>(var) << '\t' << fmt_fixed<6>(stddev) << '\t'
+                << fmt_fixed<6>(ps) << '\n';
         }
     }
 
     static void emit_pct_rows(std::ostream& out, std::map<pct_key, pct_stats> const& agg)
     {
         for(auto const& [k, v] : agg)
-            out << k.tid << '\t' << k.label << '\t' << v.count << '\t' << fmt3(v.sum)
-                << '\n';
+            out << k.tid << '\t' << k.label << '\t' << v.count << '\t'
+                << fmt_fixed<3>(v.sum) << '\n';
     }
 
     static void emit_trip_rows(std::ostream& out, std::map<row_key, uint64_t> const& agg)
@@ -270,17 +271,11 @@ private:
             out << k.tid << '\t' << k.depth << '\t' << k.label << '\t' << v << '\n';
     }
 
-    static std::string fmt6(double v)
+    template <int N>
+    static std::string fmt_fixed(double v)
     {
         std::ostringstream ss;
-        ss << std::fixed << std::setprecision(6) << v;
-        return ss.str();
-    }
-
-    static std::string fmt3(double v)
-    {
-        std::ostringstream ss;
-        ss << std::fixed << std::setprecision(3) << v;
+        ss << std::fixed << std::setprecision(N) << v;
         return ss.str();
     }
 

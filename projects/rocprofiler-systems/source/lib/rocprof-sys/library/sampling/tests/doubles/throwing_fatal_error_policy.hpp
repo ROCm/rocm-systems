@@ -34,6 +34,9 @@ namespace rocprofsys::sampling::test
 
 struct throwing_fatal_error_policy
 {
+    // Test seam: stores the raw fmt string only (no Args formatting). Tests
+    // that exist today never assert on Args contents; production formatting
+    // happens in real_fatal_error_policy::fatal via fmt::vformat.
     template <class... Args>
     [[noreturn]] void fatal(char const* file, int line, std::string_view msg,
                             Args const&...)

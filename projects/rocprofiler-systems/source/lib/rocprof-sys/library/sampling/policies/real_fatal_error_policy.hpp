@@ -5,6 +5,8 @@
 
 #include "logger/debug.hpp"
 
+#include <fmt/format.h>
+
 #include <cstdlib>
 #include <mutex>
 #include <string_view>
@@ -20,12 +22,13 @@ class real_fatal_error_policy
 {
 public:
     template <class... Args>
-    [[noreturn]] void fatal(char const* file, int line, std::string_view fmt,
-                            Args const&... /*args*/) noexcept
+    [[noreturn]] void fatal(char const* file, int line, std::string_view fmt_str,
+                            Args const&... args) noexcept
     {
         static std::mutex                 fatal_mtx;
         std::lock_guard<std::mutex> const lock{ fatal_mtx };
-        LOG_CRITICAL("[{}:{}] fatal sampling error: {}", file, line, fmt);
+        auto const formatted = fmt::vformat(fmt_str, fmt::make_format_args(args...));
+        LOG_CRITICAL("[{}:{}] fatal sampling error: {}", file, line, formatted);
         ::_Exit(1);
     }
 };

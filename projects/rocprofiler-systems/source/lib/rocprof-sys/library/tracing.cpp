@@ -6,9 +6,9 @@
 #include "core/config.hpp"
 #include "core/state.hpp"
 #include "core/utility.hpp"
+#include "library/sampling_service_instantiation.hpp"
 #include "library/thread_data.hpp"
 #include "library/thread_info.hpp"
-#include "sampling/default_policies.hpp"
 #include "sampling/sampling_service.hpp"
 
 #include <timemory/hash/types.hpp>
@@ -173,10 +173,8 @@ thread_init()
         if(get_state() != State::Finalized)
         {
             auto _shut_tid = utility::get_thread_index();
-            if(get_use_causal())
-                services::causal_sampling().shutdown(_shut_tid);
-            else if(get_use_sampling())
-                services::sampling().shutdown(_shut_tid);
+            if(get_use_causal() || get_use_sampling())
+                services::sampling_shutdown_for_thread(_shut_tid);
             auto& _thr_bundle = thread_data<thread_bundle_t>::instance();
             if(_thr_bundle && _thr_bundle->get<comp::wall_clock>() &&
                _thr_bundle->get<comp::wall_clock>()->get_is_running())
@@ -231,23 +229,14 @@ thread_init()
         // the main thread will initialize sampling when it initializes the tooling
         if(_idx > 0)
         {
-            auto _use_causal   = get_use_causal();
-            auto _use_sampling = get_use_sampling();
-            if(_use_causal || _use_sampling)
+            auto _enabled = get_use_causal() || get_use_sampling();
+            if(_enabled)
             {
                 ROCPROFSYS_SCOPED_SAMPLING_ON_CHILD_THREADS(false);
-                if(_use_causal)
-                {
-                    auto _sigs = services::causal_sampling().setup(_idx);
-                    services::causal_sampling().unblock_signals(_sigs);
-                }
-                else if(_use_sampling)
-                {
-                    auto _sigs = services::sampling().setup(_idx);
-                    services::sampling().unblock_signals(_sigs);
-                }
+                auto _sigs = services::sampling_setup_for_thread(_idx);
+                services::sampling_unblock_signals_for_thread(_sigs);
             }
-            return (_use_causal || _use_sampling);
+            return _enabled;
         }
         return false;
     }();

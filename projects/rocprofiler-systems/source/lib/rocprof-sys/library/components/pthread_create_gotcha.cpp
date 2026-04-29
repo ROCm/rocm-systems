@@ -9,10 +9,10 @@
 #include "library/causal/delay.hpp"
 #include "library/components/category_region.hpp"
 #include "library/runtime.hpp"
+#include "library/sampling_service_instantiation.hpp"
 #include "library/thread_data.hpp"
 #include "library/thread_info.hpp"
 #include "library/tracing.hpp"
-#include "sampling/default_policies.hpp"
 #include "sampling/sampling_service.hpp"
 
 #include <timemory/backends/threading.hpp>
@@ -180,16 +180,8 @@ pthread_create_gotcha::wrapper::operator()() const
         set_thread_state(ThreadState::Internal);
         if(_is_sampling)
         {
-            if(m_config.enable_causal)
-            {
-                services::causal_sampling().block_signals(_signals);
-                services::causal_sampling().shutdown(_tid);
-            }
-            else if(m_config.enable_sampling)
-            {
-                services::sampling().block_signals(_signals);
-                services::sampling().shutdown(_tid);
-            }
+            services::sampling_block_signals_for_thread(_signals);
+            services::sampling_shutdown_for_thread(_tid);
         }
 
         if(_tid >= 0)
@@ -243,23 +235,18 @@ pthread_create_gotcha::wrapper::operator()() const
         }
         if(_bundle) start_bundle(*_bundle, _tid);
         get_cpu_cid_stack(_tid, m_config.parent_tid);
-        if(m_config.enable_causal)
+        if(m_config.enable_causal || m_config.enable_sampling)
         {
-            // children inherit the parent delay data
-            if(_parent_info && _parent_info->index_data)
+            if(m_config.enable_causal && _parent_info && _parent_info->index_data)
+            {
+                // children inherit the parent delay data
                 causal::delay::get_local(_tid) =
                     causal::delay::get_local(_parent_info->index_data->sequent_value);
+            }
             _is_sampling = true;
             ROCPROFSYS_SCOPED_SAMPLING_ON_CHILD_THREADS(false);
-            _signals = services::causal_sampling().setup(_tid);
-            services::causal_sampling().unblock_signals(_signals);
-        }
-        else if(m_config.enable_sampling)
-        {
-            _is_sampling = true;
-            ROCPROFSYS_SCOPED_SAMPLING_ON_CHILD_THREADS(false);
-            _signals = services::sampling().setup(_tid);
-            services::sampling().unblock_signals(_signals);
+            _signals = services::sampling_setup_for_thread(_tid);
+            services::sampling_unblock_signals_for_thread(_signals);
         }
     }
     else if(m_config.offset)

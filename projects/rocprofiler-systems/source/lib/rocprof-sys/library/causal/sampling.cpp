@@ -14,9 +14,9 @@
 #include "library/causal/sample_data.hpp"
 #include "library/perf.hpp"
 #include "library/runtime.hpp"
+#include "library/sampling_service_instantiation.hpp"
 #include "library/thread_data.hpp"
 #include "library/thread_info.hpp"
-#include "sampling/default_policies.hpp"
 #include "sampling/sampling_service.hpp"
 
 #include <timemory/macros.hpp>
@@ -550,7 +550,7 @@ block_signals(std::set<int> _signals)
     if(_signals.empty()) _signals = get_signal_types(threading::get_id());
     if(_signals.empty()) return;
 
-    rocprofsys::services::causal_sampling().block_signals(_signals);
+    rocprofsys::services::causal_sampling_block_signals(_signals);
 }
 
 void
@@ -559,7 +559,7 @@ unblock_signals(std::set<int> _signals)
     if(_signals.empty()) _signals = get_signal_types(threading::get_id());
     if(_signals.empty()) return;
 
-    rocprofsys::services::causal_sampling().unblock_signals(_signals);
+    rocprofsys::services::causal_sampling_unblock_signals(_signals);
 }
 
 void

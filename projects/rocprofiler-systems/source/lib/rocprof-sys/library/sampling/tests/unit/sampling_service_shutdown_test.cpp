@@ -10,7 +10,7 @@
 
 using namespace rocprofsys::sampling;
 using namespace rocprofsys::sampling::test;
-using test_service = sampling_service<test_sampling_policies>;
+// test_service alias (with recording_test_hooks) lives in test_sampling_policies.hpp.
 
 // ─── AC-6: shutdown does not crash ───────────────────────────────────────────
 
@@ -50,7 +50,7 @@ TEST(sampling_service_shutdown, shutdown_in_child_skips_per_tid_processing)
     test_service svc;
     svc.setup(0);
 
-    svc.set_child_process_for_test(true);
+    svc.test_hooks_ref().set_child_process(true);
 
     svc.shutdown(0);
 

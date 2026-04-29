@@ -14,6 +14,10 @@
 #include "recording_trace_sink.hpp"
 #include "throwing_fatal_error_policy.hpp"
 
+#include "sampling/policies/production_hooks_policy.hpp"
+#include "sampling/policies/test_hooks_policy.hpp"
+#include "sampling/sampling_service.hpp"
+
 namespace rocprofsys::sampling::test
 {
 
@@ -32,5 +36,10 @@ struct test_sampling_policies
     using perfetto_sink     = noop_perfetto_sink;
     using fatal_error       = throwing_fatal_error_policy;
 };
+
+// sampling_service alias for unit tests: noop production hooks (no main-lib
+// deps) + recording test hooks (so tests can flip override flags).
+using test_service =
+    sampling_service<test_sampling_policies, noop_production_hooks, recording_test_hooks>;
 
 }  // namespace rocprofsys::sampling::test

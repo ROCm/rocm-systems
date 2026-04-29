@@ -20,9 +20,9 @@
 #include "library/causal/sampling.hpp"
 #include "library/causal/selected_entry.hpp"
 #include "library/runtime.hpp"
+#include "library/sampling_service_instantiation.hpp"
 #include "library/thread_data.hpp"
 #include "library/thread_info.hpp"
-#include "sampling/default_policies.hpp"
 #include "sampling/sampling_service.hpp"
 
 #include <timemory/data/atomic_ring_buffer.hpp>

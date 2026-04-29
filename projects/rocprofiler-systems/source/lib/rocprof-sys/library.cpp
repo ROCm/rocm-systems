@@ -47,12 +47,11 @@
 #include "library/rocprofiler-sdk/roctx_client.hpp"
 #include "library/rocprofiler-sdk/trace_control.hpp"
 #include "library/runtime.hpp"
+#include "library/sampling_service_instantiation.hpp"
 #include "library/thread_data.hpp"
 #include "library/thread_info.hpp"
 #include "library/tracing.hpp"
 #include "rocprofiler-systems/categories.h"  // in rocprof-sys-user
-#include "sampling/default_policies.hpp"
-#include "sampling/sampling_service.hpp"
 
 #include <timemory/hash/types.hpp>
 #include <timemory/log/logger.hpp>
@@ -629,23 +628,15 @@ rocprofsys_init_tooling_hidden(void)
             ROCPROFSYS_SCOPED_SAMPLING_ON_CHILD_THREADS(false);
             process_sampler::setup();
         }
-        if(get_use_causal())
+        if(get_use_causal() || get_use_sampling())
         {
             {
                 ROCPROFSYS_SCOPED_SAMPLING_ON_CHILD_THREADS(false);
-                services::causal_sampling().setup(utility::get_thread_index());
+                services::sampling_setup_for_thread(utility::get_thread_index());
             }
-            push_enable_sampling_on_child_threads(get_use_causal());
-            services::causal_sampling().unblock_signals();
-        }
-        else if(get_use_sampling())
-        {
-            {
-                ROCPROFSYS_SCOPED_SAMPLING_ON_CHILD_THREADS(false);
-                services::sampling().setup(utility::get_thread_index());
-            }
-            push_enable_sampling_on_child_threads(get_use_sampling());
-            services::sampling().unblock_signals();
+            push_enable_sampling_on_child_threads(get_use_causal() ? get_use_causal()
+                                                                   : get_use_sampling());
+            services::sampling_unblock_signals_for_thread();
         }
         get_main_bundle()->start();
         LOG_DEBUG("State: {} -> State::Active", std::to_string(get_state()));
@@ -661,7 +652,7 @@ rocprofsys_init_tooling_hidden(void)
             auto pause_callback = [](void) {
                 LOG_DEBUG("Pause callback...");
                 rocprofiler_sdk::pause();
-                services::sampling().pause();
+                services::sampling_pause();
                 component::mpi_gotcha::pause();
                 component::ucx_gotcha::pause();
                 component::shmem_gotcha<rocprofsys::DefaultSHMEMPolicy>::pause();
@@ -675,7 +666,7 @@ rocprofsys_init_tooling_hidden(void)
             auto resume_callback = [](void) {
                 LOG_DEBUG("Resume callback...");
                 rocprofiler_sdk::resume();
-                services::sampling().resume();
+                services::sampling_resume();
                 component::mpi_gotcha::resume();
                 component::ucx_gotcha::resume();
                 component::shmem_gotcha<rocprofsys::DefaultSHMEMPolicy>::resume();
@@ -721,7 +712,7 @@ rocprofsys_init_tooling_hidden(void)
         component::vaapi_gotcha::start();
     }
 
-    if(get_use_sampling()) services::sampling().block_signals();
+    if(get_use_sampling()) services::sampling_block_signals();
 
     // perfetto initialization
     if(get_use_perfetto())
@@ -937,7 +928,7 @@ rocprofsys_finalize_hidden(void)
 
     LOG_INFO("Finalizing rocprof-sys...");
 
-    services::sampling().block_samples();
+    services::sampling_block_samples();
 
     thread_info::set_stop(comp::wall_clock::record());
 
@@ -1076,16 +1067,10 @@ rocprofsys_finalize_hidden(void)
         process_sampler::shutdown();
     }
 
-    if(get_use_causal())
+    if(get_use_causal() || get_use_sampling())
     {
-        LOG_DEBUG("Shutting down causal sampling...");
-        services::causal_sampling().shutdown(utility::get_thread_index());
-    }
-
-    if(get_use_sampling())
-    {
-        LOG_DEBUG("Shutting down sampling...");
-        services::sampling().shutdown(utility::get_thread_index());
+        LOG_DEBUG("Shutting down sampling{}...", get_use_causal() ? " (causal)" : "");
+        services::sampling_shutdown_for_thread(utility::get_thread_index());
     }
 
     LOG_TRACE("Reporting the process- and thread-level metrics...");

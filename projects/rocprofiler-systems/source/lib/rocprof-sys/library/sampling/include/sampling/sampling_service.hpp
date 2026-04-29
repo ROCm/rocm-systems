@@ -6,6 +6,8 @@
 #include "sampling/data/backtrace_record.hpp"
 #include "sampling/platform_guard.hpp"
 #include "sampling/platform_traits.hpp"
+#include "sampling/policies/production_hooks_policy.hpp"
+#include "sampling/policies/test_hooks_policy.hpp"
 #include "sampling/sampling_policies.hpp"
 #include "sampling/src/pause_interval_registry.hpp"
 #include "sampling/src/sampling_duration_controller.hpp"
@@ -21,14 +23,26 @@
 namespace rocprofsys::sampling
 {
 
-// sampling_service<Policies> — the primary public surface.
+// sampling_service<Policies, ProductionHooks, TestHooks> — the primary public surface.
 // No virtual functions; all polymorphism via template policy parameters (D7).
 // The 6 free functions in the old sampling.hpp are replaced by methods here (D4).
 // Callers use the services::sampling() Meyers singleton accessor (DEC-10).
-template <class Policies>
+//
+// ProductionHooks: injection slot for production-only side effects (TLS wiring,
+// timer arming, perf-event configuration, trace_cache emission, PMC postfork).
+// Defaults to noop_production_hooks so sampling unit tests do not need
+// `library/` includes.
+//
+// TestHooks: injection slot for test-only state overrides (causal mode,
+// duration disabled, child-process mode). Defaults to noop_test_hooks
+// (constexpr-false overrides — the consulting branches fold away in
+// production builds).
+template <class Policies, class ProductionHooks = noop_production_hooks,
+          class TestHooks = noop_test_hooks>
 class sampling_service
 {
 public:
+    using policies          = Policies;
     using unwinder          = typename Policies::unwinder;
     using offload           = typename Policies::offload;
     using trace_sink        = typename Policies::trace_sink;
@@ -39,6 +53,12 @@ public:
     using report_writer     = typename Policies::report_writer;
     using perfetto_sink     = typename Policies::perfetto_sink;
     using fatal_error       = typename Policies::fatal_error;
+    using production_hooks  = ProductionHooks;
+    using test_hooks        = TestHooks;
+
+    using thread_state_t        = thread_sampler_state<Policies>;
+    using pause_registry_t      = pause_interval_registry<clock>;
+    using duration_controller_t = sampling_duration_controller<clock>;
 
     sampling_service();
     ~sampling_service();
@@ -65,40 +85,31 @@ public:
 
     std::set<int> get_signal_types(int64_t tid);
 
-    // ----- introspection (test/diagnostics) -----
+    // ----- introspection -----
     [[nodiscard]] size_t dropped_samples() const noexcept;
     [[nodiscard]] bool   is_paused() const noexcept;
     [[nodiscard]] bool   is_blocked() const noexcept;
 
-    // ----- test injection seams (policy accessors) -----
-    unwinder&          get_unwinder() noexcept { return unwinder_; }
-    offload&           get_offload() noexcept { return offload_; }
-    trace_sink&        get_trace_sink() noexcept { return trace_sink_; }
-    signal_dispatcher& signal_dispatcher_ref() noexcept { return signal_dispatcher_; }
-    report_writer&     report_writer_ref() noexcept { return report_writer_; }
-    perfetto_sink&     get_perfetto_sink() noexcept { return perfetto_sink_; }
-    clock&             get_clock() noexcept { return clock_; }
-    fatal_error&       get_fatal_error() noexcept { return fatal_; }
+    // ----- policy + state accessors (used by production hooks and tests) -----
+    unwinder&              get_unwinder() noexcept { return unwinder_; }
+    offload&               get_offload() noexcept { return offload_; }
+    trace_sink&            get_trace_sink() noexcept { return trace_sink_; }
+    signal_dispatcher&     signal_dispatcher_ref() noexcept { return signal_dispatcher_; }
+    report_writer&         report_writer_ref() noexcept { return report_writer_; }
+    perfetto_sink&         get_perfetto_sink() noexcept { return perfetto_sink_; }
+    clock&                 get_clock() noexcept { return clock_; }
+    fatal_error&           get_fatal_error() noexcept { return fatal_; }
+    pause_registry_t&      pause_registry() noexcept { return pause_registry_; }
+    duration_controller_t& duration_controller() noexcept { return duration_controller_; }
+    production_hooks&      production_hooks_ref() noexcept { return production_hooks_; }
+    test_hooks&            test_hooks_ref() noexcept { return test_hooks_; }
 
     // ----- production state setters -----
     // Called by postfork_child() to put the service into child-process mode, where
     // shutdown() skips per-tid processing (AC-20).
-    void enter_child_process_mode() noexcept { child_process_test_ = true; }
+    void enter_child_process_mode() noexcept { child_process_mode_ = true; }
 
-    // ----- test seams for state injection -----
-    void set_duration_disabled_for_test(bool v) noexcept { duration_disabled_ = v; }
-    void set_causal_mode_for_test(bool v) noexcept { causal_mode_test_ = v; }
-    void set_child_process_for_test(bool v) noexcept { child_process_test_ = v; }
-
-    // Inject a backtrace_record into the ring buffer for tid (test-only seam, I-7 fix).
-    // Creates the per-thread state entry if it does not exist yet.
-    void inject_record_for_test(int64_t tid, backtrace_record const& rec)
-    {
-        registry_.emplace(tid);
-        if(auto* state = registry_.at(tid)) state->ring_buffer().try_push(rec);
-    }
-
-    // Access per-thread state registry (test introspection).
+    // Access per-thread state registry.
     [[nodiscard]] thread_sampler_state_registry<Policies>& registry() noexcept
     {
         return registry_;
@@ -113,15 +124,16 @@ private:
     report_writer     report_writer_;
     perfetto_sink     perfetto_sink_;
     fatal_error       fatal_;
+    production_hooks  production_hooks_;
+    test_hooks        test_hooks_;
 
-    pause_interval_registry<clock>          pause_registry_;
+    pause_registry_t                        pause_registry_;
     thread_sampler_state_registry<Policies> registry_;
-    sampling_duration_controller<clock>     duration_controller_;
+    duration_controller_t                   duration_controller_;
 
     std::atomic<bool> blocked_{ false };
     bool              duration_disabled_  = false;
-    bool              causal_mode_test_   = false;
-    bool              child_process_test_ = false;
+    bool              child_process_mode_ = false;
 
     // Per-thread signal set registry (tid → signal set).
     // In production populated lazily from rocprofsys::get_sampling_signals(tid).
@@ -131,27 +143,16 @@ private:
     // Apply pthread_sigmask via signal_dispatcher_; route errors through fatal_.
     // verb is "Block" / "Unblock" — used in the LOG_DEBUG line.
     void apply_signal_mask(int how, std::set<int> sigs, char const* verb);
-
-    // Production wiring hooks — no-op in the generic template.
-    // Explicit full specializations for default_sampling_policies are provided in
-    // sampling/policies/sampling_service_production_hooks.hpp
-    // and do the TLS wiring, timer arming, thread-info guards, and PMC delegation.
-    bool setup_check_thread_guards(int64_t tid);
-    void setup_production_wiring(int64_t tid, thread_sampler_state<Policies>* state,
-                                 std::set<int> const& sigs);
-    void shutdown_production_wiring(int64_t tid);
-    // Variant 2 (Task #30): parse + resolve + emit ring records to trace_cache.
-    // Called from shutdown(tid) after offload_.write(). Generic template is a no-op.
-    // Production specialization: reads raw records from offload_, parses with
-    // sample_parser, resolves symbols, emits backtrace_region_sample to
-    // trace_cache::buffer_storage, then clears the tid from offload_.
-    void emit_resolved_to_trace_cache(int64_t tid);
-    void postfork_production_parent_reinit();
-    void postfork_production_child_cleanup();
 };
 
 #if defined(__linux__)
-using default_sampling_service = sampling_service<default_sampling_policies>;
+// Forward-declare the production hooks policy class so default_sampling_service
+// can be aliased here without dragging in main-library symbols. Defined in
+// sampling/policies/real_production_hooks.hpp (included from default_policies.hpp).
+class real_production_hooks;
+
+using default_sampling_service =
+    sampling_service<default_sampling_policies, real_production_hooks, noop_test_hooks>;
 #endif
 
 }  // namespace rocprofsys::sampling

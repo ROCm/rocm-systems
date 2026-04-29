@@ -18,7 +18,7 @@
 
 using namespace rocprofsys::sampling;
 using namespace rocprofsys::sampling::test;
-using test_service = sampling_service<test_sampling_policies>;
+// test_service alias lives in test_sampling_policies.hpp.
 
 // ─── Lifecycle: setup then shutdown completes without crash ────────────────────
 

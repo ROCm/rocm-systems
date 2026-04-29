@@ -1,11 +1,12 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-// Smoke tests for sampling_service<default_sampling_policies> production hooks.
+// Smoke tests for sampling_service<default_sampling_policies, real_production_hooks>
+// production hooks.
 //
-// Tests that the explicit full specializations in sampling_service_production_hooks.hpp
-// are wired correctly.  The observable behavior tested here is:
-//   - shutdown_production_wiring() clears the three thread-local state pointers
+// Tests that the real_production_hooks policy is wired correctly via the
+// ProductionHooksPolicy template slot. The observable behavior tested here is:
+//   - shutdown_wiring() clears the three thread-local state pointers
 //     (tl_state<default_sampling_policies>::sampler/offload/logical_tid) so no
 //     stale pointers remain after a thread's sampling session ends
 //     (AC-11, NFR-TS-2).
@@ -19,12 +20,11 @@
 #include <gtest/gtest.h>
 
 #include "core/config.hpp"
-// sampling/default_policies.hpp provides ALL 10 policy types as complete definitions.
-// Required because sampling_service_production_hooks.hpp instantiates the full
-// sampling_service<default_sampling_policies> specialization which needs every policy
-// type.
+// sampling/default_policies.hpp provides ALL 10 policy types as complete definitions
+// plus the real_production_hooks policy class. Required because the production
+// sampling_service<default_sampling_policies, real_production_hooks> instantiation
+// needs every policy type.
 #include "sampling/default_policies.hpp"
-#include "sampling/policies/sampling_service_production_hooks.hpp"
 #include "sampling/sampling_service.hpp"
 
 #include <cstdint>
@@ -43,11 +43,10 @@ public:
 
 namespace
 {
-using prod_service = rocprofsys::sampling::sampling_service<
-    rocprofsys::sampling::default_sampling_policies>;
+using prod_service = rocprofsys::sampling::default_sampling_service;
 }  // namespace
 
-// ── shutdown_production_wiring: TLS pointers cleared ─────────────────────────
+// ── shutdown_wiring: TLS pointers cleared ───────────────────────────────────
 // This is the only production hook whose outcome is directly observable without
 // OS resources (perf events, Perfetto runtime, thread_info registry).
 
@@ -56,7 +55,7 @@ TEST(sampling_service_production_hooks, shutdown_clears_tls_sampler_state)
     using namespace rocprofsys::sampling;
     using tls = tl_state<default_sampling_policies>;
 
-    // Simulate TLS state that was set by setup_production_wiring.
+    // Simulate TLS state that was set by setup_wiring.
     using state_t = thread_sampler_state<default_sampling_policies>;
     state_t dummy_state{};
     tls::sampler     = &dummy_state;
@@ -64,9 +63,8 @@ TEST(sampling_service_production_hooks, shutdown_clears_tls_sampler_state)
     tls::logical_tid = 99;
 
     // Call shutdown() on a default-constructed service.
-    // The generic template no-ops; the specialization clears TLS.
-    // shutdown() calls: offload_.write(tid) → emit_resolved_to_trace_cache(tid)
-    //                   → shutdown_production_wiring(tid)
+    // shutdown() calls: offload_.write(tid) → production_hooks_.emit_resolved(tid)
+    //                   → production_hooks_.shutdown_wiring(tid)
     // Ring buffer is empty, so write() is a no-op; the hook still runs.
     prod_service svc;
     svc.shutdown(0);

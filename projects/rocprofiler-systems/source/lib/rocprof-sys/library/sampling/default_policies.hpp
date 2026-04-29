@@ -4,7 +4,7 @@
 #pragma once
 
 // Production-complete aggregator for the 10 sampling policy types plus the
-// per-thread TLS pointers and the production wiring hooks.
+// per-thread TLS pointers and the production hooks policy.
 //
 // Lives in library/ because the heavy policies depend on main-library symbols
 // (config.hpp, tracing.hpp, trace_cache, thread_info, perf.hpp).
@@ -36,9 +36,13 @@
 #include "sampling/policies/real_perfetto_sink.hpp"
 #include "sampling/policies/real_trace_cache_sink.hpp"
 
-// ── TLS state + service template + production wiring ────────────────────────
+// ── TLS state + service template + production hooks policy ──────────────────
 #include "sampling/policies/tl_state.hpp"
 #include "sampling/sampling_service.hpp"
+
+// real_production_hooks (T18a) replaces the explicit-specialization layer
+// that formerly lived in sampling_service_production_hooks.hpp.
+#include "sampling/policies/real_production_hooks.hpp"
 
 #include <csignal>
 #include <sys/types.h>
@@ -54,9 +58,3 @@ using default_tl      = tl_state<default_sampling_policies>;
 // Forward declaration — definition in services_accessor.cpp.
 extern "C" void
 rocprofsys_sampling_signal_handler(int, siginfo_t*, void*);
-
-// Explicit full specializations of the production wiring hooks for
-// sampling_service<default_sampling_policies>. Must be included after
-// sampling_service.hpp (which pulls in sampling_service_impl.hpp with the
-// generic no-op definitions) so the specializations are visible in this TU.
-#include "sampling/policies/sampling_service_production_hooks.hpp"

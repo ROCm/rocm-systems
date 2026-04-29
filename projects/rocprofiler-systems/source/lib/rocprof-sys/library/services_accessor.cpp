@@ -16,6 +16,7 @@
 #    include "sampling/default_policies.hpp"
 #endif
 
+#include "library/sampling_service_instantiation.hpp"
 #include "sampling/sampling_service.hpp"
 
 namespace rocprofsys::services
@@ -34,6 +35,120 @@ rocprofsys::sampling::default_sampling_service&
 causal_sampling()
 {
     return sampling();
+}
+
+// ── Thin caller-facing wrappers ──────────────────────────────────────────────
+// Defined here (the single TU with the full sampling_service template
+// instantiation) so caller TUs can stay free of main-lib hook deps.
+
+std::set<int>
+sampling_setup(int64_t tid)
+{
+    return sampling().setup(tid);
+}
+
+std::set<int>
+sampling_shutdown(int64_t tid)
+{
+    return sampling().shutdown(tid);
+}
+
+void
+sampling_block_samples()
+{
+    sampling().block_samples();
+}
+
+void
+sampling_unblock_samples()
+{
+    sampling().unblock_samples();
+}
+
+void
+sampling_block_signals(std::set<int> sigs)
+{
+    sampling().block_signals(std::move(sigs));
+}
+
+void
+sampling_unblock_signals(std::set<int> sigs)
+{
+    sampling().unblock_signals(std::move(sigs));
+}
+
+void
+sampling_pause()
+{
+    sampling().pause();
+}
+
+void
+sampling_resume()
+{
+    sampling().resume();
+}
+
+void
+sampling_postfork_parent_reinit()
+{
+    sampling().postfork_parent_reinit();
+}
+
+void
+sampling_postfork_child_cleanup()
+{
+    sampling().postfork_child_cleanup();
+}
+
+void
+sampling_enter_child_process_mode()
+{
+    sampling().enter_child_process_mode();
+}
+
+std::set<int>
+causal_sampling_setup(int64_t tid)
+{
+    return causal_sampling().setup(tid);
+}
+
+std::set<int>
+causal_sampling_shutdown(int64_t tid)
+{
+    return causal_sampling().shutdown(tid);
+}
+
+void
+causal_sampling_block_signals(std::set<int> sigs)
+{
+    causal_sampling().block_signals(std::move(sigs));
+}
+
+void
+causal_sampling_unblock_signals(std::set<int> sigs)
+{
+    causal_sampling().unblock_signals(std::move(sigs));
+}
+
+void
+causal_sampling_pause()
+{
+    causal_sampling().pause();
+}
+
+void
+causal_sampling_resume()
+{
+    causal_sampling().resume();
+}
+
+void
+sampling_shutdown_in_child_mode(int64_t tid)
+{
+    auto& svc = sampling();
+    svc.enter_child_process_mode();
+    svc.shutdown(tid);
 }
 
 #endif

@@ -11,7 +11,7 @@
 
 using namespace rocprofsys::sampling;
 using namespace rocprofsys::sampling::test;
-using test_service = sampling_service<test_sampling_policies>;
+// test_service alias (with recording_test_hooks) lives in test_sampling_policies.hpp.
 
 // ─── AC-1: setup() returns non-empty signal set for a normal thread ───────────
 
@@ -62,7 +62,7 @@ TEST(sampling_service_setup, setup_returns_empty_when_duration_disabled)
 {
     test_service svc;
 
-    svc.set_duration_disabled_for_test(true);
+    svc.test_hooks_ref().set_duration_disabled(true);
 
     auto sigs = svc.setup(0);
 
@@ -76,7 +76,7 @@ TEST(sampling_service_setup, setup_throws_when_causal_profiling_enabled)
 {
     test_service svc;
 
-    svc.set_causal_mode_for_test(true);
+    svc.test_hooks_ref().set_causal_mode(true);
 
     ASSERT_THROW(svc.setup(0), std::runtime_error)
         << "setup() must throw std::runtime_error when causal profiling is enabled";
