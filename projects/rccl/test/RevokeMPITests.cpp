@@ -202,10 +202,10 @@ TEST_F(RevokeMPITest, Revoke_ThenDestroy_CleanLifecycle)
 }
 
 /**
- * Full collective recovery cycle: run an AllReduce on the parent, revoke,
- * shrink (excluding the last rank), then run another AllReduce on the
- * shrunk child. Mirrors the Meta fault-tolerance recovery flow:
- * collective -> revoke -> shrink -> collective.
+ * In-flight collective recovery cycle: enqueue a large AllReduce on the
+ * parent, revoke without waiting for completion, drain the stream, then
+ * shrink and run another AllReduce on the child. Mirrors the Meta
+ * fault-tolerance recovery flow: collective -> revoke -> shrink -> collective.
  */
 TEST_F(RevokeMPITest, Collective_Revoke_Shrink_Collective)
 {
@@ -235,9 +235,10 @@ TEST_F(RevokeMPITest, Collective_Revoke_Shrink_Collective)
 
     ASSERT_MPI_EQ(ncclSuccess,
                   ncclAllReduce(send_buf, recv_buf, kCount, ncclFloat, ncclSum, parent, stream));
-    HIP_TEST_CHECK_GTEST_FAIL(hipStreamSynchronize(stream));
 
     ASSERT_MPI_EQ(ncclSuccess, ncclCommRevoke(parent, NCCL_REVOKE_DEFAULT));
+
+    HIP_TEST_CHECK_GTEST_FAIL(hipStreamSynchronize(stream));
 
     MPI_Barrier(MPI_COMM_WORLD);
 
