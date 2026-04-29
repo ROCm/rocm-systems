@@ -94,6 +94,8 @@ execute_process ( COMMAND sh -xc "if [ ! -e run_priv_v.sh ] ; then ln -s ${TEST_
 install(FILES ${TEST_DIR}/run_install.sh RENAME run_tests.sh
         PERMISSIONS OWNER_READ OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE
         DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME} COMPONENT tests)
+install(PROGRAMS ${TEST_DIR}/run_aqlprofile.py
+        DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME} COMPONENT tests)
 
 #add_subdirectory(parser)
 
