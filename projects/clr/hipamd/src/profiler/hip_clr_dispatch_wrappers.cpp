@@ -1535,7 +1535,13 @@ static void CaptureGraphExecNodes(hipGraphExec_t exec, hipGraph_t graph) {
         knode->GetParams(&kp);
         if (!kp.func) continue;
         hipFunction_t hfunc = nullptr;
-        if (g_next.hipGetFuncBySymbol_fn(&hfunc, kp.func) != hipSuccess || !hfunc) continue;
+        if (g_next.hipGetFuncBySymbol_fn(&hfunc, kp.func) != hipSuccess || !hfunc) {
+          // Stream-captured graphs store a hipFunction_t (not a host symbol pointer) in kp.func.
+          // hipGetFuncBySymbol fails with hipErrorInvalidSymbol for these — fall back to casting
+          // directly, mirroring GraphKernelNode::getFunc().
+          hfunc = static_cast<hipFunction_t>(const_cast<void*>(kp.func));
+          if (!hip::asKernel(hfunc)) continue;
+        }
         HipGraphNodeInfoExt info;
         info.gpu.op      = HIP_OP_DISPATCH_EXT;
         info.gpu.grid_x  = kp.gridDim.x;

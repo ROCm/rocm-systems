@@ -1823,14 +1823,11 @@ void HipCaptureGraphNodeArgsExt(HipGraphNodeInfoExt* info, hipFunction_t func, v
       --len;
     }
     std::string mangled(raw.data(), len);
-    // ar->kernel_name from the HSA callback is the demangled name, so store
-    // the demangled name here so fill_dispatch_info can match with a plain strcmp.
-    // demangleName is COMGR-based but safe here (not in the GPU callback).
-    std::string demangled;
-    if (!hip::helpers::demangleName(mangled, demangled))
-      demangled = mangled;  // fallback: store mangled if demangling fails
+    // ar->kernel_name from the HSA callback is the mangled name — use the same
+    // key (mangled) so fill_dispatch_info's strcmp(ni.gpu.kernel_name, ar->kernel_name)
+    // finds a match.  Demangling happens lazily at write time (PreDemangleKernelNames).
     std::lock_guard<std::mutex> lk(g_kernel_names_mtx);
-    auto [it, ok] = g_kernel_names.emplace(demangled, demangled);
+    auto [it, ok] = g_kernel_names.emplace(mangled, mangled);
     (void)ok;
     info->gpu.kernel_name = it->first.c_str();
   }
@@ -1888,7 +1885,8 @@ HipApiRecordExt* HipGetActiveRecordExt(uint32_t api_id) {
   rec->api_name    = (api_id < kHipApiNamesCountExt) ? kHipApiNamesExt[api_id] : "unknown";
   rec->_flags_u64  = 0;
 #if defined(_WIN32)
-  rec->thread_id   = std::hash<std::thread::id>{}(std::this_thread::get_id());
+  static thread_local uint64_t cached_tid = static_cast<uint64_t>(GetCurrentThreadId());
+  rec->thread_id   = cached_tid;
 #else
   static thread_local uint64_t cached_tid = static_cast<uint64_t>(syscall(SYS_gettid));
   rec->thread_id   = cached_tid;
