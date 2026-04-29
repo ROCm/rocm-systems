@@ -14,6 +14,7 @@ set(NET_IB_CAST_SOURCES
     src/transport/net_ib_cast/p2p_resiliency.cc
     src/transport/net_ib_cast/p2p_resiliency_recovery.cc
     src/transport/net_ib_cast/reg.cc
+    src/transport/net_ib_cast/scheduler.cc
     # gin.cc and gin_host_gdaki.cc require gin/gin_host.h (CUDA/NCCL-only) — exclude from ROCm build.
     # src/transport/net_ib_cast/gin.cc
     # src/transport/net_ib_cast/gdaki/gin_host_gdaki.cc

@@ -8,6 +8,22 @@
 #include "common_cast.h"
 #include "p2p_resiliency_recovery_cast.h"
 
+extern int64_t ncclParamIbCastQpsPerConn();
+RCCL_PARAM(IbCastQpsPerP2p, "IB_QPS_PER_P2P", 0);
+extern int64_t ncclParamIbCastGdrFlushDisable();
+// AMD AINIC
+RCCL_PARAM(IbCastCtsOffloadEnabled, "CTS_OFFLOAD_ENABLED", -1);
+RCCL_PARAM(IbCastP2pDisableCts, "IB_P2P_DISABLE_CTS", 0);
+
+bool IbCastAinicRoce = 0;
+bool IbCastOffloadEnabled = 0;
+bool IbCastUseInline = 0;
+int IbCastGdrFlushDisable = 0;
+extern int64_t rcclParamAinicRoce();
+extern int64_t ncclParamIbCastUseInline();
+static int IbCastGetNumaNodeFromPath(const char* pciPath);
+static ncclResult_t IbCastGetPciRootFromPath(const char* pciPath, char* root, size_t rootLen);
+
 // RCCL's pciPathToInt64 (defined in graph/topo.cc) takes 4 args; NCCL 2.30 callers use 2.
 // Declare the 4-arg version and provide a 2-arg shim.
 ncclResult_t pciPathToInt64(char* path, int offset, int minOffset, int64_t* id);
@@ -102,7 +118,6 @@ static int ibvSpeeds[] = {
   2500,  /* SDR */
   5000,  /* DDR */
   10000, /* QDR */
-  10000, /* QDR */
   14000, /* FDR */
   25000, /* EDR */
   50000, /* HDR */
@@ -141,9 +156,8 @@ static bool ncclMlx5dvDmaBufCapable(ibv_context *context){
   NCCLCHECKGOTO(wrap_ibv_alloc_pd(&pd, context), res, failure);
   // Test kernel DMA-BUF support with a dummy call (fd=-1)
   (void)wrap_direct_ibv_reg_dmabuf_mr(pd, 0ULL /*offset*/, 0ULL /*len*/, 0ULL /*iova*/, -1 /*fd*/, 0 /*flags*/);
-  // ibv_reg_dmabuf_mr() will fail with EOPNOTSUPP/EPROTONOSUPPORT if not supported (EBADF otherwise)
+  dev_fail |= (errno == EOPNOTSUPP) || (errno == EPROTONOSUPPORT);
   (void)wrap_direct_mlx5dv_reg_dmabuf_mr(pd, 0ULL /*offset*/, 0ULL /*len*/, 0ULL /*iova*/, -1 /*fd*/, 0 /*flags*/, 0 /* mlx5 flags*/);
-  // mlx5dv_reg_dmabuf_mr() will fail with EOPNOTSUPP/EPROTONOSUPPORT if not supported (EBADF otherwise)
   dev_fail |= (errno == EOPNOTSUPP) || (errno == EPROTONOSUPPORT);
   NCCLCHECKGOTO(wrap_ibv_dealloc_pd(pd), res, failure);
   // stop the search and goto failure
@@ -180,7 +194,7 @@ fail:
 
 ncclResult_t IbCastMakeVDeviceInternal(int* d, ncclNetVDeviceProps_t* props) {
   if (ncclParamIbCastMergeNics() == 0 && props->ndevs > 1) {
-    INFO(NCCL_NET, "NET/IB : Skipping makeVDevice, NCCL_IB_MERGE_NICS=0");
+    WARN("NET/IB : Skipping makeVDevice, Please set NCCL_IB_MERGE_NICS=1");
     return ncclInvalidUsage;
   }
 
@@ -228,6 +242,40 @@ ncclResult_t IbCastMakeVDeviceInternal(int* d, ncclNetVDeviceProps_t* props) {
     }
   }
 
+  int numa0 = IbCastGetNumaNodeFromPath(dev0->pciPath);
+  //format -> 0000:00 
+  char root0[8]; 
+  IbCastGetPciRootFromPath(dev0->pciPath, root0, sizeof(root0));
+  for (int i = 1; i < props->ndevs; i++) {
+    ncclIbDev* dev = IbCastDevs + props->devs[i];
+    int numaI = IbCastGetNumaNodeFromPath(dev->pciPath);
+    if (numa0 >= 0 && numaI >= 0 && numaI != numa0) {
+      WARN("NET/IB : Merging NICs across NUMA nodes (%s numa=%d, %s numa=%d). "
+           "This may significantly reduce performance.",
+           dev0->devName, numa0, dev->devName, numaI);
+      break;
+    }
+
+    char root_i[8];
+    IbCastGetPciRootFromPath(dev->pciPath, root_i, sizeof(root_i));
+    if (strcmp(root_i, root0) != 0) {
+      WARN("NET/IB : Merging NICs across PCIe Root Complexes "
+           "(%s root=%s, %s root=%s). "
+           "GPUDirect RDMA and bandwidth aggregation may be impacted.",
+           dev0->devName, root0, dev->devName, root_i);
+      break;
+    }
+  }
+
+  // CTS Offload and CTS Inline are not yet compatible with NIC Fusion
+  // (NCCL_IB_MERGE_NICS). Disable them when a multi-NIC vNIC is created.
+  if (props->ndevs > 1) {
+    if (IbCastOffloadEnabled) {
+      INFO(NCCL_INIT|NCCL_NET, "NET/IB : NIC Fusion (ndevs=%d) - disabling CTS Offload (not yet supported with merge)", props->ndevs);
+      IbCastOffloadEnabled = false;
+    }
+  }
+
   *d = IbCastNMergedDevs++;
   INFO(NCCL_NET, "NET/IB : Made virtual device [%d] name=%s speed=%d ndevs=%d", *d, mDev->devName, mDev->speed, mDev->vProps.ndevs);
   return ncclSuccess;
@@ -246,7 +294,7 @@ ncclResult_t IbCastSetNetAttr(void *ctx, ncclNetAttr_t *netAttr) {
   return ncclSuccess;
 }
 
-const char* ibProviderName[] = {
+const char* ibCastProviderName[] = {
   "None",
   "Mlx5",
 };
@@ -265,6 +313,15 @@ ncclResult_t IbCastInitDevices(ncclDebugLogger_t logFunction, ncclProfilerCallba
   static int shownIbHcaEnv = 0;
   if(wrap_ibv_symbols() != ncclSuccess) { return ncclInternalError; }
   if(wrap_mlx5dv_symbols() != ncclSuccess) { INFO(NCCL_NET, "NET/IB : Failed to open mlx5dv symbols. Advance features like CX-8 Direct-NIC will be disabled."); }
+  if(wrap_ionicdv_symbols() != ncclSuccess) {
+    INFO(NCCL_NET, "NET/IB : Failed to open ionicdv symbols. Advance features like AINIC UD load balancing will be disabled.");
+    return ncclInternalError;
+  }
+
+  // Detect IB cards
+  int nIbDevs = 0;
+  struct ibv_device** devices = NULL;
+  IbCastAinicRoce = rcclUseAinic();
 
   if (IbCastNDevs == -1) {
     std::lock_guard<std::mutex> lock(IbCastMutex);
@@ -279,10 +336,6 @@ ncclResult_t IbCastInitDevices(ncclDebugLogger_t logFunction, ncclProfilerCallba
         ret = ncclInternalError;
         goto fail;
       }
-
-      // Detect IB cards
-      int nIbDevs;
-      struct ibv_device** devices;
 
       // Check if user defined which IB device:port to use
       const char* userIbEnv = ncclGetEnv("NCCL_IB_HCA");
@@ -394,7 +447,7 @@ ncclResult_t IbCastInitDevices(ncclDebugLogger_t logFunction, ncclProfilerCallba
 
 
               INFO(NCCL_NET, "NET/IB: [%d] %s:%s:%d/%s provider=%s speed=%d context=%p pciPath=%s ar=%d oooRqSize=%d", d, devices[d]->name, devices[d]->dev_name,
-                   IbCastDevs[IbCastNDevs].portNum, NCCL_IB_LLSTR(portAttr.link_layer), ibProviderName[IbCastDevs[IbCastNDevs].ibProvider], IbCastDevs[IbCastNDevs].speed, context,
+                   IbCastDevs[IbCastNDevs].portNum, NCCL_IB_LLSTR(portAttr.link_layer), ibCastProviderName[IbCastDevs[IbCastNDevs].ibProvider], IbCastDevs[IbCastNDevs].speed, context,
                    IbCastDevs[IbCastNDevs].pciPath, IbCastDevs[IbCastNDevs].ar, IbCastDevs[IbCastNDevs].oooRqSize);
 
               IbCastAsyncThread = std::thread(IbCastAsyncThreadMain, IbCastDevs + IbCastNDevs);
@@ -442,10 +495,37 @@ ncclResult_t IbCastInitDevices(ncclDebugLogger_t logFunction, ncclProfilerCallba
     }
     char addrline[SOCKET_NAME_MAXLEN+1];
     INFO(NCCL_INIT | NCCL_NET, "NET/IB : Using%s %s; OOB %s:%s", line, IbCastRelaxedOrderingEnabled ? "[RO]" : "", IbCastIfName, ncclSocketToString(&IbCastIfAddr, addrline));
+
+
+    IbCastUseInline = ncclParamIbCastUseInline();
+    IbCastGdrFlushDisable = ncclParamIbCastGdrFlushDisable(); 
+
+    if (IbCastAinicRoce) {
+      // for AINIC, these params are defaulted to enabled unless user forces it to disable(0).
+      IbCastOffloadEnabled = ((rcclParamIbCastCtsOffloadEnabled() == 0) ? false : true);
+
+      // CTS Offload and CTS Inline are mutually dependent — both must be
+      // enabled for either to function. Disable both if either is missing.
+      if (IbCastOffloadEnabled && rcclParamIbCastQpSchedEnable()) {
+        INFO(NCCL_INIT|NCCL_NET, "NET/IB : CAST enabled - disabling CTS Inline Data and CTS Offload (not yet supported with CAST)");
+        IbCastOffloadEnabled = false;
+      }
+      // for AINIC IbUseInline is enabled by default always
+      IbCastUseInline = true;
+      // for AINIC GDR flush is disabled by default
+      IbCastGdrFlushDisable = 1;
+  
+      INFO(NCCL_INIT|NCCL_NET, "NET/IB : AINIC RoCEv2 optimizations enabled: CTS Inline Data: %s; CTS Offload: %s; "
+           "IB Use Inline: enabled; GDR Flush: disabled", IbCastUseInline ? "Enabled": "Disabled",
+           IbCastOffloadEnabled ? "Enabled": "Disabled");
+    }
   }
 exit:
+  if (ret == ncclSuccess)
+    ret = IbCastQpSchedInitParms(&castGlobalQpSchedParms);
   return ret;
 fail:
+  if(devices && (ncclSuccess != wrap_ibv_free_device_list(devices))){WARN("NET/IB : Unable to free device list");}
   goto exit;
 }
 
@@ -487,7 +567,11 @@ ncclResult_t IbCastGetPhysProperties(int dev, ncclNetProperties_t* props) {
   props->latency = 0; // Not set
   props->port = ibDev->portNum + ibDev->realPort;
   props->maxComms = ibDev->maxQp;
-  props->maxRecvs = NCCL_NET_IB_MAX_RECVS;
+  if (IbCastOffloadEnabled && !rcclParamIbCastP2pDisableCts()) {
+    props->maxRecvs = 1; 
+  } else {
+    props->maxRecvs = NCCL_NET_IB_MAX_RECVS;
+  }
   props->netDeviceType    = NCCL_NET_DEVICE_HOST;
   props->netDeviceVersion = NCCL_NET_DEVICE_INVALID_VERSION;
   props->maxP2pBytes = NCCL_MAX_NET_SIZE_BYTES;
@@ -514,4 +598,108 @@ ncclResult_t IbCastFinalize(void* ctx) {
   free(ctx);
   NCCLCHECK(IbCastPortRecoveryThreadStop());
   return IbCastFinalizeDevices();
+}
+
+
+/**
+ * Extract the PCIe root complex (domain:bus) from a Linux sysfs PCI device path.
+ *
+ * This function scans a sysfs PCI device path (e.g.
+ *   "/sys/devices/pci0000:80/0000:80:03.1/0000:81:00.0")
+ * and extracts the first occurrence of the PCI root host bridge identifier
+ * of the form "pciDDDD:BB", where:
+ *   - DDDD is the PCI domain (hex)
+ *   - BB   is the PCI bus number (hex)
+ *
+ * The extracted root is returned as a string formatted as "DDDD:BB".
+ *
+ * This helper is typically used to determine whether multiple NICs or devices
+ * reside under the same PCIe root complex, which is important for validating
+ * NIC merging and avoiding cross-root PCIe traffic.
+ *
+ * @param pciPath  NUL-terminated sysfs PCI device path
+ * @param root     Output buffer receiving the "DDDD:BB" PCI root identifier
+ * @param rootLen  Size of the output buffer; must be >= 8
+ *
+ * @return ncclSuccess on success
+ * @return ncclInvalidUsage if inputs are invalid or no PCI root is found
+ *
+ * Notes:
+ * - The function scans for the first valid "pciDDDD:BB" pattern in the path.
+ * - The loop is bounded by the length of the string and cannot hang.
+ * - This function does not allocate memory.
+ */
+static ncclResult_t IbCastGetPciRootFromPath(
+    const char* pciPath,
+    char* root,
+    size_t rootLen
+) {
+    if (pciPath == NULL || root == NULL || rootLen < 8){
+        return ncclInvalidUsage;
+    }
+    const char* p = strstr(pciPath, "pci");
+    while (p != NULL) {
+        int domain, bus;
+        int charsRead = 0;
+        if (sscanf(p, "pci%4x:%2x%n", &domain, &bus, &charsRead) == 2 &&
+            charsRead == 10) {
+            snprintf(root, rootLen, "%04x:%02x", domain, bus);
+            return ncclSuccess;
+        }
+        p = strstr(p + 1, "pci");
+    }
+    return ncclInvalidUsage;
+}
+/**
+ * Determine the NUMA node associated with a PCI device from its sysfs path.
+ *
+ * This function reads the "numa_node" attribute from a PCI device's sysfs
+ * directory (e.g. "<pciPath>/numa_node") and returns the NUMA node ID.
+ *
+ * Linux sysfs convention:
+ *   - A non-negative integer indicates the NUMA node the device is local to
+ *   - "-1" indicates that the device has no specific NUMA affinity
+ *
+ * This helper is used to validate NUMA locality when merging NICs, ensuring
+ * that merged devices do not silently span NUMA nodes, which could negatively
+ * impact performance.
+ *
+ * @param pciPath  NUL-terminated sysfs PCI device path
+ *
+ * @return NUMA node ID (>= 0) on success
+ * @return -1 if the NUMA node cannot be determined, the file is missing,
+ *         unreadable, or contains invalid data
+ *
+ * Notes:
+ * - Uses open/read instead of stdio to avoid buffering and locale issues.
+ * - Uses strtol for robust numeric parsing and overflow detection.
+ * - A return value of -1 may indicate either "no NUMA affinity" or an error;
+ *   callers should treat it as "unknown or unspecified".
+*/
+static int IbCastGetNumaNodeFromPath(const char* pciPath) {
+    if (pciPath == NULL) {
+        return -1;
+    }
+    char numaPath[PATH_MAX];
+    if (snprintf(numaPath, sizeof(numaPath), "%s/numa_node", pciPath) >= PATH_MAX) {
+        return -1; 
+    }
+
+    int fd = open(numaPath, O_RDONLY);
+    if (fd < 0) return -1;
+
+    char buf[32];
+    ssize_t n = read(fd, buf, sizeof(buf) - 1);
+    close(fd);
+
+    if (n <= 0) return -1;
+    buf[n] = '\0';
+    
+    char* endptr;
+    errno = 0;
+    long numa = strtol(buf, &endptr, 10);
+    if (endptr == buf || errno == ERANGE) {
+        return -1;
+    }
+    return (int)numa;
 }
