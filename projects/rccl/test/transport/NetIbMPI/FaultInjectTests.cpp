@@ -549,4 +549,157 @@ TEST_F(NetIbMPITest, FaultInjCastSingleQpErrorIsFatal) {
     MPI_Barrier(MPI_COMM_WORLD);
 }
 
+// =============================================================================
+// Test: FaultInjCastQpErrorClearRecovers
+//
+// CAST path. Arm error injection on all QPs, trigger one failed send, then
+// call ncclIbCastFaultClear and open a new connection. Verifies that after
+// clearing fault state a fresh connection sends and receives N messages
+// without errors and with full data integrity.
+//
+// A new connection is used for the recovery phase because a faulted
+// connection increments fatalErrorCount and future IbCastIsend calls check
+// that counter before proceeding (NCCL_IB_RETURN_ASYNC_EVENTS=1). The test
+// therefore validates that fault injection does not leave persistent state
+// that contaminates subsequent connections.
+//
+// Verifies:
+//   - After fault injection and FaultClear, a new CAST connection transfers
+//     data correctly
+//   - fatalErrorCount on the new connection remains 0
+// =============================================================================
+TEST_F(NetIbMPITest, FaultInjCastQpErrorClearRecovers) {
+    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit))
+        << "Test requires exactly " << kExactTwoProcesses << " processes";
+
+    CAST_ENV_CHECK_OR_SKIP();
+
+    const int rank = MPIEnvironment::world_rank;
+
+    net_ = &netIbCast;
+    AssertInitAndGetDevices(nullptr);
+
+    // ── Phase 1: inject fault on first connection ─────────────────────────
+    void* listenComm1 = nullptr;
+    void* sendComm1   = nullptr;
+    void* recvComm1   = nullptr;
+    SetupCastConnection(/*dev=*/0, &listenComm1, &sendComm1, &recvComm1);
+
+    constexpr size_t kMsgSize = 1024;
+    std::vector<char> sendBuf(kMsgSize), recvBuf(kMsgSize);
+    for (size_t i = 0; i < kMsgSize; i++) sendBuf[i] = static_cast<char>(i & 0xFF);
+    memset(recvBuf.data(), 0, kMsgSize);
+
+    void* comm1   = (rank == 0) ? recvComm1 : sendComm1;
+    void* buf1    = (rank == 0) ? static_cast<void*>(recvBuf.data())
+                                : static_cast<void*>(sendBuf.data());
+    void* mhandle1 = nullptr;
+    ASSERT_EQ(RegisterMemory(comm1, buf1, kMsgSize, NCCL_PTR_HOST, &mhandle1), ncclSuccess);
+
+    const int actualNqps = GetActualNqps(sendComm1, recvComm1, buf1, kMsgSize, /*tag=*/500, mhandle1);
+    ASSERT_GT(actualNqps, 0);
+
+    if (rank == 1) {
+        for (int q = 0; q < actualNqps; ++q)
+            ncclIbCastFaultSetQpError(sendComm1, q, /*inject=*/true);
+    }
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    // Trigger the fault (rank 0 posts recv, rank 1 posts send that will fail).
+    if (rank == 0) {
+        void*  bufs[1]    = {buf1};
+        size_t sizes[1]   = {kMsgSize};
+        int    tags[1]    = {501};
+        void*  handles[1] = {mhandle1};
+        void* recvReq = nullptr;
+        ASSERT_EQ(PostRecv(recvComm1, 1, bufs, sizes, tags, handles, &recvReq), ncclSuccess);
+        for (int poll = 0; poll < 100; poll++) {
+            int done = 0, sz = 0;
+            if (TestRequest(recvReq, &done, &sz) != ncclSuccess) break;
+            if (done) break;
+            usleep(kPollIntervalUs);
+        }
+    } else {
+        void* sendReq = nullptr;
+        ncclResult_t sendRet = ncclSuccess;
+        for (int attempt = 0; attempt < kMaxRetryAttempts; attempt++) {
+            sendRet = PostSend(sendComm1, buf1, kMsgSize, 501, mhandle1, &sendReq);
+            if (sendRet != ncclSuccess || sendReq != nullptr) break;
+            usleep(kPollIntervalUs);
+        }
+        if (sendRet == ncclSuccess && sendReq != nullptr) {
+            for (int poll = 0; poll < 200; poll++) {
+                int done = 0, sz = 0;
+                int fc = 0;
+                TestRequest(sendReq, &done, &sz);
+                ncclIbCastFaultGetFatalCount(sendComm1, &fc);
+                if (done || fc > 0) break;
+                usleep(kPollIntervalUs);
+            }
+        }
+        ncclIbCastFaultClear(sendComm1);
+    }
+
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    ASSERT_EQ(DeregisterMemory(comm1, mhandle1), ncclSuccess);
+    if (rank == 0) {
+        ASSERT_EQ(CloseRecvComm(recvComm1), ncclSuccess);
+        ASSERT_EQ(CloseListenComm(listenComm1), ncclSuccess);
+    } else {
+        ASSERT_EQ(CloseSendComm(sendComm1), ncclSuccess);
+    }
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    // ── Phase 2: open fresh connection, verify it works cleanly ──────────
+    constexpr int    kNMsgs   = 20;
+    constexpr size_t kMsgSz2  = 4096;
+    const size_t     kBufSz2  = static_cast<size_t>(kNMsgs) * kMsgSz2;
+    constexpr int    kBaseTag = 510;
+
+    std::vector<char> sendBuf2(kBufSz2), recvBuf2(kBufSz2);
+    for (size_t i = 0; i < kBufSz2; i++) sendBuf2[i] = static_cast<char>((i * 5 + 11) & 0xFF);
+    memset(recvBuf2.data(), 0, kBufSz2);
+
+    void* listenComm2 = nullptr;
+    void* sendComm2   = nullptr;
+    void* recvComm2   = nullptr;
+    SetupCastConnection(/*dev=*/0, &listenComm2, &sendComm2, &recvComm2);
+
+    void* comm2   = (rank == 0) ? recvComm2 : sendComm2;
+    char* regBuf2 = (rank == 0) ? recvBuf2.data() : sendBuf2.data();
+    void* mhandle2 = nullptr;
+    ASSERT_EQ(RegisterMemory(comm2, regBuf2, kBufSz2, NCCL_PTR_HOST, &mhandle2), ncclSuccess);
+
+    CastDoBatchSendRecv(rank, sendComm2, recvComm2,
+                        sendBuf2.data(), recvBuf2.data(),
+                        kMsgSz2, kNMsgs, kBaseTag, mhandle2);
+
+    // Verify fatalCount on the new connection is still 0 (forwarded rank 1 → 0).
+    int newFatalCount = 0;
+    if (rank == 1) {
+        ncclIbCastFaultGetFatalCount(sendComm2, &newFatalCount);
+    }
+    MPI_Bcast(&newFatalCount, 1, MPI_INT, /*root=*/1, MPI_COMM_WORLD);
+
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    if (rank == 0) {
+        EXPECT_EQ(memcmp(recvBuf2.data(), sendBuf2.data(), kBufSz2), 0)
+            << "data corruption in post-fault recovery connection";
+        EXPECT_EQ(newFatalCount, 0)
+            << "new connection has non-zero fatalErrorCount after FaultClear on previous connection";
+    }
+
+    ASSERT_EQ(DeregisterMemory(comm2, mhandle2), ncclSuccess);
+    if (rank == 0) {
+        ASSERT_EQ(CloseRecvComm(recvComm2), ncclSuccess);
+        ASSERT_EQ(CloseListenComm(listenComm2), ncclSuccess);
+    } else {
+        ASSERT_EQ(CloseSendComm(sendComm2), ncclSuccess);
+    }
+    MPI_Barrier(MPI_COMM_WORLD);
+}
+
 #endif /* MPI_TESTS_ENABLED && ENABLE_FAULT_INJECTION */
