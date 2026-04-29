@@ -95,7 +95,7 @@ public:
                                { "resp_tx_pkt_seq_err", &metrics::resp_tx_pkt_seq_err },
                                { "req_rx_pkt_seq_err", &metrics::req_rx_pkt_seq_err },
                                { "req_rx_impl_nak_seq_err",
-                                   &metrics::req_rx_impl_nak_seq_err } };
+                                 &metrics::req_rx_impl_nak_seq_err } };
 
             for(const auto& stat : stats)
             {
