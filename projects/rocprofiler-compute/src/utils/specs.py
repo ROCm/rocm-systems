@@ -40,11 +40,7 @@ T = TypeVar("T")
 
 
 def canonical_gpu_arch(gpu_arch: Optional[str]) -> Optional[str]:
-    """Map LLVM GPU targets that share one SoC and analysis config tree."""
-    if gpu_arch is None:
-        return None
-    if gpu_arch == "gfx1152":
-        return "gfx1151"
+    """Normalize GPU arch aliases when they intentionally share one config tree."""
     return gpu_arch
 
 
@@ -136,10 +132,10 @@ def generate_machine_specs(
                     "You need to reprofile to update data."
                 )
 
-            # Normalize arch aliases to canonical config targets
+            # Normalize any intentional arch aliases to canonical config targets.
             sysinfo_norm = dict(sysinfo)
             gpu_arch = sysinfo_norm.get("gpu_arch")
-            sysinfo_norm["gpu_arch"] = {"gfx1152": "gfx1151"}.get(gpu_arch, gpu_arch)
+            sysinfo_norm["gpu_arch"] = canonical_gpu_arch(gpu_arch)
             return MachineSpecs(**sysinfo_norm)
         except KeyError:
             console_error(
