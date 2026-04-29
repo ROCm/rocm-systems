@@ -305,41 +305,36 @@ void sdk_callbacks_impl_t::record_callback(rocprofiler_dispatch_counting_service
 }
 
 void sdk_callbacks_impl_t::tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
-                                                 tool_data_t& tool_data)
+                                                 tool_data_t&                          tool_data)
 {
-    if (record.phase == ROCPROFILER_CALLBACK_PHASE_LOAD &&
-        record.kind == ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT &&
-        record.operation == ROCPROFILER_CODE_OBJECT_DEVICE_KERNEL_SYMBOL_REGISTER)
+    auto* data = static_cast<kernel_symbol_data_t*>(record.payload);
+    // Lock before modifying target_kernel_ids
+    std::scoped_lock lock(tool_data.mut);
+    if (!tool_data.kernel_filter_include_regex.empty())
     {
-        auto* data = static_cast<kernel_symbol_data_t*>(record.payload);
-        // Lock before modifying target_kernel_ids
-        std::scoped_lock lock(tool_data.mut);
-        if (!tool_data.kernel_filter_include_regex.empty())
+        try
         {
-            try
-            {
-                int  demangle_status = 0;
-                auto kernel_name     = cxa_demangle(data->kernel_name, &demangle_status);
-                kernel_name          = truncate_name(kernel_name);
+            int  demangle_status = 0;
+            auto kernel_name     = cxa_demangle(data->kernel_name, &demangle_status);
+            kernel_name          = truncate_name(kernel_name);
 
-                std::regex re(tool_data.kernel_filter_include_regex);
-                if (!kernel_name.empty() && std::regex_search(kernel_name, re))
-                {
-                    tool_data.target_kernel_ids.insert(data->kernel_id);
-                }
-            }
-            catch (const std::regex_error& e)
+            std::regex re(tool_data.kernel_filter_include_regex);
+            if (!kernel_name.empty() && std::regex_search(kernel_name, re))
             {
-                std::cerr << "[rocprofiler-compute] [" << __FUNCTION__
-                          << "] ERROR: Invalid regex in ROCPROF_KERNEL_FILTER_INCLUDE_REGEX: "
-                          << tool_data.kernel_filter_include_regex << " : " << e.what() << std::endl;
+                tool_data.target_kernel_ids.insert(data->kernel_id);
             }
         }
-        // If no regex specified, collect for all kernels
-        else
+        catch (const std::regex_error& e)
         {
-            tool_data.target_kernel_ids.insert(data->kernel_id);
+            std::cerr << "[rocprofiler-compute] [" << __FUNCTION__
+                      << "] ERROR: Invalid regex in ROCPROF_KERNEL_FILTER_INCLUDE_REGEX: "
+                      << tool_data.kernel_filter_include_regex << " : " << e.what() << std::endl;
         }
+    }
+    // If no regex specified, collect for all kernels
+    else
+    {
+        tool_data.target_kernel_ids.insert(data->kernel_id);
     }
 }
 

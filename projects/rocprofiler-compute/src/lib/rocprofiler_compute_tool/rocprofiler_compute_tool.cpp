@@ -3,8 +3,8 @@
 
 #include "rocprofiler_compute_tool.h"
 
-#include "gsl_assert.h"
 #include "env_parameters.h"
+#include "gsl_assert.h"
 #include "sdk_callbacks.h"
 #include "sdk_wrapper.h"
 
@@ -93,7 +93,12 @@ void tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
 {
     Expects(callback_data);
     auto* tool_data = static_cast<tool_data_t*>(callback_data);
-    tool_data->sdk_callbacks->tool_tracing_callback(record, *tool_data);
+    if (record.kind == ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT &&
+        record.phase == ROCPROFILER_CALLBACK_PHASE_LOAD &&
+        record.operation == ROCPROFILER_CODE_OBJECT_DEVICE_KERNEL_SYMBOL_REGISTER)
+    {
+        tool_data->sdk_callbacks->tool_tracing_callback(record, *tool_data);
+    }
 }
 
 void code_object_tracing_callback(rocprofiler_callback_tracing_record_t record,
@@ -103,12 +108,13 @@ void code_object_tracing_callback(rocprofiler_callback_tracing_record_t record,
     Expects(data);
     Expects(record.payload);
     if (record.kind == ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT &&
-        record.operation == ROCPROFILER_CODE_OBJECT_LOAD && record.phase == ROCPROFILER_CALLBACK_PHASE_LOAD)
+        record.phase == ROCPROFILER_CALLBACK_PHASE_LOAD && record.operation == ROCPROFILER_CODE_OBJECT_LOAD)
     {
         if (pc_sampling_mode(g_input_parameters->get_pc_sampling_mode()) != PcSamplingMode::Disabled)
         {
             auto* tool_data = static_cast<tool_data_t*>(data);
-            auto* obj_data = static_cast<rocprofiler_callback_tracing_code_object_load_data_t*>(record.payload);
+            auto* obj_data  = static_cast<rocprofiler_callback_tracing_code_object_load_data_t*>(
+                record.payload);
             tool_data->pc_sampling_collector.rlock([&](const pc_sampling_collector_t::ptr& collector)
                                                    { collector->on_code_object_load(*obj_data); });
         }
@@ -175,7 +181,7 @@ void tool_fini(void* user_data)
     delete tool_data_ptr;
 }
 
-}  // namespace rocprofiler_compute_tool
+}  // namespace rocm_compute
 
 static std::string generate_output_filename(const char* output_path)
 {

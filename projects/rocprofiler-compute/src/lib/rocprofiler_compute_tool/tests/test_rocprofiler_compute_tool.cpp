@@ -241,19 +241,13 @@ TEST_F(test_rocprofiler_compute_tool_t, OnRecordCallback_ForwardsToSdkCallbacks)
     EXPECT_EQ(calls[0].record_count, record_count);
 }
 
-TEST_F(test_rocprofiler_compute_tool_t, OnToolTracingCallback_ForwardsToSdkCallbacks)
+TEST_F(test_rocprofiler_compute_tool_t, OnKernelSymbolRegisterOperation_ForwardsToSdkCallbacks)
 {
-    tool_data_t tool_data{};
-    tool_data.sdk_callbacks = m_sdk_callbacks;
-
-    rocprofiler_callback_tracing_record_t record{};
-    record.kind = ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT;
-
-    tool_tracing_callback(m_pc_sampling_record, nullptr, &m_tool_data);
+    tool_tracing_callback(m_kernel_symbol_record, nullptr, &m_tool_data);
 
     const auto& calls = m_sdk_callbacks->get_tracing_callback_info();
     EXPECT_EQ(calls.size(), 1);
-    EXPECT_EQ(calls[0].record.kind, record.kind);
+    EXPECT_EQ(calls[0].record.kind, m_kernel_symbol_record.kind);
 }
 
 TEST_F(test_rocprofiler_compute_tool_t, OnCodeObjectTracingIfPcSamplingEnabled_ForwardsToSdkCallbacks)
@@ -286,7 +280,8 @@ TEST_F(test_rocprofiler_compute_tool_t, OnCodeObjectTracingIfPcSamplingDisabled_
 void test_rocprofiler_compute_tool_t::SetUp()
 {
     m_payload.code_object_id = 1;
-    m_pc_sampling_record     = create_code_object_load_info_with_payload(m_payload);
+    m_pc_sampling_record     = create_pc_sampling_record(m_payload);
+    m_kernel_symbol_record   = create_kernel_symbol_record();
 
     m_env_parameters        = std::make_shared<mock_env_parameters_t>();
     m_sdk_wrapper           = std::make_shared<mock_sdk_wrapper_t>();
@@ -331,13 +326,22 @@ counter_info_record_t test_rocprofiler_compute_tool_t::create_counter_record(uin
     return record;
 }
 
-rocprofiler_callback_tracing_record_t test_rocprofiler_compute_tool_t::create_code_object_load_info_with_payload(
+rocprofiler_callback_tracing_record_t test_rocprofiler_compute_tool_t::create_kernel_symbol_record()
+{
+    rocprofiler_callback_tracing_record_t record = {};
+    record.kind                                  = ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT;
+    record.phase                                 = ROCPROFILER_CALLBACK_PHASE_LOAD;
+    record.operation = ROCPROFILER_CODE_OBJECT_DEVICE_KERNEL_SYMBOL_REGISTER;
+    return record;
+}
+
+rocprofiler_callback_tracing_record_t test_rocprofiler_compute_tool_t::create_pc_sampling_record(
     rocprofiler_callback_tracing_code_object_load_data_t& payload)
 {
     rocprofiler_callback_tracing_record_t record = {};
     record.kind                                  = ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT;
-    record.operation                             = ROCPROFILER_CODE_OBJECT_LOAD;
     record.phase                                 = ROCPROFILER_CALLBACK_PHASE_LOAD;
+    record.operation                             = ROCPROFILER_CODE_OBJECT_LOAD;
     record.payload                               = &m_payload;
 
     return record;
