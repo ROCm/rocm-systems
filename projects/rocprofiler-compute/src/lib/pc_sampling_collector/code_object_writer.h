@@ -28,5 +28,7 @@ public:
     void        end_symbol() override;
     void        write_instruction(const instruction_t& inst) override;
     std::string get_result() override;
+private:
+    int32_t m_code_object_closure_count = 0;
 };
 }  // namespace rocm_compute

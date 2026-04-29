@@ -10,6 +10,18 @@ TEST_F(test_code_object_writer_t, ProvidedNoData_ReturnsMinimalJson)
     EXPECT_TRUE(nlohmann::json::accept(result));
 }
 
+TEST_F(test_code_object_writer_t, ProvidedStartCodeObjWithoutEnd_Throws)
+{
+    m_writer.start_code_obj(0);
+    EXPECT_THROW(m_writer.get_result(), std::runtime_error);
+}
+
+TEST_F(test_code_object_writer_t, ProvidedEndCodeObjWithoutStart_Throws)
+{
+    m_writer.end_code_obj_desc(0);
+    EXPECT_THROW(m_writer.get_result(), std::runtime_error);
+}
+
 void test_code_object_writer_t::SetUp()
 {
 }
