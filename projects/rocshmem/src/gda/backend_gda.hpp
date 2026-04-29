@@ -233,6 +233,16 @@ class GDABackend : public Backend {
   void ctx_destroy(Context *ctx) override;
 
   /**
+   * @brief Register a user buffer.
+   */
+  int buffer_register(void *addr, size_t length) override;
+
+  /**
+   * @brief Unregister a user buffer.
+   */
+  int buffer_unregister(void *addr) override;
+
+  /**
    * @brief Abort the application.
    *
    * @param[in] status Exit code.
