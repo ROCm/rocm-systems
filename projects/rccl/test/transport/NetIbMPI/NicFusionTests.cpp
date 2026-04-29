@@ -1805,4 +1805,195 @@ TEST_F(NetIbMPITest, Reconnect_VNic) {
     }
 }
 
+TEST_F(NetIbMPITest, MultiRecvGPUShuffled) {
+    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit))
+        << "Test requires exactly 2 processes";
+
+    int rank = MPIEnvironment::world_rank;
+    int peerRank = (rank + 1) % 2;
+
+    ASSERT_EQ(InitNetIb(), ncclSuccess);
+
+    int dev = CreateMergedDevice(3, rank);
+    if (dev == -1) {
+        GTEST_SKIP() << "Failed to create 3-NIC merged device";
+    }
+
+    {
+        ncclNetProperties_t props = {};
+        ASSERT_EQ(GetDeviceProperties(dev, &props), ncclSuccess);
+        if (!(props.ptrSupport & NCCL_PTR_CUDA)) {
+            GTEST_SKIP() << "GDR not supported on this device, skipping GPU MultiRecv test";
+        }
+    }
+
+    static constexpr int kWidth = 8;
+    static constexpr int kNumBatches = 255;
+    static constexpr int kBaseTag = 16000;
+    static constexpr int kTagStride = 100;
+    // Keep sizes modest to limit GPU memory allocation per batch
+    static constexpr size_t kBaseSizes[kWidth] = {
+        64, 256, 1024, 4096, 16384, 65536, 131072, 262144
+    };
+
+    // kRecvOrder[slot] = msgId posted at that recv slot
+    static constexpr int kRecvOrder[kWidth] = {3, 0, 6, 1, 7, 2, 5, 4};
+    // kSendOrder[issueIndex] = msgId to send at that issue position
+    static constexpr int kSendOrder[kWidth] = {5, 2, 7, 0, 6, 3, 1, 4};
+
+    // Patterns keyed by msgId (same formula as MultiRecvShuffled for consistency)
+    auto FillPattern = [&](uint8_t* hostBuf, size_t size, int batch, int msgId) {
+        for (size_t j = 0; j < size; j++) {
+            hostBuf[j] = static_cast<uint8_t>((batch * 19 + msgId * 37 + j) % kBytePatternModulo);
+        }
+    };
+
+    auto CheckPattern = [&](const uint8_t* hostBuf, size_t size, int batch, int msgId) -> bool {
+        for (size_t j = 0; j < size; j++) {
+            uint8_t expected =
+                static_cast<uint8_t>((batch * 19 + msgId * 37 + j) % kBytePatternModulo);
+            if (hostBuf[j] != expected) return false;
+        }
+        return true;
+    };
+
+    ConnectionPair pair;
+    ASSERT_EQ(SetupConnection(dev, pair, rank, peerRank), ncclSuccess);
+    void* recvComm = pair.recvComm;
+    void* sendComm = pair.sendComm;
+
+    NetConnectionGuard connGuard(net_);
+    if (rank == 0) {
+        connGuard.setRecvComm(pair.recvComm);
+        connGuard.setListenComm(pair.listenComm);
+    } else {
+        connGuard.setSendComm(pair.sendComm);
+    }
+
+    for (int batch = 0; batch < kNumBatches; batch++) {
+        int msgTags[kWidth];
+        size_t msgSizes[kWidth];
+        for (int msgId = 0; msgId < kWidth; msgId++) {
+            msgTags[msgId] = kBaseTag + batch * kTagStride + msgId;
+            msgSizes[msgId] = kBaseSizes[msgId];
+        }
+
+        if (rank == 0) {
+            void* gpuBufs[kWidth] = {};
+            void* mhs[kWidth] = {};
+            size_t recvSizesArg[kWidth];
+            int recvTags[kWidth];
+            int recvSizesOut[kWidth] = {};
+
+            auto cleanup = makeScopeGuard([&]() {
+                for (int i = 0; i < kWidth; i++) {
+                    if (mhs[i]) { DeregisterMemory(recvComm, mhs[i]); mhs[i] = nullptr; }
+                    if (gpuBufs[i]) { hipFreeWrapper(gpuBufs[i]); gpuBufs[i] = nullptr; }
+                }
+            });
+
+            for (int slot = 0; slot < kWidth; slot++) {
+                int msgId = kRecvOrder[slot];
+                recvTags[slot] = msgTags[msgId];
+                recvSizesArg[slot] = msgSizes[msgId];
+
+                HIP_TEST_CHECK_GTEST_FAIL(hipMalloc(&gpuBufs[slot], recvSizesArg[slot]));
+                HIP_TEST_CHECK_GTEST_FAIL(hipMemset(gpuBufs[slot], 0xCC, recvSizesArg[slot]));
+
+                ASSERT_EQ(RegisterMemory(recvComm, gpuBufs[slot], recvSizesArg[slot],
+                                         NCCL_PTR_CUDA, &mhs[slot]),
+                          ncclSuccess)
+                    << "GPU RegisterMemory failed for recv batch=" << batch << " slot=" << slot;
+                ASSERT_NE(mhs[slot], nullptr);
+            }
+
+            void* req = nullptr;
+            ASSERT_EQ(PostRecv(recvComm, kWidth, gpuBufs, recvSizesArg, recvTags, mhs, &req),
+                      ncclSuccess)
+                << "PostRecv failed for batch=" << batch;
+            ASSERT_NE(req, nullptr) << "PostRecv returned null request for batch=" << batch;
+
+            MPI_Barrier(MPI_COMM_WORLD);
+
+            ASSERT_EQ(WaitForCompletion(req, recvSizesOut, kLargeTransferTimeoutMs), ncclSuccess)
+                << "WaitForCompletion failed for recv batch=" << batch;
+
+            for (int slot = 0; slot < kWidth; slot++) {
+                int msgId = kRecvOrder[slot];
+                EXPECT_EQ(recvSizesOut[slot], static_cast<int>(msgSizes[msgId]))
+                    << "recv size mismatch at batch=" << batch
+                    << " slot=" << slot << " msgId=" << msgId;
+
+                std::vector<uint8_t> hostBuf(msgSizes[msgId]);
+                HIP_TEST_CHECK_GTEST_FAIL(
+                    hipMemcpy(hostBuf.data(), gpuBufs[slot], msgSizes[msgId],
+                              hipMemcpyDeviceToHost));
+
+                EXPECT_TRUE(CheckPattern(hostBuf.data(), msgSizes[msgId], batch, msgId))
+                    << "data mismatch at batch=" << batch
+                    << " slot=" << slot << " expected msgId=" << msgId
+                    << " tag=" << msgTags[msgId] << " size=" << msgSizes[msgId];
+            }
+
+            // cleanup guard fires here, deregistering MRs and freeing GPU buffers
+        } else {
+            void* gpuBufs[kWidth] = {};
+            void* mhs[kWidth] = {};
+            void* reqs[kWidth] = {};
+
+            auto cleanup = makeScopeGuard([&]() {
+                for (int i = 0; i < kWidth; i++) {
+                    if (mhs[i]) { DeregisterMemory(sendComm, mhs[i]); mhs[i] = nullptr; }
+                    if (gpuBufs[i]) { hipFreeWrapper(gpuBufs[i]); gpuBufs[i] = nullptr; }
+                }
+            });
+
+            for (int msgId = 0; msgId < kWidth; msgId++) {
+                HIP_TEST_CHECK_GTEST_FAIL(hipMalloc(&gpuBufs[msgId], msgSizes[msgId]));
+
+                std::vector<uint8_t> hostBuf(msgSizes[msgId]);
+                FillPattern(hostBuf.data(), msgSizes[msgId], batch, msgId);
+                HIP_TEST_CHECK_GTEST_FAIL(
+                    hipMemcpy(gpuBufs[msgId], hostBuf.data(), msgSizes[msgId],
+                              hipMemcpyHostToDevice));
+
+                ASSERT_EQ(RegisterMemory(sendComm, gpuBufs[msgId], msgSizes[msgId],
+                                         NCCL_PTR_CUDA, &mhs[msgId]),
+                          ncclSuccess)
+                    << "GPU RegisterMemory failed for send batch=" << batch
+                    << " msgId=" << msgId;
+                ASSERT_NE(mhs[msgId], nullptr);
+            }
+
+            MPI_Barrier(MPI_COMM_WORLD);
+
+            for (int oi = 0; oi < kWidth; oi++) {
+                int msgId = kSendOrder[oi];
+                reqs[msgId] = nullptr;
+                PostSendWithRetry(sendComm, gpuBufs[msgId], msgSizes[msgId],
+                                  msgTags[msgId], mhs[msgId], &reqs[msgId]);
+
+                ASSERT_NE(reqs[msgId], nullptr)
+                    << "PostSend returned null request for batch=" << batch
+                    << " msgId=" << msgId;
+            }
+
+            for (int msgId = 0; msgId < kWidth; msgId++) {
+                int sentSize[1] = {0}; // send request yields one size entry
+                ASSERT_EQ(WaitForCompletion(reqs[msgId], sentSize, kLargeTransferTimeoutMs),
+                          ncclSuccess)
+                    << "send completion failed for batch=" << batch << " msgId=" << msgId;
+            }
+
+            // cleanup guard fires here, deregistering MRs and freeing GPU buffers
+        }
+
+        MPI_Barrier(MPI_COMM_WORLD);
+    }
+
+    MPI_Barrier(MPI_COMM_WORLD);
+    // connGuard closes comms on scope exit
+}
+
 #endif // MPI_TESTS_ENABLED
