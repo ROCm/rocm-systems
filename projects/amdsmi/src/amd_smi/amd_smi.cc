@@ -1481,6 +1481,12 @@ amdsmi_status_t amdsmi_get_gpu_board_info(amdsmi_processor_handle processor_hand
     LOG_INFO(ss);
   }
 
+  if (std::string(board_info->manufacturer_name) == "0x1002") {
+    std::string amd_name = "Advanced Micro Devices Inc. [AMD/ATI]";
+    smi_clear_char_and_reinitialize(board_info->manufacturer_name, AMDSMI_MAX_STRING_LENGTH,
+                                    amd_name);
+  }
+
   ss << __PRETTY_FUNCTION__ << " | [After rocm smi correction] "
      << "Returning status = AMDSMI_STATUS_SUCCESS"
      << "\n; info->model_number: |" << board_info->model_number << "|"
