@@ -73,6 +73,10 @@ include(GNUInstallDirs)
 include(CheckCXXSourceCompiles)
 
 # Convert the project's name to uppercase and replace '-' with '_'.
+# This transforms "amd-dbgapi" to "AMD_DBGAPI" for use in:
+# - Symbol versioning (exportmap.in): AMD_DBGAPI_0.54, AMD_DBGAPI_0.56, etc.
+# - API documentation (amd-dbgapi.h.in): symbol version string references
+# - Doxygen configuration (docs/doxygen/cmake_setting/Doxyfile.in): project name
 string(TOUPPER "${PROJECT_NAME}" AMD_DBGAPI_NAME)
 string(REPLACE "-" "_" AMD_DBGAPI_NAME ${AMD_DBGAPI_NAME})
 
