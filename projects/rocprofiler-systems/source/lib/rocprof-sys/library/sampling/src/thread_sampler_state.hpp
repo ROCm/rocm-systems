@@ -14,6 +14,7 @@
 // The MaxThreads template parameter defaults to 512 (ROCPROFSYS_MAX_THREADS)
 // in production; unit tests use a small value (e.g. 8).
 
+#include "sampling/data/limits.hpp"
 #include "sampling/src/sample_ring_buffer.hpp"
 
 #include <array>
@@ -40,7 +41,7 @@ public:
     using timer_trigger_t    = typename Policies::timer_trigger;
     using overflow_trigger_t = typename Policies::overflow_trigger;
 
-    static constexpr size_t RING_CAPACITY = 2048;
+    static constexpr size_t RING_CAPACITY = RING_BUFFER_CAPACITY;
 
     thread_sampler_state() = default;
 
@@ -101,6 +102,16 @@ public:
 
     void start() noexcept { running_.store(true, std::memory_order_release); }
     void stop() noexcept { running_.store(false, std::memory_order_release); }
+
+    // Stop every armed/open trigger in one call. Idempotent — each trigger's
+    // stop() is itself idempotent. Used by sampling_service::shutdown(tid) and
+    // postfork_child_cleanup().
+    void stop_all_triggers() noexcept
+    {
+        if(realtime_trigger_.has_value()) realtime_trigger_->stop();
+        if(cputime_trigger_.has_value()) cputime_trigger_->stop();
+        if(overflow_trigger_.has_value()) overflow_trigger_->stop();
+    }
 
     // ----- in-flight count (DEC-4 § 7 shutdown busy-wait) -----
     // Incremented when signal handler enters, decremented on exit.
@@ -174,7 +185,7 @@ private:
 // MaxThreads defaults to 512 (ROCPROFSYS_MAX_THREADS) in production.
 // Unit tests parameterise to a smaller value via the template argument.
 
-template <class Policies, size_t MaxThreads = 512>
+template <class Policies, size_t MaxThreads = MAX_THREADS_DEFAULT>
 class thread_sampler_state_registry
 {
 public:

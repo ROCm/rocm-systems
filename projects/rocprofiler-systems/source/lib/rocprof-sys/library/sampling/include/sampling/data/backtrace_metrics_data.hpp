@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include "sampling/data/limits.hpp"
+
 #include <array>
 #include <bitset>
 #include <cstdint>
@@ -15,12 +17,12 @@ namespace rocprofsys::sampling
 // TIMEMORY_PAPI_ARRAY_SIZE = 12 on this build (cmake/Packages.cmake:788).
 struct backtrace_metrics_data
 {
-    std::bitset<6>            valid;
-    int64_t                   cpu_ns      = 0;
-    int64_t                   mem_peak_kb = 0;
-    int64_t                   ctx_swch    = 0;
-    int64_t                   page_flt    = 0;
-    std::array<long long, 12> hw_counter  = {};
+    std::bitset<METRICS_COUNT>              valid;
+    int64_t                                 cpu_ns      = 0;
+    int64_t                                 mem_peak_kb = 0;
+    int64_t                                 ctx_swch    = 0;
+    int64_t                                 page_flt    = 0;
+    std::array<long long, PAPI_EVENT_COUNT> hw_counter  = {};
 };
 
 }  // namespace rocprofsys::sampling

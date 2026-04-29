@@ -9,6 +9,7 @@
 //
 // NFR-PORT-3: lives under src/linux/ — not under include/sampling/.
 
+#include "sampling/data/limits.hpp"
 #include "sampling/data/stack_frame.hpp"
 
 #include <cstdint>
@@ -22,15 +23,13 @@ namespace rocprofsys::sampling
 class libunwind_unwinder
 {
 public:
-    static constexpr int max_depth = 64;
-
     // Unwind from the supplied signal context and return a vector of stack_frame
     // with only the address field populated. Symbol resolution is deferred.
     // async-signal-safe: uses only libunwind local-unwind, no malloc, no locks.
     [[nodiscard]] std::vector<stack_frame> unwind(void const* ctx) noexcept
     {
         // Thread-local PC buffer — avoids heap allocation in handler.
-        static thread_local uintptr_t pc_buf[max_depth];
+        static thread_local uintptr_t pc_buf[MAX_STACK_DEPTH];
 
         int           depth  = 0;
         unw_cursor_t  cursor = {};
@@ -51,7 +50,7 @@ public:
 
         if(unw_init_local(&cursor, &uctx) != 0) return {};
 
-        while(depth < max_depth)
+        while(depth < static_cast<int>(MAX_STACK_DEPTH))
         {
             unw_word_t ip = 0;
             if(unw_get_reg(&cursor, UNW_REG_IP, &ip) != 0) break;

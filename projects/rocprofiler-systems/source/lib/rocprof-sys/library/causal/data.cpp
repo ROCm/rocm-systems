@@ -23,7 +23,7 @@
 #include "library/sampling_production_policies.hpp"
 #include "library/thread_data.hpp"
 #include "library/thread_info.hpp"
-#include "sampling/services.hpp"
+#include "sampling/sampling_service.hpp"
 
 #include <timemory/data/atomic_ring_buffer.hpp>
 #include <timemory/hash/types.hpp>

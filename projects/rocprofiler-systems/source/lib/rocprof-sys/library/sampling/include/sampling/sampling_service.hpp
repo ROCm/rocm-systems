@@ -128,6 +128,10 @@ private:
     mutable std::mutex                         signal_types_mutex_;
     std::unordered_map<int64_t, std::set<int>> signal_types_;
 
+    // Apply pthread_sigmask via signal_dispatcher_; route errors through fatal_.
+    // verb is "Block" / "Unblock" — used in the LOG_DEBUG line.
+    void apply_signal_mask(int how, std::set<int> sigs, char const* verb);
+
     // Production wiring hooks — no-op in the generic template.
     // Explicit full specializations for default_sampling_policies are provided in
     // library/sampling_production_policies/sampling_service_production_hooks.hpp

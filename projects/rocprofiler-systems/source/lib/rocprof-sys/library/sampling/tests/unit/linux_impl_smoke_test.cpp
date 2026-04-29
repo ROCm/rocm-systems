@@ -34,11 +34,6 @@ rocprofsys_sampling_signal_handler(int, siginfo_t*, void*)
 #include <thread>
 #include <unistd.h>
 
-// POSIX defines sigmask(sig) as a 1-arg macro; undefine so 'sigmask' method compiles.
-#ifdef sigmask
-#    undef sigmask
-#endif
-
 using namespace rocprofsys::sampling;
 
 // ── Local minimal impls (avoid pulling main_library_policies.hpp) ─────────────
@@ -64,7 +59,7 @@ struct local_steady_clock
 
 struct local_signal_dispatcher
 {
-    int sigmask(int how, void const* set, void* oldset) noexcept
+    int apply_sigmask(int how, void const* set, void* oldset) noexcept
     {
         return ::pthread_sigmask(how, static_cast<sigset_t const*>(set),
                                  static_cast<sigset_t*>(oldset));
@@ -118,11 +113,11 @@ TEST(real_signal_dispatcher_smoke, sigmask_block_returns_zero)
     sigemptyset(&set);
     sigaddset(&set, SIGUSR2);
 
-    int ret = dispatcher.sigmask(SIG_BLOCK, &set, nullptr);
+    int ret = dispatcher.apply_sigmask(SIG_BLOCK, &set, nullptr);
     EXPECT_EQ(ret, 0) << "sigmask(SIG_BLOCK) must return 0 on success";
 
     // Restore: unblock immediately.
-    dispatcher.sigmask(SIG_UNBLOCK, &set, nullptr);
+    dispatcher.apply_sigmask(SIG_UNBLOCK, &set, nullptr);
 }
 
 TEST(real_signal_dispatcher_smoke, sigmask_unblock_returns_zero)
@@ -133,8 +128,8 @@ TEST(real_signal_dispatcher_smoke, sigmask_unblock_returns_zero)
     sigemptyset(&set);
     sigaddset(&set, SIGUSR2);
 
-    dispatcher.sigmask(SIG_BLOCK, &set, nullptr);
-    int ret = dispatcher.sigmask(SIG_UNBLOCK, &set, nullptr);
+    dispatcher.apply_sigmask(SIG_BLOCK, &set, nullptr);
+    int ret = dispatcher.apply_sigmask(SIG_UNBLOCK, &set, nullptr);
     EXPECT_EQ(ret, 0) << "sigmask(SIG_UNBLOCK) must return 0 on success";
 }
 
@@ -152,7 +147,7 @@ TEST(real_signal_dispatcher_smoke, sigmask_roundtrip_restores_mask)
     sigaddset(&add_set, SIGUSR2);
 
     sigset_t saved;
-    dispatcher.sigmask(SIG_BLOCK, &add_set, &saved);
+    dispatcher.apply_sigmask(SIG_BLOCK, &add_set, &saved);
 
     // Verify SIGUSR2 is now blocked.
     sigset_t current;
@@ -162,7 +157,7 @@ TEST(real_signal_dispatcher_smoke, sigmask_roundtrip_restores_mask)
         << "SIGUSR2 must be blocked after SIG_BLOCK";
 
     // Restore original mask via SIG_SETMASK.
-    dispatcher.sigmask(SIG_SETMASK, &saved, nullptr);
+    dispatcher.apply_sigmask(SIG_SETMASK, &saved, nullptr);
 
     ::pthread_sigmask(SIG_SETMASK, nullptr, &current);
     EXPECT_EQ(sigismember(&current, SIGUSR2), sigismember(&original, SIGUSR2))

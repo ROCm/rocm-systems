@@ -60,6 +60,10 @@ public:
 private:
     [[nodiscard]] bool deadline_reached() const noexcept;
 
+    // Set disabled flag, emit L09 log line, and invoke callback exactly once.
+    // Shared between the production deadline-thread path and tick_for_test().
+    void fire_deadline_callback();
+
     shutdown_callback                     callback_;
     std::atomic<bool>                     disabled_{ false };
     std::mutex                            mutex_;

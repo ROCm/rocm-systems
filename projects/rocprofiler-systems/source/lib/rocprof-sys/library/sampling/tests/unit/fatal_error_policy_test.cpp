@@ -64,10 +64,6 @@ TEST(fatal_error_policy, sampling_fatal_error_carries_file_and_line)
 #include "sampling/sampling_service.hpp"
 #include "sampling/src/sample_ring_buffer.hpp"
 
-#ifdef sigmask
-#    undef sigmask
-#endif
-
 using test_service = rocprofsys::sampling::sampling_service<test_sampling_policies>;
 
 TEST(fatal_error_policy, sigmask_failure_calls_fatal_policy_through_service)

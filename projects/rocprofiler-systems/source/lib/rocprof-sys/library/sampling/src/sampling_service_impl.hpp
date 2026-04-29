@@ -15,13 +15,8 @@
 
 #include "logger/debug.hpp"
 
-// POSIX defines sigmask(sig) as a 1-arg macro; undefine it so our 3-arg
-// policy method named 'sigmask' is not subject to macro expansion.
-#ifdef sigmask
-#    undef sigmask
-#endif
-
 #include <algorithm>
+#include <cctype>
 #include <exception>
 #include <sstream>
 #include <stdexcept>
@@ -52,7 +47,7 @@ sampling_service<Policies>::sampling_service()
                   "(requires start(), stop(), is_open())");
     static_assert(is_signal_dispatcher_policy_v<signal_dispatcher>,
                   "Policies::signal_dispatcher must satisfy SignalDispatcherPolicy "
-                  "(requires sigmask(int, void const*, void*))");
+                  "(requires apply_sigmask(int, void const*, void*))");
     static_assert(is_unwinder_policy_v<unwinder>,
                   "Policies::unwinder must satisfy UnwinderPolicy "
                   "(requires unwind(void const*) and static valid_pc(uintptr_t))");
@@ -127,29 +122,25 @@ sampling_service<Policies>::unblock_samples()
 
 template <class Policies>
 void
-sampling_service<Policies>::block_signals(std::set<int> sigs)
+sampling_service<Policies>::apply_signal_mask(int how, std::set<int> sigs,
+                                              char const* verb_capitalized)
 {
     auto calling_tid = static_cast<int64_t>(::gettid());
+    if(sigs.empty()) sigs = get_signal_types(calling_tid);
     if(sigs.empty())
     {
-        sigs = get_signal_types(calling_tid);
-    }
-    if(sigs.empty())
-    {
-        LOG_DEBUG("No signals to block...");
+        // Lowercase form for "No signals to {block,unblock}..." parity with legacy.
+        std::string lower{ verb_capitalized };
+        if(!lower.empty()) lower[0] = static_cast<char>(std::tolower(lower[0]));
+        LOG_DEBUG("No signals to {}...", lower);
         return;
     }
 
-    std::ostringstream sig_buf;
-    for(auto s : sigs)
-    {
-        if(sig_buf.tellp() > 0) sig_buf << ", ";
-        sig_buf << s;
-    }
-    LOG_DEBUG("Blocking signals [{}] on thread #{}...", sig_buf.str(), calling_tid);
+    LOG_DEBUG("{}ing signals [{}] on thread #{}...", verb_capitalized,
+              join_with_comma(sigs), calling_tid);
 
     signal_set ss(sigs);
-    int        err = signal_dispatcher_.sigmask(SIG_BLOCK, ss.get(), nullptr);
+    int        err = signal_dispatcher_.apply_sigmask(how, ss.get(), nullptr);
     if(err != 0)
     {
         fatal_.fatal(__FILE__, __LINE__, "pthread_sigmask failed: errno={}", err);
@@ -158,33 +149,16 @@ sampling_service<Policies>::block_signals(std::set<int> sigs)
 
 template <class Policies>
 void
+sampling_service<Policies>::block_signals(std::set<int> sigs)
+{
+    apply_signal_mask(SIG_BLOCK, std::move(sigs), "Block");
+}
+
+template <class Policies>
+void
 sampling_service<Policies>::unblock_signals(std::set<int> sigs)
 {
-    auto calling_tid = static_cast<int64_t>(::gettid());
-    if(sigs.empty())
-    {
-        sigs = get_signal_types(calling_tid);
-    }
-    if(sigs.empty())
-    {
-        LOG_DEBUG("No signals to unblock...");
-        return;
-    }
-
-    std::ostringstream sig_buf;
-    for(auto s : sigs)
-    {
-        if(sig_buf.tellp() > 0) sig_buf << ", ";
-        sig_buf << s;
-    }
-    LOG_DEBUG("Unblocking signals [{}] on thread #{}...", sig_buf.str(), calling_tid);
-
-    signal_set ss(sigs);
-    int        err = signal_dispatcher_.sigmask(SIG_UNBLOCK, ss.get(), nullptr);
-    if(err != 0)
-    {
-        fatal_.fatal(__FILE__, __LINE__, "pthread_sigmask failed: errno={}", err);
-    }
+    apply_signal_mask(SIG_UNBLOCK, std::move(sigs), "Unblock");
 }
 
 // ── pause / resume ────────────────────────────────────────────────────────
@@ -311,9 +285,7 @@ sampling_service<Policies>::shutdown(int64_t tid)
     {
         // Stop all POSIX timers before clearing the running flag so no new signals
         // are delivered after stop() (DEC-3: separate realtime + cputime slots).
-        if(state->realtime_trigger().has_value()) state->realtime_trigger()->stop();
-        if(state->cputime_trigger().has_value()) state->cputime_trigger()->stop();
-        if(state->overflow_trigger().has_value()) state->overflow_trigger()->stop();
+        state->stop_all_triggers();
 
         state->stop();
         // Busy-wait for any in-flight handler to complete (architecture § 7, 5s timeout).
@@ -335,8 +307,8 @@ sampling_service<Policies>::shutdown(int64_t tid)
 
     // Clear thread-local signal-handler pointers so a stale signal after
     // state destruction is a no-op. No-op in generic template; explicit
-    // specialization for default_sampling_policies clears tl_sampler_state_vp,
-    // tl_offload_vp, and tl_logical_tid (defined in
+    // specialization for default_sampling_policies clears the typed
+    // tl_state<default_sampling_policies>::sampler/offload/logical_tid (in
     // library/sampling_production_policies/sampling_service_production_hooks.hpp).
     shutdown_production_wiring(tid);
 
@@ -377,9 +349,7 @@ sampling_service<Policies>::postfork_child_cleanup()
     // Stop all POSIX timers across all threads — inherited file descriptors must be
     // closed in the child to avoid interfering with the parent's timer delivery.
     registry_.each([](int64_t /*tid*/, thread_sampler_state<Policies>& s) {
-        if(s.realtime_trigger().has_value()) s.realtime_trigger()->stop();
-        if(s.cputime_trigger().has_value()) s.cputime_trigger()->stop();
-        if(s.overflow_trigger().has_value()) s.overflow_trigger()->stop();
+        s.stop_all_triggers();
     });
 
     // Drop all per-thread state without per-tid processing (AC-20).

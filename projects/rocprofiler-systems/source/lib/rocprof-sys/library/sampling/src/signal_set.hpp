@@ -7,13 +7,8 @@
 // sigset_t which is a POSIX type. It is only included by Linux implementation files.
 
 #include <csignal>
-// <csignal> transitively defines sigmask(sig) as a 1-arg macro on some POSIX systems.
-// Undefine it so that policy types using "sigmask" as a method name are not mangled.
-#ifdef sigmask
-#    undef sigmask
-#endif
-
 #include <set>
+#include <string>
 
 namespace rocprofsys::sampling
 {
@@ -35,5 +30,20 @@ struct signal_set
     [[nodiscard]] sigset_t const* get() const noexcept { return &sigset; }
     sigset_t*                     get() noexcept { return &sigset; }
 };
+
+// Comma-separated representation of a signal set for log output.
+[[nodiscard]] inline std::string
+join_with_comma(std::set<int> const& signals)
+{
+    std::string out;
+    bool        first = true;
+    for(int sig : signals)
+    {
+        if(!first) out += ", ";
+        out += std::to_string(sig);
+        first = false;
+    }
+    return out;
+}
 
 }  // namespace rocprofsys::sampling

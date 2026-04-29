@@ -52,7 +52,7 @@
 #include "library/thread_info.hpp"
 #include "library/tracing.hpp"
 #include "rocprofiler-systems/categories.h"  // in rocprof-sys-user
-#include "sampling/services.hpp"
+#include "sampling/sampling_service.hpp"
 
 #include <timemory/hash/types.hpp>
 #include <timemory/log/logger.hpp>

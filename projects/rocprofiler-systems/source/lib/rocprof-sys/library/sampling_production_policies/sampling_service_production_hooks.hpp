@@ -11,6 +11,8 @@
 // sampling/ subtree. Requires main-lib headers (core/config.hpp, core/perf.hpp,
 // core/state.hpp, library/thread_info.hpp, linux/perf_event.h).
 
+#include "sampling/data/stack_frame_json.hpp"
+#include "sampling/data/track_name.hpp"
 #include "sampling/sampling_service.hpp"
 #include "sampling/src/sample_parser.hpp"
 #include "sampling/src/symbol_resolver.hpp"
@@ -24,27 +26,22 @@
 
 #include "rocprofiler-systems/categories.h"
 
-#include <nlohmann/json.hpp>
-
 #include <dlfcn.h>
 #include <libunwind.h>
 #include <linux/perf_event.h>
 #include <sys/types.h>
 #include <unistd.h>
 
+#include <array>
 #include <cstring>
 #include <mutex>
 #include <string>
+#include <utility>
 
 namespace rocprofsys::sampling
 {
 
-// Thread-local signal-handler state — defined in services_accessor.cpp.
-// Declared here at namespace scope so the static TLS model is used
-// (avoids dynamic-TLS fault in dlopen-loaded libraries).
-extern thread_local void*   tl_sampler_state_vp;
-extern thread_local void*   tl_offload_vp;
-extern thread_local int64_t tl_logical_tid;
+// Typed thread-local signal-handler state lives in sampling/policies/tl_state.hpp.
 
 // TF-4 helper: resolve a stack-frame IP to a human-readable label.
 // Cascade: cached resolver (dladdr) → libunwind proc-name → dladdr fname
@@ -107,6 +104,52 @@ sampling_service<default_sampling_policies>::setup_check_thread_guards(int64_t t
     return true;
 }
 
+namespace detail
+{
+
+// AC-16: register sampling category strings exactly once per process.
+inline void
+register_sampling_categories_once()
+{
+    static std::once_flag s_init;
+    std::call_once(s_init, [] {
+        auto& reg = trace_cache::get_metadata_registry();
+        reg.add_string("timer_sampling");
+        reg.add_string("overflow_sampling");
+    });
+}
+
+// Per-thread metric descriptor for the 4 process-sampling counter tracks
+// emitted by emit_thread_counters. Single source of truth for the metric
+// name, perfetto category, valid-bit index, and value transform.
+struct thread_metric_descriptor
+{
+    char const* track_prefix;
+    std::size_t category_enum;
+    std::size_t valid_bit;
+    double (*read)(backtrace_metrics_data const&);
+};
+
+inline constexpr std::array<thread_metric_descriptor, 4> thread_metric_descriptors = {
+    thread_metric_descriptor{ "thread_cpu_time", ROCPROFSYS_CATEGORY_THREAD_CPU_TIME, 0,
+                              [](backtrace_metrics_data const& m) {
+                                  return static_cast<double>(m.cpu_ns) * 1.0e-9;
+                              } },
+    thread_metric_descriptor{ "thread_peak_memory",
+                              ROCPROFSYS_CATEGORY_THREAD_PEAK_MEMORY, 1,
+                              [](backtrace_metrics_data const& m) {
+                                  return static_cast<double>(m.mem_peak_kb) / 1024.0;
+                              } },
+    thread_metric_descriptor{
+        "thread_context_switch", ROCPROFSYS_CATEGORY_THREAD_CONTEXT_SWITCH, 2,
+        [](backtrace_metrics_data const& m) { return static_cast<double>(m.ctx_swch); } },
+    thread_metric_descriptor{
+        "thread_page_fault", ROCPROFSYS_CATEGORY_THREAD_PAGE_FAULT, 3,
+        [](backtrace_metrics_data const& m) { return static_cast<double>(m.page_flt); } },
+};
+
+}  // namespace detail
+
 // ── setup_production_wiring ────────────────────────────────────────────────
 
 template <>
@@ -120,9 +163,10 @@ sampling_service<default_sampling_policies>::setup_production_wiring(
     // Wire per-thread signal-handler state.
     // Must be set on the calling thread so the handler can access them
     // without a mutex (NFR-TS-2).
-    tl_sampler_state_vp = static_cast<void*>(state);
-    tl_offload_vp       = static_cast<void*>(&offload_);
-    tl_logical_tid      = tid;
+    using tls        = tl_state<default_sampling_policies>;
+    tls::sampler     = state;
+    tls::offload     = &offload_;
+    tls::logical_tid = tid;
 
     pid_t sys_tid   = static_cast<pid_t>(::gettid());
     int   rt_sig    = rocprofsys::get_sampling_realtime_signal();
@@ -198,28 +242,20 @@ sampling_service<default_sampling_policies>::setup_production_wiring(
 
     // Register per-thread sampling tracks in the trace_cache metadata registry so
     // data_processor can resolve track names when inserting backtrace_region_sample
-    // records. Must happen regardless of use_perfetto — real_trace_cache_sink::store()
-    // always pushes records using these exact track names (Bug 4 root cause fix).
-    // Track name format must exactly match real_trace_cache_sink::store().
+    // records. Must happen regardless of use_perfetto.
     const auto& thread_inf = thread_info::get(tid, SequentTID);
     if(thread_inf)
     {
-        size_t sys_id = thread_inf->index_data->system_value;
-        size_t seq_id = thread_inf->index_data->sequent_value;
-
-        std::string timer_track =
-            "Thread " + std::to_string(seq_id) + " Timer (S) " + std::to_string(sys_id);
-        std::string overflow_track = "Thread " + std::to_string(seq_id) +
-                                     " Overflow (S) " + std::to_string(sys_id);
+        const std::size_t sys_id = thread_inf->index_data->system_value;
+        const std::size_t seq_id = thread_inf->index_data->sequent_value;
+        const std::string timer_track =
+            make_thread_track_name(timer_track_tag{}, seq_id, sys_id);
+        const std::string overflow_track =
+            make_thread_track_name(overflow_track_tag{}, seq_id, sys_id);
 
         auto& reg = trace_cache::get_metadata_registry();
 
-        // AC-16: register sampling category strings once per process.
-        static std::once_flag s_category_init;
-        std::call_once(s_category_init, [&reg]() {
-            reg.add_string("timer_sampling");
-            reg.add_string("overflow_sampling");
-        });
+        detail::register_sampling_categories_once();
 
         // AC-16: register thread info so rocpd has ppid/pid/tid for this thread.
         reg.add_thread_info({ getppid(), getpid(), sys_id, 0, 0, "{}" });
@@ -228,14 +264,12 @@ sampling_service<default_sampling_policies>::setup_production_wiring(
         reg.add_track({ overflow_track, sys_id, "{}" });
 
         // TF-3 follow-up: per-thread process-sampling counter tracks emitted
-        // by emit_resolved_to_trace_cache as pmc_event_with_sample. Without
-        // these, rocpd_processor::handle → data_processor::insert_sample
-        // warns "Unexisting track thread_<metric> [N]" once per sample.
+        // by emit_thread_counters as pmc_event_with_sample.
         const std::string seq_suffix = " [" + std::to_string(seq_id) + "]";
-        for(const char* prefix : { "thread_cpu_time", "thread_peak_memory",
-                                   "thread_context_switch", "thread_page_fault" })
+        for(auto const& descriptor : detail::thread_metric_descriptors)
         {
-            reg.add_track({ std::string{ prefix } + seq_suffix, sys_id, "{}" });
+            reg.add_track(
+                { std::string{ descriptor.track_prefix } + seq_suffix, sys_id, "{}" });
         }
 
         LOG_DEBUG("thread {} registered trace_cache tracks: '{}' / '{}'", tid,
@@ -249,9 +283,10 @@ template <>
 inline void
 sampling_service<default_sampling_policies>::shutdown_production_wiring(int64_t /*tid*/)
 {
-    tl_sampler_state_vp = nullptr;
-    tl_offload_vp       = nullptr;
-    tl_logical_tid      = -1;
+    using tls        = tl_state<default_sampling_policies>;
+    tls::sampler     = nullptr;
+    tls::offload     = nullptr;
+    tls::logical_tid = -1;
 }
 
 // ── postfork production hooks ──────────────────────────────────────────────
@@ -280,6 +315,183 @@ sampling_service<default_sampling_policies>::postfork_production_child_cleanup()
     }
 }
 
+namespace detail
+{
+
+// Split raw records into TIMER and OVERFLOW vectors.
+inline std::pair<std::vector<backtrace_record>, std::vector<backtrace_record>>
+split_records(std::vector<backtrace_record> const& records)
+{
+    std::pair<std::vector<backtrace_record>, std::vector<backtrace_record>> out;
+    out.first.reserve(records.size());
+    out.second.reserve(records.size());
+    for(auto const& r : records)
+    {
+        if(r.trigger == trigger_type::TIMER)
+            out.first.push_back(r);
+        else
+            out.second.push_back(r);
+    }
+    return out;
+}
+
+// Resolve unnamed stack frames in-place via the cascade resolver.
+template <class Sample>
+inline void
+resolve_stacks(std::vector<Sample>& samples, symbol_resolver& resolver)
+{
+    for(auto& s : samples)
+        for(auto& f : s.stack)
+            if(f.name.empty()) f.name = resolve_symbol(resolver, f.address);
+}
+
+// Build a single trace_cache::backtrace_region_sample for one frame.
+inline trace_cache::backtrace_region_sample
+make_region_sample(uint32_t category_id, std::size_t sys_id,
+                   std::string const& track_name, std::string const& name,
+                   std::uint64_t beg_ns, std::uint64_t end_ns, char const* category_str,
+                   stack_frame const& frame, int depth)
+{
+    return trace_cache::backtrace_region_sample{ category_id,
+                                                 static_cast<uint64_t>(sys_id),
+                                                 track_name,
+                                                 name,
+                                                 beg_ns,
+                                                 end_ns,
+                                                 category_str,
+                                                 make_call_stack_json(frame),
+                                                 make_line_info_json(frame),
+                                                 make_extdata_json(depth) };
+}
+
+// Emit timer + cpu-time region samples for one tid.
+inline void
+emit_timer_to_trace_cache(int64_t /*tid*/, std::optional<thread_info> const& info,
+                          std::vector<timer_sample> const& timer_samples)
+{
+    if(timer_samples.empty()) return;
+
+    constexpr auto category_id =
+        static_cast<uint32_t>(ROCPROFSYS_CATEGORY_TIMER_SAMPLING);
+    constexpr auto category_str     = "timer_sampling";
+    constexpr auto cpu_category_str = "cputime_sampling";
+
+    const std::size_t sys_id = info->index_data->system_value;
+    const std::size_t seq_id = info->index_data->sequent_value;
+    const std::string track_name =
+        make_thread_track_name(timer_track_tag{}, seq_id, sys_id);
+
+    for(auto const& sample : timer_samples)
+    {
+        if(!info->is_valid_lifetime({ sample.beg_ns, sample.end_ns })) continue;
+
+        const bool has_cpu = sample.metrics.valid.test(0) && sample.metrics.cpu_ns > 0;
+
+        int depth = 0;
+        for(auto const& frame : sample.stack)
+        {
+            std::string name = frame.name.empty()
+                                   ? ("0x" + fmt::format("{:X}", frame.address))
+                                   : frame.name;
+
+            // Wall-clock timer sample.
+            trace_cache::get_buffer_storage().store(
+                make_region_sample(category_id, sys_id, track_name, name, sample.beg_ns,
+                                   sample.end_ns, category_str, frame, depth));
+
+            // CPU-time sample: emitted only when cpu_ns delta is available.
+            // Duration encoded as [0, cpu_ns] so tsv_processor computes the
+            // correct cpu-time duration from end_timestamp - start_timestamp.
+            if(has_cpu)
+            {
+                trace_cache::get_buffer_storage().store(make_region_sample(
+                    category_id, sys_id, track_name, name, std::uint64_t{ 0 },
+                    static_cast<std::uint64_t>(sample.metrics.cpu_ns), cpu_category_str,
+                    frame, depth));
+            }
+
+            ++depth;
+        }
+    }
+}
+
+// Emit per-thread process-sampling counter tracks for one tid.
+inline void
+emit_thread_counters(std::optional<thread_info> const& info,
+                     std::vector<timer_sample> const&  timer_samples)
+{
+    const std::size_t sys_id = info->index_data->system_value;
+    const std::size_t seq_id = info->index_data->sequent_value;
+
+    for(auto const& sample : timer_samples)
+    {
+        if(!info->is_valid_lifetime({ sample.beg_ns, sample.end_ns })) continue;
+        const std::uint64_t mid_ns = sample.end_ns;
+
+        for(auto const& descriptor : thread_metric_descriptors)
+        {
+            if(!sample.metrics.valid.test(descriptor.valid_bit)) continue;
+            std::string track = std::string{ descriptor.track_prefix } + " [" +
+                                std::to_string(seq_id) + "]";
+            trace_cache::get_buffer_storage().store(trace_cache::pmc_event_with_sample{
+                descriptor.category_enum, std::move(track),
+                static_cast<std::size_t>(mid_ns), std::string{ "{}" },
+                /*stack_id*/ 0, /*parent_stack_id*/ 0,
+                /*correlation_id*/ 0, /*call_stack*/ std::string{},
+                /*line_info*/ std::string{}, static_cast<uint32_t>(sys_id),
+                /*device_type*/ uint8_t{ 0 }, std::string{ descriptor.track_prefix },
+                descriptor.read(sample.metrics), std::optional<int64_t>{} });
+        }
+    }
+}
+
+// Emit overflow region samples for one tid.
+inline void
+emit_overflow_to_trace_cache(int64_t /*tid*/, std::optional<thread_info> const& info,
+                             std::vector<overflow_sample> const& overflow_samples)
+{
+    if(overflow_samples.empty()) return;
+
+    constexpr auto category_id =
+        static_cast<uint32_t>(ROCPROFSYS_CATEGORY_OVERFLOW_SAMPLING);
+    constexpr auto category_str = "overflow_sampling";
+
+    const std::size_t sys_id = info->index_data->system_value;
+    const std::size_t seq_id = info->index_data->sequent_value;
+    const std::string track_name =
+        make_thread_track_name(overflow_track_tag{}, seq_id, sys_id);
+
+    for(auto const& sample : overflow_samples)
+    {
+        if(!info->is_valid_lifetime({ sample.beg_ns, sample.end_ns })) continue;
+
+        int depth = 0;
+        for(auto const& frame : sample.stack)
+        {
+            std::string name = frame.name.empty()
+                                   ? ("0x" + fmt::format("{:X}", frame.address))
+                                   : frame.name;
+            trace_cache::get_buffer_storage().store(
+                make_region_sample(category_id, sys_id, track_name, name, sample.beg_ns,
+                                   sample.end_ns, category_str, frame, depth));
+            ++depth;
+        }
+    }
+}
+
+// tid may be either an internal_value (when called from tracing.cpp /
+// library.cpp via utility::get_thread_index()) or a sequent_value (when
+// called from pthread_create_gotcha which uses _info->sequent_value).
+inline std::optional<thread_info> const&
+resolve_tid_info(int64_t tid)
+{
+    auto const& info = thread_info::get(tid, SequentTID);
+    if(info) return info;
+    return thread_info::get(tid, InternalTID);
+}
+
+}  // namespace detail
+
 // ── emit_resolved_to_trace_cache ───────────────────────────────────────────
 // Variant 2 (Task #30): after draining the ring buffer in shutdown(tid), parse
 // and resolve the raw backtrace_records and emit backtrace_region_sample directly
@@ -296,228 +508,46 @@ sampling_service<default_sampling_policies>::emit_resolved_to_trace_cache(int64_
     auto records = offload_.read(tid);
     if(records.empty()) return;
 
-    // tid may be either an internal_value (when called from tracing.cpp /
-    // library.cpp via utility::get_thread_index()) or a sequent_value (when
-    // called from pthread_create_gotcha which uses _info->sequent_value). Try
-    // SequentTID lookup first, then InternalTID. See TF-2 (regression-report).
-    const auto* info_ptr = &thread_info::get(tid, SequentTID);
-    if(!*info_ptr) info_ptr = &thread_info::get(tid, InternalTID);
-    const auto& info = *info_ptr;
+    auto const& info = detail::resolve_tid_info(tid);
     if(!info)
     {
         offload_.erase(tid);
         return;
     }
 
-    size_t sys_id = info->index_data->system_value;
-    size_t seq_id = info->index_data->sequent_value;
+    auto [timer_raw, overflow_raw] = detail::split_records(records);
 
     sample_parser   parser;
     symbol_resolver resolver;
+    const bool      legacy = rocprofsys::get_use_sampling_trace_legacy();
 
-    // Split TIMER vs OVERFLOW records.
-    std::vector<backtrace_record> timer_raw;
-    std::vector<backtrace_record> overflow_raw;
-    timer_raw.reserve(records.size());
-    overflow_raw.reserve(records.size());
-    for(auto const& r : records)
-    {
-        if(r.trigger == trigger_type::TIMER)
-            timer_raw.push_back(r);
-        else
-            overflow_raw.push_back(r);
-    }
-
-    const bool legacy = rocprofsys::get_use_sampling_trace_legacy();
-
-    // Parse + resolve + emit timer samples.
+    // Timer + cputime + thread-counter tracks (AC-11 discards single-sample buffer).
     if(timer_raw.size() >= 2)
     {
         backtrace_record              init_rec = timer_raw.front();
         std::vector<backtrace_record> tail(timer_raw.begin() + 1, timer_raw.end());
         auto timer_samples = parser.parse_timer(tid, init_rec, tail, pause_registry_);
-
         if(!timer_samples.empty())
         {
-            for(auto& s : timer_samples)
-                for(auto& f : s.stack)
-                    if(f.name.empty()) f.name = resolve_symbol(resolver, f.address);
-
-            constexpr uint32_t category_id =
-                static_cast<uint32_t>(ROCPROFSYS_CATEGORY_TIMER_SAMPLING);
-            constexpr auto category_str = "timer_sampling";
-            std::string track_name = "Thread " + std::to_string(seq_id) + " Timer (S) " +
-                                     std::to_string(sys_id);
-
-            constexpr uint32_t cpu_category_id =
-                static_cast<uint32_t>(ROCPROFSYS_CATEGORY_TIMER_SAMPLING);
-            constexpr auto cpu_category_str = "cputime_sampling";
-
-            for(auto const& s : timer_samples)
-            {
-                if(!info->is_valid_lifetime({ s.beg_ns, s.end_ns })) continue;
-
-                const bool has_cpu = s.metrics.valid.test(0) && s.metrics.cpu_ns > 0;
-
-                int depth = 0;
-                for(auto const& frame : s.stack)
-                {
-                    std::string    name = frame.name.empty()
-                                              ? ("0x" + fmt::format("{:X}", frame.address))
-                                              : frame.name;
-                    nlohmann::json cs_j;
-                    cs_j["name"] = frame.name.empty() ? fmt::format("{:X}", frame.address)
-                                                      : frame.name;
-                    cs_j["pc"]   = fmt::format("{:X}", frame.address);
-                    cs_j["file"] = frame.location;
-                    nlohmann::json li_j;
-                    li_j["line_address"] = fmt::format("{:X}", frame.line_address);
-                    li_j["name"]         = cs_j["name"];
-                    if(!frame.inlines.empty())
-                    {
-                        nlohmann::json inlined;
-                        auto const&    top  = frame.inlines.front();
-                        inlined["name"]     = top.name;
-                        inlined["location"] = top.location;
-                        inlined["line"]     = std::to_string(top.line);
-                        li_j["inlined"]     = inlined;
-                    }
-                    nlohmann::json ext;
-                    ext["depth"] = depth;
-
-                    // Wall-clock timer sample.
-                    trace_cache::get_buffer_storage().store(
-                        trace_cache::backtrace_region_sample{
-                            category_id, static_cast<uint64_t>(sys_id), track_name, name,
-                            s.beg_ns, s.end_ns, category_str, cs_j.dump(), li_j.dump(),
-                            ext.dump() });
-
-                    // CPU-time sample: emitted only when cpu_ns delta is available.
-                    // Duration encoded as [0, cpu_ns] so tsv_processor computes the
-                    // correct cpu-time duration from end_timestamp - start_timestamp.
-                    if(has_cpu)
-                    {
-                        trace_cache::get_buffer_storage().store(
-                            trace_cache::backtrace_region_sample{
-                                cpu_category_id, static_cast<uint64_t>(sys_id),
-                                track_name, name, uint64_t{ 0 },
-                                static_cast<uint64_t>(s.metrics.cpu_ns), cpu_category_str,
-                                cs_j.dump(), li_j.dump(), ext.dump() });
-                    }
-
-                    ++depth;
-                }
-            }
-
-            // TF-3: per-thread process-sampling counter tracks
-            // (thread_cpu_time / thread_peak_memory / thread_context_switch /
-            // thread_page_fault). Mirrors legacy backtrace_metrics
-            // cache_backtrace_metrics_events. Each timer sample emits one
-            // pmc_event_with_sample per metric; perfetto_processor turns these
-            // into per-thread counter tracks.
-            const auto emit_thread_counter = [&](size_t      cat_enum,
-                                                 const char* track_prefix, uint64_t ts_ns,
-                                                 double value) {
-                std::string trk =
-                    std::string{ track_prefix } + " [" + std::to_string(seq_id) + "]";
-                trace_cache::get_buffer_storage().store(
-                    trace_cache::pmc_event_with_sample{
-                        cat_enum, trk, static_cast<size_t>(ts_ns), std::string{ "{}" },
-                        /*stack_id*/ 0, /*parent_stack_id*/ 0,
-                        /*correlation_id*/ 0, /*call_stack*/ std::string{},
-                        /*line_info*/ std::string{}, static_cast<uint32_t>(sys_id),
-                        /*device_type*/ uint8_t{ 0 }, std::string{ track_prefix }, value,
-                        std::optional<int64_t>{} });
-            };
-            for(auto const& s : timer_samples)
-            {
-                if(!info->is_valid_lifetime({ s.beg_ns, s.end_ns })) continue;
-                const uint64_t mid_ns = s.end_ns;
-                if(s.metrics.valid.test(0))
-                    emit_thread_counter(ROCPROFSYS_CATEGORY_THREAD_CPU_TIME,
-                                        "thread_cpu_time", mid_ns,
-                                        static_cast<double>(s.metrics.cpu_ns) * 1.0e-9);
-                if(s.metrics.valid.test(1))
-                    emit_thread_counter(
-                        ROCPROFSYS_CATEGORY_THREAD_PEAK_MEMORY, "thread_peak_memory",
-                        mid_ns, static_cast<double>(s.metrics.mem_peak_kb) / 1024.0);
-                if(s.metrics.valid.test(2))
-                    emit_thread_counter(ROCPROFSYS_CATEGORY_THREAD_CONTEXT_SWITCH,
-                                        "thread_context_switch", mid_ns,
-                                        static_cast<double>(s.metrics.ctx_swch));
-                if(s.metrics.valid.test(3))
-                    emit_thread_counter(ROCPROFSYS_CATEGORY_THREAD_PAGE_FAULT,
-                                        "thread_page_fault", mid_ns,
-                                        static_cast<double>(s.metrics.page_flt));
-            }
-
-            // Legacy path: also emit via perfetto_sink when opt-in flag is set.
+            detail::resolve_stacks(timer_samples, resolver);
+            detail::emit_timer_to_trace_cache(tid, info, timer_samples);
+            detail::emit_thread_counters(info, timer_samples);
             if(legacy) perfetto_sink_.emit_timer(tid, nullptr, timer_samples);
         }
     }
 
-    // Parse + resolve + emit overflow samples.
+    // Overflow region samples.
     if(!overflow_raw.empty())
     {
         auto overflow_samples = parser.parse_overflow(tid, overflow_raw, pause_registry_);
-
         if(!overflow_samples.empty())
         {
-            for(auto& s : overflow_samples)
-                for(auto& f : s.stack)
-                    if(f.name.empty()) f.name = resolve_symbol(resolver, f.address);
-
-            constexpr uint32_t category_id =
-                static_cast<uint32_t>(ROCPROFSYS_CATEGORY_OVERFLOW_SAMPLING);
-            constexpr auto category_str = "overflow_sampling";
-            std::string    track_name   = "Thread " + std::to_string(seq_id) +
-                                     " Overflow (S) " + std::to_string(sys_id);
-
-            for(auto const& s : overflow_samples)
-            {
-                if(!info->is_valid_lifetime({ s.beg_ns, s.end_ns })) continue;
-
-                int depth = 0;
-                for(auto const& frame : s.stack)
-                {
-                    std::string    name = frame.name.empty()
-                                              ? ("0x" + fmt::format("{:X}", frame.address))
-                                              : frame.name;
-                    nlohmann::json cs_j;
-                    cs_j["name"] = frame.name.empty() ? fmt::format("{:X}", frame.address)
-                                                      : frame.name;
-                    cs_j["pc"]   = fmt::format("{:X}", frame.address);
-                    cs_j["file"] = frame.location;
-                    nlohmann::json li_j;
-                    li_j["line_address"] = fmt::format("{:X}", frame.line_address);
-                    li_j["name"]         = cs_j["name"];
-                    if(!frame.inlines.empty())
-                    {
-                        nlohmann::json inlined;
-                        auto const&    top  = frame.inlines.front();
-                        inlined["name"]     = top.name;
-                        inlined["location"] = top.location;
-                        inlined["line"]     = std::to_string(top.line);
-                        li_j["inlined"]     = inlined;
-                    }
-                    nlohmann::json ext;
-                    ext["depth"] = depth;
-
-                    trace_cache::get_buffer_storage().store(
-                        trace_cache::backtrace_region_sample{
-                            category_id, static_cast<uint64_t>(sys_id), track_name, name,
-                            s.beg_ns, s.end_ns, category_str, cs_j.dump(), li_j.dump(),
-                            ext.dump() });
-                    ++depth;
-                }
-            }
-
-            // Legacy path: also emit via perfetto_sink when opt-in flag is set.
+            detail::resolve_stacks(overflow_samples, resolver);
+            detail::emit_overflow_to_trace_cache(tid, info, overflow_samples);
             if(legacy) perfetto_sink_.emit_overflow(tid, nullptr, overflow_samples);
         }
     }
 
-    // Clear processed tid from offload_ to prevent double-emission in post_process().
     offload_.erase(tid);
 }
 

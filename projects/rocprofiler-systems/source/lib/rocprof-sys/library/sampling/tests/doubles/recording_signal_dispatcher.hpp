@@ -11,12 +11,6 @@
 #include <cerrno>
 #include <vector>
 
-// Some POSIX systems define sigmask(sig) as a 1-arg macro via <signal.h>.
-// Undefine it here so the method name 'sigmask' in this struct is not mangled.
-#ifdef sigmask
-#    undef sigmask
-#endif
-
 namespace rocprofsys::sampling::test
 {
 
@@ -38,10 +32,11 @@ struct sigmask_call
 
 struct recording_signal_dispatcher
 {
-    // Matches the production signal_dispatcher concept: sigmask(int, T const*, T*).
+    // Matches the production signal_dispatcher concept:
+    //   apply_sigmask(int, T const*, T*).
     // Accepts sigset_t* via implicit void* conversion — no <signal.h> needed here.
     // Maps raw POSIX how-constant to sigmask_how enum on record.
-    int sigmask(int how, void const* set, void* oldset) noexcept
+    int apply_sigmask(int how, void const* set, void* oldset) noexcept
     {
         sigmask_how mapped = sigmask_how::unknown;
         // SIG_BLOCK, SIG_UNBLOCK, SIG_SETMASK are implementation-defined (not

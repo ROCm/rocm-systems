@@ -3,15 +3,19 @@
 
 #pragma once
 
-// DEC-13: thread_context — opaque incomplete type in the public header.
 // NFR-PORT-3: public headers MUST NOT include <ucontext.h>, <signal.h>,
 //             <pthread.h>, or <linux/perf_event.h>.
 //
-// The complete definition lives in src/linux/platform_thread_context.hpp.
-// Public callers traffic in pointers/references to thread_context only.
-// Only trigger and unwinder implementations dereference the context.
+// The unwinder concept exposes its `unwind(void const* ctx)` parameter as
+// `void const*` to keep this header platform-agnostic; production wires a
+// `ucontext_t const*` through the same pointer.
 
 namespace rocprofsys::sampling
 {
-struct thread_context;
+
+// Opaque handle for sigset_t passed across the signal_dispatcher policy seam.
+// Public concept headers must not include <signal.h> (NFR-PORT-1); production
+// implementations cast to sigset_t*/sigset_t const*.
+using signal_set_handle         = void const*;
+using signal_set_mutable_handle = void*;
 }  // namespace rocprofsys::sampling

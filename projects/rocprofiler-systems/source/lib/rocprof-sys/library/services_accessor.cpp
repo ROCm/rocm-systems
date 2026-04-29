@@ -40,20 +40,10 @@ causal_sampling()
 
 }  // namespace rocprofsys::services
 
-// ── Thread-local signal-handler state (single definition) ──────────────────
-// Declared extern in sampling_production_policies.hpp; defined here so exactly
-// one TU owns them — avoids ODR violations when multiple TUs include the header.
+// Typed thread-local signal-handler state lives in sampling/policies/tl_state.hpp
+// (definitions are inline thread_local template members).
 
 #if defined(__linux__)
-
-namespace rocprofsys::sampling
-{
-
-thread_local void*   tl_sampler_state_vp = nullptr;
-thread_local void*   tl_offload_vp       = nullptr;
-thread_local int64_t tl_logical_tid      = -1;
-
-}  // namespace rocprofsys::sampling
 
 // ── Signal handler definition (single TU) ──────────────────────────────────
 // Installed via sigaction in real_timer_trigger::start().
@@ -73,7 +63,7 @@ rocprofsys_sampling_signal_handler(int sig, siginfo_t* /*info*/, void* ucontext)
     // Fast-path blocked check — no mutex.
     if(rocprofsys::services::sampling().is_blocked()) return;
 
-    default_state_t* state = tl_sampler_state();
+    default_state_t* state = default_tl::sampler;
     if(!state || !state->is_running()) return;
 
     // Re-entry guard (DEC-15) — drop sample if already in handler.
@@ -87,7 +77,7 @@ rocprofsys_sampling_signal_handler(int sig, siginfo_t* /*info*/, void* ucontext)
 
     // Build backtrace_record in-place — no heap allocation.
     backtrace_record rec{};
-    rec.tid          = tl_logical_tid;
+    rec.tid          = default_tl::logical_tid;
     rec.timestamp_ns = rocprofsys::services::sampling().get_clock().now_ns();
     rec.trigger      = (sig == rocprofsys::get_sampling_overflow_signal())
                            ? trigger_type::OVERFLOW
@@ -109,8 +99,7 @@ rocprofsys_sampling_signal_handler(int sig, siginfo_t* /*info*/, void* ucontext)
         }
         if(unw_init_local(&cursor, &uctx) == 0)
         {
-            constexpr uint8_t max_depth = libunwind_unwinder::max_depth;
-            while(rec.pc_count < max_depth)
+            while(rec.pc_count < static_cast<uint8_t>(MAX_STACK_DEPTH))
             {
                 unw_word_t ip = 0;
                 if(unw_get_reg(&cursor, UNW_REG_IP, &ip) != 0) break;

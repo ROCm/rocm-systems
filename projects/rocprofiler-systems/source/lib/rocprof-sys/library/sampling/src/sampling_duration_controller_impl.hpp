@@ -12,6 +12,20 @@ namespace rocprofsys::sampling
 
 template <class ClockPolicy>
 void
+sampling_duration_controller<ClockPolicy>::fire_deadline_callback()
+{
+    // Set disabled exactly once; the bool result of exchange() prevents a
+    // double-fire across the production thread and a concurrent tick_for_test.
+    if(disabled_.exchange(true, std::memory_order_acq_rel)) return;
+
+    LOG_INFO("Sampling duration of {:.6f} seconds has elapsed. "
+             "Shutting down sampling...",
+             duration_sec_);
+    if(callback_) callback_();
+}
+
+template <class ClockPolicy>
+void
 sampling_duration_controller<ClockPolicy>::start(double duration_sec)
 {
     if(duration_sec <= 0.0) return;
@@ -40,15 +54,10 @@ sampling_duration_controller<ClockPolicy>::start(double duration_sec)
 
             if(status == std::cv_status::timeout)
             {
-                disabled_.store(true, std::memory_order_release);
-                LOG_INFO("Sampling duration of {:.6f} seconds has elapsed. "
-                                         "Shutting down sampling...",
-                                 duration_sec_);
                 inner.unlock();
-                if(callback_) callback_();
+                fire_deadline_callback();
                 return;
             }
-            // Spurious wakeup
             LOG_WARNING("Spurious wakeup of sampling duration thread...");
         }
     });
@@ -84,19 +93,9 @@ sampling_duration_controller<ClockPolicy>::tick_for_test()
 
     ClockPolicy clk;
     if(clk.now_steady() >= deadline_)
-    {
-        if(!disabled_.exchange(true, std::memory_order_acq_rel))
-        {
-            LOG_INFO("Sampling duration of {:.6f} seconds has elapsed. "
-                     "Shutting down sampling...",
-                     duration_sec_);
-            if(callback_) callback_();
-        }
-    }
+        fire_deadline_callback();
     else
-    {
         LOG_WARNING("Spurious wakeup of sampling duration thread...");
-    }
 }
 
 }  // namespace rocprofsys::sampling
