@@ -66,57 +66,57 @@ const std::vector<mock_code_object_translator_t::file_code_object_info_t>&
     return m_file_code_obj_info;
 }
 
-void mock_pc_samples_writer_t::start_code_obj(size_t obj_id)
+void mock_code_object_writer_t::start_code_obj(size_t obj_id)
 {
     m_started_code_obj_ids.push_back(obj_id);
 }
 
-void mock_pc_samples_writer_t::end_code_obj_desc(size_t obj_id)
+void mock_code_object_writer_t::end_code_obj_desc(size_t obj_id)
 {
     m_ended_code_obj_desc_ids.push_back(obj_id);
 }
 
-void mock_pc_samples_writer_t::start_symbol(const symbol_t& symbol)
+void mock_code_object_writer_t::start_symbol(const symbol_t& symbol)
 {
     m_symbol_descriptions.push_back(symbol);
 }
 
-void mock_pc_samples_writer_t::end_symbol()
+void mock_code_object_writer_t::end_symbol()
 {
     ++m_end_symbol_count;
 }
 
-void mock_pc_samples_writer_t::write_instruction(const instruction_t& inst)
+void mock_code_object_writer_t::write_instruction(const instruction_t& inst)
 {
     m_instructions.push_back(inst);
 }
 
-std::string mock_pc_samples_writer_t::get_result()
+std::string mock_code_object_writer_t::get_result()
 {
     return {};
 }
 
-const std::vector<size_t>& mock_pc_samples_writer_t::get_started_code_obj_ids() const
+const std::vector<size_t>& mock_code_object_writer_t::get_started_code_obj_ids() const
 {
     return m_started_code_obj_ids;
 }
 
-const std::vector<size_t>& mock_pc_samples_writer_t::get_ended_code_obj_desc_ids() const
+const std::vector<size_t>& mock_code_object_writer_t::get_ended_code_obj_desc_ids() const
 {
     return m_ended_code_obj_desc_ids;
 }
 
-const std::vector<symbol_t>& mock_pc_samples_writer_t::get_symbol_descriptions() const
+const std::vector<symbol_t>& mock_code_object_writer_t::get_symbol_descriptions() const
 {
     return m_symbol_descriptions;
 }
 
-const std::vector<instruction_t>& mock_pc_samples_writer_t::get_instruction_descriptions() const
+const std::vector<instruction_t>& mock_code_object_writer_t::get_instruction_descriptions() const
 {
     return m_instructions;
 }
 
-uint32_t mock_pc_samples_writer_t::get_end_symbol_count() const
+uint32_t mock_code_object_writer_t::get_end_symbol_count() const
 {
     return m_end_symbol_count;
 }

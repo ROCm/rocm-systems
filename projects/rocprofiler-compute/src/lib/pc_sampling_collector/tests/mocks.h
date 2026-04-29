@@ -53,7 +53,7 @@ private:
     rocm_compute::instruction_t m_instruction = {"", "", 0, 0, 1};
 };
 
-class mock_pc_samples_writer_t : public rocm_compute::pc_samples_writer_t
+class mock_code_object_writer_t : public rocm_compute::code_object_writer_t
 {
 public:
     void        start_code_obj(size_t obj_id) override;

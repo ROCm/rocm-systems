@@ -38,7 +38,7 @@ void pc_sampling_collector_impl_t::on_code_object_load(
     }
 }
 
-void pc_sampling_collector_impl_t::write(pc_samples_writer_t& writer)
+void pc_sampling_collector_impl_t::write(code_object_writer_t& writer)
 {
     for (const auto& id : m_translator->get_code_object_ids())
     {

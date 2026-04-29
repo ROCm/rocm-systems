@@ -89,7 +89,7 @@ void test_pc_sampling_collector_t::SetUp()
 {
     m_translator            = std::make_shared<mock_code_object_translator_t>();
     m_pc_sampling_collector = std::make_shared<pc_sampling_collector_impl_t>(m_translator);
-    m_writer                = std::make_shared<mock_pc_samples_writer_t>();
+    m_writer                = std::make_shared<mock_code_object_writer_t>();
 
     m_mem_info.storage_type   = ROCPROFILER_CODE_OBJECT_STORAGE_TYPE_MEMORY;
     m_mem_info.memory_base    = 0x1000;
