@@ -58,6 +58,8 @@ VALU_NFMA = 1024
 # =============================================================================
 class Bench_base(ABC):
     def __init__(self, device_id: str) -> None:
+        self.device_id = device_id
+
         # Arch or hardware-specific variables must be set in child classes
         # self.lds_sizes: dict[str, int]
         self.unsupported_data_types: list[str]
@@ -250,26 +252,33 @@ class Bench_base(ABC):
         return arch_str.split(":", 1)[0]
 
     def set_cache_sizes(self) -> None:
-        from utils.amdsmi_interface import get_gpu_cache_info, get_gpu_num_compute_units
+        from utils.amdsmi_interface import (
+            amdsmi_ctx,
+            get_gpu_cache_info,
+            get_gpu_num_compute_units,
+        )
 
-        cu_count = get_gpu_num_compute_units()
-        cache_info = get_gpu_cache_info()
-        assert cache_info  # cache info must be populated
+        with amdsmi_ctx():
+            cu_count = get_gpu_num_compute_units()
+            cache_info = get_gpu_cache_info()
+            assert cache_info  # cache info must be populated
 
-        for _, cache_values in cache_info.items():
+        self.cache_sizes = {}
+
+        for cache_values in cache_info["cache"]:
             # Cache level is L1 and we are looking for vL1d which means
             # there should be a cache instance per CU available on the GPU
             if (
-                cache_values["cache_level"] == "L1"
+                cache_values["cache_level"] == 1
                 and cache_values["num_cache_instance"] == cu_count
             ):
-                self.cache_sizes["L1"] = cache_values["cache_size"]
+                self.cache_sizes["L1"] = cache_values["cache_size"]*1024
             # Cache levels L2 and L3/MALL are shared across all CUs
             # therefore only have one cache instance
-            elif cache_values["cache_level"] == "L2":
-                self.cache_sizes["L2"] = cache_values["cache_size"]
-            elif cache_values["cache_level"] == "L3":
-                self.cache_sizes["MALL"] = cache_values["cache_size"]
+            elif cache_values["cache_level"] == 2:
+                self.cache_sizes["L2"] = cache_values["cache_size"]*1024
+            elif cache_values["cache_level"] == 3:
+                self.cache_sizes["MALL"] = cache_values["cache_size"]*1024
 
     def run_get_samples(
         self,
@@ -824,7 +833,7 @@ class Bench_base(ABC):
             print("GPU Benchmarking completed")
             return metrics_dict
 
-    def dump_csv(self, metrics: dict[dict[PerfMetrics]], file_path: str) -> None:
+    def dump_csv(self, metrics: dict[PerfMetrics], file_path: str) -> None:
         """Generate a csv file containing the collected benchmark metrics."""
         # TODO: Better way to map CSV column names?
         with open(file_path, "w") as f:
@@ -841,11 +850,10 @@ class Bench_base(ABC):
 
             writer.writerow(row)
 
-            for d in metrics:
-                row = [d]
-                for t in types:
-                    row.append(metrics[d][t].mean)
-                    row.append(metrics[d][t].low)
-                    row.append(metrics[d][t].high)
+            row = [self.device_id]
+            for t in types:
+                row.append(metrics[t].mean)
+                row.append(metrics[t].low)
+                row.append(metrics[t].high)
 
-                writer.writerow(row)
+            writer.writerow(row)

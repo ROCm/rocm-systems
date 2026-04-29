@@ -206,7 +206,7 @@ def get_gpu_num_compute_units() -> int:
     error = None
     for device in get_device_handles():
         try:
-            cu_count = amdsmi.amdsmi_get_gpu_asic_info(device)["num_of_compute_units"]
+            cu_count = amdsmi.amdsmi_get_gpu_asic_info(device)["num_compute_units"]
             console_debug(f"GPU compute units count: {cu_count}")
             return int(cu_count)
         except Exception as e:
