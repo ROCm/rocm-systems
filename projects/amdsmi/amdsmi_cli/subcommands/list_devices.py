@@ -24,7 +24,7 @@ import logging
 from amdsmi import amdsmi_exception, amdsmi_interface
 
 
-class ListCommands:
+class ListDevicesCommands:
     def list_gpu(self, args, multiple_devices=False, gpu=None):
         """List information for target gpu
 
@@ -377,7 +377,7 @@ class ListCommands:
                     ainics.append(nic)
         return nics, ainics
 
-    def list(self, args, multiple_devices=False, gpu=None, nic=None, switch=None):
+    def list_devices(self, args, multiple_devices=False, gpu=None, nic=None, switch=None):
 
         if gpu:
             args.gpu = gpu

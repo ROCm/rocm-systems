@@ -150,7 +150,7 @@ if __name__ == "__main__":
     amd_smi_commands = AMDSMICommands(helpers=amd_smi_helpers)
     amd_smi_parser = AMDSMIParser(
         amd_smi_commands.version,
-        amd_smi_commands.list,
+        amd_smi_commands.list_devices,
         amd_smi_commands.static,
         amd_smi_commands.firmware,
         amd_smi_commands.bad_pages,
