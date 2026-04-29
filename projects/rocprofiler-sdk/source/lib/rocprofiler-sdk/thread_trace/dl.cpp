@@ -56,7 +56,15 @@ DL::~DL()
 
 AQLProfileDL::AQLProfileDL()
 {
-    // Check if symbols are already available in the process before loading a new copy
+#if defined(ROCPROFILER_BUILD_AQLPROFILE) && ROCPROFILER_BUILD_AQLPROFILE
+    // Vendored aqlprofile: bind directly to the in-binary copy. Going through
+    // dlsym(RTLD_DEFAULT) can resolve to a different copy in the system
+    // libhsa-amd-aqlprofile64.so, which has its own MemoryManager static map
+    // and would not see handles registered by the vendored aqlprofile_att_create_packets.
+    get_buffer_packets_fn   = &aqlprofile_att_get_buffer_packets;
+    update_buffer_status_fn = &aqlprofile_att_update_buffer_status;
+#else
+    // External aqlprofile: load symbols from libhsa-amd-aqlprofile64.so
     get_buffer_packets_fn = reinterpret_cast<GetBufferPacketsFn*>(
         dlsym(RTLD_DEFAULT, "aqlprofile_att_get_buffer_packets"));
     update_buffer_status_fn = reinterpret_cast<UpdateBufferStatusFn*>(
@@ -85,6 +93,7 @@ AQLProfileDL::AQLProfileDL()
         reinterpret_cast<GetBufferPacketsFn*>(dlsym(handle, "aqlprofile_att_get_buffer_packets"));
     update_buffer_status_fn = reinterpret_cast<UpdateBufferStatusFn*>(
         dlsym(handle, "aqlprofile_att_update_buffer_status"));
+#endif
 }
 
 AQLProfileDL::~AQLProfileDL()
