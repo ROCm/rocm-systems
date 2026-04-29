@@ -205,9 +205,9 @@ __device__ __forceinline__ void put_asm([[maybe_unused]] uint8_t* src,
 #if defined(__gfx90a__)
       int16_t val16;
       asm volatile(
-          "flat_load_ubyte %0, %1, slc\n"
+          "flat_load_ubyte %0, %1\n"
           "s_waitcnt vmcnt(0)\n"
-          "flat_store_byte %2, %0, glc slc"
+          "flat_store_byte %2, %0, glc"
           : "=&v"(val16)
           : "v"(src), "v"(dst)
           : "memory");
@@ -215,7 +215,7 @@ __device__ __forceinline__ void put_asm([[maybe_unused]] uint8_t* src,
 #if defined(__gfx942__) || defined(__gfx950__)
       int16_t val16;
       asm volatile(
-          "flat_load_ubyte %0, %1, nt\n"
+          "flat_load_ubyte %0, %1\n"
           "s_waitcnt vmcnt(0)\n"
           "flat_store_byte %2, %0, sc0 sc1"
           : "=&v"(val16)
@@ -225,9 +225,9 @@ __device__ __forceinline__ void put_asm([[maybe_unused]] uint8_t* src,
 #if defined(__gfx1100__)
       int32_t val32;
       asm volatile(
-          "flat_load_ubyte %0, %1, slc\n"
+          "flat_load_ubyte %0, %1\n"
           "s_waitcnt vmcnt(0)\n"
-          "flat_store_byte %2, %0, glc slc"
+          "flat_store_byte %2, %0, glc"
           : "=&v"(val32)
           : "v"(src), "v"(dst)
           : "memory");
@@ -235,7 +235,7 @@ __device__ __forceinline__ void put_asm([[maybe_unused]] uint8_t* src,
 #if defined(__gfx1201__)
       int32_t val32;
       asm volatile(
-          "flat_load_u8 %0, %1, th:TH_LOAD_NT\n"
+          "flat_load_u8 %0, %1\n"
           "s_wait_loadcnt 0x0\n"
           "flat_store_b8 %2, %0, scope:SCOPE_SYS"
           : "=&v"(val32)
@@ -248,9 +248,9 @@ __device__ __forceinline__ void put_asm([[maybe_unused]] uint8_t* src,
 #if defined(__gfx90a__)
       int16_t val16;
       asm volatile(
-          "flat_load_ushort %0, %1, slc\n"
+          "flat_load_ushort %0, %1\n"
           "s_waitcnt vmcnt(0)\n"
-          "flat_store_short %2, %0, glc slc"
+          "flat_store_short %2, %0, glc"
           : "=&v"(val16)
           : "v"(src), "v"(dst)
           : "memory");
@@ -258,7 +258,7 @@ __device__ __forceinline__ void put_asm([[maybe_unused]] uint8_t* src,
 #if defined(__gfx942__) || defined(__gfx950__)
       int16_t val16;
       asm volatile(
-          "flat_load_ushort %0, %1, nt\n"
+          "flat_load_ushort %0, %1\n"
           "s_waitcnt vmcnt(0)\n"
           "flat_store_short %2, %0, sc0 sc1"
           : "=&v"(val16)
@@ -268,9 +268,9 @@ __device__ __forceinline__ void put_asm([[maybe_unused]] uint8_t* src,
 #if defined(__gfx1100__)
       int32_t val32;
       asm volatile(
-          "flat_load_ushort %0, %1, slc\n"
+          "flat_load_ushort %0, %1\n"
           "s_waitcnt vmcnt(0)\n"
-          "flat_store_short %2, %0, glc slc"
+          "flat_store_short %2, %0, glc"
           : "=&v"(val32)
           : "v"(src), "v"(dst)
           : "memory");
@@ -278,7 +278,7 @@ __device__ __forceinline__ void put_asm([[maybe_unused]] uint8_t* src,
 #if defined(__gfx1201__)
       int32_t val32;
       asm volatile(
-          "flat_load_u16 %0, %1, th:TH_LOAD_NT\n"
+          "flat_load_u16 %0, %1\n"
           "s_wait_loadcnt 0x0\n"
           "flat_store_b16 %2, %0, scope:SCOPE_SYS"
           : "=&v"(val32)
@@ -291,9 +291,9 @@ __device__ __forceinline__ void put_asm([[maybe_unused]] uint8_t* src,
 #if defined(__gfx90a__) || defined(__gfx1100__)
       int32_t val32;
       asm volatile(
-          "flat_load_dword %0, %1, slc\n"
+          "flat_load_dword %0, %1\n"
           "s_waitcnt vmcnt(0)\n"
-          "flat_store_dword %2, %0, glc slc"
+          "flat_store_dword %2, %0, glc"
           : "=&v"(val32)
           : "v"(src), "v"(dst)
           : "memory");
@@ -301,7 +301,7 @@ __device__ __forceinline__ void put_asm([[maybe_unused]] uint8_t* src,
 #if defined(__gfx942__) || defined(__gfx950__)
       int32_t val32;
       asm volatile(
-          "flat_load_dword %0, %1, nt\n"
+          "flat_load_dword %0, %1\n"
           "s_waitcnt vmcnt(0)\n"
           "flat_store_dword %2, %0, sc0 sc1"
           : "=&v"(val32)
@@ -311,7 +311,7 @@ __device__ __forceinline__ void put_asm([[maybe_unused]] uint8_t* src,
 #if defined(__gfx1201__)
       int32_t val32;
       asm volatile(
-          "flat_load_b32 %0, %1, th:TH_LOAD_NT\n"
+          "flat_load_b32 %0, %1\n"
           "s_wait_loadcnt 0x0\n"
           "flat_store_b32 %2, %0, scope:SCOPE_SYS"
           : "=&v"(val32)
@@ -324,9 +324,9 @@ __device__ __forceinline__ void put_asm([[maybe_unused]] uint8_t* src,
 #if defined(__gfx90a__) || defined(__gfx1100__)
       int64_t val64;
       asm volatile(
-          "flat_load_dwordx2 %0, %1, slc\n"
+          "flat_load_dwordx2 %0, %1\n"
           "s_waitcnt vmcnt(0)\n"
-          "flat_store_dwordx2 %2, %0, glc slc"
+          "flat_store_dwordx2 %2, %0, glc"
           : "=&v"(val64)
           : "v"(src), "v"(dst)
           : "memory");
@@ -334,9 +334,9 @@ __device__ __forceinline__ void put_asm([[maybe_unused]] uint8_t* src,
 #if defined(__gfx942__) || defined(__gfx950__)
       int64_t val64;
       asm volatile(
-          "flat_load_dwordx2 %0, %1, nt\n"
+          "flat_load_dwordx2 %0, %1\n"
           "s_waitcnt vmcnt(0)\n"
-          "flat_store_dwordx2 %2, %0, sc0 sc1 nt"
+          "flat_store_dwordx2 %2, %0, sc0 sc1"
           : "=&v"(val64)
           : "v"(src), "v"(dst)
           : "memory");
@@ -344,9 +344,9 @@ __device__ __forceinline__ void put_asm([[maybe_unused]] uint8_t* src,
 #if defined(__gfx1201__)
       int64_t val64;
       asm volatile(
-          "flat_load_b64 %0, %1, th:TH_LOAD_NT\n"
+          "flat_load_b64 %0, %1\n"
           "s_wait_loadcnt 0x0\n"
-          "flat_store_b64 %2, %0, th:TH_STORE_NT_RT scope:SCOPE_SYS"
+          "flat_store_b64 %2, %0, scope:SCOPE_SYS"
           : "=&v"(val64)
           : "v"(src), "v"(dst)
           : "memory");
@@ -357,9 +357,9 @@ __device__ __forceinline__ void put_asm([[maybe_unused]] uint8_t* src,
 #if defined(__gfx90a__) || defined(__gfx1100__)
       __int128_t val128;
       asm volatile(
-          "flat_load_dwordx4 %0, %1, slc\n"
+          "flat_load_dwordx4 %0, %1\n"
           "s_waitcnt vmcnt(0)\n"
-          "flat_store_dwordx4 %2, %0, glc slc"
+          "flat_store_dwordx4 %2, %0, glc"
           : "=&v"(val128)
           : "v"(src), "v"(dst)
           : "memory");
@@ -367,9 +367,9 @@ __device__ __forceinline__ void put_asm([[maybe_unused]] uint8_t* src,
 #if defined(__gfx942__) || defined(__gfx950__)
       __int128_t val128;
       asm volatile(
-          "flat_load_dwordx4 %0, %1, nt\n"
+          "flat_load_dwordx4 %0, %1\n"
           "s_waitcnt vmcnt(0)\n"
-          "flat_store_dwordx4 %2, %0, sc0 sc1 nt"
+          "flat_store_dwordx4 %2, %0, sc0 sc1"
           : "=&v"(val128)
           : "v"(src), "v"(dst)
           : "memory");
@@ -377,9 +377,9 @@ __device__ __forceinline__ void put_asm([[maybe_unused]] uint8_t* src,
 #if defined(__gfx1201__)
       __int128_t val128;
       asm volatile(
-          "flat_load_b128 %0, %1, th:TH_LOAD_NT\n"
+          "flat_load_b128 %0, %1\n"
           "s_wait_loadcnt 0x0\n"
-          "flat_store_b128 %2, %0, th:TH_STORE_NT_RT scope:SCOPE_SYS"
+          "flat_store_b128 %2, %0, scope:SCOPE_SYS"
           : "=&v"(val128)
           : "v"(src), "v"(dst)
           : "memory");
