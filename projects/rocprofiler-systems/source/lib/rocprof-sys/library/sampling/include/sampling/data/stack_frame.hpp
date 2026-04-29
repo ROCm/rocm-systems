@@ -20,7 +20,6 @@ struct inline_frame
 struct stack_frame
 {
     std::string               name;  // demangled symbol; empty if unresolved
-    std::string               name_mangled;
     uintptr_t                 address      = 0;
     uintptr_t                 line_address = 0;
     std::string               location;  // file:line
