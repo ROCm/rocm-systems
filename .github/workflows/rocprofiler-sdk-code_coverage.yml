@@ -232,22 +232,17 @@ jobs:
         tar --use-compress-program=zstd -cf rocm-deps-codecov-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.zst \
           -C /opt rocm
 
-    - name: Upload build artifacts
-      uses: actions/upload-artifact@v4
+    - name: Cache build artifact
+      uses: actions/cache/save@v4
       with:
-        name: build-codecov-${{ matrix.system.os }}-${{ matrix.system.gpu }}
-        path: |
-          projects/rocprofiler-sdk/rocprofiler-sdk-codecov-build-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.zst
-        retention-days: 1
-        compression-level: 0
+        key: build-codecov-${{ matrix.system.os }}-${{ matrix.system.gpu }}-${{ github.run_id }}-${{ github.run_attempt }}
+        path: projects/rocprofiler-sdk/rocprofiler-sdk-codecov-build-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.zst
 
-    - name: Upload ROCM dependencies
-      uses: actions/upload-artifact@v4
+    - name: Cache ROCm dependencies
+      uses: actions/cache/save@v4
       with:
-        name: rocm-deps-codecov-${{ matrix.system.os }}-${{ matrix.system.gpu }}
+        key: rocm-deps-codecov-${{ matrix.system.os }}-${{ matrix.system.gpu }}-${{ github.run_id }}-${{ github.run_attempt }}
         path: rocm-deps-codecov-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.zst
-        retention-days: 1
-        compression-level: 0
 
   code-coverage:
     name: Code Coverage • ${{ matrix.system.gpu }} • ${{ matrix.system.os }}
@@ -286,17 +281,19 @@ jobs:
         submodules: false
         set-safe-directory: true
 
-    - name: Download build artifacts
-      uses: actions/download-artifact@v4
+    - name: Restore build artifact
+      uses: actions/cache/restore@v4
       with:
-        name: build-codecov-${{ matrix.system.os }}-${{ matrix.system.gpu }}
-        path: artifacts/
+        key: build-codecov-${{ matrix.system.os }}-${{ matrix.system.gpu }}-${{ github.run_id }}-${{ github.run_attempt }}
+        path: projects/rocprofiler-sdk/rocprofiler-sdk-codecov-build-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.zst
+        fail-on-cache-miss: true
 
-    - name: Download ROCM dependencies
-      uses: actions/download-artifact@v4
+    - name: Restore ROCm dependencies
+      uses: actions/cache/restore@v4
       with:
-        name: rocm-deps-codecov-${{ matrix.system.os }}-${{ matrix.system.gpu }}
-        path: deps/
+        key: rocm-deps-codecov-${{ matrix.system.os }}-${{ matrix.system.gpu }}-${{ github.run_id }}-${{ github.run_attempt }}
+        path: rocm-deps-codecov-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.zst
+        fail-on-cache-miss: true
 
     - name: Extract build artifacts
       shell: bash
@@ -304,14 +301,14 @@ jobs:
         apt-get update
         apt-get install -y zstd
         cd projects/rocprofiler-sdk
-        tar --use-compress-program=zstd -xf ../../artifacts/rocprofiler-sdk-codecov-build-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.zst
+        tar --use-compress-program=zstd -xf rocprofiler-sdk-codecov-build-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.zst
 
     - name: Extract ROCM dependencies
       shell: bash
       run: |
         rm -rf /opt/rocm /opt/rocm-* /opt/rocprofiler-sdk
         cd /opt
-        tar --use-compress-program=zstd -xf $GITHUB_WORKSPACE/deps/rocm-deps-codecov-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.zst
+        tar --use-compress-program=zstd -xf $GITHUB_WORKSPACE/rocm-deps-codecov-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.zst
 
     - name: Load Existing XML Code Coverage
       if: github.event_name == 'pull_request'
