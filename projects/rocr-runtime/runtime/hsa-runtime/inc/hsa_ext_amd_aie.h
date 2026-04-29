@@ -109,7 +109,8 @@ typedef struct hsa_amd_aie_kernel_dispatch_packet_s {
   };
 
   /**
-   * Number of bytes in the packet after the completion signal in this packet. Must be 24.
+   * Number of bytes in the packet after the ::completion_signal and up to ::kernarg_address. Must
+   * be 24.
    */
   uint16_t count;
 
@@ -141,7 +142,8 @@ typedef struct hsa_amd_aie_kernel_dispatch_packet_s {
   uint32_t insts_addr_high;
 
   /**
-   * Number of kernel arguments.
+   * Number of kernel arguments. Must be 0 if ::kernarg_address is NULL, and must be greater than 0
+   * if ::kernarg_address is not NULL.
    */
   uint16_t num_kernargs;
 
@@ -151,11 +153,16 @@ typedef struct hsa_amd_aie_kernel_dispatch_packet_s {
   uint16_t reserved3;
 
   /**
-   * Pointer to a buffer containing the kernel arguments. May be NULL.
+   * Pointer to a buffer containing the kernel arguments. May be NULL only when num_kernargs is 0.
    *
    * The buffer must be allocated using ::hsa_memory_allocate, and must not be
    * modified once the kernel dispatch packet is enqueued until the dispatch has
    * completed execution.
+   *
+   * The buffer must contain exactly 2 * ::num_kernargs consecutive `uint64_t` entries:
+   * - entries [0 .. ::num_kernargs - 1] are the argument addresses
+   * - entries [::num_kernargs .. 2 * ::num_kernargs - 1] are the corresponding argument sizes in
+   * bytes
    */
   void* kernarg_address;
 

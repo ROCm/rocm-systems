@@ -63,118 +63,104 @@
 #include "core/util/utils.h"
 #include "uapi/amdxdna_accel.h"
 
-// COPIED FROM
-// https://github.com/amd/xdna-driver/blob/c8d172716d2dbeb3063c6ca3805c5812d708bf47/drivers/accel/amdxdna/amdxdna_ctx.h
-
-/**
- * @brief Opcode types for commands
- *
- * ERT_INVALID_CMD:       invalid command
- * ERT_START_CU:          start a workgroup on a CU
- * ERT_START_DPU:         instruction buffer command format
- * ERT_CMD_CHAIN:         command chain
- * ERT_START_NPU:         instruction buffer command format on NPU format
- * ERT_START_NPU_PREEMPT: instruction buffer command with preemption format on NPU
- */
-enum ert_cmd_opcode {
-  ERT_INVALID_CMD = ~0U,
-  ERT_START_CU = 0,
-  ERT_START_DPU = 18,
-  ERT_CMD_CHAIN = 19,
-  ERT_START_NPU = 20,
-  ERT_START_NPU_PREEMPT = 21,
-  ERT_START_NPU_PREEMPT_ELF = 22,
-};
-
-/**
- * @brief ERT command state
- *
- * ERT_CMD_STATE_INVALID:     Invalid state
- * ERT_CMD_STATE_NEW:         Set by host before submitting a command to
- *                            scheduler
- * ERT_CMD_STATE_QUEUED:      Internal scheduler state
- * ERT_CMD_STATE_SUBMITTED:   Internal scheduler state
- * ERT_CMD_STATE_RUNNING:     Internal scheduler state
- * ERT_CMD_STATE_COMPLETED:   Set by scheduler when command completes
- * ERT_CMD_STATE_ERROR:       Set by scheduler if command failed
- * ERT_CMD_STATE_ABORT:       Set by scheduler if command abort
- * ERT_CMD_STATE_TIMEOUT:     Set by scheduler if command timeout and reset
- * ERT_CMD_STATE_NORESPONSE:  Set by scheduler if command timeout and fail to
- *                            reset
- */
-enum ert_cmd_state {
-  ERT_CMD_STATE_INVALID,
-  ERT_CMD_STATE_NEW,
-  ERT_CMD_STATE_QUEUED,
-  ERT_CMD_STATE_RUNNING,
-  ERT_CMD_STATE_COMPLETED,
-  ERT_CMD_STATE_ERROR,
-  ERT_CMD_STATE_ABORT,
-  ERT_CMD_STATE_SUBMITTED,
-  ERT_CMD_STATE_TIMEOUT,
-  ERT_CMD_STATE_NORESPONSE,
-};
-
-using u32 = uint32_t;
-using u64 = uint64_t;
-
-/**
- * ERT start kernel command format
- *
- * state:           [3-0]   current state of a command
- * unused:          [9-4]   unused bits
- * extra_cu_masks:  [11-10] extra CU masks in addition to mandatory mask
- * count:           [22-12] number of words following header for cmd data
- * opcode:          [27-23] 0, opcode for start_kernel
- * reserved:        [31-28] 0
- *
- * cu_mask:         first mandatory CU mask
- * data:            count-1 number of words representing interpreted payload
- *
- * The packet payload is comprised of reserved id field, a mandatory CU mask,
- * and extra_cu_masks per header field, followed by a CU register map of size
- * (count - (1 + extra_cu_masks)) uint32_t words.
- */
-struct amdxdna_cmd {
-  union {
-    struct {
-      u32 state : 4;
-      u32 unused : 6;
-      u32 extra_cu_masks : 2;
-      u32 count : 11;
-      u32 opcode : 5;
-      u32 reserved : 4;
-    };
-    u32 header;
-  };
-  u32 data[] __counted_by(count);
-};
-
-/**
- * @brief Interpretation of the beginning of data payload for ERT_CMD_CHAIN in
- * amdxdna_cmd. The rest of the payload in amdxdna_cmd is cmd BO handles.
- *
- * command_count: number of commands in chain
- * submit_index:  index of last successfully submitted command in chain
- * error_index:   index of failing command if cmd status is not completed
- * data[]:        address of each command in chain
- */
-struct amdxdna_cmd_chain {
-  u32 command_count;
-  u32 submit_index;
-  u32 error_index;
-  u32 reserved[3];
-  u64 data[] __counted_by(command_count);
-};
-
-// END OF COPIED FROM
-
 namespace rocr {
 namespace AMD {
 
 static_assert((sizeof(core::ShareableHandle::handle) >= sizeof(uint32_t)) &&
                   (alignof(core::ShareableHandle::handle) >= alignof(uint32_t)),
               "ShareableHandle cannot store a XDNA handle");
+
+/// @brief Opcode types for commands.
+///
+/// This should match the opcode types defined in xdna-driver and XRT ERT (ert_cmd_opcode).
+enum ert_cmd_opcode {
+  /// @brief Invalid command.
+  ERT_INVALID_CMD = ~0U,
+  /// @brief Start a workgroup on a CU.
+  ERT_START_CU = 0,
+  /// @brief Command chain.
+  ERT_CMD_CHAIN = 19,
+  /// @brief Instruction buffer command format on NPU format.
+  ERT_START_NPU = 20,
+  /// @brief Instruction buffer command with preemption format on NPU.
+  ERT_START_NPU_PREEMPT = 21,
+  /// @brief Instruction buffer command with preemption format on NPU using ELF.
+  ERT_START_NPU_PREEMPT_ELF = 22,
+};
+
+/// @brief Command state.
+///
+/// This should match the command states defined in xdna-driver and XRT ERT (ert_cmd_state).
+enum ert_cmd_state {
+  /// @brief Invalid state.
+  ERT_CMD_STATE_INVALID,
+  /// @brief Set by host before submitting a command to scheduler.
+  ERT_CMD_STATE_NEW,
+  /// @brief Internal scheduler state.
+  ERT_CMD_STATE_QUEUED,
+  /// @brief Internal scheduler state.
+  ERT_CMD_STATE_RUNNING,
+  /// @brief Set by scheduler when command completes.
+  ERT_CMD_STATE_COMPLETED,
+  /// @brief Set by scheduler if command failed.
+  ERT_CMD_STATE_ERROR,
+  /// @brief Set by scheduler if command abort.
+  ERT_CMD_STATE_ABORT,
+  /// @brief Internal scheduler state.
+  ERT_CMD_STATE_SUBMITTED,
+  /// @brief Set by scheduler if command timeout and reset.
+  ERT_CMD_STATE_TIMEOUT,
+  /// @brief Set by scheduler if command timeout and fail to reset.
+  ERT_CMD_STATE_NORESPONSE,
+};
+
+/// @brief Start kernel command packet.
+///
+/// This should match the command format defined in xdna-driver (amdxdna_cmd) and XRT ERT
+/// (ert_start_kernel_cmd).
+struct ert_start_kernel_cmd {
+  union {
+    struct {
+      /// @brief Current state of a command. Should be one @ref ERT_START_CU.
+      uint32_t state : 4;
+      uint32_t unused : 6;
+      /// @brief Extra CU masks in addition to mandatory mask. The number of extra CU masks is
+      /// determined by the value of this field, and the actual masks are included in the payload
+      /// after the mandatory cu_mask.
+      uint32_t extra_cu_masks : 2;
+      /// @brief Number of words following header for cmd data. Not include stat data. The actual
+      /// number of CU masks in the payload is (1 + extra_cu_masks) based on the header fields, and
+      /// the rest of the payload is data.
+      uint32_t count : 11;
+      /// @brief Opcode for the command. Should be one of the values in @ref ert_cmd_opcode.
+      uint32_t opcode : 5;
+      /// @brief Reserved. Must be 0.
+      uint32_t reserved : 4;
+    };
+    uint32_t header;
+  };
+  /// @brief 1 mandatory CU mask, up to 4 optional CU masks, determined by @ref extra_cu_masks. Rest
+  /// of data.
+  uint32_t data[] __counted_by(count);
+};
+
+/// @brief Command chain packet.
+///
+/// This should match the command format defined in xdna-driver (amdxdna_cmd_chain) and XRT ERT
+/// (ert_cmd_chain).
+struct ert_cmd_chain_data {
+  /// @brief Number of commands in the chain.
+  uint32_t command_count;
+  /// @brief Index of last successfully submitted command in chain.
+  uint32_t submit_index;
+  /// @brief Index of failing command if cmd status is not completed.
+  uint32_t error_index;
+  /// @brief Reserved. Must be 0.
+  uint32_t reserved[3];
+  /// @brief BO handles of each command in the chain. The number of BO handles is determined by @ref
+  /// command_count.
+  uint64_t data[] __counted_by(command_count);
+};
 
 /// @brief XDNA device type.
 enum class XDNADeviceType {
@@ -922,7 +908,7 @@ hsa_status_t XdnaDriver::SubmitCmdChain(hsa_queue_t& q, HSA_QUEUEID& queue_id,
                                  3 +  // instruction sequence (address lo/hi + size)
                                  2 * pkt->num_kernargs);  // arguments (address lo/hi)
     const uint32_t cmd_data_bytesize = cmd_dwords * sizeof(uint32_t);
-    const uint32_t cmd_bytesize = sizeof(amdxdna_cmd) + cmd_data_bytesize;
+    const uint32_t cmd_bytesize = sizeof(ert_start_kernel_cmd) + cmd_data_bytesize;
     BOHandle cmd_bo_handle;
     hsa_status_t status = CreateCmdBO(cmd_bytesize, cmd_bo_handle);
     if (status != HSA_STATUS_SUCCESS) {
@@ -931,7 +917,7 @@ hsa_status_t XdnaDriver::SubmitCmdChain(hsa_queue_t& q, HSA_QUEUEID& queue_id,
     }
     cmd_bo_handles.push_back(cmd_bo_handle);
 
-    auto* cmd = static_cast<amdxdna_cmd*>(cmd_bo_handle.vaddr);
+    auto* cmd = static_cast<ert_start_kernel_cmd*>(cmd_bo_handle.vaddr);
     cmd->state = ERT_START_CU;
     cmd->extra_cu_masks = 0;
     // The driver places a structure before each command in a command chain.
@@ -968,8 +954,8 @@ hsa_status_t XdnaDriver::SubmitCmdChain(hsa_queue_t& q, HSA_QUEUEID& queue_id,
 
   // Create command chain.
   const uint32_t cmd_chain_data_bytesize = cmd_bo_handles.size() * sizeof(uint64_t);
-  const uint32_t cmd_data_bytesize = sizeof(amdxdna_cmd_chain) + cmd_chain_data_bytesize;
-  const uint32_t cmd_bytesize = sizeof(amdxdna_cmd) + cmd_data_bytesize;
+  const uint32_t cmd_data_bytesize = sizeof(ert_cmd_chain_data) + cmd_chain_data_bytesize;
+  const uint32_t cmd_bytesize = sizeof(ert_start_kernel_cmd) + cmd_data_bytesize;
   BOHandle cmd_bo_handle;
   hsa_status_t status = CreateCmdBO(cmd_bytesize, cmd_bo_handle);
   if (status != HSA_STATUS_SUCCESS) {
@@ -980,12 +966,13 @@ hsa_status_t XdnaDriver::SubmitCmdChain(hsa_queue_t& q, HSA_QUEUEID& queue_id,
   MAKE_NAMED_SCOPE_GUARD(cmd_bo_handle_guard, [&] { DestroyBOHandle(cmd_bo_handle); });
 
   // Create a command BO for the command chain.
-  auto* cmd = static_cast<amdxdna_cmd*>(cmd_bo_handle.vaddr);
+  auto* cmd = static_cast<ert_start_kernel_cmd*>(cmd_bo_handle.vaddr);
+  memset(cmd, 0, cmd_bytesize);
   cmd->state = ERT_CMD_STATE_NEW;
   cmd->extra_cu_masks = 0;
   cmd->count = cmd_data_bytesize / sizeof(uint32_t);
   cmd->opcode = ERT_CMD_CHAIN;
-  auto* cmd_chain = reinterpret_cast<amdxdna_cmd_chain*>(cmd->data);
+  auto* cmd_chain = reinterpret_cast<ert_cmd_chain_data*>(cmd->data);
   cmd_chain->command_count = cmd_bo_handles.size();
   for (size_t i = 0; i < cmd_bo_handles.size(); i++) {
     cmd_chain->data[i] = cmd_bo_handles[i].handle;
