@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 # Copyright Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
@@ -10,7 +11,6 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import Dict, Optional
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s: %(message)s"
@@ -19,9 +19,6 @@ logger = logging.getLogger(__name__)
 
 
 def parse_arguments() -> argparse.Namespace:
-    """
-    Parse command-line arguments with all-or-nothing logic.
-    """
     parser = argparse.ArgumentParser(
         description="Run ROCm Debug Agent tests with configurable paths.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -55,68 +52,34 @@ Environment Variables (used when CLI args are not provided):
     )
 
     args = parser.parse_args()
-
-    # Check if any arguments are provided.
-    args_provided = [args.test_bin, args.test_script]
-    args_count = sum(arg is not None for arg in args_provided)
-
-    # Either all arguments or none.
+    args_count = sum(arg is not None for arg in (args.test_bin, args.test_script))
     if args_count not in (0, 2):
         parser.error(
-            "Error: Either provide both arguments (--test-bin, --test-script) or none."
+            "Either provide both arguments (--test-bin, --test-script) or none."
         )
 
     return args
 
 
 def set_core_dump_limit() -> None:
-    """
-    Set core dump size limit to 0 (equivalent to ulimit -c 0).
-    """
     try:
         resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
-        logger.info("[✓] Core dump limit set to 0.")
+        logger.info("[OK] Core dump limit set to 0.")
     except (ValueError, OSError) as e:
-        logger.warning(f"[!] Failed to set core dump limit: {e}")
+        logger.warning("[!] Failed to set core dump limit: %s", e)
         logger.warning("Core files may be generated and consume disk space.")
 
 
 def validate_path(path: Path, path_type: str, must_exist: bool = True) -> Path:
-    """
-    Validate and resolve a path.
-
-    Args:
-        path: Path to validate.
-        path_type: Description of the path (for error messages).
-        must_exist: Whether the path must exist.
-
-    Returns:
-        Resolved path.
-
-    Raises:
-        SystemExit: If path validation fails.
-    """
     try:
-        resolved = path.resolve(strict=must_exist)
-        if must_exist and not resolved.exists():
-            logger.error(f"[X] Error: {path_type} does not exist: {resolved}")
-            sys.exit(1)
-        return resolved
+        return path.resolve(strict=must_exist)
+    except FileNotFoundError as e:
+        raise FileNotFoundError(f"{path_type} does not exist: {path}") from e
     except (OSError, RuntimeError) as e:
-        logger.error(f"[X] Error: Could not resolve {path_type} '{path}': {e}")
-        sys.exit(1)
+        raise RuntimeError(f"Could not resolve {path_type} '{path}': {e}") from e
 
 
-def get_default_paths() -> Dict[str, Path]:
-    """
-    Get default paths from the installed test bundle.
-
-    Returns:
-        Dictionary containing 'test_bin' and 'test_script' paths.
-
-    Raises:
-        SystemExit: If paths cannot be resolved.
-    """
+def get_default_paths() -> dict[str, Path]:
     script_dir = Path(__file__).resolve().parent
     candidate_dirs = [script_dir]
 
@@ -137,99 +100,28 @@ def get_default_paths() -> Dict[str, Path]:
                 "test_script": validate_path(test_script, "run-test.py"),
             }
 
-    logger.error("[X] Error: rocm-debug-agent test bundle not found.")
-    sys.exit(1)
+    searched_dirs = ", ".join(str(path) for path in candidate_dirs)
+    raise FileNotFoundError(
+        f"rocm-debug-agent test bundle not found. Searched: {searched_dirs}"
+    )
 
 
 def get_python_executable() -> str:
-    """
-    Validates and returns the Python executable path.
+    if not sys.executable:
+        raise RuntimeError("Could not identify a valid Python executable path.")
 
-    Returns:
-        Path to Python executable.
+    python_executable = Path(sys.executable)
+    if not python_executable.exists():
+        raise FileNotFoundError(f"Python executable not found: {python_executable}")
 
-    Raises:
-        SystemExit: If valid Python executable cannot be found.
-    """
-    if not sys.executable or not os.path.exists(sys.executable):
-        logger.error("[X] Error: Could not identify a valid Python executable path.")
-        sys.exit(1)
-    return sys.executable
+    return str(python_executable)
 
 
-def print_section(
-    title: str,
-    border_char: str = "=",
-    width: int = 80,
-    center: bool = True,
-    inline: bool = False,
-    color: Optional[str] = None,
-) -> None:
-    """
-    Print a visually distinct section header for console output.
-
-    Supports two modes:
-    1. Full multi-line section:
-        ==============================
-              Section Title
-        ==============================
-    2. Inline single-line section:
-        -------- Section Title --------
-
-    Args:
-        title (str):
-            The text to display inside the section header.
-        border_char (str, optional):
-            Character used for the border line (default: "=").
-        width (int, optional):
-            Total width of the header including borders (default: 80).
-        center (bool, optional):
-            Whether to center the title text for multi-line sections (default: True).
-        inline (bool, optional):
-            If True, print a single-line header with title inline (default: False).
-        color (str, optional):
-            ANSI color escape code applied to both title and borders
-            (default: None, no color).
-
-            Examples:
-                "\033[92m" → Green
-                "\033[93m" → Yellow
-                "\033[94m" → Blue
-                "\033[91m" → Red
-                "\033[0m" resets color
-
-    Example:
-        print_section("EXCLUSIVE FAILING TESTS COMPARISON")
-        print_section("Clang/Clang++", border_char="-", inline=True)
-        print_section("WARNING", border_char="!", width=50, color="\033[93m")
-
-    Notes:
-        - Works in standard terminals and logs.
-    """
-    reset = "\033[0m"
-    apply_color = (
-        (lambda text: f"{color}{text}{reset}") if color else (lambda text: text)
-    )
-
-    # Always add a newline to the beginning of the section.
+def print_section(title: str) -> None:
     logger.info("")
-
-    if inline:
-        # Prepare inline title.
-        title_str = f" {title} "
-        remaining = width - len(title_str)
-        if remaining < 0:
-            remaining = 0
-        left = border_char * (remaining // 2)
-        right = border_char * (remaining - len(left))
-        logger.info(apply_color(f"{left}{title_str}{right}"))
-    else:
-        # Multi-line section style.
-        border = border_char * width
-        title_line = f"{title:^{width}}" if center else title
-        logger.info(apply_color(border))
-        logger.info(apply_color(title_line))
-        logger.info(apply_color(border))
+    logger.info("=" * 80)
+    logger.info(f"{title:^80}")
+    logger.info("=" * 80)
 
 
 def run_tests(
@@ -237,106 +129,77 @@ def run_tests(
     test_script: Path,
     working_dir: Path,
     test_bin_dir: Path,
-    env_vars: Optional[Dict[str, str]] = None,
+    env_vars: dict[str, str] | None = None,
     max_retries: int = 3,
     retry_delay: int = 5,
 ) -> None:
-    """
-    Runs the testsuite with a retry mechanism.
-
-    Args:
-        python_executable: Path to Python interpreter.
-        test_script: Path to test script.
-        working_dir: Working directory for test execution.
-        test_bin_dir: Directory containing test binaries.
-        env_vars: Environment variables for test execution.
-        max_retries: Maximum number of retry attempts.
-        retry_delay: Base delay in seconds between retries.
-
-    Raises:
-        SystemExit: If all retry attempts fail.
-    """
     if env_vars is None:
         env_vars = os.environ.copy()
 
     cmd = [python_executable, str(test_script), str(test_bin_dir)]
+    last_error: subprocess.CalledProcessError | None = None
 
     for attempt in range(1, max_retries + 1):
-        print_section(f"Running tests (Attempt {attempt}/{max_retries})")
-
-        logger.info(f"Exec [{working_dir}]$ {shlex.join(cmd)}")
+        print_section(f"Running tests (attempt {attempt}/{max_retries})")
+        logger.info("Exec [%s]$ %s", working_dir, shlex.join(cmd))
 
         start_time = time.perf_counter()
         try:
-            subprocess.run(cmd, cwd=str(working_dir), check=True, env=env_vars)
-
-            duration = time.perf_counter() - start_time
-
-            print_section(
-                f"[✓] Tests succeeded on attempt {attempt}. Duration: {duration:.2f}s"
-            )
-            return
-
+            subprocess.run(cmd, cwd=working_dir, check=True, env=env_vars)
         except subprocess.CalledProcessError as e:
+            last_error = e
             duration = time.perf_counter() - start_time
             logger.error(
-                f"[X] Attempt {attempt}/{max_retries} failed with exit code "
-                f"{e.returncode} "
-                f"after {duration:.2f}s"
+                "[X] Attempt %s/%s failed with exit code %s after %.2fs",
+                attempt,
+                max_retries,
+                e.returncode,
+                duration,
             )
 
             if attempt < max_retries:
-                # Exponential-ish backoff: multiply base delay by attempt number
                 wait_time = attempt * retry_delay
-                logger.info(f"Retrying in {wait_time}s...")
+                logger.info("Retrying in %ss...", wait_time)
                 time.sleep(wait_time)
-            else:
-                # We failed all the attempts.
-                print_section(f"[X] All {max_retries} attempts failed.")
-                sys.exit(1)
+            continue
+
+        duration = time.perf_counter() - start_time
+        print_section(
+            f"[OK] Tests succeeded on attempt {attempt}. Duration: {duration:.2f}s"
+        )
+        return
+
+    raise RuntimeError(f"All {max_retries} attempts failed.") from last_error
 
 
 def main() -> None:
-    """
-    Main entry point for the script.
-    """
-    # Parse command-line arguments.
     args = parse_arguments()
 
     print_section("Path discovery")
-    # Determine paths to use.
     if args.test_bin is not None:
         logger.info("Using paths from command-line arguments.")
-        rocr_debug_agent_test_bin = validate_path(args.test_bin, "--test-bin")
-        rocr_debug_agent_test_script = validate_path(args.test_script, "--test-script")
+        test_bin = validate_path(args.test_bin, "--test-bin")
+        test_script = validate_path(args.test_script, "--test-script")
     else:
-        # Use default logic.
         logger.info("Using default paths from the installed test bundle.")
         defaults = get_default_paths()
-        rocr_debug_agent_test_bin = defaults["test_bin"]
-        rocr_debug_agent_test_script = defaults["test_script"]
+        test_bin = defaults["test_bin"]
+        test_script = defaults["test_script"]
 
-    # Derive the test binary directory.
-    test_bin_dir = rocr_debug_agent_test_bin.parent
+    test_bin_dir = test_bin.parent
+    logger.info("Test binary: %s", test_bin)
+    logger.info("Test script: %s", test_script)
+    logger.info("Test binary directory: %s", test_bin_dir)
 
-    logger.info(f"Test Binary: {rocr_debug_agent_test_bin}")
-    logger.info(f"Test Script: {rocr_debug_agent_test_script}")
-    logger.info(f"Test Bin Dir: {test_bin_dir}")
-
-    # Setup Python executable.
     python_executable = get_python_executable()
-
-    logger.info(f"Located python executable: {python_executable}")
+    logger.info("Located Python executable: %s", python_executable)
 
     print_section("Disabling core file generation")
-
-    # Set core dump limit to 0 (ulimit -c 0).
     set_core_dump_limit()
 
-    # Run tests.
     run_tests(
         python_executable=python_executable,
-        test_script=rocr_debug_agent_test_script,
+        test_script=test_script,
         working_dir=test_bin_dir,
         test_bin_dir=test_bin_dir,
         max_retries=args.max_retries,
