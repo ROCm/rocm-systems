@@ -1,6 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
+import sqlite3
 from typing import Any, Optional
 
 from sqlalchemy import (
@@ -215,13 +216,15 @@ class Metadata(Base):
 class Database:
     _session: Optional[Session] = None
     _engine: Optional[Engine] = None
+    _db_name: Optional[str] = None
 
     @classmethod
     def init(cls, db_name: str) -> str:
-        cls._engine = create_engine(f"sqlite:///{db_name}")
+        cls._engine = create_engine("sqlite:///:memory:")
         Base.metadata.create_all(cls._engine)
         cls._session = sessionmaker(bind=cls._engine)()
-        console_debug(f"SQLite database initialized with name: {db_name}")
+        cls._db_name = db_name
+        console_debug(f"SQLite database initialized in memory (target file: {db_name})")
         return db_name
 
     @classmethod
@@ -235,6 +238,10 @@ class Database:
 
         try:
             cls._session.commit()
+            memory_conn = cls._engine.raw_connection()
+            disk_conn = sqlite3.connect(cls._db_name)
+            memory_conn.backup(disk_conn)
+            disk_conn.close()
         except Exception as e:
             cls._session.rollback()
             console_error(f"Error writing analysis database: {e}")
@@ -243,7 +250,7 @@ class Database:
             cls._session = None
 
 
-def get_views() -> list[TextClause]:
+def get_view_definitions() -> dict[str, Select[Any]]:
     median_sort_subquery = (
         select(
             Kernel.kernel_uuid,
@@ -277,8 +284,8 @@ def get_views() -> list[TextClause]:
         .group_by(median_sort_subquery.c.kernel_uuid)
     ).subquery()
 
-    views: dict[str, Select[Any]] = {
-        "kernel_view": select(
+    return {
+        "kernel": select(
             Kernel.kernel_uuid.label("kernel_uuid"),
             Kernel.workload_id.label("workload_id"),
             Workload.name.label("workload_name"),
@@ -308,7 +315,7 @@ def get_views() -> list[TextClause]:
         .group_by(
             Kernel.kernel_uuid, Kernel.workload_id, Workload.name, Kernel.kernel_name
         ),
-        "kernel_metric_view": select(
+        "kernel_metric": select(
             Workload.workload_id.label("workload_id"),
             Workload.name.label("workload_name"),
             Kernel.kernel_uuid.label("kernel_uuid"),
@@ -331,7 +338,7 @@ def get_views() -> list[TextClause]:
             MetricDefinition.metric_uuid == KernelMetricValue.metric_uuid,
         )
         .join(Kernel, KernelMetricValue.kernel_uuid == Kernel.kernel_uuid),
-        "workload_metric_view": select(
+        "workload_metric": select(
             Workload.workload_id.label("workload_id"),
             Workload.name.label("workload_name"),
             MetricDefinition.metric_uuid.label("metric_uuid"),
@@ -353,10 +360,12 @@ def get_views() -> list[TextClause]:
         ),
     }
 
+
+def get_views() -> list[TextClause]:
     return [
         text(
-            f"CREATE VIEW {PREFIX}{view_name} AS "
+            f"CREATE VIEW {PREFIX}{name}_view AS "
             f"{stmt.compile(compile_kwargs={'literal_binds': True})}"
         )
-        for view_name, stmt in views.items()
+        for name, stmt in get_view_definitions().items()
     ]

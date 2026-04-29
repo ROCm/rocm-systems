@@ -15,7 +15,7 @@ import utils.analysis_orm as orm
 from config import rocprof_compute_home
 from rocprof_compute_analyze.analysis_base import OmniAnalyze_Base
 from utils import utils_analysis
-from utils.analysis_orm import Database, get_views
+from utils.analysis_orm import Database, get_view_definitions, get_views
 from utils.file_io import process_pc_sampling_kernel_trace
 from utils.logger import (
     console_debug,
@@ -204,14 +204,26 @@ class db_analysis(OmniAnalyze_Base):
                 )
             )
 
-        # Create views
-        for view_stmt in get_views():
-            Database.get_session().execute(view_stmt)
+        if self.get_args().output_format == "csv":
+            self._save_views_as_csv_files(Path(db_name).with_suffix(""))
+        else:
+            for view_stmt in get_views():
+                Database.get_session().execute(view_stmt)
+            Database.write()
+            console_debug("Completed writing database")
+            console_warning(f"Created file: {db_name}")
 
-        # Write database
-        Database.write()
-        console_debug("Completed writing database")
-        console_warning(f"Created file: {db_name}")
+    def _save_views_as_csv_files(self, csv_dir: Path) -> None:
+        """Execute view selects and write one CSV per view into ``csv_dir``."""
+        csv_dir.mkdir(parents=True, exist_ok=True)
+        session = Database.get_session()
+        for view_name, stmt in get_view_definitions().items():
+            rows = session.execute(stmt).fetchall()
+            view_df = pd.DataFrame(rows, columns=stmt.selected_columns.keys())
+            csv_path = csv_dir / f"{view_name}.csv"
+            view_df.to_csv(csv_path, index=False)
+            console_warning(f"Created file: {csv_path}")
+        session.close()
 
     def run_analysis_metrics(
         self,
