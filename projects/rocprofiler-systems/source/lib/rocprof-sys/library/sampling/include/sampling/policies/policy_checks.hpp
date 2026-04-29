@@ -138,14 +138,6 @@ ROCPROFSYS_DEFINE_POLICY_TRAIT(
     production_hooks,
     decltype(static_cast<bool>(std::declval<T&>().check_thread_guards(int64_t{}))));
 
-// TestHooksPolicy — three constexpr-ish override probes consulted by the
-// service alongside its own production state.
-ROCPROFSYS_DEFINE_POLICY_TRAIT(
-    test_hooks,
-    decltype(static_cast<bool>(std::declval<T const&>().override_duration_disabled())),
-    decltype(static_cast<bool>(std::declval<T const&>().override_causal_mode())),
-    decltype(static_cast<bool>(std::declval<T const&>().override_child_process())));
-
 }  // namespace rocprofsys::sampling::detail
 
 #undef ROCPROFSYS_DEFINE_POLICY_TRAIT

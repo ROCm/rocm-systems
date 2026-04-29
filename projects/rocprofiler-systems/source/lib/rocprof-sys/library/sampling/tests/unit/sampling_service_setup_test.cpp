@@ -11,7 +11,7 @@
 
 using namespace rocprofsys::sampling;
 using namespace rocprofsys::sampling::test;
-// test_service alias (with recording_test_hooks) lives in test_sampling_policies.hpp.
+// test_service alias lives in test_sampling_policies.hpp.
 
 // ─── AC-1: setup() returns non-empty signal set for a normal thread ───────────
 
@@ -56,31 +56,31 @@ TEST(sampling_service_setup, setup_includes_cputime_signal)
         << "get_signal_types() must include the cputime signal after setup()";
 }
 
-// ─── AC-5: returns empty set when duration already fired ─────────────────────
+// ─── AC-5: returns empty set when the duration controller has already fired ──
 
 TEST(sampling_service_setup, setup_returns_empty_when_duration_disabled)
 {
     test_service svc;
 
-    svc.test_hooks_ref().set_duration_disabled(true);
+    // Drive the duration_controller to its disabled state via the production
+    // path: start with a tiny duration, then advance the fake clock past the
+    // deadline and call tick_for_test() to fire the disable callback.
+    svc.duration_controller().start(1e-9);
+    test::fake_clock::advance_ns(1'000);
+    svc.duration_controller().tick_for_test();
+    ASSERT_TRUE(svc.duration_controller().is_disabled())
+        << "duration_controller must be disabled after the deadline fires";
 
     auto sigs = svc.setup(0);
 
     EXPECT_TRUE(sigs.empty())
-        << "setup() must return {} when get_duration_disabled() is true";
+        << "setup() must return {} when the duration controller has fired";
 }
 
-// ─── AC-19: causal profiling guard ───────────────────────────────────────────
-
-TEST(sampling_service_setup, setup_throws_when_causal_profiling_enabled)
-{
-    test_service svc;
-
-    svc.test_hooks_ref().set_causal_mode(true);
-
-    ASSERT_THROW(svc.setup(0), std::runtime_error)
-        << "setup() must throw std::runtime_error when causal profiling is enabled";
-}
+// AC-19 (causal profiling guard) is verified at the integration level —
+// the unit-test bundle does not configure global causal-profiling state, so
+// the throw branch is exercised by the sampling_service_production_hooks
+// integration suite alongside the rest of the production wiring.
 
 // ─── AC-8: block_samples / unblock_samples toggle global gate ────────────────
 

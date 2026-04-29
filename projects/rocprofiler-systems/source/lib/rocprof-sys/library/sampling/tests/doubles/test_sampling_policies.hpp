@@ -9,13 +9,12 @@
 #include "mock_timer_trigger.hpp"
 #include "mock_unwinder.hpp"
 #include "noop_perfetto_sink.hpp"
+#include "noop_production_hooks.hpp"
 #include "noop_report_writer.hpp"
 #include "recording_signal_dispatcher.hpp"
 #include "recording_trace_sink.hpp"
 #include "throwing_fatal_error_policy.hpp"
 
-#include "sampling/policies/production_hooks_policy.hpp"
-#include "sampling/policies/test_hooks_policy.hpp"
 #include "sampling/sampling_service.hpp"
 
 namespace rocprofsys::sampling::test
@@ -23,9 +22,10 @@ namespace rocprofsys::sampling::test
 
 // All-test-double policy bundle — satisfies the sampling_policies_traits concept.
 // Type aliases use lower_case to match sampling_policies_traits<> member names.
-// production_hooks defaults to noop_production_hooks so unit tests do not pull
-// in main-lib symbols; test_hooks uses recording_test_hooks so tests can flip
-// override flags through the bundle.
+// production_hooks is a tests/doubles/-local noop so unit tests do not pull
+// in main-lib symbols. There is no test_hooks slot — production code carries
+// no test-only state; tests drive behaviour through real service entry
+// points (e.g. enter_child_process_mode, duration_controller seams).
 struct test_sampling_policies
 {
     using unwinder          = mock_unwinder;
@@ -39,7 +39,6 @@ struct test_sampling_policies
     using perfetto_sink     = noop_perfetto_sink;
     using fatal_error       = throwing_fatal_error_policy;
     using production_hooks  = noop_production_hooks;
-    using test_hooks        = recording_test_hooks;
 };
 
 // sampling_service alias for unit tests.

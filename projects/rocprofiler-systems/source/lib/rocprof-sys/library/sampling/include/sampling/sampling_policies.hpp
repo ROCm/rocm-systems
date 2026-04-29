@@ -4,14 +4,13 @@
 #pragma once
 
 // DEC-6: sampling_policies_traits struct grouping.
-// sampling_service is templated on a single Policies type. The bundle now also
-// carries the production-hooks and test-hooks types as nested aliases so the
-// service template needs only one parameter (P4 — single source of truth for
-// dependent types).
+// sampling_service is templated on a single Policies type. The bundle carries
+// the production-hooks type as a nested alias so the service template needs
+// only one parameter (P4 — single source of truth for dependent types).
+// Test-only hook helpers (mocks, recording doubles) live entirely under
+// tests/doubles/; production code carries no test-hook surface.
 
 #include "sampling/policies/policy_checks.hpp"
-#include "sampling/policies/production_hooks_policy.hpp"
-#include "sampling/policies/test_hooks_policy.hpp"
 
 namespace rocprofsys::sampling
 {
@@ -19,8 +18,7 @@ namespace rocprofsys::sampling
 template <class UnwinderT, class OffloadT, class TraceSinkT, class TimerTriggerT,
           class OverflowTriggerT, class ClockT, class SignalDispatcherT,
           class ReportWriterT, class PerfettoSinkT, class FatalErrorT,
-          class ProductionHooksT = noop_production_hooks,
-          class TestHooksT       = noop_test_hooks>
+          class ProductionHooksT>
 struct sampling_policies_traits
 {
     using unwinder          = UnwinderT;
@@ -34,7 +32,6 @@ struct sampling_policies_traits
     using perfetto_sink     = PerfettoSinkT;
     using fatal_error       = FatalErrorT;
     using production_hooks  = ProductionHooksT;
-    using test_hooks        = TestHooksT;
 };
 
 // Production types are Linux-only. Forward-declared here; defined in src/linux/.
@@ -59,11 +56,12 @@ class real_fatal_error_policy;
 // default_policies.hpp before this template alias is instantiated.
 class real_production_hooks;
 
-using default_sampling_policies = sampling_policies_traits<
-    libunwind_unwinder, trace_cache_offload_adapter, real_trace_cache_sink,
-    real_timer_trigger, real_overflow_trigger, steady_clock, real_signal_dispatcher,
-    native_report_writer, real_perfetto_sink, real_fatal_error_policy,
-    real_production_hooks, noop_test_hooks>;
+using default_sampling_policies =
+    sampling_policies_traits<libunwind_unwinder, trace_cache_offload_adapter,
+                             real_trace_cache_sink, real_timer_trigger,
+                             real_overflow_trigger, steady_clock, real_signal_dispatcher,
+                             native_report_writer, real_perfetto_sink,
+                             real_fatal_error_policy, real_production_hooks>;
 #endif
 
 }  // namespace rocprofsys::sampling

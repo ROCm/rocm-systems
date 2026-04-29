@@ -68,10 +68,6 @@ sampling_service<Policies>::sampling_service()
     static_assert(is_production_hooks_policy_v<production_hooks>,
                   "Policies::production_hooks must satisfy ProductionHooksPolicy "
                   "(requires bool check_thread_guards(int64_t))");
-    static_assert(
-        is_test_hooks_policy_v<test_hooks>,
-        "Policies::test_hooks must satisfy TestHooksPolicy "
-        "(requires override_duration_disabled / _causal_mode / _child_process)");
 }
 
 template <class Policies>
@@ -211,16 +207,15 @@ template <class Policies>
 std::set<int>
 sampling_service<Policies>::setup(int64_t tid)
 {
-    // AC-19: causal profiling guard. test_hooks_ override lets unit tests
-    // exercise the guard without enabling actual causal profiling.
-    if(test_hooks_.override_causal_mode() || rocprofsys::get_use_causal())
+    // AC-19: causal profiling guard.
+    if(rocprofsys::get_use_causal())
     {
         throw std::runtime_error("Internal error! configuring sampling not permitted "
                                  "when causal profiling is enabled");
     }
 
     // AC-5: duration already fired (production state) OR test override.
-    if(duration_disabled_ || test_hooks_.override_duration_disabled()) return {};
+    if(duration_disabled_) return {};
 
     // I-12: production thread-state guards (ThreadState::Disabled, offset thread).
     // Generic ProductionHooks default returns true; real_production_hooks checks
@@ -277,7 +272,7 @@ std::set<int>
 sampling_service<Policies>::shutdown(int64_t tid)
 {
     // AC-20: child process — release state without per-tid processing.
-    if(child_process_mode_ || test_hooks_.override_child_process()) return {};
+    if(child_process_mode_) return {};
 
     LOG_DEBUG("Stopping sampler for thread {}...", tid);
 

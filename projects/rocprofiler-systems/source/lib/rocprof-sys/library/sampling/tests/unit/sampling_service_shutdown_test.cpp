@@ -10,7 +10,7 @@
 
 using namespace rocprofsys::sampling;
 using namespace rocprofsys::sampling::test;
-// test_service alias (with recording_test_hooks) lives in test_sampling_policies.hpp.
+// test_service alias lives in test_sampling_policies.hpp.
 
 // ─── AC-6: shutdown does not crash ───────────────────────────────────────────
 
@@ -50,7 +50,8 @@ TEST(sampling_service_shutdown, shutdown_in_child_skips_per_tid_processing)
     test_service svc;
     svc.setup(0);
 
-    svc.test_hooks_ref().set_child_process(true);
+    // Use the same entry point real postfork-child path uses (AC-20).
+    svc.enter_child_process_mode();
 
     svc.shutdown(0);
 

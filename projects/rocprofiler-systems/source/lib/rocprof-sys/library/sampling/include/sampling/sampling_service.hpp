@@ -6,8 +6,6 @@
 #include "sampling/data/backtrace_record.hpp"
 #include "sampling/platform_guard.hpp"
 #include "sampling/platform_traits.hpp"
-#include "sampling/policies/production_hooks_policy.hpp"
-#include "sampling/policies/test_hooks_policy.hpp"
 #include "sampling/sampling_policies.hpp"
 #include "sampling/src/pause_interval_registry.hpp"
 #include "sampling/src/sampling_duration_controller.hpp"
@@ -29,10 +27,10 @@ namespace rocprofsys::sampling
 // Callers use the services::sampling() Meyers singleton accessor (DEC-10).
 //
 // Policies bundles every dependent type as a nested using-alias (P4 — single
-// source of truth). Production-hooks and test-hooks slots live inside the
-// bundle as `Policies::production_hooks` and `Policies::test_hooks`, with
-// noop_production_hooks / noop_test_hooks defaults supplied by
-// sampling_policies_traits so test bundles only override what they need.
+// source of truth). Production-hooks live inside the bundle as
+// `Policies::production_hooks`. Test fixtures (mocks, recording doubles)
+// live entirely under tests/doubles/; production code carries no test-hook
+// slot or test-only state.
 template <class Policies>
 class sampling_service
 {
@@ -49,7 +47,6 @@ public:
     using perfetto_sink     = typename Policies::perfetto_sink;
     using fatal_error       = typename Policies::fatal_error;
     using production_hooks  = typename Policies::production_hooks;
-    using test_hooks        = typename Policies::test_hooks;
 
     using thread_state_t        = thread_sampler_state<Policies>;
     using pause_registry_t      = pause_interval_registry<clock>;
@@ -97,7 +94,6 @@ public:
     pause_registry_t&      pause_registry() noexcept { return pause_registry_; }
     duration_controller_t& duration_controller() noexcept { return duration_controller_; }
     production_hooks&      production_hooks_ref() noexcept { return production_hooks_; }
-    test_hooks&            test_hooks_ref() noexcept { return test_hooks_; }
 
     // ----- production state setters -----
     // Called by postfork_child() to put the service into child-process mode, where
@@ -120,7 +116,6 @@ private:
     perfetto_sink     perfetto_sink_;
     fatal_error       fatal_;
     production_hooks  production_hooks_;
-    test_hooks        test_hooks_;
 
     pause_registry_t                        pause_registry_;
     thread_sampler_state_registry<Policies> registry_;
