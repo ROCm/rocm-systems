@@ -23,7 +23,7 @@ from subcommands.bad_pages import BadPagesCommands
 from subcommands.default import DefaultCommands
 from subcommands.event import EventCommands
 from subcommands.firmware import FirmwareCommands
-from subcommands.list import ListCommands
+from subcommands.list_devices import ListDevicesCommands
 from subcommands.metric import MetricCommands
 from subcommands.monitor import MonitorCommands
 from subcommands.node import NodeCommands
@@ -39,7 +39,7 @@ from subcommands.xgmi import XgmiCommands
 
 __all__ = [
     "VersionCommands",
-    "ListCommands",
+    "ListDevicesCommands",
     "StaticCommands",
     "FirmwareCommands",
     "BadPagesCommands",

@@ -4,7 +4,7 @@ set(SUBCOMMAND_FILES
     default.py
     event.py
     firmware.py
-    list.py
+    list_devices.py
     metric.py
     monitor.py
     node.py
@@ -34,4 +34,4 @@ foreach(file ${SUBCOMMAND_FILES})
     list(APPEND SUBCOMMAND_OUTPUTS ${dst})
 endforeach()
 
-add_custom_target(amdsmi_cli_subcommands ALL DEPENDS ${SUBCOMMAND_OUTPUTS})
+add_custom_target(amdsmi_cli_subcommands ALL DEPENDS python_package ${SUBCOMMAND_OUTPUTS})

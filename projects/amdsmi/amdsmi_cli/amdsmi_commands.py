@@ -32,7 +32,7 @@ from subcommands import (
     DefaultCommands,
     EventCommands,
     FirmwareCommands,
-    ListCommands,
+    ListDevicesCommands,
     MetricCommands,
     MonitorCommands,
     NodeCommands,
@@ -53,7 +53,7 @@ class AMDSMICommands(
     DefaultCommands,
     EventCommands,
     FirmwareCommands,
-    ListCommands,
+    ListDevicesCommands,
     MetricCommands,
     MonitorCommands,
     NodeCommands,
@@ -72,7 +72,7 @@ class AMDSMICommands(
     displaying the output to the specified format and destination.
 
     Subcommand implementations are organized in the subcommands/ package.
-    Each subcommand module defines a base class (e.g., ListCommands) that
+    Each subcommand module defines a base class (e.g., ListDevicesCommands) that
     provides the methods for that CLI subcommand. This class inherits from
     all of them and adds __init__, profile, and rocm_smi.
     """
