@@ -341,6 +341,13 @@ hsa_status_t Runtime::FreeMemory(void* ptr) {
   std::unique_ptr<std::vector<AllocationRegion::notifier_t>> notifiers;
   MemoryRegion::AllocateFlags alloc_flags = core::MemoryRegion::AllocateNoFlags;
 
+  // Remove any IPC socket server connection entry that referenced this
+  // pointer.
+  {
+    std::lock_guard<std::mutex> lock(ipc_sock_server_lock_);
+    ipc_sock_server_conns_.erase(reinterpret_cast<uint64_t>(ptr));
+  }
+
   {
     std::lock_guard<std::shared_mutex> lock(memory_lock_);
 
@@ -367,6 +374,7 @@ hsa_status_t Runtime::FreeMemory(void* ptr) {
     if (it->second.thunk_bo) {
       if (!thunkLoader()->IsDXG()) {
         //clear metadata
+        std::cout << "Freeing thunk BO: " << it->second.thunk_bo << " for ptr: " << ptr << std::endl;
         HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtMemHandleFree(it->second.thunk_bo));
         if (status != HSAKMT_STATUS_SUCCESS) {
           return HSA_STATUS_ERROR;
