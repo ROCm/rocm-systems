@@ -440,8 +440,8 @@ ncclResult_t bootstrapGetUniqueId(struct ncclBootstrapHandle* handle, struct ncc
     return ncclInvalidUsage;
   }
 
-  // +1 anticipates the splitCount bump in ncclCommGrow_impl
-  handle->magic = hashCombine(comm->magic, comm->splitCount + 1);
+  // +1 anticipates the childCount bump in ncclCommGrow_impl
+  handle->magic = hashCombine(comm->magic, comm->childCount + 1);
   handle->nRanks = comm->nRanks;
   memcpy(&handle->addr, &bootstrapNetIfAddr, sizeof(union ncclSocketAddress));
   NCCLCHECK(bootstrapCreateRoot(handle, false));
@@ -689,7 +689,7 @@ ncclResult_t bootstrapInit(int nHandles, void* handles, struct ncclComm* comm, s
   if (handles != NULL) {
     comm->magic = state->magic = BOOTSTRAP_HANDLE(handles, 0)->magic; // boundary + new ranks
   } else if (parent != NULL) {
-    comm->magic = state->magic = hashCombine(parent->magic, (uint64_t)parent->splitCount); // non-boundary: derive same magic
+    comm->magic = state->magic = hashCombine(parent->magic, (uint64_t)parent->childCount); // non-boundary: derive same magic
   } else {
     WARN("bootstrapInit: handles and parent are both NULL");
     return ncclSystemError;

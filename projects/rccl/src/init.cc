@@ -2066,7 +2066,7 @@ struct ncclCommInitRankAsyncJob {
   // for ncclCommSplit
   struct ncclComm* parent;
   int color, key;
-  int splitCount;
+  int childCount;
   bool isGrow;   // true → grow path (bootstrapInit, not bootstrapSplit)
   // For Shrink
   int* excludeRanksList;
@@ -2207,14 +2207,14 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
   if (job->isGrow) {
     struct ncclBootstrapHandle* growHandle = (struct ncclBootstrapHandle*)job->commId;
     uint64_t baseMagic = growHandle ? growHandle->magic                                          // boundary + new
-                                    : hashCombine(job->parent->magic, (uint64_t)job->parent->splitCount); // non-boundary: same value
+                                    : hashCombine(job->parent->magic, (uint64_t)job->parent->childCount); // non-boundary: same value
     comm->commHash = commIdHash = hashCombine(baseMagic, (uint64_t)job->nranks);
     timers[TIMER_INIT_ALLOC] = clockNano();
     NCCLCHECKGOTO(commAlloc(comm, NULL, job->nranks, job->myrank), res, fail); // NULL parent: grown comm is independent
     timers[TIMER_INIT_ALLOC] = clockNano() - timers[TIMER_INIT_ALLOC];
     comm->isGrow = true;
-    INFO(NCCL_INIT, "%s comm %p rank %d nranks %d cudaDev %d nvmlDev %d busId %lx parent %p splitCount %d commId 0x%llx - Init START", job->funcName,
-         comm, comm->rank, comm->nRanks, comm->cudaDev, comm->nvmlDev, comm->busId, job->parent, job->splitCount, commIdHash);
+    INFO(NCCL_INIT, "%s comm %p rank %d nranks %d cudaDev %d nvmlDev %d busId %lx parent %p childCount %d commId 0x%llx - Init START", job->funcName,
+         comm, comm->rank, comm->nRanks, comm->cudaDev, comm->nvmlDev, comm->busId, job->parent, job->childCount, commIdHash);
     timers[TIMER_INIT_BOOTSTRAP] = clockNano();
     NCCLCHECKGOTO(bootstrapInit(job->nId, (struct ncclBootstrapHandle*)job->commId, comm, job->parent), res, fail);
     timers[TIMER_INIT_BOOTSTRAP] = clockNano() - timers[TIMER_INIT_BOOTSTRAP];
@@ -2232,17 +2232,17 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
         goto exit;
       }
     }
-    // child hash obtained from (parent hash, split count, color)
+    // child hash obtained from (parent hash, child count, color)
     uint64_t hacc[2] = {1, 1};
     eatHash(hacc, &job->parent->commHash);
-    eatHash(hacc, &job->splitCount);
+    eatHash(hacc, &job->childCount);
     eatHash(hacc, &job->color);
     comm->commHash = digestHash(hacc);
     timers[TIMER_INIT_ALLOC] = clockNano();
     NCCLCHECKGOTO(commAlloc(comm, job->parent, job->nranks, job->myrank), res, fail);
     timers[TIMER_INIT_ALLOC] = clockNano() - timers[TIMER_INIT_ALLOC];
-    INFO(NCCL_INIT, "%s comm %p rank %d nranks %d cudaDev %d nvmlDev %d busId %lx parent %p splitCount %d color %d key %d- Init START", job->funcName,
-         comm, comm->rank, comm->nRanks, comm->cudaDev, comm->nvmlDev, comm->busId, job->parent, job->splitCount, job->color, job->key);
+    INFO(NCCL_INIT, "%s comm %p rank %d nranks %d cudaDev %d nvmlDev %d busId %lx parent %p childCount %d color %d key %d- Init START", job->funcName,
+         comm, comm->rank, comm->nRanks, comm->cudaDev, comm->nvmlDev, comm->busId, job->parent, job->childCount, job->color, job->key);
     timers[TIMER_INIT_BOOTSTRAP] = clockNano();
     NCCLCHECKGOTO(bootstrapSplit(comm->commHash, comm, job->parent, job->color, job->key, parentRanks), res, fail);
     timers[TIMER_INIT_BOOTSTRAP] = clockNano() - timers[TIMER_INIT_BOOTSTRAP];
@@ -2373,8 +2373,8 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
     /* unlink child abort flag. */
     __atomic_store_n(&job->parent->childAbortFlag, NULL, __ATOMIC_RELEASE);
     TRACE_CALL("ncclCommSplit(%p, %d, %d, %p, %d, %d)", job->parent, job->color, job->key, comm, comm->rank, comm->nRanks);
-    INFO(NCCL_INIT, "%s comm %p rank %d nranks %d cudaDev %d nvmlDev %d busId %lx parent %p splitCount %d color %d key %d - Init COMPLETE", job->funcName,
-         comm, comm->rank, comm->nRanks, comm->cudaDev, comm->nvmlDev, comm->busId, job->parent, job->splitCount, job->color, job->key);
+    INFO(NCCL_INIT, "%s comm %p rank %d nranks %d cudaDev %d nvmlDev %d busId %lx parent %p childCount %d color %d key %d - Init COMPLETE", job->funcName,
+         comm, comm->rank, comm->nRanks, comm->cudaDev, comm->nvmlDev, comm->busId, job->parent, job->childCount, job->color, job->key);
   } else {
     // the name for the replay tool is ncclCommInitRank for all the variations
     TRACE_CALL("ncclCommInitRank(%p, %d, 0x%llx, %d, %d)", comm, comm->nRanks, commIdHash, comm->rank, comm->cudaDev);
@@ -3325,8 +3325,8 @@ static ncclResult_t ncclCommInitChildComm(ncclComm_t comm, ncclComm_t* newcomm, 
     NCCLCHECKGOTO(ncclCalloc(&job->excludeRanksList, excludeRanksCount), res, fail);
     memcpy(job->excludeRanksList, excludeRanksList, excludeRanksCount * sizeof(int));
   } else {
-    // each split has to lead to a unique comm, so increment the splitCount
-    job->splitCount = ++comm->splitCount;
+    // each split has to lead to a unique comm, so increment the childCount
+    job->childCount = ++comm->childCount;
     job->excludeRanksList = NULL;
   }
   job->cudaDev = comm->cudaDev;
@@ -3424,13 +3424,13 @@ ncclResult_t ncclCommGrow_impl(ncclComm_t comm, int nRanks, const ncclUniqueId* 
       goto exit;
     }
 
-    ++comm->splitCount; // must match the +1 used in bootstrapGetUniqueId
+    ++comm->childCount; // must match the +1 used in bootstrapGetUniqueId
 
     if (uniqueId != NULL) {
       memcpy(&recvHandle, uniqueId, sizeof(recvHandle));
     } else if (comm->nRanks > 1 && (comm->rank == 0 || comm->rank == comm->nRanks - 1)) {
       NCCLCHECKGOTO(bcastGrowHandle(&recvHandle, comm, /*isRoot=*/false), res, exit);
-      uint64_t expectedMagic = hashCombine(comm->magic, (uint64_t)comm->splitCount);
+      uint64_t expectedMagic = hashCombine(comm->magic, (uint64_t)comm->childCount);
       if (recvHandle.magic != expectedMagic) {
         WARN("ncclCommGrow: magic mismatch from root, got 0x%lx expected 0x%lx",
              (unsigned long)recvHandle.magic, (unsigned long)expectedMagic);
@@ -3501,7 +3501,7 @@ ncclResult_t ncclCommGrow_impl(ncclComm_t comm, int nRanks, const ncclUniqueId* 
     job->parent     = comm;
     job->cudaDev    = comm->cudaDev;
     job->myrank     = comm->rank;   // existing rank keeps its index
-    job->splitCount = comm->splitCount;
+    job->childCount = comm->childCount;
   } else {
     job->parent  = NULL;
     job->cudaDev = cudaDev;

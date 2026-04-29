@@ -752,7 +752,7 @@ struct ncclComm {
   int symmetricSupport;
   bool useNetPXN;
   bool useGdr;
-  int splitCount;
+  int childCount;
   bool isGrow;   // true when this comm was created via ncclCommGrow
 
   struct ncclDevrState devrState; // The symmetric runtime state

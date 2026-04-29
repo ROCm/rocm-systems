@@ -320,7 +320,7 @@ ncclResult_t pncclCommShrink(ncclComm_t comm, int* excludeRanksList, int exclude
 /*! @brief      Generate a per-communicator unique ID for grow.
     @details    Called by exactly one rank on an existing comm (the "root").
                 Opens a new bootstrap rendezvous socket, derives the magic
-                deterministically from (comm->magic, splitCount+1), and pushes
+                deterministically from (comm->magic, childCount+1), and pushes
                 the handle to boundary ranks 0 and N-1 of @p comm via the
                 existing parent bootstrap. The caller distributes the
                 resulting @p uniqueId to new ranks out-of-band.
