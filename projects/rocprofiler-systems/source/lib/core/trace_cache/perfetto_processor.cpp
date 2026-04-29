@@ -1037,9 +1037,11 @@ perfetto_processor_t::handle([[maybe_unused]] const backtrace_region_sample& _bt
         write_sampling_track_data<category::timer_sampling>(_bts, m_use_annotations);
     else if(_bts.category == trait::name<category::overflow_sampling>::value)
         write_sampling_track_data<category::overflow_sampling>(_bts, m_use_annotations);
-    // "cputime_sampling": consumed by tsv_processor only — its timestamps are
-    // [0, cpu_ns], not anchored to the wall-clock timeline, so emitting to Perfetto
-    // would produce nonsense slices anchored at t=0.
+    // "cputime_sampling": skipped intentionally. Its timestamps are
+    // relative ([0, cpu_ns] CPU-time deltas), not absolute wall-clock
+    // values, so a Perfetto slice would anchor at t=0 and produce
+    // misleading timelines. Wall-clock timer samples already represent
+    // these regions; the cpu-time delta is consumed elsewhere.
 }
 
 void

@@ -3,13 +3,12 @@
 
 #pragma once
 
-// trace_cache_offload_adapter — production EmitterPolicy (renamed from OffloadPolicy).
+// trace_cache_offload_adapter — production EmitterPolicy.
 //
-// Replaces tmpfile_offload_store. Drains ring buffer contents into an in-memory
-// per-tid store. No /tmp file I/O. Task #30 (move parse+resolve into shutdown(tid))
-// will extend write() to parse and emit backtrace_region_sample directly to
-// trace_cache::buffer_storage; for now, records are held until post_process() reads
-// them via the existing fan-out pipeline.
+// Drains ring buffer contents into an in-memory per-tid store. No /tmp file I/O.
+// Records sit here until shutdown(tid) drives parse+resolve+emit through
+// real_trace_cache_sink (the trace_cache emission point owned by the sink
+// policy).
 //
 // This header is intentionally lightweight: it only includes sampling data types
 // and logger so it can be included in test TUs without libunwind / AMD-SMI deps.

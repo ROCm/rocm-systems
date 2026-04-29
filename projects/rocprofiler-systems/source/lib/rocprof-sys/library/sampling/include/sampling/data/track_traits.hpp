@@ -8,8 +8,6 @@
 #include "sampling/data/timer_sample.hpp"
 #include "sampling/data/track_name.hpp"
 
-#include <cstdint>
-
 namespace rocprofsys::sampling
 {
 
@@ -18,7 +16,13 @@ namespace rocprofsys::sampling
 // template-method dispatch in real_trace_cache_sink and real_perfetto_sink.
 
 template <class Tag>
-struct track_traits;
+struct track_traits
+{
+    static_assert(sizeof(Tag) == 0,
+                  "track_traits is undefined for this tag — provide an explicit "
+                  "specialisation of track_traits<Tag> alongside its track-name "
+                  "tag struct in sampling/data/track_name.hpp");
+};
 
 template <>
 struct track_traits<timer_track_tag>

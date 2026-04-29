@@ -20,10 +20,15 @@
 // Category "timer_sampling" → wall_clock + trip_count aggregation.
 // Category "overflow_sampling" → (future) overflow_count aggregation (currently no-op).
 //
-// NOTE: tsv_processor_t deliberately does NOT inherit processor_t<T> here to keep
-// this header free of AMD-SMI and PMC collector dependencies (sample_processor.hpp
-// transitively requires amd_smi/amdsmi.h). For production wiring via processor_view_t,
-// use tsv_processor_adapter.hpp (included only from cache_manager.cpp).
+// NOTE: the registration entry point for the processor_t<> CRTP family is
+// tsv_processor_adapter_t (see tsv_processor_adapter.hpp). The bare
+// tsv_processor_t below is deliberately CRTP-free so this header — and the
+// trace-cache unit tests that consume it — stay clear of the AMD-SMI / PMC
+// collector header graph that sample_processor.hpp transitively pulls in
+// (amd_smi/amdsmi.h, gpu/ainic/cpu_pmc_sample types). All production
+// registration goes through tsv_processor_adapter_t, which inherits
+// processor_t<tsv_processor_adapter_t> and forwards the
+// backtrace_region_sample handle to this class.
 
 #include "core/trace_cache/sample_type.hpp"
 
