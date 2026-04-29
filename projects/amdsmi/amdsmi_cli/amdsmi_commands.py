@@ -7884,7 +7884,7 @@ class AMDSMICommands:
                 if args.cpu_pwr_limit[0][0] > max_power:
                     args.cpu_pwr_limit[0][0] = max_power
                     static_dict["set_pwr_limit"]["Warning_MSG"] = (
-                        f"maximum allowed power limit is {max_power}"
+                        f"maximum allowed power limit is {max_power} mW"
                     )
                     self.logger.store_cpu_output(args.cpu, "values", static_dict)
                     self.logger.print_output()
@@ -7914,7 +7914,6 @@ class AMDSMICommands:
                 )
                 self.logger.store_cpu_output(args.cpu, "values", static_dict)
                 self.logger.print_output()
-                return
             try:
                 amdsmi_interface.amdsmi_set_cpu_xgmi_width(
                     args.cpu, args.cpu_xgmi_link_width[0][0], args.cpu_xgmi_link_width[0][1]
@@ -7945,7 +7944,6 @@ class AMDSMICommands:
                 )
                 self.logger.store_cpu_output(args.cpu, "values", static_dict)
                 self.logger.print_output()
-                return
             try:
                 amdsmi_interface.amdsmi_set_cpu_socket_lclk_dpm_level(
                     args.cpu,
@@ -7972,7 +7970,6 @@ class AMDSMICommands:
                 )
                 self.logger.store_cpu_output(args.cpu, "values", static_dict)
                 self.logger.print_output()
-                return
             try:
                 mode = args.cpu_pwr_eff_mode[0][0]
                 util = (
@@ -8028,7 +8025,6 @@ class AMDSMICommands:
                 )
                 self.logger.store_cpu_output(args.cpu, "values", static_dict)
                 self.logger.print_output()
-                return
             try:
                 amdsmi_interface.amdsmi_set_cpu_gmi3_link_width_range(
                     args.cpu, args.cpu_gmi3_link_width[0][0], args.cpu_gmi3_link_width[0][1]
@@ -8095,7 +8091,6 @@ class AMDSMICommands:
                 )
                 self.logger.store_cpu_output(args.cpu, "values", static_dict)
                 self.logger.print_output()
-                return
             try:
                 amdsmi_interface.amdsmi_cpu_apb_disable(args.cpu, args.cpu_disable_apb[0][0])
                 static_dict["apbdisable"]["state"] = (
