@@ -21,16 +21,6 @@ class Bench_gfx9(benchmark_base.Bench_base):
         self.WAVEFRONT_SIZE = 64
         self.MATRIX_OPS_TYPE = "MFMA"
 
-        # Unused, keeping for reference
-        # self.lds_sizes = {
-        #     "gfx908": 64 * 1024,
-        #     "gfx90a": 64 * 1024,
-        #     "gfx940": 64 * 1024,
-        #     "gfx941": 64 * 1024,
-        #     "gfx942": 64 * 1024,
-        #     "gfx950": 64 * 1024,
-        # }
-
         self.matrix_kernel_selector = {
             "F4": "mfma_f8f6f4<FP4_E2M1>",
             "F6": "mfma_f8f6f4<FP6_E2M3>",

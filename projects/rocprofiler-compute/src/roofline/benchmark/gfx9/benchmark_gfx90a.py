@@ -27,12 +27,6 @@ class Bench_gfx90a(benchmark_gfx9_base.Bench_gfx9):
             "MFMA-F8",
         ]
 
-        self.cache_kernel_selector = {
-            "L1": "Cache_bw<float, 16 * 1024, 256>",
-            "L2": "Cache_bw<float, 8 * 1024 * 1024, 256>",
-            "MALL": "",
-        }
-
         self.matrix_ops = {
             "F4": 0,
             "F6": 0,

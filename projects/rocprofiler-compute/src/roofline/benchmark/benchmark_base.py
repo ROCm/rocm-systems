@@ -125,6 +125,7 @@ class Bench_base(ABC):
         self.matrix_i8_src: str
         self.set_kernel_source()
         self.set_cache_sizes()
+        self.set_cache_kernel_selector()
 
     # -----------------------------------------------------------------------------
     # Helper Methods and Classes
@@ -260,6 +261,7 @@ class Bench_base(ABC):
 
         with amdsmi_ctx():
             cu_count = get_gpu_num_compute_units()
+            assert cu_count != -1
             cache_info = get_gpu_cache_info()
             assert cache_info  # cache info must be populated
 
@@ -279,6 +281,14 @@ class Bench_base(ABC):
                 self.cache_sizes["L2"] = cache_values["cache_size"]*1024
             elif cache_values["cache_level"] == 3:
                 self.cache_sizes["MALL"] = cache_values["cache_size"]*1024
+
+    def set_cache_kernel_selector(self) -> None:
+        self.cache_kernel_selector = {}
+
+        for level in ["L1", "L2", "MALL"]:
+            if level in self.cache_sizes.keys():
+                self.cache_kernel_selector[level] = \
+                    "Cache_bw<float, " + str(self.cache_sizes[level]) + ", 256>"
 
     def run_get_samples(
         self,

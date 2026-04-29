@@ -5950,6 +5950,52 @@ def test_amdsmi_get_gpu_memory_partition():
             assert partition == "N/A"
 
 
+def test_amdsmi_get_gpu_cache_size():
+    from utils.amdsmi_interface import get_gpu_cache_info, import_amdsmi_module
+
+    _ = import_amdsmi_module()
+
+    with mock.patch("utils.amdsmi_interface.get_device_handles") as device_handles_mock:
+        device_handles_mock.return_value = [12345]
+        with mock.patch(
+            "amdsmi.amdsmi_get_gpu_cache_info"
+        ) as cache_info_mock:
+            cache_info_mock.return_value = {"Mock Cache Info"}
+            cache_info = get_gpu_cache_info()
+            cache_info_mock.assert_called_once()
+            assert cache_info == {"Mock Cache Info"}
+
+        with mock.patch(
+            "amdsmi.amdsmi_get_gpu_cache_info",
+            side_effect=Exception("Mock exception"),
+        ):
+            cache_info = get_gpu_cache_info()
+            assert cache_info == {}
+
+
+def test_amdsmi_get_gpu_num_compute_units():
+    from utils.amdsmi_interface import get_gpu_num_compute_units, import_amdsmi_module
+
+    _ = import_amdsmi_module()
+
+    with mock.patch("utils.amdsmi_interface.get_device_handles") as device_handles_mock:
+        device_handles_mock.return_value = [12345]
+        with mock.patch(
+            "amdsmi.amdsmi_get_gpu_asic_info"
+        ) as cu_mock:
+            cu_mock.return_value = {"num_compute_units": 10}
+            cu_count = get_gpu_num_compute_units()
+            cu_mock.assert_called_once()
+            assert cu_count == 10
+
+        with mock.patch(
+            "amdsmi.amdsmi_get_gpu_asic_info",
+            side_effect=Exception("Mock exception"),
+        ):
+            cache_info = get_gpu_num_compute_units()
+            assert cache_info == -1
+
+
 # =============================================================================
 # TESTS FOR ITERATION MULTIPLEXING
 # =============================================================================

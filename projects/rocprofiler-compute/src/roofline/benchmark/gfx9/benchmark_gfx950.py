@@ -21,12 +21,6 @@ class Bench_gfx950(benchmark_gfx9_base.Bench_gfx9):
 
         self.unsupported_data_types = []
 
-        self.cache_kernel_selector = {
-            "L1": "Cache_bw<float, 32 * 1024, 256>",
-            "L2": "Cache_bw<float, 4 * 1024 * 1024, 256>",
-            "MALL": "Cache_bw<float, 64 * 1024 * 1024, 256>",
-        }
-
         self.matrix_ops = {
             "F4": 131072,
             "F6": 131072,

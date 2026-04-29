@@ -21,12 +21,6 @@ class Bench_gfx942(benchmark_gfx9_base.Bench_gfx9):
 
         self.unsupported_data_types = ["MFMA-F4", "MFMA-F6", "MFMA-F6F4"]
 
-        self.cache_kernel_selector = {
-            "L1": "Cache_bw<float, 32 * 1024, 256>",
-            "L2": "Cache_bw<float, 4 * 1024 * 1024, 256>",
-            "MALL": "Cache_bw<float, 64 * 1024 * 1024, 256>",
-        }
-
         self.matrix_ops = {
             "F4": 0,
             "F6": 0,
