@@ -33,6 +33,8 @@ find_package(Clang REQUIRED CONFIG
              PATH_SUFFIXES "llvm/lib/cmake/clang")
 
 ## Building test executable
+
+
 add_executable ( ${EXE_NAME} ${KERN_SRC} ${CTRL_SRC} ${UTIL_SRC} )
 target_include_directories ( ${EXE_NAME}
   PRIVATE
@@ -49,6 +51,7 @@ target_link_libraries( ${EXE_NAME}
       aqlprofile::headers
       hsa-runtime64::hsa-runtime64
       dl )
+target_link_options( ${EXE_NAME} PUBLIC -static)
 install(TARGETS ${EXE_NAME} RUNTIME DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME} COMPONENT tests)
 
 ## Build the hsa (standalone) simple_convolution test
