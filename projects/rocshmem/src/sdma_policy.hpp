@@ -44,10 +44,12 @@ class SdmaImpl {
  public:
   // Configuration (set from environment variables during init)
   bool sdmaEnabled{true};
-  uint64_t sdmaDirtyPEs{0};  // Bitmask: bit i set = PE i has pending SDMA ops (atomic)
+  // Dirty bitmask: bit [local_pe * numChannels + ch] set = channel ch has a
+  // pending SDMA op to local_pe.  With up to 8 PEs × 8 channels = 64 bits.
+  uint64_t sdmaDirtyPECh{0};
   size_t sdmaThreshold{256};  // Use SDMA for transfers >= 256B
   int numChannels{1};
-  int sdmaChannel{0};  // Per-context channel index (assigned at ctx creation)
+  int sdmaChannel{0};  // Per-context channel index (fallback / quietAll path)
 
   // Device resources - 2D array: [shm_size * numChannels]
   // Index as: deviceHandles_d[local_pe * numChannels + sdmaChannel]
@@ -61,11 +63,26 @@ class SdmaImpl {
   __host__ void sdmaHostInit(int pe, int num_pes, TcpBootstrap* bootstrap);
   __host__ void sdmaHostStop();
 
-  // Device-side copy using a single channel (for single-thread operations)
-  // Returns the handle used (for direct quietAll by caller).
+  // Device-side copy with warp-affine channel selection to minimise CAS contention.
+  //
+  // The ctx-level sdmaChannel (= ctx_id % numChannels) already distributes blocks
+  // across channels.  However, each block's warp_group has kNumWarpsPerGroup warps
+  // that all call put_nbi_warp for the same destination PE — each wavefront fires
+  // its own CAS into the same (sdmaChannel, dest_PE) ring, causing up to
+  // kNumWarpsPerGroup-way intra-block CAS contention on top of the inter-block load.
+  //
+  // Offsetting by the warp index within the workgroup gives each wavefront its own
+  // dedicated ring: (sdmaChannel + warp_id_in_wg) % numChannels.  With 8 warps and
+  // 8 channels the intra-block contention drops to zero; inter-block contention on
+  // any single ring drops from (numBlocks/numChannels * kNumWarpsPerGroup) to just
+  // (numBlocks/numChannels).
   __device__ anvil::SdmaQueueDeviceHandle* sdmaCopy(void* dst, void* src,
                                                      size_t size, int local_pe) {
-    int idx = local_pe * numChannels + sdmaChannel;
+    // AMD wavefront is 64 threads wide (gfx9/gfx10/gfx11 with wave64 mode).
+    constexpr int kWavefrontSize = 64;
+    int warp_id_in_wg = static_cast<int>(threadIdx.x / kWavefrontSize);
+    int effective_channel = (sdmaChannel + warp_id_in_wg) % numChannels;
+    int idx = local_pe * numChannels + effective_channel;
     anvil::SdmaQueueDeviceHandle* handle = deviceHandles_d[idx];
     if (handle != nullptr) {
       // Flush GL0/GL1 → GL2 before submitting the SDMA descriptor.
@@ -75,36 +92,48 @@ class SdmaImpl {
       // because SDMA probes GL2 via the coherence protocol on the same die.
       __builtin_amdgcn_fence(__ATOMIC_RELEASE, "agent");
       anvil::put(*handle, dst, src, size);
-      __hip_atomic_fetch_or(&sdmaDirtyPEs, 1ULL << local_pe, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
+      // Mark (local_pe, effective_channel) dirty so sdmaQuiet drains the right channel.
+      uint64_t bit = 1ULL << (local_pe * numChannels + effective_channel);
+      __hip_atomic_fetch_or(&sdmaDirtyPECh, bit, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
     }
     return handle;
   }
 
-  // Wait for SDMA completions for a specific PE (this context's channel)
-  // Atomically reads and clears the PE's dirty bit — no race with concurrent submits.
+  // Wait for SDMA completions for a specific PE across all channels.
+  // Atomically clears all (local_pe, ch) dirty bits and drains only the
+  // channels that had pending work.  No DeepEP changes required: the
+  // count-sending thread (which calls rocshmem_fence(pe)) is in the same CTA
+  // as the data-sending warp, so both see the same blockIdx — but we drain all
+  // channels here anyway to be safe against any channel-selection scheme.
   __device__ void sdmaQuiet(int local_pe) {
-    uint64_t mask = 1ULL << local_pe;
-    if (!(__hip_atomic_fetch_and(&sdmaDirtyPEs, ~mask, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT) & mask))
-      return;
-    int idx = local_pe * numChannels + sdmaChannel;
-    anvil::SdmaQueueDeviceHandle* handle = deviceHandles_d[idx];
-    if (handle != nullptr) {
-      anvil::quiet(*handle);
+    // Build mask covering all channels for this PE.
+    uint64_t pe_mask = ((1ULL << numChannels) - 1) << (local_pe * numChannels);
+    uint64_t was_dirty = __hip_atomic_fetch_and(&sdmaDirtyPECh, ~pe_mask,
+                                                __ATOMIC_RELAXED,
+                                                __HIP_MEMORY_SCOPE_AGENT) & pe_mask;
+    if (!was_dirty) return;
+    // Drain only the channels that were marked dirty.
+    for (int ch = 0; ch < numChannels; ch++) {
+      if (was_dirty & (1ULL << (local_pe * numChannels + ch))) {
+        anvil::SdmaQueueDeviceHandle* handle = deviceHandles_d[local_pe * numChannels + ch];
+        if (handle != nullptr) anvil::quiet(*handle);
+      }
     }
   }
 
-  // Wait for all SDMA completions (only PEs with pending ops)
+  // Wait for all SDMA completions across all PEs and channels.
+  // Iterates the sdmaDirtyPECh bitmask where each set bit corresponds to a
+  // (pe, channel) pair that has a pending SDMA op.
   __device__ void sdmaQuietAll() {
-    uint64_t dirty = __hip_atomic_exchange(&sdmaDirtyPEs, 0ULL, __ATOMIC_RELAXED,
+    uint64_t dirty = __hip_atomic_exchange(&sdmaDirtyPECh, 0ULL, __ATOMIC_RELAXED,
                                            __HIP_MEMORY_SCOPE_AGENT);
     while (dirty) {
-      int pe = __builtin_ffsll(dirty) - 1;
-      int idx = pe * numChannels + sdmaChannel;
-      anvil::SdmaQueueDeviceHandle* handle = deviceHandles_d[idx];
+      int bit = __builtin_ffsll(dirty) - 1;  // bit = pe * numChannels + ch
+      anvil::SdmaQueueDeviceHandle* handle = deviceHandles_d[bit];
       if (handle != nullptr) {
         anvil::quiet(*handle);
       }
-      dirty &= ~(1ULL << pe);
+      dirty &= ~(1ULL << bit);
     }
   }
 };
