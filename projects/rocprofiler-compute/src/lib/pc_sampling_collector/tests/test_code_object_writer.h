@@ -13,4 +13,6 @@ protected:
     rocm_compute::code_object_writer_json_t m_writer;
     const rocm_compute::symbol_t m_symbol0{"sym0", 0x10, 0x1000, 0x20};
     const rocm_compute::symbol_t m_symbol1{"sym1", 0x30, 0x1100, 0x40};
+    const rocm_compute::instruction_t m_inst0{"s_mov_b32", "// mov", 0x1000, 0x10, 4};
+    const rocm_compute::instruction_t m_inst1{"s_add_i32", "// add", 0x1004, 0x14, 4};
 };

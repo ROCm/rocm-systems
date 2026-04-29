@@ -178,6 +178,78 @@ TEST_F(test_code_object_writer_t, ProvidedSymbolsInDifferentCodeObjs_SerializesU
     EXPECT_EQ(json["code_objects"][1]["symbols"][0]["name"], m_symbol1.name);
 }
 
+TEST_F(test_code_object_writer_t, ProvidedNoInstructions_SerializesEmptyInstructionsArray)
+{
+    m_writer.start_code_obj(1);
+    m_writer.start_symbol(m_symbol0);
+    m_writer.end_symbol();
+    m_writer.end_code_obj();
+
+    const auto json = nlohmann::json::parse(m_writer.get_result());
+    const auto& symbol = json["code_objects"][0]["symbols"][0];
+    ASSERT_TRUE(symbol.contains("instructions"));
+    EXPECT_TRUE(symbol["instructions"].is_array());
+    EXPECT_EQ(symbol["instructions"].size(), 0);
+}
+
+TEST_F(test_code_object_writer_t, ProvidedInstruction_SerializesItInsideSymbol)
+{
+    m_writer.start_code_obj(1);
+    m_writer.start_symbol(m_symbol0);
+    m_writer.write_instruction(m_inst0);
+    m_writer.end_symbol();
+    m_writer.end_code_obj();
+
+    const auto json = nlohmann::json::parse(m_writer.get_result());
+    const auto& instructions = json["code_objects"][0]["symbols"][0]["instructions"];
+    ASSERT_EQ(instructions.size(), 1);
+    EXPECT_EQ(instructions[0]["name"], m_inst0.name);
+    EXPECT_EQ(instructions[0]["comment"], m_inst0.comment);
+    EXPECT_EQ(instructions[0]["virtual_address"], m_inst0.virtual_address);
+    EXPECT_EQ(instructions[0]["code_obj_offset"], m_inst0.code_obj_offset);
+    EXPECT_EQ(instructions[0]["size"], m_inst0.size);
+}
+
+TEST_F(test_code_object_writer_t, ProvidedMultipleInstructions_SerializesAllInOrder)
+{
+    m_writer.start_code_obj(1);
+    m_writer.start_symbol(m_symbol0);
+    m_writer.write_instruction(m_inst0);
+    m_writer.write_instruction(m_inst1);
+    m_writer.end_symbol();
+    m_writer.end_code_obj();
+
+    const auto json = nlohmann::json::parse(m_writer.get_result());
+    const auto& instructions = json["code_objects"][0]["symbols"][0]["instructions"];
+    ASSERT_EQ(instructions.size(), 2);
+    EXPECT_EQ(instructions[0]["name"], m_inst0.name);
+    EXPECT_EQ(instructions[1]["name"], m_inst1.name);
+}
+
+TEST_F(test_code_object_writer_t, ProvidedInstructionsInDifferentSymbols_SerializesUnderRespectiveOwners)
+{
+    m_writer.start_code_obj(1);
+
+    m_writer.start_symbol(m_symbol0);
+    m_writer.write_instruction(m_inst0);
+    m_writer.end_symbol();
+
+    m_writer.start_symbol(m_symbol1);
+    m_writer.write_instruction(m_inst1);
+    m_writer.end_symbol();
+
+    m_writer.end_code_obj();
+
+    const auto json = nlohmann::json::parse(m_writer.get_result());
+    const auto& symbols = json["code_objects"][0]["symbols"];
+    ASSERT_EQ(symbols.size(), 2);
+
+    ASSERT_EQ(symbols[0]["instructions"].size(), 1);
+    EXPECT_EQ(symbols[0]["instructions"][0]["name"], m_inst0.name);
+
+    ASSERT_EQ(symbols[1]["instructions"].size(), 1);
+    EXPECT_EQ(symbols[1]["instructions"][0]["name"], m_inst1.name);
+}
 
 
 void test_code_object_writer_t::SetUp()

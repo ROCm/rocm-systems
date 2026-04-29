@@ -39,5 +39,6 @@ private:
     symbol_t                m_current_symbol{};
     nlohmann::json::array_t m_code_objects = nlohmann::json::array();
     nlohmann::json::array_t m_symbols      = nlohmann::json::array();
+    nlohmann::json::array_t m_instructions = nlohmann::json::array();
 };
 }  // namespace rocm_compute

@@ -45,6 +45,7 @@ void code_object_writer_json_t::end_symbol()
         {"code_object_offset", m_current_symbol.code_object_offset},
         {"virtual_address", m_current_symbol.virtual_address},
         {"size", m_current_symbol.size},
+        {"instructions", std::move(m_instructions)},
     }));
 }
 
@@ -52,6 +53,14 @@ void code_object_writer_json_t::write_instruction(const instruction_t& inst)
 {
     Expects(m_code_object_closure_count != 0);
     Expects(m_symbol_closure_count != 0);
+
+    m_instructions.push_back(nlohmann::json::object({
+        {"name", inst.name},
+        {"comment", inst.comment},
+        {"virtual_address", inst.virtual_address},
+        {"code_obj_offset", inst.code_obj_offset},
+        {"size", inst.size},
+    }));
 }
 
 std::string code_object_writer_json_t::get_result()
