@@ -39,11 +39,11 @@ bool IsArchMatch(char const* arch, char const* target);
 
 /* Host Code: Must match NCCL_LL128_LINESIZE / NCCL_LL128_LINEELEMS in device 
  * code for the same arch. */
-inline int ncclLL128LineElemsFromArch(char const* arch) {
+inline int rcclLL128LineElemsFromArch(char const* arch) {
   return IsArchMatch(arch, "gfx1250") ? 128 / (int)sizeof(uint64_t) : 64 / (int)sizeof(uint64_t);
 }
-inline int ncclLL128DataElemsFromArch(char const* arch) {
-  return ncclLL128LineElemsFromArch(arch) - 1;
+inline int rcclLL128DataElemsFromArch(char const* arch) {
+  return rcclLL128LineElemsFromArch(arch) - 1;
 }
 
 #endif // ARCHINFO_H

@@ -168,7 +168,7 @@ static_assert(NCCL_LL_CLEAN_MASK % NCCL_STEPS == 0, "Invalid NCCL_LL_CLEAN_MASK 
 
  /* Note regarding LL128 macros settings in RCCL below:
   * Device code: NCCL_LL128_LINESIZE/LINEELEMS/DATAELEMS are only defined for device 
-  * Host code: Use ncclLL128LineElemsFromArch() / ncclLL128DataElemsFromArch() (archinfo.h) or
+  * Host code: Use rcclLL128LineElemsFromArch() / rcclLL128DataElemsFromArch() (archinfo.h) or
   * comm->ll128LineElems / comm->ll128DataElems (and proxyState->* in the net proxy). */
 
 #if __HIP_DEVICE_COMPILE__
