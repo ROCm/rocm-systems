@@ -256,10 +256,11 @@ public:
   /// @param[out] offset memory offset in bytes
   /// @param[out] drm_fd file descriptor
   /// @param[out] drm_fd_offset offset in @p drm_fd
+  /// @param[out] import_gpu gpu agent used to create amdgpu_bo_handle for host memory
   virtual hsa_status_t CreateShareableHandle(void* va, void* mem, size_t size,
                                              const core::Agent& agent,
                                              core::ShareableHandle* handle, uint64_t* offset,
-                                             int* drm_fd, uint64_t* drm_fd_offset) = 0;
+                                             int* drm_fd, uint64_t* drm_fd_offset, core::Agent** import_gpu = nullptr) = 0;
 
   /// @brief Destroys the handle created during @ref CreateShareableHandle.
   ///

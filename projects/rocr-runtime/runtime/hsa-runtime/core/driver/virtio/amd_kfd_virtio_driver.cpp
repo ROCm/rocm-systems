@@ -527,7 +527,7 @@ hsa_status_t KfdVirtioDriver::Unmap(core::ShareableHandle handle, void* mem, siz
 hsa_status_t KfdVirtioDriver::CreateShareableHandle(void* va, void* mem, size_t size,
                                                     const core::Agent& agent,
                                                     core::ShareableHandle* handle, uint64_t* offset,
-                                                    int* drm_fd, uint64_t* drm_fd_offset) {
+                                                    int* drm_fd, uint64_t* drm_fd_offset, core::Agent** import_gpu) {
   return HSA_STATUS_ERROR;
 }
 

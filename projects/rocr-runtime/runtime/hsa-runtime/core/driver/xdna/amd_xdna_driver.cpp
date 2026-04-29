@@ -543,7 +543,7 @@ hsa_status_t XdnaDriver::Unmap(core::ShareableHandle handle, void *mem,
 hsa_status_t XdnaDriver::CreateShareableHandle(void* va, void* mem, size_t size,
                                                const core::Agent& agent,
                                                core::ShareableHandle* handle, uint64_t* offset,
-                                               int* drm_fd, uint64_t* drm_fd_offset) {
+                                               int* drm_fd, uint64_t* drm_fd_offset, core::Agent** import_gpu) {
   // Find BO handle; mem is the BO handle; see AllocateMemory.
   auto bo_handle = FindBOHandle(mem);
   if (!bo_handle.IsValid()) {

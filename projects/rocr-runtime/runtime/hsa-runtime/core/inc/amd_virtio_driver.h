@@ -109,7 +109,7 @@ class KfdVirtioDriver final : public core::Driver {
   hsa_status_t Unmap(core::ShareableHandle handle, void* mem, size_t offset, size_t size) override;
   hsa_status_t CreateShareableHandle(void* va, void* mem, size_t size, const core::Agent& agent,
                                      core::ShareableHandle* handle, uint64_t* offset, int* drm_fd,
-                                     uint64_t* drm_fd_offset) override;
+                                     uint64_t* drm_fd_offset, core::Agent** import_gpu = nullptr) override;
   hsa_status_t DestroyShareableHandle(core::ShareableHandle* handle) override;
   hsa_status_t GetTileConfig(uint32_t node_id, HsaGpuTileConfig* config) const;
   hsa_status_t SPMAcquire(uint32_t node_id) const override;

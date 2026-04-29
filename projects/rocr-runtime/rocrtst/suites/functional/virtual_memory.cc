@@ -1953,3 +1953,278 @@ void VirtMemoryTestInterProcess::ChildProcessImpl() {
 
   PROCESS_LOG("Child: Virtual Memory test PASSED\n");
 }
+
+void VirtMemoryTestBasic::TestHostMemoryAllocation(void) {
+  // Get CPU agent
+  std::vector<hsa_agent_t> cpus;
+  ASSERT_SUCCESS(hsa_iterate_agents(rocrtst::IterateCPUAgents, &cpus));
+  ASSERT_GT(cpus.size(), 0);
+  hsa_agent_t cpu_agent = cpus[0];
+
+  // Get all GPU agents
+  std::vector<hsa_agent_t> gpus;
+  ASSERT_SUCCESS(hsa_iterate_agents(rocrtst::IterateGPUAgents, &gpus));
+  ASSERT_GT(gpus.size(), 0);
+
+  // Get CPU system memory pool
+  hsa_amd_memory_pool_t cpu_pool;
+  ASSERT_SUCCESS(hsa_amd_agent_iterate_memory_pools(cpu_agent, rocrtst::GetGlobalMemoryPool, &cpu_pool));
+
+  // Check if pool supports allocation
+  rocrtst::pool_info_t pool_i;
+  ASSERT_SUCCESS(rocrtst::AcquirePoolInfo(cpu_pool, &pool_i));
+  if (!pool_i.alloc_allowed) {
+    if (verbosity() > 0) {
+      std::cout << "    CPU pool does not support allocation. Skipping." << std::endl;
+      std::cout << kSubTestSeparator << std::endl;
+    }
+    return;
+  }
+
+  // Reserve virtual address space
+  size_t alloc_size = pool_i.alloc_granule * 100;
+  void* reserved_va = nullptr;
+  ASSERT_SUCCESS(hsa_amd_vmem_address_reserve(&reserved_va, alloc_size, 0, 0));
+  ASSERT_NE(reserved_va, nullptr);
+
+  // Create memory only handle from CPU pool
+  hsa_amd_vmem_alloc_handle_t alloc_handle;
+  ASSERT_SUCCESS(hsa_amd_vmem_handle_create(cpu_pool, alloc_size, MEMORY_TYPE_NONE, 0, &alloc_handle));
+
+  // Map the memory handle to reserved VA
+  ASSERT_SUCCESS(hsa_amd_vmem_map(reserved_va, alloc_size, 0, alloc_handle, 0));
+
+  hsa_access_permission_t perms;
+  ASSERT_SUCCESS(hsa_amd_vmem_get_access(reserved_va, &perms, cpu_agent));
+  ASSERT_EQ(perms, HSA_ACCESS_PERMISSION_NONE); // no perms granted initially
+
+  // Set RW access permissions for CPU agent
+  hsa_amd_memory_access_desc_t cpu_access = {HSA_ACCESS_PERMISSION_RW, cpu_agent};
+  ASSERT_SUCCESS(hsa_amd_vmem_set_access(reserved_va, alloc_size, &cpu_access, 1));
+
+  // Verify access by writing to the region
+  int* test_data = static_cast<int*>(reserved_va);
+  for (int i = 0; i < alloc_size / sizeof(int); i++) {
+    test_data[i] = i * 2;
+  }
+
+  // Verify permissions were set correctly for the cpu_agent
+  ASSERT_SUCCESS(hsa_amd_vmem_get_access(reserved_va, &perms, cpu_agent));
+  ASSERT_EQ(perms, HSA_ACCESS_PERMISSION_RW);
+  
+  // Other agents should not have access to this host memory
+  for (int i = 0; i < gpus.size(); i++) {
+    ASSERT_SUCCESS(hsa_amd_vmem_get_access(reserved_va, &perms, gpus[i]));
+    ASSERT_EQ(perms, HSA_ACCESS_PERMISSION_NONE);
+  }
+
+  // Cleanup
+  EXPECT_SUCCESS(hsa_amd_vmem_unmap(reserved_va, alloc_size));
+  EXPECT_SUCCESS(hsa_amd_vmem_handle_release(alloc_handle));
+  EXPECT_SUCCESS(hsa_amd_vmem_address_free(reserved_va, alloc_size));
+
+  if (verbosity() > 0) {
+    std::cout << "    Host Memory allocation executed successfully" << std::endl;
+    std::cout << kSubTestSeparator << std::endl;
+  }
+}
+
+void VirtMemoryTestBasic::TestGpuAccessToHostMemoryAllocation(void) {
+  // Get CPU agents; select the first one for testing
+  std::vector<hsa_agent_t> cpus;
+  ASSERT_SUCCESS(hsa_iterate_agents(rocrtst::IterateCPUAgents, &cpus));
+  ASSERT_GT(cpus.size(), 0);
+  hsa_agent_t cpu_agent = cpus[0];
+
+  // Get all GPU agents; use only first one for testing
+  std::vector<hsa_agent_t> gpus;
+  ASSERT_SUCCESS(hsa_iterate_agents(rocrtst::IterateGPUAgents, &gpus));
+  ASSERT_GT(gpus.size(), 0);
+  hsa_agent_t gpu_agent = gpus[0];
+
+  bool supp = false;
+  ASSERT_SUCCESS(hsa_system_get_info(HSA_AMD_SYSTEM_INFO_VIRTUAL_MEM_API_SUPPORTED, (void*)&supp));
+  if (!supp) {
+    if (verbosity() > 0) {
+      std::cout << "    Virtual Memory API not supported on this system - Skipping." << std::endl;
+      std::cout << kSubTestSeparator << std::endl;
+    }
+    return;
+  }
+
+  if (verbosity() > 0) PrintMemorySubtestHeader("GPU Access To Host Memory Allocation test");
+
+  // Get CPU system memory pool
+  hsa_amd_memory_pool_t cpu_pool;
+  ASSERT_SUCCESS(hsa_amd_agent_iterate_memory_pools(cpu_agent, rocrtst::GetGlobalMemoryPool, &cpu_pool));
+
+  // Check if pool supports allocation
+  rocrtst::pool_info_t pool_i;
+  ASSERT_SUCCESS(rocrtst::AcquirePoolInfo(cpu_pool, &pool_i));
+  if (!pool_i.alloc_allowed) {
+    if (verbosity() > 0) {
+      std::cout << "    CPU pool does not support allocation. Skipping." << std::endl;
+      std::cout << kSubTestSeparator << std::endl;
+    }
+    return;
+  }
+
+  static const int kMemoryAllocSize = 1024;
+
+  /* The vmem region has two sub-regions so GPU can read and write to the same vmem allocation.
+  input[]:  CPU initializes, GPU reads via kernel arg a
+  output[]: GPU writes via kernel arg b, CPU verifies later */
+  struct vmem_data_t {
+    int input[kMemoryAllocSize * 4];
+    int output[kMemoryAllocSize * 4];
+  };
+
+  /* host_data lives in regular system memory, used as kernel arg c so the GPU
+  can write what it read from vmem there for independent verification */
+  struct host_data_t {
+    int result[kMemoryAllocSize * 4];
+  };
+
+  // Reserve VA and create a vmem handle from CPU pool
+  struct vmem_data_t* vmem_data = nullptr;
+  size_t vmem_alloc_size = sizeof(*vmem_data);
+  // Round up to pool granularity
+  vmem_alloc_size = ((vmem_alloc_size + pool_i.alloc_granule - 1) / pool_i.alloc_granule)
+                    * pool_i.alloc_granule;
+
+  // Reserve VA
+  ASSERT_SUCCESS(hsa_amd_vmem_address_reserve((void**)&vmem_data, vmem_alloc_size, 0, 0));
+  ASSERT_NE(vmem_data, nullptr);
+
+  // Create memory only handle from system memory
+  hsa_amd_vmem_alloc_handle_t mem_handle;
+  ASSERT_SUCCESS(hsa_amd_vmem_handle_create(cpu_pool, vmem_alloc_size, MEMORY_TYPE_NONE, 0, &mem_handle));
+  
+  // Map the reserved VA to above memory only handle
+  ASSERT_SUCCESS(hsa_amd_vmem_map(vmem_data, vmem_alloc_size, 0, mem_handle, 0));
+
+  // Give both GPU and CPU agents RW access to the vmem region
+  hsa_amd_memory_access_desc_t permsAccess[] = {{HSA_ACCESS_PERMISSION_RW, gpu_agent},
+                                                {HSA_ACCESS_PERMISSION_RW, cpu_agent}};
+  ASSERT_SUCCESS(hsa_amd_vmem_set_access(vmem_data, vmem_alloc_size, permsAccess, 2));
+
+  // Create queue
+  hsa_queue_t* queue = nullptr;
+  uint32_t queue_size = 0;
+  ASSERT_SUCCESS(hsa_agent_get_info(gpu_agent, HSA_AGENT_INFO_QUEUE_MAX_SIZE, &queue_size));
+  ASSERT_SUCCESS(hsa_queue_create(gpu_agent, queue_size, HSA_QUEUE_TYPE_MULTI, NULL, NULL, 0, 0, &queue));
+
+  // Find memory pools for kernel args and host buffers
+  hsa_amd_memory_pool_t kernarg_pool;
+  ASSERT_SUCCESS(hsa_amd_agent_iterate_memory_pools(cpu_agent, rocrtst::GetKernArgMemoryPool, &kernarg_pool));
+
+  hsa_amd_memory_pool_t global_pool;
+  ASSERT_SUCCESS(hsa_amd_agent_iterate_memory_pools(cpu_agent, rocrtst::GetGlobalMemoryPool, &global_pool));
+
+  /* Allocate host_data from regular system memory pool, not via VMEM APIs and
+  and allow GPU agent access to it */
+  struct host_data_t* host_data = nullptr;
+  ASSERT_SUCCESS(hsa_amd_memory_pool_allocate(global_pool, sizeof(*host_data), 0,
+                                              reinterpret_cast<void**>(&host_data)));
+  ASSERT_SUCCESS(hsa_amd_agents_allow_access(1, &gpu_agent, NULL, host_data));
+
+  // CPU initializes vmem input region with known values (0, 10, 20, ...)
+  for (int i = 0; i < kMemoryAllocSize; ++i) {
+    vmem_data->input[i] = i * 10;
+  }
+  // Initialize all verification buffers with zeroes
+  memset(vmem_data->output, 0, sizeof(vmem_data->output));
+  memset(host_data->result, 0, sizeof(host_data->result));
+
+  // Allocate kernel arguments
+  args_t* kernArgs = nullptr;
+  ASSERT_SUCCESS(hsa_amd_memory_pool_allocate(kernarg_pool, sizeof(args_t), 0,
+                                              reinterpret_cast<void**>(&kernArgs)));
+  ASSERT_SUCCESS(hsa_amd_agents_allow_access(1, &gpu_agent, NULL, kernArgs));
+
+  // Kernel: c[i] = a[i]; b[i] = i;
+  //   a -> vmem input (GPU reads from host vmem)
+  //   b -> vmem output (GPU writes indices here)
+  //   c -> host_data->result (GPU copies read values to system memory for verification)
+  kernArgs->a = vmem_data->input;
+  kernArgs->b = vmem_data->output;
+  kernArgs->c = host_data->result;
+
+  // Load the kernel
+  set_kernel_file_name("gpuReadWrite_kernels.hsaco");
+  set_kernel_name("gpuReadWrite");
+  ASSERT_SUCCESS(rocrtst::LoadKernelFromObjFile(this, &gpu_agent));
+
+  // Create completion signal
+  hsa_signal_t signal = {0};
+  ASSERT_SUCCESS(hsa_signal_create(1, 0, NULL, &signal));
+
+  // Create and initialize AQL packet
+  hsa_kernel_dispatch_packet_t aql;
+  memset(&aql, 0, sizeof(aql));
+  aql.workgroup_size_x = 256;
+  aql.workgroup_size_y = 1;
+  aql.workgroup_size_z = 1;
+  aql.grid_size_x = kMemoryAllocSize;
+  aql.grid_size_y = 1;
+  aql.grid_size_z = 1;
+  aql.private_segment_size = 0;
+  aql.group_segment_size = 0;
+  aql.kernel_object = kernel_object();
+  aql.kernarg_address = kernArgs;
+  aql.completion_signal = signal;
+
+  const uint32_t queue_mask = queue->size - 1;
+
+  // Submit to queue
+  uint64_t index = hsa_queue_load_write_index_relaxed(queue);
+  hsa_queue_store_write_index_relaxed(queue, index + 1);
+  rocrtst::WriteAQLToQueueLoc(queue, index, &aql);
+
+  hsa_kernel_dispatch_packet_t* q_base_addr =
+      reinterpret_cast<hsa_kernel_dispatch_packet_t*>(queue->base_address);
+  rocrtst::AtomicSetPacketHeader(
+      (HSA_PACKET_TYPE_KERNEL_DISPATCH << HSA_PACKET_HEADER_TYPE) |
+          (1 << HSA_PACKET_HEADER_BARRIER) |
+          (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_ACQUIRE_FENCE_SCOPE) |
+          (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_RELEASE_FENCE_SCOPE),
+      (1 << HSA_KERNEL_DISPATCH_PACKET_SETUP_DIMENSIONS),
+      reinterpret_cast<hsa_kernel_dispatch_packet_t*>(&q_base_addr[index & queue_mask]));
+
+  // Ring doorbell and wait for completion
+  hsa_signal_store_relaxed(queue->doorbell_signal, index);
+  while (hsa_signal_wait_scacquire(signal, HSA_SIGNAL_CONDITION_LT, 1, (uint64_t)-1,
+                                   HSA_WAIT_STATE_ACTIVE)) {}
+
+  // Kernel did c[i] = a[i], so host_data->result[i] should equal the original input
+  for (int i = 0; i < kMemoryAllocSize; ++i) {
+    ASSERT_EQ(host_data->result[i], i * 10);
+  }
+  if (verbosity() > 0) {
+    std::cout << "    GPU read from host vmem verified successfully" << std::endl;
+  }
+
+  // Kernel did b[i] = i, so vmem_data->output[i] should equal i
+  for (int i = 0; i < kMemoryAllocSize; ++i) {
+    ASSERT_EQ(vmem_data->output[i], i);
+  }
+  if (verbosity() > 0) {
+    std::cout << "    GPU write to host vmem verified successfully" << std::endl;
+  }
+
+  // Cleanup
+  EXPECT_SUCCESS(hsa_amd_vmem_unmap(vmem_data, vmem_alloc_size));
+  EXPECT_SUCCESS(hsa_amd_vmem_handle_release(mem_handle));
+  if (vmem_data) {
+    EXPECT_SUCCESS(hsa_amd_vmem_address_free(vmem_data, vmem_alloc_size));
+  }
+  if (host_data) hsa_memory_free(host_data);
+  if (kernArgs) hsa_memory_free(kernArgs);
+  if (signal.handle) hsa_signal_destroy(signal);
+  if (queue) hsa_queue_destroy(queue);
+
+  if (verbosity() > 0) {
+    std::cout << "    Subtest finished" << std::endl;
+    std::cout << kSubTestSeparator << std::endl;
+  }
+}

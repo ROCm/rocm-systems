@@ -821,6 +821,9 @@ hsa_status_t Runtime::GetSystemInfo(hsa_system_info_t attribute, void* value) {
       *((uint16_t*)value) = HSA_AMD_INTERFACE_VERSION_MINOR;
       break;
     }
+    case HSA_AMD_SYSTEM_INFO_HOST_ALLOC_DMA_BUF_SUPPORTED: {
+      break;
+    }
     default:
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
@@ -3789,16 +3792,14 @@ hsa_status_t Runtime::VMemoryHandleMap(void* va, size_t size, size_t in_offset,
 
   auto *agent = memoryHandleIt->second.agentOwner();
 
-  if (agent->device_type() == core::Agent::DeviceType::kAmdCpuDevice)
-    return HSA_STATUS_ERROR_INVALID_AGENT;
-
   // Create mapping
   ShareableHandle shareable_handle;
   uint64_t offset = 0;
   int drm_fd = 0;
   uint64_t drm_fd_offset = 0;
+  core::Agent* import_gpu = nullptr;
   hsa_status_t err = agent->driver().CreateShareableHandle(
-      va, memoryHandleIt->first, size, *agent, &shareable_handle, &offset, &drm_fd, &drm_fd_offset);
+      va, memoryHandleIt->first, size, *agent, &shareable_handle, &offset, &drm_fd, &drm_fd_offset, &import_gpu);
   if (err != HSA_STATUS_SUCCESS) return err;
 
   // Register the mapping
@@ -3806,7 +3807,7 @@ hsa_status_t Runtime::VMemoryHandleMap(void* va, size_t size, size_t in_offset,
       std::piecewise_construct, std::forward_as_tuple(va),
       std::forward_as_tuple(&memoryHandleIt->second, addressHandle, va, offset, size, drm_fd,
                             reinterpret_cast<void*>(drm_fd_offset), HSA_ACCESS_PERMISSION_NONE,
-                            shareable_handle));
+                            shareable_handle, import_gpu));
 
   addressHandle->use_count++;
   memoryHandleIt->second.use_count++;
@@ -3850,7 +3851,17 @@ hsa_status_t Runtime::VMemoryHandleUnmap(void* va, size_t size) {
     }
 
     if (mappedHandleIt.second->shareable_handle.IsValid()) {
-      hsa_status_t status = mappedHandleIt.second->agentOwner()->driver().DestroyShareableHandle(
+      // Determine which agent to use for destroying the shareable handle
+      core::Agent* destroy_agent = mappedHandleIt.second->agentOwner();
+
+      if (destroy_agent->device_type() == core::Agent::kAmdCpuDevice) {
+        /* Use the GPU agent that was used during import if available 
+        to destroy the amdgpu_bo_handle in drm */
+        if (mappedHandleIt.second->gpu_agent_import != nullptr) {
+          destroy_agent = mappedHandleIt.second->gpu_agent_import;
+        }
+      }
+      hsa_status_t status = destroy_agent->driver().DestroyShareableHandle(
           &(mappedHandleIt.second->shareable_handle));
       if (status != HSA_STATUS_SUCCESS) {
         return status;
@@ -3891,6 +3902,16 @@ Runtime::MappedHandleAllowedAgent::MappedHandleAllowedAgent(
   uint64_t offset = 0;
   MemoryHandle *memHandle = mappedHandle->mem_handle;
 
+  /* When we try to grant access to the same GPU agent that was used to import host memory 
+  into drm during map, skip export/import path and use the existing amdgpu_bo_handle */
+  if (memHandle->agentOwner()->device_type() == core::Agent::kAmdCpuDevice &&
+      mappedHandle->gpu_agent_import != nullptr &&
+      targetAgent == mappedHandle->gpu_agent_import &&
+    mappedHandle->shareable_handle.IsValid()) {
+    shareable_handle = mappedHandle->shareable_handle;
+    return;
+  }
+
   // Export memory from owner agent.
   hsa_status_t status = memHandle->agentOwner()->driver().ExportDMABuf(
       memHandle->thunk_handle, mappedHandle->size, &dmabuf_fd, &offset);
@@ -3913,7 +3934,7 @@ Runtime::MappedHandleAllowedAgent::MappedHandleAllowedAgent(
   status = core::Runtime::runtime_singleton_->DmaBufClose(dmabuf_fd);
   if (status != HSA_STATUS_SUCCESS)
     return;
-  }
+}
 
 Runtime::MappedHandleAllowedAgent::~MappedHandleAllowedAgent() {
   if (targetAgent->device_type() == core::Agent::DeviceType::kAmdCpuDevice) {
@@ -3925,6 +3946,15 @@ Runtime::MappedHandleAllowedAgent::~MappedHandleAllowedAgent() {
     assert(result && "Failed to remap VA to anonymous");
   }
   else {
+    /* Skip destruction of shareable_handle of the GPU agent used for 
+    importing host memory. Will be destroyed during unmap() */
+    if (mappedHandle->gpu_agent_import == targetAgent && 
+        mappedHandle->shareable_handle.IsValid() &&
+        shareable_handle.handle == mappedHandle->shareable_handle.handle) {
+      return;
+    }
+
+    // Destroy unique shareable_handles created for all other allowed GPU agents
     hsa_status_t status = targetAgent->driver().DestroyImportedShareableHandle(&shareable_handle);
     assert(status == HSA_STATUS_SUCCESS);
   }
@@ -3971,26 +4001,34 @@ hsa_status_t Runtime::MappedHandleAllowedAgent::RemoveAccess() {
 
 Runtime::MappedHandle::MappedHandle(MemoryHandle *mem_handle, AddressHandle *address_handle,
                  void* va, uint64_t offset, size_t size, int drm_fd, void *drm_cpu_addr,
-                 hsa_access_permission_t perm, ShareableHandle shareable_handle)
+                 hsa_access_permission_t perm, ShareableHandle shareable_handle, core::Agent* gpu_agent_import)
   : mem_handle(mem_handle), address_handle(address_handle), offset(offset),
     size(size), drm_fd(drm_fd), drm_cpu_addr(drm_cpu_addr),
-    shareable_handle(shareable_handle)
+    shareable_handle(shareable_handle),
+    gpu_agent_import(gpu_agent_import)
 {
-  /* Create a CPU mapping with PROT_NONE */
   #if defined(__linux__)
   if (core::Runtime::runtime_singleton_->thunkLoader()->IsDXG()) return;
   #endif
 
-  auto cpu_agent = static_cast<AMD::GpuAgent*>(agentOwner())->GetNearestCpuAgent();
-  auto agentPermsIt = allowed_agents.emplace(std::piecewise_construct,
-                      std::forward_as_tuple(cpu_agent),
-                      std::forward_as_tuple(this, cpu_agent, va,
-                                            size, HSA_ACCESS_PERMISSION_NONE))
-                      .first;
+  auto* owner = agentOwner();
+  
+  /* Only create CPU mapping for GPU-owned memory.For CPU-owned memory, 
+  no initial mapping needed since it is already accessible */
+  if (owner->device_type() == core::Agent::DeviceType::kAmdGpuDevice) {
+    /* Create a CPU mapping with PROT_NONE */
+    core::Agent* cpu_agent = static_cast<AMD::GpuAgent*>(owner)->GetNearestCpuAgent();
+    
+    auto agentPermsIt = allowed_agents.emplace(std::piecewise_construct,
+                        std::forward_as_tuple(cpu_agent),
+                        std::forward_as_tuple(this, cpu_agent, va,
+                                              size, HSA_ACCESS_PERMISSION_NONE))
+                        .first;
 
-  auto ret = agentPermsIt->second.EnableAccess(HSA_ACCESS_PERMISSION_NONE);
-  if (ret != HSA_STATUS_SUCCESS)
-    throw AMD::hsa_exception(ret, "Failed to create default CPU mapping");
+    auto ret = agentPermsIt->second.EnableAccess(HSA_ACCESS_PERMISSION_NONE);
+    if (ret != HSA_STATUS_SUCCESS)
+      throw AMD::hsa_exception(ret, "Failed to create default CPU mapping");
+  }
 }
 
 // Note: VMemorySetAccessPerHandle should be called with &memory_lock_ held
@@ -4156,7 +4194,7 @@ hsa_status_t Runtime::VMemoryGetAccess(const void* va, hsa_access_permission_t* 
   if (!mappedHandleFound) return HSA_STATUS_ERROR_INVALID_ALLOCATION;
 
   Agent* agent = Agent::Convert(agent_handle);
-  if (agent == NULL || !agent->IsValid() || agent->device_type() != core::Agent::kAmdGpuDevice)
+  if (agent == NULL || !agent->IsValid())
     return HSA_STATUS_ERROR_INVALID_AGENT;
 
   auto agentPermsIt = mappedHandleIt->second.allowed_agents.find(agent);
@@ -4201,7 +4239,7 @@ hsa_status_t Runtime::VMemoryImportShareableHandle(int dmabuf_fd,
     }
 
     Agent* agent = nodeAgent->second.front();
-    if (agent == nullptr || !agent->IsValid() || agent->device_type() != Agent::kAmdGpuDevice) {
+    if (agent == nullptr || !agent->IsValid()) {
       *ret = NULL;
       return;
     }
@@ -4227,7 +4265,6 @@ hsa_status_t Runtime::VMemoryImportShareableHandle(int dmabuf_fd,
   ThunkHandle thunk_handle = info.MemoryAddress;
   size_t size = info.SizeInBytes;
   int gpuid = info.NodeId;
-
 
   auto memoryHandleIt = memory_handle_map_.find(thunk_handle);
   if (memoryHandleIt != memory_handle_map_.end()) {

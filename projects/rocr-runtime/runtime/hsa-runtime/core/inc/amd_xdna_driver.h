@@ -217,7 +217,7 @@ public:
                      size_t size) override;
   hsa_status_t CreateShareableHandle(void* va, void* mem, size_t size, const core::Agent& agent,
                                      core::ShareableHandle* handle, uint64_t* offset, int* drm_fd,
-                                     uint64_t* drm_fd_offset) override;
+                                     uint64_t* drm_fd_offset, core::Agent** import_gpu = nullptr) override;
   hsa_status_t DestroyShareableHandle(core::ShareableHandle* handle) override;
 
   /// @brief Submits @p num_pkts packets in a command chain.

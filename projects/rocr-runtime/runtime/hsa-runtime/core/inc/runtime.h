@@ -1005,7 +1005,7 @@ class Runtime {
   struct MappedHandle {
     MappedHandle(MemoryHandle* mem_handle, AddressHandle* address_handle, void* va,
                  uint64_t offset, size_t size, int drm_fd, void *drm_cpu_addr,
-                 hsa_access_permission_t perm, ShareableHandle shareable_handle);
+                 hsa_access_permission_t perm, ShareableHandle shareable_handle, core::Agent* gpu_agent_import = nullptr);
 
     __forceinline core::Agent* agentOwner() const { return mem_handle->region->owner(); }
 
@@ -1016,6 +1016,7 @@ class Runtime {
     int drm_fd;
     void* drm_cpu_addr;  // CPU Buffer address
     ShareableHandle shareable_handle;
+    core::Agent* gpu_agent_import; // Valid only for host memory regions; NULL for GPU owned regions
     std::map<Agent*, MappedHandleAllowedAgent> allowed_agents;
   };
   std::map<const void*, MappedHandle> mapped_handle_map_;  // Indexed by VA

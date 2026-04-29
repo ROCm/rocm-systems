@@ -237,11 +237,6 @@ KfdDriver::AllocateMemory(const core::MemoryRegion &mem_region,
     kmt_alloc_flags.ui32.NonPaged = 1;
   }
 
-  if (!m_region.IsLocalMemory() &&
-      (alloc_flags & core::MemoryRegion::AllocateMemoryOnly)) {
-    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
-  }
-
   // Allocating a memory handle for virtual memory
   kmt_alloc_flags.ui32.NoAddress =
       !!(alloc_flags & core::MemoryRegion::AllocateMemoryOnly);
@@ -508,7 +503,8 @@ hsa_status_t KfdDriver::Unmap(core::ShareableHandle handle, void *mem,
 hsa_status_t KfdDriver::CreateShareableHandle(void* va, void* mem, size_t size,
                                               const core::Agent& agent,
                                               core::ShareableHandle* handle, uint64_t* offset,
-                                              int* drm_fd, uint64_t* drm_fd_offset) {
+                                              int* drm_fd, uint64_t* drm_fd_offset, 
+                                              core::Agent** import_gpu) {
   // Create handle by exporting and importing the memory from the owning agent.
 
   // Export memory.
@@ -516,13 +512,29 @@ hsa_status_t KfdDriver::CreateShareableHandle(void* va, void* mem, size_t size,
   hsa_status_t err = ExportDMABuf(mem, size, &dmabuf_fd, offset);
   if (err != HSA_STATUS_SUCCESS) return err;
 
-  // Import memory.
-  err = ImportDMABuf(dmabuf_fd, agent, handle, mem);
+  // For host memory allocations, use first available GPU agent for importing into DRM
+  core::Agent* import_agent = const_cast<core::Agent*>(&agent);
+  if (agent.device_type() == core::Agent::DeviceType::kAmdCpuDevice) {
+    auto gpus = core::Runtime::runtime_singleton_->gpu_agents();
+    if (gpus.empty()) {
+      core::Runtime::runtime_singleton_->DmaBufClose(dmabuf_fd);
+      return HSA_STATUS_ERROR;
+    }
+    import_agent = gpus.front();
+    
+    // Store the GPU agent used for import in mapped_handle_map
+    if (import_gpu) {
+      *import_gpu = gpus.front();
+    }
+  }
+
+  // Import memory using the selected gpu_agent.
+  err = ImportDMABuf(dmabuf_fd, *import_agent, handle, mem);
   core::Runtime::runtime_singleton_->DmaBufClose(dmabuf_fd);
   if (err != HSA_STATUS_SUCCESS) return err;
 
   // Get address that memory is mapped to.
-  auto devhandle = static_cast<const GpuAgent&>(agent).libThunkDev();
+  auto devhandle = static_cast<const AMD::GpuAgent*>(import_agent)->libThunkDev();
   auto memhandle = reinterpret_cast<HsaMemoryObjectHandle>(handle->handle);
   HSAKMT_STATUS hsakmt_err =
       HSAKMT_CALL(hsaKmtMemoryGetCpuAddr(devhandle, memhandle, reinterpret_cast<HSAint32*>(drm_fd),

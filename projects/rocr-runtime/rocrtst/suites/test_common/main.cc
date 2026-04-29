@@ -595,6 +595,24 @@ TEST(rocrtstFunc, VirtMemory_Aliasing_Test) {
   );
 }
 
+TEST(rocrtstFunc, VirtMemory_HostAllocation_Test) {
+  RUN_IF_NOT_EMU_MODE(
+    VirtMemoryTestBasic vmt;
+    RunCustomTestProlog(&vmt);
+    vmt.TestHostMemoryAllocation();
+    RunCustomTestEpilog(&vmt);
+  );
+}
+
+TEST(rocrtstFunc, VirtMemory_GPUtoHostAccess_Test) {
+  RUN_IF_NOT_EMU_MODE(
+    VirtMemoryTestBasic vmt;
+    RunCustomTestProlog(&vmt);
+    vmt.TestGpuAccessToHostMemoryAllocation();
+    RunCustomTestEpilog(&vmt);
+  );
+}
+
 TEST(rocrtstFunc, VirtMemory_Interprocess_Test) {
   RUN_IF_NOT_EMU_MODE(
     VirtMemoryTestInterProcess vmt;

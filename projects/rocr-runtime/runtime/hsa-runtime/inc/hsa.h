@@ -533,6 +533,11 @@ typedef enum {
    * implementation. The type of this attribute is uint16_t.
    */
   HSA_AMD_SYSTEM_INFO_EXT_VERSION_MINOR = 0x208,
+  /**
+   * Returns true if host allocation DMA buf export is supported.
+   * The type of this attribute is bool.
+   */
+  HSA_AMD_SYSTEM_INFO_HOST_ALLOC_DMA_BUF_SUPPORTED = 0x209,
 } hsa_system_info_t;
 
 /**

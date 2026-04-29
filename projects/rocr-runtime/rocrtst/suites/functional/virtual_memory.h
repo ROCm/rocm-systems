@@ -82,6 +82,8 @@ class VirtMemoryTestBasic : public TestBase {
   void GPUAccessToGPUMemoryTest(void);
   void MemoryAccountingTest(void);
   void TestVirtAddressAlias(void);
+  void TestHostMemoryAllocation(void);
+  void TestGpuAccessToHostMemoryAllocation(void);
 
  private:
   void TestCreateDestroy(hsa_agent_t agent, hsa_amd_memory_pool_t pool);
