@@ -250,8 +250,3 @@ TEST_F(test_code_object_writer_t, ProvidedInstructionsInDifferentSymbols_Seriali
     ASSERT_EQ(symbols[1]["instructions"].size(), 1);
     EXPECT_EQ(symbols[1]["instructions"][0]["name"], m_inst1.name);
 }
-
-
-void test_code_object_writer_t::SetUp()
-{
-}
