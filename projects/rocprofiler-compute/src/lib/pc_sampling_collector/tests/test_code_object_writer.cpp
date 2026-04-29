@@ -6,7 +6,8 @@
 TEST_F(test_code_object_writer_t, ProvidedNoData_ReturnsMinimalJson)
 {
     const auto& result = m_writer.get_result();
-    EXPECT_TRUE(!result.empty());
+    EXPECT_FALSE(result.empty());
+    EXPECT_TRUE(nlohmann::json::accept(result));
 }
 
 void test_code_object_writer_t::SetUp()
