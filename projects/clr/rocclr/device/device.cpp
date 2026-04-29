@@ -365,19 +365,12 @@ amd::Memory* MemObjMap::FindMemObj(const void* k, size_t* offset, Device* dev) {
   uintptr_t key = reinterpret_cast<uintptr_t>(k);
 
   // First search the global map
-  auto it = MemObjMap_.upper_bound(key);
-  if (it != MemObjMap_.begin()) {
-    --it;
-    amd::Memory* mem = it->second;
-    size_t mem_size = (mem->getMemFlags() & ROCCLR_MEM_PHYMEM)
-                          ? sizeof(mem->getUserData().hsa_handle)
-                          : mem->getSize();
-    if (key >= it->first && key < (it->first + mem_size)) {
-      if (offset != nullptr) {
-        *offset = key - it->first;
-      }
-      return mem;
+  auto it = FindMemObjIter(key);
+  if (it != MemObjMap_.end()) {
+    if (offset != nullptr) {
+      *offset = key - it->first;
     }
+    return it->second;
   }
 
   // Search per-device va maps on Windows (due to overlapping ranges)
@@ -388,12 +381,10 @@ amd::Memory* MemObjMap::FindMemObj(const void* k, size_t* offset, Device* dev) {
   return nullptr;
 }
 
-amd::Memory* MemObjMap::FindAndRemoveMemObj(const void* k) {
-  std::unique_lock lock(AllocatedLock_);
-  uintptr_t key = reinterpret_cast<uintptr_t>(k);
+std::map<uintptr_t, amd::Memory*>::iterator MemObjMap::FindMemObjIter(uintptr_t key) {
   auto it = MemObjMap_.upper_bound(key);
   if (it == MemObjMap_.begin()) {
-    return nullptr;
+    return MemObjMap_.end();
   }
   --it;
   amd::Memory* mem = it->second;
@@ -401,8 +392,19 @@ amd::Memory* MemObjMap::FindAndRemoveMemObj(const void* k) {
                         ? sizeof(mem->getUserData().hsa_handle)
                         : mem->getSize();
   if (key < it->first || key >= (it->first + mem_size)) {
+    return MemObjMap_.end();
+  }
+  return it;
+}
+
+amd::Memory* MemObjMap::FindAndRemoveMemObj(const void* k) {
+  std::unique_lock lock(AllocatedLock_);
+  uintptr_t key = reinterpret_cast<uintptr_t>(k);
+  auto it = FindMemObjIter(key);
+  if (it == MemObjMap_.end()) {
     return nullptr;
   }
+  amd::Memory* mem = it->second;
   MemObjMap_.erase(it);
   return mem;
 }

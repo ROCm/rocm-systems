@@ -1479,6 +1479,10 @@ class MemObjMap : public AllStatic {
   static std::shared_mutex AllocatedLock_;
 
  private:
+  //!< Lookup helper shared by FindMemObj and FindAndRemoveMemObj. Caller must hold AllocatedLock_.
+  //!< Returns an iterator to the matching entry, or MemObjMap_.end() if not found.
+  static std::map<uintptr_t, amd::Memory*>::iterator FindMemObjIter(uintptr_t key);
+
   //!< the mem object<->hostptr information container
   static std::map<uintptr_t, amd::Memory*> MemObjMap_;
   //!< the virtual mem object<->hostptr information container
