@@ -1,18 +1,11 @@
 // Copyright (c) 2025-2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/code/rj_code_internal.h"
 
-#include "rocjitsu/code/basic_block.h"
-#include "rocjitsu/code/executable.h"
-#include "rocjitsu/code/instruction_list.h"
 #include "rocjitsu/isa/decoder.h"
-#include "rocjitsu/isa/instruction.h"
-#include "rocjitsu/refcount.h"
 
 #include <cstring>
-#include <memory>
-#include <vector>
 
 using namespace rocjitsu;
 
@@ -37,27 +30,6 @@ Decoder *create_decoder_for_target(rj_code_target_id_t target) {
 }
 
 } // namespace
-
-struct rj_code_executable_t : RefCounted {
-  std::unique_ptr<Executable> exec;
-};
-
-struct rj_code_object_t : RefCounted {
-  AmdGpuCodeObject *co = nullptr;
-};
-
-struct rj_code_inst_list_t : RefCounted {
-  InstructionList list;
-  std::vector<std::unique_ptr<Instruction>> storage;
-};
-
-struct rj_code_basic_block_list_t : RefCounted {
-  std::vector<std::unique_ptr<BasicBlock>> blocks;
-};
-
-struct rj_code_basic_block_t : RefCounted {
-  BasicBlock *block = nullptr;
-};
 
 rj_status_t rj_code_executable_create(const char *path, rj_code_executable_t **exec) {
   if (!path || !exec)

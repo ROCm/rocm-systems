@@ -43,40 +43,30 @@ public:
   };
 
   /// @brief Issue a memory instruction to this pipeline.
-  /// @param inst Raw instruction pointer (caller transfers ownership).
-  /// @param wf   The issuing wavefront.
+  ///
+  /// In functional mode, memory accesses complete synchronously: the load
+  /// or store is initiated and completed within this call, and the wait
+  /// counter is incremented then immediately decremented so that a
+  /// subsequent s_waitcnt sees the operation as already done.  This
+  /// eliminates the two-tick deferred pipeline that previously allowed
+  /// ALU instructions to read destination VGPRs between issue and
+  /// writeback — a hazard that real hardware prevents via scoreboarding.
   void issue(Instruction *inst, Wavefront &wf) {
     wf.wait_counters().increment(counter_type_);
-    issued_.push({inst, &wf});
+    initiate_access(*inst, wf);
+    complete_access(*inst, wf);
+    wf.wait_counters().decrement(counter_type_);
+    if (wf.state() == WfState::WAITCNT && wf.wait_satisfied())
+      wf.set_state(WfState::RUNNING);
+    if (wf.state() == WfState::ENDING && wf.wait_counters().empty())
+      wf.halt();
+    delete inst;
   }
 
-  /// @brief Advance the pipeline by one cycle.
-  void tick() {
-    // Process returned instructions: decrement counters and complete.
-    while (!returned_.empty()) {
-      auto entry = returned_.front();
-      returned_.pop();
-      entry.wf->wait_counters().decrement(counter_type_);
-      if (entry.wf->state() == WfState::WAITCNT && entry.wf->wait_satisfied())
-        entry.wf->set_state(WfState::RUNNING);
-      // If the wavefront is in ENDING state (s_endpgm executed but draining),
-      // halt it once all outstanding memory ops are complete.
-      if (entry.wf->state() == WfState::ENDING && entry.wf->wait_counters().empty())
-        entry.wf->halt();
-      complete_access(*entry.inst, *entry.wf);
-      delete entry.inst;
-    }
+  /// @brief Advance the pipeline by one cycle (no-op in functional mode).
+  void tick() {}
 
-    // Initiate access for newly issued instructions.
-    while (!issued_.empty()) {
-      auto entry = issued_.front();
-      issued_.pop();
-      initiate_access(*entry.inst, *entry.wf);
-      returned_.push(entry);
-    }
-  }
-
-  bool empty() const { return issued_.empty() && returned_.empty(); }
+  bool empty() const { return true; }
 
   WaitCounterType counter_type() const { return counter_type_; }
 

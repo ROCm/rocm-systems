@@ -233,6 +233,7 @@ class RocprofsysConfig:
     def get_base_environment(self) -> dict[str, str]:
         """Get base environment variables for test execution."""
         return {
+            "ROCPROFSYS_DEFAULT_MIN_INSTRUCTIONS": "64",
             "ROCPROFSYS_CI": "ON",
             "ROCPROFSYS_CI_TIMEOUT": os.environ.get("ROCPROFSYS_CI_TIMEOUT", "300"),
             "ROCPROFSYS_CONFIG_FILE": "",
