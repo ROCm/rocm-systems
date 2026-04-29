@@ -167,7 +167,7 @@ jobs:
       run: |
         git config --global --add safe.directory '*'
         apt-get update
-        apt-get install -y build-essential ccache python3-pip gcovr libdw-dev libsqlite3-dev libdrm-dev file autoconf pkg-config rpm libzstd-dev
+        apt-get install -y build-essential ccache python3-pip gcovr libdw-dev libsqlite3-dev libdrm-dev file autoconf pkg-config rpm
         python3 -m pip install -U --user cmake==3.24.0
         python3 -m pip install -U --user -r requirements.txt
 
@@ -223,26 +223,26 @@ jobs:
       shell: bash
       working-directory: projects/rocprofiler-sdk
       run: |
-        tar --use-compress-program=zstd -cf rocprofiler-sdk-codecov-build-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.zst \
+        tar -czf rocprofiler-sdk-codecov-build-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.gz \
           build/
 
     - name: Create ROCM dependencies tarball
       shell: bash
       run: |
-        tar --use-compress-program=zstd -cf rocm-deps-codecov-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.zst \
+        tar -czf rocm-deps-codecov-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.gz \
           -C /opt rocm
 
     - name: Cache build artifact
       uses: actions/cache/save@v4
       with:
         key: build-codecov-${{ matrix.system.os }}-${{ matrix.system.gpu }}-${{ github.run_id }}-${{ github.run_attempt }}
-        path: projects/rocprofiler-sdk/rocprofiler-sdk-codecov-build-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.zst
+        path: projects/rocprofiler-sdk/rocprofiler-sdk-codecov-build-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.gz
 
     - name: Cache ROCm dependencies
       uses: actions/cache/save@v4
       with:
         key: rocm-deps-codecov-${{ matrix.system.os }}-${{ matrix.system.gpu }}-${{ github.run_id }}-${{ github.run_attempt }}
-        path: rocm-deps-codecov-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.zst
+        path: rocm-deps-codecov-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.gz
 
   code-coverage:
     name: Code Coverage • ${{ matrix.system.gpu }} • ${{ matrix.system.os }}
@@ -285,30 +285,28 @@ jobs:
       uses: actions/cache/restore@v4
       with:
         key: build-codecov-${{ matrix.system.os }}-${{ matrix.system.gpu }}-${{ github.run_id }}-${{ github.run_attempt }}
-        path: projects/rocprofiler-sdk/rocprofiler-sdk-codecov-build-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.zst
+        path: projects/rocprofiler-sdk/rocprofiler-sdk-codecov-build-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.gz
         fail-on-cache-miss: true
 
     - name: Restore ROCm dependencies
       uses: actions/cache/restore@v4
       with:
         key: rocm-deps-codecov-${{ matrix.system.os }}-${{ matrix.system.gpu }}-${{ github.run_id }}-${{ github.run_attempt }}
-        path: rocm-deps-codecov-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.zst
+        path: rocm-deps-codecov-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.gz
         fail-on-cache-miss: true
 
     - name: Extract build artifacts
       shell: bash
       run: |
-        apt-get update
-        apt-get install -y zstd
         cd projects/rocprofiler-sdk
-        tar --use-compress-program=zstd -xf rocprofiler-sdk-codecov-build-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.zst
+        tar -xzf rocprofiler-sdk-codecov-build-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.gz
 
     - name: Extract ROCM dependencies
       shell: bash
       run: |
         rm -rf /opt/rocm /opt/rocm-* /opt/rocprofiler-sdk
         cd /opt
-        tar --use-compress-program=zstd -xf $GITHUB_WORKSPACE/rocm-deps-codecov-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.zst
+        tar -xzf $GITHUB_WORKSPACE/rocm-deps-codecov-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.gz
 
     - name: Load Existing XML Code Coverage
       if: github.event_name == 'pull_request'

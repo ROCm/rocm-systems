@@ -175,7 +175,7 @@ jobs:
         run: |
           git config --global --add safe.directory '*'
           apt-get update
-          apt-get install -y g++-11 g++-12 cmake python3-pip libdw-dev libsqlite3-dev libdrm-dev file autoconf pkg-config rpm libzstd-dev
+          apt-get install -y g++-11 g++-12 cmake python3-pip libdw-dev libsqlite3-dev libdrm-dev file autoconf pkg-config rpm
           update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 10 --slave /usr/bin/g++ g++ /usr/bin/g++-11 --slave /usr/bin/gcov gcov /usr/bin/gcov-11
           update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-12 20 --slave /usr/bin/g++ g++ /usr/bin/g++-12 --slave /usr/bin/gcov gcov /usr/bin/gcov-12
           python3 -m pip install -U --user -r requirements.txt
@@ -252,13 +252,13 @@ jobs:
         run: |
           # Tarball of the build directory; samples/ and tests/ sources come from the test job's checkout.
           # /opt/rocprofiler-sdk is reproduced in the test job via `cmake --build build --target install`.
-          tar --use-compress-program=zstd -cf rocprofiler-sdk-build-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.zst \
+          tar -czf rocprofiler-sdk-build-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.gz \
             build/
 
       - name: Create ROCM dependencies tarball
         shell: bash
         run: |
-          tar --use-compress-program=zstd -cf rocm-deps-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.zst \
+          tar -czf rocm-deps-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.gz \
             -C /opt rocm
 
       # Cache the handoff tarballs instead of using actions/upload-artifact for ~10x faster transfer.
@@ -268,13 +268,13 @@ jobs:
         uses: actions/cache/save@v4
         with:
           key: build-deb-${{ matrix.system.os }}-${{ matrix.system.gpu }}-${{ github.run_id }}-${{ github.run_attempt }}
-          path: projects/rocprofiler-sdk/rocprofiler-sdk-build-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.zst
+          path: projects/rocprofiler-sdk/rocprofiler-sdk-build-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.gz
 
       - name: Cache ROCm dependencies
         uses: actions/cache/save@v4
         with:
           key: rocm-deps-deb-${{ matrix.system.os }}-${{ matrix.system.gpu }}-${{ github.run_id }}-${{ github.run_attempt }}
-          path: rocm-deps-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.zst
+          path: rocm-deps-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.gz
 
   # -----------------------------------------------------------------------------
   # Ubuntu / DEB Test job(s) - Run on GPU runners
@@ -319,30 +319,28 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           key: build-deb-${{ matrix.system.os }}-${{ matrix.system.gpu }}-${{ github.run_id }}-${{ github.run_attempt }}
-          path: projects/rocprofiler-sdk/rocprofiler-sdk-build-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.zst
+          path: projects/rocprofiler-sdk/rocprofiler-sdk-build-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.gz
           fail-on-cache-miss: true
 
       - name: Restore ROCm dependencies
         uses: actions/cache/restore@v4
         with:
           key: rocm-deps-deb-${{ matrix.system.os }}-${{ matrix.system.gpu }}-${{ github.run_id }}-${{ github.run_attempt }}
-          path: rocm-deps-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.zst
+          path: rocm-deps-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.gz
           fail-on-cache-miss: true
 
       - name: Extract build artifacts
         shell: bash
         run: |
-          apt-get update
-          apt-get install -y zstd
           cd projects/rocprofiler-sdk
-          tar --use-compress-program=zstd -xf rocprofiler-sdk-build-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.zst
+          tar -xzf rocprofiler-sdk-build-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.gz
 
       - name: Extract ROCM dependencies
         shell: bash
         run: |
           rm -rf /opt/rocm /opt/rocm-* /opt/rocprofiler-sdk
           cd /opt
-          tar --use-compress-program=zstd -xf $GITHUB_WORKSPACE/rocm-deps-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.zst
+          tar -xzf $GITHUB_WORKSPACE/rocm-deps-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.gz
 
       - name: Install requirements
         timeout-minutes: 5
@@ -574,27 +572,27 @@ jobs:
         shell: bash
         working-directory: projects/rocprofiler-sdk
         run: |
-          tar --use-compress-program=zstd -cf rocprofiler-sdk-build-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.zst \
+          tar -czf rocprofiler-sdk-build-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.gz \
             build/ \
             ${{ env.PYTHON_VENV_PATH }}/
 
       - name: Create ROCM dependencies tarball
         shell: bash
         run: |
-          tar --use-compress-program=zstd -cf rocm-deps-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.zst \
+          tar -czf rocm-deps-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.gz \
             -C /opt rocm
 
       - name: Cache build artifact
         uses: actions/cache/save@v4
         with:
           key: build-rpm-${{ matrix.system.os }}-${{ matrix.system.gpu }}-${{ github.run_id }}-${{ github.run_attempt }}
-          path: projects/rocprofiler-sdk/rocprofiler-sdk-build-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.zst
+          path: projects/rocprofiler-sdk/rocprofiler-sdk-build-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.gz
 
       - name: Cache ROCm dependencies
         uses: actions/cache/save@v4
         with:
           key: rocm-deps-rpm-${{ matrix.system.os }}-${{ matrix.system.gpu }}-${{ github.run_id }}-${{ github.run_attempt }}
-          path: rocm-deps-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.zst
+          path: rocm-deps-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.gz
 
   # -----------------------------------------------------------------------------
   # RHEL/SLES (RPM) Test job(s) - Run on GPU runners
@@ -636,29 +634,28 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           key: build-rpm-${{ matrix.system.os }}-${{ matrix.system.gpu }}-${{ github.run_id }}-${{ github.run_attempt }}
-          path: projects/rocprofiler-sdk/rocprofiler-sdk-build-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.zst
+          path: projects/rocprofiler-sdk/rocprofiler-sdk-build-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.gz
           fail-on-cache-miss: true
 
       - name: Restore ROCm dependencies
         uses: actions/cache/restore@v4
         with:
           key: rocm-deps-rpm-${{ matrix.system.os }}-${{ matrix.system.gpu }}-${{ github.run_id }}-${{ github.run_attempt }}
-          path: rocm-deps-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.zst
+          path: rocm-deps-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.gz
           fail-on-cache-miss: true
 
       - name: Extract build artifacts
         shell: bash
         run: |
-          command -v zstd >/dev/null || dnf install -y zstd || zypper --non-interactive install zstd
           cd projects/rocprofiler-sdk
-          tar --use-compress-program=zstd -xf rocprofiler-sdk-build-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.zst
+          tar -xzf rocprofiler-sdk-build-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.gz
 
       - name: Extract ROCM dependencies
         shell: bash
         run: |
           rm -rf /opt/rocm /opt/rocm-* /opt/rocprofiler-sdk
           cd /opt
-          tar --use-compress-program=zstd -xf $GITHUB_WORKSPACE/rocm-deps-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.zst
+          tar -xzf $GITHUB_WORKSPACE/rocm-deps-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.gz
 
       - name: Enable PC Sampling
         if: ${{ contains(matrix.system.gpu, 'mi200') || contains(matrix.system.gpu, 'mi300a') }}
@@ -824,26 +821,26 @@ jobs:
       shell: bash
       working-directory: projects/rocprofiler-sdk
       run: |
-        tar --use-compress-program=zstd -cf rocprofiler-sdk-build-${{ matrix.system.os }}-${{ matrix.system.gpu }}-${{ matrix.system.sanitizer }}.tar.zst \
+        tar -czf rocprofiler-sdk-build-${{ matrix.system.os }}-${{ matrix.system.gpu }}-${{ matrix.system.sanitizer }}.tar.gz \
           build/
 
     - name: Create ROCM dependencies tarball
       shell: bash
       run: |
-        tar --use-compress-program=zstd -cf rocm-deps-${{ matrix.system.os }}-${{ matrix.system.gpu }}-${{ matrix.system.sanitizer }}.tar.zst \
+        tar -czf rocm-deps-${{ matrix.system.os }}-${{ matrix.system.gpu }}-${{ matrix.system.sanitizer }}.tar.gz \
           -C /opt rocm
 
     - name: Cache build artifact
       uses: actions/cache/save@v4
       with:
         key: build-sanitizers-${{ matrix.system.os }}-${{ matrix.system.gpu }}-${{ matrix.system.sanitizer }}-${{ github.run_id }}-${{ github.run_attempt }}
-        path: projects/rocprofiler-sdk/rocprofiler-sdk-build-${{ matrix.system.os }}-${{ matrix.system.gpu }}-${{ matrix.system.sanitizer }}.tar.zst
+        path: projects/rocprofiler-sdk/rocprofiler-sdk-build-${{ matrix.system.os }}-${{ matrix.system.gpu }}-${{ matrix.system.sanitizer }}.tar.gz
 
     - name: Cache ROCm dependencies
       uses: actions/cache/save@v4
       with:
         key: rocm-deps-sanitizers-${{ matrix.system.os }}-${{ matrix.system.gpu }}-${{ matrix.system.sanitizer }}-${{ github.run_id }}-${{ github.run_attempt }}
-        path: rocm-deps-${{ matrix.system.os }}-${{ matrix.system.gpu }}-${{ matrix.system.sanitizer }}.tar.zst
+        path: rocm-deps-${{ matrix.system.os }}-${{ matrix.system.gpu }}-${{ matrix.system.sanitizer }}.tar.gz
 
   # -----------------------------------------------------------------------------
   # Sanitizers Test job - Run ALL sanitizer tests on a SINGLE GPU runner
@@ -887,28 +884,28 @@ jobs:
       uses: actions/cache/restore@v4
       with:
         key: build-sanitizers-ubuntu-22.04-mi325-AddressSanitizer-${{ github.run_id }}-${{ github.run_attempt }}
-        path: projects/rocprofiler-sdk/rocprofiler-sdk-build-ubuntu-22.04-mi325-AddressSanitizer.tar.zst
+        path: projects/rocprofiler-sdk/rocprofiler-sdk-build-ubuntu-22.04-mi325-AddressSanitizer.tar.gz
         fail-on-cache-miss: true
 
     - name: Restore ThreadSanitizer build artifact
       uses: actions/cache/restore@v4
       with:
         key: build-sanitizers-ubuntu-22.04-mi325-ThreadSanitizer-${{ github.run_id }}-${{ github.run_attempt }}
-        path: projects/rocprofiler-sdk/rocprofiler-sdk-build-ubuntu-22.04-mi325-ThreadSanitizer.tar.zst
+        path: projects/rocprofiler-sdk/rocprofiler-sdk-build-ubuntu-22.04-mi325-ThreadSanitizer.tar.gz
         fail-on-cache-miss: true
 
     - name: Restore LeakSanitizer build artifact
       uses: actions/cache/restore@v4
       with:
         key: build-sanitizers-ubuntu-22.04-mi325-LeakSanitizer-${{ github.run_id }}-${{ github.run_attempt }}
-        path: projects/rocprofiler-sdk/rocprofiler-sdk-build-ubuntu-22.04-mi325-LeakSanitizer.tar.zst
+        path: projects/rocprofiler-sdk/rocprofiler-sdk-build-ubuntu-22.04-mi325-LeakSanitizer.tar.gz
         fail-on-cache-miss: true
 
     - name: Restore UndefinedBehaviorSanitizer build artifact
       uses: actions/cache/restore@v4
       with:
         key: build-sanitizers-ubuntu-22.04-mi325-UndefinedBehaviorSanitizer-${{ github.run_id }}-${{ github.run_attempt }}
-        path: projects/rocprofiler-sdk/rocprofiler-sdk-build-ubuntu-22.04-mi325-UndefinedBehaviorSanitizer.tar.zst
+        path: projects/rocprofiler-sdk/rocprofiler-sdk-build-ubuntu-22.04-mi325-UndefinedBehaviorSanitizer.tar.gz
         fail-on-cache-miss: true
 
     # Restore ROCm dependencies (any sanitizer's deps tarball is functionally identical; pick AddressSanitizer)
@@ -916,17 +913,15 @@ jobs:
       uses: actions/cache/restore@v4
       with:
         key: rocm-deps-sanitizers-ubuntu-22.04-mi325-AddressSanitizer-${{ github.run_id }}-${{ github.run_attempt }}
-        path: rocm-deps-ubuntu-22.04-mi325-AddressSanitizer.tar.zst
+        path: rocm-deps-ubuntu-22.04-mi325-AddressSanitizer.tar.gz
         fail-on-cache-miss: true
 
     - name: Extract ROCM dependencies
       shell: bash
       run: |
-        apt-get update
-        apt-get install -y zstd
         rm -rf /opt/rocm /opt/rocm-* /opt/rocprofiler-sdk
         cd /opt
-        tar --use-compress-program=zstd -xf $GITHUB_WORKSPACE/rocm-deps-ubuntu-22.04-mi325-AddressSanitizer.tar.zst
+        tar -xzf $GITHUB_WORKSPACE/rocm-deps-ubuntu-22.04-mi325-AddressSanitizer.tar.gz
 
     - name: Install requirements
       timeout-minutes: 5
@@ -954,7 +949,7 @@ jobs:
         echo "Running AddressSanitizer Tests"
         echo "=========================================="
         rm -rf build
-        tar --use-compress-program=zstd -xf rocprofiler-sdk-build-ubuntu-22.04-mi325-AddressSanitizer.tar.zst
+        tar -xzf rocprofiler-sdk-build-ubuntu-22.04-mi325-AddressSanitizer.tar.gz
         export PATH="$HOME/.local/bin:$PATH"
         python3 ./source/scripts/run-ci.py -B build \
           --name ${{ github.repository }}-${{ github.ref_name }}-ubuntu-22.04-mi325-AddressSanitizer-test \
@@ -981,7 +976,7 @@ jobs:
         echo "Running ThreadSanitizer Tests"
         echo "=========================================="
         rm -rf build
-        tar --use-compress-program=zstd -xf rocprofiler-sdk-build-ubuntu-22.04-mi325-ThreadSanitizer.tar.zst
+        tar -xzf rocprofiler-sdk-build-ubuntu-22.04-mi325-ThreadSanitizer.tar.gz
         export PATH="$HOME/.local/bin:$PATH"
         python3 ./source/scripts/run-ci.py -B build \
           --name ${{ github.repository }}-${{ github.ref_name }}-ubuntu-22.04-mi325-ThreadSanitizer-test \
@@ -1008,7 +1003,7 @@ jobs:
         echo "Running LeakSanitizer Tests"
         echo "=========================================="
         rm -rf build
-        tar --use-compress-program=zstd -xf rocprofiler-sdk-build-ubuntu-22.04-mi325-LeakSanitizer.tar.zst
+        tar -xzf rocprofiler-sdk-build-ubuntu-22.04-mi325-LeakSanitizer.tar.gz
         export PATH="$HOME/.local/bin:$PATH"
         python3 ./source/scripts/run-ci.py -B build \
           --name ${{ github.repository }}-${{ github.ref_name }}-ubuntu-22.04-mi325-LeakSanitizer-test \
@@ -1035,7 +1030,7 @@ jobs:
         echo "Running UndefinedBehaviorSanitizer Tests"
         echo "=========================================="
         rm -rf build
-        tar --use-compress-program=zstd -xf rocprofiler-sdk-build-ubuntu-22.04-mi325-UndefinedBehaviorSanitizer.tar.zst
+        tar -xzf rocprofiler-sdk-build-ubuntu-22.04-mi325-UndefinedBehaviorSanitizer.tar.gz
         export PATH="$HOME/.local/bin:$PATH"
         python3 ./source/scripts/run-ci.py -B build \
           --name ${{ github.repository }}-${{ github.ref_name }}-ubuntu-22.04-mi325-UndefinedBehaviorSanitizer-test \

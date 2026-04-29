@@ -92,23 +92,6 @@ runs:
         echo "LD_LIBRARY_PATH=${{ inputs.rocm-path }}/lib64:${{ inputs.rocm-path }}/lib:${{ inputs.rocm-path }}/llvm/lib:${LD_LIBRARY_PATH}" >> $GITHUB_ENV
         echo "PATH=${{ inputs.rocm-path }}/bin:${{ inputs.rocm-path }}/llvm/bin:$HOME/.local/bin:${PATH}" >> $GITHUB_ENV
 
-    - name: Ensure zstd is installed
-      shell: bash
-      run: |
-        if command -v zstd >/dev/null; then
-          exit 0
-        elif command -v apt-get >/dev/null; then
-          apt-get update
-          apt-get install -y zstd
-        elif command -v dnf >/dev/null; then
-          dnf install -y zstd
-        elif command -v zypper >/dev/null; then
-          zypper --non-interactive install zstd
-        else
-          echo "No supported package manager found to install zstd" >&2
-          exit 1
-        fi
-
     - name: Setup ccache
       if: ${{ inputs.enable-ccache == 'true' }}
       uses: hendrikmuhs/ccache-action@63069e3931dedbf3b63792097479563182fe70d1 # v1.2.18
