@@ -413,7 +413,7 @@ message(STATUS "Code Object Manager found at ${amd_comgr_DIR}.")
 # Threads, do so now.
 if(THE_ROCK_BUILD)
   # We need to pull in Threads because we link with it.
-  find_package(Threads)
+  find_package(Threads REQUIRED)
 endif()
 
 # If building a static library, retrieve the amd_comgr library's name
