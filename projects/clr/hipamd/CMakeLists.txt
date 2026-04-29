@@ -397,7 +397,7 @@ configure_package_config_file(
       hip-config-nvidia.cmake.in
       ${CMAKE_CURRENT_BINARY_DIR}/hip-config-nvidia.cmake
       INSTALL_DESTINATION ${CONFIG_PACKAGE_INSTALL_DIR}
-      PATH_VARS LIB_INSTALL_DIR INCLUDE_INSTALL_DIR BIN_INSTALL_DIR))
+      PATH_VARS LIB_INSTALL_DIR INCLUDE_INSTALL_DIR BIN_INSTALL_DIR)
 
 write_basic_package_version_file(
     ${CMAKE_CURRENT_BINARY_DIR}/hip-config-version.cmake
