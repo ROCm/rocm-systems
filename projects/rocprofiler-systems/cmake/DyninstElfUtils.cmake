@@ -186,6 +186,9 @@ else()
             "https://sourceware.org/elfutils/ftp/${ELFUTILS_DOWNLOAD_VERSION}/elfutils-${ELFUTILS_DOWNLOAD_VERSION}.tar.bz2"
             "https://mirrors.kernel.org/sourceware/elfutils/${ELFUTILS_DOWNLOAD_VERSION}/elfutils-${ELFUTILS_DOWNLOAD_VERSION}.tar.bz2"
         BUILD_IN_SOURCE 1
+        PATCH_COMMAND
+            patch -p1 -d <SOURCE_DIR> -i
+            ${CMAKE_CURRENT_LIST_DIR}/elfutils-0.188-gcc15-regs.patch
         CONFIGURE_COMMAND
             ${CMAKE_COMMAND} -E env CC=${CMAKE_C_COMPILER} CFLAGS=-fPIC\ -O3
             CXX=${CMAKE_CXX_COMPILER} CXXFLAGS=-fPIC\ -O3
