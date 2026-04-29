@@ -469,10 +469,6 @@ install(TARGETS amd-dbgapi
   DESTINATION ${CMAKE_INSTALL_LIBDIR}
   COMPONENT dev)
 
-install(TARGETS amd-dbgapi
-  DESTINATION ${CMAKE_INSTALL_LIBDIR}
-  COMPONENT asan)
-
 install(FILES
   "${CMAKE_CURRENT_BINARY_DIR}/include/amd-dbgapi/amd-dbgapi.h"
   DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/amd-dbgapi
@@ -487,11 +483,6 @@ install(FILES
   "LICENSE.txt"
   DESTINATION ${CMAKE_INSTALL_DATADIR}/doc/rocm-dbgapi
   COMPONENT dev)
-
-install(FILES
-  "LICENSE.txt"
-  DESTINATION ${CMAKE_INSTALL_DATADIR}/doc/rocm-dbgapi-asan
-  COMPONENT asan)
 
 # Generate the install-tree package.
 set(AMD_DBGAPI_PREFIX_CODE "
