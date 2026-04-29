@@ -55,6 +55,8 @@ struct stress_sampling_policies
     using report_writer     = test::noop_report_writer;
     using perfetto_sink     = test::noop_perfetto_sink;
     using fatal_error       = test::throwing_fatal_error_policy;
+    using production_hooks  = noop_production_hooks;
+    using test_hooks        = noop_test_hooks;
 };
 
 constexpr int          k_num_workers   = 4;

@@ -3,7 +3,7 @@
 
 #pragma once
 
-// Template method bodies for sampling_service<Policies, ProductionHooks, TestHooks>.
+// Template method bodies for sampling_service<Policies>.
 // Included from sampling_service.hpp after the class definition.
 // May use platform types (sigset_t, etc.) via the signal_dispatcher policy.
 
@@ -27,8 +27,8 @@ namespace rocprofsys::sampling
 
 // ── Construction / Destruction ─────────────────────────────────────────────
 
-template <class Policies, class ProductionHooks, class TestHooks>
-sampling_service<Policies, ProductionHooks, TestHooks>::sampling_service()
+template <class Policies>
+sampling_service<Policies>::sampling_service()
 : pause_registry_(clock_)
 , duration_controller_([this]() {
     duration_disabled_ = true;
@@ -65,37 +65,37 @@ sampling_service<Policies, ProductionHooks, TestHooks>::sampling_service()
     static_assert(is_fatal_error_policy_v<fatal_error>,
                   "Policies::fatal_error must satisfy FatalErrorPolicy "
                   "(requires non-void type with fatal() template method)");
-    static_assert(is_production_hooks_policy_v<ProductionHooks>,
-                  "ProductionHooks must satisfy ProductionHooksPolicy "
+    static_assert(is_production_hooks_policy_v<production_hooks>,
+                  "Policies::production_hooks must satisfy ProductionHooksPolicy "
                   "(requires bool check_thread_guards(int64_t))");
     static_assert(
-        is_test_hooks_policy_v<TestHooks>,
-        "TestHooks must satisfy TestHooksPolicy "
+        is_test_hooks_policy_v<test_hooks>,
+        "Policies::test_hooks must satisfy TestHooksPolicy "
         "(requires override_duration_disabled / _causal_mode / _child_process)");
 }
 
-template <class Policies, class ProductionHooks, class TestHooks>
-sampling_service<Policies, ProductionHooks, TestHooks>::~sampling_service() = default;
+template <class Policies>
+sampling_service<Policies>::~sampling_service() = default;
 
 // ── is_paused / is_blocked ─────────────────────────────────────────────────
 
-template <class Policies, class ProductionHooks, class TestHooks>
+template <class Policies>
 bool
-sampling_service<Policies, ProductionHooks, TestHooks>::is_paused() const noexcept
+sampling_service<Policies>::is_paused() const noexcept
 {
     return pause_registry_.is_paused();
 }
 
-template <class Policies, class ProductionHooks, class TestHooks>
+template <class Policies>
 bool
-sampling_service<Policies, ProductionHooks, TestHooks>::is_blocked() const noexcept
+sampling_service<Policies>::is_blocked() const noexcept
 {
     return blocked_.load(std::memory_order_relaxed);
 }
 
-template <class Policies, class ProductionHooks, class TestHooks>
+template <class Policies>
 size_t
-sampling_service<Policies, ProductionHooks, TestHooks>::dropped_samples() const noexcept
+sampling_service<Policies>::dropped_samples() const noexcept
 {
     size_t total = 0;
     // Sum dropped counts across all active per-thread states (DEC-15).
@@ -108,17 +108,17 @@ sampling_service<Policies, ProductionHooks, TestHooks>::dropped_samples() const 
 
 // ── block_samples / unblock_samples ───────────────────────────────────────
 
-template <class Policies, class ProductionHooks, class TestHooks>
+template <class Policies>
 void
-sampling_service<Policies, ProductionHooks, TestHooks>::block_samples()
+sampling_service<Policies>::block_samples()
 {
     LOG_DEBUG("Blocking sampling...");
     blocked_.store(true, std::memory_order_release);
 }
 
-template <class Policies, class ProductionHooks, class TestHooks>
+template <class Policies>
 void
-sampling_service<Policies, ProductionHooks, TestHooks>::unblock_samples()
+sampling_service<Policies>::unblock_samples()
 {
     LOG_DEBUG("Unblocking sampling...");
     blocked_.store(false, std::memory_order_release);
@@ -126,10 +126,10 @@ sampling_service<Policies, ProductionHooks, TestHooks>::unblock_samples()
 
 // ── block_signals / unblock_signals ───────────────────────────────────────
 
-template <class Policies, class ProductionHooks, class TestHooks>
+template <class Policies>
 void
-sampling_service<Policies, ProductionHooks, TestHooks>::apply_signal_mask(
-    int how, std::set<int> sigs, char const* verb_capitalized)
+sampling_service<Policies>::apply_signal_mask(int how, std::set<int> sigs,
+                                              char const* verb_capitalized)
 {
     auto calling_tid = static_cast<int64_t>(::gettid());
     if(sigs.empty()) sigs = get_signal_types(calling_tid);
@@ -153,26 +153,25 @@ sampling_service<Policies, ProductionHooks, TestHooks>::apply_signal_mask(
     }
 }
 
-template <class Policies, class ProductionHooks, class TestHooks>
+template <class Policies>
 void
-sampling_service<Policies, ProductionHooks, TestHooks>::block_signals(std::set<int> sigs)
+sampling_service<Policies>::block_signals(std::set<int> sigs)
 {
     apply_signal_mask(SIG_BLOCK, std::move(sigs), "Block");
 }
 
-template <class Policies, class ProductionHooks, class TestHooks>
+template <class Policies>
 void
-sampling_service<Policies, ProductionHooks, TestHooks>::unblock_signals(
-    std::set<int> sigs)
+sampling_service<Policies>::unblock_signals(std::set<int> sigs)
 {
     apply_signal_mask(SIG_UNBLOCK, std::move(sigs), "Unblock");
 }
 
 // ── pause / resume ────────────────────────────────────────────────────────
 
-template <class Policies, class ProductionHooks, class TestHooks>
+template <class Policies>
 void
-sampling_service<Policies, ProductionHooks, TestHooks>::pause()
+sampling_service<Policies>::pause()
 {
     if(pause_registry_.pause())
     {
@@ -180,9 +179,9 @@ sampling_service<Policies, ProductionHooks, TestHooks>::pause()
     }
 }
 
-template <class Policies, class ProductionHooks, class TestHooks>
+template <class Policies>
 void
-sampling_service<Policies, ProductionHooks, TestHooks>::resume()
+sampling_service<Policies>::resume()
 {
     if(pause_registry_.resume())
     {
@@ -192,9 +191,9 @@ sampling_service<Policies, ProductionHooks, TestHooks>::resume()
 
 // ── get_signal_types ──────────────────────────────────────────────────────
 
-template <class Policies, class ProductionHooks, class TestHooks>
+template <class Policies>
 std::set<int>
-sampling_service<Policies, ProductionHooks, TestHooks>::get_signal_types(int64_t tid)
+sampling_service<Policies>::get_signal_types(int64_t tid)
 {
     std::lock_guard<std::mutex> lk(signal_types_mutex_);
     auto                        it = signal_types_.find(tid);
@@ -208,9 +207,9 @@ sampling_service<Policies, ProductionHooks, TestHooks>::get_signal_types(int64_t
 
 // ── setup ─────────────────────────────────────────────────────────────────
 
-template <class Policies, class ProductionHooks, class TestHooks>
+template <class Policies>
 std::set<int>
-sampling_service<Policies, ProductionHooks, TestHooks>::setup(int64_t tid)
+sampling_service<Policies>::setup(int64_t tid)
 {
     // AC-19: causal profiling guard. test_hooks_ override lets unit tests
     // exercise the guard without enabling actual causal profiling.
@@ -273,9 +272,9 @@ sampling_service<Policies, ProductionHooks, TestHooks>::setup(int64_t tid)
 
 // ── shutdown ──────────────────────────────────────────────────────────────
 
-template <class Policies, class ProductionHooks, class TestHooks>
+template <class Policies>
 std::set<int>
-sampling_service<Policies, ProductionHooks, TestHooks>::shutdown(int64_t tid)
+sampling_service<Policies>::shutdown(int64_t tid)
 {
     // AC-20: child process — release state without per-tid processing.
     if(child_process_mode_ || test_hooks_.override_child_process()) return {};
@@ -326,18 +325,18 @@ sampling_service<Policies, ProductionHooks, TestHooks>::shutdown(int64_t tid)
 
 // ── postfork_parent_reinit / postfork_child_cleanup ───────────────────────
 
-template <class Policies, class ProductionHooks, class TestHooks>
+template <class Policies>
 void
-sampling_service<Policies, ProductionHooks, TestHooks>::postfork_parent_reinit()
+sampling_service<Policies>::postfork_parent_reinit()
 {
     // AC-17: parent process — timers survive fork() per POSIX, so no re-arming needed.
     // Delegate to the PMC layer when process sampling is active (production hook).
     production_hooks_.postfork_parent_reinit(*this);
 }
 
-template <class Policies, class ProductionHooks, class TestHooks>
+template <class Policies>
 void
-sampling_service<Policies, ProductionHooks, TestHooks>::postfork_child_cleanup()
+sampling_service<Policies>::postfork_child_cleanup()
 {
     // NFR-TS-5: block sampling signals on the calling thread BEFORE touching any state
     // so no signal handler fires against partially-destroyed per-thread state in the

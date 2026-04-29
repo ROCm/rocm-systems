@@ -23,22 +23,17 @@
 namespace rocprofsys::sampling
 {
 
-// sampling_service<Policies, ProductionHooks, TestHooks> — the primary public surface.
+// sampling_service<Policies> — the primary public surface.
 // No virtual functions; all polymorphism via template policy parameters (D7).
 // The 6 free functions in the old sampling.hpp are replaced by methods here (D4).
 // Callers use the services::sampling() Meyers singleton accessor (DEC-10).
 //
-// ProductionHooks: injection slot for production-only side effects (TLS wiring,
-// timer arming, perf-event configuration, trace_cache emission, PMC postfork).
-// Defaults to noop_production_hooks so sampling unit tests do not need
-// `library/` includes.
-//
-// TestHooks: injection slot for test-only state overrides (causal mode,
-// duration disabled, child-process mode). Defaults to noop_test_hooks
-// (constexpr-false overrides — the consulting branches fold away in
-// production builds).
-template <class Policies, class ProductionHooks = noop_production_hooks,
-          class TestHooks = noop_test_hooks>
+// Policies bundles every dependent type as a nested using-alias (P4 — single
+// source of truth). Production-hooks and test-hooks slots live inside the
+// bundle as `Policies::production_hooks` and `Policies::test_hooks`, with
+// noop_production_hooks / noop_test_hooks defaults supplied by
+// sampling_policies_traits so test bundles only override what they need.
+template <class Policies>
 class sampling_service
 {
 public:
@@ -53,8 +48,8 @@ public:
     using report_writer     = typename Policies::report_writer;
     using perfetto_sink     = typename Policies::perfetto_sink;
     using fatal_error       = typename Policies::fatal_error;
-    using production_hooks  = ProductionHooks;
-    using test_hooks        = TestHooks;
+    using production_hooks  = typename Policies::production_hooks;
+    using test_hooks        = typename Policies::test_hooks;
 
     using thread_state_t        = thread_sampler_state<Policies>;
     using pause_registry_t      = pause_interval_registry<clock>;
@@ -146,13 +141,9 @@ private:
 };
 
 #if defined(__linux__)
-// Forward-declare the production hooks policy class so default_sampling_service
-// can be aliased here without dragging in main-library symbols. Defined in
-// sampling/policies/real_production_hooks.hpp (included from default_policies.hpp).
-class real_production_hooks;
-
-using default_sampling_service =
-    sampling_service<default_sampling_policies, real_production_hooks, noop_test_hooks>;
+// real_production_hooks is forward-declared in sampling_policies.hpp so the
+// production policy bundle can name it as Policies::production_hooks.
+using default_sampling_service = sampling_service<default_sampling_policies>;
 #endif
 
 }  // namespace rocprofsys::sampling
