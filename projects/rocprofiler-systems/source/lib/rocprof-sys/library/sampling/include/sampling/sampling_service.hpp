@@ -26,11 +26,11 @@ namespace rocprofsys::sampling
 // The 6 free functions in the old sampling.hpp are replaced by methods here (D4).
 // Callers use the services::sampling() Meyers singleton accessor (DEC-10).
 //
-// Policies bundles every dependent type as a nested using-alias (P4 — single
-// source of truth). Production-hooks live inside the bundle as
-// `Policies::production_hooks`. Test fixtures (mocks, recording doubles)
-// live entirely under tests/doubles/; production code carries no test-hook
-// slot or test-only state.
+// Policies bundles 10 strategy types as nested using-aliases (P4 — single
+// source of truth). Lifecycle orchestration (setup_wiring, shutdown_wiring,
+// emit_resolved, postfork_*) is implemented directly on this class via
+// private do_* methods; tests change behaviour by substituting the 10
+// strategy policies, not by swapping orchestration.
 template <class Policies>
 class sampling_service
 {
@@ -46,7 +46,6 @@ public:
     using report_writer     = typename Policies::report_writer;
     using perfetto_sink     = typename Policies::perfetto_sink;
     using fatal_error       = typename Policies::fatal_error;
-    using production_hooks  = typename Policies::production_hooks;
 
     using thread_state_t        = thread_sampler_state<Policies>;
     using pause_registry_t      = pause_interval_registry<clock>;
@@ -93,7 +92,6 @@ public:
     fatal_error&           get_fatal_error() noexcept { return fatal_; }
     pause_registry_t&      pause_registry() noexcept { return pause_registry_; }
     duration_controller_t& duration_controller() noexcept { return duration_controller_; }
-    production_hooks&      production_hooks_ref() noexcept { return production_hooks_; }
 
     // ----- production state setters -----
     // Called by postfork_child() to put the service into child-process mode, where
@@ -115,7 +113,6 @@ private:
     report_writer     report_writer_;
     perfetto_sink     perfetto_sink_;
     fatal_error       fatal_;
-    production_hooks  production_hooks_;
 
     pause_registry_t                        pause_registry_;
     thread_sampler_state_registry<Policies> registry_;
@@ -133,11 +130,24 @@ private:
     // Apply pthread_sigmask via signal_dispatcher_; route errors through fatal_.
     // verb is "Block" / "Unblock" — used in the LOG_DEBUG line.
     void apply_signal_mask(int how, std::set<int> sigs, char const* verb);
+
+    // Lifecycle orchestration (formerly real_production_hooks). Implemented in
+    // src/sampling_service_impl.hpp; bodies depend on main-lib headers
+    // (core/config.hpp, core/perf.hpp, core/state.hpp, library/thread_info.hpp,
+    // library/pmc/sampler.hpp, core/trace_cache/cache_manager.hpp) and Linux
+    // headers (linux/perf_event.h, libunwind.h). Translation units that pull
+    // sampling_service_impl.hpp must therefore be compiled with the main-lib
+    // include set — propagated via the rocprofiler-systems-interface-library
+    // PUBLIC link on rocprof-sys-sampling-library.
+    bool check_thread_guards(int64_t tid);
+    void do_setup_wiring(int64_t tid, thread_state_t* state, std::set<int> const& sigs);
+    void do_shutdown_wiring(int64_t tid) noexcept;
+    void do_emit_resolved(int64_t tid);
+    void do_postfork_parent_reinit();
+    void do_postfork_child_cleanup();
 };
 
 #if defined(__linux__)
-// real_production_hooks is forward-declared in sampling_policies.hpp so the
-// production policy bundle can name it as Policies::production_hooks.
 using default_sampling_service = sampling_service<default_sampling_policies>;
 #endif
 

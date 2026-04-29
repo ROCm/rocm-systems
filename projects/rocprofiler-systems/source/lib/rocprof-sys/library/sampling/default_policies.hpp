@@ -43,13 +43,12 @@
 #    include "sampling/policies/real_perfetto_sink.hpp"
 #    include "sampling/policies/real_trace_cache_sink.hpp"
 
-// ── TLS state + service template + production hooks policy ──────────────────
+// ── TLS state + service template ────────────────────────────────────────────
+// Lifecycle orchestration (formerly real_production_hooks) is now inlined
+// into sampling_service<Policies>::do_setup_wiring / do_emit_resolved /
+// do_postfork_* — see src/sampling_service_impl.hpp.
 #    include "sampling/policies/tl_state.hpp"
 #    include "sampling/sampling_service.hpp"
-
-// real_production_hooks (T18a) replaces the explicit-specialization layer
-// that formerly lived in sampling_service_production_hooks.hpp.
-#    include "sampling/policies/linux/real_production_hooks.hpp"
 
 #    include <csignal>
 #    include <sys/types.h>

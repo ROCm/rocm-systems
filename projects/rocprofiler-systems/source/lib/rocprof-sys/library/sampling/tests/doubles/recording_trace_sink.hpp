@@ -27,6 +27,15 @@ struct recording_trace_sink
         m_overflow_records.push_back({ tid, static_cast<int>(samples.size()) });
     }
 
+    // Per-thread counter tracks emission shape (TF-3) — production code calls
+    // this from sampling_service::do_emit_resolved alongside store_timer.
+    // The recording double keeps an independent record so tests can assert on
+    // the call separately from the timer/overflow paths.
+    void store_thread_counters(int64_t tid, std::vector<timer_sample> const& samples)
+    {
+        m_thread_counter_records.push_back({ tid, static_cast<int>(samples.size()) });
+    }
+
     struct call_record
     {
         int64_t tid;
@@ -38,10 +47,15 @@ struct recording_trace_sink
     {
         return m_overflow_records;
     }
+    [[nodiscard]] auto const& thread_counter_records() const noexcept
+    {
+        return m_thread_counter_records;
+    }
     void clear() noexcept
     {
         m_timer_records.clear();
         m_overflow_records.clear();
+        m_thread_counter_records.clear();
     }
 
     // Total samples forwarded across all calls (convenience for assertions).
@@ -62,6 +76,7 @@ struct recording_trace_sink
 
     std::vector<call_record> m_timer_records;
     std::vector<call_record> m_overflow_records;
+    std::vector<call_record> m_thread_counter_records;
 };
 
 }  // namespace rocprofsys::sampling::test
