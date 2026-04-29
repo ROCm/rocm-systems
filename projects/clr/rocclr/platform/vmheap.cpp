@@ -289,7 +289,10 @@ HeapBlock* VmHeap::AllocBlock(size_t un_size) {
       InsertBlock(&busy_list_, walk);
       free_size_ -= size;
       if (!MapPhysMemory(walk->Offset(), size)) {
-        free(walk);
+        DetachBlock(&busy_list_, walk);
+        walk->busy_ = false;
+        MergeBlock(&free_list_, walk);
+        free_size_ += size;
         return nullptr;
       }
       return walk;
@@ -305,7 +308,10 @@ HeapBlock* VmHeap::AllocBlock(size_t un_size) {
     InsertBlock(&busy_list_, newblock);
     free_size_ -= size;
     if (!MapPhysMemory(newblock->Offset(), size)) {
-      free(newblock);
+      DetachBlock(&busy_list_, newblock);
+      newblock->busy_ = false;
+      MergeBlock(&free_list_, newblock);
+      free_size_ += size;
       return nullptr;
     }
     return newblock;
