@@ -973,6 +973,8 @@ ncclResult_t ncclTopoTuneModel(struct ncclComm* comm, int minCompCap, int maxCom
            (a == NCCL_ALGO_NVLS && comm->nNodes > 1))) disable = 1;
       // Disable CollNet+Direct if not on an NVSwitch system
       if (nvsCount == 0 && a == NCCL_ALGO_COLLNET_DIRECT) disable = 1;
+      // Disable Tree for asymmetric topology (tree structures are inconsistent across nodes)
+      if (comm->minLocalRanks != comm->maxLocalRanks && a == NCCL_ALGO_TREE) disable = 1;
       if (disable) algoEnable[f*NCCL_NUM_ALGORITHMS+a] = 0;
     }
   }
