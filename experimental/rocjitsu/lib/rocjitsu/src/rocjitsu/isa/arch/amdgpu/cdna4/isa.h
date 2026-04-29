@@ -28,7 +28,8 @@ namespace cdna4 {
 /// COND_DBG_USER and COND_DBG_SYS (both active on CDNA3/4 hardware).
 struct Isa : amdgpu::CdnaIsaBase {
   static constexpr uint32_t MAX_ACC_VGPRS_PER_WF =
-      256; ///< Unified AccVGPR file (src encoding alias at 768).
+      256;                               ///< Unified AccVGPR file (src encoding alias at 768).
+  static constexpr bool SRAM_ECC = true; ///< gfx950 has SRAM ECC.
 
   using Decoder = cdna4::Decoder;
   using MachineInst = cdna4::MachineInst;

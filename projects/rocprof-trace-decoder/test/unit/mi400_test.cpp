@@ -38,9 +38,9 @@ TEST(MI400LookupTableTest, BasicEncodingLookups)
 {
     mi400::TokenLookupTable lookup;
 
-    EXPECT_EQ(lookup.lookup(0b0010), RdnaType::INST);
-    EXPECT_EQ(lookup.lookup(0b011), RdnaType::VALU_INST);
-    EXPECT_EQ(lookup.lookup(0b1000001), RdnaType::WAVE_END);
+    EXPECT_EQ(lookup.lookup(0b0010).type, RdnaType::INST);
+    EXPECT_EQ(lookup.lookup(0b011).type, RdnaType::VALU_INST);
+    EXPECT_EQ(lookup.lookup(0b1000001).type, RdnaType::WAVE_END);
 }
 
 TEST(MI400LookupTableTest, GetTimeForTimestamp)
@@ -56,7 +56,7 @@ TEST(MI400LookupTableTest, GetTimeForTimestamp)
     int64_t realtime = 0;
     int64_t cur_time = 500;
 
-    auto result = lookup.getTime(RdnaType::TIMESTAMP, ts.raw, cur_time, packetlost, realtime);
+    auto result = lookup.getTime(lookup.lookup(0b0000001), ts.raw, cur_time, packetlost, realtime);
     EXPECT_EQ(result, ts.time + cur_time);
 }
 
@@ -73,7 +73,7 @@ TEST(MI400LookupTableTest, GetTimeForRealtimeTimestamp)
     int64_t realtime = 0;
     int64_t cur_time = 500;
 
-    auto result = lookup.getTime(RdnaType::TIMESTAMP, ts.raw, cur_time, packetlost, realtime);
+    auto result = lookup.getTime(lookup.lookup(0b0000001), ts.raw, cur_time, packetlost, realtime);
     EXPECT_EQ(result, cur_time);
     EXPECT_EQ(realtime, ts.time);
 }
@@ -91,7 +91,7 @@ TEST(MI400LookupTableTest, GetTimeWithPacketLoss)
     int64_t realtime = 0;
     int64_t cur_time = 500;
 
-    lookup.getTime(RdnaType::TIMESTAMP, ts.raw, cur_time, packetlost, realtime);
+    lookup.getTime(lookup.lookup(0b0000001), ts.raw, cur_time, packetlost, realtime);
     EXPECT_TRUE(packetlost);
 }
 
@@ -103,7 +103,7 @@ TEST(MI400LookupTableTest, GetTimeForTimeToken)
     int64_t realtime = 0;
     int64_t cur_time = 500;
 
-    auto result = lookup.getTime(RdnaType::TIME, 0, cur_time, packetlost, realtime);
+    auto result = lookup.getTime(lookup.lookup(0b1110), 0, cur_time, packetlost, realtime);
     EXPECT_GT(result, cur_time);
 }
 

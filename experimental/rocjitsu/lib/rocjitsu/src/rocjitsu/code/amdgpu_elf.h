@@ -42,10 +42,43 @@ inline constexpr Elf_Half EM_AMDGPU = 224;
 
 inline constexpr uint32_t EF_AMDGPU_MACH = 0x0ff;
 inline constexpr uint32_t EF_AMDGPU_MACH_NONE = 0;
-/// @brief Machine type for gfx942.
-inline constexpr uint32_t EF_AMDGPU_MACH_AMDGCN_GFX942 = 0x4C;
-/// @brief Machine type for gfx950.
-inline constexpr uint32_t EF_AMDGPU_MACH_AMDGCN_GFX950 = 0x4E;
+inline constexpr uint32_t EF_AMDGPU_MACH_AMDGCN_GFX908 = 0x30;
+inline constexpr uint32_t EF_AMDGPU_MACH_AMDGCN_GFX90A = 0x3f;
+inline constexpr uint32_t EF_AMDGPU_MACH_AMDGCN_GFX940 = 0x40;
+inline constexpr uint32_t EF_AMDGPU_MACH_AMDGCN_GFX941 = 0x4b;
+inline constexpr uint32_t EF_AMDGPU_MACH_AMDGCN_GFX942 = 0x4c;
+inline constexpr uint32_t EF_AMDGPU_MACH_AMDGCN_GFX950 = 0x4f;
+inline constexpr uint32_t EF_AMDGPU_MACH_AMDGCN_GFX1010 = 0x33;
+inline constexpr uint32_t EF_AMDGPU_MACH_AMDGCN_GFX1030 = 0x36;
+inline constexpr uint32_t EF_AMDGPU_MACH_AMDGCN_GFX1100 = 0x41;
+inline constexpr uint32_t EF_AMDGPU_MACH_AMDGCN_GFX1150 = 0x43;
+inline constexpr uint32_t EF_AMDGPU_MACH_AMDGCN_GFX1200 = 0x48;
+inline constexpr uint32_t EF_AMDGPU_MACH_AMDGCN_GFX1201 = 0x4e;
+
+inline constexpr uint32_t elf_mach_for_arch(rj_code_arch_t arch) {
+  switch (arch) {
+  case ROCJITSU_CODE_ARCH_CDNA1:
+    return EF_AMDGPU_MACH_AMDGCN_GFX908;
+  case ROCJITSU_CODE_ARCH_CDNA2:
+    return EF_AMDGPU_MACH_AMDGCN_GFX90A;
+  case ROCJITSU_CODE_ARCH_CDNA3:
+    return EF_AMDGPU_MACH_AMDGCN_GFX942;
+  case ROCJITSU_CODE_ARCH_CDNA4:
+    return EF_AMDGPU_MACH_AMDGCN_GFX950;
+  case ROCJITSU_CODE_ARCH_RDNA1:
+    return EF_AMDGPU_MACH_AMDGCN_GFX1010;
+  case ROCJITSU_CODE_ARCH_RDNA2:
+    return EF_AMDGPU_MACH_AMDGCN_GFX1030;
+  case ROCJITSU_CODE_ARCH_RDNA3:
+    return EF_AMDGPU_MACH_AMDGCN_GFX1100;
+  case ROCJITSU_CODE_ARCH_RDNA3_5:
+    return EF_AMDGPU_MACH_AMDGCN_GFX1150;
+  case ROCJITSU_CODE_ARCH_RDNA4:
+    return EF_AMDGPU_MACH_AMDGCN_GFX1200;
+  default:
+    return EF_AMDGPU_MACH_NONE;
+  }
+}
 
 inline constexpr uint32_t SHT_NULL = 0;
 inline constexpr uint32_t SHT_PROGBITS = 1;

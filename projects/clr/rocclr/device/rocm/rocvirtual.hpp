@@ -776,7 +776,8 @@ class VirtualGPU : public device::VirtualDevice {
   //! SDMA engine affinity tracking for this VirtualGPU/stream
   uint32_t assigned_sdma_engine_ = 0;           //!< Assigned SDMA engine mask for all operations
 
-  void* hostcallBuffer_;  //!< Hostcall buffer
+  void* hostcallBuffer_;        //!< Hostcall buffer
+  size_t hostcallBufferSize_ = 0; //!< Byte size of hostcallBuffer_, for hostFree
 
   using KernelArgImpl = device::Settings::KernelArgImpl;
 };
