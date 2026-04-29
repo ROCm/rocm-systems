@@ -21,7 +21,7 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
 
 ### Optimized
 
-* Improves HIP runtime error logging when an application's fat binary does not include a compatible code object for the detected GPU architecture, offering clearer guidance to rebuild with the appropriate --offload-arch=gfxXXXX option.
+* Improves HIP runtime error logging when an application's fat binary does not include a compatible code object for the detected GPU architecture, offering clearer guidance to rebuild with the appropriate `--offload-arch=gfxXXXX` option.
 
 * Enables in‑memory and background‑thread asynchronous logging in the HIP runtime by default to improve overall logging capability. This behavior can be disabled by setting the environment variable `AMD_LOG_ASYNC=0`.
 
