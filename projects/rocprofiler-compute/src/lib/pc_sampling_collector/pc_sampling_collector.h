@@ -38,6 +38,8 @@ public:
     void write(pc_samples_writer_t& writer) override;
 
 private:
+    void write_instructions(size_t id, const obj_symbol_t& sym) const;
+
     std::shared_ptr<code_object_translator_t> m_translator;
 };
 }  // namespace rocm_compute

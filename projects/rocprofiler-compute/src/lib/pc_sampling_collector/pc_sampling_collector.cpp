@@ -43,14 +43,21 @@ void pc_sampling_collector_impl_t::write(pc_samples_writer_t& writer)
         const auto& symbols = m_translator->get_symbol_map(id);
         for (const auto& sym : symbols)
         {
-            uint64_t       pc  = sym.virtual_address;
-            const uint64_t end = sym.virtual_address + sym.mem_size;
-            while (pc < end)
-            {
-                const auto& inst = m_translator->get_instruction(id, pc);
-                std::cout << std::hex << pc << ": " << inst.inst << "\n";
-                pc += inst.size;
-            }
+            writer.start_code_obj_desc(sym);
+            write_instructions(id, sym);
+            writer.end_code_obj_desc();
         }
+    }
+}
+
+void pc_sampling_collector_impl_t::write_instructions(size_t id, const obj_symbol_t& sym) const
+{
+    uint64_t       pc  = sym.virtual_address;
+    const uint64_t end = sym.virtual_address + sym.mem_size;
+    while (pc < end)
+    {
+        const auto& inst = m_translator->get_instruction(id, pc);
+        std::cout << std::hex << pc << ": " << inst.inst << "\n";
+        pc += inst.size;
     }
 }
