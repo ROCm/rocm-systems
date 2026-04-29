@@ -300,9 +300,9 @@ void TestCrossProcessSerialization::Run(void) {
     int child_status = 0;
     pid_t cpid = wait(&child_status);
     ASSERT_EQ(cpid, child_);
-    ASSERT_TRUE(WIFEXITED(child_status) && WEXITSTATUS(child_status) == 0)
-        << "WAITER process exited with non-zero status " << WEXITSTATUS(child_status)
-        << " — child assertions failed (see output above)";
+    ASSERT_TRUE(WIFEXITED(child_status))
+        << "WAITER process terminated by signal " << WTERMSIG(child_status);
+    EXPECT_EQ(WEXITSTATUS(child_status), 0) << "WAITER process reported assertion failure(s)";
 
   } else {
     TestBase::Run();
