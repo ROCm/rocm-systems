@@ -12,7 +12,7 @@
 // real_timer_trigger lives in sampling/policies/ (production-only).
 // The smoke test provides a no-op stub for rocprofsys_sampling_signal_handler so that
 // start() can call sigaction() without requiring the full main-library link.
-#include "sampling/policies/real_timer_trigger.hpp"
+#include "sampling/policies/linux/real_timer_trigger.hpp"
 
 // Stub: satisfies the extern "C" declaration in real_timer_trigger.hpp.
 // The actual production handler is defined in services_accessor.cpp.

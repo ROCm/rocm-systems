@@ -21,8 +21,8 @@
 #include "sampling/src/steady_clock.hpp"
 
 // ── Production-only trigger policies (not test-accessible) ───────────────────
-#include "sampling/policies/real_overflow_trigger.hpp"
-#include "sampling/policies/real_timer_trigger.hpp"
+#include "sampling/policies/linux/real_overflow_trigger.hpp"
+#include "sampling/policies/linux/real_timer_trigger.hpp"
 
 // ── EmitterPolicy (production) ───────────────────────────────────────────────
 // Lightweight header — no libunwind / AMD-SMI deps; also included by test TUs.
@@ -42,7 +42,7 @@
 
 // real_production_hooks (T18a) replaces the explicit-specialization layer
 // that formerly lived in sampling_service_production_hooks.hpp.
-#include "sampling/policies/real_production_hooks.hpp"
+#include "sampling/policies/linux/real_production_hooks.hpp"
 
 #include <csignal>
 #include <sys/types.h>
