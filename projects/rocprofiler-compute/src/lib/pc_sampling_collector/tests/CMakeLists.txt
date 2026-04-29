@@ -13,7 +13,7 @@ add_executable(
 
 target_link_libraries(
     ${target}
-    PRIVATE pc-sampling-collector gtest_main gmock gsl_assert fmt::fmt
+    PRIVATE pc-sampling-collector gtest_main gmock gsl_assert fmt::fmt nlohmann_json
 )
 target_include_directories(${target} PUBLIC .)
 
