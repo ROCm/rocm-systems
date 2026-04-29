@@ -859,19 +859,28 @@ void disable_dispatch_log_for_queue_locked(core::Queue* q) {
     qs_ptr->ring_mask    = 0;
   }
 
-  // e. Unregister from drainer registry. Drops the registry's shared_ptr
-  //    ref. The worker's own shared_ptr (held by-value in
-  //    per_queue_drain_loop) is already released because the worker
-  //    has returned and joined.
-  g_active_queues.erase(queue_id_of(q));
-
-  // f. Release profiling ref. On the 1->0 edge AqlQueue::SetProfiling(false)
+  // e. Release profiling ref. On the 1->0 edge AqlQueue::SetProfiling(false)
   //    clears the KFD profiling-buffer registration (UPDATE_QUEUE with
   //    addr=0) and frees the per-queue dispatch-record buffer.
   //    QueueProfilingRelease takes g_owners_mu, NOT g_lifecycle_mu.
   //    By this point the worker is joined so no thread can dereference
   //    the buffer.
+  //
+  //    Order rationale (review C1, stage-1 spec-compliance): release
+  //    BEFORE the registry erase. The release is the step that drives
+  //    SetProfiling(false) on the underlying AqlQueue, which is the
+  //    transition that makes the per-queue ring buffer cease to be
+  //    a profiling buffer; once that has returned, the queue is fully
+  //    quiesced from the dispatch_log perspective and erasing the
+  //    registry slot is the final hand-off.
   QueueProfilingRelease(q);
+
+  // f. Unregister from drainer registry. Drops the registry's shared_ptr
+  //    ref. The worker's own shared_ptr (held by-value in
+  //    per_queue_drain_loop) is already released because the worker
+  //    has returned and joined, so this drops the last ref and the
+  //    queue_drain_state destructor fires.
+  g_active_queues.erase(queue_id_of(q));
 
   q->dispatch_log_active.store(false, std::memory_order_release);
 }
