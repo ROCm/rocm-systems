@@ -2,7 +2,7 @@
 name: amdsmi-review-architecture
 description: "Architecture review subagent. Checks design patterns, API consistency, layering, cascade integrity. Use when: architecture review, design check, API cascade."
 tools: read/readFile, search/textSearch, search/fileSearch, search/listDirectory, search/usages
-model: "Claude Sonnet 4.6"
+model: "Claude Opus 4.6"
 user-invocable: false
 ---
 

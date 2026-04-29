@@ -407,6 +407,44 @@ def _report_active_mode() -> str:
     return "Mode: agentic"
 
 
+def _status_symbol(kind: str, stream=None) -> str:
+    """Return a status symbol representable by the target stream."""
+    import sys
+
+    stream = stream or sys.stdout
+    glyphs = {"ok": "✓", "warn": "⚠", "fail": "✗"}
+    fallback = {"ok": "OK", "warn": "WARN", "fail": "FAIL"}
+    glyph = glyphs[kind]
+    encoding = getattr(stream, "encoding", None) or "utf-8"
+    try:
+        glyph.encode(encoding)
+    except UnicodeEncodeError:
+        return fallback[kind]
+    return glyph
+
+
+def _stream_safe_text(text: str, stream=None) -> str:
+    """Return text that can be encoded by the target stream."""
+    import sys
+
+    stream = stream or sys.stdout
+    encoding = getattr(stream, "encoding", None) or "utf-8"
+    try:
+        text.encode(encoding)
+        return text
+    except UnicodeEncodeError:
+        fallback = text.translate(str.maketrans({"—": "-", "–": "-"}))
+        return fallback.encode(encoding, errors="replace").decode(encoding)
+
+
+def _doctor_print(text: str = "", stream=None) -> None:
+    """Print a doctor line without assuming UTF-8 stdout."""
+    import sys
+
+    stream = stream or sys.stdout
+    print(_stream_safe_text(text, stream), file=stream)
+
+
 def _run_doctor():
     """Run all health checks and print results in canonical format."""
     import sys
@@ -423,45 +461,49 @@ def _run_doctor():
 
     all_ok = True
     for name, (ok, msg) in checks:
-        symbol = "✓" if ok else "⚠" if "unknown" in msg.lower() else "✗"
-        if not ok and symbol == "✗":
+        kind = "ok" if ok else "warn" if "unknown" in msg.lower() else "fail"
+        symbol = _status_symbol(kind, sys.stdout)
+        if not ok and kind == "fail":
             all_ok = False
-        print(f"{symbol} {msg}")
+        _doctor_print(f"{symbol} {msg}", sys.stdout)
 
     # Check LLM providers
     configured, unconfigured = _check_llm_providers()
     all_ok = all_ok and len(configured) > 0  # at least one provider configured
     configured_str = ", ".join(configured) if configured else "(none)"
     unconfigured_str = ", ".join(unconfigured) if unconfigured else "(all configured)"
-    print(f"✓ {len(configured)}/5 LLM providers configured ({configured_str})")
+    _doctor_print(
+        f"{_status_symbol('ok', sys.stdout)} "
+        f"{len(configured)}/5 LLM providers configured ({configured_str})",
+        sys.stdout,
+    )
     if unconfigured:
-        print(f"  {len(unconfigured)}/5 providers unconfigured ({unconfigured_str}) — see README")
+        _doctor_print(
+            f"  {len(unconfigured)}/5 providers unconfigured ({unconfigured_str}) — see README",
+            sys.stdout,
+        )
 
     # Report active mode
-    print()
-    print(_report_active_mode())
+    _doctor_print(stream=sys.stdout)
+    _doctor_print(_report_active_mode(), sys.stdout)
 
     # Final status
-    print()
+    _doctor_print(stream=sys.stdout)
     if all_ok:
-        print("✓ ALL CLEAN")
+        _doctor_print(f"{_status_symbol('ok', sys.stdout)} ALL CLEAN", sys.stdout)
         return 0
     else:
-        print(f"✗ Issues found — see above")
+        _doctor_print(f"{_status_symbol('fail', sys.stdout)} Issues found — see above", sys.stdout)
         return 1
 
 
 def _get_version():
     try:
-        from importlib.metadata import version
+        from perfxpert import __version__
 
-        return version("perfxpert")
-    except (ImportError, ModuleNotFoundError):
-        # importlib.metadata not available (Python < 3.8 edge case)
-        return "0.1.0"
-    except ValueError:
-        # Package not installed / metadata lookup failed
-        return "0.1.0"
+        return __version__
+    except ImportError:
+        return "0+unknown"
 
 
 if __name__ == "__main__":

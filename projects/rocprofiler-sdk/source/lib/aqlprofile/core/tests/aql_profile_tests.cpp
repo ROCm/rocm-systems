@@ -19,30 +19,19 @@
 // LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
+#include "lib/aqlprofile/core/aql_profile.hpp"
+#include "lib/aqlprofile/aqlprofile.hpp"
+#include "lib/aqlprofile/core/pm4_factory.h"
+#include "lib/aqlprofile/aqlprofile.hpp"
 
 #include <gtest/gtest.h>
 #include <gmock/gmock.h>
 
-#include "core/aql_profile.hpp"
-#include "core/pm4_factory.h"
-#include "aqlprofile-sdk/version.h"
-#include "aqlprofile-sdk/aql_profile_v2.h"
 // header for memcpy
 #include <cstring>
 
-//#include "core/counter_dimensions.hpp"
-//#include "core/include/aql_profile_v2.h"
-
 using namespace aql_profile;
 using namespace testing;
-
-namespace aql_profile
-{
-bool                     Pm4Factory::concurrent_create_mode_ = false;
-bool                     Pm4Factory::spm_kfd_mode_           = false;
-Pm4Factory::mutex_t      Pm4Factory::mutex_;
-Pm4Factory::instances_t* Pm4Factory::instances_ = nullptr;
-}  // namespace aql_profile
 
 // Mock classes to simulate Pm4Factory and related functionality
 class MockPm4Factory : public Pm4Factory

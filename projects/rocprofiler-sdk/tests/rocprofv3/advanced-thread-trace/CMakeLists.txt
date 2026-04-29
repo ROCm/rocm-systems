@@ -248,15 +248,32 @@ rocprofiler_add_integration_execute_test(
     LABELS "integration-tests;thread-trace;pc-sampling"
     DISABLED ${ATT_PLUS_PCS_DISABLE})
 
-# Trace two GPUs
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-att-gpu-index-two-gpus
-    COMMAND $<TARGET_FILE:rocprofiler-sdk::rocprofv3> ${COMMON_PARAMS}/cmd_input -o out
-            --att-gpu-index 0,1 -- $<TARGET_FILE:vector-ops>
+    COMMAND
+        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -d att-multi-gpu --att --att-gpu-index
+        0,1 --att-consecutive-kernels 1 --kernel-trace --output-format csv --
+        $<TARGET_FILE:vector-ops>
     DEPENDS vector-ops
     TIMEOUT 45
     LABELS "integration-tests"
-    DISABLED ${IS_DISABLED})
+    DISABLED ${ROCPROFILER_DISABLE_UNSTABLE_CTESTS}
+    ENVIRONMENT "ROCPROF_ATT_LIBRARY_PATH=${attdecoder_LIB_DIR}"
+    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+    FIXTURES_SETUP rocprofv3-test-att-gpu-index-two-gpus)
+
+rocprofiler_add_integration_validate_test(
+    rocprofv3-test-att-gpu-index-two-gpus
+    TEST_PATHS validate.py
+    COPY conftest.py
+    CONFIG pytest.ini
+    DISCOVERY_ARGS -k test_multi_gpu_separate_agents
+    TIMEOUT 45
+    LABELS "integration-tests"
+    DISABLED ${ROCPROFILER_DISABLE_UNSTABLE_CTESTS}
+    FIXTURES_REQUIRED rocprofv3-test-att-gpu-index-two-gpus
+    ARGS --att-multi-gpu-out-dir ${CMAKE_CURRENT_BINARY_DIR}/att-multi-gpu
+    FAIL_REGULAR_EXPRESSION "AssertionError")
 
 # No machine has gpu index = 9999 The FAIL regex for this test is the ROCP_ERROR specific
 # to invalid device index
@@ -338,6 +355,49 @@ rocprofiler_add_integration_validate_test(
     DISCOVERY_ARGS -k test_other_simd_data
     ARGS --att-other-simd-out-dir ${OTHER_SIMD_OUT_DIR}
     FAIL_REGULAR_EXPRESSION "AssertionError")
+
+# ATT with marker-controlled device thread trace
+set(ATT_MARKER_TRACE_OUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/att-marker-trace-out")
+
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-att-marker-trace
+    COMMAND
+        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -d ${ATT_MARKER_TRACE_OUT_DIR} --att
+        --selected-regions --att-shader-engine-mask 0xF --output-format json --log-level
+        env -o out -- $<TARGET_FILE:att-marker-trace>
+    DEPENDS att-marker-trace
+    LABELS "integration-tests;thread-trace"
+    TIMEOUT 45
+    DISABLED ${IS_DISABLED}
+    ENVIRONMENT "ROCPROF_ATT_LIBRARY_PATH=${attdecoder_LIB_DIR}"
+    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+    FIXTURES_SETUP rocprofv3-test-att-marker-trace)
+
+rocprofiler_add_integration_validate_test(
+    rocprofv3-test-att-marker-trace
+    TEST_PATHS validate.py
+    COPY conftest.py
+    CONFIG pytest.ini
+    TIMEOUT 45
+    LABELS "integration-tests;thread-trace"
+    DISABLED ${IS_DISABLED}
+    FIXTURES_REQUIRED rocprofv3-test-att-marker-trace
+    DISCOVERY_ARGS -k test_att_marker_trace
+    ARGS --input ${ATT_MARKER_TRACE_OUT_DIR}/out_results.json --att-marker-trace-out-dir
+         ${ATT_MARKER_TRACE_OUT_DIR}
+    FAIL_REGULAR_EXPRESSION "AssertionError")
+
+# Conflict: att selected-regions + att-consecutive-kernels should fail
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-att-marker-trace-conflict-will-fail
+    COMMAND $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --att --selected-regions
+            --att-consecutive-kernels 5 -- $<TARGET_FILE:att-marker-trace>
+    DEPENDS att-marker-trace
+    TIMEOUT 45
+    LABELS "integration-tests;thread-trace"
+    WILL_FAIL
+    DISABLED ${IS_DISABLED}
+    FAIL_REGULAR_EXPRESSION "att-consecutive-kernels options are mutually exclusive")
 
 set(SHADERDATA_OUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/att-rocprofv3-shaderdata")
 

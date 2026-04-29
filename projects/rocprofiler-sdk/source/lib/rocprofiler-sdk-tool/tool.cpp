@@ -269,7 +269,7 @@ auto  target_kernels         = common::Synchronized<targeted_kernels_map_t>{};
 auto* execution_profile      = as_pointer<common::Synchronized<tool::execution_profile_data>>();
 auto  counter_collection_ctx = rocprofiler_context_id_t{0};
 auto  att_device_context     = rocprofiler_context_id_t{0};
-auto  att_consecutive_kernel_dispatch_id =
+auto  att_device_trace_id =
     std::atomic<rocprofiler_dispatch_id_t>{std::numeric_limits<uint64_t>::max()};
 std::mutex att_shader_data;
 
@@ -657,7 +657,10 @@ cntrl_tracing_callback(rocprofiler_callback_tracing_record_t record,
                 (tool::get_config().selected_regions_ref_count) ? pause_resume_count++ : int64_t{0};
             // only resume if there are no active contexts and the ref count was zero
             if(_active_contexts == 0 && _ref_count == 0)
+            {
+                if(tool::get_config().selected_regions) att_device_trace_id++;
                 set_contexts_active(*ctxs, true);
+            }
             else if(_ref_count < 0)
             {
                 ROCP_WARNING << fmt::format(
@@ -1619,17 +1622,17 @@ att_shader_data_callback(rocprofiler_agent_id_t  agent,
     std::lock_guard<std::mutex> lock(att_shader_data);
     std::stringstream           filename;
     auto dispatch_id = static_cast<rocprofiler_dispatch_id_t>(userdata.value);
-    // If dispatch_id/userdata.value == 0, then we are in device mode and get dispatch id from
-    // global atomic
-    if(dispatch_id == 0) dispatch_id = att_consecutive_kernel_dispatch_id.load();
+    // If dispatch_id/userdata.value == 0, then we are in device mode and get the trace id
+    // from the global atomic (set by consecutive-kernels or marker-trace logic)
+    if(dispatch_id == 0) dispatch_id = att_device_trace_id.load();
     filename << fmt::format("{}_shader_engine_{}_{}", agent.handle, se_id, dispatch_id);
 
     auto        output_stream   = get_output_stream(tool::get_config(), filename.str(), ".att");
     std::string output_filename = get_output_filename(tool::get_config(), filename.str(), ".att");
 
     output_stream.stream->write(reinterpret_cast<char*>(se_data), data_size);
-    tool_metadata->att_filenames[dispatch_id].first = agent;
-    tool_metadata->att_filenames[dispatch_id].second.emplace_back(output_filename);
+    auto key = tool::att_dispatch_agent_key_t{dispatch_id, agent.handle};
+    tool_metadata->att_filenames[key].emplace_back(output_filename);
 }
 
 rocprofiler_thread_trace_control_flags_t
@@ -1699,8 +1702,8 @@ att_dispatch_consecutive_kernel_callback(rocprofiler_callback_tracing_record_t r
                     // Keep track of launched dispatch ids
                     _data.emplace(_dispatch_id);
                     // Store lowest dispatch id for shader callback function
-                    if(att_consecutive_kernel_dispatch_id.load() > _dispatch_id)
-                        att_consecutive_kernel_dispatch_id.store(_dispatch_id);
+                    if(att_device_trace_id.load() > _dispatch_id)
+                        att_device_trace_id.store(_dispatch_id);
                 }
                 if(local_count >= _consecutive_kernels) stop_profiling = true;
             },
@@ -1728,7 +1731,7 @@ att_dispatch_consecutive_kernel_callback(rocprofiler_callback_tracing_record_t r
 
             ROCPROFILER_CALL(rocprofiler_stop_context(att_device_context), "context stop");
             stop_profiling = false;
-            att_consecutive_kernel_dispatch_id.store(std::numeric_limits<uint64_t>::max());
+            att_device_trace_id.store(std::numeric_limits<uint64_t>::max());
         },
         dispatch_id);
 }
@@ -2447,11 +2450,26 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
 
         const auto selecting_by_gpuid = !gpu_idx_set.empty();
 
-        // Use device_thread_trace_service when handling consecutive kernels
+        // Use device_thread_trace_service when handling consecutive kernels or marker trace
         const auto handle_consecutive_kernels = tool::get_config().att_consecutive_kernels >= 1;
+        const auto handle_marker_trace        = tool::get_config().selected_regions;
         rocprofiler_user_data_t user{.value = 0};
 
-        if(handle_consecutive_kernels)
+        ROCP_ERROR_IF(handle_consecutive_kernels && handle_marker_trace)
+            << "selected-regions and att-consecutive-kernels options are mutually exclusive";
+
+        if(handle_marker_trace)
+        {
+            // Marker-controlled device thread trace:
+            // Context is registered for pause/resume control and starts stopped.
+            // roctxProfilerResume(0) starts it, roctxProfilerPause(0) stops it.
+            // No KERNEL_TRACING overhead.
+            // Initialize trace ID counter to 0 (default is UINT64_MAX for consecutive-kernels
+            // min-tracking).
+            att_device_trace_id.store(0);
+            create_pause_resume_ctx(att_device_context, "advanced thread trace (ATT)");
+        }
+        else if(handle_consecutive_kernels)
         {
             // TODO: Fix DeviceThreadTracer to handle remaining thread traces before stopping
             // contexts so the following call can function correctly with marker trace:
@@ -2479,7 +2497,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
             auto agent_params = global_parameters;
             for(auto& counter : get_att_perfcounter_params(id, att_perf))
                 agent_params.push_back(counter);
-            if(!handle_consecutive_kernels)
+            if(!handle_consecutive_kernels && !handle_marker_trace)
             {
                 ROCPROFILER_CALL(
                     rocprofiler_configure_dispatch_thread_trace_service(get_client_ctx(),
@@ -3095,18 +3113,18 @@ generate_output(cleanup_mode _cleanup_mode)
             perf.emplace_back(ss.str());
         }
 
-        for(auto& [dispatch_id, att_filename_data] : tool_metadata->att_filenames)
+        for(auto& [key, att_files] : tool_metadata->att_filenames)
         {
-            std::string formats = "json,csv";
+            auto [dispatch_id, agent_handle] = key;
+            std::string formats              = "json,csv";
 
             auto ui_name = std::stringstream{};
-            ui_name << fmt::format("ui_output_agent_{}_dispatch_{}",
-                                   std::to_string(att_filename_data.first.handle),
-                                   dispatch_id);
+            ui_name << fmt::format(
+                "ui_output_agent_{}_dispatch_{}", std::to_string(agent_handle), dispatch_id);
             auto out_path = fmt::format("{}/{}", output_path, ui_name.str());
             auto in_path  = std::string(".");
 
-            decoder.parse(in_path, out_path, att_filename_data.second, codeobj, perf, formats);
+            decoder.parse(in_path, out_path, att_files, codeobj, perf, formats);
         }
     }
 
