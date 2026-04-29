@@ -161,13 +161,13 @@ if (ret == AMDSMI_STATUS_SUCCESS) {
 
 See related APIs:
 
-- [](/reference/amdsmi-py-api.md#amdsmi_get_violation_status)
-- [](/reference/amdsmi-py-api.md#amdsmi_get_gpu_metrics_info)
-- [](/reference/amdsmi-py-api.md#amdsmi_get_temp_metric)
-- [](/reference/amdsmi-py-api.md#amdsmi_get_power_cap_info)
-- [](/reference/amdsmi-py-api.md#amdsmi_get_gpu_activity)
-- [](/reference/amdsmi-py-api.md#amdsmi_get_gpu_asic_info)
-- [](/reference/amdsmi-py-api.md#amdsmi_get_gpu_bdf_id)
+- [`amdsmi_get_violation_status()`](/reference/amdsmi-py-api.md#amdsmi_get_violation_status)
+- [`amdsmi_get_gpu_metrics_info()`](/reference/amdsmi-py-api.md#amdsmi_get_gpu_metrics_info)
+- [`amdsmi_get_temp_metric()`](/reference/amdsmi-py-api.md#amdsmi_get_temp_metric)
+- [`amdsmi_get_power_cap_info()`](/reference/amdsmi-py-api.md#amdsmi_get_power_cap_info)
+- [`amdsmi_get_gpu_activity()`](/reference/amdsmi-py-api.md#amdsmi_get_gpu_activity)
+- [`amdsmi_get_gpu_asic_info()`](/reference/amdsmi-py-api.md#amdsmi_get_gpu_asic_info)
+- [`amdsmi_get_gpu_bdf_id()`](/reference/amdsmi-py-api.md#amdsmi_get_gpu_bdf_id)
 
 See
 [`example/amd_smi_violation_example.py`](../../example/amd_smi_violation_example.py)
