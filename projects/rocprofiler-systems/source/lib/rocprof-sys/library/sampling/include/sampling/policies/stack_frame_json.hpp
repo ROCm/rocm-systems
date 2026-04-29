@@ -39,8 +39,9 @@ make_line_info_json(stack_frame const& frame)
         auto const&    top  = frame.inlines.front();
         inlined["name"]     = top.name;
         inlined["location"] = top.location;
-        inlined["line"]     = std::to_string(top.line);
-        j["inlined"]        = inlined;
+        // The integer line number is embedded in `location` as "file:line".
+        // Consumers needing it as an int can parse the suffix on demand.
+        j["inlined"] = inlined;
     }
     return j.dump();
 }

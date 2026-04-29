@@ -14,7 +14,6 @@ struct inline_frame
 {
     std::string name;      // function name (demangled)
     std::string location;  // file:line
-    int         line = 0;
 };
 
 struct stack_frame
