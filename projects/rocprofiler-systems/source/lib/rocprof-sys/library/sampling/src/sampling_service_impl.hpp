@@ -89,7 +89,7 @@ sampling_service<Policies>::sampling_service()
                   "(requires read(), tids(), reset(), erase())");
     static_assert(is_trace_sink_policy_v<trace_sink>,
                   "Policies::trace_sink must satisfy TraceSinkPolicy "
-                  "(requires store_timer() and store_overflow())");
+                  "(requires store_timer(), store_overflow(), store_thread_counters())");
     static_assert(is_perfetto_sink_policy_v<perfetto_sink>,
                   "Policies::perfetto_sink must satisfy PerfettoSinkPolicy "
                   "(requires emit_timer() and emit_overflow())");
