@@ -154,6 +154,9 @@ class Tester {
 
   static std::vector<Tester *> create(TesterArguments args);
 
+  void *alloc_test_buffer(size_t size, enum UserBufType user_buf_type = USER_BUF_TYPE_HEAP);
+  void free_test_buffer(void *buffer, enum UserBufType user_buf_type = USER_BUF_TYPE_HEAP);
+
  protected:
   virtual void resetBuffers(uint64_t size) = 0;
 

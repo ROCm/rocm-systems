@@ -871,3 +871,58 @@ double Tester::timerAvgInMicroseconds() {
 
   return sum / num_timers;
 }
+
+void* Tester::alloc_test_buffer(size_t size, enum UserBufType user_buf_type) {
+  void *buffer;
+  switch (user_buf_type) {
+    case USER_BUF_TYPE_HOST:
+      CHECK_HIP(hipHostMalloc(&buffer, size));
+      break;
+    case USER_BUF_TYPE_DEVICE:
+      CHECK_HIP(hipMalloc(&buffer, size));
+      break;
+    case USER_BUF_TYPE_FINE:
+      CHECK_HIP(hipExtMallocWithFlags(&buffer, size, hipDeviceMallocFinegrained));
+      break;
+    case USER_BUF_TYPE_UNCACHED:
+#ifdef HAVE_DEVICE_MALLOC_UNCACHED
+      CHECK_HIP(hipExtMallocWithFlags(&buffer, size, hipDeviceMallocUncached));
+#else
+      std::cerr << "hipDeviceMallocUncached is unsupported. Please use another local memory type"
+                << std::endl;
+      exit(-1);
+#endif
+      break;
+    case USER_BUF_TYPE_MANAGED:
+      CHECK_HIP(hipMallocManaged(&buffer, size, hipMemAttachGlobal));
+      break;
+    case USER_BUF_TYPE_HEAP:
+    default:
+      buffer  = rocshmem_malloc(size);
+      if (buffer == nullptr) {
+        std::cerr << "Error allocating memory from symmetric heap" << std::endl;
+        std::cerr << "buffer: " << (uintptr_t) buffer << std::endl;
+        exit(-1);
+      }
+      break;
+  }
+  return buffer;
+}
+
+void Tester::free_test_buffer(void *buffer, enum UserBufType user_buf_type) {
+  switch (user_buf_type) {
+    case USER_BUF_TYPE_HOST:
+      CHECK_HIP(hipHostFree(buffer));
+      break;
+    case USER_BUF_TYPE_DEVICE:
+    case USER_BUF_TYPE_FINE:
+    case USER_BUF_TYPE_UNCACHED:
+    case USER_BUF_TYPE_MANAGED:
+      CHECK_HIP(hipFree(buffer));
+      break;
+    case USER_BUF_TYPE_HEAP:
+    default:
+      rocshmem_free(buffer);
+      break;
+  }
+}

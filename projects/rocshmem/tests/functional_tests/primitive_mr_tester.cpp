@@ -62,13 +62,13 @@ __global__ void PrimitiveMRTest(int loop, long long int *start_time,
  * HOST TESTER CLASS METHODS
  *****************************************************************************/
 PrimitiveMRTester::PrimitiveMRTester(TesterArguments args) : Tester(args) {
-  s_buf = (char *)rocshmem_malloc(max_msg_size * args.wg_size);
-  r_buf = (char *)rocshmem_malloc(max_msg_size * args.wg_size);
+  s_buf = (char *)alloc_test_buffer(max_msg_size * args.wg_size, args.local_buf_type);
+  r_buf = (char *)alloc_test_buffer(max_msg_size * args.wg_size);
 }
 
 PrimitiveMRTester::~PrimitiveMRTester() {
-  rocshmem_free(s_buf);
-  rocshmem_free(r_buf);
+  free_test_buffer(s_buf, args.local_buf_type);
+  free_test_buffer(r_buf);
 }
 
 void PrimitiveMRTester::resetBuffers([[maybe_unused]] size_t size) {
