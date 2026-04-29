@@ -227,6 +227,17 @@ sampling_service<default_sampling_policies>::setup_production_wiring(
         reg.add_track({ timer_track, sys_id, "{}" });
         reg.add_track({ overflow_track, sys_id, "{}" });
 
+        // TF-3 follow-up: per-thread process-sampling counter tracks emitted
+        // by emit_resolved_to_trace_cache as pmc_event_with_sample. Without
+        // these, rocpd_processor::handle → data_processor::insert_sample
+        // warns "Unexisting track thread_<metric> [N]" once per sample.
+        const std::string seq_suffix = " [" + std::to_string(seq_id) + "]";
+        for(const char* prefix : { "thread_cpu_time", "thread_peak_memory",
+                                   "thread_context_switch", "thread_page_fault" })
+        {
+            reg.add_track({ std::string{ prefix } + seq_suffix, sys_id, "{}" });
+        }
+
         LOG_DEBUG("thread {} registered trace_cache tracks: '{}' / '{}'", tid,
                   timer_track, overflow_track);
     }
