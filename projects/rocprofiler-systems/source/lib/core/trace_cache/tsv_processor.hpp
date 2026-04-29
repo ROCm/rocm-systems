@@ -227,32 +227,6 @@ private:
         if(m_pct_ofs.is_open()) m_pct_ptr = &m_pct_ofs;
         if(m_trip_ofs.is_open()) m_trip_ptr = &m_trip_ofs;
         write_headers_();
-
-        // TF-9: emit hw_counters-{PID}.tsv when PAPI events are configured.
-        // The signal-handler PAPI capture path is not yet implemented in the
-        // refactor, so this lists configured event names (one per row) so
-        // downstream consumers know which counters were requested. Real
-        // per-sample values land here once the PAPI integration completes.
-        const char* papi_env = std::getenv("ROCPROFSYS_PAPI_EVENTS");
-        if(papi_env != nullptr && papi_env[0] != '\0')
-        {
-            std::ofstream hw_ofs(m_output_dir + "/hw_counters" + suffix);
-            if(hw_ofs.is_open())
-            {
-                hw_ofs << "# metric: hw_counters\n"
-                       << "# unit: count\n"
-                       << "# columns: event\n";
-                std::string events{ papi_env };
-                size_t      pos = 0;
-                while(pos < events.size())
-                {
-                    auto next = events.find_first_of(",;\t ", pos);
-                    auto end  = (next == std::string::npos) ? events.size() : next;
-                    if(end > pos) hw_ofs << events.substr(pos, end - pos) << "\n";
-                    pos = (next == std::string::npos) ? events.size() : next + 1;
-                }
-            }
-        }
     }
 
     static void accumulate_(stats& st, double v)
