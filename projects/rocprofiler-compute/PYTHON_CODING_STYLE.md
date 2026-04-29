@@ -208,7 +208,7 @@ Extract helper functions when you encounter:
 
 - Extract a helper when logic is repeated, an expression benefits from a name, or a block mixes abstraction levels.
 - Search the codebase for an existing helper before writing a new one — reuse rather than duplicate.
-- Prefer combining existing helpers in new ways over modifying them (open-closed principle).
+- Always combine existing helpers in new ways over modifying them (open-closed principle).
 
 ### 1. Repeated Code Patterns
 
