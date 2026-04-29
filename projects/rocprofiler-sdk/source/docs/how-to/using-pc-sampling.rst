@@ -414,3 +414,5 @@ Fields starting with ``arb_state_`` are of particular interest as they indicate 
 For example, ``arb_state_issue_`` fields indicate the type of instructions issued by the arbiter at the time of sampling.
 On the other hand, ``arb_state_stall_`` fields indicate the type of instructions stalled at the time of sampling.
 This information is useful for understanding how many instructions per cycle (IPC) are issued.
+
+For information about how to analyze stochastic PC sampling data, see :ref:`cdna3-cdna4-pc-sampling`.
