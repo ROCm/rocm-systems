@@ -177,8 +177,14 @@ std::vector<uint32_t> lower_v_lshl_add_u64(const Instruction &inst,
     words.push_back(w1);
   }
 
-  // s_wait_alu 0xFFFD — drain VALU→carry dependency
-  words.push_back(pack_sopp(kSoppWaitAlu, 0xFFFD));
+  // VCC writeback dependency. GFX12 (RDNA4) requires an explicit s_wait_alu
+  // before reading VCC as carry-in. GFX11 (RDNA3) handles back-to-back
+  // VCC-write/VCC-read VALU ops via hardware scoreboarding, so no wait is
+  // required there. SOPP opcode 8 has different meanings between gens
+  // (s_wait_alu on GFX12 vs s_waitcnt on GFX11) so emitting it
+  // unconditionally would corrupt RDNA3 output.
+  if (host_arch == ROCJITSU_CODE_ARCH_RDNA4)
+    words.push_back(pack_sopp(kSoppWaitAlu, 0xFFFD));
 
   // v_add_co_ci_u32 vdst_hi, vcc_lo, src0_hi, src2_hi, vcc_lo
   {
@@ -369,11 +375,33 @@ std::vector<uint32_t> expand_waitcnt(const Instruction &inst, uint32_t, uint64_t
   return encode_waitcnt_gfx12(decode_waitcnt_gfx9(sopp.simm16));
 }
 
-std::vector<uint32_t> expand_v_lshl_add_u64(const Instruction &inst, uint32_t, uint64_t,
+std::vector<uint32_t> expand_v_lshl_add_u64(const Instruction &inst, uint32_t arch, uint64_t,
                                             const RegisterLiveness &, const LaneLayout *,
                                             const LaneLayout *) {
-  return lower_v_lshl_add_u64(inst, ROCJITSU_CODE_ARCH_RDNA4);
+  return lower_v_lshl_add_u64(inst, static_cast<rj_code_arch_t>(arch));
 }
+
+/// @brief Lower CDNA4 (GFX9) s_waitcnt to RDNA3 (GFX11) s_waitcnt.
+/// @details The simm16 counter-bit layout differs between GFX9 and GFX11
+/// (different bit positions for vmcnt/expcnt/lgkmcnt), so a verbatim
+/// simm16 copy by the auto-encoder gives incorrect waits. Rather than
+/// re-encode the counters precisely, emit a conservative full-drain
+/// s_waitcnt 0 which waits for every counter to reach 0. Slower than the
+/// original (which only waited on the specified counter classes) but
+/// always correct. A future change can add encode_waitcnt_gfx11 for a
+/// precise mapping, mirroring encode_waitcnt_gfx12 for the RDNA4 path.
+std::vector<uint32_t> expand_waitcnt_gfx9_to_gfx11(const Instruction &inst, uint32_t, uint64_t,
+                                                   const RegisterLiveness &, const LaneLayout *,
+                                                   const LaneLayout *) {
+  // Defensive guard: the rule table is keyed by encoding and opcode, but only
+  // SOPP s_waitcnt has the GFX9 waitcnt simm16 layout this lowering expects.
+  constexpr uint16_t kEnc_SOPP_value = 0x17F;
+  if (inst.encoding_id() != kEnc_SOPP_value)
+    return {};
+  constexpr uint32_t kRdna3SoppOp_s_waitcnt = 9;
+  return {pack_sopp(kRdna3SoppOp_s_waitcnt, 0)};
+}
+
 
 std::vector<uint32_t> expand_accvgpr_read(const Instruction &inst, uint32_t, uint64_t,
                                           const RegisterLiveness &, const LaneLayout *,
@@ -426,6 +454,23 @@ const TranslationRule kExpandRules_cdna4_to_rdna4[] = {
      expand_accvgpr_write, nullptr, nullptr},
 };
 
+// CDNA4 -> RDNA3 expand rules. With the codegen fixes (per-pair enc_map for
+// the FLAT family, FLAT_LOAD_/FLAT_STORE_ DWORD->B32 in the rename map,
+// target_opcode preserved through domain-rule overrides), the auto-generated
+// encoding translator handles the FLAT_GLBL family at the encoding level.
+// Two genuine Expand cases remain:
+//   - s_waitcnt: simm16 counter-bit layout differs between GFX9 and GFX11,
+//     so an opcode swap alone is not enough.
+//   - v_lshl_add_u64: no carry-propagating fused 64-bit add on RDNA3, expands
+//     to v_add_co_u32 + v_add_co_ci_u32.
+// Rule table must stay sorted by (src_encoding_id, src_opcode).
+const TranslationRule kExpandRules_cdna4_to_rdna3[] = {
+    {kEncSopp, kCdna4Op_s_waitcnt, RuleAction::Expand, 0, 0, nullptr,
+     expand_waitcnt_gfx9_to_gfx11, nullptr, nullptr},
+    {kEncVop3, kCdna4Op_v_lshl_add_u64, RuleAction::Expand, 0, 0, nullptr,
+     expand_v_lshl_add_u64, nullptr, nullptr},
+};
+
 } // namespace
 
 // ---------------------------------------------------------------------------
@@ -436,6 +481,8 @@ SemanticTranslator::SemanticTranslator(rj_code_arch_t guest, rj_code_arch_t host
     : host_arch_(host) {
   if (guest == ROCJITSU_CODE_ARCH_CDNA4 && host == ROCJITSU_CODE_ARCH_RDNA4)
     expand_rules_ = kExpandRules_cdna4_to_rdna4;
+  else if (guest == ROCJITSU_CODE_ARCH_CDNA4 && host == ROCJITSU_CODE_ARCH_RDNA3)
+    expand_rules_ = kExpandRules_cdna4_to_rdna3;
 }
 
 std::vector<uint32_t> SemanticTranslator::try_lower_expand(const Instruction &inst, uint64_t offset,
