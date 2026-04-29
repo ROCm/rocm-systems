@@ -136,6 +136,10 @@ enum TestType {
   TeamCtxSharedInfraTestType = 95,
   QuietOnStreamTestType = 96,
   SyncAllOnStreamTestType = 97,
+  FenceOrderPutWaveSignalTestType = 98,
+  FenceOrderPutLargeSmallTestType = 99,
+  FenceOrderFanoutTestType = 100,
+  FenceOrderPutWaveNbiChunksTestType = 101,
 };
 
 enum OpType { PutType = 0, GetType = 1 };

@@ -131,6 +131,10 @@ declare -A TEST_NUMBERS=(
   ["teamctxsharedinfra"]="95"
   ["quiet_on_stream"]="96"
   ["sync_all_on_stream"]="97"
+  ["fence_putwavesignal"]="98"
+  ["fence_putlargesmall"]="99"
+  ["fence_fanout"]="100"
+  ["fence_putwavenbichunks"]="101"
 )
 
 ExecTest() {
@@ -570,6 +574,18 @@ TestOther() {
   ExecTest  "shmemptr"         2       1            1024      8
   ExecTest  "shmemptr"         2       8            1         8
   ExecTest  "shmemptr"         2       16           128       8
+
+  ########################### Fence ordering tests #############################
+  ExecTest  "fence_putwavesignal"    2       1     64        1048576
+  ExecTest  "fence_putwavesignal"    2       8     256       1048576
+  ExecTest  "fence_putwavesignal"    2       32    1024      65536
+  ExecTest  "fence_putlargesmall"    2       1     64        4096
+  ExecTest  "fence_putlargesmall"    2       8     256       65536
+  ExecTest  "fence_fanout"           2       1     64        1048576
+  ExecTest  "fence_fanout"           4       4     256       65536
+  ExecTest  "fence_fanout"           8       8     256       65536
+  ExecTest  "fence_putwavenbichunks" 2       1     64        1048576
+  ExecTest  "fence_putwavenbichunks" 2       8     256       65536
 }
 
 TestHeatMapRMA() {
@@ -607,6 +623,7 @@ TestHeatMapColl() {
   ExecTest  "alltoall"         32      1            256        v1073741824
   ExecTest  "alltoall"         64      1            256        v1073741824
 }
+
 
 ValidateInput() {
   INPUT_COUNT=$1

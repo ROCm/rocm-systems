@@ -152,6 +152,9 @@ TesterArguments::TesterArguments(int argc, char *argv[]) {
     case TeamCtxInfraTestOddEvenType:
       max_msg_size = min_msg_size;
       break;
+    case FenceOrderPutWaveNbiChunksTestType:
+      min_msg_size = 16;  // must be >= STRESS_NUM_CHUNKS for chunk_size >= 1
+      break;
     case PutNBIMRTestType:
       min_msg_size = max_msg_size;
       break;
@@ -247,6 +250,7 @@ void TesterArguments::get_arguments() {
     case FloodWaitAmoTestType:
     case DeviceBitcodeTestType:
     case TeamCtxSharedInfraTestType:
+    case FenceOrderFanoutTestType:
       requires_two_pes = false;
       break;
     default:
