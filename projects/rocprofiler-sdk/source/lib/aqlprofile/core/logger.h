@@ -39,6 +39,8 @@
 #    include <unistd.h>
 #endif
 
+#include <fmt/format.h>
+
 #include <exception>
 #include <fstream>
 #include <iostream>
@@ -59,6 +61,7 @@ public:
     {
         std::ostringstream oss;
         oss << m;
+        std::lock_guard<mutex_t> lck(mutex_);
         if(!streaming_)
             Log(oss.str());
         else
@@ -70,6 +73,7 @@ public:
     typedef void (*manip_t)();
     Logger& operator<<(manip_t f)
     {
+        std::lock_guard<mutex_t> lck(mutex_);
         f();
         return *this;
     }
@@ -87,15 +91,15 @@ public:
     static Logger& Instance()
     {
         std::lock_guard<mutex_t> lck(mutex_);
-        if(instance_ == NULL) instance_ = new Logger();
+        if(instance_ == nullptr) instance_ = new Logger();
         return *instance_;
     }
 
     static void Destroy()
     {
         std::lock_guard<mutex_t> lck(mutex_);
-        if(instance_ != NULL) delete instance_;
-        instance_ = NULL;
+        delete instance_;
+        instance_ = nullptr;
     }
 
 private:
@@ -108,30 +112,20 @@ private:
 #endif
 
     Logger()
-    : file_(NULL)
-    , dirty_(false)
-    , streaming_(false)
-    , messaging_(false)
     {
-        const char* path = getenv("HSA_VEN_AMD_AQLPROFILE_LOG");
-        if(path != NULL)
-        {
-#ifdef _WIN32
-            char        tmp_path[MAX_PATH];
-            DWORD       tmp_len  = GetTempPathA(MAX_PATH, tmp_path);
-            std::string log_path = (tmp_len > 0) ? std::string(tmp_path) + "aql_profile_log.txt"
-                                                 : std::string("aql_profile_log.txt");
-            file_                = fopen(log_path.c_str(), "a");
-#else
-            file_ = fopen("/tmp/aql_profile_log.txt", "a");
-#endif
-        }
+        const char* enable_log = getenv("HSA_VEN_AMD_AQLPROFILE_LOG");
+
+        if(enable_log == nullptr) return;
+
+        const auto logfile = fmt::format("/tmp/aql_profile_log_{}.txt", GetPid());
+        file_              = fopen(logfile.c_str(), "a");
+
         ResetStreaming();
     }
 
     ~Logger()
     {
-        if(file_ != NULL)
+        if(file_ != nullptr)
         {
             if(dirty_) Put("\n");
             fclose(file_);
@@ -156,7 +150,7 @@ private:
         {
             message_[GetTid()] += m;
         }
-        if(file_ != NULL)
+        if(file_ != nullptr)
         {
             dirty_ = true;
 #ifndef _WIN32
@@ -172,7 +166,7 @@ private:
 
     void Log(const std::string& m)
     {
-        const time_t rawtime = time(NULL);
+        const time_t rawtime = time(nullptr);
         tm           tm_info;
 #ifdef _WIN32
         localtime_s(&tm_info, &rawtime);
@@ -186,14 +180,14 @@ private:
         Put(oss.str());
     }
 
-    FILE* file_;
-    bool  dirty_;
-    bool  streaming_;
-    bool  messaging_;
+    bool                            dirty_     = false;
+    bool                            streaming_ = false;
+    bool                            messaging_ = false;
+    FILE*                           file_      = nullptr;
+    std::map<uint32_t, std::string> message_   = {};
 
-    static mutex_t                  mutex_;
-    static Logger*                  instance_;
-    std::map<uint32_t, std::string> message_;
+    static mutex_t mutex_;
+    static Logger* instance_;
 };
 
 }  // namespace aql_profile

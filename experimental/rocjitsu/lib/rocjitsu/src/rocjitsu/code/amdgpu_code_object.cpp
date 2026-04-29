@@ -109,6 +109,70 @@ AmdGpuCodeObject::AmdGpuCodeObject(const std::string &elf_path) {
   elf_file.close();
 }
 
+AmdGpuCodeObject::AmdGpuCodeObject(const uint8_t *elf_bytes, size_t elf_size) {
+  if (elf_size < sizeof(Elf64_Ehdr)) {
+    is_valid_ = false;
+    return;
+  }
+
+  image_.assign(reinterpret_cast<const char *>(elf_bytes),
+                reinterpret_cast<const char *>(elf_bytes) + elf_size);
+
+  Elf64_Ehdr ehdr;
+  std::memcpy(&ehdr, image_.data(), sizeof(Elf64_Ehdr));
+
+  if (!is_elf(ehdr) || ehdr.e_ident[EI_CLASS] != ELFCLASS64 ||
+      ehdr.e_ident[EI_OSABI] != ELFOSABI_AMDGPU_HSA) {
+    is_valid_ = false;
+    return;
+  }
+
+  header_ = std::make_unique<HsaHeader>(ehdr);
+
+  // Parse sections directly from the in-memory image (no file I/O needed).
+  auto shoff = header_->sectionHeaderOff();
+  auto num_shdrs = header_->numSectionHeaders();
+  if (shoff + num_shdrs * sizeof(Elf64_Shdr) > elf_size) {
+    is_valid_ = false;
+    return;
+  }
+
+  std::vector<Elf64_Shdr> section_hdrs(num_shdrs);
+  std::memcpy(section_hdrs.data(), image_.data() + shoff, num_shdrs * sizeof(Elf64_Shdr));
+
+  int shstrndx = header_->sectionHeaderStrIdx();
+  if (shstrndx < 0 || static_cast<size_t>(shstrndx) >= section_hdrs.size()) {
+    is_valid_ = false;
+    return;
+  }
+
+  auto &shstrtab = section_hdrs[shstrndx];
+  for (const auto &shdr : section_hdrs) {
+    if (shdr.sh_type == SHT_NULL)
+      continue;
+    if (shdr.sh_name >= shstrtab.sh_size)
+      continue;
+    if (shdr.sh_offset + shdr.sh_size > elf_size)
+      continue;
+
+    const char *strtab_base = image_.data() + shstrtab.sh_offset;
+    size_t max_len = shstrtab.sh_size - shdr.sh_name;
+    std::string sec_name(strtab_base + shdr.sh_name, strnlen(strtab_base + shdr.sh_name, max_len));
+
+    auto sec_data = std::make_unique<char[]>(shdr.sh_size);
+    std::memcpy(sec_data.get(), image_.data() + shdr.sh_offset, shdr.sh_size);
+    sections_.emplace_back(std::make_unique<HsaSection>(sec_name, std::move(sec_data), shdr));
+
+    if (sec_name == ".text")
+      text_sections_.push_back(sections_.back().get());
+    else if (sec_name == ".rodata")
+      rodata_sections_.push_back(sections_.back().get());
+  }
+
+  target_id_ = target_from_machine_flags(header_->flags());
+  is_valid_ = true;
+}
+
 AmdGpuCodeObject::AmdGpuCodeObject(uint64_t size, std::ifstream &elf_file, std::string offload_kind,
                                    std::string target_triple, int64_t fatbin_offset)
     : offload_kind_(std::move(offload_kind)), target_triple_(std::move(target_triple)),

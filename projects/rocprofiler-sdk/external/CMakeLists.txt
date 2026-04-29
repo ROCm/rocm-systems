@@ -47,7 +47,7 @@ if(ROCPROFILER_BUILD_TESTS)
             REPO_URL https://github.com/google/googletest.git
             REPO_BRANCH "main")
 
-        set(BUILD_GMOCK OFF)
+        set(BUILD_GMOCK ON)
         set(INSTALL_GTEST OFF)
         add_subdirectory(googletest EXCLUDE_FROM_ALL)
 
@@ -58,7 +58,8 @@ if(ROCPROFILER_BUILD_TESTS)
         target_link_libraries(rocprofiler-sdk-gtest INTERFACE GTest::gtest)
         target_include_directories(
             rocprofiler-sdk-gtest SYSTEM
-            INTERFACE ${CMAKE_CURRENT_LIST_DIR}/googletest/googletest/include)
+            INTERFACE ${CMAKE_CURRENT_LIST_DIR}/googletest/googletest/include
+                      ${CMAKE_CURRENT_LIST_DIR}/googlemock/googlemock/include)
 
         mark_as_advanced(INSTALL_GTEST)
         mark_as_advanced(BUILD_GMOCK)
@@ -109,6 +110,7 @@ if(ROCPROFILER_BUILD_FMT)
         REPO_BRANCH "master")
 
     set(FMT_TEST OFF)
+    set(FMT_DEBUG_POSTFIX "")
     add_subdirectory(fmt EXCLUDE_FROM_ALL)
 
     target_link_libraries(rocprofiler-sdk-fmt INTERFACE $<BUILD_INTERFACE:fmt::fmt>)

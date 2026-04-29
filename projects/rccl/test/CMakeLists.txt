@@ -201,12 +201,18 @@ if(BUILD_TESTS)
       BitOpsTests.cpp
       CommTests.cpp
       EnqueueCountTests.cpp
+      device/TestOp128.cpp
       common/main_fixtures.cpp
       common/EnvVars.cpp
       common/ProcessIsolatedTestRunner.cpp
+      common/TestChecks.cpp
     )
 
     add_executable(rccl-UnitTestsFixtures ${TEST_FIXTURE_SOURCE_FILES})
+
+    target_include_directories(rccl-UnitTestsFixtures PRIVATE
+      ${PROJECT_BINARY_DIR}/hipify/src/device
+    )
   endif()
 
   # rccl-UnitTestsFixturesDebug: Tests that access internal symbols compiled into
@@ -264,7 +270,8 @@ if(BUILD_TESTS)
       transport/P2pMPITests.cpp
       transport/NetMPITests.cpp
       transport/ShmMPITests.cpp
-      transport/NetIbMPITests.cpp
+      transport/NetIbMPI/GeneralTests.cpp
+      transport/NetIbMPI/NicFusionTests.cpp
       ImplicitLaunchOrderMPITests.cpp
       RegistrationMPITests.cpp
     )

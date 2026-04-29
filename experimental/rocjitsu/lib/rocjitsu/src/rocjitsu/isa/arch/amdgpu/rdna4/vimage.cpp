@@ -425,7 +425,10 @@ ImageBvh64IntersectRayVimage::ImageBvh64IntersectRayVimage(const MachineInst *in
   num_dst_ = 1;
 }
 
-void ImageBvh64IntersectRayVimage::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void ImageBvh64IntersectRayVimage::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 ImageBvhDualIntersectRayVimage::ImageBvhDualIntersectRayVimage(const MachineInst *inst)
     : Vimage("image_bvh_dual_intersect_ray", reinterpret_cast<const OpEncoding *>(inst),
@@ -438,7 +441,10 @@ ImageBvhDualIntersectRayVimage::ImageBvhDualIntersectRayVimage(const MachineInst
   num_dst_ = 1;
 }
 
-void ImageBvhDualIntersectRayVimage::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void ImageBvhDualIntersectRayVimage::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 ImageBvh8IntersectRayVimage::ImageBvh8IntersectRayVimage(const MachineInst *inst)
     : Vimage("image_bvh8_intersect_ray", reinterpret_cast<const OpEncoding *>(inst),
@@ -451,7 +457,10 @@ ImageBvh8IntersectRayVimage::ImageBvh8IntersectRayVimage(const MachineInst *inst
   num_dst_ = 1;
 }
 
-void ImageBvh8IntersectRayVimage::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void ImageBvh8IntersectRayVimage::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 ImageAtomicAddFltVimage::ImageAtomicAddFltVimage(const MachineInst *inst)
     : Vimage("image_atomic_add_flt", reinterpret_cast<const OpEncoding *>(inst),

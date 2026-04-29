@@ -35,6 +35,7 @@
 #include <link.h>
 
 #include <optional>
+#include <sstream>
 #include <unordered_map>
 #include <vector>
 
@@ -165,20 +166,28 @@ find_library(void*& addr, int inpid, const std::string& library)
     }
 
     std::string line;
+    bool        found = false;
     while(std::getline(maps, line))
     {
-        if(line.find(library) != std::string::npos)
-        {
-            ROCP_TRACE << "[rocprofiler-sdk-rocattach] Entry in pid " << inpid
-                       << " maps file is: " << line;
-            break;
-        }
+        if(line.find(library) == std::string::npos) continue;
+
+        std::istringstream iss(line);
+        std::string        addr_range;
+        std::string        perms;
+        std::string        offset_str;
+        if(!(iss >> addr_range >> perms >> offset_str)) continue;
+        if(std::stoull(offset_str, nullptr, 16) != 0) continue;
+
+        ROCP_TRACE << "[rocprofiler-sdk-rocattach] Entry in pid " << inpid
+                   << " maps file is: " << line;
+        found = true;
+        break;
     }
 
-    if(!maps)
+    if(!found)
     {
-        ROCP_ERROR << "[rocprofiler-sdk-rocattach] Couldn't find library " << library << " in "
-                   << filename.str();
+        ROCP_ERROR << "[rocprofiler-sdk-rocattach] Couldn't find library " << library
+                   << " (with file offset 0) in " << filename.str();
         return false;
     }
 

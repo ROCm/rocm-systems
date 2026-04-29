@@ -47,7 +47,7 @@ typedef enum RcclTunableColls {
 #define RCCL_PROTOCOL_THREAD_THRESHOLD_IDX 3
 
 #define RCCL_SINGLE_NODE_MAX_NTHREADS 256
-#define RCCL_GFX950_MAX_NTHREADS 512  // for Simple and LL64/LL128 gfx950
+#define RCCL_GFX950_MAX_NTHREADS 256  // for Simple and LL64/LL128 gfx950
 #define RCCL_DEFAULT_MAX_NTHREADS 256 // for Simple and LL64/LL128 other archs
 #define RCCL_LL_MAX_NTHREADS 256
 #define RCCL_P2P_MAX_NTHREADS 256
