@@ -106,6 +106,11 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Fixed `cu_occupancy` displaying `0%` instead of `N/A` when file is unavailable**.  
   - Process `cu_occupancy` is now initialized to `INVALID` instead of zero, so `amd-smi process` displays `N/A` rather than a misleading `0%` when the sysfs file is not accessible.
 
+- **Fixed manufacturer name display for AMD GPUs**.  
+  - Updated `amdsmi_get_gpu_board_info()` to correctly detect vendor ID `0x1002` and display
+    "Advanced Micro Devices Inc. [AMD/ATI]" instead of the raw ID.
+  - Fixes `amd-smi static --board` output.
+
 ### Changed
 
 - **Renamed `lc_perf_other_end_recovery` to `lc_perf_other_end_recovery_count` in `amd-smi metric` CLI output for unification**.  
