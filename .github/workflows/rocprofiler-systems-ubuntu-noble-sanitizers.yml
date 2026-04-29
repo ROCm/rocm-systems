@@ -114,6 +114,14 @@ jobs:
         run: |
           SUPP_DIR=${PWD}/scripts
           SANITIZER_TYPE="${{ matrix.sanitizer-type }}"
+          # Sanitizer reports go here as <prefix>.<pid> files. Surfaced by the
+          # "Print Sanitizer Logs" step below.
+          SANITIZER_LOG_DIR=${PWD}/sanitizer-logs
+          mkdir -p "${SANITIZER_LOG_DIR}"
+          echo "SANITIZER_LOG_DIR=${SANITIZER_LOG_DIR}" >> $GITHUB_ENV
+          # Default test set covers Dyninst rewrite/runtime-instrument families
+          # plus avail and unit tests.
+          TEST_REGEX='^(rewrite-caller|code-coverage|trace-time-window|rocprofiler-systems-avail-all|rocprof-sys-unit-tests)'
           if [ "${SANITIZER_TYPE}" = "address" ]; then
               ASAN_LIB=$(${{ matrix.compiler }} -print-file-name=libasan.so)
               ASAN_LIB=$(realpath "${ASAN_LIB}")
@@ -121,9 +129,9 @@ jobs:
               ls -la "${ASAN_LIB}"
               echo "ASAN_LIBRARY=${ASAN_LIB}" >> $GITHUB_ENV
               echo "SANITIZER_CMAKE_FLAGS=-DASAN_LIBRARY=${ASAN_LIB}" >> $GITHUB_ENV
-              echo "ASAN_OPTIONS=suppressions=${SUPP_DIR}/rocprof-sys-asan.supp:detect_leaks=1:new_delete_type_mismatch=0:detect_odr_violation=0:exitcode=${SANITIZER_EXIT_CODE}" >> $GITHUB_ENV
-              echo "LSAN_OPTIONS=suppressions=${SUPP_DIR}/rocprof-sys-lsan.supp:print_suppressions=1:exitcode=${SANITIZER_EXIT_CODE}" >> $GITHUB_ENV
-              echo "UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=0:exitcode=${SANITIZER_EXIT_CODE}" >> $GITHUB_ENV
+              echo "ASAN_OPTIONS=suppressions=${SUPP_DIR}/rocprof-sys-asan.supp:detect_leaks=1:new_delete_type_mismatch=0:detect_odr_violation=0:exitcode=${SANITIZER_EXIT_CODE}:log_path=${SANITIZER_LOG_DIR}/asan" >> $GITHUB_ENV
+              echo "LSAN_OPTIONS=suppressions=${SUPP_DIR}/rocprof-sys-lsan.supp:print_suppressions=1:exitcode=${SANITIZER_EXIT_CODE}:log_path=${SANITIZER_LOG_DIR}/lsan" >> $GITHUB_ENV
+              echo "UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=0:exitcode=${SANITIZER_EXIT_CODE}:log_path=${SANITIZER_LOG_DIR}/ubsan" >> $GITHUB_ENV
           elif [ "${SANITIZER_TYPE}" = "thread" ]; then
               TSAN_LIB=$(${{ matrix.compiler }} -print-file-name=libtsan.so)
               TSAN_LIB=$(realpath "${TSAN_LIB}")
@@ -131,17 +139,23 @@ jobs:
               ls -la "${TSAN_LIB}"
               echo "TSAN_LIBRARY=${TSAN_LIB}" >> $GITHUB_ENV
               echo "SANITIZER_CMAKE_FLAGS=-DTSAN_LIBRARY=${TSAN_LIB}" >> $GITHUB_ENV
-              echo "TSAN_OPTIONS=suppressions=${SUPP_DIR}/rocprof-sys-thread.supp:second_deadlock_stack=1:print_suppressions=1:exitcode=${SANITIZER_EXIT_CODE}" >> $GITHUB_ENV
+              echo "TSAN_OPTIONS=suppressions=${SUPP_DIR}/rocprof-sys-thread.supp:second_deadlock_stack=1:print_suppressions=1:exitcode=${SANITIZER_EXIT_CODE}:log_path=${SANITIZER_LOG_DIR}/tsan" >> $GITHUB_ENV
 
               # Known TSan issue: logger fork tests (pthread_atfork + fork from
               # multi-threaded process) cause the test binary to hang during
               # process exit. TSan's exit-time cleanup deadlocks with the
               # atfork handlers that reference static locals being destroyed.
               echo "GTEST_FILTER=-logger_test*" >> $GITHUB_ENV
+
+              # TSan's 5-15x slowdown blows past the per-test 300s timeout for
+              # the Dyninst rewrite/runtime-instrument families. Restrict the
+              # TSan job to the lightweight avail + unit-test families.
+              TEST_REGEX='^(rocprofiler-systems-avail-all|rocprof-sys-unit-tests)'
           elif [ "${SANITIZER_TYPE}" = "undefined" ]; then
               echo "SANITIZER_CMAKE_FLAGS=" >> $GITHUB_ENV
-              echo "UBSAN_OPTIONS=suppressions=${SUPP_DIR}/rocprof-sys-ubsan.supp:print_stacktrace=1:halt_on_error=0:exitcode=${SANITIZER_EXIT_CODE}" >> $GITHUB_ENV
+              echo "UBSAN_OPTIONS=suppressions=${SUPP_DIR}/rocprof-sys-ubsan.supp:print_stacktrace=1:halt_on_error=0:exitcode=${SANITIZER_EXIT_CODE}:log_path=${SANITIZER_LOG_DIR}/ubsan" >> $GITHUB_ENV
           fi
+          echo "TEST_REGEX=${TEST_REGEX}" >> $GITHUB_ENV
 
       - name: Configure, Build and Test
         timeout-minutes: 300
@@ -188,7 +202,30 @@ jobs:
             -DROCPROFSYS_BUILD_NUMBER=1 \
             -DCMAKE_PREFIX_PATH=/opt/rocm \
             -- \
-            -R '^(rewrite-caller|code-coverage|trace-time-window|rocprofiler-systems-avail-all|rocprof-sys-unit-tests)'
+            -R "${TEST_REGEX}"
+
+      - name: Print Sanitizer Logs
+        if: always()
+        shell: bash
+        working-directory: projects/rocprofiler-systems/
+        run: |
+          if [ -z "${SANITIZER_LOG_DIR}" ] || [ ! -d "${SANITIZER_LOG_DIR}" ]; then
+            echo "No sanitizer log directory at '${SANITIZER_LOG_DIR}'"
+            exit 0
+          fi
+          shopt -s nullglob
+          files=("${SANITIZER_LOG_DIR}"/*)
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "No sanitizer log files in ${SANITIZER_LOG_DIR}"
+            exit 0
+          fi
+          # One collapsible group per file, titled by filename. GitHub renders
+          # ::group::NAME ... ::endgroup:: as a foldable section in the log.
+          for f in $(printf '%s\n' "${files[@]}" | sort); do
+            echo "::group::$(basename "${f}")"
+            cat "${f}"
+            echo "::endgroup::"
+          done
 
       - name: Check for Leftover Buffered Files
         timeout-minutes: 5
