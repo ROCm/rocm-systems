@@ -82,6 +82,76 @@ TEST_F(test_code_object_writer_t, ProvidedCodeObjDesc_SerializesIt)
     EXPECT_EQ(json["code_objects"][1]["id"], id1);
 }
 
+TEST_F(test_code_object_writer_t, ProvidedNoSymbols_SerializesEmptySymbolsArray)
+{
+    m_writer.start_code_obj(1);
+    m_writer.end_code_obj();
+
+    const auto json = nlohmann::json::parse(m_writer.get_result());
+    ASSERT_TRUE(json["code_objects"][0].contains("symbols"));
+    EXPECT_TRUE(json["code_objects"][0]["symbols"].is_array());
+    EXPECT_EQ(json["code_objects"][0]["symbols"].size(), 0);
+}
+
+TEST_F(test_code_object_writer_t, ProvidedSymbol_SerializesItInsideCodeObj)
+{
+    const rocm_compute::symbol_t symbol{"sym0", 0x10, 0x1000, 0x20};
+
+    m_writer.start_code_obj(1);
+    m_writer.start_symbol(symbol);
+    m_writer.end_symbol();
+    m_writer.end_code_obj();
+
+    const auto json = nlohmann::json::parse(m_writer.get_result());
+    const auto& symbols = json["code_objects"][0]["symbols"];
+    ASSERT_EQ(symbols.size(), 1);
+    EXPECT_EQ(symbols[0]["name"], symbol.name);
+    EXPECT_EQ(symbols[0]["code_object_offset"], symbol.code_object_offset);
+    EXPECT_EQ(symbols[0]["virtual_address"], symbol.virtual_address);
+    EXPECT_EQ(symbols[0]["size"], symbol.size);
+}
+
+TEST_F(test_code_object_writer_t, ProvidedMultipleSymbols_SerializesAllInOrder)
+{
+    m_writer.start_code_obj(1);
+    m_writer.start_symbol(m_symbol0);
+    m_writer.end_symbol();
+    m_writer.start_symbol(m_symbol1);
+    m_writer.end_symbol();
+    m_writer.end_code_obj();
+
+    const auto json = nlohmann::json::parse(m_writer.get_result());
+    const auto& symbols = json["code_objects"][0]["symbols"];
+    ASSERT_EQ(symbols.size(), 2);
+    EXPECT_EQ(symbols[0]["name"], m_symbol0.name);
+    EXPECT_EQ(symbols[1]["name"], m_symbol1.name);
+}
+
+TEST_F(test_code_object_writer_t, ProvidedSymbolsInDifferentCodeObjs_SerializesUnderRespectiveOwners)
+{
+    m_writer.start_code_obj(100);
+    m_writer.start_symbol(m_symbol0);
+    m_writer.end_symbol();
+    m_writer.end_code_obj();
+
+    m_writer.start_code_obj(200);
+    m_writer.start_symbol(m_symbol1);
+    m_writer.end_symbol();
+    m_writer.end_code_obj();
+
+    const auto json = nlohmann::json::parse(m_writer.get_result());
+    ASSERT_EQ(json["code_objects"].size(), 2u);
+
+    EXPECT_EQ(json["code_objects"][0]["id"], 100);
+    ASSERT_EQ(json["code_objects"][0]["symbols"].size(), 1);
+    EXPECT_EQ(json["code_objects"][0]["symbols"][0]["name"], m_symbol0.name);
+
+    EXPECT_EQ(json["code_objects"][1]["id"], 200);
+    ASSERT_EQ(json["code_objects"][1]["symbols"].size(), 1);
+    EXPECT_EQ(json["code_objects"][1]["symbols"][0]["name"], m_symbol1.name);
+}
+
+
 
 void test_code_object_writer_t::SetUp()
 {

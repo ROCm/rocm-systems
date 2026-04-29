@@ -30,8 +30,14 @@ public:
     void        write_instruction(const instruction_t& inst) override;
     std::string get_result() override;
 private:
-    int32_t              m_code_object_closure_count = 0;
-    int32_t              m_symbol_closure_count      = 0;
-    std::vector<size_t>  m_code_object_ids;
+    struct code_object_entry_t
+    {
+        size_t                id = 0;
+        std::vector<symbol_t> symbols;
+    };
+
+    int32_t                          m_code_object_closure_count = 0;
+    int32_t                          m_symbol_closure_count      = 0;
+    std::vector<code_object_entry_t> m_code_objects;
 };
 }  // namespace rocm_compute
