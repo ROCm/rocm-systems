@@ -274,21 +274,22 @@ class Bench_base(ABC):
                 cache_values["cache_level"] == 1
                 and cache_values["num_cache_instance"] == cu_count
             ):
-                self.cache_sizes["L1"] = cache_values["cache_size"]*1024
+                self.cache_sizes["L1"] = cache_values["cache_size"] * 1024
             # Cache levels L2 and L3/MALL are shared across all CUs
             # therefore only have one cache instance
             elif cache_values["cache_level"] == 2:
-                self.cache_sizes["L2"] = cache_values["cache_size"]*1024
+                self.cache_sizes["L2"] = cache_values["cache_size"] * 1024
             elif cache_values["cache_level"] == 3:
-                self.cache_sizes["MALL"] = cache_values["cache_size"]*1024
+                self.cache_sizes["MALL"] = cache_values["cache_size"] * 1024
 
     def set_cache_kernel_selector(self) -> None:
         self.cache_kernel_selector = {}
 
         for level in ["L1", "L2", "MALL"]:
             if level in self.cache_sizes.keys():
-                self.cache_kernel_selector[level] = \
+                self.cache_kernel_selector[level] = (
                     "Cache_bw<float, " + str(self.cache_sizes[level]) + ", 256>"
+                )
 
     def run_get_samples(
         self,
