@@ -4,6 +4,7 @@
 #include "code_object_translator.h"
 
 #include <string>
+#include <vector>
 
 namespace rocm_compute
 {
@@ -29,6 +30,7 @@ public:
     void        write_instruction(const instruction_t& inst) override;
     std::string get_result() override;
 private:
-    int32_t m_code_object_closure_count = 0;
+    int32_t              m_code_object_closure_count = 0;
+    std::vector<size_t>  m_code_object_ids;
 };
 }  // namespace rocm_compute

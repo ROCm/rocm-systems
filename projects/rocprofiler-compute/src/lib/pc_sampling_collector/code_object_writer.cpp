@@ -9,6 +9,7 @@ using namespace rocm_compute;
 void code_object_writer_json_t::start_code_obj(size_t obj_id)
 {
     ++m_code_object_closure_count;
+    m_code_object_ids.push_back(obj_id);
 }
 
 void code_object_writer_json_t::end_code_obj()
@@ -28,5 +29,11 @@ std::string code_object_writer_json_t::get_result()
     {
         throw std::runtime_error("Code object description is not properly closed");
     }
-    return nlohmann::json::object().dump();
+
+    auto code_objects = nlohmann::json::array();
+    for (auto id : m_code_object_ids)
+    {
+        code_objects.push_back(nlohmann::json::object({{"id", id}}));
+    }
+    return nlohmann::json{{"code_objects", std::move(code_objects)}}.dump();
 }
