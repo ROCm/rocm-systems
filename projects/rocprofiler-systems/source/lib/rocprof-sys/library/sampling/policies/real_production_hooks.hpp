@@ -13,8 +13,8 @@
 // linux/perf_event.h, library/pmc/sampler.hpp, trace_cache).
 // Included from sampling/default_policies.hpp.
 
-#include "sampling/data/stack_frame_json.hpp"
 #include "sampling/data/track_name.hpp"
+#include "sampling/policies/stack_frame_json.hpp"
 #include "sampling/policies/tl_state.hpp"
 #include "sampling/sampling_service.hpp"
 #include "sampling/src/linux/symbol_resolver.hpp"

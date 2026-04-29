@@ -7,8 +7,8 @@
 #include "core/trace_cache/sample_type.hpp"
 #include "library/thread_info.hpp"
 #include "logger/debug.hpp"
-#include "sampling/data/stack_frame_json.hpp"
 #include "sampling/data/track_traits.hpp"
+#include "sampling/policies/stack_frame_json.hpp"
 
 #include <spdlog/fmt/fmt.h>
 

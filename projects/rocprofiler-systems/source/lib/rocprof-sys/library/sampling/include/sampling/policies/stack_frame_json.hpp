@@ -45,7 +45,7 @@ make_line_info_json(stack_frame const& frame)
     return j.dump();
 }
 
-// Locked extdata schema: { "depth": <int>, ... future fields ... }.
+// Locked extdata schema: { "depth": <int> }.
 inline std::string
 make_extdata_json(int depth)
 {
