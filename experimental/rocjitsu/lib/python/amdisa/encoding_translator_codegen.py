@@ -109,10 +109,36 @@ _CDNA4_TO_RDNA4_ENC_MAP: dict[str, str] = {
     'VOP3_SDST_ENC': 'VOP3_SDST_ENC',
 }
 
+# Maps (src_enc_name -> dst_enc_name) for CDNA4 -> RDNA3. RDNA3 retains the
+# original FLAT-family encodings (no V-prefix) but renames CDNA's FLAT_GLBL
+# to FLAT_GLOBAL. Bit positions of fields differ within these encodings (e.g.
+# coherency bits, seg position) but C++ bitfield-to-bitfield assignment in
+# the auto-generated encoder handles the position differences automatically.
+_CDNA4_TO_RDNA3_ENC_MAP: dict[str, str] = {
+    'ENC_SOP1': 'ENC_SOP1',
+    'ENC_SOP2': 'ENC_SOP2',
+    'ENC_SOPC': 'ENC_SOPC',
+    'ENC_SOPK': 'ENC_SOPK',
+    'ENC_SOPP': 'ENC_SOPP',
+    'ENC_SMEM': 'ENC_SMEM',
+    'ENC_VOP1': 'ENC_VOP1',
+    'ENC_VOP2': 'ENC_VOP2',
+    'ENC_VOPC': 'ENC_VOPC',
+    'ENC_VOP3': 'ENC_VOP3',
+    'ENC_VOP3P': 'ENC_VOP3P',
+    'ENC_DS': 'ENC_DS',
+    'ENC_MUBUF': 'ENC_MUBUF',
+    'ENC_FLAT': 'ENC_FLAT',
+    'ENC_FLAT_GLBL': 'ENC_FLAT_GLOBAL',
+    'ENC_FLAT_SCRATCH': 'ENC_FLAT_SCRATCH',
+    'VOP3_SDST_ENC': 'VOP3_SDST_ENC',
+}
+
 # Lookup the right per-pair enc_map. New target ISAs are added by appending
 # entries here plus a corresponding _CDNA4_TO_<DST>_ENC_MAP definition above.
 _PAIR_ENC_MAPS: dict[tuple[str, str], dict[str, str]] = {
     ('cdna4', 'rdna4'): _CDNA4_TO_RDNA4_ENC_MAP,
+    ('cdna4', 'rdna3'): _CDNA4_TO_RDNA3_ENC_MAP,
 }
 
 # ---------------------------------------------------------------------------
