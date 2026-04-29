@@ -2,6 +2,9 @@
 // SPDX-License-Identifier:  MIT
 #include "pc_sampling_collector.h"
 
+#include <ios>
+#include <iostream>
+
 using namespace rocm_compute;
 
 pc_sampling_collector_t::ptr pc_sampling_collector_t::create()
@@ -38,17 +41,17 @@ void pc_sampling_collector_impl_t::write(pc_samples_writer_t& writer)
     for (const auto& id : m_translator->get_code_object_ids())
     {
         const auto& symbols = m_translator->get_symbol_map(id);
-        // auto symbols = translator.getSymbolMap(id);  // vaddr -> { name, mem_size }
-        // for (auto& [vaddr, sym] : symbols)
-        //{
-        //     uint64_t pc = vaddr, end = vaddr + sym.mem_size;
-        //     while (pc < end)
-        //     {
-        //         auto inst = translator.get(id, pc);
-        //         std::cout << std::hex << pc << ": " << inst->inst << "\n";
-        //         pc += inst->size;
-        //     }
-        // }
+        for (const auto& sym : symbols)
+        {
+            uint64_t       pc  = sym.virtual_address;
+            const uint64_t end = sym.virtual_address + sym.mem_size;
+            while (pc < end)
+            {
+                const auto& inst = m_translator->get_instruction(id, pc);
+                std::cout << std::hex << pc << ": " << inst.inst << "\n";
+                pc += inst.size;
+            }
+        }
         writer.write();
     }
 }

@@ -52,3 +52,10 @@ std::vector<obj_symbol_t> code_object_translator_impl_t::get_symbol_map(size_t o
     }
     return symbol_map;
 }
+
+instruction_t code_object_translator_impl_t::get_instruction(size_t   object_id,
+                                                             uint64_t virtual_address) const
+{
+    const auto& inst = m_translator->get(object_id, virtual_address);
+    return {inst->inst, inst->comment, inst->size};
+}

@@ -34,10 +34,12 @@ public:
                          uint64_t load_base,
                          uint64_t load_size) override;
 
-    const std::vector<mem_code_object_info_t>&     get_mem_code_object_info() const;
-    const std::vector<file_code_object_info_t>&    get_file_code_object_info() const;
-    const std::vector<size_t>&                     get_code_object_ids() const override;
-    std::vector<rocm_compute::obj_symbol_t> get_symbol_map(size_t object_id) const override;
+    const std::vector<mem_code_object_info_t>&  get_mem_code_object_info() const;
+    const std::vector<file_code_object_info_t>& get_file_code_object_info() const;
+    const std::vector<size_t>&                  get_code_object_ids() const override;
+    std::vector<rocm_compute::obj_symbol_t>     get_symbol_map(size_t object_id) const override;
+    rocm_compute::instruction_t get_instruction(size_t   object_id,
+                                                uint64_t virtual_address) const override;
 
 private:
     std::vector<mem_code_object_info_t>  m_mem_code_obj_info;

@@ -2,6 +2,8 @@
 // SPDX-License-Identifier:  MIT
 #include "mocks.h"
 
+using namespace rocm_compute;
+
 void mock_code_object_translator_t::add_code_object(const char* filepath,
                                                     size_t      id,
                                                     uint64_t    load_addr,
@@ -38,7 +40,14 @@ const std::vector<size_t>& mock_code_object_translator_t::get_code_object_ids() 
     return m_code_object_ids;
 }
 
-std::vector<rocm_compute::obj_symbol_t> mock_code_object_translator_t::get_symbol_map(size_t object_id) const
+std::vector<obj_symbol_t> mock_code_object_translator_t::get_symbol_map(size_t object_id) const
+{
+    return {};
+}
+
+instruction_t mock_code_object_translator_t::get_instruction(
+    size_t   object_id,
+    uint64_t virtual_address) const
 {
     return {};
 }
