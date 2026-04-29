@@ -23,14 +23,14 @@ Panel Config:
         unit: Unit
       metric:
         GL1C Busy:
-          avg: AVG((100 * GL1C_BUSY / GL1C_CYCLE) if (GL1C_CYCLE != 0) else None)
-          min: MIN((100 * GL1C_BUSY / GL1C_CYCLE) if (GL1C_CYCLE != 0) else None)
-          max: MAX((100 * GL1C_BUSY / GL1C_CYCLE) if (GL1C_CYCLE != 0) else None)
+          avg: None
+          min: None
+          max: None
           unit: Percent
         GL1C Starve:
-          avg: AVG((100 * GL1C_STARVE / GL1C_CYCLE) if (GL1C_CYCLE != 0) else None)
-          min: MIN((100 * GL1C_STARVE / GL1C_CYCLE) if (GL1C_CYCLE != 0) else None)
-          max: MAX((100 * GL1C_STARVE / GL1C_CYCLE) if (GL1C_CYCLE != 0) else None)
+          avg: None
+          min: None
+          max: None
           unit: Percent
 
   # =========================================================================
@@ -52,14 +52,14 @@ Panel Config:
           max: MAX(GL1C_REQ_sum / $denom)
           unit: (Count + $normUnit)
         Read Requests:
-          avg: AVG(GL1C_REQ_READ_sum / $denom)
-          min: MIN(GL1C_REQ_READ_sum / $denom)
-          max: MAX(GL1C_REQ_READ_sum / $denom)
+          avg: None
+          min: None
+          max: None
           unit: (Count + $normUnit)
         Write Requests:
-          avg: AVG(GL1C_REQ_WRITE_sum / $denom)
-          min: MIN(GL1C_REQ_WRITE_sum / $denom)
-          max: MAX(GL1C_REQ_WRITE_sum / $denom)
+          avg: None
+          min: None
+          max: None
           unit: (Count + $normUnit)
         Miss Requests:
           avg: AVG(GL1C_REQ_MISS_sum / $denom)
@@ -100,19 +100,19 @@ Panel Config:
         unit: Unit
       metric:
         GL2 Read Requests:
-          avg: AVG(GL1C_GL2_REQ_READ_sum / $denom)
-          min: MIN(GL1C_GL2_REQ_READ_sum / $denom)
-          max: MAX(GL1C_GL2_REQ_READ_sum / $denom)
+          avg: None
+          min: None
+          max: None
           unit: (Count + $normUnit)
         GL2 Read 128B Requests:
-          avg: AVG(GL1C_GL2_REQ_READ_128B_sum / $denom)
-          min: MIN(GL1C_GL2_REQ_READ_128B_sum / $denom)
-          max: MAX(GL1C_GL2_REQ_READ_128B_sum / $denom)
+          avg: None
+          min: None
+          max: None
           unit: (Count + $normUnit)
         GL2 Write Requests:
-          avg: AVG(GL1C_GL2_REQ_WRITE_sum / $denom)
-          min: MIN(GL1C_GL2_REQ_WRITE_sum / $denom)
-          max: MAX(GL1C_GL2_REQ_WRITE_sum / $denom)
+          avg: None
+          min: None
+          max: None
           unit: (Count + $normUnit)
 
   # =========================================================================
@@ -129,14 +129,14 @@ Panel Config:
         unit: Unit
       metric:
         GL2 Stall:
-          avg: AVG(GL1C_STALL_GL2_GL1_sum / $denom)
-          min: MIN(GL1C_STALL_GL2_GL1_sum / $denom)
-          max: MAX(GL1C_STALL_GL2_GL1_sum / $denom)
+          avg: None
+          min: None
+          max: None
           unit: (Cycles + $normUnit)
         LFIFO Full Stall:
-          avg: AVG(GL1C_STALL_LFIFO_FULL_sum / $denom)
-          min: MIN(GL1C_STALL_LFIFO_FULL_sum / $denom)
-          max: MAX(GL1C_STALL_LFIFO_FULL_sum / $denom)
+          avg: None
+          min: None
+          max: None
           unit: (Cycles + $normUnit)
 
   metrics_description:

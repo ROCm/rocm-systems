@@ -48,7 +48,7 @@ Panel Config:
           value: AVG(SQC_ICACHE_REQ_sum / $denom)
           unit: (Requests + $normUnit)
         ICache Utilization:
-          value: AVG((100 * SQC_ICACHE_BUSY_CYCLES_sum / SQ_BUSY_CYCLES_sum) if (SQ_BUSY_CYCLES_sum != 0) else None)
+          value: None
           unit: Percent
         ICache Hit Rate:
           value: AVG((100 * SQC_ICACHE_HITS_sum / (SQC_ICACHE_HITS_sum + SQC_ICACHE_MISSES_sum)) if ((SQC_ICACHE_HITS_sum + SQC_ICACHE_MISSES_sum) != 0) else None)
@@ -57,7 +57,7 @@ Panel Config:
           value: AVG((100 * SQC_ICACHE_MISSES_sum / (SQC_ICACHE_HITS_sum + SQC_ICACHE_MISSES_sum)) if ((SQC_ICACHE_HITS_sum + SQC_ICACHE_MISSES_sum) != 0) else None)
           unit: Percent
         ICache Request Stall Rate:
-          value: AVG((100 * SQC_ICACHE_INPUT_VALID_READYB_sum / SQ_BUSY_CYCLES_sum) if (SQ_BUSY_CYCLES_sum != 0) else None)
+          value: None
           unit: Percent
         ICache-GL1 Read Bandwidth:
           value: AVG((SQC_TC_INST_REQ_sum * 128) / ((End_Timestamp - Start_Timestamp) / 1e9))
@@ -81,13 +81,13 @@ Panel Config:
           value: AVG(SQC_DCACHE_REQ_sum / $denom)
           unit: (Requests + $normUnit)
         Dcache Utilization:
-          value: AVG((100 * SQC_DCACHE_BUSY_CYCLES_sum / SQ_BUSY_CYCLES_sum) if (SQ_BUSY_CYCLES_sum != 0) else None)
+          value: None
           unit: Percent
         Dcache Hit Rate:
           value: AVG((100 * SQC_DCACHE_HITS_sum / (SQC_DCACHE_HITS_sum + SQC_DCACHE_MISSES_sum)) if ((SQC_DCACHE_HITS_sum + SQC_DCACHE_MISSES_sum) != 0) else None)
           unit: Percent
         Dcache Request Stall Rate:
-          value: AVG((100 * SQC_DCACHE_INPUT_VALID_READYB_sum / SQ_BUSY_CYCLES_sum) if (SQ_BUSY_CYCLES_sum != 0) else None)
+          value: None
           unit: Percent
         Dcache-GL1 Read Bandwidth:
           value: AVG((SQC_TC_DATA_READ_REQ_sum * 128) / ((End_Timestamp - Start_Timestamp) / 1e9))
@@ -111,10 +111,10 @@ Panel Config:
           value: AVG(TCP_REQ_sum / $denom)
           unit: (Requests + $normUnit)
         TCP Read Requests:
-          value: AVG(TCP_REQ_READ_sum / $denom)
+          value: None
           unit: (Requests + $normUnit)
         TCP Write Requests:
-          value: AVG(TCP_REQ_WRITE_sum / $denom)
+          value: None
           unit: (Requests + $normUnit)
         # Counter not available: tcp_req_atomic_sum
         TCP Miss Requests:
@@ -149,10 +149,10 @@ Panel Config:
           value: AVG(SQ_LDS_ATOMIC_RETURN_sum / $denom)
           unit: (Instructions + $normUnit)
         LDS Instruction Cycles:
-          value: AVG(SQ_INST_CYCLES_LDS_sum / $denom)
+          value: None
           unit: (Cycles + $normUnit)
         LDS Wait Cycles:
-          value: AVG(SQ_WAIT_INST_LDS_sum / $denom)
+          value: None
           unit: (Cycles + $normUnit)
         LDS Bank Conflict Rate:
           value: AVG((100 * SQC_LDS_BANK_CONFLICT_sum / SQC_LDS_IDX_ACTIVE_sum) if (SQC_LDS_IDX_ACTIVE_sum != 0) else None)
@@ -176,16 +176,16 @@ Panel Config:
         unit: Unit
       metric:
         TCP-GL1 Read Requests:
-          value: AVG(TCP_GL1_REQ_READ_sum / $denom)
+          value: None
           unit: (Requests + $normUnit)
         TCP-GL1 Write Requests:
-          value: AVG(TCP_GL1_REQ_WRITE_sum / $denom)
+          value: None
           unit: (Requests + $normUnit)
         TCP-GL1 Read Bandwidth:
-          value: AVG((TCP_GL1_REQ_READ_sum * 64) / ((End_Timestamp - Start_Timestamp) / 1e9))
+          value: None
           unit: Bytes/s
         TCP-GL1 Write Bandwidth:
-          value: AVG((TCP_GL1_REQ_WRITE_sum * 64) / ((End_Timestamp - Start_Timestamp) / 1e9))
+          value: None
           unit: Bytes/s
 
   # =========================================================================
@@ -203,16 +203,16 @@ Panel Config:
         unit: Unit
       metric:
         GL1C Utilization:
-          value: AVG((100 * GL1C_BUSY_sum / GL1C_CYCLE_sum) if (GL1C_CYCLE_sum != 0) else None)
+          value: None
           unit: Percent
         GL1C Total Requests:
           value: AVG(GL1C_REQ_sum / $denom)
           unit: (Requests + $normUnit)
         GL1C Read Requests:
-          value: AVG(GL1C_REQ_READ_sum / $denom)
+          value: None
           unit: (Requests + $normUnit)
         GL1C Write Requests:
-          value: AVG(GL1C_REQ_WRITE_sum / $denom)
+          value: None
           unit: (Requests + $normUnit)
         GL1C Miss Requests:
           value: AVG(GL1C_REQ_MISS_sum / $denom)
@@ -221,10 +221,10 @@ Panel Config:
           value: AVG((100 * (GL1C_REQ_sum - GL1C_REQ_MISS_sum) / GL1C_REQ_sum) if (GL1C_REQ_sum != 0) else None)
           unit: Percent
         GL1C Starve Rate:
-          value: AVG((100 * GL1C_STARVE_sum / GL1C_CYCLE_sum) if (GL1C_CYCLE_sum != 0) else None)
+          value: None
           unit: Percent
         GL1C Stall GL2 Backpressure:
-          value: AVG((100 * GL1C_STALL_GL2_GL1_sum / GL1C_BUSY_sum) if (GL1C_BUSY_sum != 0) else None)
+          value: None
           unit: Percent
 
   # =========================================================================
@@ -242,22 +242,22 @@ Panel Config:
         unit: Unit
       metric:
         GL1-GL2 Read Requests:
-          value: AVG(GL1C_GL2_REQ_READ_sum / $denom)
+          value: None
           unit: (Requests + $normUnit)
         GL1-GL2 Write Requests:
-          value: AVG(GL1C_GL2_REQ_WRITE_sum / $denom)
+          value: None
           unit: (Requests + $normUnit)
         GL1-GL2 Read Bandwidth:
-          value: AVG((GL1C_GL2_REQ_READ_32B_sum*32 + GL1C_GL2_REQ_READ_64B_sum*64 + GL1C_GL2_REQ_READ_128B_sum*128) / ((End_Timestamp - Start_Timestamp) / 1e9))
+          value: None
           unit: Bytes/s
         GL1-GL2 Write Bandwidth:
-          value: AVG((GL1C_GL2_REQ_WRITE_32B_sum*32 + GL1C_GL2_REQ_WRITE_64B_sum*64) / ((End_Timestamp - Start_Timestamp) / 1e9))
+          value: None
           unit: Bytes/s
         GL1-GL2 Read Latency:
-          value: AVG((GL1C_GL2_REQ_READ_LATENCY_sum / GL1C_GL2_REQ_READ_sum) if (GL1C_GL2_REQ_READ_sum != 0) else None)
+          value: None
           unit: Cycles
         GL1-GL2 Write Latency:
-          value: AVG((GL1C_GL2_REQ_WRITE_LATENCY_sum / GL1C_GL2_REQ_WRITE_sum) if (GL1C_GL2_REQ_WRITE_sum != 0) else None)
+          value: None
           unit: Cycles
 
   # =========================================================================
@@ -275,7 +275,7 @@ Panel Config:
         unit: Unit
       metric:
         GL2C Utilization:
-          value: AVG((100 * GL2C_BUSY_sum / GL2C_CYCLE_sum) if (GL2C_CYCLE_sum != 0) else None)
+          value: None
           unit: Percent
         GL2C Total Requests:
           value: AVG(GL2C_REQ_sum / $denom)
@@ -316,28 +316,28 @@ Panel Config:
         unit: Unit
       metric:
         SARB Utilization:
-          value: AVG((100 * GCEA_SARB_BUSY_sum / GCEA_ALWAYS_COUNT_sum) if (GCEA_ALWAYS_COUNT_sum != 0) else None)
+          value: None
           unit: Percent
         SARB Stall Rate:
-          value: AVG((100 * GCEA_SARB_STALLED_sum / GCEA_ALWAYS_COUNT_sum) if (GCEA_ALWAYS_COUNT_sum != 0) else None)
+          value: None
           unit: Percent
         DRAM Read Requests:
-          value: AVG(GCEA_RDRAM_REQ_PER_CLIGRP_sum / $denom)
+          value: None
           unit: (Requests + $normUnit)
         DRAM Write Requests:
-          value: AVG(GCEA_WDRAM_REQ_PER_CLIGRP_sum / $denom)
+          value: None
           unit: (Requests + $normUnit)
         DRAM Read Bandwidth:
-          value: AVG((GCEA_RDRAM_SIZE_REQ_sum * 32) / ((End_Timestamp - Start_Timestamp) / 1e9))
+          value: None
           unit: Bytes/s
         DRAM Write Bandwidth:
-          value: AVG((GCEA_WDRAM_SIZE_REQ_sum * 32) / ((End_Timestamp - Start_Timestamp) / 1e9))
+          value: None
           unit: Bytes/s
         Read Returns:
-          value: AVG(GCEA_RRET_VLD_sum / $denom)
+          value: None
           unit: (Count + $normUnit)
         Write Returns:
-          value: AVG(GCEA_WRET_VLD_sum / $denom)
+          value: None
           unit: (Count + $normUnit)
 
   metrics_description:

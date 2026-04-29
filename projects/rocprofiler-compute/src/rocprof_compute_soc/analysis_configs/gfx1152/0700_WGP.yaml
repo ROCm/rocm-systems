@@ -228,9 +228,9 @@ Panel Config:
           max: MAX(SQ_INSTS_LDS_PARAM_LOAD_sum / $denom)
           unit: (Count + $normUnit)
         WAVE32 LDS Parameter Load Instructions:
-          avg: AVG(SQ_INSTS_WAVE32_LDS_PARAM_LOAD_sum / $denom)
-          min: MIN(SQ_INSTS_WAVE32_LDS_PARAM_LOAD_sum / $denom)
-          max: MAX(SQ_INSTS_WAVE32_LDS_PARAM_LOAD_sum / $denom)
+          avg: None
+          min: None
+          max: None
           unit: (Count + $normUnit)
 
   # =========================================================================
@@ -247,24 +247,24 @@ Panel Config:
         unit: Unit
       metric:
         Wait for Any:
-          avg: AVG((100 * SQ_WAIT_ANY / SQ_WAVE_CYCLES) if (SQ_WAVE_CYCLES != 0) else None)
-          min: MIN((100 * SQ_WAIT_ANY / SQ_WAVE_CYCLES) if (SQ_WAVE_CYCLES != 0) else None)
-          max: MAX((100 * SQ_WAIT_ANY / SQ_WAVE_CYCLES) if (SQ_WAVE_CYCLES != 0) else None)
+          avg: None
+          min: None
+          max: None
           unit: Percent
         Wait for Instruction Fetch:
-          avg: AVG((100 * SQ_WAIT_IFETCH / SQ_WAVE_CYCLES) if (SQ_WAVE_CYCLES != 0) else None)
-          min: MIN((100 * SQ_WAIT_IFETCH / SQ_WAVE_CYCLES) if (SQ_WAVE_CYCLES != 0) else None)
-          max: MAX((100 * SQ_WAIT_IFETCH / SQ_WAVE_CYCLES) if (SQ_WAVE_CYCLES != 0) else None)
+          avg: None
+          min: None
+          max: None
           unit: Percent
         Wait for Barrier:
-          avg: AVG((100 * SQ_WAIT_BARRIER / SQ_WAVE_CYCLES) if (SQ_WAVE_CYCLES != 0) else None)
-          min: MIN((100 * SQ_WAIT_BARRIER / SQ_WAVE_CYCLES) if (SQ_WAVE_CYCLES != 0) else None)
-          max: MAX((100 * SQ_WAIT_BARRIER / SQ_WAVE_CYCLES) if (SQ_WAVE_CYCLES != 0) else None)
+          avg: None
+          min: None
+          max: None
           unit: Percent
         Wait for Counter:
-          avg: AVG((100 * SQ_WAIT_CNT_ANY / SQ_WAVE_CYCLES) if (SQ_WAVE_CYCLES != 0) else None)
-          min: MIN((100 * SQ_WAIT_CNT_ANY / SQ_WAVE_CYCLES) if (SQ_WAVE_CYCLES != 0) else None)
-          max: MAX((100 * SQ_WAIT_CNT_ANY / SQ_WAVE_CYCLES) if (SQ_WAVE_CYCLES != 0) else None)
+          avg: None
+          min: None
+          max: None
           unit: Percent
 
   # =========================================================================

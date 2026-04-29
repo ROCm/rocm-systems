@@ -82,15 +82,15 @@ Panel Config:
           peak: None
           pop: None
         Wave Dependency Wait:
-          value: AVG(((100 * SQ_WAIT_ANY / SQ_WAVE_CYCLES) if (SQ_WAVE_CYCLES != 0) else 0))
+          value: None
           unit: Percent
           peak: 100
-          pop: AVG(((100 * SQ_WAIT_ANY / SQ_WAVE_CYCLES) if (SQ_WAVE_CYCLES != 0) else 0))
+          pop: None
         Wave Issue Wait:
-          value: AVG(((100 * SQ_WAIT_INST_ANY / SQ_WAVE_CYCLES) if (SQ_WAVE_CYCLES != 0) else 0))
+          value: None
           unit: Percent
           peak: 100
-          pop: AVG(((100 * SQ_WAIT_INST_ANY / SQ_WAVE_CYCLES) if (SQ_WAVE_CYCLES != 0) else 0))
+          pop: None
         # --- Cache hierarchy: TCP (L0) -> GL1C (L1) -> GL2C client / SQC ---
         # BW formulas and counters match 0300_Memory_Chart.yaml; peak/pop N/A (chart has no ceilings).
         TCP Cache Hit Rate:
@@ -110,7 +110,7 @@ Panel Config:
           pop: AVG((100 * (GL1C_REQ_sum - GL1C_REQ_MISS_sum) / GL1C_REQ_sum) if (GL1C_REQ_sum != 0) else None)
         GL1C Read BW:
           # Same bins as Memory Chart table 307 (GL1C–GL2 read bandwidth).
-          value: AVG((GL1C_GL2_REQ_READ_32B_sum*32 + GL1C_GL2_REQ_READ_64B_sum*64 + GL1C_GL2_REQ_READ_128B_sum*128) / ((End_Timestamp - Start_Timestamp) / 1e9))
+          value: None
           unit: Bytes/s
           peak: None
           pop: None
