@@ -214,6 +214,7 @@ jobs:
           -DROCPROFILER_BUILD_CODECOV=ON \
           -DROCPROFILER_INTERNAL_RCCL_API_TRACE=ON \
           -DCMAKE_BUILD_TYPE=${{ matrix.system.build-type }} \
+          -DCMAKE_HIP_ARCHITECTURES=gfx942 \
           -DCMAKE_PREFIX_PATH='${{ env.ROCM_PATH }};${{ env.ROCM_PATH }}/llvm' \
           -DPython3_EXECUTABLE=$(which python3) \
           ${{ env.GLOBAL_CMAKE_OPTIONS }}
@@ -222,13 +223,13 @@ jobs:
       shell: bash
       working-directory: projects/rocprofiler-sdk
       run: |
-        tar --zstd -cf rocprofiler-sdk-codecov-build-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.zst \
+        tar --use-compress-program=zstd -cf rocprofiler-sdk-codecov-build-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.zst \
           build/
 
     - name: Create ROCM dependencies tarball
       shell: bash
       run: |
-        tar --zstd -cf rocm-deps-codecov-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.zst \
+        tar --use-compress-program=zstd -cf rocm-deps-codecov-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.zst \
           -C /opt rocm
 
     - name: Upload build artifacts
@@ -303,14 +304,14 @@ jobs:
         apt-get update
         apt-get install -y zstd
         cd projects/rocprofiler-sdk
-        tar --zstd -xf ../../artifacts/rocprofiler-sdk-codecov-build-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.zst
+        tar --use-compress-program=zstd -xf ../../artifacts/rocprofiler-sdk-codecov-build-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.zst
 
     - name: Extract ROCM dependencies
       shell: bash
       run: |
         rm -rf /opt/rocm /opt/rocm-* /opt/rocprofiler-sdk
         cd /opt
-        tar --zstd -xf $GITHUB_WORKSPACE/deps/rocm-deps-codecov-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.zst
+        tar --use-compress-program=zstd -xf $GITHUB_WORKSPACE/deps/rocm-deps-codecov-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.zst
 
     - name: Load Existing XML Code Coverage
       if: github.event_name == 'pull_request'

@@ -250,30 +250,25 @@ jobs:
         shell: bash
         working-directory: projects/rocprofiler-sdk
         run: |
-          # Create a tarball of the build directory and installed SDK for testing
-          tar --zstd -cf rocprofiler-sdk-build-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.zst \
-            build/ \
-            samples/ \
-            tests/
+          # Tarball of the build directory; samples/ and tests/ sources come from the test job's checkout.
+          # /opt/rocprofiler-sdk is reproduced in the test job via `cmake --build build --target install`.
+          tar --use-compress-program=zstd -cf rocprofiler-sdk-build-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.zst \
+            build/
 
       - name: Create ROCM dependencies tarball
         shell: bash
         run: |
-          # Create a tarball of /opt/rocm and /opt/rocprofiler-sdk for test job
-          tar --zstd -cf rocm-deps-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.zst \
-            -C /opt rocm rocprofiler-sdk || tar --zstd -cf rocm-deps-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.zst -C /opt rocm
+          tar --use-compress-program=zstd -cf rocm-deps-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.zst \
+            -C /opt rocm
 
       # NOTE: Artifacts are automatically scoped to this workflow run (github.run_id).
       # The test job's `needs: build-deb` ensures it only downloads artifacts from this same run.
+      # *.deb / *.rpm / *.tgz packages live inside build/ which is already in the tarball.
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
           name: build-deb-${{ matrix.system.os }}-${{ matrix.system.gpu }}
-          path: |
-            projects/rocprofiler-sdk/rocprofiler-sdk-build-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.zst
-            projects/rocprofiler-sdk/build/*.deb
-            projects/rocprofiler-sdk/build/*.rpm
-            projects/rocprofiler-sdk/build/*.tgz
+          path: projects/rocprofiler-sdk/rocprofiler-sdk-build-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.zst
           retention-days: 1
           compression-level: 0
 
@@ -342,14 +337,14 @@ jobs:
           cd projects/rocprofiler-sdk
           apt-get update
           apt-get install -y zstd
-          tar --zstd -xf ../../artifacts/rocprofiler-sdk-build-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.zst
+          tar --use-compress-program=zstd -xf ../../artifacts/rocprofiler-sdk-build-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.zst
 
       - name: Extract ROCM dependencies
         shell: bash
         run: |
           rm -rf /opt/rocm /opt/rocm-* /opt/rocprofiler-sdk
           cd /opt
-          tar --zstd -xf $GITHUB_WORKSPACE/deps/rocm-deps-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.zst
+          tar --use-compress-program=zstd -xf $GITHUB_WORKSPACE/deps/rocm-deps-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.zst
 
       - name: Install requirements
         timeout-minutes: 5
@@ -387,6 +382,16 @@ jobs:
             -LE "${${{ matrix.system.gpu }}_EXCLUDE_LABEL_REGEX}" \
             -E  "${${{ matrix.system.gpu }}_EXCLUDE_TESTS_REGEX}"
 
+      - name: Install ROCProfiler SDK from build artifact
+        if: ${{ contains(matrix.system.gpu, env.CORE_EXT_RUNNER) }}
+        timeout-minutes: 10
+        shell: bash
+        working-directory: projects/rocprofiler-sdk
+        run: |
+          export LD_LIBRARY_PATH=${{ env.ROCM_PATH }}/lib:${{ env.ROCM_PATH }}/llvm/lib:$LD_LIBRARY_PATH
+          export PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:$HOME/.local/bin:$PATH
+          cmake --build build --target install --parallel 16
+
       - name: Test Install Build
         if: ${{ contains(matrix.system.gpu, env.CORE_EXT_RUNNER) }}
         timeout-minutes: 20
@@ -395,33 +400,13 @@ jobs:
         run: |
           export LD_LIBRARY_PATH=${{ env.ROCM_PATH }}/lib:${{ env.ROCM_PATH }}/llvm/lib:$LD_LIBRARY_PATH
           export PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:$HOME/.local/bin:$PATH
-          CMAKE_PREFIX_PATH=/opt/rocprofiler-sdk cmake -B build-samples -DGPU_TARGETS="gfx942" -DCMAKE_HIP_ARCHITECTURES="gfx942" samples
-          CMAKE_PREFIX_PATH=/opt/rocprofiler-sdk cmake -B build-tests -DGPU_TARGETS="gfx942" -DCMAKE_HIP_ARCHITECTURES="gfx942" tests
+          CMAKE_PREFIX_PATH=/opt/rocprofiler-sdk cmake -B build-samples samples
+          CMAKE_PREFIX_PATH=/opt/rocprofiler-sdk cmake -B build-tests -DGPU_TARGETS="gfx942" tests
           export LD_LIBRARY_PATH=/opt/rocprofiler-sdk/lib:${LD_LIBRARY_PATH}
           cmake --build build-samples --target all --parallel 16
           cmake --build build-tests --target all --parallel 16
-          python3 ./source/scripts/run-ci.py -B build-samples \
-            --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.system.os }}-${{ matrix.system.gpu }}-install-samples-test \
-            --mode ${CI_MODE} \
-            --site test-deb-gpu \
-            --gpu-targets gfx942 \
-            --run-attempt ${{ github.run_attempt }} \
-            --test-only \
-            -- \
-            -- \
-            -LE "${${{ matrix.system.gpu }}_EXCLUDE_LABEL_REGEX}" \
-            -E "${${{ matrix.system.gpu }}_EXCLUDE_TESTS_REGEX}"
-          python3 ./source/scripts/run-ci.py -B build-tests \
-            --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.system.os }}-${{ matrix.system.gpu }}-install-tests-test \
-            --mode ${CI_MODE} \
-            --site test-deb-gpu \
-            --gpu-targets gfx942 \
-            --run-attempt ${{ github.run_attempt }} \
-            --test-only \
-            -- \
-            -- \
-            -LE "${${{ matrix.system.gpu }}_EXCLUDE_LABEL_REGEX}" \
-            -E "${${{ matrix.system.gpu }}_EXCLUDE_TESTS_REGEX}"
+          ctest --test-dir build-samples -LE "${${{ matrix.system.gpu }}_EXCLUDE_LABEL_REGEX}" -E "${${{ matrix.system.gpu }}_EXCLUDE_TESTS_REGEX}" --output-on-failure
+          ctest --test-dir build-tests   -LE "${${{ matrix.system.gpu }}_EXCLUDE_LABEL_REGEX}" -E "${${{ matrix.system.gpu }}_EXCLUDE_TESTS_REGEX}" --output-on-failure
 
       - name: Install Packages
         if: ${{ contains(matrix.system.gpu, env.CORE_EXT_RUNNER) }}
@@ -432,11 +417,11 @@ jobs:
           export LD_LIBRARY_PATH=${{ env.ROCM_PATH }}/lib:${{ env.ROCM_PATH }}/llvm/lib:$LD_LIBRARY_PATH
           export PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:$HOME/.local/bin:$PATH
           export PATH=${PATH}:/usr/local/sbin:/usr/sbin:/sbin
-          dpkg --force-all -i ../../artifacts/*.deb
-          # Re-install in correct order
-          dpkg --force-all -i ../../artifacts/rocprofiler-sdk-roctx_*.deb
-          dpkg --force-all -i ../../artifacts/rocprofiler-sdk-rocpd_*.deb
-          for i in $(ls -S ../../artifacts/rocprofiler-sdk*.deb 2>/dev/null | grep -Ev 'roctx|rocpd'); do dpkg --force-all -i ${i}; done
+          ls -la
+          ls -la ./build
+          dpkg --force-all -i ./build/rocprofiler-sdk-roctx_*.deb
+          dpkg --force-all -i ./build/rocprofiler-sdk-rocpd_*.deb
+          for i in $(ls -S ./build/rocprofiler-sdk*.deb | egrep -v 'roctx|rocpd'); do dpkg --force-all -i ${i}; done
 
       - name: Test Installed Packages
         if: ${{ contains(matrix.system.gpu, env.CORE_EXT_RUNNER) }}
@@ -446,32 +431,12 @@ jobs:
         run: |
           export LD_LIBRARY_PATH=${{ env.ROCM_PATH }}/lib:${{ env.ROCM_PATH }}/llvm/lib:$LD_LIBRARY_PATH
           export PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:$HOME/.local/bin:$PATH
-          CMAKE_PREFIX_PATH=${{ env.ROCM_PATH }} cmake -B build-samples-deb -DGPU_TARGETS="gfx942" -DCMAKE_HIP_ARCHITECTURES="gfx942" ${{ env.ROCM_PATH }}/share/rocprofiler-sdk/samples
-          CMAKE_PREFIX_PATH=${{ env.ROCM_PATH }} cmake -B build-tests-deb -DGPU_TARGETS="gfx942" -DCMAKE_HIP_ARCHITECTURES="gfx942" ${{ env.ROCM_PATH }}/share/rocprofiler-sdk/tests
+          CMAKE_PREFIX_PATH=${{ env.ROCM_PATH }} cmake -B build-samples-deb ${{ env.ROCM_PATH }}/share/rocprofiler-sdk/samples
+          CMAKE_PREFIX_PATH=${{ env.ROCM_PATH }} cmake -B build-tests-deb -DGPU_TARGETS="gfx942" ${{ env.ROCM_PATH }}/share/rocprofiler-sdk/tests
           cmake --build build-samples-deb --target all --parallel 16
           cmake --build build-tests-deb --target all --parallel 16
-          python3 ./source/scripts/run-ci.py -B build-samples-deb \
-            --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.system.os }}-${{ matrix.system.gpu }}-deb-samples-test \
-            --mode ${CI_MODE} \
-            --site test-deb-gpu \
-            --gpu-targets gfx942 \
-            --run-attempt ${{ github.run_attempt }} \
-            --test-only \
-            -- \
-            -- \
-            -LE "${${{ matrix.system.gpu }}_EXCLUDE_LABEL_REGEX}" \
-            -E "${${{ matrix.system.gpu }}_EXCLUDE_TESTS_REGEX}"
-          python3 ./source/scripts/run-ci.py -B build-tests-deb \
-            --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.system.os }}-${{ matrix.system.gpu }}-deb-tests-test \
-            --mode ${CI_MODE} \
-            --site test-deb-gpu \
-            --gpu-targets gfx942 \
-            --run-attempt ${{ github.run_attempt }} \
-            --test-only \
-            -- \
-            -- \
-            -LE "${${{ matrix.system.gpu }}_EXCLUDE_LABEL_REGEX}" \
-            -E "${${{ matrix.system.gpu }}_EXCLUDE_TESTS_REGEX}"
+          ctest --test-dir build-samples-deb -LE "${${{ matrix.system.gpu }}_EXCLUDE_LABEL_REGEX}" -E "${${{ matrix.system.gpu }}_EXCLUDE_TESTS_REGEX}" --output-on-failure
+          ctest --test-dir build-tests-deb   -LE "${${{ matrix.system.gpu }}_EXCLUDE_LABEL_REGEX}" -E "${${{ matrix.system.gpu }}_EXCLUDE_TESTS_REGEX}" --output-on-failure
 
       - name: Archive production artifacts
         if: ${{ github.event_name == 'workflow_dispatch' && contains(matrix.system.gpu, env.CORE_EXT_RUNNER) }}
@@ -479,9 +444,9 @@ jobs:
         with:
           name: installers-deb
           path: |
-            artifacts/*.deb
-            artifacts/*.rpm
-            artifacts/*.tgz
+            projects/rocprofiler-sdk/build/*.deb
+            projects/rocprofiler-sdk/build/*.rpm
+            projects/rocprofiler-sdk/build/*.tgz
 
   # -----------------------------------------------------------------------------
   # RHEL/SLES (RPM) Build job(s)
@@ -611,14 +576,14 @@ jobs:
         shell: bash
         working-directory: projects/rocprofiler-sdk
         run: |
-          tar --zstd -cf rocprofiler-sdk-build-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.zst \
+          tar --use-compress-program=zstd -cf rocprofiler-sdk-build-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.zst \
             build/ \
             ${{ env.PYTHON_VENV_PATH }}/
 
       - name: Create ROCM dependencies tarball
         shell: bash
         run: |
-          tar --zstd -cf rocm-deps-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.zst \
+          tar --use-compress-program=zstd -cf rocm-deps-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.zst \
             -C /opt rocm
 
       - name: Upload build artifacts
@@ -691,14 +656,14 @@ jobs:
         run: |
           command -v zstd >/dev/null || dnf install -y zstd || zypper --non-interactive install zstd
           cd projects/rocprofiler-sdk
-          tar --zstd -xf ../../artifacts/rocprofiler-sdk-build-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.zst
+          tar --use-compress-program=zstd -xf ../../artifacts/rocprofiler-sdk-build-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.zst
 
       - name: Extract ROCM dependencies
         shell: bash
         run: |
           rm -rf /opt/rocm /opt/rocm-* /opt/rocprofiler-sdk
           cd /opt
-          tar --zstd -xf $GITHUB_WORKSPACE/deps/rocm-deps-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.zst
+          tar --use-compress-program=zstd -xf $GITHUB_WORKSPACE/deps/rocm-deps-${{ matrix.system.os }}-${{ matrix.system.gpu }}.tar.zst
 
       - name: Enable PC Sampling
         if: ${{ contains(matrix.system.gpu, 'mi200') || contains(matrix.system.gpu, 'mi300a') }}
@@ -864,13 +829,13 @@ jobs:
       shell: bash
       working-directory: projects/rocprofiler-sdk
       run: |
-        tar --zstd -cf rocprofiler-sdk-build-${{ matrix.system.os }}-${{ matrix.system.gpu }}-${{ matrix.system.sanitizer }}.tar.zst \
+        tar --use-compress-program=zstd -cf rocprofiler-sdk-build-${{ matrix.system.os }}-${{ matrix.system.gpu }}-${{ matrix.system.sanitizer }}.tar.zst \
           build/
 
     - name: Create ROCM dependencies tarball
       shell: bash
       run: |
-        tar --zstd -cf rocm-deps-${{ matrix.system.os }}-${{ matrix.system.gpu }}-${{ matrix.system.sanitizer }}.tar.zst \
+        tar --use-compress-program=zstd -cf rocm-deps-${{ matrix.system.os }}-${{ matrix.system.gpu }}-${{ matrix.system.sanitizer }}.tar.zst \
           -C /opt rocm
 
     - name: Upload build artifacts
@@ -966,7 +931,7 @@ jobs:
         apt-get install -y zstd
         rm -rf /opt/rocm /opt/rocm-* /opt/rocprofiler-sdk
         cd /opt
-        tar --zstd -xf $GITHUB_WORKSPACE/deps/rocm-deps-ubuntu-22.04-mi325-AddressSanitizer.tar.zst
+        tar --use-compress-program=zstd -xf $GITHUB_WORKSPACE/deps/rocm-deps-ubuntu-22.04-mi325-AddressSanitizer.tar.zst
 
     - name: Install requirements
       timeout-minutes: 5
@@ -994,7 +959,7 @@ jobs:
         echo "Running AddressSanitizer Tests"
         echo "=========================================="
         rm -rf build
-        tar --zstd -xf ../../artifacts/AddressSanitizer/rocprofiler-sdk-build-ubuntu-22.04-mi325-AddressSanitizer.tar.zst
+        tar --use-compress-program=zstd -xf ../../artifacts/AddressSanitizer/rocprofiler-sdk-build-ubuntu-22.04-mi325-AddressSanitizer.tar.zst
         export PATH="$HOME/.local/bin:$PATH"
         python3 ./source/scripts/run-ci.py -B build \
           --name ${{ github.repository }}-${{ github.ref_name }}-ubuntu-22.04-mi325-AddressSanitizer-test \
@@ -1021,7 +986,7 @@ jobs:
         echo "Running ThreadSanitizer Tests"
         echo "=========================================="
         rm -rf build
-        tar --zstd -xf ../../artifacts/ThreadSanitizer/rocprofiler-sdk-build-ubuntu-22.04-mi325-ThreadSanitizer.tar.zst
+        tar --use-compress-program=zstd -xf ../../artifacts/ThreadSanitizer/rocprofiler-sdk-build-ubuntu-22.04-mi325-ThreadSanitizer.tar.zst
         export PATH="$HOME/.local/bin:$PATH"
         python3 ./source/scripts/run-ci.py -B build \
           --name ${{ github.repository }}-${{ github.ref_name }}-ubuntu-22.04-mi325-ThreadSanitizer-test \
@@ -1048,7 +1013,7 @@ jobs:
         echo "Running LeakSanitizer Tests"
         echo "=========================================="
         rm -rf build
-        tar --zstd -xf ../../artifacts/LeakSanitizer/rocprofiler-sdk-build-ubuntu-22.04-mi325-LeakSanitizer.tar.zst
+        tar --use-compress-program=zstd -xf ../../artifacts/LeakSanitizer/rocprofiler-sdk-build-ubuntu-22.04-mi325-LeakSanitizer.tar.zst
         export PATH="$HOME/.local/bin:$PATH"
         python3 ./source/scripts/run-ci.py -B build \
           --name ${{ github.repository }}-${{ github.ref_name }}-ubuntu-22.04-mi325-LeakSanitizer-test \
@@ -1075,7 +1040,7 @@ jobs:
         echo "Running UndefinedBehaviorSanitizer Tests"
         echo "=========================================="
         rm -rf build
-        tar --zstd -xf ../../artifacts/UndefinedBehaviorSanitizer/rocprofiler-sdk-build-ubuntu-22.04-mi325-UndefinedBehaviorSanitizer.tar.zst
+        tar --use-compress-program=zstd -xf ../../artifacts/UndefinedBehaviorSanitizer/rocprofiler-sdk-build-ubuntu-22.04-mi325-UndefinedBehaviorSanitizer.tar.zst
         export PATH="$HOME/.local/bin:$PATH"
         python3 ./source/scripts/run-ci.py -B build \
           --name ${{ github.repository }}-${{ github.ref_name }}-ubuntu-22.04-mi325-UndefinedBehaviorSanitizer-test \
