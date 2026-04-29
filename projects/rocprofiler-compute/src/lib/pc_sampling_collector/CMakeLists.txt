@@ -22,7 +22,6 @@ target_link_libraries(
         synchronized
         libdw::libdw
         amd_comgr
-    PRIVATE
         nlohmann_json
 )
 

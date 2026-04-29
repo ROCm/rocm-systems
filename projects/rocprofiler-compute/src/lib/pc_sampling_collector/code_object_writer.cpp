@@ -3,7 +3,6 @@
 #include "code_object_writer.h"
 
 #include "gsl_assert.h"
-#include "nlohmann/json.hpp"
 
 using namespace rocm_compute;
 
@@ -11,7 +10,8 @@ void code_object_writer_json_t::start_code_obj(size_t obj_id)
 {
     Expects(m_code_object_closure_count == 0);
     ++m_code_object_closure_count;
-    m_code_objects.push_back(code_object_entry_t{obj_id, {}});
+
+    m_current_obj_id = obj_id;
 }
 
 void code_object_writer_json_t::end_code_obj()
@@ -19,6 +19,11 @@ void code_object_writer_json_t::end_code_obj()
     Expects(m_code_object_closure_count != 0);
     Expects(m_symbol_closure_count == 0);
     --m_code_object_closure_count;
+
+    m_code_objects.push_back(nlohmann::json::object({
+        {"id", m_current_obj_id},
+        {"symbols", std::move(m_symbols)},
+    }));
 }
 
 void code_object_writer_json_t::start_symbol(const symbol_t& symbol)
@@ -26,13 +31,21 @@ void code_object_writer_json_t::start_symbol(const symbol_t& symbol)
     Expects(m_code_object_closure_count != 0);
     Expects(m_symbol_closure_count == 0);
     ++m_symbol_closure_count;
-    m_code_objects.back().symbols.push_back(symbol);
+
+    m_current_symbol = symbol;
 }
 
 void code_object_writer_json_t::end_symbol()
 {
     Expects(m_symbol_closure_count != 0);
     --m_symbol_closure_count;
+
+    m_symbols.push_back(nlohmann::json::object({
+        {"name", m_current_symbol.name},
+        {"code_object_offset", m_current_symbol.code_object_offset},
+        {"virtual_address", m_current_symbol.virtual_address},
+        {"size", m_current_symbol.size},
+    }));
 }
 
 void code_object_writer_json_t::write_instruction(const instruction_t& inst) {}
@@ -42,23 +55,5 @@ std::string code_object_writer_json_t::get_result()
     Expects(m_code_object_closure_count == 0);
     Expects(m_symbol_closure_count == 0);
 
-    auto code_objects = nlohmann::json::array();
-    for (const auto& entry : m_code_objects)
-    {
-        auto symbols = nlohmann::json::array();
-        for (const auto& s : entry.symbols)
-        {
-            symbols.push_back(nlohmann::json::object({
-                {"name", s.name},
-                {"code_object_offset", s.code_object_offset},
-                {"virtual_address", s.virtual_address},
-                {"size", s.size},
-            }));
-        }
-        code_objects.push_back(nlohmann::json::object({
-            {"id", entry.id},
-            {"symbols", std::move(symbols)},
-        }));
-    }
-    return nlohmann::json{{"code_objects", std::move(code_objects)}}.dump();
+    return nlohmann::json{{"code_objects", std::move(m_code_objects)}}.dump();
 }

@@ -67,7 +67,6 @@ TEST_F(test_code_object_writer_t, ProvidedSymbolCallWithoutStartCodeObj_Throws)
     EXPECT_THROW(m_writer.start_symbol(rocm_compute::symbol_t{}), std::runtime_error);
 }
 
-
 TEST_F(test_code_object_writer_t, ProvidedCodeObjDesc_SerializesIt)
 {
     constexpr uint32_t id0 = 10;

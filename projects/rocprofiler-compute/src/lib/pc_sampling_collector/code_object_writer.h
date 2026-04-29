@@ -2,6 +2,7 @@
 // SPDX-License-Identifier:  MIT
 #pragma once
 #include "code_object_translator.h"
+#include "nlohmann/json.hpp"
 
 #include <string>
 #include <vector>
@@ -13,7 +14,7 @@ class code_object_writer_t
 public:
     virtual ~code_object_writer_t()                                  = default;
     virtual void        start_code_obj(size_t obj_id)                = 0;
-    virtual void        end_code_obj()             = 0;
+    virtual void        end_code_obj()                               = 0;
     virtual void        start_symbol(const symbol_t& symbol)         = 0;
     virtual void        end_symbol()                                 = 0;
     virtual void        write_instruction(const instruction_t& inst) = 0;
@@ -29,15 +30,14 @@ public:
     void        end_symbol() override;
     void        write_instruction(const instruction_t& inst) override;
     std::string get_result() override;
-private:
-    struct code_object_entry_t
-    {
-        size_t                id = 0;
-        std::vector<symbol_t> symbols;
-    };
 
+private:
     int32_t                          m_code_object_closure_count = 0;
     int32_t                          m_symbol_closure_count      = 0;
-    std::vector<code_object_entry_t> m_code_objects;
+
+    size_t                  m_current_obj_id = 0;
+    symbol_t                m_current_symbol{};
+    nlohmann::json::array_t m_code_objects = nlohmann::json::array();
+    nlohmann::json::array_t m_symbols      = nlohmann::json::array();
 };
 }  // namespace rocm_compute
