@@ -3812,7 +3812,7 @@ ncclResult_t IbCastCloseRecv(void* recvComm) {
           commDev->gpuFlush.gpuFlushGpuMem = nullptr;
           if (commDev->gpuFlush.gpuMr != nullptr) NCCLCHECK(wrap_ibv_dereg_mr(commDev->gpuFlush.gpuMr));
           commDev->gpuFlush.gpuMr = nullptr;
-          if(commDev->gpuFlush.dmabuf_fd > 0) { close(commDev->gpuFlush.dmabuf_fd);}
+          if(commDev->gpuFlush.dmabuf_fd >= 0) { close(commDev->gpuFlush.dmabuf_fd);}
         }
         if (commDev->gpuFlush.qp.qp != NULL) NCCLCHECK(wrap_ibv_destroy_qp(commDev->gpuFlush.qp.qp));
         if (commDev->gpuFlush.hostMr != NULL) NCCLCHECK(wrap_ibv_dereg_mr(commDev->gpuFlush.hostMr));
