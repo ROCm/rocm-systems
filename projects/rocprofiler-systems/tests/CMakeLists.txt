@@ -6,86 +6,10 @@
 #
 include_guard(GLOBAL)
 
-if(ROCPROFSYS_USE_PYTESTS)
-    set(_capchk_dir ${CMAKE_BINARY_DIR}/share/rocprofiler-systems/tests)
-    set(_capchk_exe ${_capchk_dir}/rocprof-sys-capchk)
-    file(MAKE_DIRECTORY ${_capchk_dir})
-    execute_process(
-        COMMAND
-            ${CMAKE_CXX_COMPILER} -O2 -g -std=c++17
-            ${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-capchk.cpp -o rocprof-sys-capchk
-        WORKING_DIRECTORY ${_capchk_dir}
-        OUTPUT_QUIET
-        ERROR_QUIET
-        RESULT_VARIABLE _capchk_result
-    )
-    if(NOT _capchk_result EQUAL 0)
-        message(
-            WARNING
-            "rocprof-sys-capchk build failed (result ${_capchk_result}); install of capability checker will be skipped."
-        )
-    endif()
-    include(${CMAKE_CURRENT_LIST_DIR}/pytest/CMakeLists.txt)
-else()
-    include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-testing.cmake)
-
-    # test groups
-    include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-unit-tests.cmake)
-    include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-config-tests.cmake)
-    include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-instrument-tests.cmake)
-    include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-preset-tests.cmake)
-    include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-pthread-tests.cmake)
-    include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-rocm-tests.cmake)
-    include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-user-api-tests.cmake)
-    include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-mpi-tests.cmake)
-    include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-ucx-tests.cmake)
-    include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-shmem-tests.cmake)
-    include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-kokkos-tests.cmake)
-    include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-openmp-tests.cmake)
-    include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-code-coverage-tests.cmake)
-    include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-fork-tests.cmake)
-    include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-time-window-tests.cmake)
-    include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-attach-tests.cmake)
-    include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-rccl-tests.cmake)
-    include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-overflow-tests.cmake)
-    include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-annotate-tests.cmake)
-    include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-causal-tests.cmake)
-    include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-python-tests.cmake)
-    include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-decode-tests.cmake)
-    include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-gpu-connect-tests.cmake)
-    include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-nic-perf.cmake)
-    include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-roctx-tests.cmake)
-    include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-selective-region-tests.cmake)
-    include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-rocm-hip-stream.cmake)
-    include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-binary-tests.cmake)
-    include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-thread-limit-tests.cmake)
-    include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-scratch-memory-tests.cmake)
-    include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-kfd-tests.cmake)
-
-    # -------------------------------------------------------------------------------------- #
-    #
-    # Global cleanup test for temporary files
-    # This runs once after ALL tests complete to clean up trace cache temporary files
-    # Uses FIXTURES_CLEANUP to ensure it runs after all tests requiring the fixture
-    #
-    # -------------------------------------------------------------------------------------- #
-
-    #delete temp files created by rocprofiler-sys tests in /tmp owned by the current user. Always return success.
-    add_test(
-        NAME rocprofsys-cleanup-tmp-files
-        COMMAND
-            sh -c
-            "find /tmp -maxdepth 1 -user $(whoami) \\( -name 'buffered_storage*.bin' -o -name 'metadata*.json' \\) -delete 2>/dev/null || true"
-        WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
-    )
-
-    set_tests_properties(
-        rocprofsys-cleanup-tmp-files
-        PROPERTIES
-            FIXTURES_CLEANUP rocprofsys-global-tmp-files
-            LABELS "cleanup;global"
-            TIMEOUT 30
-    )
+include(${CMAKE_CURRENT_LIST_DIR}/pytest/CMakeLists.txt)
+if(NOT ROCPROFSYS_USE_PYTESTS)
+    # TODO: Will be the default once TheRock is switched to CTests
+    include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-pytest.cmake)
 endif()
 
 # ------------------------------------------------------------------------------#
@@ -108,6 +32,21 @@ set(ROCPROFSYS_TEST_SCRIPTS
     ${CMAKE_CURRENT_LIST_DIR}/generate_papi_nic_events.sh
 )
 
+set(_capchk_dir ${CMAKE_BINARY_DIR}/share/rocprofiler-systems/tests)
+add_executable(
+    rocprof-sys-capchk
+    EXCLUDE_FROM_ALL
+    ${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-capchk.cpp
+)
+set_target_properties(
+    rocprof-sys-capchk
+    PROPERTIES
+        CXX_STANDARD 17
+        CXX_STANDARD_REQUIRED ON
+        CXX_EXTENSIONS OFF
+        RUNTIME_OUTPUT_DIRECTORY "${_capchk_dir}"
+)
+
 add_custom_target(
     copy-test-files
     ALL
@@ -117,7 +56,9 @@ add_custom_target(
     COMMAND
         ${CMAKE_COMMAND} -E copy_if_different ${ROCPROFSYS_PYTHON_VALIDATION_FILES}
         ${CMAKE_BINARY_DIR}/share/rocprofiler-systems/tests
-    # copy_directory for directories (copy_if_different only works for files)
+    COMMAND
+        ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_LIST_DIR}/README.md
+        ${CMAKE_BINARY_DIR}/share/rocprofiler-systems/tests
     COMMAND
         ${CMAKE_COMMAND} -E copy_directory
         ${CMAKE_CURRENT_LIST_DIR}/rocpd-validation-rules
@@ -126,6 +67,7 @@ add_custom_target(
         ${CMAKE_COMMAND} -E copy_if_different ${ROCPROFSYS_TEST_SCRIPTS}
         ${CMAKE_BINARY_DIR}/share/rocprofiler-systems/tests
 )
+add_dependencies(copy-test-files rocprof-sys-capchk)
 
 # ------------------------------------------------------------------------------#
 #
@@ -152,11 +94,10 @@ if(ROCPROFSYS_INSTALL_TESTING)
         COMPONENT rocprofiler-systems-tests
     )
     # Capability check binary
-    if(ROCPROFSYS_USE_PYTESTS AND EXISTS "${_capchk_exe}")
-        install(
-            PROGRAMS ${_capchk_exe}
+    install(
+        TARGETS rocprof-sys-capchk
+        RUNTIME
             DESTINATION share/rocprofiler-systems/tests
             COMPONENT rocprofiler-systems-tests
-        )
-    endif()
+    )
 endif()

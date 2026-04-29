@@ -90,6 +90,32 @@ TesterArguments::TesterArguments(int argc, char *argv[]) {
       skip = atoi(argv[i]);
     } else if (arg == "-noverif") {
       verif = false;
+    } else if (arg == "-localbuftype") {
+      i++;
+
+      if (argc < i + 1) {
+        fprintf(stderr, "Invalid arguments for -localbuftype.\n");
+        exit(-1);
+      }
+
+      if (std::string(argv[i]) == "heap") {
+        local_buf_type = USER_BUF_TYPE_HEAP;
+      } else if (std::string(argv[i]) == "host") {
+        local_buf_type = USER_BUF_TYPE_HOST;
+      } else if (std::string(argv[i]) == "device") {
+        local_buf_type = USER_BUF_TYPE_DEVICE;
+      } else if (std::string(argv[i]) == "fine") {
+        local_buf_type = USER_BUF_TYPE_FINE;
+      } else if (std::string(argv[i]) == "uncached") {
+        local_buf_type = USER_BUF_TYPE_UNCACHED;
+      } else if (std::string(argv[i]) == "managed") {
+        local_buf_type = USER_BUF_TYPE_MANAGED;
+      } else {
+        fprintf(stderr, "Invalid local buffer type. "
+                        "Please use one of [heap, host, device, fine, uncached, managed]. "
+                        "Defaulting to heap\n");
+        local_buf_type = USER_BUF_TYPE_HEAP;
+      }
     } else {
       show_usage(argv[0]);
       exit(-1);

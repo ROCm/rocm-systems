@@ -6,6 +6,7 @@
 //  above should always be included first
 //
 #include "api.hpp"
+#include "common/defines.h"
 #include "common/setup.hpp"
 #include "common/static_object.hpp"
 #include "core/agent.hpp"
@@ -16,7 +17,6 @@
 #include "core/config.hpp"
 #include "core/constraint.hpp"
 #include "core/cpu.hpp"
-#include "core/defines.hpp"
 #include "core/dynamic_library.hpp"
 #include "core/gpu.hpp"
 #include "core/locking.hpp"
@@ -251,7 +251,11 @@ struct fini_bundle
 {
     using data_type = std::tuple<Tp...>;
 
-    ROCPROFSYS_DEFAULT_OBJECT(fini_bundle)
+    fini_bundle()                                  = default;
+    fini_bundle(const fini_bundle&)                = default;
+    fini_bundle(fini_bundle&&) noexcept            = default;
+    fini_bundle& operator=(const fini_bundle&)     = default;
+    fini_bundle& operator=(fini_bundle&&) noexcept = default;
 
     fini_bundle(std::string_view _label)
     : m_label{ _label }

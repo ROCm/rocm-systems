@@ -29,9 +29,8 @@
 #include <string>
 #include <vector>
 
-#include "core/aql_profile_exception.h"
-#include "core/aql_profile_exception.h"
-#include "core/aql_profile.hpp"
+#include "lib/aqlprofile/core/aql_profile_exception.h"
+#include "lib/aqlprofile/core/aql_profile.hpp"
 
 namespace aql_profile
 {

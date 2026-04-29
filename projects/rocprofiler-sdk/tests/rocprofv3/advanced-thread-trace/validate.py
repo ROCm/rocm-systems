@@ -22,6 +22,7 @@
 # SOFTWARE.
 
 
+import csv
 import sys
 import pytest
 import re
@@ -384,6 +385,153 @@ def test_shaderdata(att_shaderdata_out_dir_path):
 
     # Require at least one ui_output_agent_* directory with shaderdata data.
     assert found_shaderdata, "No ui_output_agent_* directory contains shaderdata data."
+
+
+def test_multi_gpu_separate_agents(att_multi_gpu_out_dir_path):
+    """
+    When multiple GPUs are traced for the same dispatch, each agent must get
+    its own ui_output_agent_* directory.  Before the fix, all agents' ATT data
+    was merged into a single directory, causing shaderdata timestamp resets
+    (each GPU has its own independent SQTT counter) and silently dropping
+    occupancy data from all but the first agent.
+    """
+
+    out_dir = Path(att_multi_gpu_out_dir_path)
+
+    # Use agent_info.csv to determine how many GPUs are on this machine.
+    # The file is inside a hostname subdirectory: <out_dir>/<hostname>/<pid>_agent_info.csv
+    agent_csvs = list(out_dir.glob("**/*_agent_info.csv"))
+    assert agent_csvs, (
+        f"No *_agent_info.csv found under {out_dir}. "
+        f"Ensure the execute test runs with --output-format csv."
+    )
+    with open(agent_csvs[0], "r") as f:
+        gpu_count = sum(1 for row in csv.DictReader(f) if row["Agent_Type"] == "GPU")
+    if gpu_count < 2:
+        pytest.skip(f"Only {gpu_count} GPU(s) on this machine, need >= 2")
+
+    ui_dirs = sorted(p for p in out_dir.glob("ui_output_agent_*") if p.is_dir())
+
+    # With --att-gpu-index 0,1 we expect at least two output directories
+    # (one per agent).
+    assert len(ui_dirs) >= 2, (
+        f"Expected at least 2 ui_output_agent_* directories (one per GPU), "
+        f"found {len(ui_dirs)}.  ATT data from multiple agents may be merged."
+    )
+
+    # Extract agent ids from directory names and verify they are distinct.
+    agent_ids = set()
+    pattern = re.compile(r"ui_output_agent_(\d+)_dispatch_(\d+)")
+    for d in ui_dirs:
+        m = pattern.search(d.name)
+        assert m, f"Unexpected directory name format: {d.name}"
+        agent_ids.add(m.group(1))
+
+    assert len(agent_ids) >= 2, (
+        f"Expected directories for at least 2 distinct agents, "
+        f"found agent ids: {agent_ids}"
+    )
+
+    # For each directory that has shaderdata, verify timestamps are
+    # monotonically increasing across all chunks (no resets from other GPUs).
+    for ui_dir in ui_dirs:
+        filenames_path = ui_dir / "filenames.json"
+        if not filenames_path.exists():
+            continue
+
+        with open(filenames_path, "r") as f:
+            filenames_json = json.load(f)
+
+        shaderdata_filenames = filenames_json.get("shaderdata_filenames", {})
+        if not shaderdata_filenames:
+            continue
+
+        for se, files in shaderdata_filenames.items():
+            prev_end_time = -1
+            for file_entry in files:
+                begin_time = file_entry[1]
+                end_time = file_entry[2]
+
+                # Each chunk's begin_time must be >= the previous chunk's
+                # end_time.  A reset (begin < prev_end) indicates data from a
+                # different GPU was mixed in.
+                assert begin_time >= prev_end_time, (
+                    f"Shaderdata timestamp reset in {ui_dir.name} SE {se}: "
+                    f"chunk {file_entry[0]} begins at {begin_time} but "
+                    f"previous chunk ended at {prev_end_time}.  "
+                    f"Data from multiple agents may be merged."
+                )
+                prev_end_time = end_time
+
+
+def test_att_marker_trace(json_data, att_marker_trace_out_dir_path):
+    """Verify marker-controlled ATT traced only kernels between Resume and Pause.
+
+    Test binary launches 4 kernels:
+    - before_trace_kernel: before roctxProfilerResume (should NOT be traced)
+    - traced_kernel_first: after roctxProfilerResume (should be traced)
+    - traced_kernel_second: after roctxProfilerResume (should be traced)
+    - after_trace_kernel: after roctxProfilerPause (should NOT be traced)
+
+    Validation parses the stats_*.csv files produced by the ATT decoder.
+    Kernel names appear as instruction rows with "; <mangled_name>" and the
+    demangled name in the Source column.
+    """
+    data = json_data["rocprofiler-sdk-tool"]
+    strings = data["strings"]
+
+    # Verify ATT data was produced
+    assert "att_filenames" in strings.keys(), "No att_filenames in output"
+    att_files = strings["att_filenames"]
+    assert len(att_files) > 0, "Expected ATT data from marker-controlled thread trace"
+
+    # Verify decoded ATT output directories exist
+    att_ui_dirs = [
+        p
+        for p in Path(att_marker_trace_out_dir_path).glob("ui_output_agent_*")
+        if p.is_dir()
+    ]
+    assert len(att_ui_dirs) > 0, "No ui_output_agent_* directories found"
+
+    # Parse stats_*.csv files for kernel names.
+    # stats_*.csv are written to the PARENT of ui_output_* dirs (see code.cpp).
+    # The CSV has rows where the Instruction column is "; <mangled_name>" for
+    # kernel entry points and the Source column holds the demangled name.
+    traced_kernel_names = set()
+    stats_files = list(Path(att_marker_trace_out_dir_path).glob("stats_*.csv"))
+    assert (
+        len(stats_files) > 0
+    ), f"No stats_*.csv files found in {att_marker_trace_out_dir_path}"
+    for stats_file in stats_files:
+        with open(stats_file, "r") as f:
+            reader = csv.reader(f)
+            header = next(reader, None)
+            assert header is not None, f"Empty stats CSV: {stats_file}"
+            for row in reader:
+                # Instruction column (index 2) starts with "; " for kernel names
+                if len(row) >= 3 and row[2].startswith("; "):
+                    traced_kernel_names.add(row[2][2:].strip())
+                # Also check demangled name in Source column (index 7)
+                if len(row) >= 8 and row[7].strip():
+                    traced_kernel_names.add(row[7].strip())
+
+    assert len(traced_kernel_names) > 0, "No kernel names found in stats CSV files"
+
+    # Verify traced_kernel_first and traced_kernel_second were traced
+    for expected in ("traced_kernel_first", "traced_kernel_second"):
+        found = any(expected in name for name in traced_kernel_names)
+        assert found, (
+            f"Expected '{expected}' to be in ATT trace but it was not. "
+            f"Traced kernels: {traced_kernel_names}"
+        )
+
+    # Verify before_trace_kernel and after_trace_kernel were NOT traced
+    for not_expected in ("before_trace_kernel", "after_trace_kernel"):
+        found = any(not_expected in name for name in traced_kernel_names)
+        assert not found, (
+            f"Expected '{not_expected}' to NOT be in ATT trace but it was. "
+            f"Traced kernels: {traced_kernel_names}"
+        )
 
 
 if __name__ == "__main__":

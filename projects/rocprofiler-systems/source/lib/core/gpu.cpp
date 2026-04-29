@@ -13,8 +13,6 @@
     }  // namespace ::tim::cereal
 
 #include "common/defines.h"
-
-#include "defines.hpp"
 #include "gpu.hpp"
 
 #include <timemory/manager.hpp>
@@ -194,7 +192,7 @@ add_device_metadata()
 {
     if(device_count() == 0) return;
 
-    ROCPROFSYS_METADATA([](auto& ar) {
+    ::tim::manager::add_metadata([](auto& ar) {
         try
         {
             add_device_metadata(ar);

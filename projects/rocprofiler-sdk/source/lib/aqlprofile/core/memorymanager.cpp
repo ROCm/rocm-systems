@@ -20,12 +20,23 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#include "memorymanager.hpp"
+#include "lib/aqlprofile/core/memorymanager.hpp"
 #include <algorithm>
+#include "lib/common/static_object.hpp"
 
-std::atomic<size_t>                                        MemoryManager::HANDLE_COUNTER{1};
-std::unordered_map<size_t, std::shared_ptr<MemoryManager>> MemoryManager::managers;
-std::mutex                                                 MemoryManager::managers_map_mutex;
+std::atomic<size_t>&
+MemoryManager::get_handle_counter()
+{
+    static auto _v = std::atomic<size_t>{1};
+    return _v;
+}
+
+MemoryManager::memory_manager_synced_map_t*
+MemoryManager::get_managers()
+{
+    static auto*& _v = rocprofiler::common::static_object<memory_manager_synced_map_t>::construct();
+    return _v;
+}
 
 void
 CounterMemoryManager::CopyEvents(const aqlprofile_pmc_event_t* _events, size_t count)

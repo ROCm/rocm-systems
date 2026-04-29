@@ -1,3 +1,9 @@
+//
+//
+//
+
+#include "lib/aqlprofile/core/spm_common.hpp"
+
 #include <assert.h>
 #include <stdlib.h>
 #include <atomic>
@@ -12,7 +18,6 @@
 #include <future>
 #include <fstream>
 #include <cstring>
-#include "src/core/include/spm_common.hpp"
 
 #ifdef _WIN32
 #    define PUBLIC_API
