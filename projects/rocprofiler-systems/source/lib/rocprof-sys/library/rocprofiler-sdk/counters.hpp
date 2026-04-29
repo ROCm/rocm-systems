@@ -46,8 +46,6 @@ using counter_track_type   = ::perfetto::CounterTrack;
 
 struct counter_event
 {
-    ROCPROFSYS_DEFAULT_OBJECT(counter_event)
-
     explicit counter_event(counter_dispatch_record&& _v)
     : record{ _v }
     {}
@@ -110,8 +108,6 @@ struct set_storage<::rocprofsys::rocprofiler_sdk::counter_data_tracker>
     using storage_array_t = std::array<storage<type>*, max_threads>;
     friend struct get_storage<rocprofsys::rocprofiler_sdk::counter_data_tracker>;
 
-    ROCPROFSYS_DEFAULT_OBJECT(set_storage)
-
     auto operator()(storage<type>* _v, size_t _idx) const { get().at(_idx) = _v; }
     auto operator()(type&, size_t) const {}
     auto operator()(storage<type>* _v) const { get().fill(_v); }
@@ -128,8 +124,6 @@ template <>
 struct get_storage<::rocprofsys::rocprofiler_sdk::counter_data_tracker>
 {
     using type = ::rocprofsys::rocprofiler_sdk::counter_data_tracker;
-
-    ROCPROFSYS_DEFAULT_OBJECT(get_storage)
 
     auto operator()(const type&) const
     {

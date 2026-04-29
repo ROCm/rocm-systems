@@ -1953,7 +1953,7 @@ typedef CUmemOperationType hipMemOperationType;
 #define hipMemOperationTypeUnmap CU_MEM_OPERATION_TYPE_UNMAP
 typedef CUmemHandleType hipMemHandleType;
 #define hipMemHandleTypeGeneric CU_MEM_HANDLE_TYPE_GENERIC
-// Explicitely declaring hipMemAllocationProp based on CUmemAllocationProp but
+// Explicitly declaring hipMemAllocationProp based on CUmemAllocationProp but
 // using CUDA runtime members instead Because hipMemAllocationType,
 // hipMemAllocationHandleType & hipMemLocation are defined using CUDA runtime
 // data types & also used by hipMemPoolProps Currently there doesn't exist CUDA
@@ -1968,9 +1968,9 @@ typedef struct hipMemAllocationProp {
   hipMemLocation location;
   /**
    * Windows-specific POBJECT_ATTRIBUTES required when
-   * ::CU_MEM_HANDLE_TYPE_WIN32 is specified.  This object atributes structure
+   * ::CU_MEM_HANDLE_TYPE_WIN32 is specified.  This object attribute's structure
    * includes security attributes that define
-   * the scope of which exported allocations may be tranferred to other
+   * the scope of which exported allocations may be transferred to other
    * processes.  In all other cases, this field is required to be zero.
    */
   void* win32HandleMetaData;
@@ -3289,7 +3289,7 @@ inline static hipError_t hipPointerGetAttributes(hipPointerAttribute_t* attribut
 #if (CUDART_VERSION >= 11000)
     auto memType = cPA.type;
 #else
-    unsigned memType = cPA.memoryType;  // No auto because cuda 10.2 doesnt force c++11
+    unsigned memType = cPA.memoryType;  // No auto because CUDA 10.2 doesn't force C++11
 #endif
     switch (memType) {
       case cudaMemoryTypeDevice:

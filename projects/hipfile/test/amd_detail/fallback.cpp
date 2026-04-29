@@ -18,6 +18,7 @@
 #include "mfile.h"
 #include "mhip.h"
 #include "mmountinfo.h"
+#include "mstats.h"
 #include "msys.h"
 #include "state.h"
 
@@ -113,10 +114,11 @@ struct FallbackIo : public HipFileOpened {
     std::vector<uint8_t> file_data{};
     void                *nonnull_ptr{reinterpret_cast<void *>(0x1)};
 
-    StrictMock<MHip>            mhip;
-    StrictMock<MSys>            msys;
-    StrictMock<MLibMountHelper> mlibmounthelper;
-    StrictMock<MConfiguration>  mcfg{};
+    StrictMock<MHip>             mhip;
+    StrictMock<MSys>             msys;
+    StrictMock<MLibMountHelper>  mlibmounthelper;
+    StrictMock<MConfiguration>   mcfg{};
+    StrictMock<MStatsCollection> mstats{};
 
     FallbackIo() : buffer_data(1024 * 1024)
     {
@@ -181,10 +183,12 @@ struct FallbackParam : ::testing::TestWithParam<IoType> {
     shared_ptr<IBuffer> buffer{};
     shared_ptr<IFile>   file{};
 
-    StrictMock<MHip>            mhip{};
-    StrictMock<MSys>            msys{};
-    StrictMock<MLibMountHelper> mlibmounthelper{};
-    StrictMock<MConfiguration>  mcfg{};
+    StrictMock<MHip>             mhip{};
+    StrictMock<MSys>             msys{};
+    StrictMock<MLibMountHelper>  mlibmounthelper{};
+    StrictMock<MConfiguration>   mcfg{};
+    StrictMock<MStatsCollection> mstats{};
+    StrictMock<MStatsServer>     mserver{};
 
     FallbackParam()
     {
@@ -264,6 +268,7 @@ TEST_P(FallbackParam, FallbackIoTruncatesSizeToMAX_RW_COUNT)
 
     EXPECT_CALL(mcfg, fallback()).WillOnce(Return(true));
     EXPECT_CALL(msys, mmap).WillOnce(testing::Return(reinterpret_cast<void *>(0xFEFEFEFE)));
+    EXPECT_CALL(mstats, addIo).Times(1);
     switch (io_type) {
         case IoType::Read:
             EXPECT_CALL(msys, pread)
@@ -305,6 +310,7 @@ TEST_P(FallbackParam, FallbackIoAllocatesChunkSizedHostBounceBuffer)
     EXPECT_CALL(mcfg, fallback()).WillOnce(Return(true));
     EXPECT_CALL(msys, mmap(testing::_, chunk_size, testing::_, testing::_, testing::_, testing::_))
         .WillOnce(testing::Return(ptr));
+    EXPECT_CALL(mstats, addIo).Times(1);
     switch (io_type) {
         case IoType::Read:
             EXPECT_CALL(msys, pread).WillOnce(testing::Return(0));
@@ -357,6 +363,7 @@ struct FallbackWrite : public FallbackIo {
         EXPECT_CALL(msys, pwrite).WillRepeatedly(testing::Invoke(this, &FallbackWrite::fake_pwrite));
         EXPECT_CALL(msys, munmap).WillOnce(testing::Invoke(::munmap));
         EXPECT_CALL(msys, fdatasync).Times(AnyNumber());
+        EXPECT_CALL(mstats, addIo).Times(1);
     }
 
     // Test if the file contains the correct data
@@ -385,6 +392,7 @@ TEST_F(FallbackWrite, FallbackWriteThrowsOnPwriteException)
     EXPECT_CALL(mhip, hipStreamSynchronize);
     EXPECT_CALL(msys, pwrite).WillOnce(testing::Throw(std::system_error(EIO, std::generic_category())));
     EXPECT_CALL(msys, munmap).WillOnce(testing::Invoke(::munmap));
+    EXPECT_CALL(mstats, error).Times(1);
 
     ASSERT_THROW(Fallback().io(IoType::Write, file, buffer, buffer->getLength(), 0, 0), std::system_error);
 }
@@ -395,6 +403,7 @@ TEST_F(FallbackWrite, FallbackWriteThrowsOnHipmemcpyFailure)
     EXPECT_CALL(msys, mmap).WillOnce(testing::Invoke(::mmap));
     EXPECT_CALL(mhip, hipMemcpy).WillOnce(testing::Throw(Hip::RuntimeError(hipErrorUnknown)));
     EXPECT_CALL(msys, munmap).WillOnce(testing::Invoke(::munmap));
+    EXPECT_CALL(mstats, error).Times(1);
 
     ASSERT_THROW(Fallback().io(IoType::Write, file, buffer, buffer->getLength(), 0, 0), Hip::RuntimeError);
 }
@@ -406,6 +415,7 @@ TEST_F(FallbackWrite, FallbackWriteThrowsOnHipStreamSynchronizeError)
     EXPECT_CALL(mhip, hipMemcpy);
     EXPECT_CALL(mhip, hipStreamSynchronize).WillOnce(testing::Throw(Hip::RuntimeError(hipErrorUnknown)));
     EXPECT_CALL(msys, munmap).WillOnce(testing::Invoke(::munmap));
+    EXPECT_CALL(mstats, error).Times(1);
 
     ASSERT_THROW(Fallback().io(IoType::Write, file, buffer, buffer->getLength(), 0, 0), Hip::RuntimeError);
 }
@@ -551,6 +561,7 @@ struct FallbackRead : public FallbackIo {
         EXPECT_CALL(msys, pread).WillRepeatedly(testing::Invoke(this, &FallbackRead::fake_pread));
         EXPECT_CALL(mhip, hipMemcpy).WillRepeatedly(testing::Invoke(this, &FallbackRead::fake_hipMemcpy));
         EXPECT_CALL(msys, munmap).WillOnce(testing::Invoke(::munmap));
+        EXPECT_CALL(mstats, addIo).Times(1);
     }
 };
 
@@ -583,6 +594,7 @@ TEST_F(FallbackRead, FallbackReadThrowsOnPreadException)
     EXPECT_CALL(msys, mmap).WillOnce(testing::Invoke(::mmap));
     EXPECT_CALL(msys, pread).WillOnce(testing::Throw(std::system_error(EIO, std::generic_category())));
     EXPECT_CALL(msys, munmap).WillOnce(testing::Invoke(::munmap));
+    EXPECT_CALL(mstats, error).Times(1);
     ASSERT_THROW(Fallback().io(IoType::Read, file, buffer, 4096, 0, 0), std::system_error);
 }
 
@@ -596,6 +608,8 @@ TEST_F(FallbackRead, FallbackReadThrowsOnHipmemcpyFailure)
     EXPECT_CALL(msys, pread).WillRepeatedly(testing::Invoke(this, &FallbackRead::fake_pread));
     EXPECT_CALL(mhip, hipMemcpy).WillOnce(testing::Throw(Hip::RuntimeError(hipErrorUnknown)));
     EXPECT_CALL(msys, munmap).WillOnce(testing::Invoke(::munmap));
+    EXPECT_CALL(mstats, error).Times(1);
+
     ASSERT_THROW(Fallback().io(IoType::Read, file, buffer, file_length, 0, 0), Hip::RuntimeError);
 }
 
@@ -608,6 +622,7 @@ TEST_F(FallbackRead, FallbackReadHandlesEmptyFile)
     EXPECT_CALL(msys, mmap).WillOnce(testing::Invoke(::mmap));
     EXPECT_CALL(msys, pread).WillRepeatedly(testing::Invoke(this, &FallbackRead::fake_pread));
     EXPECT_CALL(msys, munmap).WillOnce(testing::Invoke(::munmap));
+    EXPECT_CALL(mstats, addIo).Times(1);
     ASSERT_EQ(file_length, Fallback().io(IoType::Read, file, buffer, buffer->getLength(), 0, 0));
     ASSERT_TRUE(device_buffer_contains_expected_data(0, 0, file_length));
 }
@@ -628,6 +643,7 @@ TEST_F(FallbackRead, FallbackReadHandlesShortPreads)
         }));
     EXPECT_CALL(mhip, hipMemcpy).WillRepeatedly(testing::Invoke(this, &FallbackRead::fake_hipMemcpy));
     EXPECT_CALL(msys, munmap).WillOnce(testing::Invoke(::munmap));
+    EXPECT_CALL(mstats, addIo).Times(1);
     ASSERT_EQ(file_length, Fallback().io(IoType::Read, file, buffer, buffer->getLength(), 0, 0));
     ASSERT_TRUE(device_buffer_contains_expected_data(0, 0, file_length));
 }
@@ -646,6 +662,7 @@ TEST_F(FallbackRead, FallbackReadHandlesInterruptedPread)
         }));
     EXPECT_CALL(mhip, hipMemcpy).WillRepeatedly(testing::Invoke(this, &FallbackRead::fake_hipMemcpy));
     EXPECT_CALL(msys, munmap).WillOnce(testing::Invoke(::munmap));
+    EXPECT_CALL(mstats, addIo).Times(1);
     ASSERT_EQ(file_length, Fallback().io(IoType::Read, file, buffer, buffer->getLength(), 0, 0));
     ASSERT_TRUE(device_buffer_contains_expected_data(0, 0, file_length));
 }

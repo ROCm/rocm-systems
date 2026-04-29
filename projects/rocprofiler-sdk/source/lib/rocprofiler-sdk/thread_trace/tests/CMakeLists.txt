@@ -11,7 +11,7 @@ target_sources(thread-trace-packet-test PRIVATE ${ROCPROFILER_THREAD_TRACE_TEST_
 target_link_libraries(
     thread-trace-packet-test
     PRIVATE rocprofiler-sdk::rocprofiler-sdk-static-library
-            rocprofiler-sdk::rocprofiler-sdk-glog
+            rocprofiler-sdk::rocprofiler-sdk-abseil
             rocprofiler-sdk::rocprofiler-sdk-hsa-runtime
             rocprofiler-sdk::rocprofiler-sdk-hip
             rocprofiler-sdk::rocprofiler-sdk-common-library
@@ -30,5 +30,5 @@ rocprofiler_add_unit_test(
     LABELS "unittests"
     ENVIRONMENT
         "ROCPROFILER_METRICS_PATH=${_ROCPROFILER_SHARE_DIR}"
-        "LD_LIBRARY_PATH=${CMAKE_INSTALL_PREFIX}/lib:${CMAKE_INSTALL_PREFIX}/llvm/lib:/opt/rocm/lib:/opt/rocm/llvm/lib:$ENV{LD_LIBRARY_PATH}"
+        "LD_LIBRARY_PATH=${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}:${CMAKE_INSTALL_PREFIX}/lib:${CMAKE_INSTALL_PREFIX}/llvm/lib:${ROCM_PATH}/lib:${ROCM_PATH}/llvm/lib:$ENV{LD_LIBRARY_PATH}"
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")

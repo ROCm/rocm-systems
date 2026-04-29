@@ -20,6 +20,8 @@
 
 #include <array>
 #include <atomic>
+#include <cstdint>
+#include <cstdlib>
 #include <memory>
 #include <optional>
 #include <string>
@@ -144,7 +146,6 @@ struct RankLogConfig
     std::optional<FileDescriptor> pipe_read_fd; ///< Pipe read end (rank 0 only)
     std::optional<FileDescriptor> pipe_write_fd; ///< Pipe write end (rank 0 only)
     std::unique_ptr<TeeThread>    tee_thread; ///< Tee thread (rank 0 only)
-    std::string                   log_file_path; ///< Path to the log file
     bool                          logging_enabled{false}; ///< Is per-rank logging enabled?
     bool                          is_rank_zero{false}; ///< Is this rank 0?
 };
@@ -182,161 +183,124 @@ std::optional<RankLogConfig> setupRankLogging(int rank);
 void restoreRankLogging(RankLogConfig& config);
 
 /**
- * @brief Get the log file path for a given rank
- *
- * Returns the path to the per-rank log file. The filename includes
- * the process ID to ensure uniqueness across test runs.
- *
- * Format: rccl_test_rank_<rank>_<pid>.log
- *
- * @param rank MPI rank
- * @param pid Process ID (use getpid() for current process)
- * @return Log file path string
+ * @brief True when RCCL_MPI_LOG_ALL_RANKS=1 (per-rank log files are active)
  */
-std::string getRankLogFilePath(int rank, pid_t pid);
+inline bool isPerRankLoggingEnabled()
+{
+    const char* env = std::getenv("RCCL_MPI_LOG_ALL_RANKS");
+    return env != nullptr && std::string(env) == "1";
+}
 
 /**
- * @brief Get the log file path for the current rank
+ * @brief Path to the per-rank log file used when RCCL_MPI_LOG_ALL_RANKS=1
  *
- * Convenience function that uses current process ID.
- *
- * @param rank MPI rank
- * @return Log file path string
+ * Matches the filename created by setupRankLogging() (current working directory).
+ * The file is shared by all tests in the process unless callers use
+ * TestLogAssertionContext::isolate_new_output.
  */
 std::string getRankLogFilePath(int rank);
 
-// ============================================================================
-// Stderr Capture for Debug Log Parsing
-// ============================================================================
+/**
+ * @brief Read an entire file into a string (e.g. NCCL_DEBUG_FILE output)
+ *
+ * @return File contents, or empty string if the file could not be read
+ */
+std::string readTextFile(const std::string& path);
 
 /**
- * @class StderrCapture
- * @brief Captures stderr output to a string for analysis
+ * @brief Read the full contents of a rank log file
  *
- * Useful for capturing NCCL debug output (e.g., NCCL_DEBUG=INFO)
- * and parsing it for specific patterns.
+ * Flushes stdout/stderr first so output redirected via per-rank logging (tee/pipe)
+ * reaches the file before reading.
  *
- * Usage:
- *   StderrCapture capture;
- *   capture.start();
- *   // ... code that writes to stderr ...
- *   capture.stop();
- *   std::string output = capture.getOutput();
- *   if (output.find("some pattern") != std::string::npos) { ... }
+ * @return File contents, or empty string if the file could not be read
  */
-class StderrCapture
+std::string readRankLogFile(int rank);
+
+/**
+ * @brief Byte length of an existing file, or 0 if missing or on error
+ */
+std::uintmax_t getFileSizeBytes(const std::string& path);
+
+/**
+ * @struct TestLogAssertionOptions
+ * @brief Configure scoped log capture for MPI test assertions
+ *
+ * Two independent mechanisms can be enabled at once:
+ * - capture_nccl_debug_file: RAII set/restore NCCL_DEBUG_FILE so NCCL writes debug
+ *   lines to a dedicated file (set before ncclComm* init). Works alongside global
+ *   per-rank logging from main_mpi.cpp.
+ * - read_per_rank_stderr_log: after the action under test, read rccl_test_rank_<r>.log
+ *   (requires RCCL_MPI_LOG_ALL_RANKS=1 for non-empty stderr capture on that rank).
+ *
+ * Use readNcclDebugLog() / readPerRankStderrLog() after the code that should emit logs.
+ * With isolate_new_output, only bytes appended after this object is constructed are
+ * returned (reduces bleed from earlier tests in the same process).
+ */
+struct TestLogAssertionOptions
 {
-public:
-    StderrCapture();
-    ~StderrCapture();
+    int mpi_rank{0};
 
-    // Non-copyable, non-movable
-    StderrCapture(const StderrCapture&)            = delete;
-    StderrCapture& operator=(const StderrCapture&) = delete;
-    StderrCapture(StderrCapture&&)                 = delete;
-    StderrCapture& operator=(StderrCapture&&)      = delete;
+    bool capture_nccl_debug_file{false};
+    /** If capture_nccl_debug_file and empty, uses /tmp/rccl_assert_nccl_rank_<r>_pid_<p>.log */
+    std::string nccl_debug_file_path;
+    bool unlink_auto_generated_nccl_path{true};
+    bool unlink_explicit_nccl_path{false};
 
-    /**
-     * @brief Start capturing stderr
-     * @return true if capture started successfully
-     */
-    bool start();
-
-    /**
-     * @brief Stop capturing and read captured output
-     */
-    void stop();
-
-    /**
-     * @brief Get the captured stderr output
-     * @return Captured output as string (empty if capture not started/stopped)
-     */
-    [[nodiscard]] const std::string& getOutput() const;
-
-    /**
-     * @brief Check if a pattern exists in captured output
-     * @param pattern Substring to search for
-     * @return true if pattern found
-     */
-    [[nodiscard]] bool hasPattern(const std::string& pattern) const;
-
-    /**
-     * @brief Reset capture state for reuse
-     */
-    void reset();
-
-    /**
-     * @brief Check if currently capturing
-     */
-    [[nodiscard]] bool isCapturing() const;
-
-private:
-    int         m_savedStderr;
-    int         m_tempFd;
-    std::string m_tempPath;
-    std::string m_capturedOutput;
-    bool        m_capturing;
+    bool read_per_rank_stderr_log{false};
+    bool isolate_new_output{true};
 };
 
 /**
- * @class StderrCaptureScope
- * @brief RAII wrapper for StderrCapture - automatically starts/stops capture
+ * @class TestLogAssertionContext
+ * @brief RAII scope for NCCL_DEBUG_FILE and/or per-rank log reads
  *
- * Usage:
- *   StderrCapture capture;
- *   {
- *       StderrCaptureScope scope(capture);
- *       // ... code that writes to stderr ...
- *   }  // capture stops here
- *   if (capture.hasPattern("some pattern")) { ... }
+ * Construct at the start of a TEST_F (before communicator init when using
+ * capture_nccl_debug_file). Destructor restores NCCL_DEBUG_FILE and optionally
+ * unlinks the NCCL temp file.
  */
-class StderrCaptureScope
+class TestLogAssertionContext
 {
 public:
-    explicit StderrCaptureScope(StderrCapture& capture);
-    ~StderrCaptureScope();
+    explicit TestLogAssertionContext(const TestLogAssertionOptions& opts);
+    ~TestLogAssertionContext();
 
-    // Non-copyable
-    StderrCaptureScope(const StderrCaptureScope&)            = delete;
-    StderrCaptureScope& operator=(const StderrCaptureScope&) = delete;
+    TestLogAssertionContext(const TestLogAssertionContext&)            = delete;
+    TestLogAssertionContext& operator=(const TestLogAssertionContext&) = delete;
+
+    [[nodiscard]] bool capturesNcclDebugFile() const noexcept { return capture_nccl_; }
+    [[nodiscard]] bool readsPerRankStderrLog() const noexcept { return read_per_rank_; }
+
+    /** Path passed to NCCL via NCCL_DEBUG_FILE when capture_nccl_debug_file is set */
+    [[nodiscard]] const std::string& ncclDebugFilePath() const noexcept { return nccl_path_; }
+
+    /** Content from the NCCL debug file (slice if isolate_new_output was set) */
+    [[nodiscard]] std::string readNcclDebugLog() const;
+
+    /** Content from rccl_test_rank_<rank>.log after flush (slice if isolated) */
+    [[nodiscard]] std::string readPerRankStderrLog() const;
 
 private:
-    StderrCapture& m_capture;
+    TestLogAssertionOptions opts_;
+    std::string             nccl_path_;
+    std::string             saved_nccl_debug_env_;
+    bool                    saved_nccl_debug_present_{false};
+    bool                    env_modified_{false};
+    bool                    auto_nccl_path_{false};
+    bool                    capture_nccl_{false};
+    bool                    read_per_rank_{false};
+    std::uintmax_t          nccl_start_offset_{0};
+    std::uintmax_t          per_rank_start_offset_{0};
 };
 
-// ============================================================================
-// NCCL Debug Environment Helpers
-// ============================================================================
+/** Scoped NCCL_DEBUG_FILE only (NCCL_DEBUG=INFO typical) */
+TestLogAssertionOptions makeNcclDebugFileAssertionOptions(int mpi_rank);
 
-/**
- * @brief Check if NCCL debug logging is enabled for a specific subsystem
- *
- * Checks NCCL_DEBUG and NCCL_DEBUG_SUBSYS environment variables.
- *
- * @param subsystem Subsystem to check (e.g., "REG", "NET", "INIT", "COLL")
- *                  Pass empty string to check if any debug is enabled
- * @param minLevel Minimum debug level required (default: "INFO")
- *                 Levels: "WARN", "INFO", "TRACE"
- * @return true if debug logging is enabled for the specified subsystem
- *
- * Examples:
- *   isNCCLDebugEnabled("REG")      // true if NCCL_DEBUG=INFO and NCCL_DEBUG_SUBSYS contains "REG"
- *   isNCCLDebugEnabled("NET")      // true if NCCL_DEBUG=INFO and NCCL_DEBUG_SUBSYS contains "NET"
- *   isNCCLDebugEnabled("")         // true if any NCCL_DEBUG level is set
- */
-bool isNCCLDebugEnabled(const std::string& subsystem = "", const std::string& minLevel = "INFO");
+/** Read rccl_test_rank_<rank>.log only (RCCL_MPI_LOG_ALL_RANKS=1) */
+TestLogAssertionOptions makePerRankStderrAssertionOptions(int mpi_rank);
 
-/**
- * @brief Get the current NCCL debug level
- * @return Debug level string ("WARN", "INFO", "TRACE") or empty if not set
- */
-std::string getNCCLDebugLevel();
-
-/**
- * @brief Get list of enabled NCCL debug subsystems
- * @return Comma-separated list of subsystems or "ALL" or empty
- */
-std::string getNCCLDebugSubsystems();
+/** Both: NCCL debug file + per-rank stderr log (either read may contain the line) */
+TestLogAssertionOptions makeCombinedAssertionLogOptions(int mpi_rank);
 
 } // namespace MPIHelpers
 

@@ -32,6 +32,11 @@ from amdisa.semantics import (
     derive_all_semantics,
     derive_semantics,
 )
+from amdisa.legalization import (
+    LegalizationAction,
+    LegalizationEntry,
+    LegalizationGenerator,
+)
 
 __all__ = [
     'Cdna1Profile',
@@ -60,4 +65,7 @@ __all__ = [
     'SemanticsSpec',
     'derive_all_semantics',
     'derive_semantics',
+    'LegalizationAction',
+    'LegalizationEntry',
+    'LegalizationGenerator',
 ]

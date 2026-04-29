@@ -31,8 +31,16 @@
 #include "log.hpp"
 #include "hip_allocator.hpp"
 
-    // the using statements remain in the code until we commit
-    // the change to make the default allocator a runtime decision.
+#if ((defined(USE_HEAP_DEVICE_COARSEGRAIN) ? 1 : 0) + \
+      (defined(USE_HEAP_DEVICE_FINEGRAIN) ? 1 : 0) + \
+      (defined(USE_HEAP_DEVICE_UNCACHED) ? 1 : 0) + \
+      (defined(USE_HEAP_DEVICE_VMM_POSIX) ? 1 : 0) + \
+      (defined(USE_HEAP_DEVICE_VMM_FABRIC) ? 1 : 0)) > 1
+ #error "Multiple USE_HEAP_DEVICE_* allocator options enabled; exactly one allocator type must be selected"
+ #endif
+
+// the using statements remain in the code until we commit
+// the change to make the default allocator a runtime decision.
 #if defined USE_HEAP_DEVICE_COARSEGRAIN
 using HIPDefaultFinegrainedAllocator = rocshmem::HIPAllocatorCoarsegrained;
 #endif
@@ -53,6 +61,15 @@ using HIPDefaultFinegrainedAllocator = rocshmem::HIPAllocatorUncached;
 using HIPDefaultFinegrainedAllocator = rocshmem::HIPAllocatorVMMPosixFd;
 #else
 #error "USE_HEAP_DEVICE_VMM_POSIX requires ROCm 7.0 or newer (HIP_VERSION >= 70000000)"
+#endif
+#endif
+
+#if defined USE_HEAP_DEVICE_VMM_FABRIC
+#if HIP_VERSION >= 70000000
+using HIPDefaultFinegrainedAllocator = rocshmem::HIPAllocatorVMMFabric;
+#else
+// Precise ROCm version required for Fabric allocator to be adjusted
+#error "USE_HEAP_DEVICE_VMM_FABRIC requires ROCm 7.0 or newer (HIP_VERSION >= 70000000)"
 #endif
 #endif
 
@@ -99,6 +116,11 @@ namespace rocshmem {
 #if defined USE_HEAP_DEVICE_VMM_POSIX
 #if HIP_VERSION >= 70000000
     default_allocator_ = new HIPAllocatorVMMPosixFd();
+#endif
+#endif
+#if defined USE_HEAP_DEVICE_VMM_FABRIC
+#if HIP_VERSION >= 70000000
+    default_allocator_ = new HIPAllocatorVMMFabric();
 #endif
 #endif
   }

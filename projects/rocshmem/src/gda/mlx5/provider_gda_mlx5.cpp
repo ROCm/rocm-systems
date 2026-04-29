@@ -27,9 +27,9 @@
 #include <type_traits>
 #include <hip/hip_runtime.h>
 
+#include "bit.hpp"
 #include "log.hpp"
 #include "util.hpp"
-#include "gda/bit.hpp"
 #include "gda/ibv_wrapper.hpp"
 #include "gda/mlx5/provider_gda_mlx5.hpp"
 #include "gda/mlx5/mlx5dv_core.hpp"

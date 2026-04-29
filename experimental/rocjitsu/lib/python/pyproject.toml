@@ -9,3 +9,6 @@ description = "AMD machine-readable ISA specification parser and C++ code genera
 requires-python = ">=3.10"
 license = "MIT"
 dependencies = ["cgen"]
+
+[tool.setuptools.packages.find]
+include = ["amdisa*"]
