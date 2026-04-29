@@ -125,6 +125,12 @@ const std::map<smi_nic_status_t, amdsmi_status_t> ainic_status_map = {
     {SMI_NIC_STATUS_DRIVER_NOT_LOADED, AMDSMI_STATUS_DRIVER_NOT_LOADED}};
 amdsmi_status_t ainic_to_amdsmi_status(smi_nic_status_t status);
 
+// Copy a rsmi_gpu_metrics_t blob into the public amdsmi_gpu_metrics_t,
+// fixing up the apu_metrics pointer to refer to a thread-local buffer.
+// Defined in amd_smi.cc.
+void copy_rsmi_gpu_metrics_to_amdsmi(const rsmi_gpu_metrics_t& rsmi_metrics,
+                                     amdsmi_gpu_metrics_t* amdsmi_metrics);
+
 }  // namespace amd::smi
 
 #endif  // AMD_SMI_INCLUDE_AMD_SMI_COMMON_H_

@@ -24,10 +24,12 @@
 #define AMD_SMI_INCLUDE_IMPL_AMD_SMI_GPU_DEVICE_H_
 
 #include <map>
+#include <memory>
 
 #include "amd_smi/amdsmi.h"
 #include "amd_smi/impl/amd_smi_drm.h"
 #include "amd_smi/impl/amd_smi_processor.h"
+#include "amd_smi/impl/i_gpu_backend.h"
 
 namespace amd::smi {
 
@@ -42,18 +44,12 @@ enum class ComputeProcessListType_t : ComputeProcessListClassType_t {
 
 class AMDSmiGPUDevice : public AMDSmiProcessor {
  public:
-  AMDSmiGPUDevice(uint32_t gpu_id, std::string path, amdsmi_bdf_t bdf, AMDSmiDrm& drm)
-      : AMDSmiProcessor(AMDSMI_PROCESSOR_TYPE_AMD_GPU),
-        gpu_id_(gpu_id),
-        path_(path),
-        bdf_(bdf),
-        drm_(drm) {}
+  AMDSmiGPUDevice(uint32_t gpu_id, std::string path, amdsmi_bdf_t bdf, AMDSmiDrm& drm);
 
-  AMDSmiGPUDevice(uint32_t gpu_id, AMDSmiDrm& drm)
-      : AMDSmiProcessor(AMDSMI_PROCESSOR_TYPE_AMD_GPU), gpu_id_(gpu_id), drm_(drm) {
-    if (check_if_drm_is_supported()) this->get_drm_data();
-  }
+  AMDSmiGPUDevice(uint32_t gpu_id, AMDSmiDrm& drm);
   ~AMDSmiGPUDevice() {}
+
+  IGPUBackend& backend() { return *backend_; }
 
   amdsmi_status_t get_drm_data();
   pthread_mutex_t* get_mutex();
@@ -85,6 +81,7 @@ class AMDSmiGPUDevice : public AMDSmiProcessor {
   uint32_t drm_render_minor_;
   uint64_t kfd_gpu_id_;  // Used to decode vram usage for KFD processes
   GPUComputeProcessList_t compute_process_list_;
+  std::unique_ptr<IGPUBackend> backend_;
   int32_t get_compute_process_list_impl(GPUComputeProcessList_t& compute_process_list,
                                         ComputeProcessListType_t list_type);
 };

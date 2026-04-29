@@ -24,8 +24,10 @@
 
 #include <dirent.h>
 #include <sys/types.h>
+#include <unistd.h>
 
 #include <atomic>
+#include <cstdlib>
 #include <cstring>
 #include <fstream>
 #include <memory>
@@ -33,6 +35,8 @@
 
 #include "amd_smi/impl/amd_smi_utils.h"
 #include "amd_smi/impl/fdinfo.h"
+#include "amd_smi/impl/mock_gpu_backend.h"
+#include "amd_smi/impl/production_gpu_backend.h"
 #include "rocm_smi/rocm_smi_kfd.h"
 #include "rocm_smi/rocm_smi_logger.h"
 #include "rocm_smi/rocm_smi_utils.h"
@@ -41,6 +45,38 @@ namespace amd::smi {
 
 // Constant for KFD context directory prefix
 static constexpr const char* kContextPrefix = "context_";
+
+namespace {
+
+// If AMDSMI_MOCK_DATA_FILE is set and points at a readable file, return a
+// MockGPUBackend; otherwise return a ProductionGPUBackend bound to @p device.
+std::unique_ptr<IGPUBackend> make_gpu_backend(AMDSmiGPUDevice& device) {
+  if (const char* mock_path = std::getenv("AMDSMI_MOCK_DATA_FILE")) {
+    if (mock_path[0] != '\0' && access(mock_path, R_OK) == 0) {
+      return std::make_unique<MockGPUBackend>(std::string(mock_path));
+    }
+  }
+  return std::make_unique<ProductionGPUBackend>(device);
+}
+
+}  // namespace
+
+AMDSmiGPUDevice::AMDSmiGPUDevice(uint32_t gpu_id, std::string path, amdsmi_bdf_t bdf,
+                                 AMDSmiDrm& drm)
+    : AMDSmiProcessor(AMDSMI_PROCESSOR_TYPE_AMD_GPU),
+      gpu_id_(gpu_id),
+      path_(path),
+      bdf_(bdf),
+      drm_(drm),
+      backend_(make_gpu_backend(*this)) {}
+
+AMDSmiGPUDevice::AMDSmiGPUDevice(uint32_t gpu_id, AMDSmiDrm& drm)
+    : AMDSmiProcessor(AMDSMI_PROCESSOR_TYPE_AMD_GPU),
+      gpu_id_(gpu_id),
+      drm_(drm),
+      backend_(make_gpu_backend(*this)) {
+  if (check_if_drm_is_supported()) this->get_drm_data();
+}
 
 uint32_t AMDSmiGPUDevice::get_gpu_id() const { return gpu_id_; }
 

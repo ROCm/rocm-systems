@@ -198,8 +198,9 @@ static_assert(offsetof(rsmi_gpu_metrics_t, apu_metrics) ==
                   offsetof(amdsmi_gpu_metrics_t, apu_metrics),
               "GPU metrics: apu_metrics (last field) offset mismatch");
 
-static void copy_rsmi_gpu_metrics_to_amdsmi(const rsmi_gpu_metrics_t& rsmi_metrics,
-                                            amdsmi_gpu_metrics_t* amdsmi_metrics) {
+namespace amd::smi {
+void copy_rsmi_gpu_metrics_to_amdsmi(const rsmi_gpu_metrics_t& rsmi_metrics,
+                                     amdsmi_gpu_metrics_t* amdsmi_metrics) {
   if (amdsmi_metrics == nullptr) return;
   std::memcpy(amdsmi_metrics, &rsmi_metrics, sizeof(*amdsmi_metrics));
 
@@ -212,6 +213,8 @@ static void copy_rsmi_gpu_metrics_to_amdsmi(const rsmi_gpu_metrics_t& rsmi_metri
   std::memcpy(&amdsmi_apu_metrics, rsmi_metrics.apu_metrics, sizeof(amdsmi_apu_metrics));
   amdsmi_metrics->apu_metrics = &amdsmi_apu_metrics;
 }
+}  // namespace amd::smi
+using amd::smi::copy_rsmi_gpu_metrics_to_amdsmi;
 
 static amdsmi_status_t get_ainic_device_from_handle(amdsmi_processor_handle processor_handle,
                                                     amd::smi::AMDSmiAINICDevice** nicdevice) {
@@ -4002,14 +4005,11 @@ amdsmi_status_t amdsmi_get_gpu_metrics_info(amdsmi_processor_handle processor_ha
   }
 
   *pgpu_metrics = amdsmi_gpu_metrics_t{};
-  rsmi_gpu_metrics_t rsmi_metrics{};
-  auto status = rsmi_wrapper(rsmi_dev_gpu_metrics_info_get, processor_handle, 0, &rsmi_metrics);
-  if (status != AMDSMI_STATUS_SUCCESS) {
-    return status;
-  }
 
-  copy_rsmi_gpu_metrics_to_amdsmi(rsmi_metrics, pgpu_metrics);
-  return status;
+  amd::smi::AMDSmiGPUDevice* gpu_device = nullptr;
+  amdsmi_status_t r = get_gpu_device_from_handle(processor_handle, &gpu_device);
+  if (r != AMDSMI_STATUS_SUCCESS) return r;
+  return gpu_device->backend().get_gpu_metrics_info(pgpu_metrics);
 }
 
 amdsmi_status_t amdsmi_get_gpu_pm_metrics_info(amdsmi_processor_handle processor_handle,
