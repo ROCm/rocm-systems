@@ -8,12 +8,20 @@ using namespace rocm_compute;
 
 void code_object_writer_json_t::start_code_obj(size_t obj_id)
 {
+    if (m_code_object_closure_count != 0)
+    {
+        throw std::runtime_error("Code object description is not properly closed");
+    }
     ++m_code_object_closure_count;
     m_code_object_ids.push_back(obj_id);
 }
 
 void code_object_writer_json_t::end_code_obj()
 {
+    if (m_code_object_closure_count == 0)
+    {
+        throw std::runtime_error("Code object description is not properly opened");
+    }
     --m_code_object_closure_count;
 }
 

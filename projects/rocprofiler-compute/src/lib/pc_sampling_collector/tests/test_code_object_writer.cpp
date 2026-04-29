@@ -18,8 +18,20 @@ TEST_F(test_code_object_writer_t, ProvidedStartCodeObjWithoutEnd_Throws)
 
 TEST_F(test_code_object_writer_t, ProvidedEndCodeObjWithoutStart_Throws)
 {
+    EXPECT_THROW( m_writer.end_code_obj(), std::runtime_error);
+}
+
+TEST_F(test_code_object_writer_t, ProvidedTwoStartCodeObjCalls_Throws)
+{
+    m_writer.start_code_obj(0);
+    EXPECT_THROW(m_writer.start_code_obj(1), std::runtime_error);
+}
+
+TEST_F(test_code_object_writer_t, ProvidedTwoEndCodeObjCalls_Throws)
+{
+    m_writer.start_code_obj(0);
     m_writer.end_code_obj();
-    EXPECT_THROW(m_writer.get_result(), std::runtime_error);
+    EXPECT_THROW(m_writer.end_code_obj(), std::runtime_error);
 }
 
 TEST_F(test_code_object_writer_t, ProvidedCodeObjDesc_SerializesIt)
