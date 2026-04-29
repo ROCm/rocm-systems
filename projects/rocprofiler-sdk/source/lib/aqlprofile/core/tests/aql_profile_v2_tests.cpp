@@ -11,6 +11,8 @@
 #include <vector>
 #include <memory>
 
+extern "C" int aql_profile_v2_c_compatibility_test(void);
+
 namespace aql_profile_v2_tests
 {
 class AqlProfileV2Test : public ::testing::Test
@@ -436,6 +438,11 @@ TEST_F(AqlProfileV2Test, DefaultInvalidValues)
     EXPECT_EQ(zero_info.cu_num, 0);
     EXPECT_EQ(zero_info.shader_arrays_per_se, 0);
 
+    aqlprofile_spm_available_configuration_t default_config;
+    EXPECT_EQ(default_config.type, AQLPROFILE_SPM_PARAMETER_TYPE_NONE);
+    EXPECT_EQ(default_config.min_interval, 0);
+    EXPECT_EQ(default_config.max_interval, 0);
+
     // Test with maximum values
     aqlprofile_pmc_event_t max_event = {};
     max_event.block_index            = UINT32_MAX;
@@ -445,6 +452,11 @@ TEST_F(AqlProfileV2Test, DefaultInvalidValues)
     EXPECT_EQ(max_event.block_index, UINT32_MAX);
     EXPECT_EQ(max_event.event_id, UINT32_MAX);
     EXPECT_EQ(max_event.flags.raw, UINT32_MAX);
+}
+
+TEST_F(AqlProfileV2Test, CCompatibilityTranslationUnit)
+{
+    EXPECT_EQ(aql_profile_v2_c_compatibility_test(), 0);
 }
 
 // Mock callback functions for testing
