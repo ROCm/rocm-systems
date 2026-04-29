@@ -875,7 +875,7 @@ static void DrainAllDevices() {
   // dispatch table wrappers, so no spurious profiling records are created and
   // there is no re-entrancy risk.
   for (auto* dev : hip::g_devices) {
-    constexpr bool kWaitForCpu = false;
+    constexpr bool kWaitForCpu = true;
     dev->SyncAllStreams(kWaitForCpu);
   }
 }
@@ -1286,13 +1286,15 @@ void WriteProtoTraceImpl(const char* filepath) {
   // Memory→GPU: alloc slice emits ph='s' (at alloc time), GPU slice emits ph='f'
   //   (at GPU time > alloc time). Arrow goes forward: Memory → GPU op that used it.
   uint64_t flow_id = 1;
-  std::unordered_map<uint64_t, uint64_t> cpu_gpu_flow;   // record slot → cpu→gpu fid
-  // alloc_out_flows[ptr]  = fids where memory slice emits ph='s' (arrow starts at alloc)
-  std::unordered_map<uint64_t, std::vector<uint64_t>> alloc_out_flows;
+  std::unordered_map<uint64_t, uint64_t> cpu_gpu_flow;        // slot → fid
+  std::unordered_map<uint64_t, uint32_t> cpu_gpu_target_ord;  // slot → target ordinal (min begin_ns)
+  // alloc_out_flows[(ptr, period_start_ns)] = fids where that period's memory slice emits ph='s'.
+  // Keyed per-period so each alloc slice only emits the fids for GPU ops live during that period.
+  std::map<std::pair<uint64_t,uint64_t>, std::vector<uint64_t>> alloc_out_flows;
   // gpu_recv_flows[slot*1000+op_ord] = fids where GPU slice emits ph='f' (arrow ends at GPU op)
   std::unordered_map<uint64_t, std::vector<uint64_t>> gpu_recv_flows;
   // Graph node→node flows: sender op emits ph='s', next op emits ph='f'.
-  // Keyed by slot*1000+op_ord (same scheme as gpu_recv_flows).
+  // Keyed by slot*1000+actual_ordinal (position in linked list).
   std::unordered_map<uint64_t, uint64_t> graph_node_out_flows; // sender key → fid
   std::unordered_map<uint64_t, uint64_t> graph_node_in_flows;  // receiver key → fid
 
@@ -1306,9 +1308,24 @@ void WriteProtoTraceImpl(const char* filepath) {
       uint64_t slot = base + i;
 
       const bool is_graph_rec = rec.api_name && strncmp(rec.api_name, "hipGraphLaunch", 14) == 0;
-      if (rec.gpu.begin_ns > 0) {
-        uint64_t fid = flow_id++;
-        cpu_gpu_flow[slot] = fid;
+      // CPU→GPU arrow: target the op with the earliest begin_ns (first to start executing),
+      // not necessarily ordinal 0 (first callback to arrive). GPU callbacks fire in completion
+      // order which can differ from dispatch order (e.g. SDMA ops on a separate engine).
+      {
+        uint32_t min_ord = UINT32_MAX;
+        uint64_t min_ns  = UINT64_MAX;
+        uint32_t ord = 0;
+        auto scan_begin = [&](const HipGpuActivityExt& gop) {
+          if (gop.begin_ns > 0 && gop.begin_ns < min_ns) { min_ns = gop.begin_ns; min_ord = ord; }
+          ++ord;
+        };
+        scan_begin(rec.gpu);
+        for (const HipGpuActivityExt* n = rec.gpu.next; n; n = n->next) scan_begin(*n);
+        if (min_ord != UINT32_MAX) {
+          uint64_t fid = flow_id++;
+          cpu_gpu_flow[slot]       = fid;
+          cpu_gpu_target_ord[slot] = min_ord;
+        }
       }
 
       // GPU→memory flows
@@ -1319,11 +1336,21 @@ void WriteProtoTraceImpl(const char* filepath) {
         auto try_ptr = [&](uint64_t ptr) {
           if (!ptr) return;
           for (int s = 0; s < nseen; ++s) if (seen[s]==ptr) return;
-          if (alloc_map.find(ptr) == alloc_map.end()) return;
+          auto ait = alloc_map.find(ptr);
+          if (ait == alloc_map.end()) return;
+          // Find the alloc period that was live when this GPU op ran.
+          // Only create an arrow if gop.begin_ns falls within an alloc period for ptr.
+          uint64_t period_start = 0;
+          for (const auto& ai : ait->second) {
+            if (ai.start_ns <= gop.begin_ns && gop.begin_ns <= ai.end_ns) {
+              period_start = ai.start_ns; break;
+            }
+          }
+          if (!period_start) return;  // GPU op outside all alloc periods for this ptr
           seen[nseen++] = ptr;
           uint64_t fid = flow_id++;
           gpu_recv_flows[key].push_back(fid);
-          alloc_out_flows[ptr].push_back(fid);
+          alloc_out_flows[{ptr, period_start}].push_back(fid);
         };
         if (gop.op == OP_ID_DISPATCH && gop.kernel_args && gop.kernel_args_size > 0) {
           const uint8_t* p = gop.kernel_args, *end = p + gop.kernel_args_size;
@@ -1341,18 +1368,27 @@ void WriteProtoTraceImpl(const char* filepath) {
       assign_mem_flows(rec.gpu);
       for (const HipGpuActivityExt* n = rec.gpu.next; n; n = n->next) assign_mem_flows(*n);
 
-      // Graph node→node flows (within this launch only).
+      // Graph node→node flows sorted by begin_ns so arrows reflect execution order
+      // regardless of callback arrival order (e.g. SDMA on a separate hardware engine).
       if (is_graph_rec && rec.gpu.gpu_op_count >= 2) {
-        const HipGpuActivityExt* prev_op = &rec.gpu;
-        uint32_t prev_ord = 0;
-        for (const HipGpuActivityExt* cur_op = rec.gpu.next; cur_op; cur_op = cur_op->next) {
-          if (prev_op->begin_ns > 0 && cur_op->begin_ns > 0) {
-            uint64_t fid = flow_id++;
-            graph_node_out_flows[slot * 1000 + prev_ord]     = fid;
-            graph_node_in_flows [slot * 1000 + prev_ord + 1] = fid;
-          }
-          prev_op = cur_op;
-          ++prev_ord;
+        // Collect (begin_ns, ordinal) for each dispatch/copy op with valid timing.
+        std::vector<std::pair<uint64_t,uint32_t>> sorted_ops;
+        uint32_t ord = 0;
+        auto collect = [&](const HipGpuActivityExt& gop) {
+          if (gop.begin_ns > 0 &&
+              (gop.op == HIP_OP_DISPATCH_EXT || gop.op == HIP_OP_COPY_EXT))
+            sorted_ops.push_back({gop.begin_ns, ord});
+          ++ord;
+        };
+        collect(rec.gpu);
+        for (const HipGpuActivityExt* n = rec.gpu.next; n; n = n->next) collect(*n);
+        std::stable_sort(sorted_ops.begin(), sorted_ops.end());
+        for (size_t k = 0; k + 1 < sorted_ops.size(); ++k) {
+          uint32_t from_ord = sorted_ops[k].second;
+          uint32_t to_ord   = sorted_ops[k + 1].second;
+          uint64_t fid = flow_id++;
+          graph_node_out_flows[slot * 1000 + from_ord] = fid;
+          graph_node_in_flows [slot * 1000 + to_ord]   = fid;
         }
       }
     }
@@ -1536,7 +1572,8 @@ void WriteProtoTraceImpl(const char* filepath) {
                       intern_evt(rec.api_name), kCatHip, cpu_anns, cpu_out, {});
 
       // GPU op slices
-      bool first_op = true;
+      auto ctoit = cpu_gpu_target_ord.find(slot);
+      uint32_t cpu_target_ord = (ctoit != cpu_gpu_target_ord.end()) ? ctoit->second : UINT32_MAX;
       uint32_t op_ord = 0;
       auto emit_gpu = [&](const HipGpuActivityExt& gop) {
         if (gop.begin_ns == 0) { ++op_ord; return; }
@@ -1616,8 +1653,11 @@ void WriteProtoTraceImpl(const char* filepath) {
 
         // GPU emits ph='f' for: CPU→GPU flow AND memory→GPU flows (all terminate here)
         in_flows_vec.clear();
-        if (first_op && cfit != cpu_gpu_flow.end()) in_flows_vec.push_back(cfit->second);
-        first_op = false;
+        // CPU→GPU arrow terminates on the op with the earliest begin_ns (pre-computed
+        // in Pass 2 as cpu_gpu_target_ord). This correctly handles graphs where callbacks
+        // fire out of dispatch order (e.g. SDMA on a separate hardware engine).
+        if (op_ord == cpu_target_ord && cfit != cpu_gpu_flow.end())
+          in_flows_vec.push_back(cfit->second);
         auto rfit = gpu_recv_flows.find(slot * 1000 + op_ord);
         if (rfit != gpu_recv_flows.end())
           in_flows_vec.insert(in_flows_vec.end(), rfit->second.begin(), rfit->second.end());
@@ -1661,7 +1701,7 @@ void WriteProtoTraceImpl(const char* filepath) {
       std::vector<std::pair<uint64_t,std::string>> anns;
       anns.push_back({iid_ptr, ptrbuf}); anns.push_back({iid_size_key, std::to_string(ai.size)});
       std::vector<uint64_t> out_flows;
-      auto afit = alloc_out_flows.find(ptr);
+      auto afit = alloc_out_flows.find({ptr, ai.start_ns});
       if (afit != alloc_out_flows.end()) out_flows = afit->second;
       uint64_t alloc_name_iid = intern_evt(alloc_name);
       EmitSliceSorted(sorted_pkts, mem_uuid, ai.start_ns, dur_ns, alloc_name,
