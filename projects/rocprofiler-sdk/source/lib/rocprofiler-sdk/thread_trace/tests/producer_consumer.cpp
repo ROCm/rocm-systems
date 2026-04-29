@@ -122,7 +122,8 @@ start_threads(rocprofiler_thread_trace_shader_data_callback_t cb_fn,
         for(const auto& [_, _agent] : agents)
         {
             auto* rocp = _agent.get_rocp_agent();
-            if(rocp && rocp->type == ROCPROFILER_AGENT_TYPE_GPU)
+            if(rocp && rocp->type == ROCPROFILER_AGENT_TYPE_GPU &&
+               rocp->runtime_visibility.hsa != 0)
             {
                 agent = &_agent;
                 break;
