@@ -43,3 +43,8 @@ void pc_sampling_collector_impl_t::on_code_object_load(
     //     }
     // }
 }
+
+void pc_sampling_collector_impl_t::write(pc_samples_writer_t& writer)
+{
+    writer.write();
+}

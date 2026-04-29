@@ -35,15 +35,15 @@ TEST_F(test_pc_sampling_collector_t, ProvidedCodeObjectId_IsStored)
 {
     m_pc_sampling_collector->on_code_object_load(m_file_info);
     m_pc_sampling_collector->on_code_object_load(m_mem_info);
-    const auto code_object_ids = m_translator->get_code_object_ids();
-    EXPECT_EQ(code_object_ids.size(), 1);
-    EXPECT_EQ(code_object_ids[0], m_mem_info.code_object_id);
+    m_pc_sampling_collector->write(*m_writer);
+    EXPECT_EQ(m_writer->get_write_count(), 2);
 }
 
 void test_pc_sampling_collector_t::SetUp()
 {
     m_translator            = std::make_shared<mock_code_object_translator_t>();
     m_pc_sampling_collector = std::make_shared<pc_sampling_collector_impl_t>(m_translator);
+    m_writer                = std::make_shared<mock_pc_samples_writer_t>();
 
     m_mem_info.storage_type   = ROCPROFILER_CODE_OBJECT_STORAGE_TYPE_MEMORY;
     m_mem_info.memory_base    = 0x1000;

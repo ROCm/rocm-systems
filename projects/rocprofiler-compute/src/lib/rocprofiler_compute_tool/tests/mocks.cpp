@@ -250,6 +250,8 @@ void mock_pc_sampling_collector_t::on_code_object_load(
     m_on_code_object_load_info.push_back(info);
 }
 
+void mock_pc_sampling_collector_t::write(pc_samples_writer_t& writer) {}
+
 const std::vector<rocprofiler_callback_tracing_code_object_load_data_t>&
     mock_pc_sampling_collector_t::get_on_code_object_load_info() const
 {

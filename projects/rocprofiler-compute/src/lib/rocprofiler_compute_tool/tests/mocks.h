@@ -170,6 +170,8 @@ class mock_pc_sampling_collector_t : public rocm_compute::pc_sampling_collector_
 {
 public:
     void on_code_object_load(const rocprofiler_callback_tracing_code_object_load_data_t& info) override;
+    void write(rocm_compute::pc_samples_writer_t& writer) override;
+
     const std::vector<rocprofiler_callback_tracing_code_object_load_data_t>& get_on_code_object_load_info() const;
 
 private:
