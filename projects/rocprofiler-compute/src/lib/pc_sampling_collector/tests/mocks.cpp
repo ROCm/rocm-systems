@@ -48,8 +48,7 @@ void mock_code_object_translator_t::add_symbols(size_t object_id,
     m_symbols_per_obj[object_id] = symbols;
 }
 
-void mock_code_object_translator_t::
-add_instruction(const rocm_compute::instruction_t& instruction) 
+void mock_code_object_translator_t::add_instruction(const rocm_compute::instruction_t& instruction)
 {
     m_instruction = instruction;
 }
@@ -71,9 +70,9 @@ void mock_code_object_writer_t::start_code_obj(size_t obj_id)
     m_started_code_obj_ids.push_back(obj_id);
 }
 
-void mock_code_object_writer_t::end_code_obj_desc(size_t obj_id)
+void mock_code_object_writer_t::end_code_obj()
 {
-    m_ended_code_obj_desc_ids.push_back(obj_id);
+    ++m_ended_code_obj_count;
 }
 
 void mock_code_object_writer_t::start_symbol(const symbol_t& symbol)
@@ -96,14 +95,14 @@ std::string mock_code_object_writer_t::get_result()
     return {};
 }
 
-const std::vector<size_t>& mock_code_object_writer_t::get_started_code_obj_ids() const
+const std::vector<size_t>& mock_code_object_writer_t::get_start_code_obj_ids() const
 {
     return m_started_code_obj_ids;
 }
 
-const std::vector<size_t>& mock_code_object_writer_t::get_ended_code_obj_desc_ids() const
+uint32_t mock_code_object_writer_t::get_end_code_obj_count() const
 {
-    return m_ended_code_obj_desc_ids;
+    return m_ended_code_obj_count;
 }
 
 const std::vector<symbol_t>& mock_code_object_writer_t::get_symbol_descriptions() const

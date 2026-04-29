@@ -57,21 +57,21 @@ class mock_code_object_writer_t : public rocm_compute::code_object_writer_t
 {
 public:
     void        start_code_obj(size_t obj_id) override;
-    void        end_code_obj_desc(size_t obj_id) override;
+    void        end_code_obj() override;
     void        start_symbol(const rocm_compute::symbol_t& symbol) override;
     void        end_symbol() override;
     void        write_instruction(const rocm_compute::instruction_t& inst) override;
     std::string get_result() override;
 
-    const std::vector<size_t>&                      get_started_code_obj_ids() const;
-    const std::vector<size_t>&                      get_ended_code_obj_desc_ids() const;
+    const std::vector<size_t>&                      get_start_code_obj_ids() const;
+    uint32_t                                        get_end_code_obj_count() const;
     const std::vector<rocm_compute::symbol_t>&      get_symbol_descriptions() const;
     const std::vector<rocm_compute::instruction_t>& get_instruction_descriptions() const;
     uint32_t                                        get_end_symbol_count() const;
 
 private:
     std::vector<size_t>                      m_started_code_obj_ids;
-    std::vector<size_t>                      m_ended_code_obj_desc_ids;
+    uint32_t                                 m_ended_code_obj_count = 0;
     std::vector<rocm_compute::symbol_t>      m_symbol_descriptions;
     std::vector<rocm_compute::instruction_t> m_instructions;
     uint32_t                                 m_end_symbol_count = 0;

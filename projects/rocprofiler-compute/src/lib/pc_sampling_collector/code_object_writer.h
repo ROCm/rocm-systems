@@ -12,7 +12,7 @@ class code_object_writer_t
 public:
     virtual ~code_object_writer_t()                                  = default;
     virtual void        start_code_obj(size_t obj_id)                = 0;
-    virtual void        end_code_obj_desc(size_t obj_id)             = 0;
+    virtual void        end_code_obj()             = 0;
     virtual void        start_symbol(const symbol_t& symbol)         = 0;
     virtual void        end_symbol()                                 = 0;
     virtual void        write_instruction(const instruction_t& inst) = 0;
@@ -23,7 +23,7 @@ class code_object_writer_json_t : public code_object_writer_t
 {
 public:
     void        start_code_obj(size_t obj_id) override;
-    void        end_code_obj_desc(size_t obj_id) override;
+    void        end_code_obj() override;
     void        start_symbol(const symbol_t& symbol) override;
     void        end_symbol() override;
     void        write_instruction(const instruction_t& inst) override;

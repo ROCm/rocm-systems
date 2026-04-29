@@ -11,7 +11,7 @@ void code_object_writer_json_t::start_code_obj(size_t obj_id)
     ++m_code_object_closure_count;
 }
 
-void code_object_writer_json_t::end_code_obj_desc(size_t obj_id)
+void code_object_writer_json_t::end_code_obj()
 {
     --m_code_object_closure_count;
 }

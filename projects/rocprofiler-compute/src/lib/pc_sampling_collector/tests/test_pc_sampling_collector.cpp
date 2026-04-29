@@ -36,12 +36,10 @@ TEST_F(test_pc_sampling_collector_t, ProvidedCodeObjects_WritesTheirIds)
     m_pc_sampling_collector->on_code_object_load(m_file_info);
     m_pc_sampling_collector->on_code_object_load(m_mem_info);
     m_pc_sampling_collector->write(*m_writer);
-    EXPECT_EQ(m_writer->get_started_code_obj_ids().size(), 2);
-    EXPECT_EQ(m_writer->get_ended_code_obj_desc_ids().size(), 2);
-    EXPECT_EQ(m_writer->get_started_code_obj_ids()[0], m_file_info.code_object_id);
-    EXPECT_EQ(m_writer->get_ended_code_obj_desc_ids()[0], m_file_info.code_object_id);
-    EXPECT_EQ(m_writer->get_started_code_obj_ids()[1], m_mem_info.code_object_id);
-    EXPECT_EQ(m_writer->get_ended_code_obj_desc_ids()[1], m_mem_info.code_object_id);
+    EXPECT_EQ(m_writer->get_start_code_obj_ids().size(), 2);
+    EXPECT_EQ(m_writer->get_end_code_obj_count(), 2);
+    EXPECT_EQ(m_writer->get_start_code_obj_ids()[0], m_file_info.code_object_id);
+    EXPECT_EQ(m_writer->get_start_code_obj_ids()[1], m_mem_info.code_object_id);
 }
 
 TEST_F(test_pc_sampling_collector_t, ProvidedCodeObjectSymbols_WritesThem)

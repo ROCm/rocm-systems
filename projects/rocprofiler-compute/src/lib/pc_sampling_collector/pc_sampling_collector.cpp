@@ -58,7 +58,7 @@ void pc_sampling_collector_impl_t::write(code_object_writer_t& writer)
             }
             writer.end_symbol();
         }
-        writer.end_code_obj_desc(id);
+        writer.end_code_obj();
     }
 }
 
