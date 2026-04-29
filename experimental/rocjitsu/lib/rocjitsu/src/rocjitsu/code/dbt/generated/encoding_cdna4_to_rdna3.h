@@ -380,7 +380,7 @@ inline TranslationResult encode_flat_glbl_rdna3(const FlatGlblFields &f, uint16_
   rocjitsu::rdna3::FlatGlobalMachineInst dst{};
   dst.encoding = 0x37;
   dst.op = dst_op;
-  dst.offset = f.ioffset;
+  dst.offset = f.ioffset & 0x1FFF;
   dst.sve = f.sve;
   dst.seg = f.seg;
   dst.addr = f.vaddr;
@@ -402,7 +402,7 @@ inline TranslationResult encode_flat_scratch_rdna3(const FlatScratchFields &f, u
   rocjitsu::rdna3::FlatScratchMachineInst dst{};
   dst.encoding = 0x37;
   dst.op = dst_op;
-  dst.offset = f.ioffset;
+  dst.offset = f.ioffset & 0x1FFF;
   dst.sve = f.sve;
   dst.seg = f.seg;
   dst.addr = f.vaddr;

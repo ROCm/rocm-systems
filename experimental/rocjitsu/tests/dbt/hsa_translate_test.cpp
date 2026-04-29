@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 /// @file hsa_translate_test.cpp
-/// @brief End-to-end hardware test: translate CDNA4 vector_add → RDNA4,
+/// @brief End-to-end hardware test: translate CDNA4 kernels to the host RDNA target,
 /// load via HSA, dispatch on the real GPU, and verify against CPU golden.
 
 #include "rocjitsu/base/rj_compiler.h"
@@ -123,7 +123,7 @@ HostTarget select_host_target(hsa_agent_t gpu) {
 } // namespace
 
 TEST(HsaTranslateTest, TranslateAndDispatchVectorAdd) {
-  // 1. Translate CDNA4 → RDNA4.
+  // 1. Translate CDNA4 to the host RDNA target.
   Executable exec(kernel_path("vector_add"));
   ASSERT_TRUE(exec.is_valid());
   ASSERT_GT(exec.num_code_objects(ROCJITSU_CODE_TARGET_GFX950), 0u);
@@ -136,8 +136,8 @@ TEST(HsaTranslateTest, TranslateAndDispatchVectorAdd) {
   ASSERT_NE(gpu.handle, 0u) << "No GPU agent found";
 
   auto target = select_host_target(gpu);
-  ASSERT_NE(target.mach, 0u)
-      << "Test requires RDNA3 (gfx1100) or RDNA4 (gfx1200/1201) GPU, found: " << target.isa_name;
+  ASSERT_NE(target.mach, 0u) << "Test requires RDNA3 (gfx1100) or RDNA4 (gfx1200/1201) GPU, found: "
+                             << target.isa_name;
 
   BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, target.arch, target.mach);
   auto result = translator.translate(*co);
@@ -285,7 +285,7 @@ TEST(HsaTranslateTest, TranslateAndDispatchVectorAdd) {
 }
 
 TEST(HsaTranslateTest, TranslateAndDispatchMfma16x16) {
-  // 1. Translate CDNA4 matmul_mfma_16x16 → RDNA4.
+  // 1. Translate CDNA4 matmul_mfma_16x16 to a host with MFMA lowering support.
   Executable exec(kernel_path("matmul_mfma_16x16"));
   ASSERT_TRUE(exec.is_valid());
   ASSERT_GT(exec.num_code_objects(ROCJITSU_CODE_TARGET_GFX950), 0u);
@@ -298,8 +298,16 @@ TEST(HsaTranslateTest, TranslateAndDispatchMfma16x16) {
   ASSERT_NE(gpu.handle, 0u);
 
   auto target = select_host_target(gpu);
-  ASSERT_NE(target.mach, 0u)
-      << "Test requires RDNA3 (gfx1100) or RDNA4 (gfx1200/1201) GPU, found: " << target.isa_name;
+  ASSERT_NE(target.mach, 0u) << "Test requires RDNA3 (gfx1100) or RDNA4 (gfx1200/1201) GPU, found: "
+                             << target.isa_name;
+  // RDNA3 accepts the target selector for vector_add, but this MFMA test still
+  // needs RDNA4-only MFMA->WMMA expansion rules. Skip instead of translating
+  // unsupported MFMA instructions into NOPs and comparing invalid output.
+  if (target.arch != ROCJITSU_CODE_ARCH_RDNA4) {
+    hsa_shut_down();
+    GTEST_SKIP() << "MFMA→WMMA semantic expansion is currently implemented only for RDNA4; found: "
+                 << target.isa_name;
+  }
 
   BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, target.arch, target.mach);
   auto result = translator.translate(*co);
@@ -430,7 +438,10 @@ TEST(HsaTranslateTest, TranslateAndDispatchMfma16x16) {
 
     hsa_memory_copy(A_dev, A_host.data(), ab_size);
     hsa_memory_copy(B_dev, B_host.data(), ab_size);
-    std::memset(C_dev, 0, c_size);
+    // Device allocations are not necessarily host-addressable on dGPUs, so
+    // zero the output through HSA instead of calling std::memset on C_dev.
+    std::vector<float> zero(M * N, 0.0f);
+    hsa_memory_copy(C_dev, zero.data(), c_size);
 
     std::vector<float> C_golden(M * N, 0.0f);
     for (uint32_t i = 0; i < M; ++i)

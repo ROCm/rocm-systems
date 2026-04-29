@@ -8,6 +8,8 @@
 #include <string>
 #include <vector>
 
+#include "rocjitsu/code/rj_code.h"
+
 namespace rocjitsu {
 
 class AmdGpuCodeObject;
@@ -23,9 +25,10 @@ public:
 
   void update_elf_flags(uint32_t new_flags);
 
-  /// @brief Patch kernel descriptors for RDNA4 Wave64 mode.
+  /// @brief Patch kernel descriptors for target Wave64 mode.
+  /// @param target_arch Target architecture whose descriptor packing rules apply.
   /// Clears ENABLE_WAVEFRONT_SIZE32 (bit 10 of kernel_code_properties).
-  void patch_kernel_descriptors_for_wave64();
+  void patch_kernel_descriptors_for_wave64(rj_code_arch_t target_arch);
 
   void append_cave_body(std::span<const uint32_t> words);
 

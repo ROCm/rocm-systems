@@ -182,7 +182,9 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
   if (target_mach_)
     patcher.update_elf_flags(target_mach_);
 
-  patcher.patch_kernel_descriptors_for_wave64();
+  // Kernel descriptor packing differs by target generation, so apply the
+  // Wave64 patch using the same host architecture as the translated text.
+  patcher.patch_kernel_descriptors_for_wave64(host_arch_);
 
   result.elf_bytes = patcher.emit();
   warnings_ = nullptr;

@@ -150,8 +150,7 @@ build_vop3(uint16_t op, uint8_t vdst, uint16_t src0, uint16_t src1 = 0, uint16_t
 // Instruction lowering functions
 // ---------------------------------------------------------------------------
 
-std::vector<uint32_t> lower_v_lshl_add_u64(const Instruction &inst,
-                                           [[maybe_unused]] rj_code_arch_t host_arch) {
+std::vector<uint32_t> lower_v_lshl_add_u64(const Instruction &inst, rj_code_arch_t host_arch) {
   const auto *raw = inst.raw_encoding();
   if (!raw || inst.size() < 8)
     return {};
@@ -402,7 +401,6 @@ std::vector<uint32_t> expand_waitcnt_gfx9_to_gfx11(const Instruction &inst, uint
   return {pack_sopp(kRdna3SoppOp_s_waitcnt, 0)};
 }
 
-
 std::vector<uint32_t> expand_accvgpr_read(const Instruction &inst, uint32_t, uint64_t,
                                           const RegisterLiveness &, const LaneLayout *,
                                           const LaneLayout *) {
@@ -465,10 +463,10 @@ const TranslationRule kExpandRules_cdna4_to_rdna4[] = {
 //     to v_add_co_u32 + v_add_co_ci_u32.
 // Rule table must stay sorted by (src_encoding_id, src_opcode).
 const TranslationRule kExpandRules_cdna4_to_rdna3[] = {
-    {kEncSopp, kCdna4Op_s_waitcnt, RuleAction::Expand, 0, 0, nullptr,
-     expand_waitcnt_gfx9_to_gfx11, nullptr, nullptr},
-    {kEncVop3, kCdna4Op_v_lshl_add_u64, RuleAction::Expand, 0, 0, nullptr,
-     expand_v_lshl_add_u64, nullptr, nullptr},
+    {kEncSopp, kCdna4Op_s_waitcnt, RuleAction::Expand, 0, 0, nullptr, expand_waitcnt_gfx9_to_gfx11,
+     nullptr, nullptr},
+    {kEncVop3, kCdna4Op_v_lshl_add_u64, RuleAction::Expand, 0, 0, nullptr, expand_v_lshl_add_u64,
+     nullptr, nullptr},
 };
 
 } // namespace

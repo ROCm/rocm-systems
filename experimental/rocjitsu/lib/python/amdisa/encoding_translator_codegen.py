@@ -535,25 +535,22 @@ def _emit_encode_fn(trans, dst_ns, dst_name):
         lines.append(f'    dst.scope = coh.scope;')
         lines.append(f'    dst.th = coh.th;')
 
-    # Pack fields from neutral struct into target
+    # Pack fields from the neutral struct into the target. Every assignment is
+    # masked to the destination width so generated encoders stay correct when a
+    # source XML field is wider than its target bitfield or carries stale high
+    # bits from a previous decode path.
     for m in trans.mappings:
         if m.kind == 'copy':
             if m.src_name == 'op':
                 continue
             dst_n = m.dst_name or m.src_name
             canonical = FIELD_RENAMES.get(m.src_name, m.src_name)
-            if m.src_bits == m.dst_bits:
-                lines.append(f'    dst.{dst_n} = f.{canonical};')
-            else:
-                mask = (1 << m.dst_bits) - 1
-                lines.append(f'    dst.{dst_n} = f.{canonical} & 0x{mask:X};')
+            mask = (1 << m.dst_bits) - 1
+            lines.append(f'    dst.{dst_n} = f.{canonical} & 0x{mask:X};')
         elif m.kind == 'remap':
             canonical = FIELD_RENAMES.get(m.src_name, m.src_name)
-            if m.src_bits == m.dst_bits:
-                lines.append(f'    dst.{m.dst_name} = f.{canonical};')
-            else:
-                mask = (1 << m.dst_bits) - 1
-                lines.append(f'    dst.{m.dst_name} = f.{canonical} & 0x{mask:X};')
+            mask = (1 << m.dst_bits) - 1
+            lines.append(f'    dst.{m.dst_name} = f.{canonical} & 0x{mask:X};')
         elif m.kind == 'insert':
             lines.append(f'    dst.{m.dst_name} = 0;')
         # drop and coherency: nothing to encode
