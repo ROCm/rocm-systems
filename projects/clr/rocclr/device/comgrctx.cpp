@@ -83,10 +83,20 @@ bool Comgr::LoadLib() {
   GET_COMGR_SYMBOL(amd_comgr_action_info_set_device_lib_linking)
   GET_COMGR_SYMBOL(amd_comgr_lookup_code_object)
   GET_COMGR_OPTIONAL_SYMBOL(amd_comgr_action_info_set_bundle_entry_ids)
-  is_ready_ = true;
   size_t major = 0, minor = 0;
   get_version(&major, &minor);
   ClPrint(amd::LOG_INFO, amd::LOG_CODE, "Loaded COMGR library version %zu.%zu.", major, minor);
+
+  constexpr size_t kRequiredMajor = 3;
+  constexpr size_t kRequiredMinor = 2;
+  if (major != kRequiredMajor || minor < kRequiredMinor) {
+    ClPrint(amd::LOG_ERROR, amd::LOG_CODE,
+            "COMGR library version %zu.%zu is incompatible; "
+            "require %zu.%zu or newer (same major).",
+            major, minor, kRequiredMajor, kRequiredMinor);
+    return false;
+  }
+  is_ready_ = true;
   return true;
 }
 
