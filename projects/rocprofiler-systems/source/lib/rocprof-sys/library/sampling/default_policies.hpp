@@ -14,40 +14,45 @@
 //
 // Linux-only enforcement happens via sampling/platform_guard.hpp at
 // sampling_service<Policies> instantiation time (NFR-PORT-3 single gate).
+// The aggregator body is also wrapped in #if defined(__linux__) so this
+// header is parseable (a no-op) on a hypothetical non-Linux preprocessor pass
+// even though the build system never compiles sampling on non-Linux.
+
+#if defined(__linux__)
 
 // ── Light policies (sampling/ — no main-lib deps) ────────────────────────────
 // libunwind is a hard requirement on Linux (sampling/CMakeLists.txt enforces
 // find_package(LibUnwind REQUIRED)), so the unwinder include is unconditional.
-#include "sampling/src/linux/libunwind_unwinder.hpp"
-#include "sampling/src/linux/real_signal_dispatcher.hpp"
-#include "sampling/src/steady_clock.hpp"
+#    include "sampling/src/linux/libunwind_unwinder.hpp"
+#    include "sampling/src/linux/real_signal_dispatcher.hpp"
+#    include "sampling/src/steady_clock.hpp"
 
 // ── Production-only trigger policies (not test-accessible) ───────────────────
-#include "sampling/policies/linux/real_overflow_trigger.hpp"
-#include "sampling/policies/linux/real_timer_trigger.hpp"
+#    include "sampling/policies/linux/real_overflow_trigger.hpp"
+#    include "sampling/policies/linux/real_timer_trigger.hpp"
 
 // ── EmitterPolicy (production) ───────────────────────────────────────────────
 // Lightweight header — no libunwind / AMD-SMI deps; also included by test TUs.
-#include "sampling/policies/trace_cache_offload_adapter.hpp"
+#    include "sampling/policies/trace_cache_offload_adapter.hpp"
 
 // ── TSV report writer (no main-lib deps; test-accessible) ────────────────────
-#include "sampling/src/native_report_writer.hpp"
+#    include "sampling/src/native_report_writer.hpp"
 
 // ── Heavy policies (one class per file under sampling/policies/) ─────────────
-#include "sampling/policies/real_fatal_error_policy.hpp"
-#include "sampling/policies/real_perfetto_sink.hpp"
-#include "sampling/policies/real_trace_cache_sink.hpp"
+#    include "sampling/policies/real_fatal_error_policy.hpp"
+#    include "sampling/policies/real_perfetto_sink.hpp"
+#    include "sampling/policies/real_trace_cache_sink.hpp"
 
 // ── TLS state + service template + production hooks policy ──────────────────
-#include "sampling/policies/tl_state.hpp"
-#include "sampling/sampling_service.hpp"
+#    include "sampling/policies/tl_state.hpp"
+#    include "sampling/sampling_service.hpp"
 
 // real_production_hooks (T18a) replaces the explicit-specialization layer
 // that formerly lived in sampling_service_production_hooks.hpp.
-#include "sampling/policies/linux/real_production_hooks.hpp"
+#    include "sampling/policies/linux/real_production_hooks.hpp"
 
-#include <csignal>
-#include <sys/types.h>
+#    include <csignal>
+#    include <sys/types.h>
 
 namespace rocprofsys::sampling
 {
@@ -60,3 +65,5 @@ using default_tl      = tl_state<default_sampling_policies>;
 // Forward declaration — definition in services_accessor.cpp.
 extern "C" void
 rocprofsys_sampling_signal_handler(int, siginfo_t*, void*);
+
+#endif  // defined(__linux__)
