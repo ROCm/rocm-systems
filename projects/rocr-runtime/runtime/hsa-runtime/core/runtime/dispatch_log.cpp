@@ -174,12 +174,13 @@ struct queue_drain_state {
   // drains are not blocked.
   std::mutex drain_mu;
 
-  // Per-queue worker thread shutdown signal + handle. Set true and joined
-  // by disable_dispatch_log_for_queue_locked (and by the destructor as a
-  // defensive safety net in case any code path drops a queue_drain_state
-  // without joining first). The worker checks should_stop with acquire
-  // ordering each iteration; the disable path stores it with release
-  // ordering before joining.
+  // Per-queue worker thread shutdown signal + handle. The supported
+  // ownership model is: disable_dispatch_log_for_queue_locked stores
+  // should_stop with release ordering and joins worker BEFORE
+  // dropping the registry's shared_ptr ref. The worker checks
+  // should_stop with acquire ordering each iteration. The destructor
+  // (below) is NOT a generic safety net for unjoined-running workers
+  // — see the destructor comment for the narrow case it handles.
   std::atomic<bool> should_stop{false};
   std::thread       worker;
 
@@ -791,23 +792,23 @@ void enable_dispatch_log_for_queue_locked(core::Queue* q) {
     return;
   }
 
-  // Step 3: register in the drainer registry. NON-OWNING — buffer is
-  // owned by AqlQueue, freed on SetProfiling(false) or AqlQueue dtor.
-  auto qs = std::make_shared<queue_drain_state>();
-  qs->queue_id         = queue_id_of(q);
-  qs->translate_gpu_ts = make_translate_gpu_ts(q);
-  qs->ring_base        = buf;
-  qs->ring_records     = record_count;
-  qs->ring_mask        = record_count - 1;
-  qs->next_idx         = 0;
-
-  g_active_queues[qs->queue_id] = qs;
-
-  // Step 4: spawn the per-queue drainer worker AFTER registration. The
-  // worker holds its own shared_ptr<queue_drain_state> by value (passed
-  // into per_queue_drain_loop), so qs is alive for the full thread
-  // lifetime even if the registry entry is erased before the worker
-  // observes should_stop.
+  // Steps 3-4: post-acquire setup. EVERYTHING that can throw between
+  // QueueProfilingAcquire (above, which bumped the profiling refcount)
+  // and the final dispatch_log_active.store(true) goes inside one
+  // try block, so any throw rolls the profiling refcount back via
+  // QueueProfilingRelease(q) and we exit cleanly. The next poller
+  // tick will retry this queue.
+  //
+  // What can throw here:
+  //   - std::make_shared<queue_drain_state>() (allocation)
+  //   - std::function copy of make_translate_gpu_ts(q) (allocation)
+  //   - g_active_queues[qs->queue_id] = qs (unordered_map insert,
+  //     can throw on rehash allocation)
+  //   - std::thread(per_queue_drain_loop, qs) (std::system_error on
+  //     EAGAIN / RLIMIT_NPROC / address-space exhaustion — review
+  //     C1 stage-2 code-quality)
+  //   - shared_ptr copies into per_queue_drain_loop's by-value
+  //     parameter (allocation; happens inside std::thread ctor)
   //
   // Stack-size note: std::thread does not expose pthread_attr_setstacksize
   // portably, so each worker uses the default pthread stack (typically
@@ -817,27 +818,45 @@ void enable_dispatch_log_for_queue_locked(core::Queue* q) {
   // would need a pthread_create-based spawn helper to set a small (e.g.
   // 64 KiB) stack; defer that until measured pressure exists.
   //
-  // Failure handling (review C1, stage-2 code-quality): std::thread's
-  // ctor can throw std::system_error if the OS refuses to create the
-  // thread (EAGAIN / RLIMIT_NPROC / address-space exhaustion). Without
-  // a catch the exception would propagate up — to the poller's tick
-  // (which has no handler and would std::terminate the process), or
-  // to on_queue_create on an application thread. Roll back to the
-  // pre-enable state instead: erase the registry entry and release
-  // the profiling ref. The next poller tick will retry; the queue
-  // simply skips this tick.
+  // Order rationale (review C3, stage-2 code-quality): catch ANY
+  // exception (not just std::system_error) so that allocation failures
+  // before the std::thread spawn — std::make_shared, std::function
+  // copy, unordered_map insert — also unwind cleanly. The previous
+  // narrower catch left a refcount-leak window from
+  // QueueProfilingAcquire success to the std::thread call.
+  std::shared_ptr<queue_drain_state> qs;
   try {
+    // Step 3: register in the drainer registry. NON-OWNING — buffer is
+    // owned by AqlQueue, freed on SetProfiling(false) or AqlQueue dtor.
+    qs = std::make_shared<queue_drain_state>();
+    qs->queue_id         = queue_id_of(q);
+    qs->translate_gpu_ts = make_translate_gpu_ts(q);
+    qs->ring_base        = buf;
+    qs->ring_records     = record_count;
+    qs->ring_mask        = record_count - 1;
+    qs->next_idx         = 0;
+
+    g_active_queues[qs->queue_id] = qs;
+
+    // Step 4: spawn the per-queue drainer worker AFTER registration.
+    // The worker holds its own shared_ptr<queue_drain_state> by value
+    // (passed into per_queue_drain_loop), so qs is alive for the full
+    // thread lifetime even if the registry entry is erased before the
+    // worker observes should_stop.
     qs->worker = std::thread(per_queue_drain_loop, qs);
-  } catch (const std::system_error& e) {
+  } catch (const std::exception& e) {
     std::fprintf(stderr,
-                 "[hsa-runtime] dispatch_log: queue_id=%llu ENABLE step 4 "
-                 "(std::thread spawn) failed: %s; rolling back enable\n",
+                 "[hsa-runtime] dispatch_log: queue_id=%llu ENABLE post-acquire "
+                 "setup failed: %s; rolling back enable\n",
                  static_cast<unsigned long long>(queue_id_of(q)),
                  e.what());
-    g_active_queues.erase(qs->queue_id);
+    // Erase from registry if we got far enough to insert. erase() is
+    // safe on a missing key (returns 0).
+    g_active_queues.erase(queue_id_of(q));
+    // Release the profiling ref bumped by QueueProfilingAcquire above.
+    // dispatch_log_active was never flipped to true, so no flag
+    // rollback is needed. The next poller enable pass will retry.
     QueueProfilingRelease(q);
-    // dispatch_log_active was never flipped to true, so no flag rollback
-    // needed. The next poller enable pass will retry this queue.
     return;
   }
 
