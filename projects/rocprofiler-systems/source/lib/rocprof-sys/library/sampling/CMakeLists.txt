@@ -53,8 +53,7 @@ endif()
 # NO main-lib deps here. Heavy policy deps live in library/services_accessor.cpp.
 target_link_libraries(
     rocprof-sys-sampling-library
-    PUBLIC rocprofiler-systems-logger
-    PRIVATE rocprofiler-systems-interface-library
+    PUBLIC rocprofiler-systems-logger rocprofiler-systems-interface-library
 )
 
 if(LINUX)
