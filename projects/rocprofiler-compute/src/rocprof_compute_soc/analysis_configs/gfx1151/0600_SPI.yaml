@@ -43,9 +43,6 @@ Panel Config:
         max: Max
         unit: Unit
       metric:
-        # Use SPI_CSN_WAVE (pmc_perf column name from collection), not SPI_CSN_WAVE_sum: the
-        # latter is a counter_defs derived alias and is often absent from pmc_perf.csv, which
-        # yields all-zero / NaN metrics. Profiler output typically already aggregates instances.
         Compute Wave Dispatches:
           avg: SUM(SPI_CSN_WAVE) / SUM($denom)
           min: MIN(SPI_CSN_WAVE / $denom)

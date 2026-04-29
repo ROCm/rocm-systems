@@ -169,17 +169,17 @@ Panel Config:
       occupancy provides more opportunities to hide memory latency through wavefront
       switching. However, maximum occupancy is not always optimal—excessive register or
       LDS usage per wavefront may limit occupancy.
-    L2 Cache Hit Rate: >-
-      Percentage of L2 cache requests that are serviced from cache without accessing
+    GL2 Cache Hit Rate: >-
+      Percentage of GL2 cache requests that are serviced from cache without accessing
       system memory. Higher hit rates reduce memory bandwidth pressure and improve
       performance. Low hit rates may indicate poor data locality or working sets that
       exceed cache capacity.
-    L2-Fabric Read BW: >-
-      Read bandwidth between the L2 cache and the memory fabric/system memory. High
+    GL2-Fabric Read BW: >-
+      Read bandwidth between the GL2 cache and the memory fabric/system memory. High
       bandwidth utilization indicates memory-intensive read patterns. This metric helps
       identify when memory bandwidth is a performance bottleneck.
-    L2-Fabric Write BW: >-
-      Write bandwidth between the L2 cache and the memory fabric/system memory. High
+    GL2-Fabric Write BW: >-
+      Write bandwidth between the GL2 cache and the memory fabric/system memory. High
       values indicate write-intensive workloads. Combined with read bandwidth, this
       shows total memory traffic leaving the GPU caches.
     LDS Bank Conflicts: >-
@@ -195,23 +195,23 @@ Panel Config:
       Percentage of wavefront execution time spent waiting for instructions to become
       ready for issue. High values may indicate instruction cache misses, complex
       control flow, or pipeline stalls preventing instruction dispatch.
-    TCP Cache Hit Rate: >-
-      Percentage of L0 vector cache (TCP) requests that hit in cache. The TCP cache
+    GL0 Cache Hit Rate (TCP Cache): >-
+      Percentage of GL0 vector cache (TCP Cache) requests that hit in cache. The TCP cache
       is the first-level cache for vector memory operations. High hit rates reduce
-      traffic to the L1 cache and improve memory access latency.
-    TCP Cache BW: >-
-      Bandwidth of requests to the L0 vector cache (TCP). This represents the rate
+      traffic to the GL1 cache and improve memory access latency.
+    GL0 Cache BW (TCP Cache): >-
+      Bandwidth of requests to the GL0 vector cache (TCP Cache). This represents the rate
       at which the shader cores are requesting data from the cache hierarchy.
       High bandwidth indicates memory-intensive workloads.
-    GL1C Hit Rate: >-
+    GL1 Cache Hit Rate: >-
       Percentage of L1 cache (GL1C) requests that hit in cache. GL1C is shared
       across multiple workgroup processors within a shader engine. Higher hit rates
       reduce traffic to the L2 cache and improve performance.
-    GL1C Read BW: >-
+    GL1 Cache Read BW: >-
       Read bandwidth between L1 (GL1C) and L2 (GL2C) caches. This represents cache
       miss traffic from L1 that must be serviced by L2. Lower values indicate
       better L1 cache efficiency.
-    GL2C Cache BW: >-
+    GL2 Cache BW: >-
       Bandwidth of read operations at the L2 cache level. This metric shows
       overall L2 cache utilization and helps identify memory subsystem bottlenecks.
     Scalar Data Cache Hit Rate: >-
@@ -219,7 +219,7 @@ Panel Config:
       stores uniform data accessed by scalar instructions. High hit rates indicate
       efficient reuse of constant and uniform data across wavefronts.
     Scalar Data Cache BW: >-
-      Bandwidth of scalar data cache requests to the L1 cache. Scalar operations
+      Bandwidth of scalar data cache requests to the GL1 cache. Scalar operations
       load uniform data shared across all threads in a wavefront, making efficient
       caching critical for performance.
     Instruction Cache Hit Rate: >-
@@ -227,6 +227,6 @@ Panel Config:
       High hit rates are essential for sustained instruction throughput. Low hit
       rates may indicate large kernel code size or divergent control flow.
     Instruction Cache BW: >-
-      Bandwidth of instruction cache requests to the L1 cache. High values may
+      Bandwidth of instruction cache requests to the GL1 cache. High values may
       indicate instruction cache pressure from large kernels or frequent
       instruction cache misses.

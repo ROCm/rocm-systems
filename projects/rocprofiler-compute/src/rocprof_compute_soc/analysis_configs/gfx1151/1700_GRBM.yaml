@@ -66,8 +66,8 @@ Panel Config:
       and processing commands. High CP busy with low shader activity may indicate
       dispatch bottlenecks or excessive command stream overhead.
     GL2C Busy: >-
-      Percentage of GPU active time the L2 cache was busy servicing memory requests.
-      High L2 busy indicates memory-intensive workloads. Compare with compute activity
+      Percentage of GPU active time the GL2 cache was busy servicing memory requests.
+      High GL2 busy indicates memory-intensive workloads. Compare with compute activity
       to determine if the workload is memory-bound or compute-bound.
     TA Busy: >-
       Percentage of GPU active time the Texture Addresser was busy processing memory

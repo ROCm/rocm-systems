@@ -10,11 +10,11 @@ Panel Config:
   title: GL1 Cache (L1)
   data source:
   # =========================================================================
-  # GL1C Utilization
+  # GL1 Cache Utilization
   # =========================================================================
   - metric_table:
       id: 1101
-      title: "GL1C Utilization"
+      title: "GL1 Cache Utilization"
       header:
         metric: Metric
         avg: Avg
@@ -68,11 +68,11 @@ Panel Config:
           unit: (Count + $normUnit)
 
   # =========================================================================
-  # GL1C Cache Performance
+  # GL1 Cache Performance
   # =========================================================================
   - metric_table:
       id: 1103
-      title: "GL1C Cache Performance"
+      title: "GL1 Cache Performance"
       header:
         metric: Metric
         avg: Avg
@@ -153,12 +153,12 @@ Panel Config:
       within the shader engine. This represents aggregated memory traffic from multiple
       Workgroup Processors.
     Read Requests: >-
-      Number of read requests to the L1 cache. High read counts indicate memory-intensive
-      load operations that missed in L0. Compare with miss requests to assess L1 cache
+      Number of read requests to the GL1 cache. High read counts indicate memory-intensive
+      load operations that missed in GL0. Compare with miss requests to assess GL1 cache
       effectiveness.
     Write Requests: >-
-      Number of write requests to the L1 cache. Write traffic includes stores that missed
-      in L0 and cache writebacks. High write counts may indicate write-intensive workloads.
+      Number of write requests to the GL1 cache. Write traffic includes stores that missed
+      in GL0 and cache writebacks. High write counts may indicate write-intensive workloads.
     Miss Requests: >-
       Number of L1 cache requests that missed and required fetching from L2. High miss
       counts increase memory latency and traffic to L2. Consider improving data locality

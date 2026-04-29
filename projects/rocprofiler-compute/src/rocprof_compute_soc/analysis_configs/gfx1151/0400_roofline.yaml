@@ -2,7 +2,7 @@
 # RDNA3.5 (gfx1151) - RDNA3.5 Roofline Performance Metrics
 # =============================================================================
 # RDNA 3.5: VALU FLOP roofline from SQ_INSTS_VALU*; WMMA (separate ISA) is not a dedicated row.
-# Cache hierarchy: TCP (L0) -> GL1C (L1) -> GL2C (L2) -> System Memory
+# Cache hierarchy: TCP Cache (L0) -> GL1C (L1) -> GL2C (L2) -> System Memory
 # =============================================================================
 
 Panel Config:
@@ -61,13 +61,13 @@ Panel Config:
         unit: Unit
       metric:
         AI GL2:
-          # Note: GL1C-GL2 reads can be 32B, 64B, or 128B. Writes can be 32B or 64B.
+          # Note: GL1-GL2 reads can be 32B, 64B, or 128B. Writes can be 32B or 64B.
           value: ( SUM($wave_size * SQ_INSTS_VALU_sum) / SUM((GL1C_GL2_REQ_READ_32B_sum*32 + GL1C_GL2_REQ_READ_64B_sum*64 + GL1C_GL2_REQ_READ_128B_sum*128) + (GL1C_GL2_REQ_WRITE_32B_sum*32 + GL1C_GL2_REQ_WRITE_64B_sum*64)) )
           unit: FLOPs/Byte
         AI GL1:
           value: ( SUM($wave_size * SQ_INSTS_VALU_sum) / SUM((TCP_GL1_REQ_READ_sum * 64) + (TCP_GL1_REQ_WRITE_sum * 64)) )
           unit: FLOPs/Byte
-        AI TCP:
+        AI GL0:
           value: ( SUM($wave_size * SQ_INSTS_VALU_sum) / SUM(TCP_REQ_sum * 64) )
           unit: FLOPs/Byte
         Performance (GFLOPs):
@@ -84,34 +84,34 @@ Panel Config:
       64-bit floating-point operations per second on the VALU. Peak is
       4 FLOPs/CU/cycle (FP32 FMA rate / 32). Uses dedicated FP64 instruction
       counter (SQ_INSTS_VALU_DP_sum). FP64 is 1/32 rate of FP32 on RDNA.
-    GL2 Cache Bandwidth: >-
-      Achieved bandwidth between the L1 and L2 caches. This represents L1 miss traffic
-      that must be serviced by L2. High bandwidth relative to peak may indicate
-      L1 cache pressure or poor data locality at the L1 level.
-    GL1 Cache Bandwidth: >-
-      Achieved bandwidth between the L0 (TCP) and L1 (GL1C) caches. This represents
-      L0 miss traffic. High bandwidth relative to peak may indicate cache pressure
-      at the L0 level or memory access patterns with poor locality.
-    TCP (L0) Cache Bandwidth: >-
-      Achieved bandwidth at the L0 vector cache (TCP). This represents total data
+    GL2 Cache BW: >-
+      Achieved bandwidth between the GL1 and GL2 caches. This represents GL1 miss traffic
+      that must be serviced by GL2. High bandwidth relative to peak may indicate
+      GL1 cache pressure or poor data locality at the GL1 level.
+    GL1 Cache BW: >-
+      Achieved bandwidth between the GL0 (TCP Cache) and GL1 caches. This represents
+      GL0 miss traffic. High bandwidth relative to peak may indicate cache pressure
+      at the GL0 level or memory access patterns with poor locality.
+    GL0 Cache BW (TCP Cache): >-
+      Achieved bandwidth at the GL0 vector cache (TCP Cache). This represents total data
       requested by shader cores from the memory hierarchy. Compare against peak to
       assess memory subsystem utilization.
-    LDS Bandwidth: >-
+    LDS BW: >-
       Achieved bandwidth for Local Data Share memory operations. LDS provides
       high-bandwidth, low-latency shared memory within a workgroup. Compare against
       peak to identify if LDS bandwidth is limiting performance.
-    AI TCP: >-
-      Arithmetic Intensity relative to the L0 cache (TCP). Higher values indicate
+    AI GL0: >-
+      Arithmetic Intensity relative to the GL0 cache (TCP Cache). Higher values indicate
       more compute operations per byte of data loaded, suggesting compute-bound
-      behavior. Lower values suggest memory-bound behavior limited by L0 bandwidth.
+      behavior. Lower values suggest memory-bound behavior limited by GL0 bandwidth.
     AI GL1: >-
-      Arithmetic Intensity relative to the L1 cache (GL1C). This metric shows compute
-      density relative to L1 cache traffic. Kernels with high AI GL1 but low AI TCP
-      benefit from L0 cache locality.
+      Arithmetic Intensity relative to the GL1 cache. This metric shows compute
+      density relative to GL1 cache traffic. Kernels with high AI GL1 but low AI GL0
+      benefit from GL0 cache locality.
     AI GL2: >-
-      Arithmetic Intensity relative to the L2 cache (GL2C). This metric shows compute
-      density relative to L2 cache traffic. Higher values indicate better cache reuse
-      at L1, while lower values suggest significant L1 miss rates.
+      Arithmetic Intensity relative to the GL2 cache. This metric shows compute
+      density relative to GL2 cache traffic. Higher values indicate better cache reuse
+      at GL1, while lower values suggest significant GL1 miss rates.
     Performance (GFLOPs): >-
       Achieved compute throughput measured in billions of floating-point operations
       per second. This value, combined with arithmetic intensity, determines the

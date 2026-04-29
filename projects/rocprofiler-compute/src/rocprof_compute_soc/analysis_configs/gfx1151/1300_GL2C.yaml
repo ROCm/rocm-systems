@@ -1,8 +1,8 @@
 # =============================================================================
 # RDNA3.5 (gfx1151) - RDNA3.5 GL2C (L2 Cache) Performance Metrics
 # =============================================================================
-# GL2C is the last-level cache shared across the GPU
-# Cache hierarchy: TCP (L0) -> GL1C (L1) -> GL2C (L2) -> Memory
+# GL2C is the GPU's final on-chip cache shared across all compute units
+# Cache hierarchy: TCP (L0) -> GL1C (L1) -> GL2C (L2) -> System Memory via GCEA
 # =============================================================================
 
 Panel Config:
@@ -10,11 +10,11 @@ Panel Config:
   title: GL2 Cache (L2)
   data source:
   # =========================================================================
-  # GL2C Cache Performance
+  # GL2 Cache Performance
   # =========================================================================
   - metric_table:
       id: 1301
-      title: "GL2C Cache Performance"
+      title: "GL2 Cache Performance"
       header:
         metric: Metric
         avg: Avg
@@ -109,10 +109,10 @@ Panel Config:
           unit: Bytes/s
 
   metrics_description:
-    GL2C Hit Rate: >-
+    GL2 Cache Hit Rate: >-
       Percentage of L2 cache requests serviced from cache without accessing system memory.
-      GL2C is the last-level cache before system memory. Higher hit rates significantly
-      reduce memory bandwidth pressure and improve performance.
+      GL2 cache is the GPU's final on-chip cache before accessing system memory via GCEA.
+      Higher hit rates significantly reduce memory bandwidth pressure and improve performance.
     GL2C Hits: >-
       Number of L2 cache requests that were serviced from cache. High hit counts relative
       to total requests indicate effective caching. Low hit counts suggest memory-bound
@@ -123,7 +123,7 @@ Panel Config:
       or reducing working set size.
     Total Requests: >-
       Total number of requests received by the L2 cache from all L1 caches and other
-      clients. This represents the aggregate memory traffic at the last-level cache.
+      clients. This represents the aggregate memory traffic at the GPU's final on-chip cache.
     Read Requests: >-
       Number of read requests to the L2 cache. High read counts indicate memory-intensive
       load operations. Compare with hit rate to assess L2 cache effectiveness for reads.
