@@ -12,15 +12,11 @@
 // guards needed here.
 
 #include "library/perf.hpp"
+#include "sampling/policies/linux/sampling_signal_handler_fwd.hpp"
 
 #include <csignal>
 #include <cstdint>
 #include <sys/types.h>
-
-// Forward declaration of the production signal handler.
-// Defined in services_accessor.cpp; declared here because start() installs it.
-extern "C" void
-rocprofsys_sampling_signal_handler(int, siginfo_t*, void*);
 
 namespace rocprofsys::sampling
 {

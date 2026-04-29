@@ -11,17 +11,14 @@
 // never included by standalone test binaries. No ROCPROFSYS_INTERNAL_BUILD
 // guards needed here.
 
+#include "sampling/policies/linux/sampling_signal_handler_fwd.hpp"
+
 #include <cerrno>
 #include <csignal>
 #include <cstdint>
 #include <cstring>
 #include <sys/types.h>
 #include <time.h>
-
-// Forward declaration of the production signal handler.
-// Defined in services_accessor.cpp; declared here because start() installs it.
-extern "C" void
-rocprofsys_sampling_signal_handler(int, siginfo_t*, void*);
 
 // POSIX defines sigmask(sig) as a macro; undefine to avoid conflicts.
 #ifdef sigmask

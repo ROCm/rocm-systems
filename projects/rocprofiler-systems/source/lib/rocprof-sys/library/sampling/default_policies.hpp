@@ -61,8 +61,6 @@ using default_tl      = tl_state<default_sampling_policies>;
 
 }  // namespace rocprofsys::sampling
 
-// Forward declaration — definition in services_accessor.cpp.
-extern "C" void
-rocprofsys_sampling_signal_handler(int, siginfo_t*, void*);
+#    include "sampling/policies/linux/sampling_signal_handler_fwd.hpp"
 
 #endif  // defined(__linux__)
