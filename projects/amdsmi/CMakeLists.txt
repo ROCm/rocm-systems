@@ -113,6 +113,11 @@ option(BUILD_TESTS "Build test suite" OFF)
 option(ENABLE_ASAN_PACKAGING "" OFF)
 option(ENABLE_ESMI_LIB "Build ESMI Library" ON)
 option(BUILD_EXAMPLES "Build examples" OFF)
+option(
+    BUILD_PYTHON_WHEEL
+    "Build the standalone Python wheel and the isolated libamd_smi_python.so it bundles. OFF means only the system-package layout is built (no .whl artifact)."
+    OFF
+)
 
 # If amdsmi is built as a static library, it should support being embedded in other programs. The setting below essentially enables the -fPIC flag.
 set(CMAKE_POSITION_INDEPENDENT_CODE ON CACHE BOOL "Enable position independent code for all targets")
@@ -457,11 +462,12 @@ add_subdirectory(goamdsmi_shim)
 set(CPACK_DEBIAN_PACKAGE_RECOMMENDS "python3-argcomplete, libdrm-amdgpu-dev")
 set(CPACK_DEBIAN_ASAN_PACKAGE_RECOMMENDS ${CPACK_DEBIAN_PACKAGE_RECOMMENDS})
 set(CPACK_DEBIAN_DEV_PACKAGE_RECOMMENDS ${CPACK_DEBIAN_PACKAGE_RECOMMENDS})
-set(CPACK_DEBIAN_PACKAGE_DEPENDS
-    "libdrm-dev, sudo, libc6, python3 (>= 3.6.8), python3-pip, python3-setuptools, python3-wheel"
-)
+# TODO(next-release): drop python3-pip -- postinst no longer pip-installs
+# anything (replaced by amdsmi.pth drop). Kept to ease rollback during the .pth migration.
+set(CPACK_DEBIAN_PACKAGE_DEPENDS "libdrm-dev, sudo, libc6, python3 (>= 3.6.8), python3-pip")
 set(CPACK_DEBIAN_ASAN_PACKAGE_DEPENDS ${CPACK_DEBIAN_PACKAGE_DEPENDS})
 set(CPACK_DEBIAN_DEV_PACKAGE_DEPENDS ${CPACK_DEBIAN_PACKAGE_DEPENDS})
+set(CPACK_DEBIAN_TESTS_PACKAGE_DEPENDS ${CPACK_DEBIAN_PACKAGE_DEPENDS})
 
 # $CURRENT_YEAR is used by copyright.in
 string(TIMESTAMP CURRENT_YEAR "%Y")
@@ -521,9 +527,10 @@ set(CPACK_RPM_DEV_PACKAGE_SUGGESTS ${CPACK_RPM_PACKAGE_SUGGESTS})
 set(CPACK_RPM_ASAN_PACKAGE_SUGGESTS ${CPACK_RPM_PACKAGE_SUGGESTS})
 # python version gated by rhel8 :(
 # note that RPM based systems have "devel" suffix instead of "dev" in debian based systems
-set(CPACK_RPM_PACKAGE_REQUIRES "libdrm-devel, sudo, python3 >= 3.6.8, python3-pip, python3-wheel, python3-setuptools")
+set(CPACK_RPM_PACKAGE_REQUIRES "libdrm-devel, sudo, python3 >= 3.6.8, python3-pip")
 set(CPACK_RPM_DEV_PACKAGE_REQUIRES ${CPACK_RPM_PACKAGE_REQUIRES})
 set(CPACK_RPM_ASAN_PACKAGE_REQUIRES ${CPACK_RPM_PACKAGE_REQUIRES})
+set(CPACK_RPM_TESTS_PACKAGE_REQUIRES ${CPACK_RPM_PACKAGE_REQUIRES})
 
 # don't terminate if bytecompile of python files fails
 set(CPACK_RPM_SPEC_MORE_DEFINE "%define _python_bytecompile_errors_terminate_build 0")
