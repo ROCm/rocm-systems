@@ -1,0 +1,14 @@
+{
+    "expected_result_overrides": {},
+    "min_rows_overrides": {},
+    "min_rows_rules": [
+        {
+            "min_rows": 5,
+            "name_prefix": "rocpd_pmc_event_",
+            "when_min_rows": 20
+        }
+    ],
+    "skip_requires": [
+        "temp"
+    ]
+}
