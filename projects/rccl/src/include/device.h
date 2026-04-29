@@ -166,13 +166,10 @@ union ncclLLFifoLine {
 // Make sure the clean mask will last for at least NCCL_NSTEPS
 static_assert(NCCL_LL_CLEAN_MASK % NCCL_STEPS == 0, "Invalid NCCL_LL_CLEAN_MASK value");
 
- /* IMPORTANT Note regarding LL128 macros settings in RCCL below:
-  * Device code: NCCL_LL128_LINESIZE matches the GPU target (__gfx1250__).
-  * Host code: must not use NCCL_LL128_LINEELEMS / NCCL_LL128_DATAELEMS due to reliance
-  * on NCCL_LL128_LINESIZE which is GPU arch-dependent. 
-  * Use ncclLL128LineElemsFromArch() / ncclLL128DataElemsFromArch() (archinfo.h) or
-  * comm->ll128LineElems / comm->ll128DataElems (and proxyState->* in the net proxy). 
-  * Fallback to a default value used here for host code compile. */
+ /* Note regarding LL128 macros settings in RCCL below:
+  * Device code: NCCL_LL128_LINESIZE/LINEELEMS/DATAELEMS are only defined for device 
+  * Host code: Use ncclLL128LineElemsFromArch() / ncclLL128DataElemsFromArch() (archinfo.h) or
+  * comm->ll128LineElems / comm->ll128DataElems (and proxyState->* in the net proxy). */
 
 #if __HIP_DEVICE_COMPILE__
 #if defined (__gfx1250__)
@@ -180,11 +177,9 @@ static_assert(NCCL_LL_CLEAN_MASK % NCCL_STEPS == 0, "Invalid NCCL_LL_CLEAN_MASK 
 #else
 #define NCCL_LL128_LINESIZE 64
 #endif
-#else
-#define NCCL_LL128_LINESIZE 64
-#endif
 #define NCCL_LL128_LINEELEMS (NCCL_LL128_LINESIZE/sizeof(uint64_t))
 #define NCCL_LL128_DATAELEMS (NCCL_LL128_LINEELEMS-1)
+#endif
 
 #define NCCL_LL128_MAX_NTHREADS 256
 #define NCCL_LL128_ELEMS_PER_THREAD 28
