@@ -79,7 +79,7 @@ if [ -n "$MISSING" ]; then
     echo ""
     echo "These symbols are exported from $SO but their wrapper bodies"
     echo "are not in the LTTng migration inventory. Either:"
-    echo "  - migrate the wrapper (insert enter/exit emit + __rocm_corr)"
+    echo "  - migrate the wrapper (insert rocm_trace_emit_hip_api_enter/exit calls)"
     echo "  - explicitly exempt the symbol via lttng_coverage_exemptions.txt"
     exit 1
 fi

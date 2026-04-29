@@ -7,17 +7,23 @@
 #   I1. Enter/exit balance: count(hip_api_enter) ==
 #         sum(hip_api_exit_status, _ptr, _void). Catches missed exit emits.
 #
-#   I2. Doorbell uniqueness: every hsa_doorbell_ring event has a distinct
-#         corr_id within a single run (validated only when HSA tracepoints
-#         are also captured).
+#   I2. hip_aql_kernel_dispatch_submit must NOT carry a dispatch_idx field.
+#         (Renumbered from I3 in schema v2 era.)
 #
-#   I3. hip_aql_kernel_dispatch_submit must NOT carry a dispatch_idx field.
+#   I3. Channel context vpid + vtid attach to events. Per schema v3 the
+#         events themselves carry no per-event identity fields; the
+#         consumer reconstructs identity from (vpid, vtid, timestamp).
+#         Asserts that a kernel-dispatch event carries a valid vtid value.
 #
-#   I4. Parent propagation for HIP -> HSA chain: after a hipLaunchKernel
-#         call, at least one hip_kernel_dispatch_enqueue AND at least one
-#         hip_aql_kernel_dispatch_submit must carry the launch's corr_id as
-#         parent_corr_id. Catches regressions in the shared-TLS slot
-#         propagation between HIP and HSA.
+#   I4. Per-(vpid, vtid) LIFO walk: enter and exit events on a given
+#         thread arrive in matched-stack order. For the single-threaded
+#         test program, every hip_api_enter on the program's vtid is
+#         followed by a hip_api_exit_* on the same vtid before the next
+#         enter at the same depth. Asserts that the dispatch events
+#         (hip_kernel_dispatch_enqueue + hip_aql_kernel_dispatch_submit)
+#         appear on the SAME vtid as the hipLaunchKernel hip_api_enter,
+#         which is what the consumer's parent-attribution algorithm
+#         relies on.
 #
 # Usage:
 #   test_hip_invariants.sh [<libamdhip64-build-dir>]
@@ -84,11 +90,16 @@ done
 lttng create "$SESSION" --output="$WORK/trace" >/dev/null
 # Larger buffers than other LTTng tests because this run captures many
 # HSA events under a hipLaunchKernel call (~150-200 events) and they all
-# need to land on the launching CPU's buffer for the I4 parent-propagation
-# assertion to find them. 224-CPU host × 32 KiB × 4 = ~28 MB total, fits
+# need to land on the launching CPU's buffer for the I4 LIFO-stack
+# assertion to find them. 224-CPU host x 32 KiB x 4 = ~28 MB total, fits
 # in /dev/shm easily.
 lttng enable-channel --userspace --discard --subbuf-size=32768 --num-subbuf=4 default >/dev/null
-# Capture HIP and HSA tracepoints both. Doorbell + intercept tell I2/I4.
+# Per schema v3 the events themselves no longer carry corr_id / parent_corr_id
+# / tid; per-event identity comes from channel-context vpid + vtid plus the
+# CTF event-header timestamp. Attach those contexts to the channel.
+lttng add-context --userspace --channel=default --type=vpid --type=vtid >/dev/null
+# Capture HIP and HSA tracepoints both. Doorbell + intercept are still
+# captured (the consumer can recover their parent context from the LIFO walk).
 lttng enable-event --userspace -c default \
     'rocm_hip:*,rocm_hsa:hsa_api_enter,rocm_hsa:hsa_doorbell_ring,rocm_hsa:hsa_intercept_packets' >/dev/null
 lttng start >/dev/null
@@ -103,14 +114,7 @@ babeltrace2 "$WORK/trace" > "$LOG" 2>&1
 
 FAIL=0
 
-# ---- I1: Enter/exit balance per (pid, tid) ----------------------------------
-# Babeltrace2 default output includes `tid = N` field for events that have
-# the field (we emit `tid` explicitly on enter). Counting works as:
-#   ENTERS = lines matching rocm_hip:hip_api_enter
-#   EXITS  = lines matching rocm_hip:hip_api_exit_(status|ptr|void)
-# Per (pid, tid) breakdown is awk-grouped on the `vpid =` and `vtid =`
-# context fields when present; we capture process-wide totals for
-# simplicity (pid is constant, single-threaded test program).
+# ---- I1: Enter/exit balance ------------------------------------------------
 N_ENTER=$(grep -c 'rocm_hip:hip_api_enter:' "$LOG" || true)
 N_EXIT=$(grep -cE 'rocm_hip:hip_api_exit_(status|ptr|void):' "$LOG" || true)
 if [ "$N_ENTER" -ne "$N_EXIT" ]; then
@@ -120,80 +124,70 @@ else
     echo "  I1 OK: enter==exit ($N_ENTER each)"
 fi
 
-# ---- I2: Doorbell corr_id uniqueness (HARD ASSERTION) -----------------------
-# Extract each doorbell event's corr_id field; count unique vs total.
-# The test program launches a kernel, so at least one doorbell MUST fire.
-DB_TOTAL=$(grep -c 'rocm_hsa:hsa_doorbell_ring:' "$LOG" || true)
-if [ "$DB_TOTAL" -lt 1 ]; then
-    echo "  I2 FAIL: no doorbell events captured but kernel launch was issued" >&2
-    FAIL=1
-else
-    DB_CORR=$(grep 'rocm_hsa:hsa_doorbell_ring:' "$LOG" \
-        | sed -n 's/.*corr_id = \([0-9]\+\).*/\1/p')
-    DB_UNIQ=$(printf '%s\n' "$DB_CORR" | sort -u | wc -l)
-    DB_COUNT=$(printf '%s\n' "$DB_CORR" | wc -l)
-    if [ "$DB_UNIQ" -ne "$DB_COUNT" ]; then
-        echo "  I2 FAIL: doorbell corr_ids not unique ($DB_UNIQ unique / $DB_COUNT total)" >&2
-        FAIL=1
-    else
-        echo "  I2 OK: $DB_COUNT doorbells, all corr_id distinct"
-    fi
-fi
-
-# ---- I3: dispatch_idx field removed -----------------------------------------
+# ---- I2: dispatch_idx field absent ----------------------------------------
 # The hip_aql_kernel_dispatch_submit event schema has no dispatch_idx
-# field. Babeltrace2 prints all fields per event; if the field is present
-# a substring match will succeed.
+# field (the join key for the firmware-ring track is (queue_id, write_idx)
+# instead). Babeltrace2 prints all fields per event; if the field is
+# present a substring match will succeed.
 KD_COUNT=$(grep -c 'rocm_hip:hip_aql_kernel_dispatch_submit:' "$LOG" || true)
 if [ "$KD_COUNT" -gt 0 ]; then
     if grep -q 'rocm_hip:hip_aql_kernel_dispatch_submit:.*dispatch_idx' "$LOG"; then
-        echo "  I3 FAIL: hip_aql_kernel_dispatch_submit still carries dispatch_idx field" >&2
+        echo "  I2 FAIL: hip_aql_kernel_dispatch_submit still carries dispatch_idx field" >&2
         FAIL=1
     else
-        echo "  I3 OK: $KD_COUNT dispatch_submit events, none carry dispatch_idx"
+        echo "  I2 OK: $KD_COUNT dispatch_submit events, none carry dispatch_idx"
     fi
 else
-    echo "  I3 SKIP: no kernel dispatch submit events captured"
+    echo "  I2 SKIP: no kernel dispatch submit events captured"
 fi
 
-# ---- I4: Parent propagation through dispatch chain (HARD ASSERTION) --------
-# After hipLaunchKernel, the HIP-side dispatch events must carry the
-# launch's corr_id as their parent_corr_id. This proves the shared-TLS
-# slot in librocprofiler-register is properly accessed by the dispatch
-# path. Specifically:
-#   - hip_kernel_dispatch_enqueue must have parent_corr_id = launch corr
-#   - hip_aql_kernel_dispatch_submit must have parent_corr_id = launch corr
-#
-# Cross-runtime propagation INTO HSA events is ALSO checked, but only as
-# INFO: HSA api_enter events under deep call chains have intermediate
-# parents (HSA-on-HSA), and on high-CPU-count hosts the per-CPU sub-buffer
-# constraints frequently drop the first-level HSA events with
-# parent=launch. The HIP-side dispatch events are the reliable indicator
-# that propagation works end-to-end.
-LAUNCH_CORR=$(grep 'rocm_hip:hip_api_enter:.*hipLaunchKernel' "$LOG" \
+# ---- I3: vpid + vtid context propagation (HARD ASSERTION) -----------------
+# Every event carries vpid + vtid because we attached the contexts at
+# session-setup time. Without this, the consumer's per-thread LIFO walk
+# is impossible. babeltrace2 renders contexts as `{ vpid = N, vtid = M }`
+# brace blocks preceding the event-payload braces.
+SAMPLE_LINE=$(grep -E 'rocm_hip:hip_api_enter:' "$LOG" | head -1 || true)
+if [ -z "$SAMPLE_LINE" ]; then
+    echo "  I3 FAIL: no hip_api_enter event found in trace" >&2
+    FAIL=1
+elif echo "$SAMPLE_LINE" | grep -qE 'vpid = [0-9]+' && \
+     echo "$SAMPLE_LINE" | grep -qE 'vtid = [0-9]+'; then
+    echo "  I3 OK: hip_api_enter carries vpid + vtid channel context"
+else
+    echo "  I3 FAIL: hip_api_enter missing vpid or vtid context" >&2
+    echo "          line: $SAMPLE_LINE" >&2
+    FAIL=1
+fi
+
+# ---- I4: Same-thread dispatch chain (HARD ASSERTION) ----------------------
+# Per the schema-v3 consumer recipe (per-(vpid,vtid) LIFO walk), the
+# kernel-dispatch events fired inside hipLaunchKernel must be on the
+# SAME vtid as the hipLaunchKernel hip_api_enter event. CLR's call
+# graph is synchronous: the AQL packet write happens on the API call
+# thread; no thread hand-offs occur between the user-facing HIP API
+# entry and the dispatch packet write.
+LAUNCH_VTID=$(grep 'rocm_hip:hip_api_enter:.*hipLaunchKernel' "$LOG" \
     | head -1 \
-    | sed -n 's/.*corr_id = \([0-9]\+\),.*/\1/p')
-if [ -z "$LAUNCH_CORR" ]; then
+    | sed -n 's/.*vtid = \([0-9]\+\).*/\1/p')
+if [ -z "$LAUNCH_VTID" ]; then
     echo "  I4 FAIL: no hipLaunchKernel hip_api_enter found in trace" >&2
     FAIL=1
 else
-    # Match parent_corr_id field followed by a delimiter ([" ,}]) so we don't
-    # accidentally match a longer corr_id with LAUNCH_CORR as a prefix.
-    ENQUEUE_WITH_PARENT=$(grep 'rocm_hip:hip_kernel_dispatch_enqueue:' "$LOG" \
-        | grep -cE "parent_corr_id = $LAUNCH_CORR[ ,}]" || true)
-    SUBMIT_WITH_PARENT=$(grep 'rocm_hip:hip_aql_kernel_dispatch_submit:' "$LOG" \
-        | grep -cE "parent_corr_id = $LAUNCH_CORR[ ,}]" || true)
-    if [ "$ENQUEUE_WITH_PARENT" -lt 1 ]; then
-        echo "  I4 FAIL: no hip_kernel_dispatch_enqueue carries hipLaunchKernel's corr_id ($LAUNCH_CORR) as parent_corr_id" >&2
+    ENQUEUE_ON_LAUNCH_VTID=$(grep 'rocm_hip:hip_kernel_dispatch_enqueue:' "$LOG" \
+        | grep -cE "vtid = $LAUNCH_VTID[ ,}]" || true)
+    SUBMIT_ON_LAUNCH_VTID=$(grep 'rocm_hip:hip_aql_kernel_dispatch_submit:' "$LOG" \
+        | grep -cE "vtid = $LAUNCH_VTID[ ,}]" || true)
+    if [ "$ENQUEUE_ON_LAUNCH_VTID" -lt 1 ]; then
+        echo "  I4 FAIL: no hip_kernel_dispatch_enqueue on launching vtid ($LAUNCH_VTID)" >&2
         FAIL=1
-    elif [ "$SUBMIT_WITH_PARENT" -lt 1 ]; then
-        echo "  I4 FAIL: no hip_aql_kernel_dispatch_submit carries hipLaunchKernel's corr_id ($LAUNCH_CORR) as parent_corr_id" >&2
+    elif [ "$SUBMIT_ON_LAUNCH_VTID" -lt 1 ]; then
+        echo "  I4 FAIL: no hip_aql_kernel_dispatch_submit on launching vtid ($LAUNCH_VTID)" >&2
         FAIL=1
     else
-        echo "  I4 OK: hip_kernel_dispatch_enqueue + hip_aql_kernel_dispatch_submit both carry hipLaunchKernel's corr_id as parent"
-        HSA_WITH_PARENT=$(grep 'rocm_hsa:hsa_api_enter:' "$LOG" \
-            | grep -cE "parent_corr_id = $LAUNCH_CORR[ ,}]" || true)
-        echo "  I4 INFO: $HSA_WITH_PARENT HSA api_enter events also carry launch corr as parent (depth-1 HSA calls; deeper HSA calls have HSA-on-HSA parents)"
+        echo "  I4 OK: hip_kernel_dispatch_enqueue + hip_aql_kernel_dispatch_submit both fired on launching vtid $LAUNCH_VTID"
+        HSA_ON_LAUNCH_VTID=$(grep 'rocm_hsa:hsa_api_enter:' "$LOG" \
+            | grep -cE "vtid = $LAUNCH_VTID[ ,}]" || true)
+        echo "  I4 INFO: $HSA_ON_LAUNCH_VTID HSA api_enter events also fired on launching vtid (cross-runtime same-thread parent recovery via LIFO walk)"
     fi
 fi
 

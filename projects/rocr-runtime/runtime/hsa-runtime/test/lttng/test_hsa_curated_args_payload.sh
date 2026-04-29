@@ -107,6 +107,9 @@ lttng-sessiond --daemonize --pidfile "$SESSIOND_PIDFILE"
 TRACE_DIR="$WORK/trace"
 lttng create "$SESSION_NAME" --output "$TRACE_DIR" >/dev/null
 lttng enable-channel --userspace --discard --subbuf-size=32768 --num-subbuf=4 ch1 >/dev/null
+# Per schema v3, attach vpid+vtid contexts so consumers can reconstruct
+# per-thread enter/exit pairing.
+lttng add-context --userspace --channel=ch1 --type=vpid --type=vtid >/dev/null
 lttng enable-event --userspace --channel=ch1 \
     'rocm_hsa:hsa_api_enter,rocm_hsa:hsa_api_exit_status' >/dev/null
 lttng enable-event --userspace --channel=ch1 \

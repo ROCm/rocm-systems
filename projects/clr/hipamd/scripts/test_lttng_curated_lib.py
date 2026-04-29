@@ -96,7 +96,7 @@ def test_field_count_dim3_packed_is_1():
     assert expanded_field_count(api) == 1
 
 def test_field_count_hipLaunchKernel_natural():
-    """High-arity case: hipLaunchKernel natural = 10 payload (over budget)."""
+    """High-arity case: hipLaunchKernel natural = 10 payload (at budget)."""
     api = {'api': 'hipLaunchKernel', 'category': 'kernel_launch', 'args': [
         {'name': 'function_address', 'type': 'ptr',    'dir': 'IN'},
         {'name': 'numBlocks',        'type': 'dim3',   'dir': 'IN'},
@@ -105,7 +105,8 @@ def test_field_count_hipLaunchKernel_natural():
         {'name': 'sharedMemBytes',   'type': 'size',   'dir': 'IN'},
         {'name': 'stream',           'type': 'handle', 'dir': 'IN'},
     ]}
-    # 1 + 3 + 3 + 1 + 1 + 1 = 10 payload  (over budget without mitigation)
+    # 1 + 3 + 3 + 1 + 1 + 1 = 10 payload (exactly at the 10-field budget;
+    # without mitigation, an 11th captured arg would push it over).
     assert expanded_field_count(api) == 10
 
 def test_field_count_hipLaunchKernel_packed():
@@ -129,14 +130,14 @@ def test_validate_under_budget_passes():
     validate_api(api)  # no raise
 
 def test_validate_over_budget_raises():
-    """Validation aborts on >9 payload fields."""
+    """Validation aborts on >10 payload fields."""
     api = {'api': 'foo', 'category': 'kernel_launch', 'args': [
-        {'name': f'a{i}', 'type': 'uint32', 'dir': 'IN'} for i in range(10)
+        {'name': f'a{i}', 'type': 'uint32', 'dir': 'IN'} for i in range(11)
     ]}
     try:
         validate_api(api)
     except BudgetError as e:
-        assert '10' in str(e)
+        assert '11' in str(e)
         assert 'foo' in str(e)
         return
     raise AssertionError("expected BudgetError")

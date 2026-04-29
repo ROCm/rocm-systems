@@ -18,10 +18,10 @@ Subcommands:
                   - AND (>=1 ROCM_TRACE_RET_*/ROCR_TRACE_API_RET_* macro
                     OR    >=1 rocm_trace_emit_hip_api_exit_* call)
                 Symbols whose definition lives in a TU not touched by
-                the migrator (no '__rocm_corr' marker in any candidate
-                body) are reported as 'not-migrated-but-listed' and do
-                not fail the gate; the symbol-coverage gate vouches for
-                them upstream.
+                the migrator (no rocm_trace_emit_hip_api_enter(__func__)
+                marker in any candidate body) are reported as
+                'not-migrated-but-listed' and do not fail the gate; the
+                symbol-coverage gate vouches for them upstream.
 
   curated       Curated-args body-content gate. For each API listed in
                 --yaml, locate the wrapper body that contains the
@@ -126,8 +126,13 @@ _BODY_EXIT_MACRO_RE = re.compile(
 _BODY_EXIT_FN_RE = re.compile(r'rocm_trace_emit_hip_api_exit_[a-z0-9_]+\s*\(')
 
 # Presence in a candidate body => this is the migrated wrapper (vs. a
-# forward decl or pre-migration helper).
-_BODY_MIGRATION_MARKER = '__rocm_corr'
+# forward decl or pre-migration helper). The migrator injects an
+# unconditional rocm_trace_emit_hip_api_enter(__func__) (or
+# rocm_trace_emit_hsa_api_enter for HSA) as the first statement of every
+# wrapper body; matching that string is sufficient to identify a body
+# that has been touched by the migrator.
+_BODY_MIGRATION_MARKER_RE = re.compile(
+    r'rocm_trace_emit_(?:hip|hsa)_api_enter\s*\(\s*__func__\s*\)')
 
 
 def gate_body(args):
@@ -138,8 +143,15 @@ def gate_body(args):
         print(f'ERROR: names-file not found: {args.names_file}', file=sys.stderr)
         return 2
 
+    # Inventory files are tab-separated: NAME<TAB>RET_KIND<TAB>RET_TYPE.
+    # Take just the first column (the symbol name).
     with open(args.names_file) as f:
-        names = [ln.strip() for ln in f if ln.strip()]
+        names = []
+        for ln in f:
+            ln = ln.strip()
+            if not ln:
+                continue
+            names.append(ln.split('\t', 1)[0])
 
     files = _collect_cpp_files(args.src_dir)
 
@@ -155,7 +167,7 @@ def gate_body(args):
         chosen = None
         for _path, txt in files:
             for body in _iter_function_bodies(txt, n):
-                if _BODY_MIGRATION_MARKER in body:
+                if _BODY_MIGRATION_MARKER_RE.search(body):
                     chosen = body
                     break
             if chosen:

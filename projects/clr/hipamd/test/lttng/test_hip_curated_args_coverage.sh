@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Coverage test: every API in curated_apis.yaml fires its _args event.
 # Generated harness calls each API with placeholder args; trace must
-# contain matching _args event with linked corr_id.
+# contain matching _args event for each (presence test, not payload).
 set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"

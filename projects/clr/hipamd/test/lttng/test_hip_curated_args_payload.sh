@@ -4,11 +4,15 @@
 # 1. Spins up a per-user lttng-sessiond.
 # 2. Enables rocm_hip:hipMemcpyAsync_args, rocm_hip:hipMalloc_args,
 #    rocm_hip:hipDeviceSynchronize_args plus generic enter/exit_status/exit_ptr.
-# 3. Builds + runs a tiny program with known argument values.
-# 4. Asserts the typed args events appear with correct payload values.
-# 5. Asserts pointer-returning APIs still get hip_api_exit_ptr (NOT
+# 3. Attaches vpid + vtid channel contexts (the schema-v3 identity source).
+# 4. Builds + runs a tiny program with known argument values.
+# 5. Asserts the typed args events appear with correct payload values.
+# 6. Asserts pointer-returning APIs still get hip_api_exit_ptr (NOT
 #    exit_status); the typed args event augments the generic exit, never
 #    replaces it.
+# 7. Asserts the channel-context vpid + vtid attach to every event,
+#    proving the schema-v3 alternative to the deleted corr_id field is
+#    functional end-to-end.
 #
 # Usage: test_hip_curated_args_payload.sh [<libamdhip64-build-dir>]
 set -euo pipefail
@@ -77,6 +81,13 @@ lttng-sessiond --daemonize --pidfile "$SESSIOND_PIDFILE"
 TRACE_DIR="$WORK/trace"
 lttng create "$SESSION_NAME" --output "$TRACE_DIR" >/dev/null
 lttng enable-channel --userspace --discard --subbuf-size=32768 --num-subbuf=4 ch1 >/dev/null
+# Attach vpid + vtid contexts to every event in the channel. Per
+# producer schema v3 the events themselves no longer carry corr_id /
+# parent_corr_id / tid; per-event identity (process id, thread id,
+# timestamp) is fully recovered from the channel context plus the CTF
+# event-header timestamp. Consumers reconstruct enter/exit pairing by
+# walking the per-(vpid, vtid) event stream.
+lttng add-context --userspace --channel=ch1 --type=vpid --type=vtid >/dev/null
 # Generic events (already covered by existing test; we re-enable to verify
 # augment-not-replace behavior).
 lttng enable-event --userspace --channel=ch1 \
@@ -117,7 +128,7 @@ HIPMA_CRASH=0
 if [ "$APP_RC" -ne 0 ] && \
    grep -q 'hipMemcpyAsync' "$DUMP" && \
    ! grep -q 'rocm_hip:hipMemcpyAsync_args' "$DUMP" && \
-   ! grep 'corr_id' "$DUMP" | grep 'hipMemcpyAsync' | grep -q 'exit_status'; then
+   ! grep 'rocm_hip:hip_api_exit_status.*hipMemcpyAsync' "$DUMP" >/dev/null; then
     HIPMA_CRASH=1
 fi
 
@@ -170,26 +181,27 @@ else
     FAIL=$((FAIL+1))
 fi
 
-# E. corr_id linkage: each _args event must share a corr_id with a matching
-#    enter and exit event from the same call. Spot-check hipMemcpyAsync if
-#    its _args fired; otherwise fall back to hipMalloc.
-# Wrap pipelines in `|| true` because `set -o pipefail` would otherwise
-# abort the script if grep finds no match (which is expected when the
-# environment trips on hipMemcpyAsync; the fallback handles that case).
-ARGS_CORR=$( (grep 'rocm_hip:hipMemcpyAsync_args' "$DUMP" || true) | head -1 | \
-             sed -n 's/.*corr_id = \([0-9]*\).*/\1/p' )
+# E. vpid + vtid context propagation: every event must carry a vpid and
+#    vtid value, courtesy of `lttng add-context --type vpid --type vtid`.
+#    This is the consumer's primary identity key in the schema-v3 world;
+#    if it's missing, the entire LIFO-walk consumer recipe is unusable.
+#    Spot-check on a curated args event (hipMemcpyAsync if its _args fired,
+#    otherwise hipMalloc).
 LINK_API="hipMemcpyAsync"
-if [ -z "$ARGS_CORR" ]; then
-    ARGS_CORR=$( (grep 'rocm_hip:hipMalloc_args' "$DUMP" || true) | head -1 | \
-                 sed -n 's/.*corr_id = \([0-9]*\).*/\1/p' )
+LINK_LINE=$( (grep 'rocm_hip:hipMemcpyAsync_args' "$DUMP" || true) | head -1 )
+if [ -z "$LINK_LINE" ]; then
+    LINK_LINE=$( (grep 'rocm_hip:hipMalloc_args' "$DUMP" || true) | head -1 )
     LINK_API="hipMalloc"
 fi
-if [ -n "$ARGS_CORR" ] && \
-   grep "corr_id = $ARGS_CORR" "$DUMP" | grep -q 'hip_api_enter' && \
-   grep "corr_id = $ARGS_CORR" "$DUMP" | grep -q 'hip_api_exit_status'; then
-    echo "  PASS  corr_id $ARGS_CORR links $LINK_API _args event to generic enter+exit"
+# babeltrace2 renders contexts inside `{ vpid = N, vtid = M }` braces
+# preceding the event-payload braces.
+if [ -n "$LINK_LINE" ] && \
+   echo "$LINK_LINE" | grep -qE 'vpid = [0-9]+' && \
+   echo "$LINK_LINE" | grep -qE 'vtid = [0-9]+'; then
+    echo "  PASS  $LINK_API _args event carries vpid + vtid channel context"
 else
-    echo "  FAIL  corr_id linkage broken for $LINK_API"
+    echo "  FAIL  $LINK_API _args event missing vpid/vtid context"
+    echo "        line: $LINK_LINE"
     FAIL=$((FAIL+1))
 fi
 

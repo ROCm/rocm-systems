@@ -15,11 +15,10 @@
 #         exactly. Also requires at least one hsa_api_exit_i64 from a
 #         signal_load call, proving _i64 path works.
 #
-#   I3. Doorbell uniqueness: covered by the HIP invariants test
-#       (test_hip_invariants.sh), which fires real doorbells via
-#       hipLaunchKernel. A pure-HSA test program would need the full
-#       executable-load + dispatch-packet dance to fire doorbells; not
-#       worth the test complexity here.
+#   I3. (Schema v2 era only — doorbell corr_id uniqueness — removed in
+#       schema v3 since corr_id is no longer carried as an event field.
+#       The HIP invariants test now asserts vtid-based dispatch-chain
+#       affinity, which serves the same purpose.)
 #
 # Usage:
 #   test_hsa_invariants.sh [<build_dir>]
@@ -135,6 +134,10 @@ for _ in $(seq 1 20); do
 done
 lttng create "$SESSION" --output="$WORK/trace" >/dev/null
 lttng enable-channel --userspace --discard --subbuf-size=8192 --num-subbuf=2 default >/dev/null
+# Per schema v3 the events themselves no longer carry corr_id / parent_corr_id
+# / tid; per-event identity comes from channel-context vpid + vtid plus the
+# CTF event-header timestamp. Attach those contexts to the channel.
+lttng add-context --userspace --channel=default --type=vpid --type=vtid >/dev/null
 lttng enable-event --userspace -c default \
     'rocm_hsa:hsa_api_enter,rocm_hsa:hsa_api_exit_status,rocm_hsa:hsa_api_exit_ptr,rocm_hsa:hsa_api_exit_void,rocm_hsa:hsa_api_exit_u64,rocm_hsa:hsa_api_exit_i64,rocm_hsa:hsa_doorbell_ring' >/dev/null
 lttng start >/dev/null
@@ -187,10 +190,21 @@ else
     echo "  I2b OK: queue-index retvals match expected sequence ($EXPECTED)"
 fi
 
-# ---- I3: doorbell corr_id uniqueness covered in HIP test --------------------
-# Pure HSA programs require the full executable-load + dispatch-packet
-# dance to fire doorbells. test_hip_invariants.sh covers this invariant
-# via a real hipLaunchKernel.
+# ---- I3: vpid + vtid context propagation (HARD ASSERTION) -------------------
+# Per schema v3 every event carries vpid + vtid via channel context;
+# without this the consumer's per-thread LIFO walk is impossible.
+SAMPLE_LINE=$(grep -E 'rocm_hsa:hsa_api_enter:' "$LOG" | head -1 || true)
+if [ -z "$SAMPLE_LINE" ]; then
+    echo "  I3 FAIL: no hsa_api_enter event found in trace" >&2
+    FAIL=1
+elif echo "$SAMPLE_LINE" | grep -qE 'vpid = [0-9]+' && \
+     echo "$SAMPLE_LINE" | grep -qE 'vtid = [0-9]+'; then
+    echo "  I3 OK: hsa_api_enter carries vpid + vtid channel context"
+else
+    echo "  I3 FAIL: hsa_api_enter missing vpid or vtid context" >&2
+    echo "          line: $SAMPLE_LINE" >&2
+    FAIL=1
+fi
 
 if [ "$FAIL" -ne 0 ]; then
     echo "FAIL: see $LOG" >&2
