@@ -29,7 +29,15 @@ target_link_libraries(
         rocprofiler-systems::rocprofiler-systems-binary
         $<$<TARGET_EXISTS:rocprofiler-systems-bin-common>:rocprofiler-systems::rocprofiler-systems-bin-common>
         rocprofiler-systems::rocprofiler-systems-interface-library
-        # Sampling unit + integration tests folded in; stress + bench stay separate.
+        # Main static archive: pulls thread_info, pmc::postfork_*, runtime, and
+        # the rest of the rocprof-sys library symbols. The sampling lifecycle
+        # methods (folded out of real_production_hooks) reference these
+        # unconditionally, so the unit-tests binary now links them just like
+        # the sampling integration test binaries already do. The TSAN stress
+        # test which previously motivated keeping this archive out has been
+        # retired.
+        rocprofiler-systems::librocprofiler-systems-static
+        # Sampling unit + integration tests folded in; bench stays separate.
         rocprof-sys-sampling-tests-objs
 )
 
@@ -37,14 +45,3 @@ target_include_directories(
     rocprof-sys-unit-tests
     PRIVATE ${PROJECT_SOURCE_DIR}/source/lib/rocprof-sys ${PROJECT_SOURCE_DIR}/source/lib
 )
-
-# Do NOT link rocprofiler-systems-object-library into unit tests.
-# It contains library.cpp whose static initializers instantiate thread_data /
-# thread_deleter, causing a TSan deadlock during atexit.
-get_target_property(_ut_libs rocprof-sys-unit-tests LINK_LIBRARIES)
-if(_ut_libs MATCHES "rocprofiler-systems-object-library")
-    message(
-        FATAL_ERROR
-        "rocprof-sys-unit-tests must NOT link rocprofiler-systems-object-library. "
-    )
-endif()
