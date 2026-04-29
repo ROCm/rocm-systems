@@ -68,6 +68,12 @@ class SdmaImpl {
     int idx = local_pe * numChannels + sdmaChannel;
     anvil::SdmaQueueDeviceHandle* handle = deviceHandles_d[idx];
     if (handle != nullptr) {
+      // Flush GL0/GL1 → GL2 before submitting the SDMA descriptor.
+      // Fine-grain memory on AMD CDNA is CC (cache-coherent, cached in GL2):
+      // the SDMA engine reads from GL2, but __syncthreads() in the caller only
+      // drains stores to GL0 without flushing to GL2.  Agent scope is sufficient
+      // because SDMA probes GL2 via the coherence protocol on the same die.
+      __builtin_amdgcn_fence(__ATOMIC_RELEASE, "agent");
       anvil::put(*handle, dst, src, size);
       __hip_atomic_fetch_or(&sdmaDirtyPEs, 1ULL << local_pe, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
     }
