@@ -183,16 +183,39 @@ struct queue_drain_state {
   std::atomic<bool> should_stop{false};
   std::thread       worker;
 
-  // Defensive safety net. The disable / shutdown path is responsible for
-  // joining the worker explicitly; this destructor only fires if a
-  // queue_drain_state is dropped without anyone having done so (e.g. a
-  // future caller that constructs a qs but never registers it). std::thread's
-  // destructor calls std::terminate() on a still-joinable thread, so we
-  // signal stop and join here as a last-resort.
+  // Defensive safety net for early-construction failures (review C2,
+  // stage-2 code-quality). The supported lifetime model is: explicit
+  // disable / shutdown path stops + joins worker BEFORE dropping any
+  // shared_ptr ref. This destructor only matters in one specific case:
+  // a qs was made_shared but worker was never assigned (e.g. enable
+  // path's std::thread construction threw — review C1) and the
+  // registry path is rolling back via shared_ptr drop. In that case
+  // worker is default-constructed (joinable() == false) so the body
+  // is a no-op.
+  //
+  // The destructor canNOT meaningfully recover a started-but-unjoined
+  // worker. The worker holds its own shared_ptr<queue_drain_state>
+  // by value (per_queue_drain_loop param), so the destructor cannot
+  // be the path that releases the last ref while the worker is still
+  // running — by definition the worker's own ref is the last one when
+  // the loop returns, and at that point we are already on the worker
+  // thread. self-join would throw std::system_error
+  // (resource_deadlock_would_occur). Guard against that edge case
+  // explicitly: skip the join if `worker` represents the current
+  // thread. std::thread::id comparison is cheap and well-defined.
   ~queue_drain_state() {
-    if (worker.joinable()) {
+    if (worker.joinable() &&
+        worker.get_id() != std::this_thread::get_id()) {
       should_stop.store(true, std::memory_order_release);
       worker.join();
+    } else if (worker.joinable()) {
+      // Self-destruction path. We cannot join ourselves; detach so
+      // std::thread's destructor doesn't std::terminate the process.
+      // This branch indicates a programming error (the supported
+      // lifetime model requires explicit join from a non-worker
+      // thread before dropping the last ref); detaching is a
+      // best-effort cleanup, not a correctness path.
+      worker.detach();
     }
   }
 };
@@ -793,7 +816,30 @@ void enable_dispatch_log_for_queue_locked(core::Queue* q) {
   // for our hosts. Workloads pushing into the thousands-of-queues regime
   // would need a pthread_create-based spawn helper to set a small (e.g.
   // 64 KiB) stack; defer that until measured pressure exists.
-  qs->worker = std::thread(per_queue_drain_loop, qs);
+  //
+  // Failure handling (review C1, stage-2 code-quality): std::thread's
+  // ctor can throw std::system_error if the OS refuses to create the
+  // thread (EAGAIN / RLIMIT_NPROC / address-space exhaustion). Without
+  // a catch the exception would propagate up — to the poller's tick
+  // (which has no handler and would std::terminate the process), or
+  // to on_queue_create on an application thread. Roll back to the
+  // pre-enable state instead: erase the registry entry and release
+  // the profiling ref. The next poller tick will retry; the queue
+  // simply skips this tick.
+  try {
+    qs->worker = std::thread(per_queue_drain_loop, qs);
+  } catch (const std::system_error& e) {
+    std::fprintf(stderr,
+                 "[hsa-runtime] dispatch_log: queue_id=%llu ENABLE step 4 "
+                 "(std::thread spawn) failed: %s; rolling back enable\n",
+                 static_cast<unsigned long long>(queue_id_of(q)),
+                 e.what());
+    g_active_queues.erase(qs->queue_id);
+    QueueProfilingRelease(q);
+    // dispatch_log_active was never flipped to true, so no flag rollback
+    // needed. The next poller enable pass will retry this queue.
+    return;
+  }
 
   q->dispatch_log_active.store(true, std::memory_order_release);
 }
