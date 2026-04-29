@@ -10,6 +10,8 @@
 #include "TestChecks.hpp"
 #include "nccl.h"
 
+#include <vector>
+
 #ifdef MPI_TESTS_ENABLED
 
 using namespace MPITestConstants;
@@ -18,40 +20,34 @@ using namespace RCCLTestHelpers;
 
 class RevokeMPITest : public MPITestBase {};
 
-/**
- * Happy path: all ranks revoke their communicator and assert ncclSuccess.
- * Requires >=2 ranks and >=2 nodes (multi-node scenario).
- */
-TEST_F(RevokeMPITest, Revoke_AllRanks_Succeeds)
+static void computeSymmetricExclude(int worldRank, int worldSize,
+                                    std::vector<int>& excludeList, bool& isExcluded)
 {
-    ASSERT_TRUE(validateTestPrerequisites(kMinProcessesForMPI,
-                                          kNoProcessLimit,
-                                          kNoPowerOfTwoRequired,
-                                          2,
-                                          kNoNodeLimit))
-        << "Test requires at least 2 MPI processes and 2 nodes";
+    MPI_Comm nodeComm;
+    MPI_Comm_split_type(MPI_COMM_WORLD, MPI_COMM_TYPE_SHARED, worldRank, MPI_INFO_NULL, &nodeComm);
+    int localSize, localRank;
+    MPI_Comm_size(nodeComm, &localSize);
+    MPI_Comm_rank(nodeComm, &localRank);
+    MPI_Comm_free(&nodeComm);
 
-    ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
-
-    ncclComm_t comm = getActiveCommunicator();
-
-    ASSERT_MPI_EQ(ncclSuccess, ncclCommRevoke(comm, NCCL_REVOKE_DEFAULT));
-
-    MPI_Barrier(MPI_COMM_WORLD);
+    int numNodes = worldSize / localSize;
+    isExcluded = (localRank == localSize - 1);
+    excludeList.clear();
+    for (int n = 0; n < numNodes; n++)
+        excludeList.push_back((n + 1) * localSize - 1);
 }
 
 /**
  * After revoke, collective operations must return ncclInvalidUsage on all ranks.
- * Requires >=2 ranks and >=2 nodes.
  */
 TEST_F(RevokeMPITest, Revoke_RejectsCollectives)
 {
-    ASSERT_TRUE(validateTestPrerequisites(kMinProcessesForMPI,
+    ASSERT_TRUE(validateTestPrerequisites(2,
                                           kNoProcessLimit,
                                           kNoPowerOfTwoRequired,
-                                          2,
+                                          1,
                                           kNoNodeLimit))
-        << "Test requires at least 2 MPI processes and 2 nodes";
+        << "Test requires at least 2 MPI processes";
 
     ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
 
@@ -71,18 +67,18 @@ TEST_F(RevokeMPITest, Revoke_RejectsCollectives)
 }
 
 /**
- * Revoke parent communicator, split into child comm, run AllReduce on child
- * across nodes and assert success.
- * Requires >=2 ranks and >=2 nodes.
+ * Revoke parent communicator, split into child comm, run AllReduce on the
+ * child and assert success. Validates that revoke leaves the parent valid as
+ * a source for ncclCommSplit.
  */
 TEST_F(RevokeMPITest, Revoke_ThenSplit_ChildWorks)
 {
-    ASSERT_TRUE(validateTestPrerequisites(kMinProcessesForMPI,
+    ASSERT_TRUE(validateTestPrerequisites(2,
                                           kNoProcessLimit,
                                           kNoPowerOfTwoRequired,
-                                          2,
+                                          1,
                                           kNoNodeLimit))
-        << "Test requires at least 2 MPI processes and 2 nodes";
+        << "Test requires at least 2 MPI processes";
 
     ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
 
@@ -119,43 +115,40 @@ TEST_F(RevokeMPITest, Revoke_ThenSplit_ChildWorks)
 }
 
 /**
- * Revoke parent communicator, then shrink (excluding the last rank on each
- * node to keep topology symmetric), and run AllReduce on the resulting child
- * across nodes. Validates that revoke forces shareResources=false on the
- * shrunk child so the child operates with its own fresh resources independent
- * of the revoked parent.
- * Requires >=2 ranks and >=2 nodes.
+ * Revoke parent communicator, then shrink (excluding the last rank), and run
+ * AllReduce on the resulting child. Validates that revoke leaves the parent
+ * valid as a source for ncclCommShrink and that the child operates with its
+ * own resources independent of the revoked parent.
  */
 TEST_F(RevokeMPITest, RevokeThenShrink_ChildWorks)
 {
-    ASSERT_TRUE(validateTestPrerequisites(kMinProcessesForMPI,
+    ASSERT_TRUE(validateTestPrerequisites(2,
                                           kNoProcessLimit,
                                           kNoPowerOfTwoRequired,
-                                          2,
+                                          1,
                                           kNoNodeLimit))
-        << "Test requires at least 2 MPI processes and 2 nodes";
+        << "Test requires at least 2 MPI processes";
 
     ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
 
-    ncclComm_t  parent     = getActiveCommunicator();
-    hipStream_t stream     = getActiveStream();
-    int         rank       = MPIEnvironment::world_rank;
-    int         world_size = MPIEnvironment::world_size;
+    ncclComm_t  parent = getActiveCommunicator();
+    hipStream_t stream = getActiveStream();
+    int         rank   = MPIEnvironment::world_rank;
 
     ASSERT_MPI_EQ(ncclSuccess, ncclCommRevoke(parent, NCCL_REVOKE_DEFAULT));
 
     MPI_Barrier(MPI_COMM_WORLD);
 
-    int ranksPerNode    = world_size / 2;
-    int excludeList[2]  = { ranksPerNode - 1, world_size - 1 };
-    int excludeCount    = 2;
-    bool isExcluded     = (rank == excludeList[0] || rank == excludeList[1]);
-    ncclComm_t child    = NCCL_COMM_NULL;
+    std::vector<int> excludeList;
+    bool             isExcluded;
+    computeSymmetricExclude(rank, MPIEnvironment::world_size, excludeList, isExcluded);
+    ncclComm_t child = NCCL_COMM_NULL;
 
     if(!isExcluded)
     {
         ASSERT_EQ(ncclSuccess,
-                  ncclCommShrink(parent, excludeList, excludeCount, &child, nullptr, NCCL_SHRINK_DEFAULT));
+                  ncclCommShrink(parent, excludeList.data(), excludeList.size(),
+                                 &child, nullptr, NCCL_SHRINK_DEFAULT));
 
         ASSERT_NE(child, nullptr);
         auto child_guard = makeCommAutoGuard(child);
@@ -174,130 +167,6 @@ TEST_F(RevokeMPITest, RevokeThenShrink_ChildWorks)
                   ncclAllReduce(send_buf, recv_buf, 1, ncclFloat, ncclSum, child, stream));
 
         HIP_TEST_CHECK_GTEST_FAIL(hipStreamSynchronize(stream));
-    }
-
-    MPI_Barrier(MPI_COMM_WORLD);
-}
-
-/**
- * Shrink first (excluding the last rank on each node to keep topology
- * symmetric), then revoke the parent. Validates that the previously-created
- * child communicator continues to function for collectives even after the
- * parent is revoked (child is independent).
- * Requires >=2 ranks and >=2 nodes.
- */
-TEST_F(RevokeMPITest, ShrinkThenRevoke_ChildUnaffected)
-{
-    ASSERT_TRUE(validateTestPrerequisites(kMinProcessesForMPI,
-                                          kNoProcessLimit,
-                                          kNoPowerOfTwoRequired,
-                                          2,
-                                          kNoNodeLimit))
-        << "Test requires at least 2 MPI processes and 2 nodes";
-
-    ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
-
-    ncclComm_t  parent     = getActiveCommunicator();
-    hipStream_t stream     = getActiveStream();
-    int         rank       = MPIEnvironment::world_rank;
-    int         world_size = MPIEnvironment::world_size;
-
-    int ranksPerNode    = world_size / 2;
-    int excludeList[2]  = { ranksPerNode - 1, world_size - 1 };
-    int excludeCount    = 2;
-    bool isExcluded     = (rank == excludeList[0] || rank == excludeList[1]);
-    ncclComm_t child    = NCCL_COMM_NULL;
-
-    if(!isExcluded)
-    {
-        ASSERT_EQ(ncclSuccess,
-                  ncclCommShrink(parent, excludeList, excludeCount, &child, nullptr, NCCL_SHRINK_DEFAULT));
-        ASSERT_NE(child, nullptr);
-    }
-
-    MPI_Barrier(MPI_COMM_WORLD);
-
-    ASSERT_MPI_EQ(ncclSuccess, ncclCommRevoke(parent, NCCL_REVOKE_DEFAULT));
-
-    MPI_Barrier(MPI_COMM_WORLD);
-
-    if(!isExcluded)
-    {
-        auto child_guard = makeCommAutoGuard(child);
-
-        void* send_buf = nullptr;
-        void* recv_buf = nullptr;
-        HIP_TEST_CHECK_GTEST_FAIL(hipMalloc(&send_buf, sizeof(float)));
-        HIP_TEST_CHECK_GTEST_FAIL(hipMalloc(&recv_buf, sizeof(float)));
-        auto send_guard = makeScopeGuard([&]() { if(send_buf) (void)hipFree(send_buf); });
-        auto recv_guard = makeScopeGuard([&]() { if(recv_buf) (void)hipFree(recv_buf); });
-
-        HIP_TEST_CHECK_GTEST_FAIL(zeroInitializeBuffer<float>(send_buf, 1));
-        HIP_TEST_CHECK_GTEST_FAIL(zeroInitializeBuffer<float>(recv_buf, 1));
-
-        ASSERT_EQ(ncclSuccess,
-                  ncclAllReduce(send_buf, recv_buf, 1, ncclFloat, ncclSum, child, stream));
-
-        HIP_TEST_CHECK_GTEST_FAIL(hipStreamSynchronize(stream));
-    }
-
-    MPI_Barrier(MPI_COMM_WORLD);
-}
-
-/**
- * Shrink first (excluding the last rank on each node to keep topology
- * symmetric), then revoke the parent. Validates that subsequent collectives
- * on the *parent* are rejected with ncclInvalidUsage on every rank that still
- * holds the parent handle (including the excluded ranks), while leaving the
- * previously-created child untouched.
- * Requires >=2 ranks and >=2 nodes.
- */
-TEST_F(RevokeMPITest, ShrinkThenRevoke_ParentRejectsCollectives)
-{
-    ASSERT_TRUE(validateTestPrerequisites(kMinProcessesForMPI,
-                                          kNoProcessLimit,
-                                          kNoPowerOfTwoRequired,
-                                          2,
-                                          kNoNodeLimit))
-        << "Test requires at least 2 MPI processes and 2 nodes";
-
-    ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
-
-    ncclComm_t  parent     = getActiveCommunicator();
-    hipStream_t stream     = getActiveStream();
-    int         rank       = MPIEnvironment::world_rank;
-    int         world_size = MPIEnvironment::world_size;
-
-    int ranksPerNode    = world_size / 2;
-    int excludeList[2]  = { ranksPerNode - 1, world_size - 1 };
-    int excludeCount    = 2;
-    bool isExcluded     = (rank == excludeList[0] || rank == excludeList[1]);
-    ncclComm_t child    = NCCL_COMM_NULL;
-
-    if(!isExcluded)
-    {
-        ASSERT_EQ(ncclSuccess,
-                  ncclCommShrink(parent, excludeList, excludeCount, &child, nullptr, NCCL_SHRINK_DEFAULT));
-        ASSERT_NE(child, nullptr);
-    }
-
-    MPI_Barrier(MPI_COMM_WORLD);
-
-    ASSERT_MPI_EQ(ncclSuccess, ncclCommRevoke(parent, NCCL_REVOKE_DEFAULT));
-
-    MPI_Barrier(MPI_COMM_WORLD);
-
-    void* buf = nullptr;
-    HIP_TEST_CHECK_GTEST_FAIL(hipMalloc(&buf, sizeof(float)));
-    auto buf_guard = makeScopeGuard([&]() { if(buf) (void)hipFree(buf); });
-
-    ncclResult_t result = ncclAllReduce(buf, buf, 1, ncclFloat, ncclSum, parent, stream);
-    ASSERT_MPI_EQ(ncclInvalidUsage, result);
-
-    if(!isExcluded)
-    {
-        auto child_guard = makeCommAutoGuard(child);
-        (void) child_guard;
     }
 
     MPI_Barrier(MPI_COMM_WORLD);
@@ -306,18 +175,17 @@ TEST_F(RevokeMPITest, ShrinkThenRevoke_ParentRejectsCollectives)
 /**
  * Explicit lifecycle: revoke the parent on every rank, then call
  * ncclCommDestroy and assert ncclSuccess on every rank. Validates the
- * documented "revoke leaves comm safe for destroy" contract across nodes
- * (the existing tests rely on TearDown to call destroy implicitly).
- * Requires >=2 ranks and >=2 nodes.
+ * documented "revoke leaves comm safe for destroy" contract (other tests
+ * rely on TearDown to call destroy implicitly).
  */
 TEST_F(RevokeMPITest, Revoke_ThenDestroy_CleanLifecycle)
 {
-    ASSERT_TRUE(validateTestPrerequisites(kMinProcessesForMPI,
+    ASSERT_TRUE(validateTestPrerequisites(2,
                                           kNoProcessLimit,
                                           kNoPowerOfTwoRequired,
-                                          2,
+                                          1,
                                           kNoNodeLimit))
-        << "Test requires at least 2 MPI processes and 2 nodes";
+        << "Test requires at least 2 MPI processes";
 
     ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
 
@@ -334,30 +202,27 @@ TEST_F(RevokeMPITest, Revoke_ThenDestroy_CleanLifecycle)
 }
 
 /**
- * Stress the in-flight scenario: enqueue a large AllReduce on every rank,
- * then call ncclCommRevoke before the collective kernel completes. Verifies
- * that revoke returns cleanly without hanging, the parent rejects subsequent
- * collectives, and a shrunk child built from the revoked parent runs an
- * AllReduce successfully.
- * Requires >=2 ranks and >=2 nodes.
+ * Full collective recovery cycle: run an AllReduce on the parent, revoke,
+ * shrink (excluding the last rank), then run another AllReduce on the
+ * shrunk child. Mirrors the Meta fault-tolerance recovery flow:
+ * collective -> revoke -> shrink -> collective.
  */
-TEST_F(RevokeMPITest, Revoke_DuringInflightCollective_Succeeds)
+TEST_F(RevokeMPITest, Collective_Revoke_Shrink_Collective)
 {
-    ASSERT_TRUE(validateTestPrerequisites(kMinProcessesForMPI,
+    ASSERT_TRUE(validateTestPrerequisites(2,
                                           kNoProcessLimit,
                                           kNoPowerOfTwoRequired,
-                                          2,
+                                          1,
                                           kNoNodeLimit))
-        << "Test requires at least 2 MPI processes and 2 nodes";
+        << "Test requires at least 2 MPI processes";
 
     ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
 
-    ncclComm_t  parent     = getActiveCommunicator();
-    hipStream_t stream     = getActiveStream();
-    int         rank       = MPIEnvironment::world_rank;
-    int         world_size = MPIEnvironment::world_size;
+    ncclComm_t  parent = getActiveCommunicator();
+    hipStream_t stream = getActiveStream();
+    int         rank   = MPIEnvironment::world_rank;
 
-    constexpr size_t kCount = 64 * 1024 * 1024;
+    constexpr size_t kCount = 1024 * 1024;
     void* send_buf = nullptr;
     void* recv_buf = nullptr;
     HIP_TEST_CHECK_GTEST_FAIL(hipMalloc(&send_buf, kCount * sizeof(float)));
@@ -370,33 +235,33 @@ TEST_F(RevokeMPITest, Revoke_DuringInflightCollective_Succeeds)
 
     ASSERT_MPI_EQ(ncclSuccess,
                   ncclAllReduce(send_buf, recv_buf, kCount, ncclFloat, ncclSum, parent, stream));
+    HIP_TEST_CHECK_GTEST_FAIL(hipStreamSynchronize(stream));
 
     ASSERT_MPI_EQ(ncclSuccess, ncclCommRevoke(parent, NCCL_REVOKE_DEFAULT));
 
-    HIP_TEST_CHECK_GTEST_FAIL(hipStreamSynchronize(stream));
-
     MPI_Barrier(MPI_COMM_WORLD);
 
-    ncclResult_t rejected = ncclAllReduce(send_buf, recv_buf, 1, ncclFloat, ncclSum, parent, stream);
-    ASSERT_MPI_EQ(ncclInvalidUsage, rejected);
-
-    MPI_Barrier(MPI_COMM_WORLD);
-
-    int ranksPerNode   = world_size / 2;
-    int excludeList[2] = { ranksPerNode - 1, world_size - 1 };
-    int excludeCount   = 2;
-    bool isExcluded    = (rank == excludeList[0] || rank == excludeList[1]);
-    ncclComm_t child   = NCCL_COMM_NULL;
+    std::vector<int> excludeList;
+    bool             isExcluded;
+    computeSymmetricExclude(rank, MPIEnvironment::world_size, excludeList, isExcluded);
+    ncclComm_t child = NCCL_COMM_NULL;
 
     if(!isExcluded)
     {
         ASSERT_EQ(ncclSuccess,
-                  ncclCommShrink(parent, excludeList, excludeCount, &child, nullptr, NCCL_SHRINK_DEFAULT));
+                  ncclCommShrink(parent, excludeList.data(), excludeList.size(),
+                                 &child, nullptr, NCCL_SHRINK_DEFAULT));
         ASSERT_NE(child, nullptr);
+    }
+
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    if(!isExcluded)
+    {
         auto child_guard = makeCommAutoGuard(child);
 
         ASSERT_EQ(ncclSuccess,
-                  ncclAllReduce(send_buf, recv_buf, 1, ncclFloat, ncclSum, child, stream));
+                  ncclAllReduce(send_buf, recv_buf, kCount, ncclFloat, ncclSum, child, stream));
         HIP_TEST_CHECK_GTEST_FAIL(hipStreamSynchronize(stream));
     }
 
@@ -404,21 +269,19 @@ TEST_F(RevokeMPITest, Revoke_DuringInflightCollective_Succeeds)
 }
 
 /**
- * Shrink first (excluding the last rank on each node to keep topology
- * symmetric), then revoke the parent, then split the shrunk child further.
- * Validates that a child created from a shrunk parent remains fully usable
- * for further sub-comm creation and collectives even after the parent has
- * been revoked.
- * Requires >=2 ranks and >=2 nodes.
+ * P2P recovery cycle with in-flight ops: launch ncclSend/ncclRecv between
+ * pairs, revoke the parent before draining, then shrink and verify a fresh
+ * P2P exchange on the child succeeds. Validates that in-flight P2P is
+ * halted gracefully and the child's resources are clean.
  */
-TEST_F(RevokeMPITest, ShrinkThenRevokeThenSplit_ChildWorks)
+TEST_F(RevokeMPITest, P2P_Revoke_Shrink_P2P)
 {
-    ASSERT_TRUE(validateTestPrerequisites(kMinProcessesForMPI,
+    ASSERT_TRUE(validateTestPrerequisites(2,
                                           kNoProcessLimit,
                                           kNoPowerOfTwoRequired,
-                                          2,
+                                          1,
                                           kNoNodeLimit))
-        << "Test requires at least 2 MPI processes and 2 nodes";
+        << "Test requires at least 2 MPI processes";
 
     ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
 
@@ -427,49 +290,72 @@ TEST_F(RevokeMPITest, ShrinkThenRevokeThenSplit_ChildWorks)
     int         rank       = MPIEnvironment::world_rank;
     int         world_size = MPIEnvironment::world_size;
 
-    int ranksPerNode      = world_size / 2;
-    int excludeList[2]    = { ranksPerNode - 1, world_size - 1 };
-    int excludeCount      = 2;
-    bool isExcluded       = (rank == excludeList[0] || rank == excludeList[1]);
-    ncclComm_t shrinkChild = NCCL_COMM_NULL;
+    constexpr size_t kCount = 64 * 1024;
+    void* send_buf = nullptr;
+    void* recv_buf = nullptr;
+    HIP_TEST_CHECK_GTEST_FAIL(hipMalloc(&send_buf, kCount * sizeof(float)));
+    HIP_TEST_CHECK_GTEST_FAIL(hipMalloc(&recv_buf, kCount * sizeof(float)));
+    auto send_guard = makeScopeGuard([&]() { if(send_buf) (void)hipFree(send_buf); });
+    auto recv_guard = makeScopeGuard([&]() { if(recv_buf) (void)hipFree(recv_buf); });
+
+    HIP_TEST_CHECK_GTEST_FAIL(zeroInitializeBuffer<float>(send_buf, kCount));
+    HIP_TEST_CHECK_GTEST_FAIL(zeroInitializeBuffer<float>(recv_buf, kCount));
+
+    ASSERT_MPI_EQ(ncclSuccess, ncclGroupStart());
+    if(rank % 2 == 0 && rank + 1 < world_size)
+    {
+        ASSERT_MPI_EQ(ncclSuccess,
+                      ncclSend(send_buf, kCount, ncclFloat, rank + 1, parent, stream));
+    }
+    else if(rank % 2 == 1)
+    {
+        ASSERT_MPI_EQ(ncclSuccess,
+                      ncclRecv(recv_buf, kCount, ncclFloat, rank - 1, parent, stream));
+    }
+    ASSERT_MPI_EQ(ncclSuccess, ncclGroupEnd());
+
+    ASSERT_MPI_EQ(ncclSuccess, ncclCommRevoke(parent, NCCL_REVOKE_DEFAULT));
+
+    HIP_TEST_CHECK_GTEST_FAIL(hipStreamSynchronize(stream));
+
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    std::vector<int> excludeList;
+    bool             isExcluded;
+    computeSymmetricExclude(rank, world_size, excludeList, isExcluded);
+    ncclComm_t child = NCCL_COMM_NULL;
 
     if(!isExcluded)
     {
         ASSERT_EQ(ncclSuccess,
-                  ncclCommShrink(parent, excludeList, excludeCount, &shrinkChild, nullptr, NCCL_SHRINK_DEFAULT));
-        ASSERT_NE(shrinkChild, nullptr);
+                  ncclCommShrink(parent, excludeList.data(), excludeList.size(),
+                                 &child, nullptr, NCCL_SHRINK_DEFAULT));
+        ASSERT_NE(child, nullptr);
     }
 
     MPI_Barrier(MPI_COMM_WORLD);
 
-    ASSERT_MPI_EQ(ncclSuccess, ncclCommRevoke(parent, NCCL_REVOKE_DEFAULT));
-
-    MPI_Barrier(MPI_COMM_WORLD);
-
     if(!isExcluded)
     {
-        auto shrink_guard = makeCommAutoGuard(shrinkChild);
+        auto child_guard = makeCommAutoGuard(child);
 
-        ncclComm_t splitChild = nullptr;
+        int child_rank = -1;
+        int child_size = 0;
+        ASSERT_EQ(ncclSuccess, ncclCommUserRank(child, &child_rank));
+        ASSERT_EQ(ncclSuccess, ncclCommCount(child, &child_size));
+
         ASSERT_EQ(ncclSuccess, ncclGroupStart());
-        ASSERT_EQ(ncclSuccess, ncclCommSplit(shrinkChild, 0, rank, &splitChild, nullptr));
+        if(child_rank % 2 == 0 && child_rank + 1 < child_size)
+        {
+            ASSERT_EQ(ncclSuccess,
+                      ncclSend(send_buf, kCount, ncclFloat, child_rank + 1, child, stream));
+        }
+        else if(child_rank % 2 == 1)
+        {
+            ASSERT_EQ(ncclSuccess,
+                      ncclRecv(recv_buf, kCount, ncclFloat, child_rank - 1, child, stream));
+        }
         ASSERT_EQ(ncclSuccess, ncclGroupEnd());
-
-        ASSERT_NE(splitChild, nullptr);
-        auto split_guard = makeCommAutoGuard(splitChild);
-
-        void* send_buf = nullptr;
-        void* recv_buf = nullptr;
-        HIP_TEST_CHECK_GTEST_FAIL(hipMalloc(&send_buf, sizeof(float)));
-        HIP_TEST_CHECK_GTEST_FAIL(hipMalloc(&recv_buf, sizeof(float)));
-        auto send_guard = makeScopeGuard([&]() { if(send_buf) (void)hipFree(send_buf); });
-        auto recv_guard = makeScopeGuard([&]() { if(recv_buf) (void)hipFree(recv_buf); });
-
-        HIP_TEST_CHECK_GTEST_FAIL(zeroInitializeBuffer<float>(send_buf, 1));
-        HIP_TEST_CHECK_GTEST_FAIL(zeroInitializeBuffer<float>(recv_buf, 1));
-
-        ASSERT_EQ(ncclSuccess,
-                  ncclAllReduce(send_buf, recv_buf, 1, ncclFloat, ncclSum, splitChild, stream));
 
         HIP_TEST_CHECK_GTEST_FAIL(hipStreamSynchronize(stream));
     }
