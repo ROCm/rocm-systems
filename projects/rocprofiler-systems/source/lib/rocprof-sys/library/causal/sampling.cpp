@@ -17,7 +17,6 @@
 #include "library/sampling_service_instantiation.hpp"
 #include "library/thread_data.hpp"
 #include "library/thread_info.hpp"
-#include "sampling/sampling_service.hpp"
 
 #include <timemory/macros.hpp>
 #include <timemory/mpl/types.hpp>

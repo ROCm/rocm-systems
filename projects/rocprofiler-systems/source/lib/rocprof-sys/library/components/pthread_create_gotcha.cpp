@@ -13,7 +13,6 @@
 #include "library/thread_data.hpp"
 #include "library/thread_info.hpp"
 #include "library/tracing.hpp"
-#include "sampling/sampling_service.hpp"
 
 #include <timemory/backends/threading.hpp>
 #include <timemory/components/macros.hpp>

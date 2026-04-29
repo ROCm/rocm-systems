@@ -11,7 +11,6 @@
 #include "library/components/fork_gotcha.hpp"
 #include "library/runtime.hpp"
 #include "library/sampling_service_instantiation.hpp"
-#include "sampling/sampling_service.hpp"
 
 #include <timemory/backends/process.hpp>
 #include <timemory/backends/threading.hpp>
