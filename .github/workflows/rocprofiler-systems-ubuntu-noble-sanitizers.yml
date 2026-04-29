@@ -219,13 +219,29 @@ jobs:
             echo "No sanitizer log files in ${SANITIZER_LOG_DIR}"
             exit 0
           fi
-          # One collapsible group per file, titled by filename. GitHub renders
-          # ::group::NAME ... ::endgroup:: as a foldable section in the log.
+          # Lines that mean a sanitizer actually fired (vs. a benign
+          # "Suppressions used:" summary that print_suppressions=1 always emits).
+          finding_regex='==[0-9]+==ERROR|SUMMARY: (Address|Leak|Undefined|Thread)Sanitizer|WARNING: ThreadSanitizer|runtime error:'
+          files_with_findings=()
           for f in $(printf '%s\n' "${files[@]}" | sort); do
-            echo "::group::$(basename "${f}")"
-            cat "${f}"
-            echo "::endgroup::"
+            name=$(basename "${f}")
+            if grep -qE "${finding_regex}" "${f}"; then
+              files_with_findings+=("${name}")
+              echo "::group::${name} (FINDINGS)"
+              cat "${f}"
+              echo "::endgroup::"
+            else
+              # Suppression summaries only — collapse without flagging.
+              echo "::group::${name} (clean — suppressions only)"
+              cat "${f}"
+              echo "::endgroup::"
+            fi
           done
+          if [ "${#files_with_findings[@]}" -gt 0 ]; then
+            echo "::error::Sanitizer findings detected in ${#files_with_findings[@]} log file(s): ${files_with_findings[*]}"
+            exit 1
+          fi
+          echo "No sanitizer findings detected (only suppression summaries)."
 
       - name: Check for Leftover Buffered Files
         timeout-minutes: 5

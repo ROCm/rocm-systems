@@ -241,6 +241,19 @@ class RocprofsysConfig:
             if key in os.environ:
                 env[key] = os.environ[key]
 
+        # When the address sanitizer is in use the example binaries are not
+        # built with -fsanitize=address, so libasan only enters the process via
+        # librocprof-sys-dl.so as a transitive DT_NEEDED. Asan refuses to
+        # initialize unless its runtime is first in the link order, so prepend
+        # libasan to LD_PRELOAD; rocprof-sys-run later appends librocprof-sys-dl
+        # via update_mode::APPEND, preserving "asan first".
+        asan_library = os.environ.get("ASAN_LIBRARY")
+        if asan_library:
+            existing = os.environ.get("LD_PRELOAD", "")
+            env["LD_PRELOAD"] = (
+                f"{asan_library}:{existing}" if existing else asan_library
+            )
+
         return env
 
     def get_base_environment(self) -> dict[str, str]:
