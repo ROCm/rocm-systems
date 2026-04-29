@@ -7,6 +7,7 @@
 
 #include "hsa/hsa.h"
 #include "hsa/hsa_ext_amd.h"
+#include "hsa/hsa_ext_amd_aie.h"
 
 #include <cstdint>
 #include <cstring>
@@ -100,53 +101,37 @@ void load_binary(hsa_amd_memory_pool_t pool, const std::filesystem::path& path, 
   size_out = size;
 }
 
-// Create packet payload
-void create_packet_payload(void* pdi_buf, void* insts_buf, std::uint32_t insts_dwords, void* input,
-                           void* output, hsa_amd_aie_ert_start_kernel_data_t* payload) {
-  // PDI pointer
-  payload->pdi_addr = pdi_buf;
-  // Transaction opcode (not counted in packet_dwords)
-  payload->data[0] = 0x3;
-  payload->data[1] = 0x0;
-  // Instructions: 3 dwords
-  payload->data[2] =
-      static_cast<std::uint32_t>(reinterpret_cast<std::uintptr_t>(insts_buf) & 0xFFFFFFFF);
-  payload->data[3] = static_cast<std::uint32_t>(reinterpret_cast<std::uintptr_t>(insts_buf) >> 32);
-  payload->data[4] = insts_dwords;
-  // Source address: 2 dwords
-  payload->data[5] =
-      static_cast<std::uint32_t>(reinterpret_cast<std::uintptr_t>(input) & 0xFFFFFFFF);
-  payload->data[6] = static_cast<std::uint32_t>(reinterpret_cast<std::uintptr_t>(input) >> 32);
-  // Destination address: 2 dwords
-  payload->data[7] =
-      static_cast<std::uint32_t>(reinterpret_cast<std::uintptr_t>(output) & 0xFFFFFFFF);
-  payload->data[8] = static_cast<std::uint32_t>(reinterpret_cast<std::uintptr_t>(output) >> 32);
-  // Sizes: 1 dword per tensor (source, then destination)
-  payload->data[9] = static_cast<std::uint32_t>(DATA_SIZE);   // input
-  payload->data[10] = static_cast<std::uint32_t>(DATA_SIZE);  // output
-}
+// Dispatch packet
+std::uint64_t dispatch_packet(void* pdi_buf, void* insts_buf, std::size_t insts_size, void* input,
+                              void* output, uint64_t* kernargs, hsa_queue_t* q) {
+  auto* queue = static_cast<hsa_amd_aie_kernel_dispatch_packet_t*>(q->base_address);
+  const auto mask = q->size - 1;
 
-// Dispatch packet submission
-void dispatch_packet(hsa_queue_t* queue, hsa_amd_aie_ert_start_kernel_data_t* payload,
-                     std::size_t payload_dwords) {
-  const std::uint64_t wr_idx = hsa_queue_add_write_index_relaxed(queue, 1);
-
+  // Find slot in the queue
+  const std::uint64_t wr_idx = hsa_queue_add_write_index_relaxed(q, 1);
   // Wait if queue is full
-  while (wr_idx - hsa_queue_load_read_index_scacquire(queue) >= queue->size) {
+  while (wr_idx - hsa_queue_load_read_index_scacquire(q) >= q->size) {
     // spin
   }
+  const std::uint64_t pkt_idx = wr_idx & mask;
 
-  const auto mask = queue->size - 1;
-  const std::uint64_t packet_id = wr_idx & mask;
-  auto* pkt = reinterpret_cast<hsa_amd_aie_ert_packet_t*>(queue->base_address) + packet_id;
-  pkt->header.header = HSA_PACKET_TYPE_VENDOR_SPECIFIC << HSA_PACKET_HEADER_TYPE;
-  pkt->header.AmdFormat = HSA_AMD_PACKET_TYPE_AIE_ERT;
-  pkt->state = HSA_AMD_AIE_ERT_STATE_NEW;
-  pkt->count = payload_dwords;
-  pkt->opcode = HSA_AMD_AIE_ERT_START_CU;
-  pkt->payload_data = reinterpret_cast<std::uint64_t>(payload);
+  // Write packet
+  auto* pkt = queue + pkt_idx;
+  *pkt = {};
+  pkt->header = (HSA_AMD_AIE_PACKET_TYPE_READY << HSA_PACKET_HEADER_TYPE) |
+      (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE) |
+      (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE);
+  pkt->opcode = HSA_AMD_AIE_PACKET_OPCODE_KMQ;
+  pkt->count = 24;
+  pkt->completion_signal.handle = 0;
+  pkt->insts_addr_low = reinterpret_cast<std::uintptr_t>(insts_buf) & 0xFFFFFFFF;
+  pkt->insts_addr_high = reinterpret_cast<std::uintptr_t>(insts_buf) >> 32;
+  pkt->num_kernargs = 2;
+  pkt->kernarg_address = kernargs;
+  pkt->insts_size = insts_size;
+  pkt->pdi_addr = pdi_buf;
 
-  hsa_signal_store_screlease(queue->doorbell_signal, wr_idx);
+  return wr_idx;
 }
 
 }  // namespace
@@ -219,7 +204,6 @@ static void VectorScalarAddHSANoAlloc(benchmark::State& state) {
   void* insts_buf = nullptr;
   std::size_t insts_size = 0;
   load_binary(dev_pool, g_insts_path, &insts_buf, insts_size);
-  std::uint32_t insts_dwords = static_cast<std::uint32_t>(insts_size / sizeof(std::uint32_t));
 
   // --- Allocate I/O buffers in data_memory ---
   std::uint32_t* input = nullptr;
@@ -236,26 +220,26 @@ static void VectorScalarAddHSANoAlloc(benchmark::State& state) {
   // Initialize input: [0, 1, 2, ..., 1023]
   std::iota(input, input + N, std::uint32_t{0});
 
-  // --- Build payload ---
-  // For 1 source + 1 destination:
-  //   packet_dwords = 3 (insts) + (1+1)*3 (tensors) = 9
-  constexpr std::size_t NUM_SRC = 1;
-  constexpr std::size_t PACKET_DWORDS = 3 + (NUM_SRC + 1) * 3;  // = 9
-
-  // Allocate payload from kernarg_memory (64 bytes)
-  hsa_amd_aie_ert_start_kernel_data_t* payload = nullptr;
-  if (hsa_amd_memory_pool_allocate(kernarg_pool, 64, 0, reinterpret_cast<void**>(&payload)) !=
-      HSA_STATUS_SUCCESS) {
+  // Allocate kernargs from kernarg_memory
+  uint64_t* kernargs = nullptr;
+  if (hsa_amd_memory_pool_allocate(kernarg_pool, 4 * sizeof(uint64_t), 0,
+                                   reinterpret_cast<void**>(&kernargs)) != HSA_STATUS_SUCCESS) {
     state.SkipWithError("Failed to allocate payload buffer");
   }
 
   // --- Benchmark loop: dispatch is synchronous ---
   for (auto _ : state) {
-    // Create HSA packet payload
-    create_packet_payload(pdi_buf, insts_buf, insts_dwords, input, output, payload);
+    // Set args
+    kernargs[0] = reinterpret_cast<uint64_t>(input);
+    kernargs[1] = reinterpret_cast<uint64_t>(output);
+    kernargs[2] = DATA_SIZE;  // input size
+    kernargs[3] = DATA_SIZE;  // output size
 
-    // Create and dispatch HSA packet
-    dispatch_packet(queue, payload, PACKET_DWORDS);
+    // Dispatch HSA packet
+    auto wr_idx = dispatch_packet(pdi_buf, insts_buf, insts_size, input, output, kernargs, queue);
+
+    // Ring doorbell
+    hsa_signal_store_screlease(queue->doorbell_signal, wr_idx);
 
     benchmark::ClobberMemory();
   }
@@ -264,7 +248,7 @@ static void VectorScalarAddHSANoAlloc(benchmark::State& state) {
   hsa_queue_destroy(queue);
   hsa_amd_memory_pool_free(output);
   hsa_amd_memory_pool_free(input);
-  hsa_amd_memory_pool_free(payload);
+  hsa_amd_memory_pool_free(kernargs);
   hsa_amd_memory_pool_free(pdi_buf);
   hsa_amd_memory_pool_free(insts_buf);
   hsa_shut_down();
@@ -338,7 +322,6 @@ static void VectorScalarAddHSA(benchmark::State& state) {
   void* insts_buf = nullptr;
   std::size_t insts_size = 0;
   load_binary(dev_pool, g_insts_path, &insts_buf, insts_size);
-  std::uint32_t insts_dwords = static_cast<std::uint32_t>(insts_size / sizeof(std::uint32_t));
 
   // --- Allocate I/O buffers in data_memory ---
   std::uint32_t* input = nullptr;
@@ -355,26 +338,27 @@ static void VectorScalarAddHSA(benchmark::State& state) {
   // Initialize input: [0, 1, 2, ..., 1023]
   std::iota(input, input + N, std::uint32_t{0});
 
-  // --- Build payload ---
-  // For 1 source + 1 destination:
-  //   packet_dwords = 3 (insts) + (1+1)*3 (tensors) = 9
-  constexpr std::size_t NUM_SRC = 1;
-  constexpr std::size_t PACKET_DWORDS = 3 + (NUM_SRC + 1) * 3;  // = 9
-
   // --- Benchmark loop: dispatch is synchronous ---
   for (auto _ : state) {
-    // Allocate payload from kernarg_memory (64 bytes)
-    hsa_amd_aie_ert_start_kernel_data_t* payload = nullptr;
-    if (hsa_amd_memory_pool_allocate(kernarg_pool, 64, 0, reinterpret_cast<void**>(&payload)) !=
-        HSA_STATUS_SUCCESS) {
+    // Allocate kernargs from kernarg_memory
+    uint64_t* kernargs = nullptr;
+    if (hsa_amd_memory_pool_allocate(kernarg_pool, 4 * sizeof(uint64_t), 0,
+                                     reinterpret_cast<void**>(&kernargs)) != HSA_STATUS_SUCCESS) {
       state.SkipWithError("Failed to allocate payload buffer");
     }
+    kernargs[0] = reinterpret_cast<uint64_t>(input);
+    kernargs[1] = reinterpret_cast<uint64_t>(output);
+    kernargs[2] = DATA_SIZE;  // input size
+    kernargs[3] = DATA_SIZE;  // output size
 
-    // Create and dispatch HSA packet
-    create_packet_payload(pdi_buf, insts_buf, insts_dwords, input, output, payload);
+    // Dispatch HSA packet
+    auto wr_idx = dispatch_packet(pdi_buf, insts_buf, insts_size, input, output, kernargs, queue);
 
-    // Free payload after dispatch to include allocation overhead in the benchmark
-    hsa_amd_memory_pool_free(payload);
+    // Ring doorbell
+    hsa_signal_store_screlease(queue->doorbell_signal, wr_idx);
+
+    // Free after dispatch to include allocation overhead in the benchmark
+    hsa_amd_memory_pool_free(kernargs);
 
     benchmark::ClobberMemory();
   }
