@@ -25,6 +25,7 @@
 #define RCCL_GATHER_SCATTER 1
 #define RCCL_ALLTOALLV 1
 #define RCCL_ALLREDUCE_WITH_BIAS 1
+#define RCCL_SUSPEND_RESUME 1
 
 #ifdef __cplusplus
 extern "C" {
@@ -434,6 +435,35 @@ ncclResult_t pncclCommWindowRegister(ncclComm_t comm, void* buff, size_t size, n
 ncclResult_t  ncclCommWindowDeregister(ncclComm_t comm, ncclWindow_t win);
 /*! @cond       include_hidden */
 ncclResult_t pncclCommWindowDeregister(ncclComm_t comm, ncclWindow_t win);
+/*! @endcond */
+
+/* Communicator suspend flags */
+#define NCCL_SUSPEND_MEM 0x01
+
+/* Communicator memory statistics */
+typedef enum {
+  ncclStatGpuMemSuspend      = 0,
+  ncclStatGpuMemSuspended    = 1,
+  ncclStatGpuMemPersist      = 2,
+  ncclStatGpuMemTotal        = 3
+} ncclCommMemStat_t;
+
+/* Suspend communicator operations to free resources */
+ncclResult_t  ncclCommSuspend(ncclComm_t comm, int flags);
+/*! @cond       include_hidden */
+ncclResult_t pncclCommSuspend(ncclComm_t comm, int flags);
+/*! @endcond */
+
+/* Resume all previously suspended communicator resources */
+ncclResult_t  ncclCommResume(ncclComm_t comm);
+/*! @cond       include_hidden */
+ncclResult_t pncclCommResume(ncclComm_t comm);
+/*! @endcond */
+
+/* Query communicator memory statistics */
+ncclResult_t  ncclCommMemStats(ncclComm_t comm, ncclCommMemStat_t stat, uint64_t* value);
+/*! @cond       include_hidden */
+ncclResult_t pncclCommMemStats(ncclComm_t comm, ncclCommMemStat_t stat, uint64_t* value);
 /*! @endcond */
 
 /*! @defgroup   rccl_api_enumerations API Enumerations

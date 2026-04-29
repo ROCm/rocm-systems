@@ -477,10 +477,10 @@ static inline ncclResult_t ncclCuMemFree(void *ptr) {
   ncclResult_t result = ncclSuccess;
   CUmemGenericAllocationHandle handle;
   size_t size = 0;
-  CUCHECK(cuMemRetainAllocationHandle(&handle, ptr));
-  CUCHECK(cuMemRelease(handle));
+  // HIP VMM: retain -> unmap -> release -> address_free (single release avoids double-free)
   CUdeviceptr base = nullptr;
   CUCHECK(cuMemGetAddressRange(&base, &size, (CUdeviceptr)ptr));
+  CUCHECK(cuMemRetainAllocationHandle(&handle, ptr));
   TRACE(NCCL_ALLOC, "CuMem Free Size %zu pointer %p handle %p", size, ptr, (void*)(uintptr_t)handle);
   CUCHECK(cuMemUnmap((CUdeviceptr)ptr, size));
   CUCHECK(cuMemRelease(handle));

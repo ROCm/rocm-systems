@@ -440,6 +440,22 @@ void ncclCommPushCudaFree(struct ncclComm* comm, void* obj) {
   dtor->obj = obj;
   dtor->next = comm->destructorHead;
   comm->destructorHead = dtor;
+
+  // Track VMM-backed allocations for suspend/resume (VMM-only to avoid SIGSEGV on non-VMM ptrs)
+  if (obj != nullptr && comm != nullptr && comm->memManager != nullptr &&
+      ncclCuMemEnable()) {
+    hipDeviceptr_t base = 0;
+    size_t sz = 0;
+    hipError_t e = hipMemGetAddressRange(&base, &sz, (hipDeviceptr_t)obj);
+    if (e == hipSuccess && sz > 0) {
+      (void)ncclMemTrack(comm->memManager, obj, sz,
+                         /*handle=*/0,
+                         hipMemHandleTypePosixFileDescriptor,
+                         ncclMemOffload);
+    } else {
+      (void)hipGetLastError();
+    }
+  }
 }
 
 static ncclResult_t ncclDestructorFnCudaHostFree(struct ncclDestructor* dtor) {
@@ -603,6 +619,19 @@ skip_profiling:
 #if CUDART_VERSION >= 12010
   if (comm->nvlsSupport) NCCLCHECK(ncclNvlsFree(comm));
 #endif
+
+  // Drain suspend/resume queues, force-resume, tear down memory manager
+  while (!ncclIntruQueueEmpty(&comm->suspendTaskQueue)) {
+    struct ncclMemManagerTask* t = ncclIntruQueueDequeue(&comm->suspendTaskQueue);
+    free(t);
+  }
+  while (!ncclIntruQueueEmpty(&comm->resumeTaskQueue)) {
+    struct ncclMemManagerTask* t = ncclIntruQueueDequeue(&comm->resumeTaskQueue);
+    free(t);
+  }
+  NCCLCHECK(ncclCommSuspendForceResumeForDestroy(comm));
+  NCCLCHECK(ncclCommSuspendCanaryFree(comm));
+  NCCLCHECK(ncclMemManagerDestroy(comm));
 
   struct ncclDestructor* dtor = comm->destructorHead;
   while (dtor != nullptr) {
@@ -839,6 +868,10 @@ static ncclResult_t commAlloc(struct ncclComm* comm, struct ncclComm* parent, in
   ncclIntruQueueMpscConstruct(&comm->callbackQueue);
   ncclIntruQueueConstruct(&comm->legacyRegCleanupQueue);
   ncclIntruQueueConstruct(&comm->ceInitTaskQueue);
+  ncclIntruQueueConstruct(&comm->suspendTaskQueue);
+  ncclIntruQueueConstruct(&comm->resumeTaskQueue);
+  comm->memManager = nullptr;
+  NCCLCHECK(ncclMemManagerInit(comm));
 
   comm->regCache.pageSize = sysconf(_SC_PAGESIZE);
 

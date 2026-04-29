@@ -129,6 +129,8 @@ struct ncclCommEventCallback {
   ncclResult_t(*fn)(struct ncclComm* comm, struct ncclCommEventCallback* cb);
 };
 
+#include "mem_manager.h"
+
 struct ncclSharedResources {
   int refCount;
   struct ncclComm* owner; /* comm which creates this shared res. */
@@ -788,6 +790,10 @@ struct ncclComm {
   bool enableDirectReduceScatter;
   // Temporary Buffer [RCCL]
   void* tempBuff;
+
+  struct ncclIntruQueue<struct ncclMemManagerTask, &ncclMemManagerTask::next> suspendTaskQueue;
+  struct ncclIntruQueue<struct ncclMemManagerTask, &ncclMemManagerTask::next> resumeTaskQueue;
+  struct ncclMemManager* memManager;
 
   uint64_t endMagic;
 };

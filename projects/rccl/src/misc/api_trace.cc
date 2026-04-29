@@ -152,6 +152,8 @@ ncclCommWindowRegister_impl(ncclComm_t comm, void* buff, size_t size, ncclWindow
 ncclResult_t
 ncclCommWindowDeregister_impl(ncclComm_t comm, ncclWindow_t win);
 
+#include "mem_manager.h"
+
 ncclResult_t
 ncclAllReduceWithBias_impl(const void* sendbuff, void* recvbuff, size_t count,
                    ncclDataType_t datatype, ncclRedOp_t op, ncclComm* comm,
@@ -269,11 +271,14 @@ RCCL_ASSERT_OFFSET(rcclApiFuncTable, ncclCommWindowRegister_fn, 39);
 RCCL_ASSERT_OFFSET(rcclApiFuncTable, ncclCommWindowDeregister_fn, 40);
 RCCL_ASSERT_OFFSET(rcclApiFuncTable, ncclAlltoAll_fn, 41);
 RCCL_ASSERT_OFFSET(rcclApiFuncTable, ncclAlltoAllv_fn, 42);
+RCCL_ASSERT_OFFSET(rcclApiFuncTable, ncclCommSuspend_fn, 43);
+RCCL_ASSERT_OFFSET(rcclApiFuncTable, ncclCommResume_fn, 44);
+RCCL_ASSERT_OFFSET(rcclApiFuncTable, ncclCommMemStats_fn, 45);
 // DO NOT REORDER, ADD NEW ITEMS HERE
 
 #undef RCCL_ASSERT_OFFSET
 
-static_assert(sizeof(rcclApiFuncTable) == compute_table_size(43),
+static_assert(sizeof(rcclApiFuncTable) == compute_table_size(46),
               "Update table major/step version and add a new offset assertion if this "
               "fails to compile");
 
@@ -326,7 +331,10 @@ RcclGetFunctionTable_impl()
                                                &ncclCommWindowRegister_impl,
                                                &ncclCommWindowDeregister_impl,
                                                &ncclAlltoAll_impl,
-                                               &ncclAlltoAllv_impl
+                                               &ncclAlltoAllv_impl,
+                                               &ncclCommSuspend_impl,
+                                               &ncclCommResume_impl,
+                                               &ncclCommMemStats_impl
                                                // DO NOT REORDER, ADD NEW ITEMS HERE
                                              };
 
@@ -443,6 +451,12 @@ NCCL_API(ncclResult_t, ncclCommShrink, ncclComm_t comm, int* excludeRanksList, i
 
 NCCL_API(ncclResult_t, ncclCommSplit, ncclComm_t comm, int color, int key,
          ncclComm_t* newcomm, ncclConfig_t* config);
+
+NCCL_API(ncclResult_t, ncclCommSuspend, ncclComm_t comm, int flags);
+
+NCCL_API(ncclResult_t, ncclCommResume, ncclComm_t comm);
+
+NCCL_API(ncclResult_t, ncclCommMemStats, ncclComm_t comm, ncclCommMemStat_t stat, uint64_t* value);
 
 NCCL_API(const char*, ncclGetErrorString, ncclResult_t code);
 
@@ -787,4 +801,22 @@ ncclResult_t
 ncclCommWindowDeregister(ncclComm_t comm, ncclWindow_t win)
 {
     return ::rccl::RcclGetFunctionTable()->ncclCommWindowDeregister_fn(comm, win);
+}
+
+ncclResult_t
+ncclCommSuspend(ncclComm_t comm, int flags)
+{
+    return ::rccl::RcclGetFunctionTable()->ncclCommSuspend_fn(comm, flags);
+}
+
+ncclResult_t
+ncclCommResume(ncclComm_t comm)
+{
+    return ::rccl::RcclGetFunctionTable()->ncclCommResume_fn(comm);
+}
+
+ncclResult_t
+ncclCommMemStats(ncclComm_t comm, ncclCommMemStat_t stat, uint64_t* value)
+{
+    return ::rccl::RcclGetFunctionTable()->ncclCommMemStats_fn(comm, stat, value);
 }
