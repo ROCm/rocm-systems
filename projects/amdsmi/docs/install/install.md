@@ -110,7 +110,7 @@ Ubuntu 22.04.
    this step.
 
    ```shell
-   export PATH="${PATH:+${PATH}:}~/opt/rocm/bin"
+   export PATH="${PATH:+${PATH}:}/opt/rocm/bin"
    ```
 
 3. Verify your installation.
@@ -176,8 +176,8 @@ strip both the (legacy) pip-registered install AND the `.pth` file.
      The wheel ships its own SONAME-renamed `libamd_smi_python.so` next to
      the wrapper, so it does not depend on `/opt/rocm` being present.
 
-   See {doc}`../py-interface/README` for the full install-paths matrix and
-   the `AMDSMI_DEBUG_LOAD` debug knob.
+   See `py-interface/README.md` in the source tree for the full
+   install-paths matrix and the `AMDSMI_DEBUG_LOAD` debug knob.
 
    > **Note:** `sudo` may be required for the system-package path. For pip,
    > use `--break-system-packages` only if installing into a non-venv

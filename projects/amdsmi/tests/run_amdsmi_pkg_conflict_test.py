@@ -76,7 +76,6 @@ ever invoked from a downstream pipeline.
 
 import argparse
 import logging
-import os
 import shutil
 import subprocess
 import sys

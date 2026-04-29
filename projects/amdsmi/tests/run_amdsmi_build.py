@@ -89,70 +89,71 @@ Output
 Run with --help for the full list of options.
 """
 
+
 # ---------------------------------------------------------------------------
 # Bootstrap: ensure Python 3.7+ (required for dataclasses & type annotations).
 # On SLES the default python3 may be 3.6; this block auto-installs a newer
 # interpreter via zypper and re-execs.  The code below intentionally avoids
 # any 3.7+ syntax so it can run on Python 3.6.
 # ---------------------------------------------------------------------------
-import sys as _sys
-import os as _os
+def _bootstrap_python():
+    import os
+    import shutil
+    import subprocess
+    import sys
 
-if _sys.version_info < (3, 7):
+    if sys.version_info >= (3, 7):
+        return
 
-    def _bootstrap_python():
-        import shutil
-        import subprocess
-
-        if not shutil.which("zypper"):
-            _sys.exit(
-                "ERROR: Python 3.7+ is required (have %d.%d). "
-                "Install a newer interpreter or use a newer base image."
-                % (_sys.version_info[0], _sys.version_info[1])
-            )
-        print(
-            "Python %d.%d is too old — upgrading via zypper..."
-            % (_sys.version_info[0], _sys.version_info[1])
+    if not shutil.which("zypper"):
+        sys.exit(
+            "ERROR: Python 3.7+ is required (have %d.%d). "
+            "Install a newer interpreter or use a newer base image."
+            % (sys.version_info[0], sys.version_info[1])
         )
-        for pkgs in [
-            ["python311", "python311-pip"],
-            ["python310", "python310-pip"],
-            ["python39", "python39-pip"],
-            ["python38", "python38-pip"],
-        ]:
-            try:
-                subprocess.check_call(
-                    ["zypper", "--non-interactive", "install"] + pkgs,
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                )
-                break
-            except subprocess.CalledProcessError:
-                continue
-        new_py = None
-        for name in ["python3.11", "python3.10", "python3.9", "python3.8"]:
-            p = shutil.which(name)
-            if p:
-                new_py = p
-                break
-        if new_py is None:
-            _sys.exit("ERROR: could not find a Python 3.7+ interpreter after install")
+    print(
+        "Python %d.%d is too old - upgrading via zypper..."
+        % (sys.version_info[0], sys.version_info[1])
+    )
+    for pkgs in [
+        ["python311", "python311-pip"],
+        ["python310", "python310-pip"],
+        ["python39", "python39-pip"],
+        ["python38", "python38-pip"],
+    ]:
         try:
             subprocess.check_call(
-                ["alternatives", "--set", "python3", new_py],
+                ["zypper", "--non-interactive", "install"] + pkgs,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
             )
-        except (subprocess.CalledProcessError, FileNotFoundError, OSError):
-            link = "/usr/bin/python3"
-            if _os.path.exists(link) or _os.path.islink(link):
-                _os.unlink(link)
-            _os.symlink(new_py, link)
-        print("Re-executing under %s ..." % new_py)
-        _os.execvp(new_py, [new_py] + _sys.argv)
+            break
+        except subprocess.CalledProcessError:
+            continue
+    new_py = None
+    for name in ["python3.11", "python3.10", "python3.9", "python3.8"]:
+        p = shutil.which(name)
+        if p:
+            new_py = p
+            break
+    if new_py is None:
+        sys.exit("ERROR: could not find a Python 3.7+ interpreter after install")
+    try:
+        subprocess.check_call(
+            ["alternatives", "--set", "python3", new_py],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    except (subprocess.CalledProcessError, FileNotFoundError, OSError):
+        link = "/usr/bin/python3"
+        if os.path.exists(link) or os.path.islink(link):
+            os.unlink(link)
+        os.symlink(new_py, link)
+    print("Re-executing under %s ..." % new_py)
+    os.execvp(new_py, [new_py] + sys.argv)
 
-    _bootstrap_python()
-del _sys, _os
+
+_bootstrap_python()
 # ---------------------------------------------------------------------------
 
 import argparse
@@ -520,7 +521,6 @@ def locate_package(build_dir: Path, package_format: str) -> Path:
 
 def install_package(cfg: "RunnerConfig", package_path: Path) -> None:
     print(f"Installing package {package_path}")
-    env = os.environ.copy()
     if cfg.package_manager == "apt":
         if cfg.refresh_apt:
             run_command(

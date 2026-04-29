@@ -145,10 +145,7 @@ def find_line_num(search_str, line):
 
 def main():
     open_bracket = "["
-    close_bracket = "]"
-    open_parenthesis = "("
     close_parenthesis = ")"
-    open_curly_brace = "{"
     close_curly_brace = "}"
 
     output_file, input_file, library, clang_extra_args = parseArgument()

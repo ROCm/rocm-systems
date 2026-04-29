@@ -53,10 +53,14 @@ library could not be loaded. Re-run with `AMDSMI_DEBUG_LOAD=1`:
 
 ```
 $ AMDSMI_DEBUG_LOAD=1 python3 -c 'import amdsmi'
-[amdsmi] WARNING: no such file: /opt/rocm/lib64/libamd_smi.so
-[amdsmi] WARNING: no such file: /opt/rocm/lib/libamd_smi.so
+[amdsmi] WARNING: <dlopen error from /opt/rocm/lib64/libamd_smi.so>
+[amdsmi] WARNING: <dlopen error from /opt/rocm/lib/libamd_smi.so>
 [amdsmi] Module imported in degraded mode; calling any amdsmi_* function will raise OSError.
 ```
+
+The exact `WARNING` text is the underlying `OSError` string from
+`ctypes.CDLL`, which is platform- and toolchain-dependent (e.g.
+`cannot open shared object file: No such file or directory` on glibc).
 
 The deferred `OSError` lists every searched path:
 

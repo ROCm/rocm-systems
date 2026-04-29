@@ -214,7 +214,7 @@ class AbiCompatTest(unittest.TestCase):
         # When the .so does NOT export a symbol, ctypes raises
         # AttributeError. The wrapper must surface that, not silently
         # treat the symbol as a no-op or return a fake handle.
-        with _Patch(STABLE_SYMBOLS) as p:
+        with _Patch(STABLE_SYMBOLS):
             w = _import_fresh_wrapper()
             # Pull the live FakeCDLL out of the wrapper.
             fake = w._libraries["libamd_smi.so"]
