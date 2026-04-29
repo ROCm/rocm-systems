@@ -28,9 +28,9 @@ namespace rocprofsys::services
 {
 
 // Driver API — mirrors sampling_service public methods on services::sampling().
-std::set<int>
+[[nodiscard]] std::set<int>
 sampling_setup(int64_t tid);
-std::set<int>
+[[nodiscard]] std::set<int>
 sampling_shutdown(int64_t tid);
 
 void
@@ -59,9 +59,9 @@ sampling_enter_child_process_mode();
 // (DEC-10); the causal-mode guard at setup() differentiates behavior. Kept as
 // thin aliases so callers in causal-only paths (causal/delay.cpp,
 // causal/sampling.cpp) read meaningfully.
-std::set<int>
+[[nodiscard]] std::set<int>
 causal_sampling_setup(int64_t tid);
-std::set<int>
+[[nodiscard]] std::set<int>
 causal_sampling_shutdown(int64_t tid);
 void
 causal_sampling_block_signals(std::set<int> sigs = {});
