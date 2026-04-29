@@ -2,6 +2,8 @@
 // SPDX-License-Identifier:  MIT
 #include "pc_sampling_collector.h"
 
+#include "gsl_assert.h"
+
 #include <ios>
 #include <iostream>
 
@@ -50,6 +52,7 @@ void pc_sampling_collector_impl_t::write(pc_samples_writer_t& writer)
             while (pc < end)
             {
                 const auto& inst = m_translator->get_instruction(id, pc);
+                Expects(inst.size);
                 writer.write_instruction(inst);
                 pc += inst.size;
             }

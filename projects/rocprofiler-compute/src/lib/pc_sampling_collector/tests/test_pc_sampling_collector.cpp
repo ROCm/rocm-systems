@@ -67,11 +67,22 @@ TEST_F(test_pc_sampling_collector_t, ProvidedSymbolInstructions_WritesThem)
     const std::vector<symbol_t> symbols = {{"name0", 0x10, 0x1000, 2}};
     m_translator->add_symbols(m_file_info.code_object_id, symbols);
     m_translator->add_symbols(m_mem_info.code_object_id, symbols);
-    const std::vector<instruction_t> instructions = {{"inst0", "comment0", 0x1000, 0x10, 1},
-                                                     {"inst1", "comment1", 0x1001, 0x11, 1}};
-    m_translator->add_instructions(instructions);
+    const instruction_t instruction = {"inst0", "comment0", 0x1000, 0x10, 1};
+    m_translator->add_instruction(instruction);
     m_pc_sampling_collector->write(*m_writer);
-    EXPECT_EQ(m_writer->get_instruction_descriptions().size(), instructions.size());
+    EXPECT_EQ(m_writer->get_instruction_descriptions().size(), symbols[0].size * 2);
+}
+
+TEST_F(test_pc_sampling_collector_t, ProvidedSymbolInstructionSizeZero_Throws)
+{
+    m_pc_sampling_collector->on_code_object_load(m_file_info);
+    m_pc_sampling_collector->on_code_object_load(m_mem_info);
+    const std::vector<symbol_t> symbols = {{"name0", 0x10, 0x1000, 2}};
+    m_translator->add_symbols(m_file_info.code_object_id, symbols);
+    m_translator->add_symbols(m_mem_info.code_object_id, symbols);
+    const instruction_t instruction = {"inst0", "comment0", 0x1000, 0x10, 0};
+    m_translator->add_instruction(instruction);
+    EXPECT_THROW(m_pc_sampling_collector->write(*m_writer), std::runtime_error);
 }
 
 void test_pc_sampling_collector_t::SetUp()

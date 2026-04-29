@@ -39,7 +39,7 @@ std::vector<symbol_t> mock_code_object_translator_t::get_symbols(size_t object_i
 
 instruction_t mock_code_object_translator_t::get_instruction(size_t object_id, uint64_t virtual_address) const
 {
-    return {};
+    return m_instruction;
 }
 
 void mock_code_object_translator_t::add_symbols(size_t object_id,
@@ -48,10 +48,10 @@ void mock_code_object_translator_t::add_symbols(size_t object_id,
     m_symbols_per_obj[object_id] = symbols;
 }
 
-void mock_code_object_translator_t::add_instructions(
-    const std::vector<rocm_compute::instruction_t>& instructions)
+void mock_code_object_translator_t::
+add_instruction(const rocm_compute::instruction_t& instruction) 
 {
-    m_instructions = instructions;
+    m_instruction = instruction;
 }
 
 const std::vector<mock_code_object_translator_t::mem_code_object_info_t>&
@@ -76,7 +76,7 @@ void mock_pc_samples_writer_t::end_code_obj_desc(size_t obj_id)
     m_ended_code_obj_desc_ids.push_back(obj_id);
 }
 
-void mock_pc_samples_writer_t::start_symbol(const rocm_compute::symbol_t& symbol)
+void mock_pc_samples_writer_t::start_symbol(const symbol_t& symbol)
 {
     m_symbol_descriptions.push_back(symbol);
 }
