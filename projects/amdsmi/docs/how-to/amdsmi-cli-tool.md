@@ -311,9 +311,11 @@ usage: amd-smi metric [-h] [-g GPU [GPU ...] | -U CPU [CPU ...] | -O CORE [CORE 
                       [-w INTERVAL] [-W TIME] [-i ITERATIONS] [-m] [-u] [-p] [-c] [-t]
                       [-P] [-e] [-k] [-f] [-C] [-o] [-l] [-x] [-E] [--cpu-power-metrics]
                       [--cpu-prochot] [--cpu-freq-metrics] [--cpu-c0-res]
+                      [--cpu-xgmi-link-width] [--cpu-apb-status]
                       [--cpu-lclk-dpm-level NBIOID] [--cpu-pwr-svi-telemetry-rails]
                       [--cpu-io-bandwidth IO_BW LINKID_NAME]
                       [--cpu-xgmi-bandwidth XGMI_BW LINKID_NAME] [--cpu-metrics-ver]
+                      [--cpu-df-pstate-range]
                       [--cpu-metrics-table] [--cpu-socket-energy] [--cpu-ddr-bandwidth]
                       [--cpu-temp] [--cpu-dimm-temp-range-rate DIMM_ADDR]
                       [--cpu-dimm-pow-consumption DIMM_ADDR]
@@ -352,6 +354,8 @@ Watch Arguments:
 CPU Arguments:
   --cpu-power-metrics                       CPU power metrics
   --cpu-prochot                             Displays prochot status
+  --cpu-xgmi-link-width                     Displays XGMI link width range, min and max values for the selected CPU
+  --cpu-apb-status                          Displays APB status
   --cpu-freq-metrics                        Displays currentFclkMemclk frequencies and cclk frequency limit
   --cpu-c0-res                              Displays C0 residency
   --cpu-lclk-dpm-level NBIOID               Displays lclk dpm level range. Requires socket ID and NBOID as inputs
@@ -364,6 +368,7 @@ CPU Arguments:
                                              i.e. P2, P3, G0 - G7
   --cpu-pwr-eff-mode                        Displays current power efficiency mode.
                                              For Family 1Ah Models 50h-57h onwards and MODE= 4 or 5, displays utilization percentage and PPT limit in Watts.
+  --cpu-df-pstate-range                     Displays DF pstate range, min and max values for the selected CPU
   --cpu-metrics-ver                         Displays metrics table version
   --cpu-metrics-table                       Displays metric table
   --cpu-socket-energy                       Displays socket energy for the selected CPU socket

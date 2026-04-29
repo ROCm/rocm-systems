@@ -1816,11 +1816,14 @@ class AMDSMIParser(argparse.ArgumentParser):
         # Help text for cpu options
         cpu_power_metrics_help = "CPU power metrics"
         cpu_proc_help = "Displays prochot status"
+        cpu_xgmi_link_width_help = "Displays XGMI link width range, min and max values for the selected CPU"
+        cpu_apb_help = "Displays APB status"
         cpu_freq_help = "Displays currentFclkMemclk frequencies and cclk frequency limit"
         cpu_c0_res_help = "Displays C0 residency"
         cpu_lclk_dpm_help = "Displays lclk dpm level range. Requires socket ID and NBOID as inputs"
         cpu_pwr_eff_mode_help = "Displays current power efficiency mode.\
         \n For Family 1Ah Models 50h-57h onwards and MODE= 4 or 5, displays utilization percentage and PPT limit in Watts."
+        cpu_df_pstate_range_help = "Displays DF pstate range, min and max values for the selected CPU"
         cpu_pwr_svi_telemetry_rails_help = "Displays svi based telemetry for all rails"
         cpu_io_bandwidth_help = "Displays current IO bandwidth for the selected CPU.\
         \n input parameters are bandwidth type(1) and link ID encodings\
@@ -2007,6 +2010,12 @@ class AMDSMIParser(argparse.ArgumentParser):
                 "--cpu-prochot", action="store_true", required=False, help=cpu_proc_help
             )
             cpu_group.add_argument(
+                "--cpu-xgmi-link-width", action="store_true", required=False, help=cpu_xgmi_link_width_help
+            )
+            cpu_group.add_argument(
+                "--cpu-apb-status", action="store_true", required=False, help=cpu_apb_help
+            )
+            cpu_group.add_argument(
                 "--cpu-freq-metrics", action="store_true", required=False, help=cpu_freq_help
             )
             cpu_group.add_argument(
@@ -2048,6 +2057,12 @@ class AMDSMIParser(argparse.ArgumentParser):
                 action="store_true",
                 required=False,
                 help=cpu_pwr_eff_mode_help,
+            )
+            cpu_group.add_argument(
+                "--cpu-df-pstate-range",
+                action="store_true",
+                required=False,
+                help=cpu_df_pstate_range_help,
             )
             cpu_group.add_argument(
                 "--cpu-metrics-ver", action="store_true", required=False, help=cpu_metrics_ver_help

@@ -4382,6 +4382,8 @@ class AMDSMICommands:
         cpu=None,
         cpu_power_metrics=None,
         cpu_prochot=None,
+        cpu_xgmi_link_width=None,
+        cpu_apb_status=None,
         cpu_freq_metrics=None,
         cpu_c0_res=None,
         cpu_lclk_dpm_level=None,
@@ -4389,6 +4391,7 @@ class AMDSMICommands:
         cpu_io_bandwidth=None,
         cpu_xgmi_bandwidth=None,
         cpu_pwr_eff_mode=None,
+        cpu_df_pstate_range=None,
         cpu_metrics_ver=None,
         cpu_metrics_table=None,
         cpu_socket_energy=None,
@@ -4416,6 +4419,8 @@ class AMDSMICommands:
             cpu (cpu_handle, optional): device_handle for target device. Defaults to None.
             cpu_power_metrics (bool, optional): Value override for args.cpu_power_metrics. Defaults to None
             cpu_prochot (bool, optional): Value override for args.cpu_prochot. Defaults to None.
+            cpu_xgmi_link_width (bool, optional): Value override for args.cpu_xgmi_link_width. Defaults to None.
+            cpu_apb_status (bool, optional): Value override for args.cpu_apb_status. Defaults to None.
             cpu_freq_metrics (bool, optional): Value override for args.cpu_freq_metrics. Defaults to None.
             cpu_c0_res (bool, optional): Value override for args.cpu_c0_res. Defaults to None
             cpu_lclk_dpm_level (list, optional): Value override for args.cpu_lclk_dpm_level. Defaults to None
@@ -4423,6 +4428,7 @@ class AMDSMICommands:
             cpu_io_bandwidth (list, optional): value override for args.cpu_io_bandwidth. Defaults to None
             cpu_xgmi_bandwidth (list, optional): value override for args.cpu_xgmi_bandwidth. Defaults to None
             cpu_pwr_eff_mode (bool, optional): Value override for args.cpu_pwr_eff_mode. Defaults to None
+            cpu_df_pstate_range (bool, optional): Value override for args.cpu_df_pstate_range. Defaults to None
             cpu_metrics_ver (bool, optional): Value override for args.cpu_metrics_ver. Defaults to None
             cpu_metrics_table (bool, optional): Value override for args.cpu_metrics_table. Defaults to None
             cpu_socket_energy (bool, optional): Value override for args.cpu_socket_energy. Defaults to None
@@ -4452,6 +4458,10 @@ class AMDSMICommands:
             args.cpu_power_metrics = cpu_power_metrics
         if cpu_prochot:
             args.cpu_prochot = cpu_prochot
+        if cpu_xgmi_link_width:
+            args.cpu_xgmi_link_width = cpu_xgmi_link_width
+        if cpu_apb_status:
+            args.cpu_apb_status = cpu_apb_status
         if cpu_freq_metrics:
             args.cpu_freq_metrics = cpu_freq_metrics
         if cpu_c0_res:
@@ -4466,6 +4476,8 @@ class AMDSMICommands:
             args.cpu_xgmi_bandwidth = cpu_xgmi_bandwidth
         if cpu_pwr_eff_mode:
             args.cpu_pwr_eff_mode = cpu_pwr_eff_mode
+        if cpu_df_pstate_range:
+            args.cpu_df_pstate_range = cpu_df_pstate_range
         if cpu_metrics_ver:
             args.cpu_metrics_ver = cpu_metrics_ver
         if cpu_metrics_table:
@@ -4507,6 +4519,8 @@ class AMDSMICommands:
         curr_platform_cpu_args = [
             "cpu_power_metrics",
             "cpu_prochot",
+            "cpu_xgmi_link_width",
+            "cpu_apb_status",
             "cpu_freq_metrics",
             "cpu_c0_res",
             "cpu_lclk_dpm_level",
@@ -4514,6 +4528,7 @@ class AMDSMICommands:
             "cpu_io_bandwidth",
             "cpu_xgmi_bandwidth",
             "cpu_pwr_eff_mode",
+            "cpu_df_pstate_range",
             "cpu_metrics_ver",
             "cpu_metrics_table",
             "cpu_socket_energy",
@@ -4536,6 +4551,8 @@ class AMDSMICommands:
         curr_platform_cpu_values = [
             args.cpu_power_metrics,
             args.cpu_prochot,
+            args.cpu_xgmi_link_width,
+            args.cpu_apb_status,
             args.cpu_freq_metrics,
             args.cpu_c0_res,
             args.cpu_lclk_dpm_level,
@@ -4543,6 +4560,7 @@ class AMDSMICommands:
             args.cpu_io_bandwidth,
             args.cpu_xgmi_bandwidth,
             args.cpu_pwr_eff_mode,
+            args.cpu_df_pstate_range,
             args.cpu_metrics_ver,
             args.cpu_metrics_table,
             args.cpu_socket_energy,
@@ -4642,6 +4660,30 @@ class AMDSMICommands:
                 static_dict["prochot"]["prochot_status"] = "N/A"
                 logging.debug(
                     "Failed to get prochot status for cpu %s | %s", cpu_id, e.get_error_info()
+                )
+        if args.cpu_xgmi_link_width:
+            static_dict["xgmi_link_width"] = {}
+            try:
+                link_width = amdsmi_interface.amdsmi_get_cpu_xgmi_width(args.cpu)
+                static_dict["xgmi_link_width"]["min_width"] = link_width["min_width"]
+                static_dict["xgmi_link_width"]["max_width"] = link_width["max_width"]
+            except amdsmi_exception.AmdSmiLibraryException as e:
+                static_dict["xgmi_link_width"]["min_width"] = "N/A"
+                static_dict["xgmi_link_width"]["max_width"] = "N/A"
+                logging.debug(
+                    "Failed to get xgmi link width for cpu %s | %s", cpu_id, e.get_error_info()
+                )
+        if args.cpu_apb_status:
+            static_dict["apb_status"] = {}
+            try:
+                apb_info = amdsmi_interface.amdsmi_get_cpu_apb_status(args.cpu)
+                static_dict["apb_status"]["status"] = apb_info["status"]
+                static_dict["apb_status"]["pstate"] = apb_info["pstate"]
+            except amdsmi_exception.AmdSmiLibraryException as e:
+                static_dict["apb_status"]["status"] = "N/A"
+                static_dict["apb_status"]["pstate"] = "N/A"
+                logging.debug(
+                    "Failed to get APB status for cpu %s | %s", cpu_id, e.get_error_info()
                 )
         if args.cpu_freq_metrics:
             static_dict["freq_metrics"] = {}
@@ -4777,6 +4819,20 @@ class AMDSMICommands:
                     "Failed to get power efficiency mode for cpu %s | %s",
                     cpu_id,
                     e.get_error_info(),
+                )
+        if args.cpu_df_pstate_range:
+            static_dict["df_pstate_range"] = {}
+            try:
+                pstate_range = amdsmi_interface.amdsmi_get_cpu_df_pstate_range(args.cpu)
+                static_dict["df_pstate_range"]["min_pstate"] = pstate_range["min_pstate"]
+                static_dict["df_pstate_range"]["max_pstate"] = pstate_range["max_pstate"]
+            except amdsmi_exception.AmdSmiLibraryException as e:
+                static_dict["df_pstate_range"]["min_pstate"] = "N/A"
+                static_dict["df_pstate_range"]["max_pstate"] = "N/A"
+                logging.debug(
+                    "Failed to get df pstate range for cpu %s | %s",
+                    cpu_id,
+                    e.get_error_info()
                 )
         if args.cpu_metrics_ver:
             static_dict["metric_version"] = {}
@@ -5681,6 +5737,8 @@ class AMDSMICommands:
         cpu=None,
         cpu_power_metrics=None,
         cpu_prochot=None,
+        cpu_xgmi_link_width=None,
+        cpu_apb_status=None,
         cpu_freq_metrics=None,
         cpu_c0_res=None,
         cpu_lclk_dpm_level=None,
@@ -5688,6 +5746,7 @@ class AMDSMICommands:
         cpu_io_bandwidth=None,
         cpu_xgmi_bandwidth=None,
         cpu_pwr_eff_mode=None,
+        cpu_df_pstate_range=None,
         cpu_metrics_ver=None,
         cpu_metrics_table=None,
         cpu_socket_energy=None,
@@ -5751,6 +5810,8 @@ class AMDSMICommands:
             cpu (cpu_handle, optional): device_handle for target device. Defaults to None.
             cpu_power_metrics (bool, optional): Value override for args.cpu_power_metrics. Defaults to None
             cpu_prochot (bool, optional): Value override for args.cpu_prochot. Defaults to None.
+            cpu_xgmi_link_width (bool, optional): Value override for args.cpu_xgmi_link_width. Defaults to None.
+            cpu_apb_status (bool, optional): Value override for args.cpu_apb_status. Defaults to None.
             cpu_freq_metrics (bool, optional): Value override for args.cpu_freq_metrics. Defaults to None.
             cpu_c0_res (bool, optional): Value override for args.cpu_c0_res. Defaults to None
             cpu_lclk_dpm_level (list, optional): Value override for args.cpu_lclk_dpm_level. Defaults to None
@@ -5758,6 +5819,7 @@ class AMDSMICommands:
             cpu_io_bandwidth (list, optional): value override for args.cpu_io_bandwidth. Defaults to None
             cpu_xgmi_bandwidth (list, optional): value override for args.cpu_xgmi_bandwidth. Defaults to None
             cpu_pwr_eff_mode (bool, optional): Value override for args.cpu_pwr_eff_mode. Defaults to None
+            cpu_df_pstate_range (bool, optional): Value override for args.cpu_df_pstate_range. Defaults to None
             cpu_metrics_ver (bool, optional): Value override for args.cpu_metrics_ver. Defaults to None
             cpu_metrics_table (bool, optional): Value override for args.cpu_metrics_table. Defaults to None
             cpu_socket_energy (bool, optional): Value override for args.cpu_socket_energy. Defaults to None
@@ -5888,6 +5950,8 @@ class AMDSMICommands:
         cpu_attributes = [
             "cpu_power_metrics",
             "cpu_prochot",
+            "cpu_xgmi_link_width",
+            "cpu_apb_status",
             "cpu_freq_metrics",
             "cpu_c0_res",
             "cpu_lclk_dpm_level",
@@ -5895,6 +5959,7 @@ class AMDSMICommands:
             "cpu_io_bandwidth",
             "cpu_xgmi_bandwidth",
             "cpu_pwr_eff_mode",
+            "cpu_df_pstate_range",
             "cpu_metrics_ver",
             "cpu_metrics_table",
             "cpu_socket_energy",
@@ -5972,6 +6037,8 @@ class AMDSMICommands:
                     cpu,
                     cpu_power_metrics,
                     cpu_prochot,
+                    cpu_xgmi_link_width,
+                    cpu_apb_status,
                     cpu_freq_metrics,
                     cpu_c0_res,
                     cpu_lclk_dpm_level,
@@ -5979,6 +6046,7 @@ class AMDSMICommands:
                     cpu_io_bandwidth,
                     cpu_xgmi_bandwidth,
                     cpu_pwr_eff_mode,
+                    cpu_df_pstate_range,
                     cpu_metrics_ver,
                     cpu_metrics_table,
                     cpu_socket_energy,
@@ -6066,6 +6134,8 @@ class AMDSMICommands:
                     cpu,
                     cpu_power_metrics,
                     cpu_prochot,
+                    cpu_xgmi_link_width,
+                    cpu_apb_status,
                     cpu_freq_metrics,
                     cpu_c0_res,
                     cpu_lclk_dpm_level,
@@ -6073,6 +6143,7 @@ class AMDSMICommands:
                     cpu_io_bandwidth,
                     cpu_xgmi_bandwidth,
                     cpu_pwr_eff_mode,
+                    cpu_df_pstate_range,
                     cpu_metrics_ver,
                     cpu_metrics_table,
                     cpu_socket_energy,
@@ -9454,6 +9525,7 @@ class AMDSMICommands:
             "cpu_xgmi_link_width",
             "cpu_lclk_dpm_level",
             "cpu_pwr_eff_mode",
+            "cpu_df_pstate_range",
             "cpu_gmi3_link_width",
             "cpu_pcie_link_rate",
             "cpu_df_pstate_range",
@@ -9461,6 +9533,8 @@ class AMDSMICommands:
             "cpu_disable_apb",
             "soc_boost_limit",
             "cpu_xgmi_pstate_range",
+            "cpu_xgmi_link_width",
+            "cpu_apb_status",
             "cpu_railisofreq_policy",
             "cpu_dfcstate_ctrl",
             "cpu_pc6_enable",
