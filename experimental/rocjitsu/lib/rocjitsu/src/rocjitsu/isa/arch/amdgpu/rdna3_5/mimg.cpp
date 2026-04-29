@@ -495,7 +495,10 @@ ImageBvh64IntersectRayMimg::ImageBvh64IntersectRayMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void ImageBvh64IntersectRayMimg::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void ImageBvh64IntersectRayMimg::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 ImageSampleMimg::ImageSampleMimg(const MachineInst *inst)
     : Mimg("image_sample", reinterpret_cast<const OpEncoding *>(inst),

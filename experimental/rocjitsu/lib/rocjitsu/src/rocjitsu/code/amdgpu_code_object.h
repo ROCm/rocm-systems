@@ -39,6 +39,11 @@ public:
   /// @param[in] elf_path Path to a standalone device ELF file.
   explicit AmdGpuCodeObject(const std::string &elf_path);
 
+  /// @brief Construct from raw ELF bytes in memory.
+  /// @param[in] elf_bytes Pointer to the ELF image.
+  /// @param[in] elf_size Size of the ELF image in bytes.
+  AmdGpuCodeObject(const uint8_t *elf_bytes, size_t elf_size);
+
   /// @brief Construct from a region within an already-open ELF file (used by AmdGpuExecutable).
   /// @param[in] size Size of the embedded ELF in bytes.
   /// @param[in] elf_file Open file stream positioned at the start of the embedded ELF.

@@ -63,17 +63,13 @@ AMOBitwiseTester<T>::AMOBitwiseTester(TesterArguments args) : Tester(args) {
   // One return per *thread* per loop
   CHECK_HIP(hipMalloc((void **)&ret_val, max_msg_size * n_in * n_loops));
 
-  dest = (T *)rocshmem_malloc(max_msg_size * n_out * n_loops);
-  if (dest == nullptr) {
-    std::cerr << "Error allocating memory from symmetric heap" << std::endl;
-    std::cerr << "dest: " << (void*)dest << std::endl;
-  }
+  dest = (T *) alloc_test_buffer(max_msg_size * n_out * n_loops);
 }
 
 template <typename T>
 AMOBitwiseTester<T>::~AMOBitwiseTester() {
   CHECK_HIP(hipFree(ret_val));
-  rocshmem_free(dest);
+  free_test_buffer(dest);
 }
 
 template <typename T>

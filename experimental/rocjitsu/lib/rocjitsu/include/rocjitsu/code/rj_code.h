@@ -342,6 +342,25 @@ RJ_API_EXPORT const rj_code_inst_t *rj_code_inst_next(const rj_code_inst_t *inst
 
 /// @}
 
+/// @defgroup dbt Dynamic Binary Translation
+/// @{
+
+typedef struct rj_code_dbt_options_t {
+  rj_code_arch_t guest_arch;
+  rj_code_arch_t host_arch;
+} rj_code_dbt_options_t;
+
+/// @brief Translate a code object from guest_arch to host_arch.
+/// @param[in]  source     Source code object to translate.
+/// @param[in]  options    Translation options.
+/// @param[out] translated Newly created translated code object (refcount = 0; caller owns it).
+/// @returns ROCJITSU_STATUS_SUCCESS on success.
+[[nodiscard]] RJ_API_EXPORT rj_status_t rj_code_translate(const rj_code_object_t *source,
+                                                          const rj_code_dbt_options_t *options,
+                                                          rj_code_object_t **translated);
+
+/// @}
+
 #ifdef __cplusplus
 } // extern "C"
 #endif
