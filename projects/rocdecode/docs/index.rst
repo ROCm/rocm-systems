@@ -26,7 +26,7 @@ rocDecode is delivered as part of `TheRock <https://github.com/ROCm/TheRock>`_. 
 
   .. grid-item-card:: Conceptual
 
-    * :doc:`Video decoding pipeline <./conceptual/video-decoding-pipeline>`
+    * :doc:`rocDecode decoding pipeline <./conceptual/rocDecode-decoding-pipelines>`
     * :doc:`rocDecode surface memory locations <./conceptual/rocDecode-memory-types>`
 
   .. grid-item-card:: How to

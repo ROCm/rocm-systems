@@ -21,4 +21,4 @@ GPU/CPU-accelerated inferencing and training.
 In addition, you can use the rocDecode API to create multiple instances of video decoders based on the number of available VCNs on a GPU device. By configuring the decoder for a device, all available VCNs can be used seamlessly to decode a batch of video streams in parallel.
 
 For more information, refer to the
-:doc:`Video decoding pipeline <./conceptual/video-decoding-pipeline>`.
+:doc:`rocDecode decode pipelines <./conceptual/rocDecode-decoding-pipelines>`.
