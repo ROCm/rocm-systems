@@ -1149,6 +1149,214 @@ TEST(HsaTranslateTest, TranslateAndDispatchTritonCdna4Matmul) {
   hsa_shut_down();
 }
 
+TEST(HsaTranslateTest, TranslateAndDispatchTritonCdna4RealMatmul1024) {
+  Executable exec(kernel_hsaco_path("triton_cdna4_real_matmul"));
+  ASSERT_TRUE(exec.is_valid());
+  ASSERT_GT(exec.num_code_objects(ROCJITSU_CODE_TARGET_GFX950), 0u);
+  const auto *co = exec.code_object(ROCJITSU_CODE_TARGET_GFX950, 0);
+  ASSERT_NE(co, nullptr);
+
+  ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
+
+  hsa_agent_t gpu = find_gpu_agent();
+  ASSERT_NE(gpu.handle, 0u);
+
+  hsa_isa_t isa{};
+  hsa_agent_get_info(gpu, HSA_AGENT_INFO_ISA, &isa);
+  char isa_name[128] = {};
+  hsa_isa_get_info_alt(isa, HSA_ISA_INFO_NAME, isa_name);
+  ASSERT_TRUE(std::strstr(isa_name, "gfx1200") || std::strstr(isa_name, "gfx1201"))
+      << "Test requires RDNA4 GPU, found: " << isa_name;
+
+  const uint32_t target_mach = std::strstr(isa_name, "gfx1201") ? 0x4E : 0x48;
+  BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA4, target_mach);
+  auto result = translator.translate(*co);
+  ASSERT_FALSE(result.elf_bytes.empty());
+  ASSERT_TRUE(result.warnings.empty()) << "Translation warnings: " << result.warnings.front();
+  {
+    auto *f = std::fopen("/tmp/translated_triton_cdna4_real_matmul.co", "wb");
+    if (f) {
+      std::fwrite(result.elf_bytes.data(), 1, result.elf_bytes.size(), f);
+      std::fclose(f);
+    }
+  }
+
+  hsa_agent_t cpu = find_cpu_agent();
+
+  hsa_code_object_reader_t reader{};
+  auto st = hsa_code_object_reader_create_from_memory(result.elf_bytes.data(),
+                                                      result.elf_bytes.size(), &reader);
+  ASSERT_EQ(st, HSA_STATUS_SUCCESS);
+
+  hsa_executable_t executable{};
+  st = hsa_executable_create_alt(HSA_PROFILE_FULL, HSA_DEFAULT_FLOAT_ROUNDING_MODE_DEFAULT, nullptr,
+                                 &executable);
+  ASSERT_EQ(st, HSA_STATUS_SUCCESS);
+  st = hsa_executable_load_agent_code_object(executable, gpu, reader, nullptr, nullptr);
+  ASSERT_EQ(st, HSA_STATUS_SUCCESS);
+  st = hsa_executable_freeze(executable, nullptr);
+  ASSERT_EQ(st, HSA_STATUS_SUCCESS);
+
+  hsa_executable_symbol_t symbol{};
+  st = hsa_executable_get_symbol_by_name(executable, "triton_cdna4_real_matmul_kernel.kd", &gpu,
+                                         &symbol);
+  ASSERT_EQ(st, HSA_STATUS_SUCCESS);
+
+  uint64_t kernel_object = 0;
+  hsa_executable_symbol_get_info(symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_OBJECT, &kernel_object);
+  ASSERT_NE(kernel_object, 0u);
+
+  constexpr uint32_t M = 1024;
+  constexpr uint32_t N = 1024;
+  constexpr uint32_t K = 1024;
+  constexpr uint32_t BlockM = 16;
+  constexpr uint32_t BlockN = 16;
+  constexpr uint32_t WorkgroupSize = 256;
+  constexpr uint32_t NumTiles = (M / BlockM) * (N / BlockN);
+  constexpr size_t ASize = M * K * sizeof(uint16_t);
+  constexpr size_t BSize = N * K * sizeof(uint16_t);
+  constexpr size_t CSize = M * N * sizeof(float);
+
+  auto gpu_pool = find_pool(gpu, HSA_AMD_SEGMENT_GLOBAL);
+  uint16_t *A_dev = nullptr, *B_dev = nullptr;
+  float *C_dev = nullptr;
+  hsa_amd_memory_pool_allocate(gpu_pool, ASize, 0, reinterpret_cast<void **>(&A_dev));
+  hsa_amd_memory_pool_allocate(gpu_pool, BSize, 0, reinterpret_cast<void **>(&B_dev));
+  hsa_amd_memory_pool_allocate(gpu_pool, CSize, 0, reinterpret_cast<void **>(&C_dev));
+  ASSERT_NE(A_dev, nullptr);
+  ASSERT_NE(B_dev, nullptr);
+  ASSERT_NE(C_dev, nullptr);
+
+  hsa_agent_t both[] = {cpu, gpu};
+  hsa_amd_agents_allow_access(2, both, nullptr, A_dev);
+  hsa_amd_agents_allow_access(2, both, nullptr, B_dev);
+  hsa_amd_agents_allow_access(2, both, nullptr, C_dev);
+
+  std::vector<uint16_t> A_host(M * K), B_host(N * K);
+  std::vector<float> C_zero(M * N, 0.0f);
+  for (uint32_t row = 0; row < M; ++row)
+    for (uint32_t k = 0; k < K; ++k)
+      A_host[row * K + k] =
+          f32_to_f16(static_cast<float>((row * 3 + k * 5) % 17) * 0.03125f - 0.25f);
+  for (uint32_t col = 0; col < N; ++col)
+    for (uint32_t k = 0; k < K; ++k)
+      B_host[col * K + k] =
+          f32_to_f16(static_cast<float>((col * 7 + k * 11) % 19) * 0.03125f - 0.28125f);
+
+  ASSERT_EQ(hsa_memory_copy(A_dev, A_host.data(), ASize), HSA_STATUS_SUCCESS);
+  ASSERT_EQ(hsa_memory_copy(B_dev, B_host.data(), BSize), HSA_STATUS_SUCCESS);
+  ASSERT_EQ(hsa_memory_copy(C_dev, C_zero.data(), CSize), HSA_STATUS_SUCCESS);
+
+  auto kernarg_pool = find_pool(cpu, HSA_AMD_SEGMENT_GLOBAL, true);
+  void *kernarg = nullptr;
+  hsa_amd_memory_pool_allocate(kernarg_pool, 40, 0, &kernarg);
+  ASSERT_NE(kernarg, nullptr);
+  hsa_amd_agents_allow_access(2, both, nullptr, kernarg);
+  std::memset(kernarg, 0, 40);
+
+  struct __attribute__((packed)) KernArgs {
+    const uint16_t *A;
+    const uint16_t *B;
+    float *C;
+    uint64_t unused0;
+    uint64_t unused1;
+  };
+  static_assert(sizeof(KernArgs) == 40);
+  auto *args = static_cast<KernArgs *>(kernarg);
+  args->A = A_dev;
+  args->B = B_dev;
+  args->C = C_dev;
+
+  hsa_queue_t *queue = nullptr;
+  uint32_t queue_size = 0;
+  hsa_agent_get_info(gpu, HSA_AGENT_INFO_QUEUE_MAX_SIZE, &queue_size);
+  st = hsa_queue_create(gpu, queue_size, HSA_QUEUE_TYPE_SINGLE, nullptr, nullptr, UINT32_MAX,
+                        UINT32_MAX, &queue);
+  ASSERT_EQ(st, HSA_STATUS_SUCCESS);
+
+  hsa_signal_t signal{};
+  hsa_signal_create(1, 0, nullptr, &signal);
+
+  uint64_t write_idx = hsa_queue_add_write_index_relaxed(queue, 1);
+  auto *aql = static_cast<hsa_kernel_dispatch_packet_t *>(queue->base_address) +
+              (write_idx & (queue->size - 1));
+  std::memset(aql, 0, sizeof(*aql));
+  aql->setup = 1;
+  aql->workgroup_size_x = WorkgroupSize;
+  aql->workgroup_size_y = 1;
+  aql->workgroup_size_z = 1;
+  aql->grid_size_x = NumTiles * WorkgroupSize;
+  aql->grid_size_y = 1;
+  aql->grid_size_z = 1;
+  aql->group_segment_size = 1024;
+  aql->kernel_object = kernel_object;
+  aql->kernarg_address = kernarg;
+  aql->completion_signal = signal;
+
+  uint16_t header = HSA_PACKET_TYPE_KERNEL_DISPATCH << HSA_PACKET_HEADER_TYPE;
+  header |= 1 << HSA_PACKET_HEADER_BARRIER;
+  header |= HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_ACQUIRE_FENCE_SCOPE;
+  header |= HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_RELEASE_FENCE_SCOPE;
+  __atomic_store_n(reinterpret_cast<uint16_t *>(aql), header, __ATOMIC_RELEASE);
+  hsa_signal_store_relaxed(queue->doorbell_signal, write_idx);
+
+  hsa_signal_value_t val = hsa_signal_wait_scacquire(signal, HSA_SIGNAL_CONDITION_LT, 1,
+                                                     60'000'000'000ULL, HSA_WAIT_STATE_BLOCKED);
+  ASSERT_EQ(val, 0) << "Kernel dispatch timed out or failed";
+
+  std::vector<float> C_result(M * N);
+  ASSERT_EQ(hsa_memory_copy(C_result.data(), C_dev, CSize), HSA_STATUS_SUCCESS);
+
+  struct Sample {
+    uint32_t row;
+    uint32_t col;
+  };
+  std::vector<Sample> samples;
+  const uint32_t points[] = {0, 1, 15, 16, 127, 255, 511, 512, 1023};
+  for (uint32_t row : points)
+    for (uint32_t col : points)
+      samples.push_back({row, col});
+  for (uint32_t i = 0; i < 32; ++i)
+    samples.push_back({(37u * i + 3u) % M, (53u * i + 5u) % N});
+
+  auto expected_at = [&](uint32_t row, uint32_t col) {
+    float expected = 0.0f;
+    for (uint32_t k = 0; k < K; ++k)
+      expected += f16_to_f32(A_host[row * K + k]) * f16_to_f32(B_host[col * K + k]);
+    return expected;
+  };
+
+  int mismatches = 0;
+  int logged = 0;
+  for (const Sample &sample : samples) {
+    const float expected = expected_at(sample.row, sample.col);
+    const float got = C_result[sample.row * N + sample.col];
+    const float tol = std::max(0.03f * std::abs(expected), 0.05f);
+    if (std::abs(got - expected) <= tol)
+      continue;
+    ++mismatches;
+    if (logged < 16) {
+      std::fprintf(stderr, "  C[%u,%u] got=% .8e expected=% .8e abs_err=% .8e tol=% .8e\n",
+                   sample.row, sample.col, got, expected, std::abs(got - expected), tol);
+      ++logged;
+    }
+  }
+
+  if (mismatches > 0)
+    std::fprintf(stderr, "\n=== Triton CDNA4 real matmul: %d sampled mismatches ===\n", mismatches);
+  EXPECT_EQ(mismatches, 0) << mismatches << " sampled mismatches out of " << samples.size();
+
+  hsa_signal_destroy(signal);
+  hsa_queue_destroy(queue);
+  hsa_amd_memory_pool_free(kernarg);
+  hsa_amd_memory_pool_free(A_dev);
+  hsa_amd_memory_pool_free(B_dev);
+  hsa_amd_memory_pool_free(C_dev);
+  hsa_executable_destroy(executable);
+  hsa_code_object_reader_destroy(reader);
+  hsa_shut_down();
+}
+
 static void run_mfma16x16_dispatch(const char *kernel_name, const char *symbol_name,
                                    float golden_scale, const char *dump_path, const char *label,
                                    uint32_t k_dim = 16, uint32_t group_segment_size = 0) {

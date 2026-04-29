@@ -27,6 +27,7 @@ RJ_DIAGNOSTIC_POP
 #include <climits>
 #include <cstring>
 #include <optional>
+#include <string>
 
 namespace rocjitsu {
 
@@ -291,7 +292,14 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
   const auto &cave = patcher.cave_body();
   if (!cave.empty()) {
     const uint64_t cave_start = patcher.cave_start();
-    assert(cave_start + cave.size() <= text.size() && "cave body exceeds .text NOP padding");
+    if (cave_start + cave.size() > text.size()) {
+      result.warnings.push_back("semantic expansion code cave exceeds .text padding: need " +
+                                std::to_string(cave.size()) + " bytes, have " +
+                                std::to_string(text.size() - cave_start) + " bytes");
+      result.elf_bytes = patcher.emit();
+      warnings_ = nullptr;
+      return result;
+    }
     std::memcpy(translated_text.data() + cave_start, cave.data(), cave.size());
   }
 

@@ -44,6 +44,7 @@ rj_add_device_kernel(lds_loop gfx950)
 rj_add_device_kernel(matmul_shared_loop gfx950)
 rj_add_device_kernel(matmul_shared_mfma_loop gfx950)
 rj_add_amdgpu_asm_kernel(triton_cdna4_matmul gfx950)
+rj_add_amdgpu_asm_kernel(triton_cdna4_real_matmul gfx950)
 
 # Umbrella target for all device kernels.
 add_custom_target(device_kernels DEPENDS
@@ -59,6 +60,7 @@ add_custom_target(device_kernels DEPENDS
     kernel_matmul_shared_loop
     kernel_matmul_shared_mfma_loop
     kernel_triton_cdna4_matmul
+    kernel_triton_cdna4_real_matmul
 )
 
 # Export variables to the parent scope so the test executable can use them.

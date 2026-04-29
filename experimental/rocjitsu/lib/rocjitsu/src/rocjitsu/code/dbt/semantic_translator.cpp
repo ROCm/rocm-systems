@@ -166,39 +166,98 @@ std::vector<uint32_t> lower_v_lshl_add_u64(const Instruction &inst,
   std::memcpy(&src, raw, sizeof(src));
   const uint16_t vdst = src.vdst;
   const uint16_t src0 = src.src0;
+  const uint16_t src1 = src.src1;
   const uint16_t src2 = src.src2;
 
-  auto carry_sgpr = liveness.find_free_sgpr(offset);
+  auto src_pair_hi = [](uint16_t low) -> std::optional<uint16_t> {
+    if (low <= 126 || (low >= 256 && low < 511))
+      return static_cast<uint16_t>(low + 1);
+    if (low >= 128 && low <= 208)
+      return 128;
+    return std::nullopt;
+  };
+  auto inline_u32 = [](uint16_t op) -> std::optional<uint32_t> {
+    if (op >= 128 && op <= 192)
+      return static_cast<uint32_t>(op - 128);
+    if (op >= 193 && op <= 208)
+      return static_cast<uint32_t>(-static_cast<int32_t>(op - 192));
+    return std::nullopt;
+  };
+
+  auto src0_hi = src_pair_hi(src0);
+  auto src2_hi = src_pair_hi(src2);
+  auto shift = inline_u32(src1);
+  if (!src0_hi || !src2_hi || !shift || *shift >= 64)
+    return {};
+
+  auto carry_sgpr = liveness.find_free_sgpr_pair(offset);
   if (!carry_sgpr)
     return {};
 
+  constexpr uint16_t kOpLshlrevB64 = 0x11F;
+  constexpr uint16_t kOpAddCoCiU32 = 288;
+  constexpr uint16_t kOpAddCoU32 = 768;
+  auto build_vop3_sdst = [](uint16_t op, uint8_t vdst, uint8_t sdst, uint16_t src0, uint16_t src1,
+                            uint16_t src2 = 0) {
+    rdna4::Vop3SdstEncMachineInst out{};
+    out.encoding = 0x35;
+    out.op = op;
+    out.vdst = vdst;
+    out.sdst = sdst;
+    out.src0 = src0;
+    out.src1 = src1;
+    out.src2 = src2;
+    return std::bit_cast<uint64_t>(out);
+  };
+  auto build_vop3_local = [](uint16_t op, uint8_t vdst, uint16_t src0, uint16_t src1,
+                             uint16_t src2 = 0) {
+    rdna4::Vop3MachineInst out{};
+    out.encoding = 0x35;
+    out.op = op;
+    out.vdst = vdst;
+    out.src0 = src0;
+    out.src1 = src1;
+    out.src2 = src2;
+    return std::bit_cast<uint64_t>(out);
+  };
+
+  auto low_word = [](uint64_t inst) { return static_cast<uint32_t>(inst); };
+  auto high_word = [](uint64_t inst) { return static_cast<uint32_t>(inst >> 32); };
+
+  uint16_t add_src0_lo = src0;
+  uint16_t add_src0_hi = *src0_hi;
   std::vector<uint32_t> words;
+  HazardTracker hz;
+
+  if (*shift != 0) {
+    auto shifted = liveness.find_free_run(offset, 2);
+    if (!shifted)
+      return {};
+
+    const uint64_t shift_inst =
+        build_vop3_local(kOpLshlrevB64, static_cast<uint8_t>(*shifted), src1, src0);
+    hz.emit2(words, low_word(shift_inst), high_word(shift_inst), HazardTracker::Pipeline::VALU);
+    add_src0_lo = static_cast<uint16_t>(256u + *shifted);
+    add_src0_hi = static_cast<uint16_t>(add_src0_lo + 1);
+  }
 
   // v_add_co_u32 vdst_lo, carry_sgpr, src0_lo, src2_lo
-  {
-    const uint32_t w0 =
-        (0x35u << 26) | (768u << 16) | (static_cast<uint32_t>(*carry_sgpr) << 8) | vdst;
-    const uint32_t w1 = static_cast<uint32_t>(src0) | (static_cast<uint32_t>(src2) << 9);
-    words.push_back(w0);
-    words.push_back(w1);
-  }
+  const uint64_t add_lo = build_vop3_sdst(kOpAddCoU32, static_cast<uint8_t>(vdst),
+                                          static_cast<uint8_t>(*carry_sgpr), add_src0_lo, src2);
+  hz.emit2(words, low_word(add_lo), high_word(add_lo), HazardTracker::Pipeline::VALU);
 
   // The carry-out is a VALU-produced scalar destination consumed by the next
   // VALU as a scalar source. Use a private SGPR carry instead of VCC: the guest
   // v_lshl_add_u64 does not clobber VCC, and compare masks are often live
   // across address calculation in loop/control-flow code.
   constexpr uint16_t kWaitVaSdst = 0xF1FF;
-  words.push_back(pack_sopp(8, kWaitVaSdst));
+  hz.emit_raw(words, pack_sopp(8, kWaitVaSdst));
 
   // v_add_co_ci_u32 vdst_hi, carry_sgpr, src0_hi, src2_hi, carry_sgpr
-  {
-    const uint32_t w0 =
-        (0x35u << 26) | (288u << 16) | (static_cast<uint32_t>(*carry_sgpr) << 8) | (vdst + 1);
-    const uint32_t w1 = static_cast<uint32_t>(src0 + 1) | (static_cast<uint32_t>(src2 + 1) << 9) |
-                        (static_cast<uint32_t>(*carry_sgpr) << 18);
-    words.push_back(w0);
-    words.push_back(w1);
-  }
+  const uint64_t add_hi =
+      build_vop3_sdst(kOpAddCoCiU32, static_cast<uint8_t>(vdst + 1),
+                      static_cast<uint8_t>(*carry_sgpr), add_src0_hi, *src2_hi, *carry_sgpr);
+  hz.emit2(words, low_word(add_hi), high_word(add_hi), HazardTracker::Pipeline::VALU);
 
   return words;
 }
@@ -474,11 +533,11 @@ std::vector<uint32_t> lower_mfma_f32_16x16x16_f16(const Instruction &inst,
 }
 
 /// @brief Lower the Triton-emitted v_bitop3_b32 LUT 0x6c to RDNA4 VALU.
-/// @details LUT 0x6c is src1 ^ (src0 & src2). When vdst aliases src0, this can
-/// be lowered without a scratch register:
-///   vdst = src0 & src2
-///   vdst = src1 ^ vdst
-std::vector<uint32_t> lower_v_bitop3_b32(const Instruction &inst) {
+/// @details LUT 0x6c is src1 ^ (src0 & src2). If vdst does not alias src1,
+/// clobber vdst with the AND result first. If vdst aliases src1, preserve src1
+/// by computing the AND into a liveness-selected temporary VGPR.
+std::vector<uint32_t> lower_v_bitop3_b32(const Instruction &inst, uint64_t offset,
+                                         const LivenessAnalysis &liveness) {
   const auto *raw = inst.raw_encoding();
   if (!raw || inst.size() < 8)
     return {};
@@ -492,16 +551,24 @@ std::vector<uint32_t> lower_v_bitop3_b32(const Instruction &inst) {
   if (truth_table != 0x6Cu)
     return {};
 
-  if (bitop.src0 != 256u + vdst)
-    return {};
-  if (bitop.src1 >= 512u || bitop.src2 >= 512u)
+  if (bitop.src0 < 256u || bitop.src0 >= 512u || bitop.src1 >= 512u || bitop.src2 >= 512u)
     return {};
 
   using P = HazardTracker::Pipeline;
   HazardTracker hz;
   std::vector<uint32_t> words;
-  hz.emit(words, build_vop2(kOpAndB32, vdst, bitop.src2, vdst), P::VALU);
-  hz.emit(words, build_vop2(kOpXorB32, vdst, bitop.src1, vdst), P::VALU);
+  const uint8_t src0_vgpr = static_cast<uint8_t>(bitop.src0 - 256u);
+  if (bitop.src1 == 256u + vdst) {
+    auto tmp = liveness.find_free_run(offset, 1);
+    if (!tmp)
+      return {};
+    const auto tmp_vgpr = static_cast<uint8_t>(*tmp);
+    hz.emit(words, build_vop2(kOpAndB32, tmp_vgpr, bitop.src2, src0_vgpr), P::VALU);
+    hz.emit(words, build_vop2(kOpXorB32, vdst, 256u + tmp_vgpr, vdst), P::VALU);
+  } else {
+    hz.emit(words, build_vop2(kOpAndB32, vdst, bitop.src2, src0_vgpr), P::VALU);
+    hz.emit(words, build_vop2(kOpXorB32, vdst, bitop.src1, vdst), P::VALU);
+  }
   return words;
 }
 
@@ -548,6 +615,32 @@ std::vector<uint32_t> lower_accvgpr_write([[maybe_unused]] const Instruction &in
   return {build_s_nop()};
 }
 
+/// @brief Lower CDNA4 s_cmpk_lt_u32 to RDNA4 s_cmp_lt_u32 with a literal.
+/// @details RDNA4 removed the SOPK compare-with-immediate form, but SOPC
+/// compare against a 32-bit literal has the same SCC result for the zero-
+/// extended 16-bit immediate used by s_cmpk_lt_u32.
+std::vector<uint32_t> lower_s_cmpk_lt_u32(const Instruction &inst) {
+  if (std::string_view(inst.mnemonic()) != "s_cmpk_lt_u32")
+    return {};
+
+  const auto *raw = inst.raw_encoding();
+  if (!raw || inst.size() < 4)
+    return {};
+
+  cdna4::SopkMachineInst src{};
+  std::memcpy(&src, raw, sizeof(src));
+
+  constexpr uint8_t kRdna4OpSCmpLtU32 = 10;
+  constexpr uint8_t kLiteralConstant = 255;
+  rdna4::SopcMachineInst dst{};
+  dst.encoding = 0x17E;
+  dst.op = kRdna4OpSCmpLtU32;
+  dst.ssrc0 = static_cast<uint8_t>(src.sdst);
+  dst.ssrc1 = kLiteralConstant;
+
+  return {std::bit_cast<uint32_t>(dst), static_cast<uint32_t>(src.simm16)};
+}
+
 // ---------------------------------------------------------------------------
 // ExpandFn adapters — conform each lowering function to the unified signature
 // ---------------------------------------------------------------------------
@@ -582,10 +675,10 @@ std::vector<uint32_t> expand_v_lshl_add_u64(const Instruction &inst, uint32_t, u
   return lower_v_lshl_add_u64(inst, ROCJITSU_CODE_ARCH_RDNA4, offset, liveness);
 }
 
-std::vector<uint32_t> expand_v_bitop3_b32(const Instruction &inst, uint32_t, uint64_t,
-                                          const LivenessAnalysis &, const LaneLayout *,
+std::vector<uint32_t> expand_v_bitop3_b32(const Instruction &inst, uint32_t, uint64_t offset,
+                                          const LivenessAnalysis &liveness, const LaneLayout *,
                                           const LaneLayout *) {
-  return lower_v_bitop3_b32(inst);
+  return lower_v_bitop3_b32(inst, offset, liveness);
 }
 
 std::vector<uint32_t> expand_accvgpr_read(const Instruction &inst, uint32_t, uint64_t,
@@ -609,6 +702,12 @@ std::vector<uint32_t> expand_mfma_f32_16x16x16_f16(const Instruction &inst, uint
                                      guest, host);
 }
 
+std::vector<uint32_t> expand_s_cmpk_lt_u32(const Instruction &inst, uint32_t, uint64_t,
+                                           const LivenessAnalysis &, const LaneLayout *,
+                                           const LaneLayout *) {
+  return lower_s_cmpk_lt_u32(inst);
+}
+
 // ---------------------------------------------------------------------------
 // Expand rules table — sorted by (src_encoding_id, src_opcode) for binary search
 // ---------------------------------------------------------------------------
@@ -617,6 +716,7 @@ std::vector<uint32_t> expand_mfma_f32_16x16x16_f16(const Instruction &inst, uint
 // Opcodes are only unique within one encoding. For example, SOPP:s_waitcnt and
 // SOP2:s_and_b32 both use opcode 12, so semantic rules must include the
 // encoding prefix to avoid expanding an unrelated instruction.
+constexpr uint16_t kCdna4Enc_SOPK_s_cmpk_lt_u32 = 0x16C;
 constexpr uint16_t kCdna4Enc_SOPP = 0x17F;
 constexpr uint16_t kCdna4Enc_FLAT_GLBL = 0x1B8;
 constexpr uint16_t kCdna4Enc_VOP3P = 0x1A7;
@@ -627,6 +727,7 @@ constexpr uint16_t kCdna4Enc_VOP3_v_lshl_add_u64 = 0x1A4;
 constexpr uint16_t kCdna4Enc_VOP3_v_bitop3_b32 = 0x1A4;
 
 // CDNA4 opcodes (from decoder: opcode_ = inst_.op)
+constexpr uint16_t kCdna4Op_s_cmpk_lt_u32 = 12;
 constexpr uint16_t kCdna4Op_s_barrier = 10;
 constexpr uint16_t kCdna4Op_s_waitcnt = 12;
 constexpr uint16_t kCdna4Op_global_store_dwordx4 = 31;
@@ -637,6 +738,8 @@ constexpr uint16_t kCdna4Op_v_lshl_add_u64 = 520;
 constexpr uint16_t kCdna4Op_v_bitop3_b32 = 564;
 
 const TranslationRule kExpandRules_cdna4_to_rdna4[] = {
+    {kCdna4Enc_SOPK_s_cmpk_lt_u32, kCdna4Op_s_cmpk_lt_u32, RuleAction::Expand, 0, 0, nullptr,
+     expand_s_cmpk_lt_u32, nullptr, nullptr},
     {kCdna4Enc_SOPP, kCdna4Op_s_barrier, RuleAction::Expand, 0, 0, nullptr, expand_s_barrier,
      nullptr, nullptr},
     {kCdna4Enc_SOPP, kCdna4Op_s_waitcnt, RuleAction::Expand, 0, 0, nullptr, expand_waitcnt, nullptr,
