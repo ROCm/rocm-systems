@@ -72,6 +72,93 @@ project(
 include(GNUInstallDirs)
 include(CheckCXXSourceCompiles)
 
+# =============================================================================
+# Helper Functions
+# =============================================================================
+
+# Determine an imported target's property from the target's imported
+# configuration. TARGET_NAME is the target's name. E.g., if PROPERTY_TYPE is
+# IMPORTED_LOCATION, this fetches the right IMPORTED_LOCATION_<config> (e.g.,
+# IMPORTED_LOCATION_RELEASE) from TARGET_NAME's properties.
+function(get_imported_property TARGET_NAME PROPERTY_TYPE PROPERTY_VAR)
+  if(NOT TARGET ${TARGET_NAME})
+    message(FATAL_ERROR "Target ${TARGET_NAME} not found.")
+  endif()
+
+  # Retrieve the list of all configurations provided by the imported target.
+  get_target_property(AVAILABLE_CONFIGS ${TARGET_NAME} IMPORTED_CONFIGURATIONS)
+
+  set(SELECTED_CONFIG "")
+
+  # If CMAKE_BUILD_TYPE is set, try an exact match. This is what cmake does too:
+  # https://gitlab.kitware.com/cmake/cmake/blob/v3.29.6/Source/cmTarget.cxx#L3378-3387
+  if(CMAKE_BUILD_TYPE)
+    string(TOUPPER "${CMAKE_BUILD_TYPE}" CMAKE_BUILD_TYPE_UPPER)
+    # Check if the specified build type matches any of the available configurations.
+    if("${CMAKE_BUILD_TYPE_UPPER}" IN_LIST AVAILABLE_CONFIGS)
+      set(SELECTED_CONFIG "${CMAKE_BUILD_TYPE_UPPER}")
+      get_target_property(PROPERTY_VALUE ${TARGET_NAME} ${PROPERTY_TYPE}_${CMAKE_BUILD_TYPE_UPPER})
+      set(${PROPERTY_VAR} ${PROPERTY_VALUE} PARENT_SCOPE)
+      message(STATUS "Selected configuration for ${TARGET_NAME}: ${SELECTED_CONFIG} (matched CMAKE_BUILD_TYPE)")
+      return()
+    endif()
+  endif()
+
+  # If the build type wasn't specified or didn't match any available
+  # configurations, pick the first valid one from all available configurations.
+  # This matches what cmake does too:
+  # https://gitlab.kitware.com/cmake/cmake/blob/v3.29.6/Source/cmTarget.cxx#L3389-3420
+  if(SELECTED_CONFIG STREQUAL "")
+    foreach(CONFIG ${AVAILABLE_CONFIGS})
+      string(TOUPPER "${CONFIG}" CONFIG_UPPER)
+      get_target_property(PROPERTY_VALUE ${TARGET_NAME} ${PROPERTY_TYPE}_${CONFIG_UPPER})
+      if(NOT ${PROPERTY_VALUE} STREQUAL "${PROPERTY_TYPE}_${CONFIG_UPPER}-NOTFOUND")
+        set(SELECTED_CONFIG ${CONFIG_UPPER})
+        message(STATUS "Selected configuration for ${TARGET_NAME}: ${SELECTED_CONFIG}")
+        set(${PROPERTY_VAR} ${PROPERTY_VALUE} PARENT_SCOPE)
+        return()
+      endif()
+    endforeach()
+  endif()
+
+  if(SELECTED_CONFIG STREQUAL "")
+    message(FATAL_ERROR "Could not determine the appropriate configuration for ${TARGET_NAME} library.")
+  endif()
+endfunction()
+
+# Generate build info string for version identification
+# Returns: developer-build-<user>-git-<hash> or just developer-build
+function(generate_build_info OUTPUT_VAR)
+  set(build_info developer-build)
+
+  if(DEFINED ENV{USER})
+    set(build_info ${build_info}-$ENV{USER})
+  endif()
+
+  find_package(Git)
+  if(GIT_FOUND)
+    execute_process(
+      COMMAND ${GIT_EXECUTABLE} rev-parse --short HEAD
+      WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}"
+      OUTPUT_VARIABLE build_revision
+      ERROR_QUIET
+      OUTPUT_STRIP_TRAILING_WHITESPACE
+    )
+  else()
+    message(STATUS "GIT not found")
+  endif()
+
+  if(DEFINED build_revision)
+    set(build_info ${build_info}-git-${build_revision})
+  endif()
+
+  set(${OUTPUT_VAR} ${build_info} PARENT_SCOPE)
+endfunction()
+
+# =============================================================================
+# End Helper Functions
+# =============================================================================
+
 # Convert the project's name to uppercase and replace '-' with '_'.
 # This transforms "amd-dbgapi" to "AMD_DBGAPI" for use in:
 # - Symbol versioning (exportmap.in): AMD_DBGAPI_0.54, AMD_DBGAPI_0.56, etc.
@@ -329,59 +416,6 @@ if(THE_ROCK_BUILD)
   find_package(Threads)
 endif()
 
-# Determine an imported target's property, from the target's imported
-# configuration.  TARGET_NAME is the target's name.  E.g., if
-# PROPERTY_TYPE is IMPORTED_LOCATION, this fetches the right
-# IMPORTED_LOCATION_<config> (e.g., IMPORTED_LOCATION_RELEASE) from
-# TARGET_NAME's properties.
-function(get_imported_property TARGET_NAME PROPERTY_TYPE PROPERTY_VAR)
-  if(NOT TARGET ${TARGET_NAME})
-    message(FATAL_ERROR "Target ${TARGET_NAME} not found.")
-  endif()
-
-  # Retrieve the list of all configurations provided by the imported
-  # target.
-  get_target_property(AVAILABLE_CONFIGS ${TARGET_NAME} IMPORTED_CONFIGURATIONS)
-
-  set(SELECTED_CONFIG "")
-
-  # If CMAKE_BUILD_TYPE is set, try an exact match.  This is what
-  # cmake does too:
-  # https://gitlab.kitware.com/cmake/cmake/blob/v3.29.6/Source/cmTarget.cxx#L3378-3387
-  if(CMAKE_BUILD_TYPE)
-    string(TOUPPER "${CMAKE_BUILD_TYPE}" CMAKE_BUILD_TYPE_UPPER)
-    # Check if the specified build type matches any of the available
-    # configurations.
-    if("${CMAKE_BUILD_TYPE_UPPER}" IN_LIST AVAILABLE_CONFIGS)
-      set(SELECTED_CONFIG "${CMAKE_BUILD_TYPE_UPPER}")
-      get_target_property(PROPERTY_VALUE ${TARGET_NAME} ${PROPERTY_TYPE}_${CMAKE_BUILD_TYPE_UPPER})
-      set(${PROPERTY_VAR} ${PROPERTY_VALUE} PARENT_SCOPE)
-      message(STATUS "Selected configuration for ${TARGET_NAME}: ${SELECTED_CONFIG} (matched CMAKE_BUILD_TYPE)")
-    endif()
-  endif()
-
-  # If the build type wasn't specified or didn't match any available
-  # configurations, pick the first valid one from all available
-  # configurations.  This matches what cmake does too:
-  # https://gitlab.kitware.com/cmake/cmake/blob/v3.29.6/Source/cmTarget.cxx#L3389-3420
-  if(SELECTED_CONFIG STREQUAL "")
-    foreach(CONFIG ${AVAILABLE_CONFIGS})
-      string(TOUPPER "${CONFIG}" CONFIG_UPPER)
-      get_target_property(PROPERTY_VALUE ${TARGET_NAME} ${PROPERTY_TYPE}_${CONFIG_UPPER})
-      if(NOT ${PROPERTY_VALUE} STREQUAL "${PROPERTY_TYPE}_${CONFIG_UPPER}-NOTFOUND")
-        set(SELECTED_CONFIG ${CONFIG_UPPER})
-        message(STATUS "Selected configuration for ${TARGET_NAME}: ${SELECTED_CONFIG}")
-        set(${PROPERTY_VAR} ${PROPERTY_VALUE} PARENT_SCOPE)
-        break()
-      endif()
-    endforeach()
-  endif()
-
-  if(SELECTED_CONFIG STREQUAL "")
-    message(FATAL_ERROR "Could not determine the appropriate configuration for ${TARGET_NAME} library.")
-  endif()
-endfunction()
-
 # If building a static library, retrieve the amd_comgr library's name
 # from the cmake package, to put in the .pc file.
 set(PC_EXTRA_LIBS "")
@@ -407,28 +441,7 @@ configure_file(
   ${CMAKE_CURRENT_SOURCE_DIR}/amd-dbgapi.pc.in
   ${CMAKE_CURRENT_BINARY_DIR}/share/pkgconfig/amd-dbgapi.pc @ONLY)
 
-set(build_info developer-build)
-
-if(DEFINED ENV{USER})
-  set(build_info ${build_info}-$ENV{USER})
-endif()
-
-find_package(Git)
-if(GIT_FOUND)
-  execute_process(
-    COMMAND ${GIT_EXECUTABLE} rev-parse --short HEAD
-    WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}"
-    OUTPUT_VARIABLE build_revision
-    ERROR_QUIET
-    OUTPUT_STRIP_TRAILING_WHITESPACE
-  )
-else()
-  message(STATUS "GIT not found")
-endif()
-
-if(DEFINED build_revision)
-  set(build_info ${build_info}-git-${build_revision})
-endif()
+generate_build_info(build_info)
 
 target_link_libraries(amd-dbgapi PRIVATE amd_comgr ${CMAKE_DL_LIBS})
 
