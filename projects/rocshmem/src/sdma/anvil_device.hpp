@@ -283,7 +283,10 @@ struct SdmaQueueDeviceHandle {
         __builtin_amdgcn_wave_barrier();
         __atomic_signal_fence(__ATOMIC_SEQ_CST);
 
-        maxWritePtr = pendingWptr;
+        // Relaxed agent-scope atomic store writes directly to GL2, making
+        // maxWritePtr visible to quiet callers on other CUs.
+        __hip_atomic_store(&maxWritePtr, pendingWptr, __ATOMIC_RELAXED,
+                           __HIP_MEMORY_SCOPE_AGENT);
         break;
       }
       __builtin_amdgcn_s_sleep(1);
@@ -307,10 +310,14 @@ struct SdmaQueueDeviceHandle {
 
   // Spin-poll rptr until HW has consumed all submitted packets
   __device__ __forceinline__ void quietAll() {
+    // One agent-scope load to read maxWritePtr set by a potentially different CU.
+    // Held in a register for the loop — it does not need updated during quietAll.
+    uint64_t target = __hip_atomic_load(&maxWritePtr, __ATOMIC_RELAXED,
+                                        __HIP_MEMORY_SCOPE_AGENT);
     uint64_t hw_read_index;
     do {
       hw_read_index = __hip_atomic_load(rptr, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
-    } while (hw_read_index < maxWritePtr);
+    } while (hw_read_index < target);
   }
 
  private:
