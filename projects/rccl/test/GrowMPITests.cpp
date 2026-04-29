@@ -10,7 +10,6 @@
 #include "TestChecks.hpp"
 #include "DeviceBufferHelpers.hpp"
 #include <cstring>
-#include <thread>
 #include <vector>
 
 #ifdef MPI_TESTS_ENABLED
@@ -22,7 +21,6 @@ using namespace RCCLTestHelpers;
 namespace GrowTestConfig {
     constexpr size_t kBufferElements = 1024;
     constexpr int    kMinRanks       = 2;
-    constexpr int    kMinNodes       = 2;
 }
 
 class GrowMPITest : public MPITestBase
@@ -78,13 +76,18 @@ protected:
         return ncclSuccess;
     }
 
+    bool ensureStream()
+    {
+        if (!grownStream_) {
+            return hipStreamCreate(&grownStream_) == hipSuccess;
+        }
+        return true;
+    }
+
     bool runAllReduceAndVerify(ncclComm_t comm, int nRanksInComm)
     {
         if (!comm) return false;
-
-        if (!grownStream_) {
-            if (hipStreamCreate(&grownStream_) != hipSuccess) return false;
-        }
+        if (!ensureStream()) return false;
 
         const size_t count   = GrowTestConfig::kBufferElements;
         const size_t bufSize = count * sizeof(float);
@@ -115,11 +118,62 @@ protected:
         return verifyBufferData<float>(recvBuf, count,
             [expected](size_t) { return expected; });
     }
+
+    bool runSendRecvRing(ncclComm_t comm, int nRanksInComm)
+    {
+        if (!comm) return false;
+        if (!ensureStream()) return false;
+
+        int myRank = -1;
+        if (ncclCommUserRank(comm, &myRank) != ncclSuccess) return false;
+
+        const int sendPeer = (myRank + 1) % nRanksInComm;
+        const int recvPeer = (myRank - 1 + nRanksInComm) % nRanksInComm;
+
+        const size_t count   = GrowTestConfig::kBufferElements;
+        const size_t bufSize = count * sizeof(float);
+
+        void* sendBuf = nullptr;
+        void* recvBuf = nullptr;
+        if (hipMalloc(&sendBuf, bufSize) != hipSuccess) return false;
+        if (hipMalloc(&recvBuf, bufSize) != hipSuccess) {
+            (void)hipFree(sendBuf);
+            return false;
+        }
+        SCOPE_EXIT(if (sendBuf) (void)hipFree(sendBuf));
+        SCOPE_EXIT(if (recvBuf) (void)hipFree(recvBuf));
+
+        const float sendVal = static_cast<float>(myRank + 1);
+        if (initializeBufferWithPattern<float>(sendBuf, count,
+                [sendVal](size_t) { return sendVal; }) != hipSuccess) {
+            return false;
+        }
+        if (hipMemset(recvBuf, 0, bufSize) != hipSuccess) return false;
+
+        ncclResult_t r;
+        r = ncclGroupStart();
+        if (r != ncclSuccess) return false;
+
+        r = ncclSend(sendBuf, count, ncclFloat, sendPeer, comm, grownStream_);
+        if (r != ncclSuccess) return false;
+
+        r = ncclRecv(recvBuf, count, ncclFloat, recvPeer, comm, grownStream_);
+        if (r != ncclSuccess) return false;
+
+        r = ncclGroupEnd();
+        if (r != ncclSuccess) return false;
+
+        if (hipStreamSynchronize(grownStream_) != hipSuccess) return false;
+
+        const float expected = static_cast<float>(recvPeer + 1);
+        return verifyBufferData<float>(recvBuf, count,
+            [expected](size_t) { return expected; });
+    }
 };
 
 // --- Test 1: Single grow, AllReduce verification ---
 
-TEST_F(GrowMPITest, Grow_ExistingRanksGrow_AllreduceCorrect)
+TEST_F(GrowMPITest, Grow_AllReduce)
 {
     if (!validateTestPrerequisites(GrowTestConfig::kMinRanks)) {
         GTEST_SKIP() << "Requires at least " << GrowTestConfig::kMinRanks << " MPI ranks";
@@ -138,35 +192,9 @@ TEST_F(GrowMPITest, Grow_ExistingRanksGrow_AllreduceCorrect)
     ASSERT_MPI_TRUE(runAllReduceAndVerify(grownComm_, worldSize));
 }
 
-// --- Test 2: Multi-node grow ---
+// --- Test 2: Single grow, SendRecv ring verification ---
 
-TEST_F(GrowMPITest, Grow_MultiNode_ExistingRanksGrow_AllreduceCorrect)
-{
-    if (!validateTestPrerequisites(GrowTestConfig::kMinRanks,
-                                    kNoProcessLimit,
-                                    /*power_of_two=*/false,
-                                    GrowTestConfig::kMinNodes)) {
-        GTEST_SKIP() << "Requires "
-                     << GrowTestConfig::kMinRanks << "+ ranks across "
-                     << GrowTestConfig::kMinNodes << "+ nodes";
-    }
-
-    const int wr        = MPIEnvironment::world_rank;
-    const int worldSize = MPIEnvironment::world_size;
-    const int existing  = worldSize - 1;
-
-    ASSERT_MPI_EQ(ncclSuccess, buildComm(existing, &initialComm_));
-    ASSERT_MPI_TRUE(wr >= existing || initialComm_ != nullptr);
-
-    ASSERT_MPI_EQ(ncclSuccess, growByOne(initialComm_, existing, &grownComm_));
-    ASSERT_MPI_NE(grownComm_, nullptr);
-
-    ASSERT_MPI_TRUE(runAllReduceAndVerify(grownComm_, worldSize));
-}
-
-// --- Test 3: Unique ID handle consistency ---
-
-TEST_F(GrowMPITest, Grow_GetUniqueId_BroadcastedToAll_HandleConsistent)
+TEST_F(GrowMPITest, Grow_SendRecv)
 {
     if (!validateTestPrerequisites(GrowTestConfig::kMinRanks)) {
         GTEST_SKIP() << "Requires at least " << GrowTestConfig::kMinRanks << " MPI ranks";
@@ -179,30 +207,15 @@ TEST_F(GrowMPITest, Grow_GetUniqueId_BroadcastedToAll_HandleConsistent)
     ASSERT_MPI_EQ(ncclSuccess, buildComm(existing, &initialComm_));
     ASSERT_MPI_TRUE(wr >= existing || initialComm_ != nullptr);
 
-    ncclUniqueId growId{};
-    if (wr == 0) {
-        ASSERT_EQ(ncclSuccess, ncclCommGetUniqueId(initialComm_, &growId));
-    }
-    MPI_Bcast(&growId, sizeof(growId), MPI_BYTE, 0, MPI_COMM_WORLD);
-
-    uint64_t myMagic = 0;
-    std::memcpy(&myMagic, growId.internal, sizeof(myMagic));
-
-    uint64_t minMagic = 0, maxMagic = 0;
-    MPI_Allreduce(&myMagic, &minMagic, 1, MPI_UINT64_T, MPI_MIN, MPI_COMM_WORLD);
-    MPI_Allreduce(&myMagic, &maxMagic, 1, MPI_UINT64_T, MPI_MAX, MPI_COMM_WORLD);
-
-    ASSERT_MPI_EQ(minMagic, maxMagic);
-    ASSERT_MPI_NE(myMagic, static_cast<uint64_t>(0));
-
-    // Complete the grow to drain the queued bootstrap message on the boundary rank.
     ASSERT_MPI_EQ(ncclSuccess, growByOne(initialComm_, existing, &grownComm_));
     ASSERT_MPI_NE(grownComm_, nullptr);
+
+    ASSERT_MPI_TRUE(runSendRecvRing(grownComm_, worldSize));
 }
 
-// --- Test 4: Double grow (N-2 -> N-1 -> N) ---
+// --- Test 3: Double grow (N-2 -> N-1 -> N), AllReduce verification ---
 
-TEST_F(GrowMPITest, Grow_DoubleGrow_SecondGrowWorks)
+TEST_F(GrowMPITest, DoubleGrow_AllReduce)
 {
     if (MPIEnvironment::world_size < 4) {
         GTEST_SKIP() << "DoubleGrow requires at least 4 MPI ranks";
@@ -229,9 +242,9 @@ TEST_F(GrowMPITest, Grow_DoubleGrow_SecondGrowWorks)
     ASSERT_MPI_TRUE(runAllReduceAndVerify(grownComm_, phase2));
 }
 
-// --- Test 5: Grow then abort ---
+// --- Test 4: Grow then abort ---
 
-TEST_F(GrowMPITest, Grow_ThenRevoke_CleanLifecycle)
+TEST_F(GrowMPITest, Grow_ThenAbort)
 {
     if (!validateTestPrerequisites(GrowTestConfig::kMinRanks)) {
         GTEST_SKIP() << "Requires at least " << GrowTestConfig::kMinRanks << " MPI ranks";
@@ -250,8 +263,32 @@ TEST_F(GrowMPITest, Grow_ThenRevoke_CleanLifecycle)
     ASSERT_MPI_TRUE(runAllReduceAndVerify(grownComm_, worldSize));
 
     ASSERT_MPI_EQ(ncclSuccess, ncclCommAbort(grownComm_));
+    grownComm_ = nullptr;
 
-    (void)ncclCommDestroy(grownComm_);
+    ASSERT_MPI_SUCCESS(MPI_Barrier(MPI_COMM_WORLD));
+}
+
+// --- Test 5: Grow then destroy ---
+
+TEST_F(GrowMPITest, Grow_ThenDestroy)
+{
+    if (!validateTestPrerequisites(GrowTestConfig::kMinRanks)) {
+        GTEST_SKIP() << "Requires at least " << GrowTestConfig::kMinRanks << " MPI ranks";
+    }
+
+    const int wr        = MPIEnvironment::world_rank;
+    const int worldSize = MPIEnvironment::world_size;
+    const int existing  = worldSize - 1;
+
+    ASSERT_MPI_EQ(ncclSuccess, buildComm(existing, &initialComm_));
+    ASSERT_MPI_TRUE(wr >= existing || initialComm_ != nullptr);
+
+    ASSERT_MPI_EQ(ncclSuccess, growByOne(initialComm_, existing, &grownComm_));
+    ASSERT_MPI_NE(grownComm_, nullptr);
+
+    ASSERT_MPI_TRUE(runAllReduceAndVerify(grownComm_, worldSize));
+
+    ASSERT_MPI_EQ(ncclSuccess, ncclCommDestroy(grownComm_));
     grownComm_ = nullptr;
 
     ASSERT_MPI_SUCCESS(MPI_Barrier(MPI_COMM_WORLD));
