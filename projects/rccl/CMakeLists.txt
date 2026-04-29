@@ -180,6 +180,12 @@ include(cmake/rocmIb.cmake)
 
 # Modify GPU architectures for Address Sanitizer builds by appending "xnack+"
 if (BUILD_ADDRESS_SANITIZER)
+  execute_process(
+    COMMAND ${CMAKE_CXX_COMPILER} -print-file-name=libclang_rt.asan-x86_64.so
+    OUTPUT_VARIABLE ASAN_RUNTIME_PATH OUTPUT_STRIP_TRAILING_WHITESPACE)
+  get_filename_component(ASAN_RUNTIME_DIR "${ASAN_RUNTIME_PATH}" DIRECTORY)
+  message(STATUS "ASAN runtime directory: ${ASAN_RUNTIME_DIR}")
+
   SET(amdgpu_targets "")
   foreach(amdgpu_target IN LISTS GPU_TARGETS)
     if(NOT amdgpu_target STREQUAL "")

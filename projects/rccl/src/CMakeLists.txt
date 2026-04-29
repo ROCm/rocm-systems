@@ -842,7 +842,11 @@ if (DUMP_ASM) # Save temporary files from kernel compilation
 endif()
 
 if(BUILD_ADDRESS_SANITIZER)
-  target_compile_options(rccl PRIVATE -fsanitize=address -shared-libasan)
+  target_compile_options(rccl PRIVATE -fsanitize=address)
+  target_link_options(rccl PRIVATE -fsanitize=address -shared-libasan)
+  if(DEFINED ASAN_RUNTIME_DIR)
+    target_link_options(rccl PRIVATE "LINKER:-rpath,${ASAN_RUNTIME_DIR}")
+  endif()
 endif()
 if(TIMETRACE)
   target_compile_options(rccl PRIVATE -ftime-trace)
