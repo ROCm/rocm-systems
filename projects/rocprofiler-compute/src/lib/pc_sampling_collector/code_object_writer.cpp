@@ -1,6 +1,9 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier:  MIT
 #include "code_object_writer.h"
+
+#include "nlohmann/json.hpp"
+
 using namespace rocm_compute;
 
 void code_object_writer_json_t::start_code_obj(size_t obj_id) {}
@@ -15,5 +18,5 @@ void code_object_writer_json_t::write_instruction(const instruction_t& inst) {}
 
 std::string code_object_writer_json_t::get_result()
 {
-    return {};
+    return nlohmann::json::object().dump();
 }
