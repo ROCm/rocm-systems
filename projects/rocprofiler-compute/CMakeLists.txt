@@ -890,7 +890,13 @@ if(INSTALL_TESTS)
         COMPONENT tests
         FILES_MATCHING
         PATTERN "*.py"
+        PATTERN "run_rocprofiler_compute.py" EXCLUDE
         PATTERN "__pycache__" EXCLUDE
+    )
+    install(
+        PROGRAMS tests/run_rocprofiler_compute.py
+        DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
+        COMPONENT tests
     )
     install(
         DIRECTORY tests/workloads
