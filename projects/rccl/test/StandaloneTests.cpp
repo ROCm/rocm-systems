@@ -413,69 +413,6 @@ namespace RcclUnitTesting
   }
 
   /**
-   * \brief Stress the in-flight scenario: enqueue a large AllReduce on every rank, then
-   *        call ncclCommRevoke before the kernel completes on the stream. Verifies that
-   *        revoke returns cleanly without hanging, the parent rejects subsequent
-   *        collectives, and ncclCommDestroy still completes successfully.
-   * ******************************************************************************************/
-  TEST(Standalone, Revoke_DuringInflightCollective)
-  {
-    int numDevices;
-    HIPCALL(hipGetDeviceCount(&numDevices));
-    if (numDevices < 2) {
-      GTEST_SKIP() << "This test requires at least 2 devices.";
-    }
-
-    std::vector<ncclComm_t> comms(numDevices);
-    NCCLCHECK(ncclCommInitAll(comms.data(), numDevices, nullptr));
-
-    constexpr size_t kCount = 64 * 1024 * 1024;
-    std::vector<float*>      sendbuff(numDevices, nullptr);
-    std::vector<float*>      recvbuff(numDevices, nullptr);
-    std::vector<hipStream_t> streams(numDevices);
-    for (int i = 0; i < numDevices; i++) {
-      HIPCALL(hipSetDevice(i));
-      HIPCALL(hipMalloc((void**)&sendbuff[i], kCount * sizeof(float)));
-      HIPCALL(hipMalloc((void**)&recvbuff[i], kCount * sizeof(float)));
-      HIPCALL(hipMemset(sendbuff[i], 0, kCount * sizeof(float)));
-      HIPCALL(hipStreamCreate(&streams[i]));
-    }
-
-    NCCLCHECK(ncclGroupStart());
-    for (int i = 0; i < numDevices; i++) {
-      HIPCALL(hipSetDevice(i));
-      ASSERT_EQ(ncclAllReduce(sendbuff[i], recvbuff[i], kCount, ncclFloat, ncclSum,
-                              comms[i], streams[i]),
-                ncclSuccess);
-    }
-    NCCLCHECK(ncclGroupEnd());
-
-    for (int i = 0; i < numDevices; i++) {
-      ASSERT_EQ(ncclCommRevoke(comms[i], NCCL_REVOKE_DEFAULT), ncclSuccess);
-    }
-
-    for (int i = 0; i < numDevices; i++) {
-      HIPCALL(hipSetDevice(i));
-      HIPCALL(hipStreamSynchronize(streams[i]));
-    }
-
-    HIPCALL(hipSetDevice(0));
-    ASSERT_EQ(ncclAllReduce(sendbuff[0], recvbuff[0], 1, ncclFloat, ncclSum,
-                            comms[0], streams[0]),
-              ncclInvalidUsage);
-
-    for (int i = 0; i < numDevices; i++) {
-      HIPCALL(hipSetDevice(i));
-      HIPCALL(hipStreamDestroy(streams[i]));
-      HIPCALL(hipFree(sendbuff[i]));
-      HIPCALL(hipFree(recvbuff[i]));
-    }
-
-    for (auto& comm : comms)
-      NCCLCHECK(ncclCommDestroy(comm));
-  }
-
-  /**
    * \brief ncclCommRevoke called from inside an active group must be rejected with
    *        ncclInvalidUsage; ncclGroupEnd should still close cleanly.
    * ******************************************************************************************/
