@@ -15,6 +15,11 @@
 // production_hooks fold pulled in those symbols transitively).
 #include "sampling/policies/linux/real_timer_trigger.hpp"
 
+// rocprofsys::threading::get_sys_tid() — portable kernel-tid wrapper. Avoids
+// calling the libc gettid(), which is only declared by glibc 2.30+ (RHEL 8
+// ships glibc 2.28). Aliased onto the rocprofsys namespace by core/common.hpp.
+#include "core/common.hpp"
+
 // steady_clock and real_signal_dispatcher are small enough to define locally
 // (main_library_policies.hpp pulls timemory/config — incompatible with unit binary).
 
@@ -171,7 +176,8 @@ TEST(real_timer_trigger_smoke, default_constructed_is_not_armed)
 TEST(real_timer_trigger_smoke, configure_does_not_arm)
 {
     real_timer_trigger trigger;
-    trigger.configure(0, ::gettid(), SIGUSR1, CLOCK_REALTIME, 100.0, 0.0);
+    trigger.configure(0, rocprofsys::threading::get_sys_tid(), SIGUSR1, CLOCK_REALTIME,
+                      100.0, 0.0);
     EXPECT_FALSE(trigger.is_armed()) << "configure() alone must not arm the timer";
 }
 
@@ -187,7 +193,8 @@ TEST(real_timer_trigger_smoke, start_sets_armed)
     sigemptyset(&sa.sa_mask);
     sigaction(SIGUSR1, &sa, nullptr);
 
-    trigger.configure(0, ::gettid(), SIGUSR1, CLOCK_REALTIME, 100.0, 0.0);
+    trigger.configure(0, rocprofsys::threading::get_sys_tid(), SIGUSR1, CLOCK_REALTIME,
+                      100.0, 0.0);
     trigger.start();
 
     EXPECT_TRUE(trigger.is_armed()) << "start() must set is_armed() to true";
@@ -212,7 +219,8 @@ TEST(real_timer_trigger_smoke, timer_delivers_signals_during_run)
     // 100 Hz → ~10ms between signals; 150ms window → expect ≥10 signals.
     // After Phase H1, start() installs rocprofsys_sampling_signal_handler (stub in this
     // binary). Install the counting handler AFTER start() so it wins the sigaction race.
-    trigger.configure(0, ::gettid(), SIGUSR1, CLOCK_REALTIME, 100.0, 0.0);
+    trigger.configure(0, rocprofsys::threading::get_sys_tid(), SIGUSR1, CLOCK_REALTIME,
+                      100.0, 0.0);
     trigger.start();
 
     // Install counting handler after trigger.start() to override the stub handler.
@@ -243,7 +251,8 @@ TEST(real_timer_trigger_smoke, timer_delivers_signals_during_run)
 TEST(real_timer_trigger_smoke, stop_without_start_is_noop)
 {
     real_timer_trigger trigger;
-    trigger.configure(0, ::gettid(), SIGUSR1, CLOCK_REALTIME, 10.0, 0.0);
+    trigger.configure(0, rocprofsys::threading::get_sys_tid(), SIGUSR1, CLOCK_REALTIME,
+                      10.0, 0.0);
     // Must not crash or assert.
     EXPECT_NO_THROW(trigger.stop());
     EXPECT_FALSE(trigger.is_armed());
@@ -260,7 +269,8 @@ TEST(real_timer_trigger_smoke, destructor_disarms_armed_timer)
 
     {
         real_timer_trigger trigger;
-        trigger.configure(0, ::gettid(), SIGUSR1, CLOCK_REALTIME, 10.0, 0.0);
+        trigger.configure(0, rocprofsys::threading::get_sys_tid(), SIGUSR1,
+                          CLOCK_REALTIME, 10.0, 0.0);
         trigger.start();
         ASSERT_TRUE(trigger.is_armed());
         // Destructor runs here — must call stop() without crashing.
@@ -301,7 +311,8 @@ TEST(real_timer_trigger_smoke, start_then_stop_restores_armed_state)
     sigaction(test_sig, &dummy, nullptr);
 
     real_timer_trigger trigger;
-    trigger.configure(0, ::gettid(), test_sig, CLOCK_REALTIME, 10.0, 0.0);
+    trigger.configure(0, rocprofsys::threading::get_sys_tid(), test_sig, CLOCK_REALTIME,
+                      10.0, 0.0);
     trigger.start();
     ASSERT_TRUE(trigger.is_armed());
     trigger.stop();

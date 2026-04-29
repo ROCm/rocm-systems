@@ -28,6 +28,7 @@
 #include "sampling/src/sample_parser.hpp"
 #include "sampling/src/sampling_config_fwd.hpp"
 
+#include "core/common.hpp"
 #include "core/config.hpp"
 #include "core/perf.hpp"
 #include "core/state.hpp"
@@ -157,7 +158,7 @@ void
 sampling_service<Policies>::apply_signal_mask(int how, std::set<int> sigs,
                                               char const* verb_capitalized)
 {
-    auto calling_tid = static_cast<int64_t>(::gettid());
+    auto calling_tid = static_cast<int64_t>(threading::get_sys_tid());
     if(sigs.empty()) sigs = get_signal_types(calling_tid);
     if(sigs.empty())
     {
@@ -504,7 +505,7 @@ sampling_service<Policies>::do_setup_wiring(int64_t tid, thread_state_t* state,
     tls::offload     = &offload_;
     tls::logical_tid = tid;
 
-    pid_t sys_tid   = static_cast<pid_t>(::gettid());
+    pid_t sys_tid   = static_cast<pid_t>(threading::get_sys_tid());
     int   rt_sig    = rocprofsys::get_sampling_realtime_signal();
     int   cpu_sig   = rocprofsys::get_sampling_cputime_signal();
     int   ovfl_sig  = rocprofsys::get_sampling_overflow_signal();

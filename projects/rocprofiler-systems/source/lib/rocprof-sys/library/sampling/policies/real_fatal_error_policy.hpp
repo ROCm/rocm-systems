@@ -5,7 +5,7 @@
 
 #include "logger/debug.hpp"
 
-#include <fmt/format.h>
+#include <spdlog/fmt/fmt.h>
 
 #include <cstdlib>
 #include <mutex>
