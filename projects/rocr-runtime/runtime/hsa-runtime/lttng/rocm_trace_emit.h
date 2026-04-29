@@ -63,18 +63,11 @@ static inline uint8_t rocm_trace_sniff_packet_type(
 
 #if defined(HSA_ENABLE_LTTNG_UST) && HSA_ENABLE_LTTNG_UST
 
-/* rocm_trace_tid.h transitively includes <rocprofiler-register/correlation.h>
- * which is only on the include path when LTTng is enabled. The no-op stubs
- * in the #else branch don't use anything from rocm_trace_tid.h, so this
- * include lives inside the LTTng guard. */
-#include "rocm_trace_tid.h"
 #include <atomic>
 #include "rocm_hsa_tp.h"
 
 /* Runtime-wide kill switch defined in rocm_trace_init.cpp. When true,
- * every emit helper short-circuits before touching LTTng state or the
- * auto-stack -- enter and exit both check the same flag so the auto-stack
- * depth stays balanced. */
+ * every emit helper short-circuits before touching LTTng state. */
 extern std::atomic<bool> rocm_hsa_trace_g_disabled;
 
 #ifndef ROCM_TRACE_DISABLED_DEFINED
@@ -84,106 +77,73 @@ static inline bool rocm_trace_disabled(void) {
 }
 #endif
 
-/* HSA emit_enter: capture parent_corr_id (= the active slot value BEFORE
- * the push), then push this call's corr_id so any nested HSA / non-HSA
- * tracepoints see this call as their parent. The push runs regardless of
- * this tracepoint's enable state so nested (possibly enabled) tracepoints
- * still get correct parent values; the matching pop happens in the exit
- * emit helpers. */
-static inline void rocm_trace_emit_hsa_api_enter(const char* api_name,
-                                                 uint64_t    corr_id) {
+static inline void rocm_trace_emit_hsa_api_enter(const char* api_name) {
     if (rocm_trace_disabled()) return;
-    const uint64_t parent = rocp_reg_auto_push(corr_id);
     if (lttng_ust_tracepoint_enabled(rocm_hsa, hsa_api_enter)) {
-        lttng_ust_do_tracepoint(rocm_hsa, hsa_api_enter,
-                                api_name, corr_id, rocm_trace_current_tid(),
-                                parent);
+        lttng_ust_do_tracepoint(rocm_hsa, hsa_api_enter, api_name);
     }
 }
 
 /* Status-returning APIs (hsa_status_t, int, etc.) */
 static inline void rocm_trace_emit_hsa_api_exit_status(const char* api_name,
-                                                       uint64_t    corr_id,
                                                        int32_t     status) {
     if (rocm_trace_disabled()) return;
-    /* Pop first, then read active: post-pop active == pre-push parent, so
-     * the exit event's parent_corr_id matches the matching enter's. */
-    rocp_reg_auto_pop();
-    const uint64_t parent = rocp_reg_active_corr_id_get();
     if (lttng_ust_tracepoint_enabled(rocm_hsa, hsa_api_exit_status)) {
         lttng_ust_do_tracepoint(rocm_hsa, hsa_api_exit_status,
-                                api_name, corr_id, status, parent);
+                                api_name, status);
     }
 }
 
 /* Unsigned 64-bit integer-returning APIs (queue index ops). Preserves
  * full width of the return value. */
 static inline void rocm_trace_emit_hsa_api_exit_u64(const char* api_name,
-                                                    uint64_t    corr_id,
                                                     uint64_t    retval) {
     if (rocm_trace_disabled()) return;
-    rocp_reg_auto_pop();
-    const uint64_t parent = rocp_reg_active_corr_id_get();
     if (lttng_ust_tracepoint_enabled(rocm_hsa, hsa_api_exit_u64)) {
         lttng_ust_do_tracepoint(rocm_hsa, hsa_api_exit_u64,
-                                api_name, corr_id, retval, parent);
+                                api_name, retval);
     }
 }
 
 /* Signed 64-bit integer-returning APIs (signal value ops). Preserves
  * full width and sign of the return value. */
 static inline void rocm_trace_emit_hsa_api_exit_i64(const char* api_name,
-                                                    uint64_t    corr_id,
                                                     int64_t     retval) {
     if (rocm_trace_disabled()) return;
-    rocp_reg_auto_pop();
-    const uint64_t parent = rocp_reg_active_corr_id_get();
     if (lttng_ust_tracepoint_enabled(rocm_hsa, hsa_api_exit_i64)) {
         lttng_ust_do_tracepoint(rocm_hsa, hsa_api_exit_i64,
-                                api_name, corr_id, retval, parent);
+                                api_name, retval);
     }
 }
 
 /* Pointer-returning APIs */
 static inline void rocm_trace_emit_hsa_api_exit_ptr(const char* api_name,
-                                                    uint64_t    corr_id,
                                                     const void* retval) {
     if (rocm_trace_disabled()) return;
-    rocp_reg_auto_pop();
-    const uint64_t parent = rocp_reg_active_corr_id_get();
     if (lttng_ust_tracepoint_enabled(rocm_hsa, hsa_api_exit_ptr)) {
         lttng_ust_do_tracepoint(rocm_hsa, hsa_api_exit_ptr,
-                                api_name, corr_id, (uint64_t)retval, parent);
+                                api_name, (uint64_t)retval);
     }
 }
 
 /* Void-returning APIs */
-static inline void rocm_trace_emit_hsa_api_exit_void(const char* api_name,
-                                                     uint64_t    corr_id) {
+static inline void rocm_trace_emit_hsa_api_exit_void(const char* api_name) {
     if (rocm_trace_disabled()) return;
-    rocp_reg_auto_pop();
-    const uint64_t parent = rocp_reg_active_corr_id_get();
     if (lttng_ust_tracepoint_enabled(rocm_hsa, hsa_api_exit_void)) {
-        lttng_ust_do_tracepoint(rocm_hsa, hsa_api_exit_void,
-                                api_name, corr_id, parent);
+        lttng_ust_do_tracepoint(rocm_hsa, hsa_api_exit_void, api_name);
     }
 }
 
-/* Doorbell ring: mints a fresh self_corr so the schema's `corr_id`
- * uniquely identifies this doorbell occurrence (would otherwise alias the
- * surrounding HSA wrapper's corr_id and make corr_id == parent_corr_id).
- * parent_corr_id is the surrounding HSA wrapper's corr_id when called
- * from within one, or 0 otherwise. */
+/* Doorbell ring: identity (vpid, vtid, timestamp) comes from the channel
+ * context; the surrounding HSA wrapper (if any) is the topmost unmatched
+ * hsa_api_enter on the same (vpid, vtid). */
 static inline void rocm_trace_emit_hsa_doorbell_ring(uint32_t queue_id,
                                                      int64_t  write_idx,
                                                      uint8_t  packet_type) {
     if (rocm_trace_disabled()) return;
     if (lttng_ust_tracepoint_enabled(rocm_hsa, hsa_doorbell_ring)) {
-        const uint64_t self_corr = rocp_reg_next_corr_id();
-        const uint64_t parent    = rocp_reg_active_corr_id_get();
         lttng_ust_do_tracepoint(rocm_hsa, hsa_doorbell_ring,
-                                queue_id, write_idx, packet_type,
-                                self_corr, rocm_trace_current_tid(), parent);
+                                queue_id, write_idx, packet_type);
     }
 }
 
@@ -193,10 +153,8 @@ static inline void rocm_trace_emit_hsa_intercept_packets(uint32_t queue_id,
                                                          uint8_t  packet_type) {
     if (rocm_trace_disabled()) return;
     if (lttng_ust_tracepoint_enabled(rocm_hsa, hsa_intercept_packets)) {
-        const uint64_t parent = rocp_reg_active_corr_id_get();
         lttng_ust_do_tracepoint(rocm_hsa, hsa_intercept_packets,
-                                queue_id, pkt_index, pkt_count, packet_type,
-                                parent);
+                                queue_id, pkt_index, pkt_count, packet_type);
     }
 }
 
@@ -205,23 +163,21 @@ static inline void rocm_trace_emit_hsa_intercept_packets(uint32_t queue_id,
 
 #else /* !HSA_ENABLE_LTTNG_UST */
 
-static inline void rocm_trace_emit_hsa_api_enter(const char* a, uint64_t c) {
-    (void)a; (void)c;
+static inline void rocm_trace_emit_hsa_api_enter(const char* a) { (void)a; }
+static inline void rocm_trace_emit_hsa_api_exit_status(const char* a, int32_t s) {
+    (void)a; (void)s;
 }
-static inline void rocm_trace_emit_hsa_api_exit_status(const char* a, uint64_t c, int32_t s) {
-    (void)a; (void)c; (void)s;
+static inline void rocm_trace_emit_hsa_api_exit_u64(const char* a, uint64_t v) {
+    (void)a; (void)v;
 }
-static inline void rocm_trace_emit_hsa_api_exit_u64(const char* a, uint64_t c, uint64_t v) {
-    (void)a; (void)c; (void)v;
+static inline void rocm_trace_emit_hsa_api_exit_i64(const char* a, int64_t v) {
+    (void)a; (void)v;
 }
-static inline void rocm_trace_emit_hsa_api_exit_i64(const char* a, uint64_t c, int64_t v) {
-    (void)a; (void)c; (void)v;
+static inline void rocm_trace_emit_hsa_api_exit_ptr(const char* a, const void* p) {
+    (void)a; (void)p;
 }
-static inline void rocm_trace_emit_hsa_api_exit_ptr(const char* a, uint64_t c, const void* p) {
-    (void)a; (void)c; (void)p;
-}
-static inline void rocm_trace_emit_hsa_api_exit_void(const char* a, uint64_t c) {
-    (void)a; (void)c;
+static inline void rocm_trace_emit_hsa_api_exit_void(const char* a) {
+    (void)a;
 }
 static inline void rocm_trace_emit_hsa_doorbell_ring(uint32_t a, int64_t b, uint8_t c) {
     (void)a; (void)b; (void)c;

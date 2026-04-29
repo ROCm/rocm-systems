@@ -74,7 +74,6 @@
 #include "core/inc/amd_core_dump.hpp"
 
 #include "lttng/rocm_trace_emit.h"
-#include "lttng/rocm_trace_tid.h"
 
 namespace rocr {
 namespace AMD {

@@ -10,21 +10,31 @@
 #include <lttng/tracepoint.h>
 #include <stdint.h>
 
-/* parent_corr_id (uint64) on every HSA event carries the value of the
- * shared librocprofiler-register active-corr-id TLS slot at emit time.
- * For events fired inside an HSA wrapper that was entered from a HIP API
- * call on the same thread, this is the HIP API's corr_id -- an explicit
- * join key for HIP -> HSA same-thread correlation chains without
- * timestamp heuristics. A value of 0 means no enclosing context. */
+/* Schema version. Bump on any breaking change to event field layout
+ * (field add/remove/rename/type-change) so consumers can detect they
+ * are reading a stream produced by a different schema generation.
+ *
+ * Version history:
+ *   2 - corr_id / parent_corr_id / tid carried as explicit event fields.
+ *   3 - corr_id / parent_corr_id / tid removed from every event; identity
+ *       and parent attribution derive from the (vpid, vtid, timestamp)
+ *       channel contexts. See rocm_trace_emit.h for the consumer recipe.
+ */
+#define ROCM_HSA_TP_SCHEMA_VERSION 3
+
+/* Per-event identity (process id, thread id, timestamp) is provided by
+ * LTTng-UST's native channel contexts -- consumers configure their channel
+ * with `lttng add-context --userspace --type vpid --type vtid` (and the CTF
+ * event-header timestamp is always present). HIP -> HSA same-thread
+ * correlation is reconstructed by walking the per-(vpid, vtid) merged
+ * event stream sorted by timestamp; the enclosing HIP API is the topmost
+ * unmatched hip_api_enter on the same thread at the time the HSA event
+ * fires. */
 LTTNG_UST_TRACEPOINT_EVENT(
     rocm_hsa, hsa_api_enter,
-    LTTNG_UST_TP_ARGS(const char*, api_name, uint64_t, corr_id, uint32_t, tid,
-                      uint64_t, parent_corr_id),
+    LTTNG_UST_TP_ARGS(const char*, api_name),
     LTTNG_UST_TP_FIELDS(
         lttng_ust_field_string(api_name, api_name)
-        lttng_ust_field_integer(uint64_t, corr_id, corr_id)
-        lttng_ust_field_integer(uint32_t, tid, tid)
-        lttng_ust_field_integer(uint64_t, parent_corr_id, parent_corr_id)
     )
 )
 
@@ -33,13 +43,10 @@ LTTNG_UST_TRACEPOINT_EVENT(
  * hsa_signal_* / hsa_queue_* index ops -- those preserve full width. */
 LTTNG_UST_TRACEPOINT_EVENT(
     rocm_hsa, hsa_api_exit_status,
-    LTTNG_UST_TP_ARGS(const char*, api_name, uint64_t, corr_id, int32_t, status,
-                      uint64_t, parent_corr_id),
+    LTTNG_UST_TP_ARGS(const char*, api_name, int32_t, status),
     LTTNG_UST_TP_FIELDS(
         lttng_ust_field_string(api_name, api_name)
-        lttng_ust_field_integer(uint64_t, corr_id, corr_id)
         lttng_ust_field_integer(int32_t, status, status)
-        lttng_ust_field_integer(uint64_t, parent_corr_id, parent_corr_id)
     )
 )
 
@@ -48,13 +55,10 @@ LTTNG_UST_TRACEPOINT_EVENT(
  * hsa_queue_add_write_index_*) -- their return type is uint64_t. */
 LTTNG_UST_TRACEPOINT_EVENT(
     rocm_hsa, hsa_api_exit_u64,
-    LTTNG_UST_TP_ARGS(const char*, api_name, uint64_t, corr_id,
-                      uint64_t, retval, uint64_t, parent_corr_id),
+    LTTNG_UST_TP_ARGS(const char*, api_name, uint64_t, retval),
     LTTNG_UST_TP_FIELDS(
         lttng_ust_field_string(api_name, api_name)
-        lttng_ust_field_integer(uint64_t, corr_id, corr_id)
         lttng_ust_field_integer(uint64_t, retval, retval)
-        lttng_ust_field_integer(uint64_t, parent_corr_id, parent_corr_id)
     )
 )
 
@@ -63,13 +67,10 @@ LTTNG_UST_TRACEPOINT_EVENT(
  * hsa_signal_wait_*) -- their return type is hsa_signal_value_t (int64_t). */
 LTTNG_UST_TRACEPOINT_EVENT(
     rocm_hsa, hsa_api_exit_i64,
-    LTTNG_UST_TP_ARGS(const char*, api_name, uint64_t, corr_id,
-                      int64_t, retval, uint64_t, parent_corr_id),
+    LTTNG_UST_TP_ARGS(const char*, api_name, int64_t, retval),
     LTTNG_UST_TP_FIELDS(
         lttng_ust_field_string(api_name, api_name)
-        lttng_ust_field_integer(uint64_t, corr_id, corr_id)
         lttng_ust_field_integer(int64_t, retval, retval)
-        lttng_ust_field_integer(uint64_t, parent_corr_id, parent_corr_id)
     )
 )
 
@@ -77,25 +78,19 @@ LTTNG_UST_TRACEPOINT_EVENT(
  * (0 if NULL). */
 LTTNG_UST_TRACEPOINT_EVENT(
     rocm_hsa, hsa_api_exit_ptr,
-    LTTNG_UST_TP_ARGS(const char*, api_name, uint64_t, corr_id, uint64_t, retval_ptr,
-                      uint64_t, parent_corr_id),
+    LTTNG_UST_TP_ARGS(const char*, api_name, uint64_t, retval_ptr),
     LTTNG_UST_TP_FIELDS(
         lttng_ust_field_string(api_name, api_name)
-        lttng_ust_field_integer(uint64_t, corr_id, corr_id)
         lttng_ust_field_integer_hex(uint64_t, retval_ptr, retval_ptr)
-        lttng_ust_field_integer(uint64_t, parent_corr_id, parent_corr_id)
     )
 )
 
 /* hsa_api_exit_void: for void-returning HSA APIs (e.g., signal store ops). */
 LTTNG_UST_TRACEPOINT_EVENT(
     rocm_hsa, hsa_api_exit_void,
-    LTTNG_UST_TP_ARGS(const char*, api_name, uint64_t, corr_id,
-                      uint64_t, parent_corr_id),
+    LTTNG_UST_TP_ARGS(const char*, api_name),
     LTTNG_UST_TP_FIELDS(
         lttng_ust_field_string(api_name, api_name)
-        lttng_ust_field_integer(uint64_t, corr_id, corr_id)
-        lttng_ust_field_integer(uint64_t, parent_corr_id, parent_corr_id)
     )
 )
 
@@ -115,29 +110,23 @@ LTTNG_UST_TRACEPOINT_EVENT(
 LTTNG_UST_TRACEPOINT_EVENT(
     rocm_hsa, hsa_doorbell_ring,
     LTTNG_UST_TP_ARGS(uint32_t, queue_id, int64_t, write_idx,
-                      uint8_t, packet_type, uint64_t, corr_id, uint32_t, tid,
-                      uint64_t, parent_corr_id),
+                      uint8_t, packet_type),
     LTTNG_UST_TP_FIELDS(
         lttng_ust_field_integer(uint32_t, queue_id, queue_id)
         lttng_ust_field_integer(int64_t, write_idx, write_idx)
         lttng_ust_field_integer(uint8_t, packet_type, packet_type)
-        lttng_ust_field_integer(uint64_t, corr_id, corr_id)
-        lttng_ust_field_integer(uint32_t, tid, tid)
-        lttng_ust_field_integer(uint64_t, parent_corr_id, parent_corr_id)
     )
 )
 
 LTTNG_UST_TRACEPOINT_EVENT(
     rocm_hsa, hsa_intercept_packets,
     LTTNG_UST_TP_ARGS(uint32_t, queue_id, uint64_t, pkt_index,
-                      uint32_t, pkt_count, uint8_t, packet_type,
-                      uint64_t, parent_corr_id),
+                      uint32_t, pkt_count, uint8_t, packet_type),
     LTTNG_UST_TP_FIELDS(
         lttng_ust_field_integer(uint32_t, queue_id, queue_id)
         lttng_ust_field_integer(uint64_t, pkt_index, pkt_index)
         lttng_ust_field_integer(uint32_t, pkt_count, pkt_count)
         lttng_ust_field_integer(uint8_t, packet_type, packet_type)
-        lttng_ust_field_integer(uint64_t, parent_corr_id, parent_corr_id)
     )
 )
 

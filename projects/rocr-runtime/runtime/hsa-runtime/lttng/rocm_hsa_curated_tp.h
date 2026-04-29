@@ -9,9 +9,8 @@
 
 LTTNG_UST_TRACEPOINT_EVENT(
     rocm_hsa, hsa_queue_create_args,
-    LTTNG_UST_TP_ARGS(uint64_t, corr_id, uint64_t, agent, uint32_t, size, uint32_t, type, uint64_t, callback, uint64_t, data, uint32_t, private_segment_size, uint32_t, group_segment_size, uint64_t, queue),
+    LTTNG_UST_TP_ARGS(uint64_t, agent, uint32_t, size, uint32_t, type, uint64_t, callback, uint64_t, data, uint32_t, private_segment_size, uint32_t, group_segment_size, uint64_t, queue),
     LTTNG_UST_TP_FIELDS(
-        lttng_ust_field_integer(uint64_t, corr_id, corr_id)
 lttng_ust_field_integer_hex(uint64_t, agent, agent)
 lttng_ust_field_integer(uint32_t, size, size)
 lttng_ust_field_integer(uint32_t, type, type)
@@ -25,18 +24,16 @@ lttng_ust_field_integer_hex(uint64_t, queue, queue)
 
 LTTNG_UST_TRACEPOINT_EVENT(
     rocm_hsa, hsa_queue_destroy_args,
-    LTTNG_UST_TP_ARGS(uint64_t, corr_id, uint64_t, queue),
+    LTTNG_UST_TP_ARGS(uint64_t, queue),
     LTTNG_UST_TP_FIELDS(
-        lttng_ust_field_integer(uint64_t, corr_id, corr_id)
 lttng_ust_field_integer_hex(uint64_t, queue, queue)
     )
 )
 
 LTTNG_UST_TRACEPOINT_EVENT(
     rocm_hsa, hsa_amd_queue_intercept_create_args,
-    LTTNG_UST_TP_ARGS(uint64_t, corr_id, uint64_t, agent_handle, uint32_t, size, uint32_t, type, uint64_t, callback, uint64_t, data, uint32_t, private_segment_size, uint32_t, group_segment_size, uint64_t, queue),
+    LTTNG_UST_TP_ARGS(uint64_t, agent_handle, uint32_t, size, uint32_t, type, uint64_t, callback, uint64_t, data, uint32_t, private_segment_size, uint32_t, group_segment_size, uint64_t, queue),
     LTTNG_UST_TP_FIELDS(
-        lttng_ust_field_integer(uint64_t, corr_id, corr_id)
 lttng_ust_field_integer_hex(uint64_t, agent_handle, agent_handle)
 lttng_ust_field_integer(uint32_t, size, size)
 lttng_ust_field_integer(uint32_t, type, type)
@@ -50,9 +47,8 @@ lttng_ust_field_integer_hex(uint64_t, queue, queue)
 
 LTTNG_UST_TRACEPOINT_EVENT(
     rocm_hsa, hsa_signal_create_args,
-    LTTNG_UST_TP_ARGS(uint64_t, corr_id, int64_t, initial_value, uint32_t, num_consumers, uint64_t, consumers, uint64_t, signal),
+    LTTNG_UST_TP_ARGS(int64_t, initial_value, uint32_t, num_consumers, uint64_t, consumers, uint64_t, signal),
     LTTNG_UST_TP_FIELDS(
-        lttng_ust_field_integer(uint64_t, corr_id, corr_id)
 lttng_ust_field_integer(int64_t, initial_value, initial_value)
 lttng_ust_field_integer(uint32_t, num_consumers, num_consumers)
 lttng_ust_field_integer_hex(uint64_t, consumers, consumers)
@@ -62,18 +58,16 @@ lttng_ust_field_integer_hex(uint64_t, signal, signal)
 
 LTTNG_UST_TRACEPOINT_EVENT(
     rocm_hsa, hsa_signal_destroy_args,
-    LTTNG_UST_TP_ARGS(uint64_t, corr_id, uint64_t, signal),
+    LTTNG_UST_TP_ARGS(uint64_t, signal),
     LTTNG_UST_TP_FIELDS(
-        lttng_ust_field_integer(uint64_t, corr_id, corr_id)
 lttng_ust_field_integer_hex(uint64_t, signal, signal)
     )
 )
 
 LTTNG_UST_TRACEPOINT_EVENT(
     rocm_hsa, hsa_amd_signal_create_args,
-    LTTNG_UST_TP_ARGS(uint64_t, corr_id, int64_t, initial_value, uint32_t, num_consumers, uint64_t, consumers, uint64_t, attributes, uint64_t, signal),
+    LTTNG_UST_TP_ARGS(int64_t, initial_value, uint32_t, num_consumers, uint64_t, consumers, uint64_t, attributes, uint64_t, signal),
     LTTNG_UST_TP_FIELDS(
-        lttng_ust_field_integer(uint64_t, corr_id, corr_id)
 lttng_ust_field_integer(int64_t, initial_value, initial_value)
 lttng_ust_field_integer(uint32_t, num_consumers, num_consumers)
 lttng_ust_field_integer_hex(uint64_t, consumers, consumers)
@@ -84,9 +78,8 @@ lttng_ust_field_integer_hex(uint64_t, signal, signal)
 
 LTTNG_UST_TRACEPOINT_EVENT(
     rocm_hsa, hsa_amd_memory_pool_allocate_args,
-    LTTNG_UST_TP_ARGS(uint64_t, corr_id, uint64_t, memory_pool, uint64_t, size, uint32_t, flags, uint64_t, ptr),
+    LTTNG_UST_TP_ARGS(uint64_t, memory_pool, uint64_t, size, uint32_t, flags, uint64_t, ptr),
     LTTNG_UST_TP_FIELDS(
-        lttng_ust_field_integer(uint64_t, corr_id, corr_id)
 lttng_ust_field_integer_hex(uint64_t, memory_pool, memory_pool)
 lttng_ust_field_integer(uint64_t, size, size)
 lttng_ust_field_integer(uint32_t, flags, flags)
@@ -96,18 +89,16 @@ lttng_ust_field_integer_hex(uint64_t, ptr, ptr)
 
 LTTNG_UST_TRACEPOINT_EVENT(
     rocm_hsa, hsa_amd_memory_pool_free_args,
-    LTTNG_UST_TP_ARGS(uint64_t, corr_id, uint64_t, ptr),
+    LTTNG_UST_TP_ARGS(uint64_t, ptr),
     LTTNG_UST_TP_FIELDS(
-        lttng_ust_field_integer(uint64_t, corr_id, corr_id)
 lttng_ust_field_integer_hex(uint64_t, ptr, ptr)
     )
 )
 
 LTTNG_UST_TRACEPOINT_EVENT(
     rocm_hsa, hsa_amd_memory_async_copy_args,
-    LTTNG_UST_TP_ARGS(uint64_t, corr_id, uint64_t, dst, uint64_t, dst_agent, uint64_t, src, uint64_t, src_agent, uint64_t, size, uint32_t, num_dep_signals, uint64_t, dep_signals, uint64_t, completion_signal),
+    LTTNG_UST_TP_ARGS(uint64_t, dst, uint64_t, dst_agent, uint64_t, src, uint64_t, src_agent, uint64_t, size, uint32_t, num_dep_signals, uint64_t, dep_signals, uint64_t, completion_signal),
     LTTNG_UST_TP_FIELDS(
-        lttng_ust_field_integer(uint64_t, corr_id, corr_id)
 lttng_ust_field_integer_hex(uint64_t, dst, dst)
 lttng_ust_field_integer_hex(uint64_t, dst_agent, dst_agent)
 lttng_ust_field_integer_hex(uint64_t, src, src)
@@ -121,9 +112,8 @@ lttng_ust_field_integer_hex(uint64_t, completion_signal, completion_signal)
 
 LTTNG_UST_TRACEPOINT_EVENT(
     rocm_hsa, hsa_amd_memory_async_copy_on_engine_args,
-    LTTNG_UST_TP_ARGS(uint64_t, corr_id, uint64_t, dst, uint64_t, dst_agent, uint64_t, src, uint64_t, src_agent, uint64_t, size, uint32_t, num_dep_signals, uint64_t, completion_signal, int32_t, engine_id, uint64_t, force_copy_on_sdma),
+    LTTNG_UST_TP_ARGS(uint64_t, dst, uint64_t, dst_agent, uint64_t, src, uint64_t, src_agent, uint64_t, size, uint32_t, num_dep_signals, uint64_t, completion_signal, int32_t, engine_id, uint64_t, force_copy_on_sdma),
     LTTNG_UST_TP_FIELDS(
-        lttng_ust_field_integer(uint64_t, corr_id, corr_id)
 lttng_ust_field_integer_hex(uint64_t, dst, dst)
 lttng_ust_field_integer_hex(uint64_t, dst_agent, dst_agent)
 lttng_ust_field_integer_hex(uint64_t, src, src)

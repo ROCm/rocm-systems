@@ -15,7 +15,6 @@
 #include "hip_platform.hpp"
 #include "hip_comgr_helper.hpp"
 #include "lttng/rocm_trace_emit.h"
-#include "lttng/rocm_trace_tid.h"
 
 namespace hip {
 
