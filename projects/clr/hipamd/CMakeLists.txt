@@ -262,9 +262,12 @@ endif()
 #############################
 # Build steps
 #############################
-set(CONFIG_PACKAGE_INSTALL_DIR ${CMAKE_INSTALL_LIBDIR}/cmake/hip)
-set(CONFIG_LANG_PACKAGE_INSTALL_DIR ${CMAKE_INSTALL_LIBDIR}/cmake/hip-lang)
-set(CONFIG_RTC_PACKAGE_INSTALL_DIR ${CMAKE_INSTALL_LIBDIR}/cmake/hiprtc)
+set(BIN_INSTALL_DIR ${CMAKE_INSTALL_BINDIR})
+set(LIB_INSTALL_DIR ${CMAKE_INSTALL_LIBDIR})
+set(INCLUDE_INSTALL_DIR ${CMAKE_INSTALL_INCLUDEDIR})
+set(CONFIG_PACKAGE_INSTALL_DIR ${LIB_INSTALL_DIR}/cmake/hip)
+set(CONFIG_LANG_PACKAGE_INSTALL_DIR ${LIB_INSTALL_DIR}/cmake/hip-lang)
+set(CONFIG_RTC_PACKAGE_INSTALL_DIR ${LIB_INSTALL_DIR}/cmake/hiprtc)
 
 # Generate hip_version.h
 set(_versionInfoHeader
@@ -381,17 +384,20 @@ include(CMakePackageConfigHelpers)
 configure_package_config_file(
         hip-config.cmake.in
         ${CMAKE_CURRENT_BINARY_DIR}/hip-config.cmake
-        INSTALL_DESTINATION ${CONFIG_PACKAGE_INSTALL_DIR})
+        INSTALL_DESTINATION ${CONFIG_PACKAGE_INSTALL_DIR}
+        PATH_VARS LIB_INSTALL_DIR INCLUDE_INSTALL_DIR BIN_INSTALL_DIR)
 
 configure_package_config_file(
         hip-config-amd.cmake.in
         ${CMAKE_CURRENT_BINARY_DIR}/hip-config-amd.cmake
-        INSTALL_DESTINATION ${CONFIG_PACKAGE_INSTALL_DIR})
+        INSTALL_DESTINATION ${CONFIG_PACKAGE_INSTALL_DIR}
+        PATH_VARS LIB_INSTALL_DIR INCLUDE_INSTALL_DIR BIN_INSTALL_DIR)
 
 configure_package_config_file(
       hip-config-nvidia.cmake.in
       ${CMAKE_CURRENT_BINARY_DIR}/hip-config-nvidia.cmake
-      INSTALL_DESTINATION ${CONFIG_PACKAGE_INSTALL_DIR})
+      INSTALL_DESTINATION ${CONFIG_PACKAGE_INSTALL_DIR}
+      PATH_VARS LIB_INSTALL_DIR INCLUDE_INSTALL_DIR BIN_INSTALL_DIR))
 
 write_basic_package_version_file(
     ${CMAKE_CURRENT_BINARY_DIR}/hip-config-version.cmake
