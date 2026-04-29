@@ -28,8 +28,8 @@
 #include <algorithm>
 #include <unordered_map>
 
-#include "pm4/cmd_config.h"
-#include "trace_decoder_instrument.h"
+#include "lib/aqlprofile/pm4/cmd_config.h"
+#include "lib/aqlprofile/pm4/trace_decoder_instrument.h"
 
 #define SQTT_PERFCOUNTER_TOKEN     (1u << 14)
 #define SQTT_PERFCOUNTER_SIMD_MASK 24

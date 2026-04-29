@@ -26,7 +26,7 @@
 #include <stdint.h>
 #include <cstdint>
 
-#include "src/def/gpu_block_info.h"
+#include "lib/aqlprofile/def/gpu_block_info.h"
 
 #define COPY_DATA_SEL_REG                  0  ///< Mem-mapped register
 #define COPY_DATA_SEL_SRC_SYS_PERF_COUNTER 4

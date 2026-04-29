@@ -3,9 +3,9 @@
 
 #pragma once
 
+#include "common/defines.h"
 #include "core/common.hpp"
 #include "core/components/fwd.hpp"
-#include "core/defines.hpp"
 #include "library/thread_data.hpp"
 
 #include <timemory/components/base.hpp>
@@ -22,8 +22,6 @@ namespace causal
 struct delay : comp::empty_base
 {
     using value_type = void;
-
-    ROCPROFSYS_DEFAULT_OBJECT(delay)
 
     static void    setup();
     static void    process();

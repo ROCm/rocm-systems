@@ -2,7 +2,7 @@
 name: amdsmi-review-security
 description: "Security review subagent. Checks vulnerabilities, secrets, input validation, unsafe patterns. Use when: security review, vulnerability check."
 tools: read/readFile, search/textSearch, search/fileSearch, search/listDirectory
-model: "Claude Sonnet 4.6"
+model: "Claude Opus 4.6"
 user-invocable: false
 ---
 
@@ -12,7 +12,7 @@ You review security for the amd-smi project. All security issues are **❌ BLOCK
 
 ## Project Layout
 
-C/C++ → `src/`, `include/amd_smi/` | Python → `py-interface/`, `amdsmi_cli/`
+Project structure and API cascade path are stored in repo memories.
 
 ## Your Job
 

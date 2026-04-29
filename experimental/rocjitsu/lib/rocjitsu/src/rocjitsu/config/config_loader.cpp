@@ -431,6 +431,8 @@ std::unordered_map<std::string, FactoryFn> &factories() {
       uint32_t gran =
           (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) ? 8 : 4;
       cp->set_vgpr_granularity(gran);
+      bool packed = (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4);
+      cp->set_packed_tid(packed);
       return cp;
     };
 

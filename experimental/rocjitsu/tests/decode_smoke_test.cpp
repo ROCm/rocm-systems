@@ -99,4 +99,62 @@ INSTANTIATE_TEST_SUITE_P(
       return name;
     });
 
+// ---------------------------------------------------------------------------
+// MUBUF lds modifier test: verify that buffer_load_dword with the lds bit set
+// (bit 16 of dword 0) produces a disassembly string containing " lds".
+//
+// MUBUF encoding (CDNA3/4):
+//   dword 0: [31:26]=enc  [24:18]=op  [17]=nt  [16]=lds  [15]=sc1
+//            [14]=sc0  [13]=idxen  [12]=offen  [11:0]=offset
+//   dword 1: [31:24]=vdata  [20:16]=vaddr  [15:11]=srsrc  [10:8]=soffset
+//
+// buffer_load_dword without lds: {0xE0500000, 0x00000000}
+// buffer_load_dword with    lds: {0xE0510000, 0x00000000}  (bit 16 set)
+// ---------------------------------------------------------------------------
+
+struct MubufLdsCase {
+  rj_code_arch_t arch;
+  const char *arch_name;
+  uint32_t words[2];
+  bool expect_lds;
+};
+
+class MubufLdsModifierTest : public ::testing::TestWithParam<MubufLdsCase> {};
+
+TEST_P(MubufLdsModifierTest, LdsModifierInDisassembly) {
+  const auto &tc = GetParam();
+  auto decoder = Decoder::create(tc.arch);
+  ASSERT_NE(decoder, nullptr);
+
+  std::unique_ptr<Instruction> inst(decoder->decode(tc.words));
+  ASSERT_NE(inst, nullptr) << "decode() returned nullptr for " << tc.arch_name;
+  EXPECT_EQ(inst->mnemonic(), "buffer_load_dword");
+
+  std::string disasm = inst->disassemble();
+  if (tc.expect_lds) {
+    EXPECT_NE(disasm.find(" lds"), std::string::npos)
+        << "Expected ' lds' in disassembly: " << disasm;
+  } else {
+    EXPECT_EQ(disasm.find(" lds"), std::string::npos)
+        << "Unexpected ' lds' in disassembly: " << disasm;
+  }
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    MubufLds, MubufLdsModifierTest,
+    ::testing::Values(
+        // CDNA4: buffer_load_dword without lds
+        MubufLdsCase{ROCJITSU_CODE_ARCH_CDNA4, "cdna4", {0xE0500000u, 0x00000000u}, false},
+        // CDNA4: buffer_load_dword with lds (bit 16 set)
+        MubufLdsCase{ROCJITSU_CODE_ARCH_CDNA4, "cdna4", {0xE0510000u, 0x00000000u}, true},
+        // CDNA1: buffer_load_dword without lds (GFX9 MUBUF enc=0x38)
+        MubufLdsCase{ROCJITSU_CODE_ARCH_CDNA1, "cdna1", {0xE0500000u, 0x00000000u}, false},
+        // CDNA1: buffer_load_dword with lds (bit 16 set)
+        MubufLdsCase{ROCJITSU_CODE_ARCH_CDNA1, "cdna1", {0xE0510000u, 0x00000000u}, true}),
+    [](const ::testing::TestParamInfo<MubufLdsCase> &info) {
+      std::string name = info.param.arch_name;
+      name += info.param.expect_lds ? "_with_lds" : "_without_lds";
+      return name;
+    });
+
 } // namespace

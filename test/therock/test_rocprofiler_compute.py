@@ -71,7 +71,7 @@ def execute_tests():
         "--output-on-failure",
         "--verbose",
         "--exclude-regex",
-        f"{" | ".join(EXCLUDED_TESTS)}",
+        f"{"|".join(EXCLUDED_TESTS)}",
         "--tests-information",
         f"{shard_index},,{total_shards}",
     ]

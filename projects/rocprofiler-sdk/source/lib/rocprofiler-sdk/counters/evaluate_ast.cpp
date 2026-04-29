@@ -416,7 +416,26 @@ EvaluateAST::EvaluateAST(rocprofiler_counter_id_t                       out_id,
                     << fmt::format("Accumulate High_RES/Low_RES only works for counters from SQ "
                                    "block: invalid operation on {} counter.",
                                    _metric.name());
-                _metric.setflags(static_cast<int>(ast.accumulate_op));
+
+                // LOW_RES (quad-cycle integration) is not supported on gfx10 and above.
+                // Redirect to HIGH_RES and warn the user.
+                auto effective_op = ast.accumulate_op;
+                if(effective_op == ACCUMULATE_OP_TYPE::LOW_RESOLUTION)
+                {
+                    const bool is_gfx10_or_later =
+                        (_agent.size() > 3) && (std::atoi(_agent.c_str() + 3) >= 1000);
+
+                    if(is_gfx10_or_later)
+                    {
+                        ROCP_WARNING << fmt::format("LOW_RES accumulation is not supported on {}. "
+                                                    "Redirecting to HIGH_RES for counter {}.",
+                                                    _agent,
+                                                    _metric.name());
+
+                        effective_op = ACCUMULATE_OP_TYPE::HIGH_RESOLUTION;
+                    }
+                }
+                _metric.setflags(static_cast<int>(effective_op));
             }
         } catch(std::exception& e)
         {

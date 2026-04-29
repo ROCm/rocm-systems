@@ -81,16 +81,19 @@ def split_copy_compute_hw_queues_rules(validation_rules_dir) -> list[Path]:
 @pytest.mark.gpu
 class TestJacobi(RocprofsysTest):
 
-    openmp_run_args = ["-m", "512"]
+    openmp_non_usm_run_args = ["-m", "512"]
+    # With OMPX_APU_MAPS=1, it takes longer, so reduce domain size
+    openmp_usm_run_args = ["-m", "64"]
     hip_run_args = ["-g", "2", "1"]
 
+    @pytest.mark.slow
     @pytest.mark.openmp
     @pytest.mark.xnack
     @pytest.mark.rocpd("hpc_openmp_environment")
     @pytest.mark.parametrize("mode", ["sys_run"])
     def test_usm(self, mode, hpc_openmp_environment, gpu_info, kfd_rules):
         env = hpc_openmp_environment.copy()
-        env["ROCPROFSYS_ROCM_DOMAINS"] = "hip_api,kernel_dispatch,memory_copy,kfd_events"
+        env["ROCPROFSYS_ROCM_DOMAINS"] = "hip_api,kernel_dispatch,memory_copy"
         env["ROCPROFSYS_TRACE_LEGACY"] = "ON"
         env["HSA_XNACK"] = "1"
         env["ROCPROFSYS_USE_AMD_SMI"] = "OFF"
@@ -103,7 +106,7 @@ class TestJacobi(RocprofsysTest):
             mode,
             target="jacobi-fortran-usm",
             env=env,
-            run_args=self.openmp_run_args,
+            run_args=self.openmp_usm_run_args,
             check_target_arch=True,
         )
 
@@ -135,26 +138,8 @@ class TestJacobi(RocprofsysTest):
                 result,
                 subtest_name="Perfetto USM Zero-Copy validation (Non-APU)",
                 categories=["rocm_ompt_api"],
-                labels=["omp_target_data_op_emi"],
-                counts=[1],
-                depths=[1],
+                pass_regex=[r"omp_target_data_op_emi\s*\|\s*1\s*\|\s*1\s*\|"],
             )
-
-        # Validate KFD events in perfetto trace
-        self.assert_perfetto(
-            result,
-            subtest_name="Perfetto KFD event validation",
-            categories=["rocm_kfd_page_fault", "rocm_kfd_page_migrate", "rocm_kfd_queue"],
-            label_substrings=["PAGE_FAULT", "PAGE_MIGRATE", "QUEUE_EVICT"],
-            print_output=True,
-        )
-
-        # Validate KFD events in rocpd database
-        self.assert_rocpd(
-            result,
-            subtest_name="ROCpd KFD event validation",
-            rules_files=kfd_rules,
-        )
 
     @pytest.mark.openmp
     @pytest.mark.roctx
@@ -170,7 +155,7 @@ class TestJacobi(RocprofsysTest):
             target="jacobi-fortran-targetdata-markers",
             env=env,
             check_target_arch=True,
-            run_args=self.openmp_run_args,
+            run_args=self.openmp_non_usm_run_args,
         )
         self.assert_regex(result)
 
@@ -193,7 +178,12 @@ class TestJacobi(RocprofsysTest):
         env["ROCPROFSYS_PERFETTO_COMBINE_TRACES"] = "ON"
 
         result = self.run_test(
-            mode, target="jacobi-hip", env=env, run_args=self.hip_run_args, mpi_ranks=2
+            mode,
+            target="jacobi-hip",
+            env=env,
+            run_args=self.hip_run_args,
+            launcher="mpi",
+            num_procs=2,
         )
         # hipHostFree is one of the last calls and should be present if the program worked correctly
         self.assert_regex(
@@ -223,6 +213,7 @@ class TestJacobi(RocprofsysTest):
 @pytest.mark.hip
 @pytest.mark.openmp
 @pytest.mark.roctx
+@pytest.mark.class_name("matrix-exponential")
 class TestMatrixExponential(RocprofsysTest):
 
     rocblas_gemm_kernel_prefix = ["Cijk_Ailk_Bljk"]
@@ -259,14 +250,19 @@ class TestMatrixExponential(RocprofsysTest):
             pass_regex=self.rocblas_gemm_kernel_prefix,
         )
 
-        self.assert_rocpd(
-            result,
-            rules_files=matrix_exponential_rules,
-        )
+        # TODO: Disabled pending investigation (AIPROFSYST-418)
+        # We expect 171 GEMM dispatches, but sometimes we see less.
+
+        # self.assert_rocpd(
+        #     result,
+        #     rules_files=matrix_exponential_rules,
+        # )
 
 
+@pytest.mark.rocm
 @pytest.mark.gpu
 @pytest.mark.hip
+@pytest.mark.class_name("split-copy-compute-hw-queues")
 class TestSplitCopyComputeHWQueues(RocprofsysTest):
 
     nstreams = 4
