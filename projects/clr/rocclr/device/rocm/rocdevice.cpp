@@ -1207,8 +1207,10 @@ bool Device::populateOCLDeviceConstants() {
     LogError("HSA_AGENT_INFO_AMD_MEMORY_PROPERTIES query failed");
   }
 
-  // Check if the device is APU
-  if (hsa_flag_isset64(memory_properties, HSA_AMD_MEMORY_PROPERTY_AGENT_IS_APU)) {
+  // Check if the device is APU with unified memory
+  const bool isApu = hsa_flag_isset64(memory_properties, HSA_AMD_MEMORY_PROPERTY_AGENT_IS_APU);
+
+  if (isApu) {
     info_.hostUnifiedMemory_ = 1;
   }
 
@@ -1224,6 +1226,28 @@ bool Device::populateOCLDeviceConstants() {
     info_.globalMemSize_ = (static_cast<uint64_t>(std::min(GPU_MAX_HEAP_SIZE, 100u)) *
                             static_cast<uint64_t>(global_segment_size)) /
                            100u;
+
+    // On APUs, include the GTT (system memory) pool in the reported memory size.
+    // Only add GTT if it's larger than VRAM - this matches the kernel's apu_prefer_gtt
+    // logic (commit 759e764f). When GTT > VRAM, the kernel redirects VRAM allocations
+    // to GTT, making both pools usable. When VRAM >= GTT, only VRAM is reliably used.
+    if (isApu && cpu_agent_info_ != nullptr &&
+        cpu_agent_info_->coarse_grain_pool.handle != 0) {
+      size_t gtt_segment_size = 0;
+      if (HSA_STATUS_SUCCESS == Hsa::memory_pool_get_info(
+              cpu_agent_info_->coarse_grain_pool,
+              HSA_AMD_MEMORY_POOL_INFO_SIZE,
+              &gtt_segment_size)) {
+        // Only add GTT if it's larger than VRAM (matches kernel logic)
+        if (gtt_segment_size > global_segment_size) {
+          uint64_t gtt_usable = (static_cast<uint64_t>(std::min(GPU_MAX_HEAP_SIZE, 100u)) *
+                                 static_cast<uint64_t>(gtt_segment_size)) / 100u;
+          info_.globalMemSize_ += gtt_usable;
+          LogPrintfInfo("APU unified memory: VRAM=%zu GTT=%zu total=%llu",
+                        global_segment_size, gtt_segment_size, info_.globalMemSize_);
+        }
+      }
+    }
 
     // For APU with vram size <= 512MiB, use a smaller single alloc percentage
     if (info_.globalMemSize_ <= 536870912) {
