@@ -285,6 +285,31 @@
         }
       ]
     },
+    "net_ib_multirecv": {
+      "extends": "net_ib_base",
+      "timeout": 300,
+      "env_variables": {
+        "NCCL_DEBUG": "INFO",
+        "NCCL_DEBUG_SUBSYS": "NET,INIT"
+      },
+      "tests": [
+        {
+          "name": "NetIB_MultiRecv",
+          "description": "irecv(n=8) batching over host memory, sequential tag order, 255 batches",
+          "test_filter": "NetIbMPITest.MultiRecv"
+        },
+        {
+          "name": "NetIB_MultiRecvShuffled",
+          "description": "irecv(n=8) batching over host memory, shuffled recv-slot and send-issue order, 255 batches",
+          "test_filter": "NetIbMPITest.MultiRecvShuffled"
+        },
+        {
+          "name": "NetIB_MultiRecvGPUShuffled",
+          "description": "irecv(n=8) batching over GPU memory (GDR path), shuffled order, 255 batches; skipped if GDR unavailable",
+          "test_filter": "NetIbMPITest.MultiRecvGPUShuffled"
+        }
+      ]
+    },
     "unit_tests_fixtures": {
       "is_gtest": true,
       "binary": "rccl-UnitTestsFixtures",
@@ -771,6 +796,12 @@
       "name": "NET IB - Data Transfer",
       "description": "InfiniBand data transfer and stress tests",
       "config": "net_ib_transfer",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - MultiRecv",
+      "description": "irecv(n>1) multi-slot batching tests",
+      "config": "net_ib_multirecv",
       "enabled": true
     },
     {
