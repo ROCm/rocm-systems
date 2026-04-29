@@ -15,13 +15,13 @@ AMD SMI exposes two distinct throttling APIs -- which one you use depends on you
 
 - On **Instinct MI300 Series and newer data center GPUs** (gpu_metrics v1.6+):
 
-  Use `amdsmi_get_violation_status()` or the CLI (`amd-smi monitor --violation`, `amd-smi metric --violation`). This API reports throttling as time-based percentages, active status flags, and accumulated counters for each violation type — useful for historical and trend-oriented monitoring. See [](#interpreting-violations-api-results) for details.
+  Use `amdsmi_get_violation_status()` or the CLI (`amd-smi monitor --violation`, `amd-smi metric --violation`). This API reports throttling as time-based percentages, active status flags, and accumulated counters for each violation type — useful for historical and trend-oriented monitoring. See [Interpreting violations API results](#interpreting-violations-api-results) for details.
 
   On these GPUs, `throttle_status` in `amd-smi metric --power` reports N/A.
 
 - On **Radeon (Navi) and Instinct MI100/MI200 Series GPUs** (gpu_metrics v1.3):
 
-  Use `amdsmi_get_gpu_metrics_info()` or `amd-smi metric --power` to check `throttle_status` (throttled/unthrottled) and `indep_throttle_status` (per-reason bit flags such as `PROCHOT_GFX`, `TDC_GFX`, `TEMP_MEM`). These indicate whether throttling is happening right now, not how much over time. See [](#interpreting-throttle_status-results) for details.
+  Use `amdsmi_get_gpu_metrics_info()` or `amd-smi metric --power` to check `throttle_status` (throttled/unthrottled) and `indep_throttle_status` (per-reason bit flags such as `PROCHOT_GFX`, `TDC_GFX`, `TEMP_MEM`). These indicate whether throttling is happening right now, not how much over time. See [Interpreting throttle_status results](#interpreting-throttle_status-results) for details.
 
   On these GPUs, the violations API and `amd-smi [metric/monitor] --violation` return N/A or max_uint.
 
@@ -44,15 +44,15 @@ For example, on Instinct MI300X systems and newer, 50% `TVIOL` means the GPU spe
 
 ### Checking power and thermal violations
 
-- On **Instinct MI300 Series and newer**, check `per_ppt_pwr` (PVIOL) and TVIOL percentages via `amdsmi_get_violation_status()`. Using the CLI, `amd-smi monitor --violation` and `amd-smi metric --violation` display PVIOL and TVIOL percentages. See [](#usage) for more information.
+- On **Instinct MI300 Series and newer**, check `per_ppt_pwr` (PVIOL) and TVIOL percentages via `amdsmi_get_violation_status()`. Using the CLI, `amd-smi monitor --violation` and `amd-smi metric --violation` display PVIOL and TVIOL percentages. See [Usage](#usage) for more information.
 
   - `PVIOL`, representing power violations, is the percentage of time the GPU throttled due to power (wattage) limits. This occurs when the GPU's power consumption exceeds safe limits, triggering power throttling to stay within the power budget.
 
   - `TVIOL`, representing thermal violation, is the percentage of time the GPU throttled due to temperature limits. This happens when GPU temperatures exceed safe operating thresholds, causing the GPU to reduce performance to cool down.
 
-  Values greater than 0% indicate time spent throttled. A GPU can experience both simultaneously, for example 30% `PVIOL` and 20% `TVIOL` at the same time. See [](#interpreting-violations-api-results) for details.
+  Values greater than 0% indicate time spent throttled. A GPU can experience both simultaneously, for example 30% `PVIOL` and 20% `TVIOL` at the same time. See [Interpreting violations API results](#interpreting-violations-api-results) for details.
 
-- On **Radeon (Navi) and Instinct MI100/MI200 Series**, look at `throttle_status` bit flags in `amd-smi metric --power` to see if PPT (power) or thermal throttling is active. See [](#throttle-status-bit-flags) for more information.
+- On **Radeon (Navi) and Instinct MI100/MI200 Series**, look at `throttle_status` bit flags in `amd-smi metric --power` to see if PPT (power) or thermal throttling is active. See [Interpreting throttle_status results](#throttle-status-bit-flags) for more information.
 
 ### Monitoring PROCHOT (processor hot) throttling
 
@@ -62,15 +62,15 @@ For example, on Instinct MI300X systems and newer, 50% `TVIOL` means the GPU spe
 
 ### Monitoring GPU hotspot temperature violations
 
-- On **Instinct MI300 Series and newer**, monitor hotspot temperature with `amdsmi_get_temp_metric()` and correlate with TVIOL%. High TVIOL% combined with high hotspot temps (>95°C) indicates thermal throttling. Use `amd-smi metric --gpu all --temperature` to track temperatures alongside violation status. See [](#usage) for more information.
+- On **Instinct MI300 Series and newer**, monitor hotspot temperature with `amdsmi_get_temp_metric()` and correlate with TVIOL%. High TVIOL% combined with high hotspot temps (>95°C) indicates thermal throttling. Use `amd-smi metric --gpu all --temperature` to track temperatures alongside violation status. See [Usage](#usage) for more information.
 
 ### Detecting HBM (high bandwidth memory) thermal throttling
 
 HBM (High-Bandwidth Memory) thermal throttling occurs when GPU memory overheats.
 
-- On **Instinct MI300 Series and newer**, this is detected via `per_hbm_thrm` (HBM_TVIOL%) and `active_hbm_thrm` in the violations API. See [](#violation-status-fields) for more information.
+- On **Instinct MI300 Series and newer**, this is detected via `per_hbm_thrm` (HBM_TVIOL%) and `active_hbm_thrm` in the violations API. See [Violation status fields](#violation-status-fields) for more information.
 
-- On **Radeon (Navi) and Instinct MI100/MI200 Series**, check the `TEMP_MEM` bit in `indep_throttle_status`. Detailed HBM violation percentages are only available on MI3x+. See [](#throttle-status-bit-flags) for more information.
+- On **Radeon (Navi) and Instinct MI100/MI200 Series**, check the `TEMP_MEM` bit in `indep_throttle_status`. Detailed HBM violation percentages are only available on MI3x+. See [Interpreting throttle_status results](#throttle-status-bit-flags) for more information.
 
 ### Adjusting clock limits
 
