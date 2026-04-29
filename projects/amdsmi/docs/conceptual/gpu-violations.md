@@ -13,7 +13,7 @@ GPU violations monitoring in AMD SMI tracks throttling events caused by power or
 
 AMD SMI exposes two distinct throttling APIs -- which one you use depends on your GPU generation:
 
-- On **Instinct MI300 Series and newer data center GPUs** (gpu_metrics v1.9):
+- On **Instinct MI300 Series and newer data center GPUs** (gpu_metrics v1.6+):
 
   Use `amdsmi_get_violation_status()` or the CLI (`amd-smi monitor --violation`, `amd-smi metric --violation`). This API reports throttling as time-based percentages, active status flags, and accumulated counters for each violation type — useful for historical and trend-oriented monitoring. See [](#interpreting-violations-api-results) for details.
 
