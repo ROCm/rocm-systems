@@ -1,0 +1,72 @@
+# Shared body of do_install_amdsmi_python_lib() used by both
+# DEBIAN/postinst.in and RPM/post.in. configure_file substitutes
+# PKG_TARGET_DIR (DEB resolves at cmake configure time; RPM uses
+# $RPM_INSTALL_PREFIX0 so the package can be relocated) and BUILD_SHARED_LIBS.
+# Edit this file -- not the per-format scriptlets -- when changing the
+# install logic.
+do_install_amdsmi_python_lib() {
+  # Static-only builds ship no libamd_smi.so; skip the .pth that would
+  # point at a wrapper whose `import amdsmi` fails at ctypes.CDLL time.
+  if [ "@BUILD_SHARED_LIBS@" != "ON" ]; then
+    return
+  fi
+
+  # Install amdsmi.pth into the SYSTEM python's site-packages so plain
+  # `import amdsmi` works. We deliberately ignore VIRTUAL_ENV: the
+  # package manager runs postinst as root with a stripped PATH, and
+  # leaking into a user's venv would surprise them with a stale .pth
+  # after deactivate/reactivate. Users who want amdsmi inside a venv
+  # should `pip install amdsmi` (the wheel ships its own .so).
+  #
+  # Resolve site-packages by asking the interpreter for `purelib` first
+  # (honors alternatives / conda / custom sysconfig schemes), then fall
+  # back to the first existing site.getsitepackages() entry for distros
+  # whose declared purelib does not yet exist on disk (e.g. stock
+  # Ubuntu 20.04 returns /usr/lib/python3.8/site-packages, absent and
+  # not on sys.path).
+  find_site_packages() {
+    local py_bin="$1"
+    if [ -x "$py_bin" ]; then
+      "$py_bin" -c 'import os, site, sysconfig
+purelib = sysconfig.get_path("purelib")
+if purelib and os.path.isdir(purelib):
+    print(purelib)
+else:
+    for p in site.getsitepackages():
+        if os.path.isdir(p):
+            print(p)
+            break' 2>/dev/null
+    fi
+  }
+
+  local target_dir="@PKG_TARGET_DIR@"
+  local log_file="/var/log/amd_smi_lib/postinst.log"
+  mkdir -p "$(dirname "$log_file")" 2>/dev/null
+
+  local sys_py site_packages
+  # `command -v` is a POSIX shell builtin; `which` is a separate package
+  # that is not always installed (and would honor a broader PATH). The
+  # postinst PATH is stripped by the package manager, so this lands on
+  # the OS-shipped python3 deterministically.
+  sys_py="$(command -v python3 || true)"
+  if [ -z "$sys_py" ]; then
+    echo "[amd-smi-lib] WARNING: no system python3 found on PATH." \
+         "AMD-SMI .pth file will not be installed; 'import amdsmi' will fail." >&2
+    echo "$(date -Iseconds) WARNING no system python3" >> "$log_file" 2>/dev/null
+    return
+  fi
+  site_packages="$(find_site_packages "$sys_py")"
+  if [ -z "$site_packages" ] || [ ! -d "$site_packages" ]; then
+    echo "[amd-smi-lib] WARNING: Could not locate system Python site-packages" \
+         "under $sys_py. AMD-SMI .pth file will not be installed." >&2
+    echo "$(date -Iseconds) WARNING no site-packages for $sys_py" >> "$log_file" 2>/dev/null
+    return
+  fi
+
+  # Log both interpreter and target so the uninstall scriptlet can
+  # delete exactly what we installed.
+  echo "$target_dir" > "$site_packages/amdsmi.pth"
+  echo "[amd-smi-lib] Installed amdsmi.pth -> $site_packages/amdsmi.pth (points to $target_dir)" >&2
+  echo "$(date -Iseconds) INFO interpreter $sys_py" >> "$log_file" 2>/dev/null
+  echo "$(date -Iseconds) INFO wrote $site_packages/amdsmi.pth" >> "$log_file" 2>/dev/null
+}

@@ -473,6 +473,22 @@ set(CPACK_DEBIAN_TESTS_PACKAGE_DEPENDS ${CPACK_DEBIAN_PACKAGE_DEPENDS})
 string(TIMESTAMP CURRENT_YEAR "%Y")
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/DEBIAN/copyright.in DEBIAN/copyright @ONLY)
 
+## Build the shared do_install_amdsmi_python_lib() body once per package
+## format. The cmake_modules template is configure_file'd with a
+## format-specific PKG_TARGET_DIR (DEB resolves at cmake configure time;
+## RPM uses $RPM_INSTALL_PREFIX0 so the package can be relocated). The
+## generated body is then read into INSTALL_AMDSMI_PYTHON_LIB_BODY which
+## the postinst/post templates substitute verbatim.
+set(_INSTALL_AMDSMI_PYTHON_LIB_TEMPLATE "${CMAKE_CURRENT_SOURCE_DIR}/cmake_modules/install_amdsmi_python_lib.sh.in")
+
+set(PKG_TARGET_DIR "${CPACK_PACKAGING_INSTALL_PREFIX}/${PY_WRAPPER_INSTALL_DIR}")
+configure_file(
+    "${_INSTALL_AMDSMI_PYTHON_LIB_TEMPLATE}"
+    "${CMAKE_CURRENT_BINARY_DIR}/_install_amdsmi_python_lib_deb.sh"
+    @ONLY
+)
+file(READ "${CMAKE_CURRENT_BINARY_DIR}/_install_amdsmi_python_lib_deb.sh" INSTALL_AMDSMI_PYTHON_LIB_BODY)
+
 ## Process the Debian install/remove scripts to update the CPACK variables
 configure_file(
     ${CMAKE_CURRENT_SOURCE_DIR}/DEBIAN/postinst.in
@@ -569,6 +585,13 @@ endif()
 # set(CPACK_RPM_PACKAGE_SUGGESTS "sudo, libdrm-devel")
 
 ## Process the Rpm install/remove scripts to update the CPACK variables
+set(PKG_TARGET_DIR "\$RPM_INSTALL_PREFIX0/${SHARE_INSTALL_PREFIX}")
+configure_file(
+    "${_INSTALL_AMDSMI_PYTHON_LIB_TEMPLATE}"
+    "${CMAKE_CURRENT_BINARY_DIR}/_install_amdsmi_python_lib_rpm.sh"
+    @ONLY
+)
+file(READ "${CMAKE_CURRENT_BINARY_DIR}/_install_amdsmi_python_lib_rpm.sh" INSTALL_AMDSMI_PYTHON_LIB_BODY)
 configure_file("${CMAKE_CURRENT_SOURCE_DIR}/RPM/post.in" RPM/post @ONLY)
 configure_file("${CMAKE_CURRENT_SOURCE_DIR}/RPM/preun.in" RPM/preun @ONLY)
 configure_file("${CMAKE_CURRENT_SOURCE_DIR}/RPM/postun.in" RPM/postun @ONLY)
