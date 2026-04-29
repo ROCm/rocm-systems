@@ -31,6 +31,8 @@ struct sampling_policies_traits
 // Production types are Linux-only. Forward-declared here; defined in src/linux/.
 // Non-Linux gate is enforced at sampling_service<Policies> instantiation time
 // via sampling/platform_guard.hpp (single source of truth — NFR-PORT-3).
+// libunwind is a hard requirement on Linux — enforced at CMake configure time
+// in sampling/CMakeLists.txt (find_package(LibUnwind REQUIRED)).
 #if defined(__linux__)
 class libunwind_unwinder;
 class trace_cache_offload_adapter;

@@ -16,6 +16,8 @@
 // sampling_service<Policies> instantiation time (NFR-PORT-3 single gate).
 
 // ── Light policies (sampling/ — no main-lib deps) ────────────────────────────
+// libunwind is a hard requirement on Linux (sampling/CMakeLists.txt enforces
+// find_package(LibUnwind REQUIRED)), so the unwinder include is unconditional.
 #include "sampling/src/linux/libunwind_unwinder.hpp"
 #include "sampling/src/linux/real_signal_dispatcher.hpp"
 #include "sampling/src/steady_clock.hpp"

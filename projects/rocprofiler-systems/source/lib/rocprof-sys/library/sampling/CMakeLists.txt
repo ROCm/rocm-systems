@@ -57,7 +57,21 @@ target_link_libraries(
     PRIVATE rocprofiler-systems-interface-library
 )
 
-if(TARGET LibUnwind::LibUnwind)
+if(LINUX)
+    # libunwind is a hard requirement on Linux — the unwinder policy seam,
+    # the in-handler unwind in services_accessor.cpp, and the symbol-resolution
+    # cascade in real_production_hooks all depend on it. Fail the configure step
+    # immediately if libunwind is missing rather than emitting a confusing link
+    # error deep in the sampling object library.
+    if(NOT TARGET LibUnwind::LibUnwind)
+        message(
+            FATAL_ERROR
+            "rocprof-sys-sampling-library requires libunwind on Linux but "
+            "LibUnwind::LibUnwind was not found. Install libunwind-dev (or set "
+            "LibUnwind_ROOT) and reconfigure, or build with "
+            "ROCPROFSYS_BUILD_LIBUNWIND=ON to use the bundled submodule."
+        )
+    endif()
     target_link_libraries(rocprof-sys-sampling-library PRIVATE LibUnwind::LibUnwind)
 endif()
 

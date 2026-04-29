@@ -8,6 +8,8 @@
 // DWARF symbol resolution is deferred to post_process — NOT called from here.
 //
 // NFR-PORT-3: lives under src/linux/ — not under include/sampling/.
+// libunwind is a hard requirement on Linux (sampling/CMakeLists.txt enforces
+// find_package(LibUnwind REQUIRED)).
 
 #include "sampling/data/limits.hpp"
 #include "sampling/data/stack_frame.hpp"
