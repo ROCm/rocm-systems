@@ -5818,6 +5818,48 @@ amdsmi_status_t amdsmi_get_gpu_virtualization_mode(amdsmi_processor_handle proce
   amdsmi_status_t status;
   SMIGPUDEVICE_MUTEX(gpu_device->get_mutex())
 
+  auto get_virt_mode_fallback = [&ss, gpu_device](
+                                    const std::string& render_name,
+                                    amdsmi_virtualization_mode_t* mode) -> amdsmi_status_t {
+    std::string render_name_local;
+    if (render_name.empty()) {
+      render_name_local = "renderD" + std::to_string(gpu_device->get_drm_render_minor());
+    } else {
+      render_name_local = render_name;
+    }
+    auto result = amd::smi::detect_virtualization_mode_sysfs(render_name_local);
+
+    ss << __PRETTY_FUNCTION__ << " | sysfs fallback detection"
+       << " | render_path: " << (render_name_local.empty() ? "<empty>" : render_name_local)
+       << " | (HOST) has_active_vfs: " << std::boolalpha << result.has_active_vfs
+       << " | (PASSTHROUGH) is_vfio_bound: " << std::boolalpha << result.is_vfio_bound
+       << " | is_vm_guest: " << std::boolalpha << result.is_vm_guest
+       << " | is_container: " << std::boolalpha << result.is_container
+       << " | sysfs_accessible: " << std::boolalpha << result.sysfs_accessible;
+    LOG_INFO(ss);
+
+    if (result.has_active_vfs) {
+      // Device has active VFs = HOST mode
+      *mode = AMDSMI_VIRTUALIZATION_MODE_HOST;
+    } else if (result.is_vfio_bound) {
+      // Device bound to vfio-pci = PASSTHROUGH mode
+      // Note: In nested virtualization (VM within VM), this reports the device's
+      // operational mode (PASSTHROUGH) rather than system context (GUEST).
+      // This aligns with DRM driver reporting and reflects device capabilities.
+      *mode = AMDSMI_VIRTUALIZATION_MODE_PASSTHROUGH;
+    } else if (result.is_vm_guest) {
+      // hypervisor flag = GUEST (containers inherit this correctly)
+      *mode = AMDSMI_VIRTUALIZATION_MODE_GUEST;
+    } else if (!result.is_vm_guest) {
+      // Not VM, safe to say BAREMETAL
+      *mode = AMDSMI_VIRTUALIZATION_MODE_BAREMETAL;
+    } else {
+      // Can't determine reliably, return UNKNOWN
+      *mode = AMDSMI_VIRTUALIZATION_MODE_UNKNOWN;
+    }
+    return AMDSMI_STATUS_SUCCESS;
+  };
+
   std::string render_name = gpu_device->get_gpu_path();
   std::string path = "/dev/dri/" + render_name;
   if (render_name.empty()) {
@@ -5888,7 +5930,7 @@ amdsmi_status_t amdsmi_get_gpu_virtualization_mode(amdsmi_processor_handle proce
      << "\n"
      << "; Returning: "
      << (isDRMVersionSupported ? smi_amdgpu_get_status_string(AMDSMI_STATUS_SUCCESS, false)
-                               : smi_amdgpu_get_status_string(AMDSMI_STATUS_NOT_SUPPORTED, false));
+                               : "Need to use fallback method");
   LOG_INFO(ss);
 
   // Check if the version is supported
@@ -5896,7 +5938,7 @@ amdsmi_status_t amdsmi_get_gpu_virtualization_mode(amdsmi_processor_handle proce
   if (isDRMVersionSupported == false) {
     drm_free_version(drm_version);
     libdrm.unload();
-    return AMDSMI_STATUS_NOT_SUPPORTED;
+    return get_virt_mode_fallback(render_name, mode);
   }
 
   // Get the device info

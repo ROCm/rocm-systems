@@ -55,7 +55,15 @@
 #endif
 
 namespace amd::smi {
+constexpr uint32_t kSMI_MAX_STRING_LENGTH = 256;  // matches AMDSMI_MAX_STRING_LENGTH
 
+struct VirtModeDetectionResult {
+  bool is_vm_guest = false;       // hypervisor flag in /proc/cpuinfo
+  bool is_container = false;      // running inside docker/lxc/podman container
+  bool has_active_vfs = false;    // VFs are provisioned (sriov_numvfs > 0) -> indicates HOST
+  bool is_vfio_bound = false;     // device bound to vfio-pci driver -> passthrough candidate
+  bool sysfs_accessible = false;  // device sysfs path accessible
+};
 pthread_mutex_t* GetMutex(uint32_t dv_ind);
 int SameFile(const std::string fileA, const std::string fileB);
 bool FileExists(char const* filename);
@@ -110,6 +118,12 @@ std::string print_rsmi_od_volt_freq_regions(uint32_t num_regions, rsmi_freq_volt
 bool is_sudo_user();
 rsmi_status_t rsmi_get_gfx_target_version(uint32_t dv_ind, std::string* gfx_version);
 rsmi_status_t rsmi_dev_number_of_computes_get(uint32_t dv_ind, uint32_t* num_computes);
+
+VirtModeDetectionResult detect_virtualization_mode_sysfs(const std::string& render_path);
+
+inline auto contains(std::string_view text, std::string_view substr) -> bool {
+  return text.find(substr) != std::string_view::npos;
+}
 
 std::string leftTrim(const std::string& s);
 std::string rightTrim(const std::string& s);

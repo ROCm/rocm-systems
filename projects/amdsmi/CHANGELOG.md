@@ -220,6 +220,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Fixed shared mutex and self-heal**.  
   - Improved self-heal logic to correctly identify and recover from corrupted or uninitialized mutex state.
 
+- **Fixed virtualization detection utilities when libDRM version < 3.62.0**.  
+  - Enables `amdsmi_get_gpu_virtualization_mode()` to work when libDRM is outdated, improving virtualization detection reliability.
+
 - **Fixed `cu_occupancy` displaying `0%` instead of `N/A` when file is unavailable**.  
   - Process `cu_occupancy` is now initialized to `INVALID` instead of zero, so `amd-smi process` displays `N/A` rather than a misleading `0%` when the sysfs file is not accessible.
 
