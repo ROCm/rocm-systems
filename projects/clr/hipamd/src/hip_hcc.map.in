@@ -661,7 +661,7 @@ local:
     *;
 } hip_7.1;
 
-hip_7.3 {
+hip_7.14 {
 global:
     hipGreenCtxCreate;
     hipExecutionCtxDestroy;
