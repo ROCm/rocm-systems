@@ -50,10 +50,76 @@ if(LINUX)
 endif()
 
 # ── Link dependencies ──────────────────────────────────────────────────────────
-# NO main-lib deps here. Heavy policy deps live in library/services_accessor.cpp.
+# Curated INTERFACE bundle of project sub-libraries that the sampling lib's
+# public surface (sampling/include/sampling/* + sampling/src/sampling_service_impl.hpp)
+# transitively requires. Replaces the previous PUBLIC link to the umbrella
+# rocprofiler-systems-interface-library — that pulled 9 unused sub-INTERFACEs
+# (mpi, ucx, libva, bfd, elfutils-as-include, sanitizer, lto, static-libgcc,
+# static-libstdcxx) onto every consumer of the sampling lib (test object lib,
+# integration test executables, the rocprof-sys object lib).
+#
+# Each entry below is the ONLY thing in the curated bundle because it is reached
+# either by a public sampling header or by sampling_service_impl.hpp (the
+# folded production_hooks lifecycle).
+add_library(rocprof-sys-sampling-deps INTERFACE)
+target_link_libraries(
+    rocprof-sys-sampling-deps
+    INTERFACE
+        # -I source/lib + source/lib/rocprof-sys, so #include "core/..." and
+        # #include "library/thread_info.hpp" resolve in consumer TUs.
+        rocprofiler-systems-headers
+        # -lpthread. sampling owns thread_sampler_state per tid + uses
+        # std::mutex/std::lock_guard in the service.
+        rocprofiler-systems-threading
+        # Project compile flags (warnings, -std=c++17). Required so consumer TUs
+        # match the sampling lib's ABI/flag set.
+        rocprofiler-systems-compile-options
+        rocprofiler-systems-compile-definitions
+        # Project common/ macros + ROCPROFSYS_MAX_THREADS. core/common.hpp
+        # (pulled by sampling_service_impl.hpp via the threading namespace
+        # alias) needs the configure-time generated common/defines.h.
+        rocprofiler-systems-common-library
+        # spdlog + the bundled fmt headers. Used by:
+        #   • logger/debug.hpp (LOG_DEBUG / LOG_INFO macros across the lib)
+        #   • real_fatal_error_policy (fmt::format for fatal messages)
+        #   • stack_frame_json (fmt::format for line info)
+        rocprofiler-systems-logger
+        # Perfetto static archive + headers. Reached via cache_manager.hpp ->
+        # buffer_storage which stores backtrace_region_sample / pmc_event_with_sample
+        # in the perfetto stream. real_perfetto_sink directly emits track events.
+        rocprofiler-systems-perfetto
+        # SQLite headers. Reached via cache_manager.hpp -> rocpd writer; the
+        # sampling lifecycle's do_emit_resolved pushes samples through trace_cache
+        # which lands in the rocpd .db.
+        rocprofiler-systems-sqlite3
+        # nlohmann/json header-only. Used by stack_frame_json.hpp to emit the
+        # per-frame call_stack/line_info JSON blobs that store_timer/store_overflow
+        # attach to backtrace_region_sample records.
+        rocprofiler-systems-json
+        # timemory headers + libtimemory-* archives. Reached via:
+        #   • core/config.hpp     — settings registry, get_sampling_*_signal/freq/...
+        #   • core/state.hpp      — ThreadState enum + get_thread_state()
+        #   • core/common.hpp     — `namespace threading = tim::threading;`
+        #                            (gives threading::get_sys_tid portably)
+        #   • library/thread_info.hpp — thread_info::get + index_data::system_value
+        #   • library/pmc/sampler.hpp — pmc::postfork_parent_reinit / _child_cleanup
+        # The sampling lifecycle calls these from check_thread_guards,
+        # do_setup_wiring, do_postfork_*.
+        rocprofiler-systems-timemory
+        # ROCm SDK headers. Pulled for rocprofiler-systems/categories.h, which
+        # supplies ROCPROFSYS_CATEGORY_TIMER_SAMPLING / OVERFLOW_SAMPLING /
+        # THREAD_CPU_TIME / etc. used by real_trace_cache_sink.
+        rocprofiler-systems-rocm
+)
+
+# Sampling lib's PUBLIC surface = the curated bundle. PRIVATE link to the
+# umbrella interface library covers the remaining build-time options the
+# sampling lib's own .cpp files inherit (sanitizer/LTO/static-libgcc flags
+# when they are explicitly enabled at configure time).
 target_link_libraries(
     rocprof-sys-sampling-library
-    PUBLIC rocprofiler-systems-logger rocprofiler-systems-interface-library
+    PUBLIC rocprof-sys-sampling-deps
+    PRIVATE rocprofiler-systems-interface-library
 )
 
 if(LINUX)
