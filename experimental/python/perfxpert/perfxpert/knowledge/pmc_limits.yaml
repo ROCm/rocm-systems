@@ -1,8 +1,9 @@
 # Per-block counter collection limits for rocprofv3 PMC pass planning. These
 # are PerfXpert tool/runtime guardrails, not GPU peak specifications.
-# Exceeding a limit yields rocprofv3 error code 38 in guarded paths.
 # Source: projects/rocprofiler-compute/src/utils/mi_gpu_spec.yaml
 #         perfmon_config entries on ROCm/rocm-systems develop.
+# The generic fallback limit is the minimum of known architecture-specific
+# limits so unknown architectures take the conservative path.
 # Note: gfx950 TCC_channels is topology metadata, not a per-pass counter limit,
 # so it is intentionally omitted from gpu_arch_limits.
 

@@ -29,6 +29,13 @@ and collection-context constants.
 
 from typing import Any, Dict, List
 
+from perfxpert.tools._pmc_limits import (
+    PMC_BLOCK_LIMIT_DEFAULT,
+    default_block_limits,
+    pmc_block,
+    pmc_block_limit,
+)
+
 # ---------------------------------------------------------------------------
 # Collection-context detection
 # ---------------------------------------------------------------------------
@@ -49,9 +56,7 @@ _SYS_TRACE_IMPLIED: frozenset = frozenset(
 )
 
 # Args that only specify output location -- not considered "new data collection"
-_OUTPUT_ONLY_ARGS: frozenset = frozenset(
-    {"-d", "-o", "--output-directory", "--output-file"}
-)
+_OUTPUT_ONLY_ARGS: frozenset = frozenset({"-d", "-o", "--output-directory", "--output-file"})
 
 # Hardware counter collection limits for rocprofv3 --pmc.
 #
@@ -76,24 +81,8 @@ _OUTPUT_ONLY_ARGS: frozenset = frozenset(
 #
 # Source: projects/rocprofiler-compute/src/utils/mi_gpu_spec.yaml perfmon_config.
 # gfx950 TCC_channels is topology metadata, not a per-pass counter limit.
-_PMC_BLOCK_LIMIT_DEFAULT: int = 4
-_PMC_BLOCK_LIMITS: Dict[str, int] = {
-    "SQ": 8,  # shader/wave
-    "GRBM": 2,  # GPU register bus manager
-    "TCP": 4,  # L1 vector cache
-    "TCC": 4,  # L2 cache
-    "TA": 2,  # texture addressing
-    "TD": 2,  # texture data
-    "CPC": 2,  # command processor compute
-    "CPF": 2,  # command processor frontend
-    "SPI": 6,  # shader processor interpolator
-    "GDS": 4,  # global data share
-    "GCEA": 2,  # graphics/compute engine adapter
-    "GL1A": 4,  # graphics L1 address
-    "GL1C": 4,  # graphics L1 cache
-    "GL2A": 4,  # graphics L2 address
-    "GL2C": 4,  # graphics L2 cache
-}
+_PMC_BLOCK_LIMIT_DEFAULT: int = PMC_BLOCK_LIMIT_DEFAULT
+_PMC_BLOCK_LIMITS: Dict[str, int] = default_block_limits()
 
 # FETCH_SIZE and WRITE_SIZE are derived metrics that each expand to multiple TCC
 # hardware counters (FETCH_SIZE -> 3 counters, WRITE_SIZE -> 2 counters). Each must
@@ -103,12 +92,12 @@ _TCC_DERIVED_COUNTERS: frozenset = frozenset({"FETCH_SIZE", "WRITE_SIZE"})
 
 def _pmc_block(counter: str) -> str:
     """Return the hardware block name for a counter (prefix before first '_')."""
-    return counter.split("_")[0]
+    return pmc_block(counter)
 
 
-def _pmc_block_limit(block: str) -> int:
+def _pmc_block_limit(block: str, gpu_arch: str = "") -> int:
     """Return the per-pass counter limit for the given hardware block."""
-    return _PMC_BLOCK_LIMITS.get(block, _PMC_BLOCK_LIMIT_DEFAULT)
+    return pmc_block_limit(block, gpu_arch)
 
 
 def _split_pmc_into_passes(
@@ -119,6 +108,7 @@ def _split_pmc_into_passes(
     output_prefix: str,
     description: str,
     app_placeholder: str = "./app",
+    gpu_arch: str = "",
 ) -> List[Dict[str, Any]]:
     """
     Split a counter list into the minimum number of rocprofv3 commands so that
@@ -158,6 +148,7 @@ def _split_pmc_into_passes(
                     output_prefix,
                     description,
                     app_placeholder,
+                    gpu_arch,
                 )
             )
         for dc in derived:
@@ -186,17 +177,14 @@ def _split_pmc_into_passes(
         if n > 1:
             for idx, cmd in enumerate(all_cmds):
                 out_name = f"{output_prefix}_pass{idx + 1}"
-                pmc_val = next(
-                    (a["value"] for a in cmd["args"] if a["name"] == "--pmc"), ""
-                )
+                pmc_val = next((a["value"] for a in cmd["args"] if a["name"] == "--pmc"), "")
                 flags_str = " ".join(base_flags)
                 cmd["description"] = f"{description} (pass {idx + 1}/{n})"
                 for arg in cmd["args"]:
                     if arg["name"] == "-o":
                         arg["value"] = out_name
                 cmd["full_command"] = (
-                    f"rocprofv3 {flags_str} --pmc {pmc_val}"
-                    f" -d {output_dir} -o {out_name} -- {app_placeholder}"
+                    f"rocprofv3 {flags_str} --pmc {pmc_val}" f" -d {output_dir} -o {out_name} -- {app_placeholder}"
                 ).strip()
         return all_cmds
 
@@ -209,13 +197,13 @@ def _split_pmc_into_passes(
         return []
 
     n_passes = max(
-        (len(cs) + _pmc_block_limit(blk) - 1) // max(_pmc_block_limit(blk), 1)
+        (len(cs) + _pmc_block_limit(blk, gpu_arch) - 1) // max(_pmc_block_limit(blk, gpu_arch), 1)
         for blk, cs in block_groups.items()
     )
 
     pass_counters: List[List[str]] = [[] for _ in range(n_passes)]
     for blk, cs in block_groups.items():
-        limit = _pmc_block_limit(blk)
+        limit = _pmc_block_limit(blk, gpu_arch)
         for pass_idx in range(n_passes):
             chunk = cs[pass_idx * limit : (pass_idx + 1) * limit]
             pass_counters[pass_idx].extend(chunk)
@@ -236,8 +224,7 @@ def _split_pmc_into_passes(
             {"name": "-o", "value": out_name},
         ]
         full_cmd = (
-            f"rocprofv3 {flags_str} --pmc {pmc_str}"
-            f" -d {output_dir} -o {out_name} -- {app_placeholder}"
+            f"rocprofv3 {flags_str} --pmc {pmc_str}" f" -d {output_dir} -o {out_name} -- {app_placeholder}"
         ).strip()
         commands.append(
             {
