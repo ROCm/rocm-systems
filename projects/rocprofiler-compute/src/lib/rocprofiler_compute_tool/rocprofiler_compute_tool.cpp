@@ -120,6 +120,57 @@ output_stream()
     return file;
 };
 
+bool print_kernel_info(std::string kernel_name, std::unordered_map<std::string, std::pair<unsigned long, unsigned long>>::mapped_type& begin_end)
+{
+    output_stream() << std::hex << "Found: " << kernel_name << " at addr: 0x" << begin_end.first
+        << std::dec << ". Printing first 64 bytes:" << std::endl;
+
+    std::unordered_set<std::string> references{};
+
+    int num_waitcnts = 0;
+    int num_scalar   = 0;
+    int num_vector   = 0;
+    int num_other    = 0;
+
+    size_t vaddr = begin_end.first;
+    while (vaddr < begin_end.second)
+    {
+        auto inst = codeobjTranslate.get(vaddr);
+        assert(inst != nullptr);
+        if (inst->comment.size())
+        {
+            std::string_view source = inst->comment;
+            if (source.rfind('/') < source.size())
+                source = source.substr(source.rfind('/'));
+            if (vaddr < begin_end.first + 64)
+                output_stream() << '\t' << inst->inst << '\n';
+
+            if (source.rfind(':') < source.size())
+                source = source.substr(0, source.rfind(':'));
+
+            references.insert(std::string(source));
+        }
+        if (inst->inst.find("v_") == 0)
+            num_vector++;
+        else if (inst->inst.find("s_waitcnt") == 0)
+            num_waitcnts++;
+        else if (inst->inst.find("s_") == 0)
+            num_scalar++;
+        else
+            num_other++;
+
+        vaddr += inst->size;
+    }
+
+    output_stream() << "  --- Num Scalar: " << num_scalar << "\n  --- Num Vector: " << num_vector
+        << "\n  --- Num Waitcnts: " << num_waitcnts
+        << "\n  --- Other instructions: " << num_other
+        << "\nKernel has source references to: " << std::endl;
+    for (auto& ref : references)
+        output_stream() << '\t' << ref << std::endl;
+    return false;
+}
+
 void code_object_tracing_callback(rocprofiler_callback_tracing_record_t record,
                                   rocprofiler_user_data_t* /*user_data*/,
                                   void* callback_data)
@@ -193,52 +244,7 @@ void code_object_tracing_callback(rocprofiler_callback_tracing_record_t record,
 
         auto& begin_end = registered_kernels.at(kernel_name);
 
-        output_stream() << std::hex << "Found: " << kernel_name << " at addr: 0x" << begin_end.first
-                        << std::dec << ". Printing first 64 bytes:" << std::endl;
-
-        std::unordered_set<std::string> references{};
-
-        int num_waitcnts = 0;
-        int num_scalar   = 0;
-        int num_vector   = 0;
-        int num_other    = 0;
-
-        size_t vaddr = begin_end.first;
-        while (vaddr < begin_end.second)
-        {
-            auto inst = codeobjTranslate.get(vaddr);
-            assert(inst != nullptr);
-            if (inst->comment.size())
-            {
-                std::string_view source = inst->comment;
-                if (source.rfind('/') < source.size())
-                    source = source.substr(source.rfind('/'));
-                if (vaddr < begin_end.first + 64)
-                    output_stream() << '\t' << inst->inst << '\n';
-
-                if (source.rfind(':') < source.size())
-                    source = source.substr(0, source.rfind(':'));
-
-                references.insert(std::string(source));
-            }
-            if (inst->inst.find("v_") == 0)
-                num_vector++;
-            else if (inst->inst.find("s_waitcnt") == 0)
-                num_waitcnts++;
-            else if (inst->inst.find("s_") == 0)
-                num_scalar++;
-            else
-                num_other++;
-
-            vaddr += inst->size;
-        }
-
-        output_stream() << "  --- Num Scalar: " << num_scalar << "\n  --- Num Vector: " << num_vector
-                        << "\n  --- Num Waitcnts: " << num_waitcnts
-                        << "\n  --- Other instructions: " << num_other
-                        << "\nKernel has source references to: " << std::endl;
-        for (auto& ref : references)
-            output_stream() << '\t' << ref << std::endl;
+        print_kernel_info(kernel_name, begin_end);    
     }
 
     (void)callback_data;
@@ -293,6 +299,10 @@ void generate_output(tool_data_t& tool_data)
         tool_data.pc_sampling_collector.rlock([&](const pc_sampling_collector_t::ptr& ptr)
                                               { ptr->write(obj_writer); });
         obj_writer.flush(tool_data.code_obj_output_filename);
+    }
+    for (auto& [kernel_name, begin_end] : registered_kernels)
+    {
+        print_kernel_info(kernel_name, begin_end);
     }
 }
 
