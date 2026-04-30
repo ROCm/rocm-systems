@@ -52,9 +52,11 @@ namespace rocprofsys::sampling
 // ── Construction / Destruction ─────────────────────────────────────────────
 
 template <class Policies>
-sampling_service<Policies>::sampling_service(sampling_config config)
+sampling_service<Policies>::sampling_service(sampling_config    config,
+                                             sampling_callbacks callbacks)
 : config_(std::move(config))
-, thread_info_resolver_(config_.resolve_thread_info)
+, callbacks_(std::move(callbacks))
+, thread_info_resolver_(callbacks_.resolve_thread_info)
 , trace_sink_(thread_info_resolver_)
 , perfetto_sink_(thread_info_resolver_, config_.use_perfetto,
                  config_.perfetto_annotations)
@@ -153,7 +155,7 @@ void
 sampling_service<Policies>::apply_signal_mask(int how, std::set<int> sigs,
                                               char const* verb_capitalized)
 {
-    auto calling_tid = static_cast<int64_t>(config_.get_sys_tid());
+    auto calling_tid = static_cast<int64_t>(callbacks_.get_sys_tid());
     if(sigs.empty()) sigs = get_signal_types(calling_tid);
     if(sigs.empty())
     {
@@ -222,7 +224,7 @@ sampling_service<Policies>::get_signal_types(int64_t tid)
     if(it != signal_types_.end()) return it->second;
 
     // Lazy-initialize from config (matches today's signal_type_instances behavior).
-    auto sigs          = config_.resolve_signals(tid);
+    auto sigs          = callbacks_.resolve_signals(tid);
     signal_types_[tid] = sigs;
     return sigs;
 }
@@ -253,7 +255,7 @@ sampling_service<Policies>::setup(int64_t tid)
         auto                        it = signal_types_.find(tid);
         if(it == signal_types_.end())
         {
-            sigs               = config_.resolve_signals(tid);
+            sigs               = callbacks_.resolve_signals(tid);
             signal_types_[tid] = sigs;
         }
         else
@@ -462,7 +464,7 @@ template <class Policies>
 bool
 sampling_service<Policies>::check_thread_guards(int64_t tid)
 {
-    return config_.is_thread_eligible(tid);
+    return callbacks_.is_thread_eligible(tid);
 }
 
 template <class Policies>
@@ -494,7 +496,7 @@ void
 sampling_service<Policies>::arm_timer_triggers(int64_t tid, thread_state_t* state,
                                                std::set<int> const& sigs)
 {
-    pid_t sys_tid  = static_cast<pid_t>(config_.get_sys_tid());
+    pid_t sys_tid  = static_cast<pid_t>(callbacks_.get_sys_tid());
     int   rt_sig   = config_.realtime_signal;
     int   cpu_sig  = config_.cputime_signal;
     auto& rt_slot  = state->realtime_trigger();
@@ -539,11 +541,11 @@ sampling_service<Policies>::arm_overflow_trigger(int64_t tid, thread_state_t* st
     int ovfl_sig = config_.overflow_signal;
     if(sigs.count(ovfl_sig) == 0) return;
 
-    pid_t           sys_tid    = static_cast<pid_t>(config_.get_sys_tid());
+    pid_t           sys_tid    = static_cast<pid_t>(callbacks_.get_sys_tid());
     perf_event_attr pe_attr    = {};
     std::string     event_name = config_.overflow_event;
     double          ovfl_freq  = config_.overflow_freq;
-    config_.configure_overflow_pe_attr(&pe_attr, event_name, ovfl_freq);
+    callbacks_.configure_overflow_pe_attr(&pe_attr, event_name, ovfl_freq);
     pe_attr.sample_type   = PERF_SAMPLE_IP | PERF_SAMPLE_CALLCHAIN;
     pe_attr.wakeup_events = 1;
 
@@ -583,16 +585,16 @@ sampling_service<Policies>::register_trace_cache_tracks(int64_t tid)
     const std::string overflow_track =
         make_thread_track_name(overflow_track_tag{}, seq_id, sys_id);
 
-    config_.register_sampling_categories();
-    config_.register_thread_info(static_cast<int>(getppid()), static_cast<int>(getpid()),
-                                 sys_id);
-    config_.register_track(timer_track, sys_id);
-    config_.register_track(overflow_track, sys_id);
+    callbacks_.register_sampling_categories();
+    callbacks_.register_thread_info(static_cast<int>(getppid()),
+                                    static_cast<int>(getpid()), sys_id);
+    callbacks_.register_track(timer_track, sys_id);
+    callbacks_.register_track(overflow_track, sys_id);
 
     const std::string seq_suffix = " [" + std::to_string(seq_id) + "]";
     for(char const* prefix : thread_counter_prefixes)
     {
-        config_.register_track(std::string{ prefix } + seq_suffix, sys_id);
+        callbacks_.register_track(std::string{ prefix } + seq_suffix, sys_id);
     }
 
     LOG_DEBUG("thread {} registered trace_cache tracks: '{}' / '{}'", tid, timer_track,
@@ -670,7 +672,7 @@ sampling_service<Policies>::do_postfork_parent_reinit()
     if(config_.use_process_sampling && config_.use_amd_smi)
     {
         LOG_DEBUG("[postfork_parent_reinit] delegating to pmc::postfork_parent_reinit");
-        config_.postfork_parent_reinit();
+        callbacks_.postfork_parent_reinit();
     }
 }
 
@@ -681,7 +683,7 @@ sampling_service<Policies>::do_postfork_child_cleanup()
     if(config_.use_process_sampling && config_.use_amd_smi)
     {
         LOG_DEBUG("[postfork_child_cleanup] delegating to pmc::postfork_child_cleanup");
-        config_.postfork_child_cleanup();
+        callbacks_.postfork_child_cleanup();
     }
 }
 

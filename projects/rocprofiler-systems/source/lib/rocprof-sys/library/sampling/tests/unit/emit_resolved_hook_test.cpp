@@ -34,7 +34,7 @@ using namespace rocprofsys::sampling::test;
 TEST(emit_resolved_hook, shutdown_drains_offload_for_tid)
 {
     using svc_t = sampling_service<test_sampling_policies>;
-    svc_t svc{ make_test_config() };
+    svc_t svc{ make_test_config(), make_test_callbacks() };
     svc.setup(0);
 
     // Insert two records directly (simulates ring drain result).

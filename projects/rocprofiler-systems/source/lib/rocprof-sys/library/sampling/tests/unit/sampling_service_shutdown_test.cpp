@@ -16,7 +16,7 @@ using namespace rocprofsys::sampling::test;
 
 TEST(sampling_service_shutdown, shutdown_tid0_does_not_crash)
 {
-    test_service svc{ make_test_config() };
+    test_service svc{ make_test_config(), make_test_callbacks() };
     svc.setup(0);
 
     EXPECT_NO_THROW(svc.shutdown(0)) << "shutdown(0) must not throw or crash";
@@ -24,7 +24,7 @@ TEST(sampling_service_shutdown, shutdown_tid0_does_not_crash)
 
 TEST(sampling_service_shutdown, double_shutdown_is_idempotent)
 {
-    test_service svc{ make_test_config() };
+    test_service svc{ make_test_config(), make_test_callbacks() };
     svc.setup(0);
     svc.shutdown(0);
 
@@ -33,7 +33,7 @@ TEST(sampling_service_shutdown, double_shutdown_is_idempotent)
 
 TEST(sampling_service_shutdown, shutdown_single_thread_returns_signal_set)
 {
-    test_service      svc{ make_test_config() };
+    test_service      svc{ make_test_config(), make_test_callbacks() };
     constexpr int64_t tid = 0;
     svc.setup(tid);
 
@@ -48,7 +48,7 @@ TEST(sampling_service_shutdown, shutdown_single_thread_returns_signal_set)
 
 TEST(sampling_service_shutdown, shutdown_in_child_skips_per_tid_processing)
 {
-    test_service svc{ make_test_config() };
+    test_service svc{ make_test_config(), make_test_callbacks() };
     svc.setup(0);
 
     // Use the same entry point real postfork-child path uses (AC-20).

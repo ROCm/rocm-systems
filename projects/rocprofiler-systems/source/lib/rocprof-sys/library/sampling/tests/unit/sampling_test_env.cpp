@@ -9,7 +9,7 @@
 //
 // Sampling-specific config (signals, frequencies, etc.) is no longer set here
 // — the sampling_service constructor receives all config via sampling_config,
-// and unit tests provide values through make_test_config().
+// and unit tests provide values through make_test_config(), make_test_callbacks().
 
 #include "core/config.hpp"
 

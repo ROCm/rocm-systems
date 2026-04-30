@@ -6,6 +6,7 @@
 #include "sampling/data/backtrace_record.hpp"
 #include "sampling/platform_guard.hpp"
 #include "sampling/platform_traits.hpp"
+#include "sampling/sampling_callbacks.hpp"
 #include "sampling/sampling_config.hpp"
 #include "sampling/sampling_policies.hpp"
 #include "sampling/src/pause_interval_registry.hpp"
@@ -53,7 +54,7 @@ public:
     using pause_registry_t      = pause_interval_registry<clock>;
     using duration_controller_t = sampling_duration_controller<clock>;
 
-    explicit sampling_service(sampling_config config);
+    sampling_service(sampling_config config, sampling_callbacks callbacks);
     ~sampling_service();
 
     sampling_service(sampling_service const&)            = delete;
@@ -95,6 +96,7 @@ public:
     pause_registry_t&      pause_registry() noexcept { return pause_registry_; }
     duration_controller_t& duration_controller() noexcept { return duration_controller_; }
     sampling_config const& config() const noexcept { return config_; }
+    sampling_callbacks const& callbacks() const noexcept { return callbacks_; }
 
     // ----- production state setters -----
     // Called by postfork_child() to put the service into child-process mode, where
@@ -109,6 +111,7 @@ public:
 
 private:
     sampling_config      config_;
+    sampling_callbacks   callbacks_;
     thread_info_resolver thread_info_resolver_;
     unwinder             unwinder_;
     offload              offload_;

@@ -49,12 +49,13 @@ using namespace rocprofsys::sampling::test;
 TEST(trigger_mutual_exclusion, config_returns_both_realtime_and_cputime_signals)
 {
     auto const cfg     = make_test_config();
+    auto const cb      = make_test_callbacks();
     int const  rt_sig  = cfg.realtime_signal;
     int const  cpu_sig = cfg.cputime_signal;
 
     EXPECT_NE(rt_sig, cpu_sig) << "realtime and cputime signals must be distinct";
 
-    auto sigs = cfg.resolve_signals(0);
+    auto sigs = cb.resolve_signals(0);
 
     EXPECT_NE(sigs.find(rt_sig), sigs.end())
         << "resolve_signals() must include the realtime signal";
@@ -71,7 +72,7 @@ TEST(trigger_mutual_exclusion, config_returns_both_realtime_and_cputime_signals)
 
 TEST(trigger_mutual_exclusion, setup_records_both_signals_in_per_thread_state)
 {
-    test_service      svc{ make_test_config() };
+    test_service      svc{ make_test_config(), make_test_callbacks() };
     constexpr int64_t tid = 0;
 
     svc.setup(tid);

@@ -56,13 +56,20 @@ make_production_config()
     auto event_opt =
         rocprofsys::get_setting_value<std::string>("ROCPROFSYS_SAMPLING_OVERFLOW_EVENT");
     if(event_opt) cfg.overflow_event = *event_opt;
-    cfg.resolve_signals = [](int64_t tid) {
+    return cfg;
+}
+
+rocprofsys::sampling::sampling_callbacks
+make_production_callbacks()
+{
+    rocprofsys::sampling::sampling_callbacks cb;
+    cb.resolve_signals = [](int64_t tid) {
         return rocprofsys::get_sampling_signals(tid);
     };
-    cfg.get_sys_tid = []() -> int64_t {
+    cb.get_sys_tid = []() -> int64_t {
         return static_cast<int64_t>(rocprofsys::threading::get_sys_tid());
     };
-    cfg.resolve_thread_info =
+    cb.resolve_thread_info =
         [](int64_t tid) -> std::optional<rocprofsys::sampling::thread_info_data> {
         auto const& info = rocprofsys::thread_info::get(tid, rocprofsys::SequentTID);
         if(!info)
@@ -72,24 +79,22 @@ make_production_config()
             return rocprofsys::sampling::thread_info_data{
                 static_cast<std::size_t>(alt->index_data->system_value),
                 static_cast<std::size_t>(alt->index_data->sequent_value),
-                static_cast<uint64_t>(alt->get_start()),
-                static_cast<uint64_t>(alt->get_stop())
+                alt->get_start(), alt->get_stop()
             };
         }
         return rocprofsys::sampling::thread_info_data{
             static_cast<std::size_t>(info->index_data->system_value),
-            static_cast<std::size_t>(info->index_data->sequent_value),
-            static_cast<uint64_t>(info->get_start()),
-            static_cast<uint64_t>(info->get_stop())
+            static_cast<std::size_t>(info->index_data->sequent_value), info->get_start(),
+            info->get_stop()
         };
     };
-    cfg.is_thread_eligible = [](int64_t tid) {
+    cb.is_thread_eligible = [](int64_t tid) {
         if(rocprofsys::get_thread_state() == rocprofsys::ThreadState::Disabled)
             return false;
         auto const& info = rocprofsys::thread_info::get(tid, rocprofsys::SequentTID);
         return !(info && info->is_offset);
     };
-    cfg.register_sampling_categories = []() {
+    cb.register_sampling_categories = []() {
         static std::once_flag flag;
         std::call_once(flag, [] {
             auto& reg = rocprofsys::trace_cache::get_metadata_registry();
@@ -97,29 +102,30 @@ make_production_config()
             reg.add_string("overflow_sampling");
         });
     };
-    cfg.register_thread_info = [](int ppid, int pid, std::size_t sys_id) {
+    cb.register_thread_info = [](int ppid, int pid, std::size_t sys_id) {
         rocprofsys::trace_cache::get_metadata_registry().add_thread_info(
             { static_cast<pid_t>(ppid), static_cast<pid_t>(pid), sys_id, 0, 0, "{}" });
     };
-    cfg.register_track = [](std::string name, std::size_t sys_id) {
+    cb.register_track = [](std::string name, std::size_t sys_id) {
         rocprofsys::trace_cache::get_metadata_registry().add_track(
             { std::move(name), sys_id, "{}" });
     };
-    cfg.configure_overflow_pe_attr = [](void* pe_attr_ptr, std::string const& event_name,
-                                        double freq) {
+    cb.configure_overflow_pe_attr = [](void* pe_attr_ptr, std::string const& event_name,
+                                       double freq) {
         auto* pe_attr = static_cast<perf_event_attr*>(pe_attr_ptr);
         rocprofsys::perf::config_overflow_sampling(*pe_attr, event_name, freq);
     };
-    cfg.postfork_parent_reinit = []() { rocprofsys::pmc::postfork_parent_reinit(); };
-    cfg.postfork_child_cleanup = []() { rocprofsys::pmc::postfork_child_cleanup(); };
-    return cfg;
+    cb.postfork_parent_reinit = []() { rocprofsys::pmc::postfork_parent_reinit(); };
+    cb.postfork_child_cleanup = []() { rocprofsys::pmc::postfork_child_cleanup(); };
+    return cb;
 }
 }  // namespace
+
 rocprofsys::sampling::default_sampling_service&
 sampling()
 {
     static rocprofsys::sampling::default_sampling_service instance{
-        make_production_config()
+        make_production_config(), make_production_callbacks()
     };
     return instance;
 }

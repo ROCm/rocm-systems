@@ -15,6 +15,7 @@
 #include "recording_trace_sink.hpp"
 #include "throwing_fatal_error_policy.hpp"
 
+#include "sampling/sampling_callbacks.hpp"
 #include "sampling/sampling_config.hpp"
 #include "sampling/sampling_service.hpp"
 
@@ -32,8 +33,15 @@ make_test_config()
     cfg.overflow_signal = SIGUSR1;
     cfg.realtime_freq   = 100.0;
     cfg.cputime_freq    = 100.0;
-    cfg.resolve_signals = [](int64_t) { return std::set<int>{ SIGPROF, SIGALRM }; };
     return cfg;
+}
+
+inline sampling_callbacks
+make_test_callbacks()
+{
+    sampling_callbacks cb;
+    cb.resolve_signals = [](int64_t) { return std::set<int>{ SIGPROF, SIGALRM }; };
+    return cb;
 }
 
 // All-test-double policy bundle — satisfies the sampling_policies_traits concept.

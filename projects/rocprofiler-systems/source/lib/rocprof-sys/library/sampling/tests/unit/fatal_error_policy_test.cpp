@@ -69,7 +69,7 @@ using rocprofsys::sampling::test::test_service;
 
 TEST(fatal_error_policy, sigmask_failure_calls_fatal_policy_through_service)
 {
-    test_service svc{ make_test_config() };
+    test_service svc{ make_test_config(), make_test_callbacks() };
 
     // Populate signal_types_[0] so block_signals() does not return early on empty set.
     svc.setup(0);

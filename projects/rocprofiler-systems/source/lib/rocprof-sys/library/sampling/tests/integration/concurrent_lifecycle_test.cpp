@@ -25,7 +25,7 @@ TEST(concurrent_lifecycle, rapid_pause_resume)
 {
     constexpr int num_threads = 4;
     constexpr int iterations  = 100;
-    test_service  svc{ make_test_config() };
+    test_service  svc{ make_test_config(), make_test_callbacks() };
 
     std::atomic<bool>        go{ false };
     std::vector<std::thread> threads;
@@ -56,7 +56,7 @@ TEST(concurrent_lifecycle, block_unblock_under_contention)
 {
     constexpr int num_threads = 4;
     constexpr int iterations  = 200;
-    test_service  svc{ make_test_config() };
+    test_service  svc{ make_test_config(), make_test_callbacks() };
 
     std::atomic<bool>        go{ false };
     std::vector<std::thread> threads;
@@ -86,7 +86,7 @@ TEST(concurrent_lifecycle, block_unblock_under_contention)
 TEST(concurrent_lifecycle, mixed_block_and_pause_contention)
 {
     constexpr int iterations = 100;
-    test_service  svc{ make_test_config() };
+    test_service  svc{ make_test_config(), make_test_callbacks() };
 
     std::atomic<bool> go{ false };
 
