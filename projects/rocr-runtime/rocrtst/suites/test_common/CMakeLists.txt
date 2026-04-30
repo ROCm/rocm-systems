@@ -738,8 +738,11 @@ if(NOT ROCM_SYSTEMS_ROOT)
     )
 endif()
 
-if(EXISTS "${ROCM_SYSTEMS_ROOT}/shared/ctest/TestCategories.cmake")
-    include("${ROCM_SYSTEMS_ROOT}/shared/ctest/TestCategories.cmake")
+set(TEST_CATEGORIES_CMAKE "${ROCM_SYSTEMS_ROOT}/shared/ctest/TestCategories.cmake")
+set(TEST_CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml")
+
+if(EXISTS "${TEST_CATEGORIES_CMAKE}" AND EXISTS "${TEST_CATEGORIES_YAML}")
+    include("${TEST_CATEGORIES_CMAKE}")
     include(GNUInstallDirs)
     enable_testing()
 
@@ -761,7 +764,7 @@ if(EXISTS "${ROCM_SYSTEMS_ROOT}/shared/ctest/TestCategories.cmake")
     message(STATUS "Applying test categories for rocrtst64")
     apply_test_category_labels(
       rocrtst64
-      "${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml"
+      "${TEST_CATEGORIES_YAML}"
       "${PROJECT_BINARY_DIR}"
       "${INSTALL_TEST_FILE}"
     )
@@ -773,12 +776,22 @@ if(EXISTS "${ROCM_SYSTEMS_ROOT}/shared/ctest/TestCategories.cmake")
         RENAME "CTestTestfile.cmake"
     )
 else()
-    message(
-        STATUS
-        "Shared CTest categories not found at "
-        "${CMAKE_CURRENT_SOURCE_DIR}/TestCategories.cmake - "
-        "skipping rocrtst64 test category labels"
-    )
+    if(NOT EXISTS "${TEST_CATEGORIES_CMAKE}")
+        message(
+            STATUS
+            "Shared CTest categories not found at "
+            "${TEST_CATEGORIES_CMAKE} - "
+            "skipping test categorization for rocrtst64"
+        )
+    endif()
+    if(NOT EXISTS "${TEST_CATEGORIES_YAML}")
+        message(
+            STATUS
+            "Test categories YAML not found at "
+            "${TEST_CATEGORIES_YAML} - "
+            "skipping test categorization for rocrtst64"
+        )
+    endif()
 endif()
 
 include ( CPack )
