@@ -1651,7 +1651,7 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
 
   {
     // Plurality vote for romeTopoModelIdx. Tie on vote count: prefer the value that
-    // first appears on the lowest MPI rank (outer index c is that first rank).
+    // first appears on the lowest rank (outer index c is that first rank).
     int refIdx = allGather3Data[0].romeTopoModelIdx;
     int refVotes = -1;
     int refFirstRank = nranks;
