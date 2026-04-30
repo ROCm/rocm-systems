@@ -136,15 +136,24 @@ ncclResult_t IbCastMultiSend(struct ncclIbSendComm* comm, int slot, int nqps, in
   }
 
   // For ID-based matching scheme, immData carries the request ID.
-  // For index-based matching scheme, immData carries the send size:
-  // - nreqs == 1
-  //      It's the send size.
+  // For index-based matching scheme, immData layout (BY_INDEX):
+  //   bits [31:24] - rxReqIndex: receiver's request slot index (from CTS fifo)
+  //   bit  [23]    - WR_IMM_SPLIT_DATA_FLAG: set when sending across >1 QPs
+  //   bits [22:0]  - unused; receiver always uses wc->byte_len for size
   // - nreqs > 1
-  //      Send size is still sent but receiver ignores it since the sizes are
-  //      written to directly to remote completion records array
+  //      Sizes are written directly to remote completion records array
   struct ibv_send_wr* lastWr = comm->wrs+nreqs-1;
   if (!useWriteOp) {
-    uint32_t immData = comm->base.recvMatchingScheme == BY_ID ? (uint32_t)(reqs[0]->id % UINT32_MAX) : reqs[0]->send.size;
+    uint32_t immData;
+    if (comm->base.recvMatchingScheme != BY_INDEX) {
+      immData = (uint32_t)(reqs[0]->id % UINT32_MAX);
+    } else {
+      uint32_t rxReqIdx = (uint32_t)slots[0].rxReqIndex;
+      immData = (rxReqIdx << WR_IMM_RX_REQ_IDX_SHIFT);
+      if (nqps > 1) {
+        immData |= WR_IMM_SPLIT_DATA_FLAG;
+      }
+    }
 
     
     if (nreqs > 1 || (!(comm->base.remOooRq && comm->base.localOooRq) && comm->ar && reqs[0]->send.size > IbCastArThreshold)) {
@@ -361,17 +370,17 @@ ncclResult_t IbCastIsend(void* sendComm, void* data, size_t size, int tag, void*
   for (int r=0; r<nreqs; r++) {
     if (!comm->useCtsOffload) {
       if (reqs[r] != NULL || slots[r].tag != tag) continue;
-    }
 
-    if (size > slots[r].size) size = slots[r].size;
-    // Sanity checks
-    if (slots[r].size < 0 || slots[r].addr == 0 || slots[r].rkeys[0] == 0) {
-      char line[SOCKET_NAME_MAXLEN + 1];
-      union ncclSocketAddress addr;
-      ncclSocketGetAddr(&comm->base.sock, &addr);
-      WARN("NET/IB : req %d/%d tag %x peer %s posted incorrect receive info: size %ld addr %lx rkeys[0]=%x",
-        r, nreqs, tag, ncclSocketToString(&addr, line), slots[r].size, slots[r].addr, slots[r].rkeys[0]);
-      return ncclInternalError;
+      if (size > slots[r].size) size = slots[r].size;
+      // Sanity checks
+      if (slots[r].size < 0 || slots[r].addr == 0 || slots[r].rkeys[0] == 0) {
+        char line[SOCKET_NAME_MAXLEN + 1];
+        union ncclSocketAddress addr;
+        ncclSocketGetAddr(&comm->base.sock, &addr);
+        WARN("NET/IB : req %d/%d tag %x peer %s posted incorrect receive info: size %ld addr %lx rkeys[0]=%x",
+          r, nreqs, tag, ncclSocketToString(&addr, line), slots[r].size, slots[r].addr, slots[r].rkeys[0]);
+        return ncclInternalError;
+      }
     }
 
     struct ncclIbRequest* req;
@@ -847,8 +856,8 @@ static inline ncclResult_t IbCastCompletionEventProcess(struct ncclIbNetCommBase
         return ncclInternalError;
       }
       if (req->nreqs == 1) {
-        if (commBase->recvMatchingScheme == BY_INDEX) {
-          req->recv.cmplsRecords->sizes[0] = (wc->imm_data & WR_IMM_SIZE_MASK);
+        if (commBase->recvMatchingScheme != BY_ID) {
+          req->recv.cmplsRecords->sizes[0] += wc->byte_len;
         } else if (req->recv.cmplsRecords->sizes[0] == 0) {
           req->recv.aggSize+= wc->byte_len;
         }
