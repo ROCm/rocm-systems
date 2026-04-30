@@ -136,17 +136,17 @@ class AMDSMICommands(
                 else:
                     raise e
 
-            # Resolve the node handle.
-            for dev in self.device_handles:
-                try:
-                    nh = amdsmi_interface.amdsmi_get_node_handle(dev)
-                    if nh is not None:
-                        self.node_handle = nh
-                        # Only need one handle, break after first success
-                        break
-                except amdsmi_exception.AmdSmiLibraryException as e:
-                    logging.debug("Unable to get node handle: %s", e.get_error_info())
-                    # Node handle functionality is optional, so don't raise an error
+        # Resolve the node handle (independent of AINIC init; needed for amd-smi node).
+        for dev in self.device_handles:
+            try:
+                nh = amdsmi_interface.amdsmi_get_node_handle(dev)
+                if nh is not None:
+                    self.node_handle = nh
+                    # Only need one handle, break after first success
+                    break
+            except amdsmi_exception.AmdSmiLibraryException as e:
+                logging.debug("Unable to get node handle: %s", e.get_error_info())
+                # Node handle functionality is optional, so don't raise an error
 
         if self.helpers.is_amd_hsmp_initialized():
             try:
@@ -188,6 +188,7 @@ class AMDSMICommands(
             version_args = argparse.Namespace()
             version_args.gpu_version = False
             version_args.cpu_version = False
+            version_args.nic_version = False
             self.version(version_args)
             sys.exit(-1)
 
