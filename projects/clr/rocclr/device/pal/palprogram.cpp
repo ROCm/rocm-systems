@@ -268,7 +268,7 @@ bool Program::createGlobalVarObj(amd::Memory** amd_mem_obj, void** device_pptr, 
 
   uint32_t length = 0;
   size_t offset = 0;
-  amd::MemFlags flags = amd::MemFlags::None;
+  amd::MemFlags flags = amd::MemFlags::Empty;
   amd::Memory* parent = nullptr;
   hsa_symbol_kind_t type;
   hsa_status_t status = HSA_STATUS_SUCCESS;

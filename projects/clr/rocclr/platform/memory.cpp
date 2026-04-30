@@ -5,6 +5,7 @@
  */
 
 #include "os/alloc.hpp"
+#include <cmath>
 #include "platform/context.hpp"
 #include "platform/object.hpp"
 #include "platform/memory.hpp"
@@ -82,7 +83,7 @@ Memory::Memory(Context& context, Type type, Flags flags, size_t size, void* svmP
       resOffset_(0),
       flagsEx_(0),
       alignment_(alignment) /* Memory Ops Lock */ {
-  svmPtrCommited_ = (flags & amd::MemFlags::SvmFineGrain) != amd::MemFlags::None ? true : false;
+  svmPtrCommited_ = (flags & amd::MemFlags::SvmFineGrain) != amd::MemFlags::Empty ? true : false;
   canBeCached_ = true;
 }
 
@@ -120,7 +121,7 @@ Memory::Memory(Memory& parent, Flags flags, size_t origin, size_t size, Type typ
 
   // Inherit memory flags from the parent
   if ((flags_ & (amd::MemFlags::ReadWrite | amd::MemFlags::ReadOnly | amd::MemFlags::WriteOnly)) ==
-      amd::MemFlags::None) {
+      amd::MemFlags::Empty) {
     flags_ |= parent_->getMemFlags() &
               (amd::MemFlags::ReadWrite | amd::MemFlags::ReadOnly | amd::MemFlags::WriteOnly);
   }
@@ -129,7 +130,7 @@ Memory::Memory(Memory& parent, Flags flags, size_t origin, size_t size, Type typ
              (amd::MemFlags::AllocHostPtr | amd::MemFlags::CopyHostPtr | amd::MemFlags::UseHostPtr);
 
   if ((flags_ & (amd::MemFlags::HostReadOnly | amd::MemFlags::HostWriteOnly |
-                 amd::MemFlags::HostNoAccess)) == amd::MemFlags::None) {
+                 amd::MemFlags::HostNoAccess)) == amd::MemFlags::Empty) {
     flags_ |= parent_->getMemFlags() &
               (amd::MemFlags::HostReadOnly | amd::MemFlags::HostWriteOnly |
                amd::MemFlags::HostNoAccess);
@@ -190,21 +191,21 @@ void Memory::removeSubBuffer(Memory* view) {
 bool Memory::allocHostMemory(void* initFrom, bool allocHostMem, bool forceCopy) {
   // Sanity checks (the parameters should have been prevalidated by the API)
   assert(!((flags_ & (amd::MemFlags::UseHostPtr | amd::MemFlags::CopyHostPtr)) !=
-               amd::MemFlags::None &&
+               amd::MemFlags::Empty &&
            (initFrom == NULL) && !allocHostMem && !isSvmPtrCommited()));
   // Note: CL_MEM_EXTERNAL_PHYSICAL_AMD is a CL-layer extension flag; checked there.
   assert(!((initFrom != NULL) && !forceCopy &&
            (flags_ & (amd::MemFlags::UseHostPtr | amd::MemFlags::CopyHostPtr)) ==
-               amd::MemFlags::None));
-  assert(!((flags_ & amd::MemFlags::CopyHostPtr) != amd::MemFlags::None &&
-           (flags_ & amd::MemFlags::UseHostPtr) != amd::MemFlags::None));
+               amd::MemFlags::Empty));
+  assert(!((flags_ & amd::MemFlags::CopyHostPtr) != amd::MemFlags::Empty &&
+           (flags_ & amd::MemFlags::UseHostPtr) != amd::MemFlags::Empty));
 
   const std::vector<Device*>& devices = context_().devices();
 
   // This allocation is necessary to use coherency mechanism
   // for the initialization
   if ((getMemFlags() & (amd::MemFlags::CopyHostPtr | amd::MemFlags::AllocHostPtr)) !=
-      amd::MemFlags::None) {
+      amd::MemFlags::Empty) {
     // Extra system memory allocation and copy can be very expensive.
     // Thus, avoid it if runtime doesn't perform deferred allocations
     if ((devices.size() == 1) || DISABLE_DEFERRED_ALLOC) {
@@ -216,7 +217,7 @@ bool Memory::allocHostMemory(void* initFrom, bool allocHostMem, bool forceCopy) 
   }
 
   // Did application request to use host memory?
-  if ((getMemFlags() & amd::MemFlags::UseHostPtr) != amd::MemFlags::None) {
+  if ((getMemFlags() & amd::MemFlags::UseHostPtr) != amd::MemFlags::Empty) {
     setHostMem(initFrom);
 
     // Recalculate image size according to pitch
@@ -232,14 +233,14 @@ bool Memory::allocHostMemory(void* initFrom, bool allocHostMem, bool forceCopy) 
   // Allocate host memory buffer if needed.
   // @note: SVM host memory allocation should be done in the device backend
   else if (allocHostMem && !isInterop() &&
-           (getMemFlags() & amd::MemFlags::SvmFineGrain) == amd::MemFlags::None) {
+           (getMemFlags() & amd::MemFlags::SvmFineGrain) == amd::MemFlags::Empty) {
     if (!hostMemRef_.allocateMemory(size_, context_())) {
       ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_MEM, "Cannot allocate Host Memory Buffer \n");
       return false;
     }
 
     // Copy data to the backing store if the app has requested
-    if (((flags_ & amd::MemFlags::CopyHostPtr) != amd::MemFlags::None || forceCopy) &&
+    if (((flags_ & amd::MemFlags::CopyHostPtr) != amd::MemFlags::Empty || forceCopy) &&
         (initFrom != NULL)) {
       copyToBackingStore(initFrom);
     }
@@ -247,13 +248,13 @@ bool Memory::allocHostMemory(void* initFrom, bool allocHostMem, bool forceCopy) 
 
   if (allocHostMem && type_ == amd::MemObjectType::Pipe) {
     // Initialize the pipe for a CPU device
-    clk_pipe_t* pipe = reinterpret_cast<clk_pipe_t*>(getHostMem());
+    amd::PipeLayout* pipe = reinterpret_cast<amd::PipeLayout*>(getHostMem());
     pipe->read_idx = 0;
     pipe->write_idx = 0;
     pipe->end_idx = asPipe()->getMaxNumPackets();
   }
 
-  if ((flags_ & (amd::MemFlags::UseHostPtr | amd::MemFlags::CopyHostPtr)) != amd::MemFlags::None &&
+  if ((flags_ & (amd::MemFlags::UseHostPtr | amd::MemFlags::CopyHostPtr)) != amd::MemFlags::Empty &&
       (NULL == lastWriter_)) {
     // Signal write, so coherency mechanism will initialize
     // memory on all devices
@@ -455,7 +456,7 @@ Memory::~Memory() {
   }
   hostMemRef_.deallocateMemory(context_());
   if (parent_ == nullptr &&
-      (getMemFlags() & amd::MemFlags::VaRangeAmd) != amd::MemFlags::None) {
+      (getMemFlags() & amd::MemFlags::VaRangeAmd) != amd::MemFlags::Empty) {
     // The mapping may manually be removed prior to objects destruction
     if (amd::MemObjMap::FindVirtualMemObj(getSvmPtr())) {
       amd::MemObjMap::RemoveVirtualMemObj(getSvmPtr());
@@ -518,7 +519,7 @@ void Memory::cacheWriteBack(device::VirtualDevice* vDev) {
 void Memory::copyToBackingStore(void* initFrom) { memcpy(getHostMem(), initFrom, size_); }
 
 bool Memory::usesSvmPointer() const {
-  if ((flags_ & amd::MemFlags::UseHostPtr) == amd::MemFlags::None) {
+  if ((flags_ & amd::MemFlags::UseHostPtr) == amd::MemFlags::Empty) {
     return false;
   }
   // If the application host pointer lies within a SVM region, so does the
@@ -540,7 +541,7 @@ void Memory::commitSvmMemory() {
 
 void Memory::uncommitSvmMemory() {
   std::scoped_lock lock(lockMemoryOps_);
-  if (svmPtrCommited_ && (flags_ & amd::MemFlags::SvmFineGrain) == amd::MemFlags::None) {
+  if (svmPtrCommited_ && (flags_ & amd::MemFlags::SvmFineGrain) == amd::MemFlags::Empty) {
     if (amd::Os::uncommitMemory(svmHostAddress_, size_)) {
       svmPtrCommited_ = false;
     } else {
@@ -556,7 +557,7 @@ Device* Memory::GetDeviceById() {
 
 // =================================================================================================
 bool Memory::ValidateMemAccess(const Device& dev, bool read_write) {
-  if ((flags_ & amd::MemFlags::VaRangeAmd) != amd::MemFlags::None) {
+  if ((flags_ & amd::MemFlags::VaRangeAmd) != amd::MemFlags::Empty) {
     return dev.ValidateMemAccess(*this, read_write);
   }
   return true;
@@ -570,9 +571,9 @@ void Buffer::initDeviceMemory() {
 bool Buffer::create(void* initFrom, bool sysMemAlloc, bool skipAlloc, bool forceAlloc) {
   // CL_MEM_EXTERNAL_PHYSICAL_AMD (CL ext) shares bit 31 with FollowUserNumaPolicy.
   // When set, initFrom points to a cl_bus_address_amd struct.
-  if ((getMemFlags() & amd::MemFlags::FollowUserNumaPolicy) != amd::MemFlags::None &&
+  if ((getMemFlags() & amd::MemFlags::FollowUserNumaPolicy) != amd::MemFlags::Empty &&
       (initFrom != NULL)) {
-    busAddress_ = *(reinterpret_cast<cl_bus_address_amd*>(initFrom));
+    busAddress_ = *(reinterpret_cast<amd::BusAddress*>(initFrom));
     initFrom = NULL;
   } else {
     busAddress_.surface_bus_address = 0;
@@ -1099,7 +1100,7 @@ uint32_t Image::numSupportedFormats(const Context& context, amd::MemObjectType i
     // Currently we are not supported sRGB for write_imagef (extension cl_khr_srgb_image_writes)
     if ((image_type == amd::MemObjectType::Image1DBuffer) ||
         ((flags & (amd::MemFlags::WriteOnly | amd::MemFlags::ReadWrite |
-                   amd::MemFlags::KernelReadWrite)) != amd::MemFlags::None)) {
+                   amd::MemFlags::KernelReadWrite)) != amd::MemFlags::Empty)) {
       numFormats -= NUM_CHANNEL_ORDER_OF_sRGB;
     }
   } else {
@@ -1115,7 +1116,7 @@ uint32_t Image::numSupportedFormats(const Context& context, amd::MemObjectType i
   }
 
   if (supportDepthStencil) {
-    if ((flags & amd::MemFlags::ReadOnly) != amd::MemFlags::None) {
+    if ((flags & amd::MemFlags::ReadOnly) != amd::MemFlags::Empty) {
       numFormats += sizeof(supportedDepthStencilFormats) / sizeof(amd::ImageFormat);
     }
   }
@@ -1160,7 +1161,7 @@ uint32_t Image::getSupportedFormats(const Context& context, amd::MemObjectType i
     // Currently we are not supported sRGB for write_imagef (extension cl_khr_srgb_image_writes)
     if ((image_type == amd::MemObjectType::Image1DBuffer) ||
         ((flags & (amd::MemFlags::WriteOnly | amd::MemFlags::ReadWrite |
-                   amd::MemFlags::KernelReadWrite)) != amd::MemFlags::None)) {
+                   amd::MemFlags::KernelReadWrite)) != amd::MemFlags::Empty)) {
       srgbWriteSupported = false;
     }
   } else {
@@ -1197,7 +1198,7 @@ uint32_t Image::getSupportedFormats(const Context& context, amd::MemObjectType i
   }
 
   if (supportDepthStencil) {
-    if ((flags & amd::MemFlags::ReadOnly) != amd::MemFlags::None) {
+    if ((flags & amd::MemFlags::ReadOnly) != amd::MemFlags::Empty) {
       for (uint i = 0; i < sizeof(supportedDepthStencilFormats) / sizeof(amd::ImageFormat); i++) {
         if (numFormats == num_entries) {
           break;

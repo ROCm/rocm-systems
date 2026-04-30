@@ -1204,7 +1204,7 @@ void VirtualGPU::submitReadMemory(amd::ReadMemoryCommand& vcmd) {
 
   // Force buffer read for IMAGE1D_BUFFER
   if ((type == amd::CommandType::ReadImage) &&
-      (vcmd.source().getType() == CL_MEM_OBJECT_IMAGE1D_BUFFER)) {
+      (vcmd.source().getType() == amd::MemObjectType::Image1DBuffer)) {
     bufferFromImage = createBufferFromImage(vcmd.source());
     if (nullptr == bufferFromImage) {
       LogError("We should not fail buffer creation from image_buffer!");
@@ -1339,7 +1339,7 @@ void VirtualGPU::submitWriteMemory(amd::WriteMemoryCommand& vcmd) {
 
   // Force buffer write for IMAGE1D_BUFFER
   if ((type == amd::CommandType::WriteImage) &&
-      (vcmd.destination().getType() == CL_MEM_OBJECT_IMAGE1D_BUFFER)) {
+      (vcmd.destination().getType() == amd::MemObjectType::Image1DBuffer)) {
     bufferFromImage = createBufferFromImage(vcmd.destination());
     if (nullptr == bufferFromImage) {
       LogError("We should not fail buffer creation from image_buffer!");
@@ -1460,7 +1460,7 @@ bool VirtualGPU::copyMemory(amd::CommandType type, amd::Memory& srcMem, amd::Mem
   amd::Memory* bufferFromImageDst = nullptr;
 
   // Force buffer read for IMAGE1D_BUFFER
-  if (srcMem.getType() == CL_MEM_OBJECT_IMAGE1D_BUFFER) {
+  if (srcMem.getType() == amd::MemObjectType::Image1DBuffer) {
     bufferFromImageSrc = createBufferFromImage(srcMem);
     if (nullptr == bufferFromImageSrc) {
       LogError("We should not fail buffer creation from image_buffer!");
@@ -1469,7 +1469,7 @@ bool VirtualGPU::copyMemory(amd::CommandType type, amd::Memory& srcMem, amd::Mem
     }
   }
   // Force buffer write for IMAGE1D_BUFFER
-  if (dstMem.getType() == CL_MEM_OBJECT_IMAGE1D_BUFFER) {
+  if (dstMem.getType() == amd::MemObjectType::Image1DBuffer) {
     bufferFromImageDst = createBufferFromImage(dstMem);
     if (nullptr == bufferFromImageDst) {
       LogError("We should not fail buffer creation from image_buffer!");
@@ -1691,7 +1691,7 @@ void VirtualGPU::submitMapMemory(amd::MapMemoryCommand& vcmd) {
           LogError("submitMapMemory() - copy failed");
           vcmd.setStatus(amd::Status::MapFailure);
         }
-      } else if ((vcmd.memory().getType() == CL_MEM_OBJECT_IMAGE1D_BUFFER)) {
+      } else if ((vcmd.memory().getType() == amd::MemObjectType::Image1DBuffer)) {
         Memory* memoryBuf = memory;
         amd::Coord3D origin(vcmd.origin()[0]);
         amd::Coord3D size(vcmd.size()[0]);
@@ -1771,7 +1771,7 @@ void VirtualGPU::submitUnmapMemory(amd::UnmapMemoryCommand& vcmd) {
             LogError("submitUnmapMemory() - copy failed");
             vcmd.setStatus(amd::Status::OutOfResources);
           }
-        } else if ((vcmd.memory().getType() == CL_MEM_OBJECT_IMAGE1D_BUFFER)) {
+        } else if ((vcmd.memory().getType() == amd::MemObjectType::Image1DBuffer)) {
           Memory* memoryBuf = memory;
           amd::Coord3D origin(writeMapInfo->origin_[0]);
           amd::Coord3D size(writeMapInfo->region_[0]);
@@ -1829,7 +1829,7 @@ bool VirtualGPU::fillMemory(amd::CommandType type, amd::Memory* amdMemory, const
   float fillValue[4];
 
   // Force fill buffer for IMAGE1D_BUFFER
-  if ((type == amd::CommandType::FillImage) && (amdMemory->getType() == CL_MEM_OBJECT_IMAGE1D_BUFFER)) {
+  if ((type == amd::CommandType::FillImage) && (amdMemory->getType() == amd::MemObjectType::Image1DBuffer)) {
     bufferFromImage = createBufferFromImage(*amdMemory);
     if (nullptr == bufferFromImage) {
       LogError("We should not fail buffer creation from image_buffer!");
@@ -1902,7 +1902,7 @@ void VirtualGPU::submitFillMemory(amd::FillMemoryCommand& cmd) {
 
     bool force_blit = false;
     if (amd::IS_HIP) {
-      constexpr uint32_t kManagedAlloc = (CL_MEM_SVM_FINE_GRAIN_BUFFER | CL_MEM_ALLOC_HOST_PTR);
+      constexpr amd::MemFlags kManagedAlloc = (amd::MemFlags::SvmFineGrain | amd::MemFlags::AllocHostPtr);
       // In case of HMM, use blit kernel instead of CPU memcpy
       if ((cmd.memory().getMemFlags() & kManagedAlloc) == kManagedAlloc) {
         force_blit = true;
@@ -2263,7 +2263,7 @@ void VirtualGPU::submitSvmFreeMemory(amd::SvmFreeMemoryCommand& vcmd) {
       dev().svmFree(svmPointers[i]);
     }
   } else {
-    vcmd.pfnFreeFunc()(as_cl(vcmd.queue()->asCommandQueue()), svmPointers.size(),
+    vcmd.pfnFreeFunc()(reinterpret_cast<cl_command_queue>(vcmd.queue()->asCommandQueue()), svmPointers.size(),
                        static_cast<void**>(&(svmPointers[0])), vcmd.userData());
   }
   profilingEnd(vcmd);
@@ -3671,7 +3671,7 @@ bool VirtualGPU::processMemObjectsHSA(const amd::Kernel& kernel, const_address p
 
           // Mark signal write for cache coherency,
           // since this object isn't a part of kernel arg setup
-          if ((memory->getMemFlags() & CL_MEM_READ_ONLY) == 0) {
+          if ((memory->getMemFlags() & amd::MemFlags::ReadOnly) == 0) {
             memory->signalWrite(&dev());
           }
           addVmMemory(gpuMemory);
@@ -3766,7 +3766,7 @@ bool VirtualGPU::processMemObjectsHSA(const amd::Kernel& kernel, const_address p
           //! Conformance can send read only subbuffer, but update the region
           //! in the kernel.
           if ((mem != nullptr) && ((!info.readOnly_ && (mem->getSvmPtr() == nullptr)) ||
-                                   ((mem->getMemFlags() & CL_MEM_READ_ONLY) == 0))) {
+                                   ((mem->getMemFlags() & amd::MemFlags::ReadOnly) == 0))) {
             mem->signalWrite(&dev());
           }
           if (info.oclObject_ == amd::KernelParameterDescriptor::ImageObject) {

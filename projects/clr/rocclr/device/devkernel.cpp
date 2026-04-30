@@ -983,7 +983,7 @@ void Kernel::InitParameters(const amd_comgr_metadata_node_t kernelMD) {
       desc.addressQualifier_ = amd::KernelArgAddressQualifier::Global;
     } else {
       // According to CL spec, otherwise must be KernelArgAccessQualifier::None,
-      desc.accessQualifier_ = amd::KernelArgAccessQualifier::None;
+      desc.accessQualifier_ = amd::KernelArgAccessQualifier::NoAccess;
     }
 
     size_t size = desc.size_;

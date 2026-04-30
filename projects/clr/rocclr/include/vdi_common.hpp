@@ -82,15 +82,11 @@ template <int N> struct ParamInfo<char[N]> {
 
 }  // namespace detail
 
-struct PlatformIDS {
-  const cl_icd_dispatch* dispatch_;
-};
-class PlatformID {
- public:
-  static inline PlatformIDS Platform = {amd::ICDDispatchedObject::icdVendorDispatch_};
-};
-#define AMD_PLATFORM (reinterpret_cast<cl_platform_id>(&amd::PlatformID::Platform))
+// Forward declaration — defined in platform/agent.cpp
+void* GetPlatformHandle();
 
 }  // namespace amd
+
+#define AMD_PLATFORM (reinterpret_cast<cl_platform_id>(amd::GetPlatformHandle()))
 
 #endif /* _VDI_COMMON_H */

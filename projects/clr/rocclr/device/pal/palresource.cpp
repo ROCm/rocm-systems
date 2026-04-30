@@ -304,7 +304,7 @@ Resource::Resource(const Device& gpuDev, size_t size)
   desc_.dimSize_ = 1;
   desc_.buffer_ = true;
   desc_.imageArray_ = false;
-  desc_.topology_ = CL_MEM_OBJECT_BUFFER;
+  desc_.topology_ = amd::MemObjectType::Buffer;
   desc_.SVMRes_ = false;
   desc_.scratch_ = false;
   desc_.isAllocExecute_ = false;
@@ -348,24 +348,24 @@ Resource::Resource(const Device& gpuDev, size_t width, size_t height, size_t dep
   desc_.baseLevel_ = 0;
   desc_.gl2CacheDisabled_ = false;
   switch (imageType) {
-    case CL_MEM_OBJECT_IMAGE2D:
+    case amd::MemObjectType::Image2D:
       desc_.dimSize_ = 2;
       break;
-    case CL_MEM_OBJECT_IMAGE3D:
+    case amd::MemObjectType::Image3D:
       desc_.dimSize_ = 3;
       break;
-    case CL_MEM_OBJECT_IMAGE2D_ARRAY:
+    case amd::MemObjectType::Image2DArray:
       desc_.dimSize_ = 3;
       desc_.imageArray_ = true;
       break;
-    case CL_MEM_OBJECT_IMAGE1D:
+    case amd::MemObjectType::Image1D:
       desc_.dimSize_ = 1;
       break;
-    case CL_MEM_OBJECT_IMAGE1D_ARRAY:
+    case amd::MemObjectType::Image1DArray:
       desc_.dimSize_ = 2;
       desc_.imageArray_ = true;
       break;
-    case CL_MEM_OBJECT_IMAGE1D_BUFFER:
+    case amd::MemObjectType::Image1DBuffer:
       desc_.dimSize_ = 1;
       break;
     default:
@@ -508,7 +508,7 @@ bool Resource::CreateImage(CreateParams* params, bool forceLinear) {
   Pal::ChannelMapping channels;
   Pal::ChNumFormat format = dev().getPalFormat(desc().format_, &channels);
 
-  if (desc().topology_ == CL_MEM_OBJECT_IMAGE1D_BUFFER) {
+  if (desc().topology_ == amd::MemObjectType::Image1DBuffer) {
     if (memoryType() == ImageBuffer) {
       ImageBufferParams* imageBuffer = reinterpret_cast<ImageBufferParams*>(params);
       viewOwner_ = imageBuffer->resource_;
@@ -575,23 +575,23 @@ bool Resource::CreateImage(CreateParams* params, bool forceLinear) {
   imgCreateInfo.arraySize = 1;
 
   switch (desc_.topology_) {
-    case CL_MEM_OBJECT_IMAGE3D:
+    case amd::MemObjectType::Image3D:
       imgCreateInfo.imageType = Pal::ImageType::Tex3d;
       viewInfo.viewType = Pal::ImageViewType::Tex3d;
       break;
-    case CL_MEM_OBJECT_IMAGE1D:
-    case CL_MEM_OBJECT_IMAGE1D_ARRAY:
-    case CL_MEM_OBJECT_IMAGE1D_BUFFER:
+    case amd::MemObjectType::Image1D:
+    case amd::MemObjectType::Image1DArray:
+    case amd::MemObjectType::Image1DBuffer:
       imgCreateInfo.imageType = Pal::ImageType::Tex1d;
       viewInfo.viewType = Pal::ImageViewType::Tex1d;
       break;
   }
-  if (desc_.topology_ == CL_MEM_OBJECT_IMAGE1D_ARRAY) {
+  if (desc_.topology_ == amd::MemObjectType::Image1DArray) {
     ImgSubresRange.numSlices = imgCreateInfo.arraySize = desc_.height_;
     imgCreateInfo.extent.depth = desc_.height_;
     imgCreateInfo.extent.height = 1;
   }
-  if (desc_.topology_ == CL_MEM_OBJECT_IMAGE2D_ARRAY) {
+  if (desc_.topology_ == amd::MemObjectType::Image2DArray) {
     ImgSubresRange.numSlices = imgCreateInfo.arraySize = desc_.depth_;
   }
 
@@ -952,7 +952,7 @@ bool Resource::CreateInterop(CreateParams* params) {
       hwState_[10] = static_cast<uint32_t>(desc().width_);
       hwState_[11] = 0;  // one extra reserved field in the argument
     }
-  } else if (desc().topology_ == CL_MEM_OBJECT_IMAGE1D_BUFFER) {
+  } else if (desc().topology_ == amd::MemObjectType::Image1DBuffer) {
     memRef_ = GpuMemoryReference::Create(dev(), gpuMemOpenInfo);
     if (nullptr == memRef_) {
       return false;
@@ -1017,10 +1017,10 @@ bool Resource::CreateInterop(CreateParams* params) {
         viewInfo.viewType = Pal::ImageViewType::Tex2d;
       }
     }
-    if (desc().topology_ == CL_MEM_OBJECT_IMAGE1D_ARRAY) {
+    if (desc().topology_ == amd::MemObjectType::Image1DArray) {
       ImgSubresRange.numSlices = desc_.height_;
     }
-    if (desc().topology_ == CL_MEM_OBJECT_IMAGE2D_ARRAY) {
+    if (desc().topology_ == amd::MemObjectType::Image2DArray) {
       ImgSubresRange.numSlices = desc_.depth_;
     }
     ImgSubresRange.numMips = desc().mipLevels_;
@@ -1086,7 +1086,7 @@ bool Resource::CreatePinned(CreateParams* params) {
   void* pinAddress = address_ = hostMemRef->hostMem();
   uint hostMemOffset = 0;
   // assert((allocSize == (desc().width_ * elementSize())) && "Sizes don't match");
-  if (desc().topology_ == CL_MEM_OBJECT_BUFFER) {
+  if (desc().topology_ == amd::MemObjectType::Buffer) {
     // Allign offset to 4K boundary (Vista/Win7 limitation)
     char* tmpHost = const_cast<char*>(
         amd::alignDown(reinterpret_cast<const char*>(address_), PinnedMemoryAlignment));
@@ -1103,7 +1103,7 @@ bool Resource::CreatePinned(CreateParams* params) {
     }
     allocSize = amd::alignUp(allocSize, PinnedMemoryAlignment);
     //            hostMemOffset &= ~(0xff);
-  } else if (desc().topology_ == CL_MEM_OBJECT_IMAGE2D) {
+  } else if (desc().topology_ == amd::MemObjectType::Image2D) {
     //! @todo: Width has to be aligned for 3D.
     //! Need to be replaced with a compute copy
     // Width aligned by 8 texels
@@ -1299,7 +1299,7 @@ bool Resource::create(MemoryType memType, CreateParams* params, bool forceLinear
       desc_.SVMRes_ = true;
       desc_.reserved_va_ = (svmPtr == 1) ? false : true;
       svmPtr = (svmPtr == 1) ? 0 : svmPtr;
-      if (params->owner_->getMemFlags() & CL_MEM_SVM_ATOMICS) {
+      if (params->owner_->getMemFlags() & amd::MemFlags::SvmAtomics) {
         desc_.gl2CacheDisabled_ = true;
       }
     }
@@ -1318,7 +1318,7 @@ bool Resource::create(MemoryType memType, CreateParams* params, bool forceLinear
   createInfo.priority = Pal::GpuMemPriority::Normal;
 
   if (memoryType() == ExternalPhysical) {
-    cl_bus_address_amd bus_address = (reinterpret_cast<amd::Buffer*>(params->owner_))->busAddress();
+    amd::BusAddress bus_address = (reinterpret_cast<amd::Buffer*>(params->owner_))->busAddress();
     createInfo.surfaceBusAddr = bus_address.surface_bus_address;
     createInfo.markerBusAddr = bus_address.marker_bus_address;
     createInfo.flags.sdiExternal = true;
@@ -1482,14 +1482,14 @@ bool Resource::partialMemCopyTo(VirtualGPU& gpu, const amd::Coord3D& srcOrigin,
     imageOffsetx = dstOrigin[0] % dstResource.elementSize();
     gpuMemoryOffset = srcOrigin[0] + offset();
     gpuMemoryRowPitch = (srcOrigin[1]) ? srcOrigin[1] : size[0] * dstResource.elementSize();
-    img1Darray = (dstResource.desc().topology_ == CL_MEM_OBJECT_IMAGE1D_ARRAY);
-    img2Darray = (dstResource.desc().topology_ == CL_MEM_OBJECT_IMAGE2D_ARRAY);
+    img1Darray = (dstResource.desc().topology_ == amd::MemObjectType::Image1DArray);
+    img2Darray = (dstResource.desc().topology_ == amd::MemObjectType::Image2DArray);
   } else if (!desc().buffer_ && dstResource.desc().buffer_) {
     imageOffsetx = srcOrigin[0] % elementSize();
     gpuMemoryOffset = dstOrigin[0] + dstResource.offset();
     gpuMemoryRowPitch = (dstOrigin[1]) ? dstOrigin[1] : size[0] * elementSize();
-    img1Darray = (desc().topology_ == CL_MEM_OBJECT_IMAGE1D_ARRAY);
-    img2Darray = (desc().topology_ == CL_MEM_OBJECT_IMAGE2D_ARRAY);
+    img1Darray = (desc().topology_ == amd::MemObjectType::Image1DArray);
+    img2Darray = (desc().topology_ == amd::MemObjectType::Image2DArray);
   }
 
   if ((desc().buffer_ && !dstResource.desc().buffer_) ||
@@ -1679,7 +1679,7 @@ bool Resource::hostWrite(VirtualGPU* gpu, const void* hostPtr, const amd::Coord3
 
   size_t startLayer = origin[2];
   size_t numLayers = size[2];
-  if (desc().topology_ == CL_MEM_OBJECT_IMAGE1D_ARRAY) {
+  if (desc().topology_ == amd::MemObjectType::Image1DArray) {
     startLayer = origin[1];
     numLayers = size[1];
   }
@@ -1748,7 +1748,7 @@ bool Resource::hostRead(VirtualGPU* gpu, void* hostPtr, const amd::Coord3D& orig
 
   size_t startLayer = origin[2];
   size_t numLayers = size[2];
-  if (desc().topology_ == CL_MEM_OBJECT_IMAGE1D_ARRAY) {
+  if (desc().topology_ == amd::MemObjectType::Image1DArray) {
     startLayer = origin[1];
     numLayers = size[1];
   }

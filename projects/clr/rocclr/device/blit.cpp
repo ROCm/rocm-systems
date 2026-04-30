@@ -73,7 +73,7 @@ bool HostBlitManager::readImage(device::Memory& srcMemory, void* dstHost,
                                 amd::CopyMetadata copyMetadata) const {
   size_t startLayer = origin[2];
   size_t numLayers = size[2];
-  if (srcMemory.owner()->getType() == CL_MEM_OBJECT_IMAGE1D_ARRAY) {
+  if (srcMemory.owner()->getType() == amd::MemObjectType::Image1DArray) {
     startLayer = origin[1];
     numLayers = size[1];
   }
@@ -202,7 +202,7 @@ bool HostBlitManager::writeImage(const void* srcHost, device::Memory& dstMemory,
 
   size_t startLayer = origin[2];
   size_t numLayers = size[2];
-  if (dstMemory.owner()->getType() == CL_MEM_OBJECT_IMAGE1D_ARRAY) {
+  if (dstMemory.owner()->getType() == amd::MemObjectType::Image1DArray) {
     startLayer = origin[1];
     numLayers = size[1];
   }
@@ -368,7 +368,7 @@ bool HostBlitManager::copyImageToBuffer(device::Memory& srcMemory, device::Memor
                                         amd::CopyMetadata copyMetadata) const {
   size_t startLayer = srcOrigin[2];
   size_t numLayers = size[2];
-  if (srcMemory.owner()->getType() == CL_MEM_OBJECT_IMAGE1D_ARRAY) {
+  if (srcMemory.owner()->getType() == amd::MemObjectType::Image1DArray) {
     startLayer = srcOrigin[1];
     numLayers = size[1];
   }
@@ -441,7 +441,7 @@ bool HostBlitManager::copyBufferToImage(device::Memory& srcMemory, device::Memor
 
   size_t startLayer = dstOrigin[2];
   size_t numLayers = size[2];
-  if (dstMemory.owner()->getType() == CL_MEM_OBJECT_IMAGE1D_ARRAY) {
+  if (dstMemory.owner()->getType() == amd::MemObjectType::Image1DArray) {
     startLayer = dstOrigin[1];
     numLayers = size[1];
   }
@@ -499,7 +499,7 @@ bool HostBlitManager::copyImage(device::Memory& srcMemory, device::Memory& dstMe
                                 amd::CopyMetadata copyMetadata) const {
   size_t startLayer = srcOrigin[2];
   size_t numLayers = size[2];
-  if (srcMemory.owner()->getType() == CL_MEM_OBJECT_IMAGE1D_ARRAY) {
+  if (srcMemory.owner()->getType() == amd::MemObjectType::Image1DArray) {
     startLayer = srcOrigin[1];
     numLayers = size[1];
   }
@@ -513,7 +513,7 @@ bool HostBlitManager::copyImage(device::Memory& srcMemory, device::Memory& dstMe
     LogError("Couldn't map source memory");
     return false;
   }
-  if (dstMemory.owner()->getType() == CL_MEM_OBJECT_IMAGE1D_ARRAY) {
+  if (dstMemory.owner()->getType() == amd::MemObjectType::Image1DArray) {
     startLayer = dstOrigin[1];
     numLayers = size[1];
   } else {
@@ -614,7 +614,7 @@ bool HostBlitManager::fillImage(device::Memory& memory, const void* pattern,
                                 bool entire) const {
   size_t startLayer = origin[2];
   size_t numLayers = size[2];
-  if (memory.owner()->getType() == CL_MEM_OBJECT_IMAGE1D_ARRAY) {
+  if (memory.owner()->getType() == amd::MemObjectType::Image1DArray) {
     startLayer = origin[1];
     numLayers = size[1];
   }
@@ -627,7 +627,7 @@ bool HostBlitManager::fillImage(device::Memory& memory, const void* pattern,
 
   // Converting a linear RGB floating-point color value to a normalized 8-bit unsigned integer sRGB
   // value so that the cpu path can treat sRGB as RGB for host transfer.
-  if (memory.owner()->asImage()->getImageFormat().image_channel_order == CL_sRGBA) {
+  if (memory.owner()->asImage()->getImageFormat().channelOrder == amd::ChannelOrder::sRGBA) {
     float* fColor = static_cast<float*>(newpattern);
     fFillColor[0] = sRGBmap(fColor[0]) / 255.0f;
     fFillColor[1] = sRGBmap(fColor[1]) / 255.0f;

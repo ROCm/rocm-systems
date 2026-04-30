@@ -3310,59 +3310,8 @@ void Device::releaseQueue(hsa_queue_t* queue, const std::vector<uint32_t>& cuMas
   }
 }
 
-void* Device::getOrCreateHostcallBuffer(hsa_queue_t* queue, bool coop_queue,
-                                        const std::vector<uint32_t>& cuMask) {
-  decltype(queuePool_)::value_type::iterator qIter;
-  bool found = false;
-
-  amd::ScopedLock l(active_queue_access_);
-  if (!coop_queue) {
-    for (auto& it : cuMask.size() == 0 ? queuePool_ : queueWithCUMaskPool_) {
-      qIter = it.find(queue);
-      if (qIter != it.end()) {
-        found = true;
-        break;
-      }
-    }
-    assert(found && "Couldn't find queue");
-
-    if (qIter->second.hostcallBuffer_) {
-      return qIter->second.hostcallBuffer_;
-    }
-  } else {
-    if (coopHostcallBuffer_) {
-      return coopHostcallBuffer_;
-    }
-  }
-
-  // The number of packets required in each buffer is at least equal to the
-  // maximum number of waves supported by the device.
-  auto wavesPerCu = info().maxThreadsPerCU_ / info().wavefrontWidth_;
-  auto numPackets = info().maxComputeUnits_ * wavesPerCu;
-
-  auto size = amd::getHostcallBufferSize(numPackets);
-  auto align = amd::getHostcallBufferAlignment();
-
-  void* buffer = context().svmAlloc(size, align,
-                                    amd::MemFlags::SvmFineGrain | amd::MemFlags::SvmAtomics);
-  if (!buffer) {
-    ClPrint(amd::LOG_ERROR, amd::LOG_QUEUE,
-            "Failed to create hostcall buffer for hardware queue %p", queue->base_address);
-    return nullptr;
-  }
-  ClPrint(amd::LOG_INFO, amd::LOG_QUEUE, "Created hostcall buffer %p for hardware queue %p", buffer,
-          queue->base_address);
-  if (!coop_queue) {
-    qIter->second.hostcallBuffer_ = buffer;
-  } else {
-    coopHostcallBuffer_ = buffer;
-  }
-  if (!amd::enableHostcalls(*this, buffer, numPackets)) {
-    ClPrint(amd::LOG_ERROR, amd::LOG_QUEUE, "Failed to register hostcall buffer %p with listener",
-            buffer);
-    return nullptr;
-  }
-  return buffer;
+void* Device::getOrCreateHostcallBuffer() {
+  return xferQueue()->getOrCreateHostcallBuffer();
 }
 
 

@@ -1537,7 +1537,7 @@ pal::Memory* Device::createBuffer(amd::Memory& owner, bool directAccess) const {
   // Check if owner is interop memory
   if (owner.isInterop()) {
     result = gpuMemory->createInterop();
-  } else if (owner.getMemFlags() & CL_MEM_USE_PERSISTENT_MEM_AMD) {
+  } else if (owner.getMemFlags() & amd::MemFlags::UsePersistentMemAmd) {
     // Attempt to allocate from persistent heap
     result = gpuMemory->create(Resource::Persistent);
     if (result) {
@@ -1554,14 +1554,14 @@ pal::Memory* Device::createBuffer(amd::Memory& owner, bool directAccess) const {
     }
   } else if (directAccess || (type == Resource::Remote)) {
     // Check for system memory allocations
-    if ((owner.getMemFlags() & (CL_MEM_ALLOC_HOST_PTR | CL_MEM_USE_HOST_PTR)) ||
+    if ((owner.getMemFlags() & (amd::MemFlags::AllocHostPtr | amd::MemFlags::UseHostPtr)) ||
         (settings().remoteAlloc_)) {
       // Allocate remote memory if AHP allocation and context has just 1 device
-      if ((owner.getMemFlags() & CL_MEM_ALLOC_HOST_PTR) &&
+      if ((owner.getMemFlags() & amd::MemFlags::AllocHostPtr) &&
           (owner.getContext().devices().size() == 1) &&
           (owner.getSize() < static_cast<size_t>(GPU_MAX_USWC_ALLOC_SIZE) * Mi)) {
         if (owner.getMemFlags() &
-            (CL_MEM_READ_ONLY | CL_MEM_HOST_WRITE_ONLY | CL_MEM_HOST_NO_ACCESS)) {
+            (amd::MemFlags::ReadOnly | amd::MemFlags::HostWriteOnly | amd::MemFlags::HostNoAccess)) {
           // GPU will be reading from this host memory buffer,
           // so assume Host write into it
           type = Resource::RemoteUSWC;
@@ -1624,7 +1624,7 @@ pal::Memory* Device::createBuffer(amd::Memory& owner, bool directAccess) const {
     // If allocation was successful
     if (result) {
       // Initialize if the memory is a pipe object
-      if (owner.getType() == CL_MEM_OBJECT_PIPE) {
+      if (owner.getType() == amd::MemObjectType::Pipe) {
         // Pipe initialize in order read_idx, write_idx, end_idx. Refer clk_pipe_t structure.
         // Init with 3 DWORDS for 32bit addressing and 6 DWORDS for 64bit
         size_t pipeInit[3] = {0, 0, owner.asPipe()->getMaxNumPackets()};
@@ -1638,7 +1638,7 @@ pal::Memory* Device::createBuffer(amd::Memory& owner, bool directAccess) const {
         if (address != nullptr) {
           // Copy saved memory
           // Note: UHP is an optional check if pinning failed and sysmem alloc was forced
-          if (owner.getMemFlags() & (CL_MEM_COPY_HOST_PTR | CL_MEM_USE_HOST_PTR)) {
+          if (owner.getMemFlags() & (amd::MemFlags::CopyHostPtr | amd::MemFlags::UseHostPtr)) {
             memcpy(address, owner.getHostMem(), owner.getSize());
           }
           // It should be safe to change the host memory pointer,
@@ -1650,7 +1650,7 @@ pal::Memory* Device::createBuffer(amd::Memory& owner, bool directAccess) const {
       }
       // An optimization for CHP. Copy memory and destroy sysmem allocation
       else if ((gpuMemory->memoryType() != Resource::Pinned) &&
-               (owner.getMemFlags() & CL_MEM_COPY_HOST_PTR) &&
+               (owner.getMemFlags() & amd::MemFlags::CopyHostPtr) &&
                (owner.getContext().devices().size() == 1)) {
         amd::Coord3D origin(0, 0, 0);
         amd::Coord3D region(owner.getSize());
@@ -1718,7 +1718,7 @@ pal::Memory* Device::createImage(amd::Memory& owner, bool directAccess) const {
                                     ? Resource::ImageExternalBuffer
                                     : Resource::ImageBuffer,
                                 &params);
-    } else if (directAccess && (owner.getMemFlags() & CL_MEM_ALLOC_HOST_PTR)) {
+    } else if (directAccess && (owner.getMemFlags() & amd::MemFlags::AllocHostPtr)) {
       Resource::PinnedParams params;
       params.owner_ = &owner;
       params.hostMemRef_ = owner.getHostMemRef();
@@ -1745,7 +1745,7 @@ pal::Memory* Device::createImage(amd::Memory& owner, bool directAccess) const {
     }
 
     if (!result && !owner.isInterop()) {
-      if (owner.getMemFlags() & CL_MEM_USE_PERSISTENT_MEM_AMD) {
+      if (owner.getMemFlags() & amd::MemFlags::UsePersistentMemAmd) {
         // Attempt to allocate from persistent heap
         result = gpuImage->create(Resource::Persistent);
       } else {
@@ -1760,7 +1760,7 @@ pal::Memory* Device::createImage(amd::Memory& owner, bool directAccess) const {
       delete gpuImage;
       return nullptr;
     } else if ((gpuImage->memoryType() != Resource::Pinned) &&
-               (owner.getMemFlags() & CL_MEM_COPY_HOST_PTR) &&
+               (owner.getMemFlags() & amd::MemFlags::CopyHostPtr) &&
                (owner.getContext().devices().size() == 1)) {
       // Ignore copy for image1D_buffer, since it was already done for buffer
       if (imageBuffer) {

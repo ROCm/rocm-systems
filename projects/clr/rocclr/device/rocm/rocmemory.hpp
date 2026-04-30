@@ -140,11 +140,11 @@ class Memory : public device::Memory {
 
   // Get MemorySegment type in terms of host memory allocation flags
   Device::MemorySegment getHostMemorySegment(const amd::MemFlags memFlags) {
-    return (memFlags & amd::MemFlags::SvmAtomics) == amd::MemFlags::None
+    return (memFlags & amd::MemFlags::SvmAtomics) == amd::MemFlags::Empty
                ? Device::MemorySegment::kNoAtomics
-               : ((memFlags & amd::MemFlags::HsaUncached) != amd::MemFlags::None
+               : ((memFlags & amd::MemFlags::HsaUncached) != amd::MemFlags::Empty
                       ? Device::MemorySegment::kUncachedAtomics
-                      : ((memFlags & amd::MemFlags::IoMemory) != amd::MemFlags::None
+                      : ((memFlags & amd::MemFlags::IoMemory) != amd::MemFlags::Empty
                              ? Device::MemorySegment::kIoMemory
                              : Device::MemorySegment::kAtomics));
   }

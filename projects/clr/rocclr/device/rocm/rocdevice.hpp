@@ -369,6 +369,8 @@ class Device : public NullDevice {
 
   void checkAtomicSupport();  //!< Check the support for pcie atomics
 
+  void* getOrCreateHostcallBuffer();
+
   //! Destructor for the physical HSA device
   virtual ~Device();
 

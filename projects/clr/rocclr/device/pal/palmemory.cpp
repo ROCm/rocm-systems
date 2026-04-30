@@ -816,12 +816,12 @@ void* Memory::allocMapTarget(const amd::Coord3D& origin, const amd::Coord3D& reg
       bool failed = false;
       amd::Memory* memory = nullptr;
       // Search for a possible indirect resource
-      cl_mem_flags flag = 0;
+      amd::MemFlags flag = amd::MemFlags::Empty;
       bool canBeCached = true;
       if (nullptr != initHostPtr) {
         // make sure the host memory is committed already, or we have a big problem.
         assert(owner()->isSvmPtrCommited() && "The host svm memory not committed yet!");
-        flag = CL_MEM_USE_HOST_PTR;
+        flag = amd::MemFlags::UseHostPtr;
         canBeCached = false;
       } else {
         memory = dev().findMapTarget(owner()->getSize());
@@ -1149,7 +1149,7 @@ void* Image::allocMapTarget(const amd::Coord3D& origin, const amd::Coord3D& regi
 
     // Update the row and slice pitches value
     *rowPitch = region[0] * elementSize();
-    if (desc().topology_ == CL_MEM_OBJECT_IMAGE1D_ARRAY) {
+    if (desc().topology_ == amd::MemObjectType::Image1DArray) {
       slicePitchTmp = *rowPitch;
     } else {
       slicePitchTmp = *rowPitch * region[1];

@@ -72,7 +72,7 @@ struct KernelParameterDescriptor {
   amd::KernelArgAddressQualifier addressQualifier_ =
       amd::KernelArgAddressQualifier::Private;  //!< Argument's address qualifier
   amd::KernelArgAccessQualifier accessQualifier_ =
-      amd::KernelArgAccessQualifier::None;         //!< Argument's access qualifier
+      amd::KernelArgAccessQualifier::NoAccess;         //!< Argument's access qualifier
   amd::KernelArgTypeQualifier typeQualifier_;      //!< Argument's type qualifier
 
   std::string name_;      //!< The parameter's name in the source

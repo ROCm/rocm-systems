@@ -422,7 +422,7 @@ class Memory : public amd::RuntimeObject {
 
 class Buffer : public Memory {
  protected:
-  cl_bus_address_amd busAddress_;
+  amd::BusAddress busAddress_;
 
   //! Initializes the device memory array which is nested
   // after'Image1DD3D10' object in memory layout.
@@ -456,7 +456,7 @@ class Buffer : public Memory {
                       const Coord3D& region   //!< Covered region dimensions
   ) const;
 
-  cl_bus_address_amd busAddress() const { return busAddress_; }
+  amd::BusAddress busAddress() const { return busAddress_; }
 };
 
 //! Pipes are a specialization of Buffers.
@@ -493,10 +493,10 @@ class Image : public Memory {
   static const amd::ImageFormat supportedFormatsRA[];
   static const amd::ImageFormat supportedDepthStencilFormats[];
   static uint32_t numSupportedFormats(const Context& context, amd::MemObjectType image_type,
-                                      amd::MemFlags flags = amd::MemFlags::None);
+                                      amd::MemFlags flags = amd::MemFlags::Empty);
   static uint32_t getSupportedFormats(const Context& context, amd::MemObjectType image_type,
                                       const uint32_t num_entries, amd::ImageFormat* image_formats,
-                                      amd::MemFlags flags = amd::MemFlags::None);
+                                      amd::MemFlags flags = amd::MemFlags::Empty);
 
   //! Helper struct to manipulate image formats.
   struct Format : public amd::ImageFormat {
@@ -509,7 +509,7 @@ class Image : public Memory {
     //! Returns true if this format is supported by runtime, false otherwise
     bool isSupported(const Context& context,
                      amd::MemObjectType image_type = static_cast<amd::MemObjectType>(0),
-                     amd::MemFlags flags = amd::MemFlags::None) const;
+                     amd::MemFlags flags = amd::MemFlags::Empty) const;
 
     //! Compare 2 image formats.
     bool operator==(const Format& rhs) const {
@@ -553,7 +553,7 @@ class Image : public Memory {
 
  protected:
   Image(const Format& format, Image& parent, uint baseMipLevel = 0,
-        amd::MemFlags flags = amd::MemFlags::None, bool isMipmapView = false);
+        amd::MemFlags flags = amd::MemFlags::Empty, bool isMipmapView = false);
 
   ///! Initializes the device memory array which is nested
   // after'Image' object in memory layout.
@@ -610,7 +610,7 @@ class Image : public Memory {
       const Format& format,                          //!< The new format for a view
       device::VirtualDevice* vDev,                   //!< Virtual device object
       uint baseMipLevel = 0,                         //!< Base mip level for a view
-      amd::MemFlags flags = amd::MemFlags::None,     //!< Memory allocation flags
+      amd::MemFlags flags = amd::MemFlags::Empty,     //!< Memory allocation flags
       bool createMipmapView = false,                 //!< To create mipmap view based on this image
       bool forceAlloc = false                        //!< To bypass deffered alloc
   );
@@ -683,7 +683,7 @@ class SvmBuffer : AllStatic {
 class ArenaMemory : public Buffer {
  public:
   ArenaMemory(Context& context)
-      : Buffer(context, 0, std::numeric_limits<size_t>::max(),
+      : Buffer(context, amd::MemFlags::Empty, std::numeric_limits<size_t>::max(),
                reinterpret_cast<void*>(kArenaMemoryPtr)) {}
   bool isArena() { return true; }
 };

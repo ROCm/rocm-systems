@@ -432,7 +432,7 @@ std::map<uintptr_t, amd::Memory*>::iterator MemObjMap::FindMemObjIter(uintptr_t 
   }
   --it;
   amd::Memory* mem = it->second;
-  size_t mem_size = (mem->getMemFlags() & ROCCLR_MEM_PHYMEM)
+  size_t mem_size = (mem->getMemFlags() & amd::MemFlags::PhyMem) != amd::MemFlags::Empty
                         ? sizeof(mem->getUserData().hsa_handle)
                         : mem->getSize();
   if (key < it->first || key >= (it->first + mem_size)) {

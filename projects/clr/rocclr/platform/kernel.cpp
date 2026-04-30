@@ -164,15 +164,15 @@ void KernelParameters::set(size_t index, size_t size, const void* value, bool sv
     } else {
       desc.info_.rawPointer_ = false;
       // convert cl_mem to amd::Memory*
-      memoryObjects_[desc.info_.arrayIndex_] = as_amd(*static_cast<const cl_mem*>(value));
+      memoryObjects_[desc.info_.arrayIndex_] = reinterpret_cast<amd::Memory*>(*static_cast<const cl_mem*>(value));
     }
   } else if (desc.type_ == amd::KernelArgValueType::Sampler) {
     // convert cl_sampler to amd::Sampler*
-    samplerObjects_[desc.info_.arrayIndex_] = as_amd(*static_cast<const cl_sampler*>(value));
+    samplerObjects_[desc.info_.arrayIndex_] = reinterpret_cast<amd::Sampler*>(*static_cast<const cl_sampler*>(value));
   } else if (desc.type_ == amd::KernelArgValueType::Queue) {
     // convert cl_command_queue to amd::DeviceQueue*
     queueObjects_[desc.info_.arrayIndex_] =
-        as_amd(*static_cast<const cl_command_queue*>(value))->asDeviceQueue();
+        reinterpret_cast<amd::CommandQueue*>(*static_cast<const cl_command_queue*>(value))->asDeviceQueue();
   } else {
     switch (desc.size_) {
       case 4:

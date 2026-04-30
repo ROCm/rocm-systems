@@ -466,6 +466,9 @@ hipError_t ihipMemcpy_validate(amd::Memory* dstMemory, amd::Memory* srcMemory, s
   return hipSuccess;
 }
 
+// Forward declaration — defined after the ihipMemcpyCommand overloads
+hip::MemcpyType ihipGetMemcpyType(amd::Memory* src, amd::Memory* dst, hipMemcpyKind kind);
+
 // ================================================================================================
 hipError_t ihipMemcpyCommand(amd::Command*& command, void* dst, const void* src, size_t sizeBytes,
                              hipMemcpyKind kind, hip::Stream& stream, bool isAsync) {
@@ -476,7 +479,7 @@ hipError_t ihipMemcpyCommand(amd::Command*& command, void* dst, const void* src,
   amd::Memory* dstMemory = getMemoryObject(dst, dOffset);
   amd::Device* queueDevice = &stream.device();
   amd::CopyMetadata copyMetadata(isAsync, amd::CopyMetadata::CopyEnginePreference::NONE);
-  hip::MemcpyType type = ihipGetMemcpyType(src, dst, kind);
+  hip::MemcpyType type = ihipGetMemcpyType(srcMemory, dstMemory, kind);
   hip::Stream* pStream = &stream;
   switch (type) {
     case hipWriteBuffer:
@@ -636,11 +639,11 @@ hipError_t ihipMemcpyCommand(amd::Command*& command, amd::Memory* dstMemory, con
   MemcpyCommandHelper helper(stream, isAsync);
 
   if (&stream.device() != dstMemory->GetDeviceById() &&
-      !(dstMemory->getMemFlags() & CL_MEM_VA_RANGE_AMD)) {
+      (dstMemory->getMemFlags() & amd::MemFlags::VaRangeAmd) == amd::MemFlags::Empty) {
     helper.switchStreamAndWait(stream, dstMemory->GetDeviceById()->context());
   }
   command = new amd::WriteMemoryCommand(
-      *helper.pStream(), CL_COMMAND_WRITE_BUFFER, helper.waitList(), *dstMemory->asBuffer(),
+      *helper.pStream(), amd::CommandType::WriteBuffer, helper.waitList(), *dstMemory->asBuffer(),
       dstOffset, sizeBytes, srcMemory, 0, 0, helper.copyMetadata());
   return MemcpyCommandHelper::checkCommand(command);
 }
@@ -652,10 +655,10 @@ hipError_t ihipMemcpyCommand(amd::Command*& command, void* dstMemory, amd::Memor
   MemcpyCommandHelper helper(stream, isAsync);
 
   if (helper.queueDevice() != srcMemory->GetDeviceById() &&
-      !(srcMemory->getMemFlags() & CL_MEM_VA_RANGE_AMD)) {
+      (srcMemory->getMemFlags() & amd::MemFlags::VaRangeAmd) == amd::MemFlags::Empty) {
     helper.switchStreamAndWait(stream, srcMemory->GetDeviceById()->context());
   }
-  command = new amd::ReadMemoryCommand(*helper.pStream(), CL_COMMAND_READ_BUFFER, helper.waitList(),
+  command = new amd::ReadMemoryCommand(*helper.pStream(), amd::CommandType::ReadBuffer, helper.waitList(),
                                        *srcMemory->asBuffer(), srcOffset, sizeBytes,
                                        dstMemory, 0, 0, helper.copyMetadata());
   return MemcpyCommandHelper::checkCommand(command);
@@ -671,7 +674,7 @@ hipError_t ihipMemcpyCommand(amd::Command*& command, amd::Memory* dstMemory, amd
   switch (type) {
     case hipCopyBufferP2P:
       command = new amd::CopyMemoryP2PCommand(
-          stream, CL_COMMAND_COPY_BUFFER, helper.waitList(), *srcMemory->asBuffer(),
+          stream, amd::CommandType::CopyBuffer, helper.waitList(), *srcMemory->asBuffer(),
           *dstMemory->asBuffer(), srcOffset, dstOffset, sizeBytes);
       {
         hipError_t status = MemcpyCommandHelper::checkCommand(command);
@@ -696,17 +699,17 @@ hipError_t ihipMemcpyCommand(amd::Command*& command, amd::Memory* dstMemory, amd
         // Scenarios such as DtoH where dst is pinned memory
         if ((helper.queueDevice() != srcMemory->GetDeviceById()) &&
             (dstMemory->getContext().devices().size() != 1) &&
-            !(srcMemory->getMemFlags() & CL_MEM_VA_RANGE_AMD)) {
+            (srcMemory->getMemFlags() & amd::MemFlags::VaRangeAmd) == amd::MemFlags::Empty) {
           helper.switchStreamAndWait(stream, srcMemory->GetDeviceById()->context());
           // Scenarios such as HtoD where src is pinned memory
         } else if ((helper.queueDevice() != dstMemory->GetDeviceById()) &&
                    (srcMemory->getContext().devices().size() != 1) &&
-                   !(dstMemory->getMemFlags() & CL_MEM_VA_RANGE_AMD)) {
+                   (dstMemory->getMemFlags() & amd::MemFlags::VaRangeAmd) == amd::MemFlags::Empty) {
           helper.switchStreamAndWait(stream, dstMemory->GetDeviceById()->context());
         }
       }
       command = new amd::CopyMemoryCommand(
-          *helper.pStream(), CL_COMMAND_COPY_BUFFER, helper.waitList(), *srcMemory->asBuffer(),
+          *helper.pStream(), amd::CommandType::CopyBuffer, helper.waitList(), *srcMemory->asBuffer(),
           *dstMemory->asBuffer(), srcOffset, dstOffset, sizeBytes,
           helper.copyMetadata());
       break;

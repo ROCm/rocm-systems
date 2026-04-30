@@ -79,7 +79,7 @@ class Context : public RuntimeObject {
  protected:
   bool terminate() {
     if (Agent::shouldPostContextEvents()) {
-      Agent::postContextFree(as_cl(this));
+      Agent::postContextFree(this);
     }
     return true;
   }

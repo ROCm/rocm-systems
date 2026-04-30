@@ -88,7 +88,7 @@ static void handlePayload(MessageHandler& messages, uint32_t service, uint64_t* 
         }
       } else {
         amd::Context& ctx = dev.context();
-        amd::Buffer* buf = new (ctx) amd::Buffer(ctx, CL_MEM_READ_WRITE, payload[1], NULL,
+        amd::Buffer* buf = new (ctx) amd::Buffer(ctx, amd::MemFlags::ReadWrite, payload[1], NULL,
                                                  (payload[1] == 2 * Mi) ? 2 * Mi : 0);
         uint64_t va = 0;
         if (buf) {

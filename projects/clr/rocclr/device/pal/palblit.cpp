@@ -945,7 +945,7 @@ bool KernelBlitManager::copyBufferToImage(device::Memory& srcMemory, device::Mem
 void CalcRowSlicePitches(uint64_t* pitch, const int32_t* copySize, size_t rowPitch,
                          size_t slicePitch, const Memory& mem) {
   uint32_t memFmtSize = mem.elementSize();
-  bool img1Darray = (mem.desc().topology_ == CL_MEM_OBJECT_IMAGE1D_ARRAY) ? true : false;
+  bool img1Darray = (mem.desc().topology_ == amd::MemObjectType::Image1DArray) ? true : false;
 
   if (rowPitch == 0) {
     pitch[0] = copySize[0];
@@ -1043,7 +1043,7 @@ bool KernelBlitManager::copyBufferToImageKernel(
   bool releaseView = false;
   bool result = false;
   amd::Image::Format newFormat(gpuMem(dstMemory).desc().format_);
-  bool swapLayer = dstView->desc().topology_ == CL_MEM_OBJECT_IMAGE1D_ARRAY;
+  bool swapLayer = dstView->desc().topology_ == amd::MemObjectType::Image1DArray;
 
   // Find unsupported formats
   for (uint i = 0; i < RejectedFormatDataTotal; ++i) {
@@ -1361,7 +1361,7 @@ bool KernelBlitManager::copyImageToBufferKernel(
   bool releaseView = false;
   bool result = false;
   amd::Image::Format newFormat(gpuMem(srcMemory).desc().format_);
-  bool swapLayer = srcView->desc().topology_ == CL_MEM_OBJECT_IMAGE1D_ARRAY;
+  bool swapLayer = srcView->desc().topology_ == amd::MemObjectType::Image1DArray;
 
   // Find unsupported formats
   for (uint i = 0; i < RejectedFormatDataTotal; ++i) {
@@ -1615,8 +1615,8 @@ bool KernelBlitManager::copyImage(device::Memory& srcMemory, device::Memory& dst
 
   // The current OpenCL spec allows "copy images from a 1D image
   // array object to a 1D image array object" only.
-  if ((gpuMem(srcMemory).desc().topology_ == CL_MEM_OBJECT_IMAGE1D_ARRAY) ||
-      (gpuMem(dstMemory).desc().topology_ == CL_MEM_OBJECT_IMAGE1D_ARRAY)) {
+  if ((gpuMem(srcMemory).desc().topology_ == amd::MemObjectType::Image1DArray) ||
+      (gpuMem(dstMemory).desc().topology_ == amd::MemObjectType::Image1DArray)) {
     blitType = BlitCopyImage1DA;
   }
 
@@ -1628,14 +1628,14 @@ bool KernelBlitManager::copyImage(device::Memory& srcMemory, device::Memory& dst
 
   // Program source origin
   int32_t srcOrg[4] = {(int32_t)srcOrigin[0], (int32_t)srcOrigin[1], (int32_t)srcOrigin[2], 0};
-  if (gpuMem(srcMemory).desc().topology_ == CL_MEM_OBJECT_IMAGE1D_ARRAY) {
+  if (gpuMem(srcMemory).desc().topology_ == amd::MemObjectType::Image1DArray) {
     srcOrg[3] = 1;
   }
   setArgument(kernels_[blitType], 2, sizeof(srcOrg), srcOrg);
 
   // Program destinaiton origin
   int32_t dstOrg[4] = {(int32_t)dstOrigin[0], (int32_t)dstOrigin[1], (int32_t)dstOrigin[2], 0};
-  if (gpuMem(dstMemory).desc().topology_ == CL_MEM_OBJECT_IMAGE1D_ARRAY) {
+  if (gpuMem(dstMemory).desc().topology_ == amd::MemObjectType::Image1DArray) {
     dstOrg[3] = 1;
   }
   setArgument(kernels_[blitType], 3, sizeof(dstOrg), dstOrg);
@@ -1677,7 +1677,7 @@ void FindPinSize(size_t& pinSize, const amd::Coord3D& size, size_t& rowPitch, si
       if ((slicePitch == 0) || (slicePitch == pinSize)) {
         slicePitch = 0;
       } else {
-        if (mem.desc().topology_ != CL_MEM_OBJECT_IMAGE1D_ARRAY) {
+        if (mem.desc().topology_ != amd::MemObjectType::Image1DArray) {
           pinSize = slicePitch;
         } else {
           pinSize = slicePitch * size[i];
@@ -2298,7 +2298,7 @@ bool KernelBlitManager::fillImage(device::Memory& memory, const void* pattern,
   size_t localWorkSize[3];
   Memory* memView = &gpuMem(memory);
   amd::Image::Format newFormat(gpuMem(memory).owner()->asImage()->getImageFormat());
-  bool swapLayer = memView->desc().topology_ == CL_MEM_OBJECT_IMAGE1D_ARRAY;
+  bool swapLayer = memView->desc().topology_ == amd::MemObjectType::Image1DArray;
 
   // Program the kernels workload depending on the fill dimensions
   fillType = FillImage;
@@ -2637,7 +2637,7 @@ amd::Memory* DmaBlitManager::pinHostMemory(const void* hostMem, size_t pinSize,
     return amdMemory;
   }
 
-  amdMemory = new (*context_) amd::Buffer(*context_, CL_MEM_USE_HOST_PTR, pinAllocSize);
+  amdMemory = new (*context_) amd::Buffer(*context_, amd::MemFlags::UseHostPtr, pinAllocSize);
   amdMemory->setVirtualDevice(&gpu());
   if ((amdMemory != NULL) && !amdMemory->create(tmpHost, SysMem)) {
     amdMemory->release();

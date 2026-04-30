@@ -9,6 +9,10 @@
 #ifndef _WIN32
 #include <GL/glx.h>
 #include <EGL/egl.h>
+// X11/Xlib.h (pulled in by GL/glx.h) defines macros that collide with rocclr types
+#undef Status
+#undef None
+#undef Success
 #else
 #include <windows.h>
 #include <GL/gl.h>

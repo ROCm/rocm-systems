@@ -232,7 +232,7 @@ address VmHeap::Alloc(size_t size) {
     return nullptr;
   }
   auto memory =
-      new (device_->context()) Buffer(*base_memory_, 0, offset, size, &device_->context());
+      new (device_->context()) Buffer(*base_memory_, amd::MemFlags::Empty, offset, size, &device_->context());
   if (nullptr == memory || !memory->create(nullptr)) {
     FreeBlock(hb);
     return nullptr;

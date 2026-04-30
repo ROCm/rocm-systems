@@ -42,7 +42,7 @@ const amd::Kernel::ArgValueKindType amd::Kernel::kArgValueKind[] = {
     {"HiddenHostcallBuffer", amd::KernelParameterDescriptor::HiddenHostcallBuffer}};
 
 const amd::Kernel::ArgAccQualType amd::Kernel::kArgAccQual[] = {
-    {"Default",    amd::KernelArgAccessQualifier::None},
+    {"Default",    amd::KernelArgAccessQualifier::NoAccess},
     {"ReadOnly",   amd::KernelArgAccessQualifier::ReadOnly},
     {"WriteOnly",  amd::KernelArgAccessQualifier::WriteOnly},
     {"ReadWrite",  amd::KernelArgAccessQualifier::ReadWrite}};
@@ -76,7 +76,7 @@ const amd::Kernel::CodePropFieldMapType amd::Kernel::kCodePropFieldMap[] = {
     {"NumSpilledVGPRs", CodePropField::NumSpilledVGPRs}};
 
 const amd::Kernel::ArgAccQualV3Type amd::Kernel::kArgAccQualV3[] = {
-    {"default",     amd::KernelArgAccessQualifier::None},
+    {"default",     amd::KernelArgAccessQualifier::NoAccess},
     {"read_only",   amd::KernelArgAccessQualifier::ReadOnly},
     {"write_only",  amd::KernelArgAccessQualifier::WriteOnly},
     {"read_write",  amd::KernelArgAccessQualifier::ReadWrite}};

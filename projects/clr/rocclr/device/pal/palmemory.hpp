@@ -148,7 +148,7 @@ class Memory : public device::Memory, public Resource {
             (!isHostMemDirectAccess() &&
              (!IsPersistent() || (owner()->getContext().devices().size() > 1))) ||
             (owner()->getMemFlags() &
-             (CL_MEM_ALLOC_HOST_PTR | CL_MEM_HOST_WRITE_ONLY | CL_MEM_READ_ONLY)));
+             (amd::MemFlags::AllocHostPtr | amd::MemFlags::HostWriteOnly | amd::MemFlags::ReadOnly)));
   }
 
   //! Quick view update for managed buffers. It should avoid expensive object allocations

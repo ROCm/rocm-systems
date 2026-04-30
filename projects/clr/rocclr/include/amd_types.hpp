@@ -542,6 +542,13 @@ enum class AddressingMode : uint32_t {
   MirroredRepeat = 0x1134, // CL_ADDRESS_MIRRORED_REPEAT
 };
 
+// Pipe memory layout. Equivalent to clk_pipe_t in opencl/amdocl/cl_kernel.h.
+struct PipeLayout {
+  size_t read_idx;
+  size_t write_idx;
+  size_t end_idx;
+};
+
 // Bus address pair for the cl_amd_bus_addressable_memory extension.
 // Equivalent to cl_bus_address_amd { cl_ulong surface_bus_address; cl_ulong marker_bus_address; }.
 struct BusAddress {
