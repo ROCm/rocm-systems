@@ -33,6 +33,7 @@
 #include "../hip_global.hpp"
 
 #include "rocclr/os/os.hpp"
+#include "platform/runtime.hpp"
 #include "utils/flags.hpp"
 
 #include <algorithm>
@@ -70,15 +71,13 @@ inline uint64_t NowNs() { return amd::Os::timeNanos(); }
 constexpr size_t kChunkSize = 10000;
 
 // Two independent enable paths:
-//   g_env_output_path  — set by GPU_CLR_PROFILE_OUTPUT=<path> at Init(), never cleared.
 //   g_enable_refcount  — incremented by hipProfilerEnableExt, decremented by Disable.
 // Recording is active when EITHER is live.
 std::atomic<int>         g_enable_refcount{0};
 std::atomic<bool>        g_callback_registered{false};
-std::string              g_env_output_path;  // written once at init; read-only afterward
 
 inline bool IsProfilingActive() {
-  return !g_env_output_path.empty() ||
+  return !flagIsDefault(GPU_CLR_PROFILE_OUTPUT) ||
          g_enable_refcount.load(std::memory_order_acquire) > 0;
 }
 
@@ -1729,11 +1728,18 @@ static std::string AddPidToPath(const std::string& path) {
 }
 
 // ================================================================================================
+// Fires before Device::tearDown() via RuntimeTearDown::RegisterTearDownCallback.
+// Drains all queues when profiling was active; writes trace if GPU_CLR_PROFILE_OUTPUT is set.
 static void ProfilerAtExit() {
-  // DrainAllDevices can crash on Windows KFD if streams are already partially
-  // torn down when the atexit handler fires. GPU work has already completed by
-  // the time the process exits normally, so skip the sync here.
-  std::string path = AddPidToPath(g_env_output_path);
+#if !defined(_WIN32)
+  // Drain in-flight GPU work whenever profiling was active (env var or API),
+  // so all ReportActivity callbacks arrive before we serialise records.
+  // Skipped on Windows where KFD streams may already be partially torn down.
+  if (IsProfilingActive()) DrainAllDevices();
+#endif
+  // Write trace only when the env-var output path was configured.
+  if (flagIsDefault(GPU_CLR_PROFILE_OUTPUT)) return;
+  std::string path = AddPidToPath(GPU_CLR_PROFILE_OUTPUT);
   // Detect extension: use binary Perfetto format for .pftrace, JSON otherwise.
   const char* ext = strrchr(path.c_str(), '.');
   if (ext && strcmp(ext, ".pftrace") == 0)
@@ -1979,12 +1985,18 @@ void HipProfilerInitExt() {
   // Build the wrapper table once from the live dispatch table.
   HipProfilerBuildWrapperTableExt(const_cast<HipDispatchTable*>(hip::GetHipDispatchTable()));
 
-  // GPU_CLR_PROFILE_OUTPUT=<path>: presence (non-empty) enables profiling;
-  // the value is the output file path written at process exit.
+  // Always register the teardown callback: ProfilerAtExit drains queues when
+  // profiling was active (env var or API) and writes the trace only when
+  // GPU_CLR_PROFILE_OUTPUT was set.
+  static std::once_flag registered;
+  std::call_once(registered, []() {
+    amd::RuntimeTearDown::RegisterTearDownCallback("HipClrProfiler", ProfilerAtExit);
+  });
+
+  // GPU_CLR_PROFILE_OUTPUT=<path>: presence enables env-var profiling mode and
+  // sets the output path for the automatic trace written at process exit.
   if (flagIsDefault(GPU_CLR_PROFILE_OUTPUT)) return;
 
-  g_env_output_path = GPU_CLR_PROFILE_OUTPUT;
-  std::atexit(ProfilerAtExit);
   EnsureCallbackAndWrappers();
 }
 
