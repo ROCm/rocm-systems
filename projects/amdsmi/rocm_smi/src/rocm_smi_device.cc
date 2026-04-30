@@ -1931,10 +1931,10 @@ rsmi_status_t Device::get_smi_device_identifiers(uint32_t device_id,
      << "; devices.size() = " << devices.size();
   LOG_DEBUG(ss);
 
-  if (device_id >= static_cast<uint32_t>(devices.size())) {
+  if (static_cast<size_t>(device_id) >= devices.size()) {
     ss << __PRETTY_FUNCTION__ << " | Invalid device_id: " << device_id
        << "; devices.size(): " << devices.size();
-    LOG_INFO(ss);
+    LOG_ERROR(ss);
     return RSMI_STATUS_INVALID_ARGS;
   }
 
