@@ -41,8 +41,9 @@ extern "C" void __rocm_hsa_tp_init(void) {
 }
 
 /* Library constructor — runs at dlopen time, before any user code in the
- * runtime is reached. Honors HSA_LTTNG_UST_DISABLE / ROCM_LTTNG_UST_DISABLE
- * and skips registration when loaded into a non-default link namespace.
+ * runtime is reached. Honors ROCM_LTTNG_UST_DISABLE (the same env var
+ * recognized by the HIP provider; one switch silences both) and skips
+ * registration when loaded into a non-default link namespace.
  *
  * dlmopen mitigation: when this DSO is loaded via dlmopen(LM_ID_NEWLM, ...)
  * (HPCToolkit / Score-P style isolation), the LTTng tracepoint provider's
