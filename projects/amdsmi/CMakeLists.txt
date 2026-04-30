@@ -468,9 +468,7 @@ add_subdirectory(goamdsmi_shim)
 set(CPACK_DEBIAN_PACKAGE_RECOMMENDS "python3-argcomplete, libdrm-amdgpu-dev")
 set(CPACK_DEBIAN_ASAN_PACKAGE_RECOMMENDS ${CPACK_DEBIAN_PACKAGE_RECOMMENDS})
 set(CPACK_DEBIAN_DEV_PACKAGE_RECOMMENDS ${CPACK_DEBIAN_PACKAGE_RECOMMENDS})
-# TODO(next-release): drop python3-pip -- postinst no longer pip-installs
-# anything (replaced by amdsmi.pth drop). Kept to ease rollback during the .pth migration.
-set(CPACK_DEBIAN_PACKAGE_DEPENDS "libdrm-dev, sudo, libc6, python3 (>= 3.6.8), python3-pip")
+set(CPACK_DEBIAN_PACKAGE_DEPENDS "libdrm-dev, sudo, libc6, python3 (>= 3.6.8)")
 set(CPACK_DEBIAN_ASAN_PACKAGE_DEPENDS ${CPACK_DEBIAN_PACKAGE_DEPENDS})
 set(CPACK_DEBIAN_DEV_PACKAGE_DEPENDS ${CPACK_DEBIAN_PACKAGE_DEPENDS})
 set(CPACK_DEBIAN_TESTS_PACKAGE_DEPENDS ${CPACK_DEBIAN_PACKAGE_DEPENDS})
@@ -478,22 +476,6 @@ set(CPACK_DEBIAN_TESTS_PACKAGE_DEPENDS ${CPACK_DEBIAN_PACKAGE_DEPENDS})
 # $CURRENT_YEAR is used by copyright.in
 string(TIMESTAMP CURRENT_YEAR "%Y")
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/DEBIAN/copyright.in DEBIAN/copyright @ONLY)
-
-## Build the shared do_install_amdsmi_python_lib() body once per package
-## format. The cmake_modules template is configure_file'd with a
-## format-specific PKG_TARGET_DIR (DEB resolves at cmake configure time;
-## RPM uses $RPM_INSTALL_PREFIX0 so the package can be relocated). The
-## generated body is then read into INSTALL_AMDSMI_PYTHON_LIB_BODY which
-## the postinst/post templates substitute verbatim.
-set(_INSTALL_AMDSMI_PYTHON_LIB_TEMPLATE "${CMAKE_CURRENT_SOURCE_DIR}/cmake_modules/install_amdsmi_python_lib.sh.in")
-
-set(PKG_TARGET_DIR "${CPACK_PACKAGING_INSTALL_PREFIX}/${PY_WRAPPER_INSTALL_DIR}")
-configure_file(
-    "${_INSTALL_AMDSMI_PYTHON_LIB_TEMPLATE}"
-    "${CMAKE_CURRENT_BINARY_DIR}/_install_amdsmi_python_lib_deb.sh"
-    @ONLY
-)
-file(READ "${CMAKE_CURRENT_BINARY_DIR}/_install_amdsmi_python_lib_deb.sh" INSTALL_AMDSMI_PYTHON_LIB_BODY)
 
 ## Process the Debian install/remove scripts to update the CPACK variables
 configure_file(
@@ -550,7 +532,7 @@ set(CPACK_RPM_DEV_PACKAGE_SUGGESTS ${CPACK_RPM_PACKAGE_SUGGESTS})
 set(CPACK_RPM_ASAN_PACKAGE_SUGGESTS ${CPACK_RPM_PACKAGE_SUGGESTS})
 # python version gated by rhel8 :(
 # note that RPM based systems have "devel" suffix instead of "dev" in debian based systems
-set(CPACK_RPM_PACKAGE_REQUIRES "libdrm-devel, sudo, python3 >= 3.6.8, python3-pip")
+set(CPACK_RPM_PACKAGE_REQUIRES "libdrm-devel, sudo, python3 >= 3.6.8")
 set(CPACK_RPM_DEV_PACKAGE_REQUIRES ${CPACK_RPM_PACKAGE_REQUIRES})
 set(CPACK_RPM_ASAN_PACKAGE_REQUIRES ${CPACK_RPM_PACKAGE_REQUIRES})
 set(CPACK_RPM_TESTS_PACKAGE_REQUIRES ${CPACK_RPM_PACKAGE_REQUIRES})
@@ -592,13 +574,6 @@ endif()
 # set(CPACK_RPM_PACKAGE_SUGGESTS "sudo, libdrm-devel")
 
 ## Process the Rpm install/remove scripts to update the CPACK variables
-set(PKG_TARGET_DIR "\$RPM_INSTALL_PREFIX0/${SHARE_INSTALL_PREFIX}")
-configure_file(
-    "${_INSTALL_AMDSMI_PYTHON_LIB_TEMPLATE}"
-    "${CMAKE_CURRENT_BINARY_DIR}/_install_amdsmi_python_lib_rpm.sh"
-    @ONLY
-)
-file(READ "${CMAKE_CURRENT_BINARY_DIR}/_install_amdsmi_python_lib_rpm.sh" INSTALL_AMDSMI_PYTHON_LIB_BODY)
 configure_file("${CMAKE_CURRENT_SOURCE_DIR}/RPM/post.in" RPM/post @ONLY)
 configure_file("${CMAKE_CURRENT_SOURCE_DIR}/RPM/preun.in" RPM/preun @ONLY)
 configure_file("${CMAKE_CURRENT_SOURCE_DIR}/RPM/postun.in" RPM/postun @ONLY)

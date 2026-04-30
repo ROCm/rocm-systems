@@ -74,88 +74,11 @@ return_logrotateToOrigConfig() {
   fi
 }
 
-rm_python_lib() {
-  # Remove the amdsmi.pth that postinst dropped into site-packages, so
-  # `import amdsmi` does not leave a stale entry on sys.path after
-  # `apt remove` / `dpkg -r`. The numbered steps below cover three
-  # sources of truth: (1) paths replayed from the postinst log, (2) live
-  # purelib / site.getsitepackages() discovery, (3) pre-.pth packages
-  # registered via pip.
-  find_site_packages() {
-    local py_bin="$1"
-    if [ -x "$py_bin" ]; then
-      "$py_bin" -c 'import os, site, sysconfig
-purelib = sysconfig.get_path("purelib")
-if purelib and os.path.isdir(purelib):
-    print(purelib)
-else:
-    for p in site.getsitepackages():
-        if os.path.isdir(p):
-            print(p)
-            break' 2>/dev/null
-    fi
-  }
-
-  local removed_any=0
-  local seen=""
-  local sp
-
-  # 1. Paths recorded by the postinst (most reliable).
-  if [ -r /var/log/amd_smi_lib/postinst.log ]; then
-    while IFS= read -r pth; do
-      [ -n "$pth" ] || continue
-      case ":$seen:" in
-        *":$pth:"*) continue ;;
-        *) seen="${seen}:$pth" ;;
-      esac
-      if [ -f "$pth" ]; then
-        rm -f "$pth" && removed_any=1
-      fi
-    done < <(grep -oE 'INFO wrote [^ ]+/amdsmi\.pth' /var/log/amd_smi_lib/postinst.log \
-             | awk '{print $3}')
-  fi
-
-  # 2. Discovery fallback (covers upgrades from older packages whose
-  #    postinst did not log the .pth path it wrote). Mirror the postinst:
-  #    look only at the SYSTEM python's site-packages -- the postinst
-  #    never wrote into a venv, so we should not check one here either.
-  sp=$(find_site_packages "$(command -v python3 || true)")
-  if [ -n "$sp" ]; then
-    local pth="$sp/amdsmi.pth"
-    case ":$seen:" in
-      *":$pth:"*) ;;
-      *)
-        seen="${seen}:$pth"
-        if [ -f "$pth" ]; then
-          rm -f "$pth" && removed_any=1
-        fi
-        ;;
-    esac
-  fi
-
-  # 3. Backwards-compat: pre-.pth packages registered amdsmi via pip.
-  if command -v python3 >/dev/null 2>&1; then
-    local pip_list_output
-    pip_list_output=$(python3 -m pip list --format=columns --disable-pip-version-check 2>/dev/null)
-    if [[ $pip_list_output == *"amdsmi"* ]]; then
-      PIP_ROOT_USER_ACTION=ignore PIP_BREAK_SYSTEM_PACKAGES=1 python3 -m pip uninstall amdsmi --yes --quiet --disable-pip-version-check
-      removed_any=1
-    fi
-  fi
-
-  if [ "$removed_any" -eq 1 ]; then
-    echo "Removed AMD-SMI python library (amdsmi)..."
-  fi
-}
-
-
 case "$1" in
   ( remove | upgrade)
     # remove old gpuv-smi symlink
     rm -f @CPACK_PACKAGING_INSTALL_PREFIX@/bin/gpuv-smi &> /dev/null
     echo "Removing AMDSMI Lib Packages..."
-    rm_python_lib
-    echo "python library removed"
     rm_ldconfig
     echo "ldconfig removed"
     rm_leftovers

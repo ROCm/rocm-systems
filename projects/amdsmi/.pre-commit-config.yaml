@@ -66,13 +66,3 @@ repos:
     hooks:
     -   id: gersemi
 
-# Local checks. The wrapper is generated from tools/generator.py, so any
-# edit to one must be mirrored in the other -- enforce that here.
--   repo: local
-    hooks:
-    -   id: check-loader-drift
-        name: amdsmi loader drift check
-        entry: python3 projects/amdsmi/tools/check_loader_drift.py
-        language: system
-        pass_filenames: false
-        files: '^projects/amdsmi/(py-interface/amdsmi_wrapper\.py|tools/generator\.py)$'

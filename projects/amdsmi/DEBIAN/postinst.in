@@ -109,12 +109,8 @@ do_ldconfig() {
   fi
 }
 
-@INSTALL_AMDSMI_PYTHON_LIB_BODY@
-
-
 case "$1" in
   ( configure )
-    do_install_amdsmi_python_lib
     do_ldconfig
     do_configureLogrotate || exit 0
   ;;

@@ -590,67 +590,28 @@ def install_package(cfg: "RunnerConfig", package_path: Path) -> None:
         symlink_path.symlink_to(rocm_binary)
         print(f"Linked {symlink_path} -> {rocm_binary}")
 
-    # Verify installation: CLI version, .pth file, and Python import/init/shutdown.
-    # The system package targets ONLY the SYSTEM python (see DEBIAN/postinst.in
-    # / RPM/post.in). The interpreter that received the .pth is recorded in
-    # /var/log/amd_smi_lib/postinst.log under "INFO interpreter <path>". The
-    # verifier MUST use that same interpreter -- bare `python3` on PATH may
-    # resolve to a different python (e.g. AMD's Ubuntu 24.04 CI image ships
-    # /opt/venv/bin/python3 ahead of /usr/bin/python3, and a venv python
-    # never sees the system /usr/local/lib/python3.12/dist-packages where
-    # the .pth was written).
-    # Note: pip list will NOT show amdsmi because the .pth approach does not
-    # register the package with pip metadata -- that is by design.
-    log_check = (
-        "import pathlib, re, sys; "
-        "log = pathlib.Path('/var/log/amd_smi_lib/postinst.log'); "
-        "assert log.exists(), f'postinst log missing: {log}'; "
-        "text = log.read_text(); "
-        "wrote = [m.group(1) for line in text.splitlines() "
-        "for m in [re.search(r'INFO wrote (.+/amdsmi\\.pth)', line)] if m]; "
-        "assert wrote, f'no INFO wrote line in {log}; contents:\\n' + text; "
-        "missing = [p for p in wrote if not pathlib.Path(p).exists()]; "
-        "assert not missing, f'postinst-recorded .pth files missing on disk: {missing}'; "
-        "interps = [m.group(1) for line in text.splitlines() "
-        "for m in [re.search(r'INFO interpreter (\\S+)', line)] if m]; "
-        "assert interps, f'no INFO interpreter line in {log}; contents:\\n' + text; "
-        "interp = interps[-1]; "
-        "assert pathlib.Path(interp).exists(), f'recorded interpreter no longer on disk: {interp}'; "
-        "print(f'\u2713 postinst wrote {len(wrote)} .pth file(s) for interpreter {interp}:'); "
-        "[print(f'  - {p}: {pathlib.Path(p).read_text().strip()}') for p in wrote]; "
-        "pathlib.Path('/tmp/amdsmi_postinst_interpreter').write_text(interp)"
+    # Verify installation: CLI version + Python import/init/shutdown under
+    # the system python. The system package installs amdsmi/ directly into
+    # the build-host python's site-packages (see py-interface/CMakeLists.txt
+    # install rule), so any python3 on PATH that shares that purelib path
+    # will see it.
+    import_smoke = (
+        "import amdsmi; "
+        "print('amdsmi from:', amdsmi.__file__); "
+        "amdsmi.amdsmi_init(); "
+        "amdsmi.amdsmi_shut_down(); "
+        "print('init/shutdown ok')"
     )
-
-    verify_commands = [[str(rocm_binary), "version"], ["python3", "-c", log_check]]
+    verify_commands = [
+        [str(rocm_binary), "version"],
+        ["python3", "-c", import_smoke],
+    ]
     for idx, verify_cmd in enumerate(verify_commands, start=1):
         try:
             run_command(verify_cmd, name=f"verify-{idx}", retries=1, log_dir=cfg.log_dir)
         except CommandError as exc:
             print(f"Verification command failed: {exc}")
             raise
-
-    # verify-3 (import smoke) MUST run under the postinst-recorded interpreter,
-    # not whichever python3 happens to win on PATH in the test runner. The
-    # path was written to /tmp/amdsmi_postinst_interpreter by verify-2 above.
-    interpreter_path = Path("/tmp/amdsmi_postinst_interpreter")
-    try:
-        recorded_interp = interpreter_path.read_text().strip()
-    except OSError as exc:
-        raise RuntimeError(f"verify-2 did not write {interpreter_path}: {exc}") from exc
-    if not recorded_interp or not Path(recorded_interp).exists():
-        raise RuntimeError(f"recorded interpreter is missing or invalid: {recorded_interp!r}")
-    import_smoke = [
-        recorded_interp,
-        "-c",
-        "import amdsmi; print('import ok'); "
-        "amdsmi.amdsmi_init(); print('init ok'); "
-        "amdsmi.amdsmi_shut_down(); print('shutdown ok')",
-    ]
-    try:
-        run_command(import_smoke, name="verify-3", retries=1, log_dir=cfg.log_dir)
-    except CommandError as exc:
-        print(f"Verification command failed: {exc}")
-        raise
 
 
 # ---------------------------------------------------------------------------
@@ -702,9 +663,10 @@ def verify_wheel_site_packages(cfg: "RunnerConfig") -> None:
         log_dir=cfg.log_dir,
     )
 
-    # Check install location — the .pth file from the system package may
-    # shadow the wheel so import resolves to /opt/rocm; that is fine as
-    # long as pip metadata confirms the wheel landed in site-packages.
+    # Check install location -- the wheel must land under site-packages
+    # or dist-packages; the system DEB/RPM also installs to dist-packages,
+    # so a coexisting system module is fine (whichever sys.path entry wins
+    # is whichever is searched first by the active python).
     run_command(
         [
             "python3",

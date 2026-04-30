@@ -86,14 +86,6 @@ else()
     )
 endif()
 
-# NOTE: We intentionally do NOT derive a site-packages path from the build
-# host's Python interpreter. In manylinux build containers, that interpreter
-# lives at /opt/python/cp3XX-cp3XX/... -- a path that does not exist on any
-# target system. Shipping a copy of the package under that path bakes the
-# build-host interpreter into the artifact (huge dead weight, not on any
-# user's sys.path). The .pth file is now placed dynamically by the postinst
-# script using the *target* system's Python.
-
 # populate version string
 configure_file(pyproject.toml.in ${PY_BUILD_DIR}/pyproject.toml @ONLY)
 configure_file(_version.py.in ${PY_PACKAGE_DIR}/_version.py @ONLY)
@@ -156,13 +148,22 @@ if(BUILD_PYTHON_WHEEL)
     )
 endif()
 
-# Install the python module under the legacy share path for CLI use.
-# Exclude the bundled .so -- in system-package context, the wrapper resolves
-# libamd_smi.so via /opt/rocm/lib64 (already installed by src/CMakeLists.txt).
-# The bundled .so is only needed for the standalone pip wheel.
+# Install the python module directly into the target Python's
+# site-packages so `import amdsmi` works after `apt install` / `dnf install`
+# without any sys.path / .pth tricks. The bundled libamd_smi_python.so is
+# excluded -- the system package ships libamd_smi.so via /opt/rocm/lib and
+# the wrapper resolves it through the dynamic linker's SONAME lookup
+# (ld.so.conf.d entry installed by postinst). The bundled .so is only
+# needed inside the pip wheel.
+#
+# Python3_SITELIB is computed by find_package(Python3 ...) above; it is
+# the absolute purelib path of the build-host's python3 (e.g.
+# /usr/lib/python3/dist-packages on Debian/Ubuntu, /usr/lib/python3.X/
+# site-packages on RHEL/SLES). All CI builds happen inside the matching
+# distro container, so build-host python == target python.
 install(
     DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/${PY_PACKAGE_DIR}
-    DESTINATION ${PY_WRAPPER_INSTALL_DIR}
+    DESTINATION ${Python3_SITELIB}
     COMPONENT dev
     PATTERN "libamd_smi*.so" EXCLUDE
 )
