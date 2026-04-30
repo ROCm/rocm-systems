@@ -79,7 +79,7 @@ static const uint16_t kInvalidHeader = (HSA_PACKET_TYPE_INVALID << HSA_PACKET_HE
 static const uint16_t kBarrierHeader = (HSA_PACKET_TYPE_BARRIER_AND << HSA_PACKET_HEADER_TYPE) |
     (1 << HSA_PACKET_HEADER_BARRIER) |
     (HSA_FENCE_SCOPE_NONE << HSA_PACKET_HEADER_ACQUIRE_FENCE_SCOPE) |
-    (HSA_FENCE_SCOPE_NONE << HSA_PACKET_HEADER_RELEASE_FENCE_SCOPE);
+    (HSA_FENCE_SCOPE_AGENT << HSA_PACKET_HEADER_RELEASE_FENCE_SCOPE);
 
 bool InterceptQueue::IsPendingRetryPoint(uint64_t wrapped_current_read_index) const {
   // This function is intended to determine if the last retry barrier packet
@@ -438,7 +438,7 @@ void InterceptQueue::StoreRelaxed(hsa_signal_value_t value) {
 hsa_status_t InterceptQueue::GetInfo(hsa_queue_info_attribute_t attribute, void* value) {
   switch (attribute) {
     case HSA_AMD_QUEUE_INFO_AGENT:
-    case HSA_AMD_QUEUE_INFO_DOORBELL_ID: 
+    case HSA_AMD_QUEUE_INFO_DOORBELL_ID:
     case HSA_QUEUE_INFO_USE_COUNT:
     case HSA_QUEUE_INFO_HW_ID: {
       if (!AMD::AqlQueue::IsType(wrapped.get())) return HSA_STATUS_ERROR_INVALID_QUEUE;
