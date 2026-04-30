@@ -713,7 +713,7 @@ static ncclResult_t IbCastSenderQpsToRts(ncclIbSendComm* comm, struct ncclIbConn
     rtrAttr->remoteQpNum = remQpInfo->qpn;
     rtrAttr->remoteLid = remDevInfo->lid;
     rtrAttr->remoteGid = remDevInfo->gid;
-    rtrAttr->localIbPort = remDevInfo->ib_port;
+    rtrAttr->localIbPort = ibDev->portNum;
     rtrAttr->localGid = commDev->base.gidInfo.localGid;
     rtrAttr->localGidIndex = commDev->base.gidInfo.localGidIndex;
     NCCLCHECK(IbCastQpRtr(localQp));
@@ -752,7 +752,7 @@ ncclResult_t IbCastConnect(void* ctx, int dev, void* opaqueHandle, void** sendCo
   int isP2p = 0; 
   *sendComm = NULL;
 
-  if (IbCastAinicRoce) {
+  if (IbCastAinicRoce && sendDevComm) {
     channelId = ((ncclNet_ctxt_t *)sendDevComm)->chId;
   }
 
@@ -828,6 +828,10 @@ ib_recv_dev_list:
   // Read isP2p from handle
   isP2p = handle->isP2p;
   comm->useCtsOffload = IbCastIsCtsOffloadEnabled(isP2p);
+  if (comm->useCtsOffload) {
+    comm->base.recvMatchingScheme = BY_ORDER;
+  }
+
   INFO(NCCL_NET, "NET/IB: IbCastConnect isP2p=%d", isP2p);
   comm->base.nqps = IbCastCalculateNqps(isP2p, comm->base.vProps.ndevs, 
                                          remoteVProps.ndevs, __func__);
@@ -1161,7 +1165,7 @@ static ncclResult_t IbCastReceiverQpsCreateToRts(ncclIbRecvComm* rComm, struct n
     rtrAttr->remoteQpNum = remQpInfo->qpn;
     rtrAttr->remoteLid = remDevInfo->lid;
     rtrAttr->remoteGid = remDevInfo->gid;
-    rtrAttr->localIbPort = remDevInfo->ib_port;
+    rtrAttr->localIbPort = ibDev->portNum;
     rtrAttr->localGid = rCommDev->base.gidInfo.localGid;
     rtrAttr->localGidIndex = rCommDev->base.gidInfo.localGidIndex;
     NCCLCHECK(IbCastQpRtr(localQp));
@@ -1287,7 +1291,7 @@ ncclResult_t IbCastAccept(void* listenComm, void** recvComm, ncclNetDeviceHandle
   bool useDmaBuf = false;
   *recvComm = NULL;
 
-  if (IbCastAinicRoce) {
+  if (IbCastAinicRoce && recvDevComm) {
     channelId = ((ncclNet_ctxt_t *) recvDevComm)->chId;
   }
 
@@ -1342,13 +1346,6 @@ ib_recv_dev_list:
   NCCLCHECK(IbCastCheckVProps(&mergedDev->vProps, &remoteVProps));
   rComm->base.vProps = mergedDev->vProps;
   memcpy(stage->buffer, &rComm->base.vProps, sizeof(ncclNetVDeviceProps_t));
-  rComm->useCtsOffload = IbCastIsCtsOffloadEnabled(remMeta.isP2p);
-  INFO(NCCL_NET, "NET/IB: ncclIbAccept isP2p=%d useCtsOffload=%d (IbP2pDisableCts=%d)", remMeta.isP2p, rComm->useCtsOffload, rcclParamIbCastP2pDisableCts());
-  rComm->base.nqps = IbCastCalculateNqps(remMeta.isP2p, rComm->base.vProps.ndevs, 
-                                         remMeta.ndevs, __func__);
-
-  rComm->base.nDataQps = std::max(rComm->base.vProps.ndevs, remoteVProps.ndevs);
-
   if (rComm->base.resiliency) {
     NCCLCHECK(IbCastResiliencyDeviceNumSet(rComm->base.resiliency, rComm->base.vProps.ndevs, remoteVProps.ndevs));
   }
@@ -1377,6 +1374,15 @@ ib_recv:
 
   /* copy back the received info */
   memcpy(&remMeta, stage->buffer, sizeof(struct ncclIbConnectionMetadata));
+
+  rComm->useCtsOffload = IbCastIsCtsOffloadEnabled(remMeta.isP2p);
+  if (rComm->useCtsOffload) {
+    rComm->base.recvMatchingScheme = BY_ORDER;
+  }
+  INFO(NCCL_NET, "NET/IB: ncclIbAccept isP2p=%d useCtsOffload=%d (IbP2pDisableCts=%d)", remMeta.isP2p, rComm->useCtsOffload, rcclParamIbCastP2pDisableCts());
+  rComm->base.nqps = IbCastCalculateNqps(remMeta.isP2p, rComm->base.vProps.ndevs,
+                                         remMeta.ndevs, __func__);
+  rComm->base.nDataQps = std::max(rComm->base.vProps.ndevs, remMeta.ndevs);
 
   // IB setup
   // Pre-declare variables because of goto
