@@ -1232,35 +1232,36 @@ static ncclResult_t socketRingAllGatherUnidir(struct ncclSocket* sendSock, struc
 exit:
   return res;
 }
-// Bidirectional ring AllGather (mirrors NCCL 2.28.7 socketRingAllGather):
-// each step exchanges two slices in opposite directions over the same forward
-// socket pair (TCP is full-duplex). Cuts latency from N-1 to N/2 rounds.
 static ncclResult_t socketRingAllGather(struct ncclSocket* nextSock, struct ncclSocket* prevSock, int rank, int nranks, char* data, int size) {
   ncclResult_t res = ncclSuccess;
   uint64_t tFirst = 0, tRest = 0;
+  /* Simple ring based AllGather
+   * At each step i receive data from (rank-i-1) from prev
+   * and send previous step's data from (rank-i) to next
+   */
   TRACE(NCCL_BOOTSTRAP, "socketRingAllGather started: rank=%d nranks=%d", rank, nranks);
   int totalSteps = nranks / 2;
   TRACE(NCCL_BOOTSTRAP, "bidirectional bootstrap: totalSteps=%d", totalSteps);
   BOOTSTRAP_PROF_OPEN(tFirst);
   for (int step = 0; step < totalSteps; step++) {
-    // N ranks requires (N-1)/2 steps for the double ring algorithm. If N is even, the last step requires a single send/recv
+    // N ranks requires (N-1)/2 steps for the double ring  algorithm. If N is even, the last step is requires a single send/recv
     bool isFinalUnidirectional = (step == totalSteps - 1) && (nranks % 2 == 0);
     // Ring0: ring from previous to next
-    int sendSliceRing0 = (rank - step + nranks) % nranks;     // Send this slice to next neighbor
-    int recvSliceRing0 = (rank - step - 1 + nranks) % nranks; // Receive this slice from prev neighbor
+    int sendSliceRing0 = (rank - step + nranks) % nranks;      // Send this slice to next neighbor
+    int recvSliceRing0 = (rank - step - 1 + nranks) % nranks;  // Receive this slice from prev neighbor
     // Ring1: ring from next to previous
-    int sendSliceRing1 = (rank + step) % nranks;              // Send this slice to prev neighbor
-    int recvSliceRing1 = (rank + step + 1) % nranks;          // Receive this slice from next neighbor
+    int sendSliceRing1 = (rank + step) % nranks;               // Send this slice to prev neighbor
+    int recvSliceRing1 = (rank + step + 1) % nranks;           // Receive this slice from next neighbor
     if (isFinalUnidirectional) {
       // Final unidirectional step, only Ring0 is used
       NCCLCHECKGOTO(socketSendRecv(nextSock, data + sendSliceRing0 * size, size, prevSock, data + recvSliceRing0 * size, size), res, exit);
     } else {
       // Bidirectional step: Ring0 and Ring1 are used simultaneously
       struct ncclSocketOp ops[4] = {
-        {NCCL_SOCKET_SEND, nextSock, data + sendSliceRing0 * size, size, 0}, // Ring0: send to next
-        {NCCL_SOCKET_RECV, prevSock, data + recvSliceRing0 * size, size, 0}, // Ring0: recv from prev
-        {NCCL_SOCKET_SEND, prevSock, data + sendSliceRing1 * size, size, 0}, // Ring1: send to prev
-        {NCCL_SOCKET_RECV, nextSock, data + recvSliceRing1 * size, size, 0}  // Ring1: recv from next
+        {NCCL_SOCKET_SEND, nextSock, data + sendSliceRing0 * size, size, 0},  // Ring0: send to next
+        {NCCL_SOCKET_RECV, prevSock, data + recvSliceRing0 * size, size, 0},  // Ring0: recv from prev
+        {NCCL_SOCKET_SEND, prevSock, data + sendSliceRing1 * size, size, 0},  // Ring1: send to prev
+        {NCCL_SOCKET_RECV, nextSock, data + recvSliceRing1 * size, size, 0}   // Ring1: recv from next
       };
       NCCLCHECKGOTO(socketDoubleSendRecv(ops), res, exit);
     }
