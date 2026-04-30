@@ -330,6 +330,22 @@ class CodeGenerator:
                     f'{mod_impl}}}'
                 ))
             fmt_enc_name = inst_enc.fmt_enc_name
+            implicit_uses_impl = self._encoding_implicit_uses_impl(
+                inst_enc, enc_field_names
+            )
+            if implicit_uses_impl:
+                public_members.append(
+                    cgen.Line(
+                        'void implicit_uses(RegisterSet &uses, uint8_t wf_size) const override;'
+                    )
+                )
+                class_func_impls.append(
+                    cgen.Line(
+                        f'void {fmt_enc_name}::implicit_uses'
+                        f'(RegisterSet &uses, uint8_t wf_size) const '
+                        f'{{ {implicit_uses_impl} }}'
+                    )
+                )
 
             if fmt_enc_name not in cond_emitted:
                 cond_emitted.add(fmt_enc_name)
@@ -487,6 +503,27 @@ class CodeGenerator:
         )
         class_def_file.gen_code()
         class_impl_file.gen_code()
+
+    def _encoding_implicit_uses_impl(
+        self, inst_enc: InstEncoding, enc_field_names: set[str]
+    ) -> str:
+        """Return C++ body for hidden register uses on an encoding base."""
+        if (
+            inst_enc.enc_name.upper() == 'ENC_FLAT'
+            and {'seg', 'saddr'} <= enc_field_names
+        ):
+            return (
+                '(void)wf_size;'
+                'if (inst_.saddr == 0x7F) return;'
+                'if (inst_.seg == 1) {'
+                'uses.expand(RegisterRef{RegClass::SGPR, '
+                'static_cast<uint16_t>(inst_.saddr), 1});'
+                '} else if (inst_.seg == 2) {'
+                'uses.expand(RegisterRef{RegClass::SGPR, '
+                'static_cast<uint16_t>(inst_.saddr), 2});'
+                '}'
+            )
+        return ''
 
     def _enc_field_at_bit(self, enc_name: str, bit_offset: int) -> str | None:
         """Return the field name at a given bit offset in an encoding, or None."""

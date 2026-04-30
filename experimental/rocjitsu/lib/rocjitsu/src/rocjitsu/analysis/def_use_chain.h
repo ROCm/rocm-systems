@@ -7,7 +7,8 @@
 /// @details This is the bridge between decoded instructions and CFG-aware
 /// liveness. Operand membership determines direction: dst operands define
 /// registers, source operands use registers. Operand::to_register_ref()
-/// determines which register class and index are involved.
+/// determines which register class and index are involved. Instruction
+/// subclasses may also report hidden register effects through implicit hooks.
 
 #pragma once
 

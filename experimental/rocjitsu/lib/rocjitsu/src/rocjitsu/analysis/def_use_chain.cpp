@@ -36,6 +36,7 @@ InstDefUse::InstDefUse(const Instruction &inst, uint8_t wf_size) {
     if (auto ref = op->to_register_ref(wf_size))
       add_def(*this, *ref);
   }
+  inst.implicit_defs(defs, wf_size);
 
   for (int i = 0; i < inst.num_src_operands(); ++i) {
     const auto *op = inst.src_operand(i);
@@ -44,6 +45,7 @@ InstDefUse::InstDefUse(const Instruction &inst, uint8_t wf_size) {
     if (auto ref = op->to_register_ref(wf_size))
       uses.expand(*ref);
   }
+  inst.implicit_uses(uses, wf_size);
 }
 
 } // namespace rocjitsu

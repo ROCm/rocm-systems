@@ -200,6 +200,15 @@ public:
   /// non-branches return nullopt.
   [[nodiscard]] virtual std::optional<int64_t> branch_offset_bytes() const { return std::nullopt; }
 
+  /// @brief Add registers implicitly read by this instruction.
+  ///
+  /// @details Used for encoded fields that affect execution but are not part of
+  /// the printed operand list, such as FLAT/GLOBAL `saddr` addressing fields.
+  virtual void implicit_uses(RegisterSet & /*uses*/, uint8_t /*wf_size*/) const {}
+
+  /// @brief Add registers implicitly written by this instruction.
+  virtual void implicit_defs(RegisterSet & /*defs*/, uint8_t /*wf_size*/) const {}
+
   /// @brief Raw encoding words of this instruction.
   /// @returns Pointer to the encoding words (size()/4 words), or nullptr if not set.
   const uint32_t *raw_encoding() const { return raw_encoding_; }

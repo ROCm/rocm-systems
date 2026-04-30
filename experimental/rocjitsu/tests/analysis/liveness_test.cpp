@@ -47,8 +47,9 @@ class TestInstruction : public Instruction {
 public:
   TestInstruction(std::string_view mnemonic, std::initializer_list<RegisterRef> defs = {},
                   std::initializer_list<RegisterRef> uses = {}, uint64_t flags = 0,
-                  std::optional<int64_t> branch_delta = std::nullopt)
-      : Instruction(mnemonic, nullptr), branch_delta_(branch_delta) {
+                  std::optional<int64_t> branch_delta = std::nullopt,
+                  std::initializer_list<RegisterRef> implicit_uses = {})
+      : Instruction(mnemonic, nullptr), implicit_uses_(implicit_uses), branch_delta_(branch_delta) {
     size_ = 4;
     flags_ = flags;
 
@@ -66,9 +67,16 @@ public:
 
   std::optional<int64_t> branch_offset_bytes() const override { return branch_delta_; }
 
+  void implicit_uses(RegisterSet &uses, uint8_t wf_size) const override {
+    (void)wf_size;
+    for (RegisterRef ref : implicit_uses_)
+      uses.expand(ref);
+  }
+
 private:
   std::array<TestOperand, 2> dst_storage_{};
   std::array<TestOperand, 4> src_storage_{};
+  std::vector<RegisterRef> implicit_uses_;
   std::optional<int64_t> branch_delta_;
 };
 
@@ -110,6 +118,7 @@ enum class TestOpcode : uint32_t {
   UseSgpr4 = 7,
   ReadWriteSgpr4 = 8,
   PredicatedDefSgpr4 = 9,
+  ImplicitUseSgpr6Pair = 10,
 };
 
 class TestDecoder : public Decoder {
@@ -137,6 +146,9 @@ public:
       return new TestInstruction("test_rw_s4", {{RegClass::SGPR, 4, 1}}, {{RegClass::SGPR, 4, 1}});
     case TestOpcode::PredicatedDefSgpr4:
       return new TestInstruction("test_pred_def_s4", {{RegClass::SGPR, 4, 1}}, {}, PREDICATED_DEF);
+    case TestOpcode::ImplicitUseSgpr6Pair:
+      return new TestInstruction("test_implicit_use_s6_pair", {}, {}, 0, std::nullopt,
+                                 {{RegClass::SGPR, 6, 2}});
     }
     return new TestInstruction("test_end", {}, {}, PROGRAM_TERMINATOR);
   }
@@ -291,6 +303,14 @@ TEST(LivenessAnalysis, ReadWriteSameRegisterIsLiveBeforeInstruction) {
 
   const Instruction &read_write = *blocks[0]->instructions().begin();
   EXPECT_TRUE(liveness.is_live_before(read_write, {RegClass::SGPR, 4, 1}));
+}
+
+TEST(LivenessAnalysis, ImplicitUseIsLiveBeforeInstruction) {
+  auto blocks = build_test_blocks({TestOpcode::ImplicitUseSgpr6Pair, TestOpcode::End});
+  LivenessAnalysis liveness = analyze_scope(blocks, 64);
+
+  const Instruction &implicit_use = *blocks[0]->instructions().begin();
+  EXPECT_TRUE(liveness.is_live_before(implicit_use, {RegClass::SGPR, 6, 2}));
 }
 
 TEST(LivenessAnalysis, PredicatedScalarDefDoesNotKillLiveOutValue) {
