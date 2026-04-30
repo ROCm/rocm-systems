@@ -156,14 +156,37 @@ endif()
 # (ld.so.conf.d entry installed by postinst). The bundled .so is only
 # needed inside the pip wheel.
 #
-# Python3_SITELIB is computed by find_package(Python3 ...) above; it is
-# the absolute purelib path of the build-host's python3 (e.g.
-# /usr/lib/python3/dist-packages on Debian/Ubuntu, /usr/lib/python3.X/
-# site-packages on RHEL/SLES). All CI builds happen inside the matching
-# distro container, so build-host python == target python.
+# We MUST install to the SYSTEM python's purelib, not whichever python
+# find_package(Python3) happened to pick. On Ubuntu 20 / Debian 10 build
+# containers the cmake-discovered interpreter can be a non-system python
+# (e.g. /opt/python/cp3X-cp3X/bin/python3 in manylinux images) whose
+# sysconfig returns a path that no user's python3 ever searches -- the
+# package would install successfully and `import amdsmi` would still
+# fail with "No module named 'amdsmi'".
+#
+# /usr/bin/python3 is the python that /opt/rocm/bin/amd-smi resolves to
+# via its `#!/usr/bin/env python3` shebang at runtime, so its purelib is
+# the only correct destination for the system DEB/RPM. We query it
+# directly with sysconfig.get_paths()['purelib'].
+if(EXISTS "/usr/bin/python3")
+    execute_process(
+        COMMAND /usr/bin/python3 -c "import sysconfig; print(sysconfig.get_paths()['purelib'])"
+        OUTPUT_VARIABLE AMDSMI_SYSTEM_PYTHON_SITELIB
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        RESULT_VARIABLE _amdsmi_sitelib_rc
+    )
+    if(NOT _amdsmi_sitelib_rc EQUAL 0 OR AMDSMI_SYSTEM_PYTHON_SITELIB STREQUAL "")
+        message(WARNING "Could not query /usr/bin/python3 for purelib; falling back to Python3_SITELIB=${Python3_SITELIB}")
+        set(AMDSMI_SYSTEM_PYTHON_SITELIB "${Python3_SITELIB}")
+    endif()
+else()
+    set(AMDSMI_SYSTEM_PYTHON_SITELIB "${Python3_SITELIB}")
+endif()
+message(STATUS "amdsmi python module install path: ${AMDSMI_SYSTEM_PYTHON_SITELIB}")
+
 install(
     DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/${PY_PACKAGE_DIR}
-    DESTINATION ${Python3_SITELIB}
+    DESTINATION ${AMDSMI_SYSTEM_PYTHON_SITELIB}
     COMPONENT dev
     PATTERN "libamd_smi*.so" EXCLUDE
 )
