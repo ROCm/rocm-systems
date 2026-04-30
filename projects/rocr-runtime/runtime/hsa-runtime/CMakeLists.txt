@@ -481,19 +481,18 @@ if( BUILD_SHARED_LIBS )
         # `cp ... 2>/dev/null || true`. The previous form silently
         # masked the case where the vendored .so files were missing
         # (e.g. the FetchContent build failed in a hard-to-spot way),
-        # which then broke downstream link consumers later. Now: copy
-        # whatever matches; if NO files matched at all, fail the build
-        # with an actionable error.
+        # which then broke downstream link consumers later. Now we
+        # explicitly probe for liblttng-ust.so* (the canonical
+        # vendored library) and fail the build with an actionable
+        # error message if absent. The cp itself uses the original
+        # glob style and lets `set -e` surface any real failures.
         #
-        # Single-line shell script: make's recipe parser does not allow
-        # bare newlines inside a command. Use `;` separators and `&&`
-        # for chained conditions. `set -e` ensures genuine cp failures
-        # propagate; the explicit `found` guard catches "glob matched
-        # nothing" (which would otherwise leave `found=0` but exit 0).
+        # Single-line shell script: make's recipe parser does not
+        # allow bare newlines inside a command argument.
         add_custom_command(TARGET ${CORE_RUNTIME_TARGET} PRE_LINK
             COMMAND ${CMAKE_COMMAND} -E make_directory
                     "$<TARGET_FILE_DIR:${CORE_RUNTIME_TARGET}>"
-            COMMAND sh -c "set -e; found=0; for lib in '${LTTNG_VENDORED_LIB_DIR}'/liblttng*.so* '${LTTNG_VENDORED_LIB_DIR}'/liburcu*.so*; do if [ -e \"$$lib\" ]; then found=1; cp -P \"$$lib\" '$<TARGET_FILE_DIR:${CORE_RUNTIME_TARGET}>/'; fi; done; if [ \"$$found\" -eq 0 ]; then echo 'error: no vendored LTTng-UST/URCU shared libraries found to stage from ${LTTNG_VENDORED_LIB_DIR}' >&2; exit 1; fi"
+            COMMAND sh -c "set -e; if ! ls '${LTTNG_VENDORED_LIB_DIR}'/liblttng-ust.so* >/dev/null 2>&1; then echo 'error: no vendored LTTng-UST shared libraries found to stage from ${LTTNG_VENDORED_LIB_DIR}' >&2; exit 1; fi; cp -P '${LTTNG_VENDORED_LIB_DIR}'/liblttng*.so* '${LTTNG_VENDORED_LIB_DIR}'/liburcu*.so* '$<TARGET_FILE_DIR:${CORE_RUNTIME_TARGET}>/'"
             COMMENT "Staging vendored LTTng-UST .so files into ${CORE_RUNTIME_TARGET} build dir"
             VERBATIM)
       endif()
