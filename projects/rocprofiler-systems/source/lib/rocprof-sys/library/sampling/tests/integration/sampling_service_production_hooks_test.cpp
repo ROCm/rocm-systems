@@ -25,6 +25,7 @@
 // sampling_service<default_sampling_policies, real_production_hooks> instantiation
 // needs every policy type.
 #include "sampling/default_policies.hpp"
+#include "sampling/sampling_config.hpp"
 #include "sampling/sampling_service.hpp"
 
 #include <cstdint>
@@ -66,7 +67,11 @@ TEST(sampling_service_production_hooks, shutdown_clears_tls_sampler_state)
     // shutdown() calls: offload_.write(tid) → production_hooks_.emit_resolved(tid)
     //                   → production_hooks_.shutdown_wiring(tid)
     // Ring buffer is empty, so write() is a no-op; the hook still runs.
-    prod_service svc;
+    sampling_config cfg;
+    cfg.resolve_signals = [](int64_t tid) {
+        return rocprofsys::get_sampling_signals(tid);
+    };
+    prod_service svc{ std::move(cfg) };
     svc.shutdown(0);
 
     EXPECT_EQ(tls::sampler, nullptr)

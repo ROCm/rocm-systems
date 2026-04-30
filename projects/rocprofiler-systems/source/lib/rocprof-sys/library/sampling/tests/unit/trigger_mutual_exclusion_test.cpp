@@ -33,7 +33,6 @@
 #include "doubles/mock_timer_trigger.hpp"
 #include "doubles/test_sampling_policies.hpp"
 #include "sampling/sampling_service.hpp"
-#include "sampling/src/sampling_config_fwd.hpp"
 
 #include <csignal>
 #include <set>
@@ -43,26 +42,26 @@ using namespace rocprofsys::sampling;
 using namespace rocprofsys::sampling::test;
 // test_service alias lives in test_sampling_policies.hpp.
 
-// ── Invariant: get_sampling_signals() returns BOTH signals ────────────────────
-// The config stub (config_stubs.cpp) returns {SIGRTMIN+1, SIGRTMIN+2}.
+// ── Invariant: test config resolve_signals() returns BOTH signals ────────────
 // Both must be present so the fix is meaningful — if only one is returned, the
 // else-if is never triggered.
 
 TEST(trigger_mutual_exclusion, config_returns_both_realtime_and_cputime_signals)
 {
-    int rt_sig  = ::rocprofsys::get_sampling_realtime_signal();
-    int cpu_sig = ::rocprofsys::get_sampling_cputime_signal();
+    auto const cfg     = make_test_config();
+    int const  rt_sig  = cfg.realtime_signal;
+    int const  cpu_sig = cfg.cputime_signal;
 
     EXPECT_NE(rt_sig, cpu_sig) << "realtime and cputime signals must be distinct";
 
-    auto sigs = ::rocprofsys::get_sampling_signals(0);
+    auto sigs = cfg.resolve_signals(0);
 
     EXPECT_NE(sigs.find(rt_sig), sigs.end())
-        << "get_sampling_signals() must include the realtime signal";
+        << "resolve_signals() must include the realtime signal";
     EXPECT_NE(sigs.find(cpu_sig), sigs.end())
-        << "get_sampling_signals() must include the cputime signal";
+        << "resolve_signals() must include the cputime signal";
     EXPECT_GE(sigs.size(), 2U)
-        << "get_sampling_signals() must return at least 2 signals "
+        << "resolve_signals() must return at least 2 signals "
            "(realtime + cputime) to exercise the mutual-exclusion bug";
 }
 
@@ -72,14 +71,14 @@ TEST(trigger_mutual_exclusion, config_returns_both_realtime_and_cputime_signals)
 
 TEST(trigger_mutual_exclusion, setup_records_both_signals_in_per_thread_state)
 {
-    test_service      svc;
+    test_service      svc{ make_test_config() };
     constexpr int64_t tid = 0;
 
     svc.setup(tid);
 
     auto sigs    = svc.get_signal_types(tid);
-    int  rt_sig  = ::rocprofsys::get_sampling_realtime_signal();
-    int  cpu_sig = ::rocprofsys::get_sampling_cputime_signal();
+    int  rt_sig  = svc.config().realtime_signal;
+    int  cpu_sig = svc.config().cputime_signal;
 
     EXPECT_NE(sigs.find(rt_sig), sigs.end())
         << "per-thread signal set must contain the realtime signal after setup()";
@@ -100,8 +99,9 @@ TEST(trigger_mutual_exclusion, dual_timer_configure_both_fire_when_both_signals_
 {
     // Simulate what the fixed setup_production_wiring should do:
     // For each signal in the set, configure the appropriate timer.
-    int const rt_sig  = ::rocprofsys::get_sampling_realtime_signal();
-    int const cpu_sig = ::rocprofsys::get_sampling_cputime_signal();
+    auto const cfg     = make_test_config();
+    int const  rt_sig  = cfg.realtime_signal;
+    int const  cpu_sig = cfg.cputime_signal;
 
     std::set<int> const sigs = { rt_sig, cpu_sig };
 
@@ -149,8 +149,9 @@ TEST(trigger_mutual_exclusion, buggy_else_if_skips_cputime_when_realtime_present
     // This test documents the BROKEN behaviour — it asserts the broken invariant
     // to make the failure mode explicit in CI output.
 
-    int const rt_sig  = ::rocprofsys::get_sampling_realtime_signal();
-    int const cpu_sig = ::rocprofsys::get_sampling_cputime_signal();
+    auto const cfg     = make_test_config();
+    int const  rt_sig  = cfg.realtime_signal;
+    int const  cpu_sig = cfg.cputime_signal;
 
     std::set<int> const sigs = { rt_sig, cpu_sig };
 

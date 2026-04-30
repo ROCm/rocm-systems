@@ -17,7 +17,7 @@ using namespace rocprofsys::sampling::test;
 
 TEST(sampling_service_setup, setup_returns_nonempty_signal_set_for_normal_thread)
 {
-    test_service      svc;
+    test_service      svc{ make_test_config() };
     constexpr int64_t tid = 0;
 
     auto sigs = svc.setup(tid);
@@ -30,12 +30,12 @@ TEST(sampling_service_setup, setup_returns_nonempty_signal_set_for_normal_thread
 
 TEST(sampling_service_setup, setup_includes_realtime_signal)
 {
-    test_service      svc;
+    test_service      svc{ make_test_config() };
     constexpr int64_t tid = 0;
 
     svc.setup(tid);
 
-    auto realtime_sig = ::rocprofsys::get_sampling_realtime_signal();
+    auto realtime_sig = svc.config().realtime_signal;
     auto sigs         = svc.get_signal_types(tid);
     EXPECT_NE(sigs.find(realtime_sig), sigs.end())
         << "get_signal_types() must include the realtime signal after setup()";
@@ -45,12 +45,12 @@ TEST(sampling_service_setup, setup_includes_realtime_signal)
 
 TEST(sampling_service_setup, setup_includes_cputime_signal)
 {
-    test_service      svc;
+    test_service      svc{ make_test_config() };
     constexpr int64_t tid = 0;
 
     svc.setup(tid);
 
-    auto cputime_sig = ::rocprofsys::get_sampling_cputime_signal();
+    auto cputime_sig = svc.config().cputime_signal;
     auto sigs        = svc.get_signal_types(tid);
     EXPECT_NE(sigs.find(cputime_sig), sigs.end())
         << "get_signal_types() must include the cputime signal after setup()";
@@ -60,7 +60,7 @@ TEST(sampling_service_setup, setup_includes_cputime_signal)
 
 TEST(sampling_service_setup, setup_returns_empty_when_duration_disabled)
 {
-    test_service svc;
+    test_service svc{ make_test_config() };
 
     // Drive the duration_controller to its disabled state via the production
     // path: start with a tiny duration, then advance the fake clock past the
@@ -86,7 +86,7 @@ TEST(sampling_service_setup, setup_returns_empty_when_duration_disabled)
 
 TEST(sampling_service_setup, block_and_unblock_samples_toggle_global_gate)
 {
-    test_service svc;
+    test_service svc{ make_test_config() };
     EXPECT_FALSE(svc.is_blocked());
 
     svc.block_samples();
@@ -100,7 +100,7 @@ TEST(sampling_service_setup, block_and_unblock_samples_toggle_global_gate)
 
 TEST(sampling_service_setup, block_signals_calls_sigmask_with_sig_block)
 {
-    test_service svc;
+    test_service svc{ make_test_config() };
     svc.setup(0);
 
     auto&  dispatcher   = svc.signal_dispatcher_ref();
@@ -121,7 +121,7 @@ TEST(sampling_service_setup, block_signals_calls_sigmask_with_sig_block)
 
 TEST(sampling_service_setup, unblock_signals_calls_sigmask_with_sig_unblock)
 {
-    test_service svc;
+    test_service svc{ make_test_config() };
     svc.setup(0);
 
     auto& dispatcher = svc.signal_dispatcher_ref();
@@ -140,7 +140,7 @@ TEST(sampling_service_setup, unblock_signals_calls_sigmask_with_sig_unblock)
 
 TEST(sampling_service_setup, get_signal_types_returns_initialized_set_for_tid)
 {
-    test_service      svc;
+    test_service      svc{ make_test_config() };
     constexpr int64_t tid = 0;
 
     svc.setup(tid);
@@ -154,7 +154,7 @@ TEST(sampling_service_setup, get_signal_types_returns_initialized_set_for_tid)
 
 TEST(sampling_service_setup, setup_calls_signal_dispatcher_to_block_signals)
 {
-    test_service svc;
+    test_service svc{ make_test_config() };
 
     auto& dispatcher = svc.signal_dispatcher_ref();
     ASSERT_EQ(dispatcher.m_calls.size(), 0U)

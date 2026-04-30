@@ -32,7 +32,7 @@ using namespace rocprofsys::sampling::test;
 
 TEST(postfork, parent_reinit_is_safe_with_empty_registry)
 {
-    test_service svc;
+    test_service svc{ make_test_config() };
     // No setup() called — registry is empty.
     EXPECT_NO_THROW(svc.postfork_parent_reinit())
         << "postfork_parent_reinit() must not throw when the thread registry is empty";
@@ -42,7 +42,7 @@ TEST(postfork, parent_reinit_is_safe_with_empty_registry)
 
 TEST(postfork, parent_reinit_is_safe_with_active_threads)
 {
-    test_service svc;
+    test_service svc{ make_test_config() };
     svc.setup(0);
     svc.setup(1);
 
@@ -70,7 +70,7 @@ TEST(postfork, parent_reinit_is_safe_with_active_threads)
 
 TEST(postfork, child_cleanup_blocks_signals_before_resetting_registry)
 {
-    test_service svc;
+    test_service svc{ make_test_config() };
     svc.setup(0);
 
     // Confirm at least one active thread state exists before cleanup.
@@ -109,7 +109,7 @@ TEST(postfork, child_cleanup_blocks_signals_before_resetting_registry)
 
 TEST(postfork, child_cleanup_clears_registry)
 {
-    test_service svc;
+    test_service svc{ make_test_config() };
     svc.setup(0);
     svc.setup(1);
     svc.setup(2);
@@ -133,7 +133,7 @@ TEST(postfork, child_cleanup_clears_registry)
 
 TEST(postfork, child_cleanup_releases_state_with_armed_timer)
 {
-    test_service svc;
+    test_service svc{ make_test_config() };
     svc.setup(0);
 
     // Emplace a mock realtime trigger on thread 0's state.
@@ -163,7 +163,7 @@ TEST(postfork, child_cleanup_releases_state_with_armed_timer)
 
 TEST(postfork, real_fork_parent_and_child_complete_without_deadlock)
 {
-    test_service svc;
+    test_service svc{ make_test_config() };
     svc.setup(0);
 
     pid_t child = ::fork();
@@ -194,7 +194,7 @@ TEST(postfork, real_fork_parent_and_child_complete_without_deadlock)
 
 TEST(postfork, child_cleanup_safe_with_empty_registry)
 {
-    test_service svc;
+    test_service svc{ make_test_config() };
     // No setup() — registry empty, no signals to block.
     EXPECT_NO_THROW(svc.postfork_child_cleanup())
         << "postfork_child_cleanup() must not throw when registry is empty "

@@ -24,7 +24,7 @@ using namespace rocprofsys::sampling::test;
 
 TEST(full_pipeline, setup_and_shutdown_completes_without_crash)
 {
-    test_service svc;
+    test_service svc{ make_test_config() };
     svc.setup(0);
     svc.shutdown(0);
     SUCCEED();
@@ -34,7 +34,7 @@ TEST(full_pipeline, setup_and_shutdown_completes_without_crash)
 
 TEST(full_pipeline, report_writer_accessible_after_shutdown)
 {
-    test_service svc;
+    test_service svc{ make_test_config() };
     svc.setup(0);
     svc.shutdown(0);
 
@@ -48,7 +48,7 @@ TEST(full_pipeline, report_writer_accessible_after_shutdown)
 
 TEST(full_pipeline, perfetto_sink_accessible_after_shutdown)
 {
-    test_service svc;
+    test_service svc{ make_test_config() };
     svc.setup(0);
     svc.shutdown(0);
 
@@ -61,7 +61,7 @@ TEST(full_pipeline, perfetto_sink_accessible_after_shutdown)
 
 TEST(full_pipeline, shutdown_after_pause_resume)
 {
-    test_service svc;
+    test_service svc{ make_test_config() };
     svc.setup(0);
     svc.pause();
     svc.resume();
@@ -74,7 +74,7 @@ TEST(full_pipeline, shutdown_after_pause_resume)
 
 TEST(full_pipeline, multi_tid_setup_then_shutdown)
 {
-    test_service svc;
+    test_service svc{ make_test_config() };
 
     constexpr int64_t k_num_tids = 4;
     for(int64_t tid = 0; tid < k_num_tids; ++tid)
@@ -92,7 +92,7 @@ TEST(full_pipeline, multi_tid_setup_then_shutdown)
 
 TEST(full_pipeline, not_paused_initially)
 {
-    test_service svc;
+    test_service svc{ make_test_config() };
     EXPECT_FALSE(svc.is_paused()) << "service must start unpaused";
 }
 
@@ -100,7 +100,7 @@ TEST(full_pipeline, not_paused_initially)
 
 TEST(full_pipeline, not_blocked_initially)
 {
-    test_service svc;
+    test_service svc{ make_test_config() };
     EXPECT_FALSE(svc.is_blocked()) << "service must start unblocked";
 }
 
@@ -108,7 +108,7 @@ TEST(full_pipeline, not_blocked_initially)
 
 TEST(full_pipeline, setup_and_shutdown_single_tid)
 {
-    test_service svc;
+    test_service svc{ make_test_config() };
     svc.setup(0);
     svc.shutdown(0);
     SUCCEED();

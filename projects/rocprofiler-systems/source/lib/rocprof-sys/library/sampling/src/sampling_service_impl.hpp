@@ -10,15 +10,14 @@
 // The lifecycle orchestration methods at the bottom of this file
 // (check_thread_guards, do_setup_wiring, do_shutdown_wiring, do_emit_resolved,
 // do_postfork_parent_reinit, do_postfork_child_cleanup) were folded out of
-// real_production_hooks. They depend on main-rocprof-sys-library headers
-// (core/config.hpp, core/perf.hpp, core/state.hpp, library/thread_info.hpp,
-// library/pmc/sampler.hpp, core/trace_cache/cache_manager.hpp) plus Linux
-// kernel headers (linux/perf_event.h, libunwind.h). Translation units that
-// transitively include this header therefore link against the rocprof-sys
-// main library — propagated via the rocprofiler-systems-interface-library
-// PUBLIC link on rocprof-sys-sampling-library.
+// real_production_hooks. Configuration is read from sampling_config (injected
+// at construction). Remaining main-library deps (core/perf.hpp,
+// core/trace_cache/cache_manager.hpp, library/thread_info.hpp) plus Linux
+// kernel headers (linux/perf_event.h, libunwind.h) are still included here;
+// these will be removed in subsequent decoupling tasks (Tasks 4–6).
 
 #include "sampling/data/track_name.hpp"
+#include "sampling/data/track_traits.hpp"
 #include "sampling/policies/real_trace_cache_sink.hpp"
 #include "sampling/policies/stack_frame_json.hpp"
 #include "sampling/policies/tl_state.hpp"
@@ -26,15 +25,6 @@
 #include "sampling/src/linux/symbol_resolver.hpp"
 #include "sampling/src/pause_interval_registry.hpp"
 #include "sampling/src/sample_parser.hpp"
-#include "sampling/src/sampling_config_fwd.hpp"
-
-#include "core/common.hpp"
-#include "core/config.hpp"
-#include "core/perf.hpp"
-#include "core/state.hpp"
-#include "core/trace_cache/cache_manager.hpp"
-#include "library/pmc/sampler.hpp"
-#include "library/thread_info.hpp"
 
 #include "rocprofiler-systems/categories.h"
 
@@ -62,8 +52,12 @@ namespace rocprofsys::sampling
 // ── Construction / Destruction ─────────────────────────────────────────────
 
 template <class Policies>
-sampling_service<Policies>::sampling_service()
-: pause_registry_(clock_)
+sampling_service<Policies>::sampling_service(sampling_config config)
+: config_(std::move(config))
+, trace_sink_(thread_info_resolver_)
+, perfetto_sink_(thread_info_resolver_, config_.use_perfetto,
+                 config_.perfetto_annotations)
+, pause_registry_(clock_)
 , duration_controller_([this]() {
     duration_disabled_ = true;
     block_samples();
@@ -158,7 +152,7 @@ void
 sampling_service<Policies>::apply_signal_mask(int how, std::set<int> sigs,
                                               char const* verb_capitalized)
 {
-    auto calling_tid = static_cast<int64_t>(threading::get_sys_tid());
+    auto calling_tid = static_cast<int64_t>(config_.get_sys_tid());
     if(sigs.empty()) sigs = get_signal_types(calling_tid);
     if(sigs.empty())
     {
@@ -227,7 +221,7 @@ sampling_service<Policies>::get_signal_types(int64_t tid)
     if(it != signal_types_.end()) return it->second;
 
     // Lazy-initialize from config (matches today's signal_type_instances behavior).
-    auto sigs          = rocprofsys::get_sampling_signals(tid);
+    auto sigs          = config_.resolve_signals(tid);
     signal_types_[tid] = sigs;
     return sigs;
 }
@@ -239,7 +233,7 @@ std::set<int>
 sampling_service<Policies>::setup(int64_t tid)
 {
     // AC-19: causal profiling guard.
-    if(rocprofsys::get_use_causal())
+    if(config_.use_causal)
     {
         throw std::runtime_error("Internal error! configuring sampling not permitted "
                                  "when causal profiling is enabled");
@@ -258,7 +252,7 @@ sampling_service<Policies>::setup(int64_t tid)
         auto                        it = signal_types_.find(tid);
         if(it == signal_types_.end())
         {
-            sigs               = rocprofsys::get_sampling_signals(tid);
+            sigs               = config_.resolve_signals(tid);
             signal_types_[tid] = sigs;
         }
         else
@@ -433,18 +427,6 @@ resolve_symbol(symbol_resolver& resolver, std::uintptr_t addr)
     return "<unresolved>";
 }
 
-// AC-16: register sampling category strings exactly once per process.
-inline void
-register_sampling_categories_once()
-{
-    static std::once_flag s_init;
-    std::call_once(s_init, [] {
-        auto& reg = trace_cache::get_metadata_registry();
-        reg.add_string("timer_sampling");
-        reg.add_string("overflow_sampling");
-    });
-}
-
 // Split raw records into TIMER and OVERFLOW vectors.
 inline std::pair<std::vector<backtrace_record>, std::vector<backtrace_record>>
 split_records(std::vector<backtrace_record> const& records)
@@ -479,18 +461,9 @@ template <class Policies>
 bool
 sampling_service<Policies>::check_thread_guards(int64_t tid)
 {
-    // I-12, Guard 1: thread state disabled.
-    if(get_thread_state() == ThreadState::Disabled) return false;
-
-    // I-12, Guard 2: offset thread — internally-created, not user code.
-    const auto& info = thread_info::get(tid, SequentTID);
-    if(info && info->is_offset) return false;
-
-    return true;
+    return config_.is_thread_eligible(tid);
 }
 
-// Wire per-thread TLS, arm POSIX timers + perf_event overflow trigger,
-// start the duration controller (tid==0 only), register trace_cache tracks.
 template <class Policies>
 void
 sampling_service<Policies>::do_setup_wiring(int64_t tid, thread_state_t* state,
@@ -498,121 +471,131 @@ sampling_service<Policies>::do_setup_wiring(int64_t tid, thread_state_t* state,
 {
     if(!state) return;
 
-    // Wire per-thread signal-handler state. Must be set on the calling
-    // thread so the handler can access them without a mutex (NFR-TS-2).
+    wire_tls(tid, state);
+    arm_timer_triggers(tid, state, sigs);
+    arm_overflow_trigger(tid, state, sigs);
+    start_duration_controller(tid);
+    register_trace_cache_tracks(tid);
+}
+
+template <class Policies>
+void
+sampling_service<Policies>::wire_tls(int64_t tid, thread_state_t* state)
+{
     using tls        = tl_state<Policies>;
     tls::sampler     = state;
     tls::offload     = &offload_;
     tls::logical_tid = tid;
+}
 
-    pid_t sys_tid   = static_cast<pid_t>(threading::get_sys_tid());
-    int   rt_sig    = rocprofsys::get_sampling_realtime_signal();
-    int   cpu_sig   = rocprofsys::get_sampling_cputime_signal();
-    int   ovfl_sig  = rocprofsys::get_sampling_overflow_signal();
-    auto& rt_slot   = state->realtime_trigger();
-    auto& cpu_slot  = state->cputime_trigger();
-    auto& ovfl_slot = state->overflow_trigger();
+template <class Policies>
+void
+sampling_service<Policies>::arm_timer_triggers(int64_t tid, thread_state_t* state,
+                                               std::set<int> const& sigs)
+{
+    pid_t sys_tid  = static_cast<pid_t>(config_.get_sys_tid());
+    int   rt_sig   = config_.realtime_signal;
+    int   cpu_sig  = config_.cputime_signal;
+    auto& rt_slot  = state->realtime_trigger();
+    auto& cpu_slot = state->cputime_trigger();
 
-    // AC-1: arm realtime timer if subscribed (independent of cputime — DEC-3).
     if(sigs.count(rt_sig) > 0)
     {
-        double rt_freq = rocprofsys::get_sampling_realtime_freq();
+        double rt_freq = config_.realtime_freq;
         rt_slot.emplace();
         rt_slot->configure(tid, sys_tid, rt_sig, CLOCK_REALTIME, rt_freq,
-                           rocprofsys::get_sampling_realtime_delay());
+                           config_.realtime_delay);
         rt_slot->start();
         LOG_DEBUG("thread {} realtime timer armed={} (sig={})", tid, rt_slot->is_armed(),
                   rt_sig);
-        // L06 — matches legacy: "[SIG{}] Sampler for thread {} will be triggered
-        // {:.1f}x per second of {}-time (every {:.3e} milliseconds)..."
         double rt_period_ms = (rt_freq > 0.0) ? (1000.0 / rt_freq) : 0.0;
         LOG_INFO("[SIG{}] Sampler for thread {} will be triggered {:.1f}x per "
                  "second of {}-time (every {:.3e} milliseconds)...",
                  rt_sig, tid, rt_freq, "wall", rt_period_ms);
     }
-    // AC-2: arm cputime timer if subscribed (independent of realtime — DEC-3).
+
     if(sigs.count(cpu_sig) > 0)
     {
-        double cpu_freq = rocprofsys::get_sampling_cputime_freq();
+        double cpu_freq = config_.cputime_freq;
         cpu_slot.emplace();
         cpu_slot->configure(tid, sys_tid, cpu_sig, CLOCK_THREAD_CPUTIME_ID, cpu_freq,
-                            rocprofsys::get_sampling_cputime_delay());
+                            config_.cputime_delay);
         cpu_slot->start();
         LOG_DEBUG("thread {} cputime timer armed={} (sig={} sys_tid={})", tid,
                   cpu_slot->is_armed(), cpu_sig, sys_tid);
-        // L06 — matches legacy: same pattern for CPU-time
         double cpu_period_ms = (cpu_freq > 0.0) ? (1000.0 / cpu_freq) : 0.0;
         LOG_INFO("[SIG{}] Sampler for thread {} will be triggered {:.1f}x per "
                  "second of {}-time (every {:.3e} milliseconds)...",
                  cpu_sig, tid, cpu_freq, "CPU", cpu_period_ms);
     }
+}
 
-    if(sigs.count(ovfl_sig) > 0)
-    {
-        perf_event_attr pe_attr        = {};
-        auto            event_name_opt = rocprofsys::get_setting_value<std::string>(
-            "ROCPROFSYS_SAMPLING_OVERFLOW_EVENT");
-        std::string event_name = event_name_opt.value_or("PERF_COUNT_SW_CPU_CLOCK");
-        double      ovfl_freq  = rocprofsys::get_sampling_overflow_freq();
-        rocprofsys::perf::config_overflow_sampling(pe_attr, event_name, ovfl_freq);
-        pe_attr.sample_type   = PERF_SAMPLE_IP | PERF_SAMPLE_CALLCHAIN;
-        pe_attr.wakeup_events = 1;
+template <class Policies>
+void
+sampling_service<Policies>::arm_overflow_trigger(int64_t tid, thread_state_t* state,
+                                                 std::set<int> const& sigs)
+{
+    int ovfl_sig = config_.overflow_signal;
+    if(sigs.count(ovfl_sig) == 0) return;
 
-        ovfl_slot.emplace();
-        ovfl_slot->configure(tid, sys_tid, ovfl_sig, &pe_attr, fatal_);
-        ovfl_slot->start();
-        LOG_DEBUG("thread {} overflow armed={} (sig={})", tid, ovfl_slot->is_open(),
-                  ovfl_sig);
-        // L05 — matches legacy: "[SIG{}] Sampler for thread {} will be triggered
-        // every {:.1f} {} events..."
-        LOG_INFO("[SIG{}] Sampler for thread {} will be triggered every {:.1f} "
-                 "{} events...",
-                 ovfl_sig, tid, ovfl_freq, event_name);
-    }
+    pid_t           sys_tid    = static_cast<pid_t>(config_.get_sys_tid());
+    perf_event_attr pe_attr    = {};
+    std::string     event_name = config_.overflow_event;
+    double          ovfl_freq  = config_.overflow_freq;
+    config_.configure_overflow_pe_attr(&pe_attr, event_name, ovfl_freq);
+    pe_attr.sample_type   = PERF_SAMPLE_IP | PERF_SAMPLE_CALLCHAIN;
+    pe_attr.wakeup_events = 1;
 
-    // Start the duration controller once on the main thread (tid==0).
+    auto& ovfl_slot = state->overflow_trigger();
+    ovfl_slot.emplace();
+    ovfl_slot->configure(tid, sys_tid, ovfl_sig, &pe_attr, fatal_);
+    ovfl_slot->start();
+    LOG_DEBUG("thread {} overflow armed={} (sig={})", tid, ovfl_slot->is_open(),
+              ovfl_sig);
+    LOG_INFO("[SIG{}] Sampler for thread {} will be triggered every {:.1f} "
+             "{} events...",
+             ovfl_sig, tid, ovfl_freq, event_name);
+}
+
+template <class Policies>
+void
+sampling_service<Policies>::start_duration_controller(int64_t tid)
+{
     if(tid == 0)
     {
-        double dur = rocprofsys::get_sampling_duration();
+        double dur = config_.duration;
         if(dur > 0.0) duration_controller_.start(dur);
     }
+}
 
-    // Register per-thread sampling tracks in the trace_cache metadata registry so
-    // data_processor can resolve track names when inserting backtrace_region_sample
-    // records. Must happen regardless of use_perfetto.
-    const auto& thread_inf = thread_info::get(tid, SequentTID);
-    if(thread_inf)
+template <class Policies>
+void
+sampling_service<Policies>::register_trace_cache_tracks(int64_t tid)
+{
+    auto thread_inf = thread_info_resolver_.resolve(tid);
+    if(!thread_inf) return;
+
+    const std::size_t sys_id = thread_inf->system_value;
+    const std::size_t seq_id = thread_inf->sequent_value;
+    const std::string timer_track =
+        make_thread_track_name(timer_track_tag{}, seq_id, sys_id);
+    const std::string overflow_track =
+        make_thread_track_name(overflow_track_tag{}, seq_id, sys_id);
+
+    config_.register_sampling_categories();
+    config_.register_thread_info(static_cast<int>(getppid()), static_cast<int>(getpid()),
+                                 sys_id);
+    config_.register_track(timer_track, sys_id);
+    config_.register_track(overflow_track, sys_id);
+
+    const std::string seq_suffix = " [" + std::to_string(seq_id) + "]";
+    for(char const* prefix : thread_counter_prefixes)
     {
-        const std::size_t sys_id = thread_inf->index_data->system_value;
-        const std::size_t seq_id = thread_inf->index_data->sequent_value;
-        const std::string timer_track =
-            make_thread_track_name(timer_track_tag{}, seq_id, sys_id);
-        const std::string overflow_track =
-            make_thread_track_name(overflow_track_tag{}, seq_id, sys_id);
-
-        auto& reg = trace_cache::get_metadata_registry();
-
-        detail::register_sampling_categories_once();
-
-        // AC-16: register thread info so rocpd has ppid/pid/tid for this thread.
-        reg.add_thread_info({ getppid(), getpid(), sys_id, 0, 0, "{}" });
-
-        reg.add_track({ timer_track, sys_id, "{}" });
-        reg.add_track({ overflow_track, sys_id, "{}" });
-
-        // TF-3 follow-up: per-thread process-sampling counter tracks emitted
-        // by real_trace_cache_sink::store_thread_counters as
-        // pmc_event_with_sample. Prefixes come from the sink so the two
-        // sides cannot drift.
-        const std::string seq_suffix = " [" + std::to_string(seq_id) + "]";
-        for(char const* prefix : real_trace_cache_sink::thread_counter_prefixes)
-        {
-            reg.add_track({ std::string{ prefix } + seq_suffix, sys_id, "{}" });
-        }
-
-        LOG_DEBUG("thread {} registered trace_cache tracks: '{}' / '{}'", tid,
-                  timer_track, overflow_track);
+        config_.register_track(std::string{ prefix } + seq_suffix, sys_id);
     }
+
+    LOG_DEBUG("thread {} registered trace_cache tracks: '{}' / '{}'", tid, timer_track,
+              overflow_track);
 }
 
 // Clear thread-local signal-handler pointers so a stale signal after state
@@ -647,7 +630,7 @@ sampling_service<Policies>::do_emit_resolved(int64_t tid)
 
     sample_parser   parser;
     symbol_resolver resolver;
-    const bool      legacy = rocprofsys::get_use_sampling_trace_legacy();
+    const bool      legacy = config_.trace_legacy;
 
     // Timer + cputime + thread-counter tracks (AC-11 discards single-sample buffer).
     if(timer_raw.size() >= 2)
@@ -683,11 +666,10 @@ template <class Policies>
 void
 sampling_service<Policies>::do_postfork_parent_reinit()
 {
-    if(rocprofsys::config::get_use_process_sampling() &&
-       rocprofsys::config::get_use_amd_smi())
+    if(config_.use_process_sampling && config_.use_amd_smi)
     {
         LOG_DEBUG("[postfork_parent_reinit] delegating to pmc::postfork_parent_reinit");
-        rocprofsys::pmc::postfork_parent_reinit();
+        config_.postfork_parent_reinit();
     }
 }
 
@@ -695,11 +677,10 @@ template <class Policies>
 void
 sampling_service<Policies>::do_postfork_child_cleanup()
 {
-    if(rocprofsys::config::get_use_process_sampling() &&
-       rocprofsys::config::get_use_amd_smi())
+    if(config_.use_process_sampling && config_.use_amd_smi)
     {
         LOG_DEBUG("[postfork_child_cleanup] delegating to pmc::postfork_child_cleanup");
-        rocprofsys::pmc::postfork_child_cleanup();
+        config_.postfork_child_cleanup();
     }
 }
 

@@ -16,18 +16,91 @@
 #    include "sampling/default_policies.hpp"
 #endif
 
+#include "core/perf.hpp"
+#include "core/state.hpp"
+#include "core/trace_cache/cache_manager.hpp"
+#include "library/pmc/sampler.hpp"
 #include "library/sampling_service_instantiation.hpp"
+#include "library/thread_info.hpp"
+
 #include "sampling/sampling_service.hpp"
+#include <linux/perf_event.h>
+#include <mutex>
 
 namespace rocprofsys::services
 {
 
 #if defined(__linux__)
 
+namespace
+{
+rocprofsys::sampling::sampling_config
+make_production_config()
+{
+    rocprofsys::sampling::sampling_config cfg;
+    cfg.realtime_signal      = rocprofsys::get_sampling_realtime_signal();
+    cfg.cputime_signal       = rocprofsys::get_sampling_cputime_signal();
+    cfg.overflow_signal      = rocprofsys::get_sampling_overflow_signal();
+    cfg.realtime_freq        = rocprofsys::get_sampling_realtime_freq();
+    cfg.cputime_freq         = rocprofsys::get_sampling_cputime_freq();
+    cfg.realtime_delay       = rocprofsys::get_sampling_realtime_delay();
+    cfg.cputime_delay        = rocprofsys::get_sampling_cputime_delay();
+    cfg.overflow_freq        = rocprofsys::get_sampling_overflow_freq();
+    cfg.duration             = rocprofsys::get_sampling_duration();
+    cfg.use_causal           = rocprofsys::get_use_causal();
+    cfg.trace_legacy         = rocprofsys::get_use_sampling_trace_legacy();
+    cfg.use_perfetto         = rocprofsys::config::get_use_perfetto();
+    cfg.perfetto_annotations = rocprofsys::config::get_perfetto_annotations();
+    cfg.use_process_sampling = rocprofsys::config::get_use_process_sampling();
+    cfg.use_amd_smi          = rocprofsys::config::get_use_amd_smi();
+    auto event_opt =
+        rocprofsys::get_setting_value<std::string>("ROCPROFSYS_SAMPLING_OVERFLOW_EVENT");
+    if(event_opt) cfg.overflow_event = *event_opt;
+    cfg.resolve_signals = [](int64_t tid) {
+        return rocprofsys::get_sampling_signals(tid);
+    };
+    cfg.get_sys_tid = []() -> int64_t {
+        return static_cast<int64_t>(rocprofsys::threading::get_sys_tid());
+    };
+    cfg.is_thread_eligible = [](int64_t tid) {
+        if(rocprofsys::get_thread_state() == rocprofsys::ThreadState::Disabled)
+            return false;
+        auto const& info = rocprofsys::thread_info::get(tid, rocprofsys::SequentTID);
+        return !(info && info->is_offset);
+    };
+    cfg.register_sampling_categories = []() {
+        static std::once_flag flag;
+        std::call_once(flag, [] {
+            auto& reg = rocprofsys::trace_cache::get_metadata_registry();
+            reg.add_string("timer_sampling");
+            reg.add_string("overflow_sampling");
+        });
+    };
+    cfg.register_thread_info = [](int ppid, int pid, std::size_t sys_id) {
+        rocprofsys::trace_cache::get_metadata_registry().add_thread_info(
+            { static_cast<pid_t>(ppid), static_cast<pid_t>(pid), sys_id, 0, 0, "{}" });
+    };
+    cfg.register_track = [](std::string name, std::size_t sys_id) {
+        rocprofsys::trace_cache::get_metadata_registry().add_track(
+            { std::move(name), sys_id, "{}" });
+    };
+    cfg.configure_overflow_pe_attr = [](void* pe_attr_ptr, std::string const& event_name,
+                                        double freq) {
+        auto* pe_attr = static_cast<perf_event_attr*>(pe_attr_ptr);
+        rocprofsys::perf::config_overflow_sampling(*pe_attr, event_name, freq);
+    };
+    cfg.postfork_parent_reinit = []() { rocprofsys::pmc::postfork_parent_reinit(); };
+    cfg.postfork_child_cleanup = []() { rocprofsys::pmc::postfork_child_cleanup(); };
+    return cfg;
+}
+}  // namespace
+
 rocprofsys::sampling::default_sampling_service&
 sampling()
 {
-    static rocprofsys::sampling::default_sampling_service instance;
+    static rocprofsys::sampling::default_sampling_service instance{
+        make_production_config()
+    };
     return instance;
 }
 
@@ -162,115 +235,19 @@ sampling_shutdown_in_child_mode(int64_t tid)
 
 // ── Signal handler definition (single TU) ──────────────────────────────────
 // Installed via sigaction in real_timer_trigger::start().
-// All state accessed through thread-local pointers — zero mutexes in handler (NFR-TS-2).
+// The template body lives in sampling/src/sampling_signal_handler_impl.hpp;
+// this extern "C" trampoline delegates to it with the production Policies.
+
+#    include "sampling/src/sampling_signal_handler_impl.hpp"
 
 #    include <csignal>
-#    include <ctime>
-#    include <libunwind.h>
-#    include <sys/resource.h>
-#    include <ucontext.h>
 
 extern "C" void
 rocprofsys_sampling_signal_handler(int sig, siginfo_t* /*info*/, void* ucontext)
 {
-    using namespace rocprofsys::sampling;
-
-    // Fast-path blocked check — no mutex.
-    if(rocprofsys::services::sampling().is_blocked()) return;
-
-    default_state_t* state = default_tl::sampler;
-    if(!state || !state->is_running()) return;
-
-    // Re-entry guard (DEC-15) — drop sample if already in handler.
-    if(state->try_enter_handler())
-    {
-        state->increment_dropped();
-        return;
-    }
-
-    state->enter_in_flight();
-
-    // Build backtrace_record in-place — no heap allocation.
-    backtrace_record rec{};
-    rec.tid          = default_tl::logical_tid;
-    rec.timestamp_ns = rocprofsys::services::sampling().get_clock().now_ns();
-    rec.trigger      = (sig == rocprofsys::get_sampling_overflow_signal())
-                           ? trigger_type::OVERFLOW
-                           : trigger_type::TIMER;
-    rec.pc_count     = 0;
-
-    // Unwind directly into rec.raw_pcs[] using the signal ucontext.
-    {
-        // The handler receives a kernel-supplied ucontext_t* and reinterprets it
-        // as the libunwind unw_context_t. On Linux/glibc both are the same
-        // mcontext_t-bearing layout; the static_assert catches any future ABI
-        // skew (e.g. uClibc, musl, a libunwind major version bump) at compile time.
-        static_assert(sizeof(unw_context_t) == sizeof(ucontext_t),
-                      "unw_context_t / ucontext_t size mismatch — ucontext "
-                      "reinterpret_cast in the sampling signal handler is unsafe");
-
-        unw_cursor_t  cursor = {};
-        unw_context_t uctx   = {};
-        if(ucontext)
-        {
-            uctx = *reinterpret_cast<unw_context_t const*>(
-                static_cast<ucontext_t const*>(ucontext));
-        }
-        else
-        {
-            unw_getcontext(&uctx);
-        }
-        if(unw_init_local(&cursor, &uctx) == 0)
-        {
-            while(rec.pc_count < static_cast<uint8_t>(MAX_STACK_DEPTH))
-            {
-                unw_word_t ip = 0;
-                if(unw_get_reg(&cursor, UNW_REG_IP, &ip) != 0) break;
-                if(ip == 0) break;
-                rec.raw_pcs[rec.pc_count++] = static_cast<uintptr_t>(ip);
-                if(unw_step(&cursor) <= 0) break;
-            }
-        }
-    }
-
-    // Capture per-thread CPU time (async-signal-safe per POSIX.1-2017 §2.4.3).
-    // Bit 0 of metrics.valid marks cpu_ns as populated.
-    {
-        struct timespec _cputime_ts = { 0, 0 };
-        if(clock_gettime(CLOCK_THREAD_CPUTIME_ID, &_cputime_ts) == 0)
-        {
-            rec.metrics.cpu_ns =
-                (_cputime_ts.tv_sec * INT64_C(1'000'000'000)) + _cputime_ts.tv_nsec;
-            rec.metrics.valid.set(0);
-        }
-    }
-
-    // TF-3: capture per-thread rusage so emit_resolved_to_trace_cache can
-    // produce the legacy thread_peak_memory / thread_context_switch /
-    // thread_page_fault Perfetto counter tracks. RUSAGE_THREAD is a Linux
-    // extension; getrusage is a thin syscall wrapper and behaves like an
-    // async-signal-safe operation in glibc (matches the legacy
-    // backtrace_metrics::sample call from develop).
-    {
-        struct rusage _ru = {};
-        if(::getrusage(RUSAGE_THREAD, &_ru) == 0)
-        {
-            rec.metrics.mem_peak_kb = static_cast<int64_t>(_ru.ru_maxrss);
-            rec.metrics.ctx_swch    = static_cast<int64_t>(_ru.ru_nvcsw + _ru.ru_nivcsw);
-            rec.metrics.page_flt    = static_cast<int64_t>(_ru.ru_minflt + _ru.ru_majflt);
-            rec.metrics.valid.set(1);  // mem_peak_kb
-            rec.metrics.valid.set(2);  // ctx_swch
-            rec.metrics.valid.set(3);  // page_flt
-        }
-    }
-
-    if(!state->ring_buffer().try_push(rec))
-    {
-        state->increment_dropped();
-    }
-
-    state->exit_in_flight();
-    state->exit_handler();
+    rocprofsys::sampling::sampling_signal_handler_body<
+        rocprofsys::sampling::default_sampling_policies>(
+        sig, ucontext, rocprofsys::services::sampling());
 }
 
 #endif  // __linux__

@@ -17,7 +17,7 @@ using namespace rocprofsys::sampling::test;
 
 TEST(sampling_service_pause_resume, pause_sets_paused_flag)
 {
-    test_service svc;
+    test_service svc{ make_test_config() };
     fake_clock::reset(1000);
 
     EXPECT_FALSE(svc.is_paused());
@@ -27,7 +27,7 @@ TEST(sampling_service_pause_resume, pause_sets_paused_flag)
 
 TEST(sampling_service_pause_resume, resume_clears_paused_flag)
 {
-    test_service svc;
+    test_service svc{ make_test_config() };
     fake_clock::reset(1000);
     svc.pause();
 
@@ -41,7 +41,7 @@ TEST(sampling_service_pause_resume, resume_clears_paused_flag)
 
 TEST(sampling_service_pause_resume, pause_sets_blocked_flag)
 {
-    test_service svc;
+    test_service svc{ make_test_config() };
     fake_clock::reset(0);
 
     EXPECT_FALSE(svc.is_blocked());
@@ -53,7 +53,7 @@ TEST(sampling_service_pause_resume, pause_sets_blocked_flag)
 
 TEST(sampling_service_pause_resume, resume_clears_blocked_flag)
 {
-    test_service svc;
+    test_service svc{ make_test_config() };
     fake_clock::reset(0);
 
     svc.pause();
@@ -66,7 +66,7 @@ TEST(sampling_service_pause_resume, resume_clears_blocked_flag)
 
 TEST(sampling_service_pause_resume, double_pause_is_noop_after_first_pause)
 {
-    test_service svc;
+    test_service svc{ make_test_config() };
     fake_clock::reset(0);
 
     svc.pause();
@@ -83,7 +83,7 @@ TEST(sampling_service_pause_resume, double_pause_is_noop_after_first_pause)
 
 TEST(sampling_service_pause_resume, double_resume_is_noop)
 {
-    test_service svc;
+    test_service svc{ make_test_config() };
     fake_clock::reset(0);
 
     svc.pause();
