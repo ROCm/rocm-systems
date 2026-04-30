@@ -32,6 +32,25 @@ were removed during the agentic refactor, so nothing here is optional.
 - All `--format`, `--llm`, `--prompt`, `--source-dir`, `-d`, `-o` flags
 - ROCm / rocprofv3 integration — we still read `.db` files and produce reports
 
+## Closed pre-agentic PRs not ported
+
+### rocm-systems#4979: LLM payload field-name mismatch
+
+The pre-agentic bridge
+`ai_analysis/api.py::_convert_result_to_llm_format()` emitted kernel
+dictionaries with `calls` and `percent_of_total`, while
+`ai_analysis/llm_analyzer.py::_sanitize_data()` expected
+`dispatch_count` and `pct_total_time`. Memory directions also used verbose
+labels such as `Host-to-Device` instead of compact IDs such as `h2d`.
+The result was silent metric loss in the LLM payload.
+
+[rocm-systems#4979](https://github.com/ROCm/rocm-systems/pull/4979)
+patched that deleted bridge. The fix is intentionally not ported:
+the agentic refactor removed the entire `perfxpert/ai_analysis/`
+package, and the current agent and deterministic payload paths keep
+producer and consumer field names aligned around `calls` and
+`percent_of_total`.
+
 ## If your workflow was...
 
 ### Conversational mode on `perfxpert analyze`
