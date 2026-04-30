@@ -1232,7 +1232,7 @@ change automatically; see `docs/architecture/correctness/gate-cascade.md` for th
 ## 10. MPI Multi-GPU Profiling (detailed)
 
 For the canonical MPI rules and command shape, use
-[Multi-GPU / MPI workflows](#5-multi-gpu--mpi-workflows). The short version
+[Multi-GPU / MPI workflows](#5-multi-gpu-mpi-workflows). The short version
 is unchanged: profile each rank with the launcher outside `rocprofv3`, give
 each rank a unique output name, merge the rank databases, then analyze the
 merged trace database.

@@ -49,7 +49,7 @@ def test_lint_sh_strict_exits_clean():
 
 
 def test_link_checker_strict_exits_clean():
-    """scripts/link-checker.py --strict must report no dead internal links."""
+    """scripts/link-checker.py --strict must report no dead links or anchors."""
     result = subprocess.run(
         [sys.executable, str(_LINK_CHECKER), "--strict", _PERFXPERT_ROOT],
         cwd=str(_REPO_ROOT),

@@ -56,9 +56,7 @@ SEARCH_DIRS=(
 VIOLATION_COUNT=0
 
 # Scan all .md files (excluding audit directories and git directories).
-# Exclusion list is documented in experimental/python/perfxpert/docs/
-# known-issues.md under "Scanner scope limitations → scripts/lint.sh".
-# Rationale for each path:
+# Rationale for each excluded path:
 #   - docs/confluence: Confluence-amendment audit artifacts that
 #     describe what was removed / renamed (must reference the old
 #     symbol names to explain what was scrubbed). Not shipped docs.

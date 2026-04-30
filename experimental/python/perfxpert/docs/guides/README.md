@@ -11,7 +11,7 @@ PerfXpert, jump to [../contributing/README.md](../contributing/README.md).
 | Install + run your first analysis | [getting-started.md](getting-started.md) |
 | Analyze an existing `.db` on a host without ROCm | [getting-started.md §0](getting-started.md#0-workflow-at-a-glance) |
 | Control `--format` output and report file names | [getting-started.md §4](getting-started.md#4-first-analysis-60-seconds) |
-| Run the first-time wizard (`perfxpert init`) | [getting-started.md §3.3](getting-started.md#33-first-run--perfxpert-init) |
+| Run the first-time wizard (`perfxpert init`) | [getting-started.md §3.3](getting-started.md#33-first-run-perfxpert-init) |
 | Understand how the agent brain works at runtime | [agentic-mode.md](agentic-mode.md) |
 | Use the interactive `perfxpert-code` TUI | [getting-started.md §9](getting-started.md#9-agentic-tui-workflow-the-star-feature) |
 | Drive PerfXpert from a coding backend (opencode / claude / codex / gemini) | [backends.md](backends.md) |

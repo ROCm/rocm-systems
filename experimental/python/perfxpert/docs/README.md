@@ -86,7 +86,9 @@ docs/
 - Every Python / bash code block intended as illustrative (not executable
   in CI) is prefixed with `# SKIP-SAMPLE — <reason>` so
   `scripts/test-samples.py --strict` skips it.
-- All cross-doc links are relative paths within this tree; external links
-  are flagged out-of-scope by `scripts/link-checker.py`.
+- All cross-doc links are relative paths within this tree; strict
+  `scripts/link-checker.py` validates internal file targets and Markdown
+  heading anchors. External URL health belongs to the separate link-health
+  workflow because it depends on network availability.
 - The user-facing brand is **PerfXpert**. `rocinsight` / `ROCINSIGHT` are
   retired and should not appear in any new doc.

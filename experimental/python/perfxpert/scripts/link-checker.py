@@ -1,33 +1,16 @@
 #!/usr/bin/env python3
-"""
-scripts/link-checker.py — Validate internal Markdown links across docs.
-Part of the docs-audit tooling.
-
-Scope (what IS checked):
-  - Relative file-existence of every `[text](path)` link in .md files
-    under the search root (excluding dotfiles and ai_analysis/).
-  - Skips links inside destructive-ignored paths (ai_analysis/, hidden).
-
-Out of scope (what is NOT checked):
-  - External HTTP/HTTPS URLs — skipped entirely (see is_external_url).
-  - Anchor fragments (`#section-id`) — stripped before file-existence
-    check. A broken anchor inside a valid file will NOT be flagged.
-  See docs/known-issues.md for the rationale.
-
-`--strict` flag:
-  - Changes OUTPUT FORMAT only: in strict mode no human-readable
-    preamble is printed; only CSV rows are emitted. The set of checks
-    performed is identical in both modes.
-"""
+"""Validate internal Markdown links across the PerfXpert docs tree."""
 
 import re
-import os
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import unquote
 import sys
 
 # Regex to match Markdown links: [text](url)
 MARKDOWN_LINK_PATTERN = r'\[([^\]]+)\]\(([^)]+)\)'
+HEADING_PATTERN = re.compile(r"^(#{1,6})\s+(.+?)\s*$")
+HTML_ID_PATTERN = re.compile(r"""<[^>]+\s(?:id|name)=["']([^"']+)["']""")
+EXPLICIT_ANCHOR_PATTERN = re.compile(r"\{#([A-Za-z0-9_.:-]+)\}\s*$")
 
 
 def is_external_url(url):
@@ -35,29 +18,75 @@ def is_external_url(url):
     return url.startswith('http://') or url.startswith('https://')
 
 
-def resolve_internal_link(doc_path, link_url):
-    """Resolve a relative link from a document."""
-    # Remove anchors
-    link_path = link_url.split('#')[0]
+def _github_slug(text):
+    """Return the GitHub-style slug for a Markdown heading."""
+    text = EXPLICIT_ANCHOR_PATTERN.sub("", text)
+    text = re.sub(r"<[^>]+>", "", text)
+    text = text.replace("`", "")
+    text = text.strip().lower()
+    text = re.sub(r"[^\w\s-]", "", text)
+    text = re.sub(r"\s+", "-", text)
+    text = re.sub(r"-+", "-", text)
+    return text.strip("-")
 
+
+def _markdown_anchors(path):
+    """Collect heading and explicit HTML anchors from a Markdown file."""
+    anchors = set()
+    counts = {}
+    try:
+        content = path.read_text(encoding="utf-8")
+    except Exception:
+        return anchors
+
+    for line in content.splitlines():
+        for match in HTML_ID_PATTERN.finditer(line):
+            anchors.add(match.group(1))
+
+        heading = HEADING_PATTERN.match(line)
+        if not heading:
+            continue
+        title = heading.group(2)
+        explicit = EXPLICIT_ANCHOR_PATTERN.search(title)
+        if explicit:
+            anchors.add(explicit.group(1))
+        slug = _github_slug(title)
+        if not slug:
+            continue
+        seen = counts.get(slug, 0)
+        anchors.add(slug if seen == 0 else f"{slug}-{seen}")
+        counts[slug] = seen + 1
+
+    return anchors
+
+
+def _split_link(link):
+    """Split a Markdown link target into path and decoded fragment."""
+    if "#" not in link:
+        return link, ""
+    path, fragment = link.split("#", 1)
+    return path, unquote(fragment)
+
+
+def _resolve_link_path(search_root, md_file, link_path):
     if not link_path:
-        # Anchor-only link (same file)
-        return str(doc_path)
-
-    # If absolute (starts with /), resolve from repo root
+        return md_file
     if link_path.startswith('/'):
-        return link_path
-
-    # Relative to document
-    doc_dir = Path(doc_path).parent
-    resolved = (doc_dir / link_path).resolve()
-    return str(resolved)
+        return Path(search_root) / link_path.lstrip('/')
+    return (md_file.parent / link_path).resolve()
 
 
-def find_broken_links(search_root="."):
+def _anchor_target_path(path):
+    if path.is_dir():
+        return path / "README.md"
+    return path
+
+
+def find_broken_links(search_root=".", *, validate_anchors=False):
     """Scan all .md files for broken links."""
     search_root = Path(search_root)
     broken_links = []
+    anchor_cache = {}
 
     for md_file in search_root.rglob("*.md"):
         # Skip hidden and cache dirs
@@ -85,23 +114,28 @@ def find_broken_links(search_root="."):
                 if is_external_url(link):
                     continue
 
-                # Validate internal link
-                link_path = link.split('#')[0]  # Remove anchor
-
-                if not link_path:
-                    # Anchor-only is OK
-                    continue
-
-                # Resolve relative to document
-                if link_path.startswith('/'):
-                    # Absolute path
-                    abs_path = Path(search_root) / link_path.lstrip('/')
-                else:
-                    # Relative path
-                    abs_path = (md_file.parent / link_path).resolve()
+                link_path, fragment = _split_link(link)
+                abs_path = _resolve_link_path(search_root, md_file, link_path)
 
                 # Check if file exists
                 if not abs_path.exists():
+                    broken_links.append({
+                        'file': str(md_file.relative_to(search_root)),
+                        'line': line_num,
+                        'link': link,
+                        'text': text,
+                    })
+                    continue
+
+                if not validate_anchors or not fragment:
+                    continue
+
+                anchor_target = _anchor_target_path(abs_path)
+                if anchor_target.suffix.lower() != ".md" or not anchor_target.exists():
+                    continue
+
+                anchors = anchor_cache.setdefault(anchor_target, _markdown_anchors(anchor_target))
+                if fragment not in anchors:
                     broken_links.append({
                         'file': str(md_file.relative_to(search_root)),
                         'line': line_num,
@@ -132,14 +166,14 @@ def main():
         strict = True
     search_root = args[0] if args else "."
 
-    broken_links = find_broken_links(search_root)
+    broken_links = find_broken_links(search_root, validate_anchors=strict)
 
     if broken_links:
         if strict:
             # Strict mode — emit only CSV rows, no preamble
             print_csv(broken_links)
         else:
-            print(f"Found {len(broken_links)} broken internal links:\n")
+            print(f"Found {len(broken_links)} broken internal links or anchors:\n")
             print_csv(broken_links)
         return 1
     else:
