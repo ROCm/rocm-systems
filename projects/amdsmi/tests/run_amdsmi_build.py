@@ -591,10 +591,14 @@ def install_package(cfg: "RunnerConfig", package_path: Path) -> None:
         print(f"Linked {symlink_path} -> {rocm_binary}")
 
     # Verify installation: CLI version + Python import/init/shutdown under
-    # the system python. The system package installs amdsmi/ directly into
-    # the build-host python's site-packages (see py-interface/CMakeLists.txt
-    # install rule), so any python3 on PATH that shares that purelib path
-    # will see it.
+    # the SYSTEM python. The system package installs amdsmi/ to the path
+    # /usr/bin/python3 searches (see py-interface/CMakeLists.txt). The
+    # test must use /usr/bin/python3 explicitly -- some build containers
+    # (notably ubuntu-24.04-bld) put a venv ahead of /usr/bin on PATH,
+    # and that venv has its own sys.path that does NOT include the
+    # system dist-packages. Falls back to plain `python3` if /usr/bin/python3
+    # is absent.
+    system_python = "/usr/bin/python3" if Path("/usr/bin/python3").exists() else "python3"
     import_smoke = (
         "import amdsmi; "
         "print('amdsmi from:', amdsmi.__file__); "
@@ -604,7 +608,7 @@ def install_package(cfg: "RunnerConfig", package_path: Path) -> None:
     )
     verify_commands = [
         [str(rocm_binary), "version"],
-        ["python3", "-c", import_smoke],
+        [system_python, "-c", import_smoke],
     ]
     for idx, verify_cmd in enumerate(verify_commands, start=1):
         try:

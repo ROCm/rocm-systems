@@ -168,15 +168,42 @@ endif()
 # via its `#!/usr/bin/env python3` shebang at runtime, so its purelib is
 # the only correct destination for the system DEB/RPM. We query it
 # directly with sysconfig.get_paths()['purelib'].
+#
+# IMPORTANT: do NOT use sysconfig.get_paths()['purelib'] -- on
+# Debian/Ubuntu the sysconfig "purelib" is /usr/lib/python3.X/site-packages
+# which is NOT on the system python's sys.path. Debian-derived distros put
+# system packages under /usr/lib/python3/dist-packages. The reliable query
+# is site.getsitepackages(), which returns the actual on-sys.path locations
+# we should install into. We prefer (in order):
+#   1. /usr/lib/python3/dist-packages         (Debian/Ubuntu primary)
+#   2. /usr/lib/python3.X/dist-packages       (Debian/Ubuntu versioned)
+#   3. /usr/lib/python3.X/site-packages       (RHEL/SLES/Fedora primary)
+# We avoid /usr/local/* because the system DEB/RPM owns /usr, and pip
+# manages /usr/local separately.
+set(_amdsmi_sitelib_query [[
+import site, sys
+candidates = [p for p in site.getsitepackages() if not p.startswith("/usr/local")]
+order = [
+    lambda p: p == "/usr/lib/python3/dist-packages",
+    lambda p: p.endswith("/dist-packages"),
+    lambda p: p.endswith("/site-packages"),
+]
+for pred in order:
+    for p in candidates:
+        if pred(p):
+            print(p); sys.exit(0)
+import sysconfig
+print(sysconfig.get_paths()["purelib"])
+]])
 if(EXISTS "/usr/bin/python3")
     execute_process(
-        COMMAND /usr/bin/python3 -c "import sysconfig; print(sysconfig.get_paths()['purelib'])"
+        COMMAND /usr/bin/python3 -c "${_amdsmi_sitelib_query}"
         OUTPUT_VARIABLE AMDSMI_SYSTEM_PYTHON_SITELIB
         OUTPUT_STRIP_TRAILING_WHITESPACE
         RESULT_VARIABLE _amdsmi_sitelib_rc
     )
     if(NOT _amdsmi_sitelib_rc EQUAL 0 OR AMDSMI_SYSTEM_PYTHON_SITELIB STREQUAL "")
-        message(WARNING "Could not query /usr/bin/python3 for purelib; falling back to Python3_SITELIB=${Python3_SITELIB}")
+        message(WARNING "Could not query /usr/bin/python3 site-packages; falling back to Python3_SITELIB=${Python3_SITELIB}")
         set(AMDSMI_SYSTEM_PYTHON_SITELIB "${Python3_SITELIB}")
     endif()
 else()
