@@ -63,4 +63,9 @@ using default_tl      = tl_state<default_sampling_policies>;
 
 #    include "sampling/policies/linux/sampling_signal_handler_fwd.hpp"
 
+// Template method bodies — bottom-included after the class definition and all
+// policy types are visible. Lives in src/ so platform types (sigset_t, etc.)
+// stay out of the public include/sampling/ headers (NFR-PORT-1).
+#    include "sampling/src/sampling_service_impl.hpp"
+
 #endif  // defined(__linux__)

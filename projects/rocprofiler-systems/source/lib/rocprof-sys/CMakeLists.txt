@@ -28,9 +28,19 @@ add_subdirectory(library)
 
 target_link_libraries(
     rocprofiler-systems-object-library
+    PRIVATE rocprofiler-systems::rocprofiler-systems-interface-library
+)
+
+# Sampling-specific include paths. Object injection is handled by
+# target_sources($<TARGET_OBJECTS:rocprof-sys-sampling-library>) in
+# library/sampling/CMakeLists.txt — do NOT target_link_libraries against
+# the OBJECT library here; that causes duplicate-symbol link errors when
+# the sampling OBJECT library gains .cpp sources.
+target_include_directories(
+    rocprofiler-systems-object-library
     PRIVATE
-        rocprofiler-systems::rocprofiler-systems-interface-library
-        rocprof-sys-sampling-library
+        ${CMAKE_CURRENT_SOURCE_DIR}/library/sampling/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/library
 )
 
 # Preserve frame pointers so that libunwind can reliably unwind through

@@ -3,6 +3,13 @@
 
 # NFR-PORT-1: Verify public sampling headers contain no OS-specific includes.
 # Called from the sampling CMakeLists.txt add_test().
+#
+# Scope: this test greps files under include/sampling/ only. It does NOT
+# chase transitive includes through src/sampling_service_impl.hpp (which
+# legitimately pulls <linux/perf_event.h>, <libunwind.h>, etc.). That
+# header is bottom-included from the policy aggregators
+# (default_policies.hpp / test_sampling_policies.hpp), not from the public
+# surface, so the platform types stay out of the include/sampling/ contract.
 
 if(NOT DEFINED SAMPLING_INCLUDE)
     message(FATAL_ERROR "SAMPLING_INCLUDE not set")

@@ -42,3 +42,7 @@ struct test_sampling_policies
 using test_service = sampling_service<test_sampling_policies>;
 
 }  // namespace rocprofsys::sampling::test
+
+// Template method bodies — bottom-included so test TUs that instantiate
+// sampling_service<test_sampling_policies> see the full method definitions.
+#include "sampling/src/sampling_service_impl.hpp"

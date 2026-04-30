@@ -165,7 +165,10 @@ causal_sampling();
 #endif
 }  // namespace rocprofsys::services
 
-// Template method bodies — include after class definition.
-// Lives in src/ so it can use platform types (sigset_t, etc.)
-// without polluting the public include/sampling/ headers (NFR-PORT-1).
-#include "sampling/src/sampling_service_impl.hpp"
+// Template method bodies live in src/sampling_service_impl.hpp. That header
+// pulls platform types (sigset_t, linux/perf_event.h, libunwind.h) plus
+// main-library headers (core/config.hpp, core/perf.hpp, etc.), so it is NOT
+// included here to keep the public include/sampling/ surface platform-neutral
+// (NFR-PORT-1). Instead, the bottom-include is in the two policy aggregators:
+//   • library/sampling/default_policies.hpp   (production)
+//   • library/sampling/tests/doubles/test_sampling_policies.hpp (test)
