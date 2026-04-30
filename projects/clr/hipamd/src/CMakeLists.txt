@@ -212,6 +212,10 @@ if(__HIP_ENABLE_PCH)
   # find_package(LLVM) returns the lib/cmake/llvm location. We require the root.
   if(NOT DEFINED HIP_LLVM_ROOT)
     set(HIP_LLVM_ROOT "${LLVM_DIR}/../../..")
+    if(NOT EXISTS "${HIP_LLVM_ROOT}/bin/clang")
+      # required because Rock installs llvm to /opt/rocm/lib/llvm
+      set(HIP_LLVM_ROOT "${LLVM_DIR}/../../llvm")
+    endif()
   endif()
 
   execute_process(COMMAND sh -c "${CMAKE_CURRENT_SOURCE_DIR}/hip_embed_pch.sh ${HIP_COMMON_INCLUDE_DIR} ${PROJECT_BINARY_DIR}/include ${PROJECT_SOURCE_DIR}/include ${HIP_LLVM_ROOT}" COMMAND_ECHO STDERR RESULT_VARIABLE EMBED_PCH_RC WORKING_DIRECTORY ${CMAKE_BINARY_DIR})

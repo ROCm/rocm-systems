@@ -22,7 +22,7 @@
 
 #pragma once
 
-#include "lib/rocprofiler-sdk/aql/aql_profile_v2.h"
+#include "lib/aqlprofile/aqlprofile.hpp"
 #include "lib/rocprofiler-sdk/aql/helpers.hpp"
 #include "lib/rocprofiler-sdk/counters/metrics.hpp"
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
@@ -58,6 +58,11 @@ operator<(aqlprofile_pmc_event_t lhs, aqlprofile_pmc_event_t rhs)
 
 namespace rocprofiler
 {
+namespace thread_trace
+{
+struct thread_trace_parameter_pack;
+}
+
 namespace aql
 {
 /**

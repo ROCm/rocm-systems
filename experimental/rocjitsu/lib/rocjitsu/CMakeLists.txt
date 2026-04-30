@@ -6,6 +6,7 @@ set(ROCJITSU_SRC_DIR ${CMAKE_CURRENT_SOURCE_DIR}/src)
 
 include(rj_add_object_library)
 
+add_subdirectory(src/rocjitsu/analysis)
 add_subdirectory(src/rocjitsu/code)
 add_subdirectory(src/rocjitsu/isa)
 add_subdirectory(src/rocjitsu/vm)

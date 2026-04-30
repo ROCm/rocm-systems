@@ -278,24 +278,24 @@ class ROBackend : public Backend {
   /**
    * @brief A free-list containing contexts.
    */
-  FreeListProxy<HIPAllocator, ROContext *> ctx_free_list{};
+  FreeListProxy<ROContext *> ctx_free_list{};
 
   /**
    * @brief AtomicWFQueue containing status flag buffers for default context
    */
-  AtomicWFQueueProxy<HIPAllocator, volatile char*> default_ctx_status_{};
+  AtomicWFQueueProxy<volatile char*> default_ctx_status_{};
 
   /**
    * @brief AtomicWFQueue containing rocshmem_g return buffers for default
    * context
    */
-  AtomicWFQueueProxy<HIPAllocator, uint64_t*> default_ctx_g_ret_buffer_{};
+  AtomicWFQueueProxy<uint64_t*> default_ctx_g_ret_buffer_{};
 
   /**
    * @brief AtomicWFQueue containing rocshmem return buffers for default
    * context
    */
-  AtomicWFQueueProxy<HIPAllocator, uint64_t*> default_ctx_atomic_ret_buffer_{};
+  AtomicWFQueueProxy<uint64_t*> default_ctx_atomic_ret_buffer_{};
 
   /**
    * @brief Holds maximum threads per work-group
