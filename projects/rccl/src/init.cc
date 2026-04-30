@@ -1240,6 +1240,28 @@ static ncclResult_t initNvlDomainInfo(struct ncclComm* comm) {
   return ncclSuccess;
 }
 
+// True when every host has the same number of ranks and those partitions sum to nranks.
+static bool uniformRanksPerHost(const struct ncclComm* comm, int nranks) {
+  int ranksPerHost = -1;
+  int total = 0;
+  for (int i = 0; i < nranks; i++) {
+    uint64_t h = comm->peerInfo[i].hostHash;
+    bool lowestRankOnHost = true;
+    for (int j = 0; j < i; j++) {
+      if (comm->peerInfo[j].hostHash == h) { lowestRankOnHost = false; break; }
+    }
+    if (!lowestRankOnHost) continue;
+    int cnt = 0;
+    for (int j = 0; j < nranks; j++) {
+      if (comm->peerInfo[j].hostHash == h) cnt++;
+    }
+    total += cnt;
+    if (ranksPerHost < 0) ranksPerHost = cnt;
+    else if (cnt != ranksPerHost) return false;
+  }
+  return total == nranks && ranksPerHost > 0;
+}
+
 static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* parent, uint64_t timers[TIMERS_INIT_COUNT]) {
   // We use 2 AllGathers
   // 1. { peerInfo, comm, compCap}
@@ -1649,7 +1671,7 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
 
   NCCLCHECKGOTO(bootstrapAllGather(comm->bootstrap, allGather3Data, sizeof(*allGather3Data)), ret, fail);
 
-  {
+  if (uniformRanksPerHost(comm, nranks)) {
     // Plurality vote for romeTopoModelIdx. Tie on vote count: prefer the value that
     // first appears on the lowest rank (outer index c is that first rank).
     auto checkRomeTopoModelIdxConsensus = [](struct ncclComm* c, struct allGatherInfo* ag, int n) -> ncclResult_t {
