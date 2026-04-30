@@ -40,6 +40,7 @@
 #include <sys/resource.h>
 #include <unistd.h>
 #include "graph/topo.h"
+#include "graph/rome_topo_consensus.h"
 #include "graph/xml.h"
 #include "archinfo.h"
 #include "param.h"
@@ -1673,59 +1674,12 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   NCCLCHECKGOTO(bootstrapAllGather(comm->bootstrap, allGather3Data, sizeof(*allGather3Data)), ret, fail);
 
   if (uniformRanksPerHost(comm, nranks)) {
-    // Plurality vote for romeTopoModelIdx. Tie on vote count: prefer the value that
-    // first appears on the lowest rank (outer index c is that first rank).
-    auto checkRomeTopoModelIdxConsensus = [](struct ncclComm* c, struct allGatherInfo* ag, int n) -> ncclResult_t {
-      std::unordered_map<int, std::pair<int, int>> tallies; // romeTopoModelIdx -> (vote count, first rank with this idx)
-      tallies.reserve(n);
-      for (int r = 0; r < n; r++) {
-        int v = ag[r].romeTopoModelIdx;
-        auto it = tallies.find(v);
-        if (it == tallies.end()) {
-          tallies.emplace(v, std::make_pair(1, r));
-        } else {
-          it->second.first++;
-        }
-      }
-      int refIdx = ag[0].romeTopoModelIdx;
-      int refVotes = -1;
-      int refFirstRank = n;
-      for (const auto& e : tallies) {
-        int cnt = e.second.first;
-        int firstRank = e.second.second;
-        if (cnt > refVotes || (cnt == refVotes && firstRank < refFirstRank)) {
-          refVotes = cnt;
-          refIdx = e.first;
-          refFirstRank = firstRank;
-        }
-      }
-      if (tallies.size() == 1) return ncclSuccess;
-      int nDisagree = 0;
-      for (int r = 0; r < n; r++) {
-        if (ag[r].romeTopoModelIdx != refIdx) nDisagree++;
-      }
-      if (nDisagree > 0) {
-        WARN("RCCL FATAL: mismatched Rome preset topology model index across ranks; all ranks must agree for precomputed graphs (voted refIdx %d from %d of %d ranks).", refIdx, refVotes, n);
-        std::unordered_map<uint64_t, int> lowestMismatchRankByHost;
-        lowestMismatchRankByHost.reserve(n);
-        for (int r = 0; r < n; r++) {
-          if (ag[r].romeTopoModelIdx == refIdx) continue;
-          uint64_t h = c->peerInfo[r].hostHash;
-          if (lowestMismatchRankByHost.find(h) == lowestMismatchRankByHost.end()) {
-            lowestMismatchRankByHost.emplace(h, r);
-          }
-        }
-        for (int r = 0; r < n; r++) {
-          if (ag[r].romeTopoModelIdx == refIdx) continue;
-          uint64_t h = c->peerInfo[r].hostHash;
-          if (lowestMismatchRankByHost[h] != r) continue;
-          WARN("  rank %d host %s romeTopoModelIdx=%d", r, ag[r].hostname, ag[r].romeTopoModelIdx);
-        }
-        return ncclInvalidUsage;
-      }
-      return ncclSuccess;
-    };
-    NCCLCHECKGOTO(checkRomeTopoModelIdxConsensus(comm, allGather3Data, nranks), ret, fail);
+    NCCLCHECKGOTO(rcclCheckRomeTopoModelIdxConsensus(
+        nranks,
+        [&](int r) { return allGather3Data[r].romeTopoModelIdx; },
+        [&](int r) { return allGather3Data[r].hostname; },
+        [&](int r) { return comm->peerInfo[r].hostHash; }),
+      ret, fail);
   }
 
   // Determine nNodes, firstRanks, ...

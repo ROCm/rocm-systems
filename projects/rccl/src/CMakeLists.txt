@@ -60,6 +60,8 @@ set(SRC_FILES
   src/graph/rings.h
   src/graph/rome_models.cc
   src/graph/rome_models.h
+  src/graph/rome_topo_consensus.cc
+  src/graph/rome_topo_consensus.h
   src/graph/search.cc
   src/graph/topo.cc
   src/graph/topo.h
