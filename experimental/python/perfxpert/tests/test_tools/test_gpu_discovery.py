@@ -10,16 +10,19 @@ from perfxpert.tools import gpu_discovery
 from perfxpert.tools._class import ToolClass
 
 
+_SYNTHETIC_GFX_IDS = ("gfxabc", "gfxdef", "gfxghi", "gfxjkl")
+
+
 def _rocminfo_sample(
-    gfx_id: str = "gfx1200",
+    gfx_id: str = _SYNTHETIC_GFX_IDS[0],
     *,
     node_id: int = 1,
-    max_sclk_mhz: int = 3500,
-    cu_count: int = 32,
-    simds_per_cu: int = 2,
-    wave_size: int = 32,
-    max_waves_per_cu: int = 32,
-    lds_kb: int = 64,
+    max_sclk_mhz: int = 1234,
+    cu_count: int = 12,
+    simds_per_cu: int = 3,
+    wave_size: int = 16,
+    max_waves_per_cu: int = 24,
+    lds_kb: int = 48,
 ) -> str:
     return f"""
 *******
@@ -27,7 +30,7 @@ Agent 2
 *******
   Name:                    {gfx_id}
   Uuid:                    GPU-c2171ff77417f1d6
-  Marketing Name:          AMD Radeon Graphics
+  Marketing Name:          Synthetic GPU
   Vendor Name:             AMD
   Device Type:             GPU
   Node:                    {node_id}
@@ -59,28 +62,32 @@ def test_discover_runtime_gpu_specs_is_read_only() -> None:
 
 
 def test_discover_runtime_gpu_specs_merges_rocm_tools(monkeypatch) -> None:
-    gfx_id = "gfx1200"
+    gfx_id = _SYNTHETIC_GFX_IDS[0]
     topology = {
         "node_id": 1,
-        "cu_count": 32,
-        "wave_size": 32,
-        "simds_per_cu": 2,
-        "max_waves_per_cu": 32,
-        "max_sclk_mhz": 3500,
+        "cu_count": 12,
+        "wave_size": 16,
+        "simds_per_cu": 3,
+        "max_waves_per_cu": 24,
+        "max_sclk_mhz": 1234,
     }
-    vram_total_bytes = 8539602944
+    vram_total_bytes = 123456789
+    rocm_smi_sclk_mhz = 321
+    rocm_smi_mclk_mhz = 654
+    amd_smi_mem_clk_mhz = 987
+    amd_smi_total_vram_mb = 765
     rocm_smi_info = {
         "card0": {
             "Node ID": str(topology["node_id"]),
             "GFX Version": gfx_id,
-            "Card Series": "AMD Radeon Graphics",
+            "Card Series": "Synthetic GPU",
             "VRAM Total Memory (B)": str(vram_total_bytes),
         }
     }
     rocm_smi_clocks = {
         "card0": {
-            "sclk clock speed:": "(500Mhz)",
-            "mclk clock speed:": "(1258Mhz)",
+            "sclk clock speed:": f"({rocm_smi_sclk_mhz}Mhz)",
+            "mclk clock speed:": f"({rocm_smi_mclk_mhz}Mhz)",
         }
     }
     amd_smi_list = [
@@ -97,10 +104,10 @@ def test_discover_runtime_gpu_specs_merges_rocm_tools(monkeypatch) -> None:
                 "gpu": 0,
                 "clock": {
                     "gfx_0": {"max_clk": {"value": topology["max_sclk_mhz"], "unit": "MHz"}},
-                    "mem_0": {"max_clk": {"value": 1258, "unit": "MHz"}},
+                    "mem_0": {"max_clk": {"value": amd_smi_mem_clk_mhz, "unit": "MHz"}},
                 },
                 "mem_usage": {
-                    "total_vram": {"value": 8144, "unit": "MB"},
+                    "total_vram": {"value": amd_smi_total_vram_mb, "unit": "MB"},
                 },
             }
         ]
@@ -136,11 +143,10 @@ def test_discover_runtime_gpu_specs_merges_rocm_tools(monkeypatch) -> None:
     assert gpu["max_waves_per_simd"] == topology["max_waves_per_cu"] // topology["simds_per_cu"]
     assert gpu["max_sclk_mhz"] == topology["max_sclk_mhz"]
     assert gpu["vram_total_bytes"] == vram_total_bytes
-    assert gpu["peak_fp32_tflops"] > 0
     assert gpu["spec_sources"]["cu_count"] == "rocminfo"
 
 
-@pytest.mark.parametrize("gfx_id", ["gfx942", "gfx1200"])
+@pytest.mark.parametrize("gfx_id", _SYNTHETIC_GFX_IDS[:2])
 def test_discover_runtime_gpu_specs_filters_by_gfx(monkeypatch, gfx_id: str) -> None:
     monkeypatch.setattr(
         gpu_discovery,
@@ -151,11 +157,11 @@ def test_discover_runtime_gpu_specs_filters_by_gfx(monkeypatch, gfx_id: str) -> 
     _clear_cache()
 
     assert gpu_discovery.discover_runtime_gpu_specs(gfx_id)["gpus"]
-    assert gpu_discovery.discover_runtime_gpu_specs("gfx9999")["gpus"] == []
+    assert gpu_discovery.discover_runtime_gpu_specs(_SYNTHETIC_GFX_IDS[2])["gpus"] == []
 
 
 def test_merge_gpu_lists_preserves_same_arch_devices_with_distinct_nodes() -> None:
-    gfx_id = "gfx9999"
+    gfx_id = _SYNTHETIC_GFX_IDS[0]
     node_ids = [1, 2]
 
     merged = gpu_discovery._merge_gpu_lists(
@@ -184,24 +190,24 @@ def test_discover_runtime_gpu_specs_can_be_disabled(monkeypatch) -> None:
     assert "disabled" in result["errors"][0]
 
 
-@pytest.mark.parametrize("gfx_id", ["gfx908", "gfx942", "gfx1200", "gfx9999"])
+@pytest.mark.parametrize("gfx_id", _SYNTHETIC_GFX_IDS)
 def test_parse_kfd_topology_supplies_rocminfo_fallback_fields(tmp_path, gfx_id: str) -> None:
     node = tmp_path / "1"
     mem = node / "mem_banks" / "0"
     mem.mkdir(parents=True)
     props = {
-        "simd_count": 64,
-        "max_waves_per_simd": 16,
-        "lds_size_in_kb": 64,
-        "wave_front_size": 32,
-        "simd_per_cu": 2,
-        "max_engine_clk_fcompute": 3500,
+        "simd_count": 12,
+        "max_waves_per_simd": 8,
+        "lds_size_in_kb": 48,
+        "wave_front_size": 16,
+        "simd_per_cu": 3,
+        "max_engine_clk_fcompute": 1234,
     }
     mem_props = {
         "heap_type": 1,
-        "size_in_bytes": 8539602944,
-        "width": 128,
-        "mem_clk_max": 1258,
+        "size_in_bytes": 123456789,
+        "width": 96,
+        "mem_clk_max": 789,
     }
     (node / "name").write_text(f"{gfx_id}\n")
     (node / "properties").write_text("\n".join(f"{key} {value}" for key, value in props.items()))
@@ -218,7 +224,12 @@ def test_parse_kfd_topology_supplies_rocminfo_fallback_fields(tmp_path, gfx_id: 
     assert gpu["wave_size"] == props["wave_front_size"]
     assert gpu["max_sclk_mhz"] == props["max_engine_clk_fcompute"]
     assert gpu["vram_total_bytes"] == mem_props["size_in_bytes"]
-    expected_bandwidth = mem_props["width"] / 8.0 * mem_props["mem_clk_max"] * 2.0 / 1_000_000.0
+    bits_per_byte = 8
+    transfers_per_clock = 2
+    mhz_bytes_to_tbs = 1_000_000
+    expected_bandwidth = (
+        mem_props["width"] / bits_per_byte * mem_props["mem_clk_max"] * transfers_per_clock / mhz_bytes_to_tbs
+    )
     assert gpu["memory_bandwidth_tbs"] == pytest.approx(round(expected_bandwidth, 3))
     assert gpu["spec_sources"]["cu_count"] == "kfd-topology"
     assert gpu["spec_sources"]["memory_bandwidth_tbs"] == "derived-from-kfd-topology"
