@@ -61,6 +61,9 @@
 /experimental/perf-dkms                                               @bwelton
 /experimental/rocjitsu                                                @atgutier
 
+# Emulation
+/emulation/rocjitsu                                                   @atgutier
+
 # Documentation-specific ownership by project (last to take precedence)
 
 /projects/clr/**/*.md                                                 @ROCm/clr-reviewers @ROCm/lrt-docs-reviewers
