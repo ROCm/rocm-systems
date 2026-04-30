@@ -201,7 +201,9 @@ std::unique_ptr<tool_data_t> create_tool_data(rocprofiler_client_id_t* /*id*/)
 {
     auto tool_data = std::make_unique<tool_data_t>();
 
-    tool_data->sdk_callbacks   = std::make_shared<sdk_callbacks_impl_t>(g_sdk_wrapper);
+    tool_data->sdk_callbacks = std::make_shared<sdk_callbacks_impl_t>(g_sdk_wrapper);
+    tool_data->pc_sampling_collector.wlock([](auto& ptr) { ptr = pc_sampling_collector_t::create(); });
+
     tool_data->output_filename = generate_output_filename(g_input_parameters->get_output_path());
 
     // ROCPROF_COUNTERS env. var. is a string like "pmc: counter1 counter2 ..."

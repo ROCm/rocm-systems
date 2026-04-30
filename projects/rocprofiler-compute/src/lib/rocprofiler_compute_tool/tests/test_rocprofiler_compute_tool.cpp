@@ -38,6 +38,17 @@ TEST_F(test_rocprofiler_compute_tool_t, ProvidedEmptyKernelFilterRange_DoesntThr
     EXPECT_NO_THROW(rocprofiler_configure(1, "", 1, &m_client_id));
 }
 
+TEST_F(test_rocprofiler_compute_tool_t, ProvidedNormalExecution_ReturnsPointersToDataProcessors)
+{
+    const auto cfg       = rocprofiler_configure(1, "", 1, &m_client_id);
+    const auto tool_data = get_tool_data(cfg);
+    EXPECT_TRUE(tool_data->sdk_callbacks);
+    tool_data->pc_sampling_collector.rlock([](const auto& ptr)
+    {
+        EXPECT_TRUE(ptr);
+    });
+}
+
 TEST_F(test_rocprofiler_compute_tool_t, ProvidedNonEmptyOutputPath_ReturnsItExtended)
 {
     const auto cfg       = rocprofiler_configure(1, "", 1, &m_client_id);
