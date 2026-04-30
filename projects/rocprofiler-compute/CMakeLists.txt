@@ -670,6 +670,18 @@ add_test(
 )
 
 # -----------------------------------
+# File I/O unit tests
+# -----------------------------------
+
+add_test(
+    NAME test_file_io
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
+        --junitxml=tests/test_file_io.xml ${COV_OPTION} tests/test_file_io.py
+        ${WORKING_DIR_OPTION}
+)
+
+# -----------------------------------
 # Generate coverage tests
 # -----------------------------------
 
@@ -689,6 +701,7 @@ if(${ENABLE_COVERAGE})
         test_analyze_commands
         test_analyze_workloads
         test_metric_utils
+        test_file_io
         test_L1_cache_counters
         test_num_xcds_spec_class
         test_num_xcds_cli_output

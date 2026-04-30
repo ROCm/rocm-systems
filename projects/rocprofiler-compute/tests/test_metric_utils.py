@@ -349,6 +349,32 @@ class TestEvaluationPipeline:
             )
         assert metric_df.loc["1.1.0", "Value"] == 450
 
+    def test_eval_metric_resolves_accum_alias_column_end_to_end(self):
+        """eval_metric resolves YAML formulas that reference ACCUM alias columns."""
+        metric_df, dfs, dfs_type, sys_info, _ = self._build_eval_metric_inputs(
+            metric_fields={
+                "Value": (
+                    "to_sum(raw_pmc_df['SQ_INST_LEVEL_VMEM_ACCUM']) / "
+                    "to_sum(raw_pmc_df['SQ_INSTS_VMEM'])"
+                ),
+            }
+        )
+        flat_raw_pmc_df = pd.DataFrame({
+            "SQ_INST_LEVEL_VMEM_ACCUM": [100.0, 200.0, 300.0],
+            "SQ_INSTS_VMEM": [10.0, 20.0, 30.0],
+            "GRBM_GUI_ACTIVE": [1000, 2000, 1500],
+        })
+        with patch("utils.metrics.evaluation_pipeline.BUILD_IN_VARS", {}):
+            eval_metric(
+                dfs,
+                dfs_type,
+                sys_info,
+                pd.DataFrame(),
+                flat_raw_pmc_df,
+                debug=False,
+            )
+        assert metric_df.loc["1.1.0", "Value"] == 10.0
+
     def test_eval_metric_normalizes_falsey_average_to_empty_string(self):
         """eval_metric replaces a falsey Average value with the empty string."""
         metric_df, dfs, dfs_type, sys_info, raw_pmc_df = self._build_eval_metric_inputs(
@@ -540,3 +566,37 @@ class TestMetricEvaluator:
         assert result == pytest.approx(40.0), (
             f"SUM([100,200,300]) / SUM([10,0,5]) should be 40.0, got {result}"
         )
+
+    def test_build_eval_string_rewrites_accum_alias_as_flat_column_lookup(self):
+        """`*_ACCUM` aliases become flat ``raw_pmc_df['<alias>']`` lookups."""
+        eval_str = self._to_eval_str(
+            "SUM(SQ_INST_LEVEL_VMEM_ACCUM) / SUM(SQ_INSTS_VMEM)"
+        )
+        assert "raw_pmc_df['SQ_INST_LEVEL_VMEM_ACCUM']" in eval_str
+        assert "raw_pmc_df['SQ_INSTS_VMEM']" in eval_str
+
+    def test_eval_expression_resolves_accum_alias_column(self):
+        """SUM(<alias>_ACCUM) / SUM(...) returns the expected ratio for flat data."""
+        evaluator = self._make_evaluator({
+            "SQ_INST_LEVEL_VMEM_ACCUM": [100.0, 200.0, 300.0],
+            "SQ_INSTS_VMEM": [10.0, 20.0, 30.0],
+        })
+        eval_str = self._to_eval_str(
+            "SUM(SQ_INST_LEVEL_VMEM_ACCUM) / SUM(SQ_INSTS_VMEM)"
+        )
+        result = evaluator.eval_expression(eval_str)
+        assert isinstance(result, float)
+        assert abs(result - 10.0) < 1e-9, (
+            f"SUM([100,200,300]) / SUM([10,20,30]) should be 10.0, got {result}"
+        )
+
+    def test_eval_expression_aggregates_per_row_accum_alias_with_min(self):
+        """MIN(<alias>_ACCUM / counter) computes the per-row minimum ratio."""
+        evaluator = self._make_evaluator({
+            "SQ_INST_LEVEL_VMEM_ACCUM": [100.0, 50.0, 300.0],
+            "SQ_INSTS_VMEM": [10.0, 25.0, 30.0],
+        })
+        eval_str = self._to_eval_str("MIN(SQ_INST_LEVEL_VMEM_ACCUM / SQ_INSTS_VMEM)")
+        result = evaluator.eval_expression(eval_str)
+        assert isinstance(result, float)
+        assert abs(result - 2.0) < 1e-9, f"MIN([10, 2, 10]) should be 2.0, got {result}"
