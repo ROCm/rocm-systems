@@ -16,10 +16,10 @@ from .. import benchmark_base
 # =============================================================================
 class Bench_gfx9(benchmark_base.Bench_base):
     def __init__(self, device_id: str) -> None:
-        super().__init__(device_id)
-
         # Must define number of AID per arch
         self.aid_count: int
+
+        super().__init__(device_id)
 
         self.WAVEFRONT_SIZE = 64
         self.MATRIX_OPS_TYPE = "MFMA"

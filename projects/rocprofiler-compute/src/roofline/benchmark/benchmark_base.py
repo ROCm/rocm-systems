@@ -130,6 +130,11 @@ class Bench_base(ABC):
     # -----------------------------------------------------------------------------
     # Helper Methods and Classes
     # -----------------------------------------------------------------------------
+
+    # Method must be set in child classes
+    def set_cache_sizes(self) -> None:
+        self.cache_sizes = {}
+
     @contextmanager
     def gpu_benchmark_lock(self, device: int) -> Generator[None, None, None]:
         """Acquire exclusive lock for benchmarking a specific GPU."""
