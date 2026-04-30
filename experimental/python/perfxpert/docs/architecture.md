@@ -11,6 +11,9 @@ the interactive launcher (`perfxpert-code`), the stdio MCP server
 All four resolve into the same session/runtime layer in
 `perfxpert.agents.runtime`.
 
+For a node-by-node map from the README architecture diagram to the docs tree,
+see [architecture/README.md](architecture/README.md).
+
 ## Agents (spec §2)
 
 ```mermaid
@@ -48,7 +51,11 @@ flowchart TD
 
 8 agents total. Each has ≤ 400 lines of fence + ≤ 5 tools + ≤ 10 input / ≤ 5 output fields. Narrow scope is CI-enforced.
 
-See [architecture/agent-runtime/agent-hierarchy.md](architecture/agent-runtime/agent-hierarchy.md) for the tier-by-tier map, fence-slice pattern, and source-tree locations, and [architecture/correctness/gate-cascade.md](architecture/correctness/gate-cascade.md) for the 5-gate correctness middleware that sits between the agents. The full architecture docs index lives at [architecture/README.md](architecture/README.md).
+See [architecture/agent-runtime/agent-hierarchy.md](architecture/agent-runtime/agent-hierarchy.md)
+for the tier-by-tier map, fence-slice pattern, and source-tree locations, and
+[architecture/correctness/gate-cascade.md](architecture/correctness/gate-cascade.md)
+for the 5-gate correctness middleware that sits between the agents. The full
+architecture docs index lives at [architecture/README.md](architecture/README.md).
 
 ## Tools (spec §3 + Appendix A)
 
@@ -60,6 +67,9 @@ in-process only. The split is:
 - **EXECUTION** — in-process only (profile.run, compile.build, patch.apply)
 
 Every tool is pure (modulo knowledge YAML loads and SQL reads); < 100 ms p99.
+The layer map is [architecture/deterministic-foundation/](architecture/deterministic-foundation/)
+for deterministic tools and curated facts, and [architecture/mcp-boundary/](architecture/mcp-boundary/)
+for the external READ_ONLY MCP contract.
 
 ## Knowledge (spec §3 Appendix B)
 

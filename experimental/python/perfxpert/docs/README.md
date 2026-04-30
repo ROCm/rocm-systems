@@ -32,7 +32,7 @@ PerfXpert's user workflow is:
 | Area | Index |
 |------|-------|
 | User guides (install, formats, providers, MCP) | [guides/README.md](guides/README.md) |
-| Architecture (agent hierarchy, gate cascade, backend adapter) | [architecture/README.md](architecture/README.md) |
+| Architecture (README diagram layers, agent hierarchy, gate cascade, backend adapter) | [architecture/README.md](architecture/README.md) |
 | Integration (MCP server, Python API embedding) | [integration/README.md](integration/README.md) |
 | Contributing (extension surfaces, governance, audit gate) | [contributing/README.md](contributing/README.md) |
 | RFCs (architectural change proposals) | [rfcs/README.md](rfcs/README.md) |
@@ -48,7 +48,9 @@ docs/
 ├── architecture/
 │   ├── README.md            ← layer-oriented architecture sub-index
 │   ├── entry-surfaces/      ← CLI, perfxpert-code, backend adapters, API/MCP entry paths
+│   ├── mcp-boundary/        ← READ_ONLY external MCP contract
 │   ├── agent-runtime/       ← Root → Analysis → Recommendation → specialists
+│   ├── deterministic-foundation/ ← classifiers, counters, schemas, knowledge
 │   └── correctness/         ← gate cascade + validation/revert path
 ├── guides/
 │   ├── README.md            ← guides sub-index
