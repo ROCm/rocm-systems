@@ -40,7 +40,7 @@ void VNopVop1::execute_impl(amdgpu::Wavefront &wf) {
     dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
     src_operands_[0] = dpp_src0_.get();
   }
-  (void)wf;
+  amdgpu::execute_v_nop_vop1(*this, wf);
 }
 
 VMovB32Vop1::VMovB32Vop1(const MachineInst *inst)
@@ -71,6 +71,7 @@ VMovB32Vop1::VMovB32Vop1(const MachineInst *inst)
     sdwa_src0_sext_ = sw->src0_sext;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
+    sdwa_clamp_ = sw->clamp;
   }
 }
 
@@ -89,7 +90,10 @@ void VMovB32Vop1::execute_impl(amdgpu::Wavefront &wf) {
     dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
     src_operands_[0] = dpp_src0_.get();
   }
+  if (dpp_src0_)
+    src0.set_delegate(dpp_src0_.get());
   amdgpu::execute_v_mov_b32_vop1(*this, wf);
+  src0.clear_delegate();
 }
 
 VReadfirstlaneB32Vop1::VReadfirstlaneB32Vop1(const MachineInst *inst)
@@ -120,6 +124,7 @@ VReadfirstlaneB32Vop1::VReadfirstlaneB32Vop1(const MachineInst *inst)
     sdwa_src0_sext_ = sw->src0_sext;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
+    sdwa_clamp_ = sw->clamp;
   }
 }
 
@@ -138,6 +143,8 @@ void VReadfirstlaneB32Vop1::execute_impl(amdgpu::Wavefront &wf) {
     dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
     src_operands_[0] = dpp_src0_.get();
   }
+  if (dpp_src0_)
+    src0.set_delegate(dpp_src0_.get());
   uint64_t exec = wf.exec();
   uint32_t val = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -147,6 +154,7 @@ void VReadfirstlaneB32Vop1::execute_impl(amdgpu::Wavefront &wf) {
     }
   }
   vdst.write_scalar(wf, val);
+  src0.clear_delegate();
 }
 
 VCvtI32F64Vop1::VCvtI32F64Vop1(const MachineInst *inst)
@@ -177,6 +185,7 @@ VCvtI32F64Vop1::VCvtI32F64Vop1(const MachineInst *inst)
     sdwa_src0_sext_ = sw->src0_sext;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
+    sdwa_clamp_ = sw->clamp;
   }
 }
 
@@ -195,7 +204,10 @@ void VCvtI32F64Vop1::execute_impl(amdgpu::Wavefront &wf) {
     dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
     src_operands_[0] = dpp_src0_.get();
   }
+  if (dpp_src0_)
+    src0.set_delegate(dpp_src0_.get());
   amdgpu::execute_v_cvt_i32_f64_vop1(*this, wf);
+  src0.clear_delegate();
 }
 
 VCvtF64I32Vop1::VCvtF64I32Vop1(const MachineInst *inst)
@@ -226,6 +238,7 @@ VCvtF64I32Vop1::VCvtF64I32Vop1(const MachineInst *inst)
     sdwa_src0_sext_ = sw->src0_sext;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
+    sdwa_clamp_ = sw->clamp;
   }
 }
 
@@ -244,7 +257,10 @@ void VCvtF64I32Vop1::execute_impl(amdgpu::Wavefront &wf) {
     dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
     src_operands_[0] = dpp_src0_.get();
   }
+  if (dpp_src0_)
+    src0.set_delegate(dpp_src0_.get());
   amdgpu::execute_v_cvt_f64_i32_vop1(*this, wf);
+  src0.clear_delegate();
 }
 
 VCvtF32I32Vop1::VCvtF32I32Vop1(const MachineInst *inst)
@@ -275,6 +291,7 @@ VCvtF32I32Vop1::VCvtF32I32Vop1(const MachineInst *inst)
     sdwa_src0_sext_ = sw->src0_sext;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
+    sdwa_clamp_ = sw->clamp;
   }
 }
 
@@ -293,7 +310,10 @@ void VCvtF32I32Vop1::execute_impl(amdgpu::Wavefront &wf) {
     dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
     src_operands_[0] = dpp_src0_.get();
   }
+  if (dpp_src0_)
+    src0.set_delegate(dpp_src0_.get());
   amdgpu::execute_v_cvt_f32_i32_vop1(*this, wf);
+  src0.clear_delegate();
 }
 
 VCvtF32U32Vop1::VCvtF32U32Vop1(const MachineInst *inst)
@@ -324,6 +344,7 @@ VCvtF32U32Vop1::VCvtF32U32Vop1(const MachineInst *inst)
     sdwa_src0_sext_ = sw->src0_sext;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
+    sdwa_clamp_ = sw->clamp;
   }
 }
 
@@ -342,7 +363,10 @@ void VCvtF32U32Vop1::execute_impl(amdgpu::Wavefront &wf) {
     dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
     src_operands_[0] = dpp_src0_.get();
   }
+  if (dpp_src0_)
+    src0.set_delegate(dpp_src0_.get());
   amdgpu::execute_v_cvt_f32_u32_vop1(*this, wf);
+  src0.clear_delegate();
 }
 
 VCvtU32F32Vop1::VCvtU32F32Vop1(const MachineInst *inst)
@@ -373,6 +397,7 @@ VCvtU32F32Vop1::VCvtU32F32Vop1(const MachineInst *inst)
     sdwa_src0_sext_ = sw->src0_sext;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
+    sdwa_clamp_ = sw->clamp;
   }
 }
 
@@ -391,7 +416,10 @@ void VCvtU32F32Vop1::execute_impl(amdgpu::Wavefront &wf) {
     dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
     src_operands_[0] = dpp_src0_.get();
   }
+  if (dpp_src0_)
+    src0.set_delegate(dpp_src0_.get());
   amdgpu::execute_v_cvt_u32_f32_vop1(*this, wf);
+  src0.clear_delegate();
 }
 
 VCvtI32F32Vop1::VCvtI32F32Vop1(const MachineInst *inst)
@@ -422,6 +450,7 @@ VCvtI32F32Vop1::VCvtI32F32Vop1(const MachineInst *inst)
     sdwa_src0_sext_ = sw->src0_sext;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
+    sdwa_clamp_ = sw->clamp;
   }
 }
 
@@ -440,7 +469,10 @@ void VCvtI32F32Vop1::execute_impl(amdgpu::Wavefront &wf) {
     dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
     src_operands_[0] = dpp_src0_.get();
   }
+  if (dpp_src0_)
+    src0.set_delegate(dpp_src0_.get());
   amdgpu::execute_v_cvt_i32_f32_vop1(*this, wf);
+  src0.clear_delegate();
 }
 
 VCvtF16F32Vop1::VCvtF16F32Vop1(const MachineInst *inst)
@@ -471,6 +503,7 @@ VCvtF16F32Vop1::VCvtF16F32Vop1(const MachineInst *inst)
     sdwa_src0_sext_ = sw->src0_sext;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
+    sdwa_clamp_ = sw->clamp;
   }
 }
 
@@ -489,7 +522,10 @@ void VCvtF16F32Vop1::execute_impl(amdgpu::Wavefront &wf) {
     dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
     src_operands_[0] = dpp_src0_.get();
   }
+  if (dpp_src0_)
+    src0.set_delegate(dpp_src0_.get());
   amdgpu::execute_v_cvt_f16_f32_vop1(*this, wf);
+  src0.clear_delegate();
 }
 
 VCvtF32F16Vop1::VCvtF32F16Vop1(const MachineInst *inst)
@@ -520,6 +556,7 @@ VCvtF32F16Vop1::VCvtF32F16Vop1(const MachineInst *inst)
     sdwa_src0_sext_ = sw->src0_sext;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
+    sdwa_clamp_ = sw->clamp;
   }
 }
 
@@ -538,7 +575,10 @@ void VCvtF32F16Vop1::execute_impl(amdgpu::Wavefront &wf) {
     dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
     src_operands_[0] = dpp_src0_.get();
   }
+  if (dpp_src0_)
+    src0.set_delegate(dpp_src0_.get());
   amdgpu::execute_v_cvt_f32_f16_vop1(*this, wf);
+  src0.clear_delegate();
 }
 
 VCvtRpiI32F32Vop1::VCvtRpiI32F32Vop1(const MachineInst *inst)
@@ -569,6 +609,7 @@ VCvtRpiI32F32Vop1::VCvtRpiI32F32Vop1(const MachineInst *inst)
     sdwa_src0_sext_ = sw->src0_sext;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
+    sdwa_clamp_ = sw->clamp;
   }
 }
 
@@ -587,7 +628,10 @@ void VCvtRpiI32F32Vop1::execute_impl(amdgpu::Wavefront &wf) {
     dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
     src_operands_[0] = dpp_src0_.get();
   }
+  if (dpp_src0_)
+    src0.set_delegate(dpp_src0_.get());
   amdgpu::execute_v_cvt_rpi_i32_f32_vop1(*this, wf);
+  src0.clear_delegate();
 }
 
 VCvtFlrI32F32Vop1::VCvtFlrI32F32Vop1(const MachineInst *inst)
@@ -618,6 +662,7 @@ VCvtFlrI32F32Vop1::VCvtFlrI32F32Vop1(const MachineInst *inst)
     sdwa_src0_sext_ = sw->src0_sext;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
+    sdwa_clamp_ = sw->clamp;
   }
 }
 
@@ -636,7 +681,10 @@ void VCvtFlrI32F32Vop1::execute_impl(amdgpu::Wavefront &wf) {
     dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
     src_operands_[0] = dpp_src0_.get();
   }
+  if (dpp_src0_)
+    src0.set_delegate(dpp_src0_.get());
   amdgpu::execute_v_cvt_flr_i32_f32_vop1(*this, wf);
+  src0.clear_delegate();
 }
 
 VCvtOffF32I4Vop1::VCvtOffF32I4Vop1(const MachineInst *inst)
@@ -667,6 +715,7 @@ VCvtOffF32I4Vop1::VCvtOffF32I4Vop1(const MachineInst *inst)
     sdwa_src0_sext_ = sw->src0_sext;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
+    sdwa_clamp_ = sw->clamp;
   }
 }
 
@@ -685,7 +734,11 @@ void VCvtOffF32I4Vop1::execute_impl(amdgpu::Wavefront &wf) {
     dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
     src_operands_[0] = dpp_src0_.get();
   }
+  if (dpp_src0_)
+    src0.set_delegate(dpp_src0_.get());
   (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+  src0.clear_delegate();
 }
 
 VCvtF32F64Vop1::VCvtF32F64Vop1(const MachineInst *inst)
@@ -716,6 +769,7 @@ VCvtF32F64Vop1::VCvtF32F64Vop1(const MachineInst *inst)
     sdwa_src0_sext_ = sw->src0_sext;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
+    sdwa_clamp_ = sw->clamp;
   }
 }
 
@@ -734,7 +788,10 @@ void VCvtF32F64Vop1::execute_impl(amdgpu::Wavefront &wf) {
     dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
     src_operands_[0] = dpp_src0_.get();
   }
+  if (dpp_src0_)
+    src0.set_delegate(dpp_src0_.get());
   amdgpu::execute_v_cvt_f32_f64_vop1(*this, wf);
+  src0.clear_delegate();
 }
 
 VCvtF64F32Vop1::VCvtF64F32Vop1(const MachineInst *inst)
@@ -765,6 +822,7 @@ VCvtF64F32Vop1::VCvtF64F32Vop1(const MachineInst *inst)
     sdwa_src0_sext_ = sw->src0_sext;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
+    sdwa_clamp_ = sw->clamp;
   }
 }
 
@@ -783,7 +841,10 @@ void VCvtF64F32Vop1::execute_impl(amdgpu::Wavefront &wf) {
     dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
     src_operands_[0] = dpp_src0_.get();
   }
+  if (dpp_src0_)
+    src0.set_delegate(dpp_src0_.get());
   amdgpu::execute_v_cvt_f64_f32_vop1(*this, wf);
+  src0.clear_delegate();
 }
 
 VCvtF32Ubyte0Vop1::VCvtF32Ubyte0Vop1(const MachineInst *inst)
@@ -814,6 +875,7 @@ VCvtF32Ubyte0Vop1::VCvtF32Ubyte0Vop1(const MachineInst *inst)
     sdwa_src0_sext_ = sw->src0_sext;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
+    sdwa_clamp_ = sw->clamp;
   }
 }
 
@@ -832,7 +894,10 @@ void VCvtF32Ubyte0Vop1::execute_impl(amdgpu::Wavefront &wf) {
     dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
     src_operands_[0] = dpp_src0_.get();
   }
+  if (dpp_src0_)
+    src0.set_delegate(dpp_src0_.get());
   amdgpu::execute_v_cvt_f32_ubyte0_vop1(*this, wf);
+  src0.clear_delegate();
 }
 
 VCvtF32Ubyte1Vop1::VCvtF32Ubyte1Vop1(const MachineInst *inst)
@@ -863,6 +928,7 @@ VCvtF32Ubyte1Vop1::VCvtF32Ubyte1Vop1(const MachineInst *inst)
     sdwa_src0_sext_ = sw->src0_sext;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
+    sdwa_clamp_ = sw->clamp;
   }
 }
 
@@ -881,7 +947,10 @@ void VCvtF32Ubyte1Vop1::execute_impl(amdgpu::Wavefront &wf) {
     dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
     src_operands_[0] = dpp_src0_.get();
   }
+  if (dpp_src0_)
+    src0.set_delegate(dpp_src0_.get());
   amdgpu::execute_v_cvt_f32_ubyte1_vop1(*this, wf);
+  src0.clear_delegate();
 }
 
 VCvtF32Ubyte2Vop1::VCvtF32Ubyte2Vop1(const MachineInst *inst)
@@ -912,6 +981,7 @@ VCvtF32Ubyte2Vop1::VCvtF32Ubyte2Vop1(const MachineInst *inst)
     sdwa_src0_sext_ = sw->src0_sext;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
+    sdwa_clamp_ = sw->clamp;
   }
 }
 
@@ -930,7 +1000,10 @@ void VCvtF32Ubyte2Vop1::execute_impl(amdgpu::Wavefront &wf) {
     dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
     src_operands_[0] = dpp_src0_.get();
   }
+  if (dpp_src0_)
+    src0.set_delegate(dpp_src0_.get());
   amdgpu::execute_v_cvt_f32_ubyte2_vop1(*this, wf);
+  src0.clear_delegate();
 }
 
 VCvtF32Ubyte3Vop1::VCvtF32Ubyte3Vop1(const MachineInst *inst)
@@ -961,6 +1034,7 @@ VCvtF32Ubyte3Vop1::VCvtF32Ubyte3Vop1(const MachineInst *inst)
     sdwa_src0_sext_ = sw->src0_sext;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
+    sdwa_clamp_ = sw->clamp;
   }
 }
 
@@ -979,7 +1053,10 @@ void VCvtF32Ubyte3Vop1::execute_impl(amdgpu::Wavefront &wf) {
     dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
     src_operands_[0] = dpp_src0_.get();
   }
+  if (dpp_src0_)
+    src0.set_delegate(dpp_src0_.get());
   amdgpu::execute_v_cvt_f32_ubyte3_vop1(*this, wf);
+  src0.clear_delegate();
 }
 
 VCvtU32F64Vop1::VCvtU32F64Vop1(const MachineInst *inst)
@@ -1010,6 +1087,7 @@ VCvtU32F64Vop1::VCvtU32F64Vop1(const MachineInst *inst)
     sdwa_src0_sext_ = sw->src0_sext;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
+    sdwa_clamp_ = sw->clamp;
   }
 }
 
@@ -1028,7 +1106,10 @@ void VCvtU32F64Vop1::execute_impl(amdgpu::Wavefront &wf) {
     dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
     src_operands_[0] = dpp_src0_.get();
   }
+  if (dpp_src0_)
+    src0.set_delegate(dpp_src0_.get());
   amdgpu::execute_v_cvt_u32_f64_vop1(*this, wf);
+  src0.clear_delegate();
 }
 
 VCvtF64U32Vop1::VCvtF64U32Vop1(const MachineInst *inst)
@@ -1059,6 +1140,7 @@ VCvtF64U32Vop1::VCvtF64U32Vop1(const MachineInst *inst)
     sdwa_src0_sext_ = sw->src0_sext;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
+    sdwa_clamp_ = sw->clamp;
   }
 }
 
@@ -1077,7 +1159,10 @@ void VCvtF64U32Vop1::execute_impl(amdgpu::Wavefront &wf) {
     dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
     src_operands_[0] = dpp_src0_.get();
   }
+  if (dpp_src0_)
+    src0.set_delegate(dpp_src0_.get());
   amdgpu::execute_v_cvt_f64_u32_vop1(*this, wf);
+  src0.clear_delegate();
 }
 
 VTruncF64Vop1::VTruncF64Vop1(const MachineInst *inst)
@@ -1108,6 +1193,7 @@ VTruncF64Vop1::VTruncF64Vop1(const MachineInst *inst)
     sdwa_src0_sext_ = sw->src0_sext;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
+    sdwa_clamp_ = sw->clamp;
   }
 }
 
@@ -1126,7 +1212,22 @@ void VTruncF64Vop1::execute_impl(amdgpu::Wavefront &wf) {
     dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
     src_operands_[0] = dpp_src0_.get();
   }
+  if (dpp_src0_)
+    src0.set_delegate(dpp_src0_.get());
   amdgpu::execute_v_trunc_f64_vop1(*this, wf);
+  src0.clear_delegate();
+  if (sdwa_clamp_) {
+    uint64_t ex = wf.exec();
+    uint32_t vb = wf.vgpr_alloc().base;
+    for (uint32_t ln = 0; ln < wf.wf_size(); ++ln) {
+      if (!(ex & (1ULL << ln)))
+        continue;
+      uint32_t dv = wf.cu().read_vgpr(vb + inst_.vdst, ln);
+      float fv = std::bit_cast<float>(dv);
+      fv = std::clamp(fv, 0.0f, 1.0f);
+      wf.cu().write_vgpr(vb + inst_.vdst, ln, std::bit_cast<uint32_t>(fv));
+    }
+  }
 }
 
 VCeilF64Vop1::VCeilF64Vop1(const MachineInst *inst)
@@ -1157,6 +1258,7 @@ VCeilF64Vop1::VCeilF64Vop1(const MachineInst *inst)
     sdwa_src0_sext_ = sw->src0_sext;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
+    sdwa_clamp_ = sw->clamp;
   }
 }
 
@@ -1175,7 +1277,22 @@ void VCeilF64Vop1::execute_impl(amdgpu::Wavefront &wf) {
     dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
     src_operands_[0] = dpp_src0_.get();
   }
+  if (dpp_src0_)
+    src0.set_delegate(dpp_src0_.get());
   amdgpu::execute_v_ceil_f64_vop1(*this, wf);
+  src0.clear_delegate();
+  if (sdwa_clamp_) {
+    uint64_t ex = wf.exec();
+    uint32_t vb = wf.vgpr_alloc().base;
+    for (uint32_t ln = 0; ln < wf.wf_size(); ++ln) {
+      if (!(ex & (1ULL << ln)))
+        continue;
+      uint32_t dv = wf.cu().read_vgpr(vb + inst_.vdst, ln);
+      float fv = std::bit_cast<float>(dv);
+      fv = std::clamp(fv, 0.0f, 1.0f);
+      wf.cu().write_vgpr(vb + inst_.vdst, ln, std::bit_cast<uint32_t>(fv));
+    }
+  }
 }
 
 VRndneF64Vop1::VRndneF64Vop1(const MachineInst *inst)
@@ -1206,6 +1323,7 @@ VRndneF64Vop1::VRndneF64Vop1(const MachineInst *inst)
     sdwa_src0_sext_ = sw->src0_sext;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
+    sdwa_clamp_ = sw->clamp;
   }
 }
 
@@ -1224,7 +1342,22 @@ void VRndneF64Vop1::execute_impl(amdgpu::Wavefront &wf) {
     dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
     src_operands_[0] = dpp_src0_.get();
   }
+  if (dpp_src0_)
+    src0.set_delegate(dpp_src0_.get());
   amdgpu::execute_v_rndne_f64_vop1(*this, wf);
+  src0.clear_delegate();
+  if (sdwa_clamp_) {
+    uint64_t ex = wf.exec();
+    uint32_t vb = wf.vgpr_alloc().base;
+    for (uint32_t ln = 0; ln < wf.wf_size(); ++ln) {
+      if (!(ex & (1ULL << ln)))
+        continue;
+      uint32_t dv = wf.cu().read_vgpr(vb + inst_.vdst, ln);
+      float fv = std::bit_cast<float>(dv);
+      fv = std::clamp(fv, 0.0f, 1.0f);
+      wf.cu().write_vgpr(vb + inst_.vdst, ln, std::bit_cast<uint32_t>(fv));
+    }
+  }
 }
 
 VFloorF64Vop1::VFloorF64Vop1(const MachineInst *inst)
@@ -1255,6 +1388,7 @@ VFloorF64Vop1::VFloorF64Vop1(const MachineInst *inst)
     sdwa_src0_sext_ = sw->src0_sext;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
+    sdwa_clamp_ = sw->clamp;
   }
 }
 
@@ -1273,7 +1407,22 @@ void VFloorF64Vop1::execute_impl(amdgpu::Wavefront &wf) {
     dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
     src_operands_[0] = dpp_src0_.get();
   }
+  if (dpp_src0_)
+    src0.set_delegate(dpp_src0_.get());
   amdgpu::execute_v_floor_f64_vop1(*this, wf);
+  src0.clear_delegate();
+  if (sdwa_clamp_) {
+    uint64_t ex = wf.exec();
+    uint32_t vb = wf.vgpr_alloc().base;
+    for (uint32_t ln = 0; ln < wf.wf_size(); ++ln) {
+      if (!(ex & (1ULL << ln)))
+        continue;
+      uint32_t dv = wf.cu().read_vgpr(vb + inst_.vdst, ln);
+      float fv = std::bit_cast<float>(dv);
+      fv = std::clamp(fv, 0.0f, 1.0f);
+      wf.cu().write_vgpr(vb + inst_.vdst, ln, std::bit_cast<uint32_t>(fv));
+    }
+  }
 }
 
 VPipeflushVop1::VPipeflushVop1(const MachineInst *inst)
@@ -1298,7 +1447,7 @@ void VPipeflushVop1::execute_impl(amdgpu::Wavefront &wf) {
     dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
     src_operands_[0] = dpp_src0_.get();
   }
-  (void)wf;
+  amdgpu::execute_v_pipeflush_vop1(*this, wf);
 }
 
 VFractF32Vop1::VFractF32Vop1(const MachineInst *inst)
@@ -1329,6 +1478,7 @@ VFractF32Vop1::VFractF32Vop1(const MachineInst *inst)
     sdwa_src0_sext_ = sw->src0_sext;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
+    sdwa_clamp_ = sw->clamp;
   }
 }
 
@@ -1347,7 +1497,22 @@ void VFractF32Vop1::execute_impl(amdgpu::Wavefront &wf) {
     dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
     src_operands_[0] = dpp_src0_.get();
   }
+  if (dpp_src0_)
+    src0.set_delegate(dpp_src0_.get());
   amdgpu::execute_v_fract_f32_vop1(*this, wf);
+  src0.clear_delegate();
+  if (sdwa_clamp_) {
+    uint64_t ex = wf.exec();
+    uint32_t vb = wf.vgpr_alloc().base;
+    for (uint32_t ln = 0; ln < wf.wf_size(); ++ln) {
+      if (!(ex & (1ULL << ln)))
+        continue;
+      uint32_t dv = wf.cu().read_vgpr(vb + inst_.vdst, ln);
+      float fv = std::bit_cast<float>(dv);
+      fv = std::clamp(fv, 0.0f, 1.0f);
+      wf.cu().write_vgpr(vb + inst_.vdst, ln, std::bit_cast<uint32_t>(fv));
+    }
+  }
 }
 
 VTruncF32Vop1::VTruncF32Vop1(const MachineInst *inst)
@@ -1378,6 +1543,7 @@ VTruncF32Vop1::VTruncF32Vop1(const MachineInst *inst)
     sdwa_src0_sext_ = sw->src0_sext;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
+    sdwa_clamp_ = sw->clamp;
   }
 }
 
@@ -1396,7 +1562,22 @@ void VTruncF32Vop1::execute_impl(amdgpu::Wavefront &wf) {
     dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
     src_operands_[0] = dpp_src0_.get();
   }
+  if (dpp_src0_)
+    src0.set_delegate(dpp_src0_.get());
   amdgpu::execute_v_trunc_f32_vop1(*this, wf);
+  src0.clear_delegate();
+  if (sdwa_clamp_) {
+    uint64_t ex = wf.exec();
+    uint32_t vb = wf.vgpr_alloc().base;
+    for (uint32_t ln = 0; ln < wf.wf_size(); ++ln) {
+      if (!(ex & (1ULL << ln)))
+        continue;
+      uint32_t dv = wf.cu().read_vgpr(vb + inst_.vdst, ln);
+      float fv = std::bit_cast<float>(dv);
+      fv = std::clamp(fv, 0.0f, 1.0f);
+      wf.cu().write_vgpr(vb + inst_.vdst, ln, std::bit_cast<uint32_t>(fv));
+    }
+  }
 }
 
 VCeilF32Vop1::VCeilF32Vop1(const MachineInst *inst)
@@ -1427,6 +1608,7 @@ VCeilF32Vop1::VCeilF32Vop1(const MachineInst *inst)
     sdwa_src0_sext_ = sw->src0_sext;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
+    sdwa_clamp_ = sw->clamp;
   }
 }
 
@@ -1445,7 +1627,22 @@ void VCeilF32Vop1::execute_impl(amdgpu::Wavefront &wf) {
     dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
     src_operands_[0] = dpp_src0_.get();
   }
+  if (dpp_src0_)
+    src0.set_delegate(dpp_src0_.get());
   amdgpu::execute_v_ceil_f32_vop1(*this, wf);
+  src0.clear_delegate();
+  if (sdwa_clamp_) {
+    uint64_t ex = wf.exec();
+    uint32_t vb = wf.vgpr_alloc().base;
+    for (uint32_t ln = 0; ln < wf.wf_size(); ++ln) {
+      if (!(ex & (1ULL << ln)))
+        continue;
+      uint32_t dv = wf.cu().read_vgpr(vb + inst_.vdst, ln);
+      float fv = std::bit_cast<float>(dv);
+      fv = std::clamp(fv, 0.0f, 1.0f);
+      wf.cu().write_vgpr(vb + inst_.vdst, ln, std::bit_cast<uint32_t>(fv));
+    }
+  }
 }
 
 VRndneF32Vop1::VRndneF32Vop1(const MachineInst *inst)
@@ -1476,6 +1673,7 @@ VRndneF32Vop1::VRndneF32Vop1(const MachineInst *inst)
     sdwa_src0_sext_ = sw->src0_sext;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
+    sdwa_clamp_ = sw->clamp;
   }
 }
 
@@ -1494,7 +1692,22 @@ void VRndneF32Vop1::execute_impl(amdgpu::Wavefront &wf) {
     dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
     src_operands_[0] = dpp_src0_.get();
   }
+  if (dpp_src0_)
+    src0.set_delegate(dpp_src0_.get());
   amdgpu::execute_v_rndne_f32_vop1(*this, wf);
+  src0.clear_delegate();
+  if (sdwa_clamp_) {
+    uint64_t ex = wf.exec();
+    uint32_t vb = wf.vgpr_alloc().base;
+    for (uint32_t ln = 0; ln < wf.wf_size(); ++ln) {
+      if (!(ex & (1ULL << ln)))
+        continue;
+      uint32_t dv = wf.cu().read_vgpr(vb + inst_.vdst, ln);
+      float fv = std::bit_cast<float>(dv);
+      fv = std::clamp(fv, 0.0f, 1.0f);
+      wf.cu().write_vgpr(vb + inst_.vdst, ln, std::bit_cast<uint32_t>(fv));
+    }
+  }
 }
 
 VFloorF32Vop1::VFloorF32Vop1(const MachineInst *inst)
@@ -1525,6 +1738,7 @@ VFloorF32Vop1::VFloorF32Vop1(const MachineInst *inst)
     sdwa_src0_sext_ = sw->src0_sext;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
+    sdwa_clamp_ = sw->clamp;
   }
 }
 
@@ -1543,7 +1757,22 @@ void VFloorF32Vop1::execute_impl(amdgpu::Wavefront &wf) {
     dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
     src_operands_[0] = dpp_src0_.get();
   }
+  if (dpp_src0_)
+    src0.set_delegate(dpp_src0_.get());
   amdgpu::execute_v_floor_f32_vop1(*this, wf);
+  src0.clear_delegate();
+  if (sdwa_clamp_) {
+    uint64_t ex = wf.exec();
+    uint32_t vb = wf.vgpr_alloc().base;
+    for (uint32_t ln = 0; ln < wf.wf_size(); ++ln) {
+      if (!(ex & (1ULL << ln)))
+        continue;
+      uint32_t dv = wf.cu().read_vgpr(vb + inst_.vdst, ln);
+      float fv = std::bit_cast<float>(dv);
+      fv = std::clamp(fv, 0.0f, 1.0f);
+      wf.cu().write_vgpr(vb + inst_.vdst, ln, std::bit_cast<uint32_t>(fv));
+    }
+  }
 }
 
 VExpF32Vop1::VExpF32Vop1(const MachineInst *inst)
@@ -1574,6 +1803,7 @@ VExpF32Vop1::VExpF32Vop1(const MachineInst *inst)
     sdwa_src0_sext_ = sw->src0_sext;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
+    sdwa_clamp_ = sw->clamp;
   }
 }
 
@@ -1592,7 +1822,22 @@ void VExpF32Vop1::execute_impl(amdgpu::Wavefront &wf) {
     dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
     src_operands_[0] = dpp_src0_.get();
   }
+  if (dpp_src0_)
+    src0.set_delegate(dpp_src0_.get());
   amdgpu::execute_v_exp_f32_vop1(*this, wf);
+  src0.clear_delegate();
+  if (sdwa_clamp_) {
+    uint64_t ex = wf.exec();
+    uint32_t vb = wf.vgpr_alloc().base;
+    for (uint32_t ln = 0; ln < wf.wf_size(); ++ln) {
+      if (!(ex & (1ULL << ln)))
+        continue;
+      uint32_t dv = wf.cu().read_vgpr(vb + inst_.vdst, ln);
+      float fv = std::bit_cast<float>(dv);
+      fv = std::clamp(fv, 0.0f, 1.0f);
+      wf.cu().write_vgpr(vb + inst_.vdst, ln, std::bit_cast<uint32_t>(fv));
+    }
+  }
 }
 
 VLogF32Vop1::VLogF32Vop1(const MachineInst *inst)
@@ -1623,6 +1868,7 @@ VLogF32Vop1::VLogF32Vop1(const MachineInst *inst)
     sdwa_src0_sext_ = sw->src0_sext;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
+    sdwa_clamp_ = sw->clamp;
   }
 }
 
@@ -1641,7 +1887,22 @@ void VLogF32Vop1::execute_impl(amdgpu::Wavefront &wf) {
     dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
     src_operands_[0] = dpp_src0_.get();
   }
+  if (dpp_src0_)
+    src0.set_delegate(dpp_src0_.get());
   amdgpu::execute_v_log_f32_vop1(*this, wf);
+  src0.clear_delegate();
+  if (sdwa_clamp_) {
+    uint64_t ex = wf.exec();
+    uint32_t vb = wf.vgpr_alloc().base;
+    for (uint32_t ln = 0; ln < wf.wf_size(); ++ln) {
+      if (!(ex & (1ULL << ln)))
+        continue;
+      uint32_t dv = wf.cu().read_vgpr(vb + inst_.vdst, ln);
+      float fv = std::bit_cast<float>(dv);
+      fv = std::clamp(fv, 0.0f, 1.0f);
+      wf.cu().write_vgpr(vb + inst_.vdst, ln, std::bit_cast<uint32_t>(fv));
+    }
+  }
 }
 
 VRcpF32Vop1::VRcpF32Vop1(const MachineInst *inst)
@@ -1672,6 +1933,7 @@ VRcpF32Vop1::VRcpF32Vop1(const MachineInst *inst)
     sdwa_src0_sext_ = sw->src0_sext;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
+    sdwa_clamp_ = sw->clamp;
   }
 }
 
@@ -1690,7 +1952,22 @@ void VRcpF32Vop1::execute_impl(amdgpu::Wavefront &wf) {
     dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
     src_operands_[0] = dpp_src0_.get();
   }
+  if (dpp_src0_)
+    src0.set_delegate(dpp_src0_.get());
   amdgpu::execute_v_rcp_f32_vop1(*this, wf);
+  src0.clear_delegate();
+  if (sdwa_clamp_) {
+    uint64_t ex = wf.exec();
+    uint32_t vb = wf.vgpr_alloc().base;
+    for (uint32_t ln = 0; ln < wf.wf_size(); ++ln) {
+      if (!(ex & (1ULL << ln)))
+        continue;
+      uint32_t dv = wf.cu().read_vgpr(vb + inst_.vdst, ln);
+      float fv = std::bit_cast<float>(dv);
+      fv = std::clamp(fv, 0.0f, 1.0f);
+      wf.cu().write_vgpr(vb + inst_.vdst, ln, std::bit_cast<uint32_t>(fv));
+    }
+  }
 }
 
 VRcpIflagF32Vop1::VRcpIflagF32Vop1(const MachineInst *inst)
@@ -1721,6 +1998,7 @@ VRcpIflagF32Vop1::VRcpIflagF32Vop1(const MachineInst *inst)
     sdwa_src0_sext_ = sw->src0_sext;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
+    sdwa_clamp_ = sw->clamp;
   }
 }
 
@@ -1739,7 +2017,22 @@ void VRcpIflagF32Vop1::execute_impl(amdgpu::Wavefront &wf) {
     dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
     src_operands_[0] = dpp_src0_.get();
   }
+  if (dpp_src0_)
+    src0.set_delegate(dpp_src0_.get());
   amdgpu::execute_v_rcp_iflag_f32_vop1(*this, wf);
+  src0.clear_delegate();
+  if (sdwa_clamp_) {
+    uint64_t ex = wf.exec();
+    uint32_t vb = wf.vgpr_alloc().base;
+    for (uint32_t ln = 0; ln < wf.wf_size(); ++ln) {
+      if (!(ex & (1ULL << ln)))
+        continue;
+      uint32_t dv = wf.cu().read_vgpr(vb + inst_.vdst, ln);
+      float fv = std::bit_cast<float>(dv);
+      fv = std::clamp(fv, 0.0f, 1.0f);
+      wf.cu().write_vgpr(vb + inst_.vdst, ln, std::bit_cast<uint32_t>(fv));
+    }
+  }
 }
 
 VRsqF32Vop1::VRsqF32Vop1(const MachineInst *inst)
@@ -1770,6 +2063,7 @@ VRsqF32Vop1::VRsqF32Vop1(const MachineInst *inst)
     sdwa_src0_sext_ = sw->src0_sext;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
+    sdwa_clamp_ = sw->clamp;
   }
 }
 
@@ -1788,7 +2082,22 @@ void VRsqF32Vop1::execute_impl(amdgpu::Wavefront &wf) {
     dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
     src_operands_[0] = dpp_src0_.get();
   }
+  if (dpp_src0_)
+    src0.set_delegate(dpp_src0_.get());
   amdgpu::execute_v_rsq_f32_vop1(*this, wf);
+  src0.clear_delegate();
+  if (sdwa_clamp_) {
+    uint64_t ex = wf.exec();
+    uint32_t vb = wf.vgpr_alloc().base;
+    for (uint32_t ln = 0; ln < wf.wf_size(); ++ln) {
+      if (!(ex & (1ULL << ln)))
+        continue;
+      uint32_t dv = wf.cu().read_vgpr(vb + inst_.vdst, ln);
+      float fv = std::bit_cast<float>(dv);
+      fv = std::clamp(fv, 0.0f, 1.0f);
+      wf.cu().write_vgpr(vb + inst_.vdst, ln, std::bit_cast<uint32_t>(fv));
+    }
+  }
 }
 
 VRcpF64Vop1::VRcpF64Vop1(const MachineInst *inst)
@@ -1819,6 +2128,7 @@ VRcpF64Vop1::VRcpF64Vop1(const MachineInst *inst)
     sdwa_src0_sext_ = sw->src0_sext;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
+    sdwa_clamp_ = sw->clamp;
   }
 }
 
@@ -1837,7 +2147,22 @@ void VRcpF64Vop1::execute_impl(amdgpu::Wavefront &wf) {
     dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
     src_operands_[0] = dpp_src0_.get();
   }
+  if (dpp_src0_)
+    src0.set_delegate(dpp_src0_.get());
   amdgpu::execute_v_rcp_f64_vop1(*this, wf);
+  src0.clear_delegate();
+  if (sdwa_clamp_) {
+    uint64_t ex = wf.exec();
+    uint32_t vb = wf.vgpr_alloc().base;
+    for (uint32_t ln = 0; ln < wf.wf_size(); ++ln) {
+      if (!(ex & (1ULL << ln)))
+        continue;
+      uint32_t dv = wf.cu().read_vgpr(vb + inst_.vdst, ln);
+      float fv = std::bit_cast<float>(dv);
+      fv = std::clamp(fv, 0.0f, 1.0f);
+      wf.cu().write_vgpr(vb + inst_.vdst, ln, std::bit_cast<uint32_t>(fv));
+    }
+  }
 }
 
 VRsqF64Vop1::VRsqF64Vop1(const MachineInst *inst)
@@ -1868,6 +2193,7 @@ VRsqF64Vop1::VRsqF64Vop1(const MachineInst *inst)
     sdwa_src0_sext_ = sw->src0_sext;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
+    sdwa_clamp_ = sw->clamp;
   }
 }
 
@@ -1886,7 +2212,22 @@ void VRsqF64Vop1::execute_impl(amdgpu::Wavefront &wf) {
     dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
     src_operands_[0] = dpp_src0_.get();
   }
+  if (dpp_src0_)
+    src0.set_delegate(dpp_src0_.get());
   amdgpu::execute_v_rsq_f64_vop1(*this, wf);
+  src0.clear_delegate();
+  if (sdwa_clamp_) {
+    uint64_t ex = wf.exec();
+    uint32_t vb = wf.vgpr_alloc().base;
+    for (uint32_t ln = 0; ln < wf.wf_size(); ++ln) {
+      if (!(ex & (1ULL << ln)))
+        continue;
+      uint32_t dv = wf.cu().read_vgpr(vb + inst_.vdst, ln);
+      float fv = std::bit_cast<float>(dv);
+      fv = std::clamp(fv, 0.0f, 1.0f);
+      wf.cu().write_vgpr(vb + inst_.vdst, ln, std::bit_cast<uint32_t>(fv));
+    }
+  }
 }
 
 VSqrtF32Vop1::VSqrtF32Vop1(const MachineInst *inst)
@@ -1917,6 +2258,7 @@ VSqrtF32Vop1::VSqrtF32Vop1(const MachineInst *inst)
     sdwa_src0_sext_ = sw->src0_sext;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
+    sdwa_clamp_ = sw->clamp;
   }
 }
 
@@ -1935,7 +2277,22 @@ void VSqrtF32Vop1::execute_impl(amdgpu::Wavefront &wf) {
     dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
     src_operands_[0] = dpp_src0_.get();
   }
+  if (dpp_src0_)
+    src0.set_delegate(dpp_src0_.get());
   amdgpu::execute_v_sqrt_f32_vop1(*this, wf);
+  src0.clear_delegate();
+  if (sdwa_clamp_) {
+    uint64_t ex = wf.exec();
+    uint32_t vb = wf.vgpr_alloc().base;
+    for (uint32_t ln = 0; ln < wf.wf_size(); ++ln) {
+      if (!(ex & (1ULL << ln)))
+        continue;
+      uint32_t dv = wf.cu().read_vgpr(vb + inst_.vdst, ln);
+      float fv = std::bit_cast<float>(dv);
+      fv = std::clamp(fv, 0.0f, 1.0f);
+      wf.cu().write_vgpr(vb + inst_.vdst, ln, std::bit_cast<uint32_t>(fv));
+    }
+  }
 }
 
 VSqrtF64Vop1::VSqrtF64Vop1(const MachineInst *inst)
@@ -1966,6 +2323,7 @@ VSqrtF64Vop1::VSqrtF64Vop1(const MachineInst *inst)
     sdwa_src0_sext_ = sw->src0_sext;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
+    sdwa_clamp_ = sw->clamp;
   }
 }
 
@@ -1984,7 +2342,22 @@ void VSqrtF64Vop1::execute_impl(amdgpu::Wavefront &wf) {
     dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
     src_operands_[0] = dpp_src0_.get();
   }
+  if (dpp_src0_)
+    src0.set_delegate(dpp_src0_.get());
   amdgpu::execute_v_sqrt_f64_vop1(*this, wf);
+  src0.clear_delegate();
+  if (sdwa_clamp_) {
+    uint64_t ex = wf.exec();
+    uint32_t vb = wf.vgpr_alloc().base;
+    for (uint32_t ln = 0; ln < wf.wf_size(); ++ln) {
+      if (!(ex & (1ULL << ln)))
+        continue;
+      uint32_t dv = wf.cu().read_vgpr(vb + inst_.vdst, ln);
+      float fv = std::bit_cast<float>(dv);
+      fv = std::clamp(fv, 0.0f, 1.0f);
+      wf.cu().write_vgpr(vb + inst_.vdst, ln, std::bit_cast<uint32_t>(fv));
+    }
+  }
 }
 
 VSinF32Vop1::VSinF32Vop1(const MachineInst *inst)
@@ -2015,6 +2388,7 @@ VSinF32Vop1::VSinF32Vop1(const MachineInst *inst)
     sdwa_src0_sext_ = sw->src0_sext;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
+    sdwa_clamp_ = sw->clamp;
   }
 }
 
@@ -2033,7 +2407,22 @@ void VSinF32Vop1::execute_impl(amdgpu::Wavefront &wf) {
     dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
     src_operands_[0] = dpp_src0_.get();
   }
+  if (dpp_src0_)
+    src0.set_delegate(dpp_src0_.get());
   amdgpu::execute_v_sin_f32_vop1(*this, wf);
+  src0.clear_delegate();
+  if (sdwa_clamp_) {
+    uint64_t ex = wf.exec();
+    uint32_t vb = wf.vgpr_alloc().base;
+    for (uint32_t ln = 0; ln < wf.wf_size(); ++ln) {
+      if (!(ex & (1ULL << ln)))
+        continue;
+      uint32_t dv = wf.cu().read_vgpr(vb + inst_.vdst, ln);
+      float fv = std::bit_cast<float>(dv);
+      fv = std::clamp(fv, 0.0f, 1.0f);
+      wf.cu().write_vgpr(vb + inst_.vdst, ln, std::bit_cast<uint32_t>(fv));
+    }
+  }
 }
 
 VCosF32Vop1::VCosF32Vop1(const MachineInst *inst)
@@ -2064,6 +2453,7 @@ VCosF32Vop1::VCosF32Vop1(const MachineInst *inst)
     sdwa_src0_sext_ = sw->src0_sext;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
+    sdwa_clamp_ = sw->clamp;
   }
 }
 
@@ -2082,7 +2472,22 @@ void VCosF32Vop1::execute_impl(amdgpu::Wavefront &wf) {
     dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
     src_operands_[0] = dpp_src0_.get();
   }
+  if (dpp_src0_)
+    src0.set_delegate(dpp_src0_.get());
   amdgpu::execute_v_cos_f32_vop1(*this, wf);
+  src0.clear_delegate();
+  if (sdwa_clamp_) {
+    uint64_t ex = wf.exec();
+    uint32_t vb = wf.vgpr_alloc().base;
+    for (uint32_t ln = 0; ln < wf.wf_size(); ++ln) {
+      if (!(ex & (1ULL << ln)))
+        continue;
+      uint32_t dv = wf.cu().read_vgpr(vb + inst_.vdst, ln);
+      float fv = std::bit_cast<float>(dv);
+      fv = std::clamp(fv, 0.0f, 1.0f);
+      wf.cu().write_vgpr(vb + inst_.vdst, ln, std::bit_cast<uint32_t>(fv));
+    }
+  }
 }
 
 VNotB32Vop1::VNotB32Vop1(const MachineInst *inst)
@@ -2113,6 +2518,7 @@ VNotB32Vop1::VNotB32Vop1(const MachineInst *inst)
     sdwa_src0_sext_ = sw->src0_sext;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
+    sdwa_clamp_ = sw->clamp;
   }
 }
 
@@ -2131,7 +2537,10 @@ void VNotB32Vop1::execute_impl(amdgpu::Wavefront &wf) {
     dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
     src_operands_[0] = dpp_src0_.get();
   }
+  if (dpp_src0_)
+    src0.set_delegate(dpp_src0_.get());
   amdgpu::execute_v_not_b32_vop1(*this, wf);
+  src0.clear_delegate();
 }
 
 VBfrevB32Vop1::VBfrevB32Vop1(const MachineInst *inst)
@@ -2162,6 +2571,7 @@ VBfrevB32Vop1::VBfrevB32Vop1(const MachineInst *inst)
     sdwa_src0_sext_ = sw->src0_sext;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
+    sdwa_clamp_ = sw->clamp;
   }
 }
 
@@ -2180,7 +2590,10 @@ void VBfrevB32Vop1::execute_impl(amdgpu::Wavefront &wf) {
     dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
     src_operands_[0] = dpp_src0_.get();
   }
+  if (dpp_src0_)
+    src0.set_delegate(dpp_src0_.get());
   amdgpu::execute_v_bfrev_b32_vop1(*this, wf);
+  src0.clear_delegate();
 }
 
 VFfbhU32Vop1::VFfbhU32Vop1(const MachineInst *inst)
@@ -2211,6 +2624,7 @@ VFfbhU32Vop1::VFfbhU32Vop1(const MachineInst *inst)
     sdwa_src0_sext_ = sw->src0_sext;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
+    sdwa_clamp_ = sw->clamp;
   }
 }
 
@@ -2229,7 +2643,10 @@ void VFfbhU32Vop1::execute_impl(amdgpu::Wavefront &wf) {
     dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
     src_operands_[0] = dpp_src0_.get();
   }
+  if (dpp_src0_)
+    src0.set_delegate(dpp_src0_.get());
   amdgpu::execute_v_ffbh_u32_vop1(*this, wf);
+  src0.clear_delegate();
 }
 
 VFfblB32Vop1::VFfblB32Vop1(const MachineInst *inst)
@@ -2260,6 +2677,7 @@ VFfblB32Vop1::VFfblB32Vop1(const MachineInst *inst)
     sdwa_src0_sext_ = sw->src0_sext;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
+    sdwa_clamp_ = sw->clamp;
   }
 }
 
@@ -2278,7 +2696,10 @@ void VFfblB32Vop1::execute_impl(amdgpu::Wavefront &wf) {
     dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
     src_operands_[0] = dpp_src0_.get();
   }
+  if (dpp_src0_)
+    src0.set_delegate(dpp_src0_.get());
   amdgpu::execute_v_ffbl_b32_vop1(*this, wf);
+  src0.clear_delegate();
 }
 
 VFfbhI32Vop1::VFfbhI32Vop1(const MachineInst *inst)
@@ -2309,6 +2730,7 @@ VFfbhI32Vop1::VFfbhI32Vop1(const MachineInst *inst)
     sdwa_src0_sext_ = sw->src0_sext;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
+    sdwa_clamp_ = sw->clamp;
   }
 }
 
@@ -2327,7 +2749,10 @@ void VFfbhI32Vop1::execute_impl(amdgpu::Wavefront &wf) {
     dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
     src_operands_[0] = dpp_src0_.get();
   }
+  if (dpp_src0_)
+    src0.set_delegate(dpp_src0_.get());
   amdgpu::execute_v_ffbh_i32_vop1(*this, wf);
+  src0.clear_delegate();
 }
 
 VFrexpExpI32F64Vop1::VFrexpExpI32F64Vop1(const MachineInst *inst)
@@ -2358,6 +2783,7 @@ VFrexpExpI32F64Vop1::VFrexpExpI32F64Vop1(const MachineInst *inst)
     sdwa_src0_sext_ = sw->src0_sext;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
+    sdwa_clamp_ = sw->clamp;
   }
 }
 
@@ -2376,7 +2802,22 @@ void VFrexpExpI32F64Vop1::execute_impl(amdgpu::Wavefront &wf) {
     dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
     src_operands_[0] = dpp_src0_.get();
   }
+  if (dpp_src0_)
+    src0.set_delegate(dpp_src0_.get());
   amdgpu::execute_v_frexp_exp_i32_f64_vop1(*this, wf);
+  src0.clear_delegate();
+  if (sdwa_clamp_) {
+    uint64_t ex = wf.exec();
+    uint32_t vb = wf.vgpr_alloc().base;
+    for (uint32_t ln = 0; ln < wf.wf_size(); ++ln) {
+      if (!(ex & (1ULL << ln)))
+        continue;
+      uint32_t dv = wf.cu().read_vgpr(vb + inst_.vdst, ln);
+      float fv = std::bit_cast<float>(dv);
+      fv = std::clamp(fv, 0.0f, 1.0f);
+      wf.cu().write_vgpr(vb + inst_.vdst, ln, std::bit_cast<uint32_t>(fv));
+    }
+  }
 }
 
 VFrexpMantF64Vop1::VFrexpMantF64Vop1(const MachineInst *inst)
@@ -2407,6 +2848,7 @@ VFrexpMantF64Vop1::VFrexpMantF64Vop1(const MachineInst *inst)
     sdwa_src0_sext_ = sw->src0_sext;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
+    sdwa_clamp_ = sw->clamp;
   }
 }
 
@@ -2425,7 +2867,22 @@ void VFrexpMantF64Vop1::execute_impl(amdgpu::Wavefront &wf) {
     dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
     src_operands_[0] = dpp_src0_.get();
   }
+  if (dpp_src0_)
+    src0.set_delegate(dpp_src0_.get());
   amdgpu::execute_v_frexp_mant_f64_vop1(*this, wf);
+  src0.clear_delegate();
+  if (sdwa_clamp_) {
+    uint64_t ex = wf.exec();
+    uint32_t vb = wf.vgpr_alloc().base;
+    for (uint32_t ln = 0; ln < wf.wf_size(); ++ln) {
+      if (!(ex & (1ULL << ln)))
+        continue;
+      uint32_t dv = wf.cu().read_vgpr(vb + inst_.vdst, ln);
+      float fv = std::bit_cast<float>(dv);
+      fv = std::clamp(fv, 0.0f, 1.0f);
+      wf.cu().write_vgpr(vb + inst_.vdst, ln, std::bit_cast<uint32_t>(fv));
+    }
+  }
 }
 
 VFractF64Vop1::VFractF64Vop1(const MachineInst *inst)
@@ -2456,6 +2913,7 @@ VFractF64Vop1::VFractF64Vop1(const MachineInst *inst)
     sdwa_src0_sext_ = sw->src0_sext;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
+    sdwa_clamp_ = sw->clamp;
   }
 }
 
@@ -2474,7 +2932,22 @@ void VFractF64Vop1::execute_impl(amdgpu::Wavefront &wf) {
     dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
     src_operands_[0] = dpp_src0_.get();
   }
+  if (dpp_src0_)
+    src0.set_delegate(dpp_src0_.get());
   amdgpu::execute_v_fract_f64_vop1(*this, wf);
+  src0.clear_delegate();
+  if (sdwa_clamp_) {
+    uint64_t ex = wf.exec();
+    uint32_t vb = wf.vgpr_alloc().base;
+    for (uint32_t ln = 0; ln < wf.wf_size(); ++ln) {
+      if (!(ex & (1ULL << ln)))
+        continue;
+      uint32_t dv = wf.cu().read_vgpr(vb + inst_.vdst, ln);
+      float fv = std::bit_cast<float>(dv);
+      fv = std::clamp(fv, 0.0f, 1.0f);
+      wf.cu().write_vgpr(vb + inst_.vdst, ln, std::bit_cast<uint32_t>(fv));
+    }
+  }
 }
 
 VFrexpExpI32F32Vop1::VFrexpExpI32F32Vop1(const MachineInst *inst)
@@ -2505,6 +2978,7 @@ VFrexpExpI32F32Vop1::VFrexpExpI32F32Vop1(const MachineInst *inst)
     sdwa_src0_sext_ = sw->src0_sext;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
+    sdwa_clamp_ = sw->clamp;
   }
 }
 
@@ -2523,7 +2997,22 @@ void VFrexpExpI32F32Vop1::execute_impl(amdgpu::Wavefront &wf) {
     dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
     src_operands_[0] = dpp_src0_.get();
   }
+  if (dpp_src0_)
+    src0.set_delegate(dpp_src0_.get());
   amdgpu::execute_v_frexp_exp_i32_f32_vop1(*this, wf);
+  src0.clear_delegate();
+  if (sdwa_clamp_) {
+    uint64_t ex = wf.exec();
+    uint32_t vb = wf.vgpr_alloc().base;
+    for (uint32_t ln = 0; ln < wf.wf_size(); ++ln) {
+      if (!(ex & (1ULL << ln)))
+        continue;
+      uint32_t dv = wf.cu().read_vgpr(vb + inst_.vdst, ln);
+      float fv = std::bit_cast<float>(dv);
+      fv = std::clamp(fv, 0.0f, 1.0f);
+      wf.cu().write_vgpr(vb + inst_.vdst, ln, std::bit_cast<uint32_t>(fv));
+    }
+  }
 }
 
 VFrexpMantF32Vop1::VFrexpMantF32Vop1(const MachineInst *inst)
@@ -2554,6 +3043,7 @@ VFrexpMantF32Vop1::VFrexpMantF32Vop1(const MachineInst *inst)
     sdwa_src0_sext_ = sw->src0_sext;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
+    sdwa_clamp_ = sw->clamp;
   }
 }
 
@@ -2572,7 +3062,22 @@ void VFrexpMantF32Vop1::execute_impl(amdgpu::Wavefront &wf) {
     dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
     src_operands_[0] = dpp_src0_.get();
   }
+  if (dpp_src0_)
+    src0.set_delegate(dpp_src0_.get());
   amdgpu::execute_v_frexp_mant_f32_vop1(*this, wf);
+  src0.clear_delegate();
+  if (sdwa_clamp_) {
+    uint64_t ex = wf.exec();
+    uint32_t vb = wf.vgpr_alloc().base;
+    for (uint32_t ln = 0; ln < wf.wf_size(); ++ln) {
+      if (!(ex & (1ULL << ln)))
+        continue;
+      uint32_t dv = wf.cu().read_vgpr(vb + inst_.vdst, ln);
+      float fv = std::bit_cast<float>(dv);
+      fv = std::clamp(fv, 0.0f, 1.0f);
+      wf.cu().write_vgpr(vb + inst_.vdst, ln, std::bit_cast<uint32_t>(fv));
+    }
+  }
 }
 
 VClrexcpVop1::VClrexcpVop1(const MachineInst *inst)
@@ -2597,7 +3102,7 @@ void VClrexcpVop1::execute_impl(amdgpu::Wavefront &wf) {
     dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
     src_operands_[0] = dpp_src0_.get();
   }
-  (void)wf;
+  amdgpu::execute_v_clrexcp_vop1(*this, wf);
 }
 
 VMovreldB32Vop1::VMovreldB32Vop1(const MachineInst *inst)
@@ -2628,6 +3133,7 @@ VMovreldB32Vop1::VMovreldB32Vop1(const MachineInst *inst)
     sdwa_src0_sext_ = sw->src0_sext;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
+    sdwa_clamp_ = sw->clamp;
   }
 }
 
@@ -2646,7 +3152,11 @@ void VMovreldB32Vop1::execute_impl(amdgpu::Wavefront &wf) {
     dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
     src_operands_[0] = dpp_src0_.get();
   }
+  if (dpp_src0_)
+    src0.set_delegate(dpp_src0_.get());
   (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+  src0.clear_delegate();
 }
 
 VMovrelsB32Vop1::VMovrelsB32Vop1(const MachineInst *inst)
@@ -2677,6 +3187,7 @@ VMovrelsB32Vop1::VMovrelsB32Vop1(const MachineInst *inst)
     sdwa_src0_sext_ = sw->src0_sext;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
+    sdwa_clamp_ = sw->clamp;
   }
 }
 
@@ -2695,7 +3206,11 @@ void VMovrelsB32Vop1::execute_impl(amdgpu::Wavefront &wf) {
     dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
     src_operands_[0] = dpp_src0_.get();
   }
+  if (dpp_src0_)
+    src0.set_delegate(dpp_src0_.get());
   (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+  src0.clear_delegate();
 }
 
 VMovrelsdB32Vop1::VMovrelsdB32Vop1(const MachineInst *inst)
@@ -2726,6 +3241,7 @@ VMovrelsdB32Vop1::VMovrelsdB32Vop1(const MachineInst *inst)
     sdwa_src0_sext_ = sw->src0_sext;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
+    sdwa_clamp_ = sw->clamp;
   }
 }
 
@@ -2744,7 +3260,11 @@ void VMovrelsdB32Vop1::execute_impl(amdgpu::Wavefront &wf) {
     dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
     src_operands_[0] = dpp_src0_.get();
   }
+  if (dpp_src0_)
+    src0.set_delegate(dpp_src0_.get());
   (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+  src0.clear_delegate();
 }
 
 VMovrelsd2B32Vop1::VMovrelsd2B32Vop1(const MachineInst *inst)
@@ -2775,6 +3295,7 @@ VMovrelsd2B32Vop1::VMovrelsd2B32Vop1(const MachineInst *inst)
     sdwa_src0_sext_ = sw->src0_sext;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
+    sdwa_clamp_ = sw->clamp;
   }
 }
 
@@ -2793,7 +3314,11 @@ void VMovrelsd2B32Vop1::execute_impl(amdgpu::Wavefront &wf) {
     dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
     src_operands_[0] = dpp_src0_.get();
   }
+  if (dpp_src0_)
+    src0.set_delegate(dpp_src0_.get());
   (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+  src0.clear_delegate();
 }
 
 VCvtF16U16Vop1::VCvtF16U16Vop1(const MachineInst *inst)
@@ -2824,6 +3349,7 @@ VCvtF16U16Vop1::VCvtF16U16Vop1(const MachineInst *inst)
     sdwa_src0_sext_ = sw->src0_sext;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
+    sdwa_clamp_ = sw->clamp;
   }
 }
 
@@ -2842,7 +3368,10 @@ void VCvtF16U16Vop1::execute_impl(amdgpu::Wavefront &wf) {
     dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
     src_operands_[0] = dpp_src0_.get();
   }
+  if (dpp_src0_)
+    src0.set_delegate(dpp_src0_.get());
   amdgpu::execute_v_cvt_f16_u16_vop1(*this, wf);
+  src0.clear_delegate();
 }
 
 VCvtF16I16Vop1::VCvtF16I16Vop1(const MachineInst *inst)
@@ -2873,6 +3402,7 @@ VCvtF16I16Vop1::VCvtF16I16Vop1(const MachineInst *inst)
     sdwa_src0_sext_ = sw->src0_sext;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
+    sdwa_clamp_ = sw->clamp;
   }
 }
 
@@ -2891,7 +3421,10 @@ void VCvtF16I16Vop1::execute_impl(amdgpu::Wavefront &wf) {
     dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
     src_operands_[0] = dpp_src0_.get();
   }
+  if (dpp_src0_)
+    src0.set_delegate(dpp_src0_.get());
   amdgpu::execute_v_cvt_f16_i16_vop1(*this, wf);
+  src0.clear_delegate();
 }
 
 VCvtU16F16Vop1::VCvtU16F16Vop1(const MachineInst *inst)
@@ -2922,6 +3455,7 @@ VCvtU16F16Vop1::VCvtU16F16Vop1(const MachineInst *inst)
     sdwa_src0_sext_ = sw->src0_sext;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
+    sdwa_clamp_ = sw->clamp;
   }
 }
 
@@ -2940,7 +3474,10 @@ void VCvtU16F16Vop1::execute_impl(amdgpu::Wavefront &wf) {
     dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
     src_operands_[0] = dpp_src0_.get();
   }
+  if (dpp_src0_)
+    src0.set_delegate(dpp_src0_.get());
   amdgpu::execute_v_cvt_u16_f16_vop1(*this, wf);
+  src0.clear_delegate();
 }
 
 VCvtI16F16Vop1::VCvtI16F16Vop1(const MachineInst *inst)
@@ -2971,6 +3508,7 @@ VCvtI16F16Vop1::VCvtI16F16Vop1(const MachineInst *inst)
     sdwa_src0_sext_ = sw->src0_sext;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
+    sdwa_clamp_ = sw->clamp;
   }
 }
 
@@ -2989,7 +3527,10 @@ void VCvtI16F16Vop1::execute_impl(amdgpu::Wavefront &wf) {
     dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
     src_operands_[0] = dpp_src0_.get();
   }
+  if (dpp_src0_)
+    src0.set_delegate(dpp_src0_.get());
   amdgpu::execute_v_cvt_i16_f16_vop1(*this, wf);
+  src0.clear_delegate();
 }
 
 VRcpF16Vop1::VRcpF16Vop1(const MachineInst *inst)
@@ -3020,6 +3561,7 @@ VRcpF16Vop1::VRcpF16Vop1(const MachineInst *inst)
     sdwa_src0_sext_ = sw->src0_sext;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
+    sdwa_clamp_ = sw->clamp;
   }
 }
 
@@ -3038,7 +3580,22 @@ void VRcpF16Vop1::execute_impl(amdgpu::Wavefront &wf) {
     dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
     src_operands_[0] = dpp_src0_.get();
   }
+  if (dpp_src0_)
+    src0.set_delegate(dpp_src0_.get());
   amdgpu::execute_v_rcp_f16_vop1(*this, wf);
+  src0.clear_delegate();
+  if (sdwa_clamp_) {
+    uint64_t ex = wf.exec();
+    uint32_t vb = wf.vgpr_alloc().base;
+    for (uint32_t ln = 0; ln < wf.wf_size(); ++ln) {
+      if (!(ex & (1ULL << ln)))
+        continue;
+      uint32_t dv = wf.cu().read_vgpr(vb + inst_.vdst, ln);
+      float fv = std::bit_cast<float>(dv);
+      fv = std::clamp(fv, 0.0f, 1.0f);
+      wf.cu().write_vgpr(vb + inst_.vdst, ln, std::bit_cast<uint32_t>(fv));
+    }
+  }
 }
 
 VSqrtF16Vop1::VSqrtF16Vop1(const MachineInst *inst)
@@ -3069,6 +3626,7 @@ VSqrtF16Vop1::VSqrtF16Vop1(const MachineInst *inst)
     sdwa_src0_sext_ = sw->src0_sext;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
+    sdwa_clamp_ = sw->clamp;
   }
 }
 
@@ -3087,7 +3645,22 @@ void VSqrtF16Vop1::execute_impl(amdgpu::Wavefront &wf) {
     dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
     src_operands_[0] = dpp_src0_.get();
   }
+  if (dpp_src0_)
+    src0.set_delegate(dpp_src0_.get());
   amdgpu::execute_v_sqrt_f16_vop1(*this, wf);
+  src0.clear_delegate();
+  if (sdwa_clamp_) {
+    uint64_t ex = wf.exec();
+    uint32_t vb = wf.vgpr_alloc().base;
+    for (uint32_t ln = 0; ln < wf.wf_size(); ++ln) {
+      if (!(ex & (1ULL << ln)))
+        continue;
+      uint32_t dv = wf.cu().read_vgpr(vb + inst_.vdst, ln);
+      float fv = std::bit_cast<float>(dv);
+      fv = std::clamp(fv, 0.0f, 1.0f);
+      wf.cu().write_vgpr(vb + inst_.vdst, ln, std::bit_cast<uint32_t>(fv));
+    }
+  }
 }
 
 VRsqF16Vop1::VRsqF16Vop1(const MachineInst *inst)
@@ -3118,6 +3691,7 @@ VRsqF16Vop1::VRsqF16Vop1(const MachineInst *inst)
     sdwa_src0_sext_ = sw->src0_sext;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
+    sdwa_clamp_ = sw->clamp;
   }
 }
 
@@ -3136,7 +3710,22 @@ void VRsqF16Vop1::execute_impl(amdgpu::Wavefront &wf) {
     dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
     src_operands_[0] = dpp_src0_.get();
   }
+  if (dpp_src0_)
+    src0.set_delegate(dpp_src0_.get());
   amdgpu::execute_v_rsq_f16_vop1(*this, wf);
+  src0.clear_delegate();
+  if (sdwa_clamp_) {
+    uint64_t ex = wf.exec();
+    uint32_t vb = wf.vgpr_alloc().base;
+    for (uint32_t ln = 0; ln < wf.wf_size(); ++ln) {
+      if (!(ex & (1ULL << ln)))
+        continue;
+      uint32_t dv = wf.cu().read_vgpr(vb + inst_.vdst, ln);
+      float fv = std::bit_cast<float>(dv);
+      fv = std::clamp(fv, 0.0f, 1.0f);
+      wf.cu().write_vgpr(vb + inst_.vdst, ln, std::bit_cast<uint32_t>(fv));
+    }
+  }
 }
 
 VLogF16Vop1::VLogF16Vop1(const MachineInst *inst)
@@ -3167,6 +3756,7 @@ VLogF16Vop1::VLogF16Vop1(const MachineInst *inst)
     sdwa_src0_sext_ = sw->src0_sext;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
+    sdwa_clamp_ = sw->clamp;
   }
 }
 
@@ -3185,7 +3775,22 @@ void VLogF16Vop1::execute_impl(amdgpu::Wavefront &wf) {
     dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
     src_operands_[0] = dpp_src0_.get();
   }
+  if (dpp_src0_)
+    src0.set_delegate(dpp_src0_.get());
   amdgpu::execute_v_log_f16_vop1(*this, wf);
+  src0.clear_delegate();
+  if (sdwa_clamp_) {
+    uint64_t ex = wf.exec();
+    uint32_t vb = wf.vgpr_alloc().base;
+    for (uint32_t ln = 0; ln < wf.wf_size(); ++ln) {
+      if (!(ex & (1ULL << ln)))
+        continue;
+      uint32_t dv = wf.cu().read_vgpr(vb + inst_.vdst, ln);
+      float fv = std::bit_cast<float>(dv);
+      fv = std::clamp(fv, 0.0f, 1.0f);
+      wf.cu().write_vgpr(vb + inst_.vdst, ln, std::bit_cast<uint32_t>(fv));
+    }
+  }
 }
 
 VExpF16Vop1::VExpF16Vop1(const MachineInst *inst)
@@ -3216,6 +3821,7 @@ VExpF16Vop1::VExpF16Vop1(const MachineInst *inst)
     sdwa_src0_sext_ = sw->src0_sext;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
+    sdwa_clamp_ = sw->clamp;
   }
 }
 
@@ -3234,7 +3840,22 @@ void VExpF16Vop1::execute_impl(amdgpu::Wavefront &wf) {
     dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
     src_operands_[0] = dpp_src0_.get();
   }
+  if (dpp_src0_)
+    src0.set_delegate(dpp_src0_.get());
   amdgpu::execute_v_exp_f16_vop1(*this, wf);
+  src0.clear_delegate();
+  if (sdwa_clamp_) {
+    uint64_t ex = wf.exec();
+    uint32_t vb = wf.vgpr_alloc().base;
+    for (uint32_t ln = 0; ln < wf.wf_size(); ++ln) {
+      if (!(ex & (1ULL << ln)))
+        continue;
+      uint32_t dv = wf.cu().read_vgpr(vb + inst_.vdst, ln);
+      float fv = std::bit_cast<float>(dv);
+      fv = std::clamp(fv, 0.0f, 1.0f);
+      wf.cu().write_vgpr(vb + inst_.vdst, ln, std::bit_cast<uint32_t>(fv));
+    }
+  }
 }
 
 VFrexpMantF16Vop1::VFrexpMantF16Vop1(const MachineInst *inst)
@@ -3265,6 +3886,7 @@ VFrexpMantF16Vop1::VFrexpMantF16Vop1(const MachineInst *inst)
     sdwa_src0_sext_ = sw->src0_sext;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
+    sdwa_clamp_ = sw->clamp;
   }
 }
 
@@ -3283,7 +3905,22 @@ void VFrexpMantF16Vop1::execute_impl(amdgpu::Wavefront &wf) {
     dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
     src_operands_[0] = dpp_src0_.get();
   }
+  if (dpp_src0_)
+    src0.set_delegate(dpp_src0_.get());
   amdgpu::execute_v_frexp_mant_f16_vop1(*this, wf);
+  src0.clear_delegate();
+  if (sdwa_clamp_) {
+    uint64_t ex = wf.exec();
+    uint32_t vb = wf.vgpr_alloc().base;
+    for (uint32_t ln = 0; ln < wf.wf_size(); ++ln) {
+      if (!(ex & (1ULL << ln)))
+        continue;
+      uint32_t dv = wf.cu().read_vgpr(vb + inst_.vdst, ln);
+      float fv = std::bit_cast<float>(dv);
+      fv = std::clamp(fv, 0.0f, 1.0f);
+      wf.cu().write_vgpr(vb + inst_.vdst, ln, std::bit_cast<uint32_t>(fv));
+    }
+  }
 }
 
 VFrexpExpI16F16Vop1::VFrexpExpI16F16Vop1(const MachineInst *inst)
@@ -3314,6 +3951,7 @@ VFrexpExpI16F16Vop1::VFrexpExpI16F16Vop1(const MachineInst *inst)
     sdwa_src0_sext_ = sw->src0_sext;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
+    sdwa_clamp_ = sw->clamp;
   }
 }
 
@@ -3332,7 +3970,22 @@ void VFrexpExpI16F16Vop1::execute_impl(amdgpu::Wavefront &wf) {
     dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
     src_operands_[0] = dpp_src0_.get();
   }
+  if (dpp_src0_)
+    src0.set_delegate(dpp_src0_.get());
   amdgpu::execute_v_frexp_exp_i16_f16_vop1(*this, wf);
+  src0.clear_delegate();
+  if (sdwa_clamp_) {
+    uint64_t ex = wf.exec();
+    uint32_t vb = wf.vgpr_alloc().base;
+    for (uint32_t ln = 0; ln < wf.wf_size(); ++ln) {
+      if (!(ex & (1ULL << ln)))
+        continue;
+      uint32_t dv = wf.cu().read_vgpr(vb + inst_.vdst, ln);
+      float fv = std::bit_cast<float>(dv);
+      fv = std::clamp(fv, 0.0f, 1.0f);
+      wf.cu().write_vgpr(vb + inst_.vdst, ln, std::bit_cast<uint32_t>(fv));
+    }
+  }
 }
 
 VFloorF16Vop1::VFloorF16Vop1(const MachineInst *inst)
@@ -3363,6 +4016,7 @@ VFloorF16Vop1::VFloorF16Vop1(const MachineInst *inst)
     sdwa_src0_sext_ = sw->src0_sext;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
+    sdwa_clamp_ = sw->clamp;
   }
 }
 
@@ -3381,7 +4035,22 @@ void VFloorF16Vop1::execute_impl(amdgpu::Wavefront &wf) {
     dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
     src_operands_[0] = dpp_src0_.get();
   }
+  if (dpp_src0_)
+    src0.set_delegate(dpp_src0_.get());
   amdgpu::execute_v_floor_f16_vop1(*this, wf);
+  src0.clear_delegate();
+  if (sdwa_clamp_) {
+    uint64_t ex = wf.exec();
+    uint32_t vb = wf.vgpr_alloc().base;
+    for (uint32_t ln = 0; ln < wf.wf_size(); ++ln) {
+      if (!(ex & (1ULL << ln)))
+        continue;
+      uint32_t dv = wf.cu().read_vgpr(vb + inst_.vdst, ln);
+      float fv = std::bit_cast<float>(dv);
+      fv = std::clamp(fv, 0.0f, 1.0f);
+      wf.cu().write_vgpr(vb + inst_.vdst, ln, std::bit_cast<uint32_t>(fv));
+    }
+  }
 }
 
 VCeilF16Vop1::VCeilF16Vop1(const MachineInst *inst)
@@ -3412,6 +4081,7 @@ VCeilF16Vop1::VCeilF16Vop1(const MachineInst *inst)
     sdwa_src0_sext_ = sw->src0_sext;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
+    sdwa_clamp_ = sw->clamp;
   }
 }
 
@@ -3430,7 +4100,22 @@ void VCeilF16Vop1::execute_impl(amdgpu::Wavefront &wf) {
     dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
     src_operands_[0] = dpp_src0_.get();
   }
+  if (dpp_src0_)
+    src0.set_delegate(dpp_src0_.get());
   amdgpu::execute_v_ceil_f16_vop1(*this, wf);
+  src0.clear_delegate();
+  if (sdwa_clamp_) {
+    uint64_t ex = wf.exec();
+    uint32_t vb = wf.vgpr_alloc().base;
+    for (uint32_t ln = 0; ln < wf.wf_size(); ++ln) {
+      if (!(ex & (1ULL << ln)))
+        continue;
+      uint32_t dv = wf.cu().read_vgpr(vb + inst_.vdst, ln);
+      float fv = std::bit_cast<float>(dv);
+      fv = std::clamp(fv, 0.0f, 1.0f);
+      wf.cu().write_vgpr(vb + inst_.vdst, ln, std::bit_cast<uint32_t>(fv));
+    }
+  }
 }
 
 VTruncF16Vop1::VTruncF16Vop1(const MachineInst *inst)
@@ -3461,6 +4146,7 @@ VTruncF16Vop1::VTruncF16Vop1(const MachineInst *inst)
     sdwa_src0_sext_ = sw->src0_sext;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
+    sdwa_clamp_ = sw->clamp;
   }
 }
 
@@ -3479,7 +4165,22 @@ void VTruncF16Vop1::execute_impl(amdgpu::Wavefront &wf) {
     dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
     src_operands_[0] = dpp_src0_.get();
   }
+  if (dpp_src0_)
+    src0.set_delegate(dpp_src0_.get());
   amdgpu::execute_v_trunc_f16_vop1(*this, wf);
+  src0.clear_delegate();
+  if (sdwa_clamp_) {
+    uint64_t ex = wf.exec();
+    uint32_t vb = wf.vgpr_alloc().base;
+    for (uint32_t ln = 0; ln < wf.wf_size(); ++ln) {
+      if (!(ex & (1ULL << ln)))
+        continue;
+      uint32_t dv = wf.cu().read_vgpr(vb + inst_.vdst, ln);
+      float fv = std::bit_cast<float>(dv);
+      fv = std::clamp(fv, 0.0f, 1.0f);
+      wf.cu().write_vgpr(vb + inst_.vdst, ln, std::bit_cast<uint32_t>(fv));
+    }
+  }
 }
 
 VRndneF16Vop1::VRndneF16Vop1(const MachineInst *inst)
@@ -3510,6 +4211,7 @@ VRndneF16Vop1::VRndneF16Vop1(const MachineInst *inst)
     sdwa_src0_sext_ = sw->src0_sext;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
+    sdwa_clamp_ = sw->clamp;
   }
 }
 
@@ -3528,7 +4230,22 @@ void VRndneF16Vop1::execute_impl(amdgpu::Wavefront &wf) {
     dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
     src_operands_[0] = dpp_src0_.get();
   }
+  if (dpp_src0_)
+    src0.set_delegate(dpp_src0_.get());
   amdgpu::execute_v_rndne_f16_vop1(*this, wf);
+  src0.clear_delegate();
+  if (sdwa_clamp_) {
+    uint64_t ex = wf.exec();
+    uint32_t vb = wf.vgpr_alloc().base;
+    for (uint32_t ln = 0; ln < wf.wf_size(); ++ln) {
+      if (!(ex & (1ULL << ln)))
+        continue;
+      uint32_t dv = wf.cu().read_vgpr(vb + inst_.vdst, ln);
+      float fv = std::bit_cast<float>(dv);
+      fv = std::clamp(fv, 0.0f, 1.0f);
+      wf.cu().write_vgpr(vb + inst_.vdst, ln, std::bit_cast<uint32_t>(fv));
+    }
+  }
 }
 
 VFractF16Vop1::VFractF16Vop1(const MachineInst *inst)
@@ -3559,6 +4276,7 @@ VFractF16Vop1::VFractF16Vop1(const MachineInst *inst)
     sdwa_src0_sext_ = sw->src0_sext;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
+    sdwa_clamp_ = sw->clamp;
   }
 }
 
@@ -3577,7 +4295,22 @@ void VFractF16Vop1::execute_impl(amdgpu::Wavefront &wf) {
     dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
     src_operands_[0] = dpp_src0_.get();
   }
+  if (dpp_src0_)
+    src0.set_delegate(dpp_src0_.get());
   amdgpu::execute_v_fract_f16_vop1(*this, wf);
+  src0.clear_delegate();
+  if (sdwa_clamp_) {
+    uint64_t ex = wf.exec();
+    uint32_t vb = wf.vgpr_alloc().base;
+    for (uint32_t ln = 0; ln < wf.wf_size(); ++ln) {
+      if (!(ex & (1ULL << ln)))
+        continue;
+      uint32_t dv = wf.cu().read_vgpr(vb + inst_.vdst, ln);
+      float fv = std::bit_cast<float>(dv);
+      fv = std::clamp(fv, 0.0f, 1.0f);
+      wf.cu().write_vgpr(vb + inst_.vdst, ln, std::bit_cast<uint32_t>(fv));
+    }
+  }
 }
 
 VSinF16Vop1::VSinF16Vop1(const MachineInst *inst)
@@ -3608,6 +4341,7 @@ VSinF16Vop1::VSinF16Vop1(const MachineInst *inst)
     sdwa_src0_sext_ = sw->src0_sext;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
+    sdwa_clamp_ = sw->clamp;
   }
 }
 
@@ -3626,7 +4360,22 @@ void VSinF16Vop1::execute_impl(amdgpu::Wavefront &wf) {
     dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
     src_operands_[0] = dpp_src0_.get();
   }
+  if (dpp_src0_)
+    src0.set_delegate(dpp_src0_.get());
   amdgpu::execute_v_sin_f16_vop1(*this, wf);
+  src0.clear_delegate();
+  if (sdwa_clamp_) {
+    uint64_t ex = wf.exec();
+    uint32_t vb = wf.vgpr_alloc().base;
+    for (uint32_t ln = 0; ln < wf.wf_size(); ++ln) {
+      if (!(ex & (1ULL << ln)))
+        continue;
+      uint32_t dv = wf.cu().read_vgpr(vb + inst_.vdst, ln);
+      float fv = std::bit_cast<float>(dv);
+      fv = std::clamp(fv, 0.0f, 1.0f);
+      wf.cu().write_vgpr(vb + inst_.vdst, ln, std::bit_cast<uint32_t>(fv));
+    }
+  }
 }
 
 VCosF16Vop1::VCosF16Vop1(const MachineInst *inst)
@@ -3657,6 +4406,7 @@ VCosF16Vop1::VCosF16Vop1(const MachineInst *inst)
     sdwa_src0_sext_ = sw->src0_sext;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
+    sdwa_clamp_ = sw->clamp;
   }
 }
 
@@ -3675,7 +4425,22 @@ void VCosF16Vop1::execute_impl(amdgpu::Wavefront &wf) {
     dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
     src_operands_[0] = dpp_src0_.get();
   }
+  if (dpp_src0_)
+    src0.set_delegate(dpp_src0_.get());
   amdgpu::execute_v_cos_f16_vop1(*this, wf);
+  src0.clear_delegate();
+  if (sdwa_clamp_) {
+    uint64_t ex = wf.exec();
+    uint32_t vb = wf.vgpr_alloc().base;
+    for (uint32_t ln = 0; ln < wf.wf_size(); ++ln) {
+      if (!(ex & (1ULL << ln)))
+        continue;
+      uint32_t dv = wf.cu().read_vgpr(vb + inst_.vdst, ln);
+      float fv = std::bit_cast<float>(dv);
+      fv = std::clamp(fv, 0.0f, 1.0f);
+      wf.cu().write_vgpr(vb + inst_.vdst, ln, std::bit_cast<uint32_t>(fv));
+    }
+  }
 }
 
 VSatPkU8I16Vop1::VSatPkU8I16Vop1(const MachineInst *inst)
@@ -3706,6 +4471,7 @@ VSatPkU8I16Vop1::VSatPkU8I16Vop1(const MachineInst *inst)
     sdwa_src0_sext_ = sw->src0_sext;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
+    sdwa_clamp_ = sw->clamp;
   }
 }
 
@@ -3724,7 +4490,11 @@ void VSatPkU8I16Vop1::execute_impl(amdgpu::Wavefront &wf) {
     dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
     src_operands_[0] = dpp_src0_.get();
   }
+  if (dpp_src0_)
+    src0.set_delegate(dpp_src0_.get());
   (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+  src0.clear_delegate();
 }
 
 VCvtNormI16F16Vop1::VCvtNormI16F16Vop1(const MachineInst *inst)
@@ -3755,6 +4525,7 @@ VCvtNormI16F16Vop1::VCvtNormI16F16Vop1(const MachineInst *inst)
     sdwa_src0_sext_ = sw->src0_sext;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
+    sdwa_clamp_ = sw->clamp;
   }
 }
 
@@ -3773,7 +4544,23 @@ void VCvtNormI16F16Vop1::execute_impl(amdgpu::Wavefront &wf) {
     dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
     src_operands_[0] = dpp_src0_.get();
   }
+  if (dpp_src0_)
+    src0.set_delegate(dpp_src0_.get());
   (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+  src0.clear_delegate();
+  if (sdwa_clamp_) {
+    uint64_t ex = wf.exec();
+    uint32_t vb = wf.vgpr_alloc().base;
+    for (uint32_t ln = 0; ln < wf.wf_size(); ++ln) {
+      if (!(ex & (1ULL << ln)))
+        continue;
+      uint32_t dv = wf.cu().read_vgpr(vb + inst_.vdst, ln);
+      float fv = std::bit_cast<float>(dv);
+      fv = std::clamp(fv, 0.0f, 1.0f);
+      wf.cu().write_vgpr(vb + inst_.vdst, ln, std::bit_cast<uint32_t>(fv));
+    }
+  }
 }
 
 VCvtNormU16F16Vop1::VCvtNormU16F16Vop1(const MachineInst *inst)
@@ -3804,6 +4591,7 @@ VCvtNormU16F16Vop1::VCvtNormU16F16Vop1(const MachineInst *inst)
     sdwa_src0_sext_ = sw->src0_sext;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
+    sdwa_clamp_ = sw->clamp;
   }
 }
 
@@ -3822,7 +4610,23 @@ void VCvtNormU16F16Vop1::execute_impl(amdgpu::Wavefront &wf) {
     dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
     src_operands_[0] = dpp_src0_.get();
   }
+  if (dpp_src0_)
+    src0.set_delegate(dpp_src0_.get());
   (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+  src0.clear_delegate();
+  if (sdwa_clamp_) {
+    uint64_t ex = wf.exec();
+    uint32_t vb = wf.vgpr_alloc().base;
+    for (uint32_t ln = 0; ln < wf.wf_size(); ++ln) {
+      if (!(ex & (1ULL << ln)))
+        continue;
+      uint32_t dv = wf.cu().read_vgpr(vb + inst_.vdst, ln);
+      float fv = std::bit_cast<float>(dv);
+      fv = std::clamp(fv, 0.0f, 1.0f);
+      wf.cu().write_vgpr(vb + inst_.vdst, ln, std::bit_cast<uint32_t>(fv));
+    }
+  }
 }
 
 VSwapB32Vop1::VSwapB32Vop1(const MachineInst *inst)
@@ -3855,6 +4659,7 @@ VSwapB32Vop1::VSwapB32Vop1(const MachineInst *inst)
     sdwa_src0_sext_ = sw->src0_sext;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
+    sdwa_clamp_ = sw->clamp;
   }
 }
 
@@ -3873,6 +4678,8 @@ void VSwapB32Vop1::execute_impl(amdgpu::Wavefront &wf) {
     dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
     src_operands_[0] = dpp_src0_.get();
   }
+  if (dpp_src0_)
+    vdst.set_delegate(dpp_src0_.get());
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -3881,6 +4688,7 @@ void VSwapB32Vop1::execute_impl(amdgpu::Wavefront &wf) {
     vdst.write_lane(wf, lane, src0.read_lane(wf, lane));
     src0.write_lane(wf, lane, tmp);
   }
+  vdst.clear_delegate();
 }
 
 VSwaprelB32Vop1::VSwaprelB32Vop1(const MachineInst *inst)
@@ -3913,6 +4721,7 @@ VSwaprelB32Vop1::VSwaprelB32Vop1(const MachineInst *inst)
     sdwa_src0_sext_ = sw->src0_sext;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
+    sdwa_clamp_ = sw->clamp;
   }
 }
 
@@ -3931,7 +4740,11 @@ void VSwaprelB32Vop1::execute_impl(amdgpu::Wavefront &wf) {
     dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
     src_operands_[0] = dpp_src0_.get();
   }
+  if (dpp_src0_)
+    vdst.set_delegate(dpp_src0_.get());
   (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+  vdst.clear_delegate();
 }
 
 } // namespace rdna1

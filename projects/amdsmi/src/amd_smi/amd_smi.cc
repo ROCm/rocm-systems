@@ -571,7 +571,6 @@ amdsmi_status_t amdsmi_get_socket_info(amdsmi_socket_handle socket_handle, size_
   return AMDSMI_STATUS_SUCCESS;
 }
 
-#ifdef ENABLE_ESMI_LIB
 amdsmi_status_t amdsmi_get_processor_info(amdsmi_processor_handle processor_handle, size_t len,
                                           char* name) {
   char proc_id[16] = {0};
@@ -591,7 +590,6 @@ amdsmi_status_t amdsmi_get_processor_info(amdsmi_processor_handle processor_hand
 
   return AMDSMI_STATUS_SUCCESS;
 }
-#endif
 
 amdsmi_status_t amdsmi_get_processor_handles(amdsmi_socket_handle socket_handle,
                                              uint32_t* processor_count,
@@ -769,7 +767,6 @@ amdsmi_status_t amdsmi_get_node_handle(amdsmi_processor_handle processor_handle,
   return AMDSMI_STATUS_SUCCESS;
 }
 
-#ifdef ENABLE_ESMI_LIB
 amdsmi_status_t amdsmi_get_processor_count_from_handles(amdsmi_processor_handle* processor_handles,
                                                         uint32_t* processor_count,
                                                         uint32_t* nr_cpusockets,
@@ -834,8 +831,6 @@ amdsmi_status_t amdsmi_get_processor_handles_by_type(amdsmi_socket_handle socket
 
   return AMDSMI_STATUS_SUCCESS;
 }
-
-#endif
 
 amdsmi_status_t amdsmi_get_processor_type(amdsmi_processor_handle processor_handle,
                                           processor_type_t* processor_type) {
