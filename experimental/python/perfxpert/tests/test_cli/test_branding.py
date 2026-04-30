@@ -39,6 +39,38 @@ def test_provider_status_marks_configured(monkeypatch):
     assert "openai" in lower
 
 
+def test_provider_status_validates_patched_opencode_env(monkeypatch, tmp_path):
+    monkeypatch.setenv("PERFXPERT_PATCHED_OPENCODE_PATH", str(tmp_path / "missing"))
+    table = get_provider_status_table()
+    row = next(line for line in table.splitlines() if line.startswith("opencode"))
+    assert "missing" in row
+
+
+def test_provider_status_matches_doctor_for_ollama_without_env(monkeypatch):
+    from perfxpert import __main__ as perfxpert_main
+    from perfxpert.cli import opencode_launcher
+
+    for env in (
+        "PERFXPERT_LLM_LOCAL_URL",
+        "OLLAMA_HOST",
+        "PERFXPERT_PATCHED_OPENCODE_PATH",
+    ):
+        monkeypatch.delenv(env, raising=False)
+    monkeypatch.setattr(
+        opencode_launcher,
+        "resolve_validated_opencode_binary",
+        lambda: (_ for _ in ()).throw(FileNotFoundError("missing")),
+    )
+
+    configured, unconfigured = perfxpert_main._check_llm_providers()
+    table = get_provider_status_table()
+    ollama_row = next(line for line in table.splitlines() if line.startswith("ollama"))
+
+    assert "ollama" not in configured
+    assert "ollama" in unconfigured
+    assert "missing" in ollama_row
+
+
 def test_launch_opencode_dry_run_returns_command():
     cmd = launch_opencode(dry_run=True, opencode_path="/tmp/opencode", extra_args=["--foo"])
     assert cmd[0] == "/tmp/opencode"

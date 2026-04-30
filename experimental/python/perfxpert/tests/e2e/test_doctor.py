@@ -3,6 +3,7 @@
 import os
 import re
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -14,16 +15,29 @@ FIXTURE = (
     / "doctor"
     / "expected_clean_output.txt"
 )
+_CHECKOUT_ROOT = Path(__file__).resolve().parents[2]
+
+
+def _checkout_python_env(env: dict[str, str] | None = None) -> dict[str, str]:
+    merged = os.environ.copy()
+    if env is not None:
+        merged.update(env)
+    existing = merged.get("PYTHONPATH")
+    paths = [str(_CHECKOUT_ROOT)]
+    if existing:
+        paths.append(existing)
+    merged["PYTHONPATH"] = os.pathsep.join(paths)
+    return merged
 
 
 def _patched_opencode_available() -> bool:
     """Return whether the default patched opencode path resolves locally."""
-    from perfxpert.cli.opencode_launcher import resolve_opencode_binary
+    from perfxpert.cli.opencode_launcher import resolve_validated_opencode_binary
 
     try:
-        resolve_opencode_binary()
+        resolve_validated_opencode_binary()
         return True
-    except FileNotFoundError:
+    except (FileNotFoundError, RuntimeError):
         return False
 
 
@@ -32,15 +46,13 @@ def _run_doctor(env=None) -> tuple[int, str]:
 
     Returns (exit_code, stdout).
     """
-    if env is None:
-        env = os.environ.copy()
-    else:
-        # Merge with current environ
-        merged = os.environ.copy()
-        merged.update(env)
-        env = merged
-
-    r = subprocess.run(["perfxpert", "doctor"], capture_output=True, text=True, env=env)
+    r = subprocess.run(
+        [sys.executable, "-m", "perfxpert", "doctor"],
+        capture_output=True,
+        text=True,
+        cwd=str(_CHECKOUT_ROOT),
+        env=_checkout_python_env(env),
+    )
     return r.returncode, r.stdout
 
 
@@ -65,7 +77,7 @@ def test_doctor_emits_expected_lines():
         r"(✓|✗) (openai-agents|openai-agents \d+\.\d+\.\d+)",
         r"✓ MCP server",
         r"✓ Python task store",
-        r"(✓|✗) (Patched opencode|patched opencode binary not found)",
+        r"(✓|⚠|✗) (Patched opencode|Optional patched opencode binary not found|patched opencode binary invalid)",
         r"\d+/5 LLM providers configured",
     ]
     for pat in essential_patterns:

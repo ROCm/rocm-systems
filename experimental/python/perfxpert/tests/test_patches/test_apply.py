@@ -191,3 +191,124 @@ def test_build_script_uses_locked_install_and_explicit_postinstall() -> None:
     text = _BUILD_SCRIPT.read_text()
     assert "bun install --frozen-lockfile --ignore-scripts" in text
     assert "bun run --cwd packages/opencode fix-node-pty" in text
+
+
+def test_build_script_is_idempotent_when_managed_patch_series_already_applied(
+    tmp_path: Path,
+) -> None:
+    repo, patch_path = _init_fake_repo(tmp_path)
+    manifest = patch_path.parent / "SHA256SUMS"
+    _write_manifest(manifest, patch_path)
+
+    (repo / "package.json").write_text("{}\n", encoding="utf-8")
+    (repo / "bun.lock").write_text("", encoding="utf-8")
+    (repo / "packages" / "opencode").mkdir(parents=True)
+    _run(["git", "add", "package.json", "bun.lock", "packages"], cwd=repo)
+    _run(
+        [
+            "git",
+            "-c",
+            "user.name=PerfXpert Tests",
+            "-c",
+            "user.email=perfxpert-tests@example.com",
+            "commit",
+            "-m",
+            "add fake opencode package",
+        ],
+        cwd=repo,
+    )
+
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    fake_bun = bin_dir / "bun"
+    fake_bun.write_text(
+        """#!/bin/sh
+if [ "$1" = "--version" ]; then
+  echo "1.2.3"
+  exit 0
+fi
+if [ "$1" = "install" ]; then
+  exit 0
+fi
+if [ "$1" = "run" ] && [ "$2" = "--cwd" ]; then
+  exit 0
+fi
+if [ "$1" = "run" ] && [ "$2" = "build" ]; then
+  mkdir -p dist/opencode/bin
+  printf '#!/bin/sh\\necho fake-opencode\\n' > dist/opencode/bin/opencode
+  chmod +x dist/opencode/bin/opencode
+  exit 0
+fi
+exit 99
+""",
+        encoding="utf-8",
+    )
+    fake_bun.chmod(0o755)
+
+    env = dict(os.environ)
+    env["PATH"] = f"{bin_dir}{os.pathsep}{env.get('PATH', '')}"
+    env["PERFXPERT_PATCH_DIR"] = str(patch_path.parent)
+    env["PERFXPERT_PATCH_MANIFEST"] = str(manifest)
+    env["PERFXPERT_OPENCODE_DIR"] = str(repo)
+    env["PERFXPERT_PATCHED_OPENCODE_PATH"] = str(tmp_path / "cache" / "opencode")
+
+    first = subprocess.run(
+        ["bash", str(_BUILD_SCRIPT)],
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert first.returncode == 0, first.stderr
+
+    second = subprocess.run(
+        ["bash", str(_BUILD_SCRIPT)],
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert second.returncode == 0, second.stderr
+    assert "managed patch series already applied" in second.stdout
+
+
+def test_build_script_refuses_unmanaged_dirty_submodule_before_build(
+    tmp_path: Path,
+) -> None:
+    repo, patch_path = _init_fake_repo(tmp_path)
+    manifest = patch_path.parent / "SHA256SUMS"
+    _write_manifest(manifest, patch_path)
+    (repo / "package.json").write_text("{}\n", encoding="utf-8")
+    (repo / "bun.lock").write_text("", encoding="utf-8")
+    (repo / "tracked.txt").write_text("unmanaged local edit\n", encoding="utf-8")
+
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    fake_bun = bin_dir / "bun"
+    fake_bun.write_text(
+        """#!/bin/sh
+if [ "$1" = "--version" ]; then
+  echo "1.2.3"
+  exit 0
+fi
+echo "bun should not build unmanaged dirty submodule" >&2
+exit 99
+""",
+        encoding="utf-8",
+    )
+    fake_bun.chmod(0o755)
+
+    env = dict(os.environ)
+    env["PATH"] = f"{bin_dir}{os.pathsep}{env.get('PATH', '')}"
+    env["PERFXPERT_PATCH_DIR"] = str(patch_path.parent)
+    env["PERFXPERT_PATCH_MANIFEST"] = str(manifest)
+    env["PERFXPERT_OPENCODE_DIR"] = str(repo)
+
+    result = subprocess.run(
+        ["bash", str(_BUILD_SCRIPT)],
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 2
+    assert "refusing to build a patched artifact" in result.stderr
+    assert "bun should not build" not in result.stderr

@@ -336,22 +336,20 @@ def _check_task_store() -> tuple[bool, str]:
 def _check_opencode_patched() -> tuple[bool, str]:
     """Check that the patched opencode binary can be resolved with version."""
     from pathlib import Path
-    from perfxpert.cli.opencode_launcher import resolve_opencode_binary
+    from perfxpert.cli.opencode_launcher import (
+        OpencodeBinaryValidationError,
+        resolve_validated_opencode_binary,
+    )
 
     try:
-        p = resolve_opencode_binary()
-        # Try to get version from the binary
-        import subprocess
-
-        try:
-            result = subprocess.run([str(p), "--version"], capture_output=True, text=True, timeout=2)
-            ver = result.stdout.strip().split()[-1] if result.returncode == 0 else "unknown"
-        except Exception:
-            ver = "unknown"
+        p, version = resolve_validated_opencode_binary()
+        ver = version.split()[-1] if version else "unknown"
         opencode_path = str(p).replace(str(Path.home()), "~")
         return True, f"Patched opencode {ver} detected at {opencode_path}"
     except FileNotFoundError as e:
-        return False, str(e)
+        return False, f"Optional patched opencode binary not found: {e}"
+    except OpencodeBinaryValidationError as e:
+        return False, f"patched opencode binary invalid: {e}"
 
 
 def _check_opencode_packaged_config() -> tuple[bool, str]:
@@ -398,12 +396,12 @@ def _check_llm_providers() -> tuple[list[str], list[str]]:
         else:
             unconfigured.append(name)
 
-    from perfxpert.cli.opencode_launcher import resolve_opencode_binary
+    from perfxpert.cli.opencode_launcher import resolve_validated_opencode_binary
 
     try:
-        resolve_opencode_binary()
+        resolve_validated_opencode_binary()
         configured.append("opencode")
-    except FileNotFoundError:
+    except (FileNotFoundError, RuntimeError):
         unconfigured.append("opencode")
 
     return sorted(configured), sorted(unconfigured)
@@ -468,7 +466,14 @@ def _run_doctor():
 
     all_ok = True
     for name, (ok, msg) in checks:
-        kind = "ok" if ok else "warn" if "unknown" in msg.lower() else "fail"
+        msg_lower = msg.lower()
+        kind = (
+            "ok"
+            if ok
+            else "warn"
+            if "unknown" in msg_lower or msg_lower.startswith("optional ")
+            else "fail"
+        )
         symbol = _status_symbol(kind, sys.stdout)
         if not ok and kind == "fail":
             all_ok = False

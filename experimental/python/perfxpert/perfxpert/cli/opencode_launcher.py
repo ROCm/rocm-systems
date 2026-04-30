@@ -28,6 +28,7 @@ from perfxpert.tools._tooldep import require_tool
 __all__ = [
     "main",
     "resolve_opencode_binary",
+    "resolve_validated_opencode_binary",
     "resolve_config_dir",
     "print_banner",
     "route_subcommand",
@@ -37,6 +38,14 @@ __all__ = [
 _BRANDING_NAME = "AMD ROCm PerfXpert"
 _BRANDING_VERSION = "0.2.0"
 _PATCHED_OPENCODE_ENV = "PERFXPERT_PATCHED_OPENCODE_PATH"
+_PATCH_MANIFEST_SHA256 = (
+    "55874e5ed7fbc07c17eb5bd59321377b0f1a4c43da1928ccfe4808f48cae9110"
+)
+_PATCH_MANIFEST_METADATA_SUFFIX = ".perfxpert-patch-manifest-sha256"
+
+
+class OpencodeBinaryValidationError(RuntimeError):
+    """Raised when a candidate patched opencode artifact fails validation."""
 
 # Known opencode subcommands (v1.4.x) — a single bare positional that matches
 # one of these MUST be forwarded as a subcommand, not treated as the CWD.
@@ -167,17 +176,78 @@ def _managed_patched_opencode_paths() -> "list[Path]":
     """Candidate patched opencode artifacts outside the Python package.
 
     The generated opencode binary is intentionally not package data. Source
-    builds and the GitHub install wrapper place the built artifact in a
-    PerfXpert-owned cache path so installed packages can still default to the
-    patched submodule build without shipping a generated binary in the package.
+    builds and `perfxpert-code install-patches` place the built artifact in a
+    PerfXpert-owned cache path so package installs can default to a patched
+    artifact without shipping a generated binary in the wheel.
     """
     candidates: list[Path] = []
     xdg_cache = os.environ.get("XDG_CACHE_HOME")
     if xdg_cache:
-        candidates.append(Path(xdg_cache).expanduser() / "perfxpert" / "opencode" / "opencode")
+        return [
+            Path(xdg_cache).expanduser()
+            / "perfxpert"
+            / "opencode"
+            / "opencode"
+        ]
 
     candidates.append(Path.home() / ".cache" / "perfxpert" / "opencode" / "opencode")
     return candidates
+
+
+def _manifest_metadata_path(path: Path) -> Path:
+    return path.with_name(path.name + _PATCH_MANIFEST_METADATA_SUFFIX)
+
+
+def _requires_manifest_metadata(path: Path) -> bool:
+    candidate = path.expanduser()
+    return any(candidate == p.expanduser() for p in _managed_patched_opencode_paths())
+
+
+def validate_patched_opencode_binary(
+    path: Path,
+    *,
+    require_manifest_metadata: bool = False,
+) -> str:
+    """Validate that a candidate patched opencode artifact is executable.
+
+    Managed cache artifacts also need a sidecar manifest hash written by
+    ``build-patched-opencode.sh``. This prevents a stale or arbitrary executable
+    in the cache from making doctor/provider discovery look healthy.
+    """
+    if require_manifest_metadata:
+        metadata = _manifest_metadata_path(path)
+        if not metadata.is_file():
+            raise OpencodeBinaryValidationError(
+                f"missing patch metadata sidecar: {metadata}"
+            )
+        actual = metadata.read_text(encoding="utf-8").strip()
+        if actual != _PATCH_MANIFEST_SHA256:
+            raise OpencodeBinaryValidationError(
+                "patch metadata sidecar does not match the current patch manifest"
+            )
+
+    try:
+        result = subprocess.run(
+            [str(path), "--version"],
+            capture_output=True,
+            text=True,
+            timeout=2,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise OpencodeBinaryValidationError(
+            f"failed to execute patched opencode smoke test: {exc}"
+        ) from exc
+
+    if result.returncode != 0:
+        stderr = (result.stderr or "").strip()
+        raise OpencodeBinaryValidationError(
+            f"patched opencode smoke test failed with exit={result.returncode}: "
+            f"{stderr[:200]}"
+        )
+
+    version = (result.stdout or result.stderr or "").strip()
+    return version or "unknown"
 
 
 def resolve_opencode_binary() -> Path:
@@ -213,6 +283,34 @@ def resolve_opencode_binary() -> Path:
         "For a user-owned upstream opencode binary, run: perfxpert-code opencode [args]. "
         "PERFXPERT_OPENCODE_PATH is honored only by that explicit escape hatch."
     )
+
+
+def resolve_validated_opencode_binary() -> tuple[Path, str]:
+    """Locate and smoke-test the PerfXpert-managed patched opencode binary."""
+    explicit = _explicit_patched_opencode_path()
+    if explicit is not None:
+        return explicit, validate_patched_opencode_binary(explicit)
+
+    for candidate in _repo_local_patched_opencode_paths():
+        if candidate.is_file() and os.access(candidate, os.X_OK):
+            return candidate, validate_patched_opencode_binary(candidate)
+
+    invalid: list[str] = []
+    for candidate in _managed_patched_opencode_paths():
+        if candidate.is_file() and os.access(candidate, os.X_OK):
+            try:
+                return candidate, validate_patched_opencode_binary(
+                    candidate,
+                    require_manifest_metadata=_requires_manifest_metadata(candidate),
+                )
+            except OpencodeBinaryValidationError as exc:
+                invalid.append(f"{candidate}: {exc}")
+
+    if invalid:
+        raise OpencodeBinaryValidationError("; ".join(invalid))
+
+    path = resolve_opencode_binary()
+    return path, validate_patched_opencode_binary(path)
 
 
 def resolve_user_opencode_binary() -> Path:

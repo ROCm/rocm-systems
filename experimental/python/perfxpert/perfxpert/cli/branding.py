@@ -34,20 +34,17 @@ def _provider_configured(name: str) -> bool:
         "openai": ("PERFXPERT_LLM_OPENAI_KEY", "OPENAI_API_KEY"),
         "ollama": ("PERFXPERT_LLM_LOCAL_URL",),
         "private": ("PERFXPERT_LLM_PRIVATE_URL",),
-        "opencode": ("PERFXPERT_PATCHED_OPENCODE_PATH",),
     }
     for env in checks.get(name, ()):
         if os.environ.get(env):
             return True
-    if name == "ollama":
-        return True  # defaults to localhost
     if name == "opencode":
-        from perfxpert.cli.opencode_launcher import resolve_opencode_binary
+        from perfxpert.cli.opencode_launcher import resolve_validated_opencode_binary
 
         try:
-            resolve_opencode_binary()
+            resolve_validated_opencode_binary()
             return True
-        except FileNotFoundError:
+        except (FileNotFoundError, RuntimeError):
             return False
     return False
 

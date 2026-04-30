@@ -320,15 +320,14 @@ perfxpert-code uninstall claude             # reverse the Claude install
 ```
 
 See [backends.md](backends.md) for the full per-backend install /
-uninstall recipes, the gate-hook event-based lift semantics, the
+uninstall recipes, the gate behavior by backend, the
 consent model (per-backend × cwd × file-set), and the env-var
 reference (`PERFXPERT_MCP_WARMUP_TIMEOUT_S`,
 `PERFXPERT_MCP_RETRY_BUDGET_S`, `PERFXPERT_SKIP_LIVE_CHECK`,
 `PERFXPERT_ASSUME_CONSENT`). The gate-probe coverage table in
 [backends.md §Gate-probe](backends.md) documents which small-model
-probe each backend uses to verify mechanical gate enforcement at
-`install()` time — Codex is not probed because its gate is
-prompt-layer-only.
+probe each backend uses at `install()` time — Codex is not probed
+because its gate is prompt-layer-only.
 
 ## 3.2 Codex trust gate
 
@@ -1106,8 +1105,9 @@ The output includes a profiling plan with the exact `rocprofv3` command to run, 
 The agentic TUI automates the full optimization loop: profile, analyze,
 AI-edit code, recompile, re-profile, compare. As of v0.2.0 this is the
 `perfxpert-code` command. By default it uses the patched opencode path
-(bundled in wheels; locally built first in source checkouts), and it
-wraps the same agent runtime the batch-mode `analyze` CLI uses.
+(explicit env override, repo-local build, or PerfXpert-managed cache
+artifact; not wheel package data), and it wraps the same agent runtime
+the batch-mode `analyze` CLI uses.
 
 ![perfxpert-code](assets/gifs/14-perfxpert-code.gif)
 
@@ -1296,13 +1296,13 @@ perfxpert-code
 
 ### Tool-priority gate + lift semantics
 
-The patched opencode path enforces a two-stage gate for every
+The patched opencode path prompts a two-stage gate for every
 GPU-performance request:
 
 1. **Gate stage.** The LLM MUST call `perfxpert_intent_classify`
    first, then `perfxpert_workflow_next_step`. Calls to `bash`,
    `edit`, `write`, `read`, `glob`, `grep` BEFORE those two are
-   refused by the system-prompt discipline (patches 0010, 0012-0017;
+   rejected by the system-prompt discipline (patches 0010, 0012-0017;
    applied to all 8 prompt families so Anthropic / GPT / Gemini /
    Kimi / Trinity / Codex / Beast / default all get identical
    framing).

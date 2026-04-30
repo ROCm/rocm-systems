@@ -76,7 +76,8 @@ CI validates every YAML against its schema on every PR.
 - OpenAI (GPT-4 family)
 - Ollama (local)
 - Private (any OpenAI-compatible endpoint)
-- Opencode (bundled subprocess wrapper)
+- Opencode (patched opencode subprocess wrapper; executable artifact is
+  resolved outside Python package data)
 
 All five verified nightly via `.github/workflows/perfxpert-nightly.yml`.
 

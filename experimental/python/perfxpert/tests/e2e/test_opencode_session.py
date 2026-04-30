@@ -1,28 +1,43 @@
-"""E2E: opencode session — real MCP call through perfxpert-mcp.
+"""E2E smoke tests for opencode launcher and checkout-pinned MCP server.
 
 Requires:
-- perfxpert-code installed (entry point)
-- perfxpert-mcp installed (entry point)
-- patched opencode binary resolvable by the default launcher
+- checkout import path available
+- patched opencode binary resolvable by the default launcher for the TUI smoke
 - Any LLM provider configured, OR --no-llm / air-gap mode
 
-Skips gracefully if the opencode binary isn't available.
+The MCP smoke is intentionally independent of the patched opencode binary.
 """
 
 import os
 import subprocess
+import sys
+from pathlib import Path
 
 import pytest
+
+_CHECKOUT_ROOT = Path(__file__).resolve().parents[2]
+
+
+def _checkout_python_env(extra: dict[str, str] | None = None) -> dict[str, str]:
+    env = os.environ.copy()
+    if extra:
+        env.update(extra)
+    existing = env.get("PYTHONPATH")
+    paths = [str(_CHECKOUT_ROOT)]
+    if existing:
+        paths.append(existing)
+    env["PYTHONPATH"] = os.pathsep.join(paths)
+    return env
 
 
 @pytest.fixture
 def opencode_available():
     try:
-        from perfxpert.cli.opencode_launcher import resolve_opencode_binary
+        from perfxpert.cli.opencode_launcher import resolve_validated_opencode_binary
 
-        resolve_opencode_binary()
+        resolve_validated_opencode_binary()
         return True
-    except (FileNotFoundError, PermissionError):
+    except (FileNotFoundError, PermissionError, RuntimeError):
         return False
     return False
 
@@ -38,11 +53,16 @@ def test_perfxpert_code_launches_if_opencode_available(opencode_available):
     # emerged — proving the launcher ran.
     import signal
     proc = subprocess.Popen(
-        ["perfxpert-code"],
+        [
+            sys.executable,
+            "-c",
+            "from perfxpert.cli.opencode_launcher import main; raise SystemExit(main())",
+        ],
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
-        env={**os.environ, "PERFXPERT_CODE_NO_BANNER": "0"},
+        cwd=str(_CHECKOUT_ROOT),
+        env=_checkout_python_env({"PERFXPERT_CODE_NO_BANNER": "0"}),
         start_new_session=True,  # so we can kill the whole process group
     )
     try:
@@ -61,36 +81,29 @@ def test_perfxpert_code_launches_if_opencode_available(opencode_available):
     assert b"AMD ROCm PerfXpert" in stderr
 
 
-def test_mcp_server_accepts_a_call_from_shell(opencode_available):
-    """Verify perfxpert-mcp at least starts and can receive an initialization message."""
-    if not opencode_available:
-        pytest.skip("patched opencode binary not available on this system")
-
-    import json, time
-
-    # Start perfxpert-mcp with stdio
-    p = subprocess.Popen(
-        ["perfxpert-mcp"],
-        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-    )
+def test_mcp_server_constructs_from_shell():
+    """Verify the checkout's perfxpert-mcp server constructs from a shell."""
     try:
-        # Send an MCP initialize request (simplified; real MCP uses JSON-RPC framing)
-        init = json.dumps({
-            "jsonrpc": "2.0", "id": 1, "method": "initialize",
-            "params": {"protocolVersion": "2024-11-05", "capabilities": {}},
-        }) + "\n"
-        p.stdin.write(init.encode("utf-8"))
-        p.stdin.flush()
-        time.sleep(0.5)
-        # Close stdin to signal EOF; server should exit cleanly
-        p.stdin.close()
-        p.wait(timeout=5)
-    finally:
-        if p.poll() is None:
-            p.terminate()
-            p.wait(timeout=2)
-    # The process should at least start without an immediate crash
-    # (exact protocol handling depends on MCP SDK version; deeper testing in test_mcp_server.py)
+        import mcp  # noqa: F401
+    except ImportError:
+        pytest.skip("MCP SDK not installed")
+
+    script = (
+        "from mcp_server.server import build_server; "
+        "build_server(); "
+        "print('mcp-ok')"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        capture_output=True,
+        text=True,
+        cwd=str(_CHECKOUT_ROOT),
+        env=_checkout_python_env(),
+        timeout=10,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "mcp-ok" in result.stdout
 
 
 # NOTE: The test_end_to_end_interactive_session was a flaky pexpect-based TUI test.

@@ -17,7 +17,7 @@ external the repo touches. Current entries:
 
 | Name | Kind | Where it comes from |
 |------|------|---------------------|
-| `opencode` | binary | `perfxpert-code` patched TUI |
+| `opencode` | binary | user-owned upstream escape hatch; default patched TUI resolution is handled by `perfxpert.cli.opencode_launcher` |
 | `rocprofv3` | binary | ROCm; used to collect traces |
 | `amdclang++` | binary | ROCm; used by the Compile gate |
 | `rocprof-trace-decoder` | shared_lib | ATT / SQTT decoder library |
@@ -85,7 +85,8 @@ Environment overrides (per-tool):
 
 ```
 PERFXPERT_ROCPROF_TRACE_DECODER_PATH   → shared-lib search path
-PERFXPERT_OPENCODE_PATH                → explicit binary path
+PERFXPERT_PATCHED_OPENCODE_PATH        → explicit patched opencode artifact for default TUI/provider paths
+PERFXPERT_OPENCODE_PATH                → explicit user-owned upstream opencode path for `perfxpert-code opencode ...`
 PERFXPERT_ALLOW_INSTALL=1              → unlocks offer_install prompt
 ```
 

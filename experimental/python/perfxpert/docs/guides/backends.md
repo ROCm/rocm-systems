@@ -53,7 +53,7 @@ any extra backend install.
 
 | Backend | Subcommand | LLM | Config location | Scope | Gate hook | MCP tool prefix |
 |---------|-----------|-----|-----------------|-------|-----------|-----------------|
-| **opencode** (default patched path) | `perfxpert-code` | Any (via opencode provider) | `~/.cache/perfxpert/opencode/opencode.json` | Per patched artifact / per-checkout | Patched system prompt + fork patches 0010, 0020 | `perfxpert_*` |
+| **opencode** (default patched path) | `perfxpert-code` | Any (via opencode provider) | `$XDG_CACHE_HOME/perfxpert/opencode/opencode.json`, or `~/.cache/perfxpert/opencode/opencode.json` when `XDG_CACHE_HOME` is unset | Per patched artifact / per-checkout | Prompt-layer tool-priority guidance from fork patches 0010, 0012-0017, 0020 | `perfxpert_*` |
 | **Claude Code** | `perfxpert-code claude` | Anthropic Claude | `./.mcp.json` + `./CLAUDE.local.md` + `./.claude/settings.json` | Project | Native `PreToolUse` hook (event-based lift) | `mcp__perfxpert__*` |
 | **Gemini CLI** | `perfxpert-code gemini` | Google Gemini | `./.gemini/settings.json` + `./.perfxpert/AGENTS.md` | Project | Native `BeforeTool` / `AfterTool` hooks (event-based lift) | `mcp_perfxpert_*` |
 | **Codex CLI** | `perfxpert-code codex` | OpenAI | `~/.codex/config.toml` (trust) + `./.codex/config.toml` when trusted or fallback `~/.codex/config.toml` for MCP + `./AGENTS.override.md` | Trust in user config; MCP project-local when trusted | Prompt-layer-only (Codex `PreToolUse` is Bash-only — see decision record) | `mcp__perfxpert__*` |
@@ -421,7 +421,7 @@ the specific models used are:
 
 | Backend  | Small model used for gate probe | Notes |
 |----------|---------------------------------|-------|
-| opencode | opencode-default                | patched `{block, retryWith}` gate (patch 0020). |
+| opencode | opencode-default                | prompt-layer tool-priority discipline (patches 0010, 0012-0017, 0020). |
 | claude   | `claude-haiku-4-5`              | native `PreToolUse` hook. R-new-4 scope: verified on haiku-4-5; other small models require independent re-verification at acceptance time. |
 | gemini   | `gemini-2.5-flash`              | Native `BeforeTool` / `AfterTool` hooks + runtime-state file for event-based lift. |
 | codex    | *not probed*                    | Gate is prompt-layer-only (Codex `PreToolUse` is Bash-only). `install()` emits a warning-level log (`codex gate hook unsupported on this backend`) and records `gate_hook_installed=False`; `verify_mcp_live` still runs its connectivity checks (e.g. `codex mcp list`) but skips the gate-probe canary. Rationale is captured in the local Codex hook-surface decision record. |

@@ -1478,8 +1478,7 @@ _PROVIDER_CREDENTIALS = {
         "env_vars": (),
         "hint": (
             "opencode provider requires a patched opencode artifact "
-            "(PERFXPERT_PATCHED_OPENCODE_PATH) or explicit "
-            "PERFXPERT_OPENCODE_PATH=/path/to/opencode"
+            "(PERFXPERT_PATCHED_OPENCODE_PATH) or a managed cache artifact"
         ),
         "required_env": (),
     },

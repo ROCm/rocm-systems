@@ -1,5 +1,6 @@
 """Unit tests for perfxpert.cli.opencode_launcher."""
 
+from hashlib import sha256
 from importlib.metadata import version
 from pathlib import Path
 from unittest import mock
@@ -8,6 +9,11 @@ import pytest
 
 from perfxpert.cli import opencode_launcher
 
+_ORIGINAL_MANAGED_PATCHED_OPENCODE_PATHS = (
+    opencode_launcher._managed_patched_opencode_paths
+)
+_PERFXPERT_ROOT = Path(__file__).resolve().parents[2]
+
 
 @pytest.fixture(autouse=True)
 def _disable_repo_local_patched_binary(monkeypatch):
@@ -15,6 +21,11 @@ def _disable_repo_local_patched_binary(monkeypatch):
         opencode_launcher,
         "_repo_local_patched_opencode_paths",
         lambda: [],
+    )
+    monkeypatch.setattr(
+        opencode_launcher,
+        "_managed_patched_opencode_paths",
+        _ORIGINAL_MANAGED_PATCHED_OPENCODE_PATHS,
     )
     monkeypatch.setattr(
         opencode_launcher,
@@ -67,6 +78,135 @@ def test_resolve_binary_prefers_repo_local_patched_build(tmp_path: Path, monkeyp
     )
 
     assert opencode_launcher.resolve_opencode_binary() == local_bin
+
+
+def test_resolve_binary_uses_managed_cache_artifact(tmp_path: Path, monkeypatch):
+    cached_bin = tmp_path / "cache" / "perfxpert" / "opencode" / "opencode"
+    cached_bin.parent.mkdir(parents=True)
+    cached_bin.write_text("#!/bin/sh\necho cache\n")
+    cached_bin.chmod(0o755)
+
+    monkeypatch.delenv("PERFXPERT_OPENCODE_PATH", raising=False)
+    monkeypatch.delenv("PERFXPERT_PATCHED_OPENCODE_PATH", raising=False)
+    monkeypatch.setattr(
+        opencode_launcher,
+        "_managed_patched_opencode_paths",
+        lambda: [cached_bin],
+    )
+
+    assert opencode_launcher.resolve_opencode_binary() == cached_bin
+
+
+def test_patch_manifest_hash_constant_matches_current_manifest():
+    manifest = _PERFXPERT_ROOT / ".patches" / "SHA256SUMS"
+    assert sha256(manifest.read_bytes()).hexdigest() == (
+        opencode_launcher._PATCH_MANIFEST_SHA256
+    )
+
+
+def test_resolve_validated_binary_accepts_tagged_managed_cache_artifact(
+    tmp_path: Path, monkeypatch
+):
+    cached_bin = tmp_path / "cache" / "perfxpert" / "opencode" / "opencode"
+    cached_bin.parent.mkdir(parents=True)
+    cached_bin.write_text("#!/bin/sh\necho opencode 1.0.0\n")
+    cached_bin.chmod(0o755)
+    cached_bin.with_name(
+        cached_bin.name + ".perfxpert-patch-manifest-sha256"
+    ).write_text(opencode_launcher._PATCH_MANIFEST_SHA256, encoding="utf-8")
+
+    monkeypatch.delenv("PERFXPERT_PATCHED_OPENCODE_PATH", raising=False)
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
+    monkeypatch.setattr(
+        opencode_launcher,
+        "_repo_local_patched_opencode_paths",
+        lambda: [],
+    )
+    monkeypatch.setattr(
+        opencode_launcher,
+        "_managed_patched_opencode_paths",
+        _ORIGINAL_MANAGED_PATCHED_OPENCODE_PATHS,
+    )
+
+    path, version = opencode_launcher.resolve_validated_opencode_binary()
+
+    assert path == cached_bin
+    assert version == "opencode 1.0.0"
+
+
+def test_resolve_validated_binary_rejects_untagged_managed_cache_artifact(
+    tmp_path: Path, monkeypatch
+):
+    cached_bin = tmp_path / "cache" / "perfxpert" / "opencode" / "opencode"
+    cached_bin.parent.mkdir(parents=True)
+    cached_bin.write_text("#!/bin/sh\necho opencode 1.0.0\n")
+    cached_bin.chmod(0o755)
+
+    monkeypatch.delenv("PERFXPERT_PATCHED_OPENCODE_PATH", raising=False)
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
+    monkeypatch.setattr(
+        opencode_launcher,
+        "_repo_local_patched_opencode_paths",
+        lambda: [],
+    )
+    monkeypatch.setattr(
+        opencode_launcher,
+        "_managed_patched_opencode_paths",
+        _ORIGINAL_MANAGED_PATCHED_OPENCODE_PATHS,
+    )
+
+    with pytest.raises(
+        opencode_launcher.OpencodeBinaryValidationError,
+        match="missing patch metadata",
+    ):
+        opencode_launcher.resolve_validated_opencode_binary()
+
+
+def test_resolve_validated_binary_rejects_broken_managed_cache_artifact(
+    tmp_path: Path, monkeypatch
+):
+    cached_bin = tmp_path / "cache" / "perfxpert" / "opencode" / "opencode"
+    cached_bin.parent.mkdir(parents=True)
+    cached_bin.write_text("#!/bin/sh\nexit 42\n")
+    cached_bin.chmod(0o755)
+    cached_bin.with_name(
+        cached_bin.name + ".perfxpert-patch-manifest-sha256"
+    ).write_text(opencode_launcher._PATCH_MANIFEST_SHA256, encoding="utf-8")
+
+    monkeypatch.delenv("PERFXPERT_PATCHED_OPENCODE_PATH", raising=False)
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
+    monkeypatch.setattr(
+        opencode_launcher,
+        "_repo_local_patched_opencode_paths",
+        lambda: [],
+    )
+    monkeypatch.setattr(
+        opencode_launcher,
+        "_managed_patched_opencode_paths",
+        _ORIGINAL_MANAGED_PATCHED_OPENCODE_PATHS,
+    )
+
+    with pytest.raises(
+        opencode_launcher.OpencodeBinaryValidationError,
+        match="smoke test failed",
+    ):
+        opencode_launcher.resolve_validated_opencode_binary()
+
+
+def test_managed_cache_paths_honor_xdg_without_home_fallback(
+    tmp_path: Path, monkeypatch
+):
+    xdg = tmp_path / "xdg-cache"
+    monkeypatch.setenv("XDG_CACHE_HOME", str(xdg))
+    monkeypatch.setattr(
+        opencode_launcher,
+        "_managed_patched_opencode_paths",
+        _ORIGINAL_MANAGED_PATCHED_OPENCODE_PATHS,
+    )
+
+    assert opencode_launcher._managed_patched_opencode_paths() == [
+        xdg / "perfxpert" / "opencode" / "opencode"
+    ]
 
 
 def test_resolve_binary_uses_explicit_patched_artifact(tmp_path: Path, monkeypatch):

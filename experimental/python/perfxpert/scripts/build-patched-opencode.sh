@@ -23,6 +23,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PERFXPERT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 SUBMODULE="${PERFXPERT_OPENCODE_DIR:-${PERFXPERT_ROOT}/opencode}"
+PATCH_MANIFEST="${PERFXPERT_PATCH_MANIFEST:-${PERFXPERT_ROOT}/.patches/SHA256SUMS}"
 DEFAULT_CACHE_ROOT="${XDG_CACHE_HOME:-${HOME}/.cache}"
 OUTPUT="${PERFXPERT_PATCHED_OPENCODE_PATH:-${DEFAULT_CACHE_ROOT}/perfxpert/opencode/opencode}"
 
@@ -68,11 +69,49 @@ fi
 
 echo "build-patched-opencode: bun=$(bun --version), submodule=${SUBMODULE}"
 
+patch_series_already_applied() {
+  local tmp_root tmp_tree current_diff expected_diff rc
+  tmp_root="$(mktemp -d "${TMPDIR:-/tmp}/perfxpert-opencode-patchcheck.XXXXXX")" || return 1
+  tmp_tree="${tmp_root}/opencode-clean"
+  current_diff="${tmp_root}/current.patch"
+  expected_diff="${tmp_root}/expected.patch"
+
+  git diff --binary HEAD -- > "${current_diff}" || {
+    rm -rf "${tmp_root}"
+    return 1
+  }
+
+  if ! git worktree add --detach "${tmp_tree}" HEAD >/dev/null 2>&1; then
+    rm -rf "${tmp_root}"
+    return 1
+  fi
+
+  if ! (
+    cd "${tmp_tree}"
+    PERFXPERT_OPENCODE_DIR="${tmp_tree}" bash "${SCRIPT_DIR}/apply-opencode-patches.sh" >/dev/null
+    git diff --binary HEAD -- > "${expected_diff}"
+  ); then
+    git worktree remove --force "${tmp_tree}" >/dev/null 2>&1 || true
+    rm -rf "${tmp_root}"
+    return 1
+  fi
+
+  if cmp -s "${current_diff}" "${expected_diff}"; then
+    rc=0
+  else
+    rc=1
+  fi
+
+  git worktree remove --force "${tmp_tree}" >/dev/null 2>&1 || true
+  rm -rf "${tmp_root}"
+  return "${rc}"
+}
+
 # --- 3. Apply patches --------------------------------------------------------
-# Idempotent: the apply script bails out on dirty tree, so we only apply
-# when the submodule is at the pinned upstream commit with no local diff. If patches
-# are already applied (tree is dirty), we skip silently. A non-git tree is
-# rejected outright: the patch script relies on git apply/checkout semantics.
+# The build artifact is trusted later as "patched", so never build from a dirty
+# submodule whose patch state cannot be proven. Re-running after our own patch
+# application is allowed only when the current diff exactly matches the managed
+# patch series generated from HEAD.
 cd "${SUBMODULE}"
 if ! git rev-parse --show-toplevel >/dev/null 2>&1; then
   echo "build-patched-opencode: ${SUBMODULE} is not a git checkout; refusing to build without the repo-pinned submodule metadata" >&2
@@ -81,8 +120,13 @@ fi
 if git diff --quiet HEAD -- 2>/dev/null; then
   echo "build-patched-opencode: applying ${PERFXPERT_ROOT}/.patches/*.patch"
   bash "${SCRIPT_DIR}/apply-opencode-patches.sh"
+elif patch_series_already_applied; then
+  echo "build-patched-opencode: managed patch series already applied in ${SUBMODULE}"
 else
-  echo "build-patched-opencode: submodule already patched (dirty tree) — skipping apply"
+  echo "build-patched-opencode: ${SUBMODULE} has uncommitted changes; refusing to build a patched artifact from an unverifiable submodule state" >&2
+  echo "  Run: (cd ${SUBMODULE} && git checkout HEAD -- .)" >&2
+  echo "  Then re-run: bash ${BASH_SOURCE[0]}" >&2
+  exit 2
 fi
 
 # --- 4. Install deps + build -------------------------------------------------
@@ -162,5 +206,6 @@ fi
 mkdir -p "$(dirname "${OUTPUT}")"
 cp -f "${BUILT}" "${OUTPUT}"
 chmod +x "${OUTPUT}"
+file_sha256 "${PATCH_MANIFEST}" > "${OUTPUT}.perfxpert-patch-manifest-sha256"
 echo "build-patched-opencode: installed → ${OUTPUT}"
 echo "build-patched-opencode: sha256=$(file_sha256 "${OUTPUT}")"

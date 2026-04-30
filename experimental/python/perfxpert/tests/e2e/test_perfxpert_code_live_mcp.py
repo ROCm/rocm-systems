@@ -14,8 +14,8 @@ Gated on:
 """
 
 import os
-import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -27,11 +27,11 @@ _CHECKOUT_ROOT = Path(__file__).resolve().parents[2]
 def _opencode_available():
     """Check if the default patched opencode binary is available."""
     try:
-        from perfxpert.cli.opencode_launcher import resolve_opencode_binary
+        from perfxpert.cli.opencode_launcher import resolve_validated_opencode_binary
 
-        resolve_opencode_binary()
+        resolve_validated_opencode_binary()
         return True
-    except (FileNotFoundError, PermissionError):
+    except (FileNotFoundError, PermissionError, RuntimeError):
         return False
 
 
@@ -43,11 +43,12 @@ def _llm_key_set():
 
 
 def _perfxpert_code_cmd() -> list[str]:
-    """Use the installed console script, but import perfxpert from this checkout."""
-    path = shutil.which("perfxpert-code")
-    if path is None:
-        pytest.skip("perfxpert-code console script not available on PATH")
-    return [path]
+    """Use this checkout's launcher module instead of an installed script."""
+    return [
+        sys.executable,
+        "-c",
+        "from perfxpert.cli.opencode_launcher import main; raise SystemExit(main())",
+    ]
 
 
 def _checkout_python_env() -> dict[str, str]:

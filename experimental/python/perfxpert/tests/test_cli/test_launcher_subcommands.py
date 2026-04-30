@@ -45,7 +45,7 @@ def _disable_repo_local_patched_binary(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-class TestHelpFlag:
+class TestHelpFlagDiscovery:
     """Bare `perfxpert-code --help` must print the perfxpert-owned banner.
 
     Per review I4: help flag discovery must list the documented
@@ -227,6 +227,25 @@ class TestPatchedBinaryResolution:
         monkeypatch.setenv("PERFXPERT_OPENCODE_PATH", str(upstream))
 
         assert opencode_launcher.resolve_opencode_binary() == patched
+
+    def test_managed_cache_artifact_is_a_default_candidate(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path
+    ) -> None:
+        """Packaged installs can resolve a prebuilt patched cache artifact."""
+        cached = tmp_path / "xdg" / "perfxpert" / "opencode" / "opencode"
+        cached.parent.mkdir(parents=True)
+        cached.write_text("#!/bin/sh\nexit 0\n")
+        cached.chmod(0o755)
+
+        monkeypatch.delenv("PERFXPERT_PATCHED_OPENCODE_PATH", raising=False)
+        monkeypatch.delenv("PERFXPERT_OPENCODE_PATH", raising=False)
+        monkeypatch.setattr(
+            opencode_launcher,
+            "_managed_patched_opencode_paths",
+            lambda: [cached],
+        )
+
+        assert opencode_launcher.resolve_opencode_binary() == cached
 
     def test_env_override_does_not_replace_default_patched_path(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path

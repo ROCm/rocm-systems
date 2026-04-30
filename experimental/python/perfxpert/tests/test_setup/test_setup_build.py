@@ -76,3 +76,10 @@ def test_build_script_retries_when_frozen_lockfile_install_fails() -> None:
     assert "frozen lockfile install failed; retrying" in text
     assert "bun install --ignore-scripts" in text
     assert "bun run build --single --skip-install" in text
+
+
+def test_build_script_refuses_dirty_unverifiable_submodule_state() -> None:
+    text = _PATCHED_BUILD_SCRIPT.read_text(encoding="utf-8")
+    assert "refusing to build a patched artifact" in text
+    assert "git diff --quiet HEAD --" in text
+    assert "already patched" not in text

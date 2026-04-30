@@ -19,7 +19,6 @@ Env var conventions (canonical):
     PERFXPERT_LLM_LOCAL_URL         (ollama)
     PERFXPERT_LLM_PRIVATE_URL / _MODEL / _API_KEY / _HEADERS / _VERIFY_SSL
     PERFXPERT_PATCHED_OPENCODE_PATH
-    PERFXPERT_OPENCODE_PATH         (explicit opencode override)
     PERFXPERT_IN_OPENCODE_SESSION   (recursion guard marker)
 
 Back-compat env-var aliases (honored with DeprecationWarning):

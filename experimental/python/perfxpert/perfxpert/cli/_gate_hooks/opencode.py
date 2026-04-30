@@ -1,20 +1,13 @@
-"""Opencode gate hook — fork-only patch 0020 extension (Task 4.6, B-N2).
+"""Opencode gate hook — prompt-layer patch 0020 extension (Task 4.6, B-N2).
 
-**Important: this hook depends on the patched opencode binary.**
+**Important: this hook is prompt-layer only for opencode today.**
 
-The `{ block: true, retryWith: <message> }` return shape from
-`plugin.trigger("tool.execute.before", ...)` is NOT part of upstream
-opencode's public plugin API. It is provided by
-`perfxpert/.patches/0020-perfxpert-tool-gate.patch`. When a user
-intentionally uses the upstream escape hatch (`perfxpert-code opencode ...`
-with `PERFXPERT_OPENCODE_PATH`), the patch is absent: the plugin trigger
-returns a truthy object but opencode ignores the `block` field and lets the
-tool run. In that scenario the hook degrades to prompt-layer enforcement only
-(the rejection-language stanza from Task 4a `_prompt_adapter`).
-
-This is documented behavior, not a bug. `verify_mcp_live` records
-`gate_hook_installed=False` + warning-level log when the user has
-used the upstream escape hatch instead of the patched binary.
+`perfxpert/.patches/0020-perfxpert-tool-gate.patch` strengthens the primary
+opencode prompts with tool-priority rejection language. It does not patch
+opencode's TypeScript runtime to mechanically block or rewrite a bad first
+tool call. When a user intentionally uses the upstream escape hatch
+(`perfxpert-code opencode ...` with `PERFXPERT_OPENCODE_PATH`), the patched
+prompt is absent and only any user-supplied upstream guidance remains.
 
 Session-state: held in memory by the patched opencode process
 (in-session object). Invalidation = process exit (session end).
@@ -29,23 +22,22 @@ from typing import Any
 @dataclass(frozen=True)
 class OpencodeGateInstallResult:
     fork_only_notice: str = (
-        "opencode gate hook requires the patched opencode binary "
-        "(perfxpert/.patches/0020-perfxpert-tool-gate.patch). Upstream "
-        "opencode silently ignores the {block, retryWith} return shape."
+        "opencode gate discipline is prompt-layer only; patched opencode "
+        "adds PerfXpert prompt/tool-priority guidance, not a mechanical "
+        "runtime block hook."
     )
-    # No files to write on the opencode side: the patch bakes the hook
-    # directly into the opencode binary's plugin invocation path.
+    # No files to write on the opencode side: the patch bakes the prompt
+    # guidance directly into the opencode prompt files.
     installed: bool = True
 
 
 def install(cwd: Any, *, env: dict | None = None) -> OpencodeGateInstallResult:
     """Install the opencode gate hook.
 
-    For the patched opencode binary this is a no-op install: the
-    gate logic is compiled into the binary via patch 0020. The
-    function exists so the per-backend install flow is uniform and
-    so future extensions (per-session config files) have a single
-    entry point.
+    For the patched opencode binary this is a no-op install: prompt-layer
+    gate guidance is compiled into the prompt files via patch 0020. The
+    function exists so the per-backend install flow is uniform and so future
+    runtime-hook extensions have a single entry point.
 
     `cwd` and `env` are accepted for signature parity with the
     claude / gemini hooks; they are unused today.
@@ -61,9 +53,9 @@ def evaluate(
 ) -> dict[str, Any]:
     """Event-based gate decision (B-N3).
 
-    Returns either `{}` (allow) or the fork-only
-    `{"block": True, "retryWith": <message>}` payload that the
-    patched opencode binary interprets.
+    Returns either `{}` (allow) or the
+    `{"block": True, "retryWith": <message>}` payload reserved for a future
+    mechanical runtime hook. Current patched opencode does not consume it.
 
     Rule:
 

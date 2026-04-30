@@ -1,6 +1,6 @@
 # PerfXpert — Known Issues
 
-## Codex gate is prompt-layer only
+## Prompt-only gates in Codex and the default opencode path
 
 `perfxpert-code codex` stages the same MCP surface as
 the other backends, but its gate remains prompt-layer-only. As of April
@@ -8,18 +8,23 @@ the other backends, but its gate remains prompt-layer-only. As of April
 Write / other tool calls, so it cannot satisfy PerfXpert's "block every
 non-perfxpert tool until `intent_classify` returns" contract.
 
+The default patched opencode path is also prompt-enforced today: patches
+0010, 0012-0017, and 0020 strengthen the system prompts and MCP tool
+descriptions, but they do not install a runtime hook that mechanically
+rewrites or blocks tool calls.
+
 Current backend split:
 
-- **Patched opencode path** — mechanical gate via fork patch 0020
-  (`{block, retryWith}` in `tool.execute.before`)
+- **Patched opencode path** — prompt-layer tool-priority discipline via
+  fork patches 0010, 0012-0017, and 0020
 - **Claude Code** — mechanical gate via native `PreToolUse`
 - **Gemini CLI** — mechanical gate via project-local `BeforeTool` /
   `AfterTool` hooks + runtime lift
 - **Codex CLI** — prompt-layer rejection language in the
   perfxpert-managed `AGENTS.override.md` compatibility override
 
-If you need a hard pre-tool-call gate today, use the default patched
-opencode path, Claude Code, or Gemini CLI instead of Codex.
+If you need a hard pre-tool-call gate today, use Claude Code or Gemini
+CLI instead of Codex or the default opencode path.
 
 ## LLM end-to-end smoke test may fail with 429 insufficient_quota
 
@@ -118,11 +123,11 @@ without being ported.
   `PERFXPERT_LLM_FALLBACK_CHAIN` to cascade across providers when
   rate-limited.
 
-- **Upstream-opencode escape hatch weakens the opencode gate.**
+- **Upstream-opencode escape hatch drops PerfXpert's patched prompt discipline.**
   If you intentionally run `perfxpert-code opencode ...` with
-  `PERFXPERT_OPENCODE_PATH` pointed at upstream `opencode`, the fork-only
-  `{block, retryWith}` behavior is unavailable. The default launcher and
-  `perfxpert doctor` do not use that upstream path.
+  `PERFXPERT_OPENCODE_PATH` pointed at upstream `opencode`, the
+  PerfXpert prompt/tool-priority patches are unavailable. The default
+  launcher and `perfxpert doctor` do not use that upstream path.
 
 ## Docs-audit baseline
 

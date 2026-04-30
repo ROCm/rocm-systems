@@ -592,8 +592,9 @@ Surfaces per backend:
   Write / other tools, so it cannot satisfy the event-based gate
   contract. Rationale is captured in the local Codex hook-surface
   decision record.
-- **opencode** — `{block, retryWith}` from patched
-  `tool.execute.before` plugin (fork-only — patch 0020).
+- **opencode** — prompt-layer tool-priority guidance from patched prompt
+  files (fork-only patches 0010, 0012-0017, and 0020); no mechanical
+  runtime block hook today.
 
 ### Known issue: first-run exit-124
 

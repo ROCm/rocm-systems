@@ -78,8 +78,8 @@ def test_check_llm_providers_accepts_canonical_env_names(monkeypatch):
 
     monkeypatch.setattr(
         opencode_launcher,
-        "resolve_opencode_binary",
-        lambda: "/cache/perfxpert/opencode/opencode",
+        "resolve_validated_opencode_binary",
+        lambda: ("/cache/perfxpert/opencode/opencode", "opencode 1.0.0"),
     )
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant")
     monkeypatch.setenv("OPENAI_API_KEY", "sk-openai")
@@ -99,8 +99,8 @@ def test_check_llm_providers_accepts_compatibility_aliases(monkeypatch):
 
     monkeypatch.setattr(
         opencode_launcher,
-        "resolve_opencode_binary",
-        lambda: "/cache/perfxpert/opencode/opencode",
+        "resolve_validated_opencode_binary",
+        lambda: ("/cache/perfxpert/opencode/opencode", "opencode 1.0.0"),
     )
     monkeypatch.setenv("OLLAMA_HOST", "http://localhost:11434")
     monkeypatch.setenv("PRIVATE_LLM_ENDPOINT", "https://llm.example/v1")
@@ -120,11 +120,52 @@ def test_check_llm_providers_marks_opencode_unconfigured_without_patched_binary(
     monkeypatch.setenv("PERFXPERT_OPENCODE_PATH", "/usr/local/bin/upstream-opencode")
     monkeypatch.setattr(
         opencode_launcher,
-        "resolve_opencode_binary",
+        "resolve_validated_opencode_binary",
         lambda: (_ for _ in ()).throw(FileNotFoundError("patched missing")),
     )
 
     configured, unconfigured = perfxpert_main._check_llm_providers()
 
+    assert "opencode" not in configured
+    assert "opencode" in unconfigured
+
+
+def test_check_opencode_patched_missing_is_optional_warning(monkeypatch):
+    from perfxpert.cli import opencode_launcher
+
+    monkeypatch.setattr(
+        opencode_launcher,
+        "resolve_validated_opencode_binary",
+        lambda: (_ for _ in ()).throw(FileNotFoundError("patched missing")),
+    )
+
+    ok, message = perfxpert_main._check_opencode_patched()
+
+    assert ok is False
+    assert message.startswith("Optional patched opencode binary not found")
+
+
+def test_check_opencode_patched_rejects_broken_cache_artifact(monkeypatch, tmp_path):
+    from perfxpert.cli import opencode_launcher
+
+    bad = tmp_path / "xdg" / "perfxpert" / "opencode" / "opencode"
+    bad.parent.mkdir(parents=True)
+    bad.write_text("#!/bin/sh\nexit 42\n", encoding="utf-8")
+    bad.chmod(0o755)
+    sidecar = bad.with_name(bad.name + ".perfxpert-patch-manifest-sha256")
+    sidecar.write_text(opencode_launcher._PATCH_MANIFEST_SHA256, encoding="utf-8")
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "xdg"))
+    monkeypatch.delenv("PERFXPERT_PATCHED_OPENCODE_PATH", raising=False)
+    monkeypatch.setattr(
+        opencode_launcher,
+        "_repo_local_patched_opencode_paths",
+        lambda: [],
+    )
+
+    ok, message = perfxpert_main._check_opencode_patched()
+    configured, unconfigured = perfxpert_main._check_llm_providers()
+
+    assert ok is False
+    assert "invalid" in message
     assert "opencode" not in configured
     assert "opencode" in unconfigured

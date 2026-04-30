@@ -1,7 +1,7 @@
 """Opencode-in-opencode recursion guard (spec §5.8, review N8).
 
-When the opencode binary is bundled as a perfxpert provider, a
-naively-configured session could recurse:
+When the patched opencode binary is used as a perfxpert provider, a
+naively configured session could recurse:
   perfxpert-code (opencode TUI) -> MCP -> agent with provider=opencode ->
   subprocess opencode -> MCP -> ... forever.
 

@@ -51,7 +51,11 @@ def _setup_env(monkeypatch, tmp_path):
     monkeypatch.setenv("PERFXPERT_LLM_OPENAI_KEY", "sk-smoke")
     monkeypatch.setenv("PERFXPERT_LLM_PRIVATE_URL", "https://smoke.local/v1")
     monkeypatch.setenv("PERFXPERT_LLM_PRIVATE_MODEL", "smoke")
-    monkeypatch.setenv("PERFXPERT_OPENCODE_PATH", "/tmp/opencode-smoke")
+    patched_opencode = tmp_path / "opencode-smoke"
+    patched_opencode.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    patched_opencode.chmod(0o755)
+    monkeypatch.setenv("PERFXPERT_PATCHED_OPENCODE_PATH", str(patched_opencode))
+    monkeypatch.delenv("PERFXPERT_OPENCODE_PATH", raising=False)
     monkeypatch.delenv("PERFXPERT_IN_OPENCODE_SESSION", raising=False)
     monkeypatch.setenv("HOME", str(tmp_path))
 
