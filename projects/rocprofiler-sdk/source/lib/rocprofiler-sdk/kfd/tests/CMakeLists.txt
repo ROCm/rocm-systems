@@ -20,6 +20,10 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
+if(ROCPROFILER_BUILD_WSL)
+    return()
+endif()
+
 rocprofiler_deactivate_clang_tidy()
 
 include(GoogleTest)
