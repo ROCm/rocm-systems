@@ -14,6 +14,12 @@ namespace rocprofsys::sampling::test
 
 struct mock_thread_info_resolver
 {
+    mock_thread_info_resolver() = default;
+
+    template <class Fn>
+    explicit mock_thread_info_resolver(Fn&&)
+    {}
+
     std::map<int64_t, thread_info_data> data;
 
     std::optional<thread_info_data> resolve(int64_t tid) const

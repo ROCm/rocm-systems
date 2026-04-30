@@ -54,6 +54,7 @@ namespace rocprofsys::sampling
 template <class Policies>
 sampling_service<Policies>::sampling_service(sampling_config config)
 : config_(std::move(config))
+, thread_info_resolver_(config_.resolve_thread_info)
 , trace_sink_(thread_info_resolver_)
 , perfetto_sink_(thread_info_resolver_, config_.use_perfetto,
                  config_.perfetto_annotations)

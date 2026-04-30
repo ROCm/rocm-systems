@@ -4,24 +4,12 @@
 #pragma once
 
 // Template implementation of the sampling signal handler body.
-// Extracted from services_accessor.cpp so tests can instantiate with
-// test policies and exercise the full unwind->ring-buffer flow without
-// real signals.
-//
-// The extern "C" trampoline in services_accessor.cpp is a one-liner
-// that delegates to this template.
+// The extern "C" trampoline in services_accessor.cpp delegates to this.
 
 #include "sampling/data/backtrace_record.hpp"
-#include "sampling/data/limits.hpp"
 #include "sampling/policies/tl_state.hpp"
 #include "sampling/sampling_service.hpp"
-
-#include <libunwind.h>
-#include <sys/resource.h>
-#include <ucontext.h>
-
-#include <cstdint>
-#include <ctime>
+#include "sampling/src/linux/signal_sample_helpers.hpp"
 
 namespace rocprofsys::sampling
 {
@@ -53,57 +41,9 @@ sampling_signal_handler_body(int sig, void* ucontext, sampling_service<Policies>
                                                              : trigger_type::TIMER;
     rec.pc_count     = 0;
 
-    {
-        static_assert(sizeof(unw_context_t) == sizeof(ucontext_t),
-                      "unw_context_t / ucontext_t size mismatch — ucontext "
-                      "reinterpret_cast in the sampling signal handler is unsafe");
-
-        unw_cursor_t  cursor = {};
-        unw_context_t uctx   = {};
-        if(ucontext)
-        {
-            uctx = *reinterpret_cast<unw_context_t const*>(
-                static_cast<ucontext_t const*>(ucontext));
-        }
-        else
-        {
-            unw_getcontext(&uctx);
-        }
-        if(unw_init_local(&cursor, &uctx) == 0)
-        {
-            while(rec.pc_count < static_cast<uint8_t>(MAX_STACK_DEPTH))
-            {
-                unw_word_t ip = 0;
-                if(unw_get_reg(&cursor, UNW_REG_IP, &ip) != 0) break;
-                if(ip == 0) break;
-                rec.raw_pcs[rec.pc_count++] = static_cast<uintptr_t>(ip);
-                if(unw_step(&cursor) <= 0) break;
-            }
-        }
-    }
-
-    {
-        struct timespec cputime_ts = { 0, 0 };
-        if(clock_gettime(CLOCK_THREAD_CPUTIME_ID, &cputime_ts) == 0)
-        {
-            rec.metrics.cpu_ns =
-                (cputime_ts.tv_sec * INT64_C(1'000'000'000)) + cputime_ts.tv_nsec;
-            rec.metrics.valid.set(0);
-        }
-    }
-
-    {
-        struct rusage ru = {};
-        if(::getrusage(RUSAGE_THREAD, &ru) == 0)
-        {
-            rec.metrics.mem_peak_kb = static_cast<int64_t>(ru.ru_maxrss);
-            rec.metrics.ctx_swch    = static_cast<int64_t>(ru.ru_nvcsw + ru.ru_nivcsw);
-            rec.metrics.page_flt    = static_cast<int64_t>(ru.ru_minflt + ru.ru_majflt);
-            rec.metrics.valid.set(1);
-            rec.metrics.valid.set(2);
-            rec.metrics.valid.set(3);
-        }
-    }
+    capture_stack_trace(rec, ucontext);
+    capture_cpu_time(rec);
+    capture_thread_rusage(rec);
 
     if(!state->ring_buffer().try_push(rec))
     {

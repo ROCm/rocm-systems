@@ -11,9 +11,12 @@
 // subsystem to be compiled and tested without linking the full rocprof-sys
 // library.
 
+#include "sampling/thread_info_data.hpp"
+
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <optional>
 #include <set>
 #include <string>
 
@@ -71,6 +74,12 @@ struct sampling_config
                                                                          std::size_t) {};
     std::function<void(std::string, std::size_t)> register_track       = [](std::string,
                                                                       std::size_t) {};
+
+    // Thread-info resolver. Returns thread system/sequent IDs and lifetime.
+    // Production: wraps thread_info::get() with SequentTID/InternalTID fallback.
+    // Default: returns nullopt (no thread info available).
+    std::function<std::optional<thread_info_data>(int64_t)> resolve_thread_info =
+        [](int64_t) -> std::optional<thread_info_data> { return std::nullopt; };
 
     // Overflow event perf_event_attr configurator.
     // Production: wired to rocprofsys::perf::config_overflow_sampling().

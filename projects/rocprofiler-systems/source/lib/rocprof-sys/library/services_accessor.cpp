@@ -62,6 +62,27 @@ make_production_config()
     cfg.get_sys_tid = []() -> int64_t {
         return static_cast<int64_t>(rocprofsys::threading::get_sys_tid());
     };
+    cfg.resolve_thread_info =
+        [](int64_t tid) -> std::optional<rocprofsys::sampling::thread_info_data> {
+        auto const& info = rocprofsys::thread_info::get(tid, rocprofsys::SequentTID);
+        if(!info)
+        {
+            auto const& alt = rocprofsys::thread_info::get(tid, rocprofsys::InternalTID);
+            if(!alt) return std::nullopt;
+            return rocprofsys::sampling::thread_info_data{
+                static_cast<std::size_t>(alt->index_data->system_value),
+                static_cast<std::size_t>(alt->index_data->sequent_value),
+                static_cast<uint64_t>(alt->get_start()),
+                static_cast<uint64_t>(alt->get_stop())
+            };
+        }
+        return rocprofsys::sampling::thread_info_data{
+            static_cast<std::size_t>(info->index_data->system_value),
+            static_cast<std::size_t>(info->index_data->sequent_value),
+            static_cast<uint64_t>(info->get_start()),
+            static_cast<uint64_t>(info->get_stop())
+        };
+    };
     cfg.is_thread_eligible = [](int64_t tid) {
         if(rocprofsys::get_thread_state() == rocprofsys::ThreadState::Disabled)
             return false;
@@ -94,7 +115,6 @@ make_production_config()
     return cfg;
 }
 }  // namespace
-
 rocprofsys::sampling::default_sampling_service&
 sampling()
 {
