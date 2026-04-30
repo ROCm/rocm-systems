@@ -1331,6 +1331,8 @@ bool Device::populateOCLDeviceConstants() {
   info_.addressBits_ = LP64_SWITCH(32, 64);
   info_.maxSamplers_ = 16;
   info_.bufferFromImageSupport_ = false;
+  info_.pitch2DLinearFilterSupport_ = false;
+  info_.pitch2DNormalizedCoordsSupport_ = false;
   info_.oclcVersion_ = "OpenCL C " OPENCL_C_VERSION_STR " ";
   info_.spirVersions_ = "";
 
@@ -1497,6 +1499,8 @@ bool Device::populateOCLDeviceConstants() {
     info_.imageBaseAddressAlignment_ = 256;
 
     info_.bufferFromImageSupport_ = false;
+    info_.pitch2DLinearFilterSupport_ = false;
+    info_.pitch2DNormalizedCoordsSupport_ = false;
 
     info_.imageSupport_ = (info_.maxReadWriteImageArgs_ > 0) ? true : false;
   }

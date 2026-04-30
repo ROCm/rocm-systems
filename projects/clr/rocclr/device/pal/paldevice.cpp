@@ -439,6 +439,8 @@ void NullDevice::fillDeviceInfo(const Pal::DeviceProperties& palProp,
     info_.imageBaseAddressAlignment_ = 256;  // XXX: 256 byte base address alignment for now
 
     info_.bufferFromImageSupport_ = true;
+    info_.pitch2DLinearFilterSupport_ = false;
+    info_.pitch2DNormalizedCoordsSupport_ = false;
   }
 
   info_.errorCorrectionSupport_ = false;

@@ -145,13 +145,14 @@ hipError_t ihipCreateTextureObject(hipTextureObject_t* pTexObject, const hipReso
   }
 
   // CUDA divergence: CUDA supports normalizedCoords and linear filtering with
-  // Pitch2D resources natively. AMD GPU texture units require tiled memory layouts
-  // for these features, so Pitch2D (linear layout) is incompatible.
+  // Pitch2D resources natively. AMD GPUs report these capabilities via
+  // device::Info; see roc::Device::populateOCLDeviceConstants().
   if (pResDesc->resType == hipResourceTypePitch2D) {
-    if (pTexDesc->normalizedCoords || pTexDesc->filterMode == hipFilterModeLinear) {
+    if ((pTexDesc->normalizedCoords && !info.pitch2DNormalizedCoordsSupport_) ||
+        (pTexDesc->filterMode == hipFilterModeLinear && !info.pitch2DLinearFilterSupport_)) {
       LogPrintfError(
           "Pitch2D resources do not support normalizedCoords or linear filtering "
-          "on this platform (normalizedCoords=%d, filterMode=%d)",
+          "on this device (normalizedCoords=%d, filterMode=%d)",
           pTexDesc->normalizedCoords, pTexDesc->filterMode);
       return hipErrorNotSupported;
     }

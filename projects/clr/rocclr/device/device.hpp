@@ -589,6 +589,17 @@ struct Info : public amd::EmbeddedObject {
   //! Describes whether buffers from images are supported
   uint32_t bufferFromImageSupport_;
 
+  //! True if Pitch2D resources support hipFilterModeLinear sampling.
+  //! AMD GPU texture units require tiled layouts for linear filtering,
+  //! so this is false on all current AMD architectures (gfx9-gfx12).
+  uint32_t pitch2DLinearFilterSupport_;
+
+  //! True if Pitch2D resources support normalized coordinates.
+  //! AMD GPU texture units require tiled layouts for normalized
+  //! coordinate sampling, so this is false on all current AMD
+  //! architectures (gfx9-gfx12).
+  uint32_t pitch2DNormalizedCoordsSupport_;
+
   //! Returns the supported SPIR versions for the device
   const char* spirVersions_;
 
