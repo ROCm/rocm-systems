@@ -112,31 +112,12 @@ static void LaunchKrnl4(size_t NumElms, int InitVal) {
   delete[] Hstptr;
 }
 
-static int HmmAttrPrint() {
-  int managed = 0;
-  INFO(
-      "The following are the attribute values related to HMM for"
-      " device 0:\n");
-  HIP_CHECK(hipDeviceGetAttribute(&managed, hipDeviceAttributeDirectManagedMemAccessFromHost, 0));
-  INFO("hipDeviceAttributeDirectManagedMemAccessFromHost: " << managed);
-  HIP_CHECK(hipDeviceGetAttribute(&managed, hipDeviceAttributeConcurrentManagedAccess, 0));
-  INFO("hipDeviceAttributeConcurrentManagedAccess: " << managed);
-  HIP_CHECK(hipDeviceGetAttribute(&managed, hipDeviceAttributePageableMemoryAccess, 0));
-  INFO("hipDeviceAttributePageableMemoryAccess: " << managed);
-  HIP_CHECK(
-      hipDeviceGetAttribute(&managed, hipDeviceAttributePageableMemoryAccessUsesHostPageTables, 0));
-  INFO("hipDeviceAttributePageableMemoryAccessUsesHostPageTables:" << managed);
-
-  HIP_CHECK(hipDeviceGetAttribute(&managed, hipDeviceAttributeManagedMemory, 0));
-  INFO("hipDeviceAttributeManagedMemory: " << managed);
-  return managed;
-}
 //  The following test case allocation, host access, device access of HMM
 //   memory from size 1 to 10KB
 
 HIP_TEST_CASE(Stress_hipMallocManaged_MultiSize) {
   IfTestPassed = true;
-  int managed = HmmAttrPrint();
+  int managed = HipTest::HmmAttrPrint();
   if (managed == 1) {
     unsigned char *Hmm1 = nullptr, *Hmm2 = nullptr;
     int InitVal = 100, blockSize = 64, DataMismatch = 0;
@@ -184,7 +165,7 @@ HIP_TEST_CASE(Stress_hipMallocManaged_KrnlWth2MemTypes) {
   int *Hmm = NULL, *Dptr = NULL, InitVal = 123;
   size_t NumElms = (1024 * 1024);
   int *Hptr = new int[NumElms], blockSize = 64, DataMismatch = 0;
-  int managed = HmmAttrPrint();
+  int managed = HipTest::HmmAttrPrint();
   if (managed == 1) {
     hipStream_t strm;
     HIP_CHECK(hipStreamCreate(&strm));
@@ -223,7 +204,7 @@ HIP_TEST_CASE(Stress_hipMallocManaged_KrnlWth2MemTypes) {
 // The following test case tests when the same Hmm memory is used for
 // launching multiple different kernels will results in any issue
 HIP_TEST_CASE(Stress_hipMallocManaged_MultiKrnlHmmAccess) {
-  int managed = HmmAttrPrint();
+  int managed = HipTest::HmmAttrPrint();
   if (managed) {
     int InitVal = 123, NumElms = (1024 * 1024);
     LaunchKrnl4(NumElms, InitVal);
@@ -234,7 +215,7 @@ HIP_TEST_CASE(Stress_hipMallocManaged_MultiKrnlHmmAccess) {
 
 // Testing the allocation of/scenarios around max possible memory
 HIP_TEST_CASE(Stress_hipMallocManaged_ExtremeSizes) {
-  int managed = HmmAttrPrint();
+  int managed = HipTest::HmmAttrPrint();
   if (managed == 1) {
     bool IfTestPassed = true;
     hipError_t err;

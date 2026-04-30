@@ -415,6 +415,26 @@ inline bool isManagedMemorySupportedOnDevice(int device) {
   return managed != 0;
 }
 
+// Prints all HMM-related device attributes for device 0
+inline int HmmAttrPrint() {
+  int value = 0;
+  WARN(
+      "The following are the attribute values related to HMM for"
+      " device 0:\n");
+  HIP_CHECK(hipDeviceGetAttribute(&value, hipDeviceAttributeDirectManagedMemAccessFromHost, 0));
+  WARN("hipDeviceAttributeDirectManagedMemAccessFromHost: " << value);
+  HIP_CHECK(hipDeviceGetAttribute(&value, hipDeviceAttributeConcurrentManagedAccess, 0));
+  WARN("hipDeviceAttributeConcurrentManagedAccess: " << value);
+  HIP_CHECK(hipDeviceGetAttribute(&value, hipDeviceAttributePageableMemoryAccess, 0));
+  WARN("hipDeviceAttributePageableMemoryAccess: " << value);
+  HIP_CHECK(
+      hipDeviceGetAttribute(&value, hipDeviceAttributePageableMemoryAccessUsesHostPageTables, 0));
+  WARN("hipDeviceAttributePageableMemoryAccessUsesHostPageTables: " << value);
+  HIP_CHECK(hipDeviceGetAttribute(&value, hipDeviceAttributeManagedMemory, 0));
+  WARN("hipDeviceAttributeManagedMemory: " << value);
+  return value;
+}
+
 inline bool isPcieAtomicSupported() {
   int pcieAtomic = 1;
   int device;
@@ -731,6 +751,25 @@ class BlockingContext {
   HIP_CHECK(hipGetDevice(&current_device_));                                   \
   if (!HipTest::isManagedMemorySupportedOnDevice(current_device_)) {           \
     HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);             \
+  }
+
+// Call at the start of tests that require managed memory support to indicate
+// whether it is supported on the current device.
+#define CHECK_MANAGED_MEMORY_SUPPORT                                           \
+  int current_device_ = 0;                                                     \
+  HIP_CHECK(hipGetDevice(&current_device_));                                   \
+  if (!HipTest::isManagedMemorySupportedOnDevice(current_device_)) {           \
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);    \
+    return;                                                                    \
+  }
+
+// Call to check whether managed memory is supported on the given device. Useful
+// when validating support across multiple devices without changing the current
+// device.
+#define CHECK_MANAGED_MEMORY_SUPPORT_ON_DEVICE(device)                         \
+  if (!HipTest::isManagedMemorySupportedOnDevice(device)) {                    \
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);    \
+    return;                                                                    \
   }
 
 #define CHECK_PCIE_ATOMIC_SUPPORT                                                                 \

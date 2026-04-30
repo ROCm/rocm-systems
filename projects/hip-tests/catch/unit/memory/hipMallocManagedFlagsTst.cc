@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: MIT
  */
 
-#include "hipMallocManagedCommon.hh"
+#include <hip_test_common.hh>
 #include <atomic>
 
 // Kernel function
@@ -16,7 +16,7 @@ __global__ void MallcMangdFlgTst(int n, float* x, float* y) {
 
 // The following section tests working of hipMallocManaged with flag parameters
 HIP_TEST_CASE(Unit_hipMallocManaged_FlgParam) {
-  auto managed = HmmAttrPrint();
+  auto managed = HipTest::HmmAttrPrint();
   if (managed != 1) {
     HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
   }
@@ -103,7 +103,7 @@ HIP_TEST_CASE(Unit_hipMallocManaged_FlgParam) {
 // The following function tests Memory access allocated using hipMallocManaged
 // in multiple streams
 HIP_TEST_CASE(Unit_hipMallocManaged_AccessMultiStream) {
-  auto managed = HmmAttrPrint();
+  auto managed = HipTest::HmmAttrPrint();
   if (managed != 1) {
     HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
   }

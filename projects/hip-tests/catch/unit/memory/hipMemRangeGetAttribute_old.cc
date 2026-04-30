@@ -17,32 +17,12 @@
 
 #include <vector>
 
-static int HmmAttrPrint() {
-  int managed = 0;
-  WARN(
-      "The following are the attribute values related to HMM for"
-      " device 0:\n");
-  HIP_CHECK(hipDeviceGetAttribute(&managed, hipDeviceAttributeDirectManagedMemAccessFromHost, 0));
-  WARN("hipDeviceAttributeDirectManagedMemAccessFromHost: " << managed);
-  HIP_CHECK(hipDeviceGetAttribute(&managed, hipDeviceAttributeConcurrentManagedAccess, 0));
-  WARN("hipDeviceAttributeConcurrentManagedAccess: " << managed);
-  HIP_CHECK(hipDeviceGetAttribute(&managed, hipDeviceAttributePageableMemoryAccess, 0));
-  WARN("hipDeviceAttributePageableMemoryAccess: " << managed);
-  HIP_CHECK(
-      hipDeviceGetAttribute(&managed, hipDeviceAttributePageableMemoryAccessUsesHostPageTables, 0));
-  WARN("hipDeviceAttributePageableMemoryAccessUsesHostPageTables:" << managed);
-
-  HIP_CHECK(hipDeviceGetAttribute(&managed, hipDeviceAttributeManagedMemory, 0));
-  WARN("hipDeviceAttributeManagedMemory: " << managed);
-  return managed;
-}
-
 // The following function tests the count parameter(last param) to
 // hipMemRangeGetAttribute api by passing possible extreme values.
 // Curently the only way to test if count param working properly is to verify
 // the first parameter of hipMemRangeGetAttribute() api has value 1 stored
 HIP_TEST_CASE(Unit_hipMemRangeGetAttribute_TstCountParam) {
-  int MangdMem = HmmAttrPrint();
+  int MangdMem = HipTest::HmmAttrPrint();
   if (MangdMem == 1) {
 #if HT_AMD
     int isPageableHMM = 0;
@@ -97,7 +77,7 @@ HIP_TEST_CASE(Unit_hipMemRangeGetAttribute_TstCountParam) {
 /* This test case checks the behavior of hipMemRangeGetAttribute() with
    AccessedBy flag is consistent with cuda's counter part*/
 HIP_TEST_CASE(Unit_hipMemRangeGetAttribute_AccessedBy1) {
-  int managed = HmmAttrPrint();
+  int managed = HipTest::HmmAttrPrint();
   if (managed == 1) {
     int Ngpus = 0, *Hmm = NULL, MEM_SZ = 4096, RND_NUM = 999;
     HIP_CHECK(hipGetDeviceCount(&Ngpus));
@@ -152,7 +132,7 @@ HIP_TEST_CASE(Unit_hipMemRangeGetAttribute_AccessedBy1) {
    not result in a crash*/
 
 HIP_TEST_CASE(Unit_hipMemRangeGetAttribute_4) {
-  int managed = HmmAttrPrint();
+  int managed = HipTest::HmmAttrPrint();
   if (managed == 1) {
     int *Hmm = NULL, PageSz = 4096, Ngpus, RND_NUM = 999;
     HIP_CHECK(hipGetDeviceCount(&Ngpus));

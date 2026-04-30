@@ -14,7 +14,7 @@
    6. Multiple Pointers
  */
 
-#include "hipMallocManagedCommon.hh"
+#include <hip_test_common.hh>
 #include <hip_test_kernels.hh>
 #include <hip_test_checkers.hh>
 #include <atomic>
@@ -61,7 +61,7 @@ void HostKernelDouble(float* Hmm, float* hPtr, size_t n) {
    This testcase verifies the concurrent access of hipMallocManaged Memory on host and device.
  */
 HIP_TEST_CASE(Unit_hipMallocManaged_HostDeviceConcurrent) {
-  auto managed = HmmAttrPrint();
+  auto managed = HipTest::HmmAttrPrint();
   if (managed != 1) {
     HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
   }
@@ -97,7 +97,7 @@ HIP_TEST_CASE(Unit_hipMallocManaged_HostDeviceConcurrent) {
 // kernel is launched on acessed chunk of hmm memory
 // and checks if there are any inconsistencies or access issues
 HIP_TEST_CASE(Unit_hipMallocManaged_MultiChunkSingleDevice) {
-  auto managed = HmmAttrPrint();
+  auto managed = HipTest::HmmAttrPrint();
   if (managed != 1) {
     HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
   }
@@ -148,7 +148,7 @@ HIP_TEST_CASE(Unit_hipMallocManaged_MultiChunkSingleDevice) {
 // kernel is launched on acessed chunk of hmm memory
 // and checks if there are any inconsistencies or access issues
 HIP_TEST_CASE(Unit_hipMallocManaged_MultiChunkMultiDevice) {
-  auto managed = HmmAttrPrint();
+  auto managed = HipTest::HmmAttrPrint();
   if (managed != 1) {
     HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
   }
@@ -202,7 +202,7 @@ HIP_TEST_CASE(Unit_hipMallocManaged_MultiChunkMultiDevice) {
 
 // The following tests oversubscription hipMallocManaged() api
 HIP_TEST_CASE(Unit_hipMallocManaged_OverSubscription) {
-  auto managed = HmmAttrPrint();
+  auto managed = HipTest::HmmAttrPrint();
   if (managed != 1) {
     HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
   }
@@ -285,7 +285,7 @@ HIP_TEST_CASE(Unit_hipMallocManaged_Negative) {
 // later validate the content without using any Memcpy.
 HIP_TEMPLATE_TEST_CASE(Unit_hipMallocManaged_TwoPointers, int,
                    float, double) {
-  auto managed = HmmAttrPrint();
+  auto managed = HipTest::HmmAttrPrint();
   if (managed != 1) {
     HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
   }
@@ -325,7 +325,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipMallocManaged_TwoPointers, int,
 
 HIP_TEMPLATE_TEST_CASE(Unit_hipMallocManaged_DeviceContextChange,
                    unsigned char, int, float, double) {
-  auto managed = HmmAttrPrint();
+  auto managed = HipTest::HmmAttrPrint();
   if (managed != 1) {
     HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
   }

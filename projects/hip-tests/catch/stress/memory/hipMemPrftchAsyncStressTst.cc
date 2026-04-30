@@ -20,26 +20,6 @@ __global__ void MemPrftchAsyncKernel1(int* Hmm, size_t N) {
   }
 }
 
-static int HmmAttrPrint() {
-  int managed = 0;
-  WARN(
-      "The following are the attribute values related to HMM for"
-      " device 0:\n");
-  HIP_CHECK(hipDeviceGetAttribute(&managed, hipDeviceAttributeDirectManagedMemAccessFromHost, 0));
-  WARN("hipDeviceAttributeDirectManagedMemAccessFromHost: " << managed);
-  HIP_CHECK(hipDeviceGetAttribute(&managed, hipDeviceAttributeConcurrentManagedAccess, 0));
-  WARN("hipDeviceAttributeConcurrentManagedAccess: " << managed);
-  HIP_CHECK(hipDeviceGetAttribute(&managed, hipDeviceAttributePageableMemoryAccess, 0));
-  WARN("hipDeviceAttributePageableMemoryAccess: " << managed);
-  HIP_CHECK(
-      hipDeviceGetAttribute(&managed, hipDeviceAttributePageableMemoryAccessUsesHostPageTables, 0));
-  WARN("hipDeviceAttributePageableMemoryAccessUsesHostPageTables:" << managed);
-
-  HIP_CHECK(hipDeviceGetAttribute(&managed, hipDeviceAttributeManagedMemory, 0));
-  WARN("hipDeviceAttributeManagedMemory: " << managed);
-  return managed;
-}
-
 static void ReleaseResource(int* Hmm, hipStream_t* strm) {
   HIP_CHECK(hipFree(Hmm));
   HIP_CHECK(hipStreamDestroy(*strm));
@@ -50,7 +30,7 @@ static void ReleaseResource(int* Hmm, hipStream_t* strm) {
    one-to-all and all-to-one fahsion followed by kernel launch within available
    devices*/
 HIP_TEST_CASE(Stress_hipMemPrefetchAsyncOneToAll) {
-  int MangdMem = HmmAttrPrint();
+  int MangdMem = HipTest::HmmAttrPrint();
   if (MangdMem == 1) {
     int *Hmm1 = nullptr, NumDevs, MemSz = (4096 * 4);
     int InitVal = 123, NumElms = MemSz / 4;

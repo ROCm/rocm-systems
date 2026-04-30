@@ -13,7 +13,7 @@
      for allocations much larger than the available memory - supported on all devices
 */
 
-#include "hipMallocManagedCommon.hh"
+#include <hip_test_common.hh>
 #include <hip_test_kernels.hh>
 #include <hip_test_checkers.hh>
 #include <string>
@@ -46,7 +46,7 @@ static unsigned threadsPerBlock{256};
    This testcase verifies the hipMallocManaged basic scenario - supported on all devices
  */
 HIP_TEST_CASE(Unit_hipMallocManaged_Basic) {
-  auto managed = HmmAttrPrint();
+  auto managed = HipTest::HmmAttrPrint();
   if (managed != 1) {
     WARN(
         "GPU doesn't support hipDeviceAttributeManagedMemory attribute so defaulting to system "
@@ -68,7 +68,7 @@ HIP_TEST_CASE(Unit_hipMallocManaged_Basic) {
    devices
  */
 HIP_TEST_CASE(Unit_hipMallocManaged_Advanced) {
-  auto managed = HmmAttrPrint();
+  auto managed = HipTest::HmmAttrPrint();
   if (managed != 1) {
     HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
   }
@@ -140,7 +140,7 @@ HIP_TEST_CASE(Unit_hipMallocManaged_Advanced) {
    larger than the available memory - supported on all devices
  */
 HIP_TEST_CASE(Unit_hipMallocManaged_Large) {
-  auto managed = HmmAttrPrint();
+  auto managed = HipTest::HmmAttrPrint();
   if (managed != 1) {
     WARN(
         "GPU doesn't support hipDeviceAttributeManagedMemory attribute so defaulting to system "

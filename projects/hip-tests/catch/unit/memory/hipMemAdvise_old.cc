@@ -85,31 +85,11 @@ __global__ void MemAdvise3(int* Hmm, int* Hmm1, int n) {
   }
 }
 
-static int HmmAttrPrint() {
-  int managed = 0;
-  WARN(
-      "The following are the attribute values related to HMM for"
-      " device 0:\n");
-  HIP_CHECK(hipDeviceGetAttribute(&managed, hipDeviceAttributeDirectManagedMemAccessFromHost, 0));
-  WARN("hipDeviceAttributeDirectManagedMemAccessFromHost: " << managed);
-  HIP_CHECK(hipDeviceGetAttribute(&managed, hipDeviceAttributeConcurrentManagedAccess, 0));
-  WARN("hipDeviceAttributeConcurrentManagedAccess: " << managed);
-  HIP_CHECK(hipDeviceGetAttribute(&managed, hipDeviceAttributePageableMemoryAccess, 0));
-  WARN("hipDeviceAttributePageableMemoryAccess: " << managed);
-  HIP_CHECK(
-      hipDeviceGetAttribute(&managed, hipDeviceAttributePageableMemoryAccessUsesHostPageTables, 0));
-  WARN("hipDeviceAttributePageableMemoryAccessUsesHostPageTables:" << managed);
-
-  HIP_CHECK(hipDeviceGetAttribute(&managed, hipDeviceAttributeManagedMemory, 0));
-  WARN("hipDeviceAttributeManagedMemory: " << managed);
-  return managed;
-}
-
 // The following function tests if peers can set hipMemAdviseSetAccessedBy flag
 // on HMM memory prefetched on each of the other gpus
 #if HT_AMD
 HIP_TEST_CASE(Unit_hipMemAdvise_TstAccessedByPeer) {
-  int MangdMem = HmmAttrPrint();
+  int MangdMem = HipTest::HmmAttrPrint();
   if (MangdMem == 1) {
     bool IfTestPassed = true;
     int *Hmm = nullptr, MEM_SIZE = 4 * 4096, A_CONST = 9999;
@@ -162,7 +142,7 @@ HIP_TEST_CASE(Unit_hipMemAdvise_TstAccessedByPeer) {
    device 1, then probe for AccessedBy flag using hipMemRangeGetAttribute()
    we should still see the said flag is set for device 0*/
 HIP_TEST_CASE(Unit_hipMemAdvise_TstAccessedByFlg2) {
-  int managed = HmmAttrPrint();
+  int managed = HipTest::HmmAttrPrint();
   if (managed == 1) {
     int *Hmm = NULL, data = 999, Ngpus = 0;
     HIP_CHECK(hipGetDeviceCount(&Ngpus));
@@ -196,7 +176,7 @@ HIP_TEST_CASE(Unit_hipMemAdvise_TstAccessedByFlg2) {
    hipMemRangeGetAttribute() it should return 1*/
 
 HIP_TEST_CASE(Unit_hipMemAdvise_TstAccessedByFlg3) {
-  int managed = HmmAttrPrint();
+  int managed = HipTest::HmmAttrPrint();
   if (managed == 1) {
     int *Hmm = NULL, data = 999, Ngpus = 0;
     HIP_CHECK(hipGetDeviceCount(&Ngpus));
@@ -231,7 +211,7 @@ HIP_TEST_CASE(Unit_hipMemAdvise_TstAccessedByFlg3) {
    AccessedBy, launch kernel. We should not have any access issues*/
 
 HIP_TEST_CASE(Unit_hipMemAdvise_TstAccessedByFlg4) {
-  int managed = HmmAttrPrint();
+  int managed = HipTest::HmmAttrPrint();
   if (managed == 1) {
     int *Hmm = NULL, NumElms = (1024 * 1024), InitVal = 123;
     hipStream_t strm;
@@ -285,12 +265,10 @@ HIP_TEST_CASE(Unit_hipMemAdvise_TstAlignedAllocMem) {
   std::string gfxName(prop.gcnArchName);
 
   if (gfxName.find("xnack+") != std::string::npos) {
-    int managedMem = 0, pageMemAccess = 0;
+    int pageMemAccess = 0;
     HIP_CHECK(hipDeviceGetAttribute(&pageMemAccess, hipDeviceAttributePageableMemoryAccess, 0));
     WARN("hipDeviceAttributePageableMemoryAccess:" << pageMemAccess);
-    HIP_CHECK(hipDeviceGetAttribute(&managedMem, hipDeviceAttributeManagedMemory, 0));
-    WARN("hipDeviceAttributeManagedMemory: " << managedMem);
-    if ((managedMem == 1) && (pageMemAccess == 1)) {
+    if (HipTest::isManagedMemorySupportedOnDevice(0) && (pageMemAccess == 1)) {
       int *Mllc = nullptr, MemSz = 4096 * 4, NumElms = 4096, InitVal = 123;
       // Mllc = reinterpret_cast<(int *)>(aligned_alloc(4096, MemSz));
       Mllc = reinterpret_cast<int*>(aligned_alloc(4096, 4096 * 4));
@@ -348,7 +326,7 @@ HIP_TEST_CASE(Unit_hipMemAdvise_TstAlignedAllocMem_XNACK) {
   gpu*/
 
 HIP_TEST_CASE(Unit_hipMemAdvise_ReadMosltyMgpuTst) {
-  int managed = HmmAttrPrint();
+  int managed = HipTest::HmmAttrPrint();
   if (managed == 1) {
     int Ngpus = 0;
     HIP_CHECK(hipGetDeviceCount(&Ngpus));

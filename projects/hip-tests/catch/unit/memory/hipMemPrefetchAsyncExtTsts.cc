@@ -31,26 +31,6 @@ __global__ void MemPrftchAsyncKernel1(int* Hmm, size_t N) {
   }
 }
 
-static int HmmAttrPrint() {
-  int managed = 0;
-  WARN(
-      "The following are the attribute values related to HMM for"
-      " device 0:\n");
-  HIP_CHECK(hipDeviceGetAttribute(&managed, hipDeviceAttributeDirectManagedMemAccessFromHost, 0));
-  WARN("hipDeviceAttributeDirectManagedMemAccessFromHost: " << managed);
-  HIP_CHECK(hipDeviceGetAttribute(&managed, hipDeviceAttributeConcurrentManagedAccess, 0));
-  WARN("hipDeviceAttributeConcurrentManagedAccess: " << managed);
-  HIP_CHECK(hipDeviceGetAttribute(&managed, hipDeviceAttributePageableMemoryAccess, 0));
-  WARN("hipDeviceAttributePageableMemoryAccess: " << managed);
-  HIP_CHECK(
-      hipDeviceGetAttribute(&managed, hipDeviceAttributePageableMemoryAccessUsesHostPageTables, 0));
-  WARN("hipDeviceAttributePageableMemoryAccessUsesHostPageTables:" << managed);
-
-  HIP_CHECK(hipDeviceGetAttribute(&managed, hipDeviceAttributeManagedMemory, 0));
-  WARN("hipDeviceAttributeManagedMemory: " << managed);
-  return managed;
-}
-
 /* Test Case Description: Allocate managed memory --> prefetch to gpu 0
    call hipMemAdvise() on the memory and apply the flags ReadMostly,
    AccessedBy, and PreferredLocation for gpus other than gpu 0 and verify
@@ -59,7 +39,7 @@ HIP_TEST_CASE(Unit_hipMemPrefetchAsyncAdviseFlgTst) {
   int NGpus = 0;
   HIP_CHECK(hipGetDeviceCount(&NGpus));
   if (NGpus >= 2) {
-    int MangdMem = HmmAttrPrint();
+    int MangdMem = HipTest::HmmAttrPrint();
     if (MangdMem == 1) {
       int *Hmm = nullptr, MemSz = (4096 * 4), InitVal = 123;
       int Outpt = 9999, NumElms = MemSz / 4;
@@ -120,7 +100,7 @@ HIP_TEST_CASE(Unit_hipMemPrefetchAsyncAccsdByTst) {
   int NGpus = 0;
   HIP_CHECK(hipGetDeviceCount(&NGpus));
   if (NGpus >= 2) {
-    int MangdMem = HmmAttrPrint();
+    int MangdMem = HipTest::HmmAttrPrint();
     if (MangdMem == 1) {
       int *Hmm = nullptr, MemSz = (4096 * 4), InitVal = 123, NumElms = MemSz / 4;
       int Outpt = 9999;
@@ -204,7 +184,7 @@ HIP_TEST_CASE(Unit_hipMemPrefetchAsyncAccsdByTst) {
 
 /*Test Case description: Negative testing with hipMemPrefetchAsync() api*/
 HIP_TEST_CASE(Unit_hipMemPrefetchAsyncNegativeTst) {
-  int MangdMem = HmmAttrPrint();
+  int MangdMem = HipTest::HmmAttrPrint();
   if (MangdMem == 1) {
     int *Hmm = nullptr, MemSz = 4096 * 4, NumElms = MemSz / 4, InitVal = 123;
     bool IfTestPassed = true;
