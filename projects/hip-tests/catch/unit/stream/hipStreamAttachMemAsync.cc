@@ -8,7 +8,6 @@
 
 #include <hip_test_common.hh>
 #include <memory>
-#include <hipMallocManagedCommon.hh>
 
 __device__ __managed__ int var = 0;
 
