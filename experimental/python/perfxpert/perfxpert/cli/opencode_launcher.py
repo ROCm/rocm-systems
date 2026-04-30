@@ -24,6 +24,11 @@ from importlib import resources
 from pathlib import Path
 from typing import Iterable
 
+from perfxpert.cli._tui_session import (
+    bind_tui_session_env,
+    cleanup_tui_session_env,
+    clear_tui_session_env,
+)
 from perfxpert.tools._tooldep import require_tool
 
 __all__ = [
@@ -81,7 +86,6 @@ _PERFXPERT_SUBCOMMANDS: "dict[str, str]" = {
     "opencode": "Run a user-owned upstream opencode binary explicitly",
     "providers": "List LLM providers and configuration status",
     "uninstall": "Reverse `perfxpert-code <backend>` install: remove MCP + AGENTS + gate hook",
-    "workflow": "Inspect external workflow adapters for the active TUI session",
 }
 
 # Subcommand names the launcher itself dispatches to `python -m perfxpert`
@@ -363,6 +367,29 @@ def route_subcommand(argv: list[str]) -> tuple[str, list[str]]:
     return ("opencode_default", list(argv))
 
 
+def _first_positional(argv: list[str]) -> str | None:
+    for token in argv:
+        if not token.startswith("-"):
+            return token
+    return None
+
+
+def _is_interactive_opencode_launch(kind: str, argv_out: list[str]) -> bool:
+    if kind == "opencode_default":
+        return True
+    return kind == "opencode_subcommand" and _first_positional(argv_out) == "tui"
+
+
+def _resolve_workload_cwd(kind: str, argv_out: list[str]) -> Path:
+    if kind == "opencode_default":
+        first = _first_positional(argv_out)
+        if first:
+            candidate = Path(first).expanduser()
+            if candidate.is_dir():
+                return candidate.resolve()
+    return Path.cwd()
+
+
 def _run_install_patches(argv: list[str]) -> int:
     """Run scripts/build-bundled-opencode.sh.
 
@@ -630,8 +657,10 @@ def main(argv: list[str] | None = None) -> int:
         except FileNotFoundError as e:
             print(f"\033[31mperfxpert-code opencode: {e}\033[0m", file=sys.stderr)
             return 1
+        env = dict(os.environ)
+        clear_tui_session_env(env)
         try:
-            proc = subprocess.run([str(binary), *argv_out], env=dict(os.environ), check=False)
+            proc = subprocess.run([str(binary), *argv_out], env=env, check=False)
         except KeyboardInterrupt:
             return 130
         return proc.returncode
@@ -670,11 +699,13 @@ def main(argv: list[str] | None = None) -> int:
     # We do NOT use the EXECUTION-tool env whitelist here because opencode is the
     # user's interactive session and they explicitly consent to it.
     env = dict(os.environ)
+    clear_tui_session_env(env)
     # Recursion guard marker (spec §5.8 / R10)
     env["PERFXPERT_IN_OPENCODE_SESSION"] = "1"
-    env["PERFXPERT_WORKLOAD_CWD"] = str(Path.cwd())
-    if kind == "opencode_default" or (kind == "opencode_subcommand" and argv_out[:1] == ["tui"]):
-        env["PERFXPERT_TUI_INTERACTIVE"] = "1"
+    env["PERFXPERT_WORKLOAD_CWD"] = str(_resolve_workload_cwd(kind, argv_out))
+    tui_token_bound = _is_interactive_opencode_launch(kind, argv_out)
+    if tui_token_bound:
+        bind_tui_session_env(env)
     # Disable opencode's auto-update check — it prompts with upstream branding
     # and, if confirmed, would replace our patched bundle with upstream.
     env.setdefault("OPENCODE_DISABLE_AUTOUPDATE", "1")
@@ -703,6 +734,9 @@ def main(argv: list[str] | None = None) -> int:
         proc = subprocess.run(cmd, env=env, cwd=exec_cwd, check=False)
     except KeyboardInterrupt:
         return 130
+    finally:
+        if tui_token_bound:
+            cleanup_tui_session_env(env)
     return proc.returncode
 
 

@@ -18,7 +18,6 @@ Usage
     perfxpert analyze -i trace.db --llm anthropic
     perfxpert diff baseline.db new.db --format text
     perfxpert ci baseline.db new.db --threshold 3.0
-    perfxpert workflow import ./external-tool --interactive
     perfxpert-code    (interactive TUI; launches the AMD-branded opencode session)
 """
 
@@ -54,7 +53,11 @@ def main(argv=None):
         version="%(prog)s " + _get_version(),
     )
 
-    subparsers = parser.add_subparsers(dest="subcommand", title="subcommands")
+    subparsers = parser.add_subparsers(
+        dest="subcommand",
+        title="subcommands",
+        metavar="{analyze,config,providers,doctor,init,diff,ci}",
+    )
 
     # ------------------------------------------------------------------
     # analyze subcommand
@@ -190,7 +193,7 @@ def main(argv=None):
 
     workflow_parser = subparsers.add_parser(
         "workflow",
-        help="TUI-only external workflow adapter inspection",
+        help=argparse.SUPPRESS,
         description=(
             "Inspect external workflow repositories for advisory capabilities, "
             "knowledge links, and MCP descriptors that can be used by an active "
@@ -198,6 +201,9 @@ def main(argv=None):
         ),
     )
     _workflow_cmd.add_args(workflow_parser)
+    subparsers._choices_actions = [  # type: ignore[attr-defined]
+        action for action in subparsers._choices_actions if action.dest != "workflow"  # type: ignore[attr-defined]
+    ]
 
     if argv is None:
         argv = sys.argv[1:]
@@ -319,9 +325,9 @@ def _check_mcp_server() -> tuple[bool, str]:
         from mcp_server.server import build_server
         from mcp_server._registry import discover_read_only_tools
 
-        server = build_server()  # noqa: F841
-        n = len(discover_read_only_tools())
-        return True, f"MCP server reachable"
+        build_server()
+        discover_read_only_tools()
+        return True, "MCP server reachable"
     except Exception as e:
         return False, f"MCP server FAILED: {e}"
 

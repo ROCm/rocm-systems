@@ -24,6 +24,9 @@ _LINT_SH = _SCRIPTS / "lint.sh"
 _LINK_CHECKER = _SCRIPTS / "link-checker.py"
 _TEST_SAMPLES = _SCRIPTS / "test-samples.py"
 _PERFXPERT_ROOT = "experimental/python/perfxpert"
+_AGENTIC_MODE = _REPO_ROOT / _PERFXPERT_ROOT / "docs" / "guides" / "agentic-mode.md"
+_GETTING_STARTED = _REPO_ROOT / _PERFXPERT_ROOT / "docs" / "guides" / "getting-started.md"
+_BUNDLED_AGENTS = _REPO_ROOT / _PERFXPERT_ROOT / "perfxpert" / "_bundled" / "opencode_config" / "AGENTS.md"
 
 
 def _fmt(result: subprocess.CompletedProcess) -> str:
@@ -73,3 +76,22 @@ def test_test_samples_strict_exits_clean():
         "scripts/test-samples.py --strict reported failing samples:\n"
         + _fmt(result)
     )
+
+
+def test_external_workflow_docs_are_tui_only():
+    """Adapter docs must not regress into copy-paste shell examples."""
+
+    text = (
+        _AGENTIC_MODE.read_text(encoding="utf-8")
+        + "\n"
+        + _GETTING_STARTED.read_text(encoding="utf-8")
+        + "\n"
+        + _BUNDLED_AGENTS.read_text(encoding="utf-8")
+    )
+    assert "Ask inside `perfxpert-code`" in text
+    assert "This is not a normal shell workflow" in text
+    assert "from `perfxpert-code run`" in text
+    assert "third-party backend dispatch" in text
+    assert "perfxpert workflow import ./external-tool" not in text
+    assert "perfxpert workflow import <source>" not in text
+    assert "<interactive-consent-flag>" not in text

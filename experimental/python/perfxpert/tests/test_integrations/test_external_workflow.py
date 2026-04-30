@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -12,6 +13,14 @@ from perfxpert.integrations.external_workflow import (
     ExternalWorkflowError,
     inspect_external_workflow,
 )
+
+
+def _is_clone_cmd(cmd: list[str]) -> bool:
+    return "clone" in cmd
+
+
+def _git_checkout_from_clone_cmd(cmd: list[str]) -> Path:
+    return Path(cmd[-1])
 
 
 def _write_adapter_fixture(root):
@@ -125,6 +134,22 @@ def test_url_source_requires_interactive_network_consent(tmp_path) -> None:
             cache_root=tmp_path / "cache",
         )
 
+    with pytest.raises(ExternalWorkflowError, match="hostname"):
+        inspect_external_workflow(
+            "https:///perf-workflow",
+            interactive=True,
+            allow_network=True,
+            cache_root=tmp_path / "cache",
+        )
+
+    with pytest.raises(ExternalWorkflowError, match="whitespace"):
+        inspect_external_workflow(
+            "https://github.com/example/perf workflow",
+            interactive=True,
+            allow_network=True,
+            cache_root=tmp_path / "cache",
+        )
+
 
 def test_https_source_clone_and_cache_reuse(tmp_path, monkeypatch) -> None:
     source_url = "https://github.com/example/perf-workflow"
@@ -132,12 +157,23 @@ def test_https_source_clone_and_cache_reuse(tmp_path, monkeypatch) -> None:
 
     def fake_run(cmd, **kwargs):
         calls.append(list(cmd))
-        if cmd[:3] == ["git", "clone", "--depth"]:
-            checkout = Path(cmd[-1])
+        assert kwargs["env"]["GIT_TERMINAL_PROMPT"] == "0"
+        assert kwargs["env"]["GIT_CONFIG_NOSYSTEM"] == "1"
+        assert kwargs["env"]["GIT_CONFIG_GLOBAL"] == os.devnull
+        assert "GIT_CONFIG_COUNT" not in kwargs["env"]
+        if "clone" in cmd or "checkout" in cmd:
+            assert "http.extraHeader=" in cmd
+            assert "credential.helper=" in cmd
+        if _is_clone_cmd(cmd):
+            checkout = _git_checkout_from_clone_cmd(cmd)
             checkout.mkdir(parents=True)
             (checkout / ".git").mkdir()
             (checkout / "README.md").write_text("Profiler and validation workflow.\n", encoding="utf-8")
             return SimpleNamespace(returncode=0, stdout="", stderr="")
+        if "sparse-checkout" in cmd or "checkout" in cmd:
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+        if cmd[0] == "git" and cmd[3:5] == ["rev-parse", "HEAD"]:
+            return SimpleNamespace(returncode=0, stdout="abc123\n", stderr="")
         if cmd[0] == "git" and cmd[3:6] == ["remote", "get-url", "origin"]:
             return SimpleNamespace(returncode=0, stdout=source_url + "\n", stderr="")
         raise AssertionError(f"unexpected command: {cmd!r}")
@@ -159,12 +195,15 @@ def test_https_source_clone_and_cache_reuse(tmp_path, monkeypatch) -> None:
         persist=False,
     )
 
-    clone_calls = [cmd for cmd in calls if cmd[:3] == ["git", "clone", "--depth"]]
+    clone_calls = [cmd for cmd in calls if _is_clone_cmd(cmd)]
     assert len(clone_calls) == 1
-    assert clone_calls[0][3] == "1"
-    assert clone_calls[0][4] == source_url
+    assert "--filter" in clone_calls[0]
+    assert "blob:none" in clone_calls[0]
+    assert "--no-checkout" in clone_calls[0]
+    assert source_url in clone_calls[0]
     assert first["materialized_path"] == second["materialized_path"]
     assert first["source"] == source_url
+    assert first["provenance"]["commit"] == "abc123"
 
 
 def test_https_clone_failure_is_runtime_error(tmp_path, monkeypatch) -> None:
@@ -190,12 +229,18 @@ def test_corrupt_file_cache_is_replaced_for_url_source(tmp_path, monkeypatch) ->
     corrupt.write_text("not a checkout\n", encoding="utf-8")
 
     def fake_run(cmd, **kwargs):
-        if cmd[:3] == ["git", "clone", "--depth"]:
-            checkout = Path(cmd[-1])
+        if _is_clone_cmd(cmd):
+            checkout = _git_checkout_from_clone_cmd(cmd)
             checkout.mkdir(parents=True)
             (checkout / ".git").mkdir()
             (checkout / "README.md").write_text("Profiler workflow.\n", encoding="utf-8")
             return SimpleNamespace(returncode=0, stdout="", stderr="")
+        if "sparse-checkout" in cmd or "checkout" in cmd:
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+        if cmd[0] == "git" and cmd[3:5] == ["rev-parse", "HEAD"]:
+            return SimpleNamespace(returncode=0, stdout="abc123\n", stderr="")
+        if cmd[0] == "git" and cmd[3:6] == ["remote", "get-url", "origin"]:
+            return SimpleNamespace(returncode=0, stdout=source_url + "\n", stderr="")
         raise AssertionError(f"unexpected command: {cmd!r}")
 
     monkeypatch.setattr("perfxpert.integrations.external_workflow.subprocess.run", fake_run)
@@ -212,15 +257,76 @@ def test_corrupt_file_cache_is_replaced_for_url_source(tmp_path, monkeypatch) ->
     assert (Path(plan["materialized_path"]) / ".git").is_dir()
 
 
+def test_completed_cache_with_wrong_remote_is_rejected(tmp_path, monkeypatch) -> None:
+    source_url = "https://github.com/example/perf-workflow"
+    cache_root = tmp_path / "cache"
+    cached = cache_root / "sources" / "perf-workflow-dd6c86ae6ab1"
+    (cached / ".git").mkdir(parents=True)
+    (cached / ".perfxpert-adapter-clone-complete").write_text("ok\n", encoding="utf-8")
+
+    def fake_run(cmd, **kwargs):
+        if cmd[0] == "git" and cmd[3:6] == ["remote", "get-url", "origin"]:
+            return SimpleNamespace(returncode=0, stdout="https://github.com/other/repo\n", stderr="")
+        raise AssertionError(f"unexpected command: {cmd!r}")
+
+    monkeypatch.setattr("perfxpert.integrations.external_workflow.subprocess.run", fake_run)
+
+    with pytest.raises(ExternalWorkflowError, match="does not match requested URL"):
+        inspect_external_workflow(
+            source_url,
+            interactive=True,
+            allow_network=True,
+            cache_root=cache_root,
+            persist=False,
+        )
+
+
+def test_partial_cache_without_sentinel_is_replaced(tmp_path, monkeypatch) -> None:
+    source_url = "https://github.com/example/perf-workflow"
+    cache_root = tmp_path / "cache"
+    partial = cache_root / "sources" / "perf-workflow-dd6c86ae6ab1"
+    (partial / ".git").mkdir(parents=True)
+
+    def fake_run(cmd, **kwargs):
+        if _is_clone_cmd(cmd):
+            checkout = _git_checkout_from_clone_cmd(cmd)
+            checkout.mkdir(parents=True)
+            (checkout / ".git").mkdir()
+            (checkout / "README.md").write_text("Profiler workflow.\n", encoding="utf-8")
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+        if "sparse-checkout" in cmd or "checkout" in cmd:
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+        if cmd[0] == "git" and cmd[3:5] == ["rev-parse", "HEAD"]:
+            return SimpleNamespace(returncode=0, stdout="abc123\n", stderr="")
+        if cmd[0] == "git" and cmd[3:6] == ["remote", "get-url", "origin"]:
+            return SimpleNamespace(returncode=0, stdout=source_url + "\n", stderr="")
+        raise AssertionError(f"unexpected command: {cmd!r}")
+
+    monkeypatch.setattr("perfxpert.integrations.external_workflow.subprocess.run", fake_run)
+
+    plan = inspect_external_workflow(
+        source_url,
+        interactive=True,
+        allow_network=True,
+        cache_root=cache_root,
+        persist=False,
+    )
+
+    assert Path(plan["materialized_path"]).is_dir()
+    assert (Path(plan["materialized_path"]) / ".perfxpert-adapter-clone-complete").is_file()
+
+
 def test_clone_finalize_failure_is_runtime_error(tmp_path, monkeypatch) -> None:
     source_url = "https://github.com/example/perf-workflow"
 
     def fake_run(cmd, **kwargs):
-        if cmd[:3] == ["git", "clone", "--depth"]:
-            checkout = Path(cmd[-1])
+        if _is_clone_cmd(cmd):
+            checkout = _git_checkout_from_clone_cmd(cmd)
             checkout.mkdir(parents=True)
             (checkout / ".git").mkdir()
             (checkout / "README.md").write_text("Profiler workflow.\n", encoding="utf-8")
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+        if "sparse-checkout" in cmd or "checkout" in cmd:
             return SimpleNamespace(returncode=0, stdout="", stderr="")
         raise AssertionError(f"unexpected command: {cmd!r}")
 
@@ -434,6 +540,32 @@ def test_cache_symlink_is_rejected(tmp_path) -> None:
         )
 
 
+def test_manifest_symlink_is_rejected(tmp_path) -> None:
+    source = tmp_path / "adapter"
+    source.mkdir()
+    (source / "README.md").write_text("Profiler workflow.\n", encoding="utf-8")
+
+    first = inspect_external_workflow(
+        str(source),
+        interactive=True,
+        cache_root=tmp_path / "cache",
+        persist=False,
+    )
+    manifest_dir = tmp_path / "cache" / "adapters"
+    manifest_dir.mkdir(parents=True)
+    target = tmp_path / "target.json"
+    target.write_text("do not overwrite\n", encoding="utf-8")
+    (manifest_dir / f"{first['adapter_id']}.json").symlink_to(target)
+
+    with pytest.raises(ExternalWorkflowError, match="symlink"):
+        inspect_external_workflow(
+            str(source),
+            interactive=True,
+            cache_root=tmp_path / "cache",
+        )
+    assert target.read_text(encoding="utf-8") == "do not overwrite\n"
+
+
 def test_malformed_mcp_descriptors_are_sanitized(tmp_path) -> None:
     source = tmp_path / "adapter"
     source.mkdir()
@@ -444,6 +576,7 @@ def test_malformed_mcp_descriptors_are_sanitized(tmp_path) -> None:
                     "bad": "not-an-object",
                     "dangerous": {"command": "adapter-mcp; rm -rf /", "args": ["serve"]},
                     "invalid": {"command": 42, "args": "serve"},
+                    "string_secret": {"command": "adapter-mcp --token secret-value"},
                     "valid": {"command": "valid-mcp", "args": ["serve"]},
                 }
             }
@@ -459,12 +592,67 @@ def test_malformed_mcp_descriptors_are_sanitized(tmp_path) -> None:
     )
 
     servers = {server["name"]: server for server in plan["mcp_servers"]}
-    assert set(servers) == {"dangerous", "invalid", "valid"}
+    assert set(servers) == {"dangerous", "invalid", "string_secret", "valid"}
     assert servers["dangerous"]["command"] is None
     assert servers["invalid"]["command"] is None
     assert servers["invalid"]["args"] == []
+    assert servers["string_secret"]["command"] == "adapter-mcp"
+    assert servers["string_secret"]["args"] == []
+    assert servers["string_secret"]["arg_count"] == 2
+    assert servers["valid"]["args"] == []
+    assert servers["valid"]["arg_count"] == 1
+    assert servers["valid"]["args_redacted"] is True
     assert servers["valid"]["command"] == "valid-mcp"
+    assert "secret-value" not in json.dumps(plan)
     assert any("unsafe MCP command" in warning for warning in plan["warnings"])
+    assert any("Redacted 1 MCP argument" in warning for warning in plan["warnings"])
+
+
+def test_opencode_mcp_shape_is_discovered_and_args_redacted(tmp_path) -> None:
+    source = tmp_path / "adapter"
+    source.mkdir()
+    (source / "opencode.json").write_text(
+        json.dumps({"mcp": {"adapter": {"command": ["adapter-mcp", "--token", "secret"]}}}),
+        encoding="utf-8",
+    )
+
+    plan = inspect_external_workflow(
+        str(source),
+        interactive=True,
+        cache_root=tmp_path / "cache",
+        persist=False,
+    )
+
+    assert plan["mcp_servers"][0]["name"] == "adapter"
+    assert plan["mcp_servers"][0]["command"] == "adapter-mcp"
+    assert plan["mcp_servers"][0]["args"] == []
+    assert plan["mcp_servers"][0]["arg_count"] == 2
+    assert "secret" not in json.dumps(plan)
+
+
+def test_source_tree_symlinks_and_fifos_are_skipped(tmp_path) -> None:
+    source = tmp_path / "adapter"
+    source.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "secret.md").write_text("secret outside root\n", encoding="utf-8")
+    (source / "docs").symlink_to(outside, target_is_directory=True)
+    (source / ".mcp.json").symlink_to(outside / "secret.md")
+    if hasattr(os, "mkfifo"):
+        os.mkfifo(source / "fifo.json")
+    (source / "README.md").write_text("Profiler workflow.\n", encoding="utf-8")
+
+    plan = inspect_external_workflow(
+        str(source),
+        interactive=True,
+        cache_root=tmp_path / "cache",
+        persist=False,
+    )
+
+    assert "README.md" in plan["inspected_files"]
+    assert "docs/secret.md" not in plan["inspected_files"]
+    assert ".mcp.json" not in plan["inspected_files"]
+    assert "fifo.json" not in plan["inspected_files"]
 
 
 def test_invalid_mcp_json_and_non_dict_servers_are_ignored(tmp_path) -> None:

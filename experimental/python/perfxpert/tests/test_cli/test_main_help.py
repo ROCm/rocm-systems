@@ -23,9 +23,9 @@ def test_top_level_help_lists_documented_subcommands(capsys) -> None:
         "init",
         "diff",
         "ci",
-        "workflow",
     ):
         assert subcommand in out
+    assert "workflow" not in out
 
 
 @pytest.mark.parametrize(

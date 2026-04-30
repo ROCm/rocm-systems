@@ -215,7 +215,7 @@ Roughly:
 | Analyze with Claude | `perfxpert analyze -i trace.db --llm anthropic` |
 | Drive an optimization session conversationally | `perfxpert-code` |
 | Drive an optimization session non-interactively | `perfxpert-code run -m "optimize hot kernel"` |
-| Add an external workflow adapter to the active TUI session | `perfxpert workflow import ./tool` with the interactive consent flag |
+| Add an external workflow adapter to the active TUI session | Ask inside `perfxpert-code`: "use `./tool` as an advisory workflow adapter" |
 
 Under the hood, the batch CLI, Python API, MCP wrappers, and
 `perfxpert-code` backends all funnel into `build_session()` and the
@@ -237,25 +237,27 @@ an external TUI talks to those runners through MCP.
 
 ## External workflow adapters
 
-Interactive TUI sessions can import external optimization workflows as
-advisory adapters. The command is accepted only from a `perfxpert-code`
-session environment:
+The bundled opencode TUI launched by `perfxpert-code` can import external
+optimization workflows as advisory adapters. This is not a normal shell workflow.
+Start `perfxpert-code` and ask inside the interactive TUI, for example:
 
-```bash
-# SKIP-SAMPLE — requires an active TUI session and explicit consent
-perfxpert workflow import ./external-tool <interactive-consent-flag> --json
+```text
+Use ./external-tool as an advisory workflow adapter for this optimization session.
 ```
+
+The TUI agent runs the gated import internally. Running the import from a
+normal shell, from `perfxpert-code run`, or from third-party backend dispatch
+is rejected.
 
 The import performs bounded metadata inspection only. It can discover
 capabilities, knowledge files, and MCP server descriptors, then writes a
 manifest under `.perfxpert/external-workflows/` for the active TUI agent to
 read. It does not run external scripts, install packages, import external
-modules, or register MCP servers. A URL source requires both the TUI session marker and explicit
-`--allow-network` consent:
+modules, or register MCP servers. A URL source requires both the live TUI
+session marker and explicit network consent:
 
-```bash
-# SKIP-SAMPLE — requires an active TUI session and explicit network consent
-perfxpert workflow import https://github.com/example/tool <interactive-consent-flag> --allow-network --json
+```text
+Use https://github.com/example/tool as an advisory workflow adapter for this session.
 ```
 
 Adapter manifests are supplemental context. PerfXpert's measured counters,

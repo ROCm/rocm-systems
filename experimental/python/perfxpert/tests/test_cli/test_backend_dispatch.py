@@ -19,6 +19,10 @@ from pathlib import Path
 import pytest
 
 from perfxpert.cli import _backend_dispatch, opencode_launcher
+from perfxpert.cli._tui_session import (
+    TUI_SESSION_SOCKET_ENV,
+    TUI_SESSION_TOKEN_ENV,
+)
 from perfxpert.cli._backend_dispatch import RECURSION_GUARD_ENV, is_help_request
 from perfxpert.cli.opencode_launcher import main, route_subcommand
 
@@ -205,7 +209,40 @@ def test_recursion_guard_empty_env_does_not_trigger(
     assert rc == 77
 
 
-def test_backend_spawn_sets_interactive_tui_marker_for_live_backend(
+def test_backend_spawn_scrubs_interactive_tui_marker_for_live_backend(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import perfxpert.cli._backend.codex as codex_mod
+
+    captured_env = {}
+    monkeypatch.delenv(RECURSION_GUARD_ENV, raising=False)
+    monkeypatch.setattr(
+        codex_mod.CodexAdapter,
+        "install",
+        lambda self, cwd, **kw: _make_install_report(self.name),
+    )
+
+    def fake_spawn(self, argv, env, cwd):
+        captured_env.update(env)
+        return 0
+
+    monkeypatch.setattr(codex_mod.CodexAdapter, "spawn", fake_spawn)
+    monkeypatch.setenv("PERFXPERT_CODE_NO_BANNER", "1")
+    monkeypatch.setenv("PERFXPERT_TUI_INTERACTIVE", "1")
+    monkeypatch.setenv("PERFXPERT_TUI_SESSION_TOKEN", "stale")
+    monkeypatch.setenv("PERFXPERT_TUI_SESSION_SOCKET", "/tmp/stale")
+    monkeypatch.setenv("PERFXPERT_TUI_SESSION_TOKEN_FILE", "/tmp/old-stale")
+
+    rc = _backend_dispatch._exec_backend("codex", ["--quiet"])
+
+    assert rc == 0
+    assert "PERFXPERT_TUI_INTERACTIVE" not in captured_env
+    assert TUI_SESSION_TOKEN_ENV not in captured_env
+    assert TUI_SESSION_SOCKET_ENV not in captured_env
+    assert "PERFXPERT_TUI_SESSION_TOKEN_FILE" not in captured_env
+
+
+def test_backend_option_only_args_do_not_set_interactive_tui_token(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import perfxpert.cli._backend.codex as codex_mod
@@ -225,11 +262,12 @@ def test_backend_spawn_sets_interactive_tui_marker_for_live_backend(
     monkeypatch.setattr(codex_mod.CodexAdapter, "spawn", fake_spawn)
     monkeypatch.setenv("PERFXPERT_CODE_NO_BANNER", "1")
 
-    rc = _backend_dispatch._exec_backend("codex", ["--quiet"])
+    rc = _backend_dispatch._exec_backend("codex", ["--quiet", "--model", "gpt-5"])
 
     assert rc == 0
-    assert captured_env["PERFXPERT_TUI_INTERACTIVE"] == "1"
-    assert captured_env["PERFXPERT_WORKLOAD_CWD"] == str(Path.cwd())
+    assert "PERFXPERT_TUI_INTERACTIVE" not in captured_env
+    assert TUI_SESSION_TOKEN_ENV not in captured_env
+    assert TUI_SESSION_SOCKET_ENV not in captured_env
 
 
 def test_backend_prompt_args_do_not_set_interactive_tui_marker(
@@ -251,11 +289,18 @@ def test_backend_prompt_args_do_not_set_interactive_tui_marker(
 
     monkeypatch.setattr(codex_mod.CodexAdapter, "spawn", fake_spawn)
     monkeypatch.setenv("PERFXPERT_CODE_NO_BANNER", "1")
+    monkeypatch.setenv("PERFXPERT_TUI_INTERACTIVE", "1")
+    monkeypatch.setenv("PERFXPERT_TUI_SESSION_TOKEN", "stale")
+    monkeypatch.setenv("PERFXPERT_TUI_SESSION_SOCKET", "/tmp/stale")
+    monkeypatch.setenv("PERFXPERT_TUI_SESSION_TOKEN_FILE", "/tmp/old-stale")
 
     rc = _backend_dispatch._exec_backend("codex", ["--quiet", "optimize ./app"])
 
     assert rc == 0
     assert "PERFXPERT_TUI_INTERACTIVE" not in captured_env
+    assert TUI_SESSION_TOKEN_ENV not in captured_env
+    assert TUI_SESSION_SOCKET_ENV not in captured_env
+    assert "PERFXPERT_TUI_SESSION_TOKEN_FILE" not in captured_env
     assert captured_env["PERFXPERT_WORKLOAD_CWD"] == str(Path.cwd())
 
 

@@ -1150,17 +1150,18 @@ drives the Analysis → Recommendation → Specialist hierarchy behind the
 scenes.
 
 External optimization toolkits can be imported into that active session as
-advisory workflow adapters. The command is accepted only from the
-`perfxpert-code` session environment, and the TUI agent runs:
+advisory workflow adapters. This is only available from the bundled opencode
+TUI launched by `perfxpert-code`. Ask inside that TUI, for example:
 
-```bash
-# SKIP-SAMPLE — requires an active TUI session and explicit consent
-perfxpert workflow import ./external-tool <interactive-consent-flag> --json
+```text
+Use ./external-tool as an advisory workflow adapter for this optimization session.
 ```
 
-For an HTTPS repository, it must ask for network consent before adding
-`--allow-network`. The adapter can contribute workflow hints, knowledge
-links, or MCP server descriptors, but PerfXpert does not run external scripts,
+The TUI agent runs the gated import internally; running the import from a
+normal shell, from `perfxpert-code run`, or from third-party backend dispatch
+is rejected. For an HTTPS repository, the TUI agent must ask for explicit
+network consent before inspection. The adapter can contribute workflow hints,
+knowledge links, or MCP server descriptors, but PerfXpert does not run external scripts,
 install packages, import external modules, or register those MCP servers
 during import. PerfXpert's measured
 counters, runtime GPU discovery, MCP gate, and correctness cascade remain
@@ -1206,9 +1207,10 @@ Typical examples the TUI is designed to propose when the trace evidence matches:
 - suggest LDS tiling when a memory-bound stencil or GEMM-like kernel reloads
   the same neighborhood repeatedly from global memory
 
-If the edit causes compilation errors, the Correctness agent reverts the
-change automatically; see `docs/architecture/gate-cascade.md` for the full
-5-gate correctness/regression contract.
+If the edit causes compilation errors, the Correctness agent attempts to
+revert the change and reports the gate result for review; see
+`docs/architecture/gate-cascade.md` for the full 5-gate
+correctness/regression workflow.
 
 ---
 

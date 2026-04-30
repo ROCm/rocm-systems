@@ -13,7 +13,9 @@ import hashlib
 import json
 import os
 import re
+import shlex
 import shutil
+import stat
 import subprocess
 import tempfile
 from dataclasses import asdict, dataclass, field
@@ -110,6 +112,8 @@ class ExternalWorkflowMcpServer:
     command: str | None
     args: list[str]
     source: str
+    arg_count: int = 0
+    args_redacted: bool = True
     activation: str = (
         "requires explicit active-session TUI consent before registration; "
         "persistent or global MCP config changes require a separate persistent-install request"
@@ -137,6 +141,7 @@ class ExternalWorkflowAdapterPlan:
     mcp_servers: list[ExternalWorkflowMcpServer] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     inspected_files: list[str] = field(default_factory=list)
+    provenance: dict[str, str] = field(default_factory=dict)
     manifest_path: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
@@ -184,6 +189,7 @@ def inspect_external_workflow(
             *source_warnings,
         ],
     )
+    plan.provenance.update(_read_git_provenance(materialized))
 
     files, scan_warnings = _candidate_files(materialized)
     plan.warnings.extend(scan_warnings)
@@ -231,6 +237,10 @@ def _materialize_source(
     if parsed.scheme in {"http", "https"}:
         if parsed.scheme != "https":
             raise ExternalWorkflowUsageError("external workflow URLs must use https://")
+        if not parsed.hostname:
+            raise ExternalWorkflowUsageError("external workflow URLs must include a hostname")
+        if any(ord(ch) < 32 or ch.isspace() for ch in source):
+            raise ExternalWorkflowUsageError("external workflow URLs must not contain whitespace or control characters")
         if parsed.username or parsed.password:
             raise ExternalWorkflowUsageError("external workflow URLs must not contain embedded credentials")
         if parsed.query or parsed.fragment:
@@ -255,8 +265,12 @@ def _materialize_source(
         path = _workflow_base_dir() / path
     if not path.exists():
         raise ExternalWorkflowUsageError(f"external workflow source not found: {source}")
+    if path.is_symlink():
+        raise ExternalWorkflowUsageError("external workflow source must not be a symlink")
     if path.is_file():
         path = path.parent
+    elif not path.is_dir():
+        raise ExternalWorkflowUsageError("external workflow source must be a directory or regular file")
     return path.resolve(), "local-path", str(path.resolve()), []
 
 
@@ -278,6 +292,7 @@ def _verify_cached_remote(dest: Path, display_source: str) -> None:
             check=False,
             text=True,
             timeout=10,
+            env=_git_env(),
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise ExternalWorkflowRuntimeError(f"failed to verify cached external workflow source: {exc}") from exc
@@ -301,12 +316,66 @@ def _run_git_clone(source: str, display_source: str, dest: Path) -> None:
         try:
             (tmp_dest / _CLONE_COMPLETE_SENTINEL).write_text("ok\n", encoding="utf-8")
             tmp_dest.rename(dest)
+        except FileExistsError:
+            if _clone_is_complete(dest):
+                _verify_cached_remote(dest, display_source)
+                return
+            raise ExternalWorkflowRuntimeError("cached external workflow source changed during clone")
         except OSError as exc:
             raise ExternalWorkflowRuntimeError(f"failed to finalize cached external workflow source: {exc}") from exc
 
 
 def _run_git_clone_to_tmp(source: str, display_source: str, dest: Path) -> None:
-    cmd = ["git", "clone", "--depth", "1", source, str(dest)]
+    cmd = _git_command_prefix() + [
+        "clone",
+        "--depth",
+        "1",
+        "--filter",
+        "blob:none",
+        "--no-checkout",
+        source,
+        str(dest),
+    ]
+    _run_git_command(cmd, source, display_source, "clone")
+    _run_git_command(
+        [
+            "git",
+            "-c",
+            "credential.helper=",
+            "-c",
+            "core.askPass=",
+            "-C",
+            str(dest),
+            "sparse-checkout",
+            "set",
+            "--no-cone",
+            "README",
+            "README.md",
+            "README.rst",
+            ".mcp.json",
+            "mcp.json",
+            "opencode.json",
+            "pyproject.toml",
+            "package.json",
+            "docs",
+            "doc",
+            "knowledge",
+            "skills",
+            "agents",
+        ],
+        source,
+        display_source,
+        "configure sparse checkout",
+    )
+    _run_git_command(
+        _git_command_prefix() + ["-C", str(dest), "checkout", "--quiet"],
+        source,
+        display_source,
+        "checkout sparse source",
+    )
+
+
+def _run_git_command(cmd: list[str], source: str, display_source: str, action: str) -> None:
     try:
         proc = subprocess.run(
             cmd,
@@ -314,12 +383,49 @@ def _run_git_clone_to_tmp(source: str, display_source: str, dest: Path) -> None:
             check=False,
             text=True,
             timeout=120,
+            env=_git_env(),
+            stdin=subprocess.DEVNULL,
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
-        raise ExternalWorkflowRuntimeError(f"failed to clone external workflow source: {exc}") from exc
+        raise ExternalWorkflowRuntimeError(f"failed to {action} external workflow source: {exc}") from exc
     if proc.returncode != 0:
         detail = _sanitize_clone_output((proc.stderr or proc.stdout or "").strip(), source, display_source)
-        raise ExternalWorkflowRuntimeError(f"git clone failed for external workflow source: {detail}")
+        raise ExternalWorkflowRuntimeError(f"git {action} failed for external workflow source: {detail}")
+
+
+def _git_command_prefix() -> list[str]:
+    return [
+        "git",
+        "-c",
+        "credential.helper=",
+        "-c",
+        "core.askPass=",
+        "-c",
+        "http.extraHeader=",
+    ]
+
+
+def _git_env() -> dict[str, str]:
+    env = {
+        key: value
+        for key, value in os.environ.items()
+        if key in {"PATH", "LANG", "LC_ALL", "LC_CTYPE", "TERM", "TMPDIR"}
+    }
+    env.update(
+        {
+            "GIT_TERMINAL_PROMPT": "0",
+            "GIT_ASKPASS": "false",
+            "SSH_ASKPASS": "false",
+            "GCM_INTERACTIVE": "never",
+            "GIT_LFS_SKIP_SMUDGE": "1",
+            "GIT_CONFIG_NOSYSTEM": "1",
+            "GIT_CONFIG_GLOBAL": os.devnull,
+            "GIT_CONFIG_SYSTEM": os.devnull,
+            "HOME": tempfile.gettempdir(),
+            "XDG_CONFIG_HOME": tempfile.gettempdir(),
+        }
+    )
+    return env
 
 
 def _candidate_files(root: Path) -> tuple[list[Path], list[str]]:
@@ -401,7 +507,8 @@ def _bounded_children(current: Path) -> tuple[list[Path], list[str]]:
                 )
                 break
             capped_children.append(child)
-    except OSError:
+    except OSError as exc:
+        warnings.append(f"Could not read {current}: {exc}; adapter inspection is partial.")
         return [], warnings
 
     children = priority_children + capped_children
@@ -421,7 +528,10 @@ def _candidate_priority(path: Path) -> tuple[int, str]:
 
 def _is_candidate_text_file(path: Path) -> bool:
     try:
-        if path.stat().st_size > MAX_TEXT_BYTES:
+        st = path.lstat()
+        if not stat.S_ISREG(st.st_mode):
+            return False
+        if st.st_size > MAX_TEXT_BYTES:
             return False
     except OSError:
         return False
@@ -429,9 +539,25 @@ def _is_candidate_text_file(path: Path) -> bool:
 
 
 def _read_text_limited(path: Path) -> str | None:
+    flags = os.O_RDONLY
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    fd = None
     try:
-        data = path.read_bytes()[:MAX_TEXT_BYTES]
+        fd = os.open(path, flags)
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode) or st.st_size > MAX_TEXT_BYTES:
+            return None
+        data = os.read(fd, MAX_TEXT_BYTES + 1)
     except OSError:
+        return None
+    finally:
+        if fd is not None:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+    if len(data) > MAX_TEXT_BYTES:
         return None
     if b"\x00" in data[:4096]:
         return None
@@ -522,29 +648,68 @@ def _detect_mcp_servers(
             data = json.loads(text)
         except json.JSONDecodeError:
             continue
-        servers = data.get("mcpServers") if isinstance(data, dict) else None
+        servers = _extract_mcp_servers(data, path.name)
         if not isinstance(servers, dict):
             continue
         for name, raw in sorted(servers.items()):
             if not isinstance(raw, dict):
                 continue
-            args = raw.get("args", [])
-            if not isinstance(args, list) or not all(isinstance(arg, str) for arg in args):
-                args = []
-            command = raw.get("command")
+            command, arg_count = _mcp_command_and_arg_count(raw)
             if command is not None and not _is_safe_mcp_command(command):
                 plan.warnings.append(
                     f"Ignored unsafe MCP command for {name!r}; review manually before registration."
                 )
                 command = None
+            if arg_count:
+                plan.warnings.append(
+                    f"Redacted {arg_count} MCP argument(s) for {name!r}; review source before registration."
+                )
             plan.mcp_servers.append(
                 ExternalWorkflowMcpServer(
                     name=str(name),
                     command=command,
-                    args=args,
+                    args=[],
+                    arg_count=arg_count,
+                    args_redacted=arg_count > 0,
                     source=_relpath(path, root),
                 )
             )
+
+
+def _extract_mcp_servers(data: object, filename: str) -> object:
+    if not isinstance(data, dict):
+        return None
+    if filename == "opencode.json" and "mcp" in data:
+        return data.get("mcp")
+    return data.get("mcpServers")
+
+
+def _mcp_command_and_arg_count(raw: dict[str, object]) -> tuple[str | None, int]:
+    command = raw.get("command")
+    args = raw.get("args", [])
+    arg_count = 0
+    if isinstance(command, list):
+        command_parts = [part for part in command if isinstance(part, str)]
+        if command_parts:
+            command = command_parts[0]
+            arg_count += max(0, len(command_parts) - 1)
+        else:
+            command = None
+    elif isinstance(command, str):
+        try:
+            command_parts = shlex.split(command)
+        except ValueError:
+            command_parts = []
+        if command_parts:
+            command = command_parts[0]
+            arg_count += max(0, len(command_parts) - 1)
+        else:
+            command = None
+    if isinstance(args, list):
+        arg_count += sum(1 for arg in args if isinstance(arg, str))
+    else:
+        args = []
+    return command if isinstance(command, str) else None, arg_count
 
 
 def _detect_knowledge_links(
@@ -674,8 +839,27 @@ def _write_manifest(cache_root: Path, plan: ExternalWorkflowAdapterPlan) -> Path
     root = _safe_cache_root(cache_root)
     manifest_dir = _safe_cache_child(root, "adapters")
     manifest_dir.mkdir(parents=True, exist_ok=True)
-    path = manifest_dir / f"{plan.adapter_id}.json"
-    path.write_text(json.dumps(plan.to_dict(), indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    path = _safe_cache_child(root, "adapters", f"{plan.adapter_id}.json")
+    if path.is_symlink():
+        raise ExternalWorkflowRuntimeError(f"manifest path must not be a symlink: {path}")
+    payload = json.dumps(plan.to_dict(), indent=2, sort_keys=True) + "\n"
+    fd, raw_tmp = tempfile.mkstemp(prefix=f".{plan.adapter_id}.", suffix=".tmp", dir=str(manifest_dir))
+    tmp_path = Path(raw_tmp)
+    try:
+        os.fchmod(fd, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as stream:
+            stream.write(payload)
+        os.replace(tmp_path, path)
+    except OSError:
+        try:
+            os.close(fd)
+        except OSError:
+            pass
+        try:
+            tmp_path.unlink()
+        except OSError:
+            pass
+        raise
     return path
 
 
@@ -731,7 +915,34 @@ def _sanitize_clone_output(detail: str, source: str, display_source: str) -> str
         return "no diagnostic output"
     sanitized = detail.replace(source, display_source)
     sanitized = re.sub(r"https://[^/\s:@]+:[^@\s]+@", "https://<redacted>@", sanitized)
+    sanitized = re.sub(r"(?i)(token|api[_-]?key|password|secret)=([^&\s]+)", r"\1=<redacted>", sanitized)
     return sanitized
+
+
+def _read_git_provenance(root: Path) -> dict[str, str]:
+    if not (root / ".git").exists():
+        return {}
+    provenance: dict[str, str] = {}
+    for key, cmd in {
+        "commit": ["git", "-C", str(root), "rev-parse", "HEAD"],
+        "remote": ["git", "-C", str(root), "remote", "get-url", "origin"],
+    }.items():
+        try:
+            proc = subprocess.run(
+                cmd,
+                capture_output=True,
+                check=False,
+                text=True,
+                timeout=10,
+                env=_git_env(),
+                stdin=subprocess.DEVNULL,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            continue
+        if proc.returncode == 0 and proc.stdout.strip():
+            value = proc.stdout.strip()
+            provenance[key] = _redact_url(value) if key == "remote" else value
+    return provenance
 
 
 def _relpath(path: Path, root: Path) -> str:

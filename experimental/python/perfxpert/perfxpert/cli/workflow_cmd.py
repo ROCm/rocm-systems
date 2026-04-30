@@ -8,6 +8,7 @@ import os
 import sys
 from pathlib import Path
 
+from perfxpert.cli._tui_session import has_active_tui_session
 from perfxpert.integrations.external_workflow import (
     ExternalWorkflowError,
     ExternalWorkflowRuntimeError,
@@ -106,4 +107,4 @@ def _print_summary(plan: dict[str, object]) -> None:
 
 
 def _in_perfxpert_tui_session() -> bool:
-    return os.environ.get("PERFXPERT_TUI_INTERACTIVE") == "1"
+    return has_active_tui_session(os.environ)

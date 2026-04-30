@@ -14,6 +14,7 @@ import sys
 from pathlib import Path
 from typing import Callable, Dict, List
 
+from perfxpert.cli._tui_session import clear_tui_session_env
 
 __all__ = [
     "_exec_backend",
@@ -29,7 +30,6 @@ __all__ = [
 # `perfxpert-code claude` from within an already-running agent session
 # refuses to launch).
 RECURSION_GUARD_ENV = "PERFXPERT_IN_AGENT_SESSION"
-INTERACTIVE_TUI_ENV = "PERFXPERT_TUI_INTERACTIVE"
 
 
 def is_help_request(remaining_argv: list[str]) -> bool:
@@ -136,6 +136,7 @@ def _run_adapter(adapter, remaining_argv: list[str]) -> int:
         # Just exec the backend with --help; adapter.spawn returns
         # the exit code if spawn_strategy == "subprocess".
         env = dict(os.environ)
+        clear_tui_session_env(env)
         env[RECURSION_GUARD_ENV] = adapter.name
         return adapter.spawn(remaining_argv, env, Path.cwd())
 
@@ -170,9 +171,8 @@ def _run_adapter(adapter, remaining_argv: list[str]) -> int:
         return 0
 
     env = dict(os.environ)
+    clear_tui_session_env(env)
     env[RECURSION_GUARD_ENV] = adapter.name
-    if not flags.remaining:
-        env[INTERACTIVE_TUI_ENV] = "1"
     env["PERFXPERT_WORKLOAD_CWD"] = str(Path.cwd())
     if not flags.quiet:
         sys.stderr.write(

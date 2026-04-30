@@ -6,6 +6,7 @@ from unittest import mock
 
 import pytest
 
+from perfxpert.cli._tui_session import TUI_SESSION_SOCKET_ENV, TUI_SESSION_TOKEN_ENV
 from perfxpert.cli import opencode_launcher
 
 
@@ -29,6 +30,20 @@ def test_version_flag_short_circuit(capsys):
 def test_v_short_flag(capsys):
     rc = opencode_launcher.main(["-V"])
     assert rc == 0
+
+
+def test_perfxpert_code_help_hides_workflow(capsys, monkeypatch):
+    def fail_resolve():
+        raise FileNotFoundError("missing bundled opencode")
+
+    monkeypatch.setattr(opencode_launcher, "resolve_opencode_binary", fail_resolve)
+
+    rc = opencode_launcher.main(["--help"])
+
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "perfxpert-owned subcommands" in out
+    assert "workflow" not in out
 
 
 def test_route_workflow_import_to_perfxpert_dispatch():
@@ -202,6 +217,8 @@ def test_default_tui_sets_interactive_marker(monkeypatch):
     opencode_launcher.main([])
 
     assert captured_env.get("PERFXPERT_TUI_INTERACTIVE") == "1"
+    assert captured_env.get(TUI_SESSION_TOKEN_ENV)
+    assert not Path(captured_env[TUI_SESSION_SOCKET_ENV]).exists()
     assert captured_env.get("PERFXPERT_WORKLOAD_CWD") == str(cwd)
 
 
@@ -219,6 +236,24 @@ def test_tui_subcommand_sets_interactive_marker(monkeypatch):
     opencode_launcher.main(["tui"])
 
     assert captured_env.get("PERFXPERT_TUI_INTERACTIVE") == "1"
+    assert captured_env.get(TUI_SESSION_TOKEN_ENV)
+    assert not Path(captured_env[TUI_SESSION_SOCKET_ENV]).exists()
+
+
+def test_opencode_default_cwd_override_sets_workload_cwd(tmp_path: Path, monkeypatch):
+    captured_env = {}
+
+    def fake_run(cmd, **kwargs):
+        captured_env.update(kwargs.get("env") or {})
+        return mock.MagicMock(returncode=0)
+
+    monkeypatch.setattr(opencode_launcher.subprocess, "run", fake_run)
+    monkeypatch.setattr(opencode_launcher, "resolve_opencode_binary", lambda: Path("/bin/true"))
+    monkeypatch.setenv("PERFXPERT_CODE_NO_BANNER", "1")
+
+    opencode_launcher.main([str(tmp_path)])
+
+    assert captured_env.get("PERFXPERT_WORKLOAD_CWD") == str(tmp_path)
 
 
 def test_noninteractive_run_does_not_set_interactive_marker(monkeypatch):
@@ -231,11 +266,44 @@ def test_noninteractive_run_does_not_set_interactive_marker(monkeypatch):
     monkeypatch.setattr(opencode_launcher.subprocess, "run", fake_run)
     monkeypatch.setattr(opencode_launcher, "resolve_opencode_binary", lambda: Path("/bin/true"))
     monkeypatch.setenv("PERFXPERT_CODE_NO_BANNER", "1")
+    monkeypatch.setenv("PERFXPERT_TUI_INTERACTIVE", "1")
+    monkeypatch.setenv("PERFXPERT_TUI_SESSION_TOKEN", "stale")
+    monkeypatch.setenv("PERFXPERT_TUI_SESSION_SOCKET", "/tmp/stale")
+    monkeypatch.setenv("PERFXPERT_TUI_SESSION_TOKEN_FILE", "/tmp/old-stale")
 
     opencode_launcher.main(["run", "optimize ./app"])
 
     assert captured_env.get("PERFXPERT_IN_OPENCODE_SESSION") == "1"
     assert "PERFXPERT_TUI_INTERACTIVE" not in captured_env
+    assert TUI_SESSION_TOKEN_ENV not in captured_env
+    assert TUI_SESSION_SOCKET_ENV not in captured_env
+    assert "PERFXPERT_TUI_SESSION_TOKEN_FILE" not in captured_env
+
+
+def test_user_opencode_path_scrubs_stale_tui_env(tmp_path: Path, monkeypatch):
+    captured_env = {}
+    fake_bin = tmp_path / "opencode"
+    fake_bin.write_text("#!/bin/sh\nexit 0\n")
+    fake_bin.chmod(0o755)
+
+    def fake_run(cmd, **kwargs):
+        captured_env.update(kwargs.get("env") or {})
+        return mock.MagicMock(returncode=0)
+
+    monkeypatch.setenv("PERFXPERT_OPENCODE_PATH", str(fake_bin))
+    monkeypatch.setenv("PERFXPERT_TUI_INTERACTIVE", "1")
+    monkeypatch.setenv("PERFXPERT_TUI_SESSION_TOKEN", "stale")
+    monkeypatch.setenv("PERFXPERT_TUI_SESSION_SOCKET", "/tmp/stale")
+    monkeypatch.setenv("PERFXPERT_TUI_SESSION_TOKEN_FILE", "/tmp/old-stale")
+    monkeypatch.setattr(opencode_launcher.subprocess, "run", fake_run)
+
+    rc = opencode_launcher.main(["opencode", "run", "hello"])
+
+    assert rc == 0
+    assert "PERFXPERT_TUI_INTERACTIVE" not in captured_env
+    assert TUI_SESSION_TOKEN_ENV not in captured_env
+    assert TUI_SESSION_SOCKET_ENV not in captured_env
+    assert "PERFXPERT_TUI_SESSION_TOKEN_FILE" not in captured_env
 
 
 def test_workflow_subcommand_dispatches_without_resolving_opencode(monkeypatch):
