@@ -45,6 +45,7 @@ CUmemAllocationHandleType ncclCuMemHandleType = CU_MEM_HANDLE_TYPE_POSIX_FILE_DE
 static int ncclCuMemSupported = 0;
 
 #define KERNEL_VERSION_CODE(major, minor) ((major << 16) | (minor << 8))
+#define RCCL_CUMEM_MIN_HIP_VERSION 70200000
 
 static int ncclGetKernelVersionCode() {
   struct utsname u;
@@ -71,15 +72,9 @@ int ncclIsCuMemSupported() {
     supported = 0;
   }
   CUDACHECKGOTO(cudaDriverGetVersion(&cudaDriverVersion), ret, error);
-  {
-    // 70051831 = ROCm 7.0.2.2 backport build; [70051831, 70060000) covers 7.0.2.x range.
-    // Block scope prevents the goto in CUDACHECKGOTO from jumping over the bool initialization.
-    bool cuMemSupported = (cudaDriverVersion >= 71260540) ||
-                          (cudaDriverVersion >= 70051831 && cudaDriverVersion < 70060000);
-    if (!cuMemSupported) {
-      WARN("cuMem support requires HIP_VERSION >= 7.12.60540 (or ROCm 7.0.2.x backport)");
-      supported = 0;
-    }
+  if (cudaDriverVersion < RCCL_CUMEM_MIN_HIP_VERSION) {
+    WARN("cuMem support requires HIP_VERSION >= 7.2.0");
+    supported = 0;
   }
   CUDACHECKGOTO(cudaGetDevice(&cudaDev), ret, error);
   if (CUPFN(cuMemCreate) == NULL) supported = 0;
@@ -105,15 +100,16 @@ static int ncclCumemHostEnable = -1;
 int ncclCuMemHostEnable() {
   if (ncclCumemHostEnable != -1)
     return ncclCumemHostEnable;
-#if HIP_VERSION < 71260540
+#if HIP_VERSION < RCCL_CUMEM_MIN_HIP_VERSION
   ncclCumemHostEnable = 0;
   return ncclCumemHostEnable;
 #else
   ncclResult_t ret = ncclSuccess;
   int cudaDriverVersion;
   int paramValue = -1;
+  int cudaDev;
   CUDACHECKGOTO(cudaDriverGetVersion(&cudaDriverVersion), ret, error);
-  if (cudaDriverVersion < 71260540) {
+  if (cudaDriverVersion < RCCL_CUMEM_MIN_HIP_VERSION) {
     ncclCumemHostEnable = 0;
   }
   else {
@@ -121,11 +117,10 @@ int ncclCuMemHostEnable() {
     if (paramValue != -1)
       ncclCumemHostEnable = paramValue;
     else
-      ncclCumemHostEnable = (cudaDriverVersion >= 71260540) ? 1 : 0;
+      ncclCumemHostEnable = (cudaDriverVersion >= RCCL_CUMEM_MIN_HIP_VERSION) ? 1 : 0;
     if (ncclCumemHostEnable) {
       // Verify that host allocations actually work.  Docker in particular is known to disable "get_mempolicy",
       // causing such allocations to fail (this can be fixed by invoking Docker with "--cap-add SYS_NICE").
-      int cudaDev;
       CUdevice currentDev;
       int cpuNumaNodeId = -1;
       CUmemAllocationProp prop = {};
