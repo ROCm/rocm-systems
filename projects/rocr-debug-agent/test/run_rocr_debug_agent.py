@@ -11,6 +11,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from typing import Dict, Optional
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s: %(message)s"
@@ -79,9 +80,11 @@ def validate_path(path: Path, path_type: str, must_exist: bool = True) -> Path:
         raise RuntimeError(f"Could not resolve {path_type} '{path}': {e}") from e
 
 
-def get_default_paths() -> dict[str, Path]:
+def get_default_paths() -> Dict[str, Path]:
     script_dir = Path(__file__).resolve().parent
-    candidate_dirs = [script_dir]
+    candidate_dirs = []
+    if script_dir.name == "rocm-debug-agent" and script_dir.parent.name == "tests":
+        candidate_dirs.append(script_dir)
 
     rocm_path = os.getenv("ROCM_PATH")
     if rocm_path:
@@ -129,7 +132,7 @@ def run_tests(
     test_script: Path,
     working_dir: Path,
     test_bin_dir: Path,
-    env_vars: dict[str, str] | None = None,
+    env_vars: Optional[Dict[str, str]] = None,
     max_retries: int = 3,
     retry_delay: int = 5,
 ) -> None:
@@ -137,7 +140,7 @@ def run_tests(
         env_vars = os.environ.copy()
 
     cmd = [python_executable, str(test_script), str(test_bin_dir)]
-    last_error: subprocess.CalledProcessError | None = None
+    last_error: Optional[subprocess.CalledProcessError] = None
 
     for attempt in range(1, max_retries + 1):
         print_section(f"Running tests (attempt {attempt}/{max_retries})")
