@@ -108,6 +108,10 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Changed
 
+- **Package install no longer modifies the system-wide logrotate timer or cron schedule**.
+  - Previously, installing `amd-smi-lib` overwrote `/lib/systemd/system/logrotate.timer` (or moved `/etc/cron.daily/logrotate` to `/etc/cron.hourly/`) to force hourly rotation, which affected every other package using logrotate.
+  - The package now only ships `/etc/logrotate.d/amd_smi.conf`, which sets its own `hourly` + `size 1M` cadence. AMD-SMI logs still rotate at the same frequency; system-wide settings stay as the distribution configured them.
+
 - **Renamed `lc_perf_other_end_recovery` to `lc_perf_other_end_recovery_count` in `amd-smi metric` CLI output for unification**.  
 
 - **Removed references to deprecated `amd-smi reset -r`**.  
