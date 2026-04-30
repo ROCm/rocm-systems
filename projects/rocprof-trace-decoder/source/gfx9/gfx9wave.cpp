@@ -638,28 +638,34 @@ void CSRegisterHandlerGFX9::HandleRealtimeClock(size_t time, size_t data)
 
     if (userdata3_count == 0)
     {
-        if (data == 0x5)
+        rocprof_trace_decoder_packet_header_t header{};
+        header.u32All = static_cast<uint32_t>(data);
+
+        if (header.opcode == ROCPROF_TRACE_DECODER_PACKET_OPCODE_RT_TIMESTAMP)
         {
-            userdata3_count = 3; // RT_TIMESTAMP: RT_LOW, RT_HI, RT_DELTA
+            userdata3_count = header.data20 ? static_cast<int>(header.data20) : 3;
+            userdata3_known = true;
         }
-        else if (data == 0x7)
+        else if (header.opcode == ROCPROF_TRACE_DECODER_PACKET_OPCODE_RT_TIMESTAMP_LO32)
         {
-            // RT_TIMESTAMP_LO32: only the new lo32 follows. Stash the prior
-            // lo32 (which lives in RT_DELTA from the last realtime emission)
-            // into RT_LOW so the unified wrap check below works unchanged.
-            userdata3_count = 1;
+            userdata3_count = header.data20 ? static_cast<int>(header.data20) : 1;
+            userdata3_known = true;
             userdata3_values[RT_LOW] = userdata3_values[RT_DELTA];
+        }
+        else
+        {
+            userdata3_count = static_cast<int>(header.data20);
+            userdata3_known = false;
         }
         return;
     }
 
     userdata3_count--;
-    userdata3_values[userdata3_count] = data;
+    if (!userdata3_known) return;
 
+    if (userdata3_count < RT_LAST) userdata3_values[userdata3_count] = data;
     if (userdata3_count > 0) return;
 
-    // handle wrapping of lowest 32 bits (works for both 0x5 and 0x7 since
-    // RT_LOW holds the prior lo32 in either case).
     if (userdata3_values[RT_DELTA] < userdata3_values[RT_LOW]) userdata3_values[RT_HI]++;
 
     att_decoder_realtime_t rt{};

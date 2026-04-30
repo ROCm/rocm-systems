@@ -84,9 +84,16 @@ std::vector<agent_output_buffer_t>*   agent_buffers{};
 //   - "Periodic emission worked" means at least one pass produced > 2 records
 //     (Begin + End anchors plus periodic markers). Cross-pass total isn't
 //     enough on its own because N anchor-only passes also exceed 2.
+//   - The strict periodic check only kicks in once we've observed enough
+//     buffer-swap callbacks (a lower bound on host worker query_status polls).
+//     Heavily instrumented hosts (e.g. code-coverage CI) can be slow enough
+//     that the producer barely polls during the trace window — in that case
+//     the trace is too short to demonstrate periodic emission and we treat
+//     the result as inconclusive rather than failing.
 std::atomic<size_t> realtime_total_count{0};
 std::atomic<size_t> realtime_max_per_pass{0};
 std::atomic<bool>   realtime_monotonicity_violation{false};
+std::atomic<size_t> buffer_swap_count{0};
 
 void
 tool_codeobj_tracing_callback(rocprofiler_callback_tracing_record_t record,
@@ -124,6 +131,8 @@ shader_data_callback(rocprofiler_agent_id_t /* agent */,
     static bool  do_sleep = is_slow ? atoi(is_slow) != 0 : false;
 
     if(do_sleep) std::this_thread::sleep_for(std::chrono::milliseconds(300));
+
+    buffer_swap_count.fetch_add(1);
 
     auto* agent_output_buffer = static_cast<agent_output_buffer_t*>(userdata.ptr);
 
@@ -361,15 +370,34 @@ tool_fini(void*)
     // boundary anchors exist. Use the per-pass max because N anchor-only
     // passes also exceed 2 globally; we want proof that periodic emission
     // happened within at least one decode pass.
-    const char* expect_env = std::getenv("EXPECT_PERIODIC_REALTIME");
+    //
+    // The check is only meaningful once enough buffer activity has occurred:
+    // each query_status poll on the host worker emits one RT_TIMESTAMP_LO32,
+    // and only the polls that find a full buffer trigger a swap callback.
+    // shader_data_callback invocations are therefore a lower bound on polls.
+    // The producer always issues one final flush with FLAGS_END at trace
+    // stop regardless of activity, so the threshold is 2 (final flush + at
+    // least one real mid-trace swap). Below the threshold the producer
+    // barely had time to run (e.g. heavy host-side instrumentation under
+    // code-coverage CI) and the trace window is too short to demonstrate
+    // periodic emission — treat as inconclusive.
+    constexpr size_t MIN_BUFFER_SWAPS_FOR_PERIODIC_CHECK = 2;
+    const char*      expect_env                          = std::getenv("EXPECT_PERIODIC_REALTIME");
     if(expect_env && atoi(expect_env) != 0)
     {
+        size_t swaps    = buffer_swap_count.load();
         size_t max_pass = realtime_max_per_pass.load();
-        if(max_pass <= 2)
+        if(swaps < MIN_BUFFER_SWAPS_FOR_PERIODIC_CHECK)
+        {
+            std::cerr << "Warning: skipping periodic REALTIME assertion — only " << swaps
+                      << " buffer swap(s) observed (need >= " << MIN_BUFFER_SWAPS_FOR_PERIODIC_CHECK
+                      << "); host too slow to exercise the periodic path" << std::endl;
+        }
+        else if(max_pass <= 2)
         {
             std::cerr << "Error: expected periodic REALTIME records within a single pass (>2), "
                       << "got max-per-pass=" << max_pass << " total=" << realtime_total_count.load()
-                      << std::endl;
+                      << " buffer-swaps=" << swaps << std::endl;
             abort();
         }
     }

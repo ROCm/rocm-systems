@@ -724,7 +724,7 @@ public:
         rocprof_trace_decoder_packet_header_t header{};
         header.opcode = ROCPROF_TRACE_DECODER_PACKET_OPCODE_RT_TIMESTAMP;
         header.type   = 0;
-        header.data20 = 0;
+        header.data20 = 3;
 
         SetGRBMToBroadcast(cmd_buffer);
         builder.BuildGPUClockPacket(
@@ -766,7 +766,7 @@ public:
             rocprof_trace_decoder_packet_header_t header{};
             header.opcode = ROCPROF_TRACE_DECODER_PACKET_OPCODE_RT_TIMESTAMP_LO32;
             header.type   = 0;
-            header.data20 = 0;
+            header.data20 = 1;
 
             builder.BuildWriteUConfigRegPacket(
                 cmd_buffer,
