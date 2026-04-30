@@ -30,7 +30,9 @@ def derive_rocm_path(script_dir: Path) -> Path:
 def main() -> None:
     script_dir = Path(__file__).resolve().parent
     rocm_path_env = os.getenv("ROCM_PATH")
-    rocm_path = Path(rocm_path_env).resolve() if rocm_path_env else derive_rocm_path(script_dir)
+    rocm_path = (
+        Path(rocm_path_env).resolve() if rocm_path_env else derive_rocm_path(script_dir)
+    )
     rocm_bin_dir = Path(os.getenv("ROCM_BIN_DIR") or rocm_path / "bin").resolve()
     tests_dir = rocm_path / "share" / "rocprofiler-systems" / "tests"
     if not tests_dir.is_dir():
