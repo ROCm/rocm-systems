@@ -1,12 +1,26 @@
-# PerfXpert — Known Issues
+# PerfXpert — Known Issues and Operational Limits
 
-## Codex gate is prompt-layer only
+This file is for active limitations that affect how users or
+contributors operate PerfXpert. Environment prerequisites, required
+credentials, and local-only test setup bugs do not belong here unless
+they affect shipped behavior.
+
+## Codex uses the prompt-layer gate fallback
 
 `perfxpert-code codex` stages the same MCP surface as
-the other backends, but its gate remains prompt-layer-only. As of April
-2026 Codex's native `PreToolUse` surface intercepts Bash only, not MCP /
-Write / other tool calls, so it cannot satisfy PerfXpert's "block every
-non-perfxpert tool until `intent_classify` returns" contract.
+the other backends, and its fallback gate is expected to work through
+the staged `AGENTS.override.md` prompt. The fallback includes the
+Codex-specific discovery exception for deferred MCP tools: before
+`mcp__perfxpert__intent_classify` is visible, the prompt allows only
+the discovery metadata tools (`tool_search`, `tool_search_tool`) needed
+to expose it, and still blocks shell / SSH / build / edit / profiling
+fallbacks until the PerfXpert gate returns.
+
+The limitation is narrower: Codex's native `PreToolUse` surface is not
+used as the mechanical enforcement layer. As of April 2026 it intercepts
+Bash, but not MCP / Write / other tool calls, so the Codex adapter
+intentionally records `gate_hook_installed=False` and relies on the
+prompt-layer fallback instead.
 
 Current backend split:
 
@@ -15,37 +29,11 @@ Current backend split:
 - **Claude Code** — mechanical gate via native `PreToolUse`
 - **Gemini CLI** — mechanical gate via project-local `BeforeTool` /
   `AfterTool` hooks + runtime lift
-- **Codex CLI** — prompt-layer rejection language in the
+- **Codex CLI** — working prompt-layer fallback in the
   perfxpert-managed `AGENTS.override.md` compatibility override
 
-If you need a hard pre-tool-call gate today, use the default patched
-opencode path, Claude Code, or Gemini CLI instead of Codex.
-
-## LLM end-to-end smoke test may fail with 429 insufficient_quota
-
-`tests/test_integration/test_llm_end_to_end.py::test_llm_enabled_produces_rec_type`
-executes a real OpenAI Agents SDK call against `gpt-4o-mini` (default) or
-`$PERFXPERT_AGENTS_MODEL_OPENAI` if set. The test will **skip** when
-`OPENAI_API_KEY` is unset. When the key is set, the wiring is exercised
-end-to-end: `framework._sdk_invoke()` builds an `agents.Agent`, calls
-`Runner.run_sync(...)`, and extracts `final_output` + tool-call metadata
-into a `FakeProviderResponse`.
-
-If the OpenAI account backing `OPENAI_API_KEY` has exhausted its quota,
-the SDK returns `429 insufficient_quota` and the test fails (not skips).
-This is a **billing condition, not a code defect**: the same error is
-reproducible via a direct `agents.Runner.run_sync(...)` call outside
-pytest, confirming the wiring is live.
-
-Workarounds to confirm the wiring on a different account:
-
-- Re-run with a different key: `OPENAI_API_KEY=sk-... pytest -k test_llm_enabled_produces_rec_type`
-- Override the model per-provider: `PERFXPERT_AGENTS_MODEL_OPENAI=gpt-3.5-turbo ...`
-- Global model override: `PERFXPERT_LLM_MODEL=gpt-4o-mini ...`
-- Bump runner turn budget: `PERFXPERT_AGENTS_MAX_TURNS=5` (default 10)
-
-This entry will be removed once a CI-owned key with guaranteed quota is
-provisioned.
+If you need enforcement that is independent of model prompt adherence,
+use the default patched opencode path, Claude Code, or Gemini CLI.
 
 ## Historical: LLM payload field-name mismatch (obsolete — rocm-systems#4979)
 
@@ -87,15 +75,6 @@ This note is preserved for institutional memory so future contributors
 who find PR #4979 in the commit history understand why it was closed
 without being ported.
 
-## Ship state (cycle-3 convergence, 2026-04-20)
-
-- **Cycle-3 reviewers**: 0 blockers, 0 important across all three branches.
-- **Test suite**: 1383 passed / 3 skipped / 0 failed (measured 2026-04-20 after Phase 8 LLM provider routing fix). Skips are documented opencode-binary absences (2) plus `test_llm_end_to_end.py` skip-on-429/auth/transient (1). The Phase 8 delta added 3 tests in `test_agents/test_framework.py` covering LitellmModel wiring for anthropic / plain-openai / double-prefix guards.
-- **Secret scanning**: local-only dev tool; not shipped in the repo. Each developer is responsible for their own secret-detection tooling. The scanner, its CI workflow, pre-commit hook, and contributor guide were removed on 2026-04-19.
-- **Known ongoing work** (not blocking ship):
-  - LLM E2E `rec_type` assertion requires a live key with quota; use `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` and a model on-roster.
-  - Confluence update remediation remains manual; automatic MCP publish requires Atlassian URL + token env vars.
-
 ## Opencode fork / bundling
 
 - **Patch application is wired into the current build/install path.**
@@ -126,26 +105,12 @@ without being ported.
   a user-owned upstream binary intentionally. In that mode the fork-only
   `{block, retryWith}` behavior is unavailable.
 
-## Docs-audit baseline
+## Docs-audit scanner scope limitations
 
-Tracks docs-audit gaps that cannot be mechanically fixed by the
-scanners but are known and tolerated for now. Each entry has a
-one-line rationale + optional follow-up tracking id.
+The docs scanners intentionally do not cover every possible Markdown
+problem. These are scanner coverage limits, not current docs violations.
 
-### Zero-violation baseline
-
-None. All three scanners (`scripts/lint.sh`, `scripts/link-checker.py`,
-`scripts/test-samples.py`) report zero violations live, enforced by
-`tests/test_docs_tooling/test_ship_readiness.py` — which runs each
-scanner in `--strict` mode and asserts `rc == 0`. Green test = zero
-violations today; no frozen JSON snapshot is kept in the repo.
-
-### Scanner scope limitations
-
-Documented here so users reading "zero violations" know what is and
-isn't covered.
-
-#### `scripts/link-checker.py`
+### `scripts/link-checker.py`
 - **External URLs not validated.** Any `http://` or `https://` link is
   skipped (`is_external_url`). Dead external links will not flag.
 - **Anchor fragments not validated.** `#section-id` is stripped before
@@ -158,9 +123,9 @@ isn't covered.
 
 Workaround: rely on Markdown preview in your IDE / GitHub for anchor
 correctness; external URL health is covered nightly by a separate
-link-health workflow (not part of the zero-violation baseline).
+link-health workflow (not part of this scanner's scope).
 
-#### `scripts/lint.sh` — banned-string scanner
+### `scripts/lint.sh` — banned-string scanner
 The banned-string scan excludes these paths (`lint.sh:50-54`) so that
 historical context or pre-existing test fixtures don't cause false
 positives:
@@ -179,18 +144,3 @@ Consequence: banned strings inside the excluded paths (or on lines
 carrying the historical anchor) will NOT trip the scanner. If you're
 adding a new fixture directory that should be ignored for legitimate
 reasons, add it here with a one-line comment.
-
-### Out-of-scope follow-ups
-
-- `tests/test_docs_tooling/test_secret_scanner.py` — three tests fail
-  locally because they cd into a fresh `tempfile.TemporaryDirectory()`
-  without symlinking `tools/_secret_scanner.py` first. Pre-existing
-  bug (commit c2c419ff9e).
-  - **Reproducer:** `pytest tests/test_docs_tooling/test_secret_scanner.py -q`
-  - **Owner / tracking:** queued in a follow-up sweep; no
-    issue number assigned yet. Fix is a one-line tmpdir setup (copy
-    or symlink `tools/_secret_scanner.py` into the tmpdir before the
-    subprocess call).
-  - **Workaround for affected devs:** skip the three `test_secret_scanner_*`
-    tests with `-k 'not secret_scanner'` while the fix is queued;
-    they don't gate any other scanner.
