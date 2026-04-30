@@ -225,12 +225,7 @@ typedef enum {
     AMDSMI_PROCESSOR_TYPE_AMD_CPU_CORE,  //!< AMD CPU-Core processor type, individual processing units within the CPU
     AMDSMI_PROCESSOR_TYPE_AMD_APU,       //!< AMD Accelerated processor type, GPU and CPU on a single die
     AMDSMI_PROCESSOR_TYPE_AMD_NIC        //!< AMD Network Interface Card processor type
-} amdsmi_processor_type_t;
-
-//! Backward-compatibility alias for ::amdsmi_processor_type_t. New code should
-//! use ::amdsmi_processor_type_t to match the ``amdsmi_`` typedef prefix
-//! convention used by the upstream amdsmi.h header.
-typedef amdsmi_processor_type_t processor_type_t;
+} processor_type_t;
 
 typedef enum {
     AMDSMI_LINK_TYPE_INTERNAL = 0,        //!< Internal Link Type, within chip
@@ -268,7 +263,7 @@ amdsmi_get_processor_handles(amdsmi_socket_handle socket_handle,
                                     uint32_t *processor_count,
                                     amdsmi_processor_handle* processor_handles);
 amdsmi_status_t
-amdsmi_get_processor_type(amdsmi_processor_handle processor_handle, amdsmi_processor_type_t* processor_type);
+amdsmi_get_processor_type(amdsmi_processor_handle processor_handle, processor_type_t* processor_type);
 
 amdsmi_status_t
 amdsmi_get_gpu_enumeration_info(amdsmi_processor_handle processor_handle, amdsmi_enumeration_info_t *info);

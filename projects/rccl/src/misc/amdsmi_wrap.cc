@@ -58,7 +58,7 @@ namespace {
   // Socket and processor handle functions
   RCCL_AMDSMI_FN(amdsmi_get_socket_handles, amdsmi_status_t, (uint32_t *socket_count, amdsmi_socket_handle* socket_handles))
   RCCL_AMDSMI_FN(amdsmi_get_processor_handles, amdsmi_status_t, (amdsmi_socket_handle socket_handle, uint32_t *processor_count, amdsmi_processor_handle* processor_handles))
-  RCCL_AMDSMI_FN(amdsmi_get_processor_type, amdsmi_status_t, (amdsmi_processor_handle processor_handle, amdsmi_processor_type_t* processor_type))
+  RCCL_AMDSMI_FN(amdsmi_get_processor_type, amdsmi_status_t, (amdsmi_processor_handle processor_handle, processor_type_t* processor_type))
   RCCL_AMDSMI_FN(amdsmi_get_processor_handle_from_bdf, amdsmi_status_t, (amdsmi_bdf_t bdf, amdsmi_processor_handle* processor_handle))
   // GPU enumeration and BDF functions
   RCCL_AMDSMI_FN(amdsmi_get_gpu_enumeration_info, amdsmi_status_t, (amdsmi_processor_handle processor_handle, amdsmi_enumeration_info_t *info))
@@ -116,7 +116,7 @@ static ncclResult_t getProcessorHandle(uint32_t deviceIndex, amdsmi_processor_ha
     AMDSMITRY(amdsmi_get_processor_handles, socket, &processor_handle_count, processor_handles.data());
 
     for (auto& proc : processor_handles) {
-      amdsmi_processor_type_t type;
+      processor_type_t type;
       AMDSMITRY(amdsmi_get_processor_type, proc, &type);
       if (type == AMDSMI_PROCESSOR_TYPE_AMD_GPU) {
         amdsmi_enumeration_info_t info;
@@ -284,7 +284,7 @@ ncclResult_t amd_smi_getDevicePciBusIdString(uint32_t deviceIndex, char* busId, 
         // AMDSMICHECK(amdsmi_get_processor_handles_by_type(socket, AMDSMI_PROCESSOR_TYPE_AMD_GPU, nullptr, &num_gpus_per_socket));
         // workaround
         for (auto& proc : processor_handles) {
-          amdsmi_processor_type_t type;
+          processor_type_t type;
 
           AMDSMITRY(amdsmi_get_processor_type, proc, &type);
           if(type == AMDSMI_PROCESSOR_TYPE_AMD_GPU) {
@@ -360,7 +360,7 @@ ncclResult_t amd_smi_getDeviceIndexByPciBusId(const char* pciBusId, uint32_t* de
 
       AMDSMITRY(amdsmi_get_processor_handle_from_bdf, bdf, &processor_handle);
 
-      amdsmi_processor_type_t type;
+      processor_type_t type;
       AMDSMITRY(amdsmi_get_processor_type, processor_handle, &type);
       if(type == AMDSMI_PROCESSOR_TYPE_AMD_GPU) {
         amdsmi_enumeration_info_t info;
@@ -429,7 +429,7 @@ ncclResult_t amd_smi_getLinkInfo(int srcIndex, int dstIndex, amdsmi_link_type_t*
         // AMDSMICHECK(amdsmi_get_processor_handles_by_type(socket, AMDSMI_PROCESSOR_TYPE_AMD_GPU, nullptr, &num_gpus_per_socket));
         // workaround
         for (auto& proc : processor_handles) {
-          amdsmi_processor_type_t proc_type;
+          processor_type_t proc_type;
           AMDSMITRY(amdsmi_get_processor_type, proc, &proc_type);
           if(proc_type == AMDSMI_PROCESSOR_TYPE_AMD_GPU) {
             amdsmi_enumeration_info_t info;
