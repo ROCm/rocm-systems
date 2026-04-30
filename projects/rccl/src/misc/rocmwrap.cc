@@ -45,9 +45,10 @@ CUmemAllocationHandleType ncclCuMemHandleType = CU_MEM_HANDLE_TYPE_POSIX_FILE_DE
 static int ncclCuMemSupported = 0;
 
 // cuMem VMM API availability by HIP/driver version.
-#define NCCL_CUMEM_NATIVE_MIN_VERSION   71260540
+#define NCCL_CUMEM_NATIVE_MIN_VERSION   70200000
 #define NCCL_CUMEM_BACKPORT_MIN_VERSION 70051831
 #define NCCL_CUMEM_BACKPORT_MAX_VERSION 70060000
+#define RCCL_CUMEM_MIN_HIP_VERSION 70200000
 
 #define NCCL_CUMEM_VERSION_SUPPORTED(version)                  \
   ((version) >= NCCL_CUMEM_NATIVE_MIN_VERSION ||               \
@@ -85,7 +86,7 @@ int ncclIsCuMemSupported() {
     // Block scope prevents the goto in CUDACHECKGOTO from jumping over the bool initialization.
     bool cuMemSupported = NCCL_CUMEM_VERSION_SUPPORTED(cudaDriverVersion);
     if (!cuMemSupported) {
-      WARN("cuMem support requires HIP_VERSION >= 7.12.60540 (or ROCm 7.0.2.x backport)");
+      WARN("cuMem support requires HIP_VERSION >= 7.2.0 (or ROCm 7.0.2.x backport)");
       supported = 0;
     }
   }
@@ -119,15 +120,16 @@ static int ncclCumemHostEnable = -1;
 int ncclCuMemHostEnable() {
   if (ncclCumemHostEnable != -1)
     return ncclCumemHostEnable;
-#if HIP_VERSION < 71260540
+#if HIP_VERSION < RCCL_CUMEM_MIN_HIP_VERSION
   ncclCumemHostEnable = 0;
   return ncclCumemHostEnable;
 #else
   ncclResult_t ret = ncclSuccess;
   int cudaDriverVersion;
   int paramValue = -1;
+  int cudaDev;
   CUDACHECKGOTO(cudaDriverGetVersion(&cudaDriverVersion), ret, error);
-  if (cudaDriverVersion < 71260540) {
+  if (cudaDriverVersion < RCCL_CUMEM_MIN_HIP_VERSION) {
     ncclCumemHostEnable = 0;
   }
   else {
@@ -135,11 +137,10 @@ int ncclCuMemHostEnable() {
     if (paramValue != -1)
       ncclCumemHostEnable = paramValue;
     else
-      ncclCumemHostEnable = (cudaDriverVersion >= 71260540) ? 1 : 0;
+      ncclCumemHostEnable = (cudaDriverVersion >= RCCL_CUMEM_MIN_HIP_VERSION) ? 1 : 0;
     if (ncclCumemHostEnable) {
       // Verify that host allocations actually work.  Docker in particular is known to disable "get_mempolicy",
       // causing such allocations to fail (this can be fixed by invoking Docker with "--cap-add SYS_NICE").
-      int cudaDev;
       CUdevice currentDev;
       int cpuNumaNodeId = -1;
       CUmemAllocationProp prop = {};
