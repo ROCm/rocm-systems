@@ -623,4 +623,12 @@ hipError_t StatCO::InitManagedVarDevicePtr(int deviceId) {
   }
   return err;
 }
+
+// ================================================================================================
+void StatCO::ForEachFatBinaryBlob(void (*cb)(const void*)) const {
+  std::scoped_lock lock(const_cast<std::recursive_mutex&>(sclock_));
+  for (const auto& kv : modules_)
+    cb(kv.first);
+}
+
 }  // namespace hip
