@@ -228,9 +228,9 @@ an [RFC](docs/rfcs/README.md).
 - **Architecture (v0.2.0+)**
   - [Architecture overview](docs/architecture.md)
   - [Architecture index](docs/architecture/README.md)
-    - [Agent hierarchy (Root / Analysis / Recommendation / specialists)](docs/architecture/agent-hierarchy.md)
-    - [Gate cascade (5 correctness gates as middleware)](docs/architecture/gate-cascade.md)
-    - [BackendAdapter protocol (multi-backend launcher)](docs/architecture/backend-adapter.md)
+    - [Agent hierarchy (Root / Analysis / Recommendation / specialists)](docs/architecture/agent-runtime/agent-hierarchy.md)
+    - [Gate cascade (5 correctness gates as middleware)](docs/architecture/correctness/gate-cascade.md)
+    - [BackendAdapter protocol (multi-backend launcher)](docs/architecture/entry-surfaces/backend-adapter.md)
 - **Integration**
   - [Integration index](docs/integration/README.md)
     - [MCP server (`perfxpert-mcp`) — 56 READ_ONLY tools (8 agent-hierarchy + 47 knowledge/classifier + 1 trace_diff)](docs/integration/mcp-server.md)

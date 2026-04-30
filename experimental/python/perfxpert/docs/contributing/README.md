@@ -29,9 +29,9 @@ docs/contributing/
 
 ## Architecture Cross-Links
 
-- [../architecture/agent-hierarchy.md](../architecture/agent-hierarchy.md) —
+- [../architecture/agent-runtime/agent-hierarchy.md](../architecture/agent-runtime/agent-hierarchy.md) —
   Root, Layer-1 agents, specialists, and source locations.
-- [../architecture/gate-cascade.md](../architecture/gate-cascade.md) —
+- [../architecture/correctness/gate-cascade.md](../architecture/correctness/gate-cascade.md) —
   correctness gates and revert flow.
 - [../integration/mcp-server.md](../integration/mcp-server.md) —
   standalone MCP server behavior and client integration.

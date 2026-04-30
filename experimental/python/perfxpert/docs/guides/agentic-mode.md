@@ -18,9 +18,9 @@ and every `perfxpert-code` backend. The entry surface changes the
 shell/UI and config plumbing, not the analysis brain.
 
 Cross-links:
-- [Agent hierarchy](../architecture/agent-hierarchy.md) — who calls
+- [Agent hierarchy](../architecture/agent-runtime/agent-hierarchy.md) — who calls
   the LLM and who doesn't
-- [Gate cascade](../architecture/gate-cascade.md) — correctness is
+- [Gate cascade](../architecture/correctness/gate-cascade.md) — correctness is
   identical in both modes
 - [MCP server](../integration/mcp-server.md) — always air-gap-safe
 

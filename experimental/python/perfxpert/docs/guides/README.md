@@ -48,4 +48,4 @@ rendered GIFs are checked in under [assets/gifs/](assets/gifs/).
 - [../README.md](../README.md) — top-level docs index
 - [../integration/mcp-server.md](../integration/mcp-server.md) — standalone
   `perfxpert-mcp` setup, client snippets, and MCP wire surface
-- [../architecture/agent-hierarchy.md](../architecture/agent-hierarchy.md) — what each agent does
+- [../architecture/agent-runtime/agent-hierarchy.md](../architecture/agent-runtime/agent-hierarchy.md) — what each agent does

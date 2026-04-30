@@ -13,9 +13,9 @@ server never exposes `EXECUTION` tools; that split is enforced at
 startup and by CI (`tests/test_integration/test_mcp_exposure.py`).
 
 Cross-links:
-- [Agent hierarchy](../architecture/agent-hierarchy.md) — what the tools
+- [Agent hierarchy](../architecture/agent-runtime/agent-hierarchy.md) — what the tools
   are used for inside PerfXpert itself
-- [Gate cascade](../architecture/gate-cascade.md) — the correctness
+- [Gate cascade](../architecture/correctness/gate-cascade.md) — the correctness
   guarantees MCP clients inherit for free when they call agent tools
 
 ## Starting the server

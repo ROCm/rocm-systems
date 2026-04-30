@@ -19,5 +19,5 @@ fixtures.
 
 ## Related Runtime Docs
 
-- [../../architecture/agent-hierarchy.md](../../architecture/agent-hierarchy.md)
-- [../../architecture/gate-cascade.md](../../architecture/gate-cascade.md)
+- [../../architecture/agent-runtime/agent-hierarchy.md](../../architecture/agent-runtime/agent-hierarchy.md)
+- [../../architecture/correctness/gate-cascade.md](../../architecture/correctness/gate-cascade.md)

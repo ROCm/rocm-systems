@@ -10,9 +10,9 @@ agent contact surface.
 Source of truth: `perfxpert/runtime/gate_cascade.py` (spec §5, §5.0).
 
 Cross-links:
-- [Agent hierarchy](agent-hierarchy.md) — where Correctness fits in
+- [Agent hierarchy](../agent-runtime/agent-hierarchy.md) — where Correctness fits in
   the tier map
-- [Agentic mode](../guides/agentic-mode.md) — how verdicts surface to
+- [Agentic mode](../../guides/agentic-mode.md) — how verdicts surface to
   end-users (LLM vs air-gap)
 
 ## The 5 gates
@@ -28,7 +28,7 @@ Strict order — ALL must pass:
 | 5 | Test Anchors | `tools.anchors.check` | Any prior-pass test now fails |
 
 Gates 1, 3, 4, and 5 invoke **EXECUTION-class** tools; see
-[mcp-server.md](../integration/mcp-server.md) for why this matters.
+[mcp-server.md](../../integration/mcp-server.md) for why this matters.
 Gate 2 invokes a READ_ONLY tool but is owned by the middleware layer
 for verdict-coherence reasons.
 

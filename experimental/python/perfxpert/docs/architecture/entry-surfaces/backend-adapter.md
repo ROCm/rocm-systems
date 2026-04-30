@@ -8,7 +8,7 @@ registered adapter by name.
 
 This doc is aimed at contributors adding a fifth backend (or
 updating an existing one). The user-facing install/uninstall surface
-is documented in [../guides/backends.md](../guides/backends.md).
+is documented in [../../guides/backends.md](../../guides/backends.md).
 
 Source of truth: `perfxpert/cli/_backend/protocol.py`.
 
@@ -186,14 +186,14 @@ Steps to add a fifth backend (example: `aider`):
 
 5. **Tests + docs.** Add `tests/test_cli/test_aider_adapter.py`
    mirroring the existing adapter tests. Update the backend
-   comparison table in [../guides/backends.md](../guides/backends.md)
+   comparison table in [../../guides/backends.md](../../guides/backends.md)
    and the per-backend state model table above in this file.
 
 ## References
 
-- [../guides/backends.md](../guides/backends.md) — user-facing
+- [../../guides/backends.md](../../guides/backends.md) — user-facing
   install/uninstall recipes
-- [../integration/mcp-server.md](../integration/mcp-server.md) —
+- [../../integration/mcp-server.md](../../integration/mcp-server.md) —
   the 56 READ_ONLY tools every adapter exposes to its backend
   (8 agent-hierarchy entry points + 47 classifier/knowledge tools
   + 1 `trace_diff.diff_runs`)

@@ -27,13 +27,13 @@ CLI, Codex CLI, opencode) pick whichever agent matches the user's
 intent based on the `AGENTS.md` reference.
 
 Cross-links:
-- [Gate cascade](gate-cascade.md) — the 5 deterministic correctness
+- [Gate cascade](../correctness/gate-cascade.md) — the 5 deterministic correctness
   gates that sit between agents
-- [MCP server](../integration/mcp-server.md) — how READ_ONLY tools are
+- [MCP server](../../integration/mcp-server.md) — how READ_ONLY tools are
   re-exposed to external clients
-- [Python API](../guides/python-api.md) — in-process embedding with
+- [Python API](../../guides/python-api.md) — in-process embedding with
   the same schemas as the MCP tools
-- [Agentic mode guide](../guides/agentic-mode.md) — end-user provider
+- [Agentic mode guide](../../guides/agentic-mode.md) — end-user provider
   ladder and air-gap behavior
 
 ## Three tiers
@@ -86,7 +86,7 @@ flowchart TD
     tier-1 agents, but the data flow is: Recommendation proposes an
     edit → middleware runs the gate cascade → the resulting
     `GateVerdict` is handed to Correctness. See
-    [gate-cascade.md](gate-cascade.md).
+    [gate-cascade.md](../correctness/gate-cascade.md).
   - **Recommendation** — converts findings into proposed code changes,
     delegates to specialists when needed.
 - **Tier 2 (Specialists)** — four narrow experts invoked by
@@ -194,7 +194,7 @@ integrations that already know the routing decision.
 ## Adding a new agent
 
 The contributor walkthrough is in
-[contributing/agent-brain/agents.md](../contributing/agent-brain/agents.md). In brief:
+[contributing/agent-brain/agents.md](../../contributing/agent-brain/agents.md). In brief:
 
 1. Create `perfxpert/agents/<name>.py` with an `AgentSpec` + handoff
    dataclass.

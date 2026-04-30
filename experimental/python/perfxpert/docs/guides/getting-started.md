@@ -1224,7 +1224,7 @@ Typical examples the TUI is designed to propose when the trace evidence matches:
   the same neighborhood repeatedly from global memory
 
 If the edit causes compilation errors, the Correctness agent reverts the
-change automatically; see `docs/architecture/gate-cascade.md` for the full
+change automatically; see `docs/architecture/correctness/gate-cascade.md` for the full
 5-gate correctness/regression contract.
 
 ---
@@ -1456,9 +1456,9 @@ payload / public JSON).
 
 ## 16. Next steps
 
-- `../architecture/agent-hierarchy.md` — 8-agent tier map + fence
+- `../architecture/agent-runtime/agent-hierarchy.md` — 8-agent tier map + fence
   slices
-- `../architecture/gate-cascade.md` — 5-gate correctness/regression
+- `../architecture/correctness/gate-cascade.md` — 5-gate correctness/regression
   middleware
 - `../integration/mcp-server.md` — full MCP tool list + client
   integration

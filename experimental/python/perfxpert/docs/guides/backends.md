@@ -12,7 +12,7 @@ native TUI with `perfxpert-mcp` already attached.
 
 This guide covers the user-visible surface. For the architectural
 contract every adapter satisfies, see
-[../architecture/backend-adapter.md](../architecture/backend-adapter.md).
+[../architecture/entry-surfaces/backend-adapter.md](../architecture/entry-surfaces/backend-adapter.md).
 For the underlying MCP server (56 READ_ONLY tools — 8 agent-hierarchy
 entry points + 47 classifier/knowledge tools + 1 `trace_diff.diff_runs`),
 see
@@ -440,7 +440,7 @@ here.
 
 ## See also
 
-- [../architecture/backend-adapter.md](../architecture/backend-adapter.md)
+- [../architecture/entry-surfaces/backend-adapter.md](../architecture/entry-surfaces/backend-adapter.md)
   — the `BackendAdapter` protocol + lifecycle contract (contributors)
 - [../integration/mcp-server.md](../integration/mcp-server.md) —
   underlying MCP server + 56 READ_ONLY tool list (8 agent-hierarchy

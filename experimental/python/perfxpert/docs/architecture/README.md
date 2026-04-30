@@ -1,22 +1,31 @@
-# Architecture docs index
+# Architecture Docs Index
 
-Reference material for how PerfXpert's agentic runtime (v0.2.0+) is
-put together. Start with [../architecture.md](../architecture.md) for
-the system-level overview; the docs below zoom in on specific
-sub-systems.
+Reference material for how PerfXpert's agentic runtime is put together.
+Start with [../architecture.md](../architecture.md) for the system-level
+overview, then drill into the layer you need.
 
-| Topic | Doc | Audience |
-|-------|-----|----------|
-| Agent tier map — Root / Analysis / Recommendation / Correctness / specialists, plus the fence-slice prompt pattern | [agent-hierarchy.md](agent-hierarchy.md) | Contributors adding or modifying agents; integrators reading the code path |
-| 5-gate correctness cascade (middleware) — Compile, SOL, Bitwise, Regression, Test Anchors | [gate-cascade.md](gate-cascade.md) | Contributors touching correctness logic; reviewers validating anti-reward-hack invariants |
-| Multi-backend launcher contract — shared install/verify/spawn lifecycle for opencode, Claude Code, Gemini CLI, and Codex CLI | [backend-adapter.md](backend-adapter.md) | Contributors extending `perfxpert-code` or validating backend-specific behavior |
+## Folder Map
 
-## See also
+```text
+docs/architecture/
+├── entry-surfaces/     CLI, perfxpert-code, backend adapters, API/MCP entry paths
+├── agent-runtime/      Root, Layer-1 agents, specialists, fence-slice pattern
+└── correctness/        gate cascade, validation, rollback, anti-reward-hacking rules
+```
 
-- [../architecture.md](../architecture.md) — top-level system diagram
-  and design rationale.
+## Start Here
+
+| You need to understand... | Go to |
+|---------------------------|-------|
+| How users and backend TUIs enter the system | [entry-surfaces/](entry-surfaces/) |
+| How the agent brain is layered and routed | [agent-runtime/](agent-runtime/) |
+| How proposed changes are validated or rejected | [correctness/](correctness/) |
+
+## See Also
+
+- [../architecture.md](../architecture.md) — top-level system diagram and
+  design rationale.
 - [../integration/mcp-server.md](../integration/mcp-server.md) — how
-  the READ_ONLY tools used by the agents are re-exposed to external
-  MCP clients.
-- [../guides/agentic-mode.md](../guides/agentic-mode.md) — end-user
-  view of the two runtime modes (air-gap vs LLM).
+  READ_ONLY tools are exposed to external MCP clients.
+- [../guides/agentic-mode.md](../guides/agentic-mode.md) — end-user view
+  of air-gap vs LLM runtime modes.

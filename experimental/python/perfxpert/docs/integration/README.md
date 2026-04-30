@@ -10,7 +10,7 @@ importing the Python package directly.
 
 ## See also
 
-- [../architecture/agent-hierarchy.md](../architecture/agent-hierarchy.md)
+- [../architecture/agent-runtime/agent-hierarchy.md](../architecture/agent-runtime/agent-hierarchy.md)
   — the agents that call the same tools in-process.
 - [../guides/agentic-mode.md](../guides/agentic-mode.md) — note that
   MCP clients are always air-gap-safe because only READ_ONLY tools

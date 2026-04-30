@@ -46,10 +46,10 @@ docs/
 ├── README.md                ← you are here
 ├── architecture.md          ← top-level system overview
 ├── architecture/
-│   ├── README.md            ← architecture sub-index
-│   ├── agent-hierarchy.md   ← Root → Analysis → Recommendation → specialists
-│   ├── gate-cascade.md      ← correctness gate + revert path
-│   └── backend-adapter.md   ← per-backend installer / verifier surface
+│   ├── README.md            ← layer-oriented architecture sub-index
+│   ├── entry-surfaces/      ← CLI, perfxpert-code, backend adapters, API/MCP entry paths
+│   ├── agent-runtime/       ← Root → Analysis → Recommendation → specialists
+│   └── correctness/         ← gate cascade + validation/revert path
 ├── guides/
 │   ├── README.md            ← guides sub-index
 │   ├── getting-started.md   ← install, run, formats, providers, troubleshooting

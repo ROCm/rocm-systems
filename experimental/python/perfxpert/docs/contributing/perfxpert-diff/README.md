@@ -17,5 +17,5 @@ This folder covers run-to-run comparison surfaces: `perfxpert diff`,
 
 - [../../guides/python-api.md](../../guides/python-api.md) — Python
   examples for `trace_diff_diff_runs`.
-- [../../architecture/agent-hierarchy.md](../../architecture/agent-hierarchy.md) —
+- [../../architecture/agent-runtime/agent-hierarchy.md](../../architecture/agent-runtime/agent-hierarchy.md) —
   where the Diff Specialist fits in the brain.

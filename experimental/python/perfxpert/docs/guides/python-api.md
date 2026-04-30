@@ -11,7 +11,7 @@ Cross-links:
 - [MCP server](../integration/mcp-server.md) — 56 read-only tools over
   stdio JSON-RPC: 8 agent tools, 47 classifier / knowledge / hardware
   tools, and 1 trace-diff tool.
-- [Agent hierarchy](../architecture/agent-hierarchy.md) — tier map,
+- [Agent hierarchy](../architecture/agent-runtime/agent-hierarchy.md) — tier map,
   fence-slice pattern, and where each agent lives in source.
 - [Agentic mode guide](agentic-mode.md) — air-gap vs LLM,
   `PERFXPERT_LLM_FALLBACK_CHAIN`, typed-error taxonomy.
@@ -467,7 +467,7 @@ to let specialists pick it up automatically.
 
 - [MCP server](../integration/mcp-server.md) — same 8 agents
   available over JSON-RPC; identical input/output schemas.
-- [Agent hierarchy](../architecture/agent-hierarchy.md) — tier
+- [Agent hierarchy](../architecture/agent-runtime/agent-hierarchy.md) — tier
   diagram and source-tree locations.
 - `perfxpert/agents/schemas.py` — authoritative Pydantic schema
   definitions (frozen models, field caps).
