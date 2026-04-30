@@ -2012,18 +2012,15 @@ uint64_t HipProfilerEnableExt() {
 
 // ================================================================================================
 uint64_t HipProfilerDisableExt() {
+  // Always drain before decrementing so IsProfilingActive() remains true
+  // during the drain and all ReportActivity callbacks are captured.
+  DrainAllDevices();
   int prev = g_enable_refcount.fetch_sub(1, std::memory_order_acq_rel);
   if (prev <= 0) {
-    // Already disabled — clamp to zero and return current record ID.
     g_enable_refcount.store(0, std::memory_order_relaxed);
     return g_rec_counter.load(std::memory_order_acquire);
   }
   if (prev == 1) {
-    // Ref count hit zero: drain and deactivate.
-    // Drain all outstanding GPU work before clearing the flag so that
-    // ReportActivity callbacks for in-flight commands are delivered while
-    // the profiler callback is still active.
-    DrainAllDevices();
     HipProfilerRemoveWrappersExt(const_cast<HipDispatchTable*>(hip::GetHipDispatchTable()));
     HipProfilerRemoveCompilerWrappersExt(
         const_cast<HipCompilerDispatchTable*>(hip::GetHipCompilerDispatchTable()));
