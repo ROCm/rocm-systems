@@ -2,7 +2,6 @@
 # Copyright Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
-import json
 import logging
 import os
 import platform
@@ -10,6 +9,7 @@ import shlex
 import shutil
 import subprocess
 from pathlib import Path
+from typing import Dict, List
 
 logging.basicConfig(level=logging.INFO)
 
@@ -74,14 +74,17 @@ def derive_rocm_path(script_dir: Path) -> Path:
     if script_dir.name == "catch_tests" and script_dir.parent.name == "hip":
         if script_dir.parent.parent.name == "share":
             return script_dir.parent.parent.parent
-    rocm_path = os.getenv("ROCM_PATH")
-    if rocm_path:
-        return Path(rocm_path)
-    return script_dir.parent.parent
+    raise RuntimeError(
+        "Could not derive ROCM_PATH from an installed hip catch test layout. "
+        "Set ROCM_PATH explicitly."
+    )
 
 
 def is_asan() -> bool:
-    return "asan" in os.getenv("ARTIFACT_GROUP", "")
+    explicit = os.getenv("HIP_TESTS_ASAN")
+    if explicit:
+        return explicit.lower() in ("1", "on", "true", "yes")
+    return "asan" in os.getenv("ARTIFACT_GROUP", "").lower()
 
 
 def get_asan_lib_path(rocm_path: Path) -> str:
@@ -116,8 +119,8 @@ def copy_dlls_exe_path(rocm_bin_dir: Path, catch_tests_path: Path) -> None:
             logging.info(f"++ Error copying {dll}: {e}")
 
 
-def setup_env(env: dict[str, str], rocm_path: Path, catch_tests_path: Path) -> None:
-    rocm_bin_dir = Path(os.environ.get("ROCM_BIN_DIR", rocm_path / "bin")).resolve()
+def setup_env(env: Dict[str, str], rocm_path: Path, catch_tests_path: Path) -> None:
+    rocm_bin_dir = Path(os.getenv("ROCM_BIN_DIR") or rocm_path / "bin").resolve()
     env["ROCM_PATH"] = str(rocm_path)
     if platform.system() == "Linux":
         hip_lib_path = rocm_path / "lib"
@@ -133,7 +136,7 @@ def setup_env(env: dict[str, str], rocm_path: Path, catch_tests_path: Path) -> N
         copy_dlls_exe_path(rocm_bin_dir, catch_tests_path)
 
 
-def build_ctest_command(catch_tests_path: Path) -> list[str]:
+def build_ctest_command(catch_tests_path: Path) -> List[str]:
     # Allow for more time in ASAN mode to run the tests.
     timeout = 1500 if is_asan() else 600
     shard_index = int(os.getenv("SHARD_INDEX", "1")) - 1
@@ -161,9 +164,8 @@ def build_ctest_command(catch_tests_path: Path) -> list[str]:
 
 def main() -> None:
     script_dir = Path(__file__).resolve().parent
-    rocm_path = Path(
-        os.environ.get("ROCM_PATH", derive_rocm_path(script_dir))
-    ).resolve()
+    rocm_path_env = os.getenv("ROCM_PATH")
+    rocm_path = Path(rocm_path_env).resolve() if rocm_path_env else derive_rocm_path(script_dir)
     catch_tests_path = rocm_path / "share" / "hip" / "catch_tests"
     if not catch_tests_path.is_dir():
         raise FileNotFoundError(f"catch tests not found in {catch_tests_path}")
