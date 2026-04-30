@@ -1,0 +1,222 @@
+{
+  "hsa_amd_memory_async_copy": [
+    {
+      "c_type": "void *",
+      "name": "dst"
+    },
+    {
+      "c_type": "hsa_agent_t",
+      "name": "dst_agent"
+    },
+    {
+      "c_type": "const void *",
+      "name": "src"
+    },
+    {
+      "c_type": "hsa_agent_t",
+      "name": "src_agent"
+    },
+    {
+      "c_type": "size_t",
+      "name": "size"
+    },
+    {
+      "c_type": "uint32_t",
+      "name": "num_dep_signals"
+    },
+    {
+      "c_type": "const hsa_signal_t *",
+      "name": "dep_signals"
+    },
+    {
+      "c_type": "hsa_signal_t",
+      "name": "completion_signal"
+    }
+  ],
+  "hsa_amd_memory_async_copy_on_engine": [
+    {
+      "c_type": "void *",
+      "name": "dst"
+    },
+    {
+      "c_type": "hsa_agent_t",
+      "name": "dst_agent"
+    },
+    {
+      "c_type": "const void *",
+      "name": "src"
+    },
+    {
+      "c_type": "hsa_agent_t",
+      "name": "src_agent"
+    },
+    {
+      "c_type": "size_t",
+      "name": "size"
+    },
+    {
+      "c_type": "uint32_t",
+      "name": "num_dep_signals"
+    },
+    {
+      "c_type": "const hsa_signal_t *",
+      "name": "dep_signals"
+    },
+    {
+      "c_type": "hsa_signal_t",
+      "name": "completion_signal"
+    },
+    {
+      "c_type": "hsa_amd_sdma_engine_id_t",
+      "name": "engine_id"
+    },
+    {
+      "c_type": "bool",
+      "name": "force_copy_on_sdma"
+    }
+  ],
+  "hsa_amd_memory_pool_allocate": [
+    {
+      "c_type": "hsa_amd_memory_pool_t",
+      "name": "memory_pool"
+    },
+    {
+      "c_type": "size_t",
+      "name": "size"
+    },
+    {
+      "c_type": "uint32_t",
+      "name": "flags"
+    },
+    {
+      "c_type": "void **",
+      "name": "ptr"
+    }
+  ],
+  "hsa_amd_memory_pool_free": [
+    {
+      "c_type": "void *",
+      "name": "ptr"
+    }
+  ],
+  "hsa_amd_queue_intercept_create": [
+    {
+      "c_type": "hsa_agent_t",
+      "name": "agent_handle"
+    },
+    {
+      "c_type": "uint32_t",
+      "name": "size"
+    },
+    {
+      "c_type": "hsa_queue_type32_t",
+      "name": "type"
+    },
+    {
+      "c_type": "void (*)(hsa_status_t, hsa_queue_t *, void *)",
+      "name": "callback"
+    },
+    {
+      "c_type": "void *",
+      "name": "data"
+    },
+    {
+      "c_type": "uint32_t",
+      "name": "private_segment_size"
+    },
+    {
+      "c_type": "uint32_t",
+      "name": "group_segment_size"
+    },
+    {
+      "c_type": "hsa_queue_t **",
+      "name": "queue"
+    }
+  ],
+  "hsa_amd_signal_create": [
+    {
+      "c_type": "hsa_signal_value_t",
+      "name": "initial_value"
+    },
+    {
+      "c_type": "uint32_t",
+      "name": "num_consumers"
+    },
+    {
+      "c_type": "const hsa_agent_t *",
+      "name": "consumers"
+    },
+    {
+      "c_type": "uint64_t",
+      "name": "attributes"
+    },
+    {
+      "c_type": "hsa_signal_t *",
+      "name": "signal"
+    }
+  ],
+  "hsa_queue_create": [
+    {
+      "c_type": "hsa_agent_t",
+      "name": "agent"
+    },
+    {
+      "c_type": "uint32_t",
+      "name": "size"
+    },
+    {
+      "c_type": "hsa_queue_type32_t",
+      "name": "type"
+    },
+    {
+      "c_type": "void (*)(hsa_status_t, hsa_queue_t *, void *)",
+      "name": "callback"
+    },
+    {
+      "c_type": "void *",
+      "name": "data"
+    },
+    {
+      "c_type": "uint32_t",
+      "name": "private_segment_size"
+    },
+    {
+      "c_type": "uint32_t",
+      "name": "group_segment_size"
+    },
+    {
+      "c_type": "hsa_queue_t **",
+      "name": "queue"
+    }
+  ],
+  "hsa_queue_destroy": [
+    {
+      "c_type": "hsa_queue_t *",
+      "name": "queue"
+    }
+  ],
+  "hsa_signal_create": [
+    {
+      "c_type": "hsa_signal_value_t",
+      "name": "initial_value"
+    },
+    {
+      "c_type": "uint32_t",
+      "name": "num_consumers"
+    },
+    {
+      "c_type": "const hsa_agent_t *",
+      "name": "consumers"
+    },
+    {
+      "c_type": "hsa_signal_t *",
+      "name": "signal"
+    }
+  ],
+  "hsa_signal_destroy": [
+    {
+      "c_type": "hsa_signal_t",
+      "name": "signal"
+    }
+  ]
+}

@@ -523,6 +523,14 @@ if( BUILD_SHARED_LIBS )
               PATTERN "liblttng*.so*"
               PATTERN "liburcu*.so*")
 
+      ## Symbol-coverage gate: post-build, diff the .so's exported HSA symbols
+      ## against the migration inventory. Fail the build on any miss.
+      add_custom_command(TARGET ${CORE_RUNTIME_TARGET} POST_BUILD
+          COMMAND ${CMAKE_COMMAND} -E echo "Running LTTng symbol-coverage gate..."
+          COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/scripts/lttng_coverage_gate.sh
+                  $<TARGET_FILE:${CORE_RUNTIME_TARGET}>
+                  ${CMAKE_CURRENT_SOURCE_DIR}/scripts/lttng_migration_inventory.txt
+          VERBATIM)
     else()
       set(HSA_DEP_LTTNG_UST OFF CACHE INTERNAL "")
     endif()

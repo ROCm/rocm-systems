@@ -405,6 +405,16 @@ if(HIP_ENABLE_LTTNG_UST)
         add_dependencies(rocclr lttng_ust_vendored)
     endif()
 
+    # Symbol-coverage gate: every exported HIP/__hip text symbol from the
+    # built libamdhip64.so must appear in one of the checked-in migration
+    # inventories. Fails the build on any miss.
+    add_custom_command(TARGET amdhip64 POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E echo "Running LTTng symbol-coverage gate..."
+        COMMAND bash ${CMAKE_CURRENT_LIST_DIR}/../scripts/lttng_coverage_gate.sh
+                $<TARGET_FILE:amdhip64>
+                ${CMAKE_CURRENT_LIST_DIR}/../scripts/lttng_migration_inventory.txt
+                ${CMAKE_CURRENT_LIST_DIR}/../scripts/lttng_migration_inventory_c.txt
+        VERBATIM)
 endif()
 
 add_custom_command(TARGET amdhip64 POST_BUILD COMMAND

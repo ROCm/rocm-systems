@@ -1,0 +1,40 @@
+# Symbols exported from libamdhip64.so that are NOT migrated by
+# scripts/lttng_migrate.py and that we explicitly exempt from the
+# symbol-coverage gate.
+#
+# Format: one symbol name per line. Lines starting with # are comments.
+#
+# Each exemption MUST have a justification comment immediately above it.
+# Adding to this list weakens the coverage guarantee - prefer extending
+# the migrator (e.g. adding the wrapper's source file to its scan, or
+# handling a new wrapper macro pattern) over adding an exemption.
+
+# Defined in hip_device_runtime.cpp:871 with HIP_INIT_API/HIP_RETURN
+# macro pattern, not the simple TRY/CATCH wrapper pattern that the
+# AST migrator handles. Kept as legacy until either the wrapper is
+# refactored to fit the pattern OR the migrator is extended to handle
+# HIP_INIT_API/HIP_RETURN.
+hipChooseDevice
+
+# Defined in hip_device.cpp with HIP_RETURN(ihipGetDeviceProperties(...))
+# macro pattern. Same reason as above.
+hipGetDeviceProperties
+
+# Defined in hip_activity.cpp:10 - simple lookup function returning
+# const char* for an enum value. Returns from a switch statement
+# without passing through the dispatch table. Outside the scope of
+# the dispatch-table-wrapper migration in Phase 2; would need its
+# own enter/exit emission added by hand.
+hipGetCmdName
+
+# Defined in hip_intercept.cpp:38 - this IS the legacy
+# hipRegisterTracerCallback path that we explicitly leave unchanged
+# (see "Files deliberately NOT modified" in the plan). It is a
+# different fan-out mechanism (callback registration), not an API
+# wrapper. Not appropriate for tracepoint emission.
+hipRegisterTracerCallback
+
+# Defined in hip_global.cpp:26 - returns the embedded precompiled
+# header bytes for hiprtc. Internal helper, not part of the public
+# HIP runtime API surface. Doesn't go through the dispatch table.
+__hipGetPCH

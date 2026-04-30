@@ -1,0 +1,1079 @@
+{
+  "hipDeviceSynchronize": [],
+  "hipEventCreate": [
+    {
+      "c_type": "hipEvent_t *",
+      "name": "event"
+    }
+  ],
+  "hipEventCreateWithFlags": [
+    {
+      "c_type": "hipEvent_t *",
+      "name": "event"
+    },
+    {
+      "c_type": "unsigned int",
+      "name": "flags"
+    }
+  ],
+  "hipEventDestroy": [
+    {
+      "c_type": "hipEvent_t",
+      "name": "event"
+    }
+  ],
+  "hipEventElapsedTime": [
+    {
+      "c_type": "float *",
+      "name": "ms"
+    },
+    {
+      "c_type": "hipEvent_t",
+      "name": "start"
+    },
+    {
+      "c_type": "hipEvent_t",
+      "name": "stop"
+    }
+  ],
+  "hipEventQuery": [
+    {
+      "c_type": "hipEvent_t",
+      "name": "event"
+    }
+  ],
+  "hipEventRecord": [
+    {
+      "c_type": "hipEvent_t",
+      "name": "event"
+    },
+    {
+      "c_type": "hipStream_t",
+      "name": "stream"
+    }
+  ],
+  "hipEventSynchronize": [
+    {
+      "c_type": "hipEvent_t",
+      "name": "event"
+    }
+  ],
+  "hipExtLaunchKernel": [
+    {
+      "c_type": "const void *",
+      "name": "function_address"
+    },
+    {
+      "c_type": "dim3",
+      "name": "numBlocks"
+    },
+    {
+      "c_type": "dim3",
+      "name": "dimBlocks"
+    },
+    {
+      "c_type": "void **",
+      "name": "args"
+    },
+    {
+      "c_type": "size_t",
+      "name": "sharedMemBytes"
+    },
+    {
+      "c_type": "hipStream_t",
+      "name": "stream"
+    },
+    {
+      "c_type": "hipEvent_t",
+      "name": "startEvent"
+    },
+    {
+      "c_type": "hipEvent_t",
+      "name": "stopEvent"
+    },
+    {
+      "c_type": "int",
+      "name": "flags"
+    }
+  ],
+  "hipExtLaunchMultiKernelMultiDevice": [
+    {
+      "c_type": "hipLaunchParams *",
+      "name": "launchParamsList"
+    },
+    {
+      "c_type": "int",
+      "name": "numDevices"
+    },
+    {
+      "c_type": "unsigned int",
+      "name": "flags"
+    }
+  ],
+  "hipFree": [
+    {
+      "c_type": "void *",
+      "name": "ptr"
+    }
+  ],
+  "hipFreeAsync": [
+    {
+      "c_type": "void *",
+      "name": "dev_ptr"
+    },
+    {
+      "c_type": "hipStream_t",
+      "name": "stream"
+    }
+  ],
+  "hipFreeHost": [
+    {
+      "c_type": "void *",
+      "name": "ptr"
+    }
+  ],
+  "hipGraphAddDependencies": [
+    {
+      "c_type": "hipGraph_t",
+      "name": "graph"
+    },
+    {
+      "c_type": "const hipGraphNode_t *",
+      "name": "from"
+    },
+    {
+      "c_type": "const hipGraphNode_t *",
+      "name": "to"
+    },
+    {
+      "c_type": "size_t",
+      "name": "numDependencies"
+    }
+  ],
+  "hipGraphAddEventRecordNode": [
+    {
+      "c_type": "hipGraphNode_t *",
+      "name": "pGraphNode"
+    },
+    {
+      "c_type": "hipGraph_t",
+      "name": "graph"
+    },
+    {
+      "c_type": "const hipGraphNode_t *",
+      "name": "pDependencies"
+    },
+    {
+      "c_type": "size_t",
+      "name": "numDependencies"
+    },
+    {
+      "c_type": "hipEvent_t",
+      "name": "event"
+    }
+  ],
+  "hipGraphAddEventWaitNode": [
+    {
+      "c_type": "hipGraphNode_t *",
+      "name": "pGraphNode"
+    },
+    {
+      "c_type": "hipGraph_t",
+      "name": "graph"
+    },
+    {
+      "c_type": "const hipGraphNode_t *",
+      "name": "pDependencies"
+    },
+    {
+      "c_type": "size_t",
+      "name": "numDependencies"
+    },
+    {
+      "c_type": "hipEvent_t",
+      "name": "event"
+    }
+  ],
+  "hipGraphAddKernelNode": [
+    {
+      "c_type": "hipGraphNode_t *",
+      "name": "pGraphNode"
+    },
+    {
+      "c_type": "hipGraph_t",
+      "name": "graph"
+    },
+    {
+      "c_type": "const hipGraphNode_t *",
+      "name": "pDependencies"
+    },
+    {
+      "c_type": "size_t",
+      "name": "numDependencies"
+    },
+    {
+      "c_type": "const hipKernelNodeParams *",
+      "name": "pNodeParams"
+    }
+  ],
+  "hipGraphAddMemcpyNode": [
+    {
+      "c_type": "hipGraphNode_t *",
+      "name": "pGraphNode"
+    },
+    {
+      "c_type": "hipGraph_t",
+      "name": "graph"
+    },
+    {
+      "c_type": "const hipGraphNode_t *",
+      "name": "pDependencies"
+    },
+    {
+      "c_type": "size_t",
+      "name": "numDependencies"
+    },
+    {
+      "c_type": "const hipMemcpy3DParms *",
+      "name": "pCopyParams"
+    }
+  ],
+  "hipGraphAddMemsetNode": [
+    {
+      "c_type": "hipGraphNode_t *",
+      "name": "pGraphNode"
+    },
+    {
+      "c_type": "hipGraph_t",
+      "name": "graph"
+    },
+    {
+      "c_type": "const hipGraphNode_t *",
+      "name": "pDependencies"
+    },
+    {
+      "c_type": "size_t",
+      "name": "numDependencies"
+    },
+    {
+      "c_type": "const hipMemsetParams *",
+      "name": "pMemsetParams"
+    }
+  ],
+  "hipGraphCreate": [
+    {
+      "c_type": "hipGraph_t *",
+      "name": "pGraph"
+    },
+    {
+      "c_type": "unsigned int",
+      "name": "flags"
+    }
+  ],
+  "hipGraphDestroy": [
+    {
+      "c_type": "hipGraph_t",
+      "name": "graph"
+    }
+  ],
+  "hipGraphExecDestroy": [
+    {
+      "c_type": "hipGraphExec_t",
+      "name": "graphExec"
+    }
+  ],
+  "hipGraphExecKernelNodeSetParams": [
+    {
+      "c_type": "hipGraphExec_t",
+      "name": "hGraphExec"
+    },
+    {
+      "c_type": "hipGraphNode_t",
+      "name": "node"
+    },
+    {
+      "c_type": "const hipKernelNodeParams *",
+      "name": "pNodeParams"
+    }
+  ],
+  "hipGraphExecMemcpyNodeSetParams1D": [
+    {
+      "c_type": "hipGraphExec_t",
+      "name": "hGraphExec"
+    },
+    {
+      "c_type": "hipGraphNode_t",
+      "name": "node"
+    },
+    {
+      "c_type": "void *",
+      "name": "dst"
+    },
+    {
+      "c_type": "const void *",
+      "name": "src"
+    },
+    {
+      "c_type": "size_t",
+      "name": "count"
+    },
+    {
+      "c_type": "hipMemcpyKind",
+      "name": "kind"
+    }
+  ],
+  "hipGraphInstantiate": [
+    {
+      "c_type": "hipGraphExec_t *",
+      "name": "pGraphExec"
+    },
+    {
+      "c_type": "hipGraph_t",
+      "name": "graph"
+    },
+    {
+      "c_type": "hipGraphNode_t *",
+      "name": "pErrorNode"
+    },
+    {
+      "c_type": "char *",
+      "name": "pLogBuffer"
+    },
+    {
+      "c_type": "size_t",
+      "name": "bufferSize"
+    }
+  ],
+  "hipGraphLaunch": [
+    {
+      "c_type": "hipGraphExec_t",
+      "name": "graphExec"
+    },
+    {
+      "c_type": "hipStream_t",
+      "name": "stream"
+    }
+  ],
+  "hipHostFree": [
+    {
+      "c_type": "void *",
+      "name": "ptr"
+    }
+  ],
+  "hipHostMalloc": [
+    {
+      "c_type": "void **",
+      "name": "ptr"
+    },
+    {
+      "c_type": "size_t",
+      "name": "size"
+    },
+    {
+      "c_type": "unsigned int",
+      "name": "flags"
+    }
+  ],
+  "hipLaunchCooperativeKernel": [
+    {
+      "c_type": "const void *",
+      "name": "f"
+    },
+    {
+      "c_type": "dim3",
+      "name": "gridDim"
+    },
+    {
+      "c_type": "dim3",
+      "name": "blockDimX"
+    },
+    {
+      "c_type": "void **",
+      "name": "kernelParams"
+    },
+    {
+      "c_type": "unsigned int",
+      "name": "sharedMemBytes"
+    },
+    {
+      "c_type": "hipStream_t",
+      "name": "stream"
+    }
+  ],
+  "hipLaunchCooperativeKernelMultiDevice": [
+    {
+      "c_type": "hipLaunchParams *",
+      "name": "launchParamsList"
+    },
+    {
+      "c_type": "int",
+      "name": "numDevices"
+    },
+    {
+      "c_type": "unsigned int",
+      "name": "flags"
+    }
+  ],
+  "hipLaunchKernel": [
+    {
+      "c_type": "const void *",
+      "name": "function_address"
+    },
+    {
+      "c_type": "dim3",
+      "name": "numBlocks"
+    },
+    {
+      "c_type": "dim3",
+      "name": "dimBlocks"
+    },
+    {
+      "c_type": "void **",
+      "name": "args"
+    },
+    {
+      "c_type": "size_t",
+      "name": "sharedMemBytes"
+    },
+    {
+      "c_type": "hipStream_t",
+      "name": "stream"
+    }
+  ],
+  "hipMalloc": [
+    {
+      "c_type": "void **",
+      "name": "ptr"
+    },
+    {
+      "c_type": "size_t",
+      "name": "size"
+    }
+  ],
+  "hipMallocAsync": [
+    {
+      "c_type": "void **",
+      "name": "dev_ptr"
+    },
+    {
+      "c_type": "size_t",
+      "name": "size"
+    },
+    {
+      "c_type": "hipMemPool_t",
+      "name": "mem_pool"
+    },
+    {
+      "c_type": "hipStream_t",
+      "name": "stream"
+    }
+  ],
+  "hipMallocHost": [
+    {
+      "c_type": "void **",
+      "name": "ptr"
+    },
+    {
+      "c_type": "size_t",
+      "name": "size"
+    }
+  ],
+  "hipMallocManaged": [
+    {
+      "c_type": "void **",
+      "name": "dev_ptr"
+    },
+    {
+      "c_type": "size_t",
+      "name": "size"
+    },
+    {
+      "c_type": "unsigned int",
+      "name": "flags"
+    }
+  ],
+  "hipMemAdvise": [
+    {
+      "c_type": "const void *",
+      "name": "dev_ptr"
+    },
+    {
+      "c_type": "size_t",
+      "name": "count"
+    },
+    {
+      "c_type": "hipMemoryAdvise",
+      "name": "advice"
+    },
+    {
+      "c_type": "int",
+      "name": "device"
+    }
+  ],
+  "hipMemPrefetchAsync": [
+    {
+      "c_type": "const void *",
+      "name": "dev_ptr"
+    },
+    {
+      "c_type": "size_t",
+      "name": "count"
+    },
+    {
+      "c_type": "int",
+      "name": "device"
+    },
+    {
+      "c_type": "hipStream_t",
+      "name": "stream"
+    }
+  ],
+  "hipMemcpy": [
+    {
+      "c_type": "void *",
+      "name": "dst"
+    },
+    {
+      "c_type": "const void *",
+      "name": "src"
+    },
+    {
+      "c_type": "size_t",
+      "name": "sizeBytes"
+    },
+    {
+      "c_type": "hipMemcpyKind",
+      "name": "kind"
+    }
+  ],
+  "hipMemcpy2DAsync": [
+    {
+      "c_type": "void *",
+      "name": "dst"
+    },
+    {
+      "c_type": "size_t",
+      "name": "dpitch"
+    },
+    {
+      "c_type": "const void *",
+      "name": "src"
+    },
+    {
+      "c_type": "size_t",
+      "name": "spitch"
+    },
+    {
+      "c_type": "size_t",
+      "name": "width"
+    },
+    {
+      "c_type": "size_t",
+      "name": "height"
+    },
+    {
+      "c_type": "hipMemcpyKind",
+      "name": "kind"
+    },
+    {
+      "c_type": "hipStream_t",
+      "name": "stream"
+    }
+  ],
+  "hipMemcpy3DAsync": [
+    {
+      "c_type": "const struct hipMemcpy3DParms *",
+      "name": "p"
+    },
+    {
+      "c_type": "hipStream_t",
+      "name": "stream"
+    }
+  ],
+  "hipMemcpyAsync": [
+    {
+      "c_type": "void *",
+      "name": "dst"
+    },
+    {
+      "c_type": "const void *",
+      "name": "src"
+    },
+    {
+      "c_type": "size_t",
+      "name": "sizeBytes"
+    },
+    {
+      "c_type": "hipMemcpyKind",
+      "name": "kind"
+    },
+    {
+      "c_type": "hipStream_t",
+      "name": "stream"
+    }
+  ],
+  "hipMemcpyDtoD": [
+    {
+      "c_type": "hipDeviceptr_t",
+      "name": "dst"
+    },
+    {
+      "c_type": "hipDeviceptr_t",
+      "name": "src"
+    },
+    {
+      "c_type": "size_t",
+      "name": "sizeBytes"
+    }
+  ],
+  "hipMemcpyDtoDAsync": [
+    {
+      "c_type": "hipDeviceptr_t",
+      "name": "dst"
+    },
+    {
+      "c_type": "hipDeviceptr_t",
+      "name": "src"
+    },
+    {
+      "c_type": "size_t",
+      "name": "sizeBytes"
+    },
+    {
+      "c_type": "hipStream_t",
+      "name": "stream"
+    }
+  ],
+  "hipMemcpyDtoH": [
+    {
+      "c_type": "void *",
+      "name": "dst"
+    },
+    {
+      "c_type": "hipDeviceptr_t",
+      "name": "src"
+    },
+    {
+      "c_type": "size_t",
+      "name": "sizeBytes"
+    }
+  ],
+  "hipMemcpyDtoHAsync": [
+    {
+      "c_type": "void *",
+      "name": "dst"
+    },
+    {
+      "c_type": "hipDeviceptr_t",
+      "name": "src"
+    },
+    {
+      "c_type": "size_t",
+      "name": "sizeBytes"
+    },
+    {
+      "c_type": "hipStream_t",
+      "name": "stream"
+    }
+  ],
+  "hipMemcpyHtoD": [
+    {
+      "c_type": "hipDeviceptr_t",
+      "name": "dst"
+    },
+    {
+      "c_type": "const void *",
+      "name": "src"
+    },
+    {
+      "c_type": "size_t",
+      "name": "sizeBytes"
+    }
+  ],
+  "hipMemcpyHtoDAsync": [
+    {
+      "c_type": "hipDeviceptr_t",
+      "name": "dst"
+    },
+    {
+      "c_type": "const void *",
+      "name": "src"
+    },
+    {
+      "c_type": "size_t",
+      "name": "sizeBytes"
+    },
+    {
+      "c_type": "hipStream_t",
+      "name": "stream"
+    }
+  ],
+  "hipMemcpyPeer": [
+    {
+      "c_type": "void *",
+      "name": "dst"
+    },
+    {
+      "c_type": "int",
+      "name": "dstDeviceId"
+    },
+    {
+      "c_type": "const void *",
+      "name": "src"
+    },
+    {
+      "c_type": "int",
+      "name": "srcDeviceId"
+    },
+    {
+      "c_type": "size_t",
+      "name": "sizeBytes"
+    }
+  ],
+  "hipMemcpyPeerAsync": [
+    {
+      "c_type": "void *",
+      "name": "dst"
+    },
+    {
+      "c_type": "int",
+      "name": "dstDeviceId"
+    },
+    {
+      "c_type": "const void *",
+      "name": "src"
+    },
+    {
+      "c_type": "int",
+      "name": "srcDevice"
+    },
+    {
+      "c_type": "size_t",
+      "name": "sizeBytes"
+    },
+    {
+      "c_type": "hipStream_t",
+      "name": "stream"
+    }
+  ],
+  "hipMemset": [
+    {
+      "c_type": "void *",
+      "name": "dst"
+    },
+    {
+      "c_type": "int",
+      "name": "value"
+    },
+    {
+      "c_type": "size_t",
+      "name": "sizeBytes"
+    }
+  ],
+  "hipMemsetAsync": [
+    {
+      "c_type": "void *",
+      "name": "dst"
+    },
+    {
+      "c_type": "int",
+      "name": "value"
+    },
+    {
+      "c_type": "size_t",
+      "name": "sizeBytes"
+    },
+    {
+      "c_type": "hipStream_t",
+      "name": "stream"
+    }
+  ],
+  "hipMemsetD16": [
+    {
+      "c_type": "hipDeviceptr_t",
+      "name": "dest"
+    },
+    {
+      "c_type": "unsigned short",
+      "name": "value"
+    },
+    {
+      "c_type": "size_t",
+      "name": "count"
+    }
+  ],
+  "hipMemsetD32": [
+    {
+      "c_type": "hipDeviceptr_t",
+      "name": "dest"
+    },
+    {
+      "c_type": "int",
+      "name": "value"
+    },
+    {
+      "c_type": "size_t",
+      "name": "count"
+    }
+  ],
+  "hipMemsetD8": [
+    {
+      "c_type": "hipDeviceptr_t",
+      "name": "dest"
+    },
+    {
+      "c_type": "unsigned char",
+      "name": "value"
+    },
+    {
+      "c_type": "size_t",
+      "name": "count"
+    }
+  ],
+  "hipModuleGetFunction": [
+    {
+      "c_type": "hipFunction_t *",
+      "name": "function"
+    },
+    {
+      "c_type": "hipModule_t",
+      "name": "module"
+    },
+    {
+      "c_type": "const char *",
+      "name": "kname"
+    }
+  ],
+  "hipModuleLaunchKernel": [
+    {
+      "c_type": "hipFunction_t",
+      "name": "f"
+    },
+    {
+      "c_type": "unsigned int",
+      "name": "gridDimX"
+    },
+    {
+      "c_type": "unsigned int",
+      "name": "gridDimY"
+    },
+    {
+      "c_type": "unsigned int",
+      "name": "gridDimZ"
+    },
+    {
+      "c_type": "unsigned int",
+      "name": "blockDimX"
+    },
+    {
+      "c_type": "unsigned int",
+      "name": "blockDimY"
+    },
+    {
+      "c_type": "unsigned int",
+      "name": "blockDimZ"
+    },
+    {
+      "c_type": "unsigned int",
+      "name": "sharedMemBytes"
+    },
+    {
+      "c_type": "hipStream_t",
+      "name": "stream"
+    },
+    {
+      "c_type": "void **",
+      "name": "kernelParams"
+    },
+    {
+      "c_type": "void **",
+      "name": "extra"
+    }
+  ],
+  "hipModuleLoadData": [
+    {
+      "c_type": "hipModule_t *",
+      "name": "module"
+    },
+    {
+      "c_type": "const void *",
+      "name": "image"
+    }
+  ],
+  "hipModuleLoadDataEx": [
+    {
+      "c_type": "hipModule_t *",
+      "name": "module"
+    },
+    {
+      "c_type": "const void *",
+      "name": "image"
+    },
+    {
+      "c_type": "unsigned int",
+      "name": "numOptions"
+    },
+    {
+      "c_type": "hipJitOption *",
+      "name": "options"
+    },
+    {
+      "c_type": "void **",
+      "name": "optionValues"
+    }
+  ],
+  "hipModuleUnload": [
+    {
+      "c_type": "hipModule_t",
+      "name": "module"
+    }
+  ],
+  "hipStreamAddCallback": [
+    {
+      "c_type": "hipStream_t",
+      "name": "stream"
+    },
+    {
+      "c_type": "hipStreamCallback_t",
+      "name": "callback"
+    },
+    {
+      "c_type": "void *",
+      "name": "userData"
+    },
+    {
+      "c_type": "unsigned int",
+      "name": "flags"
+    }
+  ],
+  "hipStreamAttachMemAsync": [
+    {
+      "c_type": "hipStream_t",
+      "name": "stream"
+    },
+    {
+      "c_type": "void *",
+      "name": "dev_ptr"
+    },
+    {
+      "c_type": "size_t",
+      "name": "length"
+    },
+    {
+      "c_type": "unsigned int",
+      "name": "flags"
+    }
+  ],
+  "hipStreamBeginCapture": [
+    {
+      "c_type": "hipStream_t",
+      "name": "stream"
+    },
+    {
+      "c_type": "hipStreamCaptureMode",
+      "name": "mode"
+    }
+  ],
+  "hipStreamCreate": [
+    {
+      "c_type": "hipStream_t *",
+      "name": "stream"
+    }
+  ],
+  "hipStreamCreateWithFlags": [
+    {
+      "c_type": "hipStream_t *",
+      "name": "stream"
+    },
+    {
+      "c_type": "unsigned int",
+      "name": "flags"
+    }
+  ],
+  "hipStreamCreateWithPriority": [
+    {
+      "c_type": "hipStream_t *",
+      "name": "stream"
+    },
+    {
+      "c_type": "unsigned int",
+      "name": "flags"
+    },
+    {
+      "c_type": "int",
+      "name": "priority"
+    }
+  ],
+  "hipStreamDestroy": [
+    {
+      "c_type": "hipStream_t",
+      "name": "stream"
+    }
+  ],
+  "hipStreamEndCapture": [
+    {
+      "c_type": "hipStream_t",
+      "name": "stream"
+    },
+    {
+      "c_type": "hipGraph_t *",
+      "name": "pGraph"
+    }
+  ],
+  "hipStreamGetFlags": [
+    {
+      "c_type": "hipStream_t",
+      "name": "stream"
+    },
+    {
+      "c_type": "unsigned int *",
+      "name": "flags"
+    }
+  ],
+  "hipStreamGetPriority": [
+    {
+      "c_type": "hipStream_t",
+      "name": "stream"
+    },
+    {
+      "c_type": "int *",
+      "name": "priority"
+    }
+  ],
+  "hipStreamIsCapturing": [
+    {
+      "c_type": "hipStream_t",
+      "name": "stream"
+    },
+    {
+      "c_type": "hipStreamCaptureStatus *",
+      "name": "pCaptureStatus"
+    }
+  ],
+  "hipStreamQuery": [
+    {
+      "c_type": "hipStream_t",
+      "name": "stream"
+    }
+  ],
+  "hipStreamSynchronize": [
+    {
+      "c_type": "hipStream_t",
+      "name": "stream"
+    }
+  ],
+  "hipStreamWaitEvent": [
+    {
+      "c_type": "hipStream_t",
+      "name": "stream"
+    },
+    {
+      "c_type": "hipEvent_t",
+      "name": "event"
+    },
+    {
+      "c_type": "unsigned int",
+      "name": "flags"
+    }
+  ]
+}

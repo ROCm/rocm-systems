@@ -1,0 +1,17 @@
+/*
+ * Companion to restrictive.map: the maximally-strict version script that
+ * exports NOTHING (everything local). Used to test the hypothesis that
+ * the LTTng provider constructor only needs the .so to load and run its
+ * __attribute__((constructor)) -- and does NOT depend on any
+ * __tracepoint_provider_* / __tracepoint__* symbols being visible in
+ * the dynamic symbol table.
+ *
+ * If the spike .so built with this map still registers rocm_spike:hello
+ * with lttng-sessiond, then Phase 4 does NOT need to widen
+ * hsacore.so.def to include LTTng symbol patterns -- a major
+ * simplification of the HSA build-system change.
+ */
+{
+    local:
+        *;
+};

@@ -1,0 +1,103 @@
+# HSA curated APIs for typed parameter capture.
+# Schema is the same as the HIP equivalent (projects/clr/hipamd/scripts/curated_apis.yaml).
+
+- api: hsa_queue_create
+  category: hsa_queues
+  args:
+    - {name: agent,                type: handle, dir: IN}
+    - {name: size,                 type: uint32, dir: IN}
+    - {name: type,                 type: uint32, dir: IN}
+    - {name: callback,             type: ptr,    dir: IN}
+    - {name: data,                 type: ptr,    dir: IN}
+    - {name: private_segment_size, type: uint32, dir: IN}
+    - {name: group_segment_size,   type: uint32, dir: IN}
+    - {name: queue,                type: handle, dir: OUT}
+
+- api: hsa_queue_destroy
+  category: hsa_queues
+  args:
+    - {name: queue, type: handle, dir: IN}
+
+- api: hsa_amd_queue_intercept_create
+  category: hsa_queues
+  notes: |
+    Verified against /opt/rocm/include/hsa/hsa_api_trace.h.
+    Same shape as hsa_queue_create with first param renamed agent_handle.
+  args:
+    - {name: agent_handle,         type: handle, dir: IN}
+    - {name: size,                 type: uint32, dir: IN}
+    - {name: type,                 type: uint32, dir: IN}
+    - {name: callback,             type: ptr,    dir: IN}
+    - {name: data,                 type: ptr,    dir: IN}
+    - {name: private_segment_size, type: uint32, dir: IN}
+    - {name: group_segment_size,   type: uint32, dir: IN}
+    - {name: queue,                type: handle, dir: OUT}
+
+- api: hsa_signal_create
+  category: hsa_signals
+  args:
+    - {name: initial_value, type: int64,  dir: IN}
+    - {name: num_consumers, type: uint32, dir: IN}
+    - {name: consumers,     type: ptr,    dir: IN}
+    - {name: signal,        type: handle, dir: OUT}
+
+- api: hsa_signal_destroy
+  category: hsa_signals
+  args:
+    - {name: signal, type: handle, dir: IN}
+
+- api: hsa_amd_signal_create
+  category: hsa_signals
+  notes: |
+    Verified against /opt/rocm/include/hsa/hsa_ext_amd.h. Same as
+    hsa_signal_create with one extra IN attributes:uint64.
+  args:
+    - {name: initial_value, type: int64,  dir: IN}
+    - {name: num_consumers, type: uint32, dir: IN}
+    - {name: consumers,     type: ptr,    dir: IN}
+    - {name: attributes,    type: uint64, dir: IN}
+    - {name: signal,        type: handle, dir: OUT}
+
+- api: hsa_amd_memory_pool_allocate
+  category: hsa_memory
+  args:
+    - {name: memory_pool, type: handle, dir: IN}
+    - {name: size,        type: size,   dir: IN}
+    - {name: flags,       type: uint32, dir: IN}
+    - {name: ptr,         type: ptr,    dir: OUT}
+
+- api: hsa_amd_memory_pool_free
+  category: hsa_memory
+  args:
+    - {name: ptr, type: ptr, dir: IN}
+
+- api: hsa_amd_memory_async_copy
+  category: hsa_memory
+  notes: 8 payload + corr_id = 9 total — fits the 9-payload budget.
+  args:
+    - {name: dst,               type: ptr,    dir: IN}
+    - {name: dst_agent,         type: handle, dir: IN}
+    - {name: src,               type: ptr,    dir: IN}
+    - {name: src_agent,         type: handle, dir: IN}
+    - {name: size,              type: size,   dir: IN}
+    - {name: num_dep_signals,   type: uint32, dir: IN}
+    - {name: dep_signals,       type: ptr,    dir: IN}
+    - {name: completion_signal, type: handle, dir: IN}
+
+- api: hsa_amd_memory_async_copy_on_engine
+  category: hsa_memory
+  notes: |
+    Drops dep_signals from YAML to fit the field budget. _on_engine adds
+    engine_id + force_copy_on_sdma to the base async_copy shape, totaling
+    11 fields including corr_id; dropping dep_signals brings it to 10
+    (the limit). engine_id is an enum (typedef enum hsa_amd_sdma_engine_id_t).
+  args:
+    - {name: dst,                 type: ptr,    dir: IN}
+    - {name: dst_agent,           type: handle, dir: IN}
+    - {name: src,                 type: ptr,    dir: IN}
+    - {name: src_agent,           type: handle, dir: IN}
+    - {name: size,                type: size,   dir: IN}
+    - {name: num_dep_signals,     type: uint32, dir: IN}
+    - {name: completion_signal,   type: handle, dir: IN}
+    - {name: engine_id,           type: enum,   dir: IN}
+    - {name: force_copy_on_sdma,  type: bool,   dir: IN}
