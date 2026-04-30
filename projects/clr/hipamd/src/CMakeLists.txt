@@ -398,10 +398,29 @@ if(HIP_ENABLE_LTTNG_UST)
     # add_dependencies) avoids the cyclic dependency that arises when
     # $<TARGET_FILE_DIR:amdhip64> is used in a separate custom target.
     if(NOT WIN32)
+        # Use a sane shell-based existence check rather than
+        # `cp ... 2>/dev/null || true`. The previous form silently
+        # masked the case where the vendored .so files were missing
+        # (e.g. the FetchContent build failed in a hard-to-spot way),
+        # which then broke downstream link consumers later. Now: copy
+        # whatever matches; if NO files matched at all, fail the build
+        # with an actionable error.
         add_custom_command(TARGET amdhip64 PRE_LINK
             COMMAND ${CMAKE_COMMAND} -E make_directory
                     "$<TARGET_FILE_DIR:amdhip64>"
-            COMMAND sh -c "cp -P '${LTTNG_VENDORED_LIB_DIR}'/liblttng*.so* '${LTTNG_VENDORED_LIB_DIR}'/liburcu*.so* '$<TARGET_FILE_DIR:amdhip64>/' 2>/dev/null || true"
+            COMMAND sh -c
+"set -e
+found=0
+for lib in '${LTTNG_VENDORED_LIB_DIR}'/liblttng*.so* '${LTTNG_VENDORED_LIB_DIR}'/liburcu*.so*; do
+    if [ -e \"\$lib\" ]; then
+        found=1
+        cp -P \"\$lib\" '$<TARGET_FILE_DIR:amdhip64>/'
+    fi
+done
+if [ \"\$found\" -eq 0 ]; then
+    echo 'error: no vendored LTTng-UST/URCU shared libraries found to stage from ${LTTNG_VENDORED_LIB_DIR}' >&2
+    exit 1
+fi"
             COMMENT "Staging vendored LTTng-UST .so files into amdhip64 build dir"
             VERBATIM)
     endif()
