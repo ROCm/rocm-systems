@@ -136,6 +136,19 @@ void Device::AddSafeStream(Stream* event_stream, Stream* wait_stream) {
 void Device::Reset() {
   auto* dev = devices()[0];
 
+  flags_ = hipDeviceScheduleSpin;
+
+  // Destroy all user streams first so their GPU work completes (including the Windows
+  // VirtualGPU barrier flush in ~VirtualGPU) before any backing memory is freed.
+  destroyAllStreams();
+
+  // null_stream_ is excluded from destroyAllStreams() since it is a null stream.
+  // Destroy it explicitly so it is recreated fresh after reset.
+  if (null_stream_ != nullptr) {
+    hip::Stream::Destroy(null_stream_);
+    null_stream_ = nullptr;
+  }
+
   {
     std::scoped_lock lock(lock_);
     auto pools_to_delete = std::exchange(mem_pools_, {});
@@ -144,10 +157,8 @@ void Device::Reset() {
       delete pool;
     }
   }
-  flags_ = hipDeviceScheduleSpin;
-  destroyAllStreams();
 
-  dev->destroyXferQueue();
+  dev->recreateXferQueue();
 
   // Clear hostcall allocations to avoid ~Device() accessing freed Memory objects later.
   dev->ClearHostcallMemories();

@@ -3972,9 +3972,12 @@ void callbackQueue(hsa_status_t status, hsa_queue_t* queue, void* data) {
   }
 }
 
-void Device::destroyXferQueue() {
+void Device::recreateXferQueue() {
   delete xferQueue_;
   xferQueue_ = nullptr;
+  // xferQueue() is a lazy accessor that recreates xferQueue_ on next access,
+  // so nulling here is sufficient — no explicit recreation needed.
+  xferQueue();
 }
 // ================================================================================================
 #if defined(__clang__)
