@@ -22,6 +22,7 @@ A practical reference for new hires. Covers every test suite, when to use it, wh
 14. [Test Infrastructure Reference](#14-test-infrastructure-reference)
 15. [Decision Guide — Which Suite?](#15-decision-guide--which-suite)
 16. [Day-to-Day Cheat Sheet](#16-day-to-day-cheat-sheet)
+17. [rccl-tests — Performance and Correctness](#17-rccl-tests--performance-and-correctness)
 
 ---
 
@@ -599,6 +600,8 @@ Full documentation: `docker/mnctl/README.md`.
 | `docker/mnctl/README.md` | `mnctl` multi-node Docker tool |
 | `tools/scripts/test_runner/README.md` | Python test runner documentation |
 | `tools/scripts/test_runner/configs/test_config_sample.json` | Annotated JSON config schema template |
+| `../rccl-tests/README.md` | rccl-tests build, usage, and full argument reference |
+| `../rccl-tests/src/collector.h` | NIC counter collector API and environment variable reference |
 
 ### External links
 
@@ -735,6 +738,51 @@ python3 tools/scripts/test_runner/test_runner.py \
   --test-name "AllReduce.OutOfPlace" --no-build
 ```
 
+### rccl-tests (performance / correctness)
+
+```bash
+cd projects/rccl-tests
+
+# Build (single GPU target, with MPI)
+GPU_TARGETS="gfx942" make MPI=1 MPI_HOME=/opt/ompi NCCL_HOME=/opt/rocm -j$(nproc)
+
+# Build via CMake (auto-detect local GPU, with MPI)
+mkdir -p build && cd build
+cmake -DCMAKE_BUILD_TYPE=Release \
+      -DCMAKE_PREFIX_PATH="/opt/ompi;/opt/rocm" \
+      -DUSE_MPI=ON \
+      -DBUILD_LOCAL_GPU_TARGET_ONLY=ON ..
+make -j$(nproc)
+cd ..
+
+# Single-node AllReduce sweep (8 GPUs)
+./build/all_reduce_perf -b 8 -e 128M -f 2 -g 8
+
+# Multi-node AllReduce (64 ranks, 8 per node)
+mpirun -np 64 -N 8 ./build/all_reduce_perf -b 8 -e 8G -f 2 -g 1
+
+# With local buffer registration (ncclCommRegister)
+./build/all_reduce_perf -b 8M -e 128M -f 2 -g 8 -R 1
+
+# With symmetric buffer registration (requires RCCL >= 2.27 + NCCL_CUMEM_ENABLE=1)
+NCCL_CUMEM_ENABLE=1 ./build/all_reduce_perf -b 8M -e 128M -f 2 -g 8 -R 2
+
+# HIP graph capture (10 replays)
+./build/all_reduce_perf -b 8M -e 128M -f 2 -g 8 -G 10
+
+# With NIC diagnostics (bnxt_re or ionic)
+RCCL_TESTS_NET_COUNTER_ENABLE=1 NCCL_IB_HCA=bnxt_re0,bnxt_re1 \
+  mpirun -np 8 ./build/all_reduce_perf -b 8M -e 128M -f 2 -g 1
+
+# NIC diagnostics with counter subset
+RCCL_TESTS_NET_COUNTER_ENABLE=1 RCCL_TESTS_NIC_COUNTER_LIST=rx_cnp_pkts,tx_cnp_pkts \
+  NCCL_IB_HCA=bnxt_re0,bnxt_re1 \
+  mpirun -np 8 ./build/all_reduce_perf -b 8M -e 128M -f 2 -g 1
+
+# Pytest correctness suite
+LD_LIBRARY_PATH=/opt/rocm/lib HSA_FORCE_FINE_GRAIN_PCIE=1 python3 -m pytest
+```
+
 ### GTest flags
 
 ```bash
@@ -772,3 +820,180 @@ python3 tools/scripts/test_runner/test_runner.py \
 | `ROCM_PATH` | Override ROCm installation directory (default: `/opt/rocm`) |
 | `HSA_NO_SCRATCH_RECLAIM=1` | Suppress GPU scratch-memory reclaim; recommended for stability |
 | `UT_POW2_GPUS=1` | Restrict tests to power-of-two GPU counts |
+| `NCCL_CUMEM_ENABLE=1` | Enable cuMem virtual-memory backing; required for symmetric buffer registration (`-R 2`) in rccl-tests |
+| `RCCL_TESTS_NET_COUNTER_ENABLE=1` | Enable NIC counter collection in rccl-tests (bnxt_re / ionic NICs) |
+| `RCCL_TESTS_NIC_COUNTER_LIST=rx_cnp_pkts,...` | Comma-separated subset of counters to collect (default: all counters for the detected NIC type) |
+| `RCCL_TESTS_NET_COUNTER_NIC_PREFIX=ionic` | NIC prefix filter for auto-discovery when `NCCL_IB_HCA` is unset |
+
+---
+
+## 17. rccl-tests — Performance and Correctness
+
+`projects/rccl-tests/` is a standalone performance and correctness tool for RCCL. It is complementary to the unit-test suites (A–G): the unit tests verify correctness and internal behaviour through GTest, while rccl-tests measures bandwidth and latency at scale and double-checks numerical correctness across collective types, data types, and reduction operations. Typical use cases are performance regression hunting, multi-node characterisation, and validating new hardware configurations.
+
+Unlike the unit tests, rccl-tests is a separate project with its own build system. It lives at `projects/rccl-tests/` and is built independently of RCCL's `install.sh`.
+
+### Supported GPU targets
+
+Both the Makefile and CMake builds support: `gfx906`, `gfx908`, `gfx90a`, `gfx942`, `gfx950`, `gfx1030`, `gfx1100`, `gfx1101`, `gfx1102`, `gfx1151`, `gfx1200`, `gfx1201`, `gfx1250`.
+
+> **`gfx1250`** was added in April 2026. HIP compatibility requires HIP ≥ 7.2.0 and is gated automatically in the Makefile.
+
+### Building
+
+```bash
+cd projects/rccl-tests
+
+# Makefile — one GPU target, with MPI
+GPU_TARGETS="gfx942" make MPI=1 MPI_HOME=/opt/ompi NCCL_HOME=/opt/rocm -j$(nproc)
+
+# Makefile — all default targets, no MPI (single-node only)
+make NCCL_HOME=/opt/rocm -j$(nproc)
+
+# CMake — auto-detect local GPU, with MPI
+mkdir -p build && cd build
+cmake -DCMAKE_BUILD_TYPE=Release \
+      -DCMAKE_PREFIX_PATH="/opt/ompi;/opt/rocm" \
+      -DUSE_MPI=ON \
+      -DBUILD_LOCAL_GPU_TARGET_ONLY=ON ..
+make -j$(nproc)
+cd ..
+```
+
+Binaries are written to `build/` and named `<collective>_perf` (e.g. `all_reduce_perf`, `all_gather_perf`, `broadcast_perf`, `reduce_scatter_perf`, `reduce_perf`, `sendrecv_perf`, `alltoall_perf`, `alltoallv_perf`).
+
+### Running
+
+#### Single-node
+
+```bash
+# AllReduce sweep, 8 GPUs, 8 B → 128 MiB
+./build/all_reduce_perf -b 8 -e 128M -f 2 -g 8
+
+# Recommended for performance: 1 MPI rank per GPU
+mpirun -np 8 --bind-to numa ./build/all_reduce_perf -b 8 -e 128M -f 2 -g 1
+```
+
+#### Multi-node
+
+```bash
+# 64 ranks across 8 nodes (8 GPUs each)
+mpirun -np 64 -N 8 ./build/all_reduce_perf -b 8 -e 8G -f 2 -g 1
+```
+
+### Key flags
+
+| Flag | Meaning |
+|------|---------|
+| `-b / -e / -f` | Min bytes, max bytes, step factor for the size sweep |
+| `-g <n>` | GPUs per thread (use `-g 1` with MPI for 1 rank per GPU) |
+| `-d <type>` | Data type (`float`, `bfloat16`, `fp8_e5m2`, `all`, …) |
+| `-o <op>` | Reduction operation (`sum`, `prod`, `min`, `max`, `avg`, `all`) |
+| `-n / -w` | Iteration and warmup counts |
+| `-c <n>` | Correctness-check iterations (default 1) |
+| `-G <n>` | Capture as HIP graph, replay N times |
+| `-R 0` | No buffer registration (default) |
+| `-R 1` | Local buffer registration via `ncclCommRegister` |
+| `-R 2` | Symmetric buffer registration (requires RCCL ≥ 2.27, `NCCL_CUMEM_ENABLE=1`) |
+| `-D <impl>` | Device API kernel implementation (0 = RCCL built-in; ≥ 1 requires `-R 2`) |
+| `-A 1` | Print algorithm / protocol / channel count per message size |
+| `-M 1` | Print memory usage report |
+| `-J <file>` | Write JSON output |
+| `-T <sec>` | Timeout per message-size step |
+
+### Buffer registration modes (`-R`)
+
+As of RCCL 2.27, rccl-tests supports three registration modes:
+
+- **`-R 0`** (default): no registration; RCCL performs IPC handle exchange at runtime.
+- **`-R 1`** (local): calls `ncclCommRegister` on send/recv buffers before the sweep, enabling RCCL to cache IPC handles and skip re-registration on each call. Supported with `hipMalloc` allocations on both GFX9 and CDNA3.
+- **`-R 2`** (symmetric): uses cuMem virtual-memory allocations backed by `NCCL_CUMEM_ENABLE=1`. Enables a symmetric-memory code path in RCCL that avoids IPC entirely on supported hardware. Requires RCCL ≥ 2.27 and HIP ≥ 7.1. **LL protocol is temporarily disabled with `-R 2`.**
+
+```bash
+# Local registration
+./build/all_reduce_perf -b 8M -e 128M -f 2 -g 8 -R 1
+
+# Symmetric registration
+NCCL_CUMEM_ENABLE=1 ./build/all_reduce_perf -b 8M -e 128M -f 2 -g 8 -R 2
+
+# Symmetric + device API implementation 1 (requires -R 2)
+NCCL_CUMEM_ENABLE=1 ./build/all_reduce_perf -b 8M -e 128M -f 2 -g 8 -R 2 -D 1
+```
+
+### NIC counter diagnostics
+
+A self-contained network counter collector (`src/collector.cu` / `src/collector.h`) was added in March 2026 and extended with AINIC (ionic) NIC support in April 2026. When enabled, it snapshots NIC counters before and after each collective, computes deltas and rates, and prints a per-node summary table. It has no dependency on the RCCL or GPU runtimes.
+
+Collection is triggered only on `localRank == 0, thread == 0` per node to avoid redundant work.
+
+**Environment variables:**
+
+| Variable | Effect |
+|----------|--------|
+| `RCCL_TESTS_NET_COUNTER_ENABLE=1` | Enable collection; without this, no output is produced |
+| `NCCL_IB_HCA=bnxt_re0,bnxt_re1,...` | Primary NIC source; names are resolved via sysfs |
+| `RCCL_TESTS_NIC_COUNTER_LIST=rx_cnp_pkts,...` | Comma-separated subset of counters (default: all counters for the detected NIC type) |
+| `RCCL_TESTS_NET_COUNTER_NIC_PREFIX=ionic` | NIC prefix filter for auto-discovery when `NCCL_IB_HCA` is unset |
+
+**Supported NIC types and their counter sources:**
+
+| NIC type | Auto-detected by | Counter sources |
+|----------|------------------|-----------------|
+| `bnxt_re` (Thor2) | `bnxt_re` prefix in IB device name | ethtool -S, IB hw_counters, debugfs bnxt_re |
+| `ionic` (AINIC) | `ionic` prefix in NIC name | ethtool -S, IB hw_counters |
+
+**Example output:**
+
+```
+NET_COUNTER_TABLE: node=myhost  rank=0  duration_sec=18
+------------------------------------------------------------
+Device              rx_cnp_pkts    tx_cnp_pkts    ...
+                    count  rate/s  count  rate/s
+------------------------------------------------------------
+bnxt_re0(benic7p1)      0    0.00      0    0.00
+bnxt_re1(benic8p1)      0    0.00      0    0.00
+------------------------------------------------------------
+```
+
+Rows are sorted by IB device name for consistent readability.
+
+**Example invocations:**
+
+```bash
+# bnxt_re NICs
+RCCL_TESTS_NET_COUNTER_ENABLE=1 NCCL_IB_HCA=bnxt_re0,bnxt_re1 \
+  mpirun -np 8 ./build/all_reduce_perf -b 8M -e 128M -f 2 -g 1
+
+# ionic NICs via auto-discovery
+RCCL_TESTS_NET_COUNTER_ENABLE=1 RCCL_TESTS_NET_COUNTER_NIC_PREFIX=ionic \
+  mpirun -np 8 ./build/all_reduce_perf -b 8M -e 128M -f 2 -g 1
+
+# Only collect CNP counters
+RCCL_TESTS_NET_COUNTER_ENABLE=1 NCCL_IB_HCA=bnxt_re0,bnxt_re1 \
+  RCCL_TESTS_NIC_COUNTER_LIST=rx_cnp_pkts,tx_cnp_pkts \
+  mpirun -np 8 ./build/all_reduce_perf -b 8M -e 128M -f 2 -g 1
+```
+
+### Pytest correctness suite
+
+rccl-tests ships a small pytest suite in `test/` that exercises AllReduce, AllGather, Broadcast, Reduce, and ReduceScatter for correctness. These run the compiled binaries and check output.
+
+```bash
+cd projects/rccl-tests
+# Fine-grained memory is required for the fine-grain memory-type tests
+LD_LIBRARY_PATH=/opt/rocm/lib HSA_FORCE_FINE_GRAIN_PCIE=1 python3 -m pytest
+
+# With a hostfile for multi-node runs
+LD_LIBRARY_PATH=/opt/rocm/lib HSA_FORCE_FINE_GRAIN_PCIE=1 \
+  python3 -m pytest --hostfile ~/.my_hostfile
+```
+
+### Relationship to the RCCL unit tests
+
+| | rccl-tests | RCCL unit tests (A–G) |
+|-|------------|-----------------------|
+| **Purpose** | Bandwidth, latency, numerical correctness at scale | Functional correctness, internal invariants |
+| **Build** | Separate project (`projects/rccl-tests/`) | Part of `projects/rccl/` via `install.sh -t` |
+| **Framework** | Custom harness + MPI + pytest | GTest + TestBed + MPITestBase |
+| **Typical scale** | 1–512+ GPUs, multi-node | 1–8 GPUs, single-node or small MPI |
+| **When to use** | Perf regressions, hardware bring-up, NIC diagnostics | Feature correctness, CI gating |
