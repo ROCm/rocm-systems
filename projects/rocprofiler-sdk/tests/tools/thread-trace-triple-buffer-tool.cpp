@@ -245,7 +245,9 @@ cntrl_tracing_callback(rocprofiler_callback_tracing_record_t record,
                 {
                     if(sdata[i].value < state.current_sdata)
                     {
-                        std::cerr << "Error: Invalid sdata value " << sdata[i].value << std::endl;
+                        std::cerr << "Error: Invalid sdata " << i << " value " << sdata[i].value << std::endl;
+                        for(size_t j = 0; j <= i + 1 && j < num_events; j++) std::cerr << sdata[j].value << " ";
+                        std::cout << std::endl;
                         abort();
                     }
                     state.current_sdata = sdata[i].value;
