@@ -25,6 +25,7 @@ PerfXpert's user workflow is:
 | Drive the interactive TUI | [guides/getting-started.md §9](guides/getting-started.md#9-agentic-tui-workflow-the-star-feature) |
 | Embed PerfXpert in your own tool | [guides/python-api.md](guides/python-api.md) |
 | Drive PerfXpert from a backend (opencode / claude / codex / gemini) | [guides/backends.md](guides/backends.md) |
+| Use `perfxpert-mcp` directly from an external MCP client | [integration/mcp-server.md §Client integration](integration/mcp-server.md#client-integration) |
 
 ## By area
 

@@ -15,6 +15,7 @@ PerfXpert, jump to [../contributing/README.md](../contributing/README.md).
 | Understand how the agent brain works at runtime | [agentic-mode.md](agentic-mode.md) |
 | Use the interactive `perfxpert-code` TUI | [getting-started.md §9](getting-started.md#9-agentic-tui-workflow-the-star-feature) |
 | Drive PerfXpert from a coding backend (opencode / claude / codex / gemini) | [backends.md](backends.md) |
+| Use `perfxpert-mcp` directly from an external MCP client | [../integration/mcp-server.md §Client integration](../integration/mcp-server.md#client-integration) |
 | Embed the agent hierarchy in your own Python code | [python-api.md](python-api.md) |
 
 ## Visual demo (15 short GIFs)
@@ -45,5 +46,6 @@ rendered GIFs are checked in under [assets/gifs/](assets/gifs/).
 ## See also
 
 - [../README.md](../README.md) — top-level docs index
-- [../integration/mcp-server.md](../integration/mcp-server.md) — MCP wire surface
+- [../integration/mcp-server.md](../integration/mcp-server.md) — standalone
+  `perfxpert-mcp` setup, client snippets, and MCP wire surface
 - [../architecture/agent-hierarchy.md](../architecture/agent-hierarchy.md) — what each agent does
