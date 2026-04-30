@@ -1,25 +1,136 @@
-# Per-block counter collection limits observed through rocprofv3. These are
-# PerfXpert tool/runtime guardrails, not vendor-published GPU peak specs.
-# Exceeding a limit yields rocprofv3 error code 38 in the guarded paths.
-# Source: llm-reference-guide.md §"Hardware Counter Per-Block Limits" (lines 10-65).
+# Per-block counter collection limits used by rocprofv3 pass planning.
+# Architecture-specific values mirror the rocprofiler-compute
+# mi_gpu_spec.yaml perfmon_config table in this repository.
 
 per_block_limits:
   SQ:
     limit: 4
-    gfx942_limit: 8
-    note: "Shader Sequencer — conservative default 4, up to 8 on gfx942 (MI300X)"
+    arch_limits:
+      gfx908: 8
+      gfx90a: 8
+      gfx940: 8
+      gfx941: 8
+      gfx942: 8
+      gfx950: 8
+      gfx1151: 8
+    note: "Shader Sequencer"
   GRBM:
     limit: 4
+    arch_limits:
+      gfx908: 2
+      gfx90a: 2
+      gfx940: 2
+      gfx941: 2
+      gfx942: 2
+      gfx950: 2
+      gfx1151: 2
     note: "Global Register Bus Manager — system-wide cycle counters"
   TCC:
     limit: 4
+    arch_limits:
+      gfx908: 4
+      gfx90a: 4
+      gfx940: 4
+      gfx941: 4
+      gfx942: 4
+      gfx950: 4
     note: "Texture Cache Controller (L2) — derived FETCH_SIZE/WRITE_SIZE must isolate; see rocprofv3_counter_limits.yaml"
   TCP:
     limit: 4
+    arch_limits:
+      gfx908: 4
+      gfx90a: 4
+      gfx940: 4
+      gfx941: 4
+      gfx942: 4
+      gfx950: 4
+      gfx1151: 4
     note: "Texture Cache Per-CU (vector L1)"
   TA:
     limit: 4
+    arch_limits:
+      gfx908: 2
+      gfx90a: 2
+      gfx940: 2
+      gfx941: 2
+      gfx942: 2
+      gfx950: 2
+      gfx1151: 2
     note: "Texture Address unit"
   TD:
     limit: 4
+    arch_limits:
+      gfx908: 2
+      gfx90a: 2
+      gfx940: 2
+      gfx941: 2
+      gfx942: 2
+      gfx950: 2
     note: "Texture Data unit"
+  CPC:
+    limit: 4
+    arch_limits:
+      gfx908: 2
+      gfx90a: 2
+      gfx940: 2
+      gfx941: 2
+      gfx942: 2
+      gfx950: 2
+      gfx1151: 2
+    note: "Command Processor Compute"
+  CPF:
+    limit: 4
+    arch_limits:
+      gfx908: 2
+      gfx90a: 2
+      gfx940: 2
+      gfx941: 2
+      gfx942: 2
+      gfx950: 2
+    note: "Command Processor Fetch"
+  SPI:
+    limit: 4
+    arch_limits:
+      gfx908: 6
+      gfx90a: 6
+      gfx940: 6
+      gfx941: 6
+      gfx942: 6
+      gfx950: 6
+      gfx1151: 6
+    note: "Shader Processor Input"
+  GDS:
+    limit: 4
+    arch_limits:
+      gfx908: 4
+      gfx90a: 4
+      gfx940: 4
+      gfx941: 4
+      gfx942: 4
+      gfx950: 4
+    note: "Global Data Share"
+  GCEA:
+    limit: 4
+    arch_limits:
+      gfx1151: 2
+    note: "Graphics Command Engine Arbiter"
+  GL1A:
+    limit: 4
+    arch_limits:
+      gfx1151: 4
+    note: "Graphics L1 address block"
+  GL1C:
+    limit: 4
+    arch_limits:
+      gfx1151: 4
+    note: "Graphics L1 cache block"
+  GL2A:
+    limit: 4
+    arch_limits:
+      gfx1151: 4
+    note: "Graphics L2 address block"
+  GL2C:
+    limit: 4
+    arch_limits:
+      gfx1151: 4
+    note: "Graphics L2 cache block"

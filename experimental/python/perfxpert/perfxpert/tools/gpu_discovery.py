@@ -43,7 +43,7 @@ PERFXPERT_DISABLE_RUNTIME_GPU_SPECS = "PERFXPERT_DISABLE_RUNTIME_GPU_SPECS"
 PERFXPERT_GPU_DISCOVERY_TIMEOUT = "PERFXPERT_GPU_DISCOVERY_TIMEOUT"
 _KFD_TOPOLOGY_ROOT = Path("/sys/class/kfd/kfd/topology/nodes")
 
-_GFX_RE = re.compile(r"\b(gfx\d{3,4}[a-z]?)\b")
+_GFX_RE = re.compile(r"\b(gfx[0-9a-z]{3,5})\b")
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 _NA_VALUES = {"", "N/A", "NA", "none", "None", "unknown", "Unknown"}
 
@@ -505,11 +505,40 @@ def _memory_bandwidth_tbs_from_kfd(width_bits: Any, mem_clk_mhz: Any) -> Optiona
 
 def _merge_gpu_lists(sources: Iterable[List[Dict[str, Any]]]) -> List[Dict[str, Any]]:
     merged: List[Dict[str, Any]] = []
+    identity_keys = ("bdf", "uuid", "node_id", "gpu_id")
+
+    def _has_identity(record: Dict[str, Any]) -> bool:
+        return any(record.get(key) is not None for key in identity_keys)
+
+    def _identity_conflicts(
+        candidate: Dict[str, Any],
+        existing: Dict[str, Any],
+        matched_key: str,
+    ) -> bool:
+        for key in identity_keys:
+            if key == matched_key:
+                continue
+            candidate_value = candidate.get(key)
+            existing_value = existing.get(key)
+            if candidate_value is not None and existing_value is not None and candidate_value != existing_value:
+                return True
+        return False
 
     def _find_match(candidate: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         for existing in merged:
-            for key in ("node_id", "gpu_id", "bdf", "uuid", "gfx_id"):
-                if candidate.get(key) is not None and candidate.get(key) == existing.get(key):
+            for key in identity_keys:
+                if candidate.get(key) is None or candidate.get(key) != existing.get(key):
+                    continue
+                if key == "gpu_id" and _identity_conflicts(candidate, existing, key):
+                    continue
+                return existing
+        if not _has_identity(candidate):
+            for existing in merged:
+                if (
+                    not _has_identity(existing)
+                    and candidate.get("gfx_id") is not None
+                    and candidate.get("gfx_id") == existing.get("gfx_id")
+                ):
                     return existing
         return None
 

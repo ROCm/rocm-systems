@@ -382,8 +382,8 @@ so you don't have to discover them separately:
 1. **GPU detection** — runtime discovery runs `rocminfo`, `rocm-smi`,
    and `amd-smi` when they are present, with read-only KFD topology as a
    fallback for ROCm environments where `rocminfo` cannot open the
-   device node. Local GPU facts such as gfx id, CU count, clocks, wave
-   size, LDS size, VRAM, PCIe, and power limits are used first.
+   device node. The local init wizard uses GPU facts such as gfx id, CU
+   count, clocks, wave size, LDS size, VRAM, PCIe, and power limits.
    Theoretical peak FLOPS are derived for newly discovered local
    architectures when enough topology is available;
    `perfxpert/knowledge/gpu_specs.yaml` remains the offline fallback for
@@ -582,8 +582,9 @@ ceilings per dtype — FP32 / FP16 / BF16 / FP8 / INT8 — are overlaid
 with the dominant dtype at full opacity and others dimmed. The HBM
 bandwidth diagonal (slope 1 in log-log space) and the ridge-point
 annotation (`gfx942 · 163 TF/s · 5.3 TB/s · ridge @ 30.8 FLOPs/B`) are
-drawn from runtime GPU discovery when the profiled GPU is local, with
-`perfxpert/knowledge/gpu_specs.yaml` as the offline fallback.
+drawn from `perfxpert/knowledge/gpu_specs.yaml`. Runtime discovery is
+used for local-only GPU initialization and for runtime-only local
+architectures that are not yet present in the static catalog.
 
 Click any dot to jump straight to the matching recommendation card
 (`id="rec-<kernel_basename>"`) — same anchor convention as the ATT

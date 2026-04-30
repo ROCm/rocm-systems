@@ -99,7 +99,7 @@ def _detect_gpu(override: Optional[str] = None) -> Optional[Dict[str, Any]]:
     if not gfx_id:
         return None
     try:
-        peaks = lookup_peaks(gfx_id)
+        peaks = lookup_peaks(gfx_id, prefer_runtime=True)
     except KeyError:
         peaks = None
     return {"gfx_id": gfx_id, "peaks": peaks}
@@ -239,11 +239,7 @@ def _suggest_first_command(framework_info: Dict[str, Any]) -> List[str]:
             "GRBM_COUNT",
             "GRBM_GUI_ACTIVE",
         ]
-        commands.append(
-            "rocprofv3 --pmc "
-            + " ".join(counters)
-            + f" -d ./profile_out_pmc -- {target}"
-        )
+        commands.append("rocprofv3 --pmc " + " ".join(counters) + f" -d ./profile_out_pmc -- {target}")
     return commands
 
 
@@ -274,9 +270,7 @@ def _format_gpu_info(gpu_info: Optional[Dict[str, Any]]) -> str:
     bandwidth = peaks.get("memory_bandwidth_tbs", "?")
     fp32 = peaks.get("peak_fp32_tflops", "?")
     return (
-        f"detected: {gfx_id} ({name}, {cu_count} CU)\n"
-        f"  peak FP32: {fp32} TFLOPS\n"
-        f"  peak HBM : {bandwidth} TB/s"
+        f"detected: {gfx_id} ({name}, {cu_count} CU)\n" f"  peak FP32: {fp32} TFLOPS\n" f"  peak HBM : {bandwidth} TB/s"
     )
 
 
@@ -312,9 +306,7 @@ def _format_suggested_cmds(commands: List[str]) -> str:
     for index, command in enumerate(commands):
         prefix = "primary : " if index == 0 else "extra   : "
         lines.append(prefix + command)
-    lines.append(
-        "(--pc-sampling / --att are second-tier - run after Tier-1 identifies hot kernels)"
-    )
+    lines.append("(--pc-sampling / --att are second-tier - run after Tier-1 identifies hot kernels)")
     return "\n".join(lines)
 
 

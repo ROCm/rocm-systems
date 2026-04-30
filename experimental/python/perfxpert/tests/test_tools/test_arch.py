@@ -56,7 +56,35 @@ def test_lookup_peaks_unknown_arch_raises():
 
 
 @pytest.mark.parametrize("gfx_id", sorted(arch._gpu_specs().keys()))
-def test_lookup_peaks_prefers_runtime_specs_for_any_known_local_gpu(monkeypatch, gfx_id):
+def test_lookup_peaks_keeps_static_specs_for_known_archs_by_default(monkeypatch, gfx_id):
+    static_specs = arch._gpu_specs()[gfx_id]
+    runtime = {
+        "gfx_id": gfx_id,
+        "name": f"Runtime {gfx_id}",
+        "cu_count": int(static_specs["cu_count"]) + 1,
+        "memory_bandwidth_tbs": float(static_specs["memory_bandwidth_tbs"]) + 0.125,
+        "spec_sources": {
+            "name": "rocminfo",
+            "cu_count": "rocminfo",
+            "memory_bandwidth_tbs": "amd-smi",
+        },
+    }
+    monkeypatch.setattr(
+        arch,
+        "_runtime_specs_for_gfx",
+        lambda requested: runtime if requested == gfx_id else {},
+    )
+
+    peaks = arch.lookup_peaks(gfx_id)
+
+    assert peaks["runtime_discovered"] is False
+    assert peaks["name"] == static_specs["name"]
+    assert peaks["cu_count"] == static_specs["cu_count"]
+    assert peaks["memory_bandwidth_tbs"] == static_specs["memory_bandwidth_tbs"]
+
+
+@pytest.mark.parametrize("gfx_id", sorted(arch._gpu_specs().keys()))
+def test_lookup_peaks_prefers_runtime_specs_for_local_init_when_requested(monkeypatch, gfx_id):
     static_specs = arch._gpu_specs()[gfx_id]
     runtime_memory_bandwidth = float(static_specs["memory_bandwidth_tbs"]) + 0.125
     runtime = {
@@ -80,7 +108,7 @@ def test_lookup_peaks_prefers_runtime_specs_for_any_known_local_gpu(monkeypatch,
         lambda requested: runtime if requested == gfx_id else {},
     )
 
-    peaks = arch.lookup_peaks(gfx_id)
+    peaks = arch.lookup_peaks(gfx_id, prefer_runtime=True)
 
     assert peaks["runtime_discovered"] is True
     assert peaks["name"] == f"Runtime {gfx_id}"
@@ -96,10 +124,14 @@ def test_lookup_peaks_prefers_runtime_specs_for_any_known_local_gpu(monkeypatch,
 
 
 def test_lookup_peaks_supports_runtime_only_local_gpu(monkeypatch):
+    cu_count = 32
+    max_sclk_mhz = 3500
+    fp32_ops_per_cu_cycle = 256
+    peak_fp32_tflops = round(cu_count * fp32_ops_per_cu_cycle * max_sclk_mhz / 1_000_000.0, 3)
     runtime = {
         "gfx_id": "gfx1200",
         "name": "Runtime RDNA",
-        "cu_count": 32,
+        "cu_count": cu_count,
         "wave_size": 32,
         "simds_per_cu": 2,
         "lds_kb": 64,
@@ -107,9 +139,9 @@ def test_lookup_peaks_supports_runtime_only_local_gpu(monkeypatch):
         "max_vgprs_per_thread": 256,
         "vgprs_per_simd": 1536,
         "max_waves_per_simd": 16,
-        "max_sclk_mhz": 3500,
-        "peak_fp32_tflops": 28.672,
-        "peak_fp64_tflops": 0.896,
+        "max_sclk_mhz": max_sclk_mhz,
+        "peak_fp32_tflops": peak_fp32_tflops,
+        "peak_fp64_tflops": peak_fp32_tflops / 32.0,
         "memory_bandwidth_tbs": 0.0,
         "spec_sources": {"gfx_id": "rocminfo", "peak_fp32_tflops": "derived-from-runtime-topology"},
     }
@@ -119,7 +151,7 @@ def test_lookup_peaks_supports_runtime_only_local_gpu(monkeypatch):
 
     assert peaks["runtime_discovered"] is True
     assert peaks["name"] == "Runtime RDNA"
-    assert peaks["peak_fp32_tflops"] == pytest.approx(28.672)
+    assert peaks["peak_fp32_tflops"] == pytest.approx(peak_fp32_tflops)
     assert peaks["ridge_point"] == 0.0
 
 

@@ -66,10 +66,7 @@ def _merge_static_and_runtime_specs(
         if (
             key in result
             and source.startswith("derived-from-")
-            and (
-                key.startswith("peak_")
-                or key in {"peak_int8_tops", "memory_bandwidth_tbs"}
-            )
+            and (key.startswith("peak_") or key in {"peak_int8_tops", "memory_bandwidth_tbs"})
         ):
             continue
         result[key] = value
@@ -111,11 +108,14 @@ def occupancy_specs_table() -> Dict[str, Dict[str, Any]]:
 
 
 @tool_class(ToolClass.READ_ONLY)
-def lookup_peaks(gfx_id: str) -> Dict[str, Any]:
+def lookup_peaks(gfx_id: str, prefer_runtime: bool = False) -> Dict[str, Any]:
     """Return hardware peak specs for a given gfx architecture.
 
     Args:
         gfx_id: Architecture identifier, e.g., "gfx942" for MI300X.
+        prefer_runtime: Use local runtime facts for known architectures. Leave
+            false for trace/remote analysis where the profiled host may differ
+            from the controller running PerfXpert.
 
     Returns:
         Dict with keys: name, codename, peak_fp64_tflops, peak_fp32_tflops,
@@ -132,15 +132,12 @@ def lookup_peaks(gfx_id: str) -> Dict[str, Any]:
         81.7
     """
     specs = _gpu_specs()
-    runtime_specs = _runtime_specs_for_gfx(gfx_id)
+    runtime_specs = _runtime_specs_for_gfx(gfx_id) if prefer_runtime or gfx_id not in specs else {}
     if gfx_id not in specs and not runtime_specs:
         known = ", ".join(sorted(specs.keys()))
         raise KeyError(f"Unknown gfx_id {gfx_id!r}; known archs: {known}")
 
     result = _merge_static_and_runtime_specs(specs.get(gfx_id, {}), runtime_specs)
     result["ridge_point"] = _ridge_point_from_specs(result, dtype="fp32")
-    result["ridge_points"] = {
-        dtype: _ridge_point_from_specs(result, dtype=dtype)
-        for dtype in _RIDGE_PEAK_KEYS
-    }
+    result["ridge_points"] = {dtype: _ridge_point_from_specs(result, dtype=dtype) for dtype in _RIDGE_PEAK_KEYS}
     return result

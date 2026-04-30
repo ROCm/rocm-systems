@@ -4,13 +4,33 @@ import json
 from pathlib import Path
 
 import jsonschema
+import yaml
 
 from perfxpert.knowledge import load_yaml
 
-SCHEMA_PATH = (
-    Path(__file__).parent.parent.parent
-    / "perfxpert" / "knowledge" / "_schemas" / "pmc_limits.schema.json"
-)
+SCHEMA_PATH = Path(__file__).parent.parent.parent / "perfxpert" / "knowledge" / "_schemas" / "pmc_limits.schema.json"
+
+
+def _mi_gpu_spec_path() -> Path:
+    for parent in Path(__file__).resolve().parents:
+        candidate = parent / "projects" / "rocprofiler-compute" / "src" / "utils" / "mi_gpu_spec.yaml"
+        if candidate.exists():
+            return candidate
+    raise FileNotFoundError("projects/rocprofiler-compute/src/utils/mi_gpu_spec.yaml")
+
+
+def _reference_perfmon_config():
+    data = yaml.safe_load(_mi_gpu_spec_path().read_text())
+    configs = {}
+    for series in data["mi_gpu_spec"]:
+        for arch in series.get("gpu_archs", []):
+            perfmon = arch.get("perfmon_config") or {}
+            configs[arch["gpu_arch"]] = {
+                block: limit
+                for block, limit in perfmon.items()
+                if isinstance(limit, int) and not block.endswith("_channels")
+            }
+    return configs
 
 
 def test_pmc_limits_loads():
@@ -34,11 +54,17 @@ def test_pmc_limits_covers_all_blocks():
     assert not missing, f"missing blocks in pmc_limits: {missing}"
 
 
-def test_sq_default_limit_is_4():
+def test_default_limits_are_conservative_positive_values():
     data = load_yaml("pmc_limits")
-    assert data["per_block_limits"]["SQ"]["limit"] == 4
+    for block, info in data["per_block_limits"].items():
+        assert info["limit"] > 0, block
 
 
-def test_sq_gfx942_override_is_8():
+def test_arch_limits_match_rocprofiler_compute_mi_gpu_spec():
     data = load_yaml("pmc_limits")
-    assert data["per_block_limits"]["SQ"].get("gfx942_limit") == 8
+    per_block = data["per_block_limits"]
+
+    for gfx_id, perfmon in _reference_perfmon_config().items():
+        for block, expected_limit in perfmon.items():
+            assert block in per_block
+            assert per_block[block]["arch_limits"][gfx_id] == expected_limit
