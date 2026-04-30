@@ -46,6 +46,7 @@
 #include "nvtx_payload_schemas.h"
 #include "utils.h"
 #include <mutex>
+#include <unordered_map>
 #include "ce_coll.h"
 #include "nvtx.h"
 
@@ -1675,43 +1676,49 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
     // Plurality vote for romeTopoModelIdx. Tie on vote count: prefer the value that
     // first appears on the lowest rank (outer index c is that first rank).
     auto checkRomeTopoModelIdxConsensus = [](struct ncclComm* c, struct allGatherInfo* ag, int n) -> ncclResult_t {
+      std::unordered_map<int, std::pair<int, int>> tallies; // romeTopoModelIdx -> (vote count, first rank with this idx)
+      tallies.reserve(n);
+      for (int r = 0; r < n; r++) {
+        int v = ag[r].romeTopoModelIdx;
+        auto it = tallies.find(v);
+        if (it == tallies.end()) {
+          tallies.emplace(v, std::make_pair(1, r));
+        } else {
+          it->second.first++;
+        }
+      }
       int refIdx = ag[0].romeTopoModelIdx;
       int refVotes = -1;
       int refFirstRank = n;
-      for (int cidx = 0; cidx < n; cidx++) {
-        int cand = ag[cidx].romeTopoModelIdx;
-        bool seenEarlier = false;
-        for (int d = 0; d < cidx; d++) {
-          if (ag[d].romeTopoModelIdx == cand) { seenEarlier = true; break; }
-        }
-        if (seenEarlier) continue;
-        int cnt = 0;
-        for (int r = 0; r < n; r++) {
-          if (ag[r].romeTopoModelIdx == cand) cnt++;
-        }
-        if (cnt > refVotes || (cnt == refVotes && cidx < refFirstRank)) {
+      for (const auto& e : tallies) {
+        int cnt = e.second.first;
+        int firstRank = e.second.second;
+        if (cnt > refVotes || (cnt == refVotes && firstRank < refFirstRank)) {
           refVotes = cnt;
-          refIdx = cand;
-          refFirstRank = cidx;
+          refIdx = e.first;
+          refFirstRank = firstRank;
         }
       }
+      if (tallies.size() == 1) return ncclSuccess;
       int nDisagree = 0;
       for (int r = 0; r < n; r++) {
         if (ag[r].romeTopoModelIdx != refIdx) nDisagree++;
       }
       if (nDisagree > 0) {
         WARN("RCCL FATAL: mismatched Rome preset topology model index across ranks; all ranks must agree for precomputed graphs (voted refIdx %d from %d of %d ranks).", refIdx, refVotes, n);
+        std::unordered_map<uint64_t, int> lowestMismatchRankByHost;
+        lowestMismatchRankByHost.reserve(n);
         for (int r = 0; r < n; r++) {
           if (ag[r].romeTopoModelIdx == refIdx) continue;
-          bool lowestMismatchOnHost = true;
-          for (int r2 = 0; r2 < r; r2++) {
-            if (ag[r2].romeTopoModelIdx == refIdx) continue;
-            if (c->peerInfo[r2].hostHash == c->peerInfo[r].hostHash) {
-              lowestMismatchOnHost = false;
-              break;
-            }
+          uint64_t h = c->peerInfo[r].hostHash;
+          if (lowestMismatchRankByHost.find(h) == lowestMismatchRankByHost.end()) {
+            lowestMismatchRankByHost.emplace(h, r);
           }
-          if (!lowestMismatchOnHost) continue;
+        }
+        for (int r = 0; r < n; r++) {
+          if (ag[r].romeTopoModelIdx == refIdx) continue;
+          uint64_t h = c->peerInfo[r].hostHash;
+          if (lowestMismatchRankByHost[h] != r) continue;
           WARN("  rank %d host %s romeTopoModelIdx=%d", r, ag[r].hostname, ag[r].romeTopoModelIdx);
         }
         return ncclInvalidUsage;
