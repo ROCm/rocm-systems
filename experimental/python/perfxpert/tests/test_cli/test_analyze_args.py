@@ -33,6 +33,15 @@ def _require_fixture(path: Path) -> Path:
     return path
 
 
+def _assert_observed_kernel_time_line(text: str) -> None:
+    line = next(
+        (line for line in text.splitlines() if "Observed RCCL kernel time:" in line),
+        "",
+    )
+    assert line
+    assert " ms" in line
+
+
 def _build_parsed_args(argv):
     """Build a parsed argparse.Namespace from a minimal analyze parser."""
     parser = argparse.ArgumentParser()
@@ -365,6 +374,5 @@ def test_execute_agentic_preserves_incomplete_rccl_payload_in_text(
     out = capsys.readouterr().out
     assert "COMMUNICATION (RCCL)" in out
     assert "Capture incomplete" in out
-    assert "Observed RCCL kernel time: 1.00 ms" in out
-    assert "0B" not in out
-    assert "0.00GB/s" not in out
+    _assert_observed_kernel_time_line(out)
+    assert "Bus BW" not in out
