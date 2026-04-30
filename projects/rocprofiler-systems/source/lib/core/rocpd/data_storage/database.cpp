@@ -72,8 +72,8 @@ process_schema_template(std::string_view schema_content, const std::string& upid
 #if defined(ROCPROFSYS_USE_ROCPD_LIBRARY) && ROCPROFSYS_USE_ROCPD_LIBRARY > 0
 void
 load_schema_cb(rocpd_sql_engine_t, rocpd_sql_schema_kind_t, rocpd_sql_options_t,
-               const rocpd_sql_schema_jinja_variables_t*, const char*,
-               const char* schema_content, void* user_data)
+               rocpd_version_triplet_t, const rocpd_sql_schema_jinja_variables_t*,
+               const char*, const char* schema_content, void* user_data)
 {
     if(user_data == nullptr || schema_content == nullptr)
     {
@@ -96,11 +96,12 @@ get_schema_query(rocpd_sql_schema_kind_t schema_kind, const std::string& upid)
 #if defined(ROCPROFSYS_USE_ROCPD_LIBRARY) && ROCPROFSYS_USE_ROCPD_LIBRARY > 0
     const auto                         jinja_size = 2 * upid.size();
     rocpd_sql_schema_jinja_variables_t info{ jinja_size, upid.c_str(), upid.c_str() };
+    rocpd_version_triplet_t            schema_version{ 0, 0, 0 };
 
     std::string query;
     auto        status = rocpd_sql_load_schema(ROCPD_SQL_ENGINE_SQLITE3, schema_kind,
-                                               ROCPD_SQL_OPTIONS_NONE, &info, load_schema_cb,
-                                               nullptr, 0, &query);
+                                               ROCPD_SQL_OPTIONS_NONE, schema_version, &info,
+                                               load_schema_cb, nullptr, 0, &query);
     if(status != ROCPD_STATUS_SUCCESS)
     {
         LOG_WARNING("Unable to load rocpd schema. Error code: {0:X}",
@@ -170,7 +171,7 @@ database::initialize_schema()
 
     const std::vector<rocpd_sql_schema_kind_t> schema_kinds = {
         ROCPD_SQL_SCHEMA_ROCPD_TABLES, ROCPD_SQL_SCHEMA_ROCPD_VIEWS,
-        ROCPD_SQL_SCHEMA_ROCPD_DATA_VIEWS, ROCPD_SQL_SCHEMA_ROCPD_MARKER_VIEWS,
+        ROCPD_SQL_SCHEMA_ROCPD_DATA_VIEWS, ROCPD_SQL_SCHEMA_ROCPD_METADATA,
         ROCPD_SQL_SCHEMA_ROCPD_SUMMARY_VIEWS
     };
 
