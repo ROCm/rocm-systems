@@ -1229,6 +1229,12 @@ class AMDSMILogger:
         vbios_version = _trunc(vbios_version)
         kernel_version = _trunc(kernel_version)
 
+        #####################################################################################
+        # FORMATTING LOGIC:                                                                 #
+        # Each version field is left-aligned within a fixed _COL_WIDTH column. Fields that  #
+        # exceed the column width are truncated with "..." to keep the box border intact.   #
+        # Fields that are "N/A" are skipped entirely to avoid cluttering the output.        #
+        #####################################################################################
         # print GPU info
         print(default_line_1)
         print("| AMD-SMI            {0:<{w}s} |".format(amd_smi_version, w=_COL_WIDTH))
