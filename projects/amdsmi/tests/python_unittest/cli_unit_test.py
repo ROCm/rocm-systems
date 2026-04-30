@@ -1085,9 +1085,8 @@ class TestAmdSmiCli(unittest.TestCase):
             fan_max = self.metric_data["gpu_data"][index]["fan"]["max"]
             if fan_max != "N/A":
                 self.assertGreater(fan_max, 0, f"GPU {index}: max fan speed must be > 0")
-                # Detect gpu_od interface via sysfs for this GPU
-                gpu_bdf = self.list_data[index]["bdf"]
-                has_gpu_od = common.has_gpu_od_interface(gpu_bdf)
+                # Detect gpu_od interface using API for this GPU
+                has_gpu_od = common.has_gpu_od_interface(gpu)
                 if has_gpu_od:
                     self.assertLessEqual(
                         fan_max, 100, f"GPU {index}: gpu_od max fan speed must be <= 100"

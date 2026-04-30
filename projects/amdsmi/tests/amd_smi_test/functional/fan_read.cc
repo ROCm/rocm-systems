@@ -111,6 +111,35 @@ void TestFanRead::Run(void) {
       DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
       ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
 
+      DISPLAY_AMDSMI_API("amdsmi_get_gpu_fan_speed_min", "gpu=" + std::to_string(i),
+                         VERB(STANDARD));
+      err = amdsmi_get_gpu_fan_speed_min(processor_handles_[i], 0, &val_ui64);
+      DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
+      CHK_ERR_ASRT(err)
+      IF_VERB(STANDARD) { std::cout << "\t**Min Fan Speed: " << val_ui64 << std::endl; }
+      // Verify api support checking functionality is working
+      DISPLAY_AMDSMI_API("amdsmi_get_gpu_fan_speed_min", "gpu=" + std::to_string(i),
+                         VERB(STANDARD));
+      err = amdsmi_get_gpu_fan_speed_min(processor_handles_[i], 0, nullptr);
+      DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_NOT_SUPPORTED);
+      ASSERT_EQ(err, AMDSMI_STATUS_NOT_SUPPORTED);
+
+      bool is_gpu_od = false;
+      DISPLAY_AMDSMI_API("amdsmi_is_gpu_od_enabled", "gpu=" + std::to_string(i),
+                         VERB(STANDARD));
+      err = amdsmi_is_gpu_od_enabled(processor_handles_[i], &is_gpu_od);
+      DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
+      CHK_ERR_ASRT(err)
+      IF_VERB(STANDARD) {
+        std::cout << "\t**GPU OD Enabled: " << (is_gpu_od ? "Yes" : "No") << std::endl;
+      }
+      // Verify api support checking functionality is working
+      DISPLAY_AMDSMI_API("amdsmi_is_gpu_od_enabled", "gpu=" + std::to_string(i),
+                         VERB(STANDARD));
+      err = amdsmi_is_gpu_od_enabled(processor_handles_[i], nullptr);
+      DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_NOT_SUPPORTED);
+      ASSERT_EQ(err, AMDSMI_STATUS_NOT_SUPPORTED);
+
       DISPLAY_AMDSMI_API("amdsmi_get_gpu_fan_rpms", "gpu=" + std::to_string(i), VERB(STANDARD));
       err = amdsmi_get_gpu_fan_rpms(processor_handles_[i], 0, &val_i64);
       DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);

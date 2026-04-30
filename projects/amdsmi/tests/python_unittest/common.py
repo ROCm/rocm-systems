@@ -261,26 +261,21 @@ def expand_glob_k_arg(caller_globals):
         break
 
 
-def has_gpu_od_interface(bdf):
+def has_gpu_od_interface(processor_handle):
     """Check if a GPU has the gpu_od sysfs interface.
 
-    This is a wrapper around AMDSMIHelpers.detect_gpu_od() for test convenience.
+    This uses the amdsmi_is_gpu_od_enabled() API to detect gpu_od support.
 
     Args:
-        bdf: PCI Bus/Device/Function string (e.g. '0000:26:00.0')
+        processor_handle: amdsmi processor handle for the GPU
 
     Returns:
         bool: True if gpu_od directory exists for this GPU
     """
-    # Add amdsmi_cli to path for import
-    cli_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "..", "amdsmi_cli")
-    if cli_path not in sys.path:
-        sys.path.insert(0, cli_path)
-
-    from amdsmi_helpers import AMDSMIHelpers
-
-    has_gpu_od, _ = AMDSMIHelpers.detect_gpu_od(bdf)
-    return has_gpu_od
+    try:
+        return amdsmi.amdsmi_is_gpu_od_enabled(processor_handle)
+    except (amdsmi.AmdSmiLibraryException, amdsmi.AmdSmiParameterException):
+        return False
 
 
 class Common:

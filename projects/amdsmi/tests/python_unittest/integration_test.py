@@ -859,9 +859,8 @@ class TestAmdSmiPython(unittest.TestCase):
                 self.common.print(msg, fan_speed_max)
                 self.common.check_ret("", "", self.common.PASS)
                 assert fan_speed_max > 0, f"Max fan speed must be > 0, got {fan_speed_max}"
-                # Detect gpu_od interface to set appropriate max threshold
-                gpu_bdf = amdsmi.amdsmi_get_gpu_device_bdf(gpu)
-                has_gpu_od = common.has_gpu_od_interface(gpu_bdf)
+                # Detect gpu_od interface using API to set appropriate max threshold
+                has_gpu_od = common.has_gpu_od_interface(gpu)
                 if has_gpu_od:
                     assert fan_speed_max <= 100, (
                         f"gpu_od max fan speed must be <= 100, got {fan_speed_max}"
@@ -878,11 +877,62 @@ class TestAmdSmiPython(unittest.TestCase):
             if found_error:
                 continue
 
+            # Verify min fan speed returns a sensible value
+            msg = f"\t### amdsmi_get_gpu_fan_speed_min(gpu={i}, index=0):"
+            try:
+                fan_speed_min = amdsmi.amdsmi_get_gpu_fan_speed_min(gpu, 0)
+                self.common.print(msg, fan_speed_min)
+                self.common.check_ret("", "", self.common.PASS)
+                # Detect gpu_od interface using API to verify min value
+                has_gpu_od = common.has_gpu_od_interface(gpu)
+                if has_gpu_od:
+                    assert fan_speed_min >= 0 and fan_speed_min <= 100, (
+                        f"gpu_od min fan speed must be in range [0-100], got {fan_speed_min}"
+                    )
+                else:
+                    # Legacy hwmon always has min of 0
+                    assert fan_speed_min == 0, (
+                        f"Legacy hwmon min fan speed must be 0, got {fan_speed_min}"
+                    )
+                # Ensure min is less than max
+                assert fan_speed_min < fan_speed_max, (
+                    f"Min fan speed ({fan_speed_min}) must be < max ({fan_speed_max})"
+                )
+            except (amdsmi.AmdSmiLibraryException, amdsmi.AmdSmiParameterException) as e:
+                if self.common.check_ret(msg, e, self.common.PASS):
+                    self.raise_exception = e
+                found_error = True
+
+            if found_error:
+                continue
+
+            # Verify is_gpu_od_enabled returns a boolean value
+            msg = f"\t### amdsmi_is_gpu_od_enabled(gpu={i}):"
+            try:
+                is_gpu_od = amdsmi.amdsmi_is_gpu_od_enabled(gpu)
+                self.common.print(msg, is_gpu_od)
+                self.common.check_ret("", "", self.common.PASS)
+                assert isinstance(is_gpu_od, bool), (
+                    f"amdsmi_is_gpu_od_enabled must return bool, got {type(is_gpu_od)}"
+                )
+                # Verify it matches the common helper result
+                has_gpu_od = common.has_gpu_od_interface(gpu)
+                assert is_gpu_od == has_gpu_od, (
+                    f"amdsmi_is_gpu_od_enabled ({is_gpu_od}) mismatch with helper ({has_gpu_od})"
+                )
+            except (amdsmi.AmdSmiLibraryException, amdsmi.AmdSmiParameterException) as e:
+                if self.common.check_ret(msg, e, self.common.PASS):
+                    self.raise_exception = e
+                found_error = True
+
+            if found_error:
+                continue
+
             # Calculate a safe mid-range value based on actual hardware limits.
             # This avoids hardcoding and works with any OD_RANGE configuration.
             # For legacy hwmon: min=0, max=255 -> mid=127
-            # For gpu_od: min=0 (conservative), max from API -> mid dynamically calculated
-            min_value = 0  # Conservative minimum (works for both legacy and gpu_od)
+            # For gpu_od: min from API, max from API -> mid dynamically calculated
+            min_value = fan_speed_min
             max_value = fan_speed_max
             fan_speed = min_value + ((max_value - min_value) // 2)
 

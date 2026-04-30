@@ -5403,6 +5403,34 @@ def amdsmi_get_gpu_fan_speed_max(processor_handle: processor_handle_t, sensor_id
     return fan_speed.value
 
 
+def amdsmi_get_gpu_fan_speed_min(processor_handle: processor_handle_t, sensor_idx: int) -> int:
+    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
+    if not isinstance(sensor_idx, int):
+        raise AmdSmiParameterException(sensor_idx, int)
+    fan_speed = ctypes.c_uint64()
+    _check_res(
+        amdsmi_wrapper.amdsmi_get_gpu_fan_speed_min(
+            processor_handle, sensor_idx, ctypes.byref(fan_speed)
+        )
+    )
+
+    return fan_speed.value
+
+
+def amdsmi_is_gpu_od_enabled(processor_handle: processor_handle_t) -> bool:
+    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
+    is_enabled = ctypes.c_bool()
+    _check_res(
+        amdsmi_wrapper.amdsmi_is_gpu_od_enabled(
+            processor_handle, ctypes.byref(is_enabled)
+        )
+    )
+
+    return is_enabled.value
+
+
 def amdsmi_get_node_handle(processor_handle):
     if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
         raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)

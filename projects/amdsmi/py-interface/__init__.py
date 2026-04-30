@@ -205,6 +205,8 @@ from .amdsmi_interface import amdsmi_get_supported_power_cap
 from .amdsmi_interface import amdsmi_get_gpu_fan_rpms
 from .amdsmi_interface import amdsmi_get_gpu_fan_speed
 from .amdsmi_interface import amdsmi_get_gpu_fan_speed_max
+from .amdsmi_interface import amdsmi_get_gpu_fan_speed_min
+from .amdsmi_interface import amdsmi_is_gpu_od_enabled
 from .amdsmi_interface import amdsmi_get_temp_metric
 from .amdsmi_interface import amdsmi_get_gpu_volt_metric
 
