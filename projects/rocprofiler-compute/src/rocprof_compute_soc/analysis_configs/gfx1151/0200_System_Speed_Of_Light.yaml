@@ -27,8 +27,7 @@
 # instance count × clock); not itemized in public RDNA 3.5 tables — % of peak is
 # indicative only.
 #
-# Cache: GL0 (TCP) -> GL1 (GL1C) -> GL2 (GL2C). L2–fabric (EA) BW; peak N/A (no sysinfo BW).
-# Memory hierarchy reference: gfx1151/0300_Memory_Chart.yaml.
+# Cache: Cache hierarchy: GL0 Cache (TCP) -> GL1 Cache -> GL2 Cache -> System Memory via GCEA
 # =============================================================================
 
 Panel Config:
