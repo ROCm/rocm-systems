@@ -24,7 +24,6 @@ Usage (from the ``rocprofiler-compute`` project root):
 
 import argparse
 import logging
-import re
 import sys
 import tempfile
 from collections.abc import Iterator
@@ -47,7 +46,7 @@ from rocprof_compute_soc.soc_base import (  # noqa: E402
 )
 from utils.logger import console_error  # noqa: E402
 from utils.mi_gpu_spec import mi_gpu_specs  # noqa: E402
-from utils.utils_counter_defs import BUILD_IN_VARS  # noqa: E402
+from utils.utils_counter_defs import BUILD_IN_VARS, parse_counters_text  # noqa: E402
 from vendored import yaml  # noqa: E402
 
 
@@ -71,30 +70,15 @@ def _counters_grouped_by_ip_sorted(counters: list[str]) -> dict[str, list[str]]:
     return by_ip
 
 
-def parse_counters_from_text(text: str) -> tuple[set[str], set[str]]:
-    """Parse hardware counters and variables from YAML text."""
-    _blk = (
-        r"(?:CHA|CHC|CPC|CPF|GC_CANE|GC_EA_SE|GCR|GL1A|GL1C|GL2A|GL2C|"
-        r"GLARBA|GLARBC|GRBM|SDMA|SPI|SQ|SP|SQC|SQG|TX|UTCL1|"
-        r"TA|TD|TCP|TCC|GCEA)_[0-9A-Z_]*[0-9A-Z](?:\[|e|_sum|_avr|_max|_min)*"
-    )
-    hw_counter_regex = _blk
-    variable_regex = r"\$([0-9A-Za-z_]*[0-9A-Za-z])"
-    hw_counter_matches = set(re.findall(hw_counter_regex, text))
-    variable_matches = set(re.findall(variable_regex, text))
-    hw_counter_matches = hw_counter_matches - variable_matches
-    return hw_counter_matches, variable_matches
-
-
 def parse_counters(config_text: str) -> set[str]:
     """Extract all hardware counters from config text."""
-    hw_counters, variables = parse_counters_from_text(config_text)
+    hw_counters, variables = parse_counters_text(config_text)
 
     while variables:
         subvariables: set[str] = set()
         for var in variables:
             if var in BUILD_IN_VARS:
-                hw_new, var_new = parse_counters_from_text(BUILD_IN_VARS[var])
+                hw_new, var_new = parse_counters_text(BUILD_IN_VARS[var])
                 hw_counters.update(hw_new)
                 subvariables.update(var_new)
         variables = subvariables - variables
@@ -147,7 +131,10 @@ def iter_yaml_metrics(
 
 
 def _rocprof_supported_superset(counters: set[str]) -> set[str]:
-    """Return a fake rocprofiler avail set so ``perfmon_coalesce`` skips unsupported warnings."""
+    """Return a fake rocprofiler avail set.
+
+    Used so perfmon_coalesce skips unsupported-counter warnings.
+    """
     out = set(counters)
     for ctr in counters:
         if is_tcc_channel_counter(ctr):
@@ -162,7 +149,10 @@ def run_soc_detect_and_coalesce(
     perfmon_config: dict[str, int],
     workload_root: Path,
 ) -> tuple[set[str], list[CounterFile]]:
-    """Run SoC counter detection and perfmon coalesce; write YAML under ``workload_root/perfmon/``."""
+    """Run SoC counter detection and perfmon coalesce.
+
+    Writes YAML under ``workload_root/perfmon/``.
+    """
     machine_spec = SimpleNamespace(
         rocminfo_lines=None,
         num_xcd=1,
@@ -222,7 +212,7 @@ def _global_ip_column_widths(
 def _bucket_plan_sections(
     output_files: list[CounterFile],
 ) -> tuple[list[str], dict[str, int], list[tuple[str, list[str]]], int]:
-    """Shared bucket layout: columns, widths, per-bucket flat counter lists, assignment total."""
+    """Shared bucket layout: columns, widths, per-bucket lists, assignment total."""
     global_columns, column_widths = _global_ip_column_widths(output_files)
     sections: list[tuple[str, list[str]]] = []
     total_assignments = 0
@@ -500,9 +490,7 @@ def render_perfmon_plan_svg(
             for col in global_columns:
                 column_counters = by_ip.get(col, [])
                 cell_text = (
-                    column_counters[row_idx]
-                    if row_idx < len(column_counters)
-                    else ""
+                    column_counters[row_idx] if row_idx < len(column_counters) else ""
                 )
                 row_cells.append(cell_text.ljust(column_widths[col]))
             console.print("| " + " | ".join(row_cells) + " |")
@@ -656,7 +644,9 @@ def _emit_inspector_output(
                 svg_content = render_perfmon_plan_svg(output_files, config_dir, arch)
                 output_path.write_text(svg_content, encoding="utf-8")
             except OSError as exc:
-                console_error(f"Error: could not write SVG output to {output_path}: {exc}")
+                console_error(
+                    f"Error: could not write SVG output to {output_path}: {exc}"
+                )
             print(f"SVG saved to {output_path}")
         elif suffix == ".txt":
             bucket_output = generate_bucket_plan(output_files, arch)
@@ -666,7 +656,9 @@ def _emit_inspector_output(
             try:
                 output_path.write_text(bucket_output + metrics_output, encoding="utf-8")
             except OSError as exc:
-                console_error(f"Error: could not write text output to {output_path}: {exc}")
+                console_error(
+                    f"Error: could not write text output to {output_path}: {exc}"
+                )
             print(f"Output written to {output_path}")
         else:
             print(

@@ -44,7 +44,11 @@ def check_all_supported_archs() -> None:
             failed.append(
                 f"{arch}: Return code {result.returncode}\n  stderr: {stderr_preview}"
             )
-            results[arch] = {"return_code": result.returncode, "buckets": 0, "counter_assignments": 0}
+            results[arch] = {
+                "return_code": result.returncode,
+                "buckets": 0,
+                "counter_assignments": 0,
+            }
             continue
 
         buckets = 0
@@ -58,7 +62,9 @@ def check_all_supported_archs() -> None:
                             buckets = int(parts[idx - 1])
                         except ValueError:
                             pass
-                    is_assignment = idx + 1 < len(parts) and "assignment" in parts[idx + 1]
+                    is_assignment = (
+                        idx + 1 < len(parts) and "assignment" in parts[idx + 1]
+                    )
                     if "counter" in part and is_assignment:
                         try:
                             counter_assignments = int(parts[idx - 1])
