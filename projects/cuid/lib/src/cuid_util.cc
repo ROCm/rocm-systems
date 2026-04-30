@@ -382,7 +382,7 @@ uint16_t CuidUtilities::get_gpu_vf_id(const std::string &device_path) {
 amdcuid_status_t
 CuidUtilities::generate_derived_cuid(const amdcuid_primary_id *primary_id,
                                      amdcuid_derived_id *derived_id,
-                                     cuid_hmac *hmac) {
+                                     cuid_hmac *hmac, bool temp) {
   if (!primary_id || !hmac) {
     // Return invalid on null input
     return AMDCUID_STATUS_INVALID_ARGUMENT;
@@ -406,15 +406,15 @@ CuidUtilities::generate_derived_cuid(const amdcuid_primary_id *primary_id,
   derived_id->hash[13] &= 0xFC; // 11111100
 
   // Get the unit id parts from the primary ID
+  uint8_t temp_indicator = temp ? 1 : 0;
   uint8_t reserved_1 = 0;
-  uint8_t reserved_2 = 0;
   // Map the 256-bit hash to 122-bit CUID format
   uint8_t id_bits[16] = {0};
 
   // Copy first 8 bytes (64 bits) from hash
   memcpy(id_bits, derived_id->hash, 8);
 
-  // insert unit id part 1 at bits 64-71
+  // insert reserved bits part 1 at bits 64-71
   id_bits[8] = reserved_1;
 
   // copy next 6 bytes (46 bits) from hash and mask off last 2 bits for bits
@@ -422,9 +422,10 @@ CuidUtilities::generate_derived_cuid(const amdcuid_primary_id *primary_id,
   memcpy(id_bits + 9, derived_id->hash + 8, 6);
   id_bits[14] &= 0xFC;
 
-  // bits 118-121: UnitID part 2 (4 bits)
-  id_bits[14] |= (reserved_2 >> 2);        // upper 2 bits of unit id part 2
-  id_bits[15] |= (reserved_2 & 0x03) << 6; // lower 2 bits of unit id part 2
+  // bits 118-121: reserved bits part 2 (4 bits)
+  id_bits[14] |= (temp_indicator >> 2); // upper 2 bits of reserved bits part 2
+  id_bits[15] |= (temp_indicator & 0x03)
+                 << 6; // lower 2 bits of reserved bits part 2
   // last 6 bits are padding (bits 122-127)
   id_bits[15] &= 0xC0;
 
