@@ -14,9 +14,7 @@
 #include <filesystem>
 #include <fstream>
 #include <numeric>
-#include <stdexcept>
-#include <string>
-#include <string_view>
+#include <vector>
 
 #define STRINGIFY2(x) #x
 #define STRINGIFY(x) STRINGIFY2(x)
@@ -205,50 +203,67 @@ static void VectorScalarAddHSANoAlloc(benchmark::State& state) {
   std::size_t insts_size = 0;
   load_binary(dev_pool, g_insts_path, &insts_buf, insts_size);
 
-  // --- Allocate I/O buffers in data_memory ---
-  std::uint32_t* input = nullptr;
-  std::uint32_t* output = nullptr;
-  if (hsa_amd_memory_pool_allocate(data_pool, DATA_SIZE, 0, reinterpret_cast<void**>(&input)) !=
-      HSA_STATUS_SUCCESS) {
-    state.SkipWithError("Failed to allocate input buffer");
-  }
-  if (hsa_amd_memory_pool_allocate(data_pool, DATA_SIZE, 0, reinterpret_cast<void**>(&output)) !=
-      HSA_STATUS_SUCCESS) {
-    state.SkipWithError("Failed to allocate output buffer");
-  }
+  const std::int32_t num_dispatches = state.range(0);
 
-  // Initialize input: [0, 1, 2, ..., 1023]
-  std::iota(input, input + N, std::uint32_t{0});
+  // --- Allocate I/O buffers in data_memory ---
+  std::vector<std::uint32_t*> inputs(num_dispatches, nullptr);
+  std::vector<std::uint32_t*> outputs(num_dispatches, nullptr);
+  for (std::int32_t i = 0; i < num_dispatches; ++i) {
+    if (hsa_amd_memory_pool_allocate(data_pool, DATA_SIZE, 0,
+                                     reinterpret_cast<void**>(&inputs[i])) != HSA_STATUS_SUCCESS) {
+      state.SkipWithError("Failed to allocate input buffer");
+      return;
+    }
+    if (hsa_amd_memory_pool_allocate(data_pool, DATA_SIZE, 0,
+                                     reinterpret_cast<void**>(&outputs[i])) != HSA_STATUS_SUCCESS) {
+      state.SkipWithError("Failed to allocate output buffer");
+      return;
+    }
+    // Initialize input: [1, 2, ..., 1024]
+    std::iota(inputs[i], inputs[i] + N, 1);
+    // Initialize output: all zeros
+    std::fill_n(outputs[i], N, 0);
+  }
 
   // Allocate kernargs from kernarg_memory
-  uint64_t* kernargs = nullptr;
-  if (hsa_amd_memory_pool_allocate(kernarg_pool, 4 * sizeof(uint64_t), 0,
-                                   reinterpret_cast<void**>(&kernargs)) != HSA_STATUS_SUCCESS) {
-    state.SkipWithError("Failed to allocate payload buffer");
+  std::vector<uint64_t*> kernargs_vec(num_dispatches, nullptr);
+  for (std::int32_t i = 0; i < num_dispatches; ++i) {
+    if (hsa_amd_memory_pool_allocate(kernarg_pool, 4 * sizeof(uint64_t), 0,
+                                     reinterpret_cast<void**>(&kernargs_vec[i])) !=
+        HSA_STATUS_SUCCESS) {
+      state.SkipWithError("Failed to allocate payload buffer");
+      return;
+    }
   }
 
   // --- Benchmark loop: dispatch is synchronous ---
   for (auto _ : state) {
-    // Set args
-    kernargs[0] = reinterpret_cast<uint64_t>(input);
-    kernargs[1] = reinterpret_cast<uint64_t>(output);
-    kernargs[2] = DATA_SIZE;  // input size
-    kernargs[3] = DATA_SIZE;  // output size
+    std::uint64_t last_wr_idx = 0;
+    for (std::int32_t i = 0; i < num_dispatches; ++i) {
+      // Set args
+      kernargs_vec[i][0] = reinterpret_cast<uint64_t>(inputs[i]);
+      kernargs_vec[i][1] = reinterpret_cast<uint64_t>(outputs[i]);
+      kernargs_vec[i][2] = DATA_SIZE;  // input size
+      kernargs_vec[i][3] = DATA_SIZE;  // output size
 
-    // Dispatch HSA packet
-    auto wr_idx = dispatch_packet(pdi_buf, insts_buf, insts_size, input, output, kernargs, queue);
+      // Dispatch HSA packet
+      last_wr_idx = dispatch_packet(pdi_buf, insts_buf, insts_size, inputs[i], outputs[i],
+                                    kernargs_vec[i], queue);
+    }
 
     // Ring doorbell
-    hsa_signal_store_screlease(queue->doorbell_signal, wr_idx);
+    hsa_signal_store_screlease(queue->doorbell_signal, last_wr_idx);
 
     benchmark::ClobberMemory();
   }
 
   // --- Teardown ---
   hsa_queue_destroy(queue);
-  hsa_amd_memory_pool_free(output);
-  hsa_amd_memory_pool_free(input);
-  hsa_amd_memory_pool_free(kernargs);
+  for (std::int32_t i = 0; i < num_dispatches; ++i) {
+    hsa_amd_memory_pool_free(outputs[i]);
+    hsa_amd_memory_pool_free(inputs[i]);
+    hsa_amd_memory_pool_free(kernargs_vec[i]);
+  }
   hsa_amd_memory_pool_free(pdi_buf);
   hsa_amd_memory_pool_free(insts_buf);
   hsa_shut_down();
@@ -323,54 +338,74 @@ static void VectorScalarAddHSA(benchmark::State& state) {
   std::size_t insts_size = 0;
   load_binary(dev_pool, g_insts_path, &insts_buf, insts_size);
 
-  // --- Allocate I/O buffers in data_memory ---
-  std::uint32_t* input = nullptr;
-  std::uint32_t* output = nullptr;
-  if (hsa_amd_memory_pool_allocate(data_pool, DATA_SIZE, 0, reinterpret_cast<void**>(&input)) !=
-      HSA_STATUS_SUCCESS) {
-    state.SkipWithError("Failed to allocate input buffer");
-  }
-  if (hsa_amd_memory_pool_allocate(data_pool, DATA_SIZE, 0, reinterpret_cast<void**>(&output)) !=
-      HSA_STATUS_SUCCESS) {
-    state.SkipWithError("Failed to allocate output buffer");
-  }
+  const std::int32_t num_dispatches = state.range(0);
 
-  // Initialize input: [0, 1, 2, ..., 1023]
-  std::iota(input, input + N, std::uint32_t{0});
+  // --- Allocate I/O buffers in data_memory ---
+  std::vector<std::uint32_t*> inputs(num_dispatches, nullptr);
+  std::vector<std::uint32_t*> outputs(num_dispatches, nullptr);
+  for (std::int32_t i = 0; i < num_dispatches; ++i) {
+    if (hsa_amd_memory_pool_allocate(data_pool, DATA_SIZE, 0,
+                                     reinterpret_cast<void**>(&inputs[i])) != HSA_STATUS_SUCCESS) {
+      state.SkipWithError("Failed to allocate input buffer");
+      return;
+    }
+    if (hsa_amd_memory_pool_allocate(data_pool, DATA_SIZE, 0,
+                                     reinterpret_cast<void**>(&outputs[i])) != HSA_STATUS_SUCCESS) {
+      state.SkipWithError("Failed to allocate output buffer");
+      return;
+    }
+    // Initialize input: [1, 2, ..., 1024]
+    std::iota(inputs[i], inputs[i] + N, 1);
+    // Initialize output: all zeros
+    std::fill_n(outputs[i], N, 0);
+  }
 
   // --- Benchmark loop: dispatch is synchronous ---
+  std::vector<uint64_t*> kernargs_vec(num_dispatches, nullptr);
   for (auto _ : state) {
-    // Allocate kernargs from kernarg_memory
-    uint64_t* kernargs = nullptr;
-    if (hsa_amd_memory_pool_allocate(kernarg_pool, 4 * sizeof(uint64_t), 0,
-                                     reinterpret_cast<void**>(&kernargs)) != HSA_STATUS_SUCCESS) {
-      state.SkipWithError("Failed to allocate payload buffer");
-    }
-    kernargs[0] = reinterpret_cast<uint64_t>(input);
-    kernargs[1] = reinterpret_cast<uint64_t>(output);
-    kernargs[2] = DATA_SIZE;  // input size
-    kernargs[3] = DATA_SIZE;  // output size
+    std::uint64_t last_wr_idx = 0;
+    for (std::int32_t i = 0; i < num_dispatches; ++i) {
+      // Allocate kernargs from kernarg_memory
+      if (hsa_amd_memory_pool_allocate(kernarg_pool, 4 * sizeof(uint64_t), 0,
+                                       reinterpret_cast<void**>(&kernargs_vec[i])) !=
+          HSA_STATUS_SUCCESS) {
+        state.SkipWithError("Failed to allocate payload buffer");
+        return;
+      }
+      kernargs_vec[i][0] = reinterpret_cast<uint64_t>(inputs[i]);
+      kernargs_vec[i][1] = reinterpret_cast<uint64_t>(outputs[i]);
+      kernargs_vec[i][2] = DATA_SIZE;  // input size
+      kernargs_vec[i][3] = DATA_SIZE;  // output size
 
-    // Dispatch HSA packet
-    auto wr_idx = dispatch_packet(pdi_buf, insts_buf, insts_size, input, output, kernargs, queue);
+      // Dispatch HSA packet
+      last_wr_idx = dispatch_packet(pdi_buf, insts_buf, insts_size, inputs[i], outputs[i],
+                                    kernargs_vec[i], queue);
+    }
 
     // Ring doorbell
-    hsa_signal_store_screlease(queue->doorbell_signal, wr_idx);
+    hsa_signal_store_screlease(queue->doorbell_signal, last_wr_idx);
 
     // Free after dispatch to include allocation overhead in the benchmark
-    hsa_amd_memory_pool_free(kernargs);
+    for (std::int32_t i = 0; i < num_dispatches; ++i) {
+      hsa_amd_memory_pool_free(kernargs_vec[i]);
+    }
 
     benchmark::ClobberMemory();
   }
 
   // --- Teardown ---
   hsa_queue_destroy(queue);
-  hsa_amd_memory_pool_free(output);
-  hsa_amd_memory_pool_free(input);
+  for (std::int32_t i = 0; i < num_dispatches; ++i) {
+    hsa_amd_memory_pool_free(outputs[i]);
+    hsa_amd_memory_pool_free(inputs[i]);
+  }
   hsa_amd_memory_pool_free(pdi_buf);
   hsa_amd_memory_pool_free(insts_buf);
   hsa_shut_down();
 }
 
-BENCHMARK(VectorScalarAddHSANoAlloc)->Unit(benchmark::kMicrosecond);
-BENCHMARK(VectorScalarAddHSA)->Unit(benchmark::kMicrosecond);
+BENCHMARK(VectorScalarAddHSANoAlloc)
+    ->Unit(benchmark::kMicrosecond)
+    ->RangeMultiplier(2)
+    ->Range(1, 32);
+BENCHMARK(VectorScalarAddHSA)->Unit(benchmark::kMicrosecond)->RangeMultiplier(2)->Range(1, 32);
