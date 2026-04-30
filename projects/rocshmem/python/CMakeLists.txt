@@ -1,15 +1,21 @@
 cmake_minimum_required(VERSION 3.16)
 
 ###############################################################################
-# ROCM/HIP Configuration
+# Build mode: Standalone vs Sub-project
 #
-# Two supported layouts:
-#   1. Standard ROCm install:  hipcc at ${ROCM_PATH}/bin/hipcc
-#                              HIP at  ${ROCM_PATH}/{include,lib,lib/cmake/hip}
-#   2. TheRock toolchain:      hipcc at ${THEROCK_TOOLCHAIN_ROOT}/lib/llvm/bin/hipcc
-#                              HIP at  ${THEROCK_TOOLCHAIN_ROOT}/{include,lib,lib/cmake/hip}
+# Standalone:  pip install / direct cmake on python/. This CMakeLists is the
+#              top-level project; we must locate hipcc and pin
+#              CMAKE_CXX_COMPILER ourselves before calling project().
+# Sub-project: added via add_subdirectory() from the parent rocSHMEM CMake
+#              (TheRock super-build). The parent has already run project()
+#              with the right toolchain, so we skip compiler selection.
 #
 ###############################################################################
+set(ROCSHMEM4PY_IS_TOP_LEVEL FALSE)
+if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
+  set(ROCSHMEM4PY_IS_TOP_LEVEL TRUE)
+endif()
+
 if(DEFINED ENV{THEROCK_TOOLCHAIN_ROOT} AND NOT THEROCK_TOOLCHAIN_ROOT)
   set(THEROCK_TOOLCHAIN_ROOT "$ENV{THEROCK_TOOLCHAIN_ROOT}" CACHE PATH "TheRock toolchain root")
 endif()
@@ -22,22 +28,22 @@ else()
   set(ROCM_PATH "/opt/rocm" CACHE STRING "ROCm install directory")
 endif()
 
-# Locate hipcc; prefer ROCM_PATH/bin then TheRock's lib/llvm/bin layout.
-find_program(HIPCC_EXECUTABLE hipcc
-             PATHS
-               ${ROCM_PATH}/bin
-               ${THEROCK_TOOLCHAIN_ROOT}/lib/llvm/bin
-             NO_DEFAULT_PATH)
+if(ROCSHMEM4PY_IS_TOP_LEVEL)
+  find_program(HIPCC_EXECUTABLE hipcc
+               PATHS
+                 ${ROCM_PATH}/bin
+                 ${THEROCK_TOOLCHAIN_ROOT}/lib/llvm/bin
+               NO_DEFAULT_PATH)
 
-if(NOT HIPCC_EXECUTABLE)
-  message(FATAL_ERROR "hipcc not found under ${ROCM_PATH}/bin or "
-                      "${THEROCK_TOOLCHAIN_ROOT}/lib/llvm/bin. "
-                      "Set ROCM_PATH or THEROCK_TOOLCHAIN_ROOT.")
+  if(NOT HIPCC_EXECUTABLE)
+    message(FATAL_ERROR "hipcc not found under ${ROCM_PATH}/bin or "
+                        "${THEROCK_TOOLCHAIN_ROOT}/lib/llvm/bin. "
+                        "Set ROCM_PATH or THEROCK_TOOLCHAIN_ROOT.")
+  endif()
+
+  set(CMAKE_CXX_COMPILER "${HIPCC_EXECUTABLE}" CACHE FILEPATH "C++ compiler")
+  project(rocshmem4py LANGUAGES CXX)
 endif()
-
-# CMake chooses the compiler during project(), so set it first.
-set(CMAKE_CXX_COMPILER "${HIPCC_EXECUTABLE}" CACHE FILEPATH "C++ compiler")
-project(rocshmem4py LANGUAGES CXX)
 
 find_package(Python3 COMPONENTS Interpreter Development REQUIRED)
 find_program(PYTHON_EXECUTABLE NAMES python3 python REQUIRED)
@@ -61,7 +67,6 @@ set(CMAKE_CXX_FLAGS_RELEASE "-O3")
 # Find Dependencies
 ###############################################################################
 
-# Find HIP. Probe both ROCM_PATH and THEROCK_TOOLCHAIN_ROOT layouts.
 list(APPEND CMAKE_PREFIX_PATH
      ${ROCM_PATH} ${ROCM_PATH}/hip ${ROCM_PATH}/lib/cmake/hip)
 if(THEROCK_TOOLCHAIN_ROOT)
@@ -105,47 +110,58 @@ message(STATUS "pybind11 directory: ${PYBIND11_DIR}")
 list(APPEND CMAKE_PREFIX_PATH ${PYBIND11_DIR})
 find_package(pybind11 REQUIRED)
 
-# Find ROCSHMEM
-if(DEFINED ENV{ROCSHMEM_HOME})
-  set(ROCSHMEM_HOME "$ENV{ROCSHMEM_HOME}" CACHE STRING "ROCSHMEM install directory")
-  list(APPEND CMAKE_PREFIX_PATH ${ROCSHMEM_HOME})
-endif()
-
-find_path(ROCSHMEM_INCLUDE_DIR 
-  NAMES rocshmem/rocshmem.hpp
-  PATHS 
-    ${ROCSHMEM_HOME}
-    ${ROCSHMEM_HOME}/../include
-    /opt/rocm
-  PATH_SUFFIXES include
-  NO_DEFAULT_PATH
-)
-
-find_library(ROCSHMEM_LIBRARY
-  NAMES rocshmem
-  PATHS 
-    ${ROCSHMEM_HOME}
-    ${ROCSHMEM_HOME}/lib
-    /opt/rocm
-  PATH_SUFFIXES lib lib64
-  NO_DEFAULT_PATH
-)
-
-if(ROCSHMEM_INCLUDE_DIR AND ROCSHMEM_LIBRARY)
+# Sub-project: the parent CMake exposes the in-tree rocshmem target.
+# Standalone: locate an installed rocSHMEM via ROCSHMEM_HOME.
+if(TARGET rocshmem)
   set(ROCSHMEM_FOUND TRUE)
-  set(ROCSHMEM_INCLUDE_DIRS ${ROCSHMEM_INCLUDE_DIR})
-  if(EXISTS "${ROCSHMEM_HOME}/include/rocshmem")
-    list(APPEND ROCSHMEM_INCLUDE_DIRS "${ROCSHMEM_HOME}/include/rocshmem")
-  endif()
-  if(EXISTS "${ROCSHMEM_HOME}/include")
-    list(APPEND ROCSHMEM_INCLUDE_DIRS "${ROCSHMEM_HOME}/include")
-  endif()
-  set(ROCSHMEM_LIBRARIES ${ROCSHMEM_LIBRARY})
-  message(STATUS "ROCSHMEM found!")
-  message(STATUS "  ROCSHMEM_INCLUDE_DIRS: ${ROCSHMEM_INCLUDE_DIRS}")
-  message(STATUS "  ROCSHMEM_LIBRARIES: ${ROCSHMEM_LIBRARIES}")
+  set(ROCSHMEM_LINK_TARGET roc::rocshmem)
+  set(ROCSHMEM_INCLUDE_DIRS
+      ${CMAKE_SOURCE_DIR}/include
+      ${CMAKE_BINARY_DIR}/include)
+  message(STATUS "ROCSHMEM target found in parent project: ${ROCSHMEM_LINK_TARGET}")
 else()
-  message(FATAL_ERROR "ROCSHMEM not found. Set ROCSHMEM_HOME environment variable.")
+  if(DEFINED ENV{ROCSHMEM_HOME})
+    set(ROCSHMEM_HOME "$ENV{ROCSHMEM_HOME}" CACHE STRING "ROCSHMEM install directory")
+    list(APPEND CMAKE_PREFIX_PATH ${ROCSHMEM_HOME})
+  endif()
+
+  find_path(ROCSHMEM_INCLUDE_DIR
+    NAMES rocshmem/rocshmem.hpp
+    PATHS
+      ${ROCSHMEM_HOME}
+      ${ROCSHMEM_HOME}/../include
+      /opt/rocm
+    PATH_SUFFIXES include
+    NO_DEFAULT_PATH
+  )
+
+  find_library(ROCSHMEM_LIBRARY
+    NAMES rocshmem
+    PATHS
+      ${ROCSHMEM_HOME}
+      ${ROCSHMEM_HOME}/lib
+      /opt/rocm
+    PATH_SUFFIXES lib lib64
+    NO_DEFAULT_PATH
+  )
+
+  if(ROCSHMEM_INCLUDE_DIR AND ROCSHMEM_LIBRARY)
+    set(ROCSHMEM_FOUND TRUE)
+    set(ROCSHMEM_INCLUDE_DIRS ${ROCSHMEM_INCLUDE_DIR})
+    if(EXISTS "${ROCSHMEM_HOME}/include/rocshmem")
+      list(APPEND ROCSHMEM_INCLUDE_DIRS "${ROCSHMEM_HOME}/include/rocshmem")
+    endif()
+    if(EXISTS "${ROCSHMEM_HOME}/include")
+      list(APPEND ROCSHMEM_INCLUDE_DIRS "${ROCSHMEM_HOME}/include")
+    endif()
+    set(ROCSHMEM_LIBRARIES ${ROCSHMEM_LIBRARY})
+    set(ROCSHMEM_LINK_TARGET ${ROCSHMEM_LIBRARIES})
+    message(STATUS "ROCSHMEM found!")
+    message(STATUS "  ROCSHMEM_INCLUDE_DIRS: ${ROCSHMEM_INCLUDE_DIRS}")
+    message(STATUS "  ROCSHMEM_LIBRARIES: ${ROCSHMEM_LIBRARIES}")
+  else()
+    message(FATAL_ERROR "ROCSHMEM not found. Set ROCSHMEM_HOME environment variable.")
+  endif()
 endif()
 
 ###############################################################################
@@ -173,13 +189,13 @@ find_package(MPI QUIET)
 
 if(hip_FOUND)
   target_link_libraries(_rocshmem4py PRIVATE
-    ${ROCSHMEM_LIBRARIES}
+    ${ROCSHMEM_LINK_TARGET}
     hip::device
     hip::host
   )
 else()
   target_link_libraries(_rocshmem4py PRIVATE
-    ${ROCSHMEM_LIBRARIES}
+    ${ROCSHMEM_LINK_TARGET}
     amdhip64
     hsa-runtime64
   )
@@ -208,6 +224,19 @@ target_link_options(_rocshmem4py PRIVATE
   -lhsa-runtime64
 )
 
-install(TARGETS _rocshmem4py
-  LIBRARY DESTINATION .
-)
+if(ROCSHMEM4PY_IS_TOP_LEVEL)
+  # Standalone: setuptools positions the .so via CMAKE_LIBRARY_OUTPUT_DIRECTORY;
+  # install(.) lands the extension at the wheel root for built distributions.
+  install(TARGETS _rocshmem4py LIBRARY DESTINATION .)
+else()
+  # Sub-project (TheRock super-build): ship the binding under the rocSHMEM
+  # subtree alongside lib/*.bc, lib/cmake/rocshmem, share/rocshmem.
+  # Consumers add <prefix>/lib/rocshmem/python to PYTHONPATH.
+  include(GNUInstallDirs)
+  set(_ROCSHMEM4PY_DEST "${CMAKE_INSTALL_LIBDIR}/rocshmem/python/rocshmem4py")
+  install(TARGETS _rocshmem4py LIBRARY DESTINATION ${_ROCSHMEM4PY_DEST})
+  install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/rocshmem4py/
+    DESTINATION ${_ROCSHMEM4PY_DEST}
+    FILES_MATCHING PATTERN "*.py"
+  )
+endif()

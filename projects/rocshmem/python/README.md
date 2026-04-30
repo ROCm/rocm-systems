@@ -36,8 +36,12 @@ Host-facing symbols are exported directly from the compiled extension module
 - Python 3.8+
 - CMake 3.20+
 - pybind11 2.13.1+
-- OpenMPI with UCX support (required for the RO backend)
-- `mpi4py` (only required when using `init_with_mpi()`)
+- Distributed launcher: `torchrun` (for `init_with_torch()`, IPC/GDA
+  backends) **or** `mpirun` (for `init_with_mpi()`, and required by the RO
+  backend regardless of init path &mdash; see [*RO backend requires `mpirun`*](#ro-backend-requires-mpirun) below).
+- ROCm-aware Open MPI 5.0.x + UCX 1.17+ &mdash; **RO backend only**; any
+  distro Open MPI works for IPC/GDA bootstrap. See [*ROCm-aware Open MPI required for RO*](#rocm-aware-open-mpi-required-for-ro) below.
+- `mpi4py` (only when using `init_with_mpi()`).
 
 ## Installation
 
@@ -289,7 +293,7 @@ suite's own README:
 | `ImportError: _rocshmem4py` | rocSHMEM not on the loader path | `export LD_LIBRARY_PATH=$ROCSHMEM_HOME/lib:$ROCM_PATH/lib:$LD_LIBRARY_PATH` |
 | CMake cannot find rocSHMEM at build time | `ROCSHMEM_HOME` unset | `export ROCSHMEM_HOME=/path/to/rocshmem/build` before `pip install -e .` |
 | Link error: `recompile with -fPIC` | `librocshmem.a` built without PIC | Rebuild rocSHMEM with `-DCMAKE_POSITION_INDEPENDENT_CODE=ON` |
-| MPI / UCX import or runtime errors | OpenMPI not built with UCX | Use an OpenMPI install with UCX and point `OMPI_DIR` at it |
+| RO backend hangs in `mca_btl_vader.so` (`Wrote -1, errno = 14`), aborts with `MPI_ERR_WIN: invalid window`, or hangs at exit in `__run_exit_handlers` &rarr; `libamdhip64` | Non-ROCm-aware Open MPI / UCX cannot handle GPU buffers in the data plane | Use ROCm-aware Open MPI 5.0.x + UCX 1.17+ &mdash; see [below](#rocm-aware-open-mpi-required-for-ro) |
 | `Unsupported configuration to initialize rocSHMEM. Please initialize the MPI library using MPI_Init first` | RO backend launched under `torchrun` &mdash; see *"RO backend requires `mpirun`"* below | Launch with `mpirun` (you can keep `init_with_torch()`), or build an IPC/GDA-only rocSHMEM if you don't need inter-node RDMA |
 | Rendezvous / port conflict under `torchrun` | Default `MASTER_PORT=29500` already taken | Set `MASTER_PORT` (or `ROCSHMEM_MASTER_PORT`) to a free port |
 
@@ -307,6 +311,24 @@ in disjoint singleton MPI universes, and that crashes inside OMPI's PMIx
 wireup. Use `mpirun` for RO; `init_with_torch()` itself still works
 under `mpirun`, so you keep the `torch.distributed` unique-id exchange
 and only the launcher changes.
+
+### ROCm-aware Open MPI required for RO
+
+Only RO backend builds need ROCm-aware **Open MPI 5.0.x + UCX 1.17+ built
+with `--with-rocm`** for data-plane RMA. IPC and GDA backends use MPI
+only for bootstrap and work with any distro Open MPI (see prereqs and
+troubleshooting above).
+
+Verify on the launch host:
+
+```bash
+mpirun --version           # must say "Open MPI v5.0.x"
+ucx_info -d | grep rocm    # must list rocm_copy and rocm_ipc transports
+```
+
+See the rocSHMEM
+[install docs](https://github.com/ROCm/rocm-systems/blob/develop/projects/rocshmem/docs/install.rst#install-dependencies)
+for build instructions.
 
 ### Diagnosing which rocSHMEM backend you actually linked
 
