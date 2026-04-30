@@ -109,21 +109,21 @@ static constexpr struct rcclSymkTuningModel rcclSymkTuningModel_0 = {
              //         LL     Simple
              /* AR */ { 11.0,  19.5 },
              /* AG */ { 8.5,   13.0 },
-             /* RS */ { 11.0,  13.0 },
+             /* RS */ { 11.0,  15.0 },
   },
   .smBw = {
-                      { 20.0,   20.0 },
-                      { 25.0,   15.0 },
-                      { 25.0,   20.0 }
+                      { 25.0,   5.0  },
+                      { 22.0,   5.0  },
+                      { 10.0,   20.0 }
   },
-  .peakBw =           { 1200.0, 1200.0, 1200.0 },
+  .peakBw =           { 800.0, 1200.0, 1200.0 },
   // The higher, the more conservative the model (less LL usage, more ST usage)
-  .llBusFactor =      { 9.0,    9.0,    9.0 },
+  .llBusFactor =      { 12.0,  4.0,   3.0 },
   // The higher, the more conservative the model (less CTAs)
   .withinPeakFactor = {
-                      { 1.025, 1.025 },
-                      { 1.025, 1.025 },
-                      { 1.025, 1.025 }
+                      { 1.100, 1.005 },
+                      { 1.015, 1.015 },
+                      { 1.025, 1.005 }
   }
 };
 
