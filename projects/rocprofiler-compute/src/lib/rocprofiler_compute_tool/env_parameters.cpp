@@ -38,6 +38,7 @@ std::string env_parameters_impl_t::get_kernel_filter_range()
 
 std::string env_parameters_impl_t::get_pc_sampling_mode() const
 {
-    const char* val = getenv("ROCPROF_PC_SAMPLING_METHOD");
-    return val ? std::string(val) : std::string();
+    return "stochastic";
+    // const char* val = getenv("ROCPROF_PC_SAMPLING_METHOD");
+    // return val ? std::string(val) : std::string();
 }
