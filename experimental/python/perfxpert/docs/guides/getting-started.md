@@ -15,6 +15,27 @@ recommendations — either deterministically (air-gap) or with an LLM
 specialist agent. Supported GPUs: MI100 / MI200 / MI300 / MI350 and
 RDNA2 / RDNA3.
 
+## 0. Workflow at a glance
+
+PerfXpert separates **capture** from **analysis**:
+
+1. **Capture a trace on a ROCm machine.** Use `rocprofv3` to run your
+   workload and write a rocprofiler-sdk SQLite database (`.db`).
+2. **Analyze the `.db`.** Run `perfxpert analyze -i <trace.db>` to
+   produce a report. Existing `.db` traces can be analyzed on a machine
+   without ROCm when PerfXpert's Python dependencies are installed.
+   ROCm tools such as `rocprofv3`, `rocminfo`, and `rocm-smi` are needed
+   when you want to capture a new trace, auto-detect a local GPU, or run
+   live profiling from the TUI.
+3. **Iterate if needed.** `perfxpert-code` wraps the same analysis brain
+   in an interactive TUI that can plan profiling commands, analyze the
+   resulting `.db`, propose source edits, rebuild, reprofile, and compare
+   the new trace with the baseline.
+
+The batch CLI does not launch your workload. It reads `.db` files that
+already exist. The TUI can guide or run the larger optimization loop when
+native execution tools are available.
+
 ## 1. Install
 
 ![install](assets/gifs/01-install.gif)
@@ -34,6 +55,8 @@ silently producing a broken `perfxpert-code`.
 
 - Python 3.10+
 - `curl`, `git`, `unzip`, `python3-venv`, and `python3-pip` for GitHub installs.
+- ROCm is required to create new traces with `rocprofv3`; it is not
+  required to analyze an existing `.db` trace.
 - On Ubuntu 24+ and other externally managed Python environments,
   create and activate a virtual environment before invoking pip.
 - `bun` on PATH, or `curl` + `unzip` so pip can bootstrap bun into the
@@ -479,6 +502,14 @@ perfxpert analyze -i trace.db --format markdown -d ./out -o report
 perfxpert analyze -i trace.db --format webview -d ./out -o report
 ```
 
+`--format` accepts `text`, `json`, `markdown`, and `webview`.
+`text` prints to stdout unless both `-d DIR` and `-o NAME` identify a
+file destination. Non-text formats write a report file by default; when
+`-d/-o` are omitted, PerfXpert writes beside the current working
+directory using the input database basename, or `analysis` for
+source-only runs. `-o` is a base name: PerfXpert appends `.txt`,
+`.json`, `.md`, or `.html` when that extension is not already present.
+
 ![analyze json](assets/gifs/05-analyze-json.gif)
 
 *`--format json | jq` — flat top-level keys make the report easy to
@@ -919,8 +950,10 @@ perfxpert analyze -i trace.db
 
 Air-gap mode: no outbound calls, rule-based classification against
 the knowledge YAMLs. `primary_bottleneck` is still set.
-`recommendations[].name` populates only with LLM mode; air-gap
-returns bottleneck + narrative only (verbatim from the rule tables).
+The raw Root agent output intentionally has no LLM-authored
+recommendation list in air-gap mode, but the rendered batch report still
+includes deterministic recommendations from the local analysis payload
+when the trace or source scan provides enough evidence.
 
 ### LLM-enabled
 
@@ -928,7 +961,7 @@ All five primary providers are selectable from the CLI with `--llm
 <name>`: `anthropic`, `openai`, `ollama`, `private`, `opencode`. The
 CLI also accepts `claude-code` as a compatibility alias for the
 patched opencode backend used by `perfxpert-code`. The same five
-primary providers are also reachable from Python via
+primary providers are also selectable from Python via
 `perfxpert.api.agent_root(...,
 provider=<name>)` — the CLI is a thin wrapper over the public Python
 API.
@@ -946,8 +979,10 @@ An LLM analysis can take 1-5 minutes per call — PerfXpert draws a live
 progress spinner on stderr so you can see each agent phase as it
 enters / exits (`entering root`, `entering analysis`, etc.) and if the
 fallback chain cascades across providers. The spinner is stderr-only,
-so piping stdout to a file (e.g. `--format json > out.json`) still
-captures clean output.
+so report output remains clean: `text` goes to stdout unless `-d/-o`
+selects a file, while `json`, `markdown`, and `webview` write report
+files by default. Use `-d ./out -o report` to pick the destination
+instead of relying on shell redirection for non-text formats.
 
 ![progress spinner](assets/gifs/10-progress-spinner.gif)
 
@@ -1196,25 +1231,15 @@ change automatically; see `docs/architecture/gate-cascade.md` for the full
 
 ## 10. MPI Multi-GPU Profiling (detailed)
 
-The supported CLI workflow is still the explicit two-step flow: profile
-each rank with the launcher outside `rocprofv3`, then analyze the
+For the canonical MPI rules and command shape, use
+[Multi-GPU / MPI workflows](#5-multi-gpu--mpi-workflows). The short version
+is unchanged: profile each rank with the launcher outside `rocprofv3`, give
+each rank a unique output name, merge the rank databases, then analyze the
 merged trace database.
-
-```bash
-# SKIP-SAMPLE — requires a built MPI application + openmpi
-mpirun -n 8 rocprofv3 --sys-trace -d ./out -o results_%q{MPI_RANK} -- ./multi_gpu_demo
-perfxpert analyze -i ./out/merged_processes.db --llm anthropic --source-dir ./src
-```
 
 Inside `perfxpert-code` you can still ask for the MPI profiling plan in
 natural language, but the batch CLI does not expose a `--run`
 launcher-wrapper flag today.
-
-The supported MPI pattern is:
-- MPI launcher outside `rocprofv3`, so each rank gets its own profiler instance
-- `%q{MPI_RANK}` or `%nid%` in the output name to avoid SQLite collisions
-- `merged_processes.db` as the input to `perfxpert analyze` after ranks are combined
-- no `--process-sync` with OpenMPI, because `LD_PRELOAD` is stripped from child ranks
 
 > **Note**: the canonical MPI rules also live in `../../perfxpert/_bundled/opencode_config/AGENTS.md`, which is what the bundled TUI guidance follows.
 
@@ -1344,7 +1369,7 @@ underlying opencode `session` subcommand).
 
 ## 12.5 Embedding: the Python API
 
-Everything the CLI does is reachable from Python via
+The agentic analysis entry points are available from Python via
 `perfxpert.api`. The 8 agent-hierarchy MCP tools map 1:1 to module
 functions (`agent_root`, `agent_analysis`, `agent_recommendation`,
 `agent_correctness`, `agent_compute_specialist`,

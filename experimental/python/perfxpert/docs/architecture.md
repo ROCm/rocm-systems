@@ -1,7 +1,6 @@
-# perfxpert Architecture
+# PerfXpert Architecture
 
-_Last refreshed: v0.2.0. Source of truth: local multi-agent-perfxpert
-design spec (kept in the contributor's working copy)._
+_Last refreshed against the checked-in `origin/develop` code path._
 
 ## High-level shape
 
@@ -70,7 +69,8 @@ CI validates every YAML against its schema on every PR.
 
 ## Providers (spec §3)
 
-5 LLM provider adapters under `perfxpert/providers/`:
+5 user-facing LLM providers are available through the agent runtime and
+CLI provider registry:
 
 - Anthropic (Claude Sonnet family)
 - OpenAI (GPT-4 family)
@@ -78,7 +78,10 @@ CI validates every YAML against its schema on every PR.
 - Private (any OpenAI-compatible endpoint)
 - Opencode (bundled subprocess wrapper)
 
-All five verified nightly via `.github/workflows/perfxpert-nightly.yml`.
+`perfxpert providers list` reports configured-status heuristics from the
+current shell: provider module importability, expected environment variables,
+and bundled opencode CLI availability where applicable. It does not prove
+hosted API reachability or that local daemons such as Ollama are running.
 
 ## Runtime middleware (spec §5)
 

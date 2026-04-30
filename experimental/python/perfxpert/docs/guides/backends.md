@@ -75,9 +75,11 @@ and MCP wiring ready to go.*
 No subcommand, no extra backend install. In packaged installs the
 launcher uses the bundled AMD-branded patched binary. In source/editable
 checkouts it prefers a locally built patched binary from
-`experimental/python/perfxpert/opencode`. Only when neither patched
-copy exists does it fall back to an upstream `opencode` on disk, with a
-warning and without the fork-only gate behavior.
+`experimental/python/perfxpert/opencode`. If neither patched copy
+exists, the default TUI exits with an actionable reinstall/build
+message. It does **not** silently fall back to an arbitrary upstream
+`opencode` binary. To run a user-owned upstream binary intentionally,
+use the explicit escape hatch: `perfxpert-code opencode ...`.
 
 ```bash
 # SKIP-SAMPLE — requires a patched opencode path (repo-local build or bundled wheel)

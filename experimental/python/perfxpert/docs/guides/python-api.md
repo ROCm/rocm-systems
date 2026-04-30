@@ -1,16 +1,16 @@
 # Python API (`perfxpert.api`)
 
-`perfxpert.api` is a **1:1 mirror** of the 8 agent-hierarchy MCP
-tools. Every callable here IS the same function the MCP server wraps
-— the Python API and the MCP surface share a single implementation.
-Use this module to embed PerfXpert's analysis brain in your own
-tooling without running the MCP server.
+`perfxpert.api` is the embeddable Python surface for the 8
+agent-hierarchy entry points plus the deterministic trace-diff helper.
+Those callables share implementations with the MCP server wrappers, but
+the full MCP server exposes additional read-only classifier, knowledge,
+and hardware-fact tools that live under `perfxpert.tools`.
 
 Cross-links:
 
-- [MCP server](../integration/mcp-server.md) — the same 8 agent tools
-  + 48 classifier / knowledge tools re-exposed over stdio JSON-RPC.
-  **This API is the same surface as the MCP tools.**
+- [MCP server](../integration/mcp-server.md) — 56 read-only tools over
+  stdio JSON-RPC: 8 agent tools, 47 classifier / knowledge / hardware
+  tools, and 1 trace-diff tool.
 - [Agent hierarchy](../architecture/agent-hierarchy.md) — tier map,
   fence-slice pattern, and where each agent lives in source.
 - [Agentic mode guide](agentic-mode.md) — air-gap vs LLM,

@@ -13,6 +13,19 @@ AI-powered AMD ROCm GPU trace analysis.
 
 ## Quickstart
 
+PerfXpert follows one common loop:
+
+1. **Capture on a ROCm machine.** Run `rocprofv3` against the workload
+   and keep the generated rocprofiler-sdk SQLite database (`.db`).
+2. **Analyze the `.db`.** Run `perfxpert analyze -i <trace.db>` to
+   generate text, JSON, Markdown, or HTML reports. This step can run on
+   a machine without ROCm as long as PerfXpert's Python dependencies are
+   installed; ROCm is required to capture new traces, not to read an
+   existing database.
+3. **Iterate interactively when needed.** Use `perfxpert-code` when you
+   want the TUI to plan profiling commands, analyze traces, propose code
+   edits, rebuild, reprofile, and compare results.
+
 ### Install
 
 ```bash
@@ -64,10 +77,20 @@ perfxpert analyze -i trace.db --llm private
 
 ### Analyze
 
+Start from a rocprofiler-sdk `.db` captured with `rocprofv3`:
+
+```bash
+# SKIP-SAMPLE — requires ./my_app built against ROCm and rocprofv3 on PATH
+rocprofv3 --sys-trace --summary -d ./out -o results -- ./my_app
+perfxpert analyze -i ./out/results_results.db --format text
+```
+
 `--format` accepts `text` (default), `json`, `markdown`, and `webview`
-(AMD-themed HTML). `text` prints to stdout unless `-o/-d` is supplied;
-all other formats write a report file by default, even when `-o` and `-d`
-are omitted.
+(AMD-themed HTML). `text` prints to stdout unless `-d DIR -o NAME`
+selects a file destination; all other formats write a report file by
+default, even when `-o` and `-d` are omitted. Use `-d DIR -o NAME` to
+choose the destination. `NAME` is a base name; PerfXpert adds `.txt`,
+`.json`, `.md`, or `.html` when the extension is not already present.
 
 LLM-backed analysis uses Chat Completions-style requests. Choose a provider
 model or private endpoint model that supports the Chat Completions API;
@@ -193,8 +216,11 @@ an [RFC](docs/rfcs/README.md).
 
 ## Documentation
 
+- [Documentation index](docs/README.md) — where to start by task.
 - **Getting started**
   - [Getting started guide](docs/guides/getting-started.md)
+    — install, capture a `.db`, analyze it, choose report formats, and
+    troubleshoot first-run setup.
   - [Agentic mode: air-gap vs LLM, provider ladder](docs/guides/agentic-mode.md)
   - [Multi-backend launcher (`perfxpert-code claude|gemini|codex`)](docs/guides/backends.md)
     — register perfxpert with your native Claude Code / Gemini CLI

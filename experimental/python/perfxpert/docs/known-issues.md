@@ -94,7 +94,7 @@ without being ported.
 - **Secret scanning**: local-only dev tool; not shipped in the repo. Each developer is responsible for their own secret-detection tooling. The scanner, its CI workflow, pre-commit hook, and contributor guide were removed on 2026-04-19.
 - **Known ongoing work** (not blocking ship):
   - LLM E2E `rec_type` assertion requires a live key with quota; use `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` and a model on-roster.
-  - Confluence update remediation: see `docs/operations/confluence-publish.md` for the manual update recipe; automatic MCP publish requires Atlassian URL + token env vars.
+  - Confluence update remediation remains manual; automatic MCP publish requires Atlassian URL + token env vars.
 
 ## Opencode fork / bundling
 
@@ -118,11 +118,13 @@ without being ported.
   `PERFXPERT_LLM_FALLBACK_CHAIN` to cascade across providers when
   rate-limited.
 
-- **Upstream-opencode fallback weakens the opencode gate.**
-  If you force `PERFXPERT_OPENCODE_PATH` to an upstream `opencode`
-  binary, or fall through to one on `PATH`, the fork-only
-  `{block, retryWith}` behavior is unavailable. The launcher warns in
-  that mode and falls back to prompt guidance only.
+- **The upstream-opencode escape hatch is explicit.**
+  The default `perfxpert-code` TUI requires the repo-local or packaged
+  patched binary and does not silently fall back to upstream opencode on
+  `PATH`, even when `PERFXPERT_OPENCODE_PATH` is set. That environment
+  variable is honored only by `perfxpert-code opencode ...`, which runs
+  a user-owned upstream binary intentionally. In that mode the fork-only
+  `{block, retryWith}` behavior is unavailable.
 
 ## Docs-audit baseline
 

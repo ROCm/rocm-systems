@@ -2,15 +2,25 @@
 
 ## What you're adding
 
-A backend adapter to a new LLM provider (OpenAI-compatible, Ollama, custom,
-etc.). Providers implement the Agents SDK `Model` protocol and handle auth,
-request/response formatting, and error recovery.
+A backend adapter to a new LLM provider (OpenAI-compatible, Ollama,
+custom, etc.). Providers implement PerfXpert's
+`perfxpert.providers.Provider` interface and return a normalized
+`ProviderResponse`. The live agent runtime still routes hosted
+providers through the OpenAI Agents SDK facade in
+`perfxpert/agents/framework.py`, so adding a new user-facing provider
+usually requires both a provider module and runtime/CLI registration.
 
 ## File locations
 
-- Implementation: `perfxpert/providers/<name>_model.py`
-- Smoke test: `tests/test_providers/test_<name>_smoke.py`
-- Registry: `perfxpert/providers/__init__.py` (list of available providers)
+- Implementation: `perfxpert/providers/<name>_provider.py`
+- Unit tests: `tests/test_providers/test_<name>_provider.py`
+- Registry: call `register("<name>", ProviderClass, "...")` from the
+  provider module.
+- Agent runtime: update `perfxpert/agents/framework.py` if the provider
+  needs a new model prefix, default model, or `RunConfig` provider.
+- CLI: update the `--llm` choices in `perfxpert/analyze.py`, the
+  first-run provider detection in `perfxpert/cli/init_cmd.py`, and
+  provider status rendering if the new provider needs env-var checks.
 
 ## Template
 
@@ -18,65 +28,82 @@ request/response formatting, and error recovery.
 # SKIP-SAMPLE — template: <name>/<Name>/<ENV_VAR> are placeholders
 """<name> — <description>.
 
-Implements the OpenAI Agents SDK Model protocol.
+Implements the PerfXpert Provider protocol.
 """
 
 import os
-from typing import Optional
+from typing import Any, Dict, List, Optional, Union
 
-from openai_agents.models import Model
+from perfxpert.providers._base import Provider, ProviderResponse
+from perfxpert.providers._exceptions import AuthError, DryRunResponse, ProviderError
+from perfxpert.providers.registry import register
 
 
-class NameModel(Model):
+class NameProvider(Provider):
     """LLM provider adapter for <name>."""
 
-    def __init__(self, api_key: Optional[str] = None):
-        """Initialize.
-
-        Args:
-            api_key: optional override; if None, read from <ENV_VAR>
-        """
-        self.api_key = api_key or os.getenv("<ENV_VAR>")
+    def __init__(self, api_key: Optional[str] = None, **_: Any) -> None:
+        self.api_key = api_key or os.environ.get("<ENV_VAR>")
         if not self.api_key:
-            raise ValueError(f"<ENV_VAR> not set")
+            raise AuthError("<name>", "no API key (set <ENV_VAR>)")
 
-    async def agenerate(self, messages: list, **kwargs) -> str:
-        """Call the model and return the response text."""
-        # Implementation
-        pass
+    def complete(
+        self,
+        messages: List[Dict[str, Any]],
+        *,
+        system: str = "",
+        model: Optional[str] = None,
+        max_tokens: Optional[int] = None,
+        dry_run: bool = False,
+    ) -> Union[ProviderResponse, object]:
+        if dry_run:
+            return DryRunResponse
 
-    async def agenerate_with_tools(self, messages: list, tools: list, **kwargs) -> tuple:
-        """Call the model with tool definitions; return (response, tool_calls)."""
-        # Implementation
-        pass
+        # Call the provider's chat/completions-style API here.
+        try:
+            content = "..."
+        except Exception as exc:
+            raise ProviderError(f"[<name>] {exc}") from exc
 
-    def sanitize_output(self, text: str) -> str:
-        """Strip unwanted prefixes/suffixes before tool invocation."""
-        return text.strip()
+        return ProviderResponse(
+            content=content,
+            provider="<name>",
+            model=model or "<default-model>",
+            input_tokens=0,
+            output_tokens=0,
+        )
+
+
+register("<name>", NameProvider, "<description for providers list>")
 ```
 
 ## Security requirements
 
-- **Secrets:** read from environment variables only (e.g., `<PROVIDER>_API_KEY`)
+- **Secrets:** read from environment variables only (e.g.,
+  `PERFXPERT_LLM_<PROVIDER>_KEY` or the provider's canonical API key)
 - Never log API keys, tokens, or request bodies containing secrets
-- Sanitize LLM output before tool calls (strip control chars, injection payloads)
-- No network calls outside the provider's official SDK
+- Normalize provider errors into `AuthError`, `RateLimitError`,
+  `QuotaExceededError`, `TransientError`, `FatalError`, `TimeoutError`,
+  or `ProviderError`
+- No network calls outside the provider module or the runtime facade
 
 ## Schema constraints (CI-enforced)
 
-- Implements `Model` protocol (type-check passes)
+- Implements `Provider.complete()` with the shared signature
 - No new runtime dependencies (or vendored + approved)
 - Secrets never appear in logs or test fixtures
+- `dry_run=True` returns `DryRunResponse` without network I/O
 
 ## Tests you must add
 
-Write `tests/test_providers/test_<name>_smoke.py`:
+Write `tests/test_providers/test_<name>_provider.py`:
 
 - `test_<name>_initializes()` — constructor succeeds
-- `test_<name>_agenerate_succeeds()` — happy-path call (mocked API)
+- `test_<name>_complete_succeeds()` — happy-path call (mocked API)
 - `test_<name>_raises_on_missing_secret()` — error handling
-- `test_<name>_sanitizes_output()` — injection prevention
-- Nightly smoke test (registered in `.github/workflows/perfxpert-nightly.yml`)
+- `test_<name>_dry_run_has_no_network()` — dry-run invariant
+- Provider status / registry test if the provider appears in
+  `perfxpert providers list`
 
 ## Review requirements
 
@@ -89,10 +116,11 @@ Write `tests/test_providers/test_<name>_smoke.py`:
 - Don't hardcode API keys or defaults; always read from env
 - Don't assume the model exists or is available at test time (mock or skip)
 - Error messages must not leak authentication details
-- If the provider is rate-limited, add backoff logic
+- If the provider is rate-limited, raise `RateLimitError` so the
+  fallback chain can try the next provider
 
 ## Related docs
 
-- OpenAI Agents SDK Model protocol: https://github.com/openai/agents-sdk
-- Nightly smoke workflow: `.github/workflows/perfxpert-nightly.yml`
+- [Agentic mode guide](../guides/agentic-mode.md) — provider selection,
+  fallback chain, and air-gap behavior
 - Existing providers in `perfxpert/providers/` as references

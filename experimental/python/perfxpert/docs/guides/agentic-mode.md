@@ -43,10 +43,11 @@ Behavior:
 
 - No outbound network calls from the agent layer. Provider resolution
   is skipped entirely.
-- `RootOutput.recommendations` is currently empty in the root air-gap
-  path. Deterministic mode still classifies the bottleneck and returns
-  the terse template narrative, but it does not yet populate structured
-  recommendation dicts until an LLM-backed path is used.
+- `RootOutput.recommendations` is intentionally empty in the raw Root
+  air-gap path because no LLM-authored recommendations are generated.
+  The batch report renderer still merges in deterministic
+  recommendations from the local trace/source analysis payload when
+  enough evidence is present.
 - `primary_bottleneck` is still set (classifier runs deterministically
   against the knowledge YAMLs).
 - `narrative` is either empty or a terse deterministic summary.
@@ -98,11 +99,11 @@ When `airgap=False` (the default), `build_session`:
 
 Behavior differences vs air-gap:
 
-- `recommendations[]["name"]` carries the technique identifier (e.g.
-  `"async_stream_overlap"`, `"vgpr_reduction"`) — same key as
-  air-gap mode, but `title` / `description` / `rationale` are
-  LLM-rewritten for the specific kernel instead of being templated
-  verbatim from the knowledge YAMLs.
+- LLM-authored `recommendations[]` carry technique identifiers such as
+  `"async_stream_overlap"` or `"vgpr_reduction"`, plus
+  trace-specific `title` / `description` / `rationale` prose. The
+  rendered CLI report then merges those LLM recommendations with the
+  deterministic recommendations from the local analysis payload.
 - `narrative` is a full natural-language summary.
 - Each agent's fence slice shapes the LLM's voice + constraints —
   never concatenated with the others.
@@ -118,11 +119,9 @@ registry: `anthropic`, `openai`, `ollama`, `private`, `opencode`.
 The CLI also accepts `claude-code` as a compatibility alias for the
 patched opencode backend used by `perfxpert-code`.*
 
-`PROVIDER_REGISTRY` is defined in `perfxpert/agents/runtime.py` (with a
-hard-coded fallback there; `build_session` imports the richer copy
-from `perfxpert.providers` when the optional provider package is
-available). It lists the supported providers in preference order.
-Current entries:
+`build_session()` validates provider names before the live path starts,
+and `perfxpert providers list` shows the provider modules registered in
+the current Python environment. Current user-facing provider names:
 
 | Provider | Source | Typical use |
 |----------|--------|-------------|
@@ -132,8 +131,11 @@ Current entries:
 | `private` | Any OpenAI-compatible endpoint | Internal deployments; requires `PERFXPERT_LLM_PRIVATE_URL` + `PERFXPERT_LLM_PRIVATE_MODEL`; CLI preflight also needs `PERFXPERT_LLM_PRIVATE_API_KEY` or `--llm-api-key` |
 | `opencode` | Bundled opencode CLI | Used by `perfxpert-code`; not callable from inside opencode itself (recursion-guarded) |
 
-`perfxpert doctor` reports which providers are reachable from the
-current shell. See [contributing/providers.md](../contributing/providers.md)
+`perfxpert doctor` and `perfxpert providers list` report configured-status
+heuristics from the current shell, such as importability, expected
+environment variables, and bundled CLI availability. They are not full
+network reachability probes for hosted APIs or local daemons. See
+[contributing/providers.md](../contributing/providers.md)
 for how to register a new one.
 
 Private OpenAI-compatible endpoints use JSON for extra headers:
@@ -204,8 +206,9 @@ Two CLI surfaces drive the same agent runtime:
 - `perfxpert-code ...` — interactive launcher. Plain `perfxpert-code`
   uses the patched opencode path; `perfxpert-code claude|gemini|codex`
   stages the same prompt/MCP surface into the user's native backend.
-  `perfxpert-code run -m <message>` is the non-interactive equivalent
-  when the patched opencode path is in use.
+  `perfxpert-code run "<prompt>"` is the non-interactive equivalent
+  when the patched opencode path is in use; add `-m <provider/model>`
+  only when you want to override the model.
 
 Roughly:
 
@@ -214,7 +217,7 @@ Roughly:
 | Analyze a trace deterministically | `perfxpert analyze -i trace.db` |
 | Analyze with Claude | `perfxpert analyze -i trace.db --llm anthropic` |
 | Drive an optimization session conversationally | `perfxpert-code` |
-| Drive an optimization session non-interactively | `perfxpert-code run -m "optimize hot kernel"` |
+| Drive an optimization session non-interactively | `perfxpert-code run "optimize hot kernel"` |
 
 Under the hood, the batch CLI, Python API, MCP wrappers, and
 `perfxpert-code` backends all funnel into `build_session()` and the
@@ -231,5 +234,5 @@ an external TUI talks to those runners through MCP.
 - **External MCP clients** (Claude Desktop, Cursor) → always air-gap
   safe because the MCP server only exposes `READ_ONLY` tools; see
   [mcp-server.md](../integration/mcp-server.md).
-- **Scripted LLM runs** → `perfxpert-code run -m "..."` or
+- **Scripted LLM runs** → `perfxpert-code run "..."` or
   `build_session(provider="anthropic")` in Python.

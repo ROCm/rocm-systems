@@ -2,15 +2,22 @@
 
 ## What you're adding
 
-A wrapper that exposes a perfxpert tool to external clients (Claude Desktop,
-Cursor, etc.) via the Model Context Protocol. MCP tools must preserve the
-`READ_ONLY` class invariant — no `EXECUTION` tools are exposed.
+A `READ_ONLY` PerfXpert tool that the MCP server can auto-discover and
+expose to external clients (Claude Desktop, Cursor, Codex, Gemini,
+opencode, etc.) via the Model Context Protocol. There is no separate
+`mcp_server/tools/` wrapper directory in the current code path: the MCP
+registry walks `perfxpert.tools.*` and registers public callables
+annotated with `@tool_class(ToolClass.READ_ONLY)`.
 
 ## File locations
 
-- MCP server: `mcp_server/`
-- Tool wrapper: `mcp_server/tools/<name>.py`
-- Tests: `tests/test_mcp/test_<name>.py`
+- Tool implementation: `perfxpert/tools/<module>.py`
+- Tool classification: `@tool_class(ToolClass.READ_ONLY)` from
+  `perfxpert.tools._class`
+- MCP auto-discovery: `mcp_server/_registry.py`
+- MCP protocol server: `mcp_server/server.py`
+- Tests: `tests/test_tools/test_<module>.py` plus integration coverage
+  in `tests/test_integration/test_mcp_exposure.py`
 
 ## Key constraint
 
@@ -21,51 +28,40 @@ in-process only. CI enforces this via `tests/test_integration/test_mcp_exposure.
 
 ```python
 # SKIP-SAMPLE — template: <name> is a placeholder
-"""<name> MCP tool wrapper."""
+"""<name> — read-only analysis helper."""
 
 from typing import Any, Dict
 
-import mcp.types as types
-from mcp.server import RequestContext
-
-from perfxpert.tools import my_read_only_tool
+from perfxpert.tools._class import ToolClass, tool_class
 
 
-async def handle_name(
-    context: RequestContext,
-    **kwargs: Any
-) -> list[types.TextContent | types.ImageContent]:
-    """MCP handler for <name>."""
-    try:
-        result = my_read_only_tool(**kwargs)
-        return [types.TextContent(type="text", text=str(result))]
-    except Exception as e:
-        return [types.TextContent(type="text", text=f"Error: {e}")]
+@tool_class(ToolClass.READ_ONLY)
+def lookup_name(metric: str) -> Dict[str, Any]:
+    """Return read-only metadata for a metric."""
+    return {"metric": metric, "description": "..."}
 ```
 
 ## Registration
 
-Add to MCP server tool list:
-
-```python
-# SKIP-SAMPLE — template: `server` and `handle_tool_call` are placeholders
-server.set_request_handler(
-    types.messages.CallToolRequest,
-    lambda ctx, req: handle_tool_call(ctx, req)
-)
-```
+No manual server registration is needed for ordinary tools. The MCP
+server imports `mcp_server._registry.discover_read_only_tools()`, walks
+`perfxpert.tools.*` recursively, skips private helpers and packages, and
+exports each public `READ_ONLY` callable. Dots in the internal tool name
+are converted to underscores on the MCP wire.
 
 ## Schema constraints (CI-enforced)
 
-- Wrapping tool must have `ToolClass.READ_ONLY` set
+- Tool must have `ToolClass.READ_ONLY` set
 - MCP exposure test (`test_mcp_exposure.py`) verifies no `EXECUTION` tools leak
-- Type hints on wrapper args + return
+- Type hints on tool args + return so the MCP schema has useful input
+  types
 
 ## Tests you must add
 
-- `test_<name>_mcp_wraps_read_only_tool()` — class invariant
-- `test_<name>_returns_valid_mcp_content()` — output shape
-- `test_<name>_handles_error()` — error path
+- `test_<name>_returns_expected_shape()` — pure function output
+- `test_<name>_is_read_only()` — class invariant
+- Schema/registry coverage if the tool has unusual parameters or a
+  custom exposed name
 
 ## Review requirements
 
@@ -75,12 +71,14 @@ server.set_request_handler(
 
 ## Common pitfalls
 
-- Don't wrap EXECUTION tools — they must stay in-process
-- MCP responses are text + images only — complex types must serialize to JSON
+- Don't mark EXECUTION tools as READ_ONLY — they must stay in-process
+- Return JSON-serializable data; `mcp_server/server.py` serializes the
+  result into MCP `TextContent`
 - Error messages should not leak internal details
 
 ## Related docs
 
-- Design spec: Appendix A (tool-class split)
+- `mcp_server/_registry.py` — auto-discovery details
+- `mcp_server/server.py` — MCP schema and JSON response wrapping
 - MCP spec: https://modelcontextprotocol.io/
 - Exposure test: `tests/test_integration/test_mcp_exposure.py`

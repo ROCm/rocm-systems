@@ -13,10 +13,10 @@ _Generated from `benchmarks/baseline/mi300x_baseline.json`._
 ## Methodology
 For each kernel:
 1. rocprofv3 --sys-trace → `rocprof.db`
-2. `perfxpert analyze -i rocprof.db --offline --emit-patch .perfxpert.patch`
-3. `git apply .perfxpert.patch`
-4. Benchmark kernel in optimized state
-5. Report baseline_ns, optimized_ns, speedup, whether perfxpert emitted a recommendation
+2. `PERFXPERT_AIRGAP=1 perfxpert analyze -i rocprof.db --format json -o report -d ./perfxpert-reports`
+3. Review the emitted recommendations and apply any accepted source changes in a separate patch
+4. Benchmark the kernel after each accepted change
+5. Report `baseline_ns`, `optimized_ns`, speedup, whether PerfXpert emitted a recommendation, and whether a reviewer accepted the change
 
 Per-kernel measurements use median of 30 runs after 3 warm-up iterations.
 
