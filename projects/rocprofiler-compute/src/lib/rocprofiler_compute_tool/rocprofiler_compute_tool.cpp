@@ -2,6 +2,7 @@
 // SPDX-License-Identifier:  MIT
 
 #include "rocprofiler_compute_tool.h"
+#include "rocprofiler-sdk/cxx/codeobj/code_printing.hpp"
 
 #include "env_parameters.h"
 #include "gsl_assert.h"
@@ -11,6 +12,7 @@
 #include <unistd.h>
 
 #include <iostream>
+#include <regex>
 #include <sstream>
 
 using namespace rocm_compute;
@@ -87,6 +89,37 @@ void record_callback(rocprofiler_dispatch_counting_service_data_t dispatch_data,
     tool_data->sdk_callbacks->record_callback(dispatch_data, record_data, record_count, *tool_data);
 }
 
+rocprofiler::sdk::codeobj::disassembly::CodeobjAddressTranslate codeobjTranslate;
+using code_obj_load_data_t = rocprofiler_callback_tracing_code_object_load_data_t;
+using kernel_symbol_data_t = rocprofiler_callback_tracing_code_object_kernel_symbol_register_data_t;
+using kernel_symbol_map_t  = std::unordered_map<std::string, std::pair<uint64_t, size_t>>;
+
+using Instruction             = rocprofiler::sdk::codeobj::disassembly::Instruction;
+using CodeobjAddressTranslate = rocprofiler::sdk::codeobj::disassembly::CodeobjAddressTranslate;
+
+rocprofiler_client_id_t*      client_id          = nullptr;
+rocprofiler_client_finalize_t client_fini_func   = nullptr;
+rocprofiler_context_id_t      client_ctx         = {0};
+kernel_symbol_map_t           registered_kernels = {};
+
+#define OUTPUT_OFSTREAM "code_obj_isa_decode.log"
+std::ostream&
+output_stream()
+{
+    static std::ofstream file(OUTPUT_OFSTREAM);
+
+    static bool file_is_open_check = [&]() {
+        if(!file.is_open())
+            std::cout << "Could not open log file: " << OUTPUT_OFSTREAM << ", writing to stdout\n";
+        else
+            std::cout << "Writing code-object-isa-decode log to: " << OUTPUT_OFSTREAM << std::endl;
+        return file.is_open();
+    }();
+
+    if(!file_is_open_check) return std::cout;
+    return file;
+};
+
 void code_object_tracing_callback(rocprofiler_callback_tracing_record_t record,
                                   rocprofiler_user_data_t* /*user_data*/,
                                   void* callback_data)
@@ -119,6 +152,96 @@ void code_object_tracing_callback(rocprofiler_callback_tracing_record_t record,
             break;
         }
     }
+
+    if (record.kind != ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT)
+        return;
+    if (record.phase != ROCPROFILER_CALLBACK_PHASE_LOAD)
+        return;
+
+    if (record.operation == ROCPROFILER_CODE_OBJECT_LOAD)
+    {
+        auto* data = static_cast<rocprofiler_callback_tracing_code_object_load_data_t*>(record.payload);
+
+        if (std::string_view(data->uri).find("file:///") == 0)
+        {
+            codeobjTranslate.addDecoder(data->uri, data->code_object_id, data->load_delta, data->load_size);
+        }
+        else
+        {
+            codeobjTranslate.addDecoder(reinterpret_cast<const void*>(data->memory_base),
+                                        data->memory_size,
+                                        data->code_object_id,
+                                        data->load_delta,
+                                        data->load_size);
+        }
+
+        auto symbolmap = codeobjTranslate.getSymbolMap();
+        for (auto& [vaddr, symbol] : symbolmap)
+            registered_kernels.insert({symbol.name, {vaddr, vaddr + symbol.mem_size}});
+    }
+    else if (record.operation == ROCPROFILER_CODE_OBJECT_DEVICE_KERNEL_SYMBOL_REGISTER)
+    {
+        output_stream() << std::hex;
+        auto* data        = static_cast<kernel_symbol_data_t*>(record.payload);
+        auto  kernel_name = std::regex_replace(data->kernel_name, std::regex{"(\\.kd)$"}, "");
+
+        if (registered_kernels.find(kernel_name) == registered_kernels.end())
+        {
+            output_stream() << "Not Found: " << kernel_name << " in codeobj." << std::endl;
+            return;
+        }
+
+        auto& begin_end = registered_kernels.at(kernel_name);
+
+        output_stream() << std::hex << "Found: " << kernel_name << " at addr: 0x" << begin_end.first
+                        << std::dec << ". Printing first 64 bytes:" << std::endl;
+
+        std::unordered_set<std::string> references{};
+
+        int num_waitcnts = 0;
+        int num_scalar   = 0;
+        int num_vector   = 0;
+        int num_other    = 0;
+
+        size_t vaddr = begin_end.first;
+        while (vaddr < begin_end.second)
+        {
+            auto inst = codeobjTranslate.get(vaddr);
+            assert(inst != nullptr);
+            if (inst->comment.size())
+            {
+                std::string_view source = inst->comment;
+                if (source.rfind('/') < source.size())
+                    source = source.substr(source.rfind('/'));
+                if (vaddr < begin_end.first + 64)
+                    output_stream() << '\t' << inst->inst << '\n';
+
+                if (source.rfind(':') < source.size())
+                    source = source.substr(0, source.rfind(':'));
+
+                references.insert(std::string(source));
+            }
+            if (inst->inst.find("v_") == 0)
+                num_vector++;
+            else if (inst->inst.find("s_waitcnt") == 0)
+                num_waitcnts++;
+            else if (inst->inst.find("s_") == 0)
+                num_scalar++;
+            else
+                num_other++;
+
+            vaddr += inst->size;
+        }
+
+        output_stream() << "  --- Num Scalar: " << num_scalar << "\n  --- Num Vector: " << num_vector
+                        << "\n  --- Num Waitcnts: " << num_waitcnts
+                        << "\n  --- Other instructions: " << num_other
+                        << "\nKernel has source references to: " << std::endl;
+        for (auto& ref : references)
+            output_stream() << '\t' << ref << std::endl;
+    }
+
+    (void)callback_data;
 }
 
 int tool_init(rocprofiler_client_finalize_t, void* user_data)
