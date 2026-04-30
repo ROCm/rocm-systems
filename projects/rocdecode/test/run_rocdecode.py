@@ -9,6 +9,7 @@ import re
 import shlex
 import subprocess
 from pathlib import Path
+from typing import Dict
 
 logging.basicConfig(level=logging.INFO)
 
@@ -17,17 +18,25 @@ def derive_rocm_path(script_dir: Path) -> Path:
     if script_dir.name == "test" and script_dir.parent.name == "rocdecode":
         if script_dir.parent.parent.name == "share":
             return script_dir.parent.parent.parent
-    rocm_path = os.getenv("ROCM_PATH")
-    if rocm_path:
-        return Path(rocm_path)
-    return script_dir.parent.parent.parent
+    raise RuntimeError(
+        "Could not derive ROCM_PATH from an installed rocdecode test layout. "
+        "Set ROCM_PATH explicitly."
+    )
 
 
-def setup_env(env: dict[str, str], rocm_path: Path) -> bool:
+def get_rocm_lib_dir(rocm_path: Path) -> Path:
+    for name in ("lib", "lib64"):
+        candidate = rocm_path / name
+        if candidate.is_dir():
+            return candidate
+    raise FileNotFoundError(f"Could not find ROCm library directory under {rocm_path}")
+
+
+def setup_env(env: Dict[str, str], rocm_path: Path) -> bool:
     env["ROCM_PATH"] = str(rocm_path)
     logging.info(f"++ rocdecode setting ROCM_PATH={rocm_path}")
     if platform.system() == "Linux":
-        hip_lib_path = rocm_path / "lib"
+        hip_lib_path = get_rocm_lib_dir(rocm_path)
         logging.info(f"++ rocdecode setting LD_LIBRARY_PATH={hip_lib_path}")
         if "LD_LIBRARY_PATH" in env:
             env["LD_LIBRARY_PATH"] = f"{hip_lib_path}:{env['LD_LIBRARY_PATH']}"
@@ -39,7 +48,7 @@ def setup_env(env: dict[str, str], rocm_path: Path) -> bool:
         return False
 
 
-def execute_tests(env: dict[str, str], test_source_dir: Path, build_dir: Path) -> None:
+def execute_tests(env: Dict[str, str], test_source_dir: Path, build_dir: Path) -> None:
     if not test_source_dir.is_dir():
         raise FileNotFoundError(f"rocdecode tests not found in {test_source_dir}")
 
@@ -91,11 +100,10 @@ def execute_tests(env: dict[str, str], test_source_dir: Path, build_dir: Path) -
 
 def main() -> None:
     script_dir = Path(__file__).resolve().parent
-    rocm_path = Path(
-        os.environ.get("ROCM_PATH", derive_rocm_path(script_dir))
-    ).resolve()
+    rocm_path_env = os.getenv("ROCM_PATH")
+    rocm_path = Path(rocm_path_env).resolve() if rocm_path_env else derive_rocm_path(script_dir)
     test_source_dir = rocm_path / "share" / "rocdecode" / "test"
-    build_dir = Path(os.environ.get("TEST_BUILD_DIR", Path.cwd() / "rocdecode-test"))
+    build_dir = Path(os.getenv("TEST_BUILD_DIR") or Path.cwd() / "rocdecode-test")
     build_dir = build_dir.resolve()
 
     env = os.environ.copy()
