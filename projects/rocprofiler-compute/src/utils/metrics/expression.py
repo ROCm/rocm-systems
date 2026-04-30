@@ -10,7 +10,6 @@ import re
 
 import astunparse
 
-from utils import schema
 from utils.utils_common import SUPPORTED_FIELD
 from utils.utils_counter_defs import SUPPORTED_DENOM
 
@@ -89,7 +88,7 @@ class CodeTransformer(ast.NodeTransformer):
         return node
 
 
-def build_eval_string(equation: str, coll_level: str, config: dict) -> str:
+def build_eval_string(equation: str) -> str:
     """
     Convert user defined equation string to eval executable string.
     For example,
@@ -97,18 +96,18 @@ def build_eval_string(equation: str, coll_level: str, config: dict) -> str:
             100 * SUM(SQ_ACTIVE_INST_SCA) / SUM(GRBM_GUI_ACTIVE * $numCU)
         output:
             100 * to_sum(
-                raw_pmc_df["pmc_perf"]["SQ_ACTIVE_INST_SCA"]
+                raw_pmc_df["SQ_ACTIVE_INST_SCA"]
             ) / to_sum(
-                raw_pmc_df["pmc_perf"]["GRBM_GUI_ACTIVE"] *
-                numCU
+                raw_pmc_df["GRBM_GUI_ACTIVE"] *
+                ammolite__numCU
             )
         input:
             SUM(TCC_EA_RDREQ_LEVEL_31) / SUM(TCC_EA_RDREQ_31)
         output:
             to_sum(
-                raw_pmc_df["pmc_perf"]["TCC_EA_RDREQ_LEVEL_31"]
+                raw_pmc_df["TCC_EA_RDREQ_LEVEL_31"]
             ) / to_sum(
-                raw_pmc_df["pmc_perf"]["TCC_EA_RDREQ_31"]
+                raw_pmc_df["TCC_EA_RDREQ_31"]
             )
         We can not handle the below for now:
         input:
@@ -125,16 +124,13 @@ def build_eval_string(equation: str, coll_level: str, config: dict) -> str:
         But potential workaround is:
         output:
             to_avg(
-                raw_pmc_df["pmc_perf"]["TCC_EA_RDREQ_31"].where(
-                    raw_pmc_df["pmc_perf"]["TCC_EA_RDREQ_31"] == 0,
-                    raw_pmc_df["pmc_perf"]["TCC_EA_RDREQ_LEVEL_31"] /
-                    raw_pmc_df["pmc_perf"]["TCC_EA_RDREQ_31"]
+                raw_pmc_df["TCC_EA_RDREQ_31"].where(
+                    raw_pmc_df["TCC_EA_RDREQ_31"] == 0,
+                    raw_pmc_df["TCC_EA_RDREQ_LEVEL_31"] /
+                    raw_pmc_df["TCC_EA_RDREQ_31"]
                 )
             )
     """
-    if coll_level is None:
-        raise Exception("Error: coll_level can not be None.")
-
     if not equation:
         return ""
 
@@ -155,30 +151,6 @@ def build_eval_string(equation: str, coll_level: str, config: dict) -> str:
     # the target is df['TCC_HIT[0]']
     equation_string = re.sub(r"\'\]\[(\d+)\]", r"[\g<1>]']", equation_string)
 
-    # apply coll_level
-    if config.get("format_rocprof_output") == "rocpd":
-        # Replace SQ_ACCUM_PREV_HIRES with coll_level_ACCUM then ignore coll_level df
-        equation_string = re.sub(
-            "SQ_ACCUM_PREV_HIRES", f"{coll_level}_ACCUM", equation_string
-        )
-        equation_string = re.sub(
-            r"raw_pmc_df",
-            f"raw_pmc_df['{schema.PMC_PERF_FILE_PREFIX}']",
-            equation_string,
-        )
-    else:
-        # Use pmc_perf.csv for all counters
-        equation_string = re.sub(
-            r"raw_pmc_df",
-            f"raw_pmc_df['{schema.PMC_PERF_FILE_PREFIX}']",
-            equation_string,
-        )
-        # Use coll_level csv for SQ_ACCUM_PREV_HIRES counter only
-        equation_string = re.sub(
-            rf"raw_pmc_df['{schema.PMC_PERF_FILE_PREFIX}']['SQ_ACCUM_PREV_HIRES']",
-            f"raw_pmc_df['{coll_level}']['SQ_ACCUM_PREV_HIRES']",
-            equation_string,
-        )
     return equation_string
 
 
@@ -287,7 +259,6 @@ def build_metric_value_string(
     dfs: dict,
     dfs_type: dict,
     normal_unit: str,
-    profiling_config: dict,
 ) -> None:
     """Apply the real eval string to its field in the metric_table df."""
     for table_id, df in dfs.items():
@@ -307,8 +278,6 @@ def build_metric_value_string(
                             if expr.lower() != "alias":
                                 df.at[row_idx_label, expr] = build_eval_string(
                                     df.at[row_idx_label, expr],
-                                    df.at[row_idx_label, "coll_level"],
-                                    profiling_config,
                                 )
 
                 elif expr.lower() == "unit" or expr.lower() == "units":

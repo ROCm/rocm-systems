@@ -151,7 +151,6 @@ class OmniAnalyze_Base:
     @demarcate
     def load_options(self, normalization_filter: Optional[str]) -> None:
         args = self.get_args()
-        profiling_config = self.get_profiling_config()
         target_filter = normalization_filter or args.normal_unit
 
         for arch_config in self._arch_configs.values():
@@ -159,7 +158,6 @@ class OmniAnalyze_Base:
                 arch_config.dfs,
                 arch_config.dfs_type,
                 target_filter,
-                profiling_config,
             )
         # Error checking for multiple runs and multiple kernel filters
         if args.gpu_kernel and (len(args.path) != len(args.gpu_kernel)):

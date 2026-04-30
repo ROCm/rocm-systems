@@ -80,7 +80,7 @@ def load_profiling_config(config_dir: str) -> dict[str, Any]:
 
 @demarcate
 def create_df_kernel_top_stats(
-    df_in: dict[str, pd.DataFrame],
+    df_in: pd.DataFrame,
     raw_data_dir: str,
     filter_gpu_ids: Optional[list[str]],
     filter_dispatch_ids: Optional[list[str]],
@@ -96,7 +96,7 @@ def create_df_kernel_top_stats(
         A tuple of (kernel_top_df, dispatch_info_df).
     """
 
-    df = df_in["pmc_perf"].copy()
+    df = df_in.copy()
 
     # The logic below for filters are the same as in parser.apply_filters(),
     # which can be merged together if need it.
@@ -299,7 +299,6 @@ def create_df_pmc(
         raw_data_dir: str, node_name: Optional[str], kernel_verbose: int, verbose: int
     ) -> pd.DataFrame:
         dfs: list[pd.DataFrame] = []
-        coll_levels: list[str] = []
 
         coll_level_map = {}
         for file_name in Path(raw_data_dir).rglob("*.csv"):
@@ -312,11 +311,10 @@ def create_df_pmc(
                     len("pmc_perf_") : -len(".csv")
                 ]
 
-            # coll_level for pmc_perf.csv
             if file_name.name == f"{schema.PMC_PERF_FILE_PREFIX}.csv":
                 coll_level_map[file_name] = schema.PMC_PERF_FILE_PREFIX
 
-        for csv_file in coll_level_map:
+        for csv_file, coll_level in coll_level_map.items():
             tmp_df = pd.read_csv(csv_file)
 
             if config_dict.get("format_rocprof_output") == "rocpd":
@@ -327,11 +325,18 @@ def create_df_pmc(
             if kernel_verbose >= 0:
                 kernel_name_shortener(tmp_df, kernel_verbose)
 
-            # NB:
-            #   Idealy, the Node column should be added out of
-            #   multiindexing level. Here, we add it into pmc_perf
-            #   as it is the main sub-df which can be handled easily
-            #   later.
+            # Disambiguate the SQ_ACCUM_PREV_HIRES counter, which appears in
+            # every pmc_perf_<bucket>.csv file, by suffixing it with the
+            # collection level (e.g. SQ_INST_LEVEL_VMEM_ACCUM). Analysis
+            # YAML formulas reference the renamed columns directly.
+            if (
+                coll_level != schema.PMC_PERF_FILE_PREFIX
+                and "SQ_ACCUM_PREV_HIRES" in tmp_df.columns
+            ):
+                tmp_df = tmp_df.rename(
+                    columns={"SQ_ACCUM_PREV_HIRES": f"{coll_level}_ACCUM"}
+                )
+
             if (
                 csv_file.name == f"{schema.PMC_PERF_FILE_PREFIX}.csv"
                 and node_name is not None
@@ -339,13 +344,16 @@ def create_df_pmc(
                 tmp_df.insert(0, "Node", node_name)
 
             dfs.append(tmp_df)
-            coll_levels.append(coll_level_map[csv_file])
 
         if not dfs:
             return pd.DataFrame()
 
-        # TODO: double check the case if all tmp_df.shape[0] are not on the same page
-        final_df = pd.concat(dfs, keys=coll_levels, axis=1, join="inner", copy=False)
+        # Join all per-bucket frames horizontally on the row index. Shared
+        # metadata columns (Dispatch_ID, Kernel_Name, ...) are deduplicated
+        # by keeping the first occurrence; counter columns are unique after
+        # the SQ_ACCUM_PREV_HIRES rename above.
+        final_df = pd.concat(dfs, axis=1, join="inner", copy=False)
+        final_df = final_df.loc[:, ~final_df.columns.duplicated()]
         if verbose >= 2:
             console_debug(f"pmc_raw_data final_single_df {final_df.info}")
         return final_df
