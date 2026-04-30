@@ -69,6 +69,8 @@ set(SRC_FILES
   device/symmetric/reduce_scatter.cuh
   graph/connect.cc
   graph/paths.cc
+  graph/rccl_graph_gen.cc
+  graph/rccl_graph_gen.h
   graph/rings.cc
   graph/rings.h
   graph/rome_models.cc
