@@ -62,6 +62,7 @@
 /experimental/rocjitsu                                                @atgutier
 
 # Emulation
+/emulation                                                            @atgutier
 /emulation/rocjitsu                                                   @atgutier
 
 # Documentation-specific ownership by project (last to take precedence)
