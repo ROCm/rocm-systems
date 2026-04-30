@@ -20,25 +20,15 @@ logger = logging.getLogger(__name__)
 
 def parse_arguments() -> argparse.Namespace:
     """
-    Parse command-line arguments with all-or-nothing logic.
+    Parse command-line arguments.
     """
     parser = argparse.ArgumentParser(
-        description="Run ROCm Debug Agent tests with configurable paths.",
+        description="Run ROCm Debug Agent tests.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
-Environment Variables (used when CLI args are not provided):
+Environment Variables:
   OUTPUT_ARTIFACTS_DIR     ROCm tree root directory (optional)
         """,
-    )
-    parser.add_argument(
-        "--test-bin",
-        type=Path,
-        help="Path to rocm-debug-agent-test binary.",
-    )
-    parser.add_argument(
-        "--test-script",
-        type=Path,
-        help="Path to run-test.py script.",
     )
     parser.add_argument(
         "--max-retries",
@@ -53,19 +43,7 @@ Environment Variables (used when CLI args are not provided):
         help="Base delay in seconds between retries (default: 5).",
     )
 
-    args = parser.parse_args()
-
-    # Check if any arguments are provided.
-    args_provided = [args.test_bin, args.test_script]
-    args_count = sum(arg is not None for arg in args_provided)
-
-    # Either all arguments or none.
-    if args_count not in (0, 2):
-        parser.error(
-            "Error: Either provide both arguments (--test-bin, --test-script) or none."
-        )
-
-    return args
+    return parser.parse_args()
 
 
 def set_core_dump_limit() -> None:
@@ -331,17 +309,10 @@ def main() -> None:
     args = parse_arguments()
 
     print_section("Path discovery")
-    # Determine paths to use.
-    if args.test_bin is not None:
-        logger.info("Using paths from command-line arguments.")
-        rocr_debug_agent_test_bin = validate_path(args.test_bin, "--test-bin")
-        rocr_debug_agent_test_script = validate_path(args.test_script, "--test-script")
-    else:
-        # Use default logic.
-        logger.info("Using default path discovery logic.")
-        defaults = get_default_paths()
-        rocr_debug_agent_test_bin = defaults["test_bin"]
-        rocr_debug_agent_test_script = defaults["test_script"]
+    # Discover paths using automatic logic.
+    defaults = get_default_paths()
+    rocr_debug_agent_test_bin = defaults["test_bin"]
+    rocr_debug_agent_test_script = defaults["test_script"]
 
     # Derive the test binary directory.
     test_bin_dir = rocr_debug_agent_test_bin.parent
