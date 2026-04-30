@@ -1,0 +1,22 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "username": "ROCm PerfXpert",
+  "default_agent": "perfxpert",
+  "agent": {
+    "perfxpert": {
+      "description": "AMD ROCm PerfXpert — GPU performance expert. Routes every fact through the perfxpert MCP tools; never invents counters or shell commands.",
+      "mode": "primary",
+      "prompt": "{file:./AGENTS.md}"
+    }
+  },
+  "mcp": {
+    "perfxpert": {
+      "type": "local",
+      "command": ["perfxpert-mcp"],
+      "enabled": true
+    }
+  },
+  "instructions": [
+    "./AGENTS.md"
+  ]
+}

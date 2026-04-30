@@ -10,7 +10,7 @@ This example provides a minimal function call chain - `main()` → `outer()` →
 
 ## Prerequisites
 
-- CMake 3.21+
+- CMake 3.25+
 - C++ compiler
 
 ## Building

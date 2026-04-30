@@ -83,7 +83,7 @@ static void GlutError(const char *fmt, va_list ap)
 
     // Mark this test as skipped because this error could be
     // due to system doesn't have display connected, e.g: Jenkins CI machine
-    HipTest::HIP_SKIP_TEST("GLUT Init Failed");
+    HipTest::HIP_SKIP_TEST("GLUT initialization failed.");
 
     glutExit();
     exit(1);
@@ -208,7 +208,7 @@ class GLContextScopeGuard {
   GLContextScopeGuard() {
 
     if(!HipTest::isImageSupported()) {
-      HipTest::HIP_SKIP_TEST("Image is not supported on the device. Skipped.");
+      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kTextureImageUnsupported);
       exit(0);
     }
 
@@ -236,7 +236,7 @@ class GLContextScopeGuard {
     if (err != GLEW_OK) {
       fprintf(stderr, "GLEW initialization failed: %s\n",
               glewGetErrorString(err));
-      HipTest::HIP_SKIP_TEST("GLEW Init Failed");
+      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kGlewInitFailed);
       exit(1);
     }
 #endif

@@ -369,7 +369,12 @@ static inspectorResult_t inspectorCommInfoMetaHeader(jsonFileOutput* jfo) {
     JSON_CHK(jsonKey(jfo, "rec_mechanism")); JSON_CHK(jsonStr(jfo, "nccl_profiler_interface"));
     JSON_CHK(jsonKey(jfo, "dump_timestamp_us")); JSON_CHK(jsonUint64(jfo, inspectorGetTime()));
     char hostname[256];
-    gethostname(hostname, 255);
+    // RCCL: gethostname() does not NUL-terminate on truncation.
+    if (gethostname(hostname, sizeof(hostname)) != 0) {
+      hostname[0] = '\0';
+    } else {
+      hostname[sizeof(hostname) - 1] = 0;
+    }
     JSON_CHK(jsonKey(jfo, "hostname")); JSON_CHK(jsonStr(jfo, hostname));
     JSON_CHK(jsonKey(jfo, "pid")); JSON_CHK(jsonUint64(jfo, getpid()));
   }
@@ -741,18 +746,38 @@ static void genDumpDir(char** workdir) {
   }
 }
 
+// RCCL: rewritten as a plain struct with pthread condvar sleep replacing
+// std::this_thread::sleep_for. Fixes teardown hang.
+// For upcoming syncs with Prometheus/ROCm extensions — do not sync without manual review.
 struct inspectorDumpThread {
   bool run{false};
+  bool threadStarted{false};
   jsonFileOutput* jfo;
   char* outputRoot;
   uint64_t sampleIntervalUsecs;
   pthread_t pthread;
-  pthread_rwlock_t guard;
+  // Mutex + condvar replacing nanosleep-based polling; wakes immediately on stopThread.
+  pthread_mutex_t sleepMutex;
+  pthread_cond_t  sleepCond;
+  clockid_t       sleepCondClock{CLOCK_MONOTONIC}; // clock used for timedwait deadlines
 
   inspectorDumpThread(const char* outputRoot, uint64_t sampleIntervalUsecs)
     : jfo(nullptr), outputRoot(strdup(outputRoot)), sampleIntervalUsecs(sampleIntervalUsecs) {
-    if (inspectorLockInit(&guard) != inspectorSuccess) {
-      INFO(NCCL_INSPECTOR, "NCCL Inspector inspectorDumpThread: couldn't init lock");
+    pthread_mutex_init(&sleepMutex, nullptr);
+    pthread_condattr_t condAttr;
+    bool useMonotonic = (pthread_condattr_init(&condAttr) == 0 &&
+                         pthread_condattr_setclock(&condAttr, CLOCK_MONOTONIC) == 0);
+    if (useMonotonic) {
+      pthread_cond_init(&sleepCond, &condAttr);
+      pthread_condattr_destroy(&condAttr);
+    } else {
+      // CLOCK_MONOTONIC condvar not supported; fall back to default (CLOCK_REALTIME).
+      // dumpMain will detect this and use CLOCK_REALTIME for its deadline.
+      INFO(NCCL_INSPECTOR,
+           "NCCL Inspector: CLOCK_MONOTONIC condvar unavailable; using CLOCK_REALTIME");
+      pthread_condattr_destroy(&condAttr);
+      pthread_cond_init(&sleepCond, nullptr);
+      sleepCondClock = CLOCK_REALTIME;
     }
   }
 
@@ -765,32 +790,35 @@ struct inspectorDumpThread {
       free(outputRoot);
       outputRoot = nullptr;
     }
-    if (inspectorLockDestroy(&guard) != inspectorSuccess) {
-      INFO(NCCL_INSPECTOR, "NCCL Inspector inspectorDumpThread: couldn't destroy lock");
-    }
+    pthread_cond_destroy(&sleepCond);
+    pthread_mutex_destroy(&sleepMutex);
   }
 
   void startThread() {
-    inspectorLockWr(&guard);
+    pthread_mutex_lock(&sleepMutex);
     run = true;
-    inspectorUnlockRWLock(&guard);
+    pthread_mutex_unlock(&sleepMutex);
     if (pthread_create(&pthread, NULL, dumpMain, this) != 0) {
       INFO(NCCL_INSPECTOR,
            "NCCL Inspector inspectorDumpThread: couldn't create dump thread!");
+      pthread_mutex_lock(&sleepMutex);
+      run = false;
+      pthread_mutex_unlock(&sleepMutex);
       return;
     }
+    threadStarted = true;
     INFO(NCCL_INSPECTOR, "NCCL Inspector inspectorDumpThread: created");
   }
 
   void stopThread() {
-    INFO(NCCL_ENV, "NCCL Inspector Stopping Dump thread");
-    inspectorLockWr(&guard);
+    INFO(NCCL_INSPECTOR, "NCCL Inspector Stopping Dump thread");
+    // Set run = false and signal under sleepMutex so the dump thread cannot
+    // miss the wakeup regardless of where it is in its loop.
+    pthread_mutex_lock(&sleepMutex);
     run = false;
-    inspectorUnlockRWLock(&guard);
-    struct timespec ts;
-    ts.tv_sec = 0;
-    ts.tv_nsec = 1000000; // 1ms
-    nanosleep(&ts, NULL);
+    pthread_cond_signal(&sleepCond);
+    pthread_mutex_unlock(&sleepMutex);
+    if (threadStarted) pthread_join(pthread, NULL);
     INFO(NCCL_INSPECTOR, "NCCL Inspector inspectorDumpThread: stopped");
   }
 
@@ -805,7 +833,12 @@ struct inspectorDumpThread {
 
     if (jfo == 0) {
       char hostname[256];
-      gethostname(hostname, 255);
+      // RCCL: gethostname() does not NUL-terminate on truncation.
+      if (gethostname(hostname, sizeof(hostname)) != 0) {
+        hostname[0] = '\0';
+      } else {
+        hostname[sizeof(hostname) - 1] = 0;
+      }
       char tmp[2048];
       snprintf(tmp, sizeof(tmp), "%s/%s-pid%d.log", output_root, hostname, getpid());
       jsonResult_t result = jsonInitFileOutput(&jfo, tmp);
@@ -821,7 +854,11 @@ struct inspectorDumpThread {
       inspectorCommInfoListDump(jfo, &g_state.deletedComms);
     }
 
-    if (g_state.deletedComms.ncomms > 0) {
+    // RCCL: re-read ncomms under lock to avoid TOCTOU after inspectorCommInfoListDump.
+    inspectorLockRd(&g_state.deletedComms.guard);
+    bool hasDeleted = (g_state.deletedComms.ncomms > 0);
+    inspectorUnlockRWLock(&g_state.deletedComms.guard);
+    if (hasDeleted) {
       inspectorCommInfoListFinalize(&g_state.deletedComms);
     }
     return inspectorSuccess;
@@ -830,24 +867,35 @@ struct inspectorDumpThread {
   static void* dumpMain(void* arg) {
     inspectorDumpThread* dumper = (inspectorDumpThread*)arg;
     inspectorResult_t res = inspectorSuccess;
-    struct timespec ts;
-    ts.tv_sec = dumper->sampleIntervalUsecs / 1000000;
-    ts.tv_nsec = dumper->sampleIntervalUsecs % 1000000;
 
-    while (dumper->run) {
-      inspectorLockWr(&dumper->guard);
-      if (!dumper->run) {
-        inspectorUnlockRWLock(&dumper->guard);
-        break;
-      }
+    while (true) {
+      // Check run flag under sleepMutex so stopThread's signal is never missed.
+      pthread_mutex_lock(&dumper->sleepMutex);
+      bool shouldRun = dumper->run;
+      pthread_mutex_unlock(&dumper->sleepMutex);
+      if (!shouldRun) break;
+
       res = dumper->inspectorStateDump(dumper->outputRoot);
-      if (res == inspectorFileOpenError || res == inspectorDisabledError) {
-        inspectorUnlockRWLock(&dumper->guard);
-        break;
-      }
-      inspectorUnlockRWLock(&dumper->guard);
+      if (res == inspectorFileOpenError || res == inspectorDisabledError) break;
 
-      nanosleep(&ts, NULL);
+      // Interruptible sleep: wakes immediately when stopThread signals the condvar.
+      struct timespec deadline;
+      clock_gettime(dumper->sleepCondClock, &deadline);
+      uint64_t nsTotal = dumper->sampleIntervalUsecs * 1000ULL;  // µs → ns
+      deadline.tv_sec  += nsTotal / 1000000000ULL;
+      deadline.tv_nsec += nsTotal % 1000000000ULL;
+      if (deadline.tv_nsec >= 1000000000L) {
+        deadline.tv_sec  += 1;
+        deadline.tv_nsec -= 1000000000L;
+      }
+      pthread_mutex_lock(&dumper->sleepMutex);
+      // Loop to handle spurious wakeups: keep waiting until the deadline
+      // expires or run becomes false (stopThread signalled us).
+      while (dumper->run) {
+        int rc = pthread_cond_timedwait(&dumper->sleepCond, &dumper->sleepMutex, &deadline);
+        if (rc == ETIMEDOUT) break;
+      }
+      pthread_mutex_unlock(&dumper->sleepMutex);
     }
 
     return 0;
@@ -1361,11 +1409,13 @@ void inspectorComputeCollBw(struct inspectorCommInfo *commInfo,
     factor = ((double)(2 * (commInfo->nranks - 1))) / ((double)commInfo->nranks);
     break;
   case ncclFuncReduceScatter:
-    trafficSize = (double)(completedColl->msgSizeBytes * commInfo->nranks);
+    // RCCL: cast before multiply to avoid uint64 overflow on large messages.
+    trafficSize = (double)completedColl->msgSizeBytes * (double)commInfo->nranks;
     factor = ((double)(commInfo->nranks - 1)) / ((double)commInfo->nranks);
     break;
   case ncclFuncAllGather:
-    trafficSize = (double)(completedColl->msgSizeBytes * commInfo->nranks);
+    // RCCL: cast before multiply to avoid uint64 overflow on large messages.
+    trafficSize = (double)completedColl->msgSizeBytes * (double)commInfo->nranks;
     factor = ((double)(commInfo->nranks - 1)) / ((double)commInfo->nranks);
     break;
   case ncclFuncSendRecv:
@@ -1386,8 +1436,8 @@ void inspectorComputeCollBw(struct inspectorCommInfo *commInfo,
  * Description:
  *
  *   Helper function to calculate kernel execution time using GPU
- *   clock values.  The GPU clock values are measured in nanoseconds
- *   from the globaltimer register.
+ *   clock values, which are ticks from `wall_clock64()` (100 MHz, 10 ns per tick)
+ *   divide by 100 to convert to microseconds.
  *
  * Thread Safety:
  *   Thread-safe (read-only operations on kernel info).
@@ -1406,8 +1456,10 @@ void inspectorComputeCollBw(struct inspectorCommInfo *commInfo,
 static uint64_t calculateKernelGpuExecTimeUsecs(struct inspectorKernelChInfo *kernelCh) {
   if (kernelCh->startGpuClk != 0 && kernelCh->stopGpuClk != 0) {
     if (kernelCh->stopGpuClk > kernelCh->startGpuClk) {
-      uint64_t execTimeNanosecs = kernelCh->stopGpuClk - kernelCh->startGpuClk;
-      return execTimeNanosecs / 1000;
+      uint64_t ticks = kernelCh->stopGpuClk - kernelCh->startGpuClk;
+      // RCCL: AMD wall_clock64() runs at 100 MHz (10 ns/tick); divide by 100 for µs.
+      // NCCL uses CUDA globaltimer at ~1 GHz (divide by 1000). Do not sync from NCCL.
+      return ticks / 100;
     }
   }
   return 0;
@@ -1443,7 +1495,9 @@ static uint64_t calculateMaxKernelExecTimeUsecs(struct inspectorCollInfo *collIn
   uint64_t maxKernelExecTimeUsecs = 0;
   inspectorTimingSource_t bestTimingSource = inspectorTimingSourceCollectiveCpu;
 
-  for (uint32_t i = 0; i < collInfo->nChannels; i++) {
+  // RCCL: cap iteration to MAX_CHANNELS; RCCL MAXCHANNELS (128/512) can exceed kernelCh[].
+  uint32_t nCh = (collInfo->nChannels < MAX_CHANNELS) ? collInfo->nChannels : MAX_CHANNELS;
+  for (uint32_t i = 0; i < nCh; i++) {
     struct inspectorKernelChInfo *kernelCh = &collInfo->kernelCh[i];
     uint64_t gpuExecTimeUsecs = calculateKernelGpuExecTimeUsecs(kernelCh);
     if (gpuExecTimeUsecs > 0) {
@@ -1467,6 +1521,7 @@ static uint64_t calculateMaxKernelExecTimeUsecs(struct inspectorCollInfo *collIn
     return maxKernelExecTimeUsecs;
   } else {
     *timingSource = inspectorTimingSourceCollectiveCpu;
+    if (collInfo->tsCompletedUsec <= collInfo->tsStartUsec) return 0; // RCCL: underflow guard
     return collInfo->tsCompletedUsec - collInfo->tsStartUsec;
   }
 }

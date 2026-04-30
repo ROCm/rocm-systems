@@ -1,7 +1,7 @@
 /*
  ***********************************************************************************************************************
  *
- *  Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All Rights Reserved.
+ *  Copyright (c) Advanced Micro Devices, Inc., or its affiliates. All rights reserved.
  *
  *  Permission is hereby granted, free of charge, to any person obtaining a copy
  *  of this software and associated documentation files (the "Software"), to deal
@@ -266,11 +266,11 @@ extern size_t EncodeAsFilename(
 
 /// Generate a log filename.
 ///
-/// @param [inout] pFilenameBuffer   Buffer to hold the filename.
-/// @param         maxSize           Max size of the pFilenameBuffer.
-/// @param         nextPost          The next write position.
-/// @param [in]    pExt              The filename extension.
-/// @param         logDuplicate      Log duplicate objects.
+/// @param [in,out] pFilenameBuffer   Buffer to hold the filename.
+/// @param          maxSize           Max size of the pFilenameBuffer.
+/// @param          nextPost          The next write position.
+/// @param [in]     pExt              The filename extension.
+/// @param          logDuplicate      Log duplicate objects.
 extern void GenLogFilename(
     char*             pFilenameBuffer,
     size_t            maxSize,

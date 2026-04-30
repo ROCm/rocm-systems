@@ -170,7 +170,7 @@ ncclResult_t rcclOverrideChannels(struct ncclComm* comm, ncclFunc_t coll, size_t
     return ncclSuccess;
   }
 
-  if (comm->nRanks == comm->nNodes) {
+  if ((comm->nRanks == comm->nNodes) && !IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx1151")) {
     INFO(NCCL_TUNING, "RCCL tuning model channel thresholds not applied for single GPU per node case");
     return ncclSuccess;
   }
@@ -370,12 +370,6 @@ ncclResult_t rcclGetAlgoName(int algo, const char** algoName) {
       case rcclAddonAlgos_t::RCCL_DIRECT_ALLGATHER:
         *algoName = "Direct";
         break;
-      case rcclAddonAlgos_t::RCCL_MSCCL:
-        *algoName = "MSCCL";
-        break;
-      case rcclAddonAlgos_t::RCCL_MSCCLPP:
-        *algoName = "MSCCLPP";
-        break;
 #ifdef ENABLE_WARP_SPEED
       case rcclAddonAlgos_t::RCCL_WARP_SPEED:
         *algoName = "RING*"; // WarpSpeed (*) uses RING algorithm
@@ -424,6 +418,12 @@ bool rcclUseAllGatherDirect(struct ncclComm* comm, size_t& msgSize) {
     return false;
   }
 
+  // Multi-node Direct AllGather requires PXN
+  if (comm->nNodes > 1 && ncclPxnDisable(comm) != 0) {
+    INFO(NCCL_INIT, "RCCL DIRECT ALLGATHER disabled on multi-node due to PXN being disabled.");
+    return false;
+  }
+
   // Check if user explicitly set threshold
   static int userThresholdInput = -2;
   if (userThresholdInput == -2) {
@@ -436,6 +436,11 @@ bool rcclUseAllGatherDirect(struct ncclComm* comm, size_t& msgSize) {
   // Only perform auto-selection if user didn't explicitly set the threshold and threshold is not -1
   if (!userThresholdInput && IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950") && threshold != -1) {
     if (comm->nNodes == 1) {
+      // Disable Direct AllGather on single-node when CE-based AllGather is enabled
+      if (comm->symmetricSupport && comm->config.CTAPolicy == NCCL_CTA_POLICY_ZERO){
+        INFO(NCCL_INIT, "RCCL Direct AllGather disabled: CTA policy ZERO, using CE-based AllGather.");
+        return false;
+      }
       threshold = 8388608;
     } else if (comm->nNodes < 64) {
       threshold = comm->nNodes * 2097152;
@@ -569,7 +574,7 @@ void rcclSetWarpSpeedCUs(struct ncclComm* comm, int algo, int threadsPerBlock, i
 }
 
 bool rcclWarpSpeedSupported(struct ncclComm* comm, struct ncclKernelPlan* plan) {
-  if (!comm->topo->warpSpeedEnabled) {
+  if (!comm->topo->warpSpeedEnabled || plan->isSymColl) {
     return false;
   }
 

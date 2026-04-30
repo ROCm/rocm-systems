@@ -52,7 +52,8 @@ std::vector<std::unique_ptr<BasicBlock>> BasicBlock::build(const CodeObject &co,
     auto current = std::make_unique<BasicBlock>(byte_offset);
 
     while (pc < inst_data_size) {
-      auto inst = decoder.decode(&inst_data[pc]);
+      auto *raw_inst = decoder.decode(&inst_data[pc]);
+      std::unique_ptr<Instruction> inst(raw_inst);
       uint32_t inst_size_bytes = static_cast<uint32_t>(inst->size());
       uint32_t inst_words = inst_size_bytes / sizeof(uint32_t);
 

@@ -1561,7 +1561,7 @@ void KFDMemoryTest::PtraceAccessInvisibleVram(int gpuNode) {
     // dstBuffer is cpu accessible gtt memory
     HsaMemoryBuffer dstBuffer(PAGE_SIZE, gpuNode);
 
-    ASSERT_SUCCESS_GPU(m_pAsm->RunAssembleBuf(ScratchCopyDwordIsa, isaBuffer.As<char*>()), gpuNode);
+    ASSERT_SUCCESS_GPU(m_pAsm->RunAssembleBuf(CopyDwordIsa, isaBuffer.As<char*>()), gpuNode);
 
     Dispatch dispatch0(isaBuffer);
     dispatch0.SetArgs(mem0, dstBuffer.As<void*>());
@@ -3067,6 +3067,11 @@ void KFDMemoryTest::ExportDMABufTest(int gpuNode) {
 
     if (Get_Version()->KernelInterfaceMinorVersion < 12) {
         LOG() << "Skipping test, requires KFD ioctl version 1.12 or newer" << std::endl;
+        return;
+    }
+
+    if (!Get_NodeInfo()->IsGPUNodeLargeBar(gpuNode)) {
+        LOG() << "Skipping test: Test requires a large bar GPU." << std::endl;
         return;
     }
 

@@ -281,7 +281,7 @@ void physicalMemoryReuse_MultiDev (hipMemAllocationProp prop) {
   int devicecount = 0;
   HIP_CHECK(hipGetDeviceCount(&devicecount));
   if (devicecount < 2) {
-    HipTest::HIP_SKIP_TEST("Machine is Single GPU. Skipping Test..");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
     return;
   }
   size_t granularity = 0;
@@ -454,7 +454,7 @@ void vMMMemoryReuse_MultiGPU (hipMemAllocationProp prop) {
   int deviceId = 0, devicecount = 0;
   HIP_CHECK(hipGetDeviceCount(&devicecount));
   if (devicecount < 2) {
-    HipTest::HIP_SKIP_TEST("Machine is Single GPU. Skipping Test..");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
     return;
   }
   size_t granularity = 0;

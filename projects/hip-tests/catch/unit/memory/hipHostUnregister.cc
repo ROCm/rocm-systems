@@ -20,8 +20,8 @@ constexpr unsigned int allFlags = hipHostRegisterDefault |   // 0
 inline bool hipHostRegisterSupported() {
 #if HT_NVIDIA
   // unable to query for cudaDevAttrHostRegisterSupported equivalent
-  HipTest::HIP_SKIP_TEST("EXSWCPHIPT-40");
-  HipTest::HIP_SKIP_TEST("hipHostRegister is not supported on this device");
+  HipTest::HIP_SKIP_TEST("tracked issue EXSWCPHIPT-40.");
+  HipTest::HIP_SKIP_TEST("hipHostRegister is not supported on this device.");
   return false;
 #else
   return true;
