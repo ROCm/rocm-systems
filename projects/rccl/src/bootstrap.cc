@@ -17,7 +17,6 @@
 #include "param.h"
 #include "ras.h"
 #include <mutex>
-#include <thread>
 
 #define BOOTSTRAP_N_CHECK_ABORT           10000
 #define BOOTSTRAP_TAG_CONNECT             (0x1 << 31)
@@ -233,6 +232,61 @@ static ncclResult_t netSendRecv(ncclNet_t* net, void* sendComm, void* sendData, 
       NCCLCHECK(netIsend(net, sendComm, sendData, sendSize, sendDataHandle, tag, &sendReq, &doneSend));
     }
   } while (!doneSend || !doneRecv);
+  return ncclSuccess;
+}
+
+#define NCCL_NET_OP_SEND 0
+#define NCCL_NET_OP_RECV 1
+
+// Net analogue of struct ncclSocketOp / ncclSocketMultiOp: drives an arbitrary number of
+// non-blocking netIsend/netIrecv operations to completion in a single thread by round-robin
+// polling. Used by the bidirectional bootstrap AllGather to overlap send/recv on both ring
+// directions across the four IB comms (forward sendComm/recvComm + reverse pair) without
+// spawning std::thread. MRs must be pre-registered by the caller (handle field).
+struct ncclNetOp {
+  int op;        // NCCL_NET_OP_SEND or NCCL_NET_OP_RECV
+  void* comm;    // send or recv comm to operate on
+  void* data;    // data pointer (must lie inside the buffer registered as 'handle')
+  int size;      // payload size
+  void* handle;  // pre-registered MR handle for 'data'
+  int tag;       // IB tag
+  void* req;     // in-flight NCCL net request (set internally)
+  int done;      // completion flag (set internally)
+};
+
+static ncclResult_t netMultiOp(ncclNet_t* net, struct ncclNetOp* ops, int numOps,
+                               volatile uint32_t* abortFlag) {
+  if (ops == NULL || numOps <= 0) {
+    WARN("netMultiOp: invalid arguments ops=%p numOps=%d", ops, numOps);
+    return ncclInvalidArgument;
+  }
+  for (int i = 0; i < numOps; i++) {
+    if (ops[i].comm == NULL) {
+      WARN("netMultiOp: invalid comm at index %d", i);
+      return ncclInvalidArgument;
+    }
+    ops[i].req = NULL;
+    ops[i].done = 0;
+  }
+  int abortCounter = 0;
+  int completed = 0;
+  while (completed < numOps) {
+    NCCLCHECK(checkAbort(abortFlag, &abortCounter));
+    bool madeProgress = false;
+    for (int i = 0; i < numOps; i++) {
+      if (ops[i].done) continue;
+      int prevDone = ops[i].done;
+      if (ops[i].op == NCCL_NET_OP_SEND) {
+        NCCLCHECK(netIsend(net, ops[i].comm, ops[i].data, ops[i].size,
+                           ops[i].handle, ops[i].tag, &ops[i].req, &ops[i].done));
+      } else {
+        NCCLCHECK(netIrecv(net, ops[i].comm, ops[i].data, ops[i].size,
+                           ops[i].handle, ops[i].tag, &ops[i].req, &ops[i].done));
+      }
+      if (ops[i].done && !prevDone) { completed++; madeProgress = true; }
+    }
+    if (!madeProgress) sched_yield();
+  }
   return ncclSuccess;
 }
 
@@ -1221,85 +1275,86 @@ exit:
   return res;
 }
 
-// Net (IB OOB) variant of the bidirectional ring AllGather. Same step formula as above.
+// Net (IB OOB) variant of the bidirectional ring AllGather. Mirrors the structure
+// of socketRingAllGather (the upstream NCCL 2.28.7 socket variant): totalSteps = N/2,
+// each step exchanges two slices in opposite directions, last step is a single
+// netSendRecv when N is even.
 //
 // IB-specific design notes:
-// - regMr is the dominant per-call cost on IB plugins (syscall + RNIC interaction).
-//   We register the four MRs concurrently (two per thread), so they pipeline with
-//   the connect/handshake of the very first netSendRecv on the other thread.
 // - Each comm owns its own QP (and PD on most plugins), so MRs are not shareable
-//   across comms; we must register the same data buffer four times.
-// - Forward-thread writes target slices [rank - N/2 .. rank - 1] (mod N), reverse
-//   target slices [rank + 1 .. rank + (N-1)/2]; rank itself is untouched. The two
-//   write sets are disjoint by construction, so the threads never race on memory.
+//   across comms; we must register the same data buffer four times (forward+reverse
+//   send and recv). MRs are registered upfront and torn down once the loop completes.
+// - The four ops per step (ring0_send/ring0_recv on forward QP + ring1_send/ring1_recv
+//   on reverse QP) are driven via netMultiOp, which round-robin polls netIsend/netIrecv
+//   in a single thread. This replaces the previous std::thread-based forward/reverse
+//   split: both directions now share one CPU but progress concurrently in the kernel.
+// - Forward and reverse writes target disjoint slice sets (forward → [rank - N/2 ..
+//   rank - 1], reverse → [rank + 1 .. rank + (N-1)/2]; rank itself is untouched), so
+//   even though both ring0 and ring1 ops are in-flight at the same time, they cannot
+//   race on memory.
 // - On any failure we still attempt to dereg every successfully-registered handle
-//   to avoid leaking pinned host memory; previous code path returned on the first
-//   regMr failure with prior MRs leaked.
+//   to avoid leaking pinned host memory.
 static ncclResult_t netBiDirRingAllGather(ncclNet_t* net,
                                           void* sendComm, void* recvComm,
                                           void* revSendComm, void* revRecvComm,
                                           int rank, int nranks, char* data, int size,
                                           volatile uint32_t* abortFlag) {
-  ncclResult_t fwdRes = ncclSuccess;
-  ncclResult_t bwdRes = ncclSuccess;
+  ncclResult_t res = ncclSuccess;
   uint64_t tFirst = 0, tRest = 0;
-  int fwdSteps = nranks / 2;
-  int bwdSteps = (nranks - 1) / 2;
+  void *sendH = NULL, *recvH = NULL, *revSendH = NULL, *revRecvH = NULL;
+  int totalSteps = nranks / 2;
 
-  TRACE(NCCL_BOOTSTRAP, "netBiDirRingAllGather started: nranks=%d fwdSteps=%d bwdSteps=%d", nranks, fwdSteps, bwdSteps);
+  TRACE(NCCL_BOOTSTRAP, "netBiDirRingAllGather started: rank=%d nranks=%d totalSteps=%d", rank, nranks, totalSteps);
+
+  res = netReg(net, sendComm, data, nranks * size, &sendH);
+  if (res == ncclSuccess) res = netReg(net, recvComm, data, nranks * size, &recvH);
+  if (res == ncclSuccess) res = netReg(net, revSendComm, data, nranks * size, &revSendH);
+  if (res == ncclSuccess) res = netReg(net, revRecvComm, data, nranks * size, &revRecvH);
+  if (res != ncclSuccess) goto cleanup;
+
   BOOTSTRAP_PROF_OPEN(tFirst);
-
-  // Forward direction: registers its own send/recv MRs and runs fwdSteps iterations.
-  std::thread fwdThread([&]() {
-    void *sendH = NULL, *recvH = NULL;
-    fwdRes = netReg(net, sendComm, data, nranks * size, &sendH);
-    if (fwdRes == ncclSuccess) fwdRes = netReg(net, recvComm, data, nranks * size, &recvH);
-    if (fwdRes == ncclSuccess) {
-      for (int i = 0; i < fwdSteps; i++) {
-        int tag = i; // forward tags stay 0..fwdSteps-1 (compatible with old netRingAllGather)
-        size_t sslice = (size_t)((rank - i + nranks) % nranks);
-        size_t rslice = (size_t)((rank - i - 1 + nranks) % nranks);
-        ncclResult_t r = netSendRecv(net, sendComm, data + sslice * size, size, sendH,
-                                     recvComm, data + rslice * size, size, recvH,
-                                     tag, abortFlag);
-        if (r != ncclSuccess) { fwdRes = r; break; }
-      }
+  for (int step = 0; step < totalSteps; step++) {
+    bool isFinalUnidirectional = (step == totalSteps - 1) && (nranks % 2 == 0);
+    int sendSliceRing0 = (rank - step + nranks) % nranks;     // Ring0 send to next
+    int recvSliceRing0 = (rank - step - 1 + nranks) % nranks; // Ring0 recv from prev
+    int sendSliceRing1 = (rank + step) % nranks;              // Ring1 send to prev
+    int recvSliceRing1 = (rank + step + 1) % nranks;          // Ring1 recv from next
+    if (isFinalUnidirectional) {
+      // Final step on even N: only ring0 over the forward QP pair.
+      res = netSendRecv(net, sendComm, data + sendSliceRing0 * size, size, sendH,
+                        recvComm, data + recvSliceRing0 * size, size, recvH,
+                        /*tag*/step, abortFlag);
+    } else {
+      // Bidirectional step: 4 in-flight ops driven by single-threaded round-robin polling.
+      // Tags are kept identical inside one MultiOp call (each comm has its own tag space
+      // on IB; collisions between forward/reverse are impossible because they live on
+      // different QPs).
+      struct ncclNetOp ops[4] = {
+        {NCCL_NET_OP_SEND, sendComm,    data + sendSliceRing0 * size, size, sendH,    /*tag*/step, NULL, 0},
+        {NCCL_NET_OP_RECV, recvComm,    data + recvSliceRing0 * size, size, recvH,    /*tag*/step, NULL, 0},
+        {NCCL_NET_OP_SEND, revSendComm, data + sendSliceRing1 * size, size, revSendH, /*tag*/step, NULL, 0},
+        {NCCL_NET_OP_RECV, revRecvComm, data + recvSliceRing1 * size, size, revRecvH, /*tag*/step, NULL, 0}
+      };
+      res = netMultiOp(net, ops, 4, abortFlag);
     }
-    if (sendH) netDereg(net, sendComm, &sendH);
-    if (recvH) netDereg(net, recvComm, &recvH);
-  });
-
-  // Reverse direction on the calling thread.
-  {
-    void *revSendH = NULL, *revRecvH = NULL;
-    bwdRes = netReg(net, revSendComm, data, nranks * size, &revSendH);
-    if (bwdRes == ncclSuccess) bwdRes = netReg(net, revRecvComm, data, nranks * size, &revRecvH);
-    if (bwdRes == ncclSuccess) {
-      for (int i = 0; i < bwdSteps; i++) {
-        // Tag space is per-QP, but we still keep them disjoint from forward tags
-        // (defensive against future plugin changes that may share a tag table).
-        int tag = i + fwdSteps + 1;
-        size_t sslice = (size_t)((rank + i) % nranks);
-        size_t rslice = (size_t)((rank + i + 1) % nranks);
-        ncclResult_t r = netSendRecv(net, revSendComm, data + sslice * size, size, revSendH,
-                                     revRecvComm, data + rslice * size, size, revRecvH,
-                                     tag, abortFlag);
-        if (i == 0) { BOOTSTRAP_PROF_CLOSE(tFirst); BOOTSTRAP_PROF_OPEN(tRest); }
-        if (r != ncclSuccess) { bwdRes = r; break; }
-      }
+    if (res != ncclSuccess) break;
+    if (step == 0) {
+      BOOTSTRAP_PROF_CLOSE(tFirst);
+      BOOTSTRAP_PROF_OPEN(tRest);
     }
-    if (bwdSteps == 0) { BOOTSTRAP_PROF_CLOSE(tFirst); BOOTSTRAP_PROF_OPEN(tRest); }
-    if (revSendH) netDereg(net, revSendComm, &revSendH);
-    if (revRecvH) netDereg(net, revRecvComm, &revRecvH);
   }
-
-  fwdThread.join();
   BOOTSTRAP_PROF_CLOSE(tRest);
   TRACE(NCCL_BOOTSTRAP | NCCL_PROFILE,
-        "netBiDirRingAllGather first message in %f, rest in %f (steps fwd=%d bwd=%d)",
-        tFirst / 1e9, tRest / 1e9, fwdSteps, bwdSteps);
+        "netBiDirRingAllGather first message in %f (%f MB/sec), rest in %f (%f MB/sec)",
+        tFirst / 1e9, (size / 1e6) / (tFirst / 1e9), tRest / 1e9, (nranks - 1) * (size / 1e6) / (tRest / 1e9));
 
-  return (fwdRes != ncclSuccess) ? fwdRes : bwdRes;
+cleanup:
+  // Best-effort cleanup: try every dereg even if some failed (avoids leaking pinned memory).
+  if (sendH)    netDereg(net, sendComm,    &sendH);
+  if (recvH)    netDereg(net, recvComm,    &recvH);
+  if (revSendH) netDereg(net, revSendComm, &revSendH);
+  if (revRecvH) netDereg(net, revRecvComm, &revRecvH);
+  return res;
 }
 
 ncclResult_t bootstrapAllGather(void* commState, void* allData, int size) {
