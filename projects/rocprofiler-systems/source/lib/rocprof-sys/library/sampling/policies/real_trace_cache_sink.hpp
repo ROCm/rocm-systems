@@ -5,7 +5,6 @@
 
 #include "core/trace_cache/cache_manager.hpp"
 #include "core/trace_cache/sample_type.hpp"
-#include "library/thread_info.hpp"
 #include "logger/debug.hpp"
 #include "rocprofiler-systems/categories.h"
 #include "sampling/data/backtrace_metrics_data.hpp"
@@ -14,6 +13,7 @@
 #include "sampling/data/track_name.hpp"
 #include "sampling/data/track_traits.hpp"
 #include "sampling/policies/stack_frame_json.hpp"
+#include "sampling/thread_info_data.hpp"
 
 #include <spdlog/fmt/fmt.h>
 
@@ -30,39 +30,30 @@ namespace rocprofsys::sampling
 // Production TraceSinkPolicy: forwards parsed samples to
 // trace_cache::buffer_storage so data_processor writes them to rocpd.db.
 //
-// Single source of truth for sampling -> trace_cache emission. Owns three
-// emission shapes:
-//   - store_timer(tid, samples)            — wall-clock + cpu-time region samples
-//   - store_overflow(tid, samples)         — overflow region samples
-//   - store_thread_counters(tid, samples)  — per-thread metric tracks
+// Template parameter ThreadInfoResolverT must satisfy:
+//   std::optional<thread_info_data> resolve(int64_t tid) const;
 //
-// All three are called from real_production_hooks::emit_resolved at shutdown.
-//
-// thread_counter_prefixes is the matching list of per-thread metric track names
-// that callers (real_production_hooks::setup_wiring) register with the trace
-// cache so the metric values land on tracks that already exist.
-class real_trace_cache_sink
+// Production: real_thread_info_resolver (wraps thread_info::get()).
+// Test: mock_thread_info_resolver (returns pre-configured data).
+template <class ThreadInfoResolverT>
+class trace_cache_sink
 {
 public:
-    // Track-name prefixes for the per-thread counter tracks emitted by
-    // store_thread_counters. Order matches thread_metric_descriptors below.
-    static constexpr std::array<char const*, 4> thread_counter_prefixes = {
-        "thread_cpu_time", "thread_peak_memory", "thread_context_switch",
-        "thread_page_fault"
-    };
+    explicit trace_cache_sink(ThreadInfoResolverT& resolver)
+    : resolver_(resolver)
+    {}
 
     void store_timer(int64_t tid, std::vector<timer_sample> const& samples)
     {
         if(samples.empty()) return;
 
-        // L44 — matches legacy: "[{}] Post-processing metrics for rocpd..."
         LOG_DEBUG("[{}] Post-processing metrics for rocpd...", tid);
 
-        const auto& info = resolve_tid_info(tid);
+        auto info = resolver_.resolve(tid);
         if(!info) return;
 
-        const std::size_t sys_id = info->index_data->system_value;
-        const std::size_t seq_id = info->index_data->sequent_value;
+        const std::size_t sys_id = info->system_value;
+        const std::size_t seq_id = info->sequent_value;
         const std::string track_name =
             make_thread_track_name(timer_track_tag{}, seq_id, sys_id);
         constexpr auto category_id =
@@ -72,7 +63,7 @@ public:
 
         for(auto const& sample : samples)
         {
-            if(!info->is_valid_lifetime({ sample.beg_ns, sample.end_ns })) continue;
+            if(!info->is_valid_lifetime(sample.beg_ns, sample.end_ns)) continue;
 
             const bool has_cpu =
                 sample.metrics.valid.test(0) && sample.metrics.cpu_ns > 0;
@@ -88,9 +79,6 @@ public:
                     category_id, sys_id, track_name, name, sample.beg_ns, sample.end_ns,
                     category_str, frame, depth));
 
-                // CPU-time sample: emitted only when cpu_ns delta is available.
-                // Duration encoded as [0, cpu_ns] so tsv_processor computes the
-                // correct cpu-time duration from end_timestamp - start_timestamp.
                 if(has_cpu)
                 {
                     trace_cache::get_buffer_storage().store(make_region_sample(
@@ -108,11 +96,11 @@ public:
     {
         if(samples.empty()) return;
 
-        const auto& info = resolve_tid_info(tid);
+        auto info = resolver_.resolve(tid);
         if(!info) return;
 
-        const std::size_t sys_id = info->index_data->system_value;
-        const std::size_t seq_id = info->index_data->sequent_value;
+        const std::size_t sys_id = info->system_value;
+        const std::size_t seq_id = info->sequent_value;
         const std::string track_name =
             make_thread_track_name(overflow_track_tag{}, seq_id, sys_id);
         constexpr auto category_id =
@@ -121,7 +109,7 @@ public:
 
         for(auto const& sample : samples)
         {
-            if(!info->is_valid_lifetime({ sample.beg_ns, sample.end_ns })) continue;
+            if(!info->is_valid_lifetime(sample.beg_ns, sample.end_ns)) continue;
 
             int depth = 0;
             for(auto const& frame : sample.stack)
@@ -137,21 +125,19 @@ public:
         }
     }
 
-    // Per-thread process-sampling counter tracks (TF-3): emits one
-    // pmc_event_with_sample per descriptor per sample whose validity bit is set.
     void store_thread_counters(int64_t tid, std::vector<timer_sample> const& samples)
     {
         if(samples.empty()) return;
 
-        const auto& info = resolve_tid_info(tid);
+        auto info = resolver_.resolve(tid);
         if(!info) return;
 
-        const std::size_t sys_id = info->index_data->system_value;
-        const std::size_t seq_id = info->index_data->sequent_value;
+        const std::size_t sys_id = info->system_value;
+        const std::size_t seq_id = info->sequent_value;
 
         for(auto const& sample : samples)
         {
-            if(!info->is_valid_lifetime({ sample.beg_ns, sample.end_ns })) continue;
+            if(!info->is_valid_lifetime(sample.beg_ns, sample.end_ns)) continue;
             const std::uint64_t mid_ns = sample.end_ns;
 
             for(auto const& descriptor : thread_metric_descriptors)
@@ -174,17 +160,7 @@ public:
     }
 
 private:
-    // tid may be either an internal_value (from tracing.cpp / library.cpp via
-    // utility::get_thread_index()) or a sequent_value (from
-    // pthread_create_gotcha which uses _info->sequent_value). Try sequent
-    // first; fall back to internal so the resolved emission paths see a
-    // consistent thread_info regardless of caller.
-    static std::optional<thread_info> const& resolve_tid_info(int64_t tid)
-    {
-        auto const& info = thread_info::get(tid, SequentTID);
-        if(info) return info;
-        return thread_info::get(tid, InternalTID);
-    }
+    ThreadInfoResolverT& resolver_;
 
     static trace_cache::backtrace_region_sample make_region_sample(
         uint32_t category_id, std::size_t sys_id, std::string const& track_name,
@@ -203,9 +179,6 @@ private:
                                                      make_extdata_json(depth) };
     }
 
-    // Per-thread metric descriptor for the 4 process-sampling counter tracks
-    // emitted by store_thread_counters. Single source of truth for the metric
-    // name, perfetto category, valid-bit index, and value transform.
     struct thread_metric_descriptor
     {
         char const* track_prefix;

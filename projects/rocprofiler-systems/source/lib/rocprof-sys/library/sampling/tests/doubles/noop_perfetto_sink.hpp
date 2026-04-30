@@ -14,6 +14,12 @@ namespace rocprofsys::sampling::test
 
 struct noop_perfetto_sink
 {
+    noop_perfetto_sink() = default;
+
+    template <class T>
+    noop_perfetto_sink(T& /*resolver*/, bool /*use_perfetto*/, bool /*annotations*/)
+    {}
+
     void emit_timer(int64_t /*tid*/, void const* /*info*/,
                     std::vector<timer_sample> const& /*samples*/)
     {}

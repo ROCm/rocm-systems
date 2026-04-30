@@ -14,6 +14,12 @@ namespace rocprofsys::sampling::test
 
 struct recording_trace_sink
 {
+    recording_trace_sink() = default;
+
+    template <class T>
+    explicit recording_trace_sink(T& /*resolver*/)
+    {}
+
     // Satisfies TraceSinkPolicy: store_timer + store_overflow.
     // Records tid and sample count; no core/ dependency introduced.
 

@@ -4,9 +4,11 @@
 #pragma once
 
 #include "rocprofiler-systems/categories.h"
+
 #include "sampling/data/overflow_sample.hpp"
 #include "sampling/data/timer_sample.hpp"
 #include "sampling/data/track_name.hpp"
+#include <array>
 
 namespace rocprofsys::sampling
 {
@@ -38,6 +40,12 @@ struct track_traits<overflow_track_tag>
     using sample_t                  = overflow_sample;
     static constexpr auto category  = ROCPROFSYS_CATEGORY_OVERFLOW_SAMPLING;
     static constexpr auto label_str = "overflow_sampling";
+};
+
+// Per-thread counter track name prefixes. Used by both trace_cache_sink
+// (emission) and do_setup_wiring (track registration) so they cannot drift.
+inline constexpr std::array<char const*, 4> thread_counter_prefixes = {
+    "thread_cpu_time", "thread_peak_memory", "thread_context_switch", "thread_page_fault"
 };
 
 }  // namespace rocprofsys::sampling

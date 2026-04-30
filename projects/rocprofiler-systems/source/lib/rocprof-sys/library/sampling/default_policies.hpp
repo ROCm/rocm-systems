@@ -41,6 +41,7 @@
 // ── Heavy policies (one class per file under sampling/policies/) ─────────────
 #    include "sampling/policies/real_fatal_error_policy.hpp"
 #    include "sampling/policies/real_perfetto_sink.hpp"
+#    include "sampling/policies/real_thread_info_resolver.hpp"
 #    include "sampling/policies/real_trace_cache_sink.hpp"
 
 // ── TLS state + service template ────────────────────────────────────────────

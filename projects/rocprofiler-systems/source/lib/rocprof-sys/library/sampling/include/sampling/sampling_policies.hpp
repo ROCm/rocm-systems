@@ -18,19 +18,21 @@ namespace rocprofsys::sampling
 
 template <class UnwinderT, class OffloadT, class TraceSinkT, class TimerTriggerT,
           class OverflowTriggerT, class ClockT, class SignalDispatcherT,
-          class ReportWriterT, class PerfettoSinkT, class FatalErrorT>
+          class ReportWriterT, class PerfettoSinkT, class FatalErrorT,
+          class ThreadInfoResolverT>
 struct sampling_policies_traits
 {
-    using unwinder          = UnwinderT;
-    using offload           = OffloadT;
-    using trace_sink        = TraceSinkT;
-    using timer_trigger     = TimerTriggerT;
-    using overflow_trigger  = OverflowTriggerT;
-    using clock             = ClockT;
-    using signal_dispatcher = SignalDispatcherT;
-    using report_writer     = ReportWriterT;
-    using perfetto_sink     = PerfettoSinkT;
-    using fatal_error       = FatalErrorT;
+    using unwinder             = UnwinderT;
+    using offload              = OffloadT;
+    using trace_sink           = TraceSinkT;
+    using timer_trigger        = TimerTriggerT;
+    using overflow_trigger     = OverflowTriggerT;
+    using clock                = ClockT;
+    using signal_dispatcher    = SignalDispatcherT;
+    using report_writer        = ReportWriterT;
+    using perfetto_sink        = PerfettoSinkT;
+    using fatal_error          = FatalErrorT;
+    using thread_info_resolver = ThreadInfoResolverT;
 };
 
 // Production types are Linux-only. Forward-declared here; defined in src/linux/.
@@ -41,19 +43,30 @@ struct sampling_policies_traits
 #if defined(__linux__)
 class libunwind_unwinder;
 class trace_cache_offload_adapter;
-class real_trace_cache_sink;
 class real_timer_trigger;
 class real_overflow_trigger;
 class steady_clock;
 class real_signal_dispatcher;
 class native_report_writer;
-class real_perfetto_sink;
 class real_fatal_error_policy;
+class real_thread_info_resolver;
 
-using default_sampling_policies = sampling_policies_traits<
-    libunwind_unwinder, trace_cache_offload_adapter, real_trace_cache_sink,
-    real_timer_trigger, real_overflow_trigger, steady_clock, real_signal_dispatcher,
-    native_report_writer, real_perfetto_sink, real_fatal_error_policy>;
+// trace_cache_sink and perfetto_sink_impl are class templates;
+// forward-declare their production instantiations via the resolver type.
+template <class ThreadInfoResolverT>
+class trace_cache_sink;
+template <class ThreadInfoResolverT>
+class perfetto_sink_impl;
+
+using default_trace_sink    = trace_cache_sink<real_thread_info_resolver>;
+using default_perfetto_sink = perfetto_sink_impl<real_thread_info_resolver>;
+
+using default_sampling_policies =
+    sampling_policies_traits<libunwind_unwinder, trace_cache_offload_adapter,
+                             default_trace_sink, real_timer_trigger,
+                             real_overflow_trigger, steady_clock, real_signal_dispatcher,
+                             native_report_writer, default_perfetto_sink,
+                             real_fatal_error_policy, real_thread_info_resolver>;
 #endif
 
 }  // namespace rocprofsys::sampling
