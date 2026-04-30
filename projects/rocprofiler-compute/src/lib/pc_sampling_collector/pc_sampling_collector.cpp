@@ -50,7 +50,7 @@ void pc_sampling_collector_impl_t::write(code_object_writer_t& writer)
                       << ", symbol.name=" << sym.name
                       << ", symbol.vaddr=" << std::hex << sym.virtual_address
                       << ", symbol.code_object_offset=" << std::hex << sym.code_object_offset
-                      << ", symbol.size=" << std::dec << sym.size << "\n";
+                      << ", symbol.size=" << std::hex << sym.size << "\n";
             writer.start_symbol(sym);
             uint64_t       pc  = sym.virtual_address;
             const uint64_t end = sym.virtual_address + sym.size;

@@ -122,7 +122,7 @@ output_stream()
 
 bool print_kernel_info(std::string kernel_name, std::unordered_map<std::string, std::pair<unsigned long, unsigned long>>::mapped_type& begin_end)
 {
-    std::clog << std::hex << "Found: " << kernel_name << " at addr: 0x" << begin_end.first
+    std::cout << std::hex << "Found: " << kernel_name << " at addr: 0x" << begin_end.first
         << std::dec << ". Printing first 64 bytes:" << std::endl;
 
     std::unordered_set<std::string> references{};
@@ -143,7 +143,7 @@ bool print_kernel_info(std::string kernel_name, std::unordered_map<std::string, 
             if (source.rfind('/') < source.size())
                 source = source.substr(source.rfind('/'));
             if (vaddr < begin_end.first + 64)
-                std::clog << '\t' << inst->inst << '\n';
+                std::cout << '\t' << inst->inst << '\n';
 
             if (source.rfind(':') < source.size())
                 source = source.substr(0, source.rfind(':'));
@@ -162,12 +162,12 @@ bool print_kernel_info(std::string kernel_name, std::unordered_map<std::string, 
         vaddr += inst->size;
     }
 
-    std::clog << "  --- Num Scalar: " << num_scalar << "\n  --- Num Vector: " << num_vector
+    std::cout << "  --- Num Scalar: " << num_scalar << "\n  --- Num Vector: " << num_vector
         << "\n  --- Num Waitcnts: " << num_waitcnts
         << "\n  --- Other instructions: " << num_other
         << "\nKernel has source references to: " << std::endl;
     for (auto& ref : references)
-        std::clog << '\t' << ref << std::endl;
+        std::cout << '\t' << ref << std::endl;
     return false;
 }
 
@@ -215,10 +215,25 @@ void code_object_tracing_callback(rocprofiler_callback_tracing_record_t record,
 
         if (std::string_view(data->uri).find("file:///") == 0)
         {
+            std::cout << "Full desc: " << std::hex
+                      << "storage_type=" << data->storage_type
+                      << ", uri=" << data->uri
+                      << ", code_object_id=" << data->code_object_id
+                      << ", load_delta=" << data->load_delta
+                      << ", load_size=" << data->load_size
+                      << std::dec << std::endl;
             codeobjTranslate.addDecoder(data->uri, data->code_object_id, data->load_delta, data->load_size);
         }
         else
         {
+            std::cout << "Full desc: " << std::hex
+                      << "storage_type=" << data->storage_type
+                      << ", memory_base=" << data->memory_base
+                      << ", memory_size=" << data->memory_size
+                      << ", code_object_id=" << data->code_object_id
+                      << ", load_delta=" << data->load_delta
+                      << ", load_size=" << data->load_size
+                      << std::dec << std::endl;
             codeobjTranslate.addDecoder(reinterpret_cast<const void*>(data->memory_base),
                                         data->memory_size,
                                         data->code_object_id,
@@ -228,17 +243,21 @@ void code_object_tracing_callback(rocprofiler_callback_tracing_record_t record,
 
         auto symbolmap = codeobjTranslate.getSymbolMap();
         for (auto& [vaddr, symbol] : symbolmap)
+        {
+            std::cout << std::hex << "Code Object Load: Registered symbol " << symbol.name << " at vaddr 0x" << vaddr
+                      << " with size 0x" << symbol.mem_size << std::dec << std::endl;
             registered_kernels.insert({symbol.name, {vaddr, vaddr + symbol.mem_size}});
+        }
     }
     else if (record.operation == ROCPROFILER_CODE_OBJECT_DEVICE_KERNEL_SYMBOL_REGISTER)
     {
-        std::clog << std::hex;
+        std::cout << std::hex;
         auto* data        = static_cast<kernel_symbol_data_t*>(record.payload);
         auto  kernel_name = std::regex_replace(data->kernel_name, std::regex{"(\\.kd)$"}, "");
 
         if (registered_kernels.find(kernel_name) == registered_kernels.end())
         {
-            std::clog << "Not Found: " << kernel_name << " in codeobj." << std::endl;
+            std::cout << "Not Found: " << kernel_name << " in codeobj." << std::endl;
             return;
         }
 
@@ -252,7 +271,7 @@ void code_object_tracing_callback(rocprofiler_callback_tracing_record_t record,
 
 int tool_init(rocprofiler_client_finalize_t, void* user_data)
 {
-    std::clog << "[rocprofiler-compute] In tool init\n";
+    std::cout << "[rocprofiler-compute] In tool init\n";
     g_sdk_wrapper->create_context(&get_client_ctx());
 
     g_sdk_wrapper->configure_callback_dispatch_counting_service(get_client_ctx(),
@@ -300,15 +319,18 @@ void generate_output(tool_data_t& tool_data)
                                               { ptr->write(obj_writer); });
         obj_writer.flush(tool_data.code_obj_output_filename);
     }
+    std::cout << std::dec << registered_kernels.size() << " kernels were registered.\n";
     for (auto& [kernel_name, begin_end] : registered_kernels)
     {
+        std::cout << std::hex << "Kernel: " << kernel_name << ", vaddr: 0x" << begin_end.first
+                  << ", size: 0x" << (begin_end.second - begin_end.first) << std::dec << std::endl;
         print_kernel_info(kernel_name, begin_end);
     }
 }
 
 void tool_fini(void* user_data)
 {
-    Expects(user_data) std::clog << "[rocprofiler-compute] In tool fini\n";
+    Expects(user_data) std::cout << "[rocprofiler-compute] In tool fini\n";
     rocprofiler_stop_context(get_client_ctx());
 
     auto* tool_data_ptr = static_cast<tool_data_t*>(user_data);
@@ -414,7 +436,7 @@ rocprofiler_tool_configure_result_t* rocprofiler_configure(uint32_t             
          << ") is using rocprofiler-sdk v" << major << "." << minor << "." << patch << " ("
          << runtime_version << ")";
 
-    std::clog << info.str() << std::endl;
+    std::cout << info.str() << std::endl;
 
     // init tool data
     auto tool_data = create_tool_data(id);

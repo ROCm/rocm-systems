@@ -17,7 +17,20 @@ code_object_translator_impl_t::~code_object_translator_impl_t() = default;
 
 void code_object_translator_impl_t::add_code_object(const char* filepath, size_t id, uint64_t load_addr, uint64_t mem_size)
 {
+    std::cout << "Adding code object from file: " << filepath << ", id: " << id << ", load_addr: " << std::hex << load_addr
+              << ", mem_size: " << mem_size << std::dec << std::endl;
     m_translator->addDecoder(filepath, id, load_addr, mem_size);
+    const auto& symbols = m_translator->getSymbolMap(id);
+    for (const auto& [virtual_address, symbol_info] : symbols)
+    {
+        std::cout << std::hex << "get_symbols: id=" << id
+                  << ", virtual_address=0x" << virtual_address
+                  << ", symbol_info.name=" << symbol_info.name
+                  << ", symbol_info.vaddr=" << std::hex << symbol_info.vaddr
+                  << ", symbol_info.faddr=" << std::hex << symbol_info.faddr
+                  << ", symbol_info.mem_size=" << std::hex << symbol_info.mem_size
+                  << std::dec << std::endl;
+    }
     m_code_object_ids.push_back(id);
 }
 
@@ -27,7 +40,21 @@ void code_object_translator_impl_t::add_code_object(uint64_t memory_base,
                                                     uint64_t load_base,
                                                     uint64_t load_size)
 {
+    std::cout << "Adding code object from memory: base: " << std::hex << memory_base << ", size: " << memory_size
+              << ", id: " << id << ", load_base: " << load_base << ", load_size: " << load_size << std::dec
+              << std::endl;
     m_translator->addDecoder(reinterpret_cast<void*>(memory_base), memory_size, id, load_base, load_size);
+    const auto& symbols = m_translator->getSymbolMap();
+    for (const auto& [virtual_address, symbol_info] : symbols)
+    {
+        std::cout << std::hex << "get_symbols: id=" << id
+                  << ", virtual_address=0x" << virtual_address
+                  << ", symbol_info.name=" << symbol_info.name
+                  << ", symbol_info.vaddr=" << std::hex << symbol_info.vaddr
+                  << ", symbol_info.faddr=" << std::hex << symbol_info.faddr
+                  << ", symbol_info.mem_size=" << std::hex << symbol_info.mem_size
+                  << std::dec << std::endl;
+    }
     m_code_object_ids.push_back(id);
 }
 
