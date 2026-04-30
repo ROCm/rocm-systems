@@ -783,7 +783,7 @@ void runReduceRandomForOps(const std::tuple<Op, Ops...>)
 }
 
 // for all the tile sizes and all input types, using random input values, calculates the reduce()
-// values. Additionally, randomly make some threads not participate
+// values. Additionally, randomly make some threads not participate for the coalesced_threads case
 HIP_TEMPLATE_TEST_CASE(Unit_Thread_Block_Tile_Reduce_Random_arithmetic, int, unsigned int, long long,
                    unsigned long long, float, half, double)
 {
