@@ -2041,18 +2041,24 @@ def builder_optimizer_step(optimizer_ctor: str) -> StructuralBuilder:
 
 
 # Idempotent single-GPU process-group bootstrap inlined by distributed
-# builders. The atexit hook destroys the process group on interpreter
-# shutdown regardless of HIP/CUDA context state; without it, rocBLAS or
-# NCCL cleanup on a faulted device can abort the interpreter with SIGABRT
-# and mask the original failure.
+# builders. Uses a file:// rendezvous in a per-process tmpdir so concurrent
+# pytest workers (xdist, CI shards) cannot collide on a TCP port. The
+# atexit hook destroys the process group on interpreter shutdown regardless
+# of HIP/CUDA context state; without it, rocBLAS or NCCL cleanup on a
+# faulted device can abort the interpreter with SIGABRT and mask the
+# original failure.
 DISTRIBUTED_BOOTSTRAP_SETUP: Tuple[str, ...] = (
     "import atexit as _atexit",
-    "import os as _os",
+    "import tempfile as _tempfile",
     "import torch.distributed as _dist",
-    '_os.environ.setdefault("MASTER_ADDR", "127.0.0.1")',
-    '_os.environ.setdefault("MASTER_PORT", "29500")',
     "if not _dist.is_initialized():",
-    '    _dist.init_process_group(backend="nccl", rank=0, world_size=1)',
+    "    _dist_init_dir = _tempfile.mkdtemp(prefix='torch_trace_cov_dist_')",
+    "    _dist.init_process_group(",
+    '        backend="nccl",',
+    '        init_method=f"file://{_dist_init_dir}/init",',
+    "        rank=0,",
+    "        world_size=1,",
+    "    )",
     "    def _shutdown_dist():",
     "        try:",
     "            if _dist.is_initialized():",
