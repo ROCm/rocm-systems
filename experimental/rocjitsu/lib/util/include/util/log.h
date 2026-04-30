@@ -117,10 +117,14 @@ public:
   static void print(Fn &&fn) {
     if constexpr ((groups & (1u << GroupId)) != 0) {
       std::ostringstream buf;
-      buf << std::format("[rj log {}] ", group_name(GroupId));
+      auto pos_before = buf.tellp();
       fn(buf);
-      buf << '\n';
-      emit(buf.str());
+      if (buf.tellp() == pos_before)
+        return;
+      std::ostringstream out;
+      out << std::format("[rj log {}] ", group_name(GroupId));
+      out << buf.str() << '\n';
+      emit(out.str());
     }
   }
 

@@ -125,28 +125,13 @@ TeamAlltoallvTester<T1>::TeamAlltoallvTester(TesterArguments args)
   int total_elems = num_elems_wg;
   int buff_size   = total_elems * sizeof(T1);
 
-  source_buf = (T1 *)rocshmem_malloc(buff_size);
-  dest_buf   = (T1 *)rocshmem_malloc(buff_size);
+  source_buf = (T1 *)alloc_test_buffer(buff_size, args.local_buf_type);
+  dest_buf   = (T1 *)alloc_test_buffer(buff_size);
 
   CHECK_HIP(hipMalloc(&source_displs, n_pes * sizeof(size_t)));
   CHECK_HIP(hipMalloc(&dest_displs  , n_pes * sizeof(size_t)));
   CHECK_HIP(hipMalloc(&source_nelems, n_pes * sizeof(size_t)));
   CHECK_HIP(hipMalloc(&dest_nelems  , n_pes * sizeof(size_t)));
-
-  if (source_buf == nullptr    ||
-      dest_buf == nullptr      ||
-      source_displs == nullptr ||
-      dest_displs == nullptr   ||
-      source_nelems == nullptr ||
-      dest_nelems == nullptr) {
-
-    printf("Error allocating memory from symmetric heap.\n"
-           "Source %p, Source Displacements %p, Source Elems %p\n"
-           "Dest %p, Dest Displacements %p, Dest Elems %p\n",
-           source_buf, source_displs, source_nelems,
-           dest_buf, dest_displs, dest_nelems);
-    rocshmem_global_exit(1);
-  }
 
   char* value = nullptr;
 
@@ -160,8 +145,8 @@ TeamAlltoallvTester<T1>::TeamAlltoallvTester(TesterArguments args)
 
 template <typename T1>
 TeamAlltoallvTester<T1>::~TeamAlltoallvTester() {
-  rocshmem_free(source_buf);
-  rocshmem_free(dest_buf);
+  free_test_buffer(source_buf, args.local_buf_type);
+  free_test_buffer(dest_buf);
   CHECK_HIP(hipFree(source_displs));
   CHECK_HIP(hipFree(dest_displs));
   CHECK_HIP(hipFree(source_nelems));

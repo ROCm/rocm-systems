@@ -31,7 +31,7 @@
 #   RJ_CONFIG      - Config file (default: configs/amdgpu_cdna4_kmd.json)
 #   RJ_INSTALL_DIR - Install prefix inside container (default: /opt/rocm)
 #   RJ_INSTALLED   - Set to 1 if rocjitsu is pre-installed in the image
-#   RJ_LOG_LEVEL   - Log verbosity: 0=silent, 1=errors, 2=info (default: 1)
+
 
 set -euo pipefail
 
@@ -68,8 +68,7 @@ ENV_ARGS=(
     -e "LD_PRELOAD=${INSTALL_DIR}/lib/librocjitsu_kmd.so"
     -e "RJ_CONFIG=${INSTALL_DIR}/share/rocjitsu/configs/amdgpu_cdna4_kmd.json"
     -e "RJ_SCHEMA=${INSTALL_DIR}/share/rocjitsu/schemas/simulation_config.fbs"
-    -e "RJ_LOG_LEVEL=${RJ_LOG_LEVEL:-1}"
-    -e "HSA_ENABLE_SDMA=0"
+    -e "HSA_ENABLE_SDMA=1"
     -e "ROCPROFILER_REGISTER_ENABLED=0"
 )
 

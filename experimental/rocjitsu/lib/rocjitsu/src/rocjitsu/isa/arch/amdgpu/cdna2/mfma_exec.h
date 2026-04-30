@@ -15,19 +15,15 @@
 
 namespace rocjitsu {
 namespace cdna2 {
-namespace mfma {
-
-using namespace amdgpu::mfma; // NOLINT(google-build-using-namespace)
 
 /// CDNA2 resolve_acc defaults to Separate mode (dedicated AccVGPR file).
 template <typename F>
 inline uint32_t resolve_acc(uint32_t vb, uint32_t dst, int src2_ev, uint32_t &const_acc,
                             F &&get_const) {
-  return amdgpu::mfma::resolve_acc<amdgpu::mfma::AccMode::Separate>(vb, dst, src2_ev, const_acc,
-                                                                    std::forward<F>(get_const));
+  return amdgpu::resolve_acc<amdgpu::AccMode::Separate>(vb, dst, src2_ev, const_acc,
+                                                        std::forward<F>(get_const));
 }
 
-} // namespace mfma
 } // namespace cdna2
 } // namespace rocjitsu
 

@@ -294,7 +294,10 @@ SMemtimeSmem::SMemtimeSmem(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void SMemtimeSmem::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SMemtimeSmem::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 SMemrealtimeSmem::SMemrealtimeSmem(const MachineInst *inst)
     : Smem("s_memrealtime", reinterpret_cast<const OpEncoding *>(inst),
@@ -305,7 +308,10 @@ SMemrealtimeSmem::SMemrealtimeSmem(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void SMemrealtimeSmem::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SMemrealtimeSmem::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 } // namespace rdna2
 } // namespace rocjitsu
