@@ -177,6 +177,9 @@ def run_soc_detect_and_coalesce(
     soc.set_perfmon_config(perfmon_config)
 
     counters, _unused_filter_blocks = soc.detect_counters()
+    # Same as OmniSoC_Base.perfmon_filter before perfmon_coalesce: drop
+    # SQ_ACCUM_PREV_HIRES here; it is injected again when LEVEL counters are
+    # allocated so pass grouping matches profiling.
     counters = counters - {"SQ_ACCUM_PREV_HIRES"}
     if not counters:
         return set(), []
