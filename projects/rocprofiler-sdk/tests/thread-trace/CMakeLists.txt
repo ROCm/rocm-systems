@@ -117,9 +117,11 @@ rocprofiler_add_integration_execute_test(
 # gfx9 emits periodic RT_TIMESTAMP_LO32 markers from query_status packets in
 # double/triple-buffer mode. Confirm the decoder surfaces more than the two Begin/End
 # anchor REALTIME records. gfx9-only; gfx10+ uses different in-trace timestamping
-# mechanisms and would only see two records.
+# mechanisms and would only see two records. Skipped under code-coverage builds: the
+# coverage harness loads an older system aqlprofile that pre-dates the RT_TIMESTAMP marker
+# emission code, so the decoder has nothing to surface.
 list(GET rocprofiler-sdk-tests-gfx-info 0 _RT_LO32_GPU0)
-if(NOT "${_RT_LO32_GPU0}" MATCHES "^gfx9[0-9a-f]+$")
+if(NOT "${_RT_LO32_GPU0}" MATCHES "^gfx9[0-9a-f]+$" OR ROCPROFILER_BUILD_CODECOV)
     set(RT_LO32_DISABLED True)
 else()
     set(RT_LO32_DISABLED ${TRIPLE_BUFFER_DISABLED})
