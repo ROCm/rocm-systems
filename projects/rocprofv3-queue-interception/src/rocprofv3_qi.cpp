@@ -81,6 +81,30 @@ int rocprofiler_set_api_table(const char* name, uint64_t /*lib_version*/,
     return 0;
 }
 
+// HSA_TOOLS_LIB shim: when loaded via the HSA tools-lib mechanism (rather than
+// rocprofiler-register), HSA calls OnLoad(api_table, ...) on attach and
+// OnUnload() on detach. Bridge those into the same install/flush paths used by
+// the rocprofiler entry points so the tool produces traces in either load mode.
+extern "C" __declspec(dllexport)
+bool OnLoad(HsaApiTable* table, uint64_t /*runtime_version*/,
+            uint64_t /*failed_tool_count*/, const char* const* /*failed_tool_names*/)
+{
+    rocprofv3_min::load_env();
+    std::fprintf(stderr, "[rocprofv3-qi] OnLoad (HSA_TOOLS_LIB path)\n");
+    if (table) {
+        rocprofv3_min::install_hsa_wrappers(table);
+        std::atexit(&rocprofv3_min::flush_once);
+    }
+    return true;
+}
+
+extern "C" __declspec(dllexport)
+void OnUnload()
+{
+    std::fprintf(stderr, "[rocprofv3-qi] OnUnload\n");
+    rocprofv3_min::flush_once();
+}
+
 BOOL WINAPI DllMain(HINSTANCE, DWORD reason, LPVOID) {
     switch (reason) {
         case DLL_PROCESS_ATTACH:
