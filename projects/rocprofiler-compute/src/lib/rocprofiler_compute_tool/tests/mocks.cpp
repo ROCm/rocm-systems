@@ -5,32 +5,32 @@
 #include "gsl_assert.h"
 using namespace rocm_compute;
 
-const char* mock_env_parameters_t::get_output_path()
+std::string mock_env_parameters_t::get_output_path()
 {
     return m_output_path.c_str();
 }
 
-const char* mock_env_parameters_t::get_requested_counters()
+std::string mock_env_parameters_t::get_requested_counters()
 {
     return m_requested_counters.c_str();
 }
 
-const char* mock_env_parameters_t::get_iteration_multiplexing_mode()
+std::string mock_env_parameters_t::get_iteration_multiplexing_mode()
 {
     return m_iteration_multiplexing_mode.c_str();
 }
 
-const char* mock_env_parameters_t::get_kernel_filter_include_regex()
+std::string mock_env_parameters_t::get_kernel_filter_include_regex()
 {
     return m_kernel_filter_include_regex.c_str();
 }
 
-const char* mock_env_parameters_t::get_kernel_filter_range()
+std::string mock_env_parameters_t::get_kernel_filter_range()
 {
     return m_kernel_filter_range.c_str();
 }
 
-const char* mock_env_parameters_t::get_pc_sampling_mode() const
+std::string mock_env_parameters_t::get_pc_sampling_mode() const
 {
     return m_pc_sampling_mode.c_str();
 }

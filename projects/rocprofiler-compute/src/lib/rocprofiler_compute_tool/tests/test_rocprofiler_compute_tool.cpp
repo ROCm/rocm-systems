@@ -38,6 +38,12 @@ TEST_F(test_rocprofiler_compute_tool_t, ProvidedEmptyKernelFilterRange_DoesntThr
     EXPECT_NO_THROW(rocprofiler_configure(1, "", 1, &m_client_id));
 }
 
+TEST_F(test_rocprofiler_compute_tool_t, ProvidedEmptyPcSamplingMode_DoesntThrow)
+{
+    m_env_parameters->set_pc_sampling_mode("");
+    EXPECT_NO_THROW(rocprofiler_configure(1, "", 1, &m_client_id));
+}
+
 TEST_F(test_rocprofiler_compute_tool_t, ProvidedNormalExecution_ReturnsPointersToDataProcessors)
 {
     const auto cfg       = rocprofiler_configure(1, "", 1, &m_client_id);

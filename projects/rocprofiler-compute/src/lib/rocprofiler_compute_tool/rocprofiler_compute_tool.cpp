@@ -210,30 +210,27 @@ std::unique_ptr<tool_data_t> create_tool_data(rocprofiler_client_id_t* /*id*/)
                                                                    "_code_obj_info.csv");
 
     // ROCPROF_COUNTERS env. var. is a string like "pmc: counter1 counter2 ..."
-    if (const char* v = g_input_parameters->get_requested_counters())
-        tool_data->requested_counters = v;
+    tool_data->requested_counters = g_input_parameters->get_requested_counters();
 
-    if (const char* v = g_input_parameters->get_iteration_multiplexing_mode())
-        tool_data->iteration_multiplexing_mode = iteration_multiplexing_mode(v);
+    tool_data->iteration_multiplexing_mode = iteration_multiplexing_mode(
+        g_input_parameters->get_iteration_multiplexing_mode());
 
     // ROCPROF_KERNEL_FILTER_INCLUDE_REGEX env. var. is a regex string like
     // kernel_name_1|kernel_name_2|... Used to collect counters only for kernels
     // with names matching the regex
-    if (const char* v = g_input_parameters->get_kernel_filter_include_regex())
-        tool_data->kernel_filter_include_regex = v;
+    tool_data->kernel_filter_include_regex = g_input_parameters->get_kernel_filter_include_regex();
 
     // ROCPROF_KERNEL_FILTER_RANGE env. var. is a string like "[4,7-9,...]"
-    if (const char* v = g_input_parameters->get_kernel_filter_range())
+    if (!g_input_parameters->get_kernel_filter_range().empty())
     {
         // Remove square brackets at the ends if present
-        std::string v_str = v;
+        std::string v_str = g_input_parameters->get_kernel_filter_range();
         if (!v_str.empty() && v_str.front() == '[')
             v_str.erase(0, 1);
         if (!v_str.empty() && v_str.back() == ']')
             v_str.pop_back();
-        v = v_str.c_str();
         // Parse the range string into vector of pairs
-        std::istringstream ss(v);
+        std::istringstream ss(v_str.c_str());
         for (std::string token; std::getline(ss, token, ',');)
         {
             size_t dash_pos = token.find('-');
