@@ -962,17 +962,24 @@ class GpuAgent : public GpuAgentInt {
     uint32_t which_buffer;                    // Current buffer selector (0 or 1)
     hsa_signal_t done_sig0;                   // Signal for buffer 0 completion
     hsa_signal_t done_sig1;                   // Signal for buffer 1 completion
-    std::atomic<uint64_t> host_write_offset;  // Write offset into host buffer
-    std::atomic<uint64_t> host_read_offset;   // Read offset from host buffer
+    uint64_t host_write_offset;               // Write offset into host buffer (mutex-protected)
+    uint64_t host_read_offset;                // Read offset from host buffer (mutex-protected)
     std::mutex host_buffer_mutex;             // Serializes this XCC's thread vs PcSamplingFlush()
     uint8_t* host_buffer_begin;               // Cached: start of this XCC's host buffer partition
-    std::atomic<size_t> lost_sample_count;    // Per-XCC lost sample counter
+    size_t lost_sample_count;                 // Per-XCC lost sample counter (mutex-protected)
+
+    /* PM4 fallback resources (per-XCC to avoid races on multi-XCC non-large-BAR systems) */
+    uint64_t* old_val;                        // Staging area for PM4 atomic return value
+    uint32_t* cmd_data;                       // PM4 command buffer
+    size_t cmd_data_sz;                       // PM4 command buffer size
+    hsa_signal_t exec_pm4_signal;             // Signal for PM4 completion
   };
 
   typedef struct {
     /* Per-XCC architecture for reduced atomic contention */
     uint32_t num_xcc;                       // Number of XCCs on this device
     pcs_sampling_data_t* device_data_base;  // Base of contiguous allocation
+    size_t per_xcc_device_stride;           // Device memory stride per XCC (for trap handler)
 
     /* Per-XCC host buffers */
     uint8_t* host_buffer;
@@ -983,12 +990,8 @@ class GpuAgent : public GpuAgentInt {
     /* Per-XCC data array - cache-line aligned AoS for optimal cache behavior */
     per_xcc_pcs_data_t* xcc_data;  // Array of per-XCC structs (size = num_xcc)
 
-    /* PM4 fallback for non-large-BAR systems (CPU cannot access VRAM directly) */
+    /* PM4 fallback flag (resources are per-XCC in per_xcc_pcs_data_t) */
     bool use_pm4_fallback;           // true if large-BAR not available
-    uint64_t* old_val;               // Staging area for PM4 atomic return value
-    uint32_t* cmd_data;              // PM4 command buffer
-    size_t cmd_data_sz;              // PM4 command buffer size
-    hsa_signal_t exec_pm4_signal;    // Signal for PM4 completion
 
     pcs::PcsRuntime::PcSamplingSession* session;
   } pcs_data_t;

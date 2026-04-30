@@ -52,6 +52,11 @@
 namespace rocr {
 namespace pcs {
 
+// Thread-local storage for sample buffer info during DataCopyCallback.
+// Each XCC monitoring thread has its own copy, eliminating the need for
+// mutex serialization.
+thread_local PcsRuntime::PcSamplingSession::data_ready_info_t pending_sample_copy = {};
+
 #define IS_BAD_PTR(ptr)                                          \
 do {                                                           \
   if ((ptr) == NULL) return HSA_STATUS_ERROR_INVALID_ARGUMENT; \
@@ -131,11 +136,6 @@ PcsRuntime::PcSamplingSession::PcSamplingSession(
   csd.buffer_size = buffer_size;
   csd.data_ready_callback = data_ready_callback;
   csd.client_callback_data = client_callback_data;
-
-  data_rdy.buf1 = nullptr;
-  data_rdy.buf1_sz = 0;
-  data_rdy.buf2 = nullptr;
-  data_rdy.buf2_sz = 0;
 }
 
 void PcsRuntime::PcSamplingSession::GetHsaKmtSamplingInfo(HsaPcSamplingInfo* sampleInfo) {
@@ -178,10 +178,24 @@ hsa_status_t PcSamplingDataCopyCallback(void* _session, size_t bytes_to_copy, vo
 
 hsa_status_t PcsRuntime::PcSamplingSession::DataCopyCallback(uint8_t* buffer,
                                                              size_t bytes_to_copy) {
-  if (bytes_to_copy != (data_rdy.buf1_sz + data_rdy.buf2_sz)) return HSA_STATUS_ERROR_EXCEPTION;
+  // Read from thread-local pending_sample_copy (set by HandleSampleData on this thread).
+  //
+  // This function must be called from within the data_ready_callback,
+  // on the same thread that invoked the callback. Calling from a different thread
+  // or after the callback has returned will fail because the thread-local storage
+  // will not contain valid buffer pointers.
 
-  if (data_rdy.buf1_sz) memcpy(buffer, data_rdy.buf1, data_rdy.buf1_sz);
-  if (data_rdy.buf2_sz) memcpy(buffer + data_rdy.buf1_sz, data_rdy.buf2, data_rdy.buf2_sz);
+  if (pending_sample_copy.buf1 == nullptr && pending_sample_copy.buf2 == nullptr)
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
+  if (bytes_to_copy != (pending_sample_copy.buf1_sz + pending_sample_copy.buf2_sz))
+    return HSA_STATUS_ERROR_EXCEPTION;
+
+  if (pending_sample_copy.buf1_sz)
+    memcpy(buffer, pending_sample_copy.buf1, pending_sample_copy.buf1_sz);
+  if (pending_sample_copy.buf2_sz)
+    memcpy(buffer + pending_sample_copy.buf1_sz, pending_sample_copy.buf2,
+           pending_sample_copy.buf2_sz);
 
   return HSA_STATUS_SUCCESS;
 }
@@ -189,16 +203,13 @@ hsa_status_t PcsRuntime::PcSamplingSession::DataCopyCallback(uint8_t* buffer,
 hsa_status_t PcsRuntime::PcSamplingSession::HandleSampleData(uint8_t* buf1, size_t buf1_sz,
                                                              uint8_t* buf2, size_t buf2_sz,
                                                              size_t lost_sample_count) {
-  // Lock to prevent concurrent XCC threads from overwriting data_rdy while
-  // the callback is in progress. This serializes sample delivery but ensures
-  // correctness. The lock is held through the entire function including the
-  // user's callback, so the callback can safely use data_copy_callback.
-  std::lock_guard<std::mutex> lock(handle_sample_mutex_);
-
-  data_rdy.buf1 = buf1;
-  data_rdy.buf1_sz = buf1_sz;
-  data_rdy.buf2 = buf2;
-  data_rdy.buf2_sz = buf2_sz;
+  // Store buffer info in thread-local storage for DataCopyCallback.
+  // Each XCC thread has its own pending_sample_copy, so no mutex is needed.
+  // The user's callback runs on this same thread and can safely call DataCopyCallback.
+  pending_sample_copy.buf1 = buf1;
+  pending_sample_copy.buf1_sz = buf1_sz;
+  pending_sample_copy.buf2 = buf2;
+  pending_sample_copy.buf2_sz = buf2_sz;
 
   AMD::GpuAgent* gpuAgent = static_cast<AMD::GpuAgent*>(agent);
 
@@ -240,6 +251,11 @@ hsa_status_t PcsRuntime::PcSamplingSession::HandleSampleData(uint8_t* buf1, size
   csd.data_ready_callback(csd.client_callback_data, buf1_sz + buf2_sz, lost_sample_count,
                           &PcSamplingDataCopyCallback,
                           /* hsa_callback_data*/ this);
+
+  // Clear thread-local storage after callback returns to catch deferred/off-thread calls.
+  // If user incorrectly calls DataCopyCallback after this point, it will return an error.
+  pending_sample_copy = {};
+
   return HSA_STATUS_SUCCESS;
 }
 
