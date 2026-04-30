@@ -18,9 +18,9 @@
 
 ## Status update — 2026-04-30
 
-**The recommendation made by this document (LTTng-UST as primary; `user_events`
-as future backend) has been carried out.** Producer-side instrumentation is
-complete and posted as two stacked draft PRs:
+**The recommendation made by this document (LTTng-UST as primary) has
+been carried out.** Producer-side instrumentation is complete and posted
+as two stacked draft PRs:
 
 | PR | Branch | Contents |
 |---|---|---|
@@ -41,14 +41,12 @@ complete and posted as two stacked draft PRs:
 **Material design changes from the recommendation in this doc:**
 
 1. **Distro dependency dissolved by vendoring.** Rather than depending on
-   distro `liblttng-ust-dev` (the thing that gated `user_events` on RHEL 9 /
-   Ubuntu 22.04 and made distro reach the headline risk), LTTng-UST 2.13.7
-   and userspace-rcu 0.14.0 are vendored as git submodules under
+   distro `liblttng-ust-dev` (the thing that originally made distro reach
+   the headline risk on RHEL 9 / Ubuntu 22.04 LTS), LTTng-UST 2.13.7 and
+   userspace-rcu 0.14.0 are vendored as git submodules under
    `projects/{clr,rocr-runtime}/external/`, built via `ExternalProject_Add`,
    and installed flat into `/opt/rocm/lib/`. No system package required at
-   build time or runtime. This makes the distro-reach concern that motivated
-   the "fallback / future-track" framing of `user_events` largely moot for
-   the primary backend.
+   build time or runtime.
 2. **In-band correlation IDs dropped (schema v3).** The original
    recommendation contemplated typed `correlation_id` fields on every event.
    Implementation work showed that vpid+vtid+timestamp from CTF channel
@@ -65,9 +63,9 @@ complete and posted as two stacked draft PRs:
 section below.
 
 **The body of this document is preserved as a reference** — the comparison
-matrix and per-technique deep-dives remain a useful reference for future
-backend swaps (e.g., the eventual `user_events` v2) and for adversarial
-review of the chosen path.
+matrix and per-technique deep-dives remain a useful reference for
+adversarial review of the chosen path and for any future revisit of the
+transport decision.
 
 ### Update — 2026-04-30: LTTng-UST also delivers FW kernel-dispatch records (PR #5519)
 
@@ -144,9 +142,9 @@ attribute construction happen even with a NoopTracer, failing constraint 3.
 **Chrome/Perfetto file** is an offline output format, not a live delivery
 mechanism — fails constraint 4.
 
-That leaves four candidates that survive the hard constraints: LTTng-UST,
-Linux `user_events`, io_uring channels, and rolling our own. Each is treated
-in detail below.
+That leaves three candidates that survive the hard constraints:
+LTTng-UST, io_uring channels, and rolling our own. Each is treated in
+detail below.
 
 ## LTTng-UST (chosen)
 
@@ -171,34 +169,6 @@ fidelity is +73% (~80× more expensive). The original distro-portability
 concern was sidestepped entirely by vendoring LTTng-UST 2.13.7 +
 userspace-rcu 0.14.0 as git submodules under `projects/{clr,rocr-runtime}/`
 — no system `liblttng-ust-dev` required at build time or runtime.
-
-## Linux `user_events` (kernel 6.4+)
-
-**Why not chosen today: distro reach.** RHEL 9 (kernel 5.14) and Ubuntu
-22.04 LTS (kernel 5.15) — both first-class ROCm targets — do not ship a
-kernel new enough. The first stable customer-baseline distros with
-`CONFIG_USER_EVENTS=y` are RHEL 10 (kernel 6.12+) and Ubuntu 24.04 (kernel
-6.8). Mainstream customer adoption of those baselines is a 2027–2028
-horizon.
-
-**Architecturally a strong long-term fit.** The 6.4 ABI is arguably a
-*better* design than LTTng-UST for our problem:
-
-* Zero new userspace library dependency on the producer side — just
-  `open()` + `ioctl()` + `writev()`.
-* Kernel-managed enable bit in producer-owned memory; activation is one
-  atomic bit-flip, no separate sessiond.
-* Native typed-schema registration (`USER_EVENT_REG_MULTI_FORMAT` is a
-  real schema-versioning story).
-* writev()-based data path is trivial to get right.
-
-**Per-event cost is higher** — ~100–300 ns syscall overhead per event vs
-LTTng-UST's per-CPU shared-memory write. Mitigated by event batching, which
-the ABI supports.
-
-**Plan:** keep this as the v2 backend swap target. The per-tracepoint macro
-shim should be designed (or refactored) to make the swap a backend
-replacement rather than a redesign — see Open Question #8 below.
 
 ## OpenTelemetry SDK + OTLP exporters
 
@@ -295,9 +265,9 @@ solved by something else. Not the primary candidate today.
 ## perf_event_open(2) + tracepoints
 
 Not a producer-side delivery mechanism on its own — it is a **consumer**
-syscall that pairs with one of the actual producers (`user_events`, USDT
-via uprobes, kernel tracepoints). For our problem it has nothing to add
-that LTTng-UST + babeltrace2 doesn't already cover.
+syscall that pairs with one of the actual producers (USDT via uprobes,
+kernel tracepoints). For our problem it has nothing to add that
+LTTng-UST + babeltrace2 doesn't already cover.
 
 ## Linux kernel tracepoints (`/sys/kernel/tracing`)
 
@@ -576,7 +546,7 @@ been zero-cost when "disabled".
   vectors).
 - Export: serialized to protobuf, sent over gRPC/HTTP. Batched in the
   BatchSpanProcessor (default ~5s flush).
-- Heavyweight relative to LTTng-UST or `user_events`.
+- Heavyweight relative to LTTng-UST.
 
 ### I. Data shape
 Strongly typed via OTel semantic conventions; OTLP is protobuf-defined.
@@ -727,115 +697,7 @@ the moment any consumer subscribes).
 
 ---
 
-## 6. Linux `user_events` (kernel 6.4+) — **the modern dark horse**
-
-### A. Mechanism
-A new tracefs ABI introduced upstream in Linux 6.4 (Beau Belgrave,
-Microsoft). Producer:
-  1. Opens `/sys/kernel/tracing/user_events_data`.
-  2. Issues `ioctl(DIAG_IOCSREG, &user_reg)` to register an event. The
-     `user_reg` struct includes:
-     - `name_args`: event name + typed-field schema string
-       (`"my_event u32 thread_id; u64 timestamp; char name[64]"`).
-     - `enable_addr`: a 32- or 64-bit word in the *producer's own address
-       space* that the kernel will atomically set/clear bits in.
-     - `enable_bit`: which bit in that word reflects "someone is consuming".
-  3. The kernel returns a `write_index` — an integer the producer must
-     prepend to event payloads.
-
-Producer hot-path: load the `enable_addr` word, test the bit, branch out if
-zero, otherwise `writev(fd, &write_index, &payload)`.
-
-Consumer attaches via standard tracefs:
-`echo 1 > /sys/kernel/tracing/events/user_events/<name>/enable` or via
-`perf record -e user_events:<name>` or via eBPF tracepoint program. When a
-consumer enables, the kernel atomically sets the producer's bit; when the
-last consumer detaches, the kernel clears it.
-
-### B. Producer requirements
-- One-time `open()` + `ioctl()` at startup per event.
-- One `writev()` per event when enabled (or just a `write()`).
-- No library link required (could be a vendored helper). Total LoC for a
-  C wrapper: ~150 lines.
-
-### C. Consumer requirements
-- tracefs mounted (`/sys/kernel/tracing`); CAP_PERFMON if event registered
-  with `USER_EVENT_REG_PERSIST`.
-- Standard ftrace / perf / bpftrace. **Out-of-process.**
-
-### D. Activation model — **YES, attach to running producer**
-Producer registers events at startup. A consumer can attach hours later via
-tracefs and the producer's enable bit gets flipped. Detach symmetric.
-
-### E. Binary modification on activation — **NO**
-Activation flips a bit in a registered word in the producer's data segment.
-**The text segment is never touched.** This is the critical differentiator
-from USDT/uprobes.
-
-### F. `LD_PRELOAD` requirement — **NO**
-Producer registers via syscall during normal startup. The consumer attaches
-via syscall.
-
-### G. Overhead when OFF
-- 1 atomic load of the registered word.
-- 1 bit test + unlikely branch.
-- Comparable to LTTng-UST's per-CPU enabled flag check.
-
-### H. Overhead when ON
-- 1 `writev()` syscall per event with the registered struct.
-- Syscall overhead (~100–300 ns on modern hardware) plus the kernel-side
-  ftrace ring-buffer write.
-- Higher per-event cost than LTTng-UST's per-CPU shared-memory write,
-  because every event crosses the kernel boundary.
-- Mitigated by event batching at the producer (combine multiple events into
-  one writev) — supported by the ABI.
-
-### I. Data shape
-Strongly typed via the registration string. Schema includes basic types
-(u8/u16/u32/u64, char, char[N], `__data_loc`, `struct mytype N`).
-**Versioning**: `USER_EVENT_REG_MULTI_FORMAT` flag (since 6.x) allows the
-same event name to coexist with multiple format versions, each tracked via
-a unique-id suffix in tracefs (`event.<hex>`). This is a real schema
-versioning story, unique among the kernel-side options.
-
-### J. Userspace stability
-Stable upstream ABI as of 6.4 with continued additions (multi-format,
-persist flag). The `enable_bit`/`enable_addr` model is the second
-iteration; the original 6.0–6.3 design used a shared mmap'd page and was
-removed in favor of the registered-address-write model.
-
-### K. Multi-producer / multi-consumer
-- Multi-producer: any process can register events with the same name.
-  With `USER_EVENT_REG_MULTI_FORMAT`, format collisions are handled per-id.
-  Without it, two producers with the same name+schema share the same
-  tracepoint.
-- Multi-consumer: standard tracefs — N consumers can enable, refcounted by
-  the kernel; the bit stays set until all detach.
-
-### L. Kernel dependency
-- **CONFIG_USER_EVENTS=y** required.
-- **6.4+** for the registered-address API. The earlier shared-page API is
-  not what tools target now.
-- Distro reality (as of 2026):
-  - Mainline / Arch / Fedora 39+: enabled.
-  - Ubuntu 24.04 (kernel 6.8): enabled.
-  - Ubuntu 22.04 (kernel 5.15): **NOT available**.
-  - RHEL 9 (kernel 5.14): **NOT available**.
-  - RHEL 10 (kernel 6.12+): expected to ship enabled.
-  - SLES 15 SP6: depends on kernel revision.
-  - Container images: must run on a host kernel with the feature.
-
-This is the **single biggest practical risk** of `user_events`: ROCm
-customers on RHEL 9 / Ubuntu 22.04 LTS / older SLES will not have it for
-several more years.
-
-### M. AMD/ROCm-specific usage
-**None documented.** Search confirms no rocprofiler / rocprof / rdc usage of
-user_events.
-
----
-
-## 7. `perf_event_open(2)` + tracepoints
+## 6. `perf_event_open(2)` + tracepoints
 
 ### A. Mechanism
 A general-purpose syscall to create a file descriptor representing a
@@ -843,7 +705,7 @@ performance event. The event can be:
 - Hardware (CPU cycles, cache misses)
 - Software (PERF_COUNT_SW_*)
 - Tracepoint (kernel tracepoints by `id`)
-- Dynamic (kprobe/uprobe — see #3/#4)
+- Dynamic (kprobe/uprobe — see §3/§4)
 
 Events are sampled into an mmap'd ring buffer or counted via `read()`.
 Consumer (typically `perf` or libperf) opens the fd against a `pid` and
@@ -851,20 +713,19 @@ optional `cpu`.
 
 ### Notes for our problem
 - Useful for *consuming* events from any source (kernel tracepoints,
-  user_events, USDT-via-uprobes, etc.). Not itself a producer-side
-  emit-data API.
-- For our problem, perf_event_open is the **consumer** API that pairs with
-  user_events (a tool can do `perf record -e user_events:my_event`) or
-  with USDT (`perf probe`).
+  USDT-via-uprobes, etc.). Not itself a producer-side emit-data API.
+- For our problem, perf_event_open is the **consumer** API that pairs
+  with USDT (`perf probe`) or with kernel tracepoints. Not relevant on
+  the producer side.
 
 ### Verdict
-Not a delivery technique on its own; it is a consumer transport that can be
-paired with user_events (the recommended candidate) or with kernel
-tracepoints. Mention but not a standalone option.
+Not a delivery technique on its own; it is a consumer transport that
+can be paired with kernel tracepoints. Mention but not a standalone
+option.
 
 ---
 
-## 8. Linux kernel tracepoints exported via `/sys/kernel/tracing`
+## 7. Linux kernel tracepoints exported via `/sys/kernel/tracing`
 
 ### A. Mechanism
 Static tracepoints compiled into the **kernel** (`TRACE_EVENT()` macros in
@@ -884,7 +745,7 @@ does not solve the userspace HIP/HSA → rocprofiler-sdk delivery problem.
 
 ---
 
-## 9. LTTng-modules vs LTTng-UST (clarification)
+## 8. LTTng-modules vs LTTng-UST (clarification)
 
 - **LTTng-modules**: kernel tracer. Out-of-tree kernel module. Replaces
   ftrace as a tracing backend in some setups. Not relevant to userspace
@@ -896,7 +757,7 @@ LTTng-UST does not require LTTng-modules to be installed.
 
 ---
 
-## 10. Chrome trace event format (file-based)
+## 9. Chrome trace event format (file-based)
 
 ### A. Mechanism
 Producer emits JSON or protobuf records to a file (or a Perfetto SDK shared
@@ -915,7 +776,7 @@ rocprofiler-sdk for visualization.
 
 ---
 
-## 11. io_uring channels (`IORING_OP_MSG_RING` and proposed IPC)
+## 10. io_uring channels (`IORING_OP_MSG_RING` and proposed IPC)
 
 ### A. Mechanism
 io_uring is a shared SQ/CQ ring between userspace and kernel. Since 5.18+,
@@ -1106,26 +967,11 @@ HIP/HSA → rocprofiler-sdk channel is solved.
    > if specific tooling needs (e.g., bpftrace-native subscribers without
    > liblttng dependency) emerge as a customer requirement.
 
-8. **`user_events` migration path.** Lock in the design abstractions now
-   so the future move to `user_events` is a backend swap rather than a
-   redesign. The two transports have nearly identical *application-facing*
-   contracts: typed event + per-event enable check + producer-side emit.
-
-   > **Status (2026-04-30): PARTIAL — to revisit before merge.** The
-   > current per-tracepoint macro shim is LTTng-UST-specific
-   > (`LTTNG_UST_TRACEPOINT_EVENT`, `lttng_ust_tracepoint`). For a clean
-   > backend swap to `user_events` later, the abstraction should be at
-   > "typed event + per-event enabled-check + emit", with LTTng-UST and
-   > `user_events` as parallel macro implementations. Worth a brief design
-   > pass before the producer ships, while call-site context is fresh.
-   > Not yet done.
-
 ---
 
 # Sources
 
 - LTTng v2.13 documentation: https://lttng.org/docs/v2.13/
-- Linux kernel `user_events`: https://docs.kernel.org/trace/user_events.html
 - Linux kernel uprobetracer: https://docs.kernel.org/trace/uprobetracer.html
 - `perf_event_open(2)` man page: https://man7.org/linux/man-pages/man2/perf_event_open.2.html
 - BPF iterators: https://docs.kernel.org/bpf/bpf_iterators.html

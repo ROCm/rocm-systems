@@ -46,10 +46,9 @@ relevant `file:line` site.
 >   descriptor so the consumer no longer hardcodes record format.
 > - `TRACING_DELIVERY_RESEARCH.md` — research on replacing the
 >   HIP/HSA → rocprofiler-sdk callback delivery with a generic
->   emit-and-subscribe transport (LTTng-UST primary,
->   `user_events` future). Producer-side complete in PRs #5475 +
->   #5513; HSA FW kernel-dispatch records also flow through this
->   transport on the `lttng-kernel-ts` branch.
+>   emit-and-subscribe transport (LTTng-UST). Producer-side complete
+>   in PRs #5475 + #5513; HSA FW kernel-dispatch records also flow
+>   through this transport on the `lttng-kernel-ts` branch.
 
 ## Scope
 

@@ -245,7 +245,6 @@ firmware port is months including build/sign/deploy/validate cycles.
 | TheRock manylinux build validation | **complete on `bewelton_therock` container** |
 | rocprofiler-sdk consumer side (CTF→record translator) | **not yet started — separate planned PR** |
 | Cross-distro CI matrix | not yet wired |
-| `user_events` backend swap (v2) | future work; awaits RHEL 10 / Ubuntu 24.04 customer baseline |
 
 ## Parallel track: LTTng-UST emit-and-subscribe transport (in flight)
 
@@ -388,10 +387,6 @@ RESOLVED / DEFERRED / NOT PURSUED / PARTIAL).
   MI325X). Per-distro coverage (RHEL 9/10, Ubuntu 22.04/24.04, SLES 15) not
   yet wired into CI. Vendoring removes the runtime risk; build-side risk is
   autotools availability for the bootstrap step.
-* **`user_events` backend (v2):** the abstraction layer for swapping to
-  `user_events` when distro reach allows is not yet structured for that
-  swap. If we want this swap to be cheap later, the per-tracepoint macro
-  shim should be designed now while the call sites are fresh.
 
 ### Expertise still needed
 
