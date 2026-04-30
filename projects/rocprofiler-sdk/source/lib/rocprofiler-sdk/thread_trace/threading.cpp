@@ -203,7 +203,7 @@ producer_loop(
 
     auto stop_trace = [&]() {
         ROCP_INFO << "Stopping the trace";
-        att_queue_submit_and_signal_last(queue, parameters.control_packet->after_krn_pkt);
+        att_queue_submit_and_wait_last(queue, parameters.control_packet->after_krn_pkt);
     };
 
     auto iterate_trace = [&]() {
@@ -265,8 +265,8 @@ producer_loop(
                                          ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_NONE,
                                          true);
 
-                    att_queue_submit_and_signal_last(queue,
-                                                     parameters.control_packet->before_krn_pkt);
+                    att_queue_submit_and_wait_last(queue,
+                                                   parameters.control_packet->before_krn_pkt);
                 }
             }
             // The status_query test verifies we immediately poll again after consuming a
