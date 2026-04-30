@@ -54,6 +54,7 @@ class Device;
 
 class Platform {
 public:
+  __attribute__((visibility("hidden")))
   static Platform& instance();
   ErrorCode Init();
   void Destroy();

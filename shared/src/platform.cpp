@@ -53,6 +53,7 @@ namespace thunk {
 
 using namespace std;
 
+__attribute__((visibility("hidden")))
 Platform& Platform::instance() {
   static Platform platform_;
   return platform_;

@@ -62,6 +62,7 @@ namespace wsl {
 namespace thunk {
 
 //class Queue;
+class Device;
 class WDDMQueue;
 
 // WSL2 hyperv GPADL protocol limitation
@@ -87,8 +88,11 @@ class WDDMDevice {
 public:
   static constexpr size_t GpuMemoryChunkSize = 2 * (1ULL << 30);   // 2 GB
 
-  WDDMDevice(D3DKMT_HANDLE adapter, LUID adapter_luid, uint32_t node_id);
+  WDDMDevice(Device *shared_dev,
+             D3DKMT_HANDLE adapter, LUID adapter_luid, uint32_t node_id);
   ~WDDMDevice();
+
+  Device *SharedDevice() const { return shared_dev_; }
 
   int NodeId() const { return node_id_; }
   int Major() { return device_info_.major; }
@@ -221,6 +225,7 @@ private:
 
   D3DKMT_HANDLE adapter_;
   LUID adapter_luid_;
+  Device *shared_dev_ = nullptr;
   D3DKMT_HANDLE device_;
 
   D3DKMT_HANDLE page_queue_;

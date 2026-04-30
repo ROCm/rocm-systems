@@ -39,6 +39,7 @@
 #include <sys/sysinfo.h>
 
 #include "shared/include/d3dkmt_types.h"
+#include "shared/include/platform.h"
 #include "impl/wddm/device.h"
 #include "util/utils.h"
 
@@ -366,6 +367,7 @@ HSAKMT_STATUS topology_sysfs_get_system_props(HsaSystemProperties& props) {
   for (auto device : dxg_topology->wdevices_)
     delete device;
   dxg_topology->wdevices_.clear();
+  wsl::thunk::Platform::instance().Destroy();
 
   WDDMCreateDevices(dxg_topology->wdevices_);
   int num_adapters = dxg_topology->wdevices_.size();
@@ -1135,6 +1137,7 @@ void topology_drop_snapshot(void) {
   for (auto device : dxg_topology->wdevices_)
     delete device;
   dxg_topology->wdevices_.clear();
+  wsl::thunk::Platform::instance().Destroy();
 }
 
 HSAKMT_STATUS validate_nodeid(uint32_t nodeid, uint32_t *gpu_id) {

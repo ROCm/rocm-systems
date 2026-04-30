@@ -51,6 +51,9 @@
 #include <unistd.h>
 #include "shared/include/status.h"
 #include "shared/include/d3dkmt_types.h"
+#include "shared/include/platform.h"
+#include "shared/include/device.h"
+#include "shared/include/lda_chain.h"
 #include "impl/wddm/device.h"
 #include "impl/wddm/queue.h"
 #include "shared/include/utils.h"
@@ -60,8 +63,10 @@ namespace thunk {
 
 const uint32_t WDDMDevice::cmdbuf_aql_frame_num_ = 0x1000;
 
-WDDMDevice::WDDMDevice(D3DKMT_HANDLE adapter, LUID adapter_luid, uint32_t node_id)
-  : adapter_(adapter), adapter_luid_(adapter_luid), node_id_(node_id) {
+WDDMDevice::WDDMDevice(Device *shared_dev,
+                       D3DKMT_HANDLE adapter, LUID adapter_luid, uint32_t node_id)
+  : adapter_(adapter), adapter_luid_(adapter_luid), shared_dev_(shared_dev),
+    node_id_(node_id) {
   memset(&device_info_, 0, sizeof(device_info_));
 
   ParseDeviceInfo();
@@ -506,56 +511,36 @@ uint32_t WDDMDevice::LdsBlocks(const hsa_kernel_dispatch_packet_t *pkt) {
 
 NTSTATUS WDDMCreateDevices(std::vector<WDDMDevice *> &devices)
 {
-  bool supported = false;
-  D3DKMT_ENUMADAPTERS2 args = {0};
-  NTSTATUS ret = DXCORE_CALL(D3DKMTEnumAdapters2(&args));
-  if (ret != STATUS_SUCCESS)
-    return ret;
-
-  if (!args.NumAdapters) {
+  auto &platform = Platform::instance();
+  std::vector<Device *> shared_devices;
+  ErrorCode code = platform.EnumerateDevices(shared_devices);
+  if (code != ErrorCode::Success && shared_devices.empty())
     return STATUS_SUCCESS;
-  }
 
-  D3DKMT_ADAPTERINFO *info = new D3DKMT_ADAPTERINFO[args.NumAdapters];
-  if (!info)
-    return STATUS_NO_MEMORY;
-
-  args.pAdapters = info;
-  ret = DXCORE_CALL(D3DKMTEnumAdapters2(&args));
-  if (ret != STATUS_SUCCESS)
-    goto err_out0;
-
-  for (int i = 0; i < args.NumAdapters; i++) {
+  for (auto *sdev : shared_devices) {
+    auto *chain = sdev->GetLdaChain();
+    D3DKMT_HANDLE adapter = chain->AdapterHandle();
     D3DKMT_QUERY_DEVICE_IDS query = {0};
 
-    ret = WDDMQueryAdapter(info[i].hAdapter, KMTQAITYPE_PHYSICALADAPTERDEVICEIDS,
-			   &query, sizeof(query));
+    NTSTATUS ret = WDDMQueryAdapter(adapter, KMTQAITYPE_PHYSICALADAPTERDEVICEIDS,
+                                    &query, sizeof(query));
     if (ret != STATUS_SUCCESS)
-      goto err_out1;
+      continue;
 
     if (query.DeviceIds.VendorID != 0x1002)
       continue;
 
-    supported = wsl::thunk::QueryAdapterSupported(query.DeviceIds.DeviceID);
+    if (!wsl::thunk::QueryAdapterSupported(query.DeviceIds.DeviceID))
+      continue;
 
-    if (supported) {
-      auto device = new WDDMDevice(
-        info[i].hAdapter, info[i].AdapterLuid, devices.size() + 1);
-      if (!device)
-        goto err_out1;
-      devices.push_back(device);
-    }
+    auto device = new WDDMDevice(sdev, adapter, chain->AdapterLuid(),
+                                 devices.size() + 1);
+    if (!device)
+      continue;
+    devices.push_back(device);
   }
 
-  delete[] info;
   return STATUS_SUCCESS;
-
- err_out1:
-  for (auto &device : devices)
-    delete device;
- err_out0:
-  delete[] info;
-  return ret;
 }
 
 bool WDDMDevice::ParseDeviceInfo() {
