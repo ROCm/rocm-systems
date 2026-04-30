@@ -9,10 +9,18 @@ import re
 import shlex
 import subprocess
 from pathlib import Path
+from typing import Dict, Optional
 
 PROJECT_NAME = "rccl"
 
 logging.basicConfig(level=logging.INFO)
+
+
+def path_from_env(name: str) -> Optional[Path]:
+    value = os.getenv(name)
+    if not value:
+        return None
+    return Path(value)
 
 
 def parse_args() -> argparse.Namespace:
@@ -20,7 +28,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--rocm-path",
         type=Path,
-        default=os.getenv("ROCM_PATH"),
+        default=path_from_env("ROCM_PATH"),
         help="ROCm install prefix. Defaults to ROCM_PATH or the runner location.",
     )
     parser.add_argument(
@@ -36,7 +44,7 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def get_rocm_path(script_path: Path, rocm_path: Path | None) -> Path:
+def get_rocm_path(script_path: Path, rocm_path: Optional[Path]) -> Path:
     if rocm_path is not None:
         return rocm_path.resolve()
 
@@ -44,6 +52,7 @@ def get_rocm_path(script_path: Path, rocm_path: Path | None) -> Path:
     if (
         script_path.parent.name == "tests"
         and script_path.parents[1].name == PROJECT_NAME
+        and script_path.parents[2].name == "share"
     ):
         return script_path.parents[3].resolve()
 
@@ -59,7 +68,7 @@ def resolve_executable(bin_dir: Path, name: str) -> Path:
     raise FileNotFoundError(f"{name} was not found in {bin_dir}")
 
 
-def get_visible_gpu_count(env: dict[str, str], bin_dir: Path) -> int:
+def get_visible_gpu_count(env: Dict[str, str], bin_dir: Path) -> int:
     rocminfo_path = bin_dir / ("rocminfo.exe" if os.name == "nt" else "rocminfo")
     rocminfo = str(rocminfo_path) if rocminfo_path.exists() else "rocminfo"
     result = subprocess.run(
