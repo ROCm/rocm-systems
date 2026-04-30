@@ -1217,9 +1217,11 @@ class AMDSMILogger:
         vbios_version = str(output["version_info"]["vbios version"])
         kernel_version = str(output["version_info"]["kernel version"])
         _COL_WIDTH = 57  # inner column width for the default output table
+
         def _trunc(s):
             """Truncate string to _COL_WIDTH chars, appending '...' if it was cut."""
-            return s[:_COL_WIDTH - 3] + "..." if len(s) > _COL_WIDTH else s
+            return s[: _COL_WIDTH - 3] + "..." if len(s) > _COL_WIDTH else s
+
         amd_smi_version = _trunc(amd_smi_version)
         rocm_version = _trunc(rocm_version)
         amdgpu_version = _trunc(amdgpu_version)
@@ -1246,7 +1248,11 @@ class AMDSMILogger:
         if fw_pldm_version != "N/A":
             print("| FW PLDM:           {0:<{w}s} |".format(fw_pldm_version, w=_COL_WIDTH))
 
-        print("| Platform:          {0:<{w}s} |".format(_trunc(str(self.helpers.os_info())), w=_COL_WIDTH))
+        print(
+            "| Platform:          {0:<{w}s} |".format(
+                _trunc(str(self.helpers.os_info())), w=_COL_WIDTH
+            )
+        )
         print(default_line_2)
         print("| BDF                        GPU-Name | Mem-Uti   Temp   UEC       Power-Usage |")
         print("| GPU  HIP-ID  OAM-ID  Partition-Mode | GFX-Uti    Fan               Mem-Usage |")
