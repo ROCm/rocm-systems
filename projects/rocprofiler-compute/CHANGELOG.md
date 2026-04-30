@@ -57,10 +57,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Changed
 
-* `--output-format csv` in analyze mode now uses the database analysis workflow.
-  * CSV output produces a folder (`rocprof_compute_<uuid>/` by default, or `<output_name>/` when `--output-name` is set) containing one CSV file per view defined in the analysis database schema (e.g. `kernel.csv`, `kernel_metric.csv`, `workload_metric.csv`).
-  * CSV output now requires rocpd profiling format (same requirement as database output): profile with `--format-rocprof-output rocpd`.
-  * `--output-format csv` no longer prints the analysis report to the terminal (matches the existing `db` format behavior).
+* `--output-format csv` in analyze mode now uses the database analysis workflow and produces one CSV per analysis view. Requires `--format-rocprof-output rocpd` and no longer prints the report to the terminal (matching `db` format).
 
 * Standalone roofline (`--roof-only` option) in profile mode now creates `roofline.csv` only. HTML roofline charts are generated via `rocprof-compute analyze`. The `calc_ai_profile()` function has been removed; `calc_ai_analyze()` is the single source of truth for arithmetic intensity calculation.
   * Roofline visualization options (`--sort`, `--mem-level`, `--roofline-data-type`) have moved from profile mode to analyze mode.

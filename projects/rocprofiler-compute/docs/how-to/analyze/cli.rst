@@ -573,7 +573,7 @@ format is ``stdout``.
 * ``csv`` format:
    * NOTE: This only works when provided workload paths are created using ``--format-rocprof-output rocpd`` profile mode option.
    * Generate a folder named ``rocprof_compute_<uuid>`` in the current working directory.
-   * This folder contains one CSV file per view defined in the :ref:`analysis database schema <analysis-database>` (e.g. ``kernel.csv``, ``kernel_metric.csv``, ``workload_metric.csv``).
+   * This folder contains one CSV file per view defined in the :ref:`analysis database schema <analysis-database>`.
    * This is useful for further programmatic analysis of analysis reports.
    * NOTE: This option will disable output of analysis report to terminal.
 
