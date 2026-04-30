@@ -35,7 +35,6 @@ from typing import Any
 import utils.hip_interface as hip
 import utils.hiprtc_interface as hiprtc
 
-
 # =============================================================================
 # GLOBAL VARIABLES
 # =============================================================================
