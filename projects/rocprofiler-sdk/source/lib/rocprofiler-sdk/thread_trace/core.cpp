@@ -258,8 +258,10 @@ ThreadTracerAgent::start_thread_trace(std::shared_ptr<std::atomic<int>> _flag)
     control_packet_copy->populate_before();
     control_packet_copy->populate_after();
 
-    auto unique_signal =
-        att_queue_submit_and_signal_last(*queue, control_packet_copy->before_krn_pkt);
+    // Submit the start packets without waiting: the producer thread (triple-buffer
+    // path) and DeviceThreadTracer::start_context (single-buffer path) wait on the
+    // returned signal so multiple agents can be launched in parallel.
+    auto unique_signal = att_queue_submit_signal_last(*queue, control_packet_copy->before_krn_pkt);
     auto shared_signal = std::shared_ptr<hsa_signal_t>(std::move(unique_signal));
 
     if(params.triple_buffering)
@@ -341,7 +343,10 @@ ThreadTracerAgent::stop_thread_trace()
         control_packet_copy->clear();
         // Join helpers and emit the final set of packets so the GPU drains.
         control_packet_copy->populate_after();
-        return att_queue_submit_and_signal_last(*queue, control_packet_copy->after_krn_pkt);
+        // Submit without waiting; DeviceThreadTracer::stop_context fans out
+        // submissions across agents and waits on every signal in parallel
+        // before calling iterate_data.
+        return att_queue_submit_signal_last(*queue, control_packet_copy->after_krn_pkt);
     }
 }
 
@@ -581,7 +586,10 @@ DeviceThreadTracer::stop_context()
     for(auto& [_, tracer] : agents)
         wait_list.emplace_back(tracer->stop_thread_trace());
 
-    wait_list.clear();
+    // Wait on every agent's after-packets explicitly so iterate_data only runs
+    // once the GPU has drained the trace; mirrors start_context's parallel wait.
+    for(auto& sig : wait_list)
+        if(sig) signal_wait(*sig);
 
     for(auto& [_, tracer] : agents)
         tracer->iterate_data();
