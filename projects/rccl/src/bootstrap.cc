@@ -94,24 +94,25 @@ NCCL_PARAM(BootstrapNetEnable,"OOB_NET_ENABLE", 0);
 
 // Large-scale bootstrap: bidirectional ring AllGather (N/2 steps instead of N-1).
 // Both the socket and the IB (net) OOB paths support a bidirectional implementation;
-// each is gated by its own env var (default: enabled), so users can fall back to the
-// classic unidirectional ring without rebuilding.
+// each is gated by its own env var. Socket bidir is enabled by default; net bidir is
+// opt-in until it shows stable total-time wins.
 //
 // Socket path mirrors upstream NCCL 2.28.7 (socketDoubleSendRecv + ncclSocketMultiOp
 // over the same forward socket pair: TCP is full-duplex). Has no setup overhead, so
 // it does not consult BOOTSTRAP_BIDIR_THRESHOLD — it is enabled whenever N ≥ 3.
 NCCL_PARAM(BootstrapBidirAllGather, "BOOTSTRAP_BIDIR_ALLGATHER", 1);
 // IB path runs a parallel reverse ring on a separate QP pair, so it does pay for
-// extra regMr + connect + accept; threshold gates it on small comms.
-NCCL_PARAM(BootstrapBidirNet,       "BOOTSTRAP_BIDIR_NET",       1);
+// extra regMr + connect + accept. Keep it opt-in until the net path shows stable
+// total-time wins, while socket bidir remains enabled by BOOTSTRAP_BIDIR_ALLGATHER.
+NCCL_PARAM(BootstrapBidirNet,       "BOOTSTRAP_BIDIR_NET",       0);
 // Minimum nranks at which bidirectional IB bootstrap is worth its overhead.
 // Below the threshold the extra reverse-ring connect + regMr dominates the savings.
 // Measured on a 4-node MI300X cluster (RoCE + 10G TCP):
 //   N=8  single-node  : bidir ~40% slower in total bootstrap time → off
 //   N=16 (2 nodes)    : bidir ring_avg −58% IB                    → on
 //   N=32 (4 nodes)    : bidir ring_avg −23% IB                    → on
-// Force-enable on any N≥3 by setting BOOTSTRAP_BIDIR_THRESHOLD=0.
-// Force-disable per-path with BOOTSTRAP_BIDIR_ALLGATHER=0 / BOOTSTRAP_BIDIR_NET=0.
+// Force-enable on any N≥3 by setting NCCL_BOOTSTRAP_BIDIR_THRESHOLD=0.
+// Force-disable per-path with NCCL_BOOTSTRAP_BIDIR_ALLGATHER=0 / NCCL_BOOTSTRAP_BIDIR_NET=0.
 NCCL_PARAM(BootstrapBidirThreshold, "BOOTSTRAP_BIDIR_THRESHOLD", 16);
 
 // Single source of truth for the "should we run bidirectional bootstrap?" decision.
@@ -583,7 +584,7 @@ struct bootstrapRing_t {
       void *sendComm, *recvComm;
       ncclNetDeviceHandle_t *sendDevHandle, *recvDevHandle;
       // Reverse ring (large-scale bidirectional IB OOB AllGather, opt-in via
-      // RCCL_BOOTSTRAP_BIDIR_NET). NULL when disabled. The socket OOB path is always
+      // NCCL_BOOTSTRAP_BIDIR_NET). NULL when disabled. The socket OOB path is always
       // bidirectional but does not need a reverse pair (TCP is full-duplex).
       void *revSendComm, *revRecvComm;
       ncclNetDeviceHandle_t *revSendDevHandle, *revRecvDevHandle;
@@ -1386,7 +1387,7 @@ static ncclResult_t socketRingAllGather(struct ncclSocket* nextSock, struct nccl
   TRACE(NCCL_BOOTSTRAP, "bidirectional bootstrap: totalSteps=%d", totalSteps);
   BOOTSTRAP_PROF_OPEN(tFirst);
   for (int step = 0; step < totalSteps; step++) {
-    // N ranks requires (N-1)/2 steps for the double ring  algorithm. If N is even, the last step is requires a single send/recv
+    // N ranks require (N-1)/2 steps for the double-ring algorithm. If N is even, the last step requires a single send/recv.
     bool isFinalUnidirectional = (step == totalSteps - 1) && (nranks % 2 == 0);
     // Ring0: ring from previous to next
     int sendSliceRing0 = (rank - step + nranks) % nranks;      // Send this slice to next neighbor

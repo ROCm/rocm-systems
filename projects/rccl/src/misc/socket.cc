@@ -922,20 +922,27 @@ ncclResult_t ncclSocketMultiOp(struct ncclSocketOp* ops, int numOps) {
     return ncclInvalidArgument;
   }
 
+  int completedOps = 0;
   for (int i = 0; i < numOps; i++) {
     if (ops[i].sock == NULL) {
       WARN("ncclSocketMultiOp: invalid socket at index %d", i);
       return ncclInvalidArgument;
     }
-    ops[i].offset = 0;
-  }
-  int completedOps=0, i=0;
-  while(completedOps < numOps){
-    if (ops[i].offset < ops[i].size){
-      NCCLCHECK(socketProgress(ops[i].op, ops[i].sock, ops[i].ptr, ops[i].size, &ops[i].offset));
-      if(ops[i].offset >= ops[i].size) completedOps++;
+    if (ops[i].op != NCCL_SOCKET_SEND && ops[i].op != NCCL_SOCKET_RECV) {
+      WARN("ncclSocketMultiOp: invalid op %d at index %d", ops[i].op, i);
+      return ncclInvalidArgument;
     }
-    i=(i+1)%numOps;
+    ops[i].offset = 0;
+    if (ops[i].size == 0) completedOps++;
+  }
+
+  int i = 0;
+  while (completedOps < numOps) {
+    if (ops[i].offset < ops[i].size) {
+      NCCLCHECK(socketProgress(ops[i].op, ops[i].sock, ops[i].ptr, ops[i].size, &ops[i].offset));
+      if (ops[i].offset >= ops[i].size) completedOps++;
+    }
+    i = (i + 1) % numOps;
   }
   return ncclSuccess;
 }
