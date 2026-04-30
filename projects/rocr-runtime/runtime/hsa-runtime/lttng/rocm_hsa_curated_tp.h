@@ -112,7 +112,7 @@ lttng_ust_field_integer_hex(uint64_t, completion_signal, completion_signal)
 
 LTTNG_UST_TRACEPOINT_EVENT(
     rocm_hsa, hsa_amd_memory_async_copy_on_engine_args,
-    LTTNG_UST_TP_ARGS(uint64_t, dst, uint64_t, dst_agent, uint64_t, src, uint64_t, src_agent, uint64_t, size, uint32_t, num_dep_signals, uint64_t, completion_signal, int32_t, engine_id, uint64_t, force_copy_on_sdma),
+    LTTNG_UST_TP_ARGS(uint64_t, dst, uint64_t, dst_agent, uint64_t, src, uint64_t, src_agent, uint64_t, size, uint32_t, num_dep_signals, uint64_t, completion_signal, int32_t, engine_id, uint32_t, force_copy_on_sdma),
     LTTNG_UST_TP_FIELDS(
 lttng_ust_field_integer_hex(uint64_t, dst, dst)
 lttng_ust_field_integer_hex(uint64_t, dst_agent, dst_agent)
@@ -122,7 +122,7 @@ lttng_ust_field_integer(uint64_t, size, size)
 lttng_ust_field_integer(uint32_t, num_dep_signals, num_dep_signals)
 lttng_ust_field_integer_hex(uint64_t, completion_signal, completion_signal)
 lttng_ust_field_integer(int32_t, engine_id, engine_id)
-lttng_ust_field_integer(uint64_t, force_copy_on_sdma, force_copy_on_sdma)
+lttng_ust_field_integer(uint32_t, force_copy_on_sdma, force_copy_on_sdma)
     )
 )
 

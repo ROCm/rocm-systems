@@ -71,13 +71,26 @@ static inline void rocm_trace_emit_hip_api_exit_void(const char* api_name) {
     }
 }
 
-/* Pack three 16-bit dims into a 64-bit field. Bits [15:0]=x, [31:16]=y,
- * [47:32]=z, [63:48]=0. Real HIP launches never exceed 2^16-1 per dim;
- * if they did the high bits would saturate (lossy but not corruption). */
+/* Pack a (x, y, z) triplet into a 64-bit field using the same lane
+ * layout as ROCM_DIM3_PACK (rocm_dim3_pack.h):
+ *   bits  0..31  : x  (full 32 bits)
+ *   bits 32..47  : y  (16-bit lane, saturates to 0xFFFF on overflow)
+ *   bits 48..62  : z  (15-bit lane, saturates to 0x7FFF on overflow)
+ *   bit  63      : overflow flag (set iff y or z exceeded its lane;
+ *                  z >= 0x8000 is treated as overflow because the lane
+ *                  is intentionally 15 bits to keep bit 63 unambiguous)
+ *
+ * Same uint32_t triplet signature is kept (vs. ROCM_DIM3_PACK's dim3
+ * argument) so this header stays self-contained — no <hip/hip_runtime.h>
+ * dependency. Lane semantics MUST stay byte-compatible with
+ * ROCM_DIM3_PACK so consumers decode both with one routine. */
 static inline uint64_t rocm_trace_pack_dims3(uint32_t x, uint32_t y, uint32_t z) {
-    return ((uint64_t)(x & 0xffffu))
-         | ((uint64_t)(y & 0xffffu) << 16)
-         | ((uint64_t)(z & 0xffffu) << 32);
+    const uint64_t x64 = (uint64_t)x;
+    const uint64_t y64 = (y > 0xFFFFu) ? 0xFFFFu : (uint64_t)y;
+    const uint64_t z64 = (z > 0x7FFFu) ? 0x7FFFu : (uint64_t)z;
+    const uint64_t overflow = ((y > 0xFFFFu) || (z > 0x7FFFu))
+                                  ? (1ULL << 63) : 0ULL;
+    return x64 | (y64 << 32) | (z64 << 48) | overflow;
 }
 
 /* hip_kernel_dispatch_enqueue: emitted just before command->enqueue() in
