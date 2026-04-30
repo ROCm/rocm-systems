@@ -321,16 +321,9 @@ hypothetical no-LTTng build is ~one atomic load + branch per event — too
 small to separate from noise on this workload, consistent with upstream
 LTTng-UST microbenchmark numbers (~5 ns when OFF).
 
-### Resolved design questions (vs `TRACING_DELIVERY_RESEARCH.md` open list)
-
-| Original open question | Resolution |
-|---|---|
-| Real-world LTTng-UST overhead on the HIP hot path | **Measured.** +0.9% wall-time at full curated capture; +0.6% generic-only. Zero drops. |
-| CTF-side correlation IDs / efficient consumer-side join | **Resolved by dropping in-band corr_id entirely.** Use vpid+vtid+timestamp from CTF channel contexts; LIFO stack walk on per-thread sorted stream. |
-| Multi-tool subscriber semantics (many sessions vs one re-fan-out) | **Picked: each tool is its own LTTng consumer.** LTTng-UST natively supports N-consumer multiplex via `buffer-shared`/`buffer-uid`/`buffer-pid` schemes; no rocprofiler-sdk re-fan-out layer needed. |
-| Build/packaging (`liblttng-ust-dev` distro availability) | **Resolved by vendoring.** Submodules under `projects/{clr,rocr-runtime}/external/`; flat `/opt/rocm/lib/` install. No distro dep. |
-| Renegotiate USDT constraint? | **Not pursued.** LTTng-UST landed first with acceptable measured overhead. Constraint stands. |
-| `user_events` migration path / backend abstraction | **Deferred.** Backend swap to Linux `user_events` (kernel 6.4+) remains a v2 design when RHEL 10 / Ubuntu 24.04+ become the customer floor (2027–2028). The hot-path call site is a thin tracepoint-provider macro layer; backend swap should be tractable. |
+Per-question resolution against the original open-questions list lives in
+`TRACING_DELIVERY_RESEARCH.md` §"Open Questions" (each item annotated
+RESOLVED / DEFERRED / NOT PURSUED / PARTIAL).
 
 ### Remaining gaps
 

@@ -71,46 +71,321 @@ review of the chosen path.
 
 ---
 
-## Today's situation (baseline for comparison)
+# Why LTTng-UST was chosen over the alternatives
 
-HIP and HSA runtimes today call into rocprofiler-sdk via function pointers
-populated through `rocprofiler-register`. The runtimes know about
-rocprofiler-sdk (via the shared API table contract); rocprofiler-sdk receives
-data **synchronously on the producer's thread** during the dispatch hot path.
-This gives full fidelity but couples the runtimes to the consumer and forces
-producer-side overhead on every event regardless of whether anyone is
-subscribed (the existence of the shared table is a non-zero cost — see
-`AIPROFSDK-813-always-on-tracing.md` for measured 2.77×–3.55× overhead).
+The original survey considered eleven candidate transports. This section
+records — in current-status form — why LTTng-UST won the comparison and what
+the disqualifying property of each alternative was. Per-technique mechanism
+detail is preserved as an appendix below.
 
-The desired property is: HIP/HSA **emit events generically** into a transport
-that does not name a consumer, and rocprofiler-sdk (or any other tool)
-**subscribes** to that transport. Steady-state cost when nobody is subscribed
-should be ~one branch per event.
+The decision was driven by four properties, in this order of priority:
+
+1. **No `LD_PRELOAD`** — must support attaching to a process that did not
+   pre-arrange tracing.
+2. **No runtime binary modification** — no text-segment patching at attach
+   time, no JIT code rewriting, no in-place instruction overwrite.
+3. **Acceptable steady-state cost when nobody is subscribed** — one atomic
+   load + branch per event budget.
+4. **Late-attach without producer cooperation** — operator decides at any
+   time to start tracing; producer doesn't need a restart, signal, or
+   callback.
+
+Five candidates fail at least one of these immediately: **uprobes**, **eBPF
+uprobes**, and **USDT** all attach by writing `INT3` (0xCC) into the
+producer's text segment when a consumer subscribes — they fail constraint 2.
+**OpenTelemetry** has no true zero-cost off state — virtual dispatch and
+attribute construction happen even with a NoopTracer, failing constraint 3.
+**Chrome/Perfetto file** is an offline output format, not a live delivery
+mechanism — fails constraint 4.
+
+That leaves four candidates that survive the hard constraints: LTTng-UST,
+Linux `user_events`, io_uring channels, and rolling our own. Each is treated
+in detail below.
+
+## LTTng-UST (chosen)
+
+| Property | Value |
+|---|---|
+| Hard constraint #1 (no LD_PRELOAD) | satisfied — linked at build, registers with `lttng-sessiond` at lib load |
+| Hard constraint #2 (no binary mod) | satisfied — activation flips a per-CPU enabled byte; `.text` is never touched |
+| OFF cost | ~5 ns (1 atomic load + 1 unlikely branch) |
+| ON cost | ~100 ns per event (lock-free per-CPU shared-memory ring buffer) |
+| Late-attach | yes, by design |
+| Schema | strongly typed via CTF metadata; native versioning story |
+| Tooling ecosystem | babeltrace2, Trace Compass, Perfetto (CTF ingest), Eclipse, custom CTF readers |
+| Maturity | 10+ years upstream; production use at HFT firms, CERN, automotive, telecom |
+| Distro reach | excellent on every ROCm-targeted distro (and: dissolved entirely by vendoring — see below) |
+| Adopting cost | producer links `liblttng-ust`; tracepoint provider headers; consumer is `lttng-sessiond` + babeltrace2 |
+
+**Implementation outcome** (see status banner above): producer-side
+implementation is complete in PR #5475 + #5513. Measured GraphBench overhead
+at full curated capture is +0.9% wall-time vs no-tracing baseline with zero
+discarded events; the same workload under `rocprofv3 --hsa-trace` at full
+fidelity is +73% (~80× more expensive). The original distro-portability
+concern was sidestepped entirely by vendoring LTTng-UST 2.13.7 +
+userspace-rcu 0.14.0 as git submodules under `projects/{clr,rocr-runtime}/`
+— no system `liblttng-ust-dev` required at build time or runtime.
+
+## Linux `user_events` (kernel 6.4+)
+
+**Why not chosen today: distro reach.** RHEL 9 (kernel 5.14) and Ubuntu
+22.04 LTS (kernel 5.15) — both first-class ROCm targets — do not ship a
+kernel new enough. The first stable customer-baseline distros with
+`CONFIG_USER_EVENTS=y` are RHEL 10 (kernel 6.12+) and Ubuntu 24.04 (kernel
+6.8). Mainstream customer adoption of those baselines is a 2027–2028
+horizon.
+
+**Architecturally a strong long-term fit.** The 6.4 ABI is arguably a
+*better* design than LTTng-UST for our problem:
+
+* Zero new userspace library dependency on the producer side — just
+  `open()` + `ioctl()` + `writev()`.
+* Kernel-managed enable bit in producer-owned memory; activation is one
+  atomic bit-flip, no separate sessiond.
+* Native typed-schema registration (`USER_EVENT_REG_MULTI_FORMAT` is a
+  real schema-versioning story).
+* writev()-based data path is trivial to get right.
+
+**Per-event cost is higher** — ~100–300 ns syscall overhead per event vs
+LTTng-UST's per-CPU shared-memory write. Mitigated by event batching, which
+the ABI supports.
+
+**Plan:** keep this as the v2 backend swap target. The per-tracepoint macro
+shim should be designed (or refactored) to make the swap a backend
+replacement rather than a redesign — see Open Question #8 below.
+
+## OpenTelemetry SDK + OTLP exporters
+
+**Why not chosen: no true zero-cost off state.** Even with a NoopTracer,
+the API call still happens — virtual dispatch through the tracer, attribute
+vector construction, sampler check. Putting an OTel call on the HIP
+dispatch hot path adds always-on cost regardless of whether anyone is
+collecting.
+
+**Secondary concerns:**
+
+* **Per-event cost when ON is hundreds of ns to low µs.** Span object
+  construction, attribute serialization, BatchSpanProcessor enqueue — all
+  on the producer thread. Heavyweight relative to LTTng-UST's ~100 ns.
+* **Heavy dependency tree** (Protobuf, gRPC, Abseil) is a real
+  distribution-portability headache. We avoid this with LTTng vendoring;
+  vendoring OTel is much harder due to its dep tree size.
+* **Wrong abstraction layer for our use case.** OTel is request-tracing
+  oriented (spans with parent-child relationships, semantic conventions
+  for HTTP/RPC/DB calls). HIP/HSA tracing is event-stream oriented. The
+  semantic mismatch costs more than it saves.
+
+**Where OTel still fits:** as an **export format** from rocprofiler-sdk
+downstream of the in-process record consumer, for customers running
+OTel-based observability stacks. AIM Engine (AMD's vLLM-on-ROCm sidecar)
+already uses OTel for serving metrics. That's a reasonable place for it —
+not on the HIP dispatch hot path.
+
+## uprobes (kernel-installed user-space probes)
+
+**Disqualified by hard constraint #2.** Arming a uprobe rewrites the
+producer's in-memory text segment (kernel writes `INT3` (0xCC) at the probe
+offset; the original instruction is preserved out-of-line for
+single-stepping). The on-disk binary is preserved via copy-on-write but
+the running process's text page is modified.
+
+We chose this constraint deliberately: text-segment modification at attach
+time interacts badly with self-relocating loaders, page-permission tooling,
+and any future executable-integrity verification (signed code, secure
+boot, IMA/EVM, container security policies). Permanently constraining
+attach to "no text mod" rules out the entire uprobes family.
+
+## eBPF uprobes (`bpf_program__attach_uprobe`)
+
+**Same disqualification as raw uprobes.** The attach mechanism is identical
+— INT3 in the producer's text, single-step out-of-line. The eBPF program
+runs in the kernel handler instead of the bare ftrace path, but the text
+modification is unchanged.
+
+**Worth noting:** USDT-via-eBPF (`bpf_program__attach_usdt`) attaches to
+compile-time-emitted NOPs in the producer. The NOPs were already in the
+binary at compile time, but activation still flips them to INT3 via the
+uprobes subsystem. **Same constraint violation.**
+
+## USDT (Userspace Statically Defined Tracepoints) — DTrace-style probes
+
+**Disqualified by hard constraint #2.** This is the closest in spirit to
+what we want — compile-time static probes, generic emission, third-party
+out-of-process subscribe via uprobes / bpftrace / SystemTap, zero runtime
+library dep. **The disqualifying factor is the kernel's chosen
+implementation** (uprobes/INT3): when a consumer attaches, the deliberately
+inserted NOP slot gets overwritten with INT3.
+
+If hard constraint #2 is renegotiated specifically for USDT — i.e.
+"in-place patching of compile-time-reserved tracing slots is OK, but
+patching of real code is not" — USDT comes back into play as a strong
+contender. We did not pursue this renegotiation; LTTng-UST landed first
+with measured-acceptable overhead. Worth a future conversation if specific
+tooling needs (e.g., bpftrace-native subscribers without `liblttng`
+dependency) emerge as a customer requirement.
+
+## io_uring channels (`IORING_OP_MSG_RING` and proposed IPC)
+
+**Why not chosen: late-attach discovery is unsolved on shipping kernels.**
+A late-attaching consumer needs to obtain the producer's ring fd, which
+requires either:
+
+* (a) Pre-arranged out-of-band fd-passing via UNIX socket `SCM_RIGHTS` —
+  implies LD_PRELOAD or pre-launch coordination, **violates constraint
+  #1**.
+* (b) `pidfd_getfd(2)` with `PTRACE_MODE_ATTACH_REALCREDS` — privileged.
+* (c) The proposed io_uring IPC subsystem with named-channel discovery —
+  not yet upstream in any shipping kernel.
+
+None of these gives the "any tool subscribes by name from outside" property
+we need.
+
+**Strengths if used in a different role:** very low per-event cost
+(~50–100 ns, comparable to LTTng-UST), shared-memory native, no syscall
+per event. Could serve as a *secondary* channel between rocprofiler-sdk
+and a downstream tool consumer once the primary HIP/HSA → tool channel is
+solved by something else. Not the primary candidate today.
+
+## perf_event_open(2) + tracepoints
+
+Not a producer-side delivery mechanism on its own — it is a **consumer**
+syscall that pairs with one of the actual producers (`user_events`, USDT
+via uprobes, kernel tracepoints). For our problem it has nothing to add
+that LTTng-UST + babeltrace2 doesn't already cover.
+
+## Linux kernel tracepoints (`/sys/kernel/tracing`)
+
+Wrong layer. These are static tracepoints compiled into the **kernel**
+(KFD ioctls, AMDGPU driver). They are useful for a complementary
+**kernel-side** trace stream (and KFD/AMDGPU could add more) but cannot
+solve the **userspace** HIP/HSA → consumer delivery problem.
+
+## Chrome trace / Perfetto file format
+
+Wrong category. This is an **output format** for offline visualization,
+not a delivery mechanism between a live producer and a live consumer.
+rocprofv3 already supports `--output-format pftrace` as an export; that
+role continues unchanged.
+
+## Rolling our own (custom shared-memory transport)
+
+**Why not chosen: cost-vs-benefit doesn't justify it.** This option was
+considered seriously and rejected on the following grounds:
+
+### What "our own" would have to provide
+
+To match LTTng-UST's feature surface, a from-scratch tracing transport
+would need every one of these subsystems:
+
+* **Lock-free per-CPU shared-memory ring buffers** with atomic
+  publish-on-commit semantics. (LTTng's implementation took years to
+  shake out the ABA / sub-buffer-rotation / wraparound corner cases.)
+* **RCU-protected per-tracepoint enabled flags** so the producer's
+  hot-path check is one atomic load + branch and the
+  enable/disable-from-outside mutation is wait-free for the producer.
+* **Out-of-process atomic enable/disable protocol** with a session daemon
+  the consumer talks to — including how the daemon discovers producers,
+  how producers discover the daemon, and how the enable signal crosses
+  the process boundary safely.
+* **fd-passing for shm rings via UNIX domain sockets** (LTTng uses this
+  to give the consumer daemon mmap access to the producer's per-CPU
+  ring buffers without requiring root).
+* **Sub-buffer rotation with backpressure / drop policy** (and the
+  `--discard` vs `--overwrite` semantics that LTTng exposes — and an
+  honest events-discarded counter so consumers know when they lost
+  data).
+* **Multi-consumer fanout** — N independent consumer sessions can
+  subscribe to overlapping events from the same producer without each
+  paying the full producer-side cost.
+* **Live-streaming protocol** for cases where consumers want events as
+  they happen (LTTng-live; analogous to `journalctl -f`).
+* **Schema metadata + versioning** — without this, the consumer can't
+  parse new event types or new fields on existing types without a
+  coordinated producer/consumer release cycle.
+* **File format library** for the offline case (event stream serialized
+  to disk, readable later by a different tool than the live consumer).
+* **Reader, viewer, indexer tools** — the Trace Compass / babeltrace2
+  ecosystem, but written by us.
+
+### Engineering cost
+
+LTTng-UST is **~50,000 LOC** of producer + consumer code, plus the
+~30,000 LOC of `userspace-rcu` it depends on, plus the ~200,000 LOC
+of `babeltrace2` for the consumer-side reader. **All of this would have
+to be re-implemented and re-validated by us** if we rolled our own.
+
+The producer-side ring buffer alone is the kind of thing where every
+non-obvious atomic-ordering bug ships as a customer-visible "we lost
+events under contention" report years later. LTTng has been validated
+in latency-critical applications (HFT, CERN ATLAS trigger system,
+automotive ECUs) — that's the exact "low overhead, can't slow down"
+profile rocprofiler-sdk needs, and someone else has paid the cost of
+proving it works.
+
+### Tooling ecosystem cost
+
+LTTng emits **CTF (Common Trace Format)**, which is read by:
+
+* `babeltrace2` — the canonical CTF reader/converter.
+* **Trace Compass** — Eclipse-based GUI trace viewer with extensible
+  analysis modules.
+* **Perfetto** (which has a CTF ingest path) — Google's tracing UI,
+  already a familiar tool to many ROCm customers via rocprofv3
+  pftrace output.
+* Custom CTF readers in Python, Rust, Go.
+
+A custom format means **a custom toolchain**. Every tool integration
+(crash dumpers, performance profilers, customer-internal observability
+stacks) is paid for in cash. CTF gives us all of these for free.
+
+### Customer-facing cost
+
+Asking customers to **learn a new trace format** to consume rocprofiler
+data — when their tooling already supports CTF (or they could trivially
+add CTF support since open-source readers exist) — is a customer
+training cost we'd have to keep paying forever.
+
+### Maintenance cost
+
+A custom transport becomes **another in-tree subsystem to maintain**
+across distros, kernels, container baselines, and ASIC families. We
+already have this matrix problem with KFD UAPI; adding a second
+matrix-multiply for a tracing transport multiplies the validation
+burden. LTTng-UST is upstream and someone else maintains its kernel /
+userspace compatibility.
+
+### Validation cost
+
+Every "did we lose events?", "did the consumer crash safely?", "did
+backpressure behave correctly under load?", "what happens when the
+producer dies mid-write?", "what happens when the consumer's ring
+buffer fills?" question has been answered for LTTng-UST already — by
+people whose business depends on the answers being right. We do not
+have an LTTng-UST validation team; we would have to build one to
+maintain a custom transport.
+
+### Summary
+
+Rolling our own would deliver no property LTTng-UST doesn't already
+deliver, would require thousands of LOC of producer + consumer code we
+don't currently have headcount to maintain, and would force every
+customer's tooling integration story to start from scratch. The cost
+is high enough and the benefit is low enough that it was not seriously
+pursued. The vendoring decision (LTTng-UST 2.13.7 + URCU 0.14.0 as git
+submodules) captures essentially all of "rolling our own"'s
+self-containment benefit at none of the engineering cost.
 
 ---
 
-## TL;DR — Comparison Matrix
+# Appendix: per-technique deep dives
 
-| Property | LTTng-UST | OpenTelemetry SDK | uprobes (kernel-installed) | eBPF uprobes | USDT (DTrace probes) | Linux `user_events` (6.4+) | `perf_event_open` + tracepoints | Chrome trace / Perfetto file | io_uring channels | Today's `rocprofiler-register` |
-|---|---|---|---|---|---|---|---|---|---|---|
-| Works without `LD_PRELOAD`? | **YES** (linked at build) | **YES** (linked at build) | **YES** (probes set externally) | **YES** | **YES** | **YES** (linked at build) | **YES** | **YES** (file-based) | **YES** | YES (rocprofiler-register linked into HIP/HSA) |
-| Works without runtime binary modification? | **YES** (no text patch) | **YES** | **NO** — INT3 (0xCC) overwrite at attach time | **NO** — same INT3 attach mechanism | **YES** when nobody attached (NOP); **NO** when attached (NOP→INT3) | **YES** (no text patch — bit flip in registered word) | **YES** for software events; depends on probe type | **YES** | **YES** | YES |
-| Producer-side compile-time changes | tracepoint provider macros + link `liblttng-ust` | OTel SDK calls + link OTel | none (probes set externally) | none, OR USDT macros for static probes | `STAP_PROBEn()` / `DTRACE_PROBE` macros, link `libstapsdt-dev` | `ioctl(DIAG_IOCSREG)` + `writev()` to a tracefs fd | none (consumer attaches externally) | call into Perfetto SDK or write JSON | `io_uring_setup()` + `IORING_OP_MSG_RING` | populate API table function pointers |
-| Consumer attach model | sessiond (out-of-process); CTF reader | OTel collector (out-of-process); OTLP gRPC/HTTP | tracefs / perf / bpftrace (out-of-process) | bpftrace / BCC / libbpf reader (out-of-process) | bpftrace / SystemTap / perf (out-of-process) | tracefs / perf (out-of-process) | perf or libperf (out-of-process) | open the trace file | another io_uring (in or out of process) | in-process callback |
-| Steady-state overhead when OFF | ~1 load + 1 branch per tracepoint (per-CPU enabled flag) | non-zero — usually a sampled-flag check; SDK is not a true zero-cost design | **0** (attach modifies code only when enabled) | **0** | ~1 NOP (literally compiled-in NOP) | ~1 load + 1 bit test of the registered enable_addr | depends on probe type | per-call cost (no on/off) | per-call cost | 1 load + 1 branch per event |
-| Per-event overhead when ON (producer side) | ~100 ns (per-CPU ring buffer write, lock-free) | µs range (SDK + queueing + serialization) | µs (INT3 + kernel trap + kprobe handler + uprobe-XOL) | µs (same INT3 + eBPF program execution) | µs (NOP→INT3 trap path, same as uprobe) | ~100–300 ns (one writev() syscall) | µs (perf record path) | µs (file write or shmem proto serialization) | ~50–100 ns (shared-mem ring) | 100s of ns–µs (function call + correlation work) |
-| Data shape / schema | strongly typed; CTF metadata; versioned | strongly typed; OTel semantic conventions | unstructured (raw register/memory values) | structured if eBPF program parses; otherwise raw | semi-typed (probe args declared in `.d` file) | strongly typed (registered struct schema) | semi-typed | typed (Perfetto protos) or untyped JSON | raw bytes (consumer interprets) | strongly typed (C structs in API table) |
-| Kernel/distro requirements | none kernel-side for UST; userspace daemon | none | uprobes: 3.5+; widely shipped | eBPF: 4.18+ for libbpf; widely shipped on modern distros | none (NOPs are inert); consumer needs uprobes | **6.4+** with `CONFIG_USER_EVENTS=y` (NOT default on RHEL 9, Ubuntu 22.04) | 2.6.31+; widely shipped | none | 5.18+ for `MSG_RING`; 6.0+ for full feature; not default | n/a |
-| Existing AMD/ROCm usage | none documented | none in rocprofiler-sdk; AIM Engine sidecar uses OTel for vLLM metrics only | none in rocprofiler-sdk | none in rocprofiler-sdk; GPUprobe uses on CUDA externally | none documented | none documented | none for HIP/HSA delivery; rocprofiler-sdk uses HSA queue intercept | rocprofv3 emits Perfetto/`pftrace` as a final output format | none | yes — current design |
-
-The two columns that survive both hard constraints AND have a usable
-producer-side cost when OFF are **LTTng-UST**, **`user_events`**, **USDT**
-(when nobody attached), **OpenTelemetry**, and **io_uring channels**. The rest
-fail at least one hard constraint or have unacceptable always-on cost.
-
----
-
-# Per-technique deep dives
+The original survey produced a per-technique deep dive for each of the
+eleven candidates. Those are preserved below as a reference for future
+backend swaps and adversarial review of the chosen path. Each section
+covers the technique's mechanism, producer / consumer requirements,
+activation model, binary-modification behavior, OFF / ON overhead,
+schema support, kernel/distro requirements, and (where applicable)
+existing AMD/ROCm usage.
 
 ## 1. LTTng-UST (Linux Trace Toolkit Next Generation — User Space)
 
@@ -670,103 +945,6 @@ upstream IPC subsystem. Not the right fit for "any tool can subscribe to
 HIP/HSA without prior arrangement". Could be useful as a *secondary*
 channel between rocprofiler-sdk and a tool consumer, after the primary
 HIP/HSA → rocprofiler-sdk channel is solved.
-
----
-
-# Final Comparison Matrix (constraint-focused)
-
-| Technique | No LD_PRELOAD | No binary mod on activate | OFF overhead acceptable | Schema support | Late-attach | Distro reach today |
-|---|---|---|---|---|---|---|
-| **LTTng-UST** | YES | **YES** | YES (~5 ns) | YES (CTF) | YES | Excellent (all major distros) |
-| **`user_events` (Linux 6.4+)** | YES | **YES** | YES (~5 ns) | YES (typed schema + multi-format) | YES | Poor today (RHEL 10 / Ubuntu 24.04+ only) |
-| **OpenTelemetry C++ SDK** | YES | YES | NO (no zero-cost off) | YES (semconv) | partial | Good (heavy deps) |
-| **io_uring channels** | borderline | YES | YES | NO | borderline | Fair (5.18+) |
-| USDT (DTrace-style) | YES | **NO** (text patched at attach) | YES (NOP-only) | partial | YES | Excellent |
-| Raw uprobes | YES | **NO** (INT3 patch) | YES (zero) | NO (raw fetchargs) | YES | Excellent |
-| eBPF uprobes | YES | **NO** (INT3 patch) | YES (zero) | YES (BPF map schema) | YES | Excellent |
-| Chrome/Perfetto file | n/a | YES | n/a (offline) | YES | n/a | Already used as output |
-| `perf_event_open` | n/a | depends on probe | depends | depends | YES | Excellent |
-| Today's `rocprofiler-register` | YES | YES | NO (always-on cost) | YES (C structs) | YES (in-process) | n/a |
-
-**Survives both hard constraints + acceptable when-OFF cost + late-attach:**
-- LTTng-UST
-- `user_events` (subject to kernel availability)
-- io_uring channels (subject to discovery problem)
-
----
-
-# Recommendation
-
-## Primary: **LTTng-UST**
-
-Rationale:
-1. **Both hard constraints satisfied unambiguously.** No LD_PRELOAD, no
-   text-segment modification at any point.
-2. **Production-grade quality.** 10+ years of upstream development, used by
-   high-frequency-trading firms, CERN, automotive, telecom — i.e., the
-   exact "low overhead, can't slow down" profile rocprofiler-sdk needs.
-3. **Strongly typed schema** (CTF) with versioning and language bindings.
-   Important for the rocprofiler-sdk record contract (we want HIP_API_ID,
-   correlation_id, kernel_object, grid/wg/segments — all typed).
-4. **~5 ns overhead when OFF**; this matches the user's request for a
-   technique where the producer pays ~one branch when nobody subscribes.
-5. **Late-attach works** out of the box. The HIP/HSA-instrumented runtimes
-   register tracepoints at load time; a tool runs `lttng enable-event`
-   later and the per-CPU enable byte flips. No restart, no LD_PRELOAD.
-6. **Already shipped on every major distro** that ROCm targets, and has been
-   for many years.
-7. **Out-of-process consumer model** is a perfect match for the user's
-   architectural goal: HIP/HSA emit generically, *any* tool — including but
-   not limited to rocprofiler-sdk — can subscribe by talking to
-   `lttng-sessiond`.
-
-Cost:
-1. New build dep on `liblttng-ust` for HIP/HSA runtimes.
-2. New runtime dep on `lttng-sessiond` for the *consumer* (not the
-   producer). The producer just needs `liblttng-ust`.
-3. CTF as the on-the-wire format — rocprofiler-sdk would consume CTF (via
-   `libbabeltrace2` or by reading the CTF stream directly) instead of
-   getting in-process callbacks.
-
-## Fallback / future-track: **`user_events`**
-
-Why not primary today:
-- **Distro reach is too narrow.** RHEL 9 and Ubuntu 22.04 LTS — both first-
-  class ROCm targets — do not ship a kernel new enough. This is a hard
-  blocker for production-grade adoption right now.
-- The 6.4 ABI itself is a clean design and arguably a *better* fit for our
-  problem than LTTng-UST in the long run: zero new userspace dependencies
-  on the producer side, kernel-managed enable bit, and a writev()-based
-  data path that's trivial to get right.
-
-When user_events becomes broadly available (RHEL 10, Ubuntu 24.04 LTS as
-the floor — i.e., 2027–2028 in customer reality), it becomes a serious
-candidate for a v2 design.
-
-A pragmatic intermediate: design HIP/HSA's emit interface as an internal
-abstraction with two backends — LTTng-UST (today) and user_events (future)
-— picked at build time or runtime. The hot-path call site is the same
-either way; the backend is a per-event function pointer set at init.
-
-## What we are NOT recommending and why
-
-- **OpenTelemetry**: too heavy for the hot path; no true zero-cost off
-  state; protobuf/gRPC dependency tree is a distro-portability headache.
-  Useful as an *export* format from rocprofiler-sdk, not as the HIP/HSA →
-  rocprofiler-sdk channel.
-- **uprobes / eBPF uprobes / USDT**: all violate hard constraint #2
-  (text-segment modification at attach). USDT in particular is so close in
-  spirit to what the user wants that this is worth raising as a
-  re-negotiation: if "no binary mod" really means "no in-place patch of
-  *real* code", USDT (which patches a deliberately-reserved NOP slot) might
-  be acceptable, in which case it deserves a second look. As stated by the
-  user, it's out.
-- **io_uring channels**: late-attach discovery isn't a solved problem on
-  shipping kernels. Reserve as a possible secondary channel.
-- **Chrome/Perfetto file**: already used as an *output* format. Not a live
-  delivery mechanism.
-- **Kernel tracepoints**: only relevant for KFD/AMDGPU-side events; doesn't
-  solve the userspace runtime → consumer problem.
 
 ---
 
