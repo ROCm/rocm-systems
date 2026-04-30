@@ -857,7 +857,7 @@ err1:
 
 static const struct hsa_gfxip_table *find_hsa_gfxip_device(uint16_t device_id, uint8_t gfxv_major)
 {
-	if (gfxv_major > 10)
+	if (gfxv_major > 12)
 		return NULL;
 
 	uint32_t i, table_size;
@@ -1274,7 +1274,8 @@ static HSAKMT_STATUS topology_sysfs_get_node_props(HsaKFDContext *ctx,
 	hsa_gfxip = find_hsa_gfxip_device(props->DeviceId, gfxv_major);
 	if (hsa_gfxip || gfxv) {
 		snprintf(per_node_override, sizeof(per_node_override), "HSA_OVERRIDE_GFX_VERSION_%d", node_id);
-		if ((envvar = getenv(per_node_override)) || (envvar = getenv("HSA_OVERRIDE_GFX_VERSION"))) {
+		if (((envvar = getenv(per_node_override)) && strlen(envvar) > 0) || 
+		    ((envvar = getenv("HSA_OVERRIDE_GFX_VERSION")) && strlen(envvar) > 0)) {
 			/* HSA_OVERRIDE_GFX_VERSION=major.minor.stepping */
 			if ((sscanf(envvar, "%u.%u.%u%c",
 					&major, &minor, &step, &dummy) != 3) ||
@@ -1284,10 +1285,17 @@ static HSAKMT_STATUS topology_sysfs_get_node_props(HsaKFDContext *ctx,
 				ret = HSAKMT_STATUS_ERROR;
 				goto out;
 			}
+			/* Prevent cross-major-version override */
+			if (gfxv_major != major) {
+				pr_err("HSA_OVERRIDE_GFX_VERSION: Device is gfx%d, override requested gfx%d not allowed\n",
+				     gfxv_major, major);
+				ret = HSAKMT_STATUS_ERROR;
+				goto out;
+			}
 			props->OverrideEngineId.ui32.Major = major & 0x3f;
 			props->OverrideEngineId.ui32.Minor = minor & 0xff;
 			props->OverrideEngineId.ui32.Stepping = step & 0xff;
-		}
+                }
 
 		if (hsa_gfxip) {
 			props->EngineId.ui32.Major = hsa_gfxip->major & 0x3f;
