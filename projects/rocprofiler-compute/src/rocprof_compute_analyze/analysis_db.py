@@ -2,6 +2,7 @@
 # SPDX-License-Identifier:  MIT
 
 import ast
+import csv
 import json
 import re
 from pathlib import Path
@@ -214,14 +215,31 @@ class db_analysis(OmniAnalyze_Base):
             console_warning(f"Created file: {db_name}")
 
     def _save_views_as_csv_files(self, csv_dir: Path) -> None:
-        """Execute view selects and write one CSV per view into csv_dir."""
+        """Stream each view's rows directly into a CSV file in csv_dir.
+
+        Uses the raw sqlite3 cursor and csv.writer so the full result set
+        is never held in memory at once.
+        """
         csv_dir.mkdir(parents=True, exist_ok=True)
         session = Database.get_session()
+        # session.connection() is a SQLAlchemy Connection; its .connection
+        # attribute is the underlying sqlite3.Connection.
+        raw_conn = session.connection().connection
         for view_name, stmt in get_view_definitions().items():
-            rows = session.execute(stmt).fetchall()
-            view_df = pd.DataFrame(rows, columns=stmt.selected_columns.keys())
+            # Render the Select as a self-contained SQL string so the raw
+            # cursor can execute it without parameter binding.
+            sql = str(
+                stmt.compile(
+                    dialect=session.bind.dialect,
+                    compile_kwargs={"literal_binds": True},
+                )
+            )
+            cursor = raw_conn.execute(sql)
             csv_path = csv_dir / f"{view_name}.csv"
-            view_df.to_csv(csv_path, index=False)
+            with csv_path.open("w", newline="") as f:
+                writer = csv.writer(f)
+                writer.writerow([column[0] for column in cursor.description])
+                writer.writerows(cursor)
             console_warning(f"Created file: {csv_path}")
         session.close()
 

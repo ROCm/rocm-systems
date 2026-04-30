@@ -2,6 +2,7 @@
 # SPDX-License-Identifier:  MIT
 
 import sqlite3
+from contextlib import closing
 from typing import Any, Optional
 
 from sqlalchemy import (
@@ -20,6 +21,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, declarative_base, relationship, sessionmaker
+from sqlalchemy.pool import StaticPool
 from sqlalchemy.sql import Select
 
 from utils.logger import console_debug, console_error
@@ -220,7 +222,13 @@ class Database:
 
     @classmethod
     def init(cls, db_name: str) -> str:
-        cls._engine = create_engine("sqlite:///:memory:")
+        # StaticPool pins the engine to a single sqlite3 connection so the
+        # session and the backup in write() share the same in-memory DB.
+        cls._engine = create_engine(
+            "sqlite:///:memory:",
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
+        )
         Base.metadata.create_all(cls._engine)
         cls._session = sessionmaker(bind=cls._engine)()
         cls._db_name = db_name
@@ -240,10 +248,11 @@ class Database:
             cls._session.commit()
             # Writing to disk is slow, so we built the database in memory.
             # Now copy the finished database to disk in one step.
-            memory_conn = cls._engine.raw_connection()
-            disk_conn = sqlite3.connect(cls._db_name)
-            memory_conn.backup(disk_conn)
-            disk_conn.close()
+            with (
+                closing(cls._engine.raw_connection()) as memory_conn,
+                closing(sqlite3.connect(cls._db_name)) as disk_conn,
+            ):
+                memory_conn.backup(disk_conn)
         except Exception as e:
             cls._session.rollback()
             console_error(f"Error writing analysis database: {e}")
