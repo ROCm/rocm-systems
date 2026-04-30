@@ -52,9 +52,30 @@ sudo ln -sf /opt/rocm/bin/amd-smi /usr/local/bin/amd-smi
 
 ### Step 5: Verify
 
+Run all verification checks. Every check must pass — any failure is ❌ BLOCKING.
+
 ```bash
-amd-smi version
+# Version check — hash must match HEAD of the branch/PR
+VERSION_OUTPUT=$(amd-smi version)
+echo "$VERSION_OUTPUT"
+INSTALLED_HASH=$(echo "$VERSION_OUTPUT" | grep -oP '\+\K[0-9a-f]+')
+EXPECTED_HASH=$(git rev-parse --short=10 HEAD)
+if [[ "$INSTALLED_HASH" != "$EXPECTED_HASH" ]]; then
+  echo "❌ Hash mismatch: installed=$INSTALLED_HASH expected=$EXPECTED_HASH"
+  exit 1
+fi
+
+# Library is loadable
+python3 -c "import amdsmi; print('Python import OK')"
+
+# Shared library exists
+ls -la /opt/rocm/lib/libamd_smi.so
+
+# CLI is on PATH
+which amd-smi
 ```
+
+If the installed version string doesn't match the version from `cmake_modules/version_util.sh`, report as ⚠️ IMPORTANT.
 
 ## One-Shot Command
 

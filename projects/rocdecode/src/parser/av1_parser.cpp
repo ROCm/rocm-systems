@@ -62,6 +62,7 @@ rocDecStatus Av1VideoParser::UnInitialize() {
 rocDecStatus Av1VideoParser::ParseVideoData(RocdecSourceDataPacket *p_data) {
     FunctionEntryLog(g_rocdec_logger);
     if (p_data->payload && p_data->payload_size) {
+        DebugLog(g_rocdec_logger, ROCDEC_STR("Parsing picture ") + ROCDEC_TOSTR(pic_count_) + ROCDEC_STR(" with payload size ") + ROCDEC_TOSTR(p_data->payload_size) + ROCDEC_STR(" bytes ..."));
         curr_pts_ = p_data->pts;
         if (ParsePictureData(p_data->payload, p_data->payload_size) != PARSER_OK) {
             ErrorLog(g_rocdec_logger, "Error occurred in picture data parsing.");
@@ -254,7 +255,7 @@ ParserResult Av1VideoParser::NotifyNewSequence(Av1SequenceHeader *p_seq_header, 
     video_format_params_.display_area.bottom = p_frame_header->render_size.render_height;
     video_format_params_.bitrate = 0;
 
-    // Dispaly aspect ratio
+    // Display aspect ratio
     int disp_width = (video_format_params_.display_area.right - video_format_params_.display_area.left);
     int disp_height = (video_format_params_.display_area.bottom - video_format_params_.display_area.top);
     int gcd = std::__gcd(disp_width, disp_height); // greatest common divisor
@@ -501,9 +502,9 @@ ParserResult Av1VideoParser::SendPicForDecode() {
     }
     dec_pic_params_.slice_params.av1 = tile_param_list_.data();
 
-#if DBGINFO
-    PrintVaapiParams();
-#endif // DBGINFO
+    if (g_rocdec_logger.GetLogLevel() >= kRocDecLogDebug) {
+        PrintVaapiParams();
+    }
 
     if (pfn_decode_picture_cb_(parser_params_.user_data, &dec_pic_params_) == 0) {
         ErrorLog(g_rocdec_logger, "Decode error occurred.");
@@ -604,9 +605,9 @@ ParserResult Av1VideoParser::DecodeFrameWrapup() {
         // For show_existing_frame = 0 case, post processing filtering is done in HW
         UpdateRefFrames();
     }
-#if DBGINFO
-    PrintDpb();
-#endif // DBGINFO
+    if (g_rocdec_logger.GetLogLevel() >= kRocDecLogDebug) {
+        PrintDpb();
+    }
 
     // Output decoded pictures from DPB if any are ready
     if (pfn_display_picture_cb_ && num_output_pics_ > 0) {
@@ -2573,7 +2574,6 @@ ParserResult Av1VideoParser::FilmGrainParams(const uint8_t *p_stream, size_t &of
     return PARSER_OK;
 }
 
-#if DBGINFO
 void Av1VideoParser::PrintVaapiParams() {
     int i, j;
     MSG("=======================");
@@ -2853,4 +2853,3 @@ void Av1VideoParser::PrintDpb() {
         MSG("");
     }
 }
-#endif // DBGINFO

@@ -69,6 +69,7 @@ rocDecStatus AvcVideoParser::UnInitialize() {
 rocDecStatus AvcVideoParser::ParseVideoData(RocdecSourceDataPacket *p_data) {
     FunctionEntryLog(g_rocdec_logger);
     if (p_data->payload && p_data->payload_size) {
+        DebugLog(g_rocdec_logger, ROCDEC_STR("Parsing picture ") + ROCDEC_TOSTR(pic_count_) + ROCDEC_STR(" with payload size ") + ROCDEC_TOSTR(p_data->payload_size) + ROCDEC_STR(" bytes ..."));
         curr_pts_ = p_data->pts;
         if (ParsePictureData(p_data->payload, p_data->payload_size) != PARSER_OK) {
             ErrorLog(g_rocdec_logger, ROCDEC_STR("Parser failed!"));
@@ -390,7 +391,7 @@ ParserResult AvcVideoParser::NotifyNewSps(AvcSeqParameterSet *p_sps) {
 
     video_format_params_.bitrate = 0;
 
-    // Dispaly aspect ratio
+    // Display aspect ratio
     // Table E-1.
     static const Rational avc_sar[] = {
         {0, 0}, // unspecified
@@ -735,9 +736,9 @@ ParserResult AvcVideoParser::SendPicForDecode() {
         }
     }
 
-#if DBGINFO
-    PrintVappiBufInfo();
-#endif // DBGINFO
+    if (g_rocdec_logger.GetLogLevel() >= kRocDecLogDebug) {
+        PrintVappiBufInfo();
+    }
 
     if (pfn_decode_picture_cb_(parser_params_.user_data, &dec_pic_params_) == 0) {
         ErrorLog(g_rocdec_logger, "Decode error occurred.");
@@ -1046,9 +1047,9 @@ ParserResult AvcVideoParser::ParseSps(uint8_t *p_stream, size_t size) {
 
     p_sps->is_received = 1;  // confirm SPS with seq_parameter_set_id received (but not activated)
 
-#if DBGINFO
-    PrintSps(p_sps);
-#endif // DBGINFO
+    if (g_rocdec_logger.GetLogLevel() >= kRocDecLogDebug) {
+        PrintSps(p_sps);
+    }
     FunctionExitLog(g_rocdec_logger);
     return PARSER_OK;
 }
@@ -1230,9 +1231,9 @@ ParserResult AvcVideoParser::ParsePps(uint8_t *p_stream, size_t stream_size_in_b
 
     p_pps->is_received = 1;  // confirm PPS with pic_parameter_set_id received (but not activated)
 
-#if DBGINFO
-    PrintPps(p_pps);
-#endif // DBGINFO
+    if (g_rocdec_logger.GetLogLevel() >= kRocDecLogDebug) {
+        PrintPps(p_pps);
+    }
     FunctionExitLog(g_rocdec_logger);
     return PARSER_OK;
 }
@@ -1589,9 +1590,9 @@ ParserResult AvcVideoParser::ParseSliceHeader(uint8_t *p_stream, size_t stream_s
         p_slice_header->slice_group_change_cycle = Parser::ReadBits(p_stream, offset, size);
     }
 
-#if DBGINFO
-    PrintSliceHeader(p_slice_header);
-#endif // DBGINFO
+    if (g_rocdec_logger.GetLogLevel() >= kRocDecLogDebug) {
+        PrintSliceHeader(p_slice_header);
+    }
     FunctionExitLog(g_rocdec_logger);
     return PARSER_OK;
 }
@@ -2276,7 +2277,7 @@ ParserResult AvcVideoParser::SetupReflist(AvcSliceInfo *p_slice_info) {
     }
 
     if (p_slice_header->slice_type == kAvcSliceTypeI || p_slice_header->slice_type == kAvcSliceTypeSI || p_slice_header->slice_type == kAvcSliceTypeI_7 || p_slice_header->slice_type == kAvcSliceTypeSI_9) {
-        // We still need to do 8.2.4.1 above for I pictures but will not go furhter.
+        // We still need to do 8.2.4.1 above for I pictures but will not go further.
         return PARSER_OK;
     }
 
@@ -2808,7 +2809,7 @@ ParserResult AvcVideoParser::MarkDecodedRefPics() {
             dpb_buffer_.field_pic_list[i * 2].is_reference = kUnusedForReference;
             dpb_buffer_.field_pic_list[i * 2 + 1].is_reference = kUnusedForReference;
         }
-        // Output the remaining picutres in DPB
+        // Output the remaining pictures in DPB
         if (FlushDpb() != PARSER_OK) {
             return PARSER_FAIL;
         }
@@ -3013,7 +3014,7 @@ ParserResult AvcVideoParser::MarkDecodedRefPics() {
                             dpb_buffer_.field_pic_list[j * 2].is_reference = kUnusedForReference;
                             dpb_buffer_.field_pic_list[j * 2 + 1].is_reference = kUnusedForReference;
                         }
-                        // Output the remaining picutres in DPB
+                        // Output the remaining pictures in DPB
                         if (FlushDpb() != PARSER_OK) {
                                 return PARSER_FAIL;
                         }
@@ -3273,9 +3274,9 @@ ParserResult AvcVideoParser::InsertCurrPicIntoDpb() {
         return PARSER_FAIL;
     }
 
-#if DBGINFO
-    PrintDpb();
-#endif // DBGINFO
+    if (g_rocdec_logger.GetLogLevel() >= kRocDecLogDebug) {
+        PrintDpb();
+    }
     return PARSER_OK;
 }
 
@@ -3310,7 +3311,6 @@ ParserResult AvcVideoParser::FlushDpb() {
     return PARSER_OK;
 }
 
-#if DBGINFO
 void AvcVideoParser::PrintSps(AvcSeqParameterSet *p_sps) {
     uint32_t i, j;
     
@@ -3601,4 +3601,3 @@ void AvcVideoParser::PrintVappiBufInfo() {
         MSG("");
     }
 }
-#endif // DBGINFO

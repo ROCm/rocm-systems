@@ -54,8 +54,8 @@ Panel Config:
           unit: Percent
         Remote Read Traffic:
           avg: SUM(100 * NOISE_CLAMP(TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_DRAM_sum, TCC_EA0_RDREQ_sum)) / SUM(TCC_EA0_RDREQ_sum)
-          min: MIN((100 * NOISE_CLAMP(TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_DRAM_sum), TCC_EA0_RDREQ_sum / TCC_EA0_RDREQ_sum))
-          max: MAX((100 * NOISE_CLAMP(TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_DRAM_sum), TCC_EA0_RDREQ_sum / TCC_EA0_RDREQ_sum))
+          min: MIN(100 * NOISE_CLAMP(TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_DRAM_sum, TCC_EA0_RDREQ_sum) / TCC_EA0_RDREQ_sum)
+          max: MAX(100 * NOISE_CLAMP(TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_DRAM_sum, TCC_EA0_RDREQ_sum) / TCC_EA0_RDREQ_sum)
           unit: Percent
         Uncached Read Traffic:
           avg: SUM(100 * TCC_EA0_RD_UNCACHED_32B_sum) / SUM(TCC_EA0_RDREQ_sum)
@@ -76,8 +76,8 @@ Panel Config:
           unit: Percent
         Remote Write and Atomic Traffic:
           avg: SUM(100 * NOISE_CLAMP(TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_DRAM_sum, TCC_EA0_WRREQ_sum)) / SUM(TCC_EA0_WRREQ_sum)
-          min: MIN((100 * NOISE_CLAMP(TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_DRAM_sum), TCC_EA0_WRREQ_sum / TCC_EA0_WRREQ_sum))
-          max: MAX((100 * NOISE_CLAMP(TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_DRAM_sum), TCC_EA0_WRREQ_sum / TCC_EA0_WRREQ_sum))
+          min: MIN(100 * NOISE_CLAMP(TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_DRAM_sum, TCC_EA0_WRREQ_sum) / TCC_EA0_WRREQ_sum)
+          max: MAX(100 * NOISE_CLAMP(TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_DRAM_sum, TCC_EA0_WRREQ_sum) / TCC_EA0_WRREQ_sum)
           unit: Percent
         Atomic Traffic:
           avg: SUM(100 * TCC_EA0_ATOMIC_sum) / SUM(TCC_EA0_WRREQ_sum)

@@ -9,7 +9,7 @@ config = {}
 config["memcopy"] = ["tests/memcopy"]
 config["cleanup"] = True
 
-soc = test_utils.gpu_soc()
+_, soc = test_utils.gpu_soc()
 
 # workload -> gfx -> metric definition
 VALIDATE_METRICS = {

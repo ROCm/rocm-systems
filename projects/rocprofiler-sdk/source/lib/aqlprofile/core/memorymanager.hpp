@@ -21,6 +21,11 @@
 // THE SOFTWARE.
 
 #pragma once
+
+#include "lib/aqlprofile/aqlprofile.hpp"
+#include "lib/aqlprofile/pm4/trace_config.h"
+#include "lib/common/synchronized.hpp"
+
 // Undefine Windows macros that conflict with class method names
 #ifdef _WIN32
 #    undef CopyMemory
@@ -28,14 +33,13 @@
 #    undef ZeroMemory
 #    undef MoveMemory
 #endif
+
 #include <vector>
 #include <atomic>
 #include <mutex>
 #include <unordered_map>
 #include <memory>
-#include "aqlprofile-sdk/aql_profile_v2.h"
 #include <stdexcept>
-#include "pm4/trace_config.h"
 
 struct EventRequest : public aqlprofile_pmc_event_t
 {
@@ -91,15 +95,18 @@ struct MemoryDeleter
 class MemoryManager
 {
 public:
+    using memory_manager_map_t        = std::unordered_map<size_t, std::shared_ptr<MemoryManager>>;
+    using memory_manager_synced_map_t = rocprofiler::common::Synchronized<memory_manager_map_t>;
+
     MemoryManager(hsa_agent_t                          agent,
                   aqlprofile_memory_alloc_callback_t   alloc,
                   aqlprofile_memory_dealloc_callback_t dealloc,
                   void*                                data)
     : agent(agent)
+    , userdata(data)
     , alloc_cb(alloc)
     , dealloc_cb(dealloc)
-    , userdata(data)
-    , handle(HANDLE_COUNTER.fetch_add(1))
+    , handle(get_handle_counter().fetch_add(1))
     {}
 
     MemoryManager(aqlprofile_agent_handle_t            agent,
@@ -107,15 +114,15 @@ public:
                   aqlprofile_memory_dealloc_callback_t dealloc,
                   void*                                data)
     : agent_handle(agent)
+    , userdata(data)
     , alloc_cb(alloc)
     , dealloc_cb(dealloc)
-    , userdata(data)
-    , handle(HANDLE_COUNTER.fetch_add(1))
+    , handle(get_handle_counter().fetch_add(1))
     {}
 
-    virtual ~MemoryManager() {}
+    virtual ~MemoryManager() = default;
 
-    void CheckStatus(hsa_status_t status) const
+    static void CheckStatus(hsa_status_t status)
     {
         if(status != HSA_STATUS_SUCCESS) throw status;
     }
@@ -142,26 +149,41 @@ public:
 
     static void RegisterManager(const std::shared_ptr<MemoryManager>& shared)
     {
-        std::lock_guard<std::mutex> lk(managers_map_mutex);
-        managers[shared->handle] = shared;
+        if(get_managers())
+        {
+            get_managers()->wlock(
+                [&shared](memory_manager_map_t& managers) { managers[shared->handle] = shared; });
+        }
     }
 
     static void DeleteManager(size_t handle)
     {
-        std::lock_guard<std::mutex> lk(managers_map_mutex);
-        managers.erase(handle);
+        if(get_managers())
+        {
+            get_managers()->wlock(
+                [](memory_manager_map_t& managers, size_t _handle) { managers.erase(_handle); },
+                handle);
+        }
     }
 
     static std::shared_ptr<MemoryManager> GetManager(size_t handle)
     {
-        std::lock_guard<std::mutex> lk(managers_map_mutex);
-        try
+        if(get_managers())
         {
-            return managers.at(handle);
-        } catch(std::exception& e)
-        {
-            return nullptr;
+            return get_managers()->rlock(
+                [](const memory_manager_map_t& managers,
+                   size_t                      _handle) -> std::shared_ptr<MemoryManager> {
+                    try
+                    {
+                        return managers.at(_handle);
+                    } catch(std::exception& e)
+                    {
+                        return nullptr;
+                    }
+                },
+                handle);
         }
+        return nullptr;
     }
 
 protected:
@@ -184,9 +206,8 @@ protected:
     aqlprofile_memory_dealloc_callback_t const dealloc_cb;
     size_t                                     handle;
 
-    static std::atomic<size_t>                                        HANDLE_COUNTER;
-    static std::unordered_map<size_t, std::shared_ptr<MemoryManager>> managers;
-    static std::mutex                                                 managers_map_mutex;
+    static std::atomic<size_t>&         get_handle_counter();
+    static memory_manager_synced_map_t* get_managers();
 };
 
 class CounterMemoryManager : public MemoryManager

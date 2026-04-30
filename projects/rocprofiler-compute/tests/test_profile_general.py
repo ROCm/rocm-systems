@@ -16,6 +16,7 @@ import numpy as np
 import pandas as pd
 import pytest
 import test_utils
+import yaml
 from scipy.stats import zscore
 
 # Runtime config options
@@ -145,7 +146,33 @@ SLURM_RANK_VAR, SLURM_SIZE_VAR = "SLURM_PROCID", "SLURM_NTASKS"
 test_utils.check_resource_allocation()
 
 # Get soc info
-soc = test_utils.gpu_soc()
+gpu_arch, soc = test_utils.gpu_soc()
+
+ROOT = os.path.dirname(os.path.dirname(__file__))
+SRC = os.path.join(ROOT, "src")
+
+
+def get_available_sets_for_arch(gpu_arch):
+    """Return available set options for the given GPU arch,
+    or [] if gpu_arch is falsy."""
+    if not gpu_arch:
+        return []
+    if SRC not in sys.path:
+        sys.path.insert(0, SRC)
+    sets_file = (
+        Path(SRC)
+        / "rocprof_compute_soc"
+        / "profile_configs"
+        / "sets"
+        / f"{gpu_arch}_sets.yaml"
+    )
+    if not sets_file.exists():
+        return []
+    data = yaml.safe_load(sets_file.read_text())
+    return [s["set_option"] for s in data.get("sets", []) if s.get("set_option")]
+
+
+AVAILABLE_SETS = get_available_sets_for_arch(gpu_arch)
 
 # Set default profiler
 os.environ["ROCPROF"] = "rocprofiler-sdk"
@@ -1298,6 +1325,90 @@ def test_roof_error_handling(binary_handler_profile_rocprof_compute):
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
+@pytest.mark.roofline_1
+def test_bench_only_basic(binary_handler_profile_rocprof_compute):
+    """
+    Test that --bench-only generates roofline.csv standalone (no application
+    profiling and no performance counter collection).
+    """
+    skip_unsupported_roofline_soc()
+
+    options = ["--device", "0", "--bench-only"]
+    workload_dir = test_utils.get_output_dir()
+
+    returncode = binary_handler_profile_rocprof_compute(
+        config, workload_dir, options, check_success=True, roof=True
+    )
+
+    assert returncode == 0
+    workload_path = Path(workload_dir)
+    roofline_csv = workload_path / "roofline.csv"
+    assert roofline_csv.exists(), f"Expected {roofline_csv} to be created"
+    # Bench-only must not produce profiling artifacts
+    assert not (workload_path / "perfmon").exists()
+    assert not (workload_path / "sysinfo.csv").exists()
+    assert not (workload_path / "profiling_config.yaml").exists()
+    assert not list(workload_path.glob("results_*.csv"))
+    assert not list(workload_path.glob("pmc_perf_*.csv"))
+
+
+@pytest.mark.roofline_1
+@pytest.mark.parametrize(
+    "conflicting_options",
+    [
+        pytest.param(["--set", "compute_thruput_util"], id="set"),
+        pytest.param(["--block", "2"], id="block"),
+        pytest.param(["--roof-only"], id="roof_only"),
+    ],
+)
+def test_bench_only_mutual_exclusion(
+    binary_handler_profile_rocprof_compute, conflicting_options
+):
+    """
+    --bench-only must be rejected when paired with --set, --block, or --roof-only.
+    These options are profiling-oriented and meaningless for a standalone benchmark.
+    """
+    skip_unsupported_roofline_soc()
+
+    options = ["--device", "0", "--bench-only"] + conflicting_options
+    workload_dir = test_utils.get_output_dir()
+
+    returncode = binary_handler_profile_rocprof_compute(
+        config, workload_dir, options, check_success=False, roof=True
+    )
+
+    assert returncode == 1, (
+        f"Expected --bench-only with {conflicting_options} to fail, "
+        f"but command exited with {returncode}"
+    )
+
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+
+@pytest.mark.roofline_1
+def test_bench_only_no_roof_mutual_exclusion(binary_handler_profile_rocprof_compute):
+    """
+    --bench-only must be rejected when combined with --no-roof, since the option
+    explicitly disables the roofline microbenchmark we are trying to run.
+    """
+    skip_unsupported_roofline_soc()
+
+    options = ["--device", "0", "--bench-only"]
+    workload_dir = test_utils.get_output_dir()
+
+    # roof=False makes the fixture inject --no-roof automatically
+    returncode = binary_handler_profile_rocprof_compute(
+        config, workload_dir, options, check_success=False, roof=False
+    )
+
+    assert returncode == 1, (
+        "Expected --bench-only combined with --no-roof to fail, "
+        f"but command exited with {returncode}"
+    )
+
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+
 @pytest.mark.roofline_2
 def test_roofline_plot_points_data_generation():
     """
@@ -2185,92 +2296,42 @@ def test_live_attach_detach_pc_sampling(
 
 @pytest.mark.sets_func
 class TestSetsIntegration:
-    def test_memory_throughput_set(self, binary_handler_profile_rocprof_compute):
-        options = ["--set", "mem_thruput"]
-        workload_dir = test_utils.get_output_dir()
-
-        binary_handler_profile_rocprof_compute(
-            config,
-            workload_dir,
-            options,
-            check_success=True,
-            roof=False,
-        )
-
-        assert test_utils.get_num_pmc_file(workload_dir) == 1
-
-        memory_metrics = (
-            ["2.1.18", "17.1.0"] if is_strix_halo_soc() else ["16.1.2", "17.1.0"]
-        )
-        for metric_id in memory_metrics:
-            assert metric_id in open(Path(workload_dir) / "log.txt").read(), (
-                f"Expected memory metric {metric_id} not found"
-            )
-
-        test_utils.clean_output_dir(config["cleanup"], workload_dir)
-
-    def test_launch_stats_set(self, binary_handler_profile_rocprof_compute):
-        options = ["--set", "launch_stats"]
-        workload_dir = test_utils.get_output_dir()
-
-        binary_handler_profile_rocprof_compute(
-            config,
-            workload_dir,
-            options,
-            check_success=True,
-            roof=False,
-        )
-
-        assert test_utils.get_num_pmc_file(workload_dir) == 1
-
-        test_utils.clean_output_dir(config["cleanup"], workload_dir)
-
-    def test_compute_thruput_util_set(self, binary_handler_profile_rocprof_compute):
-        options = ["--set", "compute_thruput_util"]
-        workload_dir = test_utils.get_output_dir()
-
-        binary_handler_profile_rocprof_compute(
-            config,
-            workload_dir,
-            options,
-            check_success=True,
-            roof=False,
-        )
-
-        assert test_utils.get_num_pmc_file(workload_dir) == 1
-
-        assert test_utils.check_file_pattern(
-            "- 11.2.3", f"{workload_dir}/profiling_config.yaml"
-        )
-
-        test_utils.clean_output_dir(config["cleanup"], workload_dir)
-
-    def test_compute_thruput_flops_set(self, binary_handler_profile_rocprof_compute):
-        options = ["--set", "compute_thruput_flops"]
-        workload_dir = test_utils.get_output_dir()
-
-        binary_handler_profile_rocprof_compute(
-            config,
-            workload_dir,
-            options,
-            check_success=True,
-            roof=False,
-        )
-
-        assert test_utils.get_num_pmc_file(workload_dir) == 1
-
-        test_utils.clean_output_dir(config["cleanup"], workload_dir)
-
-    def test_invalid_set_error_handling(self, binary_handler_profile_rocprof_compute):
-        options = ["--set", "nonexistent_set"]
-        workload_dir = test_utils.get_output_dir()
+    # Ensure single pass for auto-discovered sets from YAML for the current GPU arch.
+    @pytest.mark.parametrize("set_name", AVAILABLE_SETS, ids=lambda s: s)
+    def test_set_profiling(
+        self, binary_handler_profile_rocprof_compute, set_name, request
+    ):
+        """Each set_option runs successfully and produces a single PMC file."""
+        options = ["--set", set_name]
+        workload_dir = test_utils.get_output_dir(param_id=set_name)
 
         returncode = binary_handler_profile_rocprof_compute(
-            config,
-            workload_dir,
-            options,
-            check_success=False,
-            roof=False,
+            config, workload_dir, options, check_success=True, roof=False
+        )
+
+        assert returncode == 0
+        assert test_utils.get_num_pmc_file(workload_dir) == 1
+        test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+    @pytest.mark.parametrize(
+        "set_name",
+        [
+            pytest.param("nonexistent_set", id="nonexistent"),
+            pytest.param("x" * 1024, id="very_long_name"),
+            pytest.param("mem_thruput; rm -rf /", id="shell_metachar"),
+        ],
+    )
+    def test_invalid_set_rejected(
+        self, binary_handler_profile_rocprof_compute, set_name, request
+    ):
+        """Invalid or adversarial set names are rejected with exit code 1."""
+        options = ["--set", set_name]
+        workload_dir = test_utils.get_output_dir(
+            param_id=f"invalid_{request.node.callspec.id}"
+        )
+
+        returncode = binary_handler_profile_rocprof_compute(
+            config, workload_dir, options, check_success=False, roof=False
         )
 
         assert returncode == 1
@@ -2858,12 +2919,12 @@ def test_torch_trace_profile(
 
     # 10. Source-location grouping (file:line headers)
     location_headers = re.findall(
-        r"^(\S+:\d+)\s+\(kernel_launches:", list_output, re.MULTILINE
+        r"^(\S+:\d+)\s+\(dispatches:", list_output, re.MULTILINE
     )
     assert location_headers, "No source-location headers found in output"
 
     # 11. Aggregated stats on tree nodes
-    assert re.search(r"\(kernel_launches:\s+\d+,\s+total_duration:", list_output), (
+    assert re.search(r"\(dispatches:\s+\d+,\s+total:", list_output), (
         "No aggregated stats found in output"
     )
 
@@ -2872,13 +2933,13 @@ def test_torch_trace_profile(
     assert kernel_ids, "No kernel IDs found in output"
 
     # 13. Kernel launch durations
-    assert re.search(r"kernel_launches:\s+\d+,\s+total_duration:", list_output), (
+    assert re.search(r"dispatches:\s+\d+,\s+total:", list_output), (
         "No kernel duration info in output"
     )
 
     # 14. Source locations sorted by descending total duration
     location_durations = re.findall(
-        r"^(\S+:\d+)\s+\(kernel_launches:\s+\d+,\s+total_duration:\s+([\d.]+)\s+(ms|us)\)",
+        r"^(\S+:\d+)\s+\(dispatches:\s+\d+,\s+total:\s+([\d.]+)\s+(ms|us)",
         list_output,
         re.MULTILINE,
     )
@@ -2944,8 +3005,8 @@ def test_torch_trace_profile(
     assert "Matched PyTorch Operators" in out_exact, (
         "Expected 'Matched PyTorch Operators' header in --torch-operator output"
     )
-    assert "kernel_launches" in out_exact, (
-        "Expected call tree with kernel_launches stats in --torch-operator output"
+    assert "dispatches" in out_exact, (
+        "Expected call tree with dispatches stats in --torch-operator output"
     )
 
     # 18. Glob wildcard pattern (*relu) matches the relu operator
@@ -2960,7 +3021,7 @@ def test_torch_trace_profile(
     ])
     assert rc_glob == 0, "Analyze with --torch-operator *relu failed"
     out_glob = capsys.readouterr().out
-    assert "kernel_launches" in out_glob, (
+    assert "dispatches" in out_glob, (
         "Glob pattern *relu should match relu operator and render call tree"
     )
 
@@ -2976,7 +3037,7 @@ def test_torch_trace_profile(
     ])
     assert rc_all == 0, "Analyze with --torch-operator all failed"
     out_all = capsys.readouterr().out
-    assert "kernel_launches" in out_all, "'all' keyword should match operators"
+    assert "dispatches" in out_all, "'all' keyword should match operators"
 
     # 20. --torch-operator + -k intersection succeeds and renders call tree
     capsys.readouterr()

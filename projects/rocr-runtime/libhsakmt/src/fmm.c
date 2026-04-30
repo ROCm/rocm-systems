@@ -4358,14 +4358,23 @@ HSAKMT_STATUS hsakmt_fmm_deregister_memory(HsaKFDContext *ctx, void *address)
 	vm_object_t *object;
 	struct hsa_kfd_fmm_context *fmm_ctx = hsakmt_kfdcontext_get_fmm_context(ctx);
 
+	/* Unknown addresses are a no-op when not using dGPUs or when using SVM. */
+	bool require_registered_mem = hsakmt_is_dgpu && !ctx->hsakmt_is_svm_api_supported;
+
 	object = vm_find_object(fmm_ctx, address, 0, &aperture);
-	if (!object)
-		/* On APUs we assume it's a random system memory address
-		 * where registration and dergistration is a no-op
+	if (!object && require_registered_mem) {
+		/* The size=0 lookup rejects an address with more than one userptr
+		 * node (e.g. a single host VA registered with different pinAllocSize).
+		 * The HSA deregister API only takes an address, so fall back to the
+		 * range-based lookup which tolerates duplicates and releases any one
+		 * node whose range contains that address.
 		 */
-		return (!hsakmt_is_dgpu || ctx->hsakmt_is_svm_api_supported) ?
-			HSAKMT_STATUS_SUCCESS :
-			HSAKMT_STATUS_MEMORY_NOT_REGISTERED;
+		object = vm_find_object(fmm_ctx, address, UINT64_MAX, &aperture);
+	}
+	if (!object)
+		return require_registered_mem ?
+			HSAKMT_STATUS_MEMORY_NOT_REGISTERED :
+			HSAKMT_STATUS_SUCCESS;
 	/* Successful vm_find_object returns with aperture locked */
 
 	if (aperture == &fmm_ctx->cpuvm_aperture) {

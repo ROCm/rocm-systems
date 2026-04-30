@@ -15,6 +15,7 @@
 #include "mbackend.h"
 #include "mfile.h"
 #include "mhip.h"
+#include "mstats.h"
 #include "msys.h"
 
 #include <array>
@@ -454,7 +455,8 @@ INSTANTIATE_TEST_SUITE_P(FastpathTest, FastpathUnalignedBufferOffsetsParam,
 
 struct FastpathIoParam : public FastpathTestBase, public TestWithParam<IoType> {
 
-    StrictMock<MHip> mhip;
+    StrictMock<MHip>             mhip;
+    StrictMock<MStatsCollection> mstats;
 
     // Setup expectations on the mocks called to validate IO arguments
     void expect_validate()
@@ -537,6 +539,7 @@ TEST_P(FastpathIoParam, IoConfiguresHandle)
     handle.fd = DEFAULT_UNBUFFERED_FD.value();
 
     expect_io();
+    EXPECT_CALL(mstats, addIo).Times(1);
     switch (GetParam()) {
         case IoType::Read:
             EXPECT_CALL(mhip, hipAmdFileRead(Eq(handle), _, _, _));
@@ -558,6 +561,7 @@ TEST_P(FastpathIoParam, IoCalculatesCorrectDevicePointer)
     void *expected_device_ptr{reinterpret_cast<void *>(0x21000)};
 
     expect_io(DEFAULT_UNBUFFERED_FD, buffer_addr, static_cast<size_t>(buffer_offset) + DEFAULT_IO_SIZE);
+    EXPECT_CALL(mstats, addIo).Times(1);
     switch (GetParam()) {
         case IoType::Read:
             EXPECT_CALL(mhip, hipAmdFileRead(_, expected_device_ptr, _, _));
@@ -575,6 +579,7 @@ TEST_P(FastpathIoParam, IoCalculatesCorrectDevicePointer)
 TEST_P(FastpathIoParam, IoPassesThroughSizeAndFileOffset)
 {
     expect_io();
+    EXPECT_CALL(mstats, addIo).Times(1);
     switch (GetParam()) {
         case IoType::Read:
             EXPECT_CALL(mhip, hipAmdFileRead(_, _, Eq(DEFAULT_IO_SIZE), Eq(DEFAULT_FILE_OFFSET)));
@@ -592,6 +597,7 @@ TEST_P(FastpathIoParam, IoPassesThroughSizeAndFileOffset)
 TEST_P(FastpathIoParam, IoReturnsBytesTransferred)
 {
     expect_io();
+    EXPECT_CALL(mstats, addIo).Times(1);
     switch (GetParam()) {
         case IoType::Read:
             EXPECT_CALL(mhip, hipAmdFileRead(_, _, _, _)).WillOnce(Return(DEFAULT_IO_SIZE));
@@ -615,6 +621,7 @@ TEST_P(FastpathIoParam, IoReturnsBytesTransferredShort)
     ASSERT_LT(nbytes, DEFAULT_IO_SIZE);
 
     expect_io();
+    EXPECT_CALL(mstats, addIo).Times(1);
     switch (GetParam()) {
         case IoType::Read:
             EXPECT_CALL(mhip, hipAmdFileRead(_, _, _, _)).WillOnce(Return(nbytes));
@@ -635,6 +642,7 @@ TEST_P(FastpathIoParam, IoReturnsBytesTransferredShort)
 TEST_P(FastpathIoParam, IoDoesNotMaskHipRuntimeError)
 {
     expect_io();
+    EXPECT_CALL(mstats, error).Times(1);
     switch (GetParam()) {
         case IoType::Read:
             EXPECT_CALL(mhip, hipAmdFileRead).WillOnce(Throw(Hip::RuntimeError(hipErrorUnknown)));
@@ -655,6 +663,7 @@ TEST_P(FastpathIoParam, IoDoesNotMaskHipRuntimeError)
 TEST_P(FastpathIoParam, IoDoesNotMaskSystemError)
 {
     expect_io();
+    EXPECT_CALL(mstats, error).Times(1);
     switch (GetParam()) {
         case IoType::Read:
             EXPECT_CALL(mhip, hipAmdFileRead).WillOnce(Throw(system_error(ENODEV, generic_category())));
@@ -678,6 +687,7 @@ TEST_P(FastpathIoParam, IoSizeIsTruncatedToMaxRWCount)
     const size_t io_size{SIZE_MAX};
 
     expect_io(DEFAULT_UNBUFFERED_FD, reinterpret_cast<void *>(DEFAULT_BUFFER_ADDR), buffer_size);
+    EXPECT_CALL(mstats, addIo).Times(1);
     switch (GetParam()) {
         case IoType::Read:
             EXPECT_CALL(mhip, hipAmdFileRead(_, _, getMaxRwCount(), _)).WillOnce(Return(getMaxRwCount()));
@@ -705,6 +715,7 @@ TEST_P(FastpathIoParam, IoWithFallbackThrowsAFallbackIneligibleException)
     EXPECT_CALL(*mbuffer, getBuffer).WillOnce(Return(reinterpret_cast<void *>(DEFAULT_BUFFER_ADDR)));
     EXPECT_CALL(*mbuffer, getLength).WillOnce(Return(DEFAULT_BUFFER_LENGTH));
     EXPECT_CALL(*mfile, unbufferedFd).WillOnce(Return(DEFAULT_UNBUFFERED_FD));
+    EXPECT_CALL(mstats, error).Times(1);
 
     switch (GetParam()) {
         case IoType::Read:
@@ -734,6 +745,7 @@ TEST_P(FastpathIoParam, IoWithFallbackThrowsHipRuntimeException)
     EXPECT_CALL(*mbuffer, getBuffer).WillOnce(Return(reinterpret_cast<void *>(DEFAULT_BUFFER_ADDR)));
     EXPECT_CALL(*mbuffer, getLength).WillOnce(Return(DEFAULT_BUFFER_LENGTH));
     EXPECT_CALL(*mfile, unbufferedFd).WillOnce(Return(DEFAULT_UNBUFFERED_FD));
+    EXPECT_CALL(mstats, error).Times(1);
 
     switch (GetParam()) {
         case IoType::Read:
@@ -762,6 +774,7 @@ TEST_P(FastpathIoParam, IoThrowsAFallbackEligibleENODEV)
     EXPECT_CALL(*mbuffer, getLength).WillOnce(Return(DEFAULT_BUFFER_LENGTH));
     EXPECT_CALL(mhip, hipInit).WillOnce(Return());
     EXPECT_CALL(*mfile, unbufferedFd).WillOnce(Return(DEFAULT_UNBUFFERED_FD));
+    EXPECT_CALL(mstats, error).Times(1);
 
     switch (GetParam()) {
         case IoType::Read:
@@ -793,6 +806,7 @@ TEST_P(FastpathIoParam, IoThrowsAFallbackEligibleEREMOTEIO)
     EXPECT_CALL(*mbuffer, getLength).WillOnce(Return(DEFAULT_BUFFER_LENGTH));
     EXPECT_CALL(mhip, hipInit).WillOnce(Return());
     EXPECT_CALL(*mfile, unbufferedFd).WillOnce(Return(DEFAULT_UNBUFFERED_FD));
+    EXPECT_CALL(mstats, error).Times(1);
 
     switch (GetParam()) {
         case IoType::Read:
@@ -831,6 +845,7 @@ TEST_P(FastpathIoParam, FallbackRejectsIoRequest)
     EXPECT_CALL(*mbuffer, getLength).WillOnce(Return(DEFAULT_BUFFER_LENGTH));
     EXPECT_CALL(*mfile, unbufferedFd).WillOnce(Return(DEFAULT_UNBUFFERED_FD));
     EXPECT_CALL(*m_fallback, score).WillOnce(Return(SCORE_REJECT));
+    EXPECT_CALL(mstats, error).Times(1);
 
     switch (GetParam()) {
         case IoType::Read:

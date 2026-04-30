@@ -60,9 +60,11 @@ amd::Monitor GraphNode::WorkerThreadLock_{};
 
 hipError_t GraphMemcpyNode1D::ValidateParams(void* dst, const void* src, size_t count,
                                              hipMemcpyKind kind) {
-  hipError_t status = ihipMemcpy_validate(dst, src, count, kind);
-  if (status != hipSuccess) {
-    return status;
+  if (dst == nullptr || src == nullptr) {
+      return hipErrorInvalidValue;
+  }
+  if (static_cast<uint32_t>(kind) > hipMemcpyDefault && kind != hipMemcpyDeviceToDeviceNoCU) {
+    return hipErrorInvalidMemcpyDirection;
   }
   size_t sOffset = 0;
   amd::Memory* srcMemory = getMemoryObject(src, sOffset);
@@ -76,6 +78,19 @@ hipError_t GraphMemcpyNode1D::ValidateParams(void* dst, const void* src, size_t 
   } else if ((srcMemory != nullptr) && (dstMemory == nullptr)) {  // device to host
     if ((kind != hipMemcpyDeviceToHost) && (kind != hipMemcpyDefault)) {
       return hipErrorInvalidValue;
+    }
+  }
+
+  if (srcMemory != nullptr) {
+    hipError_t status = ihipMemcpy_validate_memory(srcMemory, count, sOffset, /*read_write*/ false);
+    if (status != hipSuccess) {
+      return status;
+    }
+  }
+  if (dstMemory != nullptr) {
+    hipError_t status = ihipMemcpy_validate_memory(dstMemory, count, dOffset, /*read_write*/ true);
+    if (status != hipSuccess) {
+      return status;
     }
   }
 
@@ -198,6 +213,8 @@ void Graph::ScheduleOneNode(Node start, int stream_id) {
     if (cur->GetType() == hipGraphNodeTypeGraph) {
       auto cgn   = reinterpret_cast<hip::ChildGraphNode*>(cur);
       auto child = cgn->GetChildGraph();
+      // Use same scheduling logic(classic or segment) as parent graph for child graph
+      child->SetSegmentScheduling(use_segment_scheduling_);
       hipError_t status = child->ScheduleNodes();
       (void)status;
       max_streams_ = std::max(max_streams_, child->max_streams_);

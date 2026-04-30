@@ -208,6 +208,18 @@ class ROBackend : public Backend {
   ROTeamProxyT *team_world_proxy_;
 
   /**
+   * @brief Allocate and initialize team shared.
+   *
+   * TEAM_SHARED contains the PEs that share a common memory domain
+   * (same node). Must be called after initIPC() since membership
+   * is determined from ipcImpl.pes_with_ipc_avail. Computes real
+   * pe_start/stride from the PE list; set to ROCSHMEM_TEAM_INVALID
+   * when IPC is disabled or when node-local ranks are not uniformly
+   * strided.
+   */
+  void setup_team_shared();
+
+  /**
    * @brief Workers used to poll on the device network request queues.
    */
   std::thread worker_thread{};
@@ -266,24 +278,24 @@ class ROBackend : public Backend {
   /**
    * @brief A free-list containing contexts.
    */
-  FreeListProxy<HIPAllocator, ROContext *> ctx_free_list{};
+  FreeListProxy<ROContext *> ctx_free_list{};
 
   /**
    * @brief AtomicWFQueue containing status flag buffers for default context
    */
-  AtomicWFQueueProxy<HIPAllocator, volatile char*> default_ctx_status_{};
+  AtomicWFQueueProxy<volatile char*> default_ctx_status_{};
 
   /**
    * @brief AtomicWFQueue containing rocshmem_g return buffers for default
    * context
    */
-  AtomicWFQueueProxy<HIPAllocator, uint64_t*> default_ctx_g_ret_buffer_{};
+  AtomicWFQueueProxy<uint64_t*> default_ctx_g_ret_buffer_{};
 
   /**
    * @brief AtomicWFQueue containing rocshmem return buffers for default
    * context
    */
-  AtomicWFQueueProxy<HIPAllocator, uint64_t*> default_ctx_atomic_ret_buffer_{};
+  AtomicWFQueueProxy<uint64_t*> default_ctx_atomic_ret_buffer_{};
 
   /**
    * @brief Holds maximum threads per work-group

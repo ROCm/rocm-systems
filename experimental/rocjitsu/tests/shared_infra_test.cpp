@@ -66,7 +66,7 @@ TEST(MfmaExecTest, InputLocF32_32x32) {
   // Actually for M=32,K=2,B=1: lanes_per_block = 64/(32*1) = 2, elems = 2/2 = 1.
   // Use M=4, K=4, B=4 which is v_mfma_f32_4x4x4f16 (valid shape).
   // lanes_per_block = 64 / (4 * 4) = 4, elems_per_group = 4/4 = 1.
-  auto loc = amdgpu::mfma::input_loc(4, 4, 4, /*i=*/2, /*k=*/0, /*b=*/0, 32);
+  auto loc = amdgpu::input_loc(4, 4, 4, /*i=*/2, /*k=*/0, /*b=*/0, 32);
   EXPECT_EQ(loc.vgpr_offset, 0u);
   EXPECT_EQ(loc.lane, 2u); // b*dim + ... = 0*4 + (0/1)*4*4 + 2 = 2
   EXPECT_EQ(loc.sub_element, 0u);
@@ -78,20 +78,20 @@ TEST(MfmaExecTest, InputLocF16_16x16) {
   // elems_per_group = 16 / 4 = 4
   // For i=0, k=0, b=0: local=0%4=0, lane=0*16+0*16*1+0=0, per_dword=2
   // vgpr_offset = 0/2 = 0, sub_element = 0%2 = 0
-  auto loc = amdgpu::mfma::input_loc(16, 16, 1, 0, 0, 0, 16);
+  auto loc = amdgpu::input_loc(16, 16, 1, 0, 0, 0, 16);
   EXPECT_EQ(loc.vgpr_offset, 0u);
   EXPECT_EQ(loc.lane, 0u);
   EXPECT_EQ(loc.sub_element, 0u);
 
   // k=1: local=1, vgpr_offset = 1/2 = 0, sub_element = 1
-  auto loc1 = amdgpu::mfma::input_loc(16, 16, 1, 0, 1, 0, 16);
+  auto loc1 = amdgpu::input_loc(16, 16, 1, 0, 1, 0, 16);
   EXPECT_EQ(loc1.vgpr_offset, 0u);
   EXPECT_EQ(loc1.sub_element, 1u);
 }
 
 TEST(MfmaExecTest, OutputLoc32_4x4) {
   // 4x4 matrix, block 0: reg = column index, lane = row index.
-  auto loc = amdgpu::mfma::output_loc_32(4, 4, /*col=*/2, /*row=*/1, /*b=*/0);
+  auto loc = amdgpu::output_loc_32(4, 4, /*col=*/2, /*row=*/1, /*b=*/0);
   EXPECT_EQ(loc.reg, 2u);
   EXPECT_EQ(loc.lane, 1u);
 }
@@ -99,7 +99,7 @@ TEST(MfmaExecTest, OutputLoc32_4x4) {
 TEST(MfmaExecTest, ResolveAccConstant) {
   // Encoding value 0-255 = inline constant. The callback should be invoked.
   uint32_t const_acc = 0;
-  uint32_t result = amdgpu::mfma::resolve_acc<amdgpu::mfma::AccMode::Unified>(
+  uint32_t result = amdgpu::resolve_acc<amdgpu::AccMode::Unified>(
       /*vb=*/100, /*dst=*/200, /*src2_ev=*/128, const_acc, [&]() -> uint32_t { return 42u; });
   EXPECT_EQ(const_acc, 42u);
   EXPECT_EQ(result, 200u); // Returns dst when constant.
@@ -108,18 +108,18 @@ TEST(MfmaExecTest, ResolveAccConstant) {
 TEST(MfmaExecTest, ResolveAccVgpr) {
   // Encoding value 256-511 = VGPR.
   uint32_t const_acc = 0;
-  uint32_t result = amdgpu::mfma::resolve_acc<amdgpu::mfma::AccMode::Unified>(
+  uint32_t result = amdgpu::resolve_acc<amdgpu::AccMode::Unified>(
       /*vb=*/100, /*dst=*/200, /*src2_ev=*/260, const_acc, [&]() -> uint32_t { return 99u; });
-  EXPECT_EQ(const_acc, amdgpu::mfma::ACC_FROM_VGPR);
+  EXPECT_EQ(const_acc, amdgpu::ACC_FROM_VGPR);
   EXPECT_EQ(result, 100u + 4u); // vb + (260 - 256)
 }
 
 TEST(MfmaExecTest, ResolveAccAccVgpr) {
   // Encoding value 768-1023 = AccVGPR (unified alias).
   uint32_t const_acc = 0;
-  uint32_t result = amdgpu::mfma::resolve_acc<amdgpu::mfma::AccMode::Unified>(
+  uint32_t result = amdgpu::resolve_acc<amdgpu::AccMode::Unified>(
       /*vb=*/100, /*dst=*/200, /*src2_ev=*/770, const_acc, [&]() -> uint32_t { return 99u; });
-  EXPECT_EQ(const_acc, amdgpu::mfma::ACC_FROM_VGPR);
+  EXPECT_EQ(const_acc, amdgpu::ACC_FROM_VGPR);
   EXPECT_EQ(result, 100u + 256u + 2u); // vb + ACC_VGPR_OFFSET + (770 - 768)
 }
 
@@ -341,13 +341,12 @@ TEST(ScratchAddrCalcTest, FlatScratchUsesWavefrontBase) {
   inst.offset = 0x10; // 12-bit immediate offset
   inst.pad_12 = 0;
 
-  std::array<uint64_t, 64> addrs{};
-  uint64_t lane_mask = 0;
-  amdgpu::addr_calc::flat_calculate_addresses(inst, *wf, addrs, lane_mask);
+  amdgpu::VectorMemState d(amdgpu::GLOBAL_MEM);
+  amdgpu::addr_calc::flat_calculate_addresses(inst, *wf, d);
 
-  EXPECT_EQ(lane_mask, 1ULL);
+  EXPECT_EQ(d.lane_mask, 1ULL);
   // scratch_base (0x1_0000_0000) + VGPR (0x100) + offset (0x10) = 0x1_0000_0110
-  EXPECT_EQ(addrs[0], SCRATCH_BASE + 0x100 + 0x10);
+  EXPECT_EQ(d.per_lane_addr[0], SCRATCH_BASE + 0x100 + 0x10);
 }
 
 TEST(ScratchAddrCalcTest, FlatGlobalDoesNotUseScratchBase) {
@@ -382,11 +381,10 @@ TEST(ScratchAddrCalcTest, FlatGlobalDoesNotUseScratchBase) {
   inst.offset = 0;
   inst.pad_12 = 0;
 
-  std::array<uint64_t, 64> addrs{};
-  uint64_t lane_mask = 0;
-  amdgpu::addr_calc::flat_calculate_addresses(inst, *wf, addrs, lane_mask);
+  amdgpu::VectorMemState d(amdgpu::GLOBAL_MEM);
+  amdgpu::addr_calc::flat_calculate_addresses(inst, *wf, d);
 
-  EXPECT_EQ(addrs[0], 0x1'0000'2000ULL); // No scratch_base added.
+  EXPECT_EQ(d.per_lane_addr[0], 0x1'0000'2000ULL); // No scratch_base added.
 }
 
 } // namespace

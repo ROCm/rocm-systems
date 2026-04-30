@@ -88,6 +88,7 @@ class IPCImplSimpleCoarse : public ::testing::TestWithParam<std::tuple<int, int,
             hip_allocator_.deallocate(ipc_impl_dptr_);
         }
         ipc_impl_.ipcHostStop();
+        delete mpi_;
         MPIInstance::mpilib_dl_close();
     }
 

@@ -30,8 +30,8 @@
 #include <iostream>
 #include <sstream>
 
-#include "pm4/cmd_builder.h"
-#include "def/gfx11_def.h"
+#include "lib/aqlprofile/pm4/cmd_builder.h"
+#include "lib/aqlprofile/def/gfx11_def.h"
 
 namespace pm4_builder
 {

@@ -231,6 +231,21 @@ __host__ void *rocshmem_malloc(size_t size);
 __host__ void rocshmem_free(void *ptr);
 
 /**
+ * @brief Registers a non-symmetric buffer
+ *
+ * @param[in] addr Pointer to previously allocated user memory
+ * @param[in] length Length of addr
+ */
+__host__ int rocshmem_buffer_register(void *addr, size_t length);
+
+/**
+ * @brief Deregisters previously registered user memory
+ *
+ * @param[in] addr Pointer to previously registered memory
+ */
+__host__ int rocshmem_buffer_unregister(void *addr);
+
+/**
  * @brief Query for the number of PEs.
  *
  * @return Number of PEs.
@@ -363,10 +378,11 @@ __host__ int rocshmem_team_split_strided(rocshmem_team_t parent_team,
  * is undefined. This call will destroy only the shareable contexts
  * created from the referenced team.
  *
- * @param[in] team The team to destroy. The behavior is undefined if
- *                 the input team is ROCSHMEM_TEAM_WORLD or any other
- *                 invalid team. If the input is ROCSHMEM_TEAM_INVALID,
- *                 this function will not perform any operation.
+ * @param[in] team The team to destroy.
+ *                 ROCSHMEM_TEAM_INVALID, ROCSHMEM_TEAM_WORLD, and
+ *                 ROCSHMEM_TEAM_SHARED are silently ignored (no-op).
+ *                 Passing a handle that was already destroyed or
+ *                 never created results in undefined behavior.
  *
  * @return None.
  */

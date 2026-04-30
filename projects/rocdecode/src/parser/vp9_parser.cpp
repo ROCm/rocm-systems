@@ -68,6 +68,7 @@ rocDecStatus Vp9VideoParser::UnInitialize() {
 rocDecStatus Vp9VideoParser::ParseVideoData(RocdecSourceDataPacket *p_data) {
     FunctionEntryLog(g_rocdec_logger);
     if (p_data->payload && p_data->payload_size) {
+        DebugLog(g_rocdec_logger, ROCDEC_STR("Parsing picture ") + ROCDEC_TOSTR(pic_count_) + ROCDEC_STR(" with payload size ") + ROCDEC_TOSTR(p_data->payload_size) + ROCDEC_STR(" bytes ..."));
         curr_pts_ = p_data->pts;
         if (ParsePictureData(p_data->payload, p_data->payload_size) != PARSER_OK) {
             ErrorLog(g_rocdec_logger, "Error occurred in ParsePictureData().");
@@ -130,9 +131,9 @@ ParserResult Vp9VideoParser::ParsePictureData(const uint8_t *p_stream, uint32_t 
                         return PARSER_OUT_OF_RANGE;
                     }
                 }
-        #if DBGINFO
-                PrintDpb();
-        #endif // DBGINFO
+                if (g_rocdec_logger.GetLogLevel() >= kRocDecLogDebug) {
+                    PrintDpb();
+                }
             } else {
                 pic_stream_data_ptr_ = pic_data_ptr;
                 pic_stream_data_size_ = frame_sizes_[frame_index];
@@ -148,9 +149,9 @@ ParserResult Vp9VideoParser::ParsePictureData(const uint8_t *p_stream, uint32_t 
                     ErrorLog(g_rocdec_logger, ROCDEC_STR("Failed to decode!"));
                     return ret;
                 }
-        #if DBGINFO
-                PrintDpb();
-        #endif // DBGINFO
+                if (g_rocdec_logger.GetLogLevel() >= kRocDecLogDebug) {
+                    PrintDpb();
+                }
                 // Output decoded pictures from DPB if any are ready
                 if (pfn_display_picture_cb_ && num_output_pics_ > 0) {
                     if ((ret = OutputDecodedPictures(false)) != PARSER_OK) {
@@ -235,7 +236,7 @@ ParserResult Vp9VideoParser::NotifyNewSequence(Vp9UncompressedHeader *p_uncomp_h
     video_format_params_.display_area.bottom = p_uncomp_header->frame_size.frame_height;
     video_format_params_.bitrate = 0;
 
-    // Dispaly aspect ratio
+    // Display aspect ratio
     int disp_width = (video_format_params_.display_area.right - video_format_params_.display_area.left);
     int disp_height = (video_format_params_.display_area.bottom - video_format_params_.display_area.top);
     int gcd = std::__gcd(disp_width, disp_height); // greatest common divisor
@@ -343,9 +344,9 @@ ParserResult Vp9VideoParser::SendPicForDecode() {
     }
     dec_pic_params_.slice_params.vp9 = p_tile_params;
 
-#if DBGINFO
-    PrintVaapiParams();
-#endif // DBGINFO
+    if (g_rocdec_logger.GetLogLevel() >= kRocDecLogDebug) {
+        PrintVaapiParams();
+    }
 
     if (pfn_decode_picture_cb_(parser_params_.user_data, &dec_pic_params_) == 0) {
         ErrorLog(g_rocdec_logger, "Decode error occurred.");
@@ -581,7 +582,7 @@ ParserResult Vp9VideoParser::ParseUncompressedHeader(uint8_t *p_stream, size_t s
     p_uncomp_header->header_size_in_bytes = Parser::ReadBits(p_stream, offset, 16);
 
     // Arbitrary size change is only supported on key frames. For other frame types, particularly inter-coded frames, only size down is
-    // supported where the existing surface can be re-used.
+    // supported where the existing surface can be reused.
     if (pic_width_ != p_uncomp_header->frame_size.frame_width || pic_height_ != p_uncomp_header->frame_size.frame_height) {
         pic_width_ = p_uncomp_header->frame_size.frame_width;
         pic_height_ = p_uncomp_header->frame_size.frame_height;
@@ -1080,7 +1081,6 @@ void Vp9VideoParser::LoopFilterFrameInit(Vp9UncompressedHeader *p_uncomp_header)
     }
 }
 
-#if DBGINFO
 void Vp9VideoParser::PrintVaapiParams() {
     int i;
     MSG("=======================");
@@ -1205,4 +1205,3 @@ void Vp9VideoParser::PrintDpb() {
         MSG("");
     }
 }
-#endif // DBGINFO
