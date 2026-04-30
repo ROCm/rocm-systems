@@ -9,10 +9,25 @@ import shlex
 import subprocess
 import sys
 from pathlib import Path
+from typing import Dict, List, Optional
 
 PROJECT_NAME = "rocprofiler-sdk"
 
 logging.basicConfig(level=logging.INFO)
+
+
+def positive_int(value: str) -> int:
+    parsed = int(value)
+    if parsed < 1:
+        raise argparse.ArgumentTypeError("value must be greater than zero")
+    return parsed
+
+
+def path_from_env(name: str) -> Optional[Path]:
+    value = os.getenv(name)
+    if not value:
+        return None
+    return Path(value)
 
 
 def parse_args() -> argparse.Namespace:
@@ -20,7 +35,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--rocm-path",
         type=Path,
-        default=os.getenv("ROCM_PATH"),
+        default=path_from_env("ROCM_PATH"),
         help="ROCm install prefix. Defaults to ROCM_PATH or the runner location.",
     )
     parser.add_argument(
@@ -35,14 +50,15 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--parallel",
-        default="8",
+        type=positive_int,
+        default=8,
         help="Parallelism passed to CMake build and CTest.",
     )
     return parser.parse_args()
 
 
 def get_rocm_path(
-    script_path: Path, rocm_path: Path | None, tests_path: Path | None
+    script_path: Path, rocm_path: Optional[Path], tests_path: Optional[Path]
 ) -> Path:
     if rocm_path is not None:
         return rocm_path.resolve()
@@ -51,6 +67,7 @@ def get_rocm_path(
     if (
         script_path.parent.name == "tests"
         and script_path.parents[1].name == PROJECT_NAME
+        and script_path.parents[2].name == "share"
     ):
         return script_path.parents[3].resolve()
 
@@ -59,13 +76,14 @@ def get_rocm_path(
         if (
             resolved_tests_path.name == "tests"
             and resolved_tests_path.parent.name == PROJECT_NAME
+            and resolved_tests_path.parent.parent.name == "share"
         ):
-            return resolved_tests_path.parents[2].resolve()
+            return resolved_tests_path.parent.parent.parent.resolve()
 
     raise RuntimeError("ROCM_PATH is required when the runner is not installed.")
 
 
-def prepend_env_path(env: dict[str, str], key: str, paths: list[Path]) -> None:
+def prepend_env_path(env: Dict[str, str], key: str, paths: List[Path]) -> None:
     existing = env.get(key)
     values = [str(path) for path in paths]
     if existing:
@@ -84,7 +102,7 @@ def get_llvm_bin_path(rocm_path: Path) -> Path:
     return candidates[0]
 
 
-def setup_env(rocm_path: Path) -> dict[str, str]:
+def setup_env(rocm_path: Path) -> Dict[str, str]:
     env = os.environ.copy()
     sdk_path = rocm_path / "share" / PROJECT_NAME
 
@@ -109,12 +127,7 @@ def get_build_dir(tests_path: Path, build_dir: str) -> Path:
     return tests_path / path
 
 
-def cmake_config(
-    rocm_path: Path,
-    tests_path: Path,
-    build_dir: Path,
-    env: dict[str, str],
-) -> None:
+def cmake_config(rocm_path: Path, tests_path: Path, build_dir: Path, env: Dict[str, str]) -> None:
     sysdeps_path = rocm_path / "lib" / "rocm_sysdeps"
     llvm_bin_path = get_llvm_bin_path(rocm_path)
     clang_path = llvm_bin_path / "amdclang"
@@ -138,14 +151,14 @@ def cmake_config(
 
 
 def cmake_build(
-    tests_path: Path, build_dir: Path, parallel: str, env: dict[str, str]
+    tests_path: Path, build_dir: Path, parallel: int, env: Dict[str, str]
 ) -> None:
     cmd = [
         "cmake",
         "--build",
         str(build_dir),
         "--parallel",
-        parallel,
+        str(parallel),
     ]
 
     logging.info("++ Exec [%s]$ %s", tests_path, shlex.join(cmd))
@@ -153,14 +166,14 @@ def cmake_build(
 
 
 def execute_tests(
-    tests_path: Path, build_dir: Path, parallel: str, env: dict[str, str]
+    tests_path: Path, build_dir: Path, parallel: int, env: Dict[str, str]
 ) -> None:
     cmd = [
         "ctest",
         "--test-dir",
         str(build_dir),
         "--parallel",
-        parallel,
+        str(parallel),
         "--output-on-failure",
     ]
 
@@ -177,6 +190,8 @@ def main() -> None:
         if args.tests_path is not None
         else rocm_path / "share" / PROJECT_NAME / "tests"
     )
+    if not tests_path.is_dir():
+        raise FileNotFoundError(f"Could not find rocprofiler-sdk tests: {tests_path}")
     build_dir = get_build_dir(tests_path, args.build_dir)
     env = setup_env(rocm_path)
 
