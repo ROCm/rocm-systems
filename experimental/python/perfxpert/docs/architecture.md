@@ -107,7 +107,7 @@ user  →  perfxpert analyze -i trace.db
 ```
 user  →  perfxpert-code
         → default patched opencode path
-          (repo-local build in source checkouts, bundled binary in wheels)
+          (explicit patched artifact or repo-local build in source checkouts)
           OR native claude / gemini / codex CLI
         → perfxpert-mcp + staged prompt / gate config as needed
         → same agent runtime under the hood

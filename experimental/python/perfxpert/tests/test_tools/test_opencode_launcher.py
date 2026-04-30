@@ -1,6 +1,5 @@
 """Unit tests for perfxpert.cli.opencode_launcher."""
 
-import os
 from importlib.metadata import version
 from pathlib import Path
 from unittest import mock
@@ -15,6 +14,11 @@ def _disable_repo_local_patched_binary(monkeypatch):
     monkeypatch.setattr(
         opencode_launcher,
         "_repo_local_patched_opencode_paths",
+        lambda: [],
+    )
+    monkeypatch.setattr(
+        opencode_launcher,
+        "_managed_patched_opencode_paths",
         lambda: [],
     )
 
@@ -53,26 +57,40 @@ def test_resolve_binary_prefers_repo_local_patched_build(tmp_path: Path, monkeyp
     local_bin = tmp_path / "repo-opencode"
     local_bin.write_text("#!/bin/sh\necho repo\n")
     local_bin.chmod(0o755)
-    bundled_bin = tmp_path / "bundled-opencode"
-    bundled_bin.write_text("#!/bin/sh\necho bundled\n")
-    bundled_bin.chmod(0o755)
 
     monkeypatch.delenv("PERFXPERT_OPENCODE_PATH", raising=False)
+    monkeypatch.delenv("PERFXPERT_PATCHED_OPENCODE_PATH", raising=False)
     monkeypatch.setattr(
         opencode_launcher,
         "_repo_local_patched_opencode_paths",
         lambda: [local_bin],
     )
 
-    import contextlib
-
-    @contextlib.contextmanager
-    def _fake_as_file(_):
-        yield bundled_bin
-
-    monkeypatch.setattr(opencode_launcher.resources, "as_file", _fake_as_file)
-
     assert opencode_launcher.resolve_opencode_binary() == local_bin
+
+
+def test_resolve_binary_uses_explicit_patched_artifact(tmp_path: Path, monkeypatch):
+    patched_bin = tmp_path / "patched-opencode"
+    patched_bin.write_text("#!/bin/sh\necho patched\n")
+    patched_bin.chmod(0o755)
+
+    monkeypatch.setenv("PERFXPERT_PATCHED_OPENCODE_PATH", str(patched_bin))
+    monkeypatch.setenv("PERFXPERT_OPENCODE_PATH", str(tmp_path / "upstream-opencode"))
+
+    assert opencode_launcher.resolve_opencode_binary() == patched_bin
+
+
+def test_resolve_binary_validates_explicit_patched_artifact(
+    tmp_path: Path, monkeypatch
+):
+    patched_bin = tmp_path / "patched-opencode"
+    patched_bin.write_text("#!/bin/sh\necho patched\n")
+    patched_bin.chmod(0o644)
+
+    monkeypatch.setenv("PERFXPERT_PATCHED_OPENCODE_PATH", str(patched_bin))
+
+    with pytest.raises(FileNotFoundError, match="not executable"):
+        opencode_launcher.resolve_opencode_binary()
 
 
 def test_resolve_user_binary_raises_when_override_missing(tmp_path: Path, monkeypatch):
@@ -202,19 +220,10 @@ def test_resolve_user_binary_autodiscovers_home_opencode_bin(tmp_path: Path, mon
     fake_bin.write_text("#!/bin/sh\necho fake\n")
     fake_bin.chmod(0o755)
 
-    # Isolate: no override, no bundled binary, no PATH hit.
+    # Isolate: no override and no PATH hit.
     monkeypatch.delenv("PERFXPERT_OPENCODE_PATH", raising=False)
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: fake_home))
     monkeypatch.setattr(opencode_launcher.shutil, "which", lambda _: None)
-
-    # Force the bundled-resource branch to miss (no bundled binary in the test wheel).
-    import contextlib
-
-    @contextlib.contextmanager
-    def _fake_as_file(_):
-        yield tmp_path / "no_such_bundled_path"
-
-    monkeypatch.setattr(opencode_launcher.resources, "as_file", _fake_as_file)
 
     resolved = opencode_launcher.resolve_user_opencode_binary()
     assert resolved == fake_bin
@@ -241,37 +250,24 @@ def test_resolve_user_binary_autodiscovers_multiple_wellknown_paths(
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: fake_home))
     monkeypatch.setattr(opencode_launcher.shutil, "which", lambda _: None)
 
-    import contextlib
-
-    @contextlib.contextmanager
-    def _fake_as_file(_):
-        yield tmp_path / "no_such_bundled_path"
-
-    monkeypatch.setattr(opencode_launcher.resources, "as_file", _fake_as_file)
-
     assert opencode_launcher.resolve_user_opencode_binary() == fake_bin
 
 
 def test_resolve_default_binary_missing_suggests_wrapper(monkeypatch, tmp_path: Path):
-    """The default path must point users back to the bundled submodule build."""
+    """The default path must point users back to the patched submodule build."""
     monkeypatch.delenv("PERFXPERT_OPENCODE_PATH", raising=False)
+    monkeypatch.delenv("PERFXPERT_PATCHED_OPENCODE_PATH", raising=False)
     # Ensure no well-known path resolves
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
     monkeypatch.setattr(opencode_launcher.shutil, "which", lambda _: None)
 
-    import contextlib
-
-    @contextlib.contextmanager
-    def _fake_as_file(_):
-        yield tmp_path / "no_such_bundled_path"
-
-    monkeypatch.setattr(opencode_launcher.resources, "as_file", _fake_as_file)
-
     with pytest.raises(FileNotFoundError) as exc:
         opencode_launcher.resolve_opencode_binary()
     msg = str(exc.value)
-    assert "bundled patched opencode binary not found" in msg
-    assert "pip-install-from-git.sh" in msg
+    assert "patched opencode binary not found" in msg
+    assert "perfxpert-code install-patches" in msg
+    assert "build-patched-opencode.sh" in msg
+    assert "PERFXPERT_PATCHED_OPENCODE_PATH" in msg
     assert "perfxpert-code opencode" in msg
 
 

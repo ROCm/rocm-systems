@@ -190,8 +190,8 @@ user-visible release is this v0.2.0 block.
   mis-shaped glyphs for `r`, `f`, `p`, `t` — so users saw a string
   that did not read as "PerfXpert". Patch `0051-amd-wordmark-ui.patch`
   is rewritten with correctly-shaped 9-letter block-letter art
-  (44 chars wide) and the bundled opencode binary is rebuilt so the
-  fix reaches pip-install users automatically.
+  (44 chars wide) and the patched opencode artifact must be rebuilt so the
+  fix reaches `perfxpert-code` users.
 
 ### Docs
 - `docs/guides/getting-started.md` fully audited and refreshed for
@@ -337,7 +337,7 @@ user-visible release is this v0.2.0 block.
 - `LLMAnalyzer` was kept as a deprecation stub in v0.2.0 and was removed in Phase 7.1.
 
 ### Removed
-- Pre-agentic interactive workflow module (~4000 LOC: InteractiveSession + WorkflowSession + 7-phase loop) subsequently removed. Replaced by `perfxpert-code` wrapping the bundled opencode TUI. (The 7-phase loop here refers to the user-facing workflow phases — profile → analyze → optimize → re-profile — not release phases.)
+- Pre-agentic interactive workflow module (~4000 LOC: InteractiveSession + WorkflowSession + 7-phase loop) subsequently removed. Replaced by `perfxpert-code` wrapping the patched opencode TUI. (The 7-phase loop here refers to the user-facing workflow phases — profile → analyze → optimize → re-profile — not release phases.)
 - Pre-agentic LLM conversation module (~600 LOC: streaming + auto-compaction) subsequently removed. Replaced by Agents SDK native sessions.
 - Monolithic fence reference guide subsequently removed. Split into per-agent slices + structured knowledge YAMLs under `perfxpert/knowledge/`.
 - `LLMAnalyzer.analyze_with_llm` and the `_call_<provider>()` private methods were removed in Phase 7.1.

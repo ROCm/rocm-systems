@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-import shutil
 from typing import List, Optional
 
 from perfxpert.runtime import recursion_guard
@@ -35,7 +34,7 @@ def _provider_configured(name: str) -> bool:
         "openai": ("PERFXPERT_LLM_OPENAI_KEY", "OPENAI_API_KEY"),
         "ollama": ("PERFXPERT_LLM_LOCAL_URL",),
         "private": ("PERFXPERT_LLM_PRIVATE_URL",),
-        "opencode": ("PERFXPERT_OPENCODE_PATH",),
+        "opencode": ("PERFXPERT_PATCHED_OPENCODE_PATH",),
     }
     for env in checks.get(name, ()):
         if os.environ.get(env):
@@ -43,7 +42,13 @@ def _provider_configured(name: str) -> bool:
     if name == "ollama":
         return True  # defaults to localhost
     if name == "opencode":
-        return shutil.which("opencode") is not None
+        from perfxpert.cli.opencode_launcher import resolve_opencode_binary
+
+        try:
+            resolve_opencode_binary()
+            return True
+        except FileNotFoundError:
+            return False
     return False
 
 
@@ -58,7 +63,7 @@ def get_provider_status_table() -> str:
         "openai": "PERFXPERT_LLM_OPENAI_KEY | OPENAI_API_KEY",
         "ollama": "PERFXPERT_LLM_LOCAL_URL (defaults to localhost:11434)",
         "private": "PERFXPERT_LLM_PRIVATE_URL + _MODEL + _API_KEY",
-        "opencode": "PERFXPERT_OPENCODE_PATH or opencode on PATH",
+        "opencode": "PERFXPERT_PATCHED_OPENCODE_PATH or patched cache artifact",
     }
     for name in ("anthropic", "openai", "ollama", "private", "opencode"):
         status = "configured" if _provider_configured(name) else "missing"
@@ -76,10 +81,22 @@ def launch_opencode(
 
     dry_run=True returns the prospective command without exec'ing.
     """
-    binary = opencode_path or os.environ.get("PERFXPERT_OPENCODE_PATH") or shutil.which("opencode")
+    if opencode_path:
+        binary = opencode_path
+    else:
+        from perfxpert.cli.opencode_launcher import resolve_opencode_binary
+
+        try:
+            binary = str(resolve_opencode_binary())
+        except FileNotFoundError as exc:
+            raise FileNotFoundError(
+                "patched opencode binary not found "
+                "(build the pinned submodule or set PERFXPERT_PATCHED_OPENCODE_PATH)"
+            ) from exc
     if not binary:
         raise FileNotFoundError(
-            "opencode binary not found (set PERFXPERT_OPENCODE_PATH or install opencode on PATH)"
+            "patched opencode binary not found "
+            "(build the pinned submodule or set PERFXPERT_PATCHED_OPENCODE_PATH)"
         )
 
     argv: List[str] = [binary]

@@ -50,24 +50,7 @@ def test_binary_path_from_env(monkeypatch):
         assert cmd[0] == "/custom/path/opencode"
 
 
-def test_binary_path_from_shutil_which(monkeypatch):
-    monkeypatch.delenv("PERFXPERT_OPENCODE_PATH", raising=False)
-    monkeypatch.delenv("PERFXPERT_IN_OPENCODE_SESSION", raising=False)
-    from perfxpert.providers.opencode_provider import OpencodeProvider
-    with patch(
-        "perfxpert.providers.opencode_provider.shutil.which",
-        return_value="/opt/bin/opencode",
-    ):
-        with patch(
-            "perfxpert.providers.opencode_provider.subprocess.run",
-            return_value=_fake_completed(stdout="ok"),
-        ) as mr:
-            OpencodeProvider().complete([{"role": "user", "content": "hi"}])
-            cmd = mr.call_args.args[0]
-            assert cmd[0] == "/opt/bin/opencode"
-
-
-def test_binary_path_from_bundled_launcher(monkeypatch):
+def test_binary_path_from_patched_launcher(monkeypatch):
     monkeypatch.delenv("PERFXPERT_OPENCODE_PATH", raising=False)
     monkeypatch.delenv("PERFXPERT_IN_OPENCODE_SESSION", raising=False)
     import perfxpert.cli.opencode_launcher as opencode_launcher
@@ -76,7 +59,7 @@ def test_binary_path_from_bundled_launcher(monkeypatch):
     monkeypatch.setattr(
         opencode_launcher,
         "resolve_opencode_binary",
-        lambda: "/pkg/perfxpert/_bundled/opencode",
+        lambda: "/cache/perfxpert/opencode/opencode",
     )
     with patch(
         "perfxpert.providers.opencode_provider.subprocess.run",
@@ -84,7 +67,27 @@ def test_binary_path_from_bundled_launcher(monkeypatch):
     ) as mr:
         OpencodeProvider().complete([{"role": "user", "content": "hi"}])
         cmd = mr.call_args.args[0]
-        assert cmd[0] == "/pkg/perfxpert/_bundled/opencode"
+        assert cmd[0] == "/cache/perfxpert/opencode/opencode"
+
+
+def test_binary_path_from_explicit_patched_launcher(monkeypatch):
+    monkeypatch.delenv("PERFXPERT_OPENCODE_PATH", raising=False)
+    monkeypatch.delenv("PERFXPERT_IN_OPENCODE_SESSION", raising=False)
+    import perfxpert.cli.opencode_launcher as opencode_launcher
+    from perfxpert.providers.opencode_provider import OpencodeProvider
+
+    monkeypatch.setattr(
+        opencode_launcher,
+        "resolve_opencode_binary",
+        lambda: "/cache/perfxpert/opencode/opencode",
+    )
+    with patch(
+        "perfxpert.providers.opencode_provider.subprocess.run",
+        return_value=_fake_completed(stdout="ok"),
+    ) as mr:
+        OpencodeProvider().complete([{"role": "user", "content": "hi"}])
+        cmd = mr.call_args.args[0]
+        assert cmd[0] == "/cache/perfxpert/opencode/opencode"
 
 
 def test_no_binary_found_raises(monkeypatch):
@@ -97,9 +100,8 @@ def test_no_binary_found_raises(monkeypatch):
         "resolve_opencode_binary",
         lambda: (_ for _ in ()).throw(FileNotFoundError("missing")),
     )
-    with patch("perfxpert.providers.opencode_provider.shutil.which", return_value=None):
-        with pytest.raises(ProviderError, match="opencode"):
-            OpencodeProvider()
+    with pytest.raises(ProviderError, match="patched binary not found"):
+        OpencodeProvider()
 
 
 def test_subprocess_output_parsed(monkeypatch):

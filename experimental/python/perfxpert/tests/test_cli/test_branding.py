@@ -46,14 +46,26 @@ def test_launch_opencode_dry_run_returns_command():
 
 
 def test_launch_opencode_missing_binary_raises(monkeypatch):
-    monkeypatch.delenv("PERFXPERT_OPENCODE_PATH", raising=False)
-    with patch("perfxpert.cli.branding.shutil.which", return_value=None):
-        with pytest.raises(FileNotFoundError):
-            launch_opencode()
+    from perfxpert.cli import opencode_launcher
+
+    monkeypatch.delenv("PERFXPERT_PATCHED_OPENCODE_PATH", raising=False)
+    monkeypatch.setattr(
+        opencode_launcher,
+        "resolve_opencode_binary",
+        lambda: (_ for _ in ()).throw(FileNotFoundError("missing")),
+    )
+    with pytest.raises(FileNotFoundError, match="patched opencode"):
+        launch_opencode()
 
 
 def test_launch_opencode_sets_recursion_env(monkeypatch):
-    monkeypatch.setenv("PERFXPERT_OPENCODE_PATH", "/bin/opencode")
+    from perfxpert.cli import opencode_launcher
+
+    monkeypatch.setattr(
+        opencode_launcher,
+        "resolve_opencode_binary",
+        lambda: "/cache/perfxpert/opencode/opencode",
+    )
     import os as _os
     captured_env = {}
 

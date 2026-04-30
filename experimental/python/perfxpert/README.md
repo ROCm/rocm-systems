@@ -18,7 +18,7 @@ AI-powered AMD ROCm GPU trace analysis.
 ```bash
 # SKIP-SAMPLE — package install + venv setup are host-specific
 # Ubuntu 22/24 example. Use the package-manager equivalent on RHEL/SLES.
-apt install -y curl git unzip python3-venv python3-pip
+apt install -y curl git python3-venv python3-pip
 python3 -m venv .venv
 . .venv/bin/activate
 
@@ -33,13 +33,14 @@ Pin a tag or commit by changing `REF`:
 REF=<SHA>; curl -fsSL "https://raw.githubusercontent.com/ROCm/rocm-systems/${REF}/experimental/python/perfxpert/scripts/pip-install-from-git.sh" | bash -s -- "${REF}"
 ```
 
-The wrapper installs from GitHub, scopes submodule init to the pinned
-PerfXpert `opencode` submodule, and bootstraps bun when needed. It
-builds the patched bundled `perfxpert-code` binary and verifies it before exiting.
-No separate `opencode` install is needed for the default `perfxpert-code`
-TUI. See [docs/guides/getting-started.md](docs/guides/getting-started.md)
-for the Ubuntu/RHEL/SLES package matrix, direct-pip equivalent, editable
-installs, and troubleshooting.
+The wrapper installs from GitHub and suppresses monorepo submodule init for the
+Python package. It does not build or package a generated `opencode` binary
+during `pip install`; source/editable users can initialize the pinned
+PerfXpert `opencode` submodule and build it explicitly with
+`scripts/build-patched-opencode.sh` or `perfxpert-code install-patches`. See
+[docs/guides/getting-started.md](docs/guides/getting-started.md) for the
+Ubuntu/RHEL/SLES package matrix, direct-pip equivalent, editable installs,
+and troubleshooting.
 
 ### LLM Providers
 
@@ -49,7 +50,7 @@ installs, and troubleshooting.
 | `openai` | OpenAI API | Alternative hosted; requires `OPENAI_API_KEY` |
 | `ollama` | Local Ollama | Fully local; requires a running `ollama serve` |
 | `private` | Any OpenAI-compatible endpoint | Internal deployments; requires `PERFXPERT_LLM_PRIVATE_URL` + `PERFXPERT_LLM_PRIVATE_MODEL`; CLI preflight also needs `PERFXPERT_LLM_PRIVATE_API_KEY` or `--llm-api-key` |
-| `opencode` | Bundled opencode CLI | Used by `perfxpert-code`; not callable from inside opencode itself (recursion-guarded) |
+| `opencode` | Patched opencode CLI | Used by `perfxpert-code`; not callable from inside opencode itself (recursion-guarded) |
 
 Private endpoint example:
 
@@ -89,7 +90,7 @@ PERFXPERT_AIRGAP=1 perfxpert analyze -i trace.db --format markdown -o report.md
 
 ```bash
 # SKIP-SAMPLE — launches interactive CLIs and may write backend config
-# Default first-class TUI: bundled patched opencode built during install.
+# Default first-class TUI: patched opencode from the pinned submodule.
 perfxpert-code
 
 # Use native shells with PerfXpert MCP and context installed for that backend.
@@ -130,7 +131,7 @@ flowchart TD
 
   subgraph entry["Entry surfaces"]
     analyze["perfxpert analyze<br/>batch reports"]
-    code["perfxpert-code<br/>bundled patched TUI"]
+    code["perfxpert-code<br/>patched opencode TUI"]
     mcp["perfxpert-mcp<br/>external MCP clients"]
     api["perfxpert.api<br/>Python embedding"]
   end
@@ -161,11 +162,10 @@ flowchart TD
 ```
 
 The GitHub wrapper is the supported install path today. It installs
-PerfXpert and builds the default `perfxpert-code` TUI from the pinned
-`experimental/python/perfxpert/opencode` submodule plus the local patch
-series. If build prerequisites are missing, install fails with
-package-manager guidance instead of falling back to an arbitrary opencode
-binary.
+PerfXpert without initializing unrelated monorepo submodules or packaging
+a generated opencode binary. The default `perfxpert-code` TUI still uses
+the patched `experimental/python/perfxpert/opencode` source when that
+artifact is built explicitly from a source/editable checkout.
 
 ## Contributing
 
@@ -218,6 +218,5 @@ an [RFC](docs/rfcs/README.md).
 
 ## Licensing
 
-MIT. opencode is also MIT — the packaged build bundles a patched binary
-from the pinned upstream submodule, and source/editable checkouts use
-that same fork via the local submodule build path.
+MIT. opencode is also MIT. PerfXpert keeps the pinned upstream submodule and
+patch series in source, but does not package the generated opencode binary.

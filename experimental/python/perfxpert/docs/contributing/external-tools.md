@@ -17,7 +17,7 @@ external the repo touches. Current entries:
 
 | Name | Kind | Where it comes from |
 |------|------|---------------------|
-| `opencode` | binary | `perfxpert-code` bundled TUI |
+| `opencode` | binary | `perfxpert-code` patched TUI |
 | `rocprofv3` | binary | ROCm; used to collect traces |
 | `amdclang++` | binary | ROCm; used by the Compile gate |
 | `rocprof-trace-decoder` | shared_lib | ATT / SQTT decoder library |

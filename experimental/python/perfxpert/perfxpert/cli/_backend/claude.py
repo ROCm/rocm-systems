@@ -783,7 +783,7 @@ def _is_healthy_status(status: str) -> bool:
 
 
 def _find_bundled_agents_md() -> Path | None:
-    """Find the bundled opencode AGENTS.md to use as the prompt source."""
+    """Find the packaged opencode AGENTS.md to use as the prompt source."""
     here = Path(__file__).resolve()
     candidates = [
         here.parent.parent.parent / "_bundled" / "opencode_config" / "AGENTS.md",

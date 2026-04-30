@@ -19,7 +19,7 @@ _PERFXPERT_ROOT = Path(__file__).resolve().parents[2]
 _OPENCODE_DIR = _PERFXPERT_ROOT / "opencode"
 _SCRIPT = _PERFXPERT_ROOT / "scripts" / "apply-opencode-patches.sh"
 _PATCH_DIR = _PERFXPERT_ROOT / ".patches"
-_BUILD_SCRIPT = _PERFXPERT_ROOT / "scripts" / "build-bundled-opencode.sh"
+_BUILD_SCRIPT = _PERFXPERT_ROOT / "scripts" / "build-patched-opencode.sh"
 
 
 def _run(cmd: list[str], *, cwd: Path) -> subprocess.CompletedProcess[str]:

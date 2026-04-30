@@ -15,7 +15,7 @@ were removed during the agentic refactor, so nothing here is optional.
 
 | Concern | Pre-v0.2.0 | Agentic (v0.2.0+) |
 |---------|------------|--------------------|
-| Interactive TUI | Inline conversational mode on `perfxpert analyze` | `perfxpert-code` (bundled AMD-themed opencode) |
+| Interactive TUI | Inline conversational mode on `perfxpert analyze` | `perfxpert-code` (patched AMD-themed opencode) |
 | Session resume | Resume-session flag on `perfxpert analyze` | opencode sessions (persistent by default) |
 | LLM "fence" | Monolithic reference guide | Per-agent `agents/fence/*.md` + knowledge YAMLs |
 | Recommendation engine | Rule-based function in `analyze.py` | Multi-agent (Analysis → Recommendation → Specialists) |

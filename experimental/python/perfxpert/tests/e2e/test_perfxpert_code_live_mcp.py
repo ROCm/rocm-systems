@@ -1,14 +1,14 @@
 """Live E2E: perfxpert-code → opencode → MCP → Python brain → response.
 
 This test proves the full stack works:
-1. perfxpert-code launcher spawns opencode with our bundled config
+1. perfxpert-code launcher spawns patched opencode with the packaged config
 2. opencode loads the MCP server (perfxpert-mcp)
 3. LLM invokes the perfxpert_arch_lookup_peaks tool via MCP
 4. Python brain executes and returns MI300X peak specs
 5. opencode returns the result to the user
 
 Gated on:
-- opencode binary available (path via PERFXPERT_OPENCODE_PATH or shutil.which)
+- patched opencode binary available through the default launcher resolver
 - LLM API key (OPENAI_API_KEY or ANTHROPIC_API_KEY)
 - Reasonable timeout (180s for network latency)
 """
@@ -25,10 +25,14 @@ _CHECKOUT_ROOT = Path(__file__).resolve().parents[2]
 
 
 def _opencode_available():
-    """Check if opencode binary is available."""
-    if os.environ.get("PERFXPERT_OPENCODE_PATH"):
-        return os.path.isfile(os.environ["PERFXPERT_OPENCODE_PATH"])
-    return shutil.which("opencode") is not None
+    """Check if the default patched opencode binary is available."""
+    try:
+        from perfxpert.cli.opencode_launcher import resolve_opencode_binary
+
+        resolve_opencode_binary()
+        return True
+    except (FileNotFoundError, PermissionError):
+        return False
 
 
 def _llm_key_set():
@@ -59,7 +63,7 @@ def _checkout_python_env() -> dict[str, str]:
 
 @pytest.mark.skipif(
     not _opencode_available(),
-    reason="opencode binary not available",
+    reason="patched opencode binary not available",
 )
 @pytest.mark.skipif(
     not _llm_key_set(),

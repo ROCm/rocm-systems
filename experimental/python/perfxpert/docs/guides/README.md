@@ -22,7 +22,7 @@ rendered GIFs are checked in under [assets/gifs/](assets/gifs/).
 
 | # | scenario | gif |
 |---|----------|-----|
-| 01 | Install (editable + bundled opencode build) | [01-install.gif](assets/gifs/01-install.gif) |
+| 01 | Install (editable + patched opencode source) | [01-install.gif](assets/gifs/01-install.gif) |
 | 02 | `perfxpert --help` + `analyze --help` | [02-help.gif](assets/gifs/02-help.gif) |
 | 03 | `perfxpert doctor` | [03-doctor.gif](assets/gifs/03-doctor.gif) |
 | 04 | `--format text` | [04-analyze-text.gif](assets/gifs/04-analyze-text.gif) |

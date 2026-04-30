@@ -26,8 +26,8 @@ perfxpert-mcp
 ```
 
 The entry point is registered in `pyproject.toml` (`perfxpert-mcp`).
-Use the same GitHub wrapper as the main README so the package, MCP
-entry point, and bundled `perfxpert-code` build are installed together:
+Use the same GitHub wrapper as the main README so the package and MCP
+entry point are installed together:
 
 ```bash
 # SKIP-SAMPLE — installs from the ROCm/rocm-systems monorepo
@@ -468,13 +468,13 @@ Gemini capabilities.
 Older perfxpert releases may have left user-global entries in
 `~/.gemini/settings.json`; current installs do not mutate that file.
 
-### opencode (bundled with `perfxpert-code`)
+### opencode (patched path used by `perfxpert-code`)
 
-No manual step required — the bundled `opencode.json` already wires
+No manual MCP setup is required — the packaged `opencode.json` already wires
 `perfxpert-mcp` as a local MCP server:
 
 ```json
-// SKIP-SAMPLE — bundled config shown for reference
+// SKIP-SAMPLE — packaged config shown for reference
 {
   "mcp": {
     "perfxpert": {

@@ -46,7 +46,7 @@ except ImportError:
         "openai": "OpenAI GPT",
         "ollama": "Local Ollama",
         "private": "Custom OpenAI-compatible endpoint",
-        "opencode": "Bundled opencode CLI",
+        "opencode": "Patched opencode CLI",
     }
 
 

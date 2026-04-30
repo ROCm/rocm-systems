@@ -1,4 +1,4 @@
-"""Validate bundled opencode.json against the real opencode JSON schema.
+"""Validate packaged opencode.json against the real opencode JSON schema.
 
 This test ensures our opencode.json conforms to the official opencode
 schema (https://opencode.ai/config.json). Schema is cached on disk to

@@ -333,8 +333,8 @@ def _check_task_store() -> tuple[bool, str]:
         return False, f"task store creation failed: {e}"
 
 
-def _check_opencode_bundled() -> tuple[bool, str]:
-    """Check that bundled opencode binary can be resolved with version."""
+def _check_opencode_patched() -> tuple[bool, str]:
+    """Check that the patched opencode binary can be resolved with version."""
     from pathlib import Path
     from perfxpert.cli.opencode_launcher import resolve_opencode_binary
 
@@ -349,13 +349,13 @@ def _check_opencode_bundled() -> tuple[bool, str]:
         except Exception:
             ver = "unknown"
         opencode_path = str(p).replace(str(Path.home()), "~")
-        return True, f"Bundled opencode {ver} detected at {opencode_path}"
+        return True, f"Patched opencode {ver} detected at {opencode_path}"
     except FileNotFoundError as e:
         return False, str(e)
 
 
-def _check_opencode_bundled_config() -> tuple[bool, str]:
-    """Check that the bundled _bundled/opencode_config dir can be resolved.
+def _check_opencode_packaged_config() -> tuple[bool, str]:
+    """Check that the packaged _bundled/opencode_config dir can be resolved.
 
     Dev builds that ship without the bundled config dir would otherwise
     fail at `perfxpert-code` startup (launcher calls `resolve_config_dir`
@@ -366,7 +366,7 @@ def _check_opencode_bundled_config() -> tuple[bool, str]:
     from perfxpert.cli.opencode_launcher import resolve_config_dir
     try:
         p = resolve_config_dir()
-        return True, f"Bundled opencode config dir present at {p}"
+        return True, f"Packaged opencode config dir present at {p}"
     except FileNotFoundError as e:
         return False, str(e)
 
@@ -390,14 +390,21 @@ def _check_llm_providers() -> tuple[list[str], list[str]]:
         "openai": ("OPENAI_API_KEY",),
         "ollama": ("PERFXPERT_LLM_LOCAL_URL", "OLLAMA_HOST"),
         "private": ("PERFXPERT_LLM_PRIVATE_URL", "PRIVATE_LLM_ENDPOINT"),
-        "opencode": (),  # always available (bundled)
     }
 
     for name, env_vars in providers.items():
-        if name == "opencode" or any(os.getenv(env_var) for env_var in env_vars):
+        if any(os.getenv(env_var) for env_var in env_vars):
             configured.append(name)
         else:
             unconfigured.append(name)
+
+    from perfxpert.cli.opencode_launcher import resolve_opencode_binary
+
+    try:
+        resolve_opencode_binary()
+        configured.append("opencode")
+    except FileNotFoundError:
+        unconfigured.append("opencode")
 
     return sorted(configured), sorted(unconfigured)
 
@@ -455,8 +462,8 @@ def _run_doctor():
         ("openai-agents", _check_openai_agents()),
         ("MCP server", _check_mcp_server()),
         ("task store", _check_task_store()),
-        ("opencode binary", _check_opencode_bundled()),
-        ("opencode config dir", _check_opencode_bundled_config()),
+        ("opencode binary", _check_opencode_patched()),
+        ("opencode config dir", _check_opencode_packaged_config()),
     ]
 
     all_ok = True

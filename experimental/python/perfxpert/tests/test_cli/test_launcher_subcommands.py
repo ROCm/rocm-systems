@@ -33,6 +33,11 @@ def _disable_repo_local_patched_binary(monkeypatch):
         "_repo_local_patched_opencode_paths",
         lambda: [],
     )
+    monkeypatch.setattr(
+        opencode_launcher,
+        "_managed_patched_opencode_paths",
+        lambda: [],
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -55,7 +60,7 @@ class TestHelpFlag:
         # Force resolve_opencode_binary to fail so we exit early after the banner
         # instead of spawning the real opencode process.
         def _no_binary():
-            raise FileNotFoundError("opencode binary not bundled in this test")
+            raise FileNotFoundError("patched opencode binary absent in this test")
 
         monkeypatch.setattr(opencode_launcher, "resolve_opencode_binary", _no_binary)
 
@@ -186,92 +191,87 @@ def test_route_install_patches_is_perfxpert_owned() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Bundled-binary priority: the launcher must prefer
-# perfxpert/_bundled/opencode over upstream installs on disk.
+# Patched-binary priority: the launcher must prefer the managed patched path
+# over upstream installs on disk and must not fall back to package data.
 # ---------------------------------------------------------------------------
 
 
-class TestBundledPriority:
+class TestPatchedBinaryResolution:
     """resolve_opencode_binary() priority order:
-       repo-local patched build → _bundled.
+       explicit patched artifact -> repo-local patched build -> managed cache.
 
-    Requirement: the bundled binary wins over
-    ~/.opencode/bin/opencode (upstream, unpatched).
+    Requirement: the default launcher never silently uses
+    ~/.opencode/bin/opencode (upstream, unpatched) or
+    perfxpert/_bundled/opencode package data.
     """
 
-    def test_bundled_wins_over_wellknown(
+    def test_explicit_patched_artifact_wins_over_wellknown(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path
     ) -> None:
-        """If both bundled and upstream exist, we pick bundled."""
-        # Stub importlib.resources so _bundled/opencode is "present".
-        bundled = tmp_path / "bundled" / "opencode"
-        bundled.parent.mkdir(parents=True)
-        bundled.write_text("#!/bin/sh\nexit 0\n")
-        bundled.chmod(0o755)
-
-        # Also create an upstream well-known entry — it must NOT win.
+        """An explicit patched artifact is separate from upstream lookup."""
+        patched = tmp_path / "patched" / "opencode"
+        patched.parent.mkdir(parents=True)
+        patched.write_text("#!/bin/sh\nexit 0\n")
+        patched.chmod(0o755)
         upstream = tmp_path / "home" / ".opencode" / "bin" / "opencode"
         upstream.parent.mkdir(parents=True)
         upstream.write_text("#!/bin/sh\nexit 1\n")
         upstream.chmod(0o755)
 
-        # Make well-known list point at the upstream binary.
         monkeypatch.setattr(
             opencode_launcher,
             "_wellknown_opencode_paths",
             lambda: [upstream],
         )
+        monkeypatch.setenv("PERFXPERT_PATCHED_OPENCODE_PATH", str(patched))
+        monkeypatch.setenv("PERFXPERT_OPENCODE_PATH", str(upstream))
 
-        # Patch importlib.resources.files() for _bundled lookup.
-        from contextlib import contextmanager
+        assert opencode_launcher.resolve_opencode_binary() == patched
 
-        @contextmanager
-        def _fake_as_file(p):
-            yield bundled
-
-        class _FakeTraversable:
-            def __truediv__(self, other):
-                return self
-
-            def is_file(self):
-                return True
-
-        monkeypatch.setattr(
-            opencode_launcher.resources, "as_file", _fake_as_file
-        )
-        monkeypatch.setattr(
-            opencode_launcher.resources,
-            "files",
-            lambda _pkg: _FakeTraversable(),
-        )
-        monkeypatch.delenv("PERFXPERT_OPENCODE_PATH", raising=False)
-
-        resolved = opencode_launcher.resolve_opencode_binary()
-        assert resolved == bundled, (
-            f"bundled must win over upstream; got {resolved}"
-        )
-
-    def test_env_override_does_not_replace_default_bundle(
+    def test_env_override_does_not_replace_default_patched_path(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path
     ) -> None:
-        """PERFXPERT_OPENCODE_PATH is not a replacement for the default bundle."""
-        explicit = tmp_path / "mycustom" / "opencode"
-        explicit.parent.mkdir(parents=True)
-        explicit.write_text("#!/bin/sh\nexit 0\n")
-        explicit.chmod(0o755)
-        bundled = tmp_path / "bundled" / "opencode"
+        """PERFXPERT_OPENCODE_PATH is only for `perfxpert-code opencode`."""
+        upstream = tmp_path / "mycustom" / "opencode"
+        upstream.parent.mkdir(parents=True)
+        upstream.write_text("#!/bin/sh\nexit 1\n")
+        upstream.chmod(0o755)
+        patched = tmp_path / "repo" / "opencode"
+        patched.parent.mkdir(parents=True)
+        patched.write_text("#!/bin/sh\nexit 0\n")
+        patched.chmod(0o755)
+
+        monkeypatch.setattr(
+            opencode_launcher,
+            "_repo_local_patched_opencode_paths",
+            lambda: [patched],
+        )
+        monkeypatch.setenv("PERFXPERT_OPENCODE_PATH", str(upstream))
+
+        assert opencode_launcher.resolve_opencode_binary() == patched
+
+    def test_default_path_ignores_packaged_bundled_binary(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path,
+    ) -> None:
+        """Package data at perfxpert/_bundled/opencode is not a default."""
+        bundled = tmp_path / "site-packages" / "perfxpert" / "_bundled" / "opencode"
         bundled.parent.mkdir(parents=True)
         bundled.write_text("#!/bin/sh\nexit 0\n")
         bundled.chmod(0o755)
 
+        monkeypatch.delenv("PERFXPERT_PATCHED_OPENCODE_PATH", raising=False)
+        monkeypatch.delenv("PERFXPERT_OPENCODE_PATH", raising=False)
+
         from contextlib import contextmanager
 
         @contextmanager
-        def _fake_as_file(p):
+        def _fake_as_file(_p):
             yield bundled
 
         class _FakeTraversable:
-            def __truediv__(self, other):
+            def __truediv__(self, _other):
                 return self
 
             def is_file(self):
@@ -283,12 +283,11 @@ class TestBundledPriority:
             "files",
             lambda _pkg: _FakeTraversable(),
         )
-        monkeypatch.setenv("PERFXPERT_OPENCODE_PATH", str(explicit))
 
-        resolved = opencode_launcher.resolve_opencode_binary()
-        assert resolved == bundled
+        with pytest.raises(FileNotFoundError, match="patched opencode binary"):
+            opencode_launcher.resolve_opencode_binary()
 
-    def test_default_path_refuses_wellknown_when_bundled_absent(
+    def test_default_path_refuses_wellknown_when_patched_absent(
         self,
         monkeypatch: pytest.MonkeyPatch,
         tmp_path,
@@ -299,36 +298,15 @@ class TestBundledPriority:
         upstream.write_text("#!/bin/sh\nexit 0\n")
         upstream.chmod(0o755)
 
-        # Bundled absent.
-        class _FakeTraversable:
-            def __truediv__(self, other):
-                return self
-
-            def is_file(self):
-                return False
-
-        from contextlib import contextmanager
-
-        @contextmanager
-        def _fake_as_file(p):
-            yield tmp_path / "bundled" / "missing"
-
-        monkeypatch.setattr(
-            opencode_launcher.resources, "as_file", _fake_as_file
-        )
-        monkeypatch.setattr(
-            opencode_launcher.resources,
-            "files",
-            lambda _pkg: _FakeTraversable(),
-        )
         monkeypatch.setattr(
             opencode_launcher,
             "_wellknown_opencode_paths",
             lambda: [upstream],
         )
+        monkeypatch.delenv("PERFXPERT_PATCHED_OPENCODE_PATH", raising=False)
         monkeypatch.delenv("PERFXPERT_OPENCODE_PATH", raising=False)
 
-        with pytest.raises(FileNotFoundError, match="bundled patched opencode"):
+        with pytest.raises(FileNotFoundError, match="patched opencode binary"):
             opencode_launcher.resolve_opencode_binary()
 
     def test_explicit_opencode_escape_hatch_uses_env_override(
@@ -396,7 +374,7 @@ class TestRunAutoAgentInject:
     so AGENTS.md (with the tool-priority gate) applies.
 
     opencode's `run` otherwise defaults to agent=build and ignores our
-    bundled opencode.json. The launcher injects `--agent perfxpert` when
+    packaged opencode.json. The launcher injects `--agent perfxpert` when
     the user did not already specify `--agent`.
     """
 
@@ -440,7 +418,7 @@ class TestRunAutoAgentInject:
         self, monkeypatch: pytest.MonkeyPatch, tmp_path
     ) -> None:
         """The launcher must set OPENCODE_CONFIG so opencode loads our
-        bundled opencode.json even when `run` keeps the user's CWD."""
+        packaged opencode.json even when `run` keeps the user's CWD."""
         fake_bin = tmp_path / "opencode"
         fake_bin.write_text("#!/bin/sh\nexit 0\n")
         fake_bin.chmod(0o755)
@@ -530,10 +508,10 @@ def test_main_install_patches_dispatches_inline(
     rc = main(["install-patches"])
     assert rc == 0
     cmd = captured["cmd"]
-    # The inline handler invokes `bash <path>/build-bundled-opencode.sh`.
+    # The inline handler invokes `bash <path>/build-patched-opencode.sh`.
     assert isinstance(cmd, list)
     assert cmd[0] == "bash"
-    assert cmd[1].endswith("build-bundled-opencode.sh")
+    assert cmd[1].endswith("build-patched-opencode.sh")
 
 
 # ---------------------------------------------------------------------------

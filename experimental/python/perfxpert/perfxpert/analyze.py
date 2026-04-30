@@ -228,7 +228,7 @@ def add_args(parser: argparse.ArgumentParser):
         "LLM enhancement options (optional)",
         "Enable natural language explanations via one of five LLM providers: "
         "anthropic, openai, ollama (local), private (self-hosted OpenAI-compatible), "
-        "or opencode (bundled CLI). Requires API key or local endpoint - see "
+        "or opencode (patched CLI). Requires API key or local endpoint - see "
         "https://console.anthropic.com/ , https://platform.openai.com/api-keys , "
         "or the matching PERFXPERT_LLM_* environment variable.",
     )
@@ -244,7 +244,7 @@ def add_args(parser: argparse.ArgumentParser):
             "'anthropic' (ANTHROPIC_API_KEY), 'openai' (OPENAI_API_KEY), "
             "'ollama' (local daemon, PERFXPERT_LLM_LOCAL_URL), "
             "'private' (self-hosted OpenAI-compatible endpoint, PERFXPERT_LLM_PRIVATE_URL + _API_KEY), "
-            "'opencode' (bundled opencode CLI, PERFXPERT_OPENCODE_PATH), "
+            "'opencode' (patched opencode CLI, PERFXPERT_PATCHED_OPENCODE_PATH), "
             "'claude-code' (compatibility alias for opencode). "
             "Local analysis always runs first; LLM provides additional natural language insights."
         ),
@@ -1477,7 +1477,8 @@ _PROVIDER_CREDENTIALS = {
     "opencode": {
         "env_vars": (),
         "hint": (
-            "opencode provider requires the bundled CLI on PATH or set "
+            "opencode provider requires a patched opencode artifact "
+            "(PERFXPERT_PATCHED_OPENCODE_PATH) or explicit "
             "PERFXPERT_OPENCODE_PATH=/path/to/opencode"
         ),
         "required_env": (),
@@ -1989,8 +1990,8 @@ def _render_cli_error(exc: BaseException) -> int:
             "anthropic": "ANTHROPIC_API_KEY",
             "ollama": "PERFXPERT_LLM_LOCAL_URL",
             "private": "PERFXPERT_LLM_PRIVATE_API_KEY",
-            "opencode": "PERFXPERT_OPENCODE_PATH",
-            "claude-code": "PERFXPERT_OPENCODE_PATH",
+            "opencode": "PERFXPERT_PATCHED_OPENCODE_PATH",
+            "claude-code": "PERFXPERT_PATCHED_OPENCODE_PATH",
         }.get(prov, f"{prov.upper()}_API_KEY")
         print(
             f"⚠ LLM auth failed for {prov}. "

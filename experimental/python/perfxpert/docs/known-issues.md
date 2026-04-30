@@ -96,14 +96,14 @@ without being ported.
   - LLM E2E `rec_type` assertion requires a live key with quota; use `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` and a model on-roster.
   - Confluence update remediation: see `docs/operations/confluence-publish.md` for the manual update recipe; automatic MCP publish requires Atlassian URL + token env vars.
 
-## Opencode fork / bundling
+## Opencode fork / patched artifact
 
-- **Patch application is wired into the current build/install path.**
-  The setup/build flow applies `.patches/*.patch` to the pinned
-  `opencode` submodule and builds the patched binary automatically when
-  prerequisites are present. `perfxpert-code install-patches` is the
-  rebuild helper for source/editable checkouts; packaged installs prefer
-  the bundled result.
+- **Patch application is an explicit source-checkout build step.**
+  The Python package build no longer compiles or packages a generated
+  `opencode` binary. Source/editable checkouts can run
+  `scripts/build-patched-opencode.sh` or `perfxpert-code install-patches`
+  to apply `.patches/*.patch` to the pinned `opencode` submodule and place
+  the patched artifact in the PerfXpert-managed cache.
 
 - **The opencode submodule (`.gitmodules` pin `v1.4.11`) is MIT.**
   All customizations are carried in `.patches/*.patch`. Do NOT commit
@@ -118,11 +118,11 @@ without being ported.
   `PERFXPERT_LLM_FALLBACK_CHAIN` to cascade across providers when
   rate-limited.
 
-- **Upstream-opencode fallback weakens the opencode gate.**
-  If you force `PERFXPERT_OPENCODE_PATH` to an upstream `opencode`
-  binary, or fall through to one on `PATH`, the fork-only
-  `{block, retryWith}` behavior is unavailable. The launcher warns in
-  that mode and falls back to prompt guidance only.
+- **Upstream-opencode escape hatch weakens the opencode gate.**
+  If you intentionally run `perfxpert-code opencode ...` with
+  `PERFXPERT_OPENCODE_PATH` pointed at upstream `opencode`, the fork-only
+  `{block, retryWith}` behavior is unavailable. The default launcher and
+  `perfxpert doctor` do not use that upstream path.
 
 ## Docs-audit baseline
 

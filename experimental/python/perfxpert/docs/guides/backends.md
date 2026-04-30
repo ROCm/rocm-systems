@@ -1,10 +1,9 @@
 # Multi-Backend Launcher (`perfxpert-code <backend>`)
 
 `perfxpert-code` is multi-backend. Plain `perfxpert-code` launches the
-patched opencode path: packaged installs prefer the bundled
-AMD-branded binary, while source/editable checkouts prefer a locally
-built patched binary from the pinned `opencode` submodule. In
-addition, each supported backend has a
+patched opencode path: source/editable checkouts can build a patched
+artifact from the pinned `opencode` submodule, and installed packages can
+use an explicitly configured patched artifact path. In addition, each supported backend has a
 subcommand that registers the `perfxpert-mcp` server in the backend's
 native config, stages an `AGENTS.md`-equivalent rendered prompt,
 installs a pre-tool-call gate hook, and then execs the backend's
@@ -36,24 +35,25 @@ call, but nothing after that is mechanically forced.
 ## Why multi-backend?
 
 Users arrive with a backend already chosen — Claude Code, Gemini CLI,
-Codex CLI, or no preference. Forcing everyone through the bundled
-opencode blocked adoption for Claude Code / Gemini users
+Codex CLI, or no preference. Forcing everyone through one opencode path
+blocked adoption for Claude Code / Gemini users
 who had already invested in their native TUI, muscle memory, and
 auth. The multi-backend launcher lets `perfxpert-code <backend>`
 write the correct MCP registration + gate hook + prompt cache for
 whichever backend the user chose, then exec the native binary — the
 perfxpert tool discipline travels with the install, not the TUI.
 
-The patched opencode path remains the recommended default. In wheels it
-ships bundled; in source checkouts it can be rebuilt from the pinned
-submodule. That path carries the STRICT-TOOL-DISCIPLINE stanza and the
-fork-only opencode gate hook without any extra backend install.
+The patched opencode path remains the recommended default when the patched
+artifact is available. It is built explicitly from the pinned submodule and
+is not packaged as a generated Python package artifact. That path carries the
+STRICT-TOOL-DISCIPLINE stanza and the fork-only opencode gate hook without
+any extra backend install.
 
 ## Backend comparison
 
 | Backend | Subcommand | LLM | Config location | Scope | Gate hook | MCP tool prefix |
 |---------|-----------|-----|-----------------|-------|-----------|-----------------|
-| **opencode** (default patched path) | `perfxpert-code` | Any (via opencode provider) | `~/.cache/perfxpert/opencode/opencode.json` | Per-bundle / per-checkout | Patched system prompt + fork patches 0010, 0020 | `perfxpert_*` |
+| **opencode** (default patched path) | `perfxpert-code` | Any (via opencode provider) | `~/.cache/perfxpert/opencode/opencode.json` | Per patched artifact / per-checkout | Patched system prompt + fork patches 0010, 0020 | `perfxpert_*` |
 | **Claude Code** | `perfxpert-code claude` | Anthropic Claude | `./.mcp.json` + `./CLAUDE.local.md` + `./.claude/settings.json` | Project | Native `PreToolUse` hook (event-based lift) | `mcp__perfxpert__*` |
 | **Gemini CLI** | `perfxpert-code gemini` | Google Gemini | `./.gemini/settings.json` + `./.perfxpert/AGENTS.md` | Project | Native `BeforeTool` / `AfterTool` hooks (event-based lift) | `mcp_perfxpert_*` |
 | **Codex CLI** | `perfxpert-code codex` | OpenAI | `~/.codex/config.toml` (trust) + `./.codex/config.toml` when trusted or fallback `~/.codex/config.toml` for MCP + `./AGENTS.override.md` | Trust in user config; MCP project-local when trusted | Prompt-layer-only (Codex `PreToolUse` is Bash-only — see decision record) | `mcp__perfxpert__*` |
@@ -72,15 +72,14 @@ directory is silent. Changing the file set (e.g. adding
 *`perfxpert-code` on the default patched path, with the interactive TUI
 and MCP wiring ready to go.*
 
-No subcommand, no extra backend install. In packaged installs the
-launcher uses the bundled AMD-branded patched binary. In source/editable
-checkouts it prefers a locally built patched binary from
-`experimental/python/perfxpert/opencode`. Only when neither patched
-copy exists does it fall back to an upstream `opencode` on disk, with a
-warning and without the fork-only gate behavior.
+No subcommand, no extra backend install. The launcher uses only patched
+artifacts: an explicit `PERFXPERT_PATCHED_OPENCODE_PATH`, a locally built
+binary from `experimental/python/perfxpert/opencode`, or the managed
+PerfXpert cache path. It does not fall back to upstream `opencode`; use
+`perfxpert-code opencode ...` for that explicit escape hatch.
 
 ```bash
-# SKIP-SAMPLE — requires a patched opencode path (repo-local build or bundled wheel)
+# SKIP-SAMPLE — requires a patched opencode path
 perfxpert-code
 ```
 
@@ -203,7 +202,7 @@ agent must still stop with a PerfXpert configuration error instead of
 using shell, SSH, build, edit, or profiling commands as a fallback.
 Smaller models may bypass advisory language; if
 mechanical enforcement matters for your workflow, use
-`perfxpert-code claude` or the bundled `opencode` default (both
+`perfxpert-code claude` or the patched `opencode` default (both
 have server-side mechanical gates). The full rationale + re-visit
 conditions are captured in the local Codex hook-surface decision
 record.
@@ -422,7 +421,7 @@ the specific models used are:
 
 | Backend  | Small model used for gate probe | Notes |
 |----------|---------------------------------|-------|
-| opencode | opencode-default                | patched `{block, retryWith}` gate (bundled patch 0020). |
+| opencode | opencode-default                | patched `{block, retryWith}` gate (patch 0020). |
 | claude   | `claude-haiku-4-5`              | native `PreToolUse` hook. R-new-4 scope: verified on haiku-4-5; other small models require independent re-verification at acceptance time. |
 | gemini   | `gemini-2.5-flash`              | Native `BeforeTool` / `AfterTool` hooks + runtime-state file for event-based lift. |
 | codex    | *not probed*                    | Gate is prompt-layer-only (Codex `PreToolUse` is Bash-only). `install()` emits a warning-level log (`codex gate hook unsupported on this backend`) and records `gate_hook_installed=False`; `verify_mcp_live` still runs its connectivity checks (e.g. `codex mcp list`) but skips the gate-probe canary. Rationale is captured in the local Codex hook-surface decision record. |

@@ -85,15 +85,12 @@ exclude = ["tests*", "opencode*"]
 [tool.setuptools.package-data]
 perfxpert = [
     "formatters/templates/*.html",
-    "_bundled/opencode",
-    "_bundled/**/*",
     "_bundled/opencode_config/*",
     "knowledge/*.yaml",
     "knowledge/_schemas/*.json",
     "agents/fence/*.md",
     "agents/templates/*",
     "../NOTICE",
-    "_bundled/opencode_LICENSE",
 ]
 
 [tool.pytest.ini_options]

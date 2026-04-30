@@ -49,18 +49,18 @@ def test_install_wrapper_help_mentions_supported_prereqs() -> None:
     )
     assert result.returncode == 0, result.stderr
     assert "curl" in result.stdout
-    assert "unzip" in result.stdout
+    assert "unzip" not in result.stdout
     assert "python3 -m venv .venv" in result.stdout
     assert "python3-venv" in result.stdout
     assert "python3-pip" in result.stdout
     assert "git" in result.stdout
-    assert "pip build hook bootstraps bun" in result.stdout
+    assert "does not initialize monorepo submodules and does not build or\n  package a generated opencode binary" in result.stdout
     assert "package-manager install" in result.stdout
     assert "It never downloads" in result.stdout
     assert "command -v curl >/dev/null || dnf install -y curl" in result.stdout
-    assert "dnf install -y git unzip python3.11 python3.11-pip" in result.stdout
-    assert "dnf install -y git unzip python3 python3-pip" in result.stdout
-    assert "zypper install -y curl git unzip python311 python311-pip" in result.stdout
+    assert "dnf install -y git python3.11 python3.11-pip" in result.stdout
+    assert "dnf install -y git python3 python3-pip" in result.stdout
+    assert "zypper install -y curl git python311 python311-pip" in result.stdout
     assert "python3.11 -m venv .venv" in result.stdout
     assert 'REF=<SHA>; curl -fsSL "https://raw.githubusercontent.com/ROCm/rocm-systems/${REF}/experimental/python/perfxpert/scripts/pip-install-from-git.sh" | bash -s -- "${REF}"' in result.stdout
 
@@ -75,26 +75,24 @@ def test_install_wrapper_help_works_from_stdin() -> None:
     assert result.returncode == 0, result.stderr
     assert "pip-install-from-git.sh" in result.stdout
     assert "curl -fsSL" in result.stdout
-    assert "pip build hook bootstraps bun" in result.stdout
+    assert "does not initialize monorepo submodules and does not build or\n  package a generated opencode binary" in result.stdout
     assert "package-manager install" in result.stdout
     assert "It never downloads" in result.stdout
     assert "command -v curl >/dev/null || dnf install -y curl" in result.stdout
-    assert "dnf install -y git unzip python3.11 python3.11-pip" in result.stdout
-    assert "zypper install -y curl git unzip python311 python311-pip" in result.stdout
+    assert "dnf install -y git python3.11 python3.11-pip" in result.stdout
+    assert "zypper install -y curl git python311 python311-pip" in result.stdout
     assert 'REF=<SHA>; curl -fsSL "https://raw.githubusercontent.com/ROCm/rocm-systems/${REF}/experimental/python/perfxpert/scripts/pip-install-from-git.sh" | bash -s -- "${REF}"' in result.stdout
 
 
 def test_readme_keeps_customer_install_flow_curl_only() -> None:
     text = _README.read_text(encoding="utf-8")
     assert "curl" in text
-    assert "unzip" in text
     assert "python3 -m venv .venv" in text
     assert "python3-venv" in text
     assert "python3-pip" in text
-    assert "bootstraps bun when needed" in text
-    assert "No separate `opencode` install is needed" in text
-    assert "patched bundled `perfxpert-code` binary" in text
-    assert "builds the patched bundled" in text
+    assert "does not build or package a generated `opencode` binary" in text
+    assert "pinned\nPerfXpert `opencode` submodule" in text
+    assert "scripts/build-patched-opencode.sh" in text
     assert "Ubuntu/RHEL/SLES package matrix" in text
     assert "| `private` | Any OpenAI-compatible endpoint |" in text
     assert "PERFXPERT_LLM_PRIVATE_URL" in text
@@ -125,13 +123,13 @@ def test_readme_keeps_copy_paste_command_shapes() -> None:
 def test_getting_started_keeps_internal_install_detail() -> None:
     text = _GETTING_STARTED.read_text(encoding="utf-8")
     assert "curl" in text
-    assert "unzip" in text
     assert "python3 -m venv .venv" in text
     assert "python3-venv" in text
     assert "python3-pip" in text
     assert "never downloads a separate" in text
     assert "Python runtime" in text
-    assert "pip bootstraps\nbun when the OS prerequisites are available" in text
+    assert "does not build a\ngenerated `opencode` binary" in text
+    assert "does not build or\npackage a generated `opencode` binary" in text
     for distro in (
         "Ubuntu 22.04",
         "Ubuntu 24.04",
@@ -142,9 +140,9 @@ def test_getting_started_keeps_internal_install_detail() -> None:
         assert distro in text
     assert "curl-minimal" in text
     assert "command -v curl >/dev/null || dnf install -y curl" in text
-    assert "dnf install -y git unzip python3.11 python3.11-pip" in text
-    assert "dnf install -y git unzip python3 python3-pip" in text
-    assert "zypper install -y curl git unzip python311 python311-pip" in text
+    assert "dnf install -y git python3.11 python3.11-pip" in text
+    assert "dnf install -y git python3 python3-pip" in text
+    assert "zypper install -y curl git python311 python311-pip" in text
     assert "bun run build --single\n--skip-install" in text
     assert "PERFXPERT_LLM_PRIVATE_API_KEY` or `--llm-api-key" in text
     assert "https://llm-api.iexample.com/OpenAI" in text
@@ -168,11 +166,11 @@ def test_install_docs_explain_perfxpert_code_follow_up() -> None:
     readme = _README.read_text(encoding="utf-8")
     guide = _GETTING_STARTED.read_text(encoding="utf-8")
 
-    assert "bootstraps bun when needed" in readme
-    assert "verifies it before exiting" in readme
+    assert "does not build or package a generated `opencode` binary" in readme
+    assert "scripts/build-patched-opencode.sh" in readme
     assert "curl -fsSL https://bun.sh/install | bash" not in readme
-    assert "Direct\npip/editable paths use the same `setup.py` build hook" in guide
-    assert "pip exits with distro-specific package-manager guidance" in guide
+    assert "Direct pip/editable installs\nno longer run an opencode build hook" in guide
+    assert "scripts/build-patched-opencode.sh" in guide
     assert "opencode.ai/install" not in readme
 
 
@@ -207,12 +205,12 @@ def test_install_wrapper_reports_missing_prereqs_when_package_manager_unavailabl
     assert "missing OS prerequisites" in result.stderr
     assert "no supported package manager found" in result.stderr
     assert "git" in result.stderr
-    assert "unzip" in result.stderr
-    assert "apt install -y curl git unzip python3-venv python3-pip" in result.stderr
+    assert "unzip" not in result.stderr
+    assert "apt install -y curl git python3-venv python3-pip" in result.stderr
     assert "command -v curl >/dev/null || dnf install -y curl" in result.stderr
-    assert "dnf install -y git unzip python3.11 python3.11-pip" in result.stderr
-    assert "dnf install -y git unzip python3 python3-pip" in result.stderr
-    assert "zypper install -y curl git unzip python311 python311-pip" in result.stderr
+    assert "dnf install -y git python3.11 python3.11-pip" in result.stderr
+    assert "dnf install -y git python3 python3-pip" in result.stderr
+    assert "zypper install -y curl git python311 python311-pip" in result.stderr
 
 
 def test_install_wrapper_installs_missing_prereqs_with_apt_get(tmp_path: Path) -> None:
@@ -270,8 +268,7 @@ exit 99
 echo "$*" >> "{installed}"
 if [ "$1" = "install" ]; then
   printf '#!/bin/sh\\nexit 0\\n' > "{bin_dir}/curl"
-  printf '#!/bin/sh\\nexit 0\\n' > "{bin_dir}/unzip"
-  chmod +x "{bin_dir}/curl" "{bin_dir}/unzip"
+  chmod +x "{bin_dir}/curl"
 fi
 exit 0
 """,
@@ -288,7 +285,7 @@ exit 0
     assert result.returncode == 0
     assert installed.read_text(encoding="utf-8").splitlines() == [
         "update",
-        "install -y curl unzip",
+        "install -y curl",
     ]
 
 
@@ -352,8 +349,7 @@ exit 99
 echo "$*" >> "{installed}"
 if [ "$1" = "install" ]; then
   printf '#!/bin/sh\\nexit 0\\n' > "{bin_dir}/git"
-  printf '#!/bin/sh\\nexit 0\\n' > "{bin_dir}/unzip"
-  chmod +x "{bin_dir}/git" "{bin_dir}/unzip"
+  chmod +x "{bin_dir}/git"
 fi
 exit 0
 """,
@@ -369,7 +365,7 @@ exit 0
 
     assert result.returncode == 0
     assert installed.read_text(encoding="utf-8").splitlines() == [
-        "install -y git unzip",
+        "install -y git",
     ]
 
 
@@ -390,7 +386,6 @@ exit 99
 """,
     )
     _symlink_tool(bin_dir, "curl")
-    _symlink_tool(bin_dir, "unzip")
     _symlink_tool(bin_dir, "git")
     _symlink_tool(bin_dir, "cat")
 
@@ -424,7 +419,6 @@ exit 99
 """,
     )
     _symlink_tool(bin_dir, "curl")
-    _symlink_tool(bin_dir, "unzip")
     _symlink_tool(bin_dir, "git")
     _symlink_tool(bin_dir, "cat")
 
@@ -440,11 +434,11 @@ exit 99
     assert "missing OS prerequisites" in result.stderr
     assert "python3.10+ with pip" in result.stderr
     assert "no supported package manager found" in result.stderr
-    assert "apt install -y curl git unzip python3-venv python3-pip" in result.stderr
+    assert "apt install -y curl git python3-venv python3-pip" in result.stderr
     assert "command -v curl >/dev/null || dnf install -y curl" in result.stderr
-    assert "dnf install -y git unzip python3.11 python3.11-pip" in result.stderr
-    assert "dnf install -y git unzip python3 python3-pip" in result.stderr
-    assert "zypper install -y curl git unzip python311 python311-pip" in result.stderr
+    assert "dnf install -y git python3.11 python3.11-pip" in result.stderr
+    assert "dnf install -y git python3 python3-pip" in result.stderr
+    assert "zypper install -y curl git python311 python311-pip" in result.stderr
 
 
 def test_install_wrapper_rejects_externally_managed_python(tmp_path: Path) -> None:
@@ -479,7 +473,6 @@ exit 99
 """,
     )
     _symlink_tool(bin_dir, "curl")
-    _symlink_tool(bin_dir, "unzip")
     _symlink_tool(bin_dir, "cat")
     _symlink_tool(bin_dir, "git")
 
@@ -495,12 +488,12 @@ exit 99
     assert "the current Python is externally managed" in result.stderr
     assert "curl -fsSL" in result.stderr
     assert "command -v curl >/dev/null || dnf install -y curl" in result.stderr
-    assert "dnf install -y git unzip python3.11 python3.11-pip" in result.stderr
-    assert "dnf install -y git unzip python3 python3-pip" in result.stderr
-    assert "zypper install -y curl git unzip python311 python311-pip" in result.stderr
+    assert "dnf install -y git python3.11 python3.11-pip" in result.stderr
+    assert "dnf install -y git python3 python3-pip" in result.stderr
+    assert "zypper install -y curl git python311 python311-pip" in result.stderr
 
 
-def test_install_wrapper_reports_ready_bundle_from_pip_build(tmp_path: Path) -> None:
+def test_install_wrapper_reports_install_complete_without_building_opencode(tmp_path: Path) -> None:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     home_dir = tmp_path / "home"
@@ -542,7 +535,6 @@ exit 99
 """,
     )
     _symlink_tool(bin_dir, "curl")
-    _symlink_tool(bin_dir, "unzip")
     _symlink_tool(bin_dir, "git")
     _symlink_tool(bin_dir, "cat")
 
@@ -557,10 +549,10 @@ exit 99
     )
 
     assert result.returncode == 0
-    assert "bundled patched perfxpert-code ready" in result.stderr
+    assert "generated opencode binary was not built or packaged" in result.stderr
 
 
-def test_install_wrapper_fails_when_bundled_opencode_is_missing_after_install(tmp_path: Path) -> None:
+def test_install_wrapper_does_not_probe_for_generated_opencode_after_install(tmp_path: Path) -> None:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     home_dir = tmp_path / "home"
@@ -598,7 +590,6 @@ exit 99
 """,
     )
     _symlink_tool(bin_dir, "curl")
-    _symlink_tool(bin_dir, "unzip")
     _symlink_tool(bin_dir, "git")
     _symlink_tool(bin_dir, "cat")
 
@@ -612,8 +603,8 @@ exit 99
         check=False,
     )
 
-    assert result.returncode == 2
-    assert "bundled patched opencode binary was not produced" in result.stderr
+    assert result.returncode == 0
+    assert "generated opencode binary was not built or packaged" in result.stderr
 
 
 def test_install_wrapper_prefers_active_python_before_versioned_fallbacks(tmp_path: Path) -> None:
@@ -694,7 +685,6 @@ exit 99
 """,
     )
     _symlink_tool(bin_dir, "curl")
-    _symlink_tool(bin_dir, "unzip")
     _symlink_tool(bin_dir, "git")
     _symlink_tool(bin_dir, "cat")
 
@@ -766,7 +756,6 @@ exit 99
 """,
     )
     _symlink_tool(bin_dir, "curl")
-    _symlink_tool(bin_dir, "unzip")
     _symlink_tool(bin_dir, "git")
     _symlink_tool(bin_dir, "cat")
 

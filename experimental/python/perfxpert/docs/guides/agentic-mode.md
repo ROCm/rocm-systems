@@ -130,7 +130,7 @@ Current entries:
 | `openai` | OpenAI API | Alternative hosted; requires `OPENAI_API_KEY` |
 | `ollama` | Local Ollama | Fully local; requires a running `ollama serve` |
 | `private` | Any OpenAI-compatible endpoint | Internal deployments; requires `PERFXPERT_LLM_PRIVATE_URL` + `PERFXPERT_LLM_PRIVATE_MODEL`; CLI preflight also needs `PERFXPERT_LLM_PRIVATE_API_KEY` or `--llm-api-key` |
-| `opencode` | Bundled opencode CLI | Used by `perfxpert-code`; not callable from inside opencode itself (recursion-guarded) |
+| `opencode` | Patched opencode CLI | Used by `perfxpert-code`; not callable from inside opencode itself (recursion-guarded) |
 
 `perfxpert doctor` reports which providers are reachable from the
 current shell. See [contributing/providers.md](../contributing/providers.md)

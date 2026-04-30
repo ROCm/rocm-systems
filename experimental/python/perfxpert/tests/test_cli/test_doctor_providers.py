@@ -46,13 +46,13 @@ def test_run_doctor_is_safe_for_ascii_stdout(monkeypatch):
     monkeypatch.setattr(perfxpert_main, "_check_task_store", lambda: (True, task_store_msg))
     monkeypatch.setattr(
         perfxpert_main,
-        "_check_opencode_bundled",
-        lambda: (True, "Bundled opencode ok"),
+        "_check_opencode_patched",
+        lambda: (True, "Patched opencode ok"),
     )
     monkeypatch.setattr(
         perfxpert_main,
-        "_check_opencode_bundled_config",
-        lambda: (True, "Bundled config ok"),
+        "_check_opencode_packaged_config",
+        lambda: (True, "Packaged config ok"),
     )
     monkeypatch.setattr(
         perfxpert_main,
@@ -74,6 +74,13 @@ def test_run_doctor_is_safe_for_ascii_stdout(monkeypatch):
 
 
 def test_check_llm_providers_accepts_canonical_env_names(monkeypatch):
+    from perfxpert.cli import opencode_launcher
+
+    monkeypatch.setattr(
+        opencode_launcher,
+        "resolve_opencode_binary",
+        lambda: "/cache/perfxpert/opencode/opencode",
+    )
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant")
     monkeypatch.setenv("OPENAI_API_KEY", "sk-openai")
     monkeypatch.setenv("PERFXPERT_LLM_LOCAL_URL", "http://localhost:11434")
@@ -88,6 +95,13 @@ def test_check_llm_providers_accepts_canonical_env_names(monkeypatch):
 
 
 def test_check_llm_providers_accepts_compatibility_aliases(monkeypatch):
+    from perfxpert.cli import opencode_launcher
+
+    monkeypatch.setattr(
+        opencode_launcher,
+        "resolve_opencode_binary",
+        lambda: "/cache/perfxpert/opencode/opencode",
+    )
     monkeypatch.setenv("OLLAMA_HOST", "http://localhost:11434")
     monkeypatch.setenv("PRIVATE_LLM_ENDPOINT", "https://llm.example/v1")
 
@@ -96,3 +110,21 @@ def test_check_llm_providers_accepts_compatibility_aliases(monkeypatch):
     assert "ollama" in configured
     assert "private" in configured
     assert "opencode" in configured
+
+
+def test_check_llm_providers_marks_opencode_unconfigured_without_patched_binary(
+    monkeypatch,
+):
+    from perfxpert.cli import opencode_launcher
+
+    monkeypatch.setenv("PERFXPERT_OPENCODE_PATH", "/usr/local/bin/upstream-opencode")
+    monkeypatch.setattr(
+        opencode_launcher,
+        "resolve_opencode_binary",
+        lambda: (_ for _ in ()).throw(FileNotFoundError("patched missing")),
+    )
+
+    configured, unconfigured = perfxpert_main._check_llm_providers()
+
+    assert "opencode" not in configured
+    assert "opencode" in unconfigured

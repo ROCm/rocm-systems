@@ -3,41 +3,33 @@
 Requires:
 - perfxpert-code installed (entry point)
 - perfxpert-mcp installed (entry point)
-- bundled opencode binary OR PERFXPERT_OPENCODE_PATH set
+- patched opencode binary resolvable by the default launcher
 - Any LLM provider configured, OR --no-llm / air-gap mode
 
 Skips gracefully if the opencode binary isn't available.
 """
 
 import os
-import shutil
 import subprocess
-from pathlib import Path
 
 import pytest
 
 
 @pytest.fixture
 def opencode_available():
-    # Check bundled OR PATH
-    if os.environ.get("PERFXPERT_OPENCODE_PATH"):
-        if Path(os.environ["PERFXPERT_OPENCODE_PATH"]).is_file():
-            return True
-    if shutil.which("opencode"):
-        return True
     try:
-        from importlib import resources
-        with resources.as_file(resources.files("perfxpert") / "_bundled" / "opencode") as p:
-            if p.is_file():
-                return True
-    except Exception:
-        pass
+        from perfxpert.cli.opencode_launcher import resolve_opencode_binary
+
+        resolve_opencode_binary()
+        return True
+    except (FileNotFoundError, PermissionError):
+        return False
     return False
 
 
 def test_perfxpert_code_launches_if_opencode_available(opencode_available):
     if not opencode_available:
-        pytest.skip("opencode binary not available on this system")
+        pytest.skip("patched opencode binary not available on this system")
 
     # Smoke: perfxpert-code must print our AMD banner to stderr BEFORE handing
     # off to opencode's interactive TUI. opencode is an alternate-screen
@@ -71,6 +63,9 @@ def test_perfxpert_code_launches_if_opencode_available(opencode_available):
 
 def test_mcp_server_accepts_a_call_from_shell(opencode_available):
     """Verify perfxpert-mcp at least starts and can receive an initialization message."""
+    if not opencode_available:
+        pytest.skip("patched opencode binary not available on this system")
+
     import json, time
 
     # Start perfxpert-mcp with stdio
