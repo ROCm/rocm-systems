@@ -175,6 +175,7 @@ class IPCImplSimpleFine : public ::testing::TestWithParam<std::tuple<int, int, i
         }
 
         ipc_impl_.ipcHostStop();
+        delete mpi_;
         delete heap_mem_;
         MPIInstance::mpilib_dl_close();
     }

@@ -3,9 +3,9 @@
 
 #pragma once
 
+#include "common/defines.h"
 #include "core/common.hpp"
 #include "core/components/fwd.hpp"
-#include "core/defines.hpp"
 
 #include <timemory/components/base.hpp>
 #include <timemory/hash/types.hpp>
@@ -32,8 +32,6 @@ struct progress_point : comp::base<progress_point, void>
 
     static std::string label();
     static std::string description();
-
-    ROCPROFSYS_DEFAULT_OBJECT(progress_point)
 
     void            start();
     void            stop();
@@ -111,8 +109,6 @@ struct push_node<rocprofsys::causal::component::progress_point>
 {
     using type = rocprofsys::causal::component::progress_point;
 
-    ROCPROFSYS_DEFAULT_OBJECT(push_node)
-
     push_node(type& _obj, scope::config _scope, hash_value_t _hash,
               int64_t _tid = threading::get_id())
     {
@@ -127,8 +123,6 @@ template <>
 struct pop_node<rocprofsys::causal::component::progress_point>
 {
     using type = rocprofsys::causal::component::progress_point;
-
-    ROCPROFSYS_DEFAULT_OBJECT(pop_node)
 
     pop_node(type& _obj, int64_t _tid = threading::get_id()) { (*this)(_obj, _tid); }
 

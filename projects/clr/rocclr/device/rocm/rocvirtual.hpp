@@ -712,6 +712,7 @@ class VirtualGPU : public device::VirtualDevice {
   hsa_barrier_and_packet_t barrier_packet_ {};
   hsa_amd_barrier_value_packet_t barrier_value_packet_ {};
 
+  uint32_t skippedDispatches_;  //!< Count of consecutive dispatches that skipped the doorbell flush.
   uint32_t dispatch_id_;  //!< This variable must be updated atomically.
   Device& roc_device_;    //!< roc device object
   PrintfDbg* printfdbg_;
@@ -775,7 +776,8 @@ class VirtualGPU : public device::VirtualDevice {
   //! SDMA engine affinity tracking for this VirtualGPU/stream
   uint32_t assigned_sdma_engine_ = 0;           //!< Assigned SDMA engine mask for all operations
 
-  void* hostcallBuffer_;  //!< Hostcall buffer
+  void* hostcallBuffer_;        //!< Hostcall buffer
+  size_t hostcallBufferSize_ = 0; //!< Byte size of hostcallBuffer_, for hostFree
 
   using KernelArgImpl = device::Settings::KernelArgImpl;
 };

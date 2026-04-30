@@ -109,9 +109,13 @@ struct pc_sampling_service
     // Contains a map with pairs (rocprofiler_agent_id_t, PCSAgentSession*).
     // The PCSAgentSession encapsulates the information about the configured PC sampling session
     // used on the agent with `rocprofiler_agent_id_t`.
+    // Uses shared_ptr for shared ownership with global sessions map.
     std::unordered_map<rocprofiler_agent_id_t,
-                       std::unique_ptr<rocprofiler::pc_sampling::PCSAgentSession>>
+                       std::shared_ptr<rocprofiler::pc_sampling::PCSAgentSession>>
         agent_sessions;
+
+    // Atomic flag for CAS-based start/stop operations
+    std::atomic<bool> enabled{false};
 };
 
 struct context
