@@ -1652,48 +1652,51 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   {
     // Plurality vote for romeTopoModelIdx. Tie on vote count: prefer the value that
     // first appears on the lowest rank (outer index c is that first rank).
-    int refIdx = allGather3Data[0].romeTopoModelIdx;
-    int refVotes = -1;
-    int refFirstRank = nranks;
-    for (int c = 0; c < nranks; c++) {
-      int cand = allGather3Data[c].romeTopoModelIdx;
-      bool seenEarlier = false;
-      for (int d = 0; d < c; d++) {
-        if (allGather3Data[d].romeTopoModelIdx == cand) { seenEarlier = true; break; }
-      }
-      if (seenEarlier) continue;
-      int cnt = 0;
-      for (int r = 0; r < nranks; r++) {
-        if (allGather3Data[r].romeTopoModelIdx == cand) cnt++;
-      }
-      if (cnt > refVotes || (cnt == refVotes && c < refFirstRank)) {
-        refVotes = cnt;
-        refIdx = cand;
-        refFirstRank = c;
-      }
-    }
-    int nDisagree = 0;
-    for (int r = 0; r < nranks; r++) {
-      if (allGather3Data[r].romeTopoModelIdx != refIdx) nDisagree++;
-    }
-    if (nDisagree > 0) {
-      WARN("RCCL FATAL: mismatched Rome preset topology model index across ranks; all ranks must agree for precomputed graphs (voted refIdx %d from %d of %d ranks).", refIdx, refVotes, nranks);
-      for (int r = 0; r < nranks; r++) {
-        if (allGather3Data[r].romeTopoModelIdx == refIdx) continue;
-        bool lowestMismatchOnHost = true;
-        for (int r2 = 0; r2 < r; r2++) {
-          if (allGather3Data[r2].romeTopoModelIdx == refIdx) continue;
-          if (comm->peerInfo[r2].hostHash == comm->peerInfo[r].hostHash) {
-            lowestMismatchOnHost = false;
-            break;
-          }
+    auto checkRomeTopoModelIdxConsensus = [](struct ncclComm* c, struct allGatherInfo* ag, int n) -> ncclResult_t {
+      int refIdx = ag[0].romeTopoModelIdx;
+      int refVotes = -1;
+      int refFirstRank = n;
+      for (int cidx = 0; cidx < n; cidx++) {
+        int cand = ag[cidx].romeTopoModelIdx;
+        bool seenEarlier = false;
+        for (int d = 0; d < cidx; d++) {
+          if (ag[d].romeTopoModelIdx == cand) { seenEarlier = true; break; }
         }
-        if (!lowestMismatchOnHost) continue;
-        WARN("  rank %d host %s romeTopoModelIdx=%d", r, allGather3Data[r].hostname, allGather3Data[r].romeTopoModelIdx);
+        if (seenEarlier) continue;
+        int cnt = 0;
+        for (int r = 0; r < n; r++) {
+          if (ag[r].romeTopoModelIdx == cand) cnt++;
+        }
+        if (cnt > refVotes || (cnt == refVotes && cidx < refFirstRank)) {
+          refVotes = cnt;
+          refIdx = cand;
+          refFirstRank = cidx;
+        }
       }
-      ret = ncclInvalidUsage;
-      goto fail;
-    }
+      int nDisagree = 0;
+      for (int r = 0; r < n; r++) {
+        if (ag[r].romeTopoModelIdx != refIdx) nDisagree++;
+      }
+      if (nDisagree > 0) {
+        WARN("RCCL FATAL: mismatched Rome preset topology model index across ranks; all ranks must agree for precomputed graphs (voted refIdx %d from %d of %d ranks).", refIdx, refVotes, n);
+        for (int r = 0; r < n; r++) {
+          if (ag[r].romeTopoModelIdx == refIdx) continue;
+          bool lowestMismatchOnHost = true;
+          for (int r2 = 0; r2 < r; r2++) {
+            if (ag[r2].romeTopoModelIdx == refIdx) continue;
+            if (c->peerInfo[r2].hostHash == c->peerInfo[r].hostHash) {
+              lowestMismatchOnHost = false;
+              break;
+            }
+          }
+          if (!lowestMismatchOnHost) continue;
+          WARN("  rank %d host %s romeTopoModelIdx=%d", r, ag[r].hostname, ag[r].romeTopoModelIdx);
+        }
+        return ncclInvalidUsage;
+      }
+      return ncclSuccess;
+    };
+    NCCLCHECKGOTO(checkRomeTopoModelIdxConsensus(comm, allGather3Data, nranks), ret, fail);
   }
 
   // Determine nNodes, firstRanks, ...
