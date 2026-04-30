@@ -69,6 +69,52 @@ matrix and per-technique deep-dives remain a useful reference for future
 backend swaps (e.g., the eventual `user_events` v2) and for adversarial
 review of the chosen path.
 
+### Update — 2026-04-30: LTTng-UST also delivers FW kernel-dispatch records (PR #5519)
+
+The original recommendation framed LTTng-UST as the delivery mechanism
+for **HIP/HSA API events**. Since then, the firmware-ring track
+(`HIGH_LEVEL_DESIGN_SUMMARY.md`, `KNOWN_ISSUES.md`,
+`FIRMWARE_RING_HYBRID_DESIGN.md`) has converged on the same transport:
+
+* The HSA-resident drainer on `users/bewelton/lttng-kernel-ts`
+  (PR #5519, draft) emits one
+  `rocm_hsa:kernel_dispatch_record(queue_id, dispatch_idx, gpu_ts,
+  record_type, corr_id, parent_corr_id)` LTTng tracepoint per FW
+  dispatch record (one event per non-zero record; HSA does not
+  interpret `record_type`).
+* This event lands in the **same CTF channel** as
+  `rocm_hip:hip_aql_kernel_dispatch_submit` and the curated
+  `<api>_args` events from PR #5475.
+* Schema v3's `(queue_id, write_idx)` cross-runtime join key is the
+  same `(queue_id, dispatch_idx)` the FW writes into each record.
+  Consumers join on this pair to recover the launching thread, the
+  HIP API correlation, the workgroup/grid/segment sizes (already on
+  the submit event), and the GPU-domain start/end timestamps (on the
+  HSA event).
+* Measured 169.3% combined-record capture rate on graphbench
+  (~85% per record_type) with the per-queue drainer thread design.
+  See `HIGH_LEVEL_DESIGN_SUMMARY.md` firmware-ring status table.
+
+**Implication for this document.** The "schema v3 (no in-band
+correlation IDs)" decision turned out to be the right one for a second
+reason that was not visible at the time: it makes the FW-side records
+joinable to the HIP-side events without either side knowing about the
+other. If schema v3 had carried in-band correlation IDs, the HSA
+drainer would have had to look them up — which would have re-introduced
+the per-queue side-table machinery from
+`FIRMWARE_RING_HYBRID_DESIGN.md` Sections 4.1–4.3 inside HSA, exactly
+the coupling the side-table-free design avoids.
+
+The rocprofiler-sdk consumer side — already noted as "not yet started"
+in the Status update above — now has a slightly larger scope: it must
+emit `KERNEL_DISPATCH_COMPLETE` records by joining
+`rocm_hip:hip_aql_kernel_dispatch_submit` with
+`rocm_hsa:kernel_dispatch_record` on `(queue_id, dispatch_idx)`,
+in addition to translating the HIP/HSA API events into `*_API_*`
+records. See `FIRMWARE_RING_HYBRID_DESIGN.md` §13.3 for the
+consumer-side join mechanism, and §13.5 for the trade-off vs
+bypassing LTTng and querying KFD directly.
+
 ---
 
 # Why LTTng-UST was chosen over the alternatives

@@ -27,11 +27,18 @@ are wrong on three counts:
   current 16-byte records. Validation passes only because user buffers
   end up oversized.
 * **Wrong format coupling.** The kernel-side validation hardcodes a
-  record size; userspace tools hardcode `mec_dispatch_record_16` C
-  structs. Adding a new record type today requires coordinated kernel
-  + libhsakmt + ROCr + rocprofiler-sdk releases. The new design has
-  the kernel ship the format as data and rocprofiler-sdk talk to KFD
-  directly — collapsing the cross-layer coordination.
+  record size; userspace tools hardcode the 16-byte
+  `mec_dispatch_record` C struct. The struct currently lives in HSA
+  (`projects/rocr-runtime/runtime/hsa-runtime/core/inc/mec_dispatch_record.h`)
+  and is consumed by HSA's per-queue drainer on
+  `users/bewelton/lttng-kernel-ts`. Any out-of-tree consumer that wants
+  to read the same ring must agree on the struct out-of-band. Adding a
+  new record type today requires coordinated kernel + libhsakmt + ROCr
+  releases (and any consumer that reads the ring directly). The new
+  design has the kernel ship the format as data and any consumer query
+  KFD directly — collapsing the cross-layer coordination. The struct
+  declaration in HSA can then become a `static_assert`-checked mirror
+  of the kernel-supplied descriptor instead of the source of truth.
 
 This plan does two things:
 
@@ -58,6 +65,149 @@ Both changes bump `KFD_IOCTL_MINOR_VERSION` 22→23 and
 `KFD_IOC_PROFILER_VERSION_NUM` 1→2. The `dispatch_record_buffer_*`
 UAPI fields on `kfd_ioctl_update_queue_args` are removed (private
 branch; no upstream consumers).
+
+---
+
+## 1.5. Today's interface — the ABI `lttng-kernel-ts` ships against (KFD MINOR=22)
+
+> Added in the 2026-04-30 status update. The HSA-resident drainer
+> on `users/bewelton/lttng-kernel-ts` (PR #5519) registers per-queue
+> dispatch-record buffers via the existing extended `UPDATE_QUEUE`
+> path described here, and will migrate to the profiler ioctl
+> proposed in §2 onwards when the kernel side ships. Any consumer
+> built today (HSA, future tools) must speak this current ABI.
+
+### 1.5.1 UAPI: `kfd_ioctl_update_queue_args` extension
+
+`include/uapi/linux/kfd_ioctl.h:99-108`:
+
+```c
+struct kfd_ioctl_update_queue_args {
+    __u64 ring_base_address;             /* to KFD */
+    __u32 queue_id;                      /* to KFD */
+    __u32 ring_size;                     /* to KFD */
+    __u32 queue_percentage;              /* to KFD */
+    __u32 queue_priority;                /* to KFD */
+    __u64 dispatch_record_buffer_addr;   /* to KFD: GPU VA (0 = disable)  -- ADDED */
+    __u32 dispatch_record_buffer_size;   /* to KFD: capacity in records   -- ADDED */
+    __u32 pad;                           /*                               -- ADDED */
+};
+```
+
+`KFD_IOCTL_MINOR_VERSION = 22` is the version of this branch. The
+`dispatch_record_buffer_*` fields are appended after the existing
+upstream-clean fields. A v22 userspace querying a v22+ kernel sees the
+new fields; a v22 userspace on an older kernel sees `EINVAL` from the
+ioctl size mismatch.
+
+### 1.5.2 Kernel-side validation: `count * 40` BO-size check
+
+`drivers/gpu/drm/amd/amdkfd/kfd_process_queue_manager.c:633` (on the
+gbt350 host kernel build):
+
+```c
+buf_byte_size = args->dispatch_record_buffer_size * 40;
+```
+
+The `* 40` literal is the firmware-recorded **per-slot stride** that
+the original prototype expected — **not** the FW write width. The
+current MEC firmware writes 16 bytes per slot
+(`mec_dispatch_record`), so a buffer sized `count * 40` has 24 unused
+trailing bytes per slot. The HSA drainer reads at the 16-byte stride
+and ignores the trailing 24 B (see
+`projects/rocr-runtime/runtime/hsa-runtime/core/runtime/dispatch_log.cpp`
+ring-base / `kSlotStride` comments).
+
+**Upstream fix (not yet in installed DKMS).** The user's amdgpu
+working tree at `/home/bewelton/amdgpu` HEAD `03a8b58c3b96` corrects
+the literal to `* 16` to match the FW write width; the lttng-kernel-ts
+branch keeps allocating `count * 40` to satisfy the deployed kernel
+until that fix lands. After it lands, allocations can shrink to
+`count * 16`.
+
+### 1.5.3 MQD plumbing: v9 fields
+
+`amd/include/v9_structs.h:213-217`:
+
+```c
+uint32_t cp_mqd_base_addr_lo32;        /* 0x29 */
+uint32_t cp_mqd_base_addr_hi32;        /* 0x2A */
+uint32_t dispatch_record_buffer_addr_lo32;   /* 0x2B  -- ADDED */
+uint32_t dispatch_record_buffer_addr_hi32;   /* 0x2C  -- ADDED */
+uint32_t dispatch_record_buffer_size;        /* 0x2D  -- ADDED */
+uint32_t reserved_46;                  /* 0x2E */
+uint32_t dispatch_record_wptr;         /* 0x2F  -- ADDED but unused */
+```
+
+KFD's v9 MQD manager writes these fields in `pqm_update_dispatch_record`
+(extracted helper) when `dispatch_record_buffer_addr != 0`; clears them
+when `addr == 0`. The MEC firmware reads them on `AqlConnect` (when
+the hardware scheduler attaches the queue to a compute pipe) and
+caches them for the duration of the connection.
+
+The `dispatch_record_wptr` field at 0x2F **is not used** by the
+current sentinel-scan drainer — the substrate publishes no host-visible
+FW write pointer, and the drainer instead detects fresh records by
+scanning slots for non-zero `record_type`. It remains in the MQD
+layout for ABI stability and possible future use.
+
+### 1.5.4 HSA-side registration call site
+
+`projects/rocr-runtime/libhsakmt/src/queues.c::hsaKmtSetQueueProfilingBuffer`
+calls `kmtIoctl(KFD_IOC_UPDATE_QUEUE, ...)` with the extended args
+struct. The third argument (`WptrHostAddr`) is documented as **unused**
+on the current substrate — kept in the function signature for ABI
+stability with the original prototype.
+
+ROCr's `AqlQueue::SetProfiling(true)` (in
+`core/runtime/amd_aql_queue.cpp`) allocates the per-queue buffer at
+`num_records * 40` bytes (cache-line-aligned, non-paged) and calls
+through. `SetProfiling(false)` calls again with `addr=0, size=0` to
+unpublish, then frees the buffer.
+
+### 1.5.5 Record format: hardcoded in HSA, not self-describing
+
+The 16-byte FW record format is held in
+`projects/rocr-runtime/runtime/hsa-runtime/core/inc/mec_dispatch_record.h`
+as a C struct. Both HSA's drainer and any ABI-equivalent consumer
+must agree on this struct out-of-band. Migrating the descriptor
+(§3 below) lifts this from HSA to the kernel.
+
+### 1.5.6 Per-queue ring sizing (current production)
+
+* `num_records` = 65536 (compile-time constexpr in `amd_aql_queue.cpp`
+  and mirrored in `dispatch_log.h::DISPATCH_LOG_RECORD_COUNT`).
+* Per-queue BO size = 65536 × 40 = 2.5 MiB (kernel allocation; oversized).
+* Per-queue active ring = 65536 × 16 = 1 MiB (FW write area; the
+  trailing 1.5 MiB per queue is unused).
+* Typical workload: 16 queues → ~40 MiB total BO per process.
+
+Two tuning experiments tried this session — 256K records per queue
+and an in-drainer batched lock-once translate — both **regressed**
+capture rate (256K → 126%, batched-translate → 154% mean vs the 169%
+baseline at 64K + per-queue threads) and were reverted. The 64K choice
+is the current local optimum and is what `lttng-kernel-ts` HEAD
+`e6abbfc7fa` ships.
+
+### 1.5.7 What `lttng-kernel-ts` will need to change when §2 lands
+
+* Add a runtime probe for KFD MINOR≥23 vs ==22 (currently it probes
+  for ==22 to detect substrate availability — see `dispatch_log.cpp`
+  KFD-version probe).
+* On a MINOR=23 kernel, route registration through
+  `AMDKFD_IOC_PROFILER` sub-op `KFD_IOC_PROFILER_DISPATCH_LOG / SET`
+  instead of `UPDATE_QUEUE`.
+* Optionally consume the JSON descriptor via `GET_DESCRIPTOR` instead
+  of trusting the compiled-in `mec_dispatch_record` C struct. (HSA can
+  static-assert that its compiled-in struct matches the kernel-shipped
+  descriptor at startup.)
+* Drop the `dispatch_record_wptr` MQD slot reference if the v23 MQD
+  layout removes it (a follow-on cleanup).
+
+The migration is decoupled from the userspace path choice: an SDK
+that consumes via Path A (LTTng) sees no change; an SDK that consumes
+via Path B (direct ioctl, see `FIRMWARE_RING_HYBRID_DESIGN.md` §13.4)
+must follow the same migration as HSA.
 
 ---
 

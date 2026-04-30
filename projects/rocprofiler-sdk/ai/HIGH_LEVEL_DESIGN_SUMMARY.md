@@ -34,14 +34,30 @@ Everything else flows from those three facts.
 
 **On the firmware-onboarding test machine (`gbt350-odcdh5-wbc1-b.png-odc.dcgpu`), end-to-end working:**
 
+Two userspace paths exist today over the same MEC + KFD substrate. The
+**SDK-side polling drainer** on `users/bewelton/cpc_tracing` is the
+original reference baseline that this document and the companion docs
+were written against. The **HSA-resident drainer + LTTng-UST emission**
+on `users/bewelton/lttng-kernel-ts` (PR #5519) is the actively
+developed path and the one currently producing measurements on gbt350.
+
 | Layer | What ships | Status |
 |---|---|---|
-| MEC firmware (`f32_mec.uc`) | `SubAqlProfBufWriteRecord` writes 16-byte records `{ts_lo, ts_hi, record_type, dispatch_idx}` to a host-visible ring on every dispatch start and EOP | gfx9_5_0 / MI350 only |
-| KFD (`amdgpu`) | Custom branch with `dispatch_record_buffer_addr/size` plumbed through `UPDATE_QUEUE` ioctl into MQD DW43–47 | gfx9 only |
-| ROCr / thunk | New HSA APIs `hsa_amd_queue_iterate`, `hsa_amd_profiling_get_dispatch_records`. Allocates and registers the ring. | Posted at `users/bewelton/cpc_tracing` |
-| rocprofiler-sdk | Standalone polling drainer reads the ring at 1ms cadence, pairs START/END, emits `KERNEL_DISPATCH_COMPLETE` records | Posted at `users/bewelton/cpc_tracing` |
+| MEC firmware (`/lib/firmware/amdgpu/gc_9_5_0_mec.bin`) | `SubAqlProfBufWriteRecord` writes 16-byte records `{ts_lo, ts_hi, record_type, dispatch_idx}` to a host-visible ring on every dispatch start (`record_type=2`) and EOP (`record_type=1`). **Post Apr-29 firmware update on this machine, both record types are produced at ~1:1 ratio**; the prior FW build wrote `rt=2` only ~0.17% of the time (a FW bug). The blob mtime did not change — the live FW behavior changed at Apr 29 13:02 GPU resets. | gfx9_5_0 / MI350 only |
+| KFD (`amdgpu`) | Installed DKMS at `/usr/src/amdgpu-6.18.4-2286447.22.04/` plumbs `dispatch_record_buffer_addr/size` through extended `AMDKFD_IOC_UPDATE_QUEUE` (KFD `MINOR=22`) into v9 MQD fields 0x2B–0x2F. BO size validation is `count * 40` bytes (per-slot stride; FW writes 16; trailing 24 unused). Upstream `* 16` fix is in user's amdgpu tree at HEAD `03a8b58c3b96` but not yet in installed DKMS — see `KFD_DISPATCH_LOG_DESIGN.md` §1.5. | gfx9 only |
+| HSA runtime (ROCr) — SDK-side reference | Original HSA APIs `hsa_amd_queue_iterate`, `hsa_amd_profiling_get_dispatch_records`. Allocates and registers the ring; consumer is the standalone SDK drainer below. Foundation for `FIRMWARE_RING_HYBRID_DESIGN.md`. | Posted at `users/bewelton/cpc_tracing` |
+| HSA runtime (ROCr) — HSA-resident drainer (production path) | Per-queue drainer threads in `core/runtime/dispatch_log.cpp` use sentinel-scan (no host-visible FW wptr; `record_type==0` is the empty marker). One worker thread per active queue. `AqlQueue::SetProfiling(true/false)` driven by `QueueProfilingAcquire`/`Release` refcount (spec §4a). Enable/disable hooks in `core/runtime/hsa.cpp::on_queue_create / on_queue_destroy`. | Posted at `users/bewelton/lttng-kernel-ts` (PR #5519, draft) at HEAD `e6abbfc7fa`; 4 implementation commits stage-1 + stage-2 debate-reviewed; spec at `~/ai/specs/2026-04-27-hsa-lttng-kernel-dispatch-tracing-design.md` (8-round adversarial debate, 27 claims accepted) |
+| LTTng-UST transport (HIP CLR + ROCr) | Vendored LTTng-UST 2.13.7 + URCU 0.14.0 submodules under `projects/{clr,rocr-runtime}/external/`; ~530 HIP + ~270 HSA wrappers migrated; 73 HIP + 10 HSA curated typed-args APIs; schema v3 (`(vpid, vtid, ts)` join, no in-band correlation IDs). HSA emits `rocm_hsa:kernel_dispatch_record(queue_id, dispatch_idx, gpu_ts, record_type, ...)` into the same CTF stream as `rocm_hip:hip_aql_kernel_dispatch_submit`. | Posted at `users/bewelton/lttng` (PR #5475) + `users/bewelton/lttng-curated-verifier` (PR #5513, stacked) |
+| rocprofiler-sdk — SDK-side polling drainer (reference) | Standalone polling drainer reads the ring at 1 ms cadence, pairs START/END heuristically, emits `KERNEL_DISPATCH_COMPLETE` records. Reference baseline only; this is what the `KNOWN_ISSUES.md` 10 numbered items are scoped to. | Posted at `users/bewelton/cpc_tracing` |
+| rocprofiler-sdk — LTTng CTF consumer | Translates `rocm_hip:*` + `rocm_hsa:*` LTTng events to existing `rocprofiler_*_record_t` shapes; joins HIP submit + HSA dispatch_record on `(queue_id, dispatch_idx)`. | **Not yet started.** Two integration paths under consideration in `FIRMWARE_RING_HYBRID_DESIGN.md` §13 (Path A: consume LTTng; Path B: bypass HSA, query KFD directly). |
 
-This baseline produces correct kernel timing on MI350 today.
+**End-to-end measurement on gbt350 (HSA-resident drainer + LTTng-UST,
+graphbench, 5.17M HIP submits per run):** **169.3% combined-record
+capture rate (~85% per record_type)**, range 158.7%–184.0% across reps.
+Two perf experiments tried this session — 256K ring (regressed to
+126.3%) and a batched lock-once translate in the drainer (regressed to
+154.6%) — both reverted; 64K ring + per-queue threads is the current
+local optimum.
 
 **Performance impact on the non-profiling path is dependent on the
 ratio of kernel launches to device syncs.** The cost lives in MEC
@@ -52,7 +68,8 @@ That work happens **per queue-reconnect, not per dispatch**.
 `hipDeviceSynchronize()` typically forces a queue drain → eviction →
 re-connect, so syncing after every launch puts the cost on the per-
 dispatch path. Workloads with batched dispatches between syncs
-amortize the cost over many launches.
+amortize the cost over many launches. This cost is identical for both
+the SDK-side and HSA-side drainer paths — it is on the FW/MQD side.
 
 > **All numbers in this section are preliminary and subject to
 > change.** They are point-in-time results from a small number of runs
@@ -60,14 +77,14 @@ amortize the cost over many launches.
 > revisions, ASIC variants, or extensive workload coverage. Treat as
 > directional, not as a steady-state performance contract.
 
-| Workload pattern                                | Preliminary overhead |
-|-------------------------------------------------|----------------------|
-| 1 launch + 1 sync, microbenchmark (worst case)  | +1.7 µs / dispatch (+10.9%) |
-| graphbench (batched, real workload)             | &lt;0.4% (in the noise floor of the run) |
-| Typical batched inference / training / Triton   | Expected near-zero by extension of the graphbench result; not yet measured per-workload |
+| Workload pattern                                | Preliminary overhead | Source |
+|-------------------------------------------------|----------------------|--------|
+| graphbench, additional LTTng overhead from the 2 new HSA tracepoints (`kernel_dispatch_record`, `kernel_dispatch_drop`) | ~0.3% wall on top of the existing base LTTng instrumentation | gbt350, this session |
+| graphbench (banff MI325X), full LTTng curated capture (97 event types, ~10M events) | +0.9% wall vs no-tracing baseline, **0 drops** | LTTng-UST track measurement; see "Parallel track" section below |
 
-The per-`AqlConnect` overhead is the only added cost on the
-non-profiling path; the per-dispatch path itself is unchanged.
+The per-`AqlConnect` overhead is the only added cost the FW/MQD side
+imposes on the non-profiling path; the per-dispatch path itself is
+unchanged.
 
 ## What's broken / missing today
 
@@ -100,6 +117,19 @@ Plus structural issues in the prototype that block upstream:
 
 Plan: `FIRMWARE_RING_HYBRID_DESIGN.md`.
 
+> **Status update — 2026-04-30.** This SDK-side hybrid has been
+> overtaken by an alternative implementation that moves the drainer
+> **out of rocprofiler-sdk and into the HSA runtime**, and delivers
+> the FW kernel-dispatch records via the same LTTng-UST channel that
+> already carries HIP/HSA API events. That work lives on
+> `users/bewelton/lttng-kernel-ts` (PR #5519, draft) — see the
+> firmware-ring track row in the Status snapshot below, and
+> `FIRMWARE_RING_HYBRID_DESIGN.md` §13 for the two SDK integration
+> paths against the HSA-resident drainer (consume LTTng directly, or
+> query KFD ioctl directly). The PR 5219 critical dependency below
+> applies only if rocprofiler-sdk pursues the SDK-side hybrid; the
+> HSA-side path bypasses PR 5219 entirely.
+
 Adds a thin wrapper on `hsa_signal_store_relaxed/screlease` (the
 doorbell stores) that runs synchronously on the launching thread.
 On every doorbell ring it captures the correlation ID and tid into a
@@ -111,15 +141,18 @@ external correlations — without ever invoking `WriteInterceptor` and
 without allocating any HSA signals.** Strictly cheaper than the
 existing `WriteInterceptor`-based interception.
 
-**Critical dependency:** PR 5219 (`users/bewelton/no-interecept-queue`).
-That PR already adds the doorbell-wrap machinery for a different
-purpose (inline queue intercept that still calls `WriteInterceptor`).
-Our hybrid sits on top of that PR's doorbell-map / wrapper
-infrastructure — we **need PR 5219 merged before this hybrid can land**.
-The `users/bewelton/cpc_tracing` branch is already rebased onto
-PR 5219 to make this dependency explicit.
+**Critical dependency (SDK-side path only):** PR 5219
+(`users/bewelton/no-interecept-queue`). That PR already adds the
+doorbell-wrap machinery for a different purpose (inline queue intercept
+that still calls `WriteInterceptor`). The SDK-side hybrid sits on top
+of that PR's doorbell-map / wrapper infrastructure — we **need PR 5219
+merged before the SDK-side hybrid can land**. The
+`users/bewelton/cpc_tracing` branch is already rebased onto PR 5219 to
+make this dependency explicit. The HSA-side path on
+`users/bewelton/lttng-kernel-ts` does not require PR 5219.
 
-Phasing (in `FIRMWARE_RING_HYBRID_DESIGN.md` §12):
+Phasing (in `FIRMWARE_RING_HYBRID_DESIGN.md` §12) — applies to the
+SDK-side hybrid only:
 
 * Phase 1 (~200 lines): doorbell hook + side table + drainer lookup.
   Recovers correlation, tid, ancestor, external-corr.
@@ -187,11 +220,13 @@ firmware port is months including build/sign/deploy/validate cycles.
 | Item | Status |
 |---|---|
 | Firmware ring + drainer baseline (MI350) | working on `gbt350-odcdh5-wbc1-b` |
-| Standalone branch `users/bewelton/cpc_tracing` | pushed, builds clean (verified on remote) |
+| Standalone branch `users/bewelton/cpc_tracing` (SDK-side drainer reference) | pushed, builds clean (verified on remote) |
 | Branch rebased on PR 5219 (`users/bewelton/no-interecept-queue`) | done |
-| SDK hybrid plan (`FIRMWARE_RING_HYBRID_DESIGN.md`) | written; review pending |
-| KFD ioctl + descriptor plan (`KFD_DISPATCH_LOG_DESIGN.md`) | written; **adversarially reviewed and revised** (commit `fa0764e8ee`) |
-| Phase 1 implementation | not yet started — gated on PR 5219 merge |
+| SDK hybrid plan (`FIRMWARE_RING_HYBRID_DESIGN.md`) | written; **superseded by HSA-resident drainer below — preserved as reference / Path B integration option** (see `FIRMWARE_RING_HYBRID_DESIGN.md` §13) |
+| **HSA-resident drainer + LTTng emission (`users/bewelton/lttng-kernel-ts`, PR #5519, draft)** | **HEAD `e6abbfc7fa`; per-queue drainer threads emit `rocm_hsa:kernel_dispatch_record` via LTTng-UST; spec at `~/ai/specs/2026-04-27-hsa-lttng-kernel-dispatch-tracing-design.md` (8-round adversarial debate, 27 claims accepted); 4 implementation commits stage-1+stage-2 debate-reviewed. Measured 169.3% combined-record capture rate on graphbench (~85% per record_type); 158.7%–184.0% range across reps. No PR 5219 dependency. Currently uses KFD MINOR=22 (extended `UPDATE_QUEUE`); will migrate to MINOR=23 when KFD plan lands.** |
+| KFD ioctl + descriptor plan (`KFD_DISPATCH_LOG_DESIGN.md`) | written; **adversarially reviewed and revised** (commit `fa0764e8ee`). Today's interface (extended `UPDATE_QUEUE`, MINOR=22) documented as the ABI `lttng-kernel-ts` ships against; proposed migration (profiler ioctl, MINOR=23) decoupled from the userspace path choice |
+| Phase 1 implementation (SDK-side hybrid) | not yet started — gated on PR 5219 merge **and** on a decision to pursue the SDK-side path over LTTng consumption (`FIRMWARE_RING_HYBRID_DESIGN.md` §13.5 recommends LTTng) |
+| rocprofiler-sdk consumer of HSA `kernel_dispatch_record` LTTng events | **not yet started** — same scope as the SDK consumer for HIP/HSA API events, joins on `(queue_id, dispatch_idx)` against `rocm_hip:hip_aql_kernel_dispatch_submit` |
 | KFD implementation | not yet started — gated on KFD-team review of the plan |
 | Firmware port to non-MI350 | not yet started — **requires firmware-team engagement** |
 
@@ -245,6 +280,21 @@ designs touch entirely different layers. The firmware-ring path is
 about kernel-dispatch *timestamps*; the LTTng-UST path is about
 *API-event delivery*. Neither blocks the other. The firmware-ring side
 can ship while the LTTng-UST side ships, and vice versa.
+
+> **2026-04-30 update.** The two tracks are now actively converging.
+> The HSA-resident drainer on `users/bewelton/lttng-kernel-ts`
+> (PR #5519) emits FW kernel-dispatch records as
+> `rocm_hsa:kernel_dispatch_record` LTTng events into the same CTF
+> stream that already carries `rocm_hip:hip_aql_kernel_dispatch_submit`
+> and the curated `<api>_args` events. Schema v3's
+> `(queue_id, write_idx)` join key from the LTTng track is the same
+> `(queue_id, dispatch_idx)` join key the FW writes into each record,
+> so a single LTTng consumer can pair HIP API events with FW
+> dispatch-completion timestamps over one transport. This collapses
+> the SDK consumer surface from "two transports + two pairing paths"
+> to "one CTF stream + one CTF event-pair routine".
+> See `FIRMWARE_RING_HYBRID_DESIGN.md` §13.3 for the consumer-side
+> mechanism.
 
 ### Status: producer-side instrumentation complete; consumer side not started
 

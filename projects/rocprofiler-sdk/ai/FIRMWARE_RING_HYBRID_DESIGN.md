@@ -3,6 +3,28 @@
 > **Status:** Design proposal. Not yet implemented.
 > Companion to `KNOWN_ISSUES.md` (which catalogs the issues this design addresses).
 
+> **Status update — 2026-04-30.** This SDK-side hybrid (drainer + doorbell
+> wrapper + per-queue side table) has been overtaken by an alternative
+> implementation that moves the drainer **out of rocprofiler-sdk and into
+> the HSA runtime**, then delivers the FW kernel-dispatch records via the
+> same LTTng-UST channel that already carries HIP/HSA API events
+> (PRs #5475 and #5513 — see `TRACING_DELIVERY_RESEARCH.md` and
+> `HIGH_LEVEL_DESIGN_SUMMARY.md`). That work lives on
+> `users/bewelton/lttng-kernel-ts` (PR #5519, draft) at HEAD `e6abbfc7fa`,
+> with a per-queue drainer thread emitting `rocm_hsa:kernel_dispatch_record`
+> events and a measured 169% combined-record capture rate on graphbench
+> (~85% per record_type). It bypasses PR 5219 entirely (no doorbell
+> wrapper, no per-queue side table, no SDK-allocated state).
+>
+> **The body of this plan is preserved in full** because (a) it remains
+> the reference design for the SDK-side path if we choose to revive it
+> (e.g., if LTTng-UST consumption proves unworkable for some downstream
+> tool), and (b) several of its mechanisms — particularly the doorbell
+> wrapper from PR 5219 — are still relevant to other rocprofiler-sdk work.
+> See **Section 13** below for how the rocprofiler-sdk now plans to
+> integrate against the HSA-resident drainer (two paths: consume LTTng
+> directly, or bypass HSA and query KFD via the same ioctl).
+
 This document describes a planned evolution of the MEC firmware-assisted
 dispatch tracing path (currently implemented in
 `source/lib/rocprofiler-sdk/kernel_dispatch/firmware_ring_drainer.{cpp,hpp}`)
@@ -1130,7 +1152,203 @@ Closes KNOWN_ISSUES item 10.
 
 ---
 
-## Section 13 — Risk Register
+## Section 13 — SDK integration with the HSA-resident drainer (the path actually shipped)
+
+> This section was added in the 2026-04-30 status update and describes
+> an alternative implementation path that has since been built on
+> `users/bewelton/lttng-kernel-ts` (PR #5519). The SDK-side hybrid
+> described in Sections 1–12 above remains a valid reference design;
+> Sections 14 (Risk Register) and Appendices A–B carry over unchanged.
+
+### 13.1 What the HSA-resident drainer ships
+
+Branch: `users/bewelton/lttng-kernel-ts`. PR: `ROCm/rocm-systems#5519`
+(draft). HEAD: `e6abbfc7fa`. Spec:
+`~/ai/specs/2026-04-27-hsa-lttng-kernel-dispatch-tracing-design.md`
+(8-round adversarial debate, 27 claims accepted).
+
+* MEC writes 16-byte records `{ts_lo, ts_hi, record_type, dispatch_idx}`
+  into the per-queue ring exactly as today (no firmware change vs the
+  current MI350 build).
+* HSA's `core/runtime/dispatch_log.cpp` owns the drainer. One worker
+  thread per active queue (4 commits at HEAD `e6abbfc7fa`, including
+  two stage-1 + stage-2 debate rounds for thread spawn failure handling
+  + destructor self-join hardening). Sentinel-scan design: each slot is
+  read with `__atomic_load_n(record_type, ACQUIRE)`, emitted, then
+  zeroed; a `record_type==0` slot is the empty marker. No FW write
+  pointer is required (the substrate publishes none).
+* HSA does not interpret `record_type` — it emits one
+  `rocm_hsa:kernel_dispatch_record(queue_id, dispatch_idx, gpu_ts,
+  record_type, corr_id, parent_corr_id)` LTTng tracepoint per
+  non-zero record. Consumers join records on
+  `(queue_id, dispatch_idx)` and choose their own start/end polarity
+  for the FW version they target.
+* Hooks into `core/runtime/hsa.cpp::on_queue_create / on_queue_destroy`
+  drive the per-queue enable/disable lifecycle (spec §4).
+* Buffer registration uses today's KFD interface — extended
+  `AMDKFD_IOC_UPDATE_QUEUE` with `dispatch_record_buffer_addr` +
+  `dispatch_record_buffer_size` trailing fields, KFD MINOR=22.
+  See `KFD_DISPATCH_LOG_DESIGN.md` §0 for the current ABI and §2 for
+  the proposed migration to the profiler ioctl (MINOR=23).
+* Measured at 169.3% combined-record capture rate (~85% per
+  record_type) on graphbench, 5.17M HIP submits per run. Variance
+  158.7%–184.0% across reps. Two perf experiments tried this session
+  (256K ring, batched-translate-with-lock-once) both regressed and
+  were reverted; 64K ring + per-queue threads is the local optimum.
+
+### 13.2 What this means for rocprofiler-sdk
+
+The SDK no longer needs to:
+
+* Run its own polling drainer thread (`firmware_ring_drainer.cpp` —
+  the entire file becomes obsolete).
+* Maintain a per-queue side table for correlation capture (Sections
+  4.1–4.3 of this plan — the entire `firmware_ring_correlation.cpp`
+  becomes obsolete).
+* Wrap `hsa_signal_store_*` for doorbell capture (Section 4.2 — the
+  entire wrapper becomes obsolete).
+* Allocate completion signals (already true in the SDK-side hybrid;
+  remains true here).
+* Depend on PR 5219 (`users/bewelton/no-interecept-queue`) for the
+  doorbell-wrap infrastructure (Section 12 critical-dependency goes
+  away).
+
+What the SDK still needs to do:
+
+* Pair the FW dispatch records with the HIP/HSA API events that
+  enqueued them (correlation, parent attribution, external-correlation
+  IDs, launching tid).
+* Synthesize `ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH` /
+  `ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH` records in the
+  shapes existing tools expect.
+* Drive the `KERNEL_DISPATCH_ENQUEUE` ENTER/EXIT phase callbacks
+  (the existing HIP wrappers in PR #5475 already fire these via
+  `rocm_hip:hip_aql_kernel_dispatch_submit` — see §13.3).
+
+There are two integration paths to choose from. Both are viable.
+
+### 13.3 SDK integration path A — consume the LTTng CTF stream (recommended)
+
+The HSA drainer emits `rocm_hsa:kernel_dispatch_record` events into the
+same CTF channel that already carries HIP API events
+(`rocm_hip:hip_api_enter`, `rocm_hip:hip_aql_kernel_dispatch_submit`,
+the curated `<api>_args` events, etc. — see PR #5475 and
+`TRACING_DELIVERY_RESEARCH.md`). One CTF stream, one consumer, one
+join.
+
+**Mechanism.** rocprofiler-sdk subscribes via the LTTng-live protocol
+(`libbabeltrace2` + `liblttng-ctl`) for live consumption, or reads the
+on-disk CTF directory for offline. It walks events in CTF
+event-header timestamp order and joins:
+
+* `rocm_hip:hip_aql_kernel_dispatch_submit(queue_id, write_idx, …)`
+  — fired on the launching thread. Carries the correlation_id from
+  the HIP API ENTER's TLS stack, the launching tid (from the CTF
+  channel context's `vtid`), the external-correlation snapshot, and
+  the AQL packet's workgroup/grid/private/group sizes. Schema v3
+  already specifies `(queue_id, write_idx)` as the cross-runtime
+  join key.
+* `rocm_hsa:kernel_dispatch_record(queue_id, dispatch_idx, gpu_ts,
+  record_type, …)` — fired by the HSA per-queue drainer thread.
+  Carries the GPU-domain timestamp (already translated to system
+  clock by the drainer via `GpuAgent::TranslateTime`).
+
+The join is `(queue_id, write_idx) == (queue_id, dispatch_idx)`
+(both are `read_dispatch_id[31:0]` masked the same way). The
+`hip_aql_kernel_dispatch_submit` event provides every datum the
+existing `KERNEL_DISPATCH_COMPLETE` record carries except the GPU
+timestamps; the `kernel_dispatch_record` events provide those.
+
+**Pros.**
+* Zero new IPC mechanisms: the LTTng-UST transport is already vendored
+  (LTTng-UST 2.13.7 + URCU 0.14.0 submodules under
+  `projects/{clr,rocr-runtime}/external/`) and validated.
+* Single CTF stream means tools other than rocprofiler-sdk
+  (babeltrace2 directly, custom CTF readers, perfetto importers) get
+  the same records for free.
+* Works for late-attach: a tool that creates an LTTng session after
+  the workload starts captures everything from session-start onward
+  with no producer cooperation.
+* Multi-process / MPI safe: the CTF channel context's `(vpid, vtid)`
+  is unambiguous across ranks (schema v3 design choice — see
+  `HIGH_LEVEL_DESIGN_SUMMARY.md`).
+* Works even if rocprofiler-sdk is not loaded — the stream is
+  consumable by anyone.
+
+**Cons.**
+* The SDK's `KERNEL_DISPATCH_ENQUEUE` callbacks have to fire from a
+  CTF event delivery, not from the launching thread directly. For
+  buffer-tracing consumers this is fine. For callback-tracing
+  consumers that expect their callback to run on the launching
+  thread, this is a behavior change — the callback fires on
+  whichever thread runs the LTTng-live consumer.
+* Adds a libbabeltrace2 dependency to rocprofiler-sdk.
+* Requires `lttng-sessiond` to be running for live consumption (or
+  pre-recorded CTF for offline).
+
+### 13.4 SDK integration path B — bypass HSA, query KFD directly via the same ioctl
+
+The SDK keeps its own polling drainer (the existing
+`firmware_ring_drainer.cpp` in this branch), but registers the buffer
+via the same KFD ioctl HSA uses, and reads the same in-memory ring
+HSA's drainer reads. HSA's LTTng emission becomes redundant from the
+SDK's perspective (the SDK ignores those events).
+
+**Mechanism.** SDK calls `AMDKFD_IOC_UPDATE_QUEUE` with the extended
+fields (today: MINOR=22; after `KFD_DISPATCH_LOG_DESIGN.md` lands:
+MINOR=23 + `KFD_IOC_PROFILER_DISPATCH_LOG`). SDK does its own
+sentinel-scan of the ring, pairs records with the doorbell-wrapper
+side table from Sections 1–12 of this document, fires
+`KERNEL_DISPATCH_COMPLETE` on the SDK's drainer thread.
+
+**Pros.**
+* `KERNEL_DISPATCH_ENQUEUE` callbacks fire on the launching thread
+  (preserves current SDK callback semantics).
+* No libbabeltrace2 dependency.
+* No `lttng-sessiond` dependency at runtime.
+
+**Cons.**
+* Two drainer threads now read the same ring (HSA's per-queue worker
+  AND the SDK's polling thread). They must coordinate ownership of
+  the slot-zero memset, or one of them will repeatedly observe slots
+  as "empty" because the other already consumed them. Easiest
+  resolution: HSA stops draining when the SDK takes ownership (a new
+  HSA API: "release the drainer; someone else will read this ring").
+  This re-introduces SDK↔HSA coupling that the LTTng path eliminates.
+* Re-introduces all of Sections 4.1–4.3's per-queue side-table
+  machinery and the PR 5219 doorbell-wrapper dependency.
+* Other tools (babeltrace2 users, perfetto importers, crash dumpers)
+  cannot consume the FW records — only rocprofiler-sdk can.
+* On `KFD_DISPATCH_LOG_DESIGN.md`'s migration to MINOR=23, the SDK
+  has to know whether HSA already owns the buffer (HSA's
+  `SetProfiling` registers it via the same ioctl) and either
+  coordinate with HSA or fail to register.
+
+### 13.5 Recommendation
+
+Path A (consume LTTng) is recommended for the following reasons:
+
+1. It removes the SDK↔HSA ring-buffer coordination problem entirely.
+2. It collapses the SDK's drainer thread, side-table machinery, and
+   PR-5219 dependency. ~470 LOC of new SDK code is replaced by
+   ~200 LOC of CTF event-pair-and-emit logic.
+3. It makes the FW records consumable by tools other than
+   rocprofiler-sdk for free.
+4. The LTTng-UST infrastructure is already shipping in PRs #5475 +
+   #5513 — no new transport to build.
+
+Path B remains viable if downstream tooling has hard constraints
+against an `lttng-sessiond` runtime dependency. In that case, the
+SDK-side hybrid in Sections 1–12 of this document is the
+implementation reference, with two modifications: (a) the SDK
+registers the ring via the KFD ioctl directly (today: extended
+UPDATE_QUEUE; after the `KFD_DISPATCH_LOG_DESIGN.md` migration:
+profiler ioctl), and (b) HSA's per-queue drainer must be opt-out so
+the SDK can take ownership.
+
+---
+
+## Section 14 — Risk Register
 
 | # | Risk                                                                                       | Likelihood   | Impact   | Mitigation                                                                                  |
 |---|--------------------------------------------------------------------------------------------|--------------|----------|---------------------------------------------------------------------------------------------|
