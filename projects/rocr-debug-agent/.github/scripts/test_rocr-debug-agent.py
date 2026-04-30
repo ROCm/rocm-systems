@@ -10,7 +10,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Optional, Tuple
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s: %(message)s"
@@ -136,7 +136,7 @@ def get_rocm_tree_root(try_rocm_path: bool = False) -> Path:
     return rocm_root
 
 
-def get_default_paths(try_rocm_path: bool = False) -> Dict[str, Path]:
+def get_default_paths(try_rocm_path: bool = False) -> Tuple[Path, Path]:
     """
     Get default paths for test binary and script.
 
@@ -144,7 +144,7 @@ def get_default_paths(try_rocm_path: bool = False) -> Dict[str, Path]:
         try_rocm_path: If True, try ROCM_PATH environment variable first.
 
     Returns:
-        Dictionary containing 'test_bin' and 'test_script' paths.
+        Tuple of (test_bin, test_script) paths.
 
     Raises:
         SystemExit: If paths cannot be resolved or don't exist.
@@ -165,26 +165,7 @@ def get_default_paths(try_rocm_path: bool = False) -> Dict[str, Path]:
         logger.error(f"[X] Error: Test script not found: {test_script}")
         sys.exit(1)
 
-    return {
-        "test_bin": test_bin,
-        "test_script": test_script,
-    }
-
-
-def get_python_executable() -> str:
-    """
-    Validates and returns the Python executable path.
-
-    Returns:
-        Path to Python executable.
-
-    Raises:
-        SystemExit: If valid Python executable cannot be found.
-    """
-    if not sys.executable or not os.path.exists(sys.executable):
-        logger.error("[X] Error: Could not identify a valid Python executable path.")
-        sys.exit(1)
-    return sys.executable
+    return test_bin, test_script
 
 
 def print_section(
@@ -262,11 +243,8 @@ def print_section(
 
 
 def run_tests(
-    python_executable: str,
     test_script: Path,
-    working_dir: Path,
     test_bin_dir: Path,
-    env_vars: Optional[Dict[str, str]] = None,
     max_retries: int = 3,
     retry_delay: int = 5,
 ) -> None:
@@ -274,30 +252,24 @@ def run_tests(
     Runs the testsuite with a retry mechanism.
 
     Args:
-        python_executable: Path to Python interpreter.
         test_script: Path to test script.
-        working_dir: Working directory for test execution.
         test_bin_dir: Directory containing test binaries.
-        env_vars: Environment variables for test execution.
         max_retries: Maximum number of retry attempts.
         retry_delay: Base delay in seconds between retries.
 
     Raises:
         SystemExit: If all retry attempts fail.
     """
-    if env_vars is None:
-        env_vars = os.environ.copy()
-
-    cmd = [python_executable, str(test_script), str(test_bin_dir)]
+    cmd = [sys.executable, str(test_script), str(test_bin_dir)]
 
     for attempt in range(1, max_retries + 1):
         print_section(f"Running tests (Attempt {attempt}/{max_retries})")
 
-        logger.info(f"Exec [{working_dir}]$ {shlex.join(cmd)}")
+        logger.info(f"Exec [{test_bin_dir}]$ {shlex.join(cmd)}")
 
         start_time = time.perf_counter()
         try:
-            subprocess.run(cmd, cwd=str(working_dir), check=True, env=env_vars)
+            subprocess.run(cmd, cwd=str(test_bin_dir), check=True)
 
             duration = time.perf_counter() - start_time
 
@@ -333,21 +305,12 @@ def main() -> None:
 
     print_section("Path discovery")
     # Discover paths using automatic logic.
-    defaults = get_default_paths(try_rocm_path=args.try_rocm_path)
-    rocr_debug_agent_test_bin = defaults["test_bin"]
-    rocr_debug_agent_test_script = defaults["test_script"]
+    test_bin, test_script = get_default_paths(try_rocm_path=args.try_rocm_path)
+    test_bin_dir = test_bin.parent
 
-    # Derive the test binary directory.
-    test_bin_dir = rocr_debug_agent_test_bin.parent
-
-    logger.info(f"Test Binary: {rocr_debug_agent_test_bin}")
-    logger.info(f"Test Script: {rocr_debug_agent_test_script}")
+    logger.info(f"Test Binary: {test_bin}")
+    logger.info(f"Test Script: {test_script}")
     logger.info(f"Test Bin Dir: {test_bin_dir}")
-
-    # Setup Python executable.
-    python_executable = get_python_executable()
-
-    logger.info(f"Located python executable: {python_executable}")
 
     print_section("Disabling core file generation")
 
@@ -356,9 +319,7 @@ def main() -> None:
 
     # Run tests.
     run_tests(
-        python_executable=python_executable,
-        test_script=rocr_debug_agent_test_script,
-        working_dir=test_bin_dir,
+        test_script=test_script,
         test_bin_dir=test_bin_dir,
         max_retries=args.max_retries,
         retry_delay=args.retry_delay,
