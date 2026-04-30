@@ -1389,7 +1389,12 @@ construct_counter_collection_profile(rocprofiler_agent_id_t       agent_id,
 
         // search the gpu agent counter info for a counter with a matching name
         bool counter_found = false;
-        for(const auto& citr : gpu_agents_counter_info.at(agent_id))
+        auto counter_vec   = gpu_agents_counter_info.find(agent_id);
+        ROCP_FATAL_IF(counter_vec == gpu_agents_counter_info.end())
+            << "No counter information found for agent " << agent_v->node_id << " (gpu-"
+            << agent_v->gpu_index << ", " << agent_v->name << "). Unable to find counter: " << itr;
+
+        for(const auto& citr : counter_vec->second)
         {
             if(name_v == std::string_view{citr.name})
             {
@@ -1613,12 +1618,15 @@ pc_sampling_callback(rocprofiler_context_id_t /* context_id*/,
 }
 
 void
-att_shader_data_callback(rocprofiler_agent_id_t  agent,
-                         int64_t                 se_id,
-                         void*                   se_data,
-                         size_t                  data_size,
-                         rocprofiler_user_data_t userdata)
+att_shader_data_callback(rocprofiler_agent_id_t                       agent,
+                         int64_t                                      se_id,
+                         void*                                        se_data,
+                         size_t                                       data_size,
+                         rocprofiler_thread_trace_shader_data_flags_t flags,
+                         rocprofiler_user_data_t                      userdata)
 {
+    if((flags & ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_GPU_BUFFER_FULL) != 0)
+        ROCP_CI_LOG(WARNING) << "Thread trace buffer full!";
     std::lock_guard<std::mutex> lock(att_shader_data);
     std::stringstream           filename;
     auto dispatch_id = static_cast<rocprofiler_dispatch_id_t>(userdata.value);

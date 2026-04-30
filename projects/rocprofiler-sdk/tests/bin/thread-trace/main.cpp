@@ -25,18 +25,20 @@
 #    undef NDEBUG
 #endif
 
+#include <rocprofiler-sdk-roctx/roctx.h>
+
 #include <cassert>
 #include <cstdint>
 #include <cstdlib>
 #include <iostream>
 #include "hip/hip_runtime.h"
 
-// Two waves per SIMD on MI300
-#define DATA_SIZE          (304 * 64 * 4 * 2)
+// 304 CUs * 64 threads * 4 simds * 8 slots on MI300
+#define DATA_SIZE          (304 * 256 * 8)
 #define HIP_API_CALL(CALL) assert((CALL) == hipSuccess)
 
 #define SHM_SIZE  64
-#define LOOPCOUNT 4
+#define LOOPCOUNT 15
 
 __global__ void
 branching_kernel(float* __restrict__ a, const float* __restrict__ b, const float* __restrict__ c);
@@ -45,8 +47,9 @@ __global__ void
 looping_lds_kernel(float* __restrict__ a,
                    const float* __restrict__ b,
                    const float* __restrict__ c,
-                   size_t size,
-                   size_t loopcount);
+                   size_t   size,
+                   size_t   loopcount,
+                   uint32_t ttracedata);
 
 class hipMemory
 {
@@ -71,13 +74,30 @@ main(int /*argc*/, char** /*argv*/)
     hipMemory dst(DATA_SIZE);
 
     HIP_API_CALL(hipDeviceSynchronize());
+    roctxProfilerResume(0);
 
-    for(size_t i = 0; i < LOOPCOUNT; i++)
+    bool is_triple_buffer = std::getenv("TRIPLEBUFFER") ? atoi(std::getenv("TRIPLEBUFFER")) : false;
+    bool start_and_stop   = std::getenv("STARTSTOP") ? atoi(std::getenv("STARTSTOP")) : false;
+
+    int loopcount = LOOPCOUNT;
+    if(start_and_stop)
+        loopcount = 5000;  // prevent multiple-cmds test taking too long / timeout
+    else if(is_triple_buffer)
+        loopcount = 30000;
+
+    for(int i = 0; i < loopcount; i++)
     {
+        if(start_and_stop && (i % 500) == 0)
+        {
+            roctxProfilerPause(0);
+            roctxProfilerResume(0);
+        }
+
         hipLaunchKernelGGL(
             branching_kernel, dim3(DATA_SIZE / 64), dim3(64), 0, 0, dst.ptr, src1.ptr, src2.ptr);
         HIP_API_CALL(hipGetLastError());
 
+        uint32_t tracedata = is_triple_buffer ? i : 0xDEADBEEF;
         hipLaunchKernelGGL(looping_lds_kernel,
                            dim3(DATA_SIZE / 64),
                            dim3(64),
@@ -87,10 +107,15 @@ main(int /*argc*/, char** /*argv*/)
                            src1.ptr,
                            src2.ptr,
                            DATA_SIZE,
-                           LOOPCOUNT);
+                           LOOPCOUNT,
+                           tracedata);
         HIP_API_CALL(hipGetLastError());
         HIP_API_CALL(hipDeviceSynchronize());
     }
+
+    // We use EXECUTE_PAUSE to test for running triple buffering after global destructor
+    const char* do_pause = std::getenv("EXECUTE_PAUSE");
+    if(do_pause == nullptr || atoi(do_pause) == 1) roctxProfilerPause(0);
 
     return 0;
 }

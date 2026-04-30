@@ -25,7 +25,7 @@
 #    undef NDEBUG
 #endif
 
-#include "trace_callbacks.hpp"
+#include "thread-trace-callbacks.hpp"
 
 #include <atomic>
 #include <mutex>

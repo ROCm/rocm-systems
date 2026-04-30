@@ -182,7 +182,12 @@ TEST(thread_trace, configure_test)
                rocprofiler_dispatch_id_t,
                void*,
                rocprofiler_user_data_t*) { return ROCPROFILER_THREAD_TRACE_CONTROL_NONE; },
-            [](rocprofiler_agent_id_t, int64_t, void*, size_t, rocprofiler_user_data_t) {},
+            [](rocprofiler_agent_id_t,
+               int64_t,
+               void*,
+               size_t,
+               rocprofiler_thread_trace_shader_data_flags_t,
+               rocprofiler_user_data_t) {},
             nullptr);
     }
 
@@ -236,7 +241,12 @@ TEST(thread_trace, perfcounters_configure_test)
                    rocprofiler_dispatch_id_t,
                    void*,
                    rocprofiler_user_data_t*) { return ROCPROFILER_THREAD_TRACE_CONTROL_NONE; },
-                [](rocprofiler_agent_id_t, int64_t, void*, size_t, rocprofiler_user_data_t) {},
+                [](rocprofiler_agent_id_t,
+                   int64_t,
+                   void*,
+                   size_t,
+                   rocprofiler_thread_trace_shader_data_flags_t,
+                   rocprofiler_user_data_t) {},
                 nullptr),
             "configure");
     }
@@ -297,12 +307,16 @@ TEST(thread_trace, perfcounters_configure_fail_test)
                rocprofiler_dispatch_id_t,
                void*,
                rocprofiler_user_data_t*) { return ROCPROFILER_THREAD_TRACE_CONTROL_NONE; },
-            [](rocprofiler_agent_id_t, int64_t, void*, size_t, rocprofiler_user_data_t) {},
+            [](rocprofiler_agent_id_t,
+               int64_t,
+               void*,
+               size_t,
+               rocprofiler_thread_trace_shader_data_flags_t,
+               rocprofiler_user_data_t) {},
             nullptr);
 
         EXPECT_NE(status, ROCPROFILER_STATUS_SUCCESS);
     }
-
     context::pop_client(1);
 }
 
@@ -327,7 +341,7 @@ TEST(thread_trace, perfcounters_aql_options_test)
             if(metric.name() == counter_name)
                 _params.perfcounters.push_back({std::atoi(metric.event().c_str()), simd_mask});
     _params.perfcounter_ctrl = 2;
-    auto new_tracer          = std::make_unique<thread_trace::ThreadTracerQueue>(
+    auto new_tracer          = std::make_unique<thread_trace::ThreadTracerAgent>(
         _params, begin(agents)->second.get_rocp_agent()->id);
 
     ASSERT_EQ(new_tracer->factory->aql_params.size(),
@@ -373,7 +387,12 @@ query_available_agents(rocprofiler_agent_version_t /* version */,
             agent->id,
             params.data(),
             params.size(),
-            [](rocprofiler_agent_id_t, int64_t, void*, size_t, rocprofiler_user_data_t) {},
+            [](rocprofiler_agent_id_t,
+               int64_t,
+               void*,
+               size_t,
+               rocprofiler_thread_trace_shader_data_flags_t,
+               rocprofiler_user_data_t) {},
             rocprofiler_user_data_t{});
     }
     return ROCPROFILER_STATUS_SUCCESS;
@@ -395,4 +414,112 @@ TEST(thread_trace, agent_configure_test)
                                                         sizeof(rocprofiler_agent_t),
                                                         &ctx),
                      "Failed to find GPU agents");
+
+    context::pop_client(1);
+}
+
+TEST(thread_trace, triple_buffer_multiple_shader)
+{
+    ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
+    test_init();
+
+    registration::init_logging();
+    registration::set_init_status(-1);
+    context::push_client(1);
+    rocprofiler_context_id_t ctx{0};
+    ROCPROFILER_CALL(rocprofiler_create_context(&ctx), "context creation failed");
+
+    auto configure_agents = [](rocprofiler_agent_version_t /* version */,
+                               const void** agents,
+                               size_t       num_agents,
+                               void*        ctx_ptr) {
+        for(size_t idx = 0; idx < num_agents; idx++)
+        {
+            const auto* agent = static_cast<const rocprofiler_agent_v0_t*>(agents[idx]);
+            if(agent->type != ROCPROFILER_AGENT_TYPE_GPU) continue;
+
+            auto parameters = std::vector<rocprofiler_thread_trace_parameter_t>{};
+            parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_BUFFERING_MODE,
+                                  ROCPROFILER_THREAD_TRACE_PARAMETER_BUFFERING_MODE_TRIPLE_BUFFER});
+            parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_SHADER_ENGINE_MASK, {0x3}});
+
+            auto status = rocprofiler_configure_device_thread_trace_service(
+                *reinterpret_cast<rocprofiler_context_id_t*>(ctx_ptr),
+                agent->id,
+                parameters.data(),
+                parameters.size(),
+                [](rocprofiler_agent_id_t,
+                   int64_t,
+                   void*,
+                   size_t,
+                   rocprofiler_thread_trace_shader_data_flags_t,
+                   rocprofiler_user_data_t) {},
+                rocprofiler_user_data_t{});
+
+            return status;
+        }
+        return ROCPROFILER_STATUS_ERROR;
+    };
+
+    auto status = rocprofiler_query_available_agents(
+        ROCPROFILER_AGENT_INFO_VERSION_0, configure_agents, sizeof(rocprofiler_agent_t), &ctx);
+    ASSERT_EQ(status, ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT);
+
+    context::pop_client(1);
+}
+
+TEST(thread_trace, triple_buffer_dispatch_mode)
+{
+    ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
+    test_init();
+
+    registration::init_logging();
+    registration::set_init_status(-1);
+    context::push_client(1);
+    rocprofiler_context_id_t ctx{0};
+    ROCPROFILER_CALL(rocprofiler_create_context(&ctx), "context creation failed");
+
+    auto configure_agents = [](rocprofiler_agent_version_t /* version */,
+                               const void** agents,
+                               size_t       num_agents,
+                               void*        ctx_ptr) {
+        for(size_t idx = 0; idx < num_agents; idx++)
+        {
+            const auto* agent = static_cast<const rocprofiler_agent_v0_t*>(agents[idx]);
+            if(agent->type != ROCPROFILER_AGENT_TYPE_GPU) continue;
+
+            auto parameters = std::vector<rocprofiler_thread_trace_parameter_t>{};
+            parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_BUFFERING_MODE,
+                                  ROCPROFILER_THREAD_TRACE_PARAMETER_BUFFERING_MODE_TRIPLE_BUFFER});
+
+            auto status = rocprofiler_configure_dispatch_thread_trace_service(
+                *reinterpret_cast<rocprofiler_context_id_t*>(ctx_ptr),
+                agent->id,
+                parameters.data(),
+                parameters.size(),
+                [](rocprofiler_agent_id_t,
+                   rocprofiler_queue_id_t,
+                   rocprofiler_async_correlation_id_t,
+                   rocprofiler_kernel_id_t,
+                   rocprofiler_dispatch_id_t,
+                   void*,
+                   rocprofiler_user_data_t*) { return ROCPROFILER_THREAD_TRACE_CONTROL_NONE; },
+                [](rocprofiler_agent_id_t,
+                   int64_t,
+                   void*,
+                   size_t,
+                   rocprofiler_thread_trace_shader_data_flags_t,
+                   rocprofiler_user_data_t) {},
+                nullptr);
+
+            return status;
+        }
+        return ROCPROFILER_STATUS_ERROR;
+    };
+
+    auto status = rocprofiler_query_available_agents(
+        ROCPROFILER_AGENT_INFO_VERSION_0, configure_agents, sizeof(rocprofiler_agent_t), &ctx);
+    ASSERT_EQ(status, ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT);
+
+    context::pop_client(1);
 }

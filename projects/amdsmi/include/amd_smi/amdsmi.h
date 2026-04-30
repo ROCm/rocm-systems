@@ -3245,6 +3245,92 @@ amdsmi_status_t amdsmi_get_processor_type(amdsmi_processor_handle processor_hand
                                           processor_type_t* processor_type);
 
 /**
+ *  @brief Get information about the given processor
+ *
+ *  @ingroup tagProcDiscovery
+ *
+ *  @platform{gpu_bm_linux} @platform{host} @platform{cpu_bm} @platform{guest_1vf}
+ *  @platform{guest_mvf} @platform{guest_windows}
+ *
+ *  @details This function retrieves processor information. The @p processor_handle must
+ *  be provided to retrieve the processor ID. The implementation depends only on
+ *  ::amdsmi_get_processor_type and is available regardless of whether the library was
+ *  built with ENABLE_ESMI_LIB.
+ *
+ *  @param[in] processor_handle a processor handle
+ *
+ *  @param[in] len the length of the caller provided buffer @p name.
+ *
+ *  @param[out] name The id of the processor.
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ */
+amdsmi_status_t amdsmi_get_processor_info(amdsmi_processor_handle processor_handle, size_t len,
+                                          char* name);
+
+/**
+ *  @brief Get respective processor counts from the processor handles
+ *
+ *  @ingroup tagProcDiscovery
+ *
+ *  @platform{gpu_bm_linux} @platform{host} @platform{cpu_bm}
+ *
+ *  @details This function classifies a list of processor handles and returns the per-type
+ *  totals. Counts are derived purely from ::amdsmi_get_processor_type and do not require
+ *  ENABLE_ESMI_LIB; on builds without ESMI, @p nr_cpusockets and @p nr_cpucores will be 0.
+ *
+ *  @param[in] processor_handles A pointer to a block of memory to which the
+ *  ::amdsmi_processor_handle values will be written. This value may be NULL.
+ *
+ *  @param[in] processor_count total processor count per socket
+ *
+ *  @param[out] nr_cpusockets Total number of cpu sockets
+ *
+ *  @param[out] nr_cpucores Total number of cpu cores
+ *
+ *  @param[out] nr_gpus Total number of gpu devices
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ */
+amdsmi_status_t amdsmi_get_processor_count_from_handles(amdsmi_processor_handle* processor_handles,
+                                                        uint32_t* processor_count,
+                                                        uint32_t* nr_cpusockets,
+                                                        uint32_t* nr_cpucores, uint32_t* nr_gpus);
+
+/**
+ *  @brief Returns a list of processor handles of the specified type in the system.
+ *
+ *  @ingroup tagProcDiscovery
+ *
+ *  @platform{gpu_bm_linux} @platform{host} @platform{cpu_bm}
+ *
+ *  @details This function retrieves processor list as per the processor type
+ *  from the total processor handles list.
+ *  The @p list of processor_handles and processor type must be provided.
+ *
+ *  @note This function fills the user-provided buffer with processor handles of the given type
+ *  (e.g., GPU, NIC). The processor handles returned are used to instantiate the rest of processor
+ *  queries in the library. If the buffer is not large enough, the call will fail.
+ *
+ *  @param[in] socket_handle The socket to query.
+ *
+ *  @param[in] processor_type The type of processor to query (see ::processor_type_t).
+ *
+ *  @param[out] processor_handles Reference to list of processor handles returned by
+ *  the library. Buffer must be allocated by user.
+ *
+ *  @param[in,out] processor_count As input, the size of the provided buffer.
+ *  As output, number of processor handles in the buffer.
+ *  Parameter must be allocated by user.
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ */
+amdsmi_status_t amdsmi_get_processor_handles_by_type(amdsmi_socket_handle socket_handle,
+                                                     processor_type_t processor_type,
+                                                     amdsmi_processor_handle* processor_handles,
+                                                     uint32_t* processor_count);
+
+/**
  *  @brief Get processor handle with the matching bdf.
  *
  *  @ingroup tagProcDiscovery
@@ -7347,88 +7433,6 @@ amdsmi_status_t amdsmi_set_gpu_ptl_formats(amdsmi_processor_handle processor_han
  */
 amdsmi_status_t amdsmi_get_cpu_handles(uint32_t* cpu_count,
                                        amdsmi_processor_handle* processor_handles);
-
-/**
- *  @brief Get information about the given processor
- *
- *  @ingroup tagEsmiProcDiscovery
- *
- *  @platform{cpu_bm}
- *
- *  @details This function retrieves processor information. The @p processor_handle must
- *  be provided to retrieve the processor ID.
- *
- *  @param[in] processor_handle a processor handle
- *
- *  @param[in] len the length of the caller provided buffer @p name.
- *
- *  @param[out] name The id of the processor.
- *
- *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
- */
-amdsmi_status_t amdsmi_get_processor_info(amdsmi_processor_handle processor_handle, size_t len,
-                                          char* name);
-
-/**
- *  @brief Get respective processor counts from the processor handles
- *
- *  @ingroup tagEsmiProcDiscovery
- *
- *  @platform{cpu_bm}
- *
- *  @details This function retrieves respective processor counts information.
- *  The @p processor_handle must be provided to retrieve the processor ID.
- *
- *  @param[in] processor_handles A pointer to a block of memory to which the
- *  ::amdsmi_processor_handle values will be written. This value may be NULL.
- *
- *  @param[in] processor_count total processor count per socket
- *
- *  @param[out] nr_cpusockets Total number of cpu sockets
- *
- *  @param[out] nr_cpucores Total number of cpu cores
- *
- *  @param[out] nr_gpus Total number of gpu devices
- *
- *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
- */
-amdsmi_status_t amdsmi_get_processor_count_from_handles(amdsmi_processor_handle* processor_handles,
-                                                        uint32_t* processor_count,
-                                                        uint32_t* nr_cpusockets,
-                                                        uint32_t* nr_cpucores, uint32_t* nr_gpus);
-
-/**
- *  @brief Returns a list of processor handles of the specified type in the system.
- *
- *  @ingroup tagEsmiProcDiscovery
- *
- *  @platform{host} @platform{gpu_bm_linux} @platform{cpu_bm}
- *
- *  @details This function retrieves processor list as per the processor type
- *  from the total processor handles list.
- *  The @p list of processor_handles and processor type must be provided.
- *
- *  @note This function fills the user-provided buffer with processor handles of the given type
- *  (e.g., GPU, NIC). The processor handles returned are used to instantiate the rest of processor
- *  queries in the library. If the buffer is not large enough, the call will fail.
- *
- *  @param[in] socket_handle The socket to query.
- *
- *  @param[in] processor_type The type of processor to query (see ::processor_type_t).
- *
- *  @param[out] processor_handles Reference to list of processor handles returned by
- *  the library. Buffer must be allocated by user.
- *
- *  @param[in,out] processor_count As input, the size of the provided buffer.
- *  As output, number of processor handles in the buffer.
- *  Parameter must be allocated by user.
- *
- *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
- */
-amdsmi_status_t amdsmi_get_processor_handles_by_type(amdsmi_socket_handle socket_handle,
-                                                     processor_type_t processor_type,
-                                                     amdsmi_processor_handle* processor_handles,
-                                                     uint32_t* processor_count);
 
 /**
  *  @brief Get the list of the cpu core handles in a system.
