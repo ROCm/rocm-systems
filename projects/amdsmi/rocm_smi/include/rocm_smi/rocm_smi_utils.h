@@ -56,6 +56,9 @@
 
 namespace amd::smi {
 
+// Human-readable AMD vendor name, shared across board/GPU info functions
+constexpr std::string_view kAmdVendorName = "Advanced Micro Devices Inc. [AMD/ATI]";
+
 pthread_mutex_t* GetMutex(uint32_t dv_ind);
 int SameFile(const std::string fileA, const std::string fileB);
 bool FileExists(char const* filename);
