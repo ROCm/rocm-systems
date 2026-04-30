@@ -127,7 +127,9 @@ def get_build_dir(tests_path: Path, build_dir: str) -> Path:
     return tests_path / path
 
 
-def cmake_config(rocm_path: Path, tests_path: Path, build_dir: Path, env: Dict[str, str]) -> None:
+def cmake_config(
+    rocm_path: Path, tests_path: Path, build_dir: Path, env: Dict[str, str]
+) -> None:
     sysdeps_path = rocm_path / "lib" / "rocm_sysdeps"
     llvm_bin_path = get_llvm_bin_path(rocm_path)
     clang_path = llvm_bin_path / "amdclang"
