@@ -1808,7 +1808,7 @@ static struct rcclRomeModel romeTopoModels[] = {
 };
 
 static_assert(sizeof(romeTopoModels)/sizeof(romeTopoModels[0]) > (size_t)RCCL_ROME_TOPO_PRESET_MODEL_4H4P_IDX,
-  "romeTopoModels[] ordering: rome_model_68 must stay at RCCL_ROME_TOPO_PRESET_MODEL_4H4P_IDX for parse4H4P");
+  "romeTopoModels[] must contain an entry at RCCL_ROME_TOPO_PRESET_MODEL_4H4P_IDX for parse4H4P");
 
 // This environment variable allows disabling of the reversal the graph parsing
 RCCL_PARAM(ModelReversalDisable, "MODEL_REVERSAL_DISABLE", 0);
