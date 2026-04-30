@@ -60,6 +60,14 @@ def test_default_limits_are_conservative_positive_values():
         assert info["limit"] > 0, block
 
 
+def test_default_limits_match_minimum_arch_limit():
+    data = load_yaml("pmc_limits")
+    for block, info in data["per_block_limits"].items():
+        arch_limits = info.get("arch_limits", {})
+        if arch_limits:
+            assert info["limit"] == min(arch_limits.values()), block
+
+
 def test_arch_limits_match_rocprofiler_compute_mi_gpu_spec():
     data = load_yaml("pmc_limits")
     per_block = data["per_block_limits"]

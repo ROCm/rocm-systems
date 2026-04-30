@@ -1,10 +1,12 @@
 # Per-block counter collection limits used by rocprofv3 pass planning.
+# The generic limit is the minimum of the known architecture-specific limits so
+# unknown architectures take the conservative path.
 # Architecture-specific values mirror the rocprofiler-compute
 # mi_gpu_spec.yaml perfmon_config table in this repository.
 
 per_block_limits:
   SQ:
-    limit: 4
+    limit: 8
     arch_limits:
       gfx908: 8
       gfx90a: 8
@@ -15,7 +17,7 @@ per_block_limits:
       gfx1151: 8
     note: "Shader Sequencer"
   GRBM:
-    limit: 4
+    limit: 2
     arch_limits:
       gfx908: 2
       gfx90a: 2
@@ -47,7 +49,7 @@ per_block_limits:
       gfx1151: 4
     note: "Texture Cache Per-CU (vector L1)"
   TA:
-    limit: 4
+    limit: 2
     arch_limits:
       gfx908: 2
       gfx90a: 2
@@ -58,7 +60,7 @@ per_block_limits:
       gfx1151: 2
     note: "Texture Address unit"
   TD:
-    limit: 4
+    limit: 2
     arch_limits:
       gfx908: 2
       gfx90a: 2
@@ -68,7 +70,7 @@ per_block_limits:
       gfx950: 2
     note: "Texture Data unit"
   CPC:
-    limit: 4
+    limit: 2
     arch_limits:
       gfx908: 2
       gfx90a: 2
@@ -79,7 +81,7 @@ per_block_limits:
       gfx1151: 2
     note: "Command Processor Compute"
   CPF:
-    limit: 4
+    limit: 2
     arch_limits:
       gfx908: 2
       gfx90a: 2
@@ -89,7 +91,7 @@ per_block_limits:
       gfx950: 2
     note: "Command Processor Fetch"
   SPI:
-    limit: 4
+    limit: 6
     arch_limits:
       gfx908: 6
       gfx90a: 6
@@ -110,7 +112,7 @@ per_block_limits:
       gfx950: 4
     note: "Global Data Share"
   GCEA:
-    limit: 4
+    limit: 2
     arch_limits:
       gfx1151: 2
     note: "Graphics Command Engine Arbiter"
