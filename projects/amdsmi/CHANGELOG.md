@@ -6,6 +6,11 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ## amd_smi_lib for ROCm 7.13.0
 
+### Changed
+
+- **Renamed `processor_type_t` enum typedef to `amdsmi_processor_type_t`**.
+  - The unprefixed typedef name did not follow the `amdsmi_*_t` convention used throughout `amdsmi.h` and was easy to collide with identifiers defined by other system-management libraries. New code should use `amdsmi_processor_type_t`. The old name is preserved as a backward-compatibility typedef alias, so existing callers continue to compile unchanged.
+
 ### Added
 
 - **Added APU metrics support (table versions 2.4 and 3.0)**.  

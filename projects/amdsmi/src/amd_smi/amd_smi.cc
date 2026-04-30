@@ -675,8 +675,8 @@ amdsmi_status_t amdsmi_get_switch_processor_handles(amdsmi_socket_handle socket_
       amd::smi::AMDSmiSystem::getInstance().handle_to_socket(socket_handle, &socket);
   if (r != AMDSMI_STATUS_SUCCESS) return r;
 
-  processor_type_t processor_type =
-      static_cast<processor_type_t>(AMDSMI_PROCESSOR_TYPE_BRCM_SWITCH);
+  amdsmi_processor_type_t processor_type =
+      static_cast<amdsmi_processor_type_t>(AMDSMI_PROCESSOR_TYPE_BRCM_SWITCH);
   std::vector<amd::smi::AMDSmiProcessor*>& processors = socket->get_processors(processor_type);
   uint32_t processor_size = static_cast<uint32_t>(processors.size());
   // Get the processor count only
@@ -776,7 +776,7 @@ amdsmi_status_t amdsmi_get_processor_count_from_handles(amdsmi_processor_handle*
   uint32_t count_cpusockets = 0;
   uint32_t count_cpucores = 0;
   uint32_t count_gpus = 0;
-  processor_type_t processor_type;
+  amdsmi_processor_type_t processor_type;
 
   if (processor_count == nullptr || processor_handles == nullptr) {
     return AMDSMI_STATUS_INVAL;
@@ -802,7 +802,7 @@ amdsmi_status_t amdsmi_get_processor_count_from_handles(amdsmi_processor_handle*
 }
 
 amdsmi_status_t amdsmi_get_processor_handles_by_type(amdsmi_socket_handle socket_handle,
-                                                     processor_type_t processor_type,
+                                                     amdsmi_processor_type_t processor_type,
                                                      amdsmi_processor_handle* processor_handles,
                                                      uint32_t* processor_count) {
   AMDSMI_CHECK_INIT();
@@ -833,7 +833,7 @@ amdsmi_status_t amdsmi_get_processor_handles_by_type(amdsmi_socket_handle socket
 }
 
 amdsmi_status_t amdsmi_get_processor_type(amdsmi_processor_handle processor_handle,
-                                          processor_type_t* processor_type) {
+                                          amdsmi_processor_type_t* processor_type) {
   AMDSMI_CHECK_INIT();
 
   if (processor_type == nullptr) {
@@ -7343,7 +7343,7 @@ amdsmi_status_t amdsmi_get_cpu_socket_count(uint32_t* sock_count) {
 amdsmi_status_t amdsmi_get_cpu_handles(uint32_t* cpu_count,
                                        amdsmi_processor_handle* processor_handles) {
   uint32_t soc_count = 0, index = 0, cpu_per_soc = 0;
-  processor_type_t processor_type = AMDSMI_PROCESSOR_TYPE_AMD_CPU;
+  amdsmi_processor_type_t processor_type = AMDSMI_PROCESSOR_TYPE_AMD_CPU;
   std::vector<amdsmi_processor_handle> cpu_handles;
   amdsmi_status_t status;
 
@@ -7392,7 +7392,7 @@ amdsmi_status_t amdsmi_get_cpu_handles(uint32_t* cpu_count,
 amdsmi_status_t amdsmi_get_cpucore_handles(uint32_t* cores_count,
                                            amdsmi_processor_handle* processor_handles) {
   uint32_t soc_count = 0, index = 0, cores_per_soc = 0;
-  processor_type_t processor_type = AMDSMI_PROCESSOR_TYPE_AMD_CPU_CORE;
+  amdsmi_processor_type_t processor_type = AMDSMI_PROCESSOR_TYPE_AMD_CPU_CORE;
   std::vector<amdsmi_processor_handle> core_handles;
   amdsmi_status_t status;
 
