@@ -90,6 +90,7 @@ public:
   bool sdwa_src0_sext_ = false;
   uint32_t sdwa_dst_sel_ = 6;
   uint32_t sdwa_dst_unused_ = 0;
+  bool sdwa_clamp_ = false;
 };
 
 class Vopc : public IsaInstruction<Isa> {
@@ -121,6 +122,7 @@ public:
   bool sdwa_src0_sext_ = false;
   uint32_t sdwa_dst_sel_ = 6;
   uint32_t sdwa_dst_unused_ = 0;
+  bool sdwa_clamp_ = false;
 };
 
 class Vintrp : public IsaInstruction<Isa> {

@@ -43,9 +43,12 @@ union rocprofiler_packet
 {
     hsa_ext_amd_aql_pm4_packet_t ext_amd_aql_pm4;
     hsa_kernel_dispatch_packet_t kernel_dispatch;
-    hsa_barrier_and_packet_t     barrier_and;
-    hsa_barrier_or_packet_t      barrier_or;
-    amd_aql_intercept_marker_t   marker;
+#if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x0D
+    hsa_amd_ext_kernel_dispatch_packet_t ext_kernel_dispatch;
+#endif
+    hsa_barrier_and_packet_t   barrier_and;
+    hsa_barrier_or_packet_t    barrier_or;
+    amd_aql_intercept_marker_t marker;
 
     rocprofiler_packet()
     : ext_amd_aql_pm4{null_amd_aql_pm4_packet}
@@ -70,6 +73,12 @@ union rocprofiler_packet
     rocprofiler_packet(amd_aql_intercept_marker_t val)
     : marker{val}
     {}
+
+#if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x0D
+    rocprofiler_packet(hsa_amd_ext_kernel_dispatch_packet_t val)
+    : ext_kernel_dispatch{val}
+    {}
+#endif
 
     ~rocprofiler_packet()                             = default;
     rocprofiler_packet(const rocprofiler_packet&)     = default;

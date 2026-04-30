@@ -80,9 +80,6 @@ def build(
         ShellMetacharError — any input contains shell metachars.
         subprocess.TimeoutExpired — build exceeds `timeout`.
     """
-    # Check external dependencies
-    require_tool("amdclang++")
-
     # Sanitize + confine paths
     reject_shell_metachars(source_rel)
     source = confine_to_project_root(Path(project_root), source_rel)
@@ -106,6 +103,8 @@ def build(
     if output_rel is not None:
         output = confine_to_project_root(Path(project_root), output_rel)
         argv.extend(["-o", str(output)])
+
+    require_tool("amdclang++", executable=_DEFAULT_CXX)
 
     proc = subprocess.run(
         argv,

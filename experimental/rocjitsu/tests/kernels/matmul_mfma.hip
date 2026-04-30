@@ -48,7 +48,9 @@ extern "C" __global__ void matmul_mfma(const float *__restrict__ A,
     acc = __builtin_amdgcn_mfma_f32_4x4x1f32(a, b, acc, 0, 0, 0);
   }
 
-  // Write the accumulated row back to C.
+  // Write the accumulated tile back to C.
+  // AMD MFMA convention: register index = row, lane index = column.
+  // acc[j] holds row j of the tile; lane selects the column within that row.
   for (unsigned j = 0; j < TILE; ++j)
-    C[(row_base + lane) * N + col_base + j] = acc[j];
+    C[(row_base + j) * N + col_base + lane] = acc[j];
 }

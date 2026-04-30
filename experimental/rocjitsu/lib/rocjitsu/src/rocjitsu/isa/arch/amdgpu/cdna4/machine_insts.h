@@ -90,7 +90,7 @@ struct Vop3pMachineInst {
   uint32_t vdst : 8;
   uint32_t neg_hi : 3;
   uint32_t op_sel : 3;
-  uint32_t pad_14 : 1;
+  uint32_t op_sel_hi_2 : 1;
   uint32_t clamp : 1;
   uint32_t op : 7;
   uint32_t encoding : 9;

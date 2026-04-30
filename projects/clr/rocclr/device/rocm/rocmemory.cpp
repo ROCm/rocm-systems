@@ -195,7 +195,12 @@ hsa_status_t Memory::interopMapBuffer(hsa_handle_t fdn, hsa_interop_map_flag_t f
   void* metadata;
   auto fd = fdn;
   hsa_status_t status = Hsa::interop_map_buffer(1, &agent, fd, flags, &size, &interop_deviceMemory_,
-                                                &metadata_size, (const void**)&metadata);
+#if IS_WINDOWS
+                                                nullptr, nullptr  // Cannot get metadata and metadata_size in Windows
+#else
+                                                &metadata_size, (const void**)&metadata
+#endif
+  );
   ClPrint(amd::LOG_DEBUG, amd::LOG_MEM, "Map Interop memory %p, size 0x%zx", interop_deviceMemory_,
           size);
   deviceMemory_ = static_cast<char*>(interop_deviceMemory_);  // + out.buf_offset;
@@ -241,13 +246,20 @@ bool Memory::createInteropBuffer(GLenum targetType, int miplevel) {
   amdImageDesc_->deviceID = (AmdVendor << DeviceIdVendorShift) | id;
 
 #if IS_WINDOWS
-  hsa_handle_t handle;
+  hsa_handle_t handle, resHandle;
   int offset;
 
-  if (!GlInterop::Export(owner(), targetType, miplevel, &handle, &offset)) return false;
+  if (!GlInterop::Export(owner(), targetType, miplevel, &handle, &resHandle, &offset, amdImageDesc_->data,
+                         MaxMetadataSizeDwords * sizeof(uint32_t))) {
+    return false;
+  }
+
   if (interopMapBuffer(handle, HSA_INTEROP_MAP_FLAG_KMT_HANDLE) != HSA_STATUS_SUCCESS) return false;
 
   deviceMemory_ = static_cast<char*>(interop_deviceMemory_) + offset;
+  if(!GlInterop::Detach(owner(), resHandle)) {
+    LogError("GlInterop::Detach(handle %p) failed", resHandle);
+  }
   return true;
 #else
   mesa_glinterop_export_in in = {0};

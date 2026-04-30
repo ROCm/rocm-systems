@@ -193,7 +193,7 @@ def test_route_install_patches_is_perfxpert_owned() -> None:
 
 class TestBundledPriority:
     """resolve_opencode_binary() priority order:
-       env override → _bundled → well-known → PATH.
+       repo-local patched build → _bundled.
 
     Requirement: the bundled binary wins over
     ~/.opencode/bin/opencode (upstream, unpatched).
@@ -251,26 +251,49 @@ class TestBundledPriority:
             f"bundled must win over upstream; got {resolved}"
         )
 
-    def test_env_override_wins_over_bundled(
+    def test_env_override_does_not_replace_default_bundle(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path
     ) -> None:
-        """PERFXPERT_OPENCODE_PATH trumps bundled — power-user escape hatch."""
+        """PERFXPERT_OPENCODE_PATH is not a replacement for the default bundle."""
         explicit = tmp_path / "mycustom" / "opencode"
         explicit.parent.mkdir(parents=True)
         explicit.write_text("#!/bin/sh\nexit 0\n")
         explicit.chmod(0o755)
+        bundled = tmp_path / "bundled" / "opencode"
+        bundled.parent.mkdir(parents=True)
+        bundled.write_text("#!/bin/sh\nexit 0\n")
+        bundled.chmod(0o755)
 
+        from contextlib import contextmanager
+
+        @contextmanager
+        def _fake_as_file(p):
+            yield bundled
+
+        class _FakeTraversable:
+            def __truediv__(self, other):
+                return self
+
+            def is_file(self):
+                return True
+
+        monkeypatch.setattr(opencode_launcher.resources, "as_file", _fake_as_file)
+        monkeypatch.setattr(
+            opencode_launcher.resources,
+            "files",
+            lambda _pkg: _FakeTraversable(),
+        )
         monkeypatch.setenv("PERFXPERT_OPENCODE_PATH", str(explicit))
-        resolved = opencode_launcher.resolve_opencode_binary()
-        assert resolved == explicit
 
-    def test_wellknown_emits_warning_when_bundled_absent(
+        resolved = opencode_launcher.resolve_opencode_binary()
+        assert resolved == bundled
+
+    def test_default_path_refuses_wellknown_when_bundled_absent(
         self,
-        capsys: pytest.CaptureFixture,
         monkeypatch: pytest.MonkeyPatch,
         tmp_path,
     ) -> None:
-        """Falling through to upstream must warn the user that patches aren't active."""
+        """The default TUI path must not silently use upstream opencode."""
         upstream = tmp_path / "home" / ".opencode" / "bin" / "opencode"
         upstream.parent.mkdir(parents=True)
         upstream.write_text("#!/bin/sh\nexit 0\n")
@@ -304,14 +327,68 @@ class TestBundledPriority:
             lambda: [upstream],
         )
         monkeypatch.delenv("PERFXPERT_OPENCODE_PATH", raising=False)
-        monkeypatch.delenv("PERFXPERT_SILENCE_UNPATCHED_WARNING", raising=False)
 
-        resolved = opencode_launcher.resolve_opencode_binary()
-        assert resolved == upstream
+        with pytest.raises(FileNotFoundError, match="bundled patched opencode"):
+            opencode_launcher.resolve_opencode_binary()
 
-        captured = capsys.readouterr()
-        assert "unpatched" in captured.err.lower()
-        assert "install-patches" in captured.err
+    def test_explicit_opencode_escape_hatch_uses_env_override(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path
+    ) -> None:
+        explicit = tmp_path / "mycustom" / "opencode"
+        explicit.parent.mkdir(parents=True)
+        explicit.write_text("#!/bin/sh\nexit 0\n")
+        explicit.chmod(0o755)
+
+        monkeypatch.setenv("PERFXPERT_OPENCODE_PATH", str(explicit))
+
+        resolved = opencode_launcher.resolve_user_opencode_binary()
+        assert resolved == explicit
+
+    def test_explicit_opencode_escape_hatch_routes_without_marker(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path
+    ) -> None:
+        explicit = tmp_path / "opencode"
+        explicit.write_text("#!/bin/sh\nexit 0\n")
+        explicit.chmod(0o755)
+        seen: dict[str, object] = {}
+
+        monkeypatch.setattr(
+            opencode_launcher,
+            "resolve_user_opencode_binary",
+            lambda: explicit,
+        )
+
+        def _fake_run(cmd, env=None, check=False, cwd=None):
+            seen["cmd"] = cmd
+            seen["env"] = env
+            seen["cwd"] = cwd
+
+            class _Result:
+                returncode = 0
+
+            return _Result()
+
+        monkeypatch.setattr(opencode_launcher.subprocess, "run", _fake_run)
+
+        rc = opencode_launcher.main(["opencode", "models"])
+
+        assert rc == 0
+        assert seen["cmd"] == [str(explicit), "models"]
+        assert "PERFXPERT_IN_OPENCODE_SESSION" not in seen["env"]
+
+    def test_explicit_opencode_help_does_not_require_user_binary(
+        self, monkeypatch: pytest.MonkeyPatch, capsys
+    ) -> None:
+        monkeypatch.setattr(
+            opencode_launcher,
+            "resolve_user_opencode_binary",
+            lambda: (_ for _ in ()).throw(FileNotFoundError("missing")),
+        )
+
+        rc = opencode_launcher.main(["--help", "opencode"])
+
+        assert rc == 0
+        assert "perfxpert-code opencode [args]" in capsys.readouterr().out
 
 
 class TestRunAutoAgentInject:

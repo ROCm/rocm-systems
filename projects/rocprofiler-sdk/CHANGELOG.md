@@ -14,10 +14,19 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
   - Supports all runtime types (HSA, HIP, ROCTX, RCCL, ROCDecode, ROCJpeg, etc.) automatically
   - No explicit late-start API calls required - works transparently
 
+**rocprofv3:**
+
+- `--att --selected-regions` now enables marker-controlled device thread trace
+  - Uses `roctxProfilerResume(0)` / `roctxProfilerPause(0)` to start and stop ATT collection at runtime
+  - Supports multiple resume/pause cycles, each producing separate trace output files
+  - Incompatible with `--att-consecutive-kernels`
+
 **Documentation:**
 
 - Added "Using Late-Loading" how-to guide with code examples
 - Documented late-loading workflow and integration with rocprofiler-register
+- Added marker-controlled thread tracing section to the thread trace how-to guide
+- Added cross-reference from ROCTx documentation to ATT with selected-regions
 
 ### Changed
 
@@ -328,3 +337,23 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 
 ### Removed
 - Counter collection support for plain text (`.txt`) input files has been deprecated due to lack of schema validation and input sanitization. Only structured file formats (JSON and YAML) with schema validation are supported.
+
+## ROCprofiler-SDK 1.3.0
+
+### Added
+
+- gfx1250 PMC support, including counter definitions and mappings for CHA, CHC, GLARBC, GL1A, GL1C, GRBMA, and GRBMH new blocks.
+- gfx1250 ATT support with per-XCC trace configuration, buffer programming, token-mask updates, and trace readback for multi-XCC devices.
+  - Extended ATT waitcnt decode for async and tensor-related instructions, adding support for `s_wait_asynccnt` and `s_wait_tensorcnt`.
+- gfx1250 stochastic PC sampling support:
+  - gfx1250-specific parser with sample routing.
+  - New stochastic sample fields: `sampling_lock_error`, `async_cnt`, `tensor_cnt`, `xnack_cnt`, and chiplet-aware metadata.
+  - Memory dependency counters reveal per-wave memory latency.
+  - Updated public PC sampling API structs and serialization for the new fields.
+  - Kernel/IOCTL enablement and dedicated gfx1250 parser tests.
+
+### Changed
+
+- Counter dimension encoding changed from fixed-width to variable-width allocation per dimension type.
+- Dimension selection and reduction logic now uses explicit dimension masks and single-index selection.
+- HSA queue interception extended to handle AMD extended kernel dispatch packets.
