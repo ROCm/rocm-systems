@@ -593,11 +593,11 @@ add_test(
 # -----------------------------------
 
 add_test(
-    NAME test_torch_trace
+    NAME test_torch_trace_analysis
     COMMAND
         ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
-        --junitxml=tests/test_torch_trace.xml ${COV_OPTION} tests/test_torch_trace.py
-        ${WORKING_DIR_OPTION}
+        --junitxml=tests/test_torch_trace_analysis.xml ${COV_OPTION}
+        tests/test_torch_trace_analysis.py ${WORKING_DIR_OPTION}
 )
 
 add_test(
@@ -677,7 +677,7 @@ if(${ENABLE_COVERAGE})
         test_data_imputation
         test_autogen_config
         test_tui_components
-        test_torch_trace
+        test_torch_trace_analysis
         test_torch_trace_coverage
     )
 

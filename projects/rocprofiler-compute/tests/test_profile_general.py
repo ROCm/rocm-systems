@@ -2,7 +2,6 @@
 # SPDX-License-Identifier:  MIT
 
 import csv
-import importlib.util
 import inspect
 import os
 import re
@@ -2684,18 +2683,9 @@ def test_iteration_multiplexing_data_types(
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
-skip_if_no_torch_gpu = pytest.mark.skipif(
-    (
-        importlib.util.find_spec("torch") is None
-        or not __import__("torch").cuda.is_available()
-    ),
-    reason=("PyTorch and GPU access are required for this test"),
-)
-
-
-@skip_if_no_torch_gpu
 @pytest.mark.torch_trace
 def test_torch_trace_profile(
+    require_torch_gpu,
     binary_handler_profile_rocprof_compute,
     binary_handler_analyze_rocprof_compute,
     capsys,
@@ -3030,9 +3020,10 @@ def test_torch_trace_profile(
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
-@skip_if_no_torch_gpu
 @pytest.mark.torch_trace
-def test_torch_trace_overhead(binary_handler_profile_rocprof_compute):
+def test_torch_trace_overhead(
+    require_torch_gpu, binary_handler_profile_rocprof_compute
+):
     """
     Measure overhead introduced by --torch-trace flag.
     Compares execution time with and without the flag to ensure overhead is acceptable.
@@ -3342,6 +3333,7 @@ def test_multi_rank_no_warning_with_iteration_multiplexing(
     ],
 )
 def test_profile_invalid_workloads_torch_trace(
+    require_torch_gpu,
     binary_handler_profile_rocprof_compute,
     workload_cmd,
     expected_exit,
