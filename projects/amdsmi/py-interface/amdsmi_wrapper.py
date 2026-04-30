@@ -3712,6 +3712,36 @@ try:
 except AttributeError:
     pass
 try:
+    amdsmi_alloc_fabric_telemetry = _libraries['libamd_smi.so'].amdsmi_alloc_fabric_telemetry
+    amdsmi_alloc_fabric_telemetry.restype = amdsmi_status_t
+    amdsmi_alloc_fabric_telemetry.argtypes = [amdsmi_processor_handle, ctypes.c_uint32, ctypes.POINTER(ctypes.POINTER(struct_amdsmi_fabric_telemetry_t))]
+except AttributeError:
+    pass
+try:
+    amdsmi_get_fabric_telemetry_data = _libraries['libamd_smi.so'].amdsmi_get_fabric_telemetry_data
+    amdsmi_get_fabric_telemetry_data.restype = amdsmi_status_t
+    amdsmi_get_fabric_telemetry_data.argtypes = [amdsmi_processor_handle, ctypes.POINTER(struct_amdsmi_fabric_telemetry_t)]
+except AttributeError:
+    pass
+try:
+    amdsmi_free_fabric_telemetry = _libraries['libamd_smi.so'].amdsmi_free_fabric_telemetry
+    amdsmi_free_fabric_telemetry.restype = amdsmi_status_t
+    amdsmi_free_fabric_telemetry.argtypes = [amdsmi_processor_handle, ctypes.POINTER(struct_amdsmi_fabric_telemetry_t)]
+except AttributeError:
+    pass
+try:
+    amdsmi_get_gpu_fabric_info = _libraries['libamd_smi.so'].amdsmi_get_gpu_fabric_info
+    amdsmi_get_gpu_fabric_info.restype = amdsmi_status_t
+    amdsmi_get_gpu_fabric_info.argtypes = [amdsmi_processor_handle, ctypes.POINTER(struct_amdsmi_fabric_info_t)]
+except AttributeError:
+    pass
+try:
+    amdsmi_fabric_telem_id_to_string = _libraries['libamd_smi.so'].amdsmi_fabric_telem_id_to_string
+    amdsmi_fabric_telem_id_to_string.restype = ctypes.c_char_p
+    amdsmi_fabric_telem_id_to_string.argtypes = [ctypes.c_uint64]
+except AttributeError:
+    pass
+try:
     amdsmi_topo_get_numa_node_number = _libraries['libamd_smi.so'].amdsmi_topo_get_numa_node_number
     amdsmi_topo_get_numa_node_number.restype = amdsmi_status_t
     amdsmi_topo_get_numa_node_number.argtypes = [amdsmi_processor_handle, ctypes.POINTER(ctypes.c_uint32)]
