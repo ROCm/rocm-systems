@@ -8,6 +8,7 @@ import platform
 import shlex
 import subprocess
 from pathlib import Path
+from typing import Optional
 
 
 logging.basicConfig(level=logging.INFO)
@@ -68,14 +69,13 @@ def derive_rocm_path(script_dir: Path) -> Path:
         bin_dir = candidate / "bin"
         if (bin_dir / "rocrtst64").is_file() or (bin_dir / "rocrtst64.exe").is_file():
             return candidate
-    if script_dir.name == "rocrtst" and script_dir.parent.name == "share":
-        return script_dir.parent.parent
-    return script_dir.parent.parent
+    raise RuntimeError(
+        "Could not derive ROCM_PATH from an installed rocrtst layout. "
+        "Set ROCM_PATH explicitly."
+    )
 
 
-def build_gtest_filter(
-    amdgpu_families: str | None, os_type: str, test_type: str
-) -> str:
+def build_gtest_filter(amdgpu_families: Optional[str], os_type: str, test_type: str) -> str:
     exclude_filter = ""
     if amdgpu_families in TEST_TO_IGNORE and os_type in TEST_TO_IGNORE[amdgpu_families]:
         ignored_tests = TEST_TO_IGNORE[amdgpu_families][os_type]
@@ -88,10 +88,14 @@ def build_gtest_filter(
 
 def main() -> None:
     script_dir = Path(__file__).resolve().parent
-    rocm_path = Path(
-        os.environ.get("ROCM_PATH", derive_rocm_path(script_dir))
-    ).resolve()
-    rocm_bin_dir = Path(os.environ.get("ROCM_BIN_DIR", rocm_path / "bin")).resolve()
+    rocm_path_env = os.getenv("ROCM_PATH")
+    rocm_path = Path(rocm_path_env).resolve() if rocm_path_env else derive_rocm_path(script_dir)
+    rocm_bin_dir = Path(os.getenv("ROCM_BIN_DIR") or rocm_path / "bin").resolve()
+    rocrtst_exe = rocm_bin_dir / (
+        "rocrtst64.exe" if platform.system() == "Windows" else "rocrtst64"
+    )
+    if not rocrtst_exe.is_file():
+        raise FileNotFoundError(f"Could not find rocrtst executable: {rocrtst_exe}")
 
     env = os.environ.copy()
     # GitHub Actions shard arrays are 1-indexed; GTest shard indexes are 0-indexed.
@@ -108,7 +112,7 @@ def main() -> None:
     else:
         env.pop("GTEST_FILTER", None)
 
-    cmd = ["./rocrtst64"]
+    cmd = [str(rocrtst_exe)]
     logging.info(f"++ Exec [{rocm_bin_dir}]$ {shlex.join(cmd)}")
     subprocess.run(cmd, cwd=rocm_bin_dir, check=True, env=env)
 
