@@ -64,6 +64,8 @@ set(SRC_FILES
   graph/rings.h
   graph/rome_models.cc
   graph/rome_models.h
+  graph/rome_topo_consensus.cc
+  graph/rome_topo_consensus.h
   graph/search.cc
   graph/topo.cc
   graph/topo.h
