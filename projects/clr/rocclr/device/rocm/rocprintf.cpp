@@ -79,18 +79,13 @@ int PrintfDbg::checkVectorSpecifier(const std::string& fmt, size_t startPos, siz
   size_t size = curPos - startPos;
 
   if (size >= 3) {
+    // Scan backwards from the specifier to find 'v'
     size = 0;
-    // no modifiers
-    if (fmt[curPos - 3] == 'v') {
-      size = 2;
-    }
-    // the modifiers are "h" or "l"
-    else if (fmt[curPos - 4] == 'v') {
-      size = 3;
-    }
-    // the modifier is "hh"
-    else if ((curPos >= 5) && (fmt[curPos - 5] == 'v')) {
-      size = 4;
+    for (size_t back = 3; back <= std::min(size_t(7), curPos); ++back) {
+      if (fmt[curPos - back] == 'v') {
+        size = back - 1; // number of chars between 'v' and specifier
+        break;
+      }
     }
     if (size > 0) {
       curPos = size;
@@ -134,9 +129,21 @@ size_t PrintfDbg::outputArgument(const std::string& fmt, bool printFloat, size_t
   if (checkString(fmt.c_str())) {
     // copiedBytes should be as number of printed chars
     copiedBytes = 0;
-    const unsigned char* argumentStr = reinterpret_cast<const unsigned char*>(argument);                                                             
-    amd::Os::printf(fmt.data(), argumentStr);                                                                                               
-    while (argumentStr[copiedBytes++] != 0);
+    // Empty string - print empty output
+    if (*(reinterpret_cast<const unsigned char*>(argument)) == 0) {
+      amd::Os::printf(fmt.data(), "");
+      copiedBytes = 1;
+    } else {
+      const unsigned char* argumentStr = reinterpret_cast<const unsigned char*>(argument);
+      // Ensure string is bounded by the argument size to handle
+      // compiler-generated strings that may not be null-terminated in the buffer
+      size_t maxLen = (size != ConstStr) ? size : SIZE_MAX;
+      size_t strLen = 0;
+      while (strLen < maxLen && argumentStr[strLen] != 0) strLen++;
+      std::string safeStr(reinterpret_cast<const char*>(argumentStr), strLen);
+      amd::Os::printf(fmt.data(), safeStr.c_str());
+      copiedBytes = strLen + 1;
+    }
   }
 
   // Print the argument(except for string ), using standard PrintfDbg()
@@ -167,21 +174,25 @@ size_t PrintfDbg::outputArgument(const std::string& fmt, bool printFloat, size_t
           std::string fmtF = fmt;
           size_t posS = fmtF.find_first_of("%");
           size_t posE = fmtF.find_first_of(fSpecifiers);
+          bool upperCase = false;
+          if (posE != std::string::npos) {
+            upperCase = std::isupper(static_cast<unsigned char>(fmtF[posE]));
+          }
           if (posS != std::string::npos && posE != std::string::npos) {
             fmtF.replace(posS + 1, posE - posS, "s");
           }
           float fSign = copysign(1.0, fArg);
           if (std::isinf(fArg) && !std::isnan(fArg)) {
             if (fSign < 0) {
-              amd::Os::printf(fmtF.data(), "-infinity");
+              amd::Os::printf(fmtF.data(), upperCase ? "-INF" : "-inf");
             } else {
-              amd::Os::printf(fmtF.data(), "infinity");
+              amd::Os::printf(fmtF.data(), upperCase ? "INF" : "inf");
             }
           } else if (std::isnan(fArg)) {
             if (fSign < 0) {
-              amd::Os::printf(fmtF.data(), "-nan");
+              amd::Os::printf(fmtF.data(), upperCase ? "-NAN" : "-nan");
             } else {
-              amd::Os::printf(fmtF.data(), "nan");
+              amd::Os::printf(fmtF.data(), upperCase ? "NAN" : "nan");
             }
           } else if (hlModifier) {
             amd::Os::printf(hlFmt.data(), fArg);
@@ -191,14 +202,15 @@ size_t PrintfDbg::outputArgument(const std::string& fmt, bool printFloat, size_t
         } else {
           bool hhModifier = (strstr(fmt.c_str(), "hh") != nullptr);
           if (hhModifier) {
-            // current implementation of printf in gcc 4.5.2 runtime libraries,
-            // doesn`t recognize "hh" modifier ==>
-            // argument should be explicitly converted to  unsigned char (uchar)
-            // before printing and
-            // fmt should be updated not to contain "hh" modifier
             std::string hhFmt = fmt;
             hhFmt.erase(hhFmt.find_first_of("h"), 2);
-            amd::Os::printf(hhFmt.data(), *(reinterpret_cast<const unsigned char*>(argument)));
+            // Use signed char for signed format specifiers (d, i), unsigned char otherwise
+            char spec = hhFmt[hhFmt.size() - 1];
+            if (spec == 'd' || spec == 'i') {
+              amd::Os::printf(hhFmt.data(), *(reinterpret_cast<const signed char*>(argument)));
+            } else {
+              amd::Os::printf(hhFmt.data(), *(reinterpret_cast<const unsigned char*>(argument)));
+            }
           } else if (hlModifier) {
             amd::Os::printf(hlFmt.data(), size == 2
                                               ? *(reinterpret_cast<const uint16_t*>(argument))
@@ -362,7 +374,13 @@ void PrintfDbg::outputDbgBuffer(const device::PrintfInfo& info, const uint32_t* 
 
   if (pos != std::string::npos) {
     fmt = str.substr(pos, str.size() - pos);
-    amd::Os::printf(fmt.data());
+    // Collapse %% to % in the remaining string
+    size_t replPos = 0;
+    while ((replPos = fmt.find("%%", replPos)) != std::string::npos) {
+      fmt.replace(replPos, 2, "%");
+      replPos += 1;
+    }
+    outputArgument(sepStr, false, ConstStr, reinterpret_cast<const uint32_t*>(fmt.data()));
   }
 }
 
@@ -373,28 +391,18 @@ bool PrintfDbg::init(bool printfEnabled) {
       return false;
     }
 
+    // Zero the entire buffer so that string arguments without explicit
+    // null terminators (from compiler-generated code) are properly terminated
+    memset(dbgBuffer_, 0, dbgBuffer_size_);
+
     // The first two DWORDs in the printf buffer are as follows:
     // First DWORD = Offset to where next information is to
     // be written, initialized to 0
     // Second DWORD = Number of bytes available for printf data
     // = buffer size \96 2*sizeof(uint32_t)
     const uint8_t initSize = 2 * sizeof(uint32_t);
-    memset(dbgBuffer_ + initSize, 0, dbgBuffer_size_ - initSize);
-    uint8_t sysMem[initSize];
-    memset(sysMem, 0, initSize);
     uint32_t dbgBufferSize = dbgBuffer_size_ - initSize;
-    memcpy(&sysMem[4], &dbgBufferSize, sizeof(dbgBufferSize));
-
-    // Copy offset and number of bytes available for printf data
-    // into the corresponding location in the debug buffer
-    hsa_status_t err = Hsa::memory_copy(dbgBuffer_, sysMem, 2 * sizeof(uint32_t));
-    if (err != HSA_STATUS_SUCCESS) {
-      LogPrintfError(
-          "\n Can't copy offset and bytes available data to dgbBuffer_,"
-          "failed with status: %d \n!",
-          err);
-      return false;
-    }
+    memcpy(&dbgBuffer_[4], &dbgBufferSize, sizeof(dbgBufferSize));
   }
   return true;
 }
