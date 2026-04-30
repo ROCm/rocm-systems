@@ -220,7 +220,7 @@ target_sources(aql-profile-v2-c-compatibility-test
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/aql_profile_v2_c_test.c)
 set_target_properties(
     aql-profile-v2-c-compatibility-test
-    PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON)
+    PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF)
 target_include_directories(aql-profile-v2-c-compatibility-test
     PRIVATE
         ${LIB_DIR}/core/include)
