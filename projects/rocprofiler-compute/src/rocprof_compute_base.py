@@ -3,8 +3,10 @@
 
 import argparse
 import importlib
+import shutil
 import socket
 import sys
+import tempfile
 import time
 from pathlib import Path
 from typing import Any, Optional
@@ -12,6 +14,7 @@ from typing import Any, Optional
 import config
 from argparser import omniarg_parser
 from rocprof_compute_soc.soc_base import OmniSoC_Base
+from roofline.run_benchmark import run_roofline_benchmark
 from utils.logger import (
     console_debug,
     console_error,
@@ -40,6 +43,7 @@ from utils.utils_common import (
     replace_rank,
     resolve_rocm_library_path,
     set_locale_encoding,
+    validate_roofline_csv,
 )
 from utils.utils_exceptions import WorkloadCommandError
 from utils.utils_profile import get_submodules
@@ -619,10 +623,11 @@ class RocProfCompute:
 
     @demarcate
     def _run_bench_only(self) -> None:
-        """Orchestrate standalone roofline microbenchmark execution."""
-        from roofline.run_benchmark import run_roofline_benchmark
-        from utils.utils_common import validate_roofline_csv
+        """Run standalone roofline microbenchmark execution.
 
+        The microbenchmark is written to a temp location first and only
+        promoted to the workload directory after passing validation.
+        """
         output_dir = Path(self.__args.output_directory)
         if not output_dir.exists():
             output_dir.mkdir(parents=True, exist_ok=True)
@@ -635,26 +640,30 @@ class RocProfCompute:
             "roofline",
             f"Running roofline microbenchmark on device {self.__args.device}",
         )
-        try:
-            run_roofline_benchmark(self.__args.device, roofline_csv)
-        except Exception as e:
-            console_error(f"Benchmark execution failed: {e}")
+
+        with tempfile.TemporaryDirectory(prefix="rocprof_bench_") as tmp_dir:
+            tmp_csv = Path(tmp_dir) / "roofline.csv"
+            try:
+                run_roofline_benchmark(self.__args.device, tmp_csv)
+            except Exception as e:
+                console_error(f"Benchmark execution failed: {e}")
+
+            is_valid, error_message = validate_roofline_csv(tmp_dir)
+            if not is_valid:
+                console_error(
+                    f"Invalid roofline.csv: {error_message}",
+                    exit=False,
+                )
+                return
+
+            shutil.move(str(tmp_csv), str(roofline_csv))
+
         if existing_roofline:
             console_warning(f"Overwrote existing {roofline_csv}")
 
-        is_valid, error_message = validate_roofline_csv(str(output_dir))
-        if not is_valid:
-            console_error(
-                f"Invalid roofline.csv: {error_message}",
-                exit=False,
-            )
-            return
-
         console_log(
             "roofline",
-            f"Roofline data saved to {roofline_csv}\n"
-            "  Run 'rocprof-compute analyze"
-            f" -p {output_dir}' for charts",
+            f"Roofline data saved to {roofline_csv}",
         )
 
     @demarcate

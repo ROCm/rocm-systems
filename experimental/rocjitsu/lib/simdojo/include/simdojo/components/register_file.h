@@ -51,7 +51,10 @@ public:
     for (size_t i = 0; i < free_blocks_.size(); ++i) {
       if (free_blocks_[i]) {
         free_blocks_[i] = false;
-        return static_cast<int32_t>(i * regs_per_block_);
+        uint32_t base = static_cast<uint32_t>(i * regs_per_block_);
+        for (uint32_t r = base; r < base + regs_per_block_; ++r)
+          data_[r] = RegType{};
+        return static_cast<int32_t>(base);
       }
     }
     return -1;

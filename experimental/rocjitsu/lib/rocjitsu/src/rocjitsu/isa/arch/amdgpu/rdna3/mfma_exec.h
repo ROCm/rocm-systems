@@ -14,19 +14,15 @@
 
 namespace rocjitsu {
 namespace rdna3 {
-namespace mfma {
-
-using namespace amdgpu::mfma; // NOLINT(google-build-using-namespace)
 
 /// RDNA WMMA resolve_acc — uses Unified mode (no separate AccVGPR file).
 template <typename F>
 inline uint32_t resolve_acc(uint32_t vb, uint32_t dst, int src2_ev, uint32_t &const_acc,
                             F &&get_const) {
-  return amdgpu::mfma::resolve_acc<amdgpu::mfma::AccMode::Unified>(vb, dst, src2_ev, const_acc,
-                                                                   std::forward<F>(get_const));
+  return amdgpu::resolve_acc<amdgpu::AccMode::Unified>(vb, dst, src2_ev, const_acc,
+                                                       std::forward<F>(get_const));
 }
 
-} // namespace mfma
 } // namespace rdna3
 } // namespace rocjitsu
 

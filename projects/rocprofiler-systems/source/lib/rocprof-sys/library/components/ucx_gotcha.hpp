@@ -3,8 +3,8 @@
 
 #pragma once
 
+#include "common/defines.h"
 #include "core/common.hpp"
-#include "core/defines.hpp"
 #include "core/timemory.hpp"
 #include "library/components/comm_data.hpp"
 
@@ -25,8 +25,6 @@ struct ucx_gotcha : tim::component::base<ucx_gotcha, void>
     static constexpr size_t gotcha_capacity = 100;
 
     using gotcha_data = tim::component::gotcha_data;
-
-    ROCPROFSYS_DEFAULT_OBJECT(ucx_gotcha)
 
     // string id for component
     static std::string label() { return "ucx_gotcha"; }

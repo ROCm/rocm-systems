@@ -110,6 +110,26 @@ function(rocprofiler_sdk_pc_sampling_stochastic_disabled _VAR)
     endif()
 endfunction()
 
+# Checks whether triple buffer is implemented for architecture: MI3xx and gfx12
+function(rocprofiler_sdk_sqtt_triple_buffer_disabled _VAR)
+    cmake_parse_arguments(ARG "ECHO" "PREFIX" "" ${ARGN})
+
+    set(CMAKE_MESSAGE_INDENT "[${PROJECT_NAME}]${ARG_PREFIX} ")
+
+    rocprofiler_sdk_get_gfx_architectures(rocprofiler-sdk-tests-gfx-info ECHO)
+    list(GET rocprofiler-sdk-tests-gfx-info 0 gpu-0-gfx-info)
+
+    if("${gpu-0-gfx-info}" MATCHES "^gfx(9[4-5][0-9]|12[0-9][0-9])$")
+        set(${_VAR}
+            FALSE
+            PARENT_SCOPE)
+    else()
+        set(${_VAR}
+            TRUE
+            PARENT_SCOPE)
+    endif()
+endfunction()
+
 function(rocprofiler_sdk_spm_disabled _VAR)
     cmake_parse_arguments(ARG "ECHO" "PREFIX" "" ${ARGN})
 

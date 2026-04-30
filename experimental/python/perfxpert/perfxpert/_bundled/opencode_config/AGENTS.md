@@ -23,6 +23,23 @@ MCP server (stdio, command `perfxpert-mcp`).
    **Gate discipline for GPU-performance requests:**
    - FIRST call `perfxpert_intent_classify`, THEN `perfxpert_workflow_next_step`.
    - Do NOT call `bash`/`edit`/`read`/`glob`/`grep` BEFORE those two.
+   - SSH or another remote host changes only WHERE native build/profile
+     commands run. It never bypasses the PerfXpert MCP gate.
+   - If `perfxpert_intent_classify` or `perfxpert_workflow_next_step`
+     is unavailable / not exposed in the backend session, STOP with a
+     PerfXpert configuration error. Do NOT use a native SSH/build/profile
+     fallback path.
+   <!--backend:codex-->
+   - Codex may defer MCP tools behind its metadata-search surface when
+     the initial tool inventory is crowded. If
+     `perfxpert_intent_classify` is not directly exposed but `tool_search`
+     / `tool_search_tool` is available, the only allowed pre-gate
+     exception is to search for "perfxpert intent_classify
+     workflow_next_step" and then immediately call the returned
+     PerfXpert MCP gate tool. If discovery cannot expose the gate, STOP
+     with the same PerfXpert configuration error. Do NOT use shell, SSH,
+     build, edit, or profiling tools as a discovery fallback.
+   <!--/backend:codex-->
    - AFTER `perfxpert_workflow_next_step` returns a phase (profile /
      optimize / reprofile / analyze / build), the gate is LIFTED.
      At that point you MUST use `bash` to run the profiler (rocprofv3,
@@ -33,6 +50,14 @@ MCP server (stdio, command `perfxpert-mcp`).
      `perfxpert_regression_compare_runs` / `perfxpert_sol_sanity_check`
      on the results. Don't ask the user to copy-paste commands you
      could run yourself.
+   - If required execution or validation tooling is missing on the local
+     machine or an SSH remote host (for example `sqlite3` needed to
+     inspect a generated `.db`), do NOT silently skip the validation,
+     leave the artifact uninspected, or continue with lower confidence.
+     Ask the user for explicit permission to install the missing tool on
+     the specific host, naming the package/tool and the install command
+     you would run. If the user declines, report that the validation is
+     blocked and stop or ask for an alternate validation path.
 
 3. **Route intent via `perfxpert_intent_classify` first.** Then pick
    downstream tools freely — there is no forced handoff after intent

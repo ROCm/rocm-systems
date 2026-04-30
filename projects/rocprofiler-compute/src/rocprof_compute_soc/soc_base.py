@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 import config
+from roofline.run_benchmark import run_roofline_benchmark
 from utils.amdsmi_interface import amdsmi_ctx, get_gpu_model, get_mem_max_clock
 from utils.logger import (
     console_debug,
@@ -892,8 +893,6 @@ class OmniSoC_Base:
         ):
             console_log("roofline", "Skipping roofline")
         else:
-            from roofline.run_benchmark import run_roofline_benchmark
-
             roofline_csv = Path(self.get_args().output_directory) / "roofline.csv"
             console_log(
                 "roofline",

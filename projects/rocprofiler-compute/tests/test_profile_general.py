@@ -1334,13 +1334,15 @@ def test_bench_only_basic(binary_handler_profile_rocprof_compute):
     )
 
     assert returncode == 0
-    roofline_csv = Path(workload_dir) / "roofline.csv"
+    workload_path = Path(workload_dir)
+    roofline_csv = workload_path / "roofline.csv"
     assert roofline_csv.exists(), f"Expected {roofline_csv} to be created"
-    # Bench-only must not produce profiling artifacts (no perfmon/, no pmc_perf_*.csv)
-    assert not (Path(workload_dir) / "perfmon").exists()
-    assert not list(Path(workload_dir).glob("pmc_perf_*.csv"))
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
+    # Bench-only must not produce profiling artifacts
+    assert not (workload_path / "perfmon").exists()
+    assert not (workload_path / "sysinfo.csv").exists()
+    assert not (workload_path / "profiling_config.yaml").exists()
+    assert not list(workload_path.glob("results_*.csv"))
+    assert not list(workload_path.glob("pmc_perf_*.csv"))
 
 
 @pytest.mark.roofline_1
@@ -2902,12 +2904,12 @@ def test_torch_trace_profile(
 
     # 10. Source-location grouping (file:line headers)
     location_headers = re.findall(
-        r"^(\S+:\d+)\s+\(kernel_launches:", list_output, re.MULTILINE
+        r"^(\S+:\d+)\s+\(dispatches:", list_output, re.MULTILINE
     )
     assert location_headers, "No source-location headers found in output"
 
     # 11. Aggregated stats on tree nodes
-    assert re.search(r"\(kernel_launches:\s+\d+,\s+total_duration:", list_output), (
+    assert re.search(r"\(dispatches:\s+\d+,\s+total:", list_output), (
         "No aggregated stats found in output"
     )
 
@@ -2916,13 +2918,13 @@ def test_torch_trace_profile(
     assert kernel_ids, "No kernel IDs found in output"
 
     # 13. Kernel launch durations
-    assert re.search(r"kernel_launches:\s+\d+,\s+total_duration:", list_output), (
+    assert re.search(r"dispatches:\s+\d+,\s+total:", list_output), (
         "No kernel duration info in output"
     )
 
     # 14. Source locations sorted by descending total duration
     location_durations = re.findall(
-        r"^(\S+:\d+)\s+\(kernel_launches:\s+\d+,\s+total_duration:\s+([\d.]+)\s+(ms|us)\)",
+        r"^(\S+:\d+)\s+\(dispatches:\s+\d+,\s+total:\s+([\d.]+)\s+(ms|us)",
         list_output,
         re.MULTILINE,
     )
@@ -2988,8 +2990,8 @@ def test_torch_trace_profile(
     assert "Matched PyTorch Operators" in out_exact, (
         "Expected 'Matched PyTorch Operators' header in --torch-operator output"
     )
-    assert "kernel_launches" in out_exact, (
-        "Expected call tree with kernel_launches stats in --torch-operator output"
+    assert "dispatches" in out_exact, (
+        "Expected call tree with dispatches stats in --torch-operator output"
     )
 
     # 18. Glob wildcard pattern (*relu) matches the relu operator
@@ -3004,7 +3006,7 @@ def test_torch_trace_profile(
     ])
     assert rc_glob == 0, "Analyze with --torch-operator *relu failed"
     out_glob = capsys.readouterr().out
-    assert "kernel_launches" in out_glob, (
+    assert "dispatches" in out_glob, (
         "Glob pattern *relu should match relu operator and render call tree"
     )
 
@@ -3020,7 +3022,7 @@ def test_torch_trace_profile(
     ])
     assert rc_all == 0, "Analyze with --torch-operator all failed"
     out_all = capsys.readouterr().out
-    assert "kernel_launches" in out_all, "'all' keyword should match operators"
+    assert "dispatches" in out_all, "'all' keyword should match operators"
 
     # 20. --torch-operator + -k intersection succeeds and renders call tree
     capsys.readouterr()

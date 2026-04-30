@@ -31,9 +31,9 @@
 #include <utility>
 #include <vector>
 
-#include "def/gpu_block_info.h"
-#include "pm4/cmd_config.h"
-#include "util/hsa_rsrc_factory.h"
+#include "lib/aqlprofile/def/gpu_block_info.h"
+#include "lib/aqlprofile/pm4/cmd_config.h"
+#include "lib/aqlprofile/util/hsa_rsrc_factory.h"
 
 namespace pm4_builder
 {
