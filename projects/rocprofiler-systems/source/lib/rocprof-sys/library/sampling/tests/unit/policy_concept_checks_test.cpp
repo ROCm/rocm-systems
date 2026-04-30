@@ -24,7 +24,6 @@
 #include "doubles/mock_timer_trigger.hpp"
 #include "doubles/mock_unwinder.hpp"
 #include "doubles/noop_perfetto_sink.hpp"
-#include "doubles/noop_report_writer.hpp"
 #include "doubles/recording_signal_dispatcher.hpp"
 #include "doubles/recording_trace_sink.hpp"
 #include "doubles/throwing_fatal_error_policy.hpp"
@@ -100,15 +99,6 @@ TEST(policy_concept_checks, perfetto_sink_policy_satisfied_by_noop_perfetto_sink
         (is_perfetto_sink_policy_v<rocprofsys::sampling::test::noop_perfetto_sink>) );
 }
 
-TEST(policy_concept_checks, report_writer_policy_satisfied_by_noop_report_writer)
-{
-    static_assert(
-        is_report_writer_policy_v<rocprofsys::sampling::test::noop_report_writer>,
-        "noop_report_writer must satisfy ReportWriterPolicy");
-    EXPECT_TRUE(
-        (is_report_writer_policy_v<rocprofsys::sampling::test::noop_report_writer>) );
-}
-
 TEST(policy_concept_checks, fatal_error_policy_satisfied_by_throwing_policy)
 {
     static_assert(
@@ -161,11 +151,6 @@ struct bad_trace_sink
 struct bad_perfetto_sink
 {
     // missing emit_timer() and emit_overflow()
-};
-
-struct bad_report_writer
-{
-    // missing write_timer_samples(), write_overflow_samples(), flush()
 };
 
 }  // namespace
@@ -224,11 +209,4 @@ TEST(policy_concept_checks, perfetto_sink_policy_not_satisfied_by_bad_type)
     static_assert(!is_perfetto_sink_policy_v<bad_perfetto_sink>,
                   "bad_perfetto_sink must NOT satisfy PerfettoSinkPolicy");
     EXPECT_FALSE((is_perfetto_sink_policy_v<bad_perfetto_sink>) );
-}
-
-TEST(policy_concept_checks, report_writer_policy_not_satisfied_by_bad_type)
-{
-    static_assert(!is_report_writer_policy_v<bad_report_writer>,
-                  "bad_report_writer must NOT satisfy ReportWriterPolicy");
-    EXPECT_FALSE((is_report_writer_policy_v<bad_report_writer>) );
 }

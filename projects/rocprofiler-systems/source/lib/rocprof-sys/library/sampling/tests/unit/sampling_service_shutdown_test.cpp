@@ -56,9 +56,9 @@ TEST(sampling_service_shutdown, shutdown_in_child_skips_per_tid_processing)
 
     svc.shutdown(0);
 
-    auto const& report = svc.report_writer_ref();
-    EXPECT_TRUE(report.m_timer_counts.empty())
-        << "Child shutdown must skip per-tid processing (timer_counts must be empty)";
-    EXPECT_TRUE(report.m_overflow_counts.empty())
-        << "Child shutdown must skip per-tid processing (overflow_counts must be empty)";
+    auto const& trace = svc.get_trace_sink();
+    EXPECT_TRUE(trace.timer_records().empty())
+        << "Child shutdown must skip per-tid processing (no timer records emitted)";
+    EXPECT_TRUE(trace.overflow_records().empty())
+        << "Child shutdown must skip per-tid processing (no overflow records emitted)";
 }

@@ -30,20 +30,6 @@ TEST(full_pipeline, setup_and_shutdown_completes_without_crash)
     SUCCEED();
 }
 
-// ─── Lifecycle: report_writer accessible after shutdown ───────────────────────
-
-TEST(full_pipeline, report_writer_accessible_after_shutdown)
-{
-    test_service svc{ make_test_config(), make_test_callbacks() };
-    svc.setup(0);
-    svc.shutdown(0);
-
-    auto& writer = svc.report_writer_ref();
-    // noop_report_writer tracks call counts; timer_count for unregistered tid is 0.
-    EXPECT_EQ(writer.m_timer_counts.count(0), 0U)
-        << "no timer samples expected when no signals were raised in the test";
-}
-
 // ─── Lifecycle: perfetto_sink accessible after shutdown ───────────────────────
 
 TEST(full_pipeline, perfetto_sink_accessible_after_shutdown)

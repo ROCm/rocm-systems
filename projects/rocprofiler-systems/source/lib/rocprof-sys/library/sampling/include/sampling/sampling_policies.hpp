@@ -18,8 +18,7 @@ namespace rocprofsys::sampling
 
 template <class UnwinderT, class OffloadT, class TraceSinkT, class TimerTriggerT,
           class OverflowTriggerT, class ClockT, class SignalDispatcherT,
-          class ReportWriterT, class PerfettoSinkT, class FatalErrorT,
-          class ThreadInfoResolverT>
+          class PerfettoSinkT, class FatalErrorT, class ThreadInfoResolverT>
 struct sampling_policies_traits
 {
     using unwinder             = UnwinderT;
@@ -29,7 +28,6 @@ struct sampling_policies_traits
     using overflow_trigger     = OverflowTriggerT;
     using clock                = ClockT;
     using signal_dispatcher    = SignalDispatcherT;
-    using report_writer        = ReportWriterT;
     using perfetto_sink        = PerfettoSinkT;
     using fatal_error          = FatalErrorT;
     using thread_info_resolver = ThreadInfoResolverT;
@@ -47,7 +45,6 @@ class real_timer_trigger;
 class real_overflow_trigger;
 class steady_clock;
 class real_signal_dispatcher;
-class native_report_writer;
 class real_fatal_error_policy;
 class real_thread_info_resolver;
 
@@ -61,12 +58,10 @@ class perfetto_sink_impl;
 using default_trace_sink    = trace_cache_sink<real_thread_info_resolver>;
 using default_perfetto_sink = perfetto_sink_impl<real_thread_info_resolver>;
 
-using default_sampling_policies =
-    sampling_policies_traits<libunwind_unwinder, trace_cache_offload_adapter,
-                             default_trace_sink, real_timer_trigger,
-                             real_overflow_trigger, steady_clock, real_signal_dispatcher,
-                             native_report_writer, default_perfetto_sink,
-                             real_fatal_error_policy, real_thread_info_resolver>;
+using default_sampling_policies = sampling_policies_traits<
+    libunwind_unwinder, trace_cache_offload_adapter, default_trace_sink,
+    real_timer_trigger, real_overflow_trigger, steady_clock, real_signal_dispatcher,
+    default_perfetto_sink, real_fatal_error_policy, real_thread_info_resolver>;
 #endif
 
 }  // namespace rocprofsys::sampling

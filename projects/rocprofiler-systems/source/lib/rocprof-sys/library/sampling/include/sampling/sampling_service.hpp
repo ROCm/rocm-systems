@@ -45,7 +45,6 @@ public:
     using overflow_trigger     = typename Policies::overflow_trigger;
     using clock                = typename Policies::clock;
     using signal_dispatcher    = typename Policies::signal_dispatcher;
-    using report_writer        = typename Policies::report_writer;
     using perfetto_sink        = typename Policies::perfetto_sink;
     using fatal_error          = typename Policies::fatal_error;
     using thread_info_resolver = typename Policies::thread_info_resolver;
@@ -89,7 +88,6 @@ public:
     offload&               get_offload() noexcept { return offload_; }
     trace_sink&            get_trace_sink() noexcept { return trace_sink_; }
     signal_dispatcher&     signal_dispatcher_ref() noexcept { return signal_dispatcher_; }
-    report_writer&         report_writer_ref() noexcept { return report_writer_; }
     perfetto_sink&         get_perfetto_sink() noexcept { return perfetto_sink_; }
     clock&                 get_clock() noexcept { return clock_; }
     fatal_error&           get_fatal_error() noexcept { return fatal_; }
@@ -118,7 +116,6 @@ private:
     trace_sink           trace_sink_;
     clock                clock_;
     signal_dispatcher    signal_dispatcher_;
-    report_writer        report_writer_;
     perfetto_sink        perfetto_sink_;
     fatal_error          fatal_;
 

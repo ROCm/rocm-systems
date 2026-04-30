@@ -35,9 +35,6 @@
 // Lightweight header — no libunwind / AMD-SMI deps; also included by test TUs.
 #    include "sampling/policies/trace_cache_offload_adapter.hpp"
 
-// ── TSV report writer (no main-lib deps; test-accessible) ────────────────────
-#    include "sampling/src/native_report_writer.hpp"
-
 // ── Heavy policies (one class per file under sampling/policies/) ─────────────
 #    include "sampling/policies/real_fatal_error_policy.hpp"
 #    include "sampling/policies/real_perfetto_sink.hpp"

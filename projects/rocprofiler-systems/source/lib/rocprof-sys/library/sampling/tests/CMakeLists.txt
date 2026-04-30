@@ -45,12 +45,7 @@ set(_sampling_test_sources
     integration/full_pipeline_test.cpp
     # Signal handler invariants: re-entry guard, ring-full drop, in-flight counter (Phase G)
     unit/sampling_signal_handler_test.cpp
-    # TSV writer correctness: header, pct_self, flat_scope, multi-thread (Phase H TDD red)
-    integration/native_report_writer_tsv_test.cpp
-    # Real-filesystem integration test: verify set_streams() + ofstream actually creates files
-    # on disk (catches silent open-failure bugs in open_report_writer_streams).
-    integration/native_report_writer_realfs_test.cpp
-    # TDD red tests for R-1: cpu_clock always empty (signal handler + parser + writer fix).
+    # TDD red tests for R-1: cpu_clock always empty (signal handler + parser fix).
     unit/metrics_population_test.cpp
     # TDD red tests for AC-2: realtime+cputime trigger mutual-exclusion (else-if → if fix).
     unit/trigger_mutual_exclusion_test.cpp
@@ -60,8 +55,6 @@ set(_sampling_test_sources
     unit/emit_resolved_hook_test.cpp
     # TDD tests for ROCPROFSYS_SAMPLING_TRACE_LEGACY config accessor (Task #26).
     unit/sampling_trace_legacy_test.cpp
-    # NFR-T-7: golden-file byte-exact diff for native_report_writer TSV output (Task #14).
-    unit/native_report_writer_golden_test.cpp
     # Task #15: C++17 detection-idiom policy concept checks.
     unit/policy_concept_checks_test.cpp
     # Concurrency stress test for lifecycle operations.

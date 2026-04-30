@@ -109,15 +109,6 @@ ROCPROFSYS_DEFINE_POLICY_TRAIT(perfetto_sink,
                                    int64_t{}, static_cast<void const*>(nullptr),
                                    std::declval<std::vector<overflow_sample> const&>())));
 
-// ReportWriterPolicy — write_timer_samples / write_overflow_samples / flush.
-ROCPROFSYS_DEFINE_POLICY_TRAIT(
-    report_writer,
-    decltype(std::declval<T&>().write_timer_samples(
-        int64_t{}, std::declval<std::vector<timer_sample> const&>())),
-    decltype(std::declval<T&>().write_overflow_samples(
-        int64_t{}, std::declval<std::vector<overflow_sample> const&>())),
-    decltype(std::declval<T&>().flush()));
-
 // FatalErrorPolicy — template <class... Args> [[noreturn]] void fatal(...) noexcept.
 // fatal() is a variadic template; not testable via void_t at definition time.
 // Verify a single-arg instantiation exists by probing T::template fatal<int>.

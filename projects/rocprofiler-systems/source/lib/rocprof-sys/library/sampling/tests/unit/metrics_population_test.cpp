@@ -23,7 +23,6 @@
 #include "sampling/data/backtrace_metrics_data.hpp"
 #include "sampling/data/backtrace_record.hpp"
 #include "sampling/data/timer_sample.hpp"
-#include "sampling/src/native_report_writer.hpp"
 #include "sampling/src/pause_interval_registry.hpp"
 #include "sampling/src/sample_parser.hpp"
 
@@ -160,72 +159,3 @@ TEST(metrics_population, parse_timer_cpu_ns_absolute_copy_is_not_a_delta)
 }
 
 // ── Part C fixture ────────────────────────────────────────────────────────────
-// native_report_writer::write_timer_samples() must accumulate cpu_clock data
-// when metrics.valid.any() is true.  Verify by injecting a timer_sample with
-// valid metrics and asserting that the cpu_clock output stream is non-empty.
-
-TEST(metrics_population, native_report_writer_emits_cpu_clock_when_metrics_valid)
-{
-    std::ostringstream   wall_out, cpu_out, pct_out, trip_out;
-    native_report_writer writer(wall_out, cpu_out, pct_out, trip_out);
-
-    timer_sample s;
-    s.tid            = 0;
-    s.beg_ns         = 0;
-    s.end_ns         = 1'000'000'000U;  // 1 s wall
-    s.metrics.cpu_ns = 400'000'000LL;
-    s.metrics.valid.set(0);  // bit 0 = cpu_ns valid
-    stack_frame f;
-    f.name = "work_fn";
-    s.stack.push_back(f);
-
-    std::vector<timer_sample> samples = { s };
-    writer.write_timer_samples(0, samples);
-    writer.flush();
-
-    // cpu_clock stream must contain at least one data row (beyond the header lines).
-    auto cpu_str = cpu_out.str();
-    // The header ends after the 3rd '#' comment line; there must be a data row after.
-    auto last_comment = cpu_str.rfind('#');
-    ASSERT_NE(last_comment, std::string::npos);
-    std::string after_header = cpu_str.substr(last_comment);
-    auto        newline_pos  = after_header.find('\n');
-    ASSERT_NE(newline_pos, std::string::npos);
-    std::string data_part = after_header.substr(newline_pos + 1);
-
-    EXPECT_FALSE(data_part.empty())
-        << "cpu_clock stream must contain at least one data row when metrics.valid.any() "
-           "is true (Part C gate: native_report_writer.hpp:136)";
-    EXPECT_NE(data_part.find("work_fn"), std::string::npos)
-        << "cpu_clock data row must include the function name";
-}
-
-TEST(metrics_population, native_report_writer_cpu_clock_empty_when_metrics_invalid)
-{
-    // Confirm the Part C gate: no data row emitted when valid.any() is false.
-    // This is the CURRENT baseline (before Part A fix), not a regression.
-    std::ostringstream   wall_out, cpu_out, pct_out, trip_out;
-    native_report_writer writer(wall_out, cpu_out, pct_out, trip_out);
-
-    timer_sample s;
-    s.tid    = 0;
-    s.beg_ns = 0;
-    s.end_ns = 1'000'000'000U;
-    // metrics NOT populated — valid.any() == false
-    stack_frame f;
-    f.name = "work_fn";
-    s.stack.push_back(f);
-
-    writer.write_timer_samples(0, { s });
-    writer.flush();
-
-    auto cpu_str   = cpu_out.str();
-    auto last_hash = cpu_str.rfind('#');
-    ASSERT_NE(last_hash, std::string::npos);
-    auto nl = cpu_str.find('\n', last_hash);
-    ASSERT_NE(nl, std::string::npos);
-    auto data_part = cpu_str.substr(nl + 1);
-
-    EXPECT_TRUE(data_part.empty())
-        << "cpu_clock must produce NO data rows when metrics.valid.any() is false";
-}

@@ -90,9 +90,6 @@ sampling_service<Policies>::sampling_service(sampling_config    config,
     static_assert(is_perfetto_sink_policy_v<perfetto_sink>,
                   "Policies::perfetto_sink must satisfy PerfettoSinkPolicy "
                   "(requires emit_timer() and emit_overflow())");
-    static_assert(is_report_writer_policy_v<report_writer>,
-                  "Policies::report_writer must satisfy ReportWriterPolicy "
-                  "(requires write_timer_samples(), write_overflow_samples(), flush())");
     static_assert(is_fatal_error_policy_v<fatal_error>,
                   "Policies::fatal_error must satisfy FatalErrorPolicy "
                   "(requires non-void type with fatal() template method)");

@@ -10,7 +10,6 @@
 #include "mock_timer_trigger.hpp"
 #include "mock_unwinder.hpp"
 #include "noop_perfetto_sink.hpp"
-#include "noop_report_writer.hpp"
 #include "recording_signal_dispatcher.hpp"
 #include "recording_trace_sink.hpp"
 #include "throwing_fatal_error_policy.hpp"
@@ -58,7 +57,6 @@ struct test_sampling_policies
     using overflow_trigger     = mock_overflow_trigger;
     using clock                = fake_clock;
     using signal_dispatcher    = recording_signal_dispatcher;
-    using report_writer        = noop_report_writer;
     using perfetto_sink        = noop_perfetto_sink;
     using fatal_error          = throwing_fatal_error_policy;
     using thread_info_resolver = mock_thread_info_resolver;
