@@ -261,8 +261,7 @@ ThreadTracerAgent::start_thread_trace(std::shared_ptr<std::atomic<int>> _flag)
     // Submit the start packets without waiting: the producer thread (triple-buffer
     // path) and DeviceThreadTracer::start_context (single-buffer path) wait on the
     // returned signal so multiple agents can be launched in parallel.
-    auto unique_signal =
-        att_queue_submit_signal_last(*queue, control_packet_copy->before_krn_pkt);
+    auto unique_signal = att_queue_submit_signal_last(*queue, control_packet_copy->before_krn_pkt);
     auto shared_signal = std::shared_ptr<hsa_signal_t>(std::move(unique_signal));
 
     if(params.triple_buffering)

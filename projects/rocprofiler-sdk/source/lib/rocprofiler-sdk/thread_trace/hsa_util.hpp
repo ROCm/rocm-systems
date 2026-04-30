@@ -100,7 +100,7 @@ att_queue_submit(const att_queue_t&            q,
 /// thread will be the one to observe completion.
 template <typename VecType>
 signal_ptr_t
-att_queue_submit_signal_last(const att_queue_t& q, VecType vec)
+att_queue_submit_signal_last(const att_queue_t& q, VecType& vec)
 {
     for(size_t i = 0; i < vec.size(); i++)
     {
@@ -115,9 +115,9 @@ att_queue_submit_signal_last(const att_queue_t& q, VecType vec)
 /// waiting on the last signal guarantees the entire batch has drained.
 template <typename VecType>
 signal_ptr_t
-att_queue_submit_and_signal_last(const att_queue_t& q, VecType vec)
+att_queue_submit_and_signal_last(const att_queue_t& q, VecType& vec)
 {
-    auto sig = att_queue_submit_signal_last(q, std::move(vec));
+    auto sig = att_queue_submit_signal_last(q, vec);
     if(sig) signal_wait(*sig);
     return sig;
 }
