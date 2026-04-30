@@ -1140,7 +1140,26 @@ class StaticCommands:
                     else:
                         static_dict["mem_carveout"] = "N/A"
             except amdsmi_exception.AmdSmiLibraryException as e:
-                static_dict["mem_carveout"] = "N/A"
+                # UMA carveout is only exposed by APU VBIOSes that support
+                # ATCS function 0xA. On dGPUs and Instinct parts (including
+                # MI300A) the sysfs attribute does not exist and the library
+                # returns NOT_SUPPORTED; surface a clearer reason than bare N/A.
+                not_supported = (
+                    e.get_error_code()
+                    == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED
+                )
+                if not_supported and not (
+                    self.logger.is_json_format() or self.logger.is_csv_format()
+                ):
+                    # Human-readable: give a descriptive reason. JSON/CSV
+                    # consumers keep the legacy bare "N/A" for back-compat.
+                    static_dict["mem_carveout"] = (
+                        "N/A (UMA carveout is not supported on this ASIC/VBIOS)"
+                    )
+                elif self.logger.is_csv_format():
+                    static_dict["mem_carveout_index"] = "N/A"
+                else:
+                    static_dict["mem_carveout"] = "N/A"
                 logging.debug(
                     "Failed to get mem carveout info for gpu %s | %s", gpu_id, e.get_error_info()
                 )
