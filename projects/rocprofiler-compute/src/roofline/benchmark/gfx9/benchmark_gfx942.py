@@ -16,8 +16,10 @@ from . import benchmark_gfx9_base
 # Bench_gfx942 Class
 # =============================================================================
 class Bench_gfx942(benchmark_gfx9_base.Bench_gfx9):
-    def __init__(self, device_id: str) -> None:
-        self.gpu_model = self.get_gpu_model()
+    def __init__(self, device_id: int) -> None:
+        # GPU model name not currently needed for MI300 series products
+        # self.gpu_model = self.get_gpu_model()
+
         # All MI300 series products have 4 physical AID
         self.aid_count = 4
 

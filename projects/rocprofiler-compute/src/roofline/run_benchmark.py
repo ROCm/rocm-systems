@@ -29,14 +29,12 @@ def run_roofline_benchmark(device_id: int, roofline_csv: Path) -> None:
     bench.dump_csv(benchmark_metrics, str(roofline_csv))
 
 
-def load_bench(device_id: str) -> object:
+def load_bench(device_id: int) -> object:
     try:
         from utils.hip_interface import hipGetDeviceProperties
 
         # Get exact LLVM target name of the device
-        gfx_device = (hipGetDeviceProperties(int(device_id)).gcnArchName).split(":", 1)[
-            0
-        ]
+        gfx_device = (hipGetDeviceProperties(device_id).gcnArchName).split(":", 1)[0]
 
         # Force gfx940 MI300A_A0 and gfx941 MI300X_A0 products
         # to use same class as gfx942 MI300_A1

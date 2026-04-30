@@ -15,7 +15,7 @@ from .. import benchmark_base
 # Bench_gfx9 Class (ABSTRACT)
 # =============================================================================
 class Bench_gfx9(benchmark_base.Bench_base):
-    def __init__(self, device_id: str) -> None:
+    def __init__(self, device_id: int) -> None:
         # Must define number of AID per arch
         self.aid_count: int
 
@@ -95,9 +95,20 @@ class Bench_gfx9(benchmark_base.Bench_base):
 
         with amdsmi_ctx():
             cu_count = get_gpu_num_compute_units()
-            assert cu_count != -1
+            if cu_count == -1:
+                raise RuntimeError(
+                    "Failed to determine GPU compute unit count from AMD-SMI."
+                )
             cache_info = get_gpu_cache_info()
-            assert cache_info  # cache info must be populated
+            if (
+                not cache_info
+                or not isinstance(cache_info, dict)
+                or "cache" not in cache_info
+                or not cache_info["cache"]
+            ):
+                raise RuntimeError(
+                    "Failed to retrieve GPU cache information from AMD-SMI."
+                )
 
         self.cache_sizes = {}
 
@@ -113,7 +124,7 @@ class Bench_gfx9(benchmark_base.Bench_base):
             # therefore only have one cache instance
             elif cache_values["cache_level"] == 2:
                 self.cache_sizes["L2"] = cache_values["cache_size"] * 1024
-            elif cache_values["cache_level"] == 3:
+            elif cache_values["cache_level"] == 3 and self.aid_count > 0:
                 self.cache_sizes["MALL"] = int(
                     cache_values["cache_size"] * 1024 / self.aid_count
                 )

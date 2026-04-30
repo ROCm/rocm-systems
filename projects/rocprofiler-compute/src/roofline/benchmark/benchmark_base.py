@@ -57,7 +57,7 @@ VALU_NFMA = 1024
 # Bench_base Class (ABSTRACT)
 # =============================================================================
 class Bench_base(ABC):
-    def __init__(self, device_id: str) -> None:
+    def __init__(self, device_id: int) -> None:
         self.device_id = device_id
 
         # Arch or hardware-specific variables must be set in child classes
@@ -805,7 +805,7 @@ class Bench_base(ABC):
     def run_benchmark(self, device: int) -> dict[PerfMetrics]:
         """
         Run the roofline tests on the specified device.
-        Returns a dictionary mapping device ID to dictionary of metrics.
+        Returns a dictionary of PerfMetrics.
         """
         with self.gpu_benchmark_lock(device):
             metrics_dict = {}

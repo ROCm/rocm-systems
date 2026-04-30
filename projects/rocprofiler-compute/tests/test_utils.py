@@ -5958,10 +5958,10 @@ def test_amdsmi_get_gpu_cache_size():
     with mock.patch("utils.amdsmi_interface.get_device_handles") as device_handles_mock:
         device_handles_mock.return_value = [12345]
         with mock.patch("amdsmi.amdsmi_get_gpu_cache_info") as cache_info_mock:
-            cache_info_mock.return_value = {"Mock Cache Info"}
+            cache_info_mock.return_value = {"cache": "Mock Cache Info"}
             cache_info = get_gpu_cache_info()
             cache_info_mock.assert_called_once()
-            assert cache_info == {"Mock Cache Info"}
+            assert cache_info == {"cache": "Mock Cache Info"}
 
         with mock.patch(
             "amdsmi.amdsmi_get_gpu_cache_info",
@@ -5988,8 +5988,8 @@ def test_amdsmi_get_gpu_num_compute_units():
             "amdsmi.amdsmi_get_gpu_asic_info",
             side_effect=Exception("Mock exception"),
         ):
-            cache_info = get_gpu_num_compute_units()
-            assert cache_info == -1
+            cu_count = get_gpu_num_compute_units()
+            assert cu_count == -1
 
 
 # =============================================================================
