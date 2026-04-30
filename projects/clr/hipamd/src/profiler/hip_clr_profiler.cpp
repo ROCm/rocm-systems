@@ -1985,13 +1985,15 @@ void HipProfilerInitExt() {
   // Build the wrapper table once from the live dispatch table.
   HipProfilerBuildWrapperTableExt(const_cast<HipDispatchTable*>(hip::GetHipDispatchTable()));
 
-  // Always register the teardown callback: ProfilerAtExit drains queues when
-  // profiling was active (env var or API) and writes the trace only when
-  // GPU_CLR_PROFILE_OUTPUT was set.
-  static std::once_flag registered;
-  std::call_once(registered, []() {
-    amd::RuntimeTearDown::RegisterTearDownCallback("HipClrProfiler", ProfilerAtExit);
-  });
+#if defined(_WIN32)
+  // RuntimeTearDown::~RuntimeTearDown() does not fire reliably during DLL
+  // unload on Windows — use atexit instead.
+  std::atexit(ProfilerAtExit);
+#else
+  // On Linux RuntimeTearDown fires before device teardown, which is the
+  // correct point to drain queues and write the trace.
+  amd::RuntimeTearDown::RegisterTearDownCallback("HipClrProfiler", ProfilerAtExit);
+#endif
 
   // GPU_CLR_PROFILE_OUTPUT=<path>: presence enables env-var profiling mode and
   // sets the output path for the automatic trace written at process exit.
