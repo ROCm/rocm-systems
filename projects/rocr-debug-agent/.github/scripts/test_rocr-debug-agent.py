@@ -27,8 +27,7 @@ def parse_arguments() -> argparse.Namespace:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Environment Variables (used when CLI args are not provided):
-  THEROCK_BIN_DIR          Directory containing rocm-debug-agent-test
-  OUTPUT_ARTIFACTS_DIR     Directory containing run-test.py script
+  OUTPUT_ARTIFACTS_DIR     ROCm tree root directory (optional)
         """,
     )
     parser.add_argument(
@@ -107,48 +106,63 @@ def validate_path(path: Path, path_type: str, must_exist: bool = True) -> Path:
         sys.exit(1)
 
 
+def get_rocm_tree_root() -> Path:
+    """
+    Determine the ROCm tree root directory.
+
+    Priority:
+    1. Use OUTPUT_ARTIFACTS_DIR environment variable if set
+    2. Derive from script location (go up 2 directory levels)
+
+    Returns:
+        Path to ROCm tree root.
+
+    Raises:
+        SystemExit: If ROCm tree root cannot be determined.
+    """
+    artifacts_dir_str = os.getenv("OUTPUT_ARTIFACTS_DIR")
+
+    if artifacts_dir_str is not None:
+        logger.info("Using OUTPUT_ARTIFACTS_DIR as ROCm tree root.")
+        rocm_root = validate_path(
+            Path(artifacts_dir_str), "OUTPUT_ARTIFACTS_DIR", must_exist=True
+        )
+    else:
+        # Derive ROCm tree root from script location.
+        # Script is at <root>/.github/scripts/test_rocr-debug-agent.py
+        # Go up 2 levels: scripts/ -> .github/ -> root/
+        script_path = Path(__file__).resolve()
+        rocm_root = script_path.parent.parent.parent
+        logger.info(f"Derived ROCm tree root from script location: {rocm_root}")
+
+    return rocm_root
+
+
 def get_default_paths() -> Dict[str, Path]:
     """
-    Get default paths from environment variables.
+    Get default paths for test binary and script.
 
     Returns:
         Dictionary containing 'test_bin' and 'test_script' paths.
 
     Raises:
-        SystemExit: If environment variables are not defined or paths cannot be resolved.
+        SystemExit: If paths cannot be resolved or don't exist.
     """
-    therock_bin_dir_str = os.getenv("THEROCK_BIN_DIR")
-    artifacts_dir_str = os.getenv("OUTPUT_ARTIFACTS_DIR")
+    rocm_root = get_rocm_tree_root()
 
-    # Check if environment variables are defined.
-    if therock_bin_dir_str is None:
-        logger.error("[X] Error: THEROCK_BIN_DIR environment variable is not defined.")
+    # Both test binary and script are in <root>/tests/rocm-debug-agent/
+    test_dir = rocm_root / "tests" / "rocm-debug-agent"
+    test_bin = test_dir / "rocm-debug-agent-test"
+    test_script = test_dir / "run-test.py"
+
+    # Validate that the paths exist.
+    if not test_bin.exists():
+        logger.error(f"[X] Error: Test binary not found: {test_bin}")
         sys.exit(1)
-
-    if artifacts_dir_str is None:
-        logger.error(
-            "[X] Error: OUTPUT_ARTIFACTS_DIR environment variable is not defined."
-        )
-        sys.exit(1)
-
-    # Resolve and validate paths.
-    therock_bin_dir = validate_path(Path(therock_bin_dir_str), "THEROCK_BIN_DIR")
-    artifacts_dir = validate_path(Path(artifacts_dir_str), "OUTPUT_ARTIFACTS_DIR")
-
-    # Try the old testing script location first (for backwards compatibility).
-    test_bin = therock_bin_dir / "rocm-debug-agent-test"
-    test_script = artifacts_dir / "src" / "rocm-debug-agent-test" / "run-test.py"
 
     if not test_script.exists():
-        # Fall back to the new testing script location (both binary and script
-        # in the same directory).
-        test_dir = artifacts_dir / "tests" / "rocm-debug-agent"
-        test_bin = test_dir / "rocm-debug-agent-test"
-        test_script = test_dir / "run-test.py"
-
-        if not test_script.exists():
-            logger.error("[X] Error: run-test.py not found.")
-            sys.exit(1)
+        logger.error(f"[X] Error: Test script not found: {test_script}")
+        sys.exit(1)
 
     return {
         "test_bin": test_bin,
@@ -324,7 +338,7 @@ def main() -> None:
         rocr_debug_agent_test_script = validate_path(args.test_script, "--test-script")
     else:
         # Use default logic.
-        logger.info("Using default paths from environment variables.")
+        logger.info("Using default path discovery logic.")
         defaults = get_default_paths()
         rocr_debug_agent_test_bin = defaults["test_bin"]
         rocr_debug_agent_test_script = defaults["test_script"]
