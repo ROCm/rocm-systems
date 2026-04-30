@@ -139,6 +139,12 @@ struct ncclTopoLinkList {
 #define RCCL_TOPO_FORCE_INTRA 16
 #define RCCL_TOPO_XGMI_ALL  32
 
+/* Rome preset graph: index into romeTopoModels[] in rome_models.cc, or sentinel below. */
+#define RCCL_ROME_TOPO_PRESET_MODEL_IDX_NONE (-1)
+#define RCCL_ROME_TOPO_PRESET_MODEL_IDX_GIO_COLUMBA (1000000)
+/* parse4H4P() applies rome_model_68 directly; this tags the preset, not romeTopoModels[]. */
+#define RCCL_ROME_TOPO_PRESET_MODEL_IDX_4H4P (1000001)
+
 
 #define GCN_ARCH_NAME_LEN 16
 
@@ -215,6 +221,8 @@ struct ncclTopoSystem {
   // [RCCL] Track hostIdx to support rail-optimized rings/trees
   int hostIdx;
   bool useRailOptimizedTrees;
+  /* RCCL Rome / GIO preset: RCCL_ROME_TOPO_PRESET_MODEL_IDX_* sentinels or romeTopoModels[] index */
+  int romeTopoModelIdx;
 };
 
 ncclResult_t ncclTopoGetNode(struct ncclTopoSystem* system, struct ncclTopoNode** node, int type, uint64_t id);

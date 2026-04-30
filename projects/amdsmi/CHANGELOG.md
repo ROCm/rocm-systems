@@ -123,6 +123,11 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Fixed `amd-smi monitor --brcm_nic` and `--brcm_switch` flags being registered on non-BRCM systems**.  
   - These flags are now only registered when BRCM hardware is present, preventing spurious failures on AMD GPU-only systems.
 
+- **Fixed `amd-smi` default command alignment**.  
+  - Updated default `amd-smi` output to align values to the left for improved readability.
+    Several items were misaligned in the default output, and this change ensures a consistent left-aligned format across all fields.
+  - *This change is purely cosmetic and does not affect any functionality.*  
+
 ### Changed
 
 - **Package install no longer modifies the system-wide logrotate timer or cron schedule**.
