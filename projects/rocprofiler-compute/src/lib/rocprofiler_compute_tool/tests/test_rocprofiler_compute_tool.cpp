@@ -50,8 +50,8 @@ TEST_F(test_rocprofiler_compute_tool_t, ProvidedNonEmptyOutputPath_ReturnsItExte
 {
     const auto cfg       = rocprofiler_configure(1, "", 1, &m_client_id);
     const auto tool_data = get_tool_data(cfg);
-    EXPECT_TRUE(tool_data->output_filename.find(m_env_parameters->get_output_path()) != std::string::npos);
-    EXPECT_TRUE(tool_data->output_filename.find(
+    EXPECT_TRUE(tool_data->counters_output_filename.find(m_env_parameters->get_output_path()) != std::string::npos);
+    EXPECT_TRUE(tool_data->counters_output_filename.find(
                     std::to_string(getpid()) + "_native_counter_collection.csv") != std::string::npos);
 }
 

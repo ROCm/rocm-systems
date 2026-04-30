@@ -147,7 +147,7 @@ void generate_output(tool_data_t& tool_data)
     // Dispatches before the kernel to be filtered was registered may have been
     // profiled. Remove any records whose kernel id does not match the
     // target_kernel_ids
-    if (!tool_data.counter_records.empty() && !tool_data.output_filename.empty())
+    if (!tool_data.counter_records.empty() && !tool_data.counters_output_filename.empty())
     {
         if (!tool_data.target_kernel_ids.empty())
         {
@@ -161,7 +161,7 @@ void generate_output(tool_data_t& tool_data)
                                }),
                 tool_data.counter_records.end());
         }
-        g_counters_writer->write_counters(tool_data.output_filename, tool_data.counter_records);
+        g_counters_writer->write_counters(tool_data.counters_output_filename, tool_data.counter_records);
     }
 
     if (tool_data.pc_sampling_mode != PcSamplingMode::Disabled)
@@ -207,7 +207,7 @@ std::unique_ptr<tool_data_t> create_tool_data(rocprofiler_client_id_t* /*id*/)
     tool_data->pc_sampling_collector.wlock([](auto& ptr) { ptr = pc_sampling_collector_t::create(); });
     tool_data->pc_sampling_mode = pc_sampling_mode(g_input_parameters->get_pc_sampling_mode());
 
-    tool_data->output_filename = generate_output_filename(g_input_parameters->get_output_path());
+    tool_data->counters_output_filename = generate_output_filename(g_input_parameters->get_output_path());
 
     // ROCPROF_COUNTERS env. var. is a string like "pmc: counter1 counter2 ..."
     if (const char* v = g_input_parameters->get_requested_counters())

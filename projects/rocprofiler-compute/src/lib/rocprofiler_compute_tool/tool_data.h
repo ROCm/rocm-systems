@@ -75,7 +75,8 @@ struct tool_data_t
     IterationMultiplexingMode iteration_multiplexing_mode{IterationMultiplexingMode::Disabled};
     PcSamplingMode                             pc_sampling_mode{PcSamplingMode::Disabled};
     std::mutex                                 mut{};
-    std::string                                output_filename{};
+    std::string                                counters_output_filename{};
+    std::string                                code_obj_output_filename{};
     std::unordered_map<uint64_t, std::string>  counter_id_name_map{};
     std::string                                requested_counters{};
     std::string                                kernel_filter_include_regex{};
