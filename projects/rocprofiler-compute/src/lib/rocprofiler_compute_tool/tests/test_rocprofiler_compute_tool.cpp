@@ -46,13 +46,22 @@ TEST_F(test_rocprofiler_compute_tool_t, ProvidedNormalExecution_ReturnsPointersT
     tool_data->pc_sampling_collector.rlock([](const auto& ptr) { EXPECT_TRUE(ptr); });
 }
 
-TEST_F(test_rocprofiler_compute_tool_t, ProvidedNonEmptyOutputPath_ReturnsItExtended)
+TEST_F(test_rocprofiler_compute_tool_t, ProvidedNonEmptyOutputPath_ReturnsCountersOutputFilename)
 {
     const auto cfg       = rocprofiler_configure(1, "", 1, &m_client_id);
     const auto tool_data = get_tool_data(cfg);
     EXPECT_TRUE(tool_data->counters_output_filename.find(m_env_parameters->get_output_path()) != std::string::npos);
     EXPECT_TRUE(tool_data->counters_output_filename.find(
                     std::to_string(getpid()) + "_native_counter_collection.csv") != std::string::npos);
+}
+
+TEST_F(test_rocprofiler_compute_tool_t, ProvidedNonEmptyOutputPath_ReturnsCodeObjOutputFilename)
+{
+    const auto cfg       = rocprofiler_configure(1, "", 1, &m_client_id);
+    const auto tool_data = get_tool_data(cfg);
+    EXPECT_TRUE(tool_data->code_obj_output_filename.find(m_env_parameters->get_output_path()) != std::string::npos);
+    EXPECT_TRUE(tool_data->code_obj_output_filename.find(
+                    std::to_string(getpid()) + "_code_obj_info.csv") != std::string::npos);
 }
 
 TEST_F(test_rocprofiler_compute_tool_t, ProvidedRequestedCounters_ReturnsIt)
