@@ -29,8 +29,10 @@
 #include <hsa/hsa.h>
 #include <hsa/hsa_ext_amd.h>
 
-#include <cstdio>
 #include <cassert>
+#include <cstdio>
+#include <type_traits>
+#include <utility>
 #include <vector>
 
 #include "rocshmem/rocshmem_config.h"  // NOLINT(build/include_subdir)
