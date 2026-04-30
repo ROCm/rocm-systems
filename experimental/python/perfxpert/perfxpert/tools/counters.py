@@ -12,7 +12,7 @@ from perfxpert.knowledge import load_yaml
 from perfxpert.tools._class import ToolClass, tool_class
 
 # TCC-derived metrics must be isolated to their own rocprofv3 pass
-# Ref: CLAUDE.md — FETCH_SIZE/WRITE_SIZE each need own pass
+# Ref: knowledge/rocprofv3_counter_limits.yaml
 _TCC_DERIVED = frozenset({"FETCH_SIZE", "WRITE_SIZE"})
 
 
@@ -109,7 +109,9 @@ def validate_for_gpu(counter_list: List[str], gpu_arch: str) -> Dict[str, Any]:
           "escalation": {...} | None,
         }
     """
-    limits_cfg = load_yaml("pmc_limits")["per_block_limits"]
+    limits_data = load_yaml("pmc_limits")
+    arch_limits = limits_data.get("gpu_arch_limits", {})
+    fallback_limits = limits_data["per_block_limits"]
     catalog = load_yaml("counter_catalog")
 
     # Build name → block index from the flat catalog
@@ -119,10 +121,11 @@ def validate_for_gpu(counter_list: List[str], gpu_arch: str) -> Dict[str, Any]:
         name_to_block.setdefault(derived, "TCC")
 
     def _limit_for(block: str) -> int:
-        """Look up per-pass limit, preferring arch-specific override."""
-        info = limits_cfg.get(block, {})
-        arch_key = f"{gpu_arch}_limit"
-        return int(info.get(arch_key, info.get("limit", 4)))
+        """Look up per-pass limit, preferring first-class GPU-arch config."""
+        arch_info = arch_limits.get(gpu_arch, {})
+        if block in arch_info:
+            return int(arch_info[block])
+        return int(fallback_limits.get(block, {}).get("limit", 4))
 
     # Separate TCC-derived counters — each gets its own pass (anti-Sakana)
     derived = [c for c in counter_list if c in _TCC_DERIVED]

@@ -63,6 +63,21 @@ def test_validate_single_pass_does_not_emit_escalation():
     assert result["escalation"] is None
 
 
+def test_validate_uses_source_derived_sq_limit():
+    """Six SQ counters fit in one pass because mi_gpu_spec.yaml sets SQ to 8."""
+    sq_counters = [
+        "SQ_WAVES",
+        "SQ_INSTS_VALU",
+        "SQ_INSTS_VMEM_RD",
+        "SQ_INSTS_VMEM_WR",
+        "SQ_INSTS_LDS",
+        "SQ_WAVE_CYCLES",
+    ]
+    result = counters.validate_for_gpu(sq_counters, gpu_arch="gfx942")
+    assert result["fixed_passes"] == [sq_counters]
+    assert result["escalation"] is None
+
+
 def test_is_read_only_class():
     assert counters.lookup_info.__tool_class__ == ToolClass.READ_ONLY
     assert counters.validate_for_gpu.__tool_class__ == ToolClass.READ_ONLY

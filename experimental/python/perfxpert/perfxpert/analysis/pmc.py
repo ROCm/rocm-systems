@@ -65,32 +65,39 @@ _OUTPUT_ONLY_ARGS: frozenset = frozenset(
 #   TCC_*           -> block "TCC"   (L2 cache)
 #
 # IMPORTANT: FETCH_SIZE and WRITE_SIZE are DERIVED metrics, not raw hardware counters.
-# Internally rocprofv3 expands them to TCC hardware block counters:
-#   FETCH_SIZE -> TCC_BUBBLE + TCC_EA0_RDREQ + GRBM_GUI_ACTIVE  (TCC block)
-#   WRITE_SIZE -> TCC_EA0_WRREQ + TCC_EA0_WRREQ_64B              (TCC block)
-# Combined they require ~4 TCC hardware counter slots (across 32 TCC instances on MI300X).
-# They MUST be isolated in their own pass whenever SQ counters are also requested.
+# Internally rocprofv3 expands them to underlying counters for TCC-derived metrics:
+#   FETCH_SIZE -> TCC_BUBBLE + TCC_EA0_RDREQ + GRBM_GUI_ACTIVE
+#   WRITE_SIZE -> TCC_EA0_WRREQ + TCC_EA0_WRREQ_64B
+# Combined they require 5 derived hardware counter slots near TCC capacity.
+# They MUST be isolated in their own pass.
 #
 # Exceeding a block's per-pass limit causes rocprofv3 to abort with error code 38:
 #   "Request exceeds the capabilities of the hardware to collect"
 #
-# Actual limits vary by GPU generation (MI100/MI200/MI300X) and block type.
-# The values below are conservative safe defaults; some blocks (e.g. SQ on
-# gfx942/MI300X) support up to 8 counters per pass in practice.
+# Source: projects/rocprofiler-compute/src/utils/mi_gpu_spec.yaml perfmon_config.
+# gfx950 TCC_channels is topology metadata, not a per-pass counter limit.
 _PMC_BLOCK_LIMIT_DEFAULT: int = 4
 _PMC_BLOCK_LIMITS: Dict[str, int] = {
-    "SQ": 4,  # shader/wave; gfx942 supports up to 8 -- use 4 as safe default
-    "GRBM": 4,  # GPU register bus manager
+    "SQ": 8,  # shader/wave
+    "GRBM": 2,  # GPU register bus manager
     "TCP": 4,  # L1 vector cache
     "TCC": 4,  # L2 cache
-    "TA": 4,  # texture addressing
-    "TD": 4,  # texture data
+    "TA": 2,  # texture addressing
+    "TD": 2,  # texture data
+    "CPC": 2,  # command processor compute
+    "CPF": 2,  # command processor frontend
+    "SPI": 6,  # shader processor interpolator
+    "GDS": 4,  # global data share
+    "GCEA": 2,  # graphics/compute engine adapter
+    "GL1A": 4,  # graphics L1 address
+    "GL1C": 4,  # graphics L1 cache
+    "GL2A": 4,  # graphics L2 address
+    "GL2C": 4,  # graphics L2 cache
 }
 
 # FETCH_SIZE and WRITE_SIZE are derived metrics that each expand to multiple TCC
-# hardware counters (FETCH_SIZE -> 3 counters, WRITE_SIZE -> 2 counters; combined 5
-# exceed the TCC per-pass limit). Each must be in its own dedicated pass, isolated
-# from all other counters -- including each other.
+# hardware counters (FETCH_SIZE -> 3 counters, WRITE_SIZE -> 2 counters). Each must
+# be in its own dedicated pass, isolated from all other counters -- including each other.
 _TCC_DERIVED_COUNTERS: frozenset = frozenset({"FETCH_SIZE", "WRITE_SIZE"})
 
 
