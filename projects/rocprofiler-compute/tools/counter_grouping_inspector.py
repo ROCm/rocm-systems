@@ -473,28 +473,15 @@ def render_perfmon_plan_svg(
         if not global_columns:
             continue
 
-        by_ip = _counters_grouped_by_ip_sorted(flat_counters)
-        table_height = max(
-            (len(by_ip.get(col, [])) for col in global_columns),
-            default=0,
-        )
-
-        header_cells = [col.ljust(column_widths[col]) for col in global_columns]
-        console.print("[bold cyan]| " + " | ".join(header_cells) + " |[/bold cyan]")
-
-        separator_cells = ["-" * column_widths[col] for col in global_columns]
-        console.print("[dim]| " + " | ".join(separator_cells) + " |[/dim]")
-
-        for row_idx in range(table_height):
-            row_cells = []
-            for col in global_columns:
-                column_counters = by_ip.get(col, [])
-                cell_text = (
-                    column_counters[row_idx] if row_idx < len(column_counters) else ""
-                )
-                row_cells.append(cell_text.ljust(column_widths[col]))
-            console.print("| " + " | ".join(row_cells) + " |")
-
+        table_lines = _format_bucket_markdown(
+            flat_counters, global_columns, column_widths
+        ).split("\n")
+        if table_lines:
+            console.print(f"[bold cyan]{table_lines[0]}[/bold cyan]")
+        if len(table_lines) > 1:
+            console.print(f"[dim]{table_lines[1]}[/dim]")
+        for line in table_lines[2:]:
+            console.print(line)
         console.print()
 
     console.print(

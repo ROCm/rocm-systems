@@ -20,10 +20,10 @@ _SRC_DIR = _PROJECT_ROOT / "src"
 if str(_SRC_DIR) not in sys.path:
     sys.path.insert(0, str(_SRC_DIR))
 
+from utils.mi_gpu_spec import mi_gpu_specs  # noqa: E402
+
 
 def check_all_supported_archs() -> None:
-    from utils.mi_gpu_spec import mi_gpu_specs
-
     supported_archs = list(mi_gpu_specs.get_gpu_series_dict().keys())
     assert supported_archs, "Should have at least one supported architecture"
 
