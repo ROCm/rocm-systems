@@ -8,12 +8,28 @@
 
 #include <hip_test_common.hh>
 #include <memory>
+#include <hipMallocManagedCommon.hh>
 
 __device__ __managed__ int var = 0;
 
 enum class StreamAttachTestType { NullStream = 0, StreamPerThread, CreatedStream };
 
 HIP_TEST_CASE(Unit_hipStreamAttachMemAsync_Negative) {
+  auto managed = HmmAttrPrint();
+  if (managed != 1) {
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
+    return;
+  }
+
+#if HT_AMD
+  int isPageableHMM = 0;
+  HIP_CHECK(hipDeviceGetAttribute(&isPageableHMM, hipDeviceAttributePageableMemoryAccess, 0));
+  if (!isPageableHMM) {
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kPageableMemoryAccessUnsupported);
+    return;
+  }
+#endif
+
   hipStream_t stream{nullptr};
 
   auto streamType =
@@ -69,6 +85,21 @@ constexpr size_t size = 1024;
 __device__ __managed__ int m_memory[size];
 
 HIP_TEST_CASE(Unit_hipStreamAttachMemAsync_UseCase) {
+  auto managed = HmmAttrPrint();
+  if (managed != 1) {
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
+    return;
+  }
+
+#if HT_AMD
+  int isPageableHMM = 0;
+  HIP_CHECK(hipDeviceGetAttribute(&isPageableHMM, hipDeviceAttributePageableMemoryAccess, 0));
+  if (!isPageableHMM) {
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kPageableMemoryAccessUnsupported);
+    return;
+  }
+#endif
+
   hipStream_t stream{nullptr};
 
   auto streamType =
