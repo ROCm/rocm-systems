@@ -17,6 +17,10 @@ from . import benchmark_gfx9_base
 # =============================================================================
 class Bench_gfx950(benchmark_gfx9_base.Bench_gfx9):
     def __init__(self, device_id: str) -> None:
+        self.gpu_model = self.get_gpu_model()
+        # MI350P has 2 logical AID, all other MI350 series products have 4 logical AID
+        self.aid_count = 2 if self.gpu_model == "MI350P" else 4
+
         super().__init__(device_id)
 
         self.unsupported_data_types = []

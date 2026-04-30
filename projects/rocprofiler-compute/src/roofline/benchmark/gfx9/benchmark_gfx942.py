@@ -17,6 +17,10 @@ from . import benchmark_gfx9_base
 # =============================================================================
 class Bench_gfx942(benchmark_gfx9_base.Bench_gfx9):
     def __init__(self, device_id: str) -> None:
+        self.gpu_model = self.get_gpu_model()
+        # All MI300 series products have 4 physical AID
+        self.aid_count = 4
+
         super().__init__(device_id)
 
         self.unsupported_data_types = ["MFMA-F4", "MFMA-F6", "MFMA-F6F4"]

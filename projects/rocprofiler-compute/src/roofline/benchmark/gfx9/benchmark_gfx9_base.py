@@ -18,6 +18,9 @@ class Bench_gfx9(benchmark_base.Bench_base):
     def __init__(self, device_id: str) -> None:
         super().__init__(device_id)
 
+        # Must define number of AID per arch
+        self.aid_count: int
+
         self.WAVEFRONT_SIZE = 64
         self.MATRIX_OPS_TYPE = "MFMA"
 
@@ -78,6 +81,42 @@ class Bench_gfx9(benchmark_base.Bench_base):
             "MFMA-F64": "MFMAF64Flops",
             "MFMA-I8": "MFMAI8Ops",
         }
+
+    # -----------------------------------------------------------------------------
+    # Helper Methods and Classes
+    # -----------------------------------------------------------------------------
+
+    def set_cache_sizes(self) -> None:
+        from utils.amdsmi_interface import (
+            amdsmi_ctx,
+            get_gpu_cache_info,
+            get_gpu_num_compute_units,
+        )
+
+        with amdsmi_ctx():
+            cu_count = get_gpu_num_compute_units()
+            assert cu_count != -1
+            cache_info = get_gpu_cache_info()
+            assert cache_info  # cache info must be populated
+
+        self.cache_sizes = {}
+
+        for cache_values in cache_info["cache"]:
+            # Cache level is L1 and we are looking for vL1d which means
+            # there should be a cache instance per CU available on the GPU
+            if (
+                cache_values["cache_level"] == 1
+                and cache_values["num_cache_instance"] == cu_count
+            ):
+                self.cache_sizes["L1"] = cache_values["cache_size"] * 1024
+            # Cache levels L2 and L3/MALL are shared across all CUs
+            # therefore only have one cache instance
+            elif cache_values["cache_level"] == 2:
+                self.cache_sizes["L2"] = cache_values["cache_size"] * 1024
+            elif cache_values["cache_level"] == 3:
+                self.cache_sizes["MALL"] = int(
+                    cache_values["cache_size"] * 1024 / self.aid_count
+                )
 
     # -----------------------------------------------------------------------------
     # Benchmarking kernel source
