@@ -276,8 +276,8 @@ struct_amdsmi_hsmp_driver_version_t._fields_ = [
 
 amdsmi_hsmp_driver_version_t = struct_amdsmi_hsmp_driver_version_t
 
-# values for enumeration 'processor_type_t'
-processor_type_t__enumvalues = {
+# values for enumeration 'amdsmi_processor_type_t'
+amdsmi_processor_type_t__enumvalues = {
     0: 'AMDSMI_PROCESSOR_TYPE_UNKNOWN',
     1: 'AMDSMI_PROCESSOR_TYPE_AMD_GPU',
     2: 'AMDSMI_PROCESSOR_TYPE_AMD_CPU',
@@ -299,7 +299,9 @@ AMDSMI_PROCESSOR_TYPE_AMD_APU = 6
 AMDSMI_PROCESSOR_TYPE_AMD_NIC = 7
 AMDSMI_PROCESSOR_TYPE_BRCM_NIC = 8
 AMDSMI_PROCESSOR_TYPE_BRCM_SWITCH = 9
-processor_type_t = ctypes.c_uint32 # enum
+amdsmi_processor_type_t = ctypes.c_uint32 # enum
+processor_type_t = amdsmi_processor_type_t
+processor_type_t__enumvalues = amdsmi_processor_type_t__enumvalues
 
 # values for enumeration 'amdsmi_status_t'
 amdsmi_status_t__enumvalues = {
@@ -2878,7 +2880,25 @@ except AttributeError:
 try:
     amdsmi_get_processor_type = _libraries['libamd_smi.so'].amdsmi_get_processor_type
     amdsmi_get_processor_type.restype = amdsmi_status_t
-    amdsmi_get_processor_type.argtypes = [amdsmi_processor_handle, ctypes.POINTER(processor_type_t)]
+    amdsmi_get_processor_type.argtypes = [amdsmi_processor_handle, ctypes.POINTER(amdsmi_processor_type_t)]
+except AttributeError:
+    pass
+try:
+    amdsmi_get_processor_info = _libraries['libamd_smi.so'].amdsmi_get_processor_info
+    amdsmi_get_processor_info.restype = amdsmi_status_t
+    amdsmi_get_processor_info.argtypes = [amdsmi_processor_handle, size_t, ctypes.POINTER(ctypes.c_char)]
+except AttributeError:
+    pass
+try:
+    amdsmi_get_processor_count_from_handles = _libraries['libamd_smi.so'].amdsmi_get_processor_count_from_handles
+    amdsmi_get_processor_count_from_handles.restype = amdsmi_status_t
+    amdsmi_get_processor_count_from_handles.argtypes = [ctypes.POINTER(ctypes.POINTER(None)), ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32)]
+except AttributeError:
+    pass
+try:
+    amdsmi_get_processor_handles_by_type = _libraries['libamd_smi.so'].amdsmi_get_processor_handles_by_type
+    amdsmi_get_processor_handles_by_type.restype = amdsmi_status_t
+    amdsmi_get_processor_handles_by_type.argtypes = [amdsmi_socket_handle, amdsmi_processor_type_t, ctypes.POINTER(ctypes.POINTER(None)), ctypes.POINTER(ctypes.c_uint32)]
 except AttributeError:
     pass
 try:
@@ -3803,24 +3823,6 @@ try:
     amdsmi_get_cpu_handles = _libraries['libamd_smi.so'].amdsmi_get_cpu_handles
     amdsmi_get_cpu_handles.restype = amdsmi_status_t
     amdsmi_get_cpu_handles.argtypes = [ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.POINTER(None))]
-except AttributeError:
-    pass
-try:
-    amdsmi_get_processor_info = _libraries['libamd_smi.so'].amdsmi_get_processor_info
-    amdsmi_get_processor_info.restype = amdsmi_status_t
-    amdsmi_get_processor_info.argtypes = [amdsmi_processor_handle, size_t, ctypes.POINTER(ctypes.c_char)]
-except AttributeError:
-    pass
-try:
-    amdsmi_get_processor_count_from_handles = _libraries['libamd_smi.so'].amdsmi_get_processor_count_from_handles
-    amdsmi_get_processor_count_from_handles.restype = amdsmi_status_t
-    amdsmi_get_processor_count_from_handles.argtypes = [ctypes.POINTER(ctypes.POINTER(None)), ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32)]
-except AttributeError:
-    pass
-try:
-    amdsmi_get_processor_handles_by_type = _libraries['libamd_smi.so'].amdsmi_get_processor_handles_by_type
-    amdsmi_get_processor_handles_by_type.restype = amdsmi_status_t
-    amdsmi_get_processor_handles_by_type.argtypes = [amdsmi_socket_handle, processor_type_t, ctypes.POINTER(ctypes.POINTER(None)), ctypes.POINTER(ctypes.c_uint32)]
 except AttributeError:
     pass
 try:
@@ -4787,13 +4789,13 @@ __all__ = \
     'amdsmi_power_profile_preset_masks_t',
     'amdsmi_power_profile_status_t', 'amdsmi_proc_info_t',
     'amdsmi_process_handle_t', 'amdsmi_process_info_t',
-    'amdsmi_processor_handle', 'amdsmi_ptl_data_format_t',
-    'amdsmi_range_t', 'amdsmi_ras_err_state_t',
-    'amdsmi_ras_feature_t', 'amdsmi_reg_type_t', 'amdsmi_reset_gpu',
-    'amdsmi_reset_gpu_fan', 'amdsmi_reset_gpu_xgmi_error',
-    'amdsmi_reset_ttm_pages_limit', 'amdsmi_retired_page_record_t',
-    'amdsmi_set_clk_freq', 'amdsmi_set_cpu_cc6_enable',
-    'amdsmi_set_cpu_core_boostlimit',
+    'amdsmi_processor_handle', 'amdsmi_processor_type_t',
+    'amdsmi_ptl_data_format_t', 'amdsmi_range_t',
+    'amdsmi_ras_err_state_t', 'amdsmi_ras_feature_t',
+    'amdsmi_reg_type_t', 'amdsmi_reset_gpu', 'amdsmi_reset_gpu_fan',
+    'amdsmi_reset_gpu_xgmi_error', 'amdsmi_reset_ttm_pages_limit',
+    'amdsmi_retired_page_record_t', 'amdsmi_set_clk_freq',
+    'amdsmi_set_cpu_cc6_enable', 'amdsmi_set_cpu_core_boostlimit',
     'amdsmi_set_cpu_core_floor_freq_limit',
     'amdsmi_set_cpu_core_msr_floor_freq_limit',
     'amdsmi_set_cpu_df_pstate_range', 'amdsmi_set_cpu_dfc_ctrl',
@@ -4837,8 +4839,9 @@ __all__ = \
     'amdsmi_voltage_type_t', 'amdsmi_vram_info_t',
     'amdsmi_vram_type_t', 'amdsmi_vram_usage_t', 'amdsmi_xgmi_info_t',
     'amdsmi_xgmi_link_status_t', 'amdsmi_xgmi_link_status_type_t',
-    'amdsmi_xgmi_status_t', 'processor_type_t', 'size_t',
-    'struct__links', 'struct_amd_metrics_table_header_t',
+    'amdsmi_xgmi_status_t', 'processor_type_t',
+    'processor_type_t__enumvalues', 'size_t', 'struct__links',
+    'struct_amd_metrics_table_header_t',
     'struct_amdsmi_accelerator_partition_profile_config_t',
     'struct_amdsmi_accelerator_partition_profile_t',
     'struct_amdsmi_accelerator_partition_resource_profile_t',

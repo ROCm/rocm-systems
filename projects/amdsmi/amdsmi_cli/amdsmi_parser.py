@@ -1621,7 +1621,10 @@ class AMDSMIParser(argparse.ArgumentParser):
                 "-p", "--partition", action="store_true", required=False, help=partition_help
             )
 
-            mem_carveout_help = "Display VRAM carveout memory options and current setting"
+            mem_carveout_help = (
+                "Display VRAM carveout memory options and current setting."
+                "\n\tOnly supported on some APUs."
+            )
             static_parser.add_argument(
                 "-m", "--mem-carveout", action="store_true", required=False, help=mem_carveout_help
             )
@@ -2624,7 +2627,11 @@ class AMDSMIParser(argparse.ArgumentParser):
             )
 
             if self.helpers.is_baremetal():
-                set_mem_carveout_help = "Set VRAM carveout size by option index.\n\tUse `amd-smi static --mem-carveout` to see available options."
+                set_mem_carveout_help = (
+                    "Set VRAM carveout size by option index."
+                    "\n\tUse `amd-smi static --mem-carveout` to see available options."
+                    "\n\tOnly supported on some APUs; a reboot is required after setting."
+                )
                 set_value_exclusive_group.add_argument(
                     "-m",
                     "--mem-carveout",
