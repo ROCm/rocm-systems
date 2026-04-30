@@ -354,9 +354,9 @@ static ncclResult_t connectRingsLoadBalanced(struct ncclComm* comm, int* ringRec
   int* nodeOrder = nullptr;
   NCCLCHECK(ncclCalloc(&nodeOrder, nChannels * nNodes));
 
-  // Note: generateGreedyNodeOrder needs to handle the flat indexing (c * nNodes + i)
+  // Note: generateRings needs to handle the flat indexing (c * nNodes + i)
   if ( nChannels > MAXCHANNELS || nChannels >= 255 ) {
-    WARN(" generateGreedyNodeOrder is implemented with an assumption nChannels [=%d] < 255 as an optimization. Update the implementaion to accept uint16/32 for nChannels ",nChannels );
+    WARN(" generateRings is implemented with an assumption nChannels [=%d] < 255 as an optimization. Update the implementaion to accept uint16/32 for nChannels ",nChannels );
   }
 
   // 2. Populate the Diverse/Greedy Node Order

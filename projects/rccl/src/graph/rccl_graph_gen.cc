@@ -55,7 +55,7 @@ static void generateWalecki(int nNodes, int channel, int* order) {
 }
 
 /**
- * This function (generateGreedyNodeOrder) takes number of nodes in a fully connected graph and number target channels, and generates upto nChannel Hamiltonian cycles 
+ * This function takes number of nodes in a fully connected graph and number target channels, and generates upto nChannel Hamiltonian cycles 
  * In this function we initially generate Walecki Construction depending on (nNodes mod 2), upto nNodes / 2 channels. Then, based on edge usage
  * heuristic, we construct rest of the cycles.
  * 
