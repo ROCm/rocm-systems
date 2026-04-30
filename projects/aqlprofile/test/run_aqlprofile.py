@@ -16,23 +16,30 @@ def derive_rocm_path(script_dir: Path) -> Path:
         test_script = candidate / "share" / "hsa-amd-aqlprofile" / "run_tests.sh"
         if test_script.is_file():
             return candidate
-    if script_dir.name == "hsa-amd-aqlprofile" and script_dir.parent.name == "share":
-        return script_dir.parent.parent
-    output_artifacts_dir = os.getenv("OUTPUT_ARTIFACTS_DIR")
-    if output_artifacts_dir:
-        return Path(output_artifacts_dir)
-    return script_dir.parent.parent
+    raise RuntimeError(
+        "Could not derive ROCM_PATH from an installed hsa-amd-aqlprofile test "
+        "layout. Set ROCM_PATH explicitly."
+    )
+
+
+def get_rocm_lib_dir(rocm_path: Path) -> Path:
+    for name in ("lib", "lib64"):
+        candidate = rocm_path / name
+        if candidate.is_dir():
+            return candidate
+    raise FileNotFoundError(f"Could not find ROCm library directory under {rocm_path}")
 
 
 def main() -> None:
     script_dir = Path(__file__).resolve().parent
-    rocm_path = Path(
-        os.environ.get("ROCM_PATH", derive_rocm_path(script_dir))
-    ).resolve()
+    rocm_path_env = os.getenv("ROCM_PATH")
+    rocm_path = Path(rocm_path_env).resolve() if rocm_path_env else derive_rocm_path(script_dir)
     test_script = rocm_path / "share" / "hsa-amd-aqlprofile" / "run_tests.sh"
+    if not test_script.is_file():
+        raise FileNotFoundError(f"Could not find test script: {test_script}")
 
     env = os.environ.copy()
-    lib_path = rocm_path / "lib"
+    lib_path = get_rocm_lib_dir(rocm_path)
     old_ld_library_path = env.get("LD_LIBRARY_PATH", "")
     env["LD_LIBRARY_PATH"] = (
         f"{lib_path}{os.pathsep}{old_ld_library_path}"
