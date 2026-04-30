@@ -12,6 +12,7 @@ on:
           - all
           - gfx94X
           - gfx950
+          - gfx1150
           - gfx1151
   schedule:
     - cron: 0 5 * * *
@@ -51,7 +52,7 @@ jobs:
         run: |
           GPU_INPUT="${{ github.event.inputs.gpu }}"
           if [ -z "$GPU_INPUT" ] || [ "$GPU_INPUT" = "all" ]; then
-            echo 'gpu_list=["gfx94X","gfx950","gfx1151"]' >> $GITHUB_OUTPUT
+            echo 'gpu_list=["gfx94X","gfx950","gfx1150","gfx1151"]' >> $GITHUB_OUTPUT
           else
             echo "gpu_list=[\"$GPU_INPUT\"]" >> $GITHUB_OUTPUT
           fi
