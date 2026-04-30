@@ -534,7 +534,6 @@ class RocProfCompute_Base:
         return (
             int(self._soc._mspec.rocm_version.split(".")[0]) >= 7
             and not args.attach_pid
-            and not is_only_pc_sampling(args.filter_blocks)
         )
 
     @abstractmethod
