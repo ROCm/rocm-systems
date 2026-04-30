@@ -94,7 +94,9 @@ att_queue_submit(const att_queue_t&            q,
                  hsa_ext_amd_aql_pm4_packet_t* packet,
                  hsa_signal_t*                 completion);
 
-/// Enqueues a sequence of packets and returns the completion signal of the last entry.
+/// Enqueues a sequence of packets, waits for the last packet to complete, and
+/// returns its completion signal. AQL packets execute in submission order, so
+/// waiting on the last signal guarantees the entire batch has drained.
 template <typename VecType>
 signal_ptr_t
 att_queue_submit_and_signal_last(const att_queue_t& q, VecType vec)
@@ -102,7 +104,11 @@ att_queue_submit_and_signal_last(const att_queue_t& q, VecType vec)
     for(size_t i = 0; i < vec.size(); i++)
     {
         auto sig = att_queue_submit(q, &vec.at(i), i == vec.size() - 1);
-        if(sig) return sig;
+        if(sig)
+        {
+            signal_wait(*sig);
+            return sig;
+        }
     }
     return nullptr;
 }
