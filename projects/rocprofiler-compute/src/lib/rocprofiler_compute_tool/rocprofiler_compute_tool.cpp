@@ -122,7 +122,7 @@ output_stream()
 
 bool print_kernel_info(std::string kernel_name, std::unordered_map<std::string, std::pair<unsigned long, unsigned long>>::mapped_type& begin_end)
 {
-    output_stream() << std::hex << "Found: " << kernel_name << " at addr: 0x" << begin_end.first
+    std::clog << std::hex << "Found: " << kernel_name << " at addr: 0x" << begin_end.first
         << std::dec << ". Printing first 64 bytes:" << std::endl;
 
     std::unordered_set<std::string> references{};
@@ -143,7 +143,7 @@ bool print_kernel_info(std::string kernel_name, std::unordered_map<std::string, 
             if (source.rfind('/') < source.size())
                 source = source.substr(source.rfind('/'));
             if (vaddr < begin_end.first + 64)
-                output_stream() << '\t' << inst->inst << '\n';
+                std::clog << '\t' << inst->inst << '\n';
 
             if (source.rfind(':') < source.size())
                 source = source.substr(0, source.rfind(':'));
@@ -162,12 +162,12 @@ bool print_kernel_info(std::string kernel_name, std::unordered_map<std::string, 
         vaddr += inst->size;
     }
 
-    output_stream() << "  --- Num Scalar: " << num_scalar << "\n  --- Num Vector: " << num_vector
+    std::clog << "  --- Num Scalar: " << num_scalar << "\n  --- Num Vector: " << num_vector
         << "\n  --- Num Waitcnts: " << num_waitcnts
         << "\n  --- Other instructions: " << num_other
         << "\nKernel has source references to: " << std::endl;
     for (auto& ref : references)
-        output_stream() << '\t' << ref << std::endl;
+        std::clog << '\t' << ref << std::endl;
     return false;
 }
 
@@ -232,19 +232,19 @@ void code_object_tracing_callback(rocprofiler_callback_tracing_record_t record,
     }
     else if (record.operation == ROCPROFILER_CODE_OBJECT_DEVICE_KERNEL_SYMBOL_REGISTER)
     {
-        output_stream() << std::hex;
+        std::clog << std::hex;
         auto* data        = static_cast<kernel_symbol_data_t*>(record.payload);
         auto  kernel_name = std::regex_replace(data->kernel_name, std::regex{"(\\.kd)$"}, "");
 
         if (registered_kernels.find(kernel_name) == registered_kernels.end())
         {
-            output_stream() << "Not Found: " << kernel_name << " in codeobj." << std::endl;
+            std::clog << "Not Found: " << kernel_name << " in codeobj." << std::endl;
             return;
         }
 
         auto& begin_end = registered_kernels.at(kernel_name);
 
-        print_kernel_info(kernel_name, begin_end);    
+        // print_kernel_info(kernel_name, begin_end);    
     }
 
     (void)callback_data;
