@@ -118,9 +118,13 @@ amdcuid_status_t CuidGpu::discover(std::vector<DevicePtr> &gpus) {
         if (info.bdf.empty()) {
           info.bdf = dev.bdf;
         }
-        if (info.render_node.empty()) {
-          info.render_node = sys_device_path;
-        }
+        // discover_single() may have synthesized an unrelated render_node
+        // (e.g. by trimming the input path) for inputs that are not the
+        // canonical /sys/class/drm/<card>/device form used elsewhere. For
+        // GIM-only devices the per-device PCI sysfs directory is the
+        // stable identifier we want persisted in the CUID file, so always
+        // overwrite it here.
+        info.render_node = sys_device_path;
         info.header.device_type = AMDCUID_DEVICE_TYPE_GPU;
         seen_bdfs.insert(dev.bdf);
         gpus.emplace_back(std::make_shared<CuidGpu>(info));
@@ -217,13 +221,20 @@ amdcuid_status_t CuidGpu::discover_single(amdcuid_gpu_info *gpu_info,
   // Determine the device node path. We prefer the renderD node for backward
   // compatibility (CUID files may reference renderD paths). If no renderD node
   // exists (e.g., GIM driver), the card path is used instead.
-  std::string full_device_node;
-  size_t last_slash = device_path.rfind('/');
-  if (last_slash != std::string::npos && last_slash > 0) {
-    // Trim to just /sys/class/drm/cardN or /sys/class/drm/renderDXXX
-    full_device_node = device_path.substr(0, last_slash);
-  } else {
-    full_device_node = device_path;
+  //
+  // Callers from /sys/class/drm enumeration pass paths of the form
+  // "/sys/class/drm/<card>/device" and expect the trailing "/device"
+  // component to be stripped so that lookups under render_node still work
+  // (the resolver re-appends "/device/..." itself). Other callers (e.g. the
+  // GIM enumeration path which passes "/sys/bus/pci/devices/<bdf>") must
+  // not be trimmed -- doing so would collapse every device to the parent
+  // directory and corrupt the CUID-file identifier.
+  std::string full_device_node = device_path;
+  const std::string kDeviceSuffix = "/device";
+  if (full_device_node.size() > kDeviceSuffix.size() &&
+      full_device_node.compare(full_device_node.size() - kDeviceSuffix.size(),
+                               kDeviceSuffix.size(), kDeviceSuffix) == 0) {
+    full_device_node.resize(full_device_node.size() - kDeviceSuffix.size());
   }
 
   // If discovered via card entry, try to resolve the associated renderD node
@@ -283,14 +294,26 @@ CuidGpu::get_hardware_fingerprint(uint64_t &fingerprint) const {
     return AMDCUID_STATUS_PERMISSION_DENIED;
   }
 
-  std::string unique_id_path = m_info.render_node + "/device/unique_id";
+  // The render_node may be either a DRM character-device directory
+  // ("/sys/class/drm/renderD<N>" or "/sys/class/drm/card<N>"), under which
+  // the PCI device attributes live at "<render_node>/device/...", or a PCI
+  // device directory directly ("/sys/bus/pci/devices/<bdf>") in which case
+  // the attributes are at "<render_node>/...". Detect the latter so the
+  // sysfs unique_id lookup works for GIM-only devices too.
+  const bool render_node_is_pci_dir =
+      m_info.render_node.find("/sys/bus/pci/devices/") == 0;
+  const std::string device_attr_prefix =
+      render_node_is_pci_dir ? m_info.render_node
+                             : (m_info.render_node + "/device");
+
+  std::string unique_id_path = device_attr_prefix + "/unique_id";
 
   // Try to read the unique_id from the device sysfs file
   std::ifstream fin(unique_id_path);
 
   // If not available and this is a VF, try the PF's unique_id via physfn
   if (!fin.is_open() && m_info.header.fields.gpu.unit_id != 0) {
-    std::string physfn_path = m_info.render_node + "/device/physfn/unique_id";
+    std::string physfn_path = device_attr_prefix + "/physfn/unique_id";
     fin.open(physfn_path);
   }
   if (fin.is_open()) {
