@@ -642,9 +642,7 @@ def impute_counters_iteration_multiplex(
         )
     )
 
-    counter_columns = [
-        col for col in df.columns if col not in non_counter_column_index
-    ]
+    counter_columns = [col for col in df.columns if col not in non_counter_column_index]
     # Collect imputed groups as dataframes
     group_dfs: list[pd.DataFrame] = []
 
@@ -788,9 +786,7 @@ def merge_counters_spatial_multiplex(df: pd.DataFrame) -> pd.DataFrame:
 
         # Process non-counter columns
         for col in [
-            col
-            for col in non_counter_column_index
-            if col not in expired_column_index
+            col for col in non_counter_column_index if col not in expired_column_index
         ]:
             if col == "Start_Timestamp":
                 # For Start_Timestamp, take the median

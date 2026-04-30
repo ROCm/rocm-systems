@@ -2000,7 +2000,6 @@ def test_list_available_metrics_with_block(
 def test_comprehensive_error_paths():
     """Simplified test for error path coverage"""
 
-    from utils.metrics.expression import build_eval_string
     from utils.parser import build_comparable_columns
     from utils.utils_common import calc_builtin_var
 

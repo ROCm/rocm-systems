@@ -41,9 +41,7 @@ def run_calc_ai_analyze_with_values(monkeypatch, metric_values):
 
     pmc_df = pd.DataFrame({"Kernel_Name": [kernel_name]})
 
-    def mock_eval_metric(
-        dfs, dfs_type, sys_info_row, roofline_peaks, pmc_data, debug
-    ):
+    def mock_eval_metric(dfs, dfs_type, sys_info_row, roofline_peaks, pmc_data, debug):
         dfs[402] = pd.DataFrame({
             "Metric": [
                 "AI HBM",

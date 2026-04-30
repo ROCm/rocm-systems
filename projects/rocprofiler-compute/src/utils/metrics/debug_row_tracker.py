@@ -107,9 +107,7 @@ def _collect_debug_column_data(
                     max((len(str(v)) for v in display), default=0),
                 )
         except (KeyError, TypeError) as error:
-            console_warning(
-                f"Skipping entry for '{col_name}'. Encountered: {error}"
-            )
+            console_warning(f"Skipping entry for '{col_name}'. Encountered: {error}")
 
     return rows_to_print, global_width
 
