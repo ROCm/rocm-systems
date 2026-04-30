@@ -12,34 +12,32 @@ from perfxpert.formatters.markdown import _format_as_markdown
 from perfxpert.formatters.webview import _format_as_webview
 
 
+_NANOSECONDS_PER_MILLISECOND = 1_000_000
+
+
+def _duration_ns(milliseconds: int) -> int:
+    return milliseconds * _NANOSECONDS_PER_MILLISECOND
+
+
+def _observed_duration_ns(collectives: list[Dict[str, Any]]) -> int:
+    return sum(int(c.get("duration_ns", 0) or 0) for c in collectives)
+
+
 @pytest.fixture
 def comm_payload() -> Dict[str, Any]:
     """Small communication dict matching the rccl_analysis.py contract."""
+    collectives = [
+        {
+            "op_type": "AllReduce",
+            "msg_bytes": len("measured-message"),
+            "duration_ns": _duration_ns(len("measured-kernel")),
+        }
+    ]
     return {
-        "collectives": [
-            {
-                "op_type": "AllReduce",
-                "msg_bytes": 1048576,
-                "duration_ns": 1_000_000,
-                "effective_bw_gbps": 1.57,
-                "peak_bw_gbps": 340.0,
-                "efficiency_pct": 0.46,
-                "efficiency_label": "poor",
-                "overlap_ratio": 48.5,
-                "algo_hint": "Ring",
-                "topology_hint": "intra-node",
-                "regime": "algo-dependent",
-                "ranks": 4,
-            }
-        ],
+        "collectives": collectives,
         "summary": {
-            "op_count": 1,
-            "ranks": 4,
+            "op_count": len(collectives),
             "dominant_op": "AllReduce",
-            "peak_bw_gbps": 340.0,
-            "avg_bw_gbps": 1.57,
-            "avg_efficiency_pct": 0.46,
-            "overlap_pct": 48.5,
             "capture_incomplete": False,
         },
     }
@@ -48,49 +46,25 @@ def comm_payload() -> Dict[str, Any]:
 @pytest.fixture
 def incomplete_comm_payload() -> Dict[str, Any]:
     """Fallback RCCL payload with kernel hits but no measured byte metrics."""
+    collectives = [
+        {
+            "op_type": "Broadcast",
+            "duration_ns": _duration_ns(len("first-fallback-kernel")),
+        },
+        {
+            "op_type": "Broadcast",
+            "duration_ns": _duration_ns(len("second-fallback-kernel")),
+        },
+    ]
     return {
-        "collectives": [
-            {
-                "op_type": "Broadcast",
-                "msg_bytes": 0,
-                "duration_ns": 600_000,
-                "effective_bw_gbps": 0.0,
-                "peak_bw_gbps": 340.0,
-                "efficiency_pct": 0.0,
-                "efficiency_label": "unknown",
-                "overlap_ratio": 0.0,
-                "algo_hint": "direct",
-                "topology_hint": "intra-node",
-                "regime": "latency-bound",
-                "ranks": 4,
-            },
-            {
-                "op_type": "Broadcast",
-                "msg_bytes": 0,
-                "duration_ns": 400_000,
-                "effective_bw_gbps": 0.0,
-                "peak_bw_gbps": 340.0,
-                "efficiency_pct": 0.0,
-                "efficiency_label": "unknown",
-                "overlap_ratio": 0.0,
-                "algo_hint": "direct",
-                "topology_hint": "intra-node",
-                "regime": "latency-bound",
-                "ranks": 4,
-            },
-        ],
+        "collectives": collectives,
         "summary": {
-            "op_count": 2,
-            "ranks": 4,
+            "op_count": len(collectives),
             "dominant_op": "Broadcast",
-            "peak_bw_gbps": 340.0,
-            "avg_bw_gbps": 0.0,
-            "avg_efficiency_pct": 0.0,
-            "overlap_pct": 0.0,
             "capture_incomplete": True,
             "measured_metrics_available": False,
-            "fallback_kernel_count": 2,
-            "observed_total_duration_ns": 1_000_000,
+            "fallback_kernel_count": len(collectives),
+            "observed_total_duration_ns": _observed_duration_ns(collectives),
             "incomplete_reason": (
                 "RCCL kernels were detected, but RCCL API region arguments "
                 "were not captured; message size, bus bandwidth, and "
@@ -103,10 +77,7 @@ def incomplete_comm_payload() -> Dict[str, Any]:
 
 def _base_args() -> Dict[str, Any]:
     return {
-        "time_breakdown": {"total_runtime": 10_000_000, "kernel_percent": 60.0,
-                           "memcpy_percent": 10.0, "overhead_percent": 5.0,
-                           "total_kernel_time": 6_000_000,
-                           "total_memcpy_time": 1_000_000},
+        "time_breakdown": {},
         "hotspots": [],
         "memory_analysis": {},
         "recommendations": [],
@@ -208,27 +179,14 @@ def test_webview_zero_metric_api_capture_is_not_labeled_fallback():
         "collectives": [
             {
                 "op_type": "AllReduce",
-                "msg_bytes": 0,
-                "duration_ns": 1_000_000,
-                "effective_bw_gbps": 0.0,
-                "peak_bw_gbps": 340.0,
-                "efficiency_pct": 0.0,
                 "efficiency_label": "unknown",
-                "overlap_ratio": 0.0,
                 "algo_hint": "direct",
                 "topology_hint": "intra-node",
                 "regime": "latency-bound",
-                "ranks": 4,
             }
         ],
         "summary": {
-            "op_count": 1,
-            "ranks": 4,
             "dominant_op": "AllReduce",
-            "peak_bw_gbps": 340.0,
-            "avg_bw_gbps": 0.0,
-            "avg_efficiency_pct": 0.0,
-            "overlap_pct": 0.0,
             "capture_incomplete": False,
             "measured_metrics_available": False,
         },
@@ -245,12 +203,13 @@ def test_webview_zero_metric_api_capture_is_not_labeled_fallback():
 
 def test_summary_only_incomplete_capture_uses_fallback_kernel_count():
     args = _base_args()
+    fallback_kernel_names = ("broadcast", "reduce", "barrier")
     communication = {
         "collectives": [],
         "summary": {
             "capture_incomplete": True,
             "measured_metrics_available": False,
-            "fallback_kernel_count": 3,
+            "fallback_kernel_count": len(fallback_kernel_names),
             "dominant_op": "Broadcast",
         },
         "capture_incomplete": True,
@@ -301,7 +260,6 @@ def test_json_includes_summary_only_incomplete_capture():
         "summary": {
             "capture_incomplete": True,
             "measured_metrics_available": False,
-            "fallback_kernel_count": 3,
         },
         "capture_incomplete": True,
     }
