@@ -1269,17 +1269,16 @@ def test_apply_filters_direct():
     class MockWorkload:
         def __init__(self):
             self.raw_pmc = pd.DataFrame({
-                ("pmc_perf", "GPU_ID"): [0, 0, 1, 1],
-                ("pmc_perf", "Kernel_Name"): [
+                "GPU_ID": [0, 0, 1, 1],
+                "Kernel_Name": [
                     "vecCopy",
                     "vecAdd",
                     "vecCopy",
                     "vecMul",
                 ],
-                ("pmc_perf", "Dispatch_ID"): [0, 1, 2, 3],
-                ("pmc_perf", "Node"): ["node0", "node0", "node1", "node1"],
+                "Dispatch_ID": [0, 1, 2, 3],
+                "Node": ["node0", "node0", "node1", "node1"],
             })
-            self.raw_pmc.columns = pd.MultiIndex.from_tuples(self.raw_pmc.columns)
 
         filter_nodes = None
         filter_gpu_ids = None
@@ -1801,16 +1800,14 @@ def test_list_torch_operators_no_trace_data(
 
 @pytest.fixture
 def mock_raw_pmc_for_kernel_top():
-    """Create raw_pmc dict with pmc_perf DF for create_df_kernel_top_stats tests."""
-    return {
-        "pmc_perf": pd.DataFrame({
-            "Kernel_Name": ["kernel_a", "kernel_b", "kernel_a", "kernel_c"],
-            "GPU_ID": [0, 0, 1, 0],
-            "Dispatch_ID": [1, 2, 3, 4],
-            "Start_Timestamp": [1000, 2000, 3000, 4000],
-            "End_Timestamp": [1500, 2800, 3400, 4200],
-        })
-    }
+    """Create flat raw_pmc DataFrame for create_df_kernel_top_stats tests."""
+    return pd.DataFrame({
+        "Kernel_Name": ["kernel_a", "kernel_b", "kernel_a", "kernel_c"],
+        "GPU_ID": [0, 0, 1, 0],
+        "Dispatch_ID": [1, 2, 3, 4],
+        "Start_Timestamp": [1000, 2000, 3000, 4000],
+        "End_Timestamp": [1500, 2800, 3400, 4200],
+    })
 
 
 @pytest.fixture
@@ -1940,16 +1937,14 @@ def test_create_df_kernel_top_stats_filters():
     from utils.file_io import create_df_kernel_top_stats
 
     # Create test data with Node column for node filtering
-    raw_pmc_with_node = {
-        "pmc_perf": pd.DataFrame({
-            "Kernel_Name": ["kernel_a", "kernel_b", "kernel_a", "kernel_c"],
-            "GPU_ID": [0, 0, 1, 0],
-            "Node": ["node0", "node0", "node1", "node0"],
-            "Dispatch_ID": [1, 2, 3, 4],
-            "Start_Timestamp": [1000, 2000, 3000, 4000],
-            "End_Timestamp": [1500, 2800, 3400, 4200],
-        })
-    }
+    raw_pmc_with_node = pd.DataFrame({
+        "Kernel_Name": ["kernel_a", "kernel_b", "kernel_a", "kernel_c"],
+        "GPU_ID": [0, 0, 1, 0],
+        "Node": ["node0", "node0", "node1", "node0"],
+        "Dispatch_ID": [1, 2, 3, 4],
+        "Start_Timestamp": [1000, 2000, 3000, 4000],
+        "End_Timestamp": [1500, 2800, 3400, 4200],
+    })
 
     with tempfile.TemporaryDirectory() as temp_dir:
         # Test GPU ID filter
@@ -2005,15 +2000,13 @@ def test_create_df_kernel_top_stats_filters():
         assert dispatch_df.iloc[0]["Kernel_Name"] == "kernel_a"
 
         # Test empty input handling
-        empty_raw_pmc = {
-            "pmc_perf": pd.DataFrame({
-                "Kernel_Name": [],
-                "GPU_ID": [],
-                "Dispatch_ID": [],
-                "Start_Timestamp": [],
-                "End_Timestamp": [],
-            })
-        }
+        empty_raw_pmc = pd.DataFrame({
+            "Kernel_Name": [],
+            "GPU_ID": [],
+            "Dispatch_ID": [],
+            "Start_Timestamp": [],
+            "End_Timestamp": [],
+        })
         kernel_top_df, dispatch_df = create_df_kernel_top_stats(
             df_in=empty_raw_pmc,
             raw_data_dir=temp_dir,
@@ -2032,21 +2025,19 @@ def test_apply_kernel_filter_integer_ids(mock_workload_for_filter):
     """Test integer kernel ID filtering, Selected marker,
     uses workload.dfs[1], invalid ID error."""
 
-    from utils import schema
     from utils.parser import apply_kernel_filter
 
-    # Create multi-indexed DataFrame similar to real raw_pmc
+    # Flat single-index raw_pmc DataFrame
     raw_df = pd.DataFrame({
-        (schema.PMC_PERF_FILE_PREFIX, "Kernel_Name"): [
+        "Kernel_Name": [
             "kernel_a",
             "kernel_b",
             "kernel_a",
             "kernel_c",
         ],
-        (schema.PMC_PERF_FILE_PREFIX, "GPU_ID"): [0, 0, 1, 0],
-        (schema.PMC_PERF_FILE_PREFIX, "Dispatch_ID"): [1, 2, 3, 4],
+        "GPU_ID": [0, 0, 1, 0],
+        "Dispatch_ID": [1, 2, 3, 4],
     })
-    raw_df.columns = pd.MultiIndex.from_tuples(raw_df.columns)
 
     # Test integer kernel ID filtering
     mock_workload_for_filter.filter_kernel_ids = [0]  # Select first kernel (kernel_a)
@@ -2054,7 +2045,7 @@ def test_apply_kernel_filter_integer_ids(mock_workload_for_filter):
 
     # Should only contain rows with kernel_a
     assert len(result_df) == 2  # kernel_a appears twice
-    assert all(result_df[schema.PMC_PERF_FILE_PREFIX]["Kernel_Name"] == "kernel_a")
+    assert all(result_df["Kernel_Name"] == "kernel_a")
 
     # Test that Selected marker is added
     assert mock_workload_for_filter.dfs[1].loc[0, "Selected"] == "*"
@@ -2082,41 +2073,36 @@ def test_apply_kernel_filter_integer_ids(mock_workload_for_filter):
 def test_apply_kernel_filter_string_names(mock_workload_for_filter):
     """Test string kernel name filtering and partial match."""
 
-    from utils import schema
     from utils.parser import apply_kernel_filter
 
-    # Create multi-indexed DataFrame
+    # Flat single-index raw_pmc DataFrame
     raw_df = pd.DataFrame({
-        (schema.PMC_PERF_FILE_PREFIX, "Kernel_Name"): [
+        "Kernel_Name": [
             "kernel_a",
             "kernel_b",
             "kernel_a",
             "kernel_c",
         ],
-        (schema.PMC_PERF_FILE_PREFIX, "GPU_ID"): [0, 0, 1, 0],
-        (schema.PMC_PERF_FILE_PREFIX, "Dispatch_ID"): [1, 2, 3, 4],
+        "GPU_ID": [0, 0, 1, 0],
+        "Dispatch_ID": [1, 2, 3, 4],
     })
-    raw_df.columns = pd.MultiIndex.from_tuples(raw_df.columns)
 
     # Test string kernel name filtering - exact match
     mock_workload_for_filter.filter_kernel_ids = ["kernel_b"]
     result_df = apply_kernel_filter(raw_df, mock_workload_for_filter)
     assert len(result_df) == 1
-    assert result_df[schema.PMC_PERF_FILE_PREFIX]["Kernel_Name"].iloc[0] == "kernel_b"
+    assert result_df["Kernel_Name"].iloc[0] == "kernel_b"
 
     # Test filtering with whitespace in kernel names (should be stripped)
     raw_df_with_whitespace = pd.DataFrame({
-        (schema.PMC_PERF_FILE_PREFIX, "Kernel_Name"): [
+        "Kernel_Name": [
             " kernel_a ",
             "kernel_b",
             "kernel_a",
         ],
-        (schema.PMC_PERF_FILE_PREFIX, "GPU_ID"): [0, 0, 1],
-        (schema.PMC_PERF_FILE_PREFIX, "Dispatch_ID"): [1, 2, 3],
+        "GPU_ID": [0, 0, 1],
+        "Dispatch_ID": [1, 2, 3],
     })
-    raw_df_with_whitespace.columns = pd.MultiIndex.from_tuples(
-        raw_df_with_whitespace.columns
-    )
 
     mock_workload_for_filter.filter_kernel_ids = ["kernel_a"]
     result_df = apply_kernel_filter(raw_df_with_whitespace, mock_workload_for_filter)

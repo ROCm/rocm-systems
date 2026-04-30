@@ -149,14 +149,9 @@ class TestAggregation:
 class TestExpression:
     """Tests for utils.metrics.expression."""
 
-    def test_build_eval_string_raises_when_coll_level_is_none(self):
-        """build_eval_string raises when coll_level is None."""
-        with pytest.raises(Exception, match="coll_level can not be None"):
-            build_eval_string("AVG(SQ_WAVES)", None, config={})
-
     def test_build_eval_string_returns_empty_for_empty_equation(self):
         """build_eval_string returns the empty string when given an empty equation."""
-        assert build_eval_string("", "pmc_perf", config={}) == ""
+        assert build_eval_string("") == ""
 
     def test_update_denominator_string_returns_empty_for_empty_equation(self):
         """update_denominator_string returns the empty string when input is empty."""
@@ -267,7 +262,7 @@ class TestEvaluationPipeline:
         """
         if metric_fields is None:
             metric_fields = {
-                "Value": "to_sum(raw_pmc_df['pmc_perf']['SQ_WAVES'])",
+                "Value": "to_sum(raw_pmc_df['SQ_WAVES'])",
                 "Average": None,
             }
 
@@ -302,19 +297,17 @@ class TestEvaluationPipeline:
             "num_xcd": 1,
             "wave_size": 64,
         })
-        raw_pmc_df = {
-            "pmc_perf": pd.DataFrame({
-                "SQ_WAVES": [100, 200, 150],
-                "GRBM_GUI_ACTIVE": [1000, 2000, 1500],
-            })
-        }
+        raw_pmc_df = pd.DataFrame({
+            "SQ_WAVES": [100, 200, 150],
+            "GRBM_GUI_ACTIVE": [1000, 2000, 1500],
+        })
         return metric_df, dfs, dfs_type, sys_info, raw_pmc_df
 
     def test_eval_metric_in_debug_mode(self):
         """eval_metric with debug=True invokes debug_row_tracker and writes back."""
         metric_df, dfs, dfs_type, sys_info, raw_pmc_df = self._build_eval_metric_inputs(
             metric_fields={
-                "Value": "to_sum(raw_pmc_df['pmc_perf']['SQ_WAVES'])",
+                "Value": "to_sum(raw_pmc_df['SQ_WAVES'])",
             }
         )
         with (
@@ -330,7 +323,6 @@ class TestEvaluationPipeline:
                 pd.DataFrame(),
                 raw_pmc_df,
                 debug=True,
-                config={},
             )
 
         mock_debug_row_tracker.assert_called_once()
@@ -343,7 +335,7 @@ class TestEvaluationPipeline:
         """eval_metric writes the computed Value back to the metric DataFrame."""
         metric_df, dfs, dfs_type, sys_info, raw_pmc_df = self._build_eval_metric_inputs(
             metric_fields={
-                "Value": "to_sum(raw_pmc_df['pmc_perf']['SQ_WAVES'])",
+                "Value": "to_sum(raw_pmc_df['SQ_WAVES'])",
             }
         )
         with patch("utils.metrics.evaluation_pipeline.BUILD_IN_VARS", {}):
@@ -354,7 +346,6 @@ class TestEvaluationPipeline:
                 pd.DataFrame(),
                 raw_pmc_df,
                 debug=False,
-                config={},
             )
         assert metric_df.loc["1.1.0", "Value"] == 450
 
@@ -373,7 +364,6 @@ class TestEvaluationPipeline:
                 pd.DataFrame(),
                 raw_pmc_df,
                 debug=False,
-                config={},
             )
         assert metric_df.loc["1.1.0", "Average"] == ""
 
@@ -446,14 +436,13 @@ class TestMetricEvaluator:
             assert metric_evaluator.eval_expression("Mock Metric") == "N/A"
 
     def _make_evaluator(self, columns, sys_vars=None):
-        """Build a MetricEvaluator from the given pmc_perf columns and sys_vars."""
-        pmc_perf_df = pd.DataFrame(columns)
-        raw_pmc_df = {"pmc_perf": pmc_perf_df}
+        """Build a MetricEvaluator from the given raw_pmc columns and sys_vars."""
+        raw_pmc_df = pd.DataFrame(columns)
         return MetricEvaluator(raw_pmc_df, sys_vars or {}, {})
 
     def _to_eval_str(self, equation):
-        """Run a YAML-style equation through build_eval_string for pmc_perf."""
-        return build_eval_string(equation, "pmc_perf", config={})
+        """Run a YAML-style equation through build_eval_string."""
+        return build_eval_string(equation)
 
     def test_eval_expression_returns_na_for_division_by_all_zero_series(self):
         """All-zero Series denominator yields inf, mapped to 'N/A'."""
