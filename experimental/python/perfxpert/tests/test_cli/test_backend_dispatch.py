@@ -14,6 +14,8 @@ Covers:
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from perfxpert.cli import _backend_dispatch, opencode_launcher
@@ -201,6 +203,60 @@ def test_recursion_guard_empty_env_does_not_trigger(
     monkeypatch.setenv("PERFXPERT_CODE_NO_BANNER", "1")
     rc = _backend_dispatch._exec_backend("codex", [])
     assert rc == 77
+
+
+def test_backend_spawn_sets_interactive_tui_marker_for_live_backend(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import perfxpert.cli._backend.codex as codex_mod
+
+    captured_env = {}
+    monkeypatch.delenv(RECURSION_GUARD_ENV, raising=False)
+    monkeypatch.setattr(
+        codex_mod.CodexAdapter,
+        "install",
+        lambda self, cwd, **kw: _make_install_report(self.name),
+    )
+
+    def fake_spawn(self, argv, env, cwd):
+        captured_env.update(env)
+        return 0
+
+    monkeypatch.setattr(codex_mod.CodexAdapter, "spawn", fake_spawn)
+    monkeypatch.setenv("PERFXPERT_CODE_NO_BANNER", "1")
+
+    rc = _backend_dispatch._exec_backend("codex", ["--quiet"])
+
+    assert rc == 0
+    assert captured_env["PERFXPERT_TUI_INTERACTIVE"] == "1"
+    assert captured_env["PERFXPERT_WORKLOAD_CWD"] == str(Path.cwd())
+
+
+def test_backend_prompt_args_do_not_set_interactive_tui_marker(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import perfxpert.cli._backend.codex as codex_mod
+
+    captured_env = {}
+    monkeypatch.delenv(RECURSION_GUARD_ENV, raising=False)
+    monkeypatch.setattr(
+        codex_mod.CodexAdapter,
+        "install",
+        lambda self, cwd, **kw: _make_install_report(self.name),
+    )
+
+    def fake_spawn(self, argv, env, cwd):
+        captured_env.update(env)
+        return 0
+
+    monkeypatch.setattr(codex_mod.CodexAdapter, "spawn", fake_spawn)
+    monkeypatch.setenv("PERFXPERT_CODE_NO_BANNER", "1")
+
+    rc = _backend_dispatch._exec_backend("codex", ["--quiet", "optimize ./app"])
+
+    assert rc == 0
+    assert "PERFXPERT_TUI_INTERACTIVE" not in captured_env
+    assert captured_env["PERFXPERT_WORKLOAD_CWD"] == str(Path.cwd())
 
 
 def _make_install_report(name: str):
@@ -552,6 +608,7 @@ def test_consent_denied_returns_rc_nonzero(monkeypatch: pytest.MonkeyPatch) -> N
 
     monkeypatch.setattr(claude_mod.ClaudeCodeAdapter, "install", _fake_install)
     # spawn should NEVER be called after a consent denial.
+
     def _no_spawn(self, a, e, c):
         raise AssertionError("spawn must not be called when consent denied")
 

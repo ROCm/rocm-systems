@@ -18,6 +18,7 @@ Usage
     perfxpert analyze -i trace.db --llm anthropic
     perfxpert diff baseline.db new.db --format text
     perfxpert ci baseline.db new.db --threshold 3.0
+    perfxpert workflow import ./external-tool --interactive
     perfxpert-code    (interactive TUI; launches the AMD-branded opencode session)
 """
 
@@ -182,6 +183,22 @@ def main(argv=None):
     )
     _ci_cmd.add_args(ci_parser)
 
+    # ------------------------------------------------------------------
+    # workflow subcommand
+    # ------------------------------------------------------------------
+    from perfxpert.cli import workflow_cmd as _workflow_cmd
+
+    workflow_parser = subparsers.add_parser(
+        "workflow",
+        help="TUI-only external workflow adapter inspection",
+        description=(
+            "Inspect external workflow repositories for advisory capabilities, "
+            "knowledge links, and MCP descriptors that can be used by an active "
+            "perfxpert-code session."
+        ),
+    )
+    _workflow_cmd.add_args(workflow_parser)
+
     if argv is None:
         argv = sys.argv[1:]
 
@@ -256,6 +273,8 @@ def main(argv=None):
         sys.exit(_diff_cmd.run_diff(args))
     elif args.subcommand == "ci":
         sys.exit(_ci_cmd.run_ci(args))
+    elif args.subcommand == "workflow":
+        sys.exit(_workflow_cmd.run_workflow(args))
     else:
         parser.print_help()
         sys.exit(1)

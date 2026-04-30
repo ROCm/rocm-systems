@@ -215,6 +215,7 @@ Roughly:
 | Analyze with Claude | `perfxpert analyze -i trace.db --llm anthropic` |
 | Drive an optimization session conversationally | `perfxpert-code` |
 | Drive an optimization session non-interactively | `perfxpert-code run -m "optimize hot kernel"` |
+| Add an external workflow adapter to the active TUI session | `perfxpert workflow import ./tool` with the interactive consent flag |
 
 Under the hood, the batch CLI, Python API, MCP wrappers, and
 `perfxpert-code` backends all funnel into `build_session()` and the
@@ -233,3 +234,31 @@ an external TUI talks to those runners through MCP.
   [mcp-server.md](../integration/mcp-server.md).
 - **Scripted LLM runs** → `perfxpert-code run -m "..."` or
   `build_session(provider="anthropic")` in Python.
+
+## External workflow adapters
+
+Interactive TUI sessions can import external optimization workflows as
+advisory adapters. The command is accepted only from a `perfxpert-code`
+session environment:
+
+```bash
+# SKIP-SAMPLE — requires an active TUI session and explicit consent
+perfxpert workflow import ./external-tool <interactive-consent-flag> --json
+```
+
+The import performs bounded metadata inspection only. It can discover
+capabilities, knowledge files, and MCP server descriptors, then writes a
+manifest under `.perfxpert/external-workflows/` for the active TUI agent to
+read. It does not run external scripts, install packages, import external
+modules, or register MCP servers. A URL source requires both the TUI session marker and explicit
+`--allow-network` consent:
+
+```bash
+# SKIP-SAMPLE — requires an active TUI session and explicit network consent
+perfxpert workflow import https://github.com/example/tool <interactive-consent-flag> --allow-network --json
+```
+
+Adapter manifests are supplemental context. PerfXpert's measured counters,
+runtime GPU discovery, MCP gate, and correctness cascade remain
+authoritative. In SSH workflows, inspect target-dependent tools on the remote
+workload host so availability and paths match the machine being optimized.

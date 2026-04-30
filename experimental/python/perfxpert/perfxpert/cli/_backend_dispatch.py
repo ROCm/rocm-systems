@@ -29,6 +29,7 @@ __all__ = [
 # `perfxpert-code claude` from within an already-running agent session
 # refuses to launch).
 RECURSION_GUARD_ENV = "PERFXPERT_IN_AGENT_SESSION"
+INTERACTIVE_TUI_ENV = "PERFXPERT_TUI_INTERACTIVE"
 
 
 def is_help_request(remaining_argv: list[str]) -> bool:
@@ -170,6 +171,9 @@ def _run_adapter(adapter, remaining_argv: list[str]) -> int:
 
     env = dict(os.environ)
     env[RECURSION_GUARD_ENV] = adapter.name
+    if not flags.remaining:
+        env[INTERACTIVE_TUI_ENV] = "1"
+    env["PERFXPERT_WORKLOAD_CWD"] = str(Path.cwd())
     if not flags.quiet:
         sys.stderr.write(
             f"perfxpert-code {adapter.name}: MCP verified; launching "

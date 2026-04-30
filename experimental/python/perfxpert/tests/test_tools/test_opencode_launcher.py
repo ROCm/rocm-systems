@@ -1,6 +1,5 @@
 """Unit tests for perfxpert.cli.opencode_launcher."""
 
-import os
 from importlib.metadata import version
 from pathlib import Path
 from unittest import mock
@@ -30,6 +29,15 @@ def test_version_flag_short_circuit(capsys):
 def test_v_short_flag(capsys):
     rc = opencode_launcher.main(["-V"])
     assert rc == 0
+
+
+def test_route_workflow_import_to_perfxpert_dispatch():
+    kind, argv = opencode_launcher.route_subcommand(
+        ["workflow", "import", "./tool", "--interactive"]
+    )
+
+    assert kind == "perfxpert"
+    assert argv == ["workflow", "import", "./tool", "--interactive"]
 
 
 def test_resolve_config_dir_returns_bundled_path():
@@ -177,6 +185,77 @@ def test_recursion_guard_env_set(monkeypatch):
     monkeypatch.setenv("PERFXPERT_CODE_NO_BANNER", "1")
     opencode_launcher.main([])
     assert captured_env.get("PERFXPERT_IN_OPENCODE_SESSION") == "1"
+
+
+def test_default_tui_sets_interactive_marker(monkeypatch):
+    captured_env = {}
+    cwd = Path.cwd()
+
+    def fake_run(cmd, **kwargs):
+        captured_env.update(kwargs.get("env") or {})
+        return mock.MagicMock(returncode=0)
+
+    monkeypatch.setattr(opencode_launcher.subprocess, "run", fake_run)
+    monkeypatch.setattr(opencode_launcher, "resolve_opencode_binary", lambda: Path("/bin/true"))
+    monkeypatch.setenv("PERFXPERT_CODE_NO_BANNER", "1")
+
+    opencode_launcher.main([])
+
+    assert captured_env.get("PERFXPERT_TUI_INTERACTIVE") == "1"
+    assert captured_env.get("PERFXPERT_WORKLOAD_CWD") == str(cwd)
+
+
+def test_tui_subcommand_sets_interactive_marker(monkeypatch):
+    captured_env = {}
+
+    def fake_run(cmd, **kwargs):
+        captured_env.update(kwargs.get("env") or {})
+        return mock.MagicMock(returncode=0)
+
+    monkeypatch.setattr(opencode_launcher.subprocess, "run", fake_run)
+    monkeypatch.setattr(opencode_launcher, "resolve_opencode_binary", lambda: Path("/bin/true"))
+    monkeypatch.setenv("PERFXPERT_CODE_NO_BANNER", "1")
+
+    opencode_launcher.main(["tui"])
+
+    assert captured_env.get("PERFXPERT_TUI_INTERACTIVE") == "1"
+
+
+def test_noninteractive_run_does_not_set_interactive_marker(monkeypatch):
+    captured_env = {}
+
+    def fake_run(cmd, **kwargs):
+        captured_env.update(kwargs.get("env") or {})
+        return mock.MagicMock(returncode=0)
+
+    monkeypatch.setattr(opencode_launcher.subprocess, "run", fake_run)
+    monkeypatch.setattr(opencode_launcher, "resolve_opencode_binary", lambda: Path("/bin/true"))
+    monkeypatch.setenv("PERFXPERT_CODE_NO_BANNER", "1")
+
+    opencode_launcher.main(["run", "optimize ./app"])
+
+    assert captured_env.get("PERFXPERT_IN_OPENCODE_SESSION") == "1"
+    assert "PERFXPERT_TUI_INTERACTIVE" not in captured_env
+
+
+def test_workflow_subcommand_dispatches_without_resolving_opencode(monkeypatch):
+    calls = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append(cmd)
+        return mock.MagicMock(returncode=0)
+
+    def fail_resolve():
+        raise AssertionError("workflow dispatch should not resolve opencode")
+
+    monkeypatch.setattr(opencode_launcher.subprocess, "run", fake_run)
+    monkeypatch.setattr(opencode_launcher, "resolve_opencode_binary", fail_resolve)
+
+    rc = opencode_launcher.main(["workflow", "import", "./adapter", "--interactive"])
+
+    assert rc == 0
+    assert calls
+    assert calls[0][1:4] == ["-m", "perfxpert", "workflow"]
 
 
 def test_amd_red_in_banner(monkeypatch):

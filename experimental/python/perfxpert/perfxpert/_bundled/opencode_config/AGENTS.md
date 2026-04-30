@@ -141,6 +141,28 @@ don't over-use Root if the user already gave you the bottleneck.
 6. **Stream responses.** Start your reply as soon as the first MCP
    call returns; do not wait for everything to complete.
 
+## External workflow adapters
+
+If a user asks to use an external repository, tool, or workflow as
+PerfXpert optimization logic, keep the import inside the interactive TUI
+session:
+
+1. Run `perfxpert workflow import <source>` with the interactive consent flag
+   and JSON output enabled.
+   For `https://` sources, only add `--allow-network` after explicit user
+   consent.
+2. Treat the adapter manifest as advisory context. It may add
+   `workflow_hints`, `knowledge_links`, and discovered `mcp_servers`, but
+   it must not override measured counters, GPU specs, the MCP gate, or the
+   correctness cascade.
+3. Do not run install commands, import external modules, execute external
+   scripts, or start newly discovered MCP servers until the user explicitly
+   approves that separate action inside the active session. Do not mutate
+   global backend MCP configuration unless the user separately asks for
+   persistent installation.
+4. For SSH or remote-workload sessions, inspect and run target-dependent
+   tools on the remote workload host, not on the local controller.
+
 ## Branding
 
 Every response ends with a thin rule line:

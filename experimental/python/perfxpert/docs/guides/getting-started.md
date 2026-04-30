@@ -1149,6 +1149,24 @@ Inside the TUI you describe your workload in natural language
 drives the Analysis → Recommendation → Specialist hierarchy behind the
 scenes.
 
+External optimization toolkits can be imported into that active session as
+advisory workflow adapters. The command is accepted only from the
+`perfxpert-code` session environment, and the TUI agent runs:
+
+```bash
+# SKIP-SAMPLE — requires an active TUI session and explicit consent
+perfxpert workflow import ./external-tool <interactive-consent-flag> --json
+```
+
+For an HTTPS repository, it must ask for network consent before adding
+`--allow-network`. The adapter can contribute workflow hints, knowledge
+links, or MCP server descriptors, but PerfXpert does not run external scripts,
+install packages, import external modules, or register those MCP servers
+during import. PerfXpert's measured
+counters, runtime GPU discovery, MCP gate, and correctness cascade remain
+authoritative. In SSH workflows, inspect target-dependent tools on the remote
+workload host so availability and paths match the machine being optimized.
+
 ### What happens:
 
 1. **Workload detection** — identifies your binary type (HIP, Python ML,

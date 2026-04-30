@@ -81,13 +81,14 @@ _PERFXPERT_SUBCOMMANDS: "dict[str, str]" = {
     "opencode": "Run a user-owned upstream opencode binary explicitly",
     "providers": "List LLM providers and configuration status",
     "uninstall": "Reverse `perfxpert-code <backend>` install: remove MCP + AGENTS + gate hook",
+    "workflow": "Inspect external workflow adapters for the active TUI session",
 }
 
 # Subcommand names the launcher itself dispatches to `python -m perfxpert`
 # or handles inline. These must short-circuit BEFORE resolve_opencode_binary()
 # so they work on a fresh install without opencode on disk.
 _PERFXPERT_DISPATCH_SUBCOMMANDS = frozenset(
-    {"init", "diff", "ci", "doctor", "install-patches", "uninstall"}
+    {"init", "diff", "ci", "doctor", "install-patches", "uninstall", "workflow"}
 )
 
 
@@ -167,7 +168,8 @@ def resolve_opencode_binary() -> Path:
     raise FileNotFoundError(
         "bundled patched opencode binary not found. Reinstall perfxpert with the "
         "GitHub wrapper so the pinned opencode submodule is built:\n"
-        '  REF=develop; curl -fsSL "https://raw.githubusercontent.com/ROCm/rocm-systems/${REF}/experimental/python/perfxpert/scripts/pip-install-from-git.sh" | bash -s -- "${REF}"\n'
+        '  REF=develop; curl -fsSL "https://raw.githubusercontent.com/ROCm/rocm-systems/${REF}/'
+        'experimental/python/perfxpert/scripts/pip-install-from-git.sh" | bash -s -- "${REF}"\n'
         "For a user-owned upstream opencode binary, run: perfxpert-code opencode [args]"
     )
 
@@ -550,7 +552,7 @@ def _run_uninstall(remaining_argv: list[str]) -> int:
                 "export PERFXPERT_ASSUME_CONSENT=1 to confirm.\n"
             )
             return 2
-        sys.stderr.write(f"\nProceed? [y/N] ")
+        sys.stderr.write("\nProceed? [y/N] ")
         sys.stderr.flush()
         try:
             answer = input().strip().lower()
@@ -670,6 +672,9 @@ def main(argv: list[str] | None = None) -> int:
     env = dict(os.environ)
     # Recursion guard marker (spec §5.8 / R10)
     env["PERFXPERT_IN_OPENCODE_SESSION"] = "1"
+    env["PERFXPERT_WORKLOAD_CWD"] = str(Path.cwd())
+    if kind == "opencode_default" or (kind == "opencode_subcommand" and argv_out[:1] == ["tui"]):
+        env["PERFXPERT_TUI_INTERACTIVE"] = "1"
     # Disable opencode's auto-update check — it prompts with upstream branding
     # and, if confirmed, would replace our patched bundle with upstream.
     env.setdefault("OPENCODE_DISABLE_AUTOUPDATE", "1")

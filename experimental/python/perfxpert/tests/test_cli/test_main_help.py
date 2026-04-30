@@ -15,7 +15,16 @@ def test_top_level_help_lists_documented_subcommands(capsys) -> None:
 
     assert exc.value.code == 0
     out = capsys.readouterr().out
-    for subcommand in ("analyze", "config", "providers", "doctor", "init", "diff", "ci"):
+    for subcommand in (
+        "analyze",
+        "config",
+        "providers",
+        "doctor",
+        "init",
+        "diff",
+        "ci",
+        "workflow",
+    ):
         assert subcommand in out
 
 
@@ -25,6 +34,11 @@ def test_top_level_help_lists_documented_subcommands(capsys) -> None:
         (["init"], "perfxpert.cli.init_cmd", "run_init"),
         (["diff", "baseline.db", "candidate.db"], "perfxpert.cli.diff_cmd", "run_diff"),
         (["ci", "baseline.db", "candidate.db"], "perfxpert.cli.ci_cmd", "run_ci"),
+        (
+            ["workflow", "import", ".", "--interactive"],
+            "perfxpert.cli.workflow_cmd",
+            "run_workflow",
+        ),
     ],
 )
 def test_main_dispatches_restored_subcommands(monkeypatch, argv, module_name, func_name) -> None:
