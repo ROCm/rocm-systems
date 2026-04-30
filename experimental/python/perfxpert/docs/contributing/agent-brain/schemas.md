@@ -580,7 +580,7 @@ honour the same gate.
 
 ## See also
 
-- [output_formats.md](output_formats.md) — the companion guide for
+- [output_formats.md](../perfxpert/output_formats.md) — the companion guide for
   format authors consuming the schema you just evolved.
 - `perfxpert/agents/schemas.py` — Layer A models.
 - `perfxpert/analysis/payload.py` — Layer B builder.

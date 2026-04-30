@@ -8,7 +8,7 @@ knowledge + tool + agent addition under the narrow-scope model.
 
 ## Prerequisites
 
-- Your development environment set up (see [CONTRIBUTING.md](../../CONTRIBUTING.md) TL;DR)
+- Your development environment set up (see [CONTRIBUTING.md](../../../CONTRIBUTING.md) TL;DR)
 - Familiarity with the three agents (Analysis, Recommendation, and Correctness)
 
 ## Step 1: Extend bottleneck types
@@ -324,7 +324,7 @@ Append to `perfxpert/knowledge/proven_optimizations.yaml`:
     description_md: "tests/fixtures/proven_optimizations/io_bound_async_streams.md"
 ```
 
-(Fixture creation is a separate task; see `docs/contributing/proven_optimizations.md`.)
+(Fixture creation is a separate task; see `docs/contributing/agent-brain/proven_optimizations.md`.)
 
 ## Step 7: Add stub tests
 

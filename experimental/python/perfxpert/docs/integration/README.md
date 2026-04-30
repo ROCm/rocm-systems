@@ -15,5 +15,5 @@ importing the Python package directly.
 - [../guides/agentic-mode.md](../guides/agentic-mode.md) — note that
   MCP clients are always air-gap-safe because only READ_ONLY tools
   are exposed.
-- [../contributing/mcp_tools.md](../contributing/mcp_tools.md) — how
+- [../contributing/perfxpert-mcp/mcp_tools.md](../contributing/perfxpert-mcp/mcp_tools.md) — how
   to add a new tool to the MCP surface.

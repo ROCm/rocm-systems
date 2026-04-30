@@ -194,7 +194,7 @@ integrations that already know the routing decision.
 ## Adding a new agent
 
 The contributor walkthrough is in
-[contributing/agents.md](../contributing/agents.md). In brief:
+[contributing/agent-brain/agents.md](../contributing/agent-brain/agents.md). In brief:
 
 1. Create `perfxpert/agents/<name>.py` with an `AgentSpec` + handoff
    dataclass.

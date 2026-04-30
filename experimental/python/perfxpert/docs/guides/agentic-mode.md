@@ -135,7 +135,7 @@ the current Python environment. Current user-facing provider names:
 heuristics from the current shell, such as importability, expected
 environment variables, and bundled CLI availability. They are not full
 network reachability probes for hosted APIs or local daemons. See
-[contributing/providers.md](../contributing/providers.md)
+[contributing/perfxpert/providers.md](../contributing/perfxpert/providers.md)
 for how to register a new one.
 
 Private OpenAI-compatible endpoints use JSON for extra headers:

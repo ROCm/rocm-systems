@@ -365,7 +365,7 @@ resolve to the same Python function).
 
 ## Adding a tool to the MCP surface
 
-See [contributing/mcp_tools.md](../contributing/mcp_tools.md) for the
+See [contributing/perfxpert-mcp/mcp_tools.md](../contributing/perfxpert-mcp/mcp_tools.md) for the
 full procedure. The short version:
 
 1. Decorate the function with `@tool_class(ToolClass.READ_ONLY)`.

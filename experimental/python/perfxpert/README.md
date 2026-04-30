@@ -238,7 +238,10 @@ an [RFC](docs/rfcs/README.md).
 - **Contributing**
   - [CONTRIBUTING.md](CONTRIBUTING.md)
   - [Contributing index](docs/contributing/README.md)
-    - [External-tool dependencies (`require_tool`)](docs/contributing/external-tools.md)
+    - [PerfXpert CLI and report surface](docs/contributing/perfxpert/)
+    - [PerfXpert-Code launcher surface](docs/contributing/perfxpert-code/)
+    - [PerfXpert-MCP exposure surface](docs/contributing/perfxpert-mcp/)
+    - [Agent brain and deterministic tools](docs/contributing/agent-brain/)
 - **Other**
   - [Historical migration notes](docs/archive/migration-to-agentic.md)
 

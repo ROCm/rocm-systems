@@ -893,7 +893,7 @@ Representative optimization examples include:
 | `hip_stream_overlap` | high memcpy/API-overhead share with serialized transfers | move copies to async streams and synchronize only at the true dependency |
 
 For contributor-facing examples of how those cases are recorded, see
-`../contributing/proven_optimizations.md`.
+`../contributing/agent-brain/proven_optimizations.md`.
 
 The prediction is always on when a technique is surfaced — there is no
 CLI gate. The JSON schema bumps to `0.3.3` when at least one rec
@@ -1423,7 +1423,7 @@ runtime loads, not on whether `rocprof_trace_decoder` happens to be importable
 from the current Python environment. Install `librocprof-trace-decoder.so`
 under `/opt/rocm/lib*`, point `PERFXPERT_ROCPROF_TRACE_DECODER_PATH` at the
 library or its parent directory, or install the ROCm decoder package into a
-standard search path. See `../contributing/external-tools.md` for the exact
+standard search path. See `../contributing/perfxpert/external-tools.md` for the exact
 lookup order.
 
 **PMC counter collection fails with a per-block limit error.**
@@ -1447,8 +1447,8 @@ server.
 
 Want to add a new output format (say CSV for spreadsheet ingestion)
 or evolve the schema? See
-[Adding an output format](../contributing/output_formats.md) and
-[Evolving the schema](../contributing/schemas.md) for the end-to-end
+[Adding an output format](../contributing/perfxpert/output_formats.md) and
+[Evolving the schema](../contributing/agent-brain/schemas.md) for the end-to-end
 contribution walkthroughs — both live under `docs/contributing/` and
 are the canonical extension-point guides for the `--format` dispatcher
 and the three-layer schema stack (agent Pydantic / deterministic

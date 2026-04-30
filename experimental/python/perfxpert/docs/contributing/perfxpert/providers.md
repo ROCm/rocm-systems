@@ -121,6 +121,6 @@ Write `tests/test_providers/test_<name>_provider.py`:
 
 ## Related docs
 
-- [Agentic mode guide](../guides/agentic-mode.md) — provider selection,
+- [Agentic mode guide](../../guides/agentic-mode.md) — provider selection,
   fallback chain, and air-gap behavior
 - Existing providers in `perfxpert/providers/` as references

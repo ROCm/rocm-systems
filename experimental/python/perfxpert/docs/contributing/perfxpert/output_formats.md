@@ -20,7 +20,7 @@ Plausible candidates that have come up:
 
 If what you want is "the JSON doc but with one extra field," you do
 **not** need a new format — evolve the schema instead (see
-[schemas.md](schemas.md)).
+[schemas.md](../agent-brain/schemas.md)).
 
 ## Architecture overview
 
@@ -516,7 +516,7 @@ Before merging a new format:
 
 ## See also
 
-- [schemas.md](schemas.md) — how to evolve the payload / schema the
+- [schemas.md](../agent-brain/schemas.md) — how to evolve the payload / schema the
   formatters consume.
 - `perfxpert/analyze.py::_format_agentic_output` (line 587) — the live
   dispatcher.

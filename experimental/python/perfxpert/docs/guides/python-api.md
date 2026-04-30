@@ -62,7 +62,7 @@ result["summary"]["dominant_op"]                   # -> "AllReduce"
 result["summary"]["overlap_pct"]                   # comm/compute overlap %
 ```
 
-[schemas]: ../contributing/schemas.md
+[schemas]: ../contributing/agent-brain/schemas.md
 
 ## Quickstart
 
@@ -348,7 +348,7 @@ for k in diff["primary_regressions"]:
 Output keys: `schema_version`, `baseline_db`, `new_db`, `wall_delta_ns`,
 `wall_delta_pct`, `per_kernel`, `primary_regressions`,
 `primary_improvements`, `narrative`. See
-[schemas.md](../contributing/schemas.md) for the `trace_diff` contract.
+[schemas.md](../contributing/agent-brain/schemas.md) for the `trace_diff` contract.
 
 ### `roofline_plot_points` — per-kernel live-roofline points
 
@@ -397,7 +397,7 @@ Dtype detection is a regex over the demangled kernel name
 `dtype_confidence: "default"`). Pass `dtype_hint="bf16"` to force a
 single dtype for every kernel — useful when your kernels don't follow
 the naming convention. See
-[schemas.md](../contributing/schemas.md#roofline-payload) for the full
+[schemas.md](../contributing/agent-brain/schemas.md#roofline-payload) for the full
 contract.
 
 ## Error handling

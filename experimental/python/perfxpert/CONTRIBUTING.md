@@ -16,19 +16,19 @@ perfxpert doctor            # health check — must be clean
 ruff check perfxpert/       # lint (optional — CI runs it anyway)
 ```
 
-## Extension surfaces (quick reference)
+## Contribution map (quick reference)
 
 | Contribution | Where | Guide |
 |--------------|-------|-------|
-| New tool | `perfxpert/tools/<module>.py` | [docs/contributing/tools.md](docs/contributing/tools.md) |
-| New knowledge entry | `perfxpert/knowledge/<name>.yaml` | [docs/contributing/knowledge.md](docs/contributing/knowledge.md) |
-| New proven optimization | `perfxpert/knowledge/proven_optimizations.yaml` + fixture pair | [docs/contributing/proven_optimizations.md](docs/contributing/proven_optimizations.md) |
-| New agent | `perfxpert/agents/<name>.py` + `agents/fence/<name>.md` | [docs/contributing/agents.md](docs/contributing/agents.md) |
-| New LLM provider | `perfxpert/providers/<name>_model.py` | [docs/contributing/providers.md](docs/contributing/providers.md) |
-| New MCP tool | `mcp_server/tools/<name>.py` | [docs/contributing/mcp_tools.md](docs/contributing/mcp_tools.md) |
-| New test fixture | `tests/fixtures/<name>.db` + `.md` | [docs/contributing/fixtures.md](docs/contributing/fixtures.md) |
-| New GPU arch | `knowledge/gpu_specs.yaml` + `vgpr_occupancy_tables.yaml` | [docs/contributing/gpu_arch.md](docs/contributing/gpu_arch.md) |
-| External-tool dependency (`require_tool` registration) | `perfxpert/tools/_tooldep.py` | [docs/contributing/external-tools.md](docs/contributing/external-tools.md) |
+| New tool | `perfxpert/tools/<module>.py` | [docs/contributing/agent-brain/tools.md](docs/contributing/agent-brain/tools.md) |
+| New knowledge entry | `perfxpert/knowledge/<name>.yaml` | [docs/contributing/agent-brain/knowledge.md](docs/contributing/agent-brain/knowledge.md) |
+| New proven optimization | `perfxpert/knowledge/proven_optimizations.yaml` + fixture pair | [docs/contributing/agent-brain/proven_optimizations.md](docs/contributing/agent-brain/proven_optimizations.md) |
+| New agent | `perfxpert/agents/<name>.py` + `agents/fence/<name>.md` | [docs/contributing/agent-brain/agents.md](docs/contributing/agent-brain/agents.md) |
+| New LLM provider | `perfxpert/providers/<name>_model.py` | [docs/contributing/perfxpert/providers.md](docs/contributing/perfxpert/providers.md) |
+| New MCP tool | `perfxpert/tools/<module>.py` with `ToolClass.READ_ONLY` | [docs/contributing/perfxpert-mcp/mcp_tools.md](docs/contributing/perfxpert-mcp/mcp_tools.md) |
+| New test fixture | `tests/fixtures/<name>.db` + `.md` | [docs/contributing/agent-brain/fixtures.md](docs/contributing/agent-brain/fixtures.md) |
+| New GPU arch | `knowledge/gpu_specs.yaml` + `vgpr_occupancy_tables.yaml` | [docs/contributing/agent-brain/gpu_arch.md](docs/contributing/agent-brain/gpu_arch.md) |
+| External-tool dependency (`require_tool` registration) | `perfxpert/tools/_tooldep.py` | [docs/contributing/perfxpert/external-tools.md](docs/contributing/perfxpert/external-tools.md) |
 
 The per-surface guides are indexed under
 [docs/contributing/README.md](docs/contributing/README.md).
@@ -44,7 +44,7 @@ The per-surface guides are indexed under
 | Correctness-gate logic change | 3 core maintainers | **yes** — `docs/rfcs/` |
 | `always.md` shared fence change | 2 core maintainers | **yes** — `docs/rfcs/` |
 
-See [docs/contributing/governance.md](docs/contributing/governance.md) for the full reviewer list + escalation path.
+See [docs/contributing/process/governance.md](docs/contributing/process/governance.md) for the full reviewer list + escalation path.
 
 ## Narrow-scope discipline
 
@@ -60,7 +60,7 @@ CI enforces these constraints mechanically (`tests/test_integration/test_narrow_
 
 End-to-end walkthrough of adding `io_bound` as a bottleneck class —
 covers knowledge, tool, agent, fence, test, fixture in ≤ 7 files without
-needing an RFC: [docs/contributing/walkthrough_new_bottleneck_class.md](docs/contributing/walkthrough_new_bottleneck_class.md).
+needing an RFC: [docs/contributing/agent-brain/walkthrough_new_bottleneck_class.md](docs/contributing/agent-brain/walkthrough_new_bottleneck_class.md).
 
 ## RFC process
 

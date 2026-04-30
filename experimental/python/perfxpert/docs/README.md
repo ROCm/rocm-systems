@@ -61,12 +61,13 @@ docs/
 │   ├── README.md
 │   └── mcp-server.md        ← the MCP wire surface (56 tools)
 ├── contributing/
-│   ├── README.md            ← per-surface extension guides
-│   ├── tools.md, knowledge.md, providers.md, agents.md, mcp_tools.md,
-│   │   output_formats.md, schemas.md, fixtures.md, gpu_arch.md,
-│   │   external-tools.md, proven_optimizations.md
-│   ├── governance.md
-│   └── walkthrough_new_bottleneck_class.md
+│   ├── README.md            ← product/surface contribution map
+│   ├── perfxpert/           ← batch CLI, reports, providers, dependencies
+│   ├── perfxpert-code/      ← interactive launcher and backend dispatch
+│   ├── perfxpert-mcp/       ← standalone MCP exposure rules
+│   ├── perfxpert-diff/      ← diff, CI comparison, baseline regression
+│   ├── agent-brain/         ← agents, tools, knowledge, schemas, fixtures
+│   └── process/             ← governance and RFC boundaries
 ├── audit_gate_runbook.md    ← parity / red-team / go-no-go commands
 ├── rfcs/
 │   ├── README.md
