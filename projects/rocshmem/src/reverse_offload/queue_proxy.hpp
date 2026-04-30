@@ -116,10 +116,10 @@ class QueueProxy {
   QueueProxy() = default;
 
   QueueProxy(size_t max_queues, size_t queue_size)
-    : max_queues_{max_queues}, queue_size_{queue_size},
-      total_queue_elements_{queue_size * max_queues},
-      queue_proxy_{max_queues},
-      per_block_queue_proxy_{queue_size * max_queues} {
+    : queue_proxy_{max_queues},
+      per_block_queue_proxy_{queue_size * max_queues},
+      max_queues_{max_queues}, queue_size_{queue_size},
+      total_queue_elements_{queue_size * max_queues} {
 
     auto **queue_array{queue_proxy_.get()};
     auto *per_block_queue{per_block_queue_proxy_.get()};

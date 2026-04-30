@@ -23,8 +23,13 @@
 
 #pragma once
 
+#ifdef _WIN32
+#include <hsa.h>
+#include <hsa_ven_amd_aqlprofile.h>
+#else
 #include <hsa/hsa.h>
 #include <hsa/hsa_ven_amd_aqlprofile.h>
+#endif
 
 #include "aqlprofile-sdk/version.h"
 
@@ -85,11 +90,11 @@ typedef enum {
   AQLPROFILE_BLOCK_NAME_GRBMH,
   AQLPROFILE_BLOCK_NAME_SQG,
 
-  // Blocks reserved for NPI support
-  AQLPROFILE_BLOCK_NAME_RESERVED_6,
-  AQLPROFILE_BLOCK_NAME_RESERVED_7,
-  AQLPROFILE_BLOCK_NAME_RESERVED_8,
-  AQLPROFILE_BLOCK_NAME_RESERVED_9,
+  // New blocks for gc_12_1_x
+  AQLPROFILE_BLOCK_NAME_GLARBA,
+  AQLPROFILE_BLOCK_NAME_GLARBC,
+  AQLPROFILE_BLOCK_NAME_GRBMA,
+  AQLPROFILE_BLOCK_NAME_GC_NHTTLB,
 
   // Add new blocks above
   AQLPROFILE_BLOCKS_NUMBER

@@ -730,11 +730,11 @@ void Os::PrintLibraryLocation() {
           (LPCSTR)&Os::loadLibrary, &hm)) {
     char cszDllPath[1024] = {0};
     if (GetModuleFileNameA(hm, cszDllPath, sizeof(cszDllPath))) {
-      ClPrint(amd::LOG_INFO, amd::LOG_INIT, "HIP Library Path: %s", cszDllPath);
+      ClPrint(amd::LOG_INFO, amd::LOG_INIT, "Runtime Library Path: %s", cszDllPath);
       return;
     }
   }
-  ClPrint(amd::LOG_INFO, amd::LOG_INIT, "HIP Library Path: <unknown>");
+  ClPrint(amd::LOG_INFO, amd::LOG_INIT, "Runtime Library Path: <unknown>");
 }
 
 // ================================================================================================

@@ -33,55 +33,57 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipMemcpyDtoD_Basic, int, float,
   TestType *A_h{nullptr}, *B_h{nullptr}, *C_h{nullptr};
 
   HIP_CHECK(hipGetDeviceCount(&numDevices));
-  if (numDevices > 1) {
-    int canAccessPeer = 0;
-    HIP_CHECK(hipDeviceCanAccessPeer(&canAccessPeer, 0, 1));
-    HIP_CHECK(hipSetDevice(0));
-    if (!canAccessPeer) {
-      std::string msg = "Device is not capable of directly accessing memory from peerDevice. Skipping the test.";
-      HipTest::HIP_SKIP_TEST(msg.c_str());
-      return;
-    }
-    HIP_CHECK(hipDeviceEnablePeerAccess(1, 0));
-    HipTest::initArrays<TestType>(&A_d, &B_d, &C_d, &A_h, &B_h, &C_h, NUM_ELM, false);
-    HIP_CHECK(hipSetDevice(1));
-    HIP_CHECK(hipMalloc(&X_d, Nbytes));
-    HIP_CHECK(hipMalloc(&Y_d, Nbytes));
-    HIP_CHECK(hipMalloc(&Z_d, Nbytes));
+  if (numDevices < 2) {
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    return;
+  }
 
-    HIP_CHECK(hipSetDevice(0));
-    HIP_CHECK(hipMemcpy(A_d, A_h, Nbytes, hipMemcpyHostToDevice));
-    HIP_CHECK(hipMemcpy(B_d, B_h, Nbytes, hipMemcpyHostToDevice));
+  int canAccessPeer = 0;
+  HIP_CHECK(hipDeviceCanAccessPeer(&canAccessPeer, 0, 1));
+  HIP_CHECK(hipSetDevice(0));
+  if (!canAccessPeer) {
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
+    return;
+  }
+  HIP_CHECK(hipDeviceEnablePeerAccess(1, 0));
+  HipTest::initArrays<TestType>(&A_d, &B_d, &C_d, &A_h, &B_h, &C_h, NUM_ELM, false);
+  HIP_CHECK(hipSetDevice(1));
+  HIP_CHECK(hipMalloc(&X_d, Nbytes));
+  HIP_CHECK(hipMalloc(&Y_d, Nbytes));
+  HIP_CHECK(hipMalloc(&Z_d, Nbytes));
+
+  HIP_CHECK(hipSetDevice(0));
+  HIP_CHECK(hipMemcpy(A_d, A_h, Nbytes, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(B_d, B_h, Nbytes, hipMemcpyHostToDevice));
+  hipLaunchKernelGGL(HipTest::vectorADD, dim3(1), NUM_ELM, 0, 0,
+                     static_cast<const TestType*>(A_d), static_cast<const TestType*>(B_d), C_d,
+                     NUM_ELM);
+  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipMemcpy(C_h, C_d, Nbytes, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipDeviceSynchronize());
+  HipTest::checkVectorADD<TestType>(A_h, B_h, C_h, NUM_ELM);
+
+  HIP_CHECK(hipSetDevice(1));
+
+  hipError_t memcpy_err = hipSuccess;
+  BEGIN_CAPTURE_SYNC(memcpy_err, false);
+  HIP_CHECK_ERROR(hipMemcpyDtoD((hipDeviceptr_t)X_d, (hipDeviceptr_t)A_d, Nbytes), memcpy_err);
+  HIP_CHECK_ERROR(hipMemcpyDtoD((hipDeviceptr_t)Y_d, (hipDeviceptr_t)B_d, Nbytes), memcpy_err);
+  END_CAPTURE_SYNC(memcpy_err);
+
+  if (memcpy_err == hipSuccess) {
     hipLaunchKernelGGL(HipTest::vectorADD, dim3(1), NUM_ELM, 0, 0,
-                       static_cast<const TestType*>(A_d), static_cast<const TestType*>(B_d), C_d,
+                       static_cast<const TestType*>(X_d), static_cast<const TestType*>(Y_d), Z_d,
                        NUM_ELM);
     HIP_CHECK(hipGetLastError());
-    HIP_CHECK(hipMemcpy(C_h, C_d, Nbytes, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpyDtoH(C_h, (hipDeviceptr_t)Z_d, Nbytes));
     HIP_CHECK(hipDeviceSynchronize());
     HipTest::checkVectorADD<TestType>(A_h, B_h, C_h, NUM_ELM);
-
-    HIP_CHECK(hipSetDevice(1));
-
-    hipError_t memcpy_err = hipSuccess;
-    BEGIN_CAPTURE_SYNC(memcpy_err, false);
-    HIP_CHECK_ERROR(hipMemcpyDtoD((hipDeviceptr_t)X_d, (hipDeviceptr_t)A_d, Nbytes), memcpy_err);
-    HIP_CHECK_ERROR(hipMemcpyDtoD((hipDeviceptr_t)Y_d, (hipDeviceptr_t)B_d, Nbytes), memcpy_err);
-    END_CAPTURE_SYNC(memcpy_err);
-
-    if (memcpy_err == hipSuccess) {
-      hipLaunchKernelGGL(HipTest::vectorADD, dim3(1), NUM_ELM, 0, 0,
-                         static_cast<const TestType*>(X_d), static_cast<const TestType*>(Y_d), Z_d,
-                         NUM_ELM);
-      HIP_CHECK(hipGetLastError());
-      HIP_CHECK(hipMemcpyDtoH(C_h, (hipDeviceptr_t)Z_d, Nbytes));
-      HIP_CHECK(hipDeviceSynchronize());
-      HipTest::checkVectorADD<TestType>(A_h, B_h, C_h, NUM_ELM);
-    }
-
-    HIP_CHECK(hipFree(X_d));
-    HIP_CHECK(hipFree(Y_d));
-    HIP_CHECK(hipFree(Z_d));
-    (void)hipGetLastError();
   }
+
+  HIP_CHECK(hipFree(X_d));
+  HIP_CHECK(hipFree(Y_d));
+  HIP_CHECK(hipFree(Z_d));
+  (void)hipGetLastError();
   HipTest::freeArrays<TestType>(A_d, B_d, C_d, A_h, B_h, C_h, false);
 }

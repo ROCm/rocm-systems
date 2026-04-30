@@ -58,20 +58,30 @@ def check_version(local_ver: str, desired_ver: str, operator: str) -> bool:
     return ops.get(operator, lambda loc, des: True)(local_ver, desired_ver)
 
 
-def verify_deps() -> None:
-    """Utility to read library dependencies from requirements.txt and endeavor
-    to load them within current execution environment.
-    Used in top-level rocprofiler-compute to provide error messages if necessary
-    dependencies are not available."""
+def check_python_version() -> None:
+    """Check that Python version meets minimum requirement for rocprofiler-compute.
 
+    Both profile and analyze modes require Python 3.8+.
+    """
+    min_python = (3, 8)
     # Check which version of python is being used
-    if sys.version_info < (3, 8):  # noqa: UP036
+    if sys.version_info < min_python:  # noqa: UP036
         print(
-            f"[ERROR] Python 3.8 or higher is required to run rocprofiler-compute. "
-            f"The current version is {sys.version_info[0]}.{sys.version_info[1]}."
+            f"[ERROR] Python {min_python[0]}.{min_python[1]} or higher "
+            f"is required for rocprofiler-compute. "
+            f"The current version is "
+            f"{sys.version_info[0]}.{sys.version_info[1]}."
         )
         sys.exit(1)
 
+
+def verify_deps() -> None:
+    """Verify that all required packages from requirements.txt are installed
+    with correct versions for analyze mode execution.
+
+    NOTE: Only called for analyze mode. Profile mode requires no external
+    dependencies (uses stdlib only).
+    """
     bindir = str(Path(__file__).resolve().parent)
     deps_locations = ["requirements.txt", "../requirements.txt"]
 
@@ -125,8 +135,8 @@ def verify_deps() -> None:
 def main() -> None:
     """Main function for rocprofiler-compute"""
 
-    # verify required python dependencies
-    verify_deps()
+    # Check Python version requirement applies to both profile and analyze modes
+    check_python_version()
 
     rocprof_compute = RocProfCompute()
     mode = rocprof_compute.get_mode()
@@ -135,6 +145,8 @@ def main() -> None:
     if mode == "profile":
         rocprof_compute.run_profiler()
     elif mode == "analyze":
+        # Analyze mode requires external dependencies - verify them
+        verify_deps()
         rocprof_compute.run_analysis()
     else:
         console_error("Unsupported execution mode")

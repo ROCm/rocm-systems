@@ -745,7 +745,8 @@ HSAKMT_STATUS topology_sysfs_get_node_props(uint32_t node_id, HsaNodeProperties&
   props.LocalMemSize = 0;
   props.MaxEngineClockMhzFCompute = device->MaxEngineClockMhz();
   props.DrmRenderMinor = node_id;
-  props.Capability2.ui32.AqlEmulationPm4_ = device->IsAqlSupported() ? 0 : 1;
+  props.Capability2.ui32.AqlEmulationPm4_ =
+      (device->IsAqlSupported() && device->DeviceInfo().hwsInfo.hwsMask.computeHwsEnabled) ? 0 : 1;
 
   {
     const char* name = device->ProductName();

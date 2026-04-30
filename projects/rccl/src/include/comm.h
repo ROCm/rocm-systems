@@ -156,6 +156,11 @@ struct ncclSharedResources {
   struct ncclProxyState* proxyState;
 };
 
+ /**
+  * NOTE: This struct contains pointer members. Shallow copies are only intended during early initialization,
+  * before these pointers are populated or before ownership/lifetime of the pointed-to resources matters.
+  * Do not treat an initialized ncclChannel as generally safe to shallow copy.
+  */
 struct ncclChannel {
   struct ncclChannelPeer** peers;
   struct ncclDevChannelPeer** devPeers;
@@ -552,6 +557,18 @@ struct ncclComm {
   int* localRankToRank;
   // localRanks and localRanktoRank for all nodes
   struct ncclNodeRanks* nodeRanks;
+
+  // Hierarchical AG sub-communicators
+  struct ncclComm* hierarchicalIntraComm;
+  struct ncclComm* hierarchicalInterComm;
+  bool hierarchicalCommsInitialized;
+
+  // Hierarchical AG temporary buffers
+  void* hierarchicalAGTempBuffer;
+
+  // Force PAT algorithm for this communicator
+  bool forcePatEnable;
+
   // MNNVL: Multi-Node NVLink
   int MNNVL; // true when MNNVL is available
   struct cliqueInfo clique; // Our MNNVL clique information
@@ -713,16 +730,6 @@ struct ncclComm {
   // shared structures for finalization
   int finalizeRankCnt;
 
-#if defined(ENABLE_MSCCLPP)
-  // Whether this comm is compatible with MSCCLPP
-  bool mscclppCompatible;
-  struct mscclppComm* mscclpp_comm;
-  size_t mscclpp_threshold;
-  bool mscclppForceEnable;
-#endif
-
-  // Whether this comm is compatible with MSCCL
-  bool mscclCompatible;
   // group job to support multi-thread FT
   struct ncclGroupJob *groupJob;
 

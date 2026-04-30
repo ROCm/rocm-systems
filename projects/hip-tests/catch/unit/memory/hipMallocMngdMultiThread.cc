@@ -285,7 +285,7 @@ static void AllocateHmmMemory(int flag, int device) {
 HIP_TEST_CASE(Unit_hipMallocManaged_MultiThread) {
   auto managed = HmmAttrPrint();
   if (managed != 1) {
-    HipTest::HIP_SKIP_TEST("GPU doesn't support managed memory so skipping test.");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
     return;
   }
 
@@ -339,7 +339,7 @@ HIP_TEST_CASE(Unit_hipMallocManaged_MultiThread) {
 HIP_TEST_CASE(Unit_hipMallocManaged_MGpuMThread) {
   auto managed = HmmAttrPrint();
   if (managed != 1) {
-    HipTest::HIP_SKIP_TEST("GPU doesn't support managed memory so skipping test.");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
     return;
   }
 
@@ -347,7 +347,7 @@ HIP_TEST_CASE(Unit_hipMallocManaged_MGpuMThread) {
   int Ngpus = 0;
   HIP_CHECK(hipGetDeviceCount(&Ngpus));
   if (Ngpus < 2) {
-    HipTest::HIP_SKIP_TEST("Skipping test because more than one device was not found.");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
     return;
   }
 
@@ -382,7 +382,7 @@ HIP_TEST_CASE(Unit_hipMallocManaged_MGpuMThread) {
 HIP_TEST_CASE(Unit_hipMallocManaged_MultiKrnlComnHmm) {
   auto managed = HmmAttrPrint();
   if (managed != 1) {
-    HipTest::HIP_SKIP_TEST("GPU doesn't support managed memory so skipping test.");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
     return;
   }
 
@@ -417,7 +417,7 @@ HIP_TEST_CASE(Unit_hipMallocManaged_MultiKrnlComnHmm) {
 HIP_TEST_CASE(Unit_hipMallocManaged_MultiKrnlComnMalloc) {
   auto managed = HmmAttrPrint();
   if (managed != 1) {
-    HipTest::HIP_SKIP_TEST("GPU doesn't support managed memory so skipping test.");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
     return;
   }
 
@@ -448,7 +448,7 @@ HIP_TEST_CASE(Unit_hipMallocManaged_MultiKrnlComnMalloc) {
 HIP_TEST_CASE(Unit_hipMallocManaged_MultiThrdMultiStrm) {
   auto managed = HmmAttrPrint();
   if (managed != 1) {
-    HipTest::HIP_SKIP_TEST("GPU doesn't support managed memory so skipping test.");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
     return;
   }
 
@@ -482,7 +482,7 @@ HIP_TEST_CASE(Unit_hipMallocManaged_MultiThrdMultiStrm) {
 HIP_TEST_CASE(Unit_hipMallocManaged_TwoKrnlsComnHmmMem) {
   auto managed = HmmAttrPrint();
   if (managed != 1) {
-    HipTest::HIP_SKIP_TEST("GPU doesn't support managed memory so skipping test.");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
     return;
   }
 

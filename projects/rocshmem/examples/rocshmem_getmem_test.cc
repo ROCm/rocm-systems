@@ -88,8 +88,8 @@ int main (int argc, char **argv)
 
     rocshmem_init();
 
-    int my_pe = rocshmem_my_pe();
-    int npes =  rocshmem_n_pes();
+    [[maybe_unused]] int my_pe = rocshmem_my_pe();
+    [[maybe_unused]] int npes =  rocshmem_n_pes();
 
     int *src = (int *)rocshmem_malloc(nelem * sizeof(int));
     int *dst = (int *)rocshmem_malloc(nelem * sizeof(int));

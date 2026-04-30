@@ -35,6 +35,7 @@
 #include "memory/std_allocator.hpp"
 #include "util.hpp"
 #include "bootstrap/bootstrap.hpp"
+#include "atomic.hpp"
 
 namespace rocshmem {
 
@@ -61,7 +62,7 @@ class IpcOnImpl {
 
   __host__ void ipcHostStop();
 
-  __host__ __device__ bool isIpcAvailable(int my_pe, int target_pe, int *local_target_pe) {
+  __host__ __device__ bool isIpcAvailable([[maybe_unused]] int my_pe, int target_pe, int *local_target_pe) {
     if (nullptr == pes_with_ipc_avail) { return false; }
 
     for (int i=0; i<shm_size; i++) {
@@ -82,7 +83,11 @@ class IpcOnImpl {
 
   __device__ void ipcCopy_wave(void *dst, void *src, size_t size);
 
-  __device__ void ipcFence() { __threadfence_system(); }
+  template <detail::atomic::rocshmem_memory_scope scope = detail::atomic::memory_scope_system,
+            detail::atomic::rocshmem_memory_order order = detail::atomic::memory_order_seq_cst>
+  __device__ __forceinline__ void ipcFence() {
+    detail::atomic::threadfence<scope, order>();
+  }
 
   template <typename T>
   __device__ void ipcAMOAdd(T *val, T value) {
@@ -154,7 +159,7 @@ class IpcOnImpl {
   __device__ void zero_byte_read(int pe) {
     int local_pe = pe % shm_size;
     uint32_t *pe_ipc_base = reinterpret_cast<uint32_t *>(ipc_bases[local_pe]);
-    volatile uint32_t read_value = __hip_atomic_load(
+    [[maybe_unused]] volatile uint32_t read_value = __hip_atomic_load(
         pe_ipc_base, __ATOMIC_SEQ_CST, __HIP_MEMORY_SCOPE_SYSTEM);
   }
 };
@@ -181,7 +186,7 @@ class IpcOffImpl {
 
   __host__ void ipcHostStop() {}
 
-  __host__ __device__ bool isIpcAvailable(int my_pe, int target_pe, int *local_target_pe) { return false; }
+  __host__ __device__ bool isIpcAvailable([[maybe_unused]] int my_pe, int target_pe, int *local_target_pe) { return false; }
 
   __device__ void ipcGpuInit(Backend *rocshmem_handle, Context *ctx,
                              int thread_id) {}
@@ -192,7 +197,9 @@ class IpcOffImpl {
 
   __device__ void ipcCopy_wave(void *dst, void *src, size_t size) {}
 
-  __device__ void ipcFence() {}
+  template <detail::atomic::rocshmem_memory_scope scope = detail::atomic::memory_scope_system,
+            detail::atomic::rocshmem_memory_order order = detail::atomic::memory_order_seq_cst>
+  __device__ __forceinline__ void ipcFence() {}
 
   template <typename T>
   __device__ T ipcAMOFetchAdd(T *val, T value) {

@@ -128,7 +128,7 @@ There are three high-level GPU analysis views:
    option. Or, build your own configuration following
    `config_template <https://github.com/ROCm/rocm-systems/blob/develop/projects/rocprofiler-compute/src/rocprof_compute_soc/analysis_configs/panel_config_template.yaml>`_.
    The following snippet shows how to generate a report containing only metric 2
-   (:doc:`System Speed-of-Light </conceptual/system-speed-of-light>`).
+   (:doc:`System Speed-of-Light </conceptual/cdna/system-speed-of-light>`).
 
    .. code-block:: shell-session
 
@@ -343,6 +343,14 @@ More analysis options
 .. code-block:: shell
 
    $ rocprof-compute analyze -p workloads/vcopy/MI200/  --list-metrics gfx90a --include-cols Description
+
+**TTY output view (plain tables)**
+
+Use ``--view table`` to force plain tabular output for all sections and ignore ``cli_style`` from the analysis YAML (for example, memory charts and Roofline charts are shown as tables). Additional ``--view`` values may be added in future releases.
+
+.. code-block:: shell
+
+   $ rocprof-compute analyze -p workloads/vcopy/MI200/ -b 3 --view table
 
 **Show System Speed-of-Light and CS_Busy blocks only**
 
@@ -646,21 +654,21 @@ Analysis database example
 
 
 PyTorch Operator Analysis
---------------------------
+=========================
 
 .. warning::
-   
-   PyTorch operator analysis is currently available only in CLI mode. GUI and TUI 
+
+   PyTorch operator analysis is currently available only in CLI mode. GUI and TUI
    will provide different interfaces for operator selection and visualization.
 
-   These options require ``--experimental``. After profiling with 
-   ``--experimental --torch-trace`` (see :ref:`torch-operator-profiling`), 
-   use ``rocprof-compute --experimental analyze ...`` with 
+   These options require ``--experimental``. After profiling with
+   ``--experimental --torch-trace`` (see :ref:`torch-operator-profiling`),
+   use ``rocprof-compute --experimental analyze ...`` with
    ``--list-torch-operators`` or ``--torch-operator`` as needed.
-   
+
 
 Listing All Operators
-^^^^^^^^^^^^^^^^^^^^^^
+---------------------
 
 Display all PyTorch operators captured during profiling:
 
@@ -686,7 +694,7 @@ hierarchy (``/``-separated) and kernel stats. A consolidated CSV
 see :ref:`torch-operator-profiling` for details.
 
 Filtering by Operator
-^^^^^^^^^^^^^^^^^^^^^^
+---------------------
 
 ``--torch-operator`` uses PurePosixPath glob patterns to select operators.
 Operator hierarchies are ``/``-separated (e.g.

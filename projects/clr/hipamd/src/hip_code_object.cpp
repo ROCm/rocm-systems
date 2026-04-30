@@ -51,19 +51,19 @@ DynCO::~DynCO() {
   std::scoped_lock lock(dclock_);
 
   for (auto& elem : vars_) {
-    if (elem.second->getVarKind() == Var::DVK_Managed) {
-      hipError_t err = ihipFree(elem.second->getManagedVarPtr());
+    if (elem.second->GetVarKind() == Var::DVK_Managed) {
+      hipError_t err = ihipFree(elem.second->GetManagedVarPtr());
       assert(err == hipSuccess);
     }
 
-    if (elem.second->getVarKind() == Var::DVK_Variable) {
+    if (elem.second->GetVarKind() == Var::DVK_Variable) {
       for (auto dev : g_devices) {
-        DeviceVar* dvar = nullptr;
-        hipError_t err = elem.second->getDeviceVarPtr(&dvar, dev->deviceId());
+        amd::Memory* mem = nullptr;
+        hipError_t err = elem.second->GetDeviceVarPtr(&mem, dev->deviceId());
         assert(err == hipSuccess);
-        if (dvar != nullptr) {
+        if (mem != nullptr) {
           // free also deletes the device ptr
-          err = ihipFree(dvar->device_ptr());
+          err = ihipFree(memDevPtr(mem));
           assert(err == hipSuccess);
         }
       }
@@ -80,7 +80,7 @@ DynCO::~DynCO() {
   delete fb_info_;
 }
 
-hipError_t DynCO::getDeviceVar(DeviceVar** dvar, const std::string& var_name) {
+hipError_t DynCO::GetDeviceVar(amd::Memory** mem, const std::string& var_name) {
   std::scoped_lock lock(dclock_);
 
   auto it = vars_.find(var_name);
@@ -89,8 +89,13 @@ hipError_t DynCO::getDeviceVar(DeviceVar** dvar, const std::string& var_name) {
     return hipErrorNotFound;
   }
 
-  hipError_t err = it->second->getDeviceVar(dvar, device_id_, module_);
-  return err;
+  return it->second->GetDeviceVar(mem, device_id_, module_);
+}
+
+hip::Var* DynCO::getVar(const std::string& var_name) {
+  std::scoped_lock lock(dclock_);
+  auto it = vars_.find(var_name);
+  return (it != vars_.end()) ? it->second : nullptr;
 }
 
 hipError_t DynCO::getDynFunc(hipFunction_t* hfunc, const std::string& func_name) {
@@ -107,7 +112,7 @@ hipError_t DynCO::getDynFunc(hipFunction_t* hfunc, const std::string& func_name)
   }
 
   /* See if this could be solved */
-  return it->second->getDynFunc(hfunc, module_);
+  return it->second->GetDynFunc(hfunc, module_);
 }
 
 hipError_t DynCO::getFuncCount(unsigned int* count) {
@@ -122,33 +127,33 @@ hipError_t DynCO::getFuncCount(unsigned int* count) {
 bool DynCO::isValidDynFunc(const void* hfunc) {
   std::scoped_lock lock(dclock_);
   return std::any_of(functions_.begin(), functions_.end(),
-                     [&](auto& it) { return it.second->isValidDynFunc(hfunc); });
+                     [&](auto& it) { return it.second->IsValidDynFunc(hfunc); });
 }
 
 hipError_t DynCO::initDynManagedVars(const std::string& managedVar) {
   std::scoped_lock lock(dclock_);
-  DeviceVar* dvar;
+  amd::Memory* mem = nullptr;
   void* pointer = nullptr;
   hipError_t status = hipSuccess;
   // To get size of the managed variable
-  status = getDeviceVar(&dvar, managedVar + ".managed");
+  status = GetDeviceVar(&mem, managedVar + ".managed");
   if (status != hipSuccess) {
     ClPrint(amd::LOG_ERROR, amd::LOG_API, "Status %d, failed to get .managed device variable:%s",
             status, managedVar.c_str());
     return status;
   }
   // Allocate managed memory for these symbols
-  status = ihipMallocManaged(&pointer, dvar->size(), 0, 0);
+  status = ihipMallocManaged(&pointer, mem->getSize(), 0, 0);
   guarantee(status == hipSuccess, "Status %d, failed to allocate managed memory", status);
 
   // update as manager variable and set managed memory pointer and size
   auto it = vars_.find(managedVar);
-  it->second->setManagedVarInfo(pointer, dvar->size());
+  it->second->SetManagedVarInfo(pointer, mem->getSize());
 
   // copy initial value to the managed variable to the managed memory allocated
   hip::Stream* stream = hip::getNullStream();
   if (stream != nullptr) {
-    status = ihipMemcpy(pointer, reinterpret_cast<address>(dvar->device_ptr()), dvar->size(),
+    status = ihipMemcpy(pointer, reinterpret_cast<address>(memDevPtr(mem)), mem->getSize(),
                         hipMemcpyDeviceToDevice, *stream);
     if (status != hipSuccess) {
       ClPrint(amd::LOG_ERROR, amd::LOG_API, "Status %d, failed to copy device ptr:%s", status,
@@ -160,15 +165,15 @@ hipError_t DynCO::initDynManagedVars(const std::string& managedVar) {
     return hipErrorInvalidResourceHandle;
   }
 
-  // Get deivce ptr to initialize with managed memory pointer
-  status = getDeviceVar(&dvar, managedVar);
+  // Get device ptr to initialize with managed memory pointer
+  status = GetDeviceVar(&mem, managedVar);
   if (status != hipSuccess) {
     ClPrint(amd::LOG_ERROR, amd::LOG_API, "Status %d, failed to get managed device variable:%s",
             status, managedVar.c_str());
     return status;
   }
   // copy managed memory pointer to the managed device variable
-  status = ihipMemcpy(reinterpret_cast<address>(dvar->device_ptr()), &pointer, dvar->size(),
+  status = ihipMemcpy(reinterpret_cast<address>(memDevPtr(mem)), &pointer, mem->getSize(),
                       hipMemcpyHostToDevice, *stream);
   if (status != hipSuccess) {
     ClPrint(amd::LOG_ERROR, amd::LOG_API, "Status %d, failed to copy device ptr:%s", status,
@@ -348,19 +353,19 @@ hipError_t StatCO::RemoveFatBinary(FatBinaryInfo** module) {
     for (auto& managedVar : managedVarsIter->second) {
       hipError_t err = hipSuccess;
       for (auto dev : g_devices) {
-        DeviceVar* dvar = nullptr;
-        IHIP_RETURN_ONFAIL(managedVar->getDeviceVarPtr(&dvar, dev->deviceId()));
-        if (dvar != nullptr) {
+        amd::Memory* mem = nullptr;
+        IHIP_RETURN_ONFAIL(managedVar->GetDeviceVarPtr(&mem, dev->deviceId()));
+        if (mem != nullptr) {
           // free also deletes the device ptr
-          err = ihipFree(dvar->device_ptr());
+          err = ihipFree(memDevPtr(mem));
           assert(err == hipSuccess);
         }
       }
-      if (managedVar->getAllocFlag()) {  // check if it is a managed or host alloc
-        err = ihipFree(*(static_cast<void**>(managedVar->getManagedVarPtr())));
+      if (managedVar->GetAllocFlag()) {  // check if it is a managed or host alloc
+        err = ihipFree(*(static_cast<void**>(managedVar->GetManagedVarPtr())));
       } else {
-        void** pointer = static_cast<void**>(managedVar->getManagedVarPtr());
-        amd::Os::releaseMemory(*pointer, managedVar->getSize());
+        void** pointer = static_cast<void**>(managedVar->GetManagedVarPtr());
+        amd::Os::releaseMemory(*pointer, managedVar->GetSize());
       }
       assert(err == hipSuccess);
       delete managedVar;
@@ -420,23 +425,23 @@ void StatCO::RemoveAllFatBinaries() {
     for (auto& managed_var : managed_vars) {
       // Free device-specific allocations across all devices
       for (auto dev : g_devices) {
-        DeviceVar* dvar = nullptr;
-        if (managed_var->getDeviceVarPtr(&dvar, dev->deviceId()) == hipSuccess && dvar) {
+        amd::Memory* mem = nullptr;
+        if (managed_var->GetDeviceVarPtr(&mem, dev->deviceId()) == hipSuccess && mem) {
           // Free device memory (also deletes the device ptr)
-          [[maybe_unused]] hipError_t err = ihipFree(dvar->device_ptr());
+          [[maybe_unused]] hipError_t err = ihipFree(memDevPtr(mem));
           assert(err == hipSuccess);
         }
       }
 
       // Free the managed memory allocation itself
-      void** managed_ptr = static_cast<void**>(managed_var->getManagedVarPtr());
-      if (managed_var->getAllocFlag()) {
+      void** managed_ptr = static_cast<void**>(managed_var->GetManagedVarPtr());
+      if (managed_var->GetAllocFlag()) {
         // Memory was allocated with ihipMallocManaged - use ihipFree
         [[maybe_unused]] hipError_t err = ihipFree(*managed_ptr);
         assert(err == hipSuccess);
       } else {
         // Memory was allocated with OS-level allocator - use OS release
-        amd::Os::releaseMemory(*managed_ptr, managed_var->getSize());
+        amd::Os::releaseMemory(*managed_ptr, managed_var->GetSize());
       }
       delete managed_var;
     }
@@ -465,7 +470,7 @@ hipError_t StatCO::RegisterFunction(const void* hostFunction, Function* func) {
     delete func;
   } else {
     functions_.insert(std::make_pair(hostFunction, func));
-    module_to_hostFunctions_[func->moduleInfo()].push_back(hostFunction);
+    module_to_hostFunctions_[func->ModuleInfo()].push_back(hostFunction);
   }
 
   return hipSuccess;
@@ -478,7 +483,7 @@ const char* StatCO::GetFuncName(const void* hostFunction) {
   if (it == functions_.end()) {
     return nullptr;
   }
-  return it->second->name().c_str();
+  return it->second->GetName().c_str();
 }
 
 hipError_t StatCO::GetFunc(hipFunction_t* hfunc, const void* hostFunction, int deviceId) {
@@ -488,7 +493,7 @@ hipError_t StatCO::GetFunc(hipFunction_t* hfunc, const void* hostFunction, int d
   }
 
   // Lazy load
-  FatBinaryInfo** module = it->second->moduleInfo();
+  FatBinaryInfo** module = it->second->ModuleInfo();
   if (module != nullptr) {
     std::scoped_lock lock(sclock_);
     if (*(module) == nullptr) {
@@ -503,7 +508,7 @@ hipError_t StatCO::GetFunc(hipFunction_t* hfunc, const void* hostFunction, int d
     return hipErrorInvalidDeviceFunction;
   }
 
-  return it->second->getStatFunc(hfunc, deviceId);
+  return it->second->GetStatFunc(hfunc, deviceId);
 }
 
 hipError_t StatCO::GetFuncAttr(hipFuncAttributes* func_attr, const void* hostFunction,
@@ -516,24 +521,24 @@ hipError_t StatCO::GetFuncAttr(hipFuncAttributes* func_attr, const void* hostFun
   }
 
   // Lazy load
-  FatBinaryInfo** module = it->second->moduleInfo();
+  FatBinaryInfo** module = it->second->ModuleInfo();
   if (*(module) == nullptr) {
     std::ignore = DigestFatBinary(module_to_hostModule_[module], *module);
   }
 
-  return it->second->getStatFuncAttr(func_attr, deviceId);
+  return it->second->GetStatFuncAttr(func_attr, deviceId);
 }
 
 hipError_t StatCO::RegisterGlobalVar(const void* hostVar, Var* var) {
   std::scoped_lock lock(sclock_);
 
   auto var_it = vars_.find(hostVar);
-  if ((var_it != vars_.end()) && (var_it->second->getName() != var->getName())) {
+  if ((var_it != vars_.end()) && (var_it->second->GetName() != var->GetName())) {
     return hipErrorInvalidSymbol;
   }
 
   vars_.insert(std::make_pair(hostVar, var));
-  module_to_hostVars_[var->moduleInfo()].push_back(hostVar);
+  module_to_hostVars_[var->ModuleInfo()].push_back(hostVar);
   return hipSuccess;
 }
 
@@ -547,21 +552,27 @@ hipError_t StatCO::GetGlobalVar(const void* hostVar, int deviceId, hipDeviceptr_
   }
 
   // Lazy load
-  FatBinaryInfo** module = it->second->moduleInfo();
+  FatBinaryInfo** module = it->second->ModuleInfo();
   if (*(module) == nullptr) {
     std::ignore = DigestFatBinary(module_to_hostModule_[module], *module);
   }
 
-  DeviceVar* dvar = nullptr;
-  IHIP_RETURN_ONFAIL(it->second->getStatDeviceVar(&dvar, deviceId));
+  amd::Memory* mem = nullptr;
+  IHIP_RETURN_ONFAIL(it->second->GetStatDeviceVar(&mem, deviceId));
 
-  *dev_ptr = dvar->device_ptr();
-  *size_ptr = dvar->size();
+  if (mem == nullptr) {
+    // Handle size-0 globals: return null device pointer and size 0.
+    *dev_ptr = 0;
+    *size_ptr = 0;
+    return hipSuccess;
+  }
+  *dev_ptr = memDevPtr(mem);
+  *size_ptr = mem->getSize();
   return hipSuccess;
 }
 
 hipError_t StatCO::RegisterManagedVar(Var* var) {
-  managedVars_[var->moduleInfo()].push_back(var);
+  managedVars_[var->ModuleInfo()].push_back(var);
   return hipSuccess;
 }
 
@@ -569,15 +580,15 @@ hipError_t StatCO::RegisterManagedVar(Var* var) {
 void StatCO::ResizeForDevices(size_t device_count) {
   std::scoped_lock lock(sclock_);
   for (const auto& it : vars_) {
-    it.second->resize_dVar(device_count);
+    it.second->ResizeDVar(device_count);
   }
   for (const auto& it : managedVars_) {
     for (const auto& var : it.second) {
-      var->resize_dVar(device_count);
+      var->ResizeDVar(device_count);
     }
   }
   for (const auto& it : functions_) {
-    it.second->resize_dFunc(device_count);
+    it.second->ResizeDFunc(device_count);
   }
 }
 
@@ -590,7 +601,7 @@ hipError_t StatCO::InitManagedVarDevicePtr(int deviceId) {
     for (auto& vecIter : managedVars_) {
       for (auto& var : vecIter.second) {
         // Lazy load
-        FatBinaryInfo** module = var->moduleInfo();
+        FatBinaryInfo** module = var->ModuleInfo();
         if (*(module) == nullptr) {
           std::ignore = DigestFatBinary(module_to_hostModule_[module], *module);
         }
@@ -600,12 +611,12 @@ hipError_t StatCO::InitManagedVarDevicePtr(int deviceId) {
           return hipErrorInvalidResourceHandle;
         }
         // Allocate managed var for deferred loading
-        IHIP_RETURN_ONFAIL(var->allocateManagedVarPtr());
+        IHIP_RETURN_ONFAIL(var->AllocateManagedVarPtr());
         // Copy from managed var host to device ptr
-        DeviceVar* dvar = nullptr;
-        IHIP_RETURN_ONFAIL(var->getStatDeviceVar(&dvar, deviceId));
-        err = ihipMemcpy(reinterpret_cast<address>(dvar->device_ptr()), var->getManagedVarPtr(),
-                         dvar->size(), hipMemcpyHostToDevice, *stream);
+        amd::Memory* mem = nullptr;
+        IHIP_RETURN_ONFAIL(var->GetStatDeviceVar(&mem, deviceId));
+        err = ihipMemcpy(reinterpret_cast<address>(memDevPtr(mem)), var->GetManagedVarPtr(),
+                         mem->getSize(), hipMemcpyHostToDevice, *stream);
       }
     }
     managedVarsDevicePtrInitalized_[deviceId] = true;

@@ -59,6 +59,7 @@
 #include "suites/functional/deallocation_notifier.h"
 #include "suites/functional/virtual_memory.h"
 #include "suites/functional/svm_memory.h"
+#include "suites/functional/time_stamp.h"
 #include "suites/performance/dispatch_time.h"
 #include "suites/performance/memory_async_copy.h"
 #if ENABLE_COPY_NUMA
@@ -80,6 +81,7 @@
 #include "suites/functional/concurrent_shutdown.h"
 #include "suites/functional/reference_count.h"
 #include "suites/functional/signal_concurrent.h"
+#include "suites/functional/metadata_prefetch.h"
 #include "suites/functional/aql_barrier_bit.h"
 #include "suites/functional/signal_kernel.h"
 #include "suites/functional/cu_masking.h"
@@ -145,6 +147,12 @@ TEST(rocrtst, Test_Example) {
 TEST(rocrtst, Test_Example_InterruptDisabled) {
   TestExample tst;
   rocrtst::SetEnv("HSA_ENABLE_INTERRUPT", "0");
+  RunGenericTest(&tst);
+}
+
+TEST(rocrtst, Test_MetadataPrefetchPacket) {
+  MetadataPrefetch tst;
+
   RunGenericTest(&tst);
 }
 
@@ -324,6 +332,13 @@ TEST(rocrtstFunc, Memory_Available) {
     mt.MemAvailableTest();
     RunCustomTestEpilog(&mt);
   );
+}
+
+TEST(rocrtstFunc, Time_Stamp) {
+  TimeStamp ts;
+  RunCustomTestProlog(&ts);
+  ts.TimeStampTest();
+  RunCustomTestEpilog(&ts);
 }
 
 TEST(rocrtstFunc, GpuCoreDump_DefaultPattern) {
@@ -522,6 +537,16 @@ TEST(rocrtstFunc, SvmMemory_Basic_Test) {
     RunCustomTestProlog(&smt);
     smt.TestCreateDestroy();
     smt.TestSVMPrefetch();
+    smt.TestSVMBatchDiscard();
+    RunCustomTestEpilog(&smt);
+  );
+}
+
+TEST(rocrtstFunc, SvmMemory_Negative_Test) {
+  RUN_IF_NOT_EMU_MODE(
+    SvmMemoryTestBasic smt;
+    RunCustomTestProlog(&smt);
+    smt.TestSVMDiscardNegative();
     RunCustomTestEpilog(&smt);
   );
 }
@@ -556,6 +581,16 @@ TEST(rocrtstFunc, VirtMemory_Accounting_Test) {
 
     RunCustomTestProlog(&vmt);
     vmt.MemoryAccountingTest();
+    RunCustomTestEpilog(&vmt);
+  );
+}
+
+TEST(rocrtstFunc, VirtMemory_Aliasing_Test) {
+  RUN_IF_NOT_EMU_MODE(
+    VirtMemoryTestBasic vmt;
+
+    RunCustomTestProlog(&vmt);
+    vmt.TestVirtAddressAlias();
     RunCustomTestEpilog(&vmt);
   );
 }

@@ -140,7 +140,7 @@ HIP_TEST_CASE(Unit_hipGetDeviceProperties_MaskedDevices) {
     ret = validateGetPropsOfMaskedDevices(count);
     REQUIRE(ret == true);
   } else {
-    SUCCEED("Not enough GPUs to run the masked GPU tests");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kRequiredDeviceCountNotMet);
   }
 }
 #endif

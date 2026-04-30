@@ -16,7 +16,7 @@ from rocprof_compute_tui.utils.tui_utils import (
     process_panels_to_dataframes,
 )
 from utils import file_io, parser, schema
-from utils.logger import console_error, demarcate
+from utils.logger import console_error, console_log, demarcate
 
 
 class tui_analysis(OmniAnalyze_Base):
@@ -32,13 +32,50 @@ class tui_analysis(OmniAnalyze_Base):
         self._profiling_config = file_io.load_profiling_config(self.path)
         self._runs = self.initalize_runs()
 
-        # Join pmc_perf_*.csv or results_*.csv files if needed (Phase 2)
-        self.join_workload_csvs(Path(self.path))
-
         if self.args.random_port:
             console_error("--gui flag is required to enable --random-port")
 
         workload = self._runs[self.path]
+
+        # Initialize per-kernel dataframes
+        self.raw_dfs: dict[str, Any] = {}
+
+        if self.pc_sampling_only():
+            console_log(
+                "analysis",
+                "Only PC sampling and kernel tracing data"
+                " available, metrics calculation will be"
+                " skipped",
+            )
+            workload.raw_pmc = file_io.process_pc_sampling_kernel_trace(self.path)
+            workload.raw_pmc = workload.raw_pmc.rename(
+                columns={"Dispatch_Id": "Dispatch_ID"}
+            )
+            # Create multi index dataframe with key pmc_perf
+            workload.raw_pmc = pd.concat([workload.raw_pmc], keys=["pmc_perf"], axis=1)
+
+            kernel_top_df, dispatch_info_df = file_io.create_df_kernel_top_stats(
+                df_in=workload.raw_pmc,
+                raw_data_dir=self.path,
+                filter_gpu_ids=workload.filter_gpu_ids,
+                filter_dispatch_ids=workload.filter_dispatch_ids,
+                filter_nodes=workload.filter_nodes,
+                time_unit=self.args.time_unit,
+                kernel_verbose=self.args.kernel_verbose,
+            )
+            workload.dfs[parser.PMC_KERNEL_TOP_TABLE_ID] = kernel_top_df
+            workload.dfs[parser.PMC_DISPATCH_INFO_TABLE_ID] = dispatch_info_df
+
+            parser.load_non_mertrics_table(
+                workload=workload,
+                dir_path=self.path,
+                args=self.args,
+            )
+            parser.nullify_unevaluated_metric_values(workload)
+            return
+
+        # Join pmc_perf_*.csv or results_*.csv files if needed (Phase 2)
+        self.join_workload_csvs(Path(self.path))
 
         workload.raw_pmc = file_io.create_df_pmc(
             self.path,
@@ -65,11 +102,10 @@ class tui_analysis(OmniAnalyze_Base):
         workload.dfs[parser.PMC_DISPATCH_INFO_TABLE_ID] = dispatch_info_df
 
         parser.load_non_mertrics_table(
-            workload=workload, dir_path=self.path, args=self.args
+            workload=workload,
+            dir_path=self.path,
+            args=self.args,
         )
-
-        # 2. Generate per-kernel dataframes (aggregated across all dispatches)
-        self.raw_dfs = {}
 
         # Group raw PMC data by kernel name
         kernel_groups = workload.raw_pmc.pmc_perf.groupby("Kernel_Name")

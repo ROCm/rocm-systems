@@ -11,15 +11,31 @@
     #include "MPITestCore.hpp"
     #include "MPIEnvironment.hpp"
     #include <cerrno>
+    #include <cstdlib>
     #include <cstring>
     #include <fcntl.h>
+    #include <fstream>
     #include <hip/hip_runtime.h>
     #include <iostream>
     #include <mpi.h>
+    #include <sstream>
+    #include <sys/stat.h>
     #include <unistd.h>
 
 namespace MPIHelpers
 {
+namespace
+{
+    std::string sliceFromOffset(const std::string& full, std::uintmax_t off)
+    {
+        if(off >= full.size())
+        {
+            return {};
+        }
+        return full.substr(static_cast<std::size_t>(off));
+    }
+} // namespace
+
 
 // ============================================================================
 // FileDescriptor Implementation
@@ -326,6 +342,170 @@ std::optional<RankLogConfig> setupRankLogging(int rank)
     std::setvbuf(stderr, nullptr, _IONBF, 0);
 
     return config;
+}
+
+std::string getRankLogFilePath(int rank)
+{
+    return std::string{"rccl_test_rank_"} + std::to_string(rank) + ".log";
+}
+
+std::uintmax_t getFileSizeBytes(const std::string& path)
+{
+    struct stat st
+    {
+    };
+    if(::stat(path.c_str(), &st) != 0)
+    {
+        return 0;
+    }
+    return static_cast<std::uintmax_t>(st.st_size);
+}
+
+std::string readTextFile(const std::string& path)
+{
+    std::ifstream file(path);
+    if(!file.is_open())
+    {
+        TEST_WARN("Could not open file: %s", path.c_str());
+        return "";
+    }
+    std::ostringstream ss;
+    ss << file.rdbuf();
+    return ss.str();
+}
+
+std::string readRankLogFile(int rank)
+{
+    std::fflush(stdout);
+    std::fflush(stderr);
+    return readTextFile(getRankLogFilePath(rank));
+}
+
+TestLogAssertionOptions makeNcclDebugFileAssertionOptions(int mpi_rank)
+{
+    TestLogAssertionOptions o;
+    o.mpi_rank                  = mpi_rank;
+    o.capture_nccl_debug_file   = true;
+    o.read_per_rank_stderr_log = false;
+    return o;
+}
+
+TestLogAssertionOptions makePerRankStderrAssertionOptions(int mpi_rank)
+{
+    TestLogAssertionOptions o;
+    o.mpi_rank                  = mpi_rank;
+    o.capture_nccl_debug_file   = false;
+    o.read_per_rank_stderr_log = true;
+    return o;
+}
+
+TestLogAssertionOptions makeCombinedAssertionLogOptions(int mpi_rank)
+{
+    TestLogAssertionOptions o;
+    o.mpi_rank                  = mpi_rank;
+    o.capture_nccl_debug_file   = true;
+    o.read_per_rank_stderr_log = true;
+    return o;
+}
+
+TestLogAssertionContext::TestLogAssertionContext(const TestLogAssertionOptions& opts)
+    : opts_(opts)
+    , capture_nccl_(opts.capture_nccl_debug_file)
+    , read_per_rank_(opts.read_per_rank_stderr_log)
+{
+    const int rank = opts.mpi_rank;
+
+    if(capture_nccl_)
+    {
+        if(opts_.nccl_debug_file_path.empty())
+        {
+            nccl_path_ = std::string{"/tmp/rccl_assert_nccl_rank_"} + std::to_string(rank) + "_pid_"
+                         + std::to_string(::getpid()) + ".log";
+            auto_nccl_path_ = true;
+        }
+        else
+        {
+            nccl_path_      = opts_.nccl_debug_file_path;
+            auto_nccl_path_ = false;
+        }
+
+        const char* prev = std::getenv("NCCL_DEBUG_FILE");
+        if(prev != nullptr)
+        {
+            saved_nccl_debug_env_     = prev;
+            saved_nccl_debug_present_ = true;
+        }
+        if(::setenv("NCCL_DEBUG_FILE", nccl_path_.c_str(), 1) != 0)
+        {
+            TEST_WARN("Rank %d: setenv NCCL_DEBUG_FILE failed", rank);
+        }
+        else
+        {
+            env_modified_ = true;
+        }
+
+        if(opts_.isolate_new_output)
+        {
+            nccl_start_offset_ = getFileSizeBytes(nccl_path_);
+        }
+    }
+
+    if(read_per_rank_)
+    {
+        if(opts_.isolate_new_output)
+        {
+            std::fflush(stdout);
+            std::fflush(stderr);
+            per_rank_start_offset_ = getFileSizeBytes(getRankLogFilePath(rank));
+        }
+    }
+}
+
+TestLogAssertionContext::~TestLogAssertionContext()
+{
+    if(env_modified_)
+    {
+        if(saved_nccl_debug_present_)
+        {
+            (void)::setenv("NCCL_DEBUG_FILE", saved_nccl_debug_env_.c_str(), 1);
+        }
+        else
+        {
+            (void)::unsetenv("NCCL_DEBUG_FILE");
+        }
+    }
+
+    if(capture_nccl_ && !nccl_path_.empty())
+    {
+        const bool unlink_it = (auto_nccl_path_ && opts_.unlink_auto_generated_nccl_path)
+                               || (!auto_nccl_path_ && opts_.unlink_explicit_nccl_path);
+        if(unlink_it)
+        {
+            (void)::unlink(nccl_path_.c_str());
+        }
+    }
+}
+
+std::string TestLogAssertionContext::readNcclDebugLog() const
+{
+    if(!capture_nccl_)
+    {
+        return {};
+    }
+    const std::string full = readTextFile(nccl_path_);
+    return opts_.isolate_new_output ? sliceFromOffset(full, nccl_start_offset_) : full;
+}
+
+std::string TestLogAssertionContext::readPerRankStderrLog() const
+{
+    if(!read_per_rank_)
+    {
+        return {};
+    }
+    std::fflush(stdout);
+    std::fflush(stderr);
+    const std::string full = readTextFile(getRankLogFilePath(opts_.mpi_rank));
+    return opts_.isolate_new_output ? sliceFromOffset(full, per_rank_start_offset_) : full;
 }
 
 void restoreRankLogging(RankLogConfig& config)

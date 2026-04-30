@@ -25,7 +25,7 @@
 #include "single_heap.hpp"
 
 #include <sstream>
-#include "util.hpp"
+#include "log.hpp"
 
 #include "dlmalloc.hpp"
 #include "default_allocator.hpp"
@@ -45,13 +45,17 @@ SingleHeap::SingleHeap() {
     heap_mem_ = new HeapMemoryType<HIPAllocatorUncached>(envvar::heap_size.get_value());
   }
 #if defined USE_HEAP_DEVICE_VMM_POSIX
-  else if (allocator->type == AllocatorTypeVMM) {
+  else if (allocator->type == AllocatorTypeVMMPosix) {
     heap_mem_ = new HeapMemoryType<HIPAllocatorVMMPosixFd>(envvar::heap_size.get_value());
   }
 #endif
+#if defined USE_HEAP_DEVICE_VMM_FABRIC
+  else if (allocator->type == AllocatorTypeVMMFabric) {
+    heap_mem_ = new HeapMemoryType<HIPAllocatorVMMFabric>(envvar::heap_size.get_value());
+  }
+#endif
   else {
-    printf("Unknown allocator type\n");
-    abort();
+    LOG_ERROR_ABORT("Unknown allocator type");
   }
   assert(heap_mem_ != nullptr);
 
@@ -63,13 +67,17 @@ SingleHeap::SingleHeap() {
     strat_ = new DLAllocatorStrategy<HeapMemoryType<HIPAllocatorUncached>>(reinterpret_cast<HeapMemoryType<HIPAllocatorUncached> *>(heap_mem_));
   }
 #if defined USE_HEAP_DEVICE_VMM_POSIX
-  else if (heap_mem_->type_ == AllocatorTypeVMM){
+  else if (heap_mem_->type_ == AllocatorTypeVMMPosix){
     strat_ = new DLAllocatorStrategy<HeapMemoryType<HIPAllocatorVMMPosixFd>>(reinterpret_cast<HeapMemoryType<HIPAllocatorVMMPosixFd> *>(heap_mem_));
   }
 #endif
+#if defined USE_HEAP_DEVICE_VMM_FABRIC
+  else if (heap_mem_->type_ == AllocatorTypeVMMFabric){
+    strat_ = new DLAllocatorStrategy<HeapMemoryType<HIPAllocatorVMMFabric>>(reinterpret_cast<HeapMemoryType<HIPAllocatorVMMFabric> *>(heap_mem_));
+  }
+#endif
   else {
-    printf("Unknown allocator type\n");
-    abort();
+    LOG_ERROR_ABORT("Unknown allocator type");
   }
 }
 
@@ -87,7 +95,7 @@ void SingleHeap::malloc(void** ptr, size_t size) {
   strat_->alloc(reinterpret_cast<char**>(ptr), size);
 }
 
-__device__ void SingleHeap::malloc(void** ptr, size_t size) {}
+__device__ void SingleHeap::malloc([[maybe_unused]] void** ptr, [[maybe_unused]] size_t size) {}
 
 void SingleHeap::free(void* ptr) {
   if (!ptr) {
@@ -96,11 +104,11 @@ void SingleHeap::free(void* ptr) {
   strat_->free(reinterpret_cast<char*>(ptr));
 }
 
-__device__ void SingleHeap::free(void* ptr) {}
+__device__ void SingleHeap::free([[maybe_unused]] void* ptr) {}
 
-void* SingleHeap::realloc(void* ptr, size_t size) { return nullptr; }
+void* SingleHeap::realloc([[maybe_unused]] void* ptr, [[maybe_unused]] size_t size) { return nullptr; }
 
-void* SingleHeap::malign(size_t alignment, size_t size) { return nullptr; }
+void* SingleHeap::malign([[maybe_unused]] size_t alignment, [[maybe_unused]] size_t size) { return nullptr; }
 
 char* SingleHeap::get_base_ptr() { return heap_mem_->get_ptr(); }
 

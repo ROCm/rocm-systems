@@ -59,7 +59,7 @@
 TestAPISupportRead::TestAPISupportRead() : TestBase() {
   set_title("RSMI API Support Read Test");
   set_description(
-      "This test verifies that the supported APIs are corretly "
+      "This test verifies that the supported APIs are correctly "
       "identified.");
 }
 

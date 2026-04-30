@@ -152,11 +152,6 @@ class MemoryAllocator {
    * @brief a hip-specific free function
    */
   std::function<hipError_t(void*)> _hip_free{nullptr};
-
-  /**
-   * @brief a hip-specific return code
-   */
-  hipError_t _hip_return_value{hipSuccess};
 };
 
 }  // namespace rocshmem

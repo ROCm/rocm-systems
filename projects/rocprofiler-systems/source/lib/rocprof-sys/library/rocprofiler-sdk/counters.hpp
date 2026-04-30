@@ -1,24 +1,5 @@
-// MIT License
-//
-// Copyright (c) 2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -65,8 +46,6 @@ using counter_track_type   = ::perfetto::CounterTrack;
 
 struct counter_event
 {
-    ROCPROFSYS_DEFAULT_OBJECT(counter_event)
-
     explicit counter_event(counter_dispatch_record&& _v)
     : record{ _v }
     {}
@@ -87,6 +66,7 @@ struct counter_storage
     std::string                           metric_description = {};
     std::string                           storage_name       = {};
     std::string                           track_name         = {};
+    tim::manager::pointer_t               manager            = {};
     std::unique_ptr<counter_storage_type> storage            = {};
     std::unique_ptr<counter_track_type>   track              = {};
 
@@ -108,6 +88,8 @@ struct counter_storage
     void operator()(const counter_event& _event, timing_interval _timing,
                     scope::config _scope = scope::get_default()) const;
 
+    void write_zero(rocprofiler_timestamp_t timestamp) const;
+
     static void write(counter_storage_type* storage, const std::string& metric_name,
                       const std::string& metric_description);
 };
@@ -126,8 +108,6 @@ struct set_storage<::rocprofsys::rocprofiler_sdk::counter_data_tracker>
     using storage_array_t = std::array<storage<type>*, max_threads>;
     friend struct get_storage<rocprofsys::rocprofiler_sdk::counter_data_tracker>;
 
-    ROCPROFSYS_DEFAULT_OBJECT(set_storage)
-
     auto operator()(storage<type>* _v, size_t _idx) const { get().at(_idx) = _v; }
     auto operator()(type&, size_t) const {}
     auto operator()(storage<type>* _v) const { get().fill(_v); }
@@ -144,8 +124,6 @@ template <>
 struct get_storage<::rocprofsys::rocprofiler_sdk::counter_data_tracker>
 {
     using type = ::rocprofsys::rocprofiler_sdk::counter_data_tracker;
-
-    ROCPROFSYS_DEFAULT_OBJECT(get_storage)
 
     auto operator()(const type&) const
     {

@@ -521,8 +521,11 @@ Examples:
         default=False,
         action="store_true",
         help=(
-            "\t\t\tRetain the large raw rocpd database in workload directory.\n"
-            "\t\t\tThis option requires --format-rocprof-output rocpd."
+            "\t\t\t(DEPRECATED) Retain the large raw rocpd database "
+            "in workload directory.\n"
+            "\t\t\tThis option requires --format-rocprof-output rocpd.\n"
+            "\t\t\t --retain-rocpd-output is deprecated. .db files will "
+            "be retained by default in a future release."
         ),
     )
 
@@ -902,6 +905,19 @@ Examples:
     )
     analyze_advanced_group.add_argument(
         "-g", dest="debug", action="store_true", help="\t\tDebug single metric."
+    )
+    analyze_advanced_group.add_argument(
+        "--view",
+        dest="view",
+        metavar="NAME",
+        choices=["table"],  # future: e.g. "bar" for additional TTY views
+        default=None,
+        help=(
+            "\t\tTTY output view. "
+            "table: force plain tables and ignore cli_style from YAML "
+            "(e.g. mem_chart, Roofline charts as tables). "
+            "Additional views may be added in future releases."
+        ),
     )
     analyze_advanced_group.add_argument(
         "--dependency",

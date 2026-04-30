@@ -88,6 +88,7 @@ class IPCImplSimpleCoarse : public ::testing::TestWithParam<std::tuple<int, int,
             hip_allocator_.deallocate(ipc_impl_dptr_);
         }
         ipc_impl_.ipcHostStop();
+        delete mpi_;
         MPIInstance::mpilib_dl_close();
     }
 
@@ -101,7 +102,7 @@ class IPCImplSimpleCoarse : public ::testing::TestWithParam<std::tuple<int, int,
         WRITE = 1
     };
 
-    virtual void copy(TestType test, dim3 grid, dim3 block) {
+    virtual void copy([[maybe_unused]] TestType test, [[maybe_unused]] dim3 grid, [[maybe_unused]] dim3 block) {
         FAIL();
     }
 
