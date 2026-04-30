@@ -32,6 +32,7 @@ add_executable(
     amdcuid_test
     unit/cuid_api_test.cc
     unit/cuid_misc_test.cc
+    unit/gim_util_test.cc
     functional/cuid_reverse_lookup_test.cc
 )
 

@@ -23,11 +23,13 @@
 #include "cuid_gpu.h"
 #include "cuid_file.h"
 #include "cuid_util.h"
+#include "gim_util.h"
 #include "pci_util.h"
 #include <cstring>
 #include <dirent.h>
 #include <fstream>
 #include <iostream>
+#include <set>
 #include <sstream>
 #include <sys/types.h>
 #include <unistd.h>
@@ -69,27 +71,66 @@ static std::string resolve_render_node(const std::string &card_path) {
 }
 
 amdcuid_status_t CuidGpu::discover(std::vector<DevicePtr> &gpus) {
+  // Track BDFs we've already added so the GIM enumeration below doesn't
+  // create duplicates of GPUs that are also visible via /sys/class/drm.
+  std::set<std::string> seen_bdfs;
+
   const char *drm_path = "/sys/class/drm";
   DIR *dir = opendir(drm_path);
-  if (!dir)
-    return AMDCUID_STATUS_UNSUPPORTED;
+  if (dir != nullptr) {
+    struct dirent *entry;
+    while ((entry = readdir(dir)) != NULL) {
+      // Use card entries (e.g., card0, card1) which are always present for DRM
+      // devices, unlike renderD nodes which may be absent with certain drivers
+      // (e.g., GIM) or for non-AMD GPUs.
+      if (is_card_entry(entry->d_name)) {
+        std::string card_name(entry->d_name);
+        std::string device_path =
+            std::string(drm_path) + "/" + card_name + "/device";
+        amdcuid_gpu_info info = {};
+        discover_single(&info, device_path);
+        if (!info.bdf.empty()) {
+          seen_bdfs.insert(info.bdf);
+        }
+        gpus.emplace_back(std::make_shared<CuidGpu>(info));
+      }
+    }
+    closedir(dir);
+  }
 
-  struct dirent *entry;
-  while ((entry = readdir(dir)) != NULL) {
-    // Use card entries (e.g., card0, card1) which are always present for DRM
-    // devices, unlike renderD nodes which may be absent with certain drivers
-    // (e.g., GIM) or for non-AMD GPUs.
-    if (is_card_entry(entry->d_name)) {
-      std::string card_name(entry->d_name);
-      std::string device_path =
-          std::string(drm_path) + "/" + card_name + "/device";
-      amdcuid_gpu_info info = {};
-      discover_single(&info, device_path);
-
-      gpus.emplace_back(std::make_shared<CuidGpu>(info));
+  // When the GIM driver is loaded, GPUs may not show up under /sys/class/drm
+  // at all. Enumerate them via the GIM SMI ioctl interface and add any BDFs
+  // we have not already discovered.
+  if (cuid::gim::GimClient::is_available()) {
+    cuid::gim::GimClient client;
+    std::vector<cuid::gim::GimDeviceEntry> gim_devices;
+    if (client.get_devices(gim_devices) == AMDCUID_STATUS_SUCCESS) {
+      for (const auto &dev : gim_devices) {
+        if (dev.bdf.empty() || seen_bdfs.count(dev.bdf) > 0) {
+          continue;
+        }
+        std::string sys_device_path = "/sys/bus/pci/devices/" + dev.bdf;
+        amdcuid_gpu_info info = {};
+        discover_single(&info, sys_device_path);
+        // Ensure BDF is populated even if the sysfs node is missing entirely;
+        // discover_single relies on the device symlink which may not exist
+        // for GIM-only devices.
+        if (info.bdf.empty()) {
+          info.bdf = dev.bdf;
+        }
+        if (info.render_node.empty()) {
+          info.render_node = sys_device_path;
+        }
+        info.header.device_type = AMDCUID_DEVICE_TYPE_GPU;
+        seen_bdfs.insert(dev.bdf);
+        gpus.emplace_back(std::make_shared<CuidGpu>(info));
+      }
     }
   }
-  closedir(dir);
+
+  if (dir == nullptr && seen_bdfs.empty()) {
+    return AMDCUID_STATUS_UNSUPPORTED;
+  }
   return AMDCUID_STATUS_SUCCESS;
 }
 
@@ -197,6 +238,40 @@ amdcuid_status_t CuidGpu::discover_single(amdcuid_gpu_info *gpu_info,
   info.bdf = bdf;
   info.render_node = full_device_node;
 
+  // Final fallback: when sysfs and PCI config space were both unable to
+  // populate the core PCI identifiers (typical of hosts running the GIM
+  // SR-IOV driver where the PCI device files are not exposed to userspace),
+  // query the same fields via the GIM SMI ioctl interface.
+  const bool needs_gim_fallback = !info.bdf.empty() &&
+                                  cuid::gim::GimClient::is_available() &&
+                                  (info.header.fields.gpu.vendor_id == 0 ||
+                                   info.header.fields.gpu.device_id == 0);
+  if (needs_gim_fallback) {
+    cuid::gim::GimClient client;
+    cuid::gim::GimAsicInfo asic;
+    if (client.get_asic_info_for_bdf(info.bdf, asic) ==
+        AMDCUID_STATUS_SUCCESS) {
+      if (info.header.fields.gpu.vendor_id == 0) {
+        info.header.fields.gpu.vendor_id =
+            static_cast<uint16_t>(asic.vendor_id);
+      }
+      if (info.header.fields.gpu.device_id == 0) {
+        info.header.fields.gpu.device_id =
+            static_cast<uint16_t>(asic.device_id);
+      }
+      if (info.header.fields.gpu.revision_id == 0) {
+        info.header.fields.gpu.revision_id =
+            static_cast<uint8_t>(asic.rev_id);
+      }
+      // pci_class is not exposed by the GIM ASIC info; default to the
+      // standard PCI display-controller class (0x0300) so consumers do not
+      // see an all-zero class identifier for GIM-only GPUs.
+      if (info.header.fields.gpu.pci_class == 0) {
+        info.header.fields.gpu.pci_class = 0x0300;
+      }
+    }
+  }
+
   *gpu_info = info;
 
   return AMDCUID_STATUS_SUCCESS;
@@ -238,23 +313,37 @@ CuidGpu::get_hardware_fingerprint(uint64_t &fingerprint) const {
     uint16_t offset = 0;
     amdcuid_status_t status =
         PciUtil::get_pci_cap_offset(m_info.bdf, 0x03, offset);
-    if (status != AMDCUID_STATUS_SUCCESS) {
-      return status;
+    if (status == AMDCUID_STATUS_SUCCESS) {
+      uint8_t fingerprint_size = 8;
+      uint8_t *fingerprint_buffer = new uint8_t[fingerprint_size];
+      status = PciUtil::read_pci_config_space(m_info.bdf, fingerprint_buffer,
+                                              fingerprint_size, offset);
+      if (status == AMDCUID_STATUS_SUCCESS) {
+        // pcie config file is little endian, so need to convert to big endian
+        fingerprint = PciUtil::le64_to_be64(
+            *reinterpret_cast<uint64_t *>(fingerprint_buffer));
+        delete[] fingerprint_buffer;
+        return AMDCUID_STATUS_SUCCESS;
+      }
+      delete[] fingerprint_buffer;
     }
 
-    uint8_t fingerprint_size = 8;
-    uint8_t *fingerprint_buffer = new uint8_t[fingerprint_size];
-    status = PciUtil::read_pci_config_space(m_info.bdf, fingerprint_buffer,
-                                            fingerprint_size, offset);
-    if (status != AMDCUID_STATUS_SUCCESS) {
-      fingerprint = 0;
-      delete[] fingerprint_buffer;
-      return status;
+    // PCI config space failed (or DSN capability is unavailable). For hosts
+    // running the GIM SR-IOV driver, sysfs PCI files may not exist at all,
+    // so fall back to the ASIC serial reported by the GIM SMI ioctl.
+    if (!m_info.bdf.empty() && cuid::gim::GimClient::is_available()) {
+      cuid::gim::GimClient client;
+      cuid::gim::GimAsicInfo asic;
+      if (client.get_asic_info_for_bdf(m_info.bdf, asic) ==
+              AMDCUID_STATUS_SUCCESS &&
+          cuid::gim::GimClient::parse_asic_serial(asic.asic_serial,
+                                                  fingerprint)) {
+        return AMDCUID_STATUS_SUCCESS;
+      }
     }
-    // pcie config file is little endian, so need to convert to big endian
-    fingerprint = PciUtil::le64_to_be64(
-        *reinterpret_cast<uint64_t *>(fingerprint_buffer));
-    delete[] fingerprint_buffer;
+
+    fingerprint = 0;
+    return AMDCUID_STATUS_HW_FINGERPRINT_NOT_FOUND;
   } else {
     // partitioned device without unique_id file cannot get fingerprint
     fingerprint = 0;
