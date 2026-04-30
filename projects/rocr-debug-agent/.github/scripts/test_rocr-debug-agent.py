@@ -28,7 +28,13 @@ def parse_arguments() -> argparse.Namespace:
         epilog="""
 Environment Variables:
   OUTPUT_ARTIFACTS_DIR     ROCm tree root directory (optional)
+  ROCM_PATH                ROCm installation path (used with --try-rocm-path)
         """,
+    )
+    parser.add_argument(
+        "--try-rocm-path",
+        action="store_true",
+        help="Use ROCM_PATH environment variable as ROCm tree root (fatal error if path cannot be resolved; takes priority over OUTPUT_ARTIFACTS_DIR).",
     )
     parser.add_argument(
         "--max-retries",
@@ -84,13 +90,18 @@ def validate_path(path: Path, path_type: str, must_exist: bool = True) -> Path:
         sys.exit(1)
 
 
-def get_rocm_tree_root() -> Path:
+def get_rocm_tree_root(try_rocm_path: bool = False) -> Path:
     """
     Determine the ROCm tree root directory.
 
     Priority:
-    1. Use OUTPUT_ARTIFACTS_DIR environment variable if set
-    2. Derive from script location (go up 2 directory levels)
+    1. If try_rocm_path is True: Use ROCM_PATH environment variable if set
+       (fatal error if path can't be resolved)
+    2. If ROCM_PATH is not set: Use OUTPUT_ARTIFACTS_DIR environment variable if set
+    3. Derive from script location (go up 2 directory levels)
+
+    Args:
+        try_rocm_path: If True, use ROCM_PATH with fatal error on resolution failure.
 
     Returns:
         Path to ROCm tree root.
@@ -98,8 +109,17 @@ def get_rocm_tree_root() -> Path:
     Raises:
         SystemExit: If ROCm tree root cannot be determined.
     """
-    artifacts_dir_str = os.getenv("OUTPUT_ARTIFACTS_DIR")
+    # Try ROCM_PATH first if requested.
+    if try_rocm_path:
+        rocm_path_str = os.getenv("ROCM_PATH")
+        if rocm_path_str is not None:
+            logger.info("Using ROCM_PATH as ROCm tree root.")
+            # Fatal error if path can't be resolved when --try-rocm-path is used
+            rocm_root = validate_path(Path(rocm_path_str), "ROCM_PATH", must_exist=True)
+            return rocm_root
 
+    # Check OUTPUT_ARTIFACTS_DIR.
+    artifacts_dir_str = os.getenv("OUTPUT_ARTIFACTS_DIR")
     if artifacts_dir_str is not None:
         logger.info("Using OUTPUT_ARTIFACTS_DIR as ROCm tree root.")
         rocm_root = validate_path(
@@ -116,9 +136,12 @@ def get_rocm_tree_root() -> Path:
     return rocm_root
 
 
-def get_default_paths() -> Dict[str, Path]:
+def get_default_paths(try_rocm_path: bool = False) -> Dict[str, Path]:
     """
     Get default paths for test binary and script.
+
+    Args:
+        try_rocm_path: If True, try ROCM_PATH environment variable first.
 
     Returns:
         Dictionary containing 'test_bin' and 'test_script' paths.
@@ -126,7 +149,7 @@ def get_default_paths() -> Dict[str, Path]:
     Raises:
         SystemExit: If paths cannot be resolved or don't exist.
     """
-    rocm_root = get_rocm_tree_root()
+    rocm_root = get_rocm_tree_root(try_rocm_path)
 
     # Both test binary and script are in <root>/tests/rocm-debug-agent/
     test_dir = rocm_root / "tests" / "rocm-debug-agent"
@@ -310,7 +333,7 @@ def main() -> None:
 
     print_section("Path discovery")
     # Discover paths using automatic logic.
-    defaults = get_default_paths()
+    defaults = get_default_paths(try_rocm_path=args.try_rocm_path)
     rocr_debug_agent_test_bin = defaults["test_bin"]
     rocr_debug_agent_test_script = defaults["test_script"]
 
