@@ -21,19 +21,20 @@ def derive_rocm_path(script_dir: Path) -> Path:
     if script_dir.name == "tests" and script_dir.parent.name == "rocprofiler-systems":
         if script_dir.parent.parent.name == "share":
             return script_dir.parent.parent.parent
-    rocm_path = os.getenv("ROCM_PATH")
-    if rocm_path:
-        return Path(rocm_path)
-    return script_dir.parent.parent.parent
+    raise RuntimeError(
+        "Could not derive ROCM_PATH from an installed rocprofiler-systems test "
+        "layout. Set ROCM_PATH explicitly."
+    )
 
 
 def main() -> None:
     script_dir = Path(__file__).resolve().parent
-    rocm_path = Path(
-        os.environ.get("ROCM_PATH", derive_rocm_path(script_dir))
-    ).resolve()
-    rocm_bin_dir = Path(os.environ.get("ROCM_BIN_DIR", rocm_path / "bin")).resolve()
+    rocm_path_env = os.getenv("ROCM_PATH")
+    rocm_path = Path(rocm_path_env).resolve() if rocm_path_env else derive_rocm_path(script_dir)
+    rocm_bin_dir = Path(os.getenv("ROCM_BIN_DIR") or rocm_path / "bin").resolve()
     tests_dir = rocm_path / "share" / "rocprofiler-systems" / "tests"
+    if not tests_dir.is_dir():
+        raise FileNotFoundError(f"Could not find rocprofiler-systems tests: {tests_dir}")
 
     env = os.environ.copy()
     existing_path = env.get("PATH", "")
@@ -54,6 +55,8 @@ def main() -> None:
     )
 
     pytest_package_exec = tests_dir / "rocprofsys-tests.pyz"
+    if not pytest_package_exec.is_file():
+        raise FileNotFoundError(f"Could not find test package: {pytest_package_exec}")
     cmd = [
         sys.executable,
         str(pytest_package_exec),
