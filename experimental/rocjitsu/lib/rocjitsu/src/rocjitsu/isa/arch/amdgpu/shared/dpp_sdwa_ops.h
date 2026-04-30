@@ -19,6 +19,8 @@
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 
+#include <bit>
+#include <cmath>
 #include <cstdint>
 #include <memory>
 
@@ -164,6 +166,8 @@ inline int dpp_permute(uint32_t dpp_ctrl, int lane, int wf_size, bool &out_of_bo
 ///
 /// @param lane Lane index.
 /// @param row_mask 4-bit row mask (bit N enables row N, 16 lanes/row).
+///        For wave32, only bits 0-1 are meaningful (rows 0-1 cover lanes 0-31);
+///        bits 2-3 have no effect since no lanes map to rows 2-3.
 /// @param bank_mask 4-bit bank mask (bit N enables bank N, 4 lanes/bank).
 /// @returns True if the lane is disabled (should not be written).
 inline bool dpp_lane_masked(int lane, uint32_t row_mask, uint32_t bank_mask) {
@@ -317,6 +321,17 @@ inline uint32_t sdwa_dst_merge(uint32_t result, uint32_t old_dst, uint32_t dst_s
   else
     fill = 0;
   return fill | merged;
+}
+
+/// @brief Apply SDWA clamp to an ALU result.
+///
+/// For floating-point operations, clamps the result to [0.0, 1.0].
+/// The caller determines whether the operation is float or integer
+/// based on the instruction's semantic type.
+inline uint32_t sdwa_clamp_f32(uint32_t result) {
+  float f = std::bit_cast<float>(result);
+  f = std::fmin(std::fmax(f, 0.0f), 1.0f);
+  return std::bit_cast<uint32_t>(f);
 }
 
 } // namespace sdwa

@@ -41,8 +41,16 @@ void CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavefront *wf,
   // the legacy layout: kernarg at s[0:1].
   if (kcp != 0) {
     uint32_t idx = 0;
-    if (AMDHSA_BITS_GET(kcp, KERNEL_CODE_PROPERTY_ENABLE_SGPR_PRIVATE_SEGMENT_BUFFER))
+    if (AMDHSA_BITS_GET(kcp, KERNEL_CODE_PROPERTY_ENABLE_SGPR_PRIVATE_SEGMENT_BUFFER)) {
+      if (pkt.queue_ptr != 0) {
+        auto *q = reinterpret_cast<const amd_queue_t *>(pkt.queue_ptr);
+        cu->write_sgpr(sbase + idx + 0, q->scratch_resource_descriptor[0]);
+        cu->write_sgpr(sbase + idx + 1, q->scratch_resource_descriptor[1]);
+        cu->write_sgpr(sbase + idx + 2, q->scratch_resource_descriptor[2]);
+        cu->write_sgpr(sbase + idx + 3, q->scratch_resource_descriptor[3]);
+      }
       idx += 4;
+    }
     if (AMDHSA_BITS_GET(kcp, KERNEL_CODE_PROPERTY_ENABLE_SGPR_DISPATCH_PTR)) {
       cu->write_sgpr(sbase + idx, static_cast<uint32_t>(pkt.dispatch_ptr));
       cu->write_sgpr(sbase + idx + 1, static_cast<uint32_t>(pkt.dispatch_ptr >> 32));
@@ -61,8 +69,13 @@ void CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavefront *wf,
       idx += 2;
     }
     if (AMDHSA_BITS_GET(kcp, KERNEL_CODE_PROPERTY_ENABLE_SGPR_DISPATCH_ID)) {
-      cu->write_sgpr(sbase + idx, pkt.workgroup_id_offset);
-      cu->write_sgpr(sbase + idx + 1, 0);
+      uint64_t dispatch_id = 0;
+      if (pkt.queue_ptr != 0) {
+        auto *q = reinterpret_cast<const amd_queue_t *>(pkt.queue_ptr);
+        dispatch_id = q->write_dispatch_id;
+      }
+      cu->write_sgpr(sbase + idx, static_cast<uint32_t>(dispatch_id));
+      cu->write_sgpr(sbase + idx + 1, static_cast<uint32_t>(dispatch_id >> 32));
       idx += 2;
     }
     if (AMDHSA_BITS_GET(kcp, KERNEL_CODE_PROPERTY_ENABLE_SGPR_FLAT_SCRATCH_INIT))
@@ -79,24 +92,73 @@ void CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavefront *wf,
     }
   }
 
-  // System SGPR: workgroup_id_x after user SGPRs.
-  cu->write_sgpr(sbase + pkt.num_user_sgprs, global_wg_id);
+  // System SGPRs: workgroup_id_{x,y,z} placed sequentially after user SGPRs.
+  // Only the IDs whose enable bits are set in compute_pgm_rsrc2 are written.
+  // When kernel_code_properties is 0 (internal test dispatches), always write
+  // workgroup_id_x as a fallback since internal kernels expect it.
+  uint32_t sys_idx = pkt.num_user_sgprs;
+  {
+    uint32_t gx = pkt.grid_wgs_x > 0 ? pkt.grid_wgs_x : 1;
+    uint32_t gy = pkt.grid_wgs_y > 0 ? pkt.grid_wgs_y : 1;
+    bool kcp_zero = (pkt.kernel_code_properties == 0);
+    if (pkt.enable_wg_id_x || kcp_zero) {
+      uint32_t wg_x = (pkt.enable_wg_id_y || pkt.enable_wg_id_z) ? global_wg_id % gx : global_wg_id;
+      cu->write_sgpr(sbase + sys_idx++, wg_x);
+    }
+    if (pkt.enable_wg_id_y)
+      cu->write_sgpr(sbase + sys_idx++, (global_wg_id / gx) % gy);
+    if (pkt.enable_wg_id_z)
+      cu->write_sgpr(sbase + sys_idx++, global_wg_id / (gx * gy));
+  }
 
   util::Logger::vm([&](auto &os) {
     static thread_local uint64_t init_count = 0;
-    if (++init_count <= 5 || (init_count % 40) == 0)
-      os << std::format("CP: init_wf #{} cu={} wf={} global_wg={} s[{}]={} kernarg={:#x}",
-                        init_count, cu->name(), wf->wf_id(), global_wg_id,
-                        sbase + pkt.num_user_sgprs, global_wg_id, pkt.kernarg_addr);
+    if (++init_count <= 200 && wf_index_in_wg == 0)
+      os << std::format("CP: init_wf #{} cu={} global_wg={} s[{}]=({},{},{})"
+                        " grid_wgs=({},{},{}) enable_x={} enable_y={} enable_z={}",
+                        init_count, cu->name(), global_wg_id, pkt.num_user_sgprs,
+                        cu->read_sgpr(sbase + pkt.num_user_sgprs),
+                        pkt.enable_wg_id_y ? cu->read_sgpr(sbase + pkt.num_user_sgprs + 1) : 0u,
+                        pkt.enable_wg_id_z ? cu->read_sgpr(sbase + pkt.num_user_sgprs + 2) : 0u,
+                        pkt.grid_wgs_x, pkt.grid_wgs_y, pkt.grid_wgs_z, pkt.enable_wg_id_x,
+                        pkt.enable_wg_id_y, pkt.enable_wg_id_z);
   });
 
-  // Workitem ID: v0 = workitem_id_x within the workgroup.
-  // For multi-wavefront workgroups, each wavefront covers a different range:
-  // wf0: 0..wf_size-1, wf1: wf_size..2*wf_size-1, etc.
+  // Workitem IDs per AMDHSA ABI. The SPI decomposes the flat thread index
+  // into (x, y, z) using the AQL packet's workgroup dimensions.
+  // enable_vgpr_workitem_id (TIDIG_COMP_CNT from compute_pgm_rsrc2):
+  //   0 = v0 only (workitem_id_x)
+  //   1 = v0 + v1 (workitem_id_x, workitem_id_y)
+  //   2 = v0 + v1 + v2 (workitem_id_x, workitem_id_y, workitem_id_z)
+  // On CDNA3/4 (PackedTID): v0[9:0]=X, v0[19:10]=Y, v0[29:20]=Z.
+  // v1/v2 are not written. Kernel extracts components via bit masks.
   uint32_t vbase = wf->vgpr_alloc().base;
+  uint32_t sbase_dbg = wf->sgpr_alloc().base;
   uint32_t workitem_base = wf_index_in_wg * cu->wf_size();
-  for (uint32_t lane = 0; lane < cu->wf_size(); ++lane)
-    cu->write_vgpr(vbase, lane, workitem_base + lane);
+  uint32_t wg_x = pkt.workgroup_size_x > 0 ? pkt.workgroup_size_x : 1;
+  uint32_t wg_y = pkt.workgroup_size_y > 0 ? pkt.workgroup_size_y : 1;
+  uint32_t wg_xy = wg_x * wg_y;
+  for (uint32_t lane = 0; lane < cu->wf_size(); ++lane) {
+    uint32_t flat_id = workitem_base + lane;
+    uint32_t id_x = flat_id % wg_x;
+    uint32_t id_y = (flat_id / wg_x) % wg_y;
+    uint32_t id_z = flat_id / wg_xy;
+    if (packed_tid_ && pkt.enable_vgpr_workitem_id > 0) {
+      uint32_t packed = (id_x & 0x3FFu) | ((id_y & 0x3FFu) << 10) | ((id_z & 0x3FFu) << 20);
+      cu->write_vgpr(vbase, lane, packed);
+    } else {
+      cu->write_vgpr(vbase, lane, id_x);
+      if (pkt.enable_vgpr_workitem_id >= 1)
+        cu->write_vgpr(vbase + 1, lane, id_y);
+      if (pkt.enable_vgpr_workitem_id >= 2)
+        cu->write_vgpr(vbase + 2, lane, id_z);
+    }
+  }
+  util::Logger::vm([&](auto &os) {
+    os << std::format("{} wg[{}] wf[{}] init: wf_idx_in_wg={} vbase={} sbase={} workitem_base={}",
+                      cu->full_path(), global_wg_id, wf->wf_id(), wf_index_in_wg, vbase, sbase_dbg,
+                      workitem_base);
+  });
 
   // Scratch (private segment) setup.
   // Each wavefront gets a unique slice of scratch memory. The per-lane
@@ -261,20 +323,21 @@ bool CommandProcessor::step() {
       size_t cu_idx = (next_cu_ + attempt) % cus_.size();
       ComputeUnitCore *cu = cus_[cu_idx];
       cu->retire_halted_wfs();
-      if (!cu->can_accept_workgroup(pkt.wfs_per_workgroup))
+      if (!cu->can_accept_workgroup(pkt.wfs_per_workgroup, pkt.group_segment_fixed_size))
         continue;
+      uint32_t lds_base = cu->allocate_lds(pkt.group_segment_fixed_size);
       std::vector<Wavefront *> wg_wavefronts;
       wg_wavefronts.reserve(pkt.wfs_per_workgroup);
       for (uint32_t w = 0; w < pkt.wfs_per_workgroup; ++w) {
         Wavefront *wf =
-            cu->dispatch_wf(wg, pkt.kernel_entry_pc, pkt.sgprs_per_wf, pkt.vgprs_per_wf);
+            cu->dispatch_wf(global_wg_id, pkt.kernel_entry_pc, pkt.sgprs_per_wf, pkt.vgprs_per_wf);
         assert(wf && "dispatch_wf failed after can_accept_workgroup returned true");
+        wf->set_lds_base(lds_base);
         init_wavefront_regs(cu, wf, pkt, global_wg_id, w);
         wg_wavefronts.push_back(wf);
       }
-      plugin_group_->onAmdgpuDispatchWorkgroup(
-            global_wg_id, pkt.vgprs_per_wf, pkt.sgprs_per_wf,
-            std::span<Wavefront *>(wg_wavefronts));
+      plugin_group_->onAmdgpuDispatchWorkgroup(global_wg_id, pkt.vgprs_per_wf, pkt.sgprs_per_wf,
+                                               std::span<Wavefront *>(wg_wavefronts));
       next_cu_ = (cu_idx + 1) % cus_.size();
       wg_dispatched = true;
     }
@@ -480,51 +543,78 @@ CommandProcessor::read_kernel_descriptor(uint64_t kernel_object, bool host_acces
   return kd;
 }
 
-/// @brief Find the kernel symbol name from the code object containing kernel_object.
-/// @details Scans backward from kernel_object to find the ELF header, then
-/// parses .symtab to find the STT_FUNC symbol whose value matches the kernel
-/// descriptor offset within the code object.
-/// @brief Find the kernel symbol name from the code object containing kernel_object.
-/// @details Uses /proc/self/maps to verify readability, then scans backward
-/// from kernel_object to find the ELF header and parses the symbol table.
-static std::string find_kernel_symbol(uint64_t kernel_object, bool host_accessible) {
-  if (kernel_object == 0 || !host_accessible)
+/// @brief Find the kernel symbol name from the code object's AMDHSA metadata.
+/// @details Uses GpuMemory::find_host_range to locate the ELF base. Parses the
+/// PT_NOTE segment to find NT_AMDGPU_METADATA (msgpack-encoded). Extracts kernel
+/// names by scanning for ".kd" symbol strings in the raw msgpack data and matches
+/// to the dispatched kernel using the kernel descriptor fields (group_segment_fixed_size,
+/// private_segment_fixed_size) read from the kernel descriptor at kernel_object.
+static std::string find_kernel_symbol(uint64_t kernel_object, GpuMemory *mem) {
+  if (kernel_object == 0 || !mem)
     return {};
 
-  auto *ko = reinterpret_cast<const uint8_t *>(kernel_object);
+  auto [range_base, range_size] = mem->find_host_range(kernel_object);
+  if (range_base == 0)
+    return {};
 
-  // The kernel descriptor is inside a code object ELF loaded by ROCR.
-  // The ELF starts at the page-aligned base of the allocation.
-  // kernel_code_entry_byte_offset is typically 0x100, so the descriptor
-  // is 0x100 bytes into the ELF — the ELF header is at the page base.
-  auto *elf_base = reinterpret_cast<const uint8_t *>(kernel_object & ~0xFFFULL);
+  auto *elf_base = reinterpret_cast<const uint8_t *>(range_base);
   if (elf_base[0] != 0x7f || elf_base[1] != 'E' || elf_base[2] != 'L' || elf_base[3] != 'F')
     return {};
 
   auto *ehdr = reinterpret_cast<const Elf64_Ehdr *>(elf_base);
-  if (ehdr->e_shentsize < sizeof(Elf64_Shdr) || ehdr->e_shnum == 0 || ehdr->e_shoff == 0)
+  if (ehdr->e_phnum == 0 || ehdr->e_phoff == 0)
     return {};
 
-  auto *shdrs = reinterpret_cast<const Elf64_Shdr *>(elf_base + ehdr->e_shoff);
-  uint64_t kd_offset = static_cast<uint64_t>(ko - elf_base);
+  auto *phdrs = reinterpret_cast<const Elf64_Phdr *>(elf_base + ehdr->e_phoff);
 
-  for (uint32_t sh_type : {SHT_SYMTAB, SHT_DYNSYM}) {
-    for (uint16_t i = 0; i < ehdr->e_shnum; ++i) {
-      if (shdrs[i].sh_type != sh_type || shdrs[i].sh_link >= ehdr->e_shnum)
+  // Read the kernel descriptor at kernel_object for matching fields.
+  auto *ko = reinterpret_cast<const uint8_t *>(kernel_object);
+  uint32_t kd_group_seg = 0, kd_private_seg = 0;
+  std::memcpy(&kd_group_seg, ko, 4);
+  std::memcpy(&kd_private_seg, ko + 4, 4);
+
+  // Find PT_NOTE containing AMDHSA metadata.
+  for (uint16_t i = 0; i < ehdr->e_phnum; ++i) {
+    if (phdrs[i].p_type != PT_NOTE || phdrs[i].p_filesz < sizeof(Elf64_Nhdr))
+      continue;
+    if (phdrs[i].p_offset + phdrs[i].p_filesz > range_size)
+      continue;
+    auto *nhdr = reinterpret_cast<const Elf64_Nhdr *>(elf_base + phdrs[i].p_offset);
+    constexpr uint32_t NT_AMDGPU_METADATA = 32;
+    if (nhdr->n_type != NT_AMDGPU_METADATA)
+      continue;
+
+    uint32_t name_aligned = (nhdr->n_namesz + 3) & ~3u;
+    uint64_t desc_off = phdrs[i].p_offset + sizeof(Elf64_Nhdr) + name_aligned;
+    uint32_t desc_sz = nhdr->n_descsz;
+    if (desc_off + desc_sz > range_size)
+      continue;
+    auto *note = elf_base + desc_off;
+
+    // Scan raw msgpack for ".kd" symbol strings. Each kernel entry has a
+    // ".symbol" field containing "kernel_name.kd" as a length-prefixed string.
+    // We extract the kernel name and check if the corresponding kernel
+    // descriptor matches our dispatch (by group_segment_fixed_size and
+    // private_segment_fixed_size). For single-kernel dispatches, the first
+    // match is sufficient.
+    std::string best_name;
+    for (size_t pos = 2; pos + 2 < desc_sz; ++pos) {
+      if (note[pos] != '.' || note[pos + 1] != 'k' || note[pos + 2] != 'd')
         continue;
-      auto *strtab = reinterpret_cast<const char *>(elf_base + shdrs[shdrs[i].sh_link].sh_offset);
-      auto *syms = reinterpret_cast<const Elf64_Sym *>(elf_base + shdrs[i].sh_offset);
-      size_t nsyms = shdrs[i].sh_size / sizeof(Elf64_Sym);
-      for (size_t s = 0; s < nsyms; ++s) {
-        if (syms[s].st_value != kd_offset)
-          continue;
-        std::string_view name(strtab + syms[s].st_name);
-        if (name.ends_with(".kd"))
-          name.remove_suffix(3);
-        if (!name.empty())
-          return std::string(name);
-      }
+      size_t end = pos + 3;
+      if (end < desc_sz && note[end] >= 0x20 && note[end] < 0x7f)
+        continue;
+      size_t start = pos;
+      while (start > 0 && note[start - 1] >= 0x20 && note[start - 1] < 0x7f)
+        --start;
+      if (start == pos)
+        continue;
+      std::string_view sym(reinterpret_cast<const char *>(note + start), pos - start);
+      if (best_name.empty())
+        best_name = std::string(sym);
     }
+    if (!best_name.empty())
+      return best_name;
   }
   return {};
 }
@@ -607,68 +697,7 @@ void CommandProcessor::process_aql_packet(const hsa_kernel_dispatch_packet_t &pk
   uint32_t wave_size = cus_.empty() ? 64 : cus_[0]->wf_size();
   uint32_t wfs_per_wg = (wg_size + wave_size - 1) / wave_size;
 
-  // Fast-path: detect ROCR multi-WF blit copy kernels and execute them as memcpy.
-  // The ROCR CopyAligned blit with wfs_per_wg > 1 and kcp == 0x8 (only kernarg_ptr
-  // enabled) copies data from src to dst using a shader loop. For large copies
-  // (e.g., 27MB Tensile code object), this takes minutes in simulation. Detect the
-  // pattern and do a direct memcpy instead.
-  // Kernarg layout (from trace): dw[0:1]=src, dw[2:3]=dst, dw[8]=size_bytes.
-  // Fast-path for ROCR blit copy kernels: detect multi-WF copy dispatches with
-  // large grids and execute as memcpy. Only fires when both src and dst are
-  // host-mapped, and the data pattern matches a CopyAligned blit.
-  // Fast-path for ALL large blit copies (grid >= 4096), including single-WF
-  // CopyAligned blits. These are host-to-GPU or GPU-to-GPU copies dispatched
-  // by ROCR to load code objects and move tensor data.
-  // Fast-path for blit copy kernels with kcp=0x8 (only kernarg_ptr enabled).
-  // Covers both CopyAligned (single-WF, grid=16384) and multi-phase copy
-  // (multi-WF, grid=256+). Excludes Tensile GEMM kernels which have kcp
-  // with additional enable bits or different user_sgpr counts.
-  // Fast-path for blit copy kernels. Matches kcp=0x8 (only kernarg_ptr) with
-  // vgprs <= 24 (blits use 8-24 VGPRs, Tensile GEMM uses 64+).
-  // Fast-path for multi-WF blit copies only: wfs_per_wg >= 4 AND vgprs <= 16
-  // AND signal=0 AND user_sgprs >= 8. This catches the 27MB Tensile code object
-  // copy kernel but not CopyAligned (single-WF) or Tensile GEMM (high vgprs).
-  // Fast-path for blit copy kernels: kcp=0x8 (only kernarg_ptr), vgprs <= 24
-  // (blits use 8-24), and no scratch (private_segment_fixed_size == 0).
-  // This catches CopyAligned and multi-WF blits but not HIP compute kernels
-  // (which use scratch) or Tensile GEMM (which uses 64+ VGPRs).
-  // Fast-path for ROCR blit copy kernels. Detected by: kcp=0x8, no scratch,
-  // vgprs <= 24, AND workgroup_size is 64 or 256 (ROCR blit standard sizes).
-  // This excludes HIP compute kernels which use different workgroup sizes.
-  // Fast-path: skip ROCR blit copy kernels by doing memcpy directly.
-  // Detected by: kcp=0x8, vgprs 16-24 (copies, not fills which use 8),
-  // no scratch, and both src/dst are host-mapped.
-  if (false) { // DISABLED until SDMA model is ready
-    auto *ka = reinterpret_cast<const uint32_t *>(pkt.kernarg_address);
-    uint64_t src = static_cast<uint64_t>(ka[0]) | (static_cast<uint64_t>(ka[1]) << 32);
-    uint64_t dst = static_cast<uint64_t>(ka[2]) | (static_cast<uint64_t>(ka[3]) << 32);
-    uint32_t size = ka[8];
-    bool src_mapped = memory_ && size > 0 && size <= 256 * 1024 * 1024 &&
-                      memory_->is_host_mapped(src) && memory_->is_host_mapped(src + size - 1);
-    bool dst_mapped = memory_ && size > 0 && size <= 256 * 1024 * 1024 &&
-                      memory_->is_host_mapped(dst) && memory_->is_host_mapped(dst + size - 1);
-    if (src != 0 && dst != 0 && src_mapped && dst_mapped) {
-      std::memcpy(reinterpret_cast<void *>(dst), reinterpret_cast<const void *>(src), size);
-      util::Logger::vm("CP: blit fast-path memcpy 0x", std::hex, src, " -> 0x", dst, std::dec,
-                       " size=", size, " signal=0x", std::hex, pkt.completion_signal.handle);
-      // Fire completion signal if present (CopyAligned blits have signals).
-      if (pkt.completion_signal.handle != 0) {
-        constexpr uint32_t SIG_VAL_OFF = 8, MAILBOX_PTR_OFF = 16, EVENT_ID_OFF = 24;
-        auto *val = reinterpret_cast<int64_t *>(pkt.completion_signal.handle + SIG_VAL_OFF);
-        std::atomic_ref<int64_t>(*val).fetch_sub(1, std::memory_order_release);
-        auto mbp = *reinterpret_cast<uint64_t *>(pkt.completion_signal.handle + MAILBOX_PTR_OFF);
-        if (mbp != 0) {
-          auto eid = *reinterpret_cast<uint32_t *>(pkt.completion_signal.handle + EVENT_ID_OFF);
-          std::atomic_ref<uint64_t>(*reinterpret_cast<uint64_t *>(mbp))
-              .store(uint64_t(eid), std::memory_order_release);
-          if (interrupt_cb_)
-            interrupt_cb_(eid);
-        }
-      }
-      return;
-    }
-  }
-
+  uint32_t num_dims = pkt.setup & 0x3;
   uint32_t grid_wgs_x = pkt.workgroup_size_x > 0 ? pkt.grid_size_x / pkt.workgroup_size_x : 1;
   uint32_t grid_wgs_y = pkt.workgroup_size_y > 0 ? pkt.grid_size_y / pkt.workgroup_size_y : 1;
   uint32_t grid_wgs_z = pkt.workgroup_size_z > 0 ? pkt.grid_size_z / pkt.workgroup_size_z : 1;
@@ -683,6 +712,7 @@ void CommandProcessor::process_aql_packet(const hsa_kernel_dispatch_packet_t &pk
   dp.num_user_sgprs = user_sgprs;
   dp.kernel_code_properties = kd.kernel_code_properties;
   dp.private_segment_fixed_size = kd.private_segment_fixed_size;
+  dp.group_segment_fixed_size = std::max(kd.group_segment_fixed_size, pkt.group_segment_size);
 
   // For KFD dispatches, provide pointers the kernel may need via user SGPRs.
   if (host_accessible) {
@@ -695,6 +725,22 @@ void CommandProcessor::process_aql_packet(const hsa_kernel_dispatch_packet_t &pk
   }
 
   dp.workgroup_id_offset = workgroup_id_offset_;
+  // For WG ID decomposition, use the dispatch dimensionality (setup field).
+  // A 1D dispatch flattens the entire grid into workgroup_id_x.
+  dp.grid_wgs_x = (num_dims <= 1) ? total_wgs : grid_wgs_x;
+  dp.grid_wgs_y = (num_dims >= 2) ? grid_wgs_y : 1;
+  dp.grid_wgs_z = (num_dims >= 3) ? grid_wgs_z : 1;
+  dp.enable_wg_id_x =
+      AMDHSA_BITS_GET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X);
+  dp.enable_wg_id_y =
+      AMDHSA_BITS_GET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Y);
+  dp.enable_wg_id_z =
+      AMDHSA_BITS_GET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Z);
+  dp.enable_vgpr_workitem_id = static_cast<uint8_t>(
+      AMDHSA_BITS_GET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_ENABLE_VGPR_WORKITEM_ID));
+  dp.workgroup_size_x = pkt.workgroup_size_x;
+  dp.workgroup_size_y = pkt.workgroup_size_y;
+  dp.workgroup_size_z = pkt.workgroup_size_z;
   dp.completion_signal = pkt.completion_signal.handle;
   dp.host_signal = host_accessible;
   dp.ordered = host_accessible;
@@ -710,15 +756,24 @@ void CommandProcessor::process_aql_packet(const hsa_kernel_dispatch_packet_t &pk
     }
   });
   util::Logger::vm([&](auto &os) {
-    std::string sym = find_kernel_symbol(pkt.kernel_object, host_accessible);
+    std::string sym = find_kernel_symbol(pkt.kernel_object, memory_);
     os << std::format("CP: dispatch \"{}\" entry_pc={:#x} kernarg={:#x}"
                       " wgs={} wfs/wg={} grid=[{},{},{}] wg=[{},{},{}]"
-                      " sgprs={} vgprs={} user_sgprs={} kcp={:#x} signal={:#x}",
+                      " sgprs={} vgprs={} user_sgprs={} kcp={:#x} signal={:#x}"
+                      " setup={} grid_wgs=({},{},{})"
+                      " enable_vgpr_wid={} packed_tid={}",
                       sym.empty() ? "?" : sym, entry_pc,
                       reinterpret_cast<uint64_t>(pkt.kernarg_address), total_wgs, wfs_per_wg,
                       pkt.grid_size_x, pkt.grid_size_y, pkt.grid_size_z, pkt.workgroup_size_x,
                       pkt.workgroup_size_y, pkt.workgroup_size_z, dp.sgprs_per_wf, dp.vgprs_per_wf,
-                      dp.num_user_sgprs, dp.kernel_code_properties, dp.completion_signal);
+                      dp.num_user_sgprs, dp.kernel_code_properties, dp.completion_signal, num_dims,
+                      dp.grid_wgs_x, dp.grid_wgs_y, dp.grid_wgs_z, dp.enable_vgpr_workitem_id,
+                      packed_tid_);
+    os << std::format("\n[rj log VM] CP: LDS: kd.group_seg={} pkt.group_seg={} dp.group_seg={}"
+                      " kd.private_seg={} pkt.private_seg={}",
+                      kd.group_segment_fixed_size, pkt.group_segment_size,
+                      dp.group_segment_fixed_size, kd.private_segment_fixed_size,
+                      pkt.private_segment_size);
   });
 
   // Process AQL acquire fence: invalidate caches so the kernel sees the
@@ -726,8 +781,10 @@ void CommandProcessor::process_aql_packet(const hsa_kernel_dispatch_packet_t &pk
   // On real hardware the CP issues GL1_INV + GL2_INV for SYSTEM/AGENT scope.
   uint32_t acquire_scope = (pkt.header >> HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE) & 0x3;
   if (acquire_scope >= HSA_FENCE_SCOPE_AGENT && !cus_.empty()) {
-    cus_[0]->flush_all();
-    util::Logger::vm("CP: acquire fence scope=", acquire_scope, " → L1+L2 flush+invalidate");
+    for (auto *cu : cus_)
+      cu->flush_all();
+    util::Logger::vm("CP: acquire fence scope=", acquire_scope, " → L1+L2 flush+invalidate (",
+                     cus_.size(), " CUs)");
   }
 
   plugin_group_->onAmdgpuKernelDispatch(pkt.kernel_object, entry_pc);
@@ -779,13 +836,7 @@ void CommandProcessor::fetch_from_queue(HwQueue &queue) {
     }
     if (read_idx >= write_idx)
       return;
-    // Acknowledge all SDMA submissions by advancing read_ptr to match write_ptr.
-    // This unblocks ROCR's SDMA queue init. Full SDMA packet parsing is in
-    // process_sdma_ring() for when HSA_ENABLE_SDMA is enabled.
-    if (queue.host_accessible) {
-      std::atomic_ref<uint64_t>(*reinterpret_cast<uint64_t *>(queue.read_ptr_va))
-          .store(write_idx, std::memory_order_release);
-    }
+    process_sdma_ring(queue, read_idx, write_idx);
     return;
   }
 
@@ -1021,11 +1072,10 @@ void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint
   auto *ring = reinterpret_cast<const uint32_t *>(queue.ring_base_va);
   uint32_t ring_mask = (queue.ring_size / sizeof(uint32_t)) - 1;
 
-  // SDMA write/read pointers are in DWORD units on GFX9 hardware.
-  // ROCR writes cached_commit_index_ (which accumulates dword-sized packet sizes)
-  // to both *queue_wptr_ and *queue_doorbell_.
-  uint64_t rpos = read_idx;
-  uint64_t wpos = write_idx;
+  // ROCR SDMA queue pointers are in BYTE units. Convert to dword units for
+  // ring buffer indexing (each SDMA packet field is a 32-bit dword).
+  uint64_t rpos = read_idx / sizeof(uint32_t);
+  uint64_t wpos = write_idx / sizeof(uint32_t);
 
   auto dw = [&](uint64_t off) -> uint32_t { return ring[(rpos + off) & ring_mask]; };
 
@@ -1045,7 +1095,7 @@ void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint
         rpos = wpos;
         continue;
       }
-      uint32_t count = (dw(1) & 0x3FFFFF) + 1;
+      uint32_t count = (dw(1) & 0x3FFFFFF) + 1;
       uint64_t src = static_cast<uint64_t>(dw(3)) | (static_cast<uint64_t>(dw(4)) << 32);
       uint64_t dst = static_cast<uint64_t>(dw(5)) | (static_cast<uint64_t>(dw(6)) << 32);
       if (header & (1u << 28)) {
@@ -1077,17 +1127,17 @@ void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint
       break;
     }
     case sdma::OP_POLL_REGMEM: {
-      // Poll memory until (value & mask) == reference.
-      // In functional mode, the polled value should already be ready
-      // (no pipeline latency). Spin briefly if needed.
+      bool mem_poll = (header >> 31) & 1;
       uint64_t addr = static_cast<uint64_t>(dw(1)) | (static_cast<uint64_t>(dw(2)) << 32);
       uint32_t ref = dw(3);
       uint32_t mask = dw(4);
-      auto *ptr = reinterpret_cast<uint32_t *>(addr);
-      for (int i = 0; i < 10000; ++i) {
-        uint32_t val = std::atomic_ref<uint32_t>(*ptr).load(std::memory_order_acquire);
-        if ((val & mask) == ref)
-          break;
+      if (mem_poll && addr > 0x1000) {
+        auto *ptr = reinterpret_cast<uint32_t *>(addr);
+        for (int i = 0; i < 10000; ++i) {
+          uint32_t val = std::atomic_ref<uint32_t>(*ptr).load(std::memory_order_acquire);
+          if ((val & mask) == ref)
+            break;
+        }
       }
       pkt_dwords = sdma::POLL_REGMEM_SIZE;
       break;
@@ -1108,7 +1158,7 @@ void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint
     case sdma::OP_CONST_FILL: {
       uint64_t addr = static_cast<uint64_t>(dw(1)) | (static_cast<uint64_t>(dw(2)) << 32);
       uint32_t data = dw(3);
-      uint32_t count = (dw(4) & 0x3FFFFF) + 1;
+      uint32_t count = (dw(4) & 0x3FFFFFF) + 1;
       uint32_t fillsize = (header >> 30) & 0x3;
       auto *dst = reinterpret_cast<uint8_t *>(addr);
       if (fillsize == 2) { // 32-bit fill
@@ -1134,7 +1184,7 @@ void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint
         rpos = wpos;
         continue;
       }
-      uint32_t count = (dw(3) & 0x3FFFFF) + 1;
+      uint32_t count = (dw(3) & 0x3FFFFFF) + 1;
       uint64_t addr = static_cast<uint64_t>(dw(1)) | (static_cast<uint64_t>(dw(2)) << 32);
       if (addr > 0x1000 && rpos + 4 + count <= wpos) {
         auto *dst = reinterpret_cast<uint32_t *>(addr);
@@ -1155,10 +1205,9 @@ void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint
     rpos += pkt_dwords;
   }
 
-  // Update the read pointer to match what we consumed (in dword units).
   if (queue.host_accessible) {
     std::atomic_ref<uint64_t>(*reinterpret_cast<uint64_t *>(queue.read_ptr_va))
-        .store(rpos, std::memory_order_release);
+        .store(rpos * sizeof(uint32_t), std::memory_order_release);
   }
 }
 

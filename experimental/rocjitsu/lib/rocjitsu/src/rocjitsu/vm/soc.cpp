@@ -79,8 +79,7 @@ SoC::SoC(std::string name, const Config &config)
 }
 
 void SoC::set_plugin_group(std::shared_ptr<ExecutionPluginGroup> plugin_group) {
-  plugin_group_ = plugin_group ? plugin_group
-                               : ExecutionPluginGroup::empty_group();
+  plugin_group_ = plugin_group ? plugin_group : ExecutionPluginGroup::empty_group();
   for (auto *xcd : xcds_)
     xcd->set_plugin_group(plugin_group_);
 }

@@ -1,0 +1,32 @@
+name: "rocprofiler Formatting"
+on:
+  pull_request:
+
+jobs:
+  check-changes:
+    runs-on: ubuntu-24.04
+    outputs:
+      rocprofiler-compute: ${{ steps.filter.outputs.rocprofiler-compute }}
+      rocprofiler-sdk: ${{ steps.filter.outputs.rocprofiler-sdk }}
+      rocprofiler-systems: ${{ steps.filter.outputs.rocprofiler-systems }}
+    steps:
+      - uses: actions/checkout@v6
+      - id: filter
+        uses: dorny/paths-filter@v4
+        with:
+          filters: '.github/filters.yml'
+
+  rocprofiler-compute:
+    needs: check-changes
+    if: ${{ needs.check-changes.outputs.rocprofiler-compute == 'true' }}
+    uses: ./.github/workflows/rocprofiler-compute-formatting.yml
+
+  rocprofiler-sdk:
+    needs: check-changes
+    if: ${{ needs.check-changes.outputs.rocprofiler-sdk == 'true' }}
+    uses: ./.github/workflows/rocprofiler-sdk-formatting.yml
+
+  rocprofiler-systems:
+    needs: check-changes
+    if: ${{ needs.check-changes.outputs.rocprofiler-systems == 'true' }}
+    uses: ./.github/workflows/rocprofiler-systems-formatting.yml
