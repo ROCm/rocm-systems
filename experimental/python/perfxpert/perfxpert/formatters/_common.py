@@ -51,3 +51,58 @@ _CATEGORY_IDS = {
     "Memory Bandwidth": "ROCPD-MEMBW-001",
     "Performance": "ROCPD-INFO-001",
 }
+
+
+def _communication_capture_incomplete(communication):
+    if not communication:
+        return False
+    summary = communication.get("summary", {}) or {}
+    return bool(
+        communication.get("capture_incomplete", False)
+        or summary.get("capture_incomplete", False)
+    )
+
+
+def _communication_has_measured_metrics(communication):
+    if not communication:
+        return False
+    summary = communication.get("summary", {}) or {}
+    if "measured_metrics_available" in summary:
+        return bool(summary.get("measured_metrics_available"))
+
+    for collective in communication.get("collectives") or []:
+        try:
+            msg_bytes = float(collective.get("msg_bytes", 0) or 0)
+            duration_ns = float(collective.get("duration_ns", 0) or 0)
+        except (TypeError, ValueError):
+            continue
+        if msg_bytes > 0 and duration_ns > 0:
+            return True
+    return False
+
+
+def _communication_event_count(communication):
+    if not communication:
+        return 0
+    summary = communication.get("summary", {}) or {}
+    collectives = communication.get("collectives") or []
+    if (
+        _communication_capture_incomplete(communication)
+        and not _communication_has_measured_metrics(communication)
+    ):
+        return int(
+            summary.get("fallback_kernel_count")
+            or summary.get("op_count")
+            or len(collectives)
+            or 0
+        )
+    return int(summary.get("op_count") or len(collectives) or 0)
+
+
+def _should_render_communication(communication):
+    if not communication:
+        return False
+    return bool(
+        communication.get("collectives")
+        or _communication_capture_incomplete(communication)
+    )

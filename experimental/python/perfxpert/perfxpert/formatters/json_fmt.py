@@ -29,7 +29,7 @@ JSON formatting functions for PerfXpert analysis results.
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from ._common import _CATEGORY_IDS, _PERFXPERT_VERSION
+from ._common import _CATEGORY_IDS, _PERFXPERT_VERSION, _should_render_communication
 
 
 def _format_as_json(
@@ -164,7 +164,7 @@ def _format_as_json(
     # 0.3.2: RCCL / NIC ``communication`` section (Phase 10). Additive —
     # bumps over 0.3.1 but ATT (0.4.0) still trumps below so a trace with
     # both ATT data + RCCL data pins schema_version = 0.4.0.
-    if communication and communication.get("collectives"):
+    if _should_render_communication(communication):
         doc["communication"] = communication
         doc["schema_version"] = "0.3.2"
         doc["metadata"]["analysis_version"] = "0.3.2"

@@ -33,7 +33,14 @@ All public symbols are re-exported here for backward compatibility.
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from ._common import _CATEGORY_IDS, _PERFXPERT_VERSION
+from ._common import (
+    _CATEGORY_IDS,
+    _PERFXPERT_VERSION,
+    _communication_capture_incomplete,
+    _communication_event_count,
+    _communication_has_measured_metrics,
+    _should_render_communication,
+)
 from .json_fmt import (
     _build_hw_counters_json,
     _build_recommendations_json,
@@ -522,62 +529,96 @@ def format_analysis_output(
         lines.append("")
 
     # Communication (RCCL / NIC) — Phase 10
-    if communication and communication.get("collectives"):
+    if _should_render_communication(communication):
         lines.append("\u2501" * width)
         lines.append("COMMUNICATION (RCCL)".center(width))
         lines.append("\u2501" * width)
         lines.append("")
         _summary = communication.get("summary", {}) or {}
-        _op_count = _summary.get("op_count", 0)
+        _op_count = _communication_event_count(communication)
         _dominant = _summary.get("dominant_op") or "n/a"
         _avg_eff = _summary.get("avg_efficiency_pct", 0.0) or 0.0
         _overlap = _summary.get("overlap_pct", 0.0) or 0.0
         _peak = _summary.get("peak_bw_gbps")
         _peak_s = f"{_peak:.0f} GB/s" if _peak else "n/a"
         _ranks = _summary.get("ranks", 0)
-        lines.append(
-            f"  {_op_count} collective(s)  \u2014  dominant: {_dominant}  "
-            f"\u2014  ranks: {_ranks}"
-        )
-        lines.append(
-            f"  Peak busBW: {_peak_s}   Avg efficiency: {_avg_eff:.1f}%   "
-            f"Comm/Compute overlap: {_overlap:.1f}%"
-        )
-        if _summary.get("capture_incomplete"):
+        _has_measured_metrics = _communication_has_measured_metrics(communication)
+        _capture_incomplete = _communication_capture_incomplete(communication)
+        if _capture_incomplete and not _has_measured_metrics:
+            _observed = _op_count
+            _observed_ns = _summary.get("observed_total_duration_ns", 0) or 0
             lines.append(
-                "  [note] Capture incomplete \u2014 fell back to kernel-name regex."
+                f"  {_op_count} RCCL kernel fallback hit(s)  \u2014  "
+                f"dominant: {_dominant}  \u2014  ranks: {_ranks}"
             )
-        lines.append("")
-        # Box-drawn table.
-        hdr = (
-            f" {'Op':<16}  {'Bytes':>10}  {'Duration':>10}  "
-            f"{'Bus BW':>12}  {'Peak':>10}  {'Eff%':>6}  {'Ovlp%':>6}"
-        )
-        lines.append(hdr)
-        lines.append("\u2500" * width)
-        for c in communication["collectives"]:
-            mb = c.get("msg_bytes", 0) or 0
-            if mb >= 1e9:
-                mb_s = f"{mb / 1e9:.2f}GB"
-            elif mb >= 1e6:
-                mb_s = f"{mb / 1e6:.1f}MB"
-            elif mb >= 1e3:
-                mb_s = f"{mb / 1e3:.1f}KB"
+            lines.append(
+                "  Capture incomplete: RCCL kernels were detected, but RCCL "
+                "API arguments were not captured."
+            )
+            if _observed_ns > 0:
+                lines.append(
+                    f"  Observed fallback kernels: {_observed}   "
+                    f"Observed RCCL kernel time: {_observed_ns / 1e6:.2f} ms"
+                )
             else:
-                mb_s = f"{mb}B"
-            dur_ns = c.get("duration_ns", 0) or 0
-            dur_ms = dur_ns / 1e6
-            bw = c.get("effective_bw_gbps", 0) or 0
-            pk = c.get("peak_bw_gbps")
-            pk_s = f"{pk:.0f}" if pk else "-"
-            eff = c.get("efficiency_pct", 0) or 0
-            ov = c.get("overlap_ratio", 0) or 0
-            op_s = str(c.get("op_type", "?"))[:16]
+                lines.append(f"  Observed fallback kernels: {_observed}")
             lines.append(
-                f" {op_s:<16}  {mb_s:>10}  {dur_ms:>8.2f}ms  "
-                f"{bw:>9.2f}GB/s  {pk_s:>10}  {eff:>5.1f}%  {ov:>5.1f}%"
+                "  Per-collective bytes, bus bandwidth, and efficiency are "
+                "unavailable; metric table hidden."
             )
-        lines.append("")
+            _evidence = communication.get("collectives") or []
+            if _evidence:
+                lines.append("  Fallback evidence:")
+                lines.append(f"    {'Op':<16}  {'Observed duration':>18}")
+                for c in _evidence[:10]:
+                    _op_s = str(c.get("op_type", "?"))[:16]
+                    _dur_ms = (c.get("duration_ns", 0) or 0) / 1e6
+                    lines.append(f"    {_op_s:<16}  {_dur_ms:>15.2f} ms")
+            lines.append("")
+        else:
+            lines.append(
+                f"  {_op_count} collective(s)  \u2014  dominant: {_dominant}  "
+                f"\u2014  ranks: {_ranks}"
+            )
+            lines.append(
+                f"  Peak busBW: {_peak_s}   Avg efficiency: {_avg_eff:.1f}%   "
+                f"Comm/Compute overlap: {_overlap:.1f}%"
+            )
+            if _summary.get("capture_incomplete"):
+                lines.append(
+                    "  [note] Capture incomplete \u2014 fell back to kernel-name regex."
+                )
+            lines.append("")
+            # Box-drawn table.
+            hdr = (
+                f" {'Op':<16}  {'Bytes':>10}  {'Duration':>10}  "
+                f"{'Bus BW':>12}  {'Peak':>10}  {'Eff%':>6}  {'Ovlp%':>6}"
+            )
+            lines.append(hdr)
+            lines.append("\u2500" * width)
+            for c in communication["collectives"]:
+                mb = c.get("msg_bytes", 0) or 0
+                if mb >= 1e9:
+                    mb_s = f"{mb / 1e9:.2f}GB"
+                elif mb >= 1e6:
+                    mb_s = f"{mb / 1e6:.1f}MB"
+                elif mb >= 1e3:
+                    mb_s = f"{mb / 1e3:.1f}KB"
+                else:
+                    mb_s = f"{mb}B"
+                dur_ns = c.get("duration_ns", 0) or 0
+                dur_ms = dur_ns / 1e6
+                bw = c.get("effective_bw_gbps", 0) or 0
+                pk = c.get("peak_bw_gbps")
+                pk_s = f"{pk:.0f}" if pk else "-"
+                eff = c.get("efficiency_pct", 0) or 0
+                ov = c.get("overlap_ratio", 0) or 0
+                op_s = str(c.get("op_type", "?"))[:16]
+                lines.append(
+                    f" {op_s:<16}  {mb_s:>10}  {dur_ms:>8.2f}ms  "
+                    f"{bw:>9.2f}GB/s  {pk_s:>10}  {eff:>5.1f}%  {ov:>5.1f}%"
+                )
+            lines.append("")
 
     # Recommendations
     lines.append("\u2501" * width)

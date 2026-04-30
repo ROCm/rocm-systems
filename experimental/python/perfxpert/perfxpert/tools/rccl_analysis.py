@@ -15,7 +15,9 @@ Primary:  ``rocpd_region WHERE category='RCCL'`` JOINed with ``rocpd_arg``
 Fallback: when no RCCL regions exist but RCCL kernels do fire, match kernel
           names against the TraceLens regex — this is the "capture
           incomplete" path. The result's summary carries
-          ``capture_incomplete: true`` so formatters can surface a hint.
+          ``capture_incomplete: true`` and
+          ``measured_metrics_available: false`` so formatters can avoid
+          presenting zero-byte rows as measured communication metrics.
 
 Formulas
 --------
@@ -302,8 +304,9 @@ def _compute_overlap_ratio(conn: sqlite3.Connection) -> float:
 def _fallback_from_kernels(conn: sqlite3.Connection) -> List[Dict[str, Any]]:
     """Regex-based fallback when no ``category='RCCL'`` rows exist.
 
-    Returns a list with one synthetic entry per distinct RCCL kernel, with
-    zeroed message size (we have no arg table binding) but real durations.
+    Returns one synthetic entry per RCCL kernel hit. The fallback has kernel
+    timing but no RCCL arg binding, so its rows are useful for summary counts
+    but should not be rendered as measured per-collective metrics.
     """
     try:
         rows = conn.execute(
@@ -450,6 +453,15 @@ def _build_summary(
     capture_incomplete: bool,
 ) -> Dict[str, Any]:
     """Compact per-run summary for formatters / the Latency Specialist."""
+    measured_metrics_available = any(
+        (c.get("msg_bytes", 0) or 0) > 0
+        and (c.get("duration_ns", 0) or 0) > 0
+        for c in collectives
+    )
+    observed_total_duration_ns = int(
+        sum(int(c.get("duration_ns", 0) or 0) for c in collectives)
+    )
+
     if not collectives:
         return {
             "op_count": 0,
@@ -460,6 +472,7 @@ def _build_summary(
             "avg_efficiency_pct": 0.0,
             "overlap_pct": overlap_pct,
             "capture_incomplete": capture_incomplete,
+            "measured_metrics_available": measured_metrics_available,
         }
 
     # Dominant op by total time.
@@ -475,7 +488,7 @@ def _build_summary(
         total_eff += c["efficiency_pct"]
     dominant = max(by_op.items(), key=lambda kv: kv[1]["time_ns"])[0]
     n = len(collectives)
-    return {
+    summary = {
         "op_count": n,
         "ranks": n_ranks,
         "dominant_op": dominant,
@@ -484,7 +497,19 @@ def _build_summary(
         "avg_efficiency_pct": round(total_eff / n, 2),
         "overlap_pct": overlap_pct,
         "capture_incomplete": capture_incomplete,
+        "measured_metrics_available": measured_metrics_available,
     }
+    if capture_incomplete and not measured_metrics_available:
+        summary.update({
+            "fallback_kernel_count": n,
+            "observed_total_duration_ns": observed_total_duration_ns,
+            "incomplete_reason": (
+                "RCCL kernels were detected, but RCCL API region arguments "
+                "were not captured; message size, bus bandwidth, and "
+                "efficiency are unavailable."
+            ),
+        })
+    return summary
 
 
 __all__ = ["analyze_collectives"]

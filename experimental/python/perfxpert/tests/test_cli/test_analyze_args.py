@@ -12,12 +12,25 @@ This test suite asserts that the CLI surface maps `--format` to
 from __future__ import annotations
 
 import argparse
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
 from perfxpert import analyze
+from perfxpert.connection import PerfxpertConnection
 from perfxpert import output_config
+
+
+_FIXTURES = Path(__file__).resolve().parent.parent / "fixtures"
+
+
+def _require_fixture(path: Path) -> Path:
+    if not path.exists():
+        from tests.fixtures import _generate_rccl_fixture  # type: ignore
+
+        _generate_rccl_fixture.main()
+    return path
 
 
 def _build_parsed_args(argv):
@@ -316,3 +329,42 @@ def test_text_format_without_output_flags_stays_on_stdout(
 
     assert capsys.readouterr().out == "REPORT\n"
     assert list(tmp_path.iterdir()) == []
+
+
+def test_execute_agentic_preserves_incomplete_rccl_payload_in_text(
+    monkeypatch,
+    capsys,
+):
+    """End-to-end guard for the CLI plumbing that carries RCCL analysis into
+    the final report.
+
+    Formatter-only tests cannot catch regressions where
+    ``build_analysis_payload()`` finds communication data but
+    ``_format_agentic_output()`` is called without it.
+    """
+    from perfxpert import api as api_mod
+    from perfxpert import analyze as analyze_mod
+
+    monkeypatch.setenv("PERFXPERT_AIRGAP", "1")
+    monkeypatch.setattr(
+        api_mod,
+        "agent_root",
+        lambda **_kwargs: SimpleNamespace(
+            narrative="",
+            recommendations=[],
+            primary_bottleneck="mixed",
+            warnings=[],
+            metadata={},
+        ),
+    )
+
+    db = _require_fixture(_FIXTURES / "rccl_fallback.db")
+    with PerfxpertConnection([str(db)]) as conn:
+        analyze_mod._execute_agentic(conn, config=None, output_format="text")
+
+    out = capsys.readouterr().out
+    assert "COMMUNICATION (RCCL)" in out
+    assert "Capture incomplete" in out
+    assert "Observed RCCL kernel time: 1.00 ms" in out
+    assert "0B" not in out
+    assert "0.00GB/s" not in out

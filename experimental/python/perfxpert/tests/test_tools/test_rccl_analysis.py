@@ -48,6 +48,7 @@ def test_analyze_collectives_computes_busbw_allreduce():
     assert r["summary"]["dominant_op"] == "AllReduce"
     assert r["summary"]["op_count"] == 4
     assert r["summary"]["capture_incomplete"] is False
+    assert r["summary"]["measured_metrics_available"] is True
 
 
 def test_analyze_collectives_fallback_regex_marks_incomplete():
@@ -55,6 +56,10 @@ def test_analyze_collectives_fallback_regex_marks_incomplete():
     path = _require(_FIXTURES / "rccl_fallback.db")
     r = rccl_analysis.analyze_collectives(path, gfx_id="gfx942")
     assert r["summary"]["capture_incomplete"] is True
+    assert r["summary"]["measured_metrics_available"] is False
+    assert r["summary"]["fallback_kernel_count"] == len(r["collectives"])
+    assert r["summary"]["observed_total_duration_ns"] == 1_000_000
+    assert "bus bandwidth" in r["summary"]["incomplete_reason"]
     assert len(r["collectives"]) >= 1
     # msg_bytes is zero because the fallback has no arg binding
     assert all(c["msg_bytes"] == 0 for c in r["collectives"])

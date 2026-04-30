@@ -33,6 +33,12 @@ import os
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
+from ._common import (
+    _communication_capture_incomplete,
+    _communication_event_count,
+    _communication_has_measured_metrics,
+    _should_render_communication,
+)
 from ._att_flamegraph import _slug as _rec_slug
 from ._att_flamegraph import render_att_flamegraph
 from ._roofline_svg import render_roofline_svg
@@ -1100,30 +1106,50 @@ def _format_as_webview(
         html = html.replace("<!-- CAT_SECTION_PLACEHOLDER -->", "")
 
     # --- Communication (RCCL / NIC) section - Phase 10 ---
-    if communication and communication.get("collectives"):
+    if _should_render_communication(communication):
         comm = communication
         c_summary = comm.get("summary", {}) or {}
         c_ops = comm.get("collectives") or []
-        c_count = c_summary.get("op_count", len(c_ops))
+        c_count = _communication_event_count(comm)
         c_dominant = c_summary.get("dominant_op") or "n/a"
         c_overlap = float(c_summary.get("overlap_pct", 0.0) or 0.0)
         c_peak = c_summary.get("peak_bw_gbps")
         c_avg_bw = float(c_summary.get("avg_bw_gbps", 0.0) or 0.0)
         c_peak_s = f"{c_peak:.0f} GB/s" if c_peak else "n/a"
         c_ranks = int(c_summary.get("ranks", 0) or 0)
-        c_incomplete = bool(c_summary.get("capture_incomplete", False))
+        c_incomplete = _communication_capture_incomplete(comm)
+        c_has_measured_metrics = _communication_has_measured_metrics(comm)
+        c_count_label = (
+            "Fallback hits"
+            if c_incomplete and not c_has_measured_metrics
+            else "Ops"
+        )
 
+        if c_has_measured_metrics:
+            metric_pills = (
+                f'<span class="hpill"><span class="hpill-label">Avg busBW:</span>'
+                f'<span class="hpill-value">{c_avg_bw:.2f} GB/s</span></span>'
+                f'<span class="hpill"><span class="hpill-label">Peak:</span>'
+                f'<span class="hpill-value">{_h(c_peak_s)}</span></span>'
+            )
+        elif c_incomplete:
+            metric_pills = (
+                '<span class="hpill"><span class="hpill-label">Metrics:</span>'
+                '<span class="hpill-value">incomplete</span></span>'
+            )
+        else:
+            metric_pills = (
+                '<span class="hpill"><span class="hpill-label">Metrics:</span>'
+                '<span class="hpill-value">unavailable</span></span>'
+            )
         overview_html = (
             '<div class="comm-overview" style="display:flex;flex-wrap:wrap;'
             'gap:.75rem;margin-bottom:1rem;font-size:.92rem">'
-            f'<span class="hpill"><span class="hpill-label">Ops:</span>'
+            f'<span class="hpill"><span class="hpill-label">{c_count_label}:</span>'
             f'<span class="hpill-value">{c_count}</span></span>'
             f'<span class="hpill"><span class="hpill-label">Dominant:</span>'
             f'<span class="hpill-value">{_h(c_dominant)}</span></span>'
-            f'<span class="hpill"><span class="hpill-label">Avg busBW:</span>'
-            f'<span class="hpill-value">{c_avg_bw:.2f} GB/s</span></span>'
-            f'<span class="hpill"><span class="hpill-label">Peak:</span>'
-            f'<span class="hpill-value">{_h(c_peak_s)}</span></span>'
+            f"{metric_pills}"
             f'<span class="hpill"><span class="hpill-label">Ranks:</span>'
             f'<span class="hpill-value">{c_ranks}</span></span>'
             "</div>"
@@ -1140,87 +1166,141 @@ def _format_as_webview(
                 return f"{b / 1_024:.1f} KB"
             return f"{b} B"
 
-        comm_rows = []
-        for c in c_ops:
-            op = str(c.get("op_type", "?"))
-            mb = int(c.get("msg_bytes", 0) or 0)
-            dur_ns = int(c.get("duration_ns", 0) or 0)
-            bw = float(c.get("effective_bw_gbps", 0.0) or 0.0)
-            peak_v = c.get("peak_bw_gbps")
-            eff = float(c.get("efficiency_pct", 0.0) or 0.0)
-            ov = float(c.get("overlap_ratio", 0.0) or 0.0)
-            regime = str(c.get("regime", "") or "")
-            algo = str(c.get("algo_hint", "") or "")
-            eff_label = str(c.get("efficiency_label", "") or "")
-            if eff >= 70:
-                eff_color = "#44dd66"
-            elif eff >= 40:
-                eff_color = "#ff8800"
-            else:
-                eff_color = "#e84040"
-            bar_w = min(100.0, eff)
-            peak_s = f"{peak_v:.0f} GB/s" if peak_v else "\u2014"
-            comm_rows.append(
-                f"<tr>"
-                f'<td><code>{_h(op)}</code></td>'
-                f"<td>{_fmt_bytes_comm(mb)}</td>"
-                f"<td>{_fmt_ns(dur_ns)}</td>"
-                f"<td>"
-                f'<div class="btrack" style="width:120px;height:10px;'
-                f'background:#1a1a2e;border-radius:4px;overflow:hidden;'
-                f'display:inline-block;vertical-align:middle">'
-                f'<div class="bfill" style="width:{bar_w:.1f}%;height:100%;'
-                f'background:{eff_color};border-radius:4px"></div>'
-                f"</div>"
-                f' <span style="color:{eff_color};margin-left:.5rem">'
-                f"{bw:.2f} GB/s</span>"
-                f"</td>"
-                f"<td>{_h(peak_s)}</td>"
-                f'<td style="color:{eff_color};font-weight:600">'
-                f'{eff:.1f}% <span class="dim" style="font-size:.82rem">'
-                f"({_h(eff_label)})</span></td>"
-                f"<td>{ov:.1f}%</td>"
-                f'<td class="dim" style="font-size:.85rem">{_h(regime)} / '
-                f"{_h(algo)}</td>"
-                f"</tr>"
+        if c_has_measured_metrics:
+            comm_rows = []
+            for c in c_ops:
+                op = str(c.get("op_type", "?"))
+                mb = int(c.get("msg_bytes", 0) or 0)
+                dur_ns = int(c.get("duration_ns", 0) or 0)
+                bw = float(c.get("effective_bw_gbps", 0.0) or 0.0)
+                peak_v = c.get("peak_bw_gbps")
+                eff = float(c.get("efficiency_pct", 0.0) or 0.0)
+                ov = float(c.get("overlap_ratio", 0.0) or 0.0)
+                regime = str(c.get("regime", "") or "")
+                algo = str(c.get("algo_hint", "") or "")
+                eff_label = str(c.get("efficiency_label", "") or "")
+                if eff >= 70:
+                    eff_color = "#44dd66"
+                elif eff >= 40:
+                    eff_color = "#ff8800"
+                else:
+                    eff_color = "#e84040"
+                bar_w = min(100.0, eff)
+                peak_s = f"{peak_v:.0f} GB/s" if peak_v else "\u2014"
+                comm_rows.append(
+                    f"<tr>"
+                    f'<td><code>{_h(op)}</code></td>'
+                    f"<td>{_fmt_bytes_comm(mb)}</td>"
+                    f"<td>{_fmt_ns(dur_ns)}</td>"
+                    f"<td>"
+                    f'<div class="btrack" style="width:120px;height:10px;'
+                    f'background:#1a1a2e;border-radius:4px;overflow:hidden;'
+                    f'display:inline-block;vertical-align:middle">'
+                    f'<div class="bfill" style="width:{bar_w:.1f}%;height:100%;'
+                    f'background:{eff_color};border-radius:4px"></div>'
+                    f"</div>"
+                    f' <span style="color:{eff_color};margin-left:.5rem">'
+                    f"{bw:.2f} GB/s</span>"
+                    f"</td>"
+                    f"<td>{_h(peak_s)}</td>"
+                    f'<td style="color:{eff_color};font-weight:600">'
+                    f'{eff:.1f}% <span class="dim" style="font-size:.82rem">'
+                    f"({_h(eff_label)})</span></td>"
+                    f"<td>{ov:.1f}%</td>"
+                    f'<td class="dim" style="font-size:.85rem">{_h(regime)} / '
+                    f"{_h(algo)}</td>"
+                    f"</tr>"
+                )
+            comm_table = (
+                '<div class="tbl-wrap">'
+                '<table class="dtable">'
+                "<thead><tr>"
+                "<th data-tip='RCCL collective operation (AllReduce, AllGather, ReduceScatter, ...).'>Op</th>"
+                "<th data-tip='Message size per rank in bytes (count * dtype_bytes).'>Bytes</th>"
+                "<th data-tip='Wall-clock duration of this collective on the kernel side.'>Duration</th>"
+                "<th data-tip='Effective bus bandwidth = msg_bytes * factor / duration. Factor is 2(N-1)/N for AllReduce, (N-1)/N for AllGather/ReduceScatter/AllToAll, 1 for Broadcast/Reduce.'>Bus BW (vs peak)</th>"
+                "<th data-tip='Achievable XGMI busBW for this architecture (from interconnect_specs.yaml).'>Peak</th>"
+                "<th data-tip='efficiency_pct = busBW / peak. Classification: &lt;40% poor, 40-70% fair, &gt;70% good.'>Eff%</th>"
+                "<th data-tip='Fraction of this collective overlapping with non-RCCL kernel activity. Higher is better.'>Overlap%</th>"
+                "<th data-tip='Regime classification (latency/bandwidth-bound) plus algorithm hint (Ring/Tree/Pairwise).'>Regime / Algo</th>"
+                "</tr></thead>"
+                "<tbody>" + "".join(comm_rows) + "</tbody>"
+                "</table></div>"
             )
-        comm_table = (
-            '<div class="tbl-wrap">'
-            '<table class="dtable">'
-            "<thead><tr>"
-            "<th data-tip='RCCL collective operation (AllReduce, AllGather, ReduceScatter, ...).'>Op</th>"
-            "<th data-tip='Message size per rank in bytes (count * dtype_bytes).'>Bytes</th>"
-            "<th data-tip='Wall-clock duration of this collective on the kernel side.'>Duration</th>"
-            "<th data-tip='Effective bus bandwidth = msg_bytes * factor / duration. Factor is 2(N-1)/N for AllReduce, (N-1)/N for AllGather/ReduceScatter/AllToAll, 1 for Broadcast/Reduce.'>Bus BW (vs peak)</th>"
-            "<th data-tip='Achievable XGMI busBW for this architecture (from interconnect_specs.yaml).'>Peak</th>"
-            "<th data-tip='efficiency_pct = busBW / peak. Classification: &lt;40% poor, 40-70% fair, &gt;70% good.'>Eff%</th>"
-            "<th data-tip='Fraction of this collective overlapping with non-RCCL kernel activity. Higher is better.'>Overlap%</th>"
-            "<th data-tip='Regime classification (latency/bandwidth-bound) plus algorithm hint (Ring/Tree/Pairwise).'>Regime / Algo</th>"
-            "</tr></thead>"
-            "<tbody>" + "".join(comm_rows) + "</tbody>"
-            "</table></div>"
-        )
+        else:
+            observed = int(c_count or 0)
+            observed_ns = int(c_summary.get("observed_total_duration_ns", 0) or 0)
+            observed_s = _fmt_ns(observed_ns) if observed_ns > 0 else "unknown"
+            if c_incomplete:
+                reason = c_summary.get("incomplete_reason") or (
+                    "RCCL kernels were detected, but RCCL API arguments were not "
+                    "captured; message size, bus bandwidth, and efficiency are unavailable."
+                )
+                title = "Capture incomplete"
+                evidence_intro = (
+                    f"Observed fallback kernels: {_h(observed)}; "
+                    f"observed RCCL kernel time: {_h(observed_s)}.<br>"
+                )
+            else:
+                reason = (
+                    "RCCL API regions were captured, but message size or count "
+                    "arguments were unavailable; bus bandwidth and efficiency "
+                    "cannot be computed."
+                )
+                title = "Metrics unavailable"
+                evidence_intro = ""
+            evidence_rows = []
+            for c in c_ops[:10]:
+                op = str(c.get("op_type", "?"))
+                dur_ns = int(c.get("duration_ns", 0) or 0)
+                evidence_rows.append(
+                    f"<tr><td><code>{_h(op)}</code></td>"
+                    f"<td>{_fmt_ns(dur_ns)}</td></tr>"
+                )
+            evidence_table = (
+                '<div class="tbl-wrap" style="margin-top:.75rem">'
+                '<table class="dtable">'
+                "<thead><tr><th>Op</th><th>Observed duration</th></tr></thead>"
+                "<tbody>" + "".join(evidence_rows) + "</tbody>"
+                "</table></div>"
+                if evidence_rows else ""
+            )
+            comm_table = (
+                '<div class="dim" style="border:1px solid var(--bdr);'
+                'border-radius:6px;padding:1rem;background:rgba(255,255,255,.03)">'
+                '<strong style="color:var(--text);font-style:normal">'
+                f'{_h(title)}</strong><br>'
+                f"{_h(reason)}<br>"
+                f"{evidence_intro}"
+                "Per-collective metric table hidden to avoid zero-byte "
+                "placeholder rows."
+                f"{evidence_table}"
+                "</div>"
+            )
 
-        ov_color = "#44dd66" if c_overlap >= 50 else (
-            "#ff8800" if c_overlap >= 20 else "#e84040"
-        )
-        overlap_donut = (
-            '<div class="gauge-wrap" style="margin-top:1rem">'
-            f'{_svg_gauge(c_overlap, ov_color, "Comm/Compute Overlap", f"{c_overlap:.0f}%")}'
-            f'<p class="g-hint {"ok" if c_overlap >= 50 else "warn"}" '
-            f'style="text-align:center;margin-top:.25rem">'
-            f'{"&#10003; Good overlap" if c_overlap >= 50 else "&#9888; Low overlap"}'
-            "</p>"
-            "</div>"
-        )
-
-        incomplete_note = (
-            '<p class="dim" style="margin-top:.75rem;font-size:.82rem">'
-            "&#9888; Capture incomplete \u2014 fell back to kernel-name regex "
-            "(no <code>category='RCCL'</code> spans in DB; install "
-            "<code>rocprofv3 &ge; 6.2</code> for full RCCL arg capture)."
-            "</p>"
-        ) if c_incomplete else ""
+        if c_has_measured_metrics:
+            ov_color = "#44dd66" if c_overlap >= 50 else (
+                "#ff8800" if c_overlap >= 20 else "#e84040"
+            )
+            overlap_donut = (
+                '<div class="gauge-wrap" style="margin-top:1rem">'
+                f'{_svg_gauge(c_overlap, ov_color, "Comm/Compute Overlap", f"{c_overlap:.0f}%")}'
+                f'<p class="g-hint {"ok" if c_overlap >= 50 else "warn"}" '
+                f'style="text-align:center;margin-top:.25rem">'
+                f'{"&#10003; Good overlap" if c_overlap >= 50 else "&#9888; Low overlap"}'
+                "</p>"
+                "</div>"
+            )
+            incomplete_note = (
+                '<p class="dim" style="margin-top:.75rem;font-size:.82rem">'
+                "&#9888; Capture incomplete \u2014 fell back to kernel-name regex "
+                "(no <code>category='RCCL'</code> spans in DB; install "
+                "<code>rocprofv3 &ge; 6.2</code> for full RCCL arg capture)."
+                "</p>"
+            ) if c_incomplete else ""
+        else:
+            overlap_donut = ""
+            incomplete_note = ""
 
         comm_section = (
             '\n<section class="scard">'
