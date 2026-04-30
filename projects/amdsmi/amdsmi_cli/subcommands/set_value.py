@@ -1772,11 +1772,25 @@ class SetValueCommands:
             except amdsmi_exception.AmdSmiLibraryException as e:
                 if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
                     raise PermissionError("Command requires elevation") from e
-                self.logger.store_output(
-                    args.gpu,
-                    "mem_carveout",
-                    f"[{e.get_error_info(detailed=False)}] Unable to set VRAM carveout to index {args.mem_carveout}",
-                )
+                if (
+                    e.get_error_code()
+                    == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED
+                ):
+                    # Surface an actionable message instead of a raw error code.
+                    # Avoid naming specific products here so the message does not
+                    # age as new ASICs add or drop UMA carveout support.
+                    self.logger.store_output(
+                        args.gpu,
+                        "mem_carveout",
+                        "Not supported: UMA carveout is only available on APUs whose"
+                        ' VBIOS exposes the ATCS "Set UMA Allocation Size" function.',
+                    )
+                else:
+                    self.logger.store_output(
+                        args.gpu,
+                        "mem_carveout",
+                        f"[{e.get_error_info(detailed=False)}] Unable to set VRAM carveout to index {args.mem_carveout}",
+                    )
                 self.logger.print_output()
 
             self.logger.clear_multiple_devices_output()
