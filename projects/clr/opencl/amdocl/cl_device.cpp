@@ -51,7 +51,7 @@ RUNTIME_ENTRY(cl_int, clGetPlatformIDs,
     amd::Runtime::init();
   }
 
-  if (((num_entries > 0 || num_platforms == NULL) && platforms == NULL) ||
+  if ((num_platforms == NULL && platforms == NULL) ||
       (num_entries == 0 && platforms != NULL)) {
     return CL_INVALID_VALUE;
   }
