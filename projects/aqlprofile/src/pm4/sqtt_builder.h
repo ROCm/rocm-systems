@@ -661,6 +661,19 @@ class GpuSqttBuilder : public SqttBuilder, protected Primitives {
     auto status_addr = (Primitives::GFXIP_LEVEL >= 12) ? Primitives::SQ_THREAD_TRACE_STATUS2_ADDR : Primitives::SQ_THREAD_TRACE_STATUS_ADDR;
     builder.BuildCopyRegDataPacket(cmd_buffer, status_addr, &control.status_double_buffer, Primitives::COPY_DATA_SEL_COUNT_1DW_PRM, false);
 
+    // Embed a periodic GPU-clock low-32 marker into the trace stream so the decoder can
+    // correlate shader-clock with GPU realtime-clock between Begin/End anchors. gfx9 only;
+    // other architectures inject realtime tokens via different in-trace mechanisms.
+    if (Primitives::GFXIP_LEVEL == 9) {
+      rocprof_trace_decoder_packet_header_t header{};
+      header.opcode = ROCPROF_TRACE_DECODER_PACKET_OPCODE_RT_TIMESTAMP_LO32;
+      header.type = 0;
+      header.data20 = 0;
+
+      builder.BuildWriteUConfigRegPacket(cmd_buffer, builder.get_addr(Primitives::SQ_THREAD_TRACE_USERDATA_3), header.u32All);
+      builder.BuildClockLo32IntoUserdata(cmd_buffer, Primitives::SQ_THREAD_TRACE_USERDATA_3);
+    }
+
     builder.BuildWriteWaitIdlePacket(cmd_buffer);
     builder.BuildCacheFlushPacket(cmd_buffer, size_t(&control), sizeof(TraceControl));
     SetGRBMToBroadcast(cmd_buffer);

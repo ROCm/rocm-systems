@@ -638,7 +638,18 @@ void CSRegisterHandlerGFX9::HandleRealtimeClock(size_t time, size_t data)
 
     if (userdata3_count == 0)
     {
-        if (data == 0x5) userdata3_count = 3;
+        if (data == 0x5)
+        {
+            userdata3_count = 3; // RT_TIMESTAMP: RT_LOW, RT_HI, RT_DELTA
+        }
+        else if (data == 0x7)
+        {
+            // RT_TIMESTAMP_LO32: only the new lo32 follows. Stash the prior
+            // lo32 (which lives in RT_DELTA from the last realtime emission)
+            // into RT_LOW so the unified wrap check below works unchanged.
+            userdata3_count = 1;
+            userdata3_values[RT_LOW] = userdata3_values[RT_DELTA];
+        }
         return;
     }
 
@@ -647,13 +658,13 @@ void CSRegisterHandlerGFX9::HandleRealtimeClock(size_t time, size_t data)
 
     if (userdata3_count > 0) return;
 
+    // handle wrapping of lowest 32 bits (works for both 0x5 and 0x7 since
+    // RT_LOW holds the prior lo32 in either case).
+    if (userdata3_values[RT_DELTA] < userdata3_values[RT_LOW]) userdata3_values[RT_HI]++;
+
     att_decoder_realtime_t rt{};
     rt.shader_clock = time;
     rt.realtime_clock = userdata3_values[RT_DELTA] | (userdata3_values[RT_HI] << 32);
-
-    // handle wrapping of lowest 32 bits
-    if (userdata3_values[RT_DELTA] < userdata3_values[RT_LOW]) rt.realtime_clock += 1ul << 32;
-
     realtime.push_back(rt);
 }
 

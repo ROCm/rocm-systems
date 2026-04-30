@@ -74,6 +74,20 @@ rocprofiler_context_id_t              agent_ctx{};
 rocprofiler_context_id_t              tracing_ctx{};
 std::vector<agent_output_buffer_t>*   agent_buffers{};
 
+// Tracks REALTIME records to verify that the gfx9 query_status path emits
+// periodic RT_TIMESTAMP_LO32 markers in addition to the Begin/End anchors.
+//
+// Notes on validation scope:
+//   - shader_clock is per-decode-pass (each rocprofiler_trace_decode call has
+//     its own time origin), so monotonicity must be checked per-pass only.
+//   - realtime_clock is the GPU wall-clock and IS monotonic across passes.
+//   - "Periodic emission worked" means at least one pass produced > 2 records
+//     (Begin + End anchors plus periodic markers). Cross-pass total isn't
+//     enough on its own because N anchor-only passes also exceed 2.
+std::atomic<size_t> realtime_total_count{0};
+std::atomic<size_t> realtime_max_per_pass{0};
+std::atomic<bool>   realtime_monotonicity_violation{false};
+
 void
 tool_codeobj_tracing_callback(rocprofiler_callback_tracing_record_t record,
                               rocprofiler_user_data_t* /* user_data */,
@@ -202,10 +216,21 @@ cntrl_tracing_callback(rocprofiler_callback_tracing_record_t record,
     {
         ROCPROFILER_CALL(rocprofiler_stop_context(agent_ctx), "stopping context");
 
+        struct parse_state_t
+        {
+            uint32_t current_sdata    = 0;
+            size_t   realtime_count   = 0;
+            int64_t  prev_shader      = 0;
+            uint64_t prev_realtime    = 0;
+            bool     monotonicity_bad = false;
+        };
+
         auto parse = [](rocprofiler_thread_trace_decoder_record_type_t record_type_id,
                         void*                                          events,
                         uint64_t                                       num_events,
                         void*                                          userdata) {
+            auto& state = *static_cast<parse_state_t*>(userdata);
+
             if(record_type_id == ROCPROFILER_THREAD_TRACE_DECODER_RECORD_INFO)
             {
                 auto* infos = (rocprofiler_thread_trace_decoder_info_t*) events;
@@ -215,29 +240,53 @@ cntrl_tracing_callback(rocprofiler_callback_tracing_record_t record,
             }
             else if(record_type_id == ROCPROFILER_THREAD_TRACE_DECODER_RECORD_SHADERDATA)
             {
-                auto& current_sdata = *static_cast<uint32_t*>(userdata);
-
                 auto* sdata = static_cast<rocprofiler_thread_trace_decoder_shaderdata_t*>(events);
                 for(size_t i = 0; i < num_events; i++)
                 {
-                    if(sdata[i].value < current_sdata)
+                    if(sdata[i].value < state.current_sdata)
                     {
                         std::cerr << "Error: Invalid sdata value " << sdata[i].value << std::endl;
                         abort();
                     }
-                    current_sdata = sdata[i].value;
+                    state.current_sdata = sdata[i].value;
                 }
+            }
+            else if(record_type_id == ROCPROFILER_THREAD_TRACE_DECODER_RECORD_REALTIME)
+            {
+                auto* rts = static_cast<rocprofiler_thread_trace_decoder_realtime_t*>(events);
+                for(size_t i = 0; i < num_events; i++)
+                {
+                    // Per-pass monotonicity: shader_clock has a per-pass time
+                    // origin, so this can only be checked within one decode.
+                    if(rts[i].shader_clock < state.prev_shader ||
+                       rts[i].realtime_clock < state.prev_realtime)
+                    {
+                        state.monotonicity_bad = true;
+                    }
+                    state.prev_shader   = rts[i].shader_clock;
+                    state.prev_realtime = rts[i].realtime_clock;
+                }
+                state.realtime_count += num_events;
             }
         };
 
         size_t total_size = 0;
         for(auto& output_buffer : *agent_buffers)
         {
-            uint32_t current_sdata = 0;
-            auto&    buffer        = output_buffer.output_buffer;
-            size_t   output_size   = std::min(output_buffer.output_size.exchange(0), buffer.size());
-            rocprofiler_trace_decode(decoder, parse, buffer.data(), output_size, &current_sdata);
+            parse_state_t state{};
+            auto&         buffer = output_buffer.output_buffer;
+            size_t output_size   = std::min(output_buffer.output_size.exchange(0), buffer.size());
+            rocprofiler_trace_decode(decoder, parse, buffer.data(), output_size, &state);
             total_size += output_size;
+
+            realtime_total_count.fetch_add(state.realtime_count);
+            // Track the largest single-pass count to prove periodic emission
+            // happened within at least one pass (anchor-only passes give 2).
+            size_t prev_max = realtime_max_per_pass.load();
+            while(state.realtime_count > prev_max &&
+                  !realtime_max_per_pass.compare_exchange_weak(prev_max, state.realtime_count))
+            {}
+            if(state.monotonicity_bad) realtime_monotonicity_violation = true;
         }
 
         static bool ignore_size = std::getenv("STARTSTOP") ? atoi(std::getenv("STARTSTOP")) : false;
@@ -298,7 +347,33 @@ tool_init(rocprofiler_client_finalize_t /* fini_func */, void* /* tool_data */)
 }
 
 void
-tool_fini(void*){};
+tool_fini(void*)
+{
+    if(realtime_monotonicity_violation.load())
+    {
+        std::cerr << "Error: REALTIME records were not monotonic within a decode pass" << std::endl;
+        abort();
+    }
+
+    // gfx9 query_status path emits periodic RT_TIMESTAMP_LO32 markers in
+    // addition to the Begin/End anchors. Gate the strict count check behind an
+    // env var so the same tool keeps working on gfx10+ where only the two
+    // boundary anchors exist. Use the per-pass max because N anchor-only
+    // passes also exceed 2 globally; we want proof that periodic emission
+    // happened within at least one decode pass.
+    const char* expect_env = std::getenv("EXPECT_PERIODIC_REALTIME");
+    if(expect_env && atoi(expect_env) != 0)
+    {
+        size_t max_pass = realtime_max_per_pass.load();
+        if(max_pass <= 2)
+        {
+            std::cerr << "Error: expected periodic REALTIME records within a single pass (>2), "
+                      << "got max-per-pass=" << max_pass << " total=" << realtime_total_count.load()
+                      << std::endl;
+            abort();
+        }
+    }
+}
 
 }  // namespace TripleBuffer
 }  // namespace ATTTest

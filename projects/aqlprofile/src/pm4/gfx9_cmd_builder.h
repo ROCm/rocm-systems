@@ -523,6 +523,13 @@ class Gfx9CmdBuilder : public CmdBuilder {
       APPEND_COMMAND_WRAPPER(cmdBuf, copy_data);
     }
   }
+
+  void BuildClockLo32IntoUserdata(CmdBuffer* cmdBuf, const Register& userdata_addr) override
+  {
+    uint32_t addr      = get_addr(userdata_addr);
+    auto     copy_data = UserdataLoPacket(addr);
+    APPEND_COMMAND_WRAPPER(cmdBuf, copy_data);
+  }
 };
 
 }  // namespace pm4_builder
