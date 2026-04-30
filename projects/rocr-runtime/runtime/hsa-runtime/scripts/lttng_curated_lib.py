@@ -21,8 +21,11 @@ ALLOWED_CATEGORIES = frozenset([
     'hsa_queues', 'hsa_signals', 'hsa_memory',
 ])
 
-# Field budget: at most 10 LTTng fields total including corr_id => 9 payload.
-PAYLOAD_BUDGET = 9
+# Field budget: LTTng-UST allows at most 10 fields per tracepoint event;
+# none of those slots are reserved by the curated framework now that
+# corr_id is no longer carried as an explicit field. Identity (vpid, vtid,
+# timestamp) comes from channel context, not the event payload.
+PAYLOAD_BUDGET = 10
 
 # Type expansion (number of payload fields each DSL type emits).
 TYPE_EXPANSION = {
@@ -50,8 +53,8 @@ def _dir_expand(arg):
 
 
 def expanded_field_count(api):
-    """Return total payload field count (excluding corr_id) after both
-    type-expansion and direction-expansion."""
+    """Return total payload field count after both type-expansion and
+    direction-expansion."""
     return sum(_type_expand(a) * _dir_expand(a) for a in api['args'])
 
 
