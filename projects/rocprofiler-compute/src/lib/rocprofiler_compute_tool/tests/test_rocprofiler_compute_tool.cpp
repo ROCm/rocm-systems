@@ -215,11 +215,33 @@ TEST_F(test_rocprofiler_compute_tool_t,
     EXPECT_EQ(m_counters_writer->get_write_counters_info()[0].kernel_id, std::vector{kernel_id0});
 }
 
-TEST_F(test_rocprofiler_compute_tool_t, OnFiniWithPcSamplingEnabled_WritesCodeObjectData)
+TEST_F(test_rocprofiler_compute_tool_t, OnFiniWithHostTrapPcSamplingEnabled_WritesCodeObjectData)
+{
+    m_env_parameters->set_pc_sampling_mode("host_trap");
+    const auto cfg       = rocprofiler_configure(1, "", 1, &m_client_id);
+    const auto tool_data = get_tool_data(cfg);
+    tool_data->pc_sampling_collector.wlock([&](auto& ptr) { ptr = m_pc_sampling_collector; });
+    cfg->finalize(tool_data);
+    EXPECT_EQ(m_pc_sampling_collector->get_write_count(), 1);
+}
+
+TEST_F(test_rocprofiler_compute_tool_t, OnFiniWithStochasticPcSamplingEnabled_WritesCodeObjectData)
+{
+    m_env_parameters->set_pc_sampling_mode("stochastic");
+    const auto cfg = rocprofiler_configure(1, "", 1, &m_client_id);
+    const auto tool_data = get_tool_data(cfg);
+    tool_data->pc_sampling_collector.wlock([&](auto& ptr) { ptr = m_pc_sampling_collector; });
+    cfg->finalize(tool_data);
+    EXPECT_EQ(m_pc_sampling_collector->get_write_count(), 1);
+}
+
+TEST_F(test_rocprofiler_compute_tool_t, OnFiniWithPcSamplingDisabled_DoesntWriteCodeObjectData)
 {
     const auto cfg = rocprofiler_configure(1, "", 1, &m_client_id);
-    cfg->finalize(m_tool_data.release());
-    EXPECT_EQ(m_pc_sampling_collector->get_write_count(), 1);
+    const auto tool_data = get_tool_data(cfg);
+    tool_data->pc_sampling_collector.wlock([&](auto& ptr) { ptr = m_pc_sampling_collector; });
+    cfg->finalize(tool_data);
+    EXPECT_EQ(m_pc_sampling_collector->get_write_count(), 0);
 }
 
 TEST_F(test_rocprofiler_compute_tool_t, OnDispatchCallback_ForwardsToSdkCallbacks)
@@ -303,7 +325,7 @@ void test_rocprofiler_compute_tool_t::SetUp()
     m_counters_writer       = std::make_shared<mock_counters_writer_t>();
     m_sdk_callbacks         = std::make_shared<mock_sdk_callbacks_t>();
     m_pc_sampling_collector = std::make_shared<mock_pc_sampling_collector_t>();
-    m_tool_data = std::make_unique<tool_data_t>();
+    m_tool_data             = std::make_unique<tool_data_t>();
 
     m_tool_data->pc_sampling_collector.wlock([&](auto& ptr) { ptr = m_pc_sampling_collector; });
     m_tool_data->sdk_callbacks = m_sdk_callbacks;

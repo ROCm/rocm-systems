@@ -164,9 +164,12 @@ void generate_output(tool_data_t& tool_data)
         g_counters_writer->write_counters(tool_data.output_filename, tool_data.counter_records);
     }
 
-    code_object_writer_json_t obj_writer;
-    tool_data.pc_sampling_collector.rlock([&](const pc_sampling_collector_t::ptr& ptr)
-                                          { ptr->write(obj_writer); });
+    if (tool_data.pc_sampling_mode != PcSamplingMode::Disabled)
+    {
+        code_object_writer_json_t obj_writer;
+        tool_data.pc_sampling_collector.rlock([&](const pc_sampling_collector_t::ptr& ptr)
+                                              { ptr->write(obj_writer); });
+    }
 }
 
 void tool_fini(void* user_data)
@@ -202,6 +205,7 @@ std::unique_ptr<tool_data_t> create_tool_data(rocprofiler_client_id_t* /*id*/)
 
     tool_data->sdk_callbacks = std::make_shared<sdk_callbacks_impl_t>(g_sdk_wrapper);
     tool_data->pc_sampling_collector.wlock([](auto& ptr) { ptr = pc_sampling_collector_t::create(); });
+    tool_data->pc_sampling_mode = pc_sampling_mode(g_input_parameters->get_pc_sampling_mode());
 
     tool_data->output_filename = generate_output_filename(g_input_parameters->get_output_path());
 
