@@ -173,7 +173,16 @@ firmware port is months including build/sign/deploy/validate cycles.
 | **CI / release engineering** | Cross-repo coordinated rolls (KFD ↔ ROCr ↔ rocprofiler-sdk ↔ firmware-per-ASIC) | The userspace migration is now smaller — only ROCr (one new attribute) and rocprofiler-sdk (direct ioctl) need to ship. libhsakmt is no longer in the path. Sequencing for the kernel UAPI bump is described in `KFD_DISPATCH_LOG_DESIGN.md` §5.1 (`_IOC_SIZE` matrix). |
 | **Adversarial / security review** | UAPI hazards, capability model, container/namespace semantics | One round of cross-vendor adversarial review (gpt-5.3-codex) already complete; findings addressed. A second pass (Gemini, or in-house security) before upstream submission is recommended. |
 
+> The LTTng-UST track has its own expertise table in the parallel-track
+> section below (§"Parallel track: LTTng-UST emit-and-subscribe transport").
+> The two tracks have largely disjoint reviewer sets — firmware-ring needs
+> KFD/MEC/HSA-runtime expertise; LTTng-UST needs HIP/HSA-runtime
+> instrumentation, CTF tooling, and (eventually) rocprofiler-sdk
+> consumer-side expertise.
+
 ## Status snapshot
+
+**Firmware-ring track:**
 
 | Item | Status |
 |---|---|
@@ -186,20 +195,37 @@ firmware port is months including build/sign/deploy/validate cycles.
 | KFD implementation | not yet started — gated on KFD-team review of the plan |
 | Firmware port to non-MI350 | not yet started — **requires firmware-team engagement** |
 
-## Medium-term, in parallel: replacing the HIP/HSA → rocprofiler-sdk callback path
+**LTTng-UST emit-and-subscribe track (parallel):**
+
+| Item | Status |
+|---|---|
+| Producer-side instrumentation (HIP CLR + ROCr) | **complete; in PR #5475 (draft)** |
+| Vendored LTTng-UST 2.13.7 + URCU 0.14.0 (submodules, flat install) | **complete; in PR #5475** |
+| Schema design (v3, no in-band corr_id; vpid+vtid+ts join) | **complete; adversarially reviewed in 6+8 rounds across 3 vendors** |
+| Curated typed-args events (73 HIP + 10 HSA APIs) | **complete; in PR #5475** |
+| Wrapper migration (~530 HIP + ~270 HSA) via libclang AST rewrite | **complete; coverage gate enforced** |
+| libclang YAML↔header drift verifier + test suite | **complete; in PR #5513 (stacked on #5475)** |
+| Real-resource coverage harness + payload/invariant tests | **complete; in PR #5513** |
+| Performance validated on GraphBench (MI325X) | **+0.9% wall-time at full curated capture, 0 drops** |
+| TheRock manylinux build validation | **complete on `bewelton_therock` container** |
+| rocprofiler-sdk consumer side (CTF→record translator) | **not yet started — separate planned PR** |
+| Cross-distro CI matrix | not yet wired |
+| `user_events` backend swap (v2) | future work; awaits RHEL 10 / Ubuntu 24.04 customer baseline |
+
+## Parallel track: LTTng-UST emit-and-subscribe transport (in flight)
 
 Today, HIP and HSA call back into rocprofiler-sdk via function pointers
 populated through `rocprofiler-register`. The runtimes know about
 rocprofiler-sdk (via the shared API table contract), and rocprofiler-sdk
 receives data **synchronously on the producer's thread**. This couples
 the runtimes to a specific consumer and forces always-on producer-side
-overhead.
+overhead even when nobody is subscribed.
 
-The medium-term goal is to move HIP/HSA to a **generic emit-and-subscribe
+The parallel goal is to move HIP/HSA to a **generic emit-and-subscribe
 transport**: HIP/HSA emit typed events to a tracing channel without
 naming a consumer, and rocprofiler-sdk (or any other tool) subscribes
-out-of-process. Steady-state cost when nobody is subscribed should be
-~one branch per event.
+out-of-process. Steady-state cost when nobody is subscribed is ~one
+atomic load + branch per event.
 
 **Hard constraints** (same as the firmware-ring side of this work):
 1. **No `LD_PRELOAD`** — must support attaching to a process that did
@@ -210,53 +236,127 @@ out-of-process. Steady-state cost when nobody is subscribed should be
 
 These eliminate uprobes, eBPF uprobes, and (under the strict reading)
 USDT — all of which arm probes by having the kernel write `INT3` (0xCC)
-into the producer's text segment when a consumer attaches.
-
-**Surviving techniques** (from `TRACING_DELIVERY_RESEARCH.md`):
-
-| Technique | Verdict |
-|---|---|
-| **LTTng-UST** | Primary recommendation today |
-| **Linux `user_events`** (kernel 6.4+) | Better long-term fit; held back by distro reach (RHEL 9 / Ubuntu 22.04 LTS lack the kernel) |
-| io_uring channels | Borderline — late-attach discovery is unsolved on shipping kernels |
-
-**Recommended architecture:** abstract HIP/HSA's emit interface so
-**LTTng-UST is the today-backend** and **`user_events` is a drop-in
-swap** when distro reach allows (RHEL 10 / Ubuntu 24.04+ era). The
-hot-path call site stays the same; the backend is a per-event function
-pointer set at init.
+into the producer's text segment when a consumer attaches. Full survey
+of considered techniques and the elimination process: see
+`TRACING_DELIVERY_RESEARCH.md`.
 
 **Why this is parallel-able with the firmware-ring work:** the two
 designs touch entirely different layers. The firmware-ring path is
 about kernel-dispatch *timestamps*; the LTTng-UST path is about
-*API tracing event delivery*. Neither blocks the other. The
-firmware-ring side can ship while the LTTng-UST side is still in
-prototype, and vice versa.
+*API-event delivery*. Neither blocks the other. The firmware-ring side
+can ship while the LTTng-UST side ships, and vice versa.
 
-**Additional expertise needed for this medium-term track:**
+### Status: producer-side instrumentation complete; consumer side not started
 
-| Area | Why |
+Two stacked draft PRs are open against `develop`:
+
+| PR | Branch | Contents |
+|---|---|---|
+| **#5475** | `users/bewelton/lttng` | Producer-side instrumentation: HIP CLR + ROCr LTTng-UST tracepoint providers, vendored LTTng-UST 2.13.7 + URCU 0.14.0 submodules, `~530` HIP + `~270` HSA wrappers migrated, schema v3 (no in-band correlation IDs) |
+| **#5513** | `users/bewelton/lttng-curated-verifier` | Stacked on #5475: libclang YAML↔header drift verifier, build-time symbol-coverage gate, DSL parser library, real-resource coverage harness, payload/invariant test suite, CI workflow |
+
+What's been built (~14k LOC across both PRs):
+
+* **Vendored LTTng-UST 2.13.7 + userspace-rcu 0.14.0** as submodules under
+  `projects/{clr,rocr-runtime}/external/`. Built once per ROCm build via
+  `ExternalProject_Add`, installed flat into `/opt/rocm/lib/` alongside
+  `libamdhip64.so` and `libhsa-runtime64.so`. **No system `liblttng-ust-dev`
+  required at runtime or build time** — the original distro-portability
+  concern is dissolved by vendoring.
+* **HIP CLR producer** (`projects/clr/hipamd/src/lttng/`): 6 generic event
+  types (`hip_api_enter`, three typed exits, `hip_kernel_dispatch_enqueue`,
+  `hip_aql_kernel_dispatch_submit`) plus 73 typed `<api>_args` events for
+  curated APIs.
+* **ROCr producer** (`projects/rocr-runtime/runtime/hsa-runtime/lttng/`): 8
+  generic events (the HIP set plus `hsa_api_exit_{u64,i64}`,
+  `hsa_doorbell_ring`, `hsa_intercept_packets`) plus 10 typed `<api>_args`
+  events.
+* **Curated parameter capture (Option C, QEMU/DPDK pattern):** YAML DSL
+  declares typed args for 73 HIP + 10 HSA APIs; Python codegen emits
+  tracepoint-event headers and emit helpers that are checked into the tree
+  (default build needs no Python or libclang); a libclang-based drift
+  verifier runs in CI to catch YAML↔header drift; a build-time
+  symbol-coverage gate fails the build if any exported HIP/HSA symbol is
+  unmigrated.
+* **Schema v3 (no in-band correlation IDs):** the producer carries no
+  per-event correlation identifiers. Consumers reconstruct enter/exit
+  pairing and parent attribution by walking the per-`(vpid, vtid)` event
+  stream sorted by CTF event-header timestamp using a LIFO stack. This is
+  strictly more correct for multi-process tracing than a per-process
+  counter would be — `(vpid, vtid)` is unambiguous across MPI ranks even
+  if both ranks happen to mint identical thread IDs. ~530 LOC and the
+  entire `librocprofiler-register/correlation` ABI surface were deleted as
+  part of this decision.
+* **Cross-runtime correlation join key:** `(queue_id, write_idx)` on
+  `hip_aql_kernel_dispatch_submit` is the natural key for joining HIP API
+  events with the firmware-ring track's GPU completion records.
+* **Default-on with escape valve:** `HIP_ENABLE_LTTNG_UST=ON` and
+  `ROCR_ENABLE_LTTNG_UST=ON` by default. Setting either to `OFF` compiles
+  out all tracing. Runtime kill switch: `ROCM_LTTNG_UST_DISABLE=1` skips
+  provider registration entirely (useful in restricted containers without
+  `lttng-sessiond` access).
+
+### Measured overhead (GraphBench, MI325X gfx942, see PR #5475)
+
+12 reps each, `taskset -c 4 chrt -f 50`, /dev/shm 64 MiB, LTTng channel
+`--discard --subbuf-size=65536 --num-subbuf=4`.
+
+| Config | wall mean (s) | × lttng_off | drops |
+|:---|---:|---:|---:|
+| **lttng_off** (build with LTTng-UST linked but no session) | **6.51** | 1.000× | n/a |
+| **lttng_on**, generic only (14 event types) | **6.55** | **1.006×** (+0.6%) | **0** |
+| **lttng_on**, generic + curated (97 event types, ~10M events) | **6.58** | **1.009×** (+0.9%) | **0** |
+| rocprofv3 `--hip-trace` | 7.20 | 1.107× (+10.7%) | n/a |
+| rocprofv3 `--hsa-trace` | 11.28 | 1.733× (+73.3%) | n/a |
+| rocprofv3 `--hip-trace --hsa-trace` | 11.93 | 1.832× (+83.2%) | n/a |
+
+**Headline:** capturing the full 97 event types — including the 83 typed
+`_args` events with per-API parameter capture — adds **0.9% wall-time vs
+the no-tracing baseline with zero discarded events**. The same workload
+under `rocprofv3 --hsa-trace` at full fidelity costs **+73-83% — roughly
+80× more expensive** than the LTTng-UST producer at full curated capture.
+
+The "lttng_off" cost (build-with-LTTng-linked-but-no-session) over a
+hypothetical no-LTTng build is ~one atomic load + branch per event — too
+small to separate from noise on this workload, consistent with upstream
+LTTng-UST microbenchmark numbers (~5 ns when OFF).
+
+### Resolved design questions (vs `TRACING_DELIVERY_RESEARCH.md` open list)
+
+| Original open question | Resolution |
 |---|---|
-| HIP / HSA runtime maintainers | Defining and inserting the typed tracepoint set; build-time `liblttng-ust` dependency |
-| LTTng / CTF tooling expertise | Schema design, version evolution, multi-tool subscriber semantics, live-consumption performance |
-| Distro / packaging | Verify `liblttng-ust-dev` availability across RHEL 9/10, Ubuntu 22.04/24.04, SLES 15, and AMD's container baselines |
-| rocprofiler-sdk consumer side | New code path to subscribe to LTTng (via `liblttng-ctl` + `babeltrace2` or LTTng-live TCP), join with the existing in-process callback model |
+| Real-world LTTng-UST overhead on the HIP hot path | **Measured.** +0.9% wall-time at full curated capture; +0.6% generic-only. Zero drops. |
+| CTF-side correlation IDs / efficient consumer-side join | **Resolved by dropping in-band corr_id entirely.** Use vpid+vtid+timestamp from CTF channel contexts; LIFO stack walk on per-thread sorted stream. |
+| Multi-tool subscriber semantics (many sessions vs one re-fan-out) | **Picked: each tool is its own LTTng consumer.** LTTng-UST natively supports N-consumer multiplex via `buffer-shared`/`buffer-uid`/`buffer-pid` schemes; no rocprofiler-sdk re-fan-out layer needed. |
+| Build/packaging (`liblttng-ust-dev` distro availability) | **Resolved by vendoring.** Submodules under `projects/{clr,rocr-runtime}/external/`; flat `/opt/rocm/lib/` install. No distro dep. |
+| Renegotiate USDT constraint? | **Not pursued.** LTTng-UST landed first with acceptable measured overhead. Constraint stands. |
+| `user_events` migration path / backend abstraction | **Deferred.** Backend swap to Linux `user_events` (kernel 6.4+) remains a v2 design when RHEL 10 / Ubuntu 24.04+ become the customer floor (2027–2028). The hot-path call site is a thin tracepoint-provider macro layer; backend swap should be tractable. |
 
-**Open questions before committing** (full list in
-`TRACING_DELIVERY_RESEARCH.md` §"Open Questions"):
+### Remaining gaps
 
-1. Real-world LTTng-UST overhead on the HIP dispatch hot path (the
-   path already has 1248 ns burned by `pool::acquire`; ~100 ns for a
-   tracepoint should fit, but verify on the actual workload).
-2. Multi-tool subscriber semantics — many tools each running their own
-   LTTng session vs single rocprofiler-sdk consumer that re-fans-out.
-3. Whether to renegotiate the "no binary modification" constraint
-   specifically for **USDT**, which patches a deliberately-reserved
-   NOP slot (not random executable code). Strict reading rules USDT
-   out; relaxed reading reopens it as a strong candidate. Worth a
-   conversation.
+* **rocprofiler-sdk consumer side:** the producer ships standalone; any tool
+  using `lttng create` + `lttng enable-event` + `babeltrace2` can consume
+  today. A first-class rocprofiler-sdk CTF→record translator (so existing
+  tools that subscribe via the rocprofiler-sdk callback API see LTTng-sourced
+  events transparently) is **not yet started**. This is a separate planned
+  PR scoped roughly at "consume CTF live via libbabeltrace2 + LTTng-live
+  protocol; emit existing `rocprofiler_*_record_t` shapes".
+* **Cross-distro CI:** PRs validate on TheRock manylinux container (gfx942
+  MI325X). Per-distro coverage (RHEL 9/10, Ubuntu 22.04/24.04, SLES 15) not
+  yet wired into CI. Vendoring removes the runtime risk; build-side risk is
+  autotools availability for the bootstrap step.
+* **`user_events` backend (v2):** the abstraction layer for swapping to
+  `user_events` when distro reach allows is not yet structured for that
+  swap. If we want this swap to be cheap later, the per-tracepoint macro
+  shim should be designed now while the call sites are fresh.
 
-Full research, comparison matrix, and per-technique deep-dives:
-`TRACING_DELIVERY_RESEARCH.md`.
+### Expertise still needed
+
+| Area | Status / why |
+|---|---|
+| HIP / HSA runtime maintainers | **Engaged via PR review on #5475 and #5513.** Wrapper migration via libclang AST rewrite is automated; new tracepoints require YAML edit + regen via opt-in CMake target. |
+| LTTng / CTF tooling | **Internal to this work today.** External CTF expertise becomes relevant for the rocprofiler-sdk consumer translator (live-CTF read perf, schema evolution discipline). |
+| Distro / packaging | **Largely dissolved by vendoring.** Build-side: autotools (`autoconf`, `automake`, `libtool`, `libtool-bin`, `pkg-config`, `patchelf`) is a hard build dep for the vendored bootstrap. |
+| rocprofiler-sdk consumer side | **Not yet started.** Requires libbabeltrace2 integration in rocprofiler-sdk, design for the CTF→`rocprofiler_*_record_t` translator, and decision on live vs offline consumption. |
 
 

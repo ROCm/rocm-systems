@@ -16,6 +16,61 @@
 
 ---
 
+## Status update — 2026-04-30
+
+**The recommendation made by this document (LTTng-UST as primary; `user_events`
+as future backend) has been carried out.** Producer-side instrumentation is
+complete and posted as two stacked draft PRs:
+
+| PR | Branch | Contents |
+|---|---|---|
+| **#5475** | `users/bewelton/lttng` | HIP CLR + ROCr LTTng-UST tracepoint providers; vendored LTTng-UST 2.13.7 + URCU 0.14.0 submodules; ~530 HIP + ~270 HSA wrappers migrated; 73 HIP + 10 HSA curated typed-args APIs; schema v3 (vpid+vtid+ts join, no in-band corr_id) |
+| **#5513** | `users/bewelton/lttng-curated-verifier` | Stacked on #5475: libclang YAML↔header drift verifier; build-time symbol-coverage gate; DSL parser library; real-resource coverage harness; payload/invariant test suite; CI workflow |
+
+**Headline measured numbers** (GraphBench, MI325X gfx942, 12 reps,
+`/dev/shm` 64 MiB):
+
+* Generic-only (14 event types): **+0.6% wall-time vs no-tracing baseline,
+  0 drops**.
+* Generic + curated (97 event types, ~10M events): **+0.9% wall-time, 0
+  drops**.
+* For comparison, `rocprofv3 --hsa-trace` at full fidelity is **+73%**
+  on the same workload — roughly **80× more expensive** than LTTng-UST at
+  full curated capture.
+
+**Material design changes from the recommendation in this doc:**
+
+1. **Distro dependency dissolved by vendoring.** Rather than depending on
+   distro `liblttng-ust-dev` (the thing that gated `user_events` on RHEL 9 /
+   Ubuntu 22.04 and made distro reach the headline risk), LTTng-UST 2.13.7
+   and userspace-rcu 0.14.0 are vendored as git submodules under
+   `projects/{clr,rocr-runtime}/external/`, built via `ExternalProject_Add`,
+   and installed flat into `/opt/rocm/lib/`. No system package required at
+   build time or runtime. This makes the distro-reach concern that motivated
+   the "fallback / future-track" framing of `user_events` largely moot for
+   the primary backend.
+2. **In-band correlation IDs dropped (schema v3).** The original
+   recommendation contemplated typed `correlation_id` fields on every event.
+   Implementation work showed that vpid+vtid+timestamp from CTF channel
+   contexts gives a strictly more correct join key (multi-process safe) and
+   eliminates the entire `librocprofiler-register/correlation` ABI surface
+   and ~530 LOC of producer-side correlation-stack maintenance.
+3. **Curated parameter capture (Option C from QEMU/DPDK pattern).** The
+   original recommendation outlined "typed tracepoint set" generically; the
+   implementation chose a YAML DSL + Python codegen + libclang drift
+   verifier pattern, with checked-in generated headers (default build needs
+   no Python or libclang). Coverage: 73 HIP + 10 HSA APIs.
+
+**Per-open-question resolution** is annotated inline in the "Open Questions"
+section below.
+
+**The body of this document is preserved as a reference** — the comparison
+matrix and per-technique deep-dives remain a useful reference for future
+backend swaps (e.g., the eventual `user_events` v2) and for adversarial
+review of the chosen path.
+
+---
+
 ## Today's situation (baseline for comparison)
 
 HIP and HSA runtimes today call into rocprofiler-sdk via function pointers
@@ -725,11 +780,33 @@ either way; the backend is a per-event function pointer set at init.
    correlation_id) push us over the existing 2.95×–3.55× envelope?
    Hypothesis: no, because ~100 ns is small relative to 1248 ns.
 
+   > **Status (2026-04-30): RESOLVED — measured.** GraphBench, MI325X gfx942,
+   > 12 reps, `--discard --subbuf-size=65536 --num-subbuf=4`: **+0.6%
+   > wall-time** for generic-only (14 event types), **+0.9%** for generic +
+   > 83 typed `_args` events (97 event types, ~10M events captured), **0
+   > discarded events** in either configuration. The hypothesis held —
+   > tracepoint cost is well below the existing per-dispatch noise floor.
+   > Same workload under `rocprofv3 --hsa-trace` at full fidelity: **+73%
+   > (~80× more expensive)**.
+
 2. **CTF-side correlation IDs.** rocprofiler-sdk's callback API gives
    typed correlation IDs (internal + external). LTTng's tracepoint fields
    handle this (it's just two u64 fields). Verify the consumer side
    (rocprofiler-sdk reading CTF) can join async-signal-handler-emitted
    completion records with API-boundary records efficiently.
+
+   > **Status (2026-04-30): RESOLVED — by dropping in-band corr_id entirely
+   > (schema v3).** Producers carry no correlation identifiers. Consumers
+   > reconstruct enter/exit pairing and parent attribution by walking the
+   > per-`(vpid, vtid)` event stream sorted by CTF event-header timestamp
+   > using a LIFO stack. Cross-runtime parents (HIP → HSA on the same
+   > thread) merge naturally because both providers share the same
+   > per-thread call stack under this scheme. The `(queue_id, write_idx)`
+   > fields on `hip_aql_kernel_dispatch_submit` serve as the natural join
+   > key for the firmware-ring track's GPU completion records. ~530 LOC
+   > and the entire `librocprofiler-register/correlation` ABI surface were
+   > deleted as part of this decision. **Strictly more correct for
+   > multi-process tracing than a per-process counter would be.**
 
 3. **Multi-tool subscriber semantics.** Today, rocprofiler-sdk supports N
    tools subscribing to HIP/HSA events via its context API. With LTTng,
@@ -738,11 +815,27 @@ either way; the backend is a per-event function pointer set at init.
    which subscribes once and re-fans-out. Option (b) preserves current
    semantics; (a) would be a behavior change. Pick one and commit.
 
+   > **Status (2026-04-30): RESOLVED — option (a) selected.** LTTng-UST
+   > natively supports N-consumer multiplex via `buffer-shared` /
+   > `buffer-uid` / `buffer-pid` schemes; no rocprofiler-sdk re-fan-out
+   > layer is needed. The behavior change vs today is intentional and
+   > aligns with the "generic emit, anyone subscribes" goal of this work.
+
 4. **How does rocprofiler-sdk consume CTF live?** LTTng-live (TCP
    protocol; networked CTF stream) is the obvious answer. Validate that
    rocprofiler-sdk's consumer thread can keep up with high-rate dispatch
    workloads (1000+ kernels/s sustained). Babeltrace 2 can also read live
    CTF buffers via shared-memory bridges.
+
+   > **Status (2026-04-30): DEFERRED — separate planned PR.** The
+   > rocprofiler-sdk consumer-side CTF→`rocprofiler_*_record_t` translator
+   > is not yet started. Today, any tool that wants LTTng-sourced events
+   > consumes via `lttng create` + `lttng enable-event` + `babeltrace2`
+   > directly — no rocprofiler-sdk involvement required. The translator is
+   > scoped roughly at "consume CTF live via libbabeltrace2 + LTTng-live
+   > protocol; emit existing `rocprofiler_*_record_t` shapes" so existing
+   > tools subscribing via the rocprofiler-sdk callback API see
+   > LTTng-sourced events transparently.
 
 5. **Build/packaging implications.** Adding `liblttng-ust` as a build dep
    for HIP/HSA touches the build matrix. Verify availability on:
@@ -751,11 +844,30 @@ either way; the backend is a per-event function pointer set at init.
    - SLES 15: EPEL or EfficiOS.
    - The internal AMD container baselines.
 
+   > **Status (2026-04-30): RESOLVED — by vendoring.** LTTng-UST 2.13.7 and
+   > userspace-rcu 0.14.0 are vendored as git submodules under
+   > `projects/{clr,rocr-runtime}/external/`, built via
+   > `ExternalProject_Add`, and installed flat into `/opt/rocm/lib/`. **No
+   > system `liblttng-ust-dev` required at build time or runtime.** The
+   > distro-reach question is dissolved for the primary backend. Build-side
+   > the only new hard deps are autotools (`autoconf`, `automake`,
+   > `libtool`, `libtool-bin`, `pkg-config`, `patchelf`); these are
+   > universally available. Validated on TheRock manylinux container
+   > (`bewelton_therock`).
+
 6. **The "tracing of intercept queues" interaction.** Today HSA queue
    intercept is the cheapest at-fidelity option (`rtl_full` at 2.95×). If
    we move HIP/HSA to LTTng-UST emit, do we also rip out the queue
    intercept path or run both? Both have different fidelity properties
    for graphs.
+
+   > **Status (2026-04-30): COEXIST.** The producer always emits
+   > tracepoints regardless of whether anyone is subscribed. The
+   > firmware-ring drainer (the kernel-dispatch-timestamp side of this
+   > overall design) remains optional and orthogonal — different layer.
+   > The legacy queue-intercept path inside rocprofiler-sdk is unchanged
+   > by this PR; it can be removed in a later cleanup once the
+   > rocprofiler-sdk LTTng consumer ships.
 
 7. **Re-negotiate the USDT constraint?** Confirm whether the hard
    constraint really means "no binary mod ever" or "no binary mod of code
@@ -764,10 +876,25 @@ either way; the backend is a per-event function pointer set at init.
    strong contender — minimal producer changes, zero runtime library dep,
    eBPF/perf/SystemTap/bpftrace as ready-made consumers.
 
+   > **Status (2026-04-30): NOT PURSUED.** LTTng-UST landed first with
+   > acceptable measured overhead. The constraint stands as originally
+   > stated. The USDT renegotiation can be revisited in a future v2 design
+   > if specific tooling needs (e.g., bpftrace-native subscribers without
+   > liblttng dependency) emerge as a customer requirement.
+
 8. **`user_events` migration path.** Lock in the design abstractions now
    so the future move to `user_events` is a backend swap rather than a
    redesign. The two transports have nearly identical *application-facing*
    contracts: typed event + per-event enable check + producer-side emit.
+
+   > **Status (2026-04-30): PARTIAL — to revisit before merge.** The
+   > current per-tracepoint macro shim is LTTng-UST-specific
+   > (`LTTNG_UST_TRACEPOINT_EVENT`, `lttng_ust_tracepoint`). For a clean
+   > backend swap to `user_events` later, the abstraction should be at
+   > "typed event + per-event enabled-check + emit", with LTTng-UST and
+   > `user_events` as parallel macro implementations. Worth a brief design
+   > pass before the producer ships, while call-site context is fresh.
+   > Not yet done.
 
 ---
 
