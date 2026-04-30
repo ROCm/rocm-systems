@@ -13,16 +13,16 @@ protected:
     void                              SetUp() override;
     void                              TearDown() override;
     static rocm_compute::tool_data_t* get_tool_data(const rocprofiler_tool_configure_result_t* cfg);
-    static void                       compare_counter_config_ids(const std::vector<uint64_t>& expected,
-                                           const std::vector<uint64_t>&                       actual);
-    static rocm_compute::counter_info_record_t create_counter_record(uint64_t counter_id,
-                                                                                 uint64_t kernel_id);
+    static void compare_counter_config_ids(const std::vector<uint64_t>& expected,
+                                           const std::vector<uint64_t>& actual);
+    static rocm_compute::counter_info_record_t   create_counter_record(uint64_t counter_id,
+                                                                       uint64_t kernel_id);
     static rocprofiler_callback_tracing_record_t create_kernel_symbol_record();
-    rocprofiler_callback_tracing_record_t create_pc_sampling_record(
-        rocprofiler_callback_tracing_code_object_load_data_t& payload);
+    rocprofiler_callback_tracing_record_t        create_pc_sampling_record(
+               rocprofiler_callback_tracing_code_object_load_data_t& payload);
 
     rocprofiler_client_id_t                              m_client_id{};
-    rocm_compute::tool_data_t                m_tool_data{};
+    std::unique_ptr<rocm_compute::tool_data_t>           m_tool_data{};
     rocprofiler_callback_tracing_code_object_load_data_t m_payload{};
     rocprofiler_callback_tracing_record_t                m_kernel_symbol_record{};
     rocprofiler_callback_tracing_record_t                m_pc_sampling_record{};

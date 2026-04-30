@@ -147,27 +147,26 @@ void generate_output(tool_data_t& tool_data)
     // Dispatches before the kernel to be filtered was registered may have been
     // profiled. Remove any records whose kernel id does not match the
     // target_kernel_ids
-    if (!tool_data.target_kernel_ids.empty())
+    if (!tool_data.counter_records.empty() && !tool_data.output_filename.empty())
     {
-        tool_data.counter_records.erase(std::remove_if(tool_data.counter_records.begin(),
-                                                       tool_data.counter_records.end(),
-                                                       [&tool_data](const counter_info_record_t& record)
-                                                       {
-                                                           return tool_data.target_kernel_ids.find(
-                                                                      record.kernel_id) ==
-                                                                  tool_data.target_kernel_ids.end();
-                                                       }),
-                                        tool_data.counter_records.end());
-    }
-    if (tool_data.counter_records.empty())
-    {
-        return;
-    }
-    // Write collected counter records and clean up
-    if (!tool_data.output_filename.empty())
-    {
+        if (!tool_data.target_kernel_ids.empty())
+        {
+            tool_data.counter_records.erase(
+                std::remove_if(tool_data.counter_records.begin(),
+                               tool_data.counter_records.end(),
+                               [&tool_data](const counter_info_record_t& record)
+                               {
+                                   return tool_data.target_kernel_ids.find(record.kernel_id) ==
+                                          tool_data.target_kernel_ids.end();
+                               }),
+                tool_data.counter_records.end());
+        }
         g_counters_writer->write_counters(tool_data.output_filename, tool_data.counter_records);
     }
+
+    code_object_writer_json_t obj_writer;
+    tool_data.pc_sampling_collector.rlock([&](const pc_sampling_collector_t::ptr& ptr)
+                                          { ptr->write(obj_writer); });
 }
 
 void tool_fini(void* user_data)

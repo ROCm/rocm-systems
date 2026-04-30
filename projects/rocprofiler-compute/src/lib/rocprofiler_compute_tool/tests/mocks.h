@@ -173,7 +173,9 @@ public:
     void write(rocm_compute::code_object_writer_t& writer) override;
 
     const std::vector<rocprofiler_callback_tracing_code_object_load_data_t>& get_on_code_object_load_info() const;
+    uint32_t get_write_count() const;
 
 private:
     std::vector<rocprofiler_callback_tracing_code_object_load_data_t> m_on_code_object_load_info = {};
+    uint32_t m_write_count = 0;
 };

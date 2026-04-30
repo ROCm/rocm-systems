@@ -43,10 +43,7 @@ TEST_F(test_rocprofiler_compute_tool_t, ProvidedNormalExecution_ReturnsPointersT
     const auto cfg       = rocprofiler_configure(1, "", 1, &m_client_id);
     const auto tool_data = get_tool_data(cfg);
     EXPECT_TRUE(tool_data->sdk_callbacks);
-    tool_data->pc_sampling_collector.rlock([](const auto& ptr)
-    {
-        EXPECT_TRUE(ptr);
-    });
+    tool_data->pc_sampling_collector.rlock([](const auto& ptr) { EXPECT_TRUE(ptr); });
 }
 
 TEST_F(test_rocprofiler_compute_tool_t, ProvidedNonEmptyOutputPath_ReturnsItExtended)
@@ -218,6 +215,13 @@ TEST_F(test_rocprofiler_compute_tool_t,
     EXPECT_EQ(m_counters_writer->get_write_counters_info()[0].kernel_id, std::vector{kernel_id0});
 }
 
+TEST_F(test_rocprofiler_compute_tool_t, OnFiniWithPcSamplingEnabled_WritesCodeObjectData)
+{
+    const auto cfg = rocprofiler_configure(1, "", 1, &m_client_id);
+    cfg->finalize(m_tool_data.release());
+    EXPECT_EQ(m_pc_sampling_collector->get_write_count(), 1);
+}
+
 TEST_F(test_rocprofiler_compute_tool_t, OnDispatchCallback_ForwardsToSdkCallbacks)
 {
     tool_data_t tool_data{};
@@ -243,7 +247,7 @@ TEST_F(test_rocprofiler_compute_tool_t, OnRecordCallback_ForwardsToSdkCallbacks)
     constexpr size_t                  record_count = 1;
     constexpr rocprofiler_user_data_t user_data{};
 
-    record_callback(dispatch_data, &record, record_count, user_data, &m_tool_data);
+    record_callback(dispatch_data, &record, record_count, user_data, m_tool_data.get());
 
     const auto& calls = m_sdk_callbacks->get_record_callback_info();
     EXPECT_EQ(calls.size(), 1);
@@ -254,7 +258,7 @@ TEST_F(test_rocprofiler_compute_tool_t, OnRecordCallback_ForwardsToSdkCallbacks)
 
 TEST_F(test_rocprofiler_compute_tool_t, OnKernelSymbolRegisterOperation_ForwardsToSdkCallbacks)
 {
-    code_object_tracing_callback(m_kernel_symbol_record, nullptr, &m_tool_data);
+    code_object_tracing_callback(m_kernel_symbol_record, nullptr, m_tool_data.get());
 
     const auto& calls = m_sdk_callbacks->get_tracing_callback_info();
     EXPECT_EQ(calls.size(), 1);
@@ -265,11 +269,11 @@ TEST_F(test_rocprofiler_compute_tool_t, OnCodeObjectTracingIfPcSamplingEnabled_F
 {
     m_payload.code_object_id = 1;
     m_env_parameters->set_pc_sampling_mode("host_trap");
-    code_object_tracing_callback(m_pc_sampling_record, nullptr, &m_tool_data);
+    code_object_tracing_callback(m_pc_sampling_record, nullptr, m_tool_data.get());
 
     m_payload.code_object_id = 2;
     m_env_parameters->set_pc_sampling_mode("stochastic");
-    code_object_tracing_callback(m_pc_sampling_record, nullptr, &m_tool_data);
+    code_object_tracing_callback(m_pc_sampling_record, nullptr, m_tool_data.get());
 
     const auto& calls = m_pc_sampling_collector->get_on_code_object_load_info();
     EXPECT_EQ(calls.size(), 2);
@@ -280,7 +284,7 @@ TEST_F(test_rocprofiler_compute_tool_t, OnCodeObjectTracingIfPcSamplingEnabled_F
 TEST_F(test_rocprofiler_compute_tool_t, OnCodeObjectTracingIfPcSamplingDisabled_DoesntForwardToSdkCallbacks)
 {
     m_env_parameters->set_pc_sampling_mode("disabled");
-    code_object_tracing_callback(m_pc_sampling_record, nullptr, &m_tool_data);
+    code_object_tracing_callback(m_pc_sampling_record, nullptr, m_tool_data.get());
 
     const auto& calls = m_pc_sampling_collector->get_on_code_object_load_info();
     EXPECT_EQ(calls.size(), 0);
@@ -299,9 +303,10 @@ void test_rocprofiler_compute_tool_t::SetUp()
     m_counters_writer       = std::make_shared<mock_counters_writer_t>();
     m_sdk_callbacks         = std::make_shared<mock_sdk_callbacks_t>();
     m_pc_sampling_collector = std::make_shared<mock_pc_sampling_collector_t>();
+    m_tool_data = std::make_unique<tool_data_t>();
 
-    m_tool_data.pc_sampling_collector.wlock([&](auto& ptr) { ptr = m_pc_sampling_collector; });
-    m_tool_data.sdk_callbacks = m_sdk_callbacks;
+    m_tool_data->pc_sampling_collector.wlock([&](auto& ptr) { ptr = m_pc_sampling_collector; });
+    m_tool_data->sdk_callbacks = m_sdk_callbacks;
 
     test_knobs::set_env_parameters(m_env_parameters);
     test_knobs::set_sdk_wrapper(m_sdk_wrapper);
