@@ -73,12 +73,7 @@ def main() -> None:
     cmd = [str(amdsmitst_bin)] + build_test_filter(os.getenv("TEST_TYPE", "full"))
 
     logging.info(f"++ Exec [{test_dir}]$ {shlex.join(cmd)}")
-    subprocess.run(
-        cmd,
-        cwd=test_dir,
-        env=env,
-        check=True,
-    )
+    subprocess.run(cmd, cwd=test_dir, env=env, check=True)
 
 
 if __name__ == "__main__":
