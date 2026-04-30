@@ -97,6 +97,7 @@ void TestFabricRead::Run(void) {
         std::cout << "\t**amdsmi_get_gpu_fabric_info() is not supported"
                      " on this system" << std::endl;
       }
+      continue;
     } else if (err != AMDSMI_STATUS_SUCCESS && err != AMDSMI_STATUS_NO_DATA) {
       CHK_ERR_ASRT(err)
     } else {
