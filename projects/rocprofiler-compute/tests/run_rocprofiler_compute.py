@@ -8,6 +8,7 @@ import os
 import shlex
 import subprocess
 from pathlib import Path
+from typing import Dict, List, Optional
 
 PROJECT_NAME = "rocprofiler-compute"
 
@@ -30,6 +31,13 @@ QUICK_TESTS = [
 logging.basicConfig(level=logging.INFO)
 
 
+def path_from_env(name: str) -> Optional[Path]:
+    value = os.getenv(name)
+    if not value:
+        return None
+    return Path(value)
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Run installed rocprofiler-compute tests."
@@ -37,7 +45,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--rocm-path",
         type=Path,
-        default=os.getenv("ROCM_PATH"),
+        default=path_from_env("ROCM_PATH"),
         help="ROCm install prefix. Defaults to ROCM_PATH or the runner location.",
     )
     parser.add_argument(
@@ -49,7 +57,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def get_rocm_path(
-    script_path: Path, rocm_path: Path | None, test_dir: Path | None
+    script_path: Path, rocm_path: Optional[Path], test_dir: Optional[Path]
 ) -> Path:
     if rocm_path is not None:
         return rocm_path.resolve()
@@ -69,7 +77,7 @@ def get_rocm_path(
     raise RuntimeError("ROCM_PATH is required when the runner is not installed.")
 
 
-def prepend_env_path(env: dict[str, str], key: str, paths: list[Path]) -> None:
+def prepend_env_path(env: Dict[str, str], key: str, paths: List[Path]) -> None:
     existing = env.get(key)
     values = [str(path) for path in paths]
     if existing:
@@ -77,7 +85,22 @@ def prepend_env_path(env: dict[str, str], key: str, paths: list[Path]) -> None:
     env[key] = os.pathsep.join(values)
 
 
-def setup_env(rocm_path: Path) -> dict[str, str]:
+def rocm_lib_dirs(rocm_path: Path) -> List[Path]:
+    candidates = [rocm_path / "lib", rocm_path / "lib64"]
+    lib_dirs = [path for path in candidates if path.is_dir()]
+    if not lib_dirs:
+        raise FileNotFoundError(
+            f"Could not find ROCm library directory under {rocm_path}"
+        )
+    sysdeps_dirs = [
+        lib_dir / "rocm_sysdeps" / "lib"
+        for lib_dir in lib_dirs
+        if (lib_dir / "rocm_sysdeps" / "lib").is_dir()
+    ]
+    return lib_dirs + sysdeps_dirs
+
+
+def setup_env(rocm_path: Path) -> Dict[str, str]:
     env = os.environ.copy()
     env["ROCM_PATH"] = str(rocm_path)
 
@@ -85,13 +108,13 @@ def setup_env(rocm_path: Path) -> dict[str, str]:
     prepend_env_path(
         env,
         "LD_LIBRARY_PATH",
-        [rocm_path / "lib", rocm_path / "lib" / "rocm_sysdeps" / "lib"],
+        rocm_lib_dirs(rocm_path),
     )
 
     return env
 
 
-def build_ctest_command() -> list[str]:
+def build_ctest_command() -> List[str]:
     shard_index = int(os.getenv("SHARD_INDEX", "1")) - 1
     total_shards = int(os.getenv("TOTAL_SHARDS", "1"))
 
@@ -120,6 +143,8 @@ def main() -> None:
         if args.test_dir is not None
         else rocm_path / "libexec" / PROJECT_NAME
     )
+    if not test_dir.is_dir():
+        raise FileNotFoundError(f"Could not find rocprofiler-compute tests: {test_dir}")
     env = setup_env(rocm_path)
     cmd = build_ctest_command()
 
