@@ -73,8 +73,8 @@ project_map = {
     # the full math library stack. This matches nightly test coverage for gfx94x.
     "runtimes": {
         "cmake_options": ["-DTHEROCK_ENABLE_ALL=ON"],
-        #TODO - Enable miopen and rocwmma once they start passing in ci-nightly
-        "projects_to_test": "hip-tests, hipblas, hipblaslt, hipcub, hipfft, hiprand, hipsolver, hipsparse, hipsparselt, miopenprovider, rocblas, rocfft, rocgdb, rocprim, rocprofiler-sdk, rocr-debug-agent, rocrand, rocroller, rocrtst, rocsolver, rocsparse, rocthrust",
+        #TODO - Enable miopen, miopenprovider and rocwmma once they start passing in ci-nightly
+        "projects_to_test": "hip-tests, hipblas, hipblaslt, hipcub, hipfft, hiprand, hipsolver, hipsparse, hipsparselt, rocblas, rocfft, rocgdb, rocprim, rocprofiler-sdk, rocr-debug-agent, rocrand, rocroller, rocrtst, rocsolver, rocsparse, rocthrust",
     },
     "all": {
         "cmake_options": ["-DTHEROCK_ENABLE_ALL=ON"],
