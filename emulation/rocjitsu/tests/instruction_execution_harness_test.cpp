@@ -224,4 +224,91 @@ TEST(InstructionExecutionHarness, Rdna4) { RUN_HARNESS(rdna4, ROCJITSU_CODE_ARCH
 
 #undef RUN_HARNESS
 
+/// @brief Targeted test for s_setreg_imm32_b32: verifies that the imm32
+/// literal is correctly read from the instruction encoding and written to
+/// the STATUS register bitfield.
+TEST(HwregTest, SetregImm32WritesStatus) {
+  amdgpu::GpuMemory gpu_mem("hwreg_test_mem");
+  amdgpu::L2Cache l2("hwreg_test_l2");
+
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA4;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 106;
+  cfg.vgprs_per_wf = 256;
+  cfg.lds_size_kb = 64;
+
+  auto cu = amdgpu::ComputeUnitCore::create("cdna4", cfg, &gpu_mem, &l2);
+  ASSERT_NE(cu, nullptr);
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+
+  // Encode s_setreg_imm32_b32 targeting STATUS (hwreg=1), offset=0, size=32.
+  // SOPK encoding: [31:28]=0xB, [27:23]=op(20), [22:16]=sdst(0), [15:0]=simm16(hwreg)
+  // hwreg encoding: reg_id | (offset << 6) | ((size-1) << 11)
+  //               = 1 | (0 << 6) | (31 << 11) = 0xF801
+  // Word 1: imm32 literal value to write
+  constexpr uint32_t kSopkEncoding = 0xBu << 28;
+  constexpr uint32_t kSetregImm32Op = 20u << 23;
+  constexpr uint32_t kHwregStatus32 = 1u | (0u << 6) | (31u << 11);
+  constexpr uint32_t kImm32Value = 0xDEADBEEF;
+  const uint32_t words[] = {kSopkEncoding | kSetregImm32Op | kHwregStatus32, kImm32Value};
+
+  std::unique_ptr<Instruction> inst(decoder->decode(words));
+  ASSERT_NE(inst, nullptr) << "Failed to decode s_setreg_imm32_b32";
+  EXPECT_EQ(std::string_view(inst->mnemonic()).substr(0, 16), "s_setreg_imm32_b");
+
+  auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+  ASSERT_NE(wf, nullptr);
+
+  wf->set_status_raw(0);
+  cu->execute_instruction(inst.get(), *wf);
+  EXPECT_EQ(wf->status_raw(), kImm32Value)
+      << "s_setreg_imm32_b32 did not write imm32 to STATUS register";
+
+  cu->reset_all_wf();
+}
+
+/// @brief Targeted test for s_setreg_imm32_b32 with partial bitfield write.
+TEST(HwregTest, SetregImm32PartialBitfield) {
+  amdgpu::GpuMemory gpu_mem("hwreg_partial_mem");
+  amdgpu::L2Cache l2("hwreg_partial_l2");
+
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA4;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 106;
+  cfg.vgprs_per_wf = 256;
+  cfg.lds_size_kb = 64;
+
+  auto cu = amdgpu::ComputeUnitCore::create("cdna4", cfg, &gpu_mem, &l2);
+  ASSERT_NE(cu, nullptr);
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+
+  // Write bits[11:8] of STATUS (offset=8, size=4).
+  // hwreg = 1 | (8 << 6) | (3 << 11) = 1 | 0x200 | 0x1800 = 0x1A01
+  constexpr uint32_t kSopk = 0xBu << 28;
+  constexpr uint32_t kOp = 20u << 23;
+  constexpr uint32_t kHwreg = 1u | (8u << 6) | (3u << 11);
+  constexpr uint32_t kImm32 = 0xFFFFFFFF;
+  const uint32_t words[] = {kSopk | kOp | kHwreg, kImm32};
+
+  std::unique_ptr<Instruction> inst(decoder->decode(words));
+  ASSERT_NE(inst, nullptr);
+
+  auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+  ASSERT_NE(wf, nullptr);
+
+  wf->set_status_raw(0xAAAAAAAA);
+  cu->execute_instruction(inst.get(), *wf);
+  // Bits[11:8] should be 0xF (from imm32=0xFFFFFFFF masked to 4 bits),
+  // all other bits should be unchanged from 0xAAAAAAAA.
+  EXPECT_EQ(wf->status_raw(), 0xAAAAAfAAu) << "Partial bitfield write to STATUS incorrect";
+
+  cu->reset_all_wf();
+}
+
 } // namespace
