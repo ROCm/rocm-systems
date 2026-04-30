@@ -56,9 +56,9 @@
 #include "amd_smi/impl/amd_smi_uuid.h"
 #include "amd_smi/impl/amd_smi_utils.h"
 
-#include "dxcore_loader.h"
-#include "platform.h"
-#include "device.h"
+#include "shared/include/dxcore_loader.h"
+#include "shared/include/platform.h"
+#include "shared/include/device.h"
 
 // a global instance of std::mutex to protect data passed during threads
 std::mutex myMutex;

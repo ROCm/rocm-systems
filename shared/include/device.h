@@ -1,13 +1,13 @@
-#ifndef _WSL_INC_WDDM_DEVICE_H_
-#define _WSL_INC_WDDM_DEVICE_H_
+#ifndef _WSL_SHARED_INC_DEVICE_H_
+#define _WSL_SHARED_INC_DEVICE_H_
 
 #include <memory>
 #include <vector>
 
-#include "d3dkmt_types.h"
-#include "gpu_info.h"
-#include "status.h"
-#include "thunk_proxy/thunk_proxy.h"
+#include "shared/include/d3dkmt_types.h"
+#include "shared/include/gpu_info.h"
+#include "shared/include/status.h"
+#include "shared/include/thunk_proxy/thunk_proxy.h"
 
 namespace wsl {
 namespace thunk {

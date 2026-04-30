@@ -2,7 +2,7 @@
  * Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
  */
 
-#include "dxcore_loader.h"
+#include "shared/include/dxcore_loader.h"
 #include <cstdlib>
 #include <cstring>
 #include <iostream>

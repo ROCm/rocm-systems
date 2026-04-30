@@ -43,8 +43,8 @@
 #ifndef _WSL_THUNK_INC_PLATFORM_H_
 #define _WSL_THUNK_INC_PLATFORM_H_
 
-#include "lda_chain.h"
-#include "utils.h"
+#include "shared/include/lda_chain.h"
+#include "shared/include/utils.h"
 #include <vector>
 
 namespace wsl {

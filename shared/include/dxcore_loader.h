@@ -23,7 +23,7 @@
 #ifndef DXG_SHARED_DXCORE_LOADER_H
 #define DXG_SHARED_DXCORE_LOADER_H
 
-#include "d3dkmt_types.h"
+#include "shared/include/d3dkmt_types.h"
 #include <dlfcn.h>
 #include <mutex>
 

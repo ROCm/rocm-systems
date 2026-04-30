@@ -40,7 +40,7 @@
 //
 ////////////////////////////////////////////////////////////////////////////////
 
-#include "status.h"
+#include "shared/include/status.h"
 
 const char* ErrorCodeToString(const ErrorCode code) {
   switch (code) {

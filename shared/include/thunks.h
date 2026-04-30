@@ -43,10 +43,10 @@
 #ifndef SHARED_THUNKS_H
 #define SHARED_THUNKS_H
 
-#include "status.h"
-#include "d3dkmt_types.h"
-#include "dxcore_loader.h"
-#include "lda_chain.h"
+#include "shared/include/status.h"
+#include "shared/include/d3dkmt_types.h"
+#include "shared/include/dxcore_loader.h"
+#include "shared/include/lda_chain.h"
 
 namespace wsl {
 namespace thunk {

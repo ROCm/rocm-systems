@@ -42,8 +42,10 @@ set_target_properties(dxg_shared PROPERTIES
 
 target_include_directories(dxg_shared
     PUBLIC
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-        $<INSTALL_INTERFACE:include>
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/..>
+        $<INSTALL_INTERFACE:>
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
 target_include_directories(dxg_shared SYSTEM PRIVATE ${WIN_SDK})
