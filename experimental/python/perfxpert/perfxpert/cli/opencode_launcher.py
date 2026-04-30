@@ -624,25 +624,44 @@ def _run_uninstall(remaining_argv: list[str]) -> int:
     is imported lazily so unrelated subcommands don't pay the import
     cost.
     """
-    # Parse dispatcher flags (--yes / -y / --quiet).
+    usage = (
+        "Usage: perfxpert-code uninstall "
+        "[--dry-run] [--yes|-y] [--quiet] {claude,gemini,codex}\n"
+    )
+    if any(a in ("--help", "-h") for a in remaining_argv):
+        sys.stdout.write(usage)
+        return 0
+
+    # Parse dispatcher flags in either position so
+    # `uninstall claude --dry-run` and `uninstall --dry-run claude` match.
     assume_yes = False
     quiet = False
-    idx = 0
-    while idx < len(remaining_argv):
-        a = remaining_argv[idx]
+    dry_run = False
+    backend: str | None = None
+    for a in remaining_argv:
         if a in ("--yes", "-y"):
             assume_yes = True
         elif a == "--quiet":
             quiet = True
+        elif a == "--dry-run":
+            dry_run = True
+        elif a.startswith("-"):
+            sys.stderr.write(f"perfxpert-code uninstall: unknown option {a!r}.\n")
+            sys.stderr.write(f"  {usage}")
+            return 2
+        elif backend is None:
+            backend = a
         else:
-            break
-        idx += 1
-    backend = remaining_argv[idx] if idx < len(remaining_argv) else None
+            sys.stderr.write(
+                f"perfxpert-code uninstall: unexpected argument {a!r}.\n"
+            )
+            sys.stderr.write(f"  {usage}")
+            return 2
 
     if backend is None:
         sys.stderr.write(
             "perfxpert-code uninstall: which backend?\n"
-            "  Usage: perfxpert-code uninstall {claude,gemini,codex}\n"
+            f"  {usage}"
         )
         return 2
 
@@ -674,10 +693,16 @@ def _run_uninstall(remaining_argv: list[str]) -> int:
     plan = adapter.plan(cwd)
     if not quiet:
         sys.stderr.write(
-            f"perfxpert-code uninstall {backend}: will remove\n"
+            f"perfxpert-code uninstall {backend}: "
+            f"{'would remove' if dry_run else 'will remove'}\n"
         )
         for action in plan.actions:
             sys.stderr.write(f"    - (reverse) {action}\n")
+        if dry_run:
+            sys.stderr.write("perfxpert-code uninstall: dry-run; no files changed.\n")
+
+    if dry_run:
+        return 0
 
     if not assume_yes and os.environ.get("PERFXPERT_ASSUME_CONSENT", "") not in {
         "1",

@@ -80,6 +80,23 @@ def test_uninstall_unknown_backend_returns_2(
     assert "unknown backend" in err.lower()
 
 
+def test_uninstall_help_returns_0(capsys: pytest.CaptureFixture) -> None:
+    rc = main(["uninstall", "--help"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "Usage: perfxpert-code uninstall" in out
+    assert "--dry-run" in out
+
+
+def test_uninstall_rejects_unknown_option(
+    isolated_home: Path, capsys: pytest.CaptureFixture
+) -> None:
+    rc = main(["uninstall", "claude", "--bogus"])
+    assert rc == 2
+    err = capsys.readouterr().err
+    assert "unknown option" in err.lower()
+
+
 def test_uninstall_codex_routes_to_adapter(
     isolated_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -136,6 +153,42 @@ def test_install_then_uninstall_round_trip_claude(
     # Pointer + cache gone.
     assert not pointer.exists()
     assert not agents_cache.exists()
+
+
+def test_uninstall_dry_run_does_not_remove_files(
+    project_cwd: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    monkeypatch.setattr("shutil.which", lambda _: None)  # no claude CLI
+    from perfxpert.cli._backend.claude import ClaudeCodeAdapter
+
+    adapter = ClaudeCodeAdapter()
+    adapter.install(project_cwd, scope="project")
+    pointer = project_cwd / "CLAUDE.local.md"
+    agents_cache = project_cwd / ".perfxpert" / "AGENTS.md"
+    assert pointer.is_file()
+    assert agents_cache.is_file()
+
+    rc = main(["uninstall", "claude", "--dry-run"])
+    assert rc == 0
+    err = capsys.readouterr().err
+    assert "dry-run" in err
+    assert pointer.is_file()
+    assert agents_cache.is_file()
+
+
+def test_uninstall_dry_run_accepts_flags_before_backend(
+    project_cwd: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("shutil.which", lambda _: None)  # no claude CLI
+    from perfxpert.cli._backend.claude import ClaudeCodeAdapter
+
+    adapter = ClaudeCodeAdapter()
+    adapter.install(project_cwd, scope="project")
+    pointer = project_cwd / "CLAUDE.local.md"
+
+    rc = main(["uninstall", "--dry-run", "--yes", "claude"])
+    assert rc == 0
+    assert pointer.is_file()
 
 
 def test_uninstall_refuses_on_pointer_drift(

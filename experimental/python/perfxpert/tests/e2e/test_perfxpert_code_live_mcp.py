@@ -83,6 +83,7 @@ def test_perfxpert_code_calls_mcp_and_returns_expected_value(
         model = "anthropic/claude-3-5-haiku-20241022"
 
     xdg_root = tmp_path / "opencode-xdg"
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(xdg_root / "config"))
     monkeypatch.setenv("XDG_DATA_HOME", str(xdg_root / "data"))
     monkeypatch.setenv("XDG_STATE_HOME", str(xdg_root / "state"))
     monkeypatch.setenv("XDG_CACHE_HOME", str(xdg_root / "cache"))
