@@ -6,14 +6,14 @@
 # =============================================================================
 
 Panel Config:
-  id: 1500
+  id: 1400
   title: Graphics Core Efficiency Arbiter (GCEA)
   data source:
   # =========================================================================
   # GCEA DRAM (System Memory) Read Interface
   # =========================================================================
   - metric_table:
-      id: 1501
+      id: 1401
       title: "DRAM Read Interface"
       header:
         metric: Metric
@@ -47,7 +47,7 @@ Panel Config:
   # GCEA DRAM (System Memory) Write Interface
   # =========================================================================
   - metric_table:
-      id: 1502
+      id: 1402
       title: "DRAM Write Interface"
       header:
         metric: Metric
@@ -81,7 +81,7 @@ Panel Config:
   # GCEA Arbiter Statistics
   # =========================================================================
   - metric_table:
-      id: 1504
+      id: 1404
       title: "System Arbiter (SARB)"
       header:
         metric: Metric
@@ -120,7 +120,7 @@ Panel Config:
   # GCEA Return Interface
   # =========================================================================
   - metric_table:
-      id: 1505
+      id: 1405
       title: "Return Interface"
       header:
         metric: Metric
@@ -146,6 +146,7 @@ Panel Config:
           unit: (Count + $normUnit)
 
   metrics_description:
+    # Table 1401 - DRAM Read Interface
     DRAM Read Requests: >-
       Number of read requests sent to system memory. RDNA 3.5 APUs use DDR5/LPDDR5 system
       memory. High read request counts indicate memory-intensive workloads that may be
@@ -162,6 +163,7 @@ Panel Config:
       Total volume of read data transferred from system memory. This metric helps quantify
       memory read bandwidth consumption. Compare with theoretical bandwidth to assess
       memory utilization.
+    # Table 1402 - DRAM Write Interface
     DRAM Write Requests: >-
       Number of write requests sent to system memory. High write request counts indicate
       write-intensive workloads. Combined with read requests, this shows total memory
@@ -176,6 +178,7 @@ Panel Config:
     DRAM Write Size (32B increments): >-
       Total volume of write data transferred to system memory. This quantifies memory
       write bandwidth consumption. High values indicate write-intensive workloads.
+    # Table 1404 - System Arbiter (SARB)
     SARB Busy: >-
       Percentage of cycles the System Arbiter is actively processing memory requests.
       High busy percentage indicates significant off-chip memory traffic. This is a
@@ -195,6 +198,7 @@ Panel Config:
       Memory requests specifically destined for system memory (DRAM). This excludes
       requests serviced by other system components. High counts indicate memory-intensive
       workloads.
+    # Table 1405 - Return Interface
     Read Returns: >-
       Number of completed read operations returning data from system memory. Each return
       delivers requested data to the GPU caches. High counts indicate successful memory

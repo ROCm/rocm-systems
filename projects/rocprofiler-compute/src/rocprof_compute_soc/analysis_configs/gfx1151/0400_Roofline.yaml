@@ -2,7 +2,7 @@
 # RDNA3.5 (gfx1151) - RDNA3.5 Roofline Performance Metrics
 # =============================================================================
 # RDNA 3.5: VALU FLOP roofline from SQ_INSTS_VALU*; WMMA (separate ISA) is not a dedicated row.
-# Cache hierarchy: TCP Cache (L0) -> GL1C (L1) -> GL2C (L2) -> System Memory
+# Cache hierarchy: TCP Cache (GL0) -> GL1 Cache -> GL2 Cache -> System Memory
 # =============================================================================
 
 Panel Config:
@@ -75,6 +75,7 @@ Panel Config:
           unit: GFLOP/s
 
   metrics_description:
+    # Table 401 - Roofline Performance Rates
     VALU FLOPs: >-
       Floating-point operations per second on the VALU. Peak is based on
       FP32 FMA single-issue (128 FLOPs/CU/cycle). VOPD dual-issue doubles
@@ -100,18 +101,19 @@ Panel Config:
       Achieved bandwidth for Local Data Share memory operations. LDS provides
       high-bandwidth, low-latency shared memory within a workgroup. Compare against
       peak to identify if LDS bandwidth is limiting performance.
-    AI GL0: >-
-      Arithmetic Intensity relative to the GL0 cache (TCP Cache). Higher values indicate
-      more compute operations per byte of data loaded, suggesting compute-bound
-      behavior. Lower values suggest memory-bound behavior limited by GL0 bandwidth.
-    AI GL1: >-
-      Arithmetic Intensity relative to the GL1 cache. This metric shows compute
-      density relative to GL1 cache traffic. Kernels with high AI GL1 but low AI GL0
-      benefit from GL0 cache locality.
+    # Table 402 - Roofline Plot Points
     AI GL2: >-
       Arithmetic Intensity relative to the GL2 cache. This metric shows compute
       density relative to GL2 cache traffic. Higher values indicate better cache reuse
       at GL1, while lower values suggest significant GL1 miss rates.
+    AI GL1: >-
+      Arithmetic Intensity relative to the GL1 cache. This metric shows compute
+      density relative to GL1 cache traffic. Kernels with high AI GL1 but low AI GL0
+      benefit from GL0 cache locality.
+    AI GL0: >-
+      Arithmetic Intensity relative to the GL0 cache (TCP Cache). Higher values indicate
+      more compute operations per byte of data loaded, suggesting compute-bound
+      behavior. Lower values suggest memory-bound behavior limited by GL0 bandwidth.
     Performance (GFLOPs): >-
       Achieved compute throughput measured in billions of floating-point operations
       per second. This value, combined with arithmetic intensity, determines the

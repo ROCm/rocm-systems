@@ -98,7 +98,7 @@ Panel Config:
   # =========================================================================
   - metric_table:
       id: 303
-      title: "TCP Cache (Vector GL0)"
+      title: "TCP Cache (GL0 Vector Cache)"
       cli_style: mem_chart
       tui_style: mem_chart
       comparable: false
@@ -341,6 +341,7 @@ Panel Config:
           unit: (Count + $normUnit)
 
   metrics_description:
+    # Table 301 - Instruction Cache (ICache Requests, ICache Utilization, ICache Hit Rate, ICache Miss Rate, ICache Request Stall Rate, ICache-GL1 Read Bandwidth)
     ICache Utilization: >-
       Percentage of shader busy cycles spent actively servicing instruction fetch requests.
       High utilization indicates the instruction cache is keeping pace with shader execution.
@@ -356,6 +357,7 @@ Panel Config:
       cache. High miss rates increase instruction fetch latency and may cause shader stalls.
       Consider reducing kernel code size or improving branch coherence.
 
+    # Table 302 - Scalar Data Cache (Dcache Requests, Dcache Utilization, Dcache Hit Rate, Dcache Request Stall Rate, Dcache-GL1 Read Bandwidth)
     Dcache Utilization: >-
       Percentage of shader busy cycles spent actively servicing scalar data cache requests.
       The scalar data cache holds uniform data accessed by scalar instructions. High
@@ -366,11 +368,13 @@ Panel Config:
       efficient reuse of constant and uniform data. Low hit rates may indicate excessive
       unique constant data or poor temporal locality.
 
+    # Table 303 - TCP Cache (TCP Total/Read/Write/Miss Requests, GL0 Cache Hit Rate, GL0 Cache BW)
     GL0 Cache Hit Rate (TCP Cache): >-
       Percentage of GL0 vector cache (TCP Cache) requests serviced from cache. TCP Cache is the
       first-level cache for vector memory operations. Higher hit rates reduce traffic
       to the GL1 cache and lower memory access latency for vector operations.
 
+    # Table 304 - LDS (LDS Instructions, LDS Atomic Instructions, LDS Instruction/Wait Cycles, LDS Bank Conflict Rate, LDS Estimated Bandwidth)
     LDS Atomic Instructions: >-
       Number of atomic operations executed on Local Data Share memory. Atomic operations
       provide thread-safe read-modify-write operations but may serialize if multiple
@@ -386,6 +390,8 @@ Panel Config:
       effective throughput after accounting for bank conflicts. RDNA 3.5 provides 32 LDS
       banks per compute unit for high-bandwidth shared memory access.
 
+    # Table 305 - TCP-GL1 Interface (Read/Write Requests and Bandwidth - no descriptions)
+    # Table 306 - GL1 Cache
     GL1 Cache Utilization: >-
       Percentage of cycles the GL1 cache is actively processing requests. GL1 cache is
       shared across multiple workgroup processors within a shader engine. High utilization
@@ -396,11 +402,14 @@ Panel Config:
       to the L2 cache and improve memory access latency. Low hit rates may indicate poor
       data locality or working sets exceeding L1 capacity.
 
+    # Table 307 - GL1-GL2 Interface (Read/Write Requests, Bandwidth, Latency - no descriptions)
+    # Table 308 - GL2 Cache
     GL2 Cache Hit Rate: >-
       Percentage of L2 cache requests that hit in cache. GL2 cache is the GPU's final
       on-chip cache before accessing system memory via GCEA. High hit rates reduce memory
       bandwidth pressure. Low hit rates cause traffic to system memory, increasing latency.
 
+    # Table 309 - Graphics Core Efficiency Arbiter (GCEA)
     SARB Utilization: >-
       Percentage of cycles the System Arbiter is actively processing memory requests.
       The arbiter handles traffic between the GPU caches and system memory interface.

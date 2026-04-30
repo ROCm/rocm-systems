@@ -308,14 +308,19 @@ Panel Config:
           unit: Percent
 
   metrics_description:
+    # Table 701 - Utilization
     WGP Utilization: >-
       Percentage of GPU active cycles where the Workgroup Processor is busy executing
       wavefronts. RDNA 3.5 WGPs contain two compute units, each with dual SIMD32 units.
       Low utilization may indicate insufficient parallelism or resource bottlenecks.
+    # Table 702 - Wavefront Launch Stats (Grid Size, Workgroup Size, VGPRs, SGPRs, LDS Allocation, Scratch Allocation - no descriptions needed for dispatch info)
+    # Table 703 - Wave Dispatch (Dispatched Waves, Dispatched Threads - no descriptions needed)
+    # Table 704 - Wave Life
     Wave Life: >-
       Average number of cycles from wavefront creation to completion. Longer wave life
       indicates more execution time per wavefront, which may be due to complex kernels,
       memory latency, or synchronization waits.
+    # Table 705 - Wave Instruction Mix
     Total Instructions: >-
       Total number of instructions executed across all wavefronts. This provides an
       overall measure of computational work. Compare with specific instruction types
@@ -340,6 +345,8 @@ Panel Config:
       Number of Local Data Share instructions executed. LDS provides fast shared memory
       within a workgroup. High counts indicate active use of shared memory for
       inter-work-item communication.
+    # Table 706 - VMEM Instruction Mix (Instructions - VMEM Flat, TEX Load, TEX Store, Flat Load, Flat Store - no descriptions)
+    # Table 707 - LDS Instruction Mix
     LDS Direct Load Instructions: >-
       Number of direct LDS load instructions. Direct loads fetch data from LDS without
       address indirection. These are typically faster than indexed LDS operations.
@@ -350,6 +357,7 @@ Panel Config:
       Number of LDS parameter loads executed in wave32 mode. RDNA 3.5 supports both
       wave32 and wave64 execution modes, with wave32 providing lower latency for
       some operations.
+    # Table 709 - Wait State Analysis
     Wait for Any: >-
       Percentage of wavefront lifetime spent waiting for any reason. High wait
       percentages indicate opportunities to improve performance through better
@@ -366,10 +374,12 @@ Panel Config:
       Percentage of wavefront lifetime spent waiting for memory operation counters.
       High values indicate memory latency is impacting performance. Consider improving
       memory access patterns or increasing occupancy to hide latency.
+    # Table 710 - Instruction Cache
     Icache Hit Rate: >-
       Percentage of instruction cache accesses that hit. High hit rates are essential
       for sustained instruction throughput. Low rates may indicate large kernels or
       divergent branches causing instruction cache thrashing.
+    # Table 711 - Scalar Data Cache
     Dcache Hit Rate: >-
       Percentage of scalar data cache accesses that hit. High hit rates indicate
       efficient reuse of constant and uniform data. Low rates may suggest excessive

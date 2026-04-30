@@ -55,10 +55,12 @@ Panel Config:
           unit: Waves/cycle
 
   metrics_description:
+    # Table 601 - SPI Utilization
     SPI Busy: >-
       Percentage of GPU active cycles where the Shader Processor Input is busy dispatching
       wavefronts. High SPI busy indicates active workload dispatch. Low values may suggest
       insufficient parallelism or dispatch bottlenecks limiting GPU utilization.
+    # Table 602 - Wave Dispatch Statistics
     Compute Wave Dispatches: >-
       Total number of compute wavefronts dispatched by the Shader Processor Input. This
       represents the work scheduled for execution on the shader engines. Compare with

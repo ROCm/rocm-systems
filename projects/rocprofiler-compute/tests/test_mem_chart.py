@@ -298,17 +298,17 @@ class TestGetSampleMetrics:
         # Check for key bandwidth metrics
         assert "TCP-GL1 Read Bandwidth" in metrics
         assert "GL1-GL2 Read Bandwidth" in metrics
-        assert "GL2C Read Bandwidth" in metrics
+        assert "GL2 Cache Read BW" in metrics
         assert "DRAM Read Bandwidth" in metrics
 
         # Check for utilization metrics
-        assert "GL1C Utilization" in metrics
-        assert "GL2C Utilization" in metrics
+        assert "GL1 Cache Utilization" in metrics
+        assert "GL2 Cache Utilization" in metrics
 
         # Check for hit rate metrics
-        assert "TCP Hit Rate" in metrics
-        assert "GL1C Hit Rate" in metrics
-        assert "GL2C Hit Rate" in metrics
+        assert "GL0 Cache Hit Rate (TCP Cache)" in metrics
+        assert "GL1 Cache Hit Rate" in metrics
+        assert "GL2 Cache Hit Rate" in metrics
 
     def test_bandwidth_values_in_bytes_per_second(self):
         """Test that bandwidth values are in Bytes/s format."""
@@ -384,10 +384,10 @@ class TestPlotMemChartGfx11:
 
     def test_normalize_mem_chart_metrics_flat_ordered(self):
         """Metrics are flattened to panel YAML order; extras dropped; missing None."""
-        raw = {"TCP Hit Rate": 1.0, "noise_key": 99}
+        raw = {"GL0 Cache Hit Rate (TCP Cache)": 1.0, "noise_key": 99}
         norm = mem_chart_gfx11.normalize_mem_chart_metrics(raw)
         assert list(norm.keys()) == list(mem_chart_gfx11.MEM_CHART_PANEL_METRIC_KEYS)
-        assert norm["TCP Hit Rate"] == 1.0
+        assert norm["GL0 Cache Hit Rate (TCP Cache)"] == 1.0
         assert "noise_key" not in norm
         assert norm["ICache Requests"] is None
 
@@ -524,7 +524,7 @@ class TestIntegrationGfx11:
         """Test chart with mixed bandwidth scales."""
         metrics = {
             "DRAM Read Bandwidth": 1.5e12,  # 1.5 TB/s
-            "GL2C Read Bandwidth": 500e9,  # 500 GB/s
+            "GL2 Cache Read BW": 500e9,  # 500 GB/s
             "GL1-GL2 Read Bandwidth": 100e6,  # 100 MB/s
             "TCP-GL1 Read Bandwidth": 50e3,  # 50 KB/s
         }

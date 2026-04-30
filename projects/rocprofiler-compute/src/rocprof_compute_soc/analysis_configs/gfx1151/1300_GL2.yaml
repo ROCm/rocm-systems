@@ -1,8 +1,8 @@
 # =============================================================================
-# RDNA3.5 (gfx1151) - RDNA3.5 GL2C (L2 Cache) Performance Metrics
+# RDNA3.5 (gfx1151) - RDNA3.5 GL2 Cache (L2 Cache) Performance Metrics
 # =============================================================================
-# GL2C is the GPU's final on-chip cache shared across all compute units
-# Cache hierarchy: TCP (L0) -> GL1C (L1) -> GL2C (L2) -> System Memory via GCEA
+# GL2 cache is the GPU's final on-chip cache shared across all compute units
+# Cache hierarchy: TCP Cache (GL0) -> GL1 Cache -> GL2 Cache -> System Memory via GCEA
 # =============================================================================
 
 Panel Config:
@@ -39,11 +39,11 @@ Panel Config:
           unit: (Count + $normUnit)
 
   # =========================================================================
-  # GL2C Request Statistics
+  # GL2 Cache Request Statistics
   # =========================================================================
   - metric_table:
       id: 1302
-      title: "GL2C Request Statistics"
+      title: "GL2 Cache Request Statistics"
       header:
         metric: Metric
         avg: Avg
@@ -83,11 +83,11 @@ Panel Config:
           unit: (Count + $normUnit)
 
   # =========================================================================
-  # GL2C Bandwidth
+  # GL2 Cache Bandwidth
   # =========================================================================
   - metric_table:
       id: 1303
-      title: "GL2C Bandwidth"
+      title: "GL2 Cache Bandwidth"
       header:
         metric: Metric
         avg: Avg
@@ -95,7 +95,7 @@ Panel Config:
         max: Max
         unit: Unit
       metric:
-        GL2C Read BW:
+        GL2 Cache Read BW:
           # 32/64/128 B read bins plus 96 B compressed reads; GL2C_EA_RDREQ_96B covers EA-side 96 B reads.
           avg: SUM(GL2C_READ_32_REQ_sum*32 + GL2C_READ_64_REQ_sum*64 + GL2C_READ_128_REQ_sum*128 + GL2C_COMPRESSED_READ_96_REQ_sum*96) / SUM((End_Timestamp - Start_Timestamp) / 1e9)
           min: MIN((GL2C_READ_32_REQ_sum*32 + GL2C_READ_64_REQ_sum*64 + GL2C_READ_128_REQ_sum*128 + GL2C_COMPRESSED_READ_96_REQ_sum*96) / ((End_Timestamp - Start_Timestamp) / 1e9))
@@ -109,42 +109,47 @@ Panel Config:
           unit: Bytes/s
 
   metrics_description:
+    # Table 1301 - GL2 Cache Performance
     GL2 Cache Hit Rate: >-
-      Percentage of L2 cache requests serviced from cache without accessing system memory.
-      GL2 cache is the GPU's final on-chip cache before accessing system memory via GCEA.
-      Higher hit rates significantly reduce memory bandwidth pressure and improve performance.
-    GL2C Hits: >-
-      Number of L2 cache requests that were serviced from cache. High hit counts relative
+      Percentage of GL2 cache requests serviced from cache without forwarding through
+      GCEA (Graphics Core Efficiency Arbiter). GL2 cache is the GPU's final on-chip cache
+      before accessing system memory. Higher hit rates significantly reduce memory bandwidth
+      pressure and improve performance.
+    GL2 Cache Hits: >-
+      Number of GL2 cache requests that were serviced from cache. High hit counts relative
       to total requests indicate effective caching. Low hit counts suggest memory-bound
       workloads or poor data locality.
-    GL2C Misses: >-
-      Number of L2 cache requests that missed and required fetching from system memory.
-      High miss counts indicate heavy memory traffic. Consider improving data locality
-      or reducing working set size.
+    GL2 Cache Misses: >-
+      Number of GL2 cache requests that missed and required fetching through GCEA
+      (Graphics Core Efficiency Arbiter). High miss counts indicate heavy memory traffic.
+      Consider improving data locality or reducing working set size.
+    # Table 1302 - GL2 Cache Request Statistics
     Total Requests: >-
-      Total number of requests received by the L2 cache from all L1 caches and other
+      Total number of requests received by the GL2 cache from all GL1 caches and other
       clients. This represents the aggregate memory traffic at the GPU's final on-chip cache.
     Read Requests: >-
-      Number of read requests to the L2 cache. High read counts indicate memory-intensive
-      load operations. Compare with hit rate to assess L2 cache effectiveness for reads.
+      Number of read requests to the GL2 cache. High read counts indicate memory-intensive
+      load operations. Compare with hit rate to assess GL2 cache effectiveness for reads.
     Write Requests: >-
-      Number of write requests to the L2 cache. Write traffic includes stores and cache
-      writebacks from L1. High write counts indicate write-intensive workloads.
+      Number of write requests to the GL2 cache. Write traffic includes stores and cache
+      writebacks from GL1. High write counts indicate write-intensive workloads.
     Atomic Requests: >-
-      Number of atomic memory operations processed by the L2 cache. Atomics provide
+      Number of atomic memory operations processed by the GL2 cache. Atomics provide
       thread-safe memory access but may serialize at contended addresses. High counts
       may impact performance.
     EA Read Requests (DRAM): >-
-      Number of read requests forwarded from L2 cache to system memory. This represents
-      L2 miss traffic that must be serviced by DRAM. High counts indicate memory-bound
+      Number of read requests forwarded from GL2 cache through GCEA (Graphics Core
+      Efficiency Arbiter). These requests go toward system memory, though they may
+      be served by system-level caches before reaching DRAM. High counts indicate memory-bound
       workloads.
     EA Write Requests (DRAM): >-
-      Number of write requests forwarded from L2 cache to system memory. This includes
-      evictions and writebacks. High counts indicate write-intensive workloads consuming
-      memory bandwidth.
-    GL2C Read BW: >-
-      Achieved read bandwidth at the L2 cache level. This represents total read traffic
-      from L1 caches to L2. High bandwidth indicates memory-intensive read patterns.
-    GL2C Write BW: >-
-      Achieved write bandwidth at the L2 cache level. This represents total write traffic
-      from L1 caches to L2. High bandwidth indicates memory-intensive write patterns.
+      Number of write requests forwarded from GL2 cache through GCEA (Graphics Core
+      Efficiency Arbiter). These include evictions and writebacks going toward system
+      memory. High counts indicate write-intensive workloads consuming memory bandwidth.
+    # Table 1303 - GL2 Cache Bandwidth
+    GL2 Cache Read BW: >-
+      Achieved read bandwidth at the GL2 cache level. This represents total read traffic
+      from GL1 caches to GL2. High bandwidth indicates memory-intensive read patterns.
+    GL2 Cache Write BW: >-
+      Achieved write bandwidth at the GL2 cache level. This represents total write traffic
+      from GL1 caches to GL2. High bandwidth indicates memory-intensive write patterns.
