@@ -618,58 +618,34 @@ Full documentation: `docker/mnctl/README.md`.
 
 ## 15. Decision Guide — Which Suite?
 
-```
-Does the test exercise a collective operation
-(AllReduce, AllGather, Broadcast, …)?
-│
-├─ YES → Suite A (rccl-UnitTests)
-│         Use TestBed::RunSimpleSweep(); follow any existing *Tests.cpp
-│
-└─ NO
-   │
-   Does the test access symbols hidden in Release builds
-   (internal functions, non-public struct members)?
-   │
-   ├─ NO
-   │   Does the test launch a __global__ GPU kernel?
-   │   │
-   │   ├─ YES → Suite G (test/device/ inside rccl-UnitTestsFixtures)
-   │   │         Use DeviceTestBase; follow test/device/TestOp128.cpp
-   │   │
-   │   └─ NO  → Suite B (rccl-UnitTestsFixtures) — plain GTest
-   │             Follow test/BitOpsTests.cpp
-   │
-   └─ YES (debug-only internals)
-       │
-       Does the test provide fake definitions of RCCL symbols
-       that override the real ones at link time?
-       │
-       ├─ YES → Suite D (rccl-UnitTestsMock)
-       │         Follow test/TransportTests.cpp
-       │
-       └─ NO
-           │
-           Does the test need alt_rsmi.cc compiled with
-           ARSMI_TEST_BUILD to expose static functions?
-           │
-           ├─ YES → Suite F (rccl-UnitTestsAltRsmi)
-           │
-           └─ NO
-               │
-               Does the test require multiple GPUs/ranks
-               communicating with each other?
-               │
-               ├─ YES → Suite E (rccl-UnitTestsMPI)
-               │         Follow test/transport/P2pMPITests.cpp
-               │         For log assertions: test/RegistrationMPITests.cpp
-               │         For custom comm config: test/CommMPITests.cpp
-               │
-               └─ NO  → Suite C (rccl-UnitTestsFixturesDebug)
-                         Does the code cache env vars in statics?
-                         ├─ YES → Use RUN_ISOLATED_TEST_WITH_ENV
-                         │         Follow test/ArgCheckTests.cpp
-                         └─ NO  → Plain GTest
-                                   Follow test/AllocTests.cpp
+```mermaid
+flowchart TD
+    A([Start]) --> B{"Collective operation?\n(AllReduce, AllGather,\nBroadcast, …)"}
+
+    B -- Yes --> SA["**Suite A** — rccl-UnitTests\nUse TestBed::RunSimpleSweep()\nFollow any existing *Tests.cpp"]
+
+    B -- No --> C{"Accesses symbols hidden\nin Release builds?\n(internal functions,\nnon-public struct members)"}
+
+    C -- No --> D{"Launches a\n__global__ GPU kernel?"}
+    D -- Yes --> SG["**Suite G** — test/device/\n(inside rccl-UnitTestsFixtures)\nUse DeviceTestBase\nFollow test/device/TestOp128.cpp"]
+    D -- No --> SB["**Suite B** — rccl-UnitTestsFixtures\nPlain GTest\nFollow test/BitOpsTests.cpp"]
+
+    C -- "Yes (debug-only internals)" --> E{"Provides fake RCCL symbol\ndefinitions that override\nreal ones at link time?"}
+
+    E -- Yes --> SD["**Suite D** — rccl-UnitTestsMock\nFollow test/TransportTests.cpp"]
+
+    E -- No --> F{"Needs alt_rsmi.cc compiled\nwith ARSMI_TEST_BUILD to\nexpose static functions?"}
+
+    F -- Yes --> SF["**Suite F** — rccl-UnitTestsAltRsmi"]
+
+    F -- No --> G{"Requires multiple GPUs/ranks\ncommunicating with each other?"}
+
+    G -- Yes --> SE["**Suite E** — rccl-UnitTestsMPI\nFollow test/transport/P2pMPITests.cpp\nLog assertions → test/RegistrationMPITests.cpp\nCustom comm config → test/CommMPITests.cpp"]
+
+    G -- No --> H{"Does the code cache\nenv vars in statics?"}
+
+    H -- Yes --> SC_env["**Suite C** — rccl-UnitTestsFixturesDebug\nUse RUN_ISOLATED_TEST_WITH_ENV\nFollow test/ArgCheckTests.cpp"]
+    H -- No --> SC_plain["**Suite C** — rccl-UnitTestsFixturesDebug\nPlain GTest\nFollow test/AllocTests.cpp"]
 ```
 
 ---
