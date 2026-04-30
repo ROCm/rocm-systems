@@ -395,7 +395,7 @@ inline bool isImageSupported() {
 
 inline bool isManagedMemorySupportedOnDevice(int device) {
   int managed = 0;
-  HIPCHECK(hipDeviceGetAttribute(&managed, hipDeviceAttributeManagedMemory, device));
+  HIP_CHECK(hipDeviceGetAttribute(&managed, hipDeviceAttributeManagedMemory, device));
   return managed != 0;
 }
 
