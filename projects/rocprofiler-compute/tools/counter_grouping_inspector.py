@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
-# Co-authored-by: @vedithal-amd
 """
 Counter grouping inspector for rocprofiler-compute.
 
@@ -23,16 +22,16 @@ Usage (from the ``rocprofiler-compute`` project root):
     ./tools/counter_grouping_inspector.py --arch gfx942 --output plan.svg
 """
 
-from __future__ import annotations
-
 import argparse
+import logging
 import re
 import sys
 import tempfile
 from collections.abc import Iterator
+from io import StringIO
 from pathlib import Path
-from typing import Any
-from unittest.mock import MagicMock, patch
+from types import SimpleNamespace
+from typing import Any, Optional
 
 # This file lives under tools/; add src/ to path for rocprof_compute_* imports.
 _SRC_DIR = Path(__file__).resolve().parent.parent / "src"
@@ -46,7 +45,9 @@ from rocprof_compute_soc.soc_base import (  # noqa: E402
     flat_counters_in_perfmon_file,
     is_tcc_channel_counter,
 )
+from utils.logger import console_error  # noqa: E402
 from utils.mi_gpu_spec import mi_gpu_specs  # noqa: E402
+from utils.utils_counter_defs import BUILD_IN_VARS  # noqa: E402
 from vendored import yaml  # noqa: E402
 
 
@@ -88,9 +89,6 @@ def parse_counters_from_text(text: str) -> tuple[set[str], set[str]]:
 def parse_counters(config_text: str) -> set[str]:
     """Extract all hardware counters from config text."""
     hw_counters, variables = parse_counters_from_text(config_text)
-
-    # Import BUILD_IN_VARS from utils_common for consistency
-    from utils.utils_common import BUILD_IN_VARS
 
     while variables:
         subvariables: set[str] = set()
@@ -149,10 +147,7 @@ def iter_yaml_metrics(
 
 
 def _rocprof_supported_superset(counters: set[str]) -> set[str]:
-    """
-    Return a fake rocprofiler avail set so ``perfmon_coalesce``skips \
-        unsupported warnings.
-    """
+    """Return a fake rocprofiler avail set so ``perfmon_coalesce`` skips unsupported warnings."""
     out = set(counters)
     for ctr in counters:
         if is_tcc_channel_counter(ctr):
@@ -163,39 +158,35 @@ def _rocprof_supported_superset(counters: set[str]) -> set[str]:
 def run_soc_detect_and_coalesce(
     arch: str,
     config_dir: Path,
-    filter_blocks: list[str] | None,
+    filter_blocks: Optional[list[str]],
     perfmon_config: dict[str, int],
     workload_root: Path,
 ) -> tuple[set[str], list[CounterFile]]:
-    """
-    Run SoC counter detection and perfmon coalesce;
-    write YAML under ``workload_root/perfmon/``.
-    """
-    mspec = MagicMock()
-    mspec.rocminfo_lines = None
-    mspec.num_xcd = 1
-    mspec.l2_banks = 4
+    """Run SoC counter detection and perfmon coalesce; write YAML under ``workload_root/perfmon/``."""
+    machine_spec = SimpleNamespace(
+        rocminfo_lines=None,
+        num_xcd=1,
+        l2_banks=4,
+    )
 
-    fb = list(filter_blocks) if filter_blocks else []
-    args = argparse.Namespace(
-        path=str(workload_root.resolve()),
+    filter_block_list = list(filter_blocks) if filter_blocks else []
+    cli_args = argparse.Namespace(
+        output_directory=str(workload_root.resolve()),
         config_dir=str(config_dir.resolve()),
-        filter_blocks=fb,
+        filter_blocks=filter_block_list,
         membw_analysis=False,
         set_selected=None,
         roof_only=False,
         spatial_multiplexing=None,
         no_roof=True,
         device=0,
-        output_directory=str(workload_root.resolve()),
     )
 
-    with patch("rocprof_compute_soc.soc_base.console_debug"):
-        soc = OmniSoC_Base(args, mspec)
+    soc = OmniSoC_Base(cli_args, machine_spec)
     soc.set_arch(arch)
     soc.set_perfmon_config(perfmon_config)
 
-    counters, _fb = soc.detect_counters()
+    counters, _unused_filter_blocks = soc.detect_counters()
     counters = counters - {"SQ_ACCUM_PREV_HIRES"}
     if not counters:
         return set(), []
@@ -204,11 +195,12 @@ def run_soc_detect_and_coalesce(
         lambda c=counters: _rocprof_supported_superset(c)
     )
 
-    with patch("rocprof_compute_soc.soc_base.console_debug"):
-        soc.perfmon_coalesce(counters)
+    soc.perfmon_coalesce(counters)
 
-    output_files, _fc, _accu = soc._allocate_perfmon_counter_files(counters)
-    return counters, output_files
+    perfmon_counter_files, _unused_perfmon_files, _unused_accumulator_files = (
+        soc._allocate_perfmon_counter_files(counters)
+    )
+    return counters, perfmon_counter_files
 
 
 def _global_ip_column_widths(
@@ -225,6 +217,21 @@ def _global_ip_column_widths(
     columns = sorted(max_cell.keys())
     widths = {ip: max_cell[ip] for ip in columns}
     return columns, widths
+
+
+def _bucket_plan_sections(
+    output_files: list[CounterFile],
+) -> tuple[list[str], dict[str, int], list[tuple[str, list[str]]], int]:
+    """Shared bucket layout: columns, widths, per-bucket flat counter lists, assignment total."""
+    global_columns, column_widths = _global_ip_column_widths(output_files)
+    sections: list[tuple[str, list[str]]] = []
+    total_assignments = 0
+    for counter_file in output_files:
+        bucket_label = counter_file.file_name_txt.replace(".txt", "")
+        flat_counters = flat_counters_in_perfmon_file(counter_file)
+        total_assignments += len(flat_counters)
+        sections.append((bucket_label, flat_counters))
+    return global_columns, column_widths, sections, total_assignments
 
 
 def _format_bucket_markdown(
@@ -260,25 +267,21 @@ def generate_bucket_plan(
     arch: str,
 ) -> str:
     """Generate the bucket allocation plan as markdown tables."""
-    from io import StringIO
-
     buf = StringIO()
     buf.write(f"Perfmon bucket allocation plan (architecture: {arch})\n\n")
 
-    global_columns, col_widths = _global_ip_column_widths(output_files)
-    total_assignments = 0
+    global_columns, column_widths, sections, total_assignments = _bucket_plan_sections(
+        output_files
+    )
 
-    for counter_file in output_files:
-        bucket_label = counter_file.file_name_txt.replace(".txt", "")
-        flat = flat_counters_in_perfmon_file(counter_file)
-        total_assignments += len(flat)
+    for bucket_label, flat_counters in sections:
         buf.write(f"Bucket: {bucket_label}\n")
-        if not flat:
+        if not flat_counters:
             buf.write("(no PMC counters)\n\n")
             continue
         if not global_columns:
             continue
-        buf.write(_format_bucket_markdown(flat, global_columns, col_widths))
+        buf.write(_format_bucket_markdown(flat_counters, global_columns, column_widths))
         buf.write("\n\n")
 
     buf.write(
@@ -313,8 +316,6 @@ def generate_multi_bucket_metrics(
     arch: str,
 ) -> str:
     """Generate metrics that span multiple buckets as a string."""
-    from io import StringIO
-
     buf = StringIO()
     counter_to_bucket = _counter_to_bucket_map(output_files)
 
@@ -326,28 +327,28 @@ def generate_multi_bucket_metrics(
         config_dir, arch
     ):
         total_metrics += 1
-        hw = parse_counters(metric_yaml)
+        hardware_counters = parse_counters(metric_yaml)
         buckets: set[str] = set()
-        for c in hw:
-            b = counter_to_bucket.get(c)
-            if b is not None:
-                buckets.add(b)
+        for formula_counter in hardware_counters:
+            bucket_label = counter_to_bucket.get(formula_counter)
+            if bucket_label is not None:
+                buckets.add(bucket_label)
 
-        panel_s = str(panel_id) if panel_id is not None else "-"
-        n_b = len(buckets)
-        if n_b > 1:
+        panel_label = str(panel_id) if panel_id is not None else "-"
+        bucket_count = len(buckets)
+        if bucket_count > 1:
             multi_rows.append((
                 file_id,
-                panel_s,
+                panel_label,
                 metric_idx,
                 metric_name,
-                n_b,
+                bucket_count,
                 ", ".join(sorted(buckets)),
             ))
-        elif n_b == 1:
+        elif bucket_count == 1:
             single_rows.append((
                 file_id,
-                panel_s,
+                panel_label,
                 metric_idx,
                 metric_name,
                 next(iter(buckets)),
@@ -452,19 +453,15 @@ def render_perfmon_plan_svg(
     Uses markdown pipe-table style (same as CLI) with all columns aligned
     across all buckets for consistent visual appearance.
     """
-    from io import StringIO
+    from rich.console import Console
 
-    try:
-        from rich.console import Console
-    except ImportError:
-        raise ImportError("Rich library required for SVG output: pip install rich")
+    global_columns, column_widths, sections, total_assignments = _bucket_plan_sections(
+        output_files
+    )
 
-    # Calculate required width based on table content
-    global_columns, col_widths = _global_ip_column_widths(output_files)
-    total_width = sum(col_widths.values()) + len(col_widths) * 3 + 10
+    total_width = sum(column_widths.values()) + len(column_widths) * 3 + 10
     console_width = max(200, total_width)
 
-    # Create console with recording enabled
     console = Console(
         file=StringIO(),
         force_terminal=True,
@@ -473,46 +470,42 @@ def render_perfmon_plan_svg(
         record=True,
     )
 
-    # Print header
     header = f"Perfmon bucket allocation plan (architecture: {arch})"
     console.print(f"[bold cyan]{header}[/bold cyan]\n")
 
-    # Print each bucket using markdown pipe-table style with global column alignment
-    total_assignments = 0
-    for counter_file in output_files:
-        bucket_label = counter_file.file_name_txt.replace(".txt", "")
-        flat = flat_counters_in_perfmon_file(counter_file)
-        total_assignments += len(flat)
-
+    for bucket_label, flat_counters in sections:
         console.print(f"[bold blue]Bucket: {bucket_label}[/bold blue]")
 
-        if not flat:
+        if not flat_counters:
             console.print("[dim](no PMC counters)[/dim]\n")
             continue
 
         if not global_columns:
             continue
 
-        # Use markdown pipe-table format - plain text for consistency
-        by_ip = _counters_grouped_by_ip_sorted(flat)
-        height = max((len(by_ip.get(c, [])) for c in global_columns), default=0)
+        by_ip = _counters_grouped_by_ip_sorted(flat_counters)
+        table_height = max(
+            (len(by_ip.get(col, [])) for col in global_columns),
+            default=0,
+        )
 
-        # Header row - use plain padding then wrap with color
-        header_parts = [col.ljust(col_widths[col]) for col in global_columns]
-        console.print("[bold cyan]| " + " | ".join(header_parts) + " |[/bold cyan]")
+        header_cells = [col.ljust(column_widths[col]) for col in global_columns]
+        console.print("[bold cyan]| " + " | ".join(header_cells) + " |[/bold cyan]")
 
-        # Separator row
-        sep_parts = ["-" * col_widths[col] for col in global_columns]
-        console.print("[dim]| " + " | ".join(sep_parts) + " |[/dim]")
+        separator_cells = ["-" * column_widths[col] for col in global_columns]
+        console.print("[dim]| " + " | ".join(separator_cells) + " |[/dim]")
 
-        # Data rows - no special coloring, just consistent padding
-        for row_idx in range(height):
-            row_parts = []
+        for row_idx in range(table_height):
+            row_cells = []
             for col in global_columns:
-                counters = by_ip.get(col, [])
-                cell = counters[row_idx] if row_idx < len(counters) else ""
-                row_parts.append(cell.ljust(col_widths[col]))
-            console.print("| " + " | ".join(row_parts) + " |")
+                column_counters = by_ip.get(col, [])
+                cell_text = (
+                    column_counters[row_idx]
+                    if row_idx < len(column_counters)
+                    else ""
+                )
+                row_cells.append(cell_text.ljust(column_widths[col]))
+            console.print("| " + " | ".join(row_cells) + " |")
 
         console.print()
 
@@ -521,7 +514,6 @@ def render_perfmon_plan_svg(
         f"{total_assignments} counter assignment(s).\n"
     )
 
-    # Add multi-bucket metrics section
     metrics_output = generate_multi_bucket_metrics(output_files, config_dir, arch)
     console.print(metrics_output)
 
@@ -538,7 +530,17 @@ def get_supported_archs() -> list[str]:
     return list(mi_gpu_specs.get_gpu_series_dict().keys())
 
 
+def _configure_inspector_logging() -> None:
+    """Suppress debug noise from SoC code paths (console_debug)."""
+    root = logging.getLogger()
+    root.setLevel(logging.WARNING)
+    for handler in root.handlers:
+        handler.setLevel(logging.WARNING)
+
+
 def main() -> None:
+    _configure_inspector_logging()
+
     # Get supported architectures dynamically from mi_gpu_specs
     supported_archs = get_supported_archs()
 
@@ -599,27 +601,18 @@ Examples:
 
     config_dir = args.config_dir or get_default_config_dir()
     if not config_dir.is_dir():
-        print(f"Error: Config directory not found: {config_dir}", file=sys.stderr)
-        sys.exit(1)
+        console_error(f"Error: Config directory not found: {config_dir}")
 
     arch = args.arch
 
     # Get perfmon config from mi_gpu_specs (single source of truth)
     perfmon_config = mi_gpu_specs.get_perfmon_config(arch)
     if not perfmon_config:
-        print(
-            f"Error: No perfmon config found for architecture: {arch}",
-            file=sys.stderr,
-        )
-        sys.exit(1)
+        console_error(f"Error: No perfmon config found for architecture: {arch}")
 
     config_arch = config_dir / arch
     if not config_arch.is_dir():
-        print(
-            f"Error: Architecture config directory not found: {config_arch}",
-            file=sys.stderr,
-        )
-        sys.exit(1)
+        console_error(f"Error: Architecture config directory not found: {config_arch}")
 
     with tempfile.TemporaryDirectory(prefix="rocprof_counter_inspector_") as tmpdir:
         workload_root = Path(tmpdir)
@@ -628,13 +621,12 @@ Examples:
         )
 
         if not counters:
-            print("No counters found!", file=sys.stderr)
-            sys.exit(1)
+            console_error("No counters found!")
 
         if args.verbose:
             print(f"Collected {len(counters)} unique counters:")
-            for c in sorted(counters):
-                print(f"  - {c}")
+            for ctr in sorted(counters):
+                print(f"  - {ctr}")
             print()
             perfmon_dir = workload_root / "perfmon"
             if perfmon_dir.is_dir():
@@ -663,15 +655,8 @@ def _emit_inspector_output(
             try:
                 svg_content = render_perfmon_plan_svg(output_files, config_dir, arch)
                 output_path.write_text(svg_content, encoding="utf-8")
-            except ImportError as e:
-                print(f"Error: {e}", file=sys.stderr)
-                sys.exit(1)
-            except OSError as e:
-                print(
-                    f"Error: could not write SVG output to {output_path}: {e}",
-                    file=sys.stderr,
-                )
-                sys.exit(1)
+            except OSError as exc:
+                console_error(f"Error: could not write SVG output to {output_path}: {exc}")
             print(f"SVG saved to {output_path}")
         elif suffix == ".txt":
             bucket_output = generate_bucket_plan(output_files, arch)
@@ -680,12 +665,8 @@ def _emit_inspector_output(
             )
             try:
                 output_path.write_text(bucket_output + metrics_output, encoding="utf-8")
-            except OSError as e:
-                print(
-                    f"Error: could not write text output to {output_path}: {e}",
-                    file=sys.stderr,
-                )
-                sys.exit(1)
+            except OSError as exc:
+                console_error(f"Error: could not write text output to {output_path}: {exc}")
             print(f"Output written to {output_path}")
         else:
             print(

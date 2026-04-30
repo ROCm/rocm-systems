@@ -657,18 +657,6 @@ add_test(
 )
 
 # -----------------------------------
-# Counter grouping inspector tests
-# -----------------------------------
-
-add_test(
-    NAME test_counter_grouping_inspector
-    COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
-        --junitxml=tests/test_counter_grouping_inspector.xml ${COV_OPTION}
-        tests/test_counter_grouping_inspector.py ${WORKING_DIR_OPTION}
-)
-
-# -----------------------------------
 # Generate coverage tests
 # -----------------------------------
 
@@ -816,13 +804,6 @@ install(
     COMPONENT main
     PATTERN "__pycache__" EXCLUDE
 )
-# counter grouping inspector tool
-install(
-    FILES tools/counter_grouping_inspector.py
-    DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}/tools
-    COMPONENT main
-)
-
 # ==============================================================================
 # Vendored Dependencies Installation
 # ==============================================================================
