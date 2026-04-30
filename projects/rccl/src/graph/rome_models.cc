@@ -1807,9 +1807,6 @@ static struct rcclRomeModel romeTopoModels[] = {
   rome_model_89, /* 45 */
 };
 
-static_assert(sizeof(romeTopoModels)/sizeof(romeTopoModels[0]) > (size_t)RCCL_ROME_TOPO_PRESET_MODEL_4H4P_IDX,
-  "romeTopoModels[] must contain an entry at RCCL_ROME_TOPO_PRESET_MODEL_4H4P_IDX for parse4H4P");
-
 // This environment variable allows disabling of the reversal the graph parsing
 RCCL_PARAM(ModelReversalDisable, "MODEL_REVERSAL_DISABLE", 0);
 
@@ -3117,7 +3114,7 @@ ncclResult_t parse4H4P(struct ncclTopoSystem* system, struct ncclTopoGraph* grap
   // create 4P4H based on reference and remapped ids
   NCCLCHECK(parseGraph(rome_model_68.ringBase, system, graph, rdm, n_hives.data(), false));
   if (graph->nChannels) {
-    NCCLCHECK(rcclTopoSetPresetRomeModelIdx(system, RCCL_ROME_TOPO_PRESET_MODEL_4H4P_IDX));
+    NCCLCHECK(rcclTopoSetPresetRomeModelIdx(system, RCCL_ROME_TOPO_PRESET_MODEL_IDX_4H4P));
   }
   return ncclSuccess;
 }
