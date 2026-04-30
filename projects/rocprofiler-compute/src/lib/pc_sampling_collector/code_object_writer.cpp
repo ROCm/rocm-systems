@@ -4,6 +4,8 @@
 
 #include "gsl_assert.h"
 
+#include <fstream>
+
 using namespace rocm_compute;
 
 void code_object_writer_json_t::start_code_obj(size_t obj_id)
@@ -69,4 +71,10 @@ std::string code_object_writer_json_t::get_result()
     Expects(m_symbol_closure_count == 0);
 
     return nlohmann::json{{"code_objects", std::move(m_code_objects)}}.dump();
+}
+
+void code_object_writer_json_t::flush(const std::string& output_file_path)
+{
+    Expects(!output_file_path.empty());
+    std::ofstream(output_file_path, std::ios::out ) << get_result();
 }

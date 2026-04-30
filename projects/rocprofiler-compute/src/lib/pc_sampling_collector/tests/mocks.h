@@ -62,6 +62,7 @@ public:
     void        end_symbol() override;
     void        write_instruction(const rocm_compute::instruction_t& inst) override;
     std::string get_result() override;
+    void        flush(const std::string& string) override;
 
     const std::vector<size_t>&                      get_start_code_obj_ids() const;
     uint32_t                                        get_end_code_obj_count() const;

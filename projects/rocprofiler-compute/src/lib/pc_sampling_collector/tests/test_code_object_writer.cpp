@@ -1,6 +1,7 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier:  MIT
 #include "test_code_object_writer.h"
+
 #include "nlohmann/json.hpp"
 
 TEST_F(test_code_object_writer_t, ProvidedNoData_ReturnsMinimalJson)
@@ -18,7 +19,7 @@ TEST_F(test_code_object_writer_t, ProvidedStartCodeObjWithoutEnd_Throws)
 
 TEST_F(test_code_object_writer_t, ProvidedEndCodeObjWithoutStart_Throws)
 {
-    EXPECT_THROW( m_writer.end_code_obj(), std::runtime_error);
+    EXPECT_THROW(m_writer.end_code_obj(), std::runtime_error);
 }
 
 TEST_F(test_code_object_writer_t, ProvidedTwoStartCodeObjCalls_Throws)
@@ -104,7 +105,7 @@ TEST_F(test_code_object_writer_t, ProvidedCodeObjDesc_SerializesIt)
     m_writer.start_code_obj(id1);
     m_writer.end_code_obj();
     const auto& result = m_writer.get_result();
-    const auto json = nlohmann::json::parse(result);
+    const auto  json   = nlohmann::json::parse(result);
     EXPECT_EQ(json["code_objects"][0]["id"], id0);
     EXPECT_EQ(json["code_objects"][1]["id"], id1);
 }
@@ -129,7 +130,7 @@ TEST_F(test_code_object_writer_t, ProvidedSymbol_SerializesItInsideCodeObj)
     m_writer.end_symbol();
     m_writer.end_code_obj();
 
-    const auto json = nlohmann::json::parse(m_writer.get_result());
+    const auto  json    = nlohmann::json::parse(m_writer.get_result());
     const auto& symbols = json["code_objects"][0]["symbols"];
     ASSERT_EQ(symbols.size(), 1);
     EXPECT_EQ(symbols[0]["name"], symbol.name);
@@ -147,7 +148,7 @@ TEST_F(test_code_object_writer_t, ProvidedMultipleSymbols_SerializesAllInOrder)
     m_writer.end_symbol();
     m_writer.end_code_obj();
 
-    const auto json = nlohmann::json::parse(m_writer.get_result());
+    const auto  json    = nlohmann::json::parse(m_writer.get_result());
     const auto& symbols = json["code_objects"][0]["symbols"];
     ASSERT_EQ(symbols.size(), 2);
     EXPECT_EQ(symbols[0]["name"], m_symbol0.name);
@@ -185,7 +186,7 @@ TEST_F(test_code_object_writer_t, ProvidedNoInstructions_SerializesEmptyInstruct
     m_writer.end_symbol();
     m_writer.end_code_obj();
 
-    const auto json = nlohmann::json::parse(m_writer.get_result());
+    const auto  json   = nlohmann::json::parse(m_writer.get_result());
     const auto& symbol = json["code_objects"][0]["symbols"][0];
     ASSERT_TRUE(symbol.contains("instructions"));
     EXPECT_TRUE(symbol["instructions"].is_array());
@@ -200,7 +201,7 @@ TEST_F(test_code_object_writer_t, ProvidedInstruction_SerializesItInsideSymbol)
     m_writer.end_symbol();
     m_writer.end_code_obj();
 
-    const auto json = nlohmann::json::parse(m_writer.get_result());
+    const auto  json         = nlohmann::json::parse(m_writer.get_result());
     const auto& instructions = json["code_objects"][0]["symbols"][0]["instructions"];
     ASSERT_EQ(instructions.size(), 1);
     EXPECT_EQ(instructions[0]["name"], m_inst0.name);
@@ -219,7 +220,7 @@ TEST_F(test_code_object_writer_t, ProvidedMultipleInstructions_SerializesAllInOr
     m_writer.end_symbol();
     m_writer.end_code_obj();
 
-    const auto json = nlohmann::json::parse(m_writer.get_result());
+    const auto  json         = nlohmann::json::parse(m_writer.get_result());
     const auto& instructions = json["code_objects"][0]["symbols"][0]["instructions"];
     ASSERT_EQ(instructions.size(), 2);
     EXPECT_EQ(instructions[0]["name"], m_inst0.name);
@@ -240,7 +241,7 @@ TEST_F(test_code_object_writer_t, ProvidedInstructionsInDifferentSymbols_Seriali
 
     m_writer.end_code_obj();
 
-    const auto json = nlohmann::json::parse(m_writer.get_result());
+    const auto  json    = nlohmann::json::parse(m_writer.get_result());
     const auto& symbols = json["code_objects"][0]["symbols"];
     ASSERT_EQ(symbols.size(), 2);
 
@@ -249,4 +250,9 @@ TEST_F(test_code_object_writer_t, ProvidedInstructionsInDifferentSymbols_Seriali
 
     ASSERT_EQ(symbols[1]["instructions"].size(), 1);
     EXPECT_EQ(symbols[1]["instructions"][0]["name"], m_inst1.name);
+}
+
+TEST_F(test_code_object_writer_t, ProvidedEmptyOutputFilePath_Throws)
+{
+    EXPECT_THROW(m_writer.flush(""), std::runtime_error);
 }

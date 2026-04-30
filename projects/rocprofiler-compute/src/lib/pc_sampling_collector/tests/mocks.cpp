@@ -95,6 +95,8 @@ std::string mock_code_object_writer_t::get_result()
     return {};
 }
 
+void mock_code_object_writer_t::flush(const std::string& string) {}
+
 const std::vector<size_t>& mock_code_object_writer_t::get_start_code_obj_ids() const
 {
     return m_started_code_obj_ids;

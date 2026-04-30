@@ -169,6 +169,7 @@ void generate_output(tool_data_t& tool_data)
         code_object_writer_json_t obj_writer;
         tool_data.pc_sampling_collector.rlock([&](const pc_sampling_collector_t::ptr& ptr)
                                               { ptr->write(obj_writer); });
+        obj_writer.flush(tool_data.code_obj_output_filename);
     }
 }
 

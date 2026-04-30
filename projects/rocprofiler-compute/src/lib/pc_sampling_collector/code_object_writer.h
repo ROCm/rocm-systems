@@ -19,6 +19,7 @@ public:
     virtual void        end_symbol()                                 = 0;
     virtual void        write_instruction(const instruction_t& inst) = 0;
     virtual std::string get_result()                                 = 0;
+    virtual void        flush(const std::string& string)             = 0;
 };
 
 class code_object_writer_json_t : public code_object_writer_t
@@ -30,6 +31,7 @@ public:
     void        end_symbol() override;
     void        write_instruction(const instruction_t& inst) override;
     std::string get_result() override;
+    void        flush(const std::string& output_file_path) override;
 
 private:
     int32_t m_code_object_closure_count = 0;
