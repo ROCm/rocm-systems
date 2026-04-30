@@ -64,6 +64,8 @@ set(_sampling_test_sources
     unit/native_report_writer_golden_test.cpp
     # Task #15: C++17 detection-idiom policy concept checks.
     unit/policy_concept_checks_test.cpp
+    # Concurrency stress test for lifecycle operations.
+    integration/concurrent_lifecycle_test.cpp
 )
 
 # Linux-only smoke tests for real OS-backed implementations.
