@@ -405,22 +405,16 @@ if(HIP_ENABLE_LTTNG_UST)
         # which then broke downstream link consumers later. Now: copy
         # whatever matches; if NO files matched at all, fail the build
         # with an actionable error.
+        #
+        # Single-line shell script: make's recipe parser does not allow
+        # bare newlines inside a command. Use `;` separators and `&&`
+        # for chained conditions. `set -e` ensures genuine cp failures
+        # propagate; the explicit `found` guard catches "glob matched
+        # nothing" (which would otherwise leave `found=0` but exit 0).
         add_custom_command(TARGET amdhip64 PRE_LINK
             COMMAND ${CMAKE_COMMAND} -E make_directory
                     "$<TARGET_FILE_DIR:amdhip64>"
-            COMMAND sh -c
-"set -e
-found=0
-for lib in '${LTTNG_VENDORED_LIB_DIR}'/liblttng*.so* '${LTTNG_VENDORED_LIB_DIR}'/liburcu*.so*; do
-    if [ -e \"\$lib\" ]; then
-        found=1
-        cp -P \"\$lib\" '$<TARGET_FILE_DIR:amdhip64>/'
-    fi
-done
-if [ \"\$found\" -eq 0 ]; then
-    echo 'error: no vendored LTTng-UST/URCU shared libraries found to stage from ${LTTNG_VENDORED_LIB_DIR}' >&2
-    exit 1
-fi"
+            COMMAND sh -c "set -e; found=0; for lib in '${LTTNG_VENDORED_LIB_DIR}'/liblttng*.so* '${LTTNG_VENDORED_LIB_DIR}'/liburcu*.so*; do if [ -e \"$$lib\" ]; then found=1; cp -P \"$$lib\" '$<TARGET_FILE_DIR:amdhip64>/'; fi; done; if [ \"$$found\" -eq 0 ]; then echo 'error: no vendored LTTng-UST/URCU shared libraries found to stage from ${LTTNG_VENDORED_LIB_DIR}' >&2; exit 1; fi"
             COMMENT "Staging vendored LTTng-UST .so files into amdhip64 build dir"
             VERBATIM)
     endif()
