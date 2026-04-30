@@ -448,6 +448,13 @@ class Parser:
         # every bit in the encoding layout.
         ucode_fields.extend(_fill_padding_gaps(ucode_fields, bit_cnt))
 
+        # Apply field renames to synthesized padding fields too (e.g.
+        # pad_14 → op_sel_hi_2 for VOP3P on CDNA4).
+        for i, f in enumerate(ucode_fields):
+            new_name = renames.get(f.name)
+            if new_name:
+                ucode_fields[i] = MicrocodeField(new_name, f.bit_cnt, f.bit_offset)
+
         enc_name = xs.get_node_text(xs.get_node(enc_node, xs.ENCODING_NAME))
         if enc_field_bit_cnt is None:
             raise ValueError(

@@ -35,13 +35,15 @@ DsAddU32Ds::DsAddU32Ds(const MachineInst *inst)
 }
 
 void DsAddU32Ds::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds)
+    throw util::UnimplementedInst(mnemonic());
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::ADD;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 4);
@@ -66,13 +68,15 @@ DsSubU32Ds::DsSubU32Ds(const MachineInst *inst)
 }
 
 void DsSubU32Ds::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds)
+    throw util::UnimplementedInst(mnemonic());
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::SUB;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 4);
@@ -97,13 +101,15 @@ DsRsubU32Ds::DsRsubU32Ds(const MachineInst *inst)
 }
 
 void DsRsubU32Ds::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds)
+    throw util::UnimplementedInst(mnemonic());
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::RSUB;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 4);
@@ -128,13 +134,15 @@ DsIncU32Ds::DsIncU32Ds(const MachineInst *inst)
 }
 
 void DsIncU32Ds::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds)
+    throw util::UnimplementedInst(mnemonic());
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::INC;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 4);
@@ -159,13 +167,15 @@ DsDecU32Ds::DsDecU32Ds(const MachineInst *inst)
 }
 
 void DsDecU32Ds::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds)
+    throw util::UnimplementedInst(mnemonic());
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::DEC;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 4);
@@ -190,13 +200,15 @@ DsMinI32Ds::DsMinI32Ds(const MachineInst *inst)
 }
 
 void DsMinI32Ds::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds)
+    throw util::UnimplementedInst(mnemonic());
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::SMIN;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 4);
@@ -221,13 +233,15 @@ DsMaxI32Ds::DsMaxI32Ds(const MachineInst *inst)
 }
 
 void DsMaxI32Ds::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds)
+    throw util::UnimplementedInst(mnemonic());
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::SMAX;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 4);
@@ -252,13 +266,15 @@ DsMinU32Ds::DsMinU32Ds(const MachineInst *inst)
 }
 
 void DsMinU32Ds::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds)
+    throw util::UnimplementedInst(mnemonic());
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::UMIN;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 4);
@@ -283,13 +299,15 @@ DsMaxU32Ds::DsMaxU32Ds(const MachineInst *inst)
 }
 
 void DsMaxU32Ds::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds)
+    throw util::UnimplementedInst(mnemonic());
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::UMAX;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 4);
@@ -314,13 +332,15 @@ DsAndB32Ds::DsAndB32Ds(const MachineInst *inst)
 }
 
 void DsAndB32Ds::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds)
+    throw util::UnimplementedInst(mnemonic());
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::AND;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 4);
@@ -345,13 +365,15 @@ DsOrB32Ds::DsOrB32Ds(const MachineInst *inst)
 }
 
 void DsOrB32Ds::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds)
+    throw util::UnimplementedInst(mnemonic());
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::OR;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 4);
@@ -376,13 +398,15 @@ DsXorB32Ds::DsXorB32Ds(const MachineInst *inst)
 }
 
 void DsXorB32Ds::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds)
+    throw util::UnimplementedInst(mnemonic());
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::XOR;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 4);
@@ -407,7 +431,10 @@ DsMskorB32Ds::DsMskorB32Ds(const MachineInst *inst)
   num_dst_ = 0;
 }
 
-void DsMskorB32Ds::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void DsMskorB32Ds::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 DsStoreB32Ds::DsStoreB32Ds(const MachineInst *inst)
     : Ds("ds_store_b32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<DsStoreB32Ds>()),
@@ -421,11 +448,13 @@ DsStoreB32Ds::DsStoreB32Ds(const MachineInst *inst)
 }
 
 void DsStoreB32Ds::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds)
+    throw util::UnimplementedInst(mnemonic());
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = false;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 4);
@@ -453,19 +482,29 @@ DsStore2addrB32Ds::DsStore2addrB32Ds(const MachineInst *inst)
 }
 
 void DsStore2addrB32Ds::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds)
+    throw util::UnimplementedInst(mnemonic());
+  auto &cu = wf.cu();
+  uint64_t exec = wf.exec();
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = false;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
+  d->exec_mask = exec;
+  d->lane_mask = exec;
+  d->ds2_active = true;
   d->store_data.resize(wf.wf_size() * 4);
+  d->ds2_store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 0, lane);
-    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
+    uint32_t base = cu.read_vgpr(wf.vgpr_alloc().base + inst_.addr, lane);
+    d->per_lane_addr[lane] = base + static_cast<uint32_t>(inst_.offset0) * 4U + wf.lds_base();
+    d->ds2_per_lane_addr[lane] = base + static_cast<uint32_t>(inst_.offset1) * 4U + wf.lds_base();
+    uint32_t v0_0 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 0, lane);
+    std::memcpy(&d->store_data[lane * 4 + 0], &v0_0, 4);
+    uint32_t v1_0 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data1 + 0, lane);
+    std::memcpy(&d->ds2_store_data[lane * 4 + 0], &v1_0, 4);
   }
   set_data(std::move(d));
 }
@@ -485,19 +524,29 @@ DsStore2addrStride64B32Ds::DsStore2addrStride64B32Ds(const MachineInst *inst)
 }
 
 void DsStore2addrStride64B32Ds::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds)
+    throw util::UnimplementedInst(mnemonic());
+  auto &cu = wf.cu();
+  uint64_t exec = wf.exec();
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = false;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
+  d->exec_mask = exec;
+  d->lane_mask = exec;
+  d->ds2_active = true;
   d->store_data.resize(wf.wf_size() * 4);
+  d->ds2_store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 0, lane);
-    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
+    uint32_t base = cu.read_vgpr(wf.vgpr_alloc().base + inst_.addr, lane);
+    d->per_lane_addr[lane] = base + static_cast<uint32_t>(inst_.offset0) * 256U + wf.lds_base();
+    d->ds2_per_lane_addr[lane] = base + static_cast<uint32_t>(inst_.offset1) * 256U + wf.lds_base();
+    uint32_t v0_0 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 0, lane);
+    std::memcpy(&d->store_data[lane * 4 + 0], &v0_0, 4);
+    uint32_t v1_0 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data1 + 0, lane);
+    std::memcpy(&d->ds2_store_data[lane * 4 + 0], &v1_0, 4);
   }
   set_data(std::move(d));
 }
@@ -517,13 +566,15 @@ DsCmpstoreB32Ds::DsCmpstoreB32Ds(const MachineInst *inst)
 }
 
 void DsCmpstoreB32Ds::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds)
+    throw util::UnimplementedInst(mnemonic());
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::CMPSWAP;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 8);
@@ -553,13 +604,15 @@ DsCmpstoreF32Ds::DsCmpstoreF32Ds(const MachineInst *inst)
 }
 
 void DsCmpstoreF32Ds::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds)
+    throw util::UnimplementedInst(mnemonic());
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::CMPSWAP;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 8);
@@ -586,13 +639,15 @@ DsMinF32Ds::DsMinF32Ds(const MachineInst *inst)
 }
 
 void DsMinF32Ds::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds)
+    throw util::UnimplementedInst(mnemonic());
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::FMIN;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 4);
@@ -617,13 +672,15 @@ DsMaxF32Ds::DsMaxF32Ds(const MachineInst *inst)
 }
 
 void DsMaxF32Ds::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds)
+    throw util::UnimplementedInst(mnemonic());
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::FMAX;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 4);
@@ -642,7 +699,10 @@ DsNopDs::DsNopDs(const MachineInst *inst)
   num_dst_ = 0;
 }
 
-void DsNopDs::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void DsNopDs::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 DsAddF32Ds::DsAddF32Ds(const MachineInst *inst)
     : Ds("ds_add_f32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<DsAddF32Ds>()),
@@ -656,13 +716,15 @@ DsAddF32Ds::DsAddF32Ds(const MachineInst *inst)
 }
 
 void DsAddF32Ds::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds)
+    throw util::UnimplementedInst(mnemonic());
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::FADD;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 4);
@@ -682,7 +744,10 @@ DsGwsSemaReleaseAllDs::DsGwsSemaReleaseAllDs(const MachineInst *inst)
   num_dst_ = 0;
 }
 
-void DsGwsSemaReleaseAllDs::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void DsGwsSemaReleaseAllDs::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 DsGwsInitDs::DsGwsInitDs(const MachineInst *inst)
     : Ds("ds_gws_init", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<DsGwsInitDs>()),
@@ -692,7 +757,10 @@ DsGwsInitDs::DsGwsInitDs(const MachineInst *inst)
   num_dst_ = 0;
 }
 
-void DsGwsInitDs::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void DsGwsInitDs::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 DsGwsSemaVDs::DsGwsSemaVDs(const MachineInst *inst)
     : Ds("ds_gws_sema_v", reinterpret_cast<const OpEncoding *>(inst),
@@ -701,7 +769,10 @@ DsGwsSemaVDs::DsGwsSemaVDs(const MachineInst *inst)
   num_dst_ = 0;
 }
 
-void DsGwsSemaVDs::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void DsGwsSemaVDs::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 DsGwsSemaBrDs::DsGwsSemaBrDs(const MachineInst *inst)
     : Ds("ds_gws_sema_br", reinterpret_cast<const OpEncoding *>(inst),
@@ -712,7 +783,10 @@ DsGwsSemaBrDs::DsGwsSemaBrDs(const MachineInst *inst)
   num_dst_ = 0;
 }
 
-void DsGwsSemaBrDs::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void DsGwsSemaBrDs::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 DsGwsSemaPDs::DsGwsSemaPDs(const MachineInst *inst)
     : Ds("ds_gws_sema_p", reinterpret_cast<const OpEncoding *>(inst),
@@ -721,7 +795,10 @@ DsGwsSemaPDs::DsGwsSemaPDs(const MachineInst *inst)
   num_dst_ = 0;
 }
 
-void DsGwsSemaPDs::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void DsGwsSemaPDs::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 DsGwsBarrierDs::DsGwsBarrierDs(const MachineInst *inst)
     : Ds("ds_gws_barrier", reinterpret_cast<const OpEncoding *>(inst),
@@ -732,7 +809,10 @@ DsGwsBarrierDs::DsGwsBarrierDs(const MachineInst *inst)
   num_dst_ = 0;
 }
 
-void DsGwsBarrierDs::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void DsGwsBarrierDs::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 DsStoreB8Ds::DsStoreB8Ds(const MachineInst *inst)
     : Ds("ds_store_b8", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<DsStoreB8Ds>()),
@@ -746,11 +826,13 @@ DsStoreB8Ds::DsStoreB8Ds(const MachineInst *inst)
 }
 
 void DsStoreB8Ds::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds)
+    throw util::UnimplementedInst(mnemonic());
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->elem_size = 1;
   d->num_elems = 1;
   d->is_load = false;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 1);
@@ -775,11 +857,13 @@ DsStoreB16Ds::DsStoreB16Ds(const MachineInst *inst)
 }
 
 void DsStoreB16Ds::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds)
+    throw util::UnimplementedInst(mnemonic());
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->elem_size = 2;
   d->num_elems = 1;
   d->is_load = false;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 2);
@@ -807,13 +891,15 @@ DsAddRtnU32Ds::DsAddRtnU32Ds(const MachineInst *inst)
 }
 
 void DsAddRtnU32Ds::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds)
+    throw util::UnimplementedInst(mnemonic());
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::ADD;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 4);
@@ -841,13 +927,15 @@ DsSubRtnU32Ds::DsSubRtnU32Ds(const MachineInst *inst)
 }
 
 void DsSubRtnU32Ds::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds)
+    throw util::UnimplementedInst(mnemonic());
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::SUB;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 4);
@@ -875,13 +963,15 @@ DsRsubRtnU32Ds::DsRsubRtnU32Ds(const MachineInst *inst)
 }
 
 void DsRsubRtnU32Ds::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds)
+    throw util::UnimplementedInst(mnemonic());
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::RSUB;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 4);
@@ -909,13 +999,15 @@ DsIncRtnU32Ds::DsIncRtnU32Ds(const MachineInst *inst)
 }
 
 void DsIncRtnU32Ds::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds)
+    throw util::UnimplementedInst(mnemonic());
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::INC;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 4);
@@ -943,13 +1035,15 @@ DsDecRtnU32Ds::DsDecRtnU32Ds(const MachineInst *inst)
 }
 
 void DsDecRtnU32Ds::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds)
+    throw util::UnimplementedInst(mnemonic());
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::DEC;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 4);
@@ -977,13 +1071,15 @@ DsMinRtnI32Ds::DsMinRtnI32Ds(const MachineInst *inst)
 }
 
 void DsMinRtnI32Ds::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds)
+    throw util::UnimplementedInst(mnemonic());
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::SMIN;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 4);
@@ -1011,13 +1107,15 @@ DsMaxRtnI32Ds::DsMaxRtnI32Ds(const MachineInst *inst)
 }
 
 void DsMaxRtnI32Ds::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds)
+    throw util::UnimplementedInst(mnemonic());
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::SMAX;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 4);
@@ -1045,13 +1143,15 @@ DsMinRtnU32Ds::DsMinRtnU32Ds(const MachineInst *inst)
 }
 
 void DsMinRtnU32Ds::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds)
+    throw util::UnimplementedInst(mnemonic());
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::UMIN;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 4);
@@ -1079,13 +1179,15 @@ DsMaxRtnU32Ds::DsMaxRtnU32Ds(const MachineInst *inst)
 }
 
 void DsMaxRtnU32Ds::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds)
+    throw util::UnimplementedInst(mnemonic());
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::UMAX;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 4);
@@ -1113,13 +1215,15 @@ DsAndRtnB32Ds::DsAndRtnB32Ds(const MachineInst *inst)
 }
 
 void DsAndRtnB32Ds::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds)
+    throw util::UnimplementedInst(mnemonic());
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::AND;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 4);
@@ -1146,13 +1250,15 @@ DsOrRtnB32Ds::DsOrRtnB32Ds(const MachineInst *inst)
 }
 
 void DsOrRtnB32Ds::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds)
+    throw util::UnimplementedInst(mnemonic());
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::OR;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 4);
@@ -1180,13 +1286,15 @@ DsXorRtnB32Ds::DsXorRtnB32Ds(const MachineInst *inst)
 }
 
 void DsXorRtnB32Ds::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds)
+    throw util::UnimplementedInst(mnemonic());
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::XOR;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 4);
@@ -1214,7 +1322,10 @@ DsMskorRtnB32Ds::DsMskorRtnB32Ds(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void DsMskorRtnB32Ds::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void DsMskorRtnB32Ds::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 DsStorexchgRtnB32Ds::DsStorexchgRtnB32Ds(const MachineInst *inst)
     : Ds("ds_storexchg_rtn_b32", reinterpret_cast<const OpEncoding *>(inst),
@@ -1231,13 +1342,15 @@ DsStorexchgRtnB32Ds::DsStorexchgRtnB32Ds(const MachineInst *inst)
 }
 
 void DsStorexchgRtnB32Ds::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds)
+    throw util::UnimplementedInst(mnemonic());
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::SWAP;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 4);
@@ -1267,13 +1380,15 @@ DsStorexchg2addrRtnB32Ds::DsStorexchg2addrRtnB32Ds(const MachineInst *inst)
 }
 
 void DsStorexchg2addrRtnB32Ds::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds)
+    throw util::UnimplementedInst(mnemonic());
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::SWAP;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 4);
@@ -1303,13 +1418,15 @@ DsStorexchg2addrStride64RtnB32Ds::DsStorexchg2addrStride64RtnB32Ds(const Machine
 }
 
 void DsStorexchg2addrStride64RtnB32Ds::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds)
+    throw util::UnimplementedInst(mnemonic());
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::SWAP;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 4);
@@ -1339,13 +1456,15 @@ DsCmpstoreRtnB32Ds::DsCmpstoreRtnB32Ds(const MachineInst *inst)
 }
 
 void DsCmpstoreRtnB32Ds::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds)
+    throw util::UnimplementedInst(mnemonic());
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::CMPSWAP;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 8);
@@ -1377,13 +1496,15 @@ DsCmpstoreRtnF32Ds::DsCmpstoreRtnF32Ds(const MachineInst *inst)
 }
 
 void DsCmpstoreRtnF32Ds::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds)
+    throw util::UnimplementedInst(mnemonic());
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::CMPSWAP;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 8);
@@ -1413,13 +1534,15 @@ DsMinRtnF32Ds::DsMinRtnF32Ds(const MachineInst *inst)
 }
 
 void DsMinRtnF32Ds::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds)
+    throw util::UnimplementedInst(mnemonic());
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::FMIN;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 4);
@@ -1447,13 +1570,15 @@ DsMaxRtnF32Ds::DsMaxRtnF32Ds(const MachineInst *inst)
 }
 
 void DsMaxRtnF32Ds::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds)
+    throw util::UnimplementedInst(mnemonic());
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::FMAX;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 4);
@@ -1481,7 +1606,10 @@ DsWrapRtnB32Ds::DsWrapRtnB32Ds(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void DsWrapRtnB32Ds::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void DsWrapRtnB32Ds::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 DsSwizzleB32Ds::DsSwizzleB32Ds(const MachineInst *inst)
     : Ds("ds_swizzle_b32", reinterpret_cast<const OpEncoding *>(inst),
@@ -1510,12 +1638,14 @@ DsLoadB32Ds::DsLoadB32Ds(const MachineInst *inst)
 }
 
 void DsLoadB32Ds::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds)
+    throw util::UnimplementedInst(mnemonic());
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = true;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   set_data(std::move(d));
 }
 
@@ -1532,12 +1662,26 @@ DsLoad2addrB32Ds::DsLoad2addrB32Ds(const MachineInst *inst)
 }
 
 void DsLoad2addrB32Ds::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds)
+    throw util::UnimplementedInst(mnemonic());
+  auto &cu = wf.cu();
+  uint64_t exec = wf.exec();
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = true;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  d->exec_mask = exec;
+  d->lane_mask = exec;
+  d->ds2_active = true;
+  d->ds2_dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst + 1;
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t base = cu.read_vgpr(wf.vgpr_alloc().base + inst_.addr, lane);
+    d->per_lane_addr[lane] = base + static_cast<uint32_t>(inst_.offset0) * 4U + wf.lds_base();
+    d->ds2_per_lane_addr[lane] = base + static_cast<uint32_t>(inst_.offset1) * 4U + wf.lds_base();
+  }
   set_data(std::move(d));
 }
 
@@ -1554,12 +1698,26 @@ DsLoad2addrStride64B32Ds::DsLoad2addrStride64B32Ds(const MachineInst *inst)
 }
 
 void DsLoad2addrStride64B32Ds::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds)
+    throw util::UnimplementedInst(mnemonic());
+  auto &cu = wf.cu();
+  uint64_t exec = wf.exec();
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = true;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  d->exec_mask = exec;
+  d->lane_mask = exec;
+  d->ds2_active = true;
+  d->ds2_dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst + 1;
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t base = cu.read_vgpr(wf.vgpr_alloc().base + inst_.addr, lane);
+    d->per_lane_addr[lane] = base + static_cast<uint32_t>(inst_.offset0) * 256U + wf.lds_base();
+    d->ds2_per_lane_addr[lane] = base + static_cast<uint32_t>(inst_.offset1) * 256U + wf.lds_base();
+  }
   set_data(std::move(d));
 }
 
@@ -1575,13 +1733,15 @@ DsLoadI8Ds::DsLoadI8Ds(const MachineInst *inst)
 }
 
 void DsLoadI8Ds::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds)
+    throw util::UnimplementedInst(mnemonic());
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 1;
   d->num_elems = 1;
   d->is_load = true;
   d->sign_extend = true;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   set_data(std::move(d));
 }
 
@@ -1597,12 +1757,14 @@ DsLoadU8Ds::DsLoadU8Ds(const MachineInst *inst)
 }
 
 void DsLoadU8Ds::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds)
+    throw util::UnimplementedInst(mnemonic());
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 1;
   d->num_elems = 1;
   d->is_load = true;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   set_data(std::move(d));
 }
 
@@ -1618,13 +1780,15 @@ DsLoadI16Ds::DsLoadI16Ds(const MachineInst *inst)
 }
 
 void DsLoadI16Ds::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds)
+    throw util::UnimplementedInst(mnemonic());
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 2;
   d->num_elems = 1;
   d->is_load = true;
   d->sign_extend = true;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   set_data(std::move(d));
 }
 
@@ -1640,12 +1804,14 @@ DsLoadU16Ds::DsLoadU16Ds(const MachineInst *inst)
 }
 
 void DsLoadU16Ds::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds)
+    throw util::UnimplementedInst(mnemonic());
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 2;
   d->num_elems = 1;
   d->is_load = true;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   set_data(std::move(d));
 }
 
@@ -1657,7 +1823,10 @@ DsConsumeDs::DsConsumeDs(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void DsConsumeDs::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void DsConsumeDs::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 DsAppendDs::DsAppendDs(const MachineInst *inst)
     : Ds("ds_append", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<DsAppendDs>()),
@@ -1667,7 +1836,10 @@ DsAppendDs::DsAppendDs(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void DsAppendDs::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void DsAppendDs::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 DsOrderedCountDs::DsOrderedCountDs(const MachineInst *inst)
     : Ds("ds_ordered_count", reinterpret_cast<const OpEncoding *>(inst),
@@ -1680,7 +1852,10 @@ DsOrderedCountDs::DsOrderedCountDs(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void DsOrderedCountDs::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void DsOrderedCountDs::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 DsAddU64Ds::DsAddU64Ds(const MachineInst *inst)
     : Ds("ds_add_u64", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<DsAddU64Ds>()),
@@ -1694,13 +1869,15 @@ DsAddU64Ds::DsAddU64Ds(const MachineInst *inst)
 }
 
 void DsAddU64Ds::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds)
+    throw util::UnimplementedInst(mnemonic());
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 8;
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::ADD;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 8);
@@ -1727,13 +1904,15 @@ DsSubU64Ds::DsSubU64Ds(const MachineInst *inst)
 }
 
 void DsSubU64Ds::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds)
+    throw util::UnimplementedInst(mnemonic());
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 8;
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::SUB;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 8);
@@ -1760,13 +1939,15 @@ DsRsubU64Ds::DsRsubU64Ds(const MachineInst *inst)
 }
 
 void DsRsubU64Ds::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds)
+    throw util::UnimplementedInst(mnemonic());
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 8;
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::RSUB;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 8);
@@ -1793,13 +1974,15 @@ DsIncU64Ds::DsIncU64Ds(const MachineInst *inst)
 }
 
 void DsIncU64Ds::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds)
+    throw util::UnimplementedInst(mnemonic());
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 8;
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::INC;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 8);
@@ -1826,13 +2009,15 @@ DsDecU64Ds::DsDecU64Ds(const MachineInst *inst)
 }
 
 void DsDecU64Ds::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds)
+    throw util::UnimplementedInst(mnemonic());
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 8;
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::DEC;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 8);
@@ -1859,13 +2044,15 @@ DsMinI64Ds::DsMinI64Ds(const MachineInst *inst)
 }
 
 void DsMinI64Ds::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds)
+    throw util::UnimplementedInst(mnemonic());
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 8;
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::SMIN;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 8);
@@ -1892,13 +2079,15 @@ DsMaxI64Ds::DsMaxI64Ds(const MachineInst *inst)
 }
 
 void DsMaxI64Ds::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds)
+    throw util::UnimplementedInst(mnemonic());
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 8;
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::SMAX;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 8);
@@ -1925,13 +2114,15 @@ DsMinU64Ds::DsMinU64Ds(const MachineInst *inst)
 }
 
 void DsMinU64Ds::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds)
+    throw util::UnimplementedInst(mnemonic());
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 8;
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::UMIN;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 8);
@@ -1958,13 +2149,15 @@ DsMaxU64Ds::DsMaxU64Ds(const MachineInst *inst)
 }
 
 void DsMaxU64Ds::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds)
+    throw util::UnimplementedInst(mnemonic());
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 8;
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::UMAX;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 8);
@@ -1991,13 +2184,15 @@ DsAndB64Ds::DsAndB64Ds(const MachineInst *inst)
 }
 
 void DsAndB64Ds::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds)
+    throw util::UnimplementedInst(mnemonic());
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 8;
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::AND;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 8);
@@ -2024,13 +2219,15 @@ DsOrB64Ds::DsOrB64Ds(const MachineInst *inst)
 }
 
 void DsOrB64Ds::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds)
+    throw util::UnimplementedInst(mnemonic());
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 8;
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::OR;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 8);
@@ -2057,13 +2254,15 @@ DsXorB64Ds::DsXorB64Ds(const MachineInst *inst)
 }
 
 void DsXorB64Ds::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds)
+    throw util::UnimplementedInst(mnemonic());
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 8;
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::XOR;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 8);
@@ -2090,7 +2289,10 @@ DsMskorB64Ds::DsMskorB64Ds(const MachineInst *inst)
   num_dst_ = 0;
 }
 
-void DsMskorB64Ds::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void DsMskorB64Ds::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 DsStoreB64Ds::DsStoreB64Ds(const MachineInst *inst)
     : Ds("ds_store_b64", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<DsStoreB64Ds>()),
@@ -2104,11 +2306,13 @@ DsStoreB64Ds::DsStoreB64Ds(const MachineInst *inst)
 }
 
 void DsStoreB64Ds::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds)
+    throw util::UnimplementedInst(mnemonic());
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->elem_size = 8;
   d->num_elems = 1;
   d->is_load = false;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 8);
@@ -2138,21 +2342,33 @@ DsStore2addrB64Ds::DsStore2addrB64Ds(const MachineInst *inst)
 }
 
 void DsStore2addrB64Ds::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds)
+    throw util::UnimplementedInst(mnemonic());
+  auto &cu = wf.cu();
+  uint64_t exec = wf.exec();
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->elem_size = 8;
   d->num_elems = 1;
   d->is_load = false;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
+  d->exec_mask = exec;
+  d->lane_mask = exec;
+  d->ds2_active = true;
   d->store_data.resize(wf.wf_size() * 8);
+  d->ds2_store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t lo0 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 0, lane);
-    uint32_t hi0 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 1, lane);
-    std::memcpy(&d->store_data[lane * 8 + 0], &lo0, 4);
-    std::memcpy(&d->store_data[lane * 8 + 4], &hi0, 4);
+    uint32_t base = cu.read_vgpr(wf.vgpr_alloc().base + inst_.addr, lane);
+    d->per_lane_addr[lane] = base + static_cast<uint32_t>(inst_.offset0) * 4U + wf.lds_base();
+    d->ds2_per_lane_addr[lane] = base + static_cast<uint32_t>(inst_.offset1) * 4U + wf.lds_base();
+    uint32_t v0_0 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 0, lane);
+    std::memcpy(&d->store_data[lane * 8 + 0], &v0_0, 4);
+    uint32_t v0_1 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 1, lane);
+    std::memcpy(&d->store_data[lane * 8 + 4], &v0_1, 4);
+    uint32_t v1_0 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data1 + 0, lane);
+    std::memcpy(&d->ds2_store_data[lane * 8 + 0], &v1_0, 4);
+    uint32_t v1_1 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data1 + 1, lane);
+    std::memcpy(&d->ds2_store_data[lane * 8 + 4], &v1_1, 4);
   }
   set_data(std::move(d));
 }
@@ -2172,21 +2388,33 @@ DsStore2addrStride64B64Ds::DsStore2addrStride64B64Ds(const MachineInst *inst)
 }
 
 void DsStore2addrStride64B64Ds::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds)
+    throw util::UnimplementedInst(mnemonic());
+  auto &cu = wf.cu();
+  uint64_t exec = wf.exec();
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->elem_size = 8;
   d->num_elems = 1;
   d->is_load = false;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
+  d->exec_mask = exec;
+  d->lane_mask = exec;
+  d->ds2_active = true;
   d->store_data.resize(wf.wf_size() * 8);
+  d->ds2_store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t lo0 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 0, lane);
-    uint32_t hi0 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 1, lane);
-    std::memcpy(&d->store_data[lane * 8 + 0], &lo0, 4);
-    std::memcpy(&d->store_data[lane * 8 + 4], &hi0, 4);
+    uint32_t base = cu.read_vgpr(wf.vgpr_alloc().base + inst_.addr, lane);
+    d->per_lane_addr[lane] = base + static_cast<uint32_t>(inst_.offset0) * 256U + wf.lds_base();
+    d->ds2_per_lane_addr[lane] = base + static_cast<uint32_t>(inst_.offset1) * 256U + wf.lds_base();
+    uint32_t v0_0 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 0, lane);
+    std::memcpy(&d->store_data[lane * 8 + 0], &v0_0, 4);
+    uint32_t v0_1 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 1, lane);
+    std::memcpy(&d->store_data[lane * 8 + 4], &v0_1, 4);
+    uint32_t v1_0 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data1 + 0, lane);
+    std::memcpy(&d->ds2_store_data[lane * 8 + 0], &v1_0, 4);
+    uint32_t v1_1 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data1 + 1, lane);
+    std::memcpy(&d->ds2_store_data[lane * 8 + 4], &v1_1, 4);
   }
   set_data(std::move(d));
 }
@@ -2206,13 +2434,15 @@ DsCmpstoreB64Ds::DsCmpstoreB64Ds(const MachineInst *inst)
 }
 
 void DsCmpstoreB64Ds::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds)
+    throw util::UnimplementedInst(mnemonic());
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 8;
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::CMPSWAP;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 16);
@@ -2246,13 +2476,15 @@ DsCmpstoreF64Ds::DsCmpstoreF64Ds(const MachineInst *inst)
 }
 
 void DsCmpstoreF64Ds::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds)
+    throw util::UnimplementedInst(mnemonic());
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 8;
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::CMPSWAP;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 16);
@@ -2283,13 +2515,15 @@ DsMinF64Ds::DsMinF64Ds(const MachineInst *inst)
 }
 
 void DsMinF64Ds::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds)
+    throw util::UnimplementedInst(mnemonic());
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 8;
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::FMIN;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 8);
@@ -2316,13 +2550,15 @@ DsMaxF64Ds::DsMaxF64Ds(const MachineInst *inst)
 }
 
 void DsMaxF64Ds::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds)
+    throw util::UnimplementedInst(mnemonic());
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 8;
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::FMAX;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 8);
@@ -2352,13 +2588,15 @@ DsAddRtnU64Ds::DsAddRtnU64Ds(const MachineInst *inst)
 }
 
 void DsAddRtnU64Ds::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds)
+    throw util::UnimplementedInst(mnemonic());
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 8;
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::ADD;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 8);
@@ -2388,13 +2626,15 @@ DsSubRtnU64Ds::DsSubRtnU64Ds(const MachineInst *inst)
 }
 
 void DsSubRtnU64Ds::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds)
+    throw util::UnimplementedInst(mnemonic());
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 8;
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::SUB;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 8);
@@ -2424,13 +2664,15 @@ DsRsubRtnU64Ds::DsRsubRtnU64Ds(const MachineInst *inst)
 }
 
 void DsRsubRtnU64Ds::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds)
+    throw util::UnimplementedInst(mnemonic());
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 8;
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::RSUB;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 8);
@@ -2460,13 +2702,15 @@ DsIncRtnU64Ds::DsIncRtnU64Ds(const MachineInst *inst)
 }
 
 void DsIncRtnU64Ds::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds)
+    throw util::UnimplementedInst(mnemonic());
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 8;
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::INC;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 8);
@@ -2496,13 +2740,15 @@ DsDecRtnU64Ds::DsDecRtnU64Ds(const MachineInst *inst)
 }
 
 void DsDecRtnU64Ds::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds)
+    throw util::UnimplementedInst(mnemonic());
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 8;
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::DEC;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 8);
@@ -2532,13 +2778,15 @@ DsMinRtnI64Ds::DsMinRtnI64Ds(const MachineInst *inst)
 }
 
 void DsMinRtnI64Ds::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds)
+    throw util::UnimplementedInst(mnemonic());
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 8;
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::SMIN;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 8);
@@ -2568,13 +2816,15 @@ DsMaxRtnI64Ds::DsMaxRtnI64Ds(const MachineInst *inst)
 }
 
 void DsMaxRtnI64Ds::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds)
+    throw util::UnimplementedInst(mnemonic());
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 8;
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::SMAX;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 8);
@@ -2604,13 +2854,15 @@ DsMinRtnU64Ds::DsMinRtnU64Ds(const MachineInst *inst)
 }
 
 void DsMinRtnU64Ds::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds)
+    throw util::UnimplementedInst(mnemonic());
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 8;
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::UMIN;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 8);
@@ -2640,13 +2892,15 @@ DsMaxRtnU64Ds::DsMaxRtnU64Ds(const MachineInst *inst)
 }
 
 void DsMaxRtnU64Ds::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds)
+    throw util::UnimplementedInst(mnemonic());
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 8;
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::UMAX;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 8);
@@ -2676,13 +2930,15 @@ DsAndRtnB64Ds::DsAndRtnB64Ds(const MachineInst *inst)
 }
 
 void DsAndRtnB64Ds::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds)
+    throw util::UnimplementedInst(mnemonic());
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 8;
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::AND;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 8);
@@ -2711,13 +2967,15 @@ DsOrRtnB64Ds::DsOrRtnB64Ds(const MachineInst *inst)
 }
 
 void DsOrRtnB64Ds::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds)
+    throw util::UnimplementedInst(mnemonic());
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 8;
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::OR;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 8);
@@ -2747,13 +3005,15 @@ DsXorRtnB64Ds::DsXorRtnB64Ds(const MachineInst *inst)
 }
 
 void DsXorRtnB64Ds::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds)
+    throw util::UnimplementedInst(mnemonic());
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 8;
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::XOR;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 8);
@@ -2783,7 +3043,10 @@ DsMskorRtnB64Ds::DsMskorRtnB64Ds(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void DsMskorRtnB64Ds::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void DsMskorRtnB64Ds::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 DsStorexchgRtnB64Ds::DsStorexchgRtnB64Ds(const MachineInst *inst)
     : Ds("ds_storexchg_rtn_b64", reinterpret_cast<const OpEncoding *>(inst),
@@ -2800,13 +3063,15 @@ DsStorexchgRtnB64Ds::DsStorexchgRtnB64Ds(const MachineInst *inst)
 }
 
 void DsStorexchgRtnB64Ds::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds)
+    throw util::UnimplementedInst(mnemonic());
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 8;
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::SWAP;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 8);
@@ -2838,13 +3103,15 @@ DsStorexchg2addrRtnB64Ds::DsStorexchg2addrRtnB64Ds(const MachineInst *inst)
 }
 
 void DsStorexchg2addrRtnB64Ds::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds)
+    throw util::UnimplementedInst(mnemonic());
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 8;
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::SWAP;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 8);
@@ -2876,13 +3143,15 @@ DsStorexchg2addrStride64RtnB64Ds::DsStorexchg2addrStride64RtnB64Ds(const Machine
 }
 
 void DsStorexchg2addrStride64RtnB64Ds::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds)
+    throw util::UnimplementedInst(mnemonic());
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 8;
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::SWAP;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 8);
@@ -2914,13 +3183,15 @@ DsCmpstoreRtnB64Ds::DsCmpstoreRtnB64Ds(const MachineInst *inst)
 }
 
 void DsCmpstoreRtnB64Ds::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds)
+    throw util::UnimplementedInst(mnemonic());
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 8;
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::CMPSWAP;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 16);
@@ -2956,13 +3227,15 @@ DsCmpstoreRtnF64Ds::DsCmpstoreRtnF64Ds(const MachineInst *inst)
 }
 
 void DsCmpstoreRtnF64Ds::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds)
+    throw util::UnimplementedInst(mnemonic());
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 8;
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::CMPSWAP;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 16);
@@ -2996,13 +3269,15 @@ DsMinRtnF64Ds::DsMinRtnF64Ds(const MachineInst *inst)
 }
 
 void DsMinRtnF64Ds::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds)
+    throw util::UnimplementedInst(mnemonic());
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 8;
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::FMIN;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 8);
@@ -3032,13 +3307,15 @@ DsMaxRtnF64Ds::DsMaxRtnF64Ds(const MachineInst *inst)
 }
 
 void DsMaxRtnF64Ds::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds)
+    throw util::UnimplementedInst(mnemonic());
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 8;
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::FMAX;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 8);
@@ -3065,12 +3342,14 @@ DsLoadB64Ds::DsLoadB64Ds(const MachineInst *inst)
 }
 
 void DsLoadB64Ds::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds)
+    throw util::UnimplementedInst(mnemonic());
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 8;
   d->num_elems = 1;
   d->is_load = true;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   set_data(std::move(d));
 }
 
@@ -3087,12 +3366,26 @@ DsLoad2addrB64Ds::DsLoad2addrB64Ds(const MachineInst *inst)
 }
 
 void DsLoad2addrB64Ds::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds)
+    throw util::UnimplementedInst(mnemonic());
+  auto &cu = wf.cu();
+  uint64_t exec = wf.exec();
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 8;
   d->num_elems = 1;
   d->is_load = true;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  d->exec_mask = exec;
+  d->lane_mask = exec;
+  d->ds2_active = true;
+  d->ds2_dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst + 2;
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t base = cu.read_vgpr(wf.vgpr_alloc().base + inst_.addr, lane);
+    d->per_lane_addr[lane] = base + static_cast<uint32_t>(inst_.offset0) * 4U + wf.lds_base();
+    d->ds2_per_lane_addr[lane] = base + static_cast<uint32_t>(inst_.offset1) * 4U + wf.lds_base();
+  }
   set_data(std::move(d));
 }
 
@@ -3109,12 +3402,26 @@ DsLoad2addrStride64B64Ds::DsLoad2addrStride64B64Ds(const MachineInst *inst)
 }
 
 void DsLoad2addrStride64B64Ds::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds)
+    throw util::UnimplementedInst(mnemonic());
+  auto &cu = wf.cu();
+  uint64_t exec = wf.exec();
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 8;
   d->num_elems = 1;
   d->is_load = true;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  d->exec_mask = exec;
+  d->lane_mask = exec;
+  d->ds2_active = true;
+  d->ds2_dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst + 2;
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t base = cu.read_vgpr(wf.vgpr_alloc().base + inst_.addr, lane);
+    d->per_lane_addr[lane] = base + static_cast<uint32_t>(inst_.offset0) * 256U + wf.lds_base();
+    d->ds2_per_lane_addr[lane] = base + static_cast<uint32_t>(inst_.offset1) * 256U + wf.lds_base();
+  }
   set_data(std::move(d));
 }
 
@@ -3133,13 +3440,15 @@ DsAddRtnF32Ds::DsAddRtnF32Ds(const MachineInst *inst)
 }
 
 void DsAddRtnF32Ds::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds)
+    throw util::UnimplementedInst(mnemonic());
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::FADD;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 4);
@@ -3163,7 +3472,10 @@ DsAddGsRegRtnDs::DsAddGsRegRtnDs(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void DsAddGsRegRtnDs::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void DsAddGsRegRtnDs::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 DsSubGsRegRtnDs::DsSubGsRegRtnDs(const MachineInst *inst)
     : Ds("ds_sub_gs_reg_rtn", reinterpret_cast<const OpEncoding *>(inst),
@@ -3176,7 +3488,10 @@ DsSubGsRegRtnDs::DsSubGsRegRtnDs(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void DsSubGsRegRtnDs::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void DsSubGsRegRtnDs::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 DsCondxchg32RtnB64Ds::DsCondxchg32RtnB64Ds(const MachineInst *inst)
     : Ds("ds_condxchg32_rtn_b64", reinterpret_cast<const OpEncoding *>(inst),
@@ -3193,13 +3508,15 @@ DsCondxchg32RtnB64Ds::DsCondxchg32RtnB64Ds(const MachineInst *inst)
 }
 
 void DsCondxchg32RtnB64Ds::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds)
+    throw util::UnimplementedInst(mnemonic());
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 8;
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::CMPSWAP;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 16);
@@ -3231,11 +3548,13 @@ DsStoreB8D16HiDs::DsStoreB8D16HiDs(const MachineInst *inst)
 }
 
 void DsStoreB8D16HiDs::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds)
+    throw util::UnimplementedInst(mnemonic());
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->elem_size = 1;
   d->num_elems = 1;
   d->is_load = false;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 1);
@@ -3243,6 +3562,7 @@ void DsStoreB8D16HiDs::execute_impl(amdgpu::Wavefront &wf) {
     if (!(exec & (1ULL << lane)))
       continue;
     uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0, lane);
+    val0 >>= 16;
     d->store_data[lane * 1 + 0] = static_cast<uint8_t>(val0);
   }
   set_data(std::move(d));
@@ -3261,11 +3581,13 @@ DsStoreB16D16HiDs::DsStoreB16D16HiDs(const MachineInst *inst)
 }
 
 void DsStoreB16D16HiDs::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds)
+    throw util::UnimplementedInst(mnemonic());
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->elem_size = 2;
   d->num_elems = 1;
   d->is_load = false;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 2);
@@ -3273,6 +3595,7 @@ void DsStoreB16D16HiDs::execute_impl(amdgpu::Wavefront &wf) {
     if (!(exec & (1ULL << lane)))
       continue;
     uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0, lane);
+    val0 >>= 16;
     std::memcpy(&d->store_data[lane * 2 + 0], &val0, 2);
   }
   set_data(std::move(d));
@@ -3291,12 +3614,15 @@ DsLoadU8D16Ds::DsLoadU8D16Ds(const MachineInst *inst)
 }
 
 void DsLoadU8D16Ds::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds)
+    throw util::UnimplementedInst(mnemonic());
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 1;
   d->num_elems = 1;
   d->is_load = true;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  d->d16_lo = true;
+  ds_calculate_addresses(inst_, wf, *d);
   set_data(std::move(d));
 }
 
@@ -3313,12 +3639,15 @@ DsLoadU8D16HiDs::DsLoadU8D16HiDs(const MachineInst *inst)
 }
 
 void DsLoadU8D16HiDs::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds)
+    throw util::UnimplementedInst(mnemonic());
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 1;
   d->num_elems = 1;
   d->is_load = true;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  d->d16_hi = true;
+  ds_calculate_addresses(inst_, wf, *d);
   set_data(std::move(d));
 }
 
@@ -3335,13 +3664,16 @@ DsLoadI8D16Ds::DsLoadI8D16Ds(const MachineInst *inst)
 }
 
 void DsLoadI8D16Ds::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds)
+    throw util::UnimplementedInst(mnemonic());
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 1;
   d->num_elems = 1;
   d->is_load = true;
   d->sign_extend = true;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  d->d16_lo = true;
+  ds_calculate_addresses(inst_, wf, *d);
   set_data(std::move(d));
 }
 
@@ -3358,13 +3690,16 @@ DsLoadI8D16HiDs::DsLoadI8D16HiDs(const MachineInst *inst)
 }
 
 void DsLoadI8D16HiDs::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds)
+    throw util::UnimplementedInst(mnemonic());
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 1;
   d->num_elems = 1;
   d->is_load = true;
   d->sign_extend = true;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  d->d16_hi = true;
+  ds_calculate_addresses(inst_, wf, *d);
   set_data(std::move(d));
 }
 
@@ -3381,12 +3716,15 @@ DsLoadU16D16Ds::DsLoadU16D16Ds(const MachineInst *inst)
 }
 
 void DsLoadU16D16Ds::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds)
+    throw util::UnimplementedInst(mnemonic());
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 2;
   d->num_elems = 1;
   d->is_load = true;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  d->d16_lo = true;
+  ds_calculate_addresses(inst_, wf, *d);
   set_data(std::move(d));
 }
 
@@ -3403,12 +3741,15 @@ DsLoadU16D16HiDs::DsLoadU16D16HiDs(const MachineInst *inst)
 }
 
 void DsLoadU16D16HiDs::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds)
+    throw util::UnimplementedInst(mnemonic());
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 2;
   d->num_elems = 1;
   d->is_load = true;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  d->d16_hi = true;
+  ds_calculate_addresses(inst_, wf, *d);
   set_data(std::move(d));
 }
 
@@ -3428,7 +3769,10 @@ DsBvhStackRtnB32Ds::DsBvhStackRtnB32Ds(const MachineInst *inst)
   num_dst_ = 2;
 }
 
-void DsBvhStackRtnB32Ds::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void DsBvhStackRtnB32Ds::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 DsStoreAddtidB32Ds::DsStoreAddtidB32Ds(const MachineInst *inst)
     : Ds("ds_store_addtid_b32", reinterpret_cast<const OpEncoding *>(inst),
@@ -3441,11 +3785,13 @@ DsStoreAddtidB32Ds::DsStoreAddtidB32Ds(const MachineInst *inst)
 }
 
 void DsStoreAddtidB32Ds::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds)
+    throw util::UnimplementedInst(mnemonic());
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = false;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 4);
@@ -3469,13 +3815,7 @@ DsLoadAddtidB32Ds::DsLoadAddtidB32Ds(const MachineInst *inst)
 }
 
 void DsLoadAddtidB32Ds::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
-  d->elem_size = 4;
-  d->num_elems = 1;
-  d->is_load = true;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
-  set_data(std::move(d));
+  amdgpu::execute_ds_load_addtid_b32_ds(*this, wf);
 }
 
 DsPermuteB32Ds::DsPermuteB32Ds(const MachineInst *inst)
@@ -3524,11 +3864,13 @@ DsStoreB96Ds::DsStoreB96Ds(const MachineInst *inst)
 }
 
 void DsStoreB96Ds::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds)
+    throw util::UnimplementedInst(mnemonic());
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->elem_size = 4;
   d->num_elems = 3;
   d->is_load = false;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 12);
@@ -3558,11 +3900,13 @@ DsStoreB128Ds::DsStoreB128Ds(const MachineInst *inst)
 }
 
 void DsStoreB128Ds::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds)
+    throw util::UnimplementedInst(mnemonic());
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->elem_size = 4;
   d->num_elems = 4;
   d->is_load = false;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 16);
@@ -3593,12 +3937,14 @@ DsLoadB96Ds::DsLoadB96Ds(const MachineInst *inst)
 }
 
 void DsLoadB96Ds::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds)
+    throw util::UnimplementedInst(mnemonic());
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 3;
   d->is_load = true;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   set_data(std::move(d));
 }
 
@@ -3614,12 +3960,14 @@ DsLoadB128Ds::DsLoadB128Ds(const MachineInst *inst)
 }
 
 void DsLoadB128Ds::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds)
+    throw util::UnimplementedInst(mnemonic());
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 4;
   d->is_load = true;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   set_data(std::move(d));
 }
 
