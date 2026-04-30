@@ -5,7 +5,47 @@ Per-surface contributor guides. Start at the repo-level
 and governance; this directory holds the deep-dive guides referenced
 from there.
 
-## Extension surfaces
+## Layer-first map
+
+PerfXpert is layered. Start from the layer you are changing, then use the
+surface guide in the right column.
+
+```
+docs/contributing/
+├── entry surfaces
+│   └── providers.md, external-tools.md
+├── agent brain
+│   └── agents.md, schemas.md
+├── deterministic tools and MCP exposure
+│   └── tools.md, mcp_tools.md, gpu_arch.md
+├── knowledge and optimization evidence
+│   └── knowledge.md, proven_optimizations.md
+├── report contracts
+│   └── output_formats.md, schemas.md
+├── fixtures and validation
+│   └── fixtures.md, walkthrough_new_bottleneck_class.md
+└── process
+    └── governance.md
+```
+
+| Architecture layer | Typical change | Start here |
+|--------------------|----------------|------------|
+| Entry surfaces | CLI/backend/provider behavior, required binaries, pylibs, shared libs | [providers.md](providers.md), [external-tools.md](external-tools.md) |
+| Agent brain | Root / Analysis / Recommendation / Correctness / specialist behavior | [agents.md](agents.md), [schemas.md](schemas.md) |
+| Deterministic tool layer | Classifiers, SQL readers, hardware lookups, pure analysis helpers | [tools.md](tools.md) |
+| MCP exposure | Make a READ_ONLY tool available to external MCP clients | [mcp_tools.md](mcp_tools.md) |
+| Hardware facts | Add or update GPU architecture metadata | [gpu_arch.md](gpu_arch.md) |
+| Knowledge layer | Add bottleneck signatures, thresholds, facts, or provenance | [knowledge.md](knowledge.md) |
+| Proven optimizations | Add measured optimization evidence and impact ranges | [proven_optimizations.md](proven_optimizations.md) |
+| Report/API contracts | Change text/json/markdown/webview output or schema fields | [output_formats.md](output_formats.md), [schemas.md](schemas.md) |
+| Fixtures/tests | Add trace fixtures or validate a new scenario | [fixtures.md](fixtures.md), [walkthrough_new_bottleneck_class.md](walkthrough_new_bottleneck_class.md) |
+| Governance | Decide whether the change needs an RFC or extra reviewers | [governance.md](governance.md) |
+
+For the runtime layer diagram, read
+[../architecture/agent-hierarchy.md](../architecture/agent-hierarchy.md)
+before editing agent or specialist behavior.
+
+## Alphabetical surface index
 
 | Surface | Guide |
 |---------|-------|
