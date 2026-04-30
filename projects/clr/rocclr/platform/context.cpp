@@ -93,6 +93,8 @@ int Context::checkProperties(const cl_context_properties* properties, Context::I
       case CL_CONTEXT_INTEROP_USER_SYNC:
         if (p->ptr == reinterpret_cast<void*>(true)) {
           info->flags_ |= InteropUserSync;
+        } else if (p->ptr != reinterpret_cast<void*>(false)) {
+          return CL_INVALID_PROPERTY;
         }
         break;
 #ifdef _WIN32
@@ -166,8 +168,8 @@ int Context::checkProperties(const cl_context_properties* properties, Context::I
         break;
       case CL_CONTEXT_PLATFORM:
         pfmId = reinterpret_cast<cl_platform_id>(p->ptr);
-        if ((NULL != pfmId) && (AMD_PLATFORM != pfmId)) {
-          return CL_INVALID_VALUE;
+        if (NULL == pfmId || AMD_PLATFORM != pfmId) {
+          return CL_INVALID_PLATFORM;
         }
         break;
       case CL_CONTEXT_OFFLINE_DEVICES_AMD:
@@ -178,7 +180,14 @@ int Context::checkProperties(const cl_context_properties* properties, Context::I
         info->flags_ |= OfflineDevices;
         break;
       default:
-        return CL_INVALID_VALUE;
+        return CL_INVALID_PROPERTY;
+    }
+    // Check for duplicate property names
+    const Element* q = reinterpret_cast<const Element*>(properties);
+    for (; q != p; ++q) {
+      if (q->name == p->name) {
+        return CL_INVALID_PROPERTY;
+      }
     }
     p++;
     count++;
