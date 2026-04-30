@@ -34,12 +34,12 @@ using ::rocprofsys::pmc::nic_device_filter;
  *
  * @tparam Driver The AMD SMI driver type (real or mock for testing)
  */
-template <typename DriverProvider>
+template <typename DriverProvider, typename Driver = pmc::collectors::nic::nic_driver>
 struct nic_traits
 {
     using metrics_t         = pmc::collectors::nic::metrics;
     using enabled_metrics_t = pmc::collectors::nic::enabled_metrics;
-    using driver_t          = pmc::collectors::nic::nic_driver;
+    using driver_t          = Driver;
     using device_t          = device<driver_t>;
     using device_ptr_t      = std::shared_ptr<device_t>;
     using container_t       = std::vector<device_ptr_t>;
