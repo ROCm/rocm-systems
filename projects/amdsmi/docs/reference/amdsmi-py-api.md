@@ -140,6 +140,44 @@ except AmdSmiException as e:
     print(e)
 ```
 
+### amdsmi_get_processor_info
+
+**Note: CURRENTLY HARDCODED TO RETURN EMPTY VALUES**
+
+Description: Return processor name. Available regardless of whether the library
+was built with ESMI support.
+
+Input parameters:
+`processor_handle` processor handle
+
+Output: Processor name
+
+Exceptions that can be thrown by `amdsmi_get_processor_info` function:
+
+* `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+try:
+    processor_handles = amdsmi_get_processor_handles()
+    if len(processor_handles) == 0:
+        print("No processors on machine")
+    else:
+        for processor in processor_handles:
+            print(amdsmi_get_processor_info(processor))
+except AmdSmiException as e:
+    print(e)
+```
+
 ### amdsmi_get_processor_handles
 
 Description: Returns list of GPU device handle objects on current machine
@@ -5555,43 +5593,6 @@ except AmdSmiException as e:
 ```
 
 ## CPU APIs
-
-### amdsmi_get_processor_info
-
-**Note: CURRENTLY HARDCODED TO RETURN EMPTY VALUES**
-
-Description: Return processor name
-
-Input parameters:
-`processor_handle` processor handle
-
-Output: Processor name
-
-Exceptions that can be thrown by `amdsmi_get_processor_info` function:
-
-* `AmdSmiLibraryException`
-
-#### Possible Library Exceptions
-
-- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
-- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
-- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
-- `AMDSMI_STATUS_INVAL` - Invalid parameters
-- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
-
-Example:
-
-```python
-try:
-    processor_handles = amdsmi_get_processor_handles()
-    if len(processor_handles) == 0:
-        print("No processors on machine")
-    else:
-        for processor in processor_handles:
-            print(amdsmi_get_processor_info(processor))
-except AmdSmiException as e:
-    print(e)
-```
 
 ### amdsmi_get_cpu_hsmp_proto_ver
 

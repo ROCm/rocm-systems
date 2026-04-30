@@ -26,6 +26,8 @@
 
 #include <cstdlib>
 #include <iostream>
+#include <unordered_map>
+#include <algorithm>
 #include <rocshmem/rocshmem.hpp>
 
 #include "tester.hpp"
@@ -49,7 +51,39 @@ TesterArguments::TesterArguments(int argc, char *argv[]) {
       max_msg_size = atoll(argv[i]);
     } else if (arg == "-a") {
       i++;
-      algorithm = atoi(argv[i]);
+      std::string a_arg = argv[i];
+
+      // If it's a pure integer, use it directly; otherwise look up by name
+      bool is_number = !a_arg.empty() && std::all_of(a_arg.begin(), a_arg.end(), ::isdigit);
+      if (is_number) {
+        algorithm = std::stoul(a_arg);
+      } else {
+        // Build map from lowercased CamelName to enum value.
+        // Generated automatically from ROCSHMEM_FOREACH_TEST_TYPE so it stays in
+        // sync with the enum without a separate hand-maintained list.
+        auto to_lower = [](std::string s) {
+          std::transform(s.begin(), s.end(), s.begin(), ::tolower);
+          return s;
+        };
+        static const std::unordered_map<std::string, unsigned> name_to_algo = []() {
+          std::unordered_map<std::string, unsigned> m;
+#define _ADD_TEST_ENTRY(name, val) \
+          { std::string k = #name; \
+            std::transform(k.begin(), k.end(), k.begin(), ::tolower); \
+            m[k] = val; }
+          ROCSHMEM_FOREACH_TEST_TYPE(_ADD_TEST_ENTRY)
+#undef _ADD_TEST_ENTRY
+          return m;
+        }();
+
+        auto it = name_to_algo.find(to_lower(a_arg));
+        if (it == name_to_algo.end()) {
+          std::cerr << "Unknown test name: " << a_arg << "\n";
+          show_usage(argv[0]);
+          exit(-1);
+        }
+        algorithm = it->second;
+      }
     } else if (arg == "-v") {
       i++;
       max_volume_size = atoi(argv[i]);
@@ -173,9 +207,9 @@ TesterArguments::TesterArguments(int argc, char *argv[]) {
       min_msg_size = 8;
       break;
     case TeamCtxInfraTestType:
-    case TeamCtxInfraTestSingleType:
-    case TeamCtxInfraTestBlockType:
-    case TeamCtxInfraTestOddEvenType:
+    case TeamCtxInfraSingleTestType:
+    case TeamCtxInfraBlockTestType:
+    case TeamCtxInfraOddEvenTestType:
       max_msg_size = min_msg_size;
       break;
     case PutNBIMRTestType:
@@ -208,7 +242,7 @@ void TesterArguments::show_usage(std::string executable_name) {
   std::cout << "\t-w <number of workgroups>\n";
   std::cout << "\t-s <maximum message size (in bytes)>\n";
   std::cout << "\t-v <maximum per origin volume (in bytes)>\n";
-  std::cout << "\t-a <algorithm number to test>\n";
+  std::cout << "\t-a <algorithm number or test name to test>\n";
   std::cout << "\t-z <WorkGroup Size>\n";
   std::cout << "\t-c <Coalescing Coefficient>\n";
   std::cout << "\t-o <Operation type for the random_access test>\n";
@@ -250,8 +284,8 @@ void TesterArguments::get_arguments() {
     case TeamBarrierTestType:
     case TeamWAVEBarrierTestType:
     case TeamWGBarrierTestType:
-    case TeamCtxInfraTestBlockType:
-    case TeamCtxInfraTestOddEvenType:
+    case TeamCtxInfraBlockTestType:
+    case TeamCtxInfraOddEvenTestType:
     // On-stream tests - support any number of PEs
     case TeamAlltoallmemOnStreamTestType:
     case BarrierAllOnStreamTestType:

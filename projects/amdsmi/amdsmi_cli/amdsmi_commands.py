@@ -176,6 +176,7 @@ class AMDSMICommands:
             version_args = argparse.Namespace()
             version_args.gpu_version = False
             version_args.cpu_version = False
+            version_args.nic_version = False
             self.version(version_args)
             sys.exit(-1)
 
@@ -192,10 +193,10 @@ class AMDSMICommands:
             args.cpu_version = cpu_version
         if nic_version:
             args.nic_version = nic_version
-        # if no args are given, display everything
+        # if no args are given, display everything available on this build
         if args.gpu_version is None and args.cpu_version is None and args.nic_version is None:
             args.gpu_version = True
-            args.cpu_version = True
+            args.cpu_version = self.helpers.is_amd_hsmp_initialized()
             args.nic_version = True
 
         if not self.group_check_printed:

@@ -2080,6 +2080,188 @@ int main() {
           }
         }
       }
+
+      // -------------------------------------------------------------------
+      // Violation Status (MI3x+ only; older ASICs may return NOT_SUPPORTED)
+      // Falls back to throttle_status via gpu_metrics on older ASICs.
+      // -------------------------------------------------------------------
+      std::cout << "\n    Output of amdsmi_get_violation_status (GPU " << gpu_number << "):\n";
+      amdsmi_violation_status_t violation_status = {};
+      ret = amdsmi_get_violation_status(processor_handles[device_index], &violation_status);
+      if (ret == AMDSMI_STATUS_SUCCESS) {
+        constexpr uint64_t kU64Max = std::numeric_limits<uint64_t>::max();
+        constexpr uint8_t kU8Max = std::numeric_limits<uint8_t>::max();
+
+        auto u64_str = [kU64Max](uint64_t v) -> std::string {
+          return (v == kU64Max) ? "N/A" : std::to_string(v);
+        };
+        // Matches CLI: active flags shown as ACTIVE / NOT ACTIVE / N/A
+        auto active_str = [kU8Max](uint8_t v) -> std::string {
+          if (v == kU8Max) return "N/A";
+          return v ? "ACTIVE" : "NOT ACTIVE";
+        };
+
+        std::cout << "\treference_timestamp (us since epoch): "
+                  << u64_str(violation_status.reference_timestamp) << "\n";
+        std::cout << "\tviolation_timestamp (ns):             "
+                  << u64_str(violation_status.violation_timestamp) << "\n";
+
+        // Accumulated counters — names match CLI output
+        std::cout << "\t-- Accumulated --\n";
+        std::cout << "\tACCUMULATION_COUNTER:       " << u64_str(violation_status.acc_counter)
+                  << "\n";
+        std::cout << "\tPROCHOT_ACCUMULATED:        " << u64_str(violation_status.acc_prochot_thrm)
+                  << "\n";
+        std::cout << "\tPPT_ACCUMULATED:            " << u64_str(violation_status.acc_ppt_pwr)
+                  << "\n";
+        std::cout << "\tSOCKET_THERMAL_ACCUMULATED: " << u64_str(violation_status.acc_socket_thrm)
+                  << "\n";
+        std::cout << "\tVR_THERMAL_ACCUMULATED:     " << u64_str(violation_status.acc_vr_thrm)
+                  << "\n";
+        std::cout << "\tHBM_THERMAL_ACCUMULATED:    " << u64_str(violation_status.acc_hbm_thrm)
+                  << "\n";
+
+        // Violation status (active flags) — names match CLI output
+        std::cout << "\t-- Violation Status --\n";
+        std::cout << "\tPROCHOT_VIOLATION_STATUS:        "
+                  << active_str(violation_status.active_prochot_thrm) << "\n";
+        std::cout << "\tPPT_VIOLATION_STATUS:            "
+                  << active_str(violation_status.active_ppt_pwr) << "\n";
+        std::cout << "\tSOCKET_THERMAL_VIOLATION_STATUS: "
+                  << active_str(violation_status.active_socket_thrm) << "\n";
+        std::cout << "\tVR_THERMAL_VIOLATION_STATUS:     "
+                  << active_str(violation_status.active_vr_thrm) << "\n";
+        std::cout << "\tHBM_THERMAL_VIOLATION_STATUS:    "
+                  << active_str(violation_status.active_hbm_thrm) << "\n";
+
+        // Violation activity (%) — names match CLI output
+        std::cout << "\t-- Violation Activity --\n";
+        std::cout << "\tPROCHOT_VIOLATION_ACTIVITY:        "
+                  << u64_str(violation_status.per_prochot_thrm) << " %\n";
+        std::cout << "\tPPT_VIOLATION_ACTIVITY:            "
+                  << u64_str(violation_status.per_ppt_pwr) << " %\n";
+        std::cout << "\tSOCKET_THERMAL_VIOLATION_ACTIVITY: "
+                  << u64_str(violation_status.per_socket_thrm) << " %\n";
+        std::cout << "\tVR_THERMAL_VIOLATION_ACTIVITY:     "
+                  << u64_str(violation_status.per_vr_thrm) << " %\n";
+        std::cout << "\tHBM_THERMAL_VIOLATION_ACTIVITY:    "
+                  << u64_str(violation_status.per_hbm_thrm) << " %\n";
+
+        // GPU metrics 1.8 per-XCP/XCC arrays.
+        // Layout matches Python CLI: one row per metric, all XCC values as a list under each XCP.
+        // XCPs/XCCs where all fields are sentinel (unsupported) are skipped.
+        std::cout << "\t-- Per-XCP/XCC (GPU metrics 1.8, N/A = unsupported) --\n";
+
+        // Build "[xcc0, xcc1, ...]" string for a row of uint64 values, skipping trailing N/As.
+        auto xcc_u64_row = [&](const uint64_t* row) -> std::string {
+          // Find last non-sentinel index so we don't pad with N/A forever.
+          int last = -1;
+          for (int xcc = 0; xcc < static_cast<int>(AMDSMI_MAX_NUM_XCC); ++xcc)
+            if (row[xcc] != kU64Max) last = xcc;
+          if (last < 0) return "N/A";
+          std::string s = "[";
+          for (int xcc = 0; xcc <= last; ++xcc) {
+            if (xcc) s += ", ";
+            s += u64_str(row[xcc]);
+          }
+          return s + "]";
+        };
+        auto xcc_active_row = [&](const uint8_t* row) -> std::string {
+          int last = -1;
+          for (int xcc = 0; xcc < static_cast<int>(AMDSMI_MAX_NUM_XCC); ++xcc)
+            if (row[xcc] != kU8Max) last = xcc;
+          if (last < 0) return "N/A";
+          std::string s = "[";
+          for (int xcc = 0; xcc <= last; ++xcc) {
+            if (xcc) s += ", ";
+            s += active_str(row[xcc]);
+          }
+          return s + "]";
+        };
+        auto xcc_pct_row = [&](const uint64_t* row) -> std::string {
+          int last = -1;
+          for (int xcc = 0; xcc < static_cast<int>(AMDSMI_MAX_NUM_XCC); ++xcc)
+            if (row[xcc] != kU64Max) last = xcc;
+          if (last < 0) return "N/A";
+          std::string s = "[";
+          for (int xcc = 0; xcc <= last; ++xcc) {
+            if (xcc) s += ", ";
+            s += u64_str(row[xcc]) + " %";
+          }
+          return s + "]";
+        };
+
+        for (uint32_t xcp = 0; xcp < AMDSMI_MAX_NUM_XCP; ++xcp) {
+          bool any_valid = false;
+          for (uint32_t xcc = 0; xcc < AMDSMI_MAX_NUM_XCC; ++xcc) {
+            if (violation_status.acc_gfx_clk_below_host_limit_total[xcp][xcc] != kU64Max ||
+                violation_status.acc_gfx_clk_below_host_limit_pwr[xcp][xcc] != kU64Max ||
+                violation_status.acc_gfx_clk_below_host_limit_thm[xcp][xcc] != kU64Max ||
+                violation_status.acc_low_utilization[xcp][xcc] != kU64Max) {
+              any_valid = true;
+              break;
+            }
+          }
+          if (!any_valid) continue;
+
+          std::cout << "\tXCP[" << xcp << "]:\n";
+          std::cout << "\t  -- Accumulated --\n";
+          std::cout << "\t  GFX_CLK_BELOW_HOST_LIMIT_POWER_ACCUMULATED:    "
+                    << xcc_u64_row(violation_status.acc_gfx_clk_below_host_limit_pwr[xcp]) << "\n";
+          std::cout << "\t  GFX_CLK_BELOW_HOST_LIMIT_THERMAL_ACCUMULATED:  "
+                    << xcc_u64_row(violation_status.acc_gfx_clk_below_host_limit_thm[xcp]) << "\n";
+          std::cout << "\t  TOTAL_GFX_CLK_BELOW_HOST_LIMIT_ACCUMULATED:    "
+                    << xcc_u64_row(violation_status.acc_gfx_clk_below_host_limit_total[xcp])
+                    << "\n";
+          std::cout << "\t  LOW_UTILIZATION_ACCUMULATED:                   "
+                    << xcc_u64_row(violation_status.acc_low_utilization[xcp]) << "\n";
+          std::cout << "\t  -- Violation Status --\n";
+          std::cout << "\t  GFX_CLK_BELOW_HOST_LIMIT_POWER_VIOLATION_STATUS:    "
+                    << xcc_active_row(violation_status.active_gfx_clk_below_host_limit_pwr[xcp])
+                    << "\n";
+          std::cout << "\t  GFX_CLK_BELOW_HOST_LIMIT_THERMAL_VIOLATION_STATUS:  "
+                    << xcc_active_row(violation_status.active_gfx_clk_below_host_limit_thm[xcp])
+                    << "\n";
+          std::cout << "\t  TOTAL_GFX_CLK_BELOW_HOST_LIMIT_VIOLATION_STATUS:    "
+                    << xcc_active_row(violation_status.active_gfx_clk_below_host_limit_total[xcp])
+                    << "\n";
+          std::cout << "\t  LOW_UTILIZATION_VIOLATION_STATUS:                   "
+                    << xcc_active_row(violation_status.active_low_utilization[xcp]) << "\n";
+          std::cout << "\t  -- Violation Activity --\n";
+          std::cout << "\t  GFX_CLK_BELOW_HOST_LIMIT_POWER_VIOLATION_ACTIVITY:    "
+                    << xcc_pct_row(violation_status.per_gfx_clk_below_host_limit_pwr[xcp]) << "\n";
+          std::cout << "\t  GFX_CLK_BELOW_HOST_LIMIT_THERMAL_VIOLATION_ACTIVITY:  "
+                    << xcc_pct_row(violation_status.per_gfx_clk_below_host_limit_thm[xcp]) << "\n";
+          std::cout << "\t  TOTAL_GFX_CLK_BELOW_HOST_LIMIT_VIOLATION_ACTIVITY:    "
+                    << xcc_pct_row(violation_status.per_gfx_clk_below_host_limit_total[xcp])
+                    << "\n";
+          std::cout << "\t  LOW_UTILIZATION_VIOLATION_ACTIVITY:                   "
+                    << xcc_pct_row(violation_status.per_low_utilization[xcp]) << "\n";
+        }
+      } else if (ret == AMDSMI_STATUS_NOT_SUPPORTED) {
+        // Navi/MI1x/MI2x: violation API not supported — fall back to gpu_metrics throttle_status
+        std::cout << "\tViolation API not supported on this ASIC. "
+                     "Falling back to gpu_metrics throttle_status.\n";
+        amdsmi_gpu_metrics_t smu = {};
+        amdsmi_status_t metrics_ret =
+            amdsmi_get_gpu_metrics_info(processor_handles[device_index], &smu);
+        if (metrics_ret == AMDSMI_STATUS_SUCCESS) {
+          // throttle_status: same field the CLI uses for amd-smi metric --power
+          constexpr uint32_t kU32Max = std::numeric_limits<uint32_t>::max();
+          if (smu.throttle_status == kU32Max) {
+            std::cout << "\tTHROTTLE_STATUS: N/A\n";
+          } else {
+            std::cout << "\tTHROTTLE_STATUS: "
+                      << (smu.throttle_status ? "THROTTLED" : "UNTHROTTLED") << "\n";
+          }
+        }
+      } else {
+        const char* err_str = nullptr;
+        amdsmi_status_code_to_string(ret, &err_str);
+        std::cout << "\tamdsmi_get_violation_status failed: "
+                  << (err_str ? err_str : "unknown error") << "\n";
+      }
+      std::cout << "\n-------------------------------------------------------------\n\n";
       gpu_number++;
     }
   }

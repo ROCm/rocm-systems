@@ -60,11 +60,12 @@ tool_codeobj_tracing_callback(rocprofiler_callback_tracing_record_t record,
                               void* callback_data);
 
 void
-shader_data_callback(rocprofiler_agent_id_t  agent,
-                     int64_t                 se_id,
-                     void*                   se_data,
-                     size_t                  data_size,
-                     rocprofiler_user_data_t userdata);
+shader_data_callback(rocprofiler_agent_id_t                       agent,
+                     int64_t                                      se_id,
+                     void*                                        se_data,
+                     size_t                                       data_size,
+                     rocprofiler_thread_trace_shader_data_flags_t flags,
+                     rocprofiler_user_data_t                      userdata);
 
 void
 init();
