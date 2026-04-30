@@ -59,8 +59,8 @@ struct in_memory_emitter
         m_store.clear();
     }
 
-    // Direct store injection for post_process tests (avoids ring-buffer detour).
-    void inject(int64_t tid, backtrace_record const& rec) { m_store[tid].push_back(rec); }
+    // Insert a record directly into the per-tid store (bypasses ring buffer).
+    void insert(int64_t tid, backtrace_record const& rec) { m_store[tid].push_back(rec); }
 
     // Remove all records for tid — mirrors trace_cache_offload_adapter::erase()
     // for test doubles that need to observe Variant 2 emit behavior.

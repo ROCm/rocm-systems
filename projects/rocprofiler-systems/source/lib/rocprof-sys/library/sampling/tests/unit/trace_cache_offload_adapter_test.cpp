@@ -219,7 +219,7 @@ TEST(trace_cache_offload_adapter, write_preserves_push_order)
 TEST(trace_cache_offload_adapter, inject_adds_record_without_ring_buffer)
 {
     trace_cache_offload_adapter adapter;
-    adapter.inject(7, make_record(7, 500));
+    adapter.insert(7, make_record(7, 500));
     auto records = adapter.read(7);
     ASSERT_EQ(records.size(), 1U);
     EXPECT_EQ(records[0].tid, 7);

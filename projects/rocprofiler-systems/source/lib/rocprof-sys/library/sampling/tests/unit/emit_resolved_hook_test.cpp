@@ -37,15 +37,15 @@ TEST(emit_resolved_hook, shutdown_drains_offload_for_tid)
     svc_t svc{ make_test_config() };
     svc.setup(0);
 
-    // Inject two records via inject() seam (simulates ring drain result).
+    // Insert two records directly (simulates ring drain result).
     backtrace_record r{};
     r.tid          = 0;
     r.timestamp_ns = 100;
     r.trigger      = trigger_type::TIMER;
     r.pc_count     = 2;
-    svc.get_offload().inject(0, r);
+    svc.get_offload().insert(0, r);
     r.timestamp_ns = 200;
-    svc.get_offload().inject(0, r);
+    svc.get_offload().insert(0, r);
 
     svc.shutdown(0);
 
@@ -61,9 +61,9 @@ TEST(emit_resolved_hook, trace_cache_adapter_erase_removes_single_tid)
     trace_cache_offload_adapter adapter;
     backtrace_record            rec{};
     rec.tid = 1;
-    adapter.inject(1, rec);
+    adapter.insert(1, rec);
     rec.tid = 2;
-    adapter.inject(2, rec);
+    adapter.insert(2, rec);
 
     adapter.erase(1);
 
@@ -83,8 +83,8 @@ TEST(emit_resolved_hook, trace_cache_adapter_erase_removes_from_tids_list)
     trace_cache_offload_adapter adapter;
     backtrace_record            rec{};
     rec.tid = 5;
-    adapter.inject(5, rec);
-    adapter.inject(6, rec);
+    adapter.insert(5, rec);
+    adapter.insert(6, rec);
 
     adapter.erase(5);
 
@@ -100,9 +100,9 @@ TEST(emit_resolved_hook, in_memory_emitter_erase_removes_single_tid)
     in_memory_emitter emitter;
     backtrace_record  rec{};
     rec.tid = 10;
-    emitter.inject(10, rec);
+    emitter.insert(10, rec);
     rec.tid = 20;
-    emitter.inject(20, rec);
+    emitter.insert(20, rec);
 
     emitter.erase(10);
 

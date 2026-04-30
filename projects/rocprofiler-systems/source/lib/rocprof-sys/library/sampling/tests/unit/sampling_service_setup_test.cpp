@@ -64,10 +64,10 @@ TEST(sampling_service_setup, setup_returns_empty_when_duration_disabled)
 
     // Drive the duration_controller to its disabled state via the production
     // path: start with a tiny duration, then advance the fake clock past the
-    // deadline and call tick_for_test() to fire the disable callback.
+    // deadline and call check_deadline() to fire the disable callback.
     svc.duration_controller().start(1e-9);
     test::fake_clock::advance_ns(1'000);
-    svc.duration_controller().tick_for_test();
+    svc.duration_controller().check_deadline();
     ASSERT_TRUE(svc.duration_controller().is_disabled())
         << "duration_controller must be disabled after the deadline fires";
 

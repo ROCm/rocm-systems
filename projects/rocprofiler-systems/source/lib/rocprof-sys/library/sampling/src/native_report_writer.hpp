@@ -85,7 +85,7 @@ class native_report_writer
     };
 
 public:
-    // Stream-injection constructor (test use).
+    // Stream-injection constructor — caller provides output streams directly.
     // Headers are written immediately so they appear even with zero samples.
     native_report_writer(std::ostream& wall_clock_out, std::ostream& cpu_clock_out,
                          std::ostream& percent_out, std::ostream& trip_count_out)
@@ -97,9 +97,8 @@ public:
         write_headers();
     }
 
-    // Default constructor (production use).
-    // Accumulates data; flush() must be driven by the production caller, which
-    // should call set_flush_handler() to provide actual output streams.
+    // Default constructor — streams provided later via set_streams().
+    // Accumulates data; flush() writes to streams set by set_streams().
     native_report_writer() = default;
 
     // Called by production code (e.g. sampling_service_production_hooks) to

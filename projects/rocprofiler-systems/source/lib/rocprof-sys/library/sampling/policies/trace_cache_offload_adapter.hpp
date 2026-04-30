@@ -71,26 +71,21 @@ public:
     }
 
     // EmitterPolicy::reset — clear all stored records.
-    // noexcept: tests/unit/trace_cache_offload_adapter_test.cpp asserts this contract.
-    // std::mutex::lock can theoretically throw std::system_error, but not on a properly
-    // constructed POSIX mutex; the contract reflects that real-world guarantee.
     void reset() noexcept
     {
         std::lock_guard<std::mutex> lk{ m_mutex };
         m_store.clear();
     }
 
-    // Direct store injection seam used by post_process tests (avoids ring-buffer detour).
-    void inject(int64_t tid, backtrace_record const& rec)
+    // Insert a record directly into the per-tid store (bypasses ring buffer).
+    void insert(int64_t tid, backtrace_record const& rec)
     {
         std::lock_guard<std::mutex> lk{ m_mutex };
         m_store[tid].push_back(rec);
     }
 
-    // Remove all records for tid after emit_resolved_to_trace_cache() has processed them.
-    // Prevents double-emission when post_process() iterates offload_.tids() (Variant 2).
-    // noexcept: tests/unit/emit_resolved_hook_test.cpp asserts this contract (see also
-    // reset()).
+    // Remove all records for tid after emit_resolved has processed them.
+    // Prevents double-emission when post_process() iterates offload_.tids().
     void erase(int64_t tid) noexcept
     {
         std::lock_guard<std::mutex> lk{ m_mutex };

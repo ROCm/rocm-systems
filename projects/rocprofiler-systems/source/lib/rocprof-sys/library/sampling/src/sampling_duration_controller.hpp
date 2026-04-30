@@ -25,7 +25,7 @@ class sampling_duration_controller
 public:
     using shutdown_callback = std::function<void()>;
 
-    // Callback is supplied at construction time (makes test injection cleaner).
+    // Callback is supplied at construction time.
     explicit sampling_duration_controller(shutdown_callback callback)
     : callback_(std::move(callback))
     {}
@@ -51,19 +51,16 @@ public:
         return disabled_.load(std::memory_order_acquire);
     }
 
-    // ── Test seams (no-ops in production) ────────────────────────────────────
-    // tick_for_test: directly runs one iteration of the deadline check
-    // (tests with fake_clock call this instead of waiting for the real thread).
-    void tick_for_test();
-
-    // set_finalized_for_test: inject a "process finalized" flag to break the loop.
-    void set_finalized_for_test(bool v) noexcept { test_finalized_ = v; }
+    // Synchronously check whether the deadline has elapsed and fire the
+    // callback if so. Used when the clock is advanced externally (e.g.
+    // fake_clock in tests) rather than waiting for the background thread.
+    void check_deadline();
 
 private:
     [[nodiscard]] bool deadline_reached() const noexcept;
 
     // Set disabled flag, emit L09 log line, and invoke callback exactly once.
-    // Shared between the production deadline-thread path and tick_for_test().
+    // Shared between the production deadline-thread path and check_deadline().
     void fire_deadline_callback();
 
     shutdown_callback                     callback_;
@@ -72,7 +69,6 @@ private:
     std::condition_variable               cv_;
     std::unique_ptr<std::thread>          thread_;
     bool                                  stop_requested_ = false;
-    bool                                  test_finalized_ = false;
     double                                duration_sec_   = 0.0;
     std::chrono::steady_clock::time_point deadline_{};
 };
@@ -82,7 +78,7 @@ void
 sampling_duration_controller<ClockPolicy>::fire_deadline_callback()
 {
     // Set disabled exactly once; the bool result of exchange() prevents a
-    // double-fire across the production thread and a concurrent tick_for_test.
+    // double-fire across the production thread and a concurrent check_deadline().
     if(disabled_.exchange(true, std::memory_order_acq_rel)) return;
 
     LOG_INFO("Sampling duration of {:.6f} seconds has elapsed. "
@@ -113,11 +109,8 @@ sampling_duration_controller<ClockPolicy>::start(double duration_sec)
         std::unique_lock<std::mutex> inner(mutex_);
         while(!stop_requested_)
         {
-            if(test_finalized_) break;
-
             auto status = cv_.wait_until(inner, deadline_);
             if(stop_requested_) break;
-            if(test_finalized_) break;
 
             if(status == std::cv_status::timeout)
             {
@@ -152,17 +145,10 @@ sampling_duration_controller<ClockPolicy>::stop() noexcept
 
 template <class ClockPolicy>
 void
-sampling_duration_controller<ClockPolicy>::tick_for_test()
+sampling_duration_controller<ClockPolicy>::check_deadline()
 {
-    // Directly check deadline against the fake clock (no sleeping).
-    // Used exclusively in tests that control time via fake_clock.
-    if(test_finalized_) return;
-
     ClockPolicy clk;
-    if(clk.now_steady() >= deadline_)
-        fire_deadline_callback();
-    else
-        LOG_WARNING("Spurious wakeup of sampling duration thread...");
+    if(clk.now_steady() >= deadline_) fire_deadline_callback();
 }
 
 }  // namespace rocprofsys::sampling
