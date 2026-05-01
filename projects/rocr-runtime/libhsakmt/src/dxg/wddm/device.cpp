@@ -241,8 +241,8 @@ hsa_status_t WDDMDevice::VramAvail(uint64_t* available_bytes) {
 
     *available_bytes = LocalHeapSize() - usedVis - usedInv;
   } else {
+    // APU count all segments
     for (const auto& seg_info : segment_infos_) {
-        // APU - NonLocal memory
         memset(&stats, 0, sizeof(D3DKMT_QUERYSTATISTICS));
         stats.Type = D3DKMT_QUERYSTATISTICS_SEGMENT;
         stats.AdapterLuid = adapter_luid_;
