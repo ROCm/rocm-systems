@@ -813,13 +813,6 @@ install(
     COMPONENT main
     PATTERN "__pycache__" EXCLUDE
 )
-# tools/config_management
-install(
-    DIRECTORY tools/config_management
-    DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
-    COMPONENT main
-    PATTERN "__pycache__" EXCLUDE
-)
 
 # ==============================================================================
 # Vendored Dependencies Installation
