@@ -199,6 +199,7 @@ if(BUILD_TESTS)
 
     set(TEST_FIXTURE_SOURCE_FILES
       BitOpsTests.cpp
+      RomeTopoConsensusTests.cpp
       CommTests.cpp
       EnqueueCountTests.cpp
       device/TestOp128.cpp
