@@ -34,6 +34,11 @@ install(
     USE_SOURCE_PERMISSIONS)
 
 install(
+    PROGRAMS ${PROJECT_SOURCE_DIR}/source/scripts/run-therock-ci.py
+    DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PACKAGE_NAME}/source/scripts
+    COMPONENT tests)
+
+install(
     FILES ${PROJECT_SOURCE_DIR}/requirements.txt
     DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PACKAGE_NAME}/tests
     COMPONENT tests)
