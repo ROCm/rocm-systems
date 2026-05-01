@@ -8,7 +8,6 @@
 #define ROCJITSU_VM_AMDGPU_COMPUTE_UNIT_H_
 
 #include "rocjitsu/base/api.h"
-#include "rocjitsu/vm/execution_plugin.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
@@ -19,8 +18,10 @@
 #include "rocjitsu/vm/amdgpu/memory_pipeline.h"
 #include "rocjitsu/vm/amdgpu/mtype.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
+#include "rocjitsu/vm/execution_plugin.h"
 #include "simdojo/components/register_file.h"
 #include "simdojo/components/vector_reg.h"
+#include "util/bit.h"
 #include "util/log.h"
 
 #include "simdojo/sim/component.h"
@@ -102,14 +103,18 @@ public:
   /// @brief Clear all halted wavefront slots and free their register allocations.
   void retire_halted_wfs();
 
+  /// @brief Like retire_halted_wfs but without resetting the LDS allocator.
+  void retire_halted_wfs_no_lds_reset();
+
   /// @brief Check whether this CU can accept an entire workgroup.
   ///
   /// @details Queries the number of free wavefront slots and register file
   /// blocks without modifying any state. The command processor calls this
   /// before dispatching to guarantee all-or-nothing workgroup placement.
   /// @param num_wfs Number of wavefronts in the workgroup.
-  /// @returns true if the CU has enough free slots and registers.
-  bool can_accept_workgroup(uint32_t num_wfs) const;
+  /// @param lds_bytes LDS bytes required by the workgroup.
+  /// @returns true if the CU has enough free slots, registers, and LDS.
+  bool can_accept_workgroup(uint32_t num_wfs, uint32_t lds_bytes = 0) const;
 
   /// @brief Execute work until the next scheduling boundary.
   ///
@@ -144,7 +149,9 @@ public:
   void set_on_idle(std::function<void()> cb) { on_idle_ = std::move(cb); }
 
   /// @brief Set the execution plugin group (shared ownership).
-  void set_plugin_group(std::shared_ptr<ExecutionPluginGroup> pg) { plugin_group_ = pg ? pg : ExecutionPluginGroup::empty_group(); }
+  void set_plugin_group(std::shared_ptr<ExecutionPluginGroup> pg) {
+    plugin_group_ = pg ? pg : ExecutionPluginGroup::empty_group();
+  }
 
   /// @brief Return the number of dispatched (active or halted) wavefront slots.
   /// @returns Count of non-idle wavefront slots.
@@ -184,6 +191,21 @@ public:
   /// @brief Return the Local Data Share (LDS).
   Lds &lds() { return lds_; }
 
+  /// @brief Clear LDS contents (zero-fill).
+  void clear_lds() { lds_.clear(); }
+
+  /// @brief Allocate a per-WG LDS region and return its base offset.
+  uint32_t allocate_lds(uint32_t size_bytes) {
+    uint32_t base = next_lds_alloc_;
+    uint32_t aligned = util::align_up(size_bytes, 256u);
+    lds_.zero_range(base, aligned);
+    next_lds_alloc_ += aligned;
+    return base;
+  }
+
+  /// @brief Reset LDS allocation (called when all WFs retire).
+  void reset_lds_alloc() { next_lds_alloc_ = 0; }
+
   /// @brief Flush all per-CU caches and the shared L2 to backing store.
   ///
   /// @details L1 V$ uses write-through, so flush just invalidates. L2 flushes
@@ -197,13 +219,15 @@ public:
                           reinterpret_cast<uintptr_t>(this), l1_vector_.store_count(),
                           l1_vector_.store_active_count(), l1_vector_.store_l2_writes());
     });
+    l1_scalar_.writeback_all();
     l1_scalar_.invalidate_all();
     l1_vector_.flush_all();
     l2_->flush_all();
   }
 
-  /// @brief Flush only the per-CU L1 caches (invalidate, since L1 is write-through).
+  /// @brief Flush only the per-CU L1 caches.
   void flush_l1() {
+    l1_scalar_.writeback_all();
     l1_scalar_.invalidate_all();
     l1_vector_.flush_all();
   }
@@ -225,6 +249,9 @@ public:
     l1_vector_.set_l2(l2);
     global_mem_pipeline_.set_l2(l2);
   }
+
+  /// @brief Query SRAM ECC mode. When true, D16 loads zero unused VGPR bits.
+  bool sram_ecc() const { return sram_ecc_; }
 
   // Memory issue interface for instruction execute() bodies.
   //
@@ -383,6 +410,7 @@ protected:
   Config config_;
   GpuMemory *memory_;
   uint32_t wf_size_ = 0;
+  bool sram_ecc_ = false;
   std::unique_ptr<Decoder> decoder_;
   simdojo::RegisterFile<uint32_t> sgpr_file_{"sgpr"};
   std::vector<std::unique_ptr<Wavefront>> wfs_; ///< Pre-allocated wavefront slots.
@@ -392,13 +420,14 @@ protected:
   L1ScalarCache l1_scalar_;
   L1VectorCache l1_vector_;
   Lds lds_;
+  uint32_t next_lds_alloc_ = 0; ///< Next free LDS offset for per-WG allocation.
   ScalarMemPipeline scalar_mem_pipeline_;
   GlobalMemPipeline global_mem_pipeline_;
   LocalMemPipeline local_mem_pipeline_;
   std::function<void()> on_idle_; ///< Callback invoked when CU becomes idle.
   std::shared_ptr<ExecutionPluginGroup> plugin_group_ = ExecutionPluginGroup::empty_group();
-  simdojo::Port *cpl_ = nullptr;  ///< Completer port: dispatch activation from CP.
-  simdojo::Port *req_ = nullptr;  ///< Requester port: L2 cache request (structural).
+  simdojo::Port *cpl_ = nullptr; ///< Completer port: dispatch activation from CP.
+  simdojo::Port *req_ = nullptr; ///< Requester port: L2 cache request (structural).
 };
 
 /// @brief Execution-mode-aware compute unit shell.
@@ -505,6 +534,7 @@ public:
     vgpr_file_.init(config.num_wf_slots * config.vgprs_per_wf, config.vgprs_per_wf);
     for (uint32_t i = 0; i < config.num_wf_slots; ++i)
       this->wfs_[i] = std::make_unique<IsaWavefront<Isa>>(*this, i);
+    this->sram_ecc_ = Isa::SRAM_ECC;
   }
 
   /// @returns Lane value from the VGPR file.

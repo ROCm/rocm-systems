@@ -1900,7 +1900,7 @@ VirtualGPU::~VirtualGPU() {
   if (hostcallBuffer_) {
     ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_QUEUE, "Deleting hostcall buffer %p", hostcallBuffer_);
     amd::disableHostcalls(hostcallBuffer_);
-    roc_device_.svmFree(hostcallBuffer_);
+    roc_device_.hostFree(hostcallBuffer_, hostcallBufferSize_);
   }
 }
 
@@ -4618,6 +4618,7 @@ void *VirtualGPU::getOrCreateHostcallBuffer() {
     ClPrint(amd::LOG_ERROR, amd::LOG_QUEUE, "Failed to create hostcall buffer");
     return nullptr;
   }
+  hostcallBufferSize_ = size;
 
   ClPrint(amd::LOG_INFO, amd::LOG_QUEUE,
           "Created hostcall buffer %p (numPackets == %d, size == %d, align == "
@@ -4629,7 +4630,9 @@ void *VirtualGPU::getOrCreateHostcallBuffer() {
     ClPrint(amd::LOG_ERROR, amd::LOG_QUEUE,
             "Failed to register hostcall buffer %p with listener",
             hostcallBuffer_);
-    dev().svmFree(hostcallBuffer_);
+    dev().hostFree(hostcallBuffer_, hostcallBufferSize_);
+    hostcallBuffer_ = nullptr;
+    hostcallBufferSize_ = 0;
     return nullptr;
   }
   return hostcallBuffer_;

@@ -12,7 +12,6 @@
 #include <memory>
 #include <random>
 #include <string>
-#include <string_view>
 #include <thread>
 #include <unordered_map>
 #include <vector>
