@@ -55,7 +55,7 @@ def kfd_rules(validation_rules_dir) -> list[Path]:
 # =============================================================================
 
 
-class TestKfdEvents(RocprofsysTest):
+class TestKFD(RocprofsysTest):
     """KFD event tracing tests using the unified-memory HIP example.
 
     The unified-memory example exercises managed memory (hipMallocManaged)
@@ -68,9 +68,10 @@ class TestKfdEvents(RocprofsysTest):
 
     run_args = ["-s", "32", "-p", "256", "-i", "4"]
 
+    @pytest.mark.timeout(120)
     @pytest.mark.rocpd("kfd_environment")
     @pytest.mark.parametrize("mode", ["sys_run"])
-    def test_kfd_events(self, mode, kfd_environment, kfd_rules):
+    def test_events(self, mode, kfd_environment, kfd_rules):
         """Run unified-memory and validate KFD events in Perfetto + ROCpd."""
         result = self.run_test(
             mode,
@@ -78,7 +79,6 @@ class TestKfdEvents(RocprofsysTest):
             env=kfd_environment,
             run_args=self.run_args,
             check_target_arch=True,
-            timeout=120,
         )
 
         self.assert_regex(
@@ -91,24 +91,32 @@ class TestKfdEvents(RocprofsysTest):
             result,
             subtest_name="Perfetto KFD page fault validation",
             categories=["rocm_kfd_page_fault"],
-            label_substrings=["PAGE_FAULT"],
             print_output=True,
+            pass_regex=[r"PAGE_FAULT"],
         )
 
         self.assert_perfetto(
             result,
             subtest_name="Perfetto KFD page migrate validation",
             categories=["rocm_kfd_page_migrate"],
-            label_substrings=["PAGE_MIGRATE"],
             print_output=True,
+            pass_regex=[r"PAGE_MIGRATE"],
+        )
+
+        self.assert_perfetto(
+            result,
+            subtest_name="Perfetto KFD queue validation",
+            categories=["rocm_kfd_queue"],
+            print_output=True,
+            pass_regex=[r"QUEUE_EVICT"],
         )
 
         self.assert_perfetto(
             result,
             subtest_name="Perfetto KFD unmap from GPU validation",
             categories=["rocm_kfd_event_unmap_from_gpu"],
-            label_substrings=["UNMAP_FROM_GPU"],
             print_output=True,
+            pass_regex=[r"UNMAP_FROM_GPU"],
         )
 
         self.assert_rocpd(
@@ -117,9 +125,10 @@ class TestKfdEvents(RocprofsysTest):
             rules_files=kfd_rules,
         )
 
+    @pytest.mark.timeout(120)
     @pytest.mark.rocpd("kfd_environment")
     @pytest.mark.parametrize("mode", ["sys_run"])
-    def test_kfd_prefetch_events(self, mode, kfd_environment, kfd_rules):
+    def test_prefetch_events(self, mode, kfd_environment, kfd_rules):
         """Focused test for prefetch-driven page migrations.
 
         Uses more prefetch iterations to generate a high volume of
@@ -133,7 +142,6 @@ class TestKfdEvents(RocprofsysTest):
             env=env,
             run_args=["-s", "32", "-p", "256", "-i", "8"],
             check_target_arch=True,
-            timeout=120,
         )
 
         self.assert_regex(
@@ -146,16 +154,24 @@ class TestKfdEvents(RocprofsysTest):
             result,
             subtest_name="Perfetto KFD prefetch migration validation",
             categories=["rocm_kfd_page_migrate"],
-            label_substrings=["PAGE_MIGRATE"],
             print_output=True,
+            pass_regex=[r"PAGE_MIGRATE"],
+        )
+
+        self.assert_perfetto(
+            result,
+            subtest_name="Perfetto KFD queue validation",
+            categories=["rocm_kfd_queue"],
+            print_output=True,
+            pass_regex=[r"QUEUE_EVICT"],
         )
 
         self.assert_perfetto(
             result,
             subtest_name="Perfetto KFD combined event validation",
             categories=["rocm_kfd_page_fault", "rocm_kfd_page_migrate"],
-            label_substrings=["PAGE_FAULT", "PAGE_MIGRATE"],
             print_output=True,
+            pass_regex=[r"PAGE_FAULT", r"PAGE_MIGRATE"],
         )
 
         self.assert_rocpd(
@@ -164,9 +180,10 @@ class TestKfdEvents(RocprofsysTest):
             rules_files=kfd_rules,
         )
 
+    @pytest.mark.timeout(180)
     @pytest.mark.rocpd("kfd_environment")
     @pytest.mark.parametrize("mode", ["sys_run"])
-    def test_kfd_memory_pressure(self, mode, kfd_environment, kfd_rules):
+    def test_memory_pressure(self, mode, kfd_environment, kfd_rules):
         """Stress test with high memory pressure to trigger queue evictions.
 
         Uses larger pressure allocation to maximize the chance of
@@ -182,7 +199,6 @@ class TestKfdEvents(RocprofsysTest):
             env=env,
             run_args=["-s", "64", "-p", "512", "-i", "4"],
             check_target_arch=True,
-            timeout=180,
         )
 
         self.assert_regex(
@@ -195,24 +211,32 @@ class TestKfdEvents(RocprofsysTest):
             result,
             subtest_name="Perfetto KFD page fault validation (pressure)",
             categories=["rocm_kfd_page_fault"],
-            label_substrings=["PAGE_FAULT"],
             print_output=True,
+            pass_regex=[r"PAGE_FAULT"],
         )
 
         self.assert_perfetto(
             result,
             subtest_name="Perfetto KFD page migrate validation (pressure)",
             categories=["rocm_kfd_page_migrate"],
-            label_substrings=["PAGE_MIGRATE"],
             print_output=True,
+            pass_regex=[r"PAGE_MIGRATE"],
+        )
+
+        self.assert_perfetto(
+            result,
+            subtest_name="Perfetto KFD queue validation (pressure)",
+            categories=["rocm_kfd_queue"],
+            print_output=True,
+            pass_regex=[r"QUEUE_EVICT"],
         )
 
         self.assert_perfetto(
             result,
             subtest_name="Perfetto KFD unmap validation (pressure)",
             categories=["rocm_kfd_event_unmap_from_gpu"],
-            label_substrings=["UNMAP_FROM_GPU"],
             print_output=True,
+            pass_regex=[r"UNMAP_FROM_GPU"],
         )
 
         self.assert_rocpd(

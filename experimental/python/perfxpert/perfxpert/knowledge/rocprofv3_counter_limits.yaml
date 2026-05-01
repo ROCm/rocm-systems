@@ -1,4 +1,6 @@
 # rocprofv3-specific counter collection rules and isolation requirements.
+# These are empirical/tool-runtime rules used to avoid rocprofv3 collection
+# failures; they are not AMD-published architecture peak specifications.
 # Source: llm-reference-guide.md §"Hardware Counter Per-Block Limits" (lines 14-65)
 #         and CLAUDE.md §"Hardware Counter Per-Block Limits (error code 38)".
 #

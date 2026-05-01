@@ -25,7 +25,7 @@
  * - Specialized guards: NcclRegHandleGuard, etc.
  *
  * Guards ensure cleanup even when ASSERT_* fails in tests.
- * See MPITestRunner.md for detailed usage documentation.
+ * See MPITestFramework.md for detailed usage documentation.
  */
 
 namespace RCCLTestGuards
