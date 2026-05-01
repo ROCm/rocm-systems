@@ -246,6 +246,23 @@ public:
     return host_page_map_.count(gpu_va >> PAGE_SHIFT) > 0;
   }
 
+  /// @brief Find the base and size of the contiguous host-mapped region containing addr.
+  /// @details Scans backward and forward through host_page_map_ to find the
+  /// full contiguous range. Returns {0, 0} if addr is not host-mapped.
+  std::pair<uint64_t, uint64_t> find_host_range(uint64_t addr) const {
+    std::shared_lock<std::shared_mutex> lock(host_range_mutex_);
+    uint64_t page = addr >> PAGE_SHIFT;
+    if (host_page_map_.count(page) == 0)
+      return {0, 0};
+    uint64_t lo = page;
+    while (lo > 0 && host_page_map_.count(lo - 1))
+      --lo;
+    uint64_t hi = page;
+    while (host_page_map_.count(hi + 1))
+      ++hi;
+    return {lo << PAGE_SHIFT, ((hi - lo) + 1) << PAGE_SHIFT};
+  }
+
   void unmap_host_pages(uint64_t gpu_va, size_t size) {
     std::lock_guard<std::shared_mutex> lock(host_range_mutex_);
     for (uint64_t off = 0; off < size; off += PAGE_SIZE)

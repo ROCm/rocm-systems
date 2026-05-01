@@ -15,7 +15,7 @@ def normalize_literals(text):
     """Replace lit(0x...) with the signed 32-bit two's complement value, and lit64(0x...) with just 0x..."""
     text = re.sub(r'lit\(0x([0-9a-fA-F]+)\)', lit_to_signed32, text)
     text = re.sub(r'lit64\((0x[0-9a-fA-F]+)\)', r'\1', text)
-    text = text.replace('HW_REG_WAVE_SCHED_MODE', 'HW_REG_SCHED_MODE')
+    text = text.replace('HW_REG_WAVE_SCHED_MODE', '26').replace('HW_REG_SCHED_MODE', '26')
     return text
 
 def normalize_row(row):

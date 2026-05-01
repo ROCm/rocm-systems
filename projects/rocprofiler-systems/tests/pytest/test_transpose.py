@@ -266,6 +266,7 @@ class TestTransposeROCProfiler(RocprofsysTest):
             check_target_arch=True,
             launcher="mpi",
             num_procs=num_processes,
+            rewrite_args=self.REWRITE_ARGS,
         )
         self.assert_regex(result)
         # Counter file device ID depends on GPU topology, search across IDs 0-9

@@ -7,6 +7,7 @@
 #ifndef ROCJITSU_ISA_ARCH_AMDGPU_RDNA2_MACHINE_INSTS_H_
 #define ROCJITSU_ISA_ARCH_AMDGPU_RDNA2_MACHINE_INSTS_H_
 
+#include "rocjitsu/isa/arch/amdgpu/shared/machine_insts_scalar.h"
 #include <cstdint>
 
 namespace rocjitsu {
@@ -14,40 +15,15 @@ namespace rdna2 {
 
 using MachineInst = uint32_t;
 
-struct Sop1MachineInst {
-  uint32_t ssrc0 : 8;
-  uint32_t op : 8;
-  uint32_t sdst : 7;
-  uint32_t encoding : 9;
-};
+using Sop1MachineInst = amdgpu::Sop1MachineInst;
 
-struct SopcMachineInst {
-  uint32_t ssrc0 : 8;
-  uint32_t ssrc1 : 8;
-  uint32_t op : 7;
-  uint32_t encoding : 9;
-};
+using SopcMachineInst = amdgpu::SopcMachineInst;
 
-struct SoppMachineInst {
-  uint32_t simm16 : 16;
-  uint32_t op : 7;
-  uint32_t encoding : 9;
-};
+using SoppMachineInst = amdgpu::SoppMachineInst;
 
-struct SopkMachineInst {
-  uint32_t simm16 : 16;
-  uint32_t sdst : 7;
-  uint32_t op : 5;
-  uint32_t encoding : 4;
-};
+using SopkMachineInst = amdgpu::SopkMachineInst;
 
-struct Sop2MachineInst {
-  uint32_t ssrc0 : 8;
-  uint32_t ssrc1 : 8;
-  uint32_t sdst : 7;
-  uint32_t op : 7;
-  uint32_t encoding : 2;
-};
+using Sop2MachineInst = amdgpu::Sop2MachineInst;
 
 struct SmemMachineInst {
   uint32_t sbase : 6;
@@ -365,38 +341,13 @@ struct MimgNsa3MachineInst {
   uint32_t vaddrl : 8;
 };
 
-struct Sop1InstLiteralMachineInst {
-  uint32_t ssrc0 : 8;
-  uint32_t op : 8;
-  uint32_t sdst : 7;
-  uint32_t encoding : 9;
-  uint32_t simm32 : 32;
-};
+using Sop1InstLiteralMachineInst = amdgpu::Sop1InstLiteralMachineInst;
 
-struct Sop2InstLiteralMachineInst {
-  uint32_t ssrc0 : 8;
-  uint32_t ssrc1 : 8;
-  uint32_t sdst : 7;
-  uint32_t op : 7;
-  uint32_t encoding : 2;
-  uint32_t simm32 : 32;
-};
+using Sop2InstLiteralMachineInst = amdgpu::Sop2InstLiteralMachineInst;
 
-struct SopcInstLiteralMachineInst {
-  uint32_t ssrc0 : 8;
-  uint32_t ssrc1 : 8;
-  uint32_t op : 7;
-  uint32_t encoding : 9;
-  uint32_t simm32 : 32;
-};
+using SopcInstLiteralMachineInst = amdgpu::SopcInstLiteralMachineInst;
 
-struct SopkInstLiteralMachineInst {
-  uint32_t simm16 : 16;
-  uint32_t sdst : 7;
-  uint32_t op : 5;
-  uint32_t encoding : 4;
-  uint32_t simm32 : 32;
-};
+using SopkInstLiteralMachineInst = amdgpu::SopkInstLiteralMachineInst;
 
 struct Vop3InstLiteralMachineInst {
   uint32_t vdst : 8;

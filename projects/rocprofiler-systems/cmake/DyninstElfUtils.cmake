@@ -177,6 +177,24 @@ else()
     file(MAKE_DIRECTORY "${_eu_root}/lib")
     file(MAKE_DIRECTORY "${_eu_root}/include")
 
+    # Backport elfutils commit 7508696d (released in 0.192) to fix GCC 15
+    # -Werror=unterminated-string-initialization in the i386/x86_64 register
+    # tables. Only applied to versions older than 0.192 where the upstream
+    # fix is missing.
+    set(_eu_patch_args)
+    if(ELFUTILS_DOWNLOAD_VERSION VERSION_LESS 0.192)
+        find_program(PATCH_EXECUTABLE NAMES patch REQUIRED)
+        set(_eu_patch_args
+            PATCH_COMMAND
+            ${PATCH_EXECUTABLE}
+            -p1
+            -d
+            <SOURCE_DIR>
+            -i
+            ${CMAKE_CURRENT_LIST_DIR}/elfutils-0.188-gcc15-regs.patch
+        )
+    endif()
+
     include(ExternalProject)
     ExternalProject_Add(
         rocprofiler-systems-elfutils-build
@@ -186,6 +204,7 @@ else()
             "https://sourceware.org/elfutils/ftp/${ELFUTILS_DOWNLOAD_VERSION}/elfutils-${ELFUTILS_DOWNLOAD_VERSION}.tar.bz2"
             "https://mirrors.kernel.org/sourceware/elfutils/${ELFUTILS_DOWNLOAD_VERSION}/elfutils-${ELFUTILS_DOWNLOAD_VERSION}.tar.bz2"
         BUILD_IN_SOURCE 1
+        ${_eu_patch_args}
         CONFIGURE_COMMAND
             ${CMAKE_COMMAND} -E env CC=${CMAKE_C_COMPILER} CFLAGS=-fPIC\ -O3
             CXX=${CMAKE_CXX_COMPILER} CXXFLAGS=-fPIC\ -O3
