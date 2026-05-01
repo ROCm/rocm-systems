@@ -2596,12 +2596,18 @@ void GpuAgent::TranslateTime(core::Signal* signal, hsa_amd_profiling_dispatch_ti
   uint64_t start, end;
   signal->GetRawTs(false, start, end);
 
-  if ((start == 0) || (end == 0) || (start < t0_.GPUClockCounter) || (end < t0_.GPUClockCounter)) {
-    debug_print("Signal %p time stamps may be invalid (start=%lu, end=%lu, t0=%lu).\n",
-                &signal->signal_, start, end, t0_.GPUClockCounter);
+  if(start == 0 || end == 0 || end < start) {
+    debug_print("Signal %p time stamps may be invalid (start=%lu, end=%lu).\n",
+                &signal->signal_, start, end);
     time.start = 0;
     time.end = 0;
     return;
+  }
+
+  if ((start < t0_.GPUClockCounter) || (end < t0_.GPUClockCounter)) {
+    debug_print("Signal %p time stamps predate t0 (start=%lu, end=%lu, t0=%lu) — using historical ratio.\n",
+      &signal->signal_, start, end, t0_.GPUClockCounter);
+    // fall through to TranslateTime() which handles the historical case
   }
 
   // Order is important, we want to translate the end time first to ensure that packet duration is
@@ -2614,12 +2620,18 @@ void GpuAgent::TranslateTime(core::Signal* signal, hsa_amd_profiling_async_copy_
   uint64_t start, end;
   signal->GetRawTs(true, start, end);
 
-  if ((start == 0) || (end == 0) || (start < t0_.GPUClockCounter) || (end < t0_.GPUClockCounter)) {
-    debug_print("Signal %p async copy time stamps may be invalid (start=%lu, end=%lu, t0=%lu).\n",
-                &signal->signal_, start, end, t0_.GPUClockCounter);
+  if(start == 0 || end == 0 || end < start) {
+    debug_print("Signal %p time stamps may be invalid (start=%lu, end=%lu).\n",
+                &signal->signal_, start, end);
     time.start = 0;
     time.end = 0;
     return;
+  }
+
+  if ((start < t0_.GPUClockCounter) || (end < t0_.GPUClockCounter)) {
+    debug_print("Signal %p time stamps predate t0 (start=%lu, end=%lu, t0=%lu) — using historical ratio.\n",
+      &signal->signal_, start, end, t0_.GPUClockCounter);
+    // fall through to TranslateTime() which handles the historical case
   }
 
   // Order is important, we want to translate the end time first to ensure that packet duration is
