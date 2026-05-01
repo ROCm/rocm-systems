@@ -631,6 +631,11 @@ TEST_F(NetIbMPITest, CastSplitDataThresholdBoundary) {
     const int rank = MPIEnvironment::world_rank;
 
     CAST_ENV_CHECK_OR_SKIP();
+    {
+        const char* v = getenv("NCCL_IB_SPLIT_DATA_ON_QPS");
+        if (!v || strcmp(v, "1") != 0)
+            GTEST_SKIP() << "CastSplitDataThresholdBoundary requires NCCL_IB_SPLIT_DATA_ON_QPS=1";
+    }
     net_ = &netIbCast;
     AssertInitAndGetDevices(nullptr);
 
@@ -1065,6 +1070,11 @@ TEST_F(NetIbMPITest, CastSendRecvMultipleSizes) {
     const int rank = MPIEnvironment::world_rank;
 
     CAST_ENV_CHECK_OR_SKIP();
+    {
+        const char* v = getenv("NCCL_IB_SPLIT_DATA_ON_QPS");
+        if (!v || strcmp(v, "1") != 0)
+            GTEST_SKIP() << "CastSendRecvMultipleSizes requires NCCL_IB_SPLIT_DATA_ON_QPS=1";
+    }
     net_ = &netIbCast;
     AssertInitAndGetDevices(nullptr);
 
