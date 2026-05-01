@@ -65,6 +65,16 @@ if(CMAKE_BUILD_TYPE MATCHES "Debug")
   set(DL_OPT_FLAGS -O1 -g)
 else()
   set(DL_OPT_FLAGS -O3)
+  if(DUMP_ASM)
+    # Release device objects otherwise carry no DWARF; llvm-objdump --source needs -g.
+    list(APPEND DL_OPT_FLAGS -g)
+  endif()
+endif()
+
+if(DUMP_ASM)
+  set(DL_IR_DEBUG_FLAG -g)
+else()
+  set(DL_IR_DEBUG_FLAG -gline-tables-only)
 endif()
 
 # ---------------------------------------------------------------------------
@@ -341,7 +351,7 @@ foreach(DL_GPU_TARGET ${DL_GPU_TARGETS})
         ${_link_inc_flags}
         -x hip --offload-device-only --offload-arch=${DL_GPU_TARGET}
         ${DL_HIP_COMPILER_FLAGS}
-        -gline-tables-only
+        ${DL_IR_DEBUG_FLAG}
         -std=c++17 -w ${DL_OPT_FLAGS}
         -emit-llvm -S
         -o ${IR_OUT}
@@ -363,7 +373,7 @@ set(DEVICE_HIPFB "${DEVICE_BUILD_DIR}/device.hipfb")
 list(JOIN DL_BUNDLER_TARGETS "," _bundler_targets_str)
 
 set(DL_BUNDLER_COMPRESS "")
-if(ENABLE_COMPRESS)
+if(ENABLE_COMPRESS AND NOT DUMP_ASM)
   set(DL_BUNDLER_COMPRESS "--compress")
 endif()
 
@@ -386,7 +396,7 @@ add_custom_command(
 set(COMMON_FAT_OBJ "${DEVICE_BUILD_DIR}/common.o")
 
 set(DL_HOST_COMPRESS "")
-if(ENABLE_COMPRESS)
+if(ENABLE_COMPRESS AND NOT DUMP_ASM)
   set(DL_HOST_COMPRESS "--offload-compress")
 endif()
 

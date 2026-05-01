@@ -751,10 +751,15 @@ if (HAVE_PARALLEL_JOBS)
   target_compile_options(rccl PRIVATE -parallel-jobs=12)
 endif()
 
-if (ROCM_VERSION VERSION_GREATER_EQUAL "60200")
-  target_compile_options(rccl PRIVATE --offload-compress)    # Compress GPU code at compile time.
-  target_link_libraries(rccl PRIVATE --offload-compress)     # Compress GPU code at link time.
-  message(STATUS "--offload-compress enabled - ROCm version >= 6.2.0")
+if(ROCM_VERSION VERSION_GREATER_EQUAL "60200")
+  if(DUMP_ASM)
+    # llvm-objdump --offloading does not handle compressed offload bundles reliably.
+    message(STATUS "--offload-compress disabled (DUMP_ASM needs uncompressed bundles)")
+  else()
+    target_compile_options(rccl PRIVATE --offload-compress)    # Compress GPU code at compile time.
+    target_link_libraries(rccl PRIVATE --offload-compress)     # Compress GPU code at link time.
+    message(STATUS "--offload-compress enabled - ROCm version >= 6.2.0")
+  endif()
 else()
   message(STATUS "--offload-compress disabled - ROCm version < 6.2.0")
 endif()
@@ -828,24 +833,28 @@ if (REPORT_KERNEL_RESOURCE_USE)
   target_link_options(rccl PRIVATE -Rpass-analysis=kernel-resource-usage)
 endif()
 
-if (DUMP_ASM) # Save temporary files from kernel compilation
-  message(STATUS "Disassembling librccl.so to asm")
-  # Maintain symbols but without changing code.  Keep additional data in dwarf section of binary.
-  target_compile_options(rccl PRIVATE -gline-tables-only)
-  set(OBJ_DUMP ${ROCM_PATH}/llvm/bin/llvm-objdump)
-
-  add_custom_command(TARGET rccl POST_BUILD
-    COMMENT "Disassembling RCCL library"
-    COMMAND /bin/bash -c "${OBJ_DUMP} --offload-fatbin librccl.so"
-    VERBATIM
-  )
-  foreach(GPUARCH ${GPU_TARGETS})
+if(DUMP_ASM)
+  if(NOT BUILD_SHARED_LIBS)
+    message(WARNING "DUMP_ASM requires a shared librccl; skipping assembly dump.")
+  else()
+    # POST_BUILD runs in src's CMAKE_CURRENT_BINARY_DIR by default; librccl.so is in
+    # PROJECT_BINARY_DIR (see root CMakeLists). Pass an absolute path and run the script
+    # with WORKING_DIRECTORY set to the library directory (no missing link dependency).
+    message(STATUS "Disassembling librccl.so offload bundles to librccl.{gfx*,host*}.s")
+    # -gline-tables-only is not enough for llvm-objdump --source (needs .debug_info, etc.)
+    target_compile_options(rccl PRIVATE -g)
+    find_program(DUMP_ASM_LLVM_OBJDUMP NAMES llvm-objdump REQUIRED
+      HINTS "${ROCM_PATH}/llvm/bin" "$ENV{ROCM_PATH}/llvm/bin")
+    set(_rccl_so "${PROJECT_BINARY_DIR}/librccl.so")
     add_custom_command(TARGET rccl POST_BUILD
-        COMMENT "Disassembling RCCL library to dump assembly for ${GPUARCH}"
-        COMMAND /bin/bash -c "${OBJ_DUMP} -d -l --source --symbolize-operands librccl.so.0.hipv4-amdgcn-amd-amdhsa--${GPUARCH} > librccl.${GPUARCH}.s"
-        VERBATIM
-    )
-  endforeach()
+      COMMENT "Disassembling RCCL offload bundles (llvm-objdump)"
+      COMMAND "${CMAKE_COMMAND}"
+        "-DRCCL_SO=${_rccl_so}"
+        "-DLLVM_OBJDUMP=${DUMP_ASM_LLVM_OBJDUMP}"
+        -P "${RCCL_SOURCE_DIR}/cmake/scripts/dump_rccl_asm.cmake"
+      WORKING_DIRECTORY "${PROJECT_BINARY_DIR}"
+      VERBATIM)
+  endif()
 endif()
 
 ## NOTE: This is currently being handled by rocm-cmake, however may need to be re-enabled in the future
