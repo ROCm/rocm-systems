@@ -10,7 +10,9 @@
 #include "rocjitsu/code/dbt/generated/legalization_types.h"
 #include "rocjitsu/code/dbt/hazard_tracker.h"
 #include "rocjitsu/code/patch/instruction_builder.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna4/encodings.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna4/machine_insts.h"
+#include "rocjitsu/isa/arch/amdgpu/rdna3/machine_insts.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna4/machine_insts.h"
 #include "rocjitsu/isa/instruction.h"
 
@@ -34,10 +36,19 @@ namespace {
   return std::bit_cast<uint32_t>(s);
 }
 
+[[nodiscard]] uint32_t make_rdna3_sopk(uint8_t op, uint16_t simm16) {
+  rdna3::SopkMachineInst s{};
+  s.encoding = 0xB;
+  s.op = op;
+  s.simm16 = simm16;
+  return std::bit_cast<uint32_t>(s);
+}
+
 constexpr uint8_t kOpWaitLoadcnt = 64;
 constexpr uint8_t kOpWaitStorecntDscnt = 73;
 constexpr uint8_t kOpWaitKmcnt = 71;
 constexpr uint8_t kOpWaitExpcnt = 68;
+constexpr uint8_t kRdna3SopkOpWaitcntVscnt = 24;
 
 } // namespace
 
@@ -87,6 +98,77 @@ std::vector<uint32_t> encode_waitcnt_gfx12(const WaitcntValues &vals) {
     words.push_back(build_s_nop());
 
   return words;
+}
+
+VectorMemoryWaitClass classify_cdna4_vector_memory_wait(const Instruction &inst) {
+  if (!inst.is_memory_op())
+    return VectorMemoryWaitClass::None;
+
+  const uint16_t op = inst.opcode();
+  if (dynamic_cast<const cdna4::Flat *>(&inst)) {
+    if ((op >= 16 && op <= 23) || (op >= 32 && op <= 37))
+      return VectorMemoryWaitClass::Load;
+    if (op >= 24 && op <= 31)
+      return VectorMemoryWaitClass::Store;
+    return VectorMemoryWaitClass::Unknown;
+  }
+
+  if (dynamic_cast<const cdna4::Mubuf *>(&inst)) {
+    if ((op <= 3) || (op >= 8 && op <= 11) || (op >= 16 && op <= 23) || (op >= 32 && op <= 38))
+      return VectorMemoryWaitClass::Load;
+    if ((op >= 4 && op <= 7) || (op >= 12 && op <= 15) || (op >= 24 && op <= 31) || op == 39)
+      return VectorMemoryWaitClass::Store;
+    return VectorMemoryWaitClass::Unknown;
+  }
+
+  if (dynamic_cast<const cdna4::Mtbuf *>(&inst))
+    return VectorMemoryWaitClass::Unknown;
+
+  if (dynamic_cast<const cdna4::Smem *>(&inst) || dynamic_cast<const cdna4::Ds *>(&inst))
+    return VectorMemoryWaitClass::None;
+
+  return VectorMemoryWaitClass::Unknown;
+}
+
+std::optional<WaitcntVmLowering>
+derive_precise_waitcnt_vm_lowering(std::span<const VectorMemoryWaitClass> outstanding,
+                                   uint8_t source_vmcnt) {
+  if (source_vmcnt == 0x3F)
+    return WaitcntVmLowering{};
+  if (outstanding.size() > 63)
+    return std::nullopt;
+  if (std::find(outstanding.begin(), outstanding.end(), VectorMemoryWaitClass::Unknown) !=
+      outstanding.end())
+    return std::nullopt;
+
+  const size_t keep = std::min<size_t>(source_vmcnt, outstanding.size());
+  const size_t suffix_begin = outstanding.size() - keep;
+  uint8_t total_loads = 0;
+  uint8_t total_stores = 0;
+  uint8_t suffix_loads = 0;
+  uint8_t suffix_stores = 0;
+
+  for (size_t i = 0; i < outstanding.size(); ++i) {
+    const auto cls = outstanding[i];
+    if (cls == VectorMemoryWaitClass::Load) {
+      ++total_loads;
+      if (i >= suffix_begin)
+        ++suffix_loads;
+    } else if (cls == VectorMemoryWaitClass::Store) {
+      ++total_stores;
+      if (i >= suffix_begin)
+        ++suffix_stores;
+    } else if (cls != VectorMemoryWaitClass::None) {
+      return std::nullopt;
+    }
+  }
+
+  WaitcntVmLowering lowering;
+  if (total_loads != suffix_loads)
+    lowering.loadcnt = suffix_loads;
+  if (total_stores != suffix_stores)
+    lowering.storecnt = suffix_stores;
+  return lowering;
 }
 
 // --- Instruction lowering (Action::Expand) ---
@@ -460,14 +542,13 @@ std::vector<uint32_t> expand_v_lshl_add_u64(const Instruction &inst, uint32_t ar
   return lower_v_lshl_add_u64(inst, static_cast<rj_code_arch_t>(arch));
 }
 
-/// @brief Lower CDNA4 (GFX9-layout) s_waitcnt to RDNA3 (GFX11-layout) s_waitcnt.
+/// @brief Lower CDNA4 (GFX9-layout) s_waitcnt to RDNA3 waitcnt instructions.
 /// @details CDNA4 keeps the GFX9 waitcnt bit layout while RDNA3 uses
 /// expcnt[2:0], lgkmcnt[9:4], vmcnt[15:10]. Decode the source counters and
-/// re-encode the target immediate so the same wait classes are preserved in
-/// place without over-waiting or copying the incompatible simm16 field.
-std::vector<uint32_t> expand_waitcnt_gfx9_to_gfx11(const Instruction &inst, uint32_t, uint64_t,
-                                                   const LivenessAnalysis &, const LaneLayout *,
-                                                   const LaneLayout *) {
+/// re-encode the target immediate. When a caller supplies a proven split VM
+/// lowering, also emit RDNA3 s_waitcnt_vscnt for the store side of GFX9 vmcnt.
+std::vector<uint32_t> lower_waitcnt_gfx9_to_gfx11(const Instruction &inst,
+                                                  const WaitcntVmLowering *waitcnt_vm) {
   // Defensive guard: the rule table is keyed by encoding and opcode, but only
   // SOPP s_waitcnt has the GFX9 waitcnt simm16 layout this lowering expects.
   constexpr uint16_t kEnc_SOPP_value = 0x17F;
@@ -475,14 +556,31 @@ std::vector<uint32_t> expand_waitcnt_gfx9_to_gfx11(const Instruction &inst, uint
     return {};
   const auto &sopp = *reinterpret_cast<const cdna4::SoppMachineInst *>(inst.raw_encoding());
   auto values = decode_waitcnt_gfx9(sopp.simm16);
-  // CDNA4 partial VM waits do not map precisely enough to RDNA3 for translated
-  // code that interleaves multiple global loads and stores. Preserve no-wait,
-  // but make active VM waits conservative so later VALU consumers cannot read
-  // an outstanding load.
-  if (values.vmcnt != 0x3F)
-    values.vmcnt = 0;
+  uint8_t storecnt = 0x3F;
+  if (values.vmcnt != 0x3F) {
+    if (waitcnt_vm) {
+      values.vmcnt = waitcnt_vm->loadcnt;
+      storecnt = waitcnt_vm->storecnt;
+    } else {
+      // CDNA4 partial VM waits do not map precisely enough to RDNA3 without a
+      // proven load/store split. Preserve no-wait, but make active VM waits
+      // conservative so later VALU consumers cannot read an outstanding load.
+      values.vmcnt = 0;
+    }
+  }
+
   constexpr uint32_t kRdna3SoppOp_s_waitcnt = 9;
-  return {pack_sopp(kRdna3SoppOp_s_waitcnt, encode_waitcnt_gfx11_simm16(values))};
+  std::vector<uint32_t> words{
+      pack_sopp(kRdna3SoppOp_s_waitcnt, encode_waitcnt_gfx11_simm16(values))};
+  if (storecnt != 0x3F)
+    words.push_back(make_rdna3_sopk(kRdna3SopkOpWaitcntVscnt, std::min<uint16_t>(storecnt, 63)));
+  return words;
+}
+
+std::vector<uint32_t> expand_waitcnt_gfx9_to_gfx11(const Instruction &inst, uint32_t, uint64_t,
+                                                   const LivenessAnalysis &, const LaneLayout *,
+                                                   const LaneLayout *) {
+  return lower_waitcnt_gfx9_to_gfx11(inst, nullptr);
 }
 
 std::vector<uint32_t> expand_accvgpr_read(const Instruction &inst, uint32_t, uint64_t,
@@ -570,16 +668,22 @@ SemanticTranslator::SemanticTranslator(rj_code_arch_t guest, rj_code_arch_t host
     expand_rules_ = kExpandRules_cdna4_to_rdna3;
 }
 
-std::vector<uint32_t> SemanticTranslator::try_lower_expand(const Instruction &inst, uint64_t offset,
-                                                           const LivenessAnalysis &liveness) const {
+std::vector<uint32_t>
+SemanticTranslator::try_lower_expand(const Instruction &inst, uint64_t offset,
+                                     const LivenessAnalysis &liveness,
+                                     const WaitcntVmLowering *waitcnt_vm) const {
   const uint16_t eid = inst.encoding_id();
   const uint16_t op = inst.opcode();
   TranslationRule key{eid, op, RuleAction::Expand, 0, 0, nullptr, nullptr, nullptr, nullptr};
   auto it = std::lower_bound(expand_rules_.begin(), expand_rules_.end(), key);
   if (it != expand_rules_.end() && it->src_encoding_id == eid && it->src_opcode == op &&
-      it->expand_fn)
+      it->expand_fn) {
+    if (guest_arch_ == ROCJITSU_CODE_ARCH_CDNA4 && host_arch_ == ROCJITSU_CODE_ARCH_RDNA3 &&
+        eid == kEncSopp && op == kCdna4Op_s_waitcnt)
+      return lower_waitcnt_gfx9_to_gfx11(inst, waitcnt_vm);
     return it->expand_fn(inst, static_cast<uint32_t>(host_arch_), offset, liveness,
                          it->guest_layout, it->host_layout);
+  }
   if (guest_arch_ == ROCJITSU_CODE_ARCH_CDNA4 && host_arch_ == ROCJITSU_CODE_ARCH_RDNA3)
     return lower_removed_compare_predicate(inst, legalization_lookup_);
   return {};

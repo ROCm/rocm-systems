@@ -33,6 +33,17 @@ RDNA3 `vmcnt(0)`, while the all-relaxed no-wait encoding remains no-wait. This
 over-waits vector memory for correctness. Precision/performance recovery is
 left as a separate precision/performance recovery task.
 
+Precision recovery handles that precision only when the translator can prove the
+source-order vector-memory queue from structured decoded instruction classes.
+For CDNA4 FLAT and MUBUF load/store operations, a known queue lets a partial
+GFX9 `vmcnt(N)` lower to the exact RDNA3 split thresholds: loadcnt is the
+number of allowed loads in the newest `N` VM operations, and storecnt is the
+number of allowed stores in that suffix. The queue can propagate across linear
+fallthrough blocks only when decoded branch targets prove there is no alternate
+entry into that block. Any unknown vector-memory operation, unsupported
+vector-memory family, saturated queue, unknown branch target, or unproven block
+entry keeps the conservative active-VM behavior.
+
 ## Remaining Gaps
 
 | Bucket | Status |
@@ -41,7 +52,7 @@ left as a separate precision/performance recovery task.
 | AccVGPR virtualization | Unsupported; requires supported AccVGPR remapping or matrix-idiom lowering, including MTBUF encodings with CDNA4 `acc=1`. |
 | Sparse SMFMAC | Unsupported; requires sparse metadata semantics and RDNA3 fallback analysis. |
 | Other non-matrix `Action::Expand` rows | Unsupported; requires per-family expansion lowering or an explicit unsupported diagnostic. |
-| Precise partial VM waitcnt performance | Correctness is conservative; partial-wait precision recovery is separate follow-up work. |
+| Precise partial VM waitcnt performance | Recovered for fully classified FLAT/MUBUF load/store queues with proven entry state when the translator can prove the underlying queue class; unknown cases remain conservative. |
 
 ## Fail-Closed Behavior
 

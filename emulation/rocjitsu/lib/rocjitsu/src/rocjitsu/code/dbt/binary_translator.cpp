@@ -16,6 +16,7 @@
 #include "rocjitsu/code/dbt/semantic_translator.h"
 #include "rocjitsu/code/patch/code_object_patcher.h"
 #include "rocjitsu/code/patch/instruction_builder.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna4/machine_insts.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 
@@ -25,8 +26,10 @@
 #include <format>
 #include <limits>
 #include <memory>
+#include <optional>
 #include <span>
 #include <string_view>
+#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
@@ -218,6 +221,210 @@ std::string missing_encoding_warning(const Instruction &inst, uint64_t offset,
   return message;
 }
 
+bool is_cdna4_s_waitcnt(const Instruction &inst) {
+  constexpr uint16_t kCdna4SoppEncoding = 0x17F;
+  constexpr uint16_t kCdna4SWaitcntOpcode = 12;
+  return inst.raw_encoding() && inst.encoding_id() == kCdna4SoppEncoding &&
+         inst.opcode() == kCdna4SWaitcntOpcode;
+}
+
+bool is_cdna4_sopp_direct_branch(const Instruction &inst) {
+  if (!inst.raw_encoding() || inst.encoding_id() != 0x17F)
+    return false;
+  const uint16_t op = inst.opcode();
+  return op == 2 || (op >= 4 && op <= 9) || (op >= 23 && op <= 26);
+}
+
+bool is_cdna4_sopp_unconditional_branch(const Instruction &inst) {
+  return inst.raw_encoding() && inst.encoding_id() == 0x17F && inst.opcode() == 2;
+}
+
+std::optional<uint64_t> cdna4_direct_branch_target(const Instruction &inst, uint64_t offset) {
+  if (!is_cdna4_sopp_direct_branch(inst))
+    return std::nullopt;
+
+  const auto &sopp = *reinterpret_cast<const cdna4::SoppMachineInst *>(inst.raw_encoding());
+  const int64_t target = static_cast<int64_t>(offset) + static_cast<int64_t>(inst.size()) +
+                         static_cast<int64_t>(static_cast<int16_t>(sopp.simm16)) *
+                             static_cast<int64_t>(sizeof(uint32_t));
+  if (target < 0)
+    return std::nullopt;
+  return static_cast<uint64_t>(target);
+}
+
+const Instruction *last_instruction(BasicBlock &block) {
+  const Instruction *last = nullptr;
+  for (const auto &inst : block.instructions())
+    last = &inst;
+  return last;
+}
+
+bool block_falls_through(BasicBlock &block) {
+  const auto *last = last_instruction(block);
+  if (!last)
+    return false;
+  if (std::string_view(last->mnemonic()).starts_with("s_endpgm"))
+    return false;
+  if (is_cdna4_sopp_unconditional_branch(*last))
+    return false;
+  if (last->is_branch() && !is_cdna4_sopp_direct_branch(*last))
+    return false;
+  return true;
+}
+
+struct WaitcntVmState {
+  bool known = false;
+  std::vector<VectorMemoryWaitClass> outstanding;
+};
+
+class WaitcntVmTracker {
+public:
+  explicit WaitcntVmTracker(WaitcntVmState state)
+      : known_(state.known), outstanding_(std::move(state.outstanding)) {}
+
+  void reset(WaitcntVmState state) {
+    known_ = state.known;
+    outstanding_ = std::move(state.outstanding);
+    pending_plan_.reset();
+  }
+
+  const WaitcntVmLowering *plan_for(const Instruction &inst) {
+    pending_plan_.reset();
+    if (!known_ || !is_cdna4_s_waitcnt(inst))
+      return nullptr;
+
+    const auto &sopp = *reinterpret_cast<const cdna4::SoppMachineInst *>(inst.raw_encoding());
+    const auto values = decode_waitcnt_gfx9(sopp.simm16);
+    if (values.vmcnt == 0x3F)
+      return nullptr;
+
+    pending_plan_ = derive_precise_waitcnt_vm_lowering(outstanding_, values.vmcnt);
+    return pending_plan_ ? &*pending_plan_ : nullptr;
+  }
+
+  void observe(const Instruction &inst) {
+    if (is_cdna4_s_waitcnt(inst)) {
+      observe_waitcnt(inst);
+      return;
+    }
+
+    const auto cls = classify_cdna4_vector_memory_wait(inst);
+    switch (cls) {
+    case VectorMemoryWaitClass::Load:
+    case VectorMemoryWaitClass::Store:
+      if (!known_)
+        return;
+      if (outstanding_.size() >= 63) {
+        known_ = false;
+        outstanding_.clear();
+      } else {
+        outstanding_.push_back(cls);
+      }
+      return;
+    case VectorMemoryWaitClass::Unknown:
+      known_ = false;
+      outstanding_.clear();
+      return;
+    case VectorMemoryWaitClass::None:
+      return;
+    }
+  }
+
+  WaitcntVmState state() const { return WaitcntVmState{known_, outstanding_}; }
+
+private:
+  void observe_waitcnt(const Instruction &inst) {
+    const auto &sopp = *reinterpret_cast<const cdna4::SoppMachineInst *>(inst.raw_encoding());
+    const auto values = decode_waitcnt_gfx9(sopp.simm16);
+    if (values.vmcnt == 0x3F)
+      return;
+
+    if (values.vmcnt == 0) {
+      known_ = true;
+      outstanding_.clear();
+      return;
+    }
+
+    if (!known_)
+      return;
+
+    const size_t keep = std::min<size_t>(values.vmcnt, outstanding_.size());
+    outstanding_.erase(outstanding_.begin(), outstanding_.begin() + (outstanding_.size() - keep));
+  }
+
+  bool known_ = false;
+  std::vector<VectorMemoryWaitClass> outstanding_;
+  std::optional<WaitcntVmLowering> pending_plan_;
+};
+
+struct WaitcntVmBlockAnalysis {
+  std::unordered_map<uint64_t, WaitcntVmLowering> lowerings;
+  WaitcntVmState exit_state;
+};
+
+WaitcntVmBlockAnalysis
+analyze_waitcnt_vm_lowerings(BasicBlock &block, WaitcntVmState entry_state,
+                             const std::unordered_set<uint64_t> &direct_branch_targets) {
+  WaitcntVmBlockAnalysis analysis;
+  WaitcntVmTracker tracker(std::move(entry_state));
+  uint64_t offset = block.start_offset();
+  for (const auto &inst : block.instructions()) {
+    if (offset != block.start_offset() &&
+        direct_branch_targets.find(offset) != direct_branch_targets.end())
+      tracker.reset(WaitcntVmState{});
+    if (const auto *plan = tracker.plan_for(inst))
+      analysis.lowerings.emplace(offset, *plan);
+    tracker.observe(inst);
+    offset += inst.size();
+  }
+  analysis.exit_state = tracker.state();
+  return analysis;
+}
+
+std::unordered_map<uint64_t, WaitcntVmLowering>
+analyze_waitcnt_vm_lowerings(std::vector<std::unique_ptr<BasicBlock>> &blocks) {
+  std::unordered_map<uint64_t, WaitcntVmLowering> lowerings;
+  std::unordered_set<uint64_t> direct_branch_targets;
+  bool has_unknown_branch_target = false;
+
+  for (const auto &block : blocks) {
+    uint64_t offset = block->start_offset();
+    for (const auto &inst : block->instructions()) {
+      if (inst.is_branch() || std::string_view(inst.mnemonic()).starts_with("s_branch") ||
+          std::string_view(inst.mnemonic()).starts_with("s_cbranch")) {
+        if (const auto target = cdna4_direct_branch_target(inst, offset))
+          direct_branch_targets.insert(*target);
+        else
+          has_unknown_branch_target = true;
+      }
+      offset += inst.size();
+    }
+  }
+
+  if (has_unknown_branch_target)
+    return lowerings;
+
+  WaitcntVmState previous_exit;
+  bool previous_falls_through = false;
+  for (size_t i = 0; i < blocks.size(); ++i) {
+    WaitcntVmState entry;
+    if (i == 0) {
+      entry.known = true;
+    } else if (!has_unknown_branch_target && previous_falls_through && previous_exit.known &&
+               direct_branch_targets.find(blocks[i]->start_offset()) ==
+                   direct_branch_targets.end()) {
+      entry = previous_exit;
+    }
+
+    auto analysis =
+        analyze_waitcnt_vm_lowerings(*blocks[i], std::move(entry), direct_branch_targets);
+    lowerings.insert(analysis.lowerings.begin(), analysis.lowerings.end());
+    previous_exit = std::move(analysis.exit_state);
+    previous_falls_through = block_falls_through(*blocks[i]);
+  }
+  return lowerings;
+}
+
 void write_words_with_nop_padding(std::vector<uint8_t> &text, uint64_t offset,
                                   std::span<const uint32_t> words, uint64_t source_size,
                                   rj_code_arch_t arch) {
@@ -353,6 +560,10 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
   // non-NOP instruction in .text. No source instruction offset is shifted.
   patcher.set_cave_start(find_trailing_nop_cave_start(text, guest_arch_));
 
+  std::unordered_map<uint64_t, WaitcntVmLowering> waitcnt_vm_lowerings;
+  if (guest_arch_ == ROCJITSU_CODE_ARCH_CDNA4 && host_arch_ == ROCJITSU_CODE_ARCH_RDNA3)
+    waitcnt_vm_lowerings = analyze_waitcnt_vm_lowerings(blocks);
+
   std::unordered_set<const BasicBlock *> translated_blocks;
   bool warned_shared_blocks = false;
   for (const KernelTranslationScope &scope : scopes) {
@@ -394,7 +605,11 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
         // For Expand: must lower; unhandled expansion is a fail-closed diagnostic.
         // For Lower: try lowering first, fall through to encoding if unhandled.
         {
-          auto expansion = semantic_translator_->try_lower_expand(inst, offset, liveness);
+          const WaitcntVmLowering *waitcnt_vm = nullptr;
+          if (auto lower_it = waitcnt_vm_lowerings.find(offset);
+              lower_it != waitcnt_vm_lowerings.end())
+            waitcnt_vm = &lower_it->second;
+          auto expansion = semantic_translator_->try_lower_expand(inst, offset, liveness, waitcnt_vm);
           if (!expansion.empty()) {
             SemanticReplacement repl{offset, offset + inst_size, std::move(expansion)};
             if (!apply_semantic(repl, translated_text, patcher, inst.mnemonic()))

@@ -28,6 +28,7 @@
 
 #include <cassert>
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <vector>
 
@@ -47,6 +48,20 @@ struct WaitcntValues {
   uint8_t expcnt = 0x07;  ///< Export count. Sentinel: 0x07.
 };
 
+/// @brief Structured CDNA4 vector-memory class used to split GFX9 vmcnt waits.
+enum class VectorMemoryWaitClass : uint8_t {
+  None,    ///< Not a vector-memory operation counted by GFX9 vmcnt.
+  Load,    ///< Vector-memory load counted by GFX9 vmcnt and RDNA3 loadcnt.
+  Store,   ///< Vector-memory store counted by GFX9 vmcnt and RDNA3 storecnt.
+  Unknown, ///< Vector-memory operation whose split RDNA3 counter is not proven.
+};
+
+/// @brief Proven RDNA3 split-counter thresholds for one CDNA4/GFX9 vmcnt wait.
+struct WaitcntVmLowering {
+  uint8_t loadcnt = 0x3F;  ///< RDNA3 loadcnt threshold, 0x3F means relaxed.
+  uint8_t storecnt = 0x3F; ///< RDNA3 storecnt threshold, 0x3F means relaxed.
+};
+
 /// @brief Decode a GFX9 s_waitcnt simm16 field into individual counter values.
 [[nodiscard]] WaitcntValues decode_waitcnt_gfx9(uint16_t simm16);
 
@@ -55,6 +70,20 @@ struct WaitcntValues {
 
 /// @brief Encode wait-counter values as GFX12 split s_wait_* instruction words.
 [[nodiscard]] std::vector<uint32_t> encode_waitcnt_gfx12(const WaitcntValues &vals);
+
+/// @brief Classify a decoded CDNA4 instruction for GFX9-vmcnt splitting.
+[[nodiscard]] VectorMemoryWaitClass classify_cdna4_vector_memory_wait(const Instruction &inst);
+
+/// @brief Compute exact RDNA3 split thresholds for a known outstanding VM op queue.
+///
+/// @details `outstanding` is the ordered source queue of GFX9-vmcnt-counted
+/// vector-memory operations since a proven empty point. The returned thresholds
+/// preserve `s_waitcnt vmcnt(source_vmcnt)` exactly by allowing the newest
+/// `source_vmcnt` combined VM operations to remain outstanding, split by the
+/// RDNA3 load/store counters. Returns nullopt if any operation is unknown.
+[[nodiscard]] std::optional<WaitcntVmLowering>
+derive_precise_waitcnt_vm_lowering(std::span<const VectorMemoryWaitClass> outstanding,
+                                   uint8_t source_vmcnt);
 
 /// @brief Result of a successful semantic translation: the source byte range
 /// and the target instruction words that replace it.
@@ -84,8 +113,9 @@ public:
   /// @param offset    Byte offset of the instruction in .text.
   /// @param liveness  Kernel-scoped live-before data used for scratch register allocation.
   /// @returns Replacement instruction words on success, empty vector if no rule matches.
-  [[nodiscard]] std::vector<uint32_t> try_lower_expand(const Instruction &inst, uint64_t offset,
-                                                       const LivenessAnalysis &liveness) const;
+  [[nodiscard]] std::vector<uint32_t>
+  try_lower_expand(const Instruction &inst, uint64_t offset, const LivenessAnalysis &liveness,
+                   const WaitcntVmLowering *waitcnt_vm = nullptr) const;
 
   /// @brief Whether an instruction is known to require semantic expansion.
   ///

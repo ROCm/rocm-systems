@@ -429,6 +429,7 @@ using rocjitsu::decode_waitcnt_gfx9;
 using rocjitsu::encode_waitcnt_gfx11_simm16;
 using rocjitsu::encode_waitcnt_gfx12;
 using rocjitsu::SemanticTranslator;
+using rocjitsu::VectorMemoryWaitClass;
 using rocjitsu::WaitcntValues;
 
 TEST(WaitcntTranslator, DecodeVmcnt0) {
@@ -488,6 +489,37 @@ TEST(WaitcntTranslator, EncodeVmcnt0EmitsLoadcntAndStorecnt) {
   }
   EXPECT_TRUE(has_loadcnt);
   EXPECT_TRUE(has_storecnt_dscnt);
+}
+
+TEST(WaitcntTranslator, DerivePreciseSplitThresholdsFromClassifiedVmOps) {
+  const std::array<VectorMemoryWaitClass, 3> ops{
+      VectorMemoryWaitClass::Load,
+      VectorMemoryWaitClass::Store,
+      VectorMemoryWaitClass::Load,
+  };
+
+  auto vmcnt1 = rocjitsu::derive_precise_waitcnt_vm_lowering(ops, 1);
+  ASSERT_TRUE(vmcnt1.has_value());
+  EXPECT_EQ(vmcnt1->loadcnt, 1);
+  EXPECT_EQ(vmcnt1->storecnt, 0);
+
+  auto vmcnt2 = rocjitsu::derive_precise_waitcnt_vm_lowering(ops, 2);
+  ASSERT_TRUE(vmcnt2.has_value());
+  EXPECT_EQ(vmcnt2->loadcnt, 1);
+  EXPECT_EQ(vmcnt2->storecnt, 0x3F);
+
+  auto no_wait = rocjitsu::derive_precise_waitcnt_vm_lowering(ops, 3);
+  ASSERT_TRUE(no_wait.has_value());
+  EXPECT_EQ(no_wait->loadcnt, 0x3F);
+  EXPECT_EQ(no_wait->storecnt, 0x3F);
+}
+
+TEST(WaitcntTranslator, UnknownVmOpBlocksPreciseSplitThresholds) {
+  const std::array<VectorMemoryWaitClass, 2> ops{
+      VectorMemoryWaitClass::Load,
+      VectorMemoryWaitClass::Unknown,
+  };
+  EXPECT_FALSE(rocjitsu::derive_precise_waitcnt_vm_lowering(ops, 1).has_value());
 }
 
 namespace {
@@ -557,6 +589,32 @@ uint32_t make_cdna4_sopp(uint16_t op, uint16_t simm16) {
 }
 
 uint32_t make_cdna4_s_waitcnt(uint16_t simm16) { return make_cdna4_sopp(12, simm16); }
+
+uint32_t make_rdna3_s_waitcnt_vscnt(uint16_t simm16) {
+  rocjitsu::rdna3::SopkMachineInst dst{};
+  dst.encoding = 0xB;
+  dst.op = 24;
+  dst.simm16 = simm16;
+  return std::bit_cast<uint32_t>(dst);
+}
+
+std::array<uint32_t, 2> make_cdna4_flat(uint8_t op) {
+  rocjitsu::cdna4::FlatMachineInst src{};
+  src.op = op;
+  src.encoding = rocjitsu::kEnc_FLAT >> 3;
+  std::array<uint32_t, 2> words{};
+  std::memcpy(words.data(), &src, sizeof(src));
+  return words;
+}
+
+std::array<uint32_t, 2> make_cdna4_mubuf(uint8_t op) {
+  rocjitsu::cdna4::MubufMachineInst src{};
+  src.op = op;
+  src.encoding = rocjitsu::kEnc_MUBUF >> 3;
+  std::array<uint32_t, 2> words{};
+  std::memcpy(words.data(), &src, sizeof(src));
+  return words;
+}
 
 std::array<uint32_t, 2> make_cdna4_v_lshl_add_u64_zero_shift() {
   rocjitsu::cdna4::Vop3MachineInst src{};
@@ -1531,6 +1589,51 @@ TEST(Cdna4ToRdna3SemanticTranslator, SWaitcntConvertsGfx9ToConservativeGfx11Layo
   EXPECT_EQ(stats.inst_count, 1u);
 }
 
+TEST(Cdna4ToRdna3SemanticTranslator, ClassifiesCdna4VectorMemoryFromDecodedEncoding) {
+  auto flat_load = decode_cdna4(make_cdna4_flat(20));
+  ASSERT_NE(flat_load, nullptr);
+  EXPECT_EQ(rocjitsu::classify_cdna4_vector_memory_wait(*flat_load), VectorMemoryWaitClass::Load);
+
+  auto flat_store = decode_cdna4(make_cdna4_flat(28));
+  ASSERT_NE(flat_store, nullptr);
+  EXPECT_EQ(rocjitsu::classify_cdna4_vector_memory_wait(*flat_store), VectorMemoryWaitClass::Store);
+
+  auto flat_atomic = decode_cdna4(make_cdna4_flat(64));
+  ASSERT_NE(flat_atomic, nullptr);
+  EXPECT_EQ(rocjitsu::classify_cdna4_vector_memory_wait(*flat_atomic),
+            VectorMemoryWaitClass::Unknown);
+
+  auto mubuf_load = decode_cdna4(make_cdna4_mubuf(20));
+  ASSERT_NE(mubuf_load, nullptr);
+  EXPECT_EQ(rocjitsu::classify_cdna4_vector_memory_wait(*mubuf_load), VectorMemoryWaitClass::Load);
+
+  auto mubuf_store = decode_cdna4(make_cdna4_mubuf(28));
+  ASSERT_NE(mubuf_store, nullptr);
+  EXPECT_EQ(rocjitsu::classify_cdna4_vector_memory_wait(*mubuf_store),
+            VectorMemoryWaitClass::Store);
+}
+
+TEST(Cdna4ToRdna3SemanticTranslator, SWaitcntUsesProvenSplitVmLowering) {
+  const std::array<uint32_t, 1> source{make_cdna4_s_waitcnt(0x4342)};
+  SemanticInstructionContext context(source);
+  ASSERT_TRUE(context.is_valid());
+  const auto *inst = context.first_instruction();
+  ASSERT_NE(inst, nullptr);
+
+  SemanticTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA3);
+  const rocjitsu::WaitcntVmLowering split{1, 0};
+  auto replacement = translator.try_lower_expand(*inst, 0, context.live(), &split);
+
+  ASSERT_EQ(replacement.size(), 2u);
+  EXPECT_EQ(replacement[0], rocjitsu::pack_sopp(9, 0x0434));
+  EXPECT_EQ(replacement[1], make_rdna3_s_waitcnt_vscnt(0));
+
+  const auto stats =
+      decode_words_as(ROCJITSU_CODE_ARCH_RDNA3, std::span<const uint32_t>(replacement));
+  EXPECT_EQ(stats.decode_failures, 0u);
+  EXPECT_EQ(stats.inst_count, 2u);
+}
+
 TEST(Cdna4ToRdna3SemanticTranslator, VLshlAddU64ZeroShiftOmitsRdna4WaitAlu) {
   const auto source = make_cdna4_v_lshl_add_u64_zero_shift();
   SemanticInstructionContext context(source);
@@ -1924,6 +2027,40 @@ DecodeStats decode_code_object_text(const rocjitsu::AmdGpuCodeObject &co, rj_cod
   return total;
 }
 
+bool code_object_text_contains_rdna3_s_waitcnt_vmcnt(const rocjitsu::AmdGpuCodeObject &co,
+                                                     uint8_t vmcnt) {
+  auto decoder = rocjitsu::Decoder::create(ROCJITSU_CODE_ARCH_RDNA3);
+  if (!decoder)
+    return false;
+
+  for (const auto *sec : co.text_sections()) {
+    const auto *data = reinterpret_cast<const uint32_t *>(sec->data());
+    const size_t words = sec->size() / sizeof(uint32_t);
+    size_t pc = 0;
+    while (pc < words) {
+      try {
+        std::unique_ptr<rocjitsu::Instruction> inst(decoder->decode(&data[pc]));
+        if (!inst || inst->size() <= 0) {
+          ++pc;
+          continue;
+        }
+        if (inst->encoding_id() == rocjitsu::kEnc_SOPP &&
+            std::string_view(inst->mnemonic()) == "s_waitcnt" && inst->raw_encoding()) {
+          const auto &sopp =
+              *reinterpret_cast<const rocjitsu::rdna3::SoppMachineInst *>(inst->raw_encoding());
+          const uint8_t decoded_vmcnt = static_cast<uint8_t>((sopp.simm16 >> 10) & 0x3F);
+          if (decoded_vmcnt == vmcnt)
+            return true;
+        }
+        pc += static_cast<size_t>(inst->size()) / sizeof(uint32_t);
+      } catch (const std::exception &) {
+        ++pc;
+      }
+    }
+  }
+  return false;
+}
+
 struct LegalizationCoverage {
   size_t decoded = 0;
   size_t decode_failures = 0;
@@ -2076,6 +2213,11 @@ TEST(BinaryTranslatorE2E, TranslateMemoryStreamCdna4ToRdna3) {
 
   const auto result = translate_cdna4_to_rdna3(*loaded.code_object);
   expect_successful_rdna3_translation(result, "memory_stream");
+
+  rocjitsu::AmdGpuCodeObject translated_co(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(translated_co.is_valid());
+  EXPECT_TRUE(code_object_text_contains_rdna3_s_waitcnt_vmcnt(translated_co, 1))
+      << "classified partial GFX9 vmcnt lowering should preserve the exact RDNA3 loadcnt suffix";
 }
 
 TEST(BinaryTranslatorE2E, Cdna4ToRdna3NoGrowthBucketsProduceNoWarnings) {
