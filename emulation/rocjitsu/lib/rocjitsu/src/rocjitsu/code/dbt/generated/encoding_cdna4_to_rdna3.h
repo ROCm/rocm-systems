@@ -341,6 +341,8 @@ inline TranslationResult encode_ds_rdna3(const DsFields &f, uint16_t dst_op) {
   rocjitsu::rdna3::DsMachineInst dst{};
   dst.encoding = 0x36;
   dst.op = dst_op;
+  if (f.acc != 0)
+    return {};
   dst.offset0 = f.offset0;
   dst.offset1 = f.offset1;
   dst.gds = f.gds;
@@ -358,6 +360,10 @@ inline TranslationResult encode_flat_rdna3(const FlatFields &f, uint16_t dst_op)
   rocjitsu::rdna3::FlatMachineInst dst{};
   dst.encoding = 0x37;
   dst.op = dst_op;
+  if (f.acc != 0)
+    return {};
+  if (f.lds != 0)
+    return {};
   dst.offset = f.ioffset & 0x1FFF;
   dst.seg = f.seg;
   dst.addr = f.vaddr;
@@ -381,6 +387,8 @@ inline TranslationResult encode_flat_glbl_rdna3(const FlatGlblFields &f, uint16_
   rocjitsu::rdna3::FlatGlobalMachineInst dst{};
   dst.encoding = 0x37;
   dst.op = dst_op;
+  if (f.acc != 0)
+    return {};
   dst.offset = f.ioffset & 0x1FFF;
   dst.sve = f.sve;
   dst.seg = f.seg;
@@ -404,6 +412,8 @@ inline TranslationResult encode_flat_scratch_rdna3(const FlatScratchFields &f, u
   rocjitsu::rdna3::FlatScratchMachineInst dst{};
   dst.encoding = 0x37;
   dst.op = dst_op;
+  if (f.acc != 0)
+    return {};
   dst.offset = f.ioffset & 0x1FFF;
   dst.sve = f.sve;
   dst.seg = f.seg;
@@ -427,6 +437,10 @@ inline TranslationResult encode_mubuf_rdna3(const MubufFields &f, uint16_t dst_o
   rocjitsu::rdna3::MubufMachineInst dst{};
   dst.encoding = 0x38;
   dst.op = dst_op;
+  if (f.acc != 0)
+    return {};
+  if (f.lds != 0)
+    return {};
   dst.offset = f.ioffset;
   dst.offen = f.offen;
   dst.idxen = f.idxen;
@@ -451,6 +465,8 @@ inline TranslationResult encode_smem_rdna3(const SmemFields &f, uint16_t dst_op)
   rocjitsu::rdna3::SmemMachineInst dst{};
   dst.encoding = 0x3D;
   dst.op = dst_op;
+  if (f.nv != 0)
+    return {};
   dst.sbase = f.sbase;
   dst.sdata = f.sdata;
   dst.offset = f.ioffset;

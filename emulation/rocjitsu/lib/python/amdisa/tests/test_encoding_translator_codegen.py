@@ -8,6 +8,7 @@ from amdisa.encoding_translator_codegen import (
     _classify_fields,
     _emit_encode_fn,
     _struct_name,
+    _unsupported_nonzero_drop_fields,
 )
 from amdisa.gpuisa import InstEncoding, MicrocodeField
 
@@ -75,3 +76,32 @@ def test_gfx9_to_gfx11_smem_glc_uses_remap() -> None:
     assert "dst.glc = coh.glc;" in body
     assert "dst.dlc = coh.dlc;" in body
     assert "dst.glc = 0;" not in body
+
+
+def test_cdna4_to_rdna3_source_only_memory_domain_drops_are_guarded() -> None:
+    src = _encoding(
+        "ENC_MUBUF",
+        ["encoding", "op", "sc0", "sc1", "nt", "lds", "acc"],
+    )
+    dst = _encoding("ENC_MUBUF", ["encoding", "op", "glc", "dlc", "slc"])
+    mappings = _classify_fields(src, dst, "ENC_MUBUF")
+
+    assert _unsupported_nonzero_drop_fields(
+        "cdna4", "rdna3", "ENC_MUBUF", mappings) == ("acc", "lds")
+
+    trans = EncodingTranslation(
+        src_enc_name="ENC_MUBUF",
+        dst_enc_name="ENC_MUBUF",
+        src_struct=_struct_name("ENC_MUBUF"),
+        dst_struct=_struct_name("ENC_MUBUF"),
+        src_bit_cnt=64,
+        dst_bit_cnt=64,
+        mappings=mappings,
+        has_gfx11_coherency_remap=True,
+        unsupported_nonzero_fields=("acc", "lds"),
+    )
+    body = "\n".join(_emit_encode_fn(trans, "dst", "rdna3"))
+
+    assert "if (f.acc != 0)" in body
+    assert "if (f.lds != 0)" in body
+    assert "return {};" in body

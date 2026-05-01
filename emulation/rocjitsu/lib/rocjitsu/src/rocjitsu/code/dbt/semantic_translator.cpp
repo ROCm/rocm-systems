@@ -52,7 +52,6 @@ uint16_t encode_waitcnt_gfx11_simm16(const WaitcntValues &vals) {
   const uint16_t expcnt = std::min<uint16_t>(vals.expcnt, 0x07);
   const uint16_t lgkmcnt = std::min<uint16_t>(vals.lgkmcnt, 0x3F);
   const uint16_t vmcnt = std::min<uint16_t>(vals.vmcnt, 0x3F);
-  // SOPP names this field simm16, but s_waitcnt treats it as packed counter bits.
   return static_cast<uint16_t>(expcnt | (lgkmcnt << 4) | (vmcnt << 10));
 }
 

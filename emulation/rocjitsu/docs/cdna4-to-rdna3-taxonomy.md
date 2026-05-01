@@ -99,6 +99,32 @@ SMEM, VOP3, VOP3_SDST_ENC, VOP3P, DS, FLAT, and MUBUF. FLAT is split by `seg`:
 flat, scratch, and global forms are re-encoded through the matching RDNA3
 structure.
 
+## Memory-family Memory-Family Audit Notes
+
+The supported same-size CDNA4-to-RDNA3 memory path is the generated field
+transfer for ordinary SMEM, MUBUF, FLAT, FLAT_GLBL-to-FLAT_GLOBAL,
+FLAT_SCRATCH, and DS rows whose source-only domain bits are clear. Targeted
+tests cover representative SMEM buffer loads, MUBUF loads and atomics, FLAT
+flat/scratch/global segment routing, DS atomics, null scalar operand remapping,
+and GFX940-to-GFX11 coherency remapping (`sc0 -> glc`, `sc1 -> slc`,
+`nt -> dlc`).
+
+CDNA4 source-only memory-domain fields that RDNA3 cannot represent in the same
+instruction are now explicit residuals rather than silent drops:
+
+| Family | Source-only field | Residual reason |
+| --- | --- | --- |
+| SMEM | `nv` | No RDNA3 same-size SMEM bit preserves the CDNA4 non-volatile/cache behavior. |
+| MUBUF | `lds`, `acc` | `lds` changes the destination memory domain; `acc` changes the register file. |
+| FLAT | `lds`, `acc` | `lds` changes the destination memory domain; `acc` changes the register file. |
+| FLAT_GLBL, FLAT_SCRATCH | `acc` | Requires AccVGPR/register-file strategy outside this same-size memory audit. |
+| DS | `acc` | Requires AccVGPR/register-file strategy outside this same-size memory audit. |
+
+Non-zero values for those fields make the generated CDNA4-to-RDNA3 encoding
+translator return no translation. Expansion or explicit diagnostic policy for
+those residuals belongs with the existing simple-expand, AccVGPR/MFMA, and
+unsupported-diagnostics follow-up work rather than this same-size memory audit.
+
 Two CDNA4-to-RDNA3 semantic rules are wired:
 
 | Source row | Bucket | Current behavior |

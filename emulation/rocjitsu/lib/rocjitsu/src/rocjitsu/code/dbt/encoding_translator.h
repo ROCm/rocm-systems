@@ -48,7 +48,6 @@ struct CoherencyGfx12 {
 /// @brief Remap GFX940 coherency bits to GFX11.
 ///
 /// @details Mapping: sc0 → glc, sc1 → slc, nt → dlc.
-/// GFX11 uses glc/slc as scope bits here; dlc carries the non-temporal hint.
 ///
 /// @param c  GFX940 coherency bits.
 /// @returns Equivalent GFX11 coherency bits.

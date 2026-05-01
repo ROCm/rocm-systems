@@ -554,6 +554,18 @@ uint32_t make_cdna4_v_lshrrev_b32(uint8_t vdst, uint8_t vsrc1, uint16_t src0) {
   return std::bit_cast<uint32_t>(src);
 }
 
+template <typename Inst> std::array<uint32_t, 2> pack_64(const Inst &src) {
+  static_assert(sizeof(Inst) == sizeof(uint32_t) * 2);
+  std::array<uint32_t, 2> words{};
+  std::memcpy(words.data(), &src, sizeof(src));
+  return words;
+}
+
+const rocjitsu::InstructionLegalization *lookup_cdna4_to_rdna3(uint16_t encoding_id,
+                                                               uint16_t opcode) {
+  return rocjitsu::lookup(rocjitsu::kLegalization_cdna4_to_rdna3, encoding_id, opcode);
+}
+
 } // namespace
 
 TEST(Cdna4ToRdna3Legalization, DuplicateKeysResolveRepresentativeRows) {
@@ -574,6 +586,338 @@ TEST(Cdna4ToRdna3Legalization, DuplicateKeysResolveRepresentativeRows) {
   ASSERT_NE(removed_false_cmp, nullptr);
   EXPECT_EQ(removed_false_cmp->action, rocjitsu::Action::Expand);
   EXPECT_EQ(removed_false_cmp->target_opcode, 0);
+}
+
+TEST(Cdna4ToRdna3MemoryFamilies, SmemLoadPreservesCoherencyAndNullOffset) {
+  rocjitsu::cdna4::SmemMachineInst src{};
+  src.sbase = 6;
+  src.sdata = 14;
+  src.soffset_en = 0;
+  src.nv = 0;
+  src.glc = 1;
+  src.imm = 1;
+  src.op = 8; // s_buffer_load_dword -> s_buffer_load_b32
+  src.encoding = 0x3D;
+  src.offset = 0x12345;
+  src.soffset = 17;
+  const auto words = pack_64(src);
+
+  const auto *leg = lookup_cdna4_to_rdna3(rocjitsu::kEnc_SMEM, src.op);
+  ASSERT_NE(leg, nullptr);
+  ASSERT_EQ(leg->action, rocjitsu::Action::Lower);
+
+  const auto translated = rocjitsu::cdna4_to_rdna3::translate_encoding_cdna4_to_rdna3(
+      rocjitsu::kEnc_SMEM, words[0], words[1], 0, leg->target_opcode);
+  ASSERT_EQ(translated.word_count, 2);
+
+  rocjitsu::rdna3::SmemMachineInst dst{};
+  std::memcpy(&dst, translated.words, sizeof(dst));
+  EXPECT_EQ(dst.sbase, src.sbase);
+  EXPECT_EQ(dst.sdata, src.sdata);
+  EXPECT_EQ(dst.offset, src.offset);
+  // CDNA soffset_en=0 disables the scalar offset; RDNA3 encodes that as null.
+  EXPECT_EQ(dst.soffset, 0x7Cu);
+  EXPECT_EQ(dst.glc, 1u);
+  EXPECT_EQ(dst.dlc, 0u);
+
+  auto dst_inst =
+      decode_one_as(ROCJITSU_CODE_ARCH_RDNA3, std::span<const uint32_t>(translated.words, 2));
+  ASSERT_NE(dst_inst, nullptr);
+  EXPECT_EQ(std::string_view(dst_inst->mnemonic()), "s_buffer_load_b32");
+}
+
+TEST(Cdna4ToRdna3MemoryFamilies, SmemNvRequiresResidualHandling) {
+  rocjitsu::cdna4::SmemMachineInst src{};
+  src.nv = 1;
+  src.op = 0;
+  src.encoding = 0x3D;
+  const auto words = pack_64(src);
+
+  // CDNA4 nv has no same-size RDNA3 representation, so translation must fail.
+  const auto *leg = lookup_cdna4_to_rdna3(rocjitsu::kEnc_SMEM, src.op);
+  ASSERT_NE(leg, nullptr);
+  const auto translated = rocjitsu::cdna4_to_rdna3::translate_encoding_cdna4_to_rdna3(
+      rocjitsu::kEnc_SMEM, words[0], words[1], 0, leg->target_opcode);
+  EXPECT_EQ(translated.word_count, 0);
+}
+
+TEST(Cdna4ToRdna3MemoryFamilies, MubufLoadAndAtomicPreserveOperandsAndCoherency) {
+  struct Case {
+    uint16_t src_op;
+    uint16_t target_op;
+    const char *mnemonic;
+  };
+  const Case cases[] = {
+      {20, 20, "buffer_load_b32"},
+      {66, 53, "buffer_atomic_add_u32"},
+  };
+
+  for (const auto &tc : cases) {
+    rocjitsu::cdna4::MubufMachineInst src{};
+    src.offset = 0x321;
+    src.offen = 1;
+    src.idxen = 1;
+    src.sc0 = 1;
+    src.sc1 = 1;
+    src.lds = 0;
+    src.nt = 1;
+    src.op = tc.src_op;
+    src.encoding = 0x38;
+    src.vaddr = 4;
+    src.vdata = 5;
+    src.srsrc = 6;
+    src.acc = 0;
+    src.soffset = 0x7F;
+    const auto words = pack_64(src);
+
+    const auto *leg = lookup_cdna4_to_rdna3(rocjitsu::kEnc_MUBUF, src.op);
+    ASSERT_NE(leg, nullptr);
+    ASSERT_EQ(leg->action, rocjitsu::Action::Lower);
+    ASSERT_EQ(leg->target_opcode, tc.target_op);
+
+    const auto translated = rocjitsu::cdna4_to_rdna3::translate_encoding_cdna4_to_rdna3(
+        rocjitsu::kEnc_MUBUF, words[0], words[1], 0, leg->target_opcode);
+    ASSERT_EQ(translated.word_count, 2);
+
+    rocjitsu::rdna3::MubufMachineInst dst{};
+    std::memcpy(&dst, translated.words, sizeof(dst));
+    EXPECT_EQ(dst.offset, src.offset);
+    EXPECT_EQ(dst.offen, src.offen);
+    EXPECT_EQ(dst.idxen, src.idxen);
+    EXPECT_EQ(dst.vaddr, src.vaddr);
+    EXPECT_EQ(dst.vdata, src.vdata);
+    EXPECT_EQ(dst.srsrc, src.srsrc);
+    // The 7-bit CDNA scalar null sentinel becomes RDNA3's 0x7c sentinel.
+    EXPECT_EQ(dst.soffset, 0x7Cu);
+    EXPECT_EQ(dst.glc, 1u);
+    EXPECT_EQ(dst.slc, 1u);
+    EXPECT_EQ(dst.dlc, 1u);
+    EXPECT_EQ(dst.tfe, 0u);
+    EXPECT_EQ(dst.op, tc.target_op);
+
+    auto dst_inst =
+        decode_one_as(ROCJITSU_CODE_ARCH_RDNA3, std::span<const uint32_t>(translated.words, 2));
+    ASSERT_NE(dst_inst, nullptr);
+    EXPECT_EQ(std::string_view(dst_inst->mnemonic()), tc.mnemonic);
+  }
+}
+
+TEST(Cdna4ToRdna3MemoryFamilies, MubufSourceOnlyDomainBitsRequireResidualHandling) {
+  rocjitsu::cdna4::MubufMachineInst src{};
+  src.op = 20;
+  src.encoding = 0x38;
+
+  const auto *leg = lookup_cdna4_to_rdna3(rocjitsu::kEnc_MUBUF, src.op);
+  ASSERT_NE(leg, nullptr);
+
+  // lds and acc change domains/register files and require residual handling.
+  src.lds = 1;
+  auto words = pack_64(src);
+  auto translated = rocjitsu::cdna4_to_rdna3::translate_encoding_cdna4_to_rdna3(
+      rocjitsu::kEnc_MUBUF, words[0], words[1], 0, leg->target_opcode);
+  EXPECT_EQ(translated.word_count, 0);
+
+  src.lds = 0;
+  src.acc = 1;
+  words = pack_64(src);
+  translated = rocjitsu::cdna4_to_rdna3::translate_encoding_cdna4_to_rdna3(
+      rocjitsu::kEnc_MUBUF, words[0], words[1], 0, leg->target_opcode);
+  EXPECT_EQ(translated.word_count, 0);
+}
+
+TEST(Cdna4ToRdna3MemoryFamilies, FlatSegmentsPreserveDomainAndCoherency) {
+  const auto *leg = lookup_cdna4_to_rdna3(rocjitsu::kEnc_FLAT, 20);
+  ASSERT_NE(leg, nullptr);
+  ASSERT_EQ(leg->action, rocjitsu::Action::Lower);
+
+  rocjitsu::cdna4::FlatMachineInst flat{};
+  flat.offset = 0x456;
+  flat.seg = 0;
+  flat.sc0 = 1;
+  flat.nt = 1;
+  flat.op = 20;
+  flat.sc1 = 1;
+  flat.encoding = 0x3F;
+  flat.addr = 8;
+  flat.data = 9;
+  flat.saddr = 0x7F;
+  flat.vdst = 10;
+  auto words = pack_64(flat);
+  auto translated = rocjitsu::cdna4_to_rdna3::translate_encoding_cdna4_to_rdna3(
+      rocjitsu::kEnc_FLAT, words[0], words[1], 0, leg->target_opcode);
+  ASSERT_EQ(translated.word_count, 2);
+
+  rocjitsu::rdna3::FlatMachineInst flat_dst{};
+  std::memcpy(&flat_dst, translated.words, sizeof(flat_dst));
+  EXPECT_EQ(flat_dst.offset, flat.offset);
+  EXPECT_EQ(flat_dst.seg, 0u);
+  EXPECT_EQ(flat_dst.glc, 1u);
+  EXPECT_EQ(flat_dst.slc, 1u);
+  EXPECT_EQ(flat_dst.dlc, 1u);
+  // Generic FLAT uses the scalar null remap when saddr carries CDNA's sentinel.
+  EXPECT_EQ(flat_dst.saddr, 0x7Cu);
+  EXPECT_EQ(flat_dst.addr, flat.addr);
+  EXPECT_EQ(flat_dst.data, flat.data);
+  EXPECT_EQ(flat_dst.vdst, flat.vdst);
+  EXPECT_NE(decode_one_as(ROCJITSU_CODE_ARCH_RDNA3, std::span<const uint32_t>(translated.words, 2)),
+            nullptr);
+
+  rocjitsu::cdna4::FlatScratchMachineInst scratch{};
+  scratch.offset = 0x1ABC;
+  scratch.sve = 1;
+  scratch.seg = 1;
+  scratch.sc0 = 1;
+  scratch.nt = 0;
+  scratch.op = 20;
+  scratch.sc1 = 1;
+  scratch.encoding = 0x3F;
+  scratch.addr = 11;
+  scratch.data = 12;
+  scratch.saddr = 13;
+  scratch.vdst = 14;
+  words = pack_64(scratch);
+  translated = rocjitsu::cdna4_to_rdna3::translate_encoding_cdna4_to_rdna3(
+      rocjitsu::kEnc_FLAT, words[0], words[1], 0, leg->target_opcode);
+  ASSERT_EQ(translated.word_count, 2);
+
+  rocjitsu::rdna3::FlatScratchMachineInst scratch_dst{};
+  std::memcpy(&scratch_dst, translated.words, sizeof(scratch_dst));
+  EXPECT_EQ(scratch_dst.offset, scratch.offset);
+  EXPECT_EQ(scratch_dst.sve, 1u);
+  EXPECT_EQ(scratch_dst.seg, 1u);
+  EXPECT_EQ(scratch_dst.glc, 1u);
+  EXPECT_EQ(scratch_dst.slc, 1u);
+  // Scratch does not carry the CDNA non-temporal bit into RDNA3 dlc.
+  EXPECT_EQ(scratch_dst.dlc, 0u);
+  EXPECT_EQ(scratch_dst.saddr, scratch.saddr);
+  EXPECT_NE(decode_one_as(ROCJITSU_CODE_ARCH_RDNA3, std::span<const uint32_t>(translated.words, 2)),
+            nullptr);
+
+  rocjitsu::cdna4::FlatGlblMachineInst global{};
+  global.offset = 0x1FED;
+  global.sve = 1;
+  global.seg = 2;
+  global.sc0 = 0;
+  global.nt = 1;
+  global.op = 20;
+  global.sc1 = 1;
+  global.encoding = 0x3F;
+  global.addr = 15;
+  global.data = 16;
+  global.saddr = 17;
+  global.vdst = 18;
+  words = pack_64(global);
+  translated = rocjitsu::cdna4_to_rdna3::translate_encoding_cdna4_to_rdna3(
+      rocjitsu::kEnc_FLAT, words[0], words[1], 0, leg->target_opcode);
+  ASSERT_EQ(translated.word_count, 2);
+
+  rocjitsu::rdna3::FlatGlobalMachineInst global_dst{};
+  std::memcpy(&global_dst, translated.words, sizeof(global_dst));
+  EXPECT_EQ(global_dst.offset, global.offset);
+  EXPECT_EQ(global_dst.sve, 1u);
+  EXPECT_EQ(global_dst.seg, 2u);
+  EXPECT_EQ(global_dst.glc, 0u);
+  EXPECT_EQ(global_dst.slc, 1u);
+  EXPECT_EQ(global_dst.dlc, 1u);
+  EXPECT_EQ(global_dst.saddr, global.saddr);
+  EXPECT_NE(decode_one_as(ROCJITSU_CODE_ARCH_RDNA3, std::span<const uint32_t>(translated.words, 2)),
+            nullptr);
+}
+
+TEST(Cdna4ToRdna3MemoryFamilies, FlatSourceOnlyDomainBitsRequireResidualHandling) {
+  const auto *leg = lookup_cdna4_to_rdna3(rocjitsu::kEnc_FLAT, 20);
+  ASSERT_NE(leg, nullptr);
+
+  // Source-only FLAT domain bits cannot be silently dropped.
+  rocjitsu::cdna4::FlatMachineInst flat{};
+  flat.op = 20;
+  flat.lds = 1;
+  flat.encoding = 0x3F;
+  auto words = pack_64(flat);
+  auto translated = rocjitsu::cdna4_to_rdna3::translate_encoding_cdna4_to_rdna3(
+      rocjitsu::kEnc_FLAT, words[0], words[1], 0, leg->target_opcode);
+  EXPECT_EQ(translated.word_count, 0);
+
+  flat.lds = 0;
+  flat.acc = 1;
+  words = pack_64(flat);
+  translated = rocjitsu::cdna4_to_rdna3::translate_encoding_cdna4_to_rdna3(
+      rocjitsu::kEnc_FLAT, words[0], words[1], 0, leg->target_opcode);
+  EXPECT_EQ(translated.word_count, 0);
+
+  rocjitsu::cdna4::FlatGlblMachineInst global{};
+  global.op = 20;
+  global.seg = 2;
+  global.acc = 1;
+  global.encoding = 0x3F;
+  words = pack_64(global);
+  translated = rocjitsu::cdna4_to_rdna3::translate_encoding_cdna4_to_rdna3(
+      rocjitsu::kEnc_FLAT, words[0], words[1], 0, leg->target_opcode);
+  EXPECT_EQ(translated.word_count, 0);
+
+  rocjitsu::cdna4::FlatScratchMachineInst scratch{};
+  scratch.op = 20;
+  scratch.seg = 1;
+  scratch.acc = 1;
+  scratch.encoding = 0x3F;
+  words = pack_64(scratch);
+  translated = rocjitsu::cdna4_to_rdna3::translate_encoding_cdna4_to_rdna3(
+      rocjitsu::kEnc_FLAT, words[0], words[1], 0, leg->target_opcode);
+  EXPECT_EQ(translated.word_count, 0);
+}
+
+TEST(Cdna4ToRdna3MemoryFamilies, DsAtomicPreservesOperandsAndDomain) {
+  rocjitsu::cdna4::DsMachineInst src{};
+  src.offset0 = 3;
+  src.offset1 = 4;
+  src.gds = 1;
+  src.op = 32; // ds_add_rtn_u32
+  src.acc = 0;
+  src.encoding = 0x36;
+  src.addr = 8;
+  src.data0 = 9;
+  src.data1 = 10;
+  src.vdst = 11;
+  const auto words = pack_64(src);
+
+  const auto *leg = lookup_cdna4_to_rdna3(rocjitsu::kEnc_DS, src.op);
+  ASSERT_NE(leg, nullptr);
+  ASSERT_EQ(leg->action, rocjitsu::Action::Lower);
+
+  const auto translated = rocjitsu::cdna4_to_rdna3::translate_encoding_cdna4_to_rdna3(
+      rocjitsu::kEnc_DS, words[0], words[1], 0, leg->target_opcode);
+  ASSERT_EQ(translated.word_count, 2);
+
+  rocjitsu::rdna3::DsMachineInst dst{};
+  std::memcpy(&dst, translated.words, sizeof(dst));
+  EXPECT_EQ(dst.offset0, src.offset0);
+  EXPECT_EQ(dst.offset1, src.offset1);
+  EXPECT_EQ(dst.gds, src.gds);
+  EXPECT_EQ(dst.op, leg->target_opcode);
+  EXPECT_EQ(dst.addr, src.addr);
+  EXPECT_EQ(dst.data0, src.data0);
+  EXPECT_EQ(dst.data1, src.data1);
+  EXPECT_EQ(dst.vdst, src.vdst);
+
+  auto dst_inst =
+      decode_one_as(ROCJITSU_CODE_ARCH_RDNA3, std::span<const uint32_t>(translated.words, 2));
+  ASSERT_NE(dst_inst, nullptr);
+  EXPECT_EQ(std::string_view(dst_inst->mnemonic()), "ds_add_rtn_u32");
+}
+
+TEST(Cdna4ToRdna3MemoryFamilies, DsAccRequiresResidualHandling) {
+  rocjitsu::cdna4::DsMachineInst src{};
+  src.op = 32;
+  src.acc = 1;
+  src.encoding = 0x36;
+  const auto words = pack_64(src);
+
+  // DS acc selects AccVGPR state, which this same-size path cannot encode.
+  const auto *leg = lookup_cdna4_to_rdna3(rocjitsu::kEnc_DS, src.op);
+  ASSERT_NE(leg, nullptr);
+  const auto translated = rocjitsu::cdna4_to_rdna3::translate_encoding_cdna4_to_rdna3(
+      rocjitsu::kEnc_DS, words[0], words[1], 0, leg->target_opcode);
+  EXPECT_EQ(translated.word_count, 0);
 }
 
 TEST(Cdna4ToRdna3InPlaceBuckets, IdentitySoppNopDecodesAsRdna3) {

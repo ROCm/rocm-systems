@@ -154,6 +154,19 @@ _GLC_REMAP_ENCODINGS = frozenset({
     'ENC_SMEM',
 })
 
+# Source-only fields in these same-size CDNA4->RDNA3 memory encodings change
+# the memory domain or register file. They cannot be preserved by the generated
+# bitfield transfer, so non-zero values must fail translation instead of being
+# silently dropped.
+_CDNA4_TO_RDNA3_UNSUPPORTED_NONZERO_DROPS = {
+    'ENC_DS': frozenset({'acc'}),
+    'ENC_FLAT': frozenset({'acc', 'lds'}),
+    'ENC_FLAT_GLBL': frozenset({'acc'}),
+    'ENC_FLAT_SCRATCH': frozenset({'acc'}),
+    'ENC_MUBUF': frozenset({'acc', 'lds'}),
+    'ENC_SMEM': frozenset({'nv'}),
+}
+
 # Fields that participate in coherency remapping (source side)
 _COHERENCY_SRC_FIELDS = frozenset({'sc0', 'sc1', 'nt', 'glc'})
 
@@ -192,6 +205,7 @@ class EncodingTranslation:
     has_glc_remap: bool = False
     has_gfx11_coherency_remap: bool = False
     has_gfx11_glc_remap: bool = False
+    unsupported_nonzero_fields: tuple[str, ...] = ()
     src_dt_index: int = 0       # primary decode table index (for dispatch)
     src_enc_field_bit_cnt: int = 9  # encoding field width in bits
     dst_enc_field_val: int = 0  # actual encoding bitfield value (for dst.encoding)
@@ -355,6 +369,22 @@ def _classify_fields(
         ))
 
     return mappings
+
+
+def _unsupported_nonzero_drop_fields(
+    src_name: str,
+    dst_name: str,
+    src_enc_name: str,
+    mappings: list[FieldMapping],
+) -> tuple[str, ...]:
+    if (src_name, dst_name) != ('cdna4', 'rdna3'):
+        return ()
+    unsupported = _CDNA4_TO_RDNA3_UNSUPPORTED_NONZERO_DROPS.get(src_enc_name, frozenset())
+    return tuple(sorted(
+        FIELD_RENAMES.get(m.src_name, m.src_name)
+        for m in mappings
+        if m.kind == 'drop' and m.src_name in unsupported
+    ))
 
 
 # ---------------------------------------------------------------------------
@@ -526,6 +556,10 @@ def _emit_encode_fn(trans, dst_ns, dst_name):
     lines.append(f'    {full_type} dst{{}};')
     lines.append(f'    dst.encoding = 0x{trans.dst_enc_field_val:X};')
     lines.append(f'    dst.op = dst_op;')
+
+    for name in trans.unsupported_nonzero_fields:
+        lines.append(f'    if (f.{name} != 0)')
+        lines.append(f'        return {{}};')
 
     # Coherency remap
     if trans.has_coherency_remap:
@@ -726,6 +760,7 @@ def generate_encoding_translators(src_spec, dst_spec, src_name, dst_name, output
             skipped.append(de); continue
         src_enc = src_spec.encoding_map[se]
         dst_enc = dst_spec.encoding_map[de]
+        mappings = _classify_fields(src_enc, dst_enc, se)
         # Pick the coherency remap matching the target ISA's field model.
         # RDNA4 uses scope/th. RDNA3 vector memory uses GLC/SLC as scope bits
         # plus DLC as the non-temporal hint; RDNA3 SMEM has only GLC/DLC.
@@ -739,13 +774,15 @@ def generate_encoding_translators(src_spec, dst_spec, src_name, dst_name, output
             src_enc_name=se, dst_enc_name=de,
             src_struct=_struct_name(se), dst_struct=_struct_name(de),
             src_bit_cnt=src_enc.bit_cnt, dst_bit_cnt=dst_enc.bit_cnt,
-            mappings=_classify_fields(src_enc, dst_enc, se),
+            mappings=mappings,
             has_coherency_remap=(se in _COHERENCY_REMAP_ENCODINGS) and dst_has_scope_th,
             has_glc_remap=(se in _GLC_REMAP_ENCODINGS) and dst_has_scope_th,
             has_gfx11_coherency_remap=(
                 (se in _COHERENCY_REMAP_ENCODINGS) and dst_has_gfx11_vector_flags),
             has_gfx11_glc_remap=(
                 (se in _GLC_REMAP_ENCODINGS) and dst_has_gfx11_glc_flags),
+            unsupported_nonzero_fields=_unsupported_nonzero_drop_fields(
+                src_name, dst_name, se, mappings),
             src_dt_index=src_dts.get(se, 0),
             src_enc_field_bit_cnt=src_enc.enc_field_bit_cnt,
             dst_enc_field_val=dst_evs.get(de, 0),
