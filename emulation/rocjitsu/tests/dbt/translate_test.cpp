@@ -402,13 +402,33 @@ std::unique_ptr<rocjitsu::Instruction> decode_cdna4(std::span<const uint32_t> wo
   return std::unique_ptr<rocjitsu::Instruction>(decoder->decode(words.data()));
 }
 
-uint32_t make_cdna4_s_waitcnt(uint16_t simm16) {
+std::unique_ptr<rocjitsu::Instruction> decode_one_as(rj_code_arch_t arch,
+                                                     std::span<const uint32_t> words) {
+  auto decoder = rocjitsu::Decoder::create(arch);
+  if (!decoder)
+    return nullptr;
+  return std::unique_ptr<rocjitsu::Instruction>(decoder->decode(words.data()));
+}
+
+std::vector<uint32_t> append_trailing_literal_for_test(const rocjitsu::TranslationResult &tr,
+                                                       std::span<const uint32_t> source_words,
+                                                       size_t source_word_count) {
+  std::vector<uint32_t> translated(tr.words, tr.words + tr.word_count);
+  // Encoding helpers rewrite opcode words only; literals stay in the source stream.
+  if (source_word_count == translated.size() + 1 && translated.size() < 3)
+    translated.push_back(source_words[translated.size()]);
+  return translated;
+}
+
+uint32_t make_cdna4_sopp(uint16_t op, uint16_t simm16) {
   rocjitsu::cdna4::SoppMachineInst src{};
   src.simm16 = simm16;
-  src.op = 12;
+  src.op = op;
   src.encoding = rocjitsu::kEnc_SOPP;
   return std::bit_cast<uint32_t>(src);
 }
+
+uint32_t make_cdna4_s_waitcnt(uint16_t simm16) { return make_cdna4_sopp(12, simm16); }
 
 std::array<uint32_t, 2> make_cdna4_v_lshl_add_u64_zero_shift() {
   rocjitsu::cdna4::Vop3MachineInst src{};
@@ -424,7 +444,176 @@ std::array<uint32_t, 2> make_cdna4_v_lshl_add_u64_zero_shift() {
   return words;
 }
 
+uint32_t make_cdna4_s_mov_b32(uint8_t sdst, uint8_t ssrc0) {
+  rocjitsu::cdna4::Sop1MachineInst src{};
+  src.ssrc0 = ssrc0;
+  src.sdst = sdst;
+  src.op = 0;
+  src.encoding = rocjitsu::kEnc_SOP1;
+  return std::bit_cast<uint32_t>(src);
+}
+
+uint32_t make_cdna4_v_add_f32(uint8_t vdst, uint8_t vsrc1, uint16_t src0) {
+  rocjitsu::cdna4::Vop2MachineInst src{};
+  src.src0 = src0;
+  src.vsrc1 = vsrc1;
+  src.vdst = vdst;
+  src.op = 1;
+  src.encoding = 0;
+  return std::bit_cast<uint32_t>(src);
+}
+
 } // namespace
+
+TEST(Cdna4ToRdna3Legalization, DuplicateKeysResolveRepresentativeRows) {
+  const auto *branch =
+      rocjitsu::lookup(rocjitsu::kLegalization_cdna4_to_rdna3, rocjitsu::kEnc_SOPP, 2);
+  ASSERT_NE(branch, nullptr);
+  EXPECT_EQ(branch->action, rocjitsu::Action::Substitute);
+  EXPECT_EQ(branch->target_opcode, 32);
+
+  const auto *s_mov =
+      rocjitsu::lookup(rocjitsu::kLegalization_cdna4_to_rdna3, rocjitsu::kEnc_SOP1, 3);
+  ASSERT_NE(s_mov, nullptr);
+  EXPECT_NE(s_mov->action, rocjitsu::Action::Expand);
+  EXPECT_EQ(s_mov->target_opcode, 3);
+
+  const auto *removed_false_cmp =
+      rocjitsu::lookup(rocjitsu::kLegalization_cdna4_to_rdna3, rocjitsu::kEnc_VOPC, 32);
+  ASSERT_NE(removed_false_cmp, nullptr);
+  EXPECT_EQ(removed_false_cmp->action, rocjitsu::Action::Expand);
+  EXPECT_EQ(removed_false_cmp->target_opcode, 0);
+}
+
+TEST(Cdna4ToRdna3InPlaceBuckets, IdentitySoppNopDecodesAsRdna3) {
+  const std::array<uint32_t, 1> source{make_cdna4_sopp(0, 0)};
+  auto inst = decode_cdna4(source);
+  ASSERT_NE(inst, nullptr);
+  ASSERT_EQ(std::string_view(inst->mnemonic()), "s_nop");
+
+  const auto *leg =
+      rocjitsu::lookup(rocjitsu::kLegalization_cdna4_to_rdna3, inst->encoding_id(), inst->opcode());
+  ASSERT_NE(leg, nullptr);
+  ASSERT_EQ(leg->action, rocjitsu::Action::Identity);
+
+  const auto translated = rocjitsu::cdna4_to_rdna3::translate_encoding_cdna4_to_rdna3(
+      inst->encoding_id(), source[0], 0, 0, leg->target_opcode);
+  ASSERT_EQ(translated.word_count, 1);
+
+  auto rdna3_inst =
+      decode_one_as(ROCJITSU_CODE_ARCH_RDNA3, std::span<const uint32_t>(translated.words, 1));
+  ASSERT_NE(rdna3_inst, nullptr);
+  EXPECT_EQ(std::string_view(rdna3_inst->mnemonic()), "s_nop");
+}
+
+TEST(Cdna4ToRdna3InPlaceBuckets, SubstituteSoppBranchDecodesAsRdna3) {
+  const std::array<uint32_t, 1> source{make_cdna4_sopp(2, 7)};
+  auto inst = decode_cdna4(source);
+  ASSERT_NE(inst, nullptr);
+  ASSERT_EQ(std::string_view(inst->mnemonic()), "s_branch");
+
+  const auto *leg =
+      rocjitsu::lookup(rocjitsu::kLegalization_cdna4_to_rdna3, inst->encoding_id(), inst->opcode());
+  ASSERT_NE(leg, nullptr);
+  ASSERT_EQ(leg->action, rocjitsu::Action::Substitute);
+  ASSERT_EQ(leg->target_opcode, 32);
+
+  const auto translated = rocjitsu::cdna4_to_rdna3::translate_encoding_cdna4_to_rdna3(
+      inst->encoding_id(), source[0], 0, 0, leg->target_opcode);
+  ASSERT_EQ(translated.word_count, 1);
+
+  auto dst = std::bit_cast<rocjitsu::rdna3::SoppMachineInst>(translated.words[0]);
+  EXPECT_EQ(dst.simm16, 7);
+  EXPECT_EQ(dst.op, 32);
+
+  auto rdna3_inst =
+      decode_one_as(ROCJITSU_CODE_ARCH_RDNA3, std::span<const uint32_t>(translated.words, 1));
+  ASSERT_NE(rdna3_inst, nullptr);
+  EXPECT_EQ(std::string_view(rdna3_inst->mnemonic()), "s_branch");
+}
+
+TEST(Cdna4ToRdna3InPlaceBuckets, SubstituteVop2DecodesAsRdna3) {
+  const std::array<uint32_t, 1> source{make_cdna4_v_add_f32(7, 9, 10)};
+  auto inst = decode_cdna4(source);
+  ASSERT_NE(inst, nullptr);
+  ASSERT_EQ(std::string_view(inst->mnemonic()), "v_add_f32_e32");
+
+  const auto *leg =
+      rocjitsu::lookup(rocjitsu::kLegalization_cdna4_to_rdna3, inst->encoding_id(), inst->opcode());
+  ASSERT_NE(leg, nullptr);
+  ASSERT_EQ(leg->action, rocjitsu::Action::Substitute);
+  ASSERT_EQ(leg->target_opcode, 3);
+
+  const auto translated = rocjitsu::cdna4_to_rdna3::translate_encoding_cdna4_to_rdna3(
+      inst->encoding_id(), source[0], 0, 0, leg->target_opcode);
+  ASSERT_EQ(translated.word_count, 1);
+
+  auto dst = std::bit_cast<rocjitsu::rdna3::Vop2MachineInst>(translated.words[0]);
+  EXPECT_EQ(dst.src0, 10);
+  EXPECT_EQ(dst.vsrc1, 9);
+  EXPECT_EQ(dst.vdst, 7);
+  EXPECT_EQ(dst.op, 3);
+
+  auto rdna3_inst =
+      decode_one_as(ROCJITSU_CODE_ARCH_RDNA3, std::span<const uint32_t>(translated.words, 1));
+  ASSERT_NE(rdna3_inst, nullptr);
+  EXPECT_EQ(std::string_view(rdna3_inst->mnemonic()), "v_add_f32_e32");
+}
+
+TEST(Cdna4ToRdna3InPlaceBuckets, GeneratedSameSizeSop1PreservesOperands) {
+  const std::array<uint32_t, 1> source{make_cdna4_s_mov_b32(17, 42)};
+  auto inst = decode_cdna4(source);
+  ASSERT_NE(inst, nullptr);
+  ASSERT_EQ(std::string_view(inst->mnemonic()), "s_mov_b32");
+
+  const auto *leg =
+      rocjitsu::lookup(rocjitsu::kLegalization_cdna4_to_rdna3, inst->encoding_id(), inst->opcode());
+  ASSERT_NE(leg, nullptr);
+  ASSERT_NE(leg->action, rocjitsu::Action::Expand);
+  ASSERT_EQ(leg->target_opcode, 0);
+
+  const auto translated = rocjitsu::cdna4_to_rdna3::translate_encoding_cdna4_to_rdna3(
+      inst->encoding_id(), source[0], 0, 0, leg->target_opcode);
+  ASSERT_EQ(translated.word_count, 1);
+
+  auto dst = std::bit_cast<rocjitsu::rdna3::Sop1MachineInst>(translated.words[0]);
+  EXPECT_EQ(dst.ssrc0, 42);
+  EXPECT_EQ(dst.sdst, 17);
+  EXPECT_EQ(dst.op, 0);
+
+  auto rdna3_inst =
+      decode_one_as(ROCJITSU_CODE_ARCH_RDNA3, std::span<const uint32_t>(translated.words, 1));
+  ASSERT_NE(rdna3_inst, nullptr);
+  EXPECT_EQ(std::string_view(rdna3_inst->mnemonic()), "s_mov_b32");
+}
+
+TEST(Cdna4ToRdna3InPlaceBuckets, TrailingLiteralIsPreservedForSubstituteVop2) {
+  constexpr uint32_t kLiteral = 0x3F800000;
+  const std::array<uint32_t, 2> source{make_cdna4_v_add_f32(7, 9, 255), kLiteral};
+  auto inst = decode_cdna4(source);
+  ASSERT_NE(inst, nullptr);
+  ASSERT_EQ(std::string_view(inst->mnemonic()), "v_add_f32_e32");
+  ASSERT_EQ(inst->size(), 8);
+
+  const auto *leg =
+      rocjitsu::lookup(rocjitsu::kLegalization_cdna4_to_rdna3, inst->encoding_id(), inst->opcode());
+  ASSERT_NE(leg, nullptr);
+  ASSERT_EQ(leg->action, rocjitsu::Action::Substitute);
+
+  const auto translated = rocjitsu::cdna4_to_rdna3::translate_encoding_cdna4_to_rdna3(
+      inst->encoding_id(), source[0], source[1], 0, leg->target_opcode);
+  ASSERT_EQ(translated.word_count, 1);
+
+  const auto translated_words = append_trailing_literal_for_test(
+      translated, std::span<const uint32_t>(source), inst->size() / sizeof(uint32_t));
+  ASSERT_EQ(translated_words.size(), 2u);
+  EXPECT_EQ(translated_words[1], kLiteral);
+
+  const auto stats =
+      decode_words_as(ROCJITSU_CODE_ARCH_RDNA3, std::span<const uint32_t>(translated_words));
+  EXPECT_EQ(stats.decode_failures, 0u);
+  EXPECT_EQ(stats.inst_count, 1u);
+}
 
 TEST(Cdna4ToRdna3SemanticTranslator, SWaitcntEmitsGfx11WaitcntFullDrain) {
   const std::array<uint32_t, 1> source{make_cdna4_s_waitcnt(0x0F0F)};
@@ -538,7 +727,6 @@ collect_cdna4_to_rdna3_no_growth_coverage(const rocjitsu::AmdGpuCodeObject &co) 
         }
 
         ++coverage.decoded;
-        // Bucket original CDNA4 instructions by the no-growth path they exercise.
         if (const auto *leg = rocjitsu::lookup(rocjitsu::kLegalization_cdna4_to_rdna3,
                                                inst->encoding_id(), inst->opcode())) {
           switch (leg->action) {

@@ -281,8 +281,6 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
         if (legalization_lookup_)
           leg = legalization_lookup_(inst.encoding_id(), inst.opcode());
 
-        const uint16_t dst_opcode = leg ? leg->target_opcode : inst.opcode();
-
         // Try semantic lowering for Expand and Lower actions.
         // For Expand: must lower (NOP-fill if unhandled).
         // For Lower: try lowering first, fall through to encoding if unhandled.
@@ -306,7 +304,7 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
           continue;
         }
 
-        handle_encoding(inst, offset, translated_text, dst_opcode, patcher, text);
+        handle_encoding(inst, offset, translated_text, leg, patcher, text);
         offset += inst_size;
       }
     }
@@ -398,7 +396,8 @@ void BinaryTranslator::apply_semantic(const SemanticReplacement &repl, std::vect
 }
 
 void BinaryTranslator::handle_encoding(const Instruction &inst, uint64_t offset,
-                                       std::vector<uint8_t> &text, uint16_t dst_opcode,
+                                       std::vector<uint8_t> &text,
+                                       const InstructionLegalization *leg,
                                        CodeObjectPatcher &patcher,
                                        std::span<const uint8_t> orig_text) {
   const uint32_t *raw = inst.raw_encoding();
@@ -411,10 +410,14 @@ void BinaryTranslator::handle_encoding(const Instruction &inst, uint64_t offset,
   const uint32_t w0 = raw[0];
   const uint32_t w1 = inst.size() > 4 ? raw[1] : 0;
   const uint32_t w2 = inst.size() > 8 ? raw[2] : 0;
+  const uint16_t dst_opcode = leg ? leg->target_opcode : inst.opcode();
 
   auto tr = encoding_translate_(inst.encoding_id(), w0, w1, w2, dst_opcode);
 
   if (tr.word_count == 0) {
+    if (warnings_ && leg && leg->action != Action::Identity) {
+      warnings_->push_back("encoding translation missing for " + std::string(inst.mnemonic()));
+    }
     std::memcpy(text.data() + offset, raw, inst.size());
     return;
   }
@@ -428,7 +431,7 @@ void BinaryTranslator::handle_encoding(const Instruction &inst, uint64_t offset,
   // gaps would indicate a format mismatch, not a trailing literal.
   const uint32_t translated_bytes = tr.word_count * 4u;
   const uint32_t orig_bytes = inst.size();
-  if (orig_bytes - translated_bytes == 4 && tr.word_count < 3) {
+  if (translated_bytes <= orig_bytes && orig_bytes - translated_bytes == 4 && tr.word_count < 3) {
     uint32_t lit_word;
     std::memcpy(&lit_word, orig_text.data() + offset + translated_bytes, 4);
     tr.words[tr.word_count++] = lit_word;

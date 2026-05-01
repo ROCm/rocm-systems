@@ -124,9 +124,9 @@ private:
   /// @param inst       The decoded guest instruction.
   /// @param offset     Byte offset of the instruction within .text.
   /// @param text       The translated text buffer.
-  /// @param dst_opcode Target opcode from the legalization table.
+  /// @param leg        Legalization entry for this instruction, or nullptr.
   void handle_encoding(const Instruction &inst, uint64_t offset, std::vector<uint8_t> &text,
-                       uint16_t dst_opcode, CodeObjectPatcher &patcher,
+                       const InstructionLegalization *leg, CodeObjectPatcher &patcher,
                        std::span<const uint8_t> orig_text);
 
   rj_code_arch_t guest_arch_;                               ///< Source ISA.
