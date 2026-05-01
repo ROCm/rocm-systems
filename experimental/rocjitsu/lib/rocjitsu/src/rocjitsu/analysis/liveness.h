@@ -62,8 +62,7 @@ public:
   /// entry being translated, not every block decoded from the containing code
   /// object.
   /// @param blocks Blocks in one kernel CFG scope.
-  /// @param wf_size Wavefront width in lanes; forwarded to operand/register mapping.
-  LivenessAnalysis(KernelBlockScope blocks, uint8_t wf_size);
+  LivenessAnalysis(KernelBlockScope blocks);
 
   /// @brief Block liveness by block object.
   [[nodiscard]] const BlockLiveness &block_liveness(const BasicBlock &block) const;
@@ -95,12 +94,12 @@ public:
                                                        uint16_t search_start = 0) const;
 
 private:
-  void analyze(KernelBlockScope blocks, uint8_t wf_size);
+  void analyze(KernelBlockScope blocks);
 
   std::vector<BlockLiveness> liveness_;
   std::unordered_map<const BasicBlock *, size_t> block_index_;
   std::unordered_map<const Instruction *, RegisterSet> live_before_;
-  RegisterSet empty_;
+  static constexpr RegisterSet empty_{};
 };
 
 } // namespace rocjitsu

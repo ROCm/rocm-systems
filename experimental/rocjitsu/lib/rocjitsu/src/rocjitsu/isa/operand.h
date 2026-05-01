@@ -42,8 +42,7 @@ public:
   /// IDs, and other non-register operands. ISA-specific subclasses override
   /// this using generated OperandType selector ranges so analysis never has to
   /// parse the display string returned by name().
-  /// @param wf_size Wavefront width in lanes; controls EXEC/VCC width.
-  [[nodiscard]] virtual std::optional<RegisterRef> to_register_ref(uint8_t wf_size) const;
+  [[nodiscard]] virtual std::optional<RegisterRef> to_register_ref() const;
 
   /// @brief Raw encoding value from the instruction binary.
   int encoding_value() const { return encoding_value_; }

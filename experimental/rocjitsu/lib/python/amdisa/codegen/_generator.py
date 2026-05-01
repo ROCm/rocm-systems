@@ -336,13 +336,13 @@ class CodeGenerator:
             if implicit_uses_impl:
                 public_members.append(
                     cgen.Line(
-                        'void implicit_uses(RegisterSet &uses, uint8_t wf_size) const override;'
+                        'void implicit_uses(RegisterSet &uses) const override;'
                     )
                 )
                 class_func_impls.append(
                     cgen.Line(
                         f'void {fmt_enc_name}::implicit_uses'
-                        f'(RegisterSet &uses, uint8_t wf_size) const '
+                        f'(RegisterSet &uses) const '
                         f'{{ {implicit_uses_impl} }}'
                     )
                 )
@@ -513,7 +513,6 @@ class CodeGenerator:
             and {'seg', 'saddr'} <= enc_field_names
         ):
             return (
-                '(void)wf_size;'
                 'if (inst_.saddr == 0x7F) return;'
                 'if (inst_.seg == 1) {'
                 'uses.expand(RegisterRef{RegClass::SGPR, '
@@ -4574,10 +4573,12 @@ class CodeGenerator:
                         ctor_body_parts.append('flags_ |= COND_BRANCH;')
                     if _mem_sem and _mem_sem.semantic_class == 'endpgm':
                         ctor_body_parts.append('flags_ |= PROGRAM_TERMINATOR;')
-                    if _mem_sem and _mem_sem.semantic_class in (
-                        'scalar_setpc', 'scalar_swappc', 'scalar_call',
-                    ):
+                    if _mem_sem and _mem_sem.semantic_class == 'scalar_setpc':
                         ctor_body_parts.append('flags_ |= INDIRECT_BRANCH;')
+                    if _mem_sem and _mem_sem.semantic_class in (
+                        'scalar_swappc', 'scalar_call',
+                    ):
+                        ctor_body_parts.append('flags_ |= INDIRECT_CALL;')
                     # Conditional scalar moves leave the destination unchanged
                     # when their predicate is false, so liveness cannot treat
                     # them as unconditional kills.
@@ -5290,8 +5291,7 @@ class CodeGenerator:
 
         ref_switch_body = '\n'.join(ref_switch_cases)
         ref_impl = (
-            f'std::optional<RegisterRef> Operand::to_register_ref(uint8_t wf_size) const {{\n'
-            f'(void)wf_size;\n'
+            f'std::optional<RegisterRef> Operand::to_register_ref() const {{\n'
             f'// Liveness tracks operands as contiguous 32-bit register lanes.\n'
             f'const auto reg_width = static_cast<uint8_t>(size_bits_ > 32 ? size_bits_ / 32 : 1);\n'
             f'switch (opr_type_) {{\n'
@@ -5309,7 +5309,7 @@ class CodeGenerator:
                 'public:\n'
                 'Operand(int size_bits, OperandType opr_type, int encoding_value);\n'
                 'std::string name() const override;\n'
-                'std::optional<RegisterRef> to_register_ref(uint8_t wf_size) const override;\n'
+                'std::optional<RegisterRef> to_register_ref() const override;\n'
                 'uint32_t read_scalar(const amdgpu::Wavefront &wf) const override;\n'
                 'uint32_t read_lane(const amdgpu::Wavefront &wf, uint32_t lane) const override;\n'
                 'void write_scalar(amdgpu::Wavefront &wf, uint32_t val) const override;\n'

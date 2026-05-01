@@ -6,31 +6,42 @@
 #include "rocjitsu/analysis/def_use_chain.h"
 #include "rocjitsu/code/basic_block.h"
 #include "rocjitsu/isa/instruction.h"
-#include "rocjitsu/isa/isa_traits.h"
 
 #include <algorithm>
 #include <cassert>
 #include <cstddef>
+#include <deque>
 #include <stdexcept>
 #include <unordered_set>
+#include <utility>
 
 namespace rocjitsu {
 
 namespace {
 
-void dfs_rpo(const BasicBlock &block, const std::unordered_set<const BasicBlock *> &allowed,
-             std::unordered_set<const BasicBlock *> &visited,
-             std::vector<const BasicBlock *> &postorder) {
-  if (!allowed.contains(&block))
-    return;
-  if (!visited.insert(&block).second)
+void dfs_reverse_post_order(const BasicBlock &start,
+                            const std::unordered_set<const BasicBlock *> &allowed,
+                            std::unordered_set<const BasicBlock *> &visited,
+                            std::vector<const BasicBlock *> &postorder) {
+  if (!allowed.contains(&start) || !visited.insert(&start).second)
     return;
 
-  for (const BasicBlock *succ : block.successors()) {
-    if (succ != nullptr)
-      dfs_rpo(*succ, allowed, visited, postorder);
+  std::vector<std::pair<const BasicBlock *, size_t>> stack;
+  stack.emplace_back(&start, 0);
+
+  while (!stack.empty()) {
+    auto &[block, next_successor] = stack.back();
+    const auto &successors = block->successors();
+    if (next_successor < successors.size()) {
+      const BasicBlock *succ = successors[next_successor++];
+      if (succ != nullptr && allowed.contains(succ) && visited.insert(succ).second)
+        stack.emplace_back(succ, 0);
+      continue;
+    }
+
+    postorder.push_back(block);
+    stack.pop_back();
   }
-  postorder.push_back(&block);
 }
 
 std::vector<const Instruction *> instructions_in_order(BasicBlock &block) {
@@ -50,9 +61,9 @@ std::vector<const Instruction *> instructions_in_order(BasicBlock &block) {
 }
 
 void remove_vector_kills(RegisterSet &kills) {
-  for (size_t i = 0; i < ISA_MAX_VGPRS; ++i)
+  for (size_t i = 0; i < REGISTER_SET_MAX_VGPRS; ++i)
     kills.erase({RegClass::VGPR, static_cast<uint16_t>(i), 1});
-  for (size_t i = 0; i < ISA_MAX_ACC_VGPRS; ++i)
+  for (size_t i = 0; i < REGISTER_SET_MAX_ACC_VGPRS; ++i)
     kills.erase({RegClass::ACC_VGPR, static_cast<uint16_t>(i), 1});
 }
 
@@ -83,18 +94,16 @@ std::vector<const BasicBlock *> reverse_post_order(KernelBlockScope blocks) {
 
   for (const BasicBlock *block : blocks) {
     if (block != nullptr)
-      dfs_rpo(*block, allowed, visited, postorder);
+      dfs_reverse_post_order(*block, allowed, visited, postorder);
   }
 
   std::ranges::reverse(postorder);
   return postorder;
 }
 
-LivenessAnalysis::LivenessAnalysis(KernelBlockScope blocks, uint8_t wf_size) {
-  analyze(blocks, wf_size);
-}
+LivenessAnalysis::LivenessAnalysis(KernelBlockScope blocks) { analyze(blocks); }
 
-void LivenessAnalysis::analyze(KernelBlockScope blocks, uint8_t wf_size) {
+void LivenessAnalysis::analyze(KernelBlockScope blocks) {
   liveness_.resize(blocks.size());
   for (size_t i = 0; i < blocks.size(); ++i) {
     if (blocks[i] != nullptr)
@@ -110,7 +119,7 @@ void LivenessAnalysis::analyze(KernelBlockScope blocks, uint8_t wf_size) {
       continue;
     auto &state = liveness_[i];
     for (const auto &inst : block->instructions()) {
-      InstDefUse du(inst, wf_size);
+      InstDefUse du(inst);
       RegisterSet kills = kill_defs(du);
       RegisterSet upward_uses = du.uses;
       upward_uses -= state.kill;
@@ -120,7 +129,7 @@ void LivenessAnalysis::analyze(KernelBlockScope blocks, uint8_t wf_size) {
   }
 
   const auto rpo = reverse_post_order(blocks);
-  std::vector<size_t> worklist;
+  std::deque<size_t> worklist;
   std::vector<bool> in_worklist(blocks.size(), false);
   auto enqueue = [&](size_t idx) {
     if (idx >= in_worklist.size() || in_worklist[idx])
@@ -136,8 +145,8 @@ void LivenessAnalysis::analyze(KernelBlockScope blocks, uint8_t wf_size) {
   }
 
   while (!worklist.empty()) {
-    const size_t idx = worklist.back();
-    worklist.pop_back();
+    const size_t idx = worklist.front();
+    worklist.pop_front();
     in_worklist[idx] = false;
 
     const BasicBlock *block = blocks[idx];
@@ -183,7 +192,7 @@ void LivenessAnalysis::analyze(KernelBlockScope blocks, uint8_t wf_size) {
     auto insts = instructions_in_order(*block);
     for (auto it = insts.rbegin(); it != insts.rend(); ++it) {
       const Instruction *inst = *it;
-      InstDefUse du(*inst, wf_size);
+      InstDefUse du(*inst);
       RegisterSet kills = kill_defs(du);
       live -= kills;
       live |= du.uses;
@@ -216,7 +225,7 @@ std::optional<uint16_t> LivenessAnalysis::find_free_run(const Instruction *inst,
     return std::nullopt;
 
   const RegisterSet &live = live_it->second;
-  for (uint16_t base = search_start; base + count <= ISA_MAX_VGPRS; ++base) {
+  for (uint16_t base = search_start; base + count <= REGISTER_SET_MAX_VGPRS; ++base) {
     if (!any_live_in_range(live, RegClass::VGPR, base, count))
       return base;
   }
@@ -230,13 +239,10 @@ std::optional<uint16_t> LivenessAnalysis::find_free_sgpr_pair(const Instruction 
     return std::nullopt;
 
   const RegisterSet &live = live_it->second;
-  // SGPR 0-105 are the normal allocatable scalar registers for these DBT
-  // scratch moves; special pairs such as VCC/FLAT_SCRATCH/TTMP are excluded.
-  constexpr uint16_t kAllocatableSgprs = 106;
   uint16_t base = search_start;
   if (base % 2 != 0)
     ++base; // even-align for s_mov_b64-style pair moves.
-  for (; base + 1 < kAllocatableSgprs; base += 2) {
+  for (; base + 1 < REGISTER_SET_ALLOCATABLE_SGPRS; base += 2) {
     if (!any_live_in_range(live, RegClass::SGPR, base, 2))
       return base;
   }
@@ -250,10 +256,9 @@ std::optional<uint16_t> LivenessAnalysis::find_free_sgpr(const Instruction *inst
     return std::nullopt;
 
   const RegisterSet &live = live_it->second;
-  // Keep this in sync with find_free_sgpr_pair(): only normal SGPRs are
-  // candidates for temporary allocation.
-  constexpr uint16_t kAllocatableSgprs = 106;
-  for (uint16_t base = search_start; base < kAllocatableSgprs; ++base) {
+  // Keep this in sync with find_free_sgpr_pair(): only normal SGPRs that are
+  // valid across supported families are candidates for temporary allocation.
+  for (uint16_t base = search_start; base < REGISTER_SET_ALLOCATABLE_SGPRS; ++base) {
     if (!live.contains({RegClass::SGPR, base, 1}))
       return base;
   }

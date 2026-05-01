@@ -29,22 +29,24 @@ enum InstFlags : uint64_t {
   COND_BRANCH = (1ULL << 1),
   /// @brief Indirect branch (target from register).
   INDIRECT_BRANCH = (1ULL << 2),
+  /// @brief Indirect call (target from register, returns to fallthrough).
+  INDIRECT_CALL = (1ULL << 3),
   /// @brief Terminates the program.
-  PROGRAM_TERMINATOR = (1ULL << 3),
+  PROGRAM_TERMINATOR = (1ULL << 4),
   /// @brief Executes immediately without scheduling latency.
-  IMMEDIATELY_EXECUTED = (1ULL << 4),
+  IMMEDIATELY_EXECUTED = (1ULL << 5),
   /// @brief Memory operation (load or store).
-  MEMORY_OP = (1ULL << 5),
+  MEMORY_OP = (1ULL << 6),
   /// @brief Wait-counter instruction (s_waitcnt, s_wait_loadcnt, s_wait_storecnt, etc.).
-  WAITCNT = (1ULL << 6),
+  WAITCNT = (1ULL << 7),
   /// @brief Barrier instruction (s_barrier, s_barrier_signal, s_barrier_wait).
-  BARRIER = (1ULL << 7),
+  BARRIER = (1ULL << 8),
   /// @brief Matrix FMA instruction (v_mfma_*, v_smfmac_*).
-  MFMA = (1ULL << 8),
+  MFMA = (1ULL << 9),
   /// @brief AccVGPR move instruction (v_accvgpr_write, v_accvgpr_read, v_accvgpr_mov).
-  ACCVGPR = (1ULL << 9),
+  ACCVGPR = (1ULL << 10),
   /// @brief Destination update is conditional and must not kill the old value.
-  PREDICATED_DEF = (1ULL << 10)
+  PREDICATED_DEF = (1ULL << 11)
 };
 
 class BasicBlock;
@@ -204,10 +206,10 @@ public:
   ///
   /// @details Used for encoded fields that affect execution but are not part of
   /// the printed operand list, such as FLAT/GLOBAL `saddr` addressing fields.
-  virtual void implicit_uses(RegisterSet & /*uses*/, uint8_t /*wf_size*/) const {}
+  virtual void implicit_uses(RegisterSet & /*uses*/) const {}
 
   /// @brief Add registers implicitly written by this instruction.
-  virtual void implicit_defs(RegisterSet & /*defs*/, uint8_t /*wf_size*/) const {}
+  virtual void implicit_defs(RegisterSet & /*defs*/) const {}
 
   /// @brief Raw encoding words of this instruction.
   /// @returns Pointer to the encoding words (size()/4 words), or nullptr if not set.

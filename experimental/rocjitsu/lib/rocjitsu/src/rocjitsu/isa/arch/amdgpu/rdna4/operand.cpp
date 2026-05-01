@@ -518,8 +518,7 @@ std::string Operand::name() const {
   return std::to_string(encoding_value_);
 }
 
-std::optional<RegisterRef> Operand::to_register_ref(uint8_t wf_size) const {
-  (void)wf_size;
+std::optional<RegisterRef> Operand::to_register_ref() const {
   // Liveness tracks operands as contiguous 32-bit register lanes.
   const auto reg_width = static_cast<uint8_t>(size_bits_ > 32 ? size_bits_ / 32 : 1);
   switch (opr_type_) {

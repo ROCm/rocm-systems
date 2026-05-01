@@ -1166,7 +1166,7 @@ SSwappcB64Sop1::SSwappcB64Sop1(const MachineInst *inst)
     ssrc0 = Operand(
         64, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
-  flags_ |= INDIRECT_BRANCH;
+  flags_ |= INDIRECT_CALL;
 }
 
 void SSwappcB64Sop1::execute_impl(amdgpu::Wavefront &wf) {

@@ -20,12 +20,13 @@ namespace rocjitsu {
 namespace {
 
 bool is_block_terminator(const Instruction &inst) {
-  return inst.flags() & (BRANCH | COND_BRANCH | INDIRECT_BRANCH | PROGRAM_TERMINATOR);
+  return inst.flags() &
+         (BRANCH | COND_BRANCH | INDIRECT_BRANCH | INDIRECT_CALL | PROGRAM_TERMINATOR);
 }
 
-bool is_program_exit(const Instruction &inst) {
-  // Indirect branches have no statically-known successor, so the local CFG
-  // terminates at them just like program exits.
+bool has_no_static_successor(const Instruction &inst) {
+  // Indirect calls return to the fallthrough block; indirect branches do not
+  // expose a statically-known successor in this local CFG.
   return inst.flags() & (PROGRAM_TERMINATOR | INDIRECT_BRANCH);
 }
 
@@ -150,7 +151,7 @@ BasicBlock::build(const CodeObject &co, Decoder &decoder, std::span<const uint64
     for (size_t i = 0; i < section_blocks.size(); ++i) {
       auto &block = *section_blocks[i];
       const Instruction *term = block.terminator();
-      if (term == nullptr || is_program_exit(*term))
+      if (term == nullptr || has_no_static_successor(*term))
         continue;
 
       auto branch_delta = term->branch_offset_bytes();

@@ -11,12 +11,34 @@
 
 #pragma once
 
-#include "rocjitsu/isa/isa_traits.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/cdna_isa_base.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/rdna_isa_base.h"
 
+#include <algorithm>
 #include <bitset>
+#include <cstddef>
 #include <cstdint>
 
 namespace rocjitsu {
+
+/// @brief RegisterSet storage capacities, derived from AMDGPU family traits.
+///
+/// @details These are storage bounds for an ISA-independent analysis set, not
+/// per-kernel allocation limits. Wave32 vs. Wave64 changes lane count, not the
+/// number of SGPR/VGPR indices addressable within a wavefront register file.
+inline constexpr size_t REGISTER_SET_MAX_SGPRS =
+    std::max<size_t>(amdgpu::CdnaIsaBase::MAX_SGPRS_PER_WF, amdgpu::RdnaIsaBase::MAX_SGPRS_PER_WF);
+inline constexpr size_t REGISTER_SET_MAX_VGPRS =
+    std::max<size_t>(amdgpu::CdnaIsaBase::MAX_VGPRS_PER_WF, amdgpu::RdnaIsaBase::MAX_VGPRS_PER_WF);
+inline constexpr size_t REGISTER_SET_MAX_ACC_VGPRS = REGISTER_SET_MAX_VGPRS;
+
+/// @brief Normal SGPRs safe for scratch allocation across supported families.
+///
+/// @details CDNA exposes 102 ordinary SGPRs per wavefront while RDNA exposes
+/// 106. Liveness itself tracks the union, but generic scratch selection must be
+/// conservative unless it is made target-ISA-specific.
+inline constexpr size_t REGISTER_SET_ALLOCATABLE_SGPRS =
+    std::min<size_t>(amdgpu::CdnaIsaBase::MAX_SGPRS_PER_WF, amdgpu::RdnaIsaBase::MAX_SGPRS_PER_WF);
 
 /// @brief ISA-independent register-file class.
 ///
@@ -42,7 +64,8 @@ enum class RegClass : uint8_t {
 ///
 /// @details `index` is relative to `cls`, not a raw operand encoding value.
 /// `width` is measured in 32-bit register lanes. A 64-bit SGPR pair is
-/// `{RegClass::SGPR, base, 2}`.
+/// `{RegClass::SGPR, base, 2}`. The current MR ISA max tracked operand width
+/// is 32 lanes (1024-bit MFMA accumulator operands), so uint8_t has ample room.
 struct RegisterRef {
   RegClass cls;
   uint16_t index;
@@ -94,9 +117,9 @@ public:
   friend bool operator==(const RegisterSet &, const RegisterSet &) = default;
 
 private:
-  std::bitset<ISA_MAX_SGPRS> sgprs_;
-  std::bitset<ISA_MAX_VGPRS> vgprs_;
-  std::bitset<ISA_MAX_ACC_VGPRS> acc_vgprs_;
+  std::bitset<REGISTER_SET_MAX_SGPRS> sgprs_;
+  std::bitset<REGISTER_SET_MAX_VGPRS> vgprs_;
+  std::bitset<REGISTER_SET_MAX_ACC_VGPRS> acc_vgprs_;
 };
 
 } // namespace rocjitsu

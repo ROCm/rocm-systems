@@ -34,10 +34,7 @@ public:
   TestOperand() = default;
   explicit TestOperand(RegisterRef ref) : Operand(ref.width * 32, ref.index), ref_(ref) {}
 
-  std::optional<RegisterRef> to_register_ref(uint8_t wf_size) const override {
-    (void)wf_size;
-    return ref_;
-  }
+  std::optional<RegisterRef> to_register_ref() const override { return ref_; }
 
 private:
   std::optional<RegisterRef> ref_;
@@ -67,8 +64,7 @@ public:
 
   std::optional<int64_t> branch_offset_bytes() const override { return branch_delta_; }
 
-  void implicit_uses(RegisterSet &uses, uint8_t wf_size) const override {
-    (void)wf_size;
+  void implicit_uses(RegisterSet &uses) const override {
     for (RegisterRef ref : implicit_uses_)
       uses.expand(ref);
   }
@@ -119,6 +115,11 @@ enum class TestOpcode : uint32_t {
   ReadWriteSgpr4 = 8,
   PredicatedDefSgpr4 = 9,
   ImplicitUseSgpr6Pair = 10,
+  DefSgpr4 = 11,
+  CBranchBackToUseSgpr4 = 12,
+  CBranchToElseAfterTwo = 13,
+  IndirectCall = 14,
+  IndirectBranch = 15,
 };
 
 class TestDecoder : public Decoder {
@@ -149,6 +150,16 @@ public:
     case TestOpcode::ImplicitUseSgpr6Pair:
       return new TestInstruction("test_implicit_use_s6_pair", {}, {}, 0, std::nullopt,
                                  {{RegClass::SGPR, 6, 2}});
+    case TestOpcode::DefSgpr4:
+      return new TestInstruction("test_def_s4", {{RegClass::SGPR, 4, 1}});
+    case TestOpcode::CBranchBackToUseSgpr4:
+      return new TestInstruction("test_cbranch_back_to_use_s4", {}, {}, COND_BRANCH, -8);
+    case TestOpcode::CBranchToElseAfterTwo:
+      return new TestInstruction("test_cbranch_else_after_two", {}, {}, COND_BRANCH, 8);
+    case TestOpcode::IndirectCall:
+      return new TestInstruction("test_indirect_call", {}, {}, INDIRECT_CALL);
+    case TestOpcode::IndirectBranch:
+      return new TestInstruction("test_indirect_branch", {}, {}, INDIRECT_BRANCH);
     }
     return new TestInstruction("test_end", {}, {}, PROGRAM_TERMINATOR);
   }
@@ -186,10 +197,9 @@ std::vector<BasicBlock *> block_scope(const std::vector<std::unique_ptr<BasicBlo
   return scope;
 }
 
-LivenessAnalysis analyze_scope(const std::vector<std::unique_ptr<BasicBlock>> &blocks,
-                               uint8_t wf_size) {
+LivenessAnalysis analyze_scope(const std::vector<std::unique_ptr<BasicBlock>> &blocks) {
   auto scope = block_scope(blocks);
-  return LivenessAnalysis(KernelBlockScope(scope), wf_size);
+  return LivenessAnalysis(KernelBlockScope(scope));
 }
 
 TEST(RegisterSetAnalysis, KeepsRegisterClassesSeparate) {
@@ -220,13 +230,13 @@ TEST(RegisterSetAnalysis, GeneratedCdna4OperandsMapTrackedRegisterRefs) {
                      cdna4::OpSelSrcAccvgpr::OPR_SRC_ACCVGPR_ACC_MIN + 7);
   cdna4::Operand imm32(32, cdna4::OperandType::OPR_SIMM32, 123);
 
-  ASSERT_TRUE(sgpr.to_register_ref(64).has_value());
-  EXPECT_EQ(*sgpr.to_register_ref(64), (RegisterRef{RegClass::SGPR, 7, 1}));
-  ASSERT_TRUE(vgpr.to_register_ref(64).has_value());
-  EXPECT_EQ(*vgpr.to_register_ref(64), (RegisterRef{RegClass::VGPR, 7, 1}));
-  ASSERT_TRUE(acc.to_register_ref(64).has_value());
-  EXPECT_EQ(*acc.to_register_ref(64), (RegisterRef{RegClass::ACC_VGPR, 7, 1}));
-  EXPECT_FALSE(imm32.to_register_ref(64).has_value());
+  ASSERT_TRUE(sgpr.to_register_ref().has_value());
+  EXPECT_EQ(*sgpr.to_register_ref(), (RegisterRef{RegClass::SGPR, 7, 1}));
+  ASSERT_TRUE(vgpr.to_register_ref().has_value());
+  EXPECT_EQ(*vgpr.to_register_ref(), (RegisterRef{RegClass::VGPR, 7, 1}));
+  ASSERT_TRUE(acc.to_register_ref().has_value());
+  EXPECT_EQ(*acc.to_register_ref(), (RegisterRef{RegClass::ACC_VGPR, 7, 1}));
+  EXPECT_FALSE(imm32.to_register_ref().has_value());
 }
 
 TEST(CfgAnalysis, LoopBackEdgeLinksPredecessor) {
@@ -276,9 +286,28 @@ TEST(CfgAnalysis, ExtraLeaderSplitsBlockAtKernelEntry) {
   EXPECT_TRUE(has_predecessor(*blocks[1], blocks[0].get()));
 }
 
+TEST(CfgAnalysis, IndirectCallFallsThroughToReturnSuccessor) {
+  auto blocks =
+      build_test_blocks({TestOpcode::IndirectCall, TestOpcode::UseSgpr4, TestOpcode::End});
+
+  ASSERT_EQ(blocks.size(), 2u);
+  ASSERT_EQ(blocks[0]->successors().size(), 1u);
+  EXPECT_EQ(blocks[0]->successors()[0], blocks[1].get());
+  EXPECT_TRUE(has_predecessor(*blocks[1], blocks[0].get()));
+}
+
+TEST(CfgAnalysis, IndirectBranchHasNoStaticSuccessor) {
+  auto blocks =
+      build_test_blocks({TestOpcode::IndirectBranch, TestOpcode::UseSgpr4, TestOpcode::End});
+
+  ASSERT_EQ(blocks.size(), 2u);
+  EXPECT_TRUE(blocks[0]->successors().empty());
+  EXPECT_TRUE(blocks[1]->predecessors().empty());
+}
+
 TEST(LivenessAnalysis, ExecMaskedVgprDefDoesNotKillInactiveLaneValue) {
   auto blocks = build_test_blocks({TestOpcode::DefVgpr0, TestOpcode::UseVgpr0, TestOpcode::End});
-  LivenessAnalysis liveness = analyze_scope(blocks, 64);
+  LivenessAnalysis liveness = analyze_scope(blocks);
 
   const Instruction &def = *blocks[0]->instructions().begin();
   EXPECT_TRUE(liveness.is_live_before(def, {RegClass::VGPR, 0, 1}));
@@ -290,7 +319,7 @@ TEST(LivenessAnalysis, ExecMaskedVgprDefDoesNotKillInactiveLaneValue) {
 
 TEST(LivenessAnalysis, FindsDeadSgprAfterLiveSgpr) {
   auto blocks = build_test_blocks({TestOpcode::UseSgpr4, TestOpcode::End});
-  LivenessAnalysis liveness = analyze_scope(blocks, 64);
+  LivenessAnalysis liveness = analyze_scope(blocks);
 
   const Instruction &use = *blocks[0]->instructions().begin();
   EXPECT_TRUE(liveness.is_live_before(use, {RegClass::SGPR, 4, 1}));
@@ -299,15 +328,27 @@ TEST(LivenessAnalysis, FindsDeadSgprAfterLiveSgpr) {
 
 TEST(LivenessAnalysis, ReadWriteSameRegisterIsLiveBeforeInstruction) {
   auto blocks = build_test_blocks({TestOpcode::ReadWriteSgpr4, TestOpcode::End});
-  LivenessAnalysis liveness = analyze_scope(blocks, 64);
+  LivenessAnalysis liveness = analyze_scope(blocks);
 
   const Instruction &read_write = *blocks[0]->instructions().begin();
   EXPECT_TRUE(liveness.is_live_before(read_write, {RegClass::SGPR, 4, 1}));
 }
 
+TEST(LivenessAnalysis, ReadWriteRegisterStaysLiveOutWhenUsedBySuccessor) {
+  std::array<uint64_t, 1> extra_leaders{4};
+  auto blocks = build_test_blocks(
+      {TestOpcode::ReadWriteSgpr4, TestOpcode::UseSgpr4, TestOpcode::End}, extra_leaders);
+  LivenessAnalysis liveness = analyze_scope(blocks);
+
+  ASSERT_EQ(blocks.size(), 2u);
+  const Instruction &read_write = *blocks[0]->instructions().begin();
+  EXPECT_TRUE(liveness.is_live_before(read_write, {RegClass::SGPR, 4, 1}));
+  EXPECT_TRUE(liveness.block_liveness(*blocks[0]).live_out.contains({RegClass::SGPR, 4, 1}));
+}
+
 TEST(LivenessAnalysis, ImplicitUseIsLiveBeforeInstruction) {
   auto blocks = build_test_blocks({TestOpcode::ImplicitUseSgpr6Pair, TestOpcode::End});
-  LivenessAnalysis liveness = analyze_scope(blocks, 64);
+  LivenessAnalysis liveness = analyze_scope(blocks);
 
   const Instruction &implicit_use = *blocks[0]->instructions().begin();
   EXPECT_TRUE(liveness.is_live_before(implicit_use, {RegClass::SGPR, 6, 2}));
@@ -316,10 +357,35 @@ TEST(LivenessAnalysis, ImplicitUseIsLiveBeforeInstruction) {
 TEST(LivenessAnalysis, PredicatedScalarDefDoesNotKillLiveOutValue) {
   auto blocks =
       build_test_blocks({TestOpcode::PredicatedDefSgpr4, TestOpcode::UseSgpr4, TestOpcode::End});
-  LivenessAnalysis liveness = analyze_scope(blocks, 64);
+  LivenessAnalysis liveness = analyze_scope(blocks);
 
   const Instruction &pred_def = *blocks[0]->instructions().begin();
   EXPECT_TRUE(liveness.is_live_before(pred_def, {RegClass::SGPR, 4, 1}));
+}
+
+TEST(LivenessAnalysis, LoopCarriedUseRevisitsBackEdgePredecessor) {
+  auto blocks = build_test_blocks({TestOpcode::DefSgpr4, TestOpcode::UseSgpr4,
+                                   TestOpcode::CBranchBackToUseSgpr4, TestOpcode::End});
+  LivenessAnalysis liveness = analyze_scope(blocks);
+
+  auto *entry = block_starting_at(blocks, 0);
+  auto *loop = block_starting_at(blocks, 4);
+  ASSERT_NE(entry, nullptr);
+  ASSERT_NE(loop, nullptr);
+  EXPECT_TRUE(liveness.block_liveness(*entry).live_out.contains({RegClass::SGPR, 4, 1}));
+  EXPECT_TRUE(liveness.block_liveness(*loop).live_in.contains({RegClass::SGPR, 4, 1}));
+  EXPECT_TRUE(liveness.block_liveness(*loop).live_out.contains({RegClass::SGPR, 4, 1}));
+}
+
+TEST(LivenessAnalysis, BranchMeetKeepsValueLiveWhenOneSuccessorPreservesIt) {
+  auto blocks = build_test_blocks({TestOpcode::CBranchToElseAfterTwo, TestOpcode::DefSgpr4,
+                                   TestOpcode::BranchToJoin, TestOpcode::Nop, TestOpcode::UseSgpr4,
+                                   TestOpcode::End});
+  LivenessAnalysis liveness = analyze_scope(blocks);
+
+  const Instruction &branch = *blocks[0]->instructions().begin();
+  EXPECT_TRUE(liveness.is_live_before(branch, {RegClass::SGPR, 4, 1}));
+  EXPECT_TRUE(liveness.block_liveness(*blocks[0]).live_out.contains({RegClass::SGPR, 4, 1}));
 }
 
 TEST(LivenessAnalysis, ExplicitBlockSubsetIgnoresOutsideSuccessors) {
@@ -334,11 +400,11 @@ TEST(LivenessAnalysis, ExplicitBlockSubsetIgnoresOutsideSuccessors) {
   ASSERT_EQ(kernel0->successors()[0]->start_offset(), 8u);
 
   const Instruction &def = *kernel0->instructions().begin();
-  LivenessAnalysis all_decoded_liveness = analyze_scope(blocks, 64);
+  LivenessAnalysis all_decoded_liveness = analyze_scope(blocks);
   EXPECT_TRUE(all_decoded_liveness.is_live_before(def, {RegClass::VGPR, 0, 1}));
 
   std::vector<BasicBlock *> kernel_blocks{kernel0};
-  LivenessAnalysis kernel_liveness(KernelBlockScope(kernel_blocks), 64);
+  LivenessAnalysis kernel_liveness{KernelBlockScope(kernel_blocks)};
   EXPECT_FALSE(kernel_liveness.is_live_before(def, {RegClass::VGPR, 0, 1}));
 }
 

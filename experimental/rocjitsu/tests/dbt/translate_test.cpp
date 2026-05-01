@@ -54,7 +54,6 @@
 #include <bit>
 #include <cstdint>
 #include <cstring>
-#include <vector>
 
 namespace rocjitsu {
 namespace {

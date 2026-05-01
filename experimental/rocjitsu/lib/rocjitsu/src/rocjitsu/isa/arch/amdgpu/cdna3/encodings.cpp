@@ -276,8 +276,7 @@ void Flat::build_modifiers(std::string &out) const {
     out += " nt";
 }
 
-void Flat::implicit_uses(RegisterSet &uses, uint8_t wf_size) const {
-  (void)wf_size;
+void Flat::implicit_uses(RegisterSet &uses) const {
   if (inst_.saddr == 0x7F)
     return;
   if (inst_.seg == 1) {

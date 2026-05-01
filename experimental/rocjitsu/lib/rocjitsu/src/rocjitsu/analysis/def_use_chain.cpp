@@ -26,26 +26,26 @@ void add_def(InstDefUse &du, RegisterRef ref) {
 
 } // namespace
 
-InstDefUse::InstDefUse(const Instruction &inst, uint8_t wf_size) {
+InstDefUse::InstDefUse(const Instruction &inst) {
   has_predicated_def = inst.flags() & PREDICATED_DEF;
 
   for (int i = 0; i < inst.num_dst_operands(); ++i) {
     const auto *op = inst.dst_operand(i);
     if (op == nullptr)
       continue;
-    if (auto ref = op->to_register_ref(wf_size))
+    if (auto ref = op->to_register_ref())
       add_def(*this, *ref);
   }
-  inst.implicit_defs(defs, wf_size);
+  inst.implicit_defs(defs);
 
   for (int i = 0; i < inst.num_src_operands(); ++i) {
     const auto *op = inst.src_operand(i);
     if (op == nullptr)
       continue;
-    if (auto ref = op->to_register_ref(wf_size))
+    if (auto ref = op->to_register_ref())
       uses.expand(*ref);
   }
-  inst.implicit_uses(uses, wf_size);
+  inst.implicit_uses(uses);
 }
 
 } // namespace rocjitsu

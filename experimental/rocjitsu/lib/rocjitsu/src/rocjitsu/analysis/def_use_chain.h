@@ -14,8 +14,6 @@
 
 #include "rocjitsu/isa/register_set.h"
 
-#include <cstdint>
-
 namespace rocjitsu {
 
 class Instruction;
@@ -25,8 +23,7 @@ class InstDefUse {
 public:
   /// @brief Extract explicit operand register refs.
   /// @param inst Decoded instruction whose operands have stable lifetimes.
-  /// @param wf_size Wavefront width in lanes, forwarded to operand register mapping.
-  InstDefUse(const Instruction &inst, uint8_t wf_size);
+  InstDefUse(const Instruction &inst);
 
   RegisterSet defs;                        ///< Registers overwritten by the instruction.
   RegisterSet uses;                        ///< Registers read before the instruction writes defs.

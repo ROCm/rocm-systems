@@ -218,8 +218,7 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
     if (scope.blocks.empty())
       continue;
 
-    LivenessAnalysis liveness(KernelBlockScope(scope.blocks),
-                              kernel_wavefront_size(guest_arch_, scope.info));
+    LivenessAnalysis liveness(KernelBlockScope(scope.blocks));
 
     for (BasicBlock *block : scope.blocks) {
       if (block == nullptr)
