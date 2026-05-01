@@ -227,13 +227,7 @@ class MIGPUSpecs:
             console_warning(f"No gpu model found for gpu arch: {gpu_arch_lower}")
             return None
 
-        if not gpu_model:
-            return None
-
-        # Preserve explicit mixed-case model names from the YAML so they can be
-        # used directly in workload folder names. Legacy lowercase entries keep
-        # the existing uppercased behavior.
-        return gpu_model if gpu_model != gpu_model.lower() else gpu_model.upper()
+        return gpu_model.upper() if gpu_model else None
 
     @classmethod
     def set_default_gpu_settings(
