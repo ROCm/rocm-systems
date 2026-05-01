@@ -154,11 +154,13 @@ bool WDDMDevice::QuerySegmentInfo()
     info.segment_id = i;
 
     if (seg.Aperture) {
-      info.kind = SegmentKind::kAperture;
+      info.kind = SegmentKind::kSystemMemory;
+      device_info_.non_local_heap_size += seg.CommitLimit;
     } else {
-      info.kind = seg.SegmentProperties.SystemMemory
-                      ? SegmentKind::kSystemMemory
-                      : SegmentKind::kLocalMemory;
+
+        info.kind = seg.SegmentProperties.SystemMemory
+                        ? SegmentKind::kSystemMemory
+                        : SegmentKind::kLocalMemory;
     }
 
     segment_infos_.push_back(info);
@@ -239,21 +241,18 @@ hsa_status_t WDDMDevice::VramAvail(uint64_t* available_bytes) {
 
     *available_bytes = LocalHeapSize() - usedVis - usedInv;
   } else {
-    // APU - NonLocal memory
-    if (!FindSegmentId(SegmentKind::kSystemMemory, &segmentId))
-      return HSA_STATUS_ERROR;
-
-    memset(&stats, 0, sizeof(D3DKMT_QUERYSTATISTICS));
-    stats.Type = D3DKMT_QUERYSTATISTICS_SEGMENT;
-    stats.AdapterLuid = adapter_luid_;
-    stats.QuerySegment.SegmentId = segmentId;
-    ret = DXCORE_CALL(D3DKMTQueryStatistics(&stats));
-    if (ret == 0)
-      usedNonLocal = stats.QueryResult.SegmentInformation.BytesResident;
-
+    for (const auto& seg_info : segment_infos_) {
+        // APU - NonLocal memory
+        memset(&stats, 0, sizeof(D3DKMT_QUERYSTATISTICS));
+        stats.Type = D3DKMT_QUERYSTATISTICS_SEGMENT;
+        stats.AdapterLuid = adapter_luid_;
+        stats.QuerySegment.SegmentId = segmentId;
+        ret = DXCORE_CALL(D3DKMTQueryStatistics(&stats));
+        if (ret == 0)
+          usedNonLocal += stats.QueryResult.SegmentInformation.BytesResident;
+    }
     *available_bytes = NonLocalHeapSize() - usedNonLocal;
   }
-
   return HSA_STATUS_SUCCESS;
 }
 

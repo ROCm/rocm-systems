@@ -1218,7 +1218,7 @@ bool Device::populateOCLDeviceConstants() {
     info_.hostUnifiedMemory_ = 1;
   }
 
-  if (settings().enableLocalMemory_ && gpuvm_segment_.handle != 0) {
+  if (settings().enableLocalMemory_ && gpuvm_segment_.handle != 0 && info_.hostUnifiedMemory_ != 1) {
     size_t global_segment_size = 0;
     if (HSA_STATUS_SUCCESS != Hsa::memory_pool_get_info(gpuvm_segment_,
                                                         HSA_AMD_MEMORY_POOL_INFO_SIZE,
@@ -1253,7 +1253,7 @@ bool Device::populateOCLDeviceConstants() {
     assert(alloc_granularity_ > 0);
   } else {
     // We suppose half of physical memory can be used by GPU in APU system
-    info_.globalMemSize_ = amd::Os::hostTotalPhysicalMemory() / 2;
+    info_.globalMemSize_ = amd::Os::hostTotalPhysicalMemory() ; // / 2;
     info_.globalMemSize_ = std::max(info_.globalMemSize_, uint64_t(1 * Gi));
     info_.globalMemSize_ = (static_cast<uint64_t>(std::min(GPU_MAX_HEAP_SIZE, 100u)) *
                             static_cast<uint64_t>(info_.globalMemSize_)) /

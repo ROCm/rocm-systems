@@ -767,10 +767,9 @@ HSAKMT_STATUS topology_sysfs_get_node_props(uint32_t node_id, HsaNodeProperties&
   /*
    * In Native Linux, if the asic is APU, this value will be set to 1,
    * if the asic is dGPU, this value will be set to 0. clr use this info
-   * to set hostUnifiedMemory_, but for now wsl does not support this feature.
-   * Therefore, force vaule to 0 temporarily.
+   * to set hostUnifiedMemory_.
    */
-  props.Integrated = 0;
+  props.Integrated = !device->IsDgpu();
   props.Domain = device->Domain();
   props.UniqueID = device->Uuid();
   props.NumXcc = device->NumXcc();
