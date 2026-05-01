@@ -64,6 +64,23 @@ CodeObjectPatcher::CodeObjectPatcher(const AmdGpuCodeObject &obj)
     text_offset_ = text_secs[0]->sectionOffset();
     text_size_ = text_secs[0]->size();
   }
+
+  if (image_.size() < sizeof(Elf64_Ehdr))
+    return;
+  const auto *ehdr = reinterpret_cast<const Elf64_Ehdr *>(image_.data());
+  const uint64_t shdr_bytes = static_cast<uint64_t>(ehdr->e_shnum) * sizeof(Elf64_Shdr);
+  if (ehdr->e_shoff > image_.size() || image_.size() - ehdr->e_shoff < shdr_bytes)
+    return;
+  const auto *shdr = reinterpret_cast<const Elf64_Shdr *>(image_.data() + ehdr->e_shoff);
+  // Relocation checks need the section index and virtual address for the same
+  // .text section that CodeObjectPatcher mutates by file offset.
+  for (uint16_t i = 0; i < ehdr->e_shnum; ++i) {
+    if (shdr[i].sh_offset == text_offset_ && shdr[i].sh_size == text_size_) {
+      text_vaddr_ = shdr[i].sh_addr;
+      text_section_index_ = i;
+      break;
+    }
+  }
 }
 
 std::span<uint8_t> CodeObjectPatcher::text_bytes() {
@@ -72,6 +89,67 @@ std::span<uint8_t> CodeObjectPatcher::text_bytes() {
 
 std::span<const uint8_t> CodeObjectPatcher::text_bytes() const {
   return {image_.data() + text_offset_, text_size_};
+}
+
+uint64_t CodeObjectPatcher::cave_capacity() const {
+  if (cave_start_ > text_size_)
+    return 0;
+  return text_size_ - cave_start_;
+}
+
+bool CodeObjectPatcher::text_range_has_relocation(uint64_t start, uint64_t end) const {
+  if (start >= end || text_size_ == 0 || text_section_index_ == 0 ||
+      image_.size() < sizeof(Elf64_Ehdr))
+    return false;
+
+  const auto *ehdr = reinterpret_cast<const Elf64_Ehdr *>(image_.data());
+  const uint64_t shdr_bytes = static_cast<uint64_t>(ehdr->e_shnum) * sizeof(Elf64_Shdr);
+  if (ehdr->e_shoff > image_.size() || image_.size() - ehdr->e_shoff < shdr_bytes)
+    return false;
+  const auto *shdr = reinterpret_cast<const Elf64_Shdr *>(image_.data() + ehdr->e_shoff);
+
+  // Real code objects report relocation offsets as virtual addresses; the
+  // synthetic tests use text-relative offsets. Accept both forms.
+  const auto relocation_text_offset = [this](uint64_t r_offset, uint64_t &text_offset) {
+    if (r_offset >= text_vaddr_ && r_offset - text_vaddr_ < text_size_) {
+      text_offset = r_offset - text_vaddr_;
+      return true;
+    }
+    if (r_offset < text_size_) {
+      text_offset = r_offset;
+      return true;
+    }
+    return false;
+  };
+
+  for (int i = 0; i < ehdr->e_shnum; ++i) {
+    if (shdr[i].sh_type != SHT_REL && shdr[i].sh_type != SHT_RELA)
+      continue;
+    if (shdr[i].sh_info != text_section_index_)
+      continue;
+    if (shdr[i].sh_offset > image_.size() || image_.size() - shdr[i].sh_offset < shdr[i].sh_size)
+      continue;
+
+    const uint64_t entsize =
+        shdr[i].sh_entsize != 0
+            ? shdr[i].sh_entsize
+            : (shdr[i].sh_type == SHT_RELA ? sizeof(Elf64_Rela) : sizeof(Elf64_Rel));
+    if (entsize < sizeof(uint64_t))
+      continue;
+
+    const uint64_t nrelocs = shdr[i].sh_size / entsize;
+    for (uint64_t j = 0; j < nrelocs; ++j) {
+      const uint64_t entry_off = shdr[i].sh_offset + j * entsize;
+      uint64_t r_offset = 0;
+      std::memcpy(&r_offset, image_.data() + entry_off, sizeof(r_offset));
+
+      uint64_t rel_text_off = 0;
+      if (relocation_text_offset(r_offset, rel_text_off) && rel_text_off >= start &&
+          rel_text_off < end)
+        return true;
+    }
+  }
+  return false;
 }
 
 void CodeObjectPatcher::overwrite_text(std::span<const uint8_t> new_text) {

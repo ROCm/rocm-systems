@@ -26,6 +26,7 @@
 #include <memory>
 #include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "rocjitsu/code/dbt/encoding_translator.h"
@@ -112,8 +113,9 @@ private:
   /// @param repl    The semantic replacement to apply.
   /// @param text    The translated text buffer (same size as original .text).
   /// @param patcher The code object patcher for cave body accumulation.
-  void apply_semantic(const struct SemanticReplacement &repl, std::vector<uint8_t> &text,
-                      CodeObjectPatcher &patcher);
+  [[nodiscard]] bool apply_semantic(const struct SemanticReplacement &repl,
+                                    std::vector<uint8_t> &text, CodeObjectPatcher &patcher,
+                                    std::string_view context);
 
   /// @brief Translate a single instruction via the encoding translation pipeline.
   ///
@@ -125,9 +127,10 @@ private:
   /// @param offset     Byte offset of the instruction within .text.
   /// @param text       The translated text buffer.
   /// @param leg        Legalization entry for this instruction, or nullptr.
-  void handle_encoding(const Instruction &inst, uint64_t offset, std::vector<uint8_t> &text,
-                       const InstructionLegalization *leg, CodeObjectPatcher &patcher,
-                       std::span<const uint8_t> orig_text);
+  [[nodiscard]] bool handle_encoding(const Instruction &inst, uint64_t offset,
+                                     std::vector<uint8_t> &text, const InstructionLegalization *leg,
+                                     CodeObjectPatcher &patcher,
+                                     std::span<const uint8_t> orig_text);
 
   rj_code_arch_t guest_arch_;                               ///< Source ISA.
   rj_code_arch_t host_arch_;                                ///< Target ISA.

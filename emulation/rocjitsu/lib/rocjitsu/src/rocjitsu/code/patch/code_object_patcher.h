@@ -73,6 +73,12 @@ public:
   /// @brief Get the cave start offset within .text.
   uint64_t cave_start() const { return cave_start_; }
 
+  /// @brief Get the available byte capacity from cave_start() to the end of .text.
+  uint64_t cave_capacity() const;
+
+  /// @brief Return true if an ELF relocation targets any byte in [.text start, end).
+  bool text_range_has_relocation(uint64_t start, uint64_t end) const;
+
   std::span<const uint8_t> cave_body() const { return cave_body_; }
 
   std::vector<uint8_t> emit() const;
@@ -81,6 +87,8 @@ private:
   std::vector<uint8_t> image_;
   uint64_t text_offset_;
   uint64_t text_size_;
+  uint64_t text_vaddr_ = 0;
+  uint16_t text_section_index_ = 0;
   std::vector<uint8_t> cave_body_;
   uint64_t cave_start_ = 0;
 };
