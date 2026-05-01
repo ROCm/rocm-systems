@@ -22,10 +22,10 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-import csv
 import json
 import pytest
 import os
+from rocprofiler_sdk.pytest_utils import read_csv_with_glob, find_single_file
 
 
 def pytest_addoption(parser):
@@ -51,9 +51,10 @@ def get_data(request, field, section_name):
         return get_csv_data(inp_data)
 
 
-def get_json_data(file_path, section_name):
+def get_json_data(file_path_pattern, section_name):
     """Load data from JSON file and extract specific section"""
     try:
+        file_path = find_single_file(file_path_pattern)
         with open(file_path, "r") as inp:
             data = json.load(inp)
 
@@ -207,14 +208,12 @@ def convert_agents_to_csv_format(agents):
     return csv_records
 
 
-def get_csv_data(file_path):
+def get_csv_data(file_path_pattern):
     """Load data from CSV file"""
     try:
-        with open(file_path, "r") as inp:
-            csv_reader = csv.DictReader(inp)
-            return [row for row in csv_reader]
-    except FileNotFoundError as e:
-        print(f"Error loading CSV file {file_path}: {e}")
+        return read_csv_with_glob(file_path_pattern)
+    except AssertionError:
+        print(f"No CSV file found matching pattern: {file_path_pattern}")
         return []
 
 

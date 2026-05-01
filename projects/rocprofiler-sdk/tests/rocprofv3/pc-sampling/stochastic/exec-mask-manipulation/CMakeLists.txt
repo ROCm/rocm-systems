@@ -65,7 +65,7 @@ rocprofiler_add_integration_validate_test(
          --input-json
          ${CMAKE_CURRENT_BINARY_DIR}/pc_sampling_cmd_input/out_*_results.json
          --input-agent-info-csv
-         ${CMAKE_CURRENT_BINARY_DIR}/pc_sampling_cmd_input/out_agent_info.csv
+         ${CMAKE_CURRENT_BINARY_DIR}/pc_sampling_cmd_input/out_*_agent_info.csv
          --all-sampled
          False
     TIMEOUT 60
@@ -102,7 +102,7 @@ rocprofiler_add_integration_validate_test(
          --input-json
          ${CMAKE_CURRENT_BINARY_DIR}/pc_sampling_json_input/out_*_results.json
          --input-agent-info-csv
-         ${CMAKE_CURRENT_BINARY_DIR}/pc_sampling_cmd_input/out_agent_info.csv
+         ${CMAKE_CURRENT_BINARY_DIR}/pc_sampling_cmd_input/out_*_agent_info.csv
          --all-sampled
          False
     TIMEOUT 60
@@ -138,7 +138,7 @@ rocprofiler_add_integration_validate_test(
          --input-json
          ${CMAKE_CURRENT_BINARY_DIR}/pc_sampling_yaml_input/out_*_results.json
          --input-agent-info-csv
-         ${CMAKE_CURRENT_BINARY_DIR}/pc_sampling_cmd_input/out_agent_info.csv
+         ${CMAKE_CURRENT_BINARY_DIR}/pc_sampling_cmd_input/out_*_agent_info.csv
          --all-sampled
     FIXTURES_REQUIRED
         rocprofv3-test-pc-sampling-stochastic-exec-mask-manipulation-input-yaml
