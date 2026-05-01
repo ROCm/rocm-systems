@@ -68,17 +68,17 @@ Panel Config:
           pop: ((100 * SUM(SQ_WAVE_CYCLES_sum) / SUM(SQ_BUSY_CYCLES_avr))
             / (($max_waves_per_cu * $cu_per_gpu)))
         # --- L2 / fabric (EA) ---
-        L2 Cache Hit Rate:
+        GL2 Cache Hit Rate:
           value: SUM(100 * GL2C_HIT_sum) / SUM(GL2C_HIT_sum + GL2C_MISS_sum)
           unit: Percent
           peak: 100
           pop: SUM(100 * GL2C_HIT_sum) / SUM(GL2C_HIT_sum + GL2C_MISS_sum)
-        L2-Fabric Read BW:
+        GL2-Fabric Read BW:
           value: SUM(GL2C_EA_RDREQ_32B_sum * 32 + GL2C_EA_RDREQ_64B_sum * 64 + GL2C_EA_RDREQ_96B_sum * 96 + GL2C_EA_RDREQ_128B_sum * 128) / SUM((End_Timestamp - Start_Timestamp) / 1e9)
           unit: Bytes/s
           peak: None
           pop: None
-        L2-Fabric Write BW:
+        GL2-Fabric Write BW:
           value: SUM((GL2C_MC_WRREQ_sum - GL2C_EA_WRREQ_64B_sum) * 32 + GL2C_EA_WRREQ_64B_sum * 64) / SUM((End_Timestamp - Start_Timestamp) / 1e9)
           unit: Bytes/s
           peak: None

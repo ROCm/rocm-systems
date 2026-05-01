@@ -5,17 +5,17 @@
       "files": {
         "0000_Top_Stats.yaml": "e20b23bcf3d5d5f4d1fb30cb171850f3",
         "0100_System_Info.yaml": "5bee16deca4a0b880af47a002fa7bab9",
-        "0200_System_Speed_Of_Light.yaml": "b73d10622ae38ce491848c26c2903426",
-        "0300_Memory_Chart.yaml": "345a8ea481764d09141fa1df4e474fa3",
-        "0400_roofline.yaml": "b8feca8025bf776c50611ed5dd1444ee",
-        "0500_CPC.yaml": "e3a13f36038d5b1e54e949a84bf5b32b",
-        "0600_SPI.yaml": "8e31d5271decd961a527dbcb04f0cfb6",
-        "0700_WGP.yaml": "cffa1f4d848ac21aec5b6a0c7b9cd5e9",
-        "0800_TCP_Cache.yaml": "8de71924b4f7aa253f8058df38f608b5",
-        "1100_GL1C.yaml": "47553b9b448d89c117cdd9cb83ee8659",
-        "1300_GL2C.yaml": "d9cfe52536a130ae980f71f374b51a33",
-        "1500_GCEA.yaml": "23eb831d9e920b112aefaa1e2c3c92f0",
-        "1700_GRBM.yaml": "90cba8a29cd78d128c68bcd1e5d66534"
+        "0200_System_Speed_Of_Light.yaml": "1227435beaea22031b76a414f443e6b2",
+        "0300_Memory_Chart.yaml": "206284ac838f1632ea86d732657ae256",
+        "0400_Roofline.yaml": "305e6943d230dd698f45c544ce5ba289",
+        "0500_CPC.yaml": "b985e9fdf6039ae083d527932e56cbcd",
+        "0600_SPI.yaml": "6360b04cb227b208769388dc0d8b5c0e",
+        "0700_WGP.yaml": "0eb42b7b12b2327a3ca44f875e31ca60",
+        "0900_GL0.yaml": "73f1d8e5376c33040813ead10bd39eb4",
+        "1100_GL1.yaml": "fe035be2b12a440a721ebad268ac802b",
+        "1300_GL2.yaml": "c2afe61a5c008156e56ac200ed8ab632",
+        "1400_GCEA.yaml": "6b351d64c6cd3df4f02425375e24ad90",
+        "1700_GRBM.yaml": "9302e64542e6b3c15f7b9380d1474bd5"
       }
     },
     "gfx908": {
