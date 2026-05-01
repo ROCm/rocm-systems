@@ -1755,6 +1755,8 @@ ncclResult_t ncclLaunchPrepare(struct ncclComm* comm) {
         plan->ceCollArgs->func = task->func;
         plan->ceCollArgs->sendWin = task->sendWin;
         plan->ceCollArgs->recvWin = task->recvWin;
+        plan->ceCollArgs->datatype = task->datatype;
+        plan->ceCollArgs->redOp = task->opHost;
 
         ncclIntruQueueEnqueue(&planner->planQueue, plan);
         ncclIntruQueueDequeue(&planner->collCeTaskQueue);
@@ -3044,14 +3046,9 @@ static ncclResult_t ceCollTaskAppend(
     struct ncclDevRedOpFull opDev) {
   struct ncclKernelPlanner *planner = &comm->planner;
 
-  // Check if CE needs initialization
-  if (comm->ceColl.baseUCSymReadyPtr == NULL && ncclIntruQueueEmpty(&comm->ceInitTaskQueue)) {
-    struct ncclCeInitTask* ceTask;
-    NCCLCHECK(ncclCalloc(&ceTask, 1));
-    ceTask->comm = comm;
-    ncclIntruQueueEnqueue(&comm->ceInitTaskQueue, ceTask);
-    ncclGroupCommJoin(comm, ncclGroupTaskTypeSymRegister);
-  }
+  // CE init is triggered in taskAppend() before this function is called,
+  // covering all CE-capable collectives including AllReduce (when user buffers
+  // are symmetrically registered via ncclMemAlloc / -R 2).
 
   // Must be in thread local group before tasks can be alloc'd in `comm->memScoped`.
   ncclGroupCommJoin(info->comm, ncclGroupTaskTypeCollective);
@@ -3118,8 +3115,41 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
       ncclDevrFindWindow(comm, info->recvbuff, &recvWin);
       bool ceImplemented = ncclCeImplemented(info->coll, info->op, info->datatype);
 
-      // Append CE collective task if CE is supported and requested by user
-      if (comm->symmetricSupport && comm->nNodes == 1 && sendWin && recvWin && (sendWin->winFlags & recvWin->winFlags & NCCL_WIN_COLL_SYMMETRIC) && comm->config.CTAPolicy == NCCL_CTA_POLICY_ZERO && ceImplemented) {
+      // Trigger CE initialization on the first CE-capable collective.
+      // This covers collectives whose user buffers ARE registered (AllGather,
+      // AlltoAll, Scatter, Gather) as well as AllReduce, which bypasses the
+      // ceCollTaskAppend path because user buffers are not symmetrically
+      // registered.  Without this trigger, CE AllReduce-only workloads would
+      // never initialize the CE runtime.
+      if (ceImplemented && comm->symmetricSupport && comm->nNodes == 1 &&
+          comm->config.CTAPolicy == NCCL_CTA_POLICY_ZERO &&
+          comm->ceColl.baseUCSymReadyPtr == NULL &&
+          ncclIntruQueueEmpty(&comm->ceInitTaskQueue)) {
+        struct ncclCeInitTask* ceTask;
+        NCCLCHECK(ncclCalloc(&ceTask, 1));
+        ceTask->comm = comm;
+        ncclIntruQueueEnqueue(&comm->ceInitTaskQueue, ceTask);
+        ncclGroupCommJoin(comm, ncclGroupTaskTypeSymRegister);
+      }
+
+      // Append CE collective task if CE is supported and user buffers are
+      // symmetrically registered.  AllReduce is handled here too: it goes
+      // through ceCollTaskAppend -> ncclLaunchCeColl -> ncclCeAllReduce so that
+      // it stays in the CE task queue and never reaches ncclMakeSymmetricTaskList.
+      // Size gate for CE AllReduce: the staging buffer ceARTmpBuf is sized
+      // for at most NCCL_CE_AR_MAX_MSG_BYTES total bytes, larger messages
+      // would overflow the registered window.  When over the cap we fall
+      // through to the kernel based path (standard NCCL ring/tree).
+      bool ceAllReduceFits = true;
+      if (info->coll == ncclFuncAllReduce) {
+        size_t totalBytes = info->count * ncclTypeSize(info->datatype);
+        if (totalBytes > (size_t)NCCL_CE_AR_MAX_MSG_BYTES) {
+          ceAllReduceFits = false;
+          INFO(NCCL_COLL, "CE AllReduce: msg %zu B > cap %zu B, falling back to standard NCCL AllReduce",
+               totalBytes, (size_t)NCCL_CE_AR_MAX_MSG_BYTES);
+        }
+      }
+      if (comm->symmetricSupport && comm->nNodes == 1 && sendWin && recvWin && (sendWin->winFlags & recvWin->winFlags & NCCL_WIN_COLL_SYMMETRIC) && comm->config.CTAPolicy == NCCL_CTA_POLICY_ZERO && ceImplemented && ceAllReduceFits) {
         NCCLCHECK(ceCollTaskAppend(comm, info, sendWin, recvWin, opDev));
       }
       // Append kernel-based collective
