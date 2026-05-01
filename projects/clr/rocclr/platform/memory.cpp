@@ -248,7 +248,11 @@ bool Memory::allocHostMemory(void* initFrom, bool allocHostMem, bool forceCopy) 
 
   if (allocHostMem && type_ == amd::MemObjectType::Pipe) {
     // Initialize the pipe for a CPU device
+<<<<<<< HEAD
     amd::PipeLayout* pipe = reinterpret_cast<amd::PipeLayout*>(getHostMem());
+=======
+    amd::PipeObject* pipe = reinterpret_cast<amd::PipeObject*>(getHostMem());
+>>>>>>> f7ae81672c (rocclr/pal: replace remaining raw CL types with typed enums in PAL layer)
     pipe->read_idx = 0;
     pipe->write_idx = 0;
     pipe->end_idx = asPipe()->getMaxNumPackets();

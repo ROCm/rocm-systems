@@ -1105,7 +1105,7 @@ void* Image::allocMapTarget(const amd::Coord3D& origin, const amd::Coord3D& regi
         //! @note Allocate a 1D buffer, since CAL issues with 3D
         //! Also HW doesn't support untiled images
         memory = new (dev().context())
-            amd::Buffer(dev().context(), 0, desc().width_ * height * depth * elementSize());
+            amd::Buffer(dev().context(), amd::MemFlags::Empty, desc().width_ * height * depth * elementSize());
         memory->setVirtualDevice(owner()->getVirtualDevice());
 
         do {

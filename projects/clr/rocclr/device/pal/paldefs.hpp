@@ -7,6 +7,8 @@
 #pragma once
 
 #include "top.hpp"
+#include <CL/cl.h>
+#include <CL/cl_ext.h>
 #include "pal.h"
 #include "palGpuMemory.h"
 #include "palImage.h"

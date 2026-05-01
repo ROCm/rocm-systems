@@ -50,6 +50,10 @@ inline FpConfig operator&(FpConfig a, FpConfig b) {
 inline FpConfig operator~(FpConfig a) {
   return static_cast<FpConfig>(~static_cast<uint64_t>(a));
 }
+inline FpConfig& operator|=(FpConfig& a, FpConfig b) {
+  a = a | b;
+  return a;
+}
 inline bool operator!(FpConfig a) {
   return static_cast<uint64_t>(a) == 0;
 }
@@ -98,6 +102,10 @@ inline SvmCapabilities operator&(SvmCapabilities a, SvmCapabilities b) {
 }
 inline SvmCapabilities operator~(SvmCapabilities a) {
   return static_cast<SvmCapabilities>(~static_cast<uint64_t>(a));
+}
+inline SvmCapabilities& operator|=(SvmCapabilities& a, SvmCapabilities b) {
+  a = a | b;
+  return a;
 }
 inline bool operator!(SvmCapabilities a) {
   return static_cast<uint64_t>(a) == 0;
@@ -437,6 +445,7 @@ enum class KernelArgAccessQualifier : uint32_t {
   WriteOnly = 0x11A1, // CL_KERNEL_ARG_ACCESS_WRITE_ONLY
   ReadWrite = 0x11A2, // CL_KERNEL_ARG_ACCESS_READ_WRITE
   NoAccess  = 0x11A3, // CL_KERNEL_ARG_ACCESS_NONE (avoid X11 "None" macro collision)
+  MaxSize   = 0x11A4, // sentinel for FindValue<V> not-found return
 };
 
 // Replaces cl_kernel_arg_type_qualifier (cl_bitfield = uint64_t)
@@ -542,11 +551,22 @@ enum class AddressingMode : uint32_t {
   MirroredRepeat = 0x1134, // CL_ADDRESS_MIRRORED_REPEAT
 };
 
+<<<<<<< HEAD
 // Pipe memory layout. Equivalent to clk_pipe_t in opencl/amdocl/cl_kernel.h.
 struct PipeLayout {
   size_t read_idx;
   size_t write_idx;
   size_t end_idx;
+=======
+// Pipe object layout for CL 2.0 pipe built-in.
+// Mirrors clk_pipe_t from opencl/amdocl/cl_kernel.h.
+struct PipeObject {
+  size_t read_idx;
+  size_t write_idx;
+  size_t end_idx;
+  char padding[128 - 3 * sizeof(size_t)];
+  // packets[] follow in device memory
+>>>>>>> f7ae81672c (rocclr/pal: replace remaining raw CL types with typed enums in PAL layer)
 };
 
 // Bus address pair for the cl_amd_bus_addressable_memory extension.

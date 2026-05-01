@@ -163,14 +163,23 @@ void KernelParameters::set(size_t index, size_t size, const void* value, bool sv
       memoryObjects_[desc.info_.arrayIndex_] = nullptr;
     } else {
       desc.info_.rawPointer_ = false;
+<<<<<<< HEAD
       // convert cl_mem to amd::Memory*
       memoryObjects_[desc.info_.arrayIndex_] = reinterpret_cast<amd::Memory*>(*static_cast<const cl_mem*>(value));
     }
   } else if (desc.type_ == amd::KernelArgValueType::Sampler) {
     // convert cl_sampler to amd::Sampler*
     samplerObjects_[desc.info_.arrayIndex_] = reinterpret_cast<amd::Sampler*>(*static_cast<const cl_sampler*>(value));
+=======
+      // Phase1: cl_mem IS amd::Memory* (same pointer, no ICD dispatch)
+      memoryObjects_[desc.info_.arrayIndex_] =
+          reinterpret_cast<amd::Memory*>(*static_cast<const cl_mem*>(value));
+    }
+  } else if (desc.type_ == amd::KernelArgValueType::Sampler) {
+    samplerObjects_[desc.info_.arrayIndex_] =
+        reinterpret_cast<amd::Sampler*>(*static_cast<const cl_sampler*>(value));
+>>>>>>> f7ae81672c (rocclr/pal: replace remaining raw CL types with typed enums in PAL layer)
   } else if (desc.type_ == amd::KernelArgValueType::Queue) {
-    // convert cl_command_queue to amd::DeviceQueue*
     queueObjects_[desc.info_.arrayIndex_] =
         reinterpret_cast<amd::CommandQueue*>(*static_cast<const cl_command_queue*>(value))->asDeviceQueue();
   } else {

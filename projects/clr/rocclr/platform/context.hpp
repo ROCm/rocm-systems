@@ -79,7 +79,11 @@ class Context : public RuntimeObject {
  protected:
   bool terminate() {
     if (Agent::shouldPostContextEvents()) {
+<<<<<<< HEAD
       Agent::postContextFree(this);
+=======
+      Agent::postContextFree(static_cast<void*>(this));
+>>>>>>> f7ae81672c (rocclr/pal: replace remaining raw CL types with typed enums in PAL layer)
     }
     return true;
   }

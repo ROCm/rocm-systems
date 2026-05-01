@@ -43,6 +43,11 @@ typedef struct {
 
 const DXGI_SAMPLE_DESC dxgiSampleDescDefault = {1, 0};
 
+static inline amd::ImageFormat toImageFormat(cl_image_format f) {
+  return amd::ImageFormat{static_cast<amd::ChannelOrder>(f.image_channel_order),
+                          static_cast<amd::ChannelDataType>(f.image_channel_data_type)};
+}
+
 //! Class D3D10Object keeps all the info about the D3D10 object
 //! from which the CL object is created
 class D3D10Object : public InteropObject {
@@ -154,7 +159,7 @@ class BufferD3D10 : public D3D10Object, public Buffer {
  public:
   //! BufferD3D10 constructor just calls constructors of base classes
   //! to pass down the parameters
-  BufferD3D10(Context& amdContext, cl_mem_flags clFlags,
+  BufferD3D10(Context& amdContext, amd::MemFlags clFlags,
               D3D10Object& d3d10obj)
       :  // Call base classes constructors
         D3D10Object(d3d10obj),
@@ -176,12 +181,12 @@ class Image1DD3D10 : public D3D10Object, public Image {
  public:
   //! Image1DD3D10 constructor just calls constructors of base classes
   //! to pass down the parameters
-  Image1DD3D10(Context& amdContext, cl_mem_flags clFlags,
+  Image1DD3D10(Context& amdContext, amd::MemFlags clFlags,
                D3D10Object& d3d10obj)
       :  // Call base classes constructors
         D3D10Object(d3d10obj),
-        Image(amdContext, CL_MEM_OBJECT_IMAGE1D, clFlags,
-              getCLFormatFromDXGI(d3d10obj.getDxgiFormat()),  // format,
+        Image(amdContext, amd::MemObjectType::Image1D, clFlags,
+              toImageFormat(getCLFormatFromDXGI(d3d10obj.getDxgiFormat())),  // format,
               d3d10obj.getWidth(), 1, 1,
               d3d10obj.getWidth() * d3d10obj.getElementBytes(),  // rowPitch),
               0) {
@@ -202,12 +207,12 @@ class Image2DD3D10 : public D3D10Object, public Image {
  public:
   //! Image2DD3D10 constructor just calls constructors of base classes
   //! to pass down the parameters
-  Image2DD3D10(Context& amdContext, cl_mem_flags clFlags,
+  Image2DD3D10(Context& amdContext, amd::MemFlags clFlags,
                D3D10Object& d3d10obj)
       :  // Call base classes constructors
         D3D10Object(d3d10obj),
-        Image(amdContext, CL_MEM_OBJECT_IMAGE2D, clFlags,
-              getCLFormatFromDXGI(d3d10obj.getDxgiFormat()),  // format,
+        Image(amdContext, amd::MemObjectType::Image2D, clFlags,
+              toImageFormat(getCLFormatFromDXGI(d3d10obj.getDxgiFormat())),  // format,
               d3d10obj.getWidth(), d3d10obj.getHeight(), 1,
               d3d10obj.getWidth() * d3d10obj.getElementBytes(),  // rowPitch),
               0) {
@@ -228,12 +233,12 @@ class Image3DD3D10 : public D3D10Object, public Image {
  public:
   //! Image2DD3D10 constructor just calls constructors of base classes
   //! to pass down the parameters
-  Image3DD3D10(Context& amdContext, cl_mem_flags clFlags,
+  Image3DD3D10(Context& amdContext, amd::MemFlags clFlags,
                D3D10Object& d3d10obj)
       :  // Call base classes constructors
         D3D10Object(d3d10obj),
-        Image(amdContext, CL_MEM_OBJECT_IMAGE3D, clFlags,
-              getCLFormatFromDXGI(d3d10obj.getDxgiFormat()),  // format,
+        Image(amdContext, amd::MemObjectType::Image3D, clFlags,
+              toImageFormat(getCLFormatFromDXGI(d3d10obj.getDxgiFormat())),  // format,
               d3d10obj.getWidth(), d3d10obj.getHeight(), d3d10obj.getDepth(),
               d3d10obj.getWidth() * d3d10obj.getElementBytes(),  // rowPitch),
               d3d10obj.getWidth() * d3d10obj.getHeight() * d3d10obj.getElementBytes()) {

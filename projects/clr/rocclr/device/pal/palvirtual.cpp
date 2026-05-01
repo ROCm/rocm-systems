@@ -1662,7 +1662,7 @@ void VirtualGPU::submitMapMemory(amd::MapMemoryCommand& vcmd) {
   pal::Memory* memory = dev().getGpuMemory(&vcmd.memory());
 
   // Save map info for unmap operation
-  memory->saveMapInfo(vcmd.mapPtr(), vcmd.origin(), vcmd.size(), vcmd.mapFlags(),
+  memory->saveMapInfo(vcmd.mapPtr(), vcmd.origin(), vcmd.size(), static_cast<uint>(vcmd.mapFlags()),
                       vcmd.isEntireMemory());
 
   // If we have host memory, use it
@@ -1902,7 +1902,11 @@ void VirtualGPU::submitFillMemory(amd::FillMemoryCommand& cmd) {
 
     bool force_blit = false;
     if (amd::IS_HIP) {
+<<<<<<< HEAD
       constexpr amd::MemFlags kManagedAlloc = (amd::MemFlags::SvmFineGrain | amd::MemFlags::AllocHostPtr);
+=======
+      const amd::MemFlags kManagedAlloc = amd::MemFlags::SvmFineGrain | amd::MemFlags::AllocHostPtr;
+>>>>>>> f7ae81672c (rocclr/pal: replace remaining raw CL types with typed enums in PAL layer)
       // In case of HMM, use blit kernel instead of CPU memcpy
       if ((cmd.memory().getMemFlags() & kManagedAlloc) == kManagedAlloc) {
         force_blit = true;
@@ -2263,7 +2267,11 @@ void VirtualGPU::submitSvmFreeMemory(amd::SvmFreeMemoryCommand& vcmd) {
       dev().svmFree(svmPointers[i]);
     }
   } else {
+<<<<<<< HEAD
     vcmd.pfnFreeFunc()(reinterpret_cast<cl_command_queue>(vcmd.queue()->asCommandQueue()), svmPointers.size(),
+=======
+    vcmd.pfnFreeFunc()(static_cast<void*>(vcmd.queue()->asCommandQueue()), svmPointers.size(),
+>>>>>>> f7ae81672c (rocclr/pal: replace remaining raw CL types with typed enums in PAL layer)
                        static_cast<void**>(&(svmPointers[0])), vcmd.userData());
   }
   profilingEnd(vcmd);
@@ -2963,8 +2971,10 @@ void VirtualGPU::submitPerfCounter(amd::PerfCounterCommand& vcmd) {
     if (nullptr == counter) {
       amd::PerfCounter::Properties prop = amdCounter->properties();
       PerfCounter* gpuCounter = new PerfCounter(
-          gpuDevice_, palRef, prop[CL_PERFCOUNTER_GPU_BLOCK_INDEX],
-          prop[CL_PERFCOUNTER_GPU_COUNTER_INDEX], prop[CL_PERFCOUNTER_GPU_EVENT_INDEX]);
+          gpuDevice_, palRef,
+          prop[static_cast<uint64_t>(amd::PerfCounterInfo::GpuBlockIndex)],
+          prop[static_cast<uint64_t>(amd::PerfCounterInfo::GpuCounterIndex)],
+          prop[static_cast<uint64_t>(amd::PerfCounterInfo::GpuEventIndex)]);
       if (nullptr == gpuCounter) {
         LogError("We failed to allocate memory for the GPU perfcounter");
         vcmd.setStatus(amd::Status::InvalidOperation);
@@ -3026,7 +3036,7 @@ void VirtualGPU::submitThreadTraceMemObjects(amd::ThreadTraceMemObjectsCommand& 
   profilingBegin(cmd);
 
   switch (cmd.type()) {
-    case static_cast<amd::CommandType>(CL_COMMAND_THREAD_TRACE_MEM): {
+    case static_cast<amd::CommandType>(0x4500): {  // CL_COMMAND_THREAD_TRACE_MEM
       amd::ThreadTrace* amdThreadTrace = &cmd.getThreadTrace();
       ThreadTrace* threadTrace = static_cast<ThreadTrace*>(amdThreadTrace->getDeviceThreadTrace());
 
@@ -3077,7 +3087,7 @@ void VirtualGPU::submitThreadTrace(amd::ThreadTraceCommand& cmd) {
   profilingBegin(cmd);
 
   switch (cmd.type()) {
-    case static_cast<amd::CommandType>(CL_COMMAND_THREAD_TRACE): {
+    case static_cast<amd::CommandType>(0x4501): {  // CL_COMMAND_THREAD_TRACE
       amd::ThreadTrace* amdThreadTrace = static_cast<amd::ThreadTrace*>(&cmd.getThreadTrace());
       ThreadTrace* threadTrace = static_cast<ThreadTrace*>(amdThreadTrace->getDeviceThreadTrace());
 
@@ -3671,7 +3681,11 @@ bool VirtualGPU::processMemObjectsHSA(const amd::Kernel& kernel, const_address p
 
           // Mark signal write for cache coherency,
           // since this object isn't a part of kernel arg setup
+<<<<<<< HEAD
           if ((memory->getMemFlags() & amd::MemFlags::ReadOnly) == 0) {
+=======
+          if ((memory->getMemFlags() & amd::MemFlags::ReadOnly) == amd::MemFlags::Empty) {
+>>>>>>> f7ae81672c (rocclr/pal: replace remaining raw CL types with typed enums in PAL layer)
             memory->signalWrite(&dev());
           }
           addVmMemory(gpuMemory);
@@ -3766,7 +3780,11 @@ bool VirtualGPU::processMemObjectsHSA(const amd::Kernel& kernel, const_address p
           //! Conformance can send read only subbuffer, but update the region
           //! in the kernel.
           if ((mem != nullptr) && ((!info.readOnly_ && (mem->getSvmPtr() == nullptr)) ||
+<<<<<<< HEAD
                                    ((mem->getMemFlags() & amd::MemFlags::ReadOnly) == 0))) {
+=======
+                                   ((mem->getMemFlags() & amd::MemFlags::ReadOnly) == amd::MemFlags::Empty))) {
+>>>>>>> f7ae81672c (rocclr/pal: replace remaining raw CL types with typed enums in PAL layer)
             mem->signalWrite(&dev());
           }
           if (info.oclObject_ == amd::KernelParameterDescriptor::ImageObject) {

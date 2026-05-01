@@ -506,7 +506,9 @@ bool Resource::CreateImage(CreateParams* params, bool forceLinear) {
   Pal::SubresId ImgSubresId = {0, 0, 0};
   Pal::SubresRange ImgSubresRange = {ImgSubresId, 1, 1, 1};
   Pal::ChannelMapping channels;
-  Pal::ChNumFormat format = dev().getPalFormat(desc().format_, &channels);
+  Pal::ChNumFormat format = dev().getPalFormat(amd::Image::Format(amd::ImageFormat{
+      static_cast<amd::ChannelOrder>(desc().format_.image_channel_order),
+      static_cast<amd::ChannelDataType>(desc().format_.image_channel_data_type)}), &channels);
 
   if (desc().topology_ == amd::MemObjectType::Image1DBuffer) {
     if (memoryType() == ImageBuffer) {
@@ -742,7 +744,9 @@ bool Resource::CreateInterop(CreateParams* params) {
   Pal::SubresId ImgSubresId = {0, 0, 0};
   Pal::SubresRange ImgSubresRange = {ImgSubresId, 1, 1, 1};
   Pal::ChannelMapping channels;
-  Pal::ChNumFormat format = dev().getPalFormat(desc().format_, &channels);
+  Pal::ChNumFormat format = dev().getPalFormat(amd::Image::Format(amd::ImageFormat{
+      static_cast<amd::ChannelOrder>(desc().format_.image_channel_order),
+      static_cast<amd::ChannelDataType>(desc().format_.image_channel_data_type)}), &channels);
   Pal::ExternalGpuMemoryOpenInfo gpuMemOpenInfo = {};
   Pal::ExternalResourceOpenInfo& openInfo = gpuMemOpenInfo.resourceInfo;
   uint misc = 0;
@@ -786,7 +790,9 @@ bool Resource::CreateInterop(CreateParams* params) {
     }
     desc_.isDoppTexture_ = (openInfo.doppDesktopInfo.gpuVirtAddr != 0);
     openInfo.flags.isDopp = desc_.isDoppTexture_;
-    format = dev().getPalFormat(desc().format_, &channels);
+    format = dev().getPalFormat(amd::Image::Format(amd::ImageFormat{
+        static_cast<amd::ChannelOrder>(desc().format_.image_channel_order),
+        static_cast<amd::ChannelDataType>(desc().format_.image_channel_data_type)}), &channels);
   } else if (memoryType() == VkInterop) {
     VkInteropParams* vparams = reinterpret_cast<VkInteropParams*>(params);
     if (vparams->handle_) {
@@ -1208,7 +1214,9 @@ bool Resource::create(MemoryType memType, CreateParams* params, bool forceLinear
   uint viewLevel = 0;
   uint viewFlags = 0;
   Pal::ChannelMapping channels;
-  Pal::ChNumFormat format = dev().getPalFormat(desc().format_, &channels);
+  Pal::ChNumFormat format = dev().getPalFormat(amd::Image::Format(amd::ImageFormat{
+      static_cast<amd::ChannelOrder>(desc().format_.image_channel_order),
+      static_cast<amd::ChannelDataType>(desc().format_.image_channel_data_type)}), &channels);
   // Set the initial offset value for any resource to 0.
   // Note: Runtime can call create() more than once, if the initial memory type failed
   offset_ = 0;
@@ -1299,7 +1307,11 @@ bool Resource::create(MemoryType memType, CreateParams* params, bool forceLinear
       desc_.SVMRes_ = true;
       desc_.reserved_va_ = (svmPtr == 1) ? false : true;
       svmPtr = (svmPtr == 1) ? 0 : svmPtr;
+<<<<<<< HEAD
       if (params->owner_->getMemFlags() & amd::MemFlags::SvmAtomics) {
+=======
+      if ((params->owner_->getMemFlags() & amd::MemFlags::SvmAtomics) != amd::MemFlags::Empty) {
+>>>>>>> f7ae81672c (rocclr/pal: replace remaining raw CL types with typed enums in PAL layer)
         desc_.gl2CacheDisabled_ = true;
       }
     }
@@ -1529,7 +1541,7 @@ bool Resource::partialMemCopyTo(VirtualGPU& gpu, const amd::Coord3D& srcOrigin,
   gpu.queue(gpu.engineID_).addCmdMemRef(dstResource.memRef());
   if (desc().buffer_ && !dstResource.desc().buffer_) {
     uint32_t arraySliceIdx = img2Darray ? dstOrigin[2] : img1Darray ? dstOrigin[1] : 0;
-    Pal::SubresId ImgSubresId = {0, dstResource.desc().baseLevel_, arraySliceIdx};
+    Pal::SubresId ImgSubresId = {0, static_cast<uint8_t>(dstResource.desc().baseLevel_), static_cast<uint16_t>(arraySliceIdx)};
     Pal::MemoryImageCopyRegion copyRegion = {};
     copyRegion.imageSubres = ImgSubresId;
     copyRegion.imageOffset.x = dstOrigin[0];
@@ -1559,7 +1571,7 @@ bool Resource::partialMemCopyTo(VirtualGPU& gpu, const amd::Coord3D& srcOrigin,
   } else if (!desc().buffer_ && dstResource.desc().buffer_) {
     Pal::MemoryImageCopyRegion copyRegion = {};
     uint32_t arraySliceIdx = img2Darray ? srcOrigin[2] : img1Darray ? srcOrigin[1] : 0;
-    Pal::SubresId ImgSubresId = {0, desc().baseLevel_, arraySliceIdx};
+    Pal::SubresId ImgSubresId = {0, static_cast<uint8_t>(desc().baseLevel_), static_cast<uint16_t>(arraySliceIdx)};
     copyRegion.imageSubres = ImgSubresId;
     copyRegion.imageOffset.x = srcOrigin[0];
     copyRegion.imageOffset.y = img1Darray ? 0 : srcOrigin[1];

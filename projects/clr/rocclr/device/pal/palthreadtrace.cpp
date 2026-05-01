@@ -146,7 +146,7 @@ void ThreadTrace::populateUserMemory() {
 
 bool ThreadTrace::info(uint infoType, uint* info, uint infoSize) const {
   switch (infoType) {
-    case CL_THREAD_TRACE_BUFFERS_SIZE: {
+    case 2: {  // CL_THREAD_TRACE_BUFFERS_SIZE
       if (infoSize < numSe_) {
         LogError("The amount of buffers should be equal to the amount of Shader Engines");
         return false;

@@ -158,7 +158,7 @@ class BufferD3D11 : public D3D11Object, public Buffer {
  public:
   //! BufferD3D11 constructor just calls constructors of base classes
   //! to pass down the parameters
-  BufferD3D11(Context& amdContext, cl_mem_flags clFlags,
+  BufferD3D11(Context& amdContext, amd::MemFlags clFlags,
               D3D11Object& d3d11obj)
       :  // Call base classes constructors
         D3D11Object(d3d11obj),
@@ -180,12 +180,12 @@ class Image1DD3D11 : public D3D11Object, public Image {
  public:
   //! Image1DD3D11 constructor just calls constructors of base classes
   //! to pass down the parameters
-  Image1DD3D11(Context& amdContext, cl_mem_flags clFlags,
+  Image1DD3D11(Context& amdContext, amd::MemFlags clFlags,
                D3D11Object& d3d11obj)
       :  // Call base classes constructors
         D3D11Object(d3d11obj),
-        Image(amdContext, CL_MEM_OBJECT_IMAGE1D, clFlags,
-              getCLFormatFromDXGI(d3d11obj.getDxgiFormat(), d3d11obj.getPlane()),  // format,
+        Image(amdContext, amd::MemObjectType::Image1D, clFlags,
+              toImageFormat(getCLFormatFromDXGI(d3d11obj.getDxgiFormat(), d3d11obj.getPlane())),  // format,
               d3d11obj.getWidth(), 1, 1,
               d3d11obj.getWidth() * d3d11obj.getElementBytes(),  // rowPitch),
               0) {
@@ -206,12 +206,12 @@ class Image2DD3D11 : public Image, public D3D11Object {
  public:
   //! Image2DD3D11 constructor just calls constructors of base classes
   //! to pass down the parameters
-  Image2DD3D11(Context& amdContext, cl_mem_flags clFlags,
+  Image2DD3D11(Context& amdContext, amd::MemFlags clFlags,
                D3D11Object& d3d11obj)
       :  // Call base classes constructors
         D3D11Object(d3d11obj),
-        Image(amdContext, CL_MEM_OBJECT_IMAGE2D, clFlags,
-              getCLFormatFromDXGI(d3d11obj.getDxgiFormat(), d3d11obj.getPlane()),  // format,
+        Image(amdContext, amd::MemObjectType::Image2D, clFlags,
+              toImageFormat(getCLFormatFromDXGI(d3d11obj.getDxgiFormat(), d3d11obj.getPlane())),  // format,
               d3d11obj.getWidth(), d3d11obj.getHeight(), 1,
               d3d11obj.getWidth() * d3d11obj.getElementBytes(),  // rowPitch),
               0) {
@@ -232,12 +232,12 @@ class Image3DD3D11 : public D3D11Object, public Image {
  public:
   //! Image2DD3D11 constructor just calls constructors of base classes
   //! to pass down the parameters
-  Image3DD3D11(Context& amdContext, cl_mem_flags clFlags,
+  Image3DD3D11(Context& amdContext, amd::MemFlags clFlags,
                D3D11Object& d3d11obj)
       :  // Call base classes constructors
         D3D11Object(d3d11obj),
-        Image(amdContext, CL_MEM_OBJECT_IMAGE3D, clFlags,
-              getCLFormatFromDXGI(d3d11obj.getDxgiFormat(), d3d11obj.getPlane()),  // format,
+        Image(amdContext, amd::MemObjectType::Image3D, clFlags,
+              toImageFormat(getCLFormatFromDXGI(d3d11obj.getDxgiFormat(), d3d11obj.getPlane())),  // format,
               d3d11obj.getWidth(), d3d11obj.getHeight(), d3d11obj.getDepth(),
               d3d11obj.getWidth() * d3d11obj.getElementBytes(),  // rowPitch),
               d3d11obj.getWidth() * d3d11obj.getHeight() * d3d11obj.getElementBytes()) {

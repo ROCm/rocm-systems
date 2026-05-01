@@ -744,20 +744,20 @@ bool PerfCounter::create() {
 }
 
 uint64_t PerfCounter::getInfo(uint64_t infoType) const {
-  switch (infoType) {
-    case CL_PERFCOUNTER_GPU_BLOCK_INDEX: {
+  switch (static_cast<amd::PerfCounterInfo>(infoType)) {
+    case amd::PerfCounterInfo::GpuBlockIndex: {
       // Return the GPU block index
       return info()->blockIndex_;
     }
-    case CL_PERFCOUNTER_GPU_COUNTER_INDEX: {
+    case amd::PerfCounterInfo::GpuCounterIndex: {
       // Return the GPU counter index
       return info()->counterIndex_;
     }
-    case CL_PERFCOUNTER_GPU_EVENT_INDEX: {
+    case amd::PerfCounterInfo::GpuEventIndex: {
       // Return the GPU event index
       return info()->eventIndex_;
     }
-    case CL_PERFCOUNTER_DATA: {
+    case amd::PerfCounterInfo::Data: {
       return palRef_->result(index_);
     }
     default:

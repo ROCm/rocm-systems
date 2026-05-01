@@ -62,7 +62,7 @@ bool Segment::alloc(pal::Program& prog, amdgpu_hsa_elf_segment_t segment, size_t
   align = amd::alignUp(align, sizeof(uint32_t));
 
   amd::Memory* amd_mem_obj = new (prog.palDevice().context())
-      amd::Buffer(prog.palDevice().context(), 0, amd::alignUp(size, align),
+      amd::Buffer(prog.palDevice().context(), amd::MemFlags::Empty, amd::alignUp(size, align),
                   // HIP requires SVM allocation for segment code due to possible global variable
                   // access and global variables are a part of code segment with the latest loader
                   amd::IS_HIP ? reinterpret_cast<void*>(1) : nullptr);

@@ -170,7 +170,7 @@ bool Export(amd::Memory* mem, GLenum targetType, int miplevel, hsa_handle_t* han
       type = GL_RESOURCE_ATTACH_TEXTURE_AMD;
       break;
     default:
-      LogError("Unknown OpenGL interop type: 0x%x",
+      LogPrintfError("Unknown OpenGL interop type: 0x%x",
                static_cast<uint32_t>(obj->getCLGLObjectType()));
       return false;
   }
@@ -187,7 +187,7 @@ bool Export(amd::Memory* mem, GLenum targetType, int miplevel, hsa_handle_t* han
   if (image_srd_size >= glResourceData.textureSRDSize) {
     std::memcpy(image_srd, glResourceData.textureSRD, glResourceData.textureSRDSize);
   } else {
-    LogError("image_srd_size %u < glResourceData.textureSRDSize %u", image_srd_size,
+    LogPrintfError("image_srd_size %u < glResourceData.textureSRDSize %u", image_srd_size,
              glResourceData.textureSRDSize);
     return false;
   }
@@ -204,22 +204,22 @@ bool Detach(amd::Memory* mem, hsa_handle_t handle) {
 
   GLenum type;
   switch (obj->getCLGLObjectType()) {
-    case CL_GL_OBJECT_BUFFER:
+    case amd::GlObjectType::Buffer:
       type = GL_RESOURCE_ATTACH_VERTEXBUFFER_AMD;
       break;
-    case CL_GL_OBJECT_RENDERBUFFER:
+    case amd::GlObjectType::Renderbuffer:
       type = GL_RESOURCE_ATTACH_RENDERBUFFER_AMD;
       break;
-    case CL_GL_OBJECT_TEXTURE_BUFFER:
-    case CL_GL_OBJECT_TEXTURE1D:
-    case CL_GL_OBJECT_TEXTURE1D_ARRAY:
-    case CL_GL_OBJECT_TEXTURE2D:
-    case CL_GL_OBJECT_TEXTURE2D_ARRAY:
-    case CL_GL_OBJECT_TEXTURE3D:
+    case amd::GlObjectType::TextureBuffer:
+    case amd::GlObjectType::Texture1D:
+    case amd::GlObjectType::Texture1DArray:
+    case amd::GlObjectType::Texture2D:
+    case amd::GlObjectType::Texture2DArray:
+    case amd::GlObjectType::Texture3D:
       type = GL_RESOURCE_ATTACH_TEXTURE_AMD;
       break;
     default:
-      LogError("Unknown OpenGL interop type: 0x%x", obj->getCLGLObjectType());
+      LogPrintfError("Unknown OpenGL interop type: 0x%x", obj->getCLGLObjectType());
       return false;
   }
 

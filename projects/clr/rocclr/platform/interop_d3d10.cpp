@@ -775,7 +775,8 @@ int D3D10Object::initD3D10Object(const Context& amdContext, ID3D10Resource* pRes
   // Check for CL format compatibilty
   if (obj.objDesc_.objDim_ != D3D10_RESOURCE_DIMENSION_BUFFER) {
     cl_image_format clFmt = obj.getCLFormatFromDXGI(obj.objDesc_.dxgiFormat_);
-    amd::Image::Format imageFormat(clFmt);
+    amd::Image::Format imageFormat(amd::ImageFormat{static_cast<amd::ChannelOrder>(clFmt.image_channel_order),
+                                   static_cast<amd::ChannelDataType>(clFmt.image_channel_data_type)});
     if (!imageFormat.isSupported(amdContext)) {
       return CL_INVALID_IMAGE_FORMAT_DESCRIPTOR;
     }

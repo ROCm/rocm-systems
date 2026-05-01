@@ -279,7 +279,8 @@ int D3D9Object::initD3D9Object(const Context& amdContext,
   // Check for CL format compatibilty
   if (obj.objDesc_.resType_ == D3DRTYPE_SURFACE) {
     cl_image_format clFmt = obj.getCLFormatFromD3D9(obj.objDesc_.d3dFormat_, plane);
-    amd::Image::Format imageFormat(clFmt);
+    amd::Image::Format imageFormat(amd::ImageFormat{static_cast<amd::ChannelOrder>(clFmt.image_channel_order),
+                                   static_cast<amd::ChannelDataType>(clFmt.image_channel_data_type)});
     if (!imageFormat.isSupported(amdContext)) {
       return CL_INVALID_IMAGE_FORMAT_DESCRIPTOR;
     }

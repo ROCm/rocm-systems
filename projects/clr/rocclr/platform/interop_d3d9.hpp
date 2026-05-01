@@ -139,11 +139,14 @@ class Image2DD3D9 : public D3D9Object, public Image {
  public:
   //! Image2DD3D9 constructor just calls constructors of base classes
   //! to pass down the parameters
-  Image2DD3D9(Context& amdContext, cl_mem_flags clFlags,
+  Image2DD3D9(Context& amdContext, amd::MemFlags clFlags,
               D3D9Object& d3d9obj)
       :  // Call base classes constructors
         D3D9Object(d3d9obj),
-        Image(amdContext, CL_MEM_OBJECT_IMAGE2D, clFlags, d3d9obj.getCLFormatFromD3D9(),
+        Image(amdContext, amd::MemObjectType::Image2D, clFlags,
+              [&]{ auto f = d3d9obj.getCLFormatFromD3D9();
+                   return amd::ImageFormat{static_cast<amd::ChannelOrder>(f.image_channel_order),
+                                           static_cast<amd::ChannelDataType>(f.image_channel_data_type)}; }(),
               d3d9obj.getWidth(), d3d9obj.getHeight(), 1,
               d3d9obj.getWidth() * d3d9obj.getElementBytes(),  // rowPitch),
               0) {

@@ -82,8 +82,19 @@ template <int N> struct ParamInfo<char[N]> {
 
 }  // namespace detail
 
+<<<<<<< HEAD
 // Forward declaration — defined in platform/agent.cpp
 void* GetPlatformHandle();
+=======
+struct PlatformIDS {
+  const void* dispatch_;  // opaque; set by OpenCL layer via Agent::setIcdDispatch()
+};
+class PlatformID {
+ public:
+  static inline PlatformIDS Platform = {nullptr};
+};
+#define AMD_PLATFORM (reinterpret_cast<cl_platform_id>(&amd::PlatformID::Platform))
+>>>>>>> f7ae81672c (rocclr/pal: replace remaining raw CL types with typed enums in PAL layer)
 
 }  // namespace amd
 

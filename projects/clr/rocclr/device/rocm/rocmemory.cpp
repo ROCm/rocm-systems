@@ -256,7 +256,7 @@ bool Memory::createInteropBuffer(GLenum targetType, int miplevel) {
 
   deviceMemory_ = static_cast<char*>(interop_deviceMemory_) + offset;
   if(!GlInterop::Detach(owner(), resHandle)) {
-    LogError("GlInterop::Detach(handle %p) failed", resHandle);
+    LogPrintfError("GlInterop::Detach(handle %p) failed", resHandle);
   }
   return true;
 #else

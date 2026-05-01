@@ -154,20 +154,20 @@ static amd_comgr_status_t populateArgs(const amd_comgr_metadata_node_t key,
       lcArg->addressQualifier_ = static_cast<amd::KernelArgAddressQualifier>(itAddrSpaceQual);
     } break;
     case ArgField::AccQual: {
-      int32_t itAccQual = amd::Kernel::FindValue(amd::Kernel::kArgAccQual, buf);
-      if (itAccQual == 0) {
+      auto itAccQual = amd::Kernel::FindValue<amd::KernelArgAccessQualifier>(amd::Kernel::kArgAccQual, buf);
+      if (itAccQual == amd::KernelArgAccessQualifier::MaxSize) {
         return AMD_COMGR_STATUS_ERROR;
       }
-      lcArg->accessQualifier_ = static_cast<amd::KernelArgAccessQualifier>(itAccQual);
+      lcArg->accessQualifier_ = itAccQual;
       lcArg->info_.readOnly_ =
           (lcArg->accessQualifier_ == amd::KernelArgAccessQualifier::ReadOnly) ? true : false;
     } break;
     case ArgField::ActualAccQual: {
-      int32_t itAccQual = amd::Kernel::FindValue(amd::Kernel::kArgAccQual, buf);
-      if (itAccQual == 0) {
+      auto itAccQual = amd::Kernel::FindValue<amd::KernelArgAccessQualifier>(amd::Kernel::kArgAccQual, buf);
+      if (itAccQual == amd::KernelArgAccessQualifier::MaxSize) {
         return AMD_COMGR_STATUS_ERROR;
       }
-      // lcArg->mActualAccQual = static_cast<amd::KernelArgAccessQualifier>(itAccQual);
+      // lcArg->mActualAccQual = itAccQual;
     } break;
     case ArgField::IsConst:
       if (buf.compare("true") == 0)
@@ -412,25 +412,24 @@ static amd_comgr_status_t populateArgsV3(const amd_comgr_metadata_node_t key,
       lcArg->addressQualifier_ = static_cast<amd::KernelArgAddressQualifier>(itAddrSpaceQual);
     } break;
     case ArgField::AccQual: {
-      int32_t itAccQual = amd::Kernel::FindValue(amd::Kernel::kArgAccQualV3, buf);
-      if (itAccQual == 0) {
+      auto itAccQual = amd::Kernel::FindValue<amd::KernelArgAccessQualifier>(amd::Kernel::kArgAccQualV3, buf);
+      if (itAccQual == amd::KernelArgAccessQualifier::MaxSize) {
         return AMD_COMGR_STATUS_ERROR;
       }
-      lcArg->accessQualifier_ = static_cast<amd::KernelArgAccessQualifier>(itAccQual);
+      lcArg->accessQualifier_ = itAccQual;
       if (!lcArg->info_.isReadOnlyByCompiler) {
         lcArg->info_.readOnly_ =
             (lcArg->accessQualifier_ == amd::KernelArgAccessQualifier::ReadOnly) ? true : false;
       }
     } break;
     case ArgField::ActualAccQual: {
-      int32_t itAccQual = amd::Kernel::FindValue(amd::Kernel::kArgAccQualV3, buf);
-      if (itAccQual == 0) {
+      auto itAccQual = amd::Kernel::FindValue<amd::KernelArgAccessQualifier>(amd::Kernel::kArgAccQualV3, buf);
+      if (itAccQual == amd::KernelArgAccessQualifier::MaxSize) {
         return AMD_COMGR_STATUS_ERROR;
       }
       lcArg->info_.isReadOnlyByCompiler = true;
       lcArg->info_.readOnly_ =
-          (static_cast<amd::KernelArgAccessQualifier>(itAccQual) ==
-           amd::KernelArgAccessQualifier::ReadOnly) ? true : false;
+          (itAccQual == amd::KernelArgAccessQualifier::ReadOnly) ? true : false;
     } break;
     case ArgField::IsConst:
       if (buf.compare("1") == 0)
