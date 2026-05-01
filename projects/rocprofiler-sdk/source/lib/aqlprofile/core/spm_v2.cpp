@@ -201,7 +201,7 @@ is_agent_supported_for_spm(const AgentInfo* agentInfo)
 std::vector<aqlprofile_spm_parameter_t> default_spm_params = {
     {AQLPROFILE_SPM_PARAMETER_TYPE_BUFFER_SIZE, 1 << 26},      // 64MB
     {AQLPROFILE_SPM_PARAMETER_TYPE_SAMPLE_INTERVAL, 1 << 13},  // 4us
-    {AQLPROFILE_SPM_PARAMETER_TYPE_TIMEOUT, 100},              // 100ms
+    {AQLPROFILE_SPM_PARAMETER_TYPE_TIMEOUT, 0},                // 0ms
     {AQLPROFILE_SPM_PARAMETER_TYPE_SAMPLE_MODE, AQLPROFILE_SPM_PARAMETER_SAMPLE_MODE_SCLK}};
 static_assert(AQLPROFILE_SPM_PARAMETER_TYPE_LAST == 4 && "Dont forget to add default param!");
 
@@ -633,4 +633,37 @@ aqlprofile_spm_is_event_supported(aqlprofile_agent_handle_t agent, aqlprofile_pm
     if(event.block_name >= blocks.size()) return false;
 
     return blocks.at(event.block_name);
+}
+
+PUBLIC_API hsa_status_t
+aqlprofile_spm_query_agent_configurations(aqlprofile_agent_handle_t                    agent,
+                                          aqlprofile_spm_available_configurations_cb_t cb,
+                                          void*                                        userdata)
+{
+    if(!cb) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
+    aql_profile::Pm4Factory* pm4_factory = nullptr;
+    try
+    {
+        pm4_factory = aql_profile::Pm4Factory::Create(agent);
+        if(!pm4_factory) return HSA_STATUS_ERROR_INVALID_AGENT;
+    } catch(...)
+    {
+        return HSA_STATUS_ERROR_INVALID_AGENT;
+    }
+
+    if(!aqlprofile::spm::is_agent_supported_for_spm(aql_profile::GetAgentInfo(agent)))
+        return HSA_STATUS_ERROR_INVALID_AGENT;
+
+    auto configs = std::vector<aqlprofile_spm_available_configuration_t>{};
+
+    auto& interval_config = configs.emplace_back();
+    interval_config.type  = AQLPROFILE_SPM_PARAMETER_TYPE_SAMPLE_INTERVAL;
+    interval_config.interval.min_interval =
+        32;  // Sample interval time in sclks. Minimum is 32 clocks by HW design
+    interval_config.interval.max_interval =
+        (1 << 16) - 32;  // Maximum value by HW design. Must be multiples of 32.
+    interval_config.interval.mode = AQLPROFILE_SPM_PARAMETER_SAMPLE_MODE_SCLK;
+
+    return cb(configs.data(), configs.size(), userdata);
 }
