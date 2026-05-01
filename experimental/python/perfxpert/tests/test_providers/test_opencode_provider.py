@@ -124,6 +124,25 @@ def test_subprocess_output_parsed(monkeypatch):
         assert r.provider == "opencode"
 
 
+def test_system_prompt_paths_redacted_before_subprocess(monkeypatch):
+    monkeypatch.delenv("PERFXPERT_IN_OPENCODE_SESSION", raising=False)
+    from perfxpert.providers.opencode_provider import OpencodeProvider
+
+    with patch(
+        "perfxpert.providers.opencode_provider.subprocess.run",
+        return_value=_fake_completed(stdout="the-answer"),
+    ) as mr:
+        OpencodeProvider(opencode_path="/bin/opencode").complete(
+            [{"role": "user", "content": "hi"}],
+            system="Inspect /home/example/private/fence.md before replying.",
+        )
+
+    prompt = mr.call_args.kwargs["input"]
+    assert "/home/example/private/fence.md" not in prompt
+    assert "[REDACTED]" in prompt
+    assert "[system]" in prompt
+
+
 def test_timeout_mapped(monkeypatch):
     monkeypatch.delenv("PERFXPERT_IN_OPENCODE_SESSION", raising=False)
     import subprocess as sp

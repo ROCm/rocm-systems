@@ -1,7 +1,10 @@
 """Tests for perfxpert.agents.framework — the SDK facade."""
 
 import inspect
+import json
+from dataclasses import dataclass
 from functools import partial
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -14,6 +17,7 @@ from perfxpert.agents.framework import (
     ToolBinding,
     run_agent,
 )
+from perfxpert.agents.schemas import AnalysisInput
 
 # -- AgentSpec / Agent construction ----------------------------------------
 
@@ -356,12 +360,176 @@ def test_sdk_invoke_wires_openai_agents_sdk(monkeypatch):
     assert isinstance(resp, FakeProviderResponse)
     assert resp.structured_output == {"narrative": "hello", "recommendations": []}
     # The SDK receives a sanitized tool name (dots → underscores)
-    assert captured["tools"] == [{"name": "intent_classify", "fn": _noop}]
+    assert captured["tools"][0]["name"] == "intent_classify"
+    assert captured["tools"][0]["fn"].__name__ == "intent_classify"
     # Default max_turns=10 when PERFXPERT_AGENTS_MAX_TURNS unset
     assert captured["max_turns"] == 10
     # Model resolved from _DEFAULT_MODELS["openai"]
     assert captured["model"] == "gpt-4o-mini"
     assert captured["run_config"] == {"kwargs": {}}
+
+
+@pytest.mark.parametrize("provider", ["openai", "anthropic", "private", "ollama"])
+def test_sdk_invoke_redacts_path_fields_before_runner(monkeypatch, provider):
+    from perfxpert.agents import framework
+
+    captured = {}
+
+    class _FakeSdkAgent:
+        def __init__(self, **_kwargs):
+            pass
+
+    class _FakeRunner:
+        @staticmethod
+        def run_sync(*, starting_agent, input, max_turns, run_config):
+            captured["input"] = input
+            return SimpleNamespace(final_output='{"narrative": "ok"}', new_items=[])
+
+    monkeypatch.setattr(framework, "_SDK_AVAILABLE", True)
+    monkeypatch.setattr(framework, "SdkAgent", _FakeSdkAgent)
+    monkeypatch.setattr(framework, "SdkRunner", _FakeRunner)
+    monkeypatch.setattr(framework, "SdkRunConfig", lambda **kwargs: {"kwargs": kwargs})
+    monkeypatch.setattr(framework, "_build_sdk_run_config", lambda _provider: {"kwargs": {}})
+
+    agent = Agent(
+        name="T",
+        layer=1,
+        fence_path=None,
+        input_schema=dict,
+        output_schema=dict,
+        tools=[],
+    )
+    payload = {
+        "user_query": "Analyze this trace",
+        "database_path": "/home/example/private/trace.db",
+        "source_dir": "demo-app/customer-project",
+        "analysis_options": {"att_dir": "att-output"},
+    }
+
+    framework._sdk_invoke(agent, payload, provider=provider)
+
+    provider_input = captured["input"]
+    parsed = json.loads(provider_input)
+    assert parsed == {
+        "user_query": "Analyze this trace",
+        "database_path": "[REDACTED_PATH:database_path]",
+        "source_dir": "[REDACTED_PATH:source_dir]",
+        "analysis_options": {"att_dir": "[REDACTED_PATH:att_dir]"},
+    }
+    assert "/home/example/private/trace.db" not in provider_input
+    assert "demo-app/customer-project" not in provider_input
+    assert "att-output" not in provider_input
+    assert provider_input.count("[REDACTED_PATH:") == 3
+
+
+def test_sdk_invoke_redacts_instructions_before_sdk_agent(monkeypatch, tmp_path):
+    from perfxpert.agents import framework
+
+    captured = {}
+
+    class _FakeSdkAgent:
+        def __init__(self, *, name, instructions, tools, model):
+            captured["instructions"] = instructions
+
+    class _FakeRunner:
+        @staticmethod
+        def run_sync(*, starting_agent, input, max_turns, run_config):
+            return SimpleNamespace(final_output='{"narrative": "ok"}', new_items=[])
+
+    monkeypatch.setattr(framework, "_SDK_AVAILABLE", True)
+    monkeypatch.setattr(framework, "SdkAgent", _FakeSdkAgent)
+    monkeypatch.setattr(framework, "SdkRunner", _FakeRunner)
+    monkeypatch.setattr(framework, "SdkRunConfig", lambda **kwargs: {"kwargs": kwargs})
+    monkeypatch.setattr(framework, "_build_sdk_run_config", lambda _provider: {"kwargs": {}})
+
+    fence = tmp_path / "fence.md"
+    fence.write_text("Inspect /home/example/private/fence.md before responding.\n")
+    agent = Agent(
+        name="T",
+        layer=1,
+        fence_path=str(fence),
+        input_schema=dict,
+        output_schema=dict,
+        tools=[],
+    )
+
+    framework._sdk_invoke(agent, {"user_query": "?"}, provider="openai")
+
+    assert "/home/example/private/fence.md" not in captured["instructions"]
+    assert "[REDACTED]" in captured["instructions"]
+
+
+def test_sdk_serialize_redacts_pathlike_schema_payloads():
+    payload = AnalysisInput(
+        database_path="/home/example/private/trace.db",
+        att_dir="att-output",
+    )
+    rendered = framework._serialize_input(payload)
+
+    parsed = json.loads(rendered)
+    assert parsed["database_path"] == "[REDACTED_PATH]"
+    assert parsed["att_dir"] == "[REDACTED_PATH]"
+    assert "/home/example/private/trace.db" not in rendered
+    assert "att-output" not in rendered
+
+
+def test_sdk_serialize_redacts_pathlike_values_by_key():
+    rendered = framework._serialize_input(
+        {
+            "source_dir": Path("/home/example/private/source"),
+            "analysis_options": {"att_dir": Path("att-output")},
+        }
+    )
+
+    parsed = json.loads(rendered)
+    assert parsed == {
+        "source_dir": "[REDACTED_PATH]",
+        "analysis_options": {"att_dir": "[REDACTED_PATH]"},
+    }
+    assert "/home/example/private/source" not in rendered
+    assert "att-output" not in rendered
+
+
+def test_sdk_serialize_redacts_dataclass_payload_paths():
+    @dataclass(frozen=True)
+    class _Payload:
+        user_query: str
+        database_path: Path
+        source_dir: str
+
+    rendered = framework._serialize_input(
+        _Payload(
+            user_query="Analyze",
+            database_path=Path("/home/example/private/trace.db"),
+            source_dir="demo-app/customer-project",
+        )
+    )
+
+    parsed = json.loads(rendered)
+    assert parsed == {
+        "user_query": "Analyze",
+        "database_path": "[REDACTED_PATH]",
+        "source_dir": "[REDACTED_PATH]",
+    }
+    assert "/home/example/private/trace.db" not in rendered
+    assert "demo-app/customer-project" not in rendered
+
+
+def test_sdk_serialize_redacts_tuple_and_set_path_carriers():
+    rendered = framework._serialize_input(
+        {
+            "include_path": (Path("private/include"),),
+            "metadata": {Path("runs/new.db")},
+        }
+    )
+
+    parsed = json.loads(rendered)
+    assert parsed == {
+        "include_path": ["[REDACTED_PATH]"],
+        "metadata": ["[REDACTED_PATH]"],
+    }
+    assert "private/include" not in rendered
+    assert "runs/new.db" not in rendered
 
 
 def test_translate_tools_accepts_partial_callables(monkeypatch):
@@ -383,6 +551,85 @@ def test_translate_tools_accepts_partial_callables(monkeypatch):
     assert wrapped[0]["name"] == "tasks_create"
     assert wrapped[0]["fn"]("check") == "demo-app:check"
     assert str(inspect.signature(wrapped[0]["fn"])) == "(title)"
+
+
+def test_translate_tools_redacts_sdk_tool_return_paths(monkeypatch):
+    def _fake_function_tool(fn, *, name_override, strict_mode):
+        return {"name": name_override, "fn": fn}
+
+    def _diff_result():
+        return {
+            "baseline_db": "/home/example/private/baseline.db",
+            "new_db": Path("runs/new.db"),
+            "summary": "ok",
+        }
+
+    monkeypatch.setattr(framework, "sdk_function_tool", _fake_function_tool)
+
+    wrapped = framework._translate_tools(
+        [ToolBinding(name="trace_diff.diff_runs", fn=_diff_result)]
+    )
+    result = wrapped[0]["fn"]()
+
+    assert result == {
+        "baseline_db": "[REDACTED_PATH]",
+        "new_db": "[REDACTED_PATH]",
+        "summary": "ok",
+    }
+
+
+def test_translate_tools_redacts_top_level_pathlike_tool_return(monkeypatch):
+    def _fake_function_tool(fn, *, name_override, strict_mode):
+        return {"name": name_override, "fn": fn}
+
+    monkeypatch.setattr(framework, "sdk_function_tool", _fake_function_tool)
+
+    wrapped = framework._translate_tools(
+        [ToolBinding(name="trace_diff.latest_db", fn=lambda: Path("runs/new.db"))]
+    )
+
+    assert wrapped[0]["fn"]() == "[REDACTED_PATH]"
+
+
+def test_translate_tools_redacts_sequence_tool_return_paths(monkeypatch):
+    def _fake_function_tool(fn, *, name_override, strict_mode):
+        return {"name": name_override, "fn": fn}
+
+    monkeypatch.setattr(framework, "sdk_function_tool", _fake_function_tool)
+
+    wrapped = framework._translate_tools(
+        [
+            ToolBinding(
+                name="trace_diff.latest_dbs",
+                fn=lambda: (Path("runs/new.db"), {Path("runs/baseline.db")}),
+            )
+        ]
+    )
+
+    assert wrapped[0]["fn"]() == ["[REDACTED_PATH]", ["[REDACTED_PATH]"]]
+
+
+def test_translate_tools_restores_sdk_path_tokens_before_tool_call(monkeypatch):
+    captured = {}
+
+    def _fake_function_tool(fn, *, name_override, strict_mode):
+        return {"name": name_override, "fn": fn}
+
+    def _hotspots(database_path):
+        captured["database_path"] = database_path
+        return {"status": "ok"}
+
+    monkeypatch.setattr(framework, "sdk_function_tool", _fake_function_tool)
+
+    wrapped = framework._translate_tools(
+        [ToolBinding(name="analysis.hotspots", fn=_hotspots)],
+        token_to_raw_path={"[REDACTED_PATH:database_path]": "/home/example/private/trace.db"},
+    )
+
+    result = wrapped[0]["fn"]("[REDACTED_PATH:database_path]")
+
+    assert captured["database_path"] == "/home/example/private/trace.db"
+    assert result == {"status": "ok"}
 
 
 def test_sdk_invoke_raises_runtime_error_when_sdk_missing(monkeypatch):
@@ -677,11 +924,30 @@ def test_sdk_invoke_opencode_dispatches_to_subprocess_provider(monkeypatch):
         tools=[],
     )
 
-    response = framework._sdk_invoke(agent, {"user_query": "?"}, provider="opencode")
+    response = framework._sdk_invoke(
+        agent,
+        {
+            "user_query": "?",
+            "database_path": "/home/example/private/trace.db",
+            "source_dir": "demo-app/customer-project",
+            "analysis_options": {"att_dir": "att-output"},
+        },
+        provider="opencode",
+    )
 
     assert captured["model"] == "github-copilot/gpt-5"
     assert captured["messages"][0]["role"] == "user"
-    assert "user_query" in captured["messages"][0]["content"]
+    user_content = captured["messages"][0]["content"]
+    parsed = json.loads(user_content)
+    assert parsed == {
+        "user_query": "?",
+        "database_path": "[REDACTED_PATH]",
+        "source_dir": "[REDACTED_PATH]",
+        "analysis_options": {"att_dir": "[REDACTED_PATH]"},
+    }
+    assert "/home/example/private/trace.db" not in user_content
+    assert "demo-app/customer-project" not in user_content
+    assert "att-output" not in user_content
     assert "You are the T agent" in captured["system"]
     assert response.text == '{"narrative": "ok"}'
     assert response.structured_output == {"narrative": "ok"}

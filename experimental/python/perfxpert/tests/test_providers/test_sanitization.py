@@ -56,3 +56,24 @@ def test_sanitize_messages_recurses_nested_content():
     assert "../../secret/file.hip" not in str(out)
     assert "[REDACTED]" in str(out)
     assert "[REDACTED_PATH]" in str(out)
+
+
+def test_sanitize_messages_redacts_path_field_values_by_key():
+    messages = [
+        {
+            "role": "user",
+            "content": {
+                "database_path": "relative/run.db",
+                "source_dir": "demo-app",
+                "include_path": ["private/include"],
+                "analysis_options": {"att_dir": "att-output"},
+            },
+        }
+    ]
+    out = sanitize_messages(messages)
+    rendered = str(out)
+    assert "relative/run.db" not in rendered
+    assert "demo-app" not in rendered
+    assert "private/include" not in rendered
+    assert "att-output" not in rendered
+    assert rendered.count("[REDACTED_PATH]") == 4

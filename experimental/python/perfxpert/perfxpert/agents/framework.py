@@ -21,6 +21,7 @@ Runtime guardrails:
 
 from __future__ import annotations
 
+from functools import wraps
 import inspect
 import json
 import logging
@@ -38,6 +39,7 @@ from perfxpert.providers._exceptions import (
     TimeoutError,
     TransientError,
 )
+from perfxpert.providers._sanitization import sanitize_value
 
 # SDK import is lazy + isolated to this file — never in agent modules.
 #
@@ -359,14 +361,19 @@ def _normalize_provider_exception(provider: str, exc: BaseException) -> Provider
     return _map_exception_by_message(provider, exc)
 
 
-def _serialize_input(input_payload: Any) -> str:
-    """Coerce an arbitrary payload into the string the SDK Runner expects."""
-    if isinstance(input_payload, str):
-        return input_payload
+def _serialize_input(
+    input_payload: Any,
+    *,
+    token_to_raw_path: Optional[Dict[str, str]] = None,
+) -> str:
+    """Render sanitized provider-bound input, optionally seeding SDK path tokens."""
+    sanitized = sanitize_value(input_payload, token_to_raw_path=token_to_raw_path)
+    if isinstance(sanitized, str):
+        return sanitized
     try:
-        return json.dumps(input_payload, default=str)
+        return json.dumps(sanitized, default=str)
     except (TypeError, ValueError):
-        return str(input_payload)
+        return str(sanitized)
 
 
 def _sanitize_tool_name(name: str) -> str:
@@ -376,20 +383,41 @@ def _sanitize_tool_name(name: str) -> str:
     return name.replace(".", "_")
 
 
-def _prepare_tool_callable_for_sdk(fn: Callable[..., Any], tool_name: str) -> Callable[..., Any]:
-    """Ensure SDK introspection has function metadata for bound callables."""
-    safe_name = _sanitize_tool_name(tool_name)
-    if inspect.isfunction(fn) or inspect.ismethod(fn):
-        if not getattr(fn, "__name__", None):
-            try:
-                setattr(fn, "__name__", safe_name)
-                setattr(fn, "__qualname__", safe_name)
-            except Exception:  # pragma: no cover - unusual callable object
-                pass
-        return fn
+def _restore_path_tokens(value: Any, token_to_raw_path: Optional[Dict[str, str]]) -> Any:
+    """Turn provider-visible path tokens back into local paths for tool calls."""
+    if not token_to_raw_path:
+        return value
+    if isinstance(value, str):
+        return token_to_raw_path.get(value, value)
+    if isinstance(value, list):
+        return [_restore_path_tokens(item, token_to_raw_path) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_restore_path_tokens(item, token_to_raw_path) for item in value)
+    if isinstance(value, dict):
+        return {
+            item_key: _restore_path_tokens(item, token_to_raw_path)
+            for item_key, item in value.items()
+        }
+    return value
 
+
+def _wrap_sdk_tool_boundary(
+    fn: Callable[..., Any],
+    tool_name: str,
+    *,
+    token_to_raw_path: Optional[Dict[str, str]] = None,
+) -> Callable[..., Any]:
+    """Restore inbound path tokens locally and redact outbound SDK tool results."""
+    safe_name = _sanitize_tool_name(tool_name)
+
+    @wraps(fn)
     def _sdk_tool_wrapper(*args: Any, **kwargs: Any) -> Any:
-        return fn(*args, **kwargs)
+        restored_args = tuple(_restore_path_tokens(arg, token_to_raw_path) for arg in args)
+        restored_kwargs = {
+            key: _restore_path_tokens(value, token_to_raw_path)
+            for key, value in kwargs.items()
+        }
+        return sanitize_value(fn(*restored_args, **restored_kwargs))
 
     _sdk_tool_wrapper.__name__ = safe_name
     _sdk_tool_wrapper.__qualname__ = safe_name
@@ -400,7 +428,11 @@ def _prepare_tool_callable_for_sdk(fn: Callable[..., Any], tool_name: str) -> Ca
     return _sdk_tool_wrapper
 
 
-def _translate_tools(tools: List[ToolBinding]) -> List[Any]:
+def _translate_tools(
+    tools: List[ToolBinding],
+    *,
+    token_to_raw_path: Optional[Dict[str, str]] = None,
+) -> List[Any]:
     """Wrap our ToolBinding list in openai-agents function_tool decorators.
 
     The SDK expects FunctionTool objects; we wrap each binding's plain
@@ -413,7 +445,11 @@ def _translate_tools(tools: List[ToolBinding]) -> List[Any]:
     wrapped: List[Any] = []
     for tb in tools:
         try:
-            sdk_callable = _prepare_tool_callable_for_sdk(tb.fn, tb.name)
+            sdk_callable = _wrap_sdk_tool_boundary(
+                tb.fn,
+                tb.name,
+                token_to_raw_path=token_to_raw_path,
+            )
             wrapped.append(
                 sdk_function_tool(
                     sdk_callable,
@@ -552,11 +588,14 @@ def _sdk_invoke(agent: "Agent", input_payload: Any, provider: str) -> FakeProvid
         )
 
     model = _resolve_model(provider)
-    tools = _translate_tools(list(agent.tools))
+    token_to_raw_path: Dict[str, str] = {}
+    input_str = _serialize_input(input_payload, token_to_raw_path=token_to_raw_path)
+    tools = _translate_tools(list(agent.tools), token_to_raw_path=token_to_raw_path)
     instructions = agent.fence_text or (
         f"You are the {agent.name} agent. "
         "Follow the JSON payload contract defined in the perfxpert fence."
     )
+    instructions = sanitize_value(instructions)
 
     try:
         sdk_agent = SdkAgent(
@@ -573,8 +612,6 @@ def _sdk_invoke(agent: "Agent", input_payload: Any, provider: str) -> FakeProvid
         max_turns = max(1, int(max_turns_env))
     except ValueError:
         max_turns = 10
-
-    input_str = _serialize_input(input_payload)
 
     try:
         run_config = _build_sdk_run_config(provider)
