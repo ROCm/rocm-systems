@@ -26,6 +26,7 @@
 #include <memory>
 #include <span>
 #include <sstream>
+#include <string_view>
 #include <unordered_set>
 #include <vector>
 
@@ -150,6 +151,27 @@ std::string hex_u64(uint64_t value) {
   std::ostringstream out;
   out << "0x" << std::hex << value;
   return out.str();
+}
+
+bool starts_with(std::string_view text, std::string_view prefix) {
+  return text.size() >= prefix.size() && text.substr(0, prefix.size()) == prefix;
+}
+
+std::string unsupported_expansion_category(std::string_view mnemonic) {
+  if (starts_with(mnemonic, "v_mfma_"))
+    return " (unsupported category: dense MFMA requires proven RDNA3 WMMA lowering or software fallback)";
+  if (starts_with(mnemonic, "v_smfmac_"))
+    return " (unsupported category: sparse SMFMAC requires proven sparse metadata semantics and RDNA3 fallback analysis)";
+  if (starts_with(mnemonic, "v_accvgpr_"))
+    return " (unsupported category: AccVGPR operand remapping requires supported standalone transfer or matrix-idiom lowering)";
+  return {};
+}
+
+std::string unsupported_expansion_warning(const Instruction &inst, uint64_t offset) {
+  return "fatal: unsupported expansion for " + std::string(inst.mnemonic()) + " at .text+" +
+         hex_u64(offset) + " (encoding_id=" + std::to_string(inst.encoding_id()) +
+         ", opcode=" + std::to_string(inst.opcode()) + ")" +
+         unsupported_expansion_category(inst.mnemonic());
 }
 
 void write_words_with_nop_padding(std::vector<uint8_t> &text, uint64_t offset,
@@ -345,20 +367,12 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
         }
 
         if (semantic_translator_->requires_expansion(inst)) {
-          result.warnings.push_back("fatal: unsupported expansion for " +
-                                    std::string(inst.mnemonic()) + " at .text+" +
-                                    hex_u64(offset) + " (encoding_id=" +
-                                    std::to_string(inst.encoding_id()) +
-                                    ", opcode=" + std::to_string(inst.opcode()) + ")");
+          result.warnings.push_back(unsupported_expansion_warning(inst, offset));
           return fail_closed();
         }
 
         if (leg && leg->action == Action::Expand) {
-          result.warnings.push_back("fatal: unsupported expansion for " +
-                                    std::string(inst.mnemonic()) + " at .text+" +
-                                    hex_u64(offset) + " (encoding_id=" +
-                                    std::to_string(inst.encoding_id()) +
-                                    ", opcode=" + std::to_string(inst.opcode()) + ")");
+          result.warnings.push_back(unsupported_expansion_warning(inst, offset));
           return fail_closed();
         }
 

@@ -149,19 +149,19 @@ if(HSA_RUNTIME64)
         TIMEOUT 30)
     message(STATUS "HSA init test enabled (found ${HSA_RUNTIME64})")
 
-    # --- HSA translate test: CDNA4→RDNA4 on-device verification ---
-    # Requires both compiled device kernels AND an RDNA4 GPU on the host.
+    # --- HSA translate test: CDNA4→RDNA3 on-device verification ---
+    # Requires both compiled device kernels AND a gfx1100 GPU on the host.
     if(HAS_DEVICE_KERNELS)
-        # Detect RDNA4 GPU at configure time via rocm_agent_enumerator.
+        # Detect RDNA3/gfx1100 GPU at configure time via rocm_agent_enumerator.
         find_program(ROCM_AGENT_ENUM rocm_agent_enumerator
             HINTS /opt/rocm/bin ENV ROCM_PATH)
-        set(HAS_RDNA4_GPU FALSE)
+        set(HAS_GFX1100_GPU FALSE)
         if(ROCM_AGENT_ENUM)
             execute_process(COMMAND ${ROCM_AGENT_ENUM}
                 OUTPUT_VARIABLE _agents OUTPUT_STRIP_TRAILING_WHITESPACE
                 ERROR_QUIET RESULT_VARIABLE _agent_rc)
-            if(_agent_rc EQUAL 0 AND _agents MATCHES "gfx120[01]")
-                set(HAS_RDNA4_GPU TRUE)
+            if(_agent_rc EQUAL 0 AND _agents MATCHES "gfx1100")
+                set(HAS_GFX1100_GPU TRUE)
             endif()
         endif()
 
@@ -180,20 +180,20 @@ if(HSA_RUNTIME64)
         add_dependencies(hsa_translate_test device_kernels)
         rj_configure_target(hsa_translate_test TEST)
 
-        if(HAS_RDNA4_GPU)
+        if(HAS_GFX1100_GPU)
             add_test(NAME "HsaTranslateTest.TranslateAndDispatchVectorAdd"
                 COMMAND hsa_translate_test --gtest_filter=*VectorAdd*
                 WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
             set_tests_properties("HsaTranslateTest.TranslateAndDispatchVectorAdd" PROPERTIES
                 TIMEOUT 30)
-            add_test(NAME "HsaTranslateTest.TranslateAndDispatchMfma16x16"
-                COMMAND hsa_translate_test --gtest_filter=*Mfma16x16*
+            add_test(NAME "HsaTranslateTest.TranslateAndDispatchMemoryStream"
+                COMMAND hsa_translate_test --gtest_filter=*MemoryStream*
                 WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
-            set_tests_properties("HsaTranslateTest.TranslateAndDispatchMfma16x16" PROPERTIES
+            set_tests_properties("HsaTranslateTest.TranslateAndDispatchMemoryStream" PROPERTIES
                 TIMEOUT 60)
-            message(STATUS "HSA translate test enabled (RDNA4 GPU detected)")
+            message(STATUS "HSA translate test enabled (gfx1100 GPU detected)")
         else()
-            message(STATUS "HSA translate test built but NOT registered with CTest (no RDNA4 GPU)")
+            message(STATUS "HSA translate test built but NOT registered with CTest (no gfx1100 GPU)")
         endif()
     endif()
 else()

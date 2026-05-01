@@ -36,6 +36,7 @@ rj_add_device_kernel(matmul_naive gfx950)
 rj_add_device_kernel(matmul_mfma gfx950)
 rj_add_device_kernel(matmul_mfma_16x16 gfx950)
 rj_add_device_kernel(matmul_tiled gfx950)
+rj_add_device_kernel(memory_stream gfx950)
 rj_add_device_kernel(vector_add gfx950)
 
 # Umbrella target for all device kernels.
@@ -44,6 +45,7 @@ add_custom_target(device_kernels DEPENDS
     kernel_matmul_mfma
     kernel_matmul_mfma_16x16
     kernel_matmul_tiled
+    kernel_memory_stream
     kernel_vector_add
 )
 
