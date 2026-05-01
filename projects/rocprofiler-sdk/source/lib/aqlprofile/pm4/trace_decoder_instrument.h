@@ -87,6 +87,15 @@ typedef union rocprof_trace_decoder_packet_header_t
         unsigned int type   : 4;   ///< one of rocprof_trace_decoder_agent_info_type_t or
                                    ///< rocprof_trace_decoder_codeobj_marker_type_t
         unsigned int data20 : 20;  ///< Agent data, if rocprof_trace_decoder_agent_info_type_t.
+                                   ///< For opcodes whose payload is a stream of writes on a
+                                   ///< separate register (e.g. RT_TIMESTAMP /
+                                   ///< RT_TIMESTAMP_LO32 on USERDATA3), this carries the
+                                   ///< number of follow-up writes the producer will emit.
+                                   ///< Decoders should consume exactly that many writes —
+                                   ///< extra fields appended by future format revisions can
+                                   ///< then be skipped without breaking previous decoder
+                                   ///< versions. A value of 0 means "use the legacy fixed
+                                   ///< count for this opcode".
     };
     unsigned int u32All;
 } rocprof_trace_decoder_packet_header_t;
@@ -95,7 +104,8 @@ typedef enum rocprof_trace_decoder_packet_opcode_t
 {
     ROCPROF_TRACE_DECODER_PACKET_OPCODE_CODEOBJ = 4,
     ROCPROF_TRACE_DECODER_PACKET_OPCODE_RT_TIMESTAMP,
-    ROCPROF_TRACE_DECODER_PACKET_OPCODE_AGENT_INFO  ///< Agent info, passed in data20. No payload.
+    ROCPROF_TRACE_DECODER_PACKET_OPCODE_AGENT_INFO,  ///< Agent info, passed in data20. No payload.
+    ROCPROF_TRACE_DECODER_PACKET_OPCODE_RT_TIMESTAMP_LO32
 
     /// @var ROCPROF_TRACE_DECODER_PACKET_OPCODE_CODEOBJ
     /// @brief Followed by several rocprof_trace_decoder_codeobj_marker_t
@@ -104,10 +114,24 @@ typedef enum rocprof_trace_decoder_packet_opcode_t
     /// @var ROCPROF_TRACE_DECODER_PACKET_OPCODE_RT_TIMESTAMP
     /// @brief Realtime timestamp to correlate the trace with outside information.
     /// Notes: userdata--3--. Gfx9 only. Not necessary for gfx10+.
-    /// Instead of a single payload, must be followed by 3x USERDATA3 writes, in order:
+    /// Instead of a single payload, must be followed by USERDATA3 writes whose count is
+    /// reported by data20 (legacy producers emit data20=0, meaning the original fixed count
+    /// of 3). The first 3 writes carry, in order:
     /// 1) Timestamp low 64bits
     /// 2) Timestamp high 64bits
     /// 3) Instant sync timestamp, low 32 bits.
+    /// Any additional writes beyond the first 3 belong to future format revisions and should
+    /// be consumed and ignored by older decoders.
+
+    /// @var ROCPROF_TRACE_DECODER_PACKET_OPCODE_RT_TIMESTAMP_LO32
+    /// @brief Periodic realtime timestamp emitted from query_status packets in double/triple
+    /// buffer mode. Notes: userdata--3--. Gfx9 only. Not necessary for gfx10+.
+    /// Followed by USERDATA3 writes whose count is reported by data20 (legacy producers emit
+    /// data20=0, meaning the original fixed count of 1). The first write carries the low 32
+    /// bits of the GPU clock counter. The high 32 bits are extrapolated by the decoder from
+    /// the most recent full RT_TIMESTAMP, detecting wraps when the new low-32 is less than
+    /// the previous low-32. Additional writes belong to future revisions and should be
+    /// consumed and ignored by older decoders.
 } rocprof_trace_decoder_packet_opcode_t;
 
 typedef enum rocprof_trace_decoder_agent_info_type_t
