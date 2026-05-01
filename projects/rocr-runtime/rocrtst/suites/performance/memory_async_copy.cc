@@ -142,6 +142,7 @@ MemoryAsyncCopy::~MemoryAsyncCopy(void) {
 
 void MemoryAsyncCopy::SetUp(void) {
   TestBase::SetUp();
+  if (test_skipped_) return;
 
   hwloc_topology_init(&topology_);
 
