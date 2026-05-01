@@ -57,6 +57,6 @@ rj_status_t rj_code_decoder_decode(rj_code_decoder_t *decoder,
   if (!decoded)
     return ROCJITSU_STATUS_ERROR;
 
-  *inst = reinterpret_cast<rj_code_inst_t *>(decoded.release());
+  *inst = reinterpret_cast<rj_code_inst_t *>(decoded);
   return ROCJITSU_STATUS_SUCCESS;
 }

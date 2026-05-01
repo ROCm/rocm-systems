@@ -245,6 +245,7 @@ std::pair<const Isa*, const Isa*> Isa::supportedIsas() {
       {"gfx11-generic", true, true, 11, 0, 0, NONE, NONE, 2, 32, 1, 256, 64 * Ki, 32, 1024},
       {"gfx1200", true, true, 12, 0, 0, NONE, NONE, 2, 32, 1, 256, 64 * Ki, 32, 1024},
       {"gfx1201", true, true, 12, 0, 1, NONE, NONE, 2, 32, 1, 256, 64 * Ki, 32, 1024},
+      {"gfx1250", true, true, 12, 5, 0, NONE, NONE, 4, 32, 1, 256, 320* Ki, 64, 1024},
       {"gfx12-generic", true, true, 12, 0, 0, NONE, NONE, 2, 32, 1, 256, 64 * Ki, 32, 1024},
   };
   return std::make_pair(std::begin(supportedIsas_), std::end(supportedIsas_));
@@ -364,19 +365,12 @@ amd::Memory* MemObjMap::FindMemObj(const void* k, size_t* offset, Device* dev) {
   uintptr_t key = reinterpret_cast<uintptr_t>(k);
 
   // First search the global map
-  auto it = MemObjMap_.upper_bound(key);
-  if (it != MemObjMap_.begin()) {
-    --it;
-    amd::Memory* mem = it->second;
-    size_t mem_size = (mem->getMemFlags() & ROCCLR_MEM_PHYMEM)
-                          ? sizeof(mem->getUserData().hsa_handle)
-                          : mem->getSize();
-    if (key >= it->first && key < (it->first + mem_size)) {
-      if (offset != nullptr) {
-        *offset = key - it->first;
-      }
-      return mem;
+  auto it = FindMemObjIter(key);
+  if (it != MemObjMap_.end()) {
+    if (offset != nullptr) {
+      *offset = key - it->first;
     }
+    return it->second;
   }
 
   // Search per-device va maps on Windows (due to overlapping ranges)
@@ -385,6 +379,34 @@ amd::Memory* MemObjMap::FindMemObj(const void* k, size_t* offset, Device* dev) {
   }
 
   return nullptr;
+}
+
+std::map<uintptr_t, amd::Memory*>::iterator MemObjMap::FindMemObjIter(uintptr_t key) {
+  auto it = MemObjMap_.upper_bound(key);
+  if (it == MemObjMap_.begin()) {
+    return MemObjMap_.end();
+  }
+  --it;
+  amd::Memory* mem = it->second;
+  size_t mem_size = (mem->getMemFlags() & ROCCLR_MEM_PHYMEM)
+                        ? sizeof(mem->getUserData().hsa_handle)
+                        : mem->getSize();
+  if (key < it->first || key >= (it->first + mem_size)) {
+    return MemObjMap_.end();
+  }
+  return it;
+}
+
+amd::Memory* MemObjMap::FindAndRemoveMemObj(const void* k) {
+  std::unique_lock lock(AllocatedLock_);
+  uintptr_t key = reinterpret_cast<uintptr_t>(k);
+  auto it = FindMemObjIter(key);
+  if (it == MemObjMap_.end()) {
+    return nullptr;
+  }
+  amd::Memory* mem = it->second;
+  MemObjMap_.erase(it);
+  return mem;
 }
 
 void MemObjMap::UpdateAccess(amd::Device* peerDev) {
@@ -614,8 +636,7 @@ Device::BlitProgram::~BlitProgram() {
 
 bool Device::BlitProgram::create(amd::Device* device, const std::string& extraKernels,
                                  const std::string& extraOptions) {
-  std::vector<amd::Device*> devices;
-  devices.push_back(device);
+  std::vector<amd::Device*> devices{device};
   int32_t retval = CL_SUCCESS;
   std::string kernels(device::BlitLinearSourceCode);
   std::string image_kernels(device::BlitImageSourceCode);
@@ -674,12 +695,17 @@ bool Device::init() {
   devices_ = nullptr;
   appProfile_.init();
 
+  if (IS_WINDOWS && flagIsDefault(GPU_ENABLE_PAL)) {
+    // On Windows by default keep PAL path for now, until we completely switch to ROCr backend
+    // Without this, roc::Device::init() returns true & disables PAL path in below code
+    GPU_ENABLE_PAL = 1;
+  }
 
 // IMPORTANT: Note that we are initialiing HSA stack first and then
 // GPU stack. The order of initialization is signiicant and if changed
 // amd::Device::registerDevice() must be accordingly modified.
 #if defined(WITH_HSA_DEVICE)
-  if ((GPU_ENABLE_PAL != 1) || flagIsDefault(GPU_ENABLE_PAL)) {
+  if ((GPU_ENABLE_PAL == 0) || (GPU_ENABLE_PAL == 2)) {
     // Return value of roc::Device::init()
     // If returned false, error initializing HSA stack.
     // If returned true, either HSA not installed or HSA stack
@@ -793,9 +819,7 @@ Device::~Device() {
 }
 
 bool Device::ValidateComgr() {
-  // use versioned comgr for HIP, unversioned for Opencl
-  const bool kComgrVersioned = amd::IS_HIP;
-  std::call_once(amd::Comgr::initialized, amd::Comgr::LoadLib, kComgrVersioned);
+  std::call_once(amd::Comgr::initialized, amd::Comgr::LoadLib);
   return amd::Comgr::IsReady();
 }
 
@@ -1138,19 +1162,29 @@ void Device::IpcDetach(amd::Memory* amd_mem_obj) const {
 }
 
 std::vector<amd::CommandQueue*> Device::getActiveQueues() {
+  std::vector<amd::CommandQueue*> result;
+  result.reserve(activeQueues.size());
+
   amd::ScopedLock lock(activeQueuesLock_);
-  for (auto it = activeQueues.begin(); it != activeQueues.end();) {
-    if ((*it)->referenceCount() == 0) {
+  for (auto it = activeQueues.begin(); it != activeQueues.end(); ++it) {
+    if (!it->second) {
+      // An inactive queue might have been releeased already, so dereferencing
+      // it->first isn't safe
+      continue;
+    }
+    if (it->first->referenceCount() == 0) {
       // It is being terminated in HostQueue::terminate().
       // We should not wait for commands in a queue being terminated.
-      it = activeQueues.erase(it);
+      it->second = false;
     } else {
+      assert(it->second);
       // In case the queue will be destroyed in Stream::Destroy().
-      (*it)->retain();
-      ++it;
+      it->first->retain();
+      result.push_back(it->first);
     }
   }
-  return std::vector<amd::CommandQueue*>(activeQueues.begin(), activeQueues.end());
+
+  return result;
 }
 
 // =================================================================================================
@@ -1251,6 +1285,7 @@ Settings::Settings() : value_(0) {
   }
 
   gwsInitSupported_ = true;
+  groupMemCarveout_ = false;
 }
 
 void Memory::saveMapInfo(const void* mapAddress, const amd::Coord3D origin,

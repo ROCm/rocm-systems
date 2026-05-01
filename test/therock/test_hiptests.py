@@ -68,6 +68,18 @@ TEST_TO_IGNORE = {
             "Unit_hipMemsetASyncMulti",
             "Unit_hipHostAlloc_AllocateMoreThanAvailGPUMemory",
             "Unit_hipStreamValue_Write - TestParams<uint32_t, PtrType::DevicePtrToHost>",
+            # TODO(#4244): Flaky with compiler submodule update - subprocess aborted.
+            "Unit_NonHost_Printf_loop",
+            "Unit_NonHost_Printf_multiple_Threads",
+            "Unit_NonHost_Printf_BufferAvailability",
+        ]
+    },
+    "gfx94X-dcgpu": {
+        "linux": [
+            # TODO(#4244): Flaky with compiler submodule update - subprocess aborted.
+            "Unit_NonHost_Printf_loop",
+            "Unit_NonHost_Printf_multiple_Threads",
+            "Unit_NonHost_Printf_BufferAvailability",
         ]
     },
     "gfx110X-all": {
@@ -95,7 +107,7 @@ def get_asan_lib_path():
 
 def copy_dlls_exe_path():
     if platform.system() == "Windows":
-        # hip and comgr dlls need to be copied to the same folder as exectuable
+        # hip and comgr dlls need to be copied to the same folder as executable
         dlls_pattern = [
             "amdhip64*.dll",
             "amd_comgr*.dll",

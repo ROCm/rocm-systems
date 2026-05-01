@@ -143,7 +143,7 @@ HIP_TEST_CASE(Performance_hipMemcpy_HostToHost) {
  */
 HIP_TEST_CASE(Performance_hipMemcpy_DeviceToDevice_EnablePeerAccess) {
   if (HipTest::getDeviceCount() < 2) {
-    HipTest::HIP_SKIP_TEST("This test requires 2 GPUs. Skipping.");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
     return;
   }
   const auto allocation_size = GENERATE(4_KB, 4_MB, 16_MB);

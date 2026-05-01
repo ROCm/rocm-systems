@@ -13,6 +13,16 @@
 
 // Tuning plugin to override NCCL's default algorithm/protocol tuning.
 
+// Built-in CSV tuner - compiled into librccl.so (follows rocmNetIb pattern)
+extern ncclTuner_t rcclCsvTuner;
+
+// Find CSV config file path. Returns path if found, nullptr if not.
+// gpuArch: GPU architecture string (e.g., "gfx950") for arch-specific config lookup
+const char* rcclCsvTunerFindConfig(const char* gpuArch);
+
+// Reset CSV tuner config path discovery (for testing)
+void rcclCsvTunerResetConfigPath();
+
 // Attempts to load NCCL tuner from environmental variable.
 // Returns ncclSuccess if the correct tuner symbol has been found and
 // successully loaded.  Otherwise returns an error and also logs the error.

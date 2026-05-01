@@ -184,19 +184,6 @@ endif()
 set_property(TARGET ${AMD_SMI} PROPERTY SOVERSION "${MAJOR}")
 set_property(TARGET ${AMD_SMI} PROPERTY VERSION "${SO_VERSION_STRING}")
 
-## If the library is a release, strip the target library
-if("${CMAKE_BUILD_TYPE}" STREQUAL Release)
-    if(BUILD_BOTH_LIBS OR BUILD_SHARED_LIBS)
-        if(TARGET ${AMD_SMI})
-            add_custom_command(
-                TARGET ${AMD_SMI}
-                POST_BUILD
-                COMMAND ${CMAKE_STRIP} lib${AMD_SMI}.so.${SO_VERSION_STRING}
-            )
-        endif()
-    endif()
-endif()
-
 ## Add the install directives for the runtime library.
 set(_INSTALL_TARGETS ${AMD_SMI} amdsminic)
 if(BUILD_BOTH_LIBS)

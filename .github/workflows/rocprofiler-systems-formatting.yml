@@ -3,22 +3,7 @@ name: rocprofiler-systems Formatting
 run-name: formatting
 
 on:
-  workflow_dispatch:
-  pull_request:
-    paths:
-      - '.github/workflows/rocprofiler-systems-formatting.yml'
-      - 'projects/rocprofiler-systems/**'
-      - '!**/*.md'
-      - '!**/*.rtf'
-      - '!**/*.rst'
-      - '!**/.markdownlint-ci2.yaml'
-      - '!**/.readthedocs.yaml'
-      - '!**/.spellcheck.local.yaml'
-      - '!**/.wordlist.txt'
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  workflow_call:
 
 jobs:
 

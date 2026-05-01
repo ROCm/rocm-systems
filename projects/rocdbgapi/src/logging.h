@@ -37,6 +37,7 @@
 #include <tuple>
 #include <type_traits>
 #include <utility>
+#include <variant>
 
 #define dbgapi_log(level, format, ...)                                        \
   do                                                                          \
@@ -105,6 +106,13 @@ to_string (std::optional<T> v)
   if (v.has_value ())
     return std::string ("{") + to_string (*v) + "}";
   return "{}";
+}
+
+template <typename... Ts>
+inline std::string
+to_string (std::variant<Ts...> var)
+{
+  return std::visit ([] (auto &&v) { return to_string (v); }, var);
 }
 
 template <>

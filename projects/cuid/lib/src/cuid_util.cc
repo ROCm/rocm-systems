@@ -93,7 +93,8 @@ std::string CuidUtilities::readlink_bdf(const std::string &device_path) {
 }
 
 // Helper to get device path from BDF based on device type
-// For GPUs: returns /sys/class/drm/renderDXXX/device path
+// For GPUs: returns /sys/class/drm/renderDXXX/device or
+//           /sys/class/drm/cardN/device path
 // For NICs: returns /sys/class/net/<iface>/device path
 std::string
 CuidUtilities::bdf_to_device_path(const std::string &bdf,
@@ -109,16 +110,38 @@ CuidUtilities::bdf_to_device_path(const std::string &bdf,
     DIR *dir = opendir(subsystem_dir.c_str());
     if (dir) {
       struct dirent *entry;
+      std::string card_path;
       while ((entry = readdir(dir)) != nullptr) {
-        // Look for renderD* nodes
+        // Prefer renderD* nodes when available
         if (strncmp(entry->d_name, "renderD", 7) == 0) {
           std::string device_path =
               "/sys/class/drm/" + std::string(entry->d_name) + "/device";
           closedir(dir);
           return device_path;
         }
+        // Track card entries as fallback (e.g., card0, card1)
+        // Exclude connector entries like card0-DP-1
+        if (strncmp(entry->d_name, "card", 4) == 0 &&
+            isdigit(entry->d_name[4])) {
+          bool all_digits = true;
+          for (size_t i = 4; entry->d_name[i] != '\0'; ++i) {
+            if (!isdigit(entry->d_name[i])) {
+              all_digits = false;
+              break;
+            }
+          }
+          if (all_digits && card_path.empty()) {
+            card_path =
+                "/sys/class/drm/" + std::string(entry->d_name) + "/device";
+          }
+        }
       }
       closedir(dir);
+      // Fall back to card entry if no renderD node was found
+      // (e.g., when using GIM driver or for non-AMD GPUs)
+      if (!card_path.empty()) {
+        return card_path;
+      }
     }
   } else if (device_type == AMDCUID_DEVICE_TYPE_NIC) {
     subsystem_dir = pci_device_path + "/net";
@@ -135,6 +158,31 @@ CuidUtilities::bdf_to_device_path(const std::string &bdf,
         return device_path;
       }
       closedir(dir);
+    }
+  } else if (device_type == AMDCUID_DEVICE_TYPE_NPU) {
+    subsystem_dir = pci_device_path + "/accel";
+    DIR *dir = opendir(subsystem_dir.c_str());
+    if (dir) {
+      struct dirent *entry;
+      while ((entry = readdir(dir)) != nullptr) {
+        // Skip . and ..
+        if (entry->d_name[0] == '.')
+          continue;
+        // Match accelN entries
+        if (strncmp(entry->d_name, "accel", 5) == 0 &&
+            isdigit(entry->d_name[5])) {
+          std::string device_path =
+              "/sys/class/accel/" + std::string(entry->d_name) + "/device";
+          closedir(dir);
+          return device_path;
+        }
+      }
+      closedir(dir);
+    }
+    // Fallback: when /sys/class/accel/ is not populated (e.g., amdxdna
+    // driver not loaded), return the PCI device path itself if it exists.
+    if (access(pci_device_path.c_str(), F_OK) == 0) {
+      return pci_device_path;
     }
   }
 
@@ -509,8 +557,8 @@ void CuidUtilities::remove_UUIDv8_bits(amdcuid_id_t *id,
   out_raw_bits[5] = id->bytes[5];
 
   // Bits 48-51: Version (8) + Bits 52-63: ID value part 2
-  out_raw_bits[6] = ((id->bytes[6] & 0x0F) << 4) | ((id->bytes[7] & 0xFC) >> 2);
-  out_raw_bits[7] = ((id->bytes[7] & 0x03) << 6) | ((id->bytes[8] & 0xFC) >> 2);
+  out_raw_bits[6] = ((id->bytes[6] & 0x0F) << 4) | ((id->bytes[7] & 0xF0) >> 4);
+  out_raw_bits[7] = ((id->bytes[7] & 0x0F) << 4) | ((id->bytes[8] & 0x3C) >> 2);
 
   // Bits 64-65: Variant (10b) + Bits 66-127: ID value part 3 (MSB)
   out_raw_bits[8] = ((id->bytes[8] & 0x03) << 6) | ((id->bytes[9] & 0xFC) >> 2);
@@ -592,6 +640,8 @@ std::string CuidUtilities::device_type_to_string(amdcuid_device_type_t type) {
     return "GPU";
   case AMDCUID_DEVICE_TYPE_NIC:
     return "NIC";
+  case AMDCUID_DEVICE_TYPE_NPU:
+    return "NPU";
   default:
     return "UNKNOWN";
   }

@@ -183,7 +183,7 @@ HIP_TEST_CASE(Unit_hipCGThreadBlockType) {
   HIP_CHECK(hipGetDeviceProperties(&device_properties, device));
 
   if (!device_properties.cooperativeLaunch) {
-    HipTest::HIP_SKIP_TEST("Device doesn't support cooperative launch!");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
     return;
   }
 

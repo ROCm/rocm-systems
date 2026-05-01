@@ -343,7 +343,7 @@ HIP_TEST_CASE(Unit_Uuid_FntlTstsFor_SetEnv_HIP_VISIBLE_DEVICES) {
         REQUIRE(proc.run()== 1);
         unsetenv("HIP_VISIBLE_DEVICES");
       } else {
-        HipTest::HIP_SKIP_TEST("Skipping because this machine has total GPUs < 2");  // NOLINT
+        WARN("Skipping section: " << HipTest::SkipReason::kFewerThanTwoGpus);  // NOLINT
       }
     }
 #endif
@@ -360,7 +360,7 @@ HIP_TEST_CASE(Unit_Uuid_FntlTstsFor_SetEnv_HIP_VISIBLE_DEVICES) {
         REQUIRE(proc.run() == 2);
         unsetenv("HIP_VISIBLE_DEVICES");
       } else {
-        HipTest::HIP_SKIP_TEST("Skipping because this machine has total GPUs < 2");  // NOLINT
+        WARN("Skipping section: " << HipTest::SkipReason::kFewerThanTwoGpus);  // NOLINT
       }
     }
 #ifdef __linux__
@@ -425,7 +425,7 @@ HIP_TEST_CASE(Unit_Uuid_FntlTstsFor_SetEnv_HIP_VISIBLE_DEVICES) {
         REQUIRE(proc.run() == 2);
         unsetenv("HIP_VISIBLE_DEVICES");
       } else {
-        HipTest::HIP_SKIP_TEST("Skipping because this machine has total GPUs < 2");  // NOLINT
+        WARN("Skipping section: " << HipTest::SkipReason::kFewerThanTwoGpus);  // NOLINT
       }
     }
     SECTION("Set Same UUID/Device ordinal more than once ") {
@@ -442,7 +442,7 @@ HIP_TEST_CASE(Unit_Uuid_FntlTstsFor_SetEnv_HIP_VISIBLE_DEVICES) {
         REQUIRE(proc.run() == 2);
         unsetenv("HIP_VISIBLE_DEVICES");
       } else {
-        HipTest::HIP_SKIP_TEST("Skipping because this machine has total GPUs < 2");  // NOLINT
+        WARN("Skipping section: " << HipTest::SkipReason::kFewerThanTwoGpus);  // NOLINT
       }
     }
     SECTION("Set Env Variable in child process") {
@@ -467,7 +467,7 @@ HIP_TEST_CASE(Unit_Uuid_FntlTstsFor_SetEnv_HIP_VISIBLE_DEVICES) {
     }
 #endif
   } else {
-    HipTest::HIP_SKIP_TEST("Skipping because this machine has total GPUs < 1");  // NOLINT
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kNoGpuDevice);  // NOLINT
   }
 }
 
@@ -521,7 +521,7 @@ void setEnv() {
     setenv("HIP_VISIBLE_DEVICES", uuidEnv.c_str(), 1);
   } else {
     tState = 2;
-    HipTest::HIP_SKIP_TEST("Skipping because this machine has total GPUs < 2");  // NOLINT
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);  // NOLINT
   }
 }
 /**

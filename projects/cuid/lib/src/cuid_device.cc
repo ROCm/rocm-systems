@@ -25,6 +25,7 @@
 #include "cuid_cpu.h"
 #include "cuid_gpu.h"
 #include "cuid_nic.h"
+#include "cuid_npu.h"
 #include "cuid_platform.h"
 #include "cuid_file.h"
 #include <dirent.h>
@@ -128,6 +129,21 @@ amdcuid_status_t CuidDevice::get_derived_cuid(amdcuid_derived_id& id, cuid_hmac 
                         const auto& info = nic->get_info();
                         CuidFileEntry entry;
                         amdcuid_status_t status = derived_file.find_by_device_node(info.network_interface, entry);
+                        if (status == AMDCUID_STATUS_SUCCESS) {
+                            build_derived_id_from_file_entry(entry, id);
+                            return AMDCUID_STATUS_SUCCESS;
+                        }
+                    }
+                }
+                break;
+            case AMDCUID_DEVICE_TYPE_NPU:
+                // search by accel node
+                {
+                    auto npu = reinterpret_cast<CuidNpu*>(const_cast<CuidDevice*>(this));
+                    if (npu) {
+                        const auto& info = npu->get_info();
+                        CuidFileEntry entry;
+                        amdcuid_status_t status = derived_file.find_by_device_node(info.accel_node, entry);
                         if (status == AMDCUID_STATUS_SUCCESS) {
                             build_derived_id_from_file_entry(entry, id);
                             return AMDCUID_STATUS_SUCCESS;

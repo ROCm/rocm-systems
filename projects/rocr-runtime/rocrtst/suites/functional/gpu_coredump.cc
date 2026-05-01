@@ -28,6 +28,7 @@
 #include "common/base_rocr_utils.h"
 #include "common/common.h"
 #include "common/helper_funcs.h"
+#include "common/platform_filter.h"
 #include "gtest/gtest.h"
 #include "hsa/hsa.h"
 
@@ -167,6 +168,8 @@ bool GpuCoreDumpTest::CheckPrerequisites() {
 }
 
 void GpuCoreDumpTest::SetUp(void) {
+  if (!checkPlatformFiltering()) return;
+
   // Don't call TestBase::SetUp() - we don't want hsa_init() in parent
 
   // Check prerequisites first

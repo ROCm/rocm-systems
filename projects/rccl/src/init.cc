@@ -40,12 +40,14 @@
 #include <sys/resource.h>
 #include <unistd.h>
 #include "graph/topo.h"
+#include "graph/rome_topo_consensus.h"
 #include "graph/xml.h"
 #include "archinfo.h"
 #include "param.h"
 #include "nvtx_payload_schemas.h"
 #include "utils.h"
 #include <mutex>
+#include <unordered_map>
 #include "ce_coll.h"
 #include "nvtx.h"
 
@@ -54,9 +56,6 @@
 #include "rccl_vars.h"
 #include "hip_rocm_version_info.h"
 //#include <hsa/hsa_ext_amd.h>
-#ifdef ENABLE_MSCCLPP
-#include "mscclpp/mscclpp_nccl.h"
-#endif
 #ifdef USE_AMDSMI
 #include "amdsmi_wrap.h"
 #else
@@ -71,8 +70,6 @@
 #endif
 
 
-#include "msccl/msccl_lifecycle.h"
-#include "msccl/msccl_status.h"
 #include "latency_profiler/CollTrace.h"
 #include "latency_profiler/CollTraceFunc.h"
 #include  <cpuid.h>
@@ -124,23 +121,13 @@ RCCL_PARAM(RocshmemEnabled, "ROCSHMEM_ENABLE", 1);
 std::unordered_map<ncclComm_t, rocshmem::rocshmem_team_t> ncclCommToRshmemTeam;
 #endif
 
-#ifdef ENABLE_MSCCLPP
-size_t std::hash<ncclUniqueId>::operator ()(const ncclUniqueId& uniqueId) const noexcept {
-  return (size_t)getHash(uniqueId.internal, NCCL_UNIQUE_ID_BYTES);
-}
-
-bool operator ==(const ncclUniqueId& a, const ncclUniqueId& b) {
-  return memcmp(a.internal, b.internal, NCCL_UNIQUE_ID_BYTES) == 0;
-}
-
-RCCL_PARAM(MscclppThreshold, "MSCCLPP_THRESHOLD", (size_t)(16*1024*1024));
-#endif
-
-static constexpr int64_t defaultEnableMscclpp = 0;
-RCCL_PARAM(MscclppEnabled, "MSCCLPP_ENABLE", defaultEnableMscclpp);
-RCCL_PARAM(MscclppForceEnabled, "MSCCLPP_FORCE_ENABLE", 0);
 // Turn off cheap fence for gfx942/gfx950
 RCCL_PARAM(Gfx9CheapFenceOff, "GFX9_CHEAP_FENCE_OFF", 0);
+
+/**
+ * Used on gfx1151 (StrixHalo) to set the nChannels for ncclTopoPreset before determining number of nodes. 
+ */
+RCCL_PARAM( InitChannels, "INIT_CHANNELS", -1) ;
 
 // GDRCOPY support: Off by default
 NCCL_PARAM(GdrCopyEnable, "GDRCOPY_ENABLE", 0);
@@ -1260,6 +1247,28 @@ static ncclResult_t initNvlDomainInfo(struct ncclComm* comm) {
   return ncclSuccess;
 }
 
+// True when every host has the same number of ranks and those partitions sum to nranks.
+static bool uniformRanksPerHost(const struct ncclComm* comm, int nranks) {
+  int ranksPerHost = -1;
+  int total = 0;
+  for (int i = 0; i < nranks; i++) {
+    uint64_t h = comm->peerInfo[i].hostHash;
+    bool lowestRankOnHost = true;
+    for (int j = 0; j < i; j++) {
+      if (comm->peerInfo[j].hostHash == h) { lowestRankOnHost = false; break; }
+    }
+    if (!lowestRankOnHost) continue;
+    int cnt = 0;
+    for (int j = 0; j < nranks; j++) {
+      if (comm->peerInfo[j].hostHash == h) cnt++;
+    }
+    total += cnt;
+    if (ranksPerHost < 0) ranksPerHost = cnt;
+    else if (cnt != ranksPerHost) return false;
+  }
+  return total == nranks && ranksPerHost > 0;
+}
+
 static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* parent, uint64_t timers[TIMERS_INIT_COUNT]) {
   // We use 2 AllGathers
   // 1. { peerInfo, comm, compCap}
@@ -1294,9 +1303,10 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
     int cpuVendor;
     int localRanks;
     int nc;
+    int romeTopoModelIdx;
     bool pivotA2AEnabled;
     bool ll128Enabled;
-    bool mscclEnabled;
+    char hostname[128];
   };
 
   int nChannelsOrig;
@@ -1309,9 +1319,6 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   int* pxnPeers = NULL;
   int *topParentLocalRanks = NULL;
   int p2pLevel = -1;
-
-  bool needsProxy = false;
-  bool mscclNeedsProxy = needsProxy;
 
   timers[TIMER_INIT_ALLGATHER] = clockNano();
   // AllGather1 - begin
@@ -1428,8 +1435,6 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   comm->topo->pivotA2ANumBiRings = 0;
   // LL128
   comm->topo->ll128Enabled = false;
-  // Topology hint for MSCCL internal scheduler about whether to enable MSCCL
-  comm->topo->mscclEnabled = false;
   // Topology hint if tree has been defined by model or User
   comm->topo->treeDefined = false;
   // Compute paths between GPUs and NICs
@@ -1484,6 +1489,8 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
     }
   }
 
+  comm->topo->skipPresetTopoMatching = !uniformRanksPerHost(comm, nranks);
+
   timers[TIMER_INIT_GRAPHS] = clockNano();
   // Get rings and trees
   memset(ringGraph, 0, sizeof(struct ncclTopoGraph));
@@ -1493,6 +1500,23 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   ringGraph->maxChannels = MAXCHANNELS/2;
   NCCLCHECKGOTO(ncclTopoCompute(comm->topo, ringGraph), ret, fail);
   NCCLCHECKGOTO(ncclTopoPrintGraph(comm->topo, ringGraph), ret, fail);
+
+  if( IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx1151" ) ) {
+    /**
+     * GFX1151 (1 GPU/node): Uses Walecki + Greedy construction to generate 'nChannels'
+     * edge-disjoint Hamiltonian rings. For N nodes, N/2 perfect rings are guaranteed;
+     * additional channels are balanced via greedy heuristics to saturate Fat-Tree/Clos fabrics.
+     * Note: nNodes is only known AFTER bootstrapAllGather (Postset), but nChannels 
+     * is required during Preset. Therefore, nChannels cannot be auto-calculated 
+     * based on nNodes at this stage.
+     * Recommended: Set nChannels via environment variable (e.g., 6 channels for 
+     * optimal 4-node load balancing). Missing channel data is backfilled 
+     * by repairMissingChannels() during Postset.
+     * */
+    int numChannels = rcclParamInitChannels() > 0 ? rcclParamInitChannels() : 6 /* 2 X (comm->nNodes - 1)  */;
+    ringGraph->nChannels = std::max(ringGraph->minChannels, std::min(ringGraph->maxChannels,(int32_t) numChannels));
+  }
+  INFO(NCCL_INIT,"ringGraph->nChannels = %d ", ringGraph->nChannels);
 
   memset(treeGraph, 0, sizeof(struct ncclTopoGraph));
   treeGraph->id = 1;
@@ -1646,7 +1670,6 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   allGather3Data[rank].pivotA2AEnabled = comm->topo->pivotA2AEnabled && rcclParamPivotAlltoallEnable();
   comm->topo->ll128Enabled =  comm->topo->ll128Enabled || rcclParamLL128ForceEnable();
   allGather3Data[rank].ll128Enabled = comm->topo->ll128Enabled;
-  allGather3Data[rank].mscclEnabled = comm->topo->mscclEnabled;
 
   for (int a=0; a<NCCL_NUM_ALGORITHMS; a++) {
     allGather3Data[rank].graphInfo[a].pattern = graphs[a]->pattern;
@@ -1661,6 +1684,8 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
 
   allGather3Data[rank].cpuArch = comm->cpuArch;
   allGather3Data[rank].cpuVendor = comm->cpuVendor;
+  allGather3Data[rank].romeTopoModelIdx = comm->topo->romeTopoModelIdx;
+  (void) getHostName(allGather3Data[rank].hostname, sizeof(allGather3Data[rank].hostname), '\0');
 
   comm->nChannels = std::min(treeGraph->nChannels, ringGraph->nChannels);
 
@@ -1671,6 +1696,15 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   NCCLCHECKGOTO(ncclTopoPreset(comm, graphs, &allGather3Data[rank].topoRanks), ret, fail);
 
   NCCLCHECKGOTO(bootstrapAllGather(comm->bootstrap, allGather3Data, sizeof(*allGather3Data)), ret, fail);
+
+  if (uniformRanksPerHost(comm, nranks)) {
+    NCCLCHECKGOTO(rcclCheckRomeTopoModelIdxConsensus(
+        nranks,
+        [&](int r) { return allGather3Data[r].romeTopoModelIdx; },
+        [&](int r) { return allGather3Data[r].hostname; },
+        [&](int r) { return comm->peerInfo[r].hostHash; }),
+      ret, fail);
+  }
 
   // Determine nNodes, firstRanks, ...
   NCCLCHECKGOTO(ncclCalloc(&nodesFirstRank, nranks), ret, fail);
@@ -1708,7 +1742,7 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
       INFO(NCCL_GRAPH, "CPUs with mixed vendors were detected.");
     }
   }
-
+  
   // Now that we know nNodes, alloc nodeRanks and compute localRanks for each node
   NCCLCHECKGOTO(ncclCalloc(&comm->nodeRanks, comm->nNodes), ret, fail);
   NCCLCHECKGOTO(ncclCalloc(&comm->rankToLocalRank, comm->nRanks), ret, fail);
@@ -1760,7 +1794,6 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
     // Make sure we align all ranks so that the tuning is consistent across ranks
     comm->topo->pivotA2AEnabled = comm->topo->pivotA2AEnabled && allGather3Data[i].pivotA2AEnabled;
     comm->topo->ll128Enabled = comm->topo->ll128Enabled && allGather3Data[i].ll128Enabled;
-    comm->topo->mscclEnabled = comm->topo->mscclEnabled && allGather3Data[i].mscclEnabled;
     for (int a=0; a<NCCL_NUM_ALGORITHMS; a++) {
       graphs[a]->nChannels = std::min(allGather3Data[i].graphInfo[a].nChannels, graphs[a]->nChannels);
       graphs[a]->sameChannels = std::min(allGather3Data[i].graphInfo[a].sameChannels, graphs[a]->sameChannels);
@@ -2039,13 +2072,6 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   NCCLCHECKGOTO(devCommSetup(comm), ret, fail);
 
   timers[TIMER_INIT_CONNECT] = clockNano() -  timers[TIMER_INIT_CONNECT];
-
-  if (mscclEnabled() && (comm->topo->mscclEnabled || mscclForceEnabled())) {
-    WARN("MSCCL is deprecated, please be careful with this feature!");
-    NCCLCHECK(mscclInit(comm));
-    mscclStatus& status = mscclGetStatus(comm);
-    status.needsProxy |= mscclNeedsProxy;
-  }
 
   /* Local intra-node barrier */
   NCCLCHECKGOTO(bootstrapIntraNodeBarrier(comm->bootstrap, comm->localRankToRank, comm->localRank, comm->localRanks, comm->localRankToRank[0]), ret, fail);
@@ -2361,62 +2387,6 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
   // Allocate Temp Buffer for Direct Reduce Scatter
   if (IsArchMatch(archName,"gfx950")) {
     NCCLCHECK(ncclCudaMalloc(&(comm->tempBuff), TEMP_BUFF_SIZE));
-  }
-
-#ifdef ENABLE_MSCCLPP
-  if (job->parent) {
-    if (job->parent->mscclppCompatible) {
-      INFO(NCCL_INIT, "MSCCL++: Splitting a compatible communicator; using parent mscclpp_comm");
-      comm->mscclppCompatible = true;
-      comm->mscclpp_threshold = job->parent->mscclpp_threshold;
-      comm->mscclpp_comm = job->parent->mscclpp_comm;
-      const ncclUniqueId& parentUniqueId = ncclCommToUniqueIdMap[job->parent];
-      auto& mscclppUniqueId = mscclpp_uniqueIdMap[parentUniqueId];
-      mscclpp_uniqueIdReverseMap[mscclppUniqueId].insert(parentUniqueId);
-      ncclCommToUniqueIdMap[comm] = parentUniqueId;
-    }
-  }
-  else
-#endif
-  if (rcclParamMscclppEnabled()) {
-#ifdef ENABLE_MSCCLPP
-    if (mscclEnabled() && (comm->topo->mscclEnabled || mscclForceEnabled()) && mscclppCommCompatible(comm)) {
-      comm->mscclppCompatible = IsArchMatch(archName, "gfx942") || IsArchMatch(archName, "gfx950");
-      if (comm->mscclppCompatible) {
-        bool mapContainsId = (mscclpp_uniqueIdMap.count(*job->commId) > 0);
-        auto& mscclppUniqueId = mscclpp_uniqueIdMap[*job->commId];
-        if (comm->localRank == 0 && !mapContainsId) {
-          NCCLCHECKGOTO(mscclpp_ncclGetUniqueId(&mscclppUniqueId), res, fail);
-          TRACE_CALL("mscclpp_ncclGetUniqueId(0x%llx)", (unsigned long long)getHash(mscclppUniqueId.internal, NCCL_UNIQUE_ID_BYTES));
-        }
-
-        NCCLCHECKGOTO(bootstrapIntraNodeBroadcast(comm->bootstrap, comm->localRankToRank, comm->localRank, comm->localRanks, 0, &mscclppUniqueId, sizeof(mscclppUniqueId)), res, fail);
-        unsigned long long mscclppUniqueIdHash; (void)mscclppUniqueIdHash;
-        TRACE_CALL("bootstrapIntraNodeBroadcast(rank=%d, nranks=%d, root=%d, bcastData=hash:0x%llx)", comm->localRank, comm->localRanks, 0, (mscclppUniqueIdHash = (unsigned long long)getHash(mscclppUniqueId.internal, NCCL_UNIQUE_ID_BYTES)));
-        mscclpp_uniqueIdReverseMap[mscclppUniqueId].insert(*job->commId);
-
-        comm->mscclpp_threshold = rcclParamMscclppThreshold();
-        INFO(NCCL_INIT, "MSCCL++: Enabled! Msg size threshold=%zu", comm->mscclpp_threshold);
-
-        NCCLCHECKGOTO(mscclpp_ncclCommInitRank(&(comm->mscclpp_comm), job->nranks, mscclppUniqueId, job->myrank), res, fail);
-        TRACE_CALL("mscclpp_ncclCommInitRank (*comm=%p, nranks=%d, commId=hash:0x%llx, myrank=%d)", comm->mscclpp_comm, job->nranks, mscclppUniqueIdHash, job->myrank);
-        mscclpp_commToUniqueIdMap[comm->mscclpp_comm] = mscclppUniqueId;
-        ncclCommToUniqueIdMap[comm] = *job->commId;
-        if (rcclParamMscclppForceEnabled()) {
-          comm->mscclppForceEnable = true;
-        } else {
-          comm->mscclppForceEnable = false;
-        }
-      } else {
-        WARN("MSCCL++: Cannot enable MSCCL++ on %s architecture", devProp.gcnArchName);
-      }
-    } else {
-      comm->mscclppCompatible = false;
-      WARN("MSCCL++: Cannot enable MSCCL++; environment is not MSCCL compatible");
-    }
-#else
-    WARN("MSCCL++: Feature not enabled. ENABLE_MSCCLPP must be defined at compile-time to enable this feature.");
-#endif
   }
 
   NCCLCHECKGOTO(latency_profiler::collTraceInit(comm), res, fail);
@@ -3094,15 +3064,10 @@ fail:
 }
 
 static ncclResult_t commCleanup(ncclComm_t comm) {
-  bool mscclEnabledForTopo = comm->topo->mscclEnabled;
-
   CUDACHECK(cudaSetDevice(comm->cudaDev));
   if (comm->tuner != NULL) {
     NCCLCHECK(comm->tuner->finalize(comm->tunerContext));
     NCCLCHECK(ncclTunerPluginUnload(comm));
-  }
-  if (mscclEnabled() && (mscclEnabledForTopo || mscclForceEnabled())) {
-    NCCLCHECK(mscclTeardown(comm));
   }
   NCCLCHECK(commFree(comm));
 
@@ -3229,29 +3194,6 @@ ncclResult_t ncclCommDestroy_impl(ncclComm_t comm) {
     return ncclSuccess;
   }
   INFO(NCCL_INIT, "Memory used = %ld", allocTracker[comm->cudaDev].totalAllocSize);
-
-#ifdef ENABLE_MSCCLPP
-  if (comm->mscclppCompatible) {
-    auto& mscclppUniqueId = mscclpp_commToUniqueIdMap[comm->mscclpp_comm];
-    auto& uniqueIds = mscclpp_uniqueIdReverseMap[mscclppUniqueId];
-    auto& ncclUniqueId = ncclCommToUniqueIdMap[comm];
-    if (uniqueIds.find(ncclUniqueId) == uniqueIds.end()) {
-      WARN("MSCCL++: comm=%p not found in mscclpp_uniqueIdReverseMap for key=%p", comm, comm->mscclpp_comm);
-    }
-    uniqueIds.erase(ncclUniqueId);
-    if (uniqueIds.size() == 0) {
-      mscclpp_uniqueIdReverseMap.erase(mscclppUniqueId);
-      ncclResult_t res = mscclpp_ncclCommDestroy(comm->mscclpp_comm);
-      TRACE_CALL("mscclpp_ncclCommDestroy");
-      if (res != ncclSuccess) {
-        WARN("MSCCL++: mscclpp_ncclCommDestroy failed (%s)", ncclGetErrorString(res));
-      }
-    }
-
-    comm->mscclppCompatible = false;
-    comm->mscclpp_comm = nullptr;
-  }
-#endif
 
 #ifdef ENABLE_ROCSHMEM
   if (comm->enableRocshmem) {
