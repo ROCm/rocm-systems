@@ -24,11 +24,6 @@ from importlib import resources
 from pathlib import Path
 from typing import Iterable
 
-from perfxpert.cli._tui_session import (
-    bind_tui_session_env,
-    cleanup_tui_session_env,
-    clear_tui_session_env,
-)
 from perfxpert.tools._tooldep import require_tool
 
 __all__ = [
@@ -46,31 +41,77 @@ _BRANDING_VERSION = "0.2.0"
 # Known opencode subcommands (v1.4.x) — a single bare positional that matches
 # one of these MUST be forwarded as a subcommand, not treated as the CWD.
 # Derived from opencode/packages/opencode/src/cli/cmd/*.ts.
-_OPENCODE_SUBCOMMANDS = frozenset({
-    "account",
-    "acp",
-    "agent",
-    "auth",      # legacy alias for account
-    "config",
-    "db",
-    "debug",
-    "export",
-    "generate",
-    "github",
-    "import",
-    "mcp",
-    "models",
-    "pr",
-    "plug",
-    "plugin",
-    "providers",
-    "run",
-    "serve",
-    "session",
-    "stats",
-    "tui",
-    "web",
-})
+_OPENCODE_SUBCOMMANDS = frozenset(
+    {
+        "account",
+        "acp",
+        "agent",
+        "auth",  # legacy alias for account
+        "completion",
+        "config",
+        "db",
+        "debug",
+        "export",
+        "generate",
+        "github",
+        "import",
+        "mcp",
+        "models",
+        "pr",
+        "plug",
+        "plugin",
+        "providers",
+        "run",
+        "serve",
+        "session",
+        "stats",
+        "upgrade",
+        "web",
+    }
+)
+_OPENCODE_VALUE_FLAGS = frozenset(
+    {
+        "--agent",
+        "--attach",
+        "--command",
+        "--config",
+        "--cors",
+        "--dir",
+        "--file",
+        "--format",
+        "--glob",
+        "--hostname",
+        "--limit",
+        "--log-level",
+        "--max-count",
+        "--mdns-domain",
+        "--method",
+        "--model",
+        "--models",
+        "--mode",
+        "--password",
+        "--path",
+        "--permission",
+        "--port",
+        "--prompt",
+        "--project",
+        "--provider",
+        "--query",
+        "--session",
+        "--theme",
+        "--thinking",
+        "--title",
+        "--token",
+        "--tool",
+        "--tools",
+        "--variant",
+        "-f",
+        "-m",
+        "-n",
+        "-p",
+        "-s",
+    }
+)
 
 # Subcommands the perfxpert launcher handles itself (does NOT exec opencode).
 # Kept in sync with `perfxpert/__main__.py`; descriptions are surfaced by
@@ -291,11 +332,38 @@ def _help_flag_precedes_subcommand(argv: Iterable[str]) -> bool:
     verbatim. Only the bare `perfxpert-code --help` case should print our
     banner.
     """
-    for tok in argv:
-        if tok in {"--help", "-h"}:
-            return True
-        if not tok.startswith("-"):
+    args = list(argv)
+    first_positional = _first_positional_index(args)
+    idx = 0
+    while idx < len(args):
+        token = args[idx]
+        if token == "--":
             return False
+        if _flag_takes_value(token):
+            if "=" not in token:
+                idx += 1
+            idx += 1
+            continue
+        if token in {"--help", "-h"}:
+            return first_positional is None or idx < first_positional
+        idx += 1
+    return False
+
+
+def _has_unconsumed_help_flag(argv: list[str]) -> bool:
+    idx = 0
+    while idx < len(argv):
+        token = argv[idx]
+        if token == "--":
+            return False
+        if _flag_takes_value(token):
+            if "=" not in token:
+                idx += 1
+            idx += 1
+            continue
+        if token in {"--help", "-h"}:
+            return True
+        idx += 1
     return False
 
 
@@ -334,12 +402,7 @@ def route_subcommand(argv: list[str]) -> tuple[str, list[str]]:
     "Failed to change directory to ...doctor" bug reported in session
     ses_25e1.
     """
-    # Find the first non-flag positional token (flags start with '-').
-    first_positional: str | None = None
-    for a in argv:
-        if not a.startswith("-"):
-            first_positional = a
-            break
+    first_positional = _first_positional(argv)
 
     if first_positional is None:
         return ("opencode_default", list(argv))
@@ -361,6 +424,9 @@ def route_subcommand(argv: list[str]) -> tuple[str, list[str]]:
                 break
         return ("user_opencode", out)
 
+    if first_positional == "tui":
+        return ("opencode_default", _strip_tui_alias(argv))
+
     if first_positional in _OPENCODE_SUBCOMMANDS:
         return ("opencode_subcommand", list(argv))
 
@@ -368,26 +434,126 @@ def route_subcommand(argv: list[str]) -> tuple[str, list[str]]:
 
 
 def _first_positional(argv: list[str]) -> str | None:
-    for token in argv:
-        if not token.startswith("-"):
-            return token
-    return None
+    positional = _first_positional_index(argv)
+    return argv[positional] if positional is not None else None
+
+
+def _positional_tokens(argv: list[str]) -> list[str]:
+    return [argv[idx] for idx in _positional_indices(argv)]
+
+
+def _first_positional_index(argv: list[str]) -> int | None:
+    indices = _positional_indices(argv)
+    return indices[0] if indices else None
+
+
+def _positional_indices(argv: list[str]) -> list[int]:
+    indices: list[int] = []
+    idx = 0
+    while idx < len(argv):
+        token = argv[idx]
+        if token == "--":
+            indices.extend(range(idx + 1, len(argv)))
+            break
+        if _flag_takes_value(token):
+            if "=" not in token:
+                idx += 1
+            idx += 1
+            continue
+        if token.startswith("-"):
+            idx += 1
+            continue
+        indices.append(idx)
+        idx += 1
+    return indices
+
+
+def _flag_takes_value(token: str) -> bool:
+    flag = token.split("=", 1)[0]
+    return flag in _OPENCODE_VALUE_FLAGS
+
+
+def _strip_tui_alias(argv: list[str]) -> list[str]:
+    out = list(argv)
+    tui_idx = _first_positional_index(out)
+    if tui_idx is None or out[tui_idx] != "tui":
+        return out
+    del out[tui_idx]
+
+    dir_value = _option_value(out, "--dir")
+    if dir_value:
+        out = _remove_option_value(out, "--dir")
+        if _first_positional_index(out) is None:
+            out.append(dir_value)
+    return out
 
 
 def _is_interactive_opencode_launch(kind: str, argv_out: list[str]) -> bool:
+    if _has_unconsumed_help_flag(argv_out):
+        return False
     if kind == "opencode_default":
         return True
-    return kind == "opencode_subcommand" and _first_positional(argv_out) == "tui"
+    positionals = _positional_tokens(argv_out)
+    return kind == "opencode_subcommand" and bool(positionals) and positionals[0] == "tui"
 
 
 def _resolve_workload_cwd(kind: str, argv_out: list[str]) -> Path:
+    dir_value = _option_value(argv_out, "--dir")
+    if dir_value:
+        candidate = Path(dir_value).expanduser()
+        if candidate.is_dir():
+            return candidate.resolve()
+    positionals = _positional_tokens(argv_out)
     if kind == "opencode_default":
-        first = _first_positional(argv_out)
-        if first:
-            candidate = Path(first).expanduser()
+        if positionals:
+            candidate = Path(positionals[0]).expanduser()
             if candidate.is_dir():
                 return candidate.resolve()
+    if kind == "opencode_subcommand" and len(positionals) >= 2 and positionals[0] == "tui":
+        candidate = Path(positionals[1]).expanduser()
+        if candidate.is_dir():
+            return candidate.resolve()
     return Path.cwd()
+
+
+def _option_value(argv: list[str], flag: str) -> str | None:
+    prefix = f"{flag}="
+    idx = 0
+    while idx < len(argv):
+        token = argv[idx]
+        if token == "--":
+            return None
+        if token == flag and idx + 1 < len(argv):
+            return argv[idx + 1]
+        if token.startswith(prefix):
+            return token[len(prefix) :]
+        if _flag_takes_value(token):
+            if "=" not in token:
+                idx += 1
+            idx += 1
+        else:
+            idx += 1
+    return None
+
+
+def _remove_option_value(argv: list[str], flag: str) -> list[str]:
+    prefix = f"{flag}="
+    out: list[str] = []
+    idx = 0
+    while idx < len(argv):
+        token = argv[idx]
+        if token == "--":
+            out.extend(argv[idx:])
+            break
+        if token == flag:
+            idx += 2
+            continue
+        if token.startswith(prefix):
+            idx += 1
+            continue
+        out.append(token)
+        idx += 1
+    return out
 
 
 def _run_install_patches(argv: list[str]) -> int:
@@ -403,7 +569,7 @@ def _run_install_patches(argv: list[str]) -> int:
     here = Path(__file__).resolve()
     candidates = [
         here.parent.parent.parent / "scripts" / "build-bundled-opencode.sh",  # editable install
-        Path.cwd() / "scripts" / "build-bundled-opencode.sh",                 # dev cwd
+        Path.cwd() / "scripts" / "build-bundled-opencode.sh",  # dev cwd
     ]
     script: Path | None = None
     for c in candidates:
@@ -461,21 +627,18 @@ def _inject_perfxpert_agent_for_run(argv_out: list[str]) -> list[str]:
         "yes",
     }:
         return argv_out
+    if _has_unconsumed_help_flag(argv_out):
+        return argv_out
 
-    # First non-flag positional must be "run".
-    run_idx: int | None = None
-    for i, tok in enumerate(argv_out):
-        if tok.startswith("-"):
-            continue
-        if tok == "run":
-            run_idx = i
-        break  # stop at first positional either way
+    run_idx = _first_positional_index(argv_out)
+    if run_idx is not None and argv_out[run_idx] != "run":
+        run_idx = None
 
     if run_idx is None:
         return argv_out
 
     # User already specified --agent somewhere?
-    if any(tok == "--agent" or tok.startswith("--agent=") for tok in argv_out):
+    if _has_unconsumed_option(argv_out, "--agent"):
         return argv_out
 
     # Insert after `run`. argv is [maybe-flags..., 'run', message_tokens...].
@@ -483,6 +646,24 @@ def _inject_perfxpert_agent_for_run(argv_out: list[str]) -> list[str]:
     new_argv.insert(run_idx + 1, "--agent")
     new_argv.insert(run_idx + 2, "perfxpert")
     return new_argv
+
+
+def _has_unconsumed_option(argv: list[str], option: str) -> bool:
+    idx = 0
+    while idx < len(argv):
+        token = argv[idx]
+        if token == "--":
+            return False
+        flag = token.split("=", 1)[0]
+        if flag == option:
+            return True
+        if _flag_takes_value(token):
+            if "=" not in token:
+                idx += 1
+            idx += 1
+        else:
+            idx += 1
+    return False
 
 
 def _exec_perfxpert_subcommand(argv: list[str]) -> int:
@@ -530,8 +711,7 @@ def _run_uninstall(remaining_argv: list[str]) -> int:
 
     if backend is None:
         sys.stderr.write(
-            "perfxpert-code uninstall: which backend?\n"
-            "  Usage: perfxpert-code uninstall {claude,gemini,codex}\n"
+            "perfxpert-code uninstall: which backend?\n" "  Usage: perfxpert-code uninstall {claude,gemini,codex}\n"
         )
         return 2
 
@@ -550,8 +730,7 @@ def _run_uninstall(remaining_argv: list[str]) -> int:
         adapter = CodexAdapter()
     else:
         sys.stderr.write(
-            f"perfxpert-code uninstall: unknown backend {backend!r}. "
-            "Expected one of: claude, gemini, codex.\n"
+            f"perfxpert-code uninstall: unknown backend {backend!r}. " "Expected one of: claude, gemini, codex.\n"
         )
         return 2
 
@@ -562,9 +741,7 @@ def _run_uninstall(remaining_argv: list[str]) -> int:
     # Dry-run preview + confirmation.
     plan = adapter.plan(cwd)
     if not quiet:
-        sys.stderr.write(
-            f"perfxpert-code uninstall {backend}: will remove\n"
-        )
+        sys.stderr.write(f"perfxpert-code uninstall {backend}: will remove\n")
         for action in plan.actions:
             sys.stderr.write(f"    - (reverse) {action}\n")
 
@@ -594,9 +771,7 @@ def _run_uninstall(remaining_argv: list[str]) -> int:
         for action in report.actions:
             sys.stderr.write(f"  {action}\n")
         if report.skipped_due_to_drift:
-            sys.stderr.write(
-                "\nRefused to remove these files (marker drift):\n"
-            )
+            sys.stderr.write("\nRefused to remove these files (marker drift):\n")
             for p in report.skipped_due_to_drift:
                 sys.stderr.write(f"  - {p}\n")
             return 1
@@ -658,7 +833,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"\033[31mperfxpert-code opencode: {e}\033[0m", file=sys.stderr)
             return 1
         env = dict(os.environ)
-        clear_tui_session_env(env)
+        _clear_tui_session_env(env)
         try:
             proc = subprocess.run([str(binary), *argv_out], env=env, check=False)
         except KeyboardInterrupt:
@@ -699,13 +874,20 @@ def main(argv: list[str] | None = None) -> int:
     # We do NOT use the EXECUTION-tool env whitelist here because opencode is the
     # user's interactive session and they explicitly consent to it.
     env = dict(os.environ)
-    clear_tui_session_env(env)
+    _clear_tui_session_env(env)
     # Recursion guard marker (spec §5.8 / R10)
     env["PERFXPERT_IN_OPENCODE_SESSION"] = "1"
     env["PERFXPERT_WORKLOAD_CWD"] = str(_resolve_workload_cwd(kind, argv_out))
     tui_token_bound = _is_interactive_opencode_launch(kind, argv_out)
     if tui_token_bound:
-        bind_tui_session_env(env)
+        try:
+            _bind_tui_session_env(env)
+        except (ImportError, OSError, RuntimeError) as exc:
+            print(
+                f"\033[31mperfxpert-code: cannot start TUI workflow import authority: {exc}\033[0m",
+                file=sys.stderr,
+            )
+            return 1
     # Disable opencode's auto-update check — it prompts with upstream branding
     # and, if confirmed, would replace our patched bundle with upstream.
     env.setdefault("OPENCODE_DISABLE_AUTOUPDATE", "1")
@@ -736,8 +918,38 @@ def main(argv: list[str] | None = None) -> int:
         return 130
     finally:
         if tui_token_bound:
-            cleanup_tui_session_env(env)
+            _cleanup_tui_session_env(env)
     return proc.returncode
+
+
+def _clear_tui_session_env(env: dict[str, str]) -> None:
+    try:
+        from perfxpert.cli._tui_session import clear_tui_session_env
+
+        clear_tui_session_env(env)
+    except ImportError:
+        for key in (
+            "PERFXPERT_TUI_INTERACTIVE",
+            "PERFXPERT_TUI_SESSION_TOKEN",
+            "PERFXPERT_TUI_SESSION_SOCKET",
+            "PERFXPERT_TUI_SESSION_TOKEN_FILE",
+        ):
+            env.pop(key, None)
+
+
+def _bind_tui_session_env(env: dict[str, str]) -> None:
+    from perfxpert.cli._tui_session import bind_tui_session_env
+
+    bind_tui_session_env(env)
+
+
+def _cleanup_tui_session_env(env: dict[str, str]) -> None:
+    try:
+        from perfxpert.cli._tui_session import cleanup_tui_session_env
+
+        cleanup_tui_session_env(env)
+    except ImportError:
+        _clear_tui_session_env(env)
 
 
 def _prepare_runtime_config_dir(src_config_dir: Path) -> Path:
@@ -761,9 +973,7 @@ def _prepare_runtime_config_dir(src_config_dir: Path) -> Path:
                 shutil.copy2(f, target)
         return runtime_dir
 
-    cache_root = Path(
-        os.environ.get("XDG_CACHE_HOME", str(Path.home() / ".cache"))
-    ).expanduser()
+    cache_root = Path(os.environ.get("XDG_CACHE_HOME", str(Path.home() / ".cache"))).expanduser()
     try:
         return _stage_into(cache_root / "perfxpert" / "opencode")
     except OSError:

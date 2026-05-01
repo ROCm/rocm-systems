@@ -14,8 +14,6 @@ import sys
 from pathlib import Path
 from typing import Callable, Dict, List
 
-from perfxpert.cli._tui_session import clear_tui_session_env
-
 __all__ = [
     "_exec_backend",
     "is_help_request",
@@ -136,7 +134,7 @@ def _run_adapter(adapter, remaining_argv: list[str]) -> int:
         # Just exec the backend with --help; adapter.spawn returns
         # the exit code if spawn_strategy == "subprocess".
         env = dict(os.environ)
-        clear_tui_session_env(env)
+        _clear_tui_session_env(env)
         env[RECURSION_GUARD_ENV] = adapter.name
         return adapter.spawn(remaining_argv, env, Path.cwd())
 
@@ -159,28 +157,36 @@ def _run_adapter(adapter, remaining_argv: list[str]) -> int:
             quiet=flags.quiet,
         )
     except Exception as exc:
-        sys.stderr.write(
-            f"perfxpert-code {adapter.name}: install failed: {exc}\n"
-        )
+        sys.stderr.write(f"perfxpert-code {adapter.name}: install failed: {exc}\n")
         return 1
 
     if flags.dry_run:
-        sys.stderr.write(
-            f"[DRY-RUN] Would exec: {adapter.binary_name} {' '.join(flags.remaining)}\n"
-        )
+        sys.stderr.write(f"[DRY-RUN] Would exec: {adapter.binary_name} {' '.join(flags.remaining)}\n")
         return 0
 
     env = dict(os.environ)
-    clear_tui_session_env(env)
+    _clear_tui_session_env(env)
     env[RECURSION_GUARD_ENV] = adapter.name
     env["PERFXPERT_WORKLOAD_CWD"] = str(Path.cwd())
     if not flags.quiet:
-        sys.stderr.write(
-            f"perfxpert-code {adapter.name}: MCP verified; launching "
-            f"{adapter.binary_name} ...\n"
-        )
+        sys.stderr.write(f"perfxpert-code {adapter.name}: MCP verified; launching " f"{adapter.binary_name} ...\n")
         sys.stderr.flush()
     return adapter.spawn(flags.remaining, env, Path.cwd())
+
+
+def _clear_tui_session_env(env: dict[str, str]) -> None:
+    try:
+        from perfxpert.cli._tui_session import clear_tui_session_env
+
+        clear_tui_session_env(env)
+    except ImportError:
+        for key in (
+            "PERFXPERT_TUI_INTERACTIVE",
+            "PERFXPERT_TUI_SESSION_TOKEN",
+            "PERFXPERT_TUI_SESSION_SOCKET",
+            "PERFXPERT_TUI_SESSION_TOKEN_FILE",
+        ):
+            env.pop(key, None)
 
 
 def _exec_backend(name: str, remaining_argv: list[str]) -> int:
@@ -206,9 +212,7 @@ def _exec_backend(name: str, remaining_argv: list[str]) -> int:
 
     handler = BACKEND_REGISTRY.get(name)
     if handler is None:
-        sys.stderr.write(
-            f"perfxpert-code: no handler registered for backend {name!r}.\n"
-        )
+        sys.stderr.write(f"perfxpert-code: no handler registered for backend {name!r}.\n")
         return 2
 
     return handler(remaining_argv)

@@ -54,6 +54,32 @@ def _write_adapter_fixture(root):
     (skill / "SKILL.md").write_text("Use this skill for optimization workflow.\n", encoding="utf-8")
 
 
+@pytest.fixture(autouse=True)
+def active_tui_session(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "perfxpert.integrations.external_workflow._has_active_tui_session",
+        lambda: True,
+    )
+
+
+def test_inspect_external_workflow_requires_active_tui_session(tmp_path, monkeypatch) -> None:
+    source = tmp_path / "adapter"
+    source.mkdir()
+    (source / "README.md").write_text("Profiler workflow.\n", encoding="utf-8")
+    monkeypatch.setattr(
+        "perfxpert.integrations.external_workflow._has_active_tui_session",
+        lambda: False,
+    )
+
+    with pytest.raises(ExternalWorkflowError, match="active perfxpert-code TUI session"):
+        inspect_external_workflow(
+            str(source),
+            interactive=True,
+            cache_root=tmp_path / "cache",
+            persist=False,
+        )
+
+
 def test_inspect_external_workflow_discovers_advisory_hooks(tmp_path) -> None:
     source = tmp_path / "adapter"
     _write_adapter_fixture(source)
@@ -83,6 +109,7 @@ def test_inspect_external_workflow_discovers_advisory_hooks(tmp_path) -> None:
     assert plan["manifest_path"]
     manifest = json.loads(Path(plan["manifest_path"]).read_text(encoding="utf-8"))
     assert manifest["adapter_id"] == plan["adapter_id"]
+    assert manifest["manifest_path"] == plan["manifest_path"]
     assert Path(plan["manifest_path"]).parent == tmp_path / "cache" / "adapters"
 
 
@@ -94,7 +121,7 @@ def test_url_source_requires_interactive_network_consent(tmp_path) -> None:
             cache_root=tmp_path / "cache",
         )
 
-    with pytest.raises(ExternalWorkflowError, match="--allow-network"):
+    with pytest.raises(ExternalWorkflowError, match="explicit network consent"):
         inspect_external_workflow(
             "https://github.com/example/perf-workflow",
             interactive=True,
@@ -158,9 +185,9 @@ def test_https_source_clone_and_cache_reuse(tmp_path, monkeypatch) -> None:
     def fake_run(cmd, **kwargs):
         calls.append(list(cmd))
         assert kwargs["env"]["GIT_TERMINAL_PROMPT"] == "0"
+        assert "GIT_CONFIG_COUNT" not in kwargs["env"]
         assert kwargs["env"]["GIT_CONFIG_NOSYSTEM"] == "1"
         assert kwargs["env"]["GIT_CONFIG_GLOBAL"] == os.devnull
-        assert "GIT_CONFIG_COUNT" not in kwargs["env"]
         if "clone" in cmd or "checkout" in cmd:
             assert "http.extraHeader=" in cmd
             assert "credential.helper=" in cmd
@@ -168,9 +195,16 @@ def test_https_source_clone_and_cache_reuse(tmp_path, monkeypatch) -> None:
             checkout = _git_checkout_from_clone_cmd(cmd)
             checkout.mkdir(parents=True)
             (checkout / ".git").mkdir()
-            (checkout / "README.md").write_text("Profiler and validation workflow.\n", encoding="utf-8")
             return SimpleNamespace(returncode=0, stdout="", stderr="")
+        if "ls-tree" in cmd:
+            return SimpleNamespace(returncode=0, stdout="README.md\n", stderr="")
         if "sparse-checkout" in cmd or "checkout" in cmd:
+            if "sparse-checkout" in cmd:
+                assert "README.md" in cmd
+                assert "docs" not in cmd
+            if "checkout" in cmd:
+                checkout = Path(cmd[cmd.index("-C") + 1])
+                (checkout / "README.md").write_text("Profiler and validation workflow.\n", encoding="utf-8")
             return SimpleNamespace(returncode=0, stdout="", stderr="")
         if cmd[0] == "git" and cmd[3:5] == ["rev-parse", "HEAD"]:
             return SimpleNamespace(returncode=0, stdout="abc123\n", stderr="")
@@ -196,7 +230,9 @@ def test_https_source_clone_and_cache_reuse(tmp_path, monkeypatch) -> None:
     )
 
     clone_calls = [cmd for cmd in calls if _is_clone_cmd(cmd)]
+    checkout_calls = [cmd for cmd in calls if "checkout" in cmd and "sparse-checkout" not in cmd]
     assert len(clone_calls) == 1
+    assert len(checkout_calls) == 1
     assert "--filter" in clone_calls[0]
     assert "blob:none" in clone_calls[0]
     assert "--no-checkout" in clone_calls[0]
@@ -204,6 +240,134 @@ def test_https_source_clone_and_cache_reuse(tmp_path, monkeypatch) -> None:
     assert first["materialized_path"] == second["materialized_path"]
     assert first["source"] == source_url
     assert first["provenance"]["commit"] == "abc123"
+
+
+def test_https_sparse_checkout_rejects_glob_pattern_paths(tmp_path, monkeypatch) -> None:
+    source_url = "https://github.com/example/perf-workflow"
+    calls: list[list[str]] = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append(list(cmd))
+        if _is_clone_cmd(cmd):
+            checkout = _git_checkout_from_clone_cmd(cmd)
+            checkout.mkdir(parents=True)
+            (checkout / ".git").mkdir()
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+        if "ls-tree" in cmd:
+            return SimpleNamespace(returncode=0, stdout="docs/*.md\ndocs/safe.md\n", stderr="")
+        if "sparse-checkout" in cmd:
+            assert "docs/*.md" not in cmd
+            assert "docs/safe.md" in cmd
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+        if "checkout" in cmd:
+            checkout = Path(cmd[cmd.index("-C") + 1])
+            docs = checkout / "docs"
+            docs.mkdir()
+            (docs / "safe.md").write_text("Profiler workflow.\n", encoding="utf-8")
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+        if cmd[0] == "git" and cmd[3:5] == ["rev-parse", "HEAD"]:
+            return SimpleNamespace(returncode=0, stdout="abc123\n", stderr="")
+        if cmd[0] == "git" and cmd[3:6] == ["remote", "get-url", "origin"]:
+            return SimpleNamespace(returncode=0, stdout=source_url + "\n", stderr="")
+        raise AssertionError(f"unexpected command: {cmd!r}")
+
+    monkeypatch.setattr("perfxpert.integrations.external_workflow.subprocess.run", fake_run)
+
+    plan = inspect_external_workflow(
+        source_url,
+        interactive=True,
+        allow_network=True,
+        cache_root=tmp_path / "cache",
+        persist=False,
+    )
+
+    assert "docs/safe.md" in plan["inspected_files"]
+    assert "docs/*.md" not in plan["inspected_files"]
+
+
+def test_git_error_redacts_proxy_url_credentials(tmp_path, monkeypatch) -> None:
+    def fake_run(cmd, **kwargs):
+        return SimpleNamespace(
+            returncode=1,
+            stdout="",
+            stderr=(
+                "fatal: unable to access proxy http://user:secret-proxy@example.com:8080\n"
+                "fatal: unable to access proxy https://ghp_tokenonly@example.com\n"
+            ),
+        )
+
+    monkeypatch.setattr("perfxpert.integrations.external_workflow.subprocess.run", fake_run)
+
+    with pytest.raises(ExternalWorkflowError) as exc:
+        inspect_external_workflow(
+            "https://github.com/example/perf-workflow",
+            interactive=True,
+            allow_network=True,
+            cache_root=tmp_path / "cache",
+        )
+
+    assert "secret-proxy" not in str(exc.value)
+    assert "ghp_tokenonly" not in str(exc.value)
+    assert "http://<redacted>@" in str(exc.value)
+    assert "https://<redacted>@" in str(exc.value)
+
+
+def test_git_error_redacts_compound_secret_keys(tmp_path, monkeypatch) -> None:
+    def fake_run(cmd, **kwargs):
+        return SimpleNamespace(
+            returncode=1,
+            stdout="",
+            stderr="fatal: access_token=secret-token client_secret=secret-client api-key=secret-api\n",
+        )
+
+    monkeypatch.setattr("perfxpert.integrations.external_workflow.subprocess.run", fake_run)
+
+    with pytest.raises(ExternalWorkflowError) as exc:
+        inspect_external_workflow(
+            "https://github.com/example/perf-workflow",
+            interactive=True,
+            allow_network=True,
+            cache_root=tmp_path / "cache",
+        )
+
+    message = str(exc.value)
+    assert "secret-token" not in message
+    assert "secret-client" not in message
+    assert "secret-api" not in message
+    assert "access_token=<redacted>" in message
+    assert "client_secret=<redacted>" in message
+    assert "api-key=<redacted>" in message
+
+
+def test_git_error_redacts_authorization_headers(tmp_path, monkeypatch) -> None:
+    def fake_run(cmd, **kwargs):
+        return SimpleNamespace(
+            returncode=1,
+            stdout="",
+            stderr=(
+                "Proxy-Authorization: Bearer secret-bearer\n"
+                "Authorization: Basic secret-basic\n"
+                "X-Api-Token: secret-header\n"
+            ),
+        )
+
+    monkeypatch.setattr("perfxpert.integrations.external_workflow.subprocess.run", fake_run)
+
+    with pytest.raises(ExternalWorkflowError) as exc:
+        inspect_external_workflow(
+            "https://github.com/example/perf-workflow",
+            interactive=True,
+            allow_network=True,
+            cache_root=tmp_path / "cache",
+        )
+
+    message = str(exc.value)
+    assert "secret-bearer" not in message
+    assert "secret-basic" not in message
+    assert "secret-header" not in message
+    assert "Proxy-Authorization: <redacted>" in message
+    assert "Authorization: <redacted>" in message
+    assert "X-Api-Token: <redacted>" in message
 
 
 def test_https_clone_failure_is_runtime_error(tmp_path, monkeypatch) -> None:
@@ -235,6 +399,8 @@ def test_corrupt_file_cache_is_replaced_for_url_source(tmp_path, monkeypatch) ->
             (checkout / ".git").mkdir()
             (checkout / "README.md").write_text("Profiler workflow.\n", encoding="utf-8")
             return SimpleNamespace(returncode=0, stdout="", stderr="")
+        if "ls-tree" in cmd:
+            return SimpleNamespace(returncode=0, stdout="README.md\n", stderr="")
         if "sparse-checkout" in cmd or "checkout" in cmd:
             return SimpleNamespace(returncode=0, stdout="", stderr="")
         if cmd[0] == "git" and cmd[3:5] == ["rev-parse", "HEAD"]:
@@ -294,6 +460,8 @@ def test_partial_cache_without_sentinel_is_replaced(tmp_path, monkeypatch) -> No
             (checkout / ".git").mkdir()
             (checkout / "README.md").write_text("Profiler workflow.\n", encoding="utf-8")
             return SimpleNamespace(returncode=0, stdout="", stderr="")
+        if "ls-tree" in cmd:
+            return SimpleNamespace(returncode=0, stdout="README.md\n", stderr="")
         if "sparse-checkout" in cmd or "checkout" in cmd:
             return SimpleNamespace(returncode=0, stdout="", stderr="")
         if cmd[0] == "git" and cmd[3:5] == ["rev-parse", "HEAD"]:
@@ -326,6 +494,8 @@ def test_clone_finalize_failure_is_runtime_error(tmp_path, monkeypatch) -> None:
             (checkout / ".git").mkdir()
             (checkout / "README.md").write_text("Profiler workflow.\n", encoding="utf-8")
             return SimpleNamespace(returncode=0, stdout="", stderr="")
+        if "ls-tree" in cmd:
+            return SimpleNamespace(returncode=0, stdout="README.md\n", stderr="")
         if "sparse-checkout" in cmd or "checkout" in cmd:
             return SimpleNamespace(returncode=0, stdout="", stderr="")
         raise AssertionError(f"unexpected command: {cmd!r}")
@@ -461,7 +631,7 @@ def test_scan_depth_cap_warns(tmp_path, monkeypatch) -> None:
     assert any("deeper than 1 levels" in warning for warning in plan["warnings"])
 
 
-def test_file_source_uses_parent_directory_and_package_bins(tmp_path) -> None:
+def test_directory_source_discovers_package_bins(tmp_path) -> None:
     source = tmp_path / "adapter"
     source.mkdir()
     (source / "README.md").write_text("A profiler helper.\n", encoding="utf-8")
@@ -471,7 +641,7 @@ def test_file_source_uses_parent_directory_and_package_bins(tmp_path) -> None:
     )
 
     plan = inspect_external_workflow(
-        str(source / "README.md"),
+        str(source),
         interactive=True,
         cache_root=tmp_path / "cache",
         persist=False,
@@ -480,6 +650,37 @@ def test_file_source_uses_parent_directory_and_package_bins(tmp_path) -> None:
     names = {cap["name"] for cap in plan["capabilities"] if cap["kind"] == "entry_point"}
     assert names == {"adapter-mcp", "adapter-prof"}
     assert plan["materialized_path"] == str(source)
+
+
+def test_file_source_is_rejected_instead_of_widening_to_parent(tmp_path) -> None:
+    source = tmp_path / "adapter"
+    source.mkdir()
+    (source / "README.md").write_text("Profiler workflow.\n", encoding="utf-8")
+
+    with pytest.raises(ExternalWorkflowError, match="must be a directory"):
+        inspect_external_workflow(
+            str(source / "README.md"),
+            interactive=True,
+            cache_root=tmp_path / "cache",
+            persist=False,
+        )
+
+
+def test_local_source_rejects_symlink_parent(tmp_path) -> None:
+    target = tmp_path / "target"
+    target.mkdir()
+    (target / "adapter").mkdir()
+    (target / "adapter" / "README.md").write_text("Profiler workflow.\n", encoding="utf-8")
+    linked = tmp_path / "linked"
+    linked.symlink_to(target, target_is_directory=True)
+
+    with pytest.raises(ExternalWorkflowError, match="symlinks"):
+        inspect_external_workflow(
+            str(linked / "adapter"),
+            interactive=True,
+            cache_root=tmp_path / "cache",
+            persist=False,
+        )
 
 
 def test_relative_source_and_default_cache_use_workload_cwd(tmp_path, monkeypatch) -> None:
@@ -575,6 +776,10 @@ def test_malformed_mcp_descriptors_are_sanitized(tmp_path) -> None:
                 "mcpServers": {
                     "bad": "not-an-object",
                     "dangerous": {"command": "adapter-mcp; rm -rf /", "args": ["serve"]},
+                    "env_args": {"command": "env", "args": ["TOKEN=secret-value", "adapter-mcp", "serve"]},
+                    "env_secret": {"command": "TOKEN=secret-value adapter-mcp", "args": ["serve"]},
+                    "env_wrapper": {"command": "env TOKEN=secret-value adapter-mcp"},
+                    "empty_env": {"command": "TOKEN= adapter-mcp"},
                     "invalid": {"command": 42, "args": "serve"},
                     "string_secret": {"command": "adapter-mcp --token secret-value"},
                     "valid": {"command": "valid-mcp", "args": ["serve"]},
@@ -592,8 +797,24 @@ def test_malformed_mcp_descriptors_are_sanitized(tmp_path) -> None:
     )
 
     servers = {server["name"]: server for server in plan["mcp_servers"]}
-    assert set(servers) == {"dangerous", "invalid", "string_secret", "valid"}
+    assert set(servers) == {
+        "dangerous",
+        "empty_env",
+        "env_args",
+        "env_secret",
+        "env_wrapper",
+        "invalid",
+        "string_secret",
+        "valid",
+    }
     assert servers["dangerous"]["command"] is None
+    assert servers["empty_env"]["command"] == "adapter-mcp"
+    assert servers["env_args"]["command"] == "adapter-mcp"
+    assert servers["env_args"]["arg_count"] == 3
+    assert servers["env_secret"]["command"] == "adapter-mcp"
+    assert servers["env_secret"]["arg_count"] == 2
+    assert servers["env_wrapper"]["command"] == "adapter-mcp"
+    assert servers["env_wrapper"]["arg_count"] == 2
     assert servers["invalid"]["command"] is None
     assert servers["invalid"]["args"] == []
     assert servers["string_secret"]["command"] == "adapter-mcp"
@@ -606,6 +827,38 @@ def test_malformed_mcp_descriptors_are_sanitized(tmp_path) -> None:
     assert "secret-value" not in json.dumps(plan)
     assert any("unsafe MCP command" in warning for warning in plan["warnings"])
     assert any("Redacted 1 MCP argument" in warning for warning in plan["warnings"])
+
+
+def test_local_git_provenance_redacts_query_secrets(tmp_path, monkeypatch) -> None:
+    source = tmp_path / "adapter"
+    source.mkdir()
+    (source / ".git").mkdir()
+    (source / "README.md").write_text("Profiler workflow.\n", encoding="utf-8")
+
+    def fake_run(cmd, **kwargs):
+        if cmd[0] == "git" and cmd[3:5] == ["rev-parse", "HEAD"]:
+            return SimpleNamespace(returncode=0, stdout="abc123\n", stderr="")
+        if cmd[0] == "git" and cmd[3:6] == ["remote", "get-url", "origin"]:
+            return SimpleNamespace(
+                returncode=0,
+                stdout="https://example.com/repo.git?token=secret-value#frag\n",
+                stderr="",
+            )
+        raise AssertionError(f"unexpected command: {cmd!r}")
+
+    monkeypatch.setattr("perfxpert.integrations.external_workflow.subprocess.run", fake_run)
+
+    plan = inspect_external_workflow(
+        str(source),
+        interactive=True,
+        cache_root=tmp_path / "cache",
+        persist=True,
+    )
+    manifest = Path(plan["manifest_path"]).read_text(encoding="utf-8")
+
+    assert plan["provenance"]["remote"] == "https://example.com/repo.git"
+    assert "secret-value" not in json.dumps(plan)
+    assert "secret-value" not in manifest
 
 
 def test_opencode_mcp_shape_is_discovered_and_args_redacted(tmp_path) -> None:

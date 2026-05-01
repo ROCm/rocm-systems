@@ -19,6 +19,18 @@ def _disable_repo_local_patched_binary(monkeypatch):
     )
 
 
+@pytest.fixture(autouse=True)
+def _stub_tui_session_socket_binding(monkeypatch, tmp_path):
+    def fake_bind(env):
+        env["PERFXPERT_TUI_INTERACTIVE"] = "1"
+        env[TUI_SESSION_TOKEN_ENV] = "test-token"
+        env[TUI_SESSION_SOCKET_ENV] = str(tmp_path / "auth.sock")
+        return True
+
+    monkeypatch.setattr(opencode_launcher, "_bind_tui_session_env", fake_bind)
+    monkeypatch.setattr(opencode_launcher, "_cleanup_tui_session_env", lambda env: None)
+
+
 def test_version_flag_short_circuit(capsys):
     rc = opencode_launcher.main(["--version"])
     assert rc == 0
@@ -47,9 +59,7 @@ def test_perfxpert_code_help_hides_workflow(capsys, monkeypatch):
 
 
 def test_route_workflow_import_to_perfxpert_dispatch():
-    kind, argv = opencode_launcher.route_subcommand(
-        ["workflow", "import", "./tool", "--interactive"]
-    )
+    kind, argv = opencode_launcher.route_subcommand(["workflow", "import", "./tool", "--interactive"])
 
     assert kind == "perfxpert"
     assert argv == ["workflow", "import", "./tool", "--interactive"]
@@ -105,9 +115,7 @@ def test_resolve_user_binary_raises_when_override_missing(tmp_path: Path, monkey
         opencode_launcher.resolve_user_opencode_binary()
 
 
-def test_resolve_user_binary_raises_when_override_not_executable(
-    tmp_path: Path, monkeypatch
-):
+def test_resolve_user_binary_raises_when_override_not_executable(tmp_path: Path, monkeypatch):
     """The explicit upstream-opencode escape hatch validates execute bit."""
     fake_bin = tmp_path / "fake-opencode"
     fake_bin.write_text("#!/bin/sh\necho fake\n")
@@ -224,8 +232,10 @@ def test_default_tui_sets_interactive_marker(monkeypatch):
 
 def test_tui_subcommand_sets_interactive_marker(monkeypatch):
     captured_env = {}
+    captured_cmd = []
 
     def fake_run(cmd, **kwargs):
+        captured_cmd.extend(cmd)
         captured_env.update(kwargs.get("env") or {})
         return mock.MagicMock(returncode=0)
 
@@ -238,6 +248,346 @@ def test_tui_subcommand_sets_interactive_marker(monkeypatch):
     assert captured_env.get("PERFXPERT_TUI_INTERACTIVE") == "1"
     assert captured_env.get(TUI_SESSION_TOKEN_ENV)
     assert not Path(captured_env[TUI_SESSION_SOCKET_ENV]).exists()
+    assert captured_cmd[1:] == []
+
+
+def test_interactive_launch_fails_when_tui_authority_cannot_bind(monkeypatch, capsys):
+    run_called = False
+
+    def fake_run(cmd, **kwargs):
+        nonlocal run_called
+        run_called = True
+        return mock.MagicMock(returncode=0)
+
+    def fail_bind(env):
+        raise RuntimeError("Linux peer-credential sockets unavailable")
+
+    monkeypatch.setattr(opencode_launcher.subprocess, "run", fake_run)
+    monkeypatch.setattr(opencode_launcher, "resolve_opencode_binary", lambda: Path("/bin/true"))
+    monkeypatch.setattr(opencode_launcher, "_bind_tui_session_env", fail_bind)
+    monkeypatch.setenv("PERFXPERT_CODE_NO_BANNER", "1")
+
+    rc = opencode_launcher.main(["tui"])
+
+    assert rc == 1
+    assert run_called is False
+    assert "cannot start TUI workflow import authority" in capsys.readouterr().err
+
+
+def test_option_value_tui_does_not_select_tui_subcommand(monkeypatch):
+    captured_env = {}
+    captured_cmd = []
+
+    def fake_run(cmd, **kwargs):
+        captured_cmd.extend(cmd)
+        captured_env.update(kwargs.get("env") or {})
+        return mock.MagicMock(returncode=0)
+
+    monkeypatch.setattr(opencode_launcher.subprocess, "run", fake_run)
+    monkeypatch.setattr(opencode_launcher, "resolve_opencode_binary", lambda: Path("/bin/true"))
+    monkeypatch.setenv("PERFXPERT_CODE_NO_BANNER", "1")
+
+    opencode_launcher.main(["--model", "tui", "run", "optimize ./app"])
+
+    assert "PERFXPERT_TUI_INTERACTIVE" not in captured_env
+    assert TUI_SESSION_TOKEN_ENV not in captured_env
+    assert captured_cmd[1:] == ["--model", "tui", "run", "--agent", "perfxpert", "optimize ./app"]
+
+
+def test_value_flags_do_not_route_or_inject_from_their_values(monkeypatch):
+    captured_env = {}
+    captured_cmd = []
+
+    def fake_run(cmd, **kwargs):
+        captured_cmd.extend(cmd)
+        captured_env.update(kwargs.get("env") or {})
+        return mock.MagicMock(returncode=0)
+
+    monkeypatch.setattr(opencode_launcher.subprocess, "run", fake_run)
+    monkeypatch.setattr(opencode_launcher, "resolve_opencode_binary", lambda: Path("/bin/true"))
+    monkeypatch.setenv("PERFXPERT_CODE_NO_BANNER", "1")
+
+    opencode_launcher.main(
+        [
+            "--prompt",
+            "doctor",
+            "-m",
+            "tui",
+            "--command",
+            "claude",
+            "--cors",
+            "http://localhost:3000",
+            "--mdns-domain",
+            "tui.local",
+            "--password",
+            "run",
+            "-p",
+            "tui",
+            "run",
+            "optimize ./app",
+        ]
+    )
+
+    assert "PERFXPERT_TUI_INTERACTIVE" not in captured_env
+    assert captured_cmd[1:] == [
+        "--prompt",
+        "doctor",
+        "-m",
+        "tui",
+        "--command",
+        "claude",
+        "--cors",
+        "http://localhost:3000",
+        "--mdns-domain",
+        "tui.local",
+        "--password",
+        "run",
+        "-p",
+        "tui",
+        "run",
+        "--agent",
+        "perfxpert",
+        "optimize ./app",
+    ]
+
+
+def test_format_flag_before_run_still_routes_and_injects_agent(monkeypatch):
+    captured_env = {}
+    captured_cmd = []
+
+    def fake_run(cmd, **kwargs):
+        captured_cmd.extend(cmd)
+        captured_env.update(kwargs.get("env") or {})
+        return mock.MagicMock(returncode=0)
+
+    monkeypatch.setattr(opencode_launcher.subprocess, "run", fake_run)
+    monkeypatch.setattr(opencode_launcher, "resolve_opencode_binary", lambda: Path("/bin/true"))
+    monkeypatch.setenv("PERFXPERT_CODE_NO_BANNER", "1")
+
+    rc = opencode_launcher.main(["--format", "json", "run", "optimize ./app"])
+
+    assert rc == 0
+    assert "PERFXPERT_TUI_INTERACTIVE" not in captured_env
+    assert captured_cmd[1:] == ["--format", "json", "run", "--agent", "perfxpert", "optimize ./app"]
+
+
+def test_bare_help_passthrough_does_not_require_tui_authority(monkeypatch):
+    captured_env = {}
+    captured_cmd = []
+    bind_called = False
+
+    def fake_run(cmd, **kwargs):
+        captured_cmd.extend(cmd)
+        captured_env.update(kwargs.get("env") or {})
+        return mock.MagicMock(returncode=0)
+
+    def fail_bind(env):
+        nonlocal bind_called
+        bind_called = True
+        raise RuntimeError("Linux peer-credential sockets unavailable")
+
+    monkeypatch.setattr(opencode_launcher.subprocess, "run", fake_run)
+    monkeypatch.setattr(opencode_launcher, "resolve_opencode_binary", lambda: Path("/bin/true"))
+    monkeypatch.setattr(opencode_launcher, "_bind_tui_session_env", fail_bind)
+    monkeypatch.setenv("PERFXPERT_CODE_NO_BANNER", "1")
+
+    rc = opencode_launcher.main(["--help"])
+
+    assert rc == 0
+    assert bind_called is False
+    assert captured_cmd[1:] == ["--help"]
+    assert "PERFXPERT_TUI_INTERACTIVE" not in captured_env
+
+
+def test_tui_help_passthrough_does_not_require_tui_authority(monkeypatch):
+    captured_env = {}
+    captured_cmd = []
+    bind_called = False
+
+    def fake_run(cmd, **kwargs):
+        captured_cmd.extend(cmd)
+        captured_env.update(kwargs.get("env") or {})
+        return mock.MagicMock(returncode=0)
+
+    def fail_bind(env):
+        nonlocal bind_called
+        bind_called = True
+        raise RuntimeError("Linux peer-credential sockets unavailable")
+
+    monkeypatch.setattr(opencode_launcher.subprocess, "run", fake_run)
+    monkeypatch.setattr(opencode_launcher, "resolve_opencode_binary", lambda: Path("/bin/true"))
+    monkeypatch.setattr(opencode_launcher, "_bind_tui_session_env", fail_bind)
+    monkeypatch.setenv("PERFXPERT_CODE_NO_BANNER", "1")
+
+    rc = opencode_launcher.main(["tui", "--help"])
+
+    assert rc == 0
+    assert bind_called is False
+    assert captured_cmd[1:] == ["--help"]
+    assert "PERFXPERT_TUI_INTERACTIVE" not in captured_env
+
+
+def test_help_shaped_option_value_does_not_trigger_wrapper_help(monkeypatch, capsys):
+    captured_cmd = []
+    captured_env = {}
+
+    def fake_run(cmd, **kwargs):
+        captured_cmd.extend(cmd)
+        captured_env.update(kwargs.get("env") or {})
+        return mock.MagicMock(returncode=0)
+
+    monkeypatch.setattr(opencode_launcher.subprocess, "run", fake_run)
+    monkeypatch.setattr(opencode_launcher, "resolve_opencode_binary", lambda: Path("/bin/true"))
+    monkeypatch.setenv("PERFXPERT_CODE_NO_BANNER", "1")
+
+    rc = opencode_launcher.main(["--model", "--help", "run", "optimize ./app"])
+
+    assert rc == 0
+    assert "AMD ROCm PerfXpert" not in capsys.readouterr().out
+    assert "PERFXPERT_TUI_INTERACTIVE" not in captured_env
+    assert captured_cmd[1:] == ["--model", "--help", "run", "--agent", "perfxpert", "optimize ./app"]
+
+
+def test_agent_shaped_option_value_does_not_suppress_run_agent_injection(monkeypatch):
+    captured_cmd = []
+
+    def fake_run(cmd, **kwargs):
+        captured_cmd.extend(cmd)
+        return mock.MagicMock(returncode=0)
+
+    monkeypatch.setattr(opencode_launcher.subprocess, "run", fake_run)
+    monkeypatch.setattr(opencode_launcher, "resolve_opencode_binary", lambda: Path("/bin/true"))
+    monkeypatch.setenv("PERFXPERT_CODE_NO_BANNER", "1")
+
+    rc = opencode_launcher.main(["--model", "--agent", "run", "optimize ./app"])
+
+    assert rc == 0
+    assert captured_cmd[1:] == ["--model", "--agent", "run", "--agent", "perfxpert", "optimize ./app"]
+
+
+def test_run_help_is_forwarded_without_agent_injection(monkeypatch):
+    captured_cmd = []
+
+    def fake_run(cmd, **kwargs):
+        captured_cmd.extend(cmd)
+        return mock.MagicMock(returncode=0)
+
+    monkeypatch.setattr(opencode_launcher.subprocess, "run", fake_run)
+    monkeypatch.setattr(opencode_launcher, "resolve_opencode_binary", lambda: Path("/bin/true"))
+    monkeypatch.setenv("PERFXPERT_CODE_NO_BANNER", "1")
+
+    rc = opencode_launcher.main(["run", "--help"])
+
+    assert rc == 0
+    assert captured_cmd[1:] == ["run", "--help"]
+
+
+@pytest.mark.parametrize("subcommand", ["completion", "upgrade"])
+def test_opencode_maintenance_subcommands_do_not_bind_tui_authority(subcommand, monkeypatch):
+    captured_cmd = []
+    bind_called = False
+
+    def fake_run(cmd, **kwargs):
+        captured_cmd.extend(cmd)
+        return mock.MagicMock(returncode=0)
+
+    def fail_bind(env):
+        nonlocal bind_called
+        bind_called = True
+        raise RuntimeError("Linux peer-credential sockets unavailable")
+
+    monkeypatch.setattr(opencode_launcher.subprocess, "run", fake_run)
+    monkeypatch.setattr(opencode_launcher, "resolve_opencode_binary", lambda: Path("/bin/true"))
+    monkeypatch.setattr(opencode_launcher, "_bind_tui_session_env", fail_bind)
+    monkeypatch.setenv("PERFXPERT_CODE_NO_BANNER", "1")
+
+    rc = opencode_launcher.main([subcommand])
+
+    assert rc == 0
+    assert bind_called is False
+    assert captured_cmd[1:] == [subcommand]
+
+
+def test_upgrade_method_flag_before_subcommand_does_not_bind_tui_authority(monkeypatch):
+    captured_cmd = []
+    bind_called = False
+
+    def fake_run(cmd, **kwargs):
+        captured_cmd.extend(cmd)
+        return mock.MagicMock(returncode=0)
+
+    def fail_bind(env):
+        nonlocal bind_called
+        bind_called = True
+        raise RuntimeError("Linux peer-credential sockets unavailable")
+
+    monkeypatch.setattr(opencode_launcher.subprocess, "run", fake_run)
+    monkeypatch.setattr(opencode_launcher, "resolve_opencode_binary", lambda: Path("/bin/true"))
+    monkeypatch.setattr(opencode_launcher, "_bind_tui_session_env", fail_bind)
+    monkeypatch.setenv("PERFXPERT_CODE_NO_BANNER", "1")
+
+    rc = opencode_launcher.main(["--method", "npm", "upgrade"])
+
+    assert rc == 0
+    assert bind_called is False
+    assert captured_cmd[1:] == ["--method", "npm", "upgrade"]
+
+
+def test_tui_subcommand_workload_arg_sets_workload_cwd(tmp_path: Path, monkeypatch):
+    captured_env = {}
+    captured_cmd = []
+
+    def fake_run(cmd, **kwargs):
+        captured_cmd.extend(cmd)
+        captured_env.update(kwargs.get("env") or {})
+        return mock.MagicMock(returncode=0)
+
+    monkeypatch.setattr(opencode_launcher.subprocess, "run", fake_run)
+    monkeypatch.setattr(opencode_launcher, "resolve_opencode_binary", lambda: Path("/bin/true"))
+    monkeypatch.setenv("PERFXPERT_CODE_NO_BANNER", "1")
+
+    opencode_launcher.main(["tui", str(tmp_path)])
+
+    assert captured_env.get("PERFXPERT_TUI_INTERACTIVE") == "1"
+    assert captured_env.get("PERFXPERT_WORKLOAD_CWD") == str(tmp_path)
+    assert captured_cmd[1:] == [str(tmp_path)]
+
+
+def test_dir_option_sets_workload_cwd(tmp_path: Path, monkeypatch):
+    captured_env = {}
+    captured_cmd = []
+
+    def fake_run(cmd, **kwargs):
+        captured_cmd.extend(cmd)
+        captured_env.update(kwargs.get("env") or {})
+        return mock.MagicMock(returncode=0)
+
+    monkeypatch.setattr(opencode_launcher.subprocess, "run", fake_run)
+    monkeypatch.setattr(opencode_launcher, "resolve_opencode_binary", lambda: Path("/bin/true"))
+    monkeypatch.setenv("PERFXPERT_CODE_NO_BANNER", "1")
+
+    opencode_launcher.main(["--dir", str(tmp_path), "tui"])
+
+    assert captured_env.get("PERFXPERT_TUI_INTERACTIVE") == "1"
+    assert captured_env.get("PERFXPERT_WORKLOAD_CWD") == str(tmp_path)
+    assert captured_cmd[1:] == [str(tmp_path)]
+
+
+def test_dir_shaped_option_value_does_not_set_workload_cwd(tmp_path: Path, monkeypatch):
+    captured_env = {}
+    cwd = Path.cwd()
+
+    def fake_run(cmd, **kwargs):
+        captured_env.update(kwargs.get("env") or {})
+        return mock.MagicMock(returncode=0)
+
+    monkeypatch.setattr(opencode_launcher.subprocess, "run", fake_run)
+    monkeypatch.setattr(opencode_launcher, "resolve_opencode_binary", lambda: Path("/bin/true"))
+    monkeypatch.setenv("PERFXPERT_CODE_NO_BANNER", "1")
+
+    opencode_launcher.main(["--model", "--dir", "run", "optimize ./app"])
+
+    assert captured_env.get("PERFXPERT_WORKLOAD_CWD") == str(cwd)
 
 
 def test_opencode_default_cwd_override_sets_workload_cwd(tmp_path: Path, monkeypatch):
@@ -374,9 +724,7 @@ def test_resolve_user_binary_autodiscovers_home_opencode_bin(tmp_path: Path, mon
         ".local/bin/opencode",
     ],
 )
-def test_resolve_user_binary_autodiscovers_multiple_wellknown_paths(
-    tmp_path: Path, monkeypatch, subpath
-):
+def test_resolve_user_binary_autodiscovers_multiple_wellknown_paths(tmp_path: Path, monkeypatch, subpath):
     """Each well-known upstream location must be auto-discovered for the escape hatch."""
     fake_home = tmp_path
     fake_bin = fake_home / subpath
@@ -422,9 +770,7 @@ def test_resolve_default_binary_missing_suggests_wrapper(monkeypatch, tmp_path: 
     assert "perfxpert-code opencode" in msg
 
 
-def test_resolve_user_binary_missing_suggests_upstream_install(
-    monkeypatch, tmp_path: Path
-):
+def test_resolve_user_binary_missing_suggests_upstream_install(monkeypatch, tmp_path: Path):
     """The explicit upstream-opencode escape hatch gives upstream install help."""
     monkeypatch.delenv("PERFXPERT_OPENCODE_PATH", raising=False)
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))

@@ -8,7 +8,6 @@ import os
 import sys
 from pathlib import Path
 
-from perfxpert.cli._tui_session import has_active_tui_session
 from perfxpert.integrations.external_workflow import (
     ExternalWorkflowError,
     ExternalWorkflowRuntimeError,
@@ -34,28 +33,28 @@ def add_args(parser: argparse.ArgumentParser) -> None:
     import_parser.add_argument(
         "--interactive",
         action="store_true",
-        help="Required consent marker; only perfxpert-code interactive sessions should pass it",
+        help=argparse.SUPPRESS,
     )
     import_parser.add_argument(
         "--allow-network",
         action="store_true",
-        help="Allow cloning an https:// source after interactive consent",
+        help=argparse.SUPPRESS,
     )
     import_parser.add_argument(
         "--cache-root",
         type=Path,
         default=None,
-        help="Adapter cache root (defaults to ./.perfxpert/external-workflows)",
+        help=argparse.SUPPRESS,
     )
     import_parser.add_argument(
         "--json",
         action="store_true",
-        help="Print the full adapter manifest as JSON",
+        help=argparse.SUPPRESS,
     )
     import_parser.add_argument(
         "--no-persist",
         action="store_true",
-        help="Inspect only; do not write the adapter manifest",
+        help=argparse.SUPPRESS,
     )
 
 
@@ -69,7 +68,7 @@ def run_workflow(args: argparse.Namespace) -> int:
     if not args.interactive or not _in_perfxpert_tui_session():
         print(
             "perfxpert workflow import: external workflow adapters are TUI-interactive only; "
-            "rerun inside perfxpert-code with --interactive.",
+            "start perfxpert-code and ask inside the TUI to import the adapter.",
             file=sys.stderr,
         )
         return 2
@@ -107,4 +106,8 @@ def _print_summary(plan: dict[str, object]) -> None:
 
 
 def _in_perfxpert_tui_session() -> bool:
+    try:
+        from perfxpert.cli._tui_session import has_active_tui_session
+    except ImportError:
+        return False
     return has_active_tui_session(os.environ)

@@ -21,10 +21,11 @@ import tempfile
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlunparse
 
 
 MAX_CANDIDATE_FILES = 120
+MAX_DEFERRED_FILES = MAX_CANDIDATE_FILES
 MAX_SCANNED_DIRS = 512
 MAX_SCAN_DEPTH = 8
 MAX_CHILDREN_PER_DIR = 1024
@@ -72,6 +73,30 @@ _SPECIAL_NAMES = {
     "pyproject.toml",
 }
 _PRIORITY_DIR_NAMES = {"docs", "doc", "knowledge", "skills", "agents"}
+_SPARSE_TREE_PATTERNS = tuple(sorted(_SPECIAL_NAMES | _PRIORITY_DIR_NAMES))
+_GIT_ENV_PASSTHROUGH = {
+    "ALL_PROXY",
+    "CURL_CA_BUNDLE",
+    "GIT_SSL_CAINFO",
+    "HTTPS_PROXY",
+    "HTTP_PROXY",
+    "NO_PROXY",
+    "REQUESTS_CA_BUNDLE",
+    "SSL_CERT_FILE",
+    "all_proxy",
+    "https_proxy",
+    "http_proxy",
+    "no_proxy",
+}
+_ENV_ASSIGNMENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=.*$")
+_SECRET_KV_RE = re.compile(
+    r"(?i)\b([A-Za-z0-9_.-]*(?:token|api[_-]?key|password|passwd|secret|credential|authorization)"
+    r"[A-Za-z0-9_.-]*)=([^&\s#]+)"
+)
+_SECRET_HEADER_RE = re.compile(
+    r"(?im)\b((?:proxy-)?authorization|[A-Za-z0-9_.-]*(?:token|api[_-]?key|secret)[A-Za-z0-9_.-]*)" r"\s*:\s*([^\r\n]+)"
+)
+_URL_USERINFO_RE = re.compile(r"(?i)\b([a-z][a-z0-9+.-]*://)[^/\s@]+@")
 
 
 class ExternalWorkflowError(RuntimeError):
@@ -132,8 +157,8 @@ class ExternalWorkflowAdapterPlan:
     execution_allowed: bool = False
     authority: str = "advisory; PerfXpert MCP gate and correctness checks remain authoritative"
     target_host_scope: str = (
-        "discover and run target-dependent tools on the workload host; for SSH workflows, "
-        "inspect the remote host instead of the local controller"
+        "inspect advisory metadata on the workload host; any target-dependent tool execution "
+        "requires a separate explicit approval"
     )
     capabilities: list[ExternalWorkflowCapability] = field(default_factory=list)
     workflow_hints: list[str] = field(default_factory=list)
@@ -167,7 +192,11 @@ def inspect_external_workflow(
 
     if not interactive:
         raise ExternalWorkflowUsageError(
-            "external workflow import is TUI-interactive only; pass --interactive from perfxpert-code"
+            "external workflow import is TUI-interactive only; start perfxpert-code and ask inside the TUI"
+        )
+    if not _has_active_tui_session():
+        raise ExternalWorkflowUsageError(
+            "external workflow import is available only from an active perfxpert-code TUI session"
         )
 
     root = _default_cache_root() if cache_root is None else Path(cache_root).expanduser()
@@ -246,9 +275,7 @@ def _materialize_source(
         if parsed.query or parsed.fragment:
             raise ExternalWorkflowUsageError("external workflow URLs must not contain query strings or fragments")
         if not allow_network:
-            raise ExternalWorkflowUsageError(
-                "URL inspection requires --allow-network after explicit TUI consent"
-            )
+            raise ExternalWorkflowUsageError("URL inspection requires explicit network consent from the active TUI")
         if not interactive:
             raise ExternalWorkflowUsageError("URL inspection is TUI-interactive only")
         display_source = _redact_url(source)
@@ -265,12 +292,15 @@ def _materialize_source(
         path = _workflow_base_dir() / path
     if not path.exists():
         raise ExternalWorkflowUsageError(f"external workflow source not found: {source}")
+    _reject_symlink_ancestry(path)
     if path.is_symlink():
         raise ExternalWorkflowUsageError("external workflow source must not be a symlink")
     if path.is_file():
-        path = path.parent
+        raise ExternalWorkflowUsageError(
+            "external workflow source must be a directory; pass the adapter root instead of a file"
+        )
     elif not path.is_dir():
-        raise ExternalWorkflowUsageError("external workflow source must be a directory or regular file")
+        raise ExternalWorkflowUsageError("external workflow source must be a directory")
     return path.resolve(), "local-path", str(path.resolve()), []
 
 
@@ -337,31 +367,18 @@ def _run_git_clone_to_tmp(source: str, display_source: str, dest: Path) -> None:
         str(dest),
     ]
     _run_git_command(cmd, source, display_source, "clone")
+    sparse_paths = _select_sparse_checkout_paths(dest, source, display_source)
+    if not sparse_paths:
+        return
     _run_git_command(
-        [
-            "git",
-            "-c",
-            "credential.helper=",
-            "-c",
-            "core.askPass=",
+        _git_command_prefix()
+        + [
             "-C",
             str(dest),
             "sparse-checkout",
             "set",
             "--no-cone",
-            "README",
-            "README.md",
-            "README.rst",
-            ".mcp.json",
-            "mcp.json",
-            "opencode.json",
-            "pyproject.toml",
-            "package.json",
-            "docs",
-            "doc",
-            "knowledge",
-            "skills",
-            "agents",
+            *sparse_paths,
         ],
         source,
         display_source,
@@ -375,7 +392,34 @@ def _run_git_clone_to_tmp(source: str, display_source: str, dest: Path) -> None:
     )
 
 
+def _select_sparse_checkout_paths(dest: Path, source: str, display_source: str) -> list[str]:
+    cmd = _git_command_prefix() + [
+        "-C",
+        str(dest),
+        "ls-tree",
+        "-r",
+        "--name-only",
+        "HEAD",
+        "--",
+        *_SPARSE_TREE_PATTERNS,
+    ]
+    output = _run_git_command_output(cmd, source, display_source, "list source tree")
+    candidates: list[str] = []
+    for raw in output.splitlines():
+        rel = raw.strip()
+        if not _is_safe_repo_relative_path(rel):
+            continue
+        if not _is_candidate_repo_text_path(rel):
+            continue
+        candidates.append(rel)
+    return _top_candidate_relative_paths(candidates)
+
+
 def _run_git_command(cmd: list[str], source: str, display_source: str, action: str) -> None:
+    _run_git_command_output(cmd, source, display_source, action)
+
+
+def _run_git_command_output(cmd: list[str], source: str, display_source: str, action: str) -> str:
     try:
         proc = subprocess.run(
             cmd,
@@ -391,6 +435,7 @@ def _run_git_command(cmd: list[str], source: str, display_source: str, action: s
     if proc.returncode != 0:
         detail = _sanitize_clone_output((proc.stderr or proc.stdout or "").strip(), source, display_source)
         raise ExternalWorkflowRuntimeError(f"git {action} failed for external workflow source: {detail}")
+    return proc.stdout or ""
 
 
 def _git_command_prefix() -> list[str]:
@@ -409,7 +454,16 @@ def _git_env() -> dict[str, str]:
     env = {
         key: value
         for key, value in os.environ.items()
-        if key in {"PATH", "LANG", "LC_ALL", "LC_CTYPE", "TERM", "TMPDIR"}
+        if key
+        in {
+            "PATH",
+            "LANG",
+            "LC_ALL",
+            "LC_CTYPE",
+            "TERM",
+            "TMPDIR",
+            *_GIT_ENV_PASSTHROUGH,
+        }
     }
     env.update(
         {
@@ -431,6 +485,7 @@ def _git_env() -> dict[str, str]:
 def _candidate_files(root: Path) -> tuple[list[Path], list[str]]:
     files: list[Path] = []
     deferred_files: list[Path] = []
+    deferred_capped = False
     warnings: list[str] = []
     stack = [(root, 0)]
     scanned_dirs = 0
@@ -438,11 +493,9 @@ def _candidate_files(root: Path) -> tuple[list[Path], list[str]]:
         current, depth = stack.pop()
         scanned_dirs += 1
         if scanned_dirs > MAX_SCANNED_DIRS:
-            warnings.append(
-                f"Stopped scanning after {MAX_SCANNED_DIRS} directories; adapter inspection is partial."
-            )
+            warnings.append(f"Stopped scanning after {MAX_SCANNED_DIRS} directories; adapter inspection is partial.")
             break
-        children, child_warnings = _bounded_children(current)
+        children, child_warnings = _bounded_children(root, current)
         warnings.extend(child_warnings)
         next_dirs: list[Path] = []
         next_files: list[Path] = []
@@ -461,31 +514,37 @@ def _candidate_files(root: Path) -> tuple[list[Path], list[str]]:
                 continue
             if _is_candidate_text_file(child):
                 next_files.append(child)
-        for child in sorted(next_files, key=_candidate_priority):
-            priority, _ = _candidate_priority(child)
+        for child in sorted(next_files, key=lambda path: _candidate_priority(path, root)):
+            priority, _ = _candidate_priority(child, root)
             if priority <= 2:
                 files.append(child)
                 if len(files) >= MAX_CANDIDATE_FILES:
                     break
             else:
-                deferred_files.append(child)
-        for child in sorted(next_dirs, key=_candidate_priority, reverse=True):
+                if len(deferred_files) < MAX_DEFERRED_FILES:
+                    deferred_files.append(child)
+                else:
+                    deferred_capped = True
+        for child in sorted(next_dirs, key=lambda path: _candidate_priority(path, root), reverse=True):
             stack.append((child, depth + 1))
 
-    for child in sorted(deferred_files, key=_candidate_priority):
+    for child in sorted(deferred_files, key=lambda path: _candidate_priority(path, root)):
         if len(files) >= MAX_CANDIDATE_FILES:
             break
         files.append(child)
 
-    if len(files) >= MAX_CANDIDATE_FILES:
+    if deferred_capped:
         warnings.append(
-            f"Stopped scanning after {MAX_CANDIDATE_FILES} candidate files; adapter inspection is partial."
+            f"Stopped collecting low-priority files after {MAX_DEFERRED_FILES}; adapter inspection is partial."
         )
+
+    if len(files) >= MAX_CANDIDATE_FILES:
+        warnings.append(f"Stopped scanning after {MAX_CANDIDATE_FILES} candidate files; adapter inspection is partial.")
 
     return files, sorted(set(warnings))
 
 
-def _bounded_children(current: Path) -> tuple[list[Path], list[str]]:
+def _bounded_children(root: Path, current: Path) -> tuple[list[Path], list[str]]:
     warnings: list[str] = []
     priority_children = []
     seen: set[Path] = set()
@@ -512,18 +571,19 @@ def _bounded_children(current: Path) -> tuple[list[Path], list[str]]:
         return [], warnings
 
     children = priority_children + capped_children
-    return sorted(children, key=_candidate_priority), warnings
+    return sorted(children, key=lambda path: _candidate_priority(path, root)), warnings
 
 
-def _candidate_priority(path: Path) -> tuple[int, str]:
-    parts = {part.lower() for part in path.parts}
+def _candidate_priority(path: Path, root: Path | None = None) -> tuple[int, str]:
+    rel = _relative_candidate_path(path, root)
+    parts = {part.lower() for part in rel.parts}
     if path.name in _SPECIAL_NAMES:
-        return (0, path.name)
+        return (0, rel.as_posix())
     if parts & _PRIORITY_DIR_NAMES:
-        return (1, path.as_posix())
+        return (1, rel.as_posix())
     if path.suffix.lower() in {".json", ".toml", ".yaml", ".yml"}:
-        return (2, path.as_posix())
-    return (3, path.as_posix())
+        return (2, rel.as_posix())
+    return (3, rel.as_posix())
 
 
 def _is_candidate_text_file(path: Path) -> bool:
@@ -656,9 +716,7 @@ def _detect_mcp_servers(
                 continue
             command, arg_count = _mcp_command_and_arg_count(raw)
             if command is not None and not _is_safe_mcp_command(command):
-                plan.warnings.append(
-                    f"Ignored unsafe MCP command for {name!r}; review manually before registration."
-                )
+                plan.warnings.append(f"Ignored unsafe MCP command for {name!r}; review manually before registration.")
                 command = None
             if arg_count:
                 plan.warnings.append(
@@ -688,28 +746,58 @@ def _mcp_command_and_arg_count(raw: dict[str, object]) -> tuple[str | None, int]
     command = raw.get("command")
     args = raw.get("args", [])
     arg_count = 0
+    command_parts: list[str] = []
+    arg_parts = [arg for arg in args if isinstance(arg, str)] if isinstance(args, list) else []
     if isinstance(command, list):
         command_parts = [part for part in command if isinstance(part, str)]
-        if command_parts:
-            command = command_parts[0]
-            arg_count += max(0, len(command_parts) - 1)
-        else:
-            command = None
     elif isinstance(command, str):
         try:
             command_parts = shlex.split(command)
         except ValueError:
             command_parts = []
-        if command_parts:
-            command = command_parts[0]
-            arg_count += max(0, len(command_parts) - 1)
-        else:
-            command = None
-    if isinstance(args, list):
-        arg_count += sum(1 for arg in args if isinstance(arg, str))
-    else:
-        args = []
+    command = None
+    if command_parts and command_parts[0] == "env":
+        env_command, env_arg_count = _mcp_env_wrapped_command(command_parts + arg_parts)
+        return env_command, env_arg_count
+    for idx, token in enumerate(command_parts):
+        if _is_env_assignment_token(token) or _token_contains_secret_kv(token):
+            arg_count += 1
+            continue
+        command = token
+        arg_count += max(0, len(command_parts) - idx - 1)
+        break
+    arg_count += len(arg_parts)
     return command if isinstance(command, str) else None, arg_count
+
+
+def _mcp_env_wrapped_command(command_parts: list[str]) -> tuple[str | None, int]:
+    arg_count = 1
+    idx = 1
+    while idx < len(command_parts):
+        token = command_parts[idx]
+        if token == "--":
+            arg_count += 1
+            idx += 1
+            break
+        if token in {"-i", "--ignore-environment"}:
+            arg_count += 1
+            idx += 1
+            continue
+        if token in {"-u", "--unset"}:
+            arg_count += 1
+            idx += 1
+            if idx < len(command_parts):
+                arg_count += 1
+                idx += 1
+            continue
+        if _is_env_assignment_token(token) or _token_contains_secret_kv(token):
+            arg_count += 1
+            idx += 1
+            continue
+        if token.startswith("-"):
+            return None, len(command_parts)
+        return token, arg_count + max(0, len(command_parts) - idx - 1)
+    return None, arg_count
 
 
 def _detect_knowledge_links(
@@ -720,7 +808,8 @@ def _detect_knowledge_links(
     for path in files:
         rel = _relpath(path, root)
         rel_lower = rel.lower()
-        if "knowledge" in rel_lower or "/docs/" in rel_lower or rel_lower.startswith("docs/"):
+        rel_parts = set(rel_lower.split("/"))
+        if rel_parts & {"doc", "docs", "knowledge"}:
             plan.knowledge_links.append(
                 ExternalWorkflowKnowledgeLink(
                     path=rel,
@@ -842,6 +931,7 @@ def _write_manifest(cache_root: Path, plan: ExternalWorkflowAdapterPlan) -> Path
     path = _safe_cache_child(root, "adapters", f"{plan.adapter_id}.json")
     if path.is_symlink():
         raise ExternalWorkflowRuntimeError(f"manifest path must not be a symlink: {path}")
+    plan.manifest_path = str(path)
     payload = json.dumps(plan.to_dict(), indent=2, sort_keys=True) + "\n"
     fd, raw_tmp = tempfile.mkstemp(prefix=f".{plan.adapter_id}.", suffix=".tmp", dir=str(manifest_dir))
     tmp_path = Path(raw_tmp)
@@ -905,18 +995,26 @@ def _adapter_id(source: str) -> str:
 
 def _redact_url(source: str) -> str:
     parsed = urlparse(source)
-    if parsed.username or parsed.password:
-        return source.replace(parsed.netloc, parsed.hostname or "<redacted-host>")
-    return source
+    if parsed.scheme and parsed.netloc:
+        host = parsed.hostname or "<redacted-host>"
+        if ":" in host and not host.startswith("["):
+            host = f"[{host}]"
+        try:
+            port = parsed.port
+        except ValueError:
+            port = None
+        netloc = f"{host}:{port}" if port else host
+        source = urlunparse((parsed.scheme, netloc, parsed.path, "", "", ""))
+    return _redact_secret_kv(source)
 
 
 def _sanitize_clone_output(detail: str, source: str, display_source: str) -> str:
     if not detail:
         return "no diagnostic output"
     sanitized = detail.replace(source, display_source)
-    sanitized = re.sub(r"https://[^/\s:@]+:[^@\s]+@", "https://<redacted>@", sanitized)
-    sanitized = re.sub(r"(?i)(token|api[_-]?key|password|secret)=([^&\s]+)", r"\1=<redacted>", sanitized)
-    return sanitized
+    sanitized = _redact_url_userinfo(sanitized)
+    sanitized = _redact_secret_headers(sanitized)
+    return _redact_secret_kv(sanitized)
 
 
 def _read_git_provenance(root: Path) -> dict[str, str]:
@@ -950,3 +1048,82 @@ def _relpath(path: Path, root: Path) -> str:
         return path.relative_to(root).as_posix()
     except ValueError:
         return path.as_posix()
+
+
+def _has_active_tui_session() -> bool:
+    try:
+        from perfxpert.cli._tui_session import has_active_tui_session
+    except ImportError:
+        return False
+    return has_active_tui_session(os.environ)
+
+
+def _reject_symlink_ancestry(path: Path) -> None:
+    for candidate in [*reversed(path.parents), path]:
+        if not candidate.exists():
+            continue
+        try:
+            if candidate.is_symlink():
+                raise ExternalWorkflowUsageError("external workflow source path must not contain symlinks")
+        except OSError as exc:
+            raise ExternalWorkflowUsageError(f"could not inspect external workflow source path: {exc}") from exc
+
+
+def _relative_candidate_path(path: Path, root: Path | None) -> Path:
+    if root is None:
+        return path
+    try:
+        return path.relative_to(root)
+    except ValueError:
+        return path
+
+
+def _is_safe_repo_relative_path(path: str) -> bool:
+    if not path or path.startswith("/") or "\x00" in path:
+        return False
+    if any(ch in path for ch in "*?[\\"):
+        return False
+    parts = path.split("/")
+    return all(part not in {"", ".", ".."} for part in parts)
+
+
+def _is_candidate_repo_text_path(path: str) -> bool:
+    pure = Path(path)
+    return pure.name in _SPECIAL_NAMES or pure.suffix.lower() in _TEXT_SUFFIXES
+
+
+def _top_candidate_relative_paths(paths: list[str]) -> list[str]:
+    unique = sorted(set(paths), key=_relative_path_priority)
+    return unique[:MAX_CANDIDATE_FILES]
+
+
+def _relative_path_priority(path: str) -> tuple[int, str]:
+    pure = Path(path)
+    parts = {part.lower() for part in pure.parts}
+    if pure.name in _SPECIAL_NAMES:
+        return (0, path)
+    if parts & _PRIORITY_DIR_NAMES:
+        return (1, path)
+    if pure.suffix.lower() in {".json", ".toml", ".yaml", ".yml"}:
+        return (2, path)
+    return (3, path)
+
+
+def _is_env_assignment_token(token: str) -> bool:
+    return bool(_ENV_ASSIGNMENT_RE.match(token))
+
+
+def _token_contains_secret_kv(token: str) -> bool:
+    return bool(_SECRET_KV_RE.search(token))
+
+
+def _redact_secret_kv(text: str) -> str:
+    return _SECRET_KV_RE.sub(r"\1=<redacted>", text)
+
+
+def _redact_secret_headers(text: str) -> str:
+    return _SECRET_HEADER_RE.sub(r"\1: <redacted>", text)
+
+
+def _redact_url_userinfo(text: str) -> str:
+    return _URL_USERINFO_RE.sub(r"\1<redacted>@", text)

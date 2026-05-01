@@ -40,7 +40,7 @@ def _disable_repo_local_patched_binary(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-class TestHelpFlag:
+class TestHelpFlagRouting:
     """Bare `perfxpert-code --help` must print the perfxpert-owned banner.
 
     Per review I4: help flag discovery must list the documented
@@ -48,10 +48,9 @@ class TestHelpFlag:
     """
 
     @pytest.mark.parametrize("flag", ["--help", "-h"])
-    def test_help_flag_prints_perfxpert_banner_and_lists_subcommands(
-        self, flag, capsys, monkeypatch
-    ):
+    def test_help_flag_prints_perfxpert_banner_and_lists_subcommands(self, flag, capsys, monkeypatch):
         """--help / -h before any subcommand prints the perfxpert help banner."""
+
         # Force resolve_opencode_binary to fail so we exit early after the banner
         # instead of spawning the real opencode process.
         def _no_binary():
@@ -85,12 +84,7 @@ class TestHelpFlag:
 
     def test_help_flag_with_only_flags_preceding_is_still_help(self):
         """`perfxpert-code --verbose --help` — verbose is a flag, not a positional."""
-        assert (
-            opencode_launcher._help_flag_precedes_subcommand(
-                ["--verbose", "--help"]
-            )
-            is True
-        )
+        assert opencode_launcher._help_flag_precedes_subcommand(["--verbose", "--help"]) is True
 
     def test_help_flag_missing_returns_false(self):
         assert opencode_launcher._help_flag_precedes_subcommand([]) is False
@@ -148,6 +142,18 @@ def test_route_unknown_positional_is_default() -> None:
     assert out == ["/tmp/my-project"]
 
 
+def test_route_tui_alias_strips_nonexistent_opencode_subcommand() -> None:
+    kind, out = route_subcommand(["tui", "/tmp/my-project"])
+    assert kind == "opencode_default"
+    assert out == ["/tmp/my-project"]
+
+
+def test_route_tui_alias_maps_dir_option_to_default_project() -> None:
+    kind, out = route_subcommand(["--dir", "/tmp/my-project", "tui"])
+    assert kind == "opencode_default"
+    assert out == ["/tmp/my-project"]
+
+
 def test_route_flags_are_skipped_when_finding_first_positional() -> None:
     # `--print-logs stats` => stats is the first positional and must route.
     kind, out = route_subcommand(["--print-logs", "stats"])
@@ -199,9 +205,7 @@ class TestBundledPriority:
     ~/.opencode/bin/opencode (upstream, unpatched).
     """
 
-    def test_bundled_wins_over_wellknown(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path
-    ) -> None:
+    def test_bundled_wins_over_wellknown(self, monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
         """If both bundled and upstream exist, we pick bundled."""
         # Stub importlib.resources so _bundled/opencode is "present".
         bundled = tmp_path / "bundled" / "opencode"
@@ -236,9 +240,7 @@ class TestBundledPriority:
             def is_file(self):
                 return True
 
-        monkeypatch.setattr(
-            opencode_launcher.resources, "as_file", _fake_as_file
-        )
+        monkeypatch.setattr(opencode_launcher.resources, "as_file", _fake_as_file)
         monkeypatch.setattr(
             opencode_launcher.resources,
             "files",
@@ -247,13 +249,9 @@ class TestBundledPriority:
         monkeypatch.delenv("PERFXPERT_OPENCODE_PATH", raising=False)
 
         resolved = opencode_launcher.resolve_opencode_binary()
-        assert resolved == bundled, (
-            f"bundled must win over upstream; got {resolved}"
-        )
+        assert resolved == bundled, f"bundled must win over upstream; got {resolved}"
 
-    def test_env_override_does_not_replace_default_bundle(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path
-    ) -> None:
+    def test_env_override_does_not_replace_default_bundle(self, monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
         """PERFXPERT_OPENCODE_PATH is not a replacement for the default bundle."""
         explicit = tmp_path / "mycustom" / "opencode"
         explicit.parent.mkdir(parents=True)
@@ -313,9 +311,7 @@ class TestBundledPriority:
         def _fake_as_file(p):
             yield tmp_path / "bundled" / "missing"
 
-        monkeypatch.setattr(
-            opencode_launcher.resources, "as_file", _fake_as_file
-        )
+        monkeypatch.setattr(opencode_launcher.resources, "as_file", _fake_as_file)
         monkeypatch.setattr(
             opencode_launcher.resources,
             "files",
@@ -331,9 +327,7 @@ class TestBundledPriority:
         with pytest.raises(FileNotFoundError, match="bundled patched opencode"):
             opencode_launcher.resolve_opencode_binary()
 
-    def test_explicit_opencode_escape_hatch_uses_env_override(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path
-    ) -> None:
+    def test_explicit_opencode_escape_hatch_uses_env_override(self, monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
         explicit = tmp_path / "mycustom" / "opencode"
         explicit.parent.mkdir(parents=True)
         explicit.write_text("#!/bin/sh\nexit 0\n")
@@ -376,9 +370,7 @@ class TestBundledPriority:
         assert seen["cmd"] == [str(explicit), "models"]
         assert "PERFXPERT_IN_OPENCODE_SESSION" not in seen["env"]
 
-    def test_explicit_opencode_help_does_not_require_user_binary(
-        self, monkeypatch: pytest.MonkeyPatch, capsys
-    ) -> None:
+    def test_explicit_opencode_help_does_not_require_user_binary(self, monkeypatch: pytest.MonkeyPatch, capsys) -> None:
         monkeypatch.setattr(
             opencode_launcher,
             "resolve_user_opencode_binary",
@@ -401,44 +393,30 @@ class TestRunAutoAgentInject:
     """
 
     def test_inject_adds_agent_perfxpert_for_run(self) -> None:
-        out = opencode_launcher._inject_perfxpert_agent_for_run(
-            ["run", "optimize kernel X"]
-        )
+        out = opencode_launcher._inject_perfxpert_agent_for_run(["run", "optimize kernel X"])
         assert out == ["run", "--agent", "perfxpert", "optimize kernel X"]
 
     def test_inject_preserves_explicit_agent(self) -> None:
-        out = opencode_launcher._inject_perfxpert_agent_for_run(
-            ["run", "--agent", "build", "explain this"]
-        )
+        out = opencode_launcher._inject_perfxpert_agent_for_run(["run", "--agent", "build", "explain this"])
         # User override wins — inject is a no-op.
         assert out == ["run", "--agent", "build", "explain this"]
 
     def test_inject_handles_agent_equals_form(self) -> None:
-        out = opencode_launcher._inject_perfxpert_agent_for_run(
-            ["run", "--agent=plan", "my message"]
-        )
+        out = opencode_launcher._inject_perfxpert_agent_for_run(["run", "--agent=plan", "my message"])
         assert out == ["run", "--agent=plan", "my message"]
 
     def test_inject_noop_for_non_run_subcommand(self) -> None:
         # stats / auth / models don't take --agent; we must NOT inject.
-        assert opencode_launcher._inject_perfxpert_agent_for_run(["stats"]) == [
-            "stats"
-        ]
-        assert opencode_launcher._inject_perfxpert_agent_for_run(
-            ["models", "anthropic"]
-        ) == ["models", "anthropic"]
+        assert opencode_launcher._inject_perfxpert_agent_for_run(["stats"]) == ["stats"]
+        assert opencode_launcher._inject_perfxpert_agent_for_run(["models", "anthropic"]) == ["models", "anthropic"]
 
     def test_inject_honors_opt_out_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("PERFXPERT_NO_AUTO_AGENT", "1")
-        out = opencode_launcher._inject_perfxpert_agent_for_run(
-            ["run", "explain"]
-        )
+        out = opencode_launcher._inject_perfxpert_agent_for_run(["run", "explain"])
         # Opt-out → no inject.
         assert out == ["run", "explain"]
 
-    def test_main_run_sets_opencode_config_env(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path
-    ) -> None:
+    def test_main_run_sets_opencode_config_env(self, monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
         """The launcher must set OPENCODE_CONFIG so opencode loads our
         bundled opencode.json even when `run` keeps the user's CWD."""
         fake_bin = tmp_path / "opencode"
@@ -465,9 +443,7 @@ class TestRunAutoAgentInject:
             captured["env"] = kwargs.get("env", {})
             return _FakeProc(0)
 
-        monkeypatch.setattr(
-            "perfxpert.cli.opencode_launcher.subprocess.run", _fake_run
-        )
+        monkeypatch.setattr("perfxpert.cli.opencode_launcher.subprocess.run", _fake_run)
         rc = main(["run", "hello"])
         assert rc == 0
         env = captured["env"]
@@ -476,9 +452,7 @@ class TestRunAutoAgentInject:
         assert cfg is not None
         assert cfg.endswith("opencode.json"), cfg
 
-    def test_main_run_preserves_user_opencode_config(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path
-    ) -> None:
+    def test_main_run_preserves_user_opencode_config(self, monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
         """If user already exported OPENCODE_CONFIG, don't clobber it."""
         fake_bin = tmp_path / "opencode"
         fake_bin.write_text("#!/bin/sh\nexit 0\n")
@@ -504,9 +478,7 @@ class TestRunAutoAgentInject:
             captured["env"] = kwargs.get("env", {})
             return _FakeProc(0)
 
-        monkeypatch.setattr(
-            "perfxpert.cli.opencode_launcher.subprocess.run", _fake_run
-        )
+        monkeypatch.setattr("perfxpert.cli.opencode_launcher.subprocess.run", _fake_run)
         rc = main(["run", "hello"])
         assert rc == 0
         env = captured["env"]
@@ -524,9 +496,7 @@ def test_main_install_patches_dispatches_inline(
         captured["cmd"] = cmd
         return _FakeProc(0)
 
-    monkeypatch.setattr(
-        "perfxpert.cli.opencode_launcher.subprocess.run", _fake_run
-    )
+    monkeypatch.setattr("perfxpert.cli.opencode_launcher.subprocess.run", _fake_run)
     rc = main(["install-patches"])
     assert rc == 0
     cmd = captured["cmd"]
@@ -559,14 +529,10 @@ def test_main_doctor_invokes_python_m_perfxpert(monkeypatch: pytest.MonkeyPatch)
     assert rc == 0
     cmd = captured["cmd"]
     assert isinstance(cmd, list)
-    assert cmd[1:] == ["-m", "perfxpert", "doctor"], (
-        "expected python -m perfxpert doctor; got " + repr(cmd)
-    )
+    assert cmd[1:] == ["-m", "perfxpert", "doctor"], "expected python -m perfxpert doctor; got " + repr(cmd)
 
 
-def test_main_stats_is_passthrough_without_cwd_override(
-    monkeypatch: pytest.MonkeyPatch, tmp_path
-) -> None:
+def test_main_stats_is_passthrough_without_cwd_override(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
     """Issue 2: `perfxpert-code stats` must NOT be interpreted as CWD."""
     # Fake binary + config dir so resolve_* succeeds.
     fake_bin = tmp_path / "opencode"
@@ -612,10 +578,16 @@ def test_main_run_passes_prompt_through(monkeypatch: pytest.MonkeyPatch, tmp_pat
     fake_cfg.mkdir()
 
     monkeypatch.setattr(
-        "perfxpert.cli.opencode_launcher.resolve_opencode_binary", lambda: fake_bin,
+        "perfxpert.cli.opencode_launcher.resolve_opencode_binary",
+        lambda: fake_bin,
     )
     monkeypatch.setattr(
-        "perfxpert.cli.opencode_launcher.resolve_config_dir", lambda: fake_cfg,
+        "perfxpert.cli.opencode_launcher.resolve_config_dir",
+        lambda: fake_cfg,
+    )
+    monkeypatch.setattr(
+        "perfxpert.cli.opencode_launcher._bind_tui_session_env",
+        lambda env: env.update({"PERFXPERT_TUI_INTERACTIVE": "1"}),
     )
     monkeypatch.setenv("PERFXPERT_CODE_NO_BANNER", "1")
 
@@ -637,9 +609,7 @@ def test_main_run_passes_prompt_through(monkeypatch: pytest.MonkeyPatch, tmp_pat
     assert captured["kwargs"].get("cwd") is None  # type: ignore[union-attr]
 
 
-def test_main_default_invocation_stages_runtime_cfg_dir(
-    monkeypatch: pytest.MonkeyPatch, tmp_path
-) -> None:
+def test_main_default_invocation_stages_runtime_cfg_dir(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
     """Default (interactive) mode still cd's into the bundled runtime dir."""
     fake_bin = tmp_path / "opencode"
     fake_bin.write_text("#!/bin/sh\nexit 0\n")
@@ -649,10 +619,16 @@ def test_main_default_invocation_stages_runtime_cfg_dir(
     (fake_cfg / "opencode.json").write_text("{}")
 
     monkeypatch.setattr(
-        "perfxpert.cli.opencode_launcher.resolve_opencode_binary", lambda: fake_bin,
+        "perfxpert.cli.opencode_launcher.resolve_opencode_binary",
+        lambda: fake_bin,
     )
     monkeypatch.setattr(
-        "perfxpert.cli.opencode_launcher.resolve_config_dir", lambda: fake_cfg,
+        "perfxpert.cli.opencode_launcher.resolve_config_dir",
+        lambda: fake_cfg,
+    )
+    monkeypatch.setattr(
+        "perfxpert.cli.opencode_launcher._bind_tui_session_env",
+        lambda env: env.update({"PERFXPERT_TUI_INTERACTIVE": "1"}),
     )
     monkeypatch.setenv("PERFXPERT_CODE_NO_BANNER", "1")
 
@@ -684,16 +660,15 @@ class TestHelpFlag:
     """
 
     @pytest.mark.parametrize("flag", ["--help", "-h"])
-    def test_bare_help_flag_prints_perfxpert_banner(
-        self, flag: str, capsys, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_bare_help_flag_prints_perfxpert_banner(self, flag: str, capsys, monkeypatch: pytest.MonkeyPatch) -> None:
         # Ensure opencode is unresolved so main() short-circuits after
         # printing the banner (per the composed fallback behavior).
         def _raise(*_args, **_kwargs):
             raise FileNotFoundError("opencode not installed")
 
         monkeypatch.setattr(
-            "perfxpert.cli.opencode_launcher.resolve_opencode_binary", _raise,
+            "perfxpert.cli.opencode_launcher.resolve_opencode_binary",
+            _raise,
         )
         rc = main([flag])
         out = capsys.readouterr().out
@@ -732,27 +707,28 @@ class TestHelpFlag:
             return _FakeProc(0)
 
         monkeypatch.setattr(
-            "perfxpert.cli.opencode_launcher.subprocess.run", _fake_run,
+            "perfxpert.cli.opencode_launcher.subprocess.run",
+            _fake_run,
         )
         rc = main(["run", flag])
         assert rc == 0
         # The help flag was forwarded to opencode verbatim (not stripped).
-        assert flag in captured["cmd"]  # type: ignore[operator]
+        assert captured["cmd"][1:] == ["run", flag]  # type: ignore[index]
         # And because `run` is a known opencode subcommand, cwd is None
         # (user's project CWD preserved).
         assert captured["kwargs"].get("cwd") is None  # type: ignore[union-attr]
 
     def test_bare_help_short_circuits_before_opencode_missing_error(
-        self, capsys, monkeypatch: pytest.MonkeyPatch,
+        self,
+        capsys,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """If opencode isn't installed, bare --help MUST still print our
         banner and return 0 (per the composed fallback behavior).
         """
         monkeypatch.setattr(
             "perfxpert.cli.opencode_launcher.resolve_opencode_binary",
-            lambda: (_ for _ in ()).throw(
-                FileNotFoundError("opencode binary not found.")
-            ),
+            lambda: (_ for _ in ()).throw(FileNotFoundError("opencode binary not found.")),
         )
         rc = main(["--help"])
         assert rc == 0

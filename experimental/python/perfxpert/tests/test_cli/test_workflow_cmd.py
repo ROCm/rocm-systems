@@ -13,7 +13,6 @@ import pytest
 
 from perfxpert import __main__ as main_mod
 from perfxpert.cli._tui_session import (
-    _trusted_launcher_paths,
     bind_tui_session_env,
     cleanup_tui_session_env,
 )
@@ -22,7 +21,40 @@ from perfxpert.integrations.external_workflow import ExternalWorkflowRuntimeErro
 
 @pytest.fixture
 def tui_session(monkeypatch) -> None:
-    monkeypatch.setattr("perfxpert.cli.workflow_cmd.has_active_tui_session", lambda env: True)
+    monkeypatch.setattr("perfxpert.cli.workflow_cmd._in_perfxpert_tui_session", lambda: True)
+    monkeypatch.setattr(
+        "perfxpert.integrations.external_workflow._has_active_tui_session",
+        lambda: True,
+    )
+
+
+def _unix_socket_available(tmp_path: Path) -> bool:
+    socket_path = tmp_path / "probe.sock"
+    listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    try:
+        listener.bind(str(socket_path))
+    except OSError:
+        return False
+    finally:
+        listener.close()
+        try:
+            socket_path.unlink()
+        except OSError:
+            pass
+    return True
+
+
+def test_workflow_import_help_hides_internal_controls(capsys) -> None:
+    with pytest.raises(SystemExit) as exc:
+        main_mod.main(["workflow", "import", "--help"])
+
+    assert exc.value.code == 0
+    out = capsys.readouterr().out
+    assert "--interactive" not in out
+    assert "--allow-network" not in out
+    assert "--cache-root" not in out
+    assert "--json" not in out
+    assert "--no-persist" not in out
 
 
 def test_workflow_import_refuses_without_interactive(tmp_path, capsys, tui_session) -> None:
@@ -44,7 +76,7 @@ def test_workflow_import_refuses_outside_tui_session(tmp_path, capsys, monkeypat
 
     assert exc.value.code == 2
     captured = capsys.readouterr()
-    assert "inside perfxpert-code" in captured.err
+    assert "inside the TUI" in captured.err
 
 
 def test_workflow_import_rejects_agent_session_without_tui_marker(tmp_path, capsys, monkeypatch) -> None:
@@ -56,7 +88,7 @@ def test_workflow_import_rejects_agent_session_without_tui_marker(tmp_path, caps
 
     assert exc.value.code == 2
     captured = capsys.readouterr()
-    assert "inside perfxpert-code" in captured.err
+    assert "inside the TUI" in captured.err
 
 
 def test_workflow_import_rejects_forged_tui_marker_without_token(tmp_path, capsys, monkeypatch) -> None:
@@ -70,12 +102,12 @@ def test_workflow_import_rejects_forged_tui_marker_without_token(tmp_path, capsy
 
     assert exc.value.code == 2
     captured = capsys.readouterr()
-    assert "inside perfxpert-code" in captured.err
+    assert "inside the TUI" in captured.err
 
 
-def test_workflow_import_rejects_forged_token_without_launcher_ancestor(
-    tmp_path, capsys, monkeypatch
-) -> None:
+def test_workflow_import_rejects_forged_token_without_launcher_ancestor(tmp_path, capsys, monkeypatch) -> None:
+    if not _unix_socket_available(tmp_path):
+        pytest.skip("Unix socket bind is not available in this test sandbox")
     env: dict[str, str] = {}
     bind_tui_session_env(env)
     for key, value in env.items():
@@ -87,12 +119,14 @@ def test_workflow_import_rejects_forged_token_without_launcher_ancestor(
 
         assert exc.value.code == 2
         captured = capsys.readouterr()
-        assert "inside perfxpert-code" in captured.err
+        assert "inside the TUI" in captured.err
     finally:
         cleanup_tui_session_env(env)
 
 
 def test_workflow_import_rejects_socket_that_only_replies_ok(tmp_path, capsys, monkeypatch) -> None:
+    if not _unix_socket_available(tmp_path):
+        pytest.skip("Unix socket bind is not available in this test sandbox")
     socket_path = tmp_path / "fake.sock"
     listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     listener.bind(str(socket_path))
@@ -131,10 +165,12 @@ def test_workflow_import_rejects_socket_that_only_replies_ok(tmp_path, capsys, m
 
     assert exc.value.code == 2
     captured = capsys.readouterr()
-    assert "inside perfxpert-code" in captured.err
+    assert "inside the TUI" in captured.err
 
 
 def test_workflow_import_rejects_path_shadowed_parent_socket(tmp_path) -> None:
+    if not _unix_socket_available(tmp_path):
+        pytest.skip("Unix socket bind is not available in this test sandbox")
     source = tmp_path / "external"
     source.mkdir()
     (source / "README.md").write_text("The adapter can use rocprof-compute counters.\n", encoding="utf-8")
@@ -224,18 +260,25 @@ raise SystemExit(proc.returncode)
     )
 
     assert proc.returncode == 2
-    assert "inside perfxpert-code" in proc.stderr
+    assert "inside the TUI" in proc.stderr
 
 
 def test_workflow_import_accepts_real_launcher_descendant_tui_session(tmp_path) -> None:
-    trusted_launchers = _trusted_launcher_paths()
-    if not trusted_launchers:
-        pytest.skip("perfxpert-code launcher is not installed in a trusted script location")
-    launcher = trusted_launchers[0]
-
+    if not _unix_socket_available(tmp_path):
+        pytest.skip("Unix socket bind is not available in this test sandbox")
     source = tmp_path / "external"
     source.mkdir()
     (source / "README.md").write_text("The adapter can use rocprof-compute counters.\n", encoding="utf-8")
+    launcher = tmp_path / "perfxpert-code"
+    launcher.write_text(
+        """#!/usr/bin/env python3
+from perfxpert.cli.opencode_launcher import main
+
+raise SystemExit(main())
+""",
+        encoding="utf-8",
+    )
+    launcher.chmod(0o755)
     fake_opencode = tmp_path / "fake-opencode"
     fake_config = tmp_path / "fake-config"
     fake_config.mkdir()
@@ -274,14 +317,20 @@ raise SystemExit(proc.returncode)
 
     sitecustomize = tmp_path / "sitecustomize.py"
     sitecustomize.write_text(
-        """import os
-from pathlib import Path
-
-from perfxpert.cli import opencode_launcher
-
-opencode_launcher.resolve_opencode_binary = lambda: Path(os.environ["PERFXPERT_TEST_FAKE_OPENCODE"])
-opencode_launcher.resolve_config_dir = lambda: Path(os.environ["PERFXPERT_TEST_CONFIG_DIR"])
-""",
+        "\n".join(
+            [
+                "import os",
+                "from pathlib import Path",
+                "",
+                "from perfxpert.cli import _tui_session",
+                "from perfxpert.cli import opencode_launcher",
+                "",
+                'opencode_launcher.resolve_opencode_binary = lambda: Path(os.environ["PERFXPERT_TEST_FAKE_OPENCODE"])',
+                'opencode_launcher.resolve_config_dir = lambda: Path(os.environ["PERFXPERT_TEST_CONFIG_DIR"])',
+                '_tui_session._trusted_launcher_paths = lambda: (Path(os.environ["PERFXPERT_TEST_TRUSTED_LAUNCHER"]),)',
+                "",
+            ]
+        ),
         encoding="utf-8",
     )
 
@@ -297,6 +346,7 @@ opencode_launcher.resolve_config_dir = lambda: Path(os.environ["PERFXPERT_TEST_C
     env["PERFXPERT_TEST_FAKE_OPENCODE"] = str(fake_opencode)
     env["PERFXPERT_TEST_CONFIG_DIR"] = str(fake_config)
     env["PERFXPERT_TEST_SOURCE"] = str(source)
+    env["PERFXPERT_TEST_TRUSTED_LAUNCHER"] = str(launcher)
 
     proc = subprocess.run(
         [str(launcher)],
@@ -383,7 +433,8 @@ def test_workflow_import_url_without_network_consent_is_usage_error(capsys, tui_
 
     assert exc.value.code == 2
     captured = capsys.readouterr()
-    assert "--allow-network" in captured.err
+    assert "explicit network consent" in captured.err
+    assert "--allow-network" not in captured.err
 
 
 def test_workflow_import_url_with_network_consent_forwards_to_inspector(

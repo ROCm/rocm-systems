@@ -6,6 +6,11 @@ is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- **External workflow adapters for `perfxpert-code`.** Active bundled TUI
+  sessions can inspect advisory local or explicitly approved HTTPS workflow
+  metadata, persist bounded manifests, and surface knowledge/MCP hints without
+  executing scripts, installing packages, importing modules, or registering MCP
+  servers.
 - **Advanced specialist tools — 8 new READ_ONLY MCP tools.** The
   specialist fences now consume eight additional deterministic
   tools surfaced on the MCP wire:

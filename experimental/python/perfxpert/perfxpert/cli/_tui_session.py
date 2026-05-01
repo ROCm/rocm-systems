@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hmac
 import os
-import pwd
 import secrets
 import shutil
 import socket
@@ -16,6 +15,11 @@ import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
+
+try:
+    import pwd
+except ImportError:  # pragma: no cover - non-Unix import-safety guard
+    pwd = None  # type: ignore[assignment]
 
 
 INTERACTIVE_TUI_ENV = "PERFXPERT_TUI_INTERACTIVE"
@@ -63,6 +67,9 @@ def bind_tui_session_env(env: dict[str, str]) -> Path:
     The helper also validates that the socket peer is an ancestor process,
     preventing a shell-created sibling socket from satisfying the gate.
     """
+
+    if not _platform_supports_active_tui_session():
+        raise RuntimeError("active TUI workflow authorization requires Linux peer-credential sockets")
 
     token = secrets.token_urlsafe(32)
     session_dir = Path(tempfile.mkdtemp(prefix="perfxpert-tui-"))
@@ -139,6 +146,8 @@ def cleanup_tui_session_env(env: dict[str, str]) -> None:
 def has_active_tui_session(env: dict[str, str] | None = None) -> bool:
     """Return True when ``env`` carries a valid active TUI socket token."""
 
+    if not _platform_supports_active_tui_session():
+        return False
     env = os.environ if env is None else env
     if env.get(INTERACTIVE_TUI_ENV) != "1":
         return False
@@ -287,6 +296,11 @@ def _trusted_launcher_paths() -> tuple[Path, ...]:
 
 
 def _account_home() -> Path | None:
+    if pwd is None:
+        try:
+            return Path.home()
+        except RuntimeError:
+            return None
     try:
         return Path(pwd.getpwuid(os.getuid()).pw_dir)
     except KeyError:
@@ -319,6 +333,10 @@ def _peer_credentials(conn: socket.socket) -> tuple[int, int, int] | None:
         return struct.unpack("3i", raw)
     except struct.error:
         return None
+
+
+def _platform_supports_active_tui_session() -> bool:
+    return hasattr(socket, "AF_UNIX") and hasattr(socket, "SO_PEERCRED") and Path("/proc").is_dir()
 
 
 def _pid_in_current_ancestry(target_pid: int) -> bool:
