@@ -167,7 +167,7 @@ struct perfetto_policy
 
         if(enabled_metric_config.bits.tx_rdma_ack_timeout)
         {
-            tracks[TX_RDMA_ACK_TIMEOUT_VALUE] = {
+            device_tracks[TX_RDMA_ACK_TIMEOUT_VALUE] = {
                 "TX ACK TIMEOUT", "timeouts",
                 counter_track::emplace(device_index, addendum("TX ACK TIMEOUT"),
                                        "packets")
@@ -176,7 +176,7 @@ struct perfetto_policy
 
         if(enabled_metric_config.bits.resp_tx_pkt_seq_err)
         {
-            tracks[RESP_TX_PKT_SEQ_ERR_VALUE] = {
+            device_tracks[RESP_TX_PKT_SEQ_ERR_VALUE] = {
                 "RESP TX PKT SEQ ERR VALUE", "errors",
                 counter_track::emplace(device_index, addendum("RESP TX PKT SEQ ERR"),
                                        "packets")
@@ -185,7 +185,7 @@ struct perfetto_policy
 
         if(enabled_metric_config.bits.req_rx_pkt_seq_err)
         {
-            tracks[REQ_RX_PKT_SEQ_ERR_VALUE] = {
+            device_tracks[REQ_RX_PKT_SEQ_ERR_VALUE] = {
                 "REQ RX PKT SEQ ERR VALUE", "errors",
                 counter_track::emplace(device_index, addendum("REQ RX PKT SEQ ERR"),
                                        "packets")
@@ -194,7 +194,7 @@ struct perfetto_policy
 
         if(enabled_metric_config.bits.req_rx_impl_nak_seq_err)
         {
-            tracks[REQ_RX_IMPL_NAK_SEQ_ERR_VALUE] = {
+            device_tracks[REQ_RX_IMPL_NAK_SEQ_ERR_VALUE] = {
                 "REQ RX IMPL NAK SEQ ERR VALUE", "errors",
                 counter_track::emplace(device_index, addendum("REQ RX IMPL NAK SEQ ERR"),
                                        "packets")
@@ -364,15 +364,6 @@ struct perfetto_policy
                         "nic_tx_cnp_pkts",
                         counter_track::at(device_index, it->second.track_index), ts,
                         static_cast<double>(sample.metric_values.tx_rdma_cnp_pkts));
-                }
-            }
-
-            // TX RDMA ACK TIMEOUT
-            if(effective_metrics.bits.tx_rdma_ack_timeout)
-            {
-                auto it = tracks.find(TX_RDMA_ACK_TIMEOUT_VALUE);
-                if(it != tracks.end())
-                {
                     TRACE_COUNTER(
                         "nic_tx_rdma_ack_timeout",
                         counter_track::at(device_index, it->second.track_index), ts,
@@ -380,11 +371,24 @@ struct perfetto_policy
                 }
             }
 
+            // TX RDMA ACK TIMEOUT
+            if(effective_metrics.bits.tx_rdma_ack_timeout)
+            {
+                auto it = device_tracks.find(TX_RDMA_ACK_TIMEOUT_VALUE);
+                if(it != device_tracks.end())
+                {
+                    TRACE_COUNTER(
+                        "nic_tx_rdma_ack_timeout",
+                        counter_track::at(device_index, it->second.track_index), ts,
+                        static_cast<double>(sample.metric_values.tx_rdma_ack_timeout));
+                        }
+            }
+
             // RESP TX PKT SEQ ERR VALUE
             if(effective_metrics.bits.resp_tx_pkt_seq_err)
             {
-                auto it = tracks.find(RESP_TX_PKT_SEQ_ERR_VALUE);
-                if(it != tracks.end())
+                auto it = device_tracks.find(RESP_TX_PKT_SEQ_ERR_VALUE);
+                if(it != device_tracks.end())
                 {
                     TRACE_COUNTER(
                         "nic_resp_tx_pkt_seq_err",
@@ -396,8 +400,8 @@ struct perfetto_policy
             // REQ RX PKT SEQ ERR VALUE
             if(effective_metrics.bits.req_rx_pkt_seq_err)
             {
-                auto it = tracks.find(REQ_RX_PKT_SEQ_ERR_VALUE);
-                if(it != tracks.end())
+                auto it = device_tracks.find(REQ_RX_PKT_SEQ_ERR_VALUE);
+                if(it != device_tracks.end())
                 {
                     TRACE_COUNTER(
                         "nic_req_rx_pkt_seq_err",
@@ -409,8 +413,8 @@ struct perfetto_policy
             // REQ RX IMPL NAK SEQ ERR VALUE
             if(effective_metrics.bits.req_rx_impl_nak_seq_err)
             {
-                auto it = tracks.find(REQ_RX_IMPL_NAK_SEQ_ERR_VALUE);
-                if(it != tracks.end())
+                auto it = device_tracks.find(REQ_RX_IMPL_NAK_SEQ_ERR_VALUE);
+                if(it != device_tracks.end())
                 {
                     TRACE_COUNTER("nic_req_rx_impl_nak_seq_err",
                                   counter_track::at(device_index, it->second.track_index),
