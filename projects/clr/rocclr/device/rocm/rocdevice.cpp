@@ -36,7 +36,10 @@
 
 #include <algorithm>
 #include <chrono>
+#include <climits>
 #include <cstring>
+#include <unistd.h>
+
 #include <fstream>
 #include <iostream>
 #include <iomanip>
@@ -3488,10 +3491,30 @@ device::Signal* Device::createSignal() const { return new roc::Signal(); }
 hsa_status_t Device::BackendErrorCallBackHandler(const hsa_amd_event_t* event, void* data) {
   cl_int gpu_error = CL_SUCCESS;
   switch (event->event_type) {
-    case HSA_AMD_GPU_MEMORY_FAULT_EVENT:
+    case HSA_AMD_GPU_MEMORY_FAULT_EVENT: {
       gpu_error = CL_INVALID_MEM_OBJECT;
-      LogError("Memory Fault Error");
+      char hostname[HOST_NAME_MAX] = "unknown";
+      gethostname(hostname, sizeof(hostname));
+      const hsa_agent_t faulty_agent = event->memory_fault.agent;
+      uint32_t gpu_index = UINT32_MAX;
+      for (auto* base_dev : amd::Device::devices()) {
+        auto* dev = static_cast<roc::Device*>(base_dev);
+        if (dev->getBackendDevice().handle != faulty_agent.handle) continue;
+        gpu_index = dev->index();
+        break;
+      }
+      if (gpu_index != UINT32_MAX) {
+        fprintf(stderr, "Memory Fault Error [host: %s, GPU index: %u, faulting addr: 0x%" PRIx64
+               "]\n", hostname, gpu_index, event->memory_fault.virtual_address);
+        gpu_error_context_ =
+            std::string(hostname) + ", GPU " + std::to_string(gpu_index);
+      } else {
+        fprintf(stderr, "Memory Fault Error [host: %s, faulting addr: 0x%" PRIx64 "]\n",
+               hostname, event->memory_fault.virtual_address);
+        gpu_error_context_ = std::string(hostname);
+      }
       break;
+    }
     case HSA_AMD_GPU_HW_EXCEPTION_EVENT:
       gpu_error = CL_INVALID_OPERATION;
       LogError("HW Exception Error");
@@ -3515,6 +3538,7 @@ hsa_status_t Device::BackendErrorCallBackHandler(const hsa_amd_event_t* event, v
   }
 
   gpu_error_ = gpu_error;
+  // gpu_error_context_ was already set by the HSA_AMD_GPU_MEMORY_FAULT_EVENT case above
   return HSA_STATUS_SUCCESS;
 }
 
@@ -3941,11 +3965,19 @@ cl_int ConvertHSAErrorIntoCLError(hsa_status_t hsa_status) {
 void callbackQueue(hsa_status_t status, hsa_queue_t* queue, void* data) {
   if (status != HSA_STATUS_SUCCESS && status != HSA_STATUS_INFO_BREAK) {
     Device* dev = reinterpret_cast<Device*>(data);
+    char hostname[HOST_NAME_MAX] = "unknown";
+    gethostname(hostname, sizeof(hostname));
     for (auto it : dev->vgpus()) {
       roc::VirtualGPU* vgpu = reinterpret_cast<roc::VirtualGPU*>(it);
       if (vgpu->gpu_queue() == queue) {
         vgpu->AnalyzeAqlQueue();
       }
+    }
+    // VM faults are handled by ROCR's VMFaultHandler which invokes this callback on the
+    // specific faulting queue for diagnostics (AnalyzeAqlQueue prints kernel name above).
+    // Return here — VMFaultHandler manages the abort and core dump.
+    if (status == static_cast<hsa_status_t>(HSA_STATUS_ERROR_MEMORY_FAULT)) {
+      return;
     }
     // Abort on device exceptions.
     const char* errorMsg = 0;
@@ -3959,12 +3991,14 @@ void callbackQueue(hsa_status_t status, hsa_queue_t* queue, void* data) {
         LogError("HSA_AMD_AGENT_INFO_MEMORY_AVAIL query failed.");
       }
       ClPrint(amd::LOG_NONE, amd::LOG_ALWAYS,
-              "Callback: Queue %p Aborting with error : %s Code: 0x%x Available Free mem : %zu MB",
-              queue->base_address, errorMsg, status, global_available_mem / Mi);
+              "Callback: Queue %p Aborting with error : %s Code: 0x%x Available Free mem : %zu MB"
+              " [host: %s, GPU index: %u]",
+              queue->base_address, errorMsg, status, global_available_mem / Mi,
+              hostname, dev->index());
     } else {
       ClPrint(amd::LOG_NONE, amd::LOG_ALWAYS,
-              "Callback: Queue %p aborting with error : %s code: 0x%x", queue->base_address,
-              errorMsg, status);
+              "Callback: Queue %p aborting with error : %s code: 0x%x [host: %s, GPU index: %u]",
+              queue->base_address, errorMsg, status, hostname, dev->index());
     }
 
     // Core dumps generally provide limited value for OOM, so do not let
@@ -3980,6 +4014,9 @@ void callbackQueue(hsa_status_t status, hsa_queue_t* queue, void* data) {
       abort();
     }
     amd::Device::gpu_error_ = ConvertHSAErrorIntoCLError(status);
+    // Propagate context into the error string visible at the next HIP API call
+    amd::Device::gpu_error_context_ =
+        std::string(hostname) + ", GPU " + std::to_string(dev->index());
   }
 }
 
