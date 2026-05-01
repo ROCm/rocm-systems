@@ -260,25 +260,43 @@ class IpcSdmaImpl : public IpcOnImpl {
   template <detail::atomic::rocshmem_memory_scope scope = detail::atomic::memory_scope_system,
             detail::atomic::rocshmem_memory_order order = detail::atomic::memory_order_seq_cst>
   __device__ __forceinline__ void ipcFence() {
-    if (sdmaImpl_.sdmaEnabled) sdmaImpl_.sdmaQuietAll();
+    if (sdmaImpl_.sdmaEnabled &&
+        __hip_atomic_load(&sdmaImpl_.sdmaDirty, __ATOMIC_RELAXED,
+                          __HIP_MEMORY_SCOPE_AGENT) != 0)
+      sdmaImpl_.sdmaQuietAll();
     detail::atomic::threadfence<scope, order>();
   }
 
   template <detail::atomic::rocshmem_memory_scope scope = detail::atomic::memory_scope_system,
             detail::atomic::rocshmem_memory_order order = detail::atomic::memory_order_seq_cst>
   __device__ __forceinline__ void ipcFence(int local_pe) {
-    if (sdmaImpl_.sdmaEnabled) sdmaImpl_.sdmaQuiet(local_pe);
+    if (sdmaImpl_.sdmaEnabled) {
+      uint64_t pe_mask = ((1ULL << sdmaImpl_.numChannels) - 1) <<
+                         (local_pe * sdmaImpl_.numChannels);
+      if (__hip_atomic_load(&sdmaImpl_.sdmaDirty, __ATOMIC_RELAXED,
+                            __HIP_MEMORY_SCOPE_AGENT) & pe_mask)
+        sdmaImpl_.sdmaQuiet(local_pe);
+    }
     detail::atomic::threadfence<scope, order>();
   }
 
   __device__ void ipcQuiet() {
-    if (sdmaImpl_.sdmaEnabled) sdmaImpl_.sdmaQuietAll();
+    if (sdmaImpl_.sdmaEnabled &&
+        __hip_atomic_load(&sdmaImpl_.sdmaDirty, __ATOMIC_RELAXED,
+                          __HIP_MEMORY_SCOPE_AGENT) != 0)
+      sdmaImpl_.sdmaQuietAll();
     detail::atomic::threadfence<detail::atomic::memory_scope_system,
                                 detail::atomic::memory_order_acq_rel>();
   }
 
   __device__ void ipcQuiet(int local_pe) {
-    if (sdmaImpl_.sdmaEnabled) sdmaImpl_.sdmaQuiet(local_pe);
+    if (sdmaImpl_.sdmaEnabled) {
+      uint64_t pe_mask = ((1ULL << sdmaImpl_.numChannels) - 1) <<
+                         (local_pe * sdmaImpl_.numChannels);
+      if (__hip_atomic_load(&sdmaImpl_.sdmaDirty, __ATOMIC_RELAXED,
+                            __HIP_MEMORY_SCOPE_AGENT) & pe_mask)
+        sdmaImpl_.sdmaQuiet(local_pe);
+    }
     detail::atomic::threadfence<detail::atomic::memory_scope_system,
                                 detail::atomic::memory_order_acq_rel>();
   }
