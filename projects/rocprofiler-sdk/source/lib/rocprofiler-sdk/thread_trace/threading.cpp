@@ -28,6 +28,8 @@
 #include "lib/rocprofiler-sdk/internal_threading.hpp"
 #include "lib/rocprofiler-sdk/thread_trace/core.hpp"
 
+#include <fmt/format.h>
+
 #include <atomic>
 #include <cstdint>
 #include <thread>
@@ -86,6 +88,7 @@ copy_data_sync(void*         dst,
                hsa_signal_t* dependency)
 {
     ROCP_FATAL_IF(dependency == nullptr) << "Dependency must not be null";
+    ROCP_TRACE << fmt::format("Executing async copy from {} to {}", src, dst);
 
     thread_local auto signal = scoped_signal_t{};
 
@@ -129,6 +132,7 @@ consumer_loop(
             continue;
         }
 
+        ROCP_TRACE << read_index.load() << "Consumer received ptr " << buffer.memory;
         auto flags = static_cast<rocprofiler_thread_trace_shader_data_flags_t>(buffer.flags);
         callback_fn(agent_id, 0, buffer.memory, buffer.size, flags, userdata);
         read_index.fetch_add(1);
@@ -282,6 +286,7 @@ producer_loop(
 
     auto end_t0 = std::chrono::system_clock::now();
     ROCP_INFO << "Total trace time: " << (end_t0 - start_t0).count() * 1E-9f << " s.";
+    ROCP_INFO << "Total flips: " << write_index.load();
 }
 }  // namespace thread_trace
 }  // namespace rocprofiler
