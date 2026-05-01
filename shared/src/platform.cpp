@@ -44,6 +44,8 @@
 #include "shared/include/thunks.h"
 #include "shared/include/platform.h"
 #include "shared/include/device.h"
+#include "shared/include/gpu_info.h"
+#include "shared/include/utils.h"
 #include "shared/include/thunk_proxy/thunk_proxy.h"
 #include <memory>
 #include <vector>
@@ -141,11 +143,20 @@ ErrorCode Platform::queryLinkedDevicesInLdaChain(
 
     code = d3dthunk::QueryAdapterInfo(&queryInfo);
 
-    if ((code == ErrorCode::Success) &&
-        (curPhysDev.DeviceIds.VendorID != AMD_VENDOR_ID) &&
-        (curPhysDev.DeviceIds.VendorID != ATI_VENDOR_ID) &&
-        (curPhysDev.DeviceIds.VendorID != intelVendorId)) {
+    if (code != ErrorCode::Success)
+      break;
+
+    const u32 vendorId = curPhysDev.DeviceIds.VendorID;
+    if (vendorId != AMD_VENDOR_ID && vendorId != ATI_VENDOR_ID &&
+        vendorId != intelVendorId) {
       code = ErrorCode::IncompatibleDevice;
+      break;
+    }
+
+    if ((vendorId == AMD_VENDOR_ID || vendorId == ATI_VENDOR_ID) &&
+        !QueryAdapterSupported(curPhysDev.DeviceIds.DeviceID)) {
+      code = ErrorCode::IncompatibleDevice;
+      break;
     }
   }
 

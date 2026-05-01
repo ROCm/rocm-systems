@@ -78,19 +78,6 @@ WDDMDevice::~WDDMDevice() {
   SetPowerOptimization(true);
 }
 
-static NTSTATUS WDDMQueryAdapter(D3DKMT_HANDLE adapter, KMTQUERYADAPTERINFOTYPE type,
-				 void *data, int size)
-{
-  D3DKMT_QUERYADAPTERINFO args = {0};
-
-  args.hAdapter = adapter;
-  args.Type = type;
-  args.pPrivateDriverData = data;
-  args.PrivateDriverDataSize = size;
-
-  return DXCORE_CALL(D3DKMTQueryAdapterInfo(&args));
-}
-
 bool WDDMDevice::QuerySegmentInfo()
 {
   uint32_t segmentCount = 0;
@@ -487,18 +474,6 @@ NTSTATUS WDDMCreateDevices(std::vector<WDDMDevice *> &devices)
   for (auto *sdev : shared_devices) {
     auto *chain = sdev->GetLdaChain();
     D3DKMT_HANDLE adapter = chain->AdapterHandle();
-    D3DKMT_QUERY_DEVICE_IDS query = {0};
-
-    NTSTATUS ret = WDDMQueryAdapter(adapter, KMTQAITYPE_PHYSICALADAPTERDEVICEIDS,
-                                    &query, sizeof(query));
-    if (ret != STATUS_SUCCESS)
-      continue;
-
-    if (query.DeviceIds.VendorID != 0x1002)
-      continue;
-
-    if (!wsl::thunk::QueryAdapterSupported(query.DeviceIds.DeviceID))
-      continue;
 
     auto device = new WDDMDevice(sdev, adapter, devices.size() + 1);
     if (!device)
