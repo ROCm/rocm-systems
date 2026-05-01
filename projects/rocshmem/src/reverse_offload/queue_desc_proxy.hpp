@@ -26,6 +26,7 @@
 #define LIBRARY_SRC_REVERSE_OFFLOAD_QUEUE_DESC_PROXY_HPP_
 
 #include "device_proxy.hpp"
+#include "memory/hip_allocator.hpp"
 
 namespace rocshmem {
 
@@ -49,14 +50,14 @@ typedef struct queue_desc {
   char padding2[56];
 } __attribute__((__aligned__(64))) queue_desc_t;
 
-template <typename ALLOCATOR>
 class QueueDescProxy {
-  using ProxyT = DeviceProxy<ALLOCATOR, queue_desc_t>;
+  using ProxyT = DeviceProxy<HIPDefaultFinegrainedAllocator, queue_desc_t>;
 
  public:
   QueueDescProxy() = default;
 
-  QueueDescProxy(size_t max_queues)
+  QueueDescProxy(size_t max_queues,
+                 [[maybe_unused]] const HIPDefaultFinegrainedAllocator& alloc = HIPDefaultFinegrainedAllocator())
     : proxy_{max_queues}, max_queues_{max_queues} {
 
     auto *queue_descs{proxy_.get()};
@@ -81,8 +82,6 @@ class QueueDescProxy {
 
   size_t max_queues_{};
 };
-
-using QueueDescProxyT = QueueDescProxy<HIPDefaultFinegrainedAllocator>;
 
 }  // namespace rocshmem
 

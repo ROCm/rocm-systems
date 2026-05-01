@@ -30,6 +30,7 @@
 #include "ipc_policy.hpp"
 #include "profiler.hpp"
 #include "queue.hpp"
+#include "memory/hip_allocator.hpp"
 
 namespace rocshmem {
 
@@ -52,9 +53,8 @@ struct BlockHandle {
   AWF_Queue_ret_buffT *default_ctx_atomic_ret{nullptr};
 };
 
-template <typename ALLOCATOR>
 class DefaultBlockHandleProxy {
-  using ProxyT = DeviceProxy<ALLOCATOR, BlockHandle>;
+  using ProxyT = DeviceProxy<HIPDefaultFinegrainedAllocator, BlockHandle>;
 
  public:
   DefaultBlockHandleProxy() = default;
@@ -64,6 +64,7 @@ class DefaultBlockHandleProxy {
                           AWF_Queue_statusT *default_ctx_status,
                           AWF_Queue_ret_buffT *default_ctx_g_ret,
                           AWF_Queue_ret_buffT *default_ctx_atomic_ret,
+                          [[maybe_unused]] const HIPDefaultFinegrainedAllocator& alloc = HIPDefaultFinegrainedAllocator(),
                           size_t num_elems = 1)
     : proxy_{num_elems} {
 
@@ -99,17 +100,15 @@ class DefaultBlockHandleProxy {
   ProxyT proxy_{};
 };
 
-using DefaultBlockHandleProxyT = DefaultBlockHandleProxy<HIPDefaultFinegrainedAllocator>;
-
-template <typename ALLOCATOR>
 class BlockHandleProxy {
-  using ProxyT = DeviceProxy<ALLOCATOR, BlockHandle>;
+  using ProxyT = DeviceProxy<HIPDefaultFinegrainedAllocator, BlockHandle>;
 
  public:
   BlockHandleProxy() = default;
 
   BlockHandleProxy(void *g_ret, void *atomic_ret, Queue *queue, size_t offset,
-                   volatile char *status, size_t max_blocks)
+                   volatile char *status, size_t max_blocks,
+                   [[maybe_unused]] const HIPDefaultFinegrainedAllocator& alloc = HIPDefaultFinegrainedAllocator())
     : proxy_{max_blocks} {
 
     for (size_t i{0}; i < max_blocks; i++) {
@@ -142,11 +141,7 @@ class BlockHandleProxy {
 
  private:
   ProxyT proxy_{};
-
-  size_t num_blocks_{};
 };
-
-using BlockHandleProxyT = BlockHandleProxy<HIPDefaultFinegrainedAllocator>;
 
 }  // namespace rocshmem
 
