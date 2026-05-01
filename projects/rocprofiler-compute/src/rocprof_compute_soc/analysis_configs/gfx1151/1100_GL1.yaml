@@ -22,12 +22,12 @@ Panel Config:
         max: Max
         unit: Unit
       metric:
-        GL1C Busy:
+        GL1 Cache Busy:
           avg: SUM(100 * GL1C_BUSY) / SUM(GL1C_CYCLE)
           min: MIN(100 * GL1C_BUSY / GL1C_CYCLE)
           max: MAX(100 * GL1C_BUSY / GL1C_CYCLE)
           unit: Percent
-        GL1C Starve:
+        GL1 Cache Starve:
           avg: SUM(100 * GL1C_STARVE) / SUM(GL1C_CYCLE)
           min: MIN(100 * GL1C_STARVE / GL1C_CYCLE)
           max: MAX(100 * GL1C_STARVE / GL1C_CYCLE)
