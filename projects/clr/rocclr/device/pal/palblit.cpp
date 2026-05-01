@@ -945,7 +945,7 @@ bool KernelBlitManager::copyBufferToImage(device::Memory& srcMemory, device::Mem
 void CalcRowSlicePitches(uint64_t* pitch, const int32_t* copySize, size_t rowPitch,
                          size_t slicePitch, const Memory& mem) {
   uint32_t memFmtSize = mem.elementSize();
-  bool img1Darray = (mem.desc().topology_ == static_cast<cl_mem_object_type>(amd::MemObjectType::Image1DArray)) ? true : false;
+  bool img1Darray = (mem.desc().topology_ == amd::MemObjectType::Image1DArray) ? true : false;
 
   if (rowPitch == 0) {
     pitch[0] = copySize[0];
@@ -1043,7 +1043,7 @@ bool KernelBlitManager::copyBufferToImageKernel(
   bool releaseView = false;
   bool result = false;
   auto _clFmt0 = gpuMem(dstMemory).desc().format_; amd::Image::Format newFormat(amd::ImageFormat{static_cast<amd::ChannelOrder>(_clFmt0.image_channel_order), static_cast<amd::ChannelDataType>(_clFmt0.image_channel_data_type)});
-  bool swapLayer = dstView->desc().topology_ == static_cast<cl_mem_object_type>(amd::MemObjectType::Image1DArray);
+  bool swapLayer = dstView->desc().topology_ == amd::MemObjectType::Image1DArray;
 
   // Find unsupported formats
   for (uint i = 0; i < RejectedFormatDataTotal; ++i) {
@@ -1065,7 +1065,7 @@ bool KernelBlitManager::copyBufferToImageKernel(
 
   // If the image format was rejected, then attempt to create a view
   if (rejected) {
-    dstView = createView(gpuMem(dstMemory), cl_image_format{static_cast<uint32_t>(newFormat.channelOrder), static_cast<uint32_t>(newFormat.channelDataType)});
+    dstView = createView(gpuMem(dstMemory), newFormat);
     if (dstView != NULL) {
       rejected = false;
       releaseView = true;
@@ -1117,9 +1117,9 @@ bool KernelBlitManager::copyBufferToImageKernel(
 
   // Program kernels arguments for the blit operation
   Memory* mem = &gpuMem(srcMemory);
-  setArgument(kernels_[blitType], 0, sizeof(cl_mem), &mem);
+  setArgument(kernels_[blitType], 0, sizeof(void*), &mem);
   mem = dstView;
-  setArgument(kernels_[blitType], 1, sizeof(cl_mem), &mem);
+  setArgument(kernels_[blitType], 1, sizeof(void*), &mem);
   uint32_t memFmtSize = gpuMem(dstMemory).elementSize();
   uint32_t components = gpuMem(dstMemory).numComponents();
 
@@ -1361,7 +1361,7 @@ bool KernelBlitManager::copyImageToBufferKernel(
   bool releaseView = false;
   bool result = false;
   auto _clFmt0 = gpuMem(srcMemory).desc().format_; amd::Image::Format newFormat(amd::ImageFormat{static_cast<amd::ChannelOrder>(_clFmt0.image_channel_order), static_cast<amd::ChannelDataType>(_clFmt0.image_channel_data_type)});
-  bool swapLayer = srcView->desc().topology_ == static_cast<cl_mem_object_type>(amd::MemObjectType::Image1DArray);
+  bool swapLayer = srcView->desc().topology_ == amd::MemObjectType::Image1DArray;
 
   // Find unsupported formats
   for (uint i = 0; i < RejectedFormatDataTotal; ++i) {
@@ -1383,7 +1383,7 @@ bool KernelBlitManager::copyImageToBufferKernel(
 
   // If the image format was rejected, then attempt to create a view
   if (rejected) {
-    srcView = createView(gpuMem(srcMemory), cl_image_format{static_cast<uint32_t>(newFormat.channelOrder), static_cast<uint32_t>(newFormat.channelDataType)});
+    srcView = createView(gpuMem(srcMemory), newFormat);
     if (srcView != NULL) {
       rejected = false;
       releaseView = true;
@@ -1435,15 +1435,15 @@ bool KernelBlitManager::copyImageToBufferKernel(
 
   // Program kernels arguments for the blit operation
   Memory* mem = srcView;
-  setArgument(kernels_[blitType], 0, sizeof(cl_mem), &mem);
+  setArgument(kernels_[blitType], 0, sizeof(void*), &mem);
   mem = &gpuMem(dstMemory);
-  setArgument(kernels_[blitType], 1, sizeof(cl_mem), &mem);
+  setArgument(kernels_[blitType], 1, sizeof(void*), &mem);
 
   // Update extra paramters for USHORT and UBYTE pointers.
   // Only then compiler can optimize the kernel to use
   // UAV Raw for other writes
-  setArgument(kernels_[blitType], 2, sizeof(cl_mem), &mem);
-  setArgument(kernels_[blitType], 3, sizeof(cl_mem), &mem);
+  setArgument(kernels_[blitType], 2, sizeof(void*), &mem);
+  setArgument(kernels_[blitType], 3, sizeof(void*), &mem);
 
   int32_t srcOrg[4] = {(int32_t)srcOrigin[0], (int32_t)srcOrigin[1], (int32_t)srcOrigin[2], 0};
   int32_t copySize[4] = {(int32_t)size[0], (int32_t)size[1], (int32_t)size[2], 0};
@@ -1558,7 +1558,7 @@ bool KernelBlitManager::copyImage(device::Memory& srcMemory, device::Memory& dst
 
   // Attempt to create a view if the format was rejected
   if (srcRejected) {
-    srcView = createView(gpuMem(srcMemory), cl_image_format{static_cast<uint32_t>(srcFormat.channelOrder), static_cast<uint32_t>(srcFormat.channelDataType)});
+    srcView = createView(gpuMem(srcMemory), srcFormat);
     if (srcView) {
       srcRejected = false;
       srcReleaseView = true;
@@ -1566,7 +1566,7 @@ bool KernelBlitManager::copyImage(device::Memory& srcMemory, device::Memory& dst
   }
 
   if (dstRejected) {
-    dstView = createView(gpuMem(dstMemory), cl_image_format{static_cast<uint32_t>(dstFormat.channelOrder), static_cast<uint32_t>(dstFormat.channelDataType)});
+    dstView = createView(gpuMem(dstMemory), dstFormat);
     if (dstView) {
       dstRejected = false;
       dstReleaseView = true;
@@ -1617,27 +1617,27 @@ bool KernelBlitManager::copyImage(device::Memory& srcMemory, device::Memory& dst
 
   // The current OpenCL spec allows "copy images from a 1D image
   // array object to a 1D image array object" only.
-  if ((gpuMem(srcMemory).desc().topology_ == static_cast<cl_mem_object_type>(amd::MemObjectType::Image1DArray)) ||
-      (gpuMem(dstMemory).desc().topology_ == static_cast<cl_mem_object_type>(amd::MemObjectType::Image1DArray))) {
+  if ((gpuMem(srcMemory).desc().topology_ == amd::MemObjectType::Image1DArray) ||
+      (gpuMem(dstMemory).desc().topology_ == amd::MemObjectType::Image1DArray)) {
     blitType = BlitCopyImage1DA;
   }
 
   // Program kernels arguments for the blit operation
   Memory* mem = srcView;
-  setArgument(kernels_[blitType], 0, sizeof(cl_mem), &mem);
+  setArgument(kernels_[blitType], 0, sizeof(void*), &mem);
   mem = dstView;
-  setArgument(kernels_[blitType], 1, sizeof(cl_mem), &mem);
+  setArgument(kernels_[blitType], 1, sizeof(void*), &mem);
 
   // Program source origin
   int32_t srcOrg[4] = {(int32_t)srcOrigin[0], (int32_t)srcOrigin[1], (int32_t)srcOrigin[2], 0};
-  if (gpuMem(srcMemory).desc().topology_ == static_cast<cl_mem_object_type>(amd::MemObjectType::Image1DArray)) {
+  if (gpuMem(srcMemory).desc().topology_ == amd::MemObjectType::Image1DArray) {
     srcOrg[3] = 1;
   }
   setArgument(kernels_[blitType], 2, sizeof(srcOrg), srcOrg);
 
   // Program destinaiton origin
   int32_t dstOrg[4] = {(int32_t)dstOrigin[0], (int32_t)dstOrigin[1], (int32_t)dstOrigin[2], 0};
-  if (gpuMem(dstMemory).desc().topology_ == static_cast<cl_mem_object_type>(amd::MemObjectType::Image1DArray)) {
+  if (gpuMem(dstMemory).desc().topology_ == amd::MemObjectType::Image1DArray) {
     dstOrg[3] = 1;
   }
   setArgument(kernels_[blitType], 3, sizeof(dstOrg), dstOrg);
@@ -1679,7 +1679,7 @@ void FindPinSize(size_t& pinSize, const amd::Coord3D& size, size_t& rowPitch, si
       if ((slicePitch == 0) || (slicePitch == pinSize)) {
         slicePitch = 0;
       } else {
-        if (mem.desc().topology_ != static_cast<cl_mem_object_type>(amd::MemObjectType::Image1DArray)) {
+        if (mem.desc().topology_ != amd::MemObjectType::Image1DArray) {
           pinSize = slicePitch;
         } else {
           pinSize = slicePitch * size[i];
@@ -1894,9 +1894,9 @@ bool KernelBlitManager::copyBufferRect(device::Memory& srcMemory, device::Memory
 
   // Program kernels arguments for the blit operation
   Memory* mem = &gpuMem(srcMemory);
-  setArgument(kernels_[blitType], 0, sizeof(cl_mem), &mem);
+  setArgument(kernels_[blitType], 0, sizeof(void*), &mem);
   mem = &gpuMem(dstMemory);
-  setArgument(kernels_[blitType], 1, sizeof(cl_mem), &mem);
+  setArgument(kernels_[blitType], 1, sizeof(void*), &mem);
   uint64_t src[4] = {srcRect.rowPitch_, srcRect.slicePitch_, srcRect.start_, 0};
   setArgument(kernels_[blitType], 2, sizeof(src), src);
   uint64_t dst[4] = {dstRect.rowPitch_, dstRect.slicePitch_, dstRect.start_, 0};
@@ -2163,7 +2163,7 @@ bool KernelBlitManager::fillBuffer(device::Memory& memory, const void* pattern, 
 
       // Program kernels arguments for the fill operation
       Memory* mem = &gpuMem(memory);
-      setArgument(kernels_[kFillType], 0, sizeof(cl_mem), &mem, koffset);
+      setArgument(kernels_[kFillType], 0, sizeof(void*), &mem, koffset);
       const size_t localWorkSize = 256;
       size_t globalWorkSize = std::min(dev().settings().limit_blit_wg_ * localWorkSize, kfill_size);
       globalWorkSize = amd::alignUp(globalWorkSize, localWorkSize);
@@ -2178,7 +2178,7 @@ bool KernelBlitManager::fillBuffer(device::Memory& memory, const void* pattern, 
       }
       gpuCB.unmap(&gpu());
       Memory* pGpuCB = &gpuCB;
-      setArgument(kernels_[kFillType], 1, sizeof(cl_mem), &pGpuCB);
+      setArgument(kernels_[kFillType], 1, sizeof(void*), &pGpuCB);
       uint64_t offset = origin[0];
 
       // Adjust the pattern size in the copy type size
@@ -2239,11 +2239,11 @@ bool KernelBlitManager::copyBuffer(device::Memory& srcMemory, device::Memory& ds
     Memory* mem = &gpuMem(srcMemory);
     // Program source origin
     uint64_t srcOffset = srcOrigin[0];
-    setArgument(kernels_[kBlitType], 0, sizeof(cl_mem), &mem, srcOffset);
+    setArgument(kernels_[kBlitType], 0, sizeof(void*), &mem, srcOffset);
     mem = &gpuMem(dstMemory);
     // Program destinaiton origin
     uint64_t dstOffset = dstOrigin[0];
-    setArgument(kernels_[kBlitType], 1, sizeof(cl_mem), &mem, dstOffset);
+    setArgument(kernels_[kBlitType], 1, sizeof(void*), &mem, dstOffset);
 
     uint64_t copySize = sizeIn[0];
     setArgument(kernels_[kBlitType], 2, sizeof(copySize), &copySize);
@@ -2300,7 +2300,7 @@ bool KernelBlitManager::fillImage(device::Memory& memory, const void* pattern,
   size_t localWorkSize[3];
   Memory* memView = &gpuMem(memory);
   amd::Image::Format newFormat(gpuMem(memory).owner()->asImage()->getImageFormat());
-  bool swapLayer = memView->desc().topology_ == static_cast<cl_mem_object_type>(amd::MemObjectType::Image1DArray);
+  bool swapLayer = memView->desc().topology_ == amd::MemObjectType::Image1DArray;
 
   // Program the kernels workload depending on the fill dimensions
   fillType = FillImage;
@@ -2342,7 +2342,7 @@ bool KernelBlitManager::fillImage(device::Memory& memory, const void* pattern,
   }
   // If the image format was rejected, then attempt to create a view
   if (rejected) {
-    memView = createView(gpuMem(memory), cl_image_format{static_cast<uint32_t>(newFormat.channelOrder), static_cast<uint32_t>(newFormat.channelDataType)});
+    memView = createView(gpuMem(memory), newFormat);
     if (memView != NULL) {
       rejected = false;
       releaseView = true;
@@ -2382,7 +2382,7 @@ bool KernelBlitManager::fillImage(device::Memory& memory, const void* pattern,
 
   // Program kernels arguments for the blit operation
   Memory* mem = memView;
-  setArgument(kernels_[fillType], 0, sizeof(cl_mem), &mem);
+  setArgument(kernels_[fillType], 0, sizeof(void*), &mem);
   setArgument(kernels_[fillType], 1, sizeof(float[4]), newpattern);
   setArgument(kernels_[fillType], 2, sizeof(int32_t[4]), newpattern);
   setArgument(kernels_[fillType], 3, sizeof(uint32_t[4]), newpattern);
@@ -2458,11 +2458,11 @@ bool KernelBlitManager::streamOpsUpdate(uint blitType, device::Memory& memory, u
   bool is32BitWrite = (sizeBytes == sizeof(uint32_t)) ? true : false;
   // Program kernels arguments for the write operation
   if (is32BitWrite) {
-    setArgument(kernels_[blitType], 0, sizeof(cl_mem), &mem, offset);
-    setArgument(kernels_[blitType], 1, sizeof(cl_mem), nullptr);
+    setArgument(kernels_[blitType], 0, sizeof(void*), &mem, offset);
+    setArgument(kernels_[blitType], 1, sizeof(void*), nullptr);
   } else {
-    setArgument(kernels_[blitType], 0, sizeof(cl_mem), nullptr);
-    setArgument(kernels_[blitType], 1, sizeof(cl_mem), &mem, offset);
+    setArgument(kernels_[blitType], 0, sizeof(void*), nullptr);
+    setArgument(kernels_[blitType], 1, sizeof(void*), &mem, offset);
   }
   setArgument(kernels_[blitType], 2, sizeof(uint64_t), &value);
   // Create ND range object for the kernel's execution
@@ -2509,11 +2509,11 @@ bool KernelBlitManager::streamOpsWait(device::Memory& memory, uint64_t value, si
   bool is32BitWait = (sizeBytes == sizeof(uint32_t)) ? true : false;
   // Program kernels arguments for the wait operation
   if (is32BitWait) {
-    setArgument(kernels_[blitType], 0, sizeof(cl_mem), &mem, offset);
-    setArgument(kernels_[blitType], 1, sizeof(cl_mem), nullptr);
+    setArgument(kernels_[blitType], 0, sizeof(void*), &mem, offset);
+    setArgument(kernels_[blitType], 1, sizeof(void*), nullptr);
   } else {
-    setArgument(kernels_[blitType], 0, sizeof(cl_mem), nullptr);
-    setArgument(kernels_[blitType], 1, sizeof(cl_mem), &mem, offset);
+    setArgument(kernels_[blitType], 0, sizeof(void*), nullptr);
+    setArgument(kernels_[blitType], 1, sizeof(void*), &mem, offset);
   }
   setArgument(kernels_[blitType], 2, sizeof(uint64_t), &value);
   setArgument(kernels_[blitType], 3, sizeof(uint64_t), &flags);
@@ -2569,8 +2569,8 @@ bool KernelBlitManager::runScheduler(device::Memory& vqueue, device::Memory& par
   // Program kernels arguments
   Memory* q = &gpuMem(vqueue);
   Memory* p = &gpuMem(params);
-  setArgument(kernels_[Scheduler], 0, sizeof(cl_mem), &q);
-  setArgument(kernels_[Scheduler], 1, sizeof(cl_mem), &p);
+  setArgument(kernels_[Scheduler], 0, sizeof(void*), &q);
+  setArgument(kernels_[Scheduler], 1, sizeof(void*), &p);
   setArgument(kernels_[Scheduler], 2, sizeof(uint), &paramIdx);
 
   // Create ND range object for the kernel's execution
@@ -2666,7 +2666,7 @@ amd::Memory* DmaBlitManager::pinHostMemory(const void* hostMem, size_t pinSize,
   return amdMemory;
 }
 
-Memory* KernelBlitManager::createView(const Memory& parent, const cl_image_format format) const {
+Memory* KernelBlitManager::createView(const Memory& parent, const amd::ImageFormat format) const {
   assert(!parent.desc().buffer_ && "View supports images only");
   Memory* gpuImage = new Image(dev(), parent.size(), parent.desc().width_, parent.desc().height_,
                                parent.desc().depth_, format, parent.desc().topology_, 1);

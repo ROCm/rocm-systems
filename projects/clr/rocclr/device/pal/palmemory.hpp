@@ -47,8 +47,8 @@ class Memory : public device::Memory, public Resource {
          size_t width,                  //!< Allocated memory width
          size_t height,                 //!< Allocated memory height
          size_t depth,                  //!< Allocated memory depth
-         cl_image_format format,        //!< Memory format
-         cl_mem_object_type imageType,  //!< CL image type
+         amd::ImageFormat format,       //!< Memory format
+         amd::MemObjectType imageType,  //!< image type
          uint mipLevels                 //!< The number of mip levels
   );
 
@@ -58,8 +58,8 @@ class Memory : public device::Memory, public Resource {
          size_t width,                  //!< Allocated memory width
          size_t height,                 //!< Allocated memory height
          size_t depth,                  //!< Allocated memory depth
-         cl_image_format format,        //!< Memory format
-         cl_mem_object_type imageType,  //!< CL image type
+         amd::ImageFormat format,       //!< Memory format
+         amd::MemObjectType imageType,  //!< image type
          uint mipLevels                 //!< The number of mip levels
   );
 
@@ -215,8 +215,8 @@ class Image : public pal::Memory {
         size_t width,                  //!< Allocated memory width
         size_t height,                 //!< Allocated memory height
         size_t depth,                  //!< Allocated memory depth
-        cl_image_format format,        //!< Memory format
-        cl_mem_object_type imageType,  //!< CL image type
+        amd::ImageFormat format,       //!< Memory format
+        amd::MemObjectType imageType,  //!< image type
         uint mipLevels                 //!< The number of mip levels
         )
       : pal::Memory(gpuDev, owner, width, height, depth, format, imageType, mipLevels),
@@ -228,8 +228,8 @@ class Image : public pal::Memory {
         size_t width,                  //!< Allocated memory width
         size_t height,                 //!< Allocated memory height
         size_t depth,                  //!< Allocated memory depth
-        cl_image_format format,        //!< Memory format
-        cl_mem_object_type imageType,  //!< CL image type
+        amd::ImageFormat format,       //!< Memory format
+        amd::MemObjectType imageType,  //!< image type
         uint mipLevels                 //!< The number of mip levels
         )
       : pal::Memory(gpuDev, size, width, height, depth, format, imageType, mipLevels),

@@ -191,8 +191,8 @@ class Resource : public amd::HeapObject {
     uint flags_;                   //!< Resource flags, used in creation
     size_t pitch_;                 //!< Resource pitch, valid if locked
     size_t slice_;                 //!< Resource slice, valid if locked
-    cl_image_format format_;       //!< CL image format
-    cl_mem_object_type topology_;  //!< CL mem object type
+    amd::ImageFormat format_;      //!< image format
+    amd::MemObjectType topology_;  //!< mem object type
     union {
       struct {
         uint dimSize_ : 2;           //!< Dimension size
@@ -222,8 +222,8 @@ class Resource : public amd::HeapObject {
            size_t width,                  //!< resource width
            size_t height,                 //!< resource height
            size_t depth,                  //!< resource depth
-           cl_image_format format,        //!< resource format
-           cl_mem_object_type imageType,  //!< CL image type
+           amd::ImageFormat format,       //!< resource format
+           amd::MemObjectType imageType,  //!< image type
            uint mipLevels = 1             //!< Number of mip levels
   );
 

@@ -514,8 +514,8 @@ class KernelBlitManager : public DmaBlitManager {
 
 
   //! Creates a view memory object
-  Memory* createView(const Memory& parent,         //!< Parent memory object
-                     const cl_image_format format  //!< The new format for a view
+  Memory* createView(const Memory& parent,          //!< Parent memory object
+                     const amd::ImageFormat format  //!< The new format for a view
   ) const;
 
   //! Atomically updates a memory location (i.e. writes, increments or decrements the memory).

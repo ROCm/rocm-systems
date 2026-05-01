@@ -826,7 +826,7 @@ bool Device::glDissociate(void* GLplatformContext, void* GLdeviceContext) const 
 }
 
 bool Device::resGLAssociate(void* GLContext, uint name, uint type, Pal::OsExternalHandle* handle,
-                            void** mbResHandle, size_t* offset, cl_image_format& newClFormat
+                            void** mbResHandle, size_t* offset, amd::ImageFormat& newClFormat
 #ifdef ATI_OS_WIN
                             ,
                             Pal::DoppDesktopInfo& doppDesktopInfo
@@ -889,8 +889,8 @@ bool Device::resGLAssociate(void* GLContext, uint name, uint type, Pal::OsExtern
     return status;
   }
 
-  newClFormat.image_channel_data_type = cmFormatXlateTable[index].image_channel_data_type;
-  newClFormat.image_channel_order = cmFormatXlateTable[index].image_channel_order;
+  newClFormat.channelDataType = static_cast<amd::ChannelDataType>(cmFormatXlateTable[index].image_channel_data_type);
+  newClFormat.channelOrder = static_cast<amd::ChannelOrder>(cmFormatXlateTable[index].image_channel_order);
 
   return status;
 }

@@ -3887,45 +3887,45 @@ ProfilingSignal::~ProfilingSignal() {
 }
 
 // ================================================================================================
-int ConvertHSAErrorIntoCLError(hsa_status_t hsa_status) {
-  int cl_error = 0; // CL_SUCCESS
+amd::Status ConvertHSAErrorIntoCLError(hsa_status_t hsa_status) {
+  amd::Status cl_error = amd::Status::Success;
   switch (hsa_status) {
     case HSA_STATUS_ERROR_OUT_OF_RESOURCES:
-      cl_error = CL_OUT_OF_RESOURCES;
+      cl_error = amd::Status::OutOfResources;
       break;
     case HSA_STATUS_ERROR_EXCEPTION:
-      cl_error = -59; // CL_INVALID_OPERATION
+      cl_error = amd::Status::InvalidOperation;
       break;
     case HSA_STATUS_ERROR_INCOMPATIBLE_ARGUMENTS:
-      cl_error = -50; // CL_INVALID_ARG_VALUE
+      cl_error = amd::Status::InvalidArgValue;
       break;
     case HSA_STATUS_ERROR_INVALID_ALLOCATION:
-      cl_error = -4; // CL_MEM_OBJECT_ALLOCATION_FAILURE
+      cl_error = amd::Status::MemObjectAllocationFailure;
       break;
     case HSA_STATUS_ERROR_INVALID_CODE_OBJECT:
-      cl_error = -44; // CL_INVALID_PROGRAM
+      cl_error = amd::Status::InvalidProgram;
       break;
     case HSA_STATUS_ERROR_INVALID_PACKET_FORMAT:
-      cl_error = -59; // CL_INVALID_OPERATION
+      cl_error = amd::Status::InvalidOperation;
       break;
     case HSA_STATUS_ERROR_INVALID_ARGUMENT:
-      cl_error = -50; // CL_INVALID_ARG_VALUE
+      cl_error = amd::Status::InvalidArgValue;
       break;
     case HSA_STATUS_ERROR_INVALID_ISA:
-      cl_error = -48; // CL_INVALID_KERNEL
+      cl_error = amd::Status::InvalidKernel;
       break;
     case (hsa_status_t)HSA_STATUS_ERROR_ILLEGAL_INSTRUCTION:
-      cl_error = -11; // CL_BUILD_PROGRAM_FAILURE
+      cl_error = amd::Status::BuildProgramFailure;
       break;
     case (hsa_status_t)HSA_STATUS_ERROR_MEMORY_FAULT:
-      cl_error = -38; // CL_INVALID_MEM_OBJECT
+      cl_error = amd::Status::InvalidMemObject;
       break;
     case (hsa_status_t)HSA_STATUS_ERROR_MEMORY_APERTURE_VIOLATION:
-      cl_error = -38; // CL_INVALID_MEM_OBJECT
+      cl_error = amd::Status::InvalidMemObject;
       break;
     case HSA_STATUS_ERROR:
     default:
-      cl_error = -2; // CL_DEVICE_NOT_AVAILABLE
+      cl_error = amd::Status::DeviceNotAvailable;
       break;
   }
   return cl_error;
@@ -3973,7 +3973,7 @@ void callbackQueue(hsa_status_t status, hsa_queue_t* queue, void* data) {
     if (should_abort) {
       abort();
     }
-    amd::Device::gpu_error_ = ConvertHSAErrorIntoCLError(status);
+    amd::Device::gpu_error_ = static_cast<int>(ConvertHSAErrorIntoCLError(status));
   }
 }
 

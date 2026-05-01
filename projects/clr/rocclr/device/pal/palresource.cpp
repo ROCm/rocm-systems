@@ -295,8 +295,7 @@ Resource::Resource(const Device& gpuDev, size_t size)
   desc_.height_ = 1;
   desc_.depth_ = 1;
   desc_.mipLevels_ = 1;
-  desc_.format_.image_channel_order = CL_R;
-  desc_.format_.image_channel_data_type = CL_FLOAT;
+  desc_.format_ = {amd::ChannelOrder::R, amd::ChannelDataType::Float};
   desc_.flags_ = 0;
   desc_.pitch_ = 0;
   desc_.slice_ = 0;
@@ -315,7 +314,7 @@ Resource::Resource(const Device& gpuDev, size_t size)
 
 // ================================================================================================
 Resource::Resource(const Device& gpuDev, size_t width, size_t height, size_t depth,
-                   cl_image_format format, cl_mem_object_type imageType, uint mipLevels)
+                   amd::ImageFormat format, amd::MemObjectType imageType, uint mipLevels)
     : elementSize_(0),
       gpuDevice_(gpuDev),
       mapCount_(0),
@@ -393,7 +392,7 @@ Resource::~Resource() {
 }
 
 // ================================================================================================
-static uint32_t GetHSAImageFormatType(const cl_image_format& format) {
+static uint32_t GetHSAImageFormatType(const amd::ImageFormat& format) {
   static const uint32_t FormatType[] = {HSA_EXT_IMAGE_CHANNEL_TYPE_SNORM_INT8,
                                         HSA_EXT_IMAGE_CHANNEL_TYPE_SNORM_INT16,
                                         HSA_EXT_IMAGE_CHANNEL_TYPE_UNORM_INT8,
@@ -411,13 +410,13 @@ static uint32_t GetHSAImageFormatType(const cl_image_format& format) {
                                         HSA_EXT_IMAGE_CHANNEL_TYPE_FLOAT,
                                         HSA_EXT_IMAGE_CHANNEL_TYPE_UNORM_INT24};
 
-  uint idx = format.image_channel_data_type - CL_SNORM_INT8;
-  assert((idx <= (CL_UNORM_INT24 - CL_SNORM_INT8)) && "Out of range format channel!");
+  uint idx = static_cast<uint32_t>(format.channelDataType) - static_cast<uint32_t>(amd::ChannelDataType::SNormInt8);
+  assert((idx <= (static_cast<uint32_t>(amd::ChannelDataType::UNormInt24) - static_cast<uint32_t>(amd::ChannelDataType::SNormInt8))) && "Out of range format channel!");
   return FormatType[idx];
 }
 
 // ================================================================================================
-static uint32_t GetHSAImageOrderType(const cl_image_format& format) {
+static uint32_t GetHSAImageOrderType(const amd::ImageFormat& format) {
   static const uint32_t OrderType[] = {HSA_EXT_IMAGE_CHANNEL_ORDER_R,
                                        HSA_EXT_IMAGE_CHANNEL_ORDER_A,
                                        HSA_EXT_IMAGE_CHANNEL_ORDER_RG,
@@ -439,8 +438,8 @@ static uint32_t GetHSAImageOrderType(const cl_image_format& format) {
                                        HSA_EXT_IMAGE_CHANNEL_ORDER_SBGRA,
                                        HSA_EXT_IMAGE_CHANNEL_ORDER_ABGR};
 
-  uint idx = format.image_channel_order - CL_R;
-  assert((idx <= (CL_ABGR - CL_R)) && "Out of range format order!");
+  uint idx = static_cast<uint32_t>(format.channelOrder) - static_cast<uint32_t>(amd::ChannelOrder::R);
+  assert((idx <= (static_cast<uint32_t>(amd::ChannelOrder::ABGR) - static_cast<uint32_t>(amd::ChannelOrder::R))) && "Out of range format order!");
   return OrderType[idx];
 }
 
@@ -507,8 +506,8 @@ bool Resource::CreateImage(CreateParams* params, bool forceLinear) {
   Pal::SubresRange ImgSubresRange = {ImgSubresId, 1, 1, 1};
   Pal::ChannelMapping channels;
   Pal::ChNumFormat format = dev().getPalFormat(amd::Image::Format(amd::ImageFormat{
-      static_cast<amd::ChannelOrder>(desc().format_.image_channel_order),
-      static_cast<amd::ChannelDataType>(desc().format_.image_channel_data_type)}), &channels);
+      desc().format_.channelOrder,
+      desc().format_.channelDataType}), &channels);
 
   if (desc().topology_ == amd::MemObjectType::Image1DBuffer) {
     if (memoryType() == ImageBuffer) {
@@ -745,8 +744,8 @@ bool Resource::CreateInterop(CreateParams* params) {
   Pal::SubresRange ImgSubresRange = {ImgSubresId, 1, 1, 1};
   Pal::ChannelMapping channels;
   Pal::ChNumFormat format = dev().getPalFormat(amd::Image::Format(amd::ImageFormat{
-      static_cast<amd::ChannelOrder>(desc().format_.image_channel_order),
-      static_cast<amd::ChannelDataType>(desc().format_.image_channel_data_type)}), &channels);
+      desc().format_.channelOrder,
+      desc().format_.channelDataType}), &channels);
   Pal::ExternalGpuMemoryOpenInfo gpuMemOpenInfo = {};
   Pal::ExternalResourceOpenInfo& openInfo = gpuMemOpenInfo.resourceInfo;
   uint misc = 0;
@@ -791,8 +790,8 @@ bool Resource::CreateInterop(CreateParams* params) {
     desc_.isDoppTexture_ = (openInfo.doppDesktopInfo.gpuVirtAddr != 0);
     openInfo.flags.isDopp = desc_.isDoppTexture_;
     format = dev().getPalFormat(amd::Image::Format(amd::ImageFormat{
-        static_cast<amd::ChannelOrder>(desc().format_.image_channel_order),
-        static_cast<amd::ChannelDataType>(desc().format_.image_channel_data_type)}), &channels);
+        desc().format_.channelOrder,
+        desc().format_.channelDataType}), &channels);
   } else if (memoryType() == VkInterop) {
     VkInteropParams* vparams = reinterpret_cast<VkInteropParams*>(params);
     if (vparams->handle_) {
@@ -1035,8 +1034,8 @@ bool Resource::CreateInterop(CreateParams* params) {
     dev().iDev()->CreateImageViewSrds(1, &viewInfo, hwState_);
     //! It's a workaround for D24S8 format, since PAL doesn't support this format
     //! and OGL decompresses 24bit DEPTH into D24S8 for OGL compatibility
-    if ((desc().format_.image_channel_order == CL_DEPTH_STENCIL) &&
-        (desc().format_.image_channel_data_type == CL_UNORM_INT24)) {
+    if ((desc().format_.channelOrder == amd::ChannelOrder::DepthStencil) &&
+        (desc().format_.channelDataType == amd::ChannelDataType::UNormInt24)) {
       hwState_[1] = (hwState_[1] & ~0x1ff00000) | 0x08d00000;
     }
     hwState_[8] = GetHSAImageFormatType(desc().format_);
@@ -1215,8 +1214,8 @@ bool Resource::create(MemoryType memType, CreateParams* params, bool forceLinear
   uint viewFlags = 0;
   Pal::ChannelMapping channels;
   Pal::ChNumFormat format = dev().getPalFormat(amd::Image::Format(amd::ImageFormat{
-      static_cast<amd::ChannelOrder>(desc().format_.image_channel_order),
-      static_cast<amd::ChannelDataType>(desc().format_.image_channel_data_type)}), &channels);
+      desc().format_.channelOrder,
+      desc().format_.channelDataType}), &channels);
   // Set the initial offset value for any resource to 0.
   // Note: Runtime can call create() more than once, if the initial memory type failed
   offset_ = 0;

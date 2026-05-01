@@ -41,7 +41,7 @@ Memory::Memory(const Device& gpuDev, size_t size)
     : device::Memory(size), Resource(gpuDev, size), pinnedMemory_(nullptr), parent_(nullptr) {}
 
 Memory::Memory(const Device& gpuDev, amd::Memory& owner, size_t width, size_t height, size_t depth,
-               cl_image_format format, cl_mem_object_type imageType, uint mipLevels)
+               amd::ImageFormat format, amd::MemObjectType imageType, uint mipLevels)
     : device::Memory(owner),
       Resource(gpuDev, width, height, depth, format, imageType, mipLevels),
       pinnedMemory_(nullptr),
@@ -52,7 +52,7 @@ Memory::Memory(const Device& gpuDev, amd::Memory& owner, size_t width, size_t he
 }
 
 Memory::Memory(const Device& gpuDev, size_t size, size_t width, size_t height, size_t depth,
-               cl_image_format format, cl_mem_object_type imageType, uint mipLevels)
+               amd::ImageFormat format, amd::MemObjectType imageType, uint mipLevels)
     : device::Memory(size),
       Resource(gpuDev, width, height, depth, format, imageType, mipLevels),
       pinnedMemory_(nullptr),

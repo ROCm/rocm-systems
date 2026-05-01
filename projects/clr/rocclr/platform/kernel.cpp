@@ -158,18 +158,18 @@ void KernelParameters::set(size_t index, size_t size, const void* value, bool sv
       LP64_SWITCH(uint32_value, uint64_value) = *(LP64_SWITCH(uint32_t*, uint64_t*))value;
       memoryObjects_[desc.info_.arrayIndex_] =
           amd::MemObjMap::FindMemObj(*reinterpret_cast<const void* const*>(value));
-    } else if ((value == NULL) || (static_cast<const cl_mem*>(value) == NULL)) {
+    } else if (value == NULL) {
       desc.info_.rawPointer_ = false;
       memoryObjects_[desc.info_.arrayIndex_] = nullptr;
     } else {
       desc.info_.rawPointer_ = false;
       // Phase1: cl_mem IS amd::Memory* (same pointer, no ICD dispatch)
       memoryObjects_[desc.info_.arrayIndex_] =
-          reinterpret_cast<amd::Memory*>(*static_cast<const cl_mem*>(value));
+          *reinterpret_cast<amd::Memory* const*>(value);
     }
   } else if (desc.type_ == amd::KernelArgValueType::Sampler) {
     samplerObjects_[desc.info_.arrayIndex_] =
-        reinterpret_cast<amd::Sampler*>(*static_cast<const cl_sampler*>(value));
+        *reinterpret_cast<amd::Sampler* const*>(value);
   } else if (desc.type_ == amd::KernelArgValueType::Queue) {
     queueObjects_[desc.info_.arrayIndex_] =
         reinterpret_cast<amd::CommandQueue*>(*static_cast<const cl_command_queue*>(value))->asDeviceQueue();
@@ -395,7 +395,7 @@ KernelSignature::KernelSignature(const std::vector<KernelParameterDescriptor>& p
   if (params.size() > 0) {
     size_t lastSize = params[last].size_;
     if (lastSize == 0 /* local mem */) {
-      lastSize = sizeof(cl_mem);
+      lastSize = sizeof(void*);
     }
     // Note: It's a special case. HW ABI expects 64 bit for SRD, regardless of the binary.
     // Force the size to 64 bit for those cases.

@@ -1691,9 +1691,7 @@ pal::Memory* Device::createImage(amd::Memory& owner, bool directAccess) const {
   }
 
   gpuImage = new pal::Image(*this, owner, image.getWidth(), image.getHeight(), image.getDepth(),
-                            cl_image_format{static_cast<uint32_t>(image.getImageFormat().channelOrder),
-                                            static_cast<uint32_t>(image.getImageFormat().channelDataType)},
-                            static_cast<cl_mem_object_type>(image.getType()), image.getMipLevels());
+                            image.getImageFormat(), image.getType(), image.getMipLevels());
 
   // Create resource
   if (nullptr != gpuImage) {
@@ -1850,9 +1848,7 @@ device::Memory* Device::createView(amd::Memory& owner, const device::Memory& par
   const amd::Image& image = *owner.asImage();
   pal::Memory* gpuImage =
       new pal::Image(*this, owner, image.getWidth(), image.getHeight(), image.getDepth(),
-                     cl_image_format{static_cast<uint32_t>(image.getImageFormat().channelOrder),
-                                     static_cast<uint32_t>(image.getImageFormat().channelDataType)},
-                     static_cast<cl_mem_object_type>(image.getType()), image.getMipLevels());
+                     image.getImageFormat(), image.getType(), image.getMipLevels());
 
   // Create resource
   if (nullptr != gpuImage) {
