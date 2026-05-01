@@ -22,12 +22,8 @@ ncclResult_t rcclCheckRomeTopoModelIdxConsensus(
   tallies.reserve(nranks);
   for (int r = 0; r < nranks; r++) {
     int v = getRomeTopoModelIdx(r);
-    auto it = tallies.find(v);
-    if (it == tallies.end()) {
-      tallies.emplace(v, std::make_pair(1, r));
-    } else {
-      it->second.first++;
-    }
+    auto& t = tallies[v];
+    if (t.first++ == 0) t.second = r;
   }
   int refIdx = getRomeTopoModelIdx(0);
   int refVotes = -1;
