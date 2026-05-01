@@ -11,6 +11,7 @@
 #include "rocjitsu/code/dbt/hazard_tracker.h"
 #include "rocjitsu/code/patch/instruction_builder.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna4/machine_insts.h"
+#include "rocjitsu/isa/arch/amdgpu/rdna3/machine_insts.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna4/machine_insts.h"
 #include "rocjitsu/isa/instruction.h"
 
@@ -120,6 +121,40 @@ build_vop3(uint16_t op, uint8_t vdst, uint16_t src0, uint16_t src1 = 0, uint16_t
   return (src0 & 0x1FFu) | ((vsrc1 & 0xFFu) << 9) | ((vdst & 0xFFu) << 17) | ((op & 0x3Fu) << 25);
 }
 
+/// @brief Build RDNA3 VOP3 instruction word pair.
+[[nodiscard]] std::pair<uint32_t, uint32_t>
+build_rdna3_vop3(uint16_t op, uint8_t vdst, uint16_t src0, uint16_t src1, uint16_t src2 = 0) {
+  rdna3::Vop3MachineInst dst{};
+  dst.encoding = 0x28;
+  dst.op = op;
+  dst.vdst = vdst;
+  dst.src0 = src0 & 0x1FFu;
+  dst.src1 = src1 & 0x1FFu;
+  dst.src2 = src2 & 0x1FFu;
+
+  uint32_t words[2]{};
+  std::memcpy(words, &dst, sizeof(dst));
+  return {words[0], words[1]};
+}
+
+/// @brief Build RDNA3 VOP3 SDST-encoding instruction word pair.
+[[nodiscard]] std::pair<uint32_t, uint32_t> build_rdna3_vop3_sdst(uint16_t op, uint8_t vdst,
+                                                                  uint8_t sdst, uint16_t src0,
+                                                                  uint16_t src1, uint16_t src2) {
+  rdna3::Vop3SdstEncMachineInst dst{};
+  dst.encoding = 0x28;
+  dst.op = op;
+  dst.vdst = vdst;
+  dst.sdst = sdst;
+  dst.src0 = src0 & 0x1FFu;
+  dst.src1 = src1 & 0x1FFu;
+  dst.src2 = src2 & 0x1FFu;
+
+  uint32_t words[2]{};
+  std::memcpy(words, &dst, sizeof(dst));
+  return {words[0], words[1]};
+}
+
 /// @brief Build s_mov_b64 sdst, ssrc0.
 [[nodiscard]] constexpr uint32_t build_s_mov_b64(uint8_t sdst, uint16_t ssrc0) {
   rdna4::Sop1MachineInst s{};
@@ -186,6 +221,213 @@ enum class CompareMaskUpdate {
 [[nodiscard]] bool is_cdna4_matrix_or_accvgpr(std::string_view mnemonic) {
   return mnemonic.starts_with("v_mfma_") || mnemonic.starts_with("v_smfmac_") ||
          mnemonic.starts_with("v_accvgpr_");
+}
+
+[[nodiscard]] bool has_expand_legalization(const Instruction &inst,
+                                           LegalizationLookupFn legalization_lookup) {
+  if (!legalization_lookup)
+    return false;
+  const auto *legalization = legalization_lookup(inst.encoding_id(), inst.opcode());
+  return legalization && legalization->action == Action::Expand;
+}
+
+[[nodiscard]] bool is_plain_src(uint16_t src) { return src != 249 && src != 250 && src != 255; }
+
+[[nodiscard]] bool is_vgpr_pair_src(uint16_t src) { return src >= 256 && src <= 510; }
+
+[[nodiscard]] bool has_plain_vop3_modifiers(const cdna4::Vop3MachineInst &src) {
+  return src.abs == 0 && src.op_sel == 0 && src.clamp == 0 && src.omod == 0 && src.neg == 0;
+}
+
+[[nodiscard]] bool has_plain_vop3_sdst_modifiers(const cdna4::Vop3SdstEncMachineInst &src) {
+  return src.clamp == 0 && src.omod == 0 && src.neg == 0;
+}
+
+void append_v_mov_b64_as_b32_pair(std::vector<uint32_t> &words, uint8_t vdst, uint8_t src_vgpr) {
+  auto emit_low = [&]() { words.push_back(build_v_mov_b32(vdst, 256 + src_vgpr)); };
+  auto emit_high = [&]() {
+    words.push_back(build_v_mov_b32(static_cast<uint8_t>(vdst + 1), 256 + src_vgpr + 1));
+  };
+
+  if (vdst == src_vgpr + 1) {
+    emit_high();
+    emit_low();
+    return;
+  }
+
+  emit_low();
+  emit_high();
+}
+
+std::vector<uint32_t> lower_vop1_v_mov_b64(const Instruction &inst) {
+  const auto *raw = inst.raw_encoding();
+  if (!raw || inst.size() != 4)
+    return {};
+
+  cdna4::Vop1MachineInst src{};
+  std::memcpy(&src, raw, sizeof(src));
+  if (!is_vgpr_pair_src(src.src0) || src.vdst > 254)
+    return {};
+
+  std::vector<uint32_t> words;
+  append_v_mov_b64_as_b32_pair(words, static_cast<uint8_t>(src.vdst),
+                               static_cast<uint8_t>(src.src0 - 256));
+  return words;
+}
+
+std::vector<uint32_t> lower_vop2_integer_renames(const Instruction &inst) {
+  const auto *raw = inst.raw_encoding();
+  if (!raw || inst.size() != 4)
+    return {};
+
+  cdna4::Vop2MachineInst src{};
+  std::memcpy(&src, raw, sizeof(src));
+  if (!is_plain_src(src.src0))
+    return {};
+
+  switch (inst.opcode()) {
+  case 28: // v_addc_co_u32_e32 -> v_add_co_ci_u32_e32
+    return {build_vop2(32, static_cast<uint8_t>(src.vdst), src.src0, src.vsrc1)};
+  case 29: // v_subb_co_u32_e32 -> v_sub_co_ci_u32_e32
+    return {build_vop2(33, static_cast<uint8_t>(src.vdst), src.src0, src.vsrc1)};
+  case 30: // v_subbrev_co_u32_e32 -> v_subrev_co_ci_u32_e32
+    return {build_vop2(34, static_cast<uint8_t>(src.vdst), src.src0, src.vsrc1)};
+  case 38: { // v_add_u16_e32 -> v_add_nc_u16
+    auto [w0, w1] = build_rdna3_vop3(771, static_cast<uint8_t>(src.vdst), src.src0,
+                                     static_cast<uint16_t>(256 + src.vsrc1));
+    return {w0, w1};
+  }
+  case 39: { // v_sub_u16_e32 -> v_sub_nc_u16
+    auto [w0, w1] = build_rdna3_vop3(772, static_cast<uint8_t>(src.vdst), src.src0,
+                                     static_cast<uint16_t>(256 + src.vsrc1));
+    return {w0, w1};
+  }
+  case 40: { // v_subrev_u16_e32 -> v_sub_nc_u16 with operands swapped
+    auto [w0, w1] = build_rdna3_vop3(772, static_cast<uint8_t>(src.vdst),
+                                     static_cast<uint16_t>(256 + src.vsrc1), src.src0);
+    return {w0, w1};
+  }
+  case 52: // v_add_u32_e32 -> v_add_nc_u32_e32
+    return {build_vop2(37, static_cast<uint8_t>(src.vdst), src.src0, src.vsrc1)};
+  case 53: // v_sub_u32_e32 -> v_sub_nc_u32_e32
+    return {build_vop2(38, static_cast<uint8_t>(src.vdst), src.src0, src.vsrc1)};
+  case 54: // v_subrev_u32_e32 -> v_subrev_nc_u32_e32
+    return {build_vop2(39, static_cast<uint8_t>(src.vdst), src.src0, src.vsrc1)};
+  default:
+    return {};
+  }
+}
+
+std::vector<uint32_t> lower_vop3_integer_renames(const Instruction &inst) {
+  const auto *raw = inst.raw_encoding();
+  if (!raw || inst.size() != 8)
+    return {};
+
+  cdna4::Vop3MachineInst src{};
+  std::memcpy(&src, raw, sizeof(src));
+  if (!has_plain_vop3_modifiers(src))
+    return {};
+  if (!is_plain_src(src.src0) || !is_plain_src(src.src1) || !is_plain_src(src.src2))
+    return {};
+
+  auto emit = [&](uint16_t target_op, uint16_t src0, uint16_t src1) -> std::vector<uint32_t> {
+    auto [w0, w1] = build_rdna3_vop3(target_op, static_cast<uint8_t>(src.vdst), src0, src1);
+    return {w0, w1};
+  };
+
+  switch (inst.opcode()) {
+  case 294: // v_add_u16 -> v_add_nc_u16
+    return emit(771, src.src0, src.src1);
+  case 295: // v_sub_u16 -> v_sub_nc_u16
+    return emit(772, src.src0, src.src1);
+  case 296: // v_subrev_u16 -> v_sub_nc_u16 with operands swapped
+    return emit(772, src.src1, src.src0);
+  case 308: // v_add_u32 -> v_add_nc_u32
+    return emit(293, src.src0, src.src1);
+  case 309: // v_sub_u32 -> v_sub_nc_u32
+    return emit(294, src.src0, src.src1);
+  case 310: // v_subrev_u32 -> v_subrev_nc_u32
+    return emit(295, src.src0, src.src1);
+  case 376: { // v_mov_b64 -> two v_mov_b32
+    if (!is_vgpr_pair_src(src.src0) || src.vdst > 254)
+      return {};
+    std::vector<uint32_t> words;
+    append_v_mov_b64_as_b32_pair(words, static_cast<uint8_t>(src.vdst),
+                                 static_cast<uint8_t>(src.src0 - 256));
+    return words;
+  }
+  case 668: // v_add_i32 -> v_add_nc_i32
+    return emit(806, src.src0, src.src1);
+  case 669: // v_sub_i32 -> v_sub_nc_i32
+    return emit(805, src.src0, src.src1);
+  case 670: // v_add_i16 -> v_add_nc_i16
+    return emit(781, src.src0, src.src1);
+  case 671: // v_sub_i16 -> v_sub_nc_i16
+    return emit(782, src.src0, src.src1);
+  default:
+    return {};
+  }
+}
+
+std::vector<uint32_t> lower_vop3_sdst_integer_renames(const Instruction &inst) {
+  const auto *raw = inst.raw_encoding();
+  if (!raw || inst.size() != 8)
+    return {};
+
+  cdna4::Vop3SdstEncMachineInst src{};
+  std::memcpy(&src, raw, sizeof(src));
+  if (!has_plain_vop3_sdst_modifiers(src))
+    return {};
+  if (!is_plain_src(src.src0) || !is_plain_src(src.src1) || !is_plain_src(src.src2))
+    return {};
+
+  uint16_t target_op = 0;
+  switch (inst.opcode()) {
+  case 284: // v_addc_co_u32 -> v_add_co_ci_u32
+    target_op = 288;
+    break;
+  case 285: // v_subb_co_u32 -> v_sub_co_ci_u32
+    target_op = 289;
+    break;
+  case 286: // v_subbrev_co_u32 -> v_subrev_co_ci_u32
+    target_op = 290;
+    break;
+  default:
+    return {};
+  }
+
+  auto [w0, w1] =
+      build_rdna3_vop3_sdst(target_op, static_cast<uint8_t>(src.vdst),
+                            static_cast<uint8_t>(src.sdst), src.src0, src.src1, src.src2);
+  return {w0, w1};
+}
+
+std::vector<uint32_t> lower_rdna3_residual_valu_expand(const Instruction &inst,
+                                                       LegalizationLookupFn legalization_lookup) {
+  if (!has_expand_legalization(inst, legalization_lookup))
+    return {};
+
+  const std::string_view mnemonic(inst.mnemonic());
+
+  if (mnemonic == "v_addc_co_u32_e32" || mnemonic == "v_subb_co_u32_e32" ||
+      mnemonic == "v_subbrev_co_u32_e32" || mnemonic == "v_add_u16_e32" ||
+      mnemonic == "v_sub_u16_e32" || mnemonic == "v_subrev_u16_e32" ||
+      mnemonic == "v_add_u32_e32" || mnemonic == "v_sub_u32_e32" || mnemonic == "v_subrev_u32_e32")
+    return lower_vop2_integer_renames(inst);
+
+  if (mnemonic == "v_mov_b64_e32")
+    return lower_vop1_v_mov_b64(inst);
+
+  if (mnemonic == "v_addc_co_u32" || mnemonic == "v_subb_co_u32" || mnemonic == "v_subbrev_co_u32")
+    return lower_vop3_sdst_integer_renames(inst);
+
+  if (mnemonic == "v_add_u16" || mnemonic == "v_sub_u16" || mnemonic == "v_subrev_u16" ||
+      mnemonic == "v_add_u32" || mnemonic == "v_sub_u32" || mnemonic == "v_subrev_u32" ||
+      mnemonic == "v_mov_b64" || mnemonic == "v_add_i32" || mnemonic == "v_sub_i32" ||
+      mnemonic == "v_add_i16" || mnemonic == "v_sub_i16")
+    return lower_vop3_integer_renames(inst);
+
+  return {};
 }
 
 // ---------------------------------------------------------------------------
@@ -580,8 +822,12 @@ std::vector<uint32_t> SemanticTranslator::try_lower_expand(const Instruction &in
       it->expand_fn)
     return it->expand_fn(inst, static_cast<uint32_t>(host_arch_), offset, liveness,
                          it->guest_layout, it->host_layout);
-  if (guest_arch_ == ROCJITSU_CODE_ARCH_CDNA4 && host_arch_ == ROCJITSU_CODE_ARCH_RDNA3)
+  if (guest_arch_ == ROCJITSU_CODE_ARCH_CDNA4 && host_arch_ == ROCJITSU_CODE_ARCH_RDNA3) {
+    if (auto lowered = lower_rdna3_residual_valu_expand(inst, legalization_lookup_);
+        !lowered.empty())
+      return lowered;
     return lower_removed_compare_predicate(inst, legalization_lookup_);
+  }
   return {};
 }
 
