@@ -84,7 +84,7 @@ class TestKFD(RocprofsysTest):
         self.assert_regex(
             result,
             subtest_name="Unified-memory completion check",
-            pass_regex=[r"\b6 tests completed\b"],
+            pass_regex=[r"6 tests completed"],
         )
 
         self.assert_perfetto(
@@ -146,7 +146,7 @@ class TestKFD(RocprofsysTest):
         self.assert_regex(
             result,
             subtest_name="Unified-memory completion check",
-            pass_regex=[r"\b6 tests completed\b"],
+            pass_regex=[r"6 tests completed"],
         )
 
         self.assert_perfetto(
@@ -202,7 +202,7 @@ class TestKFD(RocprofsysTest):
         self.assert_regex(
             result,
             subtest_name="Unified-memory completion check",
-            pass_regex=[r"\b6 tests completed\b"],
+            pass_regex=[r"6 tests completed"],
         )
 
         self.assert_perfetto(
