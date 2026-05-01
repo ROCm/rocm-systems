@@ -11,18 +11,17 @@ A practical reference for new hires. Covers every test suite, when to use it, wh
 3. [Quick-Reference Table](#3-quick-reference-table)
 4. [Building the Tests](#4-building-the-tests)
 5. [Suite A — `rccl-UnitTests` (Collective / TestBed)](#5-suite-a--rccl-unittests-collective--testbed)
-6. [Suite B — `rccl-UnitTestsFixtures` (Header-Level, Release-Safe)](#6-suite-b--rccl-unittestsfixturesebug-header-level-release-safe)
+6. [Suite B — `rccl-UnitTestsFixtures` (Header-Level, Release-Safe)](#6-suite-b--rccl-unittestsfixtures-header-level-release-safe)
 7. [Suite C — `rccl-UnitTestsFixturesDebug` (Internal Symbols, Debug Only)](#7-suite-c--rccl-unittestsfixturesdebug-internal-symbols-debug-only)
-8. [Suite D — `rccl-UnitTestsMock` (Link-Time Mocks, Debug Only)](#8-suite-d--rccl-unittestsmock-link-time-mocks-debug-only)
-9. [Suite E — `rccl-UnitTestsMPI` (Multi-Process / Multi-GPU)](#9-suite-e--rccl-unittestsmpi-multi-process--multi-gpu)
-10. [Suite F — `rccl-UnitTestsAltRsmi` (AltRsmi Special Linkage, Debug Only)](#10-suite-f--rccl-unittestsaltrsmi-altrsmi-special-linkage-debug-only)
-11. [Suite G — `rccl-UnitTestsFixtures` device/ (GPU Kernel Tests)](#11-suite-g--rccl-unittestsfixturesdevice-gpu-kernel-tests)
-12. [The Python Test Runner](#12-the-python-test-runner)
-13. [Multi-Node Testing with `mnctl`](#13-multi-node-testing-with-mnctl)
-14. [Test Infrastructure Reference](#14-test-infrastructure-reference)
-15. [Decision Guide — Which Suite?](#15-decision-guide--which-suite)
-16. [Day-to-Day Cheat Sheet](#16-day-to-day-cheat-sheet)
-17. [rccl-tests — Performance and Correctness](#17-rccl-tests--performance-and-correctness)
+8. [Suite E — `rccl-UnitTestsMPI` (Multi-Process / Multi-GPU)](#8-suite-e--rccl-unittestsmpi-multi-process--multi-gpu)
+9. [Suite F — `rccl-UnitTestsAltRsmi` (AltRsmi Special Linkage, Debug Only)](#9-suite-f--rccl-unittestsaltrsmi-altrsmi-special-linkage-debug-only)
+10. [Suite G — `rccl-UnitTestsFixtures` device/ (GPU Kernel Tests)](#10-suite-g--rccl-unittestsfixturesdevice-gpu-kernel-tests)
+11. [The Python Test Runner](#11-the-python-test-runner)
+12. [Multi-Node Testing with `mnctl`](#12-multi-node-testing-with-mnctl)
+13. [Test Infrastructure Reference](#13-test-infrastructure-reference)
+14. [Decision Guide — Which Suite?](#14-decision-guide--which-suite)
+15. [Day-to-Day Cheat Sheet](#15-day-to-day-cheat-sheet)
+16. [rccl-tests — Performance and Correctness](#16-rccl-tests--performance-and-correctness)
 
 ---
 
@@ -35,7 +34,6 @@ RCCL is a multi-GPU, multi-node collective-communication library. Testing it req
 - **Static-variable tests** — RCCL code frequently caches `getenv()` results in static variables that are initialised once per process and never reset. Standard GTest runs all tests in one process, so test order affects results. These tests need process isolation (`fork()` a fresh child per test).
 - **Collective-operation tests** need multiple communicating processes, one per GPU. A single process cannot meaningfully exercise AllReduce, AllGather, and similar operations. These tests use MPI.
 - **GPU kernel tests** run device-side (`__global__`) code directly from the host, requiring a HIP kernel launch harness.
-- **Mock/link-time override tests** replace real `librccl.so` symbols with fake implementations at link time. They must live in their own binary so the overrides cannot corrupt tests that expect real symbols.
 
 Each of these situations corresponds to a separate test binary. `test/CMakeLists.txt` is the single authoritative source for which source files belong to which binary; consult it whenever you are unsure.
 
@@ -77,7 +75,6 @@ Top-level `test/*.cpp` files are collective tests, fixture tests, and MPI tests;
 | `rccl-UnitTests` | Release **or** Debug | No | Collective operations, full-stack functional tests |
 | `rccl-UnitTestsFixtures` | Release **or** Debug | No | Header-only internals, public struct/utility tests, GPU kernel tests |
 | `rccl-UnitTestsFixturesDebug` | **Debug only** | No | Internal symbols hidden in Release (`ncclIbMalloc`, enqueue, proxy, etc.) |
-| `rccl-UnitTestsMock` | **Debug only** | No | Tests that replace real `librccl.so` symbols with mocks at link time |
 | `rccl-UnitTestsMPI` | **Debug only** | **Yes** | Multi-process collective behaviour, transport-layer (P2P/SHM/NET/IB), multi-node |
 | `rccl-UnitTestsAltRsmi` | **Debug only** | No | `alt_rsmi.cc` compiled with `ARSMI_TEST_BUILD` to expose static variables |
 
@@ -102,7 +99,7 @@ Top-level `test/*.cpp` files are collective tests, fixture tests, and MPI tests;
 # Release build — public tests only (Suites A and B)
 ./install.sh -t -l                          # -l = local GPU only (faster)
 
-# Debug build — all non-MPI suites (A, B, C, D, F, G)
+# Debug build — all non-MPI suites (A, B, C, F, G)
 ./install.sh --debug -t -l
 
 # Debug build + MPI suites (all suites including E)
@@ -150,7 +147,7 @@ cmake ../.. \
   -DROCM_PATH=/opt/rocm
 
 make -j$(nproc) rccl-UnitTests rccl-UnitTestsFixtures rccl-UnitTestsFixturesDebug \
-                rccl-UnitTestsMock rccl-UnitTestsMPI rccl-UnitTestsAltRsmi
+                rccl-UnitTestsMPI rccl-UnitTestsAltRsmi
 ```
 
 ### 4.4 Using a pre-built RCCL library
@@ -209,7 +206,7 @@ Tests that depend **only on header-defined symbols** — `inline`, `static`, `co
 
 > **Rule of thumb:** if your test only `#include`s headers and does not require symbols compiled into `librccl.so`, it belongs here.
 
-GPU kernel tests (Suite G) are also part of this binary; see [Section 11](#11-suite-g--rccl-unittestsfixturesdevice-gpu-kernel-tests).
+GPU kernel tests (Suite G) are also part of this binary; see [Section 10](#10-suite-g--rccl-unittestsfixturesdevice-gpu-kernel-tests).
 
 **Canonical example:** `test/BitOpsTests.cpp` (plain GTest against a header-only utility). `test/CommTests.cpp` is another clean example.
 
@@ -232,7 +229,7 @@ Add a new `TEST()` or `TEST_F()` block to an existing fixture test file, or crea
 
 ### What it tests
 
-Functions compiled into `librccl.so` that are hidden via `-fvisibility=hidden` in Release builds but accessible in Debug builds. This includes memory allocators, parameter lookup, argument checking, enqueue internals, socket utilities, proxy-thread code, and the XML graph parser. See `TEST_FIXTURE_DEBUG_SOURCE_FILES` in `test/CMakeLists.txt` for the current list.
+Functions compiled into `librccl.so` that are hidden via `-fvisibility=hidden` in Release builds but accessible in Debug builds. This includes memory allocators, parameter lookup, argument checking, enqueue internals, socket utilities, proxy-thread code, the XML graph parser, ROCm library wrapping, and transport setup. See `TEST_FIXTURE_DEBUG_SOURCE_FILES` in `test/CMakeLists.txt` for the current list.
 
 Many of these tests use `ProcessIsolatedTestRunner` because the code under test reads environment variables into static variables (see below).
 
@@ -258,6 +255,8 @@ If Test 1 sets `NCCL_P2P_NET_CHUNKSIZE=12345` and Test 2 clears it, the static v
 - `test/AllocTests.cpp` — plain GTest against internal symbols (no env-var sensitivity)
 - `test/ArgCheckTests.cpp` — `RUN_ISOLATED_TEST_WITH_ENV` for env-var-sensitive code
 - `test/ProxyTests.cpp` — larger example combining both patterns
+- `test/RcclWrapTests.cpp` — process-isolated tests for ROCm library wrapping, which caches state in statics
+- `test/TransportTests.cpp` — transport setup tests using the `TransportUtils.hpp` helpers to construct minimal `ncclComm` / `ncclChannel` structures without a real network fabric
 
 The available isolation macros are:
 
@@ -289,36 +288,7 @@ NCCL_DEBUG=INFO ./build/debug/test/rccl-UnitTestsFixturesDebug \
 
 ---
 
-## 8. Suite D — `rccl-UnitTestsMock` (Link-Time Mocks, Debug Only)
-
-### What it tests
-
-Tests that provide their own definitions of RCCL-internal symbols (`bootstrapAllGather`, `bootstrapIntraNodeAllGather`, the `ncclBootstrap` struct, `collNetTransport` function pointers, and similar) that override the real ones at link time. This lets tests drive transport-setup code paths without a real network fabric or GPU cluster.
-
-These tests **must** live in their own binary. Link-time symbol overrides affect every test in the same executable — mixing them with `rccl-UnitTestsFixturesDebug` would replace real symbols for all tests there too, causing silent failures. See `TEST_MOCK_SOURCE_FILES` in `test/CMakeLists.txt` for the current set.
-
-The shared mock helpers live in `test/common/TransportUtils.hpp` and `test/common/RcclMockFuncs.hpp`.
-
-**Canonical examples:** `test/TransportTests.cpp` (mock transport setup), `test/RcclWrapTests.cpp` (mock ROCm library wrapping).
-
-**Reference:** [Google Mock](https://google.github.io/googletest/gmock_for_dummies.html)
-
-### Adding a test
-
-Add to an existing mock test file, or create a new file and add it to `TEST_MOCK_SOURCE_FILES` in `test/CMakeLists.txt`. Follow the patterns in `test/TransportTests.cpp` for how to set up mock symbols and exercise the real RCCL logic against them.
-
-### Building and running
-
-```bash
-./install.sh --debug -t -l
-
-./build/debug/test/rccl-UnitTestsMock
-./build/debug/test/rccl-UnitTestsMock --gtest_filter="TransportTest.*"
-```
-
----
-
-## 9. Suite E — `rccl-UnitTestsMPI` (Multi-Process / Multi-GPU)
+## 8. Suite E — `rccl-UnitTestsMPI` (Multi-Process / Multi-GPU)
 
 ### What it tests
 
@@ -343,7 +313,6 @@ Features that require genuine multi-process communication: P2P transport, shared
 **Canonical examples:**
 - `test/transport/P2pMPITests.cpp` — clean `MPITestBase` usage: `validateTestPrerequisites`, `createTestCommunicator`, `DeviceBuffer`, RAII guards, single-node constraint (`kRequireSingleNode`)
 - `test/RegistrationMPITests.cpp` — `TestLogAssertionContext` for asserting on RCCL debug log output after an operation
-- `test/CommMPITests.cpp` — overriding `createTestCommunicator()` to inject custom `ncclConfig_t` while reusing base-class state
 
 ### Key API reference
 
@@ -378,7 +347,7 @@ Set `RCCL_MPI_LOG_ALL_RANKS=1` to redirect each rank's stderr to `rccl_test_rank
 
 Add to an existing `transport/*MPITests.cpp` file for transport-layer tests, or to a top-level MPI test file for higher-level scenarios. For a new feature area, create a new file and add it to `MPI_TEST_SOURCE_FILES` in `test/CMakeLists.txt`. Wrap the file body in `#ifdef MPI_TESTS_ENABLED … #endif`.
 
-Follow `test/transport/P2pMPITests.cpp` for the baseline pattern. If your test needs to assert that specific RCCL debug lines were emitted, follow `test/RegistrationMPITests.cpp`. If you need a custom communicator configuration (e.g. traffic class, config flags), follow `test/CommMPITests.cpp`.
+Follow `test/transport/P2pMPITests.cpp` for the baseline pattern. If your test needs to assert that specific RCCL debug lines were emitted, follow `test/RegistrationMPITests.cpp`.
 
 ### Building and running
 
@@ -410,7 +379,7 @@ RCCL_TEST_MPI_HOSTFILE=~/.my_hostfile \
 
 ---
 
-## 10. Suite F — `rccl-UnitTestsAltRsmi` (AltRsmi Special Linkage, Debug Only)
+## 9. Suite F — `rccl-UnitTestsAltRsmi` (AltRsmi Special Linkage, Debug Only)
 
 ### What it tests
 
@@ -431,7 +400,7 @@ Add to the existing AltRsmi test file, or create a new file and add it to `TEST_
 
 ---
 
-## 11. Suite G — `rccl-UnitTestsFixtures` device/ (GPU Kernel Tests)
+## 10. Suite G — `rccl-UnitTestsFixtures` device/ (GPU Kernel Tests)
 
 ### What it tests
 
@@ -463,7 +432,7 @@ Create `test/device/MyKernelTests.cpp`, inherit from `DeviceTestBase`, and follo
 
 ---
 
-## 12. The Python Test Runner
+## 11. The Python Test Runner
 
 The Python test runner (`tools/scripts/test_runner/test_runner.py`) is the preferred way to run tests in CI and for systematic coverage sweeps. It reads a JSON config, optionally builds RCCL, dispatches each test individually via `--gtest_filter`, manages per-test timeouts and environment variables, and produces a summary report. It can also re-run failed tests with an escalated debug environment.
 
@@ -525,7 +494,7 @@ To register a new test: add an entry to the `tests` array of the appropriate `te
 
 ---
 
-## 13. Multi-Node Testing with `mnctl`
+## 12. Multi-Node Testing with `mnctl`
 
 `docker/mnctl/` is a pure Python 3 tool (no pip dependencies) that builds ROCm Docker containers, deploys them across multiple nodes, wires up inter-container SSH, and leaves you with a ready-to-use MPI cluster.
 
@@ -570,14 +539,14 @@ Full documentation: `docker/mnctl/README.md`.
 
 ---
 
-## 14. Test Infrastructure Reference
+## 13. Test Infrastructure Reference
 
 ### Headers you will use most
 
 | Header (relative to `test/`) | What it provides |
 |---|---|
 | `common/TestBed.hpp` | `TestBed` + `RunSimpleSweep()` for collective tests (Suite A) |
-| `common/ProcessIsolatedTestRunner.hpp` | `RUN_ISOLATED_TEST*` macros for env-var-sensitive tests (Suites C/D) |
+| `common/ProcessIsolatedTestRunner.hpp` | `RUN_ISOLATED_TEST*` macros for env-var-sensitive tests (Suite C) |
 | `common/MPITestBase.hpp` | `MPITestBase` GTest fixture for Suite E |
 | `common/MPITestCore.hpp` | Framework-agnostic MPI base (`validateTestPrerequisites`, `createTestCommunicator`, …) |
 | `common/MPIHelpers.hpp` | `initializeMPI`, `setupGPU`, `TestLogAssertionContext`, `getRankLogFilePath` |
@@ -588,7 +557,7 @@ Full documentation: `docker/mnctl/README.md`.
 | `device/DeviceTestBase.hpp` | `DeviceTestBase`, `DeviceBuffer<T>`, `gridFor`, `syncAndCheck` (Suite G) |
 | `common/TestChecks.hpp` | `RCCL_TEST_CHECK`, `HIP_TEST_CHECK`, `MPICHECK`, `TEST_INFO`, `TEST_WARN`, … |
 | `common/EnvVars.hpp` | RAII `SetEnvVar`/`UnsetEnvVar` helpers |
-| `common/TransportUtils.hpp` | Link-time mock helpers (Suite D) |
+| `common/TransportUtils.hpp` | Helpers for constructing minimal `ncclComm`/`ncclChannel` structures in transport tests (Suite C) |
 
 ### Documentation files in the repo
 
@@ -616,7 +585,7 @@ Full documentation: `docker/mnctl/README.md`.
 
 ---
 
-## 15. Decision Guide — Which Suite?
+## 14. Decision Guide — Which Suite?
 
 ```mermaid
 flowchart TD
@@ -630,27 +599,23 @@ flowchart TD
     D -- Yes --> SG["**Suite G** — test/device/\n(inside rccl-UnitTestsFixtures)\nUse DeviceTestBase\nFollow test/device/TestOp128.cpp"]
     D -- No --> SB["**Suite B** — rccl-UnitTestsFixtures\nPlain GTest\nFollow test/BitOpsTests.cpp"]
 
-    C -- "Yes (debug-only internals)" --> E{"Provides fake RCCL symbol\ndefinitions that override\nreal ones at link time?"}
+    C -- "Yes (debug-only internals)" --> E{"Requires multiple GPUs/ranks\ncommunicating with each other?"}
 
-    E -- Yes --> SD["**Suite D** — rccl-UnitTestsMock\nFollow test/TransportTests.cpp"]
+    E -- Yes --> SE["**Suite E** — rccl-UnitTestsMPI\nFollow test/transport/P2pMPITests.cpp\nLog assertions → test/RegistrationMPITests.cpp"]
 
     E -- No --> F{"Needs alt_rsmi.cc compiled\nwith ARSMI_TEST_BUILD to\nexpose static functions?"}
 
     F -- Yes --> SF["**Suite F** — rccl-UnitTestsAltRsmi"]
 
-    F -- No --> G{"Requires multiple GPUs/ranks\ncommunicating with each other?"}
+    F -- No --> G{"Does the code cache\nenv vars in statics?"}
 
-    G -- Yes --> SE["**Suite E** — rccl-UnitTestsMPI\nFollow test/transport/P2pMPITests.cpp\nLog assertions → test/RegistrationMPITests.cpp\nCustom comm config → test/CommMPITests.cpp"]
-
-    G -- No --> H{"Does the code cache\nenv vars in statics?"}
-
-    H -- Yes --> SC_env["**Suite C** — rccl-UnitTestsFixturesDebug\nUse RUN_ISOLATED_TEST_WITH_ENV\nFollow test/ArgCheckTests.cpp"]
-    H -- No --> SC_plain["**Suite C** — rccl-UnitTestsFixturesDebug\nPlain GTest\nFollow test/AllocTests.cpp"]
+    G -- Yes --> SC_env["**Suite C** — rccl-UnitTestsFixturesDebug\nUse RUN_ISOLATED_TEST_WITH_ENV\nFollow test/ArgCheckTests.cpp"]
+    G -- No --> SC_plain["**Suite C** — rccl-UnitTestsFixturesDebug\nPlain GTest\nFollow test/AllocTests.cpp"]
 ```
 
 ---
 
-## 16. Day-to-Day Cheat Sheet
+## 15. Day-to-Day Cheat Sheet
 
 ### Build commands
 
@@ -658,7 +623,7 @@ flowchart TD
 # Release (Suites A, B, G)
 ./install.sh -t -l
 
-# Debug (Suites A–D, F, G)
+# Debug (Suites A, B, C, F, G)
 ./install.sh --debug -t -l
 
 # Debug + MPI (all suites)
@@ -677,9 +642,6 @@ flowchart TD
 
 # Suite C (debug only)
 ./build/debug/test/rccl-UnitTestsFixturesDebug
-
-# Suite D (debug only)
-./build/debug/test/rccl-UnitTestsMock
 
 # Suite E — 4 ranks
 mpirun -np 4 ./build/debug/test/rccl-UnitTestsMPI
@@ -803,9 +765,9 @@ LD_LIBRARY_PATH=/opt/rocm/lib HSA_FORCE_FINE_GRAIN_PCIE=1 python3 -m pytest
 
 ---
 
-## 17. rccl-tests — Performance and Correctness
+## 16. rccl-tests — Performance and Correctness
 
-`projects/rccl-tests/` is a standalone performance and correctness tool for RCCL. It is complementary to the unit-test suites (A–G): the unit tests verify correctness and internal behaviour through GTest, while rccl-tests measures bandwidth and latency at scale and double-checks numerical correctness across collective types, data types, and reduction operations. Typical use cases are performance regression hunting, multi-node characterisation, and validating new hardware configurations.
+`projects/rccl-tests/` is a standalone performance and correctness tool for RCCL. It is complementary to the unit-test suites (A–C, E–G): the unit tests verify correctness and internal behaviour through GTest, while rccl-tests measures bandwidth and latency at scale and double-checks numerical correctness across collective types, data types, and reduction operations. Typical use cases are performance regression hunting, multi-node characterisation, and validating new hardware configurations.
 
 Unlike the unit tests, rccl-tests is a separate project with its own build system. It lives at `projects/rccl-tests/` and is built independently of RCCL's `install.sh`.
 
@@ -966,7 +928,7 @@ LD_LIBRARY_PATH=/opt/rocm/lib HSA_FORCE_FINE_GRAIN_PCIE=1 \
 
 ### Relationship to the RCCL unit tests
 
-| | rccl-tests | RCCL unit tests (A–G) |
+| | rccl-tests | RCCL unit tests (A–C, E–G) |
 |-|------------|-----------------------|
 | **Purpose** | Bandwidth, latency, numerical correctness at scale | Functional correctness, internal invariants |
 | **Build** | Separate project (`projects/rccl-tests/`) | Part of `projects/rccl/` via `install.sh -t` |
