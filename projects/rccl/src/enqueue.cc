@@ -3044,15 +3044,6 @@ static ncclResult_t ceCollTaskAppend(
     struct ncclDevRedOpFull opDev) {
   struct ncclKernelPlanner *planner = &comm->planner;
 
-  // Check if CE needs initialization
-  if (comm->ceColl.baseUCSymReadyPtr == NULL && ncclIntruQueueEmpty(&comm->ceInitTaskQueue)) {
-    struct ncclCeInitTask* ceTask;
-    NCCLCHECK(ncclCalloc(&ceTask, 1));
-    ceTask->comm = comm;
-    ncclIntruQueueEnqueue(&comm->ceInitTaskQueue, ceTask);
-    ncclGroupCommJoin(comm, ncclGroupTaskTypeSymRegister);
-  }
-
   // Must be in thread local group before tasks can be alloc'd in `comm->memScoped`.
   ncclGroupCommJoin(info->comm, ncclGroupTaskTypeCollective);
   NCCLCHECK(ncclPlannerSetCapturingGraph(comm, info));
@@ -3117,6 +3108,18 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
       ncclDevrFindWindow(comm, info->sendbuff, &sendWin);
       ncclDevrFindWindow(comm, info->recvbuff, &recvWin);
       bool ceImplemented = ncclCeImplemented(info->coll, info->op, info->datatype);
+
+      // Trigger CE initialization lazily for any collective, not just CE ones.
+      // This ensures ncclCeInit runs even when buffers are not symmetric windows
+      // (e.g., two-shot AllReduce's ReduceScatter uses non-symmetric rsScratch).
+      // Skip if a previous attempt already failed (e.g. NCCL_WIN_ENABLE=0).
+      if (comm->ceColl.baseUCSymReadyPtr == NULL && !comm->ceColl.ceInitDisabled && ncclIntruQueueEmpty(&comm->ceInitTaskQueue)) {
+        struct ncclCeInitTask* ceTask;
+        NCCLCHECK(ncclCalloc(&ceTask, 1));
+        ceTask->comm = comm;
+        ncclIntruQueueEnqueue(&comm->ceInitTaskQueue, ceTask);
+        ncclGroupCommJoin(comm, ncclGroupTaskTypeSymRegister);
+      }
 
       // Append CE collective task if CE is supported and requested by user
       if (comm->symmetricSupport && comm->nNodes == 1 && sendWin && recvWin && (sendWin->winFlags & recvWin->winFlags & NCCL_WIN_COLL_SYMMETRIC) && comm->config.CTAPolicy == NCCL_CTA_POLICY_ZERO && ceImplemented) {

@@ -799,6 +799,11 @@ struct ncclComm {
   uint8_t* peerTwoShotSyncIpcOpened;
   uint32_t twoShotBarrierSeq;
 
+  // Two-shot AllReduce: symmetric window buffer for Phase 2 CE AllGather staging.
+  // Allocated via ncclMemAlloc and registered as symmetric window in ncclCeInit.
+  uint8_t* agBuff;
+  struct ncclDevrWindow* agWin;
+
   uint64_t endMagic;
 };
 

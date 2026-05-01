@@ -282,7 +282,13 @@ ncclResult_t ncclCommGroupRegisterSymmetric(struct ncclAsyncJob* job_) {
 
   while (!ncclIntruQueueEmpty(&comm->ceInitTaskQueue)) {
     struct ncclCeInitTask* task = ncclIntruQueueDequeue(&comm->ceInitTaskQueue);
-    NCCLCHECKGOTO(ncclCeInit(task->comm), ret, fail);
+    ncclResult_t ceRet = ncclCeInit(task->comm);
+    if (ceRet != ncclSuccess) {
+      // CE init failure (e.g. NCCL_WIN_ENABLE=0 disables symmetric windows).
+      // Mark as permanently disabled so we don't retry; fall back to IPC path.
+      task->comm->ceColl.ceInitDisabled = true;
+      INFO(NCCL_INIT, "ncclCeInit failed (ret=%d) – CE collectives disabled for this comm", ceRet);
+    }
     free(task);
   }
 

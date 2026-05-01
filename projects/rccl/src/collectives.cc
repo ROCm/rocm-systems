@@ -7,6 +7,10 @@
 #include "argcheck.h" // Need some checks here since we access comm
 #include "collectives.h"
 #include "enqueue.h"
+#include "ce_coll.h"  // ncclCeAllGather, NCCL_CE_AG_BUFF_BYTES
+
+// Set RCCL_TWO_SHOT_AG_FORCE_IPC=1 to bypass CE AllGather and always use the IPC fallback.
+RCCL_PARAM(TwoShotAgForceIpc, "TWO_SHOT_AG_FORCE_IPC", 0);
 
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
 #include <hip/hip_runtime.h>
@@ -387,7 +391,9 @@ ncclResult_t ncclAllReduce_impl(const void* sendbuff, void* recvbuff, size_t cou
   // Two-shot AllReduce (opt-in via RCCL_TWO_SHOT_ALLREDUCE=1):
   // Shot 1 — reduce-scatter: CE/SDMA-style async copies into each peer's tempBuff staging
   // (registered at ncclCommInit via IPC or same-PID direct pointers), then a device reduce
-  // kernel (direct ReduceScatter path) over tempBuff. Shot 2 — direct allgather into recvbuff.
+  // kernel (direct ReduceScatter path) over tempBuff. 
+  // Shot 2 — CE AllGather: symmetric-memory push of rsScratch → agBuff on all peers,
+  // then a local batched pull from agBuff into recvbuff.
   if (ncclGroupDepth == 0 && comm->tempBuff && rcclUseTwoShotAllReduce(comm, count, datatype, op)) {
     int nRanks, rank;
     NCCLCHECK(ncclCommCount(comm, &nRanks));
@@ -407,6 +413,14 @@ ncclResult_t ncclAllReduce_impl(const void* sendbuff, void* recvbuff, size_t cou
     void* tempbuff = comm->tempBuff;
     void* rsScratch = (char*)tempbuff + (size_t)nRanks * chunkBytes;
 
+    // CE AllGather requires a symmetric agWin and the message must fit in agBuff.
+    // If it doesn't fit, fall through to the standard ring AllReduce.
+    const bool ceAgFits = (comm->agWin != nullptr) &&
+                          ((size_t)nRanks * chunkBytes <= NCCL_CE_AG_BUFF_BYTES);
+    if (!ceAgFits) {
+      return ncclEnqueueCheck(&info);
+    }
+
     INFO(NCCL_INIT,
          "RCCL TWO-SHOT ALLREDUCE count=%zu chunkElems=%zu rank=%d nRanks=%d comm=%p stream=%p sendbuff=%p recvbuff=%p",
          count, chunkElems, rank, nRanks, comm, stream, sendbuff, recvbuff);
@@ -417,9 +431,11 @@ ncclResult_t ncclAllReduce_impl(const void* sendbuff, void* recvbuff, size_t cou
 #else
         false;
 #endif
+    INFO(NCCL_COLL, "TWO-SHOT STATE: rank=%d hipBatchedStaging=%d peerTempImported=%p peerTwoShotSyncImported=%p agWin=%p",
+         rank, (int)hipBatchedStaging, comm->peerTempImported, comm->peerTwoShotSyncImported, comm->agWin);
     if (!hipBatchedStaging) {
-      NCCLCHECK(ncclCudaMemcpyAsync((char*)tempbuff + rank * chunkBytes, (char*)sendbuff + rank * chunkBytes,
-                                    chunkBytes, stream));
+      CUDACHECK(cudaMemcpyAsync((char*)tempbuff + rank * chunkBytes, (char*)sendbuff + rank * chunkBytes,
+                                    chunkBytes, cudaMemcpyDefault, stream));
     }
 
     if (comm->peerTempImported) {
@@ -431,6 +447,9 @@ ncclResult_t ncclAllReduce_impl(const void* sendbuff, void* recvbuff, size_t cou
         size_t* batchSz = nullptr;
         hipStreamBatchMemOpParams* memOps = nullptr;
         ncclResult_t ts = ncclSuccess;
+        unsigned int nPeer = 0;
+        unsigned int nMemOps = 0;
+        unsigned int oi = 0;
 
         NCCLCHECKGOTO(ncclCalloc(&batchDst, nRanks), ts, twoshot_cleanup);
         NCCLCHECKGOTO(ncclCalloc(&batchSrc, nRanks), ts, twoshot_cleanup);
@@ -449,10 +468,9 @@ ncclResult_t ncclAllReduce_impl(const void* sendbuff, void* recvbuff, size_t cou
         CUDACHECKGOTO(hipMemcpyBatchAsync(batchDst, batchSrc, batchSz, (size_t)nRanks, nullptr, nullptr, 0,
                                           nullptr, stream), ts, twoshot_cleanup);
 
-        const unsigned int nPeer = (unsigned int)(nRanks - 1);
-        const unsigned int nMemOps = 2 * nPeer;
+        nPeer = (unsigned int)(nRanks - 1);
+        nMemOps = 2 * nPeer;
         NCCLCHECKGOTO(ncclCalloc(&memOps, nMemOps), ts, twoshot_cleanup);
-        unsigned int oi = 0;
         for (int dest = 0; dest < nRanks; dest++) {
           if (dest == rank) continue;
           memOps[oi] = {};
@@ -460,7 +478,7 @@ ncclResult_t ncclAllReduce_impl(const void* sendbuff, void* recvbuff, size_t cou
           memOps[oi].writeValue.address =
               (hipDeviceptr_t)((uint32_t*)comm->peerTwoShotSyncImported[dest] + rank);
           memOps[oi].writeValue.value = seq;
-          memOps[oi].writeValue.flags = hipStreamWriteValueDefault;
+          memOps[oi].writeValue.flags = 0;
           oi++;
         }
         for (int peer = 0; peer < nRanks; peer++) {
@@ -489,88 +507,46 @@ twoshot_cleanup:
                               nullptr};
     NCCLCHECK(ncclEnqueueCheck(&rsInfo));
     comm->enableDirectReduceScatter = 0;
-    NCCLCHECK(ncclCudaMemcpyAsync((char*)recvbuff + rank * chunkBytes, rsScratch, chunkBytes, stream));
 
-    if (hipBatchedStaging) {
-      // Allgather: batched push of this rank's shard into each peer's tempBuff, device fence, then
-      // batched local copies from tempBuff into recvbuff (user buffer not IPC-visible).
-      const uint32_t agSeq = ++comm->twoShotBarrierSeq;
-      void** agPushDst = nullptr;
-      void** agPushSrc = nullptr;
-      size_t* agPushSz = nullptr;
+      // CE AllGather: push rsScratch to all peers' agBuff[rank*chunk] via symmetric window,
+      // then pull agBuff[p*chunk] from all peers' agBuff[p*chunk] into recvbuff[p*chunk] locally.
+      // ncclCeAllGather handles the pre- and post-barriers.
+      WARN("TWO-SHOT AG CE: rank=%d msgBytes=%zu chunkBytes=%zu agWin=%p",
+           rank, count * el, chunkBytes, comm->agWin);
+      struct ncclCeCollArgs agArgs = {};
+      agArgs.func     = ncclFuncAllGather;
+      agArgs.nElts    = chunkElems;
+      agArgs.eltSize  = el;
+      agArgs.sendBuff = (uint8_t*)rsScratch;
+      agArgs.recvBuff = (uint8_t*)comm->agBuff;
+      agArgs.sendWin  = nullptr;
+      agArgs.recvWin  = comm->agWin;
+      NCCLCHECK(ncclCeAllGather(comm, &agArgs, stream));
+
+      // Pull all nRanks shards from local agBuff → recvbuff.
       void** agPullDst = nullptr;
       void** agPullSrc = nullptr;
       size_t* agPullSz = nullptr;
-      hipStreamBatchMemOpParams* agMemOps = nullptr;
       ncclResult_t agTs = ncclSuccess;
-
-      NCCLCHECKGOTO(ncclCalloc(&agPushDst, nRanks), agTs, ag_cleanup);
-      NCCLCHECKGOTO(ncclCalloc(&agPushSrc, nRanks), agTs, ag_cleanup);
-      NCCLCHECKGOTO(ncclCalloc(&agPushSz, nRanks), agTs, ag_cleanup);
-
-      for (int d = 0; d < nRanks; d++) {
-        agPushDst[d] =
-            (d == rank) ? (char*)tempbuff + rank * chunkBytes : (char*)comm->peerTempImported[d] + rank * chunkBytes;
-        agPushSrc[d] = (char*)recvbuff + rank * chunkBytes;
-        agPushSz[d] = chunkBytes;
-      }
-      CUDACHECKGOTO(hipMemcpyBatchAsync(agPushDst, agPushSrc, agPushSz, (size_t)nRanks, nullptr, nullptr, 0, nullptr,
-                                        stream),
-                    agTs, ag_cleanup);
-
-      const unsigned int agNPeer = (unsigned int)(nRanks - 1);
-      const unsigned int agNMemOps = 2 * agNPeer;
-      NCCLCHECKGOTO(ncclCalloc(&agMemOps, agNMemOps), agTs, ag_cleanup);
-      unsigned int agOi = 0;
-      for (int dest = 0; dest < nRanks; dest++) {
-        if (dest == rank) continue;
-        agMemOps[agOi] = {};
-        agMemOps[agOi].writeValue.operation = hipStreamMemOpWriteValue32;
-        agMemOps[agOi].writeValue.address =
-            (hipDeviceptr_t)((uint32_t*)comm->peerTwoShotSyncImported[dest] + rank);
-        agMemOps[agOi].writeValue.value = agSeq;
-        agMemOps[agOi].writeValue.flags = hipStreamWriteValueDefault;
-        agOi++;
-      }
-      for (int peer = 0; peer < nRanks; peer++) {
-        if (peer == rank) continue;
-        agMemOps[agOi] = {};
-        agMemOps[agOi].waitValue.operation = hipStreamMemOpWaitValue32;
-        agMemOps[agOi].waitValue.address = (hipDeviceptr_t)((uint32_t*)comm->twoShotSyncBuff + peer);
-        agMemOps[agOi].waitValue.value = agSeq;
-        agMemOps[agOi].waitValue.flags = hipStreamWaitValueEq;
-        agOi++;
-      }
-      CUDACHECKGOTO(hipStreamBatchMemOp(stream, agOi, agMemOps, 0), agTs, ag_cleanup);
-
-      const int nPull = nRanks - 1;
-      NCCLCHECKGOTO(ncclCalloc(&agPullDst, nPull), agTs, ag_cleanup);
-      NCCLCHECKGOTO(ncclCalloc(&agPullSrc, nPull), agTs, ag_cleanup);
-      NCCLCHECKGOTO(ncclCalloc(&agPullSz, nPull), agTs, ag_cleanup);
-      int pi = 0;
+      NCCLCHECKGOTO(ncclCalloc(&agPullDst, nRanks), agTs, ag_cleanup_ce);
+      NCCLCHECKGOTO(ncclCalloc(&agPullSrc, nRanks), agTs, ag_cleanup_ce);
+      NCCLCHECKGOTO(ncclCalloc(&agPullSz,  nRanks), agTs, ag_cleanup_ce);
       for (int p = 0; p < nRanks; p++) {
-        if (p == rank) continue;
-        agPullDst[pi] = (char*)recvbuff + p * chunkBytes;
-        agPullSrc[pi] = (char*)tempbuff + p * chunkBytes;
-        agPullSz[pi] = chunkBytes;
-        pi++;
+        agPullDst[p] = (char*)recvbuff     + p * chunkBytes;
+        agPullSrc[p] = (char*)comm->agBuff + p * chunkBytes;
+        agPullSz[p]  = chunkBytes;
       }
-      CUDACHECKGOTO(hipMemcpyBatchAsync(agPullDst, agPullSrc, agPullSz, (size_t)nPull, nullptr, nullptr, 0, nullptr,
-                                        stream),
-                    agTs, ag_cleanup);
-
-ag_cleanup:
-      free(agMemOps);
-      free(agPullDst);
-      free(agPullSrc);
-      free(agPullSz);
-      free(agPushDst);
-      free(agPushSrc);
-      free(agPushSz);
+      CUDACHECKGOTO(hipMemcpyBatchAsync(agPullDst, agPullSrc, agPullSz, (size_t)nRanks,
+                                        nullptr, nullptr, 0, nullptr, stream),
+                    agTs, ag_cleanup_ce);
+ag_cleanup_ce:
+      free(agPullDst); free(agPullSrc); free(agPullSz);
       NCCLCHECK(agTs);
+      return ncclSuccess;
     }
-	return ncclSuccess;
-    }
+
+    return ncclEnqueueCheck(&info);
+  }
 
   return ncclEnqueueCheck(&info);
 }

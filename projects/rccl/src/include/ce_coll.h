@@ -16,6 +16,10 @@
 #define NCCL_CE_SYNC_OPS_PER_RANK_UC 3
 #define RCCL_CE_NUM_COPY_STREAMS 8
 
+// Symmetric buffer size for two-shot AllReduce AllGather staging.
+// Must be >= nRanks * max_chunk_bytes (max constrained by rcclUseTwoShotAllReduce).
+#define NCCL_CE_AG_BUFF_BYTES (4 * 1024 * 1024)
+
 struct ncclCeColl {
   uint8_t* baseUCSymReadyPtr;
   uint8_t* baseUCSymComplPtr;
@@ -29,6 +33,8 @@ struct ncclCeColl {
   int nCopyStreams;
   cudaStream_t copyStreams[RCCL_CE_NUM_COPY_STREAMS];
   cudaEvent_t copyEvents[RCCL_CE_NUM_COPY_STREAMS];
+  // Set true when ncclCeInit() fails so we skip retrying (e.g. NCCL_WIN_ENABLE=0)
+  bool ceInitDisabled;
 };
 
 struct ncclCeInitTask {

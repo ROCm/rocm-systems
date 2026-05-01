@@ -33,15 +33,27 @@ static void ceDestroyCopyStreams(struct ncclComm* comm, int nPairs) {
 ncclResult_t ncclCeInit(struct ncclComm* comm) {
   ncclResult_t ret = ncclSuccess;
 
+  // Symmetric windows require CUmem + WIN_ENABLE. Skip gracefully when disabled
+  // (e.g. NCCL_WIN_ENABLE=0) so callers can fall back to the IPC path without crashing.
+  if (!comm->symmetricSupport) {
+    INFO(NCCL_INIT, "ncclCeInit: symmetricSupport=0 (NCCL_WIN_ENABLE=0?), skipping CE init");
+    comm->ceColl.ceInitDisabled = true;
+    return ncclSuccess;
+  }
+
   uint8_t* ceDevBase = nullptr;
   size_t ceDevBaseSize = alignUp(comm->nRanks*sizeof(uint32_t), 16) * 2;
   ncclWindow_vidmem* ceWinDev = nullptr;
   ncclWindow_vidmem* ceWinDevHost = nullptr;
+  // Two-shot AllGather symmetric staging buffer
+  uint8_t* agDevBase = nullptr;
+  ncclWindow_vidmem* agWinDev = nullptr;
+  ncclWindow_vidmem* agWinDevHost = nullptr;
   int i = 0;
   int targetStreams = 0;
   // Ensure symmetric memory runtime is initialized
   NCCLCHECKGOTO(ncclDevrInitOnce(comm), ret, fail);
-  // Allocate and register memory for the symmetric memory
+  // Allocate and register CE sync buffer as symmetric window
   NCCLCHECKGOTO(ncclMemAlloc((void**)&ceDevBase, ceDevBaseSize), ret, fail);
   NCCLCHECKGOTO(ncclDevrWindowRegisterInGroup(comm, ceDevBase, ceDevBaseSize, NCCL_WIN_COLL_SYMMETRIC, &ceWinDev), ret, fail);
   NCCLCHECKGOTO(ncclShadowPoolToHost(&comm->devrState.shadows, ceWinDev, &ceWinDevHost), ret, fail);
@@ -58,6 +70,16 @@ ncclResult_t ncclCeInit(struct ncclComm* comm) {
   comm->ceColl.intraBatchSyncMsgThreshold = CE_COLL_INTRA_BATCH_SYNC_MSG_THRESHOLD;
   comm->ceColl.nCopyStreams = 0;
   INFO(NCCL_INIT, "Init CE, rank %d baseUCSymReadyPtr %p, baseUCSymComplPtr %p, seq num %d", comm->rank, comm->ceColl.baseUCSymReadyPtr, comm->ceColl.baseUCSymComplPtr, comm->ceColl.ceSeqNum);
+
+  // Allocate and register the two-shot AllReduce- AllGather phase staging buffer as a symmetric window.
+  // This lets ncclCeAllGather push rsScratch → all peers' agBuff[rank*chunk] in one CE batch.
+  NCCLCHECKGOTO(ncclMemAlloc((void**)&agDevBase, NCCL_CE_AG_BUFF_BYTES), ret, fail);
+  NCCLCHECKGOTO(ncclDevrWindowRegisterInGroup(comm, agDevBase, NCCL_CE_AG_BUFF_BYTES, NCCL_WIN_COLL_SYMMETRIC, &agWinDev), ret, fail);
+  NCCLCHECKGOTO(ncclShadowPoolToHost(&comm->devrState.shadows, agWinDev, &agWinDevHost), ret, fail);
+  comm->agWin  = (struct ncclDevrWindow*)agWinDevHost->winHost;
+  comm->agBuff = agDevBase;
+  INFO(NCCL_INIT, "Init CE two-shot AR buffer: rank %d agBuff %p agWin %p", comm->rank, comm->agBuff, comm->agWin);
+
   {
     int multiStreams = rcclParamCeMultiStreams();
     if (multiStreams > 0) {
@@ -80,7 +102,9 @@ fail_ce_stream:
   ceDestroyCopyStreams(comm, i);
   goto fail;
 fail:
-  if (ceWinDev != nullptr) ncclCommWindowDeregister(comm, ceWinDev);
+  if (agWinDev  != nullptr) ncclCommWindowDeregister(comm, agWinDev);
+  if (agDevBase != nullptr) ncclMemFree(agDevBase);
+  if (ceWinDev  != nullptr) ncclCommWindowDeregister(comm, ceWinDev);
   if (ceDevBase != nullptr) ncclMemFree(ceDevBase);
   goto exit;
 }
@@ -94,6 +118,16 @@ ncclResult_t ncclCeFinalize(struct ncclComm* comm) {
     free(task);
   }
   
+  // Clean up two-shot AllGather staging buffer
+  if (comm->agBuff != nullptr) {
+    if (comm->agWin && comm->agWin->vidmem) {
+      NCCLCHECKGOTO(ncclCommWindowDeregister(comm, comm->agWin->vidmem), ret, fail);
+    }
+    NCCLCHECKGOTO(ncclMemFree(comm->agBuff), ret, fail);
+    comm->agBuff = nullptr;
+    comm->agWin  = nullptr;
+  }
+
   // Clean up CE resources
   if (comm->ceColl.baseUCSymReadyPtr != NULL) {
     if (comm->ceColl.ceSyncWin && comm->ceColl.ceSyncWin->vidmem) {
@@ -120,7 +154,7 @@ bool ncclCeImplemented(ncclFunc_t coll, int/*ncclDevRedOp_t*/ red, ncclDataType_
 
   // CE is supported in ROCm 7.12 and later
   // hipDriverGetVersion() returns 71200000 for ROCm 7.12
-  if (driverVersion >= 71200000) {
+  if (driverVersion >= 70200000) {
     switch (coll) {
     case ncclFuncAllGather:
     case ncclFuncAlltoAll:
@@ -345,7 +379,7 @@ ncclResult_t ncclCeLaunchBatchOps(struct ncclComm* comm, struct ncclCeBatchOpsPa
   //--------------No graph capture--------------
   else {
     // driverVersion is reported as 71200000 for ROCm 7.12 when using hipDriverGetVersion().
-    if (ROCM_VERSION >= 71200 && driverVersion >= 71200000) {
+    if (ROCM_VERSION >= 71200 && driverVersion >= 70200000) {
 #if ROCM_VERSION >= 71200
     // For ROCm 7.12+, use batch memory copy for better performance
     params->attrs[0] = {};
