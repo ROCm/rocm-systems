@@ -26,6 +26,7 @@
 #include <atomic>
 #include <cstdint>
 #include <cstring>
+#include <functional>
 #include <iostream>
 #include <memory>
 #include <mutex>
@@ -180,6 +181,27 @@ public:
 std::unique_ptr<SQTTParser> AnalyseBinary_internal(
     CppReturnInfo& info, const uint8_t* buffer, uint64_t BUFFER_SIZE, int gfx9_target_cu, class Stitcher& stitch
 );
+
+// Token iteration architectures recognised by IterateTokens_internal.
+enum class TraceArch
+{
+    UNKNOWN = 0,
+    GFX9,
+    GFX10,
+    GFX11,
+    GFX12,
+    MI400
+};
+
+// Token-walking helper IterateTokens_internal lives in iterate_tokens.hpp
+// (header-only template) so the visitor inlines and we don't drag the
+// per-arch token generator headers into every TU that includes this file.
+
+// Sniffs only the buffer header to identify the trace architecture, without
+// constructing any token generator. Mirrors the dispatch in
+// AnalyseBinary_internal / IterateTokens_internal.
+TraceArch
+DetectArch_internal(const uint8_t* buffer, uint64_t buffer_size);
 
 /*
 void applyGenerator(
