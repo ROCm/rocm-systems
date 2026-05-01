@@ -65,7 +65,8 @@ __host__ GDAContext::GDAContext(Backend *b, unsigned int ctx_id, int gda_provide
                       hipMemcpyDefault));
 
   for (uint32_t i = 0; i < num_qps; i++) {
-    qps[i].base_heap = base_heap;
+    qps[i].base_heap = (uintptr_t) base_heap[my_pe];
+    qps[i].base_heap_size = backend->heap.get_size();
   }
 
   ipcImpl_.ipc_bases = backend->ipcImpl.ipc_bases;

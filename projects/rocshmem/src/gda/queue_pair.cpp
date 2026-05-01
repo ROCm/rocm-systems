@@ -398,4 +398,22 @@ int QueuePair::buffer_unregister(uintptr_t addr) {
   return ROCSHMEM_SUCCESS;
 }
 
+__device__ uint32_t QueuePair::get_lkey(uintptr_t addr) {
+
+  /* Check if in heap */
+  if (is_ptr_in_range(base_heap, base_heap_size, addr)) {
+    return lkey;
+  }
+
+  /* Get the correct lkey for the user buffer */
+  for (size_t i=0; i<num_user_buffers; i++) {
+    if (is_ptr_in_range(user_buf_info[i].addr, user_buf_info[i].length, addr)) {
+      return user_buf_info[i].lkey;
+    }
+  }
+
+  LOGD_ERROR_ABORT("Valid lkey buffer not found");
+  return 0;
+}
+
 }  // namespace rocshmem
