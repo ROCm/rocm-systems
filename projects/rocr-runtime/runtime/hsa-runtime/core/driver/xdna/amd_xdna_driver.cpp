@@ -797,8 +797,18 @@ hsa_status_t XdnaDriver::WaitCmd(const BOHandle& cmd_bo_handle, HSA_QUEUEID queu
   // Check command status before waiting to avoid unnecessary ioctl if the command has already
   // completed.
   auto& cmd = *static_cast<volatile ert_start_kernel_cmd*>(cmd_bo_handle.vaddr);
-  if (cmd.state >= ERT_CMD_STATE_COMPLETED) {
-    return HSA_STATUS_SUCCESS;
+  switch (cmd.state) {
+    case ERT_CMD_STATE_NEW:
+    case ERT_CMD_STATE_QUEUED:
+    case ERT_CMD_STATE_RUNNING:
+      // Command is still in progress, need to wait.
+      break;
+    case ERT_CMD_STATE_COMPLETED:
+      // Command has completed, no need to wait.
+      return HSA_STATUS_SUCCESS;
+    default:
+      // Command is in an error state.
+      return HSA_STATUS_ERROR;
   }
 
   // Wait for command completion.
@@ -810,6 +820,10 @@ hsa_status_t XdnaDriver::WaitCmd(const BOHandle& cmd_bo_handle, HSA_QUEUEID queu
     return HSA_STATUS_ERROR;
   }
 
+  if (cmd.state != ERT_CMD_STATE_COMPLETED) {
+    // Command is in an error state.
+    return HSA_STATUS_ERROR;
+  }
   return HSA_STATUS_SUCCESS;
 }
 
