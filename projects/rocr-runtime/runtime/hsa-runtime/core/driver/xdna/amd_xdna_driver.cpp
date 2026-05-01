@@ -121,7 +121,7 @@ enum ert_cmd_state {
 struct ert_start_kernel_cmd {
   union {
     struct {
-      /// @brief Current state of a command. Should be one @ref ERT_START_CU.
+      /// @brief Current state of a command. Should be one of the values in @ref ert_cmd_state.
       uint32_t state : 4;
       uint32_t unused : 6;
       /// @brief Extra CU masks in addition to mandatory mask. The number of extra CU masks is
@@ -219,6 +219,20 @@ static void FlushArguments(const hsa_amd_aie_kernel_dispatch_packet_t* pkt) {
     size_t size = kernarg_address[kernarg_idx + pkt->num_kernargs];
     FlushCpuCache(ptr, 0, size);
   }
+}
+
+/**
+ * @brief Destroys the amdxdna_hwctx with the given handle.
+ *
+ * @param[in] hw_ctx_handle handle of the hardware context to destroy
+ */
+static hsa_status_t DestroyHwCtx(int fd, uint32_t hw_ctx_handle) {
+  amdxdna_drm_destroy_hwctx args = {};
+  args.handle = hw_ctx_handle;
+  if (ioctl(fd, DRM_IOCTL_AMDXDNA_DESTROY_HWCTX, &args) < 0) {
+    return HSA_STATUS_ERROR;
+  }
+  return HSA_STATUS_SUCCESS;
 }
 
 XdnaDriver::XdnaDriver(std::string devnode_name)
@@ -511,27 +525,28 @@ hsa_status_t XdnaDriver::CreateQueue(uint32_t node_id, HSA_QUEUE_TYPE type, uint
   if (ioctl(fd_, DRM_IOCTL_AMDXDNA_CREATE_HWCTX, &create_hwctx_args) < 0) {
     return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
   }
-  auto queue_id = create_hwctx_args.handle;
 
   // Create hardware context for the queue.
   constexpr size_t cu_config_size =
       sizeof(amdxdna_hwctx_param_config_cu) + sizeof(amdxdna_cu_config);
   alignas(amdxdna_hwctx_param_config_cu) std::byte cu_config_buffer[cu_config_size];
+  memset(cu_config_buffer, 0, cu_config_size);
   auto* cu_config = reinterpret_cast<amdxdna_hwctx_param_config_cu*>(cu_config_buffer);
   cu_config->num_cus = 1;
   cu_config->cu_configs[0].cu_bo = 0;
   cu_config->cu_configs[0].cu_func = default_cu_func;
 
   amdxdna_drm_config_hwctx config_ctx{};
-  config_ctx.handle = queue_id;
+  config_ctx.handle = create_hwctx_args.handle;
   config_ctx.param_type = DRM_AMDXDNA_HWCTX_CONFIG_CU;
   config_ctx.param_val = reinterpret_cast<uint64_t>(cu_config);
   config_ctx.param_val_size = static_cast<uint32_t>(cu_config_size);
   if (ioctl(fd_, DRM_IOCTL_AMDXDNA_CONFIG_HWCTX, &config_ctx) < 0) {
+    DestroyHwCtx(fd_, create_hwctx_args.handle);
     return HSA_STATUS_ERROR;
   }
 
-  queue_resource.QueueId = queue_id;
+  queue_resource.QueueId = create_hwctx_args.handle;
 
   return HSA_STATUS_SUCCESS;
 }
@@ -546,14 +561,7 @@ hsa_status_t XdnaDriver::DestroyQueue(HSA_QUEUEID queue_id) const {
   const_cast<std::unordered_map<HSA_QUEUEID, PDICache>&>(queue_pdi_map_).erase(queue_id);
 
   // Destroy hardware context associated with the queue.
-  amdxdna_drm_destroy_hwctx destroy_hwctx_args = {};
-  destroy_hwctx_args.handle = hw_ctx_handle;
-  if (ioctl(fd_, DRM_IOCTL_AMDXDNA_DESTROY_HWCTX, &destroy_hwctx_args) < 0) {
-    assert(false && "Failed to destroy hardware context for queue.");
-    return HSA_STATUS_ERROR;
-  }
-
-  return HSA_STATUS_SUCCESS;
+  return DestroyHwCtx(fd_, hw_ctx_handle);
 }
 
 hsa_status_t XdnaDriver::UpdateQueue(HSA_QUEUEID queue_id, uint32_t queue_pct,
@@ -692,7 +700,7 @@ hsa_status_t XdnaDriver::DestroyShareableHandle(core::ShareableHandle* handle) {
 }
 
 hsa_status_t XdnaDriver::QueryDriverVersion() {
-  amdxdna_drm_query_aie_version aie_version{0, 0};
+  amdxdna_drm_query_aie_version aie_version = {};
   amdxdna_drm_get_info args{DRM_AMDXDNA_QUERY_AIE_VERSION, sizeof(aie_version),
                             reinterpret_cast<uintptr_t>(&aie_version)};
 
@@ -1101,6 +1109,8 @@ hsa_status_t XdnaDriver::ConfigHwCtx(const PDICache& pdi_bo_handles, HSA_QUEUEID
 
   auto* xdna_config_cu_param =
       static_cast<amdxdna_hwctx_param_config_cu*>(malloc(config_cu_param_size));
+  memset(xdna_config_cu_param, 0, config_cu_param_size);
+
   if (xdna_config_cu_param == nullptr) {
     return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
   }
@@ -1119,10 +1129,9 @@ hsa_status_t XdnaDriver::ConfigHwCtx(const PDICache& pdi_bo_handles, HSA_QUEUEID
   // Note: we can do this because we have forced synchronization between command chains. If we move
   // to a more asynchronous model, we will need to figure out how hardware context destruction works
   // while applications are running.
-  amdxdna_drm_destroy_hwctx destroy_hwctx_args = {};
-  destroy_hwctx_args.handle = hw_ctx_handle;
-  if (ioctl(fd_, DRM_IOCTL_AMDXDNA_DESTROY_HWCTX, &destroy_hwctx_args) < 0) {
-    return HSA_STATUS_ERROR;
+  hsa_status_t status = DestroyHwCtx(fd_, hw_ctx_handle);
+  if (status != HSA_STATUS_SUCCESS) {
+    return status;
   }
   queue_id = AMDXDNA_INVALID_CTX_HANDLE;
 
@@ -1144,6 +1153,7 @@ hsa_status_t XdnaDriver::ConfigHwCtx(const PDICache& pdi_bo_handles, HSA_QUEUEID
   config_hw_ctx_args.param_val = reinterpret_cast<uint64_t>(xdna_config_cu_param);
   config_hw_ctx_args.param_val_size = static_cast<uint32_t>(config_cu_param_size);
   if (ioctl(fd_, DRM_IOCTL_AMDXDNA_CONFIG_HWCTX, &config_hw_ctx_args) < 0) {
+    DestroyHwCtx(fd_, create_hwctx_args.handle);
     return HSA_STATUS_ERROR;
   }
 
