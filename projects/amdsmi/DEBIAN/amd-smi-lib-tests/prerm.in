@@ -45,6 +45,36 @@ rm_leftovers() {
   fi
 }
 
+rm_logFolder() {
+  rm -rf /var/log/amd_smi_lib
+}
+
+
+rm_rocm_tests_dir(){
+  if [ -d "@CPACK_PACKAGING_INSTALL_PREFIX@/share/amd_smi/tests/" ]; then
+    rm -rf "@CPACK_PACKAGING_INSTALL_PREFIX@/share/amd_smi/tests/"
+    echo "Removed ROCm tests directory."
+  fi
+}
+
+
+return_logrotateToOrigConfig() {
+  local logrotateConfFile=/etc/logrotate.d/amd_smi.conf
+  if [ -f $logrotateConfFile ]; then
+    rm -rf "$logrotateConfFile"
+  fi
+  if [ -f /etc/cron.hourly/logrotate ]; then
+    mv /etc/cron.hourly/logrotate /etc/cron.daily/logrotate
+  fi
+  if [ -f /lib/systemd/system/logrotate.timer.backup ]; then
+    cp /lib/systemd/system/logrotate.timer.backup /lib/systemd/system/logrotate.timer
+    rm -rf /lib/systemd/system/logrotate.timer.backup
+    systemctl reenable --now logrotate.timer
+  fi
+}
+
+
+
 case "$1" in
   ( remove | upgrade)
     # remove old gpuv-smi symlink

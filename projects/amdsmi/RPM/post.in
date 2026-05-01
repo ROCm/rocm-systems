@@ -1,6 +1,7 @@
 #!/bin/bash
 
 do_configureLogrotate() {
+  local IS_SYSTEMD=0
   local packageName="amd-smi-lib"
   local logPath=/var/log/amd_smi_lib
   local logFile="${logPath}/AMD-SMI-lib.log"
@@ -8,7 +9,12 @@ do_configureLogrotate() {
 
   mkdir -p "${logPath}"
   touch "${logFile}"
-  chmod -R a+rw "${logPath}"
+  # NOTE: the operational log AMD-SMI-lib.log is intentionally a+rw so
+  # non-root processes can append to it. Do NOT recurse with -R: that
+  # would also relax perms on postinst.log (CWE-732), letting a local
+  # user pre-seed lines like 'INFO interpreter /tmp/evil' that the
+  # uninstall scriptlet parses (the same path is read back by the
+  # verifier under root).
   chmod a+rw "${logFile}"
 
   if ! command -v logrotate &>/dev/null; then
@@ -49,14 +55,49 @@ EOF
   # issue (only seen on RHEL 8.7)
   sed -i s/OURCE//g "${logrotateConfFile}"
   fi
-  # NOTE: we deliberately do NOT touch /lib/systemd/system/logrotate.timer
-  # or move /etc/cron.daily/logrotate to /etc/cron.hourly. Those are
-  # system-wide knobs shared with every other package that uses
-  # logrotate (rsyslog, apt, nginx, ...) and mutating them on our
-  # behalf changes rotation cadence for unrelated services.
-  # The drop-in above already declares its own `hourly` directive, so
-  # whatever cadence the distro runs logrotate at, our log will only
-  # rotate when the size threshold is met.
+  # check if logrotate uses system timers, Ubuntu/modern OS's do
+  # Several older OS's like RHEL 8.7, do not. Instead defaults
+  # to use daily cron jobs - see https://stackoverflow.com/a/69465677
+  if [ -d /run/systemd/system ]; then
+    systemctl list-timers | grep -iq logrotate
+    if [ $? -eq 0 ]; then
+      IS_SYSTEMD=1
+    fi
+  fi
+  if [ "$IS_SYSTEMD" -eq 1 ]; then
+    # Configure systemd timers - the typical setup for modern Linux logrotation setups
+    if [ -f /lib/systemd/system/logrotate.timer ]; then
+      if [ ! -f /lib/systemd/system/logrotate.timer.backup ]; then
+        cp /lib/systemd/system/logrotate.timer /lib/systemd/system/logrotate.timer.backup
+      fi
+      cat << EOF > /lib/systemd/system/logrotate.timer
+[Unit]
+Description=Hourly rotation of log files
+Documentation=man:logrotate(8) man:logrotate.conf(5)
+
+[Timer]
+OnCalendar=
+OnCalendar=hourly
+AccuracySec=1m
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+EOF
+      systemctl reenable --now logrotate.timer
+    else
+      echo "[WARNING] Could not configure systemd timer for $packageName's logrotate."\
+      "$packageName logs (when turned on) will not rotate properly."
+    fi
+  else
+    # $IS_SYSTEMD -eq 0
+    if [ -f /etc/cron.daily/logrotate ]; then
+      # move logrotate daily to hourly
+      if [ -d /etc/cron.hourly ]; then
+        mv /etc/cron.daily/logrotate /etc/cron.hourly/logrotate
+      fi
+    fi
+  fi
 }
 
 do_ldconfig() {
@@ -67,103 +108,10 @@ do_ldconfig() {
   fi
 }
 
-do_install_amdsmi_python_lib() {
-  # get python version
-  local python3_minor_version
-  python3_minor_version=$(python3 -c 'import sys;print(sys.version_info.minor)')
-  if [ $? -ne 0 ]; then
-    echo "[WARNING] Could not determine python version. "\
-      "AMD-SMI python library will not be installed."
-    return
-  fi
-
-  # check if python version is supported
-  if [ "$python3_minor_version" -lt 6 ]; then
-    echo "[WARNING] AMD-SMI python library is not "\
-      "supported on python version 3.$python3_minor_version. "\
-      "AMD-SMI python library will not be installed."
-    return
-  fi
-
-  local PREVIOUS_PIP_ROOT_USER_ACTION="$PIP_ROOT_USER_ACTION"
-  export PIP_ROOT_USER_ACTION=ignore
-  # python3.11 requires --break-system-packages
-  local PREVIOUS_PIP_BREAK_SYSTEM_PACKAGES="$PIP_BREAK_SYSTEM_PACKAGES"
-  export PIP_BREAK_SYSTEM_PACKAGES=1
-
-
-  # Remove old python library
-  local amdsmi_pip_list_output
-  amdsmi_pip_list_output=$(python3 -m pip list --format=columns --disable-pip-version-check)
-  # check pip list output for amdsmi
-  if [[ $amdsmi_pip_list_output == *"amdsmi"* ]]; then
-    echo "Detected old AMD-SMI python library (amdsmi)..."
-    python3 -m pip uninstall amdsmi --yes --quiet --disable-pip-version-check
-    echo "Removed old AMD-SMI python library (amdsmi)..."
-  fi
-
-  # static builds don't include python lib
-  if [ "@BUILD_SHARED_LIBS@" != "ON" ]; then
-    return
-  fi
-
-  check_and_install_amdsmi() {
-  local setuptools_version
-  setuptools_version=$(python3 -c 'import setuptools; print(setuptools.__version__)')
-  if [ $? -ne 0 ]; then
-    echo "[WARNING] Could not determine setuptools version. "\
-      "AMD-SMI python library will not be installed."
-    return
-  fi
-
-  # install python library at $RPM_INSTALL_PREFIX0/@SHARE_INSTALL_PREFIX@/amdsmi
-  local python_lib_path=$RPM_INSTALL_PREFIX0/@SHARE_INSTALL_PREFIX@
-  local amdsmi_python_lib_path="$python_lib_path"
-  local amdsmi_setup_py_path="$python_lib_path/setup.py"
-
-  # Decide installation method based on setuptools version
-  if [[ "$(printf '%s\n' "$setuptools_version" "28.5" | sort -V | head -n1)" == "$setuptools_version" ]]; then
-    echo "[WARNING] Setuptools version is less than 28.5. AMD-SMI will not be installed."
-  elif [[ "$(printf '%s\n' "$setuptools_version" "41.0.1" | sort -V | head -n1)" != "41.0.1" ]]; then
-    echo "Using setup.py for installation due to setuptools version $setuptools_version"
-    cd $amdsmi_python_lib_path
-    python3 setup.py install
-    cd -
-  else
-    echo "Using pyproject.toml for installation due to setuptools version $setuptools_version"
-    python3 -m pip install "$amdsmi_python_lib_path" --quiet --disable-pip-version-check --no-build-isolation --no-index
-  fi
-}
-
-  # Call the function
-  check_and_install_amdsmi
-
-  export PIP_ROOT_USER_ACTION="$PREVIOUS_PIP_ROOT_USER_ACTION"
-  export PIP_BREAK_SYSTEM_PACKAGES="$PREVIOUS_PIP_BREAK_SYSTEM_PACKAGES"
-
-  # only try to activate argcomplete if such command exists
-  # python3-argcomplete is recommended but optional, we handle its absence gracefully
-  if command -v activate-global-python-argcomplete &>/dev/null; then
-    activate-global-python-argcomplete 2>/dev/null || {
-      echo "[INFO] Bash completion activation skipped. You can manually enable it with: activate-global-python-argcomplete"
-    }
-  else
-    # try older argcomplete3 version
-    if command -v activate-global-python-argcomplete3 &>/dev/null; then
-      activate-global-python-argcomplete3 2>/dev/null || {
-        echo "[INFO] Bash completion activation skipped. You can manually enable it with: activate-global-python-argcomplete3"
-      }
-    else
-      echo "[WARNING] Could not find argcomplete activation command. "\
-        "Argument completion will not work. Install python3-argcomplete package to enable it."
-    fi
-  fi
-}
 
 
 # post install or upgrade, $i is 1 or 2 -> do these actions
 if [ "$1" -ge 1 ]; then
-  do_install_amdsmi_python_lib
   do_ldconfig
   do_configureLogrotate || exit 0
 fi

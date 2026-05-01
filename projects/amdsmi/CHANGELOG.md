@@ -39,6 +39,15 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Added `AMDSMI_LINK_TYPE_NUMA` and `AMDSMI_LINK_TYPE_XNUMA` to `amdsmi_link_type_t` enum**.  
   - Added the new types to `amdsmi_link_types` as part of support for NICs
 
+### Changed
+
+- **Reworked Python package install layout for system packages and pip wheels**.
+  - System `.deb` / `.rpm` postinst no longer runs `pip install`; it now drops a single `amdsmi.pth` file into the system Python's `site.getsitepackages()`, pointing at `/opt/rocm/share/amd_smi`. The system package targets only the system Python interpreter (`/usr/bin/python3`); users who want `amdsmi` inside a virtualenv should install the wheel via `pip install amdsmi`. Removal cleans up the `.pth` file. `pip list` will no longer show `amdsmi` for the system package.
+  - Added new CMake option `-DBUILD_PYTHON_WHEEL=ON` (default `OFF`) which builds the standalone Python wheel and an isolated `libamd_smi_python.so` (distinct SONAME) bundled inside it, so the wheel-shipped library can coexist in-process with the system `libamd_smi.so` without symbol collisions. With `-DBUILD_PYTHON_WHEEL=OFF` (the default used by ROCm CI) only the system-package layout is built; no wheel artifact is produced.
+  - `py-interface/amdsmi_wrapper.py` now auto-detects pip vs system install context and resolves the shared library accordingly (`lib64` first, then `lib`); a `_MissingLibrary` sentinel defers `OSError` to the first API call when no candidate is loadable.
+  - New `AMDSMI_DEBUG_LOAD=1` env var prints the resolved `libamd_smi*.so` path (or every candidate the loader tried) to stderr at import time. `AMDSMI_LIB_OVERRIDE` (existing) now takes precedence over both pip and system context detection so an in-tree `.so` can be loaded without uninstalling either packaged variant.
+  - Added `tools/build_wheel_debian.py` and `tools/build_wheel_rpm.py` plus a manylinux_2_28 CI workflow for producing PyPI-ready wheels.
+
 ### Resolved Issues
 
 - **Fixed AMD GPU manufacturer name display in `amd-smi static --board`**.  

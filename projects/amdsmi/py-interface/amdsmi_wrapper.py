@@ -18,6 +18,7 @@
 # CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 import os
+import sys
 # -*- coding: utf-8 -*-
 #
 # TARGET arch is: ['-I/usr/lib/llvm-16/lib/clang/16/include', '-DENABLE_ESMI_LIB']
@@ -165,54 +166,91 @@ def char_pointer_cast(string, encoding='utf-8'):
 
 _libraries = {}
 from pathlib import Path
-# libamd_smi.so can be located in several different places.
-# Look for it with below priority:
-# 0. Relative to amdsmi_wrapper.py in TheRock:
-#    `amdsmi_wrapper.py` is located in
-#    `_rocm_sdk_core/share/amd_smi/amdsmi`, libraries are in
-#    `_rocm_sdk_core/lib`.
-# 1. ROCM_HOME/ROCM_PATH environment variables
-#    - ROCM_HOME/lib
-#    - ROCM_PATH/lib (usually set to /opt/rocm/)
-# 2. Decided by the linker
-#    - LD_LIBRARY_PATH env var
-#    - defined path in /etc/ld.so.conf.d/
-# 3. Relative to amdsmi_wrapper.py
-#    - parent directory
-#    - current directory
-def find_smi_library():
-    err = OSError("Could not load libamd_smi.so")
-    possible_locations = []
-    # 0.
-    libamd_smi_path = Path(__file__).resolve().parent.parent.parent.parent / "lib/libamd_smi.so.26"
-    possible_locations.append(libamd_smi_path)
-    # 1.
-    rocm_path = os.getenv("ROCM_HOME", os.getenv("ROCM_PATH"))
-    if rocm_path:
-        possible_locations.append(os.path.join(rocm_path, "lib/libamd_smi.so"))
-    # 2.
-    possible_locations.append("libamd_smi.so")
-    # 3.
-    libamd_smi_parent_dir = Path(__file__).resolve().parent / "libamd_smi.so"
-    libamd_smi_cwd = Path.cwd() / "libamd_smi.so"
-    possible_locations.append(libamd_smi_parent_dir)
-    possible_locations.append(libamd_smi_cwd)
 
-    for location in possible_locations:
-        try:
-            lib = ctypes.CDLL(location)
-            return lib, location
-        except OSError as e:
-            err = e
-            continue
-    raise err
+# ---------------------------------------------------------------------------
+# Dynamic library loading
+# ---------------------------------------------------------------------------
+# This wrapper supports two self-contained install paths:
+#
+#   1. pip wheel
+#      The wheel ships ``libamd_smi_python.so`` next to this file.
+#
+#   2. system package (rpm / deb)
+#      The wrapper is placed in the system Python's ``site-packages``;
+#      the package also drops an ``ld.so.conf.d`` entry pointing at
+#      ``/opt/rocm/lib`` so the dynamic linker resolves the SONAME
+#      ``libamd_smi.so.<SOVERSION>`` without further help.
+#
+# A user installs ONE of those two packages. We never combine paths
+# from both -- no ROCM_HOME / ROCM_PATH ladders, no walking up to a
+# ROCm root, no LD_LIBRARY_PATH probing. ``AMDSMI_LIB_OVERRIDE`` stays
+# as a single-purpose escape hatch for ABI tests that need to load an
+# alternate .so explicitly.
+# ---------------------------------------------------------------------------
+
+
+# Versioned SONAME the system package ships; matches src/CMakeLists.txt SOVERSION.
+_AMDSMI_LIB_SONAME = "libamd_smi.so.26"
+
+
+def _load_library():
+    """Load the AMD SMI shared library.
+
+    Order:
+      1. ``AMDSMI_LIB_OVERRIDE`` env var (ABI-test escape hatch).
+      2. ``libamd_smi_python.so`` next to this file (pip wheel).
+      3. SONAME via the dynamic linker (system rpm / deb).
+    """
+    mode = getattr(ctypes, "RTLD_LOCAL", 0)
+
+    override = os.getenv("AMDSMI_LIB_OVERRIDE")
+    if override:
+        return ctypes.CDLL(override, mode=mode), override
+
+    bundled = Path(__file__).resolve().parent / "libamd_smi_python.so"
+    if bundled.exists():
+        return ctypes.CDLL(str(bundled), mode=mode), str(bundled)
+
+    return ctypes.CDLL(_AMDSMI_LIB_SONAME, mode=mode), _AMDSMI_LIB_SONAME
+
+
+class _MissingLibrary:
+    """Sentinel installed when the .so could not be loaded.
+
+    Module import stays tolerant so doc / lint / multi-stage container
+    builds work without a runtime ROCm install. Any *call* of a wrapped
+    C symbol raises OSError with the underlying error.
+    """
+
+    __slots__ = ("_err",)
+
+    def __init__(self, err=None):
+        object.__setattr__(self, "_err", err)
+
+    def _raise(self):
+        raise OSError(
+            "AMD SMI shared library could not be loaded.\n"
+            f"Underlying error: {self._err}\n"
+            "Hint: install amd-smi-lib (rpm/deb) or pip-install the amdsmi wheel."
+        )
+
+    def __getattr__(self, name):
+        if not name.startswith("amdsmi_"):
+            raise AttributeError(name)
+        return _MissingLibrary(self._err)
+
+    def __setattr__(self, name, value):
+        pass
+
+    def __call__(self, *args, **kwargs):
+        self._raise()
+
 
 try:
-    _libraries['libamd_smi.so'], location = find_smi_library()
-    #print(f"found smi lib in [", location, "]")
-except OSError as e:
-    print(e)
-    print("Unable to find libamd_smi.so library try installing amd-smi-lib from your package manager")
+    _libraries['libamd_smi.so'], _loaded_lib_path = _load_library()
+except OSError as _load_err:
+    _libraries['libamd_smi.so'] = _MissingLibrary(_load_err)
+    _loaded_lib_path = None
 
 #Add support for amdsmi_free_name_value_pairs
 amdsmi_free_name_value_pairs = _libraries['libamd_smi.so'].amdsmi_free_name_value_pairs
@@ -276,8 +314,8 @@ struct_amdsmi_hsmp_driver_version_t._fields_ = [
 
 amdsmi_hsmp_driver_version_t = struct_amdsmi_hsmp_driver_version_t
 
-# values for enumeration 'amdsmi_processor_type_t'
-amdsmi_processor_type_t__enumvalues = {
+# values for enumeration 'processor_type_t'
+processor_type_t__enumvalues = {
     0: 'AMDSMI_PROCESSOR_TYPE_UNKNOWN',
     1: 'AMDSMI_PROCESSOR_TYPE_AMD_GPU',
     2: 'AMDSMI_PROCESSOR_TYPE_AMD_CPU',
@@ -299,9 +337,7 @@ AMDSMI_PROCESSOR_TYPE_AMD_APU = 6
 AMDSMI_PROCESSOR_TYPE_AMD_NIC = 7
 AMDSMI_PROCESSOR_TYPE_BRCM_NIC = 8
 AMDSMI_PROCESSOR_TYPE_BRCM_SWITCH = 9
-amdsmi_processor_type_t = ctypes.c_uint32 # enum
-processor_type_t = amdsmi_processor_type_t
-processor_type_t__enumvalues = amdsmi_processor_type_t__enumvalues
+processor_type_t = ctypes.c_uint32 # enum
 
 # values for enumeration 'amdsmi_status_t'
 amdsmi_status_t__enumvalues = {
@@ -2961,25 +2997,7 @@ except AttributeError:
 try:
     amdsmi_get_processor_type = _libraries['libamd_smi.so'].amdsmi_get_processor_type
     amdsmi_get_processor_type.restype = amdsmi_status_t
-    amdsmi_get_processor_type.argtypes = [amdsmi_processor_handle, ctypes.POINTER(amdsmi_processor_type_t)]
-except AttributeError:
-    pass
-try:
-    amdsmi_get_processor_info = _libraries['libamd_smi.so'].amdsmi_get_processor_info
-    amdsmi_get_processor_info.restype = amdsmi_status_t
-    amdsmi_get_processor_info.argtypes = [amdsmi_processor_handle, size_t, ctypes.POINTER(ctypes.c_char)]
-except AttributeError:
-    pass
-try:
-    amdsmi_get_processor_count_from_handles = _libraries['libamd_smi.so'].amdsmi_get_processor_count_from_handles
-    amdsmi_get_processor_count_from_handles.restype = amdsmi_status_t
-    amdsmi_get_processor_count_from_handles.argtypes = [ctypes.POINTER(ctypes.POINTER(None)), ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32)]
-except AttributeError:
-    pass
-try:
-    amdsmi_get_processor_handles_by_type = _libraries['libamd_smi.so'].amdsmi_get_processor_handles_by_type
-    amdsmi_get_processor_handles_by_type.restype = amdsmi_status_t
-    amdsmi_get_processor_handles_by_type.argtypes = [amdsmi_socket_handle, amdsmi_processor_type_t, ctypes.POINTER(ctypes.POINTER(None)), ctypes.POINTER(ctypes.c_uint32)]
+    amdsmi_get_processor_type.argtypes = [amdsmi_processor_handle, ctypes.POINTER(processor_type_t)]
 except AttributeError:
     pass
 try:
@@ -4159,6 +4177,24 @@ try:
 except AttributeError:
     pass
 try:
+    amdsmi_get_processor_info = _libraries['libamd_smi.so'].amdsmi_get_processor_info
+    amdsmi_get_processor_info.restype = amdsmi_status_t
+    amdsmi_get_processor_info.argtypes = [amdsmi_processor_handle, size_t, ctypes.POINTER(ctypes.c_char)]
+except AttributeError:
+    pass
+try:
+    amdsmi_get_processor_count_from_handles = _libraries['libamd_smi.so'].amdsmi_get_processor_count_from_handles
+    amdsmi_get_processor_count_from_handles.restype = amdsmi_status_t
+    amdsmi_get_processor_count_from_handles.argtypes = [ctypes.POINTER(ctypes.POINTER(None)), ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32)]
+except AttributeError:
+    pass
+try:
+    amdsmi_get_processor_handles_by_type = _libraries['libamd_smi.so'].amdsmi_get_processor_handles_by_type
+    amdsmi_get_processor_handles_by_type.restype = amdsmi_status_t
+    amdsmi_get_processor_handles_by_type.argtypes = [amdsmi_socket_handle, processor_type_t, ctypes.POINTER(ctypes.POINTER(None)), ctypes.POINTER(ctypes.c_uint32)]
+except AttributeError:
+    pass
+try:
     amdsmi_get_cpucore_handles = _libraries['libamd_smi.so'].amdsmi_get_cpucore_handles
     amdsmi_get_cpucore_handles.restype = amdsmi_status_t
     amdsmi_get_cpucore_handles.argtypes = [ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.POINTER(None))]
@@ -5181,13 +5217,13 @@ __all__ = \
     'amdsmi_power_profile_status_t', 'amdsmi_proc_gpu_entry_t',
     'amdsmi_proc_info_by_pid_t', 'amdsmi_proc_info_t',
     'amdsmi_process_handle_t', 'amdsmi_process_info_t',
-    'amdsmi_processor_handle', 'amdsmi_processor_type_t',
-    'amdsmi_ptl_data_format_t', 'amdsmi_range_t',
-    'amdsmi_ras_err_state_t', 'amdsmi_ras_feature_t',
-    'amdsmi_reg_type_t', 'amdsmi_reset_gpu', 'amdsmi_reset_gpu_fan',
-    'amdsmi_reset_gpu_xgmi_error', 'amdsmi_reset_ttm_pages_limit',
-    'amdsmi_retired_page_record_t', 'amdsmi_set_clk_freq',
-    'amdsmi_set_cpu_cc6_enable', 'amdsmi_set_cpu_core_boostlimit',
+    'amdsmi_processor_handle', 'amdsmi_ptl_data_format_t',
+    'amdsmi_range_t', 'amdsmi_ras_err_state_t',
+    'amdsmi_ras_feature_t', 'amdsmi_reg_type_t', 'amdsmi_reset_gpu',
+    'amdsmi_reset_gpu_fan', 'amdsmi_reset_gpu_xgmi_error',
+    'amdsmi_reset_ttm_pages_limit', 'amdsmi_retired_page_record_t',
+    'amdsmi_set_clk_freq', 'amdsmi_set_cpu_cc6_enable',
+    'amdsmi_set_cpu_core_boostlimit',
     'amdsmi_set_cpu_core_floor_freq_limit',
     'amdsmi_set_cpu_core_msr_floor_freq_limit',
     'amdsmi_set_cpu_df_pstate_range', 'amdsmi_set_cpu_dfc_ctrl',
@@ -5232,9 +5268,8 @@ __all__ = \
     'amdsmi_voltage_type_t', 'amdsmi_vram_info_t',
     'amdsmi_vram_type_t', 'amdsmi_vram_usage_t', 'amdsmi_xgmi_info_t',
     'amdsmi_xgmi_link_status_t', 'amdsmi_xgmi_link_status_type_t',
-    'amdsmi_xgmi_status_t', 'processor_type_t',
-    'processor_type_t__enumvalues', 'size_t', 'struct__links',
-    'struct_amd_metrics_table_header_t',
+    'amdsmi_xgmi_status_t', 'processor_type_t', 'size_t',
+    'struct__links', 'struct_amd_metrics_table_header_t',
     'struct_amdsmi_accelerator_partition_profile_config_t',
     'struct_amdsmi_accelerator_partition_profile_t',
     'struct_amdsmi_accelerator_partition_resource_profile_t',

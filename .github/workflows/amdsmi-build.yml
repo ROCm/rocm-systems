@@ -38,6 +38,49 @@ defaults:
     shell: bash
 
 jobs:
+  manylinux-build:
+    name: Build (Manylinux Gate)
+    runs-on: ubuntu-latest
+    container:
+      image: quay.io/pypa/manylinux_2_28_x86_64
+
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+
+      - name: Mark workspace safe for git
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Build AMDSMI
+        shell: bash
+        run: |
+          set -euo pipefail
+          PROJECT_DIR=$GITHUB_WORKSPACE/projects/amdsmi
+          BUILD_DIR=/tmp/amdsmi-build
+          PY_BUILD=/opt/python/cp38-cp38/bin/python3
+
+          echo "Installing build prerequisites..."
+          dnf -y install git make gcc gcc-c++ cmake ninja-build openssl-devel
+
+          echo "Configuring and building AMDSMI..."
+          rm -rf "$BUILD_DIR"
+          mkdir -p "$BUILD_DIR"
+          cd "$BUILD_DIR"
+          cmake "$PROJECT_DIR" \
+            -DBUILD_TESTS=ON \
+            -DENABLE_ESMI_LIB=ON \
+            -DBUILD_PYTHON_WHEEL=ON \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DPython3_EXECUTABLE="$PY_BUILD"
+          make -j"$(nproc)"
+
+          echo "Building Python wheel..."
+          $PY_BUILD -m pip install --upgrade pip setuptools wheel
+          cd "$BUILD_DIR/py-interface/python_package"
+          rm -rf build dist *.whl *.egg-info
+          $PY_BUILD -m pip wheel --no-deps --no-build-isolation -w . .
+          echo "Python wheel built: $(ls *.whl)"
+          echo "Build gate passed"
+
   # Single job covering every distro + package format. The build-time logic
   # (package manager, distro quirks) is autodetected by run_amdsmi_build.py
   # from /etc/os-release, so the matrix only needs the OS label plus the

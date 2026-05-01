@@ -60,71 +60,26 @@ rm_rocm_tests_dir(){
 }
 
 
-rm_logrotateConfig() {
-  # Drop our /etc/logrotate.d/amd_smi.conf snippet. We no longer mutate
-  # the system logrotate.timer or move cron.daily/logrotate to
-  # cron.hourly, so there is nothing else to restore here.
-  # Older packages (pre-cleanup) may have left a backup behind --
-  # restore it on a best-effort basis so a subsequent upgrade does not
-  # leave the user stuck with our hourly override.
+return_logrotateToOrigConfig() {
   local logrotateConfFile=/etc/logrotate.d/amd_smi.conf
-  if [ -f "$logrotateConfFile" ]; then
-    rm -f "$logrotateConfFile"
+  if [ -f $logrotateConfFile ]; then
+    rm -rf "$logrotateConfFile"
   fi
-  if [ -f /etc/cron.hourly/logrotate ] && [ ! -f /etc/cron.daily/logrotate ]; then
+  if [ -f /etc/cron.hourly/logrotate ]; then
     mv /etc/cron.hourly/logrotate /etc/cron.daily/logrotate
   fi
   if [ -f /lib/systemd/system/logrotate.timer.backup ]; then
-    mv -f /lib/systemd/system/logrotate.timer.backup /lib/systemd/system/logrotate.timer
-    if command -v systemctl >/dev/null 2>&1; then
-      systemctl reenable --now logrotate.timer >/dev/null 2>&1 || true
-    fi
+    cp /lib/systemd/system/logrotate.timer.backup /lib/systemd/system/logrotate.timer
+    rm -rf /lib/systemd/system/logrotate.timer.backup
+    systemctl reenable --now logrotate.timer
   fi
 }
-
-rm_python_lib() {
-  # get python version
-  local python3_minor_version
-  python3_minor_version=$(python3 -c 'import sys;print(sys.version_info.minor)')
-  if [ $? -ne 0 ]; then
-    echo "[WARNING] Could not determine python version. "\
-      "AMD-SMI python library will not be uninstalled."
-    return
-  fi
-
-  # check if python version is supported
-  if [ "$python3_minor_version" -lt 6 ]; then
-    echo "[WARNING] AMD-SMI python library is not supported on python version 3.$python3_minor_version. "\
-      "AMD-SMI python library will not be uninstalled."
-    return
-  fi
-
-  # Remove old python library
-  local pip_list_output
-  pip_list_output=$(python3 -m pip list --format=columns --disable-pip-version-check)
-  # check pip list output for amdsmi
-  if [[ $pip_list_output == *"amdsmi"* ]]; then
-    PIP_ROOT_USER_ACTION=ignore PIP_BREAK_SYSTEM_PACKAGES=1 python3 -m pip uninstall amdsmi --yes --quiet --disable-pip-version-check
-  fi
-
-  pip_list_output=$(python3 -m pip list --format=columns --disable-pip-version-check)
-  # check pip list output for amdsmi
-  if [[ $pip_list_output == *"amdsmi"* ]]; then
-    echo "[WARNING] AMD-SMI python library (amdsmi) is still installed in pip. "\
-      "Check post install to ensure version is correct"
-  else
-    echo "Removed AMD-SMI python library (amdsmi)..."
-  fi
-}
-
 
 case "$1" in
   ( remove | upgrade)
     # remove old gpuv-smi symlink
     rm -f @CPACK_PACKAGING_INSTALL_PREFIX@/bin/gpuv-smi &> /dev/null
     echo "Removing AMDSMI Lib Packages..."
-    rm_python_lib
-    echo "python library removed"
     rm_ldconfig
     echo "ldconfig removed"
     rm_leftovers
@@ -133,8 +88,8 @@ case "$1" in
     echo "log folder removed"
     rm_rocm_tests_dir
     echo "rocm tests directory removed"
-    rm_logrotateConfig
-    echo "logrotate configuration removed"
+    return_logrotateToOrigConfig
+    echo "logrotate configuration restored"
   ;;
   ( purge )
   ;;
