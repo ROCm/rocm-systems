@@ -114,7 +114,6 @@ enum class RuleAction : uint8_t {
   Expand,     ///< Multi-instruction lowering (code cave eligible).
 };
 
-class LivenessAnalysis;
 struct LaneLayout;
 
 /// @brief Function type for Expand rule expansion generators.
