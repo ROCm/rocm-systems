@@ -2,7 +2,6 @@
 # SPDX-License-Identifier:  MIT
 
 import ast
-import csv
 import json
 import re
 from pathlib import Path
@@ -16,7 +15,7 @@ import utils.analysis_orm as orm
 from config import rocprof_compute_home
 from rocprof_compute_analyze.analysis_base import OmniAnalyze_Base
 from utils import utils_analysis
-from utils.analysis_orm import Database, get_view_definitions, get_views
+from utils.analysis_orm import Database, get_views
 from utils.file_io import process_pc_sampling_kernel_trace
 from utils.logger import (
     console_debug,
@@ -206,42 +205,13 @@ class db_analysis(OmniAnalyze_Base):
             )
 
         if self.get_args().output_format == "csv":
-            self._save_views_as_csv_files(Path(db_name).with_suffix(""))
+            Database.commit()
+            Database.write_csv_dir(Path(db_name).with_suffix(""))
         else:
             for view_stmt in get_views():
                 Database.get_session().execute(view_stmt)
+            Database.commit()
             Database.write()
-            console_debug("Completed writing database")
-            console_warning(f"Created file: {db_name}")
-
-    def _save_views_as_csv_files(self, csv_dir: Path) -> None:
-        """Stream each view's rows directly into a CSV file in csv_dir.
-
-        Uses the raw sqlite3 cursor and csv.writer so the full result set
-        is never held in memory at once.
-        """
-        csv_dir.mkdir(parents=True, exist_ok=True)
-        session = Database.get_session()
-        # session.connection() is a SQLAlchemy Connection; its .connection
-        # attribute is the underlying sqlite3.Connection.
-        raw_conn = session.connection().connection
-        for view_name, stmt in get_view_definitions().items():
-            # Render the Select as a self-contained SQL string so the raw
-            # cursor can execute it without parameter binding.
-            sql = str(
-                stmt.compile(
-                    dialect=session.bind.dialect,
-                    compile_kwargs={"literal_binds": True},
-                )
-            )
-            cursor = raw_conn.execute(sql)
-            csv_path = csv_dir / f"{view_name}.csv"
-            with csv_path.open("w", newline="") as f:
-                writer = csv.writer(f)
-                writer.writerow([column[0] for column in cursor.description])
-                writer.writerows(cursor)
-            console_warning(f"Created file: {csv_path}")
-        session.close()
 
     def run_analysis_metrics(
         self,

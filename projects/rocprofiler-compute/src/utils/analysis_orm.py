@@ -1,8 +1,10 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
+import csv
 import sqlite3
 from contextlib import closing
+from pathlib import Path
 from typing import Any, Optional
 
 from sqlalchemy import (
@@ -24,7 +26,7 @@ from sqlalchemy.orm import Session, declarative_base, relationship, sessionmaker
 from sqlalchemy.pool import StaticPool
 from sqlalchemy.sql import Select
 
-from utils.logger import console_debug, console_error
+from utils.logger import console_debug, console_error, console_warning
 
 PREFIX = "compute_"
 SCHEMA_VERSION = "1.3.0"
@@ -240,12 +242,22 @@ class Database:
         return cls._session
 
     @classmethod
-    def write(cls) -> None:
+    def commit(cls) -> None:
+        """Seal pending session writes. Must be called before any export."""
         if cls._session is None:
             console_error("No active database session")
-
         try:
             cls._session.commit()
+        except Exception as e:
+            cls._session.rollback()
+            console_error(f"Error committing analysis database: {e}")
+
+    @classmethod
+    def write(cls) -> None:
+        """Back up the in-memory database to disk at the configured path."""
+        if cls._session is None:
+            console_error("No active database session")
+        try:
             # Writing to disk is slow, so we built the database in memory.
             # Now copy the finished database to disk in one step.
             with (
@@ -253,9 +265,44 @@ class Database:
                 closing(sqlite3.connect(cls._db_name)) as disk_conn,
             ):
                 memory_conn.backup(disk_conn)
+            console_debug("Completed writing database")
+            console_warning(f"Created file: {cls._db_name}")
         except Exception as e:
-            cls._session.rollback()
             console_error(f"Error writing analysis database: {e}")
+        finally:
+            cls._session.close()
+            cls._session = None
+
+    @classmethod
+    def write_csv_dir(cls, csv_dir: Path) -> None:
+        """Stream each view's rows directly into a CSV file in csv_dir.
+
+        Uses the raw sqlite3 cursor and csv.writer so the full result set
+        is never held in memory at once.
+        """
+        if cls._session is None:
+            console_error("No active database session")
+        try:
+            csv_dir.mkdir(parents=True, exist_ok=True)
+            # session.connection() is a SQLAlchemy Connection; its .connection
+            # attribute is the underlying sqlite3.Connection.
+            raw_conn = cls._session.connection().connection
+            for view_name, stmt in get_view_definitions().items():
+                # Render the Select as a self-contained SQL string so the raw
+                # cursor can execute it without parameter binding.
+                sql = str(
+                    stmt.compile(
+                        dialect=cls._engine.dialect,
+                        compile_kwargs={"literal_binds": True},
+                    )
+                )
+                cursor = raw_conn.execute(sql)
+                csv_path = csv_dir / f"{view_name}.csv"
+                with csv_path.open("w", newline="") as f:
+                    writer = csv.writer(f)
+                    writer.writerow([column[0] for column in cursor.description])
+                    writer.writerows(cursor)
+                console_warning(f"Created file: {csv_path}")
         finally:
             cls._session.close()
             cls._session = None
