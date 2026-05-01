@@ -318,6 +318,13 @@ configure_settings(bool _init)
         bool, "ROCPROFSYS_USE_TIMEMORY", "[DEPRECATED] Renamed to ROCPROFSYS_PROFILE",
         !_config->get<bool>("ROCPROFSYS_TRACE"), "backend", "timemory", "deprecated");
 
+    ROCPROFSYS_CONFIG_SETTING(bool, "ROCPROFSYS_PROFILE_LEGACY",
+                              "When true, use legacy direct mode for timemory profiling "
+                              "instead of deferred trace-cache-backed reporting. When "
+                              "false (default), uses cached mode with deferred "
+                              "profile (trace-cache) processing.",
+                              false, "backend", "timemory");
+
     ROCPROFSYS_CONFIG_SETTING(bool, "ROCPROFSYS_USE_CAUSAL",
                               "Enable causal profiling analysis", false, "backend",
                               "causal", "analysis");
@@ -2596,6 +2603,17 @@ get_caching_perfetto()
     auto&       _trace  = static_cast<tim::tsettings<bool>&>(*_trace_setting).get();
     auto&       _legacy = static_cast<tim::tsettings<bool>&>(*_legacy_setting).get();
     static bool _v      = _trace && !_legacy;
+    return _v;
+}
+
+bool&
+get_caching_profile()
+{
+    static auto _profile_setting = get_config()->at("ROCPROFSYS_PROFILE");
+    static auto _legacy_setting  = get_config()->at("ROCPROFSYS_PROFILE_LEGACY");
+    auto&       _profile = static_cast<tim::tsettings<bool>&>(*_profile_setting).get();
+    auto&       _legacy  = static_cast<tim::tsettings<bool>&>(*_legacy_setting).get();
+    static bool _v       = _profile && !_legacy;
     return _v;
 }
 

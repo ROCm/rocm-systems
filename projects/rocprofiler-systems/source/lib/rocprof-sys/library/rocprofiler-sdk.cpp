@@ -90,6 +90,54 @@ using tool_agent_vec_t                         = std::vector<tool_agent>;
 client_data*                    tool_data      = new client_data{};
 std::shared_ptr<roctx_client<>> g_roctx_client = {};
 
+struct wall_clock_callback_scope_frame
+{
+    uint64_t begin_ns               = 0;
+    uint64_t child_inclusive_acc_ns = 0;
+};
+
+thread_local std::vector<wall_clock_callback_scope_frame> tl_wall_clock_callback_scope;
+
+void
+wall_clock_callback_scope_enter(uint64_t begin_ns)
+{
+    tl_wall_clock_callback_scope.push_back(
+        wall_clock_callback_scope_frame{ begin_ns, 0 });
+}
+
+void
+wall_clock_callback_scope_exit(uint64_t begin_ns, uint64_t end_ns,
+                               uint32_t* scope_depth_out, uint64_t* inclusive_out,
+                               uint64_t* exclusive_out)
+{
+    (void) begin_ns;
+    const uint64_t inclusive   = (end_ns > begin_ns) ? (end_ns - begin_ns) : 0;
+    uint64_t       exclusive   = inclusive;
+    uint32_t       scope_depth = 0;
+
+    if(!tl_wall_clock_callback_scope.empty())
+    {
+        exclusive =
+            inclusive - tl_wall_clock_callback_scope.back().child_inclusive_acc_ns;
+        scope_depth = static_cast<uint32_t>(tl_wall_clock_callback_scope.size() - 1);
+        tl_wall_clock_callback_scope.pop_back();
+        if(!tl_wall_clock_callback_scope.empty())
+            tl_wall_clock_callback_scope.back().child_inclusive_acc_ns += inclusive;
+    }
+
+    *scope_depth_out = scope_depth;
+    *inclusive_out   = inclusive;
+    *exclusive_out   = exclusive;
+}
+
+uint32_t
+wall_clock_instrumentation_stack_depth()
+{
+    auto& bundles_ptr = tracing::get_instrumentation_bundles();
+    if(!bundles_ptr || bundles_ptr->empty()) return 0;
+    return static_cast<uint32_t>(bundles_ptr->size() - 1);
+}
+
 std::shared_ptr<roctx_client<>>
 get_roctx_client()
 {
@@ -717,7 +765,28 @@ tool_tracing_callback_stop(
 
     if(get_use_timemory())
     {
+        uint32_t scope_depth  = 0;
+        uint64_t inclusive_ns = 0;
+        uint64_t exclusive_ns = 0;
+        wall_clock_callback_scope_exit(begin_ts, ts, &scope_depth, &inclusive_ns,
+                                       &exclusive_ns);
+
+        const uint32_t inst_depth = wall_clock_instrumentation_stack_depth();
+        const uint32_t depth_u32  = std::max(scope_depth, inst_depth);
+
         tracing::pop_timemory(CategoryT{}, _name);
+
+        uint64_t    end_ts       = ts;
+        const auto& _tinfo       = thread_info::get(record.thread_id, SystemTID);
+        auto        timemory_tid = _tinfo->index_data->sequent_value;
+        std::string lbl{ tool_data->callback_tracing_info.at(record.kind,
+                                                             record.operation) };
+        trace_cache::get_buffer_storage().store(trace_cache::wall_clock_event_sample{
+            begin_ts, end_ts, record.thread_id, static_cast<uint64_t>(timemory_tid),
+            record.correlation_id.internal,
+            trace_cache::wall_clock_event_source::tool_callback_api,
+            trace_cache::wall_clock_clock_domain::rocprofiler_timestamp, depth_u32,
+            exclusive_ns, std::move(lbl) });
     }
 
     if(get_use_perfetto())
@@ -1227,15 +1296,37 @@ ompt_tracing_callback_start(rocprofiler_callback_tracing_record_t record,
 
 void
 ompt_tracing_callback_stop(
-    rocprofiler_callback_tracing_record_t record, rocprofiler_user_data_t* /*user_data*/,
-    rocprofiler_timestamp_t               ts,
+    rocprofiler_callback_tracing_record_t record, rocprofiler_user_data_t* user_data,
+    rocprofiler_timestamp_t                                   ts,
     std::optional<std::vector<tim::unwind::processed_entry>>& _bt_data)
 {
     std::string_view _name = ompt_get_unified_name(record);
 
     if(get_use_timemory())
     {
+        uint64_t begin_ts = user_data->value;
+
+        uint32_t scope_depth  = 0;
+        uint64_t inclusive_ns = 0;
+        uint64_t exclusive_ns = 0;
+        wall_clock_callback_scope_exit(begin_ts, ts, &scope_depth, &inclusive_ns,
+                                       &exclusive_ns);
+
+        const uint32_t inst_depth = wall_clock_instrumentation_stack_depth();
+        const uint32_t depth_u32  = std::max(scope_depth, inst_depth);
+
         tracing::pop_timemory(category::rocm_ompt_api{}, _name);
+
+        uint64_t    end_ts       = ts;
+        const auto& _tinfo       = thread_info::get(record.thread_id, SystemTID);
+        auto        timemory_tid = _tinfo->index_data->sequent_value;
+        std::string lbl{ _name };
+        trace_cache::get_buffer_storage().store(trace_cache::wall_clock_event_sample{
+            begin_ts, end_ts, record.thread_id, static_cast<uint64_t>(timemory_tid),
+            record.correlation_id.internal,
+            trace_cache::wall_clock_event_source::ompt_callback_api,
+            trace_cache::wall_clock_clock_domain::rocprofiler_timestamp, depth_u32,
+            exclusive_ns, std::move(lbl) });
     }
 
     if(get_use_perfetto())
@@ -1387,6 +1478,7 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
     if(record.phase == ROCPROFILER_CALLBACK_PHASE_ENTER)
     {
         user_data->value = ts;
+        wall_clock_callback_scope_enter(ts);
         switch(record.kind)
         {
             case ROCPROFILER_CALLBACK_TRACING_HSA_CORE_API:
@@ -1751,6 +1843,18 @@ tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
                         _wc->set_accum(_end_ns - _beg_ns);
                     });
                     _bundle.pop();
+
+                    const uint64_t dur_ns = (_end_ns > _beg_ns) ? (_end_ns - _beg_ns) : 0;
+                    const uint32_t depth_u32 = wall_clock_instrumentation_stack_depth();
+
+                    trace_cache::get_buffer_storage().store(
+                        trace_cache::wall_clock_event_sample{
+                            _beg_ns, _end_ns, record->thread_id,
+                            static_cast<uint64_t>(_tid), record->correlation_id.internal,
+                            trace_cache::wall_clock_event_source::
+                                buffered_kernel_dispatch,
+                            trace_cache::wall_clock_clock_domain::rocprofiler_timestamp,
+                            depth_u32, dur_ns, _name });
                 }
 
                 if(get_use_perfetto())
@@ -1872,6 +1976,18 @@ tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
                         _wc->set_accum(_end_ns - _beg_ns);
                     });
                     _bundle.pop();
+
+                    const uint64_t dur_sn = (_end_ns > _beg_ns) ? (_end_ns - _beg_ns) : 0;
+                    const uint32_t depth_sn = wall_clock_instrumentation_stack_depth();
+
+                    trace_cache::get_buffer_storage().store(
+                        trace_cache::wall_clock_event_sample{
+                            _beg_ns, _end_ns, record->thread_id,
+                            static_cast<uint64_t>(thread_id_sequent),
+                            record->correlation_id.internal,
+                            trace_cache::wall_clock_event_source::buffered_scratch_memory,
+                            trace_cache::wall_clock_clock_domain::rocprofiler_timestamp,
+                            depth_sn, dur_sn, std::string{ _name } });
                 }
 
                 if(get_use_perfetto())
@@ -1992,6 +2108,17 @@ tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
                         _wc->set_accum(_end_ns - _beg_ns);
                     });
                     _bundle.pop();
+
+                    const uint64_t dur_mc = (_end_ns > _beg_ns) ? (_end_ns - _beg_ns) : 0;
+                    const uint32_t depth_mc = wall_clock_instrumentation_stack_depth();
+
+                    trace_cache::get_buffer_storage().store(
+                        trace_cache::wall_clock_event_sample{
+                            _beg_ns, _end_ns, record->thread_id,
+                            static_cast<uint64_t>(_tid), record->correlation_id.internal,
+                            trace_cache::wall_clock_event_source::buffered_memory_copy,
+                            trace_cache::wall_clock_clock_domain::rocprofiler_timestamp,
+                            depth_mc, dur_mc, std::string{ _name } });
                 }
 
                 if(get_use_perfetto())

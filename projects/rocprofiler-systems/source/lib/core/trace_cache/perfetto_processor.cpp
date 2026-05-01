@@ -1388,4 +1388,9 @@ perfetto_processor_t::handle(const kfd_sample& _kfd)
     else
         LOG_WARNING("Unknown KFD category: {}", _category);
 }
+
+void
+perfetto_processor_t::handle([[maybe_unused]] const wall_clock_event_sample&)
+{}
+
 }  // namespace rocprofsys::trace_cache

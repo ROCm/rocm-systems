@@ -378,6 +378,9 @@ get_use_rocpd() ROCPROFSYS_HOT;
 bool&
 get_caching_perfetto() ROCPROFSYS_HOT;
 
+bool&
+get_caching_profile() ROCPROFSYS_HOT;
+
 bool
 get_merge_perfetto_files();
 

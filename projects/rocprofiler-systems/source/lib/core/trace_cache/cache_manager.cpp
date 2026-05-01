@@ -6,6 +6,7 @@
 #include "core/output_file_registry.hpp"
 #include "core/trace_cache/metadata_registry.hpp"
 #include "core/trace_cache/perfetto_processor.hpp"
+#include "core/trace_cache/profile_report_processor.hpp"
 #include "core/trace_cache/rocpd_processor.hpp"
 #include "core/trace_cache/sample_processor.hpp"
 
@@ -48,7 +49,8 @@ struct format_t
 struct enabled_formats_t
 {
     std::vector<format_t> formats = { { true, get_use_rocpd(), "rocpd" },
-                                      { false, get_caching_perfetto(), "perfetto" } };
+                                      { false, get_caching_perfetto(), "perfetto" },
+                                      { false, get_caching_profile(), "profile" } };
 
     void print() const
     {
@@ -160,6 +162,14 @@ struct enabled_formats_t
         });
         return it != formats.end() && it->enabled;
     }
+
+    bool is_profile_enabled() const
+    {
+        auto it = std::find_if(formats.begin(), formats.end(), [](const auto& f) {
+            return std::strcmp(f.name, "profile") == 0;
+        });
+        return it != formats.end() && it->enabled;
+    }
 };
 
 struct processor_config_t
@@ -182,8 +192,9 @@ struct processor_config_t
 
 struct processor_storage_t
 {
-    std::shared_ptr<rocpd_processor_t>    rocpd_processor{ nullptr };
-    std::shared_ptr<perfetto_processor_t> perfetto_processor{ nullptr };
+    std::shared_ptr<rocpd_processor_t>          rocpd_processor{ nullptr };
+    std::shared_ptr<perfetto_processor_t>       perfetto_processor{ nullptr };
+    std::shared_ptr<profile_report_processor_t> profile_processor{ nullptr };
 };
 
 using directory_files_t    = std::vector<std::string>;
@@ -402,6 +413,13 @@ configure_processors(const std::shared_ptr<sample_processor_t>&       _type_proc
             _processor_config->_metadata_registry, _processor_config->_agent_manager,
             _processor_config->_pid, _processor_config->_ppid, _output_registry);
         _type_processing->add_handler(*processor_storage.perfetto_processor);
+    }
+    if(_enabled_formats.is_profile_enabled())
+    {
+        processor_storage.profile_processor =
+            std::make_shared<profile_report_processor_t>(
+                _processor_config->_pid, _processor_config->_ppid, _output_registry);
+        _type_processing->add_handler(*processor_storage.profile_processor);
     }
     return processor_storage;
 }

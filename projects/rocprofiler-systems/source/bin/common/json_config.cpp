@@ -178,6 +178,9 @@ resolve_schema_config(const nlohmann::json& config)
     {
         const auto& profiling = config["profiling"];
         resolve_enabled(result, profiling, "enabled", env_vars::PROFILE);
+        if(profiling.contains("legacy"))
+            resolve_enabled(result, profiling["legacy"], "enabled",
+                            env_vars::PROFILE_LEGACY);
         if(profiling.contains("flat_profile"))
         {
             resolve_enabled(result, profiling["flat_profile"], "enabled",
@@ -858,6 +861,7 @@ env_vars_to_json_schema(const std::map<std::string, std::string>& env_map)
     export_tracing_section(config, env_map);
 
     export_section_enabled(config, env_map, env_vars::PROFILE, "profiling");
+    export_enabled(config, env_map, env_vars::PROFILE_LEGACY, "profiling", "legacy");
     export_enabled(config, env_map, env_vars::FLAT_PROFILE, "profiling", "flat_profile");
 
     export_sampling_section(config, env_map);

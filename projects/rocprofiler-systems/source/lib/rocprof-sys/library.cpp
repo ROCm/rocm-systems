@@ -1174,12 +1174,6 @@ rocprofsys_finalize_hidden(void)
                                            _perfetto_output_error, _output_registry);
     }
 
-    {
-        auto& _manager = rocprofsys::trace_cache::cache_manager::get_instance();
-        _manager.shutdown();
-        _manager.post_process_bulk(_output_registry);
-    }
-
     if(_timemory_manager && _timemory_manager != nullptr)
     {
         _timemory_manager->add_metadata([](auto& ar) {
@@ -1240,6 +1234,15 @@ rocprofsys_finalize_hidden(void)
                     output_format::json, _comp_name);
             }
         }
+    }
+
+    // Trace-cache post-processing (e.g. profile_report_processor) writes under the same
+    // ROCPROFSYS_OUTPUT_PATH session directory as timemory. Run after timemory_finalize
+    // so that directory creation and component outputs have established the tree first.
+    {
+        auto& _manager = rocprofsys::trace_cache::cache_manager::get_instance();
+        _manager.shutdown();
+        _manager.post_process_bulk(_output_registry);
     }
 
     _output_registry.print_summary();

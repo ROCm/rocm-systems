@@ -20,12 +20,11 @@ namespace rocprofsys
 namespace trace_cache
 {
 
-using storage_parser_t =
-    storage_parser<type_identifier_t, kernel_dispatch_sample, memory_copy_sample,
-                   memory_allocate_sample, region_sample, in_time_sample,
-                   pmc_event_with_sample, pmc::collectors::gpu::sample,
-                   pmc::collectors::nic::sample, pmc::collectors::cpu::sample,
-                   backtrace_region_sample, scratch_memory_sample, kfd_sample>;
+using storage_parser_t = storage_parser<
+    type_identifier_t, kernel_dispatch_sample, memory_copy_sample, memory_allocate_sample,
+    region_sample, in_time_sample, pmc_event_with_sample, pmc::collectors::gpu::sample,
+    pmc::collectors::nic::sample, pmc::collectors::cpu::sample, backtrace_region_sample,
+    scratch_memory_sample, kfd_sample, wall_clock_event_sample>;
 
 using buffer_storage_t = buffer_storage<flush_worker_factory_t, type_identifier_t>;
 

@@ -30,7 +30,22 @@ enum class type_identifier_t : uint32_t
     scratch_memory          = 0x0009,
     ainic_pmc_sample        = 0x000A,
     kfd_sample              = 0x000B,
+    wall_clock_event        = 0x000C,
     fragmented_space        = 0xFFFF
+};
+
+enum class wall_clock_event_source : uint8_t
+{
+    buffered_kernel_dispatch = 0,
+    buffered_scratch_memory  = 1,
+    buffered_memory_copy     = 2,
+    tool_callback_api        = 3,
+    ompt_callback_api        = 4,
+};
+
+enum class wall_clock_clock_domain : uint8_t
+{
+    rocprofiler_timestamp = 0,
 };
 
 struct kernel_dispatch_sample : cacheable_t
@@ -754,6 +769,80 @@ get_size(const kfd_sample& item)
         std::string_view(item.category), std::string_view(item.track_name),
         std::string_view(item.event_metadata), item.device_id, item.device_type,
         std::string_view(item.pmc_info_name), item.value, item.system_tid);
+}
+
+struct wall_clock_event_sample : cacheable_t
+{
+    static constexpr type_identifier_t type_identifier =
+        type_identifier_t::wall_clock_event;
+
+    wall_clock_event_sample() = default;
+    wall_clock_event_sample(uint64_t _begin_ns, uint64_t _end_ns, uint64_t _thread_id,
+                            uint64_t _timemory_tid, uint64_t _correlation_id,
+                            wall_clock_event_source _source,
+                            wall_clock_clock_domain _clock_domain, uint32_t _depth,
+                            uint64_t _exclusive_nsec, std::string _label)
+    : begin_ns(_begin_ns)
+    , end_ns(_end_ns)
+    , thread_id(_thread_id)
+    , timemory_tid(_timemory_tid)
+    , correlation_id(_correlation_id)
+    , source(_source)
+    , clock_domain(_clock_domain)
+    , depth(_depth)
+    , exclusive_nsec(_exclusive_nsec)
+    , label(std::move(_label))
+    {}
+
+    uint64_t                begin_ns{};
+    uint64_t                end_ns{};
+    uint64_t                thread_id{};
+    uint64_t                timemory_tid{};
+    uint64_t                correlation_id{};
+    wall_clock_event_source source{};
+    wall_clock_clock_domain clock_domain{};
+    uint32_t                depth{};
+    uint64_t                exclusive_nsec{};
+    std::string             label{};
+};
+
+template <>
+inline void
+serialize(uint8_t* buffer, const wall_clock_event_sample& item)
+{
+    utility::store_value(buffer, item.begin_ns, item.end_ns, item.thread_id,
+                         item.timemory_tid, item.correlation_id,
+                         static_cast<uint8_t>(item.source),
+                         static_cast<uint8_t>(item.clock_domain), item.depth,
+                         item.exclusive_nsec, std::string_view(item.label));
+}
+
+template <>
+inline wall_clock_event_sample
+deserialize(uint8_t*& buffer)
+{
+    wall_clock_event_sample item;
+    uint8_t                 src_u8{};
+    uint8_t                 domain_u8{};
+    std::string_view        label_view;
+    utility::parse_value(buffer, item.begin_ns, item.end_ns, item.thread_id,
+                         item.timemory_tid, item.correlation_id, src_u8, domain_u8,
+                         item.depth, item.exclusive_nsec, label_view);
+    item.source       = static_cast<wall_clock_event_source>(src_u8);
+    item.clock_domain = static_cast<wall_clock_clock_domain>(domain_u8);
+    item.label        = std::string(label_view);
+    return item;
+}
+
+template <>
+inline size_t
+get_size(const wall_clock_event_sample& item)
+{
+    return utility::get_size(item.begin_ns, item.end_ns, item.thread_id,
+                             item.timemory_tid, item.correlation_id,
+                             static_cast<uint8_t>(item.source),
+                             static_cast<uint8_t>(item.clock_domain), item.depth,
+                             item.exclusive_nsec, std::string_view(item.label));
 }
 
 }  // namespace trace_cache

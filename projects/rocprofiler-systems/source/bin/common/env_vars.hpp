@@ -37,8 +37,9 @@ constexpr std::string_view TRACE_THREAD_RW_LOCKS = "ROCPROFSYS_TRACE_THREAD_RW_L
 constexpr std::string_view TRACE_THREAD_SPIN_LOCKS = "ROCPROFSYS_TRACE_THREAD_SPIN_LOCKS";
 
 // --- Profiling ---
-constexpr std::string_view PROFILE      = "ROCPROFSYS_PROFILE";
-constexpr std::string_view FLAT_PROFILE = "ROCPROFSYS_FLAT_PROFILE";
+constexpr std::string_view PROFILE        = "ROCPROFSYS_PROFILE";
+constexpr std::string_view PROFILE_LEGACY = "ROCPROFSYS_PROFILE_LEGACY";
+constexpr std::string_view FLAT_PROFILE   = "ROCPROFSYS_FLAT_PROFILE";
 
 // --- Sampling ---
 constexpr std::string_view USE_SAMPLING      = "ROCPROFSYS_USE_SAMPLING";
