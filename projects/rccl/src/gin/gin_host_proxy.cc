@@ -99,7 +99,7 @@ static ncclResult_t getDmaBufFd(void *addr, size_t length, int *fd,
                                 bool forceNonDataDirect = false) {
   if (ncclParamDmaBufEnable() == 0) return ncclInvalidUsage;
 
-#if CUDA_VERSION >= 11070
+#if CUDA_VERSION >= 11070 || HIP_VERSION >= 71260540
   static size_t hostPageSize = sysconf(_SC_PAGESIZE);
   size_t alignedSize = length;
   ALIGN_SIZE(alignedSize, hostPageSize);
@@ -112,8 +112,16 @@ static ncclResult_t getDmaBufFd(void *addr, size_t length, int *fd,
     if (status == CUDA_SUCCESS) return ncclSuccess;
   }
 #endif
+
+#if defined(__HIP_PLATFORM_AMD__)
+  // Direct call: hipified to hipMemGetHandleForAddressRange on HIP at build time.
+  // Same pattern as transport/net.cc and transport/coll_net.cc.
+  CUresult status = cuMemGetHandleForAddressRange((void *)fd, (CUdeviceptr)addr, alignedSize,
+                                                  CU_MEM_RANGE_HANDLE_TYPE_DMA_BUF_FD, 0);
+#else
   CUresult status = pfn_cuMemGetHandleForAddressRange((void *)fd, (CUdeviceptr)addr, alignedSize,
                                                       CU_MEM_RANGE_HANDLE_TYPE_DMA_BUF_FD, 0);
+#endif
   if (status == CUDA_SUCCESS) return ncclSuccess;
 #endif
 
