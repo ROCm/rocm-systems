@@ -24,6 +24,7 @@ class FenceOrderingTester : public Tester {
   char *r_buf{nullptr};
   uint64_t *signal{nullptr};
   int *error_count{nullptr};
+  int last_loop{0};  // actual loop count passed to the last launchKernel
 };
 
 #endif  // TESTS_FENCE_ORDERING_TESTER_HPP
