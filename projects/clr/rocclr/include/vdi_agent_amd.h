@@ -7,7 +7,6 @@
 #ifndef _VDI_AGENT_AMD_H
 #define _VDI_AGENT_AMD_H
 
-#include <CL/cl.h>
 #include "amdocl/cl_icd_amd.h"
 #include <stdint.h>
 
@@ -23,60 +22,60 @@ typedef const struct _vdi_agent vdi_agent;
 
 /* Context Callbacks */
 
-typedef void(CL_CALLBACK* acContextCreate_fn)(vdi_agent* /* agent */, cl_context /* context */);
+typedef void(CL_CALLBACK* acContextCreate_fn)(vdi_agent* /* agent */, void* /* context */);
 
-typedef void(CL_CALLBACK* acContextFree_fn)(vdi_agent* /* agent */, cl_context /* context */);
+typedef void(CL_CALLBACK* acContextFree_fn)(vdi_agent* /* agent */, void* /* context */);
 
 /* Command Queue Callbacks */
 
 typedef void(CL_CALLBACK* acCommandQueueCreate_fn)(vdi_agent* /* agent */,
-                                                   cl_command_queue /* queue */);
+                                                   void* /* queue */);
 
 typedef void(CL_CALLBACK* acCommandQueueFree_fn)(vdi_agent* /* agent */,
-                                                 cl_command_queue /* queue */);
+                                                 void* /* queue */);
 
 /* Event Callbacks */
 
-typedef void(CL_CALLBACK* acEventCreate_fn)(vdi_agent* /* agent */, cl_event /* event */,
-                                            cl_command_type /* type */);
+typedef void(CL_CALLBACK* acEventCreate_fn)(vdi_agent* /* agent */, void* /* event */,
+                                            uint32_t /* type: CL_COMMAND_* value */);
 
-typedef void(CL_CALLBACK* acEventFree_fn)(vdi_agent* /* agent */, cl_event /* event */);
+typedef void(CL_CALLBACK* acEventFree_fn)(vdi_agent* /* agent */, void* /* event */);
 
-typedef void(CL_CALLBACK* acEventStatusChanged_fn)(vdi_agent* /* agent */, cl_event /* event */,
+typedef void(CL_CALLBACK* acEventStatusChanged_fn)(vdi_agent* /* agent */, void* /* event */,
                                                    int32_t /* execution_status */,
                                                    int64_t /* epoch_time_stamp */);
 
 /* Memory Object Callbacks */
 
-typedef void(CL_CALLBACK* acMemObjectCreate_fn)(vdi_agent* /* agent */, cl_mem /* memobj */);
+typedef void(CL_CALLBACK* acMemObjectCreate_fn)(vdi_agent* /* agent */, void* /* memobj */);
 
-typedef void(CL_CALLBACK* acMemObjectFree_fn)(vdi_agent* /* agent */, cl_mem /* memobj */);
+typedef void(CL_CALLBACK* acMemObjectFree_fn)(vdi_agent* /* agent */, void* /* memobj */);
 
-typedef void(CL_CALLBACK* acMemObjectAcquired_fn)(vdi_agent* /* agent */, cl_mem /* memobj */,
-                                                  cl_device_id /* device */,
+typedef void(CL_CALLBACK* acMemObjectAcquired_fn)(vdi_agent* /* agent */, void* /* memobj */,
+                                                  void* /* device */,
                                                   int64_t /* elapsed_time */);
 
 /* Sampler Callbacks */
 
-typedef void(CL_CALLBACK* acSamplerCreate_fn)(vdi_agent* /* agent */, cl_sampler /* sampler */);
+typedef void(CL_CALLBACK* acSamplerCreate_fn)(vdi_agent* /* agent */, void* /* sampler */);
 
-typedef void(CL_CALLBACK* acSamplerFree_fn)(vdi_agent* /* agent */, cl_sampler /* sampler */);
+typedef void(CL_CALLBACK* acSamplerFree_fn)(vdi_agent* /* agent */, void* /* sampler */);
 
 /* Program Callbacks */
 
-typedef void(CL_CALLBACK* acProgramCreate_fn)(vdi_agent* /* agent */, cl_program /* program */);
+typedef void(CL_CALLBACK* acProgramCreate_fn)(vdi_agent* /* agent */, void* /* program */);
 
-typedef void(CL_CALLBACK* acProgramFree_fn)(vdi_agent* /* agent */, cl_program /* program */);
+typedef void(CL_CALLBACK* acProgramFree_fn)(vdi_agent* /* agent */, void* /* program */);
 
-typedef void(CL_CALLBACK* acProgramBuild_fn)(vdi_agent* /* agent */, cl_program /* program */);
+typedef void(CL_CALLBACK* acProgramBuild_fn)(vdi_agent* /* agent */, void* /* program */);
 
 /* Kernel Callbacks */
 
-typedef void(CL_CALLBACK* acKernelCreate_fn)(vdi_agent* /* agent */, cl_kernel /* kernel */);
+typedef void(CL_CALLBACK* acKernelCreate_fn)(vdi_agent* /* agent */, void* /* kernel */);
 
-typedef void(CL_CALLBACK* acKernelFree_fn)(vdi_agent* /* agent */, cl_kernel /* kernel */);
+typedef void(CL_CALLBACK* acKernelFree_fn)(vdi_agent* /* agent */, void* /* kernel */);
 
-typedef void(CL_CALLBACK* acKernelSetArg_fn)(vdi_agent* /* agent */, cl_kernel /* kernel */,
+typedef void(CL_CALLBACK* acKernelSetArg_fn)(vdi_agent* /* agent */, void* /* kernel */,
                                              int32_t /* arg_index */, size_t /* size */,
                                              const void* /* value_ptr */);
 
@@ -134,6 +133,11 @@ typedef struct _vdi_agent_capabilities {
 struct _vdi_agent {
   int32_t(CL_API_CALL* GetVersionNumber)(vdi_agent* /* agent */, int32_t* /* version_ret */);
 
+  /* GetPlatform, GetICDDispatchTable, and SetICDDispatchTable retain cl_* types
+   * because the platform handle and ICD dispatch table are part of the external
+   * agent ABI. Eliminating these is a separate, later phase of the type-replacement
+   * project. Note: amdocl/cl_icd_amd.h (retained for these types) transitively
+   * includes <CL/cl.h>. */
   int32_t(CL_API_CALL* GetPlatform)(vdi_agent* /* agent */, cl_platform_id* /* platform_id_ret */);
 
   int32_t(CL_API_CALL* GetTime)(vdi_agent* /* agent */, int64_t* /* time_nanos */);
