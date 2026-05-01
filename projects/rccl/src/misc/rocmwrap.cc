@@ -130,10 +130,11 @@ int ncclCuMemHostEnable() {
       CUCHECK(cuDeviceGet(&currentDev, cudaDev));
       CUCHECK(cuDeviceGetAttribute(&cpuNumaNodeId, hipDeviceAttributeHostNumaId, currentDev));
       if (cpuNumaNodeId < 0) cpuNumaNodeId = 0;
-      prop.location.type = hipMemLocationTypeHostNuma;
+      // CLR rejects HostNuma; probe with Host to match alloc.h's ncclCuMemHostAlloc.
+      prop.location.type = hipMemLocationTypeHost;
       prop.type = CU_MEM_ALLOCATION_TYPE_PINNED;
       prop.requestedHandleTypes = ncclCuMemHandleType;
-      prop.location.id = cpuNumaNodeId;
+      prop.location.id = 0;  // ignored on the Host path
       CUCHECK(cuMemGetAllocationGranularity(&granularity, &prop, CU_MEM_ALLOC_GRANULARITY_MINIMUM));
       size = 1;
       ALIGN_SIZE(size, granularity);

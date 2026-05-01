@@ -448,7 +448,7 @@ struct Optional {
   // Construct with present thing:
   template<typename ...Arg>
   NCCL_HOST_DEVICE_INLINE Optional(Present<Arg...> args):
-    Optional(args, IntSeqUpTo<sizeof...(Arg), 0>::Type()) {
+    Optional(args, typename IntSeqUpTo<sizeof...(Arg), 0>::Type()) {
   }
 
   NCCL_HOST_DEVICE_INLINE ~Optional() {
