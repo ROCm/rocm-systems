@@ -367,8 +367,8 @@ class TestPlotMemChartGfx11:
 
         # Check for key components
         assert "TCP" in result or "L0" in result  # L0 cache
-        assert "GL1C" in result  # L1 cache
-        assert "GL2C" in result  # L2 cache
+        assert "GL1 Cache" in result  # L1 cache
+        assert "GL2 Cache" in result  # L2 cache
         assert (
             "GCEA" in result
         )  # Graphics Core Efficiency Arbiter (block label in diagram)
@@ -403,7 +403,7 @@ class TestPlotMemChartGfx11:
         """Test with partial metrics (some missing)."""
         partial_metrics = {
             "TCP-GL1 Read Bandwidth": 50e9,
-            "GL1C Utilization": 65.0,
+            "GL1 Cache Utilization": 65.0,
             # Missing many other metrics
         }
         result = mem_chart_gfx11.plot_mem_chart("per_kernel", partial_metrics)
@@ -465,16 +465,16 @@ class TestDefaultSampleMetrics:
         """Test that all memory hierarchy levels are represented."""
         metrics = mem_chart_gfx11.DEFAULT_SAMPLE_METRICS
 
-        # TCP (L0)
+        # GL0 (TCP)
         assert any("TCP" in k for k in metrics.keys())
 
         # LDS
         assert any("LDS" in k for k in metrics.keys())
 
-        # GL1C
+        # GL1 Cache
         assert any("GL1" in k for k in metrics.keys())
 
-        # GL2C
+        # GL2 Cache
         assert any("GL2" in k for k in metrics.keys())
 
         # DRAM

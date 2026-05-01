@@ -24,9 +24,9 @@ Use ``MEM_CHART_PANEL_METRIC_KEYS`` for the authoritative ordered list.
 Bandwidth values are **Bytes/s**, matching the YAML ``unit: Bytes/s`` rows.
 
 RDNA3.5 MEMORY HIERARCHY (GCEA = Graphics Core Efficiency Arbiter):
-   Kernel -> TCP (L0 Vector Cache) -> GL1C (L1) -> GL2C (L2) -> GCEA -> System Memory
-         -> SQC (ICache/DCache)   -> GL1C (L1) -> GL2C (L2) -> GCEA -> System Memory
-         -> LDS (Local Data Share) [stays on CU, no GL1C connection]
+   Kernel -> GL0 (TCP Cache)      -> GL1 Cache -> GL2 Cache -> GCEA -> System Memory
+         -> SQC (ICache/DCache)   -> GL1 Cache -> GL2 Cache -> GCEA -> System Memory
+         -> LDS (Local Data Share) [stays on CU, no GL1 Cache connection]
 """
 
 import argparse
@@ -91,7 +91,7 @@ _MEM_CHART_DEFAULT_ROWS: tuple[tuple[str, Union[int, float]], ...] = (
     ("GL1 Cache Hit Rate", 85.0),
     ("GL1 Cache Starve Rate", 5.2),
     ("GL1 Cache Stall GL2 Backpressure", 8.5),
-    # Table 307: GL1C-GL2 Interface
+    # Table 307: GL1-GL2 Interface
     ("GL1-GL2 Read Requests", 30_000),
     ("GL1-GL2 Write Requests", 10_000),
     ("GL1-GL2 Read Bandwidth", 48e9),
@@ -436,7 +436,7 @@ def _build_kernel_and_l0(
     l0_stack.add_row(tcp_panel)
     l0_stack.add_row(sqc_panel)
 
-    # Edges to GL1C (TCP and SQC connect, LDS does NOT)
+    # Edges to GL1 Cache (TCP and SQC connect, LDS does NOT)
     sa_l = std_arrows["left"]
     sa_r = std_arrows["right"]
     tcp_gl1_rd = fmt_bw(m["tcp_gl1_read_bw"], precision=1)
@@ -477,7 +477,7 @@ def _build_cache_columns(
     m: dict[str, Any],
     std_arrows: dict[str, str],
 ) -> tuple[Panel, Text, Panel]:
-    """Build GL1C panel, GL1-GL2 edges, GL2C panel.
+    """Build GL1 Cache panel, GL1-GL2 edges, GL2 Cache panel.
 
     Returns (gl1_panel, gl1_gl2_edges_text, gl2_panel).
     """
@@ -496,7 +496,7 @@ def _build_cache_columns(
         f"[dim]{bar(m['gl1c_hit'])}[/dim]\n"
         "\n"
         f"{metric_line('GL2 Stall', m['gl1c_stall_gl2'], '%', COLORS['stall'])}",
-        title=f"[bold {c_bl}]GL1C[/bold {c_bl}]",
+        title=f"[bold {c_bl}]GL1 Cache[/bold {c_bl}]",
         border_style=c_bl,
         width=16,
         height=30,
@@ -536,7 +536,7 @@ def _build_cache_columns(
         "\n"
         f"{metric_line('Hit Rate', m['gl2c_hit'], '%', COLORS['hit'])}\n"
         f"[dim]{bar(m['gl2c_hit'])}[/dim]",
-        title=f"[bold {c_bl}]GL2C[/bold {c_bl}]",
+        title=f"[bold {c_bl}]GL2 Cache[/bold {c_bl}]",
         border_style=c_bl,
         width=16,
         height=30,
@@ -724,7 +724,9 @@ def create_mem_chart_diagram(
     if show_debug:
         console.print("[dim]Architecture Notes:[/dim]")
         console.print("  TCP (Texture Cache Pipe): L0 vector cache for VMEM operations")
-        console.print("  LDS (Local Data Share): On-CU scratchpad, NO GL1C connection")
+        console.print(
+            "  LDS (Local Data Share): On-CU scratchpad, NO GL1 Cache connection"
+        )
         console.print("  SQC (Sequencer Cache): ICache + DCache for scalar operations")
         console.print()
 
