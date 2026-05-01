@@ -32,11 +32,29 @@ struct CoherencyGfx9 {
   uint8_t glc; ///< Globally coherent (bypass L1).
 };
 
+/// @brief GFX11 (RDNA3/3.5) coherency bits: glc, dlc, slc.
+struct CoherencyGfx11 {
+  uint8_t glc; ///< Scope bit 0.
+  uint8_t dlc; ///< Non-temporal hint.
+  uint8_t slc; ///< Scope bit 1.
+};
+
 /// @brief GFX12 (RDNA4) coherency bits: scope, th.
 struct CoherencyGfx12 {
   uint8_t scope; ///< Cache scope (0=CU, 1=SE, 2=device, 3=system).
   uint8_t th;    ///< Temporal hint (0=default, 3=non-temporal).
 };
+
+/// @brief Remap GFX940 coherency bits to GFX11.
+///
+/// @details Mapping: sc0 → glc, sc1 → slc, nt → dlc.
+/// GFX11 uses glc/slc as scope bits here; dlc carries the non-temporal hint.
+///
+/// @param c  GFX940 coherency bits.
+/// @returns Equivalent GFX11 coherency bits.
+inline constexpr CoherencyGfx11 remap_gfx940_to_gfx11(CoherencyGfx940 c) {
+  return {c.sc0, c.nt ? uint8_t(1) : uint8_t(0), c.sc1};
+}
 
 /// @brief Remap GFX940 coherency bits to GFX12.
 ///
@@ -46,6 +64,16 @@ struct CoherencyGfx12 {
 /// @returns Equivalent GFX12 coherency bits.
 inline constexpr CoherencyGfx12 remap_gfx940_to_gfx12(CoherencyGfx940 c) {
   return {static_cast<uint8_t>((c.sc1 << 1) | c.sc0), c.nt ? uint8_t(0x3) : uint8_t(0x0)};
+}
+
+/// @brief Remap GFX9 coherency bits to GFX11.
+///
+/// @details Mapping: glc → glc, dlc/slc clear.
+///
+/// @param c  GFX9 coherency bits.
+/// @returns Equivalent GFX11 coherency bits.
+inline constexpr CoherencyGfx11 remap_gfx9_to_gfx11(CoherencyGfx9 c) {
+  return {c.glc ? uint8_t(1) : uint8_t(0), uint8_t(0), uint8_t(0)};
 }
 
 /// @brief Remap GFX9 coherency bits to GFX12.

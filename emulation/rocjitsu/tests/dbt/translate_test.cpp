@@ -102,6 +102,25 @@ TEST(CoherencyRemap, Gfx9GlcToGfx12) {
   EXPECT_EQ(coh_glc0.th, 0);
 }
 
+TEST(CoherencyRemap, Gfx940ToGfx11) {
+  auto coh = remap_gfx940_to_gfx11({1, 1, 1});
+  EXPECT_EQ(coh.glc, 1);
+  EXPECT_EQ(coh.slc, 1);
+  EXPECT_EQ(coh.dlc, 1);
+}
+
+TEST(CoherencyRemap, Gfx9GlcToGfx11) {
+  auto coh_glc1 = remap_gfx9_to_gfx11({1});
+  EXPECT_EQ(coh_glc1.glc, 1);
+  EXPECT_EQ(coh_glc1.slc, 0);
+  EXPECT_EQ(coh_glc1.dlc, 0);
+
+  auto coh_glc0 = remap_gfx9_to_gfx11({0});
+  EXPECT_EQ(coh_glc0.glc, 0);
+  EXPECT_EQ(coh_glc0.slc, 0);
+  EXPECT_EQ(coh_glc0.dlc, 0);
+}
+
 TEST(EncodingTranslator, Sop1PreservesRegisters) {
   cdna4::Sop1MachineInst src{};
   src.ssrc0 = 42;
@@ -179,6 +198,63 @@ TEST(EncodingTranslator, SmemRemapsCoherency) {
   EXPECT_EQ(dst.th, 0);
   EXPECT_EQ(dst.nv, 0);
   EXPECT_EQ(dst.soffset, 0x7C); // CDNA4 null (0x7F) → RDNA4 null (0x7C)
+}
+
+TEST(EncodingTranslator, Cdna4ToRdna3MubufRemapsCoherency) {
+  cdna4::MubufMachineInst src{};
+  src.offset = 0x123;
+  src.offen = 1;
+  src.idxen = 1;
+  src.sc0 = 1;
+  src.sc1 = 1;
+  src.nt = 1;
+  src.op = 0;
+  src.encoding = 0x38;
+  src.vaddr = 4;
+  src.vdata = 5;
+  src.srsrc = 6;
+  src.soffset = 7;
+  uint32_t words[2];
+  std::memcpy(words, &src, sizeof(src));
+
+  auto result =
+      cdna4_to_rdna3::translate_encoding_cdna4_to_rdna3(kEnc_MUBUF, words[0], words[1], 0, 0);
+
+  ASSERT_EQ(result.word_count, 2);
+  rdna3::MubufMachineInst dst{};
+  std::memcpy(&dst, result.words, sizeof(dst));
+  EXPECT_EQ(dst.glc, 1);
+  EXPECT_EQ(dst.slc, 1);
+  EXPECT_EQ(dst.dlc, 1);
+  EXPECT_EQ(dst.vaddr, 4);
+  EXPECT_EQ(dst.vdata, 5);
+  EXPECT_EQ(dst.srsrc, 6);
+}
+
+TEST(EncodingTranslator, Cdna4ToRdna3SmemPreservesGlc) {
+  cdna4::SmemMachineInst src{};
+  src.sbase = 5;
+  src.sdata = 3;
+  src.soffset_en = 1;
+  src.glc = 1;
+  src.op = 0;
+  src.offset = 0x100;
+  src.soffset = 12;
+  src.encoding = 0x3D;
+  uint32_t words[2];
+  std::memcpy(words, &src, sizeof(src));
+
+  auto result =
+      cdna4_to_rdna3::translate_encoding_cdna4_to_rdna3(kEnc_SMEM, words[0], words[1], 0, 0);
+
+  ASSERT_EQ(result.word_count, 2);
+  rdna3::SmemMachineInst dst{};
+  std::memcpy(&dst, result.words, sizeof(dst));
+  EXPECT_EQ(dst.glc, 1);
+  EXPECT_EQ(dst.dlc, 0);
+  EXPECT_EQ(dst.sbase, 5);
+  EXPECT_EQ(dst.sdata, 3);
+  EXPECT_EQ(dst.soffset, 12);
 }
 
 TEST(EncodingTranslator, Vop3PreservesModifiers) {
@@ -303,6 +379,7 @@ CHECK_NO_ILLEGAL(rdna4_to_cdna4)
 #include "rocjitsu/code/dbt/semantic_translator.h"
 
 using rocjitsu::decode_waitcnt_gfx9;
+using rocjitsu::encode_waitcnt_gfx11_simm16;
 using rocjitsu::encode_waitcnt_gfx12;
 using rocjitsu::SemanticTranslator;
 using rocjitsu::WaitcntValues;
@@ -319,6 +396,11 @@ TEST(WaitcntTranslator, DecodeAllRelaxed) {
   EXPECT_EQ(v.vmcnt, 0x3F);
   EXPECT_EQ(v.lgkmcnt, 0x0F);
   EXPECT_EQ(v.expcnt, 0x07);
+}
+
+TEST(WaitcntTranslator, EncodeGfx11ConvertsImmediateLayout) {
+  EXPECT_EQ(encode_waitcnt_gfx11_simm16(WaitcntValues{18, 3, 4}), 0x4834);
+  EXPECT_EQ(encode_waitcnt_gfx11_simm16(decode_waitcnt_gfx9(0xCF7F)), 0xFCF7);
 }
 
 TEST(WaitcntTranslator, DecodeVmcnt15Lgkm0) {
@@ -414,7 +496,6 @@ std::vector<uint32_t> append_trailing_literal_for_test(const rocjitsu::Translati
                                                        std::span<const uint32_t> source_words,
                                                        size_t source_word_count) {
   std::vector<uint32_t> translated(tr.words, tr.words + tr.word_count);
-  // Encoding helpers rewrite opcode words only; literals stay in the source stream.
   if (source_word_count == translated.size() + 1 && translated.size() < 3)
     translated.push_back(source_words[translated.size()]);
   return translated;
@@ -459,6 +540,16 @@ uint32_t make_cdna4_v_add_f32(uint8_t vdst, uint8_t vsrc1, uint16_t src0) {
   src.vsrc1 = vsrc1;
   src.vdst = vdst;
   src.op = 1;
+  src.encoding = 0;
+  return std::bit_cast<uint32_t>(src);
+}
+
+uint32_t make_cdna4_v_lshrrev_b32(uint8_t vdst, uint8_t vsrc1, uint16_t src0) {
+  rocjitsu::cdna4::Vop2MachineInst src{};
+  src.src0 = src0;
+  src.vsrc1 = vsrc1;
+  src.vdst = vdst;
+  src.op = 16;
   src.encoding = 0;
   return std::bit_cast<uint32_t>(src);
 }
@@ -560,6 +651,34 @@ TEST(Cdna4ToRdna3InPlaceBuckets, SubstituteVop2DecodesAsRdna3) {
   EXPECT_EQ(std::string_view(rdna3_inst->mnemonic()), "v_add_f32_e32");
 }
 
+TEST(Cdna4ToRdna3InPlaceBuckets, LowerVop2PreservesTargetOpcode) {
+  const std::array<uint32_t, 1> source{make_cdna4_v_lshrrev_b32(7, 9, 10)};
+  auto inst = decode_cdna4(source);
+  ASSERT_NE(inst, nullptr);
+  ASSERT_EQ(std::string_view(inst->mnemonic()), "v_lshrrev_b32_e32");
+
+  const auto *leg =
+      rocjitsu::lookup(rocjitsu::kLegalization_cdna4_to_rdna3, inst->encoding_id(), inst->opcode());
+  ASSERT_NE(leg, nullptr);
+  ASSERT_EQ(leg->action, rocjitsu::Action::Lower);
+  ASSERT_EQ(leg->target_opcode, 25);
+
+  const auto translated = rocjitsu::cdna4_to_rdna3::translate_encoding_cdna4_to_rdna3(
+      inst->encoding_id(), source[0], 0, 0, leg->target_opcode);
+  ASSERT_EQ(translated.word_count, 1);
+
+  auto dst = std::bit_cast<rocjitsu::rdna3::Vop2MachineInst>(translated.words[0]);
+  EXPECT_EQ(dst.src0, 10);
+  EXPECT_EQ(dst.vsrc1, 9);
+  EXPECT_EQ(dst.vdst, 7);
+  EXPECT_EQ(dst.op, 25);
+
+  auto rdna3_inst =
+      decode_one_as(ROCJITSU_CODE_ARCH_RDNA3, std::span<const uint32_t>(translated.words, 1));
+  ASSERT_NE(rdna3_inst, nullptr);
+  EXPECT_EQ(std::string_view(rdna3_inst->mnemonic()), "v_lshrrev_b32_e32");
+}
+
 TEST(Cdna4ToRdna3InPlaceBuckets, GeneratedSameSizeSop1PreservesOperands) {
   const std::array<uint32_t, 1> source{make_cdna4_s_mov_b32(17, 42)};
   auto inst = decode_cdna4(source);
@@ -615,8 +734,8 @@ TEST(Cdna4ToRdna3InPlaceBuckets, TrailingLiteralIsPreservedForSubstituteVop2) {
   EXPECT_EQ(stats.inst_count, 1u);
 }
 
-TEST(Cdna4ToRdna3SemanticTranslator, SWaitcntEmitsGfx11WaitcntFullDrain) {
-  const std::array<uint32_t, 1> source{make_cdna4_s_waitcnt(0x0F0F)};
+TEST(Cdna4ToRdna3SemanticTranslator, SWaitcntConvertsGfx9ToGfx11Layout) {
+  const std::array<uint32_t, 1> source{make_cdna4_s_waitcnt(0x4342)};
   auto inst = decode_cdna4(source);
   ASSERT_NE(inst, nullptr);
   ASSERT_EQ(std::string_view(inst->mnemonic()), "s_waitcnt");
@@ -626,7 +745,7 @@ TEST(Cdna4ToRdna3SemanticTranslator, SWaitcntEmitsGfx11WaitcntFullDrain) {
   auto replacement = translator.try_lower_expand(*inst, 0, liveness);
 
   ASSERT_EQ(replacement.size(), 1u);
-  EXPECT_EQ(replacement[0], rocjitsu::pack_sopp(9, 0));
+  EXPECT_EQ(replacement[0], rocjitsu::pack_sopp(9, 0x4834));
 
   const auto stats =
       decode_words_as(ROCJITSU_CODE_ARCH_RDNA3, std::span<const uint32_t>(replacement));

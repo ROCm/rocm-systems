@@ -78,7 +78,8 @@ Bucket notes:
 
 - `s_waitcnt` is counted as the one same-size semantic rewrite. The generator
   marks it `Lower`, but the CDNA4-to-RDNA3 semantic table handles it before the
-  encoding path by emitting conservative RDNA3 `s_waitcnt 0`.
+  encoding path by decoding the CDNA4 GFX9-layout counters and re-encoding a
+  same-size RDNA3 GFX11-layout `s_waitcnt`.
 - `v_lshl_add_u64` is counted in size-expanding rewrite. It is currently the
   only CDNA4-to-RDNA3 size-expanding arithmetic rule wired in the semantic
   translator.
@@ -102,7 +103,7 @@ Two CDNA4-to-RDNA3 semantic rules are wired:
 
 | Source row | Bucket | Current behavior |
 | --- | --- | --- |
-| `SOPP:s_waitcnt` | Same-size semantic rewrite | Replaces the GFX9-layout CDNA4 waitcnt with RDNA3 `s_waitcnt 0`. This is conservative and correct but can over-wait. |
+| `SOPP:s_waitcnt` | Same-size semantic rewrite | Converts the GFX9-layout CDNA4 waitcnt immediate to the RDNA3 GFX11 immediate layout in place. |
 | `VOP3:v_lshl_add_u64` | Size-expanding rewrite | Emits `v_add_co_u32` and `v_add_co_ci_u32`. The RDNA3 path deliberately skips the RDNA4-only `s_wait_alu`. |
 
 Unhandled `Action::Expand` rows warn and NOP-fill in `BinaryTranslator`.
@@ -119,7 +120,7 @@ follow-up work even though this taxonomy is complete.
 | Identity and substitute hardening | Harden identity and opcode-substitute rows, including alias-expanded lookup behavior, duplicate-key expectations, trailing literals, and branch/SOPP smoke cases. | coverage harness |
 | Generated legalization duplicate audit | Fix or explicitly document duplicate `(encoding_id, opcode)` keys in alias-expanded legalization headers before relying on header rows as implementation units. | coverage harness and identity/substitute hardening |
 | In-place field lower audit | Validate the 629 in-place lower rows by family. Split memory families (SMEM/MUBUF/FLAT/DS) from VALU/SALU families if the task is too large. | coverage harness and identity/substitute hardening |
-| Precise RDNA3 waitcnt | Replace the conservative `s_waitcnt 0` rewrite with a precise GFX9-to-GFX11 counter layout encoder, or document why the full drain remains intentional. | coverage harness |
+| Same-size semantic lowerings | Same-size semantic lowerings: precise RDNA3 waitcnt, Lower target opcode preservation, and GFX940/GFX9-to-GFX11 coherency remaps. | coverage harness and identity/substitute hardening |
 | Simple expand lowerings | Implement the 353 non-matrix, non-MTBUF Expand rows that have local instruction-sequence lowerings, using code caves and tests for branch-return correctness. | coverage harness |
 | MTBUF disposition | Either add MTBUF to the generated CDNA4-to-RDNA3 encoder or classify all 16 MTBUF rows as explicitly unsupported with diagnostics. | coverage harness |
 | MFMA/AccVGPR to RDNA3 | Design and implement the 70-row complex matrix/AccVGPR bucket, including lane layout, accumulator remapping, and VGPR pressure diagnostics. | coverage harness |

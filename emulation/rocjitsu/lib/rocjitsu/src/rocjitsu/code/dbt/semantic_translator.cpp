@@ -48,6 +48,14 @@ WaitcntValues decode_waitcnt_gfx9(uint16_t simm16) {
   return v;
 }
 
+uint16_t encode_waitcnt_gfx11_simm16(const WaitcntValues &vals) {
+  const uint16_t expcnt = std::min<uint16_t>(vals.expcnt, 0x07);
+  const uint16_t lgkmcnt = std::min<uint16_t>(vals.lgkmcnt, 0x3F);
+  const uint16_t vmcnt = std::min<uint16_t>(vals.vmcnt, 0x3F);
+  // SOPP names this field simm16, but s_waitcnt treats it as packed counter bits.
+  return static_cast<uint16_t>(expcnt | (lgkmcnt << 4) | (vmcnt << 10));
+}
+
 std::vector<uint32_t> encode_waitcnt_gfx12(const WaitcntValues &vals) {
   std::vector<uint32_t> words;
 
@@ -379,15 +387,11 @@ std::vector<uint32_t> expand_v_lshl_add_u64(const Instruction &inst, uint32_t ar
   return lower_v_lshl_add_u64(inst, static_cast<rj_code_arch_t>(arch));
 }
 
-/// @brief Lower CDNA4 (GFX9) s_waitcnt to RDNA3 (GFX11) s_waitcnt.
-/// @details The simm16 counter-bit layout differs between GFX9 and GFX11
-/// (different bit positions for vmcnt/expcnt/lgkmcnt), so a verbatim
-/// simm16 copy by the auto-encoder gives incorrect waits. Rather than
-/// re-encode the counters precisely, emit a conservative full-drain
-/// s_waitcnt 0 which waits for every counter to reach 0. Slower than the
-/// original (which only waited on the specified counter classes) but
-/// always correct. A future change can add encode_waitcnt_gfx11 for a
-/// precise mapping, mirroring encode_waitcnt_gfx12 for the RDNA4 path.
+/// @brief Lower CDNA4 (GFX9-layout) s_waitcnt to RDNA3 (GFX11-layout) s_waitcnt.
+/// @details CDNA4 keeps the GFX9 waitcnt bit layout while RDNA3 uses
+/// expcnt[2:0], lgkmcnt[9:4], vmcnt[15:10]. Decode the source counters and
+/// re-encode the target immediate so the same wait classes are preserved in
+/// place without over-waiting or copying the incompatible simm16 field.
 std::vector<uint32_t> expand_waitcnt_gfx9_to_gfx11(const Instruction &inst, uint32_t, uint64_t,
                                                    const LivenessAnalysis &, const LaneLayout *,
                                                    const LaneLayout *) {
@@ -396,8 +400,10 @@ std::vector<uint32_t> expand_waitcnt_gfx9_to_gfx11(const Instruction &inst, uint
   constexpr uint16_t kEnc_SOPP_value = 0x17F;
   if (inst.encoding_id() != kEnc_SOPP_value)
     return {};
+  const auto &sopp = *reinterpret_cast<const cdna4::SoppMachineInst *>(inst.raw_encoding());
   constexpr uint32_t kRdna3SoppOp_s_waitcnt = 9;
-  return {pack_sopp(kRdna3SoppOp_s_waitcnt, 0)};
+  return {pack_sopp(kRdna3SoppOp_s_waitcnt,
+                    encode_waitcnt_gfx11_simm16(decode_waitcnt_gfx9(sopp.simm16)))};
 }
 
 std::vector<uint32_t> expand_accvgpr_read(const Instruction &inst, uint32_t, uint64_t,

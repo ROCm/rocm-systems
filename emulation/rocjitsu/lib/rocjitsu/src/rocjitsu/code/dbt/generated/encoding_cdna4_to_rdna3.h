@@ -364,9 +364,10 @@ inline TranslationResult encode_flat_rdna3(const FlatFields &f, uint16_t dst_op)
   dst.data = f.vsrc;
   dst.saddr = f.saddr;
   dst.vdst = f.vdst;
-  dst.dlc = 0;
-  dst.glc = 0;
-  dst.slc = 0;
+  auto coh = remap_gfx940_to_gfx11({uint8_t(f.sc0), uint8_t(f.sc1), uint8_t(f.nt)});
+  dst.glc = coh.glc;
+  dst.dlc = coh.dlc;
+  dst.slc = coh.slc;
   dst.sve = 0;
   if (dst.saddr == 0x7F)
     dst.saddr = 0x7C;
@@ -387,9 +388,10 @@ inline TranslationResult encode_flat_glbl_rdna3(const FlatGlblFields &f, uint16_
   dst.data = f.vsrc;
   dst.saddr = f.saddr;
   dst.vdst = f.vdst;
-  dst.dlc = 0;
-  dst.glc = 0;
-  dst.slc = 0;
+  auto coh = remap_gfx940_to_gfx11({uint8_t(f.sc0), uint8_t(f.sc1), uint8_t(f.nt)});
+  dst.glc = coh.glc;
+  dst.dlc = coh.dlc;
+  dst.slc = coh.slc;
   if (dst.saddr == 0x7F)
     dst.saddr = 0x7C;
   TranslationResult r{};
@@ -409,9 +411,10 @@ inline TranslationResult encode_flat_scratch_rdna3(const FlatScratchFields &f, u
   dst.data = f.vsrc;
   dst.saddr = f.saddr;
   dst.vdst = f.vdst;
-  dst.dlc = 0;
-  dst.glc = 0;
-  dst.slc = 0;
+  auto coh = remap_gfx940_to_gfx11({uint8_t(f.sc0), uint8_t(f.sc1), uint8_t(f.nt)});
+  dst.glc = coh.glc;
+  dst.dlc = coh.dlc;
+  dst.slc = coh.slc;
   if (dst.saddr == 0x7F)
     dst.saddr = 0x7C;
   TranslationResult r{};
@@ -431,9 +434,10 @@ inline TranslationResult encode_mubuf_rdna3(const MubufFields &f, uint16_t dst_o
   dst.vdata = f.vdata;
   dst.srsrc = f.rsrc;
   dst.soffset = f.soffset;
-  dst.slc = 0;
-  dst.dlc = 0;
-  dst.glc = 0;
+  auto coh = remap_gfx940_to_gfx11({uint8_t(f.sc0), uint8_t(f.sc1), uint8_t(f.nt)});
+  dst.glc = coh.glc;
+  dst.dlc = coh.dlc;
+  dst.slc = coh.slc;
   dst.tfe = 0;
   if (dst.soffset == 0x7F)
     dst.soffset = 0x7C;
@@ -451,8 +455,9 @@ inline TranslationResult encode_smem_rdna3(const SmemFields &f, uint16_t dst_op)
   dst.sdata = f.sdata;
   dst.offset = f.ioffset;
   dst.soffset = f.soffset;
-  dst.dlc = 0;
-  dst.glc = 0;
+  auto coh = remap_gfx9_to_gfx11({uint8_t(f.glc)});
+  dst.glc = coh.glc;
+  dst.dlc = coh.dlc;
   if (dst.soffset == 0x7F)
     dst.soffset = 0x7C;
   if (f.soffset_en == 0)

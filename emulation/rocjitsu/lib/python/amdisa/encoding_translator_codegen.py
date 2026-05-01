@@ -158,7 +158,7 @@ _GLC_REMAP_ENCODINGS = frozenset({
 _COHERENCY_SRC_FIELDS = frozenset({'sc0', 'sc1', 'nt', 'glc'})
 
 # Fields that participate in coherency remapping (target side)
-_COHERENCY_DST_FIELDS = frozenset({'scope', 'th'})
+_COHERENCY_DST_FIELDS = frozenset({'scope', 'th', 'glc', 'dlc', 'slc'})
 
 # ---------------------------------------------------------------------------
 # Field classification
@@ -190,6 +190,8 @@ class EncodingTranslation:
     mappings: list[FieldMapping] = field(default_factory=list)
     has_coherency_remap: bool = False
     has_glc_remap: bool = False
+    has_gfx11_coherency_remap: bool = False
+    has_gfx11_glc_remap: bool = False
     src_dt_index: int = 0       # primary decode table index (for dispatch)
     src_enc_field_bit_cnt: int = 9  # encoding field width in bits
     dst_enc_field_val: int = 0  # actual encoding bitfield value (for dst.encoding)
@@ -530,10 +532,19 @@ def _emit_encode_fn(trans, dst_ns, dst_name):
         lines.append(f'    auto coh = remap_gfx940_to_gfx12({{uint8_t(f.sc0), uint8_t(f.sc1), uint8_t(f.nt)}});')
         lines.append(f'    dst.scope = coh.scope;')
         lines.append(f'    dst.th = coh.th;')
+    elif trans.has_gfx11_coherency_remap:
+        lines.append(f'    auto coh = remap_gfx940_to_gfx11({{uint8_t(f.sc0), uint8_t(f.sc1), uint8_t(f.nt)}});')
+        lines.append(f'    dst.glc = coh.glc;')
+        lines.append(f'    dst.dlc = coh.dlc;')
+        lines.append(f'    dst.slc = coh.slc;')
     elif trans.has_glc_remap:
         lines.append(f'    auto coh = remap_gfx9_to_gfx12({{uint8_t(f.glc)}});')
         lines.append(f'    dst.scope = coh.scope;')
         lines.append(f'    dst.th = coh.th;')
+    elif trans.has_gfx11_glc_remap:
+        lines.append(f'    auto coh = remap_gfx9_to_gfx11({{uint8_t(f.glc)}});')
+        lines.append(f'    dst.glc = coh.glc;')
+        lines.append(f'    dst.dlc = coh.dlc;')
 
     # Pack fields from the neutral struct into the target. Every assignment is
     # masked to the destination width so generated encoders stay correct when a
@@ -715,12 +726,15 @@ def generate_encoding_translators(src_spec, dst_spec, src_name, dst_name, output
             skipped.append(de); continue
         src_enc = src_spec.encoding_map[se]
         dst_enc = dst_spec.encoding_map[de]
-        # The coherency remap targets GFX12-style scope/th fields. If the
-        # destination encoding lacks those fields (e.g. RDNA3 SMEM with
-        # glc/dlc), suppress the remap so the regular field-by-field copy
-        # path handles glc/dlc directly.
+        # Pick the coherency remap matching the target ISA's field model.
+        # RDNA4 uses scope/th. RDNA3 vector memory uses GLC/SLC as scope bits
+        # plus DLC as the non-temporal hint; RDNA3 SMEM has only GLC/DLC.
         dst_field_names = {f.name for f in dst_enc.ucode_fields}
         dst_has_scope_th = ('scope' in dst_field_names and 'th' in dst_field_names)
+        dst_has_gfx11_vector_flags = (
+            'glc' in dst_field_names and 'dlc' in dst_field_names and 'slc' in dst_field_names)
+        dst_has_gfx11_glc_flags = (
+            'glc' in dst_field_names and 'dlc' in dst_field_names)
         translations.append(EncodingTranslation(
             src_enc_name=se, dst_enc_name=de,
             src_struct=_struct_name(se), dst_struct=_struct_name(de),
@@ -728,6 +742,10 @@ def generate_encoding_translators(src_spec, dst_spec, src_name, dst_name, output
             mappings=_classify_fields(src_enc, dst_enc, se),
             has_coherency_remap=(se in _COHERENCY_REMAP_ENCODINGS) and dst_has_scope_th,
             has_glc_remap=(se in _GLC_REMAP_ENCODINGS) and dst_has_scope_th,
+            has_gfx11_coherency_remap=(
+                (se in _COHERENCY_REMAP_ENCODINGS) and dst_has_gfx11_vector_flags),
+            has_gfx11_glc_remap=(
+                (se in _GLC_REMAP_ENCODINGS) and dst_has_gfx11_glc_flags),
             src_dt_index=src_dts.get(se, 0),
             src_enc_field_bit_cnt=src_enc.enc_field_bit_cnt,
             dst_enc_field_val=dst_evs.get(de, 0),

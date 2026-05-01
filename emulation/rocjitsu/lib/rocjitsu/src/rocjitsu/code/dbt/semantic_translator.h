@@ -50,6 +50,9 @@ struct WaitcntValues {
 /// @brief Decode a GFX9 s_waitcnt simm16 field into individual counter values.
 [[nodiscard]] WaitcntValues decode_waitcnt_gfx9(uint16_t simm16);
 
+/// @brief Encode wait-counter values as a GFX11 s_waitcnt simm16 field.
+[[nodiscard]] uint16_t encode_waitcnt_gfx11_simm16(const WaitcntValues &vals);
+
 /// @brief Encode wait-counter values as GFX12 split s_wait_* instruction words.
 [[nodiscard]] std::vector<uint32_t> encode_waitcnt_gfx12(const WaitcntValues &vals);
 
