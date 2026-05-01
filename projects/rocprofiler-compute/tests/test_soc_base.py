@@ -16,9 +16,9 @@ from rocprof_compute_soc.soc_base import (
     CounterFile,
     LimitedSet,
     OmniSoC_Base,
-    _flat_counters_in_perfmon_file,
     _rebuild_tcc_channel_file_map,
     _trial_counter_file_with_extra,
+    flat_counters_in_perfmon_file,
 )
 
 # =============================================================================
@@ -126,20 +126,20 @@ def test_counter_file_add_and_block_mapping(perfmon_config):
 
 
 # =============================================================================
-# C. _flat_counters_in_perfmon_file
+# C. flat_counters_in_perfmon_file
 # =============================================================================
 
 
 def test_flat_counters_in_perfmon_file(perfmon_config):
     # Empty file returns empty list
     cf = CounterFile("0", perfmon_config)
-    assert _flat_counters_in_perfmon_file(cf) == []
+    assert flat_counters_in_perfmon_file(cf) == []
 
     # Add counters across blocks and verify flattened order
     cf.add("SQ_WAVES")
     cf.add("TA_ADDR")
     cf.add("TCP_READ")
-    result = _flat_counters_in_perfmon_file(cf)
+    result = flat_counters_in_perfmon_file(cf)
     assert "SQ_WAVES" in result
     assert "TA_ADDR" in result
     assert "TCP_READ" in result
@@ -159,11 +159,11 @@ def test_trial_counter_file_with_extra_fits(perfmon_config):
     extras = ["TCP_READ", "TCC_HIT[0]"]
     trial = _trial_counter_file_with_extra(basis, perfmon_config, extras)
     assert trial is not None
-    flat = _flat_counters_in_perfmon_file(trial)
+    flat = flat_counters_in_perfmon_file(trial)
     assert set(flat) == {"SQ_WAVES", "TA_ADDR", "TCP_READ", "TCC_HIT[0]"}
 
     # Original basis is unchanged
-    assert set(_flat_counters_in_perfmon_file(basis)) == {"SQ_WAVES", "TA_ADDR"}
+    assert set(flat_counters_in_perfmon_file(basis)) == {"SQ_WAVES", "TA_ADDR"}
 
 
 def test_trial_counter_file_with_extra_overflow(perfmon_config):
@@ -218,14 +218,14 @@ def test_allocate_level_counters_get_dedicated_files(perfmon_config):
     assert accu_count == 2
 
     for lf in level_files:
-        flat = set(_flat_counters_in_perfmon_file(lf))
+        flat = set(flat_counters_in_perfmon_file(lf))
         # Each LEVEL file has the counter + its _ACCUM pair
         assert any(n.endswith("_ACCUM") for n in flat)
 
     # TA_ADDR placed somewhere (first-fit into a LEVEL file or its own)
     all_ctrs = set()
     for f in files:
-        all_ctrs.update(_flat_counters_in_perfmon_file(f))
+        all_ctrs.update(flat_counters_in_perfmon_file(f))
     assert "TA_ADDR" in all_ctrs
 
 
@@ -240,7 +240,7 @@ def test_allocate_first_fit_packing(perfmon_config):
     assert accu_count == 0
     assert len(files) == 1
     assert file_count == 1
-    flat = set(_flat_counters_in_perfmon_file(files[0]))
+    flat = set(flat_counters_in_perfmon_file(files[0]))
     assert flat == counters
 
 
@@ -255,12 +255,12 @@ def test_allocate_tcc_channel_coalescing(perfmon_config):
     # All TCC_HIT channels should be in the same file
     tcc_file = None
     for f in files:
-        flat = _flat_counters_in_perfmon_file(f)
+        flat = flat_counters_in_perfmon_file(f)
         if any("TCC_HIT" in c for c in flat):
             tcc_file = f
             break
     assert tcc_file is not None
-    tcc_ctrs = [c for c in _flat_counters_in_perfmon_file(tcc_file) if "TCC_HIT" in c]
+    tcc_ctrs = [c for c in flat_counters_in_perfmon_file(tcc_file) if "TCC_HIT" in c]
     assert set(tcc_ctrs) == {"TCC_HIT[0]", "TCC_HIT[1]", "TCC_HIT[2]"}
 
 
