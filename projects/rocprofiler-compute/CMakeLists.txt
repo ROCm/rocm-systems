@@ -253,6 +253,13 @@ option(
     OFF
 )
 
+# -------------------
+# Setup tool library
+# -------------------
+if(NOT SKIP_NATIVE_TOOL_BUILD)
+    add_subdirectory(src/lib)
+endif()
+
 # ---------------------------
 # Profile mode import guard
 # ---------------------------
@@ -669,6 +676,17 @@ add_test(
         ${WORKING_DIR_OPTION}
 )
 
+if(TARGET test-rocprofiler-compute-tool)
+    if(TEST_FROM_INSTALL)
+        set(_tool_test_cmd
+            "${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}/tests/test-rocprofiler-compute-tool"
+        )
+    else()
+        set(_tool_test_cmd $<TARGET_FILE:test-rocprofiler-compute-tool>)
+    endif()
+    add_test(NAME test-rocprofiler-compute-tool COMMAND ${_tool_test_cmd})
+endif()
+
 # -----------------------------------
 # Generate coverage tests
 # -----------------------------------
@@ -736,13 +754,6 @@ if(COMMAND apply_ctest_category_labels)
     endif()
 else()
     message(STATUS "Test categorization not available (TestCategories.cmake not found)")
-endif()
-
-# -------------------
-# Setup tool library
-# -------------------
-if(NOT SKIP_NATIVE_TOOL_BUILD)
-    add_subdirectory(src/lib)
 endif()
 
 # ---------

@@ -26,6 +26,8 @@ test_categories:
       - test_autogen_config
       - test_import_guard
       - test_mem_chart
+      - test_native_tool_finder
+      - test-rocprofiler-compute-tool
     exclude:
       - test_profile_live_attach_detach
     labels:
@@ -67,6 +69,8 @@ test_categories:
       - test_utils_profile_csv
       - test_profiler_base
       - test_mem_chart
+      - test_native_tool_finder
+      - test-rocprofiler-compute-tool
     exclude:
       - test_profile_live_attach_detach
     labels:
@@ -111,6 +115,8 @@ test_categories:
       - test_utils_profile_csv
       - test_profiler_base
       - test_mem_chart
+      - test_native_tool_finder
+      - test-rocprofiler-compute-tool
     exclude:
       - test_profile_live_attach_detach
     labels:
@@ -155,6 +161,8 @@ test_categories:
       - test_utils_profile_csv
       - test_profiler_base
       - test_mem_chart
+      - test_native_tool_finder
+      - test-rocprofiler-compute-tool
     exclude:
       - test_profile_live_attach_detach
     labels:
