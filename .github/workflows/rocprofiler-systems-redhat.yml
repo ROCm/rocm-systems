@@ -232,7 +232,23 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os-release: ['8.10', '9']
+        include:
+          - os-release: '8.10'
+            compiler: 'g++'
+            cc: 'gcc'
+            use-clang-omp: 'OFF'
+          - os-release: '8.10'
+            compiler: 'amdclang++'
+            cc: 'amdclang'
+            use-clang-omp: 'ON'
+          - os-release: '9'
+            compiler: 'g++'
+            cc: 'gcc'
+            use-clang-omp: 'OFF'
+          - os-release: '9'
+            compiler: 'amdclang++'
+            cc: 'amdclang'
+            use-clang-omp: 'ON'
 
     env:
       ROCPROFSYS_CI: ON
@@ -253,8 +269,8 @@ jobs:
       shell: bash
       working-directory: projects/rocprofiler-systems/
       run:
-        echo "CC=$(echo 'g++' | sed 's/+/c/g')" >> $GITHUB_ENV &&
-        echo "CXX=g++" >> $GITHUB_ENV &&
+        echo "CC=${{ matrix.cc }}" >> $GITHUB_ENV &&
+        echo "CXX=${{ matrix.compiler }}" >> $GITHUB_ENV &&
         echo "OS_VERSION_MAJOR=$(cat /etc/os-release | grep 'VERSION_ID' | sed 's/=/ /1' | awk '{print $NF}' | sed 's/"//g' | sed 's/\./ /g' | awk '{print $1}')" >> $GITHUB_ENV &&
         env
 
@@ -277,7 +293,7 @@ jobs:
         max_attempts: 5
         shell: bash
         command: |
-          dnf install -y dyninst-devel binutils-devel dyninst-static
+          dnf install -y boost-devel tbb-devel elfutils-devel libdwarf-devel elfutils-libelf-devel binutils-devel
           dnf clean all
 
     - name: Install Python Test Dependencies
@@ -317,6 +333,12 @@ jobs:
           dnf install -y rocm-dev
           if [ "${OS_VERSION_MAJOR}" -gt 8 ]; then dnf install -y libavcodec-free-devel libavformat-free-devel; fi
 
+    - name: Put ROCm compilers on PATH
+      shell: bash
+      run: |
+        echo "/opt/rocm/bin" >> "${GITHUB_PATH}"
+        echo "/opt/rocm/llvm/bin" >> "${GITHUB_PATH}"
+
     - name: Configure, Build, and Test with System Dependencies
       timeout-minutes: 115
       shell: bash
@@ -325,21 +347,25 @@ jobs:
         git config --global --add safe.directory ${GITHUB_WORKSPACE}
         git config --global --add safe.directory ${PWD}
         echo "CMake version: $(cmake --version | head -n 1)"
-        echo "Compiler version: $(g++ --version | head -n 1)"
+        echo "Compiler version: $(${{ matrix.compiler }} --version | head -n 1)"
         echo "ROCm version: 7.2"
-        echo "Testing build with SYSTEM Dyninst/binutils (default ROCPROFSYS_BUILD_{DYNINST,TBB,ELFUTILS,LIBIBERTY}=OFF)"
+        echo "Testing build with SYSTEM dependencies (ROCPROFSYS_BUILD_{TBB,ELFUTILS,LIBIBERTY}=OFF; Dyninst from source)"
         python3 ./scripts/run-ci.py -B build \
-          --name ${{ github.repository_owner }}-${{ github.ref_name }}-rhel-${{ matrix.os-release }}-system-deps-g++ \
+          --name ${{ github.repository_owner }}-${{ github.ref_name }}-rhel-${{ matrix.os-release }}-system-deps-${{ matrix.compiler }} \
           --build-jobs $(nproc) \
           --site GitHub \
           -- \
-          -DCMAKE_C_COMPILER=gcc \
-          -DCMAKE_CXX_COMPILER=g++ \
+          -DCMAKE_C_COMPILER=${{ matrix.cc }} \
+          -DCMAKE_CXX_COMPILER=${{ matrix.compiler }} \
           -DCMAKE_BUILD_TYPE=Release \
           -DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems-dev \
           -DROCPROFSYS_BUILD_TESTING=ON \
           -DROCPROFSYS_USE_PYTHON=ON \
           -DROCPROFSYS_USE_MPI_HEADERS=OFF \
+          -DROCPROFSYS_BUILD_DYNINST=ON \
+          -DROCPROFSYS_BUILD_TBB=OFF \
+          -DROCPROFSYS_BUILD_ELFUTILS=OFF \
+          -DROCPROFSYS_BUILD_LIBIBERTY=OFF \
           -DROCPROFSYS_BUILD_HIDDEN_VISIBILITY=ON \
           -DROCPROFSYS_PYTHON_PREFIX=/opt/conda/envs \
           -DROCPROFSYS_PYTHON_ENVS="py3.8;py3.9;py3.10;py3.11;py3.12;py3.13" \
@@ -347,6 +373,7 @@ jobs:
           -DROCPROFSYS_MAX_THREADS=64 \
           -DROCPROFSYS_DISABLE_EXAMPLES="transpose;rccl;openmp-target;openmp-vv;videodecode;jpegdecode;network" \
           -DROCPROFSYS_BUILD_NUMBER=${{ github.run_attempt }} \
+          -DUSE_CLANG_OMP=${{ matrix.use-clang-omp }} \
           -- \
           -LE "network|gpu"
 
