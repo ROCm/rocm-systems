@@ -69,9 +69,11 @@ struct SemanticReplacement {
 
 /// @brief Semantic translator for cross-ISA behavioral differences.
 ///
-/// @details All expansion rules (waitcnt, MFMA→WMMA, AccVGPR, etc.) are
+/// @details Most expansion rules (waitcnt, MFMA→WMMA, AccVGPR, etc.) are
 /// registered as TranslationRule entries with RuleAction::Expand. The
-/// try_lower_expand() method looks up rules by opcode via binary search.
+/// try_lower_expand() method looks up rules by opcode via binary search, with
+/// targeted fallbacks for generated legalization buckets that share one
+/// mnemonic-level lowering.
 class SemanticTranslator {
 public:
   SemanticTranslator(rj_code_arch_t guest_arch, rj_code_arch_t host_arch);
@@ -88,6 +90,7 @@ public:
 
 private:
   std::span<const TranslationRule> expand_rules_; ///< Sorted by src_opcode.
+  rj_code_arch_t guest_arch_;
   rj_code_arch_t host_arch_;
 };
 

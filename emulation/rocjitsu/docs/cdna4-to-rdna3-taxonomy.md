@@ -80,8 +80,8 @@ Bucket notes:
   marks it `Lower`, but the CDNA4-to-RDNA3 semantic table handles it before the
   encoding path by decoding the CDNA4 GFX9-layout counters and re-encoding a
   same-size RDNA3 GFX11-layout `s_waitcnt`.
-- `v_lshl_add_u64` is counted in size-expanding rewrite. It is currently the
-  only CDNA4-to-RDNA3 size-expanding arithmetic rule wired in the semantic
+- `v_lshl_add_u64` is counted in size-expanding rewrite. It remains the
+  CDNA4-to-RDNA3 size-expanding arithmetic rule wired in the semantic
   translator.
 - The complex matrix/AccVGPR bucket is all `Action::Expand`: 66
   `VOP3P_MFMA` rows, `v_accvgpr_mov_b32_e32`, `v_accvgpr_mov_b32`,
@@ -125,12 +125,13 @@ translator return no translation. Expansion or explicit diagnostic policy for
 those residuals belongs with the existing simple-expand, AccVGPR/MFMA, and
 unsupported-diagnostics follow-up work rather than this same-size memory audit.
 
-Two CDNA4-to-RDNA3 semantic rules are wired:
+Three CDNA4-to-RDNA3 semantic rule classes are wired:
 
 | Source row | Bucket | Current behavior |
 | --- | --- | --- |
 | `SOPP:s_waitcnt` | Same-size semantic rewrite | Converts the GFX9-layout CDNA4 waitcnt immediate to the RDNA3 GFX11 immediate layout in place. |
 | `VOP3:v_lshl_add_u64` | Size-expanding rewrite | Emits `v_add_co_u32` and `v_add_co_ci_u32`. The RDNA3 path deliberately skips the RDNA4-only `s_wait_alu`. |
+| `VOPC/VOP3:v_cmp_f/t/tru_*`, `v_cmpx_f/t/tru_*` rows whose generated legalization action is `Expand` | Size-expanding or same-size semantic rewrite | Emits scalar mask moves for the removed constant predicates: false writes zero, true copies `exec`, and false `cmpx` also clears `exec`. |
 
 Unhandled `Action::Expand` rows warn and NOP-fill in `BinaryTranslator`.
 Unhandled encoding families whose `Action` is not Expand can fall back to

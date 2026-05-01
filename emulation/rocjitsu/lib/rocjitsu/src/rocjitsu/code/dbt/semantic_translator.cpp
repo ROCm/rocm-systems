@@ -7,6 +7,7 @@
 #include "rocjitsu/code/dbt/semantic_translator.h"
 
 #include "rocjitsu/code/basic_block.h"
+#include "rocjitsu/code/dbt/generated/legalization_cdna4_to_rdna3.h"
 #include "rocjitsu/code/dbt/hazard_tracker.h"
 #include "rocjitsu/code/patch/instruction_builder.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna4/machine_insts.h"
@@ -129,6 +130,10 @@ build_vop3(uint16_t op, uint8_t vdst, uint16_t src0, uint16_t src1 = 0, uint16_t
   return std::bit_cast<uint32_t>(s);
 }
 
+constexpr uint8_t kVccLo = 106;
+constexpr uint8_t kExecLo = 126;
+constexpr uint16_t kInlineConst0 = 128;
+
 /// @brief Build s_mov_b32 sdst, literal (two-word instruction).
 [[nodiscard]] constexpr std::pair<uint32_t, uint32_t> build_s_mov_b32_lit(uint8_t sdst,
                                                                           uint32_t literal) {
@@ -153,6 +158,34 @@ build_vop3(uint16_t op, uint8_t vdst, uint16_t src0, uint16_t src1 = 0, uint16_t
   return (0x3Fu << 25) | (static_cast<uint32_t>(vdst) << 17) | (1u << 9) | (src0 & 0x1FF);
 }
 
+[[nodiscard]] bool starts_with(std::string_view text, std::string_view prefix) {
+  return text.size() >= prefix.size() && text.substr(0, prefix.size()) == prefix;
+}
+
+[[nodiscard]] bool ends_with(std::string_view text, std::string_view suffix) {
+  return text.size() >= suffix.size() && text.substr(text.size() - suffix.size()) == suffix;
+}
+
+enum class RemovedCompareKind : uint8_t {
+  None,
+  FalseMask,
+  TrueMask,
+  CmpxFalseMask,
+  CmpxTrueMask,
+};
+
+[[nodiscard]] RemovedCompareKind classify_removed_compare(std::string_view mnemonic) {
+  if (starts_with(mnemonic, "v_cmpx_f_"))
+    return RemovedCompareKind::CmpxFalseMask;
+  if (starts_with(mnemonic, "v_cmpx_t_") || starts_with(mnemonic, "v_cmpx_tru_"))
+    return RemovedCompareKind::CmpxTrueMask;
+  if (starts_with(mnemonic, "v_cmp_f_"))
+    return RemovedCompareKind::FalseMask;
+  if (starts_with(mnemonic, "v_cmp_t_") || starts_with(mnemonic, "v_cmp_tru_"))
+    return RemovedCompareKind::TrueMask;
+  return RemovedCompareKind::None;
+}
+
 // ---------------------------------------------------------------------------
 // Instruction lowering functions
 // ---------------------------------------------------------------------------
@@ -168,7 +201,6 @@ std::vector<uint32_t> lower_v_lshl_add_u64(const Instruction &inst, rj_code_arch
   const uint16_t src0 = src.src0;
   const uint16_t src2 = src.src2;
 
-  constexpr uint16_t kVccLo = 106;
   constexpr uint16_t kOpAddCoU32 = 768;
   constexpr uint16_t kOpAddCoCiU32 = 288;
   constexpr uint8_t kSoppWaitAlu = 8;
@@ -202,6 +234,50 @@ std::vector<uint32_t> lower_v_lshl_add_u64(const Instruction &inst, rj_code_arch
     words.push_back(w1);
   }
 
+  return words;
+}
+
+std::vector<uint32_t> lower_removed_compare_predicate(const Instruction &inst) {
+  const auto *legalization =
+      lookup(kLegalization_cdna4_to_rdna3, inst.encoding_id(), inst.opcode());
+  if (!legalization || legalization->action != Action::Expand)
+    return {};
+
+  const std::string_view mnemonic(inst.mnemonic());
+  const RemovedCompareKind kind = classify_removed_compare(mnemonic);
+  if (kind == RemovedCompareKind::None)
+    return {};
+
+  const auto *raw = inst.raw_encoding();
+  if (!raw)
+    return {};
+
+  uint8_t dest = kVccLo;
+  if (!ends_with(mnemonic, "_e32")) {
+    if (inst.size() < 8)
+      return {};
+    cdna4::Vop3MachineInst src{};
+    std::memcpy(&src, raw, sizeof(src));
+    dest = src.vdst;
+  }
+
+  std::vector<uint32_t> words;
+  switch (kind) {
+  case RemovedCompareKind::FalseMask:
+    words.push_back(build_s_mov_b64(dest, kInlineConst0));
+    break;
+  case RemovedCompareKind::CmpxFalseMask:
+    words.push_back(build_s_mov_b64(dest, kInlineConst0));
+    if (dest != kExecLo)
+      words.push_back(build_s_mov_b64(kExecLo, kInlineConst0));
+    break;
+  case RemovedCompareKind::TrueMask:
+  case RemovedCompareKind::CmpxTrueMask:
+    words.push_back(build_s_mov_b64(dest, kExecLo));
+    break;
+  case RemovedCompareKind::None:
+    break;
+  }
   return words;
 }
 
@@ -239,8 +315,6 @@ constexpr uint8_t kOpWaitDscnt = 70;
 // RDNA4 operand encoding constants
 // ---------------------------------------------------------------------------
 
-constexpr uint8_t kExecLo = 126;
-constexpr uint16_t kInlineConst0 = 128;
 constexpr uint16_t kInlineConst2 = 130;
 constexpr uint16_t kInlineConstNeg1 = 193;
 
@@ -460,11 +534,13 @@ const TranslationRule kExpandRules_cdna4_to_rdna4[] = {
 // the FLAT family, FLAT_LOAD_/FLAT_STORE_ DWORD->B32 in the rename map,
 // target_opcode preserved through domain-rule overrides), the auto-generated
 // encoding translator handles the FLAT_GLBL family at the encoding level.
-// Two genuine Expand cases remain:
+// Explicitly table-driven Expand cases:
 //   - s_waitcnt: simm16 counter-bit layout differs between GFX9 and GFX11,
 //     so an opcode swap alone is not enough.
 //   - v_lshl_add_u64: no carry-propagating fused 64-bit add on RDNA3, expands
 //     to v_add_co_u32 + v_add_co_ci_u32.
+// Removed constant compare predicates are guarded by the generated
+// legalization table and handled by lower_removed_compare_predicate().
 // Rule table must stay sorted by (src_encoding_id, src_opcode).
 const TranslationRule kExpandRules_cdna4_to_rdna3[] = {
     {kEncSopp, kCdna4Op_s_waitcnt, RuleAction::Expand, 0, 0, nullptr, expand_waitcnt_gfx9_to_gfx11,
@@ -480,7 +556,7 @@ const TranslationRule kExpandRules_cdna4_to_rdna3[] = {
 // ---------------------------------------------------------------------------
 
 SemanticTranslator::SemanticTranslator(rj_code_arch_t guest, rj_code_arch_t host)
-    : host_arch_(host) {
+    : guest_arch_(guest), host_arch_(host) {
   if (guest == ROCJITSU_CODE_ARCH_CDNA4 && host == ROCJITSU_CODE_ARCH_RDNA4)
     expand_rules_ = kExpandRules_cdna4_to_rdna4;
   else if (guest == ROCJITSU_CODE_ARCH_CDNA4 && host == ROCJITSU_CODE_ARCH_RDNA3)
@@ -497,6 +573,8 @@ std::vector<uint32_t> SemanticTranslator::try_lower_expand(const Instruction &in
       it->expand_fn)
     return it->expand_fn(inst, static_cast<uint32_t>(host_arch_), offset, liveness,
                          it->guest_layout, it->host_layout);
+  if (guest_arch_ == ROCJITSU_CODE_ARCH_CDNA4 && host_arch_ == ROCJITSU_CODE_ARCH_RDNA3)
+    return lower_removed_compare_predicate(inst);
   return {};
 }
 

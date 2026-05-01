@@ -164,9 +164,6 @@ void write_words_with_nop_padding(std::vector<uint8_t> &text, uint64_t offset,
     std::memcpy(text.data() + offset + off, &nop, sizeof(nop));
 }
 
-// The DBT keeps all original instruction offsets stable. Expansions are placed
-// in the trailing source NOP padding, so this returns the first byte of that
-// padding by scanning backward to the last real source instruction.
 uint64_t find_trailing_nop_cave_start(std::span<const uint8_t> text, rj_code_arch_t guest_arch) {
   const uint32_t nop = build_s_nop(0, guest_arch);
   uint64_t code_end = text.size();
@@ -292,6 +289,8 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
 
   std::vector<uint8_t> translated_text(text.begin(), text.end());
 
+  // Place expansion caves in trailing source NOP padding, after the last
+  // non-NOP instruction in .text. No source instruction offset is shifted.
   patcher.set_cave_start(find_trailing_nop_cave_start(text, guest_arch_));
 
   std::unordered_set<const BasicBlock *> translated_blocks;
@@ -430,8 +429,6 @@ bool BinaryTranslator::apply_semantic(const SemanticReplacement &repl, std::vect
     return true;
   }
 
-  // Larger replacements use an in-place branch stub and a cave body. This keeps
-  // existing branch offsets, metadata offsets, and basic-block starts valid.
   if (source_size < kDwordBytes)
     return fail("source range is too small for a branch stub at .text+" +
                 hex_u64(repl.start_offset));
@@ -462,7 +459,7 @@ bool BinaryTranslator::apply_semantic(const SemanticReplacement &repl, std::vect
   const uint64_t stub_next = repl.end_offset;
   const uint64_t branch_pc = repl.start_offset;
 
-  // s_branch simm16 is relative to the next dword: PC + 4 + simm16*4.
+  // s_branch simm16 targets (PC + 4 + simm16*4).
   if (branch_pc > std::numeric_limits<uint64_t>::max() - kDwordBytes)
     return fail("forward branch source offset overflow");
   int64_t fwd_bytes = 0;
@@ -485,8 +482,6 @@ bool BinaryTranslator::apply_semantic(const SemanticReplacement &repl, std::vect
   }
 
   auto cave_words = repl.target_words;
-  // The cave body ends with a return branch to the first source instruction
-  // after the replaced range.
   int64_t ret_bytes = 0;
   if (!signed_byte_delta(stub_next, cave_end, ret_bytes))
     return fail("return branch byte delta overflow");
