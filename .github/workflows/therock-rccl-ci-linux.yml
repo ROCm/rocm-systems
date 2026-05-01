@@ -33,14 +33,14 @@ jobs:
       - name: "Checking out repository for rocm-systems"
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
-          ref: c76140fa277895b3886cf1780a36fe504a1aac3a # 1233 build 
+          ref: 1c488dc360cde892ff6894e342c77b420eed275f # 1334 build 
 
       - name: Checkout TheRock repository
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           repository: "ROCm/TheRock"
           path: "TheRock"
-          ref: f61cabb02d4a4cfb4315dc63095ef7799f4138c8 # 2026-04-11 commit
+          ref: 314e547d398958f933fc9326a9d98ab13e247845 # 2026-04-30 commit
 
       - name: Install python deps
         run: |
