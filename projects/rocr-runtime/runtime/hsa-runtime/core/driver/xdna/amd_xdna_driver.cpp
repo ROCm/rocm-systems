@@ -927,15 +927,15 @@ hsa_status_t XdnaDriver::SubmitCmdChain(hsa_queue_t& q, HSA_QUEUEID& queue_id,
 
     auto* cmd = static_cast<ert_start_kernel_cmd*>(cmd_bo_handle.vaddr);
     memset(cmd, 0, cmd_bytesize);
-    cmd->state = ERT_START_CU;
+    cmd->state = ERT_CMD_STATE_NEW;
     cmd->extra_cu_masks = 0;
     // The driver places a structure before each command in a command chain.
     // Need to increase the size of the command by the size of this structure.
     cmd->count = cmd_dwords + CMD_COUNT_SIZE_INCREASE;
-    cmd->opcode = pkt->opcode;
+    cmd->opcode = pkt->opcode;               // HSA_AMD_AIE_PACKET_OPCODE_KMQ == ERT_START_CU == 0x0
     cmd->data[0] = 0x1 << cached_pdi_index;  // CU mask bit
     cmd->data[1] = 0x3;                      // txn opcode
-    cmd->data[2] = 0x0;
+    cmd->data[2] = 0x0;                      // txn opcode
     cmd->data[3] = (DEV_ADDR_BASE |
                     (reinterpret_cast<uintptr_t>(insts_addr) &
                      DEV_ADDR_OFFSET_MASK));              // instruction sequence address (lo)
