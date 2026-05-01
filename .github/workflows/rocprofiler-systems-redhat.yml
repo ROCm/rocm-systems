@@ -233,14 +233,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os-release: '8.10'
-            compiler: 'g++'
-            cc: 'gcc'
-            use-clang-omp: 'OFF'
-          - os-release: '8.10'
-            compiler: 'amdclang++'
-            cc: 'amdclang'
-            use-clang-omp: 'ON'
+          # RHEL 8.10 omitted (TBB version > 2019.9 is not met on RHEL 8).
           - os-release: '9'
             compiler: 'g++'
             cc: 'gcc'

@@ -12,6 +12,11 @@
 #define PACKAGE     "rocprofiler-systems"
 #define L_LNNO_SIZE 4
 
+// Include-order issue: bfd.h / elf-bfd.h pull in Binutils' ELF headers before libdw.h →
+// gelf.h, so Elf64_Relr (defined in the glibc elf.h) isn't visible. Including the system
+// <elf.h> before BFD headers fixes it.
+#include <elf.h>
+
 #include <bfd.h>
 #include <coff/external.h>
 #include <coff/internal.h>
