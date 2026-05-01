@@ -41,10 +41,6 @@ class GDAContext : public Context {
 
   __device__ GDAContext(Backend *b, unsigned int ctx_id); //TODO is this used?
 
-  __device__ void ctx_create();
-
-  __device__ void ctx_destroy();
-
   __device__ void putmem(void *dest, const void *source, size_t nelems, int pe);
 
   __device__ void getmem(void *dest, const void *source, size_t nelems, int pe);
@@ -60,6 +56,8 @@ class GDAContext : public Context {
   __device__ void fence(int pe);
 
   __device__ void quiet();
+
+  __device__ void pe_quiet(size_t pe);
 
   __device__ void *shmem_ptr(const void *dest, int pe);
 

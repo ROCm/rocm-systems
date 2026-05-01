@@ -1,24 +1,5 @@
-// MIT License
-//
-// Copyright (c) 2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 #include "core/trace_cache/cache_type_traits.hpp"
@@ -125,10 +106,10 @@ store_value(const Type& value, uint8_t* buffer, size_t& position)
                  type_traits::is_vector_v<DecayedType> ||
                  type_traits::is_span_v<DecayedType>)
     {
-        const size_t total_size          = get_size(value);
-        const size_t header_size         = sizeof(size_t);
-        const size_t data_size           = total_size - header_size;
-        *reinterpret_cast<size_t*>(dest) = data_size;
+        const size_t total_size  = get_size(value);
+        const size_t header_size = sizeof(size_t);
+        const size_t data_size   = total_size - header_size;
+        std::memcpy(dest, &data_size, sizeof(size_t));
         std::memcpy(dest + sizeof(size_t), value.data(), data_size);
         position += total_size;
     }
@@ -145,7 +126,7 @@ store_value(const Type& value, uint8_t* buffer, size_t& position)
     }
     else
     {
-        *reinterpret_cast<DecayedType*>(dest) = value;
+        std::memcpy(dest, &value, sizeof(DecayedType));
         position += sizeof(DecayedType);
     }
 }
@@ -168,7 +149,8 @@ parse_value(uint8_t*& data_pos, Type& arg)
 
     if constexpr(type_traits::is_string_view_v<DecayedType>)
     {
-        const size_t string_size = *reinterpret_cast<const size_t*>(data_pos);
+        size_t string_size = 0;
+        std::memcpy(&string_size, data_pos, sizeof(size_t));
         data_pos += sizeof(size_t);
         arg = std::string_view{ reinterpret_cast<const char*>(data_pos), string_size };
         data_pos += string_size;
@@ -177,12 +159,19 @@ parse_value(uint8_t*& data_pos, Type& arg)
                       type_traits::is_span_v<DecayedType>)
     {
         using ContainerType     = std::decay_t<decltype(arg)>;
-        const size_t item_size  = sizeof(typename ContainerType::value_type);
-        const size_t total_size = *reinterpret_cast<const size_t*>(data_pos);
+        using ItemType          = typename ContainerType::value_type;
+        const size_t item_size  = sizeof(ItemType);
+        size_t       total_size = 0;
+        std::memcpy(&total_size, data_pos, sizeof(size_t));
         data_pos += sizeof(size_t);
-        arg.reserve(total_size / item_size);
-        std::copy_n(reinterpret_cast<const typename ContainerType::value_type*>(data_pos),
-                    total_size / item_size, std::back_inserter(arg));
+        const size_t item_count = total_size / item_size;
+        arg.reserve(item_count);
+        for(size_t i = 0; i < item_count; ++i)
+        {
+            ItemType item;
+            std::memcpy(&item, data_pos + i * item_size, item_size);
+            arg.push_back(std::move(item));
+        }
         data_pos += total_size;
     }
     else if constexpr(type_traits::is_optional_v<DecayedType>)
@@ -202,7 +191,7 @@ parse_value(uint8_t*& data_pos, Type& arg)
     }
     else
     {
-        arg = *reinterpret_cast<const DecayedType*>(data_pos);
+        std::memcpy(&arg, data_pos, sizeof(DecayedType));
         data_pos += sizeof(DecayedType);
     }
 }

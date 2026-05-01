@@ -15,7 +15,7 @@ from dash.dependencies import Input, Output, State
 
 from config import HIDDEN_COLUMNS, PROJECT_NAME
 from rocprof_compute_analyze.analysis_base import OmniAnalyze_Base
-from roofline import Roofline
+from roofline.roofline_main import Roofline
 from utils import file_io, parser, schema
 from utils.gui import build_bar_chart, build_table_chart
 from utils.gui_components.memchart import get_memchart

@@ -157,7 +157,7 @@ static inline int ncclFuncTrafficPerByte(ncclFunc_t func, int nRanks) {
   case ncclFuncAllReduce: return 2;
   case ncclFuncAllGather: return nRanks;
   case ncclFuncReduceScatter: return nRanks;
-  case ncclFuncAlltoAllvGda: return nRanks;			      
+  case ncclFuncAlltoAllvGda: return nRanks;
   default: return 1;
   }
 }
@@ -244,8 +244,8 @@ static void addWorkBatchToPlan(
   batch->offsetBitset |= 1ull<<(offset/workSize);
   chan->wipBatch.workBytes += workSize;
   if (workType == ncclDevWorkTypeP2p) {
-    //if batching is enabled (RCCL_P2P_BATCH_ENABLE=1), 
-    //but this op is not eligible for batching with other ops (i.e. alltoallv where sendBytes != recvBytes), 
+    //if batching is enabled (RCCL_P2P_BATCH_ENABLE=1),
+    //but this op is not eligible for batching with other ops (i.e. alltoallv where sendBytes != recvBytes),
     // mark eligibility/ineligibility so that future ops that may be eligible, are not batched with ineligible ones
     if(chan->wipBatch.nP2ps == 0)
       chan->wipBatch.batchP2P = batchP2P;
@@ -271,6 +271,7 @@ static void finishPlan(struct ncclComm* comm, struct ncclKernelPlan* plan) {
   }
   plan->kernelArgsSize = sizeof(struct ncclDevKernelArgs) + batchBytes;
   plan->kernelArgsSize += (plan->workStorageType == ncclDevWorkStorageTypeArgs) ? workBytes : 0;
+  plan->kernelArgsSize = max(plan->kernelArgsSize, sizeof(ncclDevKernelArgsDefaultStorage));
   plan->kernelArgsSize = alignUp(plan->kernelArgsSize, 16);
   plan->kernelArgs = (struct ncclDevKernelArgs*)ncclMemoryStackAlloc(&comm->memScoped, plan->kernelArgsSize, /*align=*/16);
   plan->kernelArgs->comm = comm->devComm;
@@ -455,7 +456,7 @@ ncclResult_t ncclTasksRegAndEnqueue(struct ncclComm* comm) {
       devWork.currentRank = comm->rank;
       devWork.count = task->count;
     }
-    
+
     devWork.isOneRPN = comm->isOneRPN;
     devWork.netRegUsed = devWork.regUsed = 0;
     devWork.profilerEnabled = ncclProfilerPluginLoaded() && (task->eActivationMask & ncclProfileKernelCh);
@@ -756,6 +757,9 @@ static ncclResult_t scheduleCollTasksToPlan(
       NCCLCHECK(calcCollChunking(comm, task, nChannels, nBytes, &chunkSize, &directFlags, &proxyOp));
       devWork->channelLo = 0;
       devWork->channelHi = nChannels-1;
+      // RCCL: CollNet path never set task->nChannels; profiler received 0.
+      // Clamp to UINT8_MAX: ENABLE_WARP_SPEED pushes MAXCHANNELS to 512 which wraps uint8.
+      task->nChannels = (nChannels <= UINT8_MAX) ? (uint8_t)nChannels : UINT8_MAX;
       devWork->collnet.count = task->count;
       devWork->collnet.chunkCount = chunkSize/ncclTypeSize(task->datatype);
       devWork->direct = directFlags;
@@ -1016,7 +1020,7 @@ NCCL_PARAM(ChunkSize, "CHUNK_SIZE", 0);
 // Currently, p2p-batching thresholds are only used for gfx950 for 16 nodes and above
 // previously, p2p-batching was causing regression on all node-counts for larger message sizes (64KB "per-rank")
 // we want to enable by default only for gfx950, so we use rcclEffectiveP2pBatchEnable helper to branch based on arch
-RCCL_PARAM(P2pBatchEnable, "P2P_BATCH_ENABLE", -1);
+RCCL_PARAM(P2pBatchEnable, "P2P_BATCH_ENABLE", 0);
 RCCL_PARAM(P2pBatchThreshold, "P2P_BATCH_THRESHOLD", 1 << 16);  // 64k per-rank message size
 
 
@@ -1889,28 +1893,29 @@ ncclResult_t ncclLaunchKernel(struct ncclComm* comm, struct ncclKernelPlan* plan
 
   NCCLCHECK(ncclProfilerStartKernelLaunchEvent(plan, launchStream));
 
-  void* extra[] = {plan->kernelArgs, &plan->kernelArgsSize};
+  void* extra[] = {
+    CU_LAUNCH_PARAM_BUFFER_POINTER, plan->kernelArgs,
+    CU_LAUNCH_PARAM_BUFFER_SIZE, &plan->kernelArgsSize,
+    CU_LAUNCH_PARAM_END
+  };
 
   auto event = latency_profiler::collTraceAquireEventBaseline(plan, launchStream);
-  if (planner->numStreams == 1 && !plan->persistent) {
-    latency_profiler::collTraceRecordStartEvent(comm, launchStream, event.get());
-    comm->lastStream = planner->streams->stream;
-    CUDACHECKGOTO(hipExtLaunchKernel(plan->kernelFn, grid, block, extra, 0, launchStream, NULL, comm->doneEvent, 0), ret, do_return);
 
-    latency_profiler::collTraceRecordEndEvent(comm, plan, launchStream, std::move(event));
-    return ncclSuccess;
-  }
-
-  // CUfunction fn;
-  // CUDACHECK(cudaGetFuncBySymbol(&fn, sym));
-
-#if !defined(__HIP_PLATFORM_AMD__) || !defined(__HIPCC__)
   int driverVersion;
   NCCLCHECKGOTO(ncclCudaDriverVersion(&driverVersion), ret, do_return);
 
   CUfunction fn;
   CUDACHECKGOTO(cudaGetFuncBySymbol(&fn, sym), ret, do_return);
 
+  if (planner->numStreams == 1 && !plan->persistent) {
+    latency_profiler::collTraceRecordStartEvent(comm, launchStream, event.get());
+    comm->lastStream = planner->streams->stream;
+    CUCHECKGOTO(cuLaunchKernel(fn, grid.x, grid.y, grid.z, block.x, block.y, block.z, smem, launchStream, nullptr, extra), ret, do_return);
+    latency_profiler::collTraceRecordEndEvent(comm, plan, launchStream, std::move(event));
+    return ncclSuccess;
+  }
+
+#if !defined(__HIP_PLATFORM_AMD__) || !defined(__HIPCC__)
   if (CUDART_VERSION >= 11080 && driverVersion >= 11080) {
   #if CUDART_VERSION >= 11080
     int compCap = comm->compCap;
@@ -1989,9 +1994,8 @@ ncclResult_t ncclLaunchKernel(struct ncclComm* comm, struct ncclKernelPlan* plan
   }
 #endif
   // Standard kernel launch
-  //cuLaunchKernel(sym, grid.x, grid.y, grid.z, block.x, block.y, block.z, smem, launchStream, nullptr, extra);
   latency_profiler::collTraceRecordStartEvent(comm, launchStream, event.get());
-  CUDACHECKGOTO(cudaLaunchKernel(sym, grid, block, extra, smem, launchStream), ret, do_return);
+  CUCHECKGOTO(cuLaunchKernel(fn, grid.x, grid.y, grid.z, block.x, block.y, block.z, smem, launchStream, nullptr, extra), ret, do_return);
   latency_profiler::collTraceRecordEndEvent(comm, plan, launchStream, std::move(event));
 
 do_return:
@@ -2287,15 +2291,15 @@ static ncclResult_t topoGetAlgoInfo(
     }
   } else {
     rcclUpdateThreadThreshold(comm, nBytes, info, threadThreshold);
-    INFO(NCCL_INIT, "pre-adjustment threadThreshold:%i nBytes:%lu nc:%i", threadThreshold, nBytes, nc);
+    INFO(NCCL_TUNING, "pre-adjustment threadThreshold:%i nBytes:%lu nc:%i", threadThreshold, nBytes, nc);
 
     int minNChannels = ncclParamMinNchannels();
     // Ring/Tree channel tuning
-    INFO(NCCL_INIT, "minNChannels:%i", minNChannels);
+    INFO(NCCL_TUNING, "minNChannels:%i", minNChannels);
     if(nBytes < nc * nt * threadThreshold && nc > minNChannels){
       nc = std::max(1,std::max(minNChannels,(int)(nBytes/std::max(1,nt * threadThreshold))));
     }
-    INFO(NCCL_INIT, "post-adjustment based on threadThreshold:%i nBytes:%lu nc:%i", threadThreshold, nBytes, nc);
+    INFO(NCCL_TUNING, "post-adjustment based on threadThreshold:%i nBytes:%lu nc:%i", threadThreshold, nBytes, nc);
     rcclOverrideChannels(comm, info->func, nBytes, nc);
   }
 
@@ -2421,6 +2425,11 @@ rccl_static ncclResult_t getAlgoInfo(
       info->algorithm = NCCL_ALGO_TREE;
       info->protocol = NCCL_PROTO_LL;
     }
+
+    if(!userAlgoInput && (IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx1200") || IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx1201")) && comm->nNodes == 1 && (info->func == ncclFuncAllReduce)) {
+       info->algorithm = NCCL_ALGO_RING; // for Navi RING algo always performs better than Tree based on data.
+    }
+
     // NCCL_CTA_POLICY_EFFICIENCY requires user (non-symmetric) buffer registration (currently unsupported with MNNVL)
     if (comm->config.CTAPolicy == NCCL_CTA_POLICY_EFFICIENCY && !userAlgoInput && ncclGetEnv("NCCL_PROTO") == NULL && !comm->MNNVL) {
       // make algorithm selection based on buffer registration
@@ -2983,6 +2992,10 @@ static ncclResult_t collTaskAppend(
   NCCLCHECK(ncclProfilerStartCollApiEvent(info, isGraphCaptured));
 
   struct ncclTaskColl* t = ncclMemoryPoolAlloc<struct ncclTaskColl>(&comm->memPool_ncclTaskColl, &comm->memPermanent);
+  // RCCL: ncclMemoryPoolAlloc does not zero-initialize; default to 0 so
+  // scheduleCollTasksToPlan overwrites with the correct value and the inspector plugin
+  // never sees garbage in eDescr->coll.nChannels.
+  t->nChannels = 0;
   t->func = info->coll;
   t->sendbuff = info->sendbuff;
   t->recvbuff = info->recvbuff;

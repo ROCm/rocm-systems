@@ -133,7 +133,7 @@ void execute_clock_kernels(void (*kernel)(long long*, long long*, float*, float*
 
 HIP_TEST_CASE(Unit_hipClock64_Positive_Basic) {
   if (IsGfx11()) {
-    HipTest::HIP_SKIP_TEST("Issue with clock64() function on gfx11 devices!");
+    HipTest::HIP_SKIP_TEST("clock64() issue on gfx11 devices.");
     return;
   }
 
@@ -155,7 +155,7 @@ HIP_TEST_CASE(Unit_hipClock64_Positive_Basic) {
  */
 HIP_TEST_CASE(Unit_hipClock_Positive_Basic) {
   if (IsGfx11()) {
-    HipTest::HIP_SKIP_TEST("Issue with clock() function on gfx11 devices!");
+    HipTest::HIP_SKIP_TEST("clock() issue on gfx11 devices.");
     return;
   }
 

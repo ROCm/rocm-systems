@@ -216,6 +216,9 @@ public:
     /* Size of the local data share.  */
     virtual size_t lds_size () const = 0;
 
+    /* Size of the hwreg block, in dwords.  */
+    virtual size_t hwreg_count () const = 0;
+
     virtual std::optional<agent_address_t>
     register_address (amdgpu_regnum_t regnum) const = 0;
 

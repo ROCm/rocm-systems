@@ -110,7 +110,8 @@ The following table lists the parameters relevant to thread tracing:
 |                             |         |         |           | --kernel-iteration-range. If multiple targeted kernels       |
 |                             |         |         |           | overlap, the count for N next dispatches starts again from 0.|
 |                             |         |         |           | Recommended use with --att-gpu-index due to thread trace     |
-|                             |         |         |           | being enabled for all GPUs.                                  |
+|                             |         |         |           | being enabled for all GPUs. Incompatible with                |
+|                             |         |         |           | --selected-regions.                                          |
 +-----------------------------+---------+---------+-----------+--------------------------------------------------------------+
 
 For AMD Instinct accelerators, enable perfmon streaming using:
@@ -163,6 +164,57 @@ new targeted kernel, so it is possible for a generated ATT file to have more tha
 All the profiled kernels are then compiled into a single ATT file.
 If a new targeted kernel is encountered after the ``rocprofv3`` tool has finished profiling a batch of kernels,
 the profiler will restart profiling when encountering this new targeted kernel and create another ATT file with multiple kernels.
+
+Marker-controlled thread tracing
+=============================
+
+Using ``--att`` with ``--selected-regions`` enables application-controlled thread trace collection using the ``roctxProfilerResume(0)`` and ``roctxProfilerPause(0)`` APIs.
+Instead of targeting specific kernels by name or dispatch index, the application explicitly starts and stops thread trace collection at runtime.
+
+When ``--att --selected-regions`` is used:
+
+* The profiler starts with thread tracing **disabled**. No kernels are traced until ``roctxProfilerResume(0)`` is called.
+* Calling ``roctxProfilerResume(0)`` starts GPU thread trace collection.
+* Calling ``roctxProfilerPause(0)`` stops GPU thread trace collection.
+* Multiple resume/pause cycles are supported. Each cycle produces a separate set of output files (ATT data, stats CSV, and UI output directory).
+* Incompatible with ``--att-consecutive-kernels``.
+
+**Example application:**
+
+.. code-block:: c++
+
+    #include <rocprofiler-sdk-roctx/roctx.h>
+    #include <hip/hip_runtime.h>
+
+    // This kernel will NOT be traced (launched before resume)
+    hipLaunchKernelGGL(setup_kernel, grid, block, 0, 0, out, in, width);
+    hipDeviceSynchronize();
+
+    // Start thread trace collection
+    roctxProfilerResume(0);
+
+    // These kernels WILL be traced
+    hipLaunchKernelGGL(compute_kernel_a, grid, block, 0, 0, out, in, width);
+    hipLaunchKernelGGL(compute_kernel_b, grid, block, 0, 0, out, in, width);
+    hipDeviceSynchronize();
+
+    // Stop thread trace collection
+    roctxProfilerPause(0);
+
+    // This kernel will NOT be traced (launched after pause)
+    hipLaunchKernelGGL(cleanup_kernel, grid, block, 0, 0, out, in, width);
+    hipDeviceSynchronize();
+
+**Run with:**
+
+.. code-block:: bash
+
+    rocprofv3 --att --selected-regions -d <output_dir> -- <application_path>
+
+Only ``compute_kernel_a`` and ``compute_kernel_b`` will appear in the thread trace output.
+The ``setup_kernel`` and ``cleanup_kernel`` dispatches are excluded because they fall outside the resume/pause region.
+
+For more details on ``--selected-regions`` and ``roctxProfilerPause``/``roctxProfilerResume``, see :ref:`using-rocprofiler-sdk-roctx`.
 
 .. _output-files:
 

@@ -40,6 +40,7 @@ SUPPORTED_ARCHS = {
     "gfx941": {"mi300": ["MI300X_A0"]},
     "gfx942": {"mi300": ["MI300A_A1", "MI300X_A1"]},
     "gfx950": {"mi350": ["MI350"]},
+    "gfx1151": {"strix_halo": ["STRIX_HALO"]},
 }
 
 
@@ -279,11 +280,11 @@ def gpu_soc():
     soc_regex = re.compile(r"^\s*Name\s*:\s+ ([a-zA-Z0-9]+)\s*$", re.MULTILINE)
     devices = list(filter(soc_regex.match, rocminfo))
     if not devices:
-        return None
+        return ""
     gpu_arch = devices[0].split()[1]
 
     if gpu_arch not in SUPPORTED_ARCHS.keys():
-        return None
+        return ""
 
     gpu_model = list(SUPPORTED_ARCHS[gpu_arch].keys())[0].upper()
 
@@ -5686,31 +5687,40 @@ def test_pc_sampling_prof_sdk_path_nonexistent_librocprofiler_sdk_tool(
 
 
 @mock.patch("utils.utils_profile.capture_subprocess_output")
-@mock.patch("utils.utils_profile.console_error")
 @mock.patch("utils.utils_profile.console_debug")
 def test_pc_sampling_prof_subprocess_fails(
-    mock_console_debug, mock_console_error, mock_capture_subprocess, tmp_path
+    mock_console_debug, mock_capture_subprocess, tmp_path, monkeypatch
 ):
     """
     Edge Case: The capture_subprocess_output returns success=False.
     This should trigger the console_error("PC sampling failed.").
     """
+    console_error_calls = []
+
+    def mock_console_error(msg, exit=True):
+        console_error_calls.append(msg)
+        if exit:
+            raise RuntimeError("console_error called")
+
+    monkeypatch.setattr("utils.utils_profile.console_error", mock_console_error)
+
     with mock.patch("utils.utils_common._rocprof_cmd", "rocprof_cli_tool"):
         method = "stochastic"
         interval = 5000
         workload_dir = str(tmp_path)
         options = ["another_app"]
-        rocprofiler_sdk_tool_path = "/some/path/librocprofiler_sdk.so"  # noqa: F841
 
-        mock_capture_subprocess.return_value = (False, "Error output from subprocess")
+        with pytest.raises(RuntimeError, match="console_error called"):
+            utils_profile.pc_sampling_prof(options, method, interval, workload_dir)
 
-        utils_profile.pc_sampling_prof(options, method, interval, workload_dir)
-
-        mock_capture_subprocess.assert_called_once()
-        mock_console_error.assert_called_once_with("PC sampling failed.")
+        mock_capture_subprocess.assert_not_called()
+        assert console_error_calls == [
+            "APP_CMD, the workload's executable must be provided "
+            "when not in live attach mode"
+        ]
 
     mock_capture_subprocess.reset_mock()
-    mock_console_error.reset_mock()
+    console_error_calls.clear()
     with mock.patch("utils.utils_common._rocprof_cmd", "rocprofiler-sdk"):
         options = {"APP_CMD": "another_app"}
         sdk_lib_dir = tmp_path / "rocm_sdk_fail" / "lib"
@@ -5727,10 +5737,11 @@ def test_pc_sampling_prof_subprocess_fails(
             "Error output from SDK subprocess",
         )
 
-        utils_profile.pc_sampling_prof(options, method, interval, workload_dir)
+        with pytest.raises(RuntimeError, match="console_error called"):
+            utils_profile.pc_sampling_prof(options, method, interval, workload_dir)
 
         mock_capture_subprocess.assert_called_once()
-        mock_console_error.assert_called_once_with("PC sampling failed.")
+        assert console_error_calls == ["PC sampling failed."]
 
 
 @mock.patch("utils.utils_profile.capture_subprocess_output")
@@ -5778,6 +5789,31 @@ def test_pc_sampling_prof_empty_appcmd(
 
         assert mock_capture_subprocess.called
         assert mock_capture_subprocess.call_args[0][0] == ""
+        mock_console_error.assert_not_called()
+
+
+@mock.patch("utils.utils_profile.capture_subprocess_output")
+@mock.patch("utils.utils_profile.console_error")
+@mock.patch("utils.utils_profile.console_debug")
+def test_pc_sampling_prof_multiarg_appcmd(
+    mock_console_debug, mock_console_error, mock_capture_subprocess, tmp_path
+):
+    """All arguments after '--' in profiler_options must appear
+    in the subprocess call."""
+    with mock.patch("utils.utils_common._rocprof_cmd", "rocprof_cli_tool"):
+        method = "host_trap"
+        interval = 100
+        workload_dir = str(tmp_path)
+        options = ["--kernel-trace", "--", "./myapp", "arg1", "arg2"]
+
+        mock_capture_subprocess.return_value = (True, "Success")
+
+        utils_profile.pc_sampling_prof(options, method, interval, workload_dir)
+
+        assert mock_capture_subprocess.called
+        options_list = mock_capture_subprocess.call_args[0][0]
+        separator_index = options_list.index("--")
+        assert options_list[separator_index:] == ["--", "./myapp", "arg1", "arg2"]
         mock_console_error.assert_not_called()
 
 
@@ -6807,7 +6843,7 @@ def test_gpu_benchmark_locking(tmp_path, monkeypatch, capsys):
     """Test GPU benchmark locking functions."""
     import fcntl
 
-    import utils.benchmark as benchmark
+    import roofline.benchmark.benchmark_base as benchmark_base
 
     # --- Setup: redirect lock directory to temp path ---
     lock_dir = tmp_path / "locks"
@@ -6815,7 +6851,7 @@ def test_gpu_benchmark_locking(tmp_path, monkeypatch, capsys):
 
     # Mock GPU UUID
     monkeypatch.setattr(
-        benchmark.hip,
+        benchmark_base.hip,
         "hipGetDeviceProperties",
         lambda d: mock.Mock(uuid=mock.Mock(uuid=bytes([0x01, 0x02, 0x03, 0x04]))),
     )
@@ -6828,16 +6864,21 @@ def test_gpu_benchmark_locking(tmp_path, monkeypatch, capsys):
             return lock_dir
         return original_path(p)
 
-    monkeypatch.setattr(benchmark, "Path", mock_path)
+    monkeypatch.setattr(benchmark_base, "Path", mock_path)
+
+    deviceID = 0
+    # Create Bench_base object in order to call gpu benchmark lock method
+    # Device ID list arg doesn't matter since we are just using the base class
+    testClass = benchmark_base.Bench_base([deviceID])
 
     # --- Test lock acquisition and lock file creation ---
-    with benchmark.gpu_benchmark_lock(0):
+    with testClass.gpu_benchmark_lock(deviceID):
         lock_file = lock_dir / "rocprof-compute-benchmark-01020304.lock"
         assert lock_file.exists()
 
     # --- Test no message when lock acquired immediately ---
     capsys.readouterr()  # Clear previous output
-    with benchmark.gpu_benchmark_lock(0):
+    with testClass.gpu_benchmark_lock(deviceID):
         pass
     output = capsys.readouterr().out
     assert "Waiting" not in output
@@ -6850,9 +6891,9 @@ def test_gpu_benchmark_locking(tmp_path, monkeypatch, capsys):
         if call_count["count"] == 1 and (op & fcntl.LOCK_NB):
             raise BlockingIOError("Lock held by another process")
 
-    monkeypatch.setattr(benchmark.fcntl, "flock", mock_flock)
+    monkeypatch.setattr(benchmark_base.fcntl, "flock", mock_flock)
 
-    with benchmark.gpu_benchmark_lock(0):
+    with testClass.gpu_benchmark_lock(deviceID):
         pass
 
     output = capsys.readouterr().out

@@ -34,6 +34,40 @@
 
 CuidGpu::CuidGpu(const amdcuid_gpu_info &i) : m_info(i) {}
 
+// Helper to check if a /sys/class/drm entry name is a card device (e.g.,
+// "card0", "card1"). Excludes connector entries like "card0-DP-1" or
+// "card0-HDMI-A-1".
+static bool is_card_entry(const char *name) {
+  if (strncmp(name, "card", 4) != 0 || !isdigit(name[4]))
+    return false;
+  for (size_t i = 4; name[i] != '\0'; ++i) {
+    if (!isdigit(name[i]))
+      return false;
+  }
+  return true;
+}
+
+// Resolve the renderD node path for a given card path.
+// If a renderD node exists under the card's device/drm directory, returns
+// "/sys/class/drm/renderDXXX". Otherwise, returns the original card path.
+static std::string resolve_render_node(const std::string &card_path) {
+  std::string drm_dir = card_path + "/device/drm";
+  DIR *dir = opendir(drm_dir.c_str());
+  if (dir) {
+    struct dirent *entry;
+    while ((entry = readdir(dir)) != nullptr) {
+      if (strncmp(entry->d_name, "renderD", 7) == 0 &&
+          isdigit(entry->d_name[7])) {
+        std::string result = "/sys/class/drm/" + std::string(entry->d_name);
+        closedir(dir);
+        return result;
+      }
+    }
+    closedir(dir);
+  }
+  return card_path;
+}
+
 amdcuid_status_t CuidGpu::discover(std::vector<DevicePtr> &gpus) {
   const char *drm_path = "/sys/class/drm";
   DIR *dir = opendir(drm_path);
@@ -42,11 +76,13 @@ amdcuid_status_t CuidGpu::discover(std::vector<DevicePtr> &gpus) {
 
   struct dirent *entry;
   while ((entry = readdir(dir)) != NULL) {
-    if (strncmp(entry->d_name, "renderD", 7) == 0 &&
-        isdigit(entry->d_name[7])) {
-      std::string render_name(entry->d_name);
+    // Use card entries (e.g., card0, card1) which are always present for DRM
+    // devices, unlike renderD nodes which may be absent with certain drivers
+    // (e.g., GIM) or for non-AMD GPUs.
+    if (is_card_entry(entry->d_name)) {
+      std::string card_name(entry->d_name);
       std::string device_path =
-          std::string(drm_path) + "/" + render_name + "/device";
+          std::string(drm_path) + "/" + card_name + "/device";
       amdcuid_gpu_info info = {};
       discover_single(&info, device_path);
 
@@ -137,14 +173,24 @@ amdcuid_status_t CuidGpu::discover_single(amdcuid_gpu_info *gpu_info,
         (uint16_t)strtol(revision_id.c_str(), nullptr, 16);
   }
 
-  // we use the original device path to get render node
+  // Determine the device node path. We prefer the renderD node for backward
+  // compatibility (CUID files may reference renderD paths). If no renderD node
+  // exists (e.g., GIM driver), the card path is used instead.
   std::string full_device_node;
   size_t last_slash = device_path.rfind('/');
   if (last_slash != std::string::npos && last_slash > 0) {
-    // Trim to just /sys/class/drm/renderDXXX;
+    // Trim to just /sys/class/drm/cardN or /sys/class/drm/renderDXXX
     full_device_node = device_path.substr(0, last_slash);
   } else {
     full_device_node = device_path;
+  }
+
+  // If discovered via card entry, try to resolve the associated renderD node
+  if (full_device_node.find("/card") != std::string::npos) {
+    std::string render_node = resolve_render_node(full_device_node);
+    if (render_node != full_device_node) {
+      full_device_node = render_node;
+    }
   }
 
   info.header.device_type = AMDCUID_DEVICE_TYPE_GPU;

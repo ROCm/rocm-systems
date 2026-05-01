@@ -1,7 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
-cmake_minimum_required(VERSION 3.21 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.25 FATAL_ERROR)
 
 project(rocprofiler-systems-examples LANGUAGES C CXX)
 
@@ -29,7 +29,7 @@ if(CMAKE_PROJECT_NAME STREQUAL "rocprofiler-systems")
     set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR})
     set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR})
     rocprofiler_systems_add_option(ROCPROFSYS_INSTALL_EXAMPLES
-                                   "Install rocprofiler-systems examples" OFF
+        "Install rocprofiler-systems examples" OFF
     )
 elseif(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
     # Standalone build of the full examples suite
@@ -100,6 +100,7 @@ set(ROCPROFSYS_EXAMPLE_DIRS
     shmem
     scratch-memory
     sdma_test
+    unified-memory
 )
 
 foreach(_example_dir IN LISTS ROCPROFSYS_EXAMPLE_DIRS)

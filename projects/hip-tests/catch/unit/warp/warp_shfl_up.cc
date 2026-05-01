@@ -93,7 +93,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_Warp_Shfl_Up_Positive_Basic, int, unsigned int, long
   HIP_CHECK(hipGetDeviceProperties(&device_properties, device));
 
   if (!device_properties.arch.hasWarpShuffle) {
-    HipTest::HIP_SKIP_TEST("Device doesn't support Warp Shuffle!");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kWarpShuffleUnsupported);
     return;
   }
 

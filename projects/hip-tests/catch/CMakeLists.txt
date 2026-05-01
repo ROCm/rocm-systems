@@ -31,6 +31,7 @@ option(TEST_CLOCK_CYCLE "Option to use clock64" OFF)
 option(RTC_TESTING "Run tests using HIP RTC to compile the kernels" OFF)
 option(ENABLE_SPIRV "Build hip-tests for SPIRV" OFF)
 option(ENABLE_YAML_TAGS "Enable YAML tags for test cases" ON)
+option(STANDALONE_TESTS "Generate standalone executable per source file" OFF)
 
 if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE "Release")
@@ -54,15 +55,13 @@ find_program(HIPCONFIG_EXEC hipconfig REQUIRED)
 # hip root dir is 3 levels down the hip-config.cmake file path
 set(HIP_PATH ${hip_DIR}/../../../)
 if(NOT DEFINED ROCM_PATH)
-  set(ROCM_PATH "/opt/rocm")
-  if(NOT EXISTS "${ROCM_PATH}")
-    set(ROCM_PATH ${HIP_PATH})
-  endif()
+  # Derive ROCM_PATH from the HIP location instead of hardcoding to /opt/rocm
+  set(ROCM_PATH ${HIP_PATH})
 endif()
 
 if(UNIX)
   if(NOT ENABLE_SPIRV)
-    find_program(ROCM_AGENT_ENUMERATOR_EXEC rocm_agent_enumerator REQUIRED)
+    find_program(ROCM_AGENT_ENUMERATOR_EXEC rocm_agent_enumerator HINTS ${ROCM_PATH}/bin ${HIP_PATH}/bin)
   endif()
   find_program(GCC_EXEC gcc)
   find_program(GXX_EXEC g++)
@@ -76,6 +75,14 @@ message(STATUS "HIP Lib path: ${HIP_LIB_INSTALL_DIR}")
 # used by clang to find hip
 set(HIP_PATH_OPT "--hip-path=${HIP_PATH}")
 
+# Make hipcc path available to tests that need hipcc
+if(HIP_HIPCC_EXECUTABLE)
+  add_definitions(-DHIP_HIPCC_EXECUTABLE="${HIP_HIPCC_EXECUTABLE}")
+endif()
+
+# Make Rocm lib path available for runtime dlopen (e.g., librocm_smi64.so)
+add_definitions(-DROCM_SMI_LIB_DIR="${ROCM_PATH}/lib")
+
 if(TEST_CLOCK_CYCLE)
   add_definitions(-DTEST_CLOCK_CYCLE)
 endif()
@@ -83,9 +90,6 @@ endif()
 if(ENABLE_YAML_TAGS)
     add_definitions(-DENABLE_YAML_TAGS)
 endif()
-
-# flag to generate standalone exe per src file.
-message(STATUS "STANDALONE_TESTS : ${STANDALONE_TESTS}")
 
 if(NOT WIN32)
   set(CPACK_SET_DESTDIR ON CACHE BOOL "Installer package will install hip catch to CMAKE_INSTALL_PREFIX instead of CPACK_PACKAGING_INSTALL_PREFIX")
@@ -278,7 +282,7 @@ elseif(DEFINED GPU_TARGETS)
 elseif(NOT DEFINED OFFLOAD_ARCH_STR
    AND EXISTS "${ROCM_AGENT_ENUMERATOR_EXEC}"
    AND HIP_PLATFORM STREQUAL "amd" AND UNIX)
-  execute_process(COMMAND "${ROCM_PATH}/bin/rocm_agent_enumerator"
+  execute_process(COMMAND "${ROCM_AGENT_ENUMERATOR_EXEC}"
          OUTPUT_VARIABLE HIP_GPU_ARCH
          RESULT_VARIABLE ROCM_AGENT_ENUM_RESULT
          OUTPUT_STRIP_TRAILING_WHITESPACE)
