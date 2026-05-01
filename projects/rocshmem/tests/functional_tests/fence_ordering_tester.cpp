@@ -31,6 +31,7 @@ __device__ void fill_buffer_device(char *buf, size_t size, int iter) {
   for (size_t i = tid; i < size; i += block_size) {
     buf[i] = iter_fill(iter, i);
   }
+  __syncthreads();
 }
 
 // Validate buffer against iteration-specific expected pattern (parallel within wave).
@@ -103,7 +104,6 @@ __global__ void FenceOrderPutWaveSignalKernel(
 
     if (my_pe == 0) {
       fill_buffer_device(s_buf + wg_id * size, size, i);
-      __syncthreads();
       rocshmem_ctx_putmem_nbi_wave(ctx, r_buf + wave_id * size, s_buf + wg_id * size, size, 1);
       rocshmem_ctx_fence(ctx);
       if (is_thread_zero_in_wave()) {
@@ -164,7 +164,6 @@ __global__ void FenceOrderPutLargeSmallKernel(
 
     if (my_pe == 0) {
       fill_buffer_device(s_buf + wg_id * size, size, i);
-      __syncthreads();
       rocshmem_ctx_putmem_nbi_wave(ctx, r_buf + wave_id * size, s_buf + wg_id * size, size, 1);
       rocshmem_ctx_fence(ctx);
       // Signal via long_p (load/store path, tests cross-threshold ordering)
@@ -231,7 +230,6 @@ __global__ void FenceOrderFanoutKernel(
 
 
     fill_buffer_device(s_buf + wg_id * size, size, i);
-    __syncthreads();
 
     // Send to target PE, fence, signal
     rocshmem_ctx_putmem_nbi_wave(ctx, r_buf + wave_id * size, s_buf + wg_id * size, size,
@@ -300,7 +298,6 @@ __global__ void FenceOrderPutWaveNbiChunksKernel(
 
     if (my_pe == 0) {
       fill_buffer_device(s_buf + wg_id * wave_data_size, wave_data_size, i);
-      __syncthreads();
       size_t wave_base = wave_id * wave_data_size;
       size_t s_base = wg_id * wave_data_size;
       for (int c = 0; c < STRESS_NUM_CHUNKS; c++) {
@@ -377,6 +374,7 @@ void FenceOrderingTester::resetBuffers(size_t size) {
 
 void FenceOrderingTester::launchKernel(dim3 gridSize, dim3 blockSize,
                                        int loop, size_t size) {
+  last_loop = loop;
   size_t shared_bytes = 0;
 
   switch (_type) {
@@ -438,7 +436,7 @@ void FenceOrderingTester::verifyResults([[maybe_unused]] size_t size) {
   // Host-side validation as secondary check with detailed error reporting.
   // The kernel boundary flush may mask some races, but this catches
   // persistent corruption and provides diagnostic output.
-  int last_iter = args.loop + args.skip - 1;  // kernel iteration count, not message count
+  int last_iter = last_loop + args.skip - 1;  // matches loop count passed to launchKernel (may be loop_large)
 
   auto host_check = [&](const char *buf, size_t len, int iter,
                          const char *label) {
