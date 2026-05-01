@@ -584,7 +584,7 @@ typedef enum hipDeviceAttribute_t {
                                                   ///< units for the device
   hipDeviceAttributeFineGrainSupport,  ///< '1' if Device supports fine grain, '0' otherwise
   hipDeviceAttributeWallClockRate,     ///< Constant frequency of wall clock in kilohertz.
-  hipDeviceAttributeNumberOfXccs,  ///< Number of XCCs in the device’s current
+  hipDeviceAttributeNumberOfXccs,  ///< Number of XCC(s) in the device’s current
                                    ///< compute partition (XCP).
                                    ///< An XCC is AMD’s fundamental GPU compute tile.
                                    ///< Devices like MI300X include multiple XCCs
