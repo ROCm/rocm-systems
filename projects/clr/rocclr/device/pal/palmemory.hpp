@@ -147,14 +147,9 @@ class Memory : public device::Memory, public Resource {
     return (isCacheable() ||
             (!isHostMemDirectAccess() &&
              (!IsPersistent() || (owner()->getContext().devices().size() > 1))) ||
-<<<<<<< HEAD
-            (owner()->getMemFlags() &
-             (amd::MemFlags::AllocHostPtr | amd::MemFlags::HostWriteOnly | amd::MemFlags::ReadOnly)));
-=======
             ((owner()->getMemFlags() &
               (amd::MemFlags::AllocHostPtr | amd::MemFlags::HostWriteOnly | amd::MemFlags::ReadOnly))
              != amd::MemFlags::Empty));
->>>>>>> f7ae81672c (rocclr/pal: replace remaining raw CL types with typed enums in PAL layer)
   }
 
   //! Quick view update for managed buffers. It should avoid expensive object allocations

@@ -1537,11 +1537,7 @@ pal::Memory* Device::createBuffer(amd::Memory& owner, bool directAccess) const {
   // Check if owner is interop memory
   if (owner.isInterop()) {
     result = gpuMemory->createInterop();
-<<<<<<< HEAD
-  } else if (owner.getMemFlags() & amd::MemFlags::UsePersistentMemAmd) {
-=======
   } else if ((owner.getMemFlags() & amd::MemFlags::UsePersistentMemAmd) != amd::MemFlags::Empty) {
->>>>>>> f7ae81672c (rocclr/pal: replace remaining raw CL types with typed enums in PAL layer)
     // Attempt to allocate from persistent heap
     result = gpuMemory->create(Resource::Persistent);
     if (result) {
@@ -1558,16 +1554,6 @@ pal::Memory* Device::createBuffer(amd::Memory& owner, bool directAccess) const {
     }
   } else if (directAccess || (type == Resource::Remote)) {
     // Check for system memory allocations
-<<<<<<< HEAD
-    if ((owner.getMemFlags() & (amd::MemFlags::AllocHostPtr | amd::MemFlags::UseHostPtr)) ||
-        (settings().remoteAlloc_)) {
-      // Allocate remote memory if AHP allocation and context has just 1 device
-      if ((owner.getMemFlags() & amd::MemFlags::AllocHostPtr) &&
-          (owner.getContext().devices().size() == 1) &&
-          (owner.getSize() < static_cast<size_t>(GPU_MAX_USWC_ALLOC_SIZE) * Mi)) {
-        if (owner.getMemFlags() &
-            (amd::MemFlags::ReadOnly | amd::MemFlags::HostWriteOnly | amd::MemFlags::HostNoAccess)) {
-=======
     if (((owner.getMemFlags() & (amd::MemFlags::AllocHostPtr | amd::MemFlags::UseHostPtr)) != amd::MemFlags::Empty) ||
         (settings().remoteAlloc_)) {
       // Allocate remote memory if AHP allocation and context has just 1 device
@@ -1576,7 +1562,6 @@ pal::Memory* Device::createBuffer(amd::Memory& owner, bool directAccess) const {
           (owner.getSize() < static_cast<size_t>(GPU_MAX_USWC_ALLOC_SIZE) * Mi)) {
         if ((owner.getMemFlags() &
             (amd::MemFlags::ReadOnly | amd::MemFlags::HostWriteOnly | amd::MemFlags::HostNoAccess)) != amd::MemFlags::Empty) {
->>>>>>> f7ae81672c (rocclr/pal: replace remaining raw CL types with typed enums in PAL layer)
           // GPU will be reading from this host memory buffer,
           // so assume Host write into it
           type = Resource::RemoteUSWC;
@@ -1653,11 +1638,7 @@ pal::Memory* Device::createBuffer(amd::Memory& owner, bool directAccess) const {
         if (address != nullptr) {
           // Copy saved memory
           // Note: UHP is an optional check if pinning failed and sysmem alloc was forced
-<<<<<<< HEAD
-          if (owner.getMemFlags() & (amd::MemFlags::CopyHostPtr | amd::MemFlags::UseHostPtr)) {
-=======
           if ((owner.getMemFlags() & (amd::MemFlags::CopyHostPtr | amd::MemFlags::UseHostPtr)) != amd::MemFlags::Empty) {
->>>>>>> f7ae81672c (rocclr/pal: replace remaining raw CL types with typed enums in PAL layer)
             memcpy(address, owner.getHostMem(), owner.getSize());
           }
           // It should be safe to change the host memory pointer,
@@ -1669,11 +1650,7 @@ pal::Memory* Device::createBuffer(amd::Memory& owner, bool directAccess) const {
       }
       // An optimization for CHP. Copy memory and destroy sysmem allocation
       else if ((gpuMemory->memoryType() != Resource::Pinned) &&
-<<<<<<< HEAD
-               (owner.getMemFlags() & amd::MemFlags::CopyHostPtr) &&
-=======
                ((owner.getMemFlags() & amd::MemFlags::CopyHostPtr) != amd::MemFlags::Empty) &&
->>>>>>> f7ae81672c (rocclr/pal: replace remaining raw CL types with typed enums in PAL layer)
                (owner.getContext().devices().size() == 1)) {
         amd::Coord3D origin(0, 0, 0);
         amd::Coord3D region(owner.getSize());
@@ -1743,11 +1720,7 @@ pal::Memory* Device::createImage(amd::Memory& owner, bool directAccess) const {
                                     ? Resource::ImageExternalBuffer
                                     : Resource::ImageBuffer,
                                 &params);
-<<<<<<< HEAD
-    } else if (directAccess && (owner.getMemFlags() & amd::MemFlags::AllocHostPtr)) {
-=======
     } else if (directAccess && ((owner.getMemFlags() & amd::MemFlags::AllocHostPtr) != amd::MemFlags::Empty)) {
->>>>>>> f7ae81672c (rocclr/pal: replace remaining raw CL types with typed enums in PAL layer)
       Resource::PinnedParams params;
       params.owner_ = &owner;
       params.hostMemRef_ = owner.getHostMemRef();
@@ -1774,11 +1747,7 @@ pal::Memory* Device::createImage(amd::Memory& owner, bool directAccess) const {
     }
 
     if (!result && !owner.isInterop()) {
-<<<<<<< HEAD
-      if (owner.getMemFlags() & amd::MemFlags::UsePersistentMemAmd) {
-=======
       if ((owner.getMemFlags() & amd::MemFlags::UsePersistentMemAmd) != amd::MemFlags::Empty) {
->>>>>>> f7ae81672c (rocclr/pal: replace remaining raw CL types with typed enums in PAL layer)
         // Attempt to allocate from persistent heap
         result = gpuImage->create(Resource::Persistent);
       } else {
@@ -1793,11 +1762,7 @@ pal::Memory* Device::createImage(amd::Memory& owner, bool directAccess) const {
       delete gpuImage;
       return nullptr;
     } else if ((gpuImage->memoryType() != Resource::Pinned) &&
-<<<<<<< HEAD
-               (owner.getMemFlags() & amd::MemFlags::CopyHostPtr) &&
-=======
                ((owner.getMemFlags() & amd::MemFlags::CopyHostPtr) != amd::MemFlags::Empty) &&
->>>>>>> f7ae81672c (rocclr/pal: replace remaining raw CL types with typed enums in PAL layer)
                (owner.getContext().devices().size() == 1)) {
       // Ignore copy for image1D_buffer, since it was already done for buffer
       if (imageBuffer) {

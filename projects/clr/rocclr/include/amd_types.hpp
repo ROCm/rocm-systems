@@ -551,13 +551,6 @@ enum class AddressingMode : uint32_t {
   MirroredRepeat = 0x1134, // CL_ADDRESS_MIRRORED_REPEAT
 };
 
-<<<<<<< HEAD
-// Pipe memory layout. Equivalent to clk_pipe_t in opencl/amdocl/cl_kernel.h.
-struct PipeLayout {
-  size_t read_idx;
-  size_t write_idx;
-  size_t end_idx;
-=======
 // Pipe object layout for CL 2.0 pipe built-in.
 // Mirrors clk_pipe_t from opencl/amdocl/cl_kernel.h.
 struct PipeObject {
@@ -566,7 +559,6 @@ struct PipeObject {
   size_t end_idx;
   char padding[128 - 3 * sizeof(size_t)];
   // packets[] follow in device memory
->>>>>>> f7ae81672c (rocclr/pal: replace remaining raw CL types with typed enums in PAL layer)
 };
 
 // Bus address pair for the cl_amd_bus_addressable_memory extension.

@@ -1902,11 +1902,7 @@ void VirtualGPU::submitFillMemory(amd::FillMemoryCommand& cmd) {
 
     bool force_blit = false;
     if (amd::IS_HIP) {
-<<<<<<< HEAD
-      constexpr amd::MemFlags kManagedAlloc = (amd::MemFlags::SvmFineGrain | amd::MemFlags::AllocHostPtr);
-=======
       const amd::MemFlags kManagedAlloc = amd::MemFlags::SvmFineGrain | amd::MemFlags::AllocHostPtr;
->>>>>>> f7ae81672c (rocclr/pal: replace remaining raw CL types with typed enums in PAL layer)
       // In case of HMM, use blit kernel instead of CPU memcpy
       if ((cmd.memory().getMemFlags() & kManagedAlloc) == kManagedAlloc) {
         force_blit = true;
@@ -2267,11 +2263,7 @@ void VirtualGPU::submitSvmFreeMemory(amd::SvmFreeMemoryCommand& vcmd) {
       dev().svmFree(svmPointers[i]);
     }
   } else {
-<<<<<<< HEAD
-    vcmd.pfnFreeFunc()(reinterpret_cast<cl_command_queue>(vcmd.queue()->asCommandQueue()), svmPointers.size(),
-=======
     vcmd.pfnFreeFunc()(static_cast<void*>(vcmd.queue()->asCommandQueue()), svmPointers.size(),
->>>>>>> f7ae81672c (rocclr/pal: replace remaining raw CL types with typed enums in PAL layer)
                        static_cast<void**>(&(svmPointers[0])), vcmd.userData());
   }
   profilingEnd(vcmd);
@@ -3681,11 +3673,7 @@ bool VirtualGPU::processMemObjectsHSA(const amd::Kernel& kernel, const_address p
 
           // Mark signal write for cache coherency,
           // since this object isn't a part of kernel arg setup
-<<<<<<< HEAD
-          if ((memory->getMemFlags() & amd::MemFlags::ReadOnly) == 0) {
-=======
           if ((memory->getMemFlags() & amd::MemFlags::ReadOnly) == amd::MemFlags::Empty) {
->>>>>>> f7ae81672c (rocclr/pal: replace remaining raw CL types with typed enums in PAL layer)
             memory->signalWrite(&dev());
           }
           addVmMemory(gpuMemory);
@@ -3780,11 +3768,7 @@ bool VirtualGPU::processMemObjectsHSA(const amd::Kernel& kernel, const_address p
           //! Conformance can send read only subbuffer, but update the region
           //! in the kernel.
           if ((mem != nullptr) && ((!info.readOnly_ && (mem->getSvmPtr() == nullptr)) ||
-<<<<<<< HEAD
-                                   ((mem->getMemFlags() & amd::MemFlags::ReadOnly) == 0))) {
-=======
                                    ((mem->getMemFlags() & amd::MemFlags::ReadOnly) == amd::MemFlags::Empty))) {
->>>>>>> f7ae81672c (rocclr/pal: replace remaining raw CL types with typed enums in PAL layer)
             mem->signalWrite(&dev());
           }
           if (info.oclObject_ == amd::KernelParameterDescriptor::ImageObject) {

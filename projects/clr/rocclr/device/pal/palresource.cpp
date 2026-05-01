@@ -1307,11 +1307,7 @@ bool Resource::create(MemoryType memType, CreateParams* params, bool forceLinear
       desc_.SVMRes_ = true;
       desc_.reserved_va_ = (svmPtr == 1) ? false : true;
       svmPtr = (svmPtr == 1) ? 0 : svmPtr;
-<<<<<<< HEAD
-      if (params->owner_->getMemFlags() & amd::MemFlags::SvmAtomics) {
-=======
       if ((params->owner_->getMemFlags() & amd::MemFlags::SvmAtomics) != amd::MemFlags::Empty) {
->>>>>>> f7ae81672c (rocclr/pal: replace remaining raw CL types with typed enums in PAL layer)
         desc_.gl2CacheDisabled_ = true;
       }
     }

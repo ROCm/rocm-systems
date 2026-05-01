@@ -432,11 +432,7 @@ std::map<uintptr_t, amd::Memory*>::iterator MemObjMap::FindMemObjIter(uintptr_t 
   }
   --it;
   amd::Memory* mem = it->second;
-<<<<<<< HEAD
-  size_t mem_size = (mem->getMemFlags() & amd::MemFlags::PhyMem) != amd::MemFlags::Empty
-=======
   size_t mem_size = ((mem->getMemFlags() & amd::MemFlags::PhyMem) != amd::MemFlags::Empty)
->>>>>>> f7ae81672c (rocclr/pal: replace remaining raw CL types with typed enums in PAL layer)
                         ? sizeof(mem->getUserData().hsa_handle)
                         : mem->getSize();
   if (key < it->first || key >= (it->first + mem_size)) {

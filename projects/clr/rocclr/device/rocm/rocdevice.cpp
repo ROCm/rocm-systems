@@ -3310,14 +3310,6 @@ void Device::releaseQueue(hsa_queue_t* queue, const std::vector<uint32_t>& cuMas
   }
 }
 
-<<<<<<< HEAD
-void* Device::getOrCreateHostcallBuffer() {
-  return xferQueue()->getOrCreateHostcallBuffer();
-}
-
-
-=======
->>>>>>> f7ae81672c (rocclr/pal: replace remaining raw CL types with typed enums in PAL layer)
 bool Device::findLinkInfo(const amd::Device& other_device, std::vector<LinkAttrType>* link_attrs) {
   return findLinkInfo((static_cast<const roc::Device*>(&other_device))->gpuvm_segment_, link_attrs);
 }
