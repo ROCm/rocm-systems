@@ -220,9 +220,9 @@ struct perfetto_policy
             {
                 // Per-XCP metrics (MI300): create tracks for each XCP partition
                 auto array_size = (enabled_metric == detail::VCN_BUSY_VALUE)
-                                      ? AMDSMI_MAX_NUM_VCN
-                                      : ROCPROFSYS_AMDSMI_JPEG_ENGINE_COUNT;
-                for(std::size_t xcp = 0; xcp < AMDSMI_MAX_NUM_XCP; ++xcp)
+                                      ? MAX_NUM_VCN
+                                      : MAX_NUM_JPEG_V1;
+                for(std::size_t xcp = 0; xcp < MAX_NUM_XCP; ++xcp)
                 {
                     process_xcp_array(description, array_size, xcp);
                 }
@@ -232,8 +232,8 @@ struct perfetto_policy
             {
                 // Device-level metrics (Radeon): flat array, no XCP dimension
                 auto array_size = (enabled_metric == detail::VCN_ACTIVITY_VALUE)
-                                      ? AMDSMI_MAX_NUM_VCN
-                                      : ROCPROFSYS_AMDSMI_JPEG_ENGINE_COUNT;
+                                      ? MAX_NUM_VCN
+                                      : MAX_NUM_JPEG_V1;
                 for(std::size_t i = 0; i < array_size; ++i)
                 {
                     description.track_indexes.emplace_back(counter_track::emplace(
@@ -257,7 +257,7 @@ struct perfetto_policy
             xgmi_tracks.link_speed.emplace_back(counter_track::emplace(
                 device_index, addendum("XGMI Link Speed"), "Mbps"));
 
-            for(std::size_t link = 0; link < AMDSMI_MAX_NUM_XGMI_LINKS; ++link)
+            for(std::size_t link = 0; link < MAX_NUM_XGMI_LINKS; ++link)
             {
                 xgmi_tracks.read_data.emplace_back(counter_track::emplace(
                     device_index, addendum_blk(link, "XGMI Read Data"), "KB"));
@@ -572,8 +572,7 @@ private:
         }
 
         for(size_t link = 0;
-            link < AMDSMI_MAX_NUM_XGMI_LINKS && link < xgmi_tracks.read_data.size();
-            ++link)
+            link < MAX_NUM_XGMI_LINKS && link < xgmi_tracks.read_data.size(); ++link)
         {
             if(metric_values.xgmi.data_acc.read[link] != 0)
             {
@@ -585,8 +584,7 @@ private:
         }
 
         for(size_t link = 0;
-            link < AMDSMI_MAX_NUM_XGMI_LINKS && link < xgmi_tracks.write_data.size();
-            ++link)
+            link < MAX_NUM_XGMI_LINKS && link < xgmi_tracks.write_data.size(); ++link)
         {
             if(metric_values.xgmi.data_acc.write[link] != 0)
             {

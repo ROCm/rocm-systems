@@ -2546,7 +2546,7 @@ def amdsmi_get_processor_type(processor_handle: processor_handle_t) -> Dict[str,
     if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
         raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
 
-    dev_type = amdsmi_wrapper.processor_type_t()
+    dev_type = amdsmi_wrapper.amdsmi_processor_type_t()
     _check_res(amdsmi_wrapper.amdsmi_get_processor_type(processor_handle, ctypes.byref(dev_type)))
 
     return {"processor_type": AmdSmiProcessorType(dev_type.value).name}

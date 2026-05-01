@@ -10,6 +10,7 @@ exclude: |
     # these projects have their own pre-commit-config.yaml
     | projects/amdsmi/
     | projects/rdc/
+    | projects/rocprofiler-compute/
     | projects/rocm-smi-lib/
 
 repos:
