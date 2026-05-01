@@ -21,6 +21,10 @@ env:
   BUILD_TYPE: Release
   ROCM_DIR: /opt/rocm
 
+defaults:
+  run:
+    shell: bash
+
 jobs:
   debian-buildinstall:
     name: Build
@@ -37,132 +41,102 @@ jobs:
       options: --rm --privileged --device=/dev/kfd --device=/dev/dri --group-add video --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --shm-size=64G --cap-add=SYS_MODULE -v /lib/modules:/lib/modules -u root
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+
+      - name: Mark workspace safe for git
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
       - name: Set Artifact Metadata
         if: github.event_name == 'pull_request'
         run: |
-          # Set PR number and date for artifact naming
+          set -euo pipefail
           echo "PR_NUMBER=PR${{ github.event.pull_request.number }}" >> $GITHUB_ENV
-          # Set date in MMDDYY-HHMM format (UTC time)
           echo "BUILD_DATE=$(date -u +%m%d%y-%H%M)" >> $GITHUB_ENV
 
       - name: Set Project Directory
         run: |
-          # Find the directory containing the main CMakeLists.txt for AMDSMI
+          set -euo pipefail
           TARGET_DIR=$(find $GITHUB_WORKSPACE -path "*/projects/amdsmi/CMakeLists.txt" -exec dirname {} \;)
-          
           if [ -z "$TARGET_DIR" ]; then
-            echo "Could not find CMakeLists.txt in projects/amdsmi. Searching root..."
             TARGET_DIR=$(find $GITHUB_WORKSPACE -maxdepth 2 -name "CMakeLists.txt" -exec dirname {} \; | head -n 1)
           fi
-          
           echo "PROJECT_DIR=$TARGET_DIR" >> $GITHUB_ENV
 
-      - name: Update repositories for Debian10
-        if: matrix.os == 'Debian10'
+      - name: Run AMDSMI Build and Install
+        shell: bash
         run: |
-          set -e
-          echo 'Updating repositories for Debian10 (archived)'
-          cat > /etc/apt/sources.list << EOF
-          deb http://archive.debian.org/debian buster main
-          deb http://archive.debian.org/debian-security buster/updates main
-          EOF
-          echo 'Acquire::Check-Valid-Until "false";' > /etc/apt/apt.conf.d/99-disable-check-valid-until
-          apt update
+          set -euo pipefail
+          SCRIPT=$(find $GITHUB_WORKSPACE -path "*/projects/amdsmi/tests/amdsmi_build/run_amdsmi_build.py" | head -1)
+          if [ -z "$SCRIPT" ]; then
+            echo "ERROR: run_amdsmi_build.py not found"
+            exit 1
+          fi
+          echo "Using runner script: $SCRIPT"
 
-      - name: Build AMDSMI
+          ARGS=(
+            --project-dir "${{ env.PROJECT_DIR }}"
+            --os-label "${{ matrix.os }}"
+            --test-results-dir "/tmp/test-results-${{ matrix.os }}"
+            --package-manager apt
+            --package-format deb
+          )
+
+          if [ "${{ matrix.os }}" = "Debian10" ]; then
+            ARGS+=(--debian10-sources)
+          fi
+
+          echo "Running: python3 $SCRIPT ${ARGS[*]}"
+          python3 "$SCRIPT" "${ARGS[@]}"
+
+      - name: AMDSMI Build Result
+        if: always()
         run: |
-          set -e
-          echo 'Building on ${{ matrix.os }}'
-          BUILD_FOLDER=${{ env.PROJECT_DIR }}/build
-          RETRIES=3
+          set -euo pipefail
+          RESULT="/tmp/test-results-${{ matrix.os }}/build_result.txt"
+          if [ -f "$RESULT" ]; then
+            cat "$RESULT"
+            grep -q "FAILED" "$RESULT" && echo "::error::Build FAILED for ${{ matrix.os }}" || true
+          fi
 
-          for i in $(seq 1 $RETRIES); do
-            echo "Build attempt $i for ${{ matrix.os }}..."
-            rm -rf $BUILD_FOLDER
-            mkdir -p $BUILD_FOLDER
-            cd $BUILD_FOLDER
+      - name: AMDSMI Installation Result
+        if: always()
+        run: |
+          set -euo pipefail
+          RESULT="/tmp/test-results-${{ matrix.os }}/install_result.txt"
+          if [ -f "$RESULT" ]; then
+            cat "$RESULT"
+            grep -q "FAILED" "$RESULT" && echo "::error::Installation FAILED for ${{ matrix.os }}" || true
+          fi
 
-            # Configure, build, and package
-            if cmake ${{ env.PROJECT_DIR }} -DBUILD_TESTS=ON -DENABLE_ESMI_LIB=ON 2>&1 | tee cmake.log && \
-               make -j $(nproc) 2>&1 | tee make.log && \
-               make package 2>&1 | tee package.log; then
-
-              # Parse and report warnings as GitHub annotations
-              echo "::group::Build Warnings"
-              grep -i "warning" cmake.log make.log package.log | while read -r line; do
-                echo "::warning::$line"
-              done
-              echo "::endgroup::"
-
-              echo "Build successful on attempt $i"
-              break
-            else
-              echo "Build failed on attempt $i"
-              if [ $i -eq $RETRIES ]; then
-                echo "All $RETRIES build attempts failed. Exiting."
-                exit 1
-              fi
-              sleep $((2 * i))
-            fi
-          done
-          echo "Build completed on ${{ matrix.os }}"
+      - name: Verify Wheel Site-Packages Result
+        if: always()
+        run: |
+          set -euo pipefail
+          RESULT="/tmp/test-results-${{ matrix.os }}/verify_wheel_result.txt"
+          if [ -f "$RESULT" ]; then
+            cat "$RESULT"
+            grep -q "FAILED" "$RESULT" && echo "::error::Wheel verification FAILED for ${{ matrix.os }}" || true
+          fi
 
       - name: Upload Debian Package Artifacts
         if: github.event_name == 'pull_request'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: amd-smi-lib-deb-${{ matrix.os }}-${{ env.PR_NUMBER }}-${{ env.BUILD_DATE }}
           path: ${{ env.PROJECT_DIR }}/build/amd-smi-lib*99999-local_amd64.deb
           if-no-files-found: warn
           retention-days: 7
 
-      - name: Install AMDSMI
-        run: |
-          cd ${{ env.PROJECT_DIR }}/build
-          if [ "${{ matrix.os }}" != "Debian10" ]; then
-            apt update
-          fi
-
-          RETRIES=3
-          for i in $(seq 1 $RETRIES); do
-            echo "Installation attempt $i for ${{ matrix.os }}..."
-            if apt install -y ./amd-smi-lib*99999-local_amd64.deb; then
-              echo "Installation successful on attempt $i"
-              ln -s /opt/rocm/bin/amd-smi /usr/local/bin
-
-              # Verify Installation
-              echo 'Verifying installation:'
-              amd-smi version
-              python3 -m pip list | grep amd
-              python3 -m pip list | grep pip
-              python3 -m pip list | grep setuptools
-              echo 'Completed installation on ${{ matrix.os }}'
-              break
-            else
-              echo "Installation failed on attempt $i"
-              if [ $i -eq $RETRIES ]; then
-                echo "All $RETRIES installation attempts failed. Exiting."
-                exit 1
-              fi
-              sleep $((2 * i))
-            fi
-          done
-          echo "Build completed on ${{ matrix.os }}"
-
       - name: Uninstall
         if: always()
         run: |
+          set -euo pipefail
           set -e
-          echo 'Uninstalling on ${{ matrix.os }}'
           apt remove -y amd-smi-lib || true
           rm -f /usr/local/bin/amd-smi
           if [ -d /opt/rocm/share/amd_smi ]; then
-            echo '/opt/rocm/share/amd_smi exists. Removing.'
             rm -rf /opt/rocm/share/amd_smi
           fi
-          echo 'Uninstall done on ${{ matrix.os }}'
 
   debian-test:
     name: Tests
@@ -180,79 +154,49 @@ jobs:
       options: --rm --privileged --device=/dev/kfd --device=/dev/dri --group-add video --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --shm-size=64G --cap-add=SYS_MODULE -v /lib/modules:/lib/modules -u root
 
     steps:
-      - uses: actions/checkout@v4
-      
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+
+      - name: Mark workspace safe for git
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
       - name: Set Project Directory
         run: |
+          set -euo pipefail
           TARGET_DIR=$(find $GITHUB_WORKSPACE -path "*/projects/amdsmi/CMakeLists.txt" -exec dirname {} \;)
           if [ -z "$TARGET_DIR" ]; then
             TARGET_DIR=$(find $GITHUB_WORKSPACE -maxdepth 2 -name "CMakeLists.txt" -exec dirname {} \; | head -n 1)
           fi
           echo "PROJECT_DIR=$TARGET_DIR" >> $GITHUB_ENV
 
-      - name: Update repositories for Debian10
-        if: matrix.os == 'Debian10'
+      - name: Run AMDSMI Build and Install
+        shell: bash
         run: |
-          set -e
-          echo 'Updating repositories for Debian10 (archived)'
-          cat > /etc/apt/sources.list << EOF
-          deb http://archive.debian.org/debian buster main
-          deb http://archive.debian.org/debian-security buster/updates main
-          EOF
-          echo 'Acquire::Check-Valid-Until "false";' > /etc/apt/apt.conf.d/99-disable-check-valid-until
-          apt update
+          set -euo pipefail
+          SCRIPT=$(find $GITHUB_WORKSPACE -path "*/projects/amdsmi/tests/amdsmi_build/run_amdsmi_build.py" | head -1)
+          if [ -z "$SCRIPT" ]; then
+            echo "ERROR: run_amdsmi_build.py not found"
+            exit 1
+          fi
 
-      - name: Build and Install for Test
-        run: |
-          set -e
-          echo 'Building for test on ${{ matrix.os }}'
-          BUILD_FOLDER=${{ env.PROJECT_DIR }}/build
-          RETRIES=3
+          ARGS=(
+            --project-dir "${{ env.PROJECT_DIR }}"
+            --os-label "${{ matrix.os }}"
+            --test-results-dir "/tmp/test-results-${{ matrix.os }}"
+            --package-manager apt
+            --package-format deb
+          )
 
-          for i in $(seq 1 $RETRIES); do
-            echo "Build attempt $i for ${{ matrix.os }} test..."
-            rm -rf $BUILD_FOLDER
-            mkdir -p $BUILD_FOLDER
-            cd $BUILD_FOLDER
+          if [ "${{ matrix.os }}" = "Debian10" ]; then
+            ARGS+=(--debian10-sources)
+          fi
 
-            if cmake ${{ env.PROJECT_DIR }} -DBUILD_TESTS=ON -DENABLE_ESMI_LIB=ON && \
-               make -j $(nproc) && \
-               make package; then
-              echo "Build successful on attempt $i"
-              break
-            else
-              echo "Build failed on attempt $i"
-              if [ $i -eq $RETRIES ]; then
-                echo "All $RETRIES build attempts failed. Exiting."
-                exit 1
-              fi
-              sleep $((2 * i))
-            fi
-          done
-
-          echo 'Installing for test on ${{ matrix.os }}'
-          for i in $(seq 1 $RETRIES); do
-            echo "Installation attempt $i for test on ${{ matrix.os }}..."
-            if apt install -y $BUILD_FOLDER/amd-smi-lib*99999-local_amd64.deb; then
-              echo "Installation successful on attempt $i"
-              ln -s /opt/rocm/bin/amd-smi /usr/local/bin
-              echo 'Install done for test on ${{ matrix.os }}'
-              break
-            else
-              echo "Installation failed on attempt $i"
-              if [ $i -eq $RETRIES ]; then
-                echo "All $RETRIES installation attempts failed. Exiting."
-                exit 1
-              fi
-              sleep $((2 * i))
-            fi
-          done
+          python3 "$SCRIPT" "${ARGS[@]}"
 
       - name: AMDSMI Command Tests
         shell: bash
         run: |
+          set -euo pipefail
           set -e
-          echo "Running AMDSMI commands on ${{ matrix.os }}"
           mkdir -p /tmp/test-results-${{ matrix.os }}
           commands=(
             "amd-smi version"
@@ -272,19 +216,17 @@ jobs:
           for cmd in "${commands[@]}"; do
             debug_cmd="$cmd --loglevel debug"
             echo "Running: $debug_cmd"
-            if ! eval "$debug_cmd" > /tmp/test-results-${{ matrix.os }}/$(echo $cmd | tr ' ' '_').log 2>&1; then
+            log="/tmp/test-results-${{ matrix.os }}/$(echo $cmd | tr ' ' '_').log"
+            if ! eval "$debug_cmd" > "$log" 2>&1; then
               echo "Command '$debug_cmd' failed."
-              cat /tmp/test-results-${{ matrix.os }}/$(echo $cmd | tr ' ' '_').log
+              cat "$log"
               exit 1
-            else
-              echo "$debug_cmd passed."
             fi
           done
-          echo "AMDSMI commands done on ${{ matrix.os }}"
 
       - name: Upload AMDSMI Command Test Results
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: amdsmi-command-tests-${{ matrix.os }}
           path: /tmp/test-results-${{ matrix.os }}
@@ -292,110 +234,153 @@ jobs:
       - name: Run AMDSMI, Python, and Example Tests
         shell: bash
         run: |
+          set -euo pipefail
           set -e
-          echo 'Running other tests on ${{ matrix.os }}'
+          RESULTS_DIR=/tmp/test-results-${{ matrix.os }}
 
-          # AMDSMI Tests
-          echo 'Running AMDSMI tests'
           cd /opt/rocm/share/amd_smi/tests
           source amdsmitst.exclude
           source detect_asic_filter.sh
           echo "GTEST_EXCLUDE=${GTEST_EXCLUDE}"
+          ./amdsmitst --gtest_filter="-${GTEST_EXCLUDE}" > "$RESULTS_DIR/amdsmi_tests.log" 2>&1
 
-          AMDSMI_RETRIES=3
-          for attempt in $(seq 1 $AMDSMI_RETRIES); do
-            echo "AMDSMI test attempt $attempt for ${{ matrix.os }}..."
-            if ./amdsmitst --gtest_filter="-${GTEST_EXCLUDE}" > /tmp/test-results-${{ matrix.os }}/amdsmi_tests.log 2>&1; then
-              echo "AMDSMI tests passed on attempt $attempt"
-              echo "=============== TEST OUTPUT ==============="
-              cat /tmp/test-results-${{ matrix.os }}/amdsmi_tests.log | grep -E "\[==========\]|\[  PASSED  \]|\[  SKIPPED \]|\[  FAILED  \]"
-              echo "=============================================="
-              echo "AMDSMI tests done"
-              break
-            else
-              TEST_EXIT_CODE=$?
-              echo "AMDSMI tests failed on attempt $attempt with exit code $TEST_EXIT_CODE"
-              if [ $attempt -eq $AMDSMI_RETRIES ]; then
-                echo "All $AMDSMI_RETRIES AMDSMI test attempts failed. Final failure."
-                echo "=============== TEST OUTPUT ==============="
-                cat /tmp/test-results-${{ matrix.os }}/amdsmi_tests.log | grep -E "\[==========\]|\[  PASSED  \]|\[  SKIPPED \]|\[  FAILED  \]"
-                echo "=============================================="
-                echo "AMDSMI tests failed"
-                exit $TEST_EXIT_CODE
-              else
-                echo "Retrying AMDSMI tests in $((2 * attempt)) seconds..."
-                sleep $((2 * attempt))
-              fi
-            fi
-          done
-
-          # Python Tests
-          echo 'Running Python tests'
           cd /opt/rocm/share/amd_smi/tests/python_unittest
-          echo "Running integration tests..."
-          if ! ./integration_test.py -v > /tmp/test-results-${{ matrix.os }}/integration_test_output.txt 2>&1; then
-            echo "Integration tests failed!"
-            echo "=============== INTEGRATION TEST OUTPUT ==============="
-            tail -100 /tmp/test-results-${{ matrix.os }}/integration_test_output.txt
-            echo "======================================================="
-            exit 1
+          ./integration_test.py -v > "$RESULTS_DIR/integration_test_output.txt" 2>&1
+          ./unit_tests.py -v > "$RESULTS_DIR/unit_test_output.txt" 2>&1
+          if [ -f ./perf_tests.py ]; then
+            ./perf_tests.py -v > "$RESULTS_DIR/perf_test_output.txt" 2>&1 || echo 'perf_tests.py failed'
           else
-            echo "Integration tests passed"
+            echo "perf_tests.py not present; skipping" > "$RESULTS_DIR/perf_test_output.txt"
           fi
 
-          echo "Running unit tests..."
-          if ! ./unit_tests.py -v > /tmp/test-results-${{ matrix.os }}/unit_test_output.txt 2>&1; then
-            echo "Unit tests failed!"
-            echo "=============== UNIT TEST OUTPUT ==============="
-            tail -100 /tmp/test-results-${{ matrix.os }}/unit_test_output.txt
-            echo "================================================"
-            exit 1
-          else
-            echo "Unit tests passed"
-          fi
-
-          echo "Python tests done"
-
-          # Example Tests
-          echo 'Running Example tests'
           cd ${{ env.PROJECT_DIR }}/example
           rm -rf build
           cmake -B build -DENABLE_ESMI_LIB=OFF
           make -C build -j $(nproc)
           cd build
-          ./amd_smi_drm_ex > /tmp/test-results-${{ matrix.os }}/amd_smi_drm_ex.log 2>&1 || echo 'amd_smi_drm_ex failed'
-          ./amd_smi_nodrm_ex > /tmp/test-results-${{ matrix.os }}/amd_smi_nodrm_ex.log 2>&1 || echo 'amd_smi_nodrm_ex failed'
-          echo "Example tests done"
+          ./amd_smi_drm_ex > "$RESULTS_DIR/amd_smi_drm_ex.log" 2>&1 || echo 'amd_smi_drm_ex failed'
+          ./amd_smi_nodrm_ex > "$RESULTS_DIR/amd_smi_nodrm_ex.log" 2>&1 || echo 'amd_smi_nodrm_ex failed'
 
       - name: AMDSMI Test Results
         if: always()
-        run: |
-          echo "Displaying AMDSMI test results for ${{ matrix.os }}"
-          cat /tmp/test-results-${{ matrix.os }}/amdsmi_tests.log || echo "No AMDSMI test results found for ${{ matrix.os }}"
+        run: cat /tmp/test-results-${{ matrix.os }}/amdsmi_tests.log || echo "No AMDSMI test results"
 
       - name: Integration Test Results
         if: always()
-        run: |
-          echo "Displaying Integration test results for ${{ matrix.os }}"
-          cat /tmp/test-results-${{ matrix.os }}/integration_test_output.txt || echo "No integration test results found for ${{ matrix.os }}"
+        run: cat /tmp/test-results-${{ matrix.os }}/integration_test_output.txt || echo "No integration test results"
 
       - name: Unit Test Results
         if: always()
-        run: |
-          echo "Displaying Unit Test Results for ${{ matrix.os }}"
-          cat /tmp/test-results-${{ matrix.os }}/unit_test_output.txt || echo "No unit test results found for ${{ matrix.os }}"
+        run: cat /tmp/test-results-${{ matrix.os }}/unit_test_output.txt || echo "No unit test results"
+
+      - name: Perf Test Results
+        if: always()
+        run: cat /tmp/test-results-${{ matrix.os }}/perf_test_output.txt || echo "No perf test results"
 
       - name: Example DRM Test Results
         if: always()
-        run: |
-          echo "Displaying Example DRM test results for ${{ matrix.os }}"
-          cat /tmp/test-results-${{ matrix.os }}/amd_smi_drm_ex.log || echo "No DRM example test results found for ${{ matrix.os }}"
+        run: cat /tmp/test-results-${{ matrix.os }}/amd_smi_drm_ex.log || echo "No DRM example results"
 
       - name: Example NoDRM Test Results
         if: always()
+        run: cat /tmp/test-results-${{ matrix.os }}/amd_smi_nodrm_ex.log || echo "No NoDRM example results"
+
+      - name: CI Summary
+        if: always()
+        shell: bash
         run: |
-          echo "Displaying Example NoDRM test results for ${{ matrix.os }}"
-          cat /tmp/test-results-${{ matrix.os }}/amd_smi_nodrm_ex.log || echo "No NoDRM example test results found for ${{ matrix.os }}"
+          set -uo pipefail
+          RESULTS_DIR="/tmp/test-results-${{ matrix.os }}"
+          declare -a FAILURES=()
+          DETAILS=""
+
+          echo "=========================================="
+          echo "CI SUMMARY for ${{ matrix.os }}"
+          echo "=========================================="
+
+          # 1. build/install/verify stage results
+          for result_file in "$RESULTS_DIR"/*_result.txt; do
+            [ -f "$result_file" ] || continue
+            if grep -q "FAILED" "$result_file"; then
+              STAGE=$(basename "$result_file" _result.txt | tr '_' ' ')
+              FAILURES+=("$STAGE")
+              CONTENT=$(cat "$result_file")
+              DETAILS+=$'\n'"#### ${STAGE}"$'\n\n'"\`\`\`"$'\n'"${CONTENT}"$'\n'"\`\`\`"$'\n'
+              echo "FAILED: $STAGE"
+            fi
+          done
+
+          # 2. amd-smi command test logs
+          CMD_FAILS=""
+          for log in "$RESULTS_DIR"/amd-smi_*.log; do
+            [ -f "$log" ] || continue
+            CMD=$(basename "$log" .log | sed 's/amd-smi_//')
+            if grep -qE "Traceback|AmdSmiException|Error code:" "$log" 2>/dev/null; then
+              CMD_FAILS+=" $CMD"
+            fi
+          done
+          if [ -n "$CMD_FAILS" ]; then
+            FAILURES+=("Command tests:$CMD_FAILS")
+            DETAILS+=$'\n'"#### Command Tests"$'\n\n'"Failed: \`$CMD_FAILS\`"$'\n'
+          fi
+
+          # 3. AMDSMI gtest output
+          if [ -f "$RESULTS_DIR/amdsmi_tests.log" ]; then
+            GTEST_FAILS=$(grep -c "\[  FAILED  \]" "$RESULTS_DIR/amdsmi_tests.log" 2>/dev/null || true)
+            if [ "${GTEST_FAILS:-0}" -gt 0 ] 2>/dev/null; then
+              FAILURES+=("AMDSMI Tests ($GTEST_FAILS)")
+              FULL_LOG=$(cat "$RESULTS_DIR/amdsmi_tests.log")
+              DETAILS+=$'\n'"#### AMDSMI Tests — $GTEST_FAILS failure(s)"$'\n\n'"\`\`\`"$'\n'"${FULL_LOG}"$'\n'"\`\`\`"$'\n'
+            fi
+          fi
+
+          # 4. Python test outputs (integration / unit / perf)
+          for test_file in integration_test_output.txt unit_test_output.txt perf_test_output.txt; do
+            FULL="$RESULTS_DIR/$test_file"
+            [ -f "$FULL" ] || continue
+            PY_FAILS=$(grep -cE "^FAIL:|^ERROR:" "$FULL" 2>/dev/null || true)
+            if [ "${PY_FAILS:-0}" -gt 0 ] 2>/dev/null; then
+              TEST_NAME=$(basename "$test_file" _output.txt | tr '_' ' ')
+              FAILURES+=("${TEST_NAME} ($PY_FAILS)")
+              FULL_LOG=$(cat "$FULL")
+              DETAILS+=$'\n'"#### ${TEST_NAME} — $PY_FAILS failure(s)"$'\n\n'"\`\`\`"$'\n'"${FULL_LOG}"$'\n'"\`\`\`"$'\n'
+            fi
+          done
+
+          # 5. example test results (segfault detection)
+          for ex_log in amd_smi_drm_ex.log amd_smi_nodrm_ex.log; do
+            FULL="$RESULTS_DIR/$ex_log"
+            [ -f "$FULL" ] || continue
+            if grep -qiE "segfault|SIGSEGV|abort" "$FULL" 2>/dev/null; then
+              EX_NAME="${ex_log%.log}"
+              FAILURES+=("Example $EX_NAME")
+              FULL_LOG=$(cat "$FULL")
+              DETAILS+=$'\n'"#### Example ${EX_NAME}"$'\n\n'"\`\`\`"$'\n'"${FULL_LOG}"$'\n'"\`\`\`"$'\n'
+            fi
+          done
+
+          {
+            if [ ${#FAILURES[@]} -gt 0 ]; then
+              echo "## :x: CI Failed — ${{ matrix.os }}"
+              echo ""
+              echo "**${#FAILURES[@]} failure(s) detected:**"
+              echo ""
+              for f in "${FAILURES[@]}"; do
+                echo "- :red_circle: ${f}"
+              done
+              echo "$DETAILS"
+            else
+              echo "## :white_check_mark: CI Passed — ${{ matrix.os }}"
+              echo ""
+              echo "All stages and tests passed successfully."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [ ${#FAILURES[@]} -gt 0 ]; then
+            echo "::error::${#FAILURES[@]} failure(s) for ${{ matrix.os }}: ${FAILURES[*]}"
+          else
+            echo "All stages and tests PASSED for ${{ matrix.os }}"
+          fi
 
   rpm-buildinstall:
     name: Build
@@ -418,219 +403,114 @@ jobs:
       options: --rm --privileged --device=/dev/kfd --device=/dev/dri --group-add video --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --shm-size=64G --cap-add=SYS_MODULE -v /lib/modules:/lib/modules -u root
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+
+      - name: Mark workspace safe for git
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
       - name: Set Artifact Metadata
         if: github.event_name == 'pull_request'
         run: |
-          # Set PR number and date for artifact naming
+          set -euo pipefail
           echo "PR_NUMBER=PR${{ github.event.pull_request.number }}" >> $GITHUB_ENV
-          # Set date in MMDDYY-HHMM format (UTC time)
           echo "BUILD_DATE=$(date -u +%m%d%y-%H%M)" >> $GITHUB_ENV
 
       - name: Set Project Directory
         run: |
+          set -euo pipefail
           TARGET_DIR=$(find $GITHUB_WORKSPACE -path "*/projects/amdsmi/CMakeLists.txt" -exec dirname {} \;)
           if [ -z "$TARGET_DIR" ]; then
             TARGET_DIR=$(find $GITHUB_WORKSPACE -maxdepth 2 -name "CMakeLists.txt" -exec dirname {} \; | head -n 1)
           fi
           echo "PROJECT_DIR=$TARGET_DIR" >> $GITHUB_ENV
 
-      - name: Set PkgMgr
+      - name: Run AMDSMI Build and Install
+        shell: bash
         run: |
-          set -e
+          set -euo pipefail
+          SCRIPT=$(find $GITHUB_WORKSPACE -path "*/projects/amdsmi/tests/amdsmi_build/run_amdsmi_build.py" | head -1)
+          if [ -z "$SCRIPT" ]; then
+            echo "ERROR: run_amdsmi_build.py not found"
+            exit 1
+          fi
+
           case "${{ matrix.os }}" in
-            SLES)
-              echo "PACKAGE_MANAGER=zypper" >> $GITHUB_ENV
-              ;;
-            RHEL8|RHEL9|RHEL10|AlmaLinux8|AzureLinux3)
-              echo "PACKAGE_MANAGER=dnf" >> $GITHUB_ENV
-              ;;
+            SLES) PKG_MGR=zypper ;;
+            RHEL8|RHEL9|RHEL10|AlmaLinux8|AzureLinux3) PKG_MGR=dnf ;;
+            *) PKG_MGR=dnf ;;
           esac
 
-      - name: Add more_itertools
-        if: matrix.os == 'AzureLinux3'
+          ARGS=(
+            --project-dir "${{ env.PROJECT_DIR }}"
+            --os-label "${{ matrix.os }}"
+            --test-results-dir "/tmp/test-results-${{ matrix.os }}"
+            --package-manager "$PKG_MGR"
+            --package-format rpm
+          )
+
+          case "${{ matrix.os }}" in
+            RHEL10|AlmaLinux8) ARGS+=(--qa-rpaths --retries 5) ;;
+          esac
+
+          if [ "${{ matrix.os }}" = "AzureLinux3" ]; then
+            ARGS+=(--skip-setuptools-upgrade --install-more-itertools)
+          fi
+
+          echo "Running: python3 $SCRIPT ${ARGS[*]}"
+          python3 "$SCRIPT" "${ARGS[@]}"
+
+      - name: AMDSMI Build Result
+        if: always()
         run: |
-          set -e
-          echo 'Installing more_itertools on ${{ matrix.os }}'
-          python3 -m pip install more_itertools
+          set -euo pipefail
+          RESULT="/tmp/test-results-${{ matrix.os }}/build_result.txt"
+          if [ -f "$RESULT" ]; then
+            cat "$RESULT"
+            grep -q "FAILED" "$RESULT" && echo "::error::Build FAILED for ${{ matrix.os }}" || true
+          fi
 
-      - name: Build AMDSMI(RHEL10 & AlmaLinux8)
-        if: matrix.os == 'RHEL10' || matrix.os == 'AlmaLinux8'
+      - name: AMDSMI Installation Result
+        if: always()
         run: |
-          set -e
-          echo 'Building on ${{ matrix.os }} with retries and QA_RPATHS'
-          BUILD_FOLDER=${{ env.PROJECT_DIR }}/build
-          RETRIES=5
+          set -euo pipefail
+          RESULT="/tmp/test-results-${{ matrix.os }}/install_result.txt"
+          if [ -f "$RESULT" ]; then
+            cat "$RESULT"
+            grep -q "FAILED" "$RESULT" && echo "::error::Installation FAILED for ${{ matrix.os }}" || true
+          fi
 
-          # Set QA_RPATHS to ignore empty (0x0010) and invalid (0x0002) RPATHs
-          export QA_RPATHS=$((0x0010 | 0x0002))
-
-          for i in $(seq 1 $RETRIES); do
-            echo "Build attempt $i for ${{ matrix.os }} ..."
-            rm -rf $BUILD_FOLDER
-            mkdir -p $BUILD_FOLDER
-            cd $BUILD_FOLDER
-
-            if cmake ${{ env.PROJECT_DIR }} -DBUILD_TESTS=ON -DENABLE_ESMI_LIB=ON && \
-               make -j $(nproc) && \
-               make package; then
-              echo "Build successful on attempt $i"
-              break
-            else
-              echo "Build failed on attempt $i"
-              if [ $i -eq $RETRIES ]; then
-                echo "All $RETRIES build attempts failed. Exiting."
-                exit 1
-              fi
-              sleep $((2 * i))
-            fi
-          done
-          echo "Build completed on ${{ matrix.os }}"
-
-      - name: Upload RPM Package Artifacts (RHEL10 & AlmaLinux8)
-        if: github.event_name == 'pull_request' && (matrix.os == 'RHEL10' || matrix.os == 'AlmaLinux8')
-        uses: actions/upload-artifact@v4
-        with:
-          name: amd-smi-lib-rpm-${{ matrix.os }}-${{ env.PR_NUMBER }}-${{ env.BUILD_DATE }}
-          path: ${{ env.PROJECT_DIR }}/build/amd-smi-lib-*99999-local*.rpm
-          if-no-files-found: warn
-          retention-days: 7
-
-      - name: Build AMDSMI
-        if: matrix.os != 'RHEL10' && matrix.os != 'AlmaLinux8'
+      - name: Verify Wheel Site-Packages Result
+        if: always()
         run: |
-          set -e
-          echo 'Building on ${{ matrix.os }}'
-          BUILD_FOLDER=${{ env.PROJECT_DIR }}/build
-          RETRIES=3
-
-          for i in $(seq 1 $RETRIES); do
-            echo "Build attempt $i for ${{ matrix.os }}..."
-            rm -rf $BUILD_FOLDER
-            mkdir -p $BUILD_FOLDER
-            cd $BUILD_FOLDER
-
-            # Capture build output to parse warnings
-            if cmake ${{ env.PROJECT_DIR }} -DBUILD_TESTS=ON -DENABLE_ESMI_LIB=ON 2>&1 | tee cmake.log && \
-               make -j $(nproc) 2>&1 | tee make.log && \
-               make package 2>&1 | tee package.log; then
-
-              # Parse and report warnings as GitHub annotations
-              echo "::group::Build Warnings"
-              grep -i "warning" cmake.log make.log package.log | while read -r line; do
-                echo "::warning::$line"
-              done
-              echo "::endgroup::"
-
-              echo "Build successful on attempt $i"
-              break
-            else
-              echo "Build failed on attempt $i"
-              if [ $i -eq $RETRIES ]; then
-                echo "All $RETRIES build attempts failed. Exiting."
-                exit 1
-              fi
-              sleep $((2 * i))
-            fi
-          done
-          echo "Build completed on ${{ matrix.os }}"
+          set -euo pipefail
+          RESULT="/tmp/test-results-${{ matrix.os }}/verify_wheel_result.txt"
+          if [ -f "$RESULT" ]; then
+            cat "$RESULT"
+            grep -q "FAILED" "$RESULT" && echo "::error::Wheel verification FAILED for ${{ matrix.os }}" || true
+          fi
 
       - name: Upload RPM Package Artifacts
-        if: github.event_name == 'pull_request' && matrix.os != 'RHEL10' && matrix.os != 'AlmaLinux8'
-        uses: actions/upload-artifact@v4
+        if: github.event_name == 'pull_request'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: amd-smi-lib-rpm-${{ matrix.os }}-${{ env.PR_NUMBER }}-${{ env.BUILD_DATE }}
           path: ${{ env.PROJECT_DIR }}/build/amd-smi-lib-*99999-local*.rpm
           if-no-files-found: warn
           retention-days: 7
-
-      - name: Install AMDSMI(RHEL10 & AlmaLinux8)
-        if: matrix.os == 'RHEL10' || matrix.os == 'AlmaLinux8'
-        run: |
-          cd ${{ env.PROJECT_DIR }}/build
-          dnf install --setopt=skip_if_unavailable=True python3-setuptools python3-wheel -y
-
-          RETRIES=3
-          for i in $(seq 1 $RETRIES); do
-            echo "RHEL10: Installation attempt $i..."
-            if timeout 10m dnf install -y --skip-broken --disablerepo=* ./amd-smi-lib-*99999-local*.rpm; then
-              echo "Installation successful on attempt $i"
-              ln -s /opt/rocm/bin/amd-smi /usr/local/bin
-
-              echo 'Verifying installation:'
-              amd-smi version
-              python3 -m pip list | grep amd
-              python3 -m pip list | grep pip
-              python3 -m pip list | grep setuptools
-              echo 'Completed installation on RHEL10'
-              break
-            else
-              echo "Installation failed on attempt $i"
-              if [ $i -eq $RETRIES ]; then
-                echo "All $RETRIES installation attempts failed. Exiting."
-                exit 1
-              fi
-              sleep $((2 * i))
-            fi
-          done
-
-      - name: Install AMDSMI
-        if: matrix.os != 'RHEL10' && matrix.os != 'AlmaLinux8'
-        run: |
-          cd ${{ env.PROJECT_DIR }}/build
-          case ${{ env.PACKAGE_MANAGER }} in
-            zypper)
-              timeout 10m zypper --no-refresh --no-gpg-checks install -y ./amd-smi-lib-*99999-local*.rpm
-              ;;
-            dnf)
-              dnf install --setopt=skip_if_unavailable=True python3-setuptools python3-wheel -y
-              RETRIES=3
-              for i in $(seq 1 $RETRIES); do
-                echo "Attempt $i: Installing AMDSMI package..."
-                if timeout 10m dnf install -y --skip-broken --disablerepo=* ./amd-smi-lib-*99999-local*.rpm; then
-                  echo "AMDSMI package installed successfully."
-                  break
-                else
-                  echo "Installation failed on attempt $i. Retrying..."
-                  if [ $i -eq $RETRIES ]; then
-                    echo "All $RETRIES attempts failed. Exiting."
-                    exit 1
-                  fi
-                  sleep 10
-                fi
-              done
-              ;;
-          esac
-          ln -s /opt/rocm/bin/amd-smi /usr/local/bin
-
-          # Verify Installation
-          echo 'Verifying installation:'
-          amd-smi version
-          python3 -m pip list | grep amd
-          python3 -m pip list | grep pip
-          python3 -m pip list | grep setuptools
-          echo 'Completed installation on ${{ matrix.os }}'
 
       - name: Uninstall
         if: always()
         run: |
+          set -euo pipefail
           set -e
-          echo 'Uninstalling on ${{ matrix.os }}'
           case ${{ matrix.os }} in
-            SLES)
-              zypper remove -y amd-smi-lib || true
-              ;;
-            RHEL8|RHEL9|RHEL10|AlmaLinux8|AzureLinux3)
-              dnf remove -y amd-smi-lib || true
-              ;;
+            SLES) zypper remove -y amd-smi-lib || true ;;
+            RHEL8|RHEL9|RHEL10|AlmaLinux8|AzureLinux3) dnf remove -y amd-smi-lib || true ;;
           esac
           rm -f /usr/local/bin/amd-smi
           if [ -d /opt/rocm/share/amd_smi ]; then
-            echo '/opt/rocm/share/amd_smi exists. Removing.'
             rm -rf /opt/rocm/share/amd_smi
           fi
-          echo 'Uninstall done on ${{ matrix.os }}'
 
   rpm-test:
     name: Tests
@@ -654,132 +534,59 @@ jobs:
       options: --rm --privileged --device=/dev/kfd --device=/dev/dri --group-add video --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --shm-size=64G --cap-add=SYS_MODULE -v /lib/modules:/lib/modules -u root
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+
+      - name: Mark workspace safe for git
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
       - name: Set Project Directory
         run: |
+          set -euo pipefail
           TARGET_DIR=$(find $GITHUB_WORKSPACE -path "*/projects/amdsmi/CMakeLists.txt" -exec dirname {} \;)
           if [ -z "$TARGET_DIR" ]; then
             TARGET_DIR=$(find $GITHUB_WORKSPACE -maxdepth 2 -name "CMakeLists.txt" -exec dirname {} \; | head -n 1)
           fi
           echo "PROJECT_DIR=$TARGET_DIR" >> $GITHUB_ENV
 
-      - name: Set PkgMgr
+      - name: Run AMDSMI Build and Install
+        shell: bash
         run: |
-          set -e
+          set -euo pipefail
+          SCRIPT=$(find $GITHUB_WORKSPACE -path "*/projects/amdsmi/tests/amdsmi_build/run_amdsmi_build.py" | head -1)
+          if [ -z "$SCRIPT" ]; then
+            echo "ERROR: run_amdsmi_build.py not found"
+            exit 1
+          fi
+
           case "${{ matrix.os }}" in
-            SLES)
-              echo "PACKAGE_MANAGER=zypper" >> $GITHUB_ENV
-              ;;
-            RHEL8|RHEL9|RHEL10|AlmaLinux8|AzureLinux3)
-              echo "PACKAGE_MANAGER=dnf" >> $GITHUB_ENV
-              ;;
+            SLES) PKG_MGR=zypper ;;
+            RHEL8|RHEL9|RHEL10|AlmaLinux8|AzureLinux3) PKG_MGR=dnf ;;
+            *) PKG_MGR=dnf ;;
           esac
 
-      - name: Add more_itertools
-        if: matrix.os == 'AzureLinux3'
-        run: |
-          set -e
-          echo 'Installing more_itertools on ${{ matrix.os }}'
-          python3 -m pip install more_itertools
+          ARGS=(
+            --project-dir "${{ env.PROJECT_DIR }}"
+            --os-label "${{ matrix.os }}"
+            --test-results-dir "/tmp/test-results-${{ matrix.os }}"
+            --package-manager "$PKG_MGR"
+            --package-format rpm
+          )
 
-      - name: Build and Install for Tests (RHEL10 & AlmaLinux8)
-        if: matrix.os == 'RHEL10' || matrix.os == 'AlmaLinux8'
-        run: |
-          set -e
-          echo 'Building for test on RHEL10/AlmaLinux8 with retries and QA_RPATHS'
-          BUILD_FOLDER=${{ env.PROJECT_DIR }}/build
-          RETRIES=5
-
-          # Set QA_RPATHS to ignore empty (0x0010 | 0x0002) RPATHs
-          export QA_RPATHS=$((0x0010 | 0x0002))
-
-          for i in $(seq 1 $RETRIES); do
-            echo "Build attempt $i for RHEL10/AlmaLinux8 test..."
-            rm -rf $BUILD_FOLDER
-            mkdir -p $BUILD_FOLDER
-            cd $BUILD_FOLDER
-
-            if cmake ${{ env.PROJECT_DIR }} -DBUILD_TESTS=ON -DENABLE_ESMI_LIB=ON && \
-               make -j $(nproc) && \
-               make package; then
-              echo "Build successful on attempt $i"
-              break
-            else
-              echo "Build failed on attempt $i"
-              if [ $i -eq $RETRIES ]; then
-                echo "All $RETRIES build attempts failed. Exiting."
-                exit 1
-              fi
-              sleep $((2 * i))
-            fi
-          done
-
-          echo 'Installing for test on RHEL10/AlmaLinux8'
-          dnf install --setopt=skip_if_unavailable=True python3-setuptools python3-wheel -y
-
-          for i in $(seq 1 $RETRIES); do
-            echo "RHEL10/AlmaLinux8: Installation attempt $i for test..."
-            if timeout 10m dnf install -y --skip-broken --disablerepo=* $BUILD_FOLDER/amd-smi-lib-*99999-local*.rpm; then
-              echo "Installation successful on attempt $i"
-              ln -s /opt/rocm/bin/amd-smi /usr/local/bin
-              echo 'Install done for test on RHEL10/AlmaLinux8'
-              break
-            else
-              echo "Installation failed on attempt $i"
-              if [ $i -eq $RETRIES ]; then
-                echo "All $RETRIES installation attempts failed. Exiting."
-                exit 1
-              fi
-              sleep $((2 * i))
-            fi
-          done
-
-      - name: Build and Install for Tests
-        if: matrix.os != 'RHEL10' && matrix.os != 'AlmaLinux8'
-        run: |
-          set -e
-          echo 'Building for test on ${{ matrix.os }}'
-          BUILD_FOLDER=${{ env.PROJECT_DIR }}/build
-          rm -rf $BUILD_FOLDER
-          mkdir -p $BUILD_FOLDER
-          cd $BUILD_FOLDER
-          cmake ${{ env.PROJECT_DIR }} -DBUILD_TESTS=ON -DENABLE_ESMI_LIB=ON
-          make -j $(nproc)
-          make package
-
-          echo 'Installing for test on ${{ matrix.os }}'
-          case ${{ env.PACKAGE_MANAGER }} in
-            zypper)
-              timeout 10m zypper --no-refresh --no-gpg-checks install -y $BUILD_FOLDER/amd-smi-lib-*99999-local*.rpm
-              ;;
-            dnf)
-              dnf install --setopt=skip_if_unavailable=True python3-setuptools python3-wheel -y
-              RETRIES=3
-              for i in $(seq 1 $RETRIES); do
-                echo "Attempt $i: Installing..."
-                if timeout 10m dnf install -y --skip-broken --disablerepo=* $BUILD_FOLDER/amd-smi-lib-*99999-local*.rpm; then
-                  echo "Install successful."
-                  break
-                else
-                  echo "Attempt $i failed. Retrying..."
-                  if [ $i -eq $RETRIES ]; then
-                    echo "All attempts failed."
-                    exit 1
-                  fi
-                  sleep 10
-                fi
-              done
-              ;;
+          case "${{ matrix.os }}" in
+            RHEL10|AlmaLinux8) ARGS+=(--qa-rpaths --retries 5) ;;
           esac
-          ln -s /opt/rocm/bin/amd-smi /usr/local/bin
-          echo 'Install done for test on ${{ matrix.os }}'
+
+          if [ "${{ matrix.os }}" = "AzureLinux3" ]; then
+            ARGS+=(--skip-setuptools-upgrade --install-more-itertools)
+          fi
+
+          python3 "$SCRIPT" "${ARGS[@]}"
 
       - name: AMDSMI Command Tests
         shell: bash
         run: |
+          set -euo pipefail
           set -e
-          echo "Running AMDSMI commands on ${{ matrix.os }}"
           mkdir -p /tmp/test-results-${{ matrix.os }}
           commands=(
             "amd-smi version"
@@ -799,19 +606,17 @@ jobs:
           for cmd in "${commands[@]}"; do
             debug_cmd="$cmd --loglevel debug"
             echo "Running: $debug_cmd"
-            if ! eval "$debug_cmd" > /tmp/test-results-${{ matrix.os }}/$(echo $cmd | tr ' ' '_').log 2>&1; then
+            log="/tmp/test-results-${{ matrix.os }}/$(echo $cmd | tr ' ' '_').log"
+            if ! eval "$debug_cmd" > "$log" 2>&1; then
               echo "Command '$debug_cmd' failed."
-              cat /tmp/test-results-${{ matrix.os }}/$(echo $cmd | tr ' ' '_').log
+              cat "$log"
               exit 1
-            else
-              echo "$debug_cmd passed."
             fi
           done
-          echo "AMDSMI commands done on ${{ matrix.os }}"
 
       - name: Upload AMDSMI Command Test Results
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: amdsmi-command-tests-${{ matrix.os }}
           path: /tmp/test-results-${{ matrix.os }}
@@ -819,107 +624,150 @@ jobs:
       - name: Run AMDSMI, Python, and Example Tests
         shell: bash
         run: |
+          set -euo pipefail
           set -e
-          echo 'Running other tests on ${{ matrix.os }}'
+          RESULTS_DIR=/tmp/test-results-${{ matrix.os }}
 
-          # AMDSMI Tests
-          echo 'Running AMDSMI tests'
           cd /opt/rocm/share/amd_smi/tests
           source amdsmitst.exclude
           source detect_asic_filter.sh
           echo "GTEST_EXCLUDE=${GTEST_EXCLUDE}"
+          ./amdsmitst --gtest_filter="-${GTEST_EXCLUDE}" > "$RESULTS_DIR/amdsmi_tests.log" 2>&1
 
-          AMDSMI_RETRIES=3
-          for attempt in $(seq 1 $AMDSMI_RETRIES); do
-            echo "AMDSMI test attempt $attempt for ${{ matrix.os }}..."
-            if ./amdsmitst --gtest_filter="-${GTEST_EXCLUDE}" > /tmp/test-results-${{ matrix.os }}/amdsmi_tests.log 2>&1; then
-              echo "AMDSMI tests passed on attempt $attempt"
-              echo "=============== TEST OUTPUT ==============="
-              cat /tmp/test-results-${{ matrix.os }}/amdsmi_tests.log | grep -E "\[==========\]|\[  PASSED  \]|\[  SKIPPED \]|\[  FAILED  \]"
-              echo "=============================================="
-              echo "AMDSMI tests done"
-              break
-            else
-              TEST_EXIT_CODE=$?
-              echo "AMDSMI tests failed on attempt $attempt with exit code $TEST_EXIT_CODE"
-              if [ $attempt -eq $AMDSMI_RETRIES ]; then
-                echo "All $AMDSMI_RETRIES AMDSMI test attempts failed. Final failure."
-                echo "=============== TEST OUTPUT ==============="
-                cat /tmp/test-results-${{ matrix.os }}/amdsmi_tests.log | grep -E "\[==========\]|\[  PASSED  \]|\[  SKIPPED \]|\[  FAILED  \]"
-                echo "=============================================="
-                echo "AMDSMI tests failed"
-                exit $TEST_EXIT_CODE
-              else
-                echo "Retrying AMDSMI tests in $((2 * attempt)) seconds..."
-                sleep $((2 * attempt))
-              fi
-            fi
-          done
-
-          # Python Tests
-          echo 'Running Python tests'
           cd /opt/rocm/share/amd_smi/tests/python_unittest
-          echo "Running integration tests..."
-          if ! ./integration_test.py -v > /tmp/test-results-${{ matrix.os }}/integration_test_output.txt 2>&1; then
-            echo "Integration tests failed!"
-            echo "=============== INTEGRATION TEST OUTPUT ==============="
-            tail -100 /tmp/test-results-${{ matrix.os }}/integration_test_output.txt
-            echo "======================================================="
-            exit 1
+          ./integration_test.py -v > "$RESULTS_DIR/integration_test_output.txt" 2>&1
+          ./unit_tests.py -v > "$RESULTS_DIR/unit_test_output.txt" 2>&1
+          if [ -f ./perf_tests.py ]; then
+            ./perf_tests.py -v > "$RESULTS_DIR/perf_test_output.txt" 2>&1 || echo 'perf_tests.py failed'
           else
-            echo "Integration tests passed"
+            echo "perf_tests.py not present; skipping" > "$RESULTS_DIR/perf_test_output.txt"
           fi
 
-          echo "Running unit tests..."
-          if ! ./unit_tests.py -v > /tmp/test-results-${{ matrix.os }}/unit_test_output.txt 2>&1; then
-            echo "Unit tests failed!"
-            echo "=============== UNIT TEST OUTPUT ==============="
-            tail -100 /tmp/test-results-${{ matrix.os }}/unit_test_output.txt
-            echo "================================================"
-            exit 1
-          else
-            echo "Unit tests passed"
-          fi
-
-          echo "Python tests done"
-
-          # Example Tests
-          echo 'Running Example tests'
           cd ${{ env.PROJECT_DIR }}/example
           rm -rf build
           cmake -B build -DENABLE_ESMI_LIB=OFF
           make -C build -j $(nproc)
           cd build
-          ./amd_smi_drm_ex > /tmp/test-results-${{ matrix.os }}/amd_smi_drm_ex.log 2>&1 || echo 'amd_smi_drm_ex failed'
-          ./amd_smi_nodrm_ex > /tmp/test-results-${{ matrix.os }}/amd_smi_nodrm_ex.log 2>&1 || echo 'amd_smi_nodrm_ex failed'
-          echo "Example tests done"
+          ./amd_smi_drm_ex > "$RESULTS_DIR/amd_smi_drm_ex.log" 2>&1 || echo 'amd_smi_drm_ex failed'
+          ./amd_smi_nodrm_ex > "$RESULTS_DIR/amd_smi_nodrm_ex.log" 2>&1 || echo 'amd_smi_nodrm_ex failed'
 
       - name: AMDSMI Test Results
         if: always()
-        run: |
-          echo "Displaying AMDSMI test results for ${{ matrix.os }}"
-          cat /tmp/test-results-${{ matrix.os }}/amdsmi_tests.log || echo "No AMDSMI test results found for ${{ matrix.os }}"
+        run: cat /tmp/test-results-${{ matrix.os }}/amdsmi_tests.log || echo "No AMDSMI test results"
 
       - name: Integration Test Results
         if: always()
-        run: |
-          echo "Displaying Integration test results for ${{ matrix.os }}"
-          cat /tmp/test-results-${{ matrix.os }}/integration_test_output.txt || echo "No integration test results found for ${{ matrix.os }}"
+        run: cat /tmp/test-results-${{ matrix.os }}/integration_test_output.txt || echo "No integration test results"
 
       - name: Unit Test Results
         if: always()
-        run: |
-          echo "Displaying Unit Test Results for ${{ matrix.os }}"
-          cat /tmp/test-results-${{ matrix.os }}/unit_test_output.txt || echo "No unit test results found for ${{ matrix.os }}"
+        run: cat /tmp/test-results-${{ matrix.os }}/unit_test_output.txt || echo "No unit test results"
+
+      - name: Perf Test Results
+        if: always()
+        run: cat /tmp/test-results-${{ matrix.os }}/perf_test_output.txt || echo "No perf test results"
 
       - name: Example DRM Test Results
         if: always()
-        run: |
-          echo "Displaying Example DRM test results for ${{ matrix.os }}"
-          cat /tmp/test-results-${{ matrix.os }}/amd_smi_drm_ex.log || echo "No DRM example test results found for ${{ matrix.os }}"
+        run: cat /tmp/test-results-${{ matrix.os }}/amd_smi_drm_ex.log || echo "No DRM example results"
 
       - name: Example NoDRM Test Results
         if: always()
+        run: cat /tmp/test-results-${{ matrix.os }}/amd_smi_nodrm_ex.log || echo "No NoDRM example results"
+
+      - name: CI Summary
+        if: always()
+        shell: bash
         run: |
-          echo "Displaying Example NoDRM test results for ${{ matrix.os }}"
-          cat /tmp/test-results-${{ matrix.os }}/amd_smi_nodrm_ex.log || echo "No NoDRM example test results found for ${{ matrix.os }}"
+          set -uo pipefail
+          RESULTS_DIR="/tmp/test-results-${{ matrix.os }}"
+          declare -a FAILURES=()
+          DETAILS=""
+
+          echo "=========================================="
+          echo "CI SUMMARY for ${{ matrix.os }}"
+          echo "=========================================="
+
+          # 1. build/install/verify stage results
+          for result_file in "$RESULTS_DIR"/*_result.txt; do
+            [ -f "$result_file" ] || continue
+            if grep -q "FAILED" "$result_file"; then
+              STAGE=$(basename "$result_file" _result.txt | tr '_' ' ')
+              FAILURES+=("$STAGE")
+              CONTENT=$(cat "$result_file")
+              DETAILS+=$'\n'"#### ${STAGE}"$'\n\n'"\`\`\`"$'\n'"${CONTENT}"$'\n'"\`\`\`"$'\n'
+              echo "FAILED: $STAGE"
+            fi
+          done
+
+          # 2. amd-smi command test logs
+          CMD_FAILS=""
+          for log in "$RESULTS_DIR"/amd-smi_*.log; do
+            [ -f "$log" ] || continue
+            CMD=$(basename "$log" .log | sed 's/amd-smi_//')
+            if grep -qE "Traceback|AmdSmiException|Error code:" "$log" 2>/dev/null; then
+              CMD_FAILS+=" $CMD"
+            fi
+          done
+          if [ -n "$CMD_FAILS" ]; then
+            FAILURES+=("Command tests:$CMD_FAILS")
+            DETAILS+=$'\n'"#### Command Tests"$'\n\n'"Failed: \`$CMD_FAILS\`"$'\n'
+          fi
+
+          # 3. AMDSMI gtest output
+          if [ -f "$RESULTS_DIR/amdsmi_tests.log" ]; then
+            GTEST_FAILS=$(grep -c "\[  FAILED  \]" "$RESULTS_DIR/amdsmi_tests.log" 2>/dev/null || true)
+            if [ "${GTEST_FAILS:-0}" -gt 0 ] 2>/dev/null; then
+              FAILURES+=("AMDSMI Tests ($GTEST_FAILS)")
+              FULL_LOG=$(cat "$RESULTS_DIR/amdsmi_tests.log")
+              DETAILS+=$'\n'"#### AMDSMI Tests — $GTEST_FAILS failure(s)"$'\n\n'"\`\`\`"$'\n'"${FULL_LOG}"$'\n'"\`\`\`"$'\n'
+            fi
+          fi
+
+          # 4. Python test outputs (integration / unit / perf)
+          for test_file in integration_test_output.txt unit_test_output.txt perf_test_output.txt; do
+            FULL="$RESULTS_DIR/$test_file"
+            [ -f "$FULL" ] || continue
+            PY_FAILS=$(grep -cE "^FAIL:|^ERROR:" "$FULL" 2>/dev/null || true)
+            if [ "${PY_FAILS:-0}" -gt 0 ] 2>/dev/null; then
+              TEST_NAME=$(basename "$test_file" _output.txt | tr '_' ' ')
+              FAILURES+=("${TEST_NAME} ($PY_FAILS)")
+              FULL_LOG=$(cat "$FULL")
+              DETAILS+=$'\n'"#### ${TEST_NAME} — $PY_FAILS failure(s)"$'\n\n'"\`\`\`"$'\n'"${FULL_LOG}"$'\n'"\`\`\`"$'\n'
+            fi
+          done
+
+          # 5. example test results (segfault detection)
+          for ex_log in amd_smi_drm_ex.log amd_smi_nodrm_ex.log; do
+            FULL="$RESULTS_DIR/$ex_log"
+            [ -f "$FULL" ] || continue
+            if grep -qiE "segfault|SIGSEGV|abort" "$FULL" 2>/dev/null; then
+              EX_NAME="${ex_log%.log}"
+              FAILURES+=("Example $EX_NAME")
+              FULL_LOG=$(cat "$FULL")
+              DETAILS+=$'\n'"#### Example ${EX_NAME}"$'\n\n'"\`\`\`"$'\n'"${FULL_LOG}"$'\n'"\`\`\`"$'\n'
+            fi
+          done
+
+          {
+            if [ ${#FAILURES[@]} -gt 0 ]; then
+              echo "## :x: CI Failed — ${{ matrix.os }}"
+              echo ""
+              echo "**${#FAILURES[@]} failure(s) detected:**"
+              echo ""
+              for f in "${FAILURES[@]}"; do
+                echo "- :red_circle: ${f}"
+              done
+              echo "$DETAILS"
+            else
+              echo "## :white_check_mark: CI Passed — ${{ matrix.os }}"
+              echo ""
+              echo "All stages and tests passed successfully."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [ ${#FAILURES[@]} -gt 0 ]; then
+            echo "::error::${#FAILURES[@]} failure(s) for ${{ matrix.os }}: ${FAILURES[*]}"
+          else
+            echo "All stages and tests PASSED for ${{ matrix.os }}"
+          fi
