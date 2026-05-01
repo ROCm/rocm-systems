@@ -90,7 +90,12 @@ public:
                                { "rx_rdma_ucast_pkts", &metrics::rx_rdma_ucast_pkts },
                                { "tx_rdma_ucast_pkts", &metrics::tx_rdma_ucast_pkts },
                                { "rx_rdma_cnp_pkts", &metrics::rx_rdma_cnp_pkts },
-                               { "tx_rdma_cnp_pkts", &metrics::tx_rdma_cnp_pkts } };
+                               { "tx_rdma_cnp_pkts", &metrics::tx_rdma_cnp_pkts },
+                               { "tx_rdma_ack_timeout", &metrics::tx_rdma_ack_timeout },
+                               { "resp_tx_pkt_seq_err", &metrics::resp_tx_pkt_seq_err },
+                               { "req_rx_pkt_seq_err", &metrics::req_rx_pkt_seq_err },
+                               { "req_rx_impl_nak_seq_err",
+                                 &metrics::req_rx_impl_nak_seq_err } };
 
             for(const auto& stat : stats)
             {

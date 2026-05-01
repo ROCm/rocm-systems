@@ -107,6 +107,14 @@ using amd_smi_nic_rx_ucast_pkts_track =
     perfetto_counter_track<category::amd_smi_nic_rx_ucast_pkts>;
 using amd_smi_nic_tx_ucast_pkts_track =
     perfetto_counter_track<category::amd_smi_nic_tx_ucast_pkts>;
+using amd_smi_nic_tx_rdma_ack_timeout_track =
+    perfetto_counter_track<category::amd_smi_nic_tx_rdma_ack_timeout>;
+using amd_smi_nic_resp_tx_pkt_seq_err_track =
+    perfetto_counter_track<category::amd_smi_nic_resp_tx_pkt_seq_err>;
+using amd_smi_nic_req_rx_pkt_seq_err_track =
+    perfetto_counter_track<category::amd_smi_nic_req_rx_pkt_seq_err>;
+using amd_smi_nic_req_rx_impl_nak_seq_err_track =
+    perfetto_counter_track<category::amd_smi_nic_req_rx_impl_nak_seq_err>;
 
 template <typename Track>
 bool
@@ -1313,6 +1321,47 @@ perfetto_processor_t::handle([[maybe_unused]] const ainic_pmc_sample& _nic_sampl
         TRACE_COUNTER(trait::name<category::amd_smi_nic_tx_cnp_pkts>::value,
                       amd_smi_nic_tx_cnp_pkts_track::at(_device_id, 0), _ts,
                       static_cast<double>(_nic_sample.metric_values.tx_rdma_cnp_pkts));
+    }
+
+    if(_nic_sample.enabled_metric.bits.tx_rdma_ack_timeout)
+    {
+        if(!amd_smi_nic_tx_rdma_ack_timeout_track::exists(_device_id))
+            amd_smi_nic_tx_rdma_ack_timeout_track::emplace(
+                _device_id, make_track_name("TX ACK TIMEOUT"), "packets");
+        TRACE_COUNTER(trait::name<category::amd_smi_nic_tx_rdma_ack_timeout>::value,
+                      amd_smi_nic_tx_rdma_ack_timeout_track::at(_device_id, 0), _ts,
+                      static_cast<double>(_nic_sample.metric_values.tx_rdma_ack_timeout));
+    }
+
+    if(_nic_sample.enabled_metric.bits.resp_tx_pkt_seq_err)
+    {
+        if(!amd_smi_nic_resp_tx_pkt_seq_err_track::exists(_device_id))
+            amd_smi_nic_resp_tx_pkt_seq_err_track::emplace(
+                _device_id, make_track_name("RESP TX PKT SEQ ERROR"), "packets");
+        TRACE_COUNTER(trait::name<category::amd_smi_nic_resp_tx_pkt_seq_err>::value,
+                      amd_smi_nic_resp_tx_pkt_seq_err_track::at(_device_id, 0), _ts,
+                      static_cast<double>(_nic_sample.metric_values.resp_tx_pkt_seq_err));
+    }
+
+    if(_nic_sample.enabled_metric.bits.req_rx_pkt_seq_err)
+    {
+        if(!amd_smi_nic_req_rx_pkt_seq_err_track::exists(_device_id))
+            amd_smi_nic_req_rx_pkt_seq_err_track::emplace(
+                _device_id, make_track_name("REQ RX PKT SEQ ERROR"), "packets");
+        TRACE_COUNTER(trait::name<category::amd_smi_nic_req_rx_pkt_seq_err>::value,
+                      amd_smi_nic_req_rx_pkt_seq_err_track::at(_device_id, 0), _ts,
+                      static_cast<double>(_nic_sample.metric_values.req_rx_pkt_seq_err));
+    }
+
+    if(_nic_sample.enabled_metric.bits.req_rx_impl_nak_seq_err)
+    {
+        if(!amd_smi_nic_req_rx_impl_nak_seq_err_track::exists(_device_id))
+            amd_smi_nic_req_rx_impl_nak_seq_err_track::emplace(
+                _device_id, make_track_name("REQ RX IMPL NAK SEQ ERROR"), "packets");
+        TRACE_COUNTER(
+            trait::name<category::amd_smi_nic_req_rx_impl_nak_seq_err>::value,
+            amd_smi_nic_req_rx_impl_nak_seq_err_track::at(_device_id, 0), _ts,
+            static_cast<double>(_nic_sample.metric_values.req_rx_impl_nak_seq_err));
     }
 }
 
