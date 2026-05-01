@@ -397,10 +397,14 @@ class CodeGenerator:
                 class_members.append(cgen.Statement('uint32_t dpp_bank_mask_ = 0xF'))
                 class_members.append(cgen.Statement('uint32_t dpp_bound_ctrl_ = 0'))
                 class_members.append(cgen.Statement('std::unique_ptr<DppOperand> dpp_src0_'))
-                # SDWA fields (CDNA and RDNA1/2 only; RDNA3+ has no SDWA).
-                class_members.append(cgen.Statement('uint32_t sdwa_src0_sel_ = 6'))  # DWORD
+                class_members.append(cgen.Statement('std::unique_ptr<DppOperand> dpp_src1_'))
+                # SDWA fields (CDNA and RDNA1/2 have hardware SDWA encoding; fields
+                # are present on all ISAs for uniform codegen even if unused).
+                class_members.append(cgen.Statement('uint32_t sdwa_src0_sel_ = amdgpu::sdwa::DWORD'))
                 class_members.append(cgen.Statement('bool sdwa_src0_sext_ = false'))
-                class_members.append(cgen.Statement('uint32_t sdwa_dst_sel_ = 6'))   # DWORD
+                class_members.append(cgen.Statement('uint32_t sdwa_src1_sel_ = amdgpu::sdwa::DWORD'))
+                class_members.append(cgen.Statement('bool sdwa_src1_sext_ = false'))
+                class_members.append(cgen.Statement('uint32_t sdwa_dst_sel_ = amdgpu::sdwa::DWORD'))
                 class_members.append(cgen.Statement('uint32_t sdwa_dst_unused_ = 0'))
                 class_members.append(cgen.Statement('bool sdwa_clamp_ = false'))
             s = cgen.Struct(
@@ -423,6 +427,7 @@ class CodeGenerator:
                     False,
                 ),
                 ('rocjitsu/isa/instruction.h', False),
+                ('rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h', False),
                 ('string', True),
                 ('string_view', True),
             ],
@@ -4587,7 +4592,10 @@ class CodeGenerator:
         L = []
         esz = sem.elem_size  # 4 for B32, 8 for B64
         dwords_per_access = esz // 4  # 1 for B32, 2 for B64
-        stride_scale = '256U' if sem.operation == 'st64' else '4U'
+        if sem.operation == 'st64':
+            stride_scale = f'{esz * 64}U'
+        else:
+            stride_scale = f'{esz}U'
         acc = self._acc_vgpr_expr
         L.append('  auto &cu = wf.cu();')
         L.append('  uint64_t exec = wf.exec();')
@@ -4624,7 +4632,10 @@ class CodeGenerator:
         L = []
         esz = sem.elem_size  # 4 for B32, 8 for B64
         dwords_per_access = esz // 4
-        stride_scale = '256U' if sem.operation == 'st64' else '4U'
+        if sem.operation == 'st64':
+            stride_scale = f'{esz * 64}U'
+        else:
+            stride_scale = f'{esz}U'
         acc = self._acc_vgpr_expr
         L.append('  auto &cu = wf.cu();')
         L.append('  uint64_t exec = wf.exec();')
@@ -4922,7 +4933,7 @@ class CodeGenerator:
                                     f'static_cast<int>(reinterpret_cast<const {_lit_struct}*>(inst)->simm32));'
                                 )
 
-                    # DPP fixup: when src0 == 250 (DPP marker), replace the
+                    # DPP fixup: when src0 == amdgpu::SRC_DPP (DPP marker), replace the
                     # src0 operand with vsrc0 from the DPP extension dword.
                     # This lets the instruction execute normally with the
                     # correct VGPR source. Lane permutation is not yet
@@ -4942,12 +4953,12 @@ class CodeGenerator:
                         _dpp_struct = f'{_enc_base}{_dpp_suffix}MachineInst'
                         for opnd in inst.operands:
                             if opnd.name == 'src0' and opnd.name in enc_field_names:
-                                # DPP (src0 == 250): read vsrc0 and DPP control
+                                # DPP (src0 == amdgpu::SRC_DPP): read vsrc0 and DPP control
                                 # fields from the ISA-specific extension dword,
                                 # storing them on the Instruction base for
                                 # apply_dpp() to use later.
                                 ctor_body_parts.append(
-                                    f'if (reinterpret_cast<const OpEncoding*>(inst)->src0 == 250) {{'
+                                    f'if (reinterpret_cast<const OpEncoding*>(inst)->src0 == amdgpu::SRC_DPP) {{'
                                     f' auto *dp = reinterpret_cast<const {_dpp_struct}*>(inst);'
                                     f' src0 = Operand({opnd.size}, OperandType::OPR_VGPR, dp->vsrc0);'
                                     f' dpp_ctrl_ = dp->dpp_ctrl;'
@@ -4956,7 +4967,7 @@ class CodeGenerator:
                                     f' dpp_bound_ctrl_ = dp->bound_ctrl;'
                                     f'}}'
                                 )
-                                # SDWA (src0 == 249): CDNA and RDNA1/2 only.
+                                # SDWA (src0 == amdgpu::SRC_SDWA): CDNA and RDNA1/2 only.
                                 _has_sdwa = any(
                                     'SDWA' in ie.enc_name
                                     for ie in self.isa_spec.inst_encodings
@@ -4964,11 +4975,13 @@ class CodeGenerator:
                                 if _has_sdwa:
                                     _sdwa_struct = f'{_enc_base}VopSdwaMachineInst'
                                     ctor_body_parts.append(
-                                        f'if (reinterpret_cast<const OpEncoding*>(inst)->src0 == 249) {{'
+                                        f'if (reinterpret_cast<const OpEncoding*>(inst)->src0 == amdgpu::SRC_SDWA) {{'
                                         f' auto *sw = reinterpret_cast<const {_sdwa_struct}*>(inst);'
                                         f' src0 = Operand({opnd.size}, OperandType::OPR_VGPR, sw->vsrc0);'
                                         f' sdwa_src0_sel_ = sw->src0_sel;'
                                         f' sdwa_src0_sext_ = sw->src0_sext;'
+                                        f' sdwa_src1_sel_ = sw->src1_sel;'
+                                        f' sdwa_src1_sext_ = sw->src1_sext;'
                                         f' sdwa_dst_sel_ = sw->dst_sel;'
                                         f' sdwa_dst_unused_ = sw->dst_unused;'
                                         f' sdwa_clamp_ = sw->clamp;'
@@ -5071,12 +5084,22 @@ class CodeGenerator:
                                 (o.name for o in inst.operands if o.is_input),
                                 None
                             )
+                            _src_inputs = [o.name for o in inst.operands if o.is_input]
+                            _src1_name = _src_inputs[1] if len(_src_inputs) > 1 else None
                             _dpp_preamble = (
-                                '  if (inst_.src0 == 250)\n'
+                                '  uint32_t sdwa_old_dst_[64] = {};\n'
+                                '  if (sdwa_dst_sel_ != amdgpu::sdwa::DWORD) {\n'
+                                '    uint32_t vb = wf.vgpr_alloc().base;\n'
+                                '    uint64_t ex = wf.exec();\n'
+                                '    for (uint32_t ln = 0; ln < wf.wf_size(); ++ln)\n'
+                                '      if (ex & (1ULL << ln))\n'
+                                '        sdwa_old_dst_[ln] = wf.cu().read_vgpr(vb + inst_.vdst, ln);\n'
+                                '  }\n'
+                                '  if (inst_.src0 == amdgpu::SRC_DPP)\n'
                                 '    amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_,\n'
                                 '        dpp_row_mask_, dpp_bank_mask_, dpp_bound_ctrl_,\n'
                                 '        dpp_src0_, wf);\n'
-                                '  if (inst_.src0 == 249 && sdwa_src0_sel_ != 6) {\n'
+                                '  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_src0_sel_ != amdgpu::sdwa::DWORD) {\n'
                                 '    auto &cu = wf.cu();\n'
                                 '    uint32_t ws = wf.wf_size();\n'
                                 '    uint32_t vb = wf.vgpr_alloc().base + src_operands_[0]->encoding_value_;\n'
@@ -5088,34 +5111,72 @@ class CodeGenerator:
                                 '        *src_operands_[0], result, static_cast<int>(ws));\n'
                                 '    src_operands_[0] = dpp_src0_.get();\n'
                                 '  }\n'
+                                '  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_src1_sel_ != amdgpu::sdwa::DWORD && num_src_ > 1) {\n'
+                                '    auto &cu = wf.cu();\n'
+                                '    uint32_t ws = wf.wf_size();\n'
+                                '    uint32_t vb = wf.vgpr_alloc().base + src_operands_[1]->encoding_value_;\n'
+                                '    uint32_t result1[64];\n'
+                                '    for (uint32_t i = 0; i < ws; ++i)\n'
+                                '      result1[i] = amdgpu::sdwa::sdwa_src_select(\n'
+                                '          cu.read_vgpr(vb, i), sdwa_src1_sel_, sdwa_src1_sext_);\n'
+                                '    dpp_src1_ = std::make_unique<DppOperand>(\n'
+                                '        *src_operands_[1], result1, static_cast<int>(ws));\n'
+                                '    src_operands_[1] = dpp_src1_.get();\n'
+                                '  }\n'
                                 + (f'  if (dpp_src0_) {_src0_name}.set_delegate(dpp_src0_.get());\n'
                                    if _src0_name else '')
+                                + (f'  if (dpp_src1_) {_src1_name}.set_delegate(dpp_src1_.get());\n'
+                                   if _src1_name else '')
                             )
-                        # SDWA postamble: apply float clamp after ALU.
+                        # SDWA postamble: apply dst_sel merge and float clamp after ALU.
                         _sdwa_postamble = ''
-                        is_float_op = (sem and sem.data_type in ('f16', 'f32', 'f64'))
-                        if (enc.enc_name.upper() in ('ENC_VOP1', 'ENC_VOP2')
-                                and is_float_op):
+                        if enc.enc_name.upper() in ('ENC_VOP1', 'ENC_VOP2'):
+                            is_float_op = (sem and sem.data_type in ('f16', 'f32', 'f64'))
                             _sdwa_postamble = (
-                                '  if (sdwa_clamp_) {\n'
+                                '  if (sdwa_dst_sel_ != amdgpu::sdwa::DWORD) {\n'
                                 '    uint64_t ex = wf.exec();\n'
                                 '    uint32_t vb = wf.vgpr_alloc().base;\n'
                                 '    for (uint32_t ln = 0; ln < wf.wf_size(); ++ln) {\n'
                                 '      if (!(ex & (1ULL << ln))) continue;\n'
                                 '      uint32_t dv = wf.cu().read_vgpr(vb + inst_.vdst, ln);\n'
-                                '      float fv = std::bit_cast<float>(dv);\n'
-                                '      fv = std::clamp(fv, 0.0f, 1.0f);\n'
-                                '      wf.cu().write_vgpr(vb + inst_.vdst, ln, std::bit_cast<uint32_t>(fv));\n'
+                                '      dv = amdgpu::sdwa::sdwa_dst_merge(dv, sdwa_old_dst_[ln], sdwa_dst_sel_, sdwa_dst_unused_);\n'
+                                '      wf.cu().write_vgpr(vb + inst_.vdst, ln, dv);\n'
                                 '    }\n'
                                 '  }\n'
                             )
+                            if is_float_op:
+                                _sdwa_postamble += (
+                                    '  if (sdwa_clamp_) {\n'
+                                    '    uint64_t ex = wf.exec();\n'
+                                    '    uint32_t vb = wf.vgpr_alloc().base;\n'
+                                    '    for (uint32_t ln = 0; ln < wf.wf_size(); ++ln) {\n'
+                                    '      if (!(ex & (1ULL << ln))) continue;\n'
+                                    '      uint32_t dv = wf.cu().read_vgpr(vb + inst_.vdst, ln);\n'
+                                    '      float fv = std::bit_cast<float>(dv);\n'
+                                    '      fv = std::clamp(fv, 0.0f, 1.0f);\n'
+                                    '      wf.cu().write_vgpr(vb + inst_.vdst, ln, std::bit_cast<uint32_t>(fv));\n'
+                                    '    }\n'
+                                    '  }\n'
+                                )
                         _dpp_cleanup = ''
-                        if enc.enc_name.upper() in ('ENC_VOP1', 'ENC_VOP2') and _src0_name:
-                            _dpp_cleanup = (
-                                f'  {_src0_name}.clear_delegate();\n'
-                            )
+                        if enc.enc_name.upper() in ('ENC_VOP1', 'ENC_VOP2'):
+                            if _src0_name:
+                                _dpp_cleanup += f'  {_src0_name}.clear_delegate();\n'
+                            if _src1_name:
+                                _dpp_cleanup += f'  {_src1_name}.clear_delegate();\n'
+                        # Skip DPP/SDWA preamble and cleanup for unimplemented
+                        # instructions whose body is ONLY a throw — the cleanup
+                        # code after the throw would be unreachable. Only match
+                        # pure-throw bodies, not bodies with conditional throws.
+                        body_stripped = body.strip().rstrip(';').strip()
+                        body_throws = body_stripped.startswith('(void)wf;') and 'throw util::UnimplementedInst' in body_stripped and body_stripped.count('\n') <= 1
                         can_share = self._can_share_execute(inst.mnemonic)
-                        if can_share:
+                        if body_throws:
+                            exec_impl = cgen.Line(
+                                f'void {inst.fmt_name}::execute_impl'
+                                f'(amdgpu::Wavefront &wf) {{ (void)wf; throw util::UnimplementedInst(mnemonic()); }}'
+                            )
+                        elif can_share:
                             enc_key = enc.enc_name.lower().replace('enc_', '')
                             tmpl_name = f'{inst.mnemonic}_{enc_key}'
                             exec_impl = cgen.Line(

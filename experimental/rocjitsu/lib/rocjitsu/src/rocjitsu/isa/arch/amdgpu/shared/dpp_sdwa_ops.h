@@ -26,6 +26,11 @@
 
 namespace rocjitsu {
 namespace amdgpu {
+
+/// @brief VOP1/VOP2 src0 encoding values that indicate a DPP or SDWA suffix.
+constexpr uint32_t SRC_SDWA = 249;
+constexpr uint32_t SRC_DPP = 250;
+
 namespace dpp {
 
 /// Row size for DPP operations (16 lanes per row).
