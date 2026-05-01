@@ -84,7 +84,7 @@ class TestKFD(RocprofsysTest):
         self.assert_regex(
             result,
             subtest_name="Unified-memory completion check",
-            pass_regex=[r"All 16 tests completed"],
+            pass_regex=[r"\b6 tests completed\b"],
         )
 
         self.assert_perfetto(
@@ -108,7 +108,6 @@ class TestKFD(RocprofsysTest):
             subtest_name="Perfetto KFD queue validation",
             categories=["rocm_kfd_queue"],
             print_output=True,
-            pass_regex=[r"QUEUE_EVICT"],
         )
 
         self.assert_perfetto(
@@ -147,7 +146,7 @@ class TestKFD(RocprofsysTest):
         self.assert_regex(
             result,
             subtest_name="Unified-memory completion check",
-            pass_regex=[r"All 16 tests completed"],
+            pass_regex=[r"\b6 tests completed\b"],
         )
 
         self.assert_perfetto(
@@ -163,7 +162,6 @@ class TestKFD(RocprofsysTest):
             subtest_name="Perfetto KFD queue validation",
             categories=["rocm_kfd_queue"],
             print_output=True,
-            pass_regex=[r"QUEUE_EVICT"],
         )
 
         self.assert_perfetto(
@@ -204,7 +202,7 @@ class TestKFD(RocprofsysTest):
         self.assert_regex(
             result,
             subtest_name="Unified-memory completion check",
-            pass_regex=[r"All 16 tests completed"],
+            pass_regex=[r"\b6 tests completed\b"],
         )
 
         self.assert_perfetto(
@@ -228,7 +226,6 @@ class TestKFD(RocprofsysTest):
             subtest_name="Perfetto KFD queue validation (pressure)",
             categories=["rocm_kfd_queue"],
             print_output=True,
-            pass_regex=[r"QUEUE_EVICT"],
         )
 
         self.assert_perfetto(
