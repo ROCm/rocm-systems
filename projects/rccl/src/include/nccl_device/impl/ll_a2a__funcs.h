@@ -105,6 +105,11 @@ template<typename T>
 NCCL_DEVICE_INLINE void ncclLLA2ASession<Coop>::bcast(int elt, T data) {
   using nccl::utility::divUp;
   if (this->multimem) {
+#if __HIP_PLATFORM_AMD__
+    // NO HIP EQUIVALENT: multimem requires NVLINK multicast, fall through to unicast
+  }
+  {
+#else
     union { T tmp; uint32_t u32[divUp(sizeof(T),8)][2]; };
     tmp = data;
     uint4* bufmc = (uint4*)ncclGetResourceBufferMultimemPointer(this->comm, this->handle.bufHandle, this->mmHandle);
@@ -122,6 +127,7 @@ NCCL_DEVICE_INLINE void ncclLLA2ASession<Coop>::bcast(int elt, T data) {
 #endif
     }
   } else {
+#endif
     union { T tmp; uint32_t u32[divUp(sizeof(T), 8)][2]; };
     tmp = data;
     int dr = 0;

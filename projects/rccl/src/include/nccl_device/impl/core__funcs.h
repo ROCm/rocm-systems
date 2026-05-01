@@ -153,11 +153,43 @@ NCCL_DEVICE_INLINE void* ncclGetLsaMultimemPointer(ncclWindow_t w, size_t offset
 }
 #endif
 
+#if __CUDACC__
+template<typename Coop>
+NCCL_DEVICE_INLINE ncclWindow_t ncclFindWindow(Coop coop, ncclDevComm const& comm, void const *ptr) {
+  using nccl::utility::loadConst;
+  auto coalesced = ncclCoopCoalesced(coop);
+  ncclDevCommWindowTable* t = comm.windowTable;
+  while (true) {
+    bool found = false;
+    int index = coalesced.thread_rank();
+    #pragma unroll 1
+    while (index < 32) {
+      uintptr_t uptr = reinterpret_cast<uintptr_t>(ptr);
+      ncclDevCommWindowTable::Entry e = loadConst(&t->entries[index]);
+      if ((e.base != 0) && (e.size != 0) && (e.window != 0)) {
+        if (uptr - uintptr_t(e.base) < uintptr_t(e.size)) {
+          found = true;
+          break;
+        }
+      }
+      index += coalesced.size();
+    }
+    uint32_t mask = __ballot_sync(ncclCoopGetLaneMask(coalesced), found);
+    if (mask != 0) {
+      int source = __popc(mask-1);
+      index = __shfl_sync(ncclCoopGetLaneMask(coalesced), index, source);
+      return loadConst(&t->entries[index].window);
+    }
+    t = loadConst(&t->next);
+  }
+}
+#endif
+
 NCCL_HOST_DEVICE_INLINE size_t ncclGetResourceBufferOffset(ncclDevResourceHandle_t h) {
   return ((size_t)h)*128;
 }
 
-#if __CUDACC__
+#if NCCL_DEVICE_COMPILE
 NCCL_DEVICE_INLINE void* ncclGetResourceBufferLocalPointer(ncclDevComm const& comm, ncclDevResourceHandle h) {
   void* lsaFlatBase = comm.resourceWindow_inlined.lsaFlatBase;
   uint32_t stride4G = comm.resourceWindow_inlined.stride4G;
@@ -166,7 +198,7 @@ NCCL_DEVICE_INLINE void* ncclGetResourceBufferLocalPointer(ncclDevComm const& co
 }
 #endif
 
-#if __CUDACC__
+#if NCCL_DEVICE_COMPILE
 NCCL_DEVICE_INLINE void* ncclGetResourceBufferLsaPointer(ncclDevComm const& comm, ncclDevResourceHandle h, int peer) {
   int r = peer;
   void* lsaFlatBase = comm.resourceWindow_inlined.lsaFlatBase;
@@ -176,7 +208,7 @@ NCCL_DEVICE_INLINE void* ncclGetResourceBufferLsaPointer(ncclDevComm const& comm
 }
 #endif
 
-#if __CUDACC__
+#if NCCL_DEVICE_COMPILE
 NCCL_DEVICE_INLINE void* ncclGetResourceBufferPeerPointer(ncclDevComm const& comm, ncclDevResourceHandle h, ncclTeam team, int peer) {
   int r = comm.lsaRank + (peer - team.rank)*team.stride;
   void* lsaFlatBase = comm.resourceWindow_inlined.lsaFlatBase;
@@ -186,7 +218,7 @@ NCCL_DEVICE_INLINE void* ncclGetResourceBufferPeerPointer(ncclDevComm const& com
 }
 #endif
 
-#if __CUDACC__
+#if NCCL_DEVICE_COMPILE
 NCCL_DEVICE_INLINE void* ncclGetResourceBufferMultimemPointer(ncclDevComm const& comm, ncclDevResourceHandle h, ncclMultimemHandle mm) {
   void* ptr = mm.mcBasePtr;
   ptr = reinterpret_cast<char(*)[4096]>(ptr) + comm.resourceWindow_inlined.mcOffset4K;
@@ -195,13 +227,13 @@ NCCL_DEVICE_INLINE void* ncclGetResourceBufferMultimemPointer(ncclDevComm const&
 }
 #endif
 
-#if __CUDACC__
+#if NCCL_DEVICE_COMPILE
 NCCL_DEVICE_INLINE void* ncclGetResourceBufferLsaMultimemPointer(ncclDevComm const& comm, ncclDevResourceHandle h) {
   return ncclGetResourceBufferMultimemPointer(comm, h, comm.lsaMultimem);
 }
 #endif
 
-#if __CUDACC__
+#if NCCL_DEVICE_COMPILE
 NCCL_DEVICE_INLINE ncclSymPtr<char> ncclGetResourceBuffer(ncclDevComm const& comm, ncclDevResourceHandle h) {
   return ncclSymPtr<char>(comm.resourceWindow, size_t(h)*128);
 }

@@ -1,5 +1,6 @@
 /*************************************************************************
  * Copyright (c) 2025, NVIDIA CORPORATION. All rights reserved.
+ * Modifications Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * See LICENSE.txt for license information
  ************************************************************************/
@@ -14,7 +15,7 @@ struct ncclLsaBarrierHandle {
   int nBarriers;
 };
 
-#if __CUDACC__
+#if NCCL_DEVICE_COMPILE
 template<typename Coop>
 struct ncclLsaBarrierSession_internal {
   Coop coop;

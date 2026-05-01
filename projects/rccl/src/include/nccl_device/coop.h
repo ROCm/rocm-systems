@@ -92,16 +92,13 @@ struct ncclCoopLanes { // Some lanes of this warp.
 #endif
 
 #if __CUDACC__
-// A set of consecutive warps that the user has also supplied with a unique
-// id from [0..15]. It is an error for two different warp spans with the same
-// id to be in a collective concurrently.
 struct ncclCoopWarpSpan {
   uint32_t warp0:8, nWarps:8, id:8;
 
   NCCL_DEVICE_INLINE constexpr ncclCoopWarpSpan(int warp0, int nWarps, int id):
     warp0(warp0), nWarps(nWarps), id(id) {
   }
-  
+
   NCCL_DEVICE_INLINE int thread_rank() const {
     return threadIdx.x - WARP_SIZE*warp0;
   }
@@ -149,8 +146,6 @@ NCCL_DEVICE_INLINE ncclCoopMask_t ncclCoopLaneMask(ncclCoopCta coop) {
 #endif
 
 #if __CUDACC__
-// ncclCoopIsThread:
-// At compile time do we know the given coop is a single thread only.
 template<int nThreads>
 NCCL_DEVICE_INLINE constexpr bool ncclCoopIsThread(ncclCoopTile<nThreads>) {
   return nThreads == 1;
@@ -158,6 +153,14 @@ NCCL_DEVICE_INLINE constexpr bool ncclCoopIsThread(ncclCoopTile<nThreads>) {
 NCCL_DEVICE_INLINE constexpr bool ncclCoopIsThread(ncclCoopLanes) { return false; }
 NCCL_DEVICE_INLINE constexpr bool ncclCoopIsThread(ncclCoopWarpSpan) { return false; }
 NCCL_DEVICE_INLINE constexpr bool ncclCoopIsThread(ncclCoopCta) { return false; }
+#endif
+
+#if __CUDACC__
+template<int nThreads>
+NCCL_DEVICE_INLINE constexpr bool ncclCoopWithinWarp(ncclCoopTile<nThreads>) { return true; }
+NCCL_DEVICE_INLINE constexpr bool ncclCoopWithinWarp(ncclCoopLanes) { return true; }
+NCCL_DEVICE_INLINE constexpr bool ncclCoopWithinWarp(ncclCoopWarpSpan) { return false; }
+NCCL_DEVICE_INLINE constexpr bool ncclCoopWithinWarp(ncclCoopCta) { return false; }
 #endif
 
 #if __CUDACC__
@@ -184,6 +187,57 @@ NCCL_DEVICE_INLINE ncclCoopLanes ncclCoopCoalesced(ncclCoopLanes coop) {
 template<int nThreads>
 NCCL_DEVICE_INLINE ncclCoopTile<nThreads> ncclCoopCoalesced(ncclCoopTile<nThreads> coop) {
   return coop;
+}
+#endif
+
+#if __CUDACC__
+template<int nThreads, typename T>
+NCCL_DEVICE_INLINE T ncclCoopBcast(ncclCoopTile<nThreads>, T value, int root, bool entrySync=true) {
+  constexpr int n = (sizeof(T)+4-1)/4;
+  union { uint32_t u[n]; T v; };
+  v = value;
+  #pragma unroll
+  for (int i=0; i < n; i++) u[i] = __shfl_sync(-1u, u[i], root, nThreads);
+  return v;
+}
+template<typename T>
+NCCL_DEVICE_INLINE T ncclCoopBcast(ncclCoopLanes coop, T value, int root, bool entrySync=true) {
+  uint32_t m = coop.lmask;
+  uint32_t r = root == 0 ? __ffs(m)-1 : __fns(m, 0, 1+root);
+  constexpr int n = (sizeof(T)+4-1)/4;
+  union { uint32_t u[n]; T v; };
+  v = value;
+  #pragma unroll
+  for (int i=0; i < n; i++) u[i] = __shfl_sync(m, u[i], r);
+  return v;
+}
+
+NCCL_DEVICE_INLINE ulong2* ncclCoopBcast_WarpSpan_stash() {
+  __shared__ ulong2 stash[15];
+  return stash;
+}
+
+template<typename T>
+NCCL_DEVICE_INLINE T ncclCoopBcast(ncclCoopWarpSpan coop, T value, int root, bool entrySync=true) {
+  static_assert(sizeof(T) <= sizeof(ncclCoopBcast_WarpSpan_stash()[0]), "Required");
+  if (entrySync) coop.sync();
+  if (coop.thread_rank() == root) *(T*)&ncclCoopBcast_WarpSpan_stash()[coop.id] = value;
+  coop.sync();
+  return *(T*)&ncclCoopBcast_WarpSpan_stash()[coop.id];
+}
+
+NCCL_DEVICE_INLINE ulong2* ncclCoopBcast_Cta_stash() {
+  __shared__ ulong2 stash;
+  return &stash;
+}
+
+template<typename T>
+NCCL_DEVICE_INLINE T ncclCoopBcast(ncclCoopCta coop, T value, int root, bool entrySync=true) {
+  static_assert(sizeof(T) <= sizeof(*ncclCoopBcast_Cta_stash()), "Required");
+  if (entrySync) coop.sync();
+  if (coop.thread_rank() == root) *(T*)ncclCoopBcast_Cta_stash() = value;
+  coop.sync();
+  return *(T*)ncclCoopBcast_Cta_stash();
 }
 #endif
 

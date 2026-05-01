@@ -24,8 +24,14 @@ typedef struct ncclMultimemHandle ncclMultimemHandle_t;
 typedef uint32_t ncclDevResourceHandle;
 typedef ncclDevResourceHandle ncclDevResourceHandle_t;
 
+typedef uint32_t ncclGinSignal_t;
+typedef uint32_t ncclGinCounter_t;
+
 struct ncclLsaBarrierHandle;
 typedef struct ncclLsaBarrierHandle ncclLsaBarrierHandle_t;
+
+struct ncclGinBarrierHandle;
+typedef struct ncclGinBarrierHandle ncclGinBarrierHandle_t;
 
 struct ncclLLA2AHandle;
 typedef struct ncclLLA2AHandle ncclLLA2AHandle_t;
@@ -59,13 +65,26 @@ struct ncclDevCommRequirements {
 
   bool lsaMultimem; // Enable multimem on lsa team
 
+  int barrierCount;
   int lsaBarrierCount;
+  int railGinBarrierCount;
+
+  int lsaLLA2ABlockCount, lsaLLA2ASlotCount;
+
+  bool ginForceEnable;
+  int ginContextCount; // This is a hint, the actual context count in the devcomm may not match.
+  int ginSignalCount; // Guaranteed to start at id=0
+  int ginCounterCount; // Guaranteed to start at id=0
 };
 
 struct ncclDevResourceRequirements {
   ncclDevResourceRequirements_t* next;
   size_t bufferSize, bufferAlign;
   ncclDevResourceHandle_t* outBufferHandle; // If non-null, target assigned during ncclDevCommCreate.
+  int ginSignalCount;
+  int ginCounterCount;
+  ncclGinSignal_t* outGinSignalStart;
+  ncclGinCounter_t* outGinCounterStart;
 };
 
 struct ncclTeamRequirements {
@@ -122,7 +141,7 @@ NCCL_EXTERN_C __host__ ncclTeam_t ncclTeamRail(ncclComm_t);
 // Get offset of resource buffer within `comm.resourceWindow`.
 NCCL_EXTERN_C NCCL_HOST_DEVICE_INLINE size_t ncclGetResourceBufferOffset(ncclDevResourceHandle_t);
 
-#if __CUDACC__
+#if NCCL_DEVICE_COMPILE
 NCCL_DEVICE_INLINE ncclSymPtr<char> ncclGetResourceBuffer(ncclDevComm const&, ncclDevResourceHandle);
 #endif
 
@@ -138,7 +157,7 @@ NCCL_DEVICE_INLINE void* ncclGetMultimemPointer(ncclWindow_t w, size_t offset, n
 NCCL_DEVICE_INLINE void* ncclGetLsaMultimemPointer(ncclWindow_t w, size_t offset, ncclDevComm const&);
 #endif
 
-#if __CUDACC__
+#if NCCL_DEVICE_COMPILE
 // Convenience for combining ncclGet***Pointer() with resource handle.
 NCCL_DEVICE_INLINE void* ncclGetResourceBufferLocalPointer(ncclDevComm const&, ncclDevResourceHandle);
 NCCL_DEVICE_INLINE void* ncclGetResourceBufferLsaPointer(ncclDevComm const&, ncclDevResourceHandle, int peer);
