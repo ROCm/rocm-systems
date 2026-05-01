@@ -484,6 +484,14 @@ __device__ __forceinline__ bool is_last_active_lane() {
   }
 }
 
+/* Is ptr_b in range [ptr_a, ptr_a + len_a] */
+[[maybe_unused]]
+__host__ __device__ static bool
+is_ptr_in_range(uintptr_t ptr_a, size_t len_a, uintptr_t ptr_b) {
+  uintptr_t ptr_a_end = ptr_a + len_a;
+  return (ptr_a <= ptr_b) && (ptr_b <= ptr_a_end);
+}
+
 int rocm_init();
 
 void rocm_memory_lock_to_fine_grain(void* ptr, size_t size, void** gpu_ptr, int gpu_id);

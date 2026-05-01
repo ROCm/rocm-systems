@@ -565,15 +565,40 @@ void GDABackend::ctx_destroy(Context *ctx) {
   delete gda_host_ctx;
 }
 
-int GDABackend::buffer_register([[maybe_unused]] void *addr,
-                                [[maybe_unused]] size_t length) {
-  LOG_ERROR("GDABackend::buffer_register not supported");
-  return ROCSHMEM_ERROR;
+int GDABackend::buffer_register(void *addr, size_t length) {
+  int err;
+
+  /* Register in ptr cache */
+  err = Backend::buffer_register(addr, length);
+
+  if (ROCSHMEM_SUCCESS != err) {
+    return ROCSHMEM_ERROR;
+  }
+
+  /* Register with QPs */
+  for (size_t i = 0; i < num_qps; i++) {
+    err = host_qps[i].buffer_register((uintptr_t)addr, length);
+    if (ROCSHMEM_SUCCESS != err) {
+      Backend::buffer_unregister(addr);
+      return ROCSHMEM_ERROR;
+    }
+  }
+
+  return err;
 }
 
-int GDABackend::buffer_unregister([[maybe_unused]] void *addr) {
-  LOG_ERROR("GDABackend::buffer_unregister not supported");
-  return ROCSHMEM_ERROR;
+int GDABackend::buffer_unregister(void *addr) {
+  int err;
+
+  /* Deregister in ptr cache */
+  err = Backend::buffer_unregister(addr);
+
+  /* Deregister with QPs */
+  for (size_t i = 0; i < num_qps; i++) {
+    err = host_qps[i].buffer_unregister((uintptr_t)addr);
+  }
+
+  return err;
 }
 
 void GDABackend::reset_backend_stats() {
