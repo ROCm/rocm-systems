@@ -68,6 +68,22 @@ void RegisterSet::erase(RegisterRef ref) {
   }
 }
 
+void RegisterSet::clear_class(RegClass cls) {
+  switch (cls) {
+  case RegClass::SGPR:
+    sgprs_.reset();
+    break;
+  case RegClass::VGPR:
+    vgprs_.reset();
+    break;
+  case RegClass::ACC_VGPR:
+    acc_vgprs_.reset();
+    break;
+  default:
+    break;
+  }
+}
+
 bool RegisterSet::contains(RegisterRef ref) const {
   const size_t width = std::max<size_t>(1, ref.width);
   switch (ref.cls) {

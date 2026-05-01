@@ -60,13 +60,6 @@ std::vector<const Instruction *> instructions_in_order(BasicBlock &block) {
   return false;
 }
 
-void remove_vector_kills(RegisterSet &kills) {
-  for (size_t i = 0; i < REGISTER_SET_MAX_VGPRS; ++i)
-    kills.erase({RegClass::VGPR, static_cast<uint16_t>(i), 1});
-  for (size_t i = 0; i < REGISTER_SET_MAX_ACC_VGPRS; ++i)
-    kills.erase({RegClass::ACC_VGPR, static_cast<uint16_t>(i), 1});
-}
-
 [[nodiscard]] RegisterSet kill_defs(const InstDefUse &du) {
   RegisterSet kills = du.defs;
   // Predicated defs and EXEC-masked vector defs preserve old values on at least
@@ -74,8 +67,10 @@ void remove_vector_kills(RegisterSet &kills) {
   // writes cannot be treated as unconditional liveness kills.
   if (du.has_predicated_def)
     return {};
-  if (du.has_exec_masked_vector_def)
-    remove_vector_kills(kills);
+  if (du.has_exec_masked_vector_def) {
+    kills.clear_class(RegClass::VGPR);
+    kills.clear_class(RegClass::ACC_VGPR);
+  }
   return kills;
 }
 

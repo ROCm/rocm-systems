@@ -88,6 +88,9 @@ public:
   /// @brief Remove every 32-bit register lane covered by `ref`.
   void erase(RegisterRef ref);
 
+  /// @brief Remove all tracked registers in one register class.
+  void clear_class(RegClass cls);
+
   /// @brief Return true if every lane covered by `ref` is present.
   [[nodiscard]] bool contains(RegisterRef ref) const;
 
