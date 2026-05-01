@@ -10,7 +10,6 @@
 #include "hip_platform.hpp"
 #include "hip_conversions.hpp"
 #include "platform/sampler.hpp"
-#include "cl_common.hpp"
 
 struct __hip_texture {
   uint32_t imageSRD[HIP_IMAGE_OBJECT_SIZE_DWORD];
@@ -42,8 +41,8 @@ struct __hip_texture {
 namespace hip {
 
 hipError_t ihipFree(void* ptr);
-amd::Image* ihipImageCreate(const cl_channel_order channelOrder, const cl_channel_type channelType,
-                            const cl_mem_object_type imageType, const size_t imageWidth,
+amd::Image* ihipImageCreate(const amd::ImageFormat fmt, const amd::MemObjectType imageType,
+                            const size_t imageWidth,
                             const size_t imageHeight, const size_t imageDepth,
                             const size_t imageArraySize, const size_t imageRowPitch,
                             const size_t imageSlicePitch, const uint32_t numMipLevels,
@@ -213,11 +212,11 @@ hipError_t ihipCreateTextureObject(hipTextureObject_t* pTexObject, const hipReso
   amd::Image* image = nullptr;
   switch (pResDesc->resType) {
     case hipResourceTypeArray: {
-      cl_mem memObj = reinterpret_cast<cl_mem>(pResDesc->res.array.array->data);
-      if (!is_valid(memObj)) {
+      amd::Memory* memObj = reinterpret_cast<amd::Memory*>(pResDesc->res.array.array->data);
+      if (memObj == nullptr) {
         return hipErrorInvalidValue;
       }
-      image = as_amd(memObj)->asImage();
+      image = memObj->asImage();
 
       hipTextureReadMode readMode = pTexDesc->readMode;
       // 32-bit integer format will not be promoted, regardless of whether or not
@@ -255,11 +254,11 @@ hipError_t ihipCreateTextureObject(hipTextureObject_t* pTexObject, const hipReso
       break;
     }
     case hipResourceTypeMipmappedArray: {
-      cl_mem memObj = reinterpret_cast<cl_mem>(pResDesc->res.array.array->data);
-      if (!is_valid(memObj)) {
+      amd::Memory* memObj = reinterpret_cast<amd::Memory*>(pResDesc->res.array.array->data);
+      if (memObj == nullptr) {
         return hipErrorInvalidValue;
       }
-      image = as_amd(memObj)->asImage();
+      image = memObj->asImage();
 
       hipTextureReadMode readMode = pTexDesc->readMode;
       // 32-bit integer format will not be promoted, regardless of whether or not
@@ -308,9 +307,7 @@ hipError_t ihipCreateTextureObject(hipTextureObject_t* pTexObject, const hipReso
       amd::Memory* buffer =
           getMemoryObjectWithOffset(pResDesc->res.linear.devPtr, imageSizeInBytes);
       hipError_t status = hipSuccess;
-      image = ihipImageCreate(static_cast<cl_channel_order>(channelOrder),
-                              static_cast<cl_channel_type>(channelType),
-                              static_cast<cl_mem_object_type>(imageType),
+      image = ihipImageCreate(amd::ImageFormat{channelOrder, channelType}, imageType,
                               imageSizeInBytes / imageFormat.getElementSize(), /* imageWidth */
                               0,                                               /* imageHeight */
                               0,                                               /* imageDepth */
@@ -348,9 +345,7 @@ hipError_t ihipCreateTextureObject(hipTextureObject_t* pTexObject, const hipReso
           getMemoryObjectWithOffset(pResDesc->res.pitch2D.devPtr, imageSizeInBytes);
 
       hipError_t status = hipSuccess;
-      image = ihipImageCreate(static_cast<cl_channel_order>(channelOrder),
-                              static_cast<cl_channel_type>(channelType),
-                              static_cast<cl_mem_object_type>(imageType),
+      image = ihipImageCreate(amd::ImageFormat{channelOrder, channelType}, imageType,
                               pResDesc->res.pitch2D.width,        /* imageWidth */
                               pResDesc->res.pitch2D.height,       /* imageHeight */
                               0,                                  /* imageDepth */

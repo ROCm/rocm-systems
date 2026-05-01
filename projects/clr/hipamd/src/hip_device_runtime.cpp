@@ -23,14 +23,14 @@ hipError_t ihipChooseDevice(int* device, const DeviceProp* properties) {
   }
 
   *device = 0;
-  cl_uint maxMatchedCount = 0;
+  uint32_t maxMatchedCount = 0;
   int count = 0;
   IHIP_RETURN_ONFAIL(ihipDeviceGetCount(&count));
 
-  for (cl_int i = 0; i < count; ++i) {
+  for (int32_t i = 0; i < count; ++i) {
     DeviceProp currentProp = {0};
-    cl_uint validPropCount = 0;
-    cl_uint matchedCount = 0;
+    uint32_t validPropCount = 0;
+    uint32_t matchedCount = 0;
     hipError_t err = hipSuccess;
 
     if constexpr (std::is_same_v<DeviceProp, hipDeviceProp_tR0600>) {
@@ -478,7 +478,7 @@ hipError_t hipDeviceGetByPCIBusId(int* device, const char* pciBusIdstr) {
              reinterpret_cast<unsigned int*>(&pciFunction)) == 0x4) {
     int count = 0;
     HIP_RETURN_ONFAIL(ihipDeviceGetCount(&count));
-    for (cl_int i = 0; i < count; i++) {
+    for (int32_t i = 0; i < count; i++) {
       hipDevice_t dev;
       hipDeviceProp_tR0600 prop;
       HIP_RETURN_ONFAIL(ihipDeviceGet(&dev, i));

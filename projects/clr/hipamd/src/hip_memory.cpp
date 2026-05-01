@@ -10,7 +10,6 @@
 #include "hip_internal.hpp"
 #include "hip_platform.hpp"
 #include "hip_conversions.hpp"
-#include "cl_common.hpp"
 #include "platform/context.hpp"
 #include "platform/command.hpp"
 #include "platform/memory.hpp"
@@ -989,12 +988,12 @@ hipError_t ihipArrayDestroy(hipArray_t array) {
       hip::hipArraySet.erase(array);
     }
   }
-  cl_mem memObj = reinterpret_cast<cl_mem>(array->data);
-  if (is_valid(memObj) == false) {
+  amd::Memory* memObj = reinterpret_cast<amd::Memory*>(array->data);
+  if (memObj == nullptr) {
     return hipErrorInvalidValue;
   }
 
-  auto image = as_amd(memObj);
+  auto image = memObj;
   // Wait on the device, associated with the current memory object during allocation
   g_devices[image->getUserData().deviceId]->SyncAllStreams();
   image->release();
@@ -1133,25 +1132,25 @@ hipError_t hipMalloc3D(hipPitchedPtr* pitchedDevPtr, hipExtent extent) {
   HIP_RETURN(status, *pitchedDevPtr);
 }
 
-amd::Image* ihipImageCreate(const cl_channel_order channelOrder, const cl_channel_type channelType,
-                            const cl_mem_object_type imageType, const size_t imageWidth,
+amd::Image* ihipImageCreate(const amd::ImageFormat fmt, const amd::MemObjectType imageType,
+                            const size_t imageWidth,
                             const size_t imageHeight, const size_t imageDepth,
                             const size_t imageArraySize, const size_t imageRowPitch,
                             const size_t imageSlicePitch, const uint32_t numMipLevels,
                             const size_t offset, amd::Memory* buffer, hipError_t& status) {
   status = hipSuccess;
-  const amd::Image::Format imageFormat(amd::ImageFormat{
-      static_cast<amd::ChannelOrder>(channelOrder),
-      static_cast<amd::ChannelDataType>(channelType)});
+  const amd::Image::Format imageFormat(fmt);
   if (!imageFormat.isValid()) {
-    LogPrintfError("Invalid Image format for channel Order:%u Type:%u", channelOrder, channelType);
+    LogPrintfError("Invalid Image format for channel Order:%u Type:%u",
+                   static_cast<uint32_t>(fmt.channelOrder),
+                   static_cast<uint32_t>(fmt.channelDataType));
     status = hipErrorInvalidValue;
     return nullptr;
   }
 
   amd::Context& context = *hip::getCurrentDevice()->asContext();
-  if (!imageFormat.isSupported(context, static_cast<amd::MemObjectType>(imageType))) {
-    LogPrintfError("Image type: %u not supported", imageType);
+  if (!imageFormat.isSupported(context, imageType)) {
+    LogPrintfError("Image type: %u not supported", static_cast<uint32_t>(imageType));
     status = hipErrorInvalidValue;
     return nullptr;
   }
@@ -1163,7 +1162,7 @@ amd::Image* ihipImageCreate(const cl_channel_order channelOrder, const cl_channe
     return nullptr;
   }
 
-  if (!amd::Image::validateDimensions(devices, static_cast<amd::MemObjectType>(imageType),
+  if (!amd::Image::validateDimensions(devices, imageType,
                                       imageWidth, imageHeight, imageDepth, imageArraySize)) {
     ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_RESOURCE, "Image does not have valid dimensions");
     status = hipErrorInvalidValue;
@@ -1186,19 +1185,18 @@ amd::Image* ihipImageCreate(const cl_channel_order channelOrder, const cl_channe
   // TODO validate the image descriptor.
   bool isExternalBuffer = buffer != nullptr ? buffer->isInterop() : false;
   amd::Image* image = nullptr;
-  const amd::MemObjectType amdImageType = static_cast<amd::MemObjectType>(imageType);
   if (isExternalBuffer) {
     // We will create mipmap image view on top of external buffer which is from Vulkan or D3D
     // image. The buffer contains subchunks of tiled image, or it's just a linear image. Lower
     // level PAL will infer memory layout (offset, pitch, slice pitch, size) for each level
     // array in terms of tiling mode(linear or optimal), extent, format and mipmap levels.
     // Note that RocR will support mipmap in the future.
-    switch (amdImageType) {
+    switch (imageType) {
       case amd::MemObjectType::Image1D:
       case amd::MemObjectType::Image2D:
       case amd::MemObjectType::Image3D:
         image = new (buffer->getContext())
-            amd::Image(*buffer->asBuffer(), amdImageType, amd::MemFlags::ReadWrite, imageFormat,
+            amd::Image(*buffer->asBuffer(), imageType, amd::MemFlags::ReadWrite, imageFormat,
                        imageWidth, (imageHeight == 0) ? 1 : imageHeight,
                        (imageDepth == 0) ? 1 : imageDepth, imageRowPitch, imageSlicePitch,
                        numMipLevels, offset);
@@ -1207,11 +1205,11 @@ amd::Image* ihipImageCreate(const cl_channel_order channelOrder, const cl_channe
         LogPrintfError("Cannot create image of imageType: 0x%x for external buffer", imageType);
     }
   } else if (buffer != nullptr) {
-    switch (amdImageType) {
+    switch (imageType) {
       case amd::MemObjectType::Image1DBuffer:
       case amd::MemObjectType::Image2D:
         image = new (buffer->getContext())
-            amd::Image(*buffer->asBuffer(), amdImageType, amd::MemFlags::ReadWrite, imageFormat,
+            amd::Image(*buffer->asBuffer(), imageType, amd::MemFlags::ReadWrite, imageFormat,
                        (imageWidth == 0) ? 1 : imageWidth, (imageHeight == 0) ? 1 : imageHeight,
                        (imageDepth == 0) ? 1 : imageDepth, imageRowPitch, imageSlicePitch,
                        numMipLevels, offset);
@@ -1220,12 +1218,12 @@ amd::Image* ihipImageCreate(const cl_channel_order channelOrder, const cl_channe
         LogPrintfError("Cannot create image of imageType: 0x%x", imageType);
     }
   } else {
-    switch (amdImageType) {
+    switch (imageType) {
       case amd::MemObjectType::Image1D:
       case amd::MemObjectType::Image2D:
       case amd::MemObjectType::Image3D:
         image = new (context)
-            amd::Image(context, amdImageType, amd::MemFlags::ReadWrite, imageFormat, imageWidth,
+            amd::Image(context, imageType, amd::MemFlags::ReadWrite, imageFormat, imageWidth,
                        (imageHeight == 0) ? 1 : imageHeight, (imageDepth == 0) ? 1 : imageDepth,
                        imageWidth * imageFormat.getElementSize(),               /* row pitch */
                        imageWidth * imageHeight * imageFormat.getElementSize(), /* slice pitch */
@@ -1233,14 +1231,14 @@ amd::Image* ihipImageCreate(const cl_channel_order channelOrder, const cl_channe
         break;
       case amd::MemObjectType::Image1DArray:
         image = new (context)
-            amd::Image(context, amdImageType, amd::MemFlags::ReadWrite, imageFormat, imageWidth,
+            amd::Image(context, imageType, amd::MemFlags::ReadWrite, imageFormat, imageWidth,
                        imageArraySize, 1, /* image depth */
                        imageWidth * imageFormat.getElementSize(),
                        imageWidth * imageHeight * imageFormat.getElementSize(), numMipLevels);
         break;
       case amd::MemObjectType::Image2DArray:
         image = new (context)
-            amd::Image(context, amdImageType, amd::MemFlags::ReadWrite, imageFormat, imageWidth,
+            amd::Image(context, imageType, amd::MemFlags::ReadWrite, imageFormat, imageWidth,
                        imageHeight, imageArraySize, imageWidth * imageFormat.getElementSize(),
                        imageWidth * imageHeight * imageFormat.getElementSize(), numMipLevels);
         break;
@@ -1288,9 +1286,7 @@ hipError_t ihipArrayCreate(hipArray_t* array, const HIP_ARRAY3D_DESCRIPTOR* pAll
   const amd::MemObjectType imageType = hip::getAMDMemObjectType(
       pAllocateArray->Width, pAllocateArray->Height, pAllocateArray->Depth, pAllocateArray->Flags);
   hipError_t status = hipSuccess;
-  amd::Image* image = ihipImageCreate(static_cast<cl_channel_order>(channelOrder),
-                                      static_cast<cl_channel_type>(channelType),
-                                      static_cast<cl_mem_object_type>(imageType),
+  amd::Image* image = ihipImageCreate(amd::ImageFormat{channelOrder, channelType}, imageType,
                                       pAllocateArray->Width,
                                       pAllocateArray->Height, pAllocateArray->Depth,
                                       // The number of layers is determined by the depth extent.
@@ -1304,8 +1300,7 @@ hipError_t ihipArrayCreate(hipArray_t* array, const HIP_ARRAY3D_DESCRIPTOR* pAll
     return status;
   }
 
-  cl_mem memObj = as_cl<amd::Memory>(image);
-  *array = new hipArray{reinterpret_cast<void*>(memObj)};
+  *array = new hipArray{static_cast<void*>(image)};
 
   // It is UB to call hipGet*() on an array created via hipArrayCreate()/hipArray3DCreate().
   // This is due to hip not differentiating between runtime and driver types.
@@ -2203,12 +2198,12 @@ hipError_t validateImageObject(hipArray_t array, amd::Coord3D& origin, amd::Coor
     return hipErrorInvalidValue;
   }
 
-  cl_mem memObj = reinterpret_cast<cl_mem>(array->data);
-  if (!is_valid(memObj)) {
+  amd::Memory* memObj = reinterpret_cast<amd::Memory*>(array->data);
+  if (memObj == nullptr) {
     return hipErrorInvalidValue;
   }
 
-  image = as_amd(memObj)->asImage();
+  image = memObj->asImage();
   if (!image->validateRegion(origin, copyRegion)) {
     return hipErrorInvalidValue;
   }
@@ -3883,12 +3878,12 @@ hipError_t ihipPointerGetAttributes(void* data, hipPointer_attribute attribute,
           *reinterpret_cast<uint32_t*>(data) = 0;
           return hipErrorInvalidValue;
         }
-        cl_mem dstMemObj = reinterpret_cast<cl_mem>((static_cast<hipArray*>(ptr))->data);
-        if (!is_valid(dstMemObj)) {
+        amd::Memory* dstMemObj = reinterpret_cast<amd::Memory*>((static_cast<hipArray*>(ptr))->data);
+        if (dstMemObj == nullptr) {
           *reinterpret_cast<uint32_t*>(data) = 0;
           return hipErrorInvalidValue;
         }
-        amd::Image* dstImage = as_amd(dstMemObj)->asImage();
+        amd::Image* dstImage = dstMemObj->asImage();
         if (dstImage) {
           *reinterpret_cast<uint32_t*>(data) = hipMemoryTypeArray;
         } else {
@@ -4511,9 +4506,7 @@ hipError_t ihipMipmapArrayCreate(hipMipmappedArray_t* mipmapped_array_pptr,
   hipError_t status = hipSuccess;
   // Create a new amd::Image with mipmap
   amd::Image* image =
-      ihipImageCreate(static_cast<cl_channel_order>(channel_order),
-                      static_cast<cl_channel_type>(channel_type),
-                      static_cast<cl_mem_object_type>(image_type),
+      ihipImageCreate(amd::ImageFormat{channel_order, channel_type}, image_type,
                       mipmapped_array_desc_ptr->Width,
                       mipmapped_array_desc_ptr->Height, mipmapped_array_desc_ptr->Depth,
                       mipmapped_array_desc_ptr->Depth, 0 /* row pitch */, 0 /* slice pitch */,
@@ -4523,9 +4516,8 @@ hipError_t ihipMipmapArrayCreate(hipMipmappedArray_t* mipmapped_array_pptr,
     return status;
   }
 
-  cl_mem cl_mem_obj = as_cl<amd::Memory>(image);
   *mipmapped_array_pptr = new hipMipmappedArray();
-  (*mipmapped_array_pptr)->data = reinterpret_cast<void*>(cl_mem_obj);
+  (*mipmapped_array_pptr)->data = static_cast<void*>(image);
 
   (*mipmapped_array_pptr)->desc = hip::getChannelFormatDesc(mipmapped_array_desc_ptr->NumChannels,
                                                             mipmapped_array_desc_ptr->Format);
@@ -4547,12 +4539,12 @@ hipError_t ihipMipmappedArrayDestroy(hipMipmappedArray_t mipmapped_array_ptr) {
     return hipErrorInvalidValue;
   }
 
-  cl_mem mem_obj = reinterpret_cast<cl_mem>(mipmapped_array_ptr->data);
-  if (is_valid(mem_obj) == false) {
+  amd::Memory* mem_obj = reinterpret_cast<amd::Memory*>(mipmapped_array_ptr->data);
+  if (mem_obj == nullptr) {
     return hipErrorInvalidValue;
   }
 
-  auto image = as_amd(mem_obj);
+  auto image = mem_obj;
   // Wait on the device, associated with the current memory object during allocation
   g_devices[image->getUserData().deviceId]->SyncAllStreams();
   image->release();
@@ -4575,29 +4567,29 @@ hipError_t ihipMipmappedArrayGetLevel(hipArray_t* level_array_pptr,
     return hipErrorInvalidValue;
   }
   // Convert the raw data to amd::Image
-  cl_mem cl_mem_obj = reinterpret_cast<cl_mem>(mipmapped_array_ptr->data);
-  if (is_valid(cl_mem_obj) == false) {
+  amd::Memory* memObj = reinterpret_cast<amd::Memory*>(mipmapped_array_ptr->data);
+  if (memObj == nullptr) {
     return hipErrorInvalidValue;
   }
 
-  amd::Image* image = as_amd(cl_mem_obj)->asImage();
+  amd::Image* image = memObj->asImage();
   if (image == nullptr) {
     return hipErrorInvalidValue;
   }
 
   // Create new hip Array parameter and create an image view with new mip level.
   (*level_array_pptr) = new hipArray();
-  (*level_array_pptr)->data = as_cl<amd::Memory>(
-      image->createView(image->getContext(), image->getImageFormat(), NULL, mip_level, amd::MemFlags::Empty));
+  amd::Image* mip_view_image =
+      image->createView(image->getContext(), image->getImageFormat(), NULL, mip_level, amd::MemFlags::Empty);
+  (*level_array_pptr)->data = static_cast<void*>(mip_view_image);
 
   // Copy the new width, height & depth details of the flag to hipArray.
-  cl_mem cl_mip_mem_obj = reinterpret_cast<cl_mem>((*level_array_pptr)->data);
-  if (is_valid(cl_mem_obj) == false) {
+  if (mip_view_image == nullptr) {
     return hipErrorInvalidValue;
   }
 
   // Fill the hip_array info from newly created amd::Image's view
-  amd::Image* mipmap_image = as_amd(cl_mip_mem_obj)->asImage();
+  amd::Image* mipmap_image = mip_view_image;
   (*level_array_pptr)->width = mipmap_image->getWidth();
   (*level_array_pptr)->height = mipmap_image->getHeight();
   (*level_array_pptr)->depth = mipmap_image->getDepth();
@@ -4628,12 +4620,12 @@ hipError_t ihipMipmappedArrayGetMemoryRequirements(hipArrayMemoryRequirements* m
     return hipErrorInvalidHandle;
   }
 
-  cl_mem cl_mem_obj = reinterpret_cast<cl_mem>(mipmap->data);
-  if (is_valid(cl_mem_obj) == false) {
+  amd::Memory* memObj = reinterpret_cast<amd::Memory*>(mipmap->data);
+  if (memObj == nullptr) {
     return hipErrorInvalidValue;
   }
 
-  amd::Image* image = as_amd(cl_mem_obj)->asImage();
+  amd::Image* image = memObj->asImage();
   if (image == nullptr) {
     return hipErrorInvalidValue;
   }
