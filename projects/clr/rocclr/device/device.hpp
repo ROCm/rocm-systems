@@ -2208,8 +2208,6 @@ class Device : public RuntimeObject {
   bool UpdateInitialHeapSize(uint64_t initialHeapSize);
 
   //! Returns true if the device heap has been fully initialized.
-  //! For backends that do not use the tracked heap-buffer initialization path,
-  //! the absence of a heap buffer means there is no pending tracked heap init.
   bool IsHeapInitialized() const {
     return (heap_buffer_ == nullptr) ||
            heap_init_complete_.load(std::memory_order_acquire);
