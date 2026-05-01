@@ -10,6 +10,7 @@
 #include "hip_internal.hpp"
 #include "hip_platform.hpp"
 #include "hip_conversions.hpp"
+#include "cl_common.hpp"
 #include "platform/context.hpp"
 #include "platform/command.hpp"
 #include "platform/memory.hpp"
@@ -1281,13 +1282,16 @@ hipError_t ihipArrayCreate(hipArray_t* array, const HIP_ARRAY3D_DESCRIPTOR* pAll
       return hipErrorInvalidValue;
   }
 
-  const cl_channel_order channelOrder = hip::getCLChannelOrder(pAllocateArray->NumChannels, 0);
-  const cl_channel_type channelType =
-      hip::getCLChannelType(pAllocateArray->Format, hipReadModeElementType);
-  const cl_mem_object_type imageType = hip::getCLMemObjectType(
+  const amd::ChannelOrder channelOrder = hip::getAMDChannelOrder(pAllocateArray->NumChannels, 0);
+  const amd::ChannelDataType channelType =
+      hip::getAMDChannelDataType(pAllocateArray->Format, hipReadModeElementType);
+  const amd::MemObjectType imageType = hip::getAMDMemObjectType(
       pAllocateArray->Width, pAllocateArray->Height, pAllocateArray->Depth, pAllocateArray->Flags);
   hipError_t status = hipSuccess;
-  amd::Image* image = ihipImageCreate(channelOrder, channelType, imageType, pAllocateArray->Width,
+  amd::Image* image = ihipImageCreate(static_cast<cl_channel_order>(channelOrder),
+                                      static_cast<cl_channel_type>(channelType),
+                                      static_cast<cl_mem_object_type>(imageType),
+                                      pAllocateArray->Width,
                                       pAllocateArray->Height, pAllocateArray->Depth,
                                       // The number of layers is determined by the depth extent.
                                       pAllocateArray->Depth,       /* array size */
@@ -4497,17 +4501,20 @@ hipError_t ihipMipmapArrayCreate(hipMipmappedArray_t* mipmapped_array_pptr,
       return hipErrorInvalidValue;
   }
 
-  const cl_channel_order channel_order =
-      hip::getCLChannelOrder(mipmapped_array_desc_ptr->NumChannels, 0);
-  const cl_channel_type channel_type =
-      hip::getCLChannelType(mipmapped_array_desc_ptr->Format, hipReadModeElementType);
-  const cl_mem_object_type image_type =
-      hip::getCLMemObjectType(mipmapped_array_desc_ptr->Width, mipmapped_array_desc_ptr->Height,
-                              mipmapped_array_desc_ptr->Depth, mipmapped_array_desc_ptr->Flags);
+  const amd::ChannelOrder channel_order =
+      hip::getAMDChannelOrder(mipmapped_array_desc_ptr->NumChannels, 0);
+  const amd::ChannelDataType channel_type =
+      hip::getAMDChannelDataType(mipmapped_array_desc_ptr->Format, hipReadModeElementType);
+  const amd::MemObjectType image_type =
+      hip::getAMDMemObjectType(mipmapped_array_desc_ptr->Width, mipmapped_array_desc_ptr->Height,
+                               mipmapped_array_desc_ptr->Depth, mipmapped_array_desc_ptr->Flags);
   hipError_t status = hipSuccess;
   // Create a new amd::Image with mipmap
   amd::Image* image =
-      ihipImageCreate(channel_order, channel_type, image_type, mipmapped_array_desc_ptr->Width,
+      ihipImageCreate(static_cast<cl_channel_order>(channel_order),
+                      static_cast<cl_channel_type>(channel_type),
+                      static_cast<cl_mem_object_type>(image_type),
+                      mipmapped_array_desc_ptr->Width,
                       mipmapped_array_desc_ptr->Height, mipmapped_array_desc_ptr->Depth,
                       mipmapped_array_desc_ptr->Depth, 0 /* row pitch */, 0 /* slice pitch */,
                       num_mipmap_levels, offset, buffer, status);
@@ -4522,7 +4529,7 @@ hipError_t ihipMipmapArrayCreate(hipMipmappedArray_t* mipmapped_array_pptr,
 
   (*mipmapped_array_pptr)->desc = hip::getChannelFormatDesc(mipmapped_array_desc_ptr->NumChannels,
                                                             mipmapped_array_desc_ptr->Format);
-  (*mipmapped_array_pptr)->type = image_type;
+  (*mipmapped_array_pptr)->type = static_cast<unsigned int>(image_type);
   (*mipmapped_array_pptr)->width = mipmapped_array_desc_ptr->Width;
   (*mipmapped_array_pptr)->height = mipmapped_array_desc_ptr->Height;
   (*mipmapped_array_pptr)->depth = mipmapped_array_desc_ptr->Depth;
@@ -4595,10 +4602,9 @@ hipError_t ihipMipmappedArrayGetLevel(hipArray_t* level_array_pptr,
   (*level_array_pptr)->height = mipmap_image->getHeight();
   (*level_array_pptr)->depth = mipmap_image->getDepth();
 
-  const cl_mem_object_type image_type =
-      hip::getCLMemObjectType((*level_array_pptr)->width, (*level_array_pptr)->height,
-                              (*level_array_pptr)->depth, mipmapped_array_ptr->flags);
-  (*level_array_pptr)->type = image_type;
+  (*level_array_pptr)->type = static_cast<unsigned int>(
+      hip::getAMDMemObjectType((*level_array_pptr)->width, (*level_array_pptr)->height,
+                               (*level_array_pptr)->depth, mipmapped_array_ptr->flags));
   (*level_array_pptr)->Format = mipmapped_array_ptr->format;
   (*level_array_pptr)->desc = mipmapped_array_ptr->desc;
   (*level_array_pptr)->NumChannels = hip::getNumChannels((*level_array_pptr)->desc);

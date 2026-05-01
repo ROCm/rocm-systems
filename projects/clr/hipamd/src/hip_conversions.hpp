@@ -8,48 +8,48 @@
 
 #include <hip/driver_types.h>
 #include <hip/texture_types.h>
-#include "cl_common.hpp"
+#include "amd_types.hpp"
 
 namespace hip {
-inline cl_channel_type getCLChannelType(const hipArray_Format hipFormat,
-                                        const hipTextureReadMode hipReadMode) {
+inline amd::ChannelDataType getAMDChannelDataType(const hipArray_Format hipFormat,
+                                                  const hipTextureReadMode hipReadMode) {
   if (hipReadMode == hipReadModeElementType) {
     switch (hipFormat) {
       case HIP_AD_FORMAT_UNSIGNED_INT8:
-        return CL_UNSIGNED_INT8;
+        return amd::ChannelDataType::UnsignedInt8;
       case HIP_AD_FORMAT_SIGNED_INT8:
-        return CL_SIGNED_INT8;
+        return amd::ChannelDataType::SignedInt8;
       case HIP_AD_FORMAT_UNSIGNED_INT16:
-        return CL_UNSIGNED_INT16;
+        return amd::ChannelDataType::UnsignedInt16;
       case HIP_AD_FORMAT_SIGNED_INT16:
-        return CL_SIGNED_INT16;
+        return amd::ChannelDataType::SignedInt16;
       case HIP_AD_FORMAT_UNSIGNED_INT32:
-        return CL_UNSIGNED_INT32;
+        return amd::ChannelDataType::UnsignedInt32;
       case HIP_AD_FORMAT_SIGNED_INT32:
-        return CL_SIGNED_INT32;
+        return amd::ChannelDataType::SignedInt32;
       case HIP_AD_FORMAT_HALF:
-        return CL_HALF_FLOAT;
+        return amd::ChannelDataType::HalfFloat;
       case HIP_AD_FORMAT_FLOAT:
-        return CL_FLOAT;
+        return amd::ChannelDataType::Float;
     }
   } else if (hipReadMode == hipReadModeNormalizedFloat) {
     switch (hipFormat) {
       case HIP_AD_FORMAT_UNSIGNED_INT8:
-        return CL_UNORM_INT8;
+        return amd::ChannelDataType::UNormInt8;
       case HIP_AD_FORMAT_SIGNED_INT8:
-        return CL_SNORM_INT8;
+        return amd::ChannelDataType::SNormInt8;
       case HIP_AD_FORMAT_UNSIGNED_INT16:
-        return CL_UNORM_INT16;
+        return amd::ChannelDataType::UNormInt16;
       case HIP_AD_FORMAT_SIGNED_INT16:
-        return CL_SNORM_INT16;
+        return amd::ChannelDataType::SNormInt16;
       case HIP_AD_FORMAT_UNSIGNED_INT32:
-        return CL_UNSIGNED_INT32;
+        return amd::ChannelDataType::UnsignedInt32;
       case HIP_AD_FORMAT_SIGNED_INT32:
-        return CL_SIGNED_INT32;
+        return amd::ChannelDataType::SignedInt32;
       case HIP_AD_FORMAT_HALF:
-        return CL_HALF_FLOAT;
+        return amd::ChannelDataType::HalfFloat;
       case HIP_AD_FORMAT_FLOAT:
-        return CL_FLOAT;
+        return amd::ChannelDataType::Float;
     }
   }
 
@@ -57,14 +57,14 @@ inline cl_channel_type getCLChannelType(const hipArray_Format hipFormat,
   return {};
 }
 
-inline cl_channel_order getCLChannelOrder(const unsigned int hipNumChannels, const int sRGB) {
+inline amd::ChannelOrder getAMDChannelOrder(const unsigned int hipNumChannels, const int sRGB) {
   switch (hipNumChannels) {
     case 1:
-      return CL_R;
+      return amd::ChannelOrder::R;
     case 2:
-      return CL_RG;
+      return amd::ChannelOrder::RG;
     case 4:
-      return (sRGB == 1) ? CL_sRGBA : CL_RGBA;
+      return (sRGB == 1) ? amd::ChannelOrder::sRGBA : amd::ChannelOrder::RGBA;
     default:
       break;
   }
@@ -73,74 +73,72 @@ inline cl_channel_order getCLChannelOrder(const unsigned int hipNumChannels, con
   return {};
 }
 
-inline cl_mem_object_type getCLMemObjectType(const unsigned int hipWidth,
-                                             const unsigned int hipHeight,
-                                             const unsigned int hipDepth,
-                                             const unsigned int flags) {
+inline amd::MemObjectType getAMDMemObjectType(const unsigned int hipWidth,
+                                              const unsigned int hipHeight,
+                                              const unsigned int hipDepth,
+                                              const unsigned int flags) {
   if ((flags & hipArrayLayered) == hipArrayLayered) {
     if ((hipWidth != 0) && (hipHeight == 0) && (hipDepth != 0)) {
-      return CL_MEM_OBJECT_IMAGE1D_ARRAY;
+      return amd::MemObjectType::Image1DArray;
     } else if ((hipWidth != 0) && (hipHeight != 0) && (hipDepth != 0)) {
-      return CL_MEM_OBJECT_IMAGE2D_ARRAY;
+      return amd::MemObjectType::Image2DArray;
     }
   } else {
     if ((hipWidth != 0) && (hipHeight == 0) && (hipDepth == 0)) {
-      return CL_MEM_OBJECT_IMAGE1D;
+      return amd::MemObjectType::Image1D;
     } else if ((hipWidth != 0) && (hipHeight != 0) && (hipDepth == 0)) {
-      return CL_MEM_OBJECT_IMAGE2D;
+      return amd::MemObjectType::Image2D;
     } else if ((hipWidth != 0) && (hipHeight != 0) && (hipDepth != 0)) {
-      return CL_MEM_OBJECT_IMAGE3D;
+      return amd::MemObjectType::Image3D;
     }
   }
   // error scenario. ShouldNotReachHere()
-  return CL_MEM_OBJECT_ALLOCATION_FAILURE;
+  return amd::MemObjectType::Buffer;
 }
 
-inline cl_mem_object_type getCLMemObjectType(const hipArray* arr) {
-  const cl_mem dstMemObj = reinterpret_cast<const cl_mem>(arr->data);
-  const amd::Image* dstImage = as_amd(dstMemObj)->asImage();
-  return dstImage ? static_cast<cl_mem_object_type>(dstImage->getType())
-                  : CL_MEM_OBJECT_ALLOCATION_FAILURE;
+inline amd::MemObjectType getAMDMemObjectType(const hipArray* arr) {
+  const amd::Image* dstImage = reinterpret_cast<amd::Memory*>(arr->data)->asImage();
+  return dstImage ? dstImage->getType() : amd::MemObjectType::Buffer;
 }
 
 inline bool isLayered1D(const hipArray* arr) {
-  return CL_MEM_OBJECT_IMAGE1D_ARRAY == getCLMemObjectType(arr);
+  return amd::MemObjectType::Image1DArray == getAMDMemObjectType(arr);
 }
 
-inline cl_addressing_mode getCLAddressingMode(const hipTextureAddressMode hipAddressMode) {
+inline amd::AddressingMode getAMDAddressingMode(const hipTextureAddressMode hipAddressMode) {
   switch (hipAddressMode) {
     case hipAddressModeWrap:
-      return CL_ADDRESS_REPEAT;
+      return amd::AddressingMode::Repeat;
     case hipAddressModeClamp:
-      return CL_ADDRESS_CLAMP_TO_EDGE;
+      return amd::AddressingMode::ClampToEdge;
     case hipAddressModeMirror:
-      return CL_ADDRESS_MIRRORED_REPEAT;
+      return amd::AddressingMode::MirroredRepeat;
     case hipAddressModeBorder:
-      return CL_ADDRESS_CLAMP;
+      return amd::AddressingMode::Clamp;
   }
 
   // error scenario
   return {};
 }
 
-inline cl_filter_mode getCLFilterMode(const hipTextureFilterMode hipFilterMode) {
+inline amd::FilterMode getAMDFilterMode(const hipTextureFilterMode hipFilterMode) {
   switch (hipFilterMode) {
     case hipFilterModePoint:
-      return CL_FILTER_NEAREST;
+      return amd::FilterMode::Nearest;
     case hipFilterModeLinear:
-      return CL_FILTER_LINEAR;
+      return amd::FilterMode::Linear;
   }
 
   // error scenario
   return {};
 }
 
-inline cl_mem_object_type getCLMemObjectType(const hipResourceType hipResType) {
+inline amd::MemObjectType getAMDMemObjectType(const hipResourceType hipResType) {
   switch (hipResType) {
     case hipResourceTypeLinear:
-      return CL_MEM_OBJECT_IMAGE1D_BUFFER;
+      return amd::MemObjectType::Image1DBuffer;
     case hipResourceTypePitch2D:
-      return CL_MEM_OBJECT_IMAGE2D;
+      return amd::MemObjectType::Image2D;
     default:
       break;
   }
@@ -149,30 +147,30 @@ inline cl_mem_object_type getCLMemObjectType(const hipResourceType hipResType) {
   return {};
 }
 
-inline hipArray_Format getCL2hipArrayFormat(const cl_channel_type type) {
+inline hipArray_Format getHipArrayFormat(const amd::ChannelDataType type) {
   switch (type) {
-    case CL_SNORM_INT8:
-    case CL_SIGNED_INT8:
+    case amd::ChannelDataType::SNormInt8:
+    case amd::ChannelDataType::SignedInt8:
       return HIP_AD_FORMAT_SIGNED_INT8;
 
-    case CL_UNSIGNED_INT16:
+    case amd::ChannelDataType::UnsignedInt16:
       return HIP_AD_FORMAT_UNSIGNED_INT16;
 
-    case CL_SIGNED_INT16:
+    case amd::ChannelDataType::SignedInt16:
       return HIP_AD_FORMAT_SIGNED_INT16;
 
-    case CL_SIGNED_INT32:
+    case amd::ChannelDataType::SignedInt32:
       return HIP_AD_FORMAT_SIGNED_INT32;
 
-    case CL_UNSIGNED_INT32:
+    case amd::ChannelDataType::UnsignedInt32:
       return HIP_AD_FORMAT_UNSIGNED_INT32;
 
-    case CL_FLOAT:
+    case amd::ChannelDataType::Float:
       return HIP_AD_FORMAT_FLOAT;
 
-    case CL_UNSIGNED_INT8:
-    case CL_UNORM_INT8:
-    case CL_UNORM_INT_101010:
+    case amd::ChannelDataType::UnsignedInt8:
+    case amd::ChannelDataType::UNormInt8:
+    case amd::ChannelDataType::UNormInt101010:
     default:
       return HIP_AD_FORMAT_UNSIGNED_INT8;
   }

@@ -52,7 +52,7 @@ class LaunchHostFuncCallback : public StreamCallback {
   void CL_CALLBACK callback() override { callBack_(userData_); }
 };
 
-void CL_CALLBACK ihipStreamCallback(cl_event event, cl_int command_exec_status, void* user_data);
+void ihipStreamCallback(void* event_handle, int32_t command_exec_status, void* user_data);
 
 #define IPC_SIGNALS_PER_EVENT 32
 

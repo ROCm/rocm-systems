@@ -540,6 +540,7 @@ struct SetDeviceClockModeOutput {
 enum class FilterMode : uint32_t {
   Nearest = 0x1140, // CL_FILTER_NEAREST
   Linear  = 0x1141, // CL_FILTER_LINEAR
+  None    = 0x1142, // No filtering (HIP extension, used for mipmap base case)
 };
 
 // Replaces CL_ADDRESS_* constants (cl_addressing_mode = cl_uint = uint32_t)

@@ -364,12 +364,10 @@ hipError_t hipGraphicsSubResourceGetMappedArray(hipArray_t* array, hipGraphicsRe
   myarray->height = view->getHeight();
   myarray->depth = view->getDepth();
 
-  const cl_mem_object_type image_type =
-      hip::getCLMemObjectType(myarray->width, myarray->height, myarray->depth, hipArrayDefault);
-  myarray->type = image_type;
+  myarray->type = static_cast<unsigned int>(
+      hip::getAMDMemObjectType(myarray->width, myarray->height, myarray->depth, hipArrayDefault));
   amd::Image::Format f = image->getImageFormat();
-  myarray->Format = hip::getCL2hipArrayFormat(
-      static_cast<cl_channel_type>(f.channelDataType));
+  myarray->Format = hip::getHipArrayFormat(f.channelDataType);
   myarray->desc = hip::getChannelFormatDesc(f.getNumChannels(), myarray->Format);
   myarray->NumChannels = hip::getNumChannels(myarray->desc);
   myarray->isDrv = 0;

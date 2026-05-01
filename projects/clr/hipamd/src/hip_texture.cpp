@@ -164,41 +164,42 @@ hipError_t ihipCreateTextureObject(hipTextureObject_t* pTexObject, const hipReso
   }
 
   // TODO ROCclr assumes all dimensions have the same addressing mode.
-  cl_addressing_mode addressMode[3] = {CL_ADDRESS_NONE, CL_ADDRESS_NONE, CL_ADDRESS_NONE};
+  amd::AddressingMode addressMode[3] = {amd::AddressingMode::NoAddressing,
+                                        amd::AddressingMode::NoAddressing,
+                                        amd::AddressingMode::NoAddressing};
   // If hipTextureDesc::normalizedCoords is set to zero,
   // hipAddressModeWrap and hipAddressModeMirror won't be supported
   // and will be switched to hipAddressModeClamp.
   for (int i = 0; i < 3; i++) {
     if ((pTexDesc->normalizedCoords == 0) && ((pTexDesc->addressMode[i] == hipAddressModeWrap) ||
                                               (pTexDesc->addressMode[i] == hipAddressModeMirror))) {
-      addressMode[i] = hip::getCLAddressingMode(hipAddressModeClamp);
+      addressMode[i] = hip::getAMDAddressingMode(hipAddressModeClamp);
     }
     // hipTextureDesc::addressMode is ignored if hipResourceDesc::resType is hipResourceTypeLinear
     else if (pResDesc->resType != hipResourceTypeLinear) {
-      addressMode[i] = hip::getCLAddressingMode(pTexDesc->addressMode[i]);
+      addressMode[i] = hip::getAMDAddressingMode(pTexDesc->addressMode[i]);
     }
   }
 
-#ifndef CL_FILTER_NONE
-#define CL_FILTER_NONE 0x1142
-#endif
-  cl_filter_mode filterMode = CL_FILTER_NONE;
-  cl_filter_mode mipFilterMode = CL_FILTER_NONE;
-#undef CL_FILTER_NONE
+  amd::FilterMode filterMode = amd::FilterMode::None;
+  amd::FilterMode mipFilterMode = amd::FilterMode::None;
   // hipTextureDesc::filterMode is ignored if hipResourceDesc::resType is hipResourceTypeLinear.
   if (pResDesc->resType != hipResourceTypeLinear) {
-    filterMode = hip::getCLFilterMode(pTexDesc->filterMode);
+    filterMode = hip::getAMDFilterMode(pTexDesc->filterMode);
   }
 
   if (pResDesc->resType == hipResourceTypeMipmappedArray) {
-    mipFilterMode = hip::getCLFilterMode(pTexDesc->mipmapFilterMode);
+    mipFilterMode = hip::getAMDFilterMode(pTexDesc->mipmapFilterMode);
   }
 
+  const uint addrModeU[3] = {static_cast<uint>(addressMode[0]),
+                             static_cast<uint>(addressMode[1]),
+                             static_cast<uint>(addressMode[2])};
   auto sampler_deleter = [](amd::Sampler* s) { s->release(); };
   std::unique_ptr<amd::Sampler, decltype(sampler_deleter)> sampler(
       new amd::Sampler(*hip::getCurrentDevice()->asContext(), pTexDesc->normalizedCoords,
-                       addressMode, filterMode, mipFilterMode, pTexDesc->minMipmapLevelClamp,
-                       pTexDesc->maxMipmapLevelClamp),
+                       addrModeU, static_cast<uint>(filterMode), static_cast<uint>(mipFilterMode),
+                       pTexDesc->minMipmapLevelClamp, pTexDesc->maxMipmapLevelClamp),
       sampler_deleter);
 
   if (sampler.get() == nullptr) {
@@ -231,17 +232,15 @@ hipError_t ihipCreateTextureObject(hipTextureObject_t* pTexObject, const hipReso
       if ((pResViewDesc != nullptr) || (readMode == hipReadModeNormalizedFloat) ||
           (pTexDesc->sRGB == 1)) {
         // TODO ROCclr currently right now can only change the format of the image.
-        const cl_channel_order channelOrder =
+        const amd::ChannelOrder channelOrder =
             (pResViewDesc != nullptr)
-                ? hip::getCLChannelOrder(hip::getNumChannels(pResViewDesc->format), pTexDesc->sRGB)
-                : hip::getCLChannelOrder(pResDesc->res.array.array->NumChannels, pTexDesc->sRGB);
-        const cl_channel_type channelType =
+                ? hip::getAMDChannelOrder(hip::getNumChannels(pResViewDesc->format), pTexDesc->sRGB)
+                : hip::getAMDChannelOrder(pResDesc->res.array.array->NumChannels, pTexDesc->sRGB);
+        const amd::ChannelDataType channelType =
             (pResViewDesc != nullptr)
-                ? hip::getCLChannelType(hip::getArrayFormat(pResViewDesc->format), readMode)
-                : hip::getCLChannelType(pResDesc->res.array.array->Format, readMode);
-        const amd::Image::Format imageFormat(amd::ImageFormat{
-            static_cast<amd::ChannelOrder>(channelOrder),
-            static_cast<amd::ChannelDataType>(channelType)});
+                ? hip::getAMDChannelDataType(hip::getArrayFormat(pResViewDesc->format), readMode)
+                : hip::getAMDChannelDataType(pResDesc->res.array.array->Format, readMode);
+        const amd::Image::Format imageFormat(amd::ImageFormat{channelOrder, channelType});
         if (!imageFormat.isValid()) {
           return hipErrorInvalidValue;
         }
@@ -275,17 +274,15 @@ hipError_t ihipCreateTextureObject(hipTextureObject_t* pTexObject, const hipReso
       if ((pResViewDesc != nullptr) || (readMode == hipReadModeNormalizedFloat) ||
           (pTexDesc->sRGB == 1)) {
         // TODO ROCclr currently right now can only change the format of the image.
-        const cl_channel_order channelOrder =
+        const amd::ChannelOrder channelOrder =
             (pResViewDesc != nullptr)
-                ? hip::getCLChannelOrder(hip::getNumChannels(pResViewDesc->format), pTexDesc->sRGB)
-                : hip::getCLChannelOrder(pResDesc->res.mipmap.mipmap->num_channels, pTexDesc->sRGB);
-        const cl_channel_type channelType =
+                ? hip::getAMDChannelOrder(hip::getNumChannels(pResViewDesc->format), pTexDesc->sRGB)
+                : hip::getAMDChannelOrder(pResDesc->res.mipmap.mipmap->num_channels, pTexDesc->sRGB);
+        const amd::ChannelDataType channelType =
             (pResViewDesc != nullptr)
-                ? hip::getCLChannelType(hip::getArrayFormat(pResViewDesc->format), readMode)
-                : hip::getCLChannelType(pResDesc->res.mipmap.mipmap->format, readMode);
-        const amd::Image::Format imageFormat(amd::ImageFormat{
-            static_cast<amd::ChannelOrder>(channelOrder),
-            static_cast<amd::ChannelDataType>(channelType)});
+                ? hip::getAMDChannelDataType(hip::getArrayFormat(pResViewDesc->format), readMode)
+                : hip::getAMDChannelDataType(pResDesc->res.mipmap.mipmap->format, readMode);
+        const amd::Image::Format imageFormat(amd::ImageFormat{channelOrder, channelType});
         if (!imageFormat.isValid()) {
           return hipErrorInvalidValue;
         }
@@ -301,19 +298,19 @@ hipError_t ihipCreateTextureObject(hipTextureObject_t* pTexObject, const hipReso
       break;
     }
     case hipResourceTypeLinear: {
-      const cl_channel_order channelOrder =
-          hip::getCLChannelOrder(hip::getNumChannels(pResDesc->res.linear.desc), pTexDesc->sRGB);
-      const cl_channel_type channelType =
-          hip::getCLChannelType(hip::getArrayFormat(pResDesc->res.linear.desc), pTexDesc->readMode);
-      const amd::Image::Format imageFormat(amd::ImageFormat{
-          static_cast<amd::ChannelOrder>(channelOrder),
-          static_cast<amd::ChannelDataType>(channelType)});
-      const cl_mem_object_type imageType = hip::getCLMemObjectType(pResDesc->resType);
+      const amd::ChannelOrder channelOrder =
+          hip::getAMDChannelOrder(hip::getNumChannels(pResDesc->res.linear.desc), pTexDesc->sRGB);
+      const amd::ChannelDataType channelType =
+          hip::getAMDChannelDataType(hip::getArrayFormat(pResDesc->res.linear.desc), pTexDesc->readMode);
+      const amd::Image::Format imageFormat(amd::ImageFormat{channelOrder, channelType});
+      const amd::MemObjectType imageType = hip::getAMDMemObjectType(pResDesc->resType);
       const size_t imageSizeInBytes = pResDesc->res.linear.sizeInBytes;
       amd::Memory* buffer =
           getMemoryObjectWithOffset(pResDesc->res.linear.devPtr, imageSizeInBytes);
       hipError_t status = hipSuccess;
-      image = ihipImageCreate(channelOrder, channelType, imageType,
+      image = ihipImageCreate(static_cast<cl_channel_order>(channelOrder),
+                              static_cast<cl_channel_type>(channelType),
+                              static_cast<cl_mem_object_type>(imageType),
                               imageSizeInBytes / imageFormat.getElementSize(), /* imageWidth */
                               0,                                               /* imageHeight */
                               0,                                               /* imageDepth */
@@ -333,14 +330,12 @@ hipError_t ihipCreateTextureObject(hipTextureObject_t* pTexObject, const hipReso
       break;
     }
     case hipResourceTypePitch2D: {
-      const cl_channel_order channelOrder =
-          hip::getCLChannelOrder(hip::getNumChannels(pResDesc->res.pitch2D.desc), pTexDesc->sRGB);
-      const cl_channel_type channelType = hip::getCLChannelType(
+      const amd::ChannelOrder channelOrder =
+          hip::getAMDChannelOrder(hip::getNumChannels(pResDesc->res.pitch2D.desc), pTexDesc->sRGB);
+      const amd::ChannelDataType channelType = hip::getAMDChannelDataType(
           hip::getArrayFormat(pResDesc->res.pitch2D.desc), pTexDesc->readMode);
-      const amd::Image::Format imageFormat(amd::ImageFormat{
-          static_cast<amd::ChannelOrder>(channelOrder),
-          static_cast<amd::ChannelDataType>(channelType)});
-      const cl_mem_object_type imageType = hip::getCLMemObjectType(pResDesc->resType);
+      const amd::Image::Format imageFormat(amd::ImageFormat{channelOrder, channelType});
+      const amd::MemObjectType imageType = hip::getAMDMemObjectType(pResDesc->resType);
       // Guard against unsigned underflow when height is 0
       const size_t imageSizeInBytes = (pResDesc->res.pitch2D.height > 0)
           ? pResDesc->res.pitch2D.width * imageFormat.getElementSize() +
@@ -353,7 +348,9 @@ hipError_t ihipCreateTextureObject(hipTextureObject_t* pTexObject, const hipReso
           getMemoryObjectWithOffset(pResDesc->res.pitch2D.devPtr, imageSizeInBytes);
 
       hipError_t status = hipSuccess;
-      image = ihipImageCreate(channelOrder, channelType, imageType,
+      image = ihipImageCreate(static_cast<cl_channel_order>(channelOrder),
+                              static_cast<cl_channel_type>(channelType),
+                              static_cast<cl_mem_object_type>(imageType),
                               pResDesc->res.pitch2D.width,        /* imageWidth */
                               pResDesc->res.pitch2D.height,       /* imageHeight */
                               0,                                  /* imageDepth */
