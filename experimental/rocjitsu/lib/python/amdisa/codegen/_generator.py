@@ -36,6 +36,11 @@ from amdisa.codegen.shared_baselines import (
     CDNA_BASELINE as _CDNA_BASELINE,
     CDNA_ARCHES as _CDNA_ARCHES,
 )
+from amdisa.codegen.execute.vop3_modifiers import (
+    vop3_src_mod,
+    vop3_dst_mod,
+    vop3_dst_mod_f64,
+)
 
 
 
@@ -547,9 +552,8 @@ class CodeGenerator:
         # Use inst.enc_name (not enc_name) because the instruction's encoding
         # may be a sub-format (e.g. VOP3_SDST_ENC) that differs from the
         # parent encoding (ENC_VOP3). VOP3_SDST_ENC has neg/omod/clamp but
-        # no abs modifier field. Set as instance state so that helper methods
-        # (_vop3_src_mod, etc.) can read it without explicit threading.
-        self._has_abs = profile.has_abs_modifier(inst.enc_name)
+        # no abs modifier field.
+        has_abs = profile.has_abs_modifier(inst.enc_name)
         self._enc_name = enc_name
         L = []  # output lines
 
@@ -726,15 +730,15 @@ class CodeGenerator:
             L.append('    if (!(exec & (1ULL << lane))) continue;')
             if dtype == 'b64' and is_vop3:
                 L.append(f'    double s = std::bit_cast<double>({src_ops[0]}.read_lane64(wf, lane));')
-                L.extend(self._vop3_src_mod('s', 0))
-                L.extend(self._vop3_dst_mod_f64('s'))
+                L.extend(vop3_src_mod('s', 0, has_abs))
+                L.extend(vop3_dst_mod_f64('s'))
                 L.append(f'    {dst_ops[0]}.write_lane64(wf, lane, std::bit_cast<uint64_t>(s));')
             elif dtype == 'b64':
                 L.append(f'    {dst_ops[0]}.write_lane64(wf, lane, {src_ops[0]}.read_lane64(wf, lane));')
             elif is_vop3:
                 L.append(f'    float s = std::bit_cast<float>({src_ops[0]}.read_lane(wf, lane));')
-                L.extend(self._vop3_src_mod('s', 0))
-                L.extend(self._vop3_dst_mod('s'))
+                L.extend(vop3_src_mod('s', 0, has_abs))
+                L.extend(vop3_dst_mod('s'))
                 L.append(f'    {dst_ops[0]}.write_lane(wf, lane, std::bit_cast<uint32_t>(s));')
             else:
                 L.append(f'    {dst_ops[0]}.write_lane(wf, lane, {src_ops[0]}.read_lane(wf, lane));')
@@ -742,19 +746,19 @@ class CodeGenerator:
             return '\n'.join(L)
 
         if cls == 'vector_unary':
-            return self._gen_vector_unary(dst_ops, src_ops, op, dtype, is_vop3)
+            return self._gen_vector_unary(dst_ops, src_ops, op, dtype, is_vop3, has_abs)
 
         if cls == 'vector_binop':
-            return self._gen_vector_binop(dst_ops, src_ops, op, dtype, is_vop3)
+            return self._gen_vector_binop(dst_ops, src_ops, op, dtype, is_vop3, has_abs)
 
         if cls == 'vector_ternary':
-            return self._gen_vector_ternary(dst_ops, src_ops, op, dtype, is_vop3)
+            return self._gen_vector_ternary(dst_ops, src_ops, op, dtype, is_vop3, has_abs)
 
         if cls == 'vector_cmp':
-            return self._gen_vector_cmp(dst_ops, src_ops, op, dtype, is_vop3)
+            return self._gen_vector_cmp(dst_ops, src_ops, op, dtype, is_vop3, has_abs)
 
         if cls == 'vector_cmpx':
-            return self._gen_vector_cmpx(src_ops, op, dtype, is_vop3, dst_ops)
+            return self._gen_vector_cmpx(src_ops, op, dtype, is_vop3, dst_ops, has_abs)
 
         if cls == 'vector_cndmask':
             # v_cndmask_b32 is a pure bitwise select — no input/output
@@ -817,10 +821,10 @@ class CodeGenerator:
             return '\n'.join(L)
 
         if cls == 'vector_cmp_class':
-            return self._gen_vector_cmp_class(dst_ops, src_ops, dtype, False, is_vop3)
+            return self._gen_vector_cmp_class(dst_ops, src_ops, dtype, False, is_vop3, has_abs)
 
         if cls == 'vector_cmpx_class':
-            return self._gen_vector_cmp_class(dst_ops, src_ops, dtype, True, is_vop3)
+            return self._gen_vector_cmp_class(dst_ops, src_ops, dtype, True, is_vop3, has_abs)
 
         if cls == 'vector_fmamk':
             # D = S0 * K + S2, K is inline constant (second src operand)
@@ -883,13 +887,13 @@ class CodeGenerator:
             return self._gen_vector_mad_32_16(dst_ops, src_ops, dtype)
 
         if cls == 'vector_div_fixup':
-            return self._gen_vector_div_fixup(dst_ops, src_ops, dtype, is_vop3)
+            return self._gen_vector_div_fixup(dst_ops, src_ops, dtype, is_vop3, has_abs)
 
         if cls == 'vector_div_scale':
-            return self._gen_vector_div_scale(dst_ops, src_ops, dtype, is_vop3)
+            return self._gen_vector_div_scale(dst_ops, src_ops, dtype, is_vop3, has_abs)
 
         if cls == 'vector_div_fmas':
-            return self._gen_vector_div_fmas(dst_ops, src_ops, dtype, is_vop3)
+            return self._gen_vector_div_fmas(dst_ops, src_ops, dtype, is_vop3, has_abs)
 
         if cls == 'vector_dot':
             return self._gen_vector_dot(dst_ops, src_ops, op, dtype)
@@ -1142,7 +1146,7 @@ class CodeGenerator:
 
         return f'  (void)wf;\n  throw util::UnimplementedInst(mnemonic()); // unhandled semantic class: {cls}'
 
-    def _gen_vector_cmp_class(self, dst: list[str], src: list[str], dtype: str | None, is_cmpx: bool, is_vop3: bool = False) -> str:
+    def _gen_vector_cmp_class(self, dst: list[str], src: list[str], dtype: str | None, is_cmpx: bool, is_vop3: bool = False, has_abs: bool = False) -> str:
         """Generate V_CMP_CLASS / V_CMPX_CLASS body."""
         L = []
         L.append('  uint64_t exec = wf.exec();')
@@ -1158,7 +1162,7 @@ class CodeGenerator:
         if dtype == 'f64':
             L.append(f'    double s0 = std::bit_cast<double>({src[0]}.read_lane64(wf, lane));')
             if is_vop3:
-                L.extend(self._vop3_src_mod('s0', 0))
+                L.extend(vop3_src_mod('s0', 0, has_abs))
             L.append(f'    uint32_t mask = {src[1]}.read_lane(wf, lane);')
             L.append('    bool match = false;')
             L.append('    if ((mask & 0x001) && std::isnan(s0) && (std::bit_cast<uint64_t>(s0) & 0x0008000000000000ULL) == 0) match = true;')
@@ -1179,7 +1183,7 @@ class CodeGenerator:
             L.append(f'    uint16_t s0_raw = static_cast<uint16_t>({src[0]}.read_lane(wf, lane));')
             L.append(f'    float s0 = util::f16_to_f32(s0_raw);')
             if is_vop3:
-                L.extend(self._vop3_src_mod('s0', 0))
+                L.extend(vop3_src_mod('s0', 0, has_abs))
             L.append(f'    uint32_t mask = {src[1]}.read_lane(wf, lane);')
             L.append('    bool match = false;')
             L.append('    bool is_f16_nan = ((s0_raw & 0x7C00) == 0x7C00) && ((s0_raw & 0x03FF) != 0);')
@@ -1196,7 +1200,7 @@ class CodeGenerator:
         else:
             L.append(f'    float s0 = std::bit_cast<float>({src[0]}.read_lane(wf, lane));')
             if is_vop3:
-                L.extend(self._vop3_src_mod('s0', 0))
+                L.extend(vop3_src_mod('s0', 0, has_abs))
             L.append(f'    uint32_t mask = {src[1]}.read_lane(wf, lane);')
             L.append('    bool match = false;')
             L.append('    if ((mask & 0x001) && std::isnan(s0) && (std::bit_cast<uint32_t>(s0) & 0x00400000) == 0) match = true;')
@@ -1294,7 +1298,7 @@ class CodeGenerator:
         L.append('  }')
         return '\n'.join(L)
 
-    def _gen_vector_div_fixup(self, dst: list[str], src: list[str], dtype: str | None, is_vop3: bool = False) -> str:
+    def _gen_vector_div_fixup(self, dst: list[str], src: list[str], dtype: str | None, is_vop3: bool = False, has_abs: bool = False) -> str:
         """Generate V_DIV_FIXUP body (corrects division result)."""
         L = []
         L.append('  uint64_t exec = wf.exec();')
@@ -1305,9 +1309,9 @@ class CodeGenerator:
             L.append(f'    double b = std::bit_cast<double>({src[1]}.read_lane64(wf, lane));')
             L.append(f'    double c = std::bit_cast<double>({src[2]}.read_lane64(wf, lane));')
             if is_vop3:
-                L.extend(self._vop3_src_mod('p', 0))
-                L.extend(self._vop3_src_mod('b', 1))
-                L.extend(self._vop3_src_mod('c', 2))
+                L.extend(vop3_src_mod('p', 0, has_abs))
+                L.extend(vop3_src_mod('b', 1, has_abs))
+                L.extend(vop3_src_mod('c', 2, has_abs))
             L.append('    double result;')
             L.append('    if (std::isnan(b)) result = b;')
             L.append('    else if (std::isnan(c)) result = c;')
@@ -1325,16 +1329,16 @@ class CodeGenerator:
             L.append('    else if (std::isinf(b)) result = std::copysign(0.0, std::bit_cast<double>(std::bit_cast<uint64_t>(b) ^ std::bit_cast<uint64_t>(c)));')
             L.append('    else result = p;')
             if is_vop3:
-                L.extend(self._vop3_dst_mod_f64('result'))
+                L.extend(vop3_dst_mod_f64('result'))
             L.append(f'    {dst[0]}.write_lane64(wf, lane, std::bit_cast<uint64_t>(result));')
         else:
             L.append(f'    float p = std::bit_cast<float>({src[0]}.read_lane(wf, lane));')
             L.append(f'    float b = std::bit_cast<float>({src[1]}.read_lane(wf, lane));')
             L.append(f'    float c = std::bit_cast<float>({src[2]}.read_lane(wf, lane));')
             if is_vop3:
-                L.extend(self._vop3_src_mod('p', 0))
-                L.extend(self._vop3_src_mod('b', 1))
-                L.extend(self._vop3_src_mod('c', 2))
+                L.extend(vop3_src_mod('p', 0, has_abs))
+                L.extend(vop3_src_mod('b', 1, has_abs))
+                L.extend(vop3_src_mod('c', 2, has_abs))
             L.append('    float result;')
             L.append('    if (std::isnan(b)) result = b;')
             L.append('    else if (std::isnan(c)) result = c;')
@@ -1352,12 +1356,12 @@ class CodeGenerator:
             L.append('    else if (std::isinf(b)) result = std::copysign(0.0f, std::bit_cast<float>(std::bit_cast<uint32_t>(b) ^ std::bit_cast<uint32_t>(c)));')
             L.append('    else result = p;')
             if is_vop3:
-                L.extend(self._vop3_dst_mod('result'))
+                L.extend(vop3_dst_mod('result'))
             L.append(f'    {dst[0]}.write_lane(wf, lane, std::bit_cast<uint32_t>(result));')
         L.append('  }')
         return '\n'.join(L)
 
-    def _gen_vector_div_scale(self, dst: list[str], src: list[str], dtype: str | None, is_vop3: bool = False) -> str:
+    def _gen_vector_div_scale(self, dst: list[str], src: list[str], dtype: str | None, is_vop3: bool = False, has_abs: bool = False) -> str:
         """Generate V_DIV_SCALE body per ISA pseudocode (CDNA4 p.363-365).
 
         S1 = denominator, S2 = numerator. S0 selects which to scale
@@ -1384,9 +1388,9 @@ class CodeGenerator:
         L.append(f'    {fp_type} s1 = std::bit_cast<{fp_type}>({src[1]}.{read_fn}(wf, lane));')
         L.append(f'    {fp_type} s2 = std::bit_cast<{fp_type}>({src[2]}.{read_fn}(wf, lane));')
         if is_vop3:
-            L.extend(self._vop3_src_mod('s0', 0))
-            L.extend(self._vop3_src_mod('s1', 1))
-            L.extend(self._vop3_src_mod('s2', 2))
+            L.extend(vop3_src_mod('s0', 0, has_abs))
+            L.extend(vop3_src_mod('s1', 1, has_abs))
+            L.extend(vop3_src_mod('s2', 2, has_abs))
         L.append(f'    {fp_type} result = s0;')
         L.append('    bool set_vcc = false;')
         L.append(f'    if (s2 == {zero} || s1 == {zero}) {{')
@@ -1428,7 +1432,7 @@ class CodeGenerator:
         L.append('  wf.set_vcc(vcc);')
         return '\n'.join(L)
 
-    def _gen_vector_div_fmas(self, dst: list[str], src: list[str], dtype: str | None, is_vop3: bool = False) -> str:
+    def _gen_vector_div_fmas(self, dst: list[str], src: list[str], dtype: str | None, is_vop3: bool = False, has_abs: bool = False) -> str:
         """Generate V_DIV_FMAS body (FMA with scale based on VCC)."""
         L = []
         L.append('  uint64_t exec = wf.exec();')
@@ -1440,9 +1444,9 @@ class CodeGenerator:
             L.append(f'    double s1 = std::bit_cast<double>({src[1]}.read_lane64(wf, lane));')
             L.append(f'    double s2 = std::bit_cast<double>({src[2]}.read_lane64(wf, lane));')
             if is_vop3:
-                L.extend(self._vop3_src_mod('s0', 0))
-                L.extend(self._vop3_src_mod('s1', 1))
-                L.extend(self._vop3_src_mod('s2', 2))
+                L.extend(vop3_src_mod('s0', 0, has_abs))
+                L.extend(vop3_src_mod('s1', 1, has_abs))
+                L.extend(vop3_src_mod('s2', 2, has_abs))
             L.append('    double result = std::fma(s0, s1, s2);')
             L.append('    if (vcc & (1ULL << lane)) {')
             L.append('      result = std::ldexp(result, 64);')
@@ -1453,9 +1457,9 @@ class CodeGenerator:
             L.append(f'    float s1 = std::bit_cast<float>({src[1]}.read_lane(wf, lane));')
             L.append(f'    float s2 = std::bit_cast<float>({src[2]}.read_lane(wf, lane));')
             if is_vop3:
-                L.extend(self._vop3_src_mod('s0', 0))
-                L.extend(self._vop3_src_mod('s1', 1))
-                L.extend(self._vop3_src_mod('s2', 2))
+                L.extend(vop3_src_mod('s0', 0, has_abs))
+                L.extend(vop3_src_mod('s1', 1, has_abs))
+                L.extend(vop3_src_mod('s2', 2, has_abs))
             L.append('    float result = std::fma(s0, s1, s2);')
             L.append('    if (vcc & (1ULL << lane)) {')
             L.append('      result = std::ldexp(result, 32);')
@@ -2203,7 +2207,7 @@ class CodeGenerator:
         L.append('  wf.write_scc(result != 0);')
         return '\n'.join(L)
 
-    def _gen_vector_unary(self, dst: list[str], src: list[str], op: str | None, dtype: str | None, is_vop3: bool = False) -> str:
+    def _gen_vector_unary(self, dst: list[str], src: list[str], op: str | None, dtype: str | None, is_vop3: bool = False, has_abs: bool = False) -> str:
         """Generate vector unary operation body."""
         L = []
         L.append('  uint64_t exec = wf.exec();')
@@ -2402,7 +2406,7 @@ class CodeGenerator:
             # V_FREXP_EXP_I32_F64: extract exponent from f64, write as i32
             L.append(f'    double s = std::bit_cast<double>({src[0]}.read_lane64(wf, lane));')
             if is_vop3:
-                L.extend(self._vop3_src_mod('s', 0))
+                L.extend(vop3_src_mod('s', 0, has_abs))
             L.append('    int exp = 0;')
             L.append('    if (s != 0.0 && !std::isnan(s) && !std::isinf(s)) std::frexp(s, &exp);')
             L.append(f'    {dst[0]}.write_lane(wf, lane, static_cast<uint32_t>(exp));')
@@ -2410,34 +2414,34 @@ class CodeGenerator:
             # V_FREXP_MANT_F64: extract mantissa from f64, write as f64
             L.append(f'    double s = std::bit_cast<double>({src[0]}.read_lane64(wf, lane));')
             if is_vop3:
-                L.extend(self._vop3_src_mod('s', 0))
+                L.extend(vop3_src_mod('s', 0, has_abs))
             L.append('    int exp = 0;')
             L.append('    double result = std::frexp(s, &exp);')
             if is_vop3:
-                L.extend(self._vop3_dst_mod_f64('result'))
+                L.extend(vop3_dst_mod_f64('result'))
             L.append(f'    {dst[0]}.write_lane64(wf, lane, std::bit_cast<uint64_t>(result));')
         elif op == 'frexp_exp_f32':
             L.append(f'    float s = std::bit_cast<float>({src[0]}.read_lane(wf, lane));')
             if is_vop3:
-                L.extend(self._vop3_src_mod('s', 0))
+                L.extend(vop3_src_mod('s', 0, has_abs))
             L.append('    int exp = 0;')
             L.append('    if (s != 0.0f && !std::isnan(s) && !std::isinf(s)) std::frexp(s, &exp);')
             L.append(f'    {dst[0]}.write_lane(wf, lane, static_cast<uint32_t>(exp));')
         elif op == 'frexp_exp_f16':
             L.append(f'    float s = util::f16_to_f32(static_cast<uint16_t>({src[0]}.read_lane(wf, lane)));')
             if is_vop3:
-                L.extend(self._vop3_src_mod('s', 0))
+                L.extend(vop3_src_mod('s', 0, has_abs))
             L.append('    int exp = 0;')
             L.append('    if (s != 0.0f && !std::isnan(s) && !std::isinf(s)) std::frexp(s, &exp);')
             L.append(f'    {dst[0]}.write_lane(wf, lane, static_cast<uint32_t>(exp));')
         elif op == 'frexp_mant_f32':
             L.append(f'    float s = std::bit_cast<float>({src[0]}.read_lane(wf, lane));')
             if is_vop3:
-                L.extend(self._vop3_src_mod('s', 0))
+                L.extend(vop3_src_mod('s', 0, has_abs))
             L.append('    int exp = 0;')
             L.append(f'    float result = std::frexp(s, &exp);')
             if is_vop3:
-                L.extend(self._vop3_dst_mod('result'))
+                L.extend(vop3_dst_mod('result'))
             L.append(f'    {dst[0]}.write_lane(wf, lane, std::bit_cast<uint32_t>(result));')
         elif op == 'clrexcp':
             L.append(f'    (void){src[0]};')
@@ -2445,7 +2449,7 @@ class CodeGenerator:
         elif dtype == 'f64':
             L.append(f'    double s = std::bit_cast<double>({src[0]}.read_lane64(wf, lane));')
             if is_vop3:
-                L.extend(self._vop3_src_mod('s', 0))
+                L.extend(vop3_src_mod('s', 0, has_abs))
             math_map_f64 = {
                 'rcp': 'amdgpu::transcendental::rcp_f64(s)',
                 'sqrt': 'amdgpu::transcendental::sqrt_f64(s)',
@@ -2461,14 +2465,14 @@ class CodeGenerator:
             expr = math_map_f64.get(op, f's /* TODO: {op} */')
             if is_vop3:
                 L.append(f'    double result = {expr};')
-                L.extend(self._vop3_dst_mod_f64('result'))
+                L.extend(vop3_dst_mod_f64('result'))
                 L.append(f'    {dst[0]}.write_lane64(wf, lane, std::bit_cast<uint64_t>(result));')
             else:
                 L.append(f'    {dst[0]}.write_lane64(wf, lane, std::bit_cast<uint64_t>({expr}));')
         elif dtype == 'f16':
             L.append(f'    float s = util::f16_to_f32(static_cast<uint16_t>({src[0]}.read_lane(wf, lane)));')
             if is_vop3:
-                L.extend(self._vop3_src_mod('s', 0))
+                L.extend(vop3_src_mod('s', 0, has_abs))
             math_map_f16 = {
                 'rcp': '1.0f / s',
                 'sqrt': 'std::sqrt(s)',
@@ -2488,14 +2492,14 @@ class CodeGenerator:
             expr = math_map_f16.get(op, f's /* TODO: {op} */')
             if is_vop3:
                 L.append(f'    float result = {expr};')
-                L.extend(self._vop3_dst_mod('result'))
+                L.extend(vop3_dst_mod('result'))
                 L.append(f'    {dst[0]}.write_lane(wf, lane, util::f32_to_f16(result));')
             else:
                 L.append(f'    {dst[0]}.write_lane(wf, lane, util::f32_to_f16({expr}));')
         else:
             L.append(f'    float s = std::bit_cast<float>({src[0]}.read_lane(wf, lane));')
             if is_vop3:
-                L.extend(self._vop3_src_mod('s', 0))
+                L.extend(vop3_src_mod('s', 0, has_abs))
             math_map = {
                 'rcp': 'amdgpu::transcendental::rcp_f32(s)',
                 'rcp_iflag': 'amdgpu::transcendental::rcp_f32(s)',
@@ -2516,7 +2520,7 @@ class CodeGenerator:
             expr = math_map.get(op, f's /* TODO: {op} */')
             if is_vop3:
                 L.append(f'    float result = {expr};')
-                L.extend(self._vop3_dst_mod('result'))
+                L.extend(vop3_dst_mod('result'))
                 L.append(f'    {dst[0]}.write_lane(wf, lane, std::bit_cast<uint32_t>(result));')
             else:
                 L.append(f'    {dst[0]}.write_lane(wf, lane, std::bit_cast<uint32_t>({expr}));')
@@ -2524,7 +2528,7 @@ class CodeGenerator:
         L.append('  }')
         return '\n'.join(L)
 
-    def _gen_vector_binop(self, dst: list[str], src: list[str], op: str | None, dtype: str | None, is_vop3: bool = False) -> str:
+    def _gen_vector_binop(self, dst: list[str], src: list[str], op: str | None, dtype: str | None, is_vop3: bool = False, has_abs: bool = False) -> str:
         """Generate vector binary operation body."""
         if dst:
             d = dst[0]
@@ -2546,9 +2550,9 @@ class CodeGenerator:
             else:
                 L.append(f'    double sv1 = std::bit_cast<double>({s1}.read_lane64(wf, lane));')
             if is_vop3:
-                L.extend(self._vop3_src_mod('sv0', 0))
+                L.extend(vop3_src_mod('sv0', 0, has_abs))
                 if op != 'ldexp':
-                    L.extend(self._vop3_src_mod('sv1', 1))
+                    L.extend(vop3_src_mod('sv1', 1, has_abs))
             f_op_map = {
                 'add': 'sv0 + sv1',
                 'sub': 'sv0 - sv1',
@@ -2564,7 +2568,7 @@ class CodeGenerator:
             expr = f_op_map.get(op, f'sv0 /* TODO: {op} */')
             if is_vop3:
                 L.append(f'    double result = {expr};')
-                L.extend(self._vop3_dst_mod_f64('result'))
+                L.extend(vop3_dst_mod_f64('result'))
                 L.append(f'    {d}.write_lane64(wf, lane, std::bit_cast<uint64_t>(result));')
             else:
                 L.append(f'    {d}.write_lane64(wf, lane, std::bit_cast<uint64_t>({expr}));')
@@ -2576,9 +2580,9 @@ class CodeGenerator:
             else:
                 L.append(f'    float sv1 = std::bit_cast<float>({s1}.read_lane(wf, lane));')
             if is_vop3:
-                L.extend(self._vop3_src_mod('sv0', 0))
+                L.extend(vop3_src_mod('sv0', 0, has_abs))
                 if op != 'ldexp':
-                    L.extend(self._vop3_src_mod('sv1', 1))
+                    L.extend(vop3_src_mod('sv1', 1, has_abs))
             f_op_map = {
                 'add': 'sv0 + sv1',
                 'sub': 'sv0 - sv1',
@@ -2595,7 +2599,7 @@ class CodeGenerator:
             expr = f_op_map.get(op, f'sv0 /* TODO: {op} */')
             if is_vop3:
                 L.append(f'    float result = {expr};')
-                L.extend(self._vop3_dst_mod('result'))
+                L.extend(vop3_dst_mod('result'))
                 L.append(f'    {d}.write_lane(wf, lane, std::bit_cast<uint32_t>(result));')
             else:
                 L.append(f'    {d}.write_lane(wf, lane, std::bit_cast<uint32_t>({expr}));')
@@ -2607,9 +2611,9 @@ class CodeGenerator:
             else:
                 L.append(f'    float sv1 = util::f16_to_f32(static_cast<uint16_t>({s1}.read_lane(wf, lane)));')
             if is_vop3:
-                L.extend(self._vop3_src_mod('sv0', 0))
+                L.extend(vop3_src_mod('sv0', 0, has_abs))
                 if op != 'ldexp':
-                    L.extend(self._vop3_src_mod('sv1', 1))
+                    L.extend(vop3_src_mod('sv1', 1, has_abs))
             f_op_map = {
                 'add': 'sv0 + sv1',
                 'sub': 'sv0 - sv1',
@@ -2625,7 +2629,7 @@ class CodeGenerator:
             expr = f_op_map.get(op, f'sv0 /* TODO: {op} */')
             if is_vop3:
                 L.append(f'    float result = {expr};')
-                L.extend(self._vop3_dst_mod('result'))
+                L.extend(vop3_dst_mod('result'))
                 L.append(f'    {d}.write_lane(wf, lane, util::f32_to_f16(result));')
             else:
                 L.append(f'    {d}.write_lane(wf, lane, util::f32_to_f16({expr}));')
@@ -2756,7 +2760,7 @@ class CodeGenerator:
         L.append('  }')
         return '\n'.join(L)
 
-    def _gen_vector_ternary(self, dst: list[str], src: list[str], op: str | None, dtype: str | None, is_vop3: bool = False) -> str:
+    def _gen_vector_ternary(self, dst: list[str], src: list[str], op: str | None, dtype: str | None, is_vop3: bool = False, has_abs: bool = False) -> str:
         """Generate vector ternary (3-operand) operation body."""
         d = dst[0]
         s0, s1, s2 = src[0], src[1], src[2]
@@ -2816,9 +2820,9 @@ class CodeGenerator:
             L.append(f'    float b = std::bit_cast<float>({s1}.read_lane(wf, lane));')
             L.append(f'    float c = std::bit_cast<float>({s2}.read_lane(wf, lane));')
             if is_vop3:
-                L.extend(self._vop3_src_mod('a', 0))
-                L.extend(self._vop3_src_mod('b', 1))
-                L.extend(self._vop3_src_mod('c', 2))
+                L.extend(vop3_src_mod('a', 0, has_abs))
+                L.extend(vop3_src_mod('b', 1, has_abs))
+                L.extend(vop3_src_mod('c', 2, has_abs))
             f_map = {
                 'mad': 'a * b + c',
                 'fma': 'std::fma(a, b, c)',
@@ -2842,7 +2846,7 @@ class CodeGenerator:
                 L.append('    else if (ay >= ax) face = b >= 0 ? 2.0f : 3.0f;')
                 L.append('    else face = a >= 0 ? 0.0f : 1.0f;')
                 if is_vop3:
-                    L.extend(self._vop3_dst_mod('face'))
+                    L.extend(vop3_dst_mod('face'))
                 L.append(f'    {d}.write_lane(wf, lane, std::bit_cast<uint32_t>(face));')
             elif op == 'cubesc':
                 L.append('    float ax = std::fabs(a), ay = std::fabs(b), az = std::fabs(c);')
@@ -2851,7 +2855,7 @@ class CodeGenerator:
                 L.append('    else if (ay >= ax) sc = a;')
                 L.append('    else sc = a >= 0 ? -c : c;')
                 if is_vop3:
-                    L.extend(self._vop3_dst_mod('sc'))
+                    L.extend(vop3_dst_mod('sc'))
                 L.append(f'    {d}.write_lane(wf, lane, std::bit_cast<uint32_t>(sc));')
             elif op == 'cubetc':
                 L.append('    float ax = std::fabs(a), ay = std::fabs(b), az = std::fabs(c);')
@@ -2860,7 +2864,7 @@ class CodeGenerator:
                 L.append('    else if (ay >= ax) tc = b >= 0 ? c : -c;')
                 L.append('    else tc = -b;')
                 if is_vop3:
-                    L.extend(self._vop3_dst_mod('tc'))
+                    L.extend(vop3_dst_mod('tc'))
                 L.append(f'    {d}.write_lane(wf, lane, std::bit_cast<uint32_t>(tc));')
             elif op == 'cubema':
                 L.append('    float ax = std::fabs(a), ay = std::fabs(b), az = std::fabs(c);')
@@ -2869,13 +2873,13 @@ class CodeGenerator:
                 L.append('    else if (ay >= ax) ma = 2.0f * ay;')
                 L.append('    else ma = 2.0f * ax;')
                 if is_vop3:
-                    L.extend(self._vop3_dst_mod('ma'))
+                    L.extend(vop3_dst_mod('ma'))
                 L.append(f'    {d}.write_lane(wf, lane, std::bit_cast<uint32_t>(ma));')
             elif op in f_map:
                 expr = f_map[op]
                 if is_vop3:
                     L.append(f'    float result = {expr};')
-                    L.extend(self._vop3_dst_mod('result'))
+                    L.extend(vop3_dst_mod('result'))
                     L.append(f'    {d}.write_lane(wf, lane, std::bit_cast<uint32_t>(result));')
                 else:
                     L.append(f'    {d}.write_lane(wf, lane, std::bit_cast<uint32_t>({expr}));')
@@ -2886,9 +2890,9 @@ class CodeGenerator:
             L.append(f'    double b = std::bit_cast<double>({s1}.read_lane64(wf, lane));')
             L.append(f'    double c = std::bit_cast<double>({s2}.read_lane64(wf, lane));')
             if is_vop3:
-                L.extend(self._vop3_src_mod('a', 0))
-                L.extend(self._vop3_src_mod('b', 1))
-                L.extend(self._vop3_src_mod('c', 2))
+                L.extend(vop3_src_mod('a', 0, has_abs))
+                L.extend(vop3_src_mod('b', 1, has_abs))
+                L.extend(vop3_src_mod('c', 2, has_abs))
             f_map = {
                 'mad': 'a * b + c',
                 'fma': 'std::fma(a, b, c)',
@@ -2907,7 +2911,7 @@ class CodeGenerator:
             expr = f_map.get(op, f'a /* unhandled: {op} */')
             if is_vop3:
                 L.append(f'    double result = {expr};')
-                L.extend(self._vop3_dst_mod_f64('result'))
+                L.extend(vop3_dst_mod_f64('result'))
                 L.append(f'    {d}.write_lane64(wf, lane, std::bit_cast<uint64_t>(result));')
             else:
                 L.append(f'    {d}.write_lane64(wf, lane, std::bit_cast<uint64_t>({expr}));')
@@ -2916,9 +2920,9 @@ class CodeGenerator:
             L.append(f'    float b = util::f16_to_f32(static_cast<uint16_t>({s1}.read_lane(wf, lane)));')
             L.append(f'    float c = util::f16_to_f32(static_cast<uint16_t>({s2}.read_lane(wf, lane)));')
             if is_vop3:
-                L.extend(self._vop3_src_mod('a', 0))
-                L.extend(self._vop3_src_mod('b', 1))
-                L.extend(self._vop3_src_mod('c', 2))
+                L.extend(vop3_src_mod('a', 0, has_abs))
+                L.extend(vop3_src_mod('b', 1, has_abs))
+                L.extend(vop3_src_mod('c', 2, has_abs))
             f_map = {
                 'mad': 'a * b + c',
                 'fma': 'std::fma(a, b, c)',
@@ -2937,7 +2941,7 @@ class CodeGenerator:
             expr = f_map.get(op, f'a /* unhandled: {op} */')
             if is_vop3:
                 L.append(f'    float result = {expr};')
-                L.extend(self._vop3_dst_mod('result'))
+                L.extend(vop3_dst_mod('result'))
                 L.append(f'    {d}.write_lane(wf, lane, util::f32_to_f16(result));')
             else:
                 L.append(f'    {d}.write_lane(wf, lane, util::f32_to_f16({expr}));')
@@ -3070,7 +3074,7 @@ class CodeGenerator:
         L.append('  }')
         return '\n'.join(L)
 
-    def _cmp_condition(self, src: list[str], op: str | None, dtype: str | None, is_vop3: bool, L: list[str]) -> str:
+    def _cmp_condition(self, src: list[str], op: str | None, dtype: str | None, is_vop3: bool, L: list[str], has_abs: bool = False) -> str:
         """Emit source reads and return the C++ condition expression.
 
         For FP types, handles ordered comparisons (eq, lt, le, gt, ge, lg),
@@ -3089,8 +3093,8 @@ class CodeGenerator:
                 L.append(f'    float s0 = std::bit_cast<float>({src[0]}.read_lane(wf, lane));')
                 L.append(f'    float s1 = std::bit_cast<float>({src[1]}.read_lane(wf, lane));')
             if is_vop3:
-                L.extend(self._vop3_src_mod('s0', 0))
-                L.extend(self._vop3_src_mod('s1', 1))
+                L.extend(vop3_src_mod('s0', 0, has_abs))
+                L.extend(vop3_src_mod('s1', 1, has_abs))
             # Ordered comparisons (false if NaN)
             ordered_map = {
                 'eq': 's0 == s1', 'ne': 's0 != s1',
@@ -3141,7 +3145,7 @@ class CodeGenerator:
         cmp_op = cmp_map.get(op, f'== /* TODO: {op} */')
         return f's0 {cmp_op} s1'
 
-    def _gen_vector_cmp(self, dst: list[str], src: list[str], op: str | None, dtype: str | None, is_vop3: bool = False) -> str:
+    def _gen_vector_cmp(self, dst: list[str], src: list[str], op: str | None, dtype: str | None, is_vop3: bool = False, has_abs: bool = False) -> str:
         """Generate vector compare body.
 
         VOPC (VOP2-like): result always goes to VCC.
@@ -3165,7 +3169,7 @@ class CodeGenerator:
         elif op == 't':
             L.append('    vcc |= (1ULL << lane);')
         else:
-            cond = self._cmp_condition(src, op, dtype, is_vop3, L)
+            cond = self._cmp_condition(src, op, dtype, is_vop3, L, has_abs)
             L.append(f'    if ({cond})')
             L.append('      vcc |= (1ULL << lane);')
             L.append('    else')
@@ -3180,7 +3184,8 @@ class CodeGenerator:
         return '\n'.join(L)
 
     def _gen_vector_cmpx(self, src: list[str], op: str | None, dtype: str | None,
-                         is_vop3: bool = False, dst: list[str] | None = None) -> str:
+                         is_vop3: bool = False, dst: list[str] | None = None,
+                         has_abs: bool = False) -> str:
         """Generate vector compare-and-write-EXEC body.
 
         On CDNA (GFX9), V_CMPX writes both EXEC and the SDST operand.
@@ -3198,7 +3203,7 @@ class CodeGenerator:
         elif op == 't':
             L.append('    result |= (1ULL << lane);')
         else:
-            cond = self._cmp_condition(src, op, dtype, is_vop3, L)
+            cond = self._cmp_condition(src, op, dtype, is_vop3, L, has_abs)
             L.append(f'    if ({cond})')
             L.append('      result |= (1ULL << lane);')
         L.append('  }')
@@ -3269,41 +3274,6 @@ class CodeGenerator:
         else:
             L.append('  wf.set_vcc(vcc);')
         return '\n'.join(L)
-
-    def _vop3_src_mod(self, varname: str, src_idx: int,
-                       indent: str = '    ') -> list[str]:
-        """Generate VOP3 input modifier lines (abs then neg) for a float src.
-
-        Uses ``self._has_abs``, which is set by ``_gen_execute_body`` at the
-        start of each instruction's code generation.
-        """
-        lines = []
-        if self._has_abs:
-            lines.append(
-                f'{indent}if (inst_.abs & (1u << {src_idx})) {varname} = std::fabs({varname});')
-        lines.append(
-            f'{indent}if (inst_.neg & (1u << {src_idx})) {varname} = -{varname};')
-        return lines
-
-    def _vop3_dst_mod(self, varname: str,
-                       indent: str = '    ') -> list[str]:
-        """Generate VOP3 output modifier lines (omod then clamp) for a float result."""
-        return [
-            f'{indent}if (inst_.omod == 1) {varname} *= 2.0f;',
-            f'{indent}else if (inst_.omod == 2) {varname} *= 4.0f;',
-            f'{indent}else if (inst_.omod == 3) {varname} *= 0.5f;',
-            f'{indent}if (inst_.clamp) {varname} = std::clamp({varname}, 0.0f, 1.0f);',
-        ]
-
-    def _vop3_dst_mod_f64(self, varname: str,
-                           indent: str = '    ') -> list[str]:
-        """Generate VOP3 output modifier lines for a double result."""
-        return [
-            f'{indent}if (inst_.omod == 1) {varname} *= 2.0;',
-            f'{indent}else if (inst_.omod == 2) {varname} *= 4.0;',
-            f'{indent}else if (inst_.omod == 3) {varname} *= 0.5;',
-            f'{indent}if (inst_.clamp) {varname} = std::clamp({varname}, 0.0, 1.0);',
-        ]
 
     def _gen_pk_binop(self, dst: list[str], src: list[str], op: str | None, dtype: str | None) -> str:
         """Generate packed 16-bit binary op (V_PK_ADD_I16, V_PK_MUL_F16, etc.)."""
