@@ -210,6 +210,73 @@ rocprofiler_systems_add_feature(ROCPROFSYS_ROCM_VERSION
 find_package(rocprofiler-sdk ${rocprofiler_systems_FIND_QUIETLY} REQUIRED)
 target_link_libraries(rocprofiler-systems-rocm INTERFACE rocprofiler-sdk::rocprofiler-sdk)
 
+set(_ROCPROFILER_SDK_VERSION_HEADER "${ROCM_PATH}/include/rocprofiler-sdk/version.h")
+if(EXISTS "${_ROCPROFILER_SDK_VERSION_HEADER}")
+    file(
+        READ "${_ROCPROFILER_SDK_VERSION_HEADER}"
+        _ROCPROFILER_SDK_VERSION_HEADER_CONTENTS
+    )
+
+    string(
+        REGEX MATCH
+        "#define ROCPROFILER_SDK_VERSION_MAJOR[ \t]+([0-9]+)"
+        _
+        "${_ROCPROFILER_SDK_VERSION_HEADER_CONTENTS}"
+    )
+    set(ROCPROFSYS_ROCPROFILER_SDK_COMPILE_VERSION_MAJOR
+        "${CMAKE_MATCH_1}"
+        CACHE STRING
+        "rocprofiler-sdk compile-time major version"
+        FORCE
+    )
+
+    string(
+        REGEX MATCH
+        "#define ROCPROFILER_SDK_VERSION_MINOR[ \t]+([0-9]+)"
+        _
+        "${_ROCPROFILER_SDK_VERSION_HEADER_CONTENTS}"
+    )
+    set(ROCPROFSYS_ROCPROFILER_SDK_COMPILE_VERSION_MINOR
+        "${CMAKE_MATCH_1}"
+        CACHE STRING
+        "rocprofiler-sdk compile-time minor version"
+        FORCE
+    )
+
+    string(
+        REGEX MATCH
+        "#define ROCPROFILER_SDK_VERSION_PATCH[ \t]+([0-9]+)"
+        _
+        "${_ROCPROFILER_SDK_VERSION_HEADER_CONTENTS}"
+    )
+    set(ROCPROFSYS_ROCPROFILER_SDK_COMPILE_VERSION_PATCH
+        "${CMAKE_MATCH_1}"
+        CACHE STRING
+        "rocprofiler-sdk compile-time patch version"
+        FORCE
+    )
+
+    rocprofiler_systems_target_compile_definitions(
+        rocprofiler-systems-rocm
+        INTERFACE
+            ROCPROFSYS_ROCPROFILER_SDK_COMPILE_VERSION_MAJOR=${ROCPROFSYS_ROCPROFILER_SDK_COMPILE_VERSION_MAJOR}
+            ROCPROFSYS_ROCPROFILER_SDK_COMPILE_VERSION_MINOR=${ROCPROFSYS_ROCPROFILER_SDK_COMPILE_VERSION_MINOR}
+            ROCPROFSYS_ROCPROFILER_SDK_COMPILE_VERSION_PATCH=${ROCPROFSYS_ROCPROFILER_SDK_COMPILE_VERSION_PATCH}
+    )
+
+    message(
+        STATUS
+        "rocprofiler-sdk compile-time version: ${ROCPROFSYS_ROCPROFILER_SDK_COMPILE_VERSION_MAJOR}.${ROCPROFSYS_ROCPROFILER_SDK_COMPILE_VERSION_MINOR}.${ROCPROFSYS_ROCPROFILER_SDK_COMPILE_VERSION_PATCH}"
+    )
+else()
+    message(
+        WARNING
+        "rocprofiler-sdk version header not found: ${_ROCPROFILER_SDK_VERSION_HEADER}"
+    )
+endif()
+unset(_ROCPROFILER_SDK_VERSION_HEADER)
+unset(_ROCPROFILER_SDK_VERSION_HEADER_CONTENTS)
+
 # AMD SMI
 find_package(
     amd_smi
@@ -386,6 +453,70 @@ if(rocprofiler-sdk-rocpd_FOUND)
             rocprofiler-systems-rocm
             INTERFACE rocprofiler-sdk-rocpd::rocprofiler-sdk-rocpd
         )
+
+        set(_ROCPD_VERSION_HEADER "${ROCM_PATH}/include/rocprofiler-sdk-rocpd/version.h")
+        if(EXISTS "${_ROCPD_VERSION_HEADER}")
+            file(READ "${_ROCPD_VERSION_HEADER}" _ROCPD_VERSION_HEADER_CONTENTS)
+
+            string(
+                REGEX MATCH
+                "#define ROCPD_VERSION_MAJOR[ \t]+([0-9]+)"
+                _
+                "${_ROCPD_VERSION_HEADER_CONTENTS}"
+            )
+            set(ROCPROFSYS_ROCPD_COMPILE_VERSION_MAJOR
+                "${CMAKE_MATCH_1}"
+                CACHE STRING
+                "rocpd compile-time major version"
+                FORCE
+            )
+
+            string(
+                REGEX MATCH
+                "#define ROCPD_VERSION_MINOR[ \t]+([0-9]+)"
+                _
+                "${_ROCPD_VERSION_HEADER_CONTENTS}"
+            )
+            set(ROCPROFSYS_ROCPD_COMPILE_VERSION_MINOR
+                "${CMAKE_MATCH_1}"
+                CACHE STRING
+                "rocpd compile-time minor version"
+                FORCE
+            )
+
+            string(
+                REGEX MATCH
+                "#define ROCPD_VERSION_PATCH[ \t]+([0-9]+)"
+                _
+                "${_ROCPD_VERSION_HEADER_CONTENTS}"
+            )
+            set(ROCPROFSYS_ROCPD_COMPILE_VERSION_PATCH
+                "${CMAKE_MATCH_1}"
+                CACHE STRING
+                "rocpd compile-time patch version"
+                FORCE
+            )
+
+            rocprofiler_systems_target_compile_definitions(
+                rocprofiler-systems-rocm
+                INTERFACE
+                    ROCPROFSYS_ROCPD_COMPILE_VERSION_MAJOR=${ROCPROFSYS_ROCPD_COMPILE_VERSION_MAJOR}
+                    ROCPROFSYS_ROCPD_COMPILE_VERSION_MINOR=${ROCPROFSYS_ROCPD_COMPILE_VERSION_MINOR}
+                    ROCPROFSYS_ROCPD_COMPILE_VERSION_PATCH=${ROCPROFSYS_ROCPD_COMPILE_VERSION_PATCH}
+            )
+
+            message(
+                STATUS
+                "rocprofiler-sdk-rocpd compile-time version: ${ROCPROFSYS_ROCPD_COMPILE_VERSION_MAJOR}.${ROCPROFSYS_ROCPD_COMPILE_VERSION_MINOR}.${ROCPROFSYS_ROCPD_COMPILE_VERSION_PATCH}"
+            )
+        else()
+            message(
+                WARNING
+                "rocprofiler-sdk-rocpd version header not found: ${_ROCPD_VERSION_HEADER}"
+            )
+        endif()
+        unset(_ROCPD_VERSION_HEADER)
+        unset(_ROCPD_VERSION_HEADER_CONTENTS)
 
         message(
             STATUS

@@ -17,6 +17,17 @@
 #if defined(ROCPROFSYS_USE_ROCPD_LIBRARY) && ROCPROFSYS_USE_ROCPD_LIBRARY > 0
 #    include <rocprofiler-sdk-rocpd/rocpd.h>
 #    include <rocprofiler-sdk-rocpd/types.h>
+
+#    ifndef ROCPD_VERSION_TRIPLET_TO_INT
+#        define ROCPD_VERSION_TRIPLET_TO_INT(major, minor, patch)                        \
+            (major * 10000 + minor * 100 + patch)
+#    endif
+
+#    define ROCPROFSYS_ROCPD_COMPILE_VERSION                                             \
+        ROCPD_VERSION_TRIPLET_TO_INT(ROCPROFSYS_ROCPD_COMPILE_VERSION_MAJOR,             \
+                                     ROCPROFSYS_ROCPD_COMPILE_VERSION_MINOR,             \
+                                     ROCPROFSYS_ROCPD_COMPILE_VERSION_PATCH)
+#    define ROCPROFSYS_ROCPD_NEW_API_VERSION ROCPD_VERSION_TRIPLET_TO_INT(1, 3, 0)
 #else
 #    include "core/rocpd/data_storage/schema/data_views.hpp"
 #    include "core/rocpd/data_storage/schema/marker_views.hpp"
@@ -70,6 +81,8 @@ process_schema_template(std::string_view schema_content, const std::string& upid
 }
 
 #if defined(ROCPROFSYS_USE_ROCPD_LIBRARY) && ROCPROFSYS_USE_ROCPD_LIBRARY > 0
+#    if ROCPROFSYS_ROCPD_COMPILE_VERSION >= ROCPROFSYS_ROCPD_NEW_API_VERSION
+// New API (>= 1.3.0): callback includes schema_version parameter
 void
 load_schema_cb(rocpd_sql_engine_t, rocpd_sql_schema_kind_t, rocpd_sql_options_t,
                rocpd_version_triplet_t, const rocpd_sql_schema_jinja_variables_t*,
@@ -88,20 +101,68 @@ load_schema_cb(rocpd_sql_engine_t, rocpd_sql_schema_kind_t, rocpd_sql_options_t,
     }
     *query = std::string(schema_content);
 }
+#    else
+// Legacy API (< 1.3.0): callback does not have schema_version parameter
+void
+load_schema_cb_legacy(rocpd_sql_engine_t, rocpd_sql_schema_kind_t, rocpd_sql_options_t,
+                      const rocpd_sql_schema_jinja_variables_t*, const char*,
+                      const char* schema_content, void* user_data)
+{
+    if(user_data == nullptr || schema_content == nullptr)
+    {
+        LOG_WARNING("Invalid user data or schema content pointer");
+        return;
+    }
+    auto* query = static_cast<std::string*>(user_data);
+    if(query == nullptr)
+    {
+        LOG_WARNING("Invalid query pointer");
+        return;
+    }
+    *query = std::string(schema_content);
+}
+#    endif
 #endif
 
 std::string
 get_schema_query(rocpd_sql_schema_kind_t schema_kind, const std::string& upid)
 {
 #if defined(ROCPROFSYS_USE_ROCPD_LIBRARY) && ROCPROFSYS_USE_ROCPD_LIBRARY > 0
-    const auto                         jinja_size = 2 * upid.size();
-    rocpd_sql_schema_jinja_variables_t info{ jinja_size, upid.c_str(), upid.c_str() };
-    rocpd_version_triplet_t            schema_version{ 0, 0, 0 };
+    uint32_t rt_major = 0, rt_minor = 0, rt_patch = 0;
+    rocpd_get_version(&rt_major, &rt_minor, &rt_patch);
+    const uint32_t runtime_version =
+        ROCPD_VERSION_TRIPLET_TO_INT(rt_major, rt_minor, rt_patch);
 
-    std::string query;
-    auto        status = rocpd_sql_load_schema(ROCPD_SQL_ENGINE_SQLITE3, schema_kind,
-                                               ROCPD_SQL_OPTIONS_NONE, schema_version, &info,
-                                               load_schema_cb, nullptr, 0, &query);
+    if(runtime_version != ROCPROFSYS_ROCPD_COMPILE_VERSION)
+    {
+        LOG_WARNING("rocpd compile-time version {} differs from runtime version {}",
+                    ROCPROFSYS_ROCPD_COMPILE_VERSION, runtime_version);
+    }
+
+    const rocpd_sql_schema_jinja_variables_t info{ 2 * upid.size(), upid.c_str(),
+                                                   upid.c_str() };
+    rocpd_status_t                           status = ROCPD_STATUS_ERROR;
+    std::string                              query;
+
+#    if ROCPROFSYS_ROCPD_COMPILE_VERSION >= ROCPROFSYS_ROCPD_NEW_API_VERSION
+    if(runtime_version >= ROCPROFSYS_ROCPD_NEW_API_VERSION)
+    {
+        rocpd_version_triplet_t schema_version{ 0, 0, 0 };
+        status = rocpd_sql_load_schema(ROCPD_SQL_ENGINE_SQLITE3, schema_kind,
+                                       ROCPD_SQL_OPTIONS_NONE, schema_version, &info,
+                                       load_schema_cb, nullptr, 0, &query);
+    }
+    else
+    {
+        LOG_WARNING("rocpd runtime {} < {}; schema load unavailable", runtime_version,
+                    ROCPROFSYS_ROCPD_NEW_API_VERSION);
+    }
+#    else
+    status = rocpd_sql_load_schema(ROCPD_SQL_ENGINE_SQLITE3, schema_kind,
+                                   ROCPD_SQL_OPTIONS_NONE, &info, load_schema_cb_legacy,
+                                   nullptr, 0, &query);
+#    endif
+
     if(status != ROCPD_STATUS_SUCCESS)
     {
         LOG_WARNING("Unable to load rocpd schema. Error code: {0:X}",
@@ -169,11 +230,20 @@ database::initialize_schema()
 {
     const auto upid = get_upid();
 
+#if defined(ROCPROFSYS_USE_ROCPD_LIBRARY) && ROCPROFSYS_USE_ROCPD_LIBRARY > 0 &&         \
+    ROCPROFSYS_ROCPD_COMPILE_VERSION >= ROCPROFSYS_ROCPD_NEW_API_VERSION
     const std::vector<rocpd_sql_schema_kind_t> schema_kinds = {
         ROCPD_SQL_SCHEMA_ROCPD_TABLES, ROCPD_SQL_SCHEMA_ROCPD_VIEWS,
         ROCPD_SQL_SCHEMA_ROCPD_DATA_VIEWS, ROCPD_SQL_SCHEMA_ROCPD_METADATA,
         ROCPD_SQL_SCHEMA_ROCPD_SUMMARY_VIEWS
     };
+#else
+    const std::vector<rocpd_sql_schema_kind_t> schema_kinds = {
+        ROCPD_SQL_SCHEMA_ROCPD_TABLES, ROCPD_SQL_SCHEMA_ROCPD_VIEWS,
+        ROCPD_SQL_SCHEMA_ROCPD_DATA_VIEWS, ROCPD_SQL_SCHEMA_ROCPD_MARKER_VIEWS,
+        ROCPD_SQL_SCHEMA_ROCPD_SUMMARY_VIEWS
+    };
+#endif
 
     for(const auto& schema_kind : schema_kinds)
     {
