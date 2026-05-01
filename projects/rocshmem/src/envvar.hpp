@@ -552,6 +552,7 @@ namespace envvar {
     extern const var<std::string> net_merge_level;
     extern const var<std::string> net_force_merge;
     extern const var<std::string> nic_policy;
+    extern const var<size_t> num_user_buffers;
   }  // namespace gda
 
   /**

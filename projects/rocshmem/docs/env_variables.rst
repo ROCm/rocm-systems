@@ -172,6 +172,14 @@ control the behavior of rocSHMEM.
       - ``1``
       - Number of QPs per PE for each user context.
 
+
+    * - | ``ROCSHMEM_GDA_NUM_USER_BUFFERS``
+        | Allocates the number of user buffers an application shall register with
+        | ``rocshmem_buffer_register``. If the application uses more user buffers than what is
+        | defined with the variable, then the behaviour is undefined.
+      - ``4``
+      - Number of user buffer registations
+
     * - | ``ROCSHMEM_MAX_WF_BUFFERS``
         | Maximum number of wavefront buffer arrays in default context (determines size of status, return, and atomic return buffers)
       - ``1024``
