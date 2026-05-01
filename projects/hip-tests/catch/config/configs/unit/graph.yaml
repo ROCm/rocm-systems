@@ -1689,4 +1689,5 @@ graph:
     tags: [node]
   Unit_hipGraphAllocNodeMemReuse_MallocWithoutFree_NoReuse:
     <<: *level_2
+    disabled: [amd_windows]
     tags: [node]

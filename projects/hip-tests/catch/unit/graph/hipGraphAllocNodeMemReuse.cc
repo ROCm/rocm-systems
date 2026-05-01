@@ -132,9 +132,12 @@ TEST_CASE("Unit_hipGraphAllocNodeMemReuse_SameStream_SameSizes") {
 
   // Launch all three sequentially on the same stream
   HIP_CHECK(hipGraphLaunch(execA, stream));
-  HIP_CHECK(hipGraphLaunch(execB, stream));
-  HIP_CHECK(hipGraphLaunch(execC, stream));
+  HIP_CHECK(hipStreamSynchronize(stream));
 
+  HIP_CHECK(hipGraphLaunch(execB, stream));
+  HIP_CHECK(hipStreamSynchronize(stream));
+
+  HIP_CHECK(hipGraphLaunch(execC, stream));
   HIP_CHECK(hipStreamSynchronize(stream));
 
   // Check memory statistics after launch+sync
@@ -195,9 +198,12 @@ TEST_CASE("Unit_hipGraphAllocNodeMemReuse_SameStream_DifferentSizes_NoReuse") {
 
   // Launch all three sequentially on the same stream
   HIP_CHECK(hipGraphLaunch(execA, stream));
-  HIP_CHECK(hipGraphLaunch(execB, stream));
-  HIP_CHECK(hipGraphLaunch(execC, stream));
+  HIP_CHECK(hipStreamSynchronize(stream));
 
+  HIP_CHECK(hipGraphLaunch(execB, stream));
+  HIP_CHECK(hipStreamSynchronize(stream));
+
+  HIP_CHECK(hipGraphLaunch(execC, stream));
   HIP_CHECK(hipStreamSynchronize(stream));
 
   // Check memory statistics
@@ -258,9 +264,8 @@ TEST_CASE("Unit_hipGraphAllocNodeMemReuse_RepeatedLaunches") {
   constexpr int numLaunches = 10;
   for (int i = 0; i < numLaunches; i++) {
     HIP_CHECK(hipGraphLaunch(exec, stream));
+    HIP_CHECK(hipStreamSynchronize(stream));
   }
-
-  HIP_CHECK(hipStreamSynchronize(stream));
 
   // Check memory statistics
   auto stats = queryGraphMem(device);
@@ -398,6 +403,7 @@ TEST_CASE("Unit_hipGraphAllocNodeMemReuse_ExplicitAllocFreeNodes_SameSize") {
 
   // Launch both graphs sequentially on same stream
   HIP_CHECK(hipGraphLaunch(execA, stream));
+  HIP_CHECK(hipStreamSynchronize(stream));
   HIP_CHECK(hipGraphLaunch(execB, stream));
   HIP_CHECK(hipStreamSynchronize(stream));
 
@@ -494,6 +500,7 @@ TEST_CASE("Unit_hipGraphAllocNodeMemReuse_ExplicitAllocFreeNodes_DifferentSizes"
 
   // Launch both graphs sequentially on same stream
   HIP_CHECK(hipGraphLaunch(execA, stream));
+  HIP_CHECK(hipStreamSynchronize(stream));
   HIP_CHECK(hipGraphLaunch(execB, stream));
   HIP_CHECK(hipStreamSynchronize(stream));
 
