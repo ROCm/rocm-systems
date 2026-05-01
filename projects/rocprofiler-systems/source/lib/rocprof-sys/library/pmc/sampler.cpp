@@ -111,7 +111,7 @@ std::vector<collectors::collector_slice> g_collector_slices;
 std::atomic<bool> g_reinit_pending{ false };
 
 void
-should_reinit()
+reinit_if_pending()
 {
     bool _expected = true;
     if(!g_reinit_pending.compare_exchange_strong(_expected, false)) return;
@@ -143,7 +143,7 @@ config()
 void
 sample()
 {
-    should_reinit();
+    reinit_if_pending();
 
     auto_lock_t _lk{ type_mutex<category::amd_smi>() };
 
