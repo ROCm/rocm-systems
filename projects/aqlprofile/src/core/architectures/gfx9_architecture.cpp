@@ -21,11 +21,10 @@
 // THE SOFTWARE.
 
 #include "core/architectures/gfx9_architecture.hpp"
-#include "core/factory_block_tables.h"
-// gfx9_def.h provides packet macros and block info structs.
-// It must be included before gfx9_cmd_builder.h.
+#include "core/gfx9_factory.h"
 #include "def/gfx9_def.h"
 #include "pm4/gfx9_cmd_builder.h"
+#include "pm4/gfx9_primitives_provider.hpp"
 
 namespace aql_profile {
 
@@ -86,8 +85,9 @@ void Gfx9Architecture::InitializeRegisterSchema() {
 }
 
 void Gfx9Architecture::InitializeBlockTable() {
-  block_table_ = GetGfx9BlockTable();
-  block_count_ = static_cast<uint32_t>(GetGfx9BlockTableSize());
+  // Gfx9Factory::block_table_ is the shared static GFX9 block table.
+  block_table_ = Gfx9Factory::block_table_;
+  block_count_ = AQLPROFILE_BLOCKS_NUMBER;
 }
 
 const GpuBlockInfo* Gfx9Architecture::GetBlockInfo(uint32_t block_id) const {
@@ -113,6 +113,10 @@ uint32_t Gfx9Architecture::GetBlockCount() const {
 
 pm4_builder::CmdBuilder* Gfx9Architecture::CreateCmdBuilder() const {
   return new pm4_builder::Gfx9CmdBuilder(nullptr);
+}
+
+pm4_builder::PrimitivesProvider* Gfx9Architecture::CreatePrimitivesProvider() const {
+  return new pm4_builder::Gfx9PrimitivesProvider();
 }
 
 }  // namespace aql_profile

@@ -24,6 +24,7 @@
 #ifndef _GFX12_PRIMITIVES_H_
 #define _GFX12_PRIMITIVES_H_
 
+#include <cassert>
 #include <stdint.h>
 #include <cassert>
 #include <cstdint>

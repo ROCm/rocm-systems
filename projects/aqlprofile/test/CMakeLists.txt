@@ -99,8 +99,8 @@ install(FILES ${TEST_DIR}/run_install.sh RENAME run_tests.sh
 
 add_test(NAME legacy-tests COMMAND "${TEST_BINARY_DIR}/run.sh")
 
-option(AQLPROFILE_BUILD_INTEGERATION_TESTS "Build integration tests" ON)
+option(AQLPROFILE_BUILD_INTEGRATION_TESTS "Build integration tests" ON)
 
-if(AQLPROFILE_BUILD_INTEGERATION_TESTS AND NOT WIN32)
+if(AQLPROFILE_BUILD_INTEGRATION_TESTS AND NOT WIN32)
     add_subdirectory(integration)
 endif()

@@ -64,7 +64,7 @@ if [ -z "$PREFIX_PATH" ] ; then PREFIX_PATH=$PACKAGE_ROOT; fi
 if [ -z "$HIP_VDI" ] ; then HIP_VDI=0; fi
 if [ -n "$ROCM_RPATH" ] ; then LD_RUNPATH_FLAG=" -Wl,--enable-new-dtags -Wl,--rpath,${ROCM_RPATH}"; fi
 if [ -z "$TO_CLEAN" ] ; then TO_CLEAN=yes; fi
-if [ -z "$GPU_LIST" ] ; then GPU_LIST="gfx900 gfx906 gfx908 gfx90a gfx942 gfx950 gfx1030 gfx1100 gfx1101 gfx1102 gfx1031 gfx1150 gfx1151 gfx1152 gfx1153"; fi
+if [ -z "$GPU_LIST" ] ; then GPU_LIST="gfx900 gfx906 gfx908 gfx90a gfx942 gfx950 gfx1030 gfx1100 gfx1101 gfx1102 gfx1031 gfx1150 gfx1151 gfx1152 gfx1153 gfx1200 gfx1201 gfx1250"; fi
 
 AQLPROFILE_ROOT=$(cd $AQLPROFILE_ROOT && echo $PWD)
 
@@ -88,6 +88,7 @@ cmake \
     -DCPACK_GENERATOR="STGZ" \
     -DGPU_TARGETS="$GPU_LIST" \
     -DAQLPROFILE_BUILD_TESTS=$AQLPROFILE_BUILD_TESTS \
+    -DAQLPROFILE_BUILD_INTEGRATION_TESTS=OFF \
     -DCPACK_OBJCOPY_EXECUTABLE="${PACKAGE_ROOT}/llvm/bin/llvm-objcopy" \
     -DCPACK_READELF_EXECUTABLE="${PACKAGE_ROOT}/llvm/bin/llvm-readelf" \
     -DCPACK_STRIP_EXECUTABLE="${PACKAGE_ROOT}/llvm/bin/llvm-strip" \

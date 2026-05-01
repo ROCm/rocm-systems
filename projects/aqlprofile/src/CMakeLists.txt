@@ -25,15 +25,15 @@ set ( LIB_SRC
   ${LIB_DIR}/core/architecture_registry.cpp
   ${LIB_DIR}/core/hardware_architecture.cpp
   ${LIB_DIR}/core/pm4_factory_adapter.cpp
-  ${LIB_DIR}/pm4/gfx9_builders.cpp
-  ${LIB_DIR}/pm4/gfx10_builders.cpp
-  ${LIB_DIR}/pm4/gfx11_builders.cpp
-  ${LIB_DIR}/pm4/gfx12_builders.cpp
   ${LIB_DIR}/core/architectures/gfx9_architecture.cpp
   ${LIB_DIR}/core/architectures/gfx10_architecture.cpp
   ${LIB_DIR}/core/architectures/gfx11_architecture.cpp
   ${LIB_DIR}/core/architectures/gfx12_architecture.cpp
   ${LIB_DIR}/core/architectures/mi450_architecture.cpp
+  ${LIB_DIR}/pm4/gfx9_primitives_provider.cpp
+  ${LIB_DIR}/pm4/gfx10_primitives_provider.cpp
+  ${LIB_DIR}/pm4/gfx11_primitives_provider.cpp
+  ${LIB_DIR}/pm4/gfx12_primitives_provider.cpp
   ${LIB_DIR}/core/architectures/mi100_architecture.cpp
   ${LIB_DIR}/core/architectures/mi200_architecture.cpp
   ${LIB_DIR}/core/architectures/mi300_architecture.cpp

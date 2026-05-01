@@ -21,9 +21,12 @@
 // THE SOFTWARE.
 
 #include "core/pm4_factory.h"
+#include "core/ip_offset_table_init.h"
 #include "def/gfx10_def.h"
 #include "pm4/gfx10_cmd_builder.h"
+#include "pm4/gfx10_primitives_provider.hpp"
 #include "pm4/pmc_builder.h"
+#include "pm4/spm_builder.h"
 #include "pm4/sqtt_builder.h"
 
 namespace aql_profile {
@@ -44,40 +47,33 @@ class Gfx10Factory : public Pm4Factory {
   virtual int GetAccumLowID() const override { return 1; };
   virtual int GetAccumHiID() const override { return 1; };
 
-  static const GpuBlockInfo** GetBlockTable() { return block_table_; }
-  static size_t GetBlockTableSize() { return AQLPROFILE_BLOCKS_NUMBER; }
+  ~Gfx10Factory() override { delete prims_; }
 
  protected:
-  // void ConstructTable(const AgentInfo* agent_info);
   void Init(const AgentInfo* agent_info);
-  // void ConstructBuilders(const AgentInfo* agent_info);
   static const GpuBlockInfo* block_table_[AQLPROFILE_BLOCKS_NUMBER];
+  pm4_builder::PrimitivesProvider* prims_ = nullptr;
 };
 
 // Gfx builders init
 // void Gfx10Factory::ConstructBuilders(const AgentInfo* agent_info) {
 void Gfx10Factory::Init(const AgentInfo* agent_info) {
-  Pm4Factory::cmd_builder_ = new pm4_builder::Gfx10CmdBuilder(nullptr);
+  Pm4Factory::cmd_builder_ = new pm4_builder::Gfx10CmdBuilder(acquire_ip_offset_table(agent_info));
   if (Pm4Factory::cmd_builder_ == NULL) throw aql_profile_exc_msg("CmdBuilder allocation failed");
 
-  // Mark and set the mode
-  if (Pm4Factory::IsConcurrent()) {
-    Pm4Factory::pmc_builder_ =
-        new pm4_builder::GpuPmcBuilder<pm4_builder::Gfx10CmdBuilder, gfx10_cntx_prim, true>(
-            agent_info);
-  } else {
-    Pm4Factory::pmc_builder_ =
-        new pm4_builder::GpuPmcBuilder<pm4_builder::Gfx10CmdBuilder, gfx10_cntx_prim, false>(
-            agent_info);
-  }
+  auto* prims = new pm4_builder::Gfx10PrimitivesProvider();
+  prims_ = prims;
+
+  Pm4Factory::pmc_builder_ = new pm4_builder::GpuPmcBuilder(
+      agent_info, Pm4Factory::cmd_builder_, prims, Pm4Factory::IsConcurrent());
   if (Pm4Factory::pmc_builder_ == NULL) throw aql_profile_exc_msg("PmcBuilder allocation failed");
 
   Pm4Factory::spm_builder_ =
-      new pm4_builder::GpuSpmBuilder<pm4_builder::Gfx10CmdBuilder, gfx10_cntx_prim>(agent_info);
+      new pm4_builder::GpuSpmBuilder(agent_info, Pm4Factory::cmd_builder_, prims);
   if (Pm4Factory::spm_builder_ == NULL) throw aql_profile_exc_msg("SpmBuilder allocation failed");
 
   Pm4Factory::sqtt_builder_ =
-      new pm4_builder::GpuSqttBuilder<pm4_builder::Gfx10CmdBuilder, gfx10_cntx_prim>(agent_info);
+      new pm4_builder::GpuSqttBuilder(agent_info, Pm4Factory::cmd_builder_, prims);
   if (Pm4Factory::sqtt_builder_ == NULL) throw aql_profile_exc_msg("SqttBuilder allocation failed");
 
   agent_info_ = agent_info;
@@ -107,8 +103,5 @@ Pm4Factory* Pm4Factory::Gfx10Create(const AgentInfo* agent_info) {
   return p;
 }
 
-// Free-standing accessors for the GFX10 block table (used by HardwareArchitecture layer)
-const GpuBlockInfo** GetGfx10BlockTable() { return Gfx10Factory::GetBlockTable(); }
-size_t GetGfx10BlockTableSize() { return Gfx10Factory::GetBlockTableSize(); }
 
 }  // namespace aql_profile

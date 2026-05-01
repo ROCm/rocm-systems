@@ -41,6 +41,7 @@ class Gfx12Architecture : public HardwareArchitecture {
   uint32_t FindBlockByName(const char* name) const override;
   uint32_t GetBlockCount() const override;
   pm4_builder::CmdBuilder* CreateCmdBuilder() const override;
+  pm4_builder::PrimitivesProvider* CreatePrimitivesProvider() const override;
 
   // Architecture version
   bool IsGFX12() const override { return true; }

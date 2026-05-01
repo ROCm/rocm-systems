@@ -31,7 +31,7 @@ namespace gfx12 {
 #define __BLOCK_ID(block) AQLPROFILE_BLOCK_NAME_##block
 enum CounterBlockId {
   // Counters retrieved by KFD
-  IommuV2CounterBlockId = AQLPROFILE_BLOCKS_NUMBER,
+  IommuV2CounterBlockId,
   KernelDriverCounterBlockId,
 
   CpPipeStatsCounterBlockId,

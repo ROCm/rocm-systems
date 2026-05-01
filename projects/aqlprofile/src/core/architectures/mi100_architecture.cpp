@@ -21,8 +21,7 @@
 // THE SOFTWARE.
 
 #include "core/architectures/mi100_architecture.hpp"
-#include "core/factory_block_tables.h"
-#include "aqlprofile-sdk/aql_profile_v2.h"
+#include "core/gfx9_factory.h"
 
 namespace aql_profile {
 
@@ -45,8 +44,8 @@ void Mi100Architecture::InitializeBlockTable() {
   // Mi100Factory modifies block entries in-place during its construction
   // (event_id_max, instance_count overrides), so this pointer always
   // reflects the current state when queried after factory initialisation.
-  block_table_ = GetGfx9BlockTable();
-  block_count_ = static_cast<uint32_t>(GetGfx9BlockTableSize());
+  block_table_ = Gfx9Factory::block_table_;
+  block_count_ = AQLPROFILE_BLOCKS_NUMBER;
 }
 
 }  // namespace aql_profile

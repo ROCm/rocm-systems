@@ -31,6 +31,7 @@
 #define GFX12_VARIANT GFX12_VARIANT_1200
 #endif
 
+#include "aqlprofile-sdk/aql_profile_v2.h"
 #include "linux/soc24_enum.h"
 #include "util/soc15_common.h"
 #include "util/reg_offsets.h"

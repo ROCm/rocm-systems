@@ -24,6 +24,8 @@
 #define _GFX9_FACTORY_H_
 #include "core/pm4_factory.h"
 
+namespace pm4_builder { class PrimitivesProvider; }
+
 namespace aql_profile {
 
 // Gfx9 factory class
@@ -40,18 +42,21 @@ class Gfx9Factory : public Pm4Factory {
 
   bool IsGFX9() const override { return true; }
 
-  static const GpuBlockInfo** GetBlockTable() { return block_table_; }
-  static size_t GetBlockTableSize() { return AQLPROFILE_BLOCKS_NUMBER; }
+ public:
+  static const GpuBlockInfo* block_table_[AQLPROFILE_BLOCKS_NUMBER];
 
  protected:
   void Init(const AgentInfo* agent_info);
-  static const GpuBlockInfo* block_table_[AQLPROFILE_BLOCKS_NUMBER];
 
   static void Print(const GpuBlockInfo* block_info);
   const uint32_t* spm_block_delay_global[AQLPROFILE_BLOCKS_NUMBER];
   const uint32_t* spm_block_delay_se[AQLPROFILE_BLOCKS_NUMBER];
   void InitSpmBlockDelay(GpuBlockInfo* block_info);
   size_t cu_block_delay_table_size;
+  pm4_builder::PrimitivesProvider* prims_ = nullptr;
+
+ public:
+  ~Gfx9Factory() override { delete prims_; }
 };
 
 // Mi100 factory class

@@ -21,11 +21,10 @@
 // THE SOFTWARE.
 
 #include "core/architectures/gfx11_architecture.hpp"
-#include "core/factory_block_tables.h"
-// gfx11_def.h must come before gfx11_block_table.h and gfx11_primitives.h
-// to define the required macros.
+#include "core/gfx11_factory.h"
 #include "def/gfx11_def.h"
 #include "pm4/gfx11_cmd_builder.h"
+#include "pm4/gfx11_primitives_provider.hpp"
 
 namespace aql_profile {
 
@@ -84,8 +83,9 @@ void Gfx11Architecture::InitializeRegisterSchema() {
 }
 
 void Gfx11Architecture::InitializeBlockTable() {
-  block_table_ = GetGfx11BlockTable();
-  block_count_ = static_cast<uint32_t>(GetGfx11BlockTableSize());
+  // Gfx11Factory::block_table_ is the shared static GFX11 block table.
+  block_table_ = Gfx11Factory::block_table_;
+  block_count_ = AQLPROFILE_BLOCKS_NUMBER;
 }
 
 const GpuBlockInfo* Gfx11Architecture::GetBlockInfo(uint32_t block_id) const {
@@ -112,6 +112,11 @@ uint32_t Gfx11Architecture::GetBlockCount() const {
 pm4_builder::CmdBuilder* Gfx11Architecture::CreateCmdBuilder() const {
   return new pm4_builder::Gfx11CmdBuilder(nullptr);
 }
+
+pm4_builder::PrimitivesProvider* Gfx11Architecture::CreatePrimitivesProvider() const {
+  return new pm4_builder::Gfx11PrimitivesProvider();
+}
+
 
 uint32_t Gfx11Architecture::GetNumWGPs() const {
   return config_.wgp_count;

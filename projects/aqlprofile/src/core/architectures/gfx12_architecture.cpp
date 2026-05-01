@@ -25,6 +25,7 @@
 #include "core/architectures/gfx12_architecture.hpp"
 #include "def/gfx12_def.h"
 #include "pm4/gfx12_cmd_builder.h"
+#include "pm4/gfx12_primitives_provider.hpp"
 
 namespace aql_profile {
 
@@ -136,6 +137,10 @@ uint32_t Gfx12Architecture::GetBlockCount() const {
 
 pm4_builder::CmdBuilder* Gfx12Architecture::CreateCmdBuilder() const {
   return new pm4_builder::Gfx12CmdBuilder(nullptr);
+}
+
+pm4_builder::PrimitivesProvider* Gfx12Architecture::CreatePrimitivesProvider() const {
+  return new pm4_builder::Gfx12PrimitivesProvider();
 }
 
 }  // namespace aql_profile

@@ -21,13 +21,18 @@
 // THE SOFTWARE.
 
 #include "core/architectures/gfx10_architecture.hpp"
-#include "core/factory_block_tables.h"
-// gfx10_def.h must come before gfx10_block_table.h and gfx10_primitives.h
-// to define the required macros.
+#include "aqlprofile-sdk/aql_profile_v2.h"
 #include "def/gfx10_def.h"
 #include "pm4/gfx10_cmd_builder.h"
+#include "pm4/gfx10_primitives_provider.hpp"
 
 namespace aql_profile {
+
+// Forward declaration to access the shared static GFX10 block table.
+class Gfx10Factory {
+ public:
+  static const GpuBlockInfo* block_table_[];
+};
 
 using namespace gfxip::gfx10;
 
@@ -85,8 +90,9 @@ void Gfx10Architecture::InitializeRegisterSchema() {
 }
 
 void Gfx10Architecture::InitializeBlockTable() {
-  block_table_ = GetGfx10BlockTable();
-  block_count_ = static_cast<uint32_t>(GetGfx10BlockTableSize());
+  // Gfx10Factory::block_table_ is the shared static GFX10 block table.
+  block_table_ = Gfx10Factory::block_table_;
+  block_count_ = AQLPROFILE_BLOCKS_NUMBER;
 }
 
 const GpuBlockInfo* Gfx10Architecture::GetBlockInfo(uint32_t block_id) const {
@@ -113,6 +119,11 @@ uint32_t Gfx10Architecture::GetBlockCount() const {
 pm4_builder::CmdBuilder* Gfx10Architecture::CreateCmdBuilder() const {
   return new pm4_builder::Gfx10CmdBuilder(nullptr);
 }
+
+pm4_builder::PrimitivesProvider* Gfx10Architecture::CreatePrimitivesProvider() const {
+  return new pm4_builder::Gfx10PrimitivesProvider();
+}
+
 
 uint32_t Gfx10Architecture::GetNumWGPs() const {
   return config_.wgp_count;

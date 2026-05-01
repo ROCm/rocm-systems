@@ -21,8 +21,7 @@
 // THE SOFTWARE.
 
 #include "core/architectures/mi200_architecture.hpp"
-#include "core/factory_block_tables.h"
-#include "aqlprofile-sdk/aql_profile_v2.h"
+#include "core/gfx9_factory.h"
 
 namespace aql_profile {
 
@@ -45,8 +44,8 @@ void Mi200Architecture::InitializeBlockTable() {
   // Mi200Factory modifies block entries in-place (SDMA instance_count=5,
   // UMC counter_count=9, etc.) so this pointer reflects those overrides
   // once the factory has been constructed for this agent.
-  block_table_ = GetGfx9BlockTable();
-  block_count_ = static_cast<uint32_t>(GetGfx9BlockTableSize());
+  block_table_ = Gfx9Factory::block_table_;
+  block_count_ = AQLPROFILE_BLOCKS_NUMBER;
 }
 
 }  // namespace aql_profile

@@ -33,6 +33,7 @@
 
 namespace pm4_builder {
 class CmdBuilder;
+class PrimitivesProvider;
 }
 
 namespace aql_profile {
@@ -64,6 +65,10 @@ class HardwareArchitecture {
   /// Create a command builder for this architecture
   /// The caller takes ownership of the returned pointer
   virtual pm4_builder::CmdBuilder* CreateCmdBuilder() const = 0;
+
+  /// Create a primitives provider for this architecture
+  /// The caller takes ownership of the returned pointer
+  virtual pm4_builder::PrimitivesProvider* CreatePrimitivesProvider() const = 0;
 
   /// Architecture version queries
   virtual bool IsGFX9() const { return false; }

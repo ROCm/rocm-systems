@@ -32,6 +32,7 @@
 
 #include "pm4/cmd_config.h"
 #include "pm4/cmd_builder.h"
+#include "pm4/primitives_provider.hpp"
 #include "src/core/include/spm_common.hpp"
 
 namespace pm4_builder {
@@ -59,21 +60,20 @@ class SpmBuilder {
   virtual void End(CmdBuffer* cmd_buffer, const SpmConfig* config) = 0;
 };
 
-template <typename Builder, typename Primitives>
-class GpuSpmBuilder : public SpmBuilder, protected Primitives {
-  typedef typename Primitives::mux_info_t mux_info_t;
-
+class GpuSpmBuilder : public SpmBuilder {
   void DebugTrace(uint32_t value) {
     CmdBuffer cmd_buffer;
     uint32_t header[2] = {0, value};
     APPEND_COMMAND_WRAPPER((&cmd_buffer), header);
   }
 
-  Builder builder;
+  CmdBuilder* builder_;
+  const PrimitivesProvider* prim_;
 
  public:
-  explicit GpuSpmBuilder(const AgentInfo* agent_info)
-      : SpmBuilder(), builder(acquire_ip_offset_table(agent_info)) {}
+  explicit GpuSpmBuilder(const AgentInfo* agent_info, CmdBuilder* builder,
+                         const PrimitivesProvider* prim)
+      : SpmBuilder(), builder_(builder), prim_(prim) {}
 
   void Begin(CmdBuffer* cmd_buffer, const SpmConfig* config, const counters_vector& counters_vec) {
     // SPM parameters
@@ -90,18 +90,18 @@ class GpuSpmBuilder : public SpmBuilder, protected Primitives {
     memset(counter_map, 0, SPM_DESC_SIZE - sizeof(SpmBufferDesc));
 
     // On Vega this is needed to collect Perf Cntrs: enable clock for performance counters
-    if (Primitives::GFXIP_LEVEL == 9)
-      builder.BuildWriteUConfigRegPacket(cmd_buffer, Primitives::RLC_PERFMON_CLK_CNTL_ADDR, 1);
+    if (prim_->GetGfxipLevel() == 9)
+      builder_->BuildWriteUConfigRegPacket(cmd_buffer, prim_->GetRlcPerfmonClkCntlAddr(), 1);
 
     // Program Grbm to broadcast messages to all shader engines
-    builder.BuildWriteUConfigRegPacket(cmd_buffer, Primitives::GRBM_GFX_INDEX_ADDR,
-                                       Primitives::grbm_broadcast_value());
+    builder_->BuildWriteUConfigRegPacket(cmd_buffer, prim_->GetGrbmGfxIndexAddr(),
+                                         prim_->GrbmBroadcastValue());
     // Issue a CSPartialFlush cmd including cache flush
-    builder.BuildWriteWaitIdlePacket(cmd_buffer);
+    builder_->BuildWriteWaitIdlePacket(cmd_buffer);
 
     // SPM counters stop
-    builder.BuildWriteUConfigRegPacket(cmd_buffer, Primitives::CP_PERFMON_CNTL_ADDR,
-                                       Primitives::cp_perfmon_cntl_spm_stop_value());
+    builder_->BuildWriteUConfigRegPacket(cmd_buffer, prim_->GetCpPerfmonCntlAddr(),
+                                         prim_->CpPerfmonCntlSpmStopValue());
 
     // SPM counters reset
     //
@@ -114,21 +114,22 @@ class GpuSpmBuilder : public SpmBuilder, protected Primitives {
     // Also each time when user mode buffer is no longer made available to KFD, KFD will
     // reset SPM counters.
     //
-    // builder.BuildWriteUConfigRegPacket(cmd_buffer, Primitives::CP_PERFMON_CNTL_ADDR,
-    //                                     Primitives::cp_perfmon_cntl_reset_value());
+    // builder_->BuildWriteUConfigRegPacket(cmd_buffer, prim_->GetCpPerfmonCntlAddr(),
+    //                                      prim_->CpPerfmonCntlResetValue());
 
     // Issue a CSPartialFlush cmd including cache flush
-    builder.BuildWriteWaitIdlePacket(cmd_buffer);
+    builder_->BuildWriteWaitIdlePacket(cmd_buffer);
 
     // Hardcode PERFMON_RING_MODE to 3 (Stall and send interrupt) to match KFD
-    builder.BuildWriteUConfigRegPacket(cmd_buffer, Primitives::RLC_SPM_PERFMON_CNTL__ADDR,
-                                       Primitives::rlc_spm_perfmon_cntl_value(sampling_rate));
+    builder_->BuildWriteUConfigRegPacket(cmd_buffer, prim_->GetRlcSpmPerfmonCntlAddr(),
+                                         prim_->RlcSpmPerfmonCntlValue(sampling_rate));
 
     // Iterate through the list of blocks to create PM4 packets to read counter values
     // Below pair.first is the block id of a counter event and pair.second is the index into
     // counters_vec of the counter event
-    std::vector<std::vector<std::pair<int, int> > > counter_info_even(Primitives::NUMBER_OF_BLOCKS);
-    std::vector<std::vector<std::pair<int, int> > > counter_info_odd(Primitives::NUMBER_OF_BLOCKS);
+    const uint32_t num_blocks = prim_->GetNumberOfBlocks();
+    std::vector<std::vector<std::pair<int, int>>> counter_info_even(num_blocks);
+    std::vector<std::vector<std::pair<int, int>>> counter_info_odd(num_blocks);
 
     // distribute counter events to counter_info_even and counter_info_odd according to their block
     // id
@@ -136,7 +137,7 @@ class GpuSpmBuilder : public SpmBuilder, protected Primitives {
       auto& counter_des = counters_vec[index];
       const auto& block_des = counter_des.block_des;
 
-      if (block_des.id == Primitives::SQ_BLOCK_ID && config->spm_sq_32bit_mode) {
+      if (block_des.id == prim_->GetSqBlockId() && config->spm_sq_32bit_mode) {
         counter_info_even[block_des.id].push_back({block_des.id, index});
         counter_info_odd[block_des.id].push_back({block_des.id, index});
       } else {
@@ -157,7 +158,7 @@ class GpuSpmBuilder : public SpmBuilder, protected Primitives {
              ((counter_des_a.block_des.index == counter_des_b.block_des.index) &&
               (counter_des_a.index < counter_des_b.index));
     };
-    for (size_t i = 0; i < Primitives::NUMBER_OF_BLOCKS; ++i) {
+    for (size_t i = 0; i < num_blocks; ++i) {
       if (!counter_info_even[i].empty()) {
         sort(counter_info_even[i].begin(), counter_info_even[i].end(), compare);
       }
@@ -169,7 +170,7 @@ class GpuSpmBuilder : public SpmBuilder, protected Primitives {
     // compute segment size for global(0) and se(1)
     uint32_t ss_even[2] = {};
     uint32_t ss_odd[2] = {};
-    for (size_t i = 0; i < Primitives::NUMBER_OF_BLOCKS; ++i) {
+    for (size_t i = 0; i < num_blocks; ++i) {
       if (!counter_info_even[i].empty()) {
         const auto& counter_des = counters_vec[counter_info_even[i][0].second];
         const auto* block_info = counter_des.block_info;
@@ -189,41 +190,40 @@ class GpuSpmBuilder : public SpmBuilder, protected Primitives {
       }
     }
 
+    const uint32_t rlc_spm_timestamp_size16 = prim_->GetRlcSpmTimestampSize16();
+    const uint32_t rlc_spm_counters_per_line = prim_->GetRlcSpmCountersPerLine();
+
     // if SPM global is streamed we also stream time stamp.
-    ss_even[0] += Primitives::RLC_SPM_TIMESTAMP_SIZE16;
+    ss_even[0] += rlc_spm_timestamp_size16;
 
     uint32_t ss[2] = {};
     for (int i = 0; i < 2; ++i) {
-      ss_even[i] = ss_even[i] / Primitives::RLC_SPM_COUNTERS_PER_LINE +
-                   uint32_t(ss_even[i] % Primitives::RLC_SPM_COUNTERS_PER_LINE > 0);
-      ss_odd[i] = ss_odd[i] / Primitives::RLC_SPM_COUNTERS_PER_LINE +
-                  uint32_t(ss_odd[i] % Primitives::RLC_SPM_COUNTERS_PER_LINE > 0);
+      ss_even[i] = ss_even[i] / rlc_spm_counters_per_line +
+                   uint32_t(ss_even[i] % rlc_spm_counters_per_line > 0);
+      ss_odd[i] = ss_odd[i] / rlc_spm_counters_per_line +
+                  uint32_t(ss_odd[i] % rlc_spm_counters_per_line > 0);
 
       ss[i] = std::max(ss_even[i], ss_odd[i]) * 2;
     }
 
     // fill in mux_ram data according to even and odd arrays
-    std::vector<mux_info_t> mux_ram[2];
-    mux_info_t mxinf = {0xFFFF};
+    std::vector<uint16_t> mux_ram[2];
 
     // global mux_ram: initialize with all 0xFFFF.
-    mux_ram[0].resize(ss[0] * Primitives::RLC_SPM_COUNTERS_PER_LINE + 2);
-    std::fill(mux_ram[0].begin(), mux_ram[0].end(), mxinf);
+    mux_ram[0].resize(ss[0] * rlc_spm_counters_per_line + 2, 0xFFFF);
 
     // se mux_ram: initialize with all 0xFFFF (end of muxsel).
-    mux_ram[1].resize(ss[1] * Primitives::RLC_SPM_COUNTERS_PER_LINE + 2);
-    std::fill(mux_ram[1].begin(), mux_ram[1].end(), mxinf);
+    mux_ram[1].resize(ss[1] * rlc_spm_counters_per_line + 2, 0xFFFF);
 
     size_t even_idx = 0;
-    size_t odd_idx = Primitives::RLC_SPM_COUNTERS_PER_LINE;
+    size_t odd_idx = rlc_spm_counters_per_line;
     // follow the exact steps to fill in mux_ram as when the number of even/odd events are counted
     // Register timestamp
-    mxinf.data = Primitives::spm_timestamp_muxsel();
-    for (even_idx = 0; even_idx < Primitives::RLC_SPM_TIMESTAMP_SIZE16; ++even_idx) {
-      mux_ram[0][even_idx] = mxinf;
+    for (even_idx = 0; even_idx < rlc_spm_timestamp_size16; ++even_idx) {
+      mux_ram[0][even_idx] = prim_->SpmTimestampMuxsel();
     }
     // fill in global mux_sram after global time stamp
-    for (size_t j = 0; j < Primitives::NUMBER_OF_BLOCKS; ++j) {
+    for (size_t j = 0; j < num_blocks; ++j) {
       if (!counter_info_even[j].empty()) {
         const auto& counter_des = counters_vec[counter_info_even[j][0].second];
         const auto* block_info = counter_des.block_info;
@@ -231,46 +231,48 @@ class GpuSpmBuilder : public SpmBuilder, protected Primitives {
           for (size_t k = 0; k < counter_info_even[j].size(); ++k) {
             const auto index = counter_info_even[j][k].second;
             const auto& counter_des = counters_vec[index];
-            mux_ram[0][even_idx] = Primitives::spm_mux_ram_value(counter_des);
+            mux_ram[0][even_idx] = prim_->SpmMuxRamValue(counter_des);
             counter_map[index] = even_idx | 0x8000;
-            even_idx = Primitives::spm_mux_ram_idx_incr(even_idx);
+            even_idx = prim_->SpmMuxRamIdxIncr(even_idx);
           }
           for (size_t k = 0; k < counter_info_odd[j].size(); ++k) {
             const auto index = counter_info_odd[j][k].second;
             const auto& counter_des = counters_vec[index];
-            mux_ram[0][odd_idx] = Primitives::spm_mux_ram_value(counter_des);
+            mux_ram[0][odd_idx] = prim_->SpmMuxRamValue(counter_des);
             counter_map[index] = odd_idx | 0x8000;
-            odd_idx = Primitives::spm_mux_ram_idx_incr(odd_idx);
+            odd_idx = prim_->SpmMuxRamIdxIncr(odd_idx);
           }
         }
       }
     }
     // fill in SE mux_ram
     even_idx = 0;
-    odd_idx = Primitives::RLC_SPM_COUNTERS_PER_LINE;
-    for (size_t j = 0; j < Primitives::NUMBER_OF_BLOCKS; ++j) {
+    odd_idx = rlc_spm_counters_per_line;
+    const uint32_t sq_block_id = prim_->GetSqBlockId();
+    const uint32_t sq_block_spm_id = prim_->GetSqBlockSpmId();
+    for (size_t j = 0; j < num_blocks; ++j) {
       // Use this code to do 32-bit SQ profiling
-      if (j == Primitives::SQ_BLOCK_ID && config->spm_sq_32bit_mode) {
+      if (j == sq_block_id && config->spm_sq_32bit_mode) {
         for (size_t k = 0; k < counter_info_even[j].size(); ++k) {
           const auto index = counter_info_even[j][k].second;
           const auto& counter_des = counters_vec[index];
           const auto counter = uint16_t(counter_des.index) * 2;
-          const auto block = Primitives::SQ_BLOCK_SPM_ID;
+          const auto block = static_cast<uint16_t>(sq_block_spm_id);
           const auto instance = uint16_t(counter_des.block_des.index);
-          mux_ram[1][even_idx] = Primitives::spm_mux_ram_value(counter, block, instance);
+          mux_ram[1][even_idx] = prim_->SpmMuxRamValue(counter, block, instance);
           counter_map[index] = even_idx;
-          even_idx = Primitives::spm_mux_ram_idx_incr(even_idx);
+          even_idx = prim_->SpmMuxRamIdxIncr(even_idx);
         }
         for (size_t k = 0; k < counter_info_odd[j].size(); ++k) {
           const auto index = counter_info_odd[j][k].second;
           const auto& counter_des = counters_vec[index];
           const auto counter = uint16_t(counter_des.index) * 2 + 1;
-          const auto block = Primitives::SQ_BLOCK_SPM_ID;
+          const auto block = static_cast<uint16_t>(sq_block_spm_id);
           const auto instance = uint16_t(counter_des.block_des.index);
-          mux_ram[1][odd_idx] = Primitives::spm_mux_ram_value(counter, block, instance);
+          mux_ram[1][odd_idx] = prim_->SpmMuxRamValue(counter, block, instance);
           // fix corrupted upper 16-bit by setting its mux_sel to be 0x0
-          mux_ram[1][odd_idx] = mux_info_t{0x0};
-          odd_idx = Primitives::spm_mux_ram_idx_incr(odd_idx);
+          mux_ram[1][odd_idx] = 0x0;
+          odd_idx = prim_->SpmMuxRamIdxIncr(odd_idx);
         }
       } else {
         if (!counter_info_even[j].empty()) {
@@ -280,16 +282,16 @@ class GpuSpmBuilder : public SpmBuilder, protected Primitives {
             for (size_t k = 0; k < counter_info_even[j].size(); ++k) {
               const auto index = counter_info_even[j][k].second;
               const auto& counter_des = counters_vec[index];
-              mux_ram[1][even_idx] = Primitives::spm_mux_ram_value(counter_des);
+              mux_ram[1][even_idx] = prim_->SpmMuxRamValue(counter_des);
               counter_map[index] = even_idx;
-              even_idx = Primitives::spm_mux_ram_idx_incr(even_idx);
+              even_idx = prim_->SpmMuxRamIdxIncr(even_idx);
             }
             for (size_t k = 0; k < counter_info_odd[j].size(); ++k) {
               const auto index = counter_info_odd[j][k].second;
               const auto& counter_des = counters_vec[index];
-              mux_ram[1][odd_idx] = Primitives::spm_mux_ram_value(counter_des);
+              mux_ram[1][odd_idx] = prim_->SpmMuxRamValue(counter_des);
               counter_map[index] = odd_idx;
-              odd_idx = Primitives::spm_mux_ram_idx_incr(odd_idx);
+              odd_idx = prim_->SpmMuxRamIdxIncr(odd_idx);
             }
           }
         }
@@ -297,10 +299,10 @@ class GpuSpmBuilder : public SpmBuilder, protected Primitives {
     }
 
     if (config->spm_sample_delay_max) {
-      builder.BuildWriteUConfigRegPacket(cmd_buffer, Primitives::GRBM_GFX_INDEX_ADDR,
-                                         Primitives::grbm_broadcast_value());
-      builder.BuildWriteUConfigRegPacket(cmd_buffer, Primitives::RLC_SPM_PERFMON_SAMPLE_DELAY_MAX__ADDR,
-                                         config->spm_sample_delay_max);
+      builder_->BuildWriteUConfigRegPacket(cmd_buffer, prim_->GetGrbmGfxIndexAddr(),
+                                           prim_->GrbmBroadcastValue());
+      builder_->BuildWriteUConfigRegPacket(cmd_buffer, prim_->GetRlcSpmPerfmonSampleDelayMax(),
+                                           config->spm_sample_delay_max);
     }
 
     for (const auto& counter_des : counters_vec) {
@@ -313,24 +315,23 @@ class GpuSpmBuilder : public SpmBuilder, protected Primitives {
         if (block_info->attr & CounterBlockSpmGlobalAttr) {
           // for each instance of a global block we progam its delay
           for (size_t j = 0; j < block_info->instance_count; ++j) {
-            builder.BuildWriteUConfigRegPacket(cmd_buffer, Primitives::GRBM_GFX_INDEX_ADDR,
-                                               Primitives::grbm_inst_se_sh_index_value(j, 0, 0));
-            builder.BuildWriteUConfigRegPacket(cmd_buffer, block_info->delay_info.reg,
-                                               Primitives::get_spm_global_delay(counter_des, j));
+            builder_->BuildWriteUConfigRegPacket(cmd_buffer, prim_->GetGrbmGfxIndexAddr(),
+                                                 prim_->GrbmInstSeShIndexValue(j, 0, 0));
+            builder_->BuildWriteUConfigRegPacket(cmd_buffer, block_info->delay_info.reg,
+                                                 prim_->GetSpmGlobalDelay(counter_des, j));
           }
         } else {
           for (size_t i = 0; i < config->se_number; ++i) {
             for (size_t j = 0; j < block_info->instance_count; ++j) {
-              builder.BuildWriteUConfigRegPacket(cmd_buffer, Primitives::GRBM_GFX_INDEX_ADDR,
-                                                 Primitives::grbm_inst_se_index_value(j, i));
-              builder.BuildWriteUConfigRegPacket(cmd_buffer,
-                                                 block_info->delay_info.reg,
-                                                 Primitives::get_spm_se_delay(counter_des, i, j));
+              builder_->BuildWriteUConfigRegPacket(cmd_buffer, prim_->GetGrbmGfxIndexAddr(),
+                                                   prim_->GrbmInstSeIndexValue(j, i));
+              builder_->BuildWriteUConfigRegPacket(cmd_buffer, block_info->delay_info.reg,
+                                                   prim_->GetSpmSeDelay(counter_des, i, j));
             }
           }
         }
-        builder.BuildWriteUConfigRegPacket(cmd_buffer, Primitives::GRBM_GFX_INDEX_ADDR,
-                                           Primitives::grbm_broadcast_value());
+        builder_->BuildWriteUConfigRegPacket(cmd_buffer, prim_->GetGrbmGfxIndexAddr(),
+                                             prim_->GrbmBroadcastValue());
       }
 
       // 4. Program the Block instance streaming performance counters in order to specify which
@@ -343,24 +344,24 @@ class GpuSpmBuilder : public SpmBuilder, protected Primitives {
       // Setup counters
       // Configure SQ block
       if (block_info->attr & CounterBlockSqAttr) {
-        builder.BuildWriteUConfigRegPacket(cmd_buffer, reg_info.select_addr,
-                                           Primitives::sq_spm_select_value(counter_des));
-        builder.BuildWriteUConfigRegPacket(cmd_buffer, Primitives::SQ_PERFCOUNTER_MASK_ADDR,
-                                           Primitives::sq_mask_value(counter_des));
-        builder.BuildWriteUConfigRegPacket(cmd_buffer, reg_info.control_addr,
-                                           Primitives::sq_control_value(counter_des));
+        builder_->BuildWriteUConfigRegPacket(cmd_buffer, reg_info.select_addr,
+                                             prim_->SqSpmSelectValue(counter_des));
+        builder_->BuildWriteUConfigRegPacket(cmd_buffer, prim_->GetSqPerfcounterMaskAddr(),
+                                             prim_->SqMaskValue(counter_des));
+        builder_->BuildWriteUConfigRegPacket(cmd_buffer, reg_info.control_addr,
+                                             prim_->SqControlValue(counter_des));
       }
     }
 
-    for (size_t i = 0; i < Primitives::NUMBER_OF_BLOCKS; ++i) {
-      if (i == Primitives::SQ_BLOCK_ID) continue;
+    for (size_t i = 0; i < num_blocks; ++i) {
+      if (i == sq_block_id) continue;
 
       int instance = 0;
       int je, jo, j;  // je & jo store even/odd array index, j stores index of counter registers
-      for (je = jo = j = 0; je < counter_info_even[i].size(); ++je, ++j) {
+      for (je = jo = j = 0; je < (int)counter_info_even[i].size(); ++je, ++j) {
         // get 16-bit SPM select value for even counters
         const auto& counter_des = counters_vec[counter_info_even[i][je].second];
-        uint32_t spm_select_value = Primitives::spm_even_select_value(counter_des);
+        uint32_t spm_select_value = prim_->SpmEvenSelectValue(counter_des);
         if (counter_des.block_des.index != instance) {
           instance = counter_des.block_des.index;
           // Reset counter register index when instance switches
@@ -368,10 +369,10 @@ class GpuSpmBuilder : public SpmBuilder, protected Primitives {
         }
 
         // get 16-bit SPM select value for odd counters
-        if (jo < counter_info_odd[i].size()) {
+        if (jo < (int)counter_info_odd[i].size()) {
           const auto& counter_des = counters_vec[counter_info_odd[i][jo].second];
           if (counter_des.block_des.index == instance) {
-            spm_select_value |= Primitives::spm_odd_select_value(counter_des);
+            spm_select_value |= prim_->SpmOddSelectValue(counter_des);
             jo++;
           }
         }
@@ -382,25 +383,25 @@ class GpuSpmBuilder : public SpmBuilder, protected Primitives {
         Register spm_select_addr = (select == 0) ?
             block_info->counter_reg_info[index].select_addr :
             block_info->counter_reg_info[index].select1_addr;
-        builder.BuildWriteUConfigRegPacket(
-            cmd_buffer, Primitives::GRBM_GFX_INDEX_ADDR,
-            Primitives::grbm_inst_index_value(counter_des.block_des.index));
-        builder.BuildWriteConfigRegPacket(cmd_buffer, spm_select_addr, spm_select_value);
+        builder_->BuildWriteUConfigRegPacket(
+            cmd_buffer, prim_->GetGrbmGfxIndexAddr(),
+            prim_->GrbmInstIndexValue(counter_des.block_des.index));
+        builder_->BuildWriteConfigRegPacket(cmd_buffer, spm_select_addr, spm_select_value);
       }
     }
-    builder.BuildWriteUConfigRegPacket(cmd_buffer, Primitives::GRBM_GFX_INDEX_ADDR,
-                                        Primitives::grbm_broadcast_value());
+    builder_->BuildWriteUConfigRegPacket(cmd_buffer, prim_->GetGrbmGfxIndexAddr(),
+                                          prim_->GrbmBroadcastValue());
 
     // Set segment size
     uint32_t global_count = ss[0];
     uint32_t se_count = ss[1];
-    builder.BuildWriteUConfigRegPacket(
-        cmd_buffer, Primitives::RLC_SPM_PERFMON_SEGMENT_SIZE__ADDR,
-        Primitives::rlc_spm_perfmon_segment_size_value(global_count, se_count));
+    builder_->BuildWriteUConfigRegPacket(
+        cmd_buffer, prim_->GetRlcSpmPerfmonSegmentSize(),
+        prim_->RlcSpmPerfmonSegmentSizeValue(global_count, se_count));
     if (config->spm_has_core1) {
-      builder.BuildWriteUConfigRegPacket(
-          cmd_buffer, Primitives::RLC_SPM_PERFMON_SEGMENT_SIZE_CORE1__ADDR,
-          Primitives::rlc_spm_perfmon_segment_size_core1_value(se_count));
+      builder_->BuildWriteUConfigRegPacket(
+          cmd_buffer, prim_->GetRlcSpmPerfmonSegmentSizeCore1(),
+          prim_->RlcSpmPerfmonSegmentSizeCore1Value(se_count));
     }
     spm_buffer_desc->global_num_line = global_count;
     spm_buffer_desc->se_num_line = se_count;
@@ -412,52 +413,51 @@ class GpuSpmBuilder : public SpmBuilder, protected Primitives {
     // Finish MUXSEL RAM
     // 5. Program the RLC_[GLOBAL/SE]_MUXSEL_ADDR register with the starting address, likely zero.
     if (!mux_ram[0].empty()) {
-      builder.BuildWriteUConfigRegPacket(cmd_buffer, Primitives::RLC_SPM_GLOBAL_MUXSEL_ADDR__ADDR,
-                                         0);
-      builder.BuildWriteRegDataPacket(cmd_buffer, Primitives::RLC_SPM_GLOBAL_MUXSEL_DATA__ADDR,
-                                      reinterpret_cast<uint32_t*>(mux_ram[0].data()),
-                                      mux_ram[0].size() / 2, 1);
+      builder_->BuildWriteUConfigRegPacket(cmd_buffer, prim_->GetRlcSpmGlobalMuxselAddr(), 0);
+      builder_->BuildWriteRegDataPacket(cmd_buffer, prim_->GetRlcSpmGlobalMuxselData(),
+                                        reinterpret_cast<uint32_t*>(mux_ram[0].data()),
+                                        mux_ram[0].size() / 2, 1);
     }
     if (!mux_ram[1].empty()) {
-      builder.BuildWriteUConfigRegPacket(cmd_buffer, Primitives::RLC_SPM_SE_MUXSEL_ADDR__ADDR, 0);
-      builder.BuildWriteRegDataPacket(cmd_buffer, Primitives::RLC_SPM_SE_MUXSEL_DATA__ADDR,
-                                      reinterpret_cast<uint32_t*>(mux_ram[1].data()),
-                                      mux_ram[1].size() / 2, 1);
+      builder_->BuildWriteUConfigRegPacket(cmd_buffer, prim_->GetRlcSpmSeMuxselAddr(), 0);
+      builder_->BuildWriteRegDataPacket(cmd_buffer, prim_->GetRlcSpmSeMuxselData(),
+                                        reinterpret_cast<uint32_t*>(mux_ram[1].data()),
+                                        mux_ram[1].size() / 2, 1);
     }
     // pm4SPM code has the following code
-    builder.BuildWriteUConfigRegPacket(cmd_buffer, Primitives::RLC_SPM_GLOBAL_MUXSEL_ADDR__ADDR, 0);
-    builder.BuildWriteUConfigRegPacket(cmd_buffer, Primitives::RLC_SPM_SE_MUXSEL_ADDR__ADDR, 0);
+    builder_->BuildWriteUConfigRegPacket(cmd_buffer, prim_->GetRlcSpmGlobalMuxselAddr(), 0);
+    builder_->BuildWriteUConfigRegPacket(cmd_buffer, prim_->GetRlcSpmSeMuxselAddr(), 0);
 
     // Issue a CSPartialFlush cmd including cache flush
-    builder.BuildWriteWaitIdlePacket(cmd_buffer);
+    builder_->BuildWriteWaitIdlePacket(cmd_buffer);
     // Program Compute Perfcount Enable register to support perf counting
-    builder.BuildWriteShRegPacket(cmd_buffer, Primitives::COMPUTE_PERFCOUNT_ENABLE_ADDR,
-                                  Primitives::cp_perfcount_enable_value());
+    builder_->BuildWriteShRegPacket(cmd_buffer, prim_->GetComputePerfcountEnableAddr(),
+                                    prim_->CpPerfcountEnableValue());
     // SPM counters start
-    builder.BuildWriteUConfigRegPacket(cmd_buffer, Primitives::CP_PERFMON_CNTL_ADDR,
-                                       Primitives::cp_perfmon_cntl_spm_start_value());
+    builder_->BuildWriteUConfigRegPacket(cmd_buffer, prim_->GetCpPerfmonCntlAddr(),
+                                         prim_->CpPerfmonCntlSpmStartValue());
     // Issue a CSPartialFlush cmd including cache flush
-    builder.BuildWriteWaitIdlePacket(cmd_buffer);
+    builder_->BuildWriteWaitIdlePacket(cmd_buffer);
   }
 
   void End(CmdBuffer* cmd_buffer, const SpmConfig* config) {
     // Program Grbm to broadcast messages to all shader engines
-    builder.BuildWriteUConfigRegPacket(cmd_buffer, Primitives::GRBM_GFX_INDEX_ADDR,
-                                       Primitives::grbm_broadcast_value());
+    builder_->BuildWriteUConfigRegPacket(cmd_buffer, prim_->GetGrbmGfxIndexAddr(),
+                                         prim_->GrbmBroadcastValue());
     // Issue a CSPartialFlush cmd including cache flush
-    builder.BuildWriteWaitIdlePacket(cmd_buffer);
+    builder_->BuildWriteWaitIdlePacket(cmd_buffer);
     // SPM counters stop
-    builder.BuildWriteUConfigRegPacket(cmd_buffer, Primitives::CP_PERFMON_CNTL_ADDR,
-                                       Primitives::cp_perfmon_cntl_spm_stop_value());
+    builder_->BuildWriteUConfigRegPacket(cmd_buffer, prim_->GetCpPerfmonCntlAddr(),
+                                         prim_->CpPerfmonCntlSpmStopValue());
     // SPM counters reset
     // 'SPM counters reset' must be done in KFD. See comments in Begin() for more details
     //
-    // builder.BuildWriteUConfigRegPacket(cmd_buffer, Primitives::CP_PERFMON_CNTL_ADDR,
-    //                                     Primitives::cp_perfmon_cntl_reset_value());
+    // builder_->BuildWriteUConfigRegPacket(cmd_buffer, prim_->GetCpPerfmonCntlAddr(),
+    //                                      prim_->CpPerfmonCntlResetValue());
 
     // On Vega this disable clock for performance counters
-    if (Primitives::GFXIP_LEVEL == 9)
-      builder.BuildWriteUConfigRegPacket(cmd_buffer, Primitives::RLC_PERFMON_CLK_CNTL_ADDR, 0);
+    if (prim_->GetGfxipLevel() == 9)
+      builder_->BuildWriteUConfigRegPacket(cmd_buffer, prim_->GetRlcPerfmonClkCntlAddr(), 0);
   }
 };
 

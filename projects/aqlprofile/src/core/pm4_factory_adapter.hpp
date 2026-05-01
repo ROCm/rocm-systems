@@ -25,6 +25,7 @@
 
 #include "core/pm4_factory.h"
 #include "core/hardware_architecture.hpp"
+#include "pm4/primitives_provider.hpp"
 
 namespace aql_profile {
 
@@ -38,38 +39,38 @@ class Pm4FactoryAdapter : public Pm4Factory {
   Pm4FactoryAdapter(HardwareArchitecture* architecture, const AgentInfo* agent_info);
   virtual ~Pm4FactoryAdapter();
 
-  // Pm4Factory interface
-  gpu_id_t GetGpuId() const override;
-  bool IsConcurrent() const override { return concurrent_mode_; }
-  bool SpmKfdMode() const override { return spm_kfd_mode_; }
+  // Pm4Factory interface (non-virtual base methods — shadows, not overrides)
+  gpu_id_t GetGpuId() const;
+  bool IsConcurrent() const { return concurrent_mode_; }
+  bool SpmKfdMode() const { return spm_kfd_mode_; }
 
-  pm4_builder::CmdBuilder* GetCmdBuilder() const override { return cmd_builder_; }
-  pm4_builder::PmcBuilder* GetPmcBuilder() const override { return pmc_builder_; }
-  pm4_builder::SpmBuilder* GetSpmBuilder() const override { return spm_builder_; }
-  pm4_builder::SqttBuilder* GetSqttBuilder() const override { return sqtt_builder_; }
+  pm4_builder::CmdBuilder* GetCmdBuilder() const { return cmd_builder_; }
+  pm4_builder::PmcBuilder* GetPmcBuilder() const { return pmc_builder_; }
+  pm4_builder::SpmBuilder* GetSpmBuilder() const { return spm_builder_; }
+  pm4_builder::SqttBuilder* GetSqttBuilder() const { return sqtt_builder_; }
 
-  uint32_t GetShaderEnginesNumber() const override;
-  uint32_t GetShaderArraysNumber() const override;
-  uint32_t GetComputeUnitNumber() const override;
-  uint32_t GetSQTTBufferAlignment() const override { return 0x1000; }
-  const char* GetGFX() const override;
+  uint32_t GetShaderEnginesNumber() const;
+  uint32_t GetShaderArraysNumber() const;
+  uint32_t GetComputeUnitNumber() const;
+  uint32_t GetSQTTBufferAlignment() const { return 0x1000; }
+  const char* GetGFX() const;
 
   bool IsGFX9() const override { return architecture_->IsGFX9(); }
   bool IsGFX10() const override { return architecture_->IsGFX10(); }
   bool IsGFX11() const override { return architecture_->IsGFX11(); }
   bool IsGFX12() const override { return architecture_->IsGFX12(); }
 
-  uint32_t GetXccNumber() const override;
+  uint32_t GetXccNumber() const;
   uint32_t GetSpmSampleDelayMax() override;
 
-  const GpuBlockInfo* GetBlockInfo(const aqlprofile_pmc_event_t* event) const override;
-  const GpuBlockInfo* GetBlockInfo(const event_t* event) const override;
-  const GpuBlockInfo* GetBlockInfo(const uint32_t& block_id) const override;
+  const GpuBlockInfo* GetBlockInfo(const aqlprofile_pmc_event_t* event) const;
+  const GpuBlockInfo* GetBlockInfo(const event_t* event) const;
+  const GpuBlockInfo* GetBlockInfo(const uint32_t& block_id) const;
 
   size_t GetNumEvents(uint32_t block_name) const override;
   size_t GetBytesNeeded(uint32_t block_name) const override;
 
-  uint32_t FindBlock(const char* name) const override;
+  uint32_t FindBlock(const char* name) const;
 
   int GetNumWGPs() const override;
   int GetAccumLowID() const override;
@@ -83,6 +84,7 @@ class Pm4FactoryAdapter : public Pm4Factory {
   gpu_id_t MapToLegacyGpuId() const;
 
   HardwareArchitecture* architecture_;
+  pm4_builder::PrimitivesProvider* prims_;
   bool concurrent_mode_;
   bool spm_kfd_mode_;
   mutable std::string gfx_name_;

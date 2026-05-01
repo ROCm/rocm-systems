@@ -131,6 +131,37 @@ add_executable(pm4-factory-test)
 SET(AQLPROFILE_PM4_FACTORY_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/pm4_factory_tests.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../pm4_factory.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../architecture_init.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../architecture_registry.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../hardware_architecture.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../pm4_factory_adapter.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../architectures/mi100_architecture.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../architectures/mi200_architecture.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../architectures/mi300_architecture.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../architectures/mi350_architecture.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../architectures/mi450_architecture.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../architectures/gfx9_architecture.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../architectures/gfx10_architecture.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../architectures/gfx11_architecture.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../architectures/gfx12_architecture.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../ip_offset_table_init.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../parse_ip_discovery.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../navi_reg_init.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../vega20_reg_init.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../gfx12_factory.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../gfx1250_factory.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../gfx11_factory.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../gfx115x_factory.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../gfx10_factory.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../gfx940_factory.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../gfx908_factory.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../gfx90a_factory.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../gfx9_factory.cpp
+    ${LIB_DIR}/util/hsa_rsrc_factory.cpp
+    ${LIB_DIR}/pm4/gfx9_primitives_provider.cpp
+    ${LIB_DIR}/pm4/gfx10_primitives_provider.cpp
+    ${LIB_DIR}/pm4/gfx11_primitives_provider.cpp
+    ${LIB_DIR}/pm4/gfx12_primitives_provider.cpp
 )
 target_sources(pm4-factory-test PRIVATE ${AQLPROFILE_PM4_FACTORY_SOURCES})
 target_include_directories(pm4-factory-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${LIB_DIR} ${LIB_DIR}/core/include)
@@ -180,6 +211,19 @@ SET(AQLPROFILE_V2_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/../memorymanager.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../populate_aql.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../pm4_factory.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../architecture_init.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../architecture_registry.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../hardware_architecture.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../pm4_factory_adapter.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../architectures/mi100_architecture.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../architectures/mi200_architecture.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../architectures/mi300_architecture.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../architectures/mi350_architecture.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../architectures/mi450_architecture.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../architectures/gfx9_architecture.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../architectures/gfx10_architecture.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../architectures/gfx11_architecture.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../architectures/gfx12_architecture.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../ip_offset_table_init.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../parse_ip_discovery.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../navi_reg_init.cpp
@@ -194,6 +238,11 @@ SET(AQLPROFILE_V2_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/../gfx908_factory.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../gfx90a_factory.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../gfx9_factory.cpp
+    ${LIB_DIR}/util/hsa_rsrc_factory.cpp
+    ${LIB_DIR}/pm4/gfx9_primitives_provider.cpp
+    ${LIB_DIR}/pm4/gfx10_primitives_provider.cpp
+    ${LIB_DIR}/pm4/gfx11_primitives_provider.cpp
+    ${LIB_DIR}/pm4/gfx12_primitives_provider.cpp
 )
 target_sources(aql-profile-v2-test PRIVATE ${AQLPROFILE_V2_SOURCES})
 target_include_directories(aql-profile-v2-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${LIB_DIR} ${LIB_DIR}/core/include)

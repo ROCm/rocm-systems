@@ -26,19 +26,13 @@
 #include "pm4/spm_builder.h"
 #include "pm4/sqtt_builder.h"
 
-// Per-architecture builder factories (each compiled in its own TU to avoid
-// conflicting linux enum headers from different GFX generations).
-#include "pm4/gfx9_builders.hpp"
-#include "pm4/gfx10_builders.hpp"
-#include "pm4/gfx11_builders.hpp"
-#include "pm4/gfx12_builders.hpp"
-
 namespace aql_profile {
 
 Pm4FactoryAdapter::Pm4FactoryAdapter(HardwareArchitecture* architecture,
                                      const AgentInfo* agent_info)
     : Pm4Factory(BlockInfoMap(nullptr, 0)),
       architecture_(architecture),
+      prims_(nullptr),
       concurrent_mode_(false),
       spm_kfd_mode_(false) {
   if (!architecture_) {
@@ -54,35 +48,15 @@ Pm4FactoryAdapter::Pm4FactoryAdapter(HardwareArchitecture* architecture,
 
 Pm4FactoryAdapter::~Pm4FactoryAdapter() {
   // architecture_ is owned by the caller; builders are deleted by the base class.
+  delete prims_;
 }
 
 void Pm4FactoryAdapter::InitializeBuilders(const AgentInfo* agent_info) {
-  // Select the correct <CmdBuilder, Primitives> pair based on architecture family.
-  // The concurrent flag drives the PmcBuilder template specialisation.
-
-  if (architecture_->IsGFX9()) {
-    cmd_builder_  = pm4_builder_gfx9::MakeCmdBuilder();
-    pmc_builder_  = pm4_builder_gfx9::MakePmcBuilder(agent_info, concurrent_mode_);
-    spm_builder_  = pm4_builder_gfx9::MakeSpmBuilder(agent_info);
-    sqtt_builder_ = pm4_builder_gfx9::MakeSqttBuilder(agent_info);
-  } else if (architecture_->IsGFX10()) {
-    cmd_builder_  = pm4_builder_gfx10::MakeCmdBuilder();
-    pmc_builder_  = pm4_builder_gfx10::MakePmcBuilder(agent_info, concurrent_mode_);
-    spm_builder_  = pm4_builder_gfx10::MakeSpmBuilder(agent_info);
-    sqtt_builder_ = pm4_builder_gfx10::MakeSqttBuilder(agent_info);
-  } else if (architecture_->IsGFX11()) {
-    cmd_builder_  = pm4_builder_gfx11::MakeCmdBuilder();
-    pmc_builder_  = pm4_builder_gfx11::MakePmcBuilder(agent_info, concurrent_mode_);
-    spm_builder_  = pm4_builder_gfx11::MakeSpmBuilder(agent_info);
-    sqtt_builder_ = pm4_builder_gfx11::MakeSqttBuilder(agent_info);
-  } else if (architecture_->IsGFX12()) {
-    cmd_builder_  = pm4_builder_gfx12::MakeCmdBuilder();
-    pmc_builder_  = pm4_builder_gfx12::MakePmcBuilder(agent_info, concurrent_mode_);
-    spm_builder_  = pm4_builder_gfx12::MakeSpmBuilder(agent_info);
-    sqtt_builder_ = pm4_builder_gfx12::MakeSqttBuilder(agent_info);
-  } else {
-    throw aql_profile_exc_msg("Pm4FactoryAdapter: unsupported architecture family");
-  }
+  cmd_builder_ = architecture_->CreateCmdBuilder();
+  prims_        = architecture_->CreatePrimitivesProvider();
+  pmc_builder_  = new pm4_builder::GpuPmcBuilder(agent_info, cmd_builder_, prims_, concurrent_mode_);
+  spm_builder_  = new pm4_builder::GpuSpmBuilder(agent_info, cmd_builder_, prims_);
+  sqtt_builder_ = new pm4_builder::GpuSqttBuilder(agent_info, cmd_builder_, prims_);
 }
 
 gpu_id_t Pm4FactoryAdapter::MapToLegacyGpuId() const {

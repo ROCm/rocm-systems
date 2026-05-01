@@ -3,6 +3,17 @@
 
 #include <gtest/gtest.h>
 #include "core/pm4_factory.h"
+#include "core/logger.h"
+
+// Define static members required when compiling pm4_factory.cpp directly
+bool aql_profile::Pm4Factory::concurrent_create_mode_ = false;
+bool aql_profile::Pm4Factory::spm_kfd_mode_ = false;
+aql_profile::Pm4Factory::mutex_t aql_profile::Pm4Factory::mutex_;
+aql_profile::Pm4Factory::instances_t* aql_profile::Pm4Factory::instances_ = nullptr;
+namespace aql_profile {
+Logger::mutex_t Logger::mutex_;
+Logger* Logger::instance_ = nullptr;
+}
 
 using namespace aql_profile;
 

@@ -13,7 +13,7 @@
 // Define static members
 bool aql_profile::Pm4Factory::concurrent_create_mode_ = false;
 bool aql_profile::Pm4Factory::spm_kfd_mode_ = false;
-//Pm4Factory::mutex_t Pm4Factory::mutex_;
+aql_profile::Pm4Factory::mutex_t aql_profile::Pm4Factory::mutex_;
 aql_profile::Pm4Factory::instances_t* aql_profile::Pm4Factory::instances_ = nullptr;
 namespace aql_profile {
 Logger::mutex_t Logger::mutex_;

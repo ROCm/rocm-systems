@@ -61,11 +61,12 @@ public:
   void BuildCacheFlushPacket(CmdBuffer*, size_t, size_t) {}
 };
 
-// Actual GpuSqttBuilder implementation for testing
+// Local test double that exercises the same buffer-step logic without depending
+// on the real pm4_builder::GpuSqttBuilder template interface.
 template <typename Builder, typename Primitives>
-class GpuSqttBuilder {
+class SqttBuilderTestDouble {
 public:
-  explicit GpuSqttBuilder(const AgentInfo* agent_info) 
+  explicit SqttBuilderTestDouble(const AgentInfo* agent_info)
     : xcc_number_(agent_info->xcc_num)
     , se_number_total(agent_info->se_num)
     , builder_(agent_info) {}
@@ -113,7 +114,7 @@ protected:
 };
 
 TEST_F(SqttBuilderTest, DISABLED_BufferStepCalculation) {
-  GpuSqttBuilder<TestBuilder, TestPrimitives> builder(&agent_info);
+  SqttBuilderTestDouble<TestBuilder, TestPrimitives> builder(&agent_info);
 
   // Test with different buffer sizes and SE masks
   const uint64_t total_buffer = 1024 * 1024;  // 1MB total
@@ -132,7 +133,7 @@ TEST_F(SqttBuilderTest, DISABLED_BufferStepCalculation) {
 }
 
 TEST_F(SqttBuilderTest, PopulationCount) {
-  GpuSqttBuilder<TestBuilder, TestPrimitives> builder(&agent_info);
+  SqttBuilderTestDouble<TestBuilder, TestPrimitives> builder(&agent_info);
 
   // Test different SE mask configurations
   EXPECT_EQ(builder.PopCount(0x1), 1);    // Single SE
@@ -143,7 +144,7 @@ TEST_F(SqttBuilderTest, PopulationCount) {
 }
 
 TEST_F(SqttBuilderTest, ThreadTraceStatusMasks) {
-  GpuSqttBuilder<TestBuilder, TestPrimitives> builder(&agent_info);
+  SqttBuilderTestDouble<TestBuilder, TestPrimitives> builder(&agent_info);
 
   // Verify mask values
   EXPECT_EQ(builder.GetUTCErrorMask(), TestPrimitives::TT_CONTROL_UTC_ERR_MASK);
@@ -157,23 +158,23 @@ TEST_F(SqttBuilderTest, ThreadTraceStatusMasks) {
 }
 
 TEST_F(SqttBuilderTest, XCCConfiguration) {
-  GpuSqttBuilder<TestBuilder, TestPrimitives> builder(&agent_info);
+  SqttBuilderTestDouble<TestBuilder, TestPrimitives> builder(&agent_info);
 
   // Test XCC number configuration
   EXPECT_EQ(builder.GetXCCNumber(), agent_info.xcc_num);
   
   // Test with different XCC configurations
   agent_info.xcc_num = 1;
-  GpuSqttBuilder<TestBuilder, TestPrimitives> single_xcc(&agent_info);
+  SqttBuilderTestDouble<TestBuilder, TestPrimitives> single_xcc(&agent_info);
   EXPECT_EQ(single_xcc.GetXCCNumber(), 1);
 
   agent_info.xcc_num = 4;
-  GpuSqttBuilder<TestBuilder, TestPrimitives> multi_xcc(&agent_info);
+  SqttBuilderTestDouble<TestBuilder, TestPrimitives> multi_xcc(&agent_info);
   EXPECT_EQ(multi_xcc.GetXCCNumber(), 4);
 }
 
 TEST_F(SqttBuilderTest, BufferAlignmentAndBlockSize) {
-  GpuSqttBuilder<TestBuilder, TestPrimitives> builder(&agent_info);
+  SqttBuilderTestDouble<TestBuilder, TestPrimitives> builder(&agent_info);
 
   // Test buffer alignment
   EXPECT_EQ(builder.BufferAlignment(), TestPrimitives::TT_BUFF_ALIGN_SHIFT);

@@ -24,6 +24,8 @@
 #define _GFX11_FACTORY_H_
 #include "core/pm4_factory.h"
 
+namespace pm4_builder { class PrimitivesProvider; }
+
 namespace aql_profile {
 
 // Gfx11 factory class
@@ -42,12 +44,15 @@ class Gfx11Factory : public Pm4Factory {
   virtual int GetAccumLowID() const override { return 1; }
   virtual int GetAccumHiID() const override { return 1; }
 
-  static const GpuBlockInfo** GetBlockTable() { return block_table_; }
-  static size_t GetBlockTableSize() { return AQLPROFILE_BLOCKS_NUMBER; }
+ public:
+  static const GpuBlockInfo* block_table_[AQLPROFILE_BLOCKS_NUMBER];
 
  protected:
   void Init(const AgentInfo* agent_info);
-  static const GpuBlockInfo* block_table_[AQLPROFILE_BLOCKS_NUMBER];
+  pm4_builder::PrimitivesProvider* prims_ = nullptr;
+
+ public:
+  ~Gfx11Factory() override { delete prims_; }
 };
 
 // Gfx11.5 factory class

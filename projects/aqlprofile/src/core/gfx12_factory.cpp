@@ -21,9 +21,11 @@
 // THE SOFTWARE.
 
 #include "core/pm4_factory.h"
-#include "def/gfx12_def.h"
+#include "core/ip_offset_table_init.h"
 #include "pm4/gfx12_cmd_builder.h"
+#include "pm4/gfx12_primitives_provider.hpp"
 #include "pm4/pmc_builder.h"
+#include "pm4/spm_builder.h"
 #include "pm4/sqtt_builder.h"
 
 namespace aql_profile {
@@ -41,6 +43,8 @@ class Gfx12Factory : public Pm4Factory {
   }
   bool IsGFX12() const override { return true; }
 
+  ~Gfx12Factory() override { delete prims_; }
+
  protected:
   void ConstructBuilders(const AgentInfo* agent_info);
   void ConstructTable(const AgentInfo* agent_info);
@@ -49,31 +53,27 @@ class Gfx12Factory : public Pm4Factory {
     ConstructBuilders(agent_info);
     ConstructTable(agent_info);
   }
-  const GpuBlockInfo* block_table_[LastCounterBlockId + 1]{};
+  const GpuBlockInfo* block_table_[AQLPROFILE_BLOCKS_NUMBER]{};
+  pm4_builder::PrimitivesProvider* prims_ = nullptr;
 };
 
 void Gfx12Factory::ConstructBuilders(const AgentInfo* agent_info) {
-  Pm4Factory::cmd_builder_ = new pm4_builder::Gfx12CmdBuilder(nullptr);
+  Pm4Factory::cmd_builder_ = new pm4_builder::Gfx12CmdBuilder(acquire_ip_offset_table(agent_info));
   if (Pm4Factory::cmd_builder_ == NULL) throw aql_profile_exc_msg("CmdBuilder allocation failed");
 
-  // Mark and set the mode
-  if (Pm4Factory::IsConcurrent()) {
-    Pm4Factory::pmc_builder_ =
-        new pm4_builder::GpuPmcBuilder<pm4_builder::Gfx12CmdBuilder, gfx12_cntx_prim, true>(
-            agent_info);
-  } else {
-    Pm4Factory::pmc_builder_ =
-        new pm4_builder::GpuPmcBuilder<pm4_builder::Gfx12CmdBuilder, gfx12_cntx_prim, false>(
-            agent_info);
-  }
+  auto* prims = new pm4_builder::Gfx12PrimitivesProvider();
+  prims_ = prims;
+
+  Pm4Factory::pmc_builder_ = new pm4_builder::GpuPmcBuilder(
+      agent_info, Pm4Factory::cmd_builder_, prims, Pm4Factory::IsConcurrent());
   if (Pm4Factory::pmc_builder_ == NULL) throw aql_profile_exc_msg("PmcBuilder allocation failed");
 
   Pm4Factory::spm_builder_ =
-      new pm4_builder::GpuSpmBuilder<pm4_builder::Gfx12CmdBuilder, gfx12_cntx_prim>(agent_info);
+      new pm4_builder::GpuSpmBuilder(agent_info, Pm4Factory::cmd_builder_, prims);
   if (Pm4Factory::spm_builder_ == NULL) throw aql_profile_exc_msg("SpmBuilder allocation failed");
 
   Pm4Factory::sqtt_builder_ =
-      new pm4_builder::GpuSqttBuilder<pm4_builder::Gfx12CmdBuilder, gfx12_cntx_prim>(agent_info);
+      new pm4_builder::GpuSqttBuilder(agent_info, Pm4Factory::cmd_builder_, prims);
   if (Pm4Factory::sqtt_builder_ == NULL) throw aql_profile_exc_msg("SqttBuilder allocation failed");
 }
 
