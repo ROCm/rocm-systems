@@ -32,6 +32,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Optional
 
+from rich.console import Console
+
 # This file lives under tools/; add src/ to path for rocprof_compute_* imports.
 _SRC_DIR = Path(__file__).resolve().parent.parent / "src"
 if str(_SRC_DIR) not in sys.path:
@@ -450,8 +452,6 @@ def render_perfmon_plan_svg(
     Uses markdown pipe-table style (same as CLI) with all columns aligned
     across all buckets for consistent visual appearance.
     """
-    from rich.console import Console
-
     global_columns, column_widths, sections, total_assignments = _bucket_plan_sections(
         output_files
     )
@@ -644,9 +644,7 @@ def _emit_inspector_output(
             print(f"SVG saved to {output_path}")
         elif suffix == ".txt":
             bucket_output = generate_bucket_plan(output_files, arch)
-            metrics_output = generate_bucket_metrics(
-                output_files, config_dir, arch
-            )
+            metrics_output = generate_bucket_metrics(output_files, config_dir, arch)
             try:
                 output_path.write_text(bucket_output + metrics_output, encoding="utf-8")
             except OSError as exc:
