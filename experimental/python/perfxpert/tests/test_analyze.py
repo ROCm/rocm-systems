@@ -1205,6 +1205,32 @@ def _pmc_cmd(
     }
 
 
+def test_split_pmc_uses_source_derived_sq_limit():
+    """Six SQ counters stay in one pass because mi_gpu_spec.yaml sets SQ to 8."""
+    from perfxpert.analyze import _split_pmc_into_passes
+
+    sq_counters = [
+        "SQ_WAVES",
+        "SQ_INSTS_VALU",
+        "SQ_INSTS_VMEM_RD",
+        "SQ_INSTS_VMEM_WR",
+        "SQ_INSTS_LDS",
+        "SQ_WAVE_CYCLES",
+    ]
+    result = _split_pmc_into_passes(
+        sq_counters,
+        ["--sys-trace"],
+        [{"name": "--pmc", "value": " ".join(sq_counters)}],
+        "./output",
+        "profile",
+        "Collect hardware counters",
+    )
+
+    assert len(result) == 1
+    pmc_arg = next(arg for arg in result[0]["args"] if arg["name"] == "--pmc")
+    assert pmc_arg["value"] == " ".join(sq_counters)
+
+
 def test_filter_pmc_all_counters_already_collected_drops_command():
     """When every --pmc counter is already in pmc_events, the command is dropped."""
     from perfxpert.analyze import _filter_rec_commands
