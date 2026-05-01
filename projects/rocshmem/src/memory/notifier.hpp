@@ -28,6 +28,7 @@
 #include "device_proxy.hpp"
 #include "util.hpp"
 #include "atomic.hpp"
+#include "hip_allocator.hpp"
 
 namespace rocshmem {
 
@@ -98,12 +99,14 @@ class Notifier {
   uint32_t count_ {};
 };
 
-template <typename ALLOCATOR, detail::atomic::rocshmem_memory_scope scope>
+template <detail::atomic::rocshmem_memory_scope scope>
 class NotifierProxy {
-  using ProxyT = DeviceProxy<ALLOCATOR, Notifier<scope>>;
+  using ProxyT = DeviceProxy<HIPAllocator, Notifier<scope>>;
 
  public:
-  NotifierProxy(size_t num_elems = 1) : proxy_{num_elems} {
+  NotifierProxy([[maybe_unused]] const HIPAllocator& alloc = HIPAllocator(),
+                size_t num_elems = 1)
+    : proxy_{num_elems} {
     new (proxy_.get()) Notifier<scope>();
   }
 
