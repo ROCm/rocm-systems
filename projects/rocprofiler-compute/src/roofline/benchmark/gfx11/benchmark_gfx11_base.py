@@ -2,9 +2,9 @@
 # SPDX-License-Identifier:  MIT
 
 # -----------------------------------------------------------------------------
-# benchmark_base_gfx9.py
+# benchmark_base_gfx11.py
 #
-# Benchmarking base class for all gfx9-based products.
+# Benchmarking base class for all gfx11-based products.
 #
 # -----------------------------------------------------------------------------
 
@@ -12,29 +12,22 @@ from .. import benchmark_base
 
 
 # =============================================================================
-# Bench_gfx9 Class (ABSTRACT)
+# Bench_gfx11 Class (ABSTRACT)
 # =============================================================================
-class Bench_gfx9(benchmark_base.Bench_base):
+class Bench_gfx11(benchmark_base.Bench_base):
     def __init__(self, device_id: int) -> None:
-        # Must define number of AID per arch
-        self.aid_count: int
+        # Must define number of MCD per arch
+        self.mcd_count: int
 
         super().__init__(device_id)
 
-        self.WAVEFRONT_SIZE = 64
-        self.MATRIX_OPS_TYPE = "MFMA"
+        #TODO: there is potential wavefront size could be set to 64,
+        # but default for gfx11 is 32
+        self.WAVEFRONT_SIZE = 32
+        self.MATRIX_OPS_TYPE = "WMMA"
 
-        self.matrix_kernel_selector = {
-            "F4": "mfma_f8f6f4<FP4_E2M1>",
-            "F6": "mfma_f8f6f4<FP6_E2M3>",
-            "F6F4": "mfma_f8f6f4<FP6_FP4_MIXED>",
-            "F8": "mfma_f8",
-            "F16": "mfma_f16",
-            "BF16": "mfma_bf16",
-            "F32": "mfma_f32",
-            "F64": "mfma_f64",
-            "I8": "mfma_i8",
-        }
+        self.matrix_kernel_selector = {}
+        self.matrix_ops = {}
 
         self.tests = {
             "HBM": super().hbm_bw_benchmark,
@@ -48,15 +41,15 @@ class Bench_gfx9(benchmark_base.Bench_base):
             "I8": super().int8_benchmark,
             "I32": super().int32_benchmark,
             "I64": super().int64_benchmark,
-            "MFMA-F4": super().matrix_f4_bench,
-            "MFMA-F6": super().matrix_f6_bench,
-            "MFMA-F6F4": super().matrix_f6f4_bench,
-            "MFMA-F8": super().matrix_f8_bench,
-            "MFMA-F16": super().matrix_f16_bench,
-            "MFMA-BF16": super().matrix_bf16_bench,
-            "MFMA-F32": super().matrix_f32_bench,
-            "MFMA-F64": super().matrix_f64_bench,
-            "MFMA-I8": super().matrix_i8_bench,
+            "WMMA-F4": super().matrix_f4_bench,
+            "WMMA-F6": super().matrix_f6_bench,
+            "WMMA-F6F4": super().matrix_f6f4_bench,
+            "WMMA-F8": super().matrix_f8_bench,
+            "WMMA-F16": super().matrix_f16_bench,
+            "WMMA-BF16": super().matrix_bf16_bench,
+            "WMMA-F32": super().matrix_f32_bench,
+            "WMMA-F64": super().matrix_f64_bench,
+            "WMMA-I8": super().matrix_i8_bench,
         }
 
         self.csv_cols_map = {
@@ -71,16 +64,17 @@ class Bench_gfx9(benchmark_base.Bench_base):
             "I8": "I8Ops",
             "I32": "I32Ops",
             "I64": "I64Ops",
-            "MFMA-F4": "MFMAF4Flops",
-            "MFMA-F6": "MFMAF6Flops",
-            "MFMA-F6F4": "MFMAF6F4Flops",
-            "MFMA-F8": "MFMAF8Flops",
-            "MFMA-F16": "MFMAF16Flops",
-            "MFMA-BF16": "MFMABF16Flops",
-            "MFMA-F32": "MFMAF32Flops",
-            "MFMA-F64": "MFMAF64Flops",
-            "MFMA-I8": "MFMAI8Ops",
+            "WMMA-F4": "WMMAF4Flops",
+            "WMMA-F6": "WMMAF6Flops",
+            "WMMA-F6F4": "WMMAF6F4Flops",
+            "WMMA-F8": "WMMAF8Flops",
+            "WMMA-F16": "WMMAF16Flops",
+            "WMMA-BF16": "WMMABF16Flops",
+            "WMMA-F32": "WMMAF32Flops",
+            "WMMA-F64": "WMMAF64Flops",
+            "WMMA-I8": "WMMAI8Ops",
         }
+
 
     # -----------------------------------------------------------------------------
     # Helper Methods and Classes
@@ -124,10 +118,11 @@ class Bench_gfx9(benchmark_base.Bench_base):
             # therefore only have one cache instance
             elif cache_values["cache_level"] == 2:
                 self.cache_sizes["L2"] = cache_values["cache_size"] * 1024
-            elif cache_values["cache_level"] == 3 and self.aid_count > 0:
+            elif cache_values["cache_level"] == 3 and self.mcd_count > 0:
                 self.cache_sizes["MALL"] = int(
-                    cache_values["cache_size"] * 1024 / self.aid_count
+                    cache_values["cache_size"] * 1024 / self.mcd_count
                 )
+
 
     # -----------------------------------------------------------------------------
     # Benchmarking kernel source
@@ -141,66 +136,16 @@ class Bench_gfx9(benchmark_base.Bench_base):
         # All other cache and FLOPs definitions are completed in the Bench_base 
         # class set_kernel_source()
         # HBM Bandwidth benchmark
-        self.hbm_bw_src = """
-        template<typename T>
-        __global__ void HBM_bw(T *dst, const T *src)
-        {
-            const unsigned int gid = blockDim.x * blockIdx.x + threadIdx.x;
-            const unsigned int tid = threadIdx.x;
-
-            dst[gid] = src[gid];
-        }
-        """
+        self.hbm_bw_src = """"""
 
         # Matrix operations
         # ----------------------------------------
         # Kernels need arch-specific definitions or are unsupported by the hardware
+
+        self.matrix_f64_src = """"""
+        self.matrix_f32_src = """"""
         self.matrix_f16_src = """"""
         self.matrix_bf16_src = """"""
         self.matrix_i8_src = """"""
-        self.matrix_f8f6f4_src = """"""
         self.matrix_f8_src = """"""
-
-        self.matrix_f32_src = (
-            self.vector_types_src
-            + """
-            extern "C" __global__ void mfma_f32(int iter, float *dummy)
-            {
-                float a = threadIdx.x;
-                vec16<float> result = {0};
-
-                for(int i = 0; i < iter; ++i)
-                {
-                    result = __builtin_amdgcn_mfma_f32_32x32x2f32(\
-                        a, a, result, 0, 0, 0);
-                }
-
-                if (result[0] != 2*result[0])
-                {
-                    dummy[0] = result[0];
-                }
-            }
-            """
-        )
-
-        self.matrix_f64_src = (
-            self.vector_types_src
-            + """
-        extern "C" __global__ void mfma_f64(int iter, float *dummy)
-        {
-            double a =  threadIdx.x;
-
-            vec4<double> result = {0};
-
-            for(int i = 0; i < iter; ++i)
-            {
-                result = __builtin_amdgcn_mfma_f64_16x16x4f64(a, a, result, 0, 0, 0);
-            }
-
-            if (result[0] != 2*result[0])
-            {
-                dummy[0] = result[0];
-            }
-        }
-        """
-        )
+        self.matrix_f8f6f4_src = """"""
