@@ -399,7 +399,7 @@ void MemoryAsyncCopy::RunBenchmarkWithVerification(Transaction *t) {
     return;
   }
 
-  for (int i = 0; i < Granularities.size(); i++) {
+  for (size_t i = 0; i < Granularities.size(); i++) {
     if (Granularities[i].Size > size) {
       printf("Skip test with block size %s\n", Granularities[i].Str);
       break;
@@ -581,7 +581,7 @@ void MemoryAsyncCopy::DisplayBenchmark(Transaction *t) const {
   printf("Data Size             Avg Time(us)         Avg BW(GB/s)"
       "          Min Time(us)          Peak BW(GB/s)\n");
 
-  for (int i = 0; i < Granularities.size(); i++) {
+  for (size_t i = 0; i < Granularities.size(); i++) {
     if (Granularities[i].Size > size) {
       printf("Notice: Data Size >= %s is skipped due to hard limit of 1/2 vram size \n\n", Granularities[i].Str);
       break;

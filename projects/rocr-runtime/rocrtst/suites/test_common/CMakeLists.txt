@@ -336,6 +336,19 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall")
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unused")
 # set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -pedantic")
 
+# ThreadSanitizer flags
+# Check both CMake variables and environment variables
+if(DEFINED THREAD_SANITIZER OR THEROCK_SANITIZER STREQUAL "TSAN" OR
+   DEFINED ENV{THREAD_SANITIZER} OR "$ENV{THEROCK_SANITIZER}" STREQUAL "TSAN")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=thread -g -O1 -Wno-tsan")
+  set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fsanitize=thread -g -O1 -Wno-tsan")
+  set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fsanitize=thread")
+  message(STATUS "ThreadSanitizer (TSAN) enabled for rocrtst")
+
+  # TSAN options at runtime can be set via TSAN_OPTIONS environment variable
+  # Example: export TSAN_OPTIONS="halt_on_error=0:history_size=7:second_deadlock_stack=1"
+endif()
+
 #
 # Add compiler flags to include symbol information for debug builds
 #
@@ -622,6 +635,18 @@ check_cxx_compiler_flag("-fsanitize=address" COMPILER_HAS_ASAN)
 if(COMPILER_HAS_ASAN AND (CMAKE_CXX_FLAGS MATCHES "-fsanitize=address" OR CMAKE_C_FLAGS MATCHES "-fsanitize=address"))
   target_compile_definitions(${ROCRTST} PRIVATE ROCRTST_ASAN=1)
   message(STATUS "AddressSanitizer detected - defining ROCRTST_ASAN")
+endif()
+
+# Detect ThreadSanitizer and define ROCRTST_TSAN
+# Note: CMAKE_REQUIRED_LINK_OPTIONS must be set because check_cxx_compiler_flag
+# only adds the flag during compilation, not linking. Without this, the test
+# fails with "undefined reference to __tsan_init"
+set(CMAKE_REQUIRED_LINK_OPTIONS "-fsanitize=thread")
+check_cxx_compiler_flag("-fsanitize=thread" COMPILER_HAS_TSAN)
+unset(CMAKE_REQUIRED_LINK_OPTIONS)
+if(COMPILER_HAS_TSAN AND (CMAKE_CXX_FLAGS MATCHES "-fsanitize=thread" OR CMAKE_C_FLAGS MATCHES "-fsanitize=thread"))
+  target_compile_definitions(${ROCRTST} PRIVATE ROCRTST_TSAN=1)
+  message(STATUS "ThreadSanitizer detected - defining ROCRTST_TSAN")
 endif()
 
 # Find hwloc library

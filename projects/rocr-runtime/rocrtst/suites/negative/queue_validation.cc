@@ -64,6 +64,7 @@ static const uint32_t kMaxQueue = 64;
 typedef struct test_validation_data_t {
   bool cb_triggered;
   hsa_queue_t** queue_pointer;
+  hsa_queue_t* callback_source;  // Store source from callback for later comparison
   hsa_status_t  expected_status;
 } test_validation_data;
 
@@ -206,14 +207,21 @@ void QueueValidation::QueueValidationForInvalidDimension(hsa_agent_t cpuAgent,
   // Adjust the size to the max of 1024
   queue_max = (queue_max < kMaxQueueSizeForAgent) ? queue_max: kMaxQueueSizeForAgent;
 
-  hsa_queue_t *queue[kMaxQueue];  // command queue
+  // Heap-allocate queue array to avoid TSAN race with async callback accessing stack
+  hsa_queue_t **queue = new hsa_queue_t*[kMaxQueue];
   uint32_t ii;
-  test_validation_data user_data[kMaxQueue];
+  // Initialize queue pointers to nullptr
+  for (ii = 0; ii < kMaxQueue; ++ii) {
+    queue[ii] = nullptr;
+  }
+  test_validation_data* user_data = new test_validation_data[kMaxQueue];
   for (ii = 0; ii < kMaxQueue; ++ii) {
     // set callback flag to false if callback called then it will change to true
     user_data[ii].cb_triggered = false;
     // set the queue pointer
     user_data[ii].queue_pointer = &queue[ii];
+    // initialize callback_source to nullptr
+    user_data[ii].callback_source = nullptr;
     // set the expected status in queue error calback handling
     user_data[ii].expected_status = HSA_STATUS_ERROR_INCOMPATIBLE_ARGUMENTS;
 
@@ -263,9 +271,13 @@ void QueueValidation::QueueValidationForInvalidDimension(hsa_agent_t cpuAgent,
   for (ii = 0; ii < kMaxQueue; ++ii) {
     // queue error handling callback  should be triggered
     ASSERT_EQ(user_data[ii].cb_triggered, true);
+    // Verify source from callback matches queue (safe here - no race)
+    ASSERT_EQ(user_data[ii].callback_source->id, queue[ii]->id);
     if (queue[ii]) { hsa_queue_destroy(queue[ii]); }
   }
 
+  delete[] user_data;
+  delete[] queue;  // Free heap-allocated queue array
   clear_code_object();
 }
 
@@ -291,8 +303,9 @@ void QueueValidation::QueueValidationInvalidGroupMemory(hsa_agent_t cpuAgent,
   // Adjust the size to the max of 1024
   queue_max = (queue_max < kMaxQueueSizeForAgent) ? queue_max: kMaxQueueSizeForAgent;
 
-  hsa_queue_t *queue[kMaxQueue];  // command queue
-  test_validation_data user_data[kMaxQueue];
+  // Heap-allocate queue array to avoid TSAN race with async callback accessing stack
+  hsa_queue_t **queue = new hsa_queue_t*[kMaxQueue];
+  test_validation_data* user_data = new test_validation_data[kMaxQueue];
 
   uint32_t ii;
   for (ii = 0; ii < kMaxQueue; ++ii) {
@@ -300,6 +313,8 @@ void QueueValidation::QueueValidationInvalidGroupMemory(hsa_agent_t cpuAgent,
     user_data[ii].cb_triggered = false;
     // set the queue pointer
     user_data[ii].queue_pointer = &queue[ii];
+    // initialize callback_source to nullptr
+    user_data[ii].callback_source = nullptr;
     // set the expected status in queue error calback handling
     user_data[ii].expected_status = HSA_STATUS_ERROR_INVALID_ALLOCATION;
 
@@ -350,9 +365,13 @@ void QueueValidation::QueueValidationInvalidGroupMemory(hsa_agent_t cpuAgent,
   for (ii = 0; ii < kMaxQueue; ++ii) {
     // queue error handling callback  should be triggered
     ASSERT_EQ(user_data[ii].cb_triggered, true);
+    // Verify source from callback matches queue (safe here - no race)
+    ASSERT_EQ(user_data[ii].callback_source->id, queue[ii]->id);
     if (queue[ii]) { hsa_queue_destroy(queue[ii]); }
   }
 
+  delete[] user_data;
+  delete[] queue;  // Free heap-allocated queue array
   clear_code_object();
 }
 
@@ -378,14 +397,17 @@ void QueueValidation::QueueValidationForInvalidKernelObject(hsa_agent_t cpuAgent
   // Adjust the size to the max of 1024
   queue_max = (queue_max < kMaxQueueSizeForAgent) ? queue_max: kMaxQueueSizeForAgent;
 
-  hsa_queue_t *queue[kMaxQueue];  // command queue
-  test_validation_data user_data[kMaxQueue];
+  // Heap-allocate queue array to avoid TSAN race with async callback accessing stack
+  hsa_queue_t **queue = new hsa_queue_t*[kMaxQueue];
+  test_validation_data* user_data = new test_validation_data[kMaxQueue];
   uint32_t ii;
   for (ii = 0; ii < kMaxQueue; ++ii) {
     // set callback flag to false if callback called then it will change to true
     user_data[ii].cb_triggered = false;
     // set the queue pointer
     user_data[ii].queue_pointer = &queue[ii];
+    // initialize callback_source to nullptr
+    user_data[ii].callback_source = nullptr;
     // set the expected status in queue error calback handling
     user_data[ii].expected_status = HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
 
@@ -435,9 +457,13 @@ void QueueValidation::QueueValidationForInvalidKernelObject(hsa_agent_t cpuAgent
   for (ii = 0; ii < kMaxQueue; ++ii) {
     // queue error handling callback  should be triggered
     ASSERT_EQ(user_data[ii].cb_triggered, true);
+    // Verify source from callback matches queue (safe here - no race)
+    ASSERT_EQ(user_data[ii].callback_source->id, queue[ii]->id);
     if (queue[ii]) { hsa_queue_destroy(queue[ii]); }
   }
 
+  delete[] user_data;
+  delete[] queue;  // Free heap-allocated queue array
   clear_code_object();
 }
 
@@ -462,14 +488,21 @@ void QueueValidation::QueueValidationForInvalidPacket(hsa_agent_t cpuAgent,
   // Adjust the size to the max of 1024
   queue_max = (queue_max < kMaxQueueSizeForAgent) ? queue_max: kMaxQueueSizeForAgent;
 
-  hsa_queue_t *queue[kMaxQueue];  // command queue
+  // Heap-allocate queue array to avoid TSAN race with async callback accessing stack
+  hsa_queue_t **queue = new hsa_queue_t*[kMaxQueue];
   uint32_t ii;
-  test_validation_data user_data[kMaxQueue];
+  // Initialize queue pointers to nullptr
+  for (ii = 0; ii < kMaxQueue; ++ii) {
+    queue[ii] = nullptr;
+  }
+  test_validation_data* user_data = new test_validation_data[kMaxQueue];
   for (ii = 0; ii < kMaxQueue; ++ii) {
     // set callback flag to false if callback called then it will change to true
     user_data[ii].cb_triggered = false;
     // set the queue pointer
     user_data[ii].queue_pointer = &queue[ii];
+    // initialize callback_source to nullptr
+    user_data[ii].callback_source = nullptr;
     // set the expected status in queue error calback handling
     user_data[ii].expected_status = HSA_STATUS_ERROR_INVALID_PACKET_FORMAT;
 
@@ -514,9 +547,13 @@ void QueueValidation::QueueValidationForInvalidPacket(hsa_agent_t cpuAgent,
   for (ii = 0; ii < kMaxQueue; ++ii) {
     // queue error handling callback  should be triggered
     ASSERT_EQ(user_data[ii].cb_triggered, true);
+    // Verify source from callback matches queue pointer (safe here - no race)
+    ASSERT_EQ(user_data[ii].callback_source->id, queue[ii]->id);
     if (queue[ii]) { hsa_queue_destroy(queue[ii]); }
   }
 
+  delete[] user_data;
+  delete[] queue;  // Free heap-allocated queue array
   clear_code_object();
 }
 
@@ -541,8 +578,9 @@ void QueueValidation::QueueValidationForInvalidWorkGroupSize(hsa_agent_t cpuAgen
   // Adjust the size to the max of 1024
   queue_max = (queue_max < kMaxQueueSizeForAgent) ? queue_max: kMaxQueueSizeForAgent;
 
-  hsa_queue_t *queue[kMaxQueue];  // command queue
-  test_validation_data user_data[kMaxQueue][3];
+  // Heap-allocate queue array to avoid TSAN race with async callback accessing stack
+  hsa_queue_t **queue = new hsa_queue_t*[kMaxQueue];
+  test_validation_data (*user_data)[3] = new test_validation_data[kMaxQueue][3];
   uint32_t ii;
   for (ii = 0; ii < kMaxQueue; ++ii) {
     uint32_t jj;
@@ -551,6 +589,8 @@ void QueueValidation::QueueValidationForInvalidWorkGroupSize(hsa_agent_t cpuAgen
       user_data[ii][jj - 1].cb_triggered = false;
       // set the queue pointer
       user_data[ii][jj - 1].queue_pointer = &queue[ii];
+      // initialize callback_source to nullptr
+      user_data[ii][jj - 1].callback_source = nullptr;
       // set the expected status in queue error calback handling
       user_data[ii][jj - 1].expected_status = HSA_STATUS_ERROR_INVALID_ARGUMENT;
 
@@ -606,9 +646,13 @@ void QueueValidation::QueueValidationForInvalidWorkGroupSize(hsa_agent_t cpuAgen
     for (uint32_t jj = 0; jj < 3; ++jj) {
       // queue error handling callback  should be triggered
       ASSERT_EQ(user_data[ii][jj].cb_triggered, true);
+      // Verify callback received a valid source (queue already destroyed, can't compare IDs)
+      ASSERT_NE(user_data[ii][jj].callback_source, nullptr);
     }
   }
 
+  delete[] user_data;
+  delete[] queue;  // Free heap-allocated queue array
   clear_code_object();
 }
 
@@ -753,12 +797,11 @@ void CallbackQueueErrorHandling(hsa_status_t status, hsa_queue_t* source, void* 
   ASSERT_NE(data, nullptr);
 
   test_validation_data *debug_data = reinterpret_cast<test_validation_data*>(data);
-  hsa_queue_t * queue  = *(debug_data->queue_pointer);
+  // Store source for later comparison in main thread (avoids race with hsa_queue_create)
+  debug_data->callback_source = source;
   debug_data->cb_triggered = true;
   // check the status
   ASSERT_EQ(status, debug_data->expected_status);
-  // check the queue id and user data
-  ASSERT_EQ(source->id, queue->id);
   return;
 }
 

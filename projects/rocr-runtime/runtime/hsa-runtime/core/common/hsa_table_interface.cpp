@@ -42,6 +42,7 @@
 
 #include "inc/hsa_api_trace.h"
 #include "core/inc/hsa_api_trace_int.h"
+#include <mutex>
 
 static const HsaApiTable* hsaApiTable;
 static const CoreApiTable* coreApiTable;
@@ -66,11 +67,17 @@ hsa_status_t HSA_API hsa_init() {
   // variables initialized earlier than the global objects in other compilation units.
   // In particular Init::Init may get called earlier than that the underlying hsa_api_table_
   // object in hsa_api_trace.cpp has been initialized.
-  rocr::core::LoadInitialHsaApiTable();
+  static std::once_flag flag;
+  std::call_once(flag, [] {
+        rocr::core::LoadInitialHsaApiTable();
+    });
+
   return coreApiTable->hsa_init_fn();
 }
 
-hsa_status_t HSA_API hsa_shut_down() { return coreApiTable->hsa_shut_down_fn(); }
+hsa_status_t HSA_API hsa_shut_down() {
+  return coreApiTable->hsa_shut_down_fn();
+}
 
 hsa_status_t HSA_API
     hsa_system_get_info(hsa_system_info_t attribute, void* value) {

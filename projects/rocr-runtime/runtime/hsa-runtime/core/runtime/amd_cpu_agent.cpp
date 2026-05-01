@@ -43,12 +43,14 @@
 #include "core/inc/amd_cpu_agent.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cstring>
 #include <thread>
 
 #include "core/inc/amd_memory_region.h"
 #include "core/inc/driver.h"
 #include "core/inc/host_queue.h"
+#include "core/util/tsan_annotations.h"
 
 #include "inc/hsa_ext_image.h"
 
@@ -446,6 +448,7 @@ hsa_status_t CpuAgent::DmaCopy(void* dst, core::Agent& dst_agent, const void* sr
   // For cpu to cpu, fire and forget a copy thread.
   const bool profiling_enabled = (dst_agent.profiling_enabled() || src_agent.profiling_enabled());
   if (profiling_enabled) out_signal.async_copy_agent(this);
+  out_signal.Retain();
   std::thread(
       [](void* dst, const void* src, size_t size, std::vector<core::Signal*> dep_signals,
          core::Signal* completion_signal, bool profiling_enabled) {
@@ -464,8 +467,12 @@ hsa_status_t CpuAgent::DmaCopy(void* dst, core::Agent& dst_agent, const void* sr
           core::Runtime::runtime_singleton_->GetSystemInfo(HSA_SYSTEM_INFO_TIMESTAMP,
                                                            &completion_signal->signal_.end_ts);
         }
-
+        // Ensure memcpy is visible before signaling completion
+        std::atomic_thread_fence(std::memory_order_release);
+        // Inform TSAN that data written before this point is now published
+        TsanRelease(const_cast<int64_t*>(&completion_signal->signal_.value));
         completion_signal->SubRelease(1);
+        completion_signal->Release();
       },
       dst, src, size, dep_signals, &out_signal, profiling_enabled)
       .detach();

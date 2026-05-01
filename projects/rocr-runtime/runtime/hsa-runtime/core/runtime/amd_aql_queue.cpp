@@ -484,7 +484,9 @@ void AqlQueue::StoreRelaxed(hsa_signal_value_t value) {
   } else {
     // Hardware doorbell supports AQL semantics.
     _mm_sfence();
-    *(signal_.hardware_doorbell_ptr) = uint64_t(value);
+    // Use atomic store to avoid TSAN data race warnings when multiple threads
+    // ring the same queue's doorbell (valid for counted queues)
+    __atomic_store_n(signal_.hardware_doorbell_ptr, uint64_t(value), __ATOMIC_RELAXED);
     /* signal_ is allocated as uncached so we do not need read-back to flush WC */
   }
   return;

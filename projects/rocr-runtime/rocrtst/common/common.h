@@ -110,7 +110,7 @@ struct agent_pools_t{
     std::vector<hsa_amd_memory_pool_t> pools;
 };
 
-extern size_t pool_size_limit;
+extern thread_local size_t pool_size_limit;
 
 bool isEmuModeEnabled();
 

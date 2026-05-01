@@ -126,6 +126,7 @@ static void clear_after_fork(HsaKFDContext *ctx)
 		hsakmt_udmabuf_dev_fd = -1;
 	}
 	hsakmt_kfd_open_count = 0;
+	atomic_store_explicit(&hsakmt_kfd_active_count, 0, memory_order_release);
 	parent_pid = -1;
 	hsakmt_forked = false;
 }
@@ -283,9 +284,24 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtCloseKFDCtx(void)
 
 	if (hsakmt_kfd_open_count > 0)	{
 		if (--hsakmt_kfd_open_count == 0) {
+			// Release mutex before waiting for active threads
+			pthread_mutex_unlock(&hsakmt_mutex);
+
+			// Wait for all active KFD users to finish
+			// This prevents shutdown while threads are in SetEvent, etc.
+			while (atomic_load_explicit(&hsakmt_kfd_active_count,
+			                           memory_order_acquire) > 0) {
+				usleep(100);  // 100 micro seconds sleep
+			}
+
+			pr_info("All active KFD users finished. Proceeding with cleanup.\n");
+
+			// Now safe to cleanup - all active users have released
 			hsakmt_destroy_counter_props(&hsakmt_primary_kfd_ctx);
 			hsakmt_destroy_device_debugging_memory(&hsakmt_primary_kfd_ctx);
 			hsakmt_fmm_clear_all_aperture(&hsakmt_primary_kfd_ctx);
+
+			return HSAKMT_STATUS_SUCCESS;
 		}
 
 		result = HSAKMT_STATUS_SUCCESS;

@@ -45,6 +45,7 @@
 #ifndef HSA_RUNTME_CORE_INC_COMMAND_QUEUE_H_
 #define HSA_RUNTME_CORE_INC_COMMAND_QUEUE_H_
 
+#include <atomic>
 #include <sstream>
 
 #include "core/common/shared.h"
@@ -463,7 +464,7 @@ class Queue : public Checked<0xFA3906A679F9DB49> {
   core::Agent* GetAgent() { return agent_; }
 
   // @brief Attributes specifically for counted queue types
-  uint32_t use_count;
+  std::atomic<uint32_t> use_count;
   bool is_counted_queue;
 
   typedef void* rtti_t;

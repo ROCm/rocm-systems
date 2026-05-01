@@ -62,7 +62,9 @@ namespace rocrtst {
   } \
 }
 
-size_t pool_size_limit = 0;
+// Thread-local to prevent TSAN race when multiple threads call AcquirePoolInfo
+thread_local size_t pool_size_limit = 0;
+thread_local bool pool_size_limit_initialized = false;
 
 bool isEmuModeEnabled() {
   auto checkMode = []{ 
@@ -431,11 +433,19 @@ hsa_status_t AcquirePoolInfo(hsa_amd_memory_pool_t pool,
     pool_i->size = std::min(pool_i->size, max_pool_size);
   }
 
-  pool_size_limit = 0;
-  char *pool_size_limit_str = getenv("ROCRTST_LIMIT_POOL_SIZE");
-  if (pool_size_limit_str) {
-    char *end;
-    pool_size_limit = strtoul(pool_size_limit_str, &end, 10);
+  // Initialize pool_size_limit once per thread (thread_local variable)
+  if (!pool_size_limit_initialized) {
+    pool_size_limit = 0;
+    char *pool_size_limit_str = getenv("ROCRTST_LIMIT_POOL_SIZE");
+    if (pool_size_limit_str) {
+      char *end;
+      pool_size_limit = strtoul(pool_size_limit_str, &end, 10);
+    }
+    pool_size_limit_initialized = true;
+  }
+
+  // Apply the limit if set
+  if (pool_size_limit > 0) {
     if (pool_size_limit > pool_i->size) {
       std::cout << "Warning: Pool size override > than reported size (override:"
         << pool_size_limit << " reported:" << pool_i->size << ")" << std::endl;

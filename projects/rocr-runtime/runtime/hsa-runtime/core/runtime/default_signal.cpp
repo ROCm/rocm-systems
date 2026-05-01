@@ -41,6 +41,7 @@
 ////////////////////////////////////////////////////////////////////////////////
 
 #include "core/inc/default_signal.h"
+#include "core/util/tsan_annotations.h"
 
 #if defined(__i386__) || defined(__x86_64__)
 #include <mwaitxintrin.h>
@@ -71,6 +72,7 @@ void BusyWaitSignal::StoreRelaxed(hsa_signal_value_t value) {
 }
 
 void BusyWaitSignal::StoreRelease(hsa_signal_value_t value) {
+  TsanRelease(const_cast<int64_t*>(&signal_.value));
   atomic::Store(&signal_.value, int64_t(value), std::memory_order_release);
 }
 
@@ -117,6 +119,7 @@ hsa_signal_value_t BusyWaitSignal::WaitAcquire(hsa_signal_condition_t condition,
   hsa_signal_value_t ret =
       WaitRelaxed(condition, compare_value, timeout, wait_hint);
   std::atomic_thread_fence(std::memory_order_acquire);
+  TsanAcquire(const_cast<int64_t*>(&signal_.value));
   return ret;
 }
 
@@ -193,6 +196,7 @@ void BusyWaitSignal::SubAcquire(hsa_signal_value_t value) {
 }
 
 void BusyWaitSignal::SubRelease(hsa_signal_value_t value) {
+  TsanRelease(const_cast<int64_t*>(&signal_.value));
   atomic::Sub(&signal_.value, int64_t(value), std::memory_order_release);
 }
 

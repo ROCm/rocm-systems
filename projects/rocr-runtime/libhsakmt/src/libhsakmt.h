@@ -34,6 +34,7 @@
 #include <stdint.h>
 #include <limits.h>
 #include <stdio.h>
+#include <stdatomic.h>
 
 extern int hsakmt_udmabuf_dev_fd;
 extern unsigned long hsakmt_kfd_open_count;
@@ -44,6 +45,9 @@ extern int hsakmt_zfb_support;
 
 extern HsaVersionInfo hsakmt_kfd_version_info;
 extern HsaKFDContext hsakmt_primary_kfd_ctx;
+
+// Atomic counter for active KFD users
+extern _Atomic unsigned long hsakmt_kfd_active_count;
 
 #undef HSAKMTAPI
 #define HSAKMTAPI __attribute__((visibility ("default")))
@@ -60,8 +64,32 @@ extern HsaKFDContext hsakmt_primary_kfd_ctx;
 /*Avoid int-to-pointer-cast warning*/
 #define PORT_UINT64_TO_VPTR(v) ((void*)(unsigned long)(v))
 
+// Retain/Release functions for KFD active reference counting
+static inline void hsakmt_kfd_retain(void) {
+	atomic_fetch_add_explicit(&hsakmt_kfd_active_count, 1, memory_order_acquire);
+}
+
+static inline void hsakmt_kfd_release(void) {
+	atomic_fetch_sub_explicit(&hsakmt_kfd_active_count, 1, memory_order_release);
+}
+
+// Cleanup function for automatic release
+static inline void hsakmt_kfd_release_cleanup(int *guard) {
+	(void)guard;  // Unused parameter
+	hsakmt_kfd_release();
+}
+
+// Automatic release using GCC cleanup attribute
+// Creates a scope guard that automatically calls hsakmt_kfd_release() on scope exit
 #define CHECK_KFD_OPEN() \
-	do { if (hsakmt_kfd_open_count == 0 || hsakmt_forked) return HSAKMT_STATUS_KERNEL_IO_CHANNEL_NOT_OPENED; } while (0)
+	int __attribute__((cleanup(hsakmt_kfd_release_cleanup))) __kfd_guard = 0; \
+	hsakmt_kfd_retain(); \
+	if (hsakmt_kfd_open_count == 0 || hsakmt_forked) { \
+		return HSAKMT_STATUS_KERNEL_IO_CHANNEL_NOT_OPENED; \
+	}
+
+// Manual release (no longer needed with automatic cleanup, but kept for compatibility)
+#define RELEASE_KFD() hsakmt_kfd_release()
 
 #define CHECK_KFD_MINOR_VERSION(minor)					\
 	do { if ((minor) > hsakmt_kfd_version_info.KernelInterfaceMinorVersion)\

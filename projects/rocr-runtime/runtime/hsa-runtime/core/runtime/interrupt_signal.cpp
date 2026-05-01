@@ -43,6 +43,7 @@
 #include "core/inc/interrupt_signal.h"
 #include "core/inc/runtime.h"
 #include "core/util/locks.h"
+#include "core/util/tsan_annotations.h"
 
 namespace rocr {
 namespace core {
@@ -131,6 +132,7 @@ void InterruptSignal::StoreRelaxed(hsa_signal_value_t value) {
 }
 
 void InterruptSignal::StoreRelease(hsa_signal_value_t value) {
+  TsanRelease(const_cast<int64_t*>(&signal_.value));
   atomic::Store(&signal_.value, int64_t(value), std::memory_order_release);
   SetEvent();
 }
@@ -204,6 +206,7 @@ hsa_signal_value_t InterruptSignal::WaitAcquire(
   hsa_signal_value_t ret =
       WaitRelaxed(condition, compare_value, timeout, wait_hint);
   std::atomic_thread_fence(std::memory_order_acquire);
+  TsanAcquire(const_cast<int64_t*>(&signal_.value));
   return ret;
 }
 
@@ -298,6 +301,7 @@ void InterruptSignal::SubAcquire(hsa_signal_value_t value) {
 }
 
 void InterruptSignal::SubRelease(hsa_signal_value_t value) {
+  TsanRelease(const_cast<int64_t*>(&signal_.value));
   atomic::Sub(&signal_.value, int64_t(value), std::memory_order_release);
   SetEvent();
 }

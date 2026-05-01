@@ -79,6 +79,7 @@
 #include "suites/functional/concurrent_init.h"
 #include "suites/functional/concurrent_init_shutdown.h"
 #include "suites/functional/concurrent_shutdown.h"
+#include "suites/functional/concurrent_async_copy.h"
 #include "suites/functional/reference_count.h"
 #include "suites/functional/signal_concurrent.h"
 #include "suites/functional/metadata_prefetch.h"
@@ -210,6 +211,20 @@ TEST(rocrtstFunc, Concurrent_Shutdown) {
   RunCustomTestProlog(&cs);
   cs.TestConcurrentShutdown();
   RunCustomTestEpilog(&cs);
+}
+
+TEST(rocrtstFunc, Concurrent_Aync_Copy) {
+  ConcurrentAsyncCopy cs;
+  RunCustomTestProlog(&cs);
+  cs.TestConcurrentAsyncCopy();
+  RunCustomTestEpilog(&cs);
+}
+
+TEST(rocrtstFunc, SDMA_Doorbell_Race) {
+  ConcurrentAsyncCopy sdr;
+  RunCustomTestProlog(&sdr);
+  sdr.TestSdmaDoorbellRace();
+  RunCustomTestEpilog(&sdr);
 }
 
 TEST(rocrtstFunc, Reference_Count) {

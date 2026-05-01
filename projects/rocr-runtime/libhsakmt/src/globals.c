@@ -24,6 +24,7 @@
  */
 
 #include "libhsakmt.h"
+#include <stdatomic.h>
 
 // HSAKMT global data
 
@@ -31,6 +32,9 @@ int hsakmt_udmabuf_dev_fd = -1;
 unsigned long hsakmt_kfd_open_count;
 pthread_mutex_t hsakmt_mutex = PTHREAD_MUTEX_INITIALIZER;
 bool hsakmt_is_dgpu;
+
+// Atomic counter for active threads using KFD
+_Atomic unsigned long hsakmt_kfd_active_count = 0;
 
 int hsakmt_page_size;
 int hsakmt_page_shift;

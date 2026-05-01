@@ -1753,7 +1753,7 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
     HSAKMT_CALL(hsaKmtWaitOnMultipleEvents_Ext(&hsa_events[0], unique_evts, false, wait_ms, &event_age[0]));
   };
 
-  while (!async_events_control_.exit) {
+  while (!async_events_control_.exit.load(std::memory_order_acquire)) {
     // Update hsa_signals pointer at start of each iteration since PushBack
     // at the end of the previous iteration may have reallocated the vector.
     hsa_signals = reinterpret_cast<hsa_signal_handle*>(&async_events_.signal_[0]);
@@ -2824,7 +2824,7 @@ void Runtime::CloseTools() {
 }
 
 void Runtime::AsyncEventsControl::Shutdown() {
-  exit = true;
+  exit.store(true, std::memory_order_release);
   hsa_signal_handle(wake)->StoreRelaxed(1);
   os::WaitForThread(thread_);
   os::CloseThread(thread_);
@@ -3341,7 +3341,15 @@ hsa_status_t Runtime::SvmPrefetch(void* ptr, size_t size, hsa_agent_t agent,
 
     removePrefetchRanges(op);
 
-    if (op->completion.handle != 0) Signal::Convert(op->completion)->SubRelaxed(1);
+    // TSAN Fix: Protect the completion signal while we're using it.
+    // The signal could be destroyed by the user thread as soon as its value changes,
+    // so we must hold a reference during the entire SubRelaxed() operation.
+    if (op->completion.handle != 0) {
+      auto* signal = Signal::Convert(op->completion);
+      signal->Retain();      // Increment retained_ before using signal
+      signal->SubRelaxed(1); // Decrement signal value, wakes waiting thread
+      signal->Release();     // Decrement retained_ after done using signal
+    }
     delete op;
 
     return false;

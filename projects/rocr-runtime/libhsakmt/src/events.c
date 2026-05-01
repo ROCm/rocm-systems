@@ -201,7 +201,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtDestroyEventCtx(HsaKFDContext *ctx,
 HSAKMT_STATUS HSAKMTAPI hsaKmtSetEventCtx(HsaKFDContext *ctx,
 						 HsaEvent *Event)
 {
-	CHECK_KFD_OPEN();
+	CHECK_KFD_OPEN();  // Automatically releases on scope exit
 
 	if (!Event)
 		return HSAKMT_STATUS_INVALID_HANDLE;

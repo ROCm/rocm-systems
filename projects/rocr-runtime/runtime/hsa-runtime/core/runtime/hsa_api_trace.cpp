@@ -138,7 +138,17 @@ void HsaApiTable::Init() {
 }
 
 void HsaApiTable::Reset() {
-  Init();
+  // Reset only what changes: extension tables and tools
+  // core_api and amd_ext_api are never modified, so no need to reset them
+
+  // Reset extension tables to NULL (they get repopulated during LoadExtensions)
+  hsa_api.finalizer_ext_ = NULL;
+  hsa_api.image_ext_ = NULL;
+  hsa_api.pc_sampling_ext_ = NULL;
+
+  // Reset tools table
+  UpdateTools();
+  hsa_api.tools_ = &tools_api;
 }
 
 void HsaApiTable::CloneExts(void* ext_table, uint32_t table_id) {
