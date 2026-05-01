@@ -195,14 +195,14 @@ class TestKFD(RocprofsysTest):
             mode,
             target="unified-memory",
             env=env,
-            run_args=["-s", "64", "-p", "512", "-i", "4"],
+            run_args=["-a", "-s", "64", "-p", "512", "-i", "4"],
             check_target_arch=True,
         )
 
         self.assert_regex(
             result,
             subtest_name="Unified-memory completion check",
-            pass_regex=[r"6 tests completed"],
+            pass_regex=[r"16 tests completed"],
         )
 
         self.assert_perfetto(
