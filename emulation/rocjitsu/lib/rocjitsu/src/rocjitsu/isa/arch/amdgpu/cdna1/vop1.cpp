@@ -190,6 +190,9 @@ VReadfirstlaneB32Vop1::VReadfirstlaneB32Vop1(const MachineInst *inst)
     sdwa_dst_unused_ = sw->dst_unused;
     sdwa_clamp_ = sw->clamp;
   }
+  if (vdst.encoding_value_ == OpSelSregNovcc::OPR_SREG_NOVCC_EXEC_LO ||
+      vdst.encoding_value_ == OpSelSregNovcc::OPR_SREG_NOVCC_EXEC_HI)
+    flags_ |= EXEC_MODIFY;
 }
 
 void VReadfirstlaneB32Vop1::execute_impl(amdgpu::Wavefront &wf) {

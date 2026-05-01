@@ -49,6 +49,9 @@ SLoadDwordSmem::SLoadDwordSmem(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  if (sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_LO ||
+      sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_HI)
+    flags_ |= EXEC_MODIFY;
 }
 
 void SLoadDwordSmem::execute_impl(amdgpu::Wavefront &wf) {
@@ -73,6 +76,9 @@ SLoadDwordx2Smem::SLoadDwordx2Smem(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  if (sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_LO ||
+      sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_HI)
+    flags_ |= EXEC_MODIFY;
 }
 
 void SLoadDwordx2Smem::execute_impl(amdgpu::Wavefront &wf) {
@@ -97,6 +103,9 @@ SLoadDwordx4Smem::SLoadDwordx4Smem(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  if (sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_LO ||
+      sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_HI)
+    flags_ |= EXEC_MODIFY;
 }
 
 void SLoadDwordx4Smem::execute_impl(amdgpu::Wavefront &wf) {
@@ -121,6 +130,9 @@ SLoadDwordx8Smem::SLoadDwordx8Smem(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  if (sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_LO ||
+      sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_HI)
+    flags_ |= EXEC_MODIFY;
 }
 
 void SLoadDwordx8Smem::execute_impl(amdgpu::Wavefront &wf) {
@@ -145,6 +157,9 @@ SLoadDwordx16Smem::SLoadDwordx16Smem(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  if (sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_LO ||
+      sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_HI)
+    flags_ |= EXEC_MODIFY;
 }
 
 void SLoadDwordx16Smem::execute_impl(amdgpu::Wavefront &wf) {
@@ -169,6 +184,9 @@ SScratchLoadDwordSmem::SScratchLoadDwordSmem(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  if (sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_LO ||
+      sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_HI)
+    flags_ |= EXEC_MODIFY;
 }
 
 void SScratchLoadDwordSmem::execute_impl(amdgpu::Wavefront &wf) {
@@ -193,6 +211,9 @@ SScratchLoadDwordx2Smem::SScratchLoadDwordx2Smem(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  if (sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_LO ||
+      sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_HI)
+    flags_ |= EXEC_MODIFY;
 }
 
 void SScratchLoadDwordx2Smem::execute_impl(amdgpu::Wavefront &wf) {
@@ -217,6 +238,9 @@ SScratchLoadDwordx4Smem::SScratchLoadDwordx4Smem(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  if (sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_LO ||
+      sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_HI)
+    flags_ |= EXEC_MODIFY;
 }
 
 void SScratchLoadDwordx4Smem::execute_impl(amdgpu::Wavefront &wf) {
@@ -241,6 +265,9 @@ SBufferLoadDwordSmem::SBufferLoadDwordSmem(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  if (sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_LO ||
+      sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_HI)
+    flags_ |= EXEC_MODIFY;
 }
 
 void SBufferLoadDwordSmem::execute_impl(amdgpu::Wavefront &wf) {
@@ -265,6 +292,9 @@ SBufferLoadDwordx2Smem::SBufferLoadDwordx2Smem(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  if (sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_LO ||
+      sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_HI)
+    flags_ |= EXEC_MODIFY;
 }
 
 void SBufferLoadDwordx2Smem::execute_impl(amdgpu::Wavefront &wf) {
@@ -289,6 +319,9 @@ SBufferLoadDwordx4Smem::SBufferLoadDwordx4Smem(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  if (sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_LO ||
+      sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_HI)
+    flags_ |= EXEC_MODIFY;
 }
 
 void SBufferLoadDwordx4Smem::execute_impl(amdgpu::Wavefront &wf) {
@@ -313,6 +346,9 @@ SBufferLoadDwordx8Smem::SBufferLoadDwordx8Smem(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  if (sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_LO ||
+      sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_HI)
+    flags_ |= EXEC_MODIFY;
 }
 
 void SBufferLoadDwordx8Smem::execute_impl(amdgpu::Wavefront &wf) {
@@ -337,6 +373,9 @@ SBufferLoadDwordx16Smem::SBufferLoadDwordx16Smem(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  if (sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_LO ||
+      sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_HI)
+    flags_ |= EXEC_MODIFY;
 }
 
 void SBufferLoadDwordx16Smem::execute_impl(amdgpu::Wavefront &wf) {
@@ -636,6 +675,9 @@ SMemtimeSmem::SMemtimeSmem(const MachineInst *inst)
   dst_operands_[0] = &sdata;
   num_src_ = 0;
   num_dst_ = 1;
+  if (sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_LO ||
+      sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_HI)
+    flags_ |= EXEC_MODIFY;
 }
 
 void SMemtimeSmem::execute_impl(amdgpu::Wavefront &wf) {
@@ -650,6 +692,9 @@ SMemrealtimeSmem::SMemrealtimeSmem(const MachineInst *inst)
   dst_operands_[0] = &sdata;
   num_src_ = 0;
   num_dst_ = 1;
+  if (sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_LO ||
+      sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_HI)
+    flags_ |= EXEC_MODIFY;
 }
 
 void SMemrealtimeSmem::execute_impl(amdgpu::Wavefront &wf) {
@@ -737,6 +782,9 @@ SBufferAtomicSwapSmem::SBufferAtomicSwapSmem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
+  if (sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_LO ||
+      sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_HI)
+    flags_ |= EXEC_MODIFY;
 }
 
 void SBufferAtomicSwapSmem::execute_impl(amdgpu::Wavefront &wf) {
@@ -756,6 +804,9 @@ SBufferAtomicCmpswapSmem::SBufferAtomicCmpswapSmem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
+  if (sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_LO ||
+      sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_HI)
+    flags_ |= EXEC_MODIFY;
 }
 
 void SBufferAtomicCmpswapSmem::execute_impl(amdgpu::Wavefront &wf) {
@@ -775,6 +826,9 @@ SBufferAtomicAddSmem::SBufferAtomicAddSmem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
+  if (sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_LO ||
+      sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_HI)
+    flags_ |= EXEC_MODIFY;
 }
 
 void SBufferAtomicAddSmem::execute_impl(amdgpu::Wavefront &wf) {
@@ -794,6 +848,9 @@ SBufferAtomicSubSmem::SBufferAtomicSubSmem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
+  if (sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_LO ||
+      sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_HI)
+    flags_ |= EXEC_MODIFY;
 }
 
 void SBufferAtomicSubSmem::execute_impl(amdgpu::Wavefront &wf) {
@@ -813,6 +870,9 @@ SBufferAtomicSminSmem::SBufferAtomicSminSmem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
+  if (sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_LO ||
+      sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_HI)
+    flags_ |= EXEC_MODIFY;
 }
 
 void SBufferAtomicSminSmem::execute_impl(amdgpu::Wavefront &wf) {
@@ -832,6 +892,9 @@ SBufferAtomicUminSmem::SBufferAtomicUminSmem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
+  if (sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_LO ||
+      sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_HI)
+    flags_ |= EXEC_MODIFY;
 }
 
 void SBufferAtomicUminSmem::execute_impl(amdgpu::Wavefront &wf) {
@@ -851,6 +914,9 @@ SBufferAtomicSmaxSmem::SBufferAtomicSmaxSmem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
+  if (sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_LO ||
+      sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_HI)
+    flags_ |= EXEC_MODIFY;
 }
 
 void SBufferAtomicSmaxSmem::execute_impl(amdgpu::Wavefront &wf) {
@@ -870,6 +936,9 @@ SBufferAtomicUmaxSmem::SBufferAtomicUmaxSmem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
+  if (sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_LO ||
+      sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_HI)
+    flags_ |= EXEC_MODIFY;
 }
 
 void SBufferAtomicUmaxSmem::execute_impl(amdgpu::Wavefront &wf) {
@@ -889,6 +958,9 @@ SBufferAtomicAndSmem::SBufferAtomicAndSmem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
+  if (sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_LO ||
+      sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_HI)
+    flags_ |= EXEC_MODIFY;
 }
 
 void SBufferAtomicAndSmem::execute_impl(amdgpu::Wavefront &wf) {
@@ -908,6 +980,9 @@ SBufferAtomicOrSmem::SBufferAtomicOrSmem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
+  if (sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_LO ||
+      sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_HI)
+    flags_ |= EXEC_MODIFY;
 }
 
 void SBufferAtomicOrSmem::execute_impl(amdgpu::Wavefront &wf) {
@@ -927,6 +1002,9 @@ SBufferAtomicXorSmem::SBufferAtomicXorSmem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
+  if (sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_LO ||
+      sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_HI)
+    flags_ |= EXEC_MODIFY;
 }
 
 void SBufferAtomicXorSmem::execute_impl(amdgpu::Wavefront &wf) {
@@ -946,6 +1024,9 @@ SBufferAtomicIncSmem::SBufferAtomicIncSmem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
+  if (sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_LO ||
+      sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_HI)
+    flags_ |= EXEC_MODIFY;
 }
 
 void SBufferAtomicIncSmem::execute_impl(amdgpu::Wavefront &wf) {
@@ -965,6 +1046,9 @@ SBufferAtomicDecSmem::SBufferAtomicDecSmem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
+  if (sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_LO ||
+      sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_HI)
+    flags_ |= EXEC_MODIFY;
 }
 
 void SBufferAtomicDecSmem::execute_impl(amdgpu::Wavefront &wf) {
@@ -984,6 +1068,9 @@ SBufferAtomicSwapX2Smem::SBufferAtomicSwapX2Smem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
+  if (sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_LO ||
+      sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_HI)
+    flags_ |= EXEC_MODIFY;
 }
 
 void SBufferAtomicSwapX2Smem::execute_impl(amdgpu::Wavefront &wf) {
@@ -1003,6 +1090,9 @@ SBufferAtomicCmpswapX2Smem::SBufferAtomicCmpswapX2Smem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
+  if (sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_LO ||
+      sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_HI)
+    flags_ |= EXEC_MODIFY;
 }
 
 void SBufferAtomicCmpswapX2Smem::execute_impl(amdgpu::Wavefront &wf) {
@@ -1022,6 +1112,9 @@ SBufferAtomicAddX2Smem::SBufferAtomicAddX2Smem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
+  if (sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_LO ||
+      sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_HI)
+    flags_ |= EXEC_MODIFY;
 }
 
 void SBufferAtomicAddX2Smem::execute_impl(amdgpu::Wavefront &wf) {
@@ -1041,6 +1134,9 @@ SBufferAtomicSubX2Smem::SBufferAtomicSubX2Smem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
+  if (sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_LO ||
+      sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_HI)
+    flags_ |= EXEC_MODIFY;
 }
 
 void SBufferAtomicSubX2Smem::execute_impl(amdgpu::Wavefront &wf) {
@@ -1060,6 +1156,9 @@ SBufferAtomicSminX2Smem::SBufferAtomicSminX2Smem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
+  if (sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_LO ||
+      sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_HI)
+    flags_ |= EXEC_MODIFY;
 }
 
 void SBufferAtomicSminX2Smem::execute_impl(amdgpu::Wavefront &wf) {
@@ -1079,6 +1178,9 @@ SBufferAtomicUminX2Smem::SBufferAtomicUminX2Smem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
+  if (sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_LO ||
+      sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_HI)
+    flags_ |= EXEC_MODIFY;
 }
 
 void SBufferAtomicUminX2Smem::execute_impl(amdgpu::Wavefront &wf) {
@@ -1098,6 +1200,9 @@ SBufferAtomicSmaxX2Smem::SBufferAtomicSmaxX2Smem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
+  if (sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_LO ||
+      sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_HI)
+    flags_ |= EXEC_MODIFY;
 }
 
 void SBufferAtomicSmaxX2Smem::execute_impl(amdgpu::Wavefront &wf) {
@@ -1117,6 +1222,9 @@ SBufferAtomicUmaxX2Smem::SBufferAtomicUmaxX2Smem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
+  if (sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_LO ||
+      sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_HI)
+    flags_ |= EXEC_MODIFY;
 }
 
 void SBufferAtomicUmaxX2Smem::execute_impl(amdgpu::Wavefront &wf) {
@@ -1136,6 +1244,9 @@ SBufferAtomicAndX2Smem::SBufferAtomicAndX2Smem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
+  if (sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_LO ||
+      sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_HI)
+    flags_ |= EXEC_MODIFY;
 }
 
 void SBufferAtomicAndX2Smem::execute_impl(amdgpu::Wavefront &wf) {
@@ -1155,6 +1266,9 @@ SBufferAtomicOrX2Smem::SBufferAtomicOrX2Smem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
+  if (sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_LO ||
+      sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_HI)
+    flags_ |= EXEC_MODIFY;
 }
 
 void SBufferAtomicOrX2Smem::execute_impl(amdgpu::Wavefront &wf) {
@@ -1174,6 +1288,9 @@ SBufferAtomicXorX2Smem::SBufferAtomicXorX2Smem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
+  if (sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_LO ||
+      sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_HI)
+    flags_ |= EXEC_MODIFY;
 }
 
 void SBufferAtomicXorX2Smem::execute_impl(amdgpu::Wavefront &wf) {
@@ -1193,6 +1310,9 @@ SBufferAtomicIncX2Smem::SBufferAtomicIncX2Smem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
+  if (sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_LO ||
+      sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_HI)
+    flags_ |= EXEC_MODIFY;
 }
 
 void SBufferAtomicIncX2Smem::execute_impl(amdgpu::Wavefront &wf) {
@@ -1212,6 +1332,9 @@ SBufferAtomicDecX2Smem::SBufferAtomicDecX2Smem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
+  if (sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_LO ||
+      sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_HI)
+    flags_ |= EXEC_MODIFY;
 }
 
 void SBufferAtomicDecX2Smem::execute_impl(amdgpu::Wavefront &wf) {
@@ -1231,6 +1354,9 @@ SAtomicSwapSmem::SAtomicSwapSmem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
+  if (sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_LO ||
+      sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_HI)
+    flags_ |= EXEC_MODIFY;
 }
 
 void SAtomicSwapSmem::execute_impl(amdgpu::Wavefront &wf) {
@@ -1250,6 +1376,9 @@ SAtomicCmpswapSmem::SAtomicCmpswapSmem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
+  if (sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_LO ||
+      sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_HI)
+    flags_ |= EXEC_MODIFY;
 }
 
 void SAtomicCmpswapSmem::execute_impl(amdgpu::Wavefront &wf) {
@@ -1269,6 +1398,9 @@ SAtomicAddSmem::SAtomicAddSmem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
+  if (sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_LO ||
+      sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_HI)
+    flags_ |= EXEC_MODIFY;
 }
 
 void SAtomicAddSmem::execute_impl(amdgpu::Wavefront &wf) {
@@ -1288,6 +1420,9 @@ SAtomicSubSmem::SAtomicSubSmem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
+  if (sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_LO ||
+      sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_HI)
+    flags_ |= EXEC_MODIFY;
 }
 
 void SAtomicSubSmem::execute_impl(amdgpu::Wavefront &wf) {
@@ -1307,6 +1442,9 @@ SAtomicSminSmem::SAtomicSminSmem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
+  if (sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_LO ||
+      sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_HI)
+    flags_ |= EXEC_MODIFY;
 }
 
 void SAtomicSminSmem::execute_impl(amdgpu::Wavefront &wf) {
@@ -1326,6 +1464,9 @@ SAtomicUminSmem::SAtomicUminSmem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
+  if (sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_LO ||
+      sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_HI)
+    flags_ |= EXEC_MODIFY;
 }
 
 void SAtomicUminSmem::execute_impl(amdgpu::Wavefront &wf) {
@@ -1345,6 +1486,9 @@ SAtomicSmaxSmem::SAtomicSmaxSmem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
+  if (sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_LO ||
+      sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_HI)
+    flags_ |= EXEC_MODIFY;
 }
 
 void SAtomicSmaxSmem::execute_impl(amdgpu::Wavefront &wf) {
@@ -1364,6 +1508,9 @@ SAtomicUmaxSmem::SAtomicUmaxSmem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
+  if (sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_LO ||
+      sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_HI)
+    flags_ |= EXEC_MODIFY;
 }
 
 void SAtomicUmaxSmem::execute_impl(amdgpu::Wavefront &wf) {
@@ -1383,6 +1530,9 @@ SAtomicAndSmem::SAtomicAndSmem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
+  if (sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_LO ||
+      sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_HI)
+    flags_ |= EXEC_MODIFY;
 }
 
 void SAtomicAndSmem::execute_impl(amdgpu::Wavefront &wf) {
@@ -1402,6 +1552,9 @@ SAtomicOrSmem::SAtomicOrSmem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
+  if (sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_LO ||
+      sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_HI)
+    flags_ |= EXEC_MODIFY;
 }
 
 void SAtomicOrSmem::execute_impl(amdgpu::Wavefront &wf) {
@@ -1421,6 +1574,9 @@ SAtomicXorSmem::SAtomicXorSmem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
+  if (sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_LO ||
+      sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_HI)
+    flags_ |= EXEC_MODIFY;
 }
 
 void SAtomicXorSmem::execute_impl(amdgpu::Wavefront &wf) {
@@ -1440,6 +1596,9 @@ SAtomicIncSmem::SAtomicIncSmem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
+  if (sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_LO ||
+      sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_HI)
+    flags_ |= EXEC_MODIFY;
 }
 
 void SAtomicIncSmem::execute_impl(amdgpu::Wavefront &wf) {
@@ -1459,6 +1618,9 @@ SAtomicDecSmem::SAtomicDecSmem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
+  if (sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_LO ||
+      sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_HI)
+    flags_ |= EXEC_MODIFY;
 }
 
 void SAtomicDecSmem::execute_impl(amdgpu::Wavefront &wf) {
@@ -1478,6 +1640,9 @@ SAtomicSwapX2Smem::SAtomicSwapX2Smem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
+  if (sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_LO ||
+      sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_HI)
+    flags_ |= EXEC_MODIFY;
 }
 
 void SAtomicSwapX2Smem::execute_impl(amdgpu::Wavefront &wf) {
@@ -1497,6 +1662,9 @@ SAtomicCmpswapX2Smem::SAtomicCmpswapX2Smem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
+  if (sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_LO ||
+      sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_HI)
+    flags_ |= EXEC_MODIFY;
 }
 
 void SAtomicCmpswapX2Smem::execute_impl(amdgpu::Wavefront &wf) {
@@ -1516,6 +1684,9 @@ SAtomicAddX2Smem::SAtomicAddX2Smem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
+  if (sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_LO ||
+      sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_HI)
+    flags_ |= EXEC_MODIFY;
 }
 
 void SAtomicAddX2Smem::execute_impl(amdgpu::Wavefront &wf) {
@@ -1535,6 +1706,9 @@ SAtomicSubX2Smem::SAtomicSubX2Smem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
+  if (sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_LO ||
+      sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_HI)
+    flags_ |= EXEC_MODIFY;
 }
 
 void SAtomicSubX2Smem::execute_impl(amdgpu::Wavefront &wf) {
@@ -1554,6 +1728,9 @@ SAtomicSminX2Smem::SAtomicSminX2Smem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
+  if (sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_LO ||
+      sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_HI)
+    flags_ |= EXEC_MODIFY;
 }
 
 void SAtomicSminX2Smem::execute_impl(amdgpu::Wavefront &wf) {
@@ -1573,6 +1750,9 @@ SAtomicUminX2Smem::SAtomicUminX2Smem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
+  if (sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_LO ||
+      sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_HI)
+    flags_ |= EXEC_MODIFY;
 }
 
 void SAtomicUminX2Smem::execute_impl(amdgpu::Wavefront &wf) {
@@ -1592,6 +1772,9 @@ SAtomicSmaxX2Smem::SAtomicSmaxX2Smem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
+  if (sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_LO ||
+      sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_HI)
+    flags_ |= EXEC_MODIFY;
 }
 
 void SAtomicSmaxX2Smem::execute_impl(amdgpu::Wavefront &wf) {
@@ -1611,6 +1794,9 @@ SAtomicUmaxX2Smem::SAtomicUmaxX2Smem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
+  if (sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_LO ||
+      sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_HI)
+    flags_ |= EXEC_MODIFY;
 }
 
 void SAtomicUmaxX2Smem::execute_impl(amdgpu::Wavefront &wf) {
@@ -1630,6 +1816,9 @@ SAtomicAndX2Smem::SAtomicAndX2Smem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
+  if (sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_LO ||
+      sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_HI)
+    flags_ |= EXEC_MODIFY;
 }
 
 void SAtomicAndX2Smem::execute_impl(amdgpu::Wavefront &wf) {
@@ -1649,6 +1838,9 @@ SAtomicOrX2Smem::SAtomicOrX2Smem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
+  if (sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_LO ||
+      sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_HI)
+    flags_ |= EXEC_MODIFY;
 }
 
 void SAtomicOrX2Smem::execute_impl(amdgpu::Wavefront &wf) {
@@ -1668,6 +1860,9 @@ SAtomicXorX2Smem::SAtomicXorX2Smem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
+  if (sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_LO ||
+      sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_HI)
+    flags_ |= EXEC_MODIFY;
 }
 
 void SAtomicXorX2Smem::execute_impl(amdgpu::Wavefront &wf) {
@@ -1687,6 +1882,9 @@ SAtomicIncX2Smem::SAtomicIncX2Smem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
+  if (sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_LO ||
+      sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_HI)
+    flags_ |= EXEC_MODIFY;
 }
 
 void SAtomicIncX2Smem::execute_impl(amdgpu::Wavefront &wf) {
@@ -1706,6 +1904,9 @@ SAtomicDecX2Smem::SAtomicDecX2Smem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
+  if (sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_LO ||
+      sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_HI)
+    flags_ |= EXEC_MODIFY;
 }
 
 void SAtomicDecX2Smem::execute_impl(amdgpu::Wavefront &wf) {

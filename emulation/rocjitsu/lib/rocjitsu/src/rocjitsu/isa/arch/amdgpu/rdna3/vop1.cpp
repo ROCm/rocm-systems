@@ -168,6 +168,9 @@ VReadfirstlaneB32Vop1::VReadfirstlaneB32Vop1(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
+  if (vdst.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_LO ||
+      vdst.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_HI)
+    flags_ |= EXEC_MODIFY;
 }
 
 void VReadfirstlaneB32Vop1::execute_impl(amdgpu::Wavefront &wf) {

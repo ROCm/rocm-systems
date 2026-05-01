@@ -46,7 +46,12 @@ enum InstFlags : uint64_t {
   /// @brief AccVGPR move instruction (v_accvgpr_write, v_accvgpr_read, v_accvgpr_mov).
   ACCVGPR = (1ULL << 10),
   /// @brief Destination update is conditional and must not kill the old value.
-  PREDICATED_DEF = (1ULL << 11)
+  PREDICATED_DEF = (1ULL << 11),
+  /// @brief Instruction modifies any portion of the EXEC mask, either via an
+  /// opcode-implied side effect (e.g. ``s_*_saveexec_*``, ``s_*_wrexec_*``,
+  /// ``v_cmpx_*``) or via a destination operand whose decoded encoding
+  /// names ``EXEC_LO`` / ``EXEC_HI`` (e.g. ``s_mov_b64 exec, s[0:1]``).
+  EXEC_MODIFY = (1ULL << 12)
 };
 
 class BasicBlock;
@@ -194,6 +199,15 @@ public:
   bool is_mfma() const { return flags_ & MFMA; }
 
   bool is_accvgpr() const { return flags_ & ACCVGPR; }
+
+  /// @brief Whether this instruction modifies the EXEC mask.
+  /// @details True when the instruction has an unconditional EXEC side
+  /// effect (e.g. ``s_*_saveexec_*``, ``s_*_wrexec_*``, ``v_cmpx_*``)
+  /// OR when its decoded destination operand encodes EXEC_LO/EXEC_HI
+  /// (e.g. ``s_mov_b64 exec, s[0:1]``).
+  /// @retval true The instruction has the EXEC_MODIFY flag set.
+  /// @retval false The instruction does not modify EXEC.
+  bool is_exec_modify() const { return flags_ & EXEC_MODIFY; }
 
   /// @brief Signed byte offset for a direct branch target.
   ///

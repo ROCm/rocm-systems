@@ -400,6 +400,10 @@ std::string Operand::name() const {
       return "vcc_hi";
     if (encoding_value_ == OpSelSreg::OPR_SREG_NULL)
       return "null";
+    if (encoding_value_ == OpSelSreg::OPR_SREG_EXEC_LO)
+      return "exec_lo";
+    if (encoding_value_ == OpSelSreg::OPR_SREG_EXEC_HI)
+      return "exec_hi";
     break;
   }
   case OperandType::OPR_SREG_M0_INL: {

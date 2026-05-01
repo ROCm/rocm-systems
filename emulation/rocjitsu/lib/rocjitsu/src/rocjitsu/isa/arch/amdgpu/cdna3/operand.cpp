@@ -500,6 +500,10 @@ std::string Operand::name() const {
       return "vcc_lo";
     if (encoding_value_ == OpSelSreg::OPR_SREG_VCC_HI)
       return "vcc_hi";
+    if (encoding_value_ == OpSelSreg::OPR_SREG_EXEC_LO)
+      return "exec_lo";
+    if (encoding_value_ == OpSelSreg::OPR_SREG_EXEC_HI)
+      return "exec_hi";
     break;
   }
   case OperandType::OPR_SREG_NOVCC: {
@@ -518,6 +522,10 @@ std::string Operand::name() const {
         encoding_value_ <= OpSelSregNovcc::OPR_SREG_NOVCC_TTMP_MAX)
       return reg_name("ttmp", encoding_value_ - OpSelSregNovcc::OPR_SREG_NOVCC_TTMP_MIN,
                       size_bits_);
+    if (encoding_value_ == OpSelSregNovcc::OPR_SREG_NOVCC_EXEC_LO)
+      return "exec_lo";
+    if (encoding_value_ == OpSelSregNovcc::OPR_SREG_NOVCC_EXEC_HI)
+      return "exec_hi";
     break;
   }
   case OperandType::OPR_SSRC: {

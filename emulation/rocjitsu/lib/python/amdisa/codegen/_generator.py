@@ -3444,6 +3444,22 @@ class CodeGenerator:
                 parent_name = profile.derive_parent_enc_name(enc.enc_name)
                 child_encs.setdefault(parent_name, []).append(enc)
 
+        # Set of operand types whose OpSel enum names an EXEC value —
+        # used to gate the per-instruction EXEC_MODIFY runtime check on
+        # output operands. Match on the substring ``EXEC`` in case a
+        # future spec adds operands with different EXEC-naming conventions
+        exec_capable_opnd_types: set[str] = set()
+        for sel in self.isa_spec.opnd_selectors:
+            for name, _ in sel.op_sel_vals:
+                if 'EXEC' in name:
+                    exec_capable_opnd_types.add(sel.operand_type)
+                    break
+        assert exec_capable_opnd_types, (
+            f'No operand types matched the EXEC token for arch '
+            f'{self.isa_spec.arch_name!r}. The OpSel enum naming may have '
+            f'changed; update the EXEC detection in gen_insts().'
+        )
+
         for enc in self.isa_spec.inst_encodings:
             inst_classes = []
             class_func_impls = []
@@ -3751,6 +3767,44 @@ class CodeGenerator:
                                      'V_ACCVGPR_READ_B32',
                                      'V_ACCVGPR_MOV_B32'}:
                         ctor_body_parts.append('flags_ |= ACCVGPR;')
+
+                    # EXEC_MODIFY: set when the instruction modifies the
+                    # EXEC mask, by either of two paths:
+                    #   (a) implicit OPR_SDST_EXEC output operand
+                    #       (s_*_saveexec_*, s_*_wrexec_*, v_cmpx_*, ...).
+                    #   (b) any non-VGPR destination operand whose encoding
+                    #       value names EXEC_LO or EXEC_HI
+                    #      (`s_mov_b64 exec, s[0:1]`, `v_add_co_u32 exec, ...`).
+                    _opcode_writes_exec = any(
+                        o.operand_type == 'OPR_SDST_EXEC' and o.is_output
+                        for o in inst.implicit_operands
+                    )
+                    # Add if implicit
+                    if _opcode_writes_exec:
+                        ctor_body_parts.append('flags_ |= EXEC_MODIFY;')
+                    # Otherwise, check for explicit EXEC mentions
+                    else:
+                        for opnd in inst.operands:
+                            if not opnd.is_output or opnd.is_implicit:
+                                continue
+                            # Skip operand types that cannot encode EXEC
+                            # (VGPRs, HWREG, fixed-purpose fields, ...).
+                            if opnd.operand_type not in exec_capable_opnd_types:
+                                continue
+                            # Skip operands without an encoded field
+                            if opnd.name not in inst_field_names:
+                                continue
+                            opsel_name = 'OpSel' + ''.join(
+                                x.capitalize()
+                                for x in opnd.operand_type.split('_')[1:]
+                            )
+                            ctor_body_parts.append(
+                                f'if ({opnd.name}.encoding_value_ == '
+                                f'{opsel_name}::{opnd.operand_type}_EXEC_LO || '
+                                f'{opnd.name}.encoding_value_ == '
+                                f'{opsel_name}::{opnd.operand_type}_EXEC_HI)'
+                                f' flags_ |= EXEC_MODIFY;'
+                            )
 
                     # Per-instruction size overrides (e.g., VOP3PX2 128-bit
                     # instructions decoded under 64-bit VOP3P_MFMA).

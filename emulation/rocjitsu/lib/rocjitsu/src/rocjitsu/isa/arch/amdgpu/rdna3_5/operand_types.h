@@ -201,6 +201,8 @@ enum OpSelSreg {
   OPR_SREG_VCC_LO = 106,
   OPR_SREG_VCC_HI = 107,
   OPR_SREG_NULL = 124,
+  OPR_SREG_EXEC_LO = 126,
+  OPR_SREG_EXEC_HI = 127,
 };
 
 enum OpSelSregM0Inl {

@@ -41,6 +41,9 @@ SLoadDwordSmem::SLoadDwordSmem(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  if (sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_LO ||
+      sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_HI)
+    flags_ |= EXEC_MODIFY;
 }
 
 void SLoadDwordSmem::execute_impl(amdgpu::Wavefront &wf) {
@@ -65,6 +68,9 @@ SLoadDwordx2Smem::SLoadDwordx2Smem(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  if (sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_LO ||
+      sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_HI)
+    flags_ |= EXEC_MODIFY;
 }
 
 void SLoadDwordx2Smem::execute_impl(amdgpu::Wavefront &wf) {
@@ -89,6 +95,9 @@ SLoadDwordx4Smem::SLoadDwordx4Smem(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  if (sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_LO ||
+      sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_HI)
+    flags_ |= EXEC_MODIFY;
 }
 
 void SLoadDwordx4Smem::execute_impl(amdgpu::Wavefront &wf) {
@@ -113,6 +122,9 @@ SLoadDwordx8Smem::SLoadDwordx8Smem(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  if (sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_LO ||
+      sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_HI)
+    flags_ |= EXEC_MODIFY;
 }
 
 void SLoadDwordx8Smem::execute_impl(amdgpu::Wavefront &wf) {
@@ -137,6 +149,9 @@ SLoadDwordx16Smem::SLoadDwordx16Smem(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  if (sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_LO ||
+      sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_HI)
+    flags_ |= EXEC_MODIFY;
 }
 
 void SLoadDwordx16Smem::execute_impl(amdgpu::Wavefront &wf) {
@@ -161,6 +176,9 @@ SScratchLoadDwordSmem::SScratchLoadDwordSmem(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  if (sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_LO ||
+      sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_HI)
+    flags_ |= EXEC_MODIFY;
 }
 
 void SScratchLoadDwordSmem::execute_impl(amdgpu::Wavefront &wf) {
@@ -185,6 +203,9 @@ SScratchLoadDwordx2Smem::SScratchLoadDwordx2Smem(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  if (sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_LO ||
+      sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_HI)
+    flags_ |= EXEC_MODIFY;
 }
 
 void SScratchLoadDwordx2Smem::execute_impl(amdgpu::Wavefront &wf) {
@@ -209,6 +230,9 @@ SScratchLoadDwordx4Smem::SScratchLoadDwordx4Smem(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  if (sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_LO ||
+      sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_HI)
+    flags_ |= EXEC_MODIFY;
 }
 
 void SScratchLoadDwordx4Smem::execute_impl(amdgpu::Wavefront &wf) {
@@ -233,6 +257,9 @@ SBufferLoadDwordSmem::SBufferLoadDwordSmem(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  if (sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_LO ||
+      sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_HI)
+    flags_ |= EXEC_MODIFY;
 }
 
 void SBufferLoadDwordSmem::execute_impl(amdgpu::Wavefront &wf) {
@@ -257,6 +284,9 @@ SBufferLoadDwordx2Smem::SBufferLoadDwordx2Smem(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  if (sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_LO ||
+      sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_HI)
+    flags_ |= EXEC_MODIFY;
 }
 
 void SBufferLoadDwordx2Smem::execute_impl(amdgpu::Wavefront &wf) {
@@ -281,6 +311,9 @@ SBufferLoadDwordx4Smem::SBufferLoadDwordx4Smem(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  if (sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_LO ||
+      sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_HI)
+    flags_ |= EXEC_MODIFY;
 }
 
 void SBufferLoadDwordx4Smem::execute_impl(amdgpu::Wavefront &wf) {
@@ -305,6 +338,9 @@ SBufferLoadDwordx8Smem::SBufferLoadDwordx8Smem(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  if (sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_LO ||
+      sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_HI)
+    flags_ |= EXEC_MODIFY;
 }
 
 void SBufferLoadDwordx8Smem::execute_impl(amdgpu::Wavefront &wf) {
@@ -329,6 +365,9 @@ SBufferLoadDwordx16Smem::SBufferLoadDwordx16Smem(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
+  if (sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_LO ||
+      sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_HI)
+    flags_ |= EXEC_MODIFY;
 }
 
 void SBufferLoadDwordx16Smem::execute_impl(amdgpu::Wavefront &wf) {
@@ -364,6 +403,9 @@ SMemtimeSmem::SMemtimeSmem(const MachineInst *inst)
   dst_operands_[0] = &sdata;
   num_src_ = 0;
   num_dst_ = 1;
+  if (sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_LO ||
+      sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_HI)
+    flags_ |= EXEC_MODIFY;
 }
 
 void SMemtimeSmem::execute_impl(amdgpu::Wavefront &wf) {
@@ -378,6 +420,9 @@ SMemrealtimeSmem::SMemrealtimeSmem(const MachineInst *inst)
   dst_operands_[0] = &sdata;
   num_src_ = 0;
   num_dst_ = 1;
+  if (sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_LO ||
+      sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_HI)
+    flags_ |= EXEC_MODIFY;
 }
 
 void SMemrealtimeSmem::execute_impl(amdgpu::Wavefront &wf) {
@@ -428,6 +473,9 @@ SGetWaveidInWorkgroupSmem::SGetWaveidInWorkgroupSmem(const MachineInst *inst)
   dst_operands_[0] = &sdata;
   num_src_ = 0;
   num_dst_ = 1;
+  if (sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_LO ||
+      sdata.encoding_value_ == OpSelSreg::OPR_SREG_EXEC_HI)
+    flags_ |= EXEC_MODIFY;
 }
 
 void SGetWaveidInWorkgroupSmem::execute_impl(amdgpu::Wavefront &wf) {

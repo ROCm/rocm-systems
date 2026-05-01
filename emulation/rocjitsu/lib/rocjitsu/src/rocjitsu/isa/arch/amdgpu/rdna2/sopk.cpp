@@ -25,6 +25,9 @@ SMovkI32Sopk::SMovkI32Sopk(const MachineInst *inst)
   src_operands_[0] = &simm16;
   num_src_ = 1;
   num_dst_ = 1;
+  if (sdst.encoding_value_ == OpSelSdst::OPR_SDST_EXEC_LO ||
+      sdst.encoding_value_ == OpSelSdst::OPR_SDST_EXEC_HI)
+    flags_ |= EXEC_MODIFY;
 }
 
 void SMovkI32Sopk::execute_impl(amdgpu::Wavefront &wf) {
@@ -54,7 +57,9 @@ SCmovkI32Sopk::SCmovkI32Sopk(const MachineInst *inst)
   src_operands_[1] = &simm16;
   num_src_ = 2;
   num_dst_ = 1;
-  flags_ |= PREDICATED_DEF;
+  if (sdst.encoding_value_ == OpSelSdst::OPR_SDST_EXEC_LO ||
+      sdst.encoding_value_ == OpSelSdst::OPR_SDST_EXEC_HI)
+    flags_ |= EXEC_MODIFY;
 }
 
 void SCmovkI32Sopk::execute_impl(amdgpu::Wavefront &wf) {
@@ -250,6 +255,9 @@ SAddkI32Sopk::SAddkI32Sopk(const MachineInst *inst)
   src_operands_[1] = &simm16;
   num_src_ = 2;
   num_dst_ = 1;
+  if (sdst.encoding_value_ == OpSelSdst::OPR_SDST_EXEC_LO ||
+      sdst.encoding_value_ == OpSelSdst::OPR_SDST_EXEC_HI)
+    flags_ |= EXEC_MODIFY;
 }
 
 void SAddkI32Sopk::execute_impl(amdgpu::Wavefront &wf) {
@@ -265,6 +273,9 @@ SMulkI32Sopk::SMulkI32Sopk(const MachineInst *inst)
   src_operands_[1] = &simm16;
   num_src_ = 2;
   num_dst_ = 1;
+  if (sdst.encoding_value_ == OpSelSdst::OPR_SDST_EXEC_LO ||
+      sdst.encoding_value_ == OpSelSdst::OPR_SDST_EXEC_HI)
+    flags_ |= EXEC_MODIFY;
 }
 
 void SMulkI32Sopk::execute_impl(amdgpu::Wavefront &wf) {
@@ -280,6 +291,9 @@ SGetregB32Sopk::SGetregB32Sopk(const MachineInst *inst)
   src_operands_[0] = &simm16;
   num_src_ = 1;
   num_dst_ = 1;
+  if (sdst.encoding_value_ == OpSelSdst::OPR_SDST_EXEC_LO ||
+      sdst.encoding_value_ == OpSelSdst::OPR_SDST_EXEC_HI)
+    flags_ |= EXEC_MODIFY;
 }
 
 void SGetregB32Sopk::execute_impl(amdgpu::Wavefront &wf) {
@@ -325,7 +339,9 @@ SCallB64Sopk::SCallB64Sopk(const MachineInst *inst)
   src_operands_[0] = &simm16;
   num_src_ = 1;
   num_dst_ = 1;
-  flags_ |= INDIRECT_CALL;
+  if (sdst.encoding_value_ == OpSelSdst::OPR_SDST_EXEC_LO ||
+      sdst.encoding_value_ == OpSelSdst::OPR_SDST_EXEC_HI)
+    flags_ |= EXEC_MODIFY;
 }
 
 void SCallB64Sopk::execute_impl(amdgpu::Wavefront &wf) {
@@ -412,6 +428,7 @@ SSubvectorLoopBeginSopk::SSubvectorLoopBeginSopk(const MachineInst *inst)
   src_operands_[1] = &simm16;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MODIFY;
 }
 
 void SSubvectorLoopBeginSopk::execute_impl(amdgpu::Wavefront &wf) {
@@ -429,6 +446,7 @@ SSubvectorLoopEndSopk::SSubvectorLoopEndSopk(const MachineInst *inst)
   src_operands_[1] = &simm16;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= EXEC_MODIFY;
 }
 
 void SSubvectorLoopEndSopk::execute_impl(amdgpu::Wavefront &wf) {

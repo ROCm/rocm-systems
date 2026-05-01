@@ -412,6 +412,8 @@ enum OpSelSreg {
   OPR_SREG_TTMP15 = 123,
   OPR_SREG_VCC_LO = 106,
   OPR_SREG_VCC_HI = 107,
+  OPR_SREG_EXEC_LO = 126,
+  OPR_SREG_EXEC_HI = 127,
 };
 
 enum OpSelSregNovcc {
@@ -437,6 +439,8 @@ enum OpSelSregNovcc {
   OPR_SREG_NOVCC_TTMP13 = 121,
   OPR_SREG_NOVCC_TTMP14 = 122,
   OPR_SREG_NOVCC_TTMP15 = 123,
+  OPR_SREG_NOVCC_EXEC_LO = 126,
+  OPR_SREG_NOVCC_EXEC_HI = 127,
 };
 
 enum OpSelSsrc {

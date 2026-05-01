@@ -29,6 +29,12 @@ Known XML spec bugs handled by this parser (as of spec version 1.1.1):
 8. **Operand direction bug** - some read-modify-write destinations are
    marked output-only instead of input+output; codegen detects these
    by checking instruction semantics that require the old value.
+9. **OPR_SREG/OPR_SREG_NOVCC missing exec_lo/hi** - the predefined-value
+   list for these scalar-register operand types omits ``exec_lo`` (126)
+   and ``exec_hi`` (127), even though hardware accepts those encodings
+   in any 7-bit SDST/SREG field. ``_collapse_register_ranges()`` injects
+   the missing entries so the OpSel enum names resolve and disassembly
+   prints ``exec_lo``/``exec_hi`` instead of bare integers.
 """
 
 import re
@@ -133,6 +139,14 @@ def _parse_enc_id_masks(
         )
     dont_care_bits = max_enc_bits - (flat_enc_mask[1] - flat_enc_mask[0])
     return flat_enc_mask, op_mask, dont_care_bits
+
+
+# Operand types that need an exec_lo/exec_hi predefined-value injection.
+# Used by `_collapse_register_ranges()`; see parser docstring item #9.
+_EXEC_INJECT_TYPES: frozenset[str] = frozenset({
+    'OPR_SREG',
+    'OPR_SREG_NOVCC',
+})
 
 
 def _collapse_register_ranges(
@@ -266,6 +280,27 @@ def _collapse_register_ranges(
             first = True
             last = False
         predef_vals_list.append((predef_name, predef_val))
+
+    # Spec gap workaround: certain scalar-register operand types omit
+    # exec_lo/exec_hi from their <OperandPredefinedValues>, even though
+    # the hardware accepts those encodings (126/127) in any 7-bit
+    # SDST/SREG field. Inject the missing entries so static analysis
+    # (EXEC_MODIFY) can name-reference them via the OpSel enum and
+    # disassembly resolves them to their canonical names.
+    if opnd_type_name in _EXEC_INJECT_TYPES:
+        existing_names = {n for n, _ in predef_vals_list}
+        for suffix, value, display in (
+                ('EXEC_LO', '126', 'exec_lo'),
+                ('EXEC_HI', '127', 'exec_hi')):
+            enum_name = f'{opnd_type_name}_{suffix}'
+            if enum_name in existing_names:
+                continue  # spec was updated upstream; injection is a no-op
+            predef_vals_list.append((enum_name, value))
+            name_patterns.append(OperandNamePattern(
+                OperandNamePattern.NAMED,
+                operand_name=display,
+                enum_name=enum_name,
+            ))
 
     return predef_vals_list, name_patterns
 
@@ -739,6 +774,7 @@ class Parser:
                     continue
                 opcode = int(xs.get_node_text(opcode_node))
                 opnds = []
+                implicit_opnds = []
                 for opnd in operands_node:
                     is_in = (
                         opnd.attrib[xs.OPERAND_ATTR_INPUT].lower() == 'true'
@@ -774,14 +810,31 @@ class Parser:
                                 order,
                             )
                         )
+                    else:
+                        # Implicit operand (no microcode field) to capture
+                        # side effects on EXEC/SCC/VCC/etc.
+                        implicit_opnds.append(
+                            Operand(
+                                opnd_type.lower(),
+                                opnd_size,
+                                opnd_type,
+                                is_in,
+                                is_out,
+                                is_implicit,
+                                is_bin_ucode_required,
+                                order,
+                            )
+                        )
                 opnds.sort(key=lambda x: x.order)
+                implicit_opnds.sort(key=lambda x: x.order)
 
                 enc = self.isa_spec.encoding_map[enc_name]
                 is_implied_literal = (
                     enc_name in self.isa_spec.alt_encs_with_implied_literal
                 )
                 inst = Instruction(
-                    inst_name, enc_name, opcode, opnds, is_implied_literal
+                    inst_name, enc_name, opcode, opnds, is_implied_literal,
+                    implicit_opnds,
                 )
 
                 # Implied-literal instructions go to the parent encoding's

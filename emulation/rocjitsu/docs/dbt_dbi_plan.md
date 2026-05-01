@@ -4823,7 +4823,7 @@ Each phase produces a self-contained, compilable, tested changeset. A phase is c
 
 | Task | Files |
 |---|---|
-| Add `EXEC_MODIFY` flag to `InstFlags`; annotate SOPP/SOP1/VOP* instructions that write EXEC. (`INDIRECT_BRANCH` and `MEMORY_OP` flags already exist in `InstFlags`.) | `instruction.h`, all 9 ISA files |
+| ✅ Add `EXEC_MODIFY` flag to `InstFlags`; annotate SOPP/SOP1/VOP* instructions that write EXEC. (`INDIRECT_BRANCH` and `MEMORY_OP` flags already exist in `InstFlags`.) | `instruction.h`, all 9 ISA files |
 | Verify `INDIRECT_BRANCH` is correctly annotated on `s_setpc_b64` / `s_swappc_b64` in all 9 ISA decoder outputs (flag already defined) | Verify in ISA instruction subclasses |
 | Add entry-leader-aware `BasicBlock::build()` overload so kernel descriptor entry offsets start blocks | `basic_block.h/.cpp` |
 | Add RDNA1/2/3/3.5 `EF_AMDGPU_MACH` constants to `amdgpu_elf.h` (currently only GFX942 and GFX950 are defined) | `code/amdgpu_elf.h` |
