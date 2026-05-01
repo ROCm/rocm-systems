@@ -6,6 +6,7 @@ target_sources(
     rocprofiler-sdk-aqlprofile
     PRIVATE aql_profile.cpp
             counters.cpp
+            last_error.cpp
             gfx10_factory.cpp
             gfx115x_factory.cpp
             gfx11_factory.cpp

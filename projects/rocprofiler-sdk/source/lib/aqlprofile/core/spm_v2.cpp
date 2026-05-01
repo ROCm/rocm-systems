@@ -8,7 +8,7 @@
 #include "lib/aqlprofile/core/memorymanager.hpp"
 #include "lib/aqlprofile/core/commandbuffermgr.hpp"
 
-#include "lib/aqlprofile/core/logger.h"
+#include "lib/aqlprofile/core/logger.hpp"
 #include "lib/aqlprofile/core/pm4_factory.h"
 
 #include <thread>
