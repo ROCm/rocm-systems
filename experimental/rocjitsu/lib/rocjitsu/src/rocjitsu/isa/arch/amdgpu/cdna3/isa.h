@@ -24,7 +24,8 @@ namespace cdna3 {
 /// source of truth for the superset layout including COND_DBG_USER/SYS).
 struct Isa : amdgpu::CdnaIsaBase {
   static constexpr uint32_t MAX_ACC_VGPRS_PER_WF =
-      256; ///< Unified AccVGPR file (src encoding alias at 768).
+      256;                               ///< Unified AccVGPR file (src encoding alias at 768).
+  static constexpr bool SRAM_ECC = true; ///< gfx942 has SRAM ECC.
 
   using Decoder = cdna3::Decoder;
   using MachineInst = cdna3::MachineInst;

@@ -29,5 +29,21 @@ def redact_paths(value: str) -> str:
     return result
 
 
+def sanitize_value(value: Any) -> Any:
+    """Recursively redact path-like strings in provider-bound payloads."""
+    if isinstance(value, str):
+        return redact_paths(value)
+    if isinstance(value, list):
+        return [sanitize_value(item) for item in value]
+    if isinstance(value, dict):
+        return {key: sanitize_value(item) for key, item in value.items()}
+    return value
+
+
+def sanitize_messages(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Return a sanitized copy of an OpenAI-style messages list."""
+    return sanitize_value(messages)
+
+
 # Alias for backward compatibility with existing code
 _redact_paths = redact_paths

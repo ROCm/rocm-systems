@@ -121,8 +121,11 @@ std::string SimulatedDriver::redirect_sysfs_path(const char *path) {
   // /sys/class/kfd/ symlink path (rsmi/amdsmi use the symlink).
   std::string_view sv(path);
   std::string_view kfd_prefix(KFD_SYSFS_PREFIX);
-  if (sv.starts_with(kfd_prefix))
-    return inst->topology_path() + std::string(sv.substr(kfd_prefix.size()));
+  if (sv.starts_with(kfd_prefix)) {
+    auto result = inst->topology_path() + std::string(sv.substr(kfd_prefix.size()));
+    util::Logger::vm("sysfs redirect: ", path, " -> ", result);
+    return result;
+  }
   std::string_view kfd_alt_prefix(KFD_SYSFS_PREFIX_ALT);
   if (sv.starts_with(kfd_alt_prefix))
     return inst->topology_path() + std::string(sv.substr(kfd_alt_prefix.size()));
@@ -710,7 +713,11 @@ int SimulatedDriver::free_memory_ioctl(void *arg) {
         imported_dmabufs_.erase(dmabuf_it);
       }
     }
-    if (alloc.host_ptr) {
+    // For FMM (user_va) allocations, keep the host-page mapping alive until
+    // the process actually munmaps the VA. ROCR's caching allocator and
+    // PyTorch's block pool reuse freed handles without unmapping, so dropping
+    // the mapping here causes the GPU to read zeros on reuse.
+    if (alloc.host_ptr && !alloc.user_va) {
       if (auto *mem = soc_.memory())
         mem->unmap_host_pages(alloc.gpu_va, alloc.size);
     }
