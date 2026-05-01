@@ -169,12 +169,12 @@ class ROBackend : public Backend {
   /**
    * @brief Handle to block resources
    */
-  BlockHandleProxyT block_handle_proxy_;
+  BlockHandleProxy block_handle_proxy_;
 
   /**
    * @brief Handle to block resources
    */
-  DefaultBlockHandleProxyT default_block_handle_proxy_;
+  DefaultBlockHandleProxy default_block_handle_proxy_;
 
  protected:
   /**

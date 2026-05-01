@@ -64,7 +64,7 @@ class Queue {
 
   QueueProxy queue_proxy_{};
 
-  QueueDescProxyT queue_desc_proxy_{};
+  QueueDescProxy queue_desc_proxy_{};
 
   QueueElementProxy queue_element_cache_proxy_{};
 

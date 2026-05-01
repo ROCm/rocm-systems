@@ -119,7 +119,7 @@ ROBackend::ROBackend(MPI_Comm comm)
    */
   setup_team_shared();
 
-  default_block_handle_proxy_ = DefaultBlockHandleProxyT(
+  default_block_handle_proxy_ = DefaultBlockHandleProxy(
                                 g_ret_buffer_.get(),
                                 atomic_ret_buffer_.get(), &queue_,
                                 status_.get(), default_ctx_status_.get(),
@@ -130,7 +130,7 @@ ROBackend::ROBackend(MPI_Comm comm)
 
   default_context_proxy_ = DefaultContextProxy(this, tinfo);
 
-  block_handle_proxy_ = BlockHandleProxyT(g_ret_buffer_.get(),
+  block_handle_proxy_ = BlockHandleProxy(g_ret_buffer_.get(),
                         atomic_ret_buffer_.get(), &queue_,
                         max_wg_size_, status_.get(), envvar::max_num_contexts);
   setup_ctxs();
