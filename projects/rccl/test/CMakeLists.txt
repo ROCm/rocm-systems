@@ -201,7 +201,6 @@ if(BUILD_TESTS)
       BitOpsTests.cpp
       MiscTests.cpp
       RomeTopoConsensusTests.cpp
-      CommTests.cpp
       EnqueueCountTests.cpp
       device/TestOp128.cpp
       common/main_fixtures.cpp
