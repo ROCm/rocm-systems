@@ -17,7 +17,7 @@ overview:
   Architecture and data-type tables, top-level CDNA block diagrams, MI-series terminology,
   and chapters for:
   * :doc:`cdna/system-speed-of-light`
-  
+
   * :doc:`cdna/compute-unit`
 
   * :doc:`cdna/l2-cache`
@@ -30,13 +30,13 @@ overview:
 
 * **Ryzen APU (RDNA)** — :doc:`RDNA3 <rdna/rdna-performance-model>`: Architecture, top-level RDNA3 block diagram, GCEA, gfx1151 panel layout, and chapters for:
   * :doc:`rdna/system-speed-of-light`
-  
+
   * :doc:`rdna/wgp`
 
-  * :doc:`rdna/tcp-cache`
+  * :doc:`rdna/gl0-cache`
 
   * :doc:`rdna/gl1-cache`
-  
+
   * :doc:`rdna/gl2-cache`
 
   * :doc:`rdna/shader-engine`

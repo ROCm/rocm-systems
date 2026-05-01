@@ -17,7 +17,7 @@ keys appear in the RDNA3.5 (gfx1151) tab of the analysis report.
    :doc:`../cdna/system-speed-of-light`.
 
    Other gfx1151 metric tables grouped by hardware block live under :doc:`wgp`,
-   :doc:`tcp-cache`, :doc:`gl1-cache`, :doc:`gl2-cache`, :doc:`shader-engine`, and :doc:`command-processor`.
+   :doc:`gl0-cache`, :doc:`gl1-cache`, :doc:`gl2-cache`, :doc:`shader-engine`, and :doc:`command-processor`.
 
 .. warning::
 

@@ -61,7 +61,7 @@ subtrees:
           title: System Speed-of-Light
         - file: conceptual/rdna/wgp.rst
           title: Workgroup processor (WGP)
-        - file: conceptual/rdna/tcp-cache.rst
+        - file: conceptual/rdna/gl0-cache.rst
           title: GL0
         - file: conceptual/rdna/gl1-cache.rst
           title: GL1

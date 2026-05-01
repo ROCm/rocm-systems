@@ -19,11 +19,11 @@ To best use profiling data, it’s important to understand the role of various h
 For more details on AMD RDNA3 architecture, see page 5 of `RDNA3 shader instruction set architecture <https://docs.amd.com/v/u/en-US/rdna3-shader-instruction-set-architecture-feb-2023_0#page=5>`__.
 
 .. Note::
-   
+
    * For top-level metrics details on CDNA and RDNA architecture, see :doc:`../performance-model`.
 
    * For details on metrics available for CDNA-CDNA4 based Instinct GPUs, see :doc:`../cdna/cdna-performance-model`.
-   
+
    * For details on packaging, SIMD width, and generational differences between RDNA3, RDNA3.5, and later APUs, refer to :doc:`GPU hardware specifications <rocm:reference/gpu-arch-specs>` and the public architecture summaries.
 
 ROCm Compute Profiler includes analysis panels targeting RDNA3.5 parts reporting as
@@ -34,7 +34,7 @@ Memory hierarchy in the tool
 ==============================
 
 For gfx1151, the Memory Chart panel walks the path from instruction and scalar
-paths, TCP (GL0), LDS, interfaces to GL1C, GL2C, and GCEA toward
+paths, GL0 (TCP), LDS, interfaces to GL1 Cache, GL2 Cache, and GCEA toward
 system memory.
 
 Workgroups and execution
@@ -55,11 +55,11 @@ The RDNA3.5 architecture based metrics tables are categorized by the following b
 
 * :doc:`wgp` — Roofline, WGP utilization, waves, instruction mix, WGP instruction and data caches.
 
-* :doc:`tcp-cache` — TCP (GL0): Panel tables and Memory Chart rows through TCP-GL1.
+* :doc:`gl0-cache` — GL0 (TCP): Panel tables and Memory Chart rows through TCP-GL1.
 
-* :doc:`gl1-cache` — GL1C: Panel tables and Memory Chart GL1C Cache.
+* :doc:`gl1-cache` — GL1 Cache: Panel tables and Memory Chart GL1 Cache.
 
-* :doc:`gl2-cache` — GL2C, GCEA / DRAM / arbiter, and related panel metrics.
+* :doc:`gl2-cache` — GL2 Cache, GCEA / DRAM / arbiter, and related panel metrics.
 
 * :doc:`shader-engine` — GRBM GPU/SE utilization and SPI dispatch statistics.
 
