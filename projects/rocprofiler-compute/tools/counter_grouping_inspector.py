@@ -303,12 +303,16 @@ def _counter_to_bucket_map(
     return result
 
 
-def generate_multi_bucket_metrics(
+def generate_bucket_metrics(
     output_files: list[CounterFile],
     config_dir: Path,
     arch: str,
 ) -> str:
-    """Generate metrics that span multiple buckets as a string."""
+    """Generate metrics that span multiple buckets as a string.
+
+    Note: Despite handling both multi-bucket and single-bucket metrics,
+    this function's name reflects the primary bucket analysis use case.
+    """
     buf = StringIO()
     counter_to_bucket = _counter_to_bucket_map(output_files)
 
@@ -425,13 +429,13 @@ def generate_multi_bucket_metrics(
     return buf.getvalue()
 
 
-def print_multi_bucket_metrics(
+def print_bucket_metrics(
     output_files: list[CounterFile],
     config_dir: Path,
     arch: str,
 ) -> None:
     """Print metrics that span multiple buckets."""
-    output = generate_multi_bucket_metrics(output_files, config_dir, arch)
+    output = generate_bucket_metrics(output_files, config_dir, arch)
     print(output, end="")
 
 
@@ -492,7 +496,7 @@ def render_perfmon_plan_svg(
         f"{total_assignments} counter assignment(s).\n"
     )
 
-    metrics_output = generate_multi_bucket_metrics(output_files, config_dir, arch)
+    metrics_output = generate_bucket_metrics(output_files, config_dir, arch)
     console.print(metrics_output)
 
     return console.export_svg(title=title)
@@ -640,7 +644,7 @@ def _emit_inspector_output(
             print(f"SVG saved to {output_path}")
         elif suffix == ".txt":
             bucket_output = generate_bucket_plan(output_files, arch)
-            metrics_output = generate_multi_bucket_metrics(
+            metrics_output = generate_bucket_metrics(
                 output_files, config_dir, arch
             )
             try:
@@ -658,10 +662,10 @@ def _emit_inspector_output(
             )
             print("Falling back to stdout output.\n", file=sys.stderr)
             print_bucket_plan(output_files, arch)
-            print_multi_bucket_metrics(output_files, config_dir, arch)
+            print_bucket_metrics(output_files, config_dir, arch)
     else:
         print_bucket_plan(output_files, arch)
-        print_multi_bucket_metrics(output_files, config_dir, arch)
+        print_bucket_metrics(output_files, config_dir, arch)
 
 
 if __name__ == "__main__":
