@@ -68,7 +68,7 @@ class Queue {
 
   QueueElementProxy queue_element_cache_proxy_{};
 
-  HdpProxy<HIPHostAllocator> hdp_proxy_{};
+  HdpProxy hdp_proxy_{};
 
   [[maybe_unused]] size_t max_queues_{};
 

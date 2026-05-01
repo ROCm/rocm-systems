@@ -27,18 +27,20 @@
 
 #include "device_proxy.hpp"
 #include "hdp_policy.hpp"
+#include "memory/hip_allocator.hpp"
 
 namespace rocshmem {
 
-template <typename ALLOCATOR>
 class HdpProxy {
-  using HdpProxyT = DeviceProxy<ALLOCATOR, HdpPolicy>;
+  using HdpProxyT = DeviceProxy<HIPHostAllocator, HdpPolicy>;
 
  public:
   /*
    * Placement new the memory which is allocated by proxy_
    */
-  HdpProxy(size_t num_elems = 1) : proxy_{num_elems} {
+  HdpProxy([[maybe_unused]] const HIPHostAllocator& alloc = HIPHostAllocator(),
+           size_t num_elems = 1)
+    : proxy_{num_elems} {
     new (proxy_.get()) HdpPolicy();
   }
 
