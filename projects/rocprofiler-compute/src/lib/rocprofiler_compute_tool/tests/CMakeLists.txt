@@ -20,9 +20,7 @@ target_link_libraries(
 
 set_target_properties(
     ${target}
-    PROPERTIES
-        INSTALL_RPATH
-            "$ORIGIN/../../../${CMAKE_INSTALL_LIBDIR}/${PROJECT_NAME}"
+    PROPERTIES INSTALL_RPATH "$ORIGIN/../../../${CMAKE_INSTALL_LIBDIR}/${PROJECT_NAME}"
 )
 
 if(INSTALL_TESTS)
