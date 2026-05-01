@@ -14,7 +14,7 @@ The VideoDemuxer ``Demux()`` function extracts the next video packet from the st
 
 ``Demux()`` demuxes frames sequentially starting at the beginning of the stream. The ``seek()`` function is used to start demuxing from a different frame.
 
-A ``VideoSeekContext`` is passed to ``seek()``. The seek context specifies a seek criterion and a seek mode. The seek criteria describe whether the demuxer needs to seek to a specific frame or seek to a specific timestamp. The seek mode indicates whether the demuxer should seek to the exact frame or to the previous keyframe. 
+A ``VideoSeekContext`` is passed to ``seek()``. The seek context specifies a seek criteria and a seek mode. The seek criteria describe whether the demuxer needs to seek to a specific frame or seek to a specific timestamp. The seek mode indicates whether the demuxer should seek to the exact frame or to the previous keyframe. 
 
 .. note:: 
 
