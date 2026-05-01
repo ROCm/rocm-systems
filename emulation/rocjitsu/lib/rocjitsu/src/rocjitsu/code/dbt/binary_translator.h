@@ -121,7 +121,8 @@ private:
   ///
   /// @details Extracts raw encoding words, calls the per-pair encoding translate
   /// function, and writes the result into the translated text at the given offset.
-  /// Falls back to copying the original encoding if translation produces no output.
+  /// Identity rows may copy the original encoding if the generated translator
+  /// produces no output; other missing translations fail closed.
   ///
   /// @param inst       The decoded guest instruction.
   /// @param offset     Byte offset of the instruction within .text.

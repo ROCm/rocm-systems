@@ -135,10 +135,10 @@ Three CDNA4-to-RDNA3 semantic rule classes are wired:
 | `VOPC/VOP3:v_cmp_f/t/tru_*`, `v_cmpx_f/t/tru_*` rows whose generated legalization action is `Expand` | Size-expanding or same-size semantic rewrite | Emits scalar mask moves for the removed constant predicates: false writes zero, true copies `exec`, and false `cmpx` also clears `exec`. |
 
 Unhandled `Action::Expand` rows now fail closed in `BinaryTranslator`.
-Unhandled encoding families whose `Action` is not Expand can still fall back to
-source-copy behavior when `translate_encoding_cdna4_to_rdna3()` returns an empty
-translation result. That makes MTBUF and unsupported diagnostics separate
-follow-up work even though this taxonomy is complete.
+The residual-gap handling also makes non-identity rows fail closed when
+`translate_encoding_cdna4_to_rdna3()` returns an empty translation result, so
+MTBUF non-identity rows no longer silently source-copy CDNA4 bytes into RDNA3 output.
+The residual closure report is in `cdna4-to-rdna3-residual-coverage.md`.
 
 The matrix/AccVGPR guard adds a CDNA4-to-RDNA3 semantic guard for `v_mfma_*`, `v_smfmac_*`, and
 `v_accvgpr_*` rows so duplicate generated `Lower` rows in the alias-expanded
@@ -157,7 +157,7 @@ fail closed until the documented matrix/AccVGPR strategy is implemented.
 | Simple expand lowerings | Implement the 353 non-matrix, non-MTBUF Expand rows that have local instruction-sequence lowerings, using code caves and tests for branch-return correctness. | coverage harness |
 | MTBUF disposition | Either add MTBUF to the generated CDNA4-to-RDNA3 encoder or classify all 16 MTBUF rows as explicitly unsupported with diagnostics. | coverage harness |
 | MFMA/AccVGPR to RDNA3 | Design and implement the 70-row complex matrix/AccVGPR bucket, including lane layout, accumulator remapping, and VGPR pressure diagnostics. | coverage harness |
-| Unsupported diagnostics | Make unsupported rows deterministic: no silent source-copy for unhandled Lower families, no NOP-fill without an actionable warning, and diagnostic counts for residual unsupported rows. | coverage harness |
+| Remaining non-matrix expansions | Implement remaining non-matrix expansion rows by family; until then, unsupported rows fail closed with actionable diagnostics. | coverage harness |
 
 ## Representative Examples
 

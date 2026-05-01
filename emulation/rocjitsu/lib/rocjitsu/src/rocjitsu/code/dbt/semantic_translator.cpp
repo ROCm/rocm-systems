@@ -464,9 +464,15 @@ std::vector<uint32_t> expand_waitcnt_gfx9_to_gfx11(const Instruction &inst, uint
   if (inst.encoding_id() != kEnc_SOPP_value)
     return {};
   const auto &sopp = *reinterpret_cast<const cdna4::SoppMachineInst *>(inst.raw_encoding());
+  auto values = decode_waitcnt_gfx9(sopp.simm16);
+  // CDNA4 partial VM waits do not map precisely enough to RDNA3 for translated
+  // code that interleaves multiple global loads and stores. Preserve no-wait,
+  // but make active VM waits conservative so later VALU consumers cannot read
+  // an outstanding load.
+  if (values.vmcnt != 0x3F)
+    values.vmcnt = 0;
   constexpr uint32_t kRdna3SoppOp_s_waitcnt = 9;
-  return {pack_sopp(kRdna3SoppOp_s_waitcnt,
-                    encode_waitcnt_gfx11_simm16(decode_waitcnt_gfx9(sopp.simm16)))};
+  return {pack_sopp(kRdna3SoppOp_s_waitcnt, encode_waitcnt_gfx11_simm16(values))};
 }
 
 std::vector<uint32_t> expand_accvgpr_read(const Instruction &inst, uint32_t, uint64_t,

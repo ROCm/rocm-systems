@@ -157,6 +157,22 @@ bool starts_with(std::string_view text, std::string_view prefix) {
   return text.size() >= prefix.size() && text.substr(0, prefix.size()) == prefix;
 }
 
+std::string_view action_name(Action action) {
+  switch (action) {
+  case Action::Identity:
+    return "Identity";
+  case Action::Substitute:
+    return "Substitute";
+  case Action::Lower:
+    return "Lower";
+  case Action::Expand:
+    return "Expand";
+  case Action::Illegal:
+    return "Illegal";
+  }
+  return "Unknown";
+}
+
 std::string unsupported_expansion_category(std::string_view mnemonic) {
   if (starts_with(mnemonic, "v_mfma_"))
     return " (unsupported category: dense MFMA requires proven RDNA3 WMMA lowering or software fallback)";
@@ -164,7 +180,7 @@ std::string unsupported_expansion_category(std::string_view mnemonic) {
     return " (unsupported category: sparse SMFMAC requires proven sparse metadata semantics and RDNA3 fallback analysis)";
   if (starts_with(mnemonic, "v_accvgpr_"))
     return " (unsupported category: AccVGPR operand remapping requires supported standalone transfer or matrix-idiom lowering)";
-  return {};
+  return " (unsupported category: residual non-matrix expansion)";
 }
 
 std::string unsupported_expansion_warning(const Instruction &inst, uint64_t offset) {
@@ -172,6 +188,23 @@ std::string unsupported_expansion_warning(const Instruction &inst, uint64_t offs
          hex_u64(offset) + " (encoding_id=" + std::to_string(inst.encoding_id()) +
          ", opcode=" + std::to_string(inst.opcode()) + ")" +
          unsupported_expansion_category(inst.mnemonic());
+}
+
+std::string missing_encoding_warning(const Instruction &inst, uint64_t offset,
+                                     const InstructionLegalization *leg) {
+  std::string message = "fatal: unsupported encoding translation for " +
+                        std::string(inst.mnemonic()) + " at .text+" + hex_u64(offset) +
+                        " (encoding_id=" + std::to_string(inst.encoding_id()) +
+                        ", opcode=" + std::to_string(inst.opcode());
+  if (leg)
+    message += ", action=" + std::string(action_name(leg->action));
+  else
+    message += ", action=<missing legalization>";
+  message += ")";
+  if ((inst.encoding_id() >= kEnc_MTBUF && inst.encoding_id() < kEnc_MTBUF + 8) ||
+      starts_with(inst.mnemonic(), "tbuffer_"))
+    message += " (unsupported category: MTBUF format-buffer encoding translation)";
+  return message;
 }
 
 void write_words_with_nop_padding(std::vector<uint8_t> &text, uint64_t offset,
@@ -542,11 +575,13 @@ bool BinaryTranslator::handle_encoding(const Instruction &inst, uint64_t offset,
   auto tr = encoding_translate_(inst.encoding_id(), w0, w1, w2, dst_opcode);
 
   if (tr.word_count == 0) {
-    if (warnings_ && leg && leg->action != Action::Identity) {
-      warnings_->push_back("encoding translation missing for " + std::string(inst.mnemonic()));
+    if (leg && leg->action == Action::Identity) {
+      std::memcpy(text.data() + offset, raw, inst.size());
+      return true;
     }
-    std::memcpy(text.data() + offset, raw, inst.size());
-    return true;
+    if (warnings_)
+      warnings_->push_back(missing_encoding_warning(inst, offset, leg));
+    return false;
   }
 
   // Append trailing literal constant when the source instruction is larger

@@ -351,27 +351,37 @@ TEST(HsaTranslateTest, TranslateAndDispatchMemoryStream) {
   constexpr size_t buf_size = N * sizeof(float);
 
   auto gpu_pool = find_pool(gpu, HSA_AMD_SEGMENT_GLOBAL);
-  float *A_dev = nullptr, *C_dev = nullptr;
+  float *A_dev = nullptr, *B_dev = nullptr, *C_dev = nullptr, *D_dev = nullptr;
   hsa_amd_memory_pool_allocate(gpu_pool, buf_size, 0, reinterpret_cast<void **>(&A_dev));
+  hsa_amd_memory_pool_allocate(gpu_pool, buf_size, 0, reinterpret_cast<void **>(&B_dev));
   hsa_amd_memory_pool_allocate(gpu_pool, buf_size, 0, reinterpret_cast<void **>(&C_dev));
+  hsa_amd_memory_pool_allocate(gpu_pool, buf_size, 0, reinterpret_cast<void **>(&D_dev));
   ASSERT_NE(A_dev, nullptr);
+  ASSERT_NE(B_dev, nullptr);
   ASSERT_NE(C_dev, nullptr);
+  ASSERT_NE(D_dev, nullptr);
 
   hsa_agent_t both[] = {cpu, gpu};
   hsa_amd_agents_allow_access(2, both, nullptr, A_dev);
+  hsa_amd_agents_allow_access(2, both, nullptr, B_dev);
   hsa_amd_agents_allow_access(2, both, nullptr, C_dev);
+  hsa_amd_agents_allow_access(2, both, nullptr, D_dev);
 
   std::mt19937 rng(101);
   std::uniform_real_distribution<float> dist(-16.0f, 16.0f);
-  std::vector<float> A_host(N), C_golden(N);
+  std::vector<float> A_host(N), B_host(N), C_golden(N), D_golden(N);
   for (uint32_t i = 0; i < N; ++i) {
     A_host[i] = dist(rng);
+    B_host[i] = dist(rng);
     C_golden[i] = A_host[i];
+    D_golden[i] = 0.5f * A_host[i] + B_host[i];
   }
 
   hsa_memory_copy(A_dev, A_host.data(), buf_size);
+  hsa_memory_copy(B_dev, B_host.data(), buf_size);
   std::vector<float> zero(N, 0.0f);
   hsa_memory_copy(C_dev, zero.data(), buf_size);
+  hsa_memory_copy(D_dev, zero.data(), buf_size);
 
   auto kernarg_pool = find_pool(cpu, HSA_AMD_SEGMENT_GLOBAL, true);
   void *kernarg = nullptr;
@@ -382,12 +392,16 @@ TEST(HsaTranslateTest, TranslateAndDispatchMemoryStream) {
 
   struct __attribute__((packed)) KernArgs {
     const float *A;
+    const float *B;
     float *C;
+    float *D;
     uint32_t N;
   };
   auto *args = static_cast<KernArgs *>(kernarg);
   args->A = A_dev;
+  args->B = B_dev;
   args->C = C_dev;
+  args->D = D_dev;
   args->N = N;
 
   hsa_queue_t *queue = nullptr;
@@ -430,21 +444,37 @@ TEST(HsaTranslateTest, TranslateAndDispatchMemoryStream) {
   ASSERT_EQ(val, 0) << "Kernel dispatch timed out or failed";
 
   std::vector<float> C_result(N);
+  std::vector<float> D_result(N);
   hsa_memory_copy(C_result.data(), C_dev, buf_size);
+  hsa_memory_copy(D_result.data(), D_dev, buf_size);
 
-  int mismatches = 0;
+  int c_mismatches = 0;
+  int d_mismatches = 0;
+  int first_d_mismatch = -1;
   for (uint32_t i = 0; i < N; ++i) {
     if (std::abs(C_result[i] - C_golden[i]) > 1e-5f)
-      ++mismatches;
+      ++c_mismatches;
+    if (std::abs(D_result[i] - D_golden[i]) > 1e-5f) {
+      if (first_d_mismatch < 0)
+        first_d_mismatch = static_cast<int>(i);
+      ++d_mismatches;
+    }
   }
-  EXPECT_EQ(mismatches, 0) << mismatches << " element mismatches in C";
+  EXPECT_EQ(c_mismatches, 0) << c_mismatches << " element mismatches in C";
+  EXPECT_EQ(d_mismatches, 0) << d_mismatches
+                             << " element mismatches in D; first=" << first_d_mismatch << " got="
+                             << (first_d_mismatch >= 0 ? D_result[first_d_mismatch] : 0.0f)
+                             << " expected="
+                             << (first_d_mismatch >= 0 ? D_golden[first_d_mismatch] : 0.0f);
 
   // 5. Cleanup.
   hsa_signal_destroy(signal);
   hsa_queue_destroy(queue);
   hsa_amd_memory_pool_free(kernarg);
   hsa_amd_memory_pool_free(A_dev);
+  hsa_amd_memory_pool_free(B_dev);
   hsa_amd_memory_pool_free(C_dev);
+  hsa_amd_memory_pool_free(D_dev);
   hsa_executable_destroy(executable);
   hsa_code_object_reader_destroy(reader);
   hsa_shut_down();

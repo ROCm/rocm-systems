@@ -598,6 +598,19 @@ std::array<uint32_t, 2> make_cdna4_v_smfmac_f32_16x16x64_bf16() {
   return {0xD3B90000u, 0x00000000u};
 }
 
+std::array<uint32_t, 2> make_cdna4_tbuffer_load_format_x() {
+  rocjitsu::cdna4::MtbufMachineInst src{};
+  src.op = 0;
+  src.dfmt = 4;
+  src.nfmt = 7;
+  src.encoding = rocjitsu::kEnc_MTBUF >> 3;
+  src.srsrc = 7;
+
+  std::array<uint32_t, 2> words{};
+  std::memcpy(words.data(), &src, sizeof(src));
+  return words;
+}
+
 uint32_t make_cdna4_s_mov_b32(uint8_t sdst, uint8_t ssrc0) {
   rocjitsu::cdna4::Sop1MachineInst src{};
   src.ssrc0 = ssrc0;
@@ -866,6 +879,36 @@ void expect_unsupported_expansion_fails_closed(std::span<const uint32_t> unsuppo
   EXPECT_TRUE(warnings_contain(result.warnings, "unsupported expansion"));
   EXPECT_TRUE(warnings_contain(result.warnings, expected_mnemonic));
   EXPECT_TRUE(warnings_contain(result.warnings, "opcode=" + std::to_string(expected_opcode)));
+  EXPECT_TRUE(warnings_contain(result.warnings, expected_category))
+      << "unsupported diagnostic should identify " << expected_category
+      << (result.warnings.empty() ? "" : result.warnings.front());
+}
+
+void expect_unsupported_encoding_fails_closed(std::span<const uint32_t> unsupported_source,
+                                              std::string_view expected_mnemonic,
+                                              std::string_view expected_category) {
+  auto unsupported_inst = decode_cdna4(unsupported_source);
+  ASSERT_NE(unsupported_inst, nullptr);
+  ASSERT_EQ(std::string_view(unsupported_inst->mnemonic()), expected_mnemonic);
+
+  std::vector<uint32_t> source_words(unsupported_source.begin(), unsupported_source.end());
+  source_words.push_back(make_cdna4_sopp(1, 0));
+  source_words.push_back(rocjitsu::build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4));
+  source_words.push_back(rocjitsu::build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4));
+
+  const auto elf = make_minimal_amdgpu_elf(source_words);
+  rocjitsu::AmdGpuCodeObject co(elf.data(), elf.size());
+  ASSERT_TRUE(co.is_valid());
+
+  rocjitsu::BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA3);
+  const auto result = translator.translate(co);
+  EXPECT_TRUE(result.elf_bytes.empty());
+  EXPECT_TRUE(warnings_contain(result.warnings, "unsupported encoding translation"));
+  EXPECT_TRUE(warnings_contain(result.warnings, expected_mnemonic));
+  EXPECT_TRUE(warnings_contain(result.warnings,
+                               "encoding_id=" + std::to_string(unsupported_inst->encoding_id())));
+  EXPECT_TRUE(
+      warnings_contain(result.warnings, "opcode=" + std::to_string(unsupported_inst->opcode())));
   EXPECT_TRUE(warnings_contain(result.warnings, expected_category))
       << "unsupported diagnostic should identify " << expected_category
       << (result.warnings.empty() ? "" : result.warnings.front());
@@ -1393,7 +1436,7 @@ TEST(Cdna4ToRdna3InPlaceBuckets, TrailingLiteralIsPreservedForSubstituteVop2) {
   EXPECT_EQ(stats.inst_count, 1u);
 }
 
-TEST(Cdna4ToRdna3SemanticTranslator, SWaitcntConvertsGfx9ToGfx11Layout) {
+TEST(Cdna4ToRdna3SemanticTranslator, SWaitcntConvertsGfx9ToConservativeGfx11Layout) {
   const std::array<uint32_t, 1> source{make_cdna4_s_waitcnt(0x4342)};
   SemanticInstructionContext context(source);
   ASSERT_TRUE(context.is_valid());
@@ -1405,7 +1448,7 @@ TEST(Cdna4ToRdna3SemanticTranslator, SWaitcntConvertsGfx9ToGfx11Layout) {
   auto replacement = translator.try_lower_expand(*inst, 0, context.live());
 
   ASSERT_EQ(replacement.size(), 1u);
-  EXPECT_EQ(replacement[0], rocjitsu::pack_sopp(9, 0x4834));
+  EXPECT_EQ(replacement[0], rocjitsu::pack_sopp(9, 0x0034));
 
   const auto stats =
       decode_words_as(ROCJITSU_CODE_ARCH_RDNA3, std::span<const uint32_t>(replacement));
@@ -1675,6 +1718,19 @@ TEST(BinaryTranslatorExpansion, UnsupportedSmfmacRowsFailClosed) {
   const auto unsupported_source = make_cdna4_v_smfmac_f32_16x16x64_bf16();
   expect_unsupported_expansion_fails_closed(unsupported_source, "v_smfmac_f32_16x16x64_bf16", 57,
                                             "sparse SMFMAC");
+}
+
+TEST(BinaryTranslatorExpansion, UnsupportedMtbufEncodingFailsClosed) {
+  const auto unsupported_source = make_cdna4_tbuffer_load_format_x();
+  auto unsupported_inst = decode_cdna4(unsupported_source);
+  ASSERT_NE(unsupported_inst, nullptr);
+  const auto *leg = rocjitsu::lookup(rocjitsu::kLegalization_cdna4_to_rdna3,
+                                     unsupported_inst->encoding_id(), unsupported_inst->opcode());
+  ASSERT_NE(leg, nullptr);
+  ASSERT_NE(leg->action, rocjitsu::Action::Identity);
+
+  expect_unsupported_encoding_fails_closed(unsupported_source, "tbuffer_load_format_x",
+                                           "MTBUF");
 }
 
 TEST(BinaryTranslatorExpansion, RelocatedCavePaddingFailsClosed) {
