@@ -50,7 +50,8 @@ include_directories(${hip_INCLUDE_DIRS})
 find_package(hiprtc)
 find_package(Git)
 find_package(Python 3 COMPONENTS Interpreter REQUIRED)
-find_program(HIPCONFIG_EXEC hipconfig REQUIRED)
+# hipconfig is deprecated; HIP version is available directly from find_package(hip)
+set(HIP_VERSION ${hip_VERSION})
 
 # hip root dir is 3 levels down the hip-config.cmake file path
 set(HIP_PATH ${hip_DIR}/../../../)
@@ -97,14 +98,6 @@ if(NOT HIP_PLATFORM STREQUAL "amd" AND NOT HIP_PLATFORM STREQUAL "nvidia")
   message(FATAL_ERROR "Unexpected HIP_PLATFORM: " ${HIP_PLATFORM})
 endif()
 
-execute_process(COMMAND ${HIPCONFIG_EXEC} --version
-                OUTPUT_VARIABLE HIP_VERSION
-                RESULT_VARIABLE result
-                OUTPUT_STRIP_TRAILING_WHITESPACE)
-
-if(result AND NOT result EQUAL 0)
-  message(FATAL_ERROR "Failure trying to obtain HIP version via command: ${HIPCONFIG_EXEC} --version: ${result}")
-endif()
 
 if(NOT WIN32)
   if(NOT BUILD_SHARED_LIBS)
@@ -149,12 +142,19 @@ list(GET VERSION_LIST 1 HIP_VERSION_MINOR)
 list(GET VERSION_LIST 2 HIP_VERSION_PATCH_GITHASH)
 string(REPLACE "-" ";" VERSION_LIST ${HIP_VERSION_PATCH_GITHASH})
 list(GET VERSION_LIST 0 HIP_VERSION_PATCH)
-list(GET VERSION_LIST 1 HIP_VERSION_GITHASH)
+list(LENGTH VERSION_LIST _version_list_len)
+if(_version_list_len GREATER 1)
+  list(GET VERSION_LIST 1 HIP_VERSION_GITHASH)
+else()
+  set(HIP_VERSION_GITHASH "")
+endif()
 
 if(DEFINED ENV{ROCM_LIBPATCH_VERSION})
   set(HIP_PACKAGING_VERSION_PATCH ${HIP_VERSION_PATCH}.$ENV{ROCM_LIBPATCH_VERSION})
-else()
+elseif(HIP_VERSION_GITHASH)
   set(HIP_PACKAGING_VERSION_PATCH ${HIP_VERSION_PATCH}-${HIP_VERSION_GITHASH})
+else()
+  set(HIP_PACKAGING_VERSION_PATCH ${HIP_VERSION_PATCH})
 endif()
 
 find_package(Catch2 3.8.1 QUIET)
