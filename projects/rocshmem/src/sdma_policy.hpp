@@ -46,7 +46,7 @@ class SdmaImpl {
   bool sdmaEnabled{true};
   // Dirty bitmask: bit [local_pe * numChannels + ch] set = channel ch has a
   // pending SDMA op to local_pe.  With up to 8 PEs × 8 channels = 64 bits.
-  uint64_t sdmaDirtyPECh{0};
+  uint64_t sdmaDirty{0};
   size_t sdmaThreshold{256};  // Use SDMA for transfers >= 256B
   int numChannels{1};
   int sdmaChannel{0};  // Per-context channel index (fallback / quietAll path)
@@ -94,21 +94,22 @@ class SdmaImpl {
       anvil::put(*handle, dst, src, size);
       // Mark (local_pe, effective_channel) dirty so sdmaQuiet drains the right channel.
       uint64_t bit = 1ULL << (local_pe * numChannels + effective_channel);
-      __hip_atomic_fetch_or(&sdmaDirtyPECh, bit, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
+      __hip_atomic_fetch_or(&sdmaDirty, bit, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
     }
     return handle;
   }
 
   // Wait for SDMA completions for a specific PE across all channels.
   // Atomically clears all (local_pe, ch) dirty bits and drains only the
-  // channels that had pending work.  No DeepEP changes required: the
-  // count-sending thread (which calls rocshmem_fence(pe)) is in the same CTA
-  // as the data-sending warp, so both see the same blockIdx — but we drain all
-  // channels here anyway to be safe against any channel-selection scheme.
+  // channels that had pending work on that context.
+  //
+  // .  The caller must use rocshmem_ctx_fence(ctx, pe)
+  // for it to read sdmaDirty from the same context (and SdmaImpl) that submitted the puts.
+  // ensuring sdmaDirty reflects the actual pending channels.
   __device__ void sdmaQuiet(int local_pe) {
     // Build mask covering all channels for this PE.
     uint64_t pe_mask = ((1ULL << numChannels) - 1) << (local_pe * numChannels);
-    uint64_t was_dirty = __hip_atomic_fetch_and(&sdmaDirtyPECh, ~pe_mask,
+    uint64_t was_dirty = __hip_atomic_fetch_and(&sdmaDirty, ~pe_mask,
                                                 __ATOMIC_RELAXED,
                                                 __HIP_MEMORY_SCOPE_AGENT) & pe_mask;
     if (!was_dirty) return;
@@ -122,10 +123,10 @@ class SdmaImpl {
   }
 
   // Wait for all SDMA completions across all PEs and channels.
-  // Iterates the sdmaDirtyPECh bitmask where each set bit corresponds to a
+  // Iterates the sdmaDirty bitmask where each set bit corresponds to a
   // (pe, channel) pair that has a pending SDMA op.
   __device__ void sdmaQuietAll() {
-    uint64_t dirty = __hip_atomic_exchange(&sdmaDirtyPECh, 0ULL, __ATOMIC_RELAXED,
+    uint64_t dirty = __hip_atomic_exchange(&sdmaDirty, 0ULL, __ATOMIC_RELAXED,
                                            __HIP_MEMORY_SCOPE_AGENT);
     while (dirty) {
       int bit = __builtin_ffsll(dirty) - 1;  // bit = pe * numChannels + ch
