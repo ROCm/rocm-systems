@@ -1042,7 +1042,7 @@ bool KernelBlitManager::copyBufferToImageKernel(
   Memory* dstView = &gpuMem(dstMemory);
   bool releaseView = false;
   bool result = false;
-  auto _clFmt0 = gpuMem(dstMemory).desc().format_; amd::Image::Format newFormat(amd::ImageFormat{static_cast<amd::ChannelOrder>(_clFmt0.image_channel_order), static_cast<amd::ChannelDataType>(_clFmt0.image_channel_data_type)});
+  auto _clFmt0 = gpuMem(dstMemory).desc().format_; amd::Image::Format newFormat(amd::ImageFormat{static_cast<amd::ChannelOrder>(_clFmt0.channelOrder), static_cast<amd::ChannelDataType>(_clFmt0.channelDataType)});
   bool swapLayer = dstView->desc().topology_ == amd::MemObjectType::Image1DArray;
 
   // Find unsupported formats
@@ -1360,7 +1360,7 @@ bool KernelBlitManager::copyImageToBufferKernel(
   Memory* srcView = &gpuMem(srcMemory);
   bool releaseView = false;
   bool result = false;
-  auto _clFmt0 = gpuMem(srcMemory).desc().format_; amd::Image::Format newFormat(amd::ImageFormat{static_cast<amd::ChannelOrder>(_clFmt0.image_channel_order), static_cast<amd::ChannelDataType>(_clFmt0.image_channel_data_type)});
+  auto _clFmt0 = gpuMem(srcMemory).desc().format_; amd::Image::Format newFormat(amd::ImageFormat{static_cast<amd::ChannelOrder>(_clFmt0.channelOrder), static_cast<amd::ChannelDataType>(_clFmt0.channelDataType)});
   bool swapLayer = srcView->desc().topology_ == amd::MemObjectType::Image1DArray;
 
   // Find unsupported formats
@@ -1501,8 +1501,8 @@ bool KernelBlitManager::copyImage(device::Memory& srcMemory, device::Memory& dst
   bool result = false;
   Memory* srcView = &gpuMem(srcMemory);
   Memory* dstView = &gpuMem(dstMemory);
-  auto _clSrc = srcView->desc().format_; amd::Image::Format srcFormat(amd::ImageFormat{static_cast<amd::ChannelOrder>(_clSrc.image_channel_order), static_cast<amd::ChannelDataType>(_clSrc.image_channel_data_type)});
-  auto _clDst = dstView->desc().format_; amd::Image::Format dstFormat(amd::ImageFormat{static_cast<amd::ChannelOrder>(_clDst.image_channel_order), static_cast<amd::ChannelDataType>(_clDst.image_channel_data_type)});
+  auto _clSrc = srcView->desc().format_; amd::Image::Format srcFormat(amd::ImageFormat{static_cast<amd::ChannelOrder>(_clSrc.channelOrder), static_cast<amd::ChannelDataType>(_clSrc.channelDataType)});
+  auto _clDst = dstView->desc().format_; amd::Image::Format dstFormat(amd::ImageFormat{static_cast<amd::ChannelOrder>(_clDst.channelOrder), static_cast<amd::ChannelDataType>(_clDst.channelDataType)});
   bool srcRejected = false, dstRejected = false;
   bool srcReleaseView = false, dstReleaseView = false;
 
@@ -2312,7 +2312,7 @@ bool KernelBlitManager::fillImage(device::Memory& memory, const void* pattern,
   bool rejected = false;
   bool releaseView = false;
   // For depth, we need to create a view
-  if (memView->desc().format_.image_channel_order == static_cast<uint32_t>(amd::ChannelOrder::sRGBA)) {
+  if (memView->desc().format_.channelOrder == amd::ChannelOrder::sRGBA) {
     // Find unsupported data type
     for (uint i = 0; i < RejectedFormatDataTotal; ++i) {
       if (RejectedData[i].clOldType_ == static_cast<uint32_t>(newFormat.channelDataType)) {
@@ -2322,7 +2322,7 @@ bool KernelBlitManager::fillImage(device::Memory& memory, const void* pattern,
       }
     }
 
-    if (gpuMem(memory).desc().format_.image_channel_order == static_cast<uint32_t>(amd::ChannelOrder::sRGBA)) {
+    if (gpuMem(memory).desc().format_.channelOrder == amd::ChannelOrder::sRGBA) {
       // Converting a linear RGB floating-point color value to a 8-bit unsigned integer sRGB value
       // because hw is not support write_imagef for sRGB.
       float* fColor = static_cast<float*>(newpattern);
