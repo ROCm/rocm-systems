@@ -181,11 +181,6 @@ struct manageable_aperture {
 	void *base;
 	void *limit;
 	uint64_t align;
-	uint32_t alignment_order; /* Alignment for mmap aperture allocations:
-			* alignment_size = PAGE_SIZE << alignment_order
-			* Not used by non-mmap apertures (left as 0,
-			* which would correspond to PAGE_SIZE alignment).
-			*/
 	uint32_t guard_pages;
 	vm_area_t *vm_ranges;
 	rbtree_t tree;
@@ -248,6 +243,9 @@ typedef struct {
 
 	/* whether all memory is coherent (GPU cache disabled) */
 	bool disable_cache;
+
+	/* specifies the alignment size as PAGE_SIZE * 2^alignment_order */
+	uint32_t alignment_order;
 } svm_t;
 
 struct hsa_kfd_fmm_context
@@ -293,7 +291,7 @@ struct hsa_kfd_fmm_context
 
 	/* amdgpu device handle for each gpu that libdrm uses */
 	struct amdgpu_device *amdgpu_handle[DRM_LAST_RENDER_NODE + 1 - DRM_FIRST_RENDER_NODE];
-};
+} fmm_kfd_context_t;
 
 struct hsa_kfd_fmm_context *hsakmt_kfdcontext_get_fmm_context(HsaKFDContext *ctx)
 {
@@ -325,6 +323,7 @@ struct hsa_kfd_fmm_context *hsakmt_kfdcontext_get_fmm_context(HsaKFDContext *ctx
 	ctx->fmm_context->svm.check_userptr = false;
 	ctx->fmm_context->svm.reserve_svm = false;
 	ctx->fmm_context->svm.disable_cache = false;
+	ctx->fmm_context->svm.alignment_order = 0;
 
 	/* Initialize cpuvm_aperture */
 	ctx->fmm_context->cpuvm_aperture = init_aperture;
@@ -872,7 +871,8 @@ static void *mmap_aperture_allocate_aligned(manageable_aperture_t *aper,
 					    uint64_t size, uint64_t align)
 {
 	uint64_t guard_size;
-	uint64_t alignment_size = PAGE_SIZE << aper->alignment_order;
+	svm_t *svm = container_of(aper, svm_t, apertures);
+	uint64_t alignment_size = PAGE_SIZE << svm->alignment_order;
 
 	if (!aper->is_cpu_accessible) {
 		pr_err("MMap Aperture must be CPU accessible\n");
@@ -1693,6 +1693,7 @@ static void* udmabuf_allocation(HsaKFDContext *ctx,
 	uint64_t guard_size;
 	void *mem;
 	int ret;
+	struct hsa_kfd_fmm_context *fmm_ctx = hsakmt_kfdcontext_get_fmm_context(ctx);
 
 	dmabuf_fd = -1;
 	memfd = -1;
@@ -1717,7 +1718,7 @@ static void* udmabuf_allocation(HsaKFDContext *ctx,
 		goto error_release_memfd;
 	}
 
-	alignment_size = PAGE_SIZE << aperture->alignment_order;
+	alignment_size = PAGE_SIZE << fmm_ctx->svm.alignment_order;
 	alignment = alignment ? alignment : aperture->align;
 	while (alignment < alignment_size && size >= (alignment << 1))
 		alignment <<= 1;
@@ -1742,11 +1743,11 @@ static void* udmabuf_allocation(HsaKFDContext *ctx,
 		goto error_release_aperture;
 
 	node_size = numa_node_size64(numa_node_id, &free_size);
-	pr_debug("udmabuf_allocation: numa_node_id %u, node_size %lld, free_size %lld\n",
+	pr_debug("udmabuf_allocation: numa_node_id %d, node_size %lld, free_size %lld\n",
 		numa_node_id, node_size, free_size);
 	/* compare free size at numa_node_id with size */
 	if ((uint64_t)free_size < size) {
-		pr_debug("udmabuf_allocation: has no enough ram on numa_node_id %u, node_size %lld, free_size %lld\n",
+		pr_debug("udmabuf_allocation: has no enough ram on numa_node_id %d, node_size %lld, free_size %lld\n",
 			numa_node_id, node_size, free_size);
 		goto error_release_aperture;
 	}
@@ -2000,7 +2001,7 @@ static int bind_mem_to_numa(uint32_t numa_node_id, void *mem,
 	int num_node;
 	long r;
 
-	pr_debug("%s mem %p flags 0x%x size 0x%lx node_id %u\n", __func__,
+	pr_debug("%s mem %p flags 0x%x size 0x%lx node_id %d\n", __func__,
 		mem, mflags.Value, SizeInBytes, numa_node_id);
 
 	if (mflags.ui32.NoNUMABind || numa_available() == -1) {
@@ -2015,7 +2016,7 @@ static int bind_mem_to_numa(uint32_t numa_node_id, void *mem,
 
 	/* Ignore binding requests to invalid nodes IDs */
 	if (numa_node_id >= (unsigned)num_node || numa_node_id == INVALID_NODEID || num_node <= 1) {
-		pr_warn("numa_node_id is out range: numa_node_id %u, num_node %d\n", numa_node_id, num_node);
+		pr_warn("numa_node_id is out range: numa_node_id %d, num_node %d\n", numa_node_id, num_node);
 		if (mflags.ui32.NoSubstitute)
 			return -EFAULT;
 		else
@@ -2357,16 +2358,10 @@ static HSAKMT_STATUS get_process_apertures(HsaKFDContext *ctx,
 
 int hsakmt_open_drm_render_device(HsaKFDContext *ctx, int minor)
 {
-	char path[128];
 	int index, fd, dev_init_ret;
 	uint32_t major_drm, minor_drm;
 	struct amdgpu_device **device_handle;
 	struct hsa_kfd_fmm_context *fmm_ctx = hsakmt_kfdcontext_get_fmm_context(ctx);
-
-	/* Bypass amdgpu if we're running a model. Return ctx->fd, which is the
-	 * backing for all our "GPU" memory. */
-	if (hsakmt_use_model)
-		return ctx->fd;
 
 	if (minor < DRM_FIRST_RENDER_NODE || minor > DRM_LAST_RENDER_NODE) {
 		pr_err("DRM render minor %d out of range [%d, %d]\n", minor,
@@ -2379,11 +2374,10 @@ int hsakmt_open_drm_render_device(HsaKFDContext *ctx, int minor)
 	if (fmm_ctx->drm_render_fds[index])
 		return fmm_ctx->drm_render_fds[index];
 
-	sprintf(path, "/dev/dri/renderD%d", minor);
-	fd = open(path, O_RDWR | O_CLOEXEC);
+	fd = hsakmt_drm_open_render(minor);
 	if (fd < 0) {
 		if (errno != ENOENT && errno != EPERM) {
-			pr_err("Failed to open %s: %s\n", path, strerror(errno));
+			pr_err("Failed to open render node %d: %s\n", minor, strerror(errno));
 			if (errno == EACCES)
 				pr_info("Check user is in \"video\" group\n");
 		}
@@ -2403,7 +2397,7 @@ int hsakmt_open_drm_render_device(HsaKFDContext *ctx, int minor)
 	 *    its own VM space).
 	*/
 	if (ctx->hsakmt_is_primary_ctx)
-		dev_init_ret = amdgpu_device_initialize(fd, &major_drm, &minor_drm, device_handle);
+		dev_init_ret = hsakmt_amdgpu_device_initialize(fd, &major_drm, &minor_drm, device_handle);
 	else if (hsakmt_fn_amdgpu_device_initialize2)
 		dev_init_ret = hsakmt_fn_amdgpu_device_initialize2(fd, false, &major_drm, &minor_drm,
 						    (HsaAMDGPUDeviceHandle *)device_handle);
@@ -2417,16 +2411,15 @@ int hsakmt_open_drm_render_device(HsaKFDContext *ctx, int minor)
 		/* if amdgpu_device_get_fd available query render fd that libdrm uses,
 		 * then close drm_render_fds above, replace it by fd libdrm uses.
 		 */
-		if (hsakmt_fn_amdgpu_device_get_fd) {
-			fd = hsakmt_fn_amdgpu_device_get_fd(*device_handle);
-			if (fd > 0) {
-				close(fmm_ctx->drm_render_fds[index]);
-				fmm_ctx->drm_render_fds[index] = fd;
-			} else {
-				pr_err("amdgpu_device_get_fd failed: %d\n", fd);
-				amdgpu_device_deinitialize(*device_handle);
-				*device_handle = 0;
-			}
+		int libdrm_fd = hsakmt_amdgpu_device_get_fd(*device_handle);
+		if (libdrm_fd > 0) {
+			close(fmm_ctx->drm_render_fds[index]);
+			fmm_ctx->drm_render_fds[index] = libdrm_fd;
+			fd = libdrm_fd;
+		} else {
+			pr_err("amdgpu_device_get_fd failed: %d\n", libdrm_fd);
+			hsakmt_amdgpu_device_deinitialize(*device_handle);
+			*device_handle = 0;
 		}
 	}
 
@@ -2450,8 +2443,7 @@ static HSAKMT_STATUS acquire_vm(HsaKFDContext *ctx, uint32_t gpu_id, int fd)
 
 static HSAKMT_STATUS init_mmap_apertures(svm_t *svm,
 					 HSAuint64 base, HSAuint64 limit,
-					 HSAuint32 align, HSAuint32 guard_pages,
-					 uint32_t alignment_order)
+					 HSAuint32 align, HSAuint32 guard_pages)
 {
 	void *addr;
 
@@ -2468,7 +2460,6 @@ static HSAKMT_STATUS init_mmap_apertures(svm_t *svm,
 	svm->apertures[SVM_DEFAULT].base  = (void *)base;
 	svm->apertures[SVM_DEFAULT].limit = (void *)limit;
 	svm->apertures[SVM_DEFAULT].align = align;
-	svm->apertures[SVM_DEFAULT].alignment_order = alignment_order;
 	svm->apertures[SVM_DEFAULT].guard_pages = guard_pages;
 	svm->apertures[SVM_DEFAULT].is_cpu_accessible = true;
 	svm->apertures[SVM_DEFAULT].ops = &mmap_aperture_ops;
@@ -2526,8 +2517,7 @@ static void *reserve_address(void *addr, unsigned long long int len)
 
 static HSAKMT_STATUS init_svm_apertures(struct hsa_kfd_fmm_context *fmm_ctx,
 					HSAuint64 base, HSAuint64 limit,
-					HSAuint32 align, HSAuint32 guard_pages,
-					uint32_t alignment_order)
+					HSAuint32 align, HSAuint32 guard_pages)
 {
 	const HSAuint64 ADDR_INC = GPU_HUGE_PAGE_SIZE;
 	HSAuint64 len, map_size, alt_base, alt_size;
@@ -2554,8 +2544,7 @@ static HSAKMT_STATUS init_svm_apertures(struct hsa_kfd_fmm_context *fmm_ctx,
 	 */
 	if (limit >= (1ULL << 47) - 1 && !svm->reserve_svm) {
 		HSAKMT_STATUS status = init_mmap_apertures(svm, base, limit, align,
-							   guard_pages,
-							   alignment_order);
+							   guard_pages);
 
 		if (status == HSAKMT_STATUS_SUCCESS)
 			return status;
@@ -2721,7 +2710,7 @@ static void *map_mmio(HsaKFDContext *ctx,
 	pthread_mutex_unlock(&aperture->fmm_mutex);
 
 	if (hsakmt_use_model) {
-		model_set_mmio_page(mem);
+		/* FFM handles MMIO internally */
 		return mem;
 	}
 
@@ -2787,8 +2776,7 @@ static bool two_apertures_overlap(void *start_1, void *limit_1, void *start_2, v
     return (start_1 >= start_2 && start_1 <= limit_2) || (start_2 >= start_1 && start_2 <= limit_1);
 }
 
-static bool init_mem_handle_aperture(struct hsa_kfd_fmm_context *fmm_ctx,
-				 HSAuint32 align, HSAuint32 guard_pages)
+static bool init_mem_handle_aperture(struct hsa_kfd_fmm_context *fmm_ctx, HSAuint32 align, HSAuint32 guard_pages)
 {
 	bool found;
 	uint32_t i;
@@ -2831,7 +2819,7 @@ static bool init_mem_handle_aperture(struct hsa_kfd_fmm_context *fmm_ctx,
 					mem_handle_aper->base, mem_handle_aper->limit);
 			return true;
 		} else {
-			/* increase base by 1ULL<<56 to check next hole */
+			/* increase base by 1UL<<56 to check next hole */
 			mem_handle_aper->base =  VOID_PTR_ADD(mem_handle_aper->base, (1ULL << 56));
 			mem_handle_aper->limit = VOID_PTR_ADD(mem_handle_aper->base, (1ULL << 56));
 		}
@@ -2899,20 +2887,18 @@ HSAKMT_STATUS hsakmt_fmm_init_process_apertures(HsaKFDContext *ctx,
 	 * size is set to 18(1G) for GFX950 to reduce TLB hits. If any non-gfx950
 	 * ASIC is found in the system, set back to 9(2MB).
 	 */
-	uint32_t svm_alignment_order;
-
 	maxVaAlignStr = getenv("HSA_MAX_VA_ALIGN");
-	if (!maxVaAlignStr || sscanf(maxVaAlignStr, "%u", &svm_alignment_order) != 1) {
-		svm_alignment_order = 18;
+	if (!maxVaAlignStr || sscanf(maxVaAlignStr, "%u", &fmm_ctx->svm.alignment_order) != 1) {
+		fmm_ctx->svm.alignment_order = 18;
 
 		for (i = 0; i < NumNodes; i++) {
 			if (hsakmt_get_gfxv_by_node_id(ctx, i) != GFX_VERSION_GFX950) {
-				svm_alignment_order = 9;
+				fmm_ctx->svm.alignment_order = 9;
 				break;
 			}
 		}
 	}
-	pr_info("SVM alignment default order is %u.", svm_alignment_order);
+	pr_info("SVM alignment default order is %d.", fmm_ctx->svm.alignment_order);
 
 	/* Trade off - NumNodes includes GPU nodes + CPU Node. So in
 	 * systems with CPU node, slightly more memory is allocated than
@@ -3126,7 +3112,7 @@ HSAKMT_STATUS hsakmt_fmm_init_process_apertures(HsaKFDContext *ctx,
 		 * space. Set up SVM apertures shared by all such GPUs
 		 */
 		ret = init_svm_apertures(fmm_ctx, svm_base, svm_limit, svm_alignment,
-					 guardPages, svm_alignment_order);
+					 guardPages);
 		if (ret != HSAKMT_STATUS_SUCCESS)
 			goto init_svm_failed;
 
@@ -3534,7 +3520,7 @@ static HSAKMT_STATUS _fmm_map_to_gpu_userptr(HsaKFDContext *ctx,
 			nodes_to_map = fmm_ctx->all_gpu_id_array;
 			nodes_array_size = fmm_ctx->all_gpu_id_array_size;
 		}
-		pr_debug("%s Mapping Address %p size aligned: %lu offset: %x\n",
+		pr_debug("%s Mapping Address %p size aligned: %ld offset: %x\n",
 			__func__, svm_addr, PAGE_ALIGN_UP(page_offset + size), page_offset);
 		ret = fmm_map_mem_svm_api(ctx, svm_addr,
 						  PAGE_ALIGN_UP(page_offset + size),
@@ -3620,10 +3606,10 @@ static void print_device_id_array(uint32_t *device_id_array, uint32_t device_id_
 #ifdef DEBUG_PRINT_APERTURE
 	device_id_array_size /= sizeof(uint32_t);
 
-	pr_info("device id array size %u\n", device_id_array_size);
+	pr_info("device id array size %d\n", device_id_array_size);
 
 	for (uint32_t i = 0 ; i < device_id_array_size; i++)
-		pr_info("%u . 0x%x\n", (i+1), device_id_array[i]);
+		pr_info("%d . 0x%x\n", (i+1), device_id_array[i]);
 #endif
 }
 
@@ -4358,23 +4344,14 @@ HSAKMT_STATUS hsakmt_fmm_deregister_memory(HsaKFDContext *ctx, void *address)
 	vm_object_t *object;
 	struct hsa_kfd_fmm_context *fmm_ctx = hsakmt_kfdcontext_get_fmm_context(ctx);
 
-	/* Unknown addresses are a no-op when not using dGPUs or when using SVM. */
-	bool require_registered_mem = hsakmt_is_dgpu && !ctx->hsakmt_is_svm_api_supported;
-
 	object = vm_find_object(fmm_ctx, address, 0, &aperture);
-	if (!object && require_registered_mem) {
-		/* The size=0 lookup rejects an address with more than one userptr
-		 * node (e.g. a single host VA registered with different pinAllocSize).
-		 * The HSA deregister API only takes an address, so fall back to the
-		 * range-based lookup which tolerates duplicates and releases any one
-		 * node whose range contains that address.
-		 */
-		object = vm_find_object(fmm_ctx, address, UINT64_MAX, &aperture);
-	}
 	if (!object)
-		return require_registered_mem ?
-			HSAKMT_STATUS_MEMORY_NOT_REGISTERED :
-			HSAKMT_STATUS_SUCCESS;
+		/* On APUs we assume it's a random system memory address
+		 * where registration and dergistration is a no-op
+		 */
+		return (!hsakmt_is_dgpu || ctx->hsakmt_is_svm_api_supported) ?
+			HSAKMT_STATUS_SUCCESS :
+			HSAKMT_STATUS_MEMORY_NOT_REGISTERED;
 	/* Successful vm_find_object returns with aperture locked */
 
 	if (aperture == &fmm_ctx->cpuvm_aperture) {
@@ -4730,7 +4707,7 @@ void hsakmt_fmm_clear_all_mem(HsaKFDContext *ctx)
 	for (i = 0; i <= DRM_LAST_RENDER_NODE - DRM_FIRST_RENDER_NODE; i++) {
 
 		if (fmm_ctx->amdgpu_handle[i]) {
-			amdgpu_device_deinitialize(fmm_ctx->amdgpu_handle[i]);
+			hsakmt_amdgpu_device_deinitialize(fmm_ctx->amdgpu_handle[i]);
 			fmm_ctx->amdgpu_handle[i] = NULL;
 		} else if (fmm_ctx->drm_render_fds[i]) {
 			close(fmm_ctx->drm_render_fds[i]);

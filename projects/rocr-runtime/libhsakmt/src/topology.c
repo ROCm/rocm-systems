@@ -1075,24 +1075,24 @@ static int topology_get_node_props_from_drm(HsaNodeProperties *props)
 	if (props == NULL)
 		return -1;
 
-	drm_fd = drmOpenRender(props->DrmRenderMinor);
+	drm_fd = hsakmt_drm_open_render(props->DrmRenderMinor);
 	if (drm_fd < 0)
 		return -1;
 
-	if (amdgpu_device_initialize(drm_fd,
+	if (hsakmt_amdgpu_device_initialize(drm_fd,
 		&major_version, &minor_version, &device_handle) < 0) {
 		ret = -1;
 		goto err_device_initialize;
 	}
 
-	name = amdgpu_get_marketing_name(device_handle);
+	name = hsakmt_amdgpu_get_marketing_name(device_handle);
 	if (name != NULL) {
 		for (i = 0; name[i] != 0 && i < HSA_PUBLIC_NAME_SIZE - 1; i++)
 			props->MarketingName[i] = name[i];
 		props->MarketingName[i] = '\0';
 	}
 
-	if (amdgpu_query_gpu_info(device_handle, &gpu_info)) {
+	if (hsakmt_amdgpu_query_gpu_info(device_handle, &gpu_info)) {
 		ret = -1;
 		goto err_query_gpu_info;
 	}
@@ -1102,9 +1102,9 @@ static int topology_get_node_props_from_drm(HsaNodeProperties *props)
 	props->WallClockKHz = gpu_info.gpu_counter_freq;
 
 err_query_gpu_info:
-	amdgpu_device_deinitialize(device_handle);
+	hsakmt_amdgpu_device_deinitialize(device_handle);
 err_device_initialize:
-	drmClose(drm_fd);
+	hsakmt_drm_close(drm_fd);
 	return ret;
 }
 
@@ -1311,9 +1311,34 @@ static HSAKMT_STATUS topology_sysfs_get_node_props(HsaKFDContext *ctx,
 
 		/* Is dGPU Node, not APU
 		 * Retrieve the marketing name of the node.
+		 * Skip under the HSA model -- the DRM render node belongs
+		 * to the physical GPU, not the modelled one, so querying
+		 * it would report the wrong MarketingName, FamilyID, etc.
+		 * Instead, read the name from the model topology directory.
 		 */
-		if (topology_get_node_props_from_drm(props))
+		if (hsakmt_use_model) {
+			FILE *name_fd;
+			char name_buf[HSA_PUBLIC_NAME_SIZE] = {0};
+
+			snprintf(path, sizeof(path), KFD_SYSFS_PATH_NODES "/%d/name",
+				 get_topology_dir(), sys_node_id);
+			name_fd = fopen(path, "r");
+			if (name_fd) {
+				if (fgets(name_buf, sizeof(name_buf), name_fd)) {
+					int i;
+					for (i = 0; name_buf[i] && name_buf[i] != '\n'; i++)
+						;
+					name_buf[i] = '\0';
+
+					for (i = 0; name_buf[i] && i < HSA_PUBLIC_NAME_SIZE - 1; i++)
+						props->MarketingName[i] = (HSAuint16)name_buf[i];
+					props->MarketingName[i] = '\0';
+				}
+				fclose(name_fd);
+			}
+		} else if (topology_get_node_props_from_drm(props)) {
 			pr_info("failed to get marketing name for device ID 0x%x\n", props->DeviceId);
+		}
 
 		/* Get VGPR/SGPR size in byte per CU */
 		props->SGPRSizePerCU = hsakmt_get_sgpr_size_per_cu(HSA_GET_GFX_VERSION_FULL(props->EngineId.ui32));

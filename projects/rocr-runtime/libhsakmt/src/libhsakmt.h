@@ -41,6 +41,7 @@ extern bool hsakmt_forked;
 extern pthread_mutex_t hsakmt_mutex;
 extern bool hsakmt_is_dgpu;
 extern int hsakmt_zfb_support;
+extern int hsakmt_pm4_target_xcc;
 
 extern HsaVersionInfo hsakmt_kfd_version_info;
 extern HsaKFDContext hsakmt_primary_kfd_ctx;
@@ -138,6 +139,11 @@ extern int hsakmt_debug_level;
 #define HSA_GET_GFX_VERSION_MINOR(gfxv)   (((gfxv) / 100) % 100)
 #define HSA_GET_GFX_VERSION_STEP(gfxv)    ((gfxv) % 100)
 
+/* Expects gfxv (full) in hexadecimal */
+#define HSA_GET_GFX_VERSION_HEX_MAJOR(gfxv)   (((gfxv) >> 16) & 0xff)
+#define HSA_GET_GFX_VERSION_HEX_MINOR(gfxv)   (((gfxv) >> 8) & 0xff)
+#define HSA_GET_GFX_VERSION_HEX_STEP(gfxv)    ((gfxv) & 0xff)
+
 /* Expects HSA_ENGINE_ID.ui32, returns gfxv (full) in hex */
 #define HSA_GET_GFX_VERSION_FULL(ui32) \
 	(((ui32.Major) << 16) | ((ui32.Minor) << 8) | (ui32.Stepping))
@@ -176,7 +182,11 @@ enum full_gfx_versions {
 	GFX_VERSION_GFX1151		= 0x0B0501,
 	GFX_VERSION_GFX1200		= 0x0C0000,
 	GFX_VERSION_GFX1201		= 0x0C0001,
-	GFX_VERSION_GFX1250		= 0x0C0500
+	GFX_VERSION_GFX1250		= 0x0C0500,
+	GFX_VERSION_GFX1251		= 0x0C0501,
+	GFX_VERSION_GFX1260		= 0x0C0600,
+	GFX_VERSION_GFX131F		= 0x0D010F,
+	GFX_VERSION_GFX1370		= 0x0D0700,
 };
 
 struct hsa_gfxip_table {
