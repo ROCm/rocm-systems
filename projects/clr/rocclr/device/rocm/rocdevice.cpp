@@ -3707,6 +3707,7 @@ void Device::HiddenHeapInit(const VirtualGPU& gpu) {
     return result;
   };
   std::call_once(heap_initialized_, HeapZeroOut);
+  heap_init_complete_.store(true, std::memory_order_release);
 }
 
 // ================================================================================================
