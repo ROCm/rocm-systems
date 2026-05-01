@@ -1474,7 +1474,7 @@ main(int argc, char** argv)
     process_modules(filtered_modules);
 
     verbprintf(1, "Getting available procedures based on filtered modules...\n");
-    std::vector<procedure_t*>* app_functions =
+    std::vector<procedure_t*> app_functions =
         get_procedures(app_image, &filtered_modules, include_uninstr);
 
     //----------------------------------------------------------------------------------//
@@ -1508,9 +1508,9 @@ main(int argc, char** argv)
         }
     };
 
-    if(app_functions && !app_functions->empty())
+    if(!app_functions.empty())
     {
-        for(auto* itr : *app_functions)
+        for(auto* itr : app_functions)
         {
             if(itr->getModule())
             {

@@ -31,6 +31,7 @@ from .amdsmi_interface import amdsmi_get_socket_handles
 from .amdsmi_interface import amdsmi_get_socket_info
 from .amdsmi_interface import amdsmi_get_processor_count_from_handles
 from .amdsmi_interface import amdsmi_get_processor_handles_by_type
+from .amdsmi_interface import amdsmi_get_processor_info
 from .amdsmi_interface import amdsmi_get_node_handle
 from .amdsmi_interface import amdsmi_get_npm_info
 
@@ -39,7 +40,6 @@ try:
     from .amdsmi_interface import amdsmi_get_cpu_handles
     from .amdsmi_interface import amdsmi_get_cpusocket_handles  # Deprecate in 8.0
     from .amdsmi_interface import amdsmi_get_cpucore_handles
-    from .amdsmi_interface import amdsmi_get_processor_info
     from .amdsmi_interface import amdsmi_get_cpu_hsmp_proto_ver
     from .amdsmi_interface import amdsmi_get_cpu_smu_fw_version
     from .amdsmi_interface import amdsmi_get_cpu_core_energy

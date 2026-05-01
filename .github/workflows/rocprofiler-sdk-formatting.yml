@@ -5,24 +5,7 @@ permissions:
   contents: read
 
 on:
-  workflow_dispatch:
-  pull_request:
-    paths:
-      - 'projects/rocprofiler-sdk/**'
-      - '!**/*.md'
-      - '!**/*.rtf'
-      - '!**/*.rst'
-      - '!**/.markdownlint-ci2.yaml'
-      - '!**/.readthedocs.yaml'
-      - '!**/.spellcheck.local.yaml'
-      - '!**/.wordlist.txt'
-      - '!projects/rocprofiler-sdk/.github/workflows/pull_*.yml'
-      - '!projects/rocprofiler-sdk/.github/workflows/linting.yml'
-      - '!projects/rocprofiler-sdk/.github/workflows/markdown_lint.yml'
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  workflow_call:
 
 jobs:
   cmake:
