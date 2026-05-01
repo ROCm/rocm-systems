@@ -573,6 +573,19 @@ void expect_rdna3_s_mov_b64(uint32_t word, uint8_t sdst, uint16_t ssrc0) {
 
 std::array<uint32_t, 2> make_cdna4_v_accvgpr_read() { return {0xD3D80000u, 0x00000000u}; }
 
+std::array<uint32_t, 2> make_cdna4_v_accvgpr_write() { return {0xD3D90000u, 0x00000000u}; }
+
+std::array<uint32_t, 1> make_cdna4_v_accvgpr_mov_b32_e32() {
+  rocjitsu::cdna4::Vop1MachineInst src{};
+  src.src0 = 0;
+  src.op = 82;
+  src.vdst = 0;
+  src.encoding = rocjitsu::kEnc_VOP1 >> 2;
+  return {std::bit_cast<uint32_t>(src)};
+}
+
+std::array<uint32_t, 2> make_cdna4_v_mfma_f32_16x16x16_f16() { return {0xD3CD0000u, 0x00000000u}; }
+
 uint32_t make_cdna4_s_mov_b32(uint8_t sdst, uint8_t ssrc0) {
   rocjitsu::cdna4::Sop1MachineInst src{};
   src.ssrc0 = ssrc0;
@@ -714,6 +727,31 @@ std::vector<uint32_t> first_text_words(const rocjitsu::AmdGpuCodeObject &co) {
   words.resize(text->size() / sizeof(uint32_t));
   std::memcpy(words.data(), text->data(), words.size() * sizeof(uint32_t));
   return words;
+}
+
+void expect_unsupported_expansion_fails_closed(std::span<const uint32_t> unsupported_source,
+                                               std::string_view expected_mnemonic,
+                                               uint16_t expected_opcode) {
+  auto unsupported_inst = decode_cdna4(unsupported_source);
+  ASSERT_NE(unsupported_inst, nullptr);
+  ASSERT_EQ(std::string_view(unsupported_inst->mnemonic()), expected_mnemonic);
+  ASSERT_EQ(unsupported_inst->opcode(), expected_opcode);
+
+  std::vector<uint32_t> source_words(unsupported_source.begin(), unsupported_source.end());
+  source_words.push_back(make_cdna4_sopp(1, 0));
+  source_words.push_back(rocjitsu::build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4));
+  source_words.push_back(rocjitsu::build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4));
+
+  const auto elf = make_minimal_amdgpu_elf(source_words);
+  rocjitsu::AmdGpuCodeObject co(elf.data(), elf.size());
+  ASSERT_TRUE(co.is_valid());
+
+  rocjitsu::BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA3);
+  const auto result = translator.translate(co);
+  EXPECT_TRUE(result.elf_bytes.empty());
+  EXPECT_TRUE(warnings_contain(result.warnings, "unsupported expansion"));
+  EXPECT_TRUE(warnings_contain(result.warnings, expected_mnemonic));
+  EXPECT_TRUE(warnings_contain(result.warnings, "opcode=" + std::to_string(expected_opcode)));
 }
 
 } // namespace
@@ -1468,31 +1506,29 @@ TEST(BinaryTranslatorExpansion, ExhaustedNopPaddingFailsClosed) {
 
 TEST(BinaryTranslatorExpansion, UnsupportedExpandFailsClosed) {
   const auto unsupported_source = make_cdna4_v_accvgpr_read();
+  expect_unsupported_expansion_fails_closed(unsupported_source, "v_accvgpr_read", 88);
+
   auto unsupported_inst = decode_cdna4(unsupported_source);
   ASSERT_NE(unsupported_inst, nullptr);
-  ASSERT_EQ(std::string_view(unsupported_inst->mnemonic()), "v_accvgpr_read");
-  ASSERT_EQ(unsupported_inst->opcode(), 88);
   const auto *leg = rocjitsu::lookup(rocjitsu::kLegalization_cdna4_to_rdna3,
                                      unsupported_inst->encoding_id(), unsupported_inst->opcode());
   ASSERT_NE(leg, nullptr);
   ASSERT_EQ(leg->action, rocjitsu::Action::Expand);
+}
 
-  const std::vector<uint32_t> source_words{
-      unsupported_source[0],
-      unsupported_source[1],
-      make_cdna4_sopp(1, 0),
-      rocjitsu::build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4),
-      rocjitsu::build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4),
-  };
-  const auto elf = make_minimal_amdgpu_elf(source_words);
-  rocjitsu::AmdGpuCodeObject co(elf.data(), elf.size());
-  ASSERT_TRUE(co.is_valid());
+TEST(BinaryTranslatorExpansion, UnsupportedAccvgprWriteFailsClosed) {
+  const auto unsupported_source = make_cdna4_v_accvgpr_write();
+  expect_unsupported_expansion_fails_closed(unsupported_source, "v_accvgpr_write", 89);
+}
 
-  rocjitsu::BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA3);
-  const auto result = translator.translate(co);
-  EXPECT_TRUE(result.elf_bytes.empty());
-  EXPECT_TRUE(warnings_contain(result.warnings, "unsupported expansion"));
-  EXPECT_TRUE(warnings_contain(result.warnings, "opcode=88"));
+TEST(BinaryTranslatorExpansion, UnsupportedAccvgprMovFailsClosed) {
+  const auto unsupported_source = make_cdna4_v_accvgpr_mov_b32_e32();
+  expect_unsupported_expansion_fails_closed(unsupported_source, "v_accvgpr_mov_b32_e32", 82);
+}
+
+TEST(BinaryTranslatorExpansion, UnsupportedMfmaLowerRowsFailClosed) {
+  const auto unsupported_source = make_cdna4_v_mfma_f32_16x16x16_f16();
+  expect_unsupported_expansion_fails_closed(unsupported_source, "v_mfma_f32_16x16x16_f16", 77);
 }
 
 TEST(BinaryTranslatorExpansion, RelocatedCavePaddingFailsClosed) {

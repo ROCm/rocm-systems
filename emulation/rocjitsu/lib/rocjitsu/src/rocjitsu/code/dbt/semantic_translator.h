@@ -86,6 +86,14 @@ public:
   [[nodiscard]] std::vector<uint32_t> try_lower_expand(const Instruction &inst, uint64_t offset,
                                                        const LivenessAnalysis &liveness) const;
 
+  /// @brief Whether an instruction is known to require semantic expansion.
+  ///
+  /// @details Used to fail closed when a required expansion rule matched the
+  /// instruction family but could not produce a defensible lowering. This also
+  /// guards generated legalization tables that contain duplicate Lower/Expand
+  /// rows for the same source instruction.
+  [[nodiscard]] bool requires_expansion(const Instruction &inst) const;
+
   [[nodiscard]] bool has_rules() const { return !expand_rules_.empty(); }
 
 private:

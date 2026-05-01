@@ -85,7 +85,8 @@ Bucket notes:
   translator.
 - The complex matrix/AccVGPR bucket is all `Action::Expand`: 66
   `VOP3P_MFMA` rows, `v_accvgpr_mov_b32_e32`, `v_accvgpr_mov_b32`,
-  `v_accvgpr_read`, and `v_accvgpr_write`.
+  `v_accvgpr_read`, and `v_accvgpr_write`. The detailed matrix/AccVGPR strategy and
+  unsupported disposition are in `cdna4-to-rdna3-mfma-accvgpr-strategy.md`.
 - MTBUF is residual because the generated encoder switch handles VOP2, VOPC,
   VOP1, SOP2, SOPK, SOP1, SOPC, SOPP, SMEM, VOP3, VOP3_SDST_ENC, VOP3P, DS,
   FLAT, and MUBUF, but not MTBUF.
@@ -133,11 +134,16 @@ Three CDNA4-to-RDNA3 semantic rule classes are wired:
 | `VOP3:v_lshl_add_u64` | Size-expanding rewrite | Emits `v_add_co_u32` and `v_add_co_ci_u32`. The RDNA3 path deliberately skips the RDNA4-only `s_wait_alu`. |
 | `VOPC/VOP3:v_cmp_f/t/tru_*`, `v_cmpx_f/t/tru_*` rows whose generated legalization action is `Expand` | Size-expanding or same-size semantic rewrite | Emits scalar mask moves for the removed constant predicates: false writes zero, true copies `exec`, and false `cmpx` also clears `exec`. |
 
-Unhandled `Action::Expand` rows warn and NOP-fill in `BinaryTranslator`.
-Unhandled encoding families whose `Action` is not Expand can fall back to
+Unhandled `Action::Expand` rows now fail closed in `BinaryTranslator`.
+Unhandled encoding families whose `Action` is not Expand can still fall back to
 source-copy behavior when `translate_encoding_cdna4_to_rdna3()` returns an empty
 translation result. That makes MTBUF and unsupported diagnostics separate
 follow-up work even though this taxonomy is complete.
+
+The matrix/AccVGPR guard adds a CDNA4-to-RDNA3 semantic guard for `v_mfma_*`, `v_smfmac_*`, and
+`v_accvgpr_*` rows so duplicate generated `Lower` rows in the alias-expanded
+legalization table cannot silently reach the encoding translator. These rows now
+fail closed until the documented matrix/AccVGPR strategy is implemented.
 
 ## Recommended Implementation Breakdown
 

@@ -166,24 +166,22 @@ constexpr uint16_t kInlineConst0 = 128;
   return text.size() >= suffix.size() && text.substr(text.size() - suffix.size()) == suffix;
 }
 
-enum class RemovedCompareKind : uint8_t {
-  None,
-  FalseMask,
-  TrueMask,
-  CmpxFalseMask,
-  CmpxTrueMask,
-};
+[[nodiscard]] bool is_removed_compare_false(std::string_view mnemonic) {
+  return starts_with(mnemonic, "v_cmp_f_") || starts_with(mnemonic, "v_cmpx_f_");
+}
 
-[[nodiscard]] RemovedCompareKind classify_removed_compare(std::string_view mnemonic) {
-  if (starts_with(mnemonic, "v_cmpx_f_"))
-    return RemovedCompareKind::CmpxFalseMask;
-  if (starts_with(mnemonic, "v_cmpx_t_") || starts_with(mnemonic, "v_cmpx_tru_"))
-    return RemovedCompareKind::CmpxTrueMask;
-  if (starts_with(mnemonic, "v_cmp_f_"))
-    return RemovedCompareKind::FalseMask;
-  if (starts_with(mnemonic, "v_cmp_t_") || starts_with(mnemonic, "v_cmp_tru_"))
-    return RemovedCompareKind::TrueMask;
-  return RemovedCompareKind::None;
+[[nodiscard]] bool is_removed_compare_true(std::string_view mnemonic) {
+  return starts_with(mnemonic, "v_cmp_t_") || starts_with(mnemonic, "v_cmp_tru_") ||
+         starts_with(mnemonic, "v_cmpx_t_") || starts_with(mnemonic, "v_cmpx_tru_");
+}
+
+[[nodiscard]] bool is_cmpx_compare(std::string_view mnemonic) {
+  return starts_with(mnemonic, "v_cmpx_");
+}
+
+[[nodiscard]] bool is_cdna4_matrix_or_accvgpr(std::string_view mnemonic) {
+  return starts_with(mnemonic, "v_mfma_") || starts_with(mnemonic, "v_smfmac_") ||
+         starts_with(mnemonic, "v_accvgpr_");
 }
 
 // ---------------------------------------------------------------------------
@@ -244,8 +242,9 @@ std::vector<uint32_t> lower_removed_compare_predicate(const Instruction &inst) {
     return {};
 
   const std::string_view mnemonic(inst.mnemonic());
-  const RemovedCompareKind kind = classify_removed_compare(mnemonic);
-  if (kind == RemovedCompareKind::None)
+  const bool false_predicate = is_removed_compare_false(mnemonic);
+  const bool true_predicate = is_removed_compare_true(mnemonic);
+  if (!false_predicate && !true_predicate)
     return {};
 
   const auto *raw = inst.raw_encoding();
@@ -262,21 +261,12 @@ std::vector<uint32_t> lower_removed_compare_predicate(const Instruction &inst) {
   }
 
   std::vector<uint32_t> words;
-  switch (kind) {
-  case RemovedCompareKind::FalseMask:
+  if (false_predicate) {
     words.push_back(build_s_mov_b64(dest, kInlineConst0));
-    break;
-  case RemovedCompareKind::CmpxFalseMask:
-    words.push_back(build_s_mov_b64(dest, kInlineConst0));
-    if (dest != kExecLo)
+    if (is_cmpx_compare(mnemonic) && dest != kExecLo)
       words.push_back(build_s_mov_b64(kExecLo, kInlineConst0));
-    break;
-  case RemovedCompareKind::TrueMask:
-  case RemovedCompareKind::CmpxTrueMask:
+  } else {
     words.push_back(build_s_mov_b64(dest, kExecLo));
-    break;
-  case RemovedCompareKind::None:
-    break;
   }
   return words;
 }
@@ -576,6 +566,20 @@ std::vector<uint32_t> SemanticTranslator::try_lower_expand(const Instruction &in
   if (guest_arch_ == ROCJITSU_CODE_ARCH_CDNA4 && host_arch_ == ROCJITSU_CODE_ARCH_RDNA3)
     return lower_removed_compare_predicate(inst);
   return {};
+}
+
+bool SemanticTranslator::requires_expansion(const Instruction &inst) const {
+  const uint16_t eid = inst.encoding_id();
+  const uint16_t op = inst.opcode();
+  TranslationRule key{eid, op, RuleAction::Expand, 0, 0, nullptr, nullptr, nullptr, nullptr};
+  auto it = std::lower_bound(expand_rules_.begin(), expand_rules_.end(), key);
+  if (it != expand_rules_.end() && it->src_encoding_id == eid && it->src_opcode == op)
+    return true;
+
+  if (guest_arch_ == ROCJITSU_CODE_ARCH_CDNA4 && host_arch_ == ROCJITSU_CODE_ARCH_RDNA3)
+    return is_cdna4_matrix_or_accvgpr(inst.mnemonic());
+
+  return false;
 }
 
 } // namespace rocjitsu

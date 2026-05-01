@@ -344,6 +344,15 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
           }
         }
 
+        if (semantic_translator_->requires_expansion(inst)) {
+          result.warnings.push_back("fatal: unsupported expansion for " +
+                                    std::string(inst.mnemonic()) + " at .text+" +
+                                    hex_u64(offset) + " (encoding_id=" +
+                                    std::to_string(inst.encoding_id()) +
+                                    ", opcode=" + std::to_string(inst.opcode()) + ")");
+          return fail_closed();
+        }
+
         if (leg && leg->action == Action::Expand) {
           result.warnings.push_back("fatal: unsupported expansion for " +
                                     std::string(inst.mnemonic()) + " at .text+" +
