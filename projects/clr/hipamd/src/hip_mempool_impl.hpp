@@ -170,22 +170,18 @@ class Heap : public amd::EmbeddedObject {
   }
 
   /// Increments refcount for the given memory allocation
-  bool IncrementRefCount(amd::Memory* memory) {
+  void IncrementRefCount(amd::Memory* memory) {
     if (auto it = allocations_.find({memory->getSize(), memory}); it != allocations_.end()) {
       it->second.refcount_++;
-      return true;
     }
-    return false;
   }
 
   /// Decrements refcount for the given memory allocation
-  bool DecrementRefCount(amd::Memory* memory) {
+  void DecrementRefCount(amd::Memory* memory) {
     if (auto it = allocations_.find({memory->getSize(), memory}); it != allocations_.end()) {
       assert(it->second.refcount_ > 0);
       it->second.refcount_--;
-      return true;
     }
-    return false;
   }
 
   /// Enabled VM heap for memory, instead of direct allocations
@@ -345,15 +341,17 @@ class MemoryPool : public amd::ReferenceCountedObject, amd::VmHeapArray {
   void SetGraphInUse() { state_.graph_in_use_ = true; }
 
   /// Increments refcount for the given memory in either busy or free heap
-  bool IncrementRefCount(amd::Memory* memory) {
+  void IncrementRefCount(amd::Memory* memory) {
     std::scoped_lock lock(lock_pool_ops_);
-    return busy_heap_.IncrementRefCount(memory) || free_heap_.IncrementRefCount(memory);
+    busy_heap_.IncrementRefCount(memory);
+    free_heap_.IncrementRefCount(memory);
   }
 
   /// Decrements refcount for the given memory in either busy or free heap
-  bool DecrementRefCount(amd::Memory* memory) {
+  void DecrementRefCount(amd::Memory* memory) {
     std::scoped_lock lock(lock_pool_ops_);
-    return busy_heap_.DecrementRefCount(memory) || free_heap_.DecrementRefCount(memory);
+    busy_heap_.DecrementRefCount(memory);
+    free_heap_.DecrementRefCount(memory);
   }
 
  private:
