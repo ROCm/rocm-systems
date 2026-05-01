@@ -148,7 +148,6 @@ static inline ncclResult_t getSideStream(cudaStream_t *stream) {
 }
 
 #if CUDART_VERSION >= 12020 || ROCM_VERSION >= 71200
-
 static inline ncclResult_t ncclCuMemHostAlloc(void** ptr, CUmemGenericAllocationHandle *handlep, size_t size) {
   ncclResult_t result = ncclSuccess;
   size_t granularity = 0;

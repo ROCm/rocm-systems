@@ -78,6 +78,11 @@ NCCL_DEVICE_INLINE void postGfd(Coop coop, ncclGinProxyGpuCtx_t* proxyCtx, ncclG
       __stwt((uint4*)&q[idx] + i, ((uint4*)gfd)[i]);
 #endif
     }
+#if defined(__HIP_PLATFORM_AMD__)
+    // HIP has no __stwt; without this fence GFD qwords land in L2 out-of-order and
+    // the host proxy spins forever on a partial descriptor (root cause of the GIN hang).
+    __threadfence_system();
+#endif
   }
 }
 
