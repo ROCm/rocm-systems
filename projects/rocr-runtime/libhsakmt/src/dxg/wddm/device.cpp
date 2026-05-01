@@ -246,7 +246,7 @@ hsa_status_t WDDMDevice::VramAvail(uint64_t* available_bytes) {
         memset(&stats, 0, sizeof(D3DKMT_QUERYSTATISTICS));
         stats.Type = D3DKMT_QUERYSTATISTICS_SEGMENT;
         stats.AdapterLuid = adapter_luid_;
-        stats.QuerySegment.SegmentId = segmentId;
+        stats.QuerySegment.SegmentId = seg_info.segment_id;
         ret = DXCORE_CALL(D3DKMTQueryStatistics(&stats));
         if (ret == 0)
           usedNonLocal += stats.QueryResult.SegmentInformation.BytesResident;
