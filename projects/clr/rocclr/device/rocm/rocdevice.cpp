@@ -1715,7 +1715,7 @@ bool Device::populateOCLDeviceConstants() {
   // devices with no cluster support; max size is 0
   info_.clusterMaxSize_ = 0;
 
-  hsa_status_t hsaStatus = hsa_agent_get_info(
+  hsa_status_t hsaStatus = Hsa::agent_get_info(
       bkendDevice_, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_CLUSTER_MAX_SIZE),
       &info_.clusterMaxSize_);
 

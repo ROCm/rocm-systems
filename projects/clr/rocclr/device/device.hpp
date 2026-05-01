@@ -710,7 +710,7 @@ class Settings : public amd::HeapObject {
       uint kernel_arg_impl_ : 2;              //!< Kernel argument implementation
       uint sdma_swap_supported_ : 1;         //!< SDMA linear swap copy (gfx94x/gfx95x)
       uint groupMemCarveout_ : 1;             //!< Group memory carveout functionality
-      uint reserved_ : 12;
+      uint reserved_ : 10;
     };
     uint value_;
   };
