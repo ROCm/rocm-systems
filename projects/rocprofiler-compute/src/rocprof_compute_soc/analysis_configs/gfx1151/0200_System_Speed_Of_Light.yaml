@@ -45,16 +45,17 @@ Panel Config:
         pop: Pct of Peak
       metric:
         # --- Throughput (gfx950-style: rates first) ---
-        VALU FLOPs (FP16):
-          value: SUM(SQ_INSTS_VALU_sum * 64) / SUM(End_Timestamp - Start_Timestamp)
-          unit: GFLOP/s
-          peak: ((($max_sclk * $cu_per_gpu) * 256) / 1000)
-          pop: 100 * SUM(SQ_INSTS_VALU_sum * 64) / SUM(End_Timestamp - Start_Timestamp) / ($max_sclk * $cu_per_gpu * 256 / 1000)
-        VALU FLOPs (FP32):
+        # Note: RDNA 3.5 counters cannot differentiate FP16/FP32; uses aggregate VALU counter.
+        VALU FLOPs:
           value: SUM(SQ_INSTS_VALU_sum * 64) / SUM(End_Timestamp - Start_Timestamp)
           unit: GFLOP/s
           peak: ((($max_sclk * $cu_per_gpu) * 128) / 1000)
           pop: 100 * SUM(SQ_INSTS_VALU_sum * 64) / SUM(End_Timestamp - Start_Timestamp) / ($max_sclk * $cu_per_gpu * 128 / 1000)
+        VALU FLOPs (F64):
+          value: SUM(SQ_INSTS_VALU_DP_sum * 64) / SUM(End_Timestamp - Start_Timestamp)
+          unit: GFLOP/s
+          peak: ((($max_sclk * $cu_per_gpu) * 4) / 1000)
+          pop: 100 * SUM(SQ_INSTS_VALU_DP_sum * 64) / SUM(End_Timestamp - Start_Timestamp) / ($max_sclk * $cu_per_gpu * 4 / 1000)
         IPC:
           value: SUM(SQ_INSTS_ALL_sum - SQ_INSTS_INTERNAL_sum) / SUM(SQ_BUSY_CYCLES_sum)
           unit: Instr/cycle
