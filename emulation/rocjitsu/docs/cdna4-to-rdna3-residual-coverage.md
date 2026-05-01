@@ -14,6 +14,9 @@ remaining unsupported paths as durable implementation categories.
 - CPU translator tests assert that translated RDNA3 ELF output has gfx1100
   `e_flags`, emits no warnings for the supported representative kernels, and
   decodes cleanly with the RDNA3 decoder.
+- CPU translator tests cover VGPR-backed MTBUF format-buffer translation,
+  including D16 mnemonic-order legalization and RDNA3 decode of the emitted
+  `tbuffer_*` instruction.
 - Matrix/AccVGPR representative coverage remains honest: CDNA4 MFMA to RDNA3
   fails closed with diagnostics linked to the existing matrix follow-ups.
 
@@ -35,9 +38,8 @@ left as a separate precision/performance recovery task.
 | Bucket | Status |
 | --- | --- |
 | Dense MFMA to RDNA3 WMMA | Unsupported; requires proven RDNA3 WMMA lowering or a software fallback. |
-| AccVGPR virtualization | Unsupported; requires supported AccVGPR remapping or matrix-idiom lowering. |
+| AccVGPR virtualization | Unsupported; requires supported AccVGPR remapping or matrix-idiom lowering, including MTBUF encodings with CDNA4 `acc=1`. |
 | Sparse SMFMAC | Unsupported; requires sparse metadata semantics and RDNA3 fallback analysis. |
-| MTBUF format-buffer rows | Unsupported; requires MTBUF format-buffer encoding support or an explicit unsupported diagnostic. The generated CDNA4-to-RDNA3 encoder has no `kEnc_MTBUF` case. |
 | Other non-matrix `Action::Expand` rows | Unsupported; requires per-family expansion lowering or an explicit unsupported diagnostic. |
 | Precise partial VM waitcnt performance | Correctness is conservative; partial-wait precision recovery is separate follow-up work. |
 
@@ -47,14 +49,15 @@ left as a separate precision/performance recovery task.
   fatal warning containing mnemonic, `.text` offset, `encoding_id`, opcode, and
   the relevant unsupported category.
 - Any non-identity row whose generated encoder returns no instruction words now
-  fails closed instead of copying source bytes. This covers MTBUF Lower rows and
-  any future missing encoder case.
+  fails closed instead of copying source bytes. MTBUF now has an encoder; the
+  CDNA4 `acc=1` form deliberately returns no words because RDNA3 has no MTBUF
+  AccVGPR selector, producing a diagnostic tied to AccVGPR remapping.
 - Identity rows may still source-copy when the table explicitly classifies the
   row as binary-compatible.
 
 ## Deliberate Exclusions
 
-This change does not implement MTBUF, MFMA/AccVGPR, sparse matrix, or broad
+This change does not implement MFMA/AccVGPR, sparse matrix, or broad
 software-emulation lowerings. Those require family-specific semantics and tests;
 the translator rejects them with actionable diagnostics instead of emitting
 invalid RDNA3 code.

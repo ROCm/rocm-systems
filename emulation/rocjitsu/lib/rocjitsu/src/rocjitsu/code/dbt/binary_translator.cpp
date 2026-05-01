@@ -180,6 +180,8 @@ std::string unsupported_expansion_category(std::string_view mnemonic) {
     return " (unsupported category: sparse SMFMAC requires proven sparse metadata semantics and RDNA3 fallback analysis)";
   if (starts_with(mnemonic, "v_accvgpr_"))
     return " (unsupported category: AccVGPR operand remapping requires supported standalone transfer or matrix-idiom lowering)";
+  if (starts_with(mnemonic, "tbuffer_"))
+    return " (unsupported category: MTBUF format-buffer encoding translation)";
   return " (unsupported category: residual non-matrix expansion)";
 }
 
@@ -188,6 +190,16 @@ std::string unsupported_expansion_warning(const Instruction &inst, uint64_t offs
          hex_u64(offset) + " (encoding_id=" + std::to_string(inst.encoding_id()) +
          ", opcode=" + std::to_string(inst.opcode()) + ")" +
          unsupported_expansion_category(inst.mnemonic());
+}
+
+bool is_mtbuf_instruction(const Instruction &inst) {
+  return (inst.encoding_id() >= kEnc_MTBUF && inst.encoding_id() < kEnc_MTBUF + 8) ||
+         starts_with(inst.mnemonic(), "tbuffer_");
+}
+
+bool mtbuf_uses_accvgpr(const Instruction &inst) {
+  const uint32_t *raw = inst.raw_encoding();
+  return raw && inst.size() >= 8 && ((raw[1] >> 23) & 0x1);
 }
 
 std::string missing_encoding_warning(const Instruction &inst, uint64_t offset,
@@ -201,9 +213,12 @@ std::string missing_encoding_warning(const Instruction &inst, uint64_t offset,
   else
     message += ", action=<missing legalization>";
   message += ")";
-  if ((inst.encoding_id() >= kEnc_MTBUF && inst.encoding_id() < kEnc_MTBUF + 8) ||
-      starts_with(inst.mnemonic(), "tbuffer_"))
-    message += " (unsupported category: MTBUF format-buffer encoding translation)";
+  if (is_mtbuf_instruction(inst)) {
+    if (mtbuf_uses_accvgpr(inst))
+      message += " (unsupported category: AccVGPR operand remapping requires supported standalone transfer or matrix-idiom lowering) (MTBUF acc=1 requires AccVGPR virtualization)";
+    else
+      message += " (unsupported category: MTBUF format-buffer encoding translation)";
+  }
   return message;
 }
 

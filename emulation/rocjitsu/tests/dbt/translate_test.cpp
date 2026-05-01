@@ -243,6 +243,41 @@ TEST(EncodingTranslator, Cdna4ToRdna3MubufRemapsCoherency) {
   EXPECT_EQ(dst.srsrc, 6);
 }
 
+TEST(EncodingTranslator, Cdna4ToRdna3MtbufPacksFormatAndRemapsCoherency) {
+  cdna4::MtbufMachineInst src{};
+  src.offset = 0x321;
+  src.offen = 1;
+  src.idxen = 1;
+  src.sc0 = 1;
+  src.sc1 = 1;
+  src.nt = 1;
+  src.op = 0;
+  src.dfmt = 4;
+  src.nfmt = 7;
+  src.encoding = kEnc_MTBUF >> 3;
+  src.vaddr = 4;
+  src.vdata = 5;
+  src.srsrc = 6;
+  src.soffset = 7;
+  uint32_t words[2];
+  std::memcpy(words, &src, sizeof(src));
+
+  auto result =
+      cdna4_to_rdna3::translate_encoding_cdna4_to_rdna3(kEnc_MTBUF, words[0], words[1], 0, 0);
+
+  ASSERT_EQ(result.word_count, 2);
+  rdna3::MtbufMachineInst dst{};
+  std::memcpy(&dst, result.words, sizeof(dst));
+  EXPECT_EQ(dst.glc, 1);
+  EXPECT_EQ(dst.slc, 1);
+  EXPECT_EQ(dst.dlc, 1);
+  EXPECT_EQ(dst.format, 0x74);
+  EXPECT_EQ(dst.vaddr, 4);
+  EXPECT_EQ(dst.vdata, 5);
+  EXPECT_EQ(dst.srsrc, 6);
+  EXPECT_EQ(dst.tfe, 0);
+}
+
 TEST(EncodingTranslator, Cdna4ToRdna3SmemPreservesGlc) {
   cdna4::SmemMachineInst src{};
   src.sbase = 5;
@@ -598,9 +633,23 @@ std::array<uint32_t, 2> make_cdna4_v_smfmac_f32_16x16x64_bf16() {
   return {0xD3B90000u, 0x00000000u};
 }
 
-std::array<uint32_t, 2> make_cdna4_tbuffer_load_format_x() {
+std::array<uint32_t, 2> make_cdna4_tbuffer_load_format_x(bool acc = false) {
   rocjitsu::cdna4::MtbufMachineInst src{};
   src.op = 0;
+  src.dfmt = 4;
+  src.nfmt = 7;
+  src.encoding = rocjitsu::kEnc_MTBUF >> 3;
+  src.srsrc = 7;
+  src.acc = acc ? 1 : 0;
+
+  std::array<uint32_t, 2> words{};
+  std::memcpy(words.data(), &src, sizeof(src));
+  return words;
+}
+
+std::array<uint32_t, 2> make_cdna4_tbuffer_load_format_d16_x() {
+  rocjitsu::cdna4::MtbufMachineInst src{};
+  src.op = 8;
   src.dfmt = 4;
   src.nfmt = 7;
   src.encoding = rocjitsu::kEnc_MTBUF >> 3;
@@ -1436,6 +1485,33 @@ TEST(Cdna4ToRdna3InPlaceBuckets, TrailingLiteralIsPreservedForSubstituteVop2) {
   EXPECT_EQ(stats.inst_count, 1u);
 }
 
+TEST(Cdna4ToRdna3InPlaceBuckets, LowerMtbufD16DecodesAsRenamedRdna3) {
+  const auto source = make_cdna4_tbuffer_load_format_d16_x();
+  auto inst = decode_cdna4(source);
+  ASSERT_NE(inst, nullptr);
+  ASSERT_EQ(std::string_view(inst->mnemonic()), "tbuffer_load_format_d16_x");
+
+  const auto *leg =
+      rocjitsu::lookup(rocjitsu::kLegalization_cdna4_to_rdna3, inst->encoding_id(), inst->opcode());
+  ASSERT_NE(leg, nullptr);
+  ASSERT_EQ(leg->action, rocjitsu::Action::Lower);
+  ASSERT_EQ(leg->target_opcode, 8);
+
+  const auto translated = rocjitsu::cdna4_to_rdna3::translate_encoding_cdna4_to_rdna3(
+      inst->encoding_id(), source[0], source[1], 0, leg->target_opcode);
+  ASSERT_EQ(translated.word_count, 2);
+
+  rocjitsu::rdna3::MtbufMachineInst dst{};
+  std::memcpy(&dst, translated.words, sizeof(dst));
+  EXPECT_EQ(dst.op, 8);
+  EXPECT_EQ(dst.format, 0x74);
+
+  auto rdna3_inst =
+      decode_one_as(ROCJITSU_CODE_ARCH_RDNA3, std::span<const uint32_t>(translated.words, 2));
+  ASSERT_NE(rdna3_inst, nullptr);
+  EXPECT_EQ(std::string_view(rdna3_inst->mnemonic()), "tbuffer_load_d16_format_x");
+}
+
 TEST(Cdna4ToRdna3SemanticTranslator, SWaitcntConvertsGfx9ToConservativeGfx11Layout) {
   const std::array<uint32_t, 1> source{make_cdna4_s_waitcnt(0x4342)};
   SemanticInstructionContext context(source);
@@ -1720,17 +1796,45 @@ TEST(BinaryTranslatorExpansion, UnsupportedSmfmacRowsFailClosed) {
                                             "sparse SMFMAC");
 }
 
-TEST(BinaryTranslatorExpansion, UnsupportedMtbufEncodingFailsClosed) {
-  const auto unsupported_source = make_cdna4_tbuffer_load_format_x();
-  auto unsupported_inst = decode_cdna4(unsupported_source);
-  ASSERT_NE(unsupported_inst, nullptr);
-  const auto *leg = rocjitsu::lookup(rocjitsu::kLegalization_cdna4_to_rdna3,
-                                     unsupported_inst->encoding_id(), unsupported_inst->opcode());
+TEST(BinaryTranslatorExpansion, MtbufEncodingTranslatesAndDecodesAsRdna3) {
+  const auto source = make_cdna4_tbuffer_load_format_x();
+  auto inst = decode_cdna4(source);
+  ASSERT_NE(inst, nullptr);
+  const auto *leg =
+      rocjitsu::lookup(rocjitsu::kLegalization_cdna4_to_rdna3, inst->encoding_id(), inst->opcode());
   ASSERT_NE(leg, nullptr);
-  ASSERT_NE(leg->action, rocjitsu::Action::Identity);
+  ASSERT_EQ(leg->action, rocjitsu::Action::Lower);
 
+  const std::vector<uint32_t> source_words{
+      source[0],
+      source[1],
+      make_cdna4_sopp(1, 0),
+  };
+
+  const auto elf = make_minimal_amdgpu_elf(source_words);
+  rocjitsu::AmdGpuCodeObject co(elf.data(), elf.size());
+  ASSERT_TRUE(co.is_valid());
+
+  rocjitsu::BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA3);
+  const auto result = translator.translate(co);
+  EXPECT_TRUE(result.warnings.empty()) << (result.warnings.empty() ? "" : result.warnings.front());
+  ASSERT_FALSE(result.elf_bytes.empty());
+
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(translated.is_valid());
+  const auto words = first_text_words(translated);
+  ASSERT_GE(words.size(), 3u);
+
+  auto rdna3_inst =
+      decode_one_as(ROCJITSU_CODE_ARCH_RDNA3, std::span<const uint32_t>(words.data(), 2));
+  ASSERT_NE(rdna3_inst, nullptr);
+  EXPECT_EQ(std::string_view(rdna3_inst->mnemonic()), "tbuffer_load_format_x");
+}
+
+TEST(BinaryTranslatorExpansion, MtbufAccvgprEncodingFailsClosed) {
+  const auto unsupported_source = make_cdna4_tbuffer_load_format_x(true);
   expect_unsupported_encoding_fails_closed(unsupported_source, "tbuffer_load_format_x",
-                                           "MTBUF");
+                                           "AccVGPR");
 }
 
 TEST(BinaryTranslatorExpansion, RelocatedCavePaddingFailsClosed) {

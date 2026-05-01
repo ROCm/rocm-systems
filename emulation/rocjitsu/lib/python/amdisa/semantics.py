@@ -1334,6 +1334,8 @@ def _derive_mtbuf(name: str) -> InstructionSemantics | None:
     for prefix in ('TBUFFER_LOAD_', 'TBUFFER_STORE_'):
         if upper.startswith(prefix):
             suffix = upper[len(prefix):]
+            if suffix.startswith('D16_FORMAT_'):
+                suffix = 'FORMAT_D16_' + suffix[len('D16_FORMAT_'):]
             info = _FLAT_DATA_MAP.get(suffix) or _MTBUF_FORMAT_MAP.get(suffix)
             if info:
                 esz, ne, se = info

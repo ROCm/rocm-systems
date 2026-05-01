@@ -33,8 +33,8 @@ The unexpanded CDNA4-to-RDNA3 legalization view has 1,496 rows:
 | --- | ---: |
 | Identity | 66 |
 | Substitute | 361 |
-| Lower | 638 |
-| Expand | 431 |
+| Lower | 646 |
+| Expand | 423 |
 | Illegal | 0 |
 
 ## Counts By Encoding Family
@@ -43,7 +43,7 @@ The unexpanded CDNA4-to-RDNA3 legalization view has 1,496 rows:
 | --- | ---: | ---: | ---: | ---: | ---: |
 | DS | 126 | 0 | 0 | 106 | 20 |
 | FLAT | 54 | 0 | 0 | 15 | 39 |
-| MTBUF | 16 | 0 | 0 | 8 | 8 |
+| MTBUF | 16 | 0 | 0 | 16 | 0 |
 | MUBUF | 74 | 0 | 0 | 60 | 14 |
 | SMEM | 84 | 0 | 0 | 11 | 73 |
 | SOP1 | 54 | 2 | 33 | 7 | 12 |
@@ -68,11 +68,11 @@ instruction rows and sum to 1,496.
 | --- | ---: | --- |
 | Identity copy | 66 | Same mnemonic, target-compatible opcode, and field layout. Copy source words or round-trip through the encoder without changing opcode fields. |
 | Opcode substitute | 361 | Same field layout, but source and target opcodes differ. Rewrite only the opcode field through the generated encoding translator. |
-| In-place field remap/lower | 629 | Same instruction footprint and no semantic expansion required, but fields, flags, names, or target opcodes differ. Use generated decode/encode field transfer plus targeted tests. Excludes `s_waitcnt` and MTBUF. |
+| In-place field remap/lower | 645 | Same instruction footprint and no semantic expansion required, but fields, flags, names, or target opcodes differ. Use generated decode/encode field transfer plus targeted tests. Excludes `s_waitcnt`. |
 | Same-size semantic rewrite | 1 | Semantic difference is not safely represented by field transfer alone, but the replacement fits in the source footprint. Today this is `s_waitcnt`. |
 | Size-expanding rewrite | 353 | No single RDNA3 instruction preserves the CDNA4 behavior, and the row is not matrix/AccVGPR or MTBUF. Requires multi-instruction lowering and code-cave/stub handling. |
 | Complex matrix/AccVGPR emulation | 70 | All 66 `VOP3P_MFMA` rows (`v_mfma_*` and `v_smfmac_*`) plus four AccVGPR rows. Requires lane-layout, accumulator-file, and VGPR allocation design. |
-| Residual unsupported/unknown | 16 | MTBUF rows. The legalization view has 8 Lower and 8 Expand MTBUF rows, but the CDNA4-to-RDNA3 encoding translator has no MTBUF encoder case. |
+| Residual unsupported/unknown | 0 | The MTBUF residual is resolved for VGPR-backed format-buffer rows. |
 
 Bucket notes:
 
@@ -87,17 +87,19 @@ Bucket notes:
   `VOP3P_MFMA` rows, `v_accvgpr_mov_b32_e32`, `v_accvgpr_mov_b32`,
   `v_accvgpr_read`, and `v_accvgpr_write`. The detailed matrix/AccVGPR strategy and
   unsupported disposition are in `cdna4-to-rdna3-mfma-accvgpr-strategy.md`.
-- MTBUF is residual because the generated encoder switch handles VOP2, VOPC,
-  VOP1, SOP2, SOPK, SOP1, SOPC, SOPP, SMEM, VOP3, VOP3_SDST_ENC, VOP3P, DS,
-  FLAT, and MUBUF, but not MTBUF.
+- MTBUF lowering resolves the residual by packing CDNA4 `dfmt`/`nfmt` into
+  RDNA3 `format`, remapping `sc0`/`sc1`/`nt` to `glc`/`slc`/`dlc`, and
+  canonicalizing the D16 mnemonic-order rename to same-size lower rows. CDNA4
+  MTBUF with `acc=1` remains tied to the AccVGPR virtualization gap
+  (AccVGPR remapping) because RDNA3 MTBUF has no accumulator selector field.
 
 ## Currently Wired Special Cases
 
 The CDNA4-to-RDNA3 translator is selected in `BinaryTranslator` through
 `translate_encoding_cdna4_to_rdna3()` and `kLegalization_cdna4_to_rdna3`.
 The generated encoder handles VOP2, VOPC, VOP1, SOP2, SOPK, SOP1, SOPC, SOPP,
-SMEM, VOP3, VOP3_SDST_ENC, VOP3P, DS, FLAT, and MUBUF. FLAT is split by `seg`:
-flat, scratch, and global forms are re-encoded through the matching RDNA3
+SMEM, VOP3, VOP3_SDST_ENC, VOP3P, DS, FLAT, MUBUF, and MTBUF. FLAT is split by
+`seg`: flat, scratch, and global forms are re-encoded through the matching RDNA3
 structure.
 
 ## Memory-family Memory-Family Audit Notes
@@ -136,9 +138,10 @@ Three CDNA4-to-RDNA3 semantic rule classes are wired:
 
 Unhandled `Action::Expand` rows now fail closed in `BinaryTranslator`.
 The residual-gap handling also makes non-identity rows fail closed when
-`translate_encoding_cdna4_to_rdna3()` returns an empty translation result, so
-MTBUF non-identity rows no longer silently source-copy CDNA4 bytes into RDNA3 output.
-The residual closure report is in `cdna4-to-rdna3-residual-coverage.md`.
+`translate_encoding_cdna4_to_rdna3()` returns an empty translation result. For
+MTBUF this now only covers field-level unsupported forms such as CDNA4 `acc=1`,
+which cannot be encoded as RDNA3 MTBUF. The residual closure report is in
+`cdna4-to-rdna3-residual-coverage.md`.
 
 The matrix/AccVGPR guard adds a CDNA4-to-RDNA3 semantic guard for `v_mfma_*`, `v_smfmac_*`, and
 `v_accvgpr_*` rows so duplicate generated `Lower` rows in the alias-expanded
@@ -152,10 +155,10 @@ fail closed until the documented matrix/AccVGPR strategy is implemented.
 | Coverage harness | Coverage harness for CDNA4-to-RDNA3 translation, including per-bucket fixtures and warning assertions. | This taxonomy |
 | Identity and substitute hardening | Harden identity and opcode-substitute rows, including alias-expanded lookup behavior, duplicate-key expectations, trailing literals, and branch/SOPP smoke cases. | coverage harness |
 | Generated legalization duplicate audit | Fix or explicitly document duplicate `(encoding_id, opcode)` keys in alias-expanded legalization headers before relying on header rows as implementation units. | coverage harness and identity/substitute hardening |
-| In-place field lower audit | Validate the 629 in-place lower rows by family. Split memory families (SMEM/MUBUF/FLAT/DS) from VALU/SALU families if the task is too large. | coverage harness and identity/substitute hardening |
+| In-place field lower audit | Validate the 645 in-place lower rows by family. Split memory families (SMEM/MUBUF/MTBUF/FLAT/DS) from VALU/SALU families if the task is too large. | coverage harness and identity/substitute hardening |
 | Same-size semantic lowerings | Same-size semantic lowerings: precise RDNA3 waitcnt, Lower target opcode preservation, and GFX940/GFX9-to-GFX11 coherency remaps. | coverage harness and identity/substitute hardening |
 | Simple expand lowerings | Implement the 353 non-matrix, non-MTBUF Expand rows that have local instruction-sequence lowerings, using code caves and tests for branch-return correctness. | coverage harness |
-| MTBUF disposition | Either add MTBUF to the generated CDNA4-to-RDNA3 encoder or classify all 16 MTBUF rows as explicitly unsupported with diagnostics. | coverage harness |
+| MTBUF disposition | Add MTBUF to the generated CDNA4-to-RDNA3 encoder and keep `acc=1` fail-closed under the AccVGPR follow-up. | coverage harness |
 | MFMA/AccVGPR to RDNA3 | Design and implement the 70-row complex matrix/AccVGPR bucket, including lane layout, accumulator remapping, and VGPR pressure diagnostics. | coverage harness |
 | Remaining non-matrix expansions | Implement remaining non-matrix expansion rows by family; until then, unsupported rows fail closed with actionable diagnostics. | coverage harness |
 
@@ -165,8 +168,8 @@ fail closed until the documented matrix/AccVGPR strategy is implemented.
 | --- | --- |
 | Identity copy | `s_mov_b32`, `s_mov_b64`, integer `s_cmp_*`, `s_nop`, selected `v_cvt_*`, selected `v_cmpx_*_i16/u16_e32`. |
 | Opcode substitute | Most SOPP branches/control ops, many SOP1 scalar ops, VOP2 arithmetic such as `v_add_f32_e32`, and most VOPC comparisons. |
-| In-place field remap/lower | DS atomics and LDS ops, FLAT load/store base forms, MUBUF format/load/store rows, SMEM load/cache rows, VOP3 compare and arithmetic rows. |
+| In-place field remap/lower | DS atomics and LDS ops, FLAT load/store base forms, MUBUF and MTBUF format/load/store rows, SMEM load/cache rows, VOP3 compare and arithmetic rows. |
 | Same-size semantic rewrite | `s_waitcnt`. |
 | Size-expanding rewrite | `v_lshl_add_u64`, scalar control rows without RDNA3 equivalents, packed or D16 memory rows, many non-matrix `Action::Expand` VOP/SMEM rows. |
 | Complex matrix/AccVGPR emulation | `v_mfma_*`, `v_smfmac_*`, `v_accvgpr_mov_b32*`, `v_accvgpr_read`, `v_accvgpr_write`. |
-| Residual unsupported/unknown | MTBUF rows until encoder support or explicit rejection is added. |
+| Residual unsupported/unknown | None for VGPR-backed format-buffer rows; field-level MTBUF `acc=1` follows the AccVGPR virtualization gap. |

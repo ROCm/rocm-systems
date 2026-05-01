@@ -54,6 +54,69 @@ def test_gfx940_to_gfx11_vector_coherency_uses_remap() -> None:
     assert "dst.glc = 0;" not in body
 
 
+def test_mtbuf_to_gfx11_packs_format_and_rejects_accvgpr() -> None:
+    src = _encoding(
+        "ENC_MTBUF",
+        [
+            "encoding",
+            "op",
+            "offset",
+            "offen",
+            "idxen",
+            "sc0",
+            "sc1",
+            "nt",
+            "dfmt",
+            "nfmt",
+            "vaddr",
+            "vdata",
+            "srsrc",
+            "acc",
+            "soffset",
+        ],
+    )
+    dst = _encoding(
+        "ENC_MTBUF",
+        [
+            "encoding",
+            "op",
+            "offset",
+            "glc",
+            "dlc",
+            "slc",
+            "format",
+            "vaddr",
+            "vdata",
+            "srsrc",
+            "tfe",
+            "offen",
+            "idxen",
+            "soffset",
+        ],
+    )
+    mappings = _classify_fields(src, dst, "ENC_MTBUF")
+    assert {m.src_name for m in mappings if m.kind == "mtbuf_format"} == {"dfmt", "nfmt"}
+    assert not any(m.kind == "insert" and m.dst_name == "format" for m in mappings)
+
+    trans = EncodingTranslation(
+        src_enc_name="ENC_MTBUF",
+        dst_enc_name="ENC_MTBUF",
+        src_struct=_struct_name("ENC_MTBUF"),
+        dst_struct=_struct_name("ENC_MTBUF"),
+        src_bit_cnt=64,
+        dst_bit_cnt=64,
+        mappings=mappings,
+        has_gfx11_coherency_remap=True,
+    )
+    body = "\n".join(_emit_encode_fn(trans, "dst", "rdna3"))
+
+    assert "remap_gfx940_to_gfx11" in body
+    assert "if (f.acc != 0)" in body
+    assert "return {};" in body
+    assert "dst.format = ((f.nfmt & 0x7) << 4) | (f.dfmt & 0xF);" in body
+    assert "dst.format = 0;" not in body
+
+
 def test_gfx9_to_gfx11_smem_glc_uses_remap() -> None:
     src = _encoding("ENC_SMEM", ["encoding", "op", "glc"])
     dst = _encoding("ENC_SMEM", ["encoding", "op", "glc", "dlc"])

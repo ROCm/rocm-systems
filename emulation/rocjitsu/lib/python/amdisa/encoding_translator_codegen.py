@@ -128,6 +128,7 @@ _CDNA4_TO_RDNA3_ENC_MAP: dict[str, str] = {
     'ENC_VOP3P': 'ENC_VOP3P',
     'ENC_DS': 'ENC_DS',
     'ENC_MUBUF': 'ENC_MUBUF',
+    'ENC_MTBUF': 'ENC_MTBUF',
     'ENC_FLAT': 'ENC_FLAT',
     'ENC_FLAT_GLBL': 'ENC_FLAT_GLOBAL',
     'ENC_FLAT_SCRATCH': 'ENC_FLAT_SCRATCH',
@@ -147,7 +148,7 @@ _PAIR_ENC_MAPS: dict[tuple[str, str], dict[str, str]] = {
 # ---------------------------------------------------------------------------
 
 _COHERENCY_REMAP_ENCODINGS = frozenset({
-    'ENC_MUBUF', 'ENC_FLAT', 'ENC_FLAT_GLBL', 'ENC_FLAT_SCRATCH',
+    'ENC_MUBUF', 'ENC_MTBUF', 'ENC_FLAT', 'ENC_FLAT_GLBL', 'ENC_FLAT_SCRATCH',
 })
 
 _GLC_REMAP_ENCODINGS = frozenset({
@@ -172,6 +173,9 @@ _COHERENCY_SRC_FIELDS = frozenset({'sc0', 'sc1', 'nt', 'glc'})
 
 # Fields that participate in coherency remapping (target side)
 _COHERENCY_DST_FIELDS = frozenset({'scope', 'th', 'glc', 'dlc', 'slc'})
+
+_MTBUF_FORMAT_REMAP_ENCODINGS = frozenset({'ENC_MTBUF'})
+_MTBUF_FORMAT_SRC_FIELDS = frozenset({'dfmt', 'nfmt'})
 
 # ---------------------------------------------------------------------------
 # Field classification
@@ -313,6 +317,16 @@ def _classify_fields(
             mappings.append(FieldMapping(
                 'glc_remap', sname, '', sf.bit_cnt, 0,
                 f'GLC remap: glc -> scope/th',
+            ))
+            continue
+
+        if (src_enc_name in _MTBUF_FORMAT_REMAP_ENCODINGS and
+                sname in _MTBUF_FORMAT_SRC_FIELDS and 'format' in dst_fields):
+            df = dst_fields['format']
+            matched_dst.add('format')
+            mappings.append(FieldMapping(
+                'mtbuf_format', sname, 'format', sf.bit_cnt, df.bit_cnt,
+                f'MTBUF format remap: {sname} -> format ({sf.bit_cnt}b -> {df.bit_cnt}b)',
             ))
             continue
 
@@ -530,6 +544,8 @@ def _emit_decode_fn(trans, src_ns, src_name):
         if m.kind in ('coherency', 'glc_remap'):
             # Coherency source fields go into the neutral struct too
             lines.append(f'    f.{m.src_name} = src.{m.src_name};')
+        elif m.kind == 'mtbuf_format':
+            lines.append(f'    f.{m.src_name} = src.{m.src_name};')
         elif m.kind in ('copy', 'remap'):
             canonical = FIELD_RENAMES.get(m.src_name, m.src_name)
             lines.append(f'    f.{canonical} = src.{m.src_name};')
@@ -579,6 +595,12 @@ def _emit_encode_fn(trans, dst_ns, dst_name):
         lines.append(f'    auto coh = remap_gfx9_to_gfx11({{uint8_t(f.glc)}});')
         lines.append(f'    dst.glc = coh.glc;')
         lines.append(f'    dst.dlc = coh.dlc;')
+
+    if trans.src_enc_name == 'ENC_MTBUF':
+        lines.append(f'    if (f.acc != 0)')
+        lines.append(f'        return {{}};')
+    if any(m.kind == 'mtbuf_format' for m in trans.mappings):
+        lines.append(f'    dst.format = ((f.nfmt & 0x7) << 4) | (f.dfmt & 0xF);')
 
     # Pack fields from the neutral struct into the target. Every assignment is
     # masked to the destination width so generated encoders stay correct when a

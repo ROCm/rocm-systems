@@ -166,6 +166,11 @@ def _build_rename_map() -> dict[str, str]:
         _add(f'BUFFER_LOAD_FORMAT_D16_HI_{suffix}', f'BUFFER_LOAD_D16_HI_FORMAT_{suffix}')
         _add(f'BUFFER_STORE_FORMAT_D16_HI_{suffix}', f'BUFFER_STORE_D16_HI_FORMAT_{suffix}')
 
+    # --- TBUFFER_LOAD/STORE format renames ---
+    for suffix in ('X', 'XY', 'XYZ', 'XYZW'):
+        _add(f'TBUFFER_LOAD_FORMAT_D16_{suffix}', f'TBUFFER_LOAD_D16_FORMAT_{suffix}')
+        _add(f'TBUFFER_STORE_FORMAT_D16_{suffix}', f'TBUFFER_STORE_D16_FORMAT_{suffix}')
+
     # --- Atomic operation type suffixes ---
     # GFX9/GFX10 atomics have no type suffix; GFX12 adds _U32/_U64/_B32/_B64/_I32/_I64
     _atomic_type_suffixes = {

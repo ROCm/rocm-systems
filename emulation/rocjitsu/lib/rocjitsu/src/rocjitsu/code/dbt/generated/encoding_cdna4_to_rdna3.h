@@ -172,6 +172,28 @@ inline FlatScratchFields decode_flat_scratch_cdna4(uint32_t w0, uint32_t w1) {
   return f;
 }
 
+inline MtbufFields decode_mtbuf_cdna4(uint32_t w0, uint32_t w1) {
+  rocjitsu::cdna4::MtbufMachineInst src{};
+  const uint32_t src_words[] = {w0, w1};
+  std::memcpy(&src, src_words, sizeof(src));
+  MtbufFields f{};
+  f.ioffset = src.offset;
+  f.offen = src.offen;
+  f.idxen = src.idxen;
+  f.sc0 = src.sc0;
+  f.op = src.op;
+  f.dfmt = src.dfmt;
+  f.nfmt = src.nfmt;
+  f.vaddr = src.vaddr;
+  f.vdata = src.vdata;
+  f.rsrc = src.srsrc;
+  f.sc1 = src.sc1;
+  f.nt = src.nt;
+  f.acc = src.acc;
+  f.soffset = src.soffset;
+  return f;
+}
+
 inline MubufFields decode_mubuf_cdna4(uint32_t w0, uint32_t w1) {
   rocjitsu::cdna4::MubufMachineInst src{};
   const uint32_t src_words[] = {w0, w1};
@@ -433,6 +455,33 @@ inline TranslationResult encode_flat_scratch_rdna3(const FlatScratchFields &f, u
   return r;
 }
 
+inline TranslationResult encode_mtbuf_rdna3(const MtbufFields &f, uint16_t dst_op) {
+  rocjitsu::rdna3::MtbufMachineInst dst{};
+  dst.encoding = 0x3A;
+  dst.op = dst_op;
+  dst.offset = f.ioffset & 0xFFF;
+  dst.offen = f.offen & 0x1;
+  dst.idxen = f.idxen & 0x1;
+  dst.format = ((f.nfmt & 0x7) << 4) | (f.dfmt & 0xF);
+  dst.vaddr = f.vaddr & 0xFF;
+  dst.vdata = f.vdata & 0xFF;
+  dst.srsrc = f.rsrc & 0x1F;
+  dst.soffset = f.soffset & 0xFF;
+  auto coh = remap_gfx940_to_gfx11({uint8_t(f.sc0), uint8_t(f.sc1), uint8_t(f.nt)});
+  dst.glc = coh.glc;
+  dst.dlc = coh.dlc;
+  dst.slc = coh.slc;
+  if (f.acc != 0)
+    return {};
+  dst.tfe = 0;
+  if (dst.soffset == 0x7F)
+    dst.soffset = 0x7C;
+  TranslationResult r{};
+  r.word_count = uint8_t{2};
+  std::memcpy(r.words, &dst, sizeof(dst));
+  return r;
+}
+
 inline TranslationResult encode_mubuf_rdna3(const MubufFields &f, uint16_t dst_op) {
   rocjitsu::rdna3::MubufMachineInst dst{};
   dst.encoding = 0x38;
@@ -588,6 +637,8 @@ inline TranslationResult translate_encoding_cdna4_to_rdna3(uint32_t encoding_id,
   }
   case kEnc_MUBUF:
     return encode_mubuf_rdna3(decode_mubuf_cdna4(w0, w1), dst_op);
+  case kEnc_MTBUF:
+    return encode_mtbuf_rdna3(decode_mtbuf_cdna4(w0, w1), dst_op);
   default:
     break;
   }
@@ -607,6 +658,8 @@ inline TranslationResult translate_encoding_cdna4_to_rdna3(uint32_t encoding_id,
     return translate_encoding_cdna4_to_rdna3(kEnc_FLAT, w0, w1, w2, dst_op);
   if ((encoding_id & 0x1F8) == kEnc_MUBUF)
     return translate_encoding_cdna4_to_rdna3(kEnc_MUBUF, w0, w1, w2, dst_op);
+  if ((encoding_id & 0x1F8) == kEnc_MTBUF)
+    return translate_encoding_cdna4_to_rdna3(kEnc_MTBUF, w0, w1, w2, dst_op);
   if ((encoding_id & 0x1E0) == kEnc_SOPK)
     return translate_encoding_cdna4_to_rdna3(kEnc_SOPK, w0, w1, w2, dst_op);
   if ((encoding_id & 0x180) == kEnc_SOP2)
