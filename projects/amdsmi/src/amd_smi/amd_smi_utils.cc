@@ -1325,6 +1325,25 @@ uint64_t get_product_serial_number(amdsmi_processor_handle processor_handle) {
      return (half_byte == HIP_UUID_STRING_FULL_SIZE) ? std::optional<hipUUID_t>{hip_uuid} : std::nullopt;
 }
 
+std::string stringify_bdf(const amdsmi_bdf_t& bdf)
+{
+    std::ostringstream bdf_outstream;
+    bdf_outstream   << std::setfill('0')
+                    << std::hex
+                    << std::setw(4)
+                    << bdf.domain_number
+                    << ":"
+                    << std::setw(2)
+                    << static_cast<uint32_t>(bdf.bus_number)
+                    << ":"
+                    << std::setw(2)
+                    << static_cast<uint32_t>(bdf.device_number)
+                    << "."
+                    << static_cast<uint32_t>(bdf.function_number);
+    return bdf_outstream.str();
+}
+
+
 std::tuple<uint64_t, uint64_t, uint64_t, uint64_t> parse_bdfid(uint64_t bdfid) {
   uint64_t domain = (bdfid >> 32) & 0xffffffff;
   uint64_t bus = (bdfid >> 8) & 0xff;

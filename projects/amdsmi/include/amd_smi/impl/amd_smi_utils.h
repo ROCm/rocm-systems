@@ -269,7 +269,7 @@ uint64_t get_product_serial_number(amdsmi_processor_handle processor_handle);
  const char* from_uuid_to_cstring(const hipUUID_t& uuid) noexcept;
  std::optional<amdsmi_bdf_t> from_cstring_to_bdf(const char* bdf_str) noexcept;
  std::optional<hipUUID_t> from_cstring_to_uuid(const char* uuid_str) noexcept;
-
+ std::string stringify_bdf(const amdsmi_bdf_t& bdf);
 
 /**
  *  @brief Tokenize bdfid into components.
