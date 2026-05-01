@@ -64,8 +64,9 @@ def normalize_docs_section_name(arch_name: str, section_name: str) -> str:
         return section_name
 
     replacements = {
-        "Memory chart - TCP Cache (Vector L0)": "Memory chart - TCP Cache",
-        "Memory chart - GL1C Cache (L1)": "Memory chart - GL1C Cache",
+        "Memory chart - TCP Cache (GL0 Vector Cache)": "Memory chart - TCP Cache",
+        "Memory chart - GL1 Cache (L1)": "Memory chart - GL1 Cache",
+        "Memory chart - GL2 Cache (L2)": "Memory chart - GL2 Cache",
     }
     return replacements.get(section_name, section_name)
 
@@ -76,7 +77,7 @@ def normalize_docs_metric_name(arch_name: str, metric_name: str) -> str:
         return metric_name
 
     replacements = {
-        "TCP (L0) Cache Bandwidth": "TCP Cache Bandwidth",
+        "GL0 Cache BW (TCP Cache)": "GL0 Cache BW",
     }
     return replacements.get(metric_name, metric_name)
 
@@ -86,14 +87,7 @@ def normalize_docs_rst(arch_name: str, rst_text: str) -> str:
     if arch_name != "gfx1151" or not isinstance(rst_text, str):
         return rst_text
 
-    replacements = {
-        "TCP (L0 vector cache)": "TCP cache",
-        "TCP (vector L0)": "TCP",
-        "GL1C (L1 cache)": "GL1C cache",
-        "TCP (L0)": "TCP",
-        "TCP (L0 Cache)": "TCP cache",
-        "GL1C (L1 Cache)": "GL1C cache",
-    }
+    replacements: dict[str, str] = {}
 
     for old_text, new_text in replacements.items():
         rst_text = rst_text.replace(old_text, new_text)
@@ -148,12 +142,12 @@ RDNA_PANEL_ID_TO_SECTION_BY_ARCH: dict[str, dict[int, str]] = {
         201: "System Speed-of-Light",
         301: "Memory chart - Instruction Cache",
         302: "Memory chart - Scalar Data Cache",
-        303: "Memory chart - TCP Cache (Vector L0)",
+        303: "Memory chart - TCP Cache (GL0 Vector Cache)",
         304: "Memory chart - LDS (Local Data Share)",
         305: "Memory chart - TCP-GL1 Interface",
-        306: "Memory chart - GL1C Cache (L1)",
-        307: "Memory chart - GL1C-GL2 Interface",
-        308: "Memory chart - GL2C Cache (L2)",
+        306: "Memory chart - GL1 Cache (L1)",
+        307: "Memory chart - GL1-GL2 Interface",
+        308: "Memory chart - GL2 Cache (L2)",
         309: "Memory chart - GCEA to System Memory",
         401: "Roofline Performance Rates",
         402: "Roofline Plot Points",
@@ -174,23 +168,23 @@ RDNA_PANEL_ID_TO_SECTION_BY_ARCH: dict[str, dict[int, str]] = {
         709: "Wait State Analysis",
         710: "WGP Instruction Cache",
         711: "WGP Scalar Data Cache",
-        801: "TCP Utilization",
-        802: "TCP Request Statistics",
-        803: "TCP Cache Performance",
-        804: "TCP TCP-GL1 Interface",
-        805: "TCP Stalls",
-        1101: "GL1C Utilization",
-        1102: "GL1C Request Statistics",
-        1103: "GL1C Cache Performance",
-        1104: "GL1C-GL2 Interface",
-        1105: "GL1C Stalls",
-        1301: "GL2C Cache Performance",
-        1302: "GL2C Request Statistics",
-        1303: "GL2C Bandwidth",
-        1501: "DRAM Read Interface",
-        1502: "DRAM Write Interface",
-        1504: "System Arbiter (SARB)",
-        1505: "Return Interface",
+        901: "GL0 Utilization",
+        902: "GL0 Request Statistics",
+        903: "GL0 Cache Performance",
+        904: "GL0-GL1 Interface",
+        905: "GL0 Stalls",
+        1101: "GL1 Cache Utilization",
+        1102: "GL1 Cache Request Statistics",
+        1103: "GL1 Cache Performance",
+        1104: "GL1-GL2 Interface",
+        1105: "GL1 Cache Stalls",
+        1301: "GL2 Cache Performance",
+        1302: "GL2 Cache Request Statistics",
+        1303: "GL2 Cache Bandwidth",
+        1401: "DRAM Read Interface",
+        1402: "DRAM Write Interface",
+        1404: "System Arbiter (SARB)",
+        1405: "Return Interface",
         1701: "GPU Utilization",
         1702: "Shader Engine Utilization",
     },
@@ -199,7 +193,31 @@ RDNA_PANEL_ID_TO_SECTION_BY_ARCH: dict[str, dict[int, str]] = {
 
 LEGACY_SECTION_ALIASES_BY_ARCH: dict[str, dict[str, str]] = {
     "gfx1151": {
-        "GL1C GL1C-GL2 Interface": "GL1C-GL2 Interface",
+        # Memory chart sub-table renames (TCP/GL1C/GL2C → GL0/GL1 Cache/GL2 Cache).
+        "Memory chart - TCP Cache (Vector L0)": (
+            "Memory chart - TCP Cache (GL0 Vector Cache)"
+        ),
+        "Memory chart - GL1C Cache (L1)": "Memory chart - GL1 Cache (L1)",
+        "Memory chart - GL1C-GL2 Interface": "Memory chart - GL1-GL2 Interface",
+        "Memory chart - GL2C Cache (L2)": "Memory chart - GL2 Cache (L2)",
+        # Standalone-panel section renames (TCP → GL0).
+        "TCP Utilization": "GL0 Utilization",
+        "TCP Request Statistics": "GL0 Request Statistics",
+        "TCP Cache Performance": "GL0 Cache Performance",
+        "TCP TCP-GL1 Interface": "GL0-GL1 Interface",
+        "TCP Stalls": "GL0 Stalls",
+        # Standalone-panel section renames (GL1C → GL1 Cache).
+        "GL1C Utilization": "GL1 Cache Utilization",
+        "GL1C Request Statistics": "GL1 Cache Request Statistics",
+        "GL1C Cache Performance": "GL1 Cache Performance",
+        "GL1C-GL2 Interface": "GL1-GL2 Interface",
+        "GL1C Stalls": "GL1 Cache Stalls",
+        # Pre-existing alias for the doubled-prefix typo, retargeted at new canonical.
+        "GL1C GL1C-GL2 Interface": "GL1-GL2 Interface",
+        # Standalone-panel section renames (GL2C → GL2 Cache).
+        "GL2C Cache Performance": "GL2 Cache Performance",
+        "GL2C Request Statistics": "GL2 Cache Request Statistics",
+        "GL2C Bandwidth": "GL2 Cache Bandwidth",
     },
 }
 
