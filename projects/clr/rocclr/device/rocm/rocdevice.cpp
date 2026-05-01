@@ -3703,11 +3703,12 @@ void Device::HiddenHeapInit(const VirtualGPU& gpu) {
     bool result = static_cast<const KernelBlitManager&>(gpu.blitMgr())
                       .initHeap(heap_buffer_, initial_heap_buffer_, HeapBufferSize,
                                 initial_heap_size_ / (2 * Mi));
-
+    if (result) {
+      heap_init_complete_.store(true, std::memory_order_release);
+    }
     return result;
   };
   std::call_once(heap_initialized_, HeapZeroOut);
-  heap_init_complete_.store(true, std::memory_order_release);
 }
 
 // ================================================================================================
