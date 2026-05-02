@@ -58,19 +58,20 @@ inline ErrorCode TranslateNtStatus(NTSTATUS status) {
   case STATUS_PENDING:
     return ErrorCode::NotReady;
   case STATUS_NO_MEMORY:
-     return ErrorCode::OutOfMemory;
+    return ErrorCode::OutOfMemory;
   case STATUS_DEVICE_REMOVED:
     return ErrorCode::DeviceLost;
-   case STATUS_GRAPHICS_NO_VIDEO_MEMORY:
+  case STATUS_GRAPHICS_NO_VIDEO_MEMORY:
     return ErrorCode::OutOfGpuMemory;
   case STATUS_TIMEOUT:
     return ErrorCode::Timeout;
+  case STATUS_BUFFER_TOO_SMALL:
+    return ErrorCode::BufferTooSmall;
   case STATUS_INVALID_PARAMETER:
     return ErrorCode::InvalidParams;
   default:
-    break;
+    return ErrorCode::Unknown;
   }
-  return ErrorCode::Unknown;
 }
 
 namespace d3dthunk {
@@ -257,6 +258,102 @@ inline ErrorCode Escape(WinAdapterHandle adapter, WinDeviceHandle device,
   args->hAdapter = adapter;
   args->hDevice  = device;
   return TranslateNtStatus(DXCORE_CALL(D3DKMTEscape(args)));
+}
+
+typedef D3DKMT_QUERYSTATISTICS QueryStatisticsArgs;
+typedef D3DDDI_DESTROYPAGINGQUEUE DestroyPagingQueueArgs;
+typedef D3DKMT_DESTROYCONTEXT DestroyContextArgs;
+typedef D3DKMT_SIGNALSYNCHRONIZATIONOBJECTFROMGPU
+    SignalSynchronizationObjectFromGpuV1Args;
+typedef D3DKMT_QUERYCLOCKCALIBRATION QueryClockCalibrationArgs;
+
+inline ErrorCode QueryStatistics(QueryStatisticsArgs *args) {
+  return TranslateNtStatus(DXCORE_CALL(D3DKMTQueryStatistics(args)));
+}
+
+inline ErrorCode CreatePagingQueue(CreatePagingQueueArgs *args) {
+  return TranslateNtStatus(DXCORE_CALL(D3DKMTCreatePagingQueue(args)));
+}
+
+inline ErrorCode DestroyPagingQueue(DestroyPagingQueueArgs *args) {
+  return TranslateNtStatus(DXCORE_CALL(D3DKMTDestroyPagingQueue(args)));
+}
+
+inline ErrorCode Lock2(Lock2Args *args) {
+  return TranslateNtStatus(DXCORE_CALL(D3DKMTLock2(args)));
+}
+
+inline ErrorCode Unlock2(Unlock2Args *args) {
+  return TranslateNtStatus(DXCORE_CALL(D3DKMTUnlock2(args)));
+}
+
+inline ErrorCode CreateContextVirtual(CreateContextVirtualArgs *args) {
+  return TranslateNtStatus(DXCORE_CALL(D3DKMTCreateContextVirtual(args)));
+}
+
+inline ErrorCode DestroyContext(DestroyContextArgs *args) {
+  return TranslateNtStatus(DXCORE_CALL(D3DKMTDestroyContext(args)));
+}
+
+inline ErrorCode WaitForSynchronizationObjectFromGpu(
+    WaitForSynchronizationObjectFromGpuArgs *args) {
+  return TranslateNtStatus(DXCORE_CALL(D3DKMTWaitForSynchronizationObjectFromGpu(args)));
+}
+
+inline ErrorCode SignalSynchronizationObjectFromGpu(
+    SignalSynchronizationObjectFromGpuV1Args *args) {
+  return TranslateNtStatus(DXCORE_CALL(D3DKMTSignalSynchronizationObjectFromGpu(args)));
+}
+
+inline ErrorCode WaitForSynchronizationObjectFromCpu(
+    WaitForSynchronizationObjectFromCpuArgs *args) {
+  return TranslateNtStatus(DXCORE_CALL(D3DKMTWaitForSynchronizationObjectFromCpu(args)));
+}
+
+inline ErrorCode CreateSynchronizationObject2(CreateSynchronizationObject2Args *args) {
+  return TranslateNtStatus(DXCORE_CALL(D3DKMTCreateSynchronizationObject2(args)));
+}
+
+inline ErrorCode DestroySynchronizationObject(
+    D3DKMT_DESTROYSYNCHRONIZATIONOBJECT *args) {
+  return TranslateNtStatus(DXCORE_CALL(D3DKMTDestroySynchronizationObject(args)));
+}
+
+inline ErrorCode QueryClockCalibration(QueryClockCalibrationArgs *args) {
+  return TranslateNtStatus(DXCORE_CALL(D3DKMTQueryClockCalibration(args)));
+}
+
+inline ErrorCode SubmitCommand(SubmitCommandArgs *args) {
+  return TranslateNtStatus(DXCORE_CALL(D3DKMTSubmitCommand(args)));
+}
+
+inline ErrorCode CreateHwQueue(CreateHwQueueArgs *args) {
+  return TranslateNtStatus(DXCORE_CALL(D3DKMTCreateHwQueue(args)));
+}
+
+inline ErrorCode DestroyHwQueue(DestroyHwQueueArgs *args) {
+  return TranslateNtStatus(DXCORE_CALL(D3DKMTDestroyHwQueue(args)));
+}
+
+inline ErrorCode SubmitCommandToHwQueue(SubmitCommandToHwQueueArgs *args) {
+  return TranslateNtStatus(DXCORE_CALL(D3DKMTSubmitCommandToHwQueue(args)));
+}
+
+/** Optional WSL2 dxgkrnl export; nullptr if missing. */
+inline bool QueryVideoMemoryInfoAvailable() {
+  return DXCORE_CALL(D3DKMTQueryVideoMemoryInfo) != nullptr;
+}
+
+inline ErrorCode QueryVideoMemoryInfo(void *args) {
+  return TranslateNtStatus(DXCORE_CALL(D3DKMTQueryVideoMemoryInfo(args)));
+}
+
+inline bool EnumProcessesAvailable() {
+  return DXCORE_CALL(D3DKMTEnumProcesses) != nullptr;
+}
+
+inline ErrorCode EnumProcesses(void *args) {
+  return TranslateNtStatus(DXCORE_CALL(D3DKMTEnumProcesses(args)));
 }
 
 } // namespace d3dthunk

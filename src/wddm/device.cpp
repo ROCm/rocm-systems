@@ -54,12 +54,16 @@
 #include "shared/include/platform.h"
 #include "shared/include/device.h"
 #include "shared/include/lda_chain.h"
+#include "shared/include/thunk_proxy/thunk_proxy.h"
+#include "shared/include/thunks.h"
 #include "impl/wddm/device.h"
 #include "impl/wddm/queue.h"
 #include "shared/include/utils.h"
 
 namespace wsl {
 namespace thunk {
+
+namespace dx = wsl::thunk::d3dthunk;
 
 const uint32_t WDDMDevice::cmdbuf_aql_frame_num_ = 0x1000;
 
@@ -88,8 +92,8 @@ bool WDDMDevice::QuerySegmentInfo()
   adapterQuery.Type = D3DKMT_QUERYSTATISTICS_ADAPTER;
   adapterQuery.AdapterLuid = GetLuid();
 
-  NTSTATUS ret = DXCORE_CALL(D3DKMTQueryStatistics(&adapterQuery));
-  if (ret == STATUS_SUCCESS) {
+  ErrorCode ret = dx::QueryStatistics(&adapterQuery);
+  if (ret == ErrorCode::Success) {
     segmentCount = adapterQuery.QueryResult.AdapterInformation.NbSegments;
     pr_debug("Total Segments: %u\n", segmentCount);
   } else {
@@ -104,8 +108,8 @@ bool WDDMDevice::QuerySegmentInfo()
     segQuery.AdapterLuid = GetLuid();
     segQuery.QuerySegment.SegmentId = i;
 
-    ret = DXCORE_CALL(D3DKMTQueryStatistics(&segQuery));
-    if (ret != STATUS_SUCCESS) {
+    ret = dx::QueryStatistics(&segQuery);
+    if (ret != ErrorCode::Success) {
       pr_err("Failed to query segment %u info\n", i);
       return false;
     }
@@ -143,7 +147,7 @@ bool WDDMDevice::GetSegmentId(D3DKMT_QUERYSTATISTICS_SEGMENT_TYPE segment_type,
  */
 uint64_t WDDMDevice::VramAvail(void) {
   D3DKMT_QUERYSTATISTICS stats;
-  NTSTATUS ret;
+  ErrorCode ret;
   uint64_t usedVis = 0;
   uint64_t usedInv = 0;
   uint64_t usedNonLocal = 0;
@@ -162,8 +166,8 @@ uint64_t WDDMDevice::VramAvail(void) {
   stats.Type = D3DKMT_QUERYSTATISTICS_SEGMENT;
   stats.AdapterLuid = GetLuid();
   stats.QuerySegment.SegmentId = segmentId;
-  ret = DXCORE_CALL(D3DKMTQueryStatistics(&stats));
-  if (ret == 0)
+  ret = dx::QueryStatistics(&stats);
+  if (ret == ErrorCode::Success)
     usedVis = stats.QueryResult.SegmentInformation.BytesResident;
 
   // local invisible memory
@@ -173,8 +177,8 @@ uint64_t WDDMDevice::VramAvail(void) {
     stats.Type = D3DKMT_QUERYSTATISTICS_SEGMENT;
     stats.AdapterLuid = GetLuid();
     stats.QuerySegment.SegmentId = segmentId;
-    ret = DXCORE_CALL(D3DKMTQueryStatistics(&stats));
-    if (ret == 0)
+    ret = dx::QueryStatistics(&stats);
+    if (ret == ErrorCode::Success)
       usedInv = stats.QueryResult.SegmentInformation.BytesResident;
   }
 
@@ -189,8 +193,8 @@ uint64_t WDDMDevice::VramAvail(void) {
   stats.Type = D3DKMT_QUERYSTATISTICS_SEGMENT;
   stats.AdapterLuid = GetLuid();
   stats.QuerySegment.SegmentId = segmentId;
-  ret = DXCORE_CALL(D3DKMTQueryStatistics(&stats));
-  if (ret == 0)
+  ret = dx::QueryStatistics(&stats);
+  if (ret == ErrorCode::Success)
     usedNonLocal = stats.QueryResult.SegmentInformation.BytesResident;
 
   return LocalHeapSize() + NonLocalHeapSize() - usedVis - usedInv - usedNonLocal;
@@ -201,8 +205,8 @@ bool WDDMDevice::CreatePagingQueue(void) {
   args.hDevice = DeviceHandle();
   args.Priority = D3DDDI_PAGINGQUEUE_PRIORITY_NORMAL;
 
-  NTSTATUS ret = DXCORE_CALL(D3DKMTCreatePagingQueue(&args));
-  if (ret == STATUS_SUCCESS) {
+  ErrorCode ret = dx::CreatePagingQueue(&args);
+  if (ret == ErrorCode::Success) {
     page_queue_ = args.hPagingQueue;
     page_syncobj_ = args.hSyncObject;
     page_fence_addr_ = (uint64_t *)args.FenceValueCPUVirtualAddress;
@@ -210,7 +214,7 @@ bool WDDMDevice::CreatePagingQueue(void) {
     return true;
   }
 
-  pr_err("fail %x\n", ret);
+  pr_err("fail %d\n", static_cast<int>(ret));
   return false;
 }
 
@@ -218,11 +222,11 @@ bool WDDMDevice::DestroyPagingQueue(void) {
   D3DDDI_DESTROYPAGINGQUEUE args = {0};
   args.hPagingQueue = page_queue_;
 
-  NTSTATUS ret = DXCORE_CALL(D3DKMTDestroyPagingQueue(&args));
-  if (ret == STATUS_SUCCESS)
+  ErrorCode ret = dx::DestroyPagingQueue(&args);
+  if (ret == ErrorCode::Success)
     return true;
 
-  pr_err("fail %x\n", ret);
+  pr_err("fail %d\n", static_cast<int>(ret));
   return false;
 }
 
@@ -240,8 +244,8 @@ void WDDMDevice::SetPowerOptimization(bool restore) {
   d3dkmt_escape.PrivateDriverDataSize = priv.size();
   d3dkmt_escape.Flags.HardwareAccess  = true;
 
-  NTSTATUS status = DXCORE_CALL(D3DKMTEscape(&d3dkmt_escape));
-  pr_debug("status %d, restore %d\n", status, restore);
+  ErrorCode status = dx::Escape(adapter_, DeviceHandle(), &d3dkmt_escape);
+  pr_debug("status %d, restore %d\n", static_cast<int>(status), restore);
 }
 
 void WDDMDevice::UpdatePageFence(uint64_t fence_value) {
@@ -277,11 +281,11 @@ void *WDDMDevice::Lock(D3DKMT_HANDLE handle) {
   args.hDevice = DeviceHandle();
   args.hAllocation = handle;
 
-  NTSTATUS ret = DXCORE_CALL(D3DKMTLock2(&args));
-  if (ret == STATUS_SUCCESS)
+  ErrorCode ret = dx::Lock2(&args);
+  if (ret == ErrorCode::Success)
     return args.pData;
 
-  pr_err("fail %x\n", ret);
+  pr_err("fail %d\n", static_cast<int>(ret));
   return NULL;
 }
 
@@ -290,11 +294,11 @@ bool WDDMDevice::Unlock(D3DKMT_HANDLE handle) {
   args.hDevice = DeviceHandle();
   args.hAllocation = handle;
 
-  NTSTATUS ret = DXCORE_CALL(D3DKMTUnlock2(&args));
-  if (ret == STATUS_SUCCESS)
+  ErrorCode ret = dx::Unlock2(&args);
+  if (ret == ErrorCode::Success)
     return true;
 
-  pr_err("fail %x\n", ret);
+  pr_err("fail %d\n", static_cast<int>(ret));
   return false;
 }
 
@@ -318,13 +322,13 @@ bool WDDMDevice::CreateContext(int engine, D3DKMT_HANDLE *handle) {
   else
     args.Flags.DisableGpuTimeout = shared_dev_->IsGpuTimeoutDisabled(engine);
 
-  NTSTATUS ret = DXCORE_CALL(D3DKMTCreateContextVirtual(&args));
-  if (ret == STATUS_SUCCESS) {
+  ErrorCode ret = dx::CreateContextVirtual(&args);
+  if (ret == ErrorCode::Success) {
     *handle = args.hContext;
     return true;
   }
 
-  pr_err("fail %x\n", ret);
+  pr_err("fail %d\n", static_cast<int>(ret));
   return false;
 }
 
@@ -332,11 +336,11 @@ bool WDDMDevice::DestroyContext(D3DKMT_HANDLE handle) {
   D3DKMT_DESTROYCONTEXT args = {0};
   args.hContext = handle;
 
-  NTSTATUS ret = DXCORE_CALL(D3DKMTDestroyContext(&args));
-  if (ret == STATUS_SUCCESS)
+  ErrorCode ret = dx::DestroyContext(&args);
+  if (ret == ErrorCode::Success)
     return true;
 
-  pr_err("fail %x\n", ret);
+  pr_err("fail %d\n", static_cast<int>(ret));
   return false;
 }
 
@@ -349,11 +353,11 @@ bool WDDMDevice::GpuWait(WDDMQueue *queue, const D3DKMT_HANDLE *syncobjs,
   args.ObjectHandleArray = syncobjs;
   args.MonitoredFenceValueArray = values;
 
-  NTSTATUS ret = DXCORE_CALL(D3DKMTWaitForSynchronizationObjectFromGpu(&args));
-  if (ret == STATUS_SUCCESS)
+  ErrorCode ret = dx::WaitForSynchronizationObjectFromGpu(&args);
+  if (ret == ErrorCode::Success)
       return true;
 
-  pr_err("fail %x\n", ret);
+  pr_err("fail %d\n", static_cast<int>(ret));
   return false;
 }
 
@@ -365,11 +369,11 @@ bool WDDMDevice::GpuSignal(D3DKMT_HANDLE context, const D3DKMT_HANDLE *syncobjs,
   args.ObjectHandleArray = syncobjs;
   args.MonitoredFenceValueArray = value;
 
-  NTSTATUS ret = DXCORE_CALL(D3DKMTSignalSynchronizationObjectFromGpu(&args));
-  if (ret == STATUS_SUCCESS)
+  ErrorCode ret = dx::SignalSynchronizationObjectFromGpu(&args);
+  if (ret == ErrorCode::Success)
     return true;
 
-  pr_err("fail %x\n", ret);
+  pr_err("fail %d\n", static_cast<int>(ret));
   return false;
 }
 
@@ -382,11 +386,11 @@ bool WDDMDevice::CpuWait(const D3DKMT_HANDLE *syncobjs, uint64_t *value,
   args.FenceValueArray = value;
   args.Flags.WaitAny = wait_any;
 
-  NTSTATUS ret = DXCORE_CALL(D3DKMTWaitForSynchronizationObjectFromCpu(&args));
-  if (ret == STATUS_SUCCESS)
+  ErrorCode ret = dx::WaitForSynchronizationObjectFromCpu(&args);
+  if (ret == ErrorCode::Success)
     return true;
 
-  pr_err("fail %x\n", ret);
+  pr_err("fail %d\n", static_cast<int>(ret));
   return false;
 }
 
@@ -406,8 +410,8 @@ bool WDDMDevice::CreateSyncobj(D3DKMT_HANDLE *handle, uint64_t **addr) {
   args.Info.Type = D3DDDI_MONITORED_FENCE;
   args.Info.MonitoredFence.EngineAffinity = 1 << 0;
 
-  NTSTATUS ret = DXCORE_CALL(D3DKMTCreateSynchronizationObject2(&args));
-  if (ret == STATUS_SUCCESS) {
+  ErrorCode ret = dx::CreateSynchronizationObject2(&args);
+  if (ret == ErrorCode::Success) {
     *handle = args.hSyncObject;
     *addr = (uint64_t *)args.Info.MonitoredFence.FenceValueCPUVirtualAddress;
     pr_debug("create syncobj cpu addr=%p gpu addr=%" PRIx64 "\n",
@@ -417,7 +421,7 @@ bool WDDMDevice::CreateSyncobj(D3DKMT_HANDLE *handle, uint64_t **addr) {
     return true;
   }
 
-  pr_err("fail %x\n", ret);
+  pr_err("fail %d\n", static_cast<int>(ret));
   return false;
 }
 
@@ -425,9 +429,9 @@ void WDDMDevice::DestroySyncobj(D3DKMT_HANDLE handle) {
   D3DKMT_DESTROYSYNCHRONIZATIONOBJECT args = {0};
   args.hSyncObject = handle;
 
-  NTSTATUS ret = DXCORE_CALL(D3DKMTDestroySynchronizationObject(&args));
-  if (ret != STATUS_SUCCESS)
-    pr_err("fail %x\n", ret);
+  ErrorCode ret = dx::DestroySynchronizationObject(&args);
+  if (ret != ErrorCode::Success)
+    pr_err("fail %d\n", static_cast<int>(ret));
 }
 
 void WDDMDevice::InitCmdbufInfo(void) {
@@ -504,9 +508,9 @@ void WDDMDevice::GetClockCounters(uint64_t *gpu, uint64_t *cpu) {
   args.NodeOrdinal = ordinal;
   args.PhysicalAdapterIndex = 0;
 
-  NTSTATUS status = DXCORE_CALL(D3DKMTQueryClockCalibration(&args));
-  if (status) {
-    pr_debug("status %d \n", status);
+  ErrorCode status = dx::QueryClockCalibration(&args);
+  if (status != ErrorCode::Success) {
+    pr_debug("status %d \n", static_cast<int>(status));
   } else {
     if (gpu)
       *gpu = args.ClockData.GpuClockCounter;
@@ -569,9 +573,9 @@ bool WDDMDevice::SubmitToSwQueue(WDDMQueue *queue, uint64_t command_addr,
   args.pPrivateDriverData = priv.data();
   args.PrivateDriverDataSize = priv.size();
 
-  NTSTATUS ret = DXCORE_CALL(D3DKMTSubmitCommand(&args));
-  if (ret != STATUS_SUCCESS) {
-    pr_err("fail %x\n", ret);
+  ErrorCode ret = dx::SubmitCommand(&args);
+  if (ret != ErrorCode::Success) {
+    pr_err("fail %d\n", static_cast<int>(ret));
     return false;
   }
 
@@ -591,9 +595,9 @@ bool WDDMDevice::CreateHwQueue(WDDMQueue *queue) {
   createHwQueue.pPrivateDriverData = priv.data();
   createHwQueue.PrivateDriverDataSize = priv.size();
 
-  NTSTATUS ret = DXCORE_CALL(D3DKMTCreateHwQueue(&createHwQueue));
-  if (ret != STATUS_SUCCESS) {
-    pr_err("fail %x\n", ret);
+  ErrorCode ret = dx::CreateHwQueue(&createHwQueue);
+  if (ret != ErrorCode::Success) {
+    pr_err("fail %d\n", static_cast<int>(ret));
     return false;
   }
 
@@ -609,9 +613,9 @@ bool WDDMDevice::DestroyHwQueue(WDDMQueue *queue) {
     .hHwQueue = queue->queue,
   };
 
-  NTSTATUS ret = DXCORE_CALL(D3DKMTDestroyHwQueue(&DestroyHwQueue));
-  if (ret != STATUS_SUCCESS) {
-    pr_err("fail %x\n", ret);
+  ErrorCode ret = dx::DestroyHwQueue(&DestroyHwQueue);
+  if (ret != ErrorCode::Success) {
+    pr_err("fail %d\n", static_cast<int>(ret));
     return false;
   }
 
@@ -630,9 +634,9 @@ bool WDDMDevice::SubmitToHwQueue(WDDMQueue *queue, uint64_t command_addr,
   args.pPrivateDriverData = priv.data();
   args.PrivateDriverDataSize = priv.size();
 
-  NTSTATUS ret = DXCORE_CALL(D3DKMTSubmitCommandToHwQueue(&args));
-  if (ret != STATUS_SUCCESS) {
-    pr_err("fail %x\n", ret);
+  ErrorCode ret = dx::SubmitCommandToHwQueue(&args);
+  if (ret != ErrorCode::Success) {
+    pr_err("fail %d\n", static_cast<int>(ret));
     return false;
   }
 

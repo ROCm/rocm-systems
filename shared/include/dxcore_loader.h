@@ -35,13 +35,17 @@ namespace dxcore {
 
 /**
  * @brief DxcoreLoader class for dynamic loading of libdxcore.so
- * 
+ *
  * This class provides a singleton loader for the DXCore library, allowing
  * optional loading based on environment variable LIBROCDXG_ENABLE_DXCORE.
  * Supported values: "1", "true", "yes" (case-sensitive).
  * If not set or invalid, fallback to stub implementations.
- * 
+ *
  * Thread-safe initialization using std::call_once.
+ *
+ * PFN typedefs match libdxcore NTSTATUS ABI. Application code should call
+ * D3DKMT entry points only through `wsl::thunk::d3dthunk` helpers in thunks.h;
+ * DXCORE_* macros are implementation details for that header and dxcore_loader.cpp.
  */
 
 // Macro definitions mimicking HSAKMT design

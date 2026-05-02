@@ -52,6 +52,7 @@ enum class ErrorCode {
   InitializationFailed,
   OutOfGpuMemory,
   OutOfHandleApeMemory,
+  BufferTooSmall,
   Timeout,
   SyscallFail,
   InvalidParams,
