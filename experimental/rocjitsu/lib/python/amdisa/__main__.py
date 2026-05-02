@@ -22,6 +22,9 @@ from amdisa import (
 )
 from amdisa import xml_schema as xs
 from amdisa.cross_isa import CrossIsaAnalyzer
+from amdisa.encoding_translator_codegen import generate_encoding_fields, generate_encoding_translators
+from amdisa.legalization import LegalizationGenerator
+from amdisa.legalization_codegen import emit_all as emit_legalization
 from amdisa.semantics import derive_all_semantics
 
 _PROFILES = {
@@ -117,6 +120,44 @@ def _run_multi(args) -> None:
 
     # Single unified shared execute header — no per-encoding stubs needed.
 
+    # Legalization table generation (--gen-legalization).
+    if args.gen_legalization:
+        leg_gen = LegalizationGenerator(specs)
+        pairs = args.legalization_pairs
+        if pairs:
+            pair_list = []
+            for p in pairs:
+                s, d = p.split('->')
+                pair_list.append((s.strip(), d.strip()))
+        else:
+            pair_list = None
+        results = leg_gen.generate_all(pair_list)
+        leg_output = args.legalization_output or args.output or '.'
+        generated = emit_legalization(leg_output, results)
+        for src, dst, entries in results:
+            counts = leg_gen.summary(entries)
+            print(f'  {src} -> {dst}: {len(entries)} entries '
+                  f'({counts["identity"]} identity, {counts["substitute"]} substitute, '
+                  f'{counts["lower"]} lower, {counts["expand"]} expand, '
+                  f'{counts["illegal"]} illegal)', file=sys.stderr)
+        print(f'Generated {len(generated)} files in {leg_output}', file=sys.stderr)
+
+    # Encoding field structs + translator generation (--gen-encoding-translators).
+    if args.gen_encoding_translators:
+        enc_output = args.encoding_translator_output or args.output or '.'
+        generate_encoding_fields(specs, enc_output)
+        if args.encoding_pair:
+            src_n, dst_n = args.encoding_pair.split('->')
+            src_n, dst_n = src_n.strip(), dst_n.strip()
+            spec_map = {name: (spec, sem) for name, spec, sem in specs}
+            if src_n not in spec_map or dst_n not in spec_map:
+                print(f'error: --encoding-pair references unknown ISA: {src_n} or {dst_n}',
+                      file=sys.stderr)
+                sys.exit(1)
+            src_spec, _ = spec_map[src_n]
+            dst_spec, _ = spec_map[dst_n]
+            generate_encoding_translators(src_spec, dst_spec, src_n, dst_n, enc_output)
+
 
 def main() -> None:
     """Parse an AMD GPU ISA XML spec and generate C++ sources."""
@@ -179,6 +220,39 @@ def main() -> None:
         "--gen-shared-execute",
         action="store_true",
         help="Generate shared/execute_*.h template headers (requires --multi).",
+    )
+    arg_parser.add_argument(
+        "--gen-legalization",
+        action="store_true",
+        help="Generate C++ legalization tables for DBT (requires --multi).",
+    )
+    arg_parser.add_argument(
+        "--legalization-output",
+        metavar="DIR",
+        help="Output directory for legalization tables (defaults to -o value).",
+    )
+    arg_parser.add_argument(
+        "--legalization-pairs",
+        nargs='+',
+        metavar='SRC->DST',
+        help="Restrict legalization to specific pairs (e.g., cdna3->cdna4). "
+             "Default: all supported pairs from the loaded ISAs.",
+    )
+    arg_parser.add_argument(
+        "--gen-encoding-translators",
+        action="store_true",
+        help="Generate C++ encoding translator functions for DBT (requires --multi with exactly 2 ISAs).",
+    )
+    arg_parser.add_argument(
+        "--encoding-translator-output",
+        metavar="DIR",
+        help="Output directory for encoding translators (defaults to -o value).",
+    )
+    arg_parser.add_argument(
+        "--encoding-pair",
+        metavar="SRC->DST",
+        help="Source->target ISA pair for encoding translators (e.g., cdna4->rdna4). "
+             "Field structs are always generated from all ISAs in --multi.",
     )
     args = arg_parser.parse_args()
 

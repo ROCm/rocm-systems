@@ -710,7 +710,7 @@ class Settings : public amd::HeapObject {
       uint kernel_arg_impl_ : 2;              //!< Kernel argument implementation
       uint sdma_swap_supported_ : 1;         //!< SDMA linear swap copy (gfx94x/gfx95x)
       uint groupMemCarveout_ : 1;             //!< Group memory carveout functionality
-      uint reserved_ : 12;
+      uint reserved_ : 10;
     };
     uint value_;
   };
@@ -1472,10 +1472,17 @@ class MemObjMap : public AllStatic {
   //!< Same as FindMemObj but for ipc handle to MemObj mapping
   static amd::Memory* FindIpcHandleMemObj(const IpcMemHandle& k);
 
+  //!< Atomically find and remove a mem object by ptr. Returns the removed Memory* or nullptr.
+  static amd::Memory* FindAndRemoveMemObj(const void* k);
+
   //!< Shared read/write lock for all MemObjMap operations (including per-device maps)
   static std::shared_mutex AllocatedLock_;
 
  private:
+  //!< Lookup helper shared by FindMemObj and FindAndRemoveMemObj. Caller must hold AllocatedLock_.
+  //!< Returns an iterator to the matching entry, or MemObjMap_.end() if not found.
+  static std::map<uintptr_t, amd::Memory*>::iterator FindMemObjIter(uintptr_t key);
+
   //!< the mem object<->hostptr information container
   static std::map<uintptr_t, amd::Memory*> MemObjMap_;
   //!< the virtual mem object<->hostptr information container

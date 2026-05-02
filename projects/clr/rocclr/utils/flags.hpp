@@ -267,7 +267,10 @@ release(uint, DEBUG_CLR_BATCH_CPU_SYNC_SIZE, 8,                               \
 release(bool, DEBUG_CLR_DISABLE_IMAGE, false,                                 \
         "1 = Disable Image support for ROC path")                             \
 release(bool, DEBUG_CLR_ENABLE_PREFETCH_METADATA, true,                       \
-        "Enable metadata prefetch for some Aql packats")
+        "Enable metadata prefetch for some Aql packets")                      \
+release(uint, DEBUG_CLR_DOORBELL_SKIP, 16,                                    \
+        "Number of consecutive dispatches that may skip the doorbell flush.")
+ 
 
 namespace amd {
 

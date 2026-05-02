@@ -23,13 +23,13 @@
 #ifndef _GFX12_DEF_H_
 #define _GFX12_DEF_H_
 
-#include "linux/soc24_enum.h"
-#include "util/soc15_common.h"
-#include "util/reg_offsets.h"
-#include "linux/registers/gc/gc_12_0_0_offset.h"
-#include "linux/registers/gc/gc_12_0_0_sh_mask.h"
-#include "linux/registers/athub/athub_4_1_0_offset.h"
-#include "linux/registers/athub/athub_4_1_0_sh_mask.h"
+#include "lib/aqlprofile/linux/soc24_enum.h"
+#include "lib/aqlprofile/util/soc15_common.h"
+#include "lib/aqlprofile/util/reg_offsets.h"
+#include "lib/aqlprofile/linux/registers/gc/gc_12_0_0_offset.h"
+#include "lib/aqlprofile/linux/registers/gc/gc_12_0_0_sh_mask.h"
+#include "lib/aqlprofile/linux/registers/athub/athub_4_1_0_offset.h"
+#include "lib/aqlprofile/linux/registers/athub/athub_4_1_0_sh_mask.h"
 // Rename CP_PERFMON_CNTL_1 to CP_PERFMON_CNTL for better compatibility
 // CP_PERFMON_CNTL_1
 #define regCP_PERFMON_CNTL_BASE_IDX                 regCP_PERFMON_CNTL_1_BASE_IDX
@@ -43,11 +43,11 @@
 #define CP_PERFMON_CNTL__SPM_PERFMON_STATE_MASK     CP_PERFMON_CNTL_1__SPM_PERFMON_STATE_MASK
 #define CP_PERFMON_CNTL__PERFMON_ENABLE_MODE_MASK   CP_PERFMON_CNTL_1__PERFMON_ENABLE_MODE_MASK
 #define CP_PERFMON_CNTL__PERFMON_SAMPLE_ENABLE_MASK CP_PERFMON_CNTL_1__PERFMON_SAMPLE_ENABLE_MASK
-#include "linux/packets/nvd.h"
-#include "gfxip/gfx12/gfx12_block_info.h"
+#include "lib/aqlprofile/linux/packets/nvd.h"
+#include "lib/aqlprofile/gfxip/gfx12/gfx12_block_info.h"
 using namespace gfxip::gfx12;
 using namespace gfxip::gfx12::gfx1200;
-#include "gfxip/gfx12/gfx12_primitives.h"
-#include "gfxip/gfx12/gfx12_block_table.h"
+#include "lib/aqlprofile/gfxip/gfx12/gfx12_primitives.h"
+#include "lib/aqlprofile/gfxip/gfx12/gfx12_block_table.h"
 
 #endif  // _GFX12_DEF_H_
