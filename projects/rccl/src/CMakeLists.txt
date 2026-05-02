@@ -536,6 +536,24 @@ endif()
 if(ENABLE_ROCSHMEM)
   target_compile_definitions(rccl PRIVATE ENABLE_ROCSHMEM)
 endif()
+
+# Optional PMIx integration for the bootstrap rendezvous fast-path
+# (NCCL_BOOTSTRAP_PMIX=1). We only need the PMIx headers at compile time;
+# the library is loaded via dlopen at runtime to keep RCCL deployable on
+# nodes without libpmix installed. If headers aren't found we silently
+# disable the PMIx code path (existing flat-root rendezvous remains the
+# only behaviour).
+find_package(PkgConfig QUIET)
+if(PkgConfig_FOUND)
+  pkg_check_modules(PMIX QUIET pmix)
+  if(PMIX_FOUND)
+    message(STATUS "RCCL: enabling NCCL_HAVE_PMIX (headers from ${PMIX_INCLUDE_DIRS})")
+    target_compile_definitions(rccl PRIVATE NCCL_HAVE_PMIX)
+    target_include_directories(rccl PRIVATE ${PMIX_INCLUDE_DIRS})
+  else()
+    message(STATUS "RCCL: PMIx headers not found via pkg-config; PMIx bootstrap path disabled")
+  endif()
+endif()
 if("${hip_version_string}" VERSION_GREATER_EQUAL "7.12.60540")
   target_compile_definitions(rccl PRIVATE HIP_VMM_UNCACHED_MEMORY)
 endif()

@@ -115,6 +115,20 @@ NCCL_PARAM(BootstrapBidirNet,       "BOOTSTRAP_BIDIR_NET",       0);
 // Force-disable per-path with NCCL_BOOTSTRAP_BIDIR_ALLGATHER=0 / NCCL_BOOTSTRAP_BIDIR_NET=0.
 NCCL_PARAM(BootstrapBidirThreshold, "BOOTSTRAP_BIDIR_THRESHOLD", 16);
 
+// Option A — bootstrap rendezvous via PMIx pre-shared addresses.
+// When set to 1 (and libpmix is dlopen-able + the launcher provides a PMIx
+// server, e.g. mpirun/orted, slurm with pmix), the per-rank metadata exchange
+// no longer goes through rank 0's accept loop. Each rank PMIx_Put's its own
+// listen address+revHandle, the global PMIx_Fence acts as a barrier, then
+// each rank PMIx_Get's its forward neighbour's metadata directly. This
+// removes the O(N) root-side accept loop and the rank-arrival-floor that
+// dominates bootstrap time in the flat path.
+//
+// Default 0 — opt-in. RCCL gracefully falls back to the existing flat
+// rendezvous if libpmix.so cannot be loaded or PMIx_Init fails.
+NCCL_PARAM(BootstrapPmix, "BOOTSTRAP_PMIX", 0);
+
+
 // Single source of truth for the "should we run bidirectional bootstrap?" decision.
 // kind: 0 = socket OOB (no threshold, no extra setup), 1 = net (IB) OOB (threshold-gated,
 // pays for an extra QP pair). Setup, dispatch and cleanup all consult this so they
@@ -974,6 +988,178 @@ NCCL_PARAM(StaggerThreshold, "UID_STAGGER_THRESHOLD", 256);
 
 NCCL_PARAM(RasEnable, "RAS_ENABLE", 1);
 
+// =====================================================================
+// PMIx bootstrap fast-path (Option A — distributed pre-shared addresses)
+// =====================================================================
+//
+// Headers are detected at configure time (NCCL_HAVE_PMIX). The library
+// itself is dlopen'd at first use so deployment hosts without libpmix
+// remain safe — they simply don't get the fast path.
+
+#ifdef NCCL_HAVE_PMIX
+#include <pmix.h>
+#include <dlfcn.h>
+
+namespace {
+
+// Function-pointer table populated by the first call to pmixEnsureLoaded().
+// Once set, all wrappers are reentrant.
+struct PmixFns {
+  void* lib;
+  pmix_status_t (*Init)(pmix_proc_t*, pmix_info_t[], size_t);
+  pmix_status_t (*Finalize)(const pmix_info_t[], size_t);
+  pmix_status_t (*Put)(pmix_scope_t, const pmix_key_t, pmix_value_t*);
+  pmix_status_t (*Commit)(void);
+  pmix_status_t (*Fence)(const pmix_proc_t[], size_t, const pmix_info_t[], size_t);
+  pmix_status_t (*Get)(const pmix_proc_t*, const pmix_key_t, const pmix_info_t[], size_t, pmix_value_t**);
+  const char* (*Error_string)(pmix_status_t);
+};
+
+static PmixFns gPmix = {nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr};
+static int gPmixLoadState = 0; // 0=untried, 1=ok, -1=failed
+static pthread_mutex_t gPmixLoadMu = PTHREAD_MUTEX_INITIALIZER;
+static pmix_proc_t gPmixSelf;
+static int gPmixInitialized = 0;
+
+static int pmixEnsureLoaded() {
+  pthread_mutex_lock(&gPmixLoadMu);
+  if (gPmixLoadState != 0) {
+    int r = gPmixLoadState;
+    pthread_mutex_unlock(&gPmixLoadMu);
+    return r;
+  }
+  // Try a few common SONAMEs in order. PMIx ABI is forward-compatible
+  // across these majors for the symbols we use.
+  static const char* kCandidates[] = {
+    "libpmix.so.2", "libpmix.so.0", "libpmix.so", nullptr
+  };
+  void* lib = nullptr;
+  for (int i = 0; kCandidates[i]; i++) {
+    lib = dlopen(kCandidates[i], RTLD_LAZY | RTLD_GLOBAL);
+    if (lib) break;
+  }
+  if (!lib) {
+    INFO(NCCL_BOOTSTRAP, "PMIx: dlopen(libpmix) failed (%s); fast path disabled", dlerror());
+    gPmixLoadState = -1;
+    pthread_mutex_unlock(&gPmixLoadMu);
+    return -1;
+  }
+  gPmix.lib = lib;
+  gPmix.Init     = (decltype(gPmix.Init))    dlsym(lib, "PMIx_Init");
+  gPmix.Finalize = (decltype(gPmix.Finalize))dlsym(lib, "PMIx_Finalize");
+  gPmix.Put      = (decltype(gPmix.Put))     dlsym(lib, "PMIx_Put");
+  gPmix.Commit   = (decltype(gPmix.Commit))  dlsym(lib, "PMIx_Commit");
+  gPmix.Fence    = (decltype(gPmix.Fence))   dlsym(lib, "PMIx_Fence");
+  gPmix.Get      = (decltype(gPmix.Get))     dlsym(lib, "PMIx_Get");
+  gPmix.Error_string = (decltype(gPmix.Error_string))dlsym(lib, "PMIx_Error_string");
+  if (!gPmix.Init || !gPmix.Finalize || !gPmix.Put || !gPmix.Commit ||
+      !gPmix.Fence || !gPmix.Get) {
+    INFO(NCCL_BOOTSTRAP, "PMIx: required symbols missing in libpmix; fast path disabled");
+    dlclose(lib);
+    gPmix.lib = nullptr;
+    gPmixLoadState = -1;
+    pthread_mutex_unlock(&gPmixLoadMu);
+    return -1;
+  }
+  gPmixLoadState = 1;
+  pthread_mutex_unlock(&gPmixLoadMu);
+  return 1;
+}
+
+// Per-process PMIx handshake. PMIx is reference-counted internally so
+// multiple comms in the same process share one Init/Finalize pair.
+static ncclResult_t pmixInitOnce() {
+  if (gPmixInitialized) return ncclSuccess;
+  pmix_status_t rc = gPmix.Init(&gPmixSelf, NULL, 0);
+  if (rc != PMIX_SUCCESS) {
+    WARN("PMIx_Init failed: %d (%s)", rc, gPmix.Error_string ? gPmix.Error_string(rc) : "?");
+    return ncclSystemError;
+  }
+  gPmixInitialized = 1;
+  return ncclSuccess;
+}
+
+// Pack rank R's bootstrap metadata (listen addr / IB handles) into a single
+// PMIx Put payload using a deterministic key string. Using PMIX_BYTE_OBJECT
+// avoids any string-encoding pitfalls — this is opaque blob exchange.
+static ncclResult_t pmixPutMyInfo(int rank, const struct extInfo* info) {
+  pmix_value_t v;
+  memset(&v, 0, sizeof(v));
+  v.type = PMIX_BYTE_OBJECT;
+  v.data.bo.bytes = (char*)info;
+  v.data.bo.size = sizeof(*info);
+  // Key: nccl:bs:<magic>:<rank>. Magic disambiguates concurrent comms in
+  // the same job; rank disambiguates each peer's payload.
+  char key[PMIX_MAX_KEYLEN+1];
+  snprintf(key, sizeof(key), "nccl:bs:%016lx:%d", (unsigned long)info->nranks, rank);
+  pmix_status_t rc = gPmix.Put(PMIX_GLOBAL, key, &v);
+  if (rc != PMIX_SUCCESS) {
+    WARN("PMIx_Put rank=%d failed: %d (%s)", rank, rc, gPmix.Error_string ? gPmix.Error_string(rc) : "?");
+    return ncclSystemError;
+  }
+  rc = gPmix.Commit();
+  if (rc != PMIX_SUCCESS) {
+    WARN("PMIx_Commit rank=%d failed: %d (%s)", rank, rc, gPmix.Error_string ? gPmix.Error_string(rc) : "?");
+    return ncclSystemError;
+  }
+  return ncclSuccess;
+}
+
+static ncclResult_t pmixGlobalFence() {
+  pmix_proc_t allProc;
+  memset(&allProc, 0, sizeof(allProc));
+  memcpy(allProc.nspace, gPmixSelf.nspace, sizeof(allProc.nspace));
+  allProc.rank = PMIX_RANK_WILDCARD;
+  pmix_status_t rc = gPmix.Fence(&allProc, 1, NULL, 0);
+  if (rc != PMIX_SUCCESS) {
+    WARN("PMIx_Fence failed: %d (%s)", rc, gPmix.Error_string ? gPmix.Error_string(rc) : "?");
+    return ncclSystemError;
+  }
+  return ncclSuccess;
+}
+
+static ncclResult_t pmixGetPeerInfo(int peerRank, int nranks, struct extInfo* out) {
+  pmix_proc_t target;
+  memset(&target, 0, sizeof(target));
+  memcpy(target.nspace, gPmixSelf.nspace, sizeof(target.nspace));
+  target.rank = (pmix_rank_t)peerRank;
+  char key[PMIX_MAX_KEYLEN+1];
+  snprintf(key, sizeof(key), "nccl:bs:%016lx:%d", (unsigned long)nranks, peerRank);
+  pmix_value_t* val = NULL;
+  pmix_status_t rc = gPmix.Get(&target, key, NULL, 0, &val);
+  if (rc != PMIX_SUCCESS || !val) {
+    WARN("PMIx_Get peer=%d failed: %d (%s)", peerRank, rc, gPmix.Error_string ? gPmix.Error_string(rc) : "?");
+    return ncclSystemError;
+  }
+  if (val->type != PMIX_BYTE_OBJECT || val->data.bo.size != sizeof(*out)) {
+    WARN("PMIx_Get peer=%d returned unexpected payload (type=%d size=%zu)", peerRank, val->type, val->data.bo.size);
+    return ncclInternalError;
+  }
+  memcpy(out, val->data.bo.bytes, sizeof(*out));
+  return ncclSuccess;
+}
+
+} // namespace
+
+#endif // NCCL_HAVE_PMIX
+
+// Returns true if the PMIx fast-path should be used for this comm:
+// 1. NCCL_BOOTSTRAP_PMIX != 0
+// 2. RCCL was built with PMIx headers (NCCL_HAVE_PMIX)
+// 3. libpmix was successfully dlopen'd at runtime
+// 4. Single-handle path only (multi-root packed IDs go through the legacy
+//    rendezvous — they are themselves a substitute for the fast path).
+static bool bootstrapPmixUsable(int nHandles) {
+#ifdef NCCL_HAVE_PMIX
+  if (ncclParamBootstrapPmix() == 0) return false;
+  if (nHandles != 1) return false; // multi-root takes precedence
+  return pmixEnsureLoaded() == 1;
+#else
+  (void)nHandles;
+  return false;
+#endif
+}
+
 ncclResult_t bootstrapInit(int nHandles, void* handles, struct ncclComm* comm) {
   ncclResult_t result = ncclSuccess;
   int rank = comm->rank;
@@ -1059,46 +1245,94 @@ ncclResult_t bootstrapInit(int nHandles, void* handles, struct ncclComm* comm) {
   NCCLCHECK(createListenSocket(comm, BOOTSTRAP_HANDLE(handles, curr_root)->magic, &listenSockRoot, &info.listenRootAddress, ncclSocketTypeBootstrap));
   BOOTSTRAP_PROF_CLOSE(timers[BOOTSTRAP_INIT_TIME_CREATE]);
 
-  // stagger connection times to avoid an overload of the root
-  BOOTSTRAP_PROF_OPEN(timers[BOOTSTRAP_INIT_TIME_DELAY]);
-  int nRankRoot = nRankFromRoot(curr_root, nranks, nHandles);
-  if (nRankRoot > ncclParamStaggerThreshold()) {
-    // for socket the message rate in microsec
-    double msg_rate = ncclParamStaggerRate() / 1.0e6;
-    long musec = localIdFromRoot(rank, curr_root, nranks, nHandles) / msg_rate;
-    struct timespec tv;
-    long c_1e6 = 1e6;
-    tv.tv_sec = musec / c_1e6;
-    tv.tv_nsec = 1e3 * (musec % c_1e6);
-    TRACE(NCCL_BOOTSTRAP, "rank %d delaying connection to root by %ld microsec", rank, musec);
-    (void)nanosleep(&tv, NULL);
-  }
-  BOOTSTRAP_PROF_CLOSE(timers[BOOTSTRAP_INIT_TIME_DELAY]);
+  // Whether to take the PMIx fast-path (Option A — distributed pre-shared
+  // addresses). Decided once after the listen sockets are up but *before*
+  // the staggered sleep + sendToRoot, so neither cost is paid on the
+  // PMIx path.
+  bool usePmix = bootstrapPmixUsable(nHandles);
 
-  // send info on my listening socket to root
-  BOOTSTRAP_PROF_OPEN(timers[BOOTSTRAP_INIT_TIME_SEND]);
-  // send contact info to my own root
-  info.rank = rank;
-  info.iroot = curr_root;
-  NCCLCHECK(sendToRoot(BOOTSTRAP_HANDLE(handles, curr_root), comm, &info));
-  // if needed, send the connection info to the previous root
-  if (nHandles > 1 && isFirstFromRoot(rank, curr_root, nranks, nHandles)) {
-    int prev_rank = BOOTSTRAP_PID(rank - 1, nranks);
-    int prev_root = rootIdFromRank(prev_rank, nranks, nHandles);
-    info.rank = prev_rank + 1; // my rank as seen by the previous root
-    info.iroot = prev_root;
-    NCCLCHECK(sendToRoot(BOOTSTRAP_HANDLE(handles, prev_root), comm, &info));
-  }
-  BOOTSTRAP_PROF_CLOSE(timers[BOOTSTRAP_INIT_TIME_SEND]);
+  if (!usePmix) {
+    // stagger connection times to avoid an overload of the root
+    BOOTSTRAP_PROF_OPEN(timers[BOOTSTRAP_INIT_TIME_DELAY]);
+    int nRankRoot = nRankFromRoot(curr_root, nranks, nHandles);
+    if (nRankRoot > ncclParamStaggerThreshold()) {
+      // for socket the message rate in microsec
+      double msg_rate = ncclParamStaggerRate() / 1.0e6;
+      long musec = localIdFromRoot(rank, curr_root, nranks, nHandles) / msg_rate;
+      struct timespec tv;
+      long c_1e6 = 1e6;
+      tv.tv_sec = musec / c_1e6;
+      tv.tv_nsec = 1e3 * (musec % c_1e6);
+      TRACE(NCCL_BOOTSTRAP, "rank %d delaying connection to root by %ld microsec", rank, musec);
+      (void)nanosleep(&tv, NULL);
+    }
+    BOOTSTRAP_PROF_CLOSE(timers[BOOTSTRAP_INIT_TIME_DELAY]);
 
-  // get info on my "next" rank in the bootstrap ring from root
-  BOOTSTRAP_PROF_OPEN(timers[BOOTSTRAP_INIT_TIME_RECV]);
-  NCCLCHECK(ncclSocketInit(&sock));
-  NCCLCHECK(ncclSocketAccept(&sock, &listenSockRoot));
-  NCCLCHECK(socketRecv(&sock, &nextPeer, sizeof(nextPeer)));
-  NCCLCHECK(ncclSocketClose(&sock));
-  NCCLCHECK(ncclSocketClose(&listenSockRoot));
-  BOOTSTRAP_PROF_CLOSE(timers[BOOTSTRAP_INIT_TIME_RECV]);
+    // send info on my listening socket to root
+    BOOTSTRAP_PROF_OPEN(timers[BOOTSTRAP_INIT_TIME_SEND]);
+    // send contact info to my own root
+    info.rank = rank;
+    info.iroot = curr_root;
+    NCCLCHECK(sendToRoot(BOOTSTRAP_HANDLE(handles, curr_root), comm, &info));
+    // if needed, send the connection info to the previous root
+    if (nHandles > 1 && isFirstFromRoot(rank, curr_root, nranks, nHandles)) {
+      int prev_rank = BOOTSTRAP_PID(rank - 1, nranks);
+      int prev_root = rootIdFromRank(prev_rank, nranks, nHandles);
+      info.rank = prev_rank + 1; // my rank as seen by the previous root
+      info.iroot = prev_root;
+      NCCLCHECK(sendToRoot(BOOTSTRAP_HANDLE(handles, prev_root), comm, &info));
+    }
+    BOOTSTRAP_PROF_CLOSE(timers[BOOTSTRAP_INIT_TIME_SEND]);
+
+    // get info on my "next" rank in the bootstrap ring from root
+    BOOTSTRAP_PROF_OPEN(timers[BOOTSTRAP_INIT_TIME_RECV]);
+    NCCLCHECK(ncclSocketInit(&sock));
+    NCCLCHECK(ncclSocketAccept(&sock, &listenSockRoot));
+    NCCLCHECK(socketRecv(&sock, &nextPeer, sizeof(nextPeer)));
+    NCCLCHECK(ncclSocketClose(&sock));
+    NCCLCHECK(ncclSocketClose(&listenSockRoot));
+    BOOTSTRAP_PROF_CLOSE(timers[BOOTSTRAP_INIT_TIME_RECV]);
+  }
+#ifdef NCCL_HAVE_PMIX
+  else {
+    // ===== PMIx fast-path =====
+    // 1) Init PMIx client (idempotent across multi-comm processes).
+    // 2) Put my own extInfo as PMIX_BYTE_OBJECT under a deterministic key.
+    // 3) Global Fence (= barrier; uses launcher's tree algorithm).
+    // 4) Get the next peer's extInfo and unpack into nextPeer.
+    BOOTSTRAP_PROF_OPEN(timers[BOOTSTRAP_INIT_TIME_SEND]);
+    NCCLCHECK(pmixInitOnce());
+
+    info.rank = rank;
+    info.iroot = curr_root;
+    NCCLCHECK(pmixPutMyInfo(rank, &info));
+    BOOTSTRAP_PROF_CLOSE(timers[BOOTSTRAP_INIT_TIME_SEND]);
+
+    BOOTSTRAP_PROF_OPEN(timers[BOOTSTRAP_INIT_TIME_RECV]);
+    NCCLCHECK(pmixGlobalFence());
+
+    int next = (rank + 1) % nranks;
+    struct extInfo peer = {0};
+    NCCLCHECK(pmixGetPeerInfo(next, nranks, &peer));
+    nextPeer = peer.connectInfo;
+
+    // The flat path also delivers prev rank's revHandle inside nextPeer for
+    // bidir IB. Replicate that here by Get'ing prev's payload too — same
+    // KV store, no extra fence (prev already published in step 2).
+    if (wantNetBidir) {
+      int prev = (rank - 1 + nranks) % nranks;
+      struct extInfo prevInfo = {0};
+      NCCLCHECK(pmixGetPeerInfo(prev, nranks, &prevInfo));
+      memcpy(nextPeer.revHandle, prevInfo.connectInfo.revHandle, NCCL_NET_HANDLE_MAXSIZE);
+    }
+
+    // listenSockRoot was created earlier; nobody will ever connect to it on
+    // the PMIx path. Close it now so we don't leak the FD.
+    NCCLCHECK(ncclSocketClose(&listenSockRoot));
+    BOOTSTRAP_PROF_CLOSE(timers[BOOTSTRAP_INIT_TIME_RECV]);
+    INFO(NCCL_BOOTSTRAP, "PMIx bootstrap: rank %d/%d learned next=%d via PMIx_Fence", rank, nranks, next);
+  }
+#endif
 
   // Start the ring connect/accept as early as possible, then overlap its non-blocking
   // progress with local proxy/P2P socket setup below. This is intentionally single-
