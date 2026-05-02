@@ -151,7 +151,8 @@ TEST(EncodingTranslator, SmemRemapsCoherency) {
   uint32_t words[2];
   std::memcpy(words, &src, sizeof(src));
 
-  auto result = cdna4_to_rdna4::translate_encoding_cdna4_to_rdna4(kEnc_SMEM, words[0], words[1], 0, 0);
+  auto result =
+      cdna4_to_rdna4::translate_encoding_cdna4_to_rdna4(kEnc_SMEM, words[0], words[1], 0, 0);
 
   ASSERT_EQ(result.word_count, 2);
   rdna4::SmemMachineInst dst{};
@@ -179,7 +180,8 @@ TEST(EncodingTranslator, Vop3PreservesModifiers) {
   uint32_t words[2];
   std::memcpy(words, &src, sizeof(src));
 
-  auto result = cdna4_to_rdna4::translate_encoding_cdna4_to_rdna4(kEnc_VOP3, words[0], words[1], 0, 100);
+  auto result =
+      cdna4_to_rdna4::translate_encoding_cdna4_to_rdna4(kEnc_VOP3, words[0], words[1], 0, 100);
 
   ASSERT_EQ(result.word_count, 2);
   rdna4::Vop3MachineInst dst{};
