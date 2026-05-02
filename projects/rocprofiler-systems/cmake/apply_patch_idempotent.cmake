@@ -1,3 +1,6 @@
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
 # Apply a patch idempotently.
 #
 # CMake's ExternalProject regenerates `*-patch-info.txt` on every reconfigure,
@@ -13,9 +16,14 @@
 #     -DPATCH_EXE=${PATCH_EXECUTABLE}
 #     -P ${CMAKE_CURRENT_LIST_DIR}/apply_patch_idempotent.cmake
 
-if(NOT SRC OR NOT PATCH OR NOT PATCH_EXE)
-    message(FATAL_ERROR "apply_patch_idempotent: requires -DSRC, -DPATCH, -DPATCH_EXE")
-endif()
+foreach(_arg SRC PATCH PATCH_EXE)
+    if(NOT DEFINED ${_arg} OR "${${_arg}}" STREQUAL "")
+        message(
+            FATAL_ERROR
+            "apply_patch_idempotent: -D${_arg}=<value> is required"
+        )
+    endif()
+endforeach()
 
 execute_process(
     COMMAND ${PATCH_EXE} --dry-run --reverse --silent --force -p1 -d ${SRC} -i ${PATCH}
