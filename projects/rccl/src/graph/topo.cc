@@ -1702,6 +1702,18 @@ static void getNetDevsPolicyOnce() {
   if (netDevsPolicy == NETDEVS_POLICY_UNDEF) netDevsPolicy = NETDEVS_POLICY_AUTO;
 }
 
+ncclResult_t ncclTopoGetNetDevsPolicy(enum netDevsPolicy* policy, int* policyNum) {
+  static std::once_flag onceFlag;
+  std::call_once(onceFlag, getNetDevsPolicyOnce);
+  if (netDevsPolicy == NETDEVS_POLICY_MAX && netDevsPolicyNum <= 0) {
+    WARN("Invalid number of network devices = %d for policy MAX", netDevsPolicyNum);
+    return ncclInternalError;
+  }
+  if (policy) *policy = netDevsPolicy;
+  if (policyNum && netDevsPolicyNum >= 0) *policyNum = netDevsPolicyNum;
+  return ncclSuccess;
+}
+
 ncclResult_t ncclTopoGetLocalNet(struct ncclTopoSystem* system, int rank, int channelId, int64_t* id, int* dev) {
   int gpu;
   NCCLCHECK(ncclTopoRankToIndex(system, rank, &gpu, /*showWarn=*/true));
@@ -1716,8 +1728,10 @@ ncclResult_t ncclTopoGetLocalNet(struct ncclTopoSystem* system, int rank, int ch
     return ncclInternalError;
   }
 
-  static pthread_once_t once = PTHREAD_ONCE_INIT;
-  pthread_once(&once,getNetDevsPolicyOnce);
+
+  int policyCount = 0;
+  enum netDevsPolicy policy;
+  NCCLCHECK(ncclTopoGetNetDevsPolicy(&policy, &policyCount));
   int netsPerGpu = 0;
   if (netDevsPolicy == NETDEVS_POLICY_AUTO) {
     int localGpus[NCCL_TOPO_MAX_NODES];
