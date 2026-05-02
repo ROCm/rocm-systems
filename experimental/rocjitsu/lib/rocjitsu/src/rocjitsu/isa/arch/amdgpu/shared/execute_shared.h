@@ -186,8 +186,11 @@ inline void execute_s_absdiff_i32_sop2([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
   int32_t s0 = static_cast<int32_t>(inst.ssrc0.read_scalar(wf));
   int32_t s1 = static_cast<int32_t>(inst.ssrc1.read_scalar(wf));
-  int32_t result = s0 > s1 ? s0 - s1 : s1 - s0;
-  inst.sdst.write_scalar(wf, static_cast<uint32_t>(result));
+  int64_t wide_s0 = static_cast<int64_t>(s0);
+  int64_t wide_s1 = static_cast<int64_t>(s1);
+  uint32_t result =
+      static_cast<uint32_t>(wide_s0 > wide_s1 ? (wide_s0 - wide_s1) : (wide_s1 - wide_s0));
+  inst.sdst.write_scalar(wf, result);
   wf.write_scc(result != 0);
 }
 
