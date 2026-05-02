@@ -299,7 +299,7 @@ bool WDDMDevice::Unlock(D3DKMT_HANDLE handle) {
 }
 
 bool WDDMDevice::CreateContext(int engine, D3DKMT_HANDLE *handle) {
-  int ordinal = shared_dev_->DeviceInfo().EngineOrdinal(engine);
+  int ordinal = shared_dev_->EngineOrdinal(engine);
   if (ordinal < 0)
     return false;
 
@@ -316,7 +316,7 @@ bool WDDMDevice::CreateContext(int engine, D3DKMT_HANDLE *handle) {
   if (IsHwsEnabled(engine))
     args.Flags.HwQueueSupported = 1;
   else
-    args.Flags.DisableGpuTimeout = shared_dev_->DeviceInfo().IsGpuTimeoutDisabled(engine);
+    args.Flags.DisableGpuTimeout = shared_dev_->IsGpuTimeoutDisabled(engine);
 
   NTSTATUS ret = DXCORE_CALL(D3DKMTCreateContextVirtual(&args));
   if (ret == STATUS_SUCCESS) {
@@ -488,7 +488,7 @@ NTSTATUS WDDMCreateDevices(std::vector<WDDMDevice *> &devices)
 void WDDMDevice::GetClockCounters(uint64_t *gpu, uint64_t *cpu) {
 
   uint32_t engine = GetComputeEngine();
-  int ordinal = shared_dev_->DeviceInfo().EngineOrdinal(engine);
+  int ordinal = shared_dev_->EngineOrdinal(engine);
 
   D3DKMT_QUERYCLOCKCALIBRATION args = {0};
 
@@ -586,7 +586,8 @@ bool WDDMDevice::CreateHwQueue(WDDMQueue *queue) {
 
   D3DKMT_CREATEHWQUEUE createHwQueue = {0};
   createHwQueue.hHwContext = queue->context;
-  createHwQueue.Flags.DisableGpuTimeout = shared_dev_->DeviceInfo().IsGpuTimeoutDisabled(queue->queue_engine);
+  createHwQueue.Flags.DisableGpuTimeout =
+      shared_dev_->IsGpuTimeoutDisabled(queue->queue_engine);
   createHwQueue.pPrivateDriverData = priv.data();
   createHwQueue.PrivateDriverDataSize = priv.size();
 

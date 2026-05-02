@@ -78,6 +78,9 @@ public:
   WinDeviceHandle DeviceHandle() const;
   WinAdapterHandle AdapterHandle() const;
   LUID AdapterLuid() const;
+  int EngineOrdinal(int engine) const;
+  bool IsHwsEnabled(int engine) const;
+  bool IsGpuTimeoutDisabled(int engine) const;
 
 private:
   Device(Platform *platform, LdaChain *lda_chain, u32 chainIndex,

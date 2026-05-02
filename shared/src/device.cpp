@@ -139,5 +139,17 @@ LUID Device::AdapterLuid() const {
   return device_ctx_->AdapterLuid();
 }
 
+int Device::EngineOrdinal(int engine) const {
+  return device_ctx_->EngineOrdinal(engine);
+}
+
+bool Device::IsHwsEnabled(int engine) const {
+  return device_ctx_->IsHwsEnabled(engine);
+}
+
+bool Device::IsGpuTimeoutDisabled(int engine) const {
+  return device_ctx_->IsGpuTimeoutDisabled(engine);
+}
+
 } // namespace thunk
 } // namespace wsl

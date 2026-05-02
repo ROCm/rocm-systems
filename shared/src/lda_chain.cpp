@@ -95,8 +95,6 @@ ErrorCode LdaChain::QueryLinkedGpusInChain(vector<Device *> &devices,
     if (!thunk_proxy::ParseAdapterInfo(
             static_cast<D3DKMT_HANDLE>(AdapterHandle()),
             &deviceInfos[chain])) {
-      for (auto &info : deviceInfos)
-        free(info.adapter_info);
       return ErrorCode::InitializationFailed;
     }
   }

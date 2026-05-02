@@ -191,7 +191,7 @@ public:
   bool AllocUserQueueMemFromUMD(void) const { return false; }
 
   bool IsHwsEnabled(int engine) {
-    return shared_dev_->DeviceInfo().IsHwsEnabled(engine);
+    return shared_dev_->IsHwsEnabled(engine);
   }
 
   void UpdatePageFence(uint64_t fence_value);

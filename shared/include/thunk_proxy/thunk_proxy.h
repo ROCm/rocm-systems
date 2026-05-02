@@ -131,12 +131,7 @@ typedef struct {
   // --- Misc capabilities ---
   bool platform_atomic_support;
 
-  void *adapter_info;
   uint32_t kmd_version;
-
-  int EngineOrdinal(int engine) const;
-  bool IsHwsEnabled(int engine) const;
-  bool IsGpuTimeoutDisabled(int engine) const;
 } DeviceInfo;
 
 bool ParseAdapterInfo(D3DKMT_HANDLE adapter, DeviceInfo *device_info);
@@ -262,6 +257,10 @@ public:
 
   // Query memory used in bytes by type via D3DKMTQueryStatistics.
   ErrorCode QueryMemoryUsage(uint32_t mem_type, uint64_t *used) const;
+
+  int EngineOrdinal(int engine) const;
+  bool IsHwsEnabled(int engine) const;
+  bool IsGpuTimeoutDisabled(int engine) const;
 
   // Enumerate all Windows processes currently using this adapter's GPU.
   // Calls D3DKMTEnumProcesses (WSL2 dxgkrnl-specific API) and populates
