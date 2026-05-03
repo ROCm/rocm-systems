@@ -39,6 +39,7 @@ public:
       : Section(std::move(name), std::move(data)), shdr_(shdr) {}
 
   std::size_t size() const override { return shdr_.sh_size; }
+  uint64_t flags() const override { return shdr_.sh_flags; }
   uint32_t sectionHeaderNameIdx() const override { return shdr_.sh_name; }
   uint64_t sectionOffset() const override { return shdr_.sh_offset; }
 

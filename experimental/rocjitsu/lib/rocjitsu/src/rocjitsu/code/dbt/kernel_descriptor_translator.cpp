@@ -26,6 +26,7 @@ RJ_DIAGNOSTIC_POP
 #include <cstring>
 #include <functional>
 #include <optional>
+#include <unordered_set>
 
 namespace rocjitsu {
 
@@ -224,6 +225,25 @@ constexpr uint16_t kTtmpRdna4GridX = 9;
   return std::nullopt;
 }
 
+[[nodiscard]] uint64_t executable_code_range_size(uint64_t text_vaddr, uint64_t text_size,
+                                                  const Elf64_Ehdr &ehdr, const Elf64_Shdr *shdr) {
+  uint64_t code_end = text_vaddr + text_size;
+
+  // DBT places expansion bodies in .rj_translations and addresses them as a
+  // .text-relative continuation. Include executable sections at or after .text
+  // so a redirected kernel descriptor entry can still be parsed.
+  for (int i = 0; i < ehdr.e_shnum; ++i) {
+    constexpr uint64_t kShfExecInstr = 0x4;
+    if ((shdr[i].sh_flags & kShfExecInstr) == 0)
+      continue;
+    if (shdr[i].sh_addr < text_vaddr)
+      continue;
+    code_end = std::max(code_end, shdr[i].sh_addr + shdr[i].sh_size);
+  }
+
+  return code_end - text_vaddr;
+}
+
 using KernelDescriptorVisitor = std::function<void(uint64_t descriptor_file_offset,
                                                    uint64_t entry_text_offset, const KD &desc)>;
 
@@ -240,7 +260,9 @@ void visit_kernel_descriptors(std::span<const uint8_t> image, uint64_t text_offs
   auto text_vaddr = text_vaddr_for_section(text_offset, text_size, *ehdr, shdr);
   if (!text_vaddr)
     return;
+  const uint64_t code_range_size = executable_code_range_size(*text_vaddr, text_size, *ehdr, shdr);
 
+  std::unordered_set<uint64_t> seen_descriptor_offsets;
   for (int i = 0; i < ehdr->e_shnum; ++i) {
     if (shdr[i].sh_type != SHT_SYMTAB && shdr[i].sh_type != SHT_DYNSYM)
       continue;
@@ -271,6 +293,8 @@ void visit_kernel_descriptors(std::span<const uint8_t> image, uint64_t text_offs
           shdr[sec_idx].sh_offset + (symtab[j].st_value - shdr[sec_idx].sh_addr);
       if (file_off + sizeof(KD) > image.size())
         continue;
+      if (!seen_descriptor_offsets.insert(file_off).second)
+        continue;
 
       const auto *desc = reinterpret_cast<const KD *>(image.data() + file_off);
       const int64_t entry_vaddr_signed =
@@ -278,7 +302,7 @@ void visit_kernel_descriptors(std::span<const uint8_t> image, uint64_t text_offs
       if (entry_vaddr_signed < 0)
         continue;
       const uint64_t entry_vaddr = static_cast<uint64_t>(entry_vaddr_signed);
-      if (entry_vaddr < *text_vaddr || entry_vaddr >= *text_vaddr + text_size)
+      if (entry_vaddr < *text_vaddr || entry_vaddr >= *text_vaddr + code_range_size)
         continue;
 
       const uint64_t entry_text_offset = entry_vaddr - *text_vaddr;

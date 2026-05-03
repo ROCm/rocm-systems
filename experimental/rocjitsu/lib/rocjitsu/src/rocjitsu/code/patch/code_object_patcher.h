@@ -7,6 +7,8 @@
 
 #include <cstdint>
 #include <span>
+#include <string>
+#include <string_view>
 #include <vector>
 
 namespace rocjitsu {
@@ -62,12 +64,21 @@ public:
 
   uint64_t cave_body_size() const { return cave_body_.size(); }
 
-  /// @brief Set the byte offset within .text where the cave body will be placed.
+  /// @brief Materialize the accumulated cave body as an executable ELF section.
+  ///
+  /// The section data is inserted immediately after the original .text bytes so
+  /// all cave offsets are still expressible as .text-relative byte offsets:
+  /// original .text occupies [0, text_size_) and this section starts at
+  /// text_size_. The caller must therefore set cave_start() to text_size()
+  /// before emitting branch stubs.
+  void append_cave_section(std::string_view section_name = ".rj_translations");
+
+  /// @brief Set the .text-relative byte offset where the cave body will be placed.
   /// This must be called before any apply_semantic() calls so branch offsets
   /// are computed correctly.
   void set_cave_start(uint64_t offset) { cave_start_ = offset; }
 
-  /// @brief Get the cave start offset within .text.
+  /// @brief Get the .text-relative cave start offset.
   uint64_t cave_start() const { return cave_start_; }
 
   std::span<const uint8_t> cave_body() const { return cave_body_; }

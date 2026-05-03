@@ -116,7 +116,7 @@ rj_status_t rj_code_inst_list_create(rj_code_object_t *obj, rj_code_target_id_t 
 
   auto owned = std::make_unique<rj_code_inst_list_t>();
 
-  for (const auto *sec : obj->co->text_sections()) {
+  for (const auto *sec : obj->co->code_sections()) {
     const auto *inst_data = reinterpret_cast<const uint32_t *>(sec->data());
     std::size_t inst_data_size = sec->size() / sizeof(uint32_t);
     uint64_t pc = 0;
