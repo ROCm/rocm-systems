@@ -168,6 +168,7 @@ public:
 
   bool CreateSyncobj(D3DKMT_HANDLE *handle, uint64_t **addr);
   void DestroySyncobj(D3DKMT_HANDLE handle);
+  bool OpenSyncobjFromNtHandle(void *nt_handle, D3DKMT_HANDLE *out_handle);
 
   bool CreateQueue(WDDMQueue *queue, uint64_t debugger_data = 0);
   void DestroyQueue(WDDMQueue *queue);

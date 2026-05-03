@@ -531,6 +531,24 @@ void WDDMDevice::DestroySyncobj(D3DKMT_HANDLE handle) {
     pr_err("fail %x\n", ret);
 }
 
+bool WDDMDevice::OpenSyncobjFromNtHandle(void *nt_handle,
+                                         D3DKMT_HANDLE *out_handle) {
+  if (nt_handle == nullptr || out_handle == nullptr) return false;
+
+  D3DKMT_OPENSYNCOBJECTFROMNTHANDLE2 args = {0};
+  args.hNtHandle = nt_handle;
+  args.hDevice = device_;
+
+  NTSTATUS ret = DXCORE_CALL(D3DKMTOpenSyncObjectFromNtHandle2(&args));
+  if (ret != STATUS_SUCCESS) {
+    pr_err("D3DKMTOpenSyncObjectFromNtHandle2 failed: 0x%x\n", ret);
+    return false;
+  }
+
+  *out_handle = args.hSyncObject;
+  return true;
+}
+
 void WDDMDevice::InitCmdbufInfo(void) {
   if (device_info_.major == 9) {
     cmdbuf_aql_frame_size_ = 2 * sizeof(gfx9::AcquireMemTemplate);
