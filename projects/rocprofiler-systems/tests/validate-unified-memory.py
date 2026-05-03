@@ -169,7 +169,7 @@ def validate_json_output(filepath: Path) -> bool:
             return False
 
         migrations = device["migrations"]
-        required_directions = ["host_to_device", "device_to_host"]
+        required_directions = ["host_to_device", "device_to_host", "device_to_device"]
 
         for direction in required_directions:
             if direction not in migrations:

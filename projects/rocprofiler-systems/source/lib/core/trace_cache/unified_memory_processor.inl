@@ -241,13 +241,6 @@ unified_memory_processor_t<AgentManagerT, OutputRegistryT>::handle_page_migrate(
     auto [src_label, dst_label] = std::move(*agent_ids);
     auto direction              = classify_direction(src_label, dst_label);
 
-    uint32_t device_id  = sample.device_id;
-    auto [it, inserted] = m_data.devices.try_emplace(device_id);
-    if(inserted)
-        it->second.device_name = resolve_device_label(sample, src_label, dst_label);
-
-    auto& device_summary = it->second;
-
     // Float-to-int overflow is UB ([conv.fpint]); guard NaN/inf/sign/2^64.
     uint64_t size_bytes = 0;
     if(std::isfinite(sample.value) && sample.value > 0.0 &&
@@ -259,20 +252,33 @@ unified_memory_processor_t<AgentManagerT, OutputRegistryT>::handle_page_migrate(
                                ? sample.end_timestamp - sample.start_timestamp
                                : 0;
 
-    switch(direction)
+    auto gpu_bucket_id = resolve_gpu_bucket_id(src_label, dst_label, direction);
+    if(gpu_bucket_id.has_value())
     {
-        case migration_direction::HOST_TO_DEVICE:
-            device_summary.host_to_device.add_migration(size_bytes, duration_ns);
-            break;
-        case migration_direction::DEVICE_TO_HOST:
-            device_summary.device_to_host.add_migration(size_bytes, duration_ns);
-            break;
-        case migration_direction::DEVICE_TO_DEVICE:
-            device_summary.device_to_device.add_migration(size_bytes, duration_ns);
-            break;
-        case migration_direction::UNKNOWN:
-            LOG_TRACE("Unknown migration direction for device {}", device_id);
-            break;
+        auto [it, inserted] = m_data.devices.try_emplace(*gpu_bucket_id);
+        if(inserted)
+            it->second.device_name = resolve_device_label(sample, src_label, dst_label);
+
+        auto& device_summary = it->second;
+
+        switch(direction)
+        {
+            case migration_direction::HOST_TO_DEVICE:
+                device_summary.host_to_device.add_migration(size_bytes, duration_ns);
+                break;
+            case migration_direction::DEVICE_TO_HOST:
+                device_summary.device_to_host.add_migration(size_bytes, duration_ns);
+                break;
+            case migration_direction::DEVICE_TO_DEVICE:
+                device_summary.device_to_device.add_migration(size_bytes, duration_ns);
+                break;
+            case migration_direction::UNKNOWN: break;
+        }
+    }
+    else
+    {
+        LOG_TRACE("Failed to resolve unified memory GPU bucket for src='{}', dst='{}'",
+                  src_label, dst_label);
     }
 
     // Initialize to sentinel; loop falls through to it on no match.
@@ -309,6 +315,36 @@ unified_memory_processor_t<AgentManagerT, OutputRegistryT>::parse_node_id_pair(
         return std::nullopt;
     }
     return std::pair{ src_id, dst_id };
+}
+
+template <typename AgentManagerT, typename OutputRegistryT>
+std::optional<uint32_t>
+unified_memory_processor_t<AgentManagerT, OutputRegistryT>::resolve_gpu_bucket_id(
+    const std::string& src_label, const std::string& dst_label,
+    migration_direction direction) const
+{
+    auto ids = parse_node_id_pair(src_label, dst_label);
+    if(!ids.has_value()) return std::nullopt;
+
+    const auto [src_node_id, dst_node_id] = *ids;
+    const auto is_gpu_node                = [this](uint32_t node_id) {
+        auto it = m_node_type_cache.find(node_id);
+        return it != m_node_type_cache.end() && it->second == agent_type::GPU;
+    };
+
+    switch(direction)
+    {
+        case migration_direction::HOST_TO_DEVICE:
+            if(is_gpu_node(dst_node_id)) return dst_node_id;
+            break;
+        case migration_direction::DEVICE_TO_HOST:
+        case migration_direction::DEVICE_TO_DEVICE:
+            if(is_gpu_node(src_node_id)) return src_node_id;
+            break;
+        case migration_direction::UNKNOWN: break;
+    }
+
+    return std::nullopt;
 }
 
 template <typename AgentManagerT, typename OutputRegistryT>

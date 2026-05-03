@@ -21,6 +21,7 @@
 // unified_memory_processor_t<MockAgentManager, MockOutputFileRegistry>
 // can be instantiated below.
 #include "core/trace_cache/unified_memory_processor.inl"
+#include "filesystem.hpp"
 #include "mock_unified_memory_collaborators.hpp"
 
 #include <nlohmann/json.hpp>
@@ -31,7 +32,6 @@
 
 #include <cstdlib>
 #include <cstring>
-#include <filesystem>
 #include <fstream>
 #include <limits>
 #include <memory>
@@ -159,7 +159,7 @@ protected:
         if(!tmp_dir.empty())
         {
             std::error_code ec;
-            std::filesystem::remove_all(tmp_dir, ec);
+            test_common::fs::remove_all(tmp_dir, ec);
         }
         // m_suffix_guard is restored by the fixture destructor (RAII).
     }
@@ -319,21 +319,16 @@ TEST_F(UnifiedMemoryProcessorTest, ClassifyDirectionFromTopology)
 }
 
 // ──────────────────────────────────────────────────────────────────────
-// 4) extract_gpu_name resolves real name or falls back
-//
-// When the GPU's node id is in the cached topology, the device label
-// includes the agent name (e.g. "gfx950"). When the source/dest nodes
-// are unknown to the cache (e.g. the migrate event mentions a node not
-// in the agent list), the fallback "GPU" label is used.
+// 4) Host→device migrations bucket by destination GPU under producer semantics
 // ──────────────────────────────────────────────────────────────────────
-TEST_F(UnifiedMemoryProcessorTest, ExtractGpuNameResolvesOrFallsBack)
+TEST_F(UnifiedMemoryProcessorTest,
+       HostToDeviceMigrationsBucketByDestinationGpuUnderProducerSemantics)
 {
-    // Migration into a known GPU node — name should resolve to "gfx950"
-    processor->handle(make_kfd_page_migrate_sample(kCpu0, kGpu1, 1024, 100, /*dev=*/0));
+    processor->handle(make_kfd_page_migrate_sample(kCpu0, kGpu1, 1024, 100, /*dev=*/kCpu0,
+                                                   agent_type::CPU));
+    processor->handle(make_kfd_page_migrate_sample(kCpu0, kGpu2, 2048, 200, /*dev=*/kCpu0,
+                                                   agent_type::CPU));
 
-    // Migration referencing nodes not in the topology (5, 7) — name falls back to "GPU"
-    processor->handle(make_kfd_page_migrate_sample(/*src=*/5, /*dst=*/7, 1024, 100,
-                                                   /*dev=*/1));
     processor->finalize_processing();
 
     auto j_opt = read_json_output();
@@ -341,24 +336,66 @@ TEST_F(UnifiedMemoryProcessorTest, ExtractGpuNameResolvesOrFallsBack)
     auto const& j = *j_opt;
     ASSERT_EQ(j["devices"].size(), 2u);
 
-    // Find each device by id and check its label.
+    bool saw_gpu1 = false;
+    bool saw_gpu2 = false;
+    for(auto const& dev : j["devices"])
+    {
+        auto        device_id = dev["device_id"].get<uint32_t>();
+        auto const& h2d       = dev["migrations"]["host_to_device"];
+
+        if(device_id == kGpu1)
+        {
+            EXPECT_EQ(h2d["count"], 1u);
+            EXPECT_EQ(h2d["total_size_bytes"], 1024u);
+            saw_gpu1 = true;
+        }
+        else if(device_id == kGpu2)
+        {
+            EXPECT_EQ(h2d["count"], 1u);
+            EXPECT_EQ(h2d["total_size_bytes"], 2048u);
+            saw_gpu2 = true;
+        }
+        else
+        {
+            ADD_FAILURE() << "unexpected GPU bucket id: " << device_id;
+        }
+    }
+
+    EXPECT_TRUE(saw_gpu1);
+    EXPECT_TRUE(saw_gpu2);
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// 5) extract_gpu_name resolves real name or falls back
+// ──────────────────────────────────────────────────────────────────────
+TEST_F(UnifiedMemoryProcessorTest, ExtractGpuNameResolvesOrFallsBack)
+{
+    agents[2]->name.clear();
+    processor = std::make_unique<TestProcessor>(agent_mgr, kPid, tmp_dir, *registry);
+
+    processor->handle(make_kfd_page_migrate_sample(kCpu0, kGpu1, 1024, 100, /*dev=*/0));
+
+    processor->handle(make_kfd_page_migrate_sample(kCpu0, kGpu2, 1024, 100, /*dev=*/0));
+    processor->finalize_processing();
+
+    auto j_opt = read_json_output();
+    ASSERT_TRUE(j_opt.has_value());
+    auto const& j = *j_opt;
+    ASSERT_EQ(j["devices"].size(), 2u);
+
     bool saw_resolved = false;
     bool saw_fallback = false;
     for(auto const& dev : j["devices"])
     {
         std::string name = dev["device_name"];
-        if(dev["device_id"] == 0u)
+        if(dev["device_id"] == kGpu1)
         {
             EXPECT_THAT(name, HasSubstr("gfx950")) << "name=" << name;
             saw_resolved = true;
         }
-        else if(dev["device_id"] == 1u)
+        else if(dev["device_id"] == kGpu2)
         {
-            // Fallback label is literally "GPU" + " (via {cpu_name})". Match
-            // on the "GPU (" prefix so this can't be satisfied by coincidence
-            // (e.g. by a future label format that happens to contain "GPU"
-            // somewhere in the middle).
-            EXPECT_THAT(name, ::testing::StartsWith("GPU (")) << "name=" << name;
+            EXPECT_THAT(name, ::testing::StartsWith("GPU 2")) << "name=" << name;
             saw_fallback = true;
         }
     }
@@ -450,7 +487,7 @@ TEST_F(UnifiedMemoryProcessorTest, FaultsOnlyEmitsOutput)
     bool saw_json = false;
     for(const auto& e : registered)
     {
-        EXPECT_TRUE(std::filesystem::exists(e.path)) << "missing file: " << e.path;
+        EXPECT_TRUE(test_common::fs::exists(e.path)) << "missing file: " << e.path;
         if(e.format == output_format::text) saw_txt = true;
         if(e.format == output_format::json) saw_json = true;
     }
@@ -645,7 +682,7 @@ TEST_F(UnifiedMemoryProcessorTest, FloatJustBelowBoundaryIsAccepted)
 }
 
 // ──────────────────────────────────────────────────────────────────────
-// 12) Node-id values exceeding uint32_t are rejected by parse_node_id_pair
+// 13) Node-id values exceeding uint32_t are rejected by parse_node_id_pair
 //
 // from_chars writes uint32_t directly, so any decimal string whose value
 // exceeds uint32_t::max yields errc::result_out_of_range and the event
@@ -670,15 +707,7 @@ TEST_F(UnifiedMemoryProcessorTest, NodeIdsExceedingUint32AreRejected)
     auto j_opt = read_json_output();
     ASSERT_TRUE(j_opt.has_value());
     auto const& j = *j_opt;
-    // The event has device_id=0, so a device entry IS created (the entry is
-    // keyed on device_id, not on src/dst node ids). What must NOT happen is
-    // a recorded migration count — classify_direction returns UNKNOWN when
-    // parse_node_id_pair fails, so all three migration counts stay at 0.
-    ASSERT_EQ(j["devices"].size(), 1u);
-    auto const& m = j["devices"][0]["migrations"];
-    EXPECT_EQ(m["host_to_device"]["count"], 0u);
-    EXPECT_EQ(m["device_to_host"]["count"], 0u);
-    EXPECT_EQ(m["device_to_device"]["count"], 0u);
+    EXPECT_EQ(j["devices"].size(), 0u);
 }
 
 }  // namespace

@@ -296,6 +296,10 @@
                         "sampling_rate_hz": {
                             "$ref": "#/$defs/intValueField",
                             "description": "GPU metric sampling frequency in Hz"
+                        },
+                        "unified_memory_profiling": {
+                            "$ref": "#/$defs/enabledField",
+                            "description": "Enable unified memory profiling reports from KFD page fault and migration events"
                         }
                     },
                     "type": "object"

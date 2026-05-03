@@ -10,6 +10,7 @@ include(${CMAKE_CURRENT_LIST_DIR}/pytest/CMakeLists.txt)
 if(NOT ROCPROFSYS_USE_PYTESTS)
     # TODO: Will be the default once TheRock is switched to CTests
     include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-pytest.cmake)
+    include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-unified-memory-tests.cmake)
 endif()
 
 # ------------------------------------------------------------------------------#

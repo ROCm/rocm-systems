@@ -186,6 +186,10 @@ private:
     [[nodiscard]] std::optional<std::pair<uint32_t, uint32_t>> parse_node_id_pair(
         const std::string& src_label, const std::string& dst_label) const;
 
+    [[nodiscard]] std::optional<uint32_t> resolve_gpu_bucket_id(
+        const std::string& src_label, const std::string& dst_label,
+        migration_direction direction) const;
+
     [[nodiscard]] std::string extract_gpu_name(const std::string& src_label,
                                                const std::string& dst_label) const;
 

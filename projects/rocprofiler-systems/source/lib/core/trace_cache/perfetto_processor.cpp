@@ -17,11 +17,13 @@
 #include "trace_cache/sample_type.hpp"
 
 #include "logger/debug.hpp"
+#include <charconv>
 #include <cstdint>
 #include <nlohmann/json.hpp>
 
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 
 #include "library/rocprofiler-sdk/fwd.hpp"
@@ -48,6 +50,70 @@ annotate_perfetto(::perfetto::EventContext&            ctx,
             ann.value);
     }
 }  // close annotate_perfetto
+
+[[nodiscard]] std::optional<std::pair<uint32_t, uint32_t>>
+parse_kfd_migration_node_pair(const std::string& args_str)
+{
+    std::string src_agent;
+    std::string dst_agent;
+
+    try
+    {
+        const auto args = process_arguments_string(args_str);
+        for(const auto& arg : args)
+        {
+            if(arg.arg_name == "src_agent")
+                src_agent = arg.arg_value;
+            else if(arg.arg_name == "dst_agent")
+                dst_agent = arg.arg_value;
+        }
+    } catch(const std::exception& e)
+    {
+        LOG_TRACE("Failed to parse KFD migration args: {}", e.what());
+        return std::nullopt;
+    }
+
+    if(src_agent.empty() || dst_agent.empty()) return std::nullopt;
+
+    auto parse_node_id = [](const std::string& value, uint32_t& out) {
+        const auto* first = value.data();
+        const auto* last  = value.data() + value.size();
+        auto        res   = std::from_chars(first, last, out);
+        return res.ec == std::errc{} && res.ptr == last;
+    };
+
+    uint32_t src_node_id = 0;
+    uint32_t dst_node_id = 0;
+    if(!parse_node_id(src_agent, src_node_id) || !parse_node_id(dst_agent, dst_node_id))
+        return std::nullopt;
+
+    return std::pair{ src_node_id, dst_node_id };
+}
+
+[[nodiscard]] std::optional<uint32_t>
+resolve_kfd_migration_gpu_bucket(
+    const std::string&                              args_str,
+    const std::unordered_map<uint32_t, agent_type>& node_type_cache)
+{
+    auto ids = parse_kfd_migration_node_pair(args_str);
+    if(!ids.has_value()) return std::nullopt;
+
+    const auto [src_node_id, dst_node_id] = *ids;
+    const auto find_type = [&](uint32_t node_id) -> std::optional<agent_type> {
+        auto it = node_type_cache.find(node_id);
+        if(it == node_type_cache.end()) return std::nullopt;
+        return it->second;
+    };
+
+    const auto src_type = find_type(src_node_id);
+    const auto dst_type = find_type(dst_node_id);
+    if(!src_type.has_value() || !dst_type.has_value()) return std::nullopt;
+
+    if(*src_type == agent_type::CPU && *dst_type == agent_type::GPU) return dst_node_id;
+    if(*src_type == agent_type::GPU) return src_node_id;
+
+    return std::nullopt;
+}
 
 template <typename CategoryT>
 ::perfetto::Track
@@ -336,7 +402,13 @@ perfetto_processor_t::perfetto_processor_t(
 , m_tracing_session(nullptr)
 , m_use_annotations(config::get_perfetto_annotations())
 , m_output_registry(output_registry)
-{}
+{
+    for(const auto& agent_ptr : m_agent_manager.get_agents())
+    {
+        if(!agent_ptr) continue;
+        m_kfd_node_type_cache[agent_ptr->node_id] = agent_ptr->type;
+    }
+}
 
 void
 perfetto_processor_t::initialize_perfetto()
@@ -1404,18 +1476,28 @@ perfetto_processor_t::handle(const kfd_sample& _kfd)
         auto duration_ns = _end_ts - _beg_ts;
         if(duration_ns > 0)
         {
-            if(!unified_memory_bandwidth_track::exists(_kfd.device_id))
+            auto gpu_bucket_id =
+                resolve_kfd_migration_gpu_bucket(_kfd.args_str, m_kfd_node_type_cache);
+            if(!gpu_bucket_id.has_value())
+            {
+                LOG_TRACE("Failed to resolve unified memory bandwidth track for KFD "
+                          "migration args '{}'",
+                          _kfd.args_str);
+                return;
+            }
+
+            if(!unified_memory_bandwidth_track::exists(*gpu_bucket_id))
             {
                 auto track_name =
-                    fmt::format("Unified Memory Bandwidth [Device {}]", _kfd.device_id);
+                    fmt::format("Unified Memory Bandwidth [Device {}]", *gpu_bucket_id);
                 unified_memory_bandwidth_track::emplace(
-                    _kfd.device_id, track_name, "GB/s",
+                    *gpu_bucket_id, track_name, "GB/s",
                     trait::name<category::unified_memory_bandwidth>::value);
             }
 
             double bandwidth_gbps = (_kfd.value / static_cast<double>(duration_ns));
             TRACE_COUNTER(trait::name<category::unified_memory_bandwidth>::value,
-                          unified_memory_bandwidth_track::at(_kfd.device_id, 0), _end_ts,
+                          unified_memory_bandwidth_track::at(*gpu_bucket_id, 0), _end_ts,
                           bandwidth_gbps);
         }
     }
