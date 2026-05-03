@@ -18,10 +18,7 @@
 
 foreach(_arg SRC PATCH PATCH_EXE)
     if(NOT DEFINED ${_arg} OR "${${_arg}}" STREQUAL "")
-        message(
-            FATAL_ERROR
-            "apply_patch_idempotent: -D${_arg}=<value> is required"
-        )
+        message(FATAL_ERROR "apply_patch_idempotent: -D${_arg}=<value> is required")
     endif()
 endforeach()
 
