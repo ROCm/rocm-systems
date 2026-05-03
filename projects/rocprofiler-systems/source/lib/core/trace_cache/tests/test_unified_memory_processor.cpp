@@ -20,8 +20,8 @@
 // Include the implementation directly so the mock specialization
 // unified_memory_processor_t<MockAgentManager, MockOutputFileRegistry>
 // can be instantiated below.
+#include "common/tests/filesystem.hpp"
 #include "core/trace_cache/unified_memory_processor.inl"
-#include "filesystem.hpp"
 #include "mock_unified_memory_collaborators.hpp"
 
 #include <nlohmann/json.hpp>
