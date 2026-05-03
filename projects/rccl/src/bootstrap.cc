@@ -781,6 +781,77 @@ static ncclResult_t socketRingConnect(ncclSocketAddress* addr, struct ncclSocket
 // Socket OOB path no longer needs this: TCP is full-duplex and the new socketRingAllGather
 // drives both ring directions over the existing forward socket pair via socketDoubleSendRecv
 // (mirrors NCCL 2.28.7).
+// Step 1 of bidirectional setup: ensure rev listen exists and resolve prev's revHandle
+// (piggybacked or via forward-ring netSendRecv fallback). When it's a piggyback, also
+// kick off non-blocking connect()/accept() on the reverse QP so they can make progress
+// while the caller does its other local setup work. The actual completion polling is in
+// bootstrapBidirRingSetupFinish.
+//
+// Returns *prevRevHandleOut populated for callers that need it to call Finish later.
+// *startedOut == true means connect/accept were issued (Finish will only poll); false
+// means the caller chose to call the legacy one-shot bootstrapBidirRingSetup instead
+// (typically because piggyback wasn't available).
+static ncclResult_t bootstrapBidirRingSetupStart(struct ncclComm* comm, struct bootstrapState* state,
+                                                 const char* prevRevHandlePiggyback,
+                                                 char prevRevHandleOut[NCCL_NET_HANDLE_MAXSIZE],
+                                                 bool* startedOut) {
+  *startedOut = false;
+  bool wantNetBidir = bootstrapBidirEnabled(state->nranks, 1);
+  if (!wantNetBidir) return ncclSuccess;
+
+  // Listen on the reverse device. Eager listen in bootstrapInit normally already did
+  // this; fall back to in-place listen if some other caller didn't.
+  if (STATE_LISTEN(state, net.revComm) == NULL) {
+    NCCLCHECK(state->net->listen(comm->netContext, STATE_LISTEN(state, net.dev),
+                                 STATE_LISTEN(state, net.revHandle), &STATE_LISTEN(state, net.revComm)));
+  }
+
+  // Without a piggybacked prev revHandle we can't kick off connect() yet — the legacy
+  // path needs the forward ring up to do netSendRecv. Caller will fall back.
+  if (prevRevHandlePiggyback == NULL) return ncclSuccess;
+  char zeros[NCCL_NET_HANDLE_MAXSIZE]; memset(zeros, 0, NCCL_NET_HANDLE_MAXSIZE);
+  if (memcmp(prevRevHandlePiggyback, zeros, NCCL_NET_HANDLE_MAXSIZE) == 0) return ncclSuccess;
+  memcpy(prevRevHandleOut, prevRevHandlePiggyback, NCCL_NET_HANDLE_MAXSIZE);
+
+  // Issue the first non-blocking connect()/accept() so the IB QP transition starts now,
+  // overlapping with whatever local setup the caller does next (proxy/UDS/peer/RAS,
+  // and/or the forward-ring connect handshake).
+  NCCLCHECK(state->net->connect(comm->netContext, STATE_LISTEN(state, net.dev), prevRevHandleOut,
+                                &STATE_RING(state, net.revSendComm), &STATE_RING(state, net.revSendDevHandle)));
+  NCCLCHECK(state->net->accept(STATE_LISTEN(state, net.revComm),
+                               &STATE_RING(state, net.revRecvComm), &STATE_RING(state, net.revRecvDevHandle)));
+  *startedOut = true;
+  return ncclSuccess;
+}
+
+// Step 2: poll until the reverse ring connect/accept complete. Caller must have first
+// invoked bootstrapBidirRingSetupStart with started==true and saved prevRevHandle.
+static ncclResult_t bootstrapBidirRingSetupFinish(struct ncclComm* comm, struct bootstrapState* state,
+                                                  const char prevRevHandle[NCCL_NET_HANDLE_MAXSIZE]) {
+  bool wantNetBidir = bootstrapBidirEnabled(state->nranks, 1);
+  if (!wantNetBidir) return ncclSuccess;
+  int abortCounter = 0;
+  while (!STATE_RING(state, net.revSendComm) || !STATE_RING(state, net.revRecvComm)) {
+    NCCLCHECK(checkAbort(state->abortFlag, &abortCounter));
+    bool madeProgress = false;
+    if (!STATE_RING(state, net.revSendComm)) {
+      void* prev = STATE_RING(state, net.revSendComm);
+      NCCLCHECK(state->net->connect(comm->netContext, STATE_LISTEN(state, net.dev), (void*)prevRevHandle,
+                                    &STATE_RING(state, net.revSendComm), &STATE_RING(state, net.revSendDevHandle)));
+      if (STATE_RING(state, net.revSendComm) != prev) madeProgress = true;
+    }
+    if (!STATE_RING(state, net.revRecvComm)) {
+      void* prev = STATE_RING(state, net.revRecvComm);
+      NCCLCHECK(state->net->accept(STATE_LISTEN(state, net.revComm),
+                                   &STATE_RING(state, net.revRecvComm), &STATE_RING(state, net.revRecvDevHandle)));
+      if (STATE_RING(state, net.revRecvComm) != prev) madeProgress = true;
+    }
+    if (!madeProgress) sched_yield();
+  }
+  INFO(NCCL_BOOTSTRAP, "Bootstrap bidirectional ring (net) connected: nranks %d", state->nranks);
+  return ncclSuccess;
+}
+
 static ncclResult_t bootstrapBidirRingSetup(struct ncclComm* comm, struct bootstrapState* state,
                                             const char* prevRevHandlePiggyback) {
   // Cheap exit when bidirectional net bootstrap is disabled, pointless (≤2 ranks) or below
@@ -830,30 +901,7 @@ static ncclResult_t bootstrapBidirRingSetup(struct ncclComm* comm, struct bootst
     if (regRes != ncclSuccess) return regRes;
   }
 
-  // 3. Mirrored connect: revSendComm connects to prev's revHandle, revRecvComm accepts from next.
-  //    Both connect() and accept() are non-blocking on the IB plugin (they return NULL until
-  //    the QP transition completes). Yielding the CPU each round avoids a 100% spin while
-  //    waiting on the network; checkAbort still fires often enough to react to teardown.
-  int abortCounter = 0;
-  while (!STATE_RING(state, net.revSendComm) || !STATE_RING(state, net.revRecvComm)) {
-    NCCLCHECK(checkAbort(state->abortFlag, &abortCounter));
-    bool madeProgress = false;
-    if (!STATE_RING(state, net.revSendComm)) {
-      void* prev = STATE_RING(state, net.revSendComm);
-      NCCLCHECK(state->net->connect(comm->netContext, STATE_LISTEN(state, net.dev), prevRevHandle,
-                                    &STATE_RING(state, net.revSendComm), &STATE_RING(state, net.revSendDevHandle)));
-      if (STATE_RING(state, net.revSendComm) != prev) madeProgress = true;
-    }
-    if (!STATE_RING(state, net.revRecvComm)) {
-      void* prev = STATE_RING(state, net.revRecvComm);
-      NCCLCHECK(state->net->accept(STATE_LISTEN(state, net.revComm),
-                                   &STATE_RING(state, net.revRecvComm), &STATE_RING(state, net.revRecvDevHandle)));
-      if (STATE_RING(state, net.revRecvComm) != prev) madeProgress = true;
-    }
-    if (!madeProgress) sched_yield();
-  }
-  INFO(NCCL_BOOTSTRAP, "Bootstrap bidirectional ring (net) connected: nranks %d", state->nranks);
-  return ncclSuccess;
+  return bootstrapBidirRingSetupFinish(comm, state, prevRevHandle);
 }
 static ncclResult_t ringAllInfo(struct ncclComm* comm, struct bootstrapState* state,
                                 union ncclSocketAddress* peerAddresss,
@@ -930,6 +978,12 @@ ncclResult_t bootstrapInit(int nHandles, void* handles, struct ncclComm* comm) {
   struct ringConnectInfo nextPeer;
   bool performRasAddRanks = true;
   struct rasRankInit* rasRanks = nullptr;
+  // Bidirectional IB OOB split-setup state. Stored at function scope so the prev
+  // revHandle survives across the local-setup overlap region between
+  // bootstrapBidirRingSetupStart and bootstrapBidirRingSetupFinish.
+  bool bidirSplitStarted = false;
+  char bidirPrevRevHandle[NCCL_NET_HANDLE_MAXSIZE];
+  memset(bidirPrevRevHandle, 0, NCCL_NET_HANDLE_MAXSIZE);
 
   uint64_t timers[BOOTSTRAP_INIT_TIME_N] = {0};
   // [RCCL] Whether to set up the IB-bidir reverse ring at all (gated by env + threshold +
@@ -1037,6 +1091,17 @@ ncclResult_t bootstrapInit(int nHandles, void* handles, struct ncclComm* comm) {
     NCCLCHECK(socketRingConnectStart(&nextPeer.fwd.addr, &STATE_RING(state, socket.send), &STATE_LISTEN(state, socket.fwd), &STATE_RING(state, socket.recv), comm->magic, state->abortFlag));
   }
 
+  // [RCCL] Bidirectional IB OOB: kick off the reverse-ring connect()/accept() now so
+  // they overlap with both forward-ring connect and the local proxy/UDS/peer/RAS setup
+  // below. This requires a piggybacked prev revHandle (delivered via the root rendezvous
+  // or PMIx fast-path) so we can avoid the legacy netSendRecv handle exchange. When
+  // piggyback isn't available (shrunk/split comms) we fall back below to the one-shot
+  // bootstrapBidirRingSetup that does listen + handle exchange + connect/accept after
+  // the forward ring is up.
+  if (ncclParamBootstrapNetEnable()) {
+    NCCLCHECK(bootstrapBidirRingSetupStart(comm, state, nextPeer.revHandle, bidirPrevRevHandle, &bidirSplitStarted));
+  }
+
   // AllGather all listen handlers
   // in case of failure, those resources will be free'd when calling bootstrapDestroy, so we can return immediatly
   NCCLCHECK(ncclCalloc(&state->peerProxyAddresses, nranks));
@@ -1087,7 +1152,15 @@ ncclResult_t bootstrapInit(int nHandles, void* handles, struct ncclComm* comm) {
   // AllGather. The reverse listen + handle are piggybacked through the root rendezvous
   // (nextPeer.revHandle = prev's reverse listen), so the heavy synchronous netSendRecv
   // handle exchange inside bootstrapBidirRingSetup is skipped on the hot path.
-  NCCLCHECKGOTO(bootstrapBidirRingSetup(comm, state, nextPeer.revHandle), result, fail);
+  // When the split-Start above already kicked off connect/accept (piggyback path), we
+  // only need to poll for completion here — it has been progressing in parallel with
+  // proxy/UDS/peer/RAS setup and the forward-ring handshake. Otherwise fall back to
+  // the legacy one-shot path which also does the listen + handle exchange.
+  if (bidirSplitStarted) {
+    NCCLCHECKGOTO(bootstrapBidirRingSetupFinish(comm, state, bidirPrevRevHandle), result, fail);
+  } else {
+    NCCLCHECKGOTO(bootstrapBidirRingSetup(comm, state, nextPeer.revHandle), result, fail);
+  }
 
   BOOTSTRAP_PROF_OPEN(timers[BOOTSTRAP_INIT_TIME_RING]);
   NCCLCHECKGOTO(ringAllInfo(comm, state, state->peerP2pAddresses, state->peerProxyAddresses, state->peerProxyAddressesUDS, rasRanks), result, fail);
