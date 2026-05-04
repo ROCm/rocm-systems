@@ -491,10 +491,9 @@ typedef rocprofiler_status_t (*rocprofiler_available_pc_sampling_configurations_
  * sampling configurations upon the call to the
  * ::rocprofiler_query_pc_sampling_agent_configurations_v2.
  *
- * @param[out] configs - The array of PC sampling configurations supported by the agent
+ * @param[out] configs - Array of pointers to PC sampling configurations supported by the agent
  * at the moment of invoking ::rocprofiler_query_pc_sampling_agent_configurations_v2.
- * @param[out] num_config - The number of configurations contained in the underlying array
- * @p configs.
+ * @param[out] num_config - The number of configurations contained in the @p configs array.
  * In case the GPU agent does not support PC sampling or no configurations match the
  * requested record kinds and flags, the value is 0.
  * @param[in] user_data - client's private data passed via
@@ -503,9 +502,9 @@ typedef rocprofiler_status_t (*rocprofiler_available_pc_sampling_configurations_
  */
 ROCPROFILER_SDK_EXPERIMENTAL
 typedef rocprofiler_status_t (*rocprofiler_available_pc_sampling_configurations_v2_cb_t)(
-    const rocprofiler_pc_sampling_configuration_v2_t* configs,
-    size_t                                            num_config,
-    void*                                             user_data);
+    const rocprofiler_pc_sampling_configuration_v2_t** configs,
+    size_t                                             num_config,
+    void*                                              user_data);
 
 /**
  * @brief (experimental) Query PC Sampling Configuration.
@@ -576,8 +575,8 @@ rocprofiler_query_pc_sampling_agent_configurations(
  * };
  *
  * // Callback may receive e.g.:
- * //   config[0]: { unit=TIME,   min=1, max=10000, flags=0 }
- * //   config[1]: { unit=CYCLES, min=256, max=65536, flags=INTERVAL_POW2 }
+ * //   *configs[0]: { unit=TIME,   min=1, max=10000, flags=0 }
+ * //   *configs[1]: { unit=CYCLES, min=256, max=65536, flags=INTERVAL_POW2 }
  * // The tool does not know which is host-trap vs stochastic.
  * rocprofiler_query_pc_sampling_agent_configurations_v2(
  *     agent_id, kinds, 2,
