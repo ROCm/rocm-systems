@@ -5,6 +5,9 @@
 
 #include "logger/debug.hpp"
 
+#include <pthread.h>
+#include <signal.h>
+
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -106,6 +109,15 @@ sampling_duration_controller<ClockPolicy>::start(double duration_sec)
 
     stop_requested_ = false;
     thread_         = std::make_unique<std::thread>([this]() {
+        ::pthread_setname_np(::pthread_self(), "omni.samp.dur");
+
+        sigset_t ss;
+        sigemptyset(&ss);
+        sigaddset(&ss, SIGPROF);
+        sigaddset(&ss, SIGRTMIN);
+        sigaddset(&ss, SIGRTMIN + 1);
+        ::pthread_sigmask(SIG_BLOCK, &ss, nullptr);
+
         std::unique_lock<std::mutex> inner(mutex_);
         while(!stop_requested_)
         {

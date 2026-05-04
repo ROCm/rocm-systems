@@ -39,13 +39,34 @@ capture_stack_trace(backtrace_record& rec, void* ucontext)
     }
     if(unw_init_local(&cursor, &uctx) == 0)
     {
+        constexpr int skip_frames = 3;
+        for(int skip = 0; skip < skip_frames; ++skip)
+        {
+            if(unw_step(&cursor) <= 0) return;
+        }
+
         while(rec.pc_count < static_cast<uint8_t>(MAX_STACK_DEPTH))
         {
+            if(unw_is_signal_frame(&cursor))
+            {
+                if(unw_step(&cursor) <= 0) break;
+                continue;
+            }
+
             unw_word_t ip = 0;
             if(unw_get_reg(&cursor, UNW_REG_IP, &ip) != 0) break;
             if(ip == 0) break;
             rec.raw_pcs[rec.pc_count++] = static_cast<uintptr_t>(ip);
-            if(unw_step(&cursor) <= 0) break;
+
+            const int step_rc = unw_step(&cursor);
+            if(step_rc == 0) break;
+            if(step_rc < 0)
+            {
+                if(-step_rc == UNW_ENOINFO || -step_rc == UNW_EBADVERSION ||
+                   -step_rc == UNW_EINVALIDIP || -step_rc == UNW_EBADFRAME)
+                    continue;
+                break;
+            }
         }
     }
 }

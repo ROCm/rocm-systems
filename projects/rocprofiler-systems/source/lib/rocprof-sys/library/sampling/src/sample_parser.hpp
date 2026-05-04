@@ -63,35 +63,41 @@ sample_parser::parse_timer(int64_t tid, backtrace_record const& init_rec,
     std::vector<timer_sample> result;
     result.reserve(raw.size());
 
-    uint64_t last_ts     = init_rec.timestamp_ns;
-    int64_t  last_cpu_ns = init_rec.metrics.cpu_ns;
+    uint64_t               last_ts      = init_rec.timestamp_ns;
+    backtrace_metrics_data last_metrics = init_rec.metrics;
 
     for(auto const& rec : raw)
     {
-        uint64_t beg        = last_ts;
-        uint64_t end        = rec.timestamp_ns;
-        int64_t  cur_cpu_ns = static_cast<int64_t>(rec.metrics.cpu_ns);
+        uint64_t beg = last_ts;
+        uint64_t end = rec.timestamp_ns;
 
         last_ts = end;
-        // Advance last_cpu_ns unconditionally so skipped records do not inflate
-        // the delta of the next surviving sample (mirrors how last_ts advances).
-        int64_t cpu_delta = cur_cpu_ns - last_cpu_ns;
-        last_cpu_ns       = cur_cpu_ns;
 
-        if(end <= beg) continue;  // clock skew / tie — skip
+        backtrace_metrics_data delta = rec.metrics;
+        delta.cpu_ns                 = rec.metrics.cpu_ns - last_metrics.cpu_ns;
+        delta.ctx_swch               = rec.metrics.ctx_swch - last_metrics.ctx_swch;
+        delta.page_flt               = rec.metrics.page_flt - last_metrics.page_flt;
+        // mem_peak_kb: keep absolute (peak, not cumulative)
+        if(rec.metrics.valid.test(4) && last_metrics.valid.test(4))
+        {
+            for(size_t j = 0; j < delta.hw_counter.size(); ++j)
+                delta.hw_counter[j] =
+                    rec.metrics.hw_counter[j] - last_metrics.hw_counter[j];
+        }
+
+        last_metrics = rec.metrics;
+
+        if(end <= beg) continue;
 
         // AC-13: filter samples that overlap a pause interval.
         if(pause_reg.spans_pause_interval(beg, end)) continue;
 
         timer_sample s;
-        s.tid    = tid;
-        s.beg_ns = beg;
-        s.end_ns = end;
-        s.stack  = frames_from_pcs(rec);
-
-        // cpu_ns is the delta: CPU time consumed during this sample interval.
-        s.metrics        = rec.metrics;
-        s.metrics.cpu_ns = cpu_delta;
+        s.tid     = tid;
+        s.beg_ns  = beg;
+        s.end_ns  = end;
+        s.stack   = frames_from_pcs(rec);
+        s.metrics = delta;
 
         result.push_back(std::move(s));
     }
@@ -106,18 +112,23 @@ std::vector<overflow_sample>
 sample_parser::parse_overflow(int64_t tid, std::vector<backtrace_record> const& raw,
                               pause_interval_registry<ClockPolicy>& pause_reg) const
 {
+    if(raw.empty()) return {};
+
     std::vector<overflow_sample> result;
     result.reserve(raw.size());
 
-    uint64_t last_ts = 0;
-    for(auto const& rec : raw)
+    uint64_t last_ts = raw.front().timestamp_ns;
+    for(size_t i = 1; i < raw.size(); ++i)
     {
-        uint64_t beg = last_ts;
-        uint64_t end = rec.timestamp_ns;
-        last_ts      = end;
+        auto const& rec = raw[i];
+        uint64_t    beg = last_ts;
+        uint64_t    end = rec.timestamp_ns;
+        last_ts         = end;
+
+        if(end <= beg) continue;
 
         // AC-13: filter samples that overlap a pause interval.
-        if(beg < end && pause_reg.spans_pause_interval(beg, end)) continue;
+        if(pause_reg.spans_pause_interval(beg, end)) continue;
 
         overflow_sample s;
         s.tid    = tid;

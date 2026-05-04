@@ -42,6 +42,8 @@ struct recording_trace_sink
         m_thread_counter_records.push_back({ tid, static_cast<int>(samples.size()) });
     }
 
+    void store_counter_termination(int64_t /*tid*/, uint64_t /*stop_ns*/) {}
+
     struct call_record
     {
         int64_t tid;

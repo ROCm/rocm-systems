@@ -11,6 +11,10 @@
 #include "sampling/sampling_service.hpp"
 #include "sampling/src/linux/signal_sample_helpers.hpp"
 
+#include "core/state.hpp"
+
+#include <cerrno>
+
 namespace rocprofsys::sampling
 {
 
@@ -20,15 +24,22 @@ sampling_signal_handler_body(int sig, void* ucontext, sampling_service<Policies>
 {
     if(svc.is_blocked()) return;
 
+    const int saved_errno = errno;
+
     using state_t = thread_sampler_state<Policies>;
     using tls     = tl_state<Policies>;
 
     state_t* state = tls::sampler;
-    if(!state || !state->is_running()) return;
+    if(!state || !state->is_running())
+    {
+        errno = saved_errno;
+        return;
+    }
 
     if(state->try_enter_handler())
     {
         state->increment_dropped();
+        errno = saved_errno;
         return;
     }
 
@@ -41,7 +52,10 @@ sampling_signal_handler_body(int sig, void* ucontext, sampling_service<Policies>
                                                              : trigger_type::TIMER;
     rec.pc_count     = 0;
 
+    auto prev_state = set_thread_state(ThreadState::Internal);
     capture_stack_trace(rec, ucontext);
+    set_thread_state(prev_state);
+
     capture_cpu_time(rec);
     capture_thread_rusage(rec);
 
@@ -60,6 +74,7 @@ sampling_signal_handler_body(int sig, void* ucontext, sampling_service<Policies>
 
     state->exit_in_flight();
     state->exit_handler();
+    errno = saved_errno;
 }
 
 }  // namespace rocprofsys::sampling

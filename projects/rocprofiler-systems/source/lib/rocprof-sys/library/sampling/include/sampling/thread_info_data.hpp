@@ -22,7 +22,10 @@ struct thread_info_data
 
     [[nodiscard]] bool is_valid_lifetime(uint64_t beg, uint64_t end) const noexcept
     {
-        return beg >= start_ns && end <= stop_ns;
+        if(beg < start_ns) return false;
+        // stop_ns == 0 means set_stop() not yet called — thread still active
+        if(stop_ns == 0) return true;
+        return end <= stop_ns;
     }
 };
 

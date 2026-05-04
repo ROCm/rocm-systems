@@ -19,6 +19,7 @@
 #include <mutex>
 #include <set>
 #include <unordered_map>
+#include <unordered_set>
 
 namespace rocprofsys::sampling
 {
@@ -132,6 +133,11 @@ private:
     mutable std::mutex                         signal_types_mutex_;
     std::unordered_map<int64_t, std::set<int>> signal_types_;
 
+    // Tracks tids that have already emitted termination records, preventing
+    // duplicates when multiple shutdown paths fire for the same thread.
+    std::mutex                  wired_mutex_;
+    std::unordered_set<int64_t> wired_tids_;
+
     // Apply pthread_sigmask via signal_dispatcher_; route errors through fatal_.
     // verb is "Block" / "Unblock" — used in the LOG_DEBUG line.
     void apply_signal_mask(int how, std::set<int> sigs, char const* verb);
@@ -149,7 +155,7 @@ private:
     void arm_overflow_trigger(int64_t tid, thread_state_t* state,
                               std::set<int> const& sigs);
     void start_duration_controller(int64_t tid);
-    void register_trace_cache_tracks(int64_t tid);
+    void register_trace_cache_tracks(int64_t tid, std::set<int> const& sigs);
     void do_shutdown_wiring(int64_t tid) noexcept;
     void do_emit_resolved(int64_t tid);
     void do_postfork_parent_reinit();

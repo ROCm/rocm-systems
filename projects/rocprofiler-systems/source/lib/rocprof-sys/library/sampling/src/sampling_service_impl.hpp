@@ -21,6 +21,7 @@
 #include "sampling/policies/real_trace_cache_sink.hpp"
 #include "sampling/policies/stack_frame_json.hpp"
 #include "sampling/policies/tl_state.hpp"
+#include "sampling/src/linux/signal_sample_helpers.hpp"
 #include "sampling/src/linux/signal_set.hpp"
 #include "sampling/src/linux/symbol_resolver.hpp"
 #include "sampling/src/pause_interval_registry.hpp"
@@ -42,6 +43,7 @@
 #include <cstring>
 #include <exception>
 #include <mutex>
+#include <set>
 #include <sstream>
 #include <stdexcept>
 #include <utility>
@@ -276,11 +278,11 @@ sampling_service<Policies>::setup(int64_t tid)
         state->start();
     }
 
+    // Block signals BEFORE arming triggers to prevent race.
+    block_signals(sigs);
+
     // Production wiring: TLS pointer setup, timer arming, overflow trigger config.
     do_setup_wiring(tid, state, sigs);
-
-    // Block signals on the calling thread before the trigger is armed.
-    block_signals(sigs);
 
     return sigs;
 }
@@ -293,6 +295,34 @@ sampling_service<Policies>::shutdown(int64_t tid)
 {
     // AC-20: child process — release state without per-tid processing.
     if(child_process_mode_) return {};
+
+    // When main thread shuts down, stop all other threads first.
+    if(tid == 0)
+    {
+        std::vector<int64_t> other_tids;
+        registry_.each([tid, &other_tids](int64_t t, auto&) {
+            if(t != tid) other_tids.push_back(t);
+        });
+        for(auto other : other_tids)
+        {
+            if(auto* s = registry_.at(other))
+            {
+                s->stop_all_triggers();
+                s->stop();
+                offload_.write(other, s->ring_buffer(), fatal_);
+                do_emit_resolved(other);
+                do_shutdown_wiring(other);
+                registry_.erase(other);
+            }
+        }
+    }
+
+    // Guard: if Fix 4.2 loop already processed this tid, skip.
+    if(!registry_.at(tid))
+    {
+        LOG_DEBUG("Sampler for thread {} already shut down", tid);
+        return {};
+    }
 
     LOG_DEBUG("Stopping sampler for thread {}...", tid);
 
@@ -444,14 +474,67 @@ split_records(std::vector<backtrace_record> const& records)
     return out;
 }
 
-// Resolve unnamed stack frames in-place via the cascade resolver.
+// Filter internal frames, strip _dyninst suffix, reverse to bottom-of-stack-first.
+inline void
+filter_and_reverse_frames(std::vector<stack_frame>& frames)
+{
+    std::reverse(frames.begin(), frames.end());
+
+    static const std::set<std::string> signal_artifacts = { "funlockfile", "killpg",
+                                                            "__restore_rt" };
+    while(!frames.empty() && signal_artifacts.count(frames.back().name))
+        frames.pop_back();
+
+    auto use_label = [](std::string_view lbl) -> short {
+        const auto npos = std::string_view::npos;
+        if(lbl.find("rocprofsys_main") != npos) return 0;
+        if(lbl.find("rocprofsys::") != npos) return 0;
+        if(lbl.find("tim::openmp::") != npos) return -1;
+        if(lbl.find("tim::") != npos) return 0;
+        if(lbl.find("DYNINST_") != npos) return 0;
+        if(lbl.find("rocprofsys_") != npos) return -1;
+        if(lbl.find("rocprofiler_") != npos) return -1;
+        if(lbl.find("perfetto::") != npos) return -1;
+        if(lbl.find("protozero::") == 0) return -1;
+        if(lbl.find("gotcha_") != npos) return -1;
+        // Bottom-of-stack boundaries: truncate below these frames.
+        if(lbl.find("__clone") != npos) return -1;
+        if(lbl.find("__libc_start") != npos) return -1;
+        if(lbl == "start_thread") return -1;
+        if(lbl.find("pthread_condattr_") != npos) return -1;
+        if(lbl.find("std::error_code::") != npos) return -1;
+        // Module-offset fallback (e.g. "[libc.so.6+0x1234]") — unresolved noise.
+        if(lbl.size() > 2 && lbl.front() == '[' && lbl.back() == ']') return 0;
+        return 1;
+    };
+
+    std::vector<stack_frame> filtered;
+    filtered.reserve(frames.size());
+    for(auto& f : frames)
+    {
+        auto pos = f.name.find("_dyninst");
+        if(pos != std::string::npos) f.name.erase(pos, 8);
+
+        short use = use_label(f.name);
+        if(use == -1) break;
+        if(use == 0) continue;
+        filtered.push_back(std::move(f));
+    }
+    frames = std::move(filtered);
+}
+
+// Resolve unnamed stack frames in-place via the cascade resolver,
+// then filter internal frames and reverse to bottom-of-stack-first.
 template <class Sample>
 inline void
 resolve_stacks(std::vector<Sample>& samples, symbol_resolver& resolver)
 {
     for(auto& s : samples)
+    {
         for(auto& f : s.stack)
             if(f.name.empty()) f.name = resolve_symbol(resolver, f.address);
+        filter_and_reverse_frames(s.stack);
+    }
 }
 
 }  // namespace detail
@@ -472,11 +555,23 @@ sampling_service<Policies>::do_setup_wiring(int64_t tid, thread_state_t* state,
     if(!state) return;
 
     wire_tls(tid, state);
+
+    // Take initial baseline sample for metrics delta computation.
+    {
+        backtrace_record baseline{};
+        baseline.tid          = tid;
+        baseline.timestamp_ns = clock_.now_ns();
+        baseline.trigger      = trigger_type::TIMER;
+        capture_cpu_time(baseline);
+        capture_thread_rusage(baseline);
+        state->ring_buffer().try_push(baseline);
+    }
+
     callbacks_.setup_hw_counters(tid);
     arm_timer_triggers(tid, state, sigs);
     arm_overflow_trigger(tid, state, sigs);
     start_duration_controller(tid);
-    register_trace_cache_tracks(tid);
+    register_trace_cache_tracks(tid, sigs);
 }
 
 template <class Policies>
@@ -583,36 +678,45 @@ sampling_service<Policies>::start_duration_controller(int64_t tid)
 
 template <class Policies>
 void
-sampling_service<Policies>::register_trace_cache_tracks(int64_t tid)
+sampling_service<Policies>::register_trace_cache_tracks(int64_t              tid,
+                                                        std::set<int> const& sigs)
 {
     auto thread_inf = thread_info_resolver_.resolve(tid);
     if(!thread_inf) return;
 
     const std::size_t sys_id = thread_inf->system_value;
     const std::size_t seq_id = thread_inf->sequent_value;
-    const std::string timer_track =
-        make_thread_track_name(timer_track_tag{}, seq_id, sys_id);
-    const std::string overflow_track =
-        make_thread_track_name(overflow_track_tag{}, seq_id, sys_id);
+
+    const bool has_timer =
+        sigs.count(config_.realtime_signal) > 0 || sigs.count(config_.cputime_signal) > 0;
+    const bool has_overflow = sigs.count(config_.overflow_signal) > 0;
 
     callbacks_.register_sampling_categories();
     callbacks_.register_thread_info(static_cast<int>(getppid()),
                                     static_cast<int>(getpid()), sys_id);
-    callbacks_.register_track(timer_track, sys_id);
-    callbacks_.register_track(overflow_track, sys_id);
 
-    const std::string seq_suffix = " [" + std::to_string(seq_id) + "]";
-    for(char const* prefix : thread_counter_prefixes)
+    if(has_timer)
     {
-        callbacks_.register_track(std::string{ prefix } + seq_suffix, sys_id);
-    }
-    for(auto const& label : config_.hw_counter_labels)
-    {
-        callbacks_.register_track(label + seq_suffix, sys_id);
+        const std::string timer_track =
+            make_thread_track_name(timer_track_tag{}, seq_id, sys_id);
+        callbacks_.register_track(timer_track, sys_id);
+
+        const std::string seq_suffix = " [" + std::to_string(seq_id) + "]";
+        for(char const* prefix : thread_counter_prefixes)
+            callbacks_.register_track(std::string{ prefix } + seq_suffix, sys_id);
+        for(auto const& label : config_.hw_counter_labels)
+            callbacks_.register_track(label + seq_suffix, sys_id);
     }
 
-    LOG_DEBUG("thread {} registered trace_cache tracks: '{}' / '{}'", tid, timer_track,
-              overflow_track);
+    if(has_overflow)
+    {
+        const std::string overflow_track =
+            make_thread_track_name(overflow_track_tag{}, seq_id, sys_id);
+        callbacks_.register_track(overflow_track, sys_id);
+    }
+
+    LOG_DEBUG("thread {} registered trace_cache tracks (timer={} overflow={})", tid,
+              has_timer, has_overflow);
 }
 
 // Clear thread-local signal-handler pointers so a stale signal after state
@@ -621,6 +725,32 @@ template <class Policies>
 void
 sampling_service<Policies>::do_shutdown_wiring(int64_t tid) noexcept
 {
+    {
+        std::lock_guard<std::mutex> lk(wired_mutex_);
+        if(!wired_tids_.insert(tid).second)
+        {
+            callbacks_.teardown_hw_counters(tid);
+            using tls        = tl_state<Policies>;
+            tls::sampler     = nullptr;
+            tls::offload     = nullptr;
+            tls::logical_tid = -1;
+            return;
+        }
+    }
+
+    auto info = thread_info_resolver_.resolve(tid);
+    if(info)
+    {
+        auto sigs      = get_signal_types(tid);
+        bool has_timer = sigs.count(config_.realtime_signal) > 0 ||
+                         sigs.count(config_.cputime_signal) > 0;
+        if(has_timer)
+        {
+            auto stop = info->stop_ns > 0 ? info->stop_ns : clock_.now_ns();
+            trace_sink_.store_counter_termination(tid, stop);
+        }
+    }
+
     callbacks_.teardown_hw_counters(tid);
     using tls        = tl_state<Policies>;
     tls::sampler     = nullptr;

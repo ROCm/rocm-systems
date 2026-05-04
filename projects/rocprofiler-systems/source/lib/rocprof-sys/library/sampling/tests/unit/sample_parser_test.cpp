@@ -63,6 +63,7 @@ TEST(sample_parser, overflow_parse_builds_samples)
     pause_interval_registry<fake_clock> pause_reg(clock);
 
     std::vector<backtrace_record> raw = {
+        make_record(0, 4000),
         make_record(0, 5000),
         make_record(0, 6000),
     };
@@ -70,7 +71,7 @@ TEST(sample_parser, overflow_parse_builds_samples)
     auto result = parser.parse_overflow(0, raw, pause_reg);
 
     ASSERT_EQ(result.size(), 2U)
-        << "Both overflow records must survive when no pause intervals";
+        << "Both overflow records (after init) must survive when no pause intervals";
 }
 
 // ─── AC-11 / NFR-T-6: Single-sample buffer discarded ─────────────────────────
