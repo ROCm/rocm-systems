@@ -16,7 +16,7 @@ This testfile verifies the following scenarios of all hipMemcpy API
 3. Null check scenario
 */
 
-static constexpr auto NUM_ELM{1024 * 1024};
+static const auto NUM_ELM = isQuickLevel() ? 1024 : 1024 * 1024;
 
 
 /*This testcase verifies the negative scenarios of hipMemcpy APIs

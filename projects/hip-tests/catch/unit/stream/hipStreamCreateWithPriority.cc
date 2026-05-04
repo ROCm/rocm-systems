@@ -17,8 +17,8 @@
 #include <vector>
 #include "streamCommon.hh"  // NOLINT
 
-constexpr size_t MEMCPYSIZE1 = (64 * 1024 * 1024);
-constexpr size_t MEMCPYSIZE2 = (1024 * 1024);
+static const size_t MEMCPYSIZE1 = isQuickLevel() ? (100 * 1024) : (64 * 1024 * 1024);
+static const size_t MEMCPYSIZE2 = isQuickLevel() ? (100 * 1024) : (1024 * 1024);
 constexpr size_t NUMITERS = 2;
 constexpr size_t GRIDSIZE = 4096;
 constexpr size_t BLOCKSIZE = 256;
@@ -153,7 +153,7 @@ void funcTestsForAllPriorityLevelsWrtNullStrm(unsigned int flags, bool deviceSyn
  * Validate the calculated results.
  */
 void queueTasksInStreams(std::vector<hipStream_t>& stream, size_t arrsize) {
-  constexpr size_t size = MEMCPYSIZE2 * sizeof(int);
+  const size_t size = MEMCPYSIZE2 * sizeof(int);
   constexpr int initVal = 2;
 
   std::vector<int> A_in(MEMCPYSIZE2, initVal);
@@ -165,7 +165,7 @@ void queueTasksInStreams(std::vector<hipStream_t>& stream, size_t arrsize) {
   std::vector<int*> C_d(arrsize, nullptr);
 
   constexpr int threads = 1024;
-  constexpr int blocks = (MEMCPYSIZE2 / threads);
+  const int blocks = (MEMCPYSIZE2 / threads);
 
   for (int i = 0; i < arrsize; i++) {
     HIP_CHECK_THREAD(hipMalloc(&A_d[i], size));

@@ -10,8 +10,8 @@
 #include <stdlib.h>
 
 constexpr size_t buffer_size = (1024 * 1024);
-constexpr int test_iteration_hstvismem = 5;
-constexpr int test_iteration_noncohmem = 10;
+static const int test_iteration_hstvismem = isQuickLevel() ? 3 : 5;
+static const int test_iteration_noncohmem = isQuickLevel() ? 5 : 10;
 constexpr int block_size = 512;
 
 // Atomic store required as events are created with special flag hipEventDisableSystemFence [Ref : SWDEV-523177]

@@ -65,7 +65,7 @@ HIP_TEST_CASE(Unit_hipStreamEndCapture_Negative_Parameters) {
  */
 HIP_TEST_CASE(Unit_hipStreamEndCapture_Positive_GraphDestroy) {
   hipGraph_t graph{nullptr};
-  constexpr size_t N = 1000000;
+  const size_t N = isQuickLevel() ? 10000 : 1000000;
   size_t Nbytes = N * sizeof(float);
 
   LinearAllocGuard<float> A_h(LinearAllocs::malloc, Nbytes);
@@ -104,7 +104,7 @@ static void thread_func_neg(hipStream_t stream, hipGraph_t graph) {
  *    - HIP_VERSION >= 5.2
  */
 HIP_TEST_CASE(Unit_hipStreamEndCapture_Negative_Thread) {
-  constexpr size_t N = 1000000;
+  const size_t N = isQuickLevel() ? 10000 : 1000000;
   size_t Nbytes = N * sizeof(float);
 
   LinearAllocGuard<float> A_h(LinearAllocs::malloc, Nbytes);
@@ -148,7 +148,7 @@ static void thread_func_pos(hipStream_t stream, hipGraph_t* graph) {
  *    - HIP_VERSION >= 5.2
  */
 HIP_TEST_CASE(Unit_hipStreamEndCapture_Positive_Thread) {
-  constexpr size_t N = 1000000;
+  const size_t N = isQuickLevel() ? 10000 : 1000000;
   size_t Nbytes = N * sizeof(float);
 
   LinearAllocGuard<float> A_h(LinearAllocs::malloc, Nbytes);

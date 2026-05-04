@@ -9,8 +9,8 @@
 #include <utils.hh>
 #include <hip_test_process.hh>
 
-static constexpr int N = 2 * 1024 * 1024;
-static constexpr size_t NBYTES = N * sizeof(int);
+static const int N = isQuickLevel() ? (64 * 1024 / sizeof(int)) : 2 * 1024 * 1024;
+static const size_t NBYTES = N * sizeof(int);
 
 /**
  * Local Function to fill the array with given value
