@@ -4059,10 +4059,10 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const 
           // Initialize hidden heap buffer
           if (!isGraphCapture) {
             const_cast<Device&>(dev()).HiddenHeapInit(*this);
-            if (dev().IsHeapInitialized()) {
-              // Use system-scope fence on the kernel dispatch to guarantee cross-queue visibility of
-              // the heap data before the dispatched kernel accesses it.
+            // Emit a system-scope fence once after heap init completes.
+            if (dev().IsHeapInitialized() && !heap_init_fence_emitted_) {
               addSystemScope();
+              heap_init_fence_emitted_ = true;
             }
           }
           // Add heap pointer to the code

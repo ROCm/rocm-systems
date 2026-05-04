@@ -2208,6 +2208,7 @@ class Device : public RuntimeObject {
   bool UpdateInitialHeapSize(uint64_t initialHeapSize);
 
   //! Returns true if the device heap has been fully initialized.
+  //! PAL backend doesn't use the heap initialization path and heap_buffer_ is nullptr
   bool IsHeapInitialized() const {
     return (heap_buffer_ == nullptr) ||
            heap_init_complete_.load(std::memory_order_acquire);
