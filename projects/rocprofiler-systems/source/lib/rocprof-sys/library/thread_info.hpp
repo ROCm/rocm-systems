@@ -52,9 +52,9 @@ struct thread_index_data
     // the lookup value is always incremented for each thread
     // the system value is the tid provided by the operating system
     // the internal value is the value which the user expects
-    std::int64_t      internal_value = utility::get_thread_index();
-    std::int64_t      system_value   = tim::threading::get_sys_tid();
-    std::int64_t      sequent_value  = tim::threading::get_id();
+    std::int64_t internal_value = utility::get_thread_index();
+    std::int64_t system_value   = tim::threading::get_sys_tid();
+    std::int64_t sequent_value  = tim::threading::get_id();
     native_tid_t pthread_value  = ::pthread_self();
     stl_tid_t    stl_value      = std::this_thread::get_id();
 
@@ -99,10 +99,10 @@ struct thread_info
     static const std::optional<thread_info>& get(std::int64_t _tid, ThreadIdType _type);
     // note: get(native_handle_t) overloaded to & and && to prevent implicit conversion
 
-    bool            is_offset    = false;
-    const std::int64_t*  causal_count = nullptr;
-    index_data_t    index_data   = {};
-    lifetime_data_t lifetime     = { 0, 0 };
+    bool                is_offset    = false;
+    const std::int64_t* causal_count = nullptr;
+    index_data_t        index_data   = {};
+    lifetime_data_t     lifetime     = { 0, 0 };
 
     friend std::ostream& operator<<(std::ostream& _os, const thread_info& _v)
     {

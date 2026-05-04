@@ -1,7 +1,6 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include <cstdint>
 #include "library/components/vaapi_gotcha.hpp"
 #include "core/common.hpp"
 #include "core/config.hpp"
@@ -9,6 +8,7 @@
 #include "core/timemory.hpp"
 #include "library/components/category_region.hpp"
 #include "library/runtime.hpp"
+#include <cstdint>
 
 #include <timemory/backends/threading.hpp>
 #include <timemory/components/macros.hpp>

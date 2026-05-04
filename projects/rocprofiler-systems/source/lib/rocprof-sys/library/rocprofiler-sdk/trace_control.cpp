@@ -82,8 +82,9 @@ trace_control::handle_range_stop(std::uint64_t range_id)
         {
             m_active_range_ids.erase(it);
             now_empty = m_active_range_ids.empty();
-            m_active_region_count.store(static_cast<std::uint32_t>(m_active_range_ids.size()),
-                                        std::memory_order_relaxed);
+            m_active_region_count.store(
+                static_cast<std::uint32_t>(m_active_range_ids.size()),
+                std::memory_order_relaxed);
         }
     }
 

@@ -91,14 +91,14 @@ struct metrics
         std::array<std::uint16_t, MAX_NUM_VCN>     vcn_busy  = {};
     };
 
-    std::uint32_t                             current_socket_power = 0;
-    std::uint32_t                             average_socket_power = 0;
-    std::uint64_t                             memory_usage         = 0;
-    std::uint32_t                             hotspot_temperature  = 0;
-    std::uint32_t                             edge_temperature     = 0;
-    std::uint32_t                             gfx_activity         = 0;
-    std::uint32_t                             umc_activity         = 0;
-    std::uint32_t                             mm_activity          = 0;
+    std::uint32_t                        current_socket_power = 0;
+    std::uint32_t                        average_socket_power = 0;
+    std::uint64_t                        memory_usage         = 0;
+    std::uint32_t                        hotspot_temperature  = 0;
+    std::uint32_t                        edge_temperature     = 0;
+    std::uint32_t                        gfx_activity         = 0;
+    std::uint32_t                        umc_activity         = 0;
+    std::uint32_t                        mm_activity          = 0;
     std::array<xcp_metrics, MAX_NUM_XCP> xcp_stats;
 
     // Device-level VCN/JPEG activity (Radeon GPUs)

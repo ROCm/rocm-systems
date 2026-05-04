@@ -55,7 +55,7 @@ struct driver
      * for count query).
      * @return AMD SMI status code indicating success or failure.
      */
-    static amdsmi_status_t get_socket_handles(std::uint32_t*             socket_count,
+    static amdsmi_status_t get_socket_handles(std::uint32_t*        socket_count,
                                               amdsmi_socket_handle* socket_handles)
     {
         return amdsmi_get_socket_handles(socket_count, socket_handles);
@@ -122,7 +122,8 @@ struct driver
      * @return AMD SMI status code indicating success or failure.
      */
     static amdsmi_status_t get_memory_usage(amdsmi_processor_handle processor_handle,
-                                            amdsmi_memory_type_t type, std::uint64_t* usage)
+                                            amdsmi_memory_type_t    type,
+                                            std::uint64_t*          usage)
     {
         return amdsmi_get_gpu_memory_usage(processor_handle, type, usage);
     }
@@ -167,7 +168,7 @@ struct driver
      */
 #if defined(AMD_SMI_SDMA_SUPPORTED) && AMD_SMI_SDMA_SUPPORTED == 1
     static amdsmi_status_t get_gpu_process_list(amdsmi_processor_handle processor_handle,
-                                                std::uint32_t*               max_processes,
+                                                std::uint32_t*          max_processes,
                                                 amdsmi_proc_info_t*     list)
     {
         return amdsmi_get_gpu_process_list(processor_handle, max_processes, list);

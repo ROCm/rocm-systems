@@ -1,8 +1,8 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include <cstdint>
 #include "core/common_types.hpp"
+#include <cstdint>
 
 #include <gtest/gtest.h>
 

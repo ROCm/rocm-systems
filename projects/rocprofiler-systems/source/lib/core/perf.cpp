@@ -1,8 +1,8 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include <cstdint>
 #include "perf.hpp"
+#include <cstdint>
 
 #include <timemory/units.hpp>
 

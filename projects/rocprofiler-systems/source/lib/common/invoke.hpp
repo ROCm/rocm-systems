@@ -3,9 +3,9 @@
 
 #pragma once
 
-#include <cstdint>
 #include "common/defines.h"
 #include "common/join.hpp"
+#include <cstdint>
 
 #include <atomic>
 #include <cstring>
@@ -47,7 +47,7 @@ inline std::int64_t
 get_thread_index()
 {
     static std::atomic<std::int64_t> _c{ 0 };
-    static thread_local auto    _v = _c++;
+    static thread_local auto         _v = _c++;
     return _v;
 }
 

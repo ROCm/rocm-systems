@@ -81,9 +81,9 @@ struct comm_rank_data
 };
 
 std::uint64_t mpip_index        = std::numeric_limits<std::uint64_t>::max();
-auto     last_comm_record  = comm_rank_data{};
-auto     mproc_comm_record = comm_rank_data{};
-auto     mpi_comm_records  = std::map<uintptr_t, comm_rank_data>{};
+auto          last_comm_record  = comm_rank_data{};
+auto          mproc_comm_record = comm_rank_data{};
+auto          mpi_comm_records  = std::map<uintptr_t, comm_rank_data>{};
 
 using tim::auto_lock_t;
 using tim::type_mutex;

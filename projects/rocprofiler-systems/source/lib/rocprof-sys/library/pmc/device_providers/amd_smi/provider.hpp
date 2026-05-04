@@ -118,7 +118,7 @@ private:
         amdsmi_socket_handle socket_handle)
     {
         std::uint32_t count  = 0;
-        auto     status = m_driver_api->get_processor_handles_by_type(
+        auto          status = m_driver_api->get_processor_handles_by_type(
             socket_handle, AMDSMI_PROCESSOR_TYPE_AMD_NIC, nullptr, &count);
 
         if(status != AMDSMI_STATUS_SUCCESS || count == 0)

@@ -28,7 +28,7 @@ namespace detail
 struct cpu_perfetto_sample
 {
     std::uint64_t timestamp;
-    metrics  metric_values;
+    metrics       metric_values;
 };
 
 struct cpu_track_set

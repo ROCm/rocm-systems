@@ -54,10 +54,12 @@ private:
 
     bool finalized = false;
     // 64bit counter for number of bits (lo, hi)
-    std::array<std::uint32_t, 2>        count = { 0, 0 };
-    std::array<std::uint8_t, blocksize> buffer{};  // overflow bytes from last 64 byte chunk
+    std::array<std::uint32_t, 2> count = { 0, 0 };
+    std::array<std::uint8_t, blocksize>
+        buffer{};  // overflow bytes from last 64 byte chunk
     // digest so far, initialized to magic initialization constants.
-    std::array<std::uint32_t, 4> state = { 0x67452301, 0xefcdab89, 0x98badcfe, 0x10325476 };
+    std::array<std::uint32_t, 4> state = { 0x67452301, 0xefcdab89, 0x98badcfe,
+                                           0x10325476 };
     std::array<std::uint8_t, 16> digest{};  // result
 };
 
@@ -138,16 +140,20 @@ static inline std::uint32_t
 rotate_left(std::uint32_t x, int n);
 
 static inline void
-FF(std::uint32_t& a, std::uint32_t b, std::uint32_t c, std::uint32_t d, std::uint32_t x, std::uint32_t s, std::uint32_t ac);
+FF(std::uint32_t& a, std::uint32_t b, std::uint32_t c, std::uint32_t d, std::uint32_t x,
+   std::uint32_t s, std::uint32_t ac);
 
 static inline void
-GG(std::uint32_t& a, std::uint32_t b, std::uint32_t c, std::uint32_t d, std::uint32_t x, std::uint32_t s, std::uint32_t ac);
+GG(std::uint32_t& a, std::uint32_t b, std::uint32_t c, std::uint32_t d, std::uint32_t x,
+   std::uint32_t s, std::uint32_t ac);
 
 static inline void
-HH(std::uint32_t& a, std::uint32_t b, std::uint32_t c, std::uint32_t d, std::uint32_t x, std::uint32_t s, std::uint32_t ac);
+HH(std::uint32_t& a, std::uint32_t b, std::uint32_t c, std::uint32_t d, std::uint32_t x,
+   std::uint32_t s, std::uint32_t ac);
 
 static inline void
-II(std::uint32_t& a, std::uint32_t b, std::uint32_t c, std::uint32_t d, std::uint32_t x, std::uint32_t s, std::uint32_t ac);
+II(std::uint32_t& a, std::uint32_t b, std::uint32_t c, std::uint32_t d, std::uint32_t x,
+   std::uint32_t s, std::uint32_t ac);
 
 // F, G, H and I are basic md5sum functions.
 inline std::uint32_t
@@ -184,36 +190,42 @@ rotate_left(std::uint32_t x, int n)
 // FF, GG, HH, and II transformations for rounds 1, 2, 3, and 4.
 // Rotation is separate from addition to prevent recomputation.
 inline void
-FF(std::uint32_t& a, std::uint32_t b, std::uint32_t c, std::uint32_t d, std::uint32_t x, std::uint32_t s, std::uint32_t ac)
+FF(std::uint32_t& a, std::uint32_t b, std::uint32_t c, std::uint32_t d, std::uint32_t x,
+   std::uint32_t s, std::uint32_t ac)
 {
     a = rotate_left(a + F(b, c, d) + x + ac, s) + b;
 }
 
 inline void
-GG(std::uint32_t& a, std::uint32_t b, std::uint32_t c, std::uint32_t d, std::uint32_t x, std::uint32_t s, std::uint32_t ac)
+GG(std::uint32_t& a, std::uint32_t b, std::uint32_t c, std::uint32_t d, std::uint32_t x,
+   std::uint32_t s, std::uint32_t ac)
 {
     a = rotate_left(a + G(b, c, d) + x + ac, s) + b;
 }
 
 inline void
-HH(std::uint32_t& a, std::uint32_t b, std::uint32_t c, std::uint32_t d, std::uint32_t x, std::uint32_t s, std::uint32_t ac)
+HH(std::uint32_t& a, std::uint32_t b, std::uint32_t c, std::uint32_t d, std::uint32_t x,
+   std::uint32_t s, std::uint32_t ac)
 {
     a = rotate_left(a + H(b, c, d) + x + ac, s) + b;
 }
 
 inline void
-II(std::uint32_t& a, std::uint32_t b, std::uint32_t c, std::uint32_t d, std::uint32_t x, std::uint32_t s, std::uint32_t ac)
+II(std::uint32_t& a, std::uint32_t b, std::uint32_t c, std::uint32_t d, std::uint32_t x,
+   std::uint32_t s, std::uint32_t ac)
 {
     a = rotate_left(a + I(b, c, d) + x + ac, s) + b;
 }
 
-// decodes input (unsigned char) into output (std::uint32_t). Assumes len is a multiple of 4.
+// decodes input (unsigned char) into output (std::uint32_t). Assumes len is a multiple
+// of 4.
 void
 decode(std::uint32_t output[], const std::uint8_t input[], size_type len)
 {
     for(unsigned int i = 0, j = 0; j < len; i++, j += 4)
         output[i] = ((std::uint32_t) input[j]) | (((std::uint32_t) input[j + 1]) << 8) |
-                    (((std::uint32_t) input[j + 2]) << 16) | (((std::uint32_t) input[j + 3]) << 24);
+                    (((std::uint32_t) input[j + 2]) << 16) |
+                    (((std::uint32_t) input[j + 3]) << 24);
 }
 
 // encodes input (std::uint32_t) into output (unsigned char). Assumes len is

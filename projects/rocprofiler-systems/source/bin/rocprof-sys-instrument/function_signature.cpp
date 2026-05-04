@@ -1,8 +1,8 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include <cstdint>
 #include "function_signature.hpp"
+#include <cstdint>
 
 #include "core/demangler.hpp"
 

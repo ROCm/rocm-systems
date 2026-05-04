@@ -36,7 +36,8 @@ default_marker_policy::pop_timemory(std::string_view name)
 }
 
 void
-default_marker_policy::push_perfetto_ts(const char* name, std::uint64_t ts, std::uint64_t flow_id,
+default_marker_policy::push_perfetto_ts(const char* name, std::uint64_t ts,
+                                        std::uint64_t                        flow_id,
                                         const std::vector<annotation_entry>& annotations)
 {
     tracing::push_perfetto_ts(

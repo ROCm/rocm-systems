@@ -122,11 +122,13 @@ extern "C"
     void kokkosp_begin_parallel_scan(const char*, std::uint32_t,
                                      std::uint64_t*) ROCPROFSYS_PUBLIC_API;
     void kokkosp_end_parallel_scan(std::uint64_t) ROCPROFSYS_PUBLIC_API;
-    void kokkosp_begin_fence(const char*, std::uint32_t, std::uint64_t*) ROCPROFSYS_PUBLIC_API;
+    void kokkosp_begin_fence(const char*, std::uint32_t,
+                             std::uint64_t*) ROCPROFSYS_PUBLIC_API;
     void kokkosp_end_fence(std::uint64_t) ROCPROFSYS_PUBLIC_API;
     void kokkosp_push_profile_region(const char*) ROCPROFSYS_PUBLIC_API;
     void kokkosp_pop_profile_region() ROCPROFSYS_PUBLIC_API;
-    void kokkosp_create_profile_section(const char*, std::uint32_t*) ROCPROFSYS_PUBLIC_API;
+    void kokkosp_create_profile_section(const char*,
+                                        std::uint32_t*) ROCPROFSYS_PUBLIC_API;
     void kokkosp_destroy_profile_section(std::uint32_t) ROCPROFSYS_PUBLIC_API;
     void kokkosp_start_profile_section(std::uint32_t) ROCPROFSYS_PUBLIC_API;
     void kokkosp_stop_profile_section(std::uint32_t) ROCPROFSYS_PUBLIC_API;

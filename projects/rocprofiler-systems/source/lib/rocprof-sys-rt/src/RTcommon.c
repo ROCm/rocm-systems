@@ -30,12 +30,12 @@
 
 /* $Id: RTcommon.c,v 1.78 2008/04/15 16:43:44 roundy Exp $ */
 
-#include <stdint.h>
 #include "RTcommon.h"
 #include "RTthread.h"
 #include "h/dyninstAPI_RT.h"
 #include <assert.h>
 #include <stdarg.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

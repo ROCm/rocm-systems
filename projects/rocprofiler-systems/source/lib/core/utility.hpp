@@ -236,17 +236,21 @@ convert(std::string_view _inp)
     return _ret;
 }
 
-template <typename Tp = std::int64_t, typename ContainerT = std::set<Tp>, typename Up = Tp>
+template <typename Tp = std::int64_t, typename ContainerT = std::set<Tp>,
+          typename Up = Tp>
 ContainerT
 parse_numeric_range(std::string _input_string, const std::string& _label, Up _incr);
 
 extern template std::set<std::int64_t>
-parse_numeric_range<std::int64_t, std::set<std::int64_t>>(std::string, const std::string&, long);
-extern template std::vector<std::int64_t>
-parse_numeric_range<std::int64_t, std::vector<std::int64_t>>(std::string, const std::string&, long);
-extern template std::unordered_set<std::int64_t>
-parse_numeric_range<std::int64_t, std::unordered_set<std::int64_t>>(std::string, const std::string&,
+parse_numeric_range<std::int64_t, std::set<std::int64_t>>(std::string, const std::string&,
                                                           long);
+extern template std::vector<std::int64_t>
+parse_numeric_range<std::int64_t, std::vector<std::int64_t>>(std::string,
+                                                             const std::string&, long);
+extern template std::unordered_set<std::int64_t>
+parse_numeric_range<std::int64_t, std::unordered_set<std::int64_t>>(std::string,
+                                                                    const std::string&,
+                                                                    long);
 
 void
 trim_str(std::string& str);

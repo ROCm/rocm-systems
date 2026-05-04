@@ -3,12 +3,12 @@
 
 #pragma once
 
-#include <cstdint>
 #include "common/defines.h"
 #include "core/common.hpp"
 #include "core/components/fwd.hpp"
 #include "core/timemory.hpp"
 #include "library/components/category_region.hpp"
+#include <cstdint>
 
 #include <timemory/api/macros.hpp>
 #include <timemory/components/gotcha/backends.hpp>
@@ -134,7 +134,8 @@ struct comm_data : base<comm_data, void>
     // ucp_tag_recv_nbx - receive with tag matching (6 params: worker, buffer, count, tag,
     // tag_mask, param)
     static void audit(const gotcha_data& _data, audit::incoming, void*, void*,
-                      size_t count, std::uint64_t tag, std::uint64_t tag_mask, const void*);
+                      size_t count, std::uint64_t tag, std::uint64_t tag_mask,
+                      const void*);
 
     // ucp_put_nbx - RMA put operation (6 params: ep, buffer, count, remote_addr, rkey,
     // param)

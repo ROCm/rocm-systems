@@ -1,11 +1,11 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include <cstdint>
 #include "state.hpp"
 #include "common/static_object.hpp"
 #include "config.hpp"
 #include "utility.hpp"
+#include <cstdint>
 
 #include "logger/debug.hpp"
 

@@ -1,7 +1,6 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include <cstdint>
 #include "avail.hpp"
 #include "common.hpp"
 #include "common/defines.h"
@@ -11,6 +10,7 @@
 #include "generate_config.hpp"
 #include "get_availability.hpp"
 #include "info_type.hpp"
+#include <cstdint>
 
 #include "hw_counter_query.hpp"
 
@@ -73,8 +73,8 @@ write_entry(std::ostream& os, const Tp& _entry, std::int64_t _w, bool center, bo
 
 template <typename Tp, typename IntArrayT, size_t N>
 void
-write_wrap_entry(std::ostream& os, const Tp& _entry, std::int64_t _w, bool center, bool mark,
-                 size_t _idx, IntArrayT _breaks, std::array<bool, N> _use,
+write_wrap_entry(std::ostream& os, const Tp& _entry, std::int64_t _w, bool center,
+                 bool mark, size_t _idx, IntArrayT _breaks, std::array<bool, N> _use,
                  format_options& fmt_opts);
 
 template <typename IntArrayT, size_t N>
@@ -728,10 +728,10 @@ write_component_info(std::ostream& os, const array_t<bool, N>& options,
     using width_type = std::vector<std::int64_t>;
     using width_bool = std::array<bool, N + 2>;
 
-    auto       _available_column = !fmt_opts.force_brief && !fmt_opts.available_only;
-    width_type _widths           = width_type{ 30, 12, 20, 20, 20, 40, 20, 40, 10 };
-    width_bool _wusing           = width_bool{ true, _available_column };
-    std::int64_t    pad               = fmt_opts.padding;
+    auto         _available_column = !fmt_opts.force_brief && !fmt_opts.available_only;
+    width_type   _widths           = width_type{ 30, 12, 20, 20, 20, 40, 20, 40, 10 };
+    width_bool   _wusing           = width_bool{ true, _available_column };
+    std::int64_t pad               = fmt_opts.padding;
     for(size_t i = 0; i < options.size(); ++i)
         _wusing[i + 2] = options[i];
 
@@ -739,14 +739,16 @@ write_component_info(std::ostream& os, const array_t<bool, N>& options,
         constexpr size_t idx = 0;
         stringstream_t   ss;
         write_entry(ss, "COMPONENT", _widths.at(0), false, true, fmt_opts);
-        _widths.at(idx) = std::max<std::int64_t>(ss.str().length() + pad, _widths.at(idx));
+        _widths.at(idx) =
+            std::max<std::int64_t>(ss.str().length() + pad, _widths.at(idx));
     }
 
     {
         constexpr size_t idx = 1;
         stringstream_t   ss;
         write_entry(ss, "AVAILABLE", _widths.at(1), true, false, fmt_opts);
-        _widths.at(idx) = std::max<std::int64_t>(ss.str().length() + pad, _widths.at(idx));
+        _widths.at(idx) =
+            std::max<std::int64_t>(ss.str().length() + pad, _widths.at(idx));
     }
 
     for(size_t i = 0; i < fields.size(); ++i)
@@ -801,14 +803,16 @@ write_component_info(std::ostream& os, const array_t<bool, N>& options,
             constexpr size_t idx = 0;
             stringstream_t   ss;
             write_entry(ss, std::get<idx>(itr), 0, true, true, fmt_opts);
-            _widths.at(idx) = std::max<std::int64_t>(ss.str().length() + pad, _widths.at(idx));
+            _widths.at(idx) =
+                std::max<std::int64_t>(ss.str().length() + pad, _widths.at(idx));
         }
 
         {
             constexpr size_t idx = 1;
             stringstream_t   ss;
             write_entry(ss, std::get<idx>(itr), 0, true, false, fmt_opts);
-            _widths.at(idx) = std::max<std::int64_t>(ss.str().length() + pad, _widths.at(idx));
+            _widths.at(idx) =
+                std::max<std::int64_t>(ss.str().length() + pad, _widths.at(idx));
         }
 
         constexpr size_t idx = 2;
@@ -1015,8 +1019,8 @@ write_settings_info(std::ostream& os, format_options& fmt_opts,
     for(size_t i = 0; i < _widths.size(); ++i)
     {
         if(_wusing.at(i))
-            _widths.at(i) = std::max<std::uint64_t>(_widths.at(i),
-                                               _labels.at(i).size() + fmt_opts.padding);
+            _widths.at(i) = std::max<std::uint64_t>(_widths.at(i), _labels.at(i).size() +
+                                                                       fmt_opts.padding);
         else
             _widths.at(i) = 0;
     }
@@ -1042,8 +1046,8 @@ write_settings_info(std::ostream& os, format_options& fmt_opts,
         for(size_t i = 0; i < itr.size(); ++i)
         {
             if(!_wusing.at(i)) continue;
-            _widths.at(i) =
-                std::max<std::uint64_t>(_widths.at(i), itr.at(i).length() + fmt_opts.padding);
+            _widths.at(i) = std::max<std::uint64_t>(_widths.at(i), itr.at(i).length() +
+                                                                       fmt_opts.padding);
             _selected += (is_selected(itr.at(i))) ? 1 : 0;
             write_entry(ss, itr.at(i), _widths.at(i), _center.at(i), _mark.at(i),
                         fmt_opts);
@@ -1231,7 +1235,8 @@ write_hw_counter_info(std::ostream& os, format_options& fmt_opts,
     {
         for(const auto& itr : fitr.second)
         {
-            width_type _w = { { (std::int64_t) itr.symbol().length(), (std::int64_t) 4, (std::int64_t) 6,
+            width_type _w = { { (std::int64_t) itr.symbol().length(), (std::int64_t) 4,
+                                (std::int64_t) 6,
                                 (std::int64_t) itr.short_description().length(),
                                 (std::int64_t) itr.long_description().length() } };
             for(auto& witr : _w)
@@ -1351,8 +1356,8 @@ compute_max_columns(IntArrayT _widths, BoolArrayT _using, format_options& fmt_op
     };
 
     std::int32_t _max_width = fmt_opts.num_cols;
-    size_t  _n         = 0;
-    size_t  _nmax      = std::numeric_limits<std::uint16_t>::max();
+    size_t       _n         = 0;
+    size_t       _nmax      = std::numeric_limits<std::uint16_t>::max();
     while(_n++ < _nmax)
     {
         if(debug_msg)
@@ -1455,8 +1460,8 @@ write_entry(std::ostream& os, const Tp& _entry, std::int64_t _w, bool center, bo
 
 template <typename Tp, typename IntArrayT, size_t N>
 void
-write_wrap_entry(std::ostream& os, const Tp& _entry, std::int64_t _w, bool center, bool mark,
-                 size_t _idx, IntArrayT _breaks, std::array<bool, N> _use,
+write_wrap_entry(std::ostream& os, const Tp& _entry, std::int64_t _w, bool center,
+                 bool mark, size_t _idx, IntArrayT _breaks, std::array<bool, N> _use,
                  format_options& fmt_opts)
 {
     if(fmt_opts.csv)

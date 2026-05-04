@@ -219,7 +219,8 @@ private:
     void fragment_memory()
     {
         auto* _data = m_buffer->data();
-        memset(_data + m_head, std::numeric_limits<std::uint8_t>::max(), buffer_size - m_head);
+        memset(_data + m_head, std::numeric_limits<std::uint8_t>::max(),
+               buffer_size - m_head);
         *reinterpret_cast<TypeIdentifierEnum*>(_data + m_head) =
             TypeIdentifierEnum::fragmented_space;
 

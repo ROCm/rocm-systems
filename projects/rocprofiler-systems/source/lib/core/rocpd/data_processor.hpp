@@ -25,28 +25,29 @@ struct data_processor
     using insert_sample_stmt =
         std::function<void(const char*, size_t, std::uint64_t, size_t, const char*)>;
     using insert_region_stmt =
-        std::function<void(const char*, size_t, size_t, size_t, std::uint64_t, std::uint64_t,
-                           size_t, size_t, const char*)>;
-    using insert_kernel_dispatch_stmt       = std::function<void(
+        std::function<void(const char*, size_t, size_t, size_t, std::uint64_t,
+                           std::uint64_t, size_t, size_t, const char*)>;
+    using insert_kernel_dispatch_stmt = std::function<void(
         const char*, size_t, size_t, size_t, size_t, size_t, size_t, size_t, size_t,
-        std::uint64_t, std::uint64_t, size_t, size_t, size_t, size_t, size_t, size_t, size_t,
-        size_t, size_t, size_t, const char*)>;
-    using insert_memory_copy_stmt           = std::function<void(
-        const char*, size_t, size_t, size_t, std::uint64_t, std::uint64_t, size_t, size_t, size_t,
-        size_t, size_t, size_t, size_t, size_t, size_t, size_t, const char*)>;
-    using insert_memory_alloc_stmt          = std::function<void(
-        const char*, size_t, size_t, size_t, size_t, const char*, const char*, std::uint64_t,
-        std::uint64_t, size_t, size_t, size_t, size_t, size_t, const char*)>;
+        std::uint64_t, std::uint64_t, size_t, size_t, size_t, size_t, size_t, size_t,
+        size_t, size_t, size_t, size_t, const char*)>;
+    using insert_memory_copy_stmt     = std::function<void(
+        const char*, size_t, size_t, size_t, std::uint64_t, std::uint64_t, size_t, size_t,
+        size_t, size_t, size_t, size_t, size_t, size_t, size_t, size_t, const char*)>;
+    using insert_memory_alloc_stmt =
+        std::function<void(const char*, size_t, size_t, size_t, size_t, const char*,
+                           const char*, std::uint64_t, std::uint64_t, size_t, size_t,
+                           size_t, size_t, size_t, const char*)>;
     using insert_memory_alloc_no_agent_stmt = std::function<void(
-        const char*, size_t, size_t, size_t, const char*, const char*, std::uint64_t, std::uint64_t,
-        size_t, size_t, size_t, size_t, size_t, const char*)>;
-    using insert_kernel_symbol_stmt =
-        std::function<void(size_t, const char*, size_t, size_t, std::uint64_t, const char*,
-                           const char*, std::uint64_t, std::uint32_t, std::uint32_t, std::uint32_t, std::uint32_t,
-                           std::uint32_t, std::uint32_t, std::uint32_t, const char*)>;
-    using insert_code_object_stmt =
-        std::function<void(size_t, const char*, size_t, size_t, size_t, const char*,
-                           std::uint64_t, std::uint64_t, std::uint64_t, const char*, const char*)>;
+        const char*, size_t, size_t, size_t, const char*, const char*, std::uint64_t,
+        std::uint64_t, size_t, size_t, size_t, size_t, size_t, const char*)>;
+    using insert_kernel_symbol_stmt         = std::function<void(
+        size_t, const char*, size_t, size_t, std::uint64_t, const char*, const char*,
+        std::uint64_t, std::uint32_t, std::uint32_t, std::uint32_t, std::uint32_t,
+        std::uint32_t, std::uint32_t, std::uint32_t, const char*)>;
+    using insert_code_object_stmt           = std::function<void(
+        size_t, const char*, size_t, size_t, size_t, const char*, std::uint64_t,
+        std::uint64_t, std::uint64_t, const char*, const char*)>;
     using insert_args_stmt = std::function<void(const char*, size_t, size_t, const char*,
                                                 const char*, const char*, const char*)>;
 
@@ -132,8 +133,8 @@ public:
                        const char* extdata = "{}");
 
     void insert_region(size_t node_id, size_t process_id, size_t thread_id,
-                       std::uint64_t start, std::uint64_t end, size_t name_id, size_t event_id,
-                       const char* extdata = "{}");
+                       std::uint64_t start, std::uint64_t end, size_t name_id,
+                       size_t event_id, const char* extdata = "{}");
 
     size_t insert_thread_info(size_t node_id, size_t parent_process_id, size_t process_id,
                               size_t thread_id, const char* name, std::uint64_t start = 0,
@@ -166,7 +167,8 @@ public:
                               const char* display_name, std::uint32_t kernel_obj,
                               std::uint32_t kernarg_segmnt_size,
                               std::uint32_t kernarg_segment_alignment,
-                              std::uint32_t group_segment_size, std::uint32_t private_segment_size,
+                              std::uint32_t group_segment_size,
+                              std::uint32_t private_segment_size,
                               std::uint32_t sgrp_count, std::uint32_t arch_vgrp_count,
                               std::uint32_t accum_vgrp_count, const char* extdata = "{}");
 

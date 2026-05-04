@@ -33,8 +33,10 @@ namespace
 {
 struct annotation_entry
 {
-    std::string                                                             key;
-    std::variant<std::string, std::uint64_t, std::int64_t, double, std::int32_t, std::uint32_t> value;
+    std::string key;
+    std::variant<std::string, std::uint64_t, std::int64_t, double, std::int32_t,
+                 std::uint32_t>
+        value;
 };
 
 void
@@ -122,8 +124,8 @@ ensure_gpu_track(std::uint32_t device_id, bool enabled, const char* track_suffix
 
 template <typename Track, typename ValueT>
 void
-emit_gpu_scalar(std::uint32_t device_id, size_t ts, bool enabled, const char* track_suffix,
-                const char* units, ValueT value)
+emit_gpu_scalar(std::uint32_t device_id, size_t ts, bool enabled,
+                const char* track_suffix, const char* units, ValueT value)
 {
     if(ensure_gpu_track<Track>(device_id, enabled, track_suffix, units))
         TRACE_COUNTER(trait::name<typename Track::category_type>::value,
@@ -165,7 +167,8 @@ emit_xcp_array_metrics(std::uint32_t device_id, size_t ts, const char* metric_na
 }
 
 void
-emit_xgmi_metrics(std::uint32_t device_id, size_t ts, const pmc::collectors::gpu::metrics& m)
+emit_xgmi_metrics(std::uint32_t device_id, size_t ts,
+                  const pmc::collectors::gpu::metrics& m)
 {
     emit_gpu_scalar<amd_smi_xgmi_link_width_track>(device_id, ts, true, "XGMI Link Width",
                                                    "lanes", m.xgmi.link.width);
@@ -209,7 +212,8 @@ emit_xgmi_metrics(std::uint32_t device_id, size_t ts, const pmc::collectors::gpu
 }
 
 void
-emit_pcie_metrics(std::uint32_t device_id, size_t ts, const pmc::collectors::gpu::metrics& m)
+emit_pcie_metrics(std::uint32_t device_id, size_t ts,
+                  const pmc::collectors::gpu::metrics& m)
 {
     emit_gpu_scalar<amd_smi_pcie_link_width_track>(device_id, ts, true, "PCIe Link Width",
                                                    "lanes", m.pcie.link.width);

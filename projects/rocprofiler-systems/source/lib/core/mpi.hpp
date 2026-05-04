@@ -184,8 +184,8 @@ using communicator_map_t = std::unordered_map<comm_t, Tp>;
 
 inline std::int32_t rank(comm_t = comm_world_v);
 inline std::int32_t size(comm_t = comm_world_v);
-inline void    set_rank(std::int32_t, comm_t = comm_world_v);
-inline void    set_size(std::int32_t, comm_t = comm_world_v);
+inline void         set_rank(std::int32_t, comm_t = comm_world_v);
+inline void         set_size(std::int32_t, comm_t = comm_world_v);
 
 //--------------------------------------------------------------------------------------//
 // Currently ROCPROFSYS_MPI_THREAD is just a placeholder for future
@@ -411,7 +411,8 @@ rank(comm_t comm)
     {
         // this is used to guard against the queries that might happen after an
         // application calls MPI_Finalize() directly
-        static communicator_map_t<std::int32_t>* _instance = new communicator_map_t<std::int32_t>();
+        static communicator_map_t<std::int32_t>* _instance =
+            new communicator_map_t<std::int32_t>();
         if(_instance->find(comm) == _instance->end())
         {
             PMPI_Comm_rank(comm, &_rank);
@@ -433,7 +434,8 @@ size(comm_t comm)
     {
         // this is used to guard against the queries that might happen after an
         // application calls MPI_Finalize() directly
-        static communicator_map_t<std::int32_t>* _instance = new communicator_map_t<std::int32_t>();
+        static communicator_map_t<std::int32_t>* _instance =
+            new communicator_map_t<std::int32_t>();
         if(_instance->find(comm) == _instance->end())
         {
             PMPI_Comm_size(comm, &_size);
@@ -460,8 +462,14 @@ struct comm_data
 {
     using entry_t = std::array<std::int32_t, 2>;
 
-    static std::int32_t rank(comm_t _comm) { return std::max<std::int32_t>(m_data()[_comm][0], 0); }
-    static std::int32_t size(comm_t _comm) { return std::max<std::int32_t>(m_data()[_comm][1], 1); }
+    static std::int32_t rank(comm_t _comm)
+    {
+        return std::max<std::int32_t>(m_data()[_comm][0], 0);
+    }
+    static std::int32_t size(comm_t _comm)
+    {
+        return std::max<std::int32_t>(m_data()[_comm][1], 1);
+    }
 
     friend void set_rank(std::int32_t, comm_t);
     friend void set_size(std::int32_t, comm_t);

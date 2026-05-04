@@ -1,7 +1,6 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include <cstdint>
 #include "library/causal/delay.hpp"
 #include "core/state.hpp"
 #include "core/utility.hpp"
@@ -12,6 +11,7 @@
 #include "library/thread_data.hpp"
 #include "library/thread_info.hpp"
 #include "library/tracing.hpp"
+#include <cstdint>
 
 #include "logger/debug.hpp"
 
@@ -50,7 +50,7 @@ compute_sleep_for_overhead()
     auto   _stats         = tim::statistics<double>{};
     for(size_t i = 0; i < _ntot; ++i)
     {
-        auto    _val = _dist(_engine);
+        auto         _val = _dist(_engine);
         std::int64_t _beg = tracing::now();
         std::this_thread::sleep_for(std::chrono::nanoseconds{ _val });
         std::int64_t _end = tracing::now();

@@ -3,11 +3,11 @@
 
 #pragma once
 
-#include <cstdint>
 #include "common.hpp"
 #include "common/defines.h"
 #include "state.hpp"
 #include "timemory.hpp"
+#include <cstdint>
 
 #include <timemory/backends/threading.hpp>
 #include <timemory/macros/language.hpp>

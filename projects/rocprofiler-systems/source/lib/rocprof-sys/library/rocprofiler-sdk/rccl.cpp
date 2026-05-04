@@ -1,9 +1,9 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include <cstdint>
 #include "library/rocprofiler-sdk/rccl.hpp"
 #include "library/rocprofiler-sdk/rccl_internal.hpp"
+#include <cstdint>
 
 #include "core/categories.hpp"
 #include "core/config.hpp"
@@ -104,7 +104,7 @@ rccl_get_gpu_tracking_state();
 
 [[nodiscard]] rccl_event_info
 rccl_get_event_info_impl(
-    std::uint32_t                                            operation,
+    std::uint32_t                                       operation,
     const rocprofiler_callback_tracing_rccl_api_data_t& payload) noexcept
 {
     rccl_event_info info{};
@@ -173,7 +173,8 @@ rccl_metadata_initialize_track()
 
 template <typename Tp, typename... Args>
 void
-write_perfetto_counter_track(std::uint64_t _val, std::uint64_t _begin_ts, std::uint64_t _end_ts)
+write_perfetto_counter_track(std::uint64_t _val, std::uint64_t _begin_ts,
+                             std::uint64_t _end_ts)
 {
     using counter_track = rocprofsys::perfetto_counter_track<Tp>;
 
@@ -196,7 +197,8 @@ write_perfetto_counter_track(std::uint64_t _val, std::uint64_t _begin_ts, std::u
 
 template <typename Track>
 void
-cache_rccl_comm_data_events(std::uint32_t rccl_device_idx, size_t bytes, std::uint64_t timestamp_ns)
+cache_rccl_comm_data_events(std::uint32_t rccl_device_idx, size_t bytes,
+                            std::uint64_t timestamp_ns)
 {
     auto&  tracking_state = rccl_get_gpu_tracking_state();
     size_t transfer_bytes = bytes;
@@ -217,8 +219,9 @@ cache_rccl_comm_data_events(std::uint32_t rccl_device_idx, size_t bytes, std::ui
     trace_cache::get_buffer_storage().store(trace_cache::pmc_event_with_sample{
         static_cast<size_t>(category_enum_id<category::comm_data>::value), Track::label,
         timestamp_ns, event_metadata.c_str(), stack_id, parent_stack_id, correlation_id,
-        call_stack, line_info, rccl_device_idx, static_cast<std::uint8_t>(agent_type::GPU),
-        pmc_label.c_str(), static_cast<double>(cumulative), std::nullopt });
+        call_stack, line_info, rccl_device_idx,
+        static_cast<std::uint8_t>(agent_type::GPU), pmc_label.c_str(),
+        static_cast<double>(cumulative), std::nullopt });
 }
 
 rccl_gpu_tracking_state&
@@ -308,7 +311,7 @@ rccl_comm_data_initialize()
  * @param end_ts Timestamp when the API call ended (nanoseconds)
  */
 void
-tool_tracing_callback_rccl(std::uint32_t                                      operation,
+tool_tracing_callback_rccl(std::uint32_t                                 operation,
                            rocprofiler_callback_tracing_rccl_api_data_t* payload,
                            std::uint64_t begin_ts, std::uint64_t end_ts)
 {

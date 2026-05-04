@@ -26,14 +26,16 @@ namespace rocprofiler_sdk
 /// Writer builds these; policy iterates and calls add_perfetto_annotation for each.
 struct annotation_entry
 {
-    annotation_entry(const char*                   anno_key,
-                     const std::variant<std::string, std::uint64_t, std::int64_t, double, std::int32_t,
-                                        std::uint32_t>& anno_value)
+    annotation_entry(const char*                                      anno_key,
+                     const std::variant<std::string, std::uint64_t, std::int64_t, double,
+                                        std::int32_t, std::uint32_t>& anno_value)
     : key(anno_key)
     , value(anno_value)
     {}
-    const char*                                                             key;
-    std::variant<std::string, std::uint64_t, std::int64_t, double, std::int32_t, std::uint32_t> value;
+    const char* key;
+    std::variant<std::string, std::uint64_t, std::int64_t, double, std::int32_t,
+                 std::uint32_t>
+        value;
 };
 
 /// Thin API wrapper policy for marker_writer.
@@ -43,7 +45,8 @@ struct default_marker_policy
     static void push_timemory(std::string_view name);
     static void pop_timemory(std::string_view name);
 
-    static void push_perfetto_ts(const char* name, std::uint64_t ts, std::uint64_t flow_id,
+    static void push_perfetto_ts(const char* name, std::uint64_t ts,
+                                 std::uint64_t                        flow_id,
                                  const std::vector<annotation_entry>& annotations);
     static void pop_perfetto_ts(const char* name, std::uint64_t ts,
                                 const std::vector<annotation_entry>& annotations);

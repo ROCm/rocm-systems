@@ -169,7 +169,7 @@ query_cpu_agents()
 
     // Insert one agent per socket in ascending socket_id order
     // so that device_type_index == socket_id
-    auto&    mgr        = get_agent_manager_instance();
+    auto&         mgr        = get_agent_manager_instance();
     std::uint32_t node_count = 0;
 
     for(const auto& [socket_id, model_name] : socket_model_names)

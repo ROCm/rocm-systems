@@ -1,8 +1,8 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include <cstdint>
 #include "binary/address_range.hpp"
+#include <cstdint>
 
 #include "logger/debug.hpp"
 

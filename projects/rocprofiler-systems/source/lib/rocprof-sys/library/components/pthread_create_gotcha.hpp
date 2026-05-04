@@ -28,11 +28,11 @@ struct pthread_create_gotcha : tim::component::base<pthread_create_gotcha, void>
 
     struct wrapper_config
     {
-        bool      enable_causal   = false;
-        bool      enable_sampling = false;
-        bool      offset          = false;
-        std::int64_t   parent_tid      = 0;
-        promise_t promise         = {};
+        bool         enable_causal   = false;
+        bool         enable_sampling = false;
+        bool         offset          = false;
+        std::int64_t parent_tid      = 0;
+        promise_t    promise         = {};
     };
 
     struct wrapper

@@ -1,8 +1,8 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include <cstdint>
 #include "common/json_config.hpp"
+#include <cstdint>
 
 #include "common/env_vars.hpp"
 

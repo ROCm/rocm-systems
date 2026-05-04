@@ -1,13 +1,13 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include <cstdint>
 #include "library/causal/components/progress_point.hpp"
 #include "core/common.hpp"
 #include "core/concepts.hpp"
 #include "core/timemory.hpp"
 #include "library/causal/experiment.hpp"
 #include "library/thread_data.hpp"
+#include <cstdint>
 
 #include <timemory/hash/types.hpp>
 #include <timemory/mpl/type_traits.hpp>
@@ -193,7 +193,7 @@ namespace causal = rocprofsys::causal;
 void
 push_node<causal::component::progress_point>::operator()(type&        _obj, scope::config,
                                                          hash_value_t _hash,
-                                                         std::int64_t      _tid) const
+                                                         std::int64_t _tid) const
 {
     auto itr = causal::component::get_progress_map(_tid).emplace(_hash, nullptr);
     if(itr.second && !itr.first->second)

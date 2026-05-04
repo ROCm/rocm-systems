@@ -3,9 +3,9 @@
 
 #pragma once
 
-#include <cstdint>
 #include "core/demangler.hpp"
 #include "defines.hpp"
+#include <cstdint>
 
 #include <timemory/settings/macros.hpp>
 #include <timemory/tpls/cereal/archives.hpp>

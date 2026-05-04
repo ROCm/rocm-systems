@@ -1,9 +1,9 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include <cstdint>
 #include "core/trace_cache/buffer_storage.hpp"
 #include "mocked_types.hpp"
+#include <cstdint>
 
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
@@ -32,7 +32,7 @@ verify_buffer_contains(const T& sample, const std::uint8_t* buffer, size_t& buff
     buffer_pos += sizeof(size_t);
 
     std::uint8_t* deserialize_ptr = const_cast<std::uint8_t*>(buffer + buffer_pos);
-    auto     deserialized    = rocprofsys::trace_cache::deserialize<T>(deserialize_ptr);
+    auto          deserialized = rocprofsys::trace_cache::deserialize<T>(deserialize_ptr);
     EXPECT_EQ(deserialized, sample);
     buffer_pos += size;
 }
@@ -264,8 +264,9 @@ TEST_F(buffer_storage_test, MixedSampleTypes)
     std::string buffer_data = g_mock_worker->m_output_string_stream.str();
     ASSERT_FALSE(buffer_data.empty());
 
-    const std::uint8_t* buffer     = reinterpret_cast<const std::uint8_t*>(buffer_data.data());
-    size_t         buffer_pos = 0;
+    const std::uint8_t* buffer =
+        reinterpret_cast<const std::uint8_t*>(buffer_data.data());
+    size_t buffer_pos = 0;
 
     verify_buffer_contains(sample1, buffer, buffer_pos);
     verify_buffer_contains(sample2, buffer, buffer_pos);
@@ -303,8 +304,9 @@ TEST_F(buffer_storage_test, mixed_sample_types_with_optional)
     std::string buffer_data = g_mock_worker->m_output_string_stream.str();
     ASSERT_FALSE(buffer_data.empty());
 
-    const std::uint8_t* buffer     = reinterpret_cast<const std::uint8_t*>(buffer_data.data());
-    size_t         buffer_pos = 0;
+    const std::uint8_t* buffer =
+        reinterpret_cast<const std::uint8_t*>(buffer_data.data());
+    size_t buffer_pos = 0;
 
     verify_buffer_contains(sample1, buffer, buffer_pos);
     verify_buffer_contains(sample5_with_value, buffer, buffer_pos);
@@ -324,14 +326,14 @@ TEST_F(buffer_storage_test, large_payload_handling)
 
     storage.start();
     std::vector<std::uint8_t> large_payload(5000, 0xFF);
-    test_sample_3        large_sample(large_payload);
+    test_sample_3             large_sample(large_payload);
 
     EXPECT_NO_THROW(storage.store(large_sample));
 
     for(int i = 0; i < 10; ++i)
     {
         std::vector<std::uint8_t> payload(1000 + i * 100, static_cast<std::uint8_t>(i));
-        test_sample_3        sample(payload);
+        test_sample_3             sample(payload);
         EXPECT_NO_THROW(storage.store(sample));
     }
 
@@ -374,8 +376,8 @@ TEST_F(buffer_storage_test, concurrent_mixed_type_store)
                         EXPECT_NO_THROW(storage.store(test_sample_2(t * 2.5 + i, t + i)));
                         break;
                     case 2:
-                        EXPECT_NO_THROW(
-                            storage.store(test_sample_3(std::vector<std::uint8_t>(10, t))));
+                        EXPECT_NO_THROW(storage.store(
+                            test_sample_3(std::vector<std::uint8_t>(10, t))));
                         break;
                 }
             }
@@ -424,10 +426,10 @@ TEST_F(buffer_storage_test, repeated_fragmentation)
 
     storage.start();
 
-    const size_t         fragment_trigger_size = rocprofsys::trace_cache::buffer_size / 5;
+    const size_t fragment_trigger_size = rocprofsys::trace_cache::buffer_size / 5;
     std::vector<std::uint8_t> fragment_payload(fragment_trigger_size, 0xDD);
-    const int            cycle_count = 3;
-    const int            iter_count  = 2;
+    const int                 cycle_count = 3;
+    const int                 iter_count  = 2;
 
     for(int cycle = 0; cycle < cycle_count; ++cycle)
     {
@@ -445,12 +447,13 @@ TEST_F(buffer_storage_test, repeated_fragmentation)
 
     EXPECT_NO_THROW(storage.shutdown());
 
-    std::string    buffer_data = g_mock_worker->m_output_string_stream.str();
-    const std::uint8_t* buffer      = reinterpret_cast<const std::uint8_t*>(buffer_data.data());
-    size_t         buffer_pos  = 0;
-    size_t         fragmented_space_count = 0;
-    size_t         sample1_count          = 0;
-    size_t         sample3_count          = 0;
+    std::string         buffer_data = g_mock_worker->m_output_string_stream.str();
+    const std::uint8_t* buffer =
+        reinterpret_cast<const std::uint8_t*>(buffer_data.data());
+    size_t buffer_pos             = 0;
+    size_t fragmented_space_count = 0;
+    size_t sample1_count          = 0;
+    size_t sample3_count          = 0;
 
     while(buffer_pos < buffer_data.size())
     {

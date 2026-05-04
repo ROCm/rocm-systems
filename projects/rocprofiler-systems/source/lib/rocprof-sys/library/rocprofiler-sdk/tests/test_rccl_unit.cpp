@@ -1,8 +1,8 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include <cstdint>
 #include "rocprof-sys/library/rocprofiler-sdk/rccl_internal.hpp"
+#include <cstdint>
 
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>

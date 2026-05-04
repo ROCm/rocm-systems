@@ -1,7 +1,6 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include <cstdint>
 #include "library/components/backtrace_metrics.hpp"
 #include "core/common.hpp"
 #include "core/components/fwd.hpp"
@@ -14,6 +13,7 @@
 #include "library/runtime.hpp"
 #include "library/thread_info.hpp"
 #include "library/tracing.hpp"
+#include <cstdint>
 
 #include <functional>
 #include <timemory/backends/papi.hpp>
@@ -167,7 +167,8 @@ metadata_init_categories()
 
 template <typename Category>
 void
-apply_for_all_thread_names(std::int64_t _tid, std::function<void(const std::string&)> _apply)
+apply_for_all_thread_names(std::int64_t                            _tid,
+                           std::function<void(const std::string&)> _apply)
 {
     if constexpr(std::is_same_v<Category, category::thread_hardware_counter>)
     {
@@ -213,7 +214,8 @@ metadata_init_tracks(std::int64_t _tid)
 
 template <typename Category>
 void
-metadata_initialize_backtrace_metrics_pmc(size_t dev_id, const char* _units, std::int64_t _tid)
+metadata_initialize_backtrace_metrics_pmc(size_t dev_id, const char* _units,
+                                          std::int64_t _tid)
 {
     constexpr size_t EVENT_CODE       = 0;
     constexpr size_t INSTANCE_ID      = 0;
@@ -247,7 +249,7 @@ cache_backtrace_metrics_events(const std::uint32_t device_id, std::uint64_t time
     const auto* line_info       = "{}";
 
     std::optional<std::int64_t> _system_tid{ std::nullopt };
-    const auto&            _thread_info = thread_info::get(_tid, SequentTID);
+    const auto&                 _thread_info = thread_info::get(_tid, SequentTID);
     if(_thread_info.has_value())
     {
         _system_tid = _thread_info->index_data->system_value;

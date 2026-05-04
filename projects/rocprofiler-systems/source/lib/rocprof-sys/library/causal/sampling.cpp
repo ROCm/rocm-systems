@@ -1,7 +1,6 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include <cstdint>
 #include "library/causal/sampling.hpp"
 #include "binary/analysis.hpp"
 #include "core/common.hpp"
@@ -18,6 +17,7 @@
 #include "library/sampling.hpp"
 #include "library/thread_data.hpp"
 #include "library/thread_info.hpp"
+#include <cstdint>
 
 #include <timemory/macros.hpp>
 #include <timemory/mpl/types.hpp>

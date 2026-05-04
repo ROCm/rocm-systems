@@ -71,7 +71,8 @@ struct perfetto_policy
     using counter_track = perfetto_counter_track<metrics>;
 
     // Static storage for Perfetto tracks and sample buffering (C++17 inline static)
-    static inline std::map<size_t, std::map<std::uint32_t, nic_track_description>> tracks{};
+    static inline std::map<size_t, std::map<std::uint32_t, nic_track_description>>
+        tracks{};
     static inline std::map<size_t, std::unique_ptr<std::vector<nic_perfetto_sample>>>
         bundle{};
 

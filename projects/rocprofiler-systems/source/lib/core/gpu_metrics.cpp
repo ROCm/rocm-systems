@@ -1,8 +1,8 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include <cstdint>
 #include "gpu_metrics.hpp"
+#include <cstdint>
 
 #include <stdexcept>
 
@@ -27,8 +27,8 @@ serialize_uint16(std::vector<std::uint8_t>& data, std::uint16_t val)
 }
 
 void
-serialize_uint16_vector(std::vector<std::uint8_t>& data, const std::vector<std::uint16_t>& vec,
-                        std::uint8_t count)
+serialize_uint16_vector(std::vector<std::uint8_t>&        data,
+                        const std::vector<std::uint16_t>& vec, std::uint8_t count)
 {
     for(std::uint8_t i = 0; i < count; ++i)
     {
@@ -45,8 +45,8 @@ serialize_uint64(std::vector<std::uint8_t>& data, std::uint64_t val)
 }
 
 void
-serialize_uint64_vector(std::vector<std::uint8_t>& data, const std::vector<std::uint64_t>& vec,
-                        std::uint8_t count)
+serialize_uint64_vector(std::vector<std::uint8_t>&        data,
+                        const std::vector<std::uint64_t>& vec, std::uint8_t count)
 {
     for(std::uint8_t i = 0; i < count; ++i)
     {
@@ -70,7 +70,7 @@ deserialize_uint16(const std::vector<std::uint8_t>& data, size_t& offset)
     if(offset + 1 >= data.size())
         throw std::runtime_error("Invalid serialized data: unexpected end");
     std::uint16_t value = static_cast<std::uint16_t>(data[offset]) |
-                     (static_cast<std::uint16_t>(data[offset + 1]) << 8);
+                          (static_cast<std::uint16_t>(data[offset + 1]) << 8);
     offset += 2;
     return value;
 }
@@ -88,7 +88,8 @@ deserialize_uint64(const std::vector<std::uint8_t>& data, size_t& offset)
 }
 
 std::vector<std::uint16_t>
-deserialize_uint16_vector(const std::vector<std::uint8_t>& data, size_t& offset, std::uint8_t count)
+deserialize_uint16_vector(const std::vector<std::uint8_t>& data, size_t& offset,
+                          std::uint8_t count)
 {
     std::vector<std::uint16_t> values;
     values.reserve(count);
@@ -98,7 +99,8 @@ deserialize_uint16_vector(const std::vector<std::uint8_t>& data, size_t& offset,
 }
 
 std::vector<std::uint64_t>
-deserialize_uint64_vector(const std::vector<std::uint8_t>& data, size_t& offset, std::uint8_t count)
+deserialize_uint64_vector(const std::vector<std::uint8_t>& data, size_t& offset,
+                          std::uint8_t count)
 {
     std::vector<std::uint64_t> values;
     values.reserve(count);
@@ -154,12 +156,14 @@ serialize_gpu_metrics(const gpu_metrics_t&              metrics,
         }
     }
 
-    std::uint8_t vcn_count        = static_cast<std::uint8_t>(vcn_data_flat.size());
-    std::uint8_t jpeg_count       = static_cast<std::uint8_t>(jpeg_data_flat.size());
-    std::uint8_t vcn_xcp_count    = static_cast<std::uint8_t>(vcn_xcp_sizes.size());
-    std::uint8_t jpeg_xcp_count   = static_cast<std::uint8_t>(jpeg_xcp_sizes.size());
-    std::uint8_t xgmi_read_count  = static_cast<std::uint8_t>(metrics.xgmi_read_data_acc.size());
-    std::uint8_t xgmi_write_count = static_cast<std::uint8_t>(metrics.xgmi_write_data_acc.size());
+    std::uint8_t vcn_count      = static_cast<std::uint8_t>(vcn_data_flat.size());
+    std::uint8_t jpeg_count     = static_cast<std::uint8_t>(jpeg_data_flat.size());
+    std::uint8_t vcn_xcp_count  = static_cast<std::uint8_t>(vcn_xcp_sizes.size());
+    std::uint8_t jpeg_xcp_count = static_cast<std::uint8_t>(jpeg_xcp_sizes.size());
+    std::uint8_t xgmi_read_count =
+        static_cast<std::uint8_t>(metrics.xgmi_read_data_acc.size());
+    std::uint8_t xgmi_write_count =
+        static_cast<std::uint8_t>(metrics.xgmi_write_data_acc.size());
 
     std::vector<std::uint8_t> result;
 
@@ -258,8 +262,8 @@ deserialize_gpu_metrics(const std::vector<std::uint8_t>& serialized_data,
             for(std::uint8_t xcp_size : vcn_xcp_sizes)
             {
                 std::vector<std::uint16_t> xcp_data(flat_data.begin() + flat_offset,
-                                               flat_data.begin() + flat_offset +
-                                                   xcp_size);
+                                                    flat_data.begin() + flat_offset +
+                                                        xcp_size);
                 result.vcn_busy.push_back(xcp_data);
                 flat_offset += xcp_size;
             }
@@ -281,8 +285,8 @@ deserialize_gpu_metrics(const std::vector<std::uint8_t>& serialized_data,
             for(std::uint8_t xcp_size : jpeg_xcp_sizes)
             {
                 std::vector<std::uint16_t> xcp_data(flat_data.begin() + flat_offset,
-                                               flat_data.begin() + flat_offset +
-                                                   xcp_size);
+                                                    flat_data.begin() + flat_offset +
+                                                        xcp_size);
                 result.jpeg_busy.push_back(xcp_data);
                 flat_offset += xcp_size;
             }

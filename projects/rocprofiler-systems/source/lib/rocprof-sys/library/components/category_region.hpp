@@ -3,7 +3,6 @@
 
 #pragma once
 
-#include <cstdint>
 #include "common/defines.h"
 #include "core/config.hpp"
 #include "core/demangler.hpp"
@@ -16,6 +15,7 @@
 #include "library/thread_info.hpp"
 #include "library/tracing.hpp"
 #include "library/tracing/annotation.hpp"
+#include <cstdint>
 
 #include <map>
 #include <thread>
@@ -115,7 +115,7 @@ inline void
 flush_pending_cached_entries()
 {
     const auto end_ts = static_cast<timestamp_t>(rocprofsys::comp::wall_clock::record());
-    std::uint64_t   thread_id = 0;
+    std::uint64_t thread_id = 0;
 
     const auto& extended_info = rocprofsys::thread_info::get(std::this_thread::get_id());
     if(extended_info.has_value() && extended_info->index_data.has_value())

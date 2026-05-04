@@ -127,7 +127,8 @@ std::enable_if_t<(Idx <= blocking_gotcha::indexes::maybe_post_block_max_idx), Re
 blocking_gotcha::operator()(gotcha_index<Idx>, Ret (*_func)(Args...),
                             Args... _args) const noexcept
 {
-    std::int64_t _delay_value = causal::delay::get_global().load(std::memory_order_relaxed);
+    std::int64_t _delay_value =
+        causal::delay::get_global().load(std::memory_order_relaxed);
 
     causal::sampling::block_backtrace_samples();
     auto _ret = (*_func)(_args...);

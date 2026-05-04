@@ -490,13 +490,13 @@ parse_args(int argc, char** argv, std::vector<char*>& _env,
         });
 
     std::int64_t _niterations       = 1;
-    auto    _virtual_speedups  = std::vector<std::string>{};
-    auto    _function_scopes   = std::vector<std::string>{};
-    auto    _binary_scopes     = std::vector<std::string>{};
-    auto    _source_scopes     = std::vector<std::string>{};
-    auto    _function_excludes = std::vector<std::string>{};
-    auto    _binary_excludes   = std::vector<std::string>{};
-    auto    _source_excludes   = std::vector<std::string>{};
+    auto         _virtual_speedups  = std::vector<std::string>{};
+    auto         _function_scopes   = std::vector<std::string>{};
+    auto         _binary_scopes     = std::vector<std::string>{};
+    auto         _source_scopes     = std::vector<std::string>{};
+    auto         _function_excludes = std::vector<std::string>{};
+    auto         _binary_excludes   = std::vector<std::string>{};
+    auto         _source_excludes   = std::vector<std::string>{};
 
     parser
         .add_argument({ "-n", "--iterations" },

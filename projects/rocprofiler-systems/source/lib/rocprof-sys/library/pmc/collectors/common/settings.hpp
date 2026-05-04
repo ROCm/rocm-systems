@@ -3,12 +3,12 @@
 
 #pragma once
 
-#include <cstdint>
 #include "core/config.hpp"
 #include "library/pmc/collectors/cpu/types.hpp"
 #include "library/pmc/collectors/gpu/types.hpp"
 #include "library/pmc/collectors/nic/types.hpp"
 #include "logger/debug.hpp"
+#include <cstdint>
 
 #include <algorithm>
 #include <regex>
@@ -180,7 +180,8 @@ private:
             return result;
         }
 
-        auto make_bits = [](std::initializer_list<std::uint8_t> positions) -> std::uint32_t {
+        auto make_bits =
+            [](std::initializer_list<std::uint8_t> positions) -> std::uint32_t {
             std::uint32_t v = 0;
             for(auto b : positions)
                 v |= (1u << b);

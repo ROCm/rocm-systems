@@ -46,8 +46,8 @@ struct rdma_info
  */
 struct stat_entry
 {
-    std::string name;
-    std::uint64_t    value = 0;
+    std::string   name;
+    std::uint64_t value = 0;
 };
 
 /**

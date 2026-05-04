@@ -3,9 +3,9 @@
 
 #pragma once
 
-#include <cstdint>
 #include "core/demangler.hpp"
 #include "core/timemory.hpp"
+#include <cstdint>
 
 #include <timemory/components/base.hpp>
 #include <timemory/components/gotcha/backends.hpp>
@@ -107,9 +107,9 @@ struct mpip_handle : base<mpip_handle<Toolset, Tag>, void>
 private:
     struct persistent_data
     {
-        std::atomic<short>   m_configured;
+        std::atomic<short>        m_configured;
         std::atomic<std::int64_t> m_count;
-        toolset_ptr_t        m_tool;
+        toolset_ptr_t             m_tool;
     };
 
     static persistent_data& get_persistent_data()

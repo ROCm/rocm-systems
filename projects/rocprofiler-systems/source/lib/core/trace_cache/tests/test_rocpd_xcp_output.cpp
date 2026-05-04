@@ -65,8 +65,8 @@ struct mock_xcp_metrics
 struct mock_metrics
 {
     std::array<mock_xcp_metrics, MAX_NUM_XCP> xcp_stats;
-    std::array<std::uint16_t, MAX_NUM_VCN>         vcn_activity  = {};
-    std::array<std::uint16_t, MAX_NUM_JPEG>        jpeg_activity = {};
+    std::array<std::uint16_t, MAX_NUM_VCN>    vcn_activity  = {};
+    std::array<std::uint16_t, MAX_NUM_JPEG>   jpeg_activity = {};
 };
 
 // ──────────────────────────────────────────────────────────────────
@@ -122,8 +122,8 @@ generate_device_level_metrics(const std::string& base_name, bool is_enabled,
 
 // Mirrors addendum_blk lambda in perfetto_policy.hpp (lines 173-181)
 std::string
-format_perfetto_xcp_track(std::uint32_t device_id, const char* metric_name, size_t xcp_idx,
-                          size_t engine_idx)
+format_perfetto_xcp_track(std::uint32_t device_id, const char* metric_name,
+                          size_t xcp_idx, size_t engine_idx)
 {
     return fmt::format("GPU [{}] {} XCP_{}: [{:02}] (S)", device_id, metric_name, xcp_idx,
                        engine_idx);
@@ -139,7 +139,8 @@ format_perfetto_device_track(std::uint32_t device_id, const char* metric_name,
 // Mirrors unique_key computation in emit_xcp_array_metrics
 // (perfetto_processor.cpp:173-175)
 std::uint64_t
-compute_track_key(std::uint32_t device_id, std::optional<size_t> xcp_idx, size_t engine_idx)
+compute_track_key(std::uint32_t device_id, std::optional<size_t> xcp_idx,
+                  size_t engine_idx)
 {
     return (static_cast<std::uint64_t>(device_id) << 16) |
            (static_cast<std::uint64_t>(xcp_idx.value_or(0)) << 8) |
@@ -360,7 +361,7 @@ TEST_F(xcp_output_test, PerfettoTrackKeyUniqueness)
 TEST_F(xcp_output_test, SentinelValuesSkipped)
 {
     std::vector<std::pair<std::string, double>> emitted;
-    std::uint32_t                                    device_id = 0;
+    std::uint32_t                               device_id = 0;
 
     // All sentinel by default from make_sentinel_metrics()
     for(size_t xcp = 0; xcp < m.xcp_stats.size(); ++xcp)

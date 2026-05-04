@@ -3,8 +3,8 @@
 
 #pragma once
 
-#include <cstdint>
 #include "common/defines.h"
+#include <cstdint>
 
 #include "common/join.hpp"
 #include <algorithm>

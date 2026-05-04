@@ -3,8 +3,8 @@
 
 #pragma once
 
-#include <cstdint>
 #include "core/sdma_feature.hpp"
+#include <cstdint>
 
 #include <gmock/gmock.h>
 
@@ -40,7 +40,8 @@ public:
 #if defined(ROCPROFSYS_BUILD_AINIC) && ROCPROFSYS_BUILD_AINIC == 1
     MOCK_METHOD(amdsmi_status_t, get_processor_handles_by_type,
                 (amdsmi_socket_handle socket_handle, processor_type_t processor_type,
-                 amdsmi_processor_handle* processor_handles, std::uint32_t* processor_count));
+                 amdsmi_processor_handle* processor_handles,
+                 std::uint32_t*           processor_count));
 #endif
     MOCK_METHOD(amdsmi_status_t, get_processor_type,
                 (amdsmi_processor_handle processor_handle,

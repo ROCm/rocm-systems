@@ -1,12 +1,12 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include <cstdint>
 #include "library/coverage.hpp"
 #include "api.hpp"
 #include "core/config.hpp"
 #include "library/coverage/impl.hpp"
 #include "library/thread_data.hpp"
+#include <cstdint>
 
 #include <timemory/backends/threading.hpp>
 #include <timemory/tpls/cereal/cereal.hpp>

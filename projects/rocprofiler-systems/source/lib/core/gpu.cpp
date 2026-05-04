@@ -1,9 +1,9 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include <cstdint>
 #include "agent.hpp"
 #include "agent_info.hpp"
+#include <cstdint>
 #define ROCPROFILER_SDK_CEREAL_NAMESPACE_BEGIN                                           \
     namespace tim                                                                        \
     {                                                                                    \
@@ -208,7 +208,7 @@ add_device_metadata()
  * Required amdsmi methods to get processors and handles
  */
 
-std::uint32_t                             processors::total_processor_count  = 0;
+std::uint32_t                        processors::total_processor_count  = 0;
 std::vector<amdsmi_processor_handle> processors::processors_list        = {};
 std::vector<bool>                    processors::vcn_device_level_only  = {};
 std::vector<bool>                    processors::jpeg_device_level_only = {};
@@ -218,7 +218,7 @@ std::vector<bool>                    processors::xgmi_supported         = {};
 std::vector<bool>                    processors::pcie_supported         = {};
 
 std::vector<amdsmi_processor_handle> processors::ainic_list        = {};
-std::uint32_t                             processors::total_ainic_count = 0;
+std::uint32_t                        processors::total_ainic_count = 0;
 
 void
 get_processor_handles()

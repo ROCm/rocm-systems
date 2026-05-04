@@ -1,9 +1,9 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier:  MIT
 
-#include <cstdint>
 #include "library/pmc/collectors/cpu/device.hpp"
 #include "library/pmc/device_providers/procfs/drivers/tests/mock_driver.hpp"
+#include <cstdint>
 
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>

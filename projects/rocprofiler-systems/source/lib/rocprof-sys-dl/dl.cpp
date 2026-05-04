@@ -403,38 +403,41 @@ public:
     int (*rocprofsys_user_configure_f)(int, user_cb_t, user_cb_t*) = nullptr;
 
     // KokkosP functions
-    void (*kokkosp_print_help_f)(char*)                                       = nullptr;
-    void (*kokkosp_parse_args_f)(int, char**)                                 = nullptr;
-    void (*kokkosp_declare_metadata_f)(const char*, const char*)              = nullptr;
+    void (*kokkosp_print_help_f)(char*)                                        = nullptr;
+    void (*kokkosp_parse_args_f)(int, char**)                                  = nullptr;
+    void (*kokkosp_declare_metadata_f)(const char*, const char*)               = nullptr;
     void (*kokkosp_request_tool_settings_f)(const std::uint32_t,
-                                            Kokkos_Tools_ToolSettings*)       = nullptr;
+                                            Kokkos_Tools_ToolSettings*)        = nullptr;
     void (*kokkosp_init_library_f)(const int, const std::uint64_t, const std::uint32_t,
-                                   void*)                                     = nullptr;
-    void (*kokkosp_finalize_library_f)()                                      = nullptr;
-    void (*kokkosp_begin_parallel_for_f)(const char*, std::uint32_t, std::uint64_t*)    = nullptr;
-    void (*kokkosp_end_parallel_for_f)(std::uint64_t)                              = nullptr;
-    void (*kokkosp_begin_parallel_reduce_f)(const char*, std::uint32_t, std::uint64_t*) = nullptr;
-    void (*kokkosp_end_parallel_reduce_f)(std::uint64_t)                           = nullptr;
-    void (*kokkosp_begin_parallel_scan_f)(const char*, std::uint32_t, std::uint64_t*)   = nullptr;
-    void (*kokkosp_end_parallel_scan_f)(std::uint64_t)                             = nullptr;
-    void (*kokkosp_begin_fence_f)(const char*, std::uint32_t, std::uint64_t*)           = nullptr;
-    void (*kokkosp_end_fence_f)(std::uint64_t)                                     = nullptr;
-    void (*kokkosp_push_profile_region_f)(const char*)                        = nullptr;
-    void (*kokkosp_pop_profile_region_f)()                                    = nullptr;
-    void (*kokkosp_create_profile_section_f)(const char*, std::uint32_t*)          = nullptr;
-    void (*kokkosp_destroy_profile_section_f)(std::uint32_t)                       = nullptr;
-    void (*kokkosp_start_profile_section_f)(std::uint32_t)                         = nullptr;
-    void (*kokkosp_stop_profile_section_f)(std::uint32_t)                          = nullptr;
+                                   void*)                                      = nullptr;
+    void (*kokkosp_finalize_library_f)()                                       = nullptr;
+    void (*kokkosp_begin_parallel_for_f)(const char*, std::uint32_t,
+                                         std::uint64_t*)                       = nullptr;
+    void (*kokkosp_end_parallel_for_f)(std::uint64_t)                          = nullptr;
+    void (*kokkosp_begin_parallel_reduce_f)(const char*, std::uint32_t,
+                                            std::uint64_t*)                    = nullptr;
+    void (*kokkosp_end_parallel_reduce_f)(std::uint64_t)                       = nullptr;
+    void (*kokkosp_begin_parallel_scan_f)(const char*, std::uint32_t,
+                                          std::uint64_t*)                      = nullptr;
+    void (*kokkosp_end_parallel_scan_f)(std::uint64_t)                         = nullptr;
+    void (*kokkosp_begin_fence_f)(const char*, std::uint32_t, std::uint64_t*)  = nullptr;
+    void (*kokkosp_end_fence_f)(std::uint64_t)                                 = nullptr;
+    void (*kokkosp_push_profile_region_f)(const char*)                         = nullptr;
+    void (*kokkosp_pop_profile_region_f)()                                     = nullptr;
+    void (*kokkosp_create_profile_section_f)(const char*, std::uint32_t*)      = nullptr;
+    void (*kokkosp_destroy_profile_section_f)(std::uint32_t)                   = nullptr;
+    void (*kokkosp_start_profile_section_f)(std::uint32_t)                     = nullptr;
+    void (*kokkosp_stop_profile_section_f)(std::uint32_t)                      = nullptr;
     void (*kokkosp_allocate_data_f)(const SpaceHandle, const char*, const void* const,
-                                    const std::uint64_t)                           = nullptr;
+                                    const std::uint64_t)                       = nullptr;
     void (*kokkosp_deallocate_data_f)(const SpaceHandle, const char*, const void* const,
-                                      const std::uint64_t)                         = nullptr;
+                                      const std::uint64_t)                     = nullptr;
     void (*kokkosp_begin_deep_copy_f)(SpaceHandle, const char*, const void*, SpaceHandle,
-                                      const char*, const void*, std::uint64_t)     = nullptr;
-    void (*kokkosp_end_deep_copy_f)()                                         = nullptr;
-    void (*kokkosp_profile_event_f)(const char*)                              = nullptr;
-    void (*kokkosp_dual_view_sync_f)(const char*, const void* const, bool)    = nullptr;
-    void (*kokkosp_dual_view_modify_f)(const char*, const void* const, bool)  = nullptr;
+                                      const char*, const void*, std::uint64_t) = nullptr;
+    void (*kokkosp_end_deep_copy_f)()                                          = nullptr;
+    void (*kokkosp_profile_event_f)(const char*)                               = nullptr;
+    void (*kokkosp_dual_view_sync_f)(const char*, const void* const, bool)     = nullptr;
+    void (*kokkosp_dual_view_modify_f)(const char*, const void* const, bool)   = nullptr;
 
     rocprofiler_tool_configure_result_t* (*rocprofiler_configure_f)(
         std::uint32_t, const char*, std::uint32_t, rocprofiler_client_id_t*) = nullptr;
@@ -917,7 +920,7 @@ extern "C"
                                     value);
     }
 
-    void kokkosp_request_tool_settings(const std::uint32_t             version,
+    void kokkosp_request_tool_settings(const std::uint32_t        version,
                                        Kokkos_Tools_ToolSettings* settings)
     {
         return ROCPROFSYS_DL_INVOKE(get_indirect().kokkosp_request_tool_settings_f,
@@ -936,7 +939,8 @@ extern "C"
         return ROCPROFSYS_DL_INVOKE(get_indirect().kokkosp_finalize_library_f);
     }
 
-    void kokkosp_begin_parallel_for(const char* name, std::uint32_t devid, std::uint64_t* kernid)
+    void kokkosp_begin_parallel_for(const char* name, std::uint32_t devid,
+                                    std::uint64_t* kernid)
     {
         return ROCPROFSYS_DL_INVOKE(get_indirect().kokkosp_begin_parallel_for_f, name,
                                     devid, kernid);
@@ -947,7 +951,8 @@ extern "C"
         return ROCPROFSYS_DL_INVOKE(get_indirect().kokkosp_end_parallel_for_f, kernid);
     }
 
-    void kokkosp_begin_parallel_reduce(const char* name, std::uint32_t devid, std::uint64_t* kernid)
+    void kokkosp_begin_parallel_reduce(const char* name, std::uint32_t devid,
+                                       std::uint64_t* kernid)
     {
         return ROCPROFSYS_DL_INVOKE(get_indirect().kokkosp_begin_parallel_reduce_f, name,
                                     devid, kernid);
@@ -958,7 +963,8 @@ extern "C"
         return ROCPROFSYS_DL_INVOKE(get_indirect().kokkosp_end_parallel_reduce_f, kernid);
     }
 
-    void kokkosp_begin_parallel_scan(const char* name, std::uint32_t devid, std::uint64_t* kernid)
+    void kokkosp_begin_parallel_scan(const char* name, std::uint32_t devid,
+                                     std::uint64_t* kernid)
     {
         return ROCPROFSYS_DL_INVOKE(get_indirect().kokkosp_begin_parallel_scan_f, name,
                                     devid, kernid);
@@ -1029,7 +1035,8 @@ extern "C"
 
     void kokkosp_begin_deep_copy(SpaceHandle dst_handle, const char* dst_name,
                                  const void* dst_ptr, SpaceHandle src_handle,
-                                 const char* src_name, const void* src_ptr, std::uint64_t size)
+                                 const char* src_name, const void* src_ptr,
+                                 std::uint64_t size)
     {
         return ROCPROFSYS_DL_INVOKE(get_indirect().kokkosp_begin_deep_copy_f, dst_handle,
                                     dst_name, dst_ptr, src_handle, src_name, src_ptr,

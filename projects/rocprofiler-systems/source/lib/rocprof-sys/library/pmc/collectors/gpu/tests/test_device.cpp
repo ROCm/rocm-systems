@@ -1,9 +1,9 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include <cstdint>
 #include "library/pmc/collectors/gpu/device.hpp"
 #include "library/pmc/collectors/gpu/tests/mock_gpu_driver.hpp"
+#include <cstdint>
 
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
@@ -733,7 +733,8 @@ TEST_F(DeviceTest, jpeg_activity_collection_all_xcps)
     {
         for(size_t jpeg = 0; jpeg < MAX_NUM_JPEG_V1; ++jpeg)
         {
-            met.xcp_stats[xcp].jpeg_busy[jpeg] = static_cast<std::uint16_t>(30 + xcp + jpeg);
+            met.xcp_stats[xcp].jpeg_busy[jpeg] =
+                static_cast<std::uint16_t>(30 + xcp + jpeg);
         }
     }
 
@@ -1579,7 +1580,8 @@ TEST_F(DeviceTest, large_array_indices_jpeg)
     {
         for(size_t jpeg = 0; jpeg < MAX_NUM_JPEG_V1; ++jpeg)
         {
-            met.xcp_stats[xcp].jpeg_busy[jpeg] = static_cast<std::uint16_t>(xcp * 100 + jpeg);
+            met.xcp_stats[xcp].jpeg_busy[jpeg] =
+                static_cast<std::uint16_t>(xcp * 100 + jpeg);
         }
     }
 
@@ -1783,7 +1785,7 @@ TEST_F(DeviceTest, sdma_delta_computation)
 TEST_F(DeviceTest, vcn_busy_collection_preserves_sentinels)
 {
     constexpr std::uint16_t SENTINEL_16 = 0xFFFF;
-    metrics            met         = CreateSentinelMetrics();
+    metrics                 met         = CreateSentinelMetrics();
 
     met.xcp_stats[0].vcn_busy[0] = 80;
 
@@ -1814,7 +1816,7 @@ TEST_F(DeviceTest, vcn_busy_collection_preserves_sentinels)
 TEST_F(DeviceTest, jpeg_busy_collection_preserves_sentinels)
 {
     constexpr std::uint16_t SENTINEL_16 = 0xFFFF;
-    metrics            met         = CreateSentinelMetrics();
+    metrics                 met         = CreateSentinelMetrics();
 
     met.xcp_stats[0].jpeg_busy[0] = 60;
 
@@ -1845,7 +1847,7 @@ TEST_F(DeviceTest, jpeg_busy_collection_preserves_sentinels)
 TEST_F(DeviceTest, vcn_activity_device_level_preserves_sentinels)
 {
     constexpr std::uint16_t SENTINEL_16 = 0xFFFF;
-    metrics            met         = CreateSentinelMetrics();
+    metrics                 met         = CreateSentinelMetrics();
 
     met.vcn_activity[0] = 42;
 

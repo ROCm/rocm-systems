@@ -14,8 +14,9 @@ namespace gpu
 struct gpu_metrics_t
 {
     // VCN metrics
-    std::vector<std::uint16_t>              vcn_activity;  // Device-level VCN (when supported)
-    std::vector<std::vector<std::uint16_t>> vcn_busy;  // XCP-level VCN (per-XCP organization)
+    std::vector<std::uint16_t> vcn_activity;  // Device-level VCN (when supported)
+    std::vector<std::vector<std::uint16_t>>
+        vcn_busy;  // XCP-level VCN (per-XCP organization)
 
     // JPEG metrics
     std::vector<std::uint16_t> jpeg_activity;  // Device-level JPEG (when supported)
@@ -49,14 +50,15 @@ struct gpu_metrics_capabilities_t
 {
     struct flags_t
     {
-        std::uint8_t vcn_is_device_level_only  : 1;  ///< VCN is device-level (vs per-XCP)
-        std::uint8_t jpeg_is_device_level_only : 1;  ///< JPEG is device-level (vs per-XCP)
-        std::uint8_t reserved                  : 6;  ///< Reserved for future use
+        std::uint8_t vcn_is_device_level_only : 1;  ///< VCN is device-level (vs per-XCP)
+        std::uint8_t
+            jpeg_is_device_level_only : 1;  ///< JPEG is device-level (vs per-XCP)
+        std::uint8_t reserved         : 6;  ///< Reserved for future use
     };
 
     union
     {
-        flags_t flags;
+        flags_t      flags;
         std::uint8_t value;  ///< Raw byte value for easy serialization
     };
 

@@ -1,9 +1,9 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include <cstdint>
 #include "library/components/backtrace_timestamp.hpp"
 #include "library/thread_info.hpp"
+#include <cstdint>
 
 #include <timemory/components/timing/backends.hpp>
 

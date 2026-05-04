@@ -53,9 +53,9 @@
 
 #define DYNINST_BREAKPOINT_SIGNUM (SIGRTMIN + 4)
 
-#include <stdint.h>
 #include "dyninstRTExport.h"
 #include "h/compiler_diagnostics.h"
+#include <stdint.h>
 #include <stdio.h>
 
 /* If we must make up a boolean type, we should make it unique */

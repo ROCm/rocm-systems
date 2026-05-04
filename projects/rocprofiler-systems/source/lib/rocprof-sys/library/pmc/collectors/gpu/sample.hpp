@@ -32,8 +32,8 @@ struct sample : trace_cache::cacheable_t
     {}
 
     enabled_metrics enabled_metric{};
-    std::uint32_t        device_id = 0;
-    std::uint64_t        timestamp = 0;
+    std::uint32_t   device_id = 0;
+    std::uint64_t   timestamp = 0;
     metrics         metric_values{};
 };
 

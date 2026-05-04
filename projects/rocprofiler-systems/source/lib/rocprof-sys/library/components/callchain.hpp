@@ -33,7 +33,7 @@ struct callchain : comp::empty_base
 
     struct record
     {
-        std::uint64_t                                         timestamp = 0;
+        std::uint64_t                                    timestamp = 0;
         container::static_vector<uintptr_t, stack_depth> data      = {};
 
         bool operator<(const record& rhs) const;

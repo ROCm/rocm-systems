@@ -37,10 +37,10 @@ struct sample : trace_cache::cacheable_t
     , loads(std::move(_loads))
     {}
 
-    enabled_metrics      enabled_metric{};
+    enabled_metrics           enabled_metric{};
     std::uint32_t             device_id = 0;
     std::uint64_t             timestamp = 0;
-    process_metrics      process_data{};
+    process_metrics           process_data{};
     std::vector<std::uint8_t> freqs;  // serialized cpu_id+freq pairs
     std::vector<std::uint8_t> loads;  // serialized cpu_id+load pairs
 };
@@ -121,8 +121,8 @@ inline size_t
 get_size(const pmc::collectors::cpu::sample& item)
 {
     return utility::get_size(
-        static_cast<std::uint32_t>(item.enabled_metric.value), item.device_id, item.timestamp,
-        item.process_data.page_rss, item.process_data.virt_mem,
+        static_cast<std::uint32_t>(item.enabled_metric.value), item.device_id,
+        item.timestamp, item.process_data.page_rss, item.process_data.virt_mem,
         item.process_data.peak_rss, item.process_data.context_switches,
         item.process_data.page_faults, item.process_data.user_mode_time,
         item.process_data.kernel_mode_time, item.freqs, item.loads);

@@ -3,7 +3,6 @@
 
 #pragma once
 
-#include <cstdint>
 #include "binary/analysis.hpp"
 #include "common/defines.h"
 #include "core/binary/fwd.hpp"
@@ -12,6 +11,7 @@
 #include "core/utility.hpp"
 #include "library/causal/fwd.hpp"
 #include "library/thread_data.hpp"
+#include <cstdint>
 
 #include <timemory/hash/types.hpp>
 #include <timemory/tpls/cereal/cereal/cereal.hpp>

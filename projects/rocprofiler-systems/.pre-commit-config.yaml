@@ -62,5 +62,5 @@ repos:
         name: fixedwidth-type-consistency
         entry: ./projects/rocprofiler-systems/scripts/check-fixedwidth-types.sh
         language: script
-        files: \.(c|h|cpp|hpp)$
+        files: \.(cpp|hpp)$
         exclude: ^\.|^external/

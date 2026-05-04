@@ -3,7 +3,6 @@
 
 #pragma once
 
-#include <cstdint>
 #include "common/defines.h"
 #include "core/common.hpp"
 #include "core/concepts.hpp"
@@ -18,6 +17,7 @@
 #include "library/sampling.hpp"
 #include "library/thread_data.hpp"
 #include "library/tracing/annotation.hpp"
+#include <cstdint>
 
 #include <timemory/components/io/components.hpp>
 #include <timemory/components/network/types.hpp>
@@ -552,8 +552,8 @@ pop_perfetto_ts(CategoryT, const char* name, std::uint64_t _ts, Args&&... args)
 
 template <typename CategoryT, typename... Args>
 inline void
-push_perfetto_track(CategoryT, const char* name, ::perfetto::Track _track, std::uint64_t _ts,
-                    Args&&... args)
+push_perfetto_track(CategoryT, const char* name, ::perfetto::Track _track,
+                    std::uint64_t _ts, Args&&... args)
 {
     // skip if category is disabled
     if(category_push_disabled<CategoryT>()) return;
@@ -565,8 +565,8 @@ push_perfetto_track(CategoryT, const char* name, ::perfetto::Track _track, std::
 
 template <typename CategoryT, typename... Args>
 inline void
-pop_perfetto_track(CategoryT, const char* name, ::perfetto::Track _track, std::uint64_t _ts,
-                   Args&&... args)
+pop_perfetto_track(CategoryT, const char* name, ::perfetto::Track _track,
+                   std::uint64_t _ts, Args&&... args)
 {
     // skip if category is disabled and not pushed on this thread
     if(tracing_pop_disabled<CategoryT>()) return;
@@ -644,8 +644,8 @@ mark_perfetto_ts(CategoryT, const char* name, std::uint64_t _ts, Args&&... args)
 
 template <typename CategoryT, typename... Args>
 inline void
-mark_perfetto_track(CategoryT, const char* name, ::perfetto::Track _track, std::uint64_t _ts,
-                    Args&&... args)
+mark_perfetto_track(CategoryT, const char* name, ::perfetto::Track _track,
+                    std::uint64_t _ts, Args&&... args)
 {
     // skip if category is disabled
     if(category_mark_disabled<CategoryT>()) return;
@@ -679,7 +679,8 @@ get_clock_skew(FuncT&& _timestamp_func, std::int64_t _n = 1)
         _cpu_ts += _cpu_now();
         _gpu_ts += _gpu_now();
         _cpu_ts += _cpu_now();
-        return static_cast<std::int64_t>(_cpu_ts / 2) - static_cast<std::int64_t>(_gpu_ts);
+        return static_cast<std::int64_t>(_cpu_ts / 2) -
+               static_cast<std::int64_t>(_gpu_ts);
     };
 
     std::int64_t _diff = 0;

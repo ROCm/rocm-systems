@@ -3,8 +3,8 @@
 
 #pragma once
 
-#include <cstdint>
 #include "core/trace_cache/cacheable.hpp"
+#include <cstdint>
 
 #include <cmath>
 #include <cstddef>
@@ -50,7 +50,7 @@ struct test_sample_2 : public rocprofsys::trace_cache::cacheable_t
     , sample_id(id)
     {}
 
-    double   data      = 0.0;
+    double        data      = 0.0;
     std::uint32_t sample_id = 0;
 
     bool operator==(const test_sample_2& other) const

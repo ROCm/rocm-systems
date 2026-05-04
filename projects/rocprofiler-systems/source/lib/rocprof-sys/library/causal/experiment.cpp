@@ -1,7 +1,6 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include <cstdint>
 #include "library/causal/experiment.hpp"
 #include "binary/analysis.hpp"
 #include "binary/dwarf_entry.hpp"
@@ -18,6 +17,7 @@
 #include "library/thread_data.hpp"
 #include "library/thread_info.hpp"
 #include "library/tracing.hpp"
+#include <cstdint>
 
 #include <timemory/components/timing/backends.hpp>
 #include <timemory/hash/types.hpp>
@@ -47,13 +47,13 @@ namespace
 using backtrace_causal = rocprofsys::causal::component::backtrace;
 namespace cereal       = ::tim::cereal;
 
-auto    current_experiment_value  = experiment{};
-auto    current_selected_count    = std::atomic<std::uint64_t>{ 0 };
-auto    current_experiment        = std::atomic<experiment*>{ nullptr };
-auto    experiment_history        = std::vector<experiment>{};
+auto         current_experiment_value  = experiment{};
+auto         current_selected_count    = std::atomic<std::uint64_t>{ 0 };
+auto         current_experiment        = std::atomic<experiment*>{ nullptr };
+auto         experiment_history        = std::vector<experiment>{};
 std::int64_t global_scaling            = 1;
 std::int64_t global_scaling_increments = 0;
-bool    use_exp_speedup_scaling =
+bool         use_exp_speedup_scaling =
     get_env<bool>("ROCPROFSYS_CAUSAL_SCALE_EXPERIMENT_TIME_BY_SPEEDUP", false);
 }  // namespace
 
@@ -286,9 +286,9 @@ experiment::stop()
     _prog_vals.reserve(fini_progress.size());
     for(auto fitr : fini_progress)
     {
-        auto    _pt = fitr.second - init_progress[fitr.first];
-        std::int64_t _num =
-            std::max<std::int64_t>({ _pt.get_laps(), _pt.get_arrival(), _pt.get_departure() });
+        auto         _pt  = fitr.second - init_progress[fitr.first];
+        std::int64_t _num = std::max<std::int64_t>(
+            { _pt.get_laps(), _pt.get_arrival(), _pt.get_departure() });
         if(_num > 0) _prog_vals.emplace_back(_num);
     }
     std::sort(_prog_vals.begin(), _prog_vals.end());
@@ -628,7 +628,8 @@ experiment::save_experiments(std::string _fname_base, const filename_config_t& _
                 if(pitr.second.is_latency_point())
                 {
                     if(get_causal_end_to_end()) continue;
-                    auto _delta = std::max<std::int64_t>(pitr.second.get_latency_delta(), 1);
+                    auto _delta =
+                        std::max<std::int64_t>(pitr.second.get_latency_delta(), 1);
                     ofs << "latency-point\tname="
                         << rocprofsys::utility::demangle(
                                tim::get_hash_identifier(pitr.first))

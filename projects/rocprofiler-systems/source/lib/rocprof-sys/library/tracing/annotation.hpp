@@ -3,7 +3,6 @@
 
 #pragma once
 
-#include <cstdint>
 #include "common/defines.h"
 #include "core/common.hpp"
 #include "core/concepts.hpp"
@@ -11,6 +10,7 @@
 #include "core/state.hpp"
 #include "core/utility.hpp"
 #include "rocprofiler-systems/categories.h"  // in rocprof-sys-user
+#include <cstdint>
 
 #include <timemory/mpl/concepts.hpp>
 #include <timemory/operations/types/get.hpp>

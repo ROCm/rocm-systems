@@ -1,7 +1,6 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include <cstdint>
 #include "library/components/ucx_gotcha.hpp"
 #include "core/common.hpp"
 #include "core/config.hpp"
@@ -9,6 +8,7 @@
 #include "core/timemory.hpp"
 #include "library/components/category_region.hpp"
 #include "library/runtime.hpp"
+#include <cstdint>
 
 #include <timemory/backends/threading.hpp>
 #include <timemory/components/macros.hpp>
@@ -56,22 +56,22 @@ ucx_gotcha::configure()
             "ucp_atomic_add32");
         ucx_gotcha_t::configure<5, void*, void*, std::uint64_t, std::uint64_t, void*>(
             "ucp_atomic_add64");
-        ucx_gotcha_t::configure<6, void*, void*, std::uint32_t, std::uint32_t, std::uint64_t, void*>(
-            "ucp_atomic_cswap32");
-        ucx_gotcha_t::configure<7, void*, void*, std::uint64_t, std::uint64_t, std::uint64_t, void*>(
-            "ucp_atomic_cswap64");
-        ucx_gotcha_t::configure<8, void*, void*, std::uint32_t, std::uint64_t, void*, void*>(
-            "ucp_atomic_fadd32");
-        ucx_gotcha_t::configure<9, void*, void*, std::uint64_t, std::uint64_t, void*, void*>(
-            "ucp_atomic_fadd64");
-        ucx_gotcha_t::configure<10, void*, void*, std::uint32_t, std::uint64_t, void*, void*>(
-            "ucp_atomic_swap32");
-        ucx_gotcha_t::configure<11, void*, void*, std::uint64_t, std::uint64_t, void*, void*>(
-            "ucp_atomic_swap64");
+        ucx_gotcha_t::configure<6, void*, void*, std::uint32_t, std::uint32_t,
+                                std::uint64_t, void*>("ucp_atomic_cswap32");
+        ucx_gotcha_t::configure<7, void*, void*, std::uint64_t, std::uint64_t,
+                                std::uint64_t, void*>("ucp_atomic_cswap64");
+        ucx_gotcha_t::configure<8, void*, void*, std::uint32_t, std::uint64_t, void*,
+                                void*>("ucp_atomic_fadd32");
+        ucx_gotcha_t::configure<9, void*, void*, std::uint64_t, std::uint64_t, void*,
+                                void*>("ucp_atomic_fadd64");
+        ucx_gotcha_t::configure<10, void*, void*, std::uint32_t, std::uint64_t, void*,
+                                void*>("ucp_atomic_swap32");
+        ucx_gotcha_t::configure<11, void*, void*, std::uint64_t, std::uint64_t, void*,
+                                void*>("ucp_atomic_swap64");
         ucx_gotcha_t::configure<12, int, void*, int, std::uint64_t, const void*, size_t,
                                 void*>("ucp_atomic_post");
-        ucx_gotcha_t::configure<13, void*, void*, int, std::uint64_t, void*, size_t, void*,
-                                void*>("ucp_atomic_fetch_nb");
+        ucx_gotcha_t::configure<13, void*, void*, int, std::uint64_t, void*, size_t,
+                                void*, void*>("ucp_atomic_fetch_nb");
         ucx_gotcha_t::configure<14, void*, void*, unsigned, void*, void*, size_t,
                                 std::uint64_t, void*>("ucp_atomic_op_nbx");
 
@@ -113,20 +113,20 @@ ucx_gotcha::configure()
         ucx_gotcha_t::configure<36, int, void*, void*>("ucp_mem_query");
 
         // Put/Get operations
-        ucx_gotcha_t::configure<37, int, void*, const void*, size_t, std::uint64_t, void*>(
-            "ucp_put");
+        ucx_gotcha_t::configure<37, int, void*, const void*, size_t, std::uint64_t,
+                                void*>("ucp_put");
         ucx_gotcha_t::configure<38, int, void*, void*, size_t, std::uint64_t, void*>(
             "ucp_get");
-        ucx_gotcha_t::configure<39, int, void*, const void*, size_t, std::uint64_t, void*>(
-            "ucp_put_nbi");
+        ucx_gotcha_t::configure<39, int, void*, const void*, size_t, std::uint64_t,
+                                void*>("ucp_put_nbi");
         ucx_gotcha_t::configure<40, int, void*, void*, size_t, std::uint64_t, void*>(
             "ucp_get_nbi");
-        ucx_gotcha_t::configure<41, void*, void*, const void*, size_t, std::uint64_t, void*,
-                                void*>("ucp_put_nb");
-        ucx_gotcha_t::configure<42, void*, void*, void*, size_t, std::uint64_t, void*, void*>(
-            "ucp_get_nb");
-        ucx_gotcha_t::configure<43, void*, void*, const void*, size_t, std::uint64_t, void*,
-                                const void*>("ucp_put_nbx");
+        ucx_gotcha_t::configure<41, void*, void*, const void*, size_t, std::uint64_t,
+                                void*, void*>("ucp_put_nb");
+        ucx_gotcha_t::configure<42, void*, void*, void*, size_t, std::uint64_t, void*,
+                                void*>("ucp_get_nb");
+        ucx_gotcha_t::configure<43, void*, void*, const void*, size_t, std::uint64_t,
+                                void*, const void*>("ucp_put_nbx");
         ucx_gotcha_t::configure<44, void*, void*, void*, size_t, std::uint64_t, void*,
                                 const void*>("ucp_get_nbx");
 
@@ -170,10 +170,10 @@ ucx_gotcha::configure()
             "ucp_tag_recv_nb");
         ucx_gotcha_t::configure<65, void*, void*, const void*, size_t, std::uint64_t,
                                 const void*>("ucp_tag_send_nbx");
-        ucx_gotcha_t::configure<66, void*, void*, void*, size_t, std::uint64_t, std::uint64_t,
-                                const void*>("ucp_tag_recv_nbx");
-        ucx_gotcha_t::configure<67, void*, void*, const void*, size_t, std::uint64_t, void*>(
-            "ucp_tag_send_sync_nb");
+        ucx_gotcha_t::configure<66, void*, void*, void*, size_t, std::uint64_t,
+                                std::uint64_t, const void*>("ucp_tag_recv_nbx");
+        ucx_gotcha_t::configure<67, void*, void*, const void*, size_t, std::uint64_t,
+                                void*>("ucp_tag_send_sync_nb");
         ucx_gotcha_t::configure<68, void*, void*, const void*, size_t, std::uint64_t,
                                 const void*>("ucp_tag_send_sync_nbx");
 

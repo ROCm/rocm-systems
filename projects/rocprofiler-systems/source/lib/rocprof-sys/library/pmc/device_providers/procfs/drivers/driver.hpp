@@ -190,11 +190,11 @@ parse_proc_stat(std::string_view content)
                                                line.data() + space, cpu_id);
         if(ec != std::errc()) return;
 
-        cpu_jiffies jiffies;
-        std::uint64_t*   fields[]  = { &jiffies.user,   &jiffies.nice,   &jiffies.system,
-                                  &jiffies.idle,   &jiffies.iowait, &jiffies.irq,
-                                  &jiffies.softirq };
-        auto        remaining = ltrim(line.substr(space));
+        cpu_jiffies    jiffies;
+        std::uint64_t* fields[]  = { &jiffies.user,   &jiffies.nice,   &jiffies.system,
+                                     &jiffies.idle,   &jiffies.iowait, &jiffies.irq,
+                                     &jiffies.softirq };
+        auto           remaining = ltrim(line.substr(space));
 
         for(size_t i = 0; i < JIFFIES_FIELD_COUNT && !remaining.empty(); ++i)
         {
@@ -300,7 +300,8 @@ public:
             snap.peak_rss = static_cast<std::int64_t>(usage.ru_maxrss) * KB_TO_BYTES;
             snap.context_switches =
                 static_cast<std::int64_t>(usage.ru_nvcsw + usage.ru_nivcsw);
-            snap.page_faults = static_cast<std::int64_t>(usage.ru_majflt + usage.ru_minflt);
+            snap.page_faults =
+                static_cast<std::int64_t>(usage.ru_majflt + usage.ru_minflt);
             snap.user_mode_time =
                 static_cast<std::int64_t>(usage.ru_utime.tv_sec) * US_PER_SECOND +
                 static_cast<std::int64_t>(usage.ru_utime.tv_usec);

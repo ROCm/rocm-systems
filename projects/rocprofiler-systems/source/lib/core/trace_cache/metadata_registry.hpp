@@ -33,34 +33,34 @@ namespace info
 {
 struct process
 {
-    pid_t       pid;  // < Unique
-    pid_t       ppid;
-    std::string command;
-    std::string environment;
-    std::string extdata;
-    std::uint32_t    start;
-    std::uint32_t    end;
+    pid_t         pid;  // < Unique
+    pid_t         ppid;
+    std::string   command;
+    std::string   environment;
+    std::string   extdata;
+    std::uint32_t start;
+    std::uint32_t end;
 };
 
 struct pmc
 {
-    agent_type  type;
-    size_t      agent_type_index;
-    std::string target_arch;
-    size_t      event_code;
-    size_t      instance_id;
-    std::string name;  // < Unique
-    std::string symbol;
-    std::string description;
-    std::string long_description;
-    std::string component;
-    std::string units;
-    std::string value_type;
-    std::string block;
-    std::string expression;
-    std::uint32_t    is_constant;
-    std::uint32_t    is_derived;
-    std::string extdata;
+    agent_type    type;
+    size_t        agent_type_index;
+    std::string   target_arch;
+    size_t        event_code;
+    size_t        instance_id;
+    std::string   name;  // < Unique
+    std::string   symbol;
+    std::string   description;
+    std::string   long_description;
+    std::string   component;
+    std::string   units;
+    std::string   value_type;
+    std::string   block;
+    std::string   expression;
+    std::uint32_t is_constant;
+    std::uint32_t is_derived;
+    std::string   extdata;
 };
 
 struct pmc_info_hash
@@ -85,13 +85,13 @@ struct pmc_info_equal
 
 struct thread
 {
-    std::int32_t     parent_process_id;
-    std::int32_t     process_id;
-    std::uint64_t    thread_id;  // < Unique
-    std::uint32_t    start;
-    std::uint32_t    end;
-    std::string extdata;
-    friend bool operator<(const thread& lhs, const thread& rhs)
+    std::int32_t  parent_process_id;
+    std::int32_t  process_id;
+    std::uint64_t thread_id;  // < Unique
+    std::uint32_t start;
+    std::uint32_t end;
+    std::string   extdata;
+    friend bool   operator<(const thread& lhs, const thread& rhs)
     {
         return lhs.thread_id < rhs.thread_id;
     }
@@ -182,8 +182,8 @@ struct metadata_registry
     std::vector<info::pmc>      get_pmc_info_list() const;
     std::vector<info::thread>   get_thread_info_list() const;
     std::vector<info::track>    get_track_info_list() const;
-    std::vector<std::uint64_t>       get_queue_list() const;
-    std::vector<std::uint64_t>       get_stream_list() const;
+    std::vector<std::uint64_t>  get_queue_list() const;
+    std::vector<std::uint64_t>  get_stream_list() const;
     std::vector<std::string_view> get_string_list() const;
 
     bool save_to_file(const std::string&                         filepath,
@@ -215,8 +215,8 @@ private:
     common::synchronized<std::set<info::thread>> m_threads{};
     common::synchronized<std::set<info::track>>  m_tracks{};
 
-    common::synchronized<std::set<std::uint64_t>>              m_streams{};
-    common::synchronized<std::set<std::uint64_t>>              m_queues{};
+    common::synchronized<std::set<std::uint64_t>>         m_streams{};
+    common::synchronized<std::set<std::uint64_t>>         m_queues{};
     common::synchronized<std::unordered_set<std::string>> m_strings{};
     common::synchronized<std::set<rocprofiler_callback_tracing_code_object_load_data_t,
                                   info::code_object_less>>

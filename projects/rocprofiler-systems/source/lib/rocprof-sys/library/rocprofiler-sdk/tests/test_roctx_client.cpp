@@ -58,7 +58,8 @@ struct mock_marker_policy
     static void push_timemory(std::string_view name) { api->push_timemory(name); }
     static void pop_timemory(std::string_view name) { api->pop_timemory(name); }
 
-    static void push_perfetto_ts(const char* name, std::uint64_t ts, std::uint64_t flow_id,
+    static void push_perfetto_ts(const char* name, std::uint64_t ts,
+                                 std::uint64_t                        flow_id,
                                  const std::vector<annotation_entry>& annotations)
     {
         api->push_perfetto_ts(name, ts, flow_id, annotations);
@@ -560,14 +561,16 @@ using ::testing::StrEq;
 
 MATCHER_P2(IsAnnotation, key, value, "")
 {
-    return std::string(arg.key) == key && std::holds_alternative<std::uint64_t>(arg.value) &&
+    return std::string(arg.key) == key &&
+           std::holds_alternative<std::uint64_t>(arg.value) &&
            std::get<std::uint64_t>(arg.value) == static_cast<std::uint64_t>(value);
 }
 
 using mock_marker_writer = rocprofsys::rocprofiler_sdk::marker_writer<mock_marker_policy>;
 
 rocprofiler_callback_tracing_record_t
-make_record(std::uint64_t thread_id, std::uint64_t corr_internal, std::uint64_t corr_external)
+make_record(std::uint64_t thread_id, std::uint64_t corr_internal,
+            std::uint64_t corr_external)
 {
     rocprofiler_callback_tracing_record_t record{};
     record.thread_id                     = thread_id;

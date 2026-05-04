@@ -1,8 +1,8 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include <cstdint>
 #include "agent_manager.hpp"
+#include <cstdint>
 
 #include "logger/debug.hpp"
 

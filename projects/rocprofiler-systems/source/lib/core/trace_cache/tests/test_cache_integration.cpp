@@ -1,8 +1,8 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include <cstdint>
 #include "mocked_types.hpp"
+#include <cstdint>
 
 #include "core/trace_cache/buffer_storage.hpp"
 #include "core/trace_cache/storage_parser.hpp"
@@ -383,9 +383,9 @@ TEST_F(trace_cache_module_integration_test, content_validation_edge_cases)
     test_sample_2 neg_infinity(-std::numeric_limits<double>::infinity(), 43);
 
     std::vector<std::uint8_t> max_vector(10000, 0xFF);
-    test_sample_3        large_payload(max_vector);
-    test_sample_3        empty_payload;
-    test_sample_3        zero_payload({ 0x00 });
+    test_sample_3             large_payload(max_vector);
+    test_sample_3             empty_payload;
+    test_sample_3             zero_payload({ 0x00 });
 
     std::vector<test_sample_1> expected_1;
     std::vector<test_sample_2> expected_2;
@@ -688,7 +688,7 @@ TEST_F(trace_cache_module_integration_test, mixed_vector_element_sizes)
             if(i % 2 == 0)
             {
                 std::vector<std::uint8_t> payload(20, static_cast<std::uint8_t>(i));
-                test_sample_3        sample(payload);
+                test_sample_3             sample(payload);
                 expected_3.push_back(sample);
                 storage.store(sample);
             }

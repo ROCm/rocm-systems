@@ -34,9 +34,9 @@ extern "C"
     struct rocprofiler_client_id_t;
 
     using rocprofiler_configure_t =
-        rocprofiler_tool_configure_result_t* (*) (std::uint32_t    version,
-                                                  const char* runtime_version,
-                                                  std::uint32_t    priority,
+        rocprofiler_tool_configure_result_t* (*) (std::uint32_t version,
+                                                  const char*   runtime_version,
+                                                  std::uint32_t priority,
                                                   rocprofiler_client_id_t* client_id);
 
     rocprofiler_tool_configure_result_t* rocprofiler_configure(

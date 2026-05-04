@@ -87,8 +87,8 @@ struct spec
 
     double           delay    = 0.0;
     double           duration = 0.0;
-    std::uint64_t         count    = 0;
-    std::uint64_t         repeat   = 1;
+    std::uint64_t    count    = 0;
+    std::uint64_t    repeat   = 1;
     clock_identifier clock_id = {};
 };
 

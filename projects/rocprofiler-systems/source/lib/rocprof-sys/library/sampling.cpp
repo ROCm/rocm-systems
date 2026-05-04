@@ -1,7 +1,6 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include <cstdint>
 #include "library/sampling.hpp"
 #include "core/common.hpp"
 #include "core/components/fwd.hpp"
@@ -25,6 +24,7 @@
 #include "library/thread_info.hpp"
 #include "library/tracing.hpp"
 #include "library/tracing/annotation.hpp"
+#include <cstdint>
 
 #include <timemory/backends/papi.hpp>
 #include <timemory/backends/threading.hpp>
@@ -260,18 +260,18 @@ metadata_initialize_track(std::int64_t tid)
 
 struct timer_sampling_data
 {
-    std::int64_t                                   m_tid     = -1;
-    std::uint64_t                                  m_beg     = 0;
-    std::uint64_t                                  m_end     = 0;
+    std::int64_t                              m_tid     = -1;
+    std::uint64_t                             m_beg     = 0;
+    std::uint64_t                             m_end     = 0;
     std::vector<tim::unwind::processed_entry> m_stack   = {};
     backtrace_metrics                         m_metrics = {};
 };
 
 struct overflow_sampling_data
 {
-    std::int64_t                                   m_tid   = -1;
-    std::uint64_t                                  m_beg   = 0;
-    std::uint64_t                                  m_end   = 0;
+    std::int64_t                              m_tid   = -1;
+    std::uint64_t                             m_beg   = 0;
+    std::uint64_t                             m_end   = 0;
     std::vector<tim::unwind::processed_entry> m_stack = {};
 };
 
@@ -280,11 +280,13 @@ parse_timer_data(std::int64_t _tid, const bundle_t* _init,
                  const std::vector<bundle_t*>& _data);
 
 std::vector<overflow_sampling_data>
-parse_overflow_data(std::int64_t _tid, const bundle_t*, const std::vector<bundle_t*>& _data);
+parse_overflow_data(std::int64_t                  _tid, const bundle_t*,
+                    const std::vector<bundle_t*>& _data);
 
 // TODO: should we remove _tid? it's inside timer_data and overflow_data
 void
-cache_sampling_data(std::int64_t _tid, const std::vector<timer_sampling_data>& _timer_data,
+cache_sampling_data(std::int64_t                               _tid,
+                    const std::vector<timer_sampling_data>&    _timer_data,
                     const std::vector<overflow_sampling_data>& _overflow_data)
 {
     if(get_debug_sampling())
@@ -1021,7 +1023,7 @@ post_process_timemory(std::int64_t, const std::vector<timer_sampling_data>&,
                       const std::vector<overflow_sampling_data>&);
 
 void
-store_sampling_data_in_cache(std::int64_t                                    _tid,
+store_sampling_data_in_cache(std::int64_t                               _tid,
                              const std::vector<timer_sampling_data>&    _timer_data,
                              const std::vector<overflow_sampling_data>& _overflow_data);
 
@@ -1043,9 +1045,11 @@ spans_pause_interval(std::uint64_t _beg, std::uint64_t _end)
 {
     if(pause_intervals.empty()) return false;
 
-    const auto _it = std::lower_bound(
-        pause_intervals.cbegin(), pause_intervals.cend(), _beg,
-        [](const auto& _interval, std::uint64_t _val) { return _interval.resume_ts < _val; });
+    const auto _it =
+        std::lower_bound(pause_intervals.cbegin(), pause_intervals.cend(), _beg,
+                         [](const auto& _interval, std::uint64_t _val) {
+                             return _interval.resume_ts < _val;
+                         });
 
     return _it != pause_intervals.cend() && _it->pause_ts <= _end;
 }
@@ -1283,7 +1287,8 @@ post_process()
 namespace
 {
 std::vector<timer_sampling_data>
-parse_timer_data(std::int64_t _tid, const bundle_t* _init, const std::vector<bundle_t*>& _data)
+parse_timer_data(std::int64_t _tid, const bundle_t* _init,
+                 const std::vector<bundle_t*>& _data)
 {
     auto _results = std::vector<timer_sampling_data>{};
 
@@ -1333,7 +1338,8 @@ parse_timer_data(std::int64_t _tid, const bundle_t* _init, const std::vector<bun
 }
 
 std::vector<overflow_sampling_data>
-parse_overflow_data(std::int64_t _tid, const bundle_t*, const std::vector<bundle_t*>& _data)
+parse_overflow_data(std::int64_t                  _tid, const bundle_t*,
+                    const std::vector<bundle_t*>& _data)
 {
     auto _results = std::vector<overflow_sampling_data>{};
 
@@ -1377,7 +1383,8 @@ parse_overflow_data(std::int64_t _tid, const bundle_t*, const std::vector<bundle
 }
 
 void
-post_process_perfetto(std::int64_t _tid, const std::vector<timer_sampling_data>& _timer_data,
+post_process_perfetto(std::int64_t                               _tid,
+                      const std::vector<timer_sampling_data>&    _timer_data,
                       const std::vector<overflow_sampling_data>& _overflow_data)
 {
     auto _valid_metrics = backtrace_metrics::valid_array_t{};
@@ -1528,7 +1535,7 @@ post_process_perfetto(std::int64_t _tid, const std::vector<timer_sampling_data>&
         auto _labels = backtrace_metrics::get_hw_counter_labels(_tid);
         for(const auto& itr : _timer_data)
         {
-            size_t   _ncount = 0;
+            size_t        _ncount = 0;
             std::uint64_t _beg    = itr.m_beg;
             std::uint64_t _end    = itr.m_end;
             if(!_thread_info->is_valid_lifetime({ _beg, _end })) continue;
@@ -1649,7 +1656,8 @@ post_process_perfetto(std::int64_t _tid, const std::vector<timer_sampling_data>&
 }
 
 void
-post_process_timemory(std::int64_t _tid, const std::vector<timer_sampling_data>& _timer_data,
+post_process_timemory(std::int64_t                               _tid,
+                      const std::vector<timer_sampling_data>&    _timer_data,
                       const std::vector<overflow_sampling_data>& _overflow_data)
 {
     if(get_debug_sampling())
@@ -1820,7 +1828,8 @@ post_process_timemory(std::int64_t _tid, const std::vector<timer_sampling_data>&
 }
 
 void
-cache_backtrace_metrics(std::int64_t _tid, const std::vector<timer_sampling_data>& _timer_data)
+cache_backtrace_metrics(std::int64_t                            _tid,
+                        const std::vector<timer_sampling_data>& _timer_data)
 {
     auto _valid_metrics = backtrace_metrics::valid_array_t{};
 
@@ -1842,7 +1851,7 @@ cache_backtrace_metrics(std::int64_t _tid, const std::vector<timer_sampling_data
 }
 
 void
-store_sampling_data_in_cache(std::int64_t                                    _tid,
+store_sampling_data_in_cache(std::int64_t                               _tid,
                              const std::vector<timer_sampling_data>&    _timer_data,
                              const std::vector<overflow_sampling_data>& _overflow_data)
 {

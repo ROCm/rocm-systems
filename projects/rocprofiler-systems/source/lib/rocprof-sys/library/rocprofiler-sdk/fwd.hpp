@@ -3,11 +3,11 @@
 
 #pragma once
 
-#include <cstdint>
 #include "common/synchronized.hpp"
 #include "core/agent_manager.hpp"
 #include "core/perfetto.hpp"
 #include "core/timemory.hpp"
+#include <cstdint>
 
 #include <rocprofiler-sdk/agent.h>
 #include <rocprofiler-sdk/buffer_tracing.h>
@@ -40,14 +40,14 @@ using rocprofsys_agent_t = agent;
 
 struct code_object_callback_record_t
 {
-    std::uint64_t                                             timestamp = 0;
+    std::uint64_t                                        timestamp = 0;
     rocprofiler_callback_tracing_record_t                record    = {};
     rocprofiler_callback_tracing_code_object_load_data_t payload   = {};
 };
 
 struct kernel_symbol_callback_record_t
 {
-    std::uint64_t                              timestamp = 0;
+    std::uint64_t                         timestamp = 0;
     rocprofiler_callback_tracing_record_t record    = {};
     kernel_symbol_data_t                  payload   = {};
 };
@@ -76,7 +76,7 @@ struct rocprofiler_tool_counter_info_t : rocprofiler_counter_info_v0_t
 
 struct tool_agent
 {
-    std::uint64_t                  device_id = 0;
+    std::uint64_t             device_id = 0;
     const rocprofsys_agent_t* agent     = nullptr;
 };
 

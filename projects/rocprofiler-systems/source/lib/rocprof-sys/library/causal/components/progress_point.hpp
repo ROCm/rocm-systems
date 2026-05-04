@@ -44,10 +44,10 @@ struct progress_point : comp::base<progress_point, void>
     bool is_latency_point() const;
     void print(std::ostream& os) const;
 
-    void    set_hash(hash_type _v) { m_hash = _v; }
-    void    set_iterator(iterator_type _v) { m_iterator = _v; }
-    auto    get_iterator() const { return m_iterator; }
-    auto    get_hash() const { return m_hash; }
+    void         set_hash(hash_type _v) { m_hash = _v; }
+    void         set_iterator(iterator_type _v) { m_iterator = _v; }
+    auto         get_iterator() const { return m_iterator; }
+    auto         get_hash() const { return m_hash; }
     std::int64_t get_delta() const;
     std::int64_t get_arrival() const;
     std::int64_t get_departure() const;
@@ -82,9 +82,9 @@ struct progress_point : comp::base<progress_point, void>
 
 private:
     hash_type       m_hash      = 0;
-    std::int64_t         m_delta     = 0;
-    std::int64_t         m_arrival   = 0;
-    std::int64_t         m_departure = 0;
+    std::int64_t    m_delta     = 0;
+    std::int64_t    m_arrival   = 0;
+    std::int64_t    m_departure = 0;
     progress_point* m_iterator  = nullptr;
 };
 }  // namespace component

@@ -3,8 +3,8 @@
 
 #define TIMEMORY_KOKKOSP_POSTFIX ROCPROFSYS_PUBLIC_API
 
-#include <cstdint>
 #include "library/kokkosp.hpp"
+#include <cstdint>
 
 #include "api.hpp"
 #include "common/defines.h"
@@ -261,13 +261,13 @@ extern "C"
         tim::manager::add_metadata(key, value);
     }
 
-    void kokkosp_request_tool_settings(const std::uint32_t             _version,
+    void kokkosp_request_tool_settings(const std::uint32_t        _version,
                                        Kokkos_Tools_ToolSettings* _settings)
     {
         if(_version > 0) _settings->requires_global_fencing = false;
     }
 
-    void kokkosp_init_library([[maybe_unused]] const int      loadSeq,
+    void kokkosp_init_library([[maybe_unused]] const int           loadSeq,
                               [[maybe_unused]] const std::uint64_t interfaceVer,
                               const std::uint32_t devInfoCount, void* deviceInfo)
     {
@@ -366,16 +366,18 @@ extern "C"
 
     //----------------------------------------------------------------------------------//
 
-    void kokkosp_begin_parallel_for(const char* name, std::uint32_t devid, std::uint64_t* kernid)
+    void kokkosp_begin_parallel_for(const char* name, std::uint32_t devid,
+                                    std::uint64_t* kernid)
     {
         if(rocprofsys::kokkosp::is_paused()) return set_invalid_id(kernid);
         if(violates_name_rules(name)) return set_invalid_id(kernid);
 
         ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
-        auto pname = (devid > std::numeric_limits<std::uint16_t>::max())  // junk device number
-                         ? fmt::format("{} {} [for]", _kp_prefix, name)
-                         : fmt::format("{} {} [for][dev{}]", _kp_prefix, name, devid);
-        *kernid    = kokkosp::get_unique_id();
+        auto pname =
+            (devid > std::numeric_limits<std::uint16_t>::max())  // junk device number
+                ? fmt::format("{} {} [for]", _kp_prefix, name)
+                : fmt::format("{} {} [for][dev{}]", _kp_prefix, name, devid);
+        *kernid = kokkosp::get_unique_id();
         kokkosp::logger_t{}.mark(1, __FUNCTION__, name, *kernid);
         kokkosp::create_profiler<kokkosp_region>(pname, *kernid);
         kokkosp::start_profiler<kokkosp_region>(*kernid);
@@ -393,16 +395,18 @@ extern "C"
 
     //----------------------------------------------------------------------------------//
 
-    void kokkosp_begin_parallel_reduce(const char* name, std::uint32_t devid, std::uint64_t* kernid)
+    void kokkosp_begin_parallel_reduce(const char* name, std::uint32_t devid,
+                                       std::uint64_t* kernid)
     {
         if(rocprofsys::kokkosp::is_paused()) return set_invalid_id(kernid);
         if(violates_name_rules(name)) return set_invalid_id(kernid);
 
         ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
-        auto pname = (devid > std::numeric_limits<std::uint16_t>::max())  // junk device number
-                         ? fmt::format("{} {} [reduce]", _kp_prefix, name)
-                         : fmt::format("{} {} [reduce][dev{}]", _kp_prefix, name, devid);
-        *kernid    = kokkosp::get_unique_id();
+        auto pname =
+            (devid > std::numeric_limits<std::uint16_t>::max())  // junk device number
+                ? fmt::format("{} {} [reduce]", _kp_prefix, name)
+                : fmt::format("{} {} [reduce][dev{}]", _kp_prefix, name, devid);
+        *kernid = kokkosp::get_unique_id();
         kokkosp::logger_t{}.mark(1, __FUNCTION__, name, *kernid);
         kokkosp::create_profiler<kokkosp_region>(pname, *kernid);
         kokkosp::start_profiler<kokkosp_region>(*kernid);
@@ -420,16 +424,18 @@ extern "C"
 
     //----------------------------------------------------------------------------------//
 
-    void kokkosp_begin_parallel_scan(const char* name, std::uint32_t devid, std::uint64_t* kernid)
+    void kokkosp_begin_parallel_scan(const char* name, std::uint32_t devid,
+                                     std::uint64_t* kernid)
     {
         if(rocprofsys::kokkosp::is_paused()) return set_invalid_id(kernid);
         if(violates_name_rules(name)) return set_invalid_id(kernid);
 
         ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
-        auto pname = (devid > std::numeric_limits<std::uint16_t>::max())  // junk device number
-                         ? fmt::format("{} {} [scan]", _kp_prefix, name)
-                         : fmt::format("{} {} [scan][dev{}]", _kp_prefix, name, devid);
-        *kernid    = kokkosp::get_unique_id();
+        auto pname =
+            (devid > std::numeric_limits<std::uint16_t>::max())  // junk device number
+                ? fmt::format("{} {} [scan]", _kp_prefix, name)
+                : fmt::format("{} {} [scan][dev{}]", _kp_prefix, name, devid);
+        *kernid = kokkosp::get_unique_id();
         kokkosp::logger_t{}.mark(1, __FUNCTION__, name, *kernid);
         kokkosp::create_profiler<kokkosp_region>(pname, *kernid);
         kokkosp::start_profiler<kokkosp_region>(*kernid);
@@ -453,10 +459,11 @@ extern "C"
         if(violates_name_rules(name)) return set_invalid_id(kernid);
 
         ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
-        auto pname = (devid > std::numeric_limits<std::uint16_t>::max())  // junk device number
-                         ? fmt::format("{} {} [fence]", _kp_prefix, name)
-                         : fmt::format("{} {} [fence][dev{}]", _kp_prefix, name, devid);
-        *kernid    = kokkosp::get_unique_id();
+        auto pname =
+            (devid > std::numeric_limits<std::uint16_t>::max())  // junk device number
+                ? fmt::format("{} {} [fence]", _kp_prefix, name)
+                : fmt::format("{} {} [fence][dev{}]", _kp_prefix, name, devid);
+        *kernid = kokkosp::get_unique_id();
         kokkosp::logger_t{}.mark(1, __FUNCTION__, name, *kernid);
         kokkosp::create_profiler<kokkosp_region>(pname, *kernid);
         kokkosp::start_profiler<kokkosp_region>(*kernid);
@@ -562,7 +569,8 @@ extern "C"
 
     void kokkosp_begin_deep_copy(SpaceHandle dst_handle, const char* dst_name,
                                  const void* dst_ptr, SpaceHandle src_handle,
-                                 const char* src_name, const void* src_ptr, std::uint64_t size)
+                                 const char* src_name, const void* src_ptr,
+                                 std::uint64_t size)
     {
         if(rocprofsys::kokkosp::is_paused()) return;
         if(!_kp_deep_copy || rocprofsys::config::get_use_causal()) return;

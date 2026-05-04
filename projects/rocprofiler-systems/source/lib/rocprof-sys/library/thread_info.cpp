@@ -79,7 +79,7 @@ init_index_data(std::int64_t _tid, bool _offset = false)
 }
 
 thread_local std::int64_t offset_causal_count = 0;
-const auto           unknown_thread      = std::optional<thread_info>{};
+const auto                unknown_thread      = std::optional<thread_info>{};
 std::int64_t              peak_num_threads    = max_supported_threads;
 
 // Register callback to allow thread_data containers to query peak_num_threads
@@ -267,13 +267,15 @@ thread_info::get(std::int64_t _tid, ThreadIdType _type)
     }
     else if(_type == ThreadIdType::PthreadID)
     {
-        throw std::runtime_error("rocprof-sys does not support thread_info::get(std::int64_t, "
-                                 "ThreadIdType) with ThreadIdType::PthreadID");
+        throw std::runtime_error(
+            "rocprof-sys does not support thread_info::get(std::int64_t, "
+            "ThreadIdType) with ThreadIdType::PthreadID");
     }
     else if(_type == ThreadIdType::StlThreadID)
     {
-        throw std::runtime_error("rocprof-sys does not support thread_info::get(std::int64_t, "
-                                 "ThreadIdType) with ThreadIdType::StlThreadID");
+        throw std::runtime_error(
+            "rocprof-sys does not support thread_info::get(std::int64_t, "
+            "ThreadIdType) with ThreadIdType::StlThreadID");
     }
 
     if(get_is_continuous_integration() && unknown_thread)

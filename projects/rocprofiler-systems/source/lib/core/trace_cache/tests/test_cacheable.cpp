@@ -23,7 +23,7 @@ protected:
     }
 
     std::array<std::uint8_t, 1024> buffer;
-    size_t                    position;
+    size_t                         position;
 };
 
 TEST_F(cacheable_test, store_value_int)
@@ -156,7 +156,7 @@ TEST_F(cacheable_test, parse_value_int)
                                                   position);
 
     std::uint8_t* data_pos = buffer.data();
-    int      parsed_value;
+    int           parsed_value;
     rocprofsys::trace_cache::utility::parse_value(data_pos, parsed_value);
 
     EXPECT_EQ(parsed_value, 987);
@@ -170,7 +170,7 @@ TEST_F(cacheable_test, parse_value_double)
                                                   position);
 
     std::uint8_t* data_pos = buffer.data();
-    double   parsed_value;
+    double        parsed_value;
     rocprofsys::trace_cache::utility::parse_value(data_pos, parsed_value);
 
     EXPECT_DOUBLE_EQ(parsed_value, 1.618033988);
@@ -183,7 +183,7 @@ TEST_F(cacheable_test, parse_value_unsigned_long)
     rocprofsys::trace_cache::utility::store_value(original_value, buffer.data(),
                                                   position);
 
-    std::uint8_t*      data_pos = buffer.data();
+    std::uint8_t* data_pos = buffer.data();
     unsigned long parsed_value;
     rocprofsys::trace_cache::utility::parse_value(data_pos, parsed_value);
 
@@ -197,7 +197,7 @@ TEST_F(cacheable_test, parse_value_string)
     rocprofsys::trace_cache::utility::store_value(original_value, buffer.data(),
                                                   position);
 
-    std::uint8_t*         data_pos = buffer.data();
+    std::uint8_t*    data_pos = buffer.data();
     std::string_view parsed_value;
     rocprofsys::trace_cache::utility::parse_value(data_pos, parsed_value);
 
@@ -211,7 +211,7 @@ TEST_F(cacheable_test, parse_value_empty_string)
     rocprofsys::trace_cache::utility::store_value(original_value, buffer.data(),
                                                   position);
 
-    std::uint8_t*         data_pos = buffer.data();
+    std::uint8_t*    data_pos = buffer.data();
     std::string_view parsed_value;
     rocprofsys::trace_cache::utility::parse_value(data_pos, parsed_value);
 
@@ -225,7 +225,7 @@ TEST_F(cacheable_test, parse_value_optional)
     rocprofsys::trace_cache::utility::store_value(original_value, buffer.data(),
                                                   position);
 
-    std::uint8_t*              data_pos = buffer.data();
+    std::uint8_t*         data_pos = buffer.data();
     std::optional<double> parsed_value;
     rocprofsys::trace_cache::utility::parse_value(data_pos, parsed_value);
 
@@ -239,7 +239,7 @@ TEST_F(cacheable_test, parse_value_optional_empty)
     rocprofsys::trace_cache::utility::store_value(original_value, buffer.data(),
                                                   position);
 
-    std::uint8_t*              data_pos = buffer.data();
+    std::uint8_t*         data_pos = buffer.data();
     std::optional<double> parsed_value;
     rocprofsys::trace_cache::utility::parse_value(data_pos, parsed_value);
 
@@ -298,7 +298,7 @@ TEST_F(cacheable_test, roundtrip_optional_float)
     rocprofsys::trace_cache::utility::store_value(original_value, buffer.data(),
                                                   position);
 
-    std::uint8_t*             data_pos = buffer.data();
+    std::uint8_t*        data_pos = buffer.data();
     std::optional<float> parsed_value;
     rocprofsys::trace_cache::utility::parse_value(data_pos, parsed_value);
 
@@ -324,10 +324,10 @@ TEST_F(cacheable_test, roundtrip_optional_int64_negative)
 
 TEST_F(cacheable_test, parse_multiple_values_with_optional)
 {
-    int                     int_val   = 100;
+    int                          int_val   = 100;
     std::optional<std::uint32_t> opt_val   = std::uint32_t{ 777 };
-    auto                    str_val   = "mixed"sv;
-    std::optional<double>   opt_empty = std::nullopt;
+    auto                         str_val   = "mixed"sv;
+    std::optional<double>        opt_empty = std::nullopt;
 
     rocprofsys::trace_cache::utility::store_value(int_val, buffer.data(), position);
     rocprofsys::trace_cache::utility::store_value(opt_val, buffer.data(), position);
@@ -335,10 +335,10 @@ TEST_F(cacheable_test, parse_multiple_values_with_optional)
     rocprofsys::trace_cache::utility::store_value(opt_empty, buffer.data(), position);
 
     std::uint8_t*                data_pos = buffer.data();
-    int                     parsed_int;
+    int                          parsed_int;
     std::optional<std::uint32_t> parsed_opt;
-    std::string_view        parsed_str;
-    std::optional<double>   parsed_opt_empty;
+    std::string_view             parsed_str;
+    std::optional<double>        parsed_opt_empty;
 
     rocprofsys::trace_cache::utility::parse_value(data_pos, parsed_int, parsed_opt,
                                                   parsed_str, parsed_opt_empty);
@@ -352,7 +352,8 @@ TEST_F(cacheable_test, parse_multiple_values_with_optional)
 
 TEST_F(cacheable_test, roundtrip_optional_vector_uint8_with_value)
 {
-    std::optional<std::vector<std::uint8_t>> original = std::vector<std::uint8_t>{ 10, 20, 30 };
+    std::optional<std::vector<std::uint8_t>> original =
+        std::vector<std::uint8_t>{ 10, 20, 30 };
     rocprofsys::trace_cache::utility::store_value(original, buffer.data(), position);
 
     const size_t expected_size =
@@ -427,7 +428,7 @@ TEST_F(cacheable_test, roundtrip_optional_string_view_with_value)
     const size_t expected_size = sizeof(std::uint8_t) + sizeof(size_t) + original->size();
     EXPECT_EQ(position, expected_size);
 
-    std::uint8_t*                        data_pos = buffer.data();
+    std::uint8_t*                   data_pos = buffer.data();
     std::optional<std::string_view> parsed;
     rocprofsys::trace_cache::utility::parse_value(data_pos, parsed);
 
@@ -443,7 +444,7 @@ TEST_F(cacheable_test, roundtrip_optional_string_view_nullopt)
 
     EXPECT_EQ(position, sizeof(std::uint8_t));
 
-    std::uint8_t*                        data_pos = buffer.data();
+    std::uint8_t*                   data_pos = buffer.data();
     std::optional<std::string_view> parsed;
     rocprofsys::trace_cache::utility::parse_value(data_pos, parsed);
 
@@ -459,7 +460,7 @@ TEST_F(cacheable_test, roundtrip_optional_string_view_empty_string)
     const size_t expected_size = sizeof(std::uint8_t) + sizeof(size_t);
     EXPECT_EQ(position, expected_size);
 
-    std::uint8_t*                        data_pos = buffer.data();
+    std::uint8_t*                   data_pos = buffer.data();
     std::optional<std::string_view> parsed;
     rocprofsys::trace_cache::utility::parse_value(data_pos, parsed);
 
@@ -470,11 +471,12 @@ TEST_F(cacheable_test, roundtrip_optional_string_view_empty_string)
 
 TEST_F(cacheable_test, parse_multiple_values_with_optional_vector_and_string_view)
 {
-    int                                 int_val     = 42;
-    std::optional<std::vector<std::uint8_t>> opt_vec     = std::vector<std::uint8_t>{ 1, 2, 3 };
-    std::optional<std::string_view>     opt_str     = "nested"sv;
+    int                                      int_val = 42;
+    std::optional<std::vector<std::uint8_t>> opt_vec =
+        std::vector<std::uint8_t>{ 1, 2, 3 };
+    std::optional<std::string_view>          opt_str     = "nested"sv;
     std::optional<std::vector<std::uint8_t>> opt_nullvec = std::nullopt;
-    std::optional<std::string_view>     opt_nullstr = std::nullopt;
+    std::optional<std::string_view>          opt_nullstr = std::nullopt;
 
     rocprofsys::trace_cache::utility::store_value(int_val, buffer.data(), position);
     rocprofsys::trace_cache::utility::store_value(opt_vec, buffer.data(), position);
@@ -483,11 +485,11 @@ TEST_F(cacheable_test, parse_multiple_values_with_optional_vector_and_string_vie
     rocprofsys::trace_cache::utility::store_value(opt_nullstr, buffer.data(), position);
 
     std::uint8_t*                            data_pos = buffer.data();
-    int                                 parsed_int;
+    int                                      parsed_int;
     std::optional<std::vector<std::uint8_t>> parsed_vec;
-    std::optional<std::string_view>     parsed_str;
+    std::optional<std::string_view>          parsed_str;
     std::optional<std::vector<std::uint8_t>> parsed_nullvec;
-    std::optional<std::string_view>     parsed_nullstr;
+    std::optional<std::string_view>          parsed_nullstr;
 
     rocprofsys::trace_cache::utility::parse_value(
         data_pos, parsed_int, parsed_vec, parsed_str, parsed_nullvec, parsed_nullstr);
@@ -596,7 +598,7 @@ TEST_F(cacheable_test, get_size_helper_optional_empty)
 TEST_F(cacheable_test, get_size_helper_byte_array)
 {
     std::vector<std::uint8_t> value = { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 };
-    size_t               size  = rocprofsys::trace_cache::utility::get_size(value);
+    size_t                    size  = rocprofsys::trace_cache::utility::get_size(value);
     EXPECT_EQ(size, value.size() + sizeof(size_t));
 }
 
@@ -645,15 +647,16 @@ TEST_F(cacheable_test, size_consistency_optional_with_value)
 TEST_F(cacheable_test, size_consistency_optional_nullopt)
 {
     std::optional<std::uint64_t> value = std::nullopt;
-    size_t calculated_size        = rocprofsys::trace_cache::utility::get_size(value);
-    size_t position               = 0;
+    size_t calculated_size = rocprofsys::trace_cache::utility::get_size(value);
+    size_t position        = 0;
     rocprofsys::trace_cache::utility::store_value(value, buffer.data(), position);
     EXPECT_EQ(position, calculated_size)
         << "get_size() and store_value() wrote different amounts for nullopt";
 }
 TEST_F(cacheable_test, size_consistency_optional_vector_with_value)
 {
-    std::optional<std::vector<std::uint32_t>> value = std::vector<std::uint32_t>{ 1, 2, 3, 4, 5 };
+    std::optional<std::vector<std::uint32_t>> value =
+        std::vector<std::uint32_t>{ 1, 2, 3, 4, 5 };
     size_t calculated_size = rocprofsys::trace_cache::utility::get_size(value);
     size_t position        = 0;
     rocprofsys::trace_cache::utility::store_value(value, buffer.data(), position);
@@ -700,7 +703,8 @@ TEST_F(cacheable_test, store_value_span_uint32)
     size_t stored_size = *reinterpret_cast<size_t*>(buffer.data());
     EXPECT_EQ(stored_size, expected_data_size);
 
-    std::uint32_t* data_start = reinterpret_cast<std::uint32_t*>(buffer.data() + sizeof(size_t));
+    std::uint32_t* data_start =
+        reinterpret_cast<std::uint32_t*>(buffer.data() + sizeof(size_t));
     for(size_t i = 0; i < data.size(); ++i)
     {
         EXPECT_EQ(data_start[i], data[i]);
@@ -733,7 +737,7 @@ TEST_F(cacheable_test, span_store_vector_parse_roundtrip)
 
 TEST_F(cacheable_test, span_uint32_store_vector_parse_roundtrip)
 {
-    std::vector<std::uint32_t>      original_data = { 0xDEADBEEF, 0xCAFEBABE, 0x12345678 };
+    std::vector<std::uint32_t> original_data = { 0xDEADBEEF, 0xCAFEBABE, 0x12345678 };
     rocprofsys::span<std::uint32_t> span_val(original_data);
     rocprofsys::trace_cache::utility::store_value(span_val, buffer.data(), position);
 
@@ -749,7 +753,7 @@ TEST_F(cacheable_test, get_size_span_uint8)
 {
     std::vector<std::uint8_t>      data = { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 };
     rocprofsys::span<std::uint8_t> span_val(data);
-    size_t                    size = rocprofsys::trace_cache::utility::get_size(span_val);
+    size_t size = rocprofsys::trace_cache::utility::get_size(span_val);
     EXPECT_EQ(size, data.size() * sizeof(std::uint8_t) + sizeof(size_t));
 }
 
@@ -786,7 +790,7 @@ TEST_F(cacheable_test, parse_value_int_vector)
     rocprofsys::trace_cache::utility::store_value(original_value, buffer.data(),
                                                   position);
 
-    std::uint8_t*         data_pos = buffer.data();
+    std::uint8_t*    data_pos = buffer.data();
     std::vector<int> parsed_value;
     rocprofsys::trace_cache::utility::parse_value(data_pos, parsed_value);
 
@@ -812,7 +816,7 @@ TEST_F(cacheable_test, store_value_uint64_vector)
 TEST_F(cacheable_test, parse_value_uint64_vector)
 {
     std::vector<std::uint64_t> original_value = { 0xFFFFFFFFFFFFFFFF, 0x0,
-                                             0x123456789ABCDEF0 };
+                                                  0x123456789ABCDEF0 };
     rocprofsys::trace_cache::utility::store_value(original_value, buffer.data(),
                                                   position);
 
@@ -834,7 +838,7 @@ TEST_F(cacheable_test, get_size_int_vector)
 TEST_F(cacheable_test, get_size_uint64_vector)
 {
     std::vector<std::uint64_t> value = { 1, 2, 3, 4, 5 };
-    size_t                size  = rocprofsys::trace_cache::utility::get_size(value);
+    size_t                     size  = rocprofsys::trace_cache::utility::get_size(value);
     EXPECT_EQ(size, value.size() * sizeof(std::uint64_t) + sizeof(size_t));
 }
 
@@ -854,7 +858,8 @@ TEST(type_traits_test, is_span_v)
 TEST(type_traits_test, is_vector_v)
 {
     EXPECT_TRUE(rocprofsys::trace_cache::type_traits::is_vector_v<std::vector<int>>);
-    EXPECT_TRUE(rocprofsys::trace_cache::type_traits::is_vector_v<std::vector<std::uint8_t>>);
+    EXPECT_TRUE(
+        rocprofsys::trace_cache::type_traits::is_vector_v<std::vector<std::uint8_t>>);
     EXPECT_TRUE(rocprofsys::trace_cache::type_traits::is_vector_v<std::vector<double>>);
 
     EXPECT_FALSE(rocprofsys::trace_cache::type_traits::is_vector_v<int>);
@@ -866,12 +871,12 @@ TEST(type_traits_test, is_vector_v)
 TEST(type_traits_test, is_optional_v)
 {
     EXPECT_TRUE(rocprofsys::trace_cache::type_traits::is_optional_v<std::optional<int>>);
-    EXPECT_TRUE(
-        rocprofsys::trace_cache::type_traits::is_optional_v<std::optional<std::uint32_t>>);
+    EXPECT_TRUE(rocprofsys::trace_cache::type_traits::is_optional_v<
+                std::optional<std::uint32_t>>);
     EXPECT_TRUE(
         rocprofsys::trace_cache::type_traits::is_optional_v<std::optional<double>>);
-    EXPECT_TRUE(
-        rocprofsys::trace_cache::type_traits::is_optional_v<std::optional<std::uint64_t>>);
+    EXPECT_TRUE(rocprofsys::trace_cache::type_traits::is_optional_v<
+                std::optional<std::uint64_t>>);
     EXPECT_TRUE(
         rocprofsys::trace_cache::type_traits::is_optional_v<std::optional<float>>);
 
@@ -893,8 +898,8 @@ TEST(type_traits_test, is_supported_type_v)
         rocprofsys::trace_cache::type_traits::is_supported_type_v<std::string_view>);
     EXPECT_TRUE(
         rocprofsys::trace_cache::type_traits::is_supported_type_v<std::vector<int>>);
-    EXPECT_TRUE(
-        rocprofsys::trace_cache::type_traits::is_supported_type_v<std::vector<std::uint8_t>>);
+    EXPECT_TRUE(rocprofsys::trace_cache::type_traits::is_supported_type_v<
+                std::vector<std::uint8_t>>);
     EXPECT_TRUE(
         rocprofsys::trace_cache::type_traits::is_supported_type_v<rocprofsys::span<int>>);
     EXPECT_TRUE(rocprofsys::trace_cache::type_traits::is_supported_type_v<

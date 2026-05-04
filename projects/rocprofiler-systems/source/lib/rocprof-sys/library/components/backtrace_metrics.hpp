@@ -61,10 +61,10 @@ struct backtrace_metrics : comp::empty_base
     backtrace_metrics& operator=(const backtrace_metrics&)     = default;
     backtrace_metrics& operator=(backtrace_metrics&&) noexcept = default;
 
-    static void                     configure(bool, std::int64_t _tid = threading::get_id());
-    static void                     init_perfetto(std::int64_t _tid, valid_array_t);
-    static void                     fini_perfetto(std::int64_t _tid, valid_array_t);
-    static void                     init_cache(std::int64_t _tid, valid_array_t);
+    static void configure(bool, std::int64_t _tid = threading::get_id());
+    static void init_perfetto(std::int64_t _tid, valid_array_t);
+    static void fini_perfetto(std::int64_t _tid, valid_array_t);
+    static void init_cache(std::int64_t _tid, valid_array_t);
     static std::vector<std::string> get_hw_counter_labels(std::int64_t);
 
     template <typename Tp>
@@ -107,10 +107,10 @@ struct backtrace_metrics : comp::empty_base
 
 private:
     valid_array_t     m_valid      = {};
-    std::int64_t           m_cpu        = 0;
-    std::int64_t           m_mem_peak   = 0;
-    std::int64_t           m_ctx_swch   = 0;
-    std::int64_t           m_page_flt   = 0;
+    std::int64_t      m_cpu        = 0;
+    std::int64_t      m_mem_peak   = 0;
+    std::int64_t      m_ctx_swch   = 0;
+    std::int64_t      m_page_flt   = 0;
     hw_counter_data_t m_hw_counter = {};
 };
 

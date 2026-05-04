@@ -15,7 +15,7 @@ namespace causal
 {
 struct sample_data
 {
-    uintptr_t        address = 0x0;
+    uintptr_t             address = 0x0;
     mutable std::uint64_t count   = 0;
 
     bool operator==(sample_data _v) const { return (address == _v.address); }

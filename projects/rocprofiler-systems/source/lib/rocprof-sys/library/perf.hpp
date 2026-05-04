@@ -48,7 +48,8 @@ struct perf_event
     /// Open a perf_event file using the given options structure
     std::optional<std::string> open(struct perf_event_attr& pe, pid_t pid = 0,
                                     int cpu = -1);
-    std::optional<std::string> open(double, std::uint32_t = 0, pid_t pid = 0, int cpu = -1);
+    std::optional<std::string> open(double, std::uint32_t = 0, pid_t pid = 0,
+                                    int cpu = -1);
 
     /// Return file descriptor
     long get_fileno() const;

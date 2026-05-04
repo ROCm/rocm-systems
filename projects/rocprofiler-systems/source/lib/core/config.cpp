@@ -723,8 +723,8 @@ configure_settings(bool _init)
     ROCPROFSYS_CONFIG_SETTING(
         std::uint64_t, "ROCPROFSYS_THREAD_POOL_SIZE",
         "Max number of threads for processing background tasks",
-        std::max<std::uint64_t>(std::min<std::uint64_t>(4, std::thread::hardware_concurrency() / 2),
-                           1),
+        std::max<std::uint64_t>(
+            std::min<std::uint64_t>(4, std::thread::hardware_concurrency() / 2), 1),
         "parallelism", "advanced");
 
     ROCPROFSYS_CONFIG_SETTING(
@@ -2181,7 +2181,8 @@ get_perfetto_annotations()
 std::uint64_t
 get_thread_pool_size()
 {
-    static std::uint64_t _v = get_config()->get<std::uint64_t>("ROCPROFSYS_THREAD_POOL_SIZE");
+    static std::uint64_t _v =
+        get_config()->get<std::uint64_t>("ROCPROFSYS_THREAD_POOL_SIZE");
     return _v;
 }
 
@@ -2442,8 +2443,9 @@ get_trace_region()
 bool
 get_debug_tid()
 {
-    static auto _vlist = parse_numeric_range<std::int64_t, std::unordered_set<std::int64_t>>(
-        tim::get_env<std::string>("ROCPROFSYS_DEBUG_TIDS", ""), "debug tids", 1L);
+    static auto _vlist =
+        parse_numeric_range<std::int64_t, std::unordered_set<std::int64_t>>(
+            tim::get_env<std::string>("ROCPROFSYS_DEBUG_TIDS", ""), "debug tids", 1L);
     static thread_local bool _v =
         _vlist.empty() || _vlist.count(tim::threading::get_id()) > 0;
     return _v;
@@ -2452,8 +2454,9 @@ get_debug_tid()
 bool
 get_debug_pid()
 {
-    static auto _vlist = parse_numeric_range<std::int64_t, std::unordered_set<std::int64_t>>(
-        tim::get_env<std::string>("ROCPROFSYS_DEBUG_PIDS", ""), "debug pids", 1L);
+    static auto _vlist =
+        parse_numeric_range<std::int64_t, std::unordered_set<std::int64_t>>(
+            tim::get_env<std::string>("ROCPROFSYS_DEBUG_PIDS", ""), "debug pids", 1L);
     static bool _v = _vlist.empty() || _vlist.count(tim::process::get_id()) > 0 ||
                      _vlist.count(dmp::rank()) > 0;
     return _v;
@@ -2683,9 +2686,8 @@ is_output_enabled_for_current_mpi_rank()
         return true;
     }
 
-    const auto enabled_ranks =
-        rocprofsys::utility::parse_numeric_range<std::int64_t, std::unordered_set<std::int64_t>>(
-            enabled_ranks_str, "ranks", 1L);
+    const auto enabled_ranks = rocprofsys::utility::parse_numeric_range<
+        std::int64_t, std::unordered_set<std::int64_t>>(enabled_ranks_str, "ranks", 1L);
 
     const auto is_enabled = enabled_ranks.count(current_rank.value()) != 0;
     LOG_DEBUG("Output for MPI rank {} is {}", current_rank.value(),

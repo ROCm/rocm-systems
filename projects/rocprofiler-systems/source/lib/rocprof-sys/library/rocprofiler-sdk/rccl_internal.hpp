@@ -126,7 +126,8 @@ public:
      * @param bytes Number of bytes to add
      * @return The new cumulative byte count for the device
      */
-    [[nodiscard]] inline std::uint64_t add_bytes(std::uint32_t rccl_device_idx, size_t bytes)
+    [[nodiscard]] inline std::uint64_t add_bytes(std::uint32_t rccl_device_idx,
+                                                 size_t        bytes)
     {
         std::unique_lock<std::mutex> _lk{ m_cumulative_mutex };
         auto& device_bytes = m_cumulative_bytes_per_device[rccl_device_idx];
@@ -173,10 +174,10 @@ public:
     }
 
 private:
-    std::shared_ptr<PmcRegistrar>          m_pmc_registrar;
-    mutable std::mutex                     m_registered_gpus_mutex{};
-    std::unordered_set<std::uint32_t>           m_registered_gpus{};
-    mutable std::mutex                     m_cumulative_mutex{};
+    std::shared_ptr<PmcRegistrar>                    m_pmc_registrar;
+    mutable std::mutex                               m_registered_gpus_mutex{};
+    std::unordered_set<std::uint32_t>                m_registered_gpus{};
+    mutable std::mutex                               m_cumulative_mutex{};
     std::unordered_map<std::uint32_t, std::uint64_t> m_cumulative_bytes_per_device{};
 };
 

@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: MIT
 
 #pragma once
-#include <cstdint>
 #include "core/trace_cache/cache_type_traits.hpp"
+#include <cstdint>
 
 #include <functional>
 #include <map>

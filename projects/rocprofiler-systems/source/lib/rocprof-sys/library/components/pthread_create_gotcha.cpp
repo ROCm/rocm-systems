@@ -1,7 +1,6 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include <cstdint>
 #include "library/components/pthread_create_gotcha.hpp"
 #include "core/config.hpp"
 #include "core/locking.hpp"
@@ -14,6 +13,7 @@
 #include "library/thread_data.hpp"
 #include "library/thread_info.hpp"
 #include "library/tracing.hpp"
+#include <cstdint>
 
 #include <timemory/backends/threading.hpp>
 #include <timemory/components/macros.hpp>
@@ -156,15 +156,15 @@ pthread_create_gotcha::wrapper::operator()() const
 
     push_thread_state(ThreadState::Internal);
 
-    std::int64_t     _tid         = -1;
-    void*       _ret         = nullptr;
-    auto        _is_sampling = false;
-    auto        _bundle      = std::shared_ptr<bundle_t>{};
-    auto        _signals     = std::set<int>{};
-    auto        _coverage    = (get_mode() == Mode::Coverage);
-    const auto& _parent_info = thread_info::get(m_config.parent_tid, InternalTID);
-    const auto& _info        = thread_info::init(m_config.offset);
-    auto _sequent_value      = _info->index_data ? _info->index_data->sequent_value : -1;
+    std::int64_t _tid         = -1;
+    void*        _ret         = nullptr;
+    auto         _is_sampling = false;
+    auto         _bundle      = std::shared_ptr<bundle_t>{};
+    auto         _signals     = std::set<int>{};
+    auto         _coverage    = (get_mode() == Mode::Coverage);
+    const auto&  _parent_info = thread_info::get(m_config.parent_tid, InternalTID);
+    const auto&  _info        = thread_info::init(m_config.offset);
+    auto _sequent_value       = _info->index_data ? _info->index_data->sequent_value : -1;
     if(static_cast<size_t>(_sequent_value) >= ROCPROFSYS_MAX_THREADS)
     {
         static std::once_flag thread_limit_warning_flag;

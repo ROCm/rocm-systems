@@ -1,9 +1,9 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include <cstdint>
 #include "core/trace_cache/storage_parser.hpp"
 #include "mocked_types.hpp"
+#include <cstdint>
 
 #include <atomic>
 #include <cstddef>

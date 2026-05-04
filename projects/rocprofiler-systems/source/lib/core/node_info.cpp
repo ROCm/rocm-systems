@@ -1,8 +1,8 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include <cstdint>
 #include "node_info.hpp"
+#include <cstdint>
 
 #include <fstream>
 #include <iostream>
@@ -27,8 +27,9 @@ node_info::node_info()
         LOG_WARNING("Error: Unable to read machine ID from /etc/machine-id!");
     }
 
-    hash = std::hash<std::string>{}(machine_id) % std::numeric_limits<std::int64_t>::max();
-    id   = hash % std::numeric_limits<size_t>::max();
+    hash =
+        std::hash<std::string>{}(machine_id) % std::numeric_limits<std::int64_t>::max();
+    id = hash % std::numeric_limits<size_t>::max();
 
     struct utsname _sys_info;
     if(uname(&_sys_info) != 0)

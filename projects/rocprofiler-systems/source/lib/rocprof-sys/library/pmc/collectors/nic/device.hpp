@@ -182,7 +182,7 @@ private:
     std::string             m_device_name;
     std::string             m_product_name;
     std::string             m_vendor_name;
-    std::uint8_t                 m_rdma_port_count = 0;
+    std::uint8_t            m_rdma_port_count = 0;
     bool                    m_is_supported    = false;
 };
 

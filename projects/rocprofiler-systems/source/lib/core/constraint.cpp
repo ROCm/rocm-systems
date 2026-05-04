@@ -194,7 +194,8 @@ clock_identifier::as_string() const
 //
 //--------------------------------------------------------------------------------------//
 
-spec::spec(clock_identifier _id, double _delay, double _dur, std::uint64_t _n, std::uint64_t _rep)
+spec::spec(clock_identifier _id, double _delay, double _dur, std::uint64_t _n,
+           std::uint64_t _rep)
 : delay{ _delay }
 , duration{ _dur }
 , count{ _n }
@@ -202,7 +203,8 @@ spec::spec(clock_identifier _id, double _delay, double _dur, std::uint64_t _n, s
 , clock_id{ std::move(_id) }
 {}
 
-spec::spec(int _clock_id, double _delay, double _dur, std::uint64_t _n, std::uint64_t _rep)
+spec::spec(int _clock_id, double _delay, double _dur, std::uint64_t _n,
+           std::uint64_t _rep)
 : delay{ _delay }
 , duration{ _dur }
 , count{ _n }

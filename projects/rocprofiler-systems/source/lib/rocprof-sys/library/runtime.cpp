@@ -87,8 +87,9 @@ get_cpu_cid_stack(std::int64_t _tid, std::int64_t _parent)
 {
     struct rocprofsys_cpu_cid_stack
     {};
-    using init_data_t   = thread_data<bool, rocprofsys_cpu_cid_stack>;
-    using thread_data_t = thread_data<std::vector<std::uint64_t>, rocprofsys_cpu_cid_stack>;
+    using init_data_t = thread_data<bool, rocprofsys_cpu_cid_stack>;
+    using thread_data_t =
+        thread_data<std::vector<std::uint64_t>, rocprofsys_cpu_cid_stack>;
 
     auto& _v_tid = thread_data_t::instance(construct_on_thread{ _tid });
     auto& _b_tid = init_data_t::instance(construct_on_thread{ _tid }, false);
@@ -137,14 +138,15 @@ create_cpu_cid_entry(std::int64_t _tid)
     auto&& _cid = get_cpu_cid()++;
     // auto&&     _parent_cid = get_cpu_cid_stack(_p_idx)->back();
     std::uint64_t _parent_cid = 0;
-    auto&    cid_stack   = get_cpu_cid_stack(_p_idx);
+    auto&         cid_stack   = get_cpu_cid_stack(_p_idx);
 
     if(!cid_stack->empty())
     {
         _parent_cid = cid_stack->back();
     }
 
-    std::uint32_t&& _depth = get_cpu_cid_stack(_p_idx)->size() - ((_p_idx == _tid) ? 1 : 0);
+    std::uint32_t&& _depth =
+        get_cpu_cid_stack(_p_idx)->size() - ((_p_idx == _tid) ? 1 : 0);
 
     get_cpu_cid_parents(_tid)->emplace(_cid, std::make_tuple(_parent_cid, _depth));
     return std::make_tuple(_cid, _parent_cid, _depth);

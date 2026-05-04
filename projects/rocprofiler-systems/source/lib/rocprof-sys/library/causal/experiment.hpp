@@ -45,7 +45,7 @@ struct experiment
         sample() = default;
         sample(const base_type&, std::uint64_t);
 
-        mutable std::uint64_t                    count   = 0;
+        mutable std::uint64_t               count   = 0;
         std::vector<binary::inlined_symbol> inlines = {};
 
         bool        operator==(const sample&) const;
@@ -60,8 +60,8 @@ struct experiment
 
     struct record
     {
-        std::int64_t                 startup     = 0;
-        std::uint64_t                runtime     = 0;
+        std::int64_t            startup     = 0;
+        std::uint64_t           runtime     = 0;
         std::vector<experiment> experiments = {};
         std::vector<sample>     samples     = {};
 
@@ -82,9 +82,9 @@ struct experiment
     void serialize(ArchiveT& ar, const unsigned version);
 
     // in nanoseconds
-    static std::uint64_t      get_delay();
+    static std::uint64_t get_delay();
     static double        get_delay_scaling();
-    static std::uint32_t      get_index();
+    static std::uint32_t get_index();
     static bool          is_active();
     static bool          is_selected(std::uint64_t);
     static bool          is_selected(unwind_addr_t);
@@ -105,19 +105,19 @@ struct experiment
                                                 bool = true);
 
     bool              running         = false;
-    std::uint16_t          virtual_speedup = 0;    /// 0-100 in multiples of 5
-    std::uint32_t          index           = 0;    /// experiment number
-    std::uint64_t          sampling_period = 0;    /// period b/t samples [nsec]
-    std::uint64_t          start_time      = 0;    /// start of experiment [nsec]
-    std::uint64_t          end_time        = 0;    /// end of experiment [nsec]
-    std::uint64_t          experiment_time = 0;    /// how long the experiment ran [nsec]
-    std::uint64_t          duration        = 0;    /// runtime - delays [nsec]
-    std::uint64_t          batch_size      = 10;   /// batch factor for experiment/cooloff
-    std::uint64_t          scaling_factor  = 100;  /// scaling factor for experiment time
-    std::uint64_t          sample_delay    = 0;    /// how long to delay [nsec]
-    std::uint64_t          total_delay     = 0;    /// total delays [nsec]
-    std::uint64_t          selected        = 0;    /// num times selected line sampled
-    std::uint64_t          global_delay    = 0;
+    std::uint16_t     virtual_speedup = 0;    /// 0-100 in multiples of 5
+    std::uint32_t     index           = 0;    /// experiment number
+    std::uint64_t     sampling_period = 0;    /// period b/t samples [nsec]
+    std::uint64_t     start_time      = 0;    /// start of experiment [nsec]
+    std::uint64_t     end_time        = 0;    /// end of experiment [nsec]
+    std::uint64_t     experiment_time = 0;    /// how long the experiment ran [nsec]
+    std::uint64_t     duration        = 0;    /// runtime - delays [nsec]
+    std::uint64_t     batch_size      = 10;   /// batch factor for experiment/cooloff
+    std::uint64_t     scaling_factor  = 100;  /// scaling factor for experiment time
+    std::uint64_t     sample_delay    = 0;    /// how long to delay [nsec]
+    std::uint64_t     total_delay     = 0;    /// total delays [nsec]
+    std::uint64_t     selected        = 0;    /// num times selected line sampled
+    std::uint64_t     global_delay    = 0;
     double            delay_scaling   = 0.0;  /// virtual_speedup / 100.
     selected_entry    selection       = {};   /// which line was selected
     progress_points_t init_progress   = {};   /// progress points at start

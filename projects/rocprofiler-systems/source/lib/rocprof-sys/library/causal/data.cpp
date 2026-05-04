@@ -61,7 +61,7 @@ using progress_bundles_t = component_bundle_cache<component::progress_point>;
 auto speedup_seeds     = std::vector<size_t>{};
 auto speedup_divisions = get_env<std::uint16_t>("ROCPROFSYS_CAUSAL_SPEEDUP_DIVISIONS", 5);
 auto speedup_dist      = []() {
-    size_t                _n = std::max<size_t>(1, 100 / speedup_divisions);
+    size_t                     _n = std::max<size_t>(1, 100 / speedup_divisions);
     std::vector<std::uint16_t> _v(_n, std::uint16_t{ 0 });
     std::generate(_v.begin(), _v.end(),
                        [_value = 0]() mutable { return (_value += speedup_divisions); });

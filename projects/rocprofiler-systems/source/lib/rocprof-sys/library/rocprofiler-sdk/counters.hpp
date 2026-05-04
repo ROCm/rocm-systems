@@ -3,11 +3,11 @@
 
 #pragma once
 
-#include <cstdint>
 #include "common/synchronized.hpp"
 #include "core/perfetto.hpp"
 #include "core/timemory.hpp"
 #include "library/rocprofiler-sdk/fwd.hpp"
+#include <cstdint>
 
 #include <timemory/utility/types.hpp>
 
@@ -61,8 +61,8 @@ struct counter_event
 struct counter_storage
 {
     const client_data*                    tool_data          = nullptr;
-    std::uint64_t                              device_id          = 0;
-    std::int64_t                               index              = 0;
+    std::uint64_t                         device_id          = 0;
+    std::int64_t                          index              = 0;
     std::string                           metric_name        = {};
     std::string                           metric_description = {};
     std::string                           storage_name       = {};

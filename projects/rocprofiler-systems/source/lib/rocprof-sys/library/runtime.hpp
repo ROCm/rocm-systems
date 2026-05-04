@@ -3,7 +3,6 @@
 
 #pragma once
 
-#include <cstdint>
 #include "api.hpp"
 #include "common/defines.h"
 #include "core/common.hpp"
@@ -18,6 +17,7 @@
 #include "library/components/pthread_gotcha.hpp"
 #include "library/components/vaapi_gotcha.hpp"
 #include "library/thread_data.hpp"
+#include <cstdint>
 
 #include <timemory/backends/threading.hpp>
 #include <timemory/macros/language.hpp>
@@ -65,7 +65,8 @@ std::atomic<std::uint64_t>&
 get_cpu_cid() TIMEMORY_HOT;
 
 unique_ptr_t<std::vector<std::uint64_t>>&
-get_cpu_cid_stack(std::int64_t _tid = threading::get_id(), std::int64_t _parent = 0) TIMEMORY_HOT;
+get_cpu_cid_stack(std::int64_t _tid    = threading::get_id(),
+                  std::int64_t _parent = 0) TIMEMORY_HOT;
 
 using cpu_cid_data_t       = std::tuple<std::uint64_t, std::uint64_t, std::uint32_t>;
 using cpu_cid_pair_t       = std::tuple<std::uint64_t, std::uint32_t>;
@@ -78,7 +79,8 @@ cpu_cid_data_t
 create_cpu_cid_entry(std::int64_t _tid = threading::get_id()) TIMEMORY_HOT;
 
 cpu_cid_pair_t
-get_cpu_cid_entry(std::uint64_t _cid, std::int64_t _tid = threading::get_id()) TIMEMORY_HOT;
+get_cpu_cid_entry(std::uint64_t _cid,
+                  std::int64_t  _tid = threading::get_id()) TIMEMORY_HOT;
 
 tim::mutex_t&
 get_cpu_cid_stack_lock(std::int64_t _tid = threading::get_id()) TIMEMORY_HOT;

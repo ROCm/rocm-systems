@@ -48,9 +48,9 @@ public:
 
 private:
     std::set<std::string, std::less<>> m_trace_regions;
-    std::unordered_set<std::uint64_t>       m_active_range_ids;
+    std::unordered_set<std::uint64_t>  m_active_range_ids;
     std::atomic<bool>                  m_region_filter_active{ false };
-    std::atomic<std::uint32_t>              m_active_region_count{ 0 };
+    std::atomic<std::uint32_t>         m_active_region_count{ 0 };
     std::atomic<bool>                  m_user_paused{ false };
 
     std::vector<callback_t> m_resume_callbacks;

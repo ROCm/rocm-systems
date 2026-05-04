@@ -1,7 +1,6 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include <cstdint>
 #include "argparse.hpp"
 #include "common/environment.hpp"
 #include "common/path.hpp"
@@ -9,6 +8,7 @@
 #include "exception.hpp"
 #include "gpu.hpp"
 #include "state.hpp"
+#include <cstdint>
 
 #include <timemory/settings/types.hpp>
 #include <timemory/utility/filepath.hpp>
@@ -979,8 +979,8 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
             .action([&](parser_t& p) {
                 update_env(
                     _data, "ROCPROFSYS_SAMPLING_TIDS",
-                    fmt::format("{}",
-                                fmt::join(p.get<std::vector<std::int64_t>>("tids"), ", ")));
+                    fmt::format(
+                        "{}", fmt::join(p.get<std::vector<std::int64_t>>("tids"), ", ")));
             });
 
         _data.processed_environs.emplace("tids");

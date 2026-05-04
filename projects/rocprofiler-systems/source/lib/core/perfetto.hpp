@@ -3,9 +3,9 @@
 
 #pragma once
 
-#include <cstdint>
 #include "categories.hpp"
 #include "common.hpp"
+#include <cstdint>
 
 #include "config.hpp"
 
@@ -37,8 +37,8 @@ struct perfetto_counter_track
 {
     using category_type = Tp;
     using track_map_t   = std::map<std::uint32_t, std::vector<::perfetto::CounterTrack>>;
-    using name_map_t    = std::map<std::uint32_t, std::vector<std::unique_ptr<std::string>>>;
-    using data_t        = std::pair<name_map_t, track_map_t>;
+    using name_map_t = std::map<std::uint32_t, std::vector<std::unique_ptr<std::string>>>;
+    using data_t     = std::pair<name_map_t, track_map_t>;
 
     static auto   init() { (void) get_data(); }
     static auto   exists(size_t _idx, std::int64_t _n = -1);

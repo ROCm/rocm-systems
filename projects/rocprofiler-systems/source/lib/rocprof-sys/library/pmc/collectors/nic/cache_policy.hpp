@@ -140,8 +140,8 @@ struct cache_policy
         _enabled_metrics.value = enabled_metrics_cfg.value & supported_metrics.value;
 
         trace_cache::get_buffer_storage().store(trace_cache::ainic_pmc_sample{
-            _enabled_metrics, static_cast<std::uint32_t>(device_id), device_name, timestamp,
-            metric_values });
+            _enabled_metrics, static_cast<std::uint32_t>(device_id), device_name,
+            timestamp, metric_values });
     }
 };
 

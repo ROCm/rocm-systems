@@ -210,10 +210,10 @@ struct config
     bool                    include_filename   = false;
     bool                    full_filepath      = false;
     bool                    annotate_trace     = false;
-    std::int32_t                 ignore_stack_depth = 0;
-    std::int32_t                 base_stack_depth   = -1;
-    std::int32_t                 verbose            = 0;
-    std::int64_t                 depth_tracker      = 0;
+    std::int32_t            ignore_stack_depth = 0;
+    std::int32_t            base_stack_depth   = -1;
+    std::int32_t            verbose            = 0;
+    std::int64_t            depth_tracker      = 0;
     std::string             base_module_path   = {};
     strset_t                restrict_functions = {};
     strset_t                restrict_filenames = {};
@@ -236,7 +236,7 @@ get_config()
     static auto*              _instance    = new config{};
     static thread_local auto* _tl_instance = []() {
         static std::atomic<std::uint32_t> _count{ 0 };
-        auto                         _cnt = _count++;
+        auto                              _cnt = _count++;
         if(_cnt == 0) return _instance;
 
         auto* _tmp               = new config{};

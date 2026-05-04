@@ -1,13 +1,13 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include <cstdint>
 #include "library/rocprofiler-sdk/counters.hpp"
 #include "core/agent_manager.hpp"
 #include "core/demangler.hpp"
 #include "core/trace_cache/cache_manager.hpp"
 #include "core/trace_cache/metadata_registry.hpp"
 #include "library/rocprofiler-sdk/fwd.hpp"
+#include <cstdint>
 
 #include <memory>
 #include <timemory/utility/types.hpp>

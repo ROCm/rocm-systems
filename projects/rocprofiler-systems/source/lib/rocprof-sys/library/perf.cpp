@@ -1,13 +1,13 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include <cstdint>
 #include "library/perf.hpp"
 #include "core/locking.hpp"
 #include "core/state.hpp"
 #include "core/timemory.hpp"
 #include "core/utility.hpp"
 #include "library/thread_data.hpp"
+#include <cstdint>
 
 #include <timemory/log/logger.hpp>
 #include <timemory/log/macros.hpp>
@@ -179,7 +179,7 @@ std::optional<std::string>
 perf_event::open(double _freq, std::uint32_t _batch_size, pid_t _pid, int _cpu)
 {
     ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
-    std::uint64_t               _period = (1.0 / _freq) * units::sec;
+    std::uint64_t          _period = (1.0 / _freq) * units::sec;
     struct perf_event_attr _pe;
 
     if(_batch_size > 0)
@@ -542,7 +542,8 @@ perf_event::record::locate_field() const
 
     // ip
     if constexpr(SampleT == sample::ip) return reinterpret_cast<Tp>(p);
-    if(m_source != nullptr && m_source->is_sampling(sample::ip)) p += sizeof(std::uint64_t);
+    if(m_source != nullptr && m_source->is_sampling(sample::ip))
+        p += sizeof(std::uint64_t);
 
     // pid, tid
     if constexpr(SampleT == sample::pid_tid) return reinterpret_cast<Tp>(p);
@@ -551,15 +552,18 @@ perf_event::record::locate_field() const
 
     // time
     if constexpr(SampleT == sample::time) return reinterpret_cast<Tp>(p);
-    if(m_source != nullptr && m_source->is_sampling(sample::time)) p += sizeof(std::uint64_t);
+    if(m_source != nullptr && m_source->is_sampling(sample::time))
+        p += sizeof(std::uint64_t);
 
     // addr
     if constexpr(SampleT == sample::addr) return reinterpret_cast<Tp>(p);
-    if(m_source != nullptr && m_source->is_sampling(sample::addr)) p += sizeof(std::uint64_t);
+    if(m_source != nullptr && m_source->is_sampling(sample::addr))
+        p += sizeof(std::uint64_t);
 
     // id
     if constexpr(SampleT == sample::id) return reinterpret_cast<Tp>(p);
-    if(m_source != nullptr && m_source->is_sampling(sample::id)) p += sizeof(std::uint64_t);
+    if(m_source != nullptr && m_source->is_sampling(sample::id))
+        p += sizeof(std::uint64_t);
 
     // stream_id
     if constexpr(SampleT == sample::stream_id) return reinterpret_cast<Tp>(p);

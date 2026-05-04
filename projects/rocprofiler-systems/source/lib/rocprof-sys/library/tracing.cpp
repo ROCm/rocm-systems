@@ -1,13 +1,13 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include <cstdint>
 #include "library/tracing.hpp"
 #include "core/concepts.hpp"
 #include "core/config.hpp"
 #include "core/state.hpp"
 #include "library/thread_data.hpp"
 #include "library/thread_info.hpp"
+#include <cstdint>
 
 #include <timemory/hash/types.hpp>
 #include <timemory/process/threading.hpp>

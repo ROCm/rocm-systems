@@ -3,9 +3,9 @@
 
 #pragma once
 
-#include <cstdint>
 #include "library/pmc/collectors/cpu/types.hpp"
 #include "library/pmc/device_providers/procfs/drivers/driver.hpp"
+#include <cstdint>
 
 #include <spdlog/fmt/fmt.h>
 

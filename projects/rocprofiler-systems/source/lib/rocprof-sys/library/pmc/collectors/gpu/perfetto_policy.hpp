@@ -93,7 +93,7 @@ struct pcie_track_set
 
 struct perfetto_amd_smi_sample
 {
-    std::uint64_t                      timestamp;
+    std::uint64_t                 timestamp;
     pmc::collectors::gpu::metrics metrics;
 };
 
@@ -101,7 +101,7 @@ struct perfetto_device_data
 {
     std::unique_ptr<std::vector<perfetto_amd_smi_sample>> samples;
     enabled_metrics                                       supported_metrics;
-    std::unordered_map<std::uint32_t, track_description>       tracks;
+    std::unordered_map<std::uint32_t, track_description>  tracks;
     xgmi_track_set                                        xgmi_tracks;
     pcie_track_set                                        pcie_tracks;
 };
@@ -334,8 +334,8 @@ private:
         }
 
         pmc::collectors::gpu::enabled_metrics effective_metrics;
-        effective_metrics.value =
-            static_cast<std::uint32_t>(enabled_metrics_cfg.value & supported_metrics.value);
+        effective_metrics.value = static_cast<std::uint32_t>(enabled_metrics_cfg.value &
+                                                             supported_metrics.value);
 
         if(effective_metrics.value == 0)
         {
@@ -370,7 +370,7 @@ private:
 private:
     static void process_basic_metrics(
         size_t device_index, std::uint64_t ts, const metrics& metric_values,
-        const enabled_metrics&                                   effective_metrics,
+        const enabled_metrics&                                        effective_metrics,
         std::unordered_map<std::uint32_t, detail::track_description>& tracks)
     {
         auto gfx_it = tracks.find(detail::GFX_BUSY_VALUE);
@@ -455,8 +455,8 @@ private:
 
     static void process_xcp_activity(
         size_t device_index, std::uint64_t ts,
-        const pmc::collectors::gpu::metrics&                     metric_values,
-        const pmc::collectors::gpu::enabled_metrics&             effective_metrics,
+        const pmc::collectors::gpu::metrics&                          metric_values,
+        const pmc::collectors::gpu::enabled_metrics&                  effective_metrics,
         std::unordered_map<std::uint32_t, detail::track_description>& tracks)
     {
         // Per-XCP VCN busy metrics (MI300)
