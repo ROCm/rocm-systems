@@ -473,7 +473,7 @@ inline bool isKernelArgPrefetchSupported() {
   HIP_CHECK(hipGetDeviceProperties(&props, deviceId));
   std::cout << "Device Id = " << deviceId << " props.major = " << props.major
             << " props.minor = " << props.minor << std::endl;
-  return (props.major == 12 && props.minor == 5) ? true : false;
+  return (props.major == 12 && props.minor >= 5) ? true : false;
 #else
   std::cout << "Only Supported for AMD in Linux" << std::endl;
   return false;

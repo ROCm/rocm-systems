@@ -85,7 +85,7 @@ inline constexpr uint32_t SHT_PROGBITS = 1;
 inline constexpr uint32_t SHT_SYMTAB = 2;
 inline constexpr uint32_t SHT_STRTAB = 3;
 inline constexpr uint32_t SHT_NOTE = 7;
-inline constexpr uint32_t SHT_NOBITS = 8;  // ELF spec: section occupies no file space (e.g. .bss)
+inline constexpr uint32_t SHT_NOBITS = 8; // ELF spec: section occupies no file space (e.g. .bss)
 inline constexpr uint32_t SHT_DYNSYM = 11;
 
 /// @brief AMDGPU vendor specific notes for Code Object V3.

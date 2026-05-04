@@ -94,7 +94,7 @@ TEST(EncodingTranslator, Sop1PreservesRegisters) {
   src.encoding = 0x17D;
   uint32_t w0 = std::bit_cast<uint32_t>(src);
 
-  auto result = translate_encoding_cdna4_to_rdna4(kEnc_SOP1, w0, 0, 0, 5);
+  auto result = cdna4_to_rdna4::translate_encoding_cdna4_to_rdna4(kEnc_SOP1, w0, 0, 0, 5);
 
   ASSERT_EQ(result.word_count, 1);
   auto dst = std::bit_cast<rdna4::Sop1MachineInst>(result.words[0]);
@@ -113,7 +113,7 @@ TEST(EncodingTranslator, Sop2PreservesRegisters) {
   src.encoding = 0x2;
   uint32_t w0 = std::bit_cast<uint32_t>(src);
 
-  auto result = translate_encoding_cdna4_to_rdna4(kEnc_SOP2, w0, 0, 0, 7);
+  auto result = cdna4_to_rdna4::translate_encoding_cdna4_to_rdna4(kEnc_SOP2, w0, 0, 0, 7);
 
   ASSERT_EQ(result.word_count, 1);
   auto dst = std::bit_cast<rdna4::Sop2MachineInst>(result.words[0]);
@@ -130,7 +130,7 @@ TEST(EncodingTranslator, SoppPreservesSimm16) {
   src.encoding = 0x17F;
   uint32_t w0 = std::bit_cast<uint32_t>(src);
 
-  auto result = translate_encoding_cdna4_to_rdna4(kEnc_SOPP, w0, 0, 0, 12);
+  auto result = cdna4_to_rdna4::translate_encoding_cdna4_to_rdna4(kEnc_SOPP, w0, 0, 0, 12);
 
   ASSERT_EQ(result.word_count, 1);
   auto dst = std::bit_cast<rdna4::SoppMachineInst>(result.words[0]);
@@ -151,7 +151,8 @@ TEST(EncodingTranslator, SmemRemapsCoherency) {
   uint32_t words[2];
   std::memcpy(words, &src, sizeof(src));
 
-  auto result = translate_encoding_cdna4_to_rdna4(kEnc_SMEM, words[0], words[1], 0, 0);
+  auto result =
+      cdna4_to_rdna4::translate_encoding_cdna4_to_rdna4(kEnc_SMEM, words[0], words[1], 0, 0);
 
   ASSERT_EQ(result.word_count, 2);
   rdna4::SmemMachineInst dst{};
@@ -179,7 +180,8 @@ TEST(EncodingTranslator, Vop3PreservesModifiers) {
   uint32_t words[2];
   std::memcpy(words, &src, sizeof(src));
 
-  auto result = translate_encoding_cdna4_to_rdna4(kEnc_VOP3, words[0], words[1], 0, 100);
+  auto result =
+      cdna4_to_rdna4::translate_encoding_cdna4_to_rdna4(kEnc_VOP3, words[0], words[1], 0, 100);
 
   ASSERT_EQ(result.word_count, 2);
   rdna4::Vop3MachineInst dst{};
@@ -195,7 +197,7 @@ TEST(EncodingTranslator, Vop3PreservesModifiers) {
 }
 
 TEST(EncodingTranslator, UnknownEncodingReturnsEmpty) {
-  auto result = translate_encoding_cdna4_to_rdna4(0xFFFF, 0, 0, 0, 0);
+  auto result = cdna4_to_rdna4::translate_encoding_cdna4_to_rdna4(0xFFFF, 0, 0, 0, 0);
   EXPECT_EQ(result.word_count, 0);
 }
 
@@ -207,12 +209,12 @@ TEST(EncodingTranslator, DecodeEncodeRoundTrip) {
   src.encoding = 0x17D;
   uint32_t w0 = std::bit_cast<uint32_t>(src);
 
-  auto fields = decode_sop1_cdna4(w0);
+  auto fields = cdna4_to_rdna4::decode_sop1_cdna4(w0);
   EXPECT_EQ(fields.ssrc0, 55u);
   EXPECT_EQ(fields.sdst, 33u);
   EXPECT_EQ(fields.op, 4u);
 
-  auto result = encode_sop1_rdna4(fields, 4);
+  auto result = cdna4_to_rdna4::encode_sop1_rdna4(fields, 4);
   ASSERT_EQ(result.word_count, 1);
   auto dst = std::bit_cast<rdna4::Sop1MachineInst>(result.words[0]);
   EXPECT_EQ(dst.ssrc0, 55);

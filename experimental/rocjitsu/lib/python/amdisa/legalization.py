@@ -69,8 +69,9 @@ class LegalizationAction:
         return LegalizationAction('substitute', target_opcode=target_opcode)
 
     @staticmethod
-    def lower(kind: LoweringKind = LoweringKind.GENERIC) -> LegalizationAction:
-        return LegalizationAction('lower', lowering_kind=kind)
+    def lower(kind: LoweringKind = LoweringKind.GENERIC,
+              target_opcode: int = 0) -> LegalizationAction:
+        return LegalizationAction('lower', target_opcode=target_opcode, lowering_kind=kind)
 
     @staticmethod
     def expand(kind: ExpansionKind) -> LegalizationAction:
@@ -123,14 +124,16 @@ def _build_rename_map() -> dict[str, str]:
                     'SCRATCH_LOAD_', 'SCRATCH_STORE_',
                     'DS_LOAD_', 'DS_STORE_',
                     'DS_READ_', 'DS_WRITE_',
+                    'FLAT_LOAD_', 'FLAT_STORE_',
                     'GLOBAL_LOAD_', 'GLOBAL_STORE_'):
         for old_suffix, new_suffix in _dword_to_b.items():
             _add(f'{prefix}{old_suffix}', f'{prefix}{new_suffix}')
 
-    # FLAT → GLOBAL for load/store/atomic (FLAT is the legacy unified form)
-    for op in ('LOAD_', 'STORE_', 'ATOMIC_'):
-        for old_suffix, new_suffix in _dword_to_b.items():
-            _add(f'FLAT_{op}{old_suffix}', f'GLOBAL_{op}{new_suffix}')
+    # NOTE: FLAT_LOAD_/FLAT_STORE_ instructions canonicalize within the FLAT
+    # family (FLAT_LOAD_DWORD -> FLAT_LOAD_B32) via the prefix sweep above,
+    # NOT cross-family to GLOBAL_LOAD_*. CDNA4 and later have both FLAT (flat
+    # segment) and FLAT_GLBL/GLOBAL (global segment) as distinct encodings,
+    # so a FLAT-family mnemonic should not collapse onto a GLOBAL-family one.
 
     # --- Sub-dword type nomenclature: UBYTE→U8, SBYTE→I8, etc. ---
     _sub_dword = {
@@ -149,10 +152,8 @@ def _build_rename_map() -> dict[str, str]:
                     'BUFFER_LOAD_', 'BUFFER_STORE_'):
         for old_suffix, new_suffix in _sub_dword.items():
             _add(f'{prefix}{old_suffix}', f'{prefix}{new_suffix}')
-    # FLAT sub-dword → GLOBAL sub-dword
-    for op in ('LOAD_', 'STORE_'):
-        for old_suffix, new_suffix in _sub_dword.items():
-            _add(f'FLAT_{op}{old_suffix}', f'GLOBAL_{op}{new_suffix}')
+    # NOTE: see comment above on the dword sweep - FLAT sub-dword should
+    # canonicalize within the FLAT family, not cross to GLOBAL.
 
     # --- BUFFER_LOAD/STORE format renames ---
     for suffix in ('D16_X', 'D16_XY', 'D16_XYZ', 'D16_XYZW',
@@ -592,29 +593,39 @@ def _apply_domain_rules(
     for entry in entries:
         name = entry.src_mnemonic
 
+        # Helper: preserve any target_opcode the classifier identified, so that
+        # downstream encoding/semantic translators have the right dst_op even
+        # when the action is overridden to flag a domain-specific lowering.
+        prev_op = entry.action.target_opcode
+
         if name in ('S_WAITCNT', 'S_WAITCNT_VSCNT',
                      'S_WAITCNT_VMCNT', 'S_WAITCNT_LGKMCNT',
                      'S_WAITCNT_EXPCNT'):
             if src_wc != dst_wc:
-                entry.action = LegalizationAction.lower(LoweringKind.WAITCNT)
+                entry.action = LegalizationAction.lower(
+                    LoweringKind.WAITCNT, target_opcode=prev_op)
 
         if name.startswith('S_WAIT_') and name not in (
             'S_WAITCNT', 'S_WAITCNT_VSCNT', 'S_WAITCNT_VMCNT',
             'S_WAITCNT_LGKMCNT', 'S_WAITCNT_EXPCNT',
         ):
             if src_wc != dst_wc:
-                entry.action = LegalizationAction.lower(LoweringKind.WAITCNT)
+                entry.action = LegalizationAction.lower(
+                    LoweringKind.WAITCNT, target_opcode=prev_op)
 
         if name == 'S_BARRIER':
             if not src_has_split_barrier and dst_has_split_barrier:
-                entry.action = LegalizationAction.lower(LoweringKind.BARRIER)
+                entry.action = LegalizationAction.lower(
+                    LoweringKind.BARRIER, target_opcode=prev_op)
         if name in ('S_BARRIER_SIGNAL', 'S_BARRIER_WAIT'):
             if src_has_split_barrier and not dst_has_split_barrier:
-                entry.action = LegalizationAction.lower(LoweringKind.BARRIER)
+                entry.action = LegalizationAction.lower(
+                    LoweringKind.BARRIER, target_opcode=prev_op)
 
         if name.startswith('FLAT_LOAD_') or name.startswith('FLAT_STORE_'):
             if dst_isa in _SEPARATE_GLOBAL_ISAS and src_isa not in _SEPARATE_GLOBAL_ISAS:
-                entry.action = LegalizationAction.lower(LoweringKind.FLAT_MEMORY)
+                entry.action = LegalizationAction.lower(
+                    LoweringKind.FLAT_MEMORY, target_opcode=prev_op)
 
         if name.startswith('V_MFMA_') and not dst_has_mfma:
             entry.action = LegalizationAction.expand(ExpansionKind.MFMA)
