@@ -3498,8 +3498,8 @@ rocprofiler-sdk:
           block: SQG
           event: 24
     - name: SQG_LEVEL_WAVES
-      description: Number of in-flight waves observed by SQG. Best used with accumulate() 
-        functions as part of a derived counter (per shader engine). SQG_PERF_SEL_LEVEL_WAVES.
+      description: Number of in-flight waves observed by SQG. Best used with accumulate() functions 
+        as part of a derived counter (per shader engine). SQG_PERF_SEL_LEVEL_WAVES.
       properties: []
       definitions:
         - architectures:
@@ -3674,8 +3674,8 @@ rocprofiler-sdk:
           block: SQG
           event: 26
     - name: SQG_WAVES
-      description: Number of waves dispatched and observed by SQG, summed across all graphics 
-        and compute pipeline stages (per shader engine). SQG_PERF_SEL_WAVES.
+      description: Number of waves dispatched and observed by SQG, summed across all graphics and 
+        compute pipeline stages (per shader engine). SQG_PERF_SEL_WAVES.
       properties: []
       definitions:
         - architectures:
@@ -3768,8 +3768,8 @@ rocprofiler-sdk:
           block: SQG
           event: 28
     - name: SQG_WAVES_INITIAL_PREFETCH
-      description: Number of waves that issued an initial instruction prefetch (per shader 
-        engine). SQG_PERF_SEL_WAVES_INITIAL_PREFETCH.
+      description: Number of waves that issued an initial instruction prefetch (per shader engine). 
+        SQG_PERF_SEL_WAVES_INITIAL_PREFETCH.
       properties: []
       definitions:
         - architectures:
