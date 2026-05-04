@@ -1,29 +1,17 @@
-/*
- * Copyright of Aristotle TODO.  All rights reserved.
-
+/* Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
+ *
+ * SPDX-License-Identifier: MIT
  */
 
-/*
- * Gpu to File memcpy.
- * This is an example program moving data from GPU memory to a file
 
-
-//TODO 
- * For verification, input data has a pattern.
+/* buffertofile - AMD Infinity Storage buffer to file
+ *
+ * Usage: ./buffertofile DEST gpu_id
+ *
+ * This _very_basic_ program copies from a gpu buffer to DEST.
  * User can verify the output file's data after write using:
  * hexdump -C <dst_path>
- * 0000000 abab abab abab abab abab abab abab abab  |................|
- *
- * ./bufregister_write <dst_path> <gpu_id>
- *
- * | Output |
- * cuFileWrite with device memory registration
- * Open file: <dst_path> for writing
- * Allocate device memory of size: 131072 on GPU ID: <gpu_id>
- * Register device memory of size: 131072
- * Write from device memory
- * Written bytes: 131072
- * Deregister device memory
+ * 0000000 67 67 67 67 67 67 67 67 |................|
  */
 
 
@@ -100,7 +88,7 @@ close_file(const char *path, int fd, hipFileHandle_t handle)
 }
 
 
-//main TODO DOC
+// Size of data to be copied (must be multiple of 4096)
 static constexpr size_t SIZE = 8192;
 
 int
@@ -109,15 +97,10 @@ main(int argc, char *argv[])
     const char     *dst_path;
     int             dst_fd, gpu_id=-1;
     hipFileHandle_t dst_handle;
-    // void           *devbuf;
-    // hipError_t      hip_err;
     hipFileError_t  exit_status;
-    // size_t          buffer_size, file_size, block_size;
     ssize_t         nread{};
-
-	int ret = EXIT_SUCCESS;
-	void *devPtr = nullptr;
-    // hoff_t          file_offset{};
+	int 			ret = EXIT_SUCCESS;
+	void 			*devPtr = nullptr;
 
     if (argc != 3) {
         fprintf(stderr, "Usage: %s FILE_DEST GPU\n", argv[0]);
@@ -128,9 +111,6 @@ main(int argc, char *argv[])
     gpu_id = std::atoi(argv[2]);
    	CHECK_HIP(hipSetDevice(gpu_id));
 
-
-
-
 	// Opens a file to write
 	if (open_file(dst_path, O_WRONLY | O_CREAT, S_IWUSR | S_IRUSR | S_IRGRP | S_IROTH, &dst_fd,
                   &dst_handle)) {
@@ -138,11 +118,10 @@ main(int argc, char *argv[])
         goto program_exit;
     }
 	
-	// Allocate device memory and fill with 0xab
-
+	// Allocate device memory and fill with 0x67
 	fprintf(stdout, "Allocate device memory\n");
 	CHECK_HIP(hipMalloc(&devPtr, SIZE));
-	CHECK_HIP(hipMemset(static_cast<void*>(devPtr), 0xab, SIZE));
+	CHECK_HIP(hipMemset(static_cast<void*>(devPtr), 0x67, SIZE));
 	CHECK_HIP(hipStreamSynchronize(nullptr));
 
 	// Registers device memory
@@ -159,6 +138,7 @@ main(int argc, char *argv[])
 	if (nread < 0) {
 		fprintf(stderr, "Could not write in %s (%s)\n", dst_path, IS_HIPFILE_ERR(nread) ? HIPFILE_ERRSTR(nread) : strerror(errno));
 		ret = EXIT_FAILURE;
+		goto close_file;
 	} else {
 
 		fprintf(stdout, "Written bytes %ld\n", nread);
@@ -171,9 +151,10 @@ main(int argc, char *argv[])
 	if (exit_status.err != hipFileSuccess) {
 		fprintf(stderr, "CBuffer deregister failed:  %s\n", IS_HIPFILE_ERR(exit_status.err) ? HIPFILE_ERRSTR(exit_status.err) : strerror(errno));
 		ret = EXIT_FAILURE;
+		goto close_file;
 	}
 
-// Cleanup labels
+	// Cleanup labels
 close_file:
     if (close_file(dst_path, dst_fd, dst_handle)) {
         ret = EXIT_FAILURE;

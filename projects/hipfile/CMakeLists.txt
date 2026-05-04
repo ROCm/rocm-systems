@@ -289,6 +289,7 @@ endif()
 # Add the example directory
 if(AIS_INSTALL_EXAMPLES)
     add_subdirectory(examples/aiscp)
+    add_subdirectory(examples//offsetcp)
     add_subdirectory(examples/api)
 endif()
 
