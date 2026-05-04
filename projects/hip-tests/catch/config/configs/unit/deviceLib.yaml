@@ -489,3 +489,6 @@ deviceLib:
     # "=== This is newly added test to check ASAN memory errors deduced from rocDecode ==="
     # "=== during ASAN/memleak detection work on Linux ==="
     disabled: [amd_linux, amd_windows]
+  Unit_device_memcpy_async:
+    <<: *level_2
+    tags: [memory]

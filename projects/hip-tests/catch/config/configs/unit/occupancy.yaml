@@ -57,3 +57,12 @@ occupancy:
   Unit_hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags_InvalidArgs: *level_2
   Unit_hipOccupancyAvailableDynamicSMemPerBlock_Negative: *level_2
   Unit_hipOccupancyAvailableDynamicSMemPerBlock_Positive: *level_2
+  Unit_hipOccupancyMaxActiveClusters_Positive_RangeValidation: *level_2
+  Unit_hipOccupancyMaxActiveClusters_Negative_Zero_Cluster: *level_2
+  Unit_hipOccupancyMaxActiveClusters_Negative_Parameters: *level_2
+  Unit_hipOccupancyMaxPotentialClusterSize_Positive_RangeValidation: *level_2
+  Unit_hipOccupancyMaxPotentialClusterSize_Verify_Launch:
+    <<: *level_2
+    # SWDEV-SWDEV-515087 - disabled until distributed shared memory is supported
+    disabled: [amd_linux]
+  Unit_hipOccupancyMaxPotentialClusterSize_Negative_Parameters: *level_2

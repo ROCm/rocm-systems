@@ -409,13 +409,13 @@ void HipFunctorTests::TestForFunctorContainInStructObj(void) {
  *   3. To verify whether prefetch does work for an aql packet,
  *      check "prefetch: SetHeader" keyword in AMD log.
  */
-TEST_CASE("Unit_hipLaunchParmFunctor_kernel_arg_prefetch") {
+HIP_TEST_CASE(Unit_hipLaunchParmFunctor_kernel_arg_prefetch) {
   if (!HipTest::isKernelArgPrefetchSupported()) {
     HipTest::HIP_SKIP_TEST("Kernel arg prefetch is not supported on the device. Skipped.");
     return;
   }
 #else
-TEST_CASE("Unit_hipLaunchParmFunctor") {
+HIP_TEST_CASE(Unit_hipLaunchParmFunctor) {
 #endif  // KERNEL_ARG_PREFETCH
   HipFunctorTests FunctorTests;
 

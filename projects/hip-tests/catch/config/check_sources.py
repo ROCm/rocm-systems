@@ -26,7 +26,8 @@ def find_source_test_cases(source_root, group, is_unit):
     # A commented-out HIP_TEST_CASE will still be detected as a source test
     # and flagged as missing if it has no YAML entry.
     pattern = re.compile(
-        r'(?:HIP_TEST_CASE|HIP_TEMPLATE_TEST_CASE)\(\s*(\w+)\s*[,)]'
+        r'\b(?:HIP_TEST_CASE|HIP_TEMPLATE_TEST_CASE|TEST_CASE|TEMPLATE_TEST_CASE)'
+        r'\(\s*(\w+)\s*[,)]'
     )
     for root, _, files in os.walk(source_dir):
         for filename in files:

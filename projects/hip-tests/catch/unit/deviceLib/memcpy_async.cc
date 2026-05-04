@@ -81,7 +81,7 @@ __global__ void vector_add_mem_layout(float* out, float* a, float* b, float x, s
   tg.sync();
 }
 
-TEST_CASE("Unit_device_memcpy_async") {
+HIP_TEST_CASE(Unit_device_memcpy_async) {
   std::vector<std::string> supported_arch{"gfx1250"};
   hipDeviceProp_t prop;
 

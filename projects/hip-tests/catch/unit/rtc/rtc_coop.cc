@@ -210,7 +210,7 @@ void runAndCompileTest(const std::tuple<Types...> types) {
   HIPRTC_CHECK(hiprtcDestroyProgram(&prog));
 }
 
-TEST_CASE("Unit_Rtc_CoopReduce")
+HIP_TEST_CASE(Unit_Rtc_CoopReduce)
 {
   const std::tuple<int, unsigned int, long long, unsigned long long, float, half, double> allTypes;
   const std::tuple<int, unsigned int, long long, unsigned long long> integralTypes;

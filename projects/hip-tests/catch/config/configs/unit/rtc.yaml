@@ -215,3 +215,7 @@ rtc:
     tags: [compile]
   Unit_Rtc_CoopReduce:
     <<: *level_2
+    tags: [compile]
+  Unit_hiprtc_fp8_simple:
+    <<: *level_2
+    tags: [integration]

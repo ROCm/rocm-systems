@@ -29,7 +29,7 @@ inline bool hipHostRegisterSupported() {
 }
 
 
-TEST_CASE("Unit_hipHostUnregister_MemoryNotAccessibleAfterUnregister") {
+HIP_TEST_CASE(Unit_hipHostUnregister_MemoryNotAccessibleAfterUnregister) {
   if (!hipHostRegisterSupported()) {
     return;
   }

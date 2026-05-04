@@ -32,6 +32,9 @@ kernel:
   Unit_hipLaunchParmFunctor:
     <<: *level_2
     tags: [launch]
+  Unit_hipLaunchParmFunctor_kernel_arg_prefetch:
+    <<: *level_2
+    tags: [launch]
   Unit_kernel_chkConstantViaKernel:
     <<: *level_2
     tags: [memory]

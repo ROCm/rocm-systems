@@ -79,7 +79,7 @@ static void VerifyDataOnDevice(int* data, hipStream_t stream) {
  *  - Allocates managed memory, writes data, prefetches to device, verifies data
  *  - Validates that prefetch actually occurred using hipMemRangeGetAttribute
  */
-TEST_CASE("Unit_hipMemPrefetchBatchAsync_SingleOperationSingleLocation") {
+HIP_TEST_CASE(Unit_hipMemPrefetchBatchAsync_SingleOperationSingleLocation) {
   REQUIRE_MANAGED_ACCESS_DEVICE(device);
 
   LinearAllocGuard<int> managed_memory(LinearAllocs::hipMallocManaged, kTestBufferBytes);
@@ -120,7 +120,7 @@ TEST_CASE("Unit_hipMemPrefetchBatchAsync_SingleOperationSingleLocation") {
  *    2. Each operation to different location (numPrefetchLocs=count)
  *    3. Mixed grouped locations (some to location A, others to B)
  */
-TEST_CASE("Unit_hipMemPrefetchBatchAsync_LocationDistribution") {
+HIP_TEST_CASE(Unit_hipMemPrefetchBatchAsync_LocationDistribution) {
   REQUIRE_MANAGED_ACCESS_DEVICE(device);
 
   enum class DistributionPattern { AllSame, EachDifferent, MixedGrouped };
@@ -224,7 +224,7 @@ TEST_CASE("Unit_hipMemPrefetchBatchAsync_LocationDistribution") {
  *  - Prefetch Device->Host->Device and verify data integrity throughout
  *  - Tests round-trip data preservation and accessibility
  */
-TEST_CASE("Unit_hipMemPrefetchBatchAsync_RoundTripDataIntegrity") {
+HIP_TEST_CASE(Unit_hipMemPrefetchBatchAsync_RoundTripDataIntegrity) {
   REQUIRE_MANAGED_ACCESS_DEVICE(device);
 
   LinearAllocGuard<int> managed_memory(LinearAllocs::hipMallocManaged, kTestBufferBytes);
@@ -287,7 +287,7 @@ TEST_CASE("Unit_hipMemPrefetchBatchAsync_RoundTripDataIntegrity") {
  *  - Test NULL dptrs, sizes, prefetchLocs, prefetchLocIdxs arrays and freed memory pointers
  *  - Verify API returns appropriate error for invalid NULL parameters and invalid pointers
  */
-TEST_CASE("Unit_hipMemPrefetchBatchAsync_Negative_NullAndInvalidPointers") {
+HIP_TEST_CASE(Unit_hipMemPrefetchBatchAsync_Negative_NullAndInvalidPointers) {
   REQUIRE_MANAGED_ACCESS_DEVICE(device);
 
   LinearAllocGuard<int> managed_memory(LinearAllocs::hipMallocManaged, kTestBufferBytes);
@@ -352,7 +352,7 @@ TEST_CASE("Unit_hipMemPrefetchBatchAsync_Negative_NullAndInvalidPointers") {
  *  - Test various invalid prefetchLocIdxs array constraints
  *  - Verify API validates: first element must be 0, strict ordering, bounds checking
  */
-TEST_CASE("Unit_hipMemPrefetchBatchAsync_Negative_IndexArrayConstraints") {
+HIP_TEST_CASE(Unit_hipMemPrefetchBatchAsync_Negative_IndexArrayConstraints) {
   REQUIRE_MANAGED_ACCESS_DEVICE(device);
 
   constexpr size_t num_operations = 3;
@@ -430,7 +430,7 @@ TEST_CASE("Unit_hipMemPrefetchBatchAsync_Negative_IndexArrayConstraints") {
  *  - Test invalid parameters: count, sizes, flags, stream
  *  - Verify API validates all parameter constraints
  */
-TEST_CASE("Unit_hipMemPrefetchBatchAsync_Negative_ParameterValidation") {
+HIP_TEST_CASE(Unit_hipMemPrefetchBatchAsync_Negative_ParameterValidation) {
   constexpr int device = 0;
   HIP_CHECK(hipSetDevice(device));
 
@@ -531,7 +531,7 @@ TEST_CASE("Unit_hipMemPrefetchBatchAsync_Negative_ParameterValidation") {
  *    - Non-managed memory requires hipDeviceAttributePageableMemoryAccess
  *    - Managed memory requires hipDeviceAttributeConcurrentManagedAccess
  */
-TEST_CASE("Unit_hipMemPrefetchBatchAsync_Negative_DeviceCapabilities") {
+HIP_TEST_CASE(Unit_hipMemPrefetchBatchAsync_Negative_DeviceCapabilities) {
   int device = 0;
   HIP_CHECK(hipSetDevice(device));
 
@@ -570,7 +570,7 @@ TEST_CASE("Unit_hipMemPrefetchBatchAsync_Negative_DeviceCapabilities") {
  *  - Prefetch to different devices in same batch
  *  - Skip if single GPU system
  */
-TEST_CASE("Unit_hipMemPrefetchBatchAsync_MultiDevice") {
+HIP_TEST_CASE(Unit_hipMemPrefetchBatchAsync_MultiDevice) {
   int device_count = 0;
   HIP_CHECK(hipGetDeviceCount(&device_count));
 
