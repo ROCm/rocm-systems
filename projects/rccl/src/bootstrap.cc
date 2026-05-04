@@ -657,6 +657,15 @@ struct bootstrapRing_t {
       // win at much smaller N than before.
       struct ncclSocket revRecv; // reverse: recv from next
       struct ncclSocket revSend; // reverse: send to prev
+      // Persistent per-round tree-AllGather sockets (Phase A.2). Each round k
+      // exchanges with rank^(1<<k); we eagerly establish a single bidirectional
+      // socket per round during bootstrapInit (parallel non-blocking connects
+      // + accepts) so socketTreeAllGather can call socketSendRecv directly on
+      // it instead of paying a fresh TCP handshake every dispatch. The same
+      // socket carries both send and recv per round (TCP is full-duplex).
+      // The pair is owned by the smaller-rank side as connector, larger-rank
+      // side as acceptor; fully symmetric, no deadlock by construction.
+      struct ncclSocket tree[BOOTSTRAP_MAX_TREE_ROUNDS];
     } socket;
   };
 };
@@ -864,6 +873,12 @@ static ncclResult_t socketRingConnect(ncclSocketAddress* addr, struct ncclSocket
 // *startedOut == true means connect/accept were issued (Finish will only poll); false
 // means the caller chose to call the legacy one-shot bootstrapBidirRingSetup instead
 // (typically because piggyback wasn't available).
+// Forward declaration: socketTreeConnectAll lives further down (alongside
+// socketTreeAllGather) but is called from bootstrapInit's PMIx fast-path arm.
+#ifdef NCCL_HAVE_PMIX
+static ncclResult_t socketTreeConnectAll(struct bootstrapState* state);
+#endif
+
 static ncclResult_t bootstrapBidirRingSetupStart(struct ncclComm* comm, struct bootstrapState* state,
                                                  const char* prevRevHandlePiggyback,
                                                  char prevRevHandleOut[NCCL_NET_HANDLE_MAXSIZE],
@@ -1422,24 +1437,38 @@ ncclResult_t bootstrapInit(int nHandles, void* handles, struct ncclComm* comm) {
       memcpy(nextPeer.revHandle, prevInfo.connectInfo.revHandle, NCCL_NET_HANDLE_MAXSIZE);
     }
 
-    // listenSockRoot was created earlier; nobody will ever connect to it on
-    // the PMIx path. Close it now so we don't leak the FD.
-    NCCLCHECK(ncclSocketClose(&listenSockRoot));
-    BOOTSTRAP_PROF_CLOSE(timers[BOOTSTRAP_INIT_TIME_RECV]);
-    INFO(NCCL_BOOTSTRAP, "PMIx bootstrap: rank %d/%d learned next=%d via PMIx_Fence", rank, nranks, next);
-
     // [RCCL] Tree AllGather is socket-only for the MVP and requires PMIx so
     // each rank can resolve any peer's listen address from KVS at dispatch
     // time. We've just put+fenced our extInfo, so KVS is populated for
     // every rank — flag this comm as eligible. Pow-of-two check matches
     // the recursive-doubling assumption inside socketTreeAllGather.
+    //
+    // Note: arming + persistent connect MUST happen *inside* the recv timer
+    // scope so the connect cost gets folded into the rank-arrival skew
+    // bucket (slow ranks were going to wait on PMIx_Fence anyway, so the
+    // connect overlaps for free). Placing it after the RECV close would
+    // leak the connect cost into the post-recv "tail" bucket, where it
+    // looks like a per-iteration penalty in the wTail metric.
     if (!ncclParamBootstrapNetEnable() &&
         ncclParamBootstrapTreeAllGather() != 0 &&
         bootstrapTreePowOfTwo(nranks)) {
       state->treeAllGatherEnabled = 1;
       INFO(NCCL_BOOTSTRAP, "Tree AllGather: enabled for nranks=%d (rounds=%d)",
            nranks, (int)__builtin_ctz((unsigned)nranks));
+      // Phase A.2: eagerly establish persistent per-round sockets so that
+      // socketTreeAllGather avoids the JIT TCP handshake on every dispatch.
+      // Done here, after the PMIx Fence — KVS now holds every peer's
+      // treeListenAddrs[] so we can resolve all log2(N) partner addresses
+      // locally. Non-blocking connect+accept across rounds means the
+      // handshakes pipeline.
+      NCCLCHECK(socketTreeConnectAll(state));
     }
+
+    // listenSockRoot was created earlier; nobody will ever connect to it on
+    // the PMIx path. Close it now so we don't leak the FD.
+    NCCLCHECK(ncclSocketClose(&listenSockRoot));
+    BOOTSTRAP_PROF_CLOSE(timers[BOOTSTRAP_INIT_TIME_RECV]);
+    INFO(NCCL_BOOTSTRAP, "PMIx bootstrap: rank %d/%d learned next=%d via PMIx_Fence", rank, nranks, next);
   }
 #endif
 
@@ -1919,13 +1948,79 @@ exit:
 // → tree wins decisively at N ≳ 64 even though it pays a 1× connect/accept
 //   RTT per round (small-message TCP latency on the OOB path).
 #ifdef NCCL_HAVE_PMIX
-static ncclResult_t socketTreeAllGather(struct bootstrapState* state,
-                                        char* data, int size) {
+// [RCCL] Phase A.2: eagerly establish the log2(N) persistent tree-AllGather
+// sockets at bootstrap-init time, instead of paying a fresh TCP handshake
+// every dispatch. Issues all connects/accepts in non-blocking mode in
+// parallel (so the kernel pipelines them), then blocks for every socket to
+// reach the Ready state. The handshake cost amortises to ~one round-trip
+// for the slowest pair, regardless of log2(N), instead of summing log2(N)
+// × per-round handshake on every bootstrapAllGather call.
+//
+// Preconditions: state->treeAllGatherEnabled was just set, comm is on the
+// PMIx fast-path (so all peers' treeListenAddrs[] are already published in
+// KVS post-Fence), and listen.socket.tree[k] is bound for every k.
+static ncclResult_t socketTreeConnectAll(struct bootstrapState* state) {
   ncclResult_t res = ncclSuccess;
   int rank = state->rank;
   int nranks = state->nranks;
   uint64_t magic = state->magic;
   volatile uint32_t* abortFlag = state->abortFlag;
+  int rounds = (int)__builtin_ctz((unsigned)nranks);
+
+  // Stage 1: kick off every round's connect or accept in non-blocking mode.
+  // PMIx_Get is a local KVS lookup post-Fence (~µs), so doing them serially
+  // here is fine; the actual TCP handshakes overlap because each socket is
+  // in async mode.
+  for (int k = 0; k < rounds; k++) {
+    int partner = rank ^ (1 << k);
+    struct ncclSocket* sock = &STATE_RING(state, socket.tree[k]);
+    if (rank < partner) {
+      struct extInfo peer = {0};
+      NCCLCHECK(pmixGetPeerInfo(magic, partner, nranks, &peer));
+      union ncclSocketAddress partnerAddr = peer.treeListenAddrs[k];
+      NCCLCHECK(ncclSocketInit(sock, &partnerAddr, magic,
+                               ncclSocketTypeBootstrap, abortFlag, /*asyncFlag*/1));
+      NCCLCHECK(ncclSocketConnect(sock));
+    } else {
+      // Toggle the listen into async mode for the duration of the accept
+      // kick-off; restore afterwards so other sites that may still rely on
+      // the original blocking semantics aren't surprised.
+      int oldAsync = STATE_LISTEN(state, socket.tree[k]).asyncFlag;
+      STATE_LISTEN(state, socket.tree[k]).asyncFlag = 1;
+      ncclResult_t r1 = ncclSocketInit(sock);
+      ncclResult_t r2 = ncclSuccess;
+      if (r1 == ncclSuccess) {
+        r2 = ncclSocketAccept(sock, &STATE_LISTEN(state, socket.tree[k]));
+      }
+      STATE_LISTEN(state, socket.tree[k]).asyncFlag = oldAsync;
+      NCCLCHECK(r1);
+      NCCLCHECK(r2);
+    }
+  }
+
+  // Stage 2: poll every round's socket to Ready. Since each handshake started
+  // back in stage 1, the slowest one bounds total wait time; the rest are
+  // already done by the time we get here on small clusters.
+  int abortCounter = 0;
+  for (int k = 0; k < rounds; k++) {
+    int ready = 0;
+    while (!ready) {
+      NCCLCHECK(checkAbort(abortFlag, &abortCounter));
+      NCCLCHECK(ncclSocketReady(&STATE_RING(state, socket.tree[k]), &ready));
+      if (!ready) sched_yield();
+    }
+  }
+
+  INFO(NCCL_BOOTSTRAP, "Tree AllGather: persistent sockets ready (rank=%d nranks=%d rounds=%d)",
+       rank, nranks, rounds);
+  return res;
+}
+
+static ncclResult_t socketTreeAllGather(struct bootstrapState* state,
+                                        char* data, int size) {
+  ncclResult_t res = ncclSuccess;
+  int rank = state->rank;
+  int nranks = state->nranks;
 
   // Pre-validated by the dispatch site, but assert defensively.
   if (!bootstrapTreePowOfTwo(nranks)) {
@@ -1952,45 +2047,25 @@ static ncclResult_t socketTreeAllGather(struct bootstrapState* state,
     char* send_ptr = data + (size_t)my_block_lo      * (size_t)size;
     char* recv_ptr = data + (size_t)partner_block_lo * (size_t)size;
 
-    // Per-round listen sockets eliminate the cross-round race that arises
-    // if we shared one listen across rounds: peers progress at different
-    // speeds, so by the time rank R reaches its accept for round k another
-    // peer in round k+1 may already have connected to R, and the kernel
-    // queue is unordered with respect to round id. Dedicated listens give
-    // a clean 1:1 connection-to-round mapping with no protocol-level
-    // disambiguation needed.
-    struct ncclSocket sock;
-    if (rank < partner) {
-      // Connector: resolve partner's *round-k* listen address via PMIx.
-      struct extInfo peer = {0};
-      NCCLCHECKGOTO(pmixGetPeerInfo(magic, partner, nranks, &peer), res, fail);
-      union ncclSocketAddress partnerAddr = peer.treeListenAddrs[k];
-      NCCLCHECKGOTO(ncclSocketInit(&sock, &partnerAddr, magic, ncclSocketTypeBootstrap, abortFlag), res, fail);
-      NCCLCHECKGOTO(ncclSocketConnect(&sock), res, fail);
-    } else {
-      // Acceptor: pull the next pending connection off this round's listen.
-      NCCLCHECKGOTO(ncclSocketInit(&sock), res, fail);
-      NCCLCHECKGOTO(ncclSocketAccept(&sock, &STATE_LISTEN(state, socket.tree[k])), res, fail);
-    }
+    // Persistent per-round socket — established once during bootstrapInit
+    // (Phase A.2: socketTreeConnectAll), reused across every dispatch. The
+    // smaller-rank side connected to the partner's round-k listen; the
+    // larger-rank side accepted on its own listen.tree[k]. Both sides end
+    // up with the same bidirectional FD in ring.socket.tree[k].
+    struct ncclSocket* sock = &STATE_RING(state, socket.tree[k]);
 
     // Full-duplex send + recv on the same TCP connection. socketSendRecv
     // pipelines length-then-payload to avoid an extra RTT and uses the
     // same FD for both directions, which is what TCP already does
     // efficiently in the kernel. Equivalent to one ring step.
-    NCCLCHECKGOTO(socketSendRecv(&sock, send_ptr, (int)chunk_bytes,
-                                 &sock, recv_ptr, (int)chunk_bytes),
-                  res, fail_close);
-
-    NCCLCHECKGOTO(ncclSocketClose(&sock), res, fail);
+    NCCLCHECKGOTO(socketSendRecv(sock, send_ptr, (int)chunk_bytes,
+                                 sock, recv_ptr, (int)chunk_bytes),
+                  res, fail);
 
     if (k == 0) {
       BOOTSTRAP_PROF_CLOSE(tFirst);
       BOOTSTRAP_PROF_OPEN(tRest);
     }
-    continue;
-  fail_close:
-    (void)ncclSocketClose(&sock);
-    goto fail;
   }
   BOOTSTRAP_PROF_CLOSE(tRest);
   TRACE(NCCL_BOOTSTRAP | NCCL_PROFILE,
@@ -2261,12 +2336,15 @@ ncclResult_t bootstrapClose(void* commState) {
     if (STATE_LISTEN(state, socket.rev).state >= ncclSocketStateInitialized) {
       NCCLCHECK(ncclSocketClose(&STATE_LISTEN(state, socket.rev)));
     }
-    // [RCCL] Close any tree-AllGather per-round listens that bootstrapInit
-    // pre-allocated. We unconditionally walk the array because the array is
-    // statically sized; only the first log2(nranks) entries are bound when
-    // tree mode was active, the rest are still ncclSocketStateNone and the
-    // close is skipped.
+    // [RCCL] Close any tree-AllGather per-round persistent sockets and listens
+    // that bootstrapInit pre-allocated. We unconditionally walk both arrays
+    // because they are statically sized; only the first log2(nranks) entries
+    // are bound when tree mode was active, the rest are still ncclSocketStateNone
+    // (close is a no-op on those).
     for (int k = 0; k < BOOTSTRAP_MAX_TREE_ROUNDS; k++) {
+      if (STATE_RING(state, socket.tree[k]).state == ncclSocketStateReady) {
+        NCCLCHECK(ncclSocketClose(&STATE_RING(state, socket.tree[k])));
+      }
       if (STATE_LISTEN(state, socket.tree[k]).state >= ncclSocketStateInitialized) {
         NCCLCHECK(ncclSocketClose(&STATE_LISTEN(state, socket.tree[k])));
       }
