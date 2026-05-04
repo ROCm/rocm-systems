@@ -3719,6 +3719,22 @@ rocprofiler-sdk:
             - gfx1153
           block: SQG
           event: 22
+    - name: SQG_WAVES_ENDED
+      description: Aggregated number of waves ended over a period of time (per shader engine). 
+        SQG_PERF_SEL_WAVES_ENDED.
+      properties: []
+      definitions:
+        - architectures:
+            - gfx11
+            - gfx1100
+            - gfx1101
+            - gfx1102
+            - gfx1150
+            - gfx1151
+            - gfx1152
+            - gfx1153
+          block: SQG
+          event: 35
     - name: SQG_WAVES_EQ_32
       description: Number of waves that occupied exactly 32 lanes (per shader engine). 
         SQG_PERF_SEL_WAVES_EQ_32.
@@ -3863,6 +3879,22 @@ rocprofiler-sdk:
             - gfx1153
           block: SQG
           event: 13
+    - name: SQG_WAVES_STARTED
+      description: Aggregated number of waves started over a period of time (per shader engine). 
+        SQG_PERF_SEL_WAVES_STARTED.
+      properties: []
+      definitions:
+        - architectures:
+            - gfx11
+            - gfx1100
+            - gfx1101
+            - gfx1102
+            - gfx1150
+            - gfx1151
+            - gfx1152
+            - gfx1153
+          block: SQG
+          event: 34
     - name: SQG_WAVE_CYCLES
       description: Sum of clock cycles spent by waves observed at the SQG (per shader engine). 
         Incremented by the number of valid waves each cycle. SQG_PERF_SEL_WAVE_CYCLES.
