@@ -89,7 +89,7 @@ close_file(const char *path, int fd, hipFileHandle_t handle)
 
 
 // Size of data to be copied (must be multiple of 4096)
-static constexpr size_t SIZE = 8192;
+static constexpr size_t SIZE = 2*8192;
 
 int
 main(int argc, char *argv[])
