@@ -7,8 +7,10 @@
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/basic_block.h"
+#include "rocjitsu/code/dbt/generated/encoding_cdna4_to_cdna3.h"
 #include "rocjitsu/code/dbt/generated/encoding_cdna4_to_rdna3.h"
 #include "rocjitsu/code/dbt/generated/encoding_cdna4_to_rdna4.h"
+#include "rocjitsu/code/dbt/generated/legalization_cdna4_to_cdna3.h"
 #include "rocjitsu/code/dbt/generated/legalization_cdna4_to_rdna3.h"
 #include "rocjitsu/code/dbt/generated/legalization_cdna4_to_rdna4.h"
 #include "rocjitsu/code/dbt/generated/legalization_types.h"
@@ -33,6 +35,8 @@ namespace rocjitsu {
 namespace {
 
 EncodingTranslateFn select_encoding_translator(rj_code_arch_t guest, rj_code_arch_t host) {
+  if (guest == ROCJITSU_CODE_ARCH_CDNA4 && host == ROCJITSU_CODE_ARCH_CDNA3)
+    return cdna4_to_cdna3::translate_encoding_cdna4_to_cdna3;
   if (guest == ROCJITSU_CODE_ARCH_CDNA4 && host == ROCJITSU_CODE_ARCH_RDNA4)
     return cdna4_to_rdna4::translate_encoding_cdna4_to_rdna4;
   if (guest == ROCJITSU_CODE_ARCH_CDNA4 && host == ROCJITSU_CODE_ARCH_RDNA3)
@@ -41,6 +45,11 @@ EncodingTranslateFn select_encoding_translator(rj_code_arch_t guest, rj_code_arc
 }
 
 LegalizationLookupFn select_legalization(rj_code_arch_t guest, rj_code_arch_t host) {
+  if (guest == ROCJITSU_CODE_ARCH_CDNA4 && host == ROCJITSU_CODE_ARCH_CDNA3) {
+    return [](uint16_t enc_id, uint16_t opcode) -> const InstructionLegalization * {
+      return lookup(kLegalization_cdna4_to_cdna3, enc_id, opcode);
+    };
+  }
   if (guest == ROCJITSU_CODE_ARCH_CDNA4 && host == ROCJITSU_CODE_ARCH_RDNA4) {
     return [](uint16_t enc_id, uint16_t opcode) -> const InstructionLegalization * {
       return lookup(kLegalization_cdna4_to_rdna4, enc_id, opcode);
@@ -156,6 +165,46 @@ BinaryTranslator::BinaryTranslator(rj_code_arch_t guest_arch, rj_code_arch_t hos
       semantic_translator_(std::make_unique<SemanticTranslator>(guest_arch, host_arch)) {}
 
 TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
+  // Start with the exact resources already requested by the source descriptor.
+  // Increasing VGPRs or SGPRs can change occupancy, so semantic lowering only
+  // asks for a larger allocation after liveness proves that its scratch
+  // registers are dead and lie beyond the descriptor's current bounds. If that
+  // happens, rerun descriptor translation once with the requested high-water
+  // marks. A future policy flag can decide whether growing the descriptor is
+  // acceptable for a particular deployment.
+  uint32_t requested_minimum_vgprs = 0;
+  uint32_t requested_minimum_sgprs = 0;
+  auto first = translate_once(obj, 0, 0, requested_minimum_vgprs, requested_minimum_sgprs);
+  if (requested_minimum_vgprs == 0 && requested_minimum_sgprs == 0)
+    return first;
+
+  uint32_t retry_requested_minimum_vgprs = 0;
+  uint32_t retry_requested_minimum_sgprs = 0;
+  auto second = translate_once(obj, requested_minimum_vgprs, requested_minimum_sgprs,
+                               retry_requested_minimum_vgprs, retry_requested_minimum_sgprs);
+  assert(retry_requested_minimum_vgprs == 0 && retry_requested_minimum_sgprs == 0 &&
+         "resource feedback should converge after one retry");
+  if (retry_requested_minimum_vgprs == 0 && retry_requested_minimum_sgprs == 0)
+    return second;
+
+  TranslatedCodeObject result;
+  result.host_arch = host_arch_;
+  result.warnings = second.warnings;
+  result.warnings.push_back("register resource feedback did not converge after one retry");
+  CodeObjectPatcher patcher(obj);
+  result.elf_bytes = patcher.emit();
+  warnings_ = nullptr;
+  return result;
+}
+
+TranslatedCodeObject BinaryTranslator::translate_once(const AmdGpuCodeObject &obj,
+                                                      uint32_t minimum_vgprs,
+                                                      uint32_t minimum_sgprs,
+                                                      uint32_t &requested_minimum_vgprs,
+                                                      uint32_t &requested_minimum_sgprs) {
+  requested_minimum_vgprs = 0;
+  requested_minimum_sgprs = 0;
+
   TranslatedCodeObject result;
   result.host_arch = host_arch_;
   warnings_ = &result.warnings;
@@ -164,6 +213,7 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
   auto text = patcher.text_bytes();
   if (text.empty()) {
     result.elf_bytes = patcher.emit();
+    warnings_ = nullptr;
     return result;
   }
 
@@ -171,10 +221,14 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
   if (!decoder) {
     result.warnings.push_back("unsupported guest_arch: no decoder available");
     result.elf_bytes = patcher.emit();
+    warnings_ = nullptr;
     return result;
   }
+
   KernelDescriptorTranslator descriptor_translator(guest_arch_, host_arch_);
   KernelDescriptorTranslationOptions descriptor_options;
+  descriptor_options.minimum_vgprs = minimum_vgprs;
+  descriptor_options.minimum_sgprs = minimum_sgprs;
   const auto descriptor_translations = descriptor_translator.translate_image(
       patcher.image_bytes(), patcher.text_offset(), patcher.text_size(), descriptor_options);
   bool descriptors_supported = true;
@@ -223,6 +277,11 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
       continue;
 
     LivenessAnalysis liveness(KernelBlockScope(scope.blocks));
+    TranslationContext context;
+    context.target_vgpr_count =
+        scope.translation != nullptr ? scope.translation->target_vgpr_count : 0;
+    context.target_sgpr_count =
+        scope.translation != nullptr ? scope.translation->target_sgpr_count : 0;
 
     for (BasicBlock *block : scope.blocks) {
       if (block == nullptr)
@@ -259,7 +318,7 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
         // For Expand: must lower (NOP-fill if unhandled).
         // For Lower: try lowering first, fall through to encoding if unhandled.
         {
-          auto expansion = semantic_translator_->try_lower_expand(inst, offset, liveness);
+          auto expansion = semantic_translator_->try_lower_expand(inst, offset, liveness, context);
           if (!expansion.empty()) {
             SemanticReplacement repl{offset, offset + inst_size, std::move(expansion)};
             apply_semantic(repl, translated_text, patcher);
@@ -282,6 +341,15 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
         offset += inst_size;
       }
     }
+    if (context.required_vgpr_count > context.target_vgpr_count)
+      requested_minimum_vgprs = std::max(requested_minimum_vgprs, context.required_vgpr_count);
+    if (context.required_sgpr_count > context.target_sgpr_count)
+      requested_minimum_sgprs = std::max(requested_minimum_sgprs, context.required_sgpr_count);
+  }
+
+  if (requested_minimum_vgprs != 0 || requested_minimum_sgprs != 0) {
+    warnings_ = nullptr;
+    return result;
   }
 
   std::unordered_set<uint64_t> applied_descriptors;

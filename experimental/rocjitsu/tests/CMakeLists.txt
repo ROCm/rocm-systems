@@ -195,6 +195,72 @@ if(HSA_RUNTIME64)
         else()
             message(STATUS "HSA translate test built but NOT registered with CTest (no RDNA4 GPU)")
         endif()
+
+        # --- CDNA4 -> CDNA3 dispatch test ---
+        # Built whenever the HSA runtime and CDNA4 test kernels are available.
+        # Registered only on hosts with a visible MI300/CDNA3 agent; developers
+        # can still run the binary manually on remote CDNA3 machines.
+        set(HAS_CDNA3_GPU FALSE)
+        if(ROCM_AGENT_ENUM)
+            execute_process(COMMAND ${ROCM_AGENT_ENUM}
+                OUTPUT_VARIABLE _cdna3_agents OUTPUT_STRIP_TRAILING_WHITESPACE
+                ERROR_QUIET RESULT_VARIABLE _cdna3_agent_rc)
+            if(_cdna3_agent_rc EQUAL 0 AND _cdna3_agents MATCHES "gfx94[012]")
+                set(HAS_CDNA3_GPU TRUE)
+            endif()
+        endif()
+
+        add_executable(cdna4_to_cdna3_dispatch_test dbt/cdna4_to_cdna3_dispatch_test.cpp)
+        target_include_directories(cdna4_to_cdna3_dispatch_test PRIVATE
+            ${CMAKE_SOURCE_DIR}/lib/rocjitsu/include
+            ${CMAKE_SOURCE_DIR}/lib/rocjitsu/src
+            ${CMAKE_SOURCE_DIR}/lib/util/include
+            /opt/rocm/include)
+        target_link_libraries(cdna4_to_cdna3_dispatch_test PRIVATE
+            ${RJ_OBJECT_LIBS} ${HSA_RUNTIME64} GTest::gtest GTest::gtest_main)
+        target_link_options(cdna4_to_cdna3_dispatch_test PRIVATE -Wl,-rpath,/opt/rocm/lib)
+        target_compile_definitions(cdna4_to_cdna3_dispatch_test PRIVATE
+            HAS_HOST_AMDGPU=1
+            KERNEL_DIR="${KERNEL_OUTPUT_DIR}")
+        add_dependencies(cdna4_to_cdna3_dispatch_test device_kernels)
+        rj_configure_target(cdna4_to_cdna3_dispatch_test TEST)
+
+        add_test(NAME "Cdna4ToCdna3DispatchTest.DynamicCopyLoopTranslates"
+            COMMAND cdna4_to_cdna3_dispatch_test
+                    --gtest_filter=Cdna4ToCdna3DispatchTest.DynamicCopyLoopTranslates
+            WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+        set_tests_properties("Cdna4ToCdna3DispatchTest.DynamicCopyLoopTranslates" PROPERTIES
+            TIMEOUT 60)
+
+        add_test(NAME "Cdna4ToCdna3DispatchTest.TritonMatmulFixturesTranslate"
+            COMMAND cdna4_to_cdna3_dispatch_test
+                    --gtest_filter=Cdna4ToCdna3DispatchTest.TritonMatmulFixturesTranslate
+            WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+        set_tests_properties("Cdna4ToCdna3DispatchTest.TritonMatmulFixturesTranslate" PROPERTIES
+            TIMEOUT 60)
+
+        if(HAS_CDNA3_GPU)
+            set(CDNA4_TO_CDNA3_DISPATCH_TESTS
+                DynamicCopyLoopDispatchAndRun
+                TritonMatmulStatic32x32x64DispatchAndRun
+                TritonMatmulStatic512x512x512DispatchAndRun
+                TritonMatmulStatic31x31x64DispatchAndRun
+                TritonMatmulStatic32x32x63DispatchAndRun
+                TritonMatmulDynamic32x32x64DispatchAndRun
+            )
+            foreach(test_name IN LISTS CDNA4_TO_CDNA3_DISPATCH_TESTS)
+                add_test(NAME "Cdna4ToCdna3DispatchTest.${test_name}"
+                    COMMAND cdna4_to_cdna3_dispatch_test
+                            --gtest_filter=Cdna4ToCdna3DispatchTest.${test_name}
+                    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+                set_tests_properties("Cdna4ToCdna3DispatchTest.${test_name}" PROPERTIES
+                    TIMEOUT 60)
+            endforeach()
+            message(STATUS "CDNA4->CDNA3 dispatch test enabled (CDNA3 GPU detected)")
+        else()
+            message(STATUS "CDNA4->CDNA3 copy dispatch tests built but NOT registered with CTest "
+                           "(no CDNA3 GPU); translation-only checks are still registered")
+        endif()
     endif()
 else()
     message(STATUS "HSA init test disabled (libhsa-runtime64 not found)")

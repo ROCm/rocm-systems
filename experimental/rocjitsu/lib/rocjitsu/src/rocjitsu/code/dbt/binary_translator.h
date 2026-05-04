@@ -102,6 +102,17 @@ public:
   [[nodiscard]] TranslatedCodeObject translate(const AmdGpuCodeObject &obj);
 
 private:
+  /// @brief Run one complete translation attempt under fixed resource assumptions.
+  ///
+  /// @details Expand rules may discover that they need more scratch registers than
+  /// the descriptor for this attempt provides. In that case requested_minimum_*
+  /// records a retry request with a larger descriptor allocation, and
+  /// translate() discards the provisional ELF bytes from this attempt.
+  [[nodiscard]] TranslatedCodeObject translate_once(const AmdGpuCodeObject &obj,
+                                                    uint32_t minimum_vgprs, uint32_t minimum_sgprs,
+                                                    uint32_t &requested_minimum_vgprs,
+                                                    uint32_t &requested_minimum_sgprs);
+
   /// @brief Apply a single semantic replacement to the translated text.
   ///
   /// @details If the replacement fits within the source byte range, writes

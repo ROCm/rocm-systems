@@ -397,6 +397,12 @@ void visit_kernel_descriptors(std::span<const uint8_t> image, uint64_t text_offs
   return (registers + granularity - 1) / granularity - 1;
 }
 
+[[nodiscard]] uint32_t align_up(uint32_t value, uint32_t alignment) {
+  alignment = std::max(alignment, 1u);
+  const uint32_t remainder = value % alignment;
+  return remainder == 0 ? value : value + alignment - remainder;
+}
+
 [[nodiscard]] uint16_t accum_vgpr_base(const KD &desc, rj_code_arch_t guest_arch) {
   if (!uses_gfx90a_accum_offset(guest_arch) || !arch_has_accvgpr(guest_arch))
     return 0;
@@ -525,12 +531,18 @@ translate_one_descriptor(rj_code_arch_t guest_arch, rj_code_arch_t host_arch,
     result.supported = false;
   }
 
-  // CDNA MFMA kernels may address accumulator registers through a separate
-  // AccVGPR file. RDNA targets do not expose that file in the same way, so the
-  // semantic translator remaps AccVGPR references into the unified VGPR space.
-  // The descriptor translator records the first unified VGPR index that must be
-  // reserved for those remapped accumulator registers.
-  result.accvgpr_base = accum_vgpr_base(src, guest_arch);
+  // CDNA MFMA kernels address accumulator registers as logical a0, a1, ...
+  // operands. The AMDHSA ACCUM_OFFSET descriptor field chooses which physical
+  // VGPR window backs those logical AccVGPRs. Record the source value now; once
+  // the target VGPR allocation is known below, CDNA-to-CDNA translations may
+  // choose a different target window without rewriting any instruction operands.
+  // RDNA targets have no GFX90A ACCUM_OFFSET descriptor field, so their
+  // instruction lowerings must remap AccVGPR references into ordinary VGPRs and
+  // leave target_accvgpr_base at zero.
+  result.source_accvgpr_base = accum_vgpr_base(src, guest_arch);
+  result.target_accvgpr_base = uses_gfx90a_accum_offset(host_arch) && arch_has_accvgpr(host_arch)
+                                   ? result.source_accvgpr_base
+                                   : 0;
 
   // Descriptor ABI fixes that require instructions, not bitfield changes, are
   // emitted as prologue words. CodeObjectPatcher decides where to place them and
@@ -556,10 +568,28 @@ translate_one_descriptor(rj_code_arch_t guest_arch, rj_code_arch_t host_arch,
   // lowering requirements: AccVGPR unification needs enough unified VGPRs to
   // cover the remapped accumulator window, and instruction lowering may request
   // additional scratch temporaries through options.minimum_vgprs.
-  uint32_t required_vgprs = result.guest_vgpr_count;
-  if (arch_has_accvgpr(guest_arch) && !arch_has_accvgpr(host_arch) && result.accvgpr_base != 0)
-    required_vgprs = std::max(required_vgprs, result.accvgpr_base + result.guest_vgpr_count);
-  required_vgprs = std::max(required_vgprs, options.minimum_vgprs);
+  uint32_t required_vgprs = std::max(result.guest_vgpr_count, options.minimum_vgprs);
+  if (arch_has_accvgpr(guest_arch) && !arch_has_accvgpr(host_arch) &&
+      result.source_accvgpr_base != 0)
+    required_vgprs = std::max(required_vgprs, result.source_accvgpr_base + result.guest_vgpr_count);
+
+  const bool relocate_accvgprs_after_vgprs =
+      guest_arch == ROCJITSU_CODE_ARCH_CDNA4 && host_arch == ROCJITSU_CODE_ARCH_CDNA3;
+  if (relocate_accvgprs_after_vgprs && result.source_accvgpr_base != 0 &&
+      result.target_accvgpr_base != 0) {
+    // Expansion rules allocate ordinary VGPR scratch from liveness. If the
+    // source descriptor packed AccVGPRs into otherwise-dead VGPR numbers, that
+    // scratch can legally reuse the old numbers only after the target descriptor
+    // moves logical aN registers to a non-overlapping physical window.
+    const uint32_t rounded_accvgpr_count =
+        result.source_accvgpr_base < result.guest_vgpr_count
+            ? result.guest_vgpr_count - result.source_accvgpr_base
+            : 0;
+    if (rounded_accvgpr_count != 0) {
+      result.target_accvgpr_base = align_up(required_vgprs, 4);
+      required_vgprs = std::max(required_vgprs, result.target_accvgpr_base + rounded_accvgpr_count);
+    }
+  }
   result.host_vgpr_count = required_vgprs;
   result.target_vgpr_count = required_vgprs;
   if (arch_max_vgprs(host_arch) != 0 && required_vgprs > arch_max_vgprs(host_arch)) {

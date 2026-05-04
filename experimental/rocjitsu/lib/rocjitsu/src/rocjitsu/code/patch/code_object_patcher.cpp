@@ -191,6 +191,11 @@ void insert_file_bytes(std::vector<uint8_t> &image, Elf64_Ehdr &ehdr,
   return target_supports_wave32(arch);
 }
 
+[[nodiscard]] bool target_uses_gfx90a_accum_offset(rj_code_arch_t arch) {
+  return arch == ROCJITSU_CODE_ARCH_CDNA2 || arch == ROCJITSU_CODE_ARCH_CDNA3 ||
+         arch == ROCJITSU_CODE_ARCH_CDNA4;
+}
+
 [[nodiscard]] bool target_clears_rsrc1_mode_bits(rj_code_arch_t arch) {
   // DX10_CLAMP and IEEE_MODE are deprecated on GFX12. Preserve them for GFX10
   // and GFX11 targets where they still affect floating-point behavior.
@@ -278,6 +283,15 @@ void CodeObjectPatcher::apply_kernel_descriptor_translation(const KdTranslation 
       AMDHSA_BITS_SET(desc->compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX10_PLUS_INST_PREF_SIZE,
                       inst_pref);
     }
+  }
+
+  if (target_uses_gfx90a_accum_offset(target_arch) && translation.target_accvgpr_base != 0) {
+    // CDNA AccVGPR operands are encoded as logical aN registers. The descriptor
+    // maps that logical file onto physical VGPRs in groups of four, with the
+    // field value encoded as (base / 4) - 1.
+    const uint32_t encoded_accum_offset = translation.target_accvgpr_base / 4 - 1;
+    AMDHSA_BITS_SET(desc->compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET,
+                    encoded_accum_offset);
   }
 
   desc->private_segment_fixed_size = translation.target_private_size;
@@ -370,17 +384,48 @@ void CodeObjectPatcher::append_cave_section(std::string_view section_name) {
   const size_t text_index = find_text_section(shdrs, text_offset_, text_size_);
   const auto text_header = shdrs[text_index];
   const uint64_t cave_file_offset = text_offset_ + text_size_;
+  const uint64_t cave_vaddr = text_header.sh_addr + text_size_;
 
   // Insert the executable bytes at the exact address assumed by branch stub
   // construction: .text-relative offset text_size_. Any later PT_LOAD segment
   // must keep p_offset congruent with p_vaddr modulo p_align, so the total file
-  // delta is padded up to the required load alignment. The padding is part of
-  // the RX LOAD segment but not part of the .rj_translations section.
+  // delta is padded up to the required load alignment. Later allocated sections
+  // also move forward in virtual address space; otherwise a large cave can
+  // overlap the following RW LOAD segment even though its file bytes were
+  // inserted before it. The padding is part of the RX LOAD segment but not part
+  // of the .rj_translations section.
   const uint64_t file_delta_alignment = shifted_load_delta_alignment(phdrs, cave_file_offset);
   const uint64_t padded_file_delta = align_up(cave_body_.size(), file_delta_alignment);
   std::vector<uint8_t> cave_file_bytes(cave_body_.begin(), cave_body_.end());
   cave_file_bytes.resize(padded_file_delta, 0);
+
+  std::vector<bool> shift_section_vaddr(shdrs.size(), false);
+  for (size_t i = 0; i < shdrs.size(); ++i) {
+    if (i == text_index || shdrs[i].sh_type == SHT_NULL)
+      continue;
+    if ((shdrs[i].sh_flags & SHF_ALLOC) != 0 && shdrs[i].sh_addr >= cave_vaddr)
+      shift_section_vaddr[i] = true;
+  }
+
+  std::vector<bool> shift_segment_vaddr(phdrs.size(), false);
+  for (size_t i = 0; i < phdrs.size(); ++i) {
+    if (phdrs[i].p_vaddr >= cave_vaddr && phdrs[i].p_offset >= cave_file_offset)
+      shift_segment_vaddr[i] = true;
+  }
+
   insert_file_bytes(image_, header, shdrs, phdrs, cave_file_offset, cave_file_bytes, -1, true);
+
+  for (size_t i = 0; i < shdrs.size(); ++i) {
+    if (shift_section_vaddr[i])
+      shdrs[i].sh_addr += padded_file_delta;
+  }
+
+  for (size_t i = 0; i < phdrs.size(); ++i) {
+    if (!shift_segment_vaddr[i])
+      continue;
+    phdrs[i].p_vaddr += padded_file_delta;
+    phdrs[i].p_paddr += padded_file_delta;
+  }
 
   const uint32_t name_offset = append_section_name(image_, header, shdrs, phdrs, section_name);
 
@@ -388,7 +433,7 @@ void CodeObjectPatcher::append_cave_section(std::string_view section_name) {
   cave_header.sh_name = name_offset;
   cave_header.sh_type = SHT_PROGBITS;
   cave_header.sh_flags = text_header.sh_flags;
-  cave_header.sh_addr = text_header.sh_addr + text_size_;
+  cave_header.sh_addr = cave_vaddr;
   cave_header.sh_offset = cave_file_offset;
   cave_header.sh_size = cave_body_.size();
   cave_header.sh_addralign = sizeof(uint32_t);

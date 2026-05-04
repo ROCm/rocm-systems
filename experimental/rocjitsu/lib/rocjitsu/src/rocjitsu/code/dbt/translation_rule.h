@@ -116,17 +116,43 @@ enum class RuleAction : uint8_t {
 
 struct LaneLayout;
 
+/// @brief Kernel-level facts and resource requests for semantic expansion.
+///
+/// @details Descriptor translation supplies the target register allocation that
+/// the current pass is allowed to assume. Expand rules may request a larger
+/// allocation when liveness finds dead registers beyond that descriptor bound;
+/// BinaryTranslator then reruns descriptor translation with that request.
+struct TranslationContext {
+  uint32_t target_vgpr_count = 0;
+  uint32_t target_sgpr_count = 0;
+
+  uint32_t required_vgpr_count = 0;
+  uint32_t required_sgpr_count = 0;
+
+  void require_vgprs(uint32_t count) {
+    if (required_vgpr_count < count)
+      required_vgpr_count = count;
+  }
+
+  void require_sgprs(uint32_t count) {
+    if (required_sgpr_count < count)
+      required_sgpr_count = count;
+  }
+};
+
 /// @brief Function type for Expand rule expansion generators.
 ///
 /// @param inst          The decoded guest instruction to expand.
 /// @param arch          Target ISA architecture.
 /// @param offset        Byte offset of the instruction in .text.
 /// @param liveness      Kernel-scoped live-before data for safe scratch register allocation.
+/// @param context       Kernel descriptor facts and resource requests for this pass.
 /// @param guest_layout  Source matrix lane layout (nullptr if not a matrix op).
 /// @param host_layout   Target matrix lane layout (nullptr if not a matrix op).
 /// @returns Replacement instruction words, or empty vector if unhandled.
 using ExpandFn = std::vector<uint32_t> (*)(const Instruction &inst, uint32_t arch, uint64_t offset,
                                            const LivenessAnalysis &liveness,
+                                           TranslationContext &context,
                                            const LaneLayout *guest_layout,
                                            const LaneLayout *host_layout);
 

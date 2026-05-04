@@ -73,37 +73,35 @@ def emit_all(
     generated.append(str(types_path))
 
     for src, dst, entries in pairs:
-        # Duplicate entries for encoding formats with narrow (<9-bit) encoding
-        # fields. The 9-bit encoding_id (raw[0]>>23) has don't-care low bits
-        # for these formats. We emit one entry per alias so that binary search
-        # works without encoding_id normalization.
-        expanded = []
-        for e in entries:
-            enc_id = e.src_encoding_order if e.src_encoding_order >= 0 else 0xFFFF
-            dont_care = 9 - e.src_encoding_bits
-            if dont_care > 0 and enc_id < 0xFFFF:
-                for i in range(1 << dont_care):
-                    alias_id = enc_id | i
-                    expanded.append(LegalizationEntry(
-                        src_mnemonic=e.src_mnemonic,
-                        src_encoding=e.src_encoding,
-                        src_encoding_order=alias_id,
-                        src_encoding_bits=9,
-                        src_opcode=e.src_opcode,
-                        action=e.action,
-                    ))
-            else:
-                expanded.append(e)
-
-        sorted_entries = sorted(expanded, key=lambda e: (
+        sorted_entries = sorted(entries, key=lambda e: (
             e.src_encoding_order if e.src_encoding_order >= 0 else 0xFFFF,
             e.src_opcode))
+        _verify_unique_lookup_keys(src, dst, sorted_entries)
         pair_path = output_dir / f'legalization_{_pair_name(src, dst)}.h'
         _emit_pair(pair_path, src, dst, sorted_entries)
         _clang_format(pair_path)
         generated.append(str(pair_path))
 
     return generated
+
+
+def _verify_unique_lookup_keys(
+    src: str,
+    dst: str,
+    entries: list[LegalizationEntry],
+) -> None:
+    seen: dict[tuple[int, int], LegalizationEntry] = {}
+    for e in entries:
+        enc_id = e.src_encoding_order if e.src_encoding_order >= 0 else 0xFFFF
+        key = (enc_id, e.src_opcode)
+        prev = seen.get(key)
+        if prev is not None:
+            raise ValueError(
+                f'duplicate legalization key for {src}->{dst}: '
+                f'encoding_id={enc_id} opcode={e.src_opcode} maps both '
+                f'{prev.src_mnemonic}/{prev.src_encoding} and '
+                f'{e.src_mnemonic}/{e.src_encoding}')
+        seen[key] = e
 
 
 def _emit_types(path: Path) -> None:
