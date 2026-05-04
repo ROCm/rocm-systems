@@ -159,13 +159,7 @@ class IPCImplTiledFine : public ::testing::TestWithParam<std::tuple<int, int, in
     IPCImplTiledFine() {
         MPIInstance::mpilib_dl_init();
         hip_allocator_ = get_default_allocator();
-        if (hip_allocator_->type == AllocatorTypeCoarsegrained) {
-          heap_mem_ = new HeapMemoryType<HIPAllocatorCoarsegrained>(envvar::heap_size.get_value());
-        } else if (hip_allocator_->type == AllocatorTypeFinegrained) {
-          heap_mem_ = new HeapMemoryType<HIPAllocatorFinegrained>(envvar::heap_size.get_value());
-        } else if (hip_allocator_->type == AllocatorTypeUncached) {
-          heap_mem_ = new HeapMemoryType<HIPAllocatorUncached>(envvar::heap_size.get_value());
-        }
+        heap_mem_ = new HeapMemoryType(*hip_allocator_, envvar::heap_size.get_value());
         assert(heap_mem_ != nullptr);
         mpi_ = new MPI_T (heap_mem_->get_ptr(), heap_mem_->get_size(), MPI_COMM_WORLD);
 

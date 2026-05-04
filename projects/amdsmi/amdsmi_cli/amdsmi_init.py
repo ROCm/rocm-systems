@@ -108,7 +108,9 @@ def amdsmi_cli_init():
     if check_amdgpu_driver():
         init_flag |= amdsmi_interface.AmdSmiInitFlags.INIT_AMD_GPUS
         logging.debug("amdgpu driver's initstate is live")
-    if check_amd_hsmp_driver():
+    if check_amd_hsmp_driver() and hasattr(
+        amdsmi_interface.amdsmi_wrapper, "amdsmi_get_cpu_handles"
+    ):
         init_flag |= amdsmi_interface.AmdSmiInitFlags.INIT_AMD_CPUS
         logging.debug("hsmp driver's initstate is live")
     if check_amd_ionic_driver():

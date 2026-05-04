@@ -45,6 +45,8 @@ from functools import lru_cache
 from amdsmi_init import *
 from BDF import BDF
 
+import amdsmi_cli_exceptions
+
 
 class AMDSMIHelpers:
     """Helper functions that aren't apart of the AMDSMI API
@@ -1361,12 +1363,7 @@ class AMDSMIHelpers:
         return clock_types_str, clock_types_int
 
     def get_power_profiles(self):
-        power_profiles_str = [
-            profile.name for profile in amdsmi_interface.AmdSmiPowerProfilePresetMasks
-        ]
-        if "UNKNOWN" in power_profiles_str:
-            power_profiles_str.remove("UNKNOWN")
-        return power_profiles_str
+        return list(self.get_power_profile_name_mapping().keys())
 
     def get_power_profile_name_mapping(self):
         """Returns dict mapping friendly names to enum values"""
@@ -3111,16 +3108,14 @@ class AMDSMIHelpers:
             ):
                 # setting power cap to 0 will return the current power cap so the technical minimum value is 1
                 min_cap_display = 1 if min_power_cap == 0 else min_power_cap
-                if logger.is_json_format() or logger.is_csv_format():
-                    return {
-                        "status": "error",
-                        "sensor": power_type_key,
-                        "requested_power_cap": self.unit_format(logger, requested_power_cap, "W"),
-                        "min_power_cap": self.unit_format(logger, min_cap_display, "W"),
-                        "max_power_cap": self.unit_format(logger, max_power_cap, "W"),
-                        "message": f"Power cap must be between {min_cap_display}W and {max_power_cap}W",
-                    }
-                return f"Power cap must be between {min_cap_display}W and {max_power_cap}W"
+
+                # Raise so the caller exits with a non-zero return code
+                raise amdsmi_cli_exceptions.AmdSmiInvalidParameterValueException(
+                    sys.argv[1] if len(sys.argv) > 1 else "unknown",
+                    f"{requested_power_cap}W",
+                    self.get_output_format(),
+                    hint=f"Power cap must be between {min_cap_display}W and {max_power_cap}W",
+                )
             # Set the power cap
             new_power_cap = self.convert_SI_unit(
                 requested_power_cap, AMDSMIHelpers.SI_Unit.BASE, AMDSMIHelpers.SI_Unit.MICRO
