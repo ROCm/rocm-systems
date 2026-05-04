@@ -1,7 +1,13 @@
 #!/usr/bin/env python3
 # Copyright Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
+"""Run the rocprofiler-systems project's installed pytest suite.
 
+This runner is installed with the rocprofiler-systems test payload and executes
+the standalone rocprofsys-tests.pyz package shipped by that project.
+"""
+
+import argparse
 import getpass
 import logging
 import os
@@ -19,9 +25,30 @@ TEST_FILTER = (
     "and not TestGPUConnect"
 )
 
+HELP_EPILOG = f"""\
+This script runs the {PROJECT_NAME} project test suite from an installed
+payload. When run from an installed location, it discovers:
+
+  <install-prefix>/share/{PROJECT_NAME}/tests/rocprofsys-tests.pyz
+
+Environment variables:
+  ROCPROFSYS_INSTALL_DIR  rocprofiler-systems install prefix override.
+  ROCM_PATH               ROCm dependency prefix. Defaults to /opt/rocm.
+  ROCM_BIN_DIR            Directory containing ROCm command-line tools.
+"""
+
 
 def format_command(cmd) -> str:
     return " ".join(shlex.quote(str(arg)) for arg in cmd)
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description=f"Run the {PROJECT_NAME} project pytest suite.",
+        epilog=HELP_EPILOG,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    return parser.parse_args()
 
 
 def derive_install_dir(script_dir: Path) -> Path:
@@ -51,6 +78,7 @@ def prepend_path(env, name: str, path: Path) -> None:
 
 
 def main() -> None:
+    parse_args()
     script_dir = Path(__file__).resolve().parent
     install_dir_env = os.getenv("ROCPROFSYS_INSTALL_DIR")
     install_dir = (
