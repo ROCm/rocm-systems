@@ -41,7 +41,7 @@ if [[ ${#files[@]} -eq 0 ]]; then
     while IFS= read -r -d '' f; do
         files+=("$f")
     done < <(find "${PROJECT_DIR}/source" \
-        -type f \( -name '*.cpp' -o -name '*.hpp' -o -name '*.h' -o -name '*.c' \) \
+        -type f \( -name '*.cpp' -o -name '*.hpp' \) \
         ! -path '*/external/*' ! -path '*/tpls/*' \
         -print0 2>/dev/null)
 fi

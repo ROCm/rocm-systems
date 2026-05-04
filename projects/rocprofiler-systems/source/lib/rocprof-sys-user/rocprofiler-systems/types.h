@@ -24,6 +24,7 @@
 #define ROCPROFSYS_TYPES_H_
 
 #include <stddef.h>
+#include <stdint.h>
 
 #if defined(__cplusplus)
 extern "C"

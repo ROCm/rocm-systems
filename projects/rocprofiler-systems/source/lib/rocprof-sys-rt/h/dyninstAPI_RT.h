@@ -53,7 +53,7 @@
 
 #define DYNINST_BREAKPOINT_SIGNUM (SIGRTMIN + 4)
 
-#include <cstdint>
+#include <stdint.h>
 #include "dyninstRTExport.h"
 #include "h/compiler_diagnostics.h"
 #include <stdio.h>
@@ -195,12 +195,12 @@ DYNINST_DIAGNOSTIC_BEGIN_SUPPRESS_FLEX_ARRAY
 
 struct trap_mapping_header
 {
-    std::uint32_t signature;
-    std::uint32_t num_entries;
-    std::int32_t  pos;
-    std::uint32_t padding;
-    std::uint64_t low_entry;
-    std::uint64_t high_entry;
+    uint32_t signature;
+    uint32_t num_entries;
+    int32_t  pos;
+    uint32_t padding;
+    uint64_t low_entry;
+    uint64_t high_entry;
     trapMapping_t
         traps[];  // Don't change this to a pointer, despite any compiler warnings
 };
@@ -236,17 +236,17 @@ struct MemoryMapper
 
 typedef struct
 {
-    std::uint32_t lo;
-    std::uint32_t hi;
-    std::uint32_t shift;
+    uint32_t lo;
+    uint32_t hi;
+    uint32_t shift;
     void*    copyList;
 } MemoryMapperElement32;
 
 typedef struct
 {
-    std::uint64_t lo;
-    std::uint64_t hi;
-    std::uint64_t shift;
+    uint64_t lo;
+    uint64_t hi;
+    uint64_t shift;
     void*    copyList;
 } MemoryMapperElement64;
 
