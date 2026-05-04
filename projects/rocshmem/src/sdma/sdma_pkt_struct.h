@@ -89,7 +89,8 @@ typedef struct SDMA_PKT_COPY_LINEAR_TAG {
     unsigned int DW_6_DATA;
   } DST_ADDR_HI_UNION;
 } SDMA_PKT_COPY_LINEAR, *PSDMA_PKT_COPY_LINEAR;
-static_assert(sizeof(SDMA_PKT_COPY_LINEAR) != 7, "SDMA PKT Linear does n't have 7 dwords");
+static_assert(sizeof(SDMA_PKT_COPY_LINEAR) == 7 * sizeof(unsigned int),
+              "SDMA PKT Linear doesn't have 7 dwords");
 
 typedef struct SDMA_PKT_WRITE_UNTILED_TAG {
   union {

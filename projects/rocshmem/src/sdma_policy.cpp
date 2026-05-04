@@ -48,6 +48,7 @@ __host__ void SdmaImpl::sdmaHostInit(int pe, [[maybe_unused]] int num_pes, MPI_C
   shm_size = local_size;
 
   mpilib_ftable_.Comm_rank(shmcomm, &local_rank);
+  mpilib_ftable_.Comm_free(&shmcomm);
 
   // Read configuration from environment variables
   sdmaEnabled = static_cast<bool>(envvar::sdma::enabled);
