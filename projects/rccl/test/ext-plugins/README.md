@@ -8,6 +8,8 @@ This directory contains automated tests for RCCL (ROCm Communication Collectives
 
 2. **Profiler Plugin**: Validates the profiler plugin that captures detailed runtime events for collective and P2P operations, including Group, Collective, P2P, ProxyOp, ProxyStep, and GPU kernel events.
 
+3. **Inspector Plugin**: Validates the inspector plugin that produces structured JSONL output for collective operations. Tests cover schema correctness, per-rank output files, timing source validation, and verbose event trace fields across single-node and multi-node configurations.
+
 The tests are written in Python using the pytest framework, making it easy to run, maintain, and extend the test coverage.
 
 ## Directory Structure
@@ -21,6 +23,7 @@ ext-plugins/
 ├── venv/                        # Python virtual environment (created after setup)
 ├── logs/                        # Test execution logs and output files
 ├── profiler_dumps/              # Profiler plugin output (JSON trace files)
+├── inspector_dumps/             # Inspector plugin output (JSONL log files)
 ├── assets/                      # Test configuration files and assets
 │   └── csv_confs/               # CSV configuration files for testing
 │       ├── incorrect_values_config.conf
@@ -38,14 +41,21 @@ ext-plugins/
     │   ├── test_reduce.py
     │   ├── test_allgather.py
     │   └── test_reducescatter.py
-    └── ext-profiler/            # Profiler Plugin specific tests
+    ├── ext-profiler/            # Profiler Plugin specific tests
+    │   ├── test_allreduce.py
+    │   ├── test_broadcast.py
+    │   ├── test_reduce.py
+    │   ├── test_allgather.py
+    │   ├── test_alltoall.py
+    │   ├── test_reducescatter.py
+    │   └── test_sendrecv.py
+    └── ext-inspector/           # Inspector Plugin specific tests
+        ├── conftest.py          # Inspector-specific fixtures and validators
         ├── test_allreduce.py
+        ├── test_allgather.py
         ├── test_broadcast.py
         ├── test_reduce.py
-        ├── test_allgather.py
-        ├── test_alltoall.py
-        ├── test_reducescatter.py
-        └── test_sendrecv.py
+        └── test_reducescatter.py
 ```
 
 ## Installation & Setup
@@ -55,15 +65,15 @@ ext-plugins/
 - Python 3.6 or higher
 - RCCL library installed
 - ROCm environment configured
-- **Important**: Update the installation paths in `tests/conftest.py` to match your environment:
+- **Important**: Set the following environment variables to match your environment:
 
-```python
-RCCL_INSTALL_DIR = "path/to/rccl"
-OMPI_INSTALL_DIR = "path/to/ompi"
-RCCL_TESTS_DIR = "path/to/rccl-tests"
+```bash
+export RCCL_INSTALL_DIR=/path/to/rccl          # RCCL source root (contains ext-profiler/, ext-tuner/)
+export OMPI_INSTALL_DIR=/path/to/ompi/install   # OpenMPI installation directory
+export RCCL_TESTS_DIR=/path/to/rccl-tests       # rccl-tests build directory
 ```
 
-Replace these placeholder paths with your actual installation directories before running the tests.
+These are read by `tests/conftest.py` at runtime. If not set (or if plugin libraries are missing), plugin-specific tests are skipped with a clear reason in pytest output.
 
 ### Building the RCCL Plugins
 
@@ -111,6 +121,28 @@ This will compile the plugin and create `libnccl-profiler.so` in the same direct
 - **ProxyStep events**: Detailed network steps (SendWait, RecvWait, GPU waits)
 - **ProxyCtrl events**: Proxy thread control (Append, Sleep)
 - **GPU events**: Kernel channel execution
+
+#### Building the Inspector Plugin
+
+The inspector plugin is located in the `ext-profiler/inspector` directory.
+
+**Step 1: Navigate to the plugin directory**
+
+```bash
+cd rccl/ext-profiler/inspector
+```
+
+**Step 2: Build the plugin**
+
+```bash
+make
+```
+
+This will compile the plugin and create `librccl-profiler-inspector.so` in the same directory. The inspector plugin produces structured JSONL output for collective operations, including:
+- **Header**: Rank ID, total ranks, and node count
+- **Metadata**: Output format version, recording mechanism, hostname, PID, and dump timestamp
+- **Collective performance**: Operation type, sequence number, message size, execution time, timing source, algorithm bandwidth, and bus bandwidth
+- **Verbose event trace** (optional): Per-kernel channel start/stop sequence numbers and timestamps
 
 ### Step 1: Create Virtual Environment
 
@@ -163,8 +195,9 @@ Tests are organized using pytest markers. You can run specific groups of tests:
 
 **Run plugin-specific tests:**
 ```bash
-pytest -m ext_tuner --cache-clear      # CSV Tuner Plugin tests only
-pytest -m ext_profiler --cache-clear   # Profiler Plugin tests only
+pytest -m ext_tuner --cache-clear       # CSV Tuner Plugin tests only
+pytest -m ext_profiler --cache-clear    # Profiler Plugin tests only
+pytest -m ext_inspector --cache-clear   # Inspector Plugin tests only
 ```
 
 **Run tests for specific collective operations (across all plugins):**
@@ -180,8 +213,9 @@ pytest -m sendrecv --cache-clear       # SendRecv tests (profiler only)
 
 **Combine markers to run specific tests:**
 ```bash
-pytest -m "ext_profiler and allreduce" --cache-clear   # Profiler AllReduce tests only
-pytest -m "ext_tuner and broadcast" --cache-clear      # Tuner Broadcast tests only
+pytest -m "ext_profiler and allreduce" --cache-clear    # Profiler AllReduce tests only
+pytest -m "ext_tuner and broadcast" --cache-clear       # Tuner Broadcast tests only
+pytest -m "ext_inspector and allreduce" --cache-clear   # Inspector AllReduce tests only
 ```
 
 ### Run Tests with Log Output
@@ -210,3 +244,5 @@ pytest --verbose --tb=short
 - **Log Files**: Test execution logs are stored in the `logs/` directory for later review and debugging.
 
 - **Profiler Output**: Profiler plugin tests generate JSON trace files in the `profiler_dumps/` directory. These files contain detailed event traces that can be analyzed for debugging or performance analysis. The directory is automatically cleaned before each test session by the pytest fixture.
+
+- **Inspector Output**: Inspector plugin tests generate JSONL log files in the `inspector_dumps/` directory, with one file per rank per test. Each line is a self-contained JSON record containing header, metadata, and collective performance data. The directory is automatically cleaned before each test session.

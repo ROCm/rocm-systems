@@ -41,4 +41,5 @@ esmi_ib_library/
 !.clang-tidy
 !.clangd
 !.cmake-format
+!.gersemirc
 !.pre-commit-config.yaml

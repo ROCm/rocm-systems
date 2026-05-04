@@ -272,7 +272,7 @@ bool RocJpegStreamParser::ParseDHT() {
         huffman_table_id = index & 0x0F;
 
         if (huffman_table_id >= HUFFMAN_TABLES) {
-            ERR("invlaid number of Huffman table!");
+            ERR("invalid number of Huffman table!");
             return false;
         }
 
@@ -296,7 +296,7 @@ bool RocJpegStreamParser::ParseDHT() {
             jpeg_stream_parameters_.huffman_table_buffer.load_huffman_table[huffman_table_id] = 1;
         } else {
             if (count > DC_HUFFMAN_TABLE_VALUES_SIZE) {
-                ERR("invlaid DC Huffman table!")
+                ERR("invalid DC Huffman table!")
                 return false;
             }
             std::memcpy(jpeg_stream_parameters_.huffman_table_buffer.huffman_table[huffman_table_id].dc_values, stream_, count);

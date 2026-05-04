@@ -15,6 +15,8 @@ Requirements
 
 * ROCm 6.4.0 or later, including the :doc:`HIP runtime <hip:index>`. For more information, see `ROCm installation for Linux <https://rocm.docs.amd.com/projects/install-on-linux/en/latest/>`_.
 
+  * ROCm 7.0 or later is required for the VMM POSIX memory allocator (``USE_HEAP_DEVICE_VMM_POSIX``).
+
 * The following AMD GPUs have been fully tested for compatibility with rocSHMEM:
 
   * MI250X
@@ -136,6 +138,39 @@ the following flag to the build configuration scripts ``-DUSE_EXTERNAL_MPI=OFF``
 However, this will disable the functional and unit
 tests, as they required MPI to run.
 
+Memory allocator options
+^^^^^^^^^^^^^^^^^^^^^^^^^
+
+rocSHMEM provides several GPU memory allocator options that control how the symmetric heap is allocated:
+
+* **USE_HEAP_DEVICE_FINEGRAIN** (default): GPU memory with fine-grained coherency. Provides CPU access to GPU memory with cache coherency.
+
+* **USE_HEAP_DEVICE_COARSEGRAIN**: GPU memory with coarse-grained coherency. Better performance for GPU-only access patterns.
+
+* **USE_HEAP_DEVICE_UNCACHED**: GPU memory in uncached mode (requires ROCm 5.5+). May provide better performance on some architectures.
+
+* **USE_HEAP_DEVICE_VMM_POSIX**: GPU memory using Virtual Memory Management (VMM) with POSIX file descriptor-based IPC (requires ROCm 7.0+).
+  This allocator uses advanced HIP VMM APIs (``hipMemCreate``, ``hipMemAddressReserve``, ``hipMemMap``) and
+  cross-process file descriptor sharing via Linux kernel syscalls (``pidfd_open``, ``pidfd_getfd``).
+
+  .. note::
+
+    The VMM POSIX allocator requires:
+
+    * ROCm 7.0 or newer
+    * Linux kernel 5.6 or newer
+    * TCP Bootstrap-based initialization (not compatible with MPI-based initialization)
+
+    This allocator is experimental and primarily intended for advanced use cases requiring fine-grained control over GPU memory management and IPC mechanisms.
+
+These options are mutually exclusive. To use a non-default allocator, pass the corresponding flag to the build configuration scripts. For example:
+
+.. code-block:: bash
+
+  cd projects/rocshmem/build
+  cmake .. -DUSE_HEAP_DEVICE_COARSEGRAIN=ON -DUSE_HEAP_DEVICE_FINEGRAIN=OFF
+  cmake --build . --parallel 8
+
 All backends build
 ^^^^^^^^^^^^^^^^^^
 
@@ -156,7 +191,7 @@ The build script passes configuration options to CMake to set up a canonical bui
 
 .. note::
 
- This builds rocSHMEM with all backends. You can select IPC, RO, GDA, or any combination at runtime by setting an environment variable (see :doc:`Environment variables <./api/env_variables>` for more details). However, this portability can reduce performance, so the other build scripts are recommended if you need maximum performance. If no specific backend is requested by the user, the library will use the IPC backend if all PEs are on a single node. If the job spans multiple nodes, rocSHMEM will try to use the various GDA backends first, and fall back to the RO backend if neither of the GDA backends can be used.
+ This builds rocSHMEM with all backends. You can select IPC, RO, GDA, or any combination at runtime by setting an environment variable (see :doc:`Environment variables <./env_variables>` for more details). However, this portability can reduce performance, so the other build scripts are recommended if you need maximum performance. If no specific backend is requested by the user, the library will use the IPC backend if all PEs are on a single node. If the job spans multiple nodes, rocSHMEM will try to use the various GDA backends first, and fall back to the RO backend if neither of the GDA backends can be used.
 
 GDA backend build
 ^^^^^^^^^^^^^^^^^
@@ -235,9 +270,9 @@ Installation prefix
 ^^^^^^^^^^^^^^^^^^^
 
 By default, the build scripts install the library to ``~/rocshmem``. You can customize the installation path by adding
-the desired path as the script parameter. For example, to relocate the default configuration:
+the desired path through the ``INSTALL_PREFIX`` environment variable. For example, to relocate the default configuration:
 
 .. code-block:: bash
 
-  ../scripts/build_configs/ro_ipc /path/to/install
+  INSTALL_PREFIX=/path/to/install ../scripts/build_configs/all_backends
 

@@ -99,6 +99,7 @@ public:
                          uint64_t command_size,
                          uint64_t fence_value);
   hsa_status_t SetPriority(hsa_amd_queue_priority_t priority);
+  hsa_status_t SetCuMask(uint32_t cu_mask_count, const uint32_t* queue_cu_mask);
 
   uint64_t *GetSyncAddr(void) const { return sync_addr; }
   uint64_t GetCmdbufAddr(void) const { return cmdbuf_addr; }
@@ -137,6 +138,8 @@ public:
 
   std::atomic<uint64_t>* ring_wptr = nullptr;
   std::atomic<uint64_t>* ring_rptr = nullptr;
+
+  uint32_t aql_doorbell_offset_ = 0; //!< Doorbell offset for this AQL queue
 };
 
 class ComputeQueue : public WDDMQueue {
@@ -199,8 +202,8 @@ public:
   hsa_status_t PreSubmit(void);
   hsa_status_t EndSubmit(void);
 
-  void *ring;         //!< AQL queue, allocated in ROCR and points to the AQL packets
-  uint64_t ring_size; //!< AQL queue size in packets
+  void *ring; //!< AQL queue, allocated in ROCR and points to the AQL packets
+  uint64_t ring_size;
 
   // ib_start_addr is the current ib start address
   uint64_t ib_start_addr;
@@ -226,7 +229,7 @@ private:
     return AMD_HSA_BITS_GET(amd_queue_rocr_->queue_properties, AMD_QUEUE_PROPERTIES_ENABLE_PROFILING);
   }
   void HandleError(hsa_status_t status);
-  bool UpdateScratch(hsa_kernel_dispatch_packet_t *packet, bool wave32);
+  bool UpdateScratch(uint32_t private_segment_size, bool wave32);
 
   uint32_t UpdateIndexStride(uint32_t srd, bool wave32);
 
@@ -254,7 +257,7 @@ private:
   std::condition_variable thread_cond_;
   static void AqlToPm4Thread(ComputeQueue *queue);
 
-  uint64_t max_scratch_waves_;
+  uint64_t scratch_waves_;
   uint64_t dispatch_waves_;
   uint64_t scratch_size_per_wave_;
   uint64_t scratch_size_;
@@ -264,7 +267,7 @@ private:
   GpuMemoryHandle scratch_mem_;
 
   std::vector<int> scratch_base_offset_array_;
-  bool aql_;  //!< The queue is configured to the AQL execution
+  bool native_aql_ = false;  //!< Queue submits AQL packets directly without PM4 translation
 };
 
 class SDMAQueue : public WDDMQueue {

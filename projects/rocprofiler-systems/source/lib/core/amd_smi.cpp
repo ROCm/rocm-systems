@@ -12,7 +12,6 @@
 #include <cctype>
 #include <string_view>
 
-#if defined(ROCPROFSYS_USE_ROCM) && ROCPROFSYS_USE_ROCM > 0
 namespace rocprofsys
 {
 namespace amd_smi
@@ -34,20 +33,19 @@ get_setting_name(std::string_view input)
     return result;
 }
 
-#    define ROCPROFSYS_CONFIG_SETTING(TYPE, ENV_NAME, DESCRIPTION, INITIAL_VALUE, ...)   \
-        [&]() {                                                                          \
-            auto _ret = _config->insert<TYPE, TYPE>(                                     \
-                ENV_NAME, get_setting_name(ENV_NAME), DESCRIPTION,                       \
-                TYPE{ INITIAL_VALUE },                                                   \
-                std::set<std::string>{ "custom", "rocprofsys", "librocprof-sys",         \
-                                       __VA_ARGS__ });                                   \
-            if(!_ret.second)                                                             \
-            {                                                                            \
-                LOG_WARNING("Duplicate setting: {} / {}", get_setting_name(ENV_NAME),    \
-                            ENV_NAME);                                                   \
-            }                                                                            \
-            return _config->find(ENV_NAME)->second;                                      \
-        }()
+#define ROCPROFSYS_CONFIG_SETTING(TYPE, ENV_NAME, DESCRIPTION, INITIAL_VALUE, ...)       \
+    [&]() {                                                                              \
+        auto _ret = _config->insert<TYPE, TYPE>(                                         \
+            ENV_NAME, get_setting_name(ENV_NAME), DESCRIPTION, TYPE{ INITIAL_VALUE },    \
+            std::set<std::string>{ "custom", "rocprofsys", "librocprof-sys",             \
+                                   __VA_ARGS__ });                                       \
+        if(!_ret.second)                                                                 \
+        {                                                                                \
+            LOG_WARNING("Duplicate setting: {} / {}", get_setting_name(ENV_NAME),        \
+                        ENV_NAME);                                                       \
+        }                                                                                \
+        return _config->find(ENV_NAME)->second;                                          \
+    }()
 }  // namespace
 
 void
@@ -55,12 +53,13 @@ config_settings(const std::shared_ptr<settings>& _config)
 {
     if(!get_use_amd_smi() || !gpu::initialize_amdsmi()) return;
 
-    std::string default_metrics = "busy, temp, power, mem_usage";
+    std::string default_metrics = "busy, temp, power, mem_usage, sdma_usage";
     // No distinction between busy and activity shown in description
     std::string jpeg_activity_support{};
     std::string vcn_activity_support{};
     std::string xgmi_support{};
     std::string pcie_support{};
+    std::string sdma_support{};
 
     size_t device_count = gpu::get_processor_count();
     for(size_t i = 0; i < device_count; i++)
@@ -96,24 +95,16 @@ config_settings(const std::shared_ptr<settings>& _config)
         }
     }
 
+#if AMD_SMI_SDMA_SUPPORTED == 1
+    sdma_support += ", sdma_usage";
+#endif
+
     ROCPROFSYS_CONFIG_SETTING(
         std::string, "ROCPROFSYS_AMD_SMI_METRICS",
         "amd-smi metrics to collect: " + default_metrics + jpeg_activity_support +
-            vcn_activity_support + xgmi_support + pcie_support + ". " +
+            vcn_activity_support + xgmi_support + pcie_support + sdma_support + ". " +
             "An empty value implies 'all' and 'none' suppresses all.",
         "busy, temp, power, mem_usage", "backend", "amd_smi", "rocm", "process_sampling");
 }
 }  // namespace amd_smi
 }  // namespace rocprofsys
-
-#else
-namespace rocprofsys
-{
-namespace amd_smi
-{
-void
-config_settings(const std::shared_ptr<settings>&)
-{}
-}  // namespace amd_smi
-}  // namespace rocprofsys
-#endif

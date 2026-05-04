@@ -38,7 +38,7 @@ When run with `--help`, it reports the available subcommands:
 ~$ amd-smi --help
 usage: amd-smi [-h] [--rocm-smi]  ...
 
-AMD System Management Interface | Version: 26.3.0 | ROCm version: 7.12.0 | Platform: Linux Baremetal
+AMD System Management Interface | Version: 26.4.0 | ROCm version: 7.13.0 | Platform: Linux Baremetal
 
 options:
   -h, --help          show this help message and exit
@@ -109,6 +109,11 @@ details for usage.
 
 Lists GPU information.
 
+```{note}
+`amd-smi list -e` is useful for mapping physical-to-logical GPU IDs.
+The `oam_id` field identifies the physical board slot in multi-GPU OAM chassis.
+```
+
 ```shell-session
 ~$ amd-smi list --help
 usage: amd-smi list [-h] [--json | --csv] [--file FILE] [--loglevel LEVEL]
@@ -121,8 +126,8 @@ GPU with some basic information for each VF.
 
 List Arguments:
   -h, --help               show this help message and exit
-  -e                       Enumeration mapping to other features.
-                               Includes CARD, RENDER, HSA_ID, HIP_ID, and HIP_UUID.
+  -e, --enumeration        Enumeration mapping to other features.
+                               Includes CARD, RENDER, HSA_ID, HIP_ID, HIP_UUID, and OAM_ID.
 
 Device Arguments:
   -g, --gpu GPU [GPU ...]  Select a GPU ID, BDF, or UUID from the possible choices:
@@ -357,6 +362,8 @@ CPU Arguments:
   --cpu-xgmi-bandwidth XGMI_BW LINKID_NAME  Displays current XGMI bandwidth for the selected CPU
                                              input parameters are bandwidth type(1,2,4) and link ID encodings
                                              i.e. P2, P3, G0 - G7
+  --cpu-pwr-eff-mode                        Displays current power efficiency mode.
+                                             For Family 1Ah Models 50h-57h onwards and MODE= 4 or 5, displays utilization percentage and PPT limit in Watts.
   --cpu-metrics-ver                         Displays metrics table version
   --cpu-metrics-table                       Displays metric table
   --cpu-socket-energy                       Displays socket energy for the selected CPU socket
@@ -366,13 +373,27 @@ CPU Arguments:
   --cpu-dimm-temp-range-rate DIMM_ADDR      Displays dimm temperature range and refresh rate
   --cpu-dimm-pow-consumption DIMM_ADDR      Displays dimm power consumption
   --cpu-dimm-thermal-sensor DIMM_ADDR       Displays dimm thermal sensor
+  --cpu-xgmi-pstate-range                   Displays XGMI pstate range (min and max values) for the selected CPU
+  --cpu-railisofreq-policy                  Displays CPU rail isolated frequency policy
   --cpu-dfcstate-ctrl                       Displays DFCState control status
-  --cpu-railisofreq-policy                  Displays CPU ISO frequency policy
+  --cpu-pc6-enable                          Displays PC6 enable control
+  --cpu-cc6-enable                          Displays CC6 enable control
+  --cpu-dimm-sb-reg                         Read DIMM sideband register.Requires DIMM_ADDR, LID(0x2->TS0,0x6->TS1,0x9->PMIC0,0xA->SPDHub),
+                                             REG_OFFSET (hex), REG_SPACE (REGSPACE:0->Volatile,1->NVM)
+  --cpu-tdelta                              Displays CPU thermal delta (TDELTA) value for the selected CPU socket
+  --cpu-svi3-vr-controller-temp TYPE [RAIL_INDEX ...]
+                                            Get SVI3 VR controller temperature. TYPE: 0=HottestRail, 1=IndividualRail.
+                                             If TYPE=1, RAIL_INDEX: (RAIL_INDEX:0->VDDCR_CPU0,1->VDDCR_CPU1,2->VDDCR_SOC,3->VDDIO,4->VDDIO_MEM_S3) must be specified
+  --cpu-enabled-commands                    Displays HSMP enabled commands bit masks (Read/Write EnabledCommandsBitMask0-2)
+  --cpu-sdps-limit                          Displays CPU SDPS limit for the selected CPU socket (in Watts)
 
 CPU Core Arguments:
   --core-boost-limit                        Get boost limit for the selected cores
   --core-curr-active-freq-core-limit        Get Current CCLK limit set per Core
   --core-energy                             Displays core energy for the selected core
+  --core-ccd-power                          Displays CCD (Core Complex Die) power consumption for the selected core
+  --core-floor-limit                        Get floor limit frequency for the selected core (MHz)
+  --core-eff-floor-limit                    Get effective floor limit frequency for the selected core (MHz)
 
 Device Arguments:
   -g, --gpu GPU [GPU ...]      Select a GPU ID, BDF, or UUID from the possible choices:
@@ -515,7 +536,7 @@ Topology arguments:
   -o, --hops               Displays the number of hops between GPUs
   -t, --link-type          Displays the link type between GPUs
   -b, --numa-bw            Display max and min bandwidth between nodes
-  -c, --coherent           Display cache coherant (or non-coherant) link capability between nodes
+  -c, --coherent           Display cache coherent (or non-coherent) link capability between nodes
   -n, --atomics            Display 32 and 64-bit atomic io link capability between nodes
   -d, --dma                Display P2P direct memory access (DMA) link capability between nodes
   -z, --bi-dir             Display P2P bi-directional link capability between nodes
@@ -556,12 +577,16 @@ usage: amd-smi set [-h] (-g GPU [GPU ...] | -U CPU [CPU ...] | -O CORE [CORE ...
                    [-l LEVEL] [-P SETPROFILE] [-d SCLKMAX] [-C PARTITION] [-M PARTITION]
                    [-o WATTS] [-p POLICY_ID] [-x POLICY_ID] [-R STATUS]
                    [--cpu-pwr-limit PWR_LIMIT] [--cpu-xgmi-link-width MIN_WIDTH MAX_WIDTH]
-                   [--cpu-lclk-dpm-level NBIOID MIN_DPM MAX_DPM] [--cpu-pwr-eff-mode MODE]
+                   [--cpu-lclk-dpm-level NBIOID MIN_DPM MAX_DPM] [--cpu-pwr-eff-mode MODE [UTIL PPT_LIMIT]]
                    [--cpu-gmi3-link-width MIN_LW MAX_LW] [--cpu-pcie-link-rate LINK_RATE]
                    [--cpu-df-pstate-range MAX_PSTATE MIN_PSTATE] [--cpu-enable-apb]
                    [--cpu-disable-apb DF_PSTATE] [--soc-boost-limit BOOST_LIMIT]
                    [--core-boost-limit BOOST_LIMIT] [--json | --csv] [--file FILE]
-                   [--loglevel LEVEL] [--cpu-dfcstate-ctrl VALUE] [--cpu-railisofreq-policy VALUE]
+                   [--loglevel LEVEL] [--cpu-xgmi-pstate-range MIN_PSTATE MAX_PSTATE] [--cpu-railisofreq-policy VALUE]
+                   [--cpu-dfcstate-ctrl VALUE] [--cpu-pc6-enable VALUE] [--cpu-cc6-enable VALUE]
+                   [--cpu-floor-limit FLOOR_LIMIT] [--cpu-msr-floor-limit MSR_FLOOR_LIMIT]
+                   [--core-floor-limit FLOOR_LIMIT] [--core-msr-floor-limit MSR_FLOOR_LIMIT]
+                   [--cpu-dimm-sb-reg DIMM_ADDR LID REG_OFFSET REG_SPACE WRITE_DATA] [--cpu-sdps-limit SDPS_LIMIT]
 
 If no GPU is specified, will select all GPUs on the system.
 A set argument must be provided; Multiple set arguments are accepted.
@@ -569,7 +594,9 @@ Requires 'sudo' privileges.
 
 Set Arguments:
   -h, --help                                  show this help message and exit
-  -f, --fan %                                 Set GPU fan speed (0-255 or 0-100%)
+  -f, --fan %                                 Set GPU fan speed :
+                                                GPU 0: 0-255 or 0-100%
+                                                GPU 1: 20-100 or 0-100%
   -l, --perf-level LEVEL                      Set one of the following performance levels:
                                                 AUTO, LOW, HIGH, MANUAL, STABLE_STD, STABLE_PEAK, STABLE_MIN_MCLK, STABLE_MIN_SCLK, DETERMINISM
   -P, --profile PROFILE_LEVEL                 Set power profile level (#) or choose one of available profiles:
@@ -588,8 +615,8 @@ Set Arguments:
                                                 N/A
   -c, --clk-level CLK_TYPE [FREQ_LEVELS ...]  Set one or more sclk (aka gfxclk), mclk, fclk, pcie, or socclk frequency levels.
                                                 Use `amd-smi static --clock` to find acceptable levels.
-  -L, --clk-limit CLK_TYPE LIM_TYPE VALUE     Sets the sclk (aka gfxclk) or mclk minimum and maximum frequencies.
-                                                ex: amd-smi set -L (sclk | mclk) (min | max) value
+  -L, --clk-limit CLK_TYPE LIM_TYPE VALUE     Sets the sclk (aka gfxclk), mclk, or fclk minimum and maximum frequencies.
+                                                ex: amd-smi set -L (sclk | mclk | fclk) (min | max) value
   -R, --process-isolation STATUS              Enable or disable the GPU process isolation on a per partition basis: 0 for disable and 1 for enable.
   --ptl-status STATUS                         Enable or disable the PTL on a GPU processor: 0 for disable and 1 for enable
   --ptl-format FRMT1,FRMT2                    Set the PTL format on a GPU processor. For example, --ptl-format I8,F32
@@ -599,15 +626,27 @@ CPU Arguments:
   --cpu-xgmi-link-width MIN_WIDTH MAX_WIDTH                      Set max and Min linkwidth. Input parameters are min and max link width values
   --cpu-lclk-dpm-level NBIOID MIN_DPM MAX_DPM                    Sets the max and min dpm level on a given NBIO.
                                                                   Input parameters are die_index, min dpm, max dpm.
-  --cpu-pwr-eff-mode MODE                                        Sets the power efficency mode policy. Input parameter is mode.
+  --cpu-pwr-eff-mode MODE [UTIL PPT_LIMIT] [MODE [UTIL PPT_LIMIT] ...]
+                                                                 Sets the power efficiency mode policy. Input parameters,
+                                                                  MODE(0=HighPerformance, 1=PowerEfficiency, 2=IOPerformance, 3=BalancedMemory, 4=BalancedCore, 5=BalancedCoreMemory),
+                                                                  For Family 1Ah Models 50h-57h onwards, UTIL(%)(0-100) and PPT_limit (in mW) required if MODE= 4 or 5
   --cpu-gmi3-link-width MIN_LW MAX_LW                            Sets max and min gmi3 link width range
   --cpu-pcie-link-rate LINK_RATE                                 Sets pcie link rate
   --cpu-df-pstate-range MAX_PSTATE MIN_PSTATE                    Sets max and min df-pstates
   --cpu-enable-apb                                               Enables the DF p-state performance boost algorithm
   --cpu-disable-apb DF_PSTATE                                    Disables the DF p-state performance boost algorithm. Input parameter is DFPstate (0-3)
   --soc-boost-limit BOOST_LIMIT                                  Sets the boost limit for the given socket. Input parameter is socket BOOST_LIMIT value
+  --cpu-xgmi-pstate-range MIN_PSTATE MAX_PSTATE                  Sets min and max for xgmi pstate range (MAX <= MIN)
+  --cpu-railisofreq-policy VALUE                                 Sets the CPU rail isolated frequency policy. Input parameter is VALUE (0-1)
   --cpu-dfcstate-ctrl VALUE                                      Sets the DFCState control for the given socket. Input parameter is VALUE (0-1)
-  --cpu-railisofreq-policy VALUE                                 Sets the CPU ISO frequency policy. Input parameter is VALUE (0-1)
+  --cpu-pc6-enable VALUE                                         Sets PC6 enable control. Input parameter is value (0-1)
+  --cpu-cc6-enable VALUE                                         Sets CC6 enable control. Input parameter is value (0-1)
+  --cpu-floor-limit FLOOR_LIMIT                                  Sets the floor limit for the given CPU socket. Input parameter is CPU FLOOR_LIMIT value MHz
+  --cpu-msr-floor-limit MSR_FLOOR_LIMIT                          Sets the CPU MSR floor limit frequency for the given socket. Input parameter is MSR_FLOOR_LIMIT value in MHz
+  --cpu-dimm-sb-reg DIMM_ADDR LID REG_OFFSET REG_SPACE WRITE_DATA
+                                                                 Write data to DIMM sideband register. Requires DIMM_ADDR, LID(0x2->TS0,0x6->TS1,0x9->PMIC0,0xA->SPDHub)
+                                                                  REG_OFFSET (hex), REG_SPACE (REGSPACE:0->Volatile,1->NVM), WRITE_DATA (hex)
+  --cpu-sdps-limit SDPS_LIMIT                                    Set CPU SDPS limit for the given socket. Input parameter is SDPS limit value in milliwatts (mW).
 
 CPU Core Arguments:
   --core-boost-limit BOOST_LIMIT                                 Sets the boost limit for the given core. Input parameter is core BOOST_LIMIT value
@@ -1378,7 +1417,41 @@ This example code shows how to dump AFID errors in a CPER file
 ```
 
 Refer to
-[amd_smi_cper_example.py](https://github.com/ROCm/amdsmi/blob/amd-mainline/example/amd_smi_cper_example.py)
+[amd_smi_cper_example.py](https://github.com/ROCm/rocm-systems/blob/develop/projects/amdsmi/example/amd_smi_cper_example.py)
 and
-[amd_smi_afid_example.py](https://github.com/ROCm/amdsmi/blob/amd-mainline/example/amd_smi_afid_example.py)
+[amd_smi_afid_example.py](https://github.com/ROCm/rocm-systems/blob/develop/projects/amdsmi/example/amd_smi_afid_example.py)
 for API examples.
+
+## Memory tuning: UMA carveout and GTT
+
+`amd-smi static --mem-carveout` / `amd-smi set --mem-carveout INDEX` and
+`amd-smi node --gtt` / `amd-smi set --gtt GB` / `amd-smi reset --gtt` let
+users inspect and tune the BIOS VRAM carveout and the TTM `pages_limit`
+(shared GTT) respectively. Both features talk directly to kernel UAPI
+interfaces (sysfs / modprobe.d) and do **not** require libdrm.
+
+### Supported ASICs
+
+| Feature | Hardware | Status |
+|---|---|---|
+| `--mem-carveout` (UMA carveout) | Strix and later APUs (gfx1150, gfx1151, gfx1152) whose VBIOS exposes ATCS 0xA | Supported |
+| `--mem-carveout` (UMA carveout) | Radeon dGPUs, Instinct MI-series (MI100, MI200, MI300, MI300A) | Not supported — reported as `MEM_CARVEOUT: N/A (UMA carveout is not supported on this ASIC/VBIOS)` |
+| `--gtt` (TTM `pages_limit`) | Any amdgpu system, including Instinct MI300A (`amdttm` / `amd-ttm`) and Ryzen APUs (`ttm`) | Supported |
+
+### Prerequisites
+
+- **UMA carveout:** Linux kernel >= 7.0 (upstream commit [`685b711`](https://github.com/torvalds/linux/commit/685b711); some distros backport it to earlier kernels), an APU VBIOS that advertises ATCS 0xA + IGP info table v2.3, root, and a reboot after changing the index.
+- **GTT (TTM `pages_limit`):** root (to write `/etc/modprobe.d/<module>.conf`), optionally `dracut` (the tool will rebuild the initramfs automatically when `dracut` is present), and a reboot to apply the new limit. amd-smi auto-detects the TTM kernel module name (`ttm`, `amdttm`, or `amd-ttm`) and writes the matching `.conf`.
+
+### Troubleshooting: `MEM_CARVEOUT: N/A`
+
+On MI300A (and every non-APU / pre-ATCS-0xA platform) the kernel does not
+create `/sys/class/drm/<card>/device/uma/`, so `amd-smi static --mem-carveout`
+prints
+
+```text
+MEM_CARVEOUT: N/A (UMA carveout is not supported on this ASIC/VBIOS)
+```
+
+This is expected. Use `amd-smi node --gtt` / `amd-smi set --gtt` to tune
+shared GPU memory on those platforms instead.

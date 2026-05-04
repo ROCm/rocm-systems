@@ -1,23 +1,8 @@
 /*
-Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 /**
 Test Case Scenarios of hipGraphHostNodeGetParams API:
@@ -59,7 +44,7 @@ static void callbackfunc_setparams(void* B_h) {
 This test case verifies the negative scenarios of
 hipGraphHostNodeGetParams API
 */
-TEST_CASE("Unit_hipGraphHostNodeGetParams_Negative") {
+HIP_TEST_CASE(Unit_hipGraphHostNodeGetParams_Negative) {
   constexpr size_t N = 1024;
   hipGraph_t graph;
   int *A_d{nullptr}, *C_d{nullptr};
@@ -102,7 +87,7 @@ Add HostNode to the cloned graph, update hostNode using hipGraphHostNodeSetParam
 then get the host node params using hipGraphHostNodeGetParams API  and
 compare it.
 */
-TEST_CASE("Unit_hipGraphHostNodeGetParams_ClonedGraphWithHostNode") {
+HIP_TEST_CASE(Unit_hipGraphHostNodeGetParams_ClonedGraphWithHostNode) {
   constexpr size_t N = 1024;
   constexpr size_t Nbytes = N * sizeof(int);
   hipGraph_t graph;
@@ -246,7 +231,7 @@ This test case verifies hipGraphHostNodeGetParams API by
 adding host node to graph and gets the host params and
 validates it
 */
-TEST_CASE("Unit_hipGraphHostNodeGetParams_BasicFunc") { hipGraphHostNodeGetParams_func(false); }
+HIP_TEST_CASE(Unit_hipGraphHostNodeGetParams_BasicFunc) { hipGraphHostNodeGetParams_func(false); }
 
 /*
 This test case verifies hipGraphHostNodeGetParams API by
@@ -254,4 +239,4 @@ adding host node to graph, updates host node params
 using hipGraphHostNodeSetParams  and gets the host params
 validates it
 */
-TEST_CASE("Unit_hipGraphHostNodeGetParams_SetParams") { hipGraphHostNodeGetParams_func(true); }
+HIP_TEST_CASE(Unit_hipGraphHostNodeGetParams_SetParams) { hipGraphHostNodeGetParams_func(true); }

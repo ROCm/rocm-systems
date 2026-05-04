@@ -67,6 +67,9 @@ target_sources(
     empty_tester.cpp
     wavefront_primitives.cpp
     flood_tester.cpp
+    flood_amo_tester.cpp
+    device_bitcode_tester.cpp
+    library_info_tester.cpp
 )
 
 ###############################################################################
@@ -93,6 +96,8 @@ target_compile_definitions(
   ${PROJECT_NAME}
   PRIVATE
     $<$<TARGET_EXISTS:PMIx::pmix>:HAVE_PMIX=1>
+    CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+    CMAKE_BINARY_DIR="${CMAKE_BINARY_DIR}"
 )
 
 configure_file(../../scripts/functional_tests/driver.sh rocshmem_functional_driver.sh COPYONLY)
@@ -105,4 +110,10 @@ target_link_libraries(
     roc::rocshmem
     $<TARGET_NAME_IF_EXISTS:MPI::MPI_CXX>
     $<TARGET_NAME_IF_EXISTS:PMIx::pmix>
+    hiprtc
 )
+
+###############################################################################
+# DEVICE BITCODE TESTER (put/get via HSACO + rocshmem_hipmodule_init)
+###############################################################################
+include(${CMAKE_CURRENT_SOURCE_DIR}/CMakeDeviceBitcodeTester.cmake)

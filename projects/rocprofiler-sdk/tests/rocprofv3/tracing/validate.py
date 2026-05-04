@@ -367,6 +367,38 @@ def test_marker_api_trace_json(json_data):
         assert marker["end_timestamp"] >= marker["start_timestamp"]
 
 
+# rocprofv3 does not support output of KFD data to CSV
+def test_kfd_trace_json(json_data):
+    data = json_data["rocprofiler-sdk-tool"]
+
+    def get_kind_name(kind_id):
+        return data["strings"]["buffer_records"][kind_id]["kind"]
+
+    valid_kind = (
+        "KFD_EVENT_PAGE_MIGRATE",
+        "KFD_EVENT_PAGE_FAULT",
+        "KFD_EVENT_QUEUE",
+        "KFD_EVENT_UNMAP_FROM_GPU",
+        "KFD_EVENT_DROPPED_EVENTS",
+        "KFD_PAGE_MIGRATE",
+        "KFD_PAGE_FAULT",
+        "KFD_QUEUE",
+    )
+
+    buffer_records = data["buffer_records"]
+    kfd_data = buffer_records["kfd"]
+    for record in kfd_data:
+        kind_id = record["kind"]
+        op_id = record["operation"]
+
+        assert get_kind_name(kind_id) in valid_kind
+        assert op_id >= 0 and op_id < len(
+            data["strings"]["buffer_records"][kind_id]["operations"]
+        )
+        if "end_timestamp" in record:
+            assert record["end_timestamp"] >= record["start_timestamp"]
+
+
 def test_perfetto_data(pftrace_data, json_data):
     import rocprofiler_sdk.tests.rocprofv3 as rocprofv3
 

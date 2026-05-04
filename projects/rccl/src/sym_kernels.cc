@@ -91,6 +91,7 @@ static uint32_t kernelMask_user() {
 }
 
 NCCL_PARAM(SymCTAs, "SYM_CTAS", 0)
+NCCL_PARAM(SymLL, "SYM_LL", 1)
 
 static double softmin(double x, double ceiling, double softness) {
   // looks like a smooth version of: min(x, ceiling)
@@ -290,6 +291,8 @@ static uint32_t ncclSymkMask(struct ncclComm* comm, ncclFunc_t coll, int/*ncclDe
   if (!hasSTMC) kmask &= ~kernelMask_STMC;
   if (!hasLDMC) kmask &= ~kernelMask_LDMC;
 
+  if (ncclParamSymLL() == 0) kmask &= ~kernelMask_LL;
+
   size_t nBytes = nElts*ncclTypeSize(ty);
   size_t nBusBytes = (coll == ncclFuncAllReduce ? 1 : comm->nRanks)*nBytes;
   // LL kernels use 32-bit ints to track element counts and indices.
@@ -342,7 +345,11 @@ ncclResult_t ncclSymkPickKernel(
   *kernelId = bestKernel;
   *estTimeUs = kmask==0 || kernelMask_user() == (1<<ncclSymkKernelId_Count)-1 ? bestTime : 0.0f;
   *nBlocks = bestBlocks;
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+  *nWarps = 256/comm->WarpSize;
+#else
   *nWarps = 16;
+#endif
   return ncclSuccess;
 }
 
@@ -352,12 +359,6 @@ const char* ncclSymkKernelIdToString(int kernelId) {
   }
   return kernelName[kernelId];
 }
-
-#ifndef GENERATE_SYM_KERNELS
-void* ncclSymkGetKernelPtr(ncclSymkKernelId kernelId, int/*ncclDevRedOp_t*/ red, ncclDataType_t ty) {
-  return nullptr;
-}
-#endif
 
 /* this function fills in the devWork except nextWorkOffset */
 ncclResult_t ncclSymkMakeDevWork(struct ncclComm* comm, struct ncclTaskColl* task, struct ncclSymkDevWork* outDevWork) {
@@ -372,3 +373,9 @@ ncclResult_t ncclSymkMakeDevWork(struct ncclComm* comm, struct ncclTaskColl* tas
   outDevWork->nChannels = 0;
   return ncclSuccess;
 }
+
+#ifndef GENERATE_SYM_KERNELS
+void* ncclSymkGetKernelPtr(ncclSymkKernelId kernelId, int/*ncclDevRedOp_t*/ red, ncclDataType_t ty) {
+  return nullptr;
+}
+#endif

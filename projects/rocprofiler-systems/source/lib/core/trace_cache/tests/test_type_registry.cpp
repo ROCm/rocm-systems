@@ -1,24 +1,5 @@
-// MIT License
-//
-// Copyright (c) 2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "core/trace_cache/type_registry.hpp"
 #include "mocked_types.hpp"
@@ -123,4 +104,50 @@ TEST_F(type_registry_test, test_multiple_calls_same_type)
     EXPECT_EQ(sample_1_1.text, "first");
     EXPECT_EQ(sample_1_2.value, 200);
     EXPECT_EQ(sample_1_2.text, "second");
+}
+
+class type_registry_optional_test : public ::testing::Test
+{
+protected:
+    rocprofsys::trace_cache::type_registry<test_type_identifier_t, test_sample_1,
+                                           test_sample_2, test_sample_5>
+        type_registry;
+};
+
+TEST_F(type_registry_optional_test, test_get_type_sample_5_with_value)
+{
+    test_sample_5        test_value{ std::optional<uint32_t>{ 42 } };
+    size_t               buffer_size = rocprofsys::trace_cache::get_size(test_value);
+    std::vector<uint8_t> buffer(buffer_size);
+    rocprofsys::trace_cache::serialize(buffer.data(), test_value);
+
+    auto* buffer_data = buffer.data();
+    auto  result =
+        type_registry.get_type(test_type_identifier_t::sample_type_5, buffer_data);
+
+    ASSERT_TRUE(result.has_value());
+    ASSERT_TRUE(std::holds_alternative<test_sample_5>(result.value()));
+
+    auto sample_5 = std::get<test_sample_5>(result.value());
+    ASSERT_TRUE(sample_5.data.has_value());
+    EXPECT_EQ(sample_5.data.value(), 42);
+}
+
+TEST_F(type_registry_optional_test, test_get_type_sample_5_nullopt)
+{
+    test_sample_5        test_value{ std::nullopt };
+    size_t               buffer_size = rocprofsys::trace_cache::get_size(test_value);
+    std::vector<uint8_t> buffer(buffer_size);
+    rocprofsys::trace_cache::serialize(buffer.data(), test_value);
+
+    auto* buffer_data = buffer.data();
+    auto  result =
+        type_registry.get_type(test_type_identifier_t::sample_type_5, buffer_data);
+
+    ASSERT_TRUE(result.has_value());
+    ASSERT_TRUE(std::holds_alternative<test_sample_5>(result.value()));
+
+    auto sample_5 = std::get<test_sample_5>(result.value());
+    EXPECT_FALSE(sample_5.data.has_value());
+    EXPECT_EQ(sample_5.data, std::nullopt);
 }

@@ -24,6 +24,7 @@
 
 #include "generateStats.hpp"
 #include "generator.hpp"
+#include "kfd_info.hpp"
 #include "output_config.hpp"
 #include "statistics.hpp"
 
@@ -104,6 +105,12 @@ generate_csv(const output_config&                                               
              const metadata&                                                      tool_metadata,
              const generator<tool_buffer_tracing_memory_allocation_ext_record_t>& data,
              const stats_entry_t&                                                 stats);
+
+void
+generate_csv(const output_config&                               cfg,
+             const metadata&                                    tool_metadata,
+             const generator<tool_buffer_tracing_kfd_record_t>& data,
+             const stats_entry_t&                               stats);
 
 void
 generate_csv(const output_config&                                              cfg,

@@ -21,53 +21,48 @@
  */
 
 #include "amd_smi/impl/amd_smi_lib_loader.h"
-#include <iostream>
 
+#include <iostream>
 
 namespace amd::smi {
 
-AMDSmiLibraryLoader::AMDSmiLibraryLoader(): libHandler_(nullptr) {
-}
+AMDSmiLibraryLoader::AMDSmiLibraryLoader() : libHandler_(nullptr) {}
 
 amdsmi_status_t AMDSmiLibraryLoader::load(const char* filename) {
-    if (filename == nullptr) {
-        return AMDSMI_STATUS_FAIL_LOAD_MODULE;
-    }
-    if (libHandler_ || library_loaded_) {
-        unload();
-    }
+  if (filename == nullptr) {
+    return AMDSMI_STATUS_FAIL_LOAD_MODULE;
+  }
+  if (libHandler_ || library_loaded_) {
+    unload();
+  }
 
-    std::lock_guard<std::mutex> guard(library_mutex_);
-    // check if already loaded, return success if it is
-    // dlopen(filename, RTLD_NOLOAD) == null only IFF library is not loaded
-    void* isLibOpen = dlopen(filename, RTLD_NOLOAD);
-    if (isLibOpen == nullptr) {
-      libHandler_ = dlopen(filename, RTLD_LAZY);
-      if (!libHandler_) {
-          char* error = dlerror();
-          std::cerr << "Fail to open " << filename <<": " << error
-                    << std::endl;
-          return AMDSMI_STATUS_FAIL_LOAD_MODULE;
-      }
+  std::lock_guard<std::mutex> guard(library_mutex_);
+  // check if already loaded, return success if it is
+  // dlopen(filename, RTLD_NOLOAD) == null only IFF library is not loaded
+  void* isLibOpen = dlopen(filename, RTLD_NOLOAD);
+  if (isLibOpen == nullptr) {
+    libHandler_ = dlopen(filename, RTLD_LAZY);
+    if (!libHandler_) {
+      char* error = dlerror();
+      std::cerr << "Fail to open " << filename << ": " << error << std::endl;
+      return AMDSMI_STATUS_FAIL_LOAD_MODULE;
     }
-    library_loaded_ = true;
+  }
+  library_loaded_ = true;
 
-    return AMDSMI_STATUS_SUCCESS;
+  return AMDSMI_STATUS_SUCCESS;
 }
 
 amdsmi_status_t AMDSmiLibraryLoader::unload() {
-        std::lock_guard<std::mutex> guard(library_mutex_);
-        if (libHandler_) {
-            dlclose(libHandler_);
-            libHandler_ = nullptr;
-            library_loaded_ = false;
-        }
-        return AMDSMI_STATUS_SUCCESS;
+  std::lock_guard<std::mutex> guard(library_mutex_);
+  if (libHandler_) {
+    dlclose(libHandler_);
+    libHandler_ = nullptr;
+    library_loaded_ = false;
+  }
+  return AMDSMI_STATUS_SUCCESS;
 }
 
-AMDSmiLibraryLoader::~AMDSmiLibraryLoader() {
-        unload();
-}
+AMDSmiLibraryLoader::~AMDSmiLibraryLoader() { unload(); }
 
 }  // namespace amd::smi
-

@@ -43,6 +43,8 @@ class RdcGroupSettings {
   virtual rdc_status_t rdc_group_field_create(uint32_t num_field_ids, rdc_field_t* field_ids,
                                               const char* field_group_name,
                                               rdc_field_grp_t* rdc_field_group_id) = 0;
+  virtual rdc_status_t rdc_group_field_add_field(rdc_field_grp_t rdc_field_group_id,
+                                                 rdc_field_t field_id) = 0;
   virtual rdc_status_t rdc_group_field_destroy(rdc_field_grp_t rdc_field_group_id) = 0;
   virtual rdc_status_t rdc_group_field_get_info(rdc_field_grp_t rdc_field_group_id,
                                                 rdc_field_group_info_t* field_group_info) = 0;

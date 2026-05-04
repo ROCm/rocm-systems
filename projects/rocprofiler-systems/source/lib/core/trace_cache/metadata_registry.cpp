@@ -1,24 +1,5 @@
-// MIT License
-//
-// Copyright (c) 2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "metadata_registry.hpp"
 #include "agent_manager.hpp"
@@ -211,8 +192,6 @@ from_json_track(const nlohmann::json& _json)
     return t;
 }
 
-#if ROCPROFSYS_USE_ROCM
-
 nlohmann::json
 to_json(const rocprofiler_callback_tracing_code_object_load_data_t& code_object)
 {
@@ -223,11 +202,11 @@ to_json(const rocprofiler_callback_tracing_code_object_load_data_t& code_object)
     result["load_size"]      = static_cast<long long>(code_object.load_size);
     result["load_delta"]     = static_cast<long long>(code_object.load_delta);
     result["storage_type"]   = static_cast<int>(code_object.storage_type);
-#    if(ROCPROFILER_VERSION >= 600)
+#if(ROCPROFILER_VERSION >= 600)
     result["agent_id_handle"] = static_cast<long long>(code_object.agent_id.handle);
-#    else
+#else
     result["agent_id_handle"] = static_cast<long long>(code_object.rocp_agent.handle);
-#    endif
+#endif
     return result;
 }
 
@@ -244,11 +223,11 @@ from_json_code_object(const nlohmann::json& _json)
     co.storage_type   = static_cast<rocprofiler_code_object_storage_type_t>(
         _json["storage_type"].get<int>());
     auto handle = _json["agent_id_handle"].get<long long>();
-#    if(ROCPROFILER_VERSION >= 600)
+#if(ROCPROFILER_VERSION >= 600)
     co.agent_id.handle = handle;
-#    else
+#else
     co.rocp_agent.handle = handle;
-#    endif
+#endif
     return co;
 }
 
@@ -290,7 +269,6 @@ from_json_kernel_symbol(const nlohmann::json& _json)
     ks.accum_vgpr_count          = _json["accum_vgpr_count"].get<int>();
     return ks;
 }
-#endif
 
 nlohmann::json
 to_json(const agent& _agent)
@@ -379,7 +357,6 @@ to_json(const metadata_registry&                   _registry,
         result["strings"].push_back(str);
     }
 
-#if ROCPROFSYS_USE_ROCM
     auto           code_object_list  = _registry.get_code_object_list();
     nlohmann::json code_object_array = nlohmann::json::array();
     for(const auto& code_object : code_object_list)
@@ -395,7 +372,6 @@ to_json(const metadata_registry&                   _registry,
         kernel_symbol_array.push_back(to_json(kernel_symbol));
     }
     result["kernel_symbols"] = kernel_symbol_array;
-#endif
 
     for(const auto& agent : _agents)
     {
@@ -456,7 +432,6 @@ from_json(metadata_registry& _registry, std::vector<std::shared_ptr<agent>>& _ag
         _registry.add_string(item.template get<std::string>());
     });
 
-#if ROCPROFSYS_USE_ROCM
     fill_from_json("code_objects", [&_registry](const auto& item) {
         auto code_object = from_json_code_object(item);
         _registry.add_code_object(code_object);
@@ -466,7 +441,6 @@ from_json(metadata_registry& _registry, std::vector<std::shared_ptr<agent>>& _ag
         auto kernel_symbol = from_json_kernel_symbol(item);
         _registry.add_kernel_symbol(kernel_symbol);
     });
-#endif
 
     if(!_agents.empty())
     {
@@ -639,8 +613,6 @@ metadata_registry::get_string_list() const
     m_strings.rlock(assign_set_to_vector(result));
     return result;
 }
-
-#if ROCPROFSYS_USE_ROCM > 0
 
 void
 metadata_registry::add_code_object(
@@ -827,19 +799,15 @@ metadata_registry::get_callback_tracing_info() const
     return m_callback_tracing_info;
 }
 
-#endif
-
 metadata_registry::metadata_registry()
 {
-#if ROCPROFSYS_USE_ROCM > 0
     overwrite_callback_names({
-#    if(ROCPROFILER_VERSION >= 600)
+#if(ROCPROFILER_VERSION >= 600)
         { ROCPROFILER_CALLBACK_TRACING_OMPT,
           { { ROCPROFILER_OMPT_ID_parallel_begin, "omp_parallel" },
             { ROCPROFILER_OMPT_ID_parallel_end, "omp_parallel" } } }
-#    endif
-    });
 #endif
+    });
 }
 
 bool

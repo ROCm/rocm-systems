@@ -1,5 +1,5 @@
 # Copyright (c) Advanced Micro Devices, Inc.
-# SPDX-License-Identifier:  MIT
+# SPDX-License-Identifier: MIT
 
 """
 Pytest configuration and fixtures for rocprofiler-systems tests.
@@ -8,13 +8,14 @@ This module provides shared fixtures and configuration for all test modules.
 """
 
 from __future__ import annotations
-import os
-import sys
-import shutil
-import re
 from pathlib import Path
 from functools import lru_cache
 from typing import Callable, Generator, Optional
+
+import re
+import os
+import sys
+import shutil
 
 # Add the pytest directory to Python path for rocprofsys package
 sys.path.insert(0, str(Path(__file__).parent))
@@ -30,8 +31,10 @@ from rocprofsys import (
     detect_gpu,
     get_offload_extractor,
     get_target_gpu_arch,
+    get_xnack_support,
     TestResult,
     validate_regex,
+    validate_file_regex,
     validate_perfetto_trace,
     validate_rocpd_database,
     validate_timemory_json,
@@ -42,15 +45,44 @@ from rocprofsys import (
     BinaryRewriteRunner,
     RuntimeInstrumentRunner,
     SysRunRunner,
+    CausalRunner,
+    PythonRunner,
+    safe_remove,
 )
 
 # Key for storing the single test result on pytest items
+# Item-level stash keys
 _result_key: StashKey = StashKey()
-# Key for tracking subtest failures (for pytest-subtests plugin compatibility when pytest < 9.0.0)
 _subtest_failures_key: StashKey[list] = StashKey()
-# Key to prevent duplicate output printing
 _output_printed_key: StashKey[bool] = StashKey()
+_original_nodeid_key: StashKey[str] = StashKey()
 
+# Config-level stash keys
+_show_output_key: StashKey[bool] = StashKey()
+_show_on_subfail_key: StashKey[bool] = StashKey()
+
+# GNU convention. Used for CTests
+SKIP_RETURN_CODE = 77
+# Default timeout for tests in seconds
+DEFAULT_TIMEOUT = 300
+# Extra seconds added to pytest timeout in generated CTest (flush / teardown)
+CTEST_TIMEOUT_BUFFER = 30
+
+# Accepted runner types when using parametrized "mode" marker
+ROCPROFSYS_RUNNER_CLASSES = {
+    "baseline": BaselineRunner,
+    "sampling": SamplingRunner,
+    "binary_rewrite": BinaryRewriteRunner,
+    "runtime_instrument": RuntimeInstrumentRunner,
+    "sys_run": SysRunRunner,
+    "causal": CausalRunner,
+    "python": PythonRunner,
+}
+# Accepted runner types when using parametrized "mode" marker
+ROCPROFSYS_RUNNER_NAMES = list(ROCPROFSYS_RUNNER_CLASSES.keys())
+
+# rocprofiler-sdk < 1.2.2 can abort on undefined KFD node IDs; product disables KFD domains.
+KFD_MIN_SDK_VERSION: tuple[int, int, int] = (1, 2, 2)
 
 # ============================================================================
 #
@@ -66,23 +98,19 @@ _output_printed_key: StashKey[bool] = StashKey()
 def pytest_addoption(parser: pytest.Parser) -> None:
     """Add custom command-line options."""
     group = parser.getgroup("rocprofsys", "rocprofiler-systems test options")
+    # TODO: Deprecate once TheRock switches to CTest and CTest based filtering
     group.addoption(
-        "--show-output",
-        action="store_true",
-        default=False,
-        help="Show runner output on test pass",
+        "--show-test-output",
+        action="store",
+        default="subtest",
+        choices=("none", "subtest", "all"),
+        help="Show runner output: 'none' (no output), 'subtest' (default, on failure only), or 'all' (always)",
     )
     group.addoption(
-        "--show-output-on-subtest-fail",
+        "--show-config-only",
         action="store_true",
         default=False,
-        help="Show runner output only when subtests fail",
-    )
-    group.addoption(
-        "--show-config",
-        action="store_true",
-        default=False,
-        help="Show the test configuration at the beginning of the session",
+        help="Show the test configuration and exit without running any tests",
     )
     group.addoption(
         "--output-dir",
@@ -90,12 +118,12 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         default=None,
         help="Set the test output directory (default: <build_dir>/rocprof-sys-pytest-output in build mode, /tmp/<user>/rocprof-sys-pytest-output in install mode)",
     )
-    # @output_dir@ is replaced with the value of --output-dir (or default) in the log file path
     group.addoption(
-        "--output-log",
+        "--num-processes",
         action="store",
-        default="@output_dir@/pytest-output.txt",
-        help="Write log output to the specified file (use 'none' to disable)",
+        type=int,
+        default=2,
+        help="Set the number of processes to use for transpose MPI tests (default 2)",
     )
     group.addoption(
         "--monochrome",
@@ -103,49 +131,87 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         default=False,
         help="Runners use ROCPROFSYS_MONOCHROME=ON and pytest color output is disabled",
     )
+    # TODO: Deprecate once TheRock switches to CTest and CTest based filtering
     group.addoption(
         "--ci-mode",
         action="store_true",
         default=False,
-        help="Enable CI mode (developer flag : default off)",
+        help="Enable CI mode (developer flag : default: False)",
     )
     group.addoption(
-        "--ctest-integration",
-        action="store_true",
-        default=False,
-        help="Enable CTest integration (developer flag : default off)",
+        "--ctest-mode",
+        action="store",
+        default="off",
+        choices=("off", "generate", "run", "cleanup"),
+        help="CTest integration mode (developer flag): 'off' (default), 'generate', 'run', or 'cleanup'",
     )
     group.addoption(
-        "--allow-disabled",
+        "--ctest-output-path",
+        action="store",
+        default=None,
+        help="Path to write the CTest definitions file when in CTest generate mode (default: None)",
+    )
+    # TODO: Deprecate once TheRock switches to CTest
+    group.addoption(
+        "--dev",
         action="store_true",
         default=False,
-        help="Allow disabled subtests to run (CI mode only, developer flag : default off)",
+        help="Enables some QOL flags (developer flag : default off)",
+    )
+    group.addoption(
+        "--python-versions",
+        action="store",
+        default=None,
+        help="Semicolon-separated list of Python versions (e.g. '3.8;3.9;3.10')",
+    )
+    group.addoption(
+        "--python-root-dirs",
+        action="store",
+        default=None,
+        help="Semicolon-separated list of directories to search for Python interpreters in order of preference",
     )
 
 
 def pytest_configure(config: pytest.Config) -> None:
     """Register custom markers and configure pytest"""
 
-    # Enable CI configuration
-    if config.getoption("--ci-mode", default=False):
-        config.option.output_log = "none"  # Already reported to dashboard
-        config.option.show_config = True
-        config.option.show_output_on_subtest_fail = True
-        config.option.verbose = max(config.option.verbose, 1)  # -v
-        config.option.tbstyle = "short"  # --tb=short
-        if "s" not in config.option.reportchars:  # -rs
-            config.option.reportchars += "s"
+    configure_mode(config)
+
+    if config.getoption("--ctest-mode", default="off") == "cleanup":
+        _run_cleanup(config)
+        pytest.exit("Cleanup complete", returncode=0)
+
+    if config.getoption("--show-config-only", default=False):
+        pytest._config_ref = config
+        header = _generate_rocprofsys_config_header()
+        for line in header:
+            print(line)
+        pytest.exit("Header generated", returncode=0)
 
     is_monochrome = config.getoption("--monochrome", default=False)
     if is_monochrome:
         config.option.color = "no"
 
-    # Functional markers (use arguments or do more than just label a test)
+    # Disable pytest-timeout plugin if detected
+    # It will interfere with our timeout marker
+    timeout_plugin = config.pluginmanager.get_plugin("timeout")
+    if timeout_plugin:
+        config.pluginmanager.unregister(timeout_plugin)
 
+    # Functional markers (do more than just label a test)
+    #   See pytest_collection_modifyitems
     config.addinivalue_line(
         "markers",
-        "gpu: mark test as requiring a GPU (default: any available GPU)",
-    )  # triggers GPU check in run_test unless no_check_target_arch=True
+        "gpu: mark test as requiring a GPU",
+    )  # required for run_test to check if the target supports the current system architectures
+    config.addinivalue_line(
+        "markers",
+        "mpi_optional(target): If MPI is available and the target supports MPI, uses MPI to run the test",
+    )
+    config.addinivalue_line(
+        "markers",
+        "preserve(file): prevents the file from being deleted after the test, even if ROCPROFSYS_KEEP_TEST_OUTPUT is set to OFF",
+    )
     config.addinivalue_line(
         "markers",
         "run_if_gpu_category(expr): run test only if GPU category expression is true "
@@ -157,17 +223,76 @@ def pytest_configure(config: pytest.Config) -> None:
     )
     config.addinivalue_line(
         "markers",
-        "rocpd(env): mark test as using ROCpd and inject ROCpd env into given env",
+        "oshrun_min_version(version): mark test as requiring minimum OpenSHMEM version",
     )
     config.addinivalue_line(
         "markers",
-        "disable(name): Use 'all' to skip entire test, or assertion name (e.g., 'assert_rocpd') to disable subtest (CI mode only).",
+        "rocpd(env): mark test as using ROCpd and inject ROCpd env into given env",
+    )
+    # TODO: Deprecate once TheRock switches to CTest and CTest based filtering
+    config.addinivalue_line(
+        "markers",
+        "ci_enable: Full test will be run when in CI mode. To disable a subtest, use ci_disable(name) (CI mode only)",
+    )
+    # TODO: Deprecate once TheRock switches to CTest and CTest based filtering
+    config.addinivalue_line(
+        "markers",
+        "ci_disable(name): Use 'all' to skip entire test, or assertion name (e.g., 'assert_rocpd') to disable subtest. Overrides ci_enable (CI mode only)",
+    )
+    config.addinivalue_line(
+        "markers",
+        "mpi_implementation(implementation): mark test as requiring specific MPI implementation",
+    )
+    config.addinivalue_line(
+        "markers",
+        "python_versions: Test will be parametrized by Python version",
+    )
+    config.addinivalue_line(
+        "markers",
+        "timeout(seconds): mark test as having a timeout of seconds",
+    )
+    # Used for CTest
+    config.addinivalue_line(
+        "markers",
+        "depends_on(*names): declare CTest dependency on the named tests"
+        " (used for CTest DEPENDS)",
+    )
+    config.addinivalue_line(
+        "markers",
+        "serialize: mark test as serializable (used for CTest)",
+    )
+    config.addinivalue_line(
+        "markers",
+        "class_name(segment): hyphenated logical name for standardized / CTest test "
+        "names (replaces the auto-derived class segment from TestCamelCase; "
+        "e.g. 'rocprofiler-systems-instrument')",
+    )
+    config.addinivalue_line(
+        "markers",
+        "multi_gpu(num): mark test as using requiring atleast num amount of GPUs",
+    )
+    config.addinivalue_line(
+        "markers",
+        "rockoff: prevents the test from being run on TheRock",
     )
 
-    # Non-functional informational markers
+    # See pytest_collection_modifyitems
+    generic_functional_markers = [
+        "ucx",
+        "overflow",
+        "attach",
+        "mpi",
+        "python",
+        "annotate",
+        "julia",
+        "xnack",
+        "no_docker",
+        "shmem",
+        "nic",
+    ]
 
-    config.addinivalue_line("markers", "mpi: mark test as requiring MPI")
-    config.addinivalue_line("markers", "rocm: mark test as requiring ROCm")
+    # Informational markers, only used for test labeling
+
     config.addinivalue_line(
         "markers", "rocprofiler: mark test as using ROCProfiler counters"
     )
@@ -175,13 +300,21 @@ def pytest_configure(config: pytest.Config) -> None:
     config.addinivalue_line("markers", "loops: mark test as testing loop instrumentation")
 
     # Can be described using generic desc below
-    label_list = [
+    non_functional_markers = [
+        "avail",
+        "instrument",
+        "baseline",
+        "sampling",
+        "binary_rewrite",
+        "runtime_instrument",
+        "sys_run",
         "decode",
         "videodecode",
         "jpegdecode",
         "rocprof_binary",
         "rocprof_config",
         "xgmi",
+        "sdma",
         "group_by_queue",
         "group_by_stream",
         "openmp",
@@ -193,20 +326,38 @@ def pytest_configure(config: pytest.Config) -> None:
         "roctx",
         "time_window",
         "transpose",
+        "nic",
+        "network",
+        "fork",
+        "user_api",
+        "thread_limit",
+        "pthreads",
+        "rewrite_caller",
+        "locks",
+        "caller_include",
+        "causal",
+        "causal_e2e",
+        "papi",
+        "code_coverage",
+        "lulesh",
+        "unit_tests",
+        "hip_stream",
+        "presets",
+        "hpc",
+        "hip",
+        "scratch_memory",
+        "rocm",
+        "kfd",
+        "selective_regions",
     ]
-    for label in label_list:
+    for label in non_functional_markers + generic_functional_markers:
         config.addinivalue_line("markers", f"{label}: label test as {label}")
+    #
+    _show_test_output = config.getoption("--show-test-output", default="subtest")
+    config.stash[_show_output_key] = _show_test_output == "all"
+    config.stash[_show_on_subfail_key] = _show_test_output == "subtest"
 
-    # Save flags to pytest
-    pytest._show_output_flag = config.getoption("--show-output", default=False)
-    pytest._show_output_on_subtest_fail_flag = config.getoption(
-        "--show-output-on-subtest-fail", default=False
-    )
-    pytest._ctest_integration_flag = config.getoption(
-        "--ctest-integration", default=False
-    )
-
-    # Store config reference for hooks that need terminal reporter access
+    # Keep a module-level ref for hooks that don't receive config directly
     pytest._config_ref = config
 
 
@@ -215,132 +366,11 @@ def pytest_configure(config: pytest.Config) -> None:
 # ----------------------------------------------------------------------------
 
 
-def pytest_sessionstart(session):
-    """Set up terminal output redirection after plugins are loaded."""
-    config = session.config
-
-    try:
-        rocprof_config = get_rocprof_config()
-    except Exception as e:
-        pytest.exit(f"{e}")
-
-    log_file = config.getoption("--output-log", default="@output_dir@/pytest-output.txt")
-
-    if log_file.lower() == "none":
-        config._output_log_path = None
-        config._log_file_handle = None
-    else:
-        log_file = log_file.replace("@output_dir@", str(rocprof_config.test_output_dir))
-        config._output_log_path = Path(log_file)
-
-        log_path = config._output_log_path
-        log_path.parent.mkdir(parents=True, exist_ok=True)
-        config._log_file_handle = open(log_path, "w")
-
-        terminal = config.pluginmanager.get_plugin("terminalreporter")
-        if terminal:
-            tw = terminal._tw
-            file_handle = config._log_file_handle
-
-            original_write = tw.write
-
-            def redirect_to_file(s, **kwargs):
-                original_write(s, **kwargs)
-                file_handle.write(str(s))
-                file_handle.flush()
-
-            tw.write = redirect_to_file
-
-
+# TODO: Deprecate once TheRock switches to CTest and CTest based filtering
 def pytest_report_header(config) -> list[str]:
-    """Add test configuration to pytest header output."""
-
-    try:
-        rocprof_config = get_rocprof_config()
-    except Exception as e:
-        return [f"{e}"]
-
-    try:
-        gpuInfo = detect_gpu(rocprof_config.rocm_path)
-    except Exception as e:
-        return [f"rocprofiler-systems: GPU detection error - {e}"]
-
-    if not config.getoption("--show-config", default=False):
+    if not config.getoption("--ci-mode", default=False):
         return []
-
-    # Rocminfo
-    rocminfo_path = get_rocminfo(rocprof_config.rocm_path)
-    if not rocminfo_path:
-        rocminfo_err_msg = "Not found - Ensure rocminfo is in ROCM_PATH or PATH - Assuming no GPU configuration"
-
-    # Offload extractor
-    offload_msg = None
-    tool_path, is_llvm_too_old = get_offload_extractor(rocprof_config.rocm_path)
-    if tool_path:
-        if tool_path.name == "llvm-objdump":
-            offload_msg = f"{tool_path}"
-        elif tool_path.name == "roc-obj-ls":
-            if not is_llvm_too_old:
-                offload_msg = f"Using deprecated {tool_path} - Set ROCM_LLVM_OBJDUMP to use llvm-objdump instead"
-            else:
-                offload_msg = f"{tool_path}"
-
-    if not offload_msg:
-        offload_msg = (
-            "Not found - Set ROCM_LLVM_OBJDUMP to path of llvm-objdump (v20+), "
-            "or ROC_OBJ_LS to path of roc-obj-ls if llvm-objdump < v20"
-        )
-
-    rocm_version = (
-        ".".join(map(str, rocprof_config.rocm_version))
-        if rocprof_config.rocm_version
-        else "Not found"
-    )
-
-    lines = [
-        "",
-        "=" * 70,
-        "Test Configuration:",
-        "=" * 70,
-        f"  ROCm version:      {rocm_version}",
-        f"  ROCm path:         {rocprof_config.rocm_path}",
-        f"  Is installed:      {rocprof_config.is_installed}",
-        f"  Output dir:        {rocprof_config.test_output_dir}",
-        f"  Log file:          {getattr(config, '_output_log_path', None) or 'Disabled'}",
-        f"  Validate ROCPD:    {check_use_rocpd()}",
-        f"  Validate Perfetto: {check_use_perfetto()}",
-        "-" * 70,
-        "GPU Information:",
-        f"  rocminfo:          {rocminfo_path if rocminfo_path else rocminfo_err_msg}",
-        f"  Available:         {gpuInfo.available}",
-        f"  Architectures:     {gpuInfo.architectures}",
-        f"  Device count:      {gpuInfo.device_count}",
-        f"  Categories:        {gpuInfo.categories}",
-        "-" * 70,
-        "Directories:",
-        f"  Build dir:         {rocprof_config.rocprofsys_build_dir}",
-        f"  Lib dir:           {rocprof_config.rocprofsys_lib_dir}",
-        f"  Bin dir:           {rocprof_config.rocprofsys_bin_dir}",
-        f"  Tests dir:         {rocprof_config.rocprofsys_tests_dir}",
-        f"  Examples dir:      {rocprof_config.rocprofsys_examples_dir}",
-        f"  Validation dir:    {rocprof_config.rocpd_validation_rules}",
-        "-" * 70,
-        "Executables:",
-        f"  Instrument:        {rocprof_config.rocprofsys_instrument}",
-        f"  Run:               {rocprof_config.rocprofsys_run}",
-        f"  Sample:            {rocprof_config.rocprofsys_sample}",
-        f"  Avail:             {rocprof_config.rocprofsys_avail}",
-        f"  Causal:            {rocprof_config.rocprofsys_causal}",
-        f"  MPI exec:          {rocprof_config.mpiexec}",
-        f"  Offload tool:      {offload_msg}",
-        "-" * 70,
-        "System Environment:",
-    ]
-    fundamental_env = rocprof_config.get_fundamental_environment()
-    for key, value in sorted(fundamental_env.items()):
-        lines.append(f"  {key}:{' ' * (17 - len(key))}{value}")
-    lines.extend(["=" * 70, ""])
-    return lines
+    return _generate_rocprofsys_config_header()
 
 
 # ----------------------------------------------------------------------------
@@ -348,87 +378,269 @@ def pytest_report_header(config) -> list[str]:
 # ----------------------------------------------------------------------------
 
 
+def pytest_generate_tests(metafunc):
+    """Dynamically parametrize tests based on markers."""
+    marker = metafunc.definition.get_closest_marker("python_versions")
+    if marker is not None:
+        rocprof_config = get_rocprof_config()
+        supported = set(rocprof_config.capabilities.supported_python_versions or [])
+
+        # When --python-versions is explicitly passed (e.g. from CTest),
+        # always parametrize with those exact versions so node IDs match.
+        # Unsupported versions are marked as skip.
+        pytest_config = getattr(pytest, "_config_ref", None)
+        requested_str = (
+            pytest_config.getoption("--python-versions", default=None)
+            if pytest_config
+            else None
+        )
+        if requested_str:
+            requested = [v.strip() for v in requested_str.split(";") if v.strip()]
+            params = []
+            for ver in requested:
+                if ver in supported:
+                    params.append(ver)
+                else:
+                    params.append(
+                        pytest.param(
+                            ver,
+                            marks=pytest.mark.skip(f"Python {ver} not available"),
+                        )
+                    )
+            metafunc.parametrize("python_version", params)
+        elif supported:
+            metafunc.parametrize("python_version", sorted(supported))
+        else:
+            metafunc.parametrize(
+                "python_version",
+                [pytest.param(None, marks=pytest.mark.skip("No Python versions found"))],
+            )
+
+
+# ----------------------------------------------------------------------------
+# run_if_gpu_category: namespace for eval() (not an availability / skip reason helper)
+# ----------------------------------------------------------------------------
+
+
+def gpu_category_eval_context() -> dict[str, bool]:
+    info = get_gpu_info()
+    return {
+        "instinct": info is not None and "instinct" in info.categories,
+        "radeon": info is not None and "radeon" in info.categories,
+        "apu": info is not None and "apu" in info.categories,
+    }
+
+
 def pytest_collection_modifyitems(config, items) -> None:
-    """Skip tests based on markers and available resources."""
+    """Modify items based on markers."""
+    verbose = config.option.verbose > 0
+
     try:
         rocprof_config = get_rocprof_config()
     except Exception as e:
         pytest.exit(f"{e}")
-    gpu_info = detect_gpu(rocprof_config.rocm_path)
 
-    skip_gpu = pytest.mark.skip(reason="No valid GPU available")
-    skip_mpi = pytest.mark.skip(reason="MPI not available")
+    # ----------------------------------------------------------------------------
+    def base_modifications(item: pytest.Item) -> None:
+        """This function should be called for every item."""
+        _standardize_test_name(item, config, verbose=verbose)
 
-    mpi_available = rocprof_config.mpiexec is not None
+        # Handle optional markers
+        # The general form is <name>_optional(...). If the condition is met, <name> marker is added
+        if (
+            "mpi_optional" in item.keywords
+            and mpi_unavailable_reason(rocprof_config, config) is None
+        ):
+            target = item.get_closest_marker("mpi_optional").args[0]
+            try:
+                target_path = rocprof_config.get_target_executable(target)
+                if rocprof_config.capabilities.target_support_mpi(target_path):
+                    item.add_marker(pytest.mark.mpi)
+            except FileNotFoundError:
+                pass
 
-    for item in items:
-        if "gpu" in item.keywords and not gpu_info.available:
-            item.add_marker(skip_gpu)
+        # Marker dependencies
+        add_marker_if(
+            item,
+            "papi",
+            req_mark="annotate",
+            unavailable_reason=lambda: annotate_unavailable_reason(rocprof_config),
+        )
+        add_marker_if(item, "mpi", req_mark="mpi_implementation")
+        add_marker_if(item, "python", req_mark="python_versions")
+        add_marker_if(item, "gpu", req_mark="multi_gpu")
 
-        if "mpi" in item.keywords and not mpi_available:
-            item.add_marker(skip_mpi)
+        # Add corresponding runner type markers based on parametrized values ("mode")
+        detected_runners: set[str] = set()
+        if hasattr(item, "callspec") and item.callspec:
+            params = item.callspec.params
+            for param_name in ["runner", "mode", "instrumentation_mode"]:
+                if param_name in params:
+                    value = str(params[param_name])
+                    if value in ROCPROFSYS_RUNNER_NAMES:
+                        detected_runners.add(value)
+        for runner in detected_runners:
+            marker_name = runner.replace("-", "_")
+            item.add_marker(getattr(pytest.mark, marker_name))
 
-        # Check rocm_min_version marker
-        rocm_min_marker = item.get_closest_marker("rocm_min_version")
-        if rocm_min_marker:
-            min_version = rocm_min_marker.args[0] if rocm_min_marker.args else None
-            rocm_version = rocprof_config.rocm_version
-            if rocm_version is None:
-                item.add_marker(pytest.mark.skip(reason="ROCm not found"))
+    # ----------------------------------------------------------------------------
+
+    # We will not be running tests in this mode, so marker checks are redundant
+    if config.getoption("--ctest-mode", default="off") == "generate":
+        for item in items:
+            base_modifications(item)
+        return
+
+    # TODO: Deprecate once TheRock switches to CTest and CTest based filtering
+    if config.getoption("--ci-mode", default=False):
+        selected_tests = []
+        deselected_tests = []
+        for item in items:
+            base_modifications(item)
+            disable_marker = item.get_closest_marker("ci_disable")
+            ci_disabled = disable_marker and "all" in disable_marker.args
+            if item.get_closest_marker("ci_enable") and not ci_disabled:
+                selected_tests.append(item)
             else:
-                # Parse min_version and compare
-                min_parts = min_version.split(".")
-                min_tuple = tuple(int(p) for p in (min_parts + ["0", "0"])[:3])
-                if rocm_version < min_tuple:
+                deselected_tests.append(item)
+        config.hook.pytest_deselected(items=deselected_tests)
+        items[:] = selected_tests
+        return
+
+    # Marker checks
+    # "Skip" markers are left for runtime evaluation
+    for item in items:
+        base_modifications(item)
+        if "gpu" in item.keywords:
+            _msg = gpu_unavailable_reason()
+            if _msg is not None:
+                item.add_marker(pytest.mark.skip(reason=_msg))
+        if "ucx" in item.keywords and not rocprof_config.capabilities.ucx_availability:
+            item.add_marker(pytest.mark.skip(reason="UCX not available"))
+        if "mpi" in item.keywords:
+            _msg = mpi_unavailable_reason(rocprof_config, config)
+            if _msg is not None:
+                item.add_marker(pytest.mark.skip(reason=_msg))
+        if "mpi_implementation" in item.keywords:
+            req_impl = item.get_closest_marker("mpi_implementation").args[0]
+            if req_impl != rocprof_config.capabilities.mpi_implementation:
+                item.add_marker(
+                    pytest.mark.skip(
+                        reason=f"Requires {req_impl}, but {rocprof_config.capabilities.mpi_implementation} found"
+                    )
+                )
+        if "overflow" in item.keywords:
+            _msg = overflow_unavailable_reason(rocprof_config)
+            if _msg is not None:
+                item.add_marker(pytest.mark.skip(reason=_msg))
+        if "attach" in item.keywords:
+            _msg = attach_unavailable_reason(rocprof_config)
+            if _msg is not None:
+                item.add_marker(pytest.mark.skip(reason=_msg))
+        if "python" in item.keywords:
+            _msg = python_base_unavailable_reason(rocprof_config)
+            if _msg is not None:
+                item.add_marker(pytest.mark.skip(reason=_msg))
+            _msg = python_versions_unavailable_reason(rocprof_config)
+            if _msg is not None:
+                item.add_marker(pytest.mark.skip(reason=_msg))
+        if "julia" in item.keywords:
+            _msg = julia_unavailable_reason(rocprof_config)
+            if _msg is not None:
+                item.add_marker(pytest.mark.skip(reason=_msg))
+        if "xnack" in item.keywords:
+            _msg = xnack_unavailable_reason(rocprof_config)
+            if _msg is not None:
+                item.add_marker(pytest.mark.skip(reason=_msg))
+        if "no_docker" in item.keywords:
+            _msg = no_docker_unavailable_reason(rocprof_config)
+            if _msg is not None:
+                item.add_marker(pytest.mark.skip(reason=_msg))
+        if "shmem" in item.keywords:
+            _msg = shmem_unavailable_reason(rocprof_config)
+            if _msg is not None:
+                item.add_marker(pytest.mark.skip(reason=_msg))
+        if "nic" in item.keywords:
+            _msg = nic_unavailable_reason(rocprof_config)
+            if _msg is not None:
+                item.add_marker(pytest.mark.skip(reason=_msg))
+        if "kfd" in item.keywords:
+            _msg = kfd_unavailable_reason(rocprof_config)
+            if _msg is not None:
+                item.add_marker(pytest.mark.skip(reason=_msg))
+        if "rocm_min_version" in item.keywords:
+            req_version = item.get_closest_marker("rocm_min_version").args[0]
+            system_version = rocprof_config.rocm_version
+            if system_version is None:
+                item.add_marker(pytest.mark.skip(reason="ROCm version not found"))
+            # Parse min_version and compare
+            min_parts = req_version.split(".")
+            min_tuple = tuple(int(p) for p in (min_parts + ["0", "0"])[:3])
+            if system_version < min_tuple:
+                item.add_marker(
+                    pytest.mark.skip(
+                        reason=f"ROCm {'.'.join(map(str, system_version))} < required {req_version}"
+                    )
+                )
+        if "oshrun_min_version" in item.keywords:
+            req_version = item.get_closest_marker("oshrun_min_version").args[0]
+            system_version = rocprof_config.capabilities.oshrun_version
+            if system_version is None:
+                item.add_marker(pytest.mark.skip(reason="OpenSHMEM version not found"))
+            else:
+                min_parts = req_version.split(".")
+                min_tuple = tuple(int(p) for p in (min_parts + ["0", "0"])[:2])
+                if system_version < min_tuple:
                     item.add_marker(
                         pytest.mark.skip(
-                            reason=f"ROCm {'.'.join(map(str, rocm_version))} < required {min_version}"
+                            reason=f"oshrun version {'.'.join(map(str, system_version))} < required {req_version}"
                         )
                     )
-
-        # Check run_if_gpu_category marker
-        run_if_gpu_category_marker = item.get_closest_marker("run_if_gpu_category")
-        if run_if_gpu_category_marker and gpu_info.available:
-            expr = run_if_gpu_category_marker.args[0]
-
-            # Build evaluation context: each category is True/False
-            eval_context = {
-                "instinct": "instinct" in gpu_info.categories,
-                "radeon": "radeon" in gpu_info.categories,
-                "apu": "apu" in gpu_info.categories,
-            }
-
+        if "run_if_gpu_category" in item.keywords:
+            _gpu_msg = gpu_unavailable_reason()
+            if _gpu_msg is not None:
+                item.add_marker(pytest.mark.skip(reason=_gpu_msg))
+            expr = item.get_closest_marker("run_if_gpu_category").args[0]
             try:
-                result = eval(expr, {"__builtins__": {}}, eval_context)
+                result = eval(expr, {"__builtins__": {}}, gpu_category_eval_context())
                 if not result:
                     item.add_marker(
                         pytest.mark.skip(
-                            reason=f"GPU category condition '{expr}' not met, "
-                            f"GPU has categories {gpu_info.categories}"
+                            reason=f"GPU category condition '{expr}' is False"
                         )
                     )
             except Exception as e:
+                pytest.exit(f"Invalid run_if_gpu_category expression: {e}", returncode=1)
+        if "multi_gpu" in item.keywords:
+            num_gpu = item.get_closest_marker("multi_gpu").args[0]
+            info = get_gpu_info()
+            if info.device_count < num_gpu:
                 item.add_marker(
-                    pytest.mark.fail(
-                        reason=f"Invalid run_if_gpu_category marker expression: {e}"
+                    pytest.mark.skip(
+                        reason=f"Test requires atleast {num_gpu} GPUs but system has {info.device_count}"
                     )
                 )
-
-    # Deselect tests marked with @pytest.mark.disable("all") (CI mode)
-    if config.getoption("--ci-mode", default=False) and not config.getoption(
-        "--allow-disabled", default=False
-    ):
-        selected = []
-        deselected = []
-        for item in items:
-            marker = item.get_closest_marker("disable")
-            if marker and "all" in marker.args:
-                deselected.append(item)
+        # ----------------------------------------------------------------------------
+        # Deselect tests for CI mode (TheRock)
+        # Only tests explicitly marked with @pytest.mark.ci_enable are selected.
+        # Note that ci_disable("all") overrides ci_enable.
+        if config.getoption("--ci-mode", default=False) and not config.getoption(
+            "--allow-disabled", default=False
+        ):
+            disable_marker = item.get_closest_marker("ci_disable")
+            ci_disabled = disable_marker and "all" in disable_marker.args
+            if item.get_closest_marker("ci_enable") and not ci_disabled:
+                selected_tests.append(item)
             else:
-                selected.append(item)
-        if deselected:
-            config.hook.pytest_deselected(items=deselected)
-            items[:] = selected
+                deselected_tests.append(item)
+
+
+def pytest_collection_finish(session):
+    """Generate CTest definitions after collection."""
+    if session.config.getoption("--ctest-mode", default="off") == "generate":
+        raw_path = session.config.getoption("--ctest-output-path", default=None)
+        output_path = Path(raw_path) if raw_path else None
+        _ctest_generate_tests(session.items, output_path)
 
 
 # ----------------------------------------------------------------------------
@@ -436,16 +648,19 @@ def pytest_collection_modifyitems(config, items) -> None:
 # ----------------------------------------------------------------------------
 
 
+# TODO: Deprecate once TheRock switches to CTest
 @pytest.hookimpl(hookwrapper=True)  # Allows yield
 def pytest_runtest_makereport(item, call):
     """Build runner output and attach to report."""
     outcome = yield
     rep = outcome.get_result()
-    config = getattr(pytest, "_config_ref", None)
+
+    setattr(item, f"rep_{rep.when}", rep)
 
     # Relevant flags
-    show_output_flag = getattr(pytest, "_show_output_flag", False)
-    show_on_subfail_flag = getattr(pytest, "_show_output_on_subtest_fail_flag", False)
+    config = item.config
+    show_output_flag = config.stash.get(_show_output_key, False)
+    show_on_subfail_flag = config.stash.get(_show_on_subfail_key, False)
 
     has_subtest_failures = len(item.stash.get(_subtest_failures_key, [])) > 0
     show_runner_output = (show_output_flag and not rep.failed) or (
@@ -490,12 +705,13 @@ def pytest_runtest_makereport(item, call):
     rep.sections.append(("Runner Output", output_text))
 
 
+# TODO: Deprecate once TheRock switches to CTest
 def pytest_runtest_logreport(report):
     """Handle output display for passing tests."""
     # Determine if we should show runner output
-    show_output_flag = getattr(pytest, "_show_output_flag", False)
+    config = getattr(pytest, "_config_ref", None)
+    show_output_flag = config.stash.get(_show_output_key, False) if config else False
     if show_output_flag and report.when == "call" and report.passed:
-        config = getattr(pytest, "_config_ref", None)
         terminal = config.pluginmanager.get_plugin("terminalreporter") if config else None
         if terminal:
             for section_name, section_content in report.sections:
@@ -511,55 +727,21 @@ def pytest_runtest_logreport(report):
 
 
 def pytest_sessionfinish(session, exitstatus):
-    """Code that runs after all tests complete
+    """Code that runs after tests complete
 
-    If ROCPROFSYS_KEEP_TEST_OUTPUT is not set to OFF, this code cleans up:
-    - Temporary buffered storage files
-    - Temporary metadata files
-    - Perfetto temp files
-    - HSA/ROCm temp files
-    - Instrumented binaries
-    - Causal profiling temp files
-    - Empty pytest output directories
-    - Test config directories
+    In CTest mode, map "all skipped" to exit code SKIP_RETURN_CODE
+    so that CTest can distinguish skipped from passed (via SKIP_RETURN_CODE).
     """
-
-    # Disallow xdist workers from executing code after this call
-    # Only the master process should run this code
-    if hasattr(session.config, "workerinput"):
-        return
-
-    if os.environ.get("ROCPROFSYS_KEEP_TEST_OUTPUT", "1") == "1":
-        return
-
-    import glob
-
-    # Clean up temp files matching patterns
-    for pattern in _cleanup_temp_patterns():
-        for filepath in glob.glob(pattern):
-            _safe_remove_file(Path(filepath))
-
-    # Clean up empty directories in test output areas
-    try:
-        config = get_rocprof_config()
-        build_dir = config.rocprofsys_build_dir
-    except Exception:
-        return  # Can't get config, skip directory cleanup
-
-    for dir_path in _cleanup_directory_patterns(build_dir):
-        if dir_path.exists():
-            # First pass: remove empty subdirectories
-            for child in list(dir_path.iterdir()):
-                _safe_remove_directory(child, remove_if_empty=True)
-            # Second pass: remove parent if now empty
-            _safe_remove_directory(dir_path, remove_if_empty=True)
-
-
-def pytest_unconfigure(config):
-    """Clean up resources at end of session."""
-    log_handle = getattr(config, "_log_file_handle", None)
-    if log_handle:
-        log_handle.close()
+    if (
+        session.config.getoption("--ctest-mode", default="off") == "run"
+        and exitstatus == 0
+    ):
+        reporter = session.config.pluginmanager.get_plugin("terminalreporter")
+        if reporter is not None:
+            passed = len(reporter.stats.get("passed", []))
+            skipped = len(reporter.stats.get("skipped", []))
+            if passed == 0 and skipped > 0:
+                session.exitstatus = SKIP_RETURN_CODE
 
 
 # ============================================================================
@@ -567,6 +749,689 @@ def pytest_unconfigure(config):
 # Helper functions
 #
 # ============================================================================
+
+# ----------------------------------------------------------------------------
+# Collection-time availability: return None if OK, else a skip reason string.
+# ----------------------------------------------------------------------------
+
+
+def overflow_unavailable_reason(rocprof_config: RocprofsysConfig) -> Optional[str]:
+    caps = rocprof_config.capabilities
+    if caps.perf_event_paranoid <= 3 or caps.cap_sys_admin or caps.cap_perfmon:
+        return None
+    return "Requires either perf_event_paranoid <= 3, CAP_SYS_ADMIN, or CAP_PERFMON to be available"
+
+
+def gpu_unavailable_reason() -> Optional[str]:
+    gpu_info = get_gpu_info()
+    if gpu_info is not None and gpu_info.available:
+        return None
+    return "No valid GPU available"
+
+
+def annotate_unavailable_reason(rocprof_config: RocprofsysConfig) -> Optional[str]:
+    msg = overflow_unavailable_reason(rocprof_config)
+    if msg is not None:
+        return msg
+    if not rocprof_config.capabilities.papi_availability:
+        return "PAPI not available"
+    return None
+
+
+def attach_unavailable_reason(rocprof_config: RocprofsysConfig) -> Optional[str]:
+    if rocprof_config.capabilities.ptrace_scope == 0:
+        return None
+    return (
+        "Requires ptrace_scope to be 0. Run 'echo 0 | sudo tee /proc/sys/kernel/yama/ptrace_scope' "
+        "to enable attaching to process"
+    )
+
+
+def nic_unavailable_reason(rocprof_config: RocprofsysConfig) -> Optional[str]:
+    caps = rocprof_config.capabilities
+    if caps.papi_nic_events is not None and caps.perf_event_paranoid <= 2:
+        return None
+    return "Requires PAPI network events and perf_event_paranoid <= 2 to be available"
+
+
+def kfd_unavailable_reason(rocprof_config: RocprofsysConfig) -> Optional[str]:
+    sdk = rocprof_config.capabilities.rocprofiler_sdk_version
+    if sdk is not None and sdk >= KFD_MIN_SDK_VERSION:
+        return None
+    _req = ".".join(map(str, KFD_MIN_SDK_VERSION))
+    _found = ".".join(map(str, sdk)) if sdk is not None else "not found"
+    return (
+        f"Requires rocprofiler-sdk minimum {_req}, but system detected version {_found}"
+    )
+
+
+# TODO: Deprecate once TheRock switches to CTest and CTest based filtering
+def mpi_unavailable_reason(
+    rocprof_config: RocprofsysConfig, config: pytest.Config
+) -> Optional[str]:
+    if rocprof_config.capabilities.mpiexec_exec is None:
+        return "MPI not available"
+    if config.getoption("--ci-mode", default=False):
+        return "MPI tests are not run in --ci-mode"
+    return None
+
+
+def python_base_unavailable_reason(rocprof_config: RocprofsysConfig) -> Optional[str]:
+    if rocprof_config.rocprofsys_python is not None:
+        return None
+    return "rocprof-sys-python binary not found"
+
+
+def python_versions_unavailable_reason(rocprof_config: RocprofsysConfig) -> Optional[str]:
+    if (
+        rocprof_config.capabilities.supported_python_versions is not None
+        and os.environ.get("ROCPROFSYS_USE_PYTHON", "ON").upper() == "ON"
+    ):
+        return None
+    return (
+        "No supported Python versions. Each version needs a corresponding "
+        "libpyrocprofsys.<IMPL>-<VERSION>-<ARCH>-<OS>-<ABI>.so in site-packages/rocprofsys."
+    )
+
+
+def julia_unavailable_reason(rocprof_config: RocprofsysConfig) -> Optional[str]:
+    if rocprof_config.capabilities.julia_exec:
+        return None
+    return "Julia not available"
+
+
+def xnack_unavailable_reason(rocprof_config: RocprofsysConfig) -> Optional[str]:
+    if get_xnack_support(rocprof_config.rocm_path):
+        return None
+    return "XNACK not supported"
+
+
+def no_docker_unavailable_reason(rocprof_config: RocprofsysConfig) -> Optional[str]:
+    if not rocprof_config.capabilities.is_inside_docker:
+        return None
+    return "Test cannot run inside a Docker container"
+
+
+def shmem_unavailable_reason(rocprof_config: RocprofsysConfig) -> Optional[str]:
+    if rocprof_config.capabilities.oshrun_exec:
+        return None
+    return "SHMEM not available"
+
+
+# ----------------------------------------------------------------------------
+# CTest generator functions
+# ----------------------------------------------------------------------------
+
+
+def _cmake_escape(s: str) -> str:
+    """Escape a string for use inside CMake double-quoted arguments."""
+    return s.replace("\\", "\\\\").replace('"', '\\"')
+
+
+def _ctest_item_ctest_identity(item: pytest.Item) -> tuple[str, str, str]:
+    """Return ``(original_nodeid, item name, CTest nodeid fragment)`` for CMake generation."""
+    test_id = item.stash.get(_original_nodeid_key, item.nodeid)
+    test_name = item.name
+    if "::" in test_id:
+        file_part, _, rest = test_id.partition("::")
+        test_nodeid = f"{Path(file_part).name}::{rest}"
+    else:
+        test_nodeid = Path(test_id).name
+    return test_id, test_name, test_nodeid
+
+
+def _emit_ctest_header_block() -> list[str]:
+    """CMake preamble for generated CTestTestfile.cmake (env, paths, pytest/python discovery)."""
+    return [
+        "# Auto-generated CTest definitions from rocprofiler-systems pytest suite",
+        "# DO NOT EDIT — regenerate via: pytest <dir> --ctest-mode=generate",
+        "#",
+        "# Run with: ctest --test-dir <directory containing this file>",
+        "#",
+        "# Supported environment variables:",
+        "#   ROCPROFSYS_TEST_DIR         - Path to test package directory or .pyz file",
+        "#   ROCPROFSYS_TEST_EXECUTABLE  - Python or pytest executable to use",
+        "#   ROCPROFSYS_PYTHON_HINTS     - Additional search paths for versioned Python interpreters",
+        "#",
+        "",
+        "if(DEFINED ENV{ROCPROFSYS_TEST_DIR} AND NOT DEFINED ROCPROFSYS_TEST_DIR)",
+        '    set(ROCPROFSYS_TEST_DIR "$ENV{ROCPROFSYS_TEST_DIR}")',
+        "endif()",
+        "if(DEFINED ENV{ROCPROFSYS_TEST_EXECUTABLE} AND NOT DEFINED ROCPROFSYS_TEST_EXECUTABLE)",
+        '    set(ROCPROFSYS_TEST_EXECUTABLE "$ENV{ROCPROFSYS_TEST_EXECUTABLE}")',
+        "endif()",
+        "if(DEFINED ENV{ROCPROFSYS_PYTHON_HINTS} AND NOT DEFINED ROCPROFSYS_PYTHON_HINTS)",
+        '    set(ROCPROFSYS_PYTHON_HINTS "$ENV{ROCPROFSYS_PYTHON_HINTS}")',
+        "endif()",
+        "",
+        "execute_process(COMMAND pwd OUTPUT_VARIABLE _CTEST_DIR OUTPUT_STRIP_TRAILING_WHITESPACE)",
+        "if(NOT DEFINED ROCPROFSYS_TEST_DIR)",
+        '    set(ROCPROFSYS_TEST_DIR "${_CTEST_DIR}")',
+        "endif()",
+        "",
+        'set(_INSTALL_PATH "${ROCPROFSYS_TEST_DIR}/rocprofsys-tests.pyz")',
+        'set(_BUILD_PATH "${ROCPROFSYS_TEST_DIR}/../share/rocprofiler-systems/tests/pytest/")',
+        'set(_TEST_ARGS "-s" "--ctest-mode" "run")',
+        "",
+        'if(EXISTS "${_INSTALL_PATH}")',
+        "    if(NOT DEFINED ROCPROFSYS_TEST_EXECUTABLE)",
+        "        find_program(ROCPROFSYS_TEST_EXECUTABLE NAMES python3 python HINTS ${ROCPROFSYS_PYTHON_HINTS})",
+        "    endif()",
+        "    if(NOT ROCPROFSYS_TEST_EXECUTABLE)",
+        "        message(FATAL_ERROR",
+        '            "python executable not found. "',
+        '            "Set ROCPROFSYS_TEST_EXECUTABLE to the correct path "',
+        '            "or provide ROCPROFSYS_PYTHON_HINTS to search for the executable.")',
+        "    endif()",
+        '    set(_ROCPROFSYS_EXE "${ROCPROFSYS_TEST_EXECUTABLE}")',
+        '    set(_ROCPROFSYS_EXE_ARGS "${_INSTALL_PATH}")',
+        '    set(_ROCPROFSYS_NODEID_PFX "")',
+        '    set(_ROCPROFSYS_EXTRA_ARGS "${_TEST_ARGS}")',
+        'elseif(EXISTS "${_BUILD_PATH}")',
+        "    if(NOT DEFINED ROCPROFSYS_TEST_EXECUTABLE)",
+        "        find_program(ROCPROFSYS_TEST_EXECUTABLE NAMES pytest pytest3 HINTS ${ROCPROFSYS_PYTHON_HINTS})",
+        "    endif()",
+        "    if(NOT ROCPROFSYS_TEST_EXECUTABLE)",
+        "        message(FATAL_ERROR",
+        '            "pytest executable not found. "',
+        '            "Set ROCPROFSYS_TEST_EXECUTABLE to the correct path "',
+        '            "or provide ROCPROFSYS_PYTHON_HINTS to search for the executable.")',
+        "    endif()",
+        '    set(_ROCPROFSYS_EXE "${ROCPROFSYS_TEST_EXECUTABLE}")',
+        '    set(_ROCPROFSYS_EXE_ARGS "")',
+        '    set(_ROCPROFSYS_NODEID_PFX "${_BUILD_PATH}")',
+        '    set(_ROCPROFSYS_EXTRA_ARGS "${_TEST_ARGS}")',
+        "else()",
+        '    message(FATAL_ERROR "Cannot find test package. Set ROCPROFSYS_TEST_DIR=/path/to/rocprofsys-tests.pyz")',
+        "endif()",
+        "",
+        "if(DEFINED ENV{ROCPROFSYS_CI_TIMEOUT})",
+        '    set(_ROCPROFSYS_CI_TIMEOUT "$ENV{ROCPROFSYS_CI_TIMEOUT}")',
+        "endif()",
+        "",
+    ]
+
+
+def _emit_prerequisite_block() -> list[str]:
+    """``rocprofiler-systems-pytest-config`` prerequisite test (global tmp fixture setup)."""
+    return [
+        'add_test("rocprofiler-systems-pytest-config" "${_ROCPROFSYS_EXE}"'
+        ' "${_ROCPROFSYS_EXE_ARGS}"'
+        ' "${_ROCPROFSYS_NODEID_PFX}" "--show-config-only")',
+        'set_tests_properties("rocprofiler-systems-pytest-config" PROPERTIES',
+        '    FIXTURES_SETUP "rocprofsys-global-tmp-files"',
+        '    LABELS "prerequisite;global"',
+        "    TIMEOUT 10",
+        ")",
+        "",
+    ]
+
+
+def _emit_cleanup_block() -> list[str]:
+    """``rocprofiler-systems-test-cleanup`` (global tmp fixture cleanup)."""
+    return [
+        'add_test("rocprofiler-systems-test-cleanup" "${_ROCPROFSYS_EXE}"'
+        ' "${_ROCPROFSYS_EXE_ARGS}"'
+        ' "${_ROCPROFSYS_NODEID_PFX}" "--ctest-mode" "cleanup")',
+        'set_tests_properties("rocprofiler-systems-test-cleanup" PROPERTIES',
+        '    FIXTURES_CLEANUP "rocprofsys-global-tmp-files"',
+        '    LABELS "cleanup;global"',
+        "    TIMEOUT 30",
+        ")",
+        "",
+    ]
+
+
+def _emit_test_timeout_block(
+    item: pytest.Item, timeout_buffer: int = CTEST_TIMEOUT_BUFFER
+) -> list[str]:
+    """One CMake block: set ``_TEST_TIMEOUT`` from ``ROCPROFSYS_CI_TIMEOUT`` or pytest timeout (+ buffer)."""
+    timeout_marker = item.get_closest_marker("timeout")
+    timeout = (
+        int(timeout_marker.args[0])
+        if timeout_marker and timeout_marker.args
+        else DEFAULT_TIMEOUT
+    )
+    default_timeout = timeout + timeout_buffer
+    return [
+        "if(DEFINED _ROCPROFSYS_CI_TIMEOUT)",
+        f'    math(EXPR _TEST_TIMEOUT "${{_ROCPROFSYS_CI_TIMEOUT}} + {timeout_buffer}")',
+        "else()",
+        f"    set(_TEST_TIMEOUT {default_timeout})",
+        "endif()",
+        "",
+    ]
+
+
+def _emit_test_item_block(
+    item: pytest.Item,
+    labels: set[str],
+    depends_on: list[str],
+    run_serial: bool,
+) -> list[str]:
+    """``add_test`` + ``set_tests_properties`` for one item (timeout block emitted separately)."""
+    _, test_name, test_nodeid = _ctest_item_ctest_identity(item)
+    escaped_name = _cmake_escape(test_name)
+    escaped_nodeid = _cmake_escape(test_nodeid)
+
+    # Check if the test runs on a specific python version
+    extra_args = ""
+    if hasattr(item, "callspec") and "python_version" in item.callspec.params:
+        py_ver = item.callspec.params["python_version"]
+        if py_ver is not None:
+            extra_args += f' "--python-versions={py_ver}"'
+
+    lines_out: list[str] = [
+        f'add_test("{escaped_name}" "${{_ROCPROFSYS_EXE}}"'
+        f' "${{_ROCPROFSYS_EXE_ARGS}}"'
+        f' "${{_ROCPROFSYS_NODEID_PFX}}{escaped_nodeid}"'
+        f"{extra_args} ${{_ROCPROFSYS_EXTRA_ARGS}})"
+    ]
+    props: list[str] = []
+    if labels:
+        props.append(f'    LABELS "{";".join(sorted(labels))}"')
+    props.append(f"    TIMEOUT ${{_TEST_TIMEOUT}}")
+    props.append(f"    SKIP_RETURN_CODE {SKIP_RETURN_CODE}")
+    props.append('    FIXTURES_REQUIRED "rocprofsys-global-tmp-files"')
+    if run_serial:
+        props.append("    RUN_SERIAL TRUE")
+    if depends_on:
+        deps_str = ";".join(_cmake_escape(d) for d in depends_on)
+        props.append(f'    DEPENDS "{deps_str}"')
+
+    lines_out.append(f'set_tests_properties("{escaped_name}" PROPERTIES')
+    lines_out.extend(props)
+    lines_out.append(")")
+    lines_out.append("")
+    return lines_out
+
+
+def _ctest_generate_tests(
+    items: list[pytest.Item], output_path: Optional[Path] = None
+) -> None:
+    """Generate a CTestTestfile.cmake file and print it to stdout."""
+
+    no_report_markers = {
+        "parametrize",  # Ignored, except for "mode" parameter (instrumentation mode)
+        # Pytest built-in
+        "usefixtures",
+        "filterwarnings",
+        "skipif",
+        "skip",
+        "xfail",
+        # Internal markers
+        "python_versions",
+        "ci_enable",
+        "ci_disable",
+        "mpi_optional",
+        "no_docker",
+        "oshrun_min_version",
+        "rocm_min_version",
+        "run_if_gpu_category",
+        "preserve",
+        # For CTests
+        "timeout",
+        "depends_on",
+        "serialize",
+        "class_name",
+    }
+    no_report_args_markers = {"rocpd"}
+    only_report_args_markers = {"mpi_implementation"}
+
+    lines = _emit_ctest_header_block()
+    lines.extend(_emit_prerequisite_block())
+
+    seen_names: dict[str, str] = {}  # escaped_name -> original nodeid
+
+    for item in items:
+        test_id, test_name, _ = _ctest_item_ctest_identity(item)
+
+        # Handle certain markers that affect how CTest is configured
+
+        labels: set[str] = set()
+        depends_on: list[str] = []
+        run_serial = False
+
+        depends_marker = item.get_closest_marker("depends_on")
+        if depends_marker:
+            depends_on.extend(str(arg) for arg in depends_marker.args)
+
+        if item.get_closest_marker("serialize"):
+            run_serial = True
+
+        if hasattr(item, "callspec") and "mode" in item.callspec.params:
+            labels.add(str(item.callspec.params["mode"]))
+
+        # Translate pytest markers to CTest labels
+
+        for marker in item.iter_markers():
+            if marker.name in no_report_markers:
+                continue
+            if marker.name in only_report_args_markers:
+                for arg in marker.args:
+                    labels.add(str(arg))
+                continue
+            if marker.name in no_report_args_markers or not marker.args:
+                labels.add(marker.name)
+            else:
+                args_str = ", ".join(str(a) for a in marker.args)
+                labels.add(f"{marker.name}[{args_str}]")
+
+        escaped_name = _cmake_escape(test_name)
+
+        if escaped_name in seen_names:
+            pytest.exit(
+                f"\nDuplicate CTest name '{escaped_name}' generated from:\n"
+                f"  1) {seen_names[escaped_name]}\n"
+                f"  2) {test_id}\n"
+                f"(Due to _standardize_test_name or parametrization)\n"
+                f"Rework test name or parametrization to produce unique names.",
+                returncode=1,
+            )
+        seen_names[escaped_name] = test_id
+
+        lines.extend(_emit_test_timeout_block(item))
+        lines.extend(
+            _emit_test_item_block(
+                item,
+                labels,
+                depends_on,
+                run_serial,
+            )
+        )
+
+    lines.extend(_emit_cleanup_block())
+
+    content = "\n".join(lines)
+    if output_path:
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(content)
+        print(f"Generated {len(items)} CTest definitions -> {output_path}")
+    else:
+        print(content)
+    pytest.exit("CTest generation complete", returncode=0)
+
+
+# ----------------------------------------------------------------------------
+# Other helpers
+# ----------------------------------------------------------------------------
+
+
+# TODO: Deprecate once TheRock switches to CTest and CTest based filtering
+def configure_mode(config: pytest.Config) -> None:
+    """Configure the mode based on the command line options.
+
+    Modes:
+     - --ci-mode: CI mode
+     - --ctest-mode: CTest integration mode
+     - --dev: Developer mode
+    """
+
+    # MPI is disabled in CI mode, this is done in collection_modifyit
+    ci_mode = config.getoption("--ci-mode", default=False)
+    ctest_mode = config.getoption("--ctest-mode", default="off") == "run"
+    dev_mode = config.getoption("--dev", default=False)
+
+    if ci_mode or ctest_mode:
+        config.option.verbose = max(config.option.verbose, 1)  # -v
+        config.option.tbstyle = "short"  # --tb=short
+        if "s" not in config.option.reportchars:  # -rs
+            config.option.reportchars += "s"
+
+    if ctest_mode:
+        config.option.no_header = True
+        config.option.show_test_output = "all"
+
+    if ci_mode:
+        config.option.show_config = True
+        config.option.show_test_output = "subtest"
+
+    if dev_mode:
+        config.option.show_config = True
+        config.option.show_test_output = "subtest"
+        config.option.verbose = max(config.option.verbose, 1)  # -v
+        config.option.tbstyle = "short"  # --tb=short
+        if "s" not in config.option.reportchars:  # -rs
+            config.option.reportchars += "s"
+
+
+def _standardize_test_name(
+    item: pytest.Item, config: pytest.Config, verbose: bool = False
+) -> None:
+
+    # Strip test prefix from the test method name
+    test_name = item.name
+    if test_name.startswith("test"):
+        test_name = test_name[4:]
+        if test_name.startswith(("_", "-")):
+            test_name = test_name[1:]
+
+    ctest_mode = config.getoption("--ctest-mode", default="off") in ("generate", "run")
+    class_name = None
+    if ctest_mode:
+        name_marker = item.get_closest_marker("class_name")
+        if name_marker and name_marker.args:
+            class_name = str(name_marker.args[0]).strip()
+
+    if class_name:
+        full_name = f"{class_name}-{test_name}"
+    elif item.cls:
+        py_class = item.cls.__name__
+        if py_class.startswith("Test"):
+            py_class = py_class[4:]
+        full_name = f"{py_class}-{test_name}"
+    else:
+        full_name = test_name
+
+    formatted_name = "".join(c if c.isalnum() or c == "." else "-" for c in full_name)
+
+    if ctest_mode:
+        formatted_name = formatted_name.replace("_", "-")
+        while "--" in formatted_name:
+            formatted_name = formatted_name.replace("--", "-")
+        formatted_name = formatted_name.strip("-")
+        formatted_name = formatted_name.lower()
+    else:
+        # TODO: Deprecate once TheRock switches to CTests
+        formatted_name = formatted_name.replace("-", "_")
+        while "__" in formatted_name:
+            formatted_name = formatted_name.replace("__", "_")
+        formatted_name = formatted_name.strip("_")
+
+    item.stash[_original_nodeid_key] = item.nodeid
+    # nodeid is what is used to display the test name in the terminal
+    # By default, it groups it by module. In verbose, it shows the full path + class + method
+    # To get a cleaner output in verbose mode, we modify the nodeid but only if verbose is True
+    # This avoids breaking the default grouping by module in non-verbose mode
+    if verbose:
+        item._nodeid = formatted_name
+    item.name = formatted_name
+
+    # Allow -k filtering by the formatted name
+    item.extra_keyword_matches.add(formatted_name)
+    item.extra_keyword_matches.add(formatted_name.lower())
+
+
+def _generate_rocprofsys_config_header() -> list[str]:
+    try:
+        rocprof_config = get_rocprof_config()
+        cap = rocprof_config.capabilities
+    except Exception as e:
+        return [f"{e}"]
+
+    gpu_info = get_gpu_info()
+
+    # Rocm version
+    rocm_version = (
+        ".".join(map(str, rocprof_config.rocm_version))
+        if rocprof_config.rocm_version
+        else "Not found"
+    )
+
+    # Rocminfo
+    rocminfo_path = get_rocminfo(rocprof_config.rocm_path)
+    if not rocminfo_path:
+        rocminfo_err_msg = "Not found - Ensure rocminfo is in ROCM_PATH or PATH - Assuming no GPU configuration"
+
+    # Offload extractor
+    offload_msg = None
+    tool_path, is_llvm_too_old = get_offload_extractor(rocprof_config.rocm_path)
+    if tool_path:
+        if tool_path.name == "llvm-objdump":
+            offload_msg = f"{tool_path}"
+        elif tool_path.name == "roc-obj-ls":
+            if not is_llvm_too_old:
+                offload_msg = f"Using deprecated {tool_path} - Set ROCM_LLVM_OBJDUMP to use llvm-objdump instead"
+            else:
+                offload_msg = f"{tool_path}"
+
+    if not offload_msg:
+        offload_msg = (
+            "Not found - Set ROCM_LLVM_OBJDUMP to path of llvm-objdump (v20+), "
+            "or to path of roc-obj-ls if llvm-objdump < v20"
+        )
+    xnack_support = get_xnack_support(rocprof_config.rocm_path)
+
+    if cap.oshrun_version is not None:
+        oshrun_version_str = f"{cap.oshrun_version[0]}.{cap.oshrun_version[1]}"
+    else:
+        oshrun_version_str = "Not found"
+
+    # Rocprofiler SDK version
+    rocprofiler_sdk_version_str = (
+        f"{cap.rocprofiler_sdk_version[0]}.{cap.rocprofiler_sdk_version[1]}.{cap.rocprofiler_sdk_version[2]}"
+        if cap.rocprofiler_sdk_version
+        else "Not found"
+    )
+
+    W = 22  # label width for alignment
+
+    def _row(label: str, value) -> str:
+        return f"  {label:<{W}}{value}"
+
+    def _subrow(label: str, value) -> str:
+        return f"    {label:<{W}}{value}"
+
+    header = [
+        "",
+        "=" * 70,
+        "Test Configuration:",
+        "=" * 70,
+        _row("ROCm version:", rocm_version),
+        _row("ROCprof-SDK version:", rocprofiler_sdk_version_str),
+        _row("ROCm path:", rocprof_config.rocm_path),
+        _row("Is installed:", rocprof_config.is_installed),
+        _row("Output dir:", rocprof_config.test_output_dir),
+        _row("Validate ROCPD:", check_use_rocpd()),
+        _row("Validate Perfetto:", check_use_perfetto()),
+        "-" * 70,
+        "Core Executables:",
+        _row("Instrument:", rocprof_config.rocprofsys_instrument),
+        _row("Run:", rocprof_config.rocprofsys_run),
+        _row("Sample:", rocprof_config.rocprofsys_sample),
+        _row("Avail:", rocprof_config.rocprofsys_avail),
+        _row("Causal:", rocprof_config.rocprofsys_causal),
+        _row("Python:", rocprof_config.rocprofsys_python),
+        "-" * 70,
+        "Executables:",
+        _row("MPI:", cap.mpiexec_exec),
+        _subrow("Implementation:", cap.mpi_implementation),
+        _row("Julia:", cap.julia_exec),
+        _row("Oshrun:", cap.oshrun_exec),
+        _subrow("Version:", oshrun_version_str),
+        _row("Offload tool:", offload_msg),
+        _row("Rocminfo:", rocminfo_path if rocminfo_path else rocminfo_err_msg),
+        "-" * 70,
+        "System Capabilities:",
+        _row("Detected num procs:", cap.num_procs),
+        _row("UCX available:", cap.ucx_availability),
+        _row("Perf event paranoid:", cap.perf_event_paranoid),
+        _row("CAP_SYS_ADMIN:", cap.cap_sys_admin),
+        _row("CAP_PERFMON:", cap.cap_perfmon),
+        _row("Ptrace scope:", cap.ptrace_scope),
+        _row("Is inside docker:", rocprof_config.capabilities.is_inside_docker),
+        _row("PAPI available:", cap.papi_availability),
+        _row("Default NIC:", cap.default_nic),
+        *(
+            lambda evts: (
+                [_subrow("PAPI NIC events:", evts[0])]
+                + [_subrow("", e) for e in evts[1:]]
+                if evts
+                else [_subrow("PAPI NIC events:", "None")]
+            )
+        )(cap.papi_nic_events.split() if cap.papi_nic_events else []),
+        "-" * 70,
+        "GPU Information:",
+        _row("Available:", gpu_info.available),
+        _row("Architectures:", gpu_info.architectures or "None"),
+        _row("Device count:", gpu_info.device_count),
+        _row("Categories:", gpu_info.categories or "None"),
+        _row("XNACK support:", xnack_support),
+        "-" * 70,
+        "Directories:",
+        _row("Build dir:", rocprof_config.rocprofsys_build_dir),
+        _row("Lib dir:", rocprof_config.rocprofsys_lib_dir),
+        _row("Bin dir:", rocprof_config.rocprofsys_bin_dir),
+        _row("Tests dir:", rocprof_config.rocprofsys_tests_dir),
+        _row("Examples dir:", rocprof_config.rocprofsys_examples_dir),
+        _row("Validation dir:", rocprof_config.rocpd_validation_rules),
+        "-" * 70,
+        "Python:",
+        _row("Site packages:", rocprof_config.rocprofsys_site_packages),
+    ]
+    if cap.supported_python_versions and cap.supported_python_executables:
+        for version, exe in zip(
+            cap.supported_python_versions,
+            cap.supported_python_executables,
+        ):
+            header.append(_row(version, exe))
+    else:
+        header.append(
+            _row(
+                "Executables:",
+                "(no supported Python versions found — each version needs a "
+                "libpyrocprofsys.<IMPL>-<VERSION>-<ARCH>-<OS>-<ABI>.so in site-packages/rocprofsys)",
+            )
+        )
+    header.extend(["-" * 70, "System Environment:"])
+    for key, value in sorted(rocprof_config.get_fundamental_environment().items()):
+        header.append(_row(f"{key}:", value))
+    header.extend(["=" * 70, ""])
+    return header
+
+
+def add_marker_if(
+    item,
+    marker_to_add: str,
+    cond: Callable[[], bool] = lambda: True,
+    req_mark: Optional[str] = None,
+    skip_reason: Optional[str] = None,
+    unavailable_reason: Optional[Callable[[], Optional[str]]] = None,
+) -> None:
+    """Add a marker to a test item if:
+        - target_marker is present (or not specified)
+        - AND condition evaluates to True (lambda)
+
+    If ``unavailable_reason`` is set, it is called: ``None`` means add the marker;
+    a non-empty string means skip the test with that reason (preferred over cond/skip_reason).
+
+    If condition is False and skip_reason is provided, add a skip marker instead.
+    """
+    if req_mark and not item.get_closest_marker(req_mark):
+        return
+
+    if unavailable_reason is not None:
+        msg = unavailable_reason()
+        if msg is None:
+            item.add_marker(getattr(pytest.mark, marker_to_add))
+        else:
+            item.add_marker(pytest.mark.skip(reason=msg))
+        return
+
+    if cond():
+        item.add_marker(getattr(pytest.mark, marker_to_add))
+    elif skip_reason:
+        item.add_marker(pytest.mark.skip(reason=skip_reason))
 
 
 @lru_cache(maxsize=1)
@@ -578,13 +1443,13 @@ def check_use_rocpd() -> bool:
     - A valid GPU
     - ROCm >= 7.0
     """
-    if os.environ.get("ROCPROFSYS_USE_ROCPD", "").upper() == "OFF":
+    if os.environ.get("ROCPROFSYS_USE_ROCPD", "ON").upper() != "ON":
         return False
     try:
         rocprof_config = get_rocprof_config()
     except Exception as e:
         pytest.exit(f"{e}")
-    gpu_info = detect_gpu(rocprof_config.rocm_path)
+    gpu_info = get_gpu_info()
     if not gpu_info.available:
         return False
     rocm_version = rocprof_config.rocm_version
@@ -596,10 +1461,10 @@ def check_use_perfetto() -> bool:
     """Whether Perfetto is available for tests.
 
     Perfetto requires:
-    - Perfetto Python module installed
     - ROCPROFSYS_VALIDATE_PERFETTO not set to OFF (default: ON)
+    - Perfetto Python module installed
     """
-    if os.environ.get("ROCPROFSYS_VALIDATE_PERFETTO", "").upper() == "OFF":
+    if os.environ.get("ROCPROFSYS_VALIDATE_PERFETTO", "ON").upper() != "ON":
         return False
     try:
         import perfetto  # noqa
@@ -609,100 +1474,107 @@ def check_use_perfetto() -> bool:
         return False
 
 
+# The first call to this function MUST be performed in pytest_sessionstart
+# as we need the --python-versions and --python-root-dirs options to be set
 @lru_cache(maxsize=1)
 def get_rocprof_config() -> RocprofsysConfig:
     """Return the rocprofiler-systems configuration."""
     try:
         pytest_config = getattr(pytest, "_config_ref", None)
+        python_versions = None
+        python_root_dirs = None
         custom_output_dir = None
+        rocm_optional = False
         if pytest_config:
             custom_output_dir = pytest_config.getoption("--output-dir", default=None)
+            ver_str = pytest_config.getoption("--python-versions", default=None)
+            dir_str = pytest_config.getoption("--python-root-dirs", default=None)
+            # When generating the CTestTestfile.cmake in TheRock, ROCm is not present
+            rocm_optional = (
+                pytest_config.getoption("--ctest-mode", default="off") == "generate"
+            )
+            if ver_str:
+                python_versions = [v.strip() for v in ver_str.split(";") if v.strip()]
+            if dir_str:
+                python_root_dirs = [
+                    Path(d.strip()) for d in dir_str.split(";") if d.strip()
+                ]
 
         return discover_build_config(
-            output_dir=Path(custom_output_dir) if custom_output_dir else None
+            output_dir=Path(custom_output_dir) if custom_output_dir else None,
+            python_versions=python_versions,
+            python_root_dirs=python_root_dirs,
+            rocm_optional=rocm_optional,
         )
     except Exception as e:
-        raise RuntimeError(f"Failed to get rocprofiler-systems configuration: {e}")
+        raise RuntimeError("Failed to get rocprofiler-systems configuration") from e
+
+
+@lru_cache(maxsize=1)
+def get_gpu_info() -> GPUInfo:
+    """Return the GPU information."""
+    try:
+        rocprof_config = get_rocprof_config()
+    except Exception as e:
+        pytest.exit(f"{e}")
+    return detect_gpu(rocprof_config.rocm_path)
+
+
+def _run_cleanup(config: pytest.Config) -> None:
+    """Run cleanup of temp files and optionally the test output directory."""
+    import glob
+    import getpass
+
+    # Clean up temp files
+    for pattern in _cleanup_temp_patterns():
+        for filepath in glob.glob(pattern):
+            try:
+                p = Path(filepath)
+                if p.is_file() and p.owner() == getpass.getuser():
+                    p.unlink()
+                    print(f"Removed: {filepath}")
+            except (OSError, KeyError):
+                pass
+
+    # Clean up test output directory if ROCPROFSYS_KEEP_TEST_OUTPUT=0
+    if os.environ.get("ROCPROFSYS_KEEP_TEST_OUTPUT", "1") == "0":
+        try:
+            rocprof_config = get_rocprof_config()
+            output_dir = rocprof_config.test_output_dir
+            if output_dir.exists():
+                shutil.rmtree(output_dir)
+                print(f"Removed test output directory: {output_dir}")
+        except Exception as e:
+            print(f"Warning: Could not clean test output directory: {e}")
 
 
 def _cleanup_temp_patterns() -> list[str]:
-    """Return list of temp file patterns to clean up."""
-    patterns = []
+    """Return list of rocprofiler-systems temp file patterns to clean up."""
+    tmpdir = os.environ.get("ROCPROFSYS_TMPDIR", os.environ.get("TMPDIR", "/tmp"))
+    dirs = ["/tmp"]
+    if tmpdir and not tmpdir.startswith("%") and tmpdir != "/tmp":
+        dirs.append(tmpdir)
 
-    if not getattr(pytest, "_ctest_integration_flag", False):
+    patterns = []
+    for d in dirs:
         patterns.extend(
             [
-                "/tmp/buffered_storage*.bin",
-                "/tmp/metadata*.json",
+                f"{d}/rocprof-sys-*.tmp",
+                f"{d}/rocprofsys-*.tmp",
+                f"{d}/buffered_storage*.bin",
+                f"{d}/metadata*.json",
+                f"{d}/perfetto-*.proto",
+                f"{d}/perfetto_trace*.proto",
+                f"{d}/hsa-*.tmp",
+                f"{d}/rocm-*.tmp",
+                f"{d}/hip-*.tmp",
+                f"{d}/*.inst",
+                f"{d}/causal-*.json",
+                f"{d}/experiments-*.coz",
+                f"{d}/core.*",
             ]
         )
-
-    # Other rocprofiler-systems temp files (always cleaned)
-    patterns.extend(
-        [
-            "/tmp/rocprof-sys-*.tmp",
-            "/tmp/rocprofsys-*.tmp",
-            # Perfetto temp files
-            "/tmp/perfetto-*.proto",
-            "/tmp/perfetto_trace*.proto",
-            # HSA/ROCm temp files
-            "/tmp/hsa-*.tmp",
-            "/tmp/rocm-*.tmp",
-            "/tmp/hip-*.tmp",
-            # Instrumented binaries that might be left over
-            "/tmp/*.inst",
-            # Causal profiling temp files
-            "/tmp/causal-*.json",
-            "/tmp/experiments-*.coz",
-            # Core dumps (if any)
-            "/tmp/core.*",
-        ]
-    )
-
     return patterns
-
-
-def _cleanup_directory_patterns(build_dir: Path) -> list[Path]:
-    """Return list of directories to check for cleanup."""
-    patterns = []
-    if not getattr(pytest, "_ctest_integration_flag", False):
-        patterns.extend(
-            [
-                build_dir / "rocprof-sys-pytest-output",
-                build_dir / "rocprof-sys-tests-output",
-            ]
-        )
-
-    return patterns
-
-
-def _safe_remove_file(filepath: Path) -> None:
-    """Safely remove a file, ignoring errors."""
-    try:
-        if filepath.is_file():
-            filepath.unlink()
-    except OSError:
-        pass
-
-
-def _safe_remove_directory(dirpath: Path, remove_if_empty: bool = True) -> None:
-    """Safely remove a directory.
-
-    Args:
-        dirpath: Path to directory
-        remove_if_empty: If True, only remove if empty. If False, remove recursively.
-    """
-    try:
-        if not dirpath.exists():
-            return
-        if remove_if_empty:
-            if dirpath.is_dir() and not any(dirpath.iterdir()):
-                dirpath.rmdir()
-        else:
-            if dirpath.is_dir():
-                shutil.rmtree(dirpath)
-    except OSError:
-        pass
 
 
 # ============================================================================
@@ -739,6 +1611,25 @@ def flat_env(base_env: dict[str, str]) -> dict[str, str]:
         "OMP_PROC_BIND": "spread",
         "OMP_PLACES": "threads",
         "OMP_NUM_THREADS": "2",
+        "LD_LIBRARY_PATH": base_env.get("LD_LIBRARY_PATH", ""),
+    }
+
+
+@pytest.fixture
+def lock_env(base_env: dict[str, str]) -> dict[str, str]:
+    """Environment variables for thread lock tracing tests."""
+    return {
+        "ROCPROFSYS_USE_SAMPLING": "ON",
+        "ROCPROFSYS_USE_PROCESS_SAMPLING": "OFF",
+        "ROCPROFSYS_SAMPLING_FREQ": "750",
+        "ROCPROFSYS_COLLAPSE_THREADS": "ON",
+        "ROCPROFSYS_TRACE_THREAD_LOCKS": "ON",
+        "ROCPROFSYS_TRACE_THREAD_SPIN_LOCKS": "ON",
+        "ROCPROFSYS_TRACE_THREAD_RW_LOCKS": "ON",
+        "ROCPROFSYS_COUT_OUTPUT": "ON",
+        "ROCPROFSYS_TIME_OUTPUT": "OFF",
+        "ROCPROFSYS_TIMELINE_PROFILE": "OFF",
+        "ROCPROFSYS_LOG_LEVEL": "trace",
         "LD_LIBRARY_PATH": base_env.get("LD_LIBRARY_PATH", ""),
     }
 
@@ -784,10 +1675,20 @@ def timemory_env(base_env: dict[str, str]) -> dict[str, str]:
 
 
 @pytest.fixture(scope="session")
-def is_xdist_used(request) -> bool:
-    """Whether xdist is actively being used (parallel mode) for the test session."""
-    # workerinput only exists on xdist worker processes
-    return hasattr(request.config, "workerinput")
+def num_processes(request) -> int:
+    """Get the number of processes for the test."""
+    return request.config.getoption("--num-processes", default=2)
+
+
+@pytest.fixture(scope="session")
+def get_test_num_threads(rocprof_config) -> int:
+    """Get the number of threads for the test."""
+    num_threads = rocprof_config.capabilities.num_procs + (
+        rocprof_config.capabilities.num_procs // 2
+    )
+    if num_threads > 12:
+        return 12
+    return num_threads
 
 
 @pytest.fixture(scope="session")
@@ -801,12 +1702,12 @@ def rocprof_config() -> RocprofsysConfig:
 
 
 @pytest.fixture(scope="session")
-def gpu_info(rocprof_config) -> GPUInfo:
+def gpu_info() -> GPUInfo:
     """Session-wide GPU information.
 
     Detects available GPUs and their capabilities.
     """
-    return detect_gpu(rocprof_config.rocm_path)
+    return get_gpu_info()
 
 
 @pytest.fixture(scope="session")
@@ -827,20 +1728,16 @@ def validation_rules_dir(rocprof_config) -> Path:
 
 
 @pytest.fixture(scope="module")
-def test_output_base(rocprof_config) -> Path:
-    """Base directory for test outputs (module-scoped).
-
-    All test outputs for a module are stored under this directory.
-    """
+def test_output_base(rocprof_config, request) -> Path:
+    """Base directory for test outputs"""
     output_dir = rocprof_config.test_output_dir
     output_dir.mkdir(parents=True, exist_ok=True)
     return output_dir
 
 
+# TODO: Deprecate once TheRock switches to CTest
 @pytest.fixture(scope="module", autouse=True)
-def cleanup_module_temp_files(
-    rocprof_config, request: pytest.FixtureRequest, is_xdist_used
-):
+def cleanup_module_temp_files(request: pytest.FixtureRequest):
     """Module-scoped cleanup that runs AFTER each test module completes.
 
     Execution Order:
@@ -859,25 +1756,56 @@ def cleanup_module_temp_files(
 
     import glob
 
-    # Clean up instrumented binaries in build directory
-    for pattern in ["*.inst", "*.inst.orig"]:
-        for filepath in glob.glob(str(rocprof_config.rocprofsys_build_dir / pattern)):
-            _safe_remove_file(Path(filepath))
-
-    # Defer below cleanup to end of session
-    if is_xdist_used:
-        return
-
-    # Clean up trace cache temp files
-    if not getattr(pytest, "_ctest_integration_flag", False):
+    if not request.config.getoption("--ctest-mode", default="off") == "run":
         for pattern in ["/tmp/buffered_storage*.bin", "/tmp/metadata*.json"]:
             for filepath in glob.glob(pattern):
-                _safe_remove_file(Path(filepath))
+                safe_remove(Path(filepath))
 
 
 # ----------------------------------------------------------------------------
 # Function-scoped Fixtures
 # ----------------------------------------------------------------------------
+
+
+@pytest.fixture
+def create_config_file(test_output_dir) -> Path:
+    """Create a config file for a test based on env vars and return Path.
+
+    Filters out environment-only settings that should not be written to config files
+    """
+    # Settings that should only be in environment, not config files
+    env_only_pattern = re.compile(
+        r"ROCPROFSYS_(CI|CI_TIMEOUT|MODE|USE_MPIP|DEBUG_[A-Z_]+|"
+        r"FORCE_ROCPROFILER_INIT|DEFAULT_MIN_INSTRUCTIONS|MONOCHROME|VERBOSE)$"
+    )
+
+    def _create_config_file(
+        env: dict[str, str],
+        name: Optional[str] = "config.cfg",
+        skip_filter: bool = False,
+    ) -> Path:
+        config_file = test_output_dir / name
+        content = "# auto-generated by pytest\n\n"
+
+        if skip_filter:
+            config_vars = {k: v for k, v in env.items() if k != "ROCPROFSYS_CONFIG_FILE"}
+        else:
+            # Only write ROCPROFSYS_* settings to config file, excluding env-only settings
+            # Non-ROCPROFSYS vars (OMP_*, LD_LIBRARY_PATH, etc.) should stay as env vars only
+            # Also exclude ROCPROFSYS_CONFIG_FILE to avoid self-reference
+            config_vars = {
+                k: v
+                for k, v in env.items()
+                if k.startswith("ROCPROFSYS_")
+                and not env_only_pattern.match(k)
+                and k != "ROCPROFSYS_CONFIG_FILE"
+            }
+
+        content += "\n".join(f"{k}={v}" for k, v in config_vars.items())
+        config_file.write_text(content)
+        return config_file
+
+    return _create_config_file
 
 
 @pytest.fixture
@@ -906,6 +1834,7 @@ def test_output_dir(
 
     Creates a directory named after the test and cleans up on success.
     On failure, the directory is preserved for debugging.
+    Directory is removed if it is empty.
 
     Cleanup Order:
         1. Test setup: Directory is created
@@ -916,11 +1845,7 @@ def test_output_dir(
 
     This ensures validation always has access to output files.
     """
-    class_name = request.node.cls.__name__ if request.node.cls else None
-    test_name = request.node.name
-    full_name = f"{class_name}__{test_name}" if class_name else test_name
-    safe_name = "".join(c if c.isalnum() or c in "-_" else "_" for c in full_name)
-    output_dir = test_output_base / safe_name
+    output_dir = test_output_base / request.node.name
 
     if output_dir.exists():
         shutil.rmtree(output_dir)
@@ -929,11 +1854,33 @@ def test_output_dir(
     yield output_dir  # Test body executes here (including validation)
 
     # === CLEANUP PHASE (runs AFTER test body completes) ===
-    # Cleanup on success unless ROCPROFSYS_KEEP_TEST_OUTPUT is set
+
+    # If the output directory is empty, remove it
+    if output_dir.exists() and not any(output_dir.iterdir()):
+        shutil.rmtree(output_dir)
+
     keep_output = os.environ.get("ROCPROFSYS_KEEP_TEST_OUTPUT", "1") == "1"
     test_failed = hasattr(request.node, "rep_call") and request.node.rep_call.failed
 
-    if not keep_output and not test_failed and output_dir.exists():
+    if keep_output or test_failed or not output_dir.exists():
+        return
+
+    # Remove all files in the output directory, then the directory itself
+    # unless the preserve marker is present
+
+    to_preserve = []
+    preserve_marker = request.node.get_closest_marker("preserve")
+    if preserve_marker and preserve_marker.args:
+        for fname in preserve_marker.args:
+            preserved = output_dir / fname
+            to_preserve.append(preserved)
+
+    for entry in output_dir.iterdir():
+        if entry not in to_preserve:
+            safe_remove(entry)
+
+    # Remove the output directory if empty
+    if not any(output_dir.iterdir()):
         shutil.rmtree(output_dir)
 
 
@@ -963,37 +1910,6 @@ def apply_rocpd_marker(request):
     env["ROCPROFSYS_USE_ROCPD"] = "ON"
 
 
-@pytest.fixture
-def cleanup_instrumented_binary(
-    rocprof_config,
-    test_output_dir: Path,
-) -> Generator[None, None, None]:
-    """Function-scoped cleanup for instrumented binaries.
-
-    Use this fixture in tests that create instrumented binaries to ensure
-    they are cleaned up after the test completes.
-    """
-    # Track files before test
-    pre_existing = (
-        set(test_output_dir.glob("*.inst")) if test_output_dir.exists() else set()
-    )
-
-    yield
-
-    if os.environ.get("ROCPROFSYS_KEEP_TEST_OUTPUT", "1") == "1":
-        return
-
-    # Clean up any new .inst files
-    if test_output_dir.exists():
-        for inst_file in test_output_dir.glob("*.inst"):
-            if inst_file not in pre_existing:
-                _safe_remove_file(inst_file)
-
-    # Also clean from build directory
-    for inst_file in rocprof_config.rocprofsys_build_dir.glob("*.inst"):
-        _safe_remove_file(inst_file)
-
-
 # This is needed for pytest-subtests plugin compatibility when pytest < 9.0.0
 @pytest.fixture
 def record_subtest_failure(request):
@@ -1006,6 +1922,59 @@ def record_subtest_failure(request):
         request.node.stash.setdefault(_subtest_failures_key, []).append(name)
 
     return _record
+
+
+# TODO: Will be default once TheRock switches to CTest based filtering
+def _print_subtest_output(request, subtest_name: str, output: str) -> None:
+    """Print subtest validation output for important subtests when in CTest run mode."""
+    if request.config.getoption("--ctest-mode", default="off") == "run" and output:
+        print(f"\n--- {subtest_name} ---\n{output}\n", flush=True)
+
+
+# TODO: Deprecate once TheRock switches to CTest and CTest based filtering
+def _is_assert_disabled(request: pytest.FixtureRequest, subtest_name: str) -> bool:
+    """Check if a subtest is disabled via ci_disable marker in CI mode."""
+    if not request.config.getoption("--ci-mode", default=False):
+        return False
+    for marker in request.node.iter_markers("ci_disable"):
+        if subtest_name in marker.args:
+            return True
+    return False
+
+
+# ============================================================================
+# Base Test Class
+# ============================================================================
+
+
+class RocprofsysTest:
+    """Base class that auto-captures parametrized values and common fixtures onto self."""
+
+    @pytest.fixture(autouse=True)
+    def _setup(
+        self,
+        run_test,
+        assert_regex,
+        assert_perfetto,
+        assert_rocpd,
+        assert_causal_json,
+        assert_file_exists,
+        assert_timemory,
+        assert_file_regex,
+        get_test_num_threads,
+        test_output_dir,
+    ):
+
+        self.run_test = run_test
+        self.assert_regex = assert_regex
+        self.assert_perfetto = assert_perfetto
+        self.assert_rocpd = assert_rocpd
+        self.assert_causal_json = assert_causal_json
+        self.assert_file_exists = assert_file_exists
+        self.assert_timemory = assert_timemory
+        self.assert_file_regex = assert_file_regex
+        self.num_threads = get_test_num_threads
+        self.test_output_dir = test_output_dir
 
 
 # ============================================================================
@@ -1030,11 +1999,12 @@ def run_test(
         target: Target executable name
         run_args: Arguments passed to the target executable
         env: Environment variables dict
-        timeout: Test timeout in seconds
-        mpi_ranks: Number of MPI ranks (0 = disabled)
+        launcher: Launcher to use (mpi or shmem)
+
+        num_procs: Number of processes (0 = disabled)
         working_directory: Custom working directory
-        no_check_target_arch: If True, bypasses checking if the target supports the current
-                              system architectures when @pytest.mark.gpu is present (default: False)
+        check_target_arch: If True, checks if the target supports the current system architectures (default: False)
+                           Note: This requires @pytest.mark.gpu to be present
         skip_on_error: If True, pytest.skip on non-zero return code (default: False = fail)
         fail_on_pass: If True, pytest.fail on success and pytest.pass on failure (default: False)
         fail_on_not_found: If True, pytest.fail when binary not found (default: False = skip)
@@ -1045,37 +2015,48 @@ def run_test(
     Returns:
         TestResult for further assertions
     """
-    RUNNERS = {
-        "baseline": BaselineRunner,
-        "sampling": SamplingRunner,
-        "binary_rewrite": BinaryRewriteRunner,
-        "runtime_instrument": RuntimeInstrumentRunner,
-        "sys_run": SysRunRunner,
-    }
 
     def _run_test(
         runner_type: str,
         target: str,
-        run_args: Optional[list[str]] = None,
         env: Optional[dict[str, str]] = None,
-        timeout: int = 300,
-        mpi_ranks: int = 0,
+        run_args: Optional[list[str]] = None,
+        pre_run_args: Optional[list[str]] = None,
+        launcher: Optional[BaselineRunner.Launcher | str] = None,
+        num_procs: int = 0,
         working_directory: Optional[Path] = None,
-        no_check_target_arch: bool = False,
+        check_target_arch: bool = False,
         skip_on_error: bool = False,
         fail_on_pass: bool = False,
         fail_on_not_found: bool = False,
         fail_message: Optional[str] = None,
+        no_base_env: bool = False,
         **kwargs,
     ) -> TestResult:
-        runner_class = RUNNERS.get(runner_type)
+        # Filter kwargs to only pass runner-specific args that each runner accepts.
+        runner_specific_args = {
+            "baseline": {"command"},
+            "sampling": {"sample_args"},
+            "binary_rewrite": {"rewrite_args", "cleanup_on_success"},
+            "runtime_instrument": {"runtime_args"},
+            "sys_run": {"sysrun_args"},
+            "causal": {"causal_args", "causal_mode"},
+            "python": {"python_version", "profile_args", "annotated", "standalone"},
+        }
+        allowed_args = runner_specific_args.get(runner_type, set())
+        filtered_kwargs = {k: v for k, v in kwargs.items() if k in allowed_args}
+
+        if runner_type == "causal" and "causal_mode" not in filtered_kwargs:
+            pytest.exit("causal_mode is required for causal tests", returncode=1)
+
+        runner_class = ROCPROFSYS_RUNNER_CLASSES.get(runner_type)
         if not runner_class:
             pytest.fail(
-                f"Invalid runner type: {runner_type}. Use: {list(RUNNERS.keys())}"
+                f"Invalid runner type: {runner_type}. Use: {list(ROCPROFSYS_RUNNER_CLASSES.keys())}"
             )
 
         # For GPU tests, ensure that the target supports at least one of the current system architectures
-        if request.node.get_closest_marker("gpu") and not no_check_target_arch:
+        if request.node.get_closest_marker("gpu") and check_target_arch:
             try:
                 target_path = rocprof_config.get_target_executable(target)
                 target_archs = get_target_gpu_arch(rocprof_config.rocm_path, target_path)
@@ -1088,10 +2069,27 @@ def run_test(
             except FileNotFoundError:
                 pass
 
+        env = env.copy() if env else {}
+
         # Apply --monochrome option if set
         if request.config.getoption("--monochrome", default=False):
-            env = env.copy() if env else {}
             env["ROCPROFSYS_MONOCHROME"] = "ON"
+
+        # Timeout: ROCPROFSYS_CI_TIMEOUT env, else @pytest.mark.timeout, else default
+        ci_timeout_env = os.environ.get("ROCPROFSYS_CI_TIMEOUT")
+        if ci_timeout_env is not None:
+            timeout = int(ci_timeout_env)
+        elif request.node.get_closest_marker("timeout"):
+            timeout = request.node.get_closest_marker("timeout").args[0]
+        else:
+            timeout = 300
+
+        env["ROCPROFSYS_CI_TIMEOUT"] = str(timeout)
+
+        # Verify that MPI is available for "mpi_optional" tests
+        if request.node.get_closest_marker("mpi_optional") and num_procs > 0:
+            if not request.node.get_closest_marker("mpi"):
+                num_procs = 0
 
         try:
             runner = runner_class(
@@ -1099,11 +2097,14 @@ def run_test(
                 target=target,
                 output_dir=test_output_dir,
                 run_args=run_args,
+                pre_run_args=pre_run_args,
                 env=env,
                 timeout=timeout,
-                mpi_ranks=mpi_ranks,
+                launcher=launcher,
+                num_procs=num_procs,
                 working_directory=working_directory,
-                **kwargs,
+                no_base_env=no_base_env,
+                **filtered_kwargs,
             )
         except FileNotFoundError:
             if fail_on_not_found:
@@ -1120,10 +2121,34 @@ def run_test(
         )
 
         if not result.success and not fail_on_pass:
-            if fail_message:
-                msg = f"{fail_message}: {output}"
+            short_msg = fail_message or f"{runner_type} test failed"
+            ctest_mode = request.config.getoption("--ctest-mode", default="off")
+
+            cmd_str = " ".join(str(c) for c in getattr(result, "command", []))
+            env_dict = getattr(result, "environment", {})
+            env_str = (
+                "\n".join(f"  {k}={v}" for k, v in sorted(env_dict.items()))
+                if env_dict
+                else ""
+            )
+
+            details = []
+            if cmd_str:
+                details.append(f"Command: {cmd_str}")
+            if env_str:
+                details.append(f"Environment:\n{env_str}")
+            details.append(f"Runner Output:\n{output}")
+            detail_text = "\n\n".join(details)
+
+            # TODO: This will be made the standard once TheRock switches to CTest
+            if ctest_mode == "run":
+                # Print details to stdout (captured by CTest) and fail with
+                # a short message to avoid the same output appearing twice.
+                print(f"\n{detail_text}", flush=True)
+                msg = short_msg
             else:
-                msg = f"{runner_type} test failed: {output}"
+                msg = f"{short_msg}\n\n{detail_text}"
+
             if skip_on_error:
                 pytest.skip(msg)
             else:
@@ -1141,29 +2166,37 @@ def run_test(
 def assert_regex(subtests, record_subtest_failure, request):
     """Fixture that returns an assert_regex function.
 
-    Args not from validate_regex:
+    Args:
+        result: TestResult from run_test
+        mode: Optional runner type (e.g., "binary_rewrite", "sys_run"). If provided, looks up
+              mode-specific regexes from kwargs (e.g., rewrite_pass_regex, sys_run_pass_regex)
         subtest_name: Name shown in subtest output (defaults to "Regex validation")
+        pass_regex: Explicit list of pass regex patterns (used if mode is None or no mode-specific found)
+        fail_regex: Explicit list of fail regex patterns (used if mode is None or no mode-specific found)
         skip_on_fail: If True, skip instead of fail when validation fails
         fail_message: Custom message for failure (defaults to validation message)
+        **kwargs: Mode-specific regexes like rewrite_pass_regex, sys_run_fail_regex, etc.
     """
-    disabled_subtests: set[str] = set()
-    if request.config.getoption(
-        "--ci-mode", default=False
-    ) and not request.config.getoption("--allow-disabled", default=False):
-        for marker in request.node.iter_markers("disable"):
-            disabled_subtests.update(marker.args)
+    if _is_assert_disabled(request, "assert_regex"):
+        return lambda *args, **kwargs: None
 
     def _assert_regex(
         result: TestResult,
+        mode: Optional[str] = None,
         subtest_name: str = "Regex validation",
         pass_regex: Optional[list[str]] = None,
         fail_regex: Optional[list[str]] = None,
         use_abort_fail_regex: bool = True,
         skip_on_fail: bool = False,
         fail_message: Optional[str] = None,
+        **kwargs,
     ) -> None:
-        if "assert_regex" in disabled_subtests:
-            return
+        # If mode is provided, look up mode-specific regexes from kwargs
+        if mode is not None:
+            # Normalize mode name (hyphens to underscores)
+            mode_key = mode.replace("-", "_")
+            pass_regex = kwargs.get(f"{mode_key}_pass_regex") or pass_regex
+            fail_regex = kwargs.get(f"{mode_key}_fail_regex") or fail_regex
 
         with subtests.test(subtest_name):
             validation = validate_regex(
@@ -1181,26 +2214,62 @@ def assert_regex(subtests, record_subtest_failure, request):
 
 
 @pytest.fixture
-def assert_perfetto(subtests, tests_dir, record_subtest_failure, request):
+def assert_file_regex(subtests, record_subtest_failure, request):
+    """Variant of assert_regex that validates against a file."""
+    if _is_assert_disabled(request, "assert_file_regex"):
+        return lambda *args, **kwargs: None
+
+    def _assert_file_regex(
+        file_path: Path,
+        subtest_name: str = "File regex validation",
+        pass_regex: Optional[list[str]] = None,
+        fail_regex: Optional[list[str]] = None,
+        use_abort_fail_regex: bool = True,
+        skip_on_fail: bool = False,
+        fail_message: Optional[str] = None,
+    ) -> None:
+        with subtests.test(subtest_name):
+            validation = validate_file_regex(
+                file_path,
+                pass_regex,
+                fail_regex,
+                use_abort_fail_regex,
+            )
+
+            if not validation.is_valid:
+                msg = (
+                    fail_message or f"File regex validation failed: {validation.message}"
+                )
+                if skip_on_fail:
+                    pytest.skip(msg)
+                else:
+                    record_subtest_failure(subtest_name)
+                    pytest.fail(msg)
+
+    return _assert_file_regex
+
+
+@pytest.fixture
+def assert_perfetto(
+    subtests, tests_dir, record_subtest_failure, request, test_output_dir
+):
     """Fixture that returns an assert_perfetto function.
 
     Args not from validate_perfetto_trace:
         subtest_name: Name shown in subtest output (defaults to "Perfetto validation")
+        perfetto_file: (Optional) Name of the perfetto file in the test output directory (e.g., for merged.proto)
         pass_regex: (Optional) Regex patterns that must be found in validation.stdout
         fail_regex: (Optional) Regex patterns that must NOT be found in validation.stdout
         skip_on_fail: If True, skip instead of fail when validation fails
         fail_message: Custom message for failure (defaults to validation message)
     """
-    disabled_subtests: set[str] = set()
-    if request.config.getoption(
-        "--ci-mode", default=False
-    ) and not request.config.getoption("--allow-disabled", default=False):
-        for marker in request.node.iter_markers("disable"):
-            disabled_subtests.update(marker.args)
+    if _is_assert_disabled(request, "assert_perfetto"):
+        return lambda *args, **kwargs: None
 
     def _assert_perfetto(
         result: TestResult,
         subtest_name: str = "Perfetto validation",
+        perfetto_file: Optional[Path] = None,
         categories: Optional[list[str]] = None,
         labels: Optional[list[str]] = None,
         counts: Optional[list[int]] = None,
@@ -1217,16 +2286,19 @@ def assert_perfetto(subtests, tests_dir, record_subtest_failure, request):
         skip_on_fail: bool = False,
         fail_message: Optional[str] = None,
     ) -> None:
-        if "assert_perfetto" in disabled_subtests:
-            return
-
         with subtests.test(subtest_name):
             if not check_use_perfetto():
                 pytest.skip("Perfetto is disabled")
-            perfetto = result.perfetto_file
-            if perfetto is None:
+
+            # Perfetto file check
+            if perfetto_file is not None:
+                perfetto = Path(test_output_dir) / perfetto_file
+            else:
+                perfetto = result.perfetto_file
+            if not perfetto.exists():
                 record_subtest_failure(subtest_name)
-                pytest.fail("Perfetto trace not created")
+                pytest.fail(f"Perfetto trace file {perfetto} not found")
+
             validation = validate_perfetto_trace(
                 perfetto,
                 tests_dir=tests_dir,
@@ -1254,12 +2326,17 @@ def assert_perfetto(subtests, tests_dir, record_subtest_failure, request):
                 for pattern in pass_regex:
                     if not re.search(pattern, validation.stdout):
                         record_subtest_failure(subtest_name)
-                        pytest.fail(f"Pass regex not found: {pattern}\n{output}")
+                        pytest.fail(
+                            f"Pass regex not found: {pattern}\n{output}", pytrace=False
+                        )
             if fail_regex:
                 for pattern in fail_regex:
                     if re.search(pattern, validation.stdout):
                         record_subtest_failure(subtest_name)
-                        pytest.fail(f"Fail regex found: {pattern}\n{output}")
+                        pytest.fail(
+                            f"Fail regex found: {pattern}\n{output}", pytrace=False
+                        )
+            _print_subtest_output(request, subtest_name, output)
 
     return _assert_perfetto
 
@@ -1277,12 +2354,8 @@ def assert_rocpd(subtests, tests_dir, record_subtest_failure, request):
         skip_on_fail: If True, skip instead of fail when validation fails
         fail_message: Custom message for failure (defaults to validation message)
     """
-    disabled_subtests: set[str] = set()
-    if request.config.getoption(
-        "--ci-mode", default=False
-    ) and not request.config.getoption("--allow-disabled", default=False):
-        for marker in request.node.iter_markers("disable"):
-            disabled_subtests.update(marker.args)
+    if _is_assert_disabled(request, "assert_rocpd"):
+        return lambda *args, **kwargs: None
 
     def _assert_rocpd(
         result: TestResult,
@@ -1294,9 +2367,6 @@ def assert_rocpd(subtests, tests_dir, record_subtest_failure, request):
         skip_on_fail: bool = False,
         fail_message: Optional[str] = None,
     ) -> None:
-        if "assert_rocpd" in disabled_subtests:
-            return
-
         with subtests.test(subtest_name):
             if not check_use_rocpd():
                 pytest.skip("ROCpd is disabled")
@@ -1330,12 +2400,17 @@ def assert_rocpd(subtests, tests_dir, record_subtest_failure, request):
                 for pattern in pass_regex:
                     if not re.search(pattern, validation.stdout):
                         record_subtest_failure(subtest_name)
-                        pytest.fail(f"Pass regex not found: {pattern}\n{output}")
+                        pytest.fail(
+                            f"Pass regex not found: {pattern}\n{output}", pytrace=False
+                        )
             if fail_regex:
                 for pattern in fail_regex:
                     if re.search(pattern, validation.stdout):
                         record_subtest_failure(subtest_name)
-                        pytest.fail(f"Fail regex found: {pattern}\n{output}")
+                        pytest.fail(
+                            f"Fail regex found: {pattern}\n{output}", pytrace=False
+                        )
+            _print_subtest_output(request, subtest_name, output)
 
     return _assert_rocpd
 
@@ -1351,12 +2426,8 @@ def assert_timemory(subtests, tests_dir, record_subtest_failure, request):
         skip_on_fail: If True, skip instead of fail when validation fails
         fail_message: Custom message for failure (defaults to validation message)
     """
-    disabled_subtests: set[str] = set()
-    if request.config.getoption(
-        "--ci-mode", default=False
-    ) and not request.config.getoption("--allow-disabled", default=False):
-        for marker in request.node.iter_markers("disable"):
-            disabled_subtests.update(marker.args)
+    if _is_assert_disabled(request, "assert_timemory"):
+        return lambda *args, **kwargs: None
 
     def _assert_timemory(
         result: TestResult,
@@ -1373,9 +2444,6 @@ def assert_timemory(subtests, tests_dir, record_subtest_failure, request):
         skip_on_fail: bool = False,
         fail_message: Optional[str] = None,
     ) -> None:
-        if "assert_timemory" in disabled_subtests:
-            return
-
         with subtests.test(subtest_name):
             timemory_file = result.output_dir / file_name
             if not timemory_file.exists():
@@ -1403,12 +2471,17 @@ def assert_timemory(subtests, tests_dir, record_subtest_failure, request):
                 for pattern in pass_regex:
                     if not re.search(pattern, validation.stdout):
                         record_subtest_failure(subtest_name)
-                        pytest.fail(f"Pass regex not found: {pattern}\n{output}")
+                        pytest.fail(
+                            f"Pass regex not found: {pattern}\n{output}", pytrace=False
+                        )
             if fail_regex:
                 for pattern in fail_regex:
                     if re.search(pattern, validation.stdout):
                         record_subtest_failure(subtest_name)
-                        pytest.fail(f"Fail regex found: {pattern}\n{output}")
+                        pytest.fail(
+                            f"Fail regex found: {pattern}\n{output}", pytrace=False
+                        )
+            _print_subtest_output(request, subtest_name, output)
 
     return _assert_timemory
 
@@ -1422,12 +2495,8 @@ def assert_file_exists(subtests, record_subtest_failure, request):
         skip_on_fail: If True, skip instead of fail when validation fails
         fail_message: Custom message for failure (defaults to validation message)
     """
-    disabled_subtests: set[str] = set()
-    if request.config.getoption(
-        "--ci-mode", default=False
-    ) and not request.config.getoption("--allow-disabled", default=False):
-        for marker in request.node.iter_markers("disable"):
-            disabled_subtests.update(marker.args)
+    if _is_assert_disabled(request, "assert_file_exists"):
+        return lambda *args, **kwargs: None
 
     def _assert_file_exists(
         path: Path | list[Path],
@@ -1436,9 +2505,6 @@ def assert_file_exists(subtests, record_subtest_failure, request):
         skip_on_fail: bool = False,
         fail_message: Optional[str] = None,
     ) -> None:
-        if "assert_file_exists" in disabled_subtests:
-            return
-
         paths = [path] if isinstance(path, Path) else path
         with subtests.test(subtest_name):
             for p in paths:
@@ -1467,12 +2533,8 @@ def assert_causal_json(subtests, tests_dir, record_subtest_failure, request):
         skip_on_fail: If True, skip instead of fail when validation fails
         fail_message: Custom message for failure (defaults to validation message)
     """
-    disabled_subtests: set[str] = set()
-    if request.config.getoption(
-        "--ci-mode", default=False
-    ) and not request.config.getoption("--allow-disabled", default=False):
-        for marker in request.node.iter_markers("disable"):
-            disabled_subtests.update(marker.args)
+    if _is_assert_disabled(request, "assert_causal_json"):
+        return lambda *args, **kwargs: None
 
     def _assert_causal_json(
         result: TestResult,
@@ -1486,9 +2548,6 @@ def assert_causal_json(subtests, tests_dir, record_subtest_failure, request):
         skip_on_fail: bool = False,
         fail_message: Optional[str] = None,
     ) -> None:
-        if "assert_causal_json" in disabled_subtests:
-            return
-
         with subtests.test(subtest_name):
             causal_file = result.output_dir / file_name
             if not causal_file.exists():
@@ -1518,12 +2577,17 @@ def assert_causal_json(subtests, tests_dir, record_subtest_failure, request):
                 for pattern in pass_regex:
                     if not re.search(pattern, validation.stdout):
                         record_subtest_failure(subtest_name)
-                        pytest.fail(f"Pass regex not found: {pattern}\n{output}")
+                        pytest.fail(
+                            f"Pass regex not found: {pattern}\n{output}", pytrace=False
+                        )
 
             if fail_regex:
                 for pattern in fail_regex:
                     if re.search(pattern, validation.stdout):
                         record_subtest_failure(subtest_name)
-                        pytest.fail(f"Fail regex found: {pattern}\n{output}")
+                        pytest.fail(
+                            f"Fail regex found: {pattern}\n{output}", pytrace=False
+                        )
+            _print_subtest_output(request, subtest_name, output)
 
     return _assert_causal_json

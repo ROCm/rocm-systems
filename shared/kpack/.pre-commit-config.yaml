@@ -1,0 +1,43 @@
+# See https://pre-commit.com for more information
+# See https://pre-commit.com/hooks.html for more hooks
+
+exclude: "third_party/"
+
+repos:
+-   repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v3.2.0
+    hooks:
+    -   id: trailing-whitespace
+        exclude: patches/
+    -   id: end-of-file-fixer
+        exclude: patches/
+    -   id: check-yaml
+        exclude: patches/
+    -   id: check-merge-conflict
+        exclude: patches/
+
+    -   id: check-added-large-files
+    -   id: mixed-line-ending
+-   repo: https://github.com/psf/black
+    rev: 22.10.0
+    hooks:
+    -   id: black
+-   repo: https://github.com/pre-commit/mirrors-clang-format
+    rev: 'v18.1.4'
+    hooks:
+    -   id: clang-format
+
+- repo: https://github.com/hukkin/mdformat
+  rev: 0.7.21
+  hooks:
+  - id: mdformat
+    additional_dependencies:
+    - mdformat-gfm
+    - mdformat-black
+    - mdformat-frontmatter
+
+- repo: https://github.com/Lucas-C/pre-commit-hooks
+  rev: v1.5.5
+  hooks:
+  - id: forbid-tabs
+    exclude: ".gitmodules|docs/development/git_chores.md"

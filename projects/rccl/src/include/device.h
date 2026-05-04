@@ -41,7 +41,7 @@
 #include <rocshmem/rocshmem.hpp>
 #endif
 
-extern const char* ncclFuncStr[NCCL_NUM_FUNCTIONS+3];
+extern const char* ncclFuncStr[NCCL_NUM_FUNCTIONS+4];
 
 extern const char* ncclAlgoStr[NCCL_NUM_ALGORITHMS];
 
@@ -96,6 +96,10 @@ struct ncclDevRedOpFull {
   uint64_t scalarArg;
 };
 
+#ifdef __HIP_DEVICE_COMPILE__
+#include "rccl_ptr.h"
+#endif
+
 union ncclLLFifoLine {
   /* Flags have to be *after* data, because otherwise, an incomplete receive
     from the network may receive the flag but not the data.
@@ -109,6 +113,9 @@ union ncclLLFifoLine {
   };
   uint64_t v[2];
   int4 i4;
+#if defined(__HIP_DEVICE_COMPILE__) && RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
+  v4u v4u;  /* same layout as data1,flag1,data2,flag2 for b128 load/store */
+#endif
 };
 
 #if __HIP_DEVICE_COMPILE__
@@ -118,7 +125,7 @@ union ncclLLFifoLine {
   #define WARP_SIZE 32
   #endif
   #if defined (__gfx950__)
-  #define NCCL_MAX_NTHREADS 512
+  #define NCCL_MAX_NTHREADS 256
   #else
   #define NCCL_MAX_NTHREADS 256
   #endif
@@ -159,7 +166,21 @@ union ncclLLFifoLine {
 // Make sure the clean mask will last for at least NCCL_NSTEPS
 static_assert(NCCL_LL_CLEAN_MASK % NCCL_STEPS == 0, "Invalid NCCL_LL_CLEAN_MASK value");
 
+ /* Note regarding LL128 macros settings in RCCL below:
+  * Device code: NCCL_LL128_LINESIZE is arch-dependent (128 for gfx1250, 64 otherwise).
+  * Host code: Must NOT use these macros for logic as they default to 64. Instead use
+  * rcclLL128LineElemsFromArch() / rcclLL128DataElemsFromArch() (archinfo.h) or
+  * comm->ll128LineElems / comm->ll128DataElems (and proxyState->* in the net proxy). */
+
+#if __HIP_DEVICE_COMPILE__
+#if defined (__gfx1250__)
+#define NCCL_LL128_LINESIZE 128
+#else
 #define NCCL_LL128_LINESIZE 64
+#endif
+#else
+#define NCCL_LL128_LINESIZE 64
+#endif
 #define NCCL_LL128_LINEELEMS (NCCL_LL128_LINESIZE/sizeof(uint64_t))
 #define NCCL_LL128_DATAELEMS (NCCL_LL128_LINEELEMS-1)
 
@@ -345,22 +366,33 @@ inline __host__ uint8_t ncclP2pChannelBaseForRound(struct ncclComm* comm, int p2
 
 // ncclP2pChannelToPart and ncclP2pChannelForPart are inverses. The device code
 // uses ncclP2pChannelToPart to determine which part "this" channel is responsible for.
-inline __host__ int ncclP2pChannelForPart(int nP2pChannels, int base, int part, int nParts, int nNodes) {
-  if (nNodes > 2) {
-    // Only works because nP2pChannels is pow2
+inline __host__ int ncclP2pChannelForPart(int nP2pChannels, int base, int part, int nParts, int nNodes, int shiftSize) {
+  if(shiftSize == -1 && nNodes > 2){
+    //use bit-reversal
     int nChannelsLog2 = countOneBits(nP2pChannels-1);
     int delta = reverseBits(part, nChannelsLog2);
     return (base + delta) & (nP2pChannels-1);
+  }
+  else if (nNodes > 2) {
+    //multi-node and shift-size specified -> linear mapping with shiftsize
+    // Only works because nP2pChannels is pow2
+    return (base + ((part + (base>>shiftSize))<<shiftSize)) & (nP2pChannels-1);
   } else {
+    //this is equivalent to lineart mapping with shiftSize but only when nParts is 2
     return (base * nParts + part) & (nP2pChannels-1);
   }
 }
-inline __device__ int ncclP2pChannelToPart(int nP2pChannels, int base, int channel, int nParts, int nNodes) {
-  if (nNodes > 2) {
+inline __device__ int ncclP2pChannelToPart(int nP2pChannels, int base, int channel, int nParts, int nNodes, int shiftSize) {
+  if(shiftSize == -1 && nNodes > 2){
+    //use bit-reversal
     // Only works because nP2pChannels is pow2
     int nChannelsLog2 = countOneBits(nP2pChannels-1);
     int delta = (channel-base) & (nP2pChannels-1);
     return reverseBits(delta, nChannelsLog2);
+  }
+  if (nNodes > 2) {
+    // Only works because nP2pChannels is pow2
+    return (((channel - base) - ((base>>shiftSize)<<shiftSize))>>shiftSize) & ((nP2pChannels >> shiftSize)-1);
   } else {
     return (channel - base * nParts) & (nP2pChannels-1);
   }
@@ -417,6 +449,12 @@ struct alignas(16) ncclDevWorkColl {
   void* tempbuff;
   void* sndbuff;
   int size;
+  int rank;
+  size_t *sizes;
+  size_t *sendSizes;
+  size_t *sendDispls;
+  size_t *recvSizes;
+  size_t *recvDispls;
 #endif
 };
 
@@ -474,7 +512,7 @@ constexpr size_t ncclDevWorkSize(enum ncclDevWorkType type) {
         type == ncclDevWorkTypeColl ? sizeof(ncclDevWorkColl) : sizeof(ncclDevWorkCollReg);
 }
 
-#define NCCL_MAX_DEV_WORK_BATCH_BYTES 128
+#define NCCL_MAX_DEV_WORK_BATCH_BYTES 192
 #define NCCL_MAX_DEV_WORK_BATCH_COLLS (NCCL_MAX_DEV_WORK_BATCH_BYTES/sizeof(ncclDevWorkColl))
 #define NCCL_MAX_DEV_WORK_P2P_PER_BATCH 2
 #define NCCL_MAX_DEV_WORK_P2P_ELEMENTS 2
@@ -609,6 +647,7 @@ struct ncclKernelComm {
   int p2pChunkSize;
   int isAllNvlink;
   int p2pnChannelsPerPeer;
+  int p2pChannelShiftSize; // [RCCL] Modifies how parts are mapped to p2p channels
   int warpLevelComm;
   int* collNetDenseToUserRank;
 
@@ -669,6 +708,7 @@ struct alignas(16) ncclDevKernelArgs {
   enum ncclDevWorkStorageType workStorageType;
   uint32_t workMask;
   void* workBuf;
+  int warpLevelComm;
   // A channel's first batch is at `blockIdx.x`. Use `nextJump` to follow rest of list.
   // struct ncclDevWorkBatch batches[];
 };
@@ -772,7 +812,7 @@ extern void* const ncclDevKernelForFunc[/*funcIndex*/];
 extern bool const ncclDevKernelForFuncIsSpecialized[/*funcIndex*/];
 
 // Launch a one-rank reduction on stream.
-ncclResult_t ncclLaunchOneRank(void* dst, void const* src, size_t nElts, struct ncclDevRedOpFull redOp, ncclDataType_t type, cudaStream_t stream);
+ncclResult_t ncclLaunchOneRank(void* dst, void const* src, size_t nElts, struct ncclDevRedOpFull redOp, ncclDataType_t type, cudaStream_t stream, void const* acc = nullptr);
 
 // `ncclNvlsSupported()` needs to be in sync with "func_valid" in "src/device/generate.py"
 inline bool ncclNvlsSupported(int devRedOp, int type) {
@@ -805,7 +845,7 @@ inline int ncclDevFuncId(int coll, int devRedOp, int type, int algo, int proto, 
   if (coll == ncclFuncBroadcast) {
     key = ((uint64_t)(coll     & RCCL_FUNC_ID_MASK) << RCCL_COLL_SHIFT ) |
           ((uint64_t)(proto    & RCCL_FUNC_ID_MASK) << RCCL_PROTO_SHIFT);
-  } else if (coll == ncclFuncSendRecv || coll == ncclFuncAlltoAllPivot || coll == ncclFuncAllToAllGda) {
+  } else if (coll == ncclFuncSendRecv || coll == ncclFuncAlltoAllPivot || coll == ncclFuncAlltoAllGda || coll == ncclFuncAlltoAllvGda) {
     key = ((uint64_t)(coll     & RCCL_FUNC_ID_MASK) << RCCL_COLL_SHIFT );
   } else {
     key = ((uint64_t)(coll     & RCCL_FUNC_ID_MASK) << RCCL_COLL_SHIFT ) |

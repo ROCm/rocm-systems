@@ -1,21 +1,9 @@
 /*
-Copyright (c) 2024 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANNTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER INN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR INN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
 #include <hip_test_common.hh>
 #include <hip_test_defgroups.hh>
 #include <fstream>
@@ -111,29 +99,7 @@ bool testCodeObjFile(const char* codeObjFile) {
   return btestPassed;
 }
 
-#ifdef __linux__
-// Check if environment variable $ROCM_PATH is defined
-bool isRocmPathSet() {
-  FILE* fpipe;
-  char const* command = "echo $ROCM_PATH";
-  fpipe = popen(command, "r");
 
-  if (fpipe == nullptr) {
-    INFO("Unable to create command\n");
-    return false;
-  }
-  char command_op[COMMAND_LEN];
-  if (fgets(command_op, COMMAND_LEN, fpipe)) {
-    size_t len = strlen(command_op);
-    if (len > 1) {  // This is because fgets always adds newline character
-      pclose(fpipe);
-      return true;
-    }
-  }
-  pclose(fpipe);
-  return false;
-}
-#endif
 
 bool testMultiTargArchCodeObj() {
   bool btestPassed = true;
@@ -158,19 +124,16 @@ bool testMultiTargArchCodeObj() {
     return true;
   }
   // Generate the command to generate multi architecture code object file
-  const char* hipcc_path = nullptr;
-  if (isRocmPathSet()) {
-    hipcc_path = "$ROCM_PATH/bin/hipcc";
-  } else {
-    hipcc_path = "/opt/rocm/bin/hipcc";
-  }
-  /* Putting these command parameters into a variable to shorten the string
-    literal length in order to avoid multiline string literal cpplint warning
-  */
+  // Use hipcc path derived from hip-config.cmake via compile definition
+#ifdef HIP_HIPCC_EXECUTABLE
+  const char* hipcc_cmd = HIP_HIPCC_EXECUTABLE;
+#else
+  const char* hipcc_cmd = "hipcc";
+#endif
   const char* genco_option = "--offload-arch";
   const char* input_codeobj = "/tmp/vcpy_kernel.cpp";
-  const char* rocm_enumerator = "${ROCM_PATH}/bin/rocm_agent_enumerator";
-  snprintf(command, COMMAND_LEN, rocm_enumerator, hipcc_path, genco_option, props.gcnArchName,
+  snprintf(command, COMMAND_LEN, "%s %s=%s %s -o %s --genco",
+           hipcc_cmd, genco_option, props.gcnArchName,
            input_codeobj, CODE_OBJ_MULTIARCH);
 
   system((const char*)command);
@@ -182,19 +145,21 @@ bool testMultiTargArchCodeObj() {
     return true;
   }
   btestPassed = testCodeObjFile(CODE_OBJ_MULTIARCH);
-#else
-  INFO("This test is skipped due to non linux environment.\n");
 #endif
   return btestPassed;
 }
 
-TEST_CASE("Unit_hipModule_Functional") {
+HIP_TEST_CASE(Unit_hipModule_Functional) {
   bool TestPassed = true;
   SECTION("Code object file test on current GPU") {
     TestPassed &= testCodeObjFile(CODE_OBJ_SINGLEARCH);
     REQUIRE(TestPassed == true);
   }
   SECTION("Code object file test on multiple GPUs") {
+#ifndef __linux__
+    WARN("Skipping section: " << HipTest::SkipReason::kRequiresLinux);
+    return;
+#endif
     TestPassed &= testMultiTargArchCodeObj();
     REQUIRE(TestPassed == true);
   }

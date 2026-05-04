@@ -1,22 +1,8 @@
-/* Copyright (c) 2015 - 2022 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include <hip/hip_runtime.h>
 #include "hip_event.hpp"
@@ -51,7 +37,7 @@ bool EventDD::ready() {
 
 // ================================================================================================
 hipError_t Event::query() {
-  amd::ScopedLock lock(lock_);
+  std::scoped_lock lock(lock_);
 
   // If event is not recorded, event_ is null, hence return hipSuccess
   if (event_ == nullptr) {
@@ -63,7 +49,7 @@ hipError_t Event::query() {
 
 // ================================================================================================
 hipError_t Event::synchronize() {
-  amd::ScopedLock lock(lock_);
+  std::scoped_lock lock(lock_);
 
   // If event is not recorded, event_ is null, hence return hipSuccess
   if (event_ == nullptr) {
@@ -95,7 +81,7 @@ bool EventDD::awaitEventCompletion() {
 
 // ================================================================================================
 hipError_t Event::elapsedTime(Event& eStop, float& ms) {
-  amd::ScopedLock startLock(lock_);
+  std::scoped_lock startLock(lock_);
 
   // Handle same event case
   if (this == &eStop) {
@@ -106,7 +92,7 @@ hipError_t Event::elapsedTime(Event& eStop, float& ms) {
     return ready() ? hipSuccess : hipErrorNotReady;
   }
 
-  amd::ScopedLock stopLock(eStop.lock());
+  std::scoped_lock stopLock(eStop.lock());
 
   // Validate events
   if (event_ == nullptr || eStop.event() == nullptr) {
@@ -176,7 +162,7 @@ hipError_t Event::streamWaitCommand(amd::Command*& command, hip::Stream* stream)
 }
 // ================================================================================================
 hipError_t Event::streamWait(hip::Stream* stream, uint flags) {
-  amd::ScopedLock lock(lock_);
+  std::scoped_lock lock(lock_);
 
   // Early return if event is not recorded, same stream, or already ready
   if ((event_ == nullptr) || (event_->command().queue() == stream) || ready()) {
@@ -239,7 +225,7 @@ hipError_t Event::enqueueRecordCommand(hip::Stream* stream, amd::Command* comman
 // ================================================================================================
 hipError_t Event::addMarker(hip::Stream* hip_stream, amd::Command* command, bool batch_flush) {
   // Keep the lock always at the beginning of this to avoid a race. SWDEV-277847
-  amd::ScopedLock lock(lock_);
+  std::scoped_lock lock(lock_);
   if (const auto status = recordCommand(command, hip_stream, 0, batch_flush);
       status != hipSuccess) {
     return status;

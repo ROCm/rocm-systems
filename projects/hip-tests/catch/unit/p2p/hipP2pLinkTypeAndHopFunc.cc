@@ -1,21 +1,8 @@
 /*
-Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include "hipP2pLinkTypeAndHopFunc.h"
 #include <hip_test_kernels.hh>
@@ -208,7 +195,13 @@ bool testhipLinkTypeHopcountDevice(int numDevices) {
   rsmi_status_t (*fntopo_init)(uint64_t);
   rsmi_status_t (*fntopo_shut_down)();
 
-  lib_rocm_smi_hdl = dlopen("/opt/rocm/lib/librocm_smi64.so", RTLD_LAZY);
+  // Use ROCM_SMI_LIB_DIR from CMake instead of hardcoding to /opt/rocm
+#ifdef ROCM_SMI_LIB_DIR
+  std::string rocm_smi_path = std::string(ROCM_SMI_LIB_DIR) + "/librocm_smi64.so";
+#else
+  std::string rocm_smi_path = "librocm_smi64.so";
+#endif
+  lib_rocm_smi_hdl = dlopen(rocm_smi_path.c_str(), RTLD_LAZY);
   REQUIRE(lib_rocm_smi_hdl);
 
   void* fnsym = dlsym(lib_rocm_smi_hdl, "rsmi_topo_get_link_type");
@@ -297,12 +290,12 @@ bool testhipLinkTypeHopcountDevice(int numDevices) {
  *    - HIP_VERSION >= 5.5
  */
 
-TEST_CASE("Unit_hipP2pLinkTypeAndHopFunc") {
+HIP_TEST_CASE(Unit_hipP2pLinkTypeAndHopFunc) {
   int numDevices = 0;
   bool TestPassed = true;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
   if (numDevices < 2) {
-    HipTest::HIP_SKIP_TEST("Skipping because devices < 2");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
     return;
   }
   SECTION("Test running for testhipInvalidDevice") {
@@ -312,7 +305,7 @@ TEST_CASE("Unit_hipP2pLinkTypeAndHopFunc") {
 #ifdef __linux__
   getDeviceCount(&numDevices);
   if (numDevices < 2) {
-    HipTest::HIP_SKIP_TEST("Skipping because devices < 2");
+    WARN("Skipping Linux-only P2P sections: " << HipTest::SkipReason::kFewerThanTwoGpus);
     return;
   }
   SECTION("Test running for testMaskedDevice") {
@@ -340,7 +333,7 @@ TEST_CASE("Unit_hipP2pLinkTypeAndHopFunc") {
     REQUIRE(TestPassed == true);
   }
 #else
-  printf("This test is skipped due to non linux environment.\n");
+  WARN("Skipping Linux-only P2P link scenarios: " << HipTest::SkipReason::kRequiresLinux);
 #endif
 }
 

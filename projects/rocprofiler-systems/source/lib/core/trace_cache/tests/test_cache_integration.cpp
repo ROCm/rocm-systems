@@ -1,24 +1,5 @@
-// MIT License
-//
-// Copyright (c) 2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "mocked_types.hpp"
 
@@ -31,7 +12,6 @@
 #include <memory>
 #include <random>
 #include <string>
-#include <string_view>
 #include <thread>
 #include <unordered_map>
 #include <vector>
@@ -90,6 +70,18 @@ struct sample_4_hash
     }
 };
 
+struct sample_5_hash
+{
+    size_t operator()(const test_sample_5& s) const
+    {
+        if(s.data.has_value())
+        {
+            return std::hash<uint32_t>{}(s.data.value()) ^ 0x1;
+        }
+        return 0;
+    }
+};
+
 }  // namespace
 
 class integration_sample_processor_t
@@ -137,6 +129,16 @@ public:
         }
     }
 
+    void set_expected_samples_5(const std::vector<test_sample_5>& samples)
+    {
+        std::lock_guard<std::mutex> lock(m_data_mutex);
+        m_expected_samples_5.clear();
+        for(const auto& s : samples)
+        {
+            m_expected_samples_5[s]++;
+        }
+    }
+
     void execute_sample_processing(test_type_identifier_t type_identifier,
                                    const rocprofsys::trace_cache::cacheable_t& value)
     {
@@ -174,6 +176,14 @@ public:
                 check_sample_4(sample);
                 break;
             }
+            case test_type_identifier_t::sample_type_5:
+            {
+                const auto& sample = static_cast<const test_sample_5&>(value);
+                std::lock_guard<std::mutex> lock(m_data_mutex);
+                m_sample_5_count++;
+                check_sample_5(sample);
+                break;
+            }
             default: break;
         }
     }
@@ -182,11 +192,13 @@ public:
     int  get_sample_2_count() const { return m_sample_2_count.load(); }
     int  get_sample_3_count() const { return m_sample_3_count.load(); }
     int  get_sample_4_count() const { return m_sample_4_count.load(); }
+    int  get_sample_5_count() const { return m_sample_5_count.load(); }
     bool all_expected_samples_found() const
     {
         std::lock_guard<std::mutex> lock(m_data_mutex);
         return m_expected_samples_1.empty() && m_expected_samples_2.empty() &&
-               m_expected_samples_3.empty() && m_expected_samples_4.empty();
+               m_expected_samples_3.empty() && m_expected_samples_4.empty() &&
+               m_expected_samples_5.empty();
     }
 
 private:
@@ -246,14 +258,30 @@ private:
         }
     }
 
+    void check_sample_5(const test_sample_5& sample)
+    {
+        auto it = m_expected_samples_5.find(sample);
+        EXPECT_NE(it, m_expected_samples_5.end());
+        if(it != m_expected_samples_5.end())
+        {
+            it->second--;
+            if(it->second == 0)
+            {
+                m_expected_samples_5.erase(it);
+            }
+        }
+    }
+
     std::atomic<int>                                      m_sample_1_count{ 0 };
     std::atomic<int>                                      m_sample_2_count{ 0 };
     std::atomic<int>                                      m_sample_3_count{ 0 };
     std::atomic<int>                                      m_sample_4_count{ 0 };
+    std::atomic<int>                                      m_sample_5_count{ 0 };
     std::unordered_map<test_sample_1, int, sample_1_hash> m_expected_samples_1;
     std::unordered_map<test_sample_2, int, sample_2_hash> m_expected_samples_2;
     std::unordered_map<test_sample_3, int, sample_3_hash> m_expected_samples_3;
     std::unordered_map<test_sample_4, int, sample_4_hash> m_expected_samples_4;
+    std::unordered_map<test_sample_5, int, sample_5_hash> m_expected_samples_5;
     mutable std::mutex                                    m_data_mutex;
 };
 
@@ -356,8 +384,7 @@ TEST_F(trace_cache_module_integration_test, content_validation_edge_cases)
     std::vector<uint8_t> max_vector(10000, 0xFF);
     test_sample_3        large_payload(max_vector);
     test_sample_3        empty_payload;
-    std::vector<uint8_t> single_zero = { 0x00 };
-    test_sample_3        zero_payload(single_zero);
+    test_sample_3        zero_payload({ 0x00 });
 
     std::vector<test_sample_1> expected_1;
     std::vector<test_sample_2> expected_2;
@@ -692,5 +719,49 @@ TEST_F(trace_cache_module_integration_test, mixed_vector_element_sizes)
 
     EXPECT_EQ(processor->get_sample_3_count(), 50);
     EXPECT_EQ(processor->get_sample_4_count(), 50);
+    EXPECT_TRUE(processor->all_expected_samples_found());
+}
+
+TEST_F(trace_cache_module_integration_test, optional_field_roundtrip)
+{
+    std::string text_1 = "optional_test";
+
+    test_sample_1 sample1(42, text_1);
+    test_sample_5 sample5_with_value(std::optional<uint32_t>{ 12345 });
+    test_sample_5 sample5_nullopt(std::nullopt);
+    test_sample_2 sample2(2.71828, 999);
+
+    std::vector<test_sample_1> expected_1 = { sample1 };
+    std::vector<test_sample_2> expected_2 = { sample2 };
+    std::vector<test_sample_5> expected_5 = { sample5_with_value, sample5_nullopt };
+
+    {
+        rocprofsys::trace_cache::buffer_storage<
+            rocprofsys::trace_cache::flush_worker_factory_t, test_type_identifier_t>
+            storage(test_file_path);
+        storage.start();
+
+        storage.store(sample1);
+        storage.store(sample5_with_value);
+        storage.store(sample5_nullopt);
+        storage.store(sample2);
+
+        storage.shutdown();
+    }
+
+    auto processor = std::make_shared<integration_sample_processor_t>();
+    processor->set_expected_samples_1(expected_1);
+    processor->set_expected_samples_2(expected_2);
+    processor->set_expected_samples_5(expected_5);
+
+    rocprofsys::trace_cache::storage_parser<test_type_identifier_t, test_sample_1,
+                                            test_sample_2, test_sample_3, test_sample_4,
+                                            test_sample_5>
+        parser(test_file_path);
+    parser.load(processor);
+
+    EXPECT_EQ(processor->get_sample_1_count(), 1);
+    EXPECT_EQ(processor->get_sample_2_count(), 1);
+    EXPECT_EQ(processor->get_sample_5_count(), 2);
     EXPECT_TRUE(processor->all_expected_samples_found());
 }

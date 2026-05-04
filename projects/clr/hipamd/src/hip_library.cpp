@@ -1,24 +1,8 @@
 /*
-Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANNTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER INN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR INN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include <filesystem>
 #include <mutex>
@@ -31,13 +15,13 @@ THE SOFTWARE.
 #include "utils/debug.hpp"
 
 namespace hip {
-void LibraryContainer::Register(std::string name, int device, hipKernel_t k) {
+void LibraryContainer::Register(const std::string &name, int device, hipKernel_t k) {
   std::scoped_lock<std::mutex> lock(lib_mutex_);
   auto key = std::make_pair(name, device);
   if (kernels_.find(key) == kernels_.end()) {
     kernels_.insert(std::make_pair(std::make_pair(name, device), k));
     auto lib = reinterpret_cast<hipLibrary_t>(this);
-    if (!hip::PlatformState::instance().RegisterLibraryFunction(k, lib)) {
+    if (!hip::PlatformState::Instance().RegisterLibraryFunction(k, lib)) {
       LogPrintfInfo("Already registered: %p", k);
     }
   }
@@ -69,7 +53,7 @@ hipError_t LibraryContainer::EnumerateKernels(hipKernel_t* k, unsigned int maxKe
     if (auto ki = kernels_.find(std::make_pair(f.first, device_id)); ki!= kernels_.end()) {
       kern = ki->second;
     } else {
-      auto ret = f.second.get()->getDynFunc(reinterpret_cast<hipFunction_t*>(&kern), m);
+      auto ret = f.second.get()->GetDynFunc(reinterpret_cast<hipFunction_t*>(&kern), m);
       if (ret != hipSuccess) {
         return ret;
       }
@@ -80,7 +64,7 @@ hipError_t LibraryContainer::EnumerateKernels(hipKernel_t* k, unsigned int maxKe
   return hipSuccess;
 }
 
-hipError_t LibraryContainer::Kernel(hipKernel_t* k, std::string name) {
+hipError_t LibraryContainer::Kernel(hipKernel_t* k, const std::string &name) {
   auto device_id = hip::ihipGetDevice();
   if (auto ki = kernels_.find(std::make_pair(name, device_id)); ki != kernels_.end()) {
     *k = ki->second;
@@ -91,7 +75,7 @@ hipError_t LibraryContainer::Kernel(hipKernel_t* k, std::string name) {
   if (f == functions_.end()) {
     return hipErrorNotFound;
   }
-  auto ret = f->second.get()->getDynFunc(reinterpret_cast<hipFunction_t*>(k), m);
+  auto ret = f->second.get()->GetDynFunc(reinterpret_cast<hipFunction_t*>(k), m);
   if (ret != hipSuccess) {
     return ret;
   }
@@ -104,13 +88,13 @@ LibraryContainer::LibraryContainer(const char* code_object) {
   fatbin_ = std::make_shared<hip::FatBinaryInfo>(nullptr, code_object);
 }
 
-LibraryContainer::LibraryContainer(const std::string file_name) {
+LibraryContainer::LibraryContainer(const std::string &file_name) {
   fatbin_ = std::make_shared<hip::FatBinaryInfo>(file_name.c_str(), nullptr);
 }
 
 LibraryContainer::~LibraryContainer() {
   for (const auto& k : kernels_) {
-    (void)hip::PlatformState::instance().UnregisterLibraryFunction(k.second);
+    (void)hip::PlatformState::Instance().UnregisterLibraryFunction(k.second);
   }
   kernels_.clear();
 }
@@ -140,7 +124,7 @@ hipError_t LibraryContainer::BuildIt() {
   // Process Functions and create kernel handles
   std::vector<std::string> function_names;
   program->getGlobalFuncFromCodeObj(&function_names);
-  for (auto& name : function_names) {
+  for (const auto& name : function_names) {
     functions_.emplace(std::make_pair(name, std::make_shared<hip::Function>(name)));
   }
 
@@ -246,7 +230,7 @@ hipError_t hipKernelGetLibrary(hipLibrary_t* library, hipKernel_t kernel) {
     HIP_RETURN(hipErrorInvalidValue);
   }
 
-  if (!hip::PlatformState::instance().GetFunctionLibrary(kernel, library)) {
+  if (!hip::PlatformState::Instance().GetFunctionLibrary(kernel, library)) {
     HIP_RETURN(hipErrorInvalidHandle);
   }
 
@@ -260,7 +244,7 @@ hipError_t hipKernelGetName(const char** name, hipKernel_t kernel) {
   }
 
   hipLibrary_t library;
-  if (!hip::PlatformState::instance().GetFunctionLibrary(kernel, &library)) {
+  if (!hip::PlatformState::Instance().GetFunctionLibrary(kernel, &library)) {
     HIP_RETURN(hipErrorInvalidHandle);
   }
 
@@ -276,11 +260,7 @@ hipError_t hipKernelGetParamInfo(hipKernel_t kernel, size_t paramIndex, size_t* 
   if (kernel == nullptr || paramOffset == nullptr) {
     HIP_RETURN(hipErrorInvalidValue);
   }
-  const auto* const d_function = hip::DeviceFunc::asFunction(reinterpret_cast<hipFunction_t>(kernel));
-  if (d_function == nullptr) {
-    HIP_RETURN(hipErrorInvalidHandle);
-  }
-  const auto* const d_kernel = d_function->kernel();
+  const auto* const d_kernel = hip::asKernel(reinterpret_cast<hipFunction_t>(kernel));
   if (d_kernel == nullptr) {
     HIP_RETURN(hipErrorInvalidDeviceFunction);
   }
@@ -296,4 +276,140 @@ hipError_t hipKernelGetParamInfo(hipKernel_t kernel, size_t paramIndex, size_t* 
   HIP_RETURN(hipSuccess);
 }
 
+hipError_t hipKernelGetAttribute(int* pi, hipFunction_attribute attrib, hipKernel_t kernel,
+                                 hipDevice_t dev) {
+  HIP_INIT_API(hipKernelGetAttribute, pi, attrib, kernel, dev);
+  if (pi == nullptr) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+
+  const auto* const d_kernel = hip::asKernel(kernel);
+  if (d_kernel == nullptr) {
+    HIP_RETURN(hipErrorInvalidHandle);
+  }
+
+  auto* currentDevice = hip::getCurrentDevice();
+  const auto& devices = currentDevice->devices();
+  if (dev < 0 || static_cast<size_t>(dev) >= devices.size()) {
+    HIP_RETURN(hipErrorInvalidDevice);
+  }
+  const auto& device = *devices[dev];
+
+  auto* dev_kernel = d_kernel->getDeviceKernel(device);
+  if (dev_kernel == nullptr) {
+    HIP_RETURN(hipErrorMissingConfiguration);
+  }
+  const auto* wrkGrpInfoPtr = dev_kernel->workGroupInfo();
+  if (wrkGrpInfoPtr == nullptr) {
+    HIP_RETURN(hipErrorMissingConfiguration);
+  }
+  const auto& wrkGrpInfo = *wrkGrpInfoPtr;
+
+  switch (attrib) {
+    case HIP_FUNC_ATTRIBUTE_MAX_THREADS_PER_BLOCK:
+      *pi = static_cast<int>(wrkGrpInfo.size_);
+      break;
+    case HIP_FUNC_ATTRIBUTE_SHARED_SIZE_BYTES:
+      *pi = static_cast<int>(wrkGrpInfo.localMemSize_);
+      break;
+    case HIP_FUNC_ATTRIBUTE_CONST_SIZE_BYTES:
+      *pi = static_cast<int>(wrkGrpInfo.constMemSize_ - 1);
+      break;
+    case HIP_FUNC_ATTRIBUTE_LOCAL_SIZE_BYTES:
+      *pi = static_cast<int>(wrkGrpInfo.privateMemSize_);
+      break;
+    case HIP_FUNC_ATTRIBUTE_NUM_REGS:
+      *pi = static_cast<int>(wrkGrpInfo.usedVGPRs_);
+      break;
+    case HIP_FUNC_ATTRIBUTE_PTX_VERSION:
+    case HIP_FUNC_ATTRIBUTE_BINARY_VERSION:
+      *pi = device.isa().versionMajor() * 10 + device.isa().versionMinor();
+      break;
+    case HIP_FUNC_ATTRIBUTE_CACHE_MODE_CA:
+      *pi = 0;
+      break;
+    case HIP_FUNC_ATTRIBUTE_PREFERRED_SHARED_MEMORY_CARVEOUT:
+      *pi = 0;
+      break;
+    case HIP_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES: {
+      int maxDynamicSharedSizeBytes = static_cast<int>(wrkGrpInfo.maxDynamicSharedSizeBytes_);
+      const int alignmentSize = device.isa().ldsAlignment();
+      *pi = amd::alignDown(maxDynamicSharedSizeBytes, alignmentSize);
+      break;
+    }
+    default:
+      HIP_RETURN(hipErrorInvalidValue);
+  }
+
+  HIP_RETURN(hipSuccess);
+}
+
+hipError_t hipKernelSetAttribute(hipFunction_attribute attrib, int value, hipKernel_t kernel,
+                                 hipDevice_t dev) {
+  HIP_INIT_API(hipKernelSetAttribute, attrib, value, kernel, dev);
+
+  if (kernel == nullptr) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+
+  amd::Kernel* d_kernel = hip::asKernel(kernel);
+  if (d_kernel == nullptr) {
+    HIP_RETURN(hipErrorInvalidDeviceFunction);
+  }
+
+  auto* currentDevice = hip::getCurrentDevice();
+  const auto& devices = currentDevice->devices();
+  if (dev < 0 || static_cast<size_t>(dev) >= devices.size()) {
+    HIP_RETURN(hipErrorInvalidDevice);
+  }
+
+  device::Kernel* deviceKernel = const_cast<device::Kernel*>(
+      d_kernel->getDeviceKernel(*devices[dev]));
+  if (deviceKernel == nullptr) {
+    HIP_RETURN(hipErrorMissingConfiguration);
+  }
+
+  device::Kernel::WorkGroupInfo* wrkGrpInfo = deviceKernel->workGroupInfo();
+
+  if (wrkGrpInfo == nullptr) {
+    HIP_RETURN(hipErrorMissingConfiguration);
+  }
+
+  switch (attrib) {
+    case HIP_FUNC_ATTRIBUTE_MAX_THREADS_PER_BLOCK:
+    case HIP_FUNC_ATTRIBUTE_SHARED_SIZE_BYTES:
+    case HIP_FUNC_ATTRIBUTE_CONST_SIZE_BYTES:
+    case HIP_FUNC_ATTRIBUTE_LOCAL_SIZE_BYTES:
+    case HIP_FUNC_ATTRIBUTE_NUM_REGS:
+    case HIP_FUNC_ATTRIBUTE_CACHE_MODE_CA:
+    case HIP_FUNC_ATTRIBUTE_PTX_VERSION:
+    case HIP_FUNC_ATTRIBUTE_BINARY_VERSION:
+      HIP_RETURN(hipErrorInvalidValue);
+      break;
+    case HIP_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES:
+      if ((value < 0) || (value > (wrkGrpInfo->availableLDSSize_ - wrkGrpInfo->localMemSize_))) {
+        HIP_RETURN(hipErrorInvalidValue);
+      }
+      wrkGrpInfo->maxDynamicSharedSizeBytes_ = value;
+      break;
+    case HIP_FUNC_ATTRIBUTE_PREFERRED_SHARED_MEMORY_CARVEOUT:
+      break;
+    default:
+      HIP_RETURN(hipErrorInvalidValue);
+  }
+
+  HIP_RETURN(hipSuccess);
+}
+
+hipError_t hipKernelGetFunction(hipFunction_t* pFunc, hipKernel_t kernel) {
+  HIP_INIT_API(hipKernelGetFunction, pFunc, kernel);
+
+  if (pFunc == nullptr || kernel == nullptr) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+
+  *pFunc = reinterpret_cast<hipFunction_t>(kernel);
+
+  HIP_RETURN(hipSuccess);
+}
 }  // namespace hip

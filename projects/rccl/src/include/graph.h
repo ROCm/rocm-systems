@@ -44,7 +44,7 @@ enum ncclTopoGdrMode {
   ncclTopoGdrModeNum = 3
 };
 ncclResult_t ncclTopoCheckGdr(struct ncclTopoSystem* topo, int rank, int64_t netId, int read, enum ncclTopoGdrMode* gdrMode);
-ncclResult_t ncclTopoNeedFlush(struct ncclComm* comm, int64_t netId, int netDev, int rank, int* flush);
+ncclResult_t ncclTopoNeedFlush(struct ncclComm* comm, int64_t netId, int netDev, int rank, bool netManaged, int* flush);
 ncclResult_t ncclTopoIsGdrAvail(struct ncclTopoSystem* system, int rank, bool *avail);
 ncclResult_t ncclTopoCheckNet(struct ncclTopoSystem* system, int rank1, int rank2, int* net);
 int ncclPxnDisable(struct ncclComm* comm);
@@ -137,7 +137,7 @@ struct ncclTopoRanks {
   int nvlsHeadNum;
 };
 
-ncclResult_t ncclTopoPreset(struct ncclComm* comm, struct ncclTopoGraph** graphs, struct ncclTopoRanks* topoRanks);
+ncclResult_t ncclTopoPreset(struct ncclComm* comm, struct ncclTopoGraph* (&graphs)[NCCL_NUM_ALGORITHMS], struct ncclTopoRanks* topoRanks);
 
 ncclResult_t ncclTopoPostset(struct ncclComm* comm, int* firstRanks, int* treePatterns,
     struct ncclTopoRanks** allTopoRanks, int* rings, struct ncclTopoGraph** graphs, struct ncclComm* parent, int nc);

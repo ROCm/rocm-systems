@@ -1,3 +1,6 @@
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
 # ======================================================================================
 # elfutils.cmake
 #
@@ -7,14 +10,14 @@
 #
 # Accepts the following CMake variables
 #
-# ElfUtils_ROOT_DIR       - Base directory the of elfutils installation
+# ElfUtils_ROOT_DIR       - Base directory of the elfutils installation
 # ElfUtils_INCLUDEDIR     - Hint directory that contains the elfutils headers files
 # ElfUtils_LIBRARYDIR     - Hint directory that contains the elfutils library files
 # ElfUtils_MIN_VERSION    - Minimum acceptable version of elfutils
 #
 # Directly exports the following CMake variables
 #
-# ElfUtils_ROOT_DIR       - Computed base directory the of elfutils installation
+# ElfUtils_ROOT_DIR       - Computed base directory of the elfutils installation
 # ElfUtils_INCLUDE_DIRS   - elfutils include directories ElfUtils_LIBRARY_DIRS - Link
 # directories for elfutils libraries ElfUtils_LIBRARIES      - elfutils library files
 #
@@ -58,8 +61,8 @@ endif()
 
 # -------------- PATHS --------------------------------------------------------
 
-# Base directory the of elfutils installation
-set(ElfUtils_ROOT_DIR "/usr" CACHE PATH "Base directory the of elfutils installation")
+# Base directory of the elfutils installation
+set(ElfUtils_ROOT_DIR "/usr" CACHE PATH "Base directory of the elfutils installation")
 
 # Hint directory that contains the elfutils headers files
 set(ElfUtils_INCLUDEDIR
@@ -174,6 +177,27 @@ else()
     file(MAKE_DIRECTORY "${_eu_root}/lib")
     file(MAKE_DIRECTORY "${_eu_root}/include")
 
+    # Backport elfutils commit 7508696d (released in 0.192) to fix GCC 15
+    # -Werror=unterminated-string-initialization in the i386/x86_64 register
+    # tables. Only applied to versions older than 0.192 where the upstream
+    # fix is missing. The patch invocation is wrapped in
+    # apply_patch_idempotent.cmake because CMake regenerates
+    # *-patch-info.txt on every reconfigure, retriggering the patch step
+    # against already-patched source - vanilla `patch` aborts in that case.
+    set(_eu_patch_args)
+    if(ELFUTILS_DOWNLOAD_VERSION VERSION_LESS 0.192)
+        find_program(PATCH_EXECUTABLE NAMES patch REQUIRED)
+        set(_eu_patch_args
+            PATCH_COMMAND
+            ${CMAKE_COMMAND}
+            -DSRC=<SOURCE_DIR>
+            -DPATCH=${CMAKE_CURRENT_LIST_DIR}/elfutils-0.188-gcc15-regs.patch
+            -DPATCH_EXE=${PATCH_EXECUTABLE}
+            -P
+            ${CMAKE_CURRENT_LIST_DIR}/apply_patch_idempotent.cmake
+        )
+    endif()
+
     include(ExternalProject)
     ExternalProject_Add(
         rocprofiler-systems-elfutils-build
@@ -183,6 +207,7 @@ else()
             "https://sourceware.org/elfutils/ftp/${ELFUTILS_DOWNLOAD_VERSION}/elfutils-${ELFUTILS_DOWNLOAD_VERSION}.tar.bz2"
             "https://mirrors.kernel.org/sourceware/elfutils/${ELFUTILS_DOWNLOAD_VERSION}/elfutils-${ELFUTILS_DOWNLOAD_VERSION}.tar.bz2"
         BUILD_IN_SOURCE 1
+        ${_eu_patch_args}
         CONFIGURE_COMMAND
             ${CMAKE_COMMAND} -E env CC=${CMAKE_C_COMPILER} CFLAGS=-fPIC\ -O3
             CXX=${CMAKE_CXX_COMPILER} CXXFLAGS=-fPIC\ -O3
@@ -216,7 +241,7 @@ endif()
 set(ElfUtils_ROOT_DIR
     ${_eu_root}
     CACHE PATH
-    "Base directory the of elfutils installation"
+    "Base directory of the elfutils installation"
     FORCE
 )
 set(ElfUtils_INCLUDE_DIRS ${_eu_inc_dirs} CACHE PATH "elfutils include directory" FORCE)
@@ -241,3 +266,72 @@ target_link_libraries(rocprofiler-systems-elfutils INTERFACE ${ElfUtils_LIBRARIE
 rocprofiler_systems_message(STATUS "ElfUtils includes: ${ElfUtils_INCLUDE_DIRS}")
 rocprofiler_systems_message(STATUS "ElfUtils library dirs: ${ElfUtils_LIBRARY_DIRS}")
 rocprofiler_systems_message(STATUS "ElfUtils libraries: ${ElfUtils_LIBRARIES}")
+
+# --------------------------------------------------------------------------------------#
+# Create standard Elfutils::Elfutils target for system packages only
+# --------------------------------------------------------------------------------------#
+# When using system packages, create a combined target (libelf + libdw) that Dyninst's
+# find_package(Elfutils) can discover. For bundled builds, we skip this - Dyninst will
+# use Dyninst::ElfUtils (created below) instead.
+
+if(NOT TARGET Elfutils::Elfutils AND NOT ROCPROFSYS_BUILD_ELFUTILS)
+    # System package - create imported target from found LibElf/LibDwarf
+    rocprofiler_systems_message(
+        STATUS
+            "Creating Elfutils::Elfutils target from system LibElf/LibDwarf (target not provided by package)"
+    )
+
+    # Set ElfUtils_ROOT_DIR for Dyninst's find_package(Elfutils) to use as a hint
+    set(ElfUtils_ROOT_DIR
+        "${ElfUtils_ROOT_DIR}"
+        CACHE PATH
+        "ElfUtils root directory for Dyninst"
+        FORCE
+    )
+
+    add_library(Elfutils::Elfutils INTERFACE IMPORTED)
+
+    # Link to the individual LibElf and LibDwarf targets
+    if(TARGET LibElf::LibElf AND TARGET LibDwarf::LibDwarf)
+        target_link_libraries(
+            Elfutils::Elfutils
+            INTERFACE LibElf::LibElf LibDwarf::LibDwarf
+        )
+        if(ENABLE_DEBUGINFOD AND TARGET LibDebuginfod::LibDebuginfod)
+            target_link_libraries(
+                Elfutils::Elfutils
+                INTERFACE LibDebuginfod::LibDebuginfod
+            )
+        endif()
+    else()
+        # Fallback: use raw libraries and include dirs
+        set_target_properties(
+            Elfutils::Elfutils
+            PROPERTIES
+                INTERFACE_LINK_LIBRARIES "${_eu_libs}"
+                INTERFACE_INCLUDE_DIRECTORIES "${_eu_inc_dirs}"
+        )
+        if(_eu_lib_dirs)
+            set_target_properties(
+                Elfutils::Elfutils
+                PROPERTIES INTERFACE_LINK_DIRECTORIES "${_eu_lib_dirs}"
+            )
+        endif()
+    endif()
+endif()
+
+# --------------------------------------------------------------------------------------#
+# Create Dyninst::ElfUtils target if building from source
+# --------------------------------------------------------------------------------------#
+# When ElfUtils is built from source, Dyninst's find_package(Elfutils) would fail because
+# the bundled ElfUtils isn't installed in standard locations. Creating this target causes
+# Dyninst to skip find_package(Elfutils) and use the bundled dependency instead.
+
+if(ROCPROFSYS_BUILD_ELFUTILS AND NOT TARGET Dyninst::ElfUtils)
+    add_library(Dyninst::ElfUtils INTERFACE IMPORTED)
+    target_link_libraries(Dyninst::ElfUtils INTERFACE ${_eu_libs})
+    target_include_directories(Dyninst::ElfUtils SYSTEM INTERFACE ${_eu_inc_dirs})
+    if(_eu_lib_dirs)
+        target_link_directories(Dyninst::ElfUtils INTERFACE ${_eu_lib_dirs})
+    endif()
+endif()

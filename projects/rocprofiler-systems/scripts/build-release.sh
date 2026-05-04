@@ -42,10 +42,8 @@
 : ${MPI_IMPL:="openmpi"}
 : ${CLEAN:=0}
 : ${FRESH:=0}
-: ${WITH_CORE:=0}
+: ${WITH_BASE:=0}
 : ${WITH_MPI:=0}
-: ${WITH_ROCM:=0}
-: ${WITH_ROCM_MPI:=0}
 : ${IS_DOCKER:=0}
 : ${CONDA_ROOT:=/opt/conda}
 
@@ -71,11 +69,9 @@ usage()
 {
     print_option() { printf "    --%-10s %-36s     %s\n" "${1}" "${2}" "${3}"; }
     echo "Options:"
-    python_info="(Use '+nopython' to build w/o python, use '+python' to python build with python)"
-    print_option core "[+nopython] [+python]" "Core ${python_info}"
-    print_option mpi "[+nopython] [+python]" "MPI ${python_info}"
-    print_option rocm "[+nopython] [+python]" "ROCm ${python_info}"
-    print_option rocm-mpi "[+nopython] [+python]" "ROCm + MPI ${python_info}"
+    python_info="(Use '+nopython' to build w/o python, use '+python' to build with python)"
+    print_option base "[+nopython] [+python]" "Base build (no MPI) ${python_info}"
+    print_option mpi "[+nopython] [+python]" "MPI build ${python_info}"
     print_option mpi-impl "[openmpi|mpich]" "MPI implementation"
 
     echo ""
@@ -142,20 +138,12 @@ do
             usage
             exit 0
             ;;
-        --core)
-            WITH_CORE=${VAL}
+        --base)
+            WITH_BASE=${VAL}
             reset-last
             ;;
         --mpi)
             WITH_MPI=${VAL}
-            reset-last
-            ;;
-        --rocm)
-            WITH_ROCM=${VAL}
-            reset-last
-            ;;
-        --rocm-mpi)
-            WITH_ROCM_MPI=${VAL}
             reset-last
             ;;
         --mpi-impl)
@@ -394,7 +382,5 @@ if [ "${IS_DOCKER}" -ne 0 ]; then git config --global --add safe.directory ${PWD
 
 verbose-run echo "Build rocprofiler-systems installers with generators: ${GENERATORS}"
 
-build-and-package ${WITH_CORE} ${DISTRO}-core -DROCPROFSYS_USE_ROCM=OFF -DROCPROFSYS_USE_MPI=OFF
-build-and-package ${WITH_MPI} ${DISTRO}-${MPI_IMPL} -DROCPROFSYS_USE_ROCM=OFF -DROCPROFSYS_USE_MPI=ON
-build-and-package ${WITH_ROCM} ${DISTRO}-rocm-${ROCM_VERSION} -DROCPROFSYS_USE_ROCM=ON -DROCPROFSYS_USE_MPI=OFF
-build-and-package ${WITH_ROCM_MPI} ${DISTRO}-rocm-${ROCM_VERSION}-${MPI_IMPL} -DROCPROFSYS_USE_ROCM=ON -DROCPROFSYS_USE_MPI=ON
+build-and-package ${WITH_BASE} ${DISTRO}-rocm-${ROCM_VERSION} -DROCPROFSYS_USE_MPI=OFF
+build-and-package ${WITH_MPI} ${DISTRO}-rocm-${ROCM_VERSION}-${MPI_IMPL} -DROCPROFSYS_USE_MPI=ON

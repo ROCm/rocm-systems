@@ -12,6 +12,7 @@
 #include "proxy.h"
 #include "collectives.h"
 #include "gdrwrap.h"
+#include "rocmwrap.h"
 #include "shmutils.h"
 #include "p2p.h"
 #include "profiler.h"
@@ -25,7 +26,11 @@
 #if defined(ENABLE_NPKIT)
 #include "npkit/npkit.h"
 #endif
-#include "msccl/msccl_lifecycle.h"
+#include <stdio.h>
+#include <glob.h>
+#include <dirent.h>
+#include <linux/limits.h>
+#include <mutex>
 
 static_assert(sizeof(ncclNetHandle_t) <= CONNECT_SIZE, "NET Connect info is too large");
 
@@ -76,6 +81,7 @@ struct connectMapMem{
   ncclIpcDesc ipcDesc;
   ncclShmIpcDesc_t attachDesc;
   ncclShmIpcDesc_t createDesc;
+  int dmaBufFd;  // DMA-BUF fd for entire allocation (for cuMem VMM)
 };
 
 struct connectMap {
@@ -197,7 +203,139 @@ struct setupReq {
 };
 
 NCCL_PARAM(NetOptionalRecvCompletion, "NET_OPTIONAL_RECV_COMPLETION", 1);
-RCCL_PARAM(AinicRoce, "AINIC_ROCE", 0);
+
+static rcclIBNicInfo rcclPrimaryNicInfo = {rcclIBNicTypeUnknown, 0, 0};
+
+RCCL_PARAM(AinicRoce, "AINIC_ROCE", -1);
+static const char* sysfsIBPath = "/sys/class/infiniband";
+
+static int readIBNicRate(const char* devName) {
+  std::string basePath = std::string(sysfsIBPath) + "/" + devName + "/ports/";
+  DIR* dir = opendir(basePath.c_str());
+  if (dir == NULL) return 0;
+  struct dirent* entry;
+  int maxRate = 0;
+  while ((entry = readdir(dir)) != NULL) {
+    if (entry->d_name[0] == '.') continue;
+    std::string portPath = basePath + entry->d_name + "/rate";
+    std::ifstream portFile(portPath);
+    std::string rate;
+    if (!std::getline(portFile, rate)) continue;
+    char* end = nullptr;
+    long val = strtol(rate.c_str(), &end, 10);
+    if (end != rate.c_str() && val > 0) {
+      maxRate = std::max(maxRate, (int)val);
+    }
+  }
+  closedir(dir);
+  return maxRate;
+}
+
+static void rcclDetectIBNics() {
+  #define MAX_VENDOR_LEN 16
+  #define MAX_IB_DEVS 32
+  /* Map of vendor/device pairs to rcclIBNicType:
+   Note: Vendor ID should be exact value, device id can be a prefix or a wildcard*/
+  std::map<std::pair<std::string, std::string>, rcclIBNicType> vendorNames = {
+    {{"0x15b3", "*"}, rcclIBNicTypeMLX},
+    {{"0x1dd8", "0x10"}, rcclIBNicTypeAINIC},
+    {{"0x14e4", "0x1760"}, rcclIBNicTypeBNXT2}
+  };
+
+  int _Nnics[rcclIBNicTypeMax]{};
+  int _NicsRate[rcclIBNicTypeMax]{};
+  int totalNnics = 0;
+
+  /* respect user preference for AINIC */
+  if (rcclParamAinicRoce() == 1) {
+    INFO(NCCL_NET|NCCL_INIT, "RCCL: AINIC detection: enforced by user settings");
+  }
+
+  struct netIf userIfs[MAX_IB_DEVS];
+  const char* userIbEnv = ncclGetEnv("NCCL_IB_HCA");
+  bool searchNot = userIbEnv && userIbEnv[0] == '^';
+  if (searchNot) userIbEnv++;
+  if (userIbEnv && (userIbEnv[0] == '=')) userIbEnv++;
+  int nUserIfs = parseStringList(userIbEnv, userIfs, MAX_IB_DEVS);
+
+  
+  DIR* dir = opendir(sysfsIBPath);
+  if (dir == NULL) {
+    INFO(NCCL_NET|NCCL_INIT, "RCCL: No InfiniBand devices found (cannot open %s)", sysfsIBPath);
+    rcclPrimaryNicInfo.type = rcclIBNicTypeDefault;
+    return;
+  }
+
+  struct dirent* entry;
+  while ((entry = readdir(dir)) != NULL) {
+    bool detected = false;
+    if (entry->d_name[0] == '.') continue;
+    if (!matchIfList(entry->d_name, -1, userIfs, nUserIfs, false) ^ searchNot) {
+      continue;
+    }
+
+    std::string basePath = std::string(sysfsIBPath) + "/" + entry->d_name + "/device/";
+    std::ifstream vendorFile(basePath + "vendor");
+    std::ifstream deviceFile(basePath + "device");
+    std::string vendor, device;
+    if (!std::getline(vendorFile, vendor) || !std::getline(deviceFile, device)) {
+      continue;
+    }
+
+    for (const auto& [key, nicType] : vendorNames) {
+      const auto& [vendorId, deviceId] = key;
+      if (vendorId == vendor && (deviceId == "*" || device.rfind(deviceId, 0) == 0)) {
+        /* respect user preference for AINIC */
+        if ((nicType == rcclIBNicTypeAINIC) && (rcclParamAinicRoce() == 0)) {
+          continue;
+        } else if (rcclParamAinicRoce() == 1 && nicType != rcclIBNicTypeAINIC) {
+          continue;
+        }
+
+        _Nnics[nicType]++;
+        totalNnics++;
+        detected = true;
+        if (_NicsRate[nicType] == 0) {
+          _NicsRate[nicType] = readIBNicRate(entry->d_name);
+        }
+        break;
+      }
+    }
+    if (!detected) {
+    /* Unknown vendor/device pair or generic device */
+      _Nnics[rcclIBNicTypeDefault]++;
+      totalNnics++;
+    }
+  }
+  closedir(dir);
+
+  int maxCount = 0;
+  rcclIBNicType primaryNicsType = rcclIBNicTypeDefault;
+  for (int i = 0; i < rcclIBNicTypeMax; i++) {
+    if (_Nnics[i] > maxCount) {
+      maxCount = _Nnics[i];
+      primaryNicsType = static_cast<rcclIBNicType>(i);
+    }
+  }
+
+  INFO(NCCL_NET|NCCL_INIT, "RCCL: Detected %d IB devices, primary type: %d (count: %d)", 
+       totalNnics, primaryNicsType, maxCount);
+  rcclPrimaryNicInfo.type = primaryNicsType;
+  rcclPrimaryNicInfo.rate = _NicsRate[primaryNicsType];
+  rcclPrimaryNicInfo.count = maxCount;
+}
+
+static std::once_flag rcclDetectIBNicsOnce;
+
+bool rcclUseAinic() {
+  std::call_once(rcclDetectIBNicsOnce, rcclDetectIBNics);
+  return (rcclPrimaryNicInfo.type == rcclIBNicTypeAINIC);
+}
+
+rcclIBNicInfo rcclPrimaryNic() {
+  std::call_once(rcclDetectIBNicsOnce, rcclDetectIBNics);
+  return rcclPrimaryNicInfo;
+}
 
 static_assert(sizeof(ncclNetHandle_t) + sizeof(int) <= CONNECT_SIZE, "Not large enough ncclConnect to hold ncclNetHandle_t and useGdr flag");
 
@@ -301,7 +439,7 @@ static ncclResult_t sendProxyProgress(struct ncclProxyState* proxyState, struct 
 // Returns the flags to be used by a call to cuMemGetHandleForAddressRange.
 static inline int getHandleForAddressRangeFlags(ncclTopoGdrMode useGdr) {
   int flags = 0;
-#if CUDA_VERSION >= 12080
+#if CUDA_VERSION >= 12080 || HIP_VERSION >= 71260540
   // Force mapping on PCIe on systems with both PCI and C2C attachments.
   if (useGdr == ncclTopoGdrModePci) flags = CU_MEM_RANGE_FLAG_DMA_BUF_MAPPING_TYPE_PCIE;
 #endif
@@ -313,7 +451,7 @@ static inline int getHandleForAddressRangeFlags(ncclTopoGdrMode useGdr) {
 static ncclResult_t sendSetup(struct ncclComm* comm, struct ncclTopoGraph* graph, struct ncclPeerInfo* myInfo, struct ncclPeerInfo* peerInfo, struct ncclConnect* connectInfo, struct ncclConnector* send, int channelId, int connIndex) {
   struct setupReq req = { 0 };
 
-  send->conn.shared = req.shared = (graph || connIndex == 0  || mscclIsCaller()) ? 0 : ncclParamNetSharedBuffers() != -2 ? ncclParamNetSharedBuffers() : 1;
+  send->conn.shared = req.shared = (graph || connIndex == 0) ? 0 : ncclParamNetSharedBuffers() != -2 ? ncclParamNetSharedBuffers() : 1;
   req.channelId = channelId;
   req.connIndex = connIndex;
   req.curr_hdp_reg = 0;
@@ -368,7 +506,7 @@ NCCL_PARAM(GdrCopyFlushEnable, "GDRCOPY_FLUSH_ENABLE", 0);
 static ncclResult_t recvSetup(struct ncclComm* comm, struct ncclTopoGraph* graph, struct ncclPeerInfo* myInfo, struct ncclPeerInfo* peerInfo, struct ncclConnect* connectInfo, struct ncclConnector* recv, int channelId, int connIndex) {
   struct setupReq req = { 0 };
 
-  recv->conn.shared = req.shared = (graph || connIndex == 0 || mscclIsCaller()) ? 0 : ncclParamNetSharedBuffers() != -2 ? ncclParamNetSharedBuffers() : 1;
+  recv->conn.shared = req.shared = (graph || connIndex == 0) ? 0 : ncclParamNetSharedBuffers() != -2 ? ncclParamNetSharedBuffers() : 1;
   req.channelId = channelId;
   req.connIndex = connIndex;
   req.netDev = -1;
@@ -384,7 +522,10 @@ static ncclResult_t recvSetup(struct ncclComm* comm, struct ncclTopoGraph* graph
 
   // Determine whether we need to flush the GDR buffer on recv or not
   if (req.useGdr) {
-    NCCLCHECK(ncclTopoNeedFlush(comm, netId, req.netDev, myInfo->rank, &req.needFlush));
+    int managed;
+    // Flush is not needed when the hardware supports direct managed memory access from host
+    CUDACHECK(hipDeviceGetAttribute(&managed, hipDeviceAttributeDirectManagedMemAccessFromHost, 0));
+    NCCLCHECK(ncclTopoNeedFlush(comm, netId, req.netDev, myInfo->rank, (bool)managed, &req.needFlush));
     CUDACHECK(hipDeviceGetAttribute((int*)&req.curr_hdp_reg, hipDeviceAttributeHdpMemFlushCntl, myInfo->cudaDev));
     recv->conn.curr_hdp_reg = req.curr_hdp_reg;
   }
@@ -466,7 +607,7 @@ static ncclResult_t sendConnect(struct ncclComm* comm, struct ncclConnect* conne
     send->transportResources = map;
     opId = send;
     INFO(NCCL_PROXY, "sendConnect ncclProxyCallAsync opId=%p", opId);
-    netSendConnectArgs args = {{},0};
+    netSendConnectArgs args = {{},{}};
     memcpy(&args.handle, connectInfo, sizeof(ncclNetHandle_t));
 
     populateCommNetAttrs(comm, send, &args.netAttr);
@@ -492,7 +633,7 @@ static ncclResult_t sendConnect(struct ncclComm* comm, struct ncclConnect* conne
       // Enable P2P access for Legacy IPC
       cudaError_t err = cudaDeviceEnablePeerAccess(map->cudaDev, 0);
       if (err == cudaErrorPeerAccessAlreadyEnabled) {
-        cudaGetLastError();
+        (void)cudaGetLastError();
       } else if (err != cudaSuccess) {
         WARN("failed to peer with device %d: %d %s", map->cudaDev, err, cudaGetErrorString(err));
         return ncclInternalError;
@@ -783,8 +924,17 @@ static ncclResult_t sendProxySetup(struct ncclProxyConnection* connection, struc
   resources->isP2p = req->isP2p;
   ncclNetProperties_t props;
   NCCLCHECK(proxyState->ncclNet->getProperties(req->netDev, &props));
-  /* DMA-BUF support */
-  resources->useDmaBuf = resources->useGdr && proxyState->dmaBufSupport && (props.ptrSupport & NCCL_PTR_DMABUF);
+  /* GDR mode selection: RCCL_FORCE_ENABLE_DMABUF=1 forces DMAbuf, otherwise prefer peermem.
+   * cuMem/VMM buffers cannot be registered with ibv_reg_mr (causes "Bad address"
+   * and corrupts VMM state), so dmabuf must always be used when cuMem is enabled. */
+  bool peermemAvailable = (props.ptrSupport & NCCL_PTR_CUDA);
+  bool dmabufAvailable = (props.ptrSupport & NCCL_PTR_DMABUF) && proxyState->dmaBufSupport;
+  bool forceDmaBuf = rcclParamForceEnableDMABUF();
+  if (forceDmaBuf || ncclCuMemEnable()) {
+    resources->useDmaBuf = resources->useGdr && dmabufAvailable;
+  } else {
+    resources->useDmaBuf = resources->useGdr && !peermemAvailable && dmabufAvailable;
+  }
   resources->maxRecvs = props.maxRecvs;
   resources->netDeviceVersion = props.netDeviceVersion;
   resources->netDeviceType = props.netDeviceType;
@@ -823,8 +973,17 @@ static ncclResult_t recvProxySetup(struct ncclProxyConnection* connection, struc
   resources->curr_hdp_reg = req->curr_hdp_reg;
   ncclNetProperties_t props;
   NCCLCHECK(proxyState->ncclNet->getProperties(req->netDev, &props));
-  /* DMA-BUF support */
-  resources->useDmaBuf = resources->useGdr && proxyState->dmaBufSupport && (props.ptrSupport & NCCL_PTR_DMABUF);
+  /* GDR mode selection: RCCL_FORCE_ENABLE_DMABUF=1 forces DMAbuf, otherwise prefer peermem.
+   * cuMem/VMM buffers cannot be registered with ibv_reg_mr (causes "Bad address"
+   * and corrupts VMM state), so dmabuf must always be used when cuMem is enabled. */
+  bool peermemAvailable = (props.ptrSupport & NCCL_PTR_CUDA);
+  bool dmabufAvailable = (props.ptrSupport & NCCL_PTR_DMABUF) && proxyState->dmaBufSupport;
+  bool forceDmaBuf = rcclParamForceEnableDMABUF();
+  if (forceDmaBuf || ncclCuMemEnable()) {
+    resources->useDmaBuf = resources->useGdr && dmabufAvailable;
+  } else {
+    resources->useDmaBuf = resources->useGdr && !peermemAvailable && dmabufAvailable;
+  }
   resources->maxRecvs = props.maxRecvs;
   resources->netDeviceVersion = props.netDeviceVersion;
   resources->netDeviceType = props.netDeviceType;
@@ -868,7 +1027,7 @@ static ncclResult_t ncclNetGetDeviceHandle(ncclNetDeviceType type, int version, 
 static ncclResult_t sendProxyConnect(struct ncclProxyConnection* connection, struct ncclProxyState* proxyState, void* reqBuff, int reqSize, void* respBuff, int respSize, int* done) {
   ncclNet_ctxt_t ncclNetCtxt = {};
   struct sendNetResources* resources = (struct sendNetResources*)(connection->transportResources);
-  bool rcclAinicRoce = ((rcclParamAinicRoce() == 1) ? true : false);
+  bool rcclAinicRoce = rcclUseAinic();
   if (reqSize != sizeof(netSendConnectArgs)) return ncclInternalError;
   ncclResult_t ret = ncclSuccess;
   netSendConnectArgs* req = (netSendConnectArgs*) reqBuff;
@@ -885,6 +1044,8 @@ static ncclResult_t sendProxyConnect(struct ncclProxyConnection* connection, str
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
   if (proxyState->ncclNet == &rocmNetIb) {
     NCCLCHECK(rcclRocmNetP2pPolicy(req->handle, resources->isP2p));
+  } else if (proxyState->ncclNet == &netIbCast) {
+    NCCLCHECK(rcclCastNetP2pPolicy(req->handle, resources->isP2p));
   }
 #endif
   
@@ -990,12 +1151,26 @@ static ncclResult_t sendProxyConnect(struct ncclProxyConnection* connection, str
   NCCL_NET_MAP_ADD_POINTER(map, 0, 0, sizeof(struct ncclSendMem), sendMem);
   NCCL_NET_MAP_ADD_POINTER(map, 0, 0, sizeof(struct ncclRecvMem), recvMem);
 
+  map->mems[NCCL_NET_MAP_DEVMEM].dmaBufFd = -1;  // Initialize to invalid fd
   if (map->mems[NCCL_NET_MAP_DEVMEM].size) {
     if (resources->shared == 0) {
       if (!map->sameProcess || ncclCuMemEnable()) {
         ALIGN_SIZE(map->mems[NCCL_NET_MAP_DEVMEM].size, CUDA_IPC_MIN);
         NCCLCHECK(ncclP2pAllocateShareableBuffer(map->mems[NCCL_NET_MAP_DEVMEM].size, 0, &map->mems[NCCL_NET_MAP_DEVMEM].ipcDesc,
                                                 (void**)&map->mems[NCCL_NET_MAP_DEVMEM].gpuPtr));
+#if CUDA_VERSION >= 11070 || HIP_VERSION >= 71260540
+        // Get DMA-BUF fd for cuMem VMM allocations via cuMemGetHandleForAddressRange.
+        // Required even when DMA-BUF is globally disabled: ibv_reg_mr on cuMem RDMA
+        // memory fails ("Bad address") and corrupts VMM state, so ibv_reg_dmabuf_mr
+        // must be used instead.
+        if (ncclCuMemEnable()) {
+          CUCHECK(cuMemGetHandleForAddressRange((void *)&map->mems[NCCL_NET_MAP_DEVMEM].dmaBufFd,
+                                                (CUdeviceptr)map->mems[NCCL_NET_MAP_DEVMEM].gpuPtr,
+                                                map->mems[NCCL_NET_MAP_DEVMEM].size,
+                                                CU_MEM_RANGE_HANDLE_TYPE_DMA_BUF_FD,
+                                                getHandleForAddressRangeFlags(resources->useGdr)));
+        }
+#endif
       } else {
 #if defined(HIP_UNCACHED_MEMORY)
 #if defined(HIP_CONTIGUOUS_MEMORY)
@@ -1045,14 +1220,20 @@ static ncclResult_t sendProxyConnect(struct ncclProxyConnection* connection, str
   for (int p=0; p<NCCL_NUM_PROTOCOLS; p++) {
     resources->buffers[p] = NCCL_NET_MAP_GET_POINTER(map, cpu, buffs[p]);
     if (resources->buffers[p]) {
-#if CUDA_VERSION >= 11070
+#if CUDA_VERSION >= 11070 || HIP_VERSION >= 71260540
       /* DMA-BUF support */
       int type = NCCL_NET_MAP_DEV_MEM(map, buffs[p]) ? NCCL_PTR_CUDA : NCCL_PTR_HOST;
-      if (type == NCCL_PTR_CUDA && resources->useDmaBuf) {
-        int dmabuf_fd;
-        CUCHECK(cuMemGetHandleForAddressRange((void *)&dmabuf_fd, (CUdeviceptr)resources->buffers[p], resources->buffSizes[p], CU_MEM_RANGE_HANDLE_TYPE_DMA_BUF_FD, getHandleForAddressRangeFlags(resources->useGdr)));
-        NCCLCHECK(proxyState->ncclNet->regMrDmaBuf(resources->netSendComm, resources->buffers[p], resources->buffSizes[p], type, 0ULL, dmabuf_fd, &resources->mhandles[p]));
-        (void)close(dmabuf_fd);
+      if (type == NCCL_PTR_CUDA && resources->useDmaBuf && ncclCuMemEnable()) {
+        int bank = NCCL_NET_MAP_OFFSET_BANK(map, buffs[p]);
+        if (bank == NCCL_NET_MAP_DEVMEM && map->mems[NCCL_NET_MAP_DEVMEM].dmaBufFd >= 0) {
+          uint64_t offset = (char*)resources->buffers[p] - map->mems[NCCL_NET_MAP_DEVMEM].gpuPtr;
+          NCCLCHECK(proxyState->ncclNet->regMrDmaBuf(resources->netSendComm, resources->buffers[p], resources->buffSizes[p], type, offset, map->mems[NCCL_NET_MAP_DEVMEM].dmaBufFd, &resources->mhandles[p]));
+        } else {
+          int dmabuf_fd;
+          CUCHECK(cuMemGetHandleForAddressRange((void *)&dmabuf_fd, (CUdeviceptr)resources->buffers[p], resources->buffSizes[p], CU_MEM_RANGE_HANDLE_TYPE_DMA_BUF_FD, getHandleForAddressRangeFlags(resources->useGdr)));
+          NCCLCHECK(proxyState->ncclNet->regMrDmaBuf(resources->netSendComm, resources->buffers[p], resources->buffSizes[p], type, 0ULL, dmabuf_fd, &resources->mhandles[p]));
+          (void)close(dmabuf_fd);
+        }
       } else // FALL-THROUGH to nv_peermem GDR path
 #else
       /* DMA-BUF support */
@@ -1090,7 +1271,7 @@ static ncclResult_t recvProxyConnect(struct ncclProxyConnection* connection, str
   resources->tpRemoteProxyRank = req->proxyRank;
   ncclResult_t ret = ncclSuccess;
   ncclNet_ctxt_t ncclNetCtxt = {};
-  bool rcclAinicRoce = ((rcclParamAinicRoce() == 1) ? true : false);
+  bool rcclAinicRoce = rcclUseAinic();
 
   setNetAttrs(proxyState, &req->netAttr);
 
@@ -1197,11 +1378,23 @@ static ncclResult_t recvProxyConnect(struct ncclProxyConnection* connection, str
     resources->buffSizes[NCCL_PROTO_LL] = proxyState->buffSizes[NCCL_PROTO_LL];
   }
 
+  map->mems[NCCL_NET_MAP_DEVMEM].dmaBufFd = -1;  // Initialize to invalid fd
   if (map->mems[NCCL_NET_MAP_DEVMEM].size) {
     if (resources->shared == 0) {
       if (ncclCuMemEnable()) {
         NCCLCHECK(ncclP2pAllocateShareableBuffer(map->mems[NCCL_NET_MAP_DEVMEM].size, 0, &map->mems[NCCL_NET_MAP_DEVMEM].ipcDesc,
                                                 (void**)&map->mems[NCCL_NET_MAP_DEVMEM].gpuPtr));
+#if CUDA_VERSION >= 11070 || HIP_VERSION >= 71260540
+        // Get DMA-BUF fd for cuMem VMM allocations. Required even when DMA-BUF is
+        // globally disabled to avoid ibv_reg_mr on VMM memory.
+        {
+          CUCHECK(cuMemGetHandleForAddressRange((void *)&map->mems[NCCL_NET_MAP_DEVMEM].dmaBufFd,
+                                                (CUdeviceptr)map->mems[NCCL_NET_MAP_DEVMEM].gpuPtr,
+                                                map->mems[NCCL_NET_MAP_DEVMEM].size,
+                                                CU_MEM_RANGE_HANDLE_TYPE_DMA_BUF_FD,
+                                                getHandleForAddressRangeFlags(resources->useGdr)));
+        }
+#endif
       } else {
 #if defined(HIP_UNCACHED_MEMORY)
 #if defined(HIP_CONTIGUOUS_MEMORY)
@@ -1241,14 +1434,20 @@ static ncclResult_t recvProxyConnect(struct ncclProxyConnection* connection, str
   for (int p=0; p<NCCL_NUM_PROTOCOLS; p++) {
     resources->buffers[p] = NCCL_NET_MAP_GET_POINTER(map, cpu, buffs[p]);
     if (resources->buffers[p]) {
-#if CUDA_VERSION >= 11070
+#if CUDA_VERSION >= 11070 || HIP_VERSION >= 71260540
       /* DMA-BUF support */
       int type = NCCL_NET_MAP_DEV_MEM(map, buffs[p]) ? NCCL_PTR_CUDA : NCCL_PTR_HOST;
-      if (type == NCCL_PTR_CUDA && resources->useDmaBuf) {
-        int dmabuf_fd;
-        CUCHECK(cuMemGetHandleForAddressRange((void *)&dmabuf_fd, (CUdeviceptr)resources->buffers[p], resources->buffSizes[p], CU_MEM_RANGE_HANDLE_TYPE_DMA_BUF_FD, getHandleForAddressRangeFlags(resources->useGdr)));
-        NCCLCHECK(proxyState->ncclNet->regMrDmaBuf(resources->netRecvComm, resources->buffers[p], resources->buffSizes[p], type, 0ULL, dmabuf_fd, &resources->mhandles[p]));
-        (void)close(dmabuf_fd);
+      if (type == NCCL_PTR_CUDA && resources->useDmaBuf && ncclCuMemEnable()) {
+        int bank = NCCL_NET_MAP_OFFSET_BANK(map, buffs[p]);
+        if (bank == NCCL_NET_MAP_DEVMEM && map->mems[NCCL_NET_MAP_DEVMEM].dmaBufFd >= 0) {
+          uint64_t offset = (char*)resources->buffers[p] - map->mems[NCCL_NET_MAP_DEVMEM].gpuPtr;
+          NCCLCHECK(proxyState->ncclNet->regMrDmaBuf(resources->netRecvComm, resources->buffers[p], resources->buffSizes[p], type, offset, map->mems[NCCL_NET_MAP_DEVMEM].dmaBufFd, &resources->mhandles[p]));
+        } else {
+          int dmabuf_fd;
+          CUCHECK(cuMemGetHandleForAddressRange((void *)&dmabuf_fd, (CUdeviceptr)resources->buffers[p], resources->buffSizes[p], CU_MEM_RANGE_HANDLE_TYPE_DMA_BUF_FD, getHandleForAddressRangeFlags(resources->useGdr)));
+          NCCLCHECK(proxyState->ncclNet->regMrDmaBuf(resources->netRecvComm, resources->buffers[p], resources->buffSizes[p], type, 0ULL, dmabuf_fd, &resources->mhandles[p]));
+          (void)close(dmabuf_fd);
+        }
       } else // FALL-THROUGH to nv_peermem GDR path
 #else
       /* DMA-BUF support */
@@ -1298,6 +1497,11 @@ static ncclResult_t sendProxyFree(struct ncclProxyConnection* connection, struct
     } else {
       NCCLCHECK(ncclShmIpcClose(&mems[NCCL_NET_MAP_HOSTMEM].createDesc));
     }
+    // Close cached DMA-BUF fd if it was opened
+    if (mems[NCCL_NET_MAP_DEVMEM].dmaBufFd >= 0) {
+      (void)close(mems[NCCL_NET_MAP_DEVMEM].dmaBufFd);
+      mems[NCCL_NET_MAP_DEVMEM].dmaBufFd = -1;
+    }
     NCCLCHECK(ncclCudaFree(mems[NCCL_NET_MAP_DEVMEM].cpuPtr));
     if (!resources->map.sameProcess || ncclCuMemEnable()) {
       // cuMem API support
@@ -1339,6 +1543,11 @@ static ncclResult_t recvProxyFree(struct ncclProxyConnection* connection, struct
     }
     struct connectMapMem* mems = resources->map.mems;
     NCCLCHECK(ncclCudaHostFree(mems[NCCL_NET_MAP_HOSTMEM].cpuPtr));
+    // Close cached DMA-BUF fd if it was opened
+    if (mems[NCCL_NET_MAP_DEVMEM].dmaBufFd >= 0) {
+      (void)close(mems[NCCL_NET_MAP_DEVMEM].dmaBufFd);
+      mems[NCCL_NET_MAP_DEVMEM].dmaBufFd = -1;
+    }
     NCCLCHECK(ncclCudaFree(mems[NCCL_NET_MAP_DEVMEM].cpuPtr));
     if (!resources->map.sameProcess || ncclCuMemEnable()) {
       // cuMem API support
@@ -1472,11 +1681,11 @@ static ncclResult_t sendProxyProgress(struct ncclProxyState* proxyState, struct 
               // When data is in sysmem, we need to wait until all flags are correct since the GPU only
               // called threadfence()
               uint64_t flag = sub->base+sub->transmitted+1;
-              int nFifoLines = DIVUP(connFifo[buffSlot].size, sizeof(uint64_t)*NCCL_LL128_LINEELEMS);
+              int nFifoLines = DIVUP(connFifo[buffSlot].size, sizeof(uint64_t)*proxyState->ll128LineElems);
               volatile uint64_t* lines = (volatile uint64_t*)buff;
               ready = 1;
               for (int i=0; i<nFifoLines; i++) {
-                if (lines[i*NCCL_LL128_LINEELEMS+NCCL_LL128_DATAELEMS] != flag) { ready = 0; break; }
+                if (lines[i*proxyState->ll128LineElems+proxyState->ll128DataElems] != flag) { ready = 0; break; }
               }
             }
           } else if (p == NCCL_PROTO_LL) {
@@ -2153,12 +2362,22 @@ static ncclResult_t sendProxyRegBuffer(struct ncclProxyConnection* connection, s
   assert(reqSize == sizeof(struct netRegInfo));
   assert(respSize == sizeof(void*));
 
-#if CUDART_VERSION >= 11070
+#if CUDA_VERSION >= 11070 || HIP_VERSION >= 71260540
   /* DMA-BUF support */
-  if (resources->useDmaBuf) {
+  if (resources->useDmaBuf && ncclCuMemEnable()) {
     int dmabuf_fd;
     CUCHECKGOTO(cuMemGetHandleForAddressRange((void*)&dmabuf_fd, (CUdeviceptr)info->buffer, info->size, CU_MEM_RANGE_HANDLE_TYPE_DMA_BUF_FD, getHandleForAddressRangeFlags(resources->useGdr)), ret, peermem);
     NCCLCHECKGOTO(proxyState->ncclNet->regMrDmaBuf(resources->netSendComm, (void*)info->buffer, info->size, NCCL_PTR_CUDA, 0ULL, dmabuf_fd, &handle), ret, peermem);
+    (void)close(dmabuf_fd);
+    needReg = false;
+  }
+peermem:
+#else
+  if (resources->useDmaBuf && pfn_hsa_amd_portable_export_dmabuf) {
+    int dmabuf_fd;
+    uint64_t offset;
+    HSACHECKGOTO(hsa_amd_portable_export_dmabuf((const void*)info->buffer, info->size, &dmabuf_fd, &offset), ret, peermem);
+    NCCLCHECKGOTO(proxyState->ncclNet->regMrDmaBuf(resources->netSendComm, (void*)info->buffer, info->size, NCCL_PTR_CUDA, offset, dmabuf_fd, &handle), ret, peermem);
     (void)close(dmabuf_fd);
     needReg = false;
   }
@@ -2187,12 +2406,22 @@ static ncclResult_t recvProxyRegBuffer(struct ncclProxyConnection* connection, s
   assert(reqSize == sizeof(struct netRegInfo));
   assert(respSize == sizeof(void*));
 
-#if CUDART_VERSION >= 11070
+#if CUDA_VERSION >= 11070 || HIP_VERSION >= 71260540
   /* DMA-BUF support */
-  if (resources->useDmaBuf) {
+  if (resources->useDmaBuf && ncclCuMemEnable()) {
     int dmabuf_fd;
     CUCHECKGOTO(cuMemGetHandleForAddressRange((void*)&dmabuf_fd, (CUdeviceptr)info->buffer, info->size, CU_MEM_RANGE_HANDLE_TYPE_DMA_BUF_FD, getHandleForAddressRangeFlags(resources->useGdr)), ret, peermem);
     NCCLCHECKGOTO(proxyState->ncclNet->regMrDmaBuf(resources->netRecvComm, (void*)info->buffer, info->size, NCCL_PTR_CUDA, 0ULL, dmabuf_fd, &handle), ret, peermem);
+    (void)close(dmabuf_fd);
+    needReg = false;
+  }
+peermem:
+#else
+  if (resources->useDmaBuf && pfn_hsa_amd_portable_export_dmabuf) {
+    int dmabuf_fd;
+    uint64_t offset;
+    HSACHECKGOTO(hsa_amd_portable_export_dmabuf((const void*)info->buffer, info->size, &dmabuf_fd, &offset), ret, peermem);
+    NCCLCHECKGOTO(proxyState->ncclNet->regMrDmaBuf(resources->netRecvComm, (void*)info->buffer, info->size, NCCL_PTR_CUDA, offset, dmabuf_fd, &handle), ret, peermem);
     (void)close(dmabuf_fd);
     needReg = false;
   }

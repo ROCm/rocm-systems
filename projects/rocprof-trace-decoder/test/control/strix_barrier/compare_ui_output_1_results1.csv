@@ -1,0 +1,12 @@
+CodeObj,Vaddr,Instruction,Hitcount,Latency,Stall,Idle,Source
+1,5632,"; _Z5ktestv",0,0,0,0,"ktest()"
+1,5632,"s_waitcnt lgkmcnt(0)",16,16,0,6483,"/home/gbaraldi/sample.cpp:6"
+1,5636,"s_barrier",16,729,233,0,"/home/gbaraldi/sample.cpp:7"
+1,5640,"v_readfirstlane_b32 s0, v0",16,16,0,0,"/home/gbaraldi/sample.cpp:8"
+1,5644,"s_cmp_lg_u32 s0, 0",16,16,0,272,"/home/gbaraldi/sample.cpp:9"
+1,5648,"s_cbranch_scc1 1",16,16,0,132,"/home/gbaraldi/sample.cpp:9"
+1,5652,"s_sleep 2",4,346,342,0,"/home/gbaraldi/sample.cpp:9"
+1,5656,"s_barrier",16,1382,204,0,"/home/gbaraldi/sample.cpp:10"
+1,5660,"s_waitcnt lgkmcnt(0)",16,16,0,0,"/home/gbaraldi/sample.cpp:11"
+1,5664,"s_endpgm",16,4994,0,0,"/home/gbaraldi/sample.cpp:12"
+1,5668,"s_code_end",0,0,0,0,"/home/gbaraldi/sample.cpp:12"

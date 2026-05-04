@@ -1,25 +1,7 @@
-/**
- * MIT License
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
  *
- * Copyright (c) 2019 - 2024 Advanced Micro Devices, Inc. All rights reserved.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
+ * SPDX-License-Identifier: MIT
  */
 
 /**
@@ -63,11 +45,9 @@
 #endif
 #endif
 
-// Include it explicitly for HIPRTC
+#if !defined(__HIPCC_RTC__)
 #include "amd_hip_bf16.h"
 #include "amd_hip_mx_common.h"
-
-#if !defined(__HIPCC_RTC__)
 #include <hip/amd_detail/amd_hip_common.h>
 #include <climits>
 
@@ -76,6 +56,7 @@
 #include "amd_hip_fp16.h"          // __half_raw
 #include "math_fwd.h"              // ocml device functions
 #include "hip_assert.h"            // hip assertions
+
 #define __HIP_SCHAR_MAX SCHAR_MAX
 #define __HIP_SCHAR_MIN SCHAR_MIN
 #define __HIP_UCHAR_MAX UCHAR_MAX
@@ -2637,7 +2618,7 @@ struct __hip_fp8x2_e4m3 {
   __FP8_HOST__ operator float2() const {
 #endif
 #if HIP_FP8_CVT_FAST_PATH
-      return internal::cast_to_f32x2_from_f8x2(__x, __default_interpret);
+    return internal::cast_to_f32x2_from_f8x2(__x, __default_interpret);
 #else
     return float2(internal::cast_from_f8<float, false>(static_cast<__hip_fp8_storage_t>(__x & 0xFF),
                                                        __wm, __we),
@@ -2652,7 +2633,7 @@ struct __hip_fp8x2_e4m3 {
  * \brief struct representing four ocp fp8 numbers with e4m3 interpretation
  *
  * */
-struct __hip_fp8x4_e4m3 {
+ struct __hip_fp8x4_e4m3 {
   __hip_fp8x4_storage_t __x;  //! raw storage of four fp8 numbers
   static constexpr __hip_saturation_t __default_saturation = __HIP_SATFINITE;
   static constexpr __hip_fp8_interpretation_t __default_interpret = __HIP_E4M3;

@@ -49,9 +49,7 @@ Prerequisites
 
   * Default install location is ``/opt/rocm/lib``
 
-  * For custom location, use:
-
-    * Parameter ``--att-library-path``, or
+  * For custom location, use parameter ``--att-library-path``
 
     * Environment variable ``ROCPROF_ATT_LIBRARY_PATH``
 
@@ -68,50 +66,54 @@ To collect thread trace with default parameters, use:
 
 The following table lists the parameters relevant to thread tracing:
 
-+--------------------------+---------+---------+-----------+--------------------------------------------------------------+
-| Parameter                | Type    | Range   | Typical   | Description                                                  |
-+==========================+=========+=========+===========+==============================================================+
-| att-target-cu            | Integer | 0 - 15  | 1         | Defines the CU used to gather detail tokens (WGP on Navi)    |
-+--------------------------+---------+---------+-----------+--------------------------------------------------------------+
-| att-shader-engine-mask   | Bitmask | 1 - ~0u | 0x1       | Defines the Shader Engines (SE) to be traced. Max 2^32 - 1   |
-+--------------------------+---------+---------+-----------+--------------------------------------------------------------+
-| att-simd-select          | Integer | 0 - 0xF | gfx9: 0xF | Defines one or more SIMDs to be traced, out of four.         |
-|                          |         |         | Navi: 0x0 | Bitmask on GFX9 and SIMD_ID[0,3] on Navi.                    |
-+--------------------------+---------+---------+-----------+--------------------------------------------------------------+
-| kernel-iteration-range   | List    |         |           | Defines dispatch iteration of the kernel to be profiled      |
-+--------------------------+---------+---------+-----------+--------------------------------------------------------------+
-| kernel-include-regex     | String  | Any     |           | Profiles kernel names matching the regex                     |
-+--------------------------+---------+---------+-----------+--------------------------------------------------------------+
-| kernel-exclude-regex     | String  | Any     |           | Doesn't profile kernel names matching the regex              |
-+--------------------------+---------+---------+-----------+--------------------------------------------------------------+
-| att-buffer-size          | Bytes   | 1MB-2GB | 96MB      | Specifies the trace buffer size. This is shared for all SEs. |
-|                          |         |         |           | Increase this value if the buffer tends to get full.         |
-+--------------------------+---------+---------+-----------+--------------------------------------------------------------+
-| att-serialize-all        | Bool    |         | False     | If set to "True", turns on serialization for untraced kernels|
-+--------------------------+---------+---------+-----------+--------------------------------------------------------------+
-| att-perfcounter-ctrl     | Integer | 1 - 32  | 2~8       | Available only in gfx9. Streams SQ performance counters to   |
-|                          |         |         |           | the thread trace buffer in the given relative period. As     |
-|                          |         |         |           | this uses high bandwidth, a value too low can cause or worsen|
-|                          |         |         |           | "Data Lost" events and warnings.                             |
-+--------------------------+---------+---------+-----------+--------------------------------------------------------------+
-| att-perfcounters         | String  | SQ-only |           | Available only in gfx9. Specifies the list of SQ counters.   |
-|                          |         |         |           | To list all counters, use "rocprofv3 --list-avail``.         |
-+--------------------------+---------+---------+-----------+--------------------------------------------------------------+
-| att-activity             | Integer | 1 - 16  | 5~10      | Available only in gfx9.                                      |
-|                          |         |         |           | Shorthand for att-perfcounter-ctrl and the att-perfcounters  |
-|                          |         |         |           | related to compute unit activity such as VALU, SALU, etc.    |
-+--------------------------+---------+---------+-----------+--------------------------------------------------------------+
-| att-gpu-index            | Integer |         |           | Comma-separated list of integers. If enabled, only the GPU   |
-|                          | (List)  |         |           | indexes in the list will be profiled by thread trace.        |
-+--------------------------+---------+---------+-----------+--------------------------------------------------------------+
-| att-consecutive-kernels  | Integer | >=0     |           | Starting at the targeted kernel, enables thread trace for the|
-|                          |         |         |           | next N kernel dispatches, sharing a single ATT file,         |
-|                          |         |         |           | stats.csv and UI dir. See --kernel-include-regex and         |
-|                          |         |         |           | --kernel-iteration-range. If multiple targeted kernels       |
-|                          |         |         |           | overlap, the count for N next dispatches starts again from 0.|
-|                          |         |         |           | Recommended use with --att-gpu-index due to thread trace     |
-|                          |         |         |           | being enabled for all GPUs.                                  |
-+--------------------------+---------+---------+-----------+--------------------------------------------------------------+
++-----------------------------+---------+---------+-----------+--------------------------------------------------------------+
+| Parameter                   | Type    | Range   | Typical   | Description                                                  |
++=============================+=========+=========+===========+==============================================================+
+| att-target-cu               | Integer | 0 - 15  | 1         | Defines the CU used to gather detail tokens (WGP on Navi)    |
++-----------------------------+---------+---------+-----------+--------------------------------------------------------------+
+| att-shader-engine-mask      | Bitmask | 1 - ~0u | 0x1       | Defines the Shader Engines (SE) to be traced. Max 2^32 - 1   |
++-----------------------------+---------+---------+-----------+--------------------------------------------------------------+
+| att-simd-select             | Integer | 0 - 0xF | gfx9: 0xF | Defines one or more SIMDs to be traced, out of four.         |
+|                             |         |         | Navi: 0x0 | Bitmask on GFX9 and SIMD_ID[0,3] on Navi.                    |
++-----------------------------+---------+---------+-----------+--------------------------------------------------------------+
+| kernel-iteration-range      | List    |         |           | Defines dispatch iteration of the kernel to be profiled      |
++-----------------------------+---------+---------+-----------+--------------------------------------------------------------+
+| kernel-include-regex        | String  | Any     |           | Profiles kernel names matching the regex                     |
++-----------------------------+---------+---------+-----------+--------------------------------------------------------------+
+| kernel-exclude-regex        | String  | Any     |           | Doesn't profile kernel names matching the regex              |
++-----------------------------+---------+---------+-----------+--------------------------------------------------------------+
+| att-buffer-size             | Bytes   | 1MB-2GB | 96MB      | Specifies the trace buffer size. This is shared for all SEs. |
+|                             |         |         |           | Increase this value if the buffer tends to get full.         |
++-----------------------------+---------+---------+-----------+--------------------------------------------------------------+
+| att-serialize-all           | Bool    |         | False     | If set to "True", turns on serialization for untraced kernels|
++-----------------------------+---------+---------+-----------+--------------------------------------------------------------+
+| att-perfcounter-ctrl        | Integer | 1 - 32  | 2~8       | Available only in gfx9. Streams SQ performance counters to   |
+|                             |         |         |           | the thread trace buffer in the given relative period. As     |
+|                             |         |         |           | this uses high bandwidth, a value too low can cause or worsen|
+|                             |         |         |           | "Data Lost" events and warnings.                             |
++-----------------------------+---------+---------+-----------+--------------------------------------------------------------+
+| att-perfcounters            | String  | SQ-only |           | Available only in gfx9. Specifies the list of SQ counters.   |
+|                             |         |         |           | To list all counters, use "rocprofv3 --list-avail``.         |
++-----------------------------+---------+---------+-----------+--------------------------------------------------------------+
+| att-activity                | Integer | 1 - 16  | 5~10      | Available only in gfx9.                                      |
+|                             |         |         |           | Shorthand for att-perfcounter-ctrl and the att-perfcounters  |
+|                             |         |         |           | related to compute unit activity such as VALU, SALU, etc.    |
++-----------------------------+---------+---------+-----------+--------------------------------------------------------------+
+| att-perfcounter-target-only | Bool    | True or |           | Enable performance counters only for the target_cu. This     |
+|                             |         | False   |           | option allows for a low value in att-activity and *-ctrl.    |
++-----------------------------+---------+---------+-----------+--------------------------------------------------------------+
+| att-gpu-index               | Integer |         |           | Comma-separated list of integers. If enabled, only the GPU   |
+|                             | (List)  |         |           | indexes in the list will be profiled by thread trace.        |
++-----------------------------+---------+---------+-----------+--------------------------------------------------------------+
+| att-consecutive-kernels     | Integer | >=0     |           | Starting at the targeted kernel, enables thread trace for the|
+|                             |         |         |           | next N kernel dispatches, sharing a single ATT file,         |
+|                             |         |         |           | stats.csv and UI dir. See --kernel-include-regex and         |
+|                             |         |         |           | --kernel-iteration-range. If multiple targeted kernels       |
+|                             |         |         |           | overlap, the count for N next dispatches starts again from 0.|
+|                             |         |         |           | Recommended use with --att-gpu-index due to thread trace     |
+|                             |         |         |           | being enabled for all GPUs. Incompatible with                |
+|                             |         |         |           | --selected-regions.                                          |
++-----------------------------+---------+---------+-----------+--------------------------------------------------------------+
 
 For AMD Instinct accelerators, enable perfmon streaming using:
 
@@ -163,6 +165,57 @@ new targeted kernel, so it is possible for a generated ATT file to have more tha
 All the profiled kernels are then compiled into a single ATT file.
 If a new targeted kernel is encountered after the ``rocprofv3`` tool has finished profiling a batch of kernels,
 the profiler will restart profiling when encountering this new targeted kernel and create another ATT file with multiple kernels.
+
+Marker-controlled thread tracing
+=============================
+
+Using ``--att`` with ``--selected-regions`` enables application-controlled thread trace collection using the ``roctxProfilerResume(0)`` and ``roctxProfilerPause(0)`` APIs.
+Instead of targeting specific kernels by name or dispatch index, the application explicitly starts and stops thread trace collection at runtime.
+
+When ``--att --selected-regions`` is used:
+
+* The profiler starts with thread tracing **disabled**. No kernels are traced until ``roctxProfilerResume(0)`` is called.
+* Calling ``roctxProfilerResume(0)`` starts GPU thread trace collection.
+* Calling ``roctxProfilerPause(0)`` stops GPU thread trace collection.
+* Multiple resume/pause cycles are supported. Each cycle produces a separate set of output files (ATT data, stats CSV, and UI output directory).
+* Incompatible with ``--att-consecutive-kernels``.
+
+**Example application:**
+
+.. code-block:: c++
+
+    #include <rocprofiler-sdk-roctx/roctx.h>
+    #include <hip/hip_runtime.h>
+
+    // This kernel will NOT be traced (launched before resume)
+    hipLaunchKernelGGL(setup_kernel, grid, block, 0, 0, out, in, width);
+    hipDeviceSynchronize();
+
+    // Start thread trace collection
+    roctxProfilerResume(0);
+
+    // These kernels WILL be traced
+    hipLaunchKernelGGL(compute_kernel_a, grid, block, 0, 0, out, in, width);
+    hipLaunchKernelGGL(compute_kernel_b, grid, block, 0, 0, out, in, width);
+    hipDeviceSynchronize();
+
+    // Stop thread trace collection
+    roctxProfilerPause(0);
+
+    // This kernel will NOT be traced (launched after pause)
+    hipLaunchKernelGGL(cleanup_kernel, grid, block, 0, 0, out, in, width);
+    hipDeviceSynchronize();
+
+**Run with:**
+
+.. code-block:: bash
+
+    rocprofv3 --att --selected-regions -d <output_dir> -- <application_path>
+
+Only ``compute_kernel_a`` and ``compute_kernel_b`` will appear in the thread trace output.
+The ``setup_kernel`` and ``cleanup_kernel`` dispatches are excluded because they fall outside the resume/pause region.
+
+For more details on ``--selected-regions`` and ``roctxProfilerPause``/``roctxProfilerResume``, see :ref:`using-rocprofiler-sdk-roctx`.
 
 .. _output-files:
 

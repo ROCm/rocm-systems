@@ -71,7 +71,7 @@ Panel Config:
         vL1D Cache Utilization:
           value: AVG((((TCP_GATE_EN2_sum * 100) / TCP_GATE_EN1_sum) if (TCP_GATE_EN1_sum
             != 0) else None))
-          unit: Pct of Peak
+          unit: Percent
           peak: 100
           pop: None
         Theoretical LDS Bandwidth:
@@ -83,13 +83,13 @@ Panel Config:
             / (End_Timestamp - Start_Timestamp)) / (($max_sclk * $cu_per_gpu) * 0.00128)))
         LDS Utilization:
           value: AVG(((100 * SQ_LDS_IDX_ACTIVE) / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)))
-          unit: Pct of Peak
+          unit: Percent
           peak: 100
           pop: None
         L2 Cache Hit Rate:
           value: AVG((((100 * TCC_HIT_sum) / (TCC_HIT_sum + TCC_MISS_sum)) if ((TCC_HIT_sum
             + TCC_MISS_sum) != 0) else None))
-          unit: pct
+          unit: Percent
           peak: 100
           pop: AVG((((100 * TCC_HIT_sum) / (TCC_HIT_sum + TCC_MISS_sum)) if ((TCC_HIT_sum
             + TCC_MISS_sum) != 0) else None))
@@ -101,7 +101,7 @@ Panel Config:
             / ((($max_sclk / 1000) * 128) * TO_INT($total_l2_chan)))
         L2 Cache Utilization:
           value: AVG(((TCC_BUSY_sum * 100) / (TO_INT($total_l2_chan) * $GRBM_GUI_ACTIVE_PER_XCD)))
-          unit: pct
+          unit: Percent
           peak: 100
           pop: None
         L2-Fabric Read BW:
@@ -128,7 +128,7 @@ Panel Config:
             64))) / ((($max_sclk / 1000) * 64) * $sqc_per_gpu))
         L1I Hit Rate:
           value: AVG(((100 * SQC_ICACHE_HITS) / (SQC_ICACHE_HITS + SQC_ICACHE_MISSES)))
-          unit: pct
+          unit: Percent
           peak: 100
           pop: AVG(((100 * SQC_ICACHE_HITS) / (SQC_ICACHE_HITS + SQC_ICACHE_MISSES)))
         L1I BW:
@@ -139,12 +139,12 @@ Panel Config:
             64))) / ((($max_sclk / 1000) * 64) * $sqc_per_gpu))
         Address Processing Unit Busy:
           avg: AVG(((100 * TA_TA_BUSY_sum) / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)))
-          unit: pct
+          unit: Percent
           peak: 100
           pop: N/A
         Data-Return Busy:
           avg: AVG(((100 * TD_TD_BUSY_sum) / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)))
-          unit: pct
+          unit: Percent
           peak: 100
           pop: N/A
         L1I-L2 Bandwidth:

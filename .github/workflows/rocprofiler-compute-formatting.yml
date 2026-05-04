@@ -30,7 +30,7 @@ jobs:
 
     steps:
     - name: Checkout
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
       with:
         sparse-checkout: projects/rocprofiler-compute
     - name: Set up Python '3.x'
@@ -45,7 +45,7 @@ jobs:
         if [ -f requirements.txt ]; then python -m pip install -r requirements.txt; fi
     - name: Run Ruff Linter and Import Sorter
       run: |
-        ruff check . --fix --exit-zero
+        ruff check . --fix
     - name: Run Ruff Formatter
       run: |
         ruff format .
@@ -66,7 +66,7 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v6
       with:
         sparse-checkout: projects/rocprofiler-compute
     - name: Install dependencies
@@ -74,7 +74,7 @@ jobs:
       run: |
         sudo apt-get update
         sudo apt-get install -y python3-pip
-        python3 -m pip install gersemi
+        python3 -m pip install gersemi==0.22.1
     - name: gersemi
       working-directory: projects/rocprofiler-compute
       run: |
@@ -93,7 +93,7 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v6
       with:
         sparse-checkout: projects/rocprofiler-compute
     - name: Install dependencies
@@ -101,7 +101,7 @@ jobs:
       run: |
         sudo apt-get update
         sudo apt-get install -y python3-pip
-        python3 -m pip install clang-format
+        python3 -m pip install clang-format==22.1.0
     - name: clang-format
       working-directory: projects/rocprofiler-compute
       run: |
@@ -120,7 +120,7 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v6
       with:
         sparse-checkout: projects/rocprofiler-compute
     - name: find-bytecode

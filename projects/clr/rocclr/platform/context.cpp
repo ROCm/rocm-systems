@@ -1,22 +1,8 @@
-/* Copyright (c) 2008 - 2021 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include "platform/context.hpp"
 #include "platform/interop_gl.hpp"
@@ -364,10 +350,18 @@ void* Context::svmAlloc(size_t size, size_t alignment, cl_svm_mem_flags flags,
 
 void Context::svmFree(void* ptr) const {
   amd::ScopedLock lock(&ctxLock_);
+  // Atomically remove from map before any device frees the GPU VA.
+  // This prevents a concurrent allocation from reusing the same VA and being
+  // wrongly freed by a subsequent device iteration (MGPU race).
+  // The actual HSA free (release) is deferred until after all devices have
+  // iterated, so KFD cannot reuse the VA during the loop.
+  amd::Memory* svmMem = amd::MemObjMap::FindAndRemoveMemObj(ptr);
   for (const auto& dev : svmAllocDevice_) {
-    dev->svmFree(ptr);
+    dev->svmFree(ptr);  // FindMemObj returns nullptr → no-op for GPU path
   }
-  return;
+  if (svmMem != nullptr) {
+    svmMem->release();
+  }
 }
 
 bool Context::containsDevice(const Device* device) const {

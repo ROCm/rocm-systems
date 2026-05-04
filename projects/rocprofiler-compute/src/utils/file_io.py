@@ -1,27 +1,5 @@
-##############################################################################
-# MIT License
-#
-# Copyright (c) 2021 - 2025 Advanced Micro Devices, Inc. All Rights Reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
-
-##############################################################################
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier:  MIT
 
 import re
 from collections import OrderedDict
@@ -32,7 +10,7 @@ import pandas as pd
 import yaml
 
 import config
-from utils import rocpd_data, schema
+from utils import schema, utils_analysis
 from utils.kernel_name_shortener import kernel_name_shortener
 from utils.logger import (
     console_debug,
@@ -41,6 +19,7 @@ from utils.logger import (
     console_warning,
     demarcate,
 )
+from utils.utils_common import normalize_filter_to_str_list
 
 # TODO: use pandas chunksize or dask to read really large csv file
 # from dask import dataframe as dd
@@ -50,7 +29,14 @@ def load_sys_info(f: str) -> pd.DataFrame:
     """
     Load sys running info from csv file to a df.
     """
-    return pd.read_csv(f)
+    from utils.specs import canonical_gpu_arch
+
+    df = pd.read_csv(f)
+    if "gpu_arch" in df.columns and not df.empty:
+        df["gpu_arch"] = df["gpu_arch"].map(
+            lambda x: canonical_gpu_arch(str(x)) if pd.notna(x) else x
+        )
+    return df
 
 
 def load_panel_configs(
@@ -102,24 +88,28 @@ def create_df_kernel_top_stats(
     time_unit: str,
     kernel_verbose: int,
     sortby: str = "sum",
-) -> None:
+) -> tuple[pd.DataFrame, pd.DataFrame]:
     """
     Create top stats info by grouping kernels with user's filters.
+
+    Returns:
+        A tuple of (kernel_top_df, dispatch_info_df).
     """
 
     df = df_in["pmc_perf"].copy()
-
-    # Demangle original KernelNames
-    kernel_name_shortener(df, kernel_verbose)
 
     # The logic below for filters are the same as in parser.apply_filters(),
     # which can be merged together if need it.
 
     if filter_nodes:
-        df = df.loc[df["Node"].astype(str).isin([filter_nodes])]
+        df = df.loc[
+            df["Node"].astype(str).isin(normalize_filter_to_str_list(filter_nodes))
+        ]
 
     if filter_gpu_ids:
-        df = df.loc[df["GPU_ID"].astype(str).isin([filter_gpu_ids])]
+        df = df.loc[
+            df["GPU_ID"].astype(str).isin(normalize_filter_to_str_list(filter_gpu_ids))
+        ]
 
     if filter_dispatch_ids:
         # NB: support ignoring the 1st n dispatched execution by '> n'
@@ -212,9 +202,9 @@ def create_df_kernel_top_stats(
     if "Dispatch_ID" in df.columns:
         grouped = grouped.reset_index()
 
-    # Calculate percentage
+    # Calculate percent
     sum_column = f"Sum{time_unit_suffix}"
-    grouped["Pct"] = grouped[sum_column] / grouped[sum_column].sum() * 100
+    grouped["Percent"] = grouped[sum_column] / grouped[sum_column].sum() * 100
 
     #   Sort by total time as default.
     if sortby == "sum":
@@ -223,6 +213,73 @@ def create_df_kernel_top_stats(
     elif sortby == "kernel":
         grouped = grouped.sort_values("Kernel_Name")
         grouped.to_csv(str(Path(raw_data_dir) / "pmc_kernel_top.csv"), index=False)
+
+    return grouped.reset_index(drop=True), dispatch_info.reset_index(drop=True)
+
+
+def build_agent_to_gpu_map(
+    agent_info_path: Path,
+) -> dict[str, int]:
+    """
+    Map ``"Agent N"`` strings to 0-indexed GPU IDs.
+
+    GPU agents are identified by ``Agent_Type == "GPU"`` in the
+    agent info CSV.  They are sorted by ``Node_Id`` so that the
+    first GPU agent maps to GPU 0, the second to GPU 1, etc.
+
+    Returns an empty dict when *agent_info_path* does not exist.
+    """
+    if not agent_info_path.exists():
+        return {}
+
+    agent_df = pd.read_csv(agent_info_path)
+    gpu_agents = (
+        agent_df[agent_df["Agent_Type"] == "GPU"]
+        .sort_values("Node_Id")
+        .reset_index(drop=True)
+    )
+    return {f"Agent {row.Node_Id}": row.Index for row in gpu_agents.itertuples()}
+
+
+@demarcate
+def process_pc_sampling_kernel_trace(
+    workload_path: str,
+) -> pd.DataFrame:
+    """
+    Build kernel and dispatch info from a kernel trace.
+
+    Used for PC-sampling-only runs where ``pmc_perf`` data is not
+    available.  Reads ``ps_file_kernel_trace.csv`` (and optionally
+    ``ps_file_agent_info.csv`` for GPU ID mapping)
+    """
+    trace_path = Path(workload_path) / "ps_file_kernel_trace.csv"
+    if not trace_path.exists():
+        console_warning(
+            f"Kernel trace not found at {trace_path}. Cannot build dispatch data."
+        )
+        return pd.DataFrame(
+            columns=[
+                "Dispatch_Id",
+                "Kernel_Name",
+                "Start_Timestamp",
+                "End_Timestamp",
+                "GPU_ID",
+            ]
+        )
+
+    trace_df = pd.read_csv(trace_path)
+
+    # Map agent IDs to GPU IDs
+    agent_to_gpu = build_agent_to_gpu_map(
+        Path(workload_path) / "ps_file_agent_info.csv"
+    )
+    trace_df["GPU_ID"] = trace_df["Agent_Id"].map(agent_to_gpu).fillna(0).astype(int)
+
+    trace_df = trace_df[
+        ["Dispatch_Id", "Kernel_Name", "Start_Timestamp", "End_Timestamp", "GPU_ID"]
+    ]
+
+    return trace_df
 
 
 @demarcate
@@ -244,34 +301,45 @@ def create_df_pmc(
         dfs: list[pd.DataFrame] = []
         coll_levels: list[str] = []
 
-        for csv_file in Path(raw_data_dir).rglob("*.csv"):
-            file_name = csv_file.name
+        coll_level_map = {}
+        for file_name in Path(raw_data_dir).rglob("*.csv"):
+            # In csv format accumulator counters are specified as
+            # SQ_ACCUM_PREV_HIRES counter in the coll_level specific csv
+            if config_dict.get(
+                "format_rocprof_output"
+            ) == "csv" and file_name.name.startswith("pmc_perf_SQ"):
+                coll_level_map[file_name] = file_name.name[
+                    len("pmc_perf_") : -len(".csv")
+                ]
 
-            is_sq_file = file_name.startswith("SQ")
-            is_pmc_perf = file_name == f"{schema.PMC_PERF_FILE_PREFIX}.csv"
+            # coll_level for pmc_perf.csv
+            if file_name.name == f"{schema.PMC_PERF_FILE_PREFIX}.csv":
+                coll_level_map[file_name] = schema.PMC_PERF_FILE_PREFIX
 
-            if is_sq_file or is_pmc_perf:
-                tmp_df = pd.read_csv(csv_file)
+        for csv_file in coll_level_map:
+            tmp_df = pd.read_csv(csv_file)
 
-                if config_dict.get("format_rocprof_output") == "rocpd":
-                    tmp_df = rocpd_data.process_rocpd_csv(tmp_df)
+            if config_dict.get("format_rocprof_output") == "rocpd":
+                tmp_df = utils_analysis.process_rocpd_csv(tmp_df)
 
-                # Demangle original KernelNames
-                # Skip for Standalone Roofline with -1 to keep full kernel names
-                if kernel_verbose >= 0:
-                    kernel_name_shortener(tmp_df, kernel_verbose)
+            # Demangle original KernelNames
+            # Skip for Standalone Roofline with -1 to keep full kernel names
+            if kernel_verbose >= 0:
+                kernel_name_shortener(tmp_df, kernel_verbose)
 
-                # NB:
-                #   Idealy, the Node column should be added out of
-                #   multiindexing level. Here, we add it into pmc_perf
-                #   as it is the main sub-df which can be handled easily
-                #   later.
-                if file_name == "pmc_perf.csv" and node_name is not None:
-                    tmp_df.insert(0, "Node", node_name)
+            # NB:
+            #   Idealy, the Node column should be added out of
+            #   multiindexing level. Here, we add it into pmc_perf
+            #   as it is the main sub-df which can be handled easily
+            #   later.
+            if (
+                csv_file.name == f"{schema.PMC_PERF_FILE_PREFIX}.csv"
+                and node_name is not None
+            ):
+                tmp_df.insert(0, "Node", node_name)
 
-                dfs.append(tmp_df)
-                # Remove .csv extension for collection level
-                coll_levels.append(csv_file.stem)
+            dfs.append(tmp_df)
+            coll_levels.append(coll_level_map[csv_file])
 
         if not dfs:
             return pd.DataFrame()
@@ -400,3 +468,15 @@ def find_1st_sub_dir(directory: str) -> Optional[str]:
         return None
     except FileNotFoundError:
         console_error(f'The directory "{directory}" does not exist.', exit=False)
+
+
+def get_valid_nodes(directory: str) -> list[str]:
+    """Return subdirectory names that contain sysinfo.csv"""
+    dir_path = Path(directory)
+    if not dir_path.is_dir():
+        return []
+    return [
+        entry.name
+        for entry in dir_path.iterdir()
+        if entry.is_dir() and (entry / "sysinfo.csv").exists()
+    ]

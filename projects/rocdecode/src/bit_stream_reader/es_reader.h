@@ -101,8 +101,6 @@ class RocVideoESParser {
 
         bool ivf_file_header_read_; // indicator if IVF file header has been checked
 
-        RocDecLogger logger_;
-
         /*! \brief Function to retrieve the bitstream of a picture for AVC/HEVC
          * \param [out] p_pic_data Pointer to the picture data
          * \param [out] pic_size Size of the picture in bytes
@@ -129,7 +127,7 @@ class RocVideoESParser {
         /*! \brief Function to check the remaining data size in the ring buffer
          * \return Number of bytes still available in the ring
          */
-        int GetDataSizeInRB();
+        uint32_t GetDataSizeInRB();
 
         /*! \brief Function to read one byte from the ring buffer without advancing the read pointer
          * \param [in] offset The byte offset to read
@@ -205,7 +203,7 @@ class RocVideoESParser {
         int CheckHevcEStream(uint8_t *p_stream, int stream_size);
 
         /*! \brief Function to convert from Encapsulated Byte Sequence Packets to Raw Byte Sequence Payload
-        * \param [inout] stream_buffer A pointer of <tt>uint8_t</tt> for the converted RBSP buffer.
+        * \param [in,out] stream_buffer A pointer of <tt>uint8_t</tt> for the converted RBSP buffer.
         * \param [in] begin_bytepos Start position in the EBSP buffer to convert
         * \param [in] end_bytepos End position in the EBSP buffer to convert, generally it's size.
         * \return Returns the size of the converted buffer

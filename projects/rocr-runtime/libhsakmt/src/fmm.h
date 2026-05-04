@@ -156,4 +156,9 @@ void *hsakmt_mmap_allocate_aligned(int prot, int flags, uint64_t size, uint64_t 
 			    uint64_t guard_size, void *aper_base, void *aper_limit, int fd);
 
 extern int (*hsakmt_fn_amdgpu_device_get_fd)(HsaAMDGPUDeviceHandle device_handle);
+extern int (*hsakmt_fn_amdgpu_device_initialize2)(int fd,
+							 bool deduplicate_device,
+							 uint32_t *major_version,
+							 uint32_t *minor_version,
+							 HsaAMDGPUDeviceHandle *device_handle);
 #endif /* FMM_H_ */

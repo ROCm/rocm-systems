@@ -1,22 +1,6 @@
-# Copyright (c) 2020 - 2022 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 #
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 
 include(GNUInstallDirs)
 
@@ -57,8 +41,6 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Werror")
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-error=deprecated-declarations")
 endif()
-
-option(DISABLE_DIRECT_DISPATCH "Disable Direct Dispatch" OFF)
 
 option(BUILD_SHARED_LIBS "Build the shared library" ON)
 
@@ -151,7 +133,25 @@ endif()
 
 if(BUILD_SHARED_LIBS)
   if(WIN32)
-    target_sources(amdhip64 PRIVATE amdhip.def)
+    set(AMDHIP_DEF_OUTPUT "${PROJECT_BINARY_DIR}/amdhip.def")
+
+    # ROCCLR_ENABLE_HSA is known at configure time; use configure_file to
+    # conditionally include the HSA export block instead of invoking the C
+    # preprocessor at build time (cl.exe does not support GCC-style -E -P -o).
+    if(ROCCLR_ENABLE_HSA)
+      set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+        "${CMAKE_CURRENT_LIST_DIR}/hsa_exports.def")
+      file(READ "${CMAKE_CURRENT_LIST_DIR}/hsa_exports.def" HSA_EXPORTS)
+    else()
+      set(HSA_EXPORTS "")
+    endif()
+
+    configure_file("${CMAKE_CURRENT_LIST_DIR}/amdhip.def.in" "${AMDHIP_DEF_OUTPUT}" @ONLY)
+
+    # For MSVC, pass the .def file directly to the linker with /DEF: flag
+    string(REPLACE "/" "\\" AMDHIP_DEF_OUTPUT_NATIVE "${AMDHIP_DEF_OUTPUT}")
+    target_link_options(amdhip64 PRIVATE "/DEF:${AMDHIP_DEF_OUTPUT_NATIVE}")
+    set_target_properties(amdhip64 PROPERTIES LINK_DEPENDS "${AMDHIP_DEF_OUTPUT}")
   else()
     target_link_libraries(amdhip64 PRIVATE "-Wl,--version-script=${CMAKE_CURRENT_LIST_DIR}/hip_hcc.map.in")
     set_target_properties(amdhip64 PROPERTIES LINK_DEPENDS "${CMAKE_CURRENT_LIST_DIR}/hip_hcc.map.in")
@@ -190,10 +190,6 @@ else()
   target_include_directories(amdhip64 PRIVATE $<TARGET_PROPERTY:rocclr,INCLUDE_DIRECTORIES>)
 endif()
 
-if(DISABLE_DIRECT_DISPATCH)
-  target_compile_definitions(amdhip64 PRIVATE DISABLE_DIRECT_DISPATCH)
-endif()
-
 # Optional rocm-kpack support for kpack split artifacts
 # This option will be enabled permanently at a future point and gates the use
 # of the rocm-kpack library for detecting ROCm multi-arch archives in
@@ -216,6 +212,10 @@ if(__HIP_ENABLE_PCH)
   # find_package(LLVM) returns the lib/cmake/llvm location. We require the root.
   if(NOT DEFINED HIP_LLVM_ROOT)
     set(HIP_LLVM_ROOT "${LLVM_DIR}/../../..")
+    if(NOT EXISTS "${HIP_LLVM_ROOT}/bin/clang")
+      # required because Rock installs llvm to /opt/rocm/lib/llvm
+      set(HIP_LLVM_ROOT "${LLVM_DIR}/../../llvm")
+    endif()
   endif()
 
   execute_process(COMMAND sh -c "${CMAKE_CURRENT_SOURCE_DIR}/hip_embed_pch.sh ${HIP_COMMON_INCLUDE_DIR} ${PROJECT_BINARY_DIR}/include ${PROJECT_SOURCE_DIR}/include ${HIP_LLVM_ROOT}" COMMAND_ECHO STDERR RESULT_VARIABLE EMBED_PCH_RC WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
@@ -314,7 +314,7 @@ endif()
 if(HIP_ENABLE_ROCPROFILER_REGISTER)
     find_package(rocprofiler-register REQUIRED
         HINTS $ENV{rocprofiler_register_ROOT} $ENV{ROCPROFILER_REGISTER_ROOT} ${CMAKE_INSTALL_PREFIX}
-        PATHS /opt/rocm)
+        PATHS ${ROCM_PATH})
 
     # don't use HIP_VERSION_PATCH because it is too large (> 100) for rocprofiler register
     target_compile_definitions(amdhip64 PRIVATE HIP_ROCPROFILER_REGISTER=1

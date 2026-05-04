@@ -1,24 +1,8 @@
 /*
-Copyright (c) 2015 - 2023 Advanced Micro Devices, Inc. All rights reserved.
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 /**
 
@@ -415,6 +399,9 @@ typedef enum __HIP_NODISCARD hipError_t {
                                  ///< in production systems.
   hipErrorRuntimeOther = 1053,   ///< HSA runtime call other than memory returned error.  Typically
                                  ///< not seen in production systems.
+  hipErrorInvalidClusterSize = 1054,    ///< The specified cluster size is invalid, for instance
+                                       ///< when passing launch configurations to occupancy
+                                      ///< calculations
   hipErrorTbd                    ///< Marker that more error codes are needed.
 } hipError_t;
 
@@ -560,6 +547,9 @@ typedef enum hipDeviceAttribute_t {
   hipDeviceAttributeHostNumaId,             ///< NUMA ID of the cpu node closest to the device,
                                             ///< or -1 when NUMA isn't supported
   hipDeviceAttributeDmaBufSupported,  ///< Device supports DMABuf buffer sharing
+  hipDeviceAttributeGPUDirectRDMAWithHipVMMSupported,  ///< GPU Direct RDMA with HIP VMM is supported
+                                                       ///< (requires DMA-Buf and HIP virtual memory
+                                                       ///< management)
 
   hipDeviceAttributeCudaCompatibleEnd = 9999,
   hipDeviceAttributeAmdSpecificBegin = 10000,
@@ -918,7 +908,7 @@ enum hipLimit_t {
 #define hipHostRegisterMapped 0x2
 
 /** The passed memory pointer is treated as pointing to some memory-mapped I/O space, e.g.
- * belonging to a third-party PCIe device, and it will be marked as non cache-coherent and 
+ * belonging to a third-party PCIe device, and it will be marked as non cache-coherent and
  * contiguous.
  * */
 #define hipHostRegisterIoMemory 0x4
@@ -968,6 +958,10 @@ enum hipLimit_t {
 #define hipStreamWaitValueEq 0x1
 #define hipStreamWaitValueAnd 0x2
 #define hipStreamWaitValueNor 0x3
+// Flags to be used with hipStreamWriteValue32 and hipStreamWriteValue64.
+#define hipStreamWriteValueDefault 0x0
+#define hipExtStreamWriteValueIncrement 0x1000
+#define hipExtStreamWriteValueDecrement 0x1001
 
 /** Operations for hipStreamBatchMemOp*/
 typedef enum hipStreamBatchMemOpType {
@@ -1269,10 +1263,14 @@ typedef struct hipMemPoolPtrExportData {
  * @warning On AMD devices and some Nvidia devices, these hints and controls are ignored.
  */
 typedef enum hipFuncAttribute {
-  hipFuncAttributeMaxDynamicSharedMemorySize =
-      8,  ///< The maximum number of bytes requested for dynamically allocated shared memory
-  hipFuncAttributePreferredSharedMemoryCarveout =
-      9,  ///< Sets the percentage of total shared memory allocated as the shared memory carveout
+  hipFuncAttributeMaxDynamicSharedMemorySize = 8,          ///< The maximum number of bytes requested for dynamically allocated shared memory
+  hipFuncAttributePreferredSharedMemoryCarveout = 9,       ///< Sets the percentage of total shared memory allocated as the shared memory carveout
+  hipFuncAttributeClusterDimMustBeSet = 10,                ///< The kernel must launch with a valid cluster size specified.
+  hipFuncAttributeRequiredClusterWidth = 11,               ///< The required cluster width in blocks
+  hipFuncAttributeRequiredClusterHeight = 12,              ///< The required cluster height in blocks
+  hipFuncAttributeRequiredClusterDepth = 13,               ///< The required cluster depth in blocks
+  hipFuncAttributeNonPortableClusterSizeAllowed = 14,      ///< Is the function allowed to launch with non-portable cluster size.
+  hipFuncAttributeClusterSchedulingPolicyPreference = 15,  ///< The block scheduling policy of a function.
   hipFuncAttributeMax
 } hipFuncAttribute;
 /**
@@ -1580,15 +1578,26 @@ typedef enum hipSynchronizationPolicy {
   hipSyncPolicyYield = 3,       /**< Host spins but yields to other threads, reducing CPU usage */
   hipSyncPolicyBlockingSync = 4 /**< Host thread blocks (sleeps) until the stream completes */
 } hipSynchronizationPolicy;
+/* Cluster scheduling policies passed to hipFuncSetAttribute
+*/
+typedef enum hipClusterSchedulingPolicy {
+  hipClusterSchedulingPolicyDefault = 0,  ///< the default scheduling policy
+  hipClusterSchedulingPolicySpread = 1,   ///< distribute blocks evenly across cluster's CUs
+  hipClusterSchedulingPolicyLoadBalancing =
+      2,  ///< Dynamically balance block assignment to optimize resource usage
+} hipClusterSchedulingPolicy;
 
 /**
  *  Launch Attribute ID
  */
 typedef enum hipLaunchAttributeID {
-  hipLaunchAttributeAccessPolicyWindow = 1,     ///< Valid for Streams, graph nodes, launches
-  hipLaunchAttributeCooperative = 2,            ///< Valid for graph nodes, launches
-  hipLaunchAttributeSynchronizationPolicy = 3,  ///< Valid for streams
-  hipLaunchAttributePriority = 8,               ///< Valid for graph node, streams, launches
+  hipLaunchAttributeIgnore = 0,                            ///< Ignored entry
+  hipLaunchAttributeAccessPolicyWindow = 1,                ///< Valid for Streams, graph nodes, launches
+  hipLaunchAttributeCooperative = 2,                       ///< Valid for graph nodes, launches
+  hipLaunchAttributeSynchronizationPolicy = 3,             ///< Valid for streams
+  hipLaunchAttributeClusterDimension = 4,                  ///< Valid for graph nodes, launches
+  hipLaunchAttributeClusterSchedulingPolicyPreference = 5, ///< Valid for graph nodes, launches
+  hipLaunchAttributePriority = 8, ///< Valid for graph node, streams, launches
   hipLaunchAttributeMemSyncDomainMap = 9,       ///< Valid for streams, graph nodes, launches
   hipLaunchAttributeMemSyncDomain = 10,         ///< Valid for streams, graph nodes, launches
   hipLaunchAttributeMax
@@ -1613,6 +1622,26 @@ typedef union hipLaunchAttributeValue {
       memSyncDomainMap;  ///< Value of launch attribute hipLaunchAttributeMemSyncDomainMap
   hipLaunchMemSyncDomain
       memSyncDomain;  ///< Value of launch attribute hipLaunchAttributeMemSyncDomain
+  /**
+   * @brief Specifies the desired cluster dimensions for a kernel launch.
+   *
+   * This opaque type is used as the value for the launch attribute
+   * ::hipLaunchAttributeClusterDimension. It defines the dimensions of the
+   * compute cluster in terms of blocks, where each field must evenly divide
+   * the corresponding grid dimension:
+   *
+   *  - \p x: Number of blocks along the X-axis.
+   *  - \p y: Number of blocks along the Y-axis.
+   *  - \p z: Number of blocks along the Z-axis.
+   */
+  struct {
+    unsigned int x;
+    unsigned int y;
+    unsigned int z;
+  } clusterDim;
+
+  hipClusterSchedulingPolicy clusterSchedulingPolicyPreference;  ///< Value of launch attribute :: hipLaunchAttributeClusterSchedulingPolicyPreference
+                                                                 ///< determines the preferred strategy for distributing blocks within a compute cluster
 } hipLaunchAttributeValue;
 
 /**
@@ -2670,6 +2699,34 @@ hipError_t hipIpcOpenEventHandle(hipEvent_t* event, hipIpcEventHandle_t handle);
  *
  */
 hipError_t hipFuncSetAttribute(const void* func, hipFuncAttribute attr, int value);
+
+/**
+ * @brief Set attribute for a specific kernel
+ *
+ * @param [in] attrib Attribute to set
+ * @param [in] value Value to set
+ * @param [in] kernel Kernel to set attribute for
+ * @param [in] dev Device kernel execute on
+ *
+ * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorInvalidHandle,
+ * #hipErrorInvalidDevice, #hipErrorInvalidDeviceFunction, #hipErrorMissingConfiguration
+ * Note: AMD devices and some Nvidia GPUS do not support reconfigurable cache.  This hint is ignored
+ * on those architectures.
+ *
+ */
+
+hipError_t hipKernelSetAttribute(hipFunction_attribute attrib, int value, hipKernel_t kernel, hipDevice_t dev);
+
+/**
+ * @brief Function will be extracted for specific kernel
+ *
+ * @param [out] pFunc  Pointer to function handle for the kernel
+ * @param [in] kernel  kernel to get handle for
+ *
+ * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorNotFound
+ */
+hipError_t hipKernelGetFunction(hipFunction_t* pFunc, hipKernel_t kernel);
+
 /**
  * @brief Set Cache configuration for a specific function
  *
@@ -2681,6 +2738,7 @@ hipError_t hipFuncSetAttribute(const void* func, hipFuncAttribute attr, int valu
  * on those architectures.
  *
  */
+
 hipError_t hipFuncSetCacheConfig(const void* func, hipFuncCache_t config);
 /**
  * @brief Set shared memory configuation for a specific function
@@ -3929,6 +3987,27 @@ hipError_t hipMemPrefetchAsync(const void* dev_ptr, size_t count, int device,
  */
 hipError_t hipMemPrefetchAsync_v2(const void* dev_ptr, size_t count, hipMemLocation location,
                                   unsigned int flags, hipStream_t stream __dparm(0));
+
+/**
+ * @brief Prefetches a batch of memory ranges to the specified locations using HIP.
+ *
+ * @param [in] dev_ptrs      pointers to the memory ranges to prefetch
+ * @param [in] sizes      sizes in bytes of the memory ranges to prefetch
+ * @param [in] count      number of memory ranges to prefetch
+ * @param [in] prefetch_locs   locations to prefetch the memory ranges to
+ * @param [in] prefetch_loc_idxs  indices of the memory ranges to prefetch
+ * @param [in] num_prefetch_locs  number of locations to prefetch
+ * @param [in] flags      flags for future use, must be zero now.
+ * @param [in] stream    stream to enqueue the prefetch operation
+ *
+ * @returns #hipSuccess, #hipErrorInvalidValue
+ *
+ * @note  This API is implemented on Linux and is under development on Microsoft Windows.
+ */
+hipError_t hipMemPrefetchBatchAsync(void** dev_ptrs, size_t* sizes, size_t count,
+                                    hipMemLocation* prefetch_locs, size_t* prefetch_loc_idxs,
+                                    size_t num_prefetch_locs, unsigned long long flags,
+                                    hipStream_t stream);
 /**
  * @brief Advise about the usage of a given memory range to HIP.
  *
@@ -6420,6 +6499,36 @@ hipError_t hipModuleGetFunction(hipFunction_t* function, hipModule_t module, con
 hipError_t hipModuleGetFunctionCount(unsigned int* count, hipModule_t mod);
 
 /**
+ * @brief Returns information about a kernel.
+ *
+ * @param[out] pi Returned attribute value
+ * @param[in] attrib Attribute requested
+ * @param[in] kernel Kernel to query attribute of
+ * @param[in] dev Device to query attribute of
+ *
+ * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorInvalidHandle, #hipErrorInvalidDevice, #hipErrorInvalidDeviceFunction, #hipErrorMissingConfiguration
+ *
+ * Returns in *pi the integer value of the attribute attrib for the kernel kernel for the requested
+ device dev. The supported attributes are:
+ * - HIP_FUNC_ATTRIBUTE_MAX_THREADS_PER_BLOCK The maximum number of threads per block. This number depends on both the kernel and the requested device.
+ * - HIP_FUNC_ATTRIBUTE_SHARED_SIZE_BYTES The size in bytes of statically-allocated shared memory per block required by this kernel. This does not include dynamically-allocated shared memory requested by the user at runtime.
+ * - HIP_FUNC_ATTRIBUTE_CONST_SIZE_BYTES The size in bytes of user-allocated constant memory required by this kernel.
+ * - HIP_FUNC_ATTRIBUTE_LOCAL_SIZE_BYTES The size in bytes of local memory used by each thread of this kernel.
+ * - HIP_FUNC_ATTRIBUTE_NUM_REGS The number of registers used by each thread of this kernel.
+ * - HIP_FUNC_ATTRIBUTE_PTX_VERSION The PTX virtual architecture version for which the kernel was compiled. This value is the major PTX version * 10 + the minor PTX version, so a PTX version 1.3 function would return the value 13.
+ * - HIP_FUNC_ATTRIBUTE_BINARY_VERSION The binary architecture version for which the kernel was compiled. This value is the major binary version * 10 + the minor binary version, so a binary version 1.3 function would return the value 13.
+ * - HIP_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES The maximum size in bytes of dynamically-allocated shared memory.
+ * - HIP_FUNC_ATTRIBUTE_CACHE_MODE_CA The attribute to indicate whether the kernel has been compiled with user specified option "-Xptxas --dlcm=ca" set.
+ * - HIP_FUNC_ATTRIBUTE_PREFERRED_SHARED_MEMORY_CARVEOUT Preferred shared memory-L1 cache split ratio in percent of total shared memory.
+ *
+ * @see hipLibraryLoadData, hipLibraryLoadFromFile, hipLibraryUnload, hipKernelSetAttribute,
+ hipLibraryGetKernel, hipLaunchKernel, hipKernelGetFunction, hipLibraryGetModule,
+ hipModuleGetFunction, hipFuncGetAttribute
+ */
+hipError_t hipKernelGetAttribute(int* pi, hipFunction_attribute attrib, hipKernel_t kernel,
+                                 hipDevice_t dev);
+
+/**
  * @brief Load hip Library from inmemory object
  *
  * @param [out] library Output Library
@@ -6896,7 +7005,7 @@ hipError_t hipMemGetHandleForAddressRange(void* handle, hipDeviceptr_t dptr, siz
  *
  * @param [out] gridSize           minimum grid size for maximum potential occupancy
  * @param [out] blockSize          block size for maximum potential occupancy
- * @param [in]  f                  kernel function for which occupancy is calulated
+ * @param [in]  f                  kernel function for which occupancy is calculated
  * @param [in]  dynSharedMemPerBlk dynamic shared memory usage (in bytes) intended for each block
  * @param [in]  blockSizeLimit     the maximum block size for the kernel, use 0 for no limit
  *
@@ -6913,7 +7022,7 @@ hipError_t hipModuleOccupancyMaxPotentialBlockSize(int* gridSize, int* blockSize
  *
  * @param [out] gridSize           minimum grid size for maximum potential occupancy
  * @param [out] blockSize          block size for maximum potential occupancy
- * @param [in]  f                  kernel function for which occupancy is calulated
+ * @param [in]  f                  kernel function for which occupancy is calculated
  * @param [in]  dynSharedMemPerBlk dynamic shared memory usage (in bytes) intended for each block
  * @param [in]  blockSizeLimit     the maximum block size for the kernel, use 0 for no limit
  * @param [in]  flags            Extra flags for occupancy calculation (only default supported)
@@ -6932,7 +7041,7 @@ hipError_t hipModuleOccupancyMaxPotentialBlockSizeWithFlags(int* gridSize, int* 
  * @brief Returns occupancy for a device function.
  *
  * @param [out] numBlocks        Returned occupancy
- * @param [in]  f                Kernel function (hipFunction) for which occupancy is calulated
+ * @param [in]  f                Kernel function (hipFunction) for which occupancy is calculated
  * @param [in]  blockSize        Block size the kernel is intended to be launched with
  * @param [in]  dynSharedMemPerBlk Dynamic shared memory usage (in bytes) intended for each block
  * @returns  #hipSuccess, #hipErrorInvalidValue
@@ -6944,7 +7053,7 @@ hipError_t hipModuleOccupancyMaxActiveBlocksPerMultiprocessor(int* numBlocks, hi
  * @brief Returns occupancy for a device function.
  *
  * @param [out] numBlocks        Returned occupancy
- * @param [in]  f                Kernel function(hipFunction_t) for which occupancy is calulated
+ * @param [in]  f                Kernel function(hipFunction_t) for which occupancy is calculated
  * @param [in]  blockSize        Block size the kernel is intended to be launched with
  * @param [in]  dynSharedMemPerBlk Dynamic shared memory usage (in bytes) intended for each block
  * @param [in]  flags            Extra flags for occupancy calculation (only default supported)
@@ -6956,7 +7065,7 @@ hipError_t hipModuleOccupancyMaxActiveBlocksPerMultiprocessorWithFlags(
  * @brief Returns occupancy for a device function.
  *
  * @param [out] numBlocks        Returned occupancy
- * @param [in]  f                Kernel function for which occupancy is calulated
+ * @param [in]  f                Kernel function for which occupancy is calculated
  * @param [in]  blockSize        Block size the kernel is intended to be launched with
  * @param [in]  dynSharedMemPerBlk Dynamic shared memory usage (in bytes) intended for each block
  * @returns  #hipSuccess, #hipErrorInvalidDeviceFunction, #hipErrorInvalidValue
@@ -6967,7 +7076,7 @@ hipError_t hipOccupancyMaxActiveBlocksPerMultiprocessor(int* numBlocks, const vo
  * @brief Returns occupancy for a device function.
  *
  * @param [out] numBlocks        Returned occupancy
- * @param [in]  f                Kernel function for which occupancy is calulated
+ * @param [in]  f                Kernel function for which occupancy is calculated
  * @param [in]  blockSize        Block size the kernel is intended to be launched with
  * @param [in]  dynSharedMemPerBlk Dynamic shared memory usage (in bytes) intended for each block
  * @param [in]  flags            Extra flags for occupancy calculation (currently ignored)
@@ -6981,7 +7090,7 @@ hipError_t hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags(
  *
  * @param [out] gridSize           minimum grid size for maximum potential occupancy
  * @param [out] blockSize          block size for maximum potential occupancy
- * @param [in]  f                  kernel function for which occupancy is calulated
+ * @param [in]  f                  kernel function for which occupancy is calculated
  * @param [in]  dynSharedMemPerBlk dynamic shared memory usage (in bytes) intended for each block
  * @param [in]  blockSizeLimit     the maximum block size for the kernel, use 0 for no limit
  *
@@ -7009,6 +7118,31 @@ hipError_t hipOccupancyMaxPotentialBlockSize(int* gridSize, int* blockSize, cons
  */
 hipError_t hipOccupancyAvailableDynamicSMemPerBlock(size_t* dynamicSmemSize, const void* f,
                                                     int numBlocks, int blockSize);
+/**
+ * @brief determines the amount of active kernel clusters can co-exist at the same time in a device
+ *
+ * @param [out] numClusters the amount of clusters
+ * @param [in]  f           kernel function for which occupancy is calculated
+ * @param [in]  config      pointer to the kernel launch configuration structure
+ *
+ * @returns #hipSuccess, #hipErrorInvalidDeviceFunction, hipErrorInvalidClusterSize,
+ *          #hipErrorInvalidValue
+ */
+hipError_t hipOccupancyMaxActiveClusters(int* numClusters, const void* f,
+                                         const hipLaunchConfig_t* config);
+/**
+ * @brief returns the maximum cluster size (in number of blocks) that can run on the device
+ *
+ * @param [out] clusterSize the maximum cluster size
+ * @param [in]  f           kernel function for which occupancy is calculated
+ * @param [in]  config      pointer to the kernel launch configuration structure
+ *
+ * @returns #hipSuccess, #hipErrorInvalidDeviceFunction, hipErrorInvalidClusterSize,
+ *          #hipErrorInvalidValue
+ */
+hipError_t hipOccupancyMaxPotentialClusterSize(int* clusterSize, const void* f,
+                                               const hipLaunchConfig_t* config);
+
 // doxygen end Occupancy
 /**
  * @}
@@ -7957,7 +8091,7 @@ const char* hipKernelNameRef(const hipFunction_t f);
  * @param [in] hostFunction Pointer of host function.
  * @param [in] stream Stream the kernel is executed on.
  *
- * @returns #hipSuccess, #hipErrorInvalidValue
+ * @returns The name of the passed kernel function object, or nullptr.
  *
  */
 const char* hipKernelNameRefByPtr(const void* hostFunction, hipStream_t stream);
@@ -7966,7 +8100,7 @@ const char* hipKernelNameRefByPtr(const void* hostFunction, hipStream_t stream);
  *
  * @param [in] stream Stream of device executed on.
  *
- * @returns #hipSuccess, #hipErrorInvalidValue
+ * @returns The device ID on the stream.
  *
  */
 int hipGetStreamDeviceId(hipStream_t stream);
@@ -9317,6 +9451,24 @@ hipError_t hipDrvGraphExecMemcpyNodeSetParams(hipGraphExec_t hGraphExec, hipGrap
 hipError_t hipDrvGraphExecMemsetNodeSetParams(hipGraphExec_t hGraphExec, hipGraphNode_t hNode,
                                               const hipMemsetParams* memsetParams, hipCtx_t ctx);
 
+/**
+ * @brief Launches a HIP kernel using the driver API with the specified configuration.
+ * @ingroup Execution
+ *
+ * This function dispatches the device kernel represented by a HIP function object.
+ * It passes both the kernel parameters and any extra configuration arguments to the kernel launch.
+ *
+ * @param [in] config  Pointer to the kernel launch configuration structure.
+ * @param [in] f       HIP function object representing the device kernel to be launched.
+ * @param [in] params  Array of pointers to the kernel parameters.
+ * @param [in] extra   Array of pointers for additional launch parameters or extra configuration
+ * data.
+ *
+ * @returns #hipSuccess if the kernel is launched successfully, otherwise an appropriate error code.
+ */
+hipError_t hipDrvLaunchKernelEx(const HIP_LAUNCH_CONFIG* config, hipFunction_t f, void** params,
+                                void** extra);
+
 // doxygen end graph API
 /**
  * @}
@@ -9368,13 +9520,20 @@ hipError_t hipMemAddressReserve(void** ptr, size_t size, size_t alignment, void*
                                 unsigned long long flags);
 
 /**
- * @brief Creates a memory allocation described by the properties and size
+ * @brief Creates a memory handle for the allocation described by the properties and given size
  *
  * @param [out] handle - value of the returned handle.
  * @param [in] size - size of the allocation.
  * @param [in] prop - properties of the allocation.
  * @param [in] flags - currently unused, must be zero.
  * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorNotSupported
+ * 
+ * This API creates a memory allocation on the target device specified through the prop structure.
+ * The prop allocation type must be specified as either #hipMemAllocationTypePinned or
+ * #hipMemAllocationTypeUncached.
+ * The prop location type must be specified as #hipMemLocationTypeDevice or #hipMemLocationTypeHost.
+ * Any other value results in #hipErrorInvalidValue.
+ *
  * @warning This API is marked as Beta. While this feature is complete, it can
  *          change and might have outstanding issues.
  *
@@ -9653,9 +9812,7 @@ hipError_t hipCreateSurfaceObject(hipSurfaceObject_t* pSurfObject, const hipReso
  */
 hipError_t hipDestroySurfaceObject(hipSurfaceObject_t surfaceObject);
 // end of surface
-/**
- * @}
- */
+
 
 /**
  * @brief Enable HIP runtime logging.
@@ -9694,7 +9851,40 @@ hipError_t hipExtDisableLogging();
  * @see hipExtEnableLogging, hipExtDisableLogging
  */
 hipError_t hipExtSetLoggingParams(size_t log_level, size_t log_size, size_t log_mask);
-
+/**
+ * @brief Launches a HIP kernel using a generic function pointer and the specified configuration.
+ * @ingroup Execution
+ *
+ * This function is equivalent to hipLaunchKernelEx but accepts the kernel as a generic function
+ * pointer.
+ *
+ * @param [in] config                 Pointer to the kernel launch configuration structure.
+ * @param [in] fPtr                   Pointer to the device kernel function.
+ * @param [in] args                   Array of pointers to the kernel arguments.
+ *
+ * @returns #hipSuccess if the kernel is launched successfully, otherwise an appropriate error code.
+ */
+hipError_t hipLaunchKernelExC(const hipLaunchConfig_t* config, const void* fPtr, void** args);
+/**
+ * @brief Launches a HIP kernel using the driver API with the specified configuration.
+ * @ingroup Execution
+ *
+ * This function dispatches the device kernel represented by a HIP function object.
+ * It passes both the kernel parameters and any extra configuration arguments to the kernel launch.
+ *
+ * @param [in] config  Pointer to the kernel launch configuration structure.
+ * @param [in] f       HIP function object representing the device kernel to be launched.
+ * @param [in] params  Array of pointers to the kernel parameters.
+ * @param [in] extra   Array of pointers for additional launch parameters or extra configuration
+ * data.
+ *
+ * @returns #hipSuccess if the kernel is launched successfully, otherwise an appropriate error code.
+ */
+hipError_t hipDrvLaunchKernelEx(const HIP_LAUNCH_CONFIG* config, hipFunction_t f, void** params,
+                                void** extra);
+/**
+* @}
+*/
 #ifdef __cplusplus
 } /* extern "c" */
 #endif

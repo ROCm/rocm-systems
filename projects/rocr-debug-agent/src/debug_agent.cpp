@@ -58,6 +58,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <shared_mutex>
 #include <string>
 #include <thread>
 #include <type_traits>
@@ -110,6 +111,10 @@ std::optional<std::string> g_code_objects_dir;
 bool g_all_wavefronts{ false };
 bool g_precise_emmory{ false };
 bool g_precise_alu_exceptions{ false };
+bool g_lazy{ true };
+bool g_delay_loading{ false };
+
+static std::shared_mutex g_r_debug_r_state_mutex;
 
 /* Global state accessed by the dbgapi callbacks.  */
 std::optional<amd_dbgapi_breakpoint_id_t> g_rbrk_breakpoint_id;
@@ -625,14 +630,14 @@ stop_all_wavefronts (amd_dbgapi_process_id_t process_id)
   agent_log (log_level_t::info, "all wavefronts are stopped");
 }
 
-void
+std::vector<amd_dbgapi_code_object_id_t>
 print_wavefronts (amd_dbgapi_process_id_t process_id, bool all_wavefronts,
                   code_object_map_t &code_object_map)
 {
   /* This function is not thread-safe and not re-entrant.  */
   static std::mutex lock;
   if (!lock.try_lock ())
-    return;
+    return {};
   /* Make sure the lock is released when this function returns.  */
   std::scoped_lock sl (std::adopt_lock, lock);
 
@@ -644,6 +649,7 @@ print_wavefronts (amd_dbgapi_process_id_t process_id, bool all_wavefronts,
   DBGAPI_CHECK (amd_dbgapi_process_wave_list (process_id, &wave_count,
                                               &wave_ids, nullptr));
 
+  std::vector<amd_dbgapi_code_object_id_t> code_objects_disassembled;
   for (size_t i = 0; i < wave_count; ++i)
     {
       amd_dbgapi_wave_id_t wave_id = wave_ids[i];
@@ -857,6 +863,8 @@ print_wavefronts (amd_dbgapi_process_id_t process_id, bool all_wavefronts,
 
           /* Disassemble instructions around `pc`  */
           code_object_found->disassemble (architecture_id, pc);
+
+          code_objects_disassembled.emplace_back (code_object_found->id ());
         }
       else
         {
@@ -865,6 +873,7 @@ print_wavefronts (amd_dbgapi_process_id_t process_id, bool all_wavefronts,
     }
 
   free (wave_ids);
+  return code_objects_disassembled;
 }
 
 void
@@ -882,6 +891,26 @@ print_usage ()
             << std::endl
             << "                              "
                "the current directory."
+            << std::endl;
+  std::cerr << "  -c, --load-all-code-objects "
+               "Load all code objects as soon as they are loaded"
+            << std::endl
+            << "                              "
+            << "by the runtime.";
+  std::cerr << "  -z, --lazy                  "
+               "Delay inspecting the content of all loaded code "
+            << std::endl
+            << "                              "
+            << "obects until after an exception is reported."
+            << std::endl
+            << "                              "
+            << "Note that the application must not free the code "
+            << std::endl
+            << "                              "
+            << "objects' memory while they are loaded on the device."
+            << std::endl
+            << "                              "
+            << "This option is incompatible with -c."
             << std::endl;
   std::cerr << "  -p, --precise-memory        "
             << "Enable precise memory mode which ensures that " << std::endl
@@ -996,18 +1025,21 @@ process_dbgapi_events (amd_dbgapi_process_id_t process_id, bool all_wavefronts,
                   {
                     code_object_t code_object (code_objects_ids[i]);
 
-                    code_object.open ();
-                    if (!code_object.is_open ())
+                    if (!g_delay_loading)
                       {
-                        agent_warning ("could not open code_object_%ld",
-                                       code_objects_ids[i].handle);
-                        continue;
-                      }
+                        if (!code_object.open ())
+                          {
+                            agent_warning ("could not open code_object_%ld",
+                                           code_objects_ids[i].handle);
+                            continue;
+                          }
 
-                    if (g_code_objects_dir
-                        && !code_object.save (*g_code_objects_dir))
-                      agent_warning ("could not save code object to %s",
-                                     g_code_objects_dir->c_str ());
+                        if (!g_lazy && g_code_objects_dir
+                            && !code_object.save (*g_code_objects_dir))
+                          agent_warning ("could not save code object %s to %s",
+                                         code_object.uri ().c_str (),
+                                         g_code_objects_dir->c_str ());
+                      }
 
                     fresh_map.emplace (code_objects_ids[i],
                                        std::move (code_object));
@@ -1034,7 +1066,7 @@ process_dbgapi_events (amd_dbgapi_process_id_t process_id, bool all_wavefronts,
       DBGAPI_CHECK (amd_dbgapi_event_processed (event_id));
     }
 
-  /* Some events do not require us to do anythig more.  If so, just return
+  /* Some events do not require us to do anything more.  If so, just return
      early.  */
   if (!need_print_waves && !wave_need_resume)
     return;
@@ -1048,7 +1080,49 @@ process_dbgapi_events (amd_dbgapi_process_id_t process_id, bool all_wavefronts,
       process_id, AMD_DBGAPI_WAVE_CREATION_STOP));
 
   if (need_print_waves)
-    print_wavefronts (process_id, all_wavefronts, code_object_map);
+    {
+      if (g_delay_loading)
+        {
+          amd_dbgapi_breakpoint_action_t bpaction;
+          {
+            std::unique_lock<std::shared_mutex> lock (g_r_debug_r_state_mutex);
+            DBGAPI_CHECK (amd_dbgapi_report_breakpoint_hit (
+                g_rbrk_breakpoint_id.value (), 0, &bpaction));
+          }
+
+          if (bpaction == AMD_DBGAPI_BREAKPOINT_ACTION_HALT)
+            process_dbgapi_events (process_id, all_wavefronts,
+                                   code_object_map);
+        }
+
+      /* With --lazy,-z, code objects may not have been opened yet.
+         Open them now so we can resolve PCs to code objects.  */
+      for (auto it = code_object_map.begin (); it != code_object_map.end ();)
+        if (!it->second.is_open () && !it->second.open ())
+          {
+            agent_warning ("could not open code_object_%ld", it->first.handle);
+            it = code_object_map.erase (it);
+          }
+        else
+          ++it;
+
+      auto code_objects_disassembled
+          = print_wavefronts (process_id, all_wavefronts, code_object_map);
+
+      /* If the code objects were lazily loaded, save them now.  */
+      if (g_lazy && g_code_objects_dir)
+        for (auto &&code_object_id : code_objects_disassembled)
+          {
+            auto it = code_object_map.find (code_object_id);
+            agent_assert (it != code_object_map.end ());
+
+            auto &code_object = it->second;
+            if (!code_object.save (*g_code_objects_dir))
+              agent_warning ("could not save code object %s to %s",
+                             code_object.uri ().c_str (),
+                             g_code_objects_dir->c_str ());
+          }
+    }
 
   /* We now need to resume execution of the waves present.  This will allow any
      exception to be delivered to the runtime who will be able to act on it if
@@ -1549,19 +1623,29 @@ hsa_status_t
 debug_agent_hsa_executable_freeze (hsa_executable_t executable,
                                    const char *options)
 {
-  auto v = original_hsa_executable_freeze (executable, options);
+  hsa_status_t retval;
+  {
+    std::shared_lock<std::shared_mutex> lock (g_r_debug_r_state_mutex);
+    retval = original_hsa_executable_freeze (executable, options);
+  }
 
-  get_worker_thread ().update_code_object_list ();
-  return v;
+  if (!g_delay_loading)
+    get_worker_thread ().update_code_object_list ();
+  return retval;
 }
 
 hsa_status_t
 debug_agent_hsa_executable_destroy (hsa_executable_t executable)
 {
-  auto v = original_hsa_executable_destroy (executable);
+  hsa_status_t retval;
+  {
+    std::shared_lock<std::shared_mutex> lock (g_r_debug_r_state_mutex);
+    retval = original_hsa_executable_destroy (executable);
+  }
 
-  get_worker_thread ().update_code_object_list ();
-  return v;
+  if (!g_delay_loading)
+    get_worker_thread ().update_code_object_list ();
+  return retval;
 }
 
 } /* namespace.  */
@@ -1594,6 +1678,8 @@ OnLoad (void *table, uint64_t runtime_version, uint64_t failed_tool_count,
           { "log-level", required_argument, nullptr, 'l' },
           { "output", required_argument, nullptr, 'o' },
           { "save-code-objects", optional_argument, nullptr, 's' },
+          { "lazy", no_argument, nullptr, 'z' },
+          { "load-all-code-objects", no_argument, nullptr, 'c' },
           { "precise-memory", no_argument, nullptr, 'p' },
           { "precise-alu-exceptions", no_argument, nullptr, 'e' },
           { "help", no_argument, nullptr, 'h' },
@@ -1604,7 +1690,8 @@ OnLoad (void *table, uint64_t runtime_version, uint64_t failed_tool_count,
   int saved_optind = optind;
   optind = 1;
 
-  while (int c = getopt_long (argc, argv, ":as::o:dpel:h", options, nullptr))
+  while (int c
+         = getopt_long (argc, argv, ":as::o:dpezcl:h", options, nullptr))
     {
       if (c == -1)
         break;
@@ -1653,6 +1740,14 @@ OnLoad (void *table, uint64_t runtime_version, uint64_t failed_tool_count,
             print_usage ();
           break;
 
+        case 'c': /* -c or --load-all-code-objects.  */
+          g_lazy = false;
+          break;
+
+        case 'z': /* -z or --lazy. */
+          g_delay_loading = true;
+          break;
+
         case 's': /* -s or --save-code-objects  */
           if (argument)
             {
@@ -1691,6 +1786,13 @@ OnLoad (void *table, uint64_t runtime_version, uint64_t failed_tool_count,
         default:
           print_usage ();
         }
+    }
+
+  if (!g_lazy && g_delay_loading)
+    {
+      std::cerr << "\"--load-all-code-objects\" and \"--lazy\" are mutually "
+                   "exclusive" << std::endl;
+      print_usage ();
     }
 
   /* Restore the global optind.  */

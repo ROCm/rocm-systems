@@ -30,7 +30,7 @@ int aca_get_version_minor(void) { return RAS_DECODE_VERSION_MINOR; }
 
 int aca_get_version_patch(void) { return RAS_DECODE_VERSION_PATCH; }
 
-const char *aca_get_version_string(void) { return RAS_DECODE_VERSION_STRING; }
+const char* aca_get_version_string(void) { return RAS_DECODE_VERSION_STRING; }
 
 aca_version_info_t aca_get_version_info(void) {
   aca_version_info_t info;

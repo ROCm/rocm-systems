@@ -35,6 +35,16 @@ ROCPROFILER_EXTERN_C_INIT
  * @{
  */
 
+/// @brief Struct containing the information about the libraries which have registered
+/// with rocprofiler-register. @see rocprofiler_iterate_runtime_registration_info
+typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_runtime_registration_info_t
+{
+    size_t      size;              ///< in case of future extensions
+    const char* common_name;       ///< name of the library
+    uint32_t    lib_version;       ///< version
+    uint64_t    api_table_length;  ///< number of API tables
+} rocprofiler_runtime_registration_info_t;
+
 /**
  * @brief (experimental)
  *
@@ -61,6 +71,24 @@ typedef int (*rocprofiler_tool_attach_t)(rocprofiler_client_detach_t detach_func
  */
 ROCPROFILER_SDK_EXPERIMENTAL
 typedef void (*rocprofiler_tool_detach_t)(void* tool_data);
+
+/**
+ * @brief Callback function for iterating over the libraries which have registered
+ * with rocprofiler-register. @see rocprofiler_iterate_runtime_registration_info
+ *
+ * @param [in] info Pointer to library registration instance. Invokee should make a copy
+ * for reference outside of callback.
+ * @param [in] data User data passed to ::rocprofiler_iterate_runtime_registration_info
+ * @return int
+ * @retval 0 If zero is returned from callback, rocprofiler-register will continue to next
+ * registration info, if one exists
+ * @retval -1 If -1 (or any value != 0) is returned from callback, rocprofiler-register
+ * will cease to iterate over the remaining registration info, if any exists
+ */
+ROCPROFILER_SDK_EXPERIMENTAL
+typedef int (*rocprofiler_runtime_registration_info_cb_t)(
+    rocprofiler_runtime_registration_info_t* info,
+    void*                                    data);
 
 /**
  * @brief (EXPERIMENTAL) Extended data structure containing initialization, finalization,
@@ -112,6 +140,24 @@ typedef rocprofiler_tool_configure_attach_result_t* (*rocprofiler_configure_atta
     const char*              runtime_version,
     uint32_t                 priority,
     rocprofiler_client_id_t* client_id);
+
+/**
+ * @brief Iterates over all the (valid) libraries which registered their API tables with
+ * rocprofiler-register. Any libraries which do not have an accepted common name, have an
+ * invalid import function address (in secure mode), or have registered too many instances
+ * are not reported by this function.
+ *
+ * @param [in] callback Callback function to invoke for each valid registered library
+ * @param [in] data User data to pass to the callback function
+ * @return ::rocprofiler_status_t
+ * @retval ::ROCPROFILER_STATUS_SUCCESS if iteration completes successfully
+ * @retval other ::rocprofiler_status_t values if an error occurs
+ */
+ROCPROFILER_SDK_EXPERIMENTAL
+rocprofiler_status_t
+rocprofiler_iterate_runtime_registration_info(rocprofiler_runtime_registration_info_cb_t callback,
+                                              void*                                      data)
+    ROCPROFILER_ATTRIBUTE(nonnull(1)) ROCPROFILER_API;
 
 /** @} */
 

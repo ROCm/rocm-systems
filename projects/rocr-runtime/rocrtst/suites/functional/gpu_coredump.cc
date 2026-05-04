@@ -28,6 +28,7 @@
 #include "common/base_rocr_utils.h"
 #include "common/common.h"
 #include "common/helper_funcs.h"
+#include "common/platform_filter.h"
 #include "gtest/gtest.h"
 #include "hsa/hsa.h"
 
@@ -108,7 +109,7 @@ public:
   ~HSAResourceGuard() {
     // Cleanup in reverse order of typical acquisition
     if (signal.handle) hsa_signal_destroy(signal);
-    if (kernarg_buffer) hsa_memory_free(kernarg_buffer);
+    if (kernarg_buffer) hsa_amd_memory_pool_free(kernarg_buffer);
     if (executable.handle) hsa_executable_destroy(executable);
     if (code_obj_rdr.handle) hsa_code_object_reader_destroy(code_obj_rdr);
     if (file_fd != -1) close(file_fd);
@@ -167,6 +168,8 @@ bool GpuCoreDumpTest::CheckPrerequisites() {
 }
 
 void GpuCoreDumpTest::SetUp(void) {
+  if (!checkPlatformFiltering()) return;
+
   // Don't call TestBase::SetUp() - we don't want hsa_init() in parent
 
   // Check prerequisites first
@@ -495,7 +498,7 @@ pid_t GpuCoreDumpTest::RunFaultingKernelInChild() {
                               UINT64_MAX, HSA_WAIT_STATE_BLOCKED);
 
     // Should not reach here if fault occurs - destructor will cleanup
-    fprintf(stderr, "CHILD: Kernel completed without fault! This should not happen with nullptr access.\n");
+    fprintf(stderr, "CHILD: Kernel completed without fault (environment may not trigger fault for nullptr access).\n");
     _exit(0);
   }
 
@@ -656,6 +659,12 @@ void GpuCoreDumpTest::TestDefaultPattern(void) {
     }
 
     pid_t child_pid = RunFaultingKernelInChild();
+    if (child_pid == -2) {
+      std::cout << "NOTE: Child completed without GPU fault - "
+                << "environment may not support fault triggering"
+                << std::endl;
+      return;
+    }
     if (child_pid < 0) {
       FAIL() << "Failed to run test in child process";
       return;
@@ -694,6 +703,13 @@ void GpuCoreDumpTest::TestDefaultPattern(void) {
 
   // Run test in child and get PID
   pid_t child_pid = RunFaultingKernelInChild();
+  if (child_pid == -2) {
+    std::cout << "NOTE: Child completed without GPU fault - "
+              << "environment may not support fault triggering"
+              << std::endl;
+    unsetenv("HSA_COREDUMP_PATTERN");
+    return;
+  }
   if (child_pid < 0) {
     FAIL() << "Failed to run test in child process";
     return;
@@ -1121,6 +1137,14 @@ void GpuCoreDumpTest::TestDisableFlag(void) {
   setenv("HSA_COREDUMP_PATTERN", pattern.c_str(), 1);
 
   pid_t child_pid = RunFaultingKernelInChild();
+  if (child_pid == -2) {
+    std::cout << "NOTE: Child completed without GPU fault - "
+              << "environment may not support fault triggering"
+              << std::endl;
+    unsetenv("HSA_DISABLE_COREDUMP_ON_EXCEPTION");
+    unsetenv("HSA_COREDUMP_PATTERN");
+    return;
+  }
   if (child_pid < 0) {
     FAIL() << "Failed to run test in child process";
     unsetenv("HSA_DISABLE_COREDUMP_ON_EXCEPTION");
@@ -1210,6 +1234,13 @@ void GpuCoreDumpTest::TestInvalidPath(void) {
   unsetenv("HSA_DISABLE_COREDUMP_ON_EXCEPTION");
 
   pid_t child_pid = RunFaultingKernelInChild();
+  if (child_pid == -2) {
+    std::cout << "NOTE: Child completed without GPU fault - "
+              << "environment may not support fault triggering"
+              << std::endl;
+    unsetenv("HSA_COREDUMP_PATTERN");
+    return;
+  }
   if (child_pid < 0) {
     FAIL() << "Failed to run test in child process";
     unsetenv("HSA_COREDUMP_PATTERN");

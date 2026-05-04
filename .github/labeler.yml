@@ -14,6 +14,12 @@
 - changed-files:
   - any-glob-to-any-file: 'projects/hip/**/*'
 
+"project: hipfile":
+- changed-files:
+  - any-glob-to-any-file:
+    - 'projects/hipfile/**/*'
+    - '.github/workflows/hipfile-*'
+
 "project: hipother":
 - changed-files:
   - any-glob-to-any-file: 'projects/hipother/**/*'
@@ -65,6 +71,10 @@
 "project: rocprofiler-systems":
 - changed-files:
   - any-glob-to-any-file: 'projects/rocprofiler-systems/**/*'
+
+"project: rocprof-trace-decoder":
+- changed-files:
+  - any-glob-to-any-file: 'projects/rocprof-trace-decoder/**/*'
 
 "project: rocr-runtime":
 - changed-files:

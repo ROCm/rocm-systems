@@ -57,6 +57,9 @@ class TestBase : public rocrtst::BaseRocR {
 
   virtual ~TestBase(void);
 
+  // Check if test was skipped due to platform filtering
+  bool isTestSkipped() const { return test_skipped_; }
+
   enum VerboseLevel {VERBOSE_MIN = 0, VERBOSE_STANDARD, VERBOSE_PROGRESS};
 
   // @Brief: Before run the core measure codes, do something to set up
@@ -85,8 +88,20 @@ class TestBase : public rocrtst::BaseRocR {
   // @Brief: Emit close output string only.  For tests with custom close.
   void ClosePrint(void);
 
+  bool Skip() const { return skip_; }
+
+  void markAsSkip() { skip_ = true; }
+
+ protected:
+  // Check platform filtering and set test_skipped_ if test should be skipped
+  // Returns false if test should be skipped, true if it should run
+  bool checkPlatformFiltering();
+
+  bool test_skipped_ = false;
+
  private:
   std::string description_;
+  bool skip_;
 };
 
 #endif  // ROCRTST_SUITES_TEST_COMMON_TEST_BASE_H_

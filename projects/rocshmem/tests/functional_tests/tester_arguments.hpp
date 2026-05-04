@@ -35,8 +35,18 @@
 enum TeamSplitType {
   ROCSHMEM_TEST_TEAM_DUP = 0,    // Dup parent team
   ROCSHMEM_TEST_TEAM_SINGLE,     // each PE will be its own team
-  ROCSHMEM_TEST_TEAM_BLOCK,      // split parent into two halfs
+  ROCSHMEM_TEST_TEAM_BLOCK,      // split parent into two halves
   ROCSHMEM_TEST_TEAM_ODDEVEN,    // odd-even splitting
+  ROCSHMEM_TEST_TEAM_SHARED,     // predefined ROCSHMEM_TEAM_SHARED
+};
+
+enum UserBufType {
+  USER_BUF_TYPE_HOST,
+  USER_BUF_TYPE_DEVICE,
+  USER_BUF_TYPE_FINE,
+  USER_BUF_TYPE_UNCACHED,
+  USER_BUF_TYPE_MANAGED,
+  USER_BUF_TYPE_HEAP,
 };
 
 /*-----------------------------------------
@@ -65,6 +75,11 @@ class TesterArguments {
 
 public:
   /**
+   * Program name (argv[0]) for path resolution, e.g. finding HSACO next to binary
+   */
+  std::string executable_name;
+
+  /**
    * Arguments obtained from command line
    */
   unsigned num_wgs = 1;
@@ -79,6 +94,7 @@ public:
   unsigned op_type = 0;
   unsigned shmem_context = rocshmem::ROCSHMEM_CTX_WG_PRIVATE;
   AddrMode addr_mode = AddrMode::PerBlock;
+  enum UserBufType local_buf_type = USER_BUF_TYPE_HEAP;
 
   /**
    * Arguments obtained from rocshmem

@@ -1,22 +1,8 @@
-/* Copyright (c) 2015 - 2023 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 //! Implementation of GPU device memory management
 
@@ -468,7 +454,7 @@ Memory::~Memory() {
 }
 
 void Memory::syncCacheFromHost(VirtualGPU& gpu, device::Memory::SyncFlags syncFlags) {
-  amd::ScopedLock lock(owner()->lockMemoryOps());
+  std::scoped_lock lock(owner()->lockMemoryOps());
   // If the last writer was another GPU, then make a writeback
   if (isChacheCoherencySync() && (owner()->getLastWriter() != nullptr) &&
       (&dev() != owner()->getLastWriter())) {
@@ -493,7 +479,7 @@ void Memory::syncCacheFromHost(VirtualGPU& gpu, device::Memory::SyncFlags syncFl
       // Make sure the parent sync is an unique operation.
       // If the app uses multiple subbuffers from multiple queues,
       // then the parent sync can be called from multiple threads
-      amd::ScopedLock lock(owner()->parent()->lockMemoryOps());
+      std::scoped_lock lock(owner()->parent()->lockMemoryOps());
       gpuMemory->syncCacheFromHost(gpu, syncFlagsTmp);
       //! \note Don't do early exit here, since we still have to sync
       //! this view, if the parent sync operation was a NOP.
@@ -606,7 +592,7 @@ void Memory::syncHostFromCache(device::VirtualDevice* vDev, device::Memory::Sync
       // Make sure the parent sync is an unique operation.
       // If the app uses multiple subbuffers from multiple queues,
       // then the parent sync can be called from multiple threads
-      amd::ScopedLock lock(owner()->parent()->lockMemoryOps());
+      std::scoped_lock lock(owner()->parent()->lockMemoryOps());
       m->syncHostFromCache(gpu, syncFlagsTmp);
       //! \note Don't do early exit here, since we still have to sync
       //! this view, if the parent sync operation was a NOP.
@@ -634,7 +620,7 @@ void Memory::syncHostFromCache(device::VirtualDevice* vDev, device::Memory::Sync
         syncFlagsTmp.skipEntire_ = syncFlags.skipEntire_;
       }
 
-      amd::ScopedLock lock(owner()->lockMemoryOps());
+      std::scoped_lock lock(owner()->lockMemoryOps());
       for (auto& sub : owner()->subBuffers()) {
         //! \note Don't allow subbuffer's allocation in the worker thread.
         //! It may cause a system lock, because possible resource
@@ -733,7 +719,7 @@ pal::Memory* Memory::createBufferView(amd::Memory& subBufferOwner) {
 
 void Memory::decIndMapCount() {
   // Map/unmap must be serialized
-  amd::ScopedLock lock(owner()->lockMemoryOps());
+  std::scoped_lock lock(owner()->lockMemoryOps());
 
   if (indirectMapCount_ == 0) {
     if (!mipMapped()) {
@@ -772,7 +758,7 @@ void* Memory::allocMapTarget(const amd::Coord3D& origin, const amd::Coord3D& reg
   assert(owner() != nullptr);
 
   // Map/unmap must be serialized
-  amd::ScopedLock lock(owner()->lockMemoryOps());
+  std::scoped_lock lock(owner()->lockMemoryOps());
 
   address mapAddress = nullptr;
   size_t offset = origin[0];
@@ -976,7 +962,7 @@ Memory* Memory::mapMemory() const {
 
 void Memory::mgpuCacheWriteBack(VirtualGPU& gpu) {
   // Lock memory object, so only one write back can occur
-  amd::ScopedLock lock(owner()->lockMemoryOps());
+  std::scoped_lock lock(owner()->lockMemoryOps());
 
   // Attempt to allocate a staging buffer if don't have any
   if (!owner()->P2PAccess() && (owner()->getHostMem() == nullptr)) {
@@ -1048,7 +1034,7 @@ void* Image::allocMapTarget(const amd::Coord3D& origin, const amd::Coord3D& regi
   size_t depth = desc().depth_;
 
   // Map/unmap must be serialized
-  amd::ScopedLock lock(owner()->lockMemoryOps());
+  std::scoped_lock lock(owner()->lockMemoryOps());
 
   address mapAddress = nullptr;
   size_t offset = origin[0];

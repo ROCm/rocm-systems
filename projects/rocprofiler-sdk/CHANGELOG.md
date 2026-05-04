@@ -2,6 +2,53 @@
 
 Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projects/rocprofiler-sdk](https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/index.html)
 
+## Unreleased
+
+### Added
+
+**API:**
+
+- Late-start profiling support: Automatic profiling activation when rocprofiler-sdk loads after runtime initialization
+  - `rocprofiler_force_configure()` now automatically detects and profiles runtimes that initialized before SDK load
+  - Integrates with rocprofiler-register to retrieve already-registered API tables
+  - Supports all runtime types (HSA, HIP, ROCTX, RCCL, ROCDecode, ROCJpeg, etc.) automatically
+  - No explicit late-start API calls required - works transparently
+
+**rocprofv3:**
+
+- `--att --selected-regions` now enables marker-controlled device thread trace
+  - Uses `roctxProfilerResume(0)` / `roctxProfilerPause(0)` to start and stop ATT collection at runtime
+  - Supports multiple resume/pause cycles, each producing separate trace output files
+  - Incompatible with `--att-consecutive-kernels`
+
+**Documentation:**
+
+- Added "Using Late-Loading" how-to guide with code examples
+- Documented late-loading workflow and integration with rocprofiler-register
+- Added marker-controlled thread tracing section to the thread trace how-to guide
+- Added cross-reference from ROCTx documentation to ATT with selected-regions
+
+### Changed
+
+**Implementation:**
+
+- **Late-start architecture redesign**: Removed direct runtime symbol access in favor of proper rocprofiler-register integration
+  - Removed ~600 lines of dlopen/dlsym bypass logic
+  - Replaced with ~80 lines calling `rocprofiler_register_invoke_all_registrations()`
+  - Late-start now works by requesting rocprofiler-register to re-propagate stored API tables
+  - Extensible design: automatically supports new runtimes without SDK code changes
+  - Proper separation of concerns: rocprofiler-register manages table storage, SDK manages table wrapping
+
+**Internal APIs (non-public):**
+
+- Removed internal functions (were never in public headers):
+  - `rocprofiler_start_late_internal()`
+  - `rocprofiler_is_late_start_internal()`
+  - `rocprofiler_stop_late_internal()`
+- Replaced with single internal function: `rocprofiler::late_start::invoke_register_propagation()`
+
+**Note:** Public API (`rocprofiler_force_configure()`) remains unchanged - no breaking changes for users
+
 ## ROCprofiler-SDK for AFAR I
 
 ### Added
@@ -245,6 +292,7 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 - Counter collection support for `gfx1150` and `gfx1151`.
 - HSA Extension API v8 support.
 - `hipStreamCopyAttributes` API implementation.
+- `--profile-mpi-ranks` option in `rocprofv3` to selectively profile specific MPI ranks. Supports comma-separated ranges and individual ranks (e.g., `--profile-mpi-ranks 0-3,8,10-15`).
 
 ### Optimized
 
@@ -268,8 +316,44 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
   - Ability to combine command-line `--pmc` flags with input file counter groups
   - Each pass generates output in a separate `pass_n` subdirectory
   - Example: `rocprofv3 --pmc SQ_WAVES --pmc GRBM_COUNT -- <app>` creates two profiling passes
+- KFD (Kernel Fusion Driver) event tracing support:
+  - Buffer service configurations for each KFD buffer tracing type
+  - New type `tool_buffer_tracing_kfd_record_t` using `std::variant` to wrap 8 different KFD buffer tracing types
+  - KFD record dumping to rocpd with support for 8 main KFD event types
+  - Each KFD event generates `rocpd_info_pmc`, `rocpd_event`, `rocpd_region`, and `rocpd_pmc_event` rows
+  - Support for rocpd to perfetto conversion for KFD events
+  - `rocprofv3` `--kfd-trace` flag to enable KFD event tracing
+  - Fixed handling for special SVM location in KFD prefetch location reporting
+  - Fixed parsing for queue restore events to handle both correct format (character '0') and broken driver format (NULL character '\0')
 
 ### Changed
 
 - Version updated to 1.2.0 to support better library compatibility detection for downstream dependencies
 - Fixed rocpd OTF2 output to add ACCELERATOR_DEVICE as system tree node domain for AMD devices.
+
+### Resolved issues
+
+- Fixed `rocprofv3` input file parsing where comment lines containing `pmc:` were incorrectly processed as valid counter collection directives, causing unintended profiling passes.
+
+### Removed
+- Counter collection support for plain text (`.txt`) input files has been deprecated due to lack of schema validation and input sanitization. Only structured file formats (JSON and YAML) with schema validation are supported.
+
+## ROCprofiler-SDK 1.3.0
+
+### Added
+
+- gfx1250 PMC support, including counter definitions and mappings for CHA, CHC, GLARBC, GL1A, GL1C, GRBMA, and GRBMH new blocks.
+- gfx1250 ATT support with per-XCC trace configuration, buffer programming, token-mask updates, and trace readback for multi-XCC devices.
+  - Extended ATT waitcnt decode for async and tensor-related instructions, adding support for `s_wait_asynccnt` and `s_wait_tensorcnt`.
+- gfx1250 stochastic PC sampling support:
+  - gfx1250-specific parser with sample routing.
+  - New stochastic sample fields: `sampling_lock_error`, `async_cnt`, `tensor_cnt`, `xnack_cnt`, and chiplet-aware metadata.
+  - Memory dependency counters reveal per-wave memory latency.
+  - Updated public PC sampling API structs and serialization for the new fields.
+  - Kernel/IOCTL enablement and dedicated gfx1250 parser tests.
+
+### Changed
+
+- Counter dimension encoding changed from fixed-width to variable-width allocation per dimension type.
+- Dimension selection and reduction logic now uses explicit dimension masks and single-index selection.
+- HSA queue interception extended to handle AMD extended kernel dispatch packets.

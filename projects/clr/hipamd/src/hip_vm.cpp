@@ -1,22 +1,8 @@
-/* Copyright (c) 2015 - 2022 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include <hip/hip_runtime.h>
 #include "hip_internal.hpp"
@@ -113,7 +99,7 @@ hipError_t hipMemCreate(hipMemGenericAllocationHandle_t* handle, size_t size,
   amd::Context* amdContext = useHostDevice ? hip::host_context : curDevContext;
 
   if (amdContext == nullptr) {
-    return hipErrorOutOfMemory;
+    HIP_RETURN(hipErrorOutOfMemory);
   }
 
   const auto& dev_info = amdContext->devices()[0]->info();
@@ -131,7 +117,7 @@ hipError_t hipMemCreate(hipMemGenericAllocationHandle_t* handle, size_t size,
   // Handle out of memory cases,
   if (ptr == nullptr) {
     size_t free = 0, total = 0;
-    hipError_t hip_error = hipMemGetInfo(&free, &total);
+    hipError_t hip_error = ihipMemGetInfo(&free, &total);
     if (hip_error == hipSuccess) {
       LogPrintfError(
           "Allocation failed : Device memory : required :%zu | free :%zu"
@@ -451,6 +437,9 @@ hipError_t hipMemUnmap(void* ptr, size_t size) {
       HIP_RETURN(hipErrorInvalidValue);
     }
 
+    // Save next_ptr before enqueue — submitVirtualMap releases sub_obj
+    address next_ptr = NextSubBufferPtr(vaddr_sub_obj);
+
     amd::Command* cmd = new amd::VirtualMapCommand(
         *hip::getCurrentDevice()->NullStream(), amd::Command::EventWaitList{},
         vaddr_sub_obj->getSvmPtr(), vaddr_sub_obj->getSize(), nullptr);
@@ -462,8 +451,7 @@ hipError_t hipMemUnmap(void* ptr, size_t size) {
         reinterpret_cast<hip::GenericAllocation*>(phys_mem_obj->getUserData().data);
     ga->release();
 
-    address next_ptr = NextSubBufferPtr(vaddr_sub_obj);
-    vaddr_sub_obj->release();
+    // sub_obj already released in submitVirtualMap after HW unmap
     vaddr_sub_obj = amd::MemObjMap::FindMemObj(next_ptr);
   }
 

@@ -25,6 +25,12 @@
 #include <stddef.h>
 #include <stdint.h>
 
+// Define mappings of CU -> {SA, WGP} on gfx10 and above. The last bit of CU defines the SA.
+#define ROCPROFILER_TRACE_DECODER_CU_SA_SHIFT  0x7
+#define ROCPROFILER_TRACE_DECODER_CU_SA_MASK   0x80
+#define ROCPROFILER_TRACE_DECODER_CU_WGP_SHIFT 0x0
+#define ROCPROFILER_TRACE_DECODER_CU_WGP_MASK  0x7F
+
 /**
  * @defgroup THREAD_TRACE Thread Trace Service
  * @brief ROCprof-trace-decoder defined types. All timestamp values are in shader clock units.
@@ -213,6 +219,19 @@ typedef struct rocprofiler_thread_trace_decoder_shaderdata_t
 } rocprofiler_thread_trace_decoder_shaderdata_t;
 
 /**
+ * @brief Tracks VMEM operations on the other SIMD
+ * Gfx11+ only. Added in rocprof-trace-decoder 0.1.5
+ */
+typedef struct rocprofiler_thread_trace_decoder_inst_other_simd_t
+{
+    uint64_t size;      ///< Size of this struct.
+    int64_t  time;      ///< Issue time.
+    uint16_t cycles;    ///< Execution duration, not including stall.
+    uint8_t  wgp;       ///< WGP ID. This is always the target cu.
+    uint8_t  category;  ///< One of rocprofiler_thread_trace_decoder_inst_category_t
+} rocprofiler_thread_trace_decoder_inst_other_simd_t;
+
+/**
  * @brief Defines the type of payload received by rocprofiler_thread_trace_decoder_callback_t
  */
 typedef enum rocprofiler_thread_trace_decoder_record_type_t
@@ -226,10 +245,13 @@ typedef enum rocprofiler_thread_trace_decoder_record_type_t
     ROCPROFILER_THREAD_TRACE_DECODER_RECORD_SHADERDATA,  ///< rocprofiler_thread_trace_decoder_shaderdata_t*
     ROCPROFILER_THREAD_TRACE_DECODER_RECORD_REALTIME,  ///< rocprofiler_thread_trace_decoder_realtime_t*
     ROCPROFILER_THREAD_TRACE_DECODER_RECORD_RT_FREQUENCY,
+    ROCPROFILER_THREAD_TRACE_DECODER_RECORD_INST_OTHER_SIMD,
     ROCPROFILER_THREAD_TRACE_DECODER_RECORD_LAST
 
     /// @var ROCPROFILER_THREAD_TRACE_DECODER_RECORD_RT_FREQUENCY
     /// @brief uint64_t*. Realtime clock frequency in Hz.
+    /// @var ROCPROFILER_THREAD_TRACE_DECODER_RECORD_INST_OTHER_SIMD
+    /// @brief rocprofiler_thread_trace_decoder_inst_other_simd_t*. Instruction issue on other simd.
 } rocprofiler_thread_trace_decoder_record_type_t;
 
 /** @} */

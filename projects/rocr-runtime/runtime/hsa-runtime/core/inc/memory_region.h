@@ -110,6 +110,7 @@ class MemoryRegion : public Checked<0x9C961F19EE175BB3> {
     // allocations in AQL to PM4 conversion.
     AllocateExecutableBlitKernelObject = (1 << 12),
     AllocateQueueObject = (1 << 13),  // Allocates AQL queue object, KMD requires physical access for the fence update
+    AllocateCodeObject = (1 << 14),
   };
 
   typedef uint32_t AllocateFlags;

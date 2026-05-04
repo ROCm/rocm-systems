@@ -299,14 +299,13 @@ __hidden ncclResult_t pluginInit(void** context, uint64_t commId, size_t nRanks,
     // Note: Example numbers are for reference only.
     //       Actual numbers may vary depending on the hardware and network topology.
     //       These numbers are not guaranteed to be optimal for all cases.
-    // Limit the tree bandwidth to 15GB/s
-    constants->perChMaxTreeBws[NCCL_BLACKWELL_COMPCAP_IDX][NCCL_TUNING_SCALE_4NODES] = 15.0;
 
-    // Limit the ring bandwidth to 20GB/s
-    constants->perChMaxRingLL128Bws[NCCL_BLACKWELL_COMPCAP_IDX][NCCL_TUNING_SCALE_4NODES] = 20.0;
-
-    // Set NVLSTree base network latency to 24us
-    constants->hwLatencies[NCCL_HW_NET][NCCL_ALGO_NVLS][NCCL_PROTO_SIMPLE] = 24.0;
+    // Limit the Ring/Simple bandwidth ratio to 70% for <=2 nodes
+    constants->bwRatio[0][NCCL_ALGO_RING][NCCL_PROTO_SIMPLE] = 0.70;
+    // Limit the Tree/Simple bandwidth ratio to 65% for >2 nodes
+    constants->bwRatio[1][NCCL_ALGO_TREE][NCCL_PROTO_SIMPLE] = 0.65;
+    // Set Ring/Simple base network latency to 280
+    constants->hwLatencies[NCCL_HW_NET][NCCL_ALGO_RING][NCCL_PROTO_SIMPLE] = 280.0;
   }
   
   TunerContext* ctx = (TunerContext*)malloc(sizeof(TunerContext));

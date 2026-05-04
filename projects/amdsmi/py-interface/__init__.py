@@ -9,7 +9,7 @@
 #
 # The above copyright notice and this permission notice shall be included in all
 # copies or substantial portions of the Software.
-#``
+# ``
 # THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 # IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
 # FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
@@ -31,15 +31,15 @@ from .amdsmi_interface import amdsmi_get_socket_handles
 from .amdsmi_interface import amdsmi_get_socket_info
 from .amdsmi_interface import amdsmi_get_processor_count_from_handles
 from .amdsmi_interface import amdsmi_get_processor_handles_by_type
+from .amdsmi_interface import amdsmi_get_processor_info
 from .amdsmi_interface import amdsmi_get_node_handle
-from .amdsmi_interface import amdsmi_get_device_handle_from_node
 from .amdsmi_interface import amdsmi_get_npm_info
 
 # ESMI Dependent Functions
 try:
-    from .amdsmi_interface import amdsmi_get_cpusocket_handles
+    from .amdsmi_interface import amdsmi_get_cpu_handles
+    from .amdsmi_interface import amdsmi_get_cpusocket_handles  # Deprecate in 8.0
     from .amdsmi_interface import amdsmi_get_cpucore_handles
-    from .amdsmi_interface import amdsmi_get_processor_info
     from .amdsmi_interface import amdsmi_get_cpu_hsmp_proto_ver
     from .amdsmi_interface import amdsmi_get_cpu_smu_fw_version
     from .amdsmi_interface import amdsmi_get_cpu_core_energy
@@ -58,6 +58,7 @@ try:
     from .amdsmi_interface import amdsmi_get_cpu_pwr_svi_telemetry_all_rails
     from .amdsmi_interface import amdsmi_set_cpu_socket_power_cap
     from .amdsmi_interface import amdsmi_set_cpu_pwr_efficiency_mode
+    from .amdsmi_interface import amdsmi_get_cpu_pwr_efficiency_mode
     from .amdsmi_interface import amdsmi_get_cpu_core_boostlimit
     from .amdsmi_interface import amdsmi_get_cpu_socket_c0_residency
     from .amdsmi_interface import amdsmi_set_cpu_core_boostlimit
@@ -83,11 +84,33 @@ try:
     from .amdsmi_interface import amdsmi_get_cpu_family
     from .amdsmi_interface import amdsmi_get_cpu_model
     from .amdsmi_interface import amdsmi_get_cpu_model_name
-    from .amdsmi_interface import amdsmi_get_cpu_handles
-    from .amdsmi_interface import amdsmi_get_dfc_ctrl
-    from .amdsmi_interface import amdsmi_set_dfc_ctrl
-    from .amdsmi_interface import amdsmi_get_cpu_rail_isofreq_policy
+    from .amdsmi_interface import amdsmi_set_cpu_xgmi_pstate_range
+    from .amdsmi_interface import amdsmi_get_cpu_xgmi_pstate_range
     from .amdsmi_interface import amdsmi_set_cpu_rail_isofreq_policy
+    from .amdsmi_interface import amdsmi_get_cpu_rail_isofreq_policy
+    from .amdsmi_interface import amdsmi_set_cpu_dfc_ctrl
+    from .amdsmi_interface import amdsmi_get_cpu_dfc_ctrl
+    from .amdsmi_interface import amdsmi_set_cpu_cc6_enable
+    from .amdsmi_interface import amdsmi_get_cpu_cc6_enable
+    from .amdsmi_interface import amdsmi_set_cpu_pc6_enable
+    from .amdsmi_interface import amdsmi_get_cpu_pc6_enable
+    from .amdsmi_interface import amdsmi_get_cpu_dimm_sb_reg
+    from .amdsmi_interface import amdsmi_set_cpu_dimm_sb_reg
+    from .amdsmi_interface import amdsmi_get_cpu_core_ccd_power
+    from .amdsmi_interface import amdsmi_get_cpu_tdelta
+    from .amdsmi_interface import amdsmi_get_cpu_svi3_vr_controller_temp
+    from .amdsmi_interface import amdsmi_get_cpu_enabled_commands
+    from .amdsmi_interface import amdsmi_get_cpu_core_floor_freq_limit
+    from .amdsmi_interface import amdsmi_get_cpu_floor_freq_limit
+    from .amdsmi_interface import amdsmi_get_cpu_core_eff_floor_freq_limit
+    from .amdsmi_interface import amdsmi_get_cpu_eff_floor_freq_limit
+    from .amdsmi_interface import amdsmi_set_cpu_core_floor_freq_limit
+    from .amdsmi_interface import amdsmi_set_cpu_floor_freq_limit
+    from .amdsmi_interface import amdsmi_set_cpu_core_msr_floor_freq_limit
+    from .amdsmi_interface import amdsmi_set_cpu_msr_floor_freq_limit
+    from .amdsmi_interface import amdsmi_get_cpu_freq_range
+    from .amdsmi_interface import amdsmi_set_cpu_sdps_limit
+    from .amdsmi_interface import amdsmi_get_cpu_sdps_limit
 except AttributeError:
     pass
 
@@ -320,6 +343,12 @@ from .amdsmi_interface import AmdSmiVirtualizationMode
 from .amdsmi_interface import AmdSmiVramType
 from .amdsmi_interface import AmdSmiAffinityScope
 from .amdsmi_interface import AmdSmiPtlData
+
+from .amdsmi_interface import amdsmi_get_gpu_uma_carveout_info
+from .amdsmi_interface import amdsmi_set_gpu_uma_carveout
+from .amdsmi_interface import amdsmi_get_ttm_info
+from .amdsmi_interface import amdsmi_set_ttm_pages_limit
+from .amdsmi_interface import amdsmi_reset_ttm_pages_limit
 
 # Exceptions
 from .amdsmi_exception import AmdSmiLibraryException

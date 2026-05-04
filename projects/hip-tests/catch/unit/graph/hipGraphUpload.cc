@@ -1,21 +1,8 @@
 /*
-Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include <hip_test_common.hh>
 #include <hip_test_checkers.hh>
@@ -135,7 +122,7 @@ static void hipGraphUploadFunctional_with_stream(hipStream_t stream) {
   HIP_CHECK(hipGraphDestroy(graph));
 }
 
-TEST_CASE("Unit_hipGraphUpload_Functional") {
+HIP_TEST_CASE(Unit_hipGraphUpload_Functional) {
   SECTION("Pass a stream") {
     hipStream_t stream;
     HIP_CHECK(hipStreamCreate(&stream));
@@ -153,7 +140,7 @@ TEST_CASE("Unit_hipGraphUpload_Functional") {
   }
 }
 
-TEST_CASE("Unit_hipGraphUpload_Functional_multidevice_test", "[multigpu]") {
+HIP_TEST_CASE(Unit_hipGraphUpload_Functional_multidevice_test) {
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
 
@@ -205,7 +192,7 @@ TEST_CASE("Unit_hipGraphUpload_Functional_multidevice_test", "[multigpu]") {
       }
     }
   } else {
-    SUCCEED("Skipped the testcase as there is no device to test.");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kNoGpuDevice);
   }
 }
 
@@ -215,7 +202,7 @@ TEST_CASE("Unit_hipGraphUpload_Functional_multidevice_test", "[multigpu]") {
    Upload the graph into high priority stream and execute the graph and verify.
  */
 
-TEST_CASE("Unit_hipGraphUpload_Functional_With_Priority_Stream") {
+HIP_TEST_CASE(Unit_hipGraphUpload_Functional_With_Priority_Stream) {
   constexpr size_t N = 1024;
   constexpr size_t Nbytes = N * sizeof(int);
   hipGraph_t graph;
@@ -262,9 +249,8 @@ TEST_CASE("Unit_hipGraphUpload_Functional_With_Priority_Stream") {
 4) Graphexec is destroyed before upload
 */
 
-TEST_CASE("Unit_hipGraphUpload_Negative_Parameters") {
+HIP_TEST_CASE(Unit_hipGraphUpload_Negative_Parameters) {
   hipGraphExec_t graphExec{};
-  hipError_t ret;
 
   hipStream_t stream;
   HIP_CHECK(hipStreamCreate(&stream));
@@ -281,8 +267,9 @@ TEST_CASE("Unit_hipGraphUpload_Negative_Parameters") {
     HIP_CHECK(hipGraphCreate(&graph, 0));
     HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
 
-    ret = hipGraphUpload(graphExec, stream1);
-    REQUIRE(hipSuccess == ret);
+    HIP_CHECK(hipGraphUpload(graphExec, stream1));
+    HIP_CHECK(hipGraphExecDestroy(graphExec));
+    HIP_CHECK(hipGraphDestroy(graph));
   }
   SECTION("graphExec is destroyed") {
     hipGraphExec_t graph_exec;
@@ -294,6 +281,7 @@ TEST_CASE("Unit_hipGraphUpload_Negative_Parameters") {
     HIP_CHECK(hipGraphUpload(graph_exec, hipStreamPerThread));
     HIP_CHECK(hipGraphExecDestroy(graph_exec));
     HIP_CHECK_ERROR(hipGraphUpload(graph_exec, hipStreamPerThread), hipErrorInvalidValue);
+    HIP_CHECK(hipGraphDestroy(graph));
   }
   HIP_CHECK(hipStreamDestroy(stream));
 }

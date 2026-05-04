@@ -96,6 +96,7 @@ void MemoryAllocationTest::SetUp(void) {
   hsa_status_t err;
 
   TestBase::SetUp();
+  if (test_skipped_) return;
 
   err = rocrtst::SetDefaultAgents(this);
   ASSERT_EQ(HSA_STATUS_SUCCESS, err);
@@ -540,7 +541,10 @@ void MemoryAllocationTest::MemoryAllocateContiguousTest(hsa_agent_t agent,
                                                    &importedPtr, 0, NULL));
 
   ASSERT_NE(importedPtr, nullptr);
-  ASSERT_EQ(importedSz, alloc_size);
+  // When there's an offset in the DMA buffer export, the imported size includes
+  // the offset, so importedSz >= alloc_size + offset. The actual memory region
+  // starts at (reinterpret_cast<char*>(importedPtr) + offset) with size alloc_size.
+  ASSERT_GE(importedSz, alloc_size + offset);
 
   close(dmabuf);
 

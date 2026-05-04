@@ -1,21 +1,8 @@
 /*
-Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include "warp_vote_common.hh"
 
@@ -40,9 +27,14 @@ __global__ void kernel_any(uint64_t* const out, const uint64_t* const active_mas
 
   const auto grid = cg::this_grid();
   const auto warp = cg::tiled_partition(cg::this_thread_block(), warpSize);
-
   int pred = MASK_SHIFT(predicate, warp.thread_rank());
+
+#if HT_AMD
   out[grid.thread_rank()] = __any(pred);
+#else
+  unsigned mask = 0xFFFFFFFF;
+  out[grid.thread_rank()] = __any_sync(mask, pred);
+#endif
 }
 
 class WarpAny : public WarpVoteTest<WarpAny, uint64_t> {
@@ -100,14 +92,14 @@ class WarpAny : public WarpVoteTest<WarpAny, uint64_t> {
  *  - HIP_VERSION >= 5.2
  *  - Device supports warp vote
  */
-TEST_CASE("Unit_Warp_Vote_Any_Positive_Basic") {
+HIP_TEST_CASE(Unit_Warp_Vote_Any_Positive_Basic) {
   int device;
   hipDeviceProp_t device_properties;
   HIP_CHECK(hipGetDevice(&device));
   HIP_CHECK(hipGetDeviceProperties(&device_properties, device));
 
   if (!device_properties.arch.hasWarpVote) {
-    HipTest::HIP_SKIP_TEST("Device doesn't support Warp Vote!");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kWarpVoteUnsupported);
     return;
   }
 

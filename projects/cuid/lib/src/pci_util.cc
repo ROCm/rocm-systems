@@ -104,30 +104,39 @@ amdcuid_status_t PciUtil::get_pci_cap_offset(std::string bdf, uint32_t cap_id, u
         return status;
     }
 
-    // check the 4th bit in the status register first to determine if the capabilities list exists
-    uint8_t status_reg = config_space[0x06];
-    if ((status_reg & 0b10000) == 0)
-    {
-        return AMDCUID_STATUS_UNSUPPORTED;
-    }
-
-    // Get the capabilities pointer from the PCI config space
-    // Device Serial Number is a PCIE Extended Capability, so we need to look in the extended capabilities list
+    // Device Serial Number (cap_id 0x0003) is a PCIe Extended Capability.
+    // Traverse the extended capability list starting at offset 0x100.
     uint16_t cap_ptr = 0x100;
+    for (size_t hops = 0; hops < 1024; ++hops) {
+        if (cap_ptr < 0x100 || cap_ptr + 3 >= sizeof(config_space)) {
+            return AMDCUID_STATUS_UNSUPPORTED;
+        }
 
-    uint16_t cap_id_local = config_space[cap_ptr];
-    // Iterate through the capabilities list
-    while (cap_ptr != 0) {
-        // Check if this is the capability we're looking for
-        if (cap_id_local == cap_id) {
-            // Found the capability, set the offset to the capability's data
+        uint32_t header =
+            static_cast<uint32_t>(config_space[cap_ptr]) |
+            (static_cast<uint32_t>(config_space[cap_ptr + 1]) << 8) |
+            (static_cast<uint32_t>(config_space[cap_ptr + 2]) << 16) |
+            (static_cast<uint32_t>(config_space[cap_ptr + 3]) << 24);
+
+        uint16_t cap_id_local = static_cast<uint16_t>(header & 0xFFFF);
+        uint16_t next_ptr = static_cast<uint16_t>((header >> 20) & 0x0FFF);
+
+        if (cap_id_local == static_cast<uint16_t>(cap_id)) {
             offset = cap_ptr + 4;
             return AMDCUID_STATUS_SUCCESS;
         }
 
-        // Move to the next capability
-        cap_ptr = config_space[cap_ptr + 2];
-        cap_id_local = config_space[cap_ptr];
+        // End of list.
+        if (next_ptr == 0) {
+            break;
+        }
+
+        // Guard against malformed/cyclic lists.
+        if (next_ptr == cap_ptr) {
+            break;
+        }
+
+        cap_ptr = next_ptr;
     }
 
     return AMDCUID_STATUS_UNSUPPORTED;
