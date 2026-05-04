@@ -10,8 +10,6 @@ import threading
 
 from .utils import FunctionNotFoundError, NotSupportedError
 
-from cuda.pathfinder import load_nvidia_dynamic_lib
-
 
 ###############################################################################
 # Extern
@@ -118,8 +116,46 @@ cdef void* __ncclGetPeerDevicePointer = NULL
 
 
 cdef void* load_library() except* with gil:
-    cdef uintptr_t handle = load_nvidia_dynamic_lib("nccl")._handle_uint
-    return <void*>handle
+    # Patched for RCCL: replace upstream cuda.pathfinder lookup with a
+    # ROCm-native search.
+    #   1. NCCL_LIBRARY env var, if set, is used verbatim (path or SONAME).
+    #   2. Otherwise: ctypes.util.find_library('rccl') (ldconfig cache),
+    #      then $ROCM_PATH/lib/librccl.so and $HIP_PATH/lib/librccl.so,
+    #      then bare 'librccl.so' (resolved via LD_LIBRARY_PATH at dlopen).
+    import os
+    import ctypes.util
+
+    cdef void* handle = NULL
+    cdef bytes lib_bytes
+    cdef const char* err_ptr
+
+    explicit = os.environ.get("NCCL_LIBRARY")
+    if explicit:
+        candidates = [explicit]
+    else:
+        candidates = []
+        resolved = ctypes.util.find_library("rccl")
+        if resolved is not None:
+            candidates.append(resolved)
+        for env_var in ("ROCM_PATH", "HIP_PATH"):
+            root = os.environ.get(env_var)
+            if root:
+                candidates.append(os.path.join(root, "lib", "librccl.so"))
+        candidates.append("librccl.so")
+
+    for cand in candidates:
+        lib_bytes = cand.encode("utf-8")
+        handle = dlopen(lib_bytes, RTLD_NOW | RTLD_GLOBAL)
+        if handle != NULL:
+            return handle
+
+    err_ptr = dlerror()
+    err_str = err_ptr.decode() if err_ptr != NULL else "no diagnostic"
+    raise NotSupportedError(
+        f"Could not load RCCL library. Tried: {candidates}. "
+        f"Last dlerror: {err_str}. Set NCCL_LIBRARY or ensure "
+        "ROCM_PATH/HIP_PATH points to the ROCm install."
+    )
 
 
 cdef int _check_or_init_nccl() except -1 nogil:

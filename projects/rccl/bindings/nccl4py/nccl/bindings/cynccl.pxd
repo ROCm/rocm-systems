@@ -79,13 +79,10 @@ ctypedef enum ncclGinConnectionType_t "ncclGinConnectionType_t":
 
 
 # types
-cdef extern from *:
-    """
-    #include <driver_types.h>
-    #include <library_types.h>
-    #include <cuComplex.h>
-    """
-    ctypedef void* cudaStream_t 'cudaStream_t'
+# Patched for RCCL: removed CUDA driver-types include block. cudaStream_t
+# is treated as an opaque void* (HIP's hipStream_t is also void*); we never
+# dereference it, only pass it through to RCCL functions resolved by dlsym.
+ctypedef void* cudaStream_t
 
 
 ctypedef uint32_t ncclDevResourceHandle_t 'ncclDevResourceHandle_t'

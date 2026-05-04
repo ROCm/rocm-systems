@@ -26,26 +26,14 @@ classifiers = [
     "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: 3.14",
     "Programming Language :: Python :: Implementation :: CPython",
-    "Environment :: GPU :: NVIDIA CUDA",
-    "Environment :: GPU :: NVIDIA CUDA :: 12",
-    "Environment :: GPU :: NVIDIA CUDA :: 13",
 ]
 
 dependencies = [
     "packaging",
     "numpy",
-    "cuda.core>=0.5.0,<1.0",
-    "cuda-pathfinder~=1.1",
-]
-
-[project.optional-dependencies]
-cu12 = [
-    "nvidia-nccl-cu12",
-    "cuda-bindings~=12.0",
-]
-cu13 = [
-    "nvidia-nccl-cu13",
-    "cuda-bindings~=13.0",
+    # cuda.core / cuda-bindings / nvidia-* are replaced by the local
+    # nccl._hip_compat.cuda_core_shim package backed by hip-python.
+    "hip-python",
 ]
 
 [dependency-groups]
@@ -75,7 +63,10 @@ build-backend = "setuptools.build_meta"
 include-package-data = false
 
 [tool.setuptools.packages.find]
-include = ["nccl*"]
+# Ship the local `cuda.core` shim package alongside `nccl` so
+# `from cuda.core import ...` resolves on a ROCm host without pulling
+# the upstream NVIDIA cuda-core / cuda-bindings packages.
+include = ["nccl*", "cuda*"]
 
 [tool.setuptools.package-data]
 "nccl.bindings" = ["cynccl.pxd"]
@@ -96,6 +87,12 @@ typeCheckingMode = "basic"
 minversion = "6.0"
 testpaths = ["tests"]
 python_files = ["test_*.py"]
+# The collectives + interop suites need >=2 MPI ranks, so they live
+# under the `mpi` marker and are launched via
+# `mpirun -np N pytest -m mpi tests/`. Declared here for `--strict-markers`.
+markers = [
+    "mpi: requires mpirun and >=2 ranks (uses pytest-mpi)",
+]
 
 [tool.cibuildwheel]
 build = "cp310-* cp311-* cp312-* cp313-* cp314-* cp314t-*"
@@ -107,10 +104,3 @@ archs = ["native"]  # Fast local builds; override in CI for multi-arch
 manylinux-x86_64-image = "manylinux_2_28"
 manylinux-aarch64-image = "manylinux_2_28"
 
-[tool.uv]
-conflicts = [
-    [
-        { extra = "cu12" },
-        { extra = "cu13" },
-    ]
-]
