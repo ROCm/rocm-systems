@@ -82,6 +82,14 @@ transpose(const int* in, int* out, int M, int N);
 void
 run(int rank, int tid, int ndevice, int argc, char** argv);
 
+// Exercises the hipMemcpyBatchAsync -> hsa_amd_memory_async_batch_copy
+// path. Each direction is issued as kCopiesPerDirection count==1 calls
+// so every call hits ROCr's single-entry LINEAR branch (which permits
+// a CPU src_agent); multi-entry batches with src_agent==CPU currently
+// fall back to per-copy hsa_amd_memory_async_copy_on_engine.
+void
+run_hip_memcpy_batch(int rank, int tid, hipStream_t stream);
+
 int
 main(int argc, char** argv)
 {
@@ -310,11 +318,121 @@ run(int rank, int tid, int devid, int argc, char** argv)
     HIP_API_CALL(hipFreeAsync(out, stream));
 
     HIP_API_CALL(hipStreamSynchronize(stream));
+
+    // Only run batch memory copies on device 0.
+    if(devid == 0)
+    {
+        run_hip_memcpy_batch(rank, tid, stream);
+    }
+
+    HIP_API_CALL(hipStreamSynchronize(stream));
     HIP_API_CALL(hipStreamDestroy(stream));
 
     mark("end");
 
     roctxRangeStop(roctx_run_id);
+}
+
+void
+run_hip_memcpy_batch(int rank, int tid, hipStream_t stream)
+{
+#if HIP_VERSION < 70100000
+    {
+        auto_lock_t _lk{print_lock};
+        std::cout << "[transpose][" << rank << "][" << tid
+                  << "] hipMemcpyBatchAsync skipped (requires HIP >= 7.1)" << std::endl;
+    }
+    return;
+#else
+    auto roctx_id = roctxRangeStart("run/hip-memcpy-batch");
+
+    // Loop-iteration count, NOT the batch's `count` argument (which is 1).
+    constexpr std::size_t kCopiesPerDirection = 4;
+    constexpr std::size_t kElementsPerCopy    = 1U << 14;  // 16K ints (64 KiB)
+    constexpr std::size_t kBytesPerCopy       = kElementsPerCopy * sizeof(int);
+
+    // hipHostMalloc + hipMalloc gives every pointer a 1:1 amd::Memory
+    // backing, which keeps CLR on the buffer-batch path that reaches
+    // hsa_amd_memory_async_batch_copy. hipMallocAsync (mempool) would
+    // route through the per-copy hipWriteBuffer path instead.
+    int* h_src[kCopiesPerDirection] = {};
+    int* h_dst[kCopiesPerDirection] = {};
+    int* d_buf[kCopiesPerDirection] = {};
+
+    for(std::size_t i = 0; i < kCopiesPerDirection; ++i)
+    {
+        HIP_API_CALL(hipHostMalloc(&h_src[i], kBytesPerCopy, hipHostMallocDefault));
+        HIP_API_CALL(hipHostMalloc(&h_dst[i], kBytesPerCopy, hipHostMallocDefault));
+        for(std::size_t j = 0; j < kElementsPerCopy; ++j)
+        {
+            h_src[i][j] = static_cast<int>((tid + 1) * 1000003 + i * kElementsPerCopy + j);
+            h_dst[i][j] = -1;
+        }
+        HIP_API_CALL(hipMalloc(&d_buf[i], kBytesPerCopy));
+    }
+
+    std::size_t fail_idx = static_cast<std::size_t>(-1);
+
+    // CPU (pinned) -> GPU
+    roctxRangePush("run/hip-memcpy-batch/H2D");
+    for(std::size_t i = 0; i < kCopiesPerDirection; ++i)
+    {
+        void*       one_dst         = d_buf[i];
+        void*       one_src         = h_src[i];
+        std::size_t one_size        = kBytesPerCopy;
+        std::size_t one_attrs_idx[] = {0};
+        HIP_API_CALL(hipMemcpyBatchAsync(
+            &one_dst, &one_src, &one_size, 1, nullptr, one_attrs_idx, 0, &fail_idx, stream));
+    }
+    roctxRangePop();
+
+    // GPU -> CPU (pinned)
+    roctxRangePush("run/hip-memcpy-batch/D2H");
+    for(std::size_t i = 0; i < kCopiesPerDirection; ++i)
+    {
+        void*       one_dst         = h_dst[i];
+        void*       one_src         = d_buf[i];
+        std::size_t one_size        = kBytesPerCopy;
+        std::size_t one_attrs_idx[] = {0};
+        HIP_API_CALL(hipMemcpyBatchAsync(
+            &one_dst, &one_src, &one_size, 1, nullptr, one_attrs_idx, 0, &fail_idx, stream));
+    }
+    roctxRangePop();
+
+    HIP_API_CALL(hipStreamSynchronize(stream));
+
+    std::size_t mismatches = 0;
+    for(std::size_t i = 0; i < kCopiesPerDirection && mismatches < 8; ++i)
+    {
+        for(std::size_t j = 0; j < kElementsPerCopy && mismatches < 8; ++j)
+        {
+            if(h_dst[i][j] != h_src[i][j])
+            {
+                auto_lock_t _lk{print_lock};
+                std::cerr << "[transpose][" << rank << "][" << tid
+                          << "] hipMemcpyBatchAsync mismatch at batch " << i << ", idx " << j
+                          << ": got " << h_dst[i][j] << ", expected " << h_src[i][j] << "\n";
+                ++mismatches;
+            }
+        }
+    }
+
+    for(std::size_t i = 0; i < kCopiesPerDirection; ++i)
+    {
+        HIP_API_CALL(hipFree(d_buf[i]));
+        HIP_API_CALL(hipHostFree(h_src[i]));
+        HIP_API_CALL(hipHostFree(h_dst[i]));
+    }
+
+    {
+        auto_lock_t _lk{print_lock};
+        std::cout << "[transpose][" << rank << "][" << tid
+                  << "] hipMemcpyBatchAsync H2D + D2H completed (count=1 batches per call, "
+                  << kCopiesPerDirection << " copies per direction)" << std::endl;
+    }
+
+    roctxRangeStop(roctx_id);
+#endif
 }
 
 namespace
