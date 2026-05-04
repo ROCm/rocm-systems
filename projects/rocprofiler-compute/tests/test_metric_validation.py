@@ -22,9 +22,9 @@ def get_hbm_data_transfer(analysis_workload_dir, data):
 VALIDATE_METRICS = {
     "memcopy": {
         "command": ["tests/memcopy"],
+        "name": "HBM Data Transfer",
         "MI200": [
             {
-                "name": "HBM Data Transfer",
                 "profile_metric_id": ["4.1.8"],
                 "expected_values": [4096.0],
                 "tolerance": 0.10,
@@ -39,7 +39,6 @@ VALIDATE_METRICS = {
         ],
         "MI300": [
             {
-                "name": "HBM Data Transfer",
                 "profile_metric_id": ["4.1.9"],
                 "expected_values": [4096.0],
                 "tolerance": 0.10,
@@ -54,7 +53,6 @@ VALIDATE_METRICS = {
         ],
         "MI350": [
             {
-                "name": "HBM Data Transfer",
                 "profile_metric_id": ["4.1.10"],
                 "expected_values": [4096.0],
                 "tolerance": 0.10,
@@ -94,8 +92,8 @@ def test_validate_metrics(
             param_id=f"{workload}_analysis"
         )
         try:
-            # Ensure non zero length of profile df
-            options = VALIDATE_METRICS[workload].get("profile_options", [])
+            # Copy to prevent upstream global mutations
+            options = list(VALIDATE_METRICS[workload].get("profile_options", []))
             profile_config = {workload: VALIDATE_METRICS[workload]["command"]}
             _ = binary_handler_profile_rocprof_compute(
                 profile_config,
@@ -105,6 +103,7 @@ def test_validate_metrics(
                 roof=VALIDATE_METRICS[workload].get("roof", False),
                 app_name=workload,
             )
+            # Ensure non zero length of profile df
             _ = test_utils.check_csv_files(
                 profile_workload_dir, num_devices=1, num_kernels=1
             )
@@ -138,7 +137,7 @@ def test_validate_metrics(
                 ]
                 diffs = [(abs(actual - exp) / exp * 100) for exp in expected_values]
                 assert any(matches), (
-                    f"{metric['name']}: "
+                    f"{VALIDATE_METRICS[workload]['name']}: "
                     f"actual={actual}, expected_values={expected_values}, "
                     f"diffs={diffs} (tolerance: {tolerance * 100}%)"
                 )
