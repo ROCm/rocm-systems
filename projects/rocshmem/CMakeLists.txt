@@ -73,6 +73,15 @@ option(BUILD_DEBUG_DEVICE "Compile in device-side logging (LOGD_WARN/INFO and GD
 option(GDA_IONIC "Build for AMD Pensando IONIC RDMA provider" OFF)
 option(GDA_BNXT "Build for Broadcom RDMA provider" OFF)
 option(GDA_MLX5 "Build for Mellanox MLX5 RDMA provider" OFF)
+option(ASAN "Enable AddressSanitizer" ON)
+
+if (ASAN)
+  execute_process(
+    COMMAND ${CMAKE_CXX_COMPILER} -print-file-name=libclang_rt.asan-x86_64.so
+    OUTPUT_VARIABLE ASAN_RUNTIME_PATH OUTPUT_STRIP_TRAILING_WHITESPACE)
+  get_filename_component(ASAN_RUNTIME_DIR "${ASAN_RUNTIME_PATH}" DIRECTORY)
+  message(STATUS "ASAN runtime directory: ${ASAN_RUNTIME_DIR}")
+endif()
 
 set(USE_EXTERNAL_MPI AUTO CACHE STRING "Link with an external MPI (required if used MPI is ABI incompatible with Open MPI v5)")
 set_property(CACHE USE_EXTERNAL_MPI PROPERTY STRINGS AUTO ON OFF)
@@ -126,6 +135,24 @@ if(AMDSMI_LIBRARY)
   endif()
 else()
   message(STATUS "AMD SMI library not found - disabling pod-based IPC capability detection")
+endif()
+
+#############################################################################
+target_link_options(
+    ${PROJECT_NAME}
+    PUBLIC
+      $<$<BOOL:${ASAN}>:-fsanitize=address -g -shared-libsan>
+  )
+
+  target_compile_options(
+    ${PROJECT_NAME}
+    PUBLIC
+      $<$<BOOL:${ASAN}>:-fsanitize=address -g>
+  )
+
+if (ASAN)
+   message(STATUS "Removing xnack- from GPU_TARGET as these are invalid with ASAN address sanitizer")
+   list(FILTER GPU_TARGETS EXCLUDE REGEX ".*:xnack-$")
 endif()
 
 #############################################################################
