@@ -54,6 +54,9 @@ __host__ void SdmaImpl::sdmaHostInit(int pe, [[maybe_unused]] int num_pes, MPI_C
   sdmaEnabled = static_cast<bool>(envvar::sdma::enabled);
   sdmaThreshold = static_cast<size_t>(envvar::sdma::threshold);
   numChannels = static_cast<int>(envvar::sdma::num_channels);
+  if (numChannels < 1 || numChannels > 8) {
+    LOG_ERROR_ABORT("ROCSHMEM_SDMA_NUM_CHANNELS=%d is out of range [1, 8]", numChannels);
+  }
 
   if (!sdmaEnabled) {
     LOG_INFO("SDMA disabled at runtime (ROCSHMEM_SDMA_ENABLED=0)");
@@ -114,6 +117,9 @@ __host__ void SdmaImpl::sdmaHostInit(int pe, [[maybe_unused]] int num_pes, TcpBo
   sdmaEnabled = static_cast<bool>(envvar::sdma::enabled);
   sdmaThreshold = static_cast<size_t>(envvar::sdma::threshold);
   numChannels = static_cast<int>(envvar::sdma::num_channels);
+  if (numChannels < 1 || numChannels > 8) {
+    LOG_ERROR_ABORT("ROCSHMEM_SDMA_NUM_CHANNELS=%d is out of range [1, 8]", numChannels);
+  }
 
   if (!sdmaEnabled) {
     LOG_INFO("SDMA disabled at runtime (ROCSHMEM_SDMA_ENABLED=0)");
