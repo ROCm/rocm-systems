@@ -130,6 +130,23 @@ namespace
 // Thread for safe cleanup output generation
 auto output_generation_thread = common::Synchronized<std::optional<std::thread>>{};
 
+// Track whether this process is a forked child of the original profiled process.
+// Forked children may inherit rocprofv3/ROCm state from the parent, so they should
+// not run normal rocprofv3 finalization from the signal handler.
+auto forked_child_process = std::atomic<bool>{false};
+
+void
+rocprofv3_atfork_child()
+{
+    forked_child_process.store(true, std::memory_order_relaxed);
+}
+
+bool
+is_forked_child_process()
+{
+    return forked_child_process.load(std::memory_order_relaxed);
+}
+
 using sigaction_t      = struct sigaction;
 using signal_func_t    = sighandler_t (*)(int signum, sighandler_t handler);
 using sigaction_func_t = int (*)(int signum,
@@ -2167,6 +2184,10 @@ tool_attach(rocprofiler_client_detach_t /*detach_func*/,
 int
 tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
 {
+    static auto _atfork_once = std::once_flag{};
+    std::call_once(_atfork_once,
+                   []() { pthread_atfork(nullptr, nullptr, rocprofv3_atfork_child); });
+
     static constexpr auto null_context_id = rocprofiler_context_id_t{.handle = 0};
     static constexpr auto null_buffer_id  = rocprofiler_buffer_id_t{.handle = 0};
 
@@ -3510,6 +3531,19 @@ rocprofv3_error_signal_handler(int signo, siginfo_t* info, void* ucontext)
         {
             auto status = wait_pid(itr, WUNTRACED | WNOHANG);
             if(status) diagnose_status(itr, status.value());
+        }
+
+        if(is_forked_child_process())
+        {
+            ROCP_WARNING << fmt::format(
+                "[PPID={}][PID={}][TID={}][rocprofv3_error_signal_handler] "
+                "rocprofv3 skipping finalization in forked child process after signal {}",
+                getppid(),
+                getpid(),
+                common::get_tid(),
+                signo);
+
+            _Exit(signo == SIGTERM ? EXIT_SUCCESS : EXIT_FAILURE);
         }
 
         ROCP_WARNING << fmt::format(
