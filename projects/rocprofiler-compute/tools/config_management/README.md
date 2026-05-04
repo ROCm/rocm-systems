@@ -28,14 +28,18 @@ rocprofiler-compute/
 │       │       └── <latest_arch>_diff.yaml
 │       ├── gfx90a/
 │       ├── gfx940/
-│       ├── gfx950/                      # latest_arch
-│       └── gfx9_config_template.yaml    # single source of truth
+│       ├── gfx950/                      # latest_arch (CDNA gfx9 line)
+│       ├── gfx1151/                     # RDNA 3.5 (gfx11**)
+│       ├── gfx9_config_template.yaml    # CDNA panel contract
+│       └── gfx11_config_template.yaml   # RDNA 3.5 gfx11** panel contract
 │
 ├── src/util/
 │   ├── hash_checker.py
 │   ├── .config_hashes.json
 │
 └── tools/config_management/
+    ├── gfx9_config_template.yaml        # copy / reference (may mirror src)
+    ├── gfx11_config_template.yaml         # copy / reference (may mirror src)
     ├── master_config_workflow_script.py
     ├── parse_config_template.py
     ├── verify_against_config_template.py
@@ -49,11 +53,14 @@ rocprofiler-compute/
 ## Core Concepts
 ### Latest Architecture
 
-- Exactly one architecture is considered *latest*
-- Defined in:
+- The CDNA gfx9 line has one *latest* architecture for delta workflows.
+- It is defined in:
 ```bash
 src/rocprof_compute_soc/analysis_configs/gfx9_config_template.yaml
 ```
+- RDNA 3.5 configs (`gfx11**`, e.g. `gfx1151`) use a separate template
+  (`gfx11_config_template.yaml`) and do not participate in gfx9 deltas.
+  Regenerate it with `parse_config_template.py` from a gfx11** directory.
 
 ### Panel YAMLs
 

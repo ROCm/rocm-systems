@@ -15,7 +15,7 @@
 
 Panel Config:
   id: 300
-  title: RDNA3.5 Memory Chart
+  title: Memory Chart
   description: >-
     Detailed memory hierarchy metrics for RDNA3.5, showing request counts,
     bandwidth, hit rates, and utilization at each cache level.

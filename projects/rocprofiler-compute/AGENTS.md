@@ -13,6 +13,11 @@ for enforced rules including type annotations, f-strings, and `pathlib` usage.
 
 ## Git Workflows
 
+For git (clone, fetch, pull, push): do **not** use classic GitHub PATs (`ghp_*`,
+tokens embedded in remote URLs, or pasted credentials). Prefer **`gh auth login`**
+so GitHub auth is handled via the CLI. Use fine-grained or environment-provided
+tokens only when the host already supplies them—not as a substitute with classic PATs.
+
 When asked to commit changes, follow **[`.ai/rules/commit-workflow.md`](.ai/rules/commit-workflow.md)**
 for staging, commit message conventions, pre-commit hook handling, and branch safety.
 

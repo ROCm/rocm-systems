@@ -6,10 +6,24 @@
 Metric description manager.
 Syncs metric descriptions between config YAMLs and documentation files.
 
+Run from the ``rocprofiler-compute`` project root so default
+``--per-arch-output`` (``tools/per_arch_metric_definitions``) and
+``--docs-output-dir`` (``docs/data/metrics``) resolve correctly.
+
+Panel YAMLs are loaded with a sorted ``*.yaml`` glob per architecture; filenames
+(e.g. gfx11** ``0300_memory_chart.yaml``, ``0700_workgroup_processor.yaml``) are
+not hardcoded—only ``Panel Config`` content and ``metric_table`` ids matter.
+RDNA 3.5 (gfx11xx) variants share one panel-id map
+(``RDNA35_PANEL_ID_TO_SECTION_BY_ARCH``).
+
 Usage:
-    python metric_description_manager.py --sync-arch <arch_name> <configs_dir>
-    python metric_description_manager.py --sync-all <configs_dir>
-    python metric_description_manager.py --validate <arch_name> <configs_dir>
+    python tools/config_management/metric_description_manager.py \\
+        --sync-arch gfx1151 src/rocprof_compute_soc/analysis_configs
+    python tools/config_management/metric_description_manager.py --sync-all \\
+        src/rocprof_compute_soc/analysis_configs
+    python tools/config_management/metric_description_manager.py \\
+        --validate gfx1151 src/rocprof_compute_soc/analysis_configs
+    python tools/config_management/metric_description_manager.py --generate-docs
 """
 
 from __future__ import annotations
@@ -28,6 +42,24 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from config_management import utils_ruamel as cm_utils  # noqa: E402
+
+# Base architectures for ``--generate-docs``. RDNA35 gfx11** extras on disk are
+# appended automatically (see ``resolved_docs_target_archs``). Keep CDNA entries
+# aligned with ``src/rocprof_compute_soc/analysis_configs/``.
+DEFAULT_DOCS_TARGET_ARCHS: list[str] = [
+    "gfx908",
+    "gfx90a",
+    "gfx942",
+    "gfx950",
+    "gfx1151",
+]
+
+_GFX11_VARIANT_RE = re.compile(r"^gfx11[0-9a-f]{2}$", re.IGNORECASE)
+
+
+def is_rdna35_arch(arch_name: str) -> bool:
+    """True for RDNA 3.5 IP names: ``gfx11xx`` (``gfx1100`` … ``gfx11ff``)."""
+    return bool(_GFX11_VARIANT_RE.fullmatch(arch_name))
 
 
 def normalize_unit_for_docs(unit: str) -> str:
@@ -60,7 +92,7 @@ def format_yaml_scalar(value: str):
 
 def normalize_docs_section_name(arch_name: str, section_name: str) -> str:
     """Apply docs-only section name cleanup for selected architectures."""
-    if arch_name != "gfx1151":
+    if not is_rdna35_arch(arch_name):
         return section_name
 
     replacements = {
@@ -73,7 +105,7 @@ def normalize_docs_section_name(arch_name: str, section_name: str) -> str:
 
 def normalize_docs_metric_name(arch_name: str, metric_name: str) -> str:
     """Apply docs-only metric name cleanup for selected architectures."""
-    if arch_name != "gfx1151":
+    if not is_rdna35_arch(arch_name):
         return metric_name
 
     replacements = {
@@ -84,7 +116,7 @@ def normalize_docs_metric_name(arch_name: str, metric_name: str) -> str:
 
 def normalize_docs_rst(arch_name: str, rst_text: str) -> str:
     """Apply docs-only wording cleanup for selected architectures."""
-    if arch_name != "gfx1151" or not isinstance(rst_text, str):
+    if not is_rdna35_arch(arch_name) or not isinstance(rst_text, str):
         return rst_text
 
     replacements: dict[str, str] = {}
@@ -133,92 +165,60 @@ CDNA_PANEL_ID_TO_SECTION: dict[int, str] = {
     1706: "L2 - Fabric interface detailed metrics",
 }
 
-# RDNA architectures reuse metric_table IDs with different meanings
-RDNA_PANEL_ID_TO_SECTION_BY_ARCH: dict[str, dict[int, str]] = {
-    "gfx1151": {
-        1: "Top Kernels",
-        2: "Dispatch List",
-        101: "System Info",
-        201: "System Speed-of-Light",
-        301: "Memory chart - Instruction Cache",
-        302: "Memory chart - Scalar Data Cache",
-        303: "Memory chart - TCP Cache (GL0 Vector Cache)",
-        304: "Memory chart - LDS (Local Data Share)",
-        305: "Memory chart - TCP-GL1 Interface",
-        306: "Memory chart - GL1 Cache (L1)",
-        307: "Memory chart - GL1-GL2 Interface",
-        308: "Memory chart - GL2 Cache (L2)",
-        309: "Memory chart - GCEA to System Memory",
-        401: "Roofline Performance Rates",
-        402: "Roofline Plot Points",
-        501: "CPC Utilization",
-        502: "CPC Interface Utilization",
-        503: "MEC Stall Cycles",
-        504: "CPC Memory Requests",
-        505: "MEC Instruction Cache",
-        601: "SPI Utilization",
-        602: "Wave Dispatch Statistics",
-        701: "WGP Utilization",
-        702: "Wavefront Launch Stats",
-        703: "Wave Dispatch",
-        704: "Wave Life",
-        705: "Wave Instruction Mix",
-        706: "VMEM Instruction Mix",
-        707: "LDS Instruction Mix",
-        709: "Wait State Analysis",
-        710: "WGP Instruction Cache",
-        711: "WGP Scalar Data Cache",
-        901: "GL0 Utilization",
-        902: "GL0 Request Statistics",
-        903: "GL0 Cache Performance",
-        904: "GL0-GL1 Interface",
-        905: "GL0 Stalls",
-        1101: "GL1 Cache Utilization",
-        1102: "GL1 Cache Request Statistics",
-        1103: "GL1 Cache Performance",
-        1104: "GL1-GL2 Interface",
-        1105: "GL1 Cache Stalls",
-        1301: "GL2 Cache Performance",
-        1302: "GL2 Cache Request Statistics",
-        1303: "GL2 Cache Bandwidth",
-        1401: "DRAM Read Interface",
-        1402: "DRAM Write Interface",
-        1404: "System Arbiter (SARB)",
-        1405: "Return Interface",
-        1701: "GPU Utilization",
-        1702: "Shader Engine Utilization",
-    },
-}
-
-
-LEGACY_SECTION_ALIASES_BY_ARCH: dict[str, dict[str, str]] = {
-    "gfx1151": {
-        # Memory chart sub-table renames (TCP/GL1C/GL2C → GL0/GL1 Cache/GL2 Cache).
-        "Memory chart - TCP Cache (Vector L0)": (
-            "Memory chart - TCP Cache (GL0 Vector Cache)"
-        ),
-        "Memory chart - GL1C Cache (L1)": "Memory chart - GL1 Cache (L1)",
-        "Memory chart - GL1C-GL2 Interface": "Memory chart - GL1-GL2 Interface",
-        "Memory chart - GL2C Cache (L2)": "Memory chart - GL2 Cache (L2)",
-        # Standalone-panel section renames (TCP → GL0).
-        "TCP Utilization": "GL0 Utilization",
-        "TCP Request Statistics": "GL0 Request Statistics",
-        "TCP Cache Performance": "GL0 Cache Performance",
-        "TCP TCP-GL1 Interface": "GL0-GL1 Interface",
-        "TCP Stalls": "GL0 Stalls",
-        # Standalone-panel section renames (GL1C → GL1 Cache).
-        "GL1C Utilization": "GL1 Cache Utilization",
-        "GL1C Request Statistics": "GL1 Cache Request Statistics",
-        "GL1C Cache Performance": "GL1 Cache Performance",
-        "GL1C-GL2 Interface": "GL1-GL2 Interface",
-        "GL1C Stalls": "GL1 Cache Stalls",
-        # Pre-existing alias for the doubled-prefix typo, retargeted at new canonical.
-        "GL1C GL1C-GL2 Interface": "GL1-GL2 Interface",
-        # Standalone-panel section renames (GL2C → GL2 Cache).
-        "GL2C Cache Performance": "GL2 Cache Performance",
-        "GL2C Request Statistics": "GL2 Cache Request Statistics",
-        "GL2C Bandwidth": "GL2 Cache Bandwidth",
-    },
+# RDNA 3.5 (gfx11xx): metric_table IDs → section names. Shared by every
+# ``is_rdna35_arch`` variant (gfx1100 … gfx11ff), not per-directory.
+RDNA35_PANEL_ID_TO_SECTION_BY_ARCH: dict[int, str] = {
+    1: "Top Kernels",
+    2: "Dispatch List",
+    101: "System Info",
+    201: "System Speed-of-Light",
+    301: "Memory chart - Instruction Cache",
+    302: "Memory chart - Scalar Data Cache",
+    303: "Memory chart - TCP Cache (GL0 Vector Cache)",
+    304: "Memory chart - LDS (Local Data Share)",
+    305: "Memory chart - TCP-GL1 Interface",
+    306: "Memory chart - GL1 Cache (L1)",
+    307: "Memory chart - GL1-GL2 Interface",
+    308: "Memory chart - GL2 Cache (L2)",
+    309: "Memory chart - GCEA to System Memory",
+    401: "Roofline Performance Rates",
+    402: "Roofline Plot Points",
+    501: "CPC Utilization",
+    502: "CPC Interface Utilization",
+    503: "MEC Stall Cycles",
+    504: "CPC Memory Requests",
+    505: "MEC Instruction Cache",
+    601: "SPI Utilization",
+    602: "Wave Dispatch Statistics",
+    701: "WGP Utilization",
+    702: "Wavefront Launch Stats",
+    703: "Wave Dispatch",
+    704: "Wave Life",
+    705: "Wave Instruction Mix",
+    706: "VMEM Instruction Mix",
+    707: "LDS Instruction Mix",
+    709: "Wait State Analysis",
+    710: "WGP Instruction Cache",
+    711: "WGP Scalar Data Cache",
+    901: "GL0 Utilization",
+    902: "GL0 Request Statistics",
+    903: "GL0 Cache Performance",
+    904: "GL0-GL1 Interface",
+    905: "GL0 Stalls",
+    1101: "GL1 Cache Utilization",
+    1102: "GL1 Cache Request Statistics",
+    1103: "GL1 Cache Performance",
+    1104: "GL1-GL2 Interface",
+    1105: "GL1 Cache Stalls",
+    1301: "GL2 Cache Performance",
+    1302: "GL2 Cache Request Statistics",
+    1303: "GL2 Cache Bandwidth",
+    1401: "DRAM Read Interface",
+    1402: "DRAM Write Interface",
+    1404: "System Arbiter (SARB)",
+    1405: "Return Interface",
+    1701: "GPU Utilization",
+    1702: "Shader Engine Utilization",
 }
 
 
@@ -226,9 +226,8 @@ def panel_id_to_section(arch_name: str, table_id: int | None) -> str | None:
     """Resolve documentation section name for a metric_table id (arch-specific)."""
     if table_id is None:
         return None
-    rdna_map = RDNA_PANEL_ID_TO_SECTION_BY_ARCH.get(arch_name)
-    if rdna_map is not None:
-        return rdna_map.get(table_id)
+    if is_rdna35_arch(arch_name):
+        return RDNA35_PANEL_ID_TO_SECTION_BY_ARCH.get(table_id)
     return CDNA_PANEL_ID_TO_SECTION.get(table_id)
 
 
@@ -376,29 +375,8 @@ def load_existing_per_arch(arch_name: str, per_arch_dir: Union[str, Path]) -> di
     per_arch_file = Path(per_arch_dir) / f"{arch_name}_metrics_description.yaml"
     if per_arch_file.exists():
         with open(per_arch_file, encoding="utf-8") as f:
-            return canonicalize_section_aliases(arch_name, yaml.safe_load(f) or {})
+            return yaml.safe_load(f) or {}
     return {}
-
-
-def canonicalize_section_aliases(arch_name: str, descriptions: dict) -> dict:
-    """Merge legacy section names into their canonical names."""
-    aliases = LEGACY_SECTION_ALIASES_BY_ARCH.get(arch_name)
-    if not aliases or not descriptions:
-        return descriptions
-
-    canonicalized: dict = {}
-    for section, metrics in descriptions.items():
-        canonical_section = aliases.get(section, section)
-
-        if canonical_section not in canonicalized:
-            canonicalized[canonical_section] = {}
-
-        existing_metrics = canonicalized[canonical_section]
-        for metric_name, metric_data in metrics.items():
-            if metric_name not in existing_metrics:
-                existing_metrics[metric_name] = metric_data
-
-    return canonicalized
 
 
 def preserve_manual_rst_edits(new_descriptions: dict, existing_per_arch: dict) -> dict:
@@ -460,10 +438,28 @@ def preserve_manual_rst_edits(new_descriptions: dict, existing_per_arch: dict) -
     return new_descriptions
 
 
+def resolved_docs_target_archs(per_arch_dir: Union[str, Path]) -> list[str]:
+    """
+    Doc emit list: ``DEFAULT_DOCS_TARGET_ARCHS`` plus any gfx11** arch that has a
+    per-arch YAML on disk but is not already listed (e.g. gfx1150).
+    """
+    p = Path(per_arch_dir)
+    arches = list(DEFAULT_DOCS_TARGET_ARCHS)
+    known = set(arches)
+    extra: list[str] = []
+    suffix = "_metrics_description.yaml"
+    for path in p.glob(f"*{suffix}"):
+        arch = path.name.removesuffix(suffix)
+        if is_rdna35_arch(arch) and arch not in known:
+            extra.append(arch)
+    extra.sort()
+    return arches + extra
+
+
 def generate_docs_from_per_arch(
     per_arch_dir: Union[str, Path],
     docs_output_dir: Union[str, Path],
-    target_archs: list[str] = None,
+    target_archs: list[str] | None = None,
 ) -> bool:
     """
     Generate per-arch documentation YAMLs from per-arch metric definitions.
@@ -476,8 +472,7 @@ def generate_docs_from_per_arch(
     - Write docs YAML (only 'rst' and 'unit' fields)
     """
     if target_archs is None:
-        # Default: skip gfx940, gfx941 (redundant)
-        target_archs = ["gfx908", "gfx90a", "gfx942", "gfx950"]
+        target_archs = resolved_docs_target_archs(per_arch_dir)
 
     docs_output_dir = Path(docs_output_dir)
     docs_output_dir.mkdir(parents=True, exist_ok=True)
@@ -638,11 +633,7 @@ def main() -> int:
     args = parser.parse_args()
 
     if args.generate_docs:
-        ok = generate_docs_from_per_arch(
-            args.per_arch_output,
-            args.docs_output_dir,
-            target_archs=["gfx908", "gfx90a", "gfx942", "gfx950", "gfx1151"],
-        )
+        ok = generate_docs_from_per_arch(args.per_arch_output, args.docs_output_dir)
         return 0 if ok else 1
 
     if args.sync_arch:
