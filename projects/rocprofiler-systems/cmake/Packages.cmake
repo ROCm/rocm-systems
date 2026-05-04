@@ -210,7 +210,22 @@ rocprofiler_systems_add_feature(ROCPROFSYS_ROCM_VERSION
 find_package(rocprofiler-sdk ${rocprofiler_systems_FIND_QUIETLY} REQUIRED)
 target_link_libraries(rocprofiler-systems-rocm INTERFACE rocprofiler-sdk::rocprofiler-sdk)
 
-set(_ROCPROFILER_SDK_VERSION_HEADER "${ROCM_PATH}/include/rocprofiler-sdk/version.h")
+get_target_property(
+    _ROCPROFILER_SDK_INCLUDE_DIRS
+    rocprofiler-sdk::rocprofiler-sdk
+    INTERFACE_INCLUDE_DIRECTORIES
+)
+set(_ROCPROFILER_SDK_VERSION_HEADER "")
+foreach(_dir IN LISTS _ROCPROFILER_SDK_INCLUDE_DIRS)
+    if(EXISTS "${_dir}/rocprofiler-sdk/version.h")
+        set(_ROCPROFILER_SDK_VERSION_HEADER "${_dir}/rocprofiler-sdk/version.h")
+        break()
+    endif()
+endforeach()
+unset(_ROCPROFILER_SDK_INCLUDE_DIRS)
+if(NOT _ROCPROFILER_SDK_VERSION_HEADER)
+    set(_ROCPROFILER_SDK_VERSION_HEADER "${ROCM_PATH}/include/rocprofiler-sdk/version.h")
+endif()
 if(EXISTS "${_ROCPROFILER_SDK_VERSION_HEADER}")
     file(
         READ "${_ROCPROFILER_SDK_VERSION_HEADER}"
@@ -454,7 +469,31 @@ if(rocprofiler-sdk-rocpd_FOUND)
             INTERFACE rocprofiler-sdk-rocpd::rocprofiler-sdk-rocpd
         )
 
-        set(_ROCPD_VERSION_HEADER "${ROCM_PATH}/include/rocprofiler-sdk-rocpd/version.h")
+        get_target_property(
+            _ROCPD_INCLUDE_DIRS
+            rocprofiler-sdk-rocpd::rocprofiler-sdk-rocpd
+            INTERFACE_INCLUDE_DIRECTORIES
+        )
+        get_target_property(
+            _SDK_INCLUDE_DIRS
+            rocprofiler-sdk::rocprofiler-sdk
+            INTERFACE_INCLUDE_DIRECTORIES
+        )
+        list(APPEND _ROCPD_INCLUDE_DIRS ${_SDK_INCLUDE_DIRS})
+        unset(_SDK_INCLUDE_DIRS)
+        set(_ROCPD_VERSION_HEADER "")
+        foreach(_dir IN LISTS _ROCPD_INCLUDE_DIRS)
+            if(EXISTS "${_dir}/rocprofiler-sdk-rocpd/version.h")
+                set(_ROCPD_VERSION_HEADER "${_dir}/rocprofiler-sdk-rocpd/version.h")
+                break()
+            endif()
+        endforeach()
+        unset(_ROCPD_INCLUDE_DIRS)
+        if(NOT _ROCPD_VERSION_HEADER)
+            set(_ROCPD_VERSION_HEADER
+                "${ROCM_PATH}/include/rocprofiler-sdk-rocpd/version.h"
+            )
+        endif()
         if(EXISTS "${_ROCPD_VERSION_HEADER}")
             file(READ "${_ROCPD_VERSION_HEADER}" _ROCPD_VERSION_HEADER_CONTENTS)
 
