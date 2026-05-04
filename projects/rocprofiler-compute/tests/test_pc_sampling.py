@@ -55,7 +55,7 @@ def _skip_if_pc_sampling_unsupported(stdout, stderr, workload_dir):
 
 
 def skip_unsupported_pc_sampling_soc(is_stochastic=False):
-    unsupported_socs = {"MI100", "STRIX_HALO"}
+    unsupported_socs = {"MI100", "RDNA35_HALO"}
     if is_stochastic:
         unsupported_socs.add("MI200")
 

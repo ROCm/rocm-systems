@@ -376,7 +376,7 @@ mi_gpu_spec:
             GL2A: 4
             GL2C: 4
         models:
-          - gpu_model: strix_halo
+          - gpu_model: rdna35_halo
             chip_ids:
               physical: 5510
   #########################################################
