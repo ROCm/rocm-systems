@@ -778,3 +778,12 @@
 
 <gfx1102 base="gfx11">
 </gfx1102>
+<gfx1151 base="gfx11">
+  <metric name="TCP_GATE_EN1" block=TCP event=0 descr="TCP interface clocks are turned on. Not Windowed."></metric>
+  <metric name="TCP_GATE_EN2" block=TCP event=1 descr="TCP core clocks are turned on. Not Windowed."></metric>
+  <metric name="TCP_REQ" block=TCP event=9 descr="Total number of requests from TA to TCP."></metric>
+  <metric name="TCP_REQ_MISS" block=TCP event=17 descr="Total number of TCP cache misses."></metric>
+</gfx1151>
+
+<gfx1152 base="gfx1151">
+</gfx1152>

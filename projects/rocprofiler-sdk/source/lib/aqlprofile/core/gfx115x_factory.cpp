@@ -45,7 +45,13 @@ Gfx115xFactory::Gfx115xFactory(const AgentInfo* agent_info)
             case Gl1cCounterBlockId: block_info->instance_count = 4; break;
             case Gl2aCounterBlockId: block_info->instance_count = 4; break;
             case Gl2cCounterBlockId: block_info->instance_count = 8; break;
-            case TcpCounterBlockId: block_info->instance_count = 2; break;
+            case TcpCounterBlockId:
+                block_info->instance_count = 2;
+                /* Add TcAttr so SQ_PERFCOUNTER_CTRL(CS_EN) and SQ_PERFCOUNTER_CTRL2(FORCE_EN,VMID_EN)
+                 * are written during counter start. Without this, TA->TCP request events
+                 * (TCP_REQ, TCP_REQ_MISS etc.) are gated off and always return 0 on gfx115x. */
+                block_info->attr |= CounterBlockTcAttr;
+                break;
             case TaCounterBlockId: block_info->instance_count = 2; break;
             case TdCounterBlockId: block_info->instance_count = 2; break;
             default: break;

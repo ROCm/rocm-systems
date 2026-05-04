@@ -572,6 +572,14 @@
 
 <gfx1102 base="gfx11">
 </gfx1102>
+<gfx1151 base="gfx11">
+  <metric name="TCP_REQ_sum"      expr=reduce(TCP_REQ,sum)      descr="Total number of requests from TA to TCP. Sum over TCP instances."></metric>
+  <metric name="TCP_REQ_MISS_sum" expr=reduce(TCP_REQ_MISS,sum) descr="Total number of TCP cache misses. Sum over TCP instances."></metric>
+  <metric name="TCPCacheHitRate"  expr=100*(TCP_REQ_sum-TCP_REQ_MISS_sum)/TCP_REQ_sum descr="TCP L0 cache hit rate percentage."></metric>
+</gfx1151>
+
+<gfx1152 base="gfx1151">
+</gfx1152>
 
 <gfx11 base="gfx11"></gfx11>
 #Mi300

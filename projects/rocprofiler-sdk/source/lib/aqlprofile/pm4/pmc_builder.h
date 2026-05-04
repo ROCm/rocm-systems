@@ -696,8 +696,18 @@ public:
                         if((block_info->instance_count > 1) &&
                            (block_info->attr & CounterBlockSaAttr))
                         {
-                            grbm_value = Primitives::grbm_inst_se_sh_index_value(
-                                block_des.index, se_index, sarray);
+                            // For gfx11 WGP-indexed blocks (e.g. TCP on gfx115x), the
+                            // logical instance index maps to a WGP; hardware GRBM_GFX_INDEX
+                            // INSTANCE_INDEX must be wgp_index << 2.  Using the direct
+                            // instance index addresses the wrong (or non-existent) hardware
+                            // block and returns 0.
+                            if(Primitives::GFXIP_LEVEL == 11 &&
+                               (block_info->attr & CounterBlockWgpAttr))
+                                grbm_value = Primitives::grbm_se_sh_wgp_index_value(
+                                    se_index, sarray, block_des.index);
+                            else
+                                grbm_value = Primitives::grbm_inst_se_sh_index_value(
+                                    block_des.index, se_index, sarray);
                         }
                         else if((block_info->instance_count > 1) &&
                                 (block_info->attr & CounterBlockSeAttr))
