@@ -184,6 +184,7 @@ TEST(thread_trace, configure_test)
                rocprofiler_user_data_t*) { return ROCPROFILER_THREAD_TRACE_CONTROL_NONE; },
             [](rocprofiler_agent_id_t,
                int64_t,
+               uint64_t,
                void*,
                size_t,
                rocprofiler_thread_trace_shader_data_flags_t,
@@ -243,6 +244,7 @@ TEST(thread_trace, perfcounters_configure_test)
                    rocprofiler_user_data_t*) { return ROCPROFILER_THREAD_TRACE_CONTROL_NONE; },
                 [](rocprofiler_agent_id_t,
                    int64_t,
+                   uint64_t,
                    void*,
                    size_t,
                    rocprofiler_thread_trace_shader_data_flags_t,
@@ -309,6 +311,7 @@ TEST(thread_trace, perfcounters_configure_fail_test)
                rocprofiler_user_data_t*) { return ROCPROFILER_THREAD_TRACE_CONTROL_NONE; },
             [](rocprofiler_agent_id_t,
                int64_t,
+               uint64_t,
                void*,
                size_t,
                rocprofiler_thread_trace_shader_data_flags_t,
@@ -389,6 +392,7 @@ query_available_agents(rocprofiler_agent_version_t /* version */,
             params.size(),
             [](rocprofiler_agent_id_t,
                int64_t,
+               uint64_t,
                void*,
                size_t,
                rocprofiler_thread_trace_shader_data_flags_t,
@@ -439,8 +443,7 @@ TEST(thread_trace, triple_buffer_multiple_shader)
             if(agent->type != ROCPROFILER_AGENT_TYPE_GPU) continue;
 
             auto parameters = std::vector<rocprofiler_thread_trace_parameter_t>{};
-            parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_BUFFERING_MODE,
-                                  ROCPROFILER_THREAD_TRACE_PARAMETER_BUFFERING_MODE_TRIPLE_BUFFER});
+            parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_NUM_BUFFERS, {3}});
             parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_SHADER_ENGINE_MASK, {0x3}});
 
             auto status = rocprofiler_configure_device_thread_trace_service(
@@ -450,6 +453,7 @@ TEST(thread_trace, triple_buffer_multiple_shader)
                 parameters.size(),
                 [](rocprofiler_agent_id_t,
                    int64_t,
+                   uint64_t,
                    void*,
                    size_t,
                    rocprofiler_thread_trace_shader_data_flags_t,
@@ -489,8 +493,7 @@ TEST(thread_trace, triple_buffer_dispatch_mode)
             if(agent->type != ROCPROFILER_AGENT_TYPE_GPU) continue;
 
             auto parameters = std::vector<rocprofiler_thread_trace_parameter_t>{};
-            parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_BUFFERING_MODE,
-                                  ROCPROFILER_THREAD_TRACE_PARAMETER_BUFFERING_MODE_TRIPLE_BUFFER});
+            parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_NUM_BUFFERS, {3}});
 
             auto status = rocprofiler_configure_dispatch_thread_trace_service(
                 *reinterpret_cast<rocprofiler_context_id_t*>(ctx_ptr),
@@ -506,6 +509,7 @@ TEST(thread_trace, triple_buffer_dispatch_mode)
                    rocprofiler_user_data_t*) { return ROCPROFILER_THREAD_TRACE_CONTROL_NONE; },
                 [](rocprofiler_agent_id_t,
                    int64_t,
+                   uint64_t,
                    void*,
                    size_t,
                    rocprofiler_thread_trace_shader_data_flags_t,

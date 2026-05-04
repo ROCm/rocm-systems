@@ -141,13 +141,13 @@ default_submit(const att_queue_t& q, hsa_ext_amd_aql_pm4_packet_t* packet, hsa_s
 }  // namespace
 
 att_queue_t
-att_queue_create(const hsa::AgentCache& agent, size_t triple_buffer_size)
+att_queue_create(const hsa::AgentCache& agent, size_t buffer_size, size_t num_buffers)
 {
     ROCP_TRACE << "Constructing Async queue.";
 
     auto q        = att_queue_t{};
     q.agent_id    = CHECK_NOTNULL(agent.get_rocp_agent())->id;
-    q.buffer_size = triple_buffer_size;
+    q.buffer_size = buffer_size;
     q.hsa_agent   = agent.get_hsa_agent();
     q.near_cpu    = agent.near_cpu();
     q.submit_fn   = default_submit;
@@ -156,7 +156,7 @@ att_queue_create(const hsa::AgentCache& agent, size_t triple_buffer_size)
     auto* ext  = CHECK_NOTNULL(hsa::get_amd_ext_table());
 
     // MULTI is required because submissions arrive from multiple producers:
-    //   - the producer_loop thread (triple buffering)
+    //   - the producer_loop thread (multi-buffer mode)
     //   - HSA loader threads driving load_codeobj/unload_codeobj callbacks
     // The default_submit path uses an atomic write-index increment and a release
     // store of the packet header, which is safe under MULTI. Doorbell stores from
@@ -174,12 +174,13 @@ att_queue_create(const hsa::AgentCache& agent, size_t triple_buffer_size)
 
     ROCP_FATAL_IF(status != HSA_STATUS_SUCCESS) << "Failed to create thread trace async queue";
 
-    if(triple_buffer_size != 0)
+    if(buffer_size != 0 && num_buffers != 0)
     {
-        for(auto& memory : q.triple_buffer_memory)
+        q.cpu_buffers.resize(num_buffers, nullptr);
+        for(auto& memory : q.cpu_buffers)
         {
             CHECK_HSA(ext->hsa_amd_memory_pool_allocate_fn(
-                          agent.cpu_pool(), triple_buffer_size, 0, &memory),
+                          agent.cpu_pool(), buffer_size, 0, &memory),
                       "failed to allocate contiguous memory");
             CHECK_HSA(ext->hsa_amd_agents_allow_access_fn(1, &q.near_cpu, nullptr, memory),
                       "failed to allow cpu access");
@@ -200,13 +201,14 @@ att_queue_destroy(att_queue_t& q)
     ROCP_WARNING_IF(_queue_status != HSA_STATUS_SUCCESS)
         << "Failed to destroy queue: " << _queue_status;
 
-    for(auto* memory : q.triple_buffer_memory)
+    for(auto* memory : q.cpu_buffers)
     {
         if(memory == nullptr) continue;
         auto _mem_status = hsa::get_amd_ext_table()->hsa_amd_memory_pool_free_fn(memory);
         ROCP_WARNING_IF(_mem_status != HSA_STATUS_SUCCESS)
             << "Failed to free memory pool: " << _mem_status;
     }
+    q.cpu_buffers.clear();
     q.hsa_queue = nullptr;
 }
 
@@ -239,9 +241,9 @@ att_queue_deleter_t::operator()(att_queue_t* q) const
 }
 
 att_queue_ptr_t
-make_att_queue(const hsa::AgentCache& agent, size_t triple_buffer_size)
+make_att_queue(const hsa::AgentCache& agent, size_t buffer_size, size_t num_buffers)
 {
-    auto* q = new att_queue_t{att_queue_create(agent, triple_buffer_size)};
+    auto* q = new att_queue_t{att_queue_create(agent, buffer_size, num_buffers)};
     return att_queue_ptr_t{q};
 }
 

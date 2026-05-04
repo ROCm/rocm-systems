@@ -64,6 +64,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <iostream>
+#include <memory>
 #include <mutex>
 #include <unordered_map>
 #include <utility>
@@ -202,7 +203,14 @@ pgm_hi_data_hist()
 
 // Reusable scratch buffer for rare-scan output. Sized once at first use; we
 // only ever touch it from the callback, so no synchronization needed.
-thread_local std::vector<rare_scan::RareToken> tls_out;
+//
+// Default-initialized array (uninitialized memory) rather than a value-init
+// std::vector(N): the first consumer-callback per thread used to spend ~70 ms
+// zero-filling 128 MB, which let the SQTT producer race ahead and trip
+// CPU_FULL on flip N+1. With raw new[], allocation is microseconds and pages
+// are demand-faulted only as the scanner actually writes to them.
+thread_local std::unique_ptr<rare_scan::RareToken[]> tls_out{
+    new rare_scan::RareToken[SCAN_OUT_CAP]};
 
 void
 scan_inline(const uint8_t* buf, size_t size)
@@ -216,10 +224,8 @@ scan_inline(const uint8_t* buf, size_t size)
         return;
     }
 
-    if(tls_out.size() < SCAN_OUT_CAP) tls_out.resize(SCAN_OUT_CAP);
-
     auto t0 = std::chrono::steady_clock::now();
-    size_t n = rocprof_trace_decoder_rare_scan_gfx9(buf, size, tls_out.data(), tls_out.size());
+    size_t n = rocprof_trace_decoder_rare_scan_gfx9(buf, size, tls_out.get(), SCAN_OUT_CAP);
     auto t1 = std::chrono::steady_clock::now();
 
     chunks_processed.fetch_add(1, std::memory_order_relaxed);
@@ -317,7 +323,7 @@ rocprofiler_context_id_t              tracing_ctx{};
 
 constexpr uint64_t TARGET_CU       = 1;
 constexpr uint64_t SHADER_MASK     = 0x1;
-constexpr uint64_t GPU_BUFFER_SIZE_DEFAULT = 256ul << 20;  // 64MB triple-buffer slot
+constexpr uint64_t GPU_BUFFER_SIZE_DEFAULT = 192ul << 20;  // 64MB triple-buffer slot
 
 // Allow override at startup for sweeping.  GPU_BUFFER_SIZE_MB=N picks N MB.
 inline uint64_t
@@ -335,6 +341,7 @@ gpu_buffer_size()
 void
 shader_data_callback(rocprofiler_agent_id_t /*agent*/,
                      int64_t /*se_id*/,
+                     uint64_t /*chunk_index*/,
                      void*                                        se_data,
                      size_t                                       data_size,
                      rocprofiler_thread_trace_shader_data_flags_t flags,
@@ -364,11 +371,7 @@ query_available_agents(rocprofiler_agent_version_t /*version*/,
     std::fprintf(stderr, "[scan] GPU_BUFFER_SIZE = %lu bytes (%lu MB)\n",
                  (unsigned long) buf_size, (unsigned long) (buf_size >> 20));
     parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_BUFFER_SIZE, {buf_size}});
-    // NOTE: do NOT set NO_DETAIL=1 — it enables OCCUPANCY_MODE in aqlprofile,
-    // which strips REG/INST/PERF tokens and emits only wave-occupancy EVENTs.
-    // We need REG tokens for the PGM_LO/PGM_HI histogram, so leave detail on.
-    parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_BUFFERING_MODE,
-                          {ROCPROFILER_THREAD_TRACE_PARAMETER_BUFFERING_MODE_TRIPLE_BUFFER}});
+    parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_NUM_BUFFERS, {3}});
 
     for(size_t idx = 0; idx < num_agents; idx++)
     {
@@ -492,10 +495,8 @@ tool_fini(void* /*tool_data*/)
               << " (" << bytes_gb << " GB)"
               << " rare_tokens=" << total
               << " unique_reg_addrs=" << hist.size() << "\n";
-    std::cout << "[scan] PGM_LO (0x" << std::hex << COMPUTE_PGM_LO << std::dec
-              << ") writes=" << ScanState::pgm_lo_count.load() << "\n";
-    std::cout << "[scan] PGM_HI (0x" << std::hex << COMPUTE_PGM_HI << std::dec
-              << ") writes=" << ScanState::pgm_hi_count.load() << "\n";
+    std::cout << "[scan] PGM_LO writes=" << ScanState::pgm_lo_count.load() << "\n";
+    std::cout << "[scan] PGM_HI writes=" << ScanState::pgm_hi_count.load() << "\n";
 
     // Throughput, broken into:
     //   scanner: rocprof_trace_decoder_rare_scan_gfx9 (the AVX-512 path)
@@ -505,12 +506,9 @@ tool_fini(void* /*tool_data*/)
         if(ns == 0 || bytes == 0) return;
         double seconds  = ns / 1e9;
         double gb_per_s = (double) bytes / seconds / (1024.0 * 1024.0 * 1024.0);
-        double ns_per_b = (double) ns / (double) bytes;
-        double per_chk  = chunks ? ((double) ns / (double) chunks / 1000.0) : 0.0;
         std::printf(
-            "[scan] %-8s  wall=%.3fs  throughput=%.2f GB/s  %.3f ns/byte"
-            "  avg_chunk=%.1f us\n",
-            label, seconds, gb_per_s, ns_per_b, per_chk);
+            "[scan] %-8s  wall=%.3fs  throughput=%.2f GB/s\n",
+            label, seconds, gb_per_s);
     };
     report("scanner", scanner_ns);
     report("post",    post_ns);

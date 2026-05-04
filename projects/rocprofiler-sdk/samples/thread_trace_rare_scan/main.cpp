@@ -30,7 +30,7 @@
 
 #include "hip/hip_runtime.h"
 
-#define DATA_SIZE (304 * 64 * 4 * 2)
+#define DATA_SIZE (304 * 64 * 4 * 3)
 #define LDS_SIZE  1024
 
 #define HIP_API_CALL(CALL)                                                                         \
@@ -48,11 +48,9 @@ divide_kernel(float* a, const float* b, const float* c, int loopcnt)
     float bdx = b[index];
     float cdx = c[index];
 
-    for (int i=0; i<2*loopcnt; i++)
+    for (int i=0; i<11; i++)
+    for (int j=0; j<loopcnt; j++)
     {
-        asm volatile("v_add_f32 %0, %1, 3" : "=v"(bdx) : "v"(bdx) );
-        asm volatile("v_mul_f32 %0, %1, 2" : "=v"(cdx) : "v"(cdx) );
-
         float cdx2 = cdx + 1;
         float bdx2 = bdx * 1.5f;
         bdx = bdx2 / (cdx2 + 1);
@@ -119,7 +117,7 @@ main(int /*argc*/, char** /*argv*/)
 {
     // Configurable run length so the dedicated scan thread sees many shader-
     // data callbacks. Default 10 seconds, override with RUN_SECONDS=N.
-    double run_seconds = 10.0;
+    double run_seconds = 4.0;
     if(const char* env = std::getenv("RUN_SECONDS"))
     {
         char*  end = nullptr;
@@ -139,6 +137,7 @@ main(int /*argc*/, char** /*argv*/)
     HIP_API_CALL(hipDeviceSynchronize());
 
     roctxProfilerResume(0);
+    //roctxProfilerPause(0);
 
     auto       start = std::chrono::steady_clock::now();
     uint64_t   iter  = 0;
