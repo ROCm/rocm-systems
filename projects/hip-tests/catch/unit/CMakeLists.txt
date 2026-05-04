@@ -32,7 +32,7 @@ add_subdirectory(complex)
 add_subdirectory(p2p)
 add_subdirectory(threadfence)
 add_subdirectory(virtualMemoryManagement)
-# add_subdirectory(deviceLib)
+add_subdirectory(deviceLib)
 # TODO Rock build failures
 if(UNIX)
   add_subdirectory(atomics)
