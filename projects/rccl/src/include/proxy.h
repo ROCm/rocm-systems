@@ -395,6 +395,10 @@ struct ncclProxyState {
 
   // A handle to the proxy traces
   facebook_rccl::ProxyTrace* proxyTrace;
+
+  // [RCCL] Host mirrors of device side NCCL_LL128_LINEELEMS / NCCL_LL128_DATAELEMS
+  int ll128LineElems;
+  int ll128DataElems;
 };
 
 enum proxyConnectState {
