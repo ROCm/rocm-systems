@@ -488,7 +488,7 @@ PROFILING WORKFLOW:
         .dtype("KB")
         .action([&](parser_t& p) {
             rocprofsys::common::update_env(
-                _env, env::PERFETTO_BUFFER_SIZE_KB, p.get<int64_t>("trace-buffer-size"),
+                _env, env::PERFETTO_BUFFER_SIZE_KB, p.get<std::int64_t>("trace-buffer-size"),
                 update_mode::REPLACE, ":", updated_envs, original_envs);
         });
     parser.add_argument({ "--trace-fill-policy" }, _trace_policy_desc)
@@ -713,7 +713,7 @@ PROFILING WORKFLOW:
         .action([&](parser_t& p) {
             rocprofsys::common::update_env(
                 _env, env::SAMPLING_TIDS,
-                join(array_config{ ", " }, p.get<std::vector<int64_t>>("tids")),
+                join(array_config{ ", " }, p.get<std::vector<std::int64_t>>("tids")),
                 update_mode::REPLACE, ":", updated_envs, original_envs);
         });
 

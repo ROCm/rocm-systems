@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <cstdint>
 #include "library/pmc/collectors/cpu/types.hpp"
 #include "library/pmc/device_providers/procfs/drivers/driver.hpp"
 
@@ -164,8 +165,8 @@ private:
                 continue;
             }
 
-            const uint64_t total_delta  = curr.total() - prev.total();
-            const uint64_t active_delta = curr.active() - prev.active();
+            const std::uint64_t total_delta  = curr.total() - prev.total();
+            const std::uint64_t active_delta = curr.active() - prev.active();
 
             double load_pct = 0.0;
             if(total_delta > 0)

@@ -1,6 +1,7 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include <cstdint>
 #include "common.hpp"
 
 #include <timemory/mpl/apply.hpp>
@@ -26,8 +27,8 @@ str_set_t         category_view       = {};
 std::stringstream lerr{};
 
 bool    debug_msg = tim::get_env<bool>("ROCPROFSYS_DEBUG_AVAIL", settings::debug());
-int32_t verbose_level =
-    tim::get_env<int32_t>("ROCPROFSYS_VERBOSE_AVAIL", settings::verbose());
+std::int32_t verbose_level =
+    tim::get_env<std::int32_t>("ROCPROFSYS_VERBOSE_AVAIL", settings::verbose());
 
 // explicit setting names to exclude
 std::set<std::string> settings_exclude = {

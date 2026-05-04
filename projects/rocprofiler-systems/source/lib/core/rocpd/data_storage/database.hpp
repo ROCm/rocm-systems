@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #pragma once
+#include <cstdint>
 #include "common/traits.hpp"
 #include "logger/debug.hpp"
 
@@ -89,10 +90,10 @@ private:
 
     template <typename T, std::enable_if_t<!(common::traits::is_string_literal<T>() ||
                                              std::is_floating_point_v<std::decay_t<T>> ||
-                                             std::is_same_v<std::decay_t<T>, int64_t> ||
-                                             std::is_same_v<std::decay_t<T>, uint64_t> ||
-                                             std::is_same_v<std::decay_t<T>, int32_t> ||
-                                             std::is_same_v<std::decay_t<T>, uint32_t>),
+                                             std::is_same_v<std::decay_t<T>, std::int64_t> ||
+                                             std::is_same_v<std::decay_t<T>, std::uint64_t> ||
+                                             std::is_same_v<std::decay_t<T>, std::int32_t> ||
+                                             std::is_same_v<std::decay_t<T>, std::uint32_t>),
                                            int> = 0>
     void bind_value([[maybe_unused]] sqlite3_stmt* stmt, [[maybe_unused]] int position,
                     [[maybe_unused]] T& _value, [[maybe_unused]] const std::string& query)
@@ -120,25 +121,25 @@ private:
             "Failed to bind double! Position: ", position, ", Value: ", _value);
     }
 
-    template <typename T, std::enable_if_t<std::is_same_v<std::decay_t<T>, int64_t> ||
-                                               std::is_same_v<std::decay_t<T>, uint64_t>,
+    template <typename T, std::enable_if_t<std::is_same_v<std::decay_t<T>, std::int64_t> ||
+                                               std::is_same_v<std::decay_t<T>, std::uint64_t>,
                                            int> = 0>
     void bind_value(sqlite3_stmt* stmt, int position, T&& _value,
                     const std::string& query)
     {
         validate_sqlite3_result(sqlite3_bind_int64(stmt, position, _value), query.c_str(),
-                                "Failed to bind int64_t/uint64_t! Position: ", position,
+                                "Failed to bind std::int64_t/std::uint64_t! Position: ", position,
                                 ", Value: ", _value);
     }
 
-    template <typename T, std::enable_if_t<std::is_same_v<std::decay_t<T>, int32_t> ||
-                                               std::is_same_v<std::decay_t<T>, uint32_t>,
+    template <typename T, std::enable_if_t<std::is_same_v<std::decay_t<T>, std::int32_t> ||
+                                               std::is_same_v<std::decay_t<T>, std::uint32_t>,
                                            int> = 0>
     void bind_value(sqlite3_stmt* stmt, int position, T&& _value,
                     const std::string& query)
     {
         validate_sqlite3_result(sqlite3_bind_int(stmt, position, _value), query.c_str(),
-                                "Failed to bind int32_t/uint32_t! Position: ", position,
+                                "Failed to bind std::int32_t/std::uint32_t! Position: ", position,
                                 ", Value: ", _value);
     }
 

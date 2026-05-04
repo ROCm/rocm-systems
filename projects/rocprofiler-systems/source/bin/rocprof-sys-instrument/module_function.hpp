@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <cstdint>
 #include "function_signature.hpp"
 #include "fwd.hpp"
 
@@ -82,8 +83,8 @@ struct module_function
     bool is_linkage_constrained() const;
 
     size_t                                      start_address     = 0;
-    uint64_t                                    address_range     = 0;
-    uint64_t                                    num_instructions  = 0;
+    std::uint64_t                                    address_range     = 0;
+    std::uint64_t                                    num_instructions  = 0;
     module_t*                                   module            = nullptr;
     procedure_t*                                function          = nullptr;
     symtab_func_t*                              symtab_function   = nullptr;
@@ -93,7 +94,7 @@ struct module_function
     function_signature                          signature         = {};
     basic_block_set_t                           basic_blocks      = {};
     basic_loop_vec_t                            loop_blocks       = {};
-    std::map<instruction_category_t, int64_t>   instruction_types = {};
+    std::map<instruction_category_t, std::int64_t>   instruction_types = {};
     std::vector<std::vector<instr_addr_pair_t>> instructions      = {};
 
     mutable str_msg_vec_t messages = {};

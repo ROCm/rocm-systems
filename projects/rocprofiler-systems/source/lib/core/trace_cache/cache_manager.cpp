@@ -1,6 +1,7 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include <cstdint>
 #include "cache_manager.hpp"
 
 #include "core/output_file_registry.hpp"
@@ -324,7 +325,7 @@ merge_perfetto_files()
     // initialization
 
     auto    suffix_variant  = settings::default_process_suffix();
-    int32_t cached_mpi_rank = 0;
+    std::int32_t cached_mpi_rank = 0;
 
     if(std::holds_alternative<int>(suffix_variant))
     {

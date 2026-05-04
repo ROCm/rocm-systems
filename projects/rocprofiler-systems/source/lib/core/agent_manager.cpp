@@ -1,6 +1,7 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include <cstdint>
 #include "agent_manager.hpp"
 
 #include "logger/debug.hpp"
@@ -64,7 +65,7 @@ agent_manager::get_agent_by_id(size_t device_id, agent_type type) const
 }
 
 const agent&
-agent_manager::get_agent_by_handle(uint64_t device_handle, agent_type type) const
+agent_manager::get_agent_by_handle(std::uint64_t device_handle, agent_type type) const
 {
     LOG_TRACE("Getting agent for device handle: {}, type {}", device_handle,
               to_string(type));

@@ -15,7 +15,7 @@ class cpu_pmc_sample_test : public ::testing::Test
 protected:
     void SetUp() override { buffer.fill(0); }
 
-    std::array<uint8_t, 4096> buffer;
+    std::array<std::uint8_t, 4096> buffer;
 };
 
 TEST_F(cpu_pmc_sample_test, serialize_deserialize)
@@ -34,13 +34,13 @@ TEST_F(cpu_pmc_sample_test, serialize_deserialize)
     pm.user_mode_time   = 1000000;
     pm.kernel_mode_time = 500000;
 
-    std::vector<uint8_t> freqs_data = { 100, 150, 200, 180, 190, 195, 185, 170 };
-    std::vector<uint8_t> loads_data = { 10, 20, 30, 40 };
+    std::vector<std::uint8_t> freqs_data = { 100, 150, 200, 180, 190, 195, 185, 170 };
+    std::vector<std::uint8_t> loads_data = { 10, 20, 30, 40 };
     cpu_pmc_sample       original(em, 1u, 80000, pm, freqs_data, loads_data);
 
     serialize(buffer.data(), original);
 
-    uint8_t* buffer_ptr   = buffer.data();
+    std::uint8_t* buffer_ptr   = buffer.data();
     auto     deserialized = deserialize<cpu_pmc_sample>(buffer_ptr);
 
     EXPECT_EQ(deserialized.device_id, original.device_id);
@@ -66,8 +66,8 @@ TEST_F(cpu_pmc_sample_test, get_size)
     enabled_metrics em{};
     process_metrics pm{};
 
-    std::vector<uint8_t> freqs_data = { 100, 150, 200, 180, 190, 195, 185, 170 };
-    std::vector<uint8_t> loads_data = { 10, 20, 30, 40 };
+    std::vector<std::uint8_t> freqs_data = { 100, 150, 200, 180, 190, 195, 185, 170 };
+    std::vector<std::uint8_t> loads_data = { 10, 20, 30, 40 };
     cpu_pmc_sample       s(em, 0u, 80000, pm, freqs_data, loads_data);
 
     EXPECT_GT(get_size(s), 0u);
@@ -84,12 +84,12 @@ TEST_F(cpu_pmc_sample_test, empty_data)
 
     enabled_metrics      em{};
     process_metrics      pm{};
-    std::vector<uint8_t> empty;
+    std::vector<std::uint8_t> empty;
     cpu_pmc_sample       original(em, 0u, 0, pm, empty, empty);
 
     serialize(buffer.data(), original);
 
-    uint8_t* buffer_ptr   = buffer.data();
+    std::uint8_t* buffer_ptr   = buffer.data();
     auto     deserialized = deserialize<cpu_pmc_sample>(buffer_ptr);
 
     EXPECT_TRUE(deserialized.freqs.empty());

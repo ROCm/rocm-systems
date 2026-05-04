@@ -1,6 +1,7 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include <cstdint>
 #include "library/sampling.hpp"
 #include "core/common.hpp"
 #include "core/components/fwd.hpp"

@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <cstdint>
 #include "common/defines.h"
 
 #include "common/join.hpp"
@@ -357,7 +358,7 @@ discover_torch_libpath(const std::string& python_binary, bool verbose = false)
     return torch_libdir;
 }
 
-enum class update_mode : uint8_t
+enum class update_mode : std::uint8_t
 {
     REPLACE = 0,
     PREPEND,

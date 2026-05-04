@@ -1,6 +1,7 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include <cstdint>
 #include "library/pmc/collectors/common/collector_slice.hpp"
 #include "library/pmc/collectors/common/settings.hpp"
 #include "library/pmc/collectors/gpu/cache_policy.hpp"
@@ -152,7 +153,7 @@ sample()
         return;
     }
 
-    auto timestamp = static_cast<int64_t>(tim::get_clock_real_now<size_t, std::nano>());
+    auto timestamp = static_cast<std::int64_t>(tim::get_clock_real_now<size_t, std::nano>());
 
     for(auto& slice : g_collector_slices)
     {
@@ -253,7 +254,7 @@ pause()
         return;
     }
 
-    auto timestamp = static_cast<int64_t>(tim::get_clock_real_now<size_t, std::nano>());
+    auto timestamp = static_cast<std::int64_t>(tim::get_clock_real_now<size_t, std::nano>());
 
     for(auto& slice : g_collector_slices)
     {

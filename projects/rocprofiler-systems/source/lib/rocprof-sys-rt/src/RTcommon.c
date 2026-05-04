@@ -30,6 +30,7 @@
 
 /* $Id: RTcommon.c,v 1.78 2008/04/15 16:43:44 roundy Exp $ */
 
+#include <cstdint>
 #include "RTcommon.h"
 #include "RTthread.h"
 #include "h/dyninstAPI_RT.h"
@@ -205,8 +206,8 @@ DYNINSTinit(void)
     rtdebug_printf("%s[%d]:  welcome to DYNINSTinit\n", __FILE__, __LINE__);
 
     /* sanity check */
-    assert(sizeof(int64_t) == 8);
-    assert(sizeof(int32_t) == 4);
+    assert(sizeof(std::int64_t) == 8);
+    assert(sizeof(std::int32_t) == 4);
 
     /* defensive stuff */
     memset(DYNINST_target_cache, 0,

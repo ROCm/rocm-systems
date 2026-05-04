@@ -1,6 +1,7 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include <cstdint>
 #include "core/categories.hpp"
 #include "core/config.hpp"
 #include "core/locking.hpp"
@@ -38,9 +39,9 @@ constexpr auto timeout_signal_v = static_cast<int>(timeout_signal);
 auto                  main_thread_native_handle         = pthread_self();
 bool                  ci_timeout_active                 = false;
 auto                  ci_timeout_mutex                  = locking::atomic_mutex{};
-uint64_t              ci_timeout_backtrace_global_count = 1;
-uint64_t              ci_timeout_backtrace_global_done  = 0;
-thread_local uint64_t ci_timeout_backtrace_local_count  = 0;
+std::uint64_t              ci_timeout_backtrace_global_count = 1;
+std::uint64_t              ci_timeout_backtrace_global_done  = 0;
+thread_local std::uint64_t ci_timeout_backtrace_local_count  = 0;
 
 void
 ci_timeout_backtrace(int)
@@ -76,10 +77,10 @@ ensure_ci_timeout_backtrace(double             _ci_timeout_seconds,
     while(_ci_timeout_seconds <= _factor)
         _factor /= 1.25;
 
-    uint64_t _ci_timeout_nitr    = 0;
-    int64_t  _ci_timeout_nanosec = (_ci_timeout_seconds - _factor) * units::sec;
+    std::uint64_t _ci_timeout_nitr    = 0;
+    std::int64_t  _ci_timeout_nanosec = (_ci_timeout_seconds - _factor) * units::sec;
     auto     _ci_timeout_total_count =
-        get_env<uint64_t>("ROCPROFSYS_CI_TIMEOUT_COUNT", 1, false);
+        get_env<std::uint64_t>("ROCPROFSYS_CI_TIMEOUT_COUNT", 1, false);
     const auto root_pid =
         get_env<pid_t>("ROCPROFSYS_ROOT_PROCESS", process::get_id(), false);
 
@@ -97,7 +98,7 @@ ensure_ci_timeout_backtrace(double             _ci_timeout_seconds,
         }
 
         auto    _tids             = pthread_gotcha::get_native_handles();
-        int64_t _ci_timeout_pause = (_factor * units::sec) / (3 * (_tids.size() + 1));
+        std::int64_t _ci_timeout_pause = (_factor * units::sec) / (3 * (_tids.size() + 1));
         auto    _kill_thread      = [_ci_timeout_pause](auto _handle) {
             // execute the pthread_kill and wait until ci_timeout_backtrace increments
             // ci_timeout_backtrace_global_done (or 50 iterations pass) to avoid

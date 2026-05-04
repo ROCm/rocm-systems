@@ -1,6 +1,7 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include <cstdint>
 #include "library/causal/components/backtrace.hpp"
 #include "core/concepts.hpp"
 #include "core/config.hpp"
@@ -126,7 +127,7 @@ void
 backtrace::sample(int _sig)
 {
     constexpr size_t  depth        = ::rocprofsys::causal::unwind_depth;
-    constexpr int64_t ignore_depth = ::rocprofsys::causal::unwind_offset;
+    constexpr std::int64_t ignore_depth = ::rocprofsys::causal::unwind_offset;
     constexpr size_t  select_init  = std::numeric_limits<size_t>::max();
     constexpr size_t  select_ival  = 5;  // interval at which realtime signal contributes
 
@@ -208,12 +209,12 @@ backtrace::sample(int _sig)
 
 template <typename Tp>
 Tp
-backtrace::get_period(uint64_t _units)
+backtrace::get_period(std::uint64_t _units)
 {
     using cast_type = std::conditional_t<std::is_floating_point<Tp>::value, Tp, double>;
 
     double  _period      = 1.0 / 1000.0;
-    int64_t _period_nsec = static_cast<int64_t>(_period * units::sec) % units::sec;
+    std::int64_t _period_nsec = static_cast<std::int64_t>(_period * units::sec) % units::sec;
     return static_cast<Tp>(_period_nsec) / static_cast<cast_type>(_units);
 }
 }  // namespace component
@@ -221,9 +222,9 @@ backtrace::get_period(uint64_t _units)
 }  // namespace rocprofsys
 
 #define INSTANTIATE_BT_CAUSAL_PERIOD(TYPE)                                               \
-    template TYPE rocprofsys::causal::component::backtrace::get_period<TYPE>(uint64_t);
+    template TYPE rocprofsys::causal::component::backtrace::get_period<TYPE>(std::uint64_t);
 
 INSTANTIATE_BT_CAUSAL_PERIOD(float)
 INSTANTIATE_BT_CAUSAL_PERIOD(double)
-INSTANTIATE_BT_CAUSAL_PERIOD(int64_t)
-INSTANTIATE_BT_CAUSAL_PERIOD(uint64_t)
+INSTANTIATE_BT_CAUSAL_PERIOD(std::int64_t)
+INSTANTIATE_BT_CAUSAL_PERIOD(std::uint64_t)

@@ -31,7 +31,7 @@ struct pthread_create_gotcha : tim::component::base<pthread_create_gotcha, void>
         bool      enable_causal   = false;
         bool      enable_sampling = false;
         bool      offset          = false;
-        int64_t   parent_tid      = 0;
+        std::int64_t   parent_tid      = 0;
         promise_t promise         = {};
     };
 
@@ -54,7 +54,7 @@ struct pthread_create_gotcha : tim::component::base<pthread_create_gotcha, void>
     // generate the gotcha wrappers
     static void configure();
     static void shutdown();
-    static void shutdown(int64_t);
+    static void shutdown(std::int64_t);
 
     static void pause();
     static void resume();

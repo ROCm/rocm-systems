@@ -1,6 +1,7 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include <cstdint>
 #include "library/components/pthread_create_gotcha.hpp"
 #include "core/config.hpp"
 #include "core/locking.hpp"
@@ -50,7 +51,7 @@ using category_region_t = tim::lightweight_tuple<category_region<category::pthre
 namespace
 {
 auto* is_shutdown   = new bool{ false };  // intentional data leak
-auto* bundles       = new std::map<int64_t, std::shared_ptr<bundle_t>>{};
+auto* bundles       = new std::map<std::int64_t, std::shared_ptr<bundle_t>>{};
 auto* bundles_mutex = new std::mutex{};
 auto  bundles_dtor  = scope::destructor{ []() {
     pthread_create_gotcha::shutdown();
@@ -62,7 +63,7 @@ auto  bundles_dtor  = scope::destructor{ []() {
 
 template <typename... Args>
 inline void
-start_bundle(bundle_t& _bundle, int64_t _tid, Args&&... _args)
+start_bundle(bundle_t& _bundle, std::int64_t _tid, Args&&... _args)
 {
     if(!get_use_timemory() && !get_use_perfetto()) return;
     LOG_TRACE("Starting bundle '{}' in thread {}...", _bundle.key(), _tid);
@@ -88,7 +89,7 @@ start_bundle(bundle_t& _bundle, int64_t _tid, Args&&... _args)
 
 template <typename... Args>
 inline void
-stop_bundle(bundle_t& _bundle, int64_t _tid, Args&&... _args)
+stop_bundle(bundle_t& _bundle, std::int64_t _tid, Args&&... _args)
 {
     if(!get_use_timemory() && !get_use_perfetto()) return;
 
@@ -155,7 +156,7 @@ pthread_create_gotcha::wrapper::operator()() const
 
     push_thread_state(ThreadState::Internal);
 
-    int64_t     _tid         = -1;
+    std::int64_t     _tid         = -1;
     void*       _ret         = nullptr;
     auto        _is_sampling = false;
     auto        _bundle      = std::shared_ptr<bundle_t>{};
@@ -478,7 +479,7 @@ pthread_create_gotcha::shutdown()
 }
 
 void
-pthread_create_gotcha::shutdown(int64_t _tid)
+pthread_create_gotcha::shutdown(std::int64_t _tid)
 {
     if(_tid == 0) shutdown();
 
