@@ -1,7 +1,14 @@
 #!/usr/bin/env python3
 # Copyright Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
+"""Run the rocr-runtime project's installed rocrtst test suite.
 
+This runner is installed with the rocr-runtime rocrtst payload and executes the
+rocrtst64 executable shipped by that project. It is intended to be called
+directly from CI or by developers with an installed ROCm tree.
+"""
+
+import argparse
 import logging
 import os
 import platform
@@ -12,6 +19,21 @@ from typing import Optional
 
 
 logging.basicConfig(level=logging.INFO)
+
+HELP_EPILOG = """\
+This script runs the rocr-runtime project test suite from an installed ROCm
+payload. When run from an installed location, it discovers:
+
+  <rocm-prefix>/bin/rocrtst64[.exe]
+
+Environment variables:
+  ROCM_PATH          ROCm install prefix override.
+  ROCM_BIN_DIR      Directory containing rocrtst64.
+  TEST_TYPE         Use "quick" for the quick-test subset.
+  AMDGPU_FAMILIES   GPU family used for CI exclusions.
+  SHARD_INDEX       1-based GitHub Actions shard index.
+  TOTAL_SHARDS      Total number of GitHub Actions shards.
+"""
 
 
 # TODO(#3851): Excluded tests (flaky or disabled in CI).
@@ -64,6 +86,15 @@ QUICK_TESTS = [
 ]
 
 
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Run the rocr-runtime project rocrtst test suite.",
+        epilog=HELP_EPILOG,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    return parser.parse_args()
+
+
 def derive_rocm_path(script_dir: Path) -> Path:
     for candidate in (script_dir, *script_dir.parents):
         bin_dir = candidate / "bin"
@@ -87,6 +118,7 @@ def build_gtest_filter(amdgpu_families: Optional[str], os_type: str, test_type: 
 
 
 def main() -> None:
+    parse_args()
     script_dir = Path(__file__).resolve().parent
     rocm_path_env = os.getenv("ROCM_PATH")
     rocm_path = Path(rocm_path_env).resolve() if rocm_path_env else derive_rocm_path(script_dir)
