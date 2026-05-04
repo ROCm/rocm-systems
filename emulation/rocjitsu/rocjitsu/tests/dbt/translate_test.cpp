@@ -17,8 +17,10 @@
 /// These tests complement the hardware tests in hsa_translate_test.cpp which
 /// verify correctness on real RDNA4 GPUs.
 
+#include "rocjitsu/analysis/liveness.h"
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
+#include "rocjitsu/code/basic_block.h"
 #include "rocjitsu/code/dbt/encoding_translator.h"
 #include "rocjitsu/code/dbt/generated/encoding_cdna4_to_rdna4.h"
 #include "rocjitsu/code/dbt/generated/encoding_fields.h"
@@ -36,6 +38,7 @@
 #include "rocjitsu/code/dbt/generated/legalization_cdna3_to_cdna4.h"
 #include "rocjitsu/code/dbt/generated/legalization_cdna3_to_rdna3.h"
 #include "rocjitsu/code/dbt/generated/legalization_cdna3_to_rdna4.h"
+#include "rocjitsu/code/dbt/generated/legalization_cdna4_to_cdna3.h"
 #include "rocjitsu/code/dbt/generated/legalization_cdna4_to_rdna3.h"
 #include "rocjitsu/code/dbt/generated/legalization_cdna4_to_rdna4.h"
 #include "rocjitsu/code/dbt/generated/legalization_rdna1_to_cdna3.h"
@@ -50,8 +53,13 @@
 #include "rocjitsu/code/dbt/generated/legalization_rdna3_to_rdna4.h"
 #include "rocjitsu/code/dbt/generated/legalization_rdna4_to_cdna4.h"
 #include "rocjitsu/code/dbt/generated/legalization_types.h"
+#include "rocjitsu/code/dbt/semantic_translator.h"
 #include "rocjitsu/code/patch/code_object_patcher.h"
 #include "rocjitsu/code/patch/instruction_builder.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna3/machine_insts.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna4/machine_insts.h"
+#include "rocjitsu/isa/decoder.h"
+#include "rocjitsu/isa/instruction.h"
 
 #include "rocjitsu/base/rj_compiler.h"
 RJ_DIAGNOSTIC_PUSH
@@ -69,8 +77,10 @@ RJ_DIAGNOSTIC_POP
 #include <cstring>
 #include <iostream>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace rocjitsu {
@@ -86,6 +96,57 @@ uint32_t add_elf_name(std::vector<uint8_t> &names, std::string_view name) {
 uint64_t align_up_for_test(uint64_t value, uint64_t alignment) {
   const uint64_t remainder = value % alignment;
   return remainder == 0 ? value : value + alignment - remainder;
+}
+
+std::vector<uint8_t> make_minimal_amdgpu_elf_with_text(const std::vector<uint32_t> &text_words) {
+  constexpr uint64_t text_offset = 0x100;
+  const uint64_t text_size = text_words.size() * sizeof(uint32_t);
+
+  std::vector<uint8_t> shstrtab{'\0'};
+  const uint32_t text_name = add_elf_name(shstrtab, ".text");
+  const uint32_t shstrtab_name = add_elf_name(shstrtab, ".shstrtab");
+
+  const uint64_t shstrtab_offset = text_offset + text_size;
+  const uint64_t shoff = align_up_for_test(shstrtab_offset + shstrtab.size(), 8);
+  constexpr uint16_t section_count = 3;
+
+  std::vector<uint8_t> image(shoff + section_count * sizeof(Elf64_Shdr), 0);
+
+  Elf64_Ehdr ehdr{};
+  std::memcpy(ehdr.e_ident, EI_MAGIC, EI_MAGIC_SIZE);
+  ehdr.e_ident[EI_CLASS] = ELFCLASS64;
+  ehdr.e_ident[EI_OSABI] = ELFOSABI_AMDGPU_HSA;
+  ehdr.e_type = 1; // ET_REL
+  ehdr.e_machine = EM_AMDGPU;
+  ehdr.e_version = 1;
+  ehdr.e_shoff = shoff;
+  ehdr.e_flags = EF_AMDGPU_MACH_AMDGCN_GFX950;
+  ehdr.e_ehsize = sizeof(Elf64_Ehdr);
+  ehdr.e_shentsize = sizeof(Elf64_Shdr);
+  ehdr.e_shnum = section_count;
+  ehdr.e_shstrndx = 2;
+  std::memcpy(image.data(), &ehdr, sizeof(ehdr));
+
+  if (!text_words.empty())
+    std::memcpy(image.data() + text_offset, text_words.data(), text_size);
+  std::memcpy(image.data() + shstrtab_offset, shstrtab.data(), shstrtab.size());
+
+  std::array<Elf64_Shdr, section_count> shdrs{};
+  shdrs[1].sh_name = text_name;
+  shdrs[1].sh_type = SHT_PROGBITS;
+  shdrs[1].sh_flags = 0x6; // SHF_ALLOC | SHF_EXECINSTR
+  shdrs[1].sh_offset = text_offset;
+  shdrs[1].sh_size = text_size;
+  shdrs[1].sh_addralign = sizeof(uint32_t);
+
+  shdrs[2].sh_name = shstrtab_name;
+  shdrs[2].sh_type = SHT_STRTAB;
+  shdrs[2].sh_offset = shstrtab_offset;
+  shdrs[2].sh_size = shstrtab.size();
+  shdrs[2].sh_addralign = 1;
+
+  std::memcpy(image.data() + shoff, shdrs.data(), shdrs.size() * sizeof(Elf64_Shdr));
+  return image;
 }
 
 std::vector<uint8_t> make_minimal_amdgpu_elf_with_text_and_rodata() {
@@ -252,6 +313,345 @@ const Section *find_section(const CodeObject &co, std::string_view name) {
       return section.get();
   }
   return nullptr;
+}
+
+constexpr uint16_t kTestA = 256 + 1;
+constexpr uint16_t kTestB = 256 + 2;
+constexpr uint16_t kTestC = 256 + 3;
+constexpr uint16_t kInlineNeg1ForTest = 193;
+
+enum class Bitop3Formula {
+  And,
+  Or,
+  Xor,
+  Xnor,
+  Not,
+  AndOr,
+  Or3,
+  Xor3,
+};
+
+struct Bitop3EquivalenceCase {
+  const char *name;
+  uint8_t truth_table;
+  uint16_t src1;
+  uint16_t src2;
+  Bitop3Formula formula;
+};
+
+const std::array<Bitop3EquivalenceCase, 8> kBitop3EquivalenceCases = {{
+    {"V_AND", 0x40, kTestB, scalar_positive_inline_u32(0), Bitop3Formula::And},
+    {"V_OR", 0x54, kTestB, scalar_positive_inline_u32(0), Bitop3Formula::Or},
+    {"V_XOR", 0x14, kTestB, scalar_positive_inline_u32(0), Bitop3Formula::Xor},
+    {"V_XNOR", 0x41, kTestB, scalar_positive_inline_u32(0), Bitop3Formula::Xnor},
+    {"V_NOT", 0x01, scalar_positive_inline_u32(0), scalar_positive_inline_u32(0),
+     Bitop3Formula::Not},
+    {"V_AND_OR", 0xEA, kTestB, kTestC, Bitop3Formula::AndOr},
+    {"V_OR3", 0xFE, kTestB, kTestC, Bitop3Formula::Or3},
+    {"V_XOR3", 0x96, kTestB, kTestC, Bitop3Formula::Xor3},
+}};
+
+std::array<uint32_t, 2> make_cdna4_bitop3_words(uint16_t opcode,
+                                                const Bitop3EquivalenceCase &test_case) {
+  cdna4::Vop3MachineInst inst{};
+  inst.encoding = 0x34;
+  inst.op = opcode;
+  // Deliberately write back into A. This exercises the scratch-accumulator path:
+  // the lowering must not clobber an input register before every monomial has
+  // consumed the original source value.
+  inst.vdst = 1;
+  inst.src0 = kTestA;
+  inst.src1 = test_case.src1;
+  inst.src2 = test_case.src2;
+  // CDNA4 V_BITOP3 stores TTBL as { OMOD[1:0], ABS[2:0], NEG[2:0] }.
+  inst.omod = (test_case.truth_table >> 6) & 0x3;
+  inst.abs = (test_case.truth_table >> 3) & 0x7;
+  inst.neg = test_case.truth_table & 0x7;
+
+  std::array<uint32_t, 2> words{};
+  std::memcpy(words.data(), &inst, sizeof(inst));
+  return words;
+}
+
+uint32_t expected_bitop3_equivalence(Bitop3Formula formula, uint32_t a, uint32_t b, uint32_t c,
+                                     uint32_t mask) {
+  a &= mask;
+  b &= mask;
+  c &= mask;
+
+  switch (formula) {
+  case Bitop3Formula::And:
+    return (a & b) & mask;
+  case Bitop3Formula::Or:
+    return (a | b) & mask;
+  case Bitop3Formula::Xor:
+    return (a ^ b) & mask;
+  case Bitop3Formula::Xnor:
+    return ~(a ^ b) & mask;
+  case Bitop3Formula::Not:
+    return ~a & mask;
+  case Bitop3Formula::AndOr:
+    return ((a & b) | c) & mask;
+  case Bitop3Formula::Or3:
+    return (a | b | c) & mask;
+  case Bitop3Formula::Xor3:
+    return (a ^ b ^ c) & mask;
+  }
+  return 0;
+}
+
+std::optional<uint32_t> read_cdna3_vop3_operand(uint16_t operand,
+                                                const std::array<uint32_t, 256> &vgprs) {
+  if (operand >= 256 && operand < 512)
+    return vgprs[operand - 256];
+  if (operand >= scalar_positive_inline_u32(0) && operand <= scalar_positive_inline_u32(64))
+    return operand - scalar_positive_inline_u32(0);
+  if (operand == kInlineNeg1ForTest)
+    return 0xFFFFFFFFu;
+  return std::nullopt;
+}
+
+std::optional<uint32_t> evaluate_cdna3_bitop3_lowering(const std::vector<uint32_t> &words,
+                                                       uint32_t a, uint32_t b, uint32_t c) {
+  std::array<uint32_t, 256> vgprs{};
+  vgprs[1] = a;
+  vgprs[2] = b;
+  vgprs[3] = c;
+
+  if (words.size() % 2 != 0)
+    return std::nullopt;
+
+  for (size_t i = 0; i < words.size(); i += 2) {
+    cdna3::Vop3MachineInst inst{};
+    const uint32_t raw[] = {words[i], words[i + 1]};
+    std::memcpy(&inst, raw, sizeof(inst));
+
+    auto src0 = read_cdna3_vop3_operand(static_cast<uint16_t>(inst.src0), vgprs);
+    auto src1 = read_cdna3_vop3_operand(static_cast<uint16_t>(inst.src1), vgprs);
+    if (!src0)
+      return std::nullopt;
+
+    switch (inst.op) {
+    case 321: // v_mov_b32
+      vgprs[inst.vdst] = *src0;
+      break;
+    case 272: // v_lshrrev_b32
+      if (!src1)
+        return std::nullopt;
+      vgprs[inst.vdst] = *src1 >> (*src0 & 31u);
+      break;
+    case 274: // v_lshlrev_b32
+      if (!src1)
+        return std::nullopt;
+      vgprs[inst.vdst] = *src1 << (*src0 & 31u);
+      break;
+    case 275: // v_and_b32
+      if (!src1)
+        return std::nullopt;
+      vgprs[inst.vdst] = *src0 & *src1;
+      break;
+    case 277: // v_xor_b32
+      if (!src1)
+        return std::nullopt;
+      vgprs[inst.vdst] = *src0 ^ *src1;
+      break;
+    default:
+      return std::nullopt;
+    }
+  }
+
+  return vgprs[1];
+}
+
+std::vector<uint32_t>
+lower_first_cdna4_instruction_for_test(const std::vector<uint32_t> &text_words) {
+  auto image = make_minimal_amdgpu_elf_with_text(text_words);
+  AmdGpuCodeObject co(image.data(), image.size());
+  EXPECT_TRUE(co.is_valid());
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  EXPECT_NE(decoder, nullptr);
+  auto blocks = BasicBlock::build(co, *decoder);
+  EXPECT_EQ(blocks.size(), 1u);
+  if (blocks.empty())
+    return {};
+
+  std::vector<BasicBlock *> scope_blocks;
+  scope_blocks.reserve(blocks.size());
+  for (auto &block : blocks)
+    scope_blocks.push_back(block.get());
+
+  LivenessAnalysis liveness(KernelBlockScope(scope_blocks.data(), scope_blocks.size()));
+  const Instruction &inst = *blocks.front()->instructions().begin();
+
+  SemanticTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3);
+  TranslationContext context;
+  return translator.try_lower_expand(inst, 0, liveness, context);
+}
+
+std::vector<uint32_t> lower_cdna4_bitop3_for_test(uint16_t opcode,
+                                                  const Bitop3EquivalenceCase &test_case) {
+  const auto inst_words = make_cdna4_bitop3_words(opcode, test_case);
+  return lower_first_cdna4_instruction_for_test({inst_words[0], inst_words[1]});
+}
+
+std::vector<uint32_t> lower_cdna4_ds_read_b64_tr_b16_for_test(uint8_t vdst, uint8_t addr,
+                                                              uint8_t offset0, uint8_t offset1) {
+  cdna4::DsMachineInst src{};
+  src.encoding = 0x36;
+  src.op = 227;
+  src.vdst = vdst;
+  src.addr = addr;
+  src.offset0 = offset0;
+  src.offset1 = offset1;
+
+  uint32_t words[2]{};
+  std::memcpy(words, &src, sizeof(src));
+  return lower_first_cdna4_instruction_for_test({words[0], words[1]});
+}
+
+std::vector<uint32_t> lower_cdna4_wide_k_mfma_for_test(uint16_t opcode, uint8_t vdst,
+                                                       uint16_t src2) {
+  cdna4::Vop3pMfmaMachineInst src{};
+  src.encoding = 0x1A7;
+  src.op = opcode;
+  src.vdst = vdst;
+  src.acc_cd = 1;
+  src.src0 = 256 + 8;
+  src.src1 = 256 + 16;
+  src.src2 = src2;
+
+  uint32_t words[2]{};
+  std::memcpy(words, &src, sizeof(src));
+  return lower_first_cdna4_instruction_for_test({words[0], words[1]});
+}
+
+void expect_cdna3_words_decode(const std::vector<uint32_t> &words) {
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA3);
+  ASSERT_NE(decoder, nullptr);
+  for (size_t pc = 0; pc < words.size();) {
+    std::unique_ptr<Instruction> inst(decoder->decode(&words[pc]));
+    ASSERT_NE(inst, nullptr);
+    EXPECT_NE(std::string_view(inst->mnemonic()), "v_bitop3_b16");
+    EXPECT_NE(std::string_view(inst->mnemonic()), "v_bitop3_b32");
+    pc += inst->size() / sizeof(uint32_t);
+  }
+}
+
+TEST(DsTransposeLowering, ReadB64TrB16Cdna4ToCdna3) {
+  const auto lowered = lower_cdna4_ds_read_b64_tr_b16_for_test(8, 11, 0x80, 0);
+  ASSERT_FALSE(lowered.empty());
+  ASSERT_GE(lowered.size(), 2u);
+
+  cdna3::DsMachineInst read{};
+  std::memcpy(&read, lowered.data(), sizeof(read));
+  EXPECT_EQ(read.encoding, 0x36u);
+  EXPECT_EQ(read.op, 118u);
+  EXPECT_EQ(read.addr, 11u);
+  EXPECT_EQ(read.offset0, 0x80u);
+  EXPECT_EQ(read.offset1, 0u);
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA3);
+  ASSERT_NE(decoder, nullptr);
+
+  int ds_read_b64_count = 0;
+  int ds_bpermute_count = 0;
+  int v_perm_count = 0;
+  int v_pack_count = 0;
+  int waitcnt_count = 0;
+  for (size_t pc = 0; pc < lowered.size();) {
+    std::unique_ptr<Instruction> inst(decoder->decode(&lowered[pc]));
+    ASSERT_NE(inst, nullptr) << "decode failed at word " << pc;
+    const std::string_view mnemonic = inst->mnemonic();
+    EXPECT_NE(mnemonic, "ds_read_b64_tr_b16");
+    EXPECT_NE(mnemonic, "invalid");
+    if (mnemonic == "ds_read_b64")
+      ++ds_read_b64_count;
+    else if (mnemonic == "ds_bpermute_b32")
+      ++ds_bpermute_count;
+    else if (mnemonic == "v_perm_b32")
+      ++v_perm_count;
+    else if (mnemonic == "v_pack_b32_f16")
+      ++v_pack_count;
+    else if (mnemonic == "s_waitcnt")
+      ++waitcnt_count;
+    pc += inst->size() / sizeof(uint32_t);
+  }
+
+  EXPECT_EQ(ds_read_b64_count, 1);
+  EXPECT_EQ(ds_bpermute_count, 8);
+  EXPECT_EQ(v_perm_count, 4);
+  EXPECT_EQ(v_pack_count, 2);
+  EXPECT_GE(waitcnt_count, 1);
+}
+
+TEST(MfmaWideKLowering, F16WideKCdna4ToCdna3) {
+  struct Case {
+    uint16_t wide_opcode;
+    uint8_t narrow_opcode;
+    const char *wide_mnemonic;
+    const char *narrow_mnemonic;
+  };
+  const std::array<Case, 2> cases = {{
+      {84, 77, "v_mfma_f32_16x16x32_f16", "v_mfma_f32_16x16x16_f16"},
+      {85, 76, "v_mfma_f32_32x32x16_f16", "v_mfma_f32_32x32x8_f16"},
+  }};
+
+  constexpr uint8_t kVdst = 32;
+  for (const auto &test_case : cases) {
+    for (const uint16_t src2 :
+         {scalar_positive_inline_u32(0), uint16_t{256}, uint16_t{256 + kVdst}}) {
+      const auto lowered = lower_cdna4_wide_k_mfma_for_test(test_case.wide_opcode, kVdst, src2);
+      ASSERT_FALSE(lowered.empty()) << test_case.wide_mnemonic << " src2=" << src2;
+
+      auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA3);
+      ASSERT_NE(decoder, nullptr);
+
+      int ds_bpermute_count = 0;
+      int waitcnt_count = 0;
+      int narrow_mfma_count = 0;
+      std::vector<uint16_t> mfma_src0;
+      std::vector<uint16_t> mfma_src1;
+      std::vector<uint16_t> mfma_src2;
+      for (size_t pc = 0; pc < lowered.size();) {
+        std::unique_ptr<Instruction> inst(decoder->decode(&lowered[pc]));
+        ASSERT_NE(inst, nullptr) << "decode failed at word " << pc;
+        const std::string_view mnemonic = inst->mnemonic();
+        EXPECT_NE(mnemonic, "invalid");
+        EXPECT_NE(mnemonic, test_case.wide_mnemonic);
+        if (mnemonic == "ds_bpermute_b32")
+          ++ds_bpermute_count;
+        else if (mnemonic == "s_waitcnt")
+          ++waitcnt_count;
+        else if (mnemonic == test_case.narrow_mnemonic) {
+          ++narrow_mfma_count;
+          cdna3::Vop3pMfmaMachineInst mfma{};
+          std::memcpy(&mfma, &lowered[pc], sizeof(mfma));
+          EXPECT_EQ(mfma.op, test_case.narrow_opcode);
+          EXPECT_EQ(mfma.vdst, kVdst);
+          EXPECT_EQ(mfma.acc_cd, 1u);
+          EXPECT_EQ(mfma.acc, 0u);
+          mfma_src0.push_back(static_cast<uint16_t>(mfma.src0));
+          mfma_src1.push_back(static_cast<uint16_t>(mfma.src1));
+          mfma_src2.push_back(static_cast<uint16_t>(mfma.src2));
+        }
+        pc += inst->size() / sizeof(uint32_t);
+      }
+
+      EXPECT_EQ(ds_bpermute_count, 0) << test_case.wide_mnemonic;
+      EXPECT_EQ(waitcnt_count, 0) << test_case.wide_mnemonic;
+      EXPECT_EQ(narrow_mfma_count, 2) << test_case.wide_mnemonic;
+      ASSERT_EQ(mfma_src0.size(), 2u) << test_case.wide_mnemonic;
+      ASSERT_EQ(mfma_src1.size(), 2u) << test_case.wide_mnemonic;
+      ASSERT_EQ(mfma_src2.size(), 2u) << test_case.wide_mnemonic;
+      EXPECT_EQ(mfma_src0[0], 256u + 8) << test_case.wide_mnemonic;
+      EXPECT_EQ(mfma_src0[1], 256u + 10) << test_case.wide_mnemonic;
+      EXPECT_EQ(mfma_src1[0], 256u + 16) << test_case.wide_mnemonic;
+      EXPECT_EQ(mfma_src1[1], 256u + 18) << test_case.wide_mnemonic;
+      EXPECT_EQ(mfma_src2[0], src2) << test_case.wide_mnemonic;
+      EXPECT_EQ(mfma_src2[1], 256u + kVdst) << test_case.wide_mnemonic;
+    }
+  }
 }
 
 TEST(CoherencyRemap, Gfx940ToGfx12AgentScope) {
@@ -436,6 +836,16 @@ TEST(LegalizationLookup, ReturnsNullForUnknown) {
   EXPECT_EQ(entry, nullptr);
 }
 
+TEST(LegalizationLookup, Cdna4ToCdna3UsesExactRuntimeEncodingId) {
+  const auto *vop3_cmp = lookup(kLegalization_cdna4_to_cdna3, 416, 84);
+  ASSERT_NE(vop3_cmp, nullptr);
+  EXPECT_EQ(vop3_cmp->action, Action::Identity);
+
+  const auto *mfma = lookup(kLegalization_cdna4_to_cdna3, 423, 84);
+  ASSERT_NE(mfma, nullptr);
+  EXPECT_EQ(mfma->action, Action::Expand);
+}
+
 TEST(LegalizationTable, NoIllegalEntries_Cdna4ToRdna4) {
   for (const auto &e : kLegalization_cdna4_to_rdna4) {
     EXPECT_NE(e.action, Action::Illegal)
@@ -466,6 +876,7 @@ CHECK_NO_ILLEGAL(cdna2_to_rdna4)
 CHECK_NO_ILLEGAL(cdna3_to_cdna4)
 CHECK_NO_ILLEGAL(cdna3_to_rdna3)
 CHECK_NO_ILLEGAL(cdna3_to_rdna4)
+CHECK_NO_ILLEGAL(cdna4_to_cdna3)
 CHECK_NO_ILLEGAL(cdna4_to_rdna3)
 CHECK_NO_ILLEGAL(rdna1_to_cdna3)
 CHECK_NO_ILLEGAL(rdna1_to_cdna4)
@@ -480,6 +891,38 @@ CHECK_NO_ILLEGAL(rdna3_to_rdna4)
 CHECK_NO_ILLEGAL(rdna4_to_cdna4)
 
 #undef CHECK_NO_ILLEGAL
+
+TEST(Bitop3Lowering, EquivalenceCasesCdna4ToCdna3) {
+  constexpr uint16_t kCdna4OpBitop3B16 = 563;
+  constexpr uint16_t kCdna4OpBitop3B32 = 564;
+  const std::array<std::array<uint32_t, 3>, 4> samples = {{
+      {0xA5A55A5Au, 0x0F0FF0F0u, 0x3333CCCCu},
+      {0x00000000u, 0xFFFFFFFFu, 0x13579BDFu},
+      {0xFFFFFFFFu, 0x2468ACE0u, 0x00000000u},
+      {0x8001007Fu, 0x7FFE0101u, 0x55AA33CCu},
+  }};
+
+  for (const auto &test_case : kBitop3EquivalenceCases) {
+    for (const auto [opcode, mask] :
+         {std::pair<uint16_t, uint32_t>{kCdna4OpBitop3B32, 0xFFFFFFFFu},
+          std::pair<uint16_t, uint32_t>{kCdna4OpBitop3B16, 0x0000FFFFu}}) {
+      const auto lowered = lower_cdna4_bitop3_for_test(opcode, test_case);
+      ASSERT_FALSE(lowered.empty()) << test_case.name << " opcode " << opcode;
+      expect_cdna3_words_decode(lowered);
+
+      for (const auto &sample : samples) {
+        const uint32_t a = sample[0];
+        const uint32_t b = sample[1];
+        const uint32_t c = sample[2];
+        const auto actual = evaluate_cdna3_bitop3_lowering(lowered, a, b, c);
+        ASSERT_TRUE(actual.has_value()) << test_case.name << " opcode " << opcode;
+        const uint32_t expected = expected_bitop3_equivalence(test_case.formula, a, b, c, mask);
+        EXPECT_EQ(*actual, expected) << test_case.name << " opcode " << opcode << " a=0x"
+                                     << std::hex << a << " b=0x" << b << " c=0x" << c << std::dec;
+      }
+    }
+  }
+}
 
 TEST(CodeObjectPatcher, CaveBodyMaterializesInRjTranslationsAfterText) {
   auto image = make_minimal_amdgpu_elf_with_text_and_rodata();
@@ -862,7 +1305,7 @@ TEST(KernelDescriptorTranslator, CdnaAccVgprExpansionGrowsUnifiedVgprAllocationF
           return translation.descriptor_file_offset == fixture.kd_file_off;
         });
     ASSERT_NE(translated, translations.end());
-    EXPECT_EQ(translated->accvgpr_base, 64u);
+    EXPECT_EQ(translated->source_accvgpr_base, 64u);
     EXPECT_EQ(translated->guest_vgpr_count, 64u);
     EXPECT_EQ(translated->target_vgpr_count, 128u);
     EXPECT_EQ(translated->target_vgpr_granulated, 31u);

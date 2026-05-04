@@ -373,6 +373,7 @@ class _InstRecord:
     enc_name: str
     enc_order: int
     enc_bits: int
+    enc_alias_count: int
     opcode: int
     field_sig: tuple[tuple[str, int], ...]
     opnd_sig: tuple
@@ -418,6 +419,50 @@ class LegalizationGenerator:
         return 0
 
     @staticmethod
+    def _dt_index_for_opcode(enc, spec, opcode: int) -> int:
+        """Return the first primary decode-table slot used by this opcode.
+
+        The runtime DBT lookup uses Instruction::encoding_id(), which is
+        decoded from raw word bits [31:23]. For formats whose architectural
+        encoding field is narrower than 9 bits, the remaining low bits in that
+        runtime value may be opcode bits rather than true don't-care bits. Use
+        the parser's opcode-specific decode table entry so legalization keys
+        match decoded instructions exactly.
+        """
+        if enc.primary_dt_ptrs is None:
+            parent_name = spec.profile.derive_parent_enc_name(enc.enc_name)
+            if parent_name in spec.encoding_map:
+                return LegalizationGenerator._dt_index_for_opcode(
+                    spec.encoding_map[parent_name], spec, opcode)
+            return LegalizationGenerator._dt_index(enc, spec)
+
+        if 0 <= opcode < len(enc.primary_dt_ptrs):
+            ptr = enc.primary_dt_ptrs[opcode]
+            if ptr != -1:
+                return ptr
+
+        return LegalizationGenerator._dt_index(enc, spec)
+
+    @staticmethod
+    def _dt_alias_count_for_opcode(enc, spec, opcode: int) -> int:
+        """Return the number of real decode-table aliases for this opcode."""
+        if enc.primary_dt_ptrs is None:
+            parent_name = spec.profile.derive_parent_enc_name(enc.enc_name)
+            if parent_name in spec.encoding_map:
+                return LegalizationGenerator._dt_alias_count_for_opcode(
+                    spec.encoding_map[parent_name], spec, opcode)
+            return 1
+
+        if 0 <= opcode < len(enc.primary_dt_ptrs):
+            ptr = enc.primary_dt_ptrs[opcode]
+            if ptr != -1:
+                dte = spec.primary_decode_table[ptr]
+                if dte is not None:
+                    return dte.num_dupe_entries
+
+        return 1
+
+    @staticmethod
     def _enc_field_value(enc, spec) -> int:
         dt_idx = LegalizationGenerator._dt_index(enc, spec)
         max_enc_bits = spec.profile.max_enc_bits
@@ -445,8 +490,11 @@ class LegalizationGenerator:
                         canonical=canonical_mnemonic(inst.name),
                         isa_name=isa_name,
                         enc_name=enc.enc_name,
-                        enc_order=self._dt_index(enc, spec),
+                        enc_order=self._dt_index_for_opcode(
+                            enc, spec, inst.opcode),
                         enc_bits=enc.enc_field_bit_cnt,
+                        enc_alias_count=self._dt_alias_count_for_opcode(
+                            enc, spec, inst.opcode),
                         opcode=inst.opcode,
                         field_sig=fsig,
                         opnd_sig=opsig,
@@ -491,14 +539,15 @@ class LegalizationGenerator:
             else:
                 action = self._best_match_action(src_rec, candidates)
 
-            entries.append(LegalizationEntry(
-                src_mnemonic=src_rec.mnemonic,
-                src_encoding=src_rec.enc_name,
-                src_encoding_order=src_rec.enc_order,
-                src_encoding_bits=src_rec.enc_bits,
-                src_opcode=src_rec.opcode,
-                action=action,
-            ))
+            for alias in range(src_rec.enc_alias_count):
+                entries.append(LegalizationEntry(
+                    src_mnemonic=src_rec.mnemonic,
+                    src_encoding=src_rec.enc_name,
+                    src_encoding_order=src_rec.enc_order + alias,
+                    src_encoding_bits=src_rec.enc_bits,
+                    src_opcode=src_rec.opcode,
+                    action=action,
+                ))
 
         _apply_domain_rules(entries, src_isa, dst_isa)
         return entries
@@ -656,6 +705,7 @@ def _default_pairs(
         # Intra-CDNA upgrades
         ('cdna1', 'cdna2'), ('cdna1', 'cdna3'), ('cdna1', 'cdna4'),
         ('cdna2', 'cdna3'), ('cdna2', 'cdna4'), ('cdna3', 'cdna4'),
+        ('cdna4', 'cdna3'),
         # CDNA → RDNA
         ('cdna1', 'rdna1'), ('cdna1', 'rdna2'), ('cdna1', 'rdna3'),
         ('cdna1', 'rdna4'), ('cdna2', 'rdna3'), ('cdna2', 'rdna4'),

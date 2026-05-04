@@ -238,6 +238,7 @@ target_include_directories(rocjitsu_shared PRIVATE ${GENERATED_DIR})
 add_dependencies(rocjitsu_shared flatbuffers_schemas)
 
 # Tools
+add_subdirectory(tools/dbt_translate)
 if(RJ_BUILD_GUI)
     add_subdirectory(tools/simgui)
 endif()

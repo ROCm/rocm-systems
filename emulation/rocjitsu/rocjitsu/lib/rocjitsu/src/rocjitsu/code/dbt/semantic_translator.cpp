@@ -8,6 +8,7 @@
 
 #include "rocjitsu/code/basic_block.h"
 #include "rocjitsu/code/dbt/hazard_tracker.h"
+#include "rocjitsu/code/dbt/translations/translations.h"
 #include "rocjitsu/code/patch/instruction_builder.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna4/machine_insts.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna4/machine_insts.h"
@@ -17,7 +18,6 @@
 #include <bit>
 #include <cassert>
 #include <cstring>
-#include <string_view>
 
 namespace rocjitsu {
 
@@ -257,7 +257,8 @@ constexpr uint8_t kOpWmmaF32_16x16x16_F16 = 64;
 std::vector<uint32_t>
 lower_mfma_f32_16x16x16_f16(const Instruction &inst, [[maybe_unused]] rj_code_arch_t host_arch,
                             [[maybe_unused]] uint64_t offset, const LivenessAnalysis &liveness,
-                            const LaneLayout *guest_layout, const LaneLayout *host_layout) {
+                            TranslationContext &context, const LaneLayout *guest_layout,
+                            const LaneLayout *host_layout) {
   const auto *raw = inst.raw_encoding();
   if (!raw || inst.size() < 8)
     return {};
@@ -279,15 +280,18 @@ lower_mfma_f32_16x16x16_f16(const Instruction &inst, [[maybe_unused]] rj_code_ar
   if (!exec_save_opt)
     return {};
   const uint8_t kExecSave = static_cast<uint8_t>(*exec_save_opt);
+  context.require_sgprs(kExecSave + 2);
 
   auto tmp_sgpr_opt = liveness.find_free_sgpr(&inst, kExecSave + 2);
   if (!tmp_sgpr_opt)
     return {};
   const uint8_t kTmpSgpr = static_cast<uint8_t>(*tmp_sgpr_opt);
+  context.require_sgprs(kTmpSgpr + 1);
 
   auto free_reg = liveness.find_free_run(&inst, 1, vdst + 4);
   if (!free_reg)
     return {};
+  context.require_vgprs(*free_reg + 1);
   const uint8_t vaddr = static_cast<uint8_t>(*free_reg);
 
   std::vector<uint32_t> words;
@@ -365,8 +369,8 @@ std::vector<uint32_t> lower_accvgpr_write([[maybe_unused]] const Instruction &in
 // ---------------------------------------------------------------------------
 
 std::vector<uint32_t> expand_waitcnt(const Instruction &inst, uint32_t, uint64_t,
-                                     const LivenessAnalysis &, const LaneLayout *,
-                                     const LaneLayout *) {
+                                     const LivenessAnalysis &, TranslationContext &,
+                                     const LaneLayout *, const LaneLayout *) {
   if (!inst.raw_encoding())
     return {};
   const auto &sopp = *reinterpret_cast<const cdna4::SoppMachineInst *>(inst.raw_encoding());
@@ -374,8 +378,8 @@ std::vector<uint32_t> expand_waitcnt(const Instruction &inst, uint32_t, uint64_t
 }
 
 std::vector<uint32_t> expand_v_lshl_add_u64(const Instruction &inst, uint32_t arch, uint64_t,
-                                            const LivenessAnalysis &, const LaneLayout *,
-                                            const LaneLayout *) {
+                                            const LivenessAnalysis &, TranslationContext &,
+                                            const LaneLayout *, const LaneLayout *) {
   return lower_v_lshl_add_u64(inst, static_cast<rj_code_arch_t>(arch));
 }
 
@@ -389,8 +393,8 @@ std::vector<uint32_t> expand_v_lshl_add_u64(const Instruction &inst, uint32_t ar
 /// always correct. A future change can add encode_waitcnt_gfx11 for a
 /// precise mapping, mirroring encode_waitcnt_gfx12 for the RDNA4 path.
 std::vector<uint32_t> expand_waitcnt_gfx9_to_gfx11(const Instruction &inst, uint32_t, uint64_t,
-                                                   const LivenessAnalysis &, const LaneLayout *,
-                                                   const LaneLayout *) {
+                                                   const LivenessAnalysis &, TranslationContext &,
+                                                   const LaneLayout *, const LaneLayout *) {
   // Defensive guard: the rule table is keyed by encoding and opcode, but only
   // SOPP s_waitcnt has the GFX9 waitcnt simm16 layout this lowering expects.
   constexpr uint16_t kEnc_SOPP_value = 0x17F;
@@ -401,24 +405,23 @@ std::vector<uint32_t> expand_waitcnt_gfx9_to_gfx11(const Instruction &inst, uint
 }
 
 std::vector<uint32_t> expand_accvgpr_read(const Instruction &inst, uint32_t, uint64_t,
-                                          const LivenessAnalysis &, const LaneLayout *,
-                                          const LaneLayout *) {
+                                          const LivenessAnalysis &, TranslationContext &,
+                                          const LaneLayout *, const LaneLayout *) {
   return lower_accvgpr_read(inst, ROCJITSU_CODE_ARCH_RDNA4);
 }
 
 std::vector<uint32_t> expand_accvgpr_write(const Instruction &inst, uint32_t, uint64_t,
-                                           const LivenessAnalysis &, const LaneLayout *,
-                                           const LaneLayout *) {
+                                           const LivenessAnalysis &, TranslationContext &,
+                                           const LaneLayout *, const LaneLayout *) {
   return lower_accvgpr_write(inst, ROCJITSU_CODE_ARCH_RDNA4);
 }
 
-std::vector<uint32_t> expand_mfma_f32_16x16x16_f16(const Instruction &inst, uint32_t arch,
-                                                   uint64_t offset,
-                                                   const LivenessAnalysis &liveness,
-                                                   const LaneLayout *guest,
-                                                   const LaneLayout *host) {
+std::vector<uint32_t>
+expand_mfma_f32_16x16x16_f16(const Instruction &inst, uint32_t arch, uint64_t offset,
+                             const LivenessAnalysis &liveness, TranslationContext &context,
+                             const LaneLayout *guest, const LaneLayout *host) {
   return lower_mfma_f32_16x16x16_f16(inst, static_cast<rj_code_arch_t>(arch), offset, liveness,
-                                     guest, host);
+                                     context, guest, host);
 }
 
 // ---------------------------------------------------------------------------
@@ -478,19 +481,22 @@ SemanticTranslator::SemanticTranslator(rj_code_arch_t guest, rj_code_arch_t host
     : host_arch_(host) {
   if (guest == ROCJITSU_CODE_ARCH_CDNA4 && host == ROCJITSU_CODE_ARCH_RDNA4)
     expand_rules_ = kExpandRules_cdna4_to_rdna4;
+  else if (guest == ROCJITSU_CODE_ARCH_CDNA4 && host == ROCJITSU_CODE_ARCH_CDNA3)
+    expand_rules_ = cdna4_to_cdna3_expand_rules();
   else if (guest == ROCJITSU_CODE_ARCH_CDNA4 && host == ROCJITSU_CODE_ARCH_RDNA3)
     expand_rules_ = kExpandRules_cdna4_to_rdna3;
 }
 
 std::vector<uint32_t> SemanticTranslator::try_lower_expand(const Instruction &inst, uint64_t offset,
-                                                           const LivenessAnalysis &liveness) const {
+                                                           const LivenessAnalysis &liveness,
+                                                           TranslationContext &context) const {
   const uint16_t eid = inst.encoding_id();
   const uint16_t op = inst.opcode();
   TranslationRule key{eid, op, RuleAction::Expand, 0, 0, nullptr, nullptr, nullptr, nullptr};
   auto it = std::lower_bound(expand_rules_.begin(), expand_rules_.end(), key);
   if (it != expand_rules_.end() && it->src_encoding_id == eid && it->src_opcode == op &&
       it->expand_fn)
-    return it->expand_fn(inst, static_cast<uint32_t>(host_arch_), offset, liveness,
+    return it->expand_fn(inst, static_cast<uint32_t>(host_arch_), offset, liveness, context,
                          it->guest_layout, it->host_layout);
   return {};
 }
