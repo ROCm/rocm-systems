@@ -52,3 +52,7 @@ cmake \
     $* $src_path
 cmake --build . --parallel 8
 cmake --install .
+
+if [[ "${ASAN}" == true ]]; then
+    export HSA_XNACK=1
+fi
