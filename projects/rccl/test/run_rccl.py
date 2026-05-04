@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 # Copyright Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
+"""Run the RCCL project's installed unit test suite.
+
+This runner is installed with RCCL and executes the rccl-UnitTests binary
+shipped by that project when at least two GPUs are visible.
+"""
 
 import argparse
 import logging
@@ -15,6 +20,15 @@ PROJECT_NAME = "rccl"
 
 logging.basicConfig(level=logging.INFO)
 
+HELP_EPILOG = f"""\
+This script runs the {PROJECT_NAME} project unit test suite from an installed
+ROCm payload. When run from an installed location, it discovers:
+
+  <rocm-prefix>/bin/rccl-UnitTests[.exe]
+
+The test suite requires at least two visible GPUs.
+"""
+
 
 def path_from_env(name: str) -> Optional[Path]:
     value = os.getenv(name)
@@ -24,12 +38,19 @@ def path_from_env(name: str) -> Optional[Path]:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Run installed RCCL unit tests.")
+    parser = argparse.ArgumentParser(
+        description=f"Run the {PROJECT_NAME} project unit test suite.",
+        epilog=HELP_EPILOG,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     parser.add_argument(
         "--rocm-path",
         type=Path,
         default=path_from_env("ROCM_PATH"),
-        help="ROCm install prefix. Defaults to ROCM_PATH or the runner location.",
+        help=(
+            "ROCm install prefix used by the RCCL tests. Defaults to ROCM_PATH "
+            "or the installed runner location."
+        ),
     )
     parser.add_argument(
         "--bin-dir",
