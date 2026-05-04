@@ -938,6 +938,12 @@ For attachment profiling of running processes:
         default=True,
     )
 
+    add_parser_bool_argument(
+        advanced_options,
+        "--attach-sync-output",
+        help="[Attach mode only] Generate output files synchronously during detachment (default: async). Use this option when scripts need to access output files immediately after rocprofv3 exits",
+    )
+
     if args is None:
         args = sys.argv[1:]
 
@@ -1482,6 +1488,7 @@ def run(app_args, args, **kwargs):
     update_env("ROCPROF_OUTPUT_FILE_NAME", _output_file)
     update_env("ROCPROF_OUTPUT_PATH", _output_path)
     update_env("ROCPROF_OUTPUT_CONFIG_FILE", args.output_config, overwrite_if_true=True)
+    update_env("ROCPROF_ATTACH_OUTPUT_GENERATION_SYNC", args.attach_sync_output)
     if app_pass is not None and args.sub_directory is not None:
         app_env["ROCPROF_OUTPUT_PATH"] = os.path.join(
             f"{_output_path}", f"{args.sub_directory}{app_pass}"
