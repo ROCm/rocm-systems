@@ -23,13 +23,14 @@ VALIDATE_METRICS = {
     "memcopy": {
         "command": ["tests/memcopy"],
         "name": "HBM Data Transfer",
+        "get_actual_func": get_hbm_data_transfer,
         "MI200": [
             {
                 "profile_metric_id": ["4.1.8"],
                 "expected_values": [4096.0],
                 "tolerance": 0.10,
-                "get_actual": get_hbm_data_transfer,
                 "get_actual_data": {
+                    "soc": "MI200",
                     "bw_csv": "4.1_Roofline_Performance_Rates.csv",
                     "bw_column": "Value",
                     "duration_csv": "0.1_Top_Kernels.csv",
@@ -42,8 +43,8 @@ VALIDATE_METRICS = {
                 "profile_metric_id": ["4.1.9"],
                 "expected_values": [4096.0],
                 "tolerance": 0.10,
-                "get_actual": get_hbm_data_transfer,
                 "get_actual_data": {
+                    "soc": "MI300",
                     "bw_csv": "4.1_Roofline_Performance_Rates.csv",
                     "bw_column": "Value",
                     "duration_csv": "0.1_Top_Kernels.csv",
@@ -56,8 +57,8 @@ VALIDATE_METRICS = {
                 "profile_metric_id": ["4.1.10"],
                 "expected_values": [4096.0],
                 "tolerance": 0.10,
-                "get_actual": get_hbm_data_transfer,
                 "get_actual_data": {
+                    "soc": "MI350",
                     "bw_csv": "4.1_Roofline_Performance_Rates.csv",
                     "bw_column": "Value",
                     "duration_csv": "0.1_Top_Kernels.csv",
@@ -125,8 +126,9 @@ def test_validate_metrics(
                 f"with metric ids {metric_ids}: exit code {code}"
             )
 
+            get_actual_func = VALIDATE_METRICS[workload]["get_actual_func"]
             for metric in metrics:
-                actual = metric["get_actual"](
+                actual = get_actual_func(
                     analysis_workload_dir, metric["get_actual_data"]
                 )
                 expected_values = metric["expected_values"]
