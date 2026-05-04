@@ -217,6 +217,9 @@ TEST(metrics, check_agent_valid)
 
 TEST(metrics, check_public_api_query)
 {
+#if ROCPROFILER_BUILD_WSL
+    GTEST_SKIP() << "requires GPU hardware counters not available on WSL";
+#endif
     auto        metrics_map = rocprofiler::counters::loadMetrics();
     const auto& id_map      = metrics_map->id_to_metric;
     for(const auto& [id, metric] : id_map)

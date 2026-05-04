@@ -243,6 +243,9 @@ add_constants(std::unordered_map<std::string, Metric>& metrics, uint64_t start_i
 
 TEST(evaluate_ast, counter_constants)
 {
+#if ROCPROFILER_BUILD_WSL
+    GTEST_SKIP() << "requires GPU agent topology not available on WSL";
+#endif
     // Test the construction of counter constants and their evaluation
     std::unordered_map<std::string, Metric> metrics = {
         {"MAX_WAVE_SIZE", Metric("gfx9", "MAX_WAVE_SIZE", "a", "1", "a", "wave_front_size", "", 0)},
@@ -1024,6 +1027,9 @@ TEST(evaluate_ast, counter_reduction_avg)
 
 TEST(evaluate_ast, evaluate_mixed_counters)
 {
+#if ROCPROFILER_BUILD_WSL
+    GTEST_SKIP() << "requires GPU agent topology not available on WSL";
+#endif
     using namespace rocprofiler::counters;
 
     auto get_base_rec_id = [](uint64_t counter_id) {

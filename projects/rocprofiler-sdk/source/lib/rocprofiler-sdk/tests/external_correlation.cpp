@@ -230,6 +230,9 @@ thread_postcreate(rocprofiler_runtime_library_t /*lib*/, void* tool_data)
 
 TEST(rocprofiler_lib, callback_external_correlation)
 {
+#if ROCPROFILER_BUILD_WSL
+    GTEST_SKIP() << "requires full HSA runtime intercept not available on WSL";
+#endif
     using init_func_t = int (*)(rocprofiler_client_finalize_t, void*);
     using fini_func_t = void (*)(void*);
 
@@ -373,6 +376,9 @@ TEST(rocprofiler_lib, callback_external_correlation)
 
 TEST(rocprofiler_lib, buffered_external_correlation)
 {
+#if ROCPROFILER_BUILD_WSL
+    GTEST_SKIP() << "requires full HSA runtime intercept not available on WSL";
+#endif
     using init_func_t = int (*)(rocprofiler_client_finalize_t, void*);
     using fini_func_t = void (*)(void*);
 

@@ -233,6 +233,9 @@ TEST(rocprofiler_lib, registration_lambda_no_result)
 
 TEST(rocprofiler_lib, callback_registration_lambda_with_result)
 {
+#if ROCPROFILER_BUILD_WSL
+    GTEST_SKIP() << "requires full HSA runtime intercept not available on WSL";
+#endif
     using init_func_t = int (*)(rocprofiler_client_finalize_t, void*);
     using fini_func_t = void (*)(void*);
 
@@ -370,6 +373,9 @@ TEST(rocprofiler_lib, callback_registration_lambda_with_result)
 
 TEST(rocprofiler_lib, buffer_registration_lambda_with_result)
 {
+#if ROCPROFILER_BUILD_WSL
+    GTEST_SKIP() << "requires full HSA runtime intercept not available on WSL";
+#endif
     using init_func_t = int (*)(rocprofiler_client_finalize_t, void*);
     using fini_func_t = void (*)(void*);
 

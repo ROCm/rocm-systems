@@ -166,6 +166,9 @@ auto valid_intercept_combos = init_list_t{
 
 TEST(rocprofiler_lib, intercept_table_and_callback_tracing)
 {
+#if ROCPROFILER_BUILD_WSL
+    GTEST_SKIP() << "requires full HSA runtime intercept not available on WSL";
+#endif
     // test layering of tool interception of API table on top of rocprofiler API tracing.
     // This test enables both rocprofiler API tracing and a tool installing it's own
     // wrappers via the HsaApiTable. With both active, one should see the same
@@ -316,6 +319,9 @@ TEST(rocprofiler_lib, intercept_table_and_callback_tracing)
 
 TEST(rocprofiler_lib, intercept_table_and_callback_tracing_disable_context)
 {
+#if ROCPROFILER_BUILD_WSL
+    GTEST_SKIP() << "requires full HSA runtime intercept not available on WSL";
+#endif
     // test layering of tool interception of API table on top of rocprofiler API tracing.
     // Similar to intercept_table_and_callback_tracing test except on the
     // first call to hsa_iterate_agents the context is disabled. As a result,

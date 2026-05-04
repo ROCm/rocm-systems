@@ -206,6 +206,9 @@ test_init()
 
 TEST(dimension, block_dim_test)
 {
+#if ROCPROFILER_BUILD_WSL
+    GTEST_SKIP() << "requires GPU hardware counters not available on WSL";
+#endif
     ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
     test_init();
 

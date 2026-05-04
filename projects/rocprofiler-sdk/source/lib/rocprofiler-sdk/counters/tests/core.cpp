@@ -195,6 +195,9 @@ null_record_callback(rocprofiler_dispatch_counting_service_data_t,
 
 TEST(core, check_packet_generation)
 {
+#if ROCPROFILER_BUILD_WSL
+    GTEST_SKIP() << "requires GPU hardware counters not available on WSL";
+#endif
     ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
     test_init();
     ASSERT_TRUE(hsa::get_queue_controller() != nullptr);
@@ -360,6 +363,9 @@ get_buffer_offset();
 
 TEST(core, check_callbacks)
 {
+#if ROCPROFILER_BUILD_WSL
+    GTEST_SKIP() << "requires GPU hardware counters not available on WSL";
+#endif
     int64_t count = 0;
     ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
     test_init();
@@ -484,6 +490,9 @@ TEST(core, check_callbacks)
 
 TEST(core, destroy_counter_profile)
 {
+#if ROCPROFILER_BUILD_WSL
+    GTEST_SKIP() << "requires GPU hardware counters not available on WSL";
+#endif
     ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
     test_init();
 
@@ -655,6 +664,9 @@ TEST(core, start_stop_callback_ctx)
 
 TEST(core, test_profile_incremental)
 {
+#if ROCPROFILER_BUILD_WSL
+    GTEST_SKIP() << "requires GPU hardware counters not available on WSL";
+#endif
     ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
     test_init();
     ASSERT_TRUE(hsa::get_queue_controller() != nullptr);
@@ -909,6 +921,9 @@ rocprofiler-sdk:
 
 TEST(core, create_counter)
 {
+#if ROCPROFILER_BUILD_WSL
+    GTEST_SKIP() << "requires GPU hardware counters not available on WSL";
+#endif
     std::vector<Metric> to_add = {
         Metric("", "SQ_WAVES_REDUCE_T", "", "", "", "reduce(SQ_WAVES,sum)", "", 10000),
         Metric("", "SQ_WAVES_AVR_T", "", "", "", "reduce(SQ_WAVES,avr)", "", 10001),

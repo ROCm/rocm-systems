@@ -198,6 +198,9 @@ TEST(thread_trace, configure_test)
 
 TEST(thread_trace, perfcounters_configure_test)
 {
+#if ROCPROFILER_BUILD_WSL
+    GTEST_SKIP() << "requires GPU hardware counters not available on WSL";
+#endif
     constexpr int NUM_COUNTERS = 3;
     ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
     test_init();
