@@ -391,6 +391,22 @@ Run with your OpenSHMEM launcher (e.g., ``oshrun``) and ``rocprof-sys-sample`` o
 
    oshrun -n 4 rocprof-sys-sample -- ./my_shmem_app
 
+.. note::
+
+   PRRTE-based ``oshrun`` (Open MPI 5.0 and later) strips the first literal ``--``
+   from the program's argument list before passing it to the target application. This
+   breaks commands like ``rocprof-sys-run -- <binary>`` because ``rocprof-sys-run``
+   never receives the ``--`` separator and misinterprets its arguments. Older ORTE-based
+   ``oshrun`` (4.x and earlier) preserves ``--`` and is not affected.
+
+   As a workaround, pass ``-- --`` (two separate ``--`` delimiters) so that ``oshrun``
+   consumes the first one and the second reaches ``rocprof-sys-sample`` or
+   ``rocprof-sys-run`` as expected:
+
+   .. code-block:: shell
+
+      oshrun -n 4 rocprof-sys-sample -- -- ./my_shmem_app
+
 
 Multi-Layer Communication Analysis
 ===================================
