@@ -797,6 +797,8 @@ install(TARGETS ${ROCRTST}
 install(FILES ${ROCRTST_ROOT}/config/platform_config.yaml
         DESTINATION share/rocrtst)
 
+install(PROGRAMS run_rocrtst.py DESTINATION share/rocrtst)
+
 install ( DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/../../thirdparty/lib DESTINATION lib/rocrtst )
 
 include ( CPack )
