@@ -255,7 +255,7 @@ TEST_F(NetIbMPITest, SimpleSendRecv) {
         PostSingleRecv(pair.recvComm, buffer, bufferSize, tag, mhandle, &request);
     } else {
         // Sender
-        FillHostBuffer(buffer, bufferSize, rank);
+        fillHostBufferWithPattern<uint8_t>(buffer, bufferSize, makeBytePattern(rank));
         PostSendWithRetry(pair.sendComm, buffer, bufferSize, tag, mhandle, &request);
     }
 
@@ -271,7 +271,7 @@ TEST_F(NetIbMPITest, SimpleSendRecv) {
 
         // Verify received data
         int senderRank = 1;  // Data was sent by rank 1
-        EXPECT_TRUE(VerifyHostBuffer(buffer, bufferSize, senderRank)) << "Data validation failed";
+        EXPECT_TRUE(verifyHostBufferData<uint8_t>(buffer, bufferSize, makeBytePattern(senderRank))) << "Data validation failed";
     }
 
     // NetMHandleGuard will automatically deregister memory when test scope ends
@@ -317,7 +317,7 @@ TEST_F(NetIbMPITest, SendRecvMultipleSizes) {
             PostSingleRecv(pair.recvComm, buffer, size, tag, mhandle, &request);
             ASSERT_NE(request, nullptr) << "Recv request should never be NULL";
         } else {
-            FillHostBuffer(buffer, size, seed);
+            fillHostBufferWithPattern<uint8_t>(buffer, size, makeBytePattern(seed));
             PostSendWithRetry(pair.sendComm, buffer, size, tag, mhandle, &request);
         }
 
@@ -335,7 +335,7 @@ TEST_F(NetIbMPITest, SendRecvMultipleSizes) {
 
         if (rank == 0) {
             EXPECT_EQ(sizes[0], size) << "Size mismatch for transfer of " << size << " bytes";
-            EXPECT_TRUE(VerifyHostBuffer(buffer, size, seed)) << "Data validation failed for size " << size;
+            EXPECT_TRUE(verifyHostBufferData<uint8_t>(buffer, size, makeBytePattern(seed))) << "Data validation failed for size " << size;
         }
 
         // NetMHandleGuard will automatically deregister at end of loop iteration
@@ -448,7 +448,7 @@ TEST_F(NetIbMPITest, FlushAfterRecv) {
                           recvHandles, &request), ncclSuccess);
     } else {
         // Sender
-        ASSERT_EQ(InitializeBuffer(buffer, bufferSize, rank), hipSuccess);
+        ASSERT_EQ(initializeBufferWithPattern<uint8_t>(buffer, bufferSize, makeBytePattern(rank)), hipSuccess);
 
         PostSendWithRetry(pair.sendComm, buffer, bufferSize, tag, mhandle, &request);
     }
@@ -546,7 +546,7 @@ TEST_F(NetIbMPITest, MultipleSequentialTransfers) {
             PostSingleRecv(pair.recvComm, recvBuffer, bufferSize, tag, mhandle, &request);
             ASSERT_NE(request, nullptr) << "Recv request should never be NULL";
         } else {
-            FillHostBuffer(sendBuffer, bufferSize, seed);
+            fillHostBufferWithPattern<uint8_t>(sendBuffer, bufferSize, makeBytePattern(seed));
             PostSendWithRetry(pair.sendComm, sendBuffer, bufferSize, tag, mhandle, &request);
         }
 
@@ -565,7 +565,7 @@ TEST_F(NetIbMPITest, MultipleSequentialTransfers) {
         if (rank == 0) {
             EXPECT_EQ(sizes[0], bufferSize) << "Transfer " << i << " size mismatch";
 
-            EXPECT_TRUE(VerifyHostBuffer(recvBuffer, bufferSize, seed)) << "Transfer " << i << " data validation failed (seed=" << seed << ")";
+            EXPECT_TRUE(verifyHostBufferData<uint8_t>(recvBuffer, bufferSize, makeBytePattern(seed))) << "Transfer " << i << " data validation failed (seed=" << seed << ")";
 
             // NOTE: Flush is NOT called for host memory transfers
             // Flush (iflush) is only needed for GPU Direct RDMA to ensure data visibility on GPU.
@@ -610,7 +610,7 @@ TEST_F(NetIbMPITest, LargeTransfer) {
         PostSingleRecv(pair.recvComm, buffer, bufferSize, tag, mhandle, &request);
     } else {
         // Sender
-        FillHostBuffer(buffer, bufferSize, rank);
+        fillHostBufferWithPattern<uint8_t>(buffer, bufferSize, makeBytePattern(rank));
         PostSendWithRetry(pair.sendComm, buffer, bufferSize, tag, mhandle, &request);
     }
 
@@ -626,7 +626,7 @@ TEST_F(NetIbMPITest, LargeTransfer) {
 
         // Verify received data
         int senderRank = 1;  // Data was sent by rank 1
-        EXPECT_TRUE(VerifyHostBuffer(buffer, bufferSize, senderRank)) << "Large transfer data validation failed";
+        EXPECT_TRUE(verifyHostBufferData<uint8_t>(buffer, bufferSize, makeBytePattern(senderRank))) << "Large transfer data validation failed";
     }
 
     // NetMHandleGuard will automatically deregister at scope end
@@ -830,7 +830,7 @@ TEST_F(NetIbMPITest, MultipleSimultaneousListens) {
                   ncclSuccess);
 
         if (rank == 1) {
-            FillHostBuffer(buf, kTransferSize, seed);
+            fillHostBufferWithPattern<uint8_t>(buf, kTransferSize, makeBytePattern(seed));
         } else {
             memset(buf, 0xDE, kTransferSize);
         }
@@ -857,9 +857,8 @@ TEST_F(NetIbMPITest, MultipleSimultaneousListens) {
 
             size_t errIdx = 0;
             uint8_t errExp = 0, errGot = 0;
-            bool ok = RCCLTestHelpers::verifyHostBufferData<uint8_t>(buf, kTransferSize,
-                [seed](size_t j) { return static_cast<uint8_t>((seed + j) % kBytePatternModulo); },
-                0, 0.0, &errIdx, &errExp, &errGot);
+            bool ok = verifyHostBufferData<uint8_t>(buf, kTransferSize,
+                makeBytePattern(seed), 0, 0.0, &errIdx, &errExp, &errGot);
             EXPECT_TRUE(ok) << listens[c].label << " data mismatch at byte " << errIdx
                             << ": expected " << (int)errExp << " got " << (int)errGot;
         }

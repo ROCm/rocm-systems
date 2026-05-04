@@ -107,7 +107,7 @@ TEST_F(NetIbMPITest, ConnectAndTransfer_VNic) {
         memset(buffer, 0, bufferSize);
         PostSingleRecv(pair.recvComm, buffer, bufferSize, tag, mhandle, &request);
     } else {
-        FillHostBuffer(buffer, bufferSize, seed);
+        fillHostBufferWithPattern<uint8_t>(buffer, bufferSize, makeBytePattern(seed));
         PostSendWithRetry(pair.sendComm, buffer, bufferSize, tag, mhandle, &request);
     }
 
@@ -119,7 +119,7 @@ TEST_F(NetIbMPITest, ConnectAndTransfer_VNic) {
     // Verify data integrity.
     if (rank == 0) {
         EXPECT_EQ(sizes[0], bufferSize) << "Received size mismatch";
-        EXPECT_TRUE(VerifyHostBuffer(buffer, bufferSize, seed)) << "Data validation failed on vNIC transfer";
+        EXPECT_TRUE(verifyHostBufferData<uint8_t>(buffer, bufferSize, makeBytePattern(seed))) << "Data validation failed on vNIC transfer";
     }
 }
 
@@ -210,7 +210,7 @@ TEST_F(NetIbMPITest, AsymmetricMerge_VNic) {
         memset(buffer, 0, bufferSize);
         PostSingleRecv(pair.recvComm, buffer, bufferSize, tag, mhandle, &request);
     } else {
-        FillHostBuffer(buffer, bufferSize, seed);
+        fillHostBufferWithPattern<uint8_t>(buffer, bufferSize, makeBytePattern(seed));
         PostSendWithRetry(pair.sendComm, buffer, bufferSize, tag, mhandle, &request);
     }
 
@@ -222,7 +222,7 @@ TEST_F(NetIbMPITest, AsymmetricMerge_VNic) {
     // Verify data integrity across the asymmetric connection.
     if (rank == 0) {
         EXPECT_EQ(sizes[0], bufferSize) << "Received size mismatch";
-        EXPECT_TRUE(VerifyHostBuffer(buffer, bufferSize, seed)) << "Data validation failed on asymmetric vNIC transfer";
+        EXPECT_TRUE(verifyHostBufferData<uint8_t>(buffer, bufferSize, makeBytePattern(seed))) << "Data validation failed on asymmetric vNIC transfer";
     }
 }
 
@@ -287,7 +287,7 @@ TEST_F(NetIbMPITest, CloseWithoutTransfer_VNic) {
         memset(buffer, 0, bufferSize);
         PostSingleRecv(pair2.recvComm, buffer, bufferSize, tag, mhandle, &request);
     } else {
-        FillHostBuffer(buffer, bufferSize, seed);
+        fillHostBufferWithPattern<uint8_t>(buffer, bufferSize, makeBytePattern(seed));
         PostSendWithRetry(pair2.sendComm, buffer, bufferSize, tag, mhandle, &request);
     }
 
@@ -299,7 +299,7 @@ TEST_F(NetIbMPITest, CloseWithoutTransfer_VNic) {
     // Verify the vNIC is still functional after the no-transfer teardown.
     if (rank == 0) {
         EXPECT_EQ(sizes[0], bufferSize) << "Received size mismatch";
-        EXPECT_TRUE(VerifyHostBuffer(buffer, bufferSize, seed)) << "Data validation failed after no-transfer teardown reconnect";
+        EXPECT_TRUE(verifyHostBufferData<uint8_t>(buffer, bufferSize, makeBytePattern(seed))) << "Data validation failed after no-transfer teardown reconnect";
     }
 }
 
@@ -366,7 +366,7 @@ TEST_F(NetIbMPITest, RegDeregCycling_VNic) {
         memset(buffer, 0, bufferSize);
         PostSingleRecv(pair.recvComm, buffer, bufferSize, tag, mhandle, &request);
     } else {
-        FillHostBuffer(buffer, bufferSize, seed);
+        fillHostBufferWithPattern<uint8_t>(buffer, bufferSize, makeBytePattern(seed));
         PostSendWithRetry(pair.sendComm, buffer, bufferSize, tag, mhandle, &request);
     }
 
@@ -378,7 +378,7 @@ TEST_F(NetIbMPITest, RegDeregCycling_VNic) {
     // Data integrity check after MR cache cycling.
     if (rank == 0) {
         EXPECT_EQ(sizes[0], bufferSize) << "Received size mismatch";
-        EXPECT_TRUE(VerifyHostBuffer(buffer, bufferSize, seed)) << "Data validation failed after reg/dereg cycling";
+        EXPECT_TRUE(verifyHostBufferData<uint8_t>(buffer, bufferSize, makeBytePattern(seed))) << "Data validation failed after reg/dereg cycling";
     }
 }
 
@@ -431,7 +431,7 @@ TEST_F(NetIbMPITest, LargeTransfer_VNic) {
         memset(buffer, 0, bufferSize);
         PostSingleRecv(pair.recvComm, buffer, bufferSize, tag, mhandle, &request);
     } else {
-        FillHostBuffer(buffer, bufferSize, seed);
+        fillHostBufferWithPattern<uint8_t>(buffer, bufferSize, makeBytePattern(seed));
         PostSendWithRetry(pair.sendComm, buffer, bufferSize, tag, mhandle, &request);
     }
 
@@ -445,7 +445,7 @@ TEST_F(NetIbMPITest, LargeTransfer_VNic) {
     // ncclIbMultiSend would corrupt data at QP split points.
     if (rank == 0) {
         EXPECT_EQ(sizes[0], bufferSize) << "Large transfer size mismatch";
-        EXPECT_TRUE(VerifyHostBuffer(buffer, bufferSize, seed)) << "Large vNIC transfer data validation failed";
+        EXPECT_TRUE(verifyHostBufferData<uint8_t>(buffer, bufferSize, makeBytePattern(seed))) << "Large vNIC transfer data validation failed";
     }
 }
 
@@ -507,7 +507,7 @@ TEST_F(NetIbMPITest, MixedSizes_VNic) {
             memset(buffer, 0, size);
             PostSingleRecv(pair.recvComm, buffer, size, tag, mhandle, &request);
         } else {
-            FillHostBuffer(buffer, size, seed);
+            fillHostBufferWithPattern<uint8_t>(buffer, size, makeBytePattern(seed));
             PostSendWithRetry(pair.sendComm, buffer, size, tag, mhandle, &request);
         }
 
@@ -522,7 +522,7 @@ TEST_F(NetIbMPITest, MixedSizes_VNic) {
 
         if (rank == 0) {
             EXPECT_EQ(sizes[0], size) << "Size mismatch for transfer of " << size << " bytes";
-            EXPECT_TRUE(VerifyHostBuffer(buffer, size, seed)) << "Data validation failed for size " << size;
+            EXPECT_TRUE(verifyHostBufferData<uint8_t>(buffer, size, makeBytePattern(seed))) << "Data validation failed for size " << size;
         }
     }
 }
@@ -584,7 +584,7 @@ TEST_F(NetIbMPITest, UnalignedSizeTransfer_VNic) {
             memset(buffer, 0, size);
             PostSingleRecv(pair.recvComm, buffer, size, tag, mhandle, &request);
         } else {
-            FillHostBuffer(buffer, size, seed);
+            fillHostBufferWithPattern<uint8_t>(buffer, size, makeBytePattern(seed));
             PostSendWithRetry(pair.sendComm, buffer, size, tag, mhandle, &request);
         }
 
@@ -599,7 +599,7 @@ TEST_F(NetIbMPITest, UnalignedSizeTransfer_VNic) {
         // Byte level verification at the striping boundary.
         if (rank == 0) {
             EXPECT_EQ(sizes[0], size) << "Size mismatch for transfer of " << size << " bytes";
-            EXPECT_TRUE(VerifyHostBuffer(buffer, size, seed)) << "Data validation failed for size " << size;
+            EXPECT_TRUE(verifyHostBufferData<uint8_t>(buffer, size, makeBytePattern(seed))) << "Data validation failed for size " << size;
         }
     }
 }
@@ -713,7 +713,7 @@ TEST_F(NetIbMPITest, Bidirectional_VNic) {
     const int sendSeed = 5700 + rank;
 
     // Fill send buffer with rank-specific pattern.
-    FillHostBuffer(sendBuf, bufferSize, sendSeed);
+    fillHostBufferWithPattern<uint8_t>(sendBuf, bufferSize, makeBytePattern(sendSeed));
 
     // Post recv and send simultaneously on both connections.
     void* recvRequest = nullptr;
@@ -737,7 +737,7 @@ TEST_F(NetIbMPITest, Bidirectional_VNic) {
     // Verify received data matches the peer's send pattern.
     int peerSeed = 5700 + peerRank;
     EXPECT_EQ(recvSizesOut[0], bufferSize) << "Received size mismatch";
-    EXPECT_TRUE(VerifyHostBuffer(recvBuf, bufferSize, peerSeed)) << "Bidirectional vNIC transfer data validation failed";
+    EXPECT_TRUE(verifyHostBufferData<uint8_t>(recvBuf, bufferSize, makeBytePattern(peerSeed))) << "Bidirectional vNIC transfer data validation failed";
 }
 
 TEST_F(NetIbMPITest, FlushRepeated_VNic) {
@@ -794,7 +794,7 @@ TEST_F(NetIbMPITest, FlushRepeated_VNic) {
 
         if (rank == 1) {
             // Fill GPU buffer via DeviceBufferHelpers (host vector → hipMemcpy in one call).
-            ASSERT_EQ(InitializeBuffer(gpuBuffer, bufferSize, seed), hipSuccess);
+            ASSERT_EQ(initializeBufferWithPattern<uint8_t>(gpuBuffer, bufferSize, makeBytePattern(seed)), hipSuccess);
             PostSendWithRetry(pair.sendComm, gpuBuffer, bufferSize, tag, mhandle, &request);
         } else {
             // Rank 0: post recv on GPU buffer.
@@ -822,7 +822,7 @@ TEST_F(NetIbMPITest, FlushRepeated_VNic) {
             }
 
             // Verify GPU buffer via DeviceBufferHelpers (hipMemcpy + compare in one call).
-            ASSERT_TRUE(VerifyBuffer(gpuBuffer, bufferSize, seed))
+            ASSERT_TRUE(verifyBufferData<uint8_t>(gpuBuffer, bufferSize, makeBytePattern(seed)))
                 << "Iter " << iter << ": data verification failed after flush";
         }
 
@@ -880,7 +880,7 @@ TEST_F(NetIbMPITest, SequentialTransfers_VNic) {
 
         if (rank == 1) {
             // Fill buffer with per-iteration pattern.
-            FillHostBuffer(buffer, bufferSize, seed);
+            fillHostBufferWithPattern<uint8_t>(buffer, bufferSize, makeBytePattern(seed));
             PostSendWithRetry(pair.sendComm, buffer, bufferSize, tag, mhandle, &request);
         } else {
             // Zero buffer before recv to ensure verification catches stale data.
@@ -897,7 +897,7 @@ TEST_F(NetIbMPITest, SequentialTransfers_VNic) {
         // Verify received data matches the iteration-specific pattern.
         if (rank == 0) {
             ASSERT_EQ(sizes[0], bufferSize) << "Iter " << iter << ": received size mismatch";
-            ASSERT_TRUE(VerifyHostBuffer(buffer, bufferSize, seed)) << "Iter " << iter << ": data verification failed";
+            ASSERT_TRUE(verifyHostBufferData<uint8_t>(buffer, bufferSize, makeBytePattern(seed))) << "Iter " << iter << ": data verification failed";
         }
 
         // Sync before next iteration to prevent request reuse races.
@@ -999,9 +999,9 @@ TEST_F(NetIbMPITest, SendRecvDifferentMemoryTypes) {
 
         if (rank == 1) {
             if (memType == NCCL_PTR_CUDA) {
-                ASSERT_EQ(InitializeBuffer(buf, sz, seed), hipSuccess);
+                ASSERT_EQ(initializeBufferWithPattern<uint8_t>(buf, sz, makeBytePattern(seed)), hipSuccess);
             } else {
-                FillHostBuffer(buf, sz, seed);
+                fillHostBufferWithPattern<uint8_t>(buf, sz, makeBytePattern(seed));
             }
         } else {
             if (memType == NCCL_PTR_CUDA) {
@@ -1040,9 +1040,9 @@ TEST_F(NetIbMPITest, SendRecvDifferentMemoryTypes) {
             }
 
             if (memType == NCCL_PTR_CUDA) {
-                EXPECT_TRUE(VerifyBuffer(buf, sz, seed)) << "Data mismatch for " << c.desc;
+                EXPECT_TRUE(verifyBufferData<uint8_t>(buf, sz, makeBytePattern(seed))) << "Data mismatch for " << c.desc;
             } else {
-                EXPECT_TRUE(VerifyHostBuffer(buf, sz, seed)) << "Data mismatch for " << c.desc;
+                EXPECT_TRUE(verifyHostBufferData<uint8_t>(buf, sz, makeBytePattern(seed))) << "Data mismatch for " << c.desc;
             }
         }
     }
@@ -1125,7 +1125,7 @@ TEST_F(NetIbMPITest, SendRecvMultipleSizesFusion) {
         int seed = 9000 + (int)idx;
 
         if (rank == 1) {
-            FillHostBuffer(buffer, sz, seed);
+            fillHostBufferWithPattern<uint8_t>(buffer, sz, makeBytePattern(seed));
         } else {
             memset(buffer, 0xDE, sz);
         }
@@ -1153,9 +1153,8 @@ TEST_F(NetIbMPITest, SendRecvMultipleSizesFusion) {
             uint8_t errExp = 0, errGot = 0;
 
             if (sizeOk) {
-                dataOk = RCCLTestHelpers::verifyHostBufferData<uint8_t>(buffer, sz,
-                    [seed](size_t i) { return static_cast<uint8_t>((seed + i) % kBytePatternModulo); },
-                    0, 0.0, &errIdx, &errExp, &errGot);
+                dataOk = verifyHostBufferData<uint8_t>(buffer, sz,
+                    makeBytePattern(seed), 0, 0.0, &errIdx, &errExp, &errGot);
             }
 
             bool ok = sizeOk && dataOk;
@@ -1259,7 +1258,7 @@ TEST_F(NetIbMPITest, MultidirectionalTransfer) {
         ASSERT_EQ(RegisterMemory(myRecvComm, recvBuf, pat.recvSize,
                                  NCCL_PTR_HOST, &recvMr), ncclSuccess);
 
-        FillHostBuffer(sendBuf, pat.sendSize, pat.sendSeed);
+        fillHostBufferWithPattern<uint8_t>(sendBuf, pat.sendSize, makeBytePattern(pat.sendSeed));
         memset(recvBuf, 0xDE, pat.recvSize);
 
         // BOTH ranks post recv
@@ -1290,9 +1289,8 @@ TEST_F(NetIbMPITest, MultidirectionalTransfer) {
         {
             size_t errIdx = 0;
             uint8_t errExp = 0, errGot = 0;
-            bool ok = RCCLTestHelpers::verifyHostBufferData<uint8_t>(recvBuf, pat.recvSize,
-                [&pat](size_t j) { return static_cast<uint8_t>((pat.recvSeed + j) % kBytePatternModulo); },
-                0, 0.0, &errIdx, &errExp, &errGot);
+            bool ok = verifyHostBufferData<uint8_t>(recvBuf, pat.recvSize,
+                makeBytePattern(pat.recvSeed), 0, 0.0, &errIdx, &errExp, &errGot);
             EXPECT_TRUE(ok) << pat.name << " rank " << rank
                             << " data mismatch at byte " << errIdx
                             << ": expected " << (int)errExp << " got " << (int)errGot;
@@ -1427,7 +1425,7 @@ TEST_F(NetIbMPITest, MultipleOutstandingSendRecv) {
         // Fill each buffer with a unique pattern and post send
         for (int i = 0; i < kNumOutstanding; i++) {
             int seed = kTagBase + i;
-            FillHostBuffer(bufs[i], kLargeBufferSize, seed);
+            fillHostBufferWithPattern<uint8_t>(bufs[i], kLargeBufferSize, makeBytePattern(seed));
 
             void* sendReq = nullptr;
             ASSERT_EQ(PostSend(pair.sendComm, bufs[i], kLargeBufferSize,
@@ -1471,9 +1469,8 @@ TEST_F(NetIbMPITest, MultipleOutstandingSendRecv) {
             int seed = kTagBase + i;
             size_t errIdx = 0;
             uint8_t errExp = 0, errGot = 0;
-            bool good = RCCLTestHelpers::verifyHostBufferData<uint8_t>(bufs[i], kLargeBufferSize,
-                [seed](size_t j) { return static_cast<uint8_t>((seed + j) % kBytePatternModulo); },
-                0, 0.0, &errIdx, &errExp, &errGot);
+            bool good = verifyHostBufferData<uint8_t>(bufs[i], kLargeBufferSize,
+                makeBytePattern(seed), 0, 0.0, &errIdx, &errExp, &errGot);
 
             if (good) {
                 ok++;
@@ -1765,7 +1762,7 @@ TEST_F(NetIbMPITest, Reconnect_VNic) {
 
         if (rank == 1) {
             // Fill with cycle-specific pattern.
-            FillHostBuffer(buffer, bufferSize, seed);
+            fillHostBufferWithPattern<uint8_t>(buffer, bufferSize, makeBytePattern(seed));
             PostSendWithRetry(pair.sendComm, buffer, bufferSize, tag, mhandle, &request);
         } else {
             memset(buffer, 0, bufferSize);
@@ -1780,7 +1777,7 @@ TEST_F(NetIbMPITest, Reconnect_VNic) {
         // Verify received data matches the cycle-specific pattern.
         if (rank == 0) {
             ASSERT_EQ(sizes[0], bufferSize) << "Cycle " << cycle << ": received size mismatch";
-            ASSERT_TRUE(VerifyHostBuffer(buffer, bufferSize, seed)) << "Cycle " << cycle << ": data verification failed";
+            ASSERT_TRUE(verifyHostBufferData<uint8_t>(buffer, bufferSize, makeBytePattern(seed))) << "Cycle " << cycle << ": data verification failed";
         }
 
         MPI_Barrier(MPI_COMM_WORLD);
