@@ -39,8 +39,10 @@ template <class ThreadInfoResolverT>
 class trace_cache_sink
 {
 public:
-    explicit trace_cache_sink(ThreadInfoResolverT& resolver)
+    explicit trace_cache_sink(ThreadInfoResolverT& resolver,
+                              std::vector<std::string> hw_labels = {})
     : resolver_(resolver)
+    , hw_labels_(std::move(hw_labels))
     {}
 
     void store_timer(int64_t tid, std::vector<timer_sample> const& samples)
@@ -156,11 +158,37 @@ public:
                         std::string{ descriptor.track_prefix },
                         descriptor.read(sample.metrics), std::optional<int64_t>{} });
             }
+
+            if(sample.metrics.valid.test(4) && !hw_labels_.empty())
+            {
+                constexpr auto hw_category =
+                    static_cast<std::size_t>(ROCPROFSYS_CATEGORY_THREAD_HARDWARE_COUNTER);
+                for(std::size_t idx = 0;
+                    idx < hw_labels_.size() &&
+                    idx < sample.metrics.hw_counter.size();
+                    ++idx)
+                {
+                    std::string track =
+                        hw_labels_[idx] + " [" + std::to_string(seq_id) + "]";
+                    trace_cache::get_buffer_storage().store(
+                        trace_cache::pmc_event_with_sample{
+                            hw_category, std::move(track),
+                            static_cast<std::size_t>(mid_ns), std::string{ "{}" },
+                            /*stack_id*/ 0, /*parent_stack_id*/ 0,
+                            /*correlation_id*/ 0, /*call_stack*/ std::string{},
+                            /*line_info*/ std::string{}, static_cast<uint32_t>(sys_id),
+                            /*device_type*/ uint8_t{ 0 },
+                            hw_labels_[idx],
+                            static_cast<double>(sample.metrics.hw_counter[idx]),
+                            std::optional<int64_t>{} });
+                }
+            }
         }
     }
 
 private:
-    ThreadInfoResolverT& resolver_;
+    ThreadInfoResolverT&     resolver_;
+    std::vector<std::string> hw_labels_;
 
     static trace_cache::backtrace_region_sample make_region_sample(
         uint32_t category_id, std::size_t sys_id, std::string const& track_name,

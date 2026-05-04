@@ -7,6 +7,7 @@
 // Separated from sampling_config (POD values) so the config struct stays
 // lightweight and copyable without std::function overhead.
 
+#include "sampling/data/limits.hpp"
 #include "sampling/thread_info_data.hpp"
 
 #include <cstddef>
@@ -18,6 +19,11 @@
 
 namespace rocprofsys::sampling
 {
+
+// Signal-safe function pointer type for reading HW counters from the signal handler.
+// Writes up to PAPI_EVENT_COUNT values into `out`; returns the number actually written.
+using hw_counter_read_fn = std::size_t (*)(int64_t tid, long long* out,
+                                           std::size_t max_count);
 
 struct sampling_callbacks
 {
@@ -43,6 +49,12 @@ struct sampling_callbacks
 
     std::function<void()> postfork_parent_reinit = []() {};
     std::function<void()> postfork_child_cleanup = []() {};
+
+    // HW counter (PAPI) lifecycle — setup/teardown use std::function (not signal-safe),
+    // read uses a raw function pointer (async-signal-safe).
+    std::function<void(int64_t)> setup_hw_counters    = [](int64_t) {};
+    std::function<void(int64_t)> teardown_hw_counters = [](int64_t) {};
+    hw_counter_read_fn           read_hw_counters     = nullptr;
 };
 
 }  // namespace rocprofsys::sampling

@@ -45,6 +45,14 @@ sampling_signal_handler_body(int sig, void* ucontext, sampling_service<Policies>
     capture_cpu_time(rec);
     capture_thread_rusage(rec);
 
+    auto read_hw = svc.callbacks().read_hw_counters;
+    if(read_hw)
+    {
+        auto n = read_hw(rec.tid, rec.metrics.hw_counter.data(),
+                         rec.metrics.hw_counter.size());
+        if(n > 0) rec.metrics.valid.set(4);
+    }
+
     if(!state->ring_buffer().try_push(rec))
     {
         state->increment_dropped();

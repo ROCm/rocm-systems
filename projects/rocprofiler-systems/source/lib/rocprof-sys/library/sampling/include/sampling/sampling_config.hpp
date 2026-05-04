@@ -8,6 +8,7 @@
 
 #include <cstdint>
 #include <string>
+#include <vector>
 
 namespace rocprofsys::sampling
 {
@@ -33,6 +34,8 @@ struct sampling_config
     bool trace_legacy         = false;
     bool use_process_sampling = false;
     bool use_amd_smi          = false;
+
+    std::vector<std::string> hw_counter_labels;
 };
 
 }  // namespace rocprofsys::sampling

@@ -57,7 +57,7 @@ sampling_service<Policies>::sampling_service(sampling_config    config,
 : config_(std::move(config))
 , callbacks_(std::move(callbacks))
 , thread_info_resolver_(callbacks_.resolve_thread_info)
-, trace_sink_(thread_info_resolver_)
+, trace_sink_(thread_info_resolver_, config_.hw_counter_labels)
 , perfetto_sink_(thread_info_resolver_, config_.use_perfetto,
                  config_.perfetto_annotations)
 , pause_registry_(clock_)
@@ -472,6 +472,7 @@ sampling_service<Policies>::do_setup_wiring(int64_t tid, thread_state_t* state,
     if(!state) return;
 
     wire_tls(tid, state);
+    callbacks_.setup_hw_counters(tid);
     arm_timer_triggers(tid, state, sigs);
     arm_overflow_trigger(tid, state, sigs);
     start_duration_controller(tid);
@@ -543,8 +544,20 @@ sampling_service<Policies>::arm_overflow_trigger(int64_t tid, thread_state_t* st
     std::string     event_name = config_.overflow_event;
     double          ovfl_freq  = config_.overflow_freq;
     callbacks_.configure_overflow_pe_attr(&pe_attr, event_name, ovfl_freq);
-    pe_attr.sample_type   = PERF_SAMPLE_IP | PERF_SAMPLE_CALLCHAIN;
-    pe_attr.wakeup_events = 1;
+    pe_attr.sample_type              = PERF_SAMPLE_IP | PERF_SAMPLE_CALLCHAIN;
+    pe_attr.wakeup_events            = 1;
+    pe_attr.exclude_idle             = 1;
+    pe_attr.exclude_kernel           = 1;
+    pe_attr.exclude_hv               = 1;
+    pe_attr.exclude_callchain_kernel = 1;
+    pe_attr.disabled                 = 1;
+    pe_attr.inherit                  = 0;
+
+    if(pe_attr.type == PERF_TYPE_SOFTWARE)
+    {
+        pe_attr.use_clockid = 1;
+        pe_attr.clockid     = CLOCK_REALTIME;
+    }
 
     auto& ovfl_slot = state->overflow_trigger();
     ovfl_slot.emplace();
@@ -593,6 +606,10 @@ sampling_service<Policies>::register_trace_cache_tracks(int64_t tid)
     {
         callbacks_.register_track(std::string{ prefix } + seq_suffix, sys_id);
     }
+    for(auto const& label : config_.hw_counter_labels)
+    {
+        callbacks_.register_track(label + seq_suffix, sys_id);
+    }
 
     LOG_DEBUG("thread {} registered trace_cache tracks: '{}' / '{}'", tid, timer_track,
               overflow_track);
@@ -602,8 +619,9 @@ sampling_service<Policies>::register_trace_cache_tracks(int64_t tid)
 // destruction is a no-op.
 template <class Policies>
 void
-sampling_service<Policies>::do_shutdown_wiring(int64_t /*tid*/) noexcept
+sampling_service<Policies>::do_shutdown_wiring(int64_t tid) noexcept
 {
+    callbacks_.teardown_hw_counters(tid);
     using tls        = tl_state<Policies>;
     tls::sampler     = nullptr;
     tls::offload     = nullptr;
