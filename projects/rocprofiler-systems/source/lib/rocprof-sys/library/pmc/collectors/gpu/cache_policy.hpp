@@ -67,7 +67,7 @@ struct cache_policy
               thread_id, "{}" });
 
         auto add_vcn_track = [&](std::optional<int> xcp_idx) {
-            for(int clk = 0; clk < AMDSMI_MAX_NUM_VCN; ++clk)
+            for(size_t clk = 0; clk < MAX_NUM_VCN; ++clk)
             {
                 auto name =
                     trace_cache::info::format_track_name<category::amd_smi_vcn_activity>(
@@ -78,7 +78,7 @@ struct cache_policy
         };
 
         auto add_jpeg_track = [&](std::optional<int> xcp_idx) {
-            for(size_t clk = 0; clk < ROCPROFSYS_AMDSMI_JPEG_ENGINE_COUNT; ++clk)
+            for(size_t clk = 0; clk < MAX_NUM_JPEG_V1; ++clk)
             {
                 auto name =
                     trace_cache::info::format_track_name<category::amd_smi_jpeg_activity>(
@@ -88,7 +88,7 @@ struct cache_policy
             }
         };
 
-        for(int xcp = 0; xcp < AMDSMI_MAX_NUM_XCP; ++xcp)
+        for(size_t xcp = 0; xcp < MAX_NUM_XCP; ++xcp)
         {
             add_vcn_track(xcp);
             add_jpeg_track(xcp);
@@ -101,7 +101,7 @@ struct cache_policy
             { trace_cache::info::format_track_name<category::amd_smi_xgmi_link_speed>(),
               thread_id, "{}" });
 
-        for(int vcn = 0; vcn < AMDSMI_MAX_NUM_VCN; ++vcn)
+        for(size_t vcn = 0; vcn < MAX_NUM_VCN; ++vcn)
         {
             auto vcn_name =
                 trace_cache::info::format_track_name<category::amd_smi_vcn_activity>(
@@ -110,7 +110,7 @@ struct cache_policy
                 { vcn_name.c_str(), thread_id, "{}" });
         }
 
-        for(int link = 0; link < AMDSMI_MAX_NUM_XGMI_LINKS; ++link)
+        for(size_t link = 0; link < MAX_NUM_XGMI_LINKS; ++link)
         {
             auto read_name =
                 trace_cache::info::format_track_name<category::amd_smi_xgmi_read_data>(
@@ -207,7 +207,7 @@ struct cache_policy
               COMPONENT, tim::units::mem_repr(tim::units::megabyte),
               rocprofsys::trace_cache::ABSOLUTE, BLOCK, EXPRESSION, 0, 0, "{}" });
 
-        for(int vcn = 0; vcn < AMDSMI_MAX_NUM_VCN; ++vcn)
+        for(size_t vcn = 0; vcn < MAX_NUM_VCN; ++vcn)
         {
             auto vcn_name =
                 trace_cache::info::format_track_name<category::amd_smi_vcn_activity>(vcn);
@@ -220,9 +220,9 @@ struct cache_policy
                   EXPRESSION, 0, 0, "{}" });
         }
 
-        for(int xcp = 0; xcp < AMDSMI_MAX_NUM_XCP; ++xcp)
+        for(size_t xcp = 0; xcp < MAX_NUM_XCP; ++xcp)
         {
-            for(int vcn = 0; vcn < AMDSMI_MAX_NUM_VCN; ++vcn)
+            for(size_t vcn = 0; vcn < MAX_NUM_VCN; ++vcn)
             {
                 auto vcn_name =
                     trace_cache::info::format_track_name<category::amd_smi_vcn_activity>(
@@ -237,9 +237,9 @@ struct cache_policy
             }
         }
 
-        for(size_t xcp = 0; xcp < AMDSMI_MAX_NUM_XCP; ++xcp)
+        for(size_t xcp = 0; xcp < MAX_NUM_XCP; ++xcp)
         {
-            for(size_t jpeg = 0; jpeg < ROCPROFSYS_AMDSMI_JPEG_ENGINE_COUNT; ++jpeg)
+            for(size_t jpeg = 0; jpeg < MAX_NUM_JPEG_V1; ++jpeg)
             {
                 auto jpeg_name =
                     trace_cache::info::format_track_name<category::amd_smi_jpeg_activity>(

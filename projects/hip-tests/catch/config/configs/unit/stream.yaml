@@ -57,6 +57,8 @@ stream:
   Unit_hipStreamAttachMemAsync_UseCase:
     <<: *level_2
     tags: [memory]
+    # disabled due to flaky segfault in CI nightly https://github.com/ROCm/TheRock/issues/4111
+    disabled: [amd_linux]
   Unit_hipStreamCreateWithFlags_Negative_NullStream:
     <<: *level_2
     tags: [lifecycle]

@@ -40,7 +40,7 @@ class RemoteHeapInfoTestFixture : public ::testing::Test
     /**
      * @brief Helper type for heap memory
      */
-    using HEAP_T = HeapMemoryType<HIPAllocator>;
+    using HEAP_T = HeapMemoryType;
 
     /**
      * @brief Helper type for RemoteHeapInfo with MPI
@@ -51,7 +51,8 @@ class RemoteHeapInfoTestFixture : public ::testing::Test
     /**
      * @brief Heap memory object
      */
-    HEAP_T heap_mem_ {};
+    HIPAllocator alloc_{};
+    HEAP_T heap_mem_{alloc_};
 
     /**
      * @brief Remote heap info with MPI Communicator

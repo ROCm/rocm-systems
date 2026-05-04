@@ -8,6 +8,11 @@
 [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/11458/badge)](https://www.bestpractices.dev/projects/11458)
 [![CodeQL](https://github.com/ROCm/hipFile/actions/workflows/github-code-scanning/codeql/badge.svg)](https://github.com/ROCm/hipFile/actions/workflows/github-code-scanning/codeql)
 [![Coverity](https://scan.coverity.com/projects/hipFile/badge.svg)](https://scan.coverity.com/projects/hipFile)
+[![clang-format](https://github.com/ROCm/rocm-systems/actions/workflows/hipfile-clang-format.yml/badge.svg?branch=develop)](https://github.com/ROCm/rocm-systems/actions/workflows/hipfile-clang-format.yml)
+[![cmakelint](https://github.com/ROCm/rocm-systems/actions/workflows/hipfile-cmakelint.yml/badge.svg?branch=develop)](https://github.com/ROCm/rocm-systems/actions/workflows/hipfile-cmakelint.yml)
+[![codespell](https://github.com/ROCm/rocm-systems/actions/workflows/hipfile-codespell.yml/badge.svg?branch=develop)](https://github.com/ROCm/rocm-systems/actions/workflows/hipfile-codespell.yml)
+[![pylint](https://github.com/ROCm/rocm-systems/actions/workflows/hipfile-pylint.yml/badge.svg?branch=develop)](https://github.com/ROCm/rocm-systems/actions/workflows/hipfile-pylint.yml)
+[![shellcheck](https://github.com/ROCm/rocm-systems/actions/workflows/hipfile-shellcheck.yml/badge.svg?branch=develop)](https://github.com/ROCm/rocm-systems/actions/workflows/hipfile-shellcheck.yml)
 
 AMD Infinity Storage library that supports IO directly to the GPU.
 

@@ -33,6 +33,7 @@ constexpr static hsa_signal_value_t kInitSignalValueOne = 1;
 // Timeouts for HSA signal wait
 constexpr static uint64_t kTimeout100us = 100 * K;
 constexpr static uint64_t kUnlimitedWait = std::numeric_limits<uint64_t>::max();
+constexpr static uint64_t kInvalidQueueIndex = std::numeric_limits<uint64_t>::max();
 
 constexpr static uint64_t kTimeout4Secs = 4 * M;
 
@@ -680,7 +681,7 @@ class VirtualGPU : public device::VirtualDevice {
 
     // Make sure the last packet contained a completion signal
     if (last_packet_with_signal_index_ == last_write_index_) {
-      if ((last_write_index_ == 0) && (last_completion_signal_.handle == 0)) {
+      if ((last_write_index_ == kInvalidQueueIndex) && (last_completion_signal_.handle == 0)) {
         return true;
       } else {
         return (Hsa::signal_load_relaxed(last_completion_signal_) == 0);
@@ -711,6 +712,7 @@ class VirtualGPU : public device::VirtualDevice {
   hsa_barrier_and_packet_t barrier_packet_ {};
   hsa_amd_barrier_value_packet_t barrier_value_packet_ {};
 
+  uint32_t skippedDispatches_;  //!< Count of consecutive dispatches that skipped the doorbell flush.
   uint32_t dispatch_id_;  //!< This variable must be updated atomically.
   Device& roc_device_;    //!< roc device object
   PrintfDbg* printfdbg_;
@@ -766,15 +768,16 @@ class VirtualGPU : public device::VirtualDevice {
                                        //!< kUnknown/kFlushedToDevice/kFlushedToSystem
   std::atomic<bool> fence_dirty_;      //!< Fence modified flag
 
-  uint64_t last_write_index_ = 0;             //!< The last HW queue write index for any packet
-  uint64_t last_packet_with_signal_index_ = 0;//!< The last HW queue write index for a packet
+  uint64_t last_write_index_ = kInvalidQueueIndex; //!< The last HW queue write index for any packet
+  uint64_t last_packet_with_signal_index_ = kInvalidQueueIndex; //!< The last HW queue write index for a packet
                                               //!< with a completion signal
   hsa_signal_t last_completion_signal_{};     //!< The last completion signal
 
   //! SDMA engine affinity tracking for this VirtualGPU/stream
   uint32_t assigned_sdma_engine_ = 0;           //!< Assigned SDMA engine mask for all operations
 
-  void* hostcallBuffer_;  //!< Hostcall buffer
+  void* hostcallBuffer_;        //!< Hostcall buffer
+  size_t hostcallBufferSize_ = 0; //!< Byte size of hostcallBuffer_, for hostFree
 
   using KernelArgImpl = device::Settings::KernelArgImpl;
 };

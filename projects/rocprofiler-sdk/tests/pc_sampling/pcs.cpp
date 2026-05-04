@@ -326,6 +326,15 @@ print_sample_common_fields(std::ostream& os, const PcSamplingRecordT* pc_sample)
        << "wave_in_group: " << std::setw(2) << static_cast<unsigned int>(pc_sample->wave_in_group)
        << ", "
        << "chiplet: " << std::setw(2) << static_cast<unsigned int>(pc_sample->hw_id.chiplet) << ", "
+       << "shader engine: " << std::setw(2)
+       << static_cast<unsigned int>(pc_sample->hw_id.shader_engine_id) << ", "
+       << "shader array: " << std::setw(2)
+       << static_cast<unsigned int>(pc_sample->hw_id.shader_array_id) << ", "
+       << "CU (WGP): " << std::setw(2) << static_cast<unsigned int>(pc_sample->hw_id.cu_or_wgp_id)
+       << ", "
+       << "wave slot: " << std::setw(2) << static_cast<unsigned int>(pc_sample->hw_id.wave_id)
+       << ", "
+       << "simd: " << std::setw(2) << static_cast<unsigned int>(pc_sample->hw_id.simd_id) << ", "
        << "dispatch_id: " << std::setw(7) << pc_sample->dispatch_id << ","
        << "correlation: {internal=" << std::setw(7) << pc_sample->correlation_id.internal << ", "
        << "external=" << std::setw(5) << pc_sample->correlation_id.external.value << "}, ";

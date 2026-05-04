@@ -25,7 +25,9 @@ std::string reg_name(const char *prefix, int reg_num, int size_bits) {
 } // namespace
 
 Operand::Operand(int size_bits, OperandType opr_type, int encoding_value)
-    : IsaOperand<Isa>(size_bits, opr_type, encoding_value) {}
+    : IsaOperand<Isa>(size_bits, opr_type, encoding_value) {
+  is_vgpr_ = is_vgpr_operand_type(opr_type);
+}
 
 std::string Operand::name() const {
   switch (opr_type_) {
@@ -553,6 +555,10 @@ uint32_t resolve_src_scalar(const amdgpu::Wavefront &wf, int ev) {
     return 0xC0800000u; // -4.0f
   if (ev == 248)
     return 0x3E22F983u; // 1/(2*pi)
+  if (ev == 249)
+    return 0u; // SRC_POPS_EXITING_WAVE_ID (not used in compute)
+  if (ev == 250)
+    return 0u; // NULL
   if (ev == 251)
     return wf.vcc() == 0 ? 1u : 0u; // VCCZ
   if (ev == 252)
@@ -663,12 +669,16 @@ uint32_t vgpr_index(OperandType opr_type, int ev) {
 } // namespace
 
 uint32_t Operand::read_scalar(const amdgpu::Wavefront &wf) const {
+  if (delegate())
+    return delegate()->read_scalar(wf);
   if (is_immediate_type(opr_type_))
     return static_cast<uint32_t>(encoding_value_);
   return resolve_src_scalar(wf, encoding_value_);
 }
 
 uint32_t Operand::read_lane(const amdgpu::Wavefront &wf, uint32_t lane) const {
+  if (delegate())
+    return delegate()->read_lane(wf, lane);
   int ev = encoding_value_;
   if (is_vgpr_only_type(opr_type_))
     return wf.cu().read_vgpr(wf.vgpr_alloc().base + vgpr_index(opr_type_, ev), lane);
@@ -693,6 +703,8 @@ void Operand::write_lane(amdgpu::Wavefront &wf, uint32_t lane, uint32_t val) con
 }
 
 uint64_t Operand::read_lane64(const amdgpu::Wavefront &wf, uint32_t lane) const {
+  if (delegate())
+    return delegate()->read_lane64(wf, lane);
   int ev = encoding_value_;
   if (is_vgpr_only_type(opr_type_)) {
     uint32_t idx = wf.vgpr_alloc().base + vgpr_index(opr_type_, ev);

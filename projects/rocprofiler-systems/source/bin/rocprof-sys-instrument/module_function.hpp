@@ -27,7 +27,11 @@ struct module_function
     static void             update_width(const module_function& rhs);
     static void             write_header(std::ostream& os);
 
-    TIMEMORY_DEFAULT_OBJECT(module_function)
+    module_function()                                      = default;
+    module_function(const module_function&)                = default;
+    module_function(module_function&&) noexcept            = default;
+    module_function& operator=(const module_function&)     = default;
+    module_function& operator=(module_function&&) noexcept = default;
 
     module_function(module_t* mod, procedure_t* proc);
 

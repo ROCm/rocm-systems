@@ -62,6 +62,10 @@ class TestCdnaProfile:
         renames = self.p.field_renames('ENC_FLAT')
         assert renames.get('sve') == 'lds'
 
+    def test_field_renames_vop3p(self):
+        renames = self.p.field_renames('ENC_VOP3P')
+        assert renames.get('pad_14') == 'op_sel_hi_2'
+
     def test_field_renames_other_enc_empty(self):
         assert self.p.field_renames('ENC_VOP2') == {}
 

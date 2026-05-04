@@ -292,6 +292,16 @@ TEST(att_decoder_waitcnt_test, gfx12)
     append_isa(42, "s_wait_idle");
     append_isa(43, "invalid");
 
+    append_isa(44, "global_load_async_");
+    append_isa(45, "global_store_async_");
+
+    append_isa(46, "tensor_load");
+    append_isa(47, "tensor_store");
+    append_isa(48, "tensor_save");
+
+    append_isa(49, "s_wait_tensorcnt 0");
+    append_isa(50, "s_wait_asynccnt 0");
+
     std::vector<wave_instruction_t> insts{};
     for(size_t i = 0; i < isa_map.size(); i++)
     {
@@ -321,7 +331,7 @@ TEST(att_decoder_waitcnt_test, gfx12)
         ASSERT_EQ(dependencies.at(dep).size(), set.size());
     };
 
-    ASSERT_EQ(dependencies.size(), 12);
+    ASSERT_EQ(dependencies.size(), 14);
     set_equal(6, {2, 3});
     set_equal(7, {4});
     set_equal(8, {5});
@@ -334,6 +344,8 @@ TEST(att_decoder_waitcnt_test, gfx12)
     set_equal(38, {32, 33, 34, 35});
     set_equal(39, {36});
     set_equal(42, {40, 41});
+    set_equal(49, {46, 47, 48});
+    set_equal(50, {44, 45});
 }
 
 TEST(att_decoder_waitcnt_test, fail_conditions)

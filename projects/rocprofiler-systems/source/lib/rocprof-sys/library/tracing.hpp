@@ -7,7 +7,6 @@
 #include "core/common.hpp"
 #include "core/concepts.hpp"
 #include "core/config.hpp"
-#include "core/defines.hpp"
 #include "core/demangler.hpp"
 #include "core/perfetto.hpp"
 #include "core/state.hpp"
