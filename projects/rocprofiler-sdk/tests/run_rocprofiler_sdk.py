@@ -30,6 +30,10 @@ def path_from_env(name: str) -> Optional[Path]:
     return Path(value)
 
 
+def format_command(cmd: List[str]) -> str:
+    return " ".join(shlex.quote(str(arg)) for arg in cmd)
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run installed rocprofiler-sdk tests.")
     parser.add_argument(
@@ -148,7 +152,7 @@ def cmake_config(
         f"-DPython3_EXECUTABLE={sys.executable}",
     ]
 
-    logging.info("++ Exec [%s]$ %s", tests_path, shlex.join(cmd))
+    logging.info("++ Exec [%s]$ %s", tests_path, format_command(cmd))
     subprocess.run(cmd, cwd=tests_path, check=True, env=env)
 
 
@@ -163,7 +167,7 @@ def cmake_build(
         str(parallel),
     ]
 
-    logging.info("++ Exec [%s]$ %s", tests_path, shlex.join(cmd))
+    logging.info("++ Exec [%s]$ %s", tests_path, format_command(cmd))
     subprocess.run(cmd, cwd=tests_path, check=True, env=env)
 
 
@@ -179,7 +183,7 @@ def execute_tests(
         "--output-on-failure",
     ]
 
-    logging.info("++ Exec [%s]$ %s", tests_path, shlex.join(cmd))
+    logging.info("++ Exec [%s]$ %s", tests_path, format_command(cmd))
     subprocess.run(cmd, cwd=tests_path, check=True, env=env)
 
 
