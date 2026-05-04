@@ -3,7 +3,7 @@
 // The University of Illinois/NCSA
 // Open Source License (NCSA)
 //
-// Copyright (c) 2014-2025, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2014-2026, Advanced Micro Devices, Inc. All rights reserved.
 //
 // Developed by:
 //
@@ -483,10 +483,11 @@ inline uint32_t LowPart(uint64_t value) { return (value & 0x00000000FFFFFFFF); }
 /// @param: lo(Input), To be placed in the lower bits of the output
 /// @return: OutType, Concatenation of hi and lo
 template <typename OutType, typename InType>
-typename std::enable_if<std::is_integral<OutType>::value && std::is_integral<InType>::value &&
-                            sizeof(OutType) >= 2 * sizeof(InType),
-                        OutType>::type
-Concat(InType hi, InType lo) {
+constexpr
+    typename std::enable_if<std::is_integral<OutType>::value && std::is_integral<InType>::value &&
+                                sizeof(OutType) >= 2 * sizeof(InType),
+                            OutType>::type
+    Concat(InType hi, InType lo) {
   OutType res = ((static_cast<OutType>(hi) << sizeof(InType) * 8) | static_cast<OutType>(lo));
   return res;
 }

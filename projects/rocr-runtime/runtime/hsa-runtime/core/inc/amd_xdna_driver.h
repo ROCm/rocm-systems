@@ -39,6 +39,7 @@
 // DEALINGS WITH THE SOFTWARE.
 //
 ////////////////////////////////////////////////////////////////////////////////
+
 #ifndef HSA_RUNTIME_CORE_INC_AMD_XDNA_DRIVER_H_
 #define HSA_RUNTIME_CORE_INC_AMD_XDNA_DRIVER_H_
 
@@ -48,50 +49,11 @@
 #include <memory>
 #include <unordered_map>
 
-#include "core/driver/xdna/uapi/amdxdna_accel.h"
 #include "core/inc/amd_aie_agent.h"
 #include "core/inc/driver.h"
 #include "core/inc/memory_region.h"
 
-/// @brief struct amdxdna_cmd_chain - Interpretation of data payload for
-/// ERT_CMD_CHAIN
-struct amdxdna_cmd_chain {
-  /// Number of commands in chain
-  __u32 command_count;
-  /// Index of last successfully submitted command in chain
-  __u32 submit_index;
-  /// Index of failing command if cmd status is not completed
-  __u32 error_index;
-  __u32 reserved[3];
-  /// Address of each command in chain
-  __u64 data[] __counted_by(command_count);
-};
-
-/// @brief struct amdxdna_cmd - Exec buffer command header format
-struct amdxdna_cmd {
-  union {
-    struct {
-      /// Current state of a command
-      __u32 state : 4;
-      __u32 unused : 6;
-      /// Extra CU masks in addition to mandatory mask
-      __u32 extra_cu_masks : 2;
-      /// Number of words in payload (data)
-      __u32 count : 11;
-      /// Opcode identifying specific command
-      __u32 opcode : 5;
-      __u32 reserved : 4;
-    };
-    __u32 header;
-  };
-  /// Count number of words representing packet payload
-  __u32 data[] __counted_by(count);
-};
-
 namespace rocr {
-namespace core {
-class Queue;
-}
 
 namespace AMD {
 
@@ -104,8 +66,8 @@ class XdnaDriver final : public core::Driver {
   struct BOHandle {
     /// Mapped address.
     void* vaddr = nullptr;
-    /// Handle returned by xdna.
-    uint32_t handle = AMDXDNA_INVALID_BO_HANDLE;
+    /// Handle returned by xdna. Same value as AMDXDNA_INVALID_BO_HANDLE.
+    uint32_t handle = 0;
     /// Size in bytes.
     size_t size = 0;
     /// True if @ref vaddr needs to be unmapped.
@@ -114,7 +76,7 @@ class XdnaDriver final : public core::Driver {
     constexpr BOHandle() = default;
     constexpr BOHandle(void* vaddr, uint32_t handle, size_t size)
         : vaddr{vaddr}, handle{handle}, size{size} {}
-    constexpr bool IsValid() const { return handle != AMDXDNA_INVALID_BO_HANDLE; }
+    constexpr bool IsValid() const { return handle != 0; }
   };
 
 
@@ -220,9 +182,18 @@ public:
                                      uint64_t* drm_fd_offset) override;
   hsa_status_t DestroyShareableHandle(core::ShareableHandle* handle) override;
 
-  /// @brief Submits @p num_pkts packets in a command chain.
-  hsa_status_t SubmitCmdChain(hsa_amd_aie_ert_packet_t* first_pkt, uint32_t num_pkts,
-                              HSA_QUEUEID& queue_id, uint32_t num_core_tiles);
+  /// @brief Submits a chain of command packets to the driver for execution.
+  ///
+  /// @note The packets are contiguous in index but not necessarily contiguous in memory.
+  ///
+  /// @param[in] q AIE KMQ queue with queued packets
+  /// @param[in,out] queue_id queue ID. It will be updated if the driver needs to create a new
+  /// hardware context for this command chain.
+  /// @param[in] first_pkt_idx index of the first packet in the queue
+  /// @param[in] num_pkts number of packets in the queue to be submitted
+  /// @param[in] num_core_tiles number of core tiles in the AIE device
+  hsa_status_t SubmitCmdChain(hsa_queue_t& q, HSA_QUEUEID& queue_id, uint64_t first_pkt_idx,
+                              uint64_t num_pkts, uint32_t num_core_tiles);
 
   hsa_status_t SPMAcquire(uint32_t preferred_node_id) const override;
   hsa_status_t SPMRelease(uint32_t preferred_node_id) const override;
@@ -259,7 +230,7 @@ public:
 
   /// @brief Creates a new hardware context with the given PDI BO handles.
   hsa_status_t ConfigHwCtx(const PDICache& pdi_bo_handles, HSA_QUEUEID& queue_id,
-                           uint32_t num_core_tiles);
+                           uint32_t num_core_tiles) const;
 
   hsa_status_t QueryDriverVersion();
 
@@ -274,15 +245,6 @@ public:
   /// @param size size of memory to allocate
   /// @param bo_info allocated BO
   hsa_status_t CreateCmdBO(uint32_t size, BOHandle& bo_info);
-
-  /// @brief Gets all BOs from a command packet payload, flushes the caches associated with them and
-  /// replaces the instruction virtual address with the device address.
-  ///
-  /// @param count Number of entries in the command
-  /// @param cmd_pkt_payload A pointer to the payload of the command
-  /// @param bo_handles vector that contains all BO handles
-  hsa_status_t PrepareBOs(uint32_t count, hsa_amd_aie_ert_start_kernel_data_t* cmd_pkt_payload,
-                          std::vector<uint32_t>& bo_handles);
 
   /// @brief Executes a command and waits for its completion
   ///
