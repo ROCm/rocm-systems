@@ -31,11 +31,21 @@ QUICK_TESTS = [
 logging.basicConfig(level=logging.INFO)
 
 
+def format_command(cmd: List[str]) -> str:
+    return " ".join(shlex.quote(str(arg)) for arg in cmd)
+
+
 def path_from_env(name: str) -> Optional[Path]:
     value = os.getenv(name)
     if not value:
         return None
     return Path(value)
+
+
+def installed_ctest_dir(script_path: Path) -> Optional[Path]:
+    if script_path.parent.name == PROJECT_NAME:
+        return script_path.parent.resolve()
+    return None
 
 
 def parse_args() -> argparse.Namespace:
@@ -49,30 +59,35 @@ def parse_args() -> argparse.Namespace:
         help="ROCm install prefix. Defaults to ROCM_PATH or the runner location.",
     )
     parser.add_argument(
+        "--ctest-dir",
         "--test-dir",
+        dest="ctest_dir",
         type=Path,
-        help="Installed rocprofiler-compute test directory.",
+        default=path_from_env("ROCPROFILER_COMPUTE_TEST_DIR"),
+        help=(
+            "Top-level installed rocprofiler-compute CTest payload directory "
+            "containing CTestTestfile.cmake. Defaults to "
+            "ROCPROFILER_COMPUTE_TEST_DIR or the runner location."
+        ),
     )
     return parser.parse_args()
 
 
 def get_rocm_path(
-    script_path: Path, rocm_path: Optional[Path], test_dir: Optional[Path]
+    script_path: Path, rocm_path: Optional[Path], ctest_dir: Optional[Path]
 ) -> Path:
     if rocm_path is not None:
         return rocm_path.resolve()
 
-    # Installed at <prefix>/libexec/rocprofiler-compute.
-    if (
-        script_path.parent.name == PROJECT_NAME
-        and script_path.parent.parent.name == "libexec"
-    ):
-        return script_path.parents[2].resolve()
+    # Installed at <prefix>/<libexecdir>/rocprofiler-compute.
+    installed_dir = installed_ctest_dir(script_path)
+    if installed_dir is not None:
+        return installed_dir.parents[1].resolve()
 
-    if test_dir is not None and test_dir.name == PROJECT_NAME:
-        resolved_test_dir = test_dir.resolve()
-        if resolved_test_dir.parent.name == "libexec":
-            return resolved_test_dir.parents[1].resolve()
+    if ctest_dir is not None:
+        resolved_ctest_dir = ctest_dir.resolve()
+        if resolved_ctest_dir.name == PROJECT_NAME:
+            return resolved_ctest_dir.parents[1].resolve()
 
     raise RuntimeError("ROCM_PATH is required when the runner is not installed.")
 
@@ -137,19 +152,22 @@ def build_ctest_command() -> List[str]:
 def main() -> None:
     args = parse_args()
     script_path = Path(__file__).resolve()
-    rocm_path = get_rocm_path(script_path, args.rocm_path, args.test_dir)
-    test_dir = (
-        args.test_dir.resolve()
-        if args.test_dir is not None
-        else rocm_path / "libexec" / PROJECT_NAME
+    rocm_path = get_rocm_path(script_path, args.rocm_path, args.ctest_dir)
+    ctest_dir = (
+        args.ctest_dir.resolve()
+        if args.ctest_dir is not None
+        else installed_ctest_dir(script_path) or rocm_path / "libexec" / PROJECT_NAME
     )
-    if not test_dir.is_dir():
-        raise FileNotFoundError(f"Could not find rocprofiler-compute tests: {test_dir}")
+    ctest_file = ctest_dir / "CTestTestfile.cmake"
+    if not ctest_file.is_file():
+        raise FileNotFoundError(
+            f"Could not find rocprofiler-compute CTest payload: {ctest_file}"
+        )
     env = setup_env(rocm_path)
     cmd = build_ctest_command()
 
-    logging.info("++ Exec [%s]$ %s", test_dir, shlex.join(cmd))
-    subprocess.run(cmd, cwd=test_dir, check=True, env=env)
+    logging.info("++ Exec [%s]$ %s", ctest_dir, format_command(cmd))
+    subprocess.run(cmd, cwd=ctest_dir, check=True, env=env)
 
 
 if __name__ == "__main__":
