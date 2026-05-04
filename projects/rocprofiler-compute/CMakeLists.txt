@@ -149,6 +149,7 @@ endif()
 
 # Setup testing collateral
 
+option(INSTALL_TESTS "Build test suite" OFF)
 option(ENABLE_TESTS "Enable compilation of testing collateral" OFF)
 set(CMAKE_HIP_FLAGS_RELEASE "-O2")
 if(${ENABLE_TESTS})
@@ -678,9 +679,7 @@ add_test(
 
 if(TARGET test-rocprofiler-compute-tool)
     if(TEST_FROM_INSTALL)
-        set(_tool_test_cmd
-            "${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}/tests/test-rocprofiler-compute-tool"
-        )
+        set(_tool_test_cmd tests/test-rocprofiler-compute-tool)
     else()
         set(_tool_test_cmd $<TARGET_FILE:test-rocprofiler-compute-tool>)
     endif()
@@ -923,7 +922,6 @@ install(
 )
 
 # TEST collateral
-option(INSTALL_TESTS "Build test suite" OFF)
 if(INSTALL_TESTS)
     install(
         DIRECTORY tests
