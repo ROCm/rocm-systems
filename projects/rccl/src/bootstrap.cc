@@ -128,6 +128,28 @@ NCCL_PARAM(BootstrapBidirThreshold, "BOOTSTRAP_BIDIR_THRESHOLD", 16);
 // rendezvous if libpmix.so cannot be loaded or PMIx_Init fails.
 NCCL_PARAM(BootstrapPmix, "BOOTSTRAP_PMIX", 0);
 
+// [RCCL] BOOTSTRAP_TREE_ALLGATHER: enable a recursive-doubling (log N) tree-based
+// AllGather for the bootstrap-time peer-info exchange, replacing the O(N) ring
+// allgather. Requires:
+//   * NCCL_BOOTSTRAP_PMIX=1 (so each rank can resolve any peer's listen address
+//     via PMIx KVS without a separate O(N) rendezvous round)
+//   * power-of-two nranks (MVP — non-pow2 will fall back to ring/bidir)
+//   * socket OOB transport (NCCL_OOB_NET_ENABLE=0). IB OOB tree is Phase B.
+// Each round k exchanges 2^k chunks with rank XOR (1<<k). After log2(N) rounds
+// every rank has all N chunks. Connections are JIT-established per round
+// (smaller rank connects, larger rank accepts on its existing forward listen)
+// and closed at round end, so peak open FD count is +1 over baseline.
+// Default 0 — opt-in. Falls back to ring/bidir if any precondition fails.
+NCCL_PARAM(BootstrapTreeAllGather, "BOOTSTRAP_TREE_ALLGATHER", 0);
+
+// MAX_TREE_ROUNDS bounds log2(nranks) for the recursive-doubling tree
+// AllGather. 20 covers nranks up to 2^20 = 1,048,576 — well above any
+// realistic large-scale init the bootstrap targets. The per-round listen
+// sockets are created on-demand (only the first log2(nranks) entries are
+// actually bound), so the cost of the unused tail is just the embedded
+// ncclSocket struct (~few hundred bytes per comm).
+#define BOOTSTRAP_MAX_TREE_ROUNDS 20
+
 
 // Single source of truth for the "should we run bidirectional bootstrap?" decision.
 // kind: 0 = socket OOB (no threshold, no extra setup), 1 = net (IB) OOB (threshold-gated,
@@ -143,6 +165,15 @@ static inline bool bootstrapBidirEnabled(int nranks, int kind) {
     return ncclParamBootstrapBidirNet() != 0;
   }
   return false;
+}
+
+// Returns true if the per-rank state was initialised under conditions that allow
+// the recursive-doubling tree AllGather (PMIx fast-path used, env enabled,
+// power-of-two nranks, socket OOB). All of those are decided once during
+// bootstrapInit and frozen on the bootstrapState — the dispatcher in
+// bootstrapAllGather just consults the flag (see state->treeAllGatherEnabled).
+static inline bool bootstrapTreePowOfTwo(int n) {
+  return n >= 2 && (n & (n - 1)) == 0;
 }
 
 ncclResult_t bootstrapNetInit() {
@@ -379,6 +410,14 @@ struct extInfo {
   int nroots;                                // total number of roots
   union ncclSocketAddress listenRootAddress; // address of my listenSocket for the root
   struct ringConnectInfo connectInfo;
+  // Per-round tree-listen addresses used by socketTreeAllGather. Only
+  // populated when the publisher rank is running with
+  // NCCL_BOOTSTRAP_TREE_ALLGATHER=1 (otherwise zeros, which is harmless
+  // because non-tree dispatch paths never read these). Sized to match
+  // BOOTSTRAP_MAX_TREE_ROUNDS so the struct layout is stable across
+  // configurations and compatible with the existing PMIx_Put/Get blob
+  // protocol (PMIx_BYTE_OBJECT carries the whole struct).
+  union ncclSocketAddress treeListenAddrs[BOOTSTRAP_MAX_TREE_ROUNDS];
 };
 #define NET_HANDLE(h, rank)    ((h) + (rank * NCCL_NET_HANDLE_MAXSIZE))
 #define BOOTSTRAP_HANDLE(h, i) ((struct ncclBootstrapHandle*)((char*)h + i * NCCL_UNIQUE_ID_BYTES))
@@ -635,6 +674,12 @@ struct bootstrapListen_t {
     struct {
       struct ncclSocket fwd; // forward ring listen
       struct ncclSocket rev; // reverse ring listen (bidir socket only)
+      // Per-round dedicated listen sockets for the tree AllGather. We need
+      // one listen per round so the acceptor cannot mix up connections
+      // belonging to different rounds (a single shared listen has
+      // unordered backlog across rounds, which races when peers progress
+      // through rounds at different speeds).
+      struct ncclSocket tree[BOOTSTRAP_MAX_TREE_ROUNDS];
     } socket;
   };
 };
@@ -652,6 +697,12 @@ struct bootstrapState {
   int nranks;
   uint64_t magic;
   volatile uint32_t* abortFlag;
+  // [RCCL] Set in bootstrapInit when all preconditions for the recursive-doubling
+  // tree AllGather are met (PMIx fast-path active, NCCL_BOOTSTRAP_TREE_ALLGATHER=1,
+  // pow-of-two nranks, socket OOB). Consumed by bootstrapAllGather to dispatch
+  // to socketTreeAllGather instead of the ring variants. Stored as int (not bool)
+  // for ABI safety and so future flags can pack here.
+  int treeAllGatherEnabled;
 };
 #define STATE_RING(s, f) (s->ring.f)
 #define STATE_LISTEN(s, f) (s->listen.f)
@@ -1082,16 +1133,23 @@ static ncclResult_t pmixInitOnce() {
 // Pack rank R's bootstrap metadata (listen addr / IB handles) into a single
 // PMIx Put payload using a deterministic key string. Using PMIX_BYTE_OBJECT
 // avoids any string-encoding pitfalls — this is opaque blob exchange.
-static ncclResult_t pmixPutMyInfo(int rank, const struct extInfo* info) {
+//
+// The key includes the per-comm magic so that successive ncclCommInit calls
+// from the same process (e.g. NCCL_TESTS_BOOTSTRAP_WARMUP=1's throw-away
+// init followed by the measured init) do not alias each other. PMIx_Put
+// with an already-published key has implementation-defined visibility once
+// you re-Fence — re-using the key was causing measured-init Get's to
+// resolve to stale warmup-era listen ports, manifesting as
+// "Connection refused" inside socketRingConnectStart.
+static ncclResult_t pmixPutMyInfo(uint64_t magic, int rank, const struct extInfo* info) {
   pmix_value_t v;
   memset(&v, 0, sizeof(v));
   v.type = PMIX_BYTE_OBJECT;
   v.data.bo.bytes = (char*)info;
   v.data.bo.size = sizeof(*info);
-  // Key: nccl:bs:<magic>:<rank>. Magic disambiguates concurrent comms in
-  // the same job; rank disambiguates each peer's payload.
   char key[PMIX_MAX_KEYLEN+1];
-  snprintf(key, sizeof(key), "nccl:bs:%016lx:%d", (unsigned long)info->nranks, rank);
+  snprintf(key, sizeof(key), "nccl:bs:%016lx:%016lx:%d",
+           (unsigned long)magic, (unsigned long)info->nranks, rank);
   pmix_status_t rc = gPmix.Put(PMIX_GLOBAL, key, &v);
   if (rc != PMIX_SUCCESS) {
     WARN("PMIx_Put rank=%d failed: %d (%s)", rank, rc, gPmix.Error_string ? gPmix.Error_string(rc) : "?");
@@ -1118,13 +1176,14 @@ static ncclResult_t pmixGlobalFence() {
   return ncclSuccess;
 }
 
-static ncclResult_t pmixGetPeerInfo(int peerRank, int nranks, struct extInfo* out) {
+static ncclResult_t pmixGetPeerInfo(uint64_t magic, int peerRank, int nranks, struct extInfo* out) {
   pmix_proc_t target;
   memset(&target, 0, sizeof(target));
   memcpy(target.nspace, gPmixSelf.nspace, sizeof(target.nspace));
   target.rank = (pmix_rank_t)peerRank;
   char key[PMIX_MAX_KEYLEN+1];
-  snprintf(key, sizeof(key), "nccl:bs:%016lx:%d", (unsigned long)nranks, peerRank);
+  snprintf(key, sizeof(key), "nccl:bs:%016lx:%016lx:%d",
+           (unsigned long)magic, (unsigned long)nranks, peerRank);
   pmix_value_t* val = NULL;
   pmix_status_t rc = gPmix.Get(&target, key, NULL, 0, &val);
   if (rc != PMIX_SUCCESS || !val) {
@@ -1184,13 +1243,13 @@ ncclResult_t bootstrapInit(int nHandles, void* handles, struct ncclComm* comm) {
   // OOB net enabled). If true, we create the reverse listen *before* sendToRoot so its
   // handle piggybacks the existing root rendezvous (no extra RTT).
   bool wantNetBidir = ncclParamBootstrapNetEnable() && bootstrapBidirEnabled(nranks, 1);
-  // [RCCL] Same idea for the socket-bidir dedicated reverse TCP pair (sep-pair commit
-  // 919fdf3063): each rank stashes its rev-listen sockaddr into info.connectInfo.revHandle
-  // and expects to receive prev rank's rev-listen back through the rendezvous. The flat
-  // root path arranges this naturally; the PMIx fast-path needs an explicit prev-Get
-  // below (see "wantNetBidir || wantSocketBidir"). Without this, revHandle stays zero
-  // on the PMIx + socket-bidir path, the rev TCP pair connects to 0.0.0.0 (loopback),
-  // and the first post-init bootstrapAllGather hangs in Ring1 on a self-loop.
+  // [RCCL] Same idea for the socket-bidir dedicated reverse TCP pair (sep-pair commit):
+  // it stashes its rev-listen sockaddr into info.connectInfo.revHandle and expects to
+  // receive prev rank's rev-listen back through the rendezvous. The flat-root path
+  // arranges this naturally; the PMIx fast-path needs an explicit prev-Get below
+  // (otherwise revHandle stays zero and the rev pair connects nowhere, which manifests
+  // as a hang in the first post-init bootstrapAllGather since revSend ends up looped
+  // to its own listen via 0.0.0.0).
   bool wantSocketBidir = !ncclParamBootstrapNetEnable() && bootstrapBidirEnabled(nranks, 0);
 
   NCCLCHECK(ncclCalloc(&state, 1));
@@ -1246,6 +1305,30 @@ ncclResult_t bootstrapInit(int nHandles, void* handles, struct ncclComm* comm) {
                     "ncclSocketAddress must fit in revHandle");
       NCCLCHECK(createListenSocket(comm, comm->magic, &STATE_LISTEN(state, socket.rev), &revAddr, ncclSocketTypeBootstrap));
       memcpy(info.connectInfo.revHandle, &revAddr, sizeof(revAddr));
+    }
+    // [RCCL] Pre-allocate per-round listen sockets for the recursive-doubling
+    // tree AllGather. We need one listen per round so the acceptor cannot
+    // race accepts across rounds (a single shared listen has unordered
+    // backlog when peers progress at different speeds). Their addresses are
+    // bundled into info.treeListenAddrs[] which travels through the same
+    // PMIx_Put as the rest of extInfo, so each peer can dial the right
+    // round-listen later in socketTreeAllGather. Only create as many as
+    // we'll actually use (log2(nranks)) and only when the env opt-in is
+    // set + nranks is pow-2 — non-tree comms get a static no-op tail.
+    if (ncclParamBootstrapTreeAllGather() != 0 && bootstrapTreePowOfTwo(nranks)) {
+      int rounds = 0;
+      while ((1 << rounds) < nranks) rounds++;
+      if (rounds > BOOTSTRAP_MAX_TREE_ROUNDS) {
+        WARN("bootstrap: tree allgather rounds=%d exceeds BOOTSTRAP_MAX_TREE_ROUNDS=%d, falling back",
+             rounds, BOOTSTRAP_MAX_TREE_ROUNDS);
+      } else {
+        for (int k = 0; k < rounds; k++) {
+          NCCLCHECK(createListenSocket(comm, comm->magic,
+                                       &STATE_LISTEN(state, socket.tree[k]),
+                                       &info.treeListenAddrs[k],
+                                       ncclSocketTypeBootstrap));
+        }
+      }
     }
   }
   // Create socket for root to contact me using the root's magic
@@ -1313,7 +1396,7 @@ ncclResult_t bootstrapInit(int nHandles, void* handles, struct ncclComm* comm) {
 
     info.rank = rank;
     info.iroot = curr_root;
-    NCCLCHECK(pmixPutMyInfo(rank, &info));
+    NCCLCHECK(pmixPutMyInfo(comm->magic, rank, &info));
     BOOTSTRAP_PROF_CLOSE(timers[BOOTSTRAP_INIT_TIME_SEND]);
 
     BOOTSTRAP_PROF_OPEN(timers[BOOTSTRAP_INIT_TIME_RECV]);
@@ -1321,21 +1404,21 @@ ncclResult_t bootstrapInit(int nHandles, void* handles, struct ncclComm* comm) {
 
     int next = (rank + 1) % nranks;
     struct extInfo peer = {0};
-    NCCLCHECK(pmixGetPeerInfo(next, nranks, &peer));
+    NCCLCHECK(pmixGetPeerInfo(comm->magic, next, nranks, &peer));
     nextPeer = peer.connectInfo;
 
     // The flat path also delivers prev rank's revHandle inside nextPeer — for
     // both IB bidir (raw IB connect blob) and socket-bidir sep-pair (rev-listen
-    // sockaddr packed into the same union, since 919fdf3063). Replicate that
-    // here by Get'ing prev's payload too — same KV store, no extra fence
-    // (prev already published in step 2). Required for socket-bidir as well
-    // as IB bidir; omitting the socket case leaks zeros into revHandle and
-    // the rev TCP pair connects to 0.0.0.0 (loopback) instead of the prev
-    // rank, which hangs the first bootstrapAllGather post-init.
+    // sockaddr packed into the same union). Replicate that here by Get'ing
+    // prev's payload too — same KV store, no extra fence (prev already
+    // published in step 2). Required for socket-bidir as well as IB bidir;
+    // omitting the socket case leaks zeros into revHandle and the rev TCP
+    // pair connects to 0.0.0.0 (loopback) instead of the prev rank, which
+    // hangs the first bootstrapAllGather post-init.
     if (wantNetBidir || wantSocketBidir) {
       int prev = (rank - 1 + nranks) % nranks;
       struct extInfo prevInfo = {0};
-      NCCLCHECK(pmixGetPeerInfo(prev, nranks, &prevInfo));
+      NCCLCHECK(pmixGetPeerInfo(comm->magic, prev, nranks, &prevInfo));
       memcpy(nextPeer.revHandle, prevInfo.connectInfo.revHandle, NCCL_NET_HANDLE_MAXSIZE);
     }
 
@@ -1344,6 +1427,19 @@ ncclResult_t bootstrapInit(int nHandles, void* handles, struct ncclComm* comm) {
     NCCLCHECK(ncclSocketClose(&listenSockRoot));
     BOOTSTRAP_PROF_CLOSE(timers[BOOTSTRAP_INIT_TIME_RECV]);
     INFO(NCCL_BOOTSTRAP, "PMIx bootstrap: rank %d/%d learned next=%d via PMIx_Fence", rank, nranks, next);
+
+    // [RCCL] Tree AllGather is socket-only for the MVP and requires PMIx so
+    // each rank can resolve any peer's listen address from KVS at dispatch
+    // time. We've just put+fenced our extInfo, so KVS is populated for
+    // every rank — flag this comm as eligible. Pow-of-two check matches
+    // the recursive-doubling assumption inside socketTreeAllGather.
+    if (!ncclParamBootstrapNetEnable() &&
+        ncclParamBootstrapTreeAllGather() != 0 &&
+        bootstrapTreePowOfTwo(nranks)) {
+      state->treeAllGatherEnabled = 1;
+      INFO(NCCL_BOOTSTRAP, "Tree AllGather: enabled for nranks=%d (rounds=%d)",
+           nranks, (int)__builtin_ctz((unsigned)nranks));
+    }
   }
 #endif
 
@@ -1794,6 +1890,118 @@ exit:
   return res;
 }
 
+// Recursive-doubling tree AllGather over the socket OOB path, gated by
+// NCCL_BOOTSTRAP_TREE_ALLGATHER and only viable when PMIx is loaded so each
+// rank can resolve any peer's listen address from KVS without an extra
+// rendezvous round. log2(N) rounds; round k exchanges 2^k chunks between
+// rank and (rank XOR (1<<k)). After log2(N) rounds the buffer is fully
+// allgathered.
+//
+// MVP scope:
+//   * power-of-two nranks only (caller checks bootstrapTreePowOfTwo before
+//     setting state->treeAllGatherEnabled — non-pow2 falls back to ring)
+//   * connections are JIT-established per round (smaller rank connects to
+//     partner's existing forward listen socket, larger rank accepts on its
+//     own forward listen) and closed after the round; peak open FD count
+//     stays at +1 over baseline. This makes the implementation independent
+//     from the bidir reverse-pair setup and means tree mode coexists with
+//     bidir/unidir ring (which still own the fwd send/recv pair).
+//   * partner's listen address is fetched from PMIx KVS on demand. The
+//     address is the same `connectInfo.fwd.addr` already published in
+//     pmixPutMyInfo by the original PMIx fast-path, so there is no extra
+//     setup: tree allgather is purely a *dispatch-time* alternative.
+//
+// Complexity vs ring/bidir at scale (latency-bound bootstrap data):
+//   ring   N - 1 steps × α
+//   bidir  N/2  steps × ~2α  (per-step contention from forward+reverse on
+//                              one NIC; observed empirically in this branch)
+//   tree   log2(N)  steps × α  (single connection per step, full-duplex)
+// → tree wins decisively at N ≳ 64 even though it pays a 1× connect/accept
+//   RTT per round (small-message TCP latency on the OOB path).
+#ifdef NCCL_HAVE_PMIX
+static ncclResult_t socketTreeAllGather(struct bootstrapState* state,
+                                        char* data, int size) {
+  ncclResult_t res = ncclSuccess;
+  int rank = state->rank;
+  int nranks = state->nranks;
+  uint64_t magic = state->magic;
+  volatile uint32_t* abortFlag = state->abortFlag;
+
+  // Pre-validated by the dispatch site, but assert defensively.
+  if (!bootstrapTreePowOfTwo(nranks)) {
+    WARN("socketTreeAllGather invoked with non-pow2 nranks=%d (should never happen)", nranks);
+    return ncclInternalError;
+  }
+  int rounds = 0;
+  while ((1 << rounds) < nranks) rounds++;
+
+  uint64_t tFirst = 0, tRest = 0;
+  TRACE(NCCL_BOOTSTRAP, "socketTreeAllGather started: rank=%d nranks=%d rounds=%d size=%d", rank, nranks, rounds, size);
+  BOOTSTRAP_PROF_OPEN(tFirst);
+
+  for (int k = 0; k < rounds; k++) {
+    int partner = rank ^ (1 << k);
+    // At entry to round k, this rank already holds chunks for the contiguous
+    // index range [my_block_lo, my_block_lo + 2^k). The partner (which
+    // differs only in bit k) holds the matching block at [partner_block_lo,
+    // partner_block_lo + 2^k). We swap whole blocks so that after the round
+    // both ranks hold the union [min, min + 2^(k+1)).
+    int my_block_lo      = (rank    >> k) << k;
+    int partner_block_lo = (partner >> k) << k;
+    size_t chunk_bytes = (size_t)(1 << k) * (size_t)size;
+    char* send_ptr = data + (size_t)my_block_lo      * (size_t)size;
+    char* recv_ptr = data + (size_t)partner_block_lo * (size_t)size;
+
+    // Per-round listen sockets eliminate the cross-round race that arises
+    // if we shared one listen across rounds: peers progress at different
+    // speeds, so by the time rank R reaches its accept for round k another
+    // peer in round k+1 may already have connected to R, and the kernel
+    // queue is unordered with respect to round id. Dedicated listens give
+    // a clean 1:1 connection-to-round mapping with no protocol-level
+    // disambiguation needed.
+    struct ncclSocket sock;
+    if (rank < partner) {
+      // Connector: resolve partner's *round-k* listen address via PMIx.
+      struct extInfo peer = {0};
+      NCCLCHECKGOTO(pmixGetPeerInfo(magic, partner, nranks, &peer), res, fail);
+      union ncclSocketAddress partnerAddr = peer.treeListenAddrs[k];
+      NCCLCHECKGOTO(ncclSocketInit(&sock, &partnerAddr, magic, ncclSocketTypeBootstrap, abortFlag), res, fail);
+      NCCLCHECKGOTO(ncclSocketConnect(&sock), res, fail);
+    } else {
+      // Acceptor: pull the next pending connection off this round's listen.
+      NCCLCHECKGOTO(ncclSocketInit(&sock), res, fail);
+      NCCLCHECKGOTO(ncclSocketAccept(&sock, &STATE_LISTEN(state, socket.tree[k])), res, fail);
+    }
+
+    // Full-duplex send + recv on the same TCP connection. socketSendRecv
+    // pipelines length-then-payload to avoid an extra RTT and uses the
+    // same FD for both directions, which is what TCP already does
+    // efficiently in the kernel. Equivalent to one ring step.
+    NCCLCHECKGOTO(socketSendRecv(&sock, send_ptr, (int)chunk_bytes,
+                                 &sock, recv_ptr, (int)chunk_bytes),
+                  res, fail_close);
+
+    NCCLCHECKGOTO(ncclSocketClose(&sock), res, fail);
+
+    if (k == 0) {
+      BOOTSTRAP_PROF_CLOSE(tFirst);
+      BOOTSTRAP_PROF_OPEN(tRest);
+    }
+    continue;
+  fail_close:
+    (void)ncclSocketClose(&sock);
+    goto fail;
+  }
+  BOOTSTRAP_PROF_CLOSE(tRest);
+  TRACE(NCCL_BOOTSTRAP | NCCL_PROFILE,
+        "socketTreeAllGather first round in %f sec, rest in %f sec",
+        tFirst / 1e9, tRest / 1e9);
+  return ncclSuccess;
+fail:
+  return res;
+}
+#endif // NCCL_HAVE_PMIX
+
 // Net (IB OOB) variant of the bidirectional ring AllGather. Mirrors the structure
 // of socketRingAllGather (the upstream NCCL 2.28.7 socket variant): totalSteps = N/2,
 // each step exchanges two slices in opposite directions, last step is a single
@@ -1902,6 +2110,15 @@ ncclResult_t bootstrapAllGather(void* commState, void* allData, int size) {
       NCCLCHECKGOTO(netRingAllGather(state->net, STATE_RING(state, net.sendComm), STATE_RING(state, net.recvComm), rank, nranks, (char*)allData, size, state->abortFlag), res, exit);
     }
   } else {
+#ifdef NCCL_HAVE_PMIX
+    // Tree path takes precedence over bidir/unidir when bootstrapInit decided
+    // it was viable (PMIx fast-path active + pow-of-two nranks + opt-in env).
+    // The flag is set once per comm; bootstrapSplit and other secondary code
+    // paths leave it at 0 so they fall through to the ring variants below.
+    if (state->treeAllGatherEnabled) {
+      NCCLCHECKGOTO(socketTreeAllGather(state, (char*)allData, size), res, exit);
+    } else
+#endif
     if (bootstrapBidirEnabled(nranks, 0)) {
       // Use the dedicated reverse pair only when it was actually set up (bootstrapInit
       // socket-bidir path). bootstrapSplit doesn't set up a reverse pair, so the sockets
@@ -2043,6 +2260,16 @@ ncclResult_t bootstrapClose(void* commState) {
     NCCLCHECK(ncclSocketClose(&STATE_LISTEN(state, socket.fwd)));
     if (STATE_LISTEN(state, socket.rev).state >= ncclSocketStateInitialized) {
       NCCLCHECK(ncclSocketClose(&STATE_LISTEN(state, socket.rev)));
+    }
+    // [RCCL] Close any tree-AllGather per-round listens that bootstrapInit
+    // pre-allocated. We unconditionally walk the array because the array is
+    // statically sized; only the first log2(nranks) entries are bound when
+    // tree mode was active, the rest are still ncclSocketStateNone and the
+    // close is skipped.
+    for (int k = 0; k < BOOTSTRAP_MAX_TREE_ROUNDS; k++) {
+      if (STATE_LISTEN(state, socket.tree[k]).state >= ncclSocketStateInitialized) {
+        NCCLCHECK(ncclSocketClose(&STATE_LISTEN(state, socket.tree[k])));
+      }
     }
   }
   // close the p2p socket
