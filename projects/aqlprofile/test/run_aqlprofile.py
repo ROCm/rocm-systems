@@ -1,7 +1,14 @@
 #!/usr/bin/env python3
 # Copyright Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
+"""Run the aqlprofile project's installed test suite.
 
+This runner is installed with the hsa-amd-aqlprofile test payload and executes
+the run_tests.sh script shipped by that project. It is intended to be called
+directly from CI or by developers with an installed ROCm tree.
+"""
+
+import argparse
 import logging
 import os
 import shlex
@@ -9,6 +16,26 @@ import subprocess
 from pathlib import Path
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")
+
+HELP_EPILOG = """\
+This script runs the aqlprofile project test suite from an installed ROCm
+payload. When run from an installed location, it discovers:
+
+  <rocm-prefix>/share/hsa-amd-aqlprofile/run_tests.sh
+
+Environment variables:
+  ROCM_PATH          ROCm install prefix override.
+  LD_LIBRARY_PATH    Existing library path to append after the ROCm lib dir.
+"""
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Run the aqlprofile project test suite.",
+        epilog=HELP_EPILOG,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    return parser.parse_args()
 
 
 def derive_rocm_path(script_dir: Path) -> Path:
@@ -31,6 +58,7 @@ def get_rocm_lib_dir(rocm_path: Path) -> Path:
 
 
 def main() -> None:
+    parse_args()
     script_dir = Path(__file__).resolve().parent
     rocm_path_env = os.getenv("ROCM_PATH")
     rocm_path = Path(rocm_path_env).resolve() if rocm_path_env else derive_rocm_path(script_dir)
