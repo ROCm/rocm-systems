@@ -18,6 +18,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
     * Number of kernel dispatches
     * Min/Max/Mean and Total duration of kernel dispatches
 
+* Profile workload output folder name for Strix Halo series (gfx1151) is changed from `strix_halo` to `rdna35_halo`
+
 ### Removed
 
 * ``--path`` and ``--subpath`` options have been removed from profile mode. Use ``--output-directory`` instead.

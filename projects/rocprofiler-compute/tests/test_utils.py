@@ -45,7 +45,7 @@ SUPPORTED_ARCHS = {
     "gfx941": {"mi300": ["MI300X_A0"]},
     "gfx942": {"mi300": ["MI300A_A1", "MI300X_A1"]},
     "gfx950": {"mi350": ["MI350"]},
-    "gfx1151": {"strix_halo": ["STRIX_HALO"]},
+    "gfx1151": {"rdna35_halo": ["RDNA35_HALO"]},
 }
 
 
