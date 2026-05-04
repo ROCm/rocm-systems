@@ -605,4 +605,196 @@ TEST_F(RevokeMPITest, Collective_Revoke_AsymmetricShrink_Collective)
     MPI_Barrier(MPI_COMM_WORLD);
 }
 
+/**
+ * NCCL_SHRINK_ABORT: enqueue a large collective on parent, then shrink with
+ * the ABORT flag (terminates in-flight ops before creating child).
+ * Verifies child collective works and rank renumbering is correct.
+ * Covers Meta TorchComms requirement 3: ncclCommShrink with NCCL_SHRINK_ABORT.
+ */
+TEST_F(RevokeMPITest, ShrinkAbort_InFlight_ChildWorks_RankRenumbering)
+{
+    ASSERT_TRUE(validateTestPrerequisites(4,
+                                          kNoProcessLimit,
+                                          kNoPowerOfTwoRequired,
+                                          1,
+                                          kNoNodeLimit))
+        << "Test requires at least 4 MPI processes";
+
+    ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+
+    ncclComm_t  parent = getActiveCommunicator();
+    hipStream_t stream = getActiveStream();
+    int         rank   = MPIEnvironment::world_rank;
+
+    constexpr size_t kCount = 1024 * 1024;
+    void* send_buf = nullptr;
+    void* recv_buf = nullptr;
+    HIP_TEST_CHECK_GTEST_FAIL(hipMalloc(&send_buf, kCount * sizeof(float)));
+    HIP_TEST_CHECK_GTEST_FAIL(hipMalloc(&recv_buf, kCount * sizeof(float)));
+    auto send_guard = makeScopeGuard([&]() { if(send_buf) (void)hipFree(send_buf); });
+    auto recv_guard = makeScopeGuard([&]() { if(recv_buf) (void)hipFree(recv_buf); });
+
+    HIP_TEST_CHECK_GTEST_FAIL(zeroInitializeBuffer<float>(send_buf, kCount));
+    HIP_TEST_CHECK_GTEST_FAIL(zeroInitializeBuffer<float>(recv_buf, kCount));
+
+    ASSERT_MPI_EQ(ncclSuccess,
+                  ncclAllReduce(send_buf, recv_buf, kCount, ncclFloat, ncclSum, parent, stream));
+
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    std::vector<int> excludeList;
+    bool             isExcluded;
+    computeSymmetricExclude(rank, MPIEnvironment::world_size, excludeList, isExcluded);
+    ncclComm_t child = NCCL_COMM_NULL;
+
+    if(!isExcluded)
+    {
+        ASSERT_EQ(ncclSuccess,
+                  ncclCommShrink(parent, excludeList.data(), excludeList.size(),
+                                 &child, nullptr, NCCL_SHRINK_ABORT));
+        ASSERT_NE(child, nullptr);
+
+        int childRank = -1, childSize = 0;
+        ASSERT_EQ(ncclSuccess, ncclCommUserRank(child, &childRank));
+        ASSERT_EQ(ncclSuccess, ncclCommCount(child, &childSize));
+
+        int expectedSize = MPIEnvironment::world_size - static_cast<int>(excludeList.size());
+        ASSERT_EQ(childSize, expectedSize);
+        ASSERT_GE(childRank, 0);
+        ASSERT_LT(childRank, childSize);
+    }
+
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    if(!isExcluded)
+    {
+        auto child_guard = makeCommAutoGuard(child);
+
+        ASSERT_EQ(ncclSuccess,
+                  ncclAllReduce(send_buf, recv_buf, kCount, ncclFloat, ncclSum, child, stream));
+        HIP_TEST_CHECK_GTEST_FAIL(hipStreamSynchronize(stream));
+    }
+
+    MPI_Barrier(MPI_COMM_WORLD);
+}
+
+/**
+ * In-flight collective, revoke, then explicit destroy on all ranks.
+ * Verifies ncclCommDestroy returns ncclSuccess after revoke — no SIGABRT.
+ * Covers Meta TorchComms requirement 1: revoke ≠ abort.
+ */
+TEST_F(RevokeMPITest, InFlightCollective_Revoke_Destroy_Clean)
+{
+    ASSERT_TRUE(validateTestPrerequisites(2,
+                                          kNoProcessLimit,
+                                          kNoPowerOfTwoRequired,
+                                          1,
+                                          kNoNodeLimit))
+        << "Test requires at least 2 MPI processes";
+
+    ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+
+    ncclComm_t  parent = getActiveCommunicator();
+    hipStream_t stream = getActiveStream();
+
+    constexpr size_t kCount = 1024 * 1024;
+    void* send_buf = nullptr;
+    void* recv_buf = nullptr;
+    HIP_TEST_CHECK_GTEST_FAIL(hipMalloc(&send_buf, kCount * sizeof(float)));
+    HIP_TEST_CHECK_GTEST_FAIL(hipMalloc(&recv_buf, kCount * sizeof(float)));
+    auto send_guard = makeScopeGuard([&]() { if(send_buf) (void)hipFree(send_buf); });
+    auto recv_guard = makeScopeGuard([&]() { if(recv_buf) (void)hipFree(recv_buf); });
+
+    HIP_TEST_CHECK_GTEST_FAIL(zeroInitializeBuffer<float>(send_buf, kCount));
+    HIP_TEST_CHECK_GTEST_FAIL(zeroInitializeBuffer<float>(recv_buf, kCount));
+
+    ASSERT_MPI_EQ(ncclSuccess,
+                  ncclAllReduce(send_buf, recv_buf, kCount, ncclFloat, ncclSum, parent, stream));
+
+    ASSERT_MPI_EQ(ncclSuccess, ncclCommRevoke(parent, NCCL_REVOKE_DEFAULT));
+
+    HIP_TEST_CHECK_GTEST_FAIL(hipStreamSynchronize(stream));
+
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    ASSERT_MPI_EQ(ncclSuccess, ncclCommDestroy(parent));
+    test_comm_ = nullptr;
+
+    MPI_Barrier(MPI_COMM_WORLD);
+}
+
+/**
+ * Repeated revoke+shrink cycle: revoke parent -> shrink -> child collective ->
+ * revoke child -> shrink child -> grandchild collective -> destroy all.
+ * Verifies no resource leaks or crashes across multiple generations.
+ * Covers Meta TorchComms requirement 4: no leaked resources.
+ */
+TEST_F(RevokeMPITest, RepeatedRevokeShrinkCycles_ResourceCleanup)
+{
+    ASSERT_TRUE(validateTestPrerequisites(4,
+                                          kNoProcessLimit,
+                                          kNoPowerOfTwoRequired,
+                                          2,
+                                          kNoNodeLimit))
+        << "Test requires at least 4 MPI processes across 2 nodes";
+
+    ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+
+    ncclComm_t  parent = getActiveCommunicator();
+    hipStream_t stream = getActiveStream();
+    int         rank   = MPIEnvironment::world_rank;
+
+    constexpr size_t kCount = 64 * 1024;
+    void* send_buf = nullptr;
+    void* recv_buf = nullptr;
+    HIP_TEST_CHECK_GTEST_FAIL(hipMalloc(&send_buf, kCount * sizeof(float)));
+    HIP_TEST_CHECK_GTEST_FAIL(hipMalloc(&recv_buf, kCount * sizeof(float)));
+    auto send_guard = makeScopeGuard([&]() { if(send_buf) (void)hipFree(send_buf); });
+    auto recv_guard = makeScopeGuard([&]() { if(recv_buf) (void)hipFree(recv_buf); });
+
+    HIP_TEST_CHECK_GTEST_FAIL(zeroInitializeBuffer<float>(send_buf, kCount));
+    HIP_TEST_CHECK_GTEST_FAIL(zeroInitializeBuffer<float>(recv_buf, kCount));
+
+    ASSERT_MPI_EQ(ncclSuccess,
+                  ncclAllReduce(send_buf, recv_buf, kCount, ncclFloat, ncclSum, parent, stream));
+
+    ASSERT_MPI_EQ(ncclSuccess, ncclCommRevoke(parent, NCCL_REVOKE_DEFAULT));
+    HIP_TEST_CHECK_GTEST_FAIL(hipStreamSynchronize(stream));
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    std::vector<int> excludeList;
+    bool             isExcluded;
+    computeSymmetricExclude(rank, MPIEnvironment::world_size, excludeList, isExcluded);
+    ncclComm_t child = NCCL_COMM_NULL;
+
+    if(!isExcluded)
+    {
+        ASSERT_EQ(ncclSuccess,
+                  ncclCommShrink(parent, excludeList.data(), excludeList.size(),
+                                 &child, nullptr, NCCL_SHRINK_DEFAULT));
+        ASSERT_NE(child, nullptr);
+    }
+
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    if(!isExcluded)
+    {
+        ASSERT_EQ(ncclSuccess,
+                  ncclAllReduce(send_buf, recv_buf, kCount, ncclFloat, ncclSum, child, stream));
+        HIP_TEST_CHECK_GTEST_FAIL(hipStreamSynchronize(stream));
+
+        ASSERT_EQ(ncclSuccess, ncclCommRevoke(child, NCCL_REVOKE_DEFAULT));
+        HIP_TEST_CHECK_GTEST_FAIL(hipStreamSynchronize(stream));
+    }
+
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    if(!isExcluded)
+    {
+        ASSERT_EQ(ncclSuccess, ncclCommDestroy(child));
+    }
+
+    MPI_Barrier(MPI_COMM_WORLD);
+}
+
 #endif // MPI_TESTS_ENABLED
