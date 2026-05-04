@@ -2,6 +2,14 @@
 # Copyright Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
+"""Build and run the rocjpeg project's installed test suite.
+
+This runner is installed with the rocjpeg test source payload. It configures
+and builds those installed tests on the target machine, then executes the
+generated CTest suite.
+"""
+
+import argparse
 import logging
 import os
 import platform
@@ -13,9 +21,34 @@ from typing import Dict
 
 logging.basicConfig(level=logging.INFO)
 
+PROJECT_NAME = "rocjpeg"
+
+HELP_EPILOG = f"""\
+This script runs the {PROJECT_NAME} project test suite from an installed ROCm
+payload. When run from an installed location, it discovers:
+
+  <rocm-prefix>/share/{PROJECT_NAME}/test
+
+The installed tests are CMake source files, so the runner configures and builds
+them before invoking CTest.
+
+Environment variables:
+  ROCM_PATH          ROCm install prefix override.
+  TEST_BUILD_DIR     Build directory for the installed test source.
+"""
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description=f"Build and run the {PROJECT_NAME} project test suite.",
+        epilog=HELP_EPILOG,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    return parser.parse_args()
+
 
 def derive_rocm_path(script_dir: Path) -> Path:
-    if script_dir.name == "test" and script_dir.parent.name == "rocjpeg":
+    if script_dir.name == "test" and script_dir.parent.name == PROJECT_NAME:
         if script_dir.parent.parent.name == "share":
             return script_dir.parent.parent.parent
     raise RuntimeError(
@@ -99,10 +132,11 @@ def execute_tests(env: Dict[str, str], test_source_dir: Path, build_dir: Path) -
 
 
 def main() -> None:
+    parse_args()
     script_dir = Path(__file__).resolve().parent
     rocm_path_env = os.getenv("ROCM_PATH")
     rocm_path = Path(rocm_path_env).resolve() if rocm_path_env else derive_rocm_path(script_dir)
-    test_source_dir = rocm_path / "share" / "rocjpeg" / "test"
+    test_source_dir = rocm_path / "share" / PROJECT_NAME / "test"
     build_dir = Path(os.getenv("TEST_BUILD_DIR") or Path.cwd() / "rocjpeg-test")
     build_dir = build_dir.resolve()
 
