@@ -34,8 +34,9 @@ __global__ void
 looping_lds_kernel(float* __restrict__ a,
                    const float* __restrict__ b,
                    const float* __restrict__ c,
-                   size_t size,
-                   size_t loopcount)
+                   size_t   size,
+                   size_t   loopcount,
+                   uint32_t ttracedata)
 {
     __shared__ float interm[SHM_SIZE];
 
@@ -54,7 +55,7 @@ looping_lds_kernel(float* __restrict__ a,
 
     a[index] = interm[threadIdx.x % SHM_SIZE] + c[index];
 
-    asm volatile("s_mov_b32 m0, 0xDEADBEEF");  // checked in trace_callbacks.cpp
-    asm volatile("s_nop 1");                   // s_nop 0 should also work
+    asm volatile("s_mov_b32 m0, %0" : : "r"(ttracedata));
+    asm volatile("s_nop 1");
     asm volatile("s_ttracedata");
 }

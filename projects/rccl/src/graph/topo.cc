@@ -757,6 +757,7 @@ ncclResult_t ncclTopoAddC2c(struct ncclXmlNode* node, struct ncclTopoSystem* sys
 ncclResult_t ncclTopoGetSystemFromXml(struct ncclXml* xml, struct ncclTopoSystem** topoSystem, const uint64_t localHostHash) {
   NCCLCHECK(ncclCalloc(topoSystem, 1));
   struct ncclTopoSystem* system = *topoSystem;
+  system->romeTopoModelIdx = RCCL_ROME_TOPO_PRESET_MODEL_IDX_NONE;
   struct ncclXmlNode* topNode;
   NCCLCHECK(xmlFindTag(xml, "system", &topNode));
   for (int s=0; s<topNode->nSubs; s++) {

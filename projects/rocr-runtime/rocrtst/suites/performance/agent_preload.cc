@@ -58,6 +58,7 @@ AgentPreloadTest::~AgentPreloadTest() {
 void AgentPreloadTest::SetUp() {
   hsa_status_t err;
   TestBase::SetUp();
+  if (test_skipped_) return;
 
   err = hsa_iterate_agents(rocrtst::IterateGPUAgents, &gpu_agents_);
   ASSERT_EQ(err, HSA_STATUS_SUCCESS);

@@ -7,7 +7,9 @@
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/basic_block.h"
+#include "rocjitsu/code/dbt/generated/encoding_cdna4_to_rdna3.h"
 #include "rocjitsu/code/dbt/generated/encoding_cdna4_to_rdna4.h"
+#include "rocjitsu/code/dbt/generated/legalization_cdna4_to_rdna3.h"
 #include "rocjitsu/code/dbt/generated/legalization_cdna4_to_rdna4.h"
 #include "rocjitsu/code/dbt/generated/legalization_types.h"
 #include "rocjitsu/code/dbt/semantic_translator.h"
@@ -26,17 +28,23 @@ namespace {
 
 EncodingTranslateFn select_encoding_translator(rj_code_arch_t guest, rj_code_arch_t host) {
   if (guest == ROCJITSU_CODE_ARCH_CDNA4 && host == ROCJITSU_CODE_ARCH_RDNA4)
-    return translate_encoding_cdna4_to_rdna4;
+    return cdna4_to_rdna4::translate_encoding_cdna4_to_rdna4;
+  if (guest == ROCJITSU_CODE_ARCH_CDNA4 && host == ROCJITSU_CODE_ARCH_RDNA3)
+    return cdna4_to_rdna3::translate_encoding_cdna4_to_rdna3;
   return nullptr;
 }
 
-const InstructionLegalization *legalization_cdna4_to_rdna4(uint16_t enc_id, uint16_t opcode) {
-  return lookup(kLegalization_cdna4_to_rdna4, enc_id, opcode);
-}
-
 LegalizationLookupFn select_legalization(rj_code_arch_t guest, rj_code_arch_t host) {
-  if (guest == ROCJITSU_CODE_ARCH_CDNA4 && host == ROCJITSU_CODE_ARCH_RDNA4)
-    return legalization_cdna4_to_rdna4;
+  if (guest == ROCJITSU_CODE_ARCH_CDNA4 && host == ROCJITSU_CODE_ARCH_RDNA4) {
+    return [](uint16_t enc_id, uint16_t opcode) -> const InstructionLegalization * {
+      return lookup(kLegalization_cdna4_to_rdna4, enc_id, opcode);
+    };
+  }
+  if (guest == ROCJITSU_CODE_ARCH_CDNA4 && host == ROCJITSU_CODE_ARCH_RDNA3) {
+    return [](uint16_t enc_id, uint16_t opcode) -> const InstructionLegalization * {
+      return lookup(kLegalization_cdna4_to_rdna3, enc_id, opcode);
+    };
+  }
   return nullptr;
 }
 
@@ -174,7 +182,9 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
   if (target_mach_)
     patcher.update_elf_flags(target_mach_);
 
-  patcher.patch_kernel_descriptors_for_wave64();
+  // Kernel descriptor packing differs by target generation, so apply the
+  // Wave64 patch using the same host architecture as the translated text.
+  patcher.patch_kernel_descriptors_for_wave64(host_arch_);
 
   result.elf_bytes = patcher.emit();
   warnings_ = nullptr;

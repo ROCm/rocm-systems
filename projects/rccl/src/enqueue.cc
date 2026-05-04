@@ -68,7 +68,7 @@ static ncclKernelMatch const ncclKerns[3] = {
 static int rcclProtoGrainSize(int proto, ncclComm *comm){
   switch (proto) {
     case NCCL_PROTO_LL: return 16;
-    case NCCL_PROTO_LL128: return comm->WarpSize*(NCCL_LL128_SHMEM_ELEMS_PER_THREAD/NCCL_LL128_LINEELEMS)*NCCL_LL128_DATAELEMS*sizeof(uint64_t);
+    case NCCL_PROTO_LL128: return comm->WarpSize*NCCL_LL128_SHMEM_ELEMS_PER_THREAD*comm->ll128DataElems*sizeof(uint64_t)/comm->ll128LineElems;
     case NCCL_PROTO_SIMPLE: return 512;
     default: return -1;
   }
@@ -2518,7 +2518,7 @@ static ncclResult_t calcCollChunking(
   int sliceSteps = (info->protocol == NCCL_PROTO_SIMPLE && info->algorithm == NCCL_ALGO_RING) ? info->sliceSteps : 1;
   int chunkSize = stepSize*chunkSteps;
   if (info->protocol == NCCL_PROTO_LL) chunkSize /= 2;
-  if (info->protocol == NCCL_PROTO_LL128) chunkSize = (chunkSize / NCCL_LL128_LINEELEMS) * NCCL_LL128_DATAELEMS;
+  if (info->protocol == NCCL_PROTO_LL128) chunkSize = (chunkSize / comm->ll128LineElems) * comm->ll128DataElems;
 
   if (info->algorithm == NCCL_ALGO_TREE && info->protocol == NCCL_PROTO_SIMPLE) {
     if (pattern == ncclPatternTreeUpDown) {
