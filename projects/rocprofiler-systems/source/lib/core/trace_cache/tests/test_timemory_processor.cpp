@@ -43,8 +43,7 @@ protected:
 
     std::string read_file(const std::string& name) const
     {
-        auto          pid  = std::to_string(::getpid());
-        auto          path = m_tmpdir / (name + "-" + pid + ".json");
+        auto          path = m_tmpdir / (name + ".json");
         std::ifstream ifs(path);
         if(!ifs.is_open()) return {};
         std::ostringstream ss;
@@ -54,8 +53,7 @@ protected:
 
     bool file_exists(const std::string& name, const std::string& ext) const
     {
-        auto pid  = std::to_string(::getpid());
-        auto path = m_tmpdir / (name + "-" + pid + ext);
+        auto path = m_tmpdir / (name + ext);
         return std::filesystem::exists(path);
     }
 

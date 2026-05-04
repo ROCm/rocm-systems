@@ -502,14 +502,6 @@ filter_and_reverse_frames(std::vector<stack_frame>& frames)
         if(lbl.find("perfetto::") != npos) return -1;
         if(lbl.find("protozero::") == 0) return -1;
         if(lbl.find("gotcha_") != npos) return -1;
-        // Bottom-of-stack boundaries: truncate below these frames.
-        if(lbl.find("__clone") != npos) return -1;
-        if(lbl.find("__libc_start") != npos) return -1;
-        if(lbl == "start_thread") return -1;
-        if(lbl.find("pthread_condattr_") != npos) return -1;
-        if(lbl.find("std::error_code::") != npos) return -1;
-        // Module-offset fallback (e.g. "[libc.so.6+0x1234]") — unresolved noise.
-        if(lbl.size() > 2 && lbl.front() == '[' && lbl.back() == ']') return 0;
         return 1;
     };
 

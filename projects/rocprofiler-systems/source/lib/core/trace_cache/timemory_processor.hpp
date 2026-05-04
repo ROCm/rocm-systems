@@ -233,7 +233,7 @@ private:
 
     std::string make_filepath_(const std::string& name, const std::string& ext) const
     {
-        return m_output_dir + "/" + name + "-" + std::to_string(::getpid()) + ext;
+        return m_output_dir + "/" + name + ext;
     }
 
     std::map<std::pair<uint64_t, int>, double> compute_children_sum_(
