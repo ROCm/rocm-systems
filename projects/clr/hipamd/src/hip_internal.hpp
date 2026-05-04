@@ -56,7 +56,7 @@ extern std::once_flag g_ihipInitialized;
 
   struct ResourceMeta {
     uint32_t familyId;
-    unsigned int startCU;
+    uint32_t startCU;
   };
 enum MemcpyType {
   hipHostToHost,      //!< Memcpy from host to host
@@ -553,7 +553,7 @@ namespace hip {
     void setPrimaryExecCtx(ExecutionCtx* ctx) { primaryExecCtx_ = ctx; }
     std::recursive_mutex& getLock() { return lock_; }
 
-    void registerResource(uint32_t resId, uint32_t familyId, unsigned int startCU);
+    void registerResource(uint32_t resId, uint32_t familyId, uint32_t startCU);
     const ResourceMeta* lookupResource(uint32_t resId);
 
   private:

@@ -334,7 +334,7 @@ bool Device::GetActiveStatus() {
 }
 
 // ================================================================================================
-void Device::registerResource(uint32_t resId, uint32_t familyId, unsigned int startCU) {
+void Device::registerResource(uint32_t resId, uint32_t familyId, uint32_t startCU) {
   std::lock_guard<std::mutex> lk(resourceFamilyMapLock_);
   resourceFamilyMap_[resId] = {familyId, startCU};
 }
