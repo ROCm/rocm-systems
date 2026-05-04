@@ -8,7 +8,7 @@
 #include "core/trace_cache/perfetto_processor.hpp"
 #include "core/trace_cache/rocpd_processor.hpp"
 #include "core/trace_cache/sample_processor.hpp"
-#include "core/trace_cache/tsv_processor_adapter.hpp"
+#include "core/trace_cache/timemory_processor_adapter.hpp"
 
 #include "core/agent_manager.hpp"
 #include "core/config.hpp"
@@ -183,9 +183,9 @@ struct processor_config_t
 
 struct processor_storage_t
 {
-    std::shared_ptr<rocpd_processor_t>       rocpd_processor{ nullptr };
-    std::shared_ptr<perfetto_processor_t>    perfetto_processor{ nullptr };
-    std::shared_ptr<tsv_processor_adapter_t> tsv_processor{ nullptr };
+    std::shared_ptr<rocpd_processor_t>            rocpd_processor{ nullptr };
+    std::shared_ptr<perfetto_processor_t>         perfetto_processor{ nullptr };
+    std::shared_ptr<timemory_processor_adapter_t> timemory_processor{ nullptr };
 };
 
 using directory_files_t    = std::vector<std::string>;
@@ -408,9 +408,9 @@ configure_processors(const std::shared_ptr<sample_processor_t>&       _type_proc
     {
         auto output_dir = tim::filepath::dirname(
             config::get_sampling_output_filepath("sampling_wall_clock"));
-        processor_storage.tsv_processor =
-            std::make_shared<tsv_processor_adapter_t>(std::move(output_dir));
-        _type_processing->add_handler(*processor_storage.tsv_processor);
+        processor_storage.timemory_processor =
+            std::make_shared<timemory_processor_adapter_t>(std::move(output_dir));
+        _type_processing->add_handler(*processor_storage.timemory_processor);
     }
     return processor_storage;
 }
