@@ -3139,6 +3139,13 @@ ncclResult_t ncclCommFinalize_impl(ncclComm_t comm) {
   /* wait comm ready before finalize. */
   NCCLCHECKGOTO(ncclCommEnsureReady(comm), ret, fail);
 
+  /* ncclCommFinalize is invalid on a revoked communicator. */
+  if (comm->revokedFlag) {
+    WARN("ncclCommFinalize: comm %p has been revoked; use ncclCommDestroy instead", comm);
+    ret = ncclInvalidUsage;
+    goto fail;
+  }
+
   /* prevent double finalize. */
   if (comm->finalizeCalled) {
     ret = ncclInvalidArgument;
@@ -3198,6 +3205,20 @@ static ncclResult_t commReclaim(struct ncclAsyncJob* job_) {
           /* every comm aborts, commDestroySync should not be blocked. */
           if ((ret = commDestroySync((struct ncclAsyncJob*) &job)) != ncclSuccess)
             WARN("commReclaim: comm %p (rank = %d) in commDestroySync, error %d", curIntraComm, curRank, ret);
+        } else if (curIntraComm->revokedFlag) {
+          /* commRevokeAsync already synced streams and stopped proxy;
+           * drain any remaining persistent graph refs and legacy IPC cleanup
+           * callbacks before commCleanup runs (mirrors commDestroySync). */
+          while (curIntraComm->localPersistentRefs != 0) {
+            if ((ret = ncclCommPollCallbacks(curIntraComm, /*waitSome=*/true)) != ncclSuccess) break;
+          }
+          while (!ncclIntruQueueEmpty(&curIntraComm->legacyRegCleanupQueue)) {
+            struct ncclCommCallback* cb = ncclIntruQueueDequeue(&curIntraComm->legacyRegCleanupQueue);
+            if (cb->fn(curIntraComm, cb) != ncclSuccess) {
+              WARN("commReclaim: legacy IPC cleanup callback failed comm %p (rank = %d) cb %p",
+                   curIntraComm, curRank, cb);
+            }
+          }
         }
       }
 
@@ -3366,8 +3387,6 @@ ncclResult_t ncclCommRevoke_impl(ncclComm_t comm, int revokeFlags) {
 
   ncclResult_t ret = ncclSuccess;
   struct ncclCommRevokeAsyncJob* job = NULL;
-  bool flagSet = false;
-  bool jobLaunched = false;
 
   if (revokeFlags != NCCL_REVOKE_DEFAULT) {
     WARN("ncclCommRevoke: unsupported revokeFlags 0x%x (only NCCL_REVOKE_DEFAULT is supported)", revokeFlags);
@@ -3386,27 +3405,17 @@ ncclResult_t ncclCommRevoke_impl(ncclComm_t comm, int revokeFlags) {
     goto fail;
   }
 
-  NCCLCHECKGOTO(ncclCommEnsureReady(comm), ret, fail);
-
   if (comm->destroyFlag || comm->finalizeCalled || comm->revokedFlag) {
     WARN("Comm %p is already in a state of destruction, finalization, or revocation", comm);
     ret = ncclInvalidUsage;
     goto fail;
   }
 
-  {
-    uint32_t expected = 0;
-    if (!__atomic_compare_exchange_n(&comm->revokedFlag, &expected, 1u,
-                                     /*weak=*/false,
-                                     __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
-      WARN("Communicator %p is already revoked", comm);
-      ret = ncclInvalidUsage;
-      goto fail;
-    }
-    flagSet = true;
-  }
-
-  // Blocks subsequent ncclCommFinalize (which tests this flag and rejects); destroy/abort still allowed.
+  // Abort in-flight kernels so commRevokeAsync's stream sync cannot deadlock.
+  // finalizeCalled blocks commDestroySync in commReclaim (revoke handles cleanup).
+  (void)setCommAbortFlags(comm, 1);
+  comm->revokedFlag = 1;
+  (void)ncclCommEnsureReady(comm);
   comm->finalizeCalled = true;
 
   INFO(NCCL_INIT, "comm %p rank %d nRanks %d cudaDev %d busId %lx - Revoke START",
@@ -3415,7 +3424,6 @@ ncclResult_t ncclCommRevoke_impl(ncclComm_t comm, int revokeFlags) {
   NCCLCHECKGOTO(ncclCalloc(&job, 1), ret, fail);
   job->comm = comm;
   NCCLCHECKGOTO(ncclAsyncLaunch((struct ncclAsyncJob*)job, commRevokeAsync, NULL, free, comm), ret, fail);
-  jobLaunched = true;
 
 exit:
   ncclGroupErrCheck(ret);
@@ -3425,9 +3433,6 @@ exit:
   }
   return ret;
 fail:
-  if (flagSet && !jobLaunched) {
-    __atomic_store_n(&comm->revokedFlag, 0u, __ATOMIC_RELEASE);
-  }
   if (comm && !comm->config.blocking) (void) ncclCommSetAsyncError(comm, ret);
   goto exit;
 }

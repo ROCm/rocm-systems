@@ -285,10 +285,18 @@ ncclResult_t pncclCommAbort(ncclComm_t comm);
 /*! @endcond */
 
 /*! @brief      Revoke a communicator without destroying it.
-    @details    Drains in-flight work, stops the proxy service, and rejects subsequently
-                enqueued collectives with ncclInvalidUsage. The communicator remains
-                valid as a parent for ncclCommSplit / ncclCommShrink / ncclCommGrow, or
-                may be torn down via ncclCommFinalize / ncclCommDestroy / ncclCommAbort.
+    @details    Aborts in-flight collectives by raising the comm's abort flag,
+                stops the proxy service, and rejects subsequently enqueued
+                collectives with ncclInvalidUsage. The abort flag is cleared
+                once the asynchronous revoke job completes, so the communicator
+                remains valid as a parent for ncclCommSplit / ncclCommShrink /
+                ncclCommGrow, and may be torn down via ncclCommDestroy /
+                ncclCommAbort.
+                Because in-flight collectives are aborted (not drained), revoke
+                can recover from peers that have failed mid-collective; output
+                buffers of an aborted collective contain undefined data.
+                ncclCommFinalize on a revoked communicator is invalid and returns
+                ncclInvalidUsage.
                 Pass NCCL_REVOKE_DEFAULT for revokeFlags; other values are rejected
                 with ncclInvalidArgument.
     @return     Result code. See @ref rccl_result_code for more details.
