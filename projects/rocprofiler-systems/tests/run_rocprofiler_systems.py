@@ -17,6 +17,10 @@ TEST_FILTER = (
 )
 
 
+def format_command(cmd) -> str:
+    return " ".join(shlex.quote(str(arg)) for arg in cmd)
+
+
 def derive_rocm_path(script_dir: Path) -> Path:
     if script_dir.name == "tests" and script_dir.parent.name == "rocprofiler-systems":
         if script_dir.parent.parent.name == "share":
@@ -69,7 +73,7 @@ def main() -> None:
         "--log-cli-level=info",
     ]
 
-    logging.info(f"++ Exec [{rocm_path}]$ {shlex.join(cmd)}")
+    logging.info(f"++ Exec [{rocm_path}]$ {format_command(cmd)}")
     subprocess.run(cmd, cwd=rocm_path, check=True, env=env)
 
 
