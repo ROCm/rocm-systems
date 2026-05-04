@@ -2,7 +2,7 @@
 # Copyright Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
-"""Manual runner for amdsmitst.
+"""Run the amd-smi project's installed amdsmitst test suite.
 
 amdsmitst requires GPU device access (/dev/kfd, /dev/dri), elevated
 permissions, and execution on a ROCm-enabled system. GitHub-hosted CI
@@ -10,6 +10,7 @@ environments do not expose these capabilities, so this script is intended for
 manual execution inside a privileged ROCm environment or container.
 """
 
+import argparse
 import logging
 import os
 import shlex
@@ -18,6 +19,21 @@ from pathlib import Path
 from typing import List
 
 logging.basicConfig(level=logging.INFO)
+
+HELP_EPILOG = """\
+This script runs the amd-smi project test suite from an installed ROCm payload.
+When run from an installed location, it discovers:
+
+  <rocm-prefix>/share/amd_smi/tests/amdsmitst
+
+Environment variables:
+  ROCM_PATH          ROCm install prefix override.
+  TEST_TYPE         Use "quick" for the dynamic-metric quick-test subset.
+  SHARD_INDEX       1-based GitHub Actions shard index.
+  TOTAL_SHARDS      Total number of GitHub Actions shards.
+
+The amdsmitst binary requires GPU device access and elevated permissions.
+"""
 
 INCLUDE_TESTS = [
     "amdsmitstReadOnly.*",
@@ -35,6 +51,15 @@ EXCLUDE_TESTS = [
     "amdsmitstReadOnly.TestFrequenciesRead",
     "amdsmitstReadWrite.TestPowerReadWrite",
 ]
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Run the amd-smi project amdsmitst test suite.",
+        epilog=HELP_EPILOG,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    return parser.parse_args()
 
 
 def derive_rocm_path(script_dir: Path) -> Path:
@@ -58,6 +83,7 @@ def build_test_filter(test_type: str) -> List[str]:
 
 
 def main() -> None:
+    parse_args()
     script_dir = Path(__file__).resolve().parent
     rocm_path_env = os.getenv("ROCM_PATH")
     rocm_path = Path(rocm_path_env).resolve() if rocm_path_env else derive_rocm_path(script_dir)
