@@ -403,7 +403,10 @@ SSetvskipSopc::SSetvskipSopc(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
 }
 
-void SSetvskipSopc::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SSetvskipSopc::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 SSetGprIdxOnSopc::SSetGprIdxOnSopc(const MachineInst *inst)
     : Sopc("s_set_gpr_idx_on", reinterpret_cast<const OpEncoding *>(inst),
@@ -424,7 +427,10 @@ SSetGprIdxOnSopc::SSetGprIdxOnSopc(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
 }
 
-void SSetGprIdxOnSopc::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SSetGprIdxOnSopc::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 SCmpEqU64Sopc::SCmpEqU64Sopc(const MachineInst *inst)
     : Sopc("s_cmp_eq_u64", reinterpret_cast<const OpEncoding *>(inst),

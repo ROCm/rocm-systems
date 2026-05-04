@@ -57,6 +57,7 @@ rocDecode is delivered as part of `TheRock <https://github.com/ROCm/TheRock>`_. 
       * :doc:`The rocDecode FFMpeg decoder <./reference/rocDecode-ffmpeg-decoder>`
 
     * :doc:`rocDecode logging levels <./reference/rocDecode-logging-control>`
+    * :doc:`rocDecode environment variables <./reference/rocDecode-env-vars>`
     * :doc:`rocDecode codec support and hardware capabilities <./reference/rocDecode-formats-and-architectures>`
     * :doc:`API library <../doxygen/html/files>`
     * :doc:`Functions <../doxygen/html/globals>`

@@ -3,9 +3,9 @@
 
 #pragma once
 
+#include "common/defines.h"
 #include "core/containers/aligned_static_vector.hpp"
 #include "core/containers/operators.hpp"
-#include "core/defines.hpp"
 
 #include <algorithm>
 #include <initializer_list>

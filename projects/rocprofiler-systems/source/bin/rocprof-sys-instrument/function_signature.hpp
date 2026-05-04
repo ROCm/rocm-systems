@@ -11,7 +11,11 @@ struct function_signature
 {
     using location_t = std::pair<unsigned long, unsigned long>;
 
-    TIMEMORY_DEFAULT_OBJECT(function_signature)
+    function_signature()                                         = default;
+    function_signature(const function_signature&)                = default;
+    function_signature(function_signature&&) noexcept            = default;
+    function_signature& operator=(const function_signature&)     = default;
+    function_signature& operator=(function_signature&&) noexcept = default;
 
     function_signature(std::string_view _ret, std::string_view _name,
                        std::string_view _file, location_t _row = { 0, 0 },

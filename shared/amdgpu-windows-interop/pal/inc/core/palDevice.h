@@ -148,7 +148,7 @@ constexpr uint32 MaxPixelPackerPerSe = 4;
 /// Defines host flags for Semaphore/Fence Array wait
 enum HostWaitFlags : uint32
 {
-    HostWaitAny                = 0x1,  ///< if set this bit, return after any signle semaphore/fence in the array has
+    HostWaitAny                = 0x1,  ///< if set this bit, return after any single semaphore/fence in the array has
                                        ///  completed. if not set, wait for completion of all semaphores/fences in the
                                        ///  array before returning.
 };
@@ -454,7 +454,7 @@ enum TemporalHintsMrtBehavior : uint8
 {
     TemporalHintsDynamicRt = 0x0, ///< Enable Dynamic RT Temporal hints. PAL chooses NT vs RT based on heuristics.
     TemporalHintsStaticRt  = 0x1, ///< Regular temporal for both near and far read/write caches.
-    TemporalHintsStaticNt  = 0x2, ///< Non-temporal (re-use not expected) for both near and far read/write caches.
+    TemporalHintsStaticNt  = 0x2, ///< Non-temporal (reuse not expected) for both near and far read/write caches.
 };
 
 enum TemporalHintsIbReadBehavior : uint8
@@ -656,8 +656,8 @@ struct PalPublicSettings
     /// the ACE.
     bool disableExecuteIndirectAceOffload;
 
-    /// Value to initialize metadata for DCC surfaces to, if they are compressable. This has no effect on non-DCC
-    /// images. Images whose initial layout is not compressable are only affected if this is "forced".
+    /// Value to initialize metadata for DCC surfaces to, if they are compressible. This has no effect on non-DCC
+    /// images. Images whose initial layout is not compressible are only affected if this is "forced".
     ///  0x00 - Uncompressed (default)
     ///  0x01 - Opaque Black
     ///  0x02 - Opaque White
@@ -1244,7 +1244,7 @@ struct DeviceProperties
                 uint32 supportHostMappedForeignMemory   :  1;
 
                 /// Indicates whether specifying memory references at Submit time is supported. If not supported
-                /// all memory references must be manged via IDevice or IQueue AddGpuMemoryReferences()
+                /// all memory references must be managed via IDevice or IQueue AddGpuMemoryReferences()
                 uint32 supportPerSubmitMemRefs          :  1;
 
                 /// Indicates support for GPU virtual addresses that are visible to all devices.
@@ -1262,7 +1262,7 @@ struct DeviceProperties
                 /// (DMA-capable) I/O bus to the main memory.
                 uint32 iommuv2Support                   :  1;
 
-                /// Indiciates that the platform supports automatic GPU memory priority management.
+                /// Indicates that the platform supports automatic GPU memory priority management.
                 uint32 autoPrioritySupport              :  1;
 
                 /// Indicates KMD has enabled HBCC(High Bandwidth Cache Controller) page migration support.  This means
@@ -1711,7 +1711,7 @@ struct DeviceProperties
 #endif
 
 #if defined(_WIN32)
-        bool   supportArbitaryPrtMapUnmap;  ///< Support arbitary prt map unmap operation.
+        bool   supportArbitaryPrtMapUnmap;  ///< Support arbitrary prt map unmap operation.
 #endif
 
         uint32                     umdFpsCapFrameRate;   ///< The frame rate of the UMD FPS CAP
@@ -1801,7 +1801,7 @@ struct PrivateScreenNotifyInfo
                                                   ///  calls callback pfnOnTopology.
     TopologyChangeNotificationFunc pfnOnTopology; ///< Pointer to client provided function. PAL should call this when
                                                   ///  the topology change happens and let the client handle the change.
-    DestroyNotificationFunc        pfnOnDestroy;  ///< Pointer to client provdided function. PAL should call this when
+    DestroyNotificationFunc        pfnOnDestroy;  ///< Pointer to client provided function. PAL should call this when
                                                   ///  a private screen object is to be destroyed. The pOwner data is
                                                   ///  passed at @ref IPrivateScreen::BindOwner() time.
 };
@@ -1983,7 +1983,7 @@ struct GpuMemoryHeapProperties
     gpusize physicalSize;                  ///< Physical size of the heap in bytes
 };
 
-/// Reports properties of a specific GPU block required for interpretting performance experiment data from that block.
+/// Reports properties of a specific GPU block required for interpreting performance experiment data from that block.
 /// See @ref PerfExperimentProperties.
 struct GpuBlockPerfProperties
 {
@@ -2154,7 +2154,7 @@ enum class CompressionMode : uint32
     ReadEnableWriteDisable = 2,  ///< Support reading compressed data, but force any writes to be uncompressed (keeping
                                  ///  physical metadata consistent).
     ReadBypassWriteDisable = 3,  ///< Bypass physical metadata on reads (assume decompressed), all writes will be
-                                 ///  uncompressed and will write physical metatdata marking updated blocks as being
+                                 ///  uncompressed and will write physical metadata marking updated blocks as being
                                  ///  uncompressed. This mode is intended to handle placed resources that do not
                                  ///  want compression in memory allocations that have distributed compression enabled.
                                  ///  WARNING: Using this mode to read compressed data will result in corruption.
@@ -2653,7 +2653,7 @@ enum class WorkstationStereoMode : uint32
     Count,
 };
 
-/// Specifies output arguments for IDevice::GetPrimaryInfo(), returning capabilitiy information for a display in
+/// Specifies output arguments for IDevice::GetPrimaryInfo(), returning capability information for a display in
 /// a particular mode.
 struct GetPrimaryInfoOutput
 {
@@ -2958,7 +2958,7 @@ struct FlglState
         struct
         {
             uint32 genLockEnabled    : 1;   ///< True if genlock is currently enabled. Genlock is a system-wide setting
-                                            ///< in CCC. Genlock provides a singal source (which is used in framelock)
+                                            ///< in CCC. Genlock provides a signal source (which is used in framelock)
             uint32 frameLockEnabled  : 1;   ///< True if (KMD) framelock is currently enabled.
                                             ///< Framelock is the mechanism to sync all presents in multiple adapters.
             uint32 isTimingMaster    : 1;   ///< True if the display being driven by the current adapter is the timing
@@ -3045,7 +3045,7 @@ struct GlSyncConfig
     uint32 framelockCntlVector; ///< Vector of Framelock control bits. GlSyncFrameLockCntl*
     uint32 signalSource;        ///< Source of sync signal. Can be House Sync, RJ45 Port or GPUPort.
                                 ///  GlSyncSignalSource* or GPUPort Index
-    uint8  sampleRate;          ///< Number of VSyncs per sample. 0 - no sampling, syncronized by singal VSync.
+    uint8  sampleRate;          ///< Number of VSyncs per sample. 0 - no sampling, synchronized by signal VSync.
     uint8  syncField;           ///< Sync to Field 1 or to both Fields when input signal is interlaced.
                                 ///  GlSyncSyncField*
     uint8  triggerEdge;         ///< Which edge should be used as trigger. GlSyncTriggerEdge*
@@ -3335,7 +3335,7 @@ public:
     /// settings and build up the device for further use. If the client doesn't call this function, it will be called
     /// automatically when IPlatform::Destroy() is called or when devices are re-enumerated.
     ///
-    /// This function provides clients with a way to return devices to a trival state, one in which they have no
+    /// This function provides clients with a way to return devices to a trivial state, one in which they have no
     /// lingering OS or kernel driver dependencies. If a client pairs external state (e.g., an OS handle) with their
     /// devices they may be required to call this function when they destroy their API device objects.
     ///
@@ -3389,7 +3389,7 @@ public:
     ///
     /// @returns Success if the heap properties were successfully queried and returned in info[].  Otherwise, one of the
     ///          following errors may be returned:
-    ///          + ErrorUnknown if an unexpected internal error occured.
+    ///          + ErrorUnknown if an unexpected internal error occurred.
     virtual Result GetGpuMemoryHeapProperties(
         GpuMemoryHeapProperties info[GpuHeapCount]) const = 0;
 
@@ -3517,7 +3517,7 @@ public:
     /// @returns Success if the display modes were successfully queried and the results were reported in
     ///          pStereoModeCount/pStereoModeList.  Otherwise, one of the following errors may be returned:
     ///          + Unsupported if stereo mode is not supported, or the stereo modes can't be queried.
-    ///          + ErrorOutOfMemory if temp memeory allocation failed.
+    ///          + ErrorOutOfMemory if temp memory allocation failed.
     virtual Result GetStereoDisplayModes(
         uint32*                   pStereoModeCount,
         StereoDisplayModeOutput*  pStereoModeList) const = 0;
@@ -3549,7 +3549,7 @@ public:
     ///
     /// @param [in] pGpuMemory    The dst GPU memory reference which will be marked as 10 bits format.
     ///
-    /// @returns Success if the KMD has been sucessfully notified.
+    /// @returns Success if the KMD has been successfully notified.
     virtual Result RequestKmdReinterpretAs10Bit(
         const IGpuMemory* pGpuMemory) const = 0;
 
@@ -3623,7 +3623,7 @@ public:
     ///                                     vidPnSrcId is valid.
     ///
     /// @returns Success if the metadata controls on the given vidPnSrcId was successfully polled.
-    ///          Otherwise, one of the following erros may be returned:
+    ///          Otherwise, one of the following errors may be returned:
     ///          + ErrorInvalidValue if vidPnSrcId is invalid (out of range)
     ///          + ErrorUnavailable if no implementation on current platform or if metadata shared buffer is null.
     virtual Result PollFullScreenFrameMetadataControl(
@@ -3790,7 +3790,7 @@ public:
     /// @param [in] wsiPlatform               WSI Platform the request supposed to send to
     /// @param [in] visualId                  Requested visual information which may not needed for some wsiPlatforms
     ///
-    /// @returns Success if the request is supported. Otherwise, one of the following erros may be returned:
+    /// @returns Success if the request is supported. Otherwise, one of the following errors may be returned:
     ///         + Unsupported
     virtual Result DeterminePresentationSupported(
         OsDisplayHandle      hDisplay,
@@ -4623,7 +4623,7 @@ public:
     /// The SRD can be created in either system memory or pre-mapped GPU memory.  If updating GPU memory, the client
     /// must ensure there are no GPU accesses of this memory in flight before calling this method.
     ///
-    /// The generated sampler SRD controlls execution of sample instructions in a shader, and should be setup as
+    /// The generated sampler SRD controls execution of sample instructions in a shader, and should be setup as
     /// described in @ref SamplerInfo.  The client should put the resulting SRD in an appropriate location based on the
     /// shader resource mapping specified by the bound pipeline, either directly in user data
     /// (ICmdBuffer::CmdSetUserData()) or a table in GPU memory indirectly referenced by user data.
@@ -4806,7 +4806,7 @@ public:
     ///
     /// @param [in]  createInfo Library creation parameters including ELF code object and other items.
     /// @param [out] pResult    The validation result if pResult is non-null.  This argument can be null to avoid the
-    ///                         additonal validation.
+    ///                         additional validation.
     ///
     /// @returns Size, in bytes, of system memory required for an IShaderLibrary object with the specified properties.
     ///          A return value of zero indicates the createInfo was invalid.
@@ -5065,7 +5065,7 @@ public:
     ///
     /// @returns Success if the NT handle was successfully opened.  Otherwise, one of
     ///          the following errors may be returned:
-    ///          + ErrorInvalidValue if the name or attributes is invaild.
+    ///          + ErrorInvalidValue if the name or attributes is invalid.
     virtual Result OpenExternalHandleFromName(
         const ExternalHandleInfo& handleInfo,
         OsExternalHandle*         pHandle) = 0;
@@ -5104,7 +5104,7 @@ public:
         void*                  pPlacementAddr,
         IFence**               ppFence) const = 0;
 
-    /// Opens a fence wihich was shared by another Device.
+    /// Opens a fence which was shared by another Device.
     ///
     /// @param  [in] openInfo         A reference to FenceOpenInfo, the handle is used if it's not null, or the
     ///                               event is opened via name.
@@ -5309,7 +5309,7 @@ public:
     /// private screens. If the id of an enumerated private screen already exists, it is treated as unchanged. The EDID
     /// array and display index are used to generate MD5 hash code.
     ///
-    /// @param [out]  pNumScreens  Pointer to the number of private sceens, note that this number does not mean first
+    /// @param [out]  pNumScreens  Pointer to the number of private screens, note that this number does not mean first
     ///                            *pNumScreens elements in ppScreens are valid but just a hint that total *pNumScreens
     ///                            out of MaxPrivateScreens are valid.
     /// @param [out]  ppScreens    Pointer to the array of private screens. The client must pass in the pointer to an
@@ -5515,7 +5515,7 @@ public:
     ///
     /// @returns Success if query returns with success. Otherwise, one of the following errors may returned:
     ///          + ErrorUnknown if an unexpected internal error occurs.
-    ///          + ErrorInvalidPointer if pGlSyncConfig is null poiter.
+    ///          + ErrorInvalidPointer if pGlSyncConfig is null pointer.
     virtual Result FlglGetSyncConfiguration(
         GlSyncConfig* pGlSyncConfig) const  = 0;
 
@@ -5644,7 +5644,7 @@ public:
     /// re-querythe attached screens and they will find a new one in the list that is pretend, but they can use it just
     /// like a normal display.
     ///
-    /// @param [in]  virtualDisplayInfo   Virtual display creation infomation.
+    /// @param [in]  virtualDisplayInfo   Virtual display creation information.
     /// @param [out] pScreenTargetId      The screen target ID returned by KMD
     ///
     /// @returns Success if the call succeeded.
@@ -5674,7 +5674,7 @@ public:
 
     /// Determines if hardware accelerated stereo rendering can be enabled for given graphic pipeline.
     /// If hardware accelerate stereo rendering can be enabled, client doesn't need to do shader patching
-    /// which includes translating view id intrinsic to user data slot, outputing render target
+    /// which includes translating view id intrinsic to user data slot, outputting render target
     /// array index and viewport array index in shader closest to scan converter.
     ///
     /// @param [in]  viewInstancingInfo  Graphic pipeline view instancing information.
@@ -5792,7 +5792,7 @@ public:
     /// @return Result::Success             if successful
     ///         Result::Unsupported         if feature is not supported
     ///         Result::AlreadyExists       if there is already a CmdDisassembly::ICmdBufferReporting
-    ///                                         registered with this devide
+    ///                                         registered with this device
     ///         Result::ErrorInvalidValue   if pInterface == nullptr
     ///
     virtual Result RegisterCmdReportingInterface(

@@ -373,6 +373,7 @@ _MUBUF_MODIFIERS = [
     EncodingModifier('sc0'),
     EncodingModifier('sc1'),
     EncodingModifier('nt'),
+    EncodingModifier('lds'),
 ]
 
 _MTBUF_MODIFIERS = [
@@ -403,6 +404,7 @@ _MUBUF_MODIFIERS_GLC = [
     EncodingModifier('offset', is_offset=True),
     EncodingModifier('glc'),
     EncodingModifier('slc'),
+    EncodingModifier('lds'),
 ]
 
 _MTBUF_MODIFIERS_GLC = [
@@ -437,6 +439,7 @@ _MUBUF_MODIFIERS_GLC_DLC = [
     EncodingModifier('glc'),
     EncodingModifier('dlc'),
     EncodingModifier('slc'),
+    EncodingModifier('lds'),
 ]
 
 _MTBUF_MODIFIERS_GLC_DLC = [
@@ -752,9 +755,18 @@ class CdnaProfile(_AmdgpuProfileBase):
     # The LDS field controls whether FLAT accesses local data store vs. VGPR.
     _FLAT_FIELD_RENAMES: dict[str, str] = {'sve': 'lds'}
 
+    # XML bug (P2): CDNA4 ENC_VOP3P lists bit 14 as 'PAD' but the ISA PDF
+    # names it 'OP_SEL_HI_2' (the third bit of op_sel_hi for src2 hi/lo
+    # half selection in packed FP16/BF16 instructions). CDNA3's XML already
+    # uses the correct name; the rename is a no-op there.
+    _VOP3P_FIELD_RENAMES: dict[str, str] = {'pad_14': 'op_sel_hi_2'}
+
     def field_renames(self, enc_name: str) -> dict[str, str]:
-        if enc_name.upper() == 'ENC_FLAT':
+        upper = enc_name.upper()
+        if upper == 'ENC_FLAT':
             return self._FLAT_FIELD_RENAMES
+        if upper == 'ENC_VOP3P':
+            return self._VOP3P_FIELD_RENAMES
         return {}
 
     @property

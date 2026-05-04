@@ -84,17 +84,22 @@ set(COMPONENT_NAME_rocpd "rocprofiler-sdk-rocpd")
 set(COMPONENT_NAME_benchmark "rocprofiler-sdk-benchmark")
 set(COMPONENT_NAME_rocattach "rocprofiler-sdk-rocattach")
 
+set(_aqlprofile_pkg_dep)
+if(NOT ROCPROFILER_BUILD_AQLPROFILE)
+    set(_aqlprofile_pkg_dep "hsa-amd-aqlprofile (>= 1.0.0)")
+endif()
+
 set(COMPONENT_DEP_core
     "rocprofiler-sdk-roctx (>= ${PROJECT_VERSION})"
     "rocprofiler-sdk-rocpd (>= ${PROJECT_VERSION})"
-    "rocprofiler-sdk-rocattach (>= ${PROJECT_VERSION})" "hsa-amd-aqlprofile (>= 1.0.0)")
+    "rocprofiler-sdk-rocattach (>= ${PROJECT_VERSION})" ${_aqlprofile_pkg_dep})
 set(COMPONENT_DEP_docs "")
 set(COMPONENT_DEP_tests
     "rocprofiler-sdk (>= ${PROJECT_VERSION})"
     "rocprofiler-sdk-roctx (>= ${PROJECT_VERSION})"
     "rocprofiler-sdk-rocpd (>= ${PROJECT_VERSION})"
     "rocprofiler-sdk-rocattach (>= ${PROJECT_VERSION})"
-    "hsa-amd-aqlprofile (>= 1.0.0)")
+    ${_aqlprofile_pkg_dep})
 set(COMPONENT_DEP_roctx "rocprofiler-register")
 set(COMPONENT_DEP_rocpd "")
 set(COMPONENT_DEP_benchmark "rocprofiler-sdk (>= ${PROJECT_VERSION})")

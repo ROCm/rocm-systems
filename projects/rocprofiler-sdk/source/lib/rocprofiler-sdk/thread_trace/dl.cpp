@@ -22,6 +22,8 @@
 
 #include "lib/rocprofiler-sdk/thread_trace/dl.hpp"
 #include "lib/common/filesystem.hpp"
+#include "lib/common/logging.hpp"
+#include "lib/common/static_object.hpp"
 
 #include <dlfcn.h>
 #include <cassert>
@@ -50,6 +52,60 @@ DL::DL(const char* libpath)
 DL::~DL()
 {
     if(handle) dlclose(handle);
+}
+
+AQLProfileDL::AQLProfileDL()
+{
+#if defined(ROCPROFILER_BUILD_AQLPROFILE) && ROCPROFILER_BUILD_AQLPROFILE
+    // Vendored aqlprofile: bind directly to the in-binary copy. Going through
+    // dlsym(RTLD_DEFAULT) can resolve to a different copy in the system
+    // libhsa-amd-aqlprofile64.so, which has its own MemoryManager static map
+    // and would not see handles registered by the vendored aqlprofile_att_create_packets.
+    get_buffer_packets_fn   = &aqlprofile_att_get_buffer_packets;
+    update_buffer_status_fn = &aqlprofile_att_update_buffer_status;
+#else
+    // External aqlprofile: load symbols from libhsa-amd-aqlprofile64.so
+    get_buffer_packets_fn = reinterpret_cast<GetBufferPacketsFn*>(
+        dlsym(RTLD_DEFAULT, "aqlprofile_att_get_buffer_packets"));
+    update_buffer_status_fn = reinterpret_cast<UpdateBufferStatusFn*>(
+        dlsym(RTLD_DEFAULT, "aqlprofile_att_update_buffer_status"));
+
+    if(valid()) return;
+
+    const char* lib_names[] = {
+        "libhsa-amd-aqlprofile64.so",
+        "libhsa-amd-aqlprofile64.so.1",
+    };
+
+    for(const char* lib_name : lib_names)
+    {
+        handle = dlopen(lib_name, RTLD_LAZY | RTLD_LOCAL);
+        if(handle) break;
+    }
+
+    if(!handle)
+    {
+        ROCP_WARNING << "Failed to load libhsa-amd-aqlprofile64.so.1: " << dlerror();
+        return;
+    }
+
+    get_buffer_packets_fn =
+        reinterpret_cast<GetBufferPacketsFn*>(dlsym(handle, "aqlprofile_att_get_buffer_packets"));
+    update_buffer_status_fn = reinterpret_cast<UpdateBufferStatusFn*>(
+        dlsym(handle, "aqlprofile_att_update_buffer_status"));
+#endif
+}
+
+AQLProfileDL::~AQLProfileDL()
+{
+    if(handle) dlclose(handle);
+}
+
+AQLProfileDL*
+get_aqlprofile_dl()
+{
+    static auto& instance = common::static_object<AQLProfileDL>::construct();
+    return instance;
 }
 
 }  // namespace thread_trace

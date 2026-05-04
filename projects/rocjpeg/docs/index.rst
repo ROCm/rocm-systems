@@ -33,6 +33,7 @@ rocJPEG is delivered as part of `TheRock <https://github.com/ROCm/TheRock>`_. Th
 
   .. grid-item-card:: Reference
 
+    * :doc:`rocJPEG environment variables <./reference/rocJPEG-env-vars>`
     * :doc:`rocJPEG subsampling and hardware capabilities <./reference/rocjpeg-formats-and-architectures>`
     * :doc:`rocJPEG API library <../doxygen/html/files>`
     * :doc:`rocJPEG Functions <../doxygen/html/globals>`

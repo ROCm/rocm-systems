@@ -54,12 +54,8 @@ get_hsa_pcs_latency()
     return 1000;
 }
 
-constexpr size_t
-get_hsa_pcs_buffer_size()
-{
-    // TODO: Find the minimum size of all buffers and use that.
-    return 64 * 1024 * sizeof(perf_sample_hosttrap_v1_t);  // 4MB
-}
+size_t
+get_hsa_pcs_buffer_size(uint32_t gfx_target_version);
 }  // namespace utils
 }  // namespace pc_sampling
 }  // namespace rocprofiler

@@ -7,8 +7,8 @@
 
 #include <array>
 #include <cstdint>
-
-#include <amd_smi/amdsmi.h>
+#include <limits>
+#include <string>
 
 namespace rocprofsys
 {
@@ -19,9 +19,17 @@ namespace collectors
 namespace gpu
 {
 
-// Sentinel values used by AMD SMI to indicate unsupported/unavailable metrics
-constexpr uint16_t METRIC_VALUE_NOT_SUPPORTED_16 = 0xffff;
-constexpr uint64_t METRIC_VALUE_NOT_SUPPORTED_64 = 0xffffffffffffffff;
+// Sentinel values used by AMD SMI to indicate unsupported/unavailable metrics.
+// AMD SMI returns these per-field; the POD widens some fields to 32/64 bits so the
+// 16-bit sentinel must be checked explicitly when reading from the wider POD field.
+constexpr uint32_t METRIC_VALUE_NOT_SUPPORTED_16 = 0xFFFF;
+constexpr uint64_t METRIC_VALUE_NOT_SUPPORTED_64 = 0xFFFFFFFFFFFFFFFFULL;
+
+constexpr size_t MAX_NUM_VCN        = 4;
+constexpr size_t MAX_NUM_JPEG       = 32;
+constexpr size_t MAX_NUM_JPEG_V1    = 40;
+constexpr size_t MAX_NUM_XCP        = 8;
+constexpr size_t MAX_NUM_XGMI_LINKS = 8;
 
 /**
  * @brief Bitfield union for selecting which AMD SMI metrics to collect.
@@ -66,45 +74,36 @@ union enabled_metrics
     uint32_t value = 0;
 };
 
-// Get the actual JPEG engine count from the AMD SMI structure at compile time.
-// This ensures compatibility across ROCm versions where the jpeg_busy array size
-// may differ (32 in ROCm 6.x vs 40 in ROCm 7.x).
-constexpr size_t ROCPROFSYS_AMDSMI_JPEG_ENGINE_COUNT =
-    sizeof(amdsmi_gpu_xcp_metrics_t::jpeg_busy) / sizeof(uint16_t);
-
-#ifndef AMDSMI_MAX_NUM_VCN
-#    define AMDSMI_MAX_NUM_VCN 4
-#endif
-
-#ifndef AMDSMI_MAX_NUM_JPEG
-#    define AMDSMI_MAX_NUM_JPEG 32
-#endif
-
-#ifndef AMDSMI_MAX_NUM_XCP
-#    define AMDSMI_MAX_NUM_XCP 8
-#endif
+/**
+ * @brief GPU ASIC identification info.
+ */
+struct asic_info
+{
+    std::string product_name;
+    std::string vendor_name;
+};
 
 struct metrics
 {
     struct xcp_metrics
     {
-        std::array<uint16_t, ROCPROFSYS_AMDSMI_JPEG_ENGINE_COUNT> jpeg_busy = {};
-        std::array<uint16_t, AMDSMI_MAX_NUM_VCN>                  vcn_busy  = {};
+        std::array<uint16_t, MAX_NUM_JPEG_V1> jpeg_busy = {};
+        std::array<uint16_t, MAX_NUM_VCN>     vcn_busy  = {};
     };
 
-    uint32_t                                    current_socket_power = 0;
-    uint32_t                                    average_socket_power = 0;
-    uint64_t                                    memory_usage         = 0;
-    int64_t                                     hotspot_temperature  = 0;
-    int64_t                                     edge_temperature     = 0;
-    uint32_t                                    gfx_activity         = 0;
-    uint32_t                                    umc_activity         = 0;
-    uint32_t                                    mm_activity          = 0;
-    std::array<xcp_metrics, AMDSMI_MAX_NUM_XCP> xcp_stats;
+    uint32_t                             current_socket_power = 0;
+    uint32_t                             average_socket_power = 0;
+    uint64_t                             memory_usage         = 0;
+    uint32_t                             hotspot_temperature  = 0;
+    uint32_t                             edge_temperature     = 0;
+    uint32_t                             gfx_activity         = 0;
+    uint32_t                             umc_activity         = 0;
+    uint32_t                             mm_activity          = 0;
+    std::array<xcp_metrics, MAX_NUM_XCP> xcp_stats;
 
     // Device-level VCN/JPEG activity (Radeon GPUs)
-    std::array<uint16_t, AMDSMI_MAX_NUM_VCN>  vcn_activity  = {};
-    std::array<uint16_t, AMDSMI_MAX_NUM_JPEG> jpeg_activity = {};
+    std::array<uint16_t, MAX_NUM_VCN>  vcn_activity  = {};
+    std::array<uint16_t, MAX_NUM_JPEG> jpeg_activity = {};
 
     struct
     {
@@ -116,8 +115,8 @@ struct metrics
 
         struct
         {
-            std::array<uint64_t, AMDSMI_MAX_NUM_XGMI_LINKS> read  = {};
-            std::array<uint64_t, AMDSMI_MAX_NUM_XGMI_LINKS> write = {};
+            std::array<uint64_t, MAX_NUM_XGMI_LINKS> read  = {};
+            std::array<uint64_t, MAX_NUM_XGMI_LINKS> write = {};
         } data_acc;
     } xgmi;
 
@@ -138,6 +137,22 @@ struct metrics
 
     uint32_t sdma_usage = 0;  // SDMA utilization percentage (0-100)
 };
+
+template <typename T>
+[[nodiscard]] constexpr bool
+is_metric_supported(T value, T invalid_sentinel = std::numeric_limits<T>::max())
+{
+    return value != invalid_sentinel;
+}
+
+template <typename T>
+constexpr bool
+populate_if_supported(T& dest, T src, T invalid_sentinel = std::numeric_limits<T>::max())
+{
+    const bool valid = is_metric_supported(src, invalid_sentinel);
+    dest             = valid ? src : T{ 0 };
+    return valid;
+}
 
 }  // namespace gpu
 }  // namespace collectors
