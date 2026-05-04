@@ -1,6 +1,12 @@
 #!/usr/bin/env python3
 # Copyright Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
+"""Build and run the rocprofiler-sdk project's installed CTest suite.
+
+This runner is installed with the rocprofiler-sdk test source payload. It
+configures and builds those installed tests against the ROCm install tree, then
+executes the generated CTest suite.
+"""
 
 import argparse
 import logging
@@ -14,6 +20,16 @@ from typing import Dict, List, Optional
 PROJECT_NAME = "rocprofiler-sdk"
 
 logging.basicConfig(level=logging.INFO)
+
+HELP_EPILOG = f"""\
+This script runs the {PROJECT_NAME} project test suite from an installed ROCm
+payload. When run from an installed location, it discovers:
+
+  <rocm-prefix>/share/{PROJECT_NAME}/tests
+
+The installed tests are CMake source files, so the runner configures and builds
+them before invoking CTest.
+"""
 
 
 def positive_int(value: str) -> int:
@@ -35,17 +51,27 @@ def format_command(cmd: List[str]) -> str:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Run installed rocprofiler-sdk tests.")
+    parser = argparse.ArgumentParser(
+        description=f"Build and run the {PROJECT_NAME} project test suite.",
+        epilog=HELP_EPILOG,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     parser.add_argument(
         "--rocm-path",
         type=Path,
         default=path_from_env("ROCM_PATH"),
-        help="ROCm install prefix. Defaults to ROCM_PATH or the runner location.",
+        help=(
+            "ROCm install prefix used by the rocprofiler-sdk tests. "
+            "Defaults to ROCM_PATH or the installed runner/tests location."
+        ),
     )
     parser.add_argument(
         "--tests-path",
         type=Path,
-        help="Installed rocprofiler-sdk tests directory.",
+        help=(
+            "Installed rocprofiler-sdk tests source directory. Defaults to "
+            "<rocm-path>/share/rocprofiler-sdk/tests."
+        ),
     )
     parser.add_argument(
         "--build-dir",
