@@ -428,6 +428,87 @@ TEST_F(RevokeMPITest, Revoke_InsideGroup_Rejected)
     ASSERT_MPI_EQ(ncclSuccess, ncclGroupEnd());
 }
 
+/**
+ * Incomplete collective variant: rank np-1 does NOT call AllReduce, so the
+ * collective is guaranteed to be stuck in-flight when revoke fires. This
+ * verifies that revoke can recover from a truly incomplete operation, not
+ * just one that might have raced to completion.
+ *
+ * Relies on ncclCommRevoke setting abortFlag=1 synchronously before launching
+ * commRevokeAsync, so that the device-side
+ * kernel waiting for the missing peer exits and the host stream sync inside
+ * commRevokeAsync can proceed.
+ *
+ */
+TEST_F(RevokeMPITest, IncompleteCollective_Revoke_Shrink_Collective)
+{
+    ASSERT_TRUE(validateTestPrerequisites(4,
+                                          kNoProcessLimit,
+                                          kNoPowerOfTwoRequired,
+                                          1,
+                                          kNoNodeLimit))
+        << "Test requires at least 4 MPI processes";
+
+    ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+
+    ncclComm_t  parent = getActiveCommunicator();
+    hipStream_t stream = getActiveStream();
+    int         rank   = MPIEnvironment::world_rank;
+    int         world_size = MPIEnvironment::world_size;
+
+    constexpr size_t kCount = 1024 * 1024;
+    void* send_buf = nullptr;
+    void* recv_buf = nullptr;
+    HIP_TEST_CHECK_GTEST_FAIL(hipMalloc(&send_buf, kCount * sizeof(float)));
+    HIP_TEST_CHECK_GTEST_FAIL(hipMalloc(&recv_buf, kCount * sizeof(float)));
+    auto send_guard = makeScopeGuard([&]() { if(send_buf) (void)hipFree(send_buf); });
+    auto recv_guard = makeScopeGuard([&]() { if(recv_buf) (void)hipFree(recv_buf); });
+
+    HIP_TEST_CHECK_GTEST_FAIL(zeroInitializeBuffer<float>(send_buf, kCount));
+    HIP_TEST_CHECK_GTEST_FAIL(zeroInitializeBuffer<float>(recv_buf, kCount));
+
+    if (rank != world_size - 1) {
+        ASSERT_EQ(ncclSuccess,
+                  ncclAllReduce(send_buf, recv_buf, kCount, ncclFloat, ncclSum, parent, stream));
+    }
+
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    ASSERT_MPI_EQ(ncclSuccess, ncclCommRevoke(parent, NCCL_REVOKE_DEFAULT));
+
+    if (rank != world_size - 1) {
+        HIP_TEST_CHECK_GTEST_FAIL(hipStreamSynchronize(stream));
+    }
+
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    std::vector<int> excludeList;
+    bool             isExcluded;
+    computeSymmetricExclude(rank, world_size, excludeList, isExcluded);
+    ncclComm_t child = NCCL_COMM_NULL;
+
+    if(!isExcluded)
+    {
+        ASSERT_EQ(ncclSuccess,
+                  ncclCommShrink(parent, excludeList.data(), excludeList.size(),
+                                 &child, nullptr, NCCL_SHRINK_DEFAULT));
+        ASSERT_NE(child, nullptr);
+    }
+
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    if(!isExcluded)
+    {
+        auto child_guard = makeCommAutoGuard(child);
+
+        ASSERT_EQ(ncclSuccess,
+                  ncclAllReduce(send_buf, recv_buf, kCount, ncclFloat, ncclSum, child, stream));
+        HIP_TEST_CHECK_GTEST_FAIL(hipStreamSynchronize(stream));
+    }
+
+    MPI_Barrier(MPI_COMM_WORLD);
+}
+
 static void computeAsymmetricExclude(int worldRank, int worldSize,
                                      std::vector<int>& excludeList, bool& isExcluded)
 {
