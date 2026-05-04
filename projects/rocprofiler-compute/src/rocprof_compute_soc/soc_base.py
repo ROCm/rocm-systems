@@ -432,7 +432,7 @@ class OmniSoC_Base:
                 continue
             new_bucket = CounterFile(str(file_count), cfg)
             trial = _trial_counter_file_with_extra(new_bucket, cfg, need_sorted)
-            if trial is not None and _flat_counters_in_perfmon_file(trial):
+            if trial is not None and flat_counters_in_perfmon_file(trial):
                 files.append(trial)
                 file_count += 1
                 remaining -= set(need_sorted)
@@ -975,7 +975,7 @@ def _trial_counter_file_with_extra(
     """Clone basis, try appending extras; None if any won't fit."""
     original_name = basis.file_name_txt.removeprefix("pmc_perf_").removesuffix(".txt")
     trial = CounterFile(original_name, perfmon_config)
-    for ctr in _flat_counters_in_perfmon_file(basis):
+    for ctr in flat_counters_in_perfmon_file(basis):
         if not trial.add(ctr):
             msg = f"clone replay failed for {ctr!r} in {basis.file_name_txt}"
             raise RuntimeError(msg)
@@ -991,13 +991,13 @@ def _rebuild_tcc_channel_file_map(
     """Map TCC counter base name to the bucket that holds its channel instances."""
     result: dict[str, CounterFile] = {}
     for bucket in output_files:
-        for ctr in _flat_counters_in_perfmon_file(bucket):
+        for ctr in flat_counters_in_perfmon_file(bucket):
             if is_tcc_channel_counter(ctr):
                 result[ctr.split("[")[0]] = bucket
     return result
 
 
-def _flat_counters_in_perfmon_file(counter_file: CounterFile) -> list[str]:
+def flat_counters_in_perfmon_file(counter_file: CounterFile) -> list[str]:
     """Ordered list of PMC counter names assigned to one perfmon bucket file."""
     return [
         ctr

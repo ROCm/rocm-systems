@@ -2,7 +2,6 @@
 # SPDX-License-Identifier:  MIT
 
 import csv
-import importlib.util
 import inspect
 import os
 import re
@@ -2745,18 +2744,9 @@ def test_iteration_multiplexing_data_types(
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
-skip_if_no_torch_gpu = pytest.mark.skipif(
-    (
-        importlib.util.find_spec("torch") is None
-        or not __import__("torch").cuda.is_available()
-    ),
-    reason=("PyTorch and GPU access are required for this test"),
-)
-
-
-@skip_if_no_torch_gpu
 @pytest.mark.torch_trace
 def test_torch_trace_profile(
+    require_torch_gpu,
     binary_handler_profile_rocprof_compute,
     binary_handler_analyze_rocprof_compute,
     capsys,
@@ -2929,12 +2919,12 @@ def test_torch_trace_profile(
 
     # 10. Source-location grouping (file:line headers)
     location_headers = re.findall(
-        r"^(\S+:\d+)\s+\(kernel_launches:", list_output, re.MULTILINE
+        r"^(\S+:\d+)\s+\(dispatches:", list_output, re.MULTILINE
     )
     assert location_headers, "No source-location headers found in output"
 
     # 11. Aggregated stats on tree nodes
-    assert re.search(r"\(kernel_launches:\s+\d+,\s+total_duration:", list_output), (
+    assert re.search(r"\(dispatches:\s+\d+,\s+total:", list_output), (
         "No aggregated stats found in output"
     )
 
@@ -2943,13 +2933,13 @@ def test_torch_trace_profile(
     assert kernel_ids, "No kernel IDs found in output"
 
     # 13. Kernel launch durations
-    assert re.search(r"kernel_launches:\s+\d+,\s+total_duration:", list_output), (
+    assert re.search(r"dispatches:\s+\d+,\s+total:", list_output), (
         "No kernel duration info in output"
     )
 
     # 14. Source locations sorted by descending total duration
     location_durations = re.findall(
-        r"^(\S+:\d+)\s+\(kernel_launches:\s+\d+,\s+total_duration:\s+([\d.]+)\s+(ms|us)\)",
+        r"^(\S+:\d+)\s+\(dispatches:\s+\d+,\s+total:\s+([\d.]+)\s+(ms|us)",
         list_output,
         re.MULTILINE,
     )
@@ -3015,8 +3005,8 @@ def test_torch_trace_profile(
     assert "Matched PyTorch Operators" in out_exact, (
         "Expected 'Matched PyTorch Operators' header in --torch-operator output"
     )
-    assert "kernel_launches" in out_exact, (
-        "Expected call tree with kernel_launches stats in --torch-operator output"
+    assert "dispatches" in out_exact, (
+        "Expected call tree with dispatches stats in --torch-operator output"
     )
 
     # 18. Glob wildcard pattern (*relu) matches the relu operator
@@ -3031,7 +3021,7 @@ def test_torch_trace_profile(
     ])
     assert rc_glob == 0, "Analyze with --torch-operator *relu failed"
     out_glob = capsys.readouterr().out
-    assert "kernel_launches" in out_glob, (
+    assert "dispatches" in out_glob, (
         "Glob pattern *relu should match relu operator and render call tree"
     )
 
@@ -3047,7 +3037,7 @@ def test_torch_trace_profile(
     ])
     assert rc_all == 0, "Analyze with --torch-operator all failed"
     out_all = capsys.readouterr().out
-    assert "kernel_launches" in out_all, "'all' keyword should match operators"
+    assert "dispatches" in out_all, "'all' keyword should match operators"
 
     # 20. --torch-operator + -k intersection succeeds and renders call tree
     capsys.readouterr()
@@ -3091,9 +3081,10 @@ def test_torch_trace_profile(
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
-@skip_if_no_torch_gpu
 @pytest.mark.torch_trace
-def test_torch_trace_overhead(binary_handler_profile_rocprof_compute):
+def test_torch_trace_overhead(
+    require_torch_gpu, binary_handler_profile_rocprof_compute
+):
     """
     Measure overhead introduced by --torch-trace flag.
     Compares execution time with and without the flag to ensure overhead is acceptable.
@@ -3105,7 +3096,7 @@ def test_torch_trace_overhead(binary_handler_profile_rocprof_compute):
     returncode_baseline = binary_handler_profile_rocprof_compute(
         config,
         workload_dir_baseline,
-        [],  # No torch-trace flag
+        ["--iteration-multiplexing"],  # Baseline without --torch-trace
         check_success=True,
         roof=False,
         app_name="torch_test_app",
@@ -3128,7 +3119,7 @@ def test_torch_trace_overhead(binary_handler_profile_rocprof_compute):
     returncode_with_flag = binary_handler_profile_rocprof_compute(
         config,
         workload_dir_with_flag,
-        ["--experimental", "--torch-trace"],
+        ["--experimental", "--torch-trace", "--iteration-multiplexing"],
         check_success=True,
         roof=False,
         app_name="torch_test_app",
@@ -3403,6 +3394,7 @@ def test_multi_rank_no_warning_with_iteration_multiplexing(
     ],
 )
 def test_profile_invalid_workloads_torch_trace(
+    require_torch_gpu,
     binary_handler_profile_rocprof_compute,
     workload_cmd,
     expected_exit,
@@ -3419,7 +3411,7 @@ def test_profile_invalid_workloads_torch_trace(
     returncode, stdout, stderr = binary_handler_profile_rocprof_compute(
         test_config,
         workload_dir,
-        options=["--experimental", "--torch-trace"],
+        options=["--experimental", "--torch-trace", "--iteration-multiplexing"],
         check_success=False,
         app_name=app_name,
         capture_output=True,

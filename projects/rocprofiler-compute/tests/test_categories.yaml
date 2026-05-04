@@ -14,7 +14,8 @@ test_categories:
       - test_pc_sampling_analysis
       - test_tui_components
       - test_analysis_db
-      - test_torch_trace
+      - test_torch_trace_analysis
+      - test_torch_trace_coverage
       - test_L1_cache_counters
       - test_data_imputation
       - test_roofline_calc_ai_analyze
@@ -57,7 +58,8 @@ test_categories:
       - test_utils
       - test_L1_cache_counters
       - test_roofline_calc_ai_analyze
-      - test_torch_trace
+      - test_torch_trace_analysis
+      - test_torch_trace_coverage
       - test_tui_components
       - test_import_guard
       - test_profile_multi_rank
@@ -101,7 +103,8 @@ test_categories:
       - test_utils
       - test_L1_cache_counters
       - test_roofline_calc_ai_analyze
-      - test_torch_trace
+      - test_torch_trace_analysis
+      - test_torch_trace_coverage
       - test_tui_components
       - test_import_guard
       - test_profile_multi_rank
@@ -145,7 +148,8 @@ test_categories:
       - test_utils
       - test_L1_cache_counters
       - test_roofline_calc_ai_analyze
-      - test_torch_trace
+      - test_torch_trace_analysis
+      - test_torch_trace_coverage
       - test_tui_components
       - test_import_guard
       - test_profile_multi_rank

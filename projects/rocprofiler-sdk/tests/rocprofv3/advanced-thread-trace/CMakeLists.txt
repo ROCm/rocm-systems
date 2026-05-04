@@ -356,13 +356,56 @@ rocprofiler_add_integration_validate_test(
     ARGS --att-other-simd-out-dir ${OTHER_SIMD_OUT_DIR}
     FAIL_REGULAR_EXPRESSION "AssertionError")
 
+# ATT with marker-controlled device thread trace
+set(ATT_MARKER_TRACE_OUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/att-marker-trace-out")
+
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-att-marker-trace
+    COMMAND
+        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -d ${ATT_MARKER_TRACE_OUT_DIR} --att
+        --selected-regions --att-shader-engine-mask 0xF --output-format json --log-level
+        env -o out -- $<TARGET_FILE:att-marker-trace>
+    DEPENDS att-marker-trace
+    LABELS "integration-tests;thread-trace"
+    TIMEOUT 45
+    DISABLED ${IS_DISABLED}
+    ENVIRONMENT "ROCPROF_ATT_LIBRARY_PATH=${attdecoder_LIB_DIR}"
+    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+    FIXTURES_SETUP rocprofv3-test-att-marker-trace)
+
+rocprofiler_add_integration_validate_test(
+    rocprofv3-test-att-marker-trace
+    TEST_PATHS validate.py
+    COPY conftest.py
+    CONFIG pytest.ini
+    TIMEOUT 45
+    LABELS "integration-tests;thread-trace"
+    DISABLED ${IS_DISABLED}
+    FIXTURES_REQUIRED rocprofv3-test-att-marker-trace
+    DISCOVERY_ARGS -k test_att_marker_trace
+    ARGS --input ${ATT_MARKER_TRACE_OUT_DIR}/out_results.json --att-marker-trace-out-dir
+         ${ATT_MARKER_TRACE_OUT_DIR}
+    FAIL_REGULAR_EXPRESSION "AssertionError")
+
+# Conflict: att selected-regions + att-consecutive-kernels should fail
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-att-marker-trace-conflict-will-fail
+    COMMAND $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --att --selected-regions
+            --att-consecutive-kernels 5 -- $<TARGET_FILE:att-marker-trace>
+    DEPENDS att-marker-trace
+    TIMEOUT 45
+    LABELS "integration-tests;thread-trace"
+    WILL_FAIL
+    DISABLED ${IS_DISABLED}
+    FAIL_REGULAR_EXPRESSION "att-consecutive-kernels options are mutually exclusive")
+
 set(SHADERDATA_OUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/att-rocprofv3-shaderdata")
 
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-att-shaderdata
     COMMAND $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -d ${SHADERDATA_OUT_DIR} --att --
-            $<TARGET_FILE:thread-trace-api-multi-test>
-    DEPENDS thread-trace-api-multi-test
+            $<TARGET_FILE:thread-trace-test-app>
+    DEPENDS thread-trace-test-app
     TIMEOUT 45
     LABELS "integration-tests"
     DISABLED ${IS_DISABLED}

@@ -51,7 +51,9 @@ public:
   const Memory &memory() const { return memory_; }
 
   /// @brief Set the execution plugin group (shared ownership).
-  void set_plugin_group(std::shared_ptr<ExecutionPluginGroup> pg) { plugin_group_ = pg ? pg : ExecutionPluginGroup::empty_group(); }
+  void set_plugin_group(std::shared_ptr<ExecutionPluginGroup> pg) {
+    plugin_group_ = pg ? pg : ExecutionPluginGroup::empty_group();
+  }
 
 private:
   HartState state_;

@@ -2,11 +2,12 @@ rocprofiler_deactivate_clang_tidy()
 
 include(GoogleTest)
 
-set(ROCPROFILER_THREAD_TRACE_TEST_SOURCES "att_packet_test.cpp")
+set(ROCPROFILER_THREAD_TRACE_PACKET_TEST_SOURCES "att_packet_test.cpp")
 
 add_executable(thread-trace-packet-test)
 
-target_sources(thread-trace-packet-test PRIVATE ${ROCPROFILER_THREAD_TRACE_TEST_SOURCES})
+target_sources(thread-trace-packet-test
+               PRIVATE ${ROCPROFILER_THREAD_TRACE_PACKET_TEST_SOURCES})
 
 target_link_libraries(
     thread-trace-packet-test
@@ -24,9 +25,37 @@ set(_ROCPROFILER_SHARE_DIR
 
 rocprofiler_add_unit_test(
     TARGET thread-trace-packet-test
-    SOURCES ${ROCPROFILER_THREAD_TRACE_TEST_SOURCES}
-    TEST_LIST thread-trace-packet-test_TESTS
+    SOURCES ${ROCPROFILER_THREAD_TRACE_PACKET_TEST_SOURCES}
+    TEST_LIST thread-trace-test_TESTS
     TIMEOUT 10
+    LABELS "unittests"
+    ENVIRONMENT
+        "ROCPROFILER_METRICS_PATH=${_ROCPROFILER_SHARE_DIR}"
+        "LD_LIBRARY_PATH=${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}:${CMAKE_INSTALL_PREFIX}/lib:${CMAKE_INSTALL_PREFIX}/llvm/lib:${ROCM_PATH}/lib:${ROCM_PATH}/llvm/lib:$ENV{LD_LIBRARY_PATH}"
+    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+
+set(ROCPROFILER_THREAD_TRACE_PRODUCER_CONSUMER_TEST_SOURCES "producer_consumer.cpp")
+
+add_executable(thread-trace-producer-consumer-test)
+target_sources(thread-trace-producer-consumer-test
+               PRIVATE ${ROCPROFILER_THREAD_TRACE_PRODUCER_CONSUMER_TEST_SOURCES})
+
+target_link_libraries(
+    thread-trace-producer-consumer-test
+    PRIVATE rocprofiler-sdk::rocprofiler-sdk-static-library
+            rocprofiler-sdk::rocprofiler-sdk-abseil
+            rocprofiler-sdk::rocprofiler-sdk-hsa-runtime
+            rocprofiler-sdk::rocprofiler-sdk-hip
+            rocprofiler-sdk::rocprofiler-sdk-common-library
+            GTest::gtest
+            GTest::gtest_main
+            rocprofiler-sdk::counter-test-constants)
+
+rocprofiler_add_unit_test(
+    TARGET thread-trace-producer-consumer-test
+    SOURCES ${ROCPROFILER_THREAD_TRACE_PRODUCER_CONSUMER_TEST_SOURCES}
+    TEST_LIST thread-trace-test_TESTS
+    TIMEOUT 100
     LABELS "unittests"
     ENVIRONMENT
         "ROCPROFILER_METRICS_PATH=${_ROCPROFILER_SHARE_DIR}"
