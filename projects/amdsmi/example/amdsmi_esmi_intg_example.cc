@@ -178,7 +178,7 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char** argv) {
 
       cout << "\n-------------------------------------------------\n";
 
-      auto socket_power = double(0.0);
+      uint32_t socket_power;
       cout << setprecision(3) << " CPU " << index << "\t|";
       cout << "\n-------------------------------------------------";
       cout << "\n| Power (Watts)\t\t\t | ";
@@ -195,7 +195,7 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char** argv) {
         cout << " NA (Err:" << ret << "     |";
       }
 
-      auto power_limit = double(0.0);
+      uint32_t power_limit = 0;
       cout << "\n| PowerLimit (Watts)\t\t | ";
 
       ret = amdsmi_get_cpu_socket_power_cap(plist[index], &power_limit);
@@ -210,7 +210,7 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char** argv) {
         cout << " NA (Err:" << ret << "     |";
       }
 
-      auto power_max = double(0.0);
+      uint32_t power_max = 0;
       cout << "\n| PowerLimitMax (Watts)\t\t | ";
 
       ret = amdsmi_get_cpu_socket_power_cap_max(plist[index], &power_max);
