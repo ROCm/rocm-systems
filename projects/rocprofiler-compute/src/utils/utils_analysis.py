@@ -674,6 +674,8 @@ def impute_counters_iteration_multiplex(
             f"across {unique_occurences.ngroups} unique kernel configurations"
         )
 
+        incomplete_kernel_names: set[str] = set()
+
         for _, group in unique_occurences:
             # Identify counter buckets
             counter_groups: set[frozenset[str]] = set()
@@ -708,7 +710,16 @@ def impute_counters_iteration_multiplex(
                 .bfill()  # Propagate first valid value backward to start of subgroup
                 .ffill()  # Propagate forward to end of subgroup
             )
+
+            group_copy, affected_kernels = _nullify_incomplete_dispatch_rows(
+                group_copy, counter_columns
+            )
+            incomplete_kernel_names.update(affected_kernels)
+
             group_dfs.append(group_copy)
+
+        if incomplete_kernel_names:
+            _warn_kernels_with_incomplete_coverage(incomplete_kernel_names)
 
         # Create a new dataframe by concatenating all groups
         result_dfs.append(
@@ -719,6 +730,50 @@ def impute_counters_iteration_multiplex(
 
     final_df = pd.concat(result_dfs, keys=coll_levels, axis=1, copy=False)
     return final_df
+
+
+def _nullify_incomplete_dispatch_rows(
+    group: pd.DataFrame,
+    counter_columns: list[str],
+) -> tuple[pd.DataFrame, set[str]]:
+    """
+    Nullify all counter columns for dispatch rows that still have NaN after imputation.
+
+    A dispatch row with any remaining NaN counter value cannot produce valid metrics.
+    Non-counter columns are preserved so that Top Stats timing data remains accurate.
+
+    Returns the group with nullified rows and the set of affected kernel names.
+    """
+    incomplete_mask = group[counter_columns].isnull().any(axis=1)
+    if not incomplete_mask.any():
+        return group, set()
+    group.loc[incomplete_mask, counter_columns] = np.nan
+    affected_kernels: set[str] = set(group.loc[incomplete_mask, "Kernel_Name"].unique())
+    return group, affected_kernels
+
+
+def _warn_kernels_with_incomplete_coverage(incomplete_kernel_names: set[str]) -> None:
+    """
+    Emit a warning listing kernels excluded from metrics due to missing counter data.
+    """
+    kernel_list = "\n\n".join(
+        f"  Kernel {i}: {name}"
+        for i, name in enumerate(sorted(incomplete_kernel_names), start=1)
+    )
+    console_warning(
+        "imputation",
+        (
+            f"Some kernels have missing counter data after imputation and "
+            f"have been excluded from metric calculations:\n\n"
+            f"{kernel_list}\n\n"
+            f"Execution times for these kernels are still shown in Top Stats "
+            f"(Block 1).\n"
+            f"To get more complete counter coverage, you may consider:\n"
+            f"  - running the kernel more times\n"
+            f"  - collecting fewer metric blocks or counter sets\n"
+            f"  - using application replay instead of iteration multiplexing"
+        ),
+    )
 
 
 def merge_counters_spatial_multiplex(df_multi_index: pd.DataFrame) -> pd.DataFrame:

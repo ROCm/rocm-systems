@@ -124,9 +124,13 @@ def test_impute_multiplex_kernel_launch_params_no_imputation():
     assert isinstance(result, pd.DataFrame)
     assert len(result) == 3  # Ensure same number of rows
 
-    # No imputation possible
+    # Each dispatch still has NaN in the other counter after imputation,
+    # so all counter columns are nullified for all dispatches.
+    assert pd.isna(result[("file1", "Counter1")].iloc[0])
     assert pd.isna(result[("file1", "Counter2")].iloc[0])
     assert pd.isna(result[("file1", "Counter1")].iloc[1])
+    assert pd.isna(result[("file1", "Counter2")].iloc[1])
+    assert pd.isna(result[("file1", "Counter1")].iloc[2])
     assert pd.isna(result[("file1", "Counter2")].iloc[2])
 
 
@@ -197,10 +201,14 @@ def test_impute_multiplex_multi_kernel_kernel_launch_params_no_imputation():
     assert isinstance(result, pd.DataFrame)
     assert len(result) == 3  # Ensure same number of rows
 
-    # No imputation possible
+    # Each dispatch still has NaN in the other counter after imputation,
+    # so all counter columns are nullified for all dispatches.
+    assert pd.isna(result[("file1", "Counter1")].iloc[0])
     assert pd.isna(result[("file1", "Counter2")].iloc[0])
     assert pd.isna(result[("file1", "Counter1")].iloc[1])
+    assert pd.isna(result[("file1", "Counter2")].iloc[1])
     assert pd.isna(result[("file1", "Counter1")].iloc[2])
+    assert pd.isna(result[("file1", "Counter2")].iloc[2])
 
 
 def test_fewer_dispatches_single_kernel():
@@ -238,14 +246,13 @@ def test_fewer_dispatches_single_kernel():
     assert isinstance(result, pd.DataFrame)
     assert len(result) == 2
 
-    # C1 and C2 are imputed across both dispatches
-    assert result[("file1", "C1")].iloc[0] == 10
-    assert result[("file1", "C2")].iloc[0] == 20
-    assert result[("file1", "C1")].iloc[1] == 10
-    assert result[("file1", "C2")].iloc[1] == 20
-
-    # C3 remains NaN (no dispatch provided a value)
+    # C3 was never collected (NaN on all rows after imputation), so all rows are
+    # nullified — C1 and C2 are also set to NaN to fully exclude these dispatches.
+    assert pd.isna(result[("file1", "C1")].iloc[0])
+    assert pd.isna(result[("file1", "C2")].iloc[0])
     assert pd.isna(result[("file1", "C3")].iloc[0])
+    assert pd.isna(result[("file1", "C1")].iloc[1])
+    assert pd.isna(result[("file1", "C2")].iloc[1])
     assert pd.isna(result[("file1", "C3")].iloc[1])
 
 
@@ -283,20 +290,20 @@ def test_fewer_dispatches_multiple_kernels_both_incomplete():
     assert isinstance(result, pd.DataFrame)
     assert len(result) == 4
 
-    # kernel_a (dispatches 1-2): C1 and C2 imputed, C3 remains NaN
-    assert result[("file1", "C1")].iloc[0] == 10
-    assert result[("file1", "C2")].iloc[0] == 20
+    # kernel_a (dispatches 1-2): C3 never collected → all rows nullified
+    assert pd.isna(result[("file1", "C1")].iloc[0])
+    assert pd.isna(result[("file1", "C2")].iloc[0])
     assert pd.isna(result[("file1", "C3")].iloc[0])
-    assert result[("file1", "C1")].iloc[1] == 10
-    assert result[("file1", "C2")].iloc[1] == 20
+    assert pd.isna(result[("file1", "C1")].iloc[1])
+    assert pd.isna(result[("file1", "C2")].iloc[1])
     assert pd.isna(result[("file1", "C3")].iloc[1])
 
-    # kernel_b (dispatches 3-4): C1 and C2 imputed, C3 remains NaN
-    assert result[("file1", "C1")].iloc[2] == 40
-    assert result[("file1", "C2")].iloc[2] == 60
+    # kernel_b (dispatches 3-4): C3 never collected → all rows nullified
+    assert pd.isna(result[("file1", "C1")].iloc[2])
+    assert pd.isna(result[("file1", "C2")].iloc[2])
     assert pd.isna(result[("file1", "C3")].iloc[2])
-    assert result[("file1", "C1")].iloc[3] == 40
-    assert result[("file1", "C2")].iloc[3] == 60
+    assert pd.isna(result[("file1", "C1")].iloc[3])
+    assert pd.isna(result[("file1", "C2")].iloc[3])
     assert pd.isna(result[("file1", "C3")].iloc[3])
 
 
@@ -340,15 +347,15 @@ def test_fewer_dispatches_one_incomplete_one_complete():
     assert isinstance(result, pd.DataFrame)
     assert len(result) == 5
 
-    # kernel_a (dispatches 1-2): C1 and C2 imputed, C3 remains NaN
-    assert result[("file1", "C1")].iloc[0] == 10
-    assert result[("file1", "C2")].iloc[0] == 20
+    # kernel_a (dispatches 1-2): C3 never collected → all rows nullified
+    assert pd.isna(result[("file1", "C1")].iloc[0])
+    assert pd.isna(result[("file1", "C2")].iloc[0])
     assert pd.isna(result[("file1", "C3")].iloc[0])
-    assert result[("file1", "C1")].iloc[1] == 10
-    assert result[("file1", "C2")].iloc[1] == 20
+    assert pd.isna(result[("file1", "C1")].iloc[1])
+    assert pd.isna(result[("file1", "C2")].iloc[1])
     assert pd.isna(result[("file1", "C3")].iloc[1])
 
-    # kernel_b (dispatches 3-5): all 3 counters fully imputed
+    # kernel_b (dispatches 3-5): all 3 counters fully imputed, no NaN → not nullified
     assert result[("file1", "C1")].iloc[2] == 50
     assert result[("file1", "C2")].iloc[2] == 60
     assert result[("file1", "C3")].iloc[2] == 70
@@ -401,20 +408,20 @@ def test_fewer_dispatches_same_kernel_different_launch_params():
     assert isinstance(result, pd.DataFrame)
     assert len(result) == 4
 
-    # Config 1 (dispatches 1-2): C1 and C2 imputed, C3 remains NaN
-    assert result[("file1", "C1")].iloc[0] == 10
-    assert result[("file1", "C2")].iloc[0] == 20
+    # Config 1 (dispatches 1-2): C3 never collected → all rows nullified
+    assert pd.isna(result[("file1", "C1")].iloc[0])
+    assert pd.isna(result[("file1", "C2")].iloc[0])
     assert pd.isna(result[("file1", "C3")].iloc[0])
-    assert result[("file1", "C1")].iloc[1] == 10
-    assert result[("file1", "C2")].iloc[1] == 20
+    assert pd.isna(result[("file1", "C1")].iloc[1])
+    assert pd.isna(result[("file1", "C2")].iloc[1])
     assert pd.isna(result[("file1", "C3")].iloc[1])
 
-    # Config 2 (dispatches 3-4): C1 and C2 imputed, C3 remains NaN
-    assert result[("file1", "C1")].iloc[2] == 30
-    assert result[("file1", "C2")].iloc[2] == 40
+    # Config 2 (dispatches 3-4): C3 never collected → all rows nullified
+    assert pd.isna(result[("file1", "C1")].iloc[2])
+    assert pd.isna(result[("file1", "C2")].iloc[2])
     assert pd.isna(result[("file1", "C3")].iloc[2])
-    assert result[("file1", "C1")].iloc[3] == 30
-    assert result[("file1", "C2")].iloc[3] == 40
+    assert pd.isna(result[("file1", "C1")].iloc[3])
+    assert pd.isna(result[("file1", "C2")].iloc[3])
     assert pd.isna(result[("file1", "C3")].iloc[3])
 
 
@@ -459,15 +466,15 @@ def test_fewer_dispatches_same_kernel_one_incomplete_one_complete():
     assert isinstance(result, pd.DataFrame)
     assert len(result) == 5
 
-    # Config 1 (dispatches 1-2): C1 and C2 imputed, C3 remains NaN
-    assert result[("file1", "C1")].iloc[0] == 10
-    assert result[("file1", "C2")].iloc[0] == 20
+    # Config 1 (dispatches 1-2): C3 never collected → all rows nullified
+    assert pd.isna(result[("file1", "C1")].iloc[0])
+    assert pd.isna(result[("file1", "C2")].iloc[0])
     assert pd.isna(result[("file1", "C3")].iloc[0])
-    assert result[("file1", "C1")].iloc[1] == 10
-    assert result[("file1", "C2")].iloc[1] == 20
+    assert pd.isna(result[("file1", "C1")].iloc[1])
+    assert pd.isna(result[("file1", "C2")].iloc[1])
     assert pd.isna(result[("file1", "C3")].iloc[1])
 
-    # Config 2 (dispatches 3-5): all 3 counters fully imputed
+    # Config 2 (dispatches 3-5): all 3 counters fully imputed, no NaN → not nullified
     assert result[("file1", "C1")].iloc[2] == 50
     assert result[("file1", "C2")].iloc[2] == 60
     assert result[("file1", "C3")].iloc[2] == 70
@@ -518,7 +525,8 @@ def test_incomplete_last_group_single_kernel():
     assert result[("file1", "C1")].iloc[1] == 10
     assert result[("file1", "C2")].iloc[1] == 20
 
-    # Subgroup 2 (dispatch 3, incomplete): C2 filled from previous_fill_values
+    # Subgroup 2 (dispatch 3, incomplete): C2 filled from previous subgroup
+    # via cross-subgroup ffill; no NaN remains so the row is kept as valid.
     assert result[("file1", "C1")].iloc[2] == 30
     assert result[("file1", "C2")].iloc[2] == 20
 
@@ -599,7 +607,7 @@ def test_incomplete_last_group_multiple_kernels_both_incomplete():
     assert result[("file1", "C2")].iloc[2] == 20
     assert result[("file1", "C3")].iloc[2] == 30
 
-    # kernel_a subgroup 2 (dispatch 4, incomplete): C2 and C3 from previous_fill_values
+    # kernel_a subgroup 2 (dispatch 4, incomplete): filled via cross-subgroup ffill
     assert result[("file1", "C1")].iloc[3] == 40
     assert result[("file1", "C2")].iloc[3] == 20
     assert result[("file1", "C3")].iloc[3] == 30
@@ -615,7 +623,7 @@ def test_incomplete_last_group_multiple_kernels_both_incomplete():
     assert result[("file1", "C2")].iloc[6] == 60
     assert result[("file1", "C3")].iloc[6] == 70
 
-    # kernel_b subgroup 2 (dispatches 8-9, incomplete): C3 from previous_fill_values
+    # kernel_b subgroup 2 (dispatches 8-9, incomplete): filled via cross-subgroup ffill
     assert result[("file1", "C1")].iloc[7] == 80
     assert result[("file1", "C2")].iloc[7] == 90
     assert result[("file1", "C3")].iloc[7] == 70
@@ -713,7 +721,7 @@ def test_incomplete_last_group_one_incomplete_other_complete():
     assert result[("file1", "C2")].iloc[2] == 20
     assert result[("file1", "C3")].iloc[2] == 30
 
-    # kernel_a subgroup 2 (dispatch 4, incomplete): C2 and C3 from previous_fill_values
+    # kernel_a subgroup 2 (dispatch 4, incomplete): filled via cross-subgroup ffill
     assert result[("file1", "C1")].iloc[3] == 40
     assert result[("file1", "C2")].iloc[3] == 20
     assert result[("file1", "C3")].iloc[3] == 30
@@ -729,7 +737,7 @@ def test_incomplete_last_group_one_incomplete_other_complete():
     assert result[("file1", "C2")].iloc[6] == 60
     assert result[("file1", "C3")].iloc[6] == 70
 
-    # kernel_b subgroup 2 (dispatches 8-10): complete round, no fallback needed
+    # kernel_b subgroup 2 (dispatches 8-10): complete round, no nullification
     assert result[("file1", "C1")].iloc[7] == 80
     assert result[("file1", "C2")].iloc[7] == 90
     assert result[("file1", "C3")].iloc[7] == 100
@@ -783,7 +791,8 @@ def test_incomplete_last_group_same_kernel_different_launch_params():
     assert isinstance(result, pd.DataFrame)
     assert len(result) == 6
 
-    # Config 1 (dispatches 1-3): incomplete last, C2 from previous_fill_values
+    # Config 1 (dispatches 1-3): subgroup 0 (1-2) complete, subgroup 1 (3) filled
+    # via cross-subgroup ffill; no NaN remains so dispatch 3 is kept as valid.
     assert result[("file1", "C1")].iloc[0] == 10
     assert result[("file1", "C2")].iloc[0] == 20
     assert result[("file1", "C1")].iloc[1] == 10
@@ -791,7 +800,7 @@ def test_incomplete_last_group_same_kernel_different_launch_params():
     assert result[("file1", "C1")].iloc[2] == 30
     assert result[("file1", "C2")].iloc[2] == 20
 
-    # Config 2 (dispatches 4-6): incomplete last, C1 from previous_fill_values
+    # Config 2 (dispatches 4-6): subgroup 0 (4-5) complete, subgroup 1 (6) filled
     assert result[("file1", "C1")].iloc[3] == 50
     assert result[("file1", "C2")].iloc[3] == 60
     assert result[("file1", "C1")].iloc[4] == 50
@@ -843,7 +852,8 @@ def test_incomplete_last_group_same_kernel_one_incomplete_one_complete():
     assert isinstance(result, pd.DataFrame)
     assert len(result) == 7
 
-    # Config 1 (dispatches 1-3): incomplete last, C2 from previous_fill_values
+    # Config 1 (dispatches 1-3): subgroup 0 (1-2) complete, subgroup 1 (3) filled
+    # via cross-subgroup ffill; no NaN remains so dispatch 3 is kept as valid.
     assert result[("file1", "C1")].iloc[0] == 10
     assert result[("file1", "C2")].iloc[0] == 20
     assert result[("file1", "C1")].iloc[1] == 10
@@ -851,7 +861,7 @@ def test_incomplete_last_group_same_kernel_one_incomplete_one_complete():
     assert result[("file1", "C1")].iloc[2] == 30
     assert result[("file1", "C2")].iloc[2] == 20
 
-    # Config 2 (dispatches 4-7): 2 complete rounds, no fallback needed
+    # Config 2 (dispatches 4-7): 2 complete rounds, no nullification
     assert result[("file1", "C1")].iloc[3] == 50
     assert result[("file1", "C2")].iloc[3] == 60
     assert result[("file1", "C1")].iloc[4] == 50
@@ -1411,3 +1421,66 @@ def test_impute_counters_iteration_multiplex_multi_file():
     assert result[("file2", "C2")].iloc[0] == 60
     assert result[("file2", "C1")].iloc[1] == 50
     assert result[("file2", "C2")].iloc[1] == 60
+
+
+def test_incomplete_dispatches_nullify_counter_values():
+    """
+    After imputation, any dispatch row that still has at least one NaN counter
+    value should have ALL counter columns set to NaN (fully nullified).
+    Non-counter columns (timestamps, kernel name, etc.) must be preserved so
+    that Top Stats (Block 1) timing data remains accurate.
+
+    Scenario:
+      kernel_a: 2 dispatches, 3 counter buckets {C1}, {C2}, {C3}.
+      Only 2 dispatches are available so the {C3} bucket is never reached:
+        - Dispatch 1: C1=10, C2=NaN, C3=NaN
+        - Dispatch 2: C1=NaN, C2=20, C3=NaN
+      After bfill/ffill imputation:
+        - C1 and C2 are filled for both dispatches (C1=10, C2=20)
+        - C3 remains NaN for both dispatches (never collected)
+      Post-imputation nullification:
+        - Both dispatches have C3=NaN -> all counter columns set to NaN
+        - Timestamp and Kernel_Name columns are preserved
+    """
+    data = {
+        ("file1", "Dispatch_ID"): [1, 2],
+        ("file1", "GPU_ID"): [0, 0],
+        ("file1", "Grid_Size"): [1024, 1024],
+        ("file1", "Workgroup_Size"): [64, 64],
+        ("file1", "LDS_Per_Workgroup"): [32, 32],
+        ("file1", "Scratch_Per_Workitem"): [0, 0],
+        ("file1", "Arch_VGPR"): [16, 16],
+        ("file1", "Accum_VGPR"): [0, 0],
+        ("file1", "SGPR"): [32, 32],
+        ("file1", "Kernel_Name"): ["kernel_a", "kernel_a"],
+        ("file1", "Start_Timestamp"): [1000, 1200],
+        ("file1", "End_Timestamp"): [1500, 1700],
+        ("file1", "Kernel_ID"): [1, 1],
+        ("file1", "C1"): [10, None],
+        ("file1", "C2"): [None, 20],
+        ("file1", "C3"): [None, None],
+    }
+    df = make_multilevel_df(data)
+    result = utils.impute_counters_iteration_multiplex(df, "kernel")
+    result = result.sort_values(by=("file1", "Dispatch_ID")).reset_index(drop=True)
+
+    assert isinstance(result, pd.DataFrame)
+    assert len(result) == 2
+
+    # Both dispatches: C3 was never collected so it remains NaN after imputation,
+    # triggering nullification of all counter columns on both rows.
+    assert pd.isna(result[("file1", "C1")].iloc[0])
+    assert pd.isna(result[("file1", "C2")].iloc[0])
+    assert pd.isna(result[("file1", "C3")].iloc[0])
+    assert pd.isna(result[("file1", "C1")].iloc[1])
+    assert pd.isna(result[("file1", "C2")].iloc[1])
+    assert pd.isna(result[("file1", "C3")].iloc[1])
+
+    # Non-counter columns must still be populated on both dispatches
+    # (preserved for Top Stats / Block 1 timing display).
+    assert result[("file1", "Start_Timestamp")].iloc[0] == 1000
+    assert result[("file1", "End_Timestamp")].iloc[0] == 1500
+    assert result[("file1", "Kernel_Name")].iloc[0] == "kernel_a"
+    assert result[("file1", "Start_Timestamp")].iloc[1] == 1200
+    assert result[("file1", "End_Timestamp")].iloc[1] == 1700
+    assert result[("file1", "Kernel_Name")].iloc[1] == "kernel_a"

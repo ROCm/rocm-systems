@@ -687,12 +687,15 @@ def process_table_data(
                     if run_name != base_run:
                         # Calculate percent difference between current and
                         # base dataframe.
-                        base_series = pd.to_numeric(
+                        base_series_raw = pd.to_numeric(
                             base_df[header], errors="coerce"
-                        ).fillna(0.0)
-                        cur_series = pd.to_numeric(
-                            cur_df[header], errors="coerce"
-                        ).fillna(0.0)
+                        )
+                        cur_series_raw = pd.to_numeric(cur_df[header], errors="coerce")
+                        # Track which rows are NaN in either run so they can
+                        # be shown as "N/A" instead of being treated as zero.
+                        either_nan_mask = base_series_raw.isna() | cur_series_raw.isna()
+                        base_series = base_series_raw.fillna(0.0)
+                        cur_series = cur_series_raw.fillna(0.0)
 
                         # Calculate absolute and percent differences
                         absolute_diff = (cur_series - base_series).round(args.decimal)
@@ -709,6 +712,10 @@ def process_table_data(
                             + " ("
                             + percent_diff.astype(str)
                             + "%)"
+                        )
+                        # Replace entries where either run had NaN with "N/A"
+                        formatted_diff = formatted_diff.where(
+                            ~either_nan_mask, other="N/A"
                         )
 
                         result_df = pd.concat([result_df, formatted_diff], axis=1)
