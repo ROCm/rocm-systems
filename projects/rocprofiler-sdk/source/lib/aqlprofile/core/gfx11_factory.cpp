@@ -59,6 +59,10 @@ Gfx11Factory::Init(const AgentInfo* agent_info)
     if(Pm4Factory::sqtt_builder_ == NULL)
         throw aql_profile_exc_msg("SqttBuilder allocation failed");
 
+    // Register blocks whose enum value lies beyond HSA_VEN_AMD_AQLPROFILE_BLOCKS_NUMBER and
+    // therefore cannot be initialized by the static positional initializer below.
+    block_table_[AQLPROFILE_BLOCK_NAME_SQG] = &SqgCounterBlockInfo;
+
     agent_info_ = agent_info;
 }
 
