@@ -63,6 +63,29 @@ endif()
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 
 # ---------------------------------------------------------------------------
+# NPU detection
+# ---------------------------------------------------------------------------
+find_program(XRT_SMI xrt-smi)
+if(XRT_SMI)
+  execute_process(
+    COMMAND "${XRT_SMI}" examine
+    OUTPUT_VARIABLE XRT_SMI_OUTPUT
+    ERROR_QUIET
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+  )
+  if(XRT_SMI_OUTPUT MATCHES "NPU Strix|NPU Strix Halo|NPU Krackan|RyzenAI-npu[456]")
+    set(NPU_TARGET "npu2")
+  elseif(XRT_SMI_OUTPUT MATCHES "NPU Phoenix|RyzenAI-npu1")
+    set(NPU_TARGET "npu")
+  endif()
+endif()
+if(NOT NPU_TARGET)
+  message(FATAL_ERROR "Could not auto-detect NPU device. Please set NPU_TARGET to either 'npu' or 'npu2'.")
+else()
+  message(STATUS "NPU target: ${NPU_TARGET}")
+endif()
+
+# ---------------------------------------------------------------------------
 # Kernel artifact build
 # ---------------------------------------------------------------------------
 set(KERNEL_BUILD_DIR "${CMAKE_CURRENT_BINARY_DIR}/kernel_build")
@@ -73,9 +96,9 @@ set(AIE_MLIR "${KERNEL_BUILD_DIR}/aie.mlir")
 add_custom_command(
   OUTPUT "${AIE_MLIR}"
   COMMAND "${CMAKE_COMMAND}" -E make_directory "${KERNEL_BUILD_DIR}"
-  COMMAND "${Python3_EXECUTABLE}" "${VECTOR_SCALAR_ADD_PY}" npu > "${AIE_MLIR}"
+  COMMAND "${Python3_EXECUTABLE}" "${VECTOR_SCALAR_ADD_PY}" "${NPU_TARGET}" > "${AIE_MLIR}"
   DEPENDS "${VECTOR_SCALAR_ADD_PY}"
-  COMMENT "Generating aie.mlir from vector_scalar_add.py"
+  COMMENT "Generating aie.mlir from vector_scalar_add.py (target: ${NPU_TARGET})"
   VERBATIM
 )
 
