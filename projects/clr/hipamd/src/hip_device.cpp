@@ -142,7 +142,7 @@ void Device::Reset() {
   // VirtualGPU barrier flush in ~VirtualGPU) before any backing memory is freed.
   destroyAllStreams();
 
-  // null_stream_ is excluded from destroyAllStreams() since it is a null stream.
+  // null_stream_ is excluded from destroyAllStreams(),
   // Destroy it explicitly so it is recreated fresh after reset.
   if (null_stream_ != nullptr) {
     hip::Stream::Destroy(null_stream_);
@@ -158,6 +158,10 @@ void Device::Reset() {
     }
   }
 
+  // Recreate the internal transfer queue so it starts fresh after reset.
+  // Must happen after pools and streams are torn down (PAL resource destructors
+  // call through xferQueue), but before Purge (ROCR svmFree of hostcallBuffer
+  // happens in ~VirtualGPU).
   dev->recreateXferQueue();
 
   // Clear hostcall allocations to avoid ~Device() accessing freed Memory objects later.
