@@ -229,7 +229,10 @@ thread_init()
         if(_idx > 0)
         {
             auto _enabled = get_use_causal() || get_use_sampling();
-            if(_enabled)
+            // Skip if pthread_create_gotcha already set up sampling on this thread.
+            // Re-calling setup() with a different tid would overwrite TLS pointers
+            // and mis-target the POSIX timer (SIGEV_THREAD_ID uses calling thread).
+            if(_enabled && !services::sampling_is_setup_for_current_thread())
             {
                 ROCPROFSYS_SCOPED_SAMPLING_ON_CHILD_THREADS(false);
                 auto _sigs = services::sampling_setup_for_thread(_idx);

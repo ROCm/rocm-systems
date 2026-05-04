@@ -97,6 +97,9 @@ sampling_unblock_signals_for_thread(std::set<int> sigs = {})
     sampling_unblock_signals(std::move(sigs));
 }
 
+bool
+sampling_is_setup_for_current_thread();
+
 // Encapsulates the fork-child 2-step:
 //   services::sampling().enter_child_process_mode();
 //   services::sampling().shutdown(tid);

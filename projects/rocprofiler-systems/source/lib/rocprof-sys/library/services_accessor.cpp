@@ -60,10 +60,10 @@ make_production_config()
     auto event_opt =
         rocprofsys::get_setting_value<std::string>("ROCPROFSYS_SAMPLING_OVERFLOW_EVENT");
     if(event_opt) cfg.overflow_event = *event_opt;
-#if defined(ROCPROFSYS_USE_PAPI)
+#    if defined(ROCPROFSYS_USE_PAPI)
     rocprofsys::papi_bridge::detail::ensure_initialized();
     cfg.hw_counter_labels = rocprofsys::papi_bridge::get_labels();
-#endif
+#    endif
     return cfg;
 }
 
@@ -125,11 +125,11 @@ make_production_callbacks()
     };
     cb.postfork_parent_reinit = []() { rocprofsys::pmc::postfork_parent_reinit(); };
     cb.postfork_child_cleanup = []() { rocprofsys::pmc::postfork_child_cleanup(); };
-#if defined(ROCPROFSYS_USE_PAPI)
+#    if defined(ROCPROFSYS_USE_PAPI)
     cb.setup_hw_counters    = [](int64_t tid) { rocprofsys::papi_bridge::setup(tid); };
     cb.teardown_hw_counters = [](int64_t tid) { rocprofsys::papi_bridge::teardown(tid); };
     cb.read_hw_counters     = &rocprofsys::papi_bridge::read;
-#endif
+#    endif
     return cb;
 }
 }  // namespace
@@ -187,6 +187,14 @@ void
 sampling_unblock_signals(std::set<int> sigs)
 {
     sampling().unblock_signals(std::move(sigs));
+}
+
+bool
+sampling_is_setup_for_current_thread()
+{
+    using tls_t =
+        rocprofsys::sampling::tl_state<rocprofsys::sampling::default_sampling_policies>;
+    return tls_t::sampler != nullptr;
 }
 
 void
