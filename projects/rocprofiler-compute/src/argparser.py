@@ -216,6 +216,7 @@ Examples:
 \trocprof-compute profile -n vcopy_kernel -k vecCopy -- ./vcopy -n 1048576 -b 256
 \trocprof-compute profile -n vcopy_disp -d 0 -- ./vcopy -n 1048576 -b 256
 \trocprof-compute profile -n vcopy_roof --roof-only -- ./vcopy -n 1048576 -b 256
+\trocprof-compute profile -n my_bench --bench-only
 ---------------------------------------------------------------------------------
         """,  # noqa: E501
         prog="tool",
@@ -275,19 +276,6 @@ Examples:
         ),
     )
     profile_group.add_argument(
-        "-p",
-        "--path",
-        metavar="",
-        type=str,
-        dest="path",
-        default=str(Path.cwd() / "workloads"),
-        required=False,
-        help=(
-            f"\t\t\t(DEPRECATED) Specify path to save workload.\n\t\t\t(DEFAULT: {Path.cwd()}/workloads/<name>)\n"  # noqa: E501
-            "\t\t\t --path is deprecated. Use --output-directory instead."  # noqa: E501
-        ),
-    )
-    profile_group.add_argument(
         "--output-directory",
         metavar="",
         type=str,
@@ -303,18 +291,6 @@ Examples:
             '\t\t\t   %%env{NAME}%%: Environment variable "NAME"\n'
             "\t\t\t(DEFAULT: <current-working-directory>/workloads/<name>/%%gpumodel%%) without MPI,\n"  # noqa: E501
             "\t\t\t <current-working-directory>/workloads/<name>/%%rank%% with MPI.)"
-        ),
-    )
-    profile_group.add_argument(
-        "--subpath",
-        metavar="",
-        type=str,
-        dest="subpath",
-        default="gpu_model",
-        required=False,
-        help=(
-            "\t\t\t(DEPRECATED) Specify the type of subpath to save workload: node_name, gpu_model."  # noqa: E501
-            "\n\t\t\t --subpath is deprecated. Use --output-directory with parameterization instead."  # noqa: E501
         ),
     )
     profile_group.add_argument(
@@ -411,7 +387,7 @@ Examples:
             "\t\t\tAlternatively, specify block alias(es) for filtering "
             "(e.g. lds, l1i, sl1d).\n"
             "\t\t\tCan provide multiple space separated arguments.\n"
-            "\t\t\tCannot be used with --set or --roof-only"
+            "\t\t\tCannot be used with --set, --roof-only, or --bench-only"
         ),
     )
     profile_group.add_argument(
@@ -427,7 +403,7 @@ Examples:
             "\t\t\tProfile a set of metrics of topic of interest by collecting "
             "counters in a single pass.\n"
             "\t\t\tFor available sets, see --list-sets\n"
-            "\t\t\tCannot be used with --block or --roof-only"
+            "\t\t\tCannot be used with --block, --roof-only, or --bench-only"
         ),
     )
     profile_group.add_argument(
@@ -537,7 +513,19 @@ Examples:
         action="store_true",
         help=(
             "\t\t\tProfile roofline data only.\n"
-            "\t\t\tCannot be used with --block or --set"
+            "\t\t\tCannot be used with --block, --set, or --bench-only"
+        ),
+    )
+    roofline_group.add_argument(
+        "--bench-only",
+        required=False,
+        default=False,
+        action="store_true",
+        help=(
+            "\t\t\tRun roofline microbenchmark only.\n"
+            "\t\t\tNo application profiling or counter collection.\n"
+            "\t\t\tNo application run is required.\n"
+            "\t\t\tCannot be used with --block, --set, --roof-only, or --no-roof"
         ),
     )
     roofline_group.add_argument(
@@ -546,7 +534,10 @@ Examples:
         required=False,
         default=0,
         type=int,
-        help="\t\t\tTarget GPU device ID. (DEFAULT: 0)",
+        help=(
+            "\t\t\tTarget GPU device ID per amd-smi for roofline benchmarking"
+            " (Default: 0)"
+        ),
     )
 
     ## ----------------------------

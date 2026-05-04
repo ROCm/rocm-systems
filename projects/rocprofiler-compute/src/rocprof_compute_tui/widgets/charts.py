@@ -325,7 +325,7 @@ class MemoryChart(Static):
             try:
                 with StringIO() as string_buffer:
                     sys.stdout = string_buffer
-                    result = plot_func("", "per_kernel", metric_dict)
+                    result = plot_func("per_kernel", metric_dict)
                     stdout_output = string_buffer.getvalue()
             finally:
                 sys.stdout = original_stdout

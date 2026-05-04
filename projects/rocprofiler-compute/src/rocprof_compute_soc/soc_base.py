@@ -7,7 +7,6 @@ import argparse
 import functools
 import math
 import os
-import re
 import shutil
 import sys
 from abc import abstractmethod
@@ -16,6 +15,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 import config
+from roofline.run_benchmark import run_roofline_benchmark
 from utils.amdsmi_interface import amdsmi_ctx, get_gpu_model, get_mem_max_clock
 from utils.logger import (
     console_debug,
@@ -27,9 +27,7 @@ from utils.logger import (
 from utils.mi_gpu_spec import mi_gpu_specs
 from utils.specs import MachineSpecs
 from utils.utils_common import (
-    BUILD_IN_VARS,
     METRIC_ID_RE,
-    SUPPORTED_DENOM,
     add_counter_extra_config_input_yaml,
     convert_metric_id_to_panel_info,
     create_temp_rocprofiler_metrics_path,
@@ -39,6 +37,10 @@ from utils.utils_common import (
     parse_sets_yaml,
     resolve_rocm_library_path,
     validate_roofline_csv,
+)
+from utils.utils_counter_defs import (
+    BLOCK_REMAP,
+    extract_counters,
 )
 from vendored import yaml
 
@@ -397,7 +399,7 @@ class OmniSoC_Base:
             metric_name,
             metric_yaml,
         ) in self._iter_arch_analysis_yaml_metrics():
-            hw = self.parse_counters(metric_yaml)
+            hw = extract_counters(metric_yaml)
             hw = self._expand_tcc_template_counters(hw)
             counters = frozenset(hw & remaining)
             if not counters:
@@ -430,7 +432,7 @@ class OmniSoC_Base:
                 continue
             new_bucket = CounterFile(str(file_count), cfg)
             trial = _trial_counter_file_with_extra(new_bucket, cfg, need_sorted)
-            if trial is not None and _flat_counters_in_perfmon_file(trial):
+            if trial is not None and flat_counters_in_perfmon_file(trial):
                 files.append(trial)
                 file_count += 1
                 remaining -= set(need_sorted)
@@ -493,7 +495,7 @@ class OmniSoC_Base:
                 block_id, config_filename_dict, config_root_dir, texts
             )
 
-        counters = self.parse_counters("\n".join(texts))
+        counters = extract_counters("\n".join(texts))
         counters = self._expand_tcc_template_counters(counters)
 
         return counters, filter_blocks
@@ -651,58 +653,6 @@ class OmniSoC_Base:
                         continue
                     yield stem_id, panel_id, idx, metric_name, metric_text
 
-    @demarcate
-    def parse_counters(self, config_text: str) -> set[str]:
-        """
-        Create a set of all hardware counters mentioned in the given config file
-        content string.
-        """
-        hw_counter_matches, variable_matches = self.parse_counters_text(config_text)
-
-        # get hw counters and variables for all supported denominators
-        for formula in SUPPORTED_DENOM.values():
-            hw_counter_matches_denom, variable_matches_denom = self.parse_counters_text(
-                formula
-            )
-            hw_counter_matches.update(hw_counter_matches_denom)
-            variable_matches.update(variable_matches_denom)
-
-        # get hw counters corresponding to variables recursively
-        while variable_matches:
-            subvariable_matches: set[str] = set()
-            for var in variable_matches:
-                if var in BUILD_IN_VARS:
-                    (
-                        hw_counter_matches_vars,
-                        variable_matches_vars,
-                    ) = self.parse_counters_text(BUILD_IN_VARS[var])
-                    hw_counter_matches.update(hw_counter_matches_vars)
-                    subvariable_matches.update(variable_matches_vars)
-            # process new found variables
-            variable_matches = subvariable_matches - variable_matches
-
-        return hw_counter_matches
-
-    def parse_counters_text(self, text: str) -> tuple[set[str], set[str]]:
-        """Parse out hardware counters and variables from given text"""
-        # hw counter name should start with ip block name
-        # hw counter name should have all capital letters or digits
-        # and should not end with underscore
-        # he counter name can either optionally end with '[' or '_sum'
-        _blk = (
-            r"(?:SQ|SQC|SP|TA|TD|TCP|TCC|GL1A|GL1C|GL2A|GL2C|"
-            r"CPC|CPF|SPI|GCEA|GRBM)"
-        )
-        _sfx = r"_[0-9A-Z_]*[0-9A-Z](?:\[|_sum|_avr|_max|_min)*"
-        hw_counter_regex = _blk + _sfx
-        # only capture the variable name after $ using capturing group
-        variable_regex = r"\$([0-9A-Za-z_]*[0-9A-Za-z])"
-        hw_counter_matches = set(re.findall(hw_counter_regex, text))
-        variable_matches = set(re.findall(variable_regex, text))
-        # variable matches cannot be counters
-        hw_counter_matches = hw_counter_matches - variable_matches
-        return hw_counter_matches, variable_matches
-
     def get_rocprof_supported_counters(self) -> set[str]:
         args = self.get_args()
         rocprof_counters: set[str] = set()
@@ -782,7 +732,7 @@ class OmniSoC_Base:
         Sort and bucket all related performance counters to minimize required
         application passes
         """
-        workload_perfmon_dir = Path(self.get_args().path) / "perfmon"
+        workload_perfmon_dir = Path(self.get_args().output_directory) / "perfmon"
         workload_perfmon_dir.mkdir(parents=True, exist_ok=True)
 
         rocprof_counters = self.get_rocprof_supported_counters()
@@ -943,17 +893,14 @@ class OmniSoC_Base:
         ):
             console_log("roofline", "Skipping roofline")
         else:
-            # Dynamic import to isolate hip dependency during profile time only
-            from roofline.run_benchmark import load_bench
-
+            roofline_csv = Path(self.get_args().output_directory) / "roofline.csv"
             console_log(
-                "roofline", f"Checking for roofline.csv in {self.get_args().path}"
+                "roofline",
+                f"Checking for roofline.csv in {self.get_args().output_directory}",
             )
-            if not (Path(self.get_args().path) / "roofline.csv").is_file():
+            if not roofline_csv.is_file():
                 try:
-                    bench = load_bench([self.get_args().device])
-                    result = bench.run_on_devices([self.get_args().device])
-                    bench.dump_csv(result, f"{self.get_args().path}/roofline.csv")
+                    run_roofline_benchmark(self.get_args().device, roofline_csv)
                 except Exception as e:
                     console_error(
                         "roofline",
@@ -962,7 +909,9 @@ class OmniSoC_Base:
                     )
                     return
 
-            is_valid, error_msg = validate_roofline_csv(self.get_args().path)
+            is_valid, error_msg = validate_roofline_csv(
+                self.get_args().output_directory
+            )
             if not is_valid:
                 console_error(
                     "roofline",
@@ -973,9 +922,11 @@ class OmniSoC_Base:
 
             console_log(
                 "roofline",
-                f"Roofline data saved to {self.get_args().path}/roofline.csv\n"
-                f"  Run 'rocprof-compute analyze -p {self.get_args().path}' "
-                f"for charts",
+                "Roofline data saved to "
+                f"{self.get_args().output_directory}/roofline.csv\n"
+                "  Run 'rocprof-compute analyze -p "
+                f"{self.get_args().output_directory}' "
+                "for charts",
             )
 
 
@@ -1012,13 +963,7 @@ class CounterFile:
 
     def add(self, counter: str) -> bool:
         block = counter.split("_")[0]
-
-        # SQ and SQC belong to the same IP block
-        if block == "SQC":
-            block = "SQ"
-        if block == "SP":
-            block = "SQ"
-
+        block = BLOCK_REMAP.get(block, block)
         return self.blocks[block].add(counter)
 
 
@@ -1030,7 +975,7 @@ def _trial_counter_file_with_extra(
     """Clone basis, try appending extras; None if any won't fit."""
     original_name = basis.file_name_txt.removeprefix("pmc_perf_").removesuffix(".txt")
     trial = CounterFile(original_name, perfmon_config)
-    for ctr in _flat_counters_in_perfmon_file(basis):
+    for ctr in flat_counters_in_perfmon_file(basis):
         if not trial.add(ctr):
             msg = f"clone replay failed for {ctr!r} in {basis.file_name_txt}"
             raise RuntimeError(msg)
@@ -1046,13 +991,13 @@ def _rebuild_tcc_channel_file_map(
     """Map TCC counter base name to the bucket that holds its channel instances."""
     result: dict[str, CounterFile] = {}
     for bucket in output_files:
-        for ctr in _flat_counters_in_perfmon_file(bucket):
+        for ctr in flat_counters_in_perfmon_file(bucket):
             if is_tcc_channel_counter(ctr):
                 result[ctr.split("[")[0]] = bucket
     return result
 
 
-def _flat_counters_in_perfmon_file(counter_file: CounterFile) -> list[str]:
+def flat_counters_in_perfmon_file(counter_file: CounterFile) -> list[str]:
     """Ordered list of PMC counter names assigned to one perfmon bucket file."""
     return [
         ctr

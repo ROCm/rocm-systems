@@ -16,7 +16,7 @@ config["METRIC_COMPARE"] = False
 
 num_devices = 1
 
-soc = test_utils.gpu_soc()
+_, soc = test_utils.gpu_soc()
 
 if soc is None:
     pytest.skip("GPU not supported", allow_module_level=True)
@@ -138,6 +138,7 @@ def test_multi_rank_pc_sampling_only(
     skip_unsupported_pc_sampling_soc()
 
     monkeypatch.setenv("OMPI_COMM_WORLD_RANK", "0")
+    monkeypatch.setenv("OMPI_COMM_WORLD_SIZE", "2")
 
     workload_dir = test_utils.get_output_dir()
 
@@ -176,6 +177,7 @@ def test_multi_rank_warning_pc_sampling_with_counters(
     skip_unsupported_pc_sampling_soc()
 
     monkeypatch.setenv("OMPI_COMM_WORLD_RANK", "0")
+    monkeypatch.setenv("OMPI_COMM_WORLD_SIZE", "2")
 
     workload_dir = test_utils.get_output_dir()
 

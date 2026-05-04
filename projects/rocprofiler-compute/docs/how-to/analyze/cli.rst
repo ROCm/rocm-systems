@@ -681,17 +681,55 @@ Display all PyTorch operators captured during profiling:
    Grouped by source location, sorted by total GPU kernel duration.
    ================================================================================
 
-   main.py:60 (kernel_launches: 110, total_duration: 59.31 ms)
-   └─ nn.Module.Net.forward (kernel_launches: 110, total_duration: 59.31 ms)
-      ├─ nn.Module.Conv2d.forward
-      |  └─ torch.nn.functional.conv2d (kernel_launches: 40, total_duration: 27.08 ms)
-      └─ nn.Module.Linear.forward
-         └─ torch.nn.functional.linear (kernel_launches: 20, total_duration: 15.41 ms)
+   main.py:60 (dispatches: 90, total: 42.80 ms, dispatch_mean: 0.48 ms, dispatch_min: 0.01 ms, dispatch_max: 2.10 ms)
+   └─ nn.Module.Net.forward (calls: 10, dispatches: 90, total: 42.80 ms, dispatch_mean: 0.48 ms, dispatch_min: 0.01 ms, dispatch_max: 2.10 ms)
+      ├─ torch.nn.functional.conv2d (calls: 20)
+      |  └─ conv2d_fwd (dispatches: 40, total: 27.08 ms)
+      ├─ torch.nn.functional.linear (calls: 20)
+      |  └─ gemm (dispatches: 20, total: 15.41 ms)
+      └─ torch.nn.functional.relu (calls: 40)
+         └─ relu_kernel (dispatches: 30, total: 0.31 ms)
+
+   Operator summary (Min/Max/Mean are per-dispatch over the subtree; sorted by Total):
+   ╒══════════════════════════════════════════════════╤═════════╤══════════════╤══════════╤═══════════╤═════════════╤═════════╤═════════╤═════════╕
+   │ Operator                                         │   Calls │   Dispatches │    Total │   % Total │   Mean/Call │    Mean │     Min │     Max │
+   ╞══════════════════════════════════════════════════╪═════════╪══════════════╪══════════╪═══════════╪═════════════╪═════════╪═════════╪═════════╡
+   │ nn.Module.Net.forward                            │      10 │           90 │ 42.80 ms │    100.00 │     4.28 ms │ 0.48 ms │ 0.01 ms │ 2.10 ms │
+   ├──────────────────────────────────────────────────┼─────────┼──────────────┼──────────┼───────────┼─────────────┼─────────┼─────────┼─────────┤
+   │ nn.Module.Net.forward/torch.nn.functional.conv2d │      20 │           40 │ 27.08 ms │     63.27 │     1.35 ms │ 0.68 ms │ 0.21 ms │ 2.10 ms │
+   ├──────────────────────────────────────────────────┼─────────┼──────────────┼──────────┼───────────┼─────────────┼─────────┼─────────┼─────────┤
+   │ nn.Module.Net.forward/torch.nn.functional.linear │      20 │           20 │ 15.41 ms │     36.00 │     0.77 ms │ 0.77 ms │ 0.13 ms │ 1.82 ms │
+   ├──────────────────────────────────────────────────┼─────────┼──────────────┼──────────┼───────────┼─────────────┼─────────┼─────────┼─────────┤
+   │ nn.Module.Net.forward/torch.nn.functional.relu   │      40 │           30 │  0.31 ms │      0.72 │     7.70 us │ 0.01 ms │ 0.01 ms │ 0.02 ms │
+   ╘══════════════════════════════════════════════════╧═════════╧══════════════╧══════════╧═══════════╧═════════════╧═════════╧═════════╧═════════╛
 
 Output is grouped by source location (``file:line``) and shows full operator
 hierarchy (``/``-separated) and kernel stats. A consolidated CSV
 (``torch_trace/consolidated.csv``) is written with all operator/kernel data;
 see :ref:`torch-operator-profiling` for details.
+
+The flat **Operator summary** table below the call tree has one row per
+operator that ran at least one GPU kernel. Time cells auto-switch between
+milliseconds and microseconds per cell; missing values render as ``N/A``.
+
+* **Operator** — full operator path (for example
+  ``aten::matmul/aten::mm``).
+* **Calls** — how many times the operator was invoked. ``N/A`` when the
+  trace did not include ``Context_Id`` information to count invocations.
+* **Dispatches** — how many GPU kernels ran while the operator was on the
+  call stack (kernels launched by operators it called also count).
+* **Total** — total GPU time spent while the operator was on the call
+  stack.
+* **% Total** — share of the workload's total GPU time spent while this
+  operator was on the call stack. Because the same kernel time is counted
+  for an operator and for any operator that called it, the column can add
+  up to more than 100%. ``N/A`` when no GPU time was recorded.
+* **Mean/Call** — average GPU time per call to this operator.
+* **Mean / Min / Max** — per-kernel-dispatch timings across all kernels
+  launched while this operator was on the call stack.
+
+When no operator has any recorded dispatches, the table is replaced by the
+line ``Operator summary: (no operators with recorded dispatches)``.
 
 Filtering by Operator
 ---------------------

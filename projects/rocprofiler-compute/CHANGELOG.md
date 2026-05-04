@@ -2,6 +2,40 @@
 
 Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.amd.com/projects/rocprofiler-compute/en/latest/](https://rocm.docs.amd.com/projects/rocprofiler-compute/en/latest/).
 
+## ROCm Compute Profiler 3.7.0 for ROCm 7.14.0
+
+### Added
+
+* Added ``--bench-only`` profile mode option to run the roofline microbenchmark standalone (without profiling an application or collecting performance counters). No application run is required. Useful for regenerating ``roofline.csv`` in an existing workload directory or running the microbenchmark on systems where only HIP is available but rocprofiler-sdk is not.
+* Added backward compatibility for live attach mode to work with older ROCm 7.x.x releases.
+
+### Changed
+
+* Changed ratio metric aggregation from `AVG(A/B)` (arithmetic mean of per-dispatch ratios) to `SUM(A)/SUM(B)` (ratio of totals) across all analysis YAML configurations and all GPU architectures. `SUM(A)/SUM(B)` is a weighted average where each dispatch contributes proportionally to its denominator magnitude (duration, access count, cycle count). Single-dispatch workloads are unaffected (mathematically identical). Multi-dispatch workloads with different kernels or varying durations will see corrected values.
+
+* Added operator statistics and per-operator summary table in the analysis output of torch operators profiling. Added the following statistics for every torch operators and its children:
+    * Number of invocations
+    * Number of kernel dispatches
+    * Min/Max/Mean and Total duration of kernel dispatches
+
+### Removed
+
+* ``--path`` and ``--subpath`` options have been removed from profile mode. Use ``--output-directory`` instead.
+
+* Removed redundant `if (X != 0) else None` divide-by-zero guards from metric equations across all analysis YAML configurations. Division by zero is already handled by the metric evaluation engine, which returns `"N/A"` for `inf` and `NaN` results.
+
+### Optimized
+
+### Resolved issues
+
+* Fixed `inf` display for metrics with zero-denominator counters (e.g., L2-Fabric Write Latency when no write requests are issued). The metric evaluation path now catches `inf` scalar results and returns `"N/A"`, consistent with existing `NaN` handling.
+
+* Fixed empirical roofline benchmark to correctly produce double the Matrix BF16 Gflop/s on gfx90a (MI 200 series) GPUs
+
+### Upcoming changes
+
+### Known issues
+
 ## ROCm Compute Profiler 3.6.0 for ROCm 7.13.0
 
 ### Added
@@ -146,10 +180,6 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * Removed redundant warnings for compute/memory partition not found for AMD Instinct MI300 series and later GPUs by skipping the partition checks.
 
 * Corrected the formula for metrics related to reads from L2 cache to HBM for AMD Instinct MI350 Series GPUs.
-
-### Upcoming changes
-
-* ``--path`` and ``--subpath`` options have been deprecated in favor of ``--output-directory`` and will be removed in a future release.
 
 ### Upcoming changes
 

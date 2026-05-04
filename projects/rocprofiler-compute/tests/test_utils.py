@@ -6,6 +6,7 @@ import inspect
 import io
 import locale
 import logging
+import math
 import os
 import re
 import shutil
@@ -21,14 +22,18 @@ import utils.utils_analysis as utils_analysis
 import utils.utils_common as utils_common
 import utils.utils_profile as utils_profile
 from utils.tty import (
-    format_stats,
+    format_duration,
+    format_node_stats,
     print_operator_node,
     show_call_tree,
+    show_operator_summary,
 )
 from utils.utils_analysis import (
     CallTreeNode,
     KernelStats,
+    NodeRollup,
     build_call_trees,
+    build_operator_summary,
     parse_top_level_location,
     rollup_node_stats,
 )
@@ -269,26 +274,26 @@ def get_num_pmc_file(output_dir):
 
 
 def gpu_soc():
-    # Parse arch details from rocminfo
-    rocminfo = str(
-        # decode with utf-8 to account for rocm-smi changes in latest rocm
-        subprocess.run(
-            ["rocminfo"], stdout=subprocess.PIPE, stderr=subprocess.PIPE
-        ).stdout.decode("utf-8")
+    """Return (arch, model) from rocminfo, e.g. ('gfx942', 'MI300').
+
+    Both are '' when no supported GPU is detected.
+    """
+    # decode with utf-8 to account for rocm-smi changes in latest rocm
+    rocminfo = (
+        subprocess
+        .run(["rocminfo"], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        .stdout.decode("utf-8")
+        .split("\n")
     )
-    rocminfo = rocminfo.split("\n")
     soc_regex = re.compile(r"^\s*Name\s*:\s+ ([a-zA-Z0-9]+)\s*$", re.MULTILINE)
     devices = list(filter(soc_regex.match, rocminfo))
     if not devices:
-        return ""
-    gpu_arch = devices[0].split()[1]
-
-    if gpu_arch not in SUPPORTED_ARCHS.keys():
-        return ""
-
-    gpu_model = list(SUPPORTED_ARCHS[gpu_arch].keys())[0].upper()
-
-    return gpu_model
+        return "", ""
+    arch = devices[0].split()[1]
+    if arch not in SUPPORTED_ARCHS:
+        return "", ""
+    model = list(SUPPORTED_ARCHS[arch].keys())[0].upper()
+    return arch, model
 
 
 # =============================================================================
@@ -596,29 +601,46 @@ def test_detect_rocprof_sdk(monkeypatch):
     assert any("rocprof_cmd is rocprofiler-sdk" in log_entry for log_entry in logs)
 
 
+def make_dummy_process(*, lines=(), returncode=0, poll_pending_first=False):
+    """Fake subprocess.Popen for capture_subprocess_output tests."""
+
+    class Stdout:
+        def __init__(self):
+            self.iter = iter(lines)
+
+        def readline(self):
+            return next(self.iter, "")
+
+        def fileno(self):
+            return 1
+
+        def close(self):
+            pass
+
+    class Process:
+        def __init__(self):
+            self.stdout = Stdout()
+            self.poll_pending = poll_pending_first
+
+        def poll(self):
+            if self.poll_pending:
+                self.poll_pending = False
+                return None
+            return returncode
+
+        def wait(self):
+            return returncode
+
+    return Process()
+
+
 def test_capture_subprocess_output_with_new_env(monkeypatch):
     """
     Test capture_subprocess_output with custom environment variables.
     Verifies that new_env parameter is properly passed to subprocess.
     """
 
-    class DummyProcess:
-        def __init__(self):
-            self.stdout = type(
-                "MockStdout", (), {"readline": lambda: "", "fileno": lambda: 1}
-            )()
-            self._poll_count = 0
-
-        def poll(self):
-            if self._poll_count == 0:
-                self._poll_count += 1
-                return None
-            return 0
-
-        def wait(self):
-            return 0
-
-    dummy_process = DummyProcess()
+    dummy_process = make_dummy_process(poll_pending_first=True)
     popen_calls = []
 
     def dummy_popen(*args, **kwargs):
@@ -626,18 +648,6 @@ def test_capture_subprocess_output_with_new_env(monkeypatch):
         return dummy_process
 
     monkeypatch.setattr("subprocess.Popen", dummy_popen)
-
-    class DummySelector:
-        def register(self, fileobj, event, callback):
-            pass
-
-        def select(self, timeout=1):
-            return []
-
-        def close(self):
-            pass
-
-    monkeypatch.setattr("selectors.DefaultSelector", DummySelector)
     monkeypatch.setattr("utils.utils_common.console_log", lambda *a, **k: None)
     monkeypatch.setattr("utils.logger.console_debug", lambda *a, **k: None)
 
@@ -655,31 +665,7 @@ def test_capture_subprocess_output_profile_mode(monkeypatch):
     Verifies different behavior when profiling mode is active.
     """
 
-    class DummyProcess:
-        def __init__(self):
-            self.stdout = type(
-                "MockStdout", (), {"readline": lambda: "", "fileno": lambda: 1}
-            )()
-
-        def poll(self):
-            return 0
-
-        def wait(self):
-            return 0
-
-    monkeypatch.setattr("subprocess.Popen", lambda *a, **k: DummyProcess())
-
-    class DummySelector:
-        def register(self, fileobj, event, callback):
-            pass
-
-        def select(self, timeout=1):
-            return []
-
-        def close(self):
-            pass
-
-    monkeypatch.setattr("selectors.DefaultSelector", DummySelector)
+    monkeypatch.setattr("subprocess.Popen", lambda *a, **k: make_dummy_process())
     monkeypatch.setattr("utils.utils_common.console_log", lambda *a, **k: None)
     monkeypatch.setattr("utils.logger.console_debug", lambda *a, **k: None)
 
@@ -696,66 +682,10 @@ def test_capture_subprocess_output_failure(monkeypatch):
     Test capture_subprocess_output returns
     (False, output) when subprocess exits with nonzero code.
     """
-    lines = ["fail\n"]
-
-    class DummyStdout:
-        def __init__(self, lines):
-            self._lines = lines
-            self._idx = 0
-
-        def readline(self):
-            if self._idx < len(self._lines):
-                val = self._lines[self._idx]
-                self._idx += 1
-                return val
-            return ""
-
-    class DummyProcess:
-        def __init__(self):
-            self.stdout = DummyStdout(lines)
-            self._poll_count = 0
-
-        def poll(self):
-            if self._poll_count == 0:
-                self._poll_count += 1
-                return None
-            return 1
-
-        def wait(self):
-            return 1
-
-    dummy_process = DummyProcess()
-
-    def dummy_popen(*args, **kwargs):
-        return dummy_process
-
-    monkeypatch.setattr("subprocess.Popen", dummy_popen)
-
-    class DummySelector:
-        def __init__(self):
-            self._registered = []
-
-        def register(self, fileobj, event, callback):
-            self._registered.append((fileobj, event, callback))
-
-        def select(self):
-            if hasattr(self, "_called"):
-                return []
-            self._called = True
-            key_obj = type(
-                "Key",
-                (),
-                {
-                    "data": staticmethod(self._registered[0][2]),
-                    "fileobj": self._registered[0][0],
-                },
-            )()
-            return [(key_obj, 1)]
-
-        def close(self):
-            pass
-
-    monkeypatch.setattr("selectors.DefaultSelector", DummySelector)
+    dummy_process = make_dummy_process(
+        lines=["fail\n"], returncode=1, poll_pending_first=True
+    )
+    monkeypatch.setattr("subprocess.Popen", lambda *a, **k: dummy_process)
     monkeypatch.setattr("utils.utils_common.console_log", lambda *a, **k: None)
     monkeypatch.setattr("utils.logger.console_debug", lambda *a, **k: None)
 
@@ -766,72 +696,30 @@ def test_capture_subprocess_output_failure(monkeypatch):
 
 def test_capture_subprocess_output_unicode_decode(monkeypatch):
     """
-    Test capture_subprocess_output handles
-    UnicodeDecodeError in handle_output gracefully.
+    Test capture_subprocess_output handles bad bytes from the child without
+    crashing. errors="replace" on Popen substitutes invalid bytes with the
+    Unicode replacement character (\\ufffd), so readline never raises.
     """
 
-    class DummyStdout:
-        def __init__(self):
-            self._called = False
+    popen_calls = []
 
-        def readline(self):
-            if not self._called:
-                self._called = True
-                raise UnicodeDecodeError("utf-8", b"", 0, 1, "reason")
-            return ""
-
-    class DummyProcess:
-        def __init__(self):
-            self.stdout = DummyStdout()
-            self._poll_count = 0
-
-        def poll(self):
-            if self._poll_count == 0:
-                self._poll_count += 1
-                return None
-            return 0
-
-        def wait(self):
-            return 0
-
-    dummy_process = DummyProcess()
-
+    # Lines as the TextIOWrapper would yield them after error replacement:
+    # bad bytes show up as �, not as exceptions.
     def dummy_popen(*args, **kwargs):
-        return dummy_process
+        popen_calls.append(kwargs)
+        return make_dummy_process(lines=["good line\n", "bad � byte\n"])
 
     monkeypatch.setattr("subprocess.Popen", dummy_popen)
-
-    class DummySelector:
-        def __init__(self):
-            self._registered = []
-
-        def register(self, fileobj, event, callback):
-            self._registered.append((fileobj, event, callback))
-
-        def select(self):
-            if hasattr(self, "_called"):
-                return []
-            self._called = True
-            key_obj = type(
-                "Key",
-                (),
-                {
-                    "data": staticmethod(self._registered[0][2]),
-                    "fileobj": self._registered[0][0],
-                },
-            )()
-            return [(key_obj, 1)]
-
-        def close(self):
-            pass
-
-    monkeypatch.setattr("selectors.DefaultSelector", DummySelector)
     monkeypatch.setattr("utils.utils_common.console_log", lambda *a, **k: None)
     monkeypatch.setattr("utils.logger.console_debug", lambda *a, **k: None)
 
     success, output = utils_common.capture_subprocess_output(["echo", "test"])
+
     assert success is True
-    assert output == ""
+    assert "good line" in output
+    assert "�" in output
+    # Popen must request "replace" error handling so bad bytes never raise.
+    assert popen_calls[0].get("errors") == "replace"
 
 
 # =============================================================================
@@ -1841,7 +1729,7 @@ def test_run_prof_sdk_creates_new_env_copy(tmp_path, monkeypatch):
             rocprofiler_sdk_tool_path="sdk_tool",
             roof_only=True,
             format_rocprof_output="format",
-            path="path",
+            output_directory="path",
             remaining="remaining",
             iteration_multiplexing=None,
             attach_pid=None,
@@ -2234,20 +2122,9 @@ def test_capture_subprocess_output_with_logging_disabled(monkeypatch):
     Test capture_subprocess_output with enable_logging=False doesn't call console_log.
     """
 
-    class DummyProcess:
-        def __init__(self):
-            self.stdout = io.StringIO("test output\n")
-
-        def poll(self):
-            return 0
-
-        def wait(self):
-            return 0
-
-    monkeypatch.setattr("subprocess.Popen", lambda *a, **k: DummyProcess())
     monkeypatch.setattr(
-        "selectors.DefaultSelector",
-        lambda: mock.Mock(register=mock.Mock(), select=lambda: [], close=mock.Mock()),
+        "subprocess.Popen",
+        lambda *a, **k: make_dummy_process(lines=["test output\n"]),
     )
 
     log_calls = []
@@ -6345,7 +6222,7 @@ def test_noise_clamp_clamping_behavior():
     """Core behavior: positives unchanged, negatives clamped to 0."""
     import numpy as np
 
-    from utils.parser import to_noise_clamp
+    from utils.metrics.noise_clamper import to_noise_clamp
 
     # Scalar: positive unchanged
     assert to_noise_clamp(1000.0, 100000.0) == 1000.0
@@ -6368,7 +6245,7 @@ def test_noise_clamp_clamping_behavior():
 @pytest.mark.noise_clamp
 def test_noise_clamp_zero_reference():
     """Edge case: zero reference should not cause division by zero."""
-    from utils.parser import to_noise_clamp
+    from utils.metrics.noise_clamper import to_noise_clamp
 
     assert to_noise_clamp(-100.0, 0.0) == 0.0
     result = to_noise_clamp(pd.Series([-100.0]), pd.Series([0.0]))
@@ -6378,7 +6255,7 @@ def test_noise_clamp_zero_reference():
 @pytest.mark.noise_clamp
 def test_noise_clamp_warning_above_threshold():
     """Warning recorded when relative error >= 1%."""
-    from utils.parser import (
+    from utils.metrics.noise_clamper import (
         clear_noise_clamp_warnings,
         get_noise_clamp_warnings,
         to_noise_clamp,
@@ -6397,7 +6274,7 @@ def test_noise_clamp_warning_above_threshold():
 @pytest.mark.noise_clamp
 def test_noise_clamp_no_warning_below_threshold():
     """No warning when relative error < 1%."""
-    from utils.parser import (
+    from utils.metrics.noise_clamper import (
         clear_noise_clamp_warnings,
         get_noise_clamp_warnings,
         to_noise_clamp,
@@ -6414,7 +6291,7 @@ def test_noise_clamp_no_warning_below_threshold():
 @pytest.mark.noise_clamp
 def test_noise_clamp_empty_input():
     """Empty inputs should return empty without error."""
-    from utils.parser import to_noise_clamp
+    from utils.metrics.noise_clamper import to_noise_clamp
 
     result = to_noise_clamp(pd.Series([], dtype=float), pd.Series([], dtype=float))
     assert len(result) == 0
@@ -6423,7 +6300,7 @@ def test_noise_clamp_empty_input():
 @pytest.mark.noise_clamp
 def test_noise_clamp_threshold_boundary():
     """Exactly 1% error should trigger warning (>= not >)."""
-    from utils.parser import (
+    from utils.metrics.noise_clamper import (
         clear_noise_clamp_warnings,
         get_noise_clamp_warnings,
         to_noise_clamp,
@@ -6441,7 +6318,7 @@ def test_noise_clamper_instance_isolation():
     """Separate NoiseClamper instances should have independent state."""
     import numpy as np
 
-    from utils.parser import NoiseClamper
+    from utils.metrics.noise_clamper import NoiseClamper
 
     clamper1 = NoiseClamper()
     clamper2 = NoiseClamper()
@@ -6936,31 +6813,123 @@ def test_parse_location_no_colon():
     assert parse_top_level_location("10@mainpy") == "unknown:0"
 
 
-def test_format_stats_microseconds():
-    assert "us" in format_stats(1, 0.005)
+def test_format_duration_microseconds_below_threshold():
+    assert format_duration(0.005) == "5.00 us"
 
 
-def test_format_stats_milliseconds():
-    assert "1.50 ms" in format_stats(1, 1.5)
+def test_format_duration_milliseconds_above_threshold():
+    assert format_duration(1.5) == "1.50 ms"
 
 
-def test_format_stats_boundary():
-    assert "ms" in format_stats(1, 0.01)
+def test_format_duration_boundary_value_is_milliseconds():
+    assert format_duration(0.01) == "0.01 ms"
 
 
-def test_format_stats_basic():
-    result = format_stats(3, 1.5)
-    assert "kernel_launches: 3" in result
-    assert "total_duration: 1.50 ms" in result
+def test_format_duration_none_renders_na():
+    assert format_duration(None) == "N/A"
+
+
+def test_format_duration_nan_renders_na():
+    assert format_duration(float("nan")) == "N/A"
+
+
+def test_kernel_stats_defaults_min_max_to_none():
+    stats = KernelStats()
+    assert stats.min_duration_ns is None
+    assert stats.max_duration_ns is None
+
+
+def test_call_tree_node_defaults_dispatch_stats_to_none():
+    node = CallTreeNode(name="x")
+    assert node.min_dispatch_ns is None
+    assert node.max_dispatch_ns is None
+    assert node.mean_dispatch_ns is None
+
+
+def test_call_tree_node_call_count_is_property_of_invocation_ids():
+    node = CallTreeNode(name="x")
+    assert node.call_count == 0
+    node.invocation_ids.add("ctx1")
+    node.invocation_ids.add("ctx2")
+    assert node.call_count == 2
+
+
+def test_format_node_stats_omits_calls_when_no_invocation_ids():
+    node = CallTreeNode(name="x")
+    node.kernel_launches = 1
+    node.total_duration_ms = 1.0
+    node.mean_dispatch_ns = 1_000_000.0
+    node.min_dispatch_ns = 1_000_000.0
+    node.max_dispatch_ns = 1_000_000.0
+    rendered = format_node_stats(node)
+    assert "calls:" not in rendered
+    assert "dispatches: 1" in rendered
+    assert "total: 1.00 ms" in rendered
+
+
+def test_format_node_stats_includes_calls_when_invocation_ids_present():
+    node = CallTreeNode(name="x")
+    node.invocation_ids.add("ctx1")
+    node.invocation_ids.add("ctx2")
+    node.kernel_launches = 4
+    node.total_duration_ms = 2.0
+    node.mean_dispatch_ns = 500_000.0
+    node.min_dispatch_ns = 500_000.0
+    node.max_dispatch_ns = 500_000.0
+    rendered = format_node_stats(node)
+    assert "calls: 2" in rendered
+    assert "dispatches: 4" in rendered
+
+
+def test_format_node_stats_renders_na_when_dispatch_stats_missing():
+    node = CallTreeNode(name="x")
+    node.kernel_launches = 0
+    rendered = format_node_stats(node)
+    assert "dispatch_mean: N/A" in rendered
+    assert "dispatch_min: N/A" in rendered
+    assert "dispatch_max: N/A" in rendered
 
 
 def test_rollup_leaf_node():
     node = CallTreeNode(name="leaf")
     node.kernels["kern_a"] = KernelStats(launches=2, total_duration_ns=1000.0)
-    launches, dur_ns = rollup_node_stats(node)
-    assert launches == 2
-    assert dur_ns == 1000.0
+    rollup = rollup_node_stats(node)
+    assert rollup.launches == 2
+    assert rollup.total_duration_ns == 1000.0
     assert node.kernel_launches == 2
+
+
+def test_rollup_leaf_node_with_no_min_max_returns_none():
+    node = CallTreeNode(name="leaf")
+    node.kernels["kern"] = KernelStats(launches=1, total_duration_ns=0.0)
+    rollup = rollup_node_stats(node)
+    assert isinstance(rollup, NodeRollup)
+    assert rollup.min_dispatch_ns is None
+    assert rollup.max_dispatch_ns is None
+    assert node.min_dispatch_ns is None
+    assert node.max_dispatch_ns is None
+    assert node.mean_dispatch_ns == 0.0
+
+
+def test_rollup_leaf_node_with_zero_launches_has_mean_none():
+    node = CallTreeNode(name="leaf")
+    rollup = rollup_node_stats(node)
+    assert rollup.launches == 0
+    assert node.mean_dispatch_ns is None
+
+
+def test_rollup_propagates_min_max_from_kernel_stats():
+    node = CallTreeNode(name="leaf")
+    node.kernels["k"] = KernelStats(
+        launches=2,
+        total_duration_ns=3000.0,
+        min_duration_ns=1000.0,
+        max_duration_ns=2000.0,
+    )
+    rollup_node_stats(node)
+    assert node.min_dispatch_ns == 1000.0
+    assert node.max_dispatch_ns == 2000.0
+    assert node.mean_dispatch_ns == 1500.0
 
 
 def test_rollup_parent_rolls_up_children():
@@ -7126,7 +7095,7 @@ def test_show_call_tree_prints_location_and_stats(capsys):
     show_call_tree({"main.py:10": root})
     output = capsys.readouterr().out
     assert "main.py:10" in output
-    assert "kernel_launches: 1" in output
+    assert "dispatches: 1" in output
     assert "kern" in output
 
 
@@ -7166,7 +7135,7 @@ def test_print_operator_node_branching_shows_stats(capsys):
     node.kernels["k2"] = KernelStats(launches=1, total_duration_ns=2_500_000.0)
     print_operator_node(node)
     output = capsys.readouterr().out
-    assert "kernel_launches: 2" in output
+    assert "dispatches: 2" in output
     assert "k1" in output
     assert "k2" in output
 
@@ -7180,7 +7149,7 @@ def test_print_operator_node_non_branching_omits_stats(capsys):
     output = capsys.readouterr().out
     lines = output.strip().split("\n")
     assert "└─ single" in lines[0]
-    assert "kernel_launches" not in lines[0]
+    assert "dispatches" not in lines[0]
 
 
 def test_print_operator_node_long_kernel_wraps(capsys):
@@ -7207,6 +7176,202 @@ def test_print_operator_node_long_kernel_wraps(capsys):
     ]
     assert wrapped_kernel_lines
     assert not any(line.strip().startswith("(id 7)") for line in output_lines)
+
+
+# ---------------------------------------------------------------------------
+# build_operator_summary
+# ---------------------------------------------------------------------------
+
+
+_OPERATOR_SUMMARY_COLUMNS = [
+    "Operator",
+    "Location",
+    "Calls",
+    "Dispatches",
+    "Dispatches_Per_Call",
+    "Total_GPU",
+    "Pct_Total_GPU",
+    "Mean_Per_Call",
+    "Mean_Per_Dispatch",
+    "Min_Dispatch",
+    "Max_Dispatch",
+]
+
+
+def _build_summary_from_dataframe(rows):
+    call_trees = build_call_trees(pd.DataFrame(rows))
+    return build_operator_summary(call_trees)
+
+
+def test_build_operator_summary_empty_input_returns_empty_with_full_schema():
+    summary = build_operator_summary({})
+    assert list(summary.columns) == _OPERATOR_SUMMARY_COLUMNS
+    assert summary.empty
+
+
+def test_build_operator_summary_skips_synthetic_location_root():
+    summary = _build_summary_from_dataframe([
+        {
+            "Operator_Name": "op_a",
+            "Kernel_Name": "kern",
+            "Context_Id": "10@f.py:1",
+            "Start_Timestamp_kernel": 0,
+            "End_Timestamp_kernel": 1_000_000,
+        }
+    ])
+    assert "f.py:1" not in summary["Operator"].tolist()
+    assert "op_a" in summary["Operator"].tolist()
+
+
+def test_build_operator_summary_row_values_for_single_dispatch():
+    summary = _build_summary_from_dataframe([
+        {
+            "Operator_Name": "op_a",
+            "Kernel_Name": "kern",
+            "Context_Id": "10@f.py:1",
+            "Start_Timestamp_kernel": 0,
+            "End_Timestamp_kernel": 2_000_000,
+        }
+    ])
+    row = summary.loc[summary["Operator"] == "op_a"].iloc[0]
+    assert row["Location"] == "f.py:1"
+    assert row["Calls"] == 1
+    assert row["Dispatches"] == 1
+    assert row["Dispatches_Per_Call"] == 1.0
+    assert row["Total_GPU"] == pytest.approx(2.0)
+    assert row["Pct_Total_GPU"] == pytest.approx(100.0)
+    assert row["Mean_Per_Call"] == pytest.approx(2.0)
+    assert row["Mean_Per_Dispatch"] == pytest.approx(2.0)
+    assert row["Min_Dispatch"] == pytest.approx(2.0)
+    assert row["Max_Dispatch"] == pytest.approx(2.0)
+
+
+def test_build_operator_summary_sort_by_total_descending():
+    summary = _build_summary_from_dataframe([
+        {
+            "Operator_Name": "small_op",
+            "Kernel_Name": "kern",
+            "Context_Id": "10@f.py:1",
+            "Start_Timestamp_kernel": 0,
+            "End_Timestamp_kernel": 1_000_000,
+        },
+        {
+            "Operator_Name": "big_op",
+            "Kernel_Name": "kern",
+            "Context_Id": "20@f.py:2",
+            "Start_Timestamp_kernel": 0,
+            "End_Timestamp_kernel": 10_000_000,
+        },
+    ])
+    operators_in_order = summary["Operator"].tolist()
+    assert operators_in_order.index("big_op") < operators_in_order.index("small_op")
+
+
+def test_build_operator_summary_pct_total_gpu_sums_to_100_at_top_level():
+    summary = _build_summary_from_dataframe([
+        {
+            "Operator_Name": "op_a",
+            "Kernel_Name": "kern",
+            "Context_Id": "10@f.py:1",
+            "Start_Timestamp_kernel": 0,
+            "End_Timestamp_kernel": 3_000_000,
+        },
+        {
+            "Operator_Name": "op_b",
+            "Kernel_Name": "kern",
+            "Context_Id": "20@f.py:2",
+            "Start_Timestamp_kernel": 0,
+            "End_Timestamp_kernel": 1_000_000,
+        },
+    ])
+    op_a_pct = summary.loc[summary["Operator"] == "op_a", "Pct_Total_GPU"].iloc[0]
+    op_b_pct = summary.loc[summary["Operator"] == "op_b", "Pct_Total_GPU"].iloc[0]
+    assert op_a_pct == pytest.approx(75.0)
+    assert op_b_pct == pytest.approx(25.0)
+
+
+def test_build_operator_summary_pct_total_gpu_is_nan_when_grand_total_zero():
+    root = CallTreeNode(name="f.py:1")
+    op = CallTreeNode(name="op")
+    op.kernel_launches = 1
+    op.total_duration_ms = 0.0
+    op.invocation_ids.add("ctx")
+    root.children["op"] = op
+    summary = build_operator_summary({"f.py:1": root})
+    pct = summary.loc[summary["Operator"] == "op", "Pct_Total_GPU"].iloc[0]
+    assert math.isnan(pct)
+
+
+def test_build_operator_summary_min_max_mean_are_nan_when_no_dispatch_stats():
+    root = CallTreeNode(name="f.py:1")
+    op = CallTreeNode(name="op")
+    op.kernel_launches = 1
+    op.total_duration_ms = 5.0
+    op.invocation_ids.add("ctx")
+    root.children["op"] = op
+    summary = build_operator_summary({"f.py:1": root})
+    row = summary.loc[summary["Operator"] == "op"].iloc[0]
+    assert math.isnan(row["Min_Dispatch"])
+    assert math.isnan(row["Max_Dispatch"])
+    assert math.isnan(row["Mean_Per_Dispatch"])
+
+
+def test_build_operator_summary_calls_nan_when_no_invocation_ids():
+    root = CallTreeNode(name="f.py:1")
+    op = CallTreeNode(name="torch.ops.x")
+    op.kernel_launches = 2
+    op.total_duration_ms = 4.0
+    op.mean_dispatch_ns = 2_000_000.0
+    op.min_dispatch_ns = 2_000_000.0
+    op.max_dispatch_ns = 2_000_000.0
+    root.children["torch.ops.x"] = op
+    summary = build_operator_summary({"f.py:1": root})
+    row = summary.loc[summary["Operator"] == "torch.ops.x"].iloc[0]
+    assert math.isnan(row["Calls"])
+    assert math.isnan(row["Dispatches_Per_Call"])
+    assert math.isnan(row["Mean_Per_Call"])
+    assert row["Dispatches"] == 2
+
+
+# ---------------------------------------------------------------------------
+# show_operator_summary
+# ---------------------------------------------------------------------------
+
+
+def test_show_operator_summary_empty_prints_no_dispatches_message(capsys):
+    show_operator_summary(pd.DataFrame(columns=_OPERATOR_SUMMARY_COLUMNS))
+    output = capsys.readouterr().out
+    assert "no operators with recorded dispatches" in output
+
+
+def test_show_operator_summary_renders_per_cell_unit_suffix(capsys):
+    summary = _build_summary_from_dataframe([
+        {
+            "Operator_Name": "op_a",
+            "Kernel_Name": "kern",
+            "Context_Id": "10@f.py:1",
+            "Start_Timestamp_kernel": 0,
+            "End_Timestamp_kernel": 2_000_000,
+        }
+    ])
+    show_operator_summary(summary)
+    output = capsys.readouterr().out
+    assert "ms" in output or "us" in output
+    assert "Operator" in output
+    assert "Total" in output
+
+
+def test_show_operator_summary_renders_na_for_nan_cells(capsys):
+    root = CallTreeNode(name="f.py:1")
+    op = CallTreeNode(name="op")
+    op.kernel_launches = 1
+    op.total_duration_ms = 0.0
+    op.invocation_ids.add("ctx")
+    root.children["op"] = op
+    summary = build_operator_summary({"f.py:1": root})
+    show_operator_summary(summary)
+    output = capsys.readouterr().out
+    assert "N/A" in output
 
 
 # =============================================================================
