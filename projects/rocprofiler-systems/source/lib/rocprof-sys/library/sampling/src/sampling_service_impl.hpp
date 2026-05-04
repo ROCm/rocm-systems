@@ -278,11 +278,15 @@ sampling_service<Policies>::setup(int64_t tid)
         state->start();
     }
 
-    // Block signals BEFORE arming triggers to prevent race.
+    // Block signals BEFORE arming triggers to prevent SPSC race on ring buffer
+    // (baseline push in do_setup_wiring vs signal handler push).
     block_signals(sigs);
 
     // Production wiring: TLS pointer setup, timer arming, overflow trigger config.
     do_setup_wiring(tid, state, sigs);
+
+    // Unblock signals so timer/overflow handlers fire during normal operation.
+    unblock_signals(sigs);
 
     return sigs;
 }
@@ -309,6 +313,7 @@ sampling_service<Policies>::shutdown(int64_t tid)
             {
                 s->stop_all_triggers();
                 s->stop();
+                s->wait_for_in_flight_zero(5000);
                 offload_.write(other, s->ring_buffer(), fatal_);
                 do_emit_resolved(other);
                 do_shutdown_wiring(other);

@@ -712,8 +712,6 @@ rocprofsys_init_tooling_hidden(void)
         component::vaapi_gotcha::start();
     }
 
-    if(get_use_sampling()) services::sampling_block_signals();
-
     // perfetto initialization
     if(get_use_perfetto())
     {
