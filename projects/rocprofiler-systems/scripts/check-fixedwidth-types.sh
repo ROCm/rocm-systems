@@ -22,7 +22,6 @@
 set -euo pipefail
 
 TYPES_RE="uint8_t|uint16_t|uint32_t|uint64_t|int8_t|int16_t|int32_t|int64_t"
-SED_TYPES_RE="uint8_t\|uint16_t\|uint32_t\|uint64_t\|int8_t\|int16_t\|int32_t\|int64_t"
 
 FIX=0
 files=()
@@ -47,8 +46,7 @@ if [[ ${#files[@]} -eq 0 ]]; then
 fi
 
 has_bare() {
-    sed "s/\bstd::\(${SED_TYPES_RE}\)\b/__STDQ__/g" "$1" \
-        | grep -Pq "\b(${TYPES_RE})\b"
+    grep -Pq "(?<!std::)\b(${TYPES_RE})\b" "$1"
 }
 
 has_c_include() {
@@ -127,8 +125,7 @@ if [[ ${#type_violations[@]} -gt 0 ]]; then
     echo "Files with bare types:"
     for f in "${type_violations[@]}"; do
         echo "  $f"
-        sed "s/\bstd::\(${SED_TYPES_RE}\)\b/__STDQ__/g" "$f" \
-            | grep -Pn "\b(${TYPES_RE})\b" | head -5 | sed 's/^/    /'
+        grep -Pn "(?<!std::)\b(${TYPES_RE})\b" "$f" | head -5 | sed 's/^/    /'
         echo ""
     done
     rc=1

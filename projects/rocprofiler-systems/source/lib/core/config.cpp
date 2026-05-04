@@ -376,7 +376,7 @@ configure_settings(bool _init)
         "--rocprofsys-kokkos-kernel-logger", "kokkos", "debugging", "advanced");
 
     ROCPROFSYS_CONFIG_SETTING(
-        int64_t, "ROCPROFSYS_KOKKOSP_NAME_LENGTH_MAX",
+        std::int64_t, "ROCPROFSYS_KOKKOSP_NAME_LENGTH_MAX",
         "Set this to a value > 0 to help avoid unnamed Kokkos Tools "
         "callbacks. Generally, unnamed callbacks are the demangled "
         "name of the function, which is very long",
@@ -688,8 +688,8 @@ configure_settings(bool _init)
                               "default to the value of ROCPROFSYS_COLLAPSE_PROCESSES",
                               false, "perfetto", "data", "advanced");
 
-    ROCPROFSYS_CONFIG_SETTING(uint32_t, "ROCPROFSYS_PERFETTO_FLUSH_PERIOD_MS",
-                              "Set Perfetto flush period (in ms)", uint32_t{ 10000 },
+    ROCPROFSYS_CONFIG_SETTING(std::uint32_t, "ROCPROFSYS_PERFETTO_FLUSH_PERIOD_MS",
+                              "Set Perfetto flush period (in ms)", std::uint32_t{ 10000 },
                               "perfetto", "data");
 
     ROCPROFSYS_CONFIG_SETTING(
@@ -721,9 +721,9 @@ configure_settings(bool _init)
         true, "perfetto", "data", "debugging", "advanced");
 
     ROCPROFSYS_CONFIG_SETTING(
-        uint64_t, "ROCPROFSYS_THREAD_POOL_SIZE",
+        std::uint64_t, "ROCPROFSYS_THREAD_POOL_SIZE",
         "Max number of threads for processing background tasks",
-        std::max<uint64_t>(std::min<uint64_t>(4, std::thread::hardware_concurrency() / 2),
+        std::max<std::uint64_t>(std::min<std::uint64_t>(4, std::thread::hardware_concurrency() / 2),
                            1),
         "parallelism", "advanced");
 
@@ -804,7 +804,7 @@ configure_settings(bool _init)
         "causal", "analysis", "advanced", "io");
 
     ROCPROFSYS_CONFIG_SETTING(
-        uint64_t, "ROCPROFSYS_CAUSAL_RANDOM_SEED",
+        std::uint64_t, "ROCPROFSYS_CAUSAL_RANDOM_SEED",
         "Seed for random number generator which selects speedups and experiments -- "
         "please note that the lines selected for experimentation are not reproducible "
         "but the speedup selection is. If set to zero, std::random_device{}() will be "
@@ -1372,7 +1372,7 @@ get_use_sampling_cputime()
 }
 
 std::set<int>
-get_sampling_signals(int64_t)
+get_sampling_signals(std::int64_t)
 {
     auto _v = std::set<int>{};
     if(get_use_causal())
@@ -2074,11 +2074,11 @@ get_perfetto_buffer_size()
     return static_cast<tim::tsettings<size_t>&>(*_v->second).get();
 }
 
-uint32_t
+std::uint32_t
 get_perfetto_flush_period()
 {
     static auto _v = get_config()->find("ROCPROFSYS_PERFETTO_FLUSH_PERIOD_MS");
-    return static_cast<tim::tsettings<uint32_t>&>(*_v->second).get();
+    return static_cast<tim::tsettings<std::uint32_t>&>(*_v->second).get();
 }
 
 bool
@@ -2178,10 +2178,10 @@ get_perfetto_annotations()
     return static_cast<tim::tsettings<bool>&>(*_v->second).get();
 }
 
-uint64_t
+std::uint64_t
 get_thread_pool_size()
 {
-    static uint64_t _v = get_config()->get<uint64_t>("ROCPROFSYS_THREAD_POOL_SIZE");
+    static std::uint64_t _v = get_config()->get<std::uint64_t>("ROCPROFSYS_THREAD_POOL_SIZE");
     return _v;
 }
 
@@ -2327,7 +2327,7 @@ get_cpu_metrics()
     return static_cast<tim::tsettings<std::string>&>(*_v->second).get();
 }
 
-std::set<int64_t>
+std::set<std::int64_t>
 get_sampling_tids()
 {
     auto _v = get_config()->find("ROCPROFSYS_SAMPLING_TIDS");
@@ -2335,7 +2335,7 @@ get_sampling_tids()
         static_cast<tim::tsettings<std::string>&>(*_v->second).get(), "thread IDs", 1L);
 }
 
-std::set<int64_t>
+std::set<std::int64_t>
 get_sampling_cputime_tids()
 {
     auto _v = get_config()->find("ROCPROFSYS_SAMPLING_CPUTIME_TIDS");
@@ -2343,7 +2343,7 @@ get_sampling_cputime_tids()
         static_cast<tim::tsettings<std::string>&>(*_v->second).get(), "thread IDs", 1L);
 }
 
-std::set<int64_t>
+std::set<std::int64_t>
 get_sampling_realtime_tids()
 {
     auto _v = get_config()->find("ROCPROFSYS_SAMPLING_REALTIME_TIDS");
@@ -2351,7 +2351,7 @@ get_sampling_realtime_tids()
         static_cast<tim::tsettings<std::string>&>(*_v->second).get(), "thread IDs", 1L);
 }
 
-std::set<int64_t>
+std::set<std::int64_t>
 get_sampling_overflow_tids()
 {
     auto _v = get_config()->find("ROCPROFSYS_SAMPLING_OVERFLOW_TIDS");
@@ -2442,7 +2442,7 @@ get_trace_region()
 bool
 get_debug_tid()
 {
-    static auto _vlist = parse_numeric_range<int64_t, std::unordered_set<int64_t>>(
+    static auto _vlist = parse_numeric_range<std::int64_t, std::unordered_set<std::int64_t>>(
         tim::get_env<std::string>("ROCPROFSYS_DEBUG_TIDS", ""), "debug tids", 1L);
     static thread_local bool _v =
         _vlist.empty() || _vlist.count(tim::threading::get_id()) > 0;
@@ -2452,7 +2452,7 @@ get_debug_tid()
 bool
 get_debug_pid()
 {
-    static auto _vlist = parse_numeric_range<int64_t, std::unordered_set<int64_t>>(
+    static auto _vlist = parse_numeric_range<std::int64_t, std::unordered_set<std::int64_t>>(
         tim::get_env<std::string>("ROCPROFSYS_DEBUG_PIDS", ""), "debug pids", 1L);
     static bool _v = _vlist.empty() || _vlist.count(tim::process::get_id()) > 0 ||
                      _vlist.count(dmp::rank()) > 0;
@@ -2630,7 +2630,7 @@ get_rank_filter_output()
 #endif
 
 #if ROCPROFSYS_MPI_OR_MPI_HEADERS_ENABLED
-std::optional<uint64_t>
+std::optional<std::uint64_t>
 get_mpi_rank_from_env()
 {
     const std::vector<std::string> rank_env_var_options = {
@@ -2684,7 +2684,7 @@ is_output_enabled_for_current_mpi_rank()
     }
 
     const auto enabled_ranks =
-        rocprofsys::utility::parse_numeric_range<int64_t, std::unordered_set<int64_t>>(
+        rocprofsys::utility::parse_numeric_range<std::int64_t, std::unordered_set<std::int64_t>>(
             enabled_ranks_str, "ranks", 1L);
 
     const auto is_enabled = enabled_ranks.count(current_rank.value()) != 0;
@@ -2970,11 +2970,11 @@ get_causal_end_to_end()
     return static_cast<tim::tsettings<bool>&>(*_v->second).get();
 }
 
-std::vector<int64_t>
+std::vector<std::int64_t>
 get_causal_fixed_speedup()
 {
     static auto _v = get_config()->find("ROCPROFSYS_CAUSAL_FIXED_SPEEDUP");
-    return parse_numeric_range<int64_t, std::vector<int64_t>>(
+    return parse_numeric_range<std::int64_t, std::vector<std::int64_t>>(
         static_cast<tim::tsettings<std::string>&>(*_v->second).get(),
         "causal fixed speedup", 5L);
 }
