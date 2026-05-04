@@ -73,6 +73,8 @@ set(AMD_TEST_SRC
     fp6_ocp.cc
     fp4_ocp.cc
     memcpy_async.cc
+    bfloat16_atomic_test.cc
+    fp16_atomic_test.cc
 )
 
 set(AMD_ARCH_SPEC_TEST_SRC

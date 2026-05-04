@@ -146,7 +146,7 @@ class ROBackend : public Backend {
   /**
    * @brief Handle to device memory fields.
    */
-  BackendProxyT backend_proxy{};
+  BackendProxy backend_proxy{};
 
   /**
    * @brief Handle to block resources
@@ -205,7 +205,7 @@ class ROBackend : public Backend {
    *
    * See the transport class for more details.
    */
-  ROTeamProxyT *team_world_proxy_;
+  ROTeamProxy *team_world_proxy_;
 
   /**
    * @brief Allocate and initialize team shared.
@@ -233,7 +233,7 @@ class ROBackend : public Backend {
   /**
    * @brief Pool of contexts for RO_NET
    */
-  WindowProxyT *ro_window_proxy_;
+  WindowProxy *ro_window_proxy_;
 
  protected:
   /**
@@ -248,7 +248,7 @@ class ROBackend : public Backend {
    *
    * @note Internal data ownership is managed by the proxy
    */
-  ProfilerProxyT profiler_proxy_;  // init handled in constructor
+  ProfilerProxy profiler_proxy_;  // init handled in constructor
 
  public:
   /**
@@ -262,7 +262,7 @@ class ROBackend : public Backend {
    *
    * @note Internal data ownership is managed by the proxy
    */
-  DefaultContextProxyT default_context_proxy_;  // init handled in constructor
+  DefaultContextProxy default_context_proxy_;  // init handled in constructor
 
   /**
    * @brief Controls how many thread blocks are monitored by polling thread.

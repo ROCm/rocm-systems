@@ -71,6 +71,11 @@ def pytest_addoption(parser):
         action="store",
         help="Path to multi-GPU ATT output directory.",
     )
+    parser.addoption(
+        "--att-marker-trace-out-dir",
+        action="store",
+        help="Path to ATT marker trace output directory.",
+    )
 
 
 @pytest.fixture
@@ -124,4 +129,12 @@ def att_multi_gpu_out_dir_path(request):
     output_dir_path = request.config.getoption("--att-multi-gpu-out-dir")
     if not output_dir_path:
         pytest.skip("--att-multi-gpu-out-dir not provided")
+    return output_dir_path
+
+
+@pytest.fixture
+def att_marker_trace_out_dir_path(request):
+    output_dir_path = request.config.getoption("--att-marker-trace-out-dir")
+    if not output_dir_path:
+        pytest.skip("--att-marker-trace-out-dir not provided")
     return output_dir_path

@@ -17,9 +17,11 @@ import re
 # HW counter name must start with an IP block prefix, followed by an
 # underscore-separated suffix of uppercase letters/digits, optionally
 # ending with '[' or an aggregation suffix (_sum, _avr, _max, _min).
+# IP block prefixes for PMC-style names (aligned with analysis YAML / tooling).
 HW_COUNTER_BLK = (
-    r"(?:SQ|SQC|SP|TA|TD|TCP|TCC|GL1A|GL1C|GL2A|GL2C|"
-    r"CPC|CPF|SPI|GCEA|GRBM)"
+    r"(?:CHA|CHC|CPC|CPF|GCEA|GC_CANE|GC_EA_SE|GCR|"
+    r"GL1A|GL1C|GL2A|GL2C|GLARBA|GLARBC|GRBM|SDMA|SPI|"
+    r"SQ|SQC|SP|SQG|TA|TD|TCP|TCC|TX|UTCL1)"
 )
 HW_COUNTER_SFX = r"_[0-9A-Z_]*[0-9A-Z](?:\[|_sum|_avr|_max|_min)*"
 HW_COUNTER_RE = re.compile(HW_COUNTER_BLK + HW_COUNTER_SFX)

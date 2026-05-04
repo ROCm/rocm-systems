@@ -101,8 +101,9 @@ struct generate
 
             if constexpr(use_placement_new_when_generating_unique_ptr<value_type>::value)
             {
-                // create a thread-local buffer for placement-new
-                static thread_local auto _buffer = std::array<char, sizeof(value_type)>{};
+                // create a thread-local buffer for placement-new with proper alignment
+                alignas(value_type) static thread_local auto _buffer =
+                    std::array<char, sizeof(value_type)>{};
                 if constexpr(std::is_constructible<value_type, Args...>::value)
                 {
                     return type{ new(_buffer.data())

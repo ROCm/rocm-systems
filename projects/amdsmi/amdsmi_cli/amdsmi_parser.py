@@ -424,6 +424,14 @@ class AMDSMIParser(argparse.ArgumentParser):
                         sys.argv[1], clk_type, output_format
                     )
 
+                if not perf_levels_str:
+                    raise amdsmi_cli_exceptions.AmdSmiInvalidParameterValueException(
+                        sys.argv[1],
+                        clk_type,
+                        output_format,
+                        hint=f"\n--clk-level requires at least one performance level index (e.g. --clk-level {clk_type} 0 1)",
+                    )
+
                 perf_levels = []
                 # Check if every item in perf level is valid
                 for level in perf_levels_str:
@@ -1144,11 +1152,15 @@ class AMDSMIParser(argparse.ArgumentParser):
                 if isinstance(values, str):
                     if "%" in values:
                         try:
-                            amdsmi_helpers.confirm_out_of_spec_warning()
                             # Store percentage value with is_percentage flag
                             # CLI will convert based on gpu_od availability
                             percentage_value = int(values[:-1])
                             if 0 <= percentage_value <= 100:
+                                # Making behavior consistent with recent non-percentage path changes
+                                # 1. Check input validity (0-100%)
+                                # 2. If valid, prompt out-of-spec warning. If not valid, raise argparse error without prompt.
+                                # This ensures users are only prompted for valid inputs that may be out-of-spec, not for invalid inputs.
+                                amdsmi_helpers.confirm_out_of_spec_warning()
                                 # Store as tuple: (percentage_value, is_percentage=True)
                                 setattr(args, self.dest, (percentage_value, True))
                             else:
@@ -1621,7 +1633,10 @@ class AMDSMIParser(argparse.ArgumentParser):
                 "-p", "--partition", action="store_true", required=False, help=partition_help
             )
 
-            mem_carveout_help = "Display VRAM carveout memory options and current setting"
+            mem_carveout_help = (
+                "Display VRAM carveout memory options and current setting."
+                "\n\tOnly supported on some APUs."
+            )
             static_parser.add_argument(
                 "-m", "--mem-carveout", action="store_true", required=False, help=mem_carveout_help
             )
@@ -2408,7 +2423,7 @@ class AMDSMIParser(argparse.ArgumentParser):
                 set_perf_level_help = (
                     f"Set one of the following performance levels:\n\t{perf_level_help_choices_str}"
                 )
-                power_profile_choices_str = ", ".join(self.helpers.get_power_profiles()[0:-1])
+                power_profile_choices_str = ", ".join(self.helpers.get_power_profiles())
                 set_profile_help = f"Set power profile level (#) or choose one of available profiles:\n\t{power_profile_choices_str}"
                 set_perf_det_help = (
                     "Enable performance determinism mode and set GFXCLK softmax limit (in MHz)"
@@ -2511,6 +2526,8 @@ class AMDSMIParser(argparse.ArgumentParser):
                     "-P",
                     "--profile",
                     action="store",
+                    choices=self.helpers.get_power_profiles(),
+                    type=str.upper,
                     required=False,
                     help=set_profile_help,
                     metavar="PROFILE_LEVEL",
@@ -2624,7 +2641,11 @@ class AMDSMIParser(argparse.ArgumentParser):
             )
 
             if self.helpers.is_baremetal():
-                set_mem_carveout_help = "Set VRAM carveout size by option index.\n\tUse `amd-smi static --mem-carveout` to see available options."
+                set_mem_carveout_help = (
+                    "Set VRAM carveout size by option index."
+                    "\n\tUse `amd-smi static --mem-carveout` to see available options."
+                    "\n\tOnly supported on some APUs; a reboot is required after setting."
+                )
                 set_value_exclusive_group.add_argument(
                     "-m",
                     "--mem-carveout",
@@ -3033,16 +3054,19 @@ class AMDSMIParser(argparse.ArgumentParser):
         monitor_parser.add_argument(
             "-q", "--process", action="store_true", required=False, help=process_help
         )
-        monitor_parser.add_argument(
-            "-nic", "--brcm_nic", action="store_true", required=False, help=nic_monitor_help
-        )
-        monitor_parser.add_argument(
-            "-switch",
-            "--brcm_switch",
-            action="store_true",
-            required=False,
-            help=switch_monitor_help,
-        )
+
+        if self.helpers.is_brcm_nic_initialized():
+            monitor_parser.add_argument(
+                "-nic", "--brcm_nic", action="store_true", required=False, help=nic_monitor_help
+            )
+        if self.helpers.is_brcm_switch_initialized():
+            monitor_parser.add_argument(
+                "-switch",
+                "--brcm_switch",
+                action="store_true",
+                required=False,
+                help=switch_monitor_help,
+            )
         if not self.helpers.is_virtual_os():
             monitor_parser.add_argument(
                 "-V", "--violation", action="store_true", required=False, help=violation_help
