@@ -75,6 +75,7 @@ typedef enum rocprofiler_rccl_api_id_t  // NOLINT(performance-enum-size)
     ROCPROFILER_RCCL_API_ID_ncclCommShrink,
     ROCPROFILER_RCCL_API_ID_ncclCommWindowRegister,
     ROCPROFILER_RCCL_API_ID_ncclCommWindowDeregister,
+    ROCPROFILER_RCCL_API_ID_ncclCommRevoke,
 #endif
 #if RCCL_API_TRACE_VERSION_PATCH >= 3
     ROCPROFILER_RCCL_API_ID_ncclAlltoAll,

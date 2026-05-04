@@ -239,6 +239,8 @@ typedef ncclResult_t (*ncclCommRegister_fn_t)(const ncclComm_t comm,
 
 typedef ncclResult_t (*ncclCommDeregister_fn_t)(const ncclComm_t comm, void* handle);
 
+typedef ncclResult_t (*ncclCommRevoke_fn_t)(ncclComm_t comm, int revokeFlags);
+
 typedef ncclResult_t (*ncclCommWindowRegister_fn_t)(ncclComm_t    comm,
                                                     void*         buff,
                                                     size_t        size,
@@ -307,6 +309,7 @@ typedef struct rcclApiFuncTable
     ncclCommShrink_fn_t           ncclCommShrink_fn;
     ncclCommWindowRegister_fn_t   ncclCommWindowRegister_fn;
     ncclCommWindowDeregister_fn_t ncclCommWindowDeregister_fn;
+    ncclCommRevoke_fn_t           ncclCommRevoke_fn;
     ncclAlltoAll_fn_t             ncclAlltoAll_fn;
     ncclAlltoAllv_fn_t            ncclAlltoAllv_fn;
 } rcclApiFuncTable;
