@@ -1184,6 +1184,14 @@ ncclResult_t bootstrapInit(int nHandles, void* handles, struct ncclComm* comm) {
   // OOB net enabled). If true, we create the reverse listen *before* sendToRoot so its
   // handle piggybacks the existing root rendezvous (no extra RTT).
   bool wantNetBidir = ncclParamBootstrapNetEnable() && bootstrapBidirEnabled(nranks, 1);
+  // [RCCL] Same idea for the socket-bidir dedicated reverse TCP pair (sep-pair commit
+  // 919fdf3063): each rank stashes its rev-listen sockaddr into info.connectInfo.revHandle
+  // and expects to receive prev rank's rev-listen back through the rendezvous. The flat
+  // root path arranges this naturally; the PMIx fast-path needs an explicit prev-Get
+  // below (see "wantNetBidir || wantSocketBidir"). Without this, revHandle stays zero
+  // on the PMIx + socket-bidir path, the rev TCP pair connects to 0.0.0.0 (loopback),
+  // and the first post-init bootstrapAllGather hangs in Ring1 on a self-loop.
+  bool wantSocketBidir = !ncclParamBootstrapNetEnable() && bootstrapBidirEnabled(nranks, 0);
 
   NCCLCHECK(ncclCalloc(&state, 1));
   state->rank = rank;
@@ -1316,10 +1324,15 @@ ncclResult_t bootstrapInit(int nHandles, void* handles, struct ncclComm* comm) {
     NCCLCHECK(pmixGetPeerInfo(next, nranks, &peer));
     nextPeer = peer.connectInfo;
 
-    // The flat path also delivers prev rank's revHandle inside nextPeer for
-    // bidir IB. Replicate that here by Get'ing prev's payload too — same
-    // KV store, no extra fence (prev already published in step 2).
-    if (wantNetBidir) {
+    // The flat path also delivers prev rank's revHandle inside nextPeer — for
+    // both IB bidir (raw IB connect blob) and socket-bidir sep-pair (rev-listen
+    // sockaddr packed into the same union, since 919fdf3063). Replicate that
+    // here by Get'ing prev's payload too — same KV store, no extra fence
+    // (prev already published in step 2). Required for socket-bidir as well
+    // as IB bidir; omitting the socket case leaks zeros into revHandle and
+    // the rev TCP pair connects to 0.0.0.0 (loopback) instead of the prev
+    // rank, which hangs the first bootstrapAllGather post-init.
+    if (wantNetBidir || wantSocketBidir) {
       int prev = (rank - 1 + nranks) % nranks;
       struct extInfo prevInfo = {0};
       NCCLCHECK(pmixGetPeerInfo(prev, nranks, &prevInfo));
