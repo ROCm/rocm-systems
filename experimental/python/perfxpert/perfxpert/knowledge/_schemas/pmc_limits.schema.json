@@ -1,18 +1,32 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "type": "object",
-  "required": ["per_block_limits"],
+  "required": ["gpu_arch_limits", "per_block_limits"],
   "properties": {
+    "gpu_arch_limits": {
+      "type": "object",
+      "description": "Maximum raw hardware counters per block per rocprofv3 pass, keyed by GPU architecture",
+      "patternProperties": {
+        "^gfx[0-9a-z]+$": {
+          "type": "object",
+          "minProperties": 1,
+          "patternProperties": {
+            "^[A-Z][A-Z0-9_]*$": {"type": "integer", "minimum": 1}
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
     "per_block_limits": {
       "type": "object",
-      "description": "Maximum raw hardware counters per block per rocprofv3 pass",
+      "description": "Fallback maximum raw hardware counters per block per rocprofv3 pass",
       "patternProperties": {
         "^[A-Z][A-Z0-9_]*$": {
           "type": "object",
           "required": ["limit"],
           "properties": {
             "limit": {"type": "integer", "minimum": 1},
-            "gfx942_limit": {"type": "integer", "minimum": 1},
             "note": {"type": "string"}
           },
           "additionalProperties": false

@@ -324,7 +324,7 @@ pc_sampling_service_finish_configuration(context::pc_sampling_service* service)
             pc_sampling::utils::get_matching_hsa_pcs_units(agent_session->unit),
             agent_session->interval,
             pc_sampling::utils::get_hsa_pcs_latency(),
-            pc_sampling::utils::get_hsa_pcs_buffer_size(),
+            pc_sampling::utils::get_hsa_pcs_buffer_size(agent_session->agent->gfx_target_version),
             data_ready_callback,
             agent_session.get(),
             &agent_session->hsa_pc_sampling);

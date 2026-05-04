@@ -228,11 +228,36 @@ class RocprofsysConfig:
         for key, value in os.environ.items():
             if key.startswith(("OMPI_", "ROCPROFSYS_")):
                 env[key] = value
+
+        # Forward sanitizer runtime options so pytest-launched binaries honor
+        # the suppression files / exitcode set by the CI workflow.
+        for key in (
+            "ASAN_OPTIONS",
+            "LSAN_OPTIONS",
+            "UBSAN_OPTIONS",
+            "TSAN_OPTIONS",
+            "ASAN_SYMBOLIZER_PATH",
+        ):
+            if key in os.environ:
+                env[key] = os.environ[key]
+
+        # When the address sanitizer is in use the example binaries are not
+        # built with -fsanitize=address, so libasan only enters the process via
+        # librocprof-sys-dl.so as a transitive DT_NEEDED. Asan refuses to
+        # initialize unless its runtime is first in the link order, so prepend
+        # libasan to LD_PRELOAD; rocprof-sys-run later appends librocprof-sys-dl
+        # via update_mode::APPEND, preserving "asan first".
+        asan_library = os.environ.get("ASAN_LIBRARY")
+        if asan_library:
+            existing = os.environ.get("LD_PRELOAD", "")
+            env["LD_PRELOAD"] = f"{asan_library}:{existing}" if existing else asan_library
+
         return env
 
     def get_base_environment(self) -> dict[str, str]:
         """Get base environment variables for test execution."""
         return {
+            "ROCPROFSYS_DEFAULT_MIN_INSTRUCTIONS": "64",
             "ROCPROFSYS_CI": "ON",
             "ROCPROFSYS_CI_TIMEOUT": os.environ.get("ROCPROFSYS_CI_TIMEOUT", "300"),
             "ROCPROFSYS_CONFIG_FILE": "",
