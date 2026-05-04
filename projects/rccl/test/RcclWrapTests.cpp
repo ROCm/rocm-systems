@@ -15,6 +15,7 @@
 #include "common/ProcessIsolatedTestRunner.hpp"
 #include "debug.h"
 #include "graph/topo.h"
+#include "net.h"
 #include "rocmwrap.h"
 
 namespace RcclUnitTesting
@@ -1351,6 +1352,107 @@ check_sticky:
         << "CUCHECKGOTO should set result to ncclUnhandledCudaError on failure";
     EXPECT_EQ(hipSuccess, hipGetLastError())
         << "CUCHECKGOTO must clear sticky HIP error after failure";
+}
+
+TEST(Rcclwrap, RcclUseAllGatherDirectNodeCountTests)
+{
+    TEST_INFO("=== Starting Process-Isolated rcclUseAllGatherDirect Node Count Tests ===");
+
+    // Test case structure for AllGather Direct node-count gating tests
+    struct AGDirectNodeCountTestCase
+    {
+        std::string                                  name;
+        std::string                                  arch;
+        int                                          nRanks;
+        int                                          nNodes;
+        bool                                         requiresAinic; // Skip if AINIC not present
+        std::unordered_map<std::string, std::string> extraEnv;
+    };
+
+    std::vector<AGDirectNodeCountTestCase> testCases = {
+        // nNodes > 32: must return false for any NIC type (hardware-independent)
+        {
+            "AGDirect_Disabled_nNodes33",
+            "gfx942",
+            128, // >= 64 ranks so PXN is enabled for gfx942
+            33,  // > 32 nodes
+            false,
+            {}
+        },
+        // nNodes > 16 with AINIC: must return false (skipped when AINIC hardware absent)
+        {
+            "AGDirect_Disabled_AINIC_nNodes17",
+            "gfx942",
+            128, // >= 64 ranks so PXN is enabled for gfx942
+            17,  // > 16 nodes
+            true,
+            {}
+        },
+    };
+
+    // Base environment: clean state, no env vars that would short-circuit earlier checks
+    std::unordered_map<std::string, std::string> baseEnv = {
+        {       "NCCL_DEBUG", "TRACE"},
+        {"NCCL_DEBUG_SUBSYS",   "ALL"}
+    };
+
+    for(const auto& tc : testCases)
+    {
+        ProcessIsolatedTestRunner::registerTest(
+            ProcessIsolatedTestRunner::TestConfig(
+                tc.name,
+                [tc]()
+                {
+                    // Skip AINIC tests when AINIC hardware is not present, since
+                    // rcclUseAinic() relies on hardware detection and cannot be
+                    // forced in a test environment without actual AINIC NICs.
+                    if(tc.requiresAinic && !rcclUseAinic())
+                    {
+                        GTEST_SKIP() << "Skipping " << tc.name
+                                     << ": AINIC hardware not present";
+                        return;
+                    }
+
+                    ncclComm_t            mockComm = nullptr;
+                    struct ncclTopoSystem mockTopo;
+                    struct ncclTopoNode   mockGpuNode;
+                    CreateMockComm(mockComm, mockTopo, mockGpuNode, tc.arch.c_str(), tc.nRanks);
+                    mockComm->nNodes = tc.nNodes;
+
+                    // Use a message size that passes the threshold check so only
+                    // the node-count guards are responsible for any false return.
+                    size_t msgSize = 8388608; // 8 MiB
+
+                    bool result = rcclUseAllGatherDirect(mockComm, msgSize);
+
+                    EXPECT_FALSE(result)
+                        << "Expected rcclUseAllGatherDirect to return false for "
+                        << tc.arch << " with nNodes=" << tc.nNodes;
+
+                    CleanupMockComm(mockComm);
+                }
+            )
+                .withEnvironment(
+                    [&tc, &baseEnv]()
+                    {
+                        auto env = baseEnv;
+                        env.insert(tc.extraEnv.begin(), tc.extraEnv.end());
+                        return env;
+                    }()
+                )
+                .withTimeout(std::chrono::seconds(60))
+        );
+    }
+
+    ProcessIsolatedTestRunner::ExecutionOptions options;
+    options.stopOnFirstFailure = false;
+    options.verboseLogging     = true;
+
+    bool allTestsPassed = ProcessIsolatedTestRunner::executeAllTests(options);
+
+    EXPECT_TRUE(allTestsPassed) << "One or more AllGather Direct node count tests failed";
+
+    TEST_INFO("=== Process-Isolated rcclUseAllGatherDirect Node Count Tests Completed ===");
 }
 
 } // namespace RcclUnitTesting

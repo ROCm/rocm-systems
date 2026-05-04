@@ -135,7 +135,7 @@ driver and make sure that any resources held by AMD SMI are released.
        for (uint32_t j=0; j < device_count; j++) {
          // Get device type. Since the amdsmi is initialized with
          // AMD_SMI_INIT_AMD_GPUS, the processor_type must be AMDSMI_PROCESSOR_TYPE_AMD_GPU.
-         processor_type_t processor_type;
+         amdsmi_processor_type_t processor_type;
          ret = amdsmi_get_processor_type(processor_handles[j], &processor_type);
          if (processor_type != AMDSMI_PROCESSOR_TYPE_AMD_GPU) {
            std::cout << "Expect AMDSMI_PROCESSOR_TYPE_AMD_GPU device type!\n";
@@ -202,7 +202,7 @@ driver and make sure that any resources held by AMD SMI are released.
            uint32_t cpu_count = 0;
 
            // Set processor type as AMDSMI_PROCESSOR_TYPE_AMD_CPU
-           processor_type_t processor_type = AMDSMI_PROCESSOR_TYPE_AMD_CPU;
+           amdsmi_processor_type_t processor_type = AMDSMI_PROCESSOR_TYPE_AMD_CPU;
            ret = amdsmi_get_processor_handles_by_type(sockets[i], processor_type, nullptr, &cpu_count);
 
            // Allocate the memory for the cpus

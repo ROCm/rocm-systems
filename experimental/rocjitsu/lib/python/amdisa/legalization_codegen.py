@@ -13,6 +13,9 @@ Generates:
 from __future__ import annotations
 
 from pathlib import Path
+import shutil
+import subprocess
+import sys
 
 from amdisa.legalization import LegalizationEntry
 
@@ -39,6 +42,23 @@ def _pair_name(src: str, dst: str) -> str:
     return f'{src}_to_{dst}'
 
 
+def _clang_format(path: Path) -> None:
+    """Format emitted C++ headers when clang-format is available.
+
+    The generator emits simple 4-space templates; formatting here keeps the
+    checked-in generated headers aligned with rocjitsu's 2-space C++ style.
+    """
+    exe = shutil.which('clang-format')
+    if exe is None:
+        print('warning: clang-format not found; emitted files may need manual '
+              'formatting', file=sys.stderr)
+        return
+    try:
+        subprocess.run([exe, '-i', str(path)], check=True)
+    except subprocess.CalledProcessError as exc:
+        print(f'warning: clang-format failed for {path}: {exc}', file=sys.stderr)
+
+
 def emit_all(
     output_dir: str | Path,
     pairs: list[tuple[str, str, list[LegalizationEntry]]],
@@ -49,6 +69,7 @@ def emit_all(
 
     types_path = output_dir / 'legalization_types.h'
     _emit_types(types_path)
+    _clang_format(types_path)
     generated.append(str(types_path))
 
     for src, dst, entries in pairs:
@@ -79,6 +100,7 @@ def emit_all(
             e.src_opcode))
         pair_path = output_dir / f'legalization_{_pair_name(src, dst)}.h'
         _emit_pair(pair_path, src, dst, sorted_entries)
+        _clang_format(pair_path)
         generated.append(str(pair_path))
 
     return generated
