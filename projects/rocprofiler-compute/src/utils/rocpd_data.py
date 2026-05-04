@@ -282,6 +282,8 @@ def _stream_db_marker_trace(
     """
     try:
         with closing(conn.execute(MARKER_API_TRACE_QUERY)) as cursor:
+            if cursor.description is None:
+                return header_written
             if not header_written:
                 writer.writerow([desc[0] for desc in cursor.description])
                 header_written = True
@@ -308,6 +310,8 @@ def _stream_db_counters(
     """
     try:
         with closing(conn.execute(COUNTERS_COLLECTION_QUERY)) as cursor:
+            if cursor.description is None:
+                return 0, header_written
             column_positions = {
                 desc[0]: idx for idx, desc in enumerate(cursor.description)
             }
