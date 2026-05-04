@@ -207,6 +207,12 @@ class IpcSdmaImpl : public IpcOnImpl {
   void assignSdmaChannel(unsigned int ctx_id) {
     if (sdmaImpl_.numChannels > 0) {
       sdmaImpl_.sdmaChannel = ctx_id % sdmaImpl_.numChannels;
+      // stride=1 (spread wf_id across channels) for the default context (ctx_id=0,
+      // shared by all WGs) or when ROCSHMEM_SDMA_SPREAD_CHANNELS=1 forces it.
+      // Per-WG contexts (ctx_id>=1) already distribute across channels via ctx_id;
+      // the wf_id offset would only reshuffle contention without reducing it.
+      sdmaImpl_.sdmaChannelStride =
+          ((ctx_id == 0) || static_cast<bool>(envvar::sdma::spread_channels)) ? 1 : 0;
     }
   }
 

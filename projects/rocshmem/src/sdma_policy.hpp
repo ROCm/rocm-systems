@@ -49,7 +49,8 @@ class SdmaImpl {
   uint64_t sdmaDirty{0};
   size_t sdmaThreshold{256};  // Use SDMA for transfers >= 256B
   int numChannels{1};
-  int sdmaChannel{0};  // Per-context channel index (fallback / quietAll path)
+  int sdmaChannel{0};       // Per-context base channel (= ctx_id % numChannels)
+  int sdmaChannelStride{0}; // 0 = use sdmaChannel as-is; 1 = add wf_id offset
 
   // Device resources - 2D array: [shm_size * numChannels]
   // Index as: deviceHandles_d[local_pe * numChannels + sdmaChannel]
@@ -63,25 +64,22 @@ class SdmaImpl {
   __host__ void sdmaHostInit(int pe, int num_pes, TcpBootstrap* bootstrap);
   __host__ void sdmaHostStop();
 
-  // Device-side copy with warp-affine channel selection to minimise CAS contention.
+  // Device-side copy with optional wavefront-affine channel spreading.
   //
-  // The ctx-level sdmaChannel (= ctx_id % numChannels) already distributes blocks
-  // across channels.  However, each block's warp_group has kNumWarpsPerGroup warps
-  // that all call put_nbi_warp for the same destination PE — each wavefront fires
-  // its own CAS into the same (sdmaChannel, dest_PE) ring, causing up to
-  // kNumWarpsPerGroup-way intra-block CAS contention on top of the inter-block load.
+  // sdmaChannelStride controls the mode (set host-side in assignSdmaChannel):
   //
-  // Offsetting by the warp index within the workgroup gives each wavefront its own
-  // dedicated ring: (sdmaChannel + warp_id_in_wg) % numChannels.  With 8 warps and
-  // 8 channels the intra-block contention drops to zero; inter-block contention on
-  // any single ring drops from (numBlocks/numChannels * kNumWarpsPerGroup) to just
-  // (numBlocks/numChannels).
+  // - 0 (default for per-WG contexts, ctx_id>=1): effective_channel = sdmaChannel.
+  //   wg_ctx_create already distributes WGs across channels via ctx_id % numChannels;
+  //   adding a wf_id offset would only reshuffle contention without reducing it.
+  //
+  // - 1 (default context ctx_id=0, or ROCSHMEM_SDMA_SPREAD_CHANNELS=1):
+  //   effective_channel = (sdmaChannel + wf_id) % numChannels.
+  //   When all WGs share one context, the offset spreads N*W wavefronts across
+  //   W channels, reducing per-channel CAS contention from N*W to N.
   __device__ anvil::SdmaQueueDeviceHandle* sdmaCopy(void* dst, void* src,
-                                                     size_t size, int local_pe) {
-    // AMD wavefront is 64 threads wide (gfx9/gfx10/gfx11 with wave64 mode).
-    constexpr int kWavefrontSize = 64;
-    int warp_id_in_wg = static_cast<int>(threadIdx.x / kWavefrontSize);
-    int effective_channel = (sdmaChannel + warp_id_in_wg) % numChannels;
+                                                    size_t size, int local_pe) {
+    int effective_channel = (sdmaChannel +
+        sdmaChannelStride * (get_flat_block_id() / WF_SIZE)) % numChannels;
     int idx = local_pe * numChannels + effective_channel;
     anvil::SdmaQueueDeviceHandle* handle = deviceHandles_d[idx];
     if (handle != nullptr) {
@@ -102,10 +100,8 @@ class SdmaImpl {
   // Wait for SDMA completions for a specific PE across all channels.
   // Atomically clears all (local_pe, ch) dirty bits and drains only the
   // channels that had pending work on that context.
-  //
-  // .  The caller must use rocshmem_ctx_fence(ctx, pe)
-  // for it to read sdmaDirty from the same context (and SdmaImpl) that submitted the puts.
-  // ensuring sdmaDirty reflects the actual pending channels.
+  // The caller must use rocshmem_ctx_fence(ctx, pe) for it to read sdmaDirty from
+  // the same context (and SdmaImpl) that submitted the puts.
   __device__ void sdmaQuiet(int local_pe) {
     // Build mask covering all channels for this PE.
     uint64_t pe_mask = ((1ULL << numChannels) - 1) << (local_pe * numChannels);
