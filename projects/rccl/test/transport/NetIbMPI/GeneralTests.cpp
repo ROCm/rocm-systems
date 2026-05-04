@@ -1118,20 +1118,15 @@ TEST_F(NetIbMPITest, MultiRecv) {
     };
 
     auto FillPattern = [&](void* buf, size_t size, int batch, int slot) {
-        uint8_t* p = static_cast<uint8_t*>(buf);
-        for (size_t j = 0; j < size; j++) {
-            p[j] = static_cast<uint8_t>((batch * 17 + slot * 31 + j) % kBytePatternModulo);
-        }
+        fillHostBufferWithPattern<uint8_t>(buf, size, [batch, slot](size_t j) {
+            return static_cast<uint8_t>((batch * 17 + slot * 31 + j) % 256);
+        });
     };
 
     auto CheckPattern = [&](void* buf, size_t size, int batch, int slot) -> bool {
-        uint8_t* p = static_cast<uint8_t*>(buf);
-        for (size_t j = 0; j < size; j++) {
-            uint8_t expected =
-                static_cast<uint8_t>((batch * 17 + slot * 31 + j) % kBytePatternModulo);
-            if (p[j] != expected) return false;
-        }
-        return true;
+        return verifyHostBufferData<uint8_t>(buf, size, [batch, slot](size_t j) {
+            return static_cast<uint8_t>((batch * 17 + slot * 31 + j) % 256);
+        });
     };
 
     ConnectionPair pair;
@@ -1276,20 +1271,15 @@ TEST_F(NetIbMPITest, MultiRecvShuffled) {
     static constexpr int kSendOrder[kWidth] = {5, 2, 7, 0, 6, 3, 1, 4};
 
     auto FillPattern = [&](void* buf, size_t size, int batch, int msgId) {
-        uint8_t* p = static_cast<uint8_t*>(buf);
-        for (size_t j = 0; j < size; j++) {
-            p[j] = static_cast<uint8_t>((batch * 19 + msgId * 37 + j) % kBytePatternModulo);
-        }
+        fillHostBufferWithPattern<uint8_t>(buf, size, [batch, msgId](size_t j) {
+            return static_cast<uint8_t>((batch * 19 + msgId * 37 + j) % 256);
+        });
     };
 
     auto CheckPattern = [&](void* buf, size_t size, int batch, int msgId) -> bool {
-        uint8_t* p = static_cast<uint8_t*>(buf);
-        for (size_t j = 0; j < size; j++) {
-            uint8_t expected =
-                static_cast<uint8_t>((batch * 19 + msgId * 37 + j) % kBytePatternModulo);
-            if (p[j] != expected) return false;
-        }
-        return true;
+        return verifyHostBufferData<uint8_t>(buf, size, [batch, msgId](size_t j) {
+            return static_cast<uint8_t>((batch * 19 + msgId * 37 + j) % 256);
+        });
     };
 
     ConnectionPair pair;

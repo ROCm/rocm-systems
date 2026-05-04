@@ -1841,18 +1841,15 @@ TEST_F(NetIbMPITest, MultiRecvGPUShuffled) {
 
     // Patterns keyed by msgId (same formula as MultiRecvShuffled for consistency)
     auto FillPattern = [&](uint8_t* hostBuf, size_t size, int batch, int msgId) {
-        for (size_t j = 0; j < size; j++) {
-            hostBuf[j] = static_cast<uint8_t>((batch * 19 + msgId * 37 + j) % kBytePatternModulo);
-        }
+        fillHostBufferWithPattern<uint8_t>(hostBuf, size, [batch, msgId](size_t j) {
+            return static_cast<uint8_t>((batch * 19 + msgId * 37 + j) % 256);
+        });
     };
 
     auto CheckPattern = [&](const uint8_t* hostBuf, size_t size, int batch, int msgId) -> bool {
-        for (size_t j = 0; j < size; j++) {
-            uint8_t expected =
-                static_cast<uint8_t>((batch * 19 + msgId * 37 + j) % kBytePatternModulo);
-            if (hostBuf[j] != expected) return false;
-        }
-        return true;
+        return verifyHostBufferData<uint8_t>(hostBuf, size, [batch, msgId](size_t j) {
+            return static_cast<uint8_t>((batch * 19 + msgId * 37 + j) % 256);
+        });
     };
 
     ConnectionPair pair;
