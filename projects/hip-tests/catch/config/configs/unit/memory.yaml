@@ -322,7 +322,9 @@ memory:
     tags: []
   Unit_hipHostRegister_ReferenceFromKernelandhipMemset:
     <<: *level_2
+    # disabling due to flaky segfault in CI nightly https://github.com/ROCm/TheRock/issues/4111
     tags: []
+    disabled: [amd_linux]
   Unit_hipHostRegister_DirectReferenceFromKernel: *level_2
   Unit_hipHostRegister_DirectReferenceMultGpu:
     <<: *level_2
@@ -344,6 +346,8 @@ memory:
   Unit_hipHostRegister_Perform_hipMemcpy:
     <<: *level_2
     tags: [alloc]
+    # disabled due to flaky segfault in CI nightly https://github.com/ROCm/TheRock/issues/4111
+    disabled: [amd_linux]
   Unit_hipHostRegister_AsyncApis:
     <<: *level_2
     tags: [alloc]

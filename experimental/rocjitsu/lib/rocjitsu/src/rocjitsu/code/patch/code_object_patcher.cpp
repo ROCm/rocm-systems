@@ -18,6 +18,32 @@ RJ_DIAGNOSTIC_POP
 #include <elf.h>
 
 namespace rocjitsu {
+namespace {
+
+struct Wave64DescriptorPatchInfo {
+  uint32_t vgpr_granularity;  // rsrc1 encodes (actual_vgprs / granularity) - 1.
+  bool clear_rsrc1_mode_bits; // GFX12 deprecates DX10_CLAMP and IEEE_MODE.
+};
+
+Wave64DescriptorPatchInfo wave64_descriptor_patch_info(rj_code_arch_t target_arch) {
+  // Keep per-generation descriptor conventions in one place so adding a new
+  // RDNA target does not require scattering magic constants through the patcher.
+  switch (target_arch) {
+  case ROCJITSU_CODE_ARCH_RDNA1:
+  case ROCJITSU_CODE_ARCH_RDNA2:
+  case ROCJITSU_CODE_ARCH_RDNA3:
+  case ROCJITSU_CODE_ARCH_RDNA3_5:
+    return {8u, false};
+  case ROCJITSU_CODE_ARCH_RDNA4:
+    return {12u, true};
+  default:
+    // Unknown targets keep the older GFX10/GFX11-compatible behavior: 8-VGPR
+    // granularity and preserved floating-point mode bits.
+    return {8u, false};
+  }
+}
+
+} // namespace
 
 CodeObjectPatcher::CodeObjectPatcher(const AmdGpuCodeObject &obj)
     : image_(obj.image_data(), obj.image_data() + obj.image_size()), text_offset_(0),
@@ -48,9 +74,13 @@ void CodeObjectPatcher::update_elf_flags(uint32_t new_mach) {
   ehdr->e_flags = (ehdr->e_flags & ~0xFFu) | (new_mach & 0xFFu);
 }
 
-void CodeObjectPatcher::patch_kernel_descriptors_for_wave64() {
+void CodeObjectPatcher::patch_kernel_descriptors_for_wave64(rj_code_arch_t target_arch) {
   using KD = rocr::llvm::amdhsa::kernel_descriptor_t;
   namespace kd = rocr::llvm::amdhsa;
+
+  // Select target-specific descriptor policy once; the loop below only applies
+  // the policy while walking each kernel descriptor in the code object.
+  const Wave64DescriptorPatchInfo target_info = wave64_descriptor_patch_info(target_arch);
 
   auto *ehdr = reinterpret_cast<Elf64_Ehdr *>(image_.data());
   if (ehdr->e_shoff + static_cast<uint64_t>(ehdr->e_shnum) * sizeof(Elf64_Shdr) > image_.size())
@@ -91,9 +121,9 @@ void CodeObjectPatcher::patch_kernel_descriptors_for_wave64() {
 
       auto *kd = reinterpret_cast<KD *>(image_.data() + file_off);
 
-      // --- compute_pgm_rsrc1: translate GFX9 → GFX12 ---
+      // --- compute_pgm_rsrc1: translate GFX9 → GFX10+ ---
 
-      // VGPR granularity: GFX9 wave64 uses granularity 8, RDNA4 wave64 uses 12.
+      // VGPR granularity: GFX9/GFX11 wave64 use 8, RDNA4 wave64 uses 12.
       // On CDNA3/4, AccVGPRs occupy the upper portion of the unified VGPR file.
       // ACCUM_OFFSET in rsrc3 indicates where AccVGPRs start: (offset+1)*4.
       // The translated code must allocate enough VGPRs for both ranges.
@@ -109,18 +139,22 @@ void CodeObjectPatcher::patch_kernel_descriptors_for_wave64() {
       // Semantic lowering (e.g., MFMA→WMMA) injects instructions that need
       // temp VGPRs found via liveness analysis. Ensure enough headroom.
       actual_vgprs = std::max(actual_vgprs, 128u);
-      uint32_t rdna4_vgpr_gran = std::max(1u, (actual_vgprs + 11) / 12 - 1);
+      uint32_t target_vgpr_gran =
+          (actual_vgprs + target_info.vgpr_granularity - 1) / target_info.vgpr_granularity - 1;
       AMDHSA_BITS_SET(kd->compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
-                      rdna4_vgpr_gran);
+                      target_vgpr_gran);
 
       // SGPR granularity: on GFX10+, the field is ignored by hardware but must
       // be set for the runtime. Use 0 (8 SGPRs) which matches native compilers.
       AMDHSA_BITS_SET(kd->compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
                       0);
 
-      // DX10_CLAMP and IEEE_MODE are deprecated on GFX12 — clear them.
-      AMDHSA_BITS_SET(kd->compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_ENABLE_DX10_CLAMP, 0);
-      AMDHSA_BITS_SET(kd->compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_ENABLE_IEEE_MODE, 0);
+      // DX10_CLAMP and IEEE_MODE are deprecated on GFX12. Preserve them for
+      // GFX11, where they still affect floating-point behavior.
+      if (target_info.clear_rsrc1_mode_bits) {
+        AMDHSA_BITS_SET(kd->compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_ENABLE_DX10_CLAMP, 0);
+        AMDHSA_BITS_SET(kd->compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_ENABLE_IEEE_MODE, 0);
+      }
 
       // Set GFX10+ required mode bits.
       AMDHSA_BITS_SET(kd->compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_WGP_MODE, 1);

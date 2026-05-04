@@ -108,6 +108,19 @@ std::unique_ptr<cpu_collector_t> g_cpu_collector;
 
 std::vector<collectors::collector_slice> g_collector_slices;
 
+std::atomic<bool> g_reinit_pending{ false };
+
+void
+reinit_if_pending()
+{
+    bool _expected = true;
+    if(!g_reinit_pending.compare_exchange_strong(_expected, false)) return;
+
+    LOG_DEBUG("Performing deferred PMC reinit after fork.");
+    shutdown();
+    setup();
+}
+
 }  // namespace
 
 void
@@ -130,6 +143,8 @@ config()
 void
 sample()
 {
+    reinit_if_pending();
+
     auto_lock_t _lk{ type_mutex<category::amd_smi>() };
 
     if(pmc::get_state() != State::Active)
@@ -269,9 +284,10 @@ postfork_child_cleanup()
 void
 postfork_parent_reinit()
 {
-    LOG_DEBUG("Reinitializing PMC sampling in parent process after fork.");
-    shutdown();
-    setup();
+    // Cannot call shutdown()/setup() here: setup() queries AMD SMI, which
+    // internally calls fork(), which would re-enter the postfork handler
+    // chain while glibc still holds __fork_lock. Defer to next sample().
+    g_reinit_pending.store(true);
 }
 
 }  // namespace rocprofsys::pmc

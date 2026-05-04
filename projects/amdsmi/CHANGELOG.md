@@ -76,6 +76,13 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Updated memory API documentation**  
     Added note that the sum of per-process memory usage is not expected to equal total usage.
 
+### Optimized
+
+- **Optimized `rsmi_dev_device_identifiers_get()` in the ROCm-SMI device layer**.  
+  - Removed unnecessary iteration by directly indexing the device list.
+  - Added bounds checking for `device_id`, with clearer error handling/logging.
+  - Improves performance for device identifier queries.
+
 ### Resolved Issues
 
 - **Fixed `amd-smi metric` crashing with `TypeError` on MI300A when no CPU flags are specified**.  

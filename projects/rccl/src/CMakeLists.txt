@@ -398,6 +398,10 @@ add_custom_target(copy_nccl_device_headers DEPENDS ${NCCL_DEVICE_HEADER})
 # available before compiling the unit tests executable(s)
 add_custom_target(hipify_all DEPENDS ${HIP_SOURCES})
 
+# Serialize copy after full hipify: prevents previous race condition where copying of nccl device headers
+# could proceed before hipify_all stage had completed.
+add_dependencies(copy_nccl_device_headers hipify_all)
+
 # Add the generated net_ib_rocm.cc file (created by rocmIb.cmake in the staging area)
 # This file is patched and transformed directly into HIPIFY_DIR, bypassing the hipify step
 list(APPEND HIP_SOURCES "${HIPIFY_DIR}/src/transport/net_ib_rocm.cc")
