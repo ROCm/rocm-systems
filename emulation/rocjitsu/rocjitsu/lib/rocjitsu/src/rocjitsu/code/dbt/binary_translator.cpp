@@ -12,6 +12,7 @@
 #include "rocjitsu/code/dbt/generated/legalization_cdna4_to_rdna3.h"
 #include "rocjitsu/code/dbt/generated/legalization_cdna4_to_rdna4.h"
 #include "rocjitsu/code/dbt/generated/legalization_types.h"
+#include "rocjitsu/code/dbt/kernel_descriptor_translator.h"
 #include "rocjitsu/code/dbt/semantic_translator.h"
 #include "rocjitsu/code/patch/code_object_patcher.h"
 #include "rocjitsu/code/patch/instruction_builder.h"
@@ -62,11 +63,10 @@ LegalizationLookupFn select_legalization(rj_code_arch_t guest, rj_code_arch_t ho
   return nullptr;
 }
 
-[[nodiscard]] std::vector<uint64_t>
-kernel_entry_offsets(std::span<const KernelDescriptorInfo> kernels) {
+[[nodiscard]] std::vector<uint64_t> kernel_entry_offsets(std::span<const KdTranslation> kernels) {
   std::vector<uint64_t> offsets;
   offsets.reserve(kernels.size());
-  for (const KernelDescriptorInfo &kernel : kernels)
+  for (const KdTranslation &kernel : kernels)
     offsets.push_back(kernel.entry_text_offset);
 
   std::ranges::sort(offsets);
@@ -75,7 +75,7 @@ kernel_entry_offsets(std::span<const KernelDescriptorInfo> kernels) {
 }
 
 struct KernelTranslationScope {
-  const KernelDescriptorInfo *info = nullptr;
+  const KdTranslation *translation = nullptr;
   BasicBlock *entry = nullptr;
   std::vector<BasicBlock *> blocks;
 };
@@ -113,17 +113,17 @@ reachable_kernel_blocks(const std::vector<std::unique_ptr<BasicBlock>> &blocks, 
 
 [[nodiscard]] std::vector<KernelTranslationScope>
 kernel_translation_scopes(const std::vector<std::unique_ptr<BasicBlock>> &blocks,
-                          std::span<const KernelDescriptorInfo> kernels) {
+                          std::span<const KdTranslation> kernels) {
   std::vector<KernelTranslationScope> scopes;
   const auto entries = kernel_entry_offsets(kernels);
   if (entries.empty())
     return scopes;
 
   std::unordered_set<uint64_t> entry_set(entries.begin(), entries.end());
-  std::vector<const KernelDescriptorInfo *> ordered_kernels;
+  std::vector<const KdTranslation *> ordered_kernels;
   ordered_kernels.reserve(kernels.size());
   std::unordered_set<uint64_t> seen_entries;
-  for (const KernelDescriptorInfo &kernel : kernels) {
+  for (const KdTranslation &kernel : kernels) {
     if (seen_entries.insert(kernel.entry_text_offset).second)
       ordered_kernels.push_back(&kernel);
   }
@@ -133,7 +133,7 @@ kernel_translation_scopes(const std::vector<std::unique_ptr<BasicBlock>> &blocks
   });
 
   scopes.reserve(ordered_kernels.size());
-  for (const KernelDescriptorInfo *kernel : ordered_kernels) {
+  for (const KdTranslation *kernel : ordered_kernels) {
     BasicBlock *entry = block_for_offset(blocks, kernel->entry_text_offset);
     if (entry == nullptr)
       continue;
@@ -173,16 +173,33 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
     result.elf_bytes = patcher.emit();
     return result;
   }
-  const auto kernel_info = patcher.kernel_descriptor_info();
-  if (kernel_info.empty()) {
+  KernelDescriptorTranslator descriptor_translator(guest_arch_, host_arch_);
+  KernelDescriptorTranslationOptions descriptor_options;
+  const auto descriptor_translations = descriptor_translator.translate_image(
+      patcher.image_bytes(), patcher.text_offset(), patcher.text_size(), descriptor_options);
+  bool descriptors_supported = true;
+  for (const auto &translation : descriptor_translations) {
+    result.warnings.insert(result.warnings.end(), translation.warnings.begin(),
+                           translation.warnings.end());
+    descriptors_supported &= translation.supported;
+  }
+  if (!descriptors_supported) {
+    result.warnings.push_back("kernel descriptor translation requires unsupported resource or ABI "
+                              "virtualization; leaving code object unchanged");
+    result.elf_bytes = patcher.emit();
+    warnings_ = nullptr;
+    return result;
+  }
+
+  if (descriptor_translations.empty()) {
     result.warnings.push_back("kernel descriptors are required for kernel-level translation");
     warnings_ = nullptr;
     return result;
   }
 
-  const auto entry_offsets = kernel_entry_offsets(kernel_info);
+  const auto entry_offsets = kernel_entry_offsets(descriptor_translations);
   auto blocks = BasicBlock::build(obj, *decoder, entry_offsets);
-  auto scopes = kernel_translation_scopes(blocks, kernel_info);
+  auto scopes = kernel_translation_scopes(blocks, descriptor_translations);
 
   if (scopes.size() != entry_offsets.size()) {
     result.warnings.push_back(
@@ -280,22 +297,10 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
     }
   }
 
-  // Rewrite workgroup_id SGPR references to TTMP registers.
-  // This runs after encoding translation so it reads from translated_text.
-  std::unordered_set<const BasicBlock *> rewritten_wg_blocks;
-  for (const KernelTranslationScope &scope : scopes) {
-    if (scope.info == nullptr)
-      continue;
-
-    for (BasicBlock *block : scope.blocks) {
-      if (block == nullptr || !rewritten_wg_blocks.insert(block).second)
-        continue;
-
-      auto wg_rewrites = semantic_translator_->rewrite_workgroup_ids(
-          *block, scope.info->workgroup_id, translated_text);
-      for (const auto &repl : wg_rewrites)
-        apply_semantic(repl, translated_text, patcher);
-    }
+  std::unordered_set<uint64_t> applied_descriptors;
+  for (const KdTranslation &translation : descriptor_translations) {
+    if (applied_descriptors.insert(translation.descriptor_file_offset).second)
+      patcher.apply_kernel_descriptor_translation(translation, host_arch_);
   }
 
   // Write cave body into the NOP padding at the end of .text.
@@ -320,10 +325,6 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
 
   if (target_mach_)
     patcher.update_elf_flags(target_mach_);
-
-  // Kernel descriptor packing differs by target generation, so apply the
-  // Wave64 patch using the same host architecture as the translated text.
-  patcher.patch_kernel_descriptors_for_wave64(host_arch_);
 
   result.elf_bytes = patcher.emit();
   warnings_ = nullptr;
