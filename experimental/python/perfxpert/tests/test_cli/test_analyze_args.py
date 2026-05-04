@@ -12,10 +12,12 @@ This test suite asserts that the CLI surface maps `--format` to
 from __future__ import annotations
 
 import argparse
+from types import SimpleNamespace
 
 import pytest
 
 from perfxpert import analyze
+from perfxpert import output_config
 
 
 def _build_parsed_args(argv):
@@ -91,6 +93,28 @@ def test_llm_flag_absent_does_not_set_enable_llm():
     kwargs = process_args(_FakeConn(), ns)
     assert "llm_provider" not in kwargs
     assert "enable_llm" not in kwargs
+
+
+def test_private_preflight_accepts_compat_endpoint_env(monkeypatch):
+    from perfxpert import analyze as analyze_mod
+
+    monkeypatch.delenv("PERFXPERT_LLM_PRIVATE_URL", raising=False)
+    monkeypatch.setenv("PRIVATE_LLM_ENDPOINT", "https://llm.example/v1")
+    monkeypatch.setenv("PERFXPERT_LLM_PRIVATE_API_KEY", "secret")
+
+    analyze_mod._preflight_provider_auth("private", None)
+
+
+def test_private_preflight_requires_either_endpoint_env(monkeypatch):
+    from perfxpert import analyze as analyze_mod
+    from perfxpert.providers._exceptions import AuthError
+
+    monkeypatch.delenv("PERFXPERT_LLM_PRIVATE_URL", raising=False)
+    monkeypatch.delenv("PRIVATE_LLM_ENDPOINT", raising=False)
+    monkeypatch.setenv("PERFXPERT_LLM_PRIVATE_API_KEY", "secret")
+
+    with pytest.raises(AuthError, match="PRIVATE_LLM_ENDPOINT"):
+        analyze_mod._preflight_provider_auth("private", None)
 
 
 def test_format_and_llm_flags_compose():
@@ -238,3 +262,169 @@ def test_execute_agentic_warns_on_unknown_kwargs(tmp_path, monkeypatch):
         f"expected RuntimeWarning mentioning 'some_future_flag'; got "
         f"{[str(w.message) for w in caught]}"
     )
+
+
+def _stub_agentic_render(monkeypatch, rendered: str = "REPORT") -> None:
+    from perfxpert import api as api_mod
+    from perfxpert.analysis import payload as payload_mod
+    from perfxpert import analyze as analyze_mod
+
+    monkeypatch.setattr(
+        api_mod,
+        "agent_root",
+        lambda **_kwargs: SimpleNamespace(
+            narrative="",
+            recommendations=[],
+            primary_bottleneck="mixed",
+            warnings=[],
+            metadata={},
+        ),
+    )
+    monkeypatch.setattr(payload_mod, "build_analysis_payload", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr(analyze_mod, "_format_agentic_output", lambda *_args, **_kwargs: rendered)
+
+
+@pytest.mark.parametrize(
+    ("fmt", "ext"),
+    [("json", ".json"), ("markdown", ".md"), ("webview", ".html")],
+)
+def test_non_text_formats_default_to_file_output_without_output_flags(
+    tmp_path,
+    monkeypatch,
+    capsys,
+    fmt,
+    ext,
+):
+    from perfxpert import analyze as analyze_mod
+
+    _stub_agentic_render(monkeypatch)
+    monkeypatch.chdir(tmp_path)
+
+    cfg = output_config.output_config(output_file=None, output_path=None)
+    analyze_mod._execute_agentic(None, config=cfg, output_format=fmt)
+
+    out = tmp_path / f"analysis{ext}"
+    assert out.read_text() == "REPORT"
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert f"Analysis written to: ./{out.name}" in captured.err
+
+
+@pytest.mark.parametrize(
+    ("fmt", "ext"),
+    [("json", ".json"), ("markdown", ".md"), ("webview", ".html")],
+)
+def test_non_text_formats_dir_only_default_to_analysis_stem(
+    tmp_path,
+    monkeypatch,
+    capsys,
+    fmt,
+    ext,
+):
+    from perfxpert import analyze as analyze_mod
+
+    _stub_agentic_render(monkeypatch)
+    monkeypatch.chdir(tmp_path)
+    out_dir = tmp_path / "reports"
+
+    cfg = output_config.output_config(output_file=None, output_path=str(out_dir))
+    analyze_mod._execute_agentic(None, config=cfg, output_format=fmt)
+
+    out = out_dir / f"analysis{ext}"
+    assert out.read_text() == "REPORT"
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert f"Analysis written to: {out}" in captured.err
+
+
+def test_non_text_format_with_output_name_defaults_to_current_directory(
+    tmp_path,
+    monkeypatch,
+    capsys,
+):
+    from perfxpert import analyze as analyze_mod
+
+    _stub_agentic_render(monkeypatch, rendered="{}")
+    monkeypatch.chdir(tmp_path)
+
+    cfg = output_config.output_config(output_file="custom-report", output_path=None)
+    analyze_mod._execute_agentic(None, config=cfg, output_format="json")
+
+    assert (tmp_path / "custom-report.json").read_text() == "{}"
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "Analysis written to: ./custom-report.json" in captured.err
+
+
+def test_text_format_without_output_flags_stays_on_stdout(
+    tmp_path,
+    monkeypatch,
+    capsys,
+):
+    from perfxpert import analyze as analyze_mod
+
+    _stub_agentic_render(monkeypatch)
+    monkeypatch.chdir(tmp_path)
+
+    cfg = output_config.output_config(output_file=None, output_path=None)
+    analyze_mod._execute_agentic(None, config=cfg, output_format="text")
+
+    assert capsys.readouterr().out == "REPORT\n"
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_non_text_format_output_dash_stays_on_stdout(
+    tmp_path,
+    monkeypatch,
+    capsys,
+):
+    from perfxpert import analyze as analyze_mod
+
+    _stub_agentic_render(monkeypatch, rendered="{}")
+    monkeypatch.chdir(tmp_path)
+
+    cfg = output_config.output_config(output_file="-", output_path=None)
+    analyze_mod._execute_agentic(None, config=cfg, output_format="json")
+
+    captured = capsys.readouterr()
+    assert captured.out == "{}\n"
+    assert captured.err == ""
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_non_text_format_output_dash_ignores_output_dir(
+    tmp_path,
+    monkeypatch,
+    capsys,
+):
+    from perfxpert import analyze as analyze_mod
+
+    _stub_agentic_render(monkeypatch, rendered="{}")
+    monkeypatch.chdir(tmp_path)
+
+    cfg = output_config.output_config(output_file="-", output_path=str(tmp_path / "reports"))
+    analyze_mod._execute_agentic(None, config=cfg, output_format="json")
+
+    captured = capsys.readouterr()
+    assert captured.out == "{}\n"
+    assert captured.err == ""
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_text_format_with_output_name_defaults_to_current_directory(
+    tmp_path,
+    monkeypatch,
+    capsys,
+):
+    from perfxpert import analyze as analyze_mod
+
+    _stub_agentic_render(monkeypatch)
+    monkeypatch.chdir(tmp_path)
+
+    cfg = output_config.output_config(output_file="custom-report", output_path=None)
+    analyze_mod._execute_agentic(None, config=cfg, output_format="text")
+
+    assert (tmp_path / "custom-report.txt").read_text() == "REPORT"
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "Analysis written to: ./custom-report.txt" in captured.err

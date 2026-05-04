@@ -22,12 +22,12 @@
       ],
       "properties": {
         "name": {"type": "string"},
-        "xgmi_peak_gbps": {"type": "number", "minimum": 0, "description": "Aggregate bidirectional XGMI bandwidth (0 for NICs or GPUs without XGMI)."},
+        "xgmi_peak_gbps": {"type": "number", "minimum": 0, "description": "Aggregate AMD-published or explicitly derived IF/XGMI bandwidth (0 for NICs or GPUs without XGMI)."},
         "xgmi_links": {"type": "integer", "minimum": 0},
         "xgmi_per_link_gbps": {"type": "number", "minimum": 0},
         "pcie_tier": {"type": "string", "description": "Human-readable PCIe generation/width label, e.g. 'PCIe Gen5 x16'."},
-        "pcie_peak_gbps": {"type": "number", "minimum": 0},
-        "achievable_gbps": {"type": "number", "minimum": 0, "description": "Typical RCCL AllReduce busBW observed in practice."},
+        "pcie_peak_gbps": {"type": "number", "minimum": 0, "description": "Theoretical one-way PCIe peak bandwidth."},
+        "achievable_gbps": {"type": "number", "minimum": 0, "description": "Empirical RCCL AllReduce busBW observed in practice."},
         "source_url": {"type": "string", "format": "uri"},
         "measured_with": {"type": "string"}
       }

@@ -40,10 +40,6 @@
 
 namespace rocshmem {
 
-//=============================================================================
-// Kernels — templated on IPC implementation type
-//=============================================================================
-
 template <typename IpcImplT>
 __global__
 void
@@ -73,14 +69,10 @@ kernel_simple_coarse_copy_warp(IpcImplT *ipc_impl, int *src, int *dest, size_t b
     __syncthreads();
 }
 
-//=============================================================================
-// Fixture — templated on Config trait
-//=============================================================================
-
 template <typename Config>
 class IPCImplSimpleCoarse : public ::testing::TestWithParam<std::tuple<int, int, int>> {
     using IpcImplT = typename Config::impl_type;
-    using HEAP_T = HeapMemoryType<HIPAllocator>;
+    using HEAP_T = HeapMemoryType;
     using MPI_T = RemoteHeapInfo<CommunicatorMPI>;
     using FN_T = void (*)(IpcImplT*, int*, int*, size_t);
 
@@ -102,8 +94,8 @@ class IPCImplSimpleCoarse : public ::testing::TestWithParam<std::tuple<int, int,
             hip_allocator_.deallocate(ipc_impl_dptr_);
         }
         ipc_impl_.ipcHostStop();
+        delete mpi_;
         MPIInstance::mpilib_dl_close();
-
     }
 
     void launch(FN_T f, const dim3 grid, const dim3 block, int* src, int* dest, size_t bytes) {
@@ -202,18 +194,13 @@ class IPCImplSimpleCoarse : public ::testing::TestWithParam<std::tuple<int, int,
   protected:
     std::vector<int> golden_;
 
-    HEAP_T heap_mem_ {};
+    HIPAllocator hip_allocator_ {};
+    HEAP_T heap_mem_ {hip_allocator_};
     MPI_T *mpi_{nullptr};
 
     IpcImplT ipc_impl_ {};
     IpcImplT *ipc_impl_dptr_ {nullptr};
-
-    HIPAllocator hip_allocator_ {};
 };
-
-//=============================================================================
-// IPC load/store test classes
-//=============================================================================
 
 class DegenerateSimpleCoarse : public IPCImplSimpleCoarse<IpcOnTestConfig> {
   public:

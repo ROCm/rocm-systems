@@ -2,178 +2,98 @@
 // SPDX-License-Identifier: MIT
 
 #include "library/pmc/collectors/nic/device.hpp"
-#include "library/pmc/device_providers/amd_smi/drivers/tests/mock_driver.hpp"
+#include "library/pmc/collectors/nic/tests/mock_nic_driver.hpp"
 
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
-#include <cstring>
+#include <stdexcept>
 
 using namespace rocprofsys::pmc::collectors::nic;
-using ::testing::_;
 using ::testing::AtLeast;
-using ::testing::DoAll;
 using ::testing::Return;
-using ::testing::SetArgPointee;
 using ::testing::StrictMock;
+using ::testing::Throw;
 
-using MockDriver =
-    ::testing::StrictMock<rocprofsys::pmc::drivers::amd_smi::testing::mock_driver>;
+using MockDriver = StrictMock<rocprofsys::pmc::collectors::nic::testing::mock_nic_driver>;
 
 namespace rocprofsys::pmc::collectors::nic::testing
 {
 
 /**
  * @brief Test fixture for NIC device tests.
- *
- * Provides common setup for device tests including mock driver and
- * helper methods for configuring mock behavior.
  */
 class NicDeviceTest : public ::testing::Test
 {
 protected:
     std::shared_ptr<MockDriver> mock_driver;
-    amdsmi_processor_handle     test_handle{};
-    processor_type_t            test_processor_type{};
-    size_t                      test_index{};
+    size_t                      test_index = 0;
 
-    void SetUp() override
+    void SetUp() override { mock_driver = std::make_shared<MockDriver>(); }
+
+    void SetupBaseNicInfo()
     {
-        mock_driver         = std::make_shared<MockDriver>();
-        test_handle         = reinterpret_cast<amdsmi_processor_handle>(0x5678);
-        test_processor_type = AMDSMI_PROCESSOR_TYPE_AMD_NIC;
-        test_index          = 0;
+        EXPECT_CALL(*mock_driver, get_nic_asic_info())
+            .Times(AtLeast(1))
+            .WillRepeatedly(Return(asic_info{ "AMD AINIC Test", "AMD" }));
+
+        EXPECT_CALL(*mock_driver, get_nic_port_info())
+            .Times(AtLeast(1))
+            .WillRepeatedly(Return(port_info{ "enp226s0" }));
+
+        EXPECT_CALL(*mock_driver, get_nic_rdma_info())
+            .Times(AtLeast(1))
+            .WillRepeatedly(Return(rdma_info{ 1 }));
     }
 
-    void TearDown() override
-    {
-        ::testing::Mock::VerifyAndClearExpectations(mock_driver.get());
-        mock_driver.reset();
-    }
-
-    /**
-     * @brief Configure mock to return NIC with full RDMA support.
-     */
     void SetupFullRdmaSupport()
     {
-        // Setup ASIC info for vendor and product names
-        amdsmi_nic_asic_info_t asic_info{};
-        std::strncpy(asic_info.product_name, "AMD AINIC Test",
-                     sizeof(asic_info.product_name) - 1);
-        std::strncpy(asic_info.vendor_name, "AMD", sizeof(asic_info.vendor_name) - 1);
+        SetupBaseNicInfo();
 
-        EXPECT_CALL(*mock_driver, get_nic_asic_info(test_handle, _))
+        EXPECT_CALL(*mock_driver, get_nic_rdma_port_statistics(0))
             .Times(AtLeast(1))
-            .WillRepeatedly(
-                DoAll(SetArgPointee<1>(asic_info), Return(AMDSMI_STATUS_SUCCESS)));
-
-        // Setup port info
-        amdsmi_nic_port_info_t port_info{};
-        port_info.num_ports = 1;
-        std::strncpy(port_info.ports[0].netdev, "enp226s0",
-                     sizeof(port_info.ports[0].netdev) - 1);
-
-        EXPECT_CALL(*mock_driver, get_nic_port_info(test_handle, _))
-            .Times(AtLeast(1))
-            .WillRepeatedly(
-                DoAll(SetArgPointee<1>(port_info), Return(AMDSMI_STATUS_SUCCESS)));
-
-        // Setup RDMA device info
-        amdsmi_nic_rdma_devices_info_t rdma_info{};
-        rdma_info.num_rdma_dev                    = 1;
-        rdma_info.rdma_dev_info[0].num_rdma_ports = 1;
-        std::strncpy(rdma_info.rdma_dev_info[0].rdma_dev, "rdma0",
-                     sizeof(rdma_info.rdma_dev_info[0].rdma_dev) - 1);
-
-        EXPECT_CALL(*mock_driver, get_nic_rdma_dev_info(test_handle, _))
-            .Times(AtLeast(1))
-            .WillRepeatedly(
-                DoAll(SetArgPointee<1>(rdma_info), Return(AMDSMI_STATUS_SUCCESS)));
-
-        // Setup statistics count query
-        EXPECT_CALL(*mock_driver,
-                    get_nic_rdma_port_statistics(test_handle, 0, _, nullptr))
-            .Times(AtLeast(1))
-            .WillRepeatedly([](amdsmi_processor_handle, uint8_t, uint32_t* count,
-                               amdsmi_nic_stat_t*) {
-                *count = 6;
-                return AMDSMI_STATUS_SUCCESS;
-            });
+            .WillRepeatedly(Return(std::vector<stat_entry>{
+                { "rx_rdma_ucast_bytes", 0 },
+                { "tx_rdma_ucast_bytes", 0 },
+                { "rx_rdma_ucast_pkts", 0 },
+                { "tx_rdma_ucast_pkts", 0 },
+                { "rx_rdma_cnp_pkts", 0 },
+                { "tx_rdma_cnp_pkts", 0 },
+            }));
     }
 
-    /**
-     * @brief Configure mock to return full statistics.
-     */
     void SetupStatisticsData()
     {
-        SetupFullRdmaSupport();
+        SetupBaseNicInfo();
 
-        EXPECT_CALL(*mock_driver,
-                    get_nic_rdma_port_statistics(test_handle, 0, _, ::testing::NotNull()))
+        EXPECT_CALL(*mock_driver, get_nic_rdma_port_statistics(0))
             .Times(AtLeast(1))
-            .WillRepeatedly([](amdsmi_processor_handle, uint8_t, uint32_t* count,
-                               amdsmi_nic_stat_t* stats) {
-                *count = 6;
-
-                std::strncpy(stats[0].name, "rx_rdma_ucast_bytes",
-                             sizeof(stats[0].name) - 1);
-                stats[0].value = 1000000;
-
-                std::strncpy(stats[1].name, "tx_rdma_ucast_bytes",
-                             sizeof(stats[1].name) - 1);
-                stats[1].value = 2000000;
-
-                std::strncpy(stats[2].name, "rx_rdma_ucast_pkts",
-                             sizeof(stats[2].name) - 1);
-                stats[2].value = 5000;
-
-                std::strncpy(stats[3].name, "tx_rdma_ucast_pkts",
-                             sizeof(stats[3].name) - 1);
-                stats[3].value = 6000;
-
-                std::strncpy(stats[4].name, "rx_rdma_cnp_pkts",
-                             sizeof(stats[4].name) - 1);
-                stats[4].value = 100;
-
-                std::strncpy(stats[5].name, "tx_rdma_cnp_pkts",
-                             sizeof(stats[5].name) - 1);
-                stats[5].value = 200;
-
-                return AMDSMI_STATUS_SUCCESS;
-            });
+            .WillRepeatedly(Return(std::vector<stat_entry>{
+                { "rx_rdma_ucast_bytes", 1000000 },
+                { "tx_rdma_ucast_bytes", 2000000 },
+                { "rx_rdma_ucast_pkts", 5000 },
+                { "tx_rdma_ucast_pkts", 6000 },
+                { "rx_rdma_cnp_pkts", 100 },
+                { "tx_rdma_cnp_pkts", 200 },
+            }));
     }
 
     /**
-     * @brief Configure mock to return no RDMA support.
+     * @brief Configure mock to simulate no RDMA support.
      */
     void SetupNoRdmaSupport()
     {
-        // Setup ASIC info
-        amdsmi_nic_asic_info_t asic_info{};
-        std::strncpy(asic_info.product_name, "Generic NIC",
-                     sizeof(asic_info.product_name) - 1);
-        std::strncpy(asic_info.vendor_name, "Unknown", sizeof(asic_info.vendor_name) - 1);
-
-        EXPECT_CALL(*mock_driver, get_nic_asic_info(test_handle, _))
+        EXPECT_CALL(*mock_driver, get_nic_asic_info())
             .Times(AtLeast(1))
-            .WillRepeatedly(
-                DoAll(SetArgPointee<1>(asic_info), Return(AMDSMI_STATUS_SUCCESS)));
+            .WillRepeatedly(Return(asic_info{ "Generic NIC", "Unknown" }));
 
-        // Setup port info (NIC exists but no RDMA)
-        amdsmi_nic_port_info_t port_info{};
-        port_info.num_ports = 1;
-        std::strncpy(port_info.ports[0].netdev, "eth0",
-                     sizeof(port_info.ports[0].netdev) - 1);
-
-        EXPECT_CALL(*mock_driver, get_nic_port_info(test_handle, _))
+        EXPECT_CALL(*mock_driver, get_nic_port_info())
             .Times(AtLeast(1))
-            .WillRepeatedly(
-                DoAll(SetArgPointee<1>(port_info), Return(AMDSMI_STATUS_SUCCESS)));
+            .WillRepeatedly(Return(port_info{ "eth0" }));
 
-        // RDMA query fails
-        EXPECT_CALL(*mock_driver, get_nic_rdma_dev_info(test_handle, _))
+        EXPECT_CALL(*mock_driver, get_nic_rdma_info())
             .Times(AtLeast(1))
-            .WillRepeatedly(Return(AMDSMI_STATUS_NOT_SUPPORTED));
+            .WillRepeatedly(Throw(std::runtime_error("get_nic_rdma_dev_info failed: 2")));
     }
 };
 
@@ -181,7 +101,7 @@ TEST_F(NicDeviceTest, DeviceIsSupported_WhenRdmaAvailable)
 {
     SetupFullRdmaSupport();
 
-    device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
+    device<MockDriver> dev(mock_driver, test_index);
 
     EXPECT_TRUE(dev.is_supported());
     EXPECT_EQ(dev.get_index(), test_index);
@@ -194,7 +114,7 @@ TEST_F(NicDeviceTest, DeviceIsNotSupported_WhenNoRdma)
 {
     SetupNoRdmaSupport();
 
-    device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
+    device<MockDriver> dev(mock_driver, test_index);
 
     EXPECT_FALSE(dev.is_supported());
 }
@@ -203,7 +123,7 @@ TEST_F(NicDeviceTest, GetSupportedMetrics_AllEnabled)
 {
     SetupFullRdmaSupport();
 
-    device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
+    device<MockDriver> dev(mock_driver, test_index);
     auto               supported = dev.get_supported_metrics();
 
     EXPECT_TRUE(supported.bits.rx_rdma_ucast_bytes);
@@ -218,7 +138,7 @@ TEST_F(NicDeviceTest, GetNicMetrics_ReturnsCorrectValues)
 {
     SetupStatisticsData();
 
-    device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
+    device<MockDriver> dev(mock_driver, test_index);
     auto               m = dev.get_nic_metrics();
 
     EXPECT_EQ(m.rx_rdma_ucast_bytes, 1000000ULL);
@@ -231,43 +151,163 @@ TEST_F(NicDeviceTest, GetNicMetrics_ReturnsCorrectValues)
 
 TEST_F(NicDeviceTest, GetNicMetrics_ReturnsZeros_WhenNoRdmaPorts)
 {
-    // Setup ASIC info
-    amdsmi_nic_asic_info_t asic_info{};
-    std::strncpy(asic_info.product_name, "Test NIC", sizeof(asic_info.product_name) - 1);
-    std::strncpy(asic_info.vendor_name, "Test Vendor", sizeof(asic_info.vendor_name) - 1);
-
-    EXPECT_CALL(*mock_driver, get_nic_asic_info(test_handle, _))
+    EXPECT_CALL(*mock_driver, get_nic_asic_info())
         .Times(AtLeast(1))
-        .WillRepeatedly(
-            DoAll(SetArgPointee<1>(asic_info), Return(AMDSMI_STATUS_SUCCESS)));
+        .WillRepeatedly(Return(asic_info{ "Test NIC", "Test Vendor" }));
 
-    // Setup with RDMA device but no ports
-    amdsmi_nic_port_info_t port_info{};
-    port_info.num_ports = 1;
-    std::strncpy(port_info.ports[0].netdev, "enp226s0",
-                 sizeof(port_info.ports[0].netdev) - 1);
-
-    EXPECT_CALL(*mock_driver, get_nic_port_info(test_handle, _))
+    EXPECT_CALL(*mock_driver, get_nic_port_info())
         .Times(AtLeast(1))
-        .WillRepeatedly(
-            DoAll(SetArgPointee<1>(port_info), Return(AMDSMI_STATUS_SUCCESS)));
+        .WillRepeatedly(Return(port_info{ "enp226s0" }));
 
-    amdsmi_nic_rdma_devices_info_t rdma_info{};
-    rdma_info.num_rdma_dev                    = 1;
-    rdma_info.rdma_dev_info[0].num_rdma_ports = 0;  // No ports
-
-    EXPECT_CALL(*mock_driver, get_nic_rdma_dev_info(test_handle, _))
+    EXPECT_CALL(*mock_driver, get_nic_rdma_info())
         .Times(AtLeast(1))
-        .WillRepeatedly(
-            DoAll(SetArgPointee<1>(rdma_info), Return(AMDSMI_STATUS_SUCCESS)));
+        .WillRepeatedly(Return(rdma_info{ 0 }));
 
-    device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
+    device<MockDriver> dev(mock_driver, test_index);
 
     EXPECT_FALSE(dev.is_supported());
 
     auto m = dev.get_nic_metrics();
     EXPECT_EQ(m.rx_rdma_ucast_bytes, 0ULL);
     EXPECT_EQ(m.tx_rdma_ucast_bytes, 0ULL);
+}
+
+TEST_F(NicDeviceTest, GetNicMetrics_ReturnsZeros_WhenStatisticsQueryThrows)
+{
+    EXPECT_CALL(*mock_driver, get_nic_asic_info())
+        .WillOnce(Return(asic_info{ "AMD AINIC Test", "AMD" }));
+
+    EXPECT_CALL(*mock_driver, get_nic_port_info())
+        .WillOnce(Return(port_info{ "enp226s0" }));
+
+    EXPECT_CALL(*mock_driver, get_nic_rdma_info()).WillOnce(Return(rdma_info{ 1 }));
+
+    EXPECT_CALL(*mock_driver, get_nic_rdma_port_statistics(0))
+        .WillOnce(Return(std::vector<stat_entry>{
+            { "rx_rdma_ucast_bytes", 0 },
+            { "tx_rdma_ucast_bytes", 0 },
+            { "rx_rdma_ucast_pkts", 0 },
+            { "tx_rdma_ucast_pkts", 0 },
+            { "rx_rdma_cnp_pkts", 0 },
+            { "tx_rdma_cnp_pkts", 0 },
+        }))
+        .WillOnce(Throw(std::runtime_error("stats query failed")));
+
+    device<MockDriver> dev(mock_driver, test_index);
+    EXPECT_TRUE(dev.is_supported());
+
+    auto m = dev.get_nic_metrics();
+    EXPECT_EQ(m.rx_rdma_ucast_bytes, 0ULL);
+    EXPECT_EQ(m.tx_rdma_ucast_bytes, 0ULL);
+    EXPECT_EQ(m.rx_rdma_ucast_pkts, 0ULL);
+    EXPECT_EQ(m.tx_rdma_ucast_pkts, 0ULL);
+    EXPECT_EQ(m.rx_rdma_cnp_pkts, 0ULL);
+    EXPECT_EQ(m.tx_rdma_cnp_pkts, 0ULL);
+}
+
+TEST_F(NicDeviceTest, GetNicMetrics_IgnoresUnknownStatNames)
+{
+    SetupBaseNicInfo();
+
+    EXPECT_CALL(*mock_driver, get_nic_rdma_port_statistics(0))
+        .Times(AtLeast(1))
+        .WillRepeatedly(Return(std::vector<stat_entry>{
+            { "rx_rdma_ucast_bytes", 1000 },
+            { "unknown_stat_1", 9999 },
+            { "tx_rdma_ucast_bytes", 2000 },
+            { "some_other_counter", 8888 },
+        }));
+
+    device<MockDriver> dev(mock_driver, test_index);
+    auto               m = dev.get_nic_metrics();
+
+    EXPECT_EQ(m.rx_rdma_ucast_bytes, 1000ULL);
+    EXPECT_EQ(m.tx_rdma_ucast_bytes, 2000ULL);
+    EXPECT_EQ(m.rx_rdma_ucast_pkts, 0ULL);
+    EXPECT_EQ(m.tx_rdma_ucast_pkts, 0ULL);
+    EXPECT_EQ(m.rx_rdma_cnp_pkts, 0ULL);
+    EXPECT_EQ(m.tx_rdma_cnp_pkts, 0ULL);
+}
+
+TEST_F(NicDeviceTest, GetNicMetrics_HandlesPartialStats)
+{
+    SetupBaseNicInfo();
+
+    EXPECT_CALL(*mock_driver, get_nic_rdma_port_statistics(0))
+        .Times(AtLeast(1))
+        .WillRepeatedly(Return(std::vector<stat_entry>{
+            { "rx_rdma_ucast_bytes", 500 },
+            { "tx_rdma_cnp_pkts", 10 },
+        }));
+
+    device<MockDriver> dev(mock_driver, test_index);
+    auto               m = dev.get_nic_metrics();
+
+    EXPECT_EQ(m.rx_rdma_ucast_bytes, 500ULL);
+    EXPECT_EQ(m.tx_rdma_cnp_pkts, 10ULL);
+    EXPECT_EQ(m.tx_rdma_ucast_bytes, 0ULL);
+    EXPECT_EQ(m.rx_rdma_ucast_pkts, 0ULL);
+    EXPECT_EQ(m.tx_rdma_ucast_pkts, 0ULL);
+    EXPECT_EQ(m.rx_rdma_cnp_pkts, 0ULL);
+}
+
+TEST_F(NicDeviceTest, DeviceInitializes_WhenAsicInfoThrows)
+{
+    EXPECT_CALL(*mock_driver, get_nic_asic_info())
+        .WillOnce(Throw(std::runtime_error("get_nic_asic_info failed")));
+
+    EXPECT_CALL(*mock_driver, get_nic_port_info())
+        .WillOnce(Return(port_info{ "enp226s0" }));
+
+    EXPECT_CALL(*mock_driver, get_nic_rdma_info()).WillOnce(Return(rdma_info{ 1 }));
+
+    EXPECT_CALL(*mock_driver, get_nic_rdma_port_statistics(0))
+        .WillOnce(Return(std::vector<stat_entry>{
+            { "rx_rdma_ucast_bytes", 0 },
+        }));
+
+    device<MockDriver> dev(mock_driver, test_index);
+
+    EXPECT_TRUE(dev.is_supported());
+    EXPECT_TRUE(dev.get_product_name().empty());
+    EXPECT_TRUE(dev.get_vendor_name().empty());
+    EXPECT_EQ(dev.get_name(), "enp226s0");
+}
+
+TEST_F(NicDeviceTest, DeviceInitializes_WhenPortInfoThrows)
+{
+    EXPECT_CALL(*mock_driver, get_nic_asic_info())
+        .WillOnce(Return(asic_info{ "AMD AINIC Test", "AMD" }));
+
+    EXPECT_CALL(*mock_driver, get_nic_port_info())
+        .WillOnce(Throw(std::runtime_error("get_nic_port_info failed")));
+
+    EXPECT_CALL(*mock_driver, get_nic_rdma_info()).WillOnce(Return(rdma_info{ 1 }));
+
+    EXPECT_CALL(*mock_driver, get_nic_rdma_port_statistics(0))
+        .WillOnce(Return(std::vector<stat_entry>{
+            { "rx_rdma_ucast_bytes", 0 },
+        }));
+
+    device<MockDriver> dev(mock_driver, test_index);
+
+    EXPECT_TRUE(dev.is_supported());
+    EXPECT_TRUE(dev.get_name().empty());
+    EXPECT_EQ(dev.get_product_name(), "AMD AINIC Test");
+    EXPECT_EQ(dev.get_vendor_name(), "AMD");
+}
+
+TEST_F(NicDeviceTest, DeviceNotSupported_WhenStatsEmpty)
+{
+    SetupBaseNicInfo();
+
+    EXPECT_CALL(*mock_driver, get_nic_rdma_port_statistics(0))
+        .Times(AtLeast(1))
+        .WillRepeatedly(Return(std::vector<stat_entry>{}));
+
+    device<MockDriver> dev(mock_driver, test_index);
+
+    EXPECT_FALSE(dev.is_supported());
 }
 
 }  // namespace rocprofsys::pmc::collectors::nic::testing

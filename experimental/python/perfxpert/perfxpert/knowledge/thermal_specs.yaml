@@ -1,9 +1,9 @@
 # thermal_specs — per-arch thermal envelope + throttle thresholds used by
 # `gpu_runtime_monitor.analyze_thermal` when the caller supplies gfx_id.
 #
-# Junction temperature (TjMax) governs whether the driver dynamically
-# clock-gates. Exceeding `tj_throttle_margin_c` below TjMax is a strong
-# signal that perf is thermally bounded.
+# Public AMD product specs are used for TDP where available. Junction and HBM
+# temperature caps are conservative PerfXpert runtime defaults, not guaranteed
+# SKU-level AMD-published limits; override them when exact telemetry is known.
 #
 # Phase-10 Feature B.
 
@@ -51,7 +51,8 @@ verdict_buckets:
     description: "Junction temp within throttle_margin OR power >= TDP headroom."
 
 notes: |
-  Sourced from AMD data sheets / ROCm public documentation. Values are
-  *defaults* — real-world board partners may ship with more aggressive
-  thermal caps. Override via parse_amd_smi_json sample + analyze_thermal
-  tjmax_c argument when you know the exact sku.
+  TDP values are sourced from public AMD product specs where available.
+  Junction and HBM temperature limits are conservative PerfXpert defaults for
+  runtime classification, because public product pages do not consistently
+  publish SKU-level TjMax/HBM TjMax values. Override via parse_amd_smi_json
+  sample + analyze_thermal tjmax_c argument when you know the exact SKU.

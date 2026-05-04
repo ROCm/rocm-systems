@@ -10,7 +10,12 @@ import pytest
 from pathlib import Path
 from conftest import RocprofsysTest
 
-pytestmark = [pytest.mark.gpu, pytest.mark.roctx, pytest.mark.ci_enable]
+pytestmark = [
+    pytest.mark.gpu,
+    pytest.mark.roctx,
+    pytest.mark.ci_enable,  # TODO: Deprecate once TheRock switches to CTest
+    pytest.mark.rocm,
+]
 
 # =============================================================================
 # ROCTx fixtures
@@ -87,7 +92,21 @@ class TestROCTx(RocprofsysTest):
 
     REWRITE_ARGS = ["-e", "-v", "2", "--instrument-loops"]
 
-    @pytest.mark.parametrize("mode", ["baseline", "binary_rewrite", "sys_run"])
+    @pytest.mark.timeout(120)
+    @pytest.mark.parametrize(
+        "mode",
+        [
+            "baseline",
+            "binary_rewrite",
+            "sys_run",
+            pytest.param(
+                "runtime_instrument",
+                marks=pytest.mark.ci_disable(
+                    "all"
+                ),  # TODO: Remove once TheRock switches to CTest
+            ),
+        ],
+    )
     def test(self, mode, roctx_env):
         result = self.run_test(
             mode,
@@ -95,11 +114,13 @@ class TestROCTx(RocprofsysTest):
             env=roctx_env,
             rewrite_args=self.REWRITE_ARGS,
             check_target_arch=True,
-            timeout=120,
         )
         self.assert_regex(result)
 
-    @pytest.mark.ci_disable("assert_rocpd")
+    @pytest.mark.timeout(120)
+    @pytest.mark.ci_disable(
+        "assert_rocpd"
+    )  # TODO: Deprecate once TheRock switches to CTest
     @pytest.mark.rocpd("roctx_env")
     def test_sampling(
         self,
@@ -118,7 +139,7 @@ class TestROCTx(RocprofsysTest):
             depths = self.roctx_cached_depth()
 
         result = self.run_test(
-            "sampling", target="roctx", env=env, check_target_arch=True, timeout=120
+            "sampling", target="roctx", env=env, check_target_arch=True
         )
 
         self.assert_regex(result)

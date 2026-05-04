@@ -32,6 +32,7 @@ def test_dry_run_no_network(monkeypatch):
 
 def test_missing_url_raises_auth(monkeypatch):
     monkeypatch.delenv("PERFXPERT_LLM_PRIVATE_URL", raising=False)
+    monkeypatch.delenv("PRIVATE_LLM_ENDPOINT", raising=False)
     from perfxpert.providers.private_provider import PrivateProvider
 
     with pytest.raises(AuthError):
@@ -50,6 +51,20 @@ def test_posts_to_chat_completions(monkeypatch):
         PrivateProvider().complete([{"role": "user", "content": "hi"}])
         url = mp.call_args.args[0]
         assert url == "https://llm.corp.internal/v1/chat/completions"
+
+
+def test_compat_endpoint_env_is_honored(monkeypatch):
+    monkeypatch.delenv("PERFXPERT_LLM_PRIVATE_URL", raising=False)
+    monkeypatch.setenv("PRIVATE_LLM_ENDPOINT", "https://compat.example/v1")
+    monkeypatch.setenv("PERFXPERT_LLM_PRIVATE_MODEL", "internal-xl")
+    from perfxpert.providers.private_provider import PrivateProvider
+
+    with patch(
+        "perfxpert.providers.private_provider.httpx.post",
+        return_value=_fake_chat_response(),
+    ) as mp:
+        PrivateProvider().complete([{"role": "user", "content": "hi"}])
+        assert mp.call_args.args[0] == "https://compat.example/v1/chat/completions"
 
 
 def test_default_api_key_dummy(monkeypatch):
@@ -88,6 +103,25 @@ def test_custom_headers_merged(monkeypatch):
         assert headers["X-Trace"] == "1"
 
 
+def test_provider_payload_redacts_paths(monkeypatch):
+    monkeypatch.setenv("PERFXPERT_LLM_PRIVATE_URL", "https://llm.corp.internal/v1")
+    monkeypatch.setenv("PERFXPERT_LLM_PRIVATE_MODEL", "internal-xl")
+    from perfxpert.providers.private_provider import PrivateProvider
+
+    with patch(
+        "perfxpert.providers.private_provider.httpx.post",
+        return_value=_fake_chat_response(),
+    ) as mp:
+        PrivateProvider().complete(
+            [{"role": "user", "content": "analyze /tmp/private/trace.db"}],
+            system=r"project is C:\Users\dev\repo",
+        )
+        payload = mp.call_args.kwargs["json"]
+        assert "/tmp/private/trace.db" not in str(payload)
+        assert r"C:\Users\dev\repo" not in str(payload)
+        assert "[REDACTED]" in str(payload)
+
+
 def test_verify_ssl_disabled_when_env_zero(monkeypatch):
     monkeypatch.setenv("PERFXPERT_LLM_PRIVATE_URL", "https://internal.corp/v1")
     monkeypatch.setenv("PERFXPERT_LLM_PRIVATE_MODEL", "m")
@@ -100,6 +134,21 @@ def test_verify_ssl_disabled_when_env_zero(monkeypatch):
     ) as mp:
         PrivateProvider().complete([{"role": "user", "content": "hi"}])
         assert mp.call_args.kwargs["verify"] is False
+
+
+def test_verify_ssl_from_env_defaults_true(monkeypatch):
+    monkeypatch.delenv("PERFXPERT_LLM_PRIVATE_VERIFY_SSL", raising=False)
+    from perfxpert.providers.private_provider import _verify_ssl_from_env
+
+    assert _verify_ssl_from_env() is True
+
+
+@pytest.mark.parametrize("value", ["0", "false", "False", "no", "NO", "off", "OFF"])
+def test_verify_ssl_from_env_false_values(monkeypatch, value):
+    monkeypatch.setenv("PERFXPERT_LLM_PRIVATE_VERIFY_SSL", value)
+    from perfxpert.providers.private_provider import _verify_ssl_from_env
+
+    assert _verify_ssl_from_env() is False
 
 
 def test_response_parsed(monkeypatch):
@@ -141,11 +190,31 @@ def test_parse_headers_valid_json_dict():
     assert result == {"X-Tenant": "amd", "X-Version": "1"}
 
 
+def test_parse_headers_accepts_python_literal_dict_for_legacy_shell_snippets():
+    from perfxpert.providers.private_provider import _parse_headers
+
+    result = _parse_headers("{'Ocp-Apim-Subscription-Key': 'abc', 'user': 'amd'}")
+    assert result == {"Ocp-Apim-Subscription-Key": "abc", "user": "amd"}
+
+
 def test_parse_headers_invalid_json_raises_value_error():
     from perfxpert.providers.private_provider import _parse_headers
 
     with pytest.raises(ValueError, match="invalid JSON"):
         _parse_headers("not-json{{{")
+
+
+def test_parse_headers_invalid_json_redacts_raw_value():
+    from perfxpert.providers.private_provider import _parse_headers
+
+    secret = "Ocp-Apim-Subscription-Key: secret-token"
+    with pytest.raises(ValueError) as excinfo:
+        _parse_headers(secret)
+
+    message = str(excinfo.value)
+    assert "Value redacted" in message
+    assert "secret-token" not in message
+    assert "Ocp-Apim-Subscription-Key" not in message
 
 
 def test_parse_headers_non_dict_json_raises_value_error():
