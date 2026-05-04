@@ -167,7 +167,7 @@ uint64_t WDDMDevice::VramAvail(void) {
     usedVis = stats.QueryResult.SegmentInformation.BytesResident;
 
   // local invisible memory
-  if (shared_dev_->DeviceInfo().local_invisible_heap_size) {
+  if (LocalInvisibleHeapSize()) {
     segmentId++;
     memset(&stats, 0, sizeof(D3DKMT_QUERYSTATISTICS));
     stats.Type = D3DKMT_QUERYSTATISTICS_SEGMENT;
@@ -431,13 +431,13 @@ void WDDMDevice::DestroySyncobj(D3DKMT_HANDLE handle) {
 }
 
 void WDDMDevice::InitCmdbufInfo(void) {
-  if (shared_dev_->DeviceInfo().major == 9) {
+  if (Major() == 9) {
     cmdbuf_aql_frame_size_ = 2 * sizeof(gfx9::AcquireMemTemplate);
-  } else if (shared_dev_->DeviceInfo().major >= 10) {
+  } else if (Major() >= 10) {
     cmdbuf_aql_frame_size_ = 2 * sizeof(gfx10::AcquireMemTemplate);
   }
 
-  if (shared_dev_->DeviceInfo().major >= 11) {
+  if (Major() >= 11) {
     cmdbuf_aql_frame_size_ += sizeof(SetScratchTemplate);
     cmdbuf_aql_frame_size_ += sizeof(DispatchProgramResourceRegs); // BuildComputeShaderParams
   }

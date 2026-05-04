@@ -16,17 +16,17 @@ size_t GpuMemory::CalcChunkNumbers(gpusize size) {
 }
 
 gpusize GpuMemory::AdjustSize(gpusize size) const {
-  const auto &device_info = device_->DeviceInfo();
+  auto shared_dev = device_->SharedDevice();
 
-  if (device_info.enable_big_page_alignment && desc_.domain == thunk_proxy::kLocal) {
-    uint32_t alignment = device_info.big_page_alignment_size;
+  if (shared_dev->EnableBigPageAlignment() && desc_.domain == thunk_proxy::kLocal) {
+    uint32_t alignment = shared_dev->BigPageAlignmentSize();
     // BigPage is only supported for allocations > bigPageMinAlignment.
     // Also, if bigPageMinAlignment == 0, BigPage optimization is not supported per KMD.
     // We do either LargePage or BigPage alignment, whichever has a higher value.
-    if ((device_info.hw_big_page_min_alignment_size > 0) && (size > device_info.hw_big_page_min_alignment_size)) {
-      alignment = std::max(alignment, device_info.hw_big_page_min_alignment_size);
-      if (size > device_info.hw_big_page_alignment_size)
-        alignment = std::max(alignment, device_info.hw_big_page_alignment_size);
+    if ((shared_dev->HwBigPageMinAlignmentSize() > 0) && (size > shared_dev->HwBigPageMinAlignmentSize())) {
+      alignment = std::max(alignment, shared_dev->HwBigPageMinAlignmentSize());
+      if (size > shared_dev->HwBigPageAlignmentSize())
+        alignment = std::max(alignment, shared_dev->HwBigPageAlignmentSize());
     }
     if (alignment > 0)
       size = AlignUp(size, alignment);
@@ -291,7 +291,7 @@ ErrorCode GpuMemory::CreatePhysicalMemory() {
   size_t size = desc_.size;
   uint64_t addr = desc_.gpu_addr;
   char *cpu_addr = static_cast<char *>(desc_.cpu_addr);
-  const auto &device_info = GetDevice()->DeviceInfo();
+  const auto *shared_dev = GetDevice()->SharedDevice();
 
   for (size_t i = 0; i < num_allocations; i++) {
 
@@ -299,11 +299,14 @@ ErrorCode GpuMemory::CreatePhysicalMemory() {
     size_t block_size = std::min(size, WDDMDevice::GpuMemoryChunkSize);
 
     if (IsUserMemory() || IsSystem()) {
-      thunk_proxy::SetAllocationInfo(priv_data, block_size, desc_.domain, 0, desc_.mem_flags, desc_.engine_flag, device_info);
+      shared_dev->SetAllocationInfo(priv_data, block_size, desc_.domain, 0,
+                                    desc_.mem_flags, desc_.engine_flag);
       alloc_info[i].pSystemMem = static_cast<void *>(cpu_addr);
       cpu_addr += block_size;
     } else {
-      thunk_proxy::SetAllocationInfo(priv_data, block_size, desc_.domain, addr, desc_.mem_flags, desc_.engine_flag, device_info);
+      shared_dev->SetAllocationInfo(priv_data, block_size, desc_.domain,
+                                    addr, desc_.mem_flags,
+                                    desc_.engine_flag);
     }
 
     size -= block_size;

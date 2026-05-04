@@ -47,98 +47,12 @@ enum SchedLevel {
   kHigh = 2,
 };
 
-struct HwsInfo {
-  union {
-    struct {
-      uint32_t gfxHwsEnabled     : 1;
-      uint32_t computeHwsEnabled : 1;
-      uint32_t dmaHwsEnabled     : 1;
-      uint32_t dma1HwsEnabled    : 1;
-      uint32_t reserved          : 28;
-    } hwsMask;
-    uint32_t osHwsEnableFlags;
-  };
-  uint64_t engineOrdinalMask; // Indicates which engines (by ordinal) support MES HWS
-};
-
-typedef struct {
-  // --- Identity ---
-  uint32_t device_id;
-  uint32_t family;
-  uint32_t asic_revision;
-  int major;
-  int minor;
-  int stepping;
-  bool is_dgpu;
-  char product_name[MAX_PATH];
-  uint64_t uuid;
-
-  // --- Shader / compute topology ---
-  uint32_t wavefront_size;
-  uint32_t compute_unit_count;
-  uint32_t num_shader_engine;
-  uint32_t shader_array_per_shader_engine;
-  uint32_t simd_per_cu;
-  uint32_t wave_per_cu;
-  uint32_t max_scratch_slots_per_cu;
-  uint32_t watch_points_num;
-  uint32_t num_cp_queues;
-  uint32_t user_queue_size;
-  uint32_t lds_size;
-  uint32_t domain;
-  uint32_t num_gws;
-
-  // --- Clock / performance ---
-  uint32_t max_engine_clock_mhz;
-  uint32_t max_memory_clock_mhz;
-  uint64_t gpu_counter_frequency;
-
-  // --- Cache sizes ---
-  uint32_t l1_cache_size;
-  uint32_t l2_cache_size;
-  uint32_t l3_cache_size;
-  uint32_t gl2_cacheline_size;
-  uint32_t memory_bus_width;
-
-  // --- Memory heaps ---
-  uint64_t local_visible_heap_size;
-  uint64_t local_invisible_heap_size;
-  uint64_t non_local_heap_size;
-
-  // --- Virtual address apertures ---
-  uint64_t private_aperture_base;
-  uint64_t private_aperture_size;
-  uint64_t shared_aperture_base;
-  uint64_t shared_aperture_size;
-  uint32_t pci_bus_addr;
-
-  // --- Big page alignment ---
-  bool enable_big_page_alignment;
-  uint32_t big_page_alignment_size;
-  uint32_t hw_big_page_min_alignment_size;
-  uint32_t hw_big_page_alignment_size;
-
-  // --- Firmware versions ---
-  uint32_t mec_fw_version;
-  uint32_t sdma_fw_version;
-
-  // --- Scheduler / HWS ---
-  HwsInfo hwsInfo;
-  std::vector<int> sdma_schedid;
-  uint32_t compute_schedid;
-  bool state_shadowing_by_cpfw;
-
-  // --- Misc capabilities ---
-  bool platform_atomic_support;
-
-  uint32_t kmd_version;
-} DeviceInfo;
-
-bool ParseAdapterInfo(D3DKMT_HANDLE adapter, DeviceInfo *device_info);
+class DeviceContext;
 
 uint32_t QueueEngine2EngineFlag(uint32_t queue_engine);
 void SetAllocationInfo(void *data, uint64_t size, AllocDomain domain,
-                      uint64_t addr, uint32_t mem_flags, uint32_t engine_flag, const DeviceInfo &device_info);
+                      uint64_t addr, uint32_t mem_flags, uint32_t engine_flag,
+                      const DeviceContext &device_ctx);
 
 struct PrivData {
   std::vector<uint8_t> buf;
@@ -173,11 +87,10 @@ public:
 
   ~ChainContext();
 
-  // Issue QAI escapes for every GPU in the chain.  On success:
+  // Issue QAI escapes for every GPU in the chain. On success:
   //   - NumChainedGpus() / VendorId() are updated from KMD data
-  //   - out_infos is resized to one DeviceInfo per GPU slot
-  ErrorCode QueryAdapterInfo(WinAdapterHandle device_handle,
-                             std::vector<DeviceInfo> &out_infos);
+  //   - per-GPU info caches are refreshed.
+  ErrorCode QueryAdapterInfo();
 
   // Valid after QueryAdapterInfo() succeeds.
   WinAdapterHandle AdapterHandle()          const;
@@ -185,9 +98,9 @@ public:
   uint32_t VendorId(uint32_t index) const;
 
   // Create a DeviceContext for GPU slot chain_index.
+  // DeviceInfo is derived on demand from cached per-slot adapter info.
   class DeviceContext *CreateDevice(WinDeviceHandle device_handle,
-                                    uint32_t chain_index,
-                                    const DeviceInfo &device_info) const;
+                                    uint32_t chain_index) const;
 
   ChainContext(const ChainContext &) = delete;
   ChainContext &operator=(const ChainContext &) = delete;
@@ -280,7 +193,63 @@ public:
   // Send a driver-escape packet on behalf of this GPU slot.
   ErrorCode Escape(void *pData, size_t dataSize, bool hardwareAccess = false) const;
 
-  const DeviceInfo &GetDeviceInfo() const;
+  int Major() const;
+  bool IsDgpu() const;
+  uint64_t LocalVisibleHeapSize() const;
+  uint64_t LocalInvisibleHeapSize() const;
+  uint32_t NumSdmaEngines() const;
+  uint32_t SdmaEngine(uint32_t idx) const;
+  uint32_t ComputeEngine() const;
+  uint32_t NumCpQueues() const;
+  uint32_t UserQueueSize() const;
+  uint32_t MecFwVersion() const;
+  uint32_t SdmaFwVersion() const;
+  uint32_t L1CacheSize() const;
+  uint32_t L2CacheSize() const;
+  uint32_t L3CacheSize() const;
+  uint32_t Gl2CacheLineSize() const;
+  bool SupportStateShadowingByCpFw() const;
+  bool SupportPlatformAtomic() const;
+
+  // Device version and identification
+  int Minor() const;
+  int Stepping() const;
+  const char *ProductName() const;
+  uint64_t Uuid() const;
+  uint32_t Family() const;
+  uint32_t DeviceId() const;
+  uint32_t Domain() const;
+  uint32_t AsicRevision() const;
+  uint32_t PciBusAddr() const;
+
+  // Processor configuration
+  uint32_t WavefrontSize() const;
+  uint32_t ComputeUnitCount() const;
+  uint32_t WavePerCu() const;
+  uint32_t SimdPerCu() const;
+  uint32_t MaxScratchSlotsPerCu() const;
+  uint32_t NumShaderEngine() const;
+  uint32_t ShaderArrayPerShaderEngine() const;
+  uint32_t NumGws() const;
+  uint32_t LdsSize() const;
+  uint32_t WatchPointsNum() const;
+
+  // Memory and frequency
+  uint32_t MemoryBusWidth() const;
+  uint32_t MaxMemoryClockMhz() const;
+  uint32_t MaxEngineClockMhz() const;
+  uint64_t GpuCounterFrequency() const;
+  uint64_t NonLocalHeapSize() const;
+  uint64_t PrivateApertureBase() const;
+  uint64_t PrivateApertureSize() const;
+  uint64_t SharedApertureBase() const;
+  uint64_t SharedApertureSize() const;
+
+  // Memory alignment configuration
+  bool EnableBigPageAlignment() const;
+  uint32_t BigPageAlignmentSize() const;
+  uint32_t HwBigPageMinAlignmentSize() const;
+  uint32_t HwBigPageAlignmentSize() const;
 
   WinDeviceHandle DeviceHandle() const;
   WinAdapterHandle AdapterHandle() const;

@@ -82,22 +82,10 @@ ErrorCode LdaChain::QueryLinkedGpusInChain(vector<Device *> &devices,
     return code;
   device_handle_ = args.hDevice;
 
-  // QueryAdapterInfo issues all KMD escapes, updates NumChainedGpus() /
-  // VendorId() inside ChainContext, and fills deviceInfos.
-  std::vector<thunk_proxy::DeviceInfo> deviceInfos;
-  const auto qaiCode = chain_ctx_->QueryAdapterInfo(
-      static_cast<WinAdapterHandle>(device_handle_), deviceInfos);
+  // QueryAdapterInfo issues all KMD escapes and updates chain-side caches.
+  const auto qaiCode = chain_ctx_->QueryAdapterInfo();
   if (qaiCode != ErrorCode::Success)
     return qaiCode;
-
-  deviceInfos.resize(ChainedDeviceCount());
-  for (u32 chain = 0; chain < ChainedDeviceCount(); ++chain) {
-    if (!thunk_proxy::ParseAdapterInfo(
-            static_cast<D3DKMT_HANDLE>(AdapterHandle()),
-            &deviceInfos[chain])) {
-      return ErrorCode::InitializationFailed;
-    }
-  }
 
   auto code = ErrorCode::Success;
   for (u32 chain = 0; chain < ChainedDeviceCount() && code == ErrorCode::Success;
@@ -109,11 +97,9 @@ ErrorCode LdaChain::QueryLinkedGpusInChain(vector<Device *> &devices,
 
     switch (VendorId(chain)) {
     case ATI_VENDOR_ID: {
-      const thunk_proxy::DeviceInfo &info = deviceInfos[chain];
-
       code = Device::Create(GetPlatform(), this,
                             static_cast<u32>(devices.size()),
-                            chain, info, &chained_devices_[chain]);
+                            chain, &chained_devices_[chain]);
       if (code == ErrorCode::Success && ChainedDevice(chain)) {
         devices.push_back(ChainedDevice(chain));
         devices.back()->Init();  // pre-fetch sensor limits; ignore failure

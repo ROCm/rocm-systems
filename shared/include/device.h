@@ -20,9 +20,7 @@ class LdaChain;
 class Device {
 public:
   static ErrorCode Create(Platform *platform, LdaChain *ldaChain,
-                          u32 deviceIndex, u32 chainIndex,
-                          const thunk_proxy::DeviceInfo &deviceInfo,
-                          Device **deviceOut);
+                          u32 deviceIndex, u32 chainIndex, Device **deviceOut);
 
   LdaChain *GetLdaChain()   const { return lda_chain_; }
   u32       GetChainIndex() const { return chain_index_; }
@@ -74,13 +72,66 @@ public:
   ErrorCode Escape(void *pData, size_t dataSize,
                    bool hardwareAccess = false) const;
 
-  const thunk_proxy::DeviceInfo &DeviceInfo() const;
   WinDeviceHandle DeviceHandle() const;
   WinAdapterHandle AdapterHandle() const;
   LUID AdapterLuid() const;
   int EngineOrdinal(int engine) const;
   bool IsHwsEnabled(int engine) const;
   bool IsGpuTimeoutDisabled(int engine) const;
+
+  int Major() const;
+  int Minor() const;
+  int Stepping() const;
+  bool IsDgpu() const;
+  const char *ProductName() const;
+  uint64_t Uuid() const;
+  uint32_t Family() const;
+  uint32_t DeviceId() const;
+  uint32_t WavefrontSize() const;
+  uint32_t ComputeUnitCount() const;
+  uint32_t MaxEngineClockMhz() const;
+  uint32_t WatchPointsNum() const;
+  uint32_t PciBusAddr() const;
+  uint32_t MemoryBusWidth() const;
+  uint32_t MaxMemoryClockMhz() const;
+  uint32_t WavePerCu() const;
+  uint32_t SimdPerCu() const;
+  uint32_t MaxScratchSlotsPerCu() const;
+  uint32_t NumShaderEngine() const;
+  uint32_t ShaderArrayPerShaderEngine() const;
+  uint32_t NumSdmaEngines() const;
+  uint32_t SdmaEngine(uint32_t idx) const;
+  uint32_t Domain() const;
+  uint32_t NumGws() const;
+  uint32_t AsicRevision() const;
+  uint64_t LocalVisibleHeapSize() const;
+  uint64_t LocalInvisibleHeapSize() const;
+  uint64_t NonLocalHeapSize() const;
+  uint64_t PrivateApertureBase() const;
+  uint64_t PrivateApertureSize() const;
+  uint64_t SharedApertureBase() const;
+  uint64_t SharedApertureSize() const;
+  uint32_t LdsSize() const;
+  uint64_t GpuCounterFrequency() const;
+  uint32_t UserQueueSize() const;
+  uint32_t MecFwVersion() const;
+  uint32_t SdmaFwVersion() const;
+  uint32_t L1CacheSize() const;
+  uint32_t L2CacheSize() const;
+  uint32_t L3CacheSize() const;
+  uint32_t Gl2CacheLineSize() const;
+  bool SupportStateShadowingByCpFw() const;
+  bool SupportPlatformAtomic() const;
+  uint32_t ComputeEngine() const;
+  uint32_t NumCpQueues() const;
+  bool EnableBigPageAlignment() const;
+  uint32_t BigPageAlignmentSize() const;
+  uint32_t HwBigPageMinAlignmentSize() const;
+  uint32_t HwBigPageAlignmentSize() const;
+
+  void SetAllocationInfo(void *data, uint64_t size,
+                         thunk_proxy::AllocDomain domain, uint64_t addr,
+                         uint32_t mem_flags, uint32_t engine_flag) const;
 
 private:
   Device(Platform *platform, LdaChain *lda_chain, u32 chainIndex,

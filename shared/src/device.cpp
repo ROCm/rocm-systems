@@ -18,13 +18,11 @@ Device::Device(Platform *platform, LdaChain *lda_chain, u32 chainIndex,
 }
 
 ErrorCode Device::Create(Platform *platform, LdaChain *ldaChain,
-                         u32 deviceIndex, u32 chainIndex,
-                         const thunk_proxy::DeviceInfo &deviceInfo,
-                         Device **deviceOut) {
+                         u32 deviceIndex, u32 chainIndex, Device **deviceOut) {
   (void)deviceIndex;
   auto dctx = std::unique_ptr<thunk_proxy::DeviceContext>(
       ldaChain->GetChainContext()->CreateDevice(
-          ldaChain->DeviceHandle(), chainIndex, deviceInfo));
+          ldaChain->DeviceHandle(), chainIndex));
 
   if (!dctx)
     return ErrorCode::InitializationFailed;
@@ -123,10 +121,6 @@ ErrorCode Device::EnumGpuProcesses(
   return device_ctx_->EnumGpuProcesses(out);
 }
 
-const thunk_proxy::DeviceInfo &Device::DeviceInfo() const {
-  return device_ctx_->GetDeviceInfo();
-}
-
 WinDeviceHandle Device::DeviceHandle() const {
   return device_ctx_->DeviceHandle();
 }
@@ -149,6 +143,64 @@ bool Device::IsHwsEnabled(int engine) const {
 
 bool Device::IsGpuTimeoutDisabled(int engine) const {
   return device_ctx_->IsGpuTimeoutDisabled(engine);
+}
+
+int Device::Major() const { return device_ctx_->Major(); }
+int Device::Minor() const { return device_ctx_->Minor(); }
+int Device::Stepping() const { return device_ctx_->Stepping(); }
+bool Device::IsDgpu() const { return device_ctx_->IsDgpu(); }
+const char *Device::ProductName() const { return device_ctx_->ProductName(); }
+uint64_t Device::Uuid() const { return device_ctx_->Uuid(); }
+uint32_t Device::Family() const { return device_ctx_->Family(); }
+uint32_t Device::DeviceId() const { return device_ctx_->DeviceId(); }
+uint32_t Device::WavefrontSize() const { return device_ctx_->WavefrontSize(); }
+uint32_t Device::ComputeUnitCount() const { return device_ctx_->ComputeUnitCount(); }
+uint32_t Device::MaxEngineClockMhz() const { return device_ctx_->MaxEngineClockMhz(); }
+uint32_t Device::WatchPointsNum() const { return device_ctx_->WatchPointsNum(); }
+uint32_t Device::PciBusAddr() const { return device_ctx_->PciBusAddr(); }
+uint32_t Device::MemoryBusWidth() const { return device_ctx_->MemoryBusWidth(); }
+uint32_t Device::MaxMemoryClockMhz() const { return device_ctx_->MaxMemoryClockMhz(); }
+uint32_t Device::WavePerCu() const { return device_ctx_->WavePerCu(); }
+uint32_t Device::SimdPerCu() const { return device_ctx_->SimdPerCu(); }
+uint32_t Device::MaxScratchSlotsPerCu() const { return device_ctx_->MaxScratchSlotsPerCu(); }
+uint32_t Device::NumShaderEngine() const { return device_ctx_->NumShaderEngine(); }
+uint32_t Device::ShaderArrayPerShaderEngine() const { return device_ctx_->ShaderArrayPerShaderEngine(); }
+uint32_t Device::NumSdmaEngines() const { return device_ctx_->NumSdmaEngines(); }
+uint32_t Device::SdmaEngine(uint32_t idx) const { return device_ctx_->SdmaEngine(idx); }
+uint32_t Device::Domain() const { return device_ctx_->Domain(); }
+uint32_t Device::NumGws() const { return device_ctx_->NumGws(); }
+uint32_t Device::AsicRevision() const { return device_ctx_->AsicRevision(); }
+uint64_t Device::LocalVisibleHeapSize() const { return device_ctx_->LocalVisibleHeapSize(); }
+uint64_t Device::LocalInvisibleHeapSize() const { return device_ctx_->LocalInvisibleHeapSize(); }
+uint64_t Device::NonLocalHeapSize() const { return device_ctx_->NonLocalHeapSize(); }
+uint64_t Device::PrivateApertureBase() const { return device_ctx_->PrivateApertureBase(); }
+uint64_t Device::PrivateApertureSize() const { return device_ctx_->PrivateApertureSize(); }
+uint64_t Device::SharedApertureBase() const { return device_ctx_->SharedApertureBase(); }
+uint64_t Device::SharedApertureSize() const { return device_ctx_->SharedApertureSize(); }
+uint32_t Device::LdsSize() const { return device_ctx_->LdsSize(); }
+uint64_t Device::GpuCounterFrequency() const { return device_ctx_->GpuCounterFrequency(); }
+uint32_t Device::UserQueueSize() const { return device_ctx_->UserQueueSize(); }
+uint32_t Device::MecFwVersion() const { return device_ctx_->MecFwVersion(); }
+uint32_t Device::SdmaFwVersion() const { return device_ctx_->SdmaFwVersion(); }
+uint32_t Device::L1CacheSize() const { return device_ctx_->L1CacheSize(); }
+uint32_t Device::L2CacheSize() const { return device_ctx_->L2CacheSize(); }
+uint32_t Device::L3CacheSize() const { return device_ctx_->L3CacheSize(); }
+uint32_t Device::Gl2CacheLineSize() const { return device_ctx_->Gl2CacheLineSize(); }
+bool Device::SupportStateShadowingByCpFw() const { return device_ctx_->SupportStateShadowingByCpFw(); }
+bool Device::SupportPlatformAtomic() const { return device_ctx_->SupportPlatformAtomic(); }
+uint32_t Device::ComputeEngine() const { return device_ctx_->ComputeEngine(); }
+uint32_t Device::NumCpQueues() const { return device_ctx_->NumCpQueues(); }
+bool Device::EnableBigPageAlignment() const { return device_ctx_->EnableBigPageAlignment(); }
+uint32_t Device::BigPageAlignmentSize() const { return device_ctx_->BigPageAlignmentSize(); }
+uint32_t Device::HwBigPageMinAlignmentSize() const { return device_ctx_->HwBigPageMinAlignmentSize(); }
+uint32_t Device::HwBigPageAlignmentSize() const { return device_ctx_->HwBigPageAlignmentSize(); }
+
+void Device::SetAllocationInfo(void *data, uint64_t size,
+                               thunk_proxy::AllocDomain domain, uint64_t addr,
+                               uint32_t mem_flags,
+                               uint32_t engine_flag) const {
+  thunk_proxy::SetAllocationInfo(data, size, domain, addr, mem_flags,
+                                 engine_flag, *device_ctx_);
 }
 
 } // namespace thunk
