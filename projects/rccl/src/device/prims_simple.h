@@ -56,12 +56,6 @@ class Primitives<
   struct ncclConnFifo* connFifo = NULL;
   T* connEltsFifo;
   T* directBuff = NULL;
-  // ROCM-21756: cached host-side intent flag from ncclDevWorkColl::regUsed
-  // (or the OR of p2p sendIpcReg/recvIpcReg). When 0, setDataPtrs never
-  // assigned directBuff, so waitPeer must not dereference it. Used in lieu
-  // of a per-thread `directBuff != NULL` check because it (a) mirrors the
-  // existing `Direct && fn.work->regUsed` gate in process() below, (b) is
-  // decided once on the host and survives any future change to setDataPtrs.
   int regUsed = 0;
   uint64_t *connStepPtr;
   uint64_t connStepCache; // Cache last seen value of (*connStepPtr)
@@ -201,7 +195,7 @@ private:
       } else if (!isSendNotRecv && DirectRecv) {
         if ((flags & DirectRead) && regUsed && directBuff != nullptr) {
           ptrs[index] = directBuff + srcIx + offset;
-        } else if ((flags & DirectWrite) && directBuff != nullptr) {
+        } else if ((flags & DirectWrite) && regUsed && directBuff != nullptr) {
           ptrs[index] = directBuff + dstIx + offset;  // send to next from my output buffer
         } else {
           ptrs[index] = connEltsFifo + (step%NCCL_STEPS)*connStepSize;
@@ -515,7 +509,7 @@ public:
           if ((flags & ConnFifoEnabled) && connFifo[step%NCCL_STEPS].mode == NCCL_MODE_OFFSET) {
             int offset = loadInt(&connFifo[step%NCCL_STEPS].offset);
             ptrs[index] = connEltsFifo + offset/sizeof(T);
-          } else if (Direct && regUsed) {  // ROCM-21756: cached; was fn.work->regUsed
+          } else if (Direct && regUsed) {
             if (isSendNotRecv) {
               if (flags & DirectWrite) {
                 ptrs[index] = directBuff;
@@ -834,11 +828,7 @@ public:
       // coverity[negative_returns:FALSE] => coverity thinks that index could be -1 but that's not actually the case
       // coverity[var_deref_model] => coverity thinks work can dereferenced if NULL but this is not the case
       setDataPtrs(inputBuf, outputBuf, redOpArg, (struct ncclDevWorkCollReg*)collWork, sendIpcReg || recvIpcReg, peer, collWork != nullptr ? collWork->acc : nullptr);
-      // ROCM-21756: cache the same gate setDataPtrs used to decide whether
-      // to assign directBuff. waitPeer reads this flag to avoid dereferencing
-      // an unassigned (NULL) directBuff when the unsafe single-stream fast
-      // path in enqueue.cc lets the kernel run before IPC registration is
-      // visible to it.
+      // cached host-side intent flag from ncclDevWorkColl::regUsed
       regUsed = (sendIpcReg || recvIpcReg) ? 1 : 0;
       // coverity[uninit_member] => coverity thinks fan.n is not initialized
     } else if (mode == primsModePatRs || mode == primsModePatAg) { // Connect to all ranks +/- 2^n
