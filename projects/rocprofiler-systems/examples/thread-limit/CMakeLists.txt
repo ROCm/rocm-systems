@@ -42,6 +42,8 @@ target_compile_options(tests-compile-options INTERFACE -g)
 
 add_executable(thread-limit thread-limit.cpp)
 target_compile_definitions(thread-limit PRIVATE MAX_THREADS=${ROCPROFSYS_MAX_THREADS})
+target_compile_options(thread-limit PRIVATE -fPIE)
+target_link_options(thread-limit PRIVATE -pie -Wl,-z,pack-relative-relocs)
 target_link_libraries(thread-limit PRIVATE Threads::Threads tests-compile-options)
 
 if(ROCPROFSYS_INSTALL_EXAMPLES AND TARGET thread-limit)

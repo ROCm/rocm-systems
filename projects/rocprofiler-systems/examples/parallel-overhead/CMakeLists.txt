@@ -31,6 +31,12 @@ target_compile_definitions(parallel-overhead-locks PRIVATE USE_LOCKS=1)
 
 set(PARALLEL_OVERHEAD_EXAMPLES parallel-overhead parallel-overhead-locks)
 foreach(PARALLEL_OVERHEAD_EXAMPLE IN LISTS PARALLEL_OVERHEAD_EXAMPLES)
+    target_compile_options(${PARALLEL_OVERHEAD_EXAMPLE} PRIVATE -fPIE)
+    target_link_options(
+        ${PARALLEL_OVERHEAD_EXAMPLE}
+        PRIVATE -pie -Wl,-z,pack-relative-relocs
+    )
+
     if(ROCPROFSYS_INSTALL_EXAMPLES AND TARGET ${PARALLEL_OVERHEAD_EXAMPLE})
         install(
             TARGETS ${PARALLEL_OVERHEAD_EXAMPLE}

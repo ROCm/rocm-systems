@@ -45,6 +45,8 @@ function(rocprofiler_systems_causal_example_executable _NAME)
     target_compile_options(rocprofsys-causal-example-lib-no-debug INTERFACE -g0)
 
     add_executable(${_NAME} ${CAUSAL_SOURCES})
+    target_compile_options(${_NAME} PRIVATE -fPIE)
+    target_link_options(${_NAME} PRIVATE -pie -Wl,-z,pack-relative-relocs)
     target_compile_definitions(
         ${_NAME}
         PRIVATE USE_COZ=0 USE_OMNI=0 ${CAUSAL_DEFINITIONS}
@@ -62,6 +64,8 @@ function(rocprofiler_systems_causal_example_executable _NAME)
     )
 
     add_executable(${_NAME}-rocprofsys ${CAUSAL_SOURCES})
+    target_compile_options(${_NAME}-rocprofsys PRIVATE -fPIE)
+    target_link_options(${_NAME}-rocprofsys PRIVATE -pie -Wl,-z,pack-relative-relocs)
     target_compile_definitions(
         ${_NAME}-rocprofsys
         PRIVATE USE_COZ=0 USE_OMNI=1 ${CAUSAL_DEFINITIONS}
@@ -79,6 +83,8 @@ function(rocprofiler_systems_causal_example_executable _NAME)
     )
 
     add_executable(${_NAME}-ndebug ${CAUSAL_SOURCES})
+    target_compile_options(${_NAME}-ndebug PRIVATE -fPIE)
+    target_link_options(${_NAME}-ndebug PRIVATE -pie -Wl,-z,pack-relative-relocs)
     target_compile_definitions(
         ${_NAME}-ndebug
         PRIVATE USE_COZ=0 USE_OMNI=0 ${CAUSAL_DEFINITIONS}
@@ -96,6 +102,11 @@ function(rocprofiler_systems_causal_example_executable _NAME)
     )
 
     add_executable(${_NAME}-rocprofsys-ndebug ${CAUSAL_SOURCES})
+    target_compile_options(${_NAME}-rocprofsys-ndebug PRIVATE -fPIE)
+    target_link_options(
+        ${_NAME}-rocprofsys-ndebug
+        PRIVATE -pie -Wl,-z,pack-relative-relocs
+    )
     target_compile_definitions(
         ${_NAME}-rocprofsys-ndebug
         PRIVATE USE_COZ=0 USE_OMNI=1 ${CAUSAL_DEFINITIONS}
@@ -128,6 +139,8 @@ function(rocprofiler_systems_causal_example_executable _NAME)
         )
 
         add_executable(${_NAME}-coz ${CAUSAL_SOURCES})
+        target_compile_options(${_NAME}-coz PRIVATE -fPIE)
+        target_link_options(${_NAME}-coz PRIVATE -pie -Wl,-z,pack-relative-relocs)
         target_compile_definitions(
             ${_NAME}-coz
             PRIVATE USE_COZ=1 USE_OMNI=0 ${CAUSAL_DEFINITIONS}

@@ -40,7 +40,9 @@ set(_SHMEM_PINGPONG_EXE ${_SHMEM_BINDIR}/shmem_pingpong${CMAKE_EXECUTABLE_SUFFIX
 
 add_custom_command(
     OUTPUT ${_SHMEM_HELLO_EXE}
-    COMMAND ${OSHCC_EXECUTABLE} ${_SHMEM_SRCDIR}/shmem_hello.c -o ${_SHMEM_HELLO_EXE}
+    COMMAND
+        ${OSHCC_EXECUTABLE} -fPIE ${_SHMEM_SRCDIR}/shmem_hello.c -pie
+        -Wl,-z,pack-relative-relocs -o ${_SHMEM_HELLO_EXE}
     DEPENDS ${_SHMEM_SRCDIR}/shmem_hello.c
     COMMENT "Building shmem_hello with oshcc"
     VERBATIM
@@ -50,7 +52,8 @@ add_custom_target(shmem_hello ALL DEPENDS ${_SHMEM_HELLO_EXE})
 add_custom_command(
     OUTPUT ${_SHMEM_PINGPONG_EXE}
     COMMAND
-        ${OSHCC_EXECUTABLE} ${_SHMEM_SRCDIR}/shmem_pingpong.c -o ${_SHMEM_PINGPONG_EXE}
+        ${OSHCC_EXECUTABLE} -fPIE ${_SHMEM_SRCDIR}/shmem_pingpong.c -pie
+        -Wl,-z,pack-relative-relocs -o ${_SHMEM_PINGPONG_EXE}
     DEPENDS ${_SHMEM_SRCDIR}/shmem_pingpong.c
     COMMENT "Building shmem_pingpong with oshcc"
     VERBATIM

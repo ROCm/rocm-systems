@@ -14,6 +14,8 @@ set(CMAKE_BUILD_TYPE "Debug")
 
 add_executable(trace-time-window trace-time-window.cpp)
 target_compile_options(trace-time-window PRIVATE ${_FLAGS})
+target_compile_options(trace-time-window PRIVATE -fPIE)
+target_link_options(trace-time-window PRIVATE -pie -Wl,-z,pack-relative-relocs)
 
 if(ROCPROFSYS_INSTALL_EXAMPLES AND TARGET trace-time-window)
     install(

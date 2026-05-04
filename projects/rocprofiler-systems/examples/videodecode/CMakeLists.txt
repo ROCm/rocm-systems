@@ -165,6 +165,8 @@ if(FFMPEG_FOUND AND rocdecode_FOUND)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=gnu++17")
     target_link_libraries(videodecode ${LINK_LIBRARY_LIST})
     target_compile_options(videodecode PRIVATE ${_FLAGS})
+    target_compile_options(videodecode PRIVATE -fPIE)
+    target_link_options(videodecode PRIVATE -pie -Wl,-z,pack-relative-relocs)
 
     # FFMPEG multi-version support
     if(_FFMPEG_AVCODEC_VERSION VERSION_LESS_EQUAL 58.134.100)

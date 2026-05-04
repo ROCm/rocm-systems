@@ -68,6 +68,8 @@ target_compile_options(
     scratch-memory
     PRIVATE -W -Wall -Wextra -Wpedantic -Wshadow -Werror
 )
+target_compile_options(scratch-memory PRIVATE -fPIE)
+target_link_options(scratch-memory PRIVATE -pie -Wl,-z,pack-relative-relocs)
 target_link_libraries(scratch-memory PRIVATE Threads::Threads ${HSA_RUNTIME_LIBRARY})
 
 foreach(arch IN LISTS ROCPROFSYS_GFX_TARGETS)

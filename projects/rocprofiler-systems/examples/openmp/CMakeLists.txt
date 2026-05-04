@@ -86,6 +86,9 @@ target_link_libraries(openmp-lu PRIVATE openmp-common)
 set(OPENMP_EXAMPLES openmp-cg openmp-lu)
 
 foreach(OPENMP_EXAMPLE IN LISTS OPENMP_EXAMPLES)
+    target_compile_options(${OPENMP_EXAMPLE} PRIVATE -fPIE)
+    target_link_options(${OPENMP_EXAMPLE} PRIVATE -pie -Wl,-z,pack-relative-relocs)
+
     if(ROCPROFSYS_INSTALL_EXAMPLES AND TARGET ${OPENMP_EXAMPLE})
         install(
             TARGETS ${OPENMP_EXAMPLE}

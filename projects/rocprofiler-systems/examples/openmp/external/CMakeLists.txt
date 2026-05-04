@@ -91,8 +91,10 @@ function(configure_ompvv_tests TEST_TYPE TEST_LIST_VAR)
             endforeach()
         endif()
 
-        set(CUSTOM_FFLAGS "-lm ${FOFFLOADING_FLAGS}")
-        set(CUSTOM_FLINKFLAGS "-lm ${FOFFLOADING_FLAGS}")
+        set(CUSTOM_FFLAGS "-lm ${FOFFLOADING_FLAGS} -fPIE")
+        set(CUSTOM_FLINKFLAGS
+            "-lm ${FOFFLOADING_FLAGS} -Wl,-pie -Wl,-z,pack-relative-relocs"
+        )
 
         add_custom_command(
             OUTPUT "${OMPVV_BIN_DEST}/${TARGET_NAME}"

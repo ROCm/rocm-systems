@@ -50,7 +50,9 @@ target_compile_options(
     ${HPC_EXAMPLE_NAME}
     PRIVATE ${OpenMP_CXX_FLAGS} -Wno-vla-cxx-extension
 )
+target_compile_options(${HPC_EXAMPLE_NAME} PRIVATE -fPIE)
 target_link_options(${HPC_EXAMPLE_NAME} PRIVATE -fopenmp)
+target_link_options(${HPC_EXAMPLE_NAME} PRIVATE -pie -Wl,-z,pack-relative-relocs)
 target_link_libraries(${HPC_EXAMPLE_NAME} PRIVATE ${ROCBLAS_LIBRARY} ${ROCTX_SDK_LIBRARY})
 
 foreach(arch IN LISTS ROCPROFSYS_GFX_TARGETS)
