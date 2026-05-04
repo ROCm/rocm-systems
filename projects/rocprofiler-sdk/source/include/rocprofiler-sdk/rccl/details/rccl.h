@@ -89,6 +89,10 @@ typedef enum
 #define NCCL_SHRINK_ABORT                                                                          \
     0x01 /* First, terminate ongoing parent operations, and then shrink the parent communicator */
 
+/* ncclCommRevoke flags */
+#define NCCL_REVOKE_DEFAULT                                                                        \
+    0x00 /* default revoke behavior: quiesce in-flight work, reject new ops */
+
 /*! @defgroup   rccl_config_type Communicator Configuration
     @details    Structure that allows for customizing Communicator behavior via
    ncclCommInitRankConfig
@@ -375,6 +379,11 @@ pncclCommShrink(ncclComm_t    comm,
                 ncclComm_t*   newcomm,
                 ncclConfig_t* config,
                 int           shrinkFlags);
+
+ncclResult_t
+ncclCommRevoke(ncclComm_t comm, int revokeFlags);
+ncclResult_t
+pncclCommRevoke(ncclComm_t comm, int revokeFlags);
 
 /*! @brief      Creates a new communicator (multi thread/process version), similar to
    ncclCommInitRankConfig.
