@@ -495,6 +495,7 @@ filter_and_reverse_frames(std::vector<stack_frame>& frames)
     auto use_label = [](std::string_view lbl) -> short {
         const auto npos = std::string_view::npos;
         if(lbl.find("rocprofsys_main") != npos) return 0;
+        if(lbl.find("rocprofsys_libc_start_main") != npos) return 0;
         if(lbl.find("rocprofsys::") != npos) return 0;
         if(lbl.find("tim::openmp::") != npos) return -1;
         if(lbl.find("tim::") != npos) return 0;
