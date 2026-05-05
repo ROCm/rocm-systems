@@ -3,6 +3,7 @@
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     rj_add_object_library(rocjitsu_kmd
+        linux/events.cpp
         linux/simulated_driver.cpp
         linux/sysfs.cpp
     )

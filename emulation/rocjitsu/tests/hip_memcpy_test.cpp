@@ -18,8 +18,7 @@ int main(int argc, char **argv) {
   ::testing::InitGoogleTest(&argc, argv);
   int rc = RUN_ALL_TESTS();
   (void)hipDeviceReset();
-  _exit(rc); // HIP atexit handlers call hsa_shut_down() which hangs without a
-             // real GPU; device state is already reset above.
+  return rc;
 }
 
 #define HIP_ASSERT(call)                                                                           \

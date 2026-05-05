@@ -28,20 +28,9 @@
 
 namespace rocjitsu {
 
-// KFD mmap offset encoding (mirrors kfd_priv.h).
-constexpr uint64_t KFD_MMAP_TYPE_SHIFT = 62;
-constexpr uint64_t KFD_MMAP_TYPE_MASK = 0x3ULL << KFD_MMAP_TYPE_SHIFT;
-constexpr uint64_t KFD_MMAP_TYPE_DOORBELL = 0x3ULL << KFD_MMAP_TYPE_SHIFT;
-constexpr uint64_t KFD_MMAP_TYPE_EVENTS = 0x2ULL << KFD_MMAP_TYPE_SHIFT;
-constexpr uint64_t KFD_MMAP_GPU_ID_SHIFT = 46;
 constexpr const char *const KFD_SYSFS_PREFIX = "/sys/devices/virtual/kfd/kfd/topology";
 
 namespace {
-
-constexpr uint64_t kfd_mmap_gpu_id(uint32_t gpu_id) {
-  return (static_cast<uint64_t>(gpu_id) << KFD_MMAP_GPU_ID_SHIFT) &
-         ((1ULL << KFD_MMAP_TYPE_SHIFT) - (1ULL << KFD_MMAP_GPU_ID_SHIFT));
-}
 
 bool vm_trace_enabled() {
   static const bool enabled = (std::getenv("RJ_VMEM_TRACE") != nullptr);
@@ -223,8 +212,6 @@ SimulatedDriver::SimulatedDriver(simdojo::SimulationEngine &engine, SoC &soc)
 SimulatedDriver::~SimulatedDriver() {
   if (fd_ >= 0)
     close();
-  if (event_memfd_ >= 0)
-    ::close(event_memfd_);
 }
 
 void SimulatedDriver::setup_topology(const Sysfs::GpuInfo &gpu) {
@@ -252,64 +239,29 @@ int SimulatedDriver::open() {
     if (fd_ < 0)
       return -1;
   }
-  closing_.store(false, std::memory_order_release);
+  event_state_.reset();
   g_kfd_fd.store(fd_, std::memory_order_release);
   engine_.register_as_primary();
-  // Resolve the CommandProcessor for this device once. All queue operations
-  // (create, flush, destroy) use cp_ so they never need to know the XCD index.
-  // SoC::command_processor() owns the topology decision (single-XCD → xcd(0);
-  // future multi-XCD would return a MES dispatcher).
   cp_ = soc_.command_processor();
-  // Register the interrupt callback here rather than at queue-creation time.
-  // The CP calls this after writing to a completion signal's event mailbox,
-  // waking any thread blocked in wait_events_ioctl.
-  cp_->set_interrupt_callback([this](uint32_t event_id) {
-    std::lock_guard<std::mutex> lock(event_mutex_);
-    if (auto it = events_.find(event_id); it != events_.end() && !it->second.signaled) {
-      it->second.signaled = true;
-    }
-    if (event_page_) {
-      auto *slots = static_cast<uint64_t *>(event_page_);
-      uint32_t limit = static_cast<uint32_t>(event_page_size_ / sizeof(uint64_t));
-      if (event_id < limit)
-        std::atomic_ref<uint64_t>(slots[event_id]).store(1, std::memory_order_release);
-    }
-    event_cv_.notify_all();
-  });
+  cp_->set_interrupt_callback(
+      [this](uint32_t event_id) { event_state_.signal_interrupt(event_id); });
+
   return fd_;
 }
 
 int SimulatedDriver::close() {
-  // Do NOT release the engine primary here. ROCR may close and re-open
-  // /dev/kfd during its lifetime (e.g., Init() failure → Close() → retry).
-  // Releasing the primary causes the engine to terminate, and it cannot
-  // be restarted. The engine stays alive for the process lifetime.
   const bool trace_enabled = vm_trace_enabled();
   size_t leaked_allocations = 0;
   uint64_t leaked_bytes = 0;
   size_t leaked_queues = 0;
   std::vector<uint64_t> leaked_handles;
+  event_state_.notify_closing();
   {
-    // Hold event_mutex_ while setting closing_ to ensure wait_events_ioctl's
-    // predicate sees the closed state before we notify.
-    std::lock_guard<std::mutex> lock(event_mutex_);
-    closing_.store(true, std::memory_order_release);
     // fd_ is intentionally NOT reset — the memfd stays reserved so the fd number
     // remains stable across close/reopen. lookup() uses g_kfd_fd to gate routing.
     g_kfd_fd.store(-1, std::memory_order_release);
   }
-  // Signal every event page slot non-zero. libhsakmt's WaitOnEvent polls
-  // signal_page[event_slot_index] directly; a non-zero value breaks the loop
-  // immediately, allowing ROCR's background threads to see IsValid()==false
-  // and exit cleanly without spinning on the WAIT_EVENTS ioctl.
-  if (event_page_) {
-    auto *slots = static_cast<uint64_t *>(event_page_);
-    size_t count = event_page_size_ / sizeof(uint64_t);
-    for (size_t i = 0; i < count; ++i)
-      std::atomic_ref<uint64_t>(slots[i]).store(KFD_SIGNAL_EVENT_LIMIT, std::memory_order_release);
-  }
-  event_cv_.notify_all();
-
+  event_state_.signal_page_shutdown();
   // Unregister any CP queues and free host mappings that ROCR left open.
   // In normal operation ROCR calls DESTROY_QUEUE / FREE_MEMORY before close(),
   // but guard against leaks on abnormal shutdown.
@@ -504,28 +456,37 @@ void *SimulatedDriver::mmap(void *addr, size_t length, int prot, int flags, off_
   if (type == KFD_MMAP_TYPE_EVENTS) {
     // Signal event page: a shared memfd that libhsakmt polls for event signals.
     // libhsakmt checks signal_page[event_slot_index] != 0 on each wait iteration.
-    if (event_memfd_ < 0) {
-      event_memfd_ =
+    if (event_state_.memfd < 0) {
+      event_state_.memfd =
           static_cast<int>(syscall(SYS_memfd_create, "rocjitsu_events", MFD_ALLOW_SEALING));
-      if (event_memfd_ < 0)
+      if (event_state_.memfd < 0)
         return MAP_FAILED;
-      if (ftruncate(event_memfd_, static_cast<off_t>(length)) != 0) {
-        ::close(event_memfd_);
-        event_memfd_ = -1;
+      if (ftruncate(event_state_.memfd, static_cast<off_t>(length)) != 0) {
+        ::close(event_state_.memfd);
+        event_state_.memfd = -1;
         return MAP_FAILED;
       }
-      // Seal against resize: the event page has a fixed layout (one slot per
-      // KFD event ID) and must never grow or shrink after creation.
-      fcntl(event_memfd_, F_ADD_SEALS, F_SEAL_SHRINK | F_SEAL_GROW);
+      // Initialize all slots to UNSIGNALED (0xFF...FF) matching real KFD's
+      // allocate_signal_page which does memset(page, 0xFF, size).
+      {
+        auto *init_ptr = reinterpret_cast<uint8_t *>(
+            syscall(SYS_mmap, nullptr, length, PROT_WRITE, MAP_SHARED, event_state_.memfd, 0));
+        if (init_ptr != MAP_FAILED) {
+          std::memset(init_ptr, 0xFF, length);
+          syscall(SYS_munmap, init_ptr, length);
+        }
+      }
+      fcntl(event_state_.memfd, F_ADD_SEALS, F_SEAL_SHRINK | F_SEAL_GROW);
     }
     int mflags = MAP_SHARED;
     if (flags & MAP_FIXED)
       mflags |= MAP_FIXED;
-    long raw = syscall(SYS_mmap, addr, length, PROT_READ | PROT_WRITE, mflags, event_memfd_, 0);
+    long raw =
+        syscall(SYS_mmap, addr, length, PROT_READ | PROT_WRITE, mflags, event_state_.memfd, 0);
     void *ptr = (raw < 0) ? MAP_FAILED : reinterpret_cast<void *>(static_cast<uintptr_t>(raw));
     if (ptr != MAP_FAILED) {
-      event_page_ = ptr;
-      event_page_size_ = length;
+      event_state_.page = ptr;
+      event_state_.page_size = length;
     }
     return ptr;
   }
@@ -590,7 +551,7 @@ void *SimulatedDriver::mmap(void *addr, size_t length, int prot, int flags, off_
 
 int SimulatedDriver::munmap(void *addr, size_t length) {
   if (addr == doorbell_page_) {
-    if (!closing_.load(std::memory_order_acquire)) {
+    if (!event_state_.is_closing()) {
       errno = EPERM;
       return -1;
     }
@@ -603,9 +564,9 @@ int SimulatedDriver::munmap(void *addr, size_t length) {
     syscall(SYS_munmap, addr, length);
     return 0;
   }
-  if (addr == event_page_) {
-    event_page_ = nullptr;
-    event_page_size_ = 0;
+  if (addr == event_state_.page) {
+    event_state_.page = nullptr;
+    event_state_.page_size = 0;
     syscall(SYS_munmap, addr, length);
     return 0;
   }
@@ -744,14 +705,15 @@ int SimulatedDriver::map_memory_ioctl(void *arg) {
                       alloc.handle, alloc.gpu_va, alloc.size, alloc.flags,
                       reinterpret_cast<uintptr_t>(alloc.host_ptr));
   });
-  // Ensure the allocation's host pages are registered in GpuMemory.
   if (alloc.host_ptr && soc_.memory())
     soc_.memory()->map_host_pages(alloc.gpu_va, alloc.host_ptr, alloc.size);
+  args->n_success = args->n_devices;
   return 0;
 }
 
 int SimulatedDriver::unmap_memory_ioctl(void *arg) {
-  (void)arg;
+  auto *args = static_cast<kfd_ioctl_unmap_memory_from_gpu_args *>(arg);
+  args->n_success = args->n_devices;
   return 0;
 }
 
@@ -838,96 +800,6 @@ int SimulatedDriver::destroy_queue_ioctl(void *arg) {
   {
     std::lock_guard<std::mutex> lk(alloc_mutex_);
     std::erase(active_queue_ids_, args->queue_id);
-  }
-  return 0;
-}
-
-int SimulatedDriver::create_event_ioctl(void *arg) {
-  auto *args = static_cast<kfd_ioctl_create_event_args *>(arg);
-  std::lock_guard<std::mutex> lock(event_mutex_);
-
-  if (next_event_id_ >= KFD_SIGNAL_EVENT_LIMIT)
-    return -ENOSPC;
-
-  // dGPU path: libhsakmt pre-allocates the event page as a regular GPUVM
-  // allocation and passes its mmap offset in event_page_offset. The real
-  // kernel calls kfd_kmap_event_page() to adopt it. We resolve the offset
-  // back to the host pointer via our allocation table.
-  if (args->event_page_offset != 0 && !event_page_) {
-    uint64_t handle = static_cast<uint64_t>(args->event_page_offset) >> 12;
-    std::lock_guard<std::mutex> alock(alloc_mutex_);
-    auto it = allocations_.find(handle);
-    if (it != allocations_.end() && it->second.host_ptr) {
-      event_page_ = it->second.host_ptr;
-      event_page_size_ = it->second.size;
-      util::Logger::vm("CREATE_EVENT: adopted pre-allocated event page handle=", handle,
-                       " host_ptr=0x", std::hex, reinterpret_cast<uintptr_t>(event_page_),
-                       " size=", std::dec, event_page_size_);
-    }
-  }
-
-  GpuEvent ev{};
-  ev.event_id = next_event_id_++;
-  ev.event_type = args->event_type;
-  ev.auto_reset = args->auto_reset != 0;
-  ev.signaled = false;
-
-  events_[ev.event_id] = ev;
-
-  args->event_id = ev.event_id;
-  args->event_trigger_data = ev.event_id;
-  args->event_slot_index = ev.event_id;
-  args->event_page_offset = KFD_MMAP_TYPE_EVENTS | kfd_mmap_gpu_id(gpu_id_);
-
-  util::Logger::vm([&](auto &os) {
-    os << std::format("CREATE_EVENT id={} slot={} type={} auto_reset={}", ev.event_id,
-                      args->event_slot_index, args->event_type, ev.auto_reset);
-  });
-  return 0;
-}
-
-int SimulatedDriver::destroy_event_ioctl(void *arg) {
-  auto *args = static_cast<kfd_ioctl_destroy_event_args *>(arg);
-  {
-    std::lock_guard<std::mutex> lock(event_mutex_);
-    events_.erase(args->event_id);
-  }
-  // Wake any threads blocked in wait_events_ioctl — the event they were
-  // waiting on may have been destroyed. The real KFD driver does the same.
-  event_cv_.notify_all();
-  return 0;
-}
-
-int SimulatedDriver::set_event_ioctl(void *arg) {
-  auto *args = static_cast<kfd_ioctl_set_event_args *>(arg);
-  {
-    std::lock_guard<std::mutex> lock(event_mutex_);
-    auto it = events_.find(args->event_id);
-    if (it == events_.end())
-      return -EINVAL;
-    it->second.signaled = true;
-    // Write to the signal page slot so libhsakmt's direct poll detects this event.
-    if (event_page_) {
-      auto *slots = static_cast<uint64_t *>(event_page_);
-      if (args->event_id < event_page_size_ / sizeof(uint64_t))
-        std::atomic_ref<uint64_t>(slots[args->event_id]).store(1, std::memory_order_release);
-    }
-  }
-  event_cv_.notify_all();
-  return 0;
-}
-
-int SimulatedDriver::reset_event_ioctl(void *arg) {
-  auto *args = static_cast<kfd_ioctl_reset_event_args *>(arg);
-  std::lock_guard<std::mutex> lock(event_mutex_);
-  auto it = events_.find(args->event_id);
-  if (it == events_.end())
-    return -EINVAL;
-  it->second.signaled = false;
-  if (event_page_) {
-    auto *slots = static_cast<uint64_t *>(event_page_);
-    if (args->event_id < event_page_size_ / sizeof(uint64_t))
-      std::atomic_ref<uint64_t>(slots[args->event_id]).store(0, std::memory_order_release);
   }
   return 0;
 }
@@ -1110,98 +982,6 @@ int SimulatedDriver::set_xnack_mode_ioctl(void *arg) {
   // Returning 0 prevents libhsakmt from enabling SVM allocation paths that bypass
   // our ALLOC_MEMORY_OF_GPU tracking.
   args->xnack_enabled = 0;
-  return 0;
-}
-
-int SimulatedDriver::wait_events_ioctl(void *arg) {
-  auto *args = static_cast<kfd_ioctl_wait_events_args *>(arg);
-
-  auto timeout_ms = std::chrono::milliseconds(args->timeout);
-
-  std::unique_lock<std::mutex> lock(event_mutex_);
-
-  // Build the list of requested event IDs from the userspace array.
-  auto *ev_data = reinterpret_cast<const kfd_event_data *>(args->events_ptr);
-
-  auto is_signaled = [this](uint32_t id) -> bool {
-    if (auto it = events_.find(id); it != events_.end() && it->second.signaled)
-      return true;
-    if (event_page_ && id < event_page_size_ / sizeof(uint64_t)) {
-      auto *slots = static_cast<uint64_t *>(event_page_);
-      auto slot_val = std::atomic_ref<uint64_t>(slots[id]).load(std::memory_order_acquire);
-      if (slot_val != 0)
-        return true;
-    }
-    return false;
-  };
-
-  static const bool sync_trace = std::getenv("RJ_SYNC_TRACE") != nullptr;
-
-  auto pred = [this, args, ev_data, &is_signaled]() -> bool {
-    if (closing_)
-      return true;
-    if (args->wait_for_all) {
-      // AND semantics: all requested events must be signaled.
-      for (uint32_t i = 0; i < args->num_events; ++i) {
-        if (!is_signaled(ev_data[i].event_id))
-          return false;
-      }
-      return args->num_events > 0;
-    } else {
-      // OR semantics: any one event signaled is sufficient.
-      for (uint32_t i = 0; i < args->num_events; ++i) {
-        if (is_signaled(ev_data[i].event_id))
-          return true;
-      }
-      return false;
-    }
-  };
-
-  if (closing_)
-    return -EBADF;
-
-  if (args->timeout == 0) {
-    args->wait_result = pred() ? 0 : 1;
-  } else if (args->timeout == ~0u) {
-    // Cap infinite waits at 100ms. ROCR's signal watcher uses UINT32_MAX and
-    // relies on the kernel's wake_up_interruptible() during shutdown. Simulate
-    // this by returning periodically with wait_result=1 (spurious wakeup) so
-    // ROCR's thread can check its own termination flag and exit before close()
-    // is called. Without this, hsa_shut_down() deadlocks: it joins the watcher
-    // while the watcher is stuck in our wait waiting for close() to be called.
-    event_cv_.wait_for(lock, std::chrono::milliseconds(100), pred);
-    if (closing_)
-      return -EBADF;
-    args->wait_result = pred() ? 0 : 1;
-  } else {
-    // Cap the wait at 100ms. ROCR issues long-timeout drain waits (e.g. 30s)
-    // during hsa_shut_down() for GPU work that never completes in the simulator.
-    // Returning early with wait_result=1 (timeout) is correct: ROCR treats it
-    // identically to the deadline expiring and continues with cleanup.
-    // close() also notifies event_cv_, so a real close-driven wake still works.
-    auto cap = std::min(timeout_ms, std::chrono::milliseconds(100));
-    event_cv_.wait_for(lock, cap, pred);
-    if (closing_)
-      return -EBADF;
-    args->wait_result = pred() ? 0 : 1;
-  }
-
-  if (sync_trace && args->wait_result == 0)
-    util::Logger::vm("WAIT_EVENTS result=0 (signaled)");
-
-  // Auto-reset signaled events from the requested set.
-  for (uint32_t i = 0; i < args->num_events; ++i) {
-    uint32_t id = ev_data[i].event_id;
-    if (auto it = events_.find(id);
-        it != events_.end() && it->second.signaled && it->second.auto_reset) {
-      it->second.signaled = false;
-      if (event_page_ && id < event_page_size_ / sizeof(uint64_t)) {
-        auto *slots = static_cast<uint64_t *>(event_page_);
-        std::atomic_ref<uint64_t>(slots[id]).store(0, std::memory_order_release);
-      }
-    }
-  }
-
   return 0;
 }
 

@@ -5,6 +5,7 @@
 #define ROCJITSU_KMD_LINUX_SIMULATED_DRIVER_H_
 
 #include "rocjitsu/base/rj_compiler.h"
+#include "rocjitsu/kmd/linux/events.h"
 #include "rocjitsu/kmd/linux/sysfs.h"
 #include "rocjitsu/vm/driver.h"
 #include "rocjitsu/vm/soc.h"
@@ -27,6 +28,18 @@ RJ_DIAGNOSTIC_POP
 #include <vector>
 
 namespace rocjitsu {
+
+// KFD mmap offset encoding (mirrors kfd_priv.h).
+inline constexpr uint64_t KFD_MMAP_TYPE_SHIFT = 62;
+inline constexpr uint64_t KFD_MMAP_TYPE_MASK = 0x3ULL << KFD_MMAP_TYPE_SHIFT;
+inline constexpr uint64_t KFD_MMAP_TYPE_DOORBELL = 0x3ULL << KFD_MMAP_TYPE_SHIFT;
+inline constexpr uint64_t KFD_MMAP_TYPE_EVENTS = 0x2ULL << KFD_MMAP_TYPE_SHIFT;
+inline constexpr uint64_t KFD_MMAP_GPU_ID_SHIFT = 46;
+
+inline constexpr uint64_t kfd_mmap_gpu_id(uint32_t gpu_id) {
+  return (static_cast<uint64_t>(gpu_id) << KFD_MMAP_GPU_ID_SHIFT) &
+         ((1ULL << KFD_MMAP_TYPE_SHIFT) - (1ULL << KFD_MMAP_GPU_ID_SHIFT));
+}
 
 /// @brief Simulated kernel-mode driver that routes KFD ioctls to the simulator.
 ///
@@ -161,22 +174,7 @@ private:
   size_t doorbell_page_size_ = 0; ///< Size of the mapped doorbell aperture.
   uint64_t doorbell_gpu_va_ = 0;  ///< GPU VA associated with the doorbell aperture.
 
-  int event_memfd_ = -1;       ///< memfd backing the KFD signal event page.
-  void *event_page_ = nullptr; ///< Mapped signal page (libhsakmt polls slots here).
-  size_t event_page_size_ = 0; ///< Size of the mapped event page in bytes.
-
-  struct GpuEvent {
-    uint32_t event_id = 0;
-    uint32_t event_type = 0;
-    bool signaled = false;
-    bool auto_reset = false;
-  };
-
-  std::mutex event_mutex_;
-  std::condition_variable event_cv_;
-  std::unordered_map<uint32_t, GpuEvent> events_;
-  uint32_t next_event_id_ = 1;
-  std::atomic<bool> closing_{false}; ///< Set on close(); read inside and outside event_mutex_.
+  EventState event_state_;
 
   struct MemoryPolicy {
     uint64_t alternate_base = 0;
