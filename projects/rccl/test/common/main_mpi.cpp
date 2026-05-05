@@ -71,7 +71,13 @@ int main(int argc, char* argv[])
     // MPI_Finalize is called by:
     // 1. MPIEnvironment::TearDown() -> cleanup_mpi() (normal case)
     // 2. MPIEnvironment destructor (safety net if TearDown fails or no tests match)
-    return ret_code;
+    //
+    // Use _exit() to bypass __cxa_finalize / atexit handlers.
+    // HIP's cleanup handler crashes (corrupted double-linked list / SIGABRT)
+    // after repeated RCCL communicator create/destroy cycles.  All RCCL and
+    // MPI resources are already freed above, so skipping the library
+    // destructors is safe.
+    _exit(ret_code);
 }
 
 #else // MPI_TESTS_ENABLED not defined
