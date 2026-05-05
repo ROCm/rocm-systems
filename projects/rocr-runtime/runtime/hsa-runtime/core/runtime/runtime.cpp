@@ -49,8 +49,6 @@
 #include <dlfcn.h>
 #include <amdgpu_drm.h>
 #include <sys/mman.h>
-#else
-#define debug_warning(__VA_ARGS__)
 #endif
 
 #include "core/inc/runtime.h"
