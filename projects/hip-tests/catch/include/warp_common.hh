@@ -417,28 +417,19 @@ T calculateExpected(T* output,
        }
     }
 
-    if (aggType == AggregationType::Reduce) {
-      for (int modulo = 2; modulo <= wavefrontSize; modulo *= 2) {
-        for (int i = 0; i < wavefrontSize; i += modulo) {
-          int j = i + modulo / 2;
 
-          if (j < wavefrontSize)
-            output[i] += output[j];
-        }
-      }
-
-      result = output[0];
-    } else {
-      for (int modulo = 2; modulo <= wavefrontSize; modulo *= 2) {
-        for (int i = 0; i < wavefrontSize; i += modulo) {
+    for (int modulo = 2; modulo <= wavefrontSize; modulo *= 2) {
+      for (int i = 0; i < wavefrontSize; i += 1) {
+        if (i % modulo == modulo -1) {
           int j = i - modulo / 2;
 
-          if (j >= 0)
+          if (j >= 0) {
             output[i] += output[j];
+          }
         }
       }
-      result = output[wavefrontSize];
     }
+    result = output[wavefrontSize - 1];
   } else if constexpr (std::is_same<Op, cooperative_groups::less<T>>::value) {
     MinOp<T> minOp;
     return calculateExpected(output, input, minOp, mask, aggType);

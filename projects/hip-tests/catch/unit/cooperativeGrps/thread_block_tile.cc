@@ -674,8 +674,8 @@ void aggregateForTypeAndOp(AggregationType aggType)
                                          (std::is_signed<T>::value? -1023 : 0);
   typename distribution::result_type b = std::is_same<T, half>::value? std::numeric_limits<unsigned short>::max() :
                                          1023;
-  distribution distInput(a, b);
-  int numReduce = 0;
+  distribution distInput {a, b};
+  int numAggregation = 0;
   void* kernelPtr;
   T expected[64];
 
@@ -718,38 +718,43 @@ void aggregateForTypeAndOp(AggregationType aggType)
   HIP_CHECK(hipMemcpy(h_result.host_ptr(), d_result.ptr(),
                       h_result.size_bytes(), hipMemcpyDeviceToHost));
 
-  while (numReduce < kNumReduces) {
+  while (numAggregation < kNumReduces) {
     for (int laneId = 0; laneId < wavefrontSize; laneId++) {
+      T result = h_result.host_ptr()[numAggregation * wavefrontSize + laneId];
+      int lastLane;
+      const T* input = &h_input.host_ptr()[numAggregation * wavefrontSize];
       unsigned long long mask = ~0ull;
-      T result = h_result.host_ptr()[numReduce * wavefrontSize + laneId];
-      const T* input = &h_input.host_ptr()[numReduce * wavefrontSize];
+      Op op {};
 
       if constexpr (TileSize > 0) {
         mask >>= (64 - TileSize);
         mask <<= ((laneId % wavefrontSize) / TileSize) * TileSize;
       }
 
-      mask &= h_extraMasks.host_ptr()[numReduce];
-
-      if ((1ull << laneId) & mask) {
-        Op op {};
-        calculateExpected(expected, input, op, mask, aggType);
-      }
+      mask &= h_extraMasks.host_ptr()[numAggregation];
+      lastLane = 64 - __builtin_clzll(mask) - 1;
+      calculateExpected(expected, input, op, mask, aggType);
 
       if constexpr (std::is_integral<T>::value) {
         // for integral types the result should match exactly
-        if (result != expected[laneId]) {
-          std::string opName = opToString<T, Op>();
-          printMismatch(result, expected[laneId], input, mask);
-          INFO("Operator: " << opName);
-          REQUIRE(result == expected[laneId]);
+        if ((1ull << laneId) & mask) {
+          int resultLane = (aggType == AggregationType::Reduce)? lastLane : laneId;
+          // for reduce, the result would be in the last lane whose first bit is on in the mask
+          // for scans, the associated result is different in each lane
+          if (result != expected[resultLane]) {
+            std::string opName = opToString<T, Op>();
+
+            printMismatch(result, expected[resultLane], input, mask);
+            INFO("Operator: " << opName << " mask: 0x" << std::hex << mask);
+            REQUIRE(result == expected[resultLane]);
+          }
         }
       } else {
         compareFloatingPoint(result, expected[laneId], mask, h_input.host_ptr());
       }
     }
 
-    numReduce++;
+    numAggregation++;
   }
 }
 
