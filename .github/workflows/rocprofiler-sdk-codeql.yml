@@ -107,7 +107,8 @@ jobs:
           projects/hip
           .github/workflows/rocprofiler-sdk-codeql.yml
           .github/workflows/rocprofiler-sdk-formatting.yml
-        submodules: 'true'
+        submodules: false
+        set-safe-directory: true
 
     # Initializes the CodeQL tools for scanning.
     - name: Initialize CodeQL

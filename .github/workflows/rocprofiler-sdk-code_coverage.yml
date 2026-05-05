@@ -189,11 +189,11 @@ jobs:
     - name: Sync gcov with compilers
       timeout-minutes: 10
       shell: bash
-      run: |
-        apt-get install -y gcc-${{ env.GCC_COMPILER_VERSION }} g++-${{ env.GCC_COMPILER_VERSION }}
-        update-alternatives \
-            --install /usr/bin/gcc  gcc  /usr/bin/gcc-${{ env.GCC_COMPILER_VERSION }} 500 \
-            --slave   /usr/bin/g++  g++  /usr/bin/g++-${{ env.GCC_COMPILER_VERSION }} \
+      run:
+        apt-get install -y gcc-${{ env.GCC_COMPILER_VERSION }} g++-${{ env.GCC_COMPILER_VERSION }} &&
+        update-alternatives
+            --install /usr/bin/gcc  gcc  /usr/bin/gcc-${{ env.GCC_COMPILER_VERSION }} 500
+            --slave   /usr/bin/g++  g++  /usr/bin/g++-${{ env.GCC_COMPILER_VERSION }}
             --slave   /usr/bin/gcov gcov /usr/bin/gcov-${{ env.GCC_COMPILER_VERSION }}
 
     - name: Enable PC Sampling
