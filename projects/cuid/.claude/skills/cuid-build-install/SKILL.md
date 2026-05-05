@@ -5,7 +5,7 @@ description: "Build and install cuid from source. Use when: building locally, in
 
 # Build & Install cuid
 
-Builds cuid from source, packages it, and installs locally. Used by the review agent as a pre-step before dispatching subagents, and can be invoked independently.
+Builds cuid from source and installs locally. Used by the review agent as a pre-step before dispatching subagents, and can be invoked independently.
 
 ## Prerequisites
 
