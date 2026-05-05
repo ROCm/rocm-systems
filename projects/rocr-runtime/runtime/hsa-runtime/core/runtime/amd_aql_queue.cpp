@@ -361,10 +361,37 @@ AqlQueue::~AqlQueue() {
   // because we need a valid agent_ + driver() to clear the per-queue KFD
   // registration before the queue itself is gone.
   if (agent_ != nullptr && dispatch_record_buffer_ != nullptr) {
+    // Phase-2: release the dispatch_log BO refs (buffer + wptr + rptr +
+    // signal) that the new KFD_IOC_PROFILER_DISPATCH_LOG SET path took
+    // when SetProfiling(true) registered them. Without this, the kernel
+    // still holds 4 BO refs at queue-destroy time and the host-side
+    // system_deallocator() below trips a "Memory in use" critical
+    // error on the dispatch_record_buffer_ BO. Best-effort: missing
+    // thunk / older kernel returns NOT_SUPPORTED and we proceed with
+    // the legacy clear below.
+    if (dispatch_log_wptr_buf_ != nullptr) {
+      (void)agent_->driver().SetDispatchLog(
+          queue_id_, static_cast<uint32_t>(agent_->KfdGpuID()),
+          /*buffer_base=*/nullptr, /*num_records=*/0,
+          /*wptr_addr=*/nullptr, /*rptr_addr=*/nullptr, /*signal_addr=*/nullptr);
+    }
     agent_->driver().SetQueueProfilingBuffer(queue_id_, nullptr, 0, nullptr);
     agent_->system_deallocator()(dispatch_record_buffer_);
     dispatch_record_buffer_ = nullptr;
     dispatch_record_buffer_size_ = 0;
+    // Free the Phase-2 host-VA counter words.
+    if (dispatch_log_wptr_buf_) {
+      agent_->system_deallocator()(dispatch_log_wptr_buf_);
+      dispatch_log_wptr_buf_ = nullptr;
+    }
+    if (dispatch_log_rptr_buf_) {
+      agent_->system_deallocator()(dispatch_log_rptr_buf_);
+      dispatch_log_rptr_buf_ = nullptr;
+    }
+    if (dispatch_log_signal_buf_) {
+      agent_->system_deallocator()(dispatch_log_signal_buf_);
+      dispatch_log_signal_buf_ = nullptr;
+    }
   }
 
   // Remove this queue from the agent's AQL queue registry and clear the
@@ -1604,14 +1631,21 @@ hsa_status_t AqlQueue::SetProfiling(bool enabled) {
 
   if (enabled && !dispatch_record_buffer_) {
     constexpr uint32_t num_records = 65536;
-    // Host kernel computes BO size as `count * 40` (see
-    // kfd_process_queue_manager.c:638 in the gbt350 host kernel). The MEC
-    // firmware only writes 16 bytes per slot (mec_dispatch_record). We
-    // allocate the larger size so the kernel's BO size validation passes;
-    // the trailing 24 bytes per slot are unused by FW and never read by
-    // the drainer.
-    constexpr size_t kHostKernelRecordStride = 40;
-    const size_t buf_size = size_t(num_records) * kHostKernelRecordStride;
+    // FW writes 16-byte mec_dispatch_record entries at 16-byte stride
+    // (see core/inc/mec_dispatch_record.h and the FW f32_mec.uc
+    // SubAqlProfBufWriteRecord). The kernel's BO-size validation
+    // matches that stride exactly: kfd_process_queue_manager.c uses
+    // `dispatch_record_buffer_size * 16` for both the legacy
+    // SetQueueProfilingBuffer path and the new dispatch_log
+    // KFD_IOC_PROFILER_DISPATCH_LOG sub-op. The earlier `*40`
+    // allocation here was a workaround for an older pre-fix kernel
+    // (which over-counted the stride in its BO-size check); both that
+    // older kernel and the new validation accept `*16`, so we now
+    // allocate the FW-stride exact size and avoid wasting 60% of the
+    // BO. Matches kfd_queue_buffer_get's strict mapping->last
+    // equality check.
+    constexpr size_t kFwRecordStride = 16;
+    const size_t buf_size = size_t(num_records) * kFwRecordStride;
     constexpr size_t kCacheLineAlign = 64;
     dispatch_record_buffer_ = agent_->system_allocator()(
         buf_size, kCacheLineAlign, core::MemoryRegion::AllocateNonPaged);
