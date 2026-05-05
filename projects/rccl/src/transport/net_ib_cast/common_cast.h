@@ -12,6 +12,7 @@
 #include "core.h"
 #include "socket.h"
 #include "net.h"
+#include "net_ib_cast_inspect.h"
 #include "graph.h"
 #include "utils.h"
 #include "param.h"
@@ -200,9 +201,6 @@ struct ncclProfilerInfo {
 #define NCCL_NET_IB_REQ_GIN_IPUT 4
 #define NCCL_NET_IB_REQ_GIN_IGET 5
 extern const char* IbCastReqTypeStr[];
-
-// Maximal number of QPs a communicator can have for data transfers
-#define NCCL_IB_MAX_QPS 128
 
 struct ncclIbQpSchedParms {
     bool enable;
