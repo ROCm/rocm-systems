@@ -2,8 +2,6 @@
 
 A comprehensive unit test kernel that exercises most of the instructions and features available on AMD GPUs including Instinct (MI250/MI300/MI350), Radeon (RX 9070 XT), and Strix/Strix Halo (RDNA 3.5, gfx1150/gfx1151) APU iGPUs.
 
-**Source layout:** This workload lives under `sample/mega_kernel/` in the rocprofiler-compute tree. Full-product CMake installs these sample workloads into the `tests/` install area at build time; the `tests/` tree is not a second source location for this kernel.
-
 ## Supported GPU Architectures
 
 ### CDNA (Compute/Datacenter)
