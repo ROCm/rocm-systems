@@ -7888,6 +7888,7 @@ class AMDSMICommands:
                     )
                     self.logger.store_cpu_output(args.cpu, "values", static_dict)
                     self.logger.print_output()
+                    return
 
                 amdsmi_interface.amdsmi_set_cpu_socket_power_cap(args.cpu, args.cpu_pwr_limit[0][0])
                 static_dict["set_pwr_limit"]["Response"] = (
