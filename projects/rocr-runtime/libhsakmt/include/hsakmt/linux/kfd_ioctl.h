@@ -1616,11 +1616,43 @@ struct kfd_ioctl_pc_sample_args {
 	__u32 reserved;
 };
 
-#define KFD_IOC_PROFILER_VERSION_NUM 1
+#define KFD_IOC_PROFILER_VERSION_NUM 2     /* was 1; v2 adds DISPATCH_LOG sub-op */
 enum kfd_profiler_ops {
 	KFD_IOC_PROFILER_PMC = 0,
 	KFD_IOC_PROFILER_PC_SAMPLE = 1,
 	KFD_IOC_PROFILER_VERSION = 2,
+	KFD_IOC_PROFILER_PTL_CONTROL = 3,
+	KFD_IOC_PROFILER_DISPATCH_LOG = 4,
+};
+
+enum kfd_dispatch_log_op {
+	KFD_DISPATCH_LOG_OP_SET   = 1,
+	KFD_DISPATCH_LOG_OP_CLEAR = 2,
+};
+
+enum kfd_dispatch_log_mem_space {
+	KFD_DISPATCH_LOG_MEM_GTT  = 1,
+	KFD_DISPATCH_LOG_MEM_VRAM = 2,
+};
+
+struct kfd_ioctl_dispatch_log_args {
+	__u32 gpu_id;                  /* user_gpu_id; rejected if mismatched with queue's device */
+	__u32 queue_id;                /* KFD queue id */
+	__u32 op;                      /* enum kfd_dispatch_log_op */
+	__u32 mem_space;               /* enum kfd_dispatch_log_mem_space */
+
+	__u64 buffer_addr;             /* GPU VA of record buffer (16-byte records); 0 in CLEAR */
+	__u32 buffer_size_records;     /* power-of-2 count; 0 in CLEAR */
+	__u32 pad;
+
+	__u64 wptr_addr;               /* FW writes per-record producer position; 0 = none */
+	__u64 rptr_addr;               /* host writes consumer position; FW reads; 0 = none */
+	__u64 signal_addr;             /* HSA signal value field; FW writes per-record; 0 = none */
+};
+
+struct kfd_ioctl_ptl_control {
+	__u32 gpu_id;
+	__u32 enable;
 };
 
 /**
@@ -1635,8 +1667,10 @@ struct kfd_ioctl_pmc_settings {
 struct kfd_ioctl_profiler_args {
 	__u32 op;					/* kfd_profiler_op */
 	union {
-		struct kfd_ioctl_pc_sample_args pc_sample;
-		struct kfd_ioctl_pmc_settings  pmc;
+		struct kfd_ioctl_pc_sample_args    pc_sample;
+		struct kfd_ioctl_pmc_settings      pmc;
+		struct kfd_ioctl_ptl_control       ptl;
+		struct kfd_ioctl_dispatch_log_args dispatch_log;   /* v2: KFD_IOC_PROFILER_DISPATCH_LOG */
 		__u32 version;				/* KFD_IOC_PROFILER_VERSION_NUM */
 	};
 };

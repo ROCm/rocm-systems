@@ -1172,6 +1172,86 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtSetQueueProfilingBuffer(HSA_QUEUEID QueueId,
 	return HSAKMT_STATUS_SUCCESS;
 }
 
+/*
+ * hsaKmtSetDispatchLog — register the per-queue MEC dispatch-record buffer
+ * and three optional host-VA pointer counters via the KFD profiler ioctl
+ * sub-op KFD_IOC_PROFILER_DISPATCH_LOG (KFD MINOR >= 20, KFD_IOC_PROFILER
+ * version >= 2).
+ *
+ * Replaces hsaKmtSetQueueProfilingBuffer() for callers that want the new
+ * FW-readable host-VA pointers. The old API still works (FW falls back to
+ * sentinel-scan-able buffer-only behavior) but cannot deliver per-queue
+ * wptr/rptr/signal updates because the older UPDATE_QUEUE ABI lacks the
+ * trailing pointer fields.
+ *
+ * Pass BufferBase = NULL to issue KFD_DISPATCH_LOG_OP_CLEAR (drops the
+ * record buffer + all three pointer registrations on the queue). Pass
+ * non-NULL BufferBase + NumRecords > 0 to SET; any of WptrAddr/RptrAddr/
+ * SignalAddr that is NULL is treated by the kernel and FW as "not
+ * registered" and that side-channel is skipped per record.
+ *
+ * GpuId is the same user_gpu_id the caller would pass to other KFD
+ * ioctls; the kernel rejects the call with -EINVAL if it does not match
+ * the queue's owning device (closes the gpu_id<->queue_id binding gap).
+ */
+static HSAKMT_STATUS hsaKmtSetDispatchLogCtx(HsaKFDContext *ctx,
+                                             HSA_QUEUEID QueueId,
+                                             HSAuint32 GpuId,
+                                             void *BufferBase,
+                                             HSAuint32 NumRecords,
+                                             void *WptrAddr,
+                                             void *RptrAddr,
+                                             void *SignalAddr)
+{
+	struct queue *q = PORT_UINT64_TO_VPTR(QueueId);
+	struct kfd_ioctl_profiler_args args = {0};
+	int err;
+
+	CHECK_KFD_OPEN();
+
+	if (!q)
+		return HSAKMT_STATUS_INVALID_PARAMETER;
+
+	args.op = KFD_IOC_PROFILER_DISPATCH_LOG;
+	args.dispatch_log.gpu_id    = GpuId;
+	args.dispatch_log.queue_id  = q->queue_id;
+	args.dispatch_log.op        = BufferBase
+	                                  ? KFD_DISPATCH_LOG_OP_SET
+	                                  : KFD_DISPATCH_LOG_OP_CLEAR;
+	args.dispatch_log.mem_space = KFD_DISPATCH_LOG_MEM_GTT;
+	args.dispatch_log.buffer_addr         = (__u64)(uintptr_t)BufferBase;
+	args.dispatch_log.buffer_size_records = NumRecords;
+	args.dispatch_log.pad                 = 0;
+	args.dispatch_log.wptr_addr           = (__u64)(uintptr_t)WptrAddr;
+	args.dispatch_log.rptr_addr           = (__u64)(uintptr_t)RptrAddr;
+	args.dispatch_log.signal_addr         = (__u64)(uintptr_t)SignalAddr;
+
+	/* Mirror the queue's local cache of buffer addr/size for backward
+	 * compat with existing UPDATE_QUEUE callers that read these on
+	 * subsequent priority updates etc. */
+	q->dispatch_record_buffer_addr = (uintptr_t)BufferBase;
+	q->dispatch_record_buffer_size = NumRecords;
+
+	err = hsakmt_ioctl(ctx->fd, AMDKFD_IOC_PROFILER, &args);
+	if (err == -1)
+		return HSAKMT_STATUS_ERROR;
+
+	return HSAKMT_STATUS_SUCCESS;
+}
+
+HSAKMT_STATUS HSAKMTAPI hsaKmtSetDispatchLog(HSA_QUEUEID QueueId,
+                                             HSAuint32 GpuId,
+                                             void *BufferBase,
+                                             HSAuint32 NumRecords,
+                                             void *WptrAddr,
+                                             void *RptrAddr,
+                                             void *SignalAddr)
+{
+	return hsaKmtSetDispatchLogCtx(&hsakmt_primary_kfd_ctx, QueueId, GpuId,
+	                               BufferBase, NumRecords,
+	                               WptrAddr, RptrAddr, SignalAddr);
+}
+
 HSAKMT_STATUS HSAKMTAPI hsaKmtDestroyQueue(HSA_QUEUEID QueueId)
 {
 	return hsaKmtDestroyQueueCtx(&hsakmt_primary_kfd_ctx, QueueId);

@@ -422,6 +422,26 @@ hsaKmtSetQueueProfilingBuffer(
     );
 
 /**
+  Configures MEC dispatch profiling ring buffer for a queue WITH host-VA
+  pointer counters that the firmware writes per record (KFD MINOR >= 20,
+  KFD_IOC_PROFILER_VERSION >= 2). Pass BufferBase = NULL to clear the
+  registration. Any of WptrAddr/RptrAddr/SignalAddr may be NULL to opt
+  out of that side-channel.
+*/
+
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtSetDispatchLog(
+    HSA_QUEUEID         QueueId,        //IN
+    HSAuint32           GpuId,          //IN user_gpu_id of the agent owning QueueId
+    void*               BufferBase,     //IN GPU VA of record buffer; NULL = clear
+    HSAuint32           NumRecords,     //IN ring length (power of two); 0 if BufferBase NULL
+    void*               WptrAddr,       //IN GPU VA of host wptr word; NULL skips per-record wptr publish
+    void*               RptrAddr,       //IN GPU VA of host rptr word; NULL skips rptr feedback
+    void*               SignalAddr      //IN GPU VA of host signal word; NULL skips per-record signal publish
+    );
+
+/**
   Destroys a queue
 */
 
