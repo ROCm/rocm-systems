@@ -483,6 +483,27 @@ split_records(std::vector<backtrace_record> const& records)
 inline void
 filter_and_reverse_frames(std::vector<stack_frame>& frames)
 {
+    // Before reversing: raw order is leaf-first, root-last.
+    // Strip system library bootstrap frames from root end (currently at back).
+    // Uses dladdr() module check instead of hardcoded symbol names — works
+    // across compilers (GCC/Clang), C libraries (glibc/musl), and ABIs.
+    auto is_system_bootstrap_frame = [](const stack_frame& f) -> bool {
+        // _start is the ELF entry point — always bootstrap, but linked into
+        // the executable (from crt1.o) so dladdr reports the exe, not libc.
+        if(f.name == "_start") return true;
+        if(f.address == 0) return false;
+        ::Dl_info info{};
+        if(::dladdr(reinterpret_cast<void const*>(f.address), &info) == 0) return false;
+        const char* fname = info.dli_fname;
+        if(!fname) return false;
+        return std::strstr(fname, "libc.so") || std::strstr(fname, "libc-") ||
+               std::strstr(fname, "libpthread") || std::strstr(fname, "libstdc++") ||
+               std::strstr(fname, "libc++") || std::strstr(fname, "ld-linux") ||
+               std::strstr(fname, "linux-vdso");
+    };
+    while(!frames.empty() && is_system_bootstrap_frame(frames.back()))
+        frames.pop_back();
+
     std::reverse(frames.begin(), frames.end());
 
     static const std::set<std::string> signal_artifacts = { "funlockfile", "killpg",
@@ -517,6 +538,14 @@ filter_and_reverse_frames(std::vector<stack_frame>& frames)
         if(use == 0) continue;
         filtered.push_back(std::move(f));
     }
+
+    // After use_label strips rocprofsys::/tim:: frames, system library frames
+    // that were hidden behind them may now be at the front. Strip those too.
+    auto it = filtered.begin();
+    while(it != filtered.end() && is_system_bootstrap_frame(*it))
+        ++it;
+    if(it != filtered.begin()) filtered.erase(filtered.begin(), it);
+
     frames = std::move(filtered);
 }
 
