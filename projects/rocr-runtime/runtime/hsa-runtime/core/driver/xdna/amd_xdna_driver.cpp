@@ -258,7 +258,7 @@ static hsa_status_t SubmitCommand(int fd, uint32_t cmd_bo_handle,
   exec_cmd.cmd_handles = cmd_bo_handle;
   exec_cmd.args = reinterpret_cast<uint64_t>(bo_handles.data());
   exec_cmd.cmd_count = 1;
-  exec_cmd.arg_count = bo_handles.size();
+  exec_cmd.arg_count = static_cast<uint32_t>(bo_handles.size());
   if (ioctl(fd, DRM_IOCTL_AMDXDNA_EXEC_CMD, &exec_cmd) < 0) {
     return HSA_STATUS_ERROR;
   }
@@ -1022,16 +1022,19 @@ hsa_status_t XdnaDriver::SubmitCmdChain(hsa_queue_t& q, HSA_QUEUEID& queue_id,
     FlushArguments(pkt);
   }
 
+  auto hw_ctx_handle = static_cast<uint32_t>(queue_id);
+
   if (num_pkts == 1) {
     // Single packet: submit the per-kernel cmd BO directly, no chain wrapper.
     uint64_t seq = 0;
-    hsa_status_t status = SubmitCommand(fd_, cmd_bo_handles[0].handle, bo_handles, queue_id, seq);
+    hsa_status_t status =
+        SubmitCommand(fd_, cmd_bo_handles[0].handle, bo_handles, hw_ctx_handle, seq);
     if (status != HSA_STATUS_SUCCESS) {
       assert(false && "Failed to submit command.");
       return status;
     }
-    status = WaitCommand(fd_, static_cast<ert_start_kernel_cmd*>(cmd_bo_handles[0].vaddr), queue_id,
-                         seq);
+    status = WaitCommand(fd_, static_cast<ert_start_kernel_cmd*>(cmd_bo_handles[0].vaddr),
+                         hw_ctx_handle, seq);
     if (status != HSA_STATUS_SUCCESS) {
       assert(false && "Failed waiting for command.");
       return status;
@@ -1062,13 +1065,13 @@ hsa_status_t XdnaDriver::SubmitCmdChain(hsa_queue_t& q, HSA_QUEUEID& queue_id,
 
     // Execute all commands in the command chain.
     uint64_t seq = 0;
-    status = SubmitCommand(fd_, cmd_bo_handle.handle, bo_handles, queue_id, seq);
+    status = SubmitCommand(fd_, cmd_bo_handle.handle, bo_handles, hw_ctx_handle, seq);
     if (status != HSA_STATUS_SUCCESS) {
       assert(false && "Failed to submit command chain.");
       return status;
     }
-    status =
-        WaitCommand(fd_, static_cast<ert_start_kernel_cmd*>(cmd_bo_handle.vaddr), queue_id, seq);
+    status = WaitCommand(fd_, static_cast<ert_start_kernel_cmd*>(cmd_bo_handle.vaddr),
+                         hw_ctx_handle, seq);
     if (status != HSA_STATUS_SUCCESS) {
       assert(false && "Failed waiting for command chain.");
       return status;
