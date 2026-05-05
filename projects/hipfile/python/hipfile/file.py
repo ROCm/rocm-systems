@@ -1,7 +1,10 @@
 # pylint: disable=C0114,C0115,C0116
+from __future__ import annotations
+
 import os
 import stat
 from sys import stderr
+from typing import TYPE_CHECKING
 
 from hipfile._hipfile import (  # pylint: disable=E0401,E0611
     hipFileHandleRegister,
@@ -12,23 +15,32 @@ from hipfile._hipfile import (  # pylint: disable=E0401,E0611
 from hipfile.enums import FileHandleType
 from hipfile.error import HipFileException
 
+if TYPE_CHECKING:
+    from types import TracebackType
+
+    from hipfile.buffer import Buffer
+
 
 class FileHandle:
     DEFAULT_MODE = stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP | stat.S_IROTH
 
     def __init__(
-        self, path, flags, mode=DEFAULT_MODE, handle_type=FileHandleType.OPAQUE_FD
-    ):
-        self._fd = None
+        self,
+        path: str | os.PathLike[str],
+        flags: int,
+        mode: int = DEFAULT_MODE,
+        handle_type: FileHandleType = FileHandleType.OPAQUE_FD,
+    ) -> None:
+        self._fd: int | None = None
         self._flags = flags
-        self._handle = None
-        self._handle_type = None
+        self._handle: int | None = None
+        self._handle_type: FileHandleType | None = None
         self._mode = mode
         self._path = path
 
         self.handle_type = handle_type
 
-    def __del__(self):
+    def __del__(self) -> None:
         try:
             self.close()
         except Exception:  # pylint: disable=W0718  # Suppress exceptions in a dtor
@@ -37,27 +49,32 @@ class FileHandle:
                 file=stderr,
             )
 
-    def __enter__(self):
+    def __enter__(self) -> FileHandle:
         self.open()
         return self
 
-    def __exit__(self, exc_type, exc_value, traceback):
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_value: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
         self.close()
 
     @property
-    def flags(self):
+    def flags(self) -> int:
         return self._flags
 
     @property
-    def handle(self):
+    def handle(self) -> int | None:
         return self._handle
 
     @property
-    def handle_type(self):
+    def handle_type(self) -> FileHandleType | None:
         return self._handle_type
 
     @handle_type.setter
-    def handle_type(self, _handle_type):
+    def handle_type(self, _handle_type: FileHandleType) -> None:
         if self._handle is not None:
             raise RuntimeError("Cannot modify handle_type while FileHandle is open")
         if _handle_type not in FileHandleType:
@@ -69,14 +86,14 @@ class FileHandle:
         self._handle_type = _handle_type
 
     @property
-    def mode(self):
+    def mode(self) -> int:
         return self._mode
 
     @property
-    def path(self):
+    def path(self) -> str | os.PathLike[str]:
         return self._path
 
-    def open(self):
+    def open(self) -> None:
         if self._handle is not None:
             raise RuntimeError("The FileHandle is already open.")
         self._fd = os.open(self._path, self._flags, self._mode)
@@ -87,7 +104,7 @@ class FileHandle:
             raise HipFileException(err[0], err[1])
         self._handle = handle
 
-    def close(self):
+    def close(self) -> None:
         if self._handle is not None:
             hipFileHandleDeregister(self._handle)
             self._handle = None
@@ -95,7 +112,9 @@ class FileHandle:
             os.close(self._fd)
             self._fd = None
 
-    def read(self, buffer, size, file_offset, buffer_offset):
+    def read(
+        self, buffer: Buffer, size: int, file_offset: int, buffer_offset: int
+    ) -> int:
         if self._handle is None:
             raise RuntimeError("The FileHandle is not open.")
         bytes_read, extra_err = hipFileRead(
@@ -111,7 +130,9 @@ class FileHandle:
             raise HipFileException(-bytes_read, extra_err)
         return bytes_read
 
-    def write(self, buffer, size, file_offset, buffer_offset):
+    def write(
+        self, buffer: Buffer, size: int, file_offset: int, buffer_offset: int
+    ) -> int:
         if self._handle is None:
             raise RuntimeError("The FileHandle is not open.")
         bytes_written, extra_err = hipFileWrite(
