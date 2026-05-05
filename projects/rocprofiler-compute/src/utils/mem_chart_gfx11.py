@@ -413,7 +413,7 @@ def _build_kernel_and_l0(
     )
     tcp_panel = Panel(
         f"{metric_line('Hit Rate', m['tcp_hit'], '%', COLORS['hit'])}\n{tcp_bw_line}",
-        title=f"[bold {c_bl}]GL0(TCP Cache)[/bold {c_bl}]",
+        title=f"[bold {c_bl}]GL0 (TCP Cache)[/bold {c_bl}]",
         border_style=c_bl,
         width=20,
         height=10,

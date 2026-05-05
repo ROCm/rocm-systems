@@ -99,7 +99,7 @@ Panel Config:
           unit: Percent
           peak: 100
           pop: SUM(100 * SQ_WAIT_INST_ANY) / SUM(SQ_WAVE_CYCLES)
-        # --- Cache hierarchy: TCP (L0) -> GL1C (L1) -> GL2C client / SQC ---
+        # --- Cache hierarchy: GL0 (L0) -> GL1 (L1) -> GL2 client / SQC ---
         # BW formulas and counters match 0300_memory_chart.yaml; peak/pop N/A (chart has no ceilings).
         GL0 Cache Hit Rate (TCP Cache):
           value: SUM(100 * (TCP_REQ_sum - TCP_REQ_MISS_sum)) / SUM(TCP_REQ_sum)

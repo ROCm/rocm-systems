@@ -33,7 +33,7 @@ rocprofiler-compute/
 │       ├── gfx9_config_template.yaml    # CDNA panel contract
 │       └── gfx11_config_template.yaml   # RDNA 3.5 gfx11** panel contract
 │
-├── src/util/
+├── src/utils/
 │   ├── hash_checker.py
 │   ├── .config_hashes.json
 │
