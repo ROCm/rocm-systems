@@ -20,7 +20,7 @@ permissions:
 jobs:
   version-check:
     name: version-check
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v6
@@ -55,9 +55,10 @@ jobs:
             exit 0
           fi
 
+          VERSION_REGEX='project\([[:space:]]*rocpdsna[[:space:]]+VERSION[[:space:]]+[0-9]+\.[0-9]+\.[0-9]+'
           OLD=$(git show "${BASE}:projects/rocpdsna/CMakeLists.txt" \
-            | grep -oE 'project\(rocpdsna VERSION [0-9]+\.[0-9]+\.[0-9]+' || true)
-          NEW=$(grep -oE 'project\(rocpdsna VERSION [0-9]+\.[0-9]+\.[0-9]+' \
+            | grep -oE "${VERSION_REGEX}" || true)
+          NEW=$(grep -oE "${VERSION_REGEX}" \
             projects/rocpdsna/CMakeLists.txt || true)
 
           if [ -n "${NEW}" ] && [ "${OLD}" != "${NEW}" ]; then

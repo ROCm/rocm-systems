@@ -25,7 +25,7 @@ downstream consumer of the library.
 - `librocpdsna.so` now ships with a SOVERSION (`librocpdsna.so.0` symlink and
   `librocpdsna.so.0.1.0` actual file) so consumers can pin to a specific ABI.
 
-## [0.1.0] - 2026-04-23
+## [0.1.0] - 2026-05-05
 
 Initial release.
 
