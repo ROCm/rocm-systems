@@ -151,11 +151,11 @@ struct queue_drain_state {
   // Host-managed monotonic record cursor. Mutated only under drain_mu.
   // Slot index is (next_idx & ring_mask).
   //
-  // Two drain modes select on whether wptr_ptr below is non-null:
-  //   - WPTR-bound scan (preferred, MINOR>=20): next_idx tracks the
+  // Two drain modes select on whether signal_ptr below is non-null:
+  //   - SIGNAL-bound scan (preferred, MINOR>=20): next_idx tracks the
   //     absolute count of records the host has emitted. Each pass reads
-  //     fw_wptr atomically and iterates [next_idx, fw_wptr). After
-  //     emitting all records, next_idx is set to fw_wptr and the same
+  //     *signal_ptr atomically and iterates [next_idx, signal). After
+  //     emitting all records, next_idx is set to signal and the same
   //     value is published to *rptr_ptr for FW backpressure visibility
   //     (FW does not currently read it but publishing keeps the door
   //     open for future FW that does).
@@ -172,19 +172,21 @@ struct queue_drain_state {
   // succeeded. All three are nullptr in fallback mode.
   //
   // Memory model:
-  //   - wptr_ptr: FW writes per-record (post-increment record count) with
-  //     release-atomicity equivalent (FW spins on TC outstanding tag
-  //     count after the record body write before the wptr publish, per
-  //     f32_mec.uc @SubAqlProfBufWriteRecord). Host reads with acquire
-  //     to establish happens-before with the record body bytes.
+  //   - signal_ptr: FW writes per-record (post-increment record count)
+  //     AFTER first writing the same value to wptr_ptr (see f32_mec.uc
+  //     @SubAqlProfBufWriteRecord lines 29605-29626 — wptr write THEN
+  //     TC-drain THEN signal write THEN TC-drain). Per single FW thread
+  //     signal is the LAST write per record and carries the strongest
+  //     "record committed" semantics. The drainer uses signal_ptr as
+  //     its source of truth (see drain_one_queue Path A for the
+  //     multi-XCC race rationale).
+  //   - wptr_ptr: FW writes the same per-record value as signal_ptr,
+  //     just earlier in the publish sequence. Kept registered so the
+  //     KFD ioctl + FW-side state stays symmetric, but the drainer
+  //     does not read it (signal is the source of truth).
   //   - rptr_ptr: host writes after consume with release. FW reads on
   //     queue connect (currently informational; backpressure not
   //     enforced).
-  //   - signal_ptr: FW writes per-record (same value as wptr_ptr — see
-  //     FW Q3 in 2026-05-01-mec-firmware-dispatch-log-interface.md).
-  //     Host can use as an HSA signal payload for hsa_signal_wait_value_geq
-  //     or sleep-then-poll. Currently unused by the drain loop (we busy-
-  //     poll wptr_ptr instead) but kept for future signal-based wait.
   volatile uint64_t* wptr_ptr   = nullptr;
   volatile uint64_t* rptr_ptr   = nullptr;
   volatile uint64_t* signal_ptr = nullptr;
@@ -393,45 +395,43 @@ bool drain_one_queue(queue_drain_state& qs, bool force_emit) {
   if (qs.ring_base == nullptr || qs.ring_records == 0) return false;
 
   // ============================================================================
-  // PATH A: WPTR-BOUND SCAN (preferred, KFD MINOR>=20 + new FW)
+  // PATH A: SIGNAL-BOUND SCAN (preferred, KFD MINOR>=20 + new FW)
   //
-  // FW publishes the post-increment record count to *qs.wptr_ptr per
-  // record (see f32_mec.uc @SubAqlProfBufWriteRecord). Host reads it
-  // atomically with acquire and iterates [qs.next_idx, fw_wptr) — each
-  // slot is read exactly once, no duplicates possible. After consuming,
-  // host publishes its position to *qs.rptr_ptr for FW visibility (FW
-  // does not enforce backpressure today but the publish keeps the door
-  // open).
+  // FW publishes the post-increment record count to *qs.signal_ptr after
+  // first publishing the same value to *qs.wptr_ptr (see f32_mec.uc
+  // @SubAqlProfBufWriteRecord lines 29605-29626 — wptr write THEN
+  // TC-drain THEN signal write THEN TC-drain). Per single FW thread,
+  // signal_addr is the LAST write per record, so any non-zero observation
+  // implies the corresponding record body, wptr increment, and host
+  // wptr_addr publish all already happened. We use signal as the source
+  // of truth.
   //
-  // Overrun handling: if (fw_wptr - qs.next_idx) > qs.ring_records the
+  // Why not wptr too? KFD programs the same wptr_addr / signal_addr into
+  // the per-MQD slots for every XCC (kfd_mqd_manager_v9.c:450-461 — no
+  // master/slave gating). FW state machines on multiple XCCs can publish
+  // concurrently to the same host VA without atomics, so both wptr and
+  // signal can race / oscillate. Empirically wptr can go backward by
+  // 300-450 records between polls. Signal races too (it's the same store
+  // pattern), but using signal-only:
+  //   1. Aligns with FW's intended per-record publish boundary (signal
+  //      is written AFTER wptr, semantically "record committed").
+  //   2. Simplifies the drainer (one counter, not two).
+  //   3. Opens the door to hsa_signal_wait on signal_addr instead of
+  //      polling, deferred to a future optimization.
+  //
+  // Backward-publish protection (still needed because signal races too):
+  // qs.next_idx is our host-side monotonic floor. If FW publishes a
+  // value < next_idx, treat it as stale and skip the pass; we wait for
+  // a future monotonic publish to advance.
+  //
+  // Overrun handling: if (signal - qs.next_idx) > qs.ring_records the
   // host has fallen behind by more than one ring lap; the older records
   // were silently overwritten (FW does not stall on full ring). We jump
-  // qs.next_idx forward by the overrun distance and emit a kernel_dispatch_drop
-  // tracepoint so the consumer sees the gap. This is the bounded-progress
-  // analog of the sentinel-scan's pass_budget.
+  // qs.next_idx forward by the overrun distance and emit a
+  // kernel_dispatch_drop tracepoint so the consumer sees the gap.
   // ============================================================================
-  if (qs.wptr_ptr != nullptr) {
-    // FW publish-monotonicity workaround: the gfx950 MEC firmware
-    // publishes wptr_addr and signal_addr non-monotonically (observed
-    // delta_w going negative by 300-450 between consecutive polls;
-    // signal and wptr can also disagree by similar magnitudes). The
-    // FW publish path appears to race across CU lanes / cores —
-    // documented in the FW interface spec under "publish ordering".
-    //
-    // Mitigation:
-    //   1. Take max(wptr, signal): one may briefly publish a stale
-    //      value while the other races forward. Both are FW writes
-    //      of the same logical counter.
-    //   2. Use a per-queue monotonic floor (qs.next_idx) so FW
-    //      publishing a backward value never re-emits already-drained
-    //      records. If max(wptr,signal) < next_idx, FW's published
-    //      value is stale; skip this pass and wait for the next
-    //      monotonic update.
-    const uint64_t fw_wptr   = __atomic_load_n(qs.wptr_ptr,   __ATOMIC_ACQUIRE);
-    const uint64_t fw_signal = qs.signal_ptr
-                                   ? __atomic_load_n(qs.signal_ptr, __ATOMIC_ACQUIRE)
-                                   : fw_wptr;
-    const uint64_t observed = (fw_wptr > fw_signal) ? fw_wptr : fw_signal;
+  if (qs.signal_ptr != nullptr) {
+    const uint64_t observed = __atomic_load_n(qs.signal_ptr, __ATOMIC_ACQUIRE);
 
     // Backward (or stale) FW publish: ignore this pass entirely.
     // qs.next_idx is our monotonic floor.
