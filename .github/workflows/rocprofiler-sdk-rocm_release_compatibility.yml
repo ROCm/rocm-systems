@@ -65,9 +65,10 @@ jobs:
     - name: Install Git
       timeout-minutes: 25
       run: |
-        apt-get update
-        apt-get install -y software-properties-common
-        add-apt-repository -y ppa:git-core/ppa
+        sed -i \
+          -e 's|http://archive.ubuntu.com/ubuntu|http://azure.archive.ubuntu.com/ubuntu|g' \
+          -e 's|http://security.ubuntu.com/ubuntu|http://azure.archive.ubuntu.com/ubuntu|g' \
+          /etc/apt/sources.list /etc/apt/sources.list.d/*.sources 2>/dev/null || true
         apt-get update
         apt-get install -y git
 
@@ -77,14 +78,18 @@ jobs:
       timeout-minutes: 10
       shell: bash
       run: |
+        sed -i \
+          -e 's|http://archive.ubuntu.com/ubuntu|http://azure.archive.ubuntu.com/ubuntu|g' \
+          -e 's|http://security.ubuntu.com/ubuntu|http://azure.archive.ubuntu.com/ubuntu|g' \
+          /etc/apt/sources.list /etc/apt/sources.list.d/*.sources 2>/dev/null || true
         cd projects/rocprofiler-sdk
         git config --global --add safe.directory '*'
-        apt update
-        apt install -y wget build-essential cmake g++-11 g++-12 python3-pip libdw-dev libsqlite3-dev
+        apt-get update
+        apt-get install -y wget build-essential cmake g++-11 g++-12 python3-pip libdw-dev libsqlite3-dev
 
         # Older ROCm versions don't provide these packages.
-        apt install -y rccl-dev rccl-unittests || true
-        apt install -y rocjpeg-dev rocjpeg-test rocdecode-dev rocdecode-test || true
+        apt-get install -y rccl-dev rccl-unittests || true
+        apt-get install -y rocjpeg-dev rocjpeg-test rocdecode-dev rocdecode-test || true
 
         update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 10 --slave /usr/bin/g++ g++ /usr/bin/g++-11 --slave /usr/bin/gcov gcov /usr/bin/gcov-11
         update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-12 20 --slave /usr/bin/g++ g++ /usr/bin/g++-12 --slave /usr/bin/gcov gcov /usr/bin/gcov-12

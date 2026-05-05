@@ -180,6 +180,10 @@ jobs:
       shell: bash
       working-directory: projects/rocprofiler-sdk
       run: |
+        sed -i \
+          -e 's|http://archive.ubuntu.com/ubuntu|http://azure.archive.ubuntu.com/ubuntu|g' \
+          -e 's|http://security.ubuntu.com/ubuntu|http://azure.archive.ubuntu.com/ubuntu|g' \
+          /etc/apt/sources.list /etc/apt/sources.list.d/*.sources 2>/dev/null || true
         git config --global --add safe.directory '*'
         apt-get update
         apt-get install -y build-essential ccache python3-pip gcovr wkhtmltopdf xvfb xfonts-base xfonts-75dpi xfonts-100dpi xfonts-utils xfonts-encodings libfontconfig libdw-dev libsqlite3-dev libdrm-dev file autoconf pkg-config rpm libzstd-dev
@@ -189,11 +193,11 @@ jobs:
     - name: Sync gcov with compilers
       timeout-minutes: 10
       shell: bash
-      run:
-        apt-get install -y gcc-${{ env.GCC_COMPILER_VERSION }} g++-${{ env.GCC_COMPILER_VERSION }} &&
-        update-alternatives
-            --install /usr/bin/gcc  gcc  /usr/bin/gcc-${{ env.GCC_COMPILER_VERSION }} 500
-            --slave   /usr/bin/g++  g++  /usr/bin/g++-${{ env.GCC_COMPILER_VERSION }}
+      run: |
+        apt-get install -y gcc-${{ env.GCC_COMPILER_VERSION }} g++-${{ env.GCC_COMPILER_VERSION }}
+        update-alternatives \
+            --install /usr/bin/gcc  gcc  /usr/bin/gcc-${{ env.GCC_COMPILER_VERSION }} 500 \
+            --slave   /usr/bin/g++  g++  /usr/bin/g++-${{ env.GCC_COMPILER_VERSION }} \
             --slave   /usr/bin/gcov gcov /usr/bin/gcov-${{ env.GCC_COMPILER_VERSION }}
 
     - name: Enable PC Sampling

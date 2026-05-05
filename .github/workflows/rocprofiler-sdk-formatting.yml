@@ -44,6 +44,10 @@ jobs:
     - name: Install dependencies
       working-directory: projects/rocprofiler-sdk
       run: |
+        sudo sed -i \
+          -e 's|http://archive.ubuntu.com/ubuntu|http://azure.archive.ubuntu.com/ubuntu|g' \
+          -e 's|http://security.ubuntu.com/ubuntu|http://azure.archive.ubuntu.com/ubuntu|g' \
+          /etc/apt/sources.list /etc/apt/sources.list.d/*.sources 2>/dev/null || true
         sudo apt-get update
         sudo apt-get install -y python3-pip
         python3 -m pip install -r requirements.txt
@@ -84,6 +88,10 @@ jobs:
     - name: Install dependencies
       working-directory: projects/rocprofiler-sdk
       run: |
+        sudo sed -i \
+          -e 's|http://archive.ubuntu.com/ubuntu|http://azure.archive.ubuntu.com/ubuntu|g' \
+          -e 's|http://security.ubuntu.com/ubuntu|http://azure.archive.ubuntu.com/ubuntu|g' \
+          /etc/apt/sources.list /etc/apt/sources.list.d/*.sources 2>/dev/null || true
         DISTRIB_CODENAME=$(cat /etc/lsb-release | grep DISTRIB_CODENAME | awk -F '=' '{print $NF}')
         sudo apt-get update
         sudo apt-get install -y software-properties-common python3 python3-pip
