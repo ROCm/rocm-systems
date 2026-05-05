@@ -414,10 +414,6 @@ __device__ uint64_t QueuePair::mlx5_post_wqe_amo([[maybe_unused]] int32_t length
     }
     // we are the last thread in the wavefront, so we have the last WQE posted
     mlx5_ring_doorbell(reserve_count, wqe);
-    // wait until leader's fetch completes; completion order ensures others are complete as well
-    if (fetching) {
-      mlx5_poll_cq_until(reserve_count);
-    }
     // increment commit index and release any other waiting waves
     __hip_atomic_fetch_add(&mlx5_sq.commit_idx, wf_info.num_pe_group_lanes,
                            __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
@@ -425,6 +421,10 @@ __device__ uint64_t QueuePair::mlx5_post_wqe_amo([[maybe_unused]] int32_t length
     // wake up any other sleeping waves (in the same workgroup)
     amdgcn_s_wakeup();
 #endif
+    // wait until leader's fetch completes; completion order ensures others are complete as well
+    if (fetching) {
+      mlx5_poll_cq_until(reserve_count);
+    }
   }
 
   if (fetching) {
