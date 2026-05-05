@@ -277,7 +277,8 @@ class MemoryPool : public amd::ReferenceCountedObject, amd::VmHeapArray {
   void* AllocateMemory(size_t size, Stream* stream, void* dptr = nullptr);
 
   /// Frees memory by placing memory object with HIP event into free_heap_
-  bool FreeMemory(amd::Memory* memory, Stream* stream, Event* event = nullptr);
+  bool FreeMemory(amd::Memory* memory, Stream* stream, Event* event = nullptr,
+                  bool skip_event = false);
 
   /// Check if memory is active and belongs to the busy heap
   bool IsBusyMemory(amd::Memory* memory) const { return busy_heap_.IsActiveMemory(memory); }

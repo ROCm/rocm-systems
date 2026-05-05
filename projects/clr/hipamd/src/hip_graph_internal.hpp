@@ -821,7 +821,8 @@ class Graph {
     auto memory = getMemoryObject(dev_ptr, offset);
     if (memory != nullptr) {
       auto device_id = memory->getUserData().deviceId;
-      if (!g_devices[device_id]->FreeMemory(memory, stream)) {
+      constexpr bool kSkipEvent = true;
+      if (!g_devices[device_id]->FreeMemory(memory, stream, nullptr, kSkipEvent)) {
         LogError("Memory didn't belong to any pool!");
       }
     }
@@ -3015,7 +3016,13 @@ class GraphMemFreeNode : public GraphNode {
         hip::setCurrentDevice(device_id_);
       }
       auto device_id = phys_mem_obj->getUserData().deviceId;
-      if (!g_devices[device_id]->FreeMemory(phys_mem_obj, static_cast<hip::Stream*>(queue()))) {
+      // event markers enqeued by FreeMemory is not required in graph path
+      // on non DD path. Its causing deadlock in command queue thread.
+      // Packet batch flat is already ensuring barriers packets are added
+      // before/after the AQL packet batch.
+      bool kSkipEvent =  !AMD_DIRECT_DISPATCH;
+      if (!g_devices[device_id]->FreeMemory(phys_mem_obj,
+              static_cast<hip::Stream*>(queue()), nullptr, kSkipEvent)) {
         LogError("Memory didn't belong to any pool!");
       }
       // Skip MemObjMap::AddMemObj -- sub_obj is the active entry for this VA

@@ -242,7 +242,7 @@ void* MemoryPool::AllocateMemory(size_t size, Stream* stream, void* dptr) {
 }
 
 // ================================================================================================
-bool MemoryPool::FreeMemory(amd::Memory* memory, Stream* stream, Event* event) {
+bool MemoryPool::FreeMemory(amd::Memory* memory, Stream* stream, Event* event, bool skip_event) {
   {
     std::scoped_lock lock(lock_pool_ops_);
 
@@ -297,16 +297,22 @@ bool MemoryPool::FreeMemory(amd::Memory* memory, Stream* stream, Event* event) {
       // The stream of destruction is a safe stream, because the app must handle sync
       ts.AddSafeStream(stream);
 
-      if (event == nullptr) {
-        // Add a marker to the stream to trace availability of this memory
-        Event* e = new hip::Event(0);
-        if (hipSuccess == e->addMarker(stream, nullptr)) {
-          ts.SetEvent(e);
-          // Make sure runtime sends a notification
-          auto result = e->ready();
+      // Graph path: skip marker creation and blocking waits to avoid deadlocking
+      // the non-direct-dispatch queue thread. Markers enqueued during submit() land
+      // behind commands in the FIFO that depend on them, causing a deadlock.
+      // The safe stream added above is sufficient for reuse checks in FindMemory.
+      if (!skip_event) {
+        if (event == nullptr) {
+          // Add a marker to the stream to trace availability of this memory
+          Event* e = new hip::Event(0);
+          if (hipSuccess == e->addMarker(stream, nullptr)) {
+            ts.SetEvent(e);
+            // Make sure runtime sends a notification
+            auto result = e->ready();
+          }
+        } else {
+          ts.SetEvent(event);
         }
-      } else {
-        ts.SetEvent(event);
       }
     } else {
       // Assume a safe release from hipFree() if stream is nullptr
