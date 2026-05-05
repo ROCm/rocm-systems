@@ -1898,15 +1898,10 @@ class AMDSMICommands:
                             freq_dict = "N/A"
                             continue
                         freq_dict = {}
-                        current_level = frequencies["current"]
-                        # The driver returns UINT32_MAX when no current DPM level is
-                        # tracked (common on APU clock domains such as MEM/FCLK/SOC
-                        # whose PMFW does not expose a discrete current index).
-                        # Surface that as "N/A" instead of leaking the raw sentinel.
-                        if current_level == 0xFFFFFFFF:
-                            current_level = "N/A"
+                        # amdsmi_get_clk_freq() already maps the UINT32_MAX
+                        # sentinel (no current DPM level tracked) to "N/A".
                         # Add current_level first for proper output ordering
-                        freq_dict.update({"current_level": current_level})
+                        freq_dict.update({"current_level": frequencies["current"]})
                         # Add frequency_levels second
                         freq_dict.update({"frequency_levels": {}})
                         if frequencies["num_supported"] != 0:
@@ -3434,10 +3429,8 @@ class AMDSMICommands:
                     frequency_dict = amdsmi_interface.amdsmi_get_clk_freq(
                         args.gpu, amdsmi_interface.AmdSmiClkType.DF
                     )
-                    # Bounds-check the current index: the driver may return
-                    # UINT32_MAX (or any out-of-range value) when no current
-                    # FCLK level is tracked, which would otherwise raise
-                    # IndexError and leave fclk_0 unpopulated.
+                    # current is "N/A" when no FCLK level is tracked; otherwise
+                    # bounds-check before indexing freq_list.
                     current_idx = frequency_dict["current"]
                     freq_list = frequency_dict["frequency"]
                     if isinstance(current_idx, int) and 0 <= current_idx < len(freq_list):

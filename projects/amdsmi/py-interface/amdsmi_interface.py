@@ -5477,9 +5477,10 @@ def amdsmi_get_clk_freq(
     freq = amdsmi_wrapper.amdsmi_frequencies_t()
     _check_res(amdsmi_wrapper.amdsmi_get_clk_freq(processor_handle, clk_type, ctypes.byref(freq)))
 
+    # UINT32_MAX => no current DPM level tracked; surface as "N/A".
     dict_ret = {
         "num_supported": freq.num_supported,
-        "current": freq.current,
+        "current": _validate_if_max_uint(freq.current, MaxUIntegerTypes.UINT32_T),
         "frequency": list(freq.frequency)[: freq.num_supported],
     }
     return dict_ret
