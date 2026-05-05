@@ -1802,18 +1802,18 @@ ncclResult_t ncclLaunchPrepare(struct ncclComm* comm) {
     cudaStream_t deviceStream, launchOrder;
     NCCLCHECKGOTO(ncclStrongStreamAcquire(planner->capturingGraph, &comm->sharedRes->deviceStream, /*concurrent=*/false, &deviceStream), result, failure);
 
-    if (persistent || planner->numStreams != 1) {
-      // userStream[0] waits on each userStream[i]...
-      for (struct ncclCudaStreamList* l=planner->streams->next; l != nullptr; l = l->next) {
-        CUDACHECKGOTO(cudaEventRecord(comm->sharedRes->scratchEvent, l->stream), result, failure);
-        CUDACHECKGOTO(cudaStreamWaitEvent(launchStream, comm->sharedRes->scratchEvent, 0), result, failure);
-      }
-      // userStream[0] waits on deviceStream
-      NCCLCHECKGOTO(ncclStreamWaitStream(launchStream, deviceStream, comm->sharedRes->scratchEvent), result, failure);
-    } else if (planner->streams->stream != comm->lastStream && comm->lastStream != nullptr && !persistent) {
-      // Stream changed from last call, create dependency against last NCCL kernel launch
-      CUDACHECKGOTO(hipStreamWaitEvent(planner->streams->stream, comm->doneEvent, 0), result, failure);
+    // Always sync launchStream against deviceStream so the proxy thread is ordered
+    // wrt this launch — required for correctness even when numStreams==1 and
+    // !persistent. The userStream[i] loop is a no-op when numStreams==1.
+    // The previous else-if (hipStreamWaitEvent on doneEvent) handled only the
+    // stream-change case AND required comm->lastStream != nullptr, so it missed
+    // workloads where the prior collective ran on the default stream
+    // (e.g. DeepSpeed ZeRO-3 training → eval transition).
+    for (struct ncclCudaStreamList* l=planner->streams->next; l != nullptr; l = l->next) {
+      CUDACHECKGOTO(cudaEventRecord(comm->sharedRes->scratchEvent, l->stream), result, failure);
+      CUDACHECKGOTO(cudaStreamWaitEvent(launchStream, comm->sharedRes->scratchEvent, 0), result, failure);
     }
+    NCCLCHECKGOTO(ncclStreamWaitStream(launchStream, deviceStream, comm->sharedRes->scratchEvent), result, failure);
 
     bool capturing = ncclCudaGraphValid(planner->capturingGraph);
     enum ncclImplicitOrder implicitOrder;
@@ -1911,6 +1911,10 @@ ncclResult_t ncclLaunchKernel(struct ncclComm* comm, struct ncclKernelPlan* plan
     latency_profiler::collTraceRecordStartEvent(comm, launchStream, event.get());
     comm->lastStream = planner->streams->stream;
     CUCHECKGOTO(cuLaunchKernel(fn, grid.x, grid.y, grid.z, block.x, block.y, block.z, smem, launchStream, nullptr, extra), ret, do_return);
+    // Record completion so future stream-change waits (hipStreamWaitEvent on
+    // doneEvent in ncclLaunchPrepare) resolve. hipExtLaunchKernel did this via
+    // its stopEvent parameter prior to PR #3741; cuLaunchKernel has no equivalent.
+    CUDACHECKGOTO(hipEventRecord(comm->doneEvent, launchStream), ret, do_return);
     latency_profiler::collTraceRecordEndEvent(comm, plan, launchStream, std::move(event));
     return ncclSuccess;
   }
@@ -2058,24 +2062,14 @@ ncclResult_t ncclLaunchFinish(struct ncclComm* comm) {
       CUDACHECK(cudaEventCreateWithFlags(&comm->sharedRes->scratchEvent, cudaEventDisableTiming));
     }
 
-    if (capturing || planner->numStreams != 1 || ncclParamLaunchOrderImplicit()) {
-      CUDACHECK(cudaEventRecord(finishedEvent, launchStream));
-      // deviceStream waits on userStream[0]
-      NCCLCHECK(ncclStrongStreamAcquiredWorkStream(planner->capturingGraph, &comm->sharedRes->deviceStream, /*concurrent=*/false, &deviceStream));
-
-      // We know that deviceStream is strictly behind the launchStream because launchStream
-      // synced with it before kernel launch. This allows us to to see deviceStream waiting
-      // on launchStream as a fast-forward. When building CUDA graphs fast forwards should
-      // be handled specially so as not to create graphs with a blowup in the number of edges.
-      // So we could do this:
-      //   CUDACHECK(cudaStreamWaitEvent(deviceStream, finishedEvent, 0));
-      // But instead we do:
-      NCCLCHECK(ncclStreamAdvanceToEvent(planner->capturingGraph, deviceStream, finishedEvent));
-
-      // Each userStream[i] waits on userStream[0]
-      for (struct ncclCudaStreamList* l=planner->streams->next; l != nullptr; l = l->next) {
-        CUDACHECK(cudaStreamWaitEvent(l->stream, finishedEvent, 0));
-      }
+    // Always advance deviceStream past launchStream so the next collective's
+    // ncclLaunchPrepare wait on deviceStream sees this kernel's completion.
+    // The userStream[i] fanout loop is a no-op when numStreams==1.
+    CUDACHECK(cudaEventRecord(finishedEvent, launchStream));
+    NCCLCHECK(ncclStrongStreamAcquiredWorkStream(planner->capturingGraph, &comm->sharedRes->deviceStream, /*concurrent=*/false, &deviceStream));
+    NCCLCHECK(ncclStreamAdvanceToEvent(planner->capturingGraph, deviceStream, finishedEvent));
+    for (struct ncclCudaStreamList* l=planner->streams->next; l != nullptr; l = l->next) {
+      CUDACHECK(cudaStreamWaitEvent(l->stream, finishedEvent, 0));
     }
     enum ncclImplicitOrder implicitOrder;
     NCCLCHECK(getImplicitOrder(&implicitOrder, capturing));
