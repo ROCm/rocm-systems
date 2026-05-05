@@ -145,6 +145,7 @@ hipApiRecordExt* AllocChunk() {
 
 // ================================================================================================
 void FreeChunk(hipApiRecordExt* chunk) {
+  if (!chunk) return;
   for (size_t i = 0; i < kChunkSize; ++i) {
     // Free spill node kernel_args blobs and the nodes themselves.
     // All kernel_args blobs are owned: single launches by HipCaptureKernelArgsExt,
@@ -183,9 +184,11 @@ static void FreeRecordResources(hipApiRecordExt* rec) {
   rec->gpu.kernel_args_size = 0;
 }
 
-// Forward declarations for ChunkDeliveryThread (defined later in the file).
-static FILE* g_pf_file = nullptr;
-static void  PfChunkCallback(const hipApiRecordExt*, uint32_t, void*);
+// Forward declaration — PfChunkCallback is defined later in the file and
+// registered as an internal chunk client when pftrace output is enabled.
+static FILE*                    g_pf_file           = nullptr;
+static std::atomic<uint32_t>   g_pf_slabs_written{0}; // incremented each time PfChunkCallback delivers
+static void  PfChunkCallback(const hipApiRecordExt*, uint32_t, uint32_t, void*);
 
 // ================================================================================================
 // Background thread: delivers completed records to all registered g_chunk_clients.
@@ -193,16 +196,18 @@ static void  PfChunkCallback(const hipApiRecordExt*, uint32_t, void*);
 // Uses two counters for synchronisation:
 //   g_max_gpu_chunk_id — highest chunk_id whose GPU callback has completed (fetch_max,
 //                         release store in HipActivityCallbackExt).
-//   next_deliver        — local to this thread; next chunk_id to deliver.
+//   next_slab          — local to this thread; index of the next slab to deliver.
 //
-// Mid-stream: deliver [next_deliver .. g_max_gpu_chunk_id - 2] (conservative 2-record
-// safety margin so the delivery thread never races with a still-writing callback).
-// The acquire load of g_max_gpu_chunk_id establishes happens-before with the release
-// store in HipActivityCallbackExt, guaranteeing all GPU fields are visible.
+// Delivery granularity is always one full kChunkSize slab. We never deliver a partial slab
+// mid-stream — only the last slab at exit may be partial (records allocated but not kChunkSize).
 //
-// Stop-flush: deliver [next_deliver .. g_next_chunk_id - 1] (every allocated record).
+// Mid-stream watermark: (g_max_gpu_chunk_id - kDeliveryMargin) / kChunkSize
+//   Only slabs whose last record is at least kDeliveryMargin behind the max GPU callback
+//   chunk_id are considered complete and safe to deliver.
+//
+// Stop-flush: deliver all remaining slabs up to the last allocated record.
 static void ChunkDeliveryThread() {
-  uint32_t next_deliver = 0;
+  uint32_t next_slab = 0;
 
   while (true) {
     {
@@ -210,62 +215,50 @@ static void ChunkDeliveryThread() {
       g_chunk_cv.wait(lk, [&] {
         if (g_chunk_thread_stop.load(std::memory_order_relaxed)) return true;
         uint32_t max_id = g_max_gpu_chunk_id.load(std::memory_order_acquire);
-        return max_id >= next_deliver + kDeliveryMargin;
+        // Wake when the next slab's last record (chunk_id) is at least
+        // kDeliveryMargin behind the highest GPU-callback chunk_id.
+        // slab_last is the chunk_id of the last record in slab next_slab.
+        uint32_t slab_last = (next_slab + 1) * static_cast<uint32_t>(kChunkSize) - 1;
+        return max_id > slab_last + kDeliveryMargin;
       });
     }
 
     bool stopping = g_chunk_thread_stop.load(std::memory_order_relaxed);
-    uint32_t max_id = g_max_gpu_chunk_id.load(std::memory_order_acquire);
+    uint32_t total = g_next_chunk_id.load(std::memory_order_acquire);
 
-    uint32_t watermark;
-    if (stopping) {
-      // Flush all allocated records regardless of GPU callback status.
-      uint32_t total = g_next_chunk_id.load(std::memory_order_acquire);
-      watermark = (total > 0) ? total - 1 : 0;
-    } else {
-      watermark = max_id - kDeliveryMargin;
+    // Snapshot client list once per wakeup.
+    std::vector<HipChunkClient> clients;
+    {
+      std::lock_guard<std::mutex> lk(g_chunk_clients_mtx);
+      clients = g_chunk_clients;
     }
 
-    if (watermark < next_deliver) {
-      if (stopping) break;
-      continue;
-    }
-
-    // Struct-copy records [next_deliver .. watermark].
-    // The acquire load of g_max_gpu_chunk_id above established happens-before with
-    // HipActivityCallbackExt's release store, so all GPU writes are visible here.
-    std::vector<hipApiRecordExt> flat;
-    flat.reserve(watermark - next_deliver + 1);
-    for (uint32_t cid = next_deliver; cid <= watermark; ++cid) {
-      size_t idx = cid / kChunkSize;
-      size_t off = cid % kChunkSize;
-      if (idx >= g_records.size()) break;
-      flat.push_back(g_records[idx][off]);
-    }
-
-    if (!flat.empty()) {
-      // Internal pftrace writer — called directly when env-var output is active.
-      if (g_pf_file)
-        PfChunkCallback(flat.data(), static_cast<uint32_t>(flat.size()), nullptr);
-      // External clients registered via hipProfilerRegisterChunkCallbackExt.
-      std::vector<HipChunkClient> clients;
-      {
-        std::lock_guard<std::mutex> lk(g_chunk_clients_mtx);
-        clients = g_chunk_clients;
-      }
+    auto deliver_slab = [&](uint32_t slab_idx, uint32_t count) {
+      if (slab_idx >= g_records.size() || !g_records[slab_idx]) return;
+      hipApiRecordExt* ptr = g_records[slab_idx];
+      uint32_t slab_first  = slab_idx * static_cast<uint32_t>(kChunkSize);
       for (auto& c : clients)
-        c.cb(flat.data(), static_cast<uint32_t>(flat.size()), c.user_data);
-      // Free owned resources on the originals (not the copies).
-      for (uint32_t cid = next_deliver; cid <= watermark; ++cid) {
-        size_t idx = cid / kChunkSize;
-        size_t off = cid % kChunkSize;
-        if (idx >= g_records.size()) break;
-        FreeRecordResources(&g_records[idx][off]);
+        c.cb(ptr, count, slab_first, c.user_data);
+      for (uint32_t i = 0; i < count; ++i)
+        FreeRecordResources(&ptr[i]);
+      g_records[slab_idx] = nullptr;
+    };
+
+    // Deliver all complete slabs that are kDeliveryMargin behind the GPU callback watermark.
+    if (total >= static_cast<uint32_t>(kChunkSize)) {
+      uint32_t watermark_slab = total / static_cast<uint32_t>(kChunkSize) - 1;
+      while (next_slab <= watermark_slab) {
+        deliver_slab(next_slab, static_cast<uint32_t>(kChunkSize));
+        ++next_slab;
       }
     }
 
-    next_deliver = watermark + 1;
-    if (stopping) break;
+    if (stopping) {
+      // Flush the partial last slab (records allocated but slab not yet full).
+      uint32_t remainder = total % static_cast<uint32_t>(kChunkSize);
+      if (remainder > 0) deliver_slab(next_slab, remainder);
+      break;
+    }
   }
 }
 
@@ -487,7 +480,7 @@ int HipActivityCallbackExt(activity_domain_t domain, uint32_t op_id, void* data)
   // Update g_max_gpu_chunk_id to rec->chunk_id (fetch_max via CAS loop, release store).
   // The release store ensures all GPU writes above are visible to the delivery thread
   // after its acquire load of g_max_gpu_chunk_id.
-  if (g_pf_file || !g_chunk_clients.empty()) {
+  if (!g_chunk_clients.empty()) {
     uint32_t id   = rec->chunk_id;
     uint32_t prev = g_max_gpu_chunk_id.load(std::memory_order_relaxed);
     while (id > prev && !g_max_gpu_chunk_id.compare_exchange_weak(
@@ -1453,11 +1446,9 @@ static void PfEnsureGpuThread(int dev_id, uint64_t gtid, hipStream_t stream) {
 // Processes one delivery batch: emits track descriptors, InternedData, and
 // sorted event packets directly into g_pf_buf, then writes to g_pf_file.
 // Called from the ChunkDeliveryThread (not on the main thread).
-static void PfChunkCallback(const hipApiRecordExt* records, uint32_t count, void* /*ud*/) {
+static void PfChunkCallback(const hipApiRecordExt* records, uint32_t count, uint32_t /*chunk_id*/, void* /*ud*/) {
   if (!g_pf_file || count == 0) return;
-
-  fprintf(stderr, "[profiler] chunk callback: %u records (chunk_ids %u..%u)\n",
-          count, records[0].chunk_id, records[count-1].chunk_id);
+  g_pf_slabs_written.fetch_add(1, std::memory_order_relaxed);
 
   std::lock_guard<std::mutex> lk(g_pf_mtx);
 
@@ -2384,15 +2375,15 @@ static void ProfilerAtExit() {
   const char* ext = strrchr(path.c_str(), '.');
   bool pftrace_mode = (ext && strcmp(ext, ".pftrace") == 0);
 
-  if (pftrace_mode && g_pf_file) {
-    // Streaming pftrace mode: the chunk thread already wrote all event packets.
+  if (pftrace_mode && g_pf_file && g_pf_slabs_written.load(std::memory_order_relaxed) > 0) {
+    // Streaming pftrace mode: chunk thread delivered records incrementally.
     // Flush memory lifetime slices and close the file.
     PfFlushAllocSlices();
     fclose(g_pf_file);
     g_pf_file = nullptr;
   } else if (pftrace_mode) {
-    // Streaming was requested but file wasn't opened (e.g. open failed at init).
-    // Fall back to batch write.
+    // No chunks were streamed (short run, or file open failed) — batch write.
+    if (g_pf_file) { fclose(g_pf_file); g_pf_file = nullptr; }
     WriteProtoTraceImpl(path.c_str());
   } else {
     // JSON mode: always buffered batch write.
@@ -2672,8 +2663,12 @@ void HipProfilerInitExt() {
       FILE* f = fopen(path.c_str(), "wb");
       if (f) {
         g_pf_file = f;
-        // Start the delivery thread — ChunkDeliveryThread calls PfChunkCallback
-        // directly when g_pf_file is set, no client registration needed.
+        // Register PfChunkCallback as an internal client so it goes through
+        // the same delivery path as external clients.
+        {
+          std::lock_guard<std::mutex> lk(g_chunk_clients_mtx);
+          g_chunk_clients.push_back({PfChunkCallback, nullptr});
+        }
         g_chunk_thread_stop = false;
         g_chunk_thread      = std::thread(ChunkDeliveryThread);
       } else {
