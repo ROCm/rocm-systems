@@ -3862,7 +3862,7 @@ class CodeGenerator:
             L.append(f'    d->num_elems = {ne};')
             L.append('    d->is_load = true;')
             L.append('    d->lds_dst = true;')
-            L.append('    d->lds_base = wf.m0();')
+            L.append('    d->lds_base = wf.m0() + wf.lds_base();')
             L.append(f'    d->mtype = {self._mtype_expr()};')
             L.append(f'    d->non_temporal = {nt};')
             L.append(f'    {addr_fn}(inst_, wf, *d);')
