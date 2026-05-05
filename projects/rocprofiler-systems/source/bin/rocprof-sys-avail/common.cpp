@@ -14,6 +14,7 @@
 #include <string_view>
 #include <sys/stat.h>
 #include <unordered_map>
+#include <unordered_set>
 
 using settings = ::tim::settings;
 
@@ -411,6 +412,24 @@ file_exists(const std::string& _fname)
     if(stat(_fname.c_str(), &_buffer) == 0)
         return (S_ISREG(_buffer.st_mode) != 0 || S_ISLNK(_buffer.st_mode) != 0);
     return false;
+}
+
+//--------------------------------------------------------------------------------------//
+
+void
+filter_operations(const std::string& env_var_name, std::vector<std::string>& choices)
+{
+    // Filter out internal/unsupported callbacks
+    if(env_var_name.find("ROCPROFSYS_ROCM_OMPT_OPERATIONS") == 0)
+    {
+        choices.erase(
+            std::remove_if(choices.begin(), choices.end(),
+                           [](const std::string& op) {
+                               return op == "omp_callback_functions" ||  // internal
+                                      op == "omp_thread_end";            // unsupported
+                           }),
+            choices.end());
+    }
 }
 
 //--------------------------------------------------------------------------------------//
