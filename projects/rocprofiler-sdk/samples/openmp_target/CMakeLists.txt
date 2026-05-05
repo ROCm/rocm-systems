@@ -78,7 +78,8 @@ rocprofiler_samples_get_ld_library_path_env(
 
 set(openmp-target-sample-env
     ${PRELOAD_ENV} ${LIBRARY_PATH_ENV} "OMP_NUM_THREADS=2" "OMP_TARGET_OFFLOAD=mandatory"
-    "OMP_DISPLAY_ENV=1" "ROCR_VISIBLE_DEVICES=0")
+    "OMP_DISPLAY_ENV=1" "HSA_VISIBLE_DEVICES=0" "HIP_VISIBLE_DEVICES=0"
+    "ROCR_VISIBLE_DEVICES=0")
 
 add_test(NAME openmp-target-sample COMMAND $<TARGET_FILE:openmp-target-sample>)
 
