@@ -1079,13 +1079,9 @@ def create_temp_rocprofiler_metrics_path(sdk_config: dict[str, Any]) -> str:
 
 
 def reconfigure_stdio_utf8() -> None:
-    """Force sys.stdout / sys.stderr to UTF-8 regardless of the startup locale.
-
-    sys.stdout's encoding is decided once at interpreter startup from
-    locale.getpreferredencoding(), so a later locale.setlocale() call cannot
-    fix it. Reconfiguring the existing TextIOWrapper does. errors="replace"
-    keeps a single bad byte from crashing tabulated output on terminals that
-    cannot render every glyph.
+    """Force sys.stdout and sys.stderr to UTF-8 so tabulated output never
+    crashes with UnicodeEncodeError on systems started under a non-UTF-8
+    locale.
     """
     for stream in (sys.stdout, sys.stderr):
         try:
