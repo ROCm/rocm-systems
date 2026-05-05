@@ -411,17 +411,38 @@ bool drain_one_queue(queue_drain_state& qs, bool force_emit) {
   // analog of the sentinel-scan's pass_budget.
   // ============================================================================
   if (qs.wptr_ptr != nullptr) {
-    const uint64_t fw_wptr = __atomic_load_n(qs.wptr_ptr, __ATOMIC_ACQUIRE);
+    // FW publish-monotonicity workaround: the gfx950 MEC firmware
+    // publishes wptr_addr and signal_addr non-monotonically (observed
+    // delta_w going negative by 300-450 between consecutive polls;
+    // signal and wptr can also disagree by similar magnitudes). The
+    // FW publish path appears to race across CU lanes / cores —
+    // documented in the FW interface spec under "publish ordering".
+    //
+    // Mitigation:
+    //   1. Take max(wptr, signal): one may briefly publish a stale
+    //      value while the other races forward. Both are FW writes
+    //      of the same logical counter.
+    //   2. Use a per-queue monotonic floor (qs.next_idx) so FW
+    //      publishing a backward value never re-emits already-drained
+    //      records. If max(wptr,signal) < next_idx, FW's published
+    //      value is stale; skip this pass and wait for the next
+    //      monotonic update.
+    const uint64_t fw_wptr   = __atomic_load_n(qs.wptr_ptr,   __ATOMIC_ACQUIRE);
+    const uint64_t fw_signal = qs.signal_ptr
+                                   ? __atomic_load_n(qs.signal_ptr, __ATOMIC_ACQUIRE)
+                                   : fw_wptr;
+    const uint64_t observed = (fw_wptr > fw_signal) ? fw_wptr : fw_signal;
 
-    // Nothing new since last pass. Steady-state cheap exit.
-    if (fw_wptr == qs.next_idx) return false;
+    // Backward (or stale) FW publish: ignore this pass entirely.
+    // qs.next_idx is our monotonic floor.
+    if (observed <= qs.next_idx) return false;
 
     // Overrun detection. If FW lapped us, log a drop event and skip
     // the unrecoverable region. The records we DO read after the skip
-    // are still valid (they're the most recent fw_wptr - ring_records
+    // are still valid (they're the most recent observed - ring_records
     // records, just with a gap before them).
     uint64_t start = qs.next_idx;
-    uint64_t end   = fw_wptr;
+    uint64_t end   = observed;
     if ((end - start) > qs.ring_records) {
       const uint64_t lost = (end - start) - qs.ring_records;
       rocm_trace_emit_hsa_kernel_dispatch_drop(
