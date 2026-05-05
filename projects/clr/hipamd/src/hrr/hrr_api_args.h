@@ -1900,6 +1900,8 @@ typedef struct {
     uint64_t hostPtr;
     uint64_t sizeBytes;
     uint32_t flags;
+    uint64_t blob_hash_lo;  /* sysmem blob hash lo */
+    uint64_t blob_hash_hi;  /* sysmem blob hash hi */
 } hrr_args_hipHostRegister;
 
 /* hipError_t hipHostUnregister(void* hostPtr) */

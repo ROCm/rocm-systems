@@ -99,6 +99,9 @@ MANUAL_CAPTURE_APIS: Set[str] = {
     "hipMemcpyHtoDAsync",
     # Fat binary registration — blob snapshotting
     "__hipRegisterFatBinary",
+    # Host memory registration — blob snapshotting of initial host mem contents
+    "hipHostRegister",
+    "hipHostUnregister",
 }
 
 # Alias for backward compat within the file (some helpers used MANUAL_APIS)
@@ -153,6 +156,9 @@ MANUAL_PLAYBACK_APIS: Set[str] = {
     "hipEventDestroy",
     # Fat binary registration — load blob as module so kernel names resolve
     "__hipRegisterFatBinary",
+    # Host memory registration — need handle map + blob restore
+    "hipHostRegister",
+    "hipHostUnregister",
     # Graph stream-capture flow — hipStreamEndCapture output handle must be recorded,
     # hipGraphInstantiate must use the recorded graph handle and record exec handle.
     # hipStreamBeginCapture also handled manually for debug / stream-not-found safety.
@@ -282,6 +288,9 @@ EXTRA_FIELDS: Dict[str, List[Tuple[str, str, str]]] = {
         ("uint64_t", "co_hash_hi", "code object hash hi"),
         ("uint32_t", "module_id",  "sequential module handle ID"),
     ],
+    # hipHostRegister — snapshot of host memory at registration time
+    "hipHostRegister":    [("uint64_t", "blob_hash_lo", "sysmem blob hash lo"),
+                           ("uint64_t", "blob_hash_hi", "sysmem blob hash hi")],
     # Memcpy 1D variants — blob hash for H2D data
     "hipMemcpy":          [("uint64_t", "blob_hash_lo", "H2D blob hash lo"),
                            ("uint64_t", "blob_hash_hi", "H2D blob hash hi")],
@@ -1201,7 +1210,7 @@ _PLAYBACK_CPP_PREAMBLE = """\
  *
  * Contains:
  *   - playback_hipFoo() for every HIP API
- *     Signature: hipError_t playback_foo(PlaybackContext&, const uint8_t*, size_t)
+ *     Signature: hipError_t playback_foo(PlaybackContext&, const uint8_t*)
  *   - hrr_playback_dispatch[HRR_API_COUNT]  — indexed by hrr_api_id_t
  * ============================================================================ */
 
@@ -1364,36 +1373,33 @@ def generate_playback_shim(entry: ApiEntry) -> str:
     """Generate playback function for one API."""
     sname = f"hrr_args_{entry.name}"
     fname = f"playback_{entry.name}"
-    sig   = f"static hipError_t {fname}(PlaybackContext& ctx, const uint8_t* payload, size_t pl_len)"
+    sig   = f"static hipError_t {fname}(PlaybackContext& ctx, const uint8_t* payload)"
 
     # No-op playback APIs: emit an inline static no-op body (return hipSuccess)
     if entry.name in NOOP_PLAYBACK_APIS:
         return (f"static hipError_t {fname}"
-                f"(PlaybackContext& ctx, const uint8_t* payload, size_t pl_len) {{\n"
-                f"  (void)ctx; (void)payload; (void)pl_len;\n"
+                f"(PlaybackContext& ctx, const uint8_t* payload) {{\n"
+                f"  (void)ctx; (void)payload;\n"
                 f"  return hipSuccess;\n"
                 f"}}\n")
 
     # Manual playback APIs: emit an extern declaration only, body in hip_playback.cpp
     if entry.name in MANUAL_PLAYBACK_APIS:
         return (f"extern hipError_t {fname}"
-                f"(PlaybackContext& ctx, const uint8_t* payload, size_t pl_len);\n")
+                f"(PlaybackContext& ctx, const uint8_t* payload);\n")
 
     lines = []
     lines.append(f"{sig} {{")
 
     if entry.table == "compiler":
         # Compiler APIs (hipRegisterFatBinary etc.) are replay no-ops
-        lines.append(f"  (void)ctx; (void)payload; (void)pl_len;")
+        lines.append(f"  (void)ctx; (void)payload;")
         lines.append(f"  return hipSuccess;")
         lines.append("}")
         return "\n".join(lines) + "\n"
 
-    lines.append(f"  (void)pl_len;")
-    # payload points to the bytes AFTER the 32-byte hrr_event_header.
-    # The hrr_args_* struct starts with that header, so subtract its size
-    # so that a->ret reads payload[0], a->field1 reads payload[4], etc.
-    lines.append(f"  const auto* a = reinterpret_cast<const {sname}*>(payload - sizeof(hrr_event_header));")
+    # payload points to the full hrr_args_* struct (header + fields).
+    lines.append(f"  const auto* a = reinterpret_cast<const {sname}*>(payload);")
 
     # Check if this API creates/destroys allocs or handles
     is_alloc_create  = entry.name in _ALLOC_CREATE_APIS

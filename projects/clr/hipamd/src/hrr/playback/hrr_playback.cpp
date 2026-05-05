@@ -65,7 +65,7 @@ static void print_info(const hrr::Archive& archive, bool show_events) {
   // Event type breakdown
   std::map<uint16_t, size_t> type_counts;
   for (const auto& ev : archive.events)
-    type_counts[ev.header.event_type]++;
+    type_counts[ev.header().event_type]++;
 
   printf("Event Type Breakdown:\n");
   printf("  %-22s %s\n", "Type", "Count");
@@ -83,7 +83,7 @@ static void print_info(const hrr::Archive& archive, bool show_events) {
     size_t kid = 0;
     std::map<std::string, size_t> kernel_calls;
     for (const auto& ev : archive.events) {
-      if (ev.header.event_type != HRR_API_HIPMODULELAUNCHKERNEL || !ev.kernel_launch)
+      if (ev.header().event_type != HRR_API_HIPMODULELAUNCHKERNEL || !ev.kernel_launch)
         continue;
       const auto& kl = *ev.kernel_launch;
       kernel_calls[kl.kernel_name]++;
@@ -116,12 +116,12 @@ static void print_info(const hrr::Archive& archive, bool show_events) {
   printf("  %-6s %-10s %-16s %-22s %s\n", "Seq", "Thread", "Timestamp(ns)", "Type", "Details");
   for (const auto& ev : archive.events) {
     printf("  %-6llu %-10llu %-16llu %-22s",
-           (unsigned long long)ev.header.sequence_id,
-           (unsigned long long)ev.header.thread_id,
-           (unsigned long long)ev.header.timestamp_ns,
-           hrr::event_type_name(ev.header.event_type));
+           (unsigned long long)ev.header().sequence_id,
+           (unsigned long long)ev.header().thread_id,
+           (unsigned long long)ev.header().timestamp_ns,
+           hrr::event_type_name(ev.header().event_type));
 
-    switch (ev.header.event_type) {
+    switch (ev.header().event_type) {
       case HRR_API_HIPMALLOC:
         printf(" handle=0x%llx size=%llu",
                (unsigned long long)ev.malloc_ev.ptr_handle,
@@ -196,7 +196,7 @@ static bool is_special(uint16_t etype) {
 }
 
 static void handle_special(PlaybackContext& ctx, const hrr::Event& ev) {
-  switch (ev.header.event_type) {
+  switch (ev.header().event_type) {
 
     case HRR_API_HIPDEVICESYNCHRONIZE:
       if (!ctx.skip_device_sync) hipDeviceSynchronize();
@@ -212,9 +212,9 @@ static void handle_special(PlaybackContext& ctx, const hrr::Event& ev) {
       return;
 
     case HRR_API_HIPSETDEVICE: {
-      if (ev.raw_payload.size() >= 8) {
-        int32_t dev = 0;
-        memcpy(&dev, ev.raw_payload.data() + 4, 4);
+      if (ev.raw_payload.size() >= sizeof(hrr_args_hipSetDevice)) {
+        const auto* a = reinterpret_cast<const hrr_args_hipSetDevice*>(ev.raw_payload.data());
+        int dev = a->deviceId;
         int n = 0; hipGetDeviceCount(&n);
         if (dev >= n) dev = 0;
         hipSetDevice(dev);
@@ -307,18 +307,18 @@ static bool needs_ordering(uint16_t etype) {
 
 static void dispatch_event(PlaybackContext& ctx, const hrr::Event& ev,
                            size_t idx, bool log, const hrr::Event* next_ev) {
-  uint16_t etype = ev.header.event_type;
+  uint16_t etype = ev.header().event_type;
 
   // Give kernel-launch handlers the sequence ID so they can wait and advance
   // next_seq at the exact point of the HIP call.
-  hrr_dispatch_seq = ev.header.sequence_id;
+  hrr_dispatch_seq = ev.header().sequence_id;
   auto order = needs_ordering(etype);
-  auto next_order = next_ev && needs_ordering(next_ev->header.event_type);
+  auto next_order = next_ev && needs_ordering(next_ev->header().event_type);
   //order = (order ^ next_order);
 
   // Only "create" events need ordering — wait for turn then advance immediately
   // (before the call) so the next thread can start preparing while we execute.
-  while (ctx.next_seq.load(std::memory_order_acquire) != ev.header.sequence_id)
+  while (ctx.next_seq.load(std::memory_order_acquire) != ev.header().sequence_id)
     std::this_thread::yield();
 
   // RAII guard: non-ordering events advance immediately (constructor) so the
@@ -336,7 +336,7 @@ static void dispatch_event(PlaybackContext& ctx, const hrr::Event& ev,
       if (order)
         ctx.next_seq.store(next, std::memory_order_release);
     }
-  } seq_guard{ctx, ev.header.sequence_id + 1, order};
+  } seq_guard{ctx, ev.header().sequence_id + 1, order};
 
   if (is_special(etype)) {
     handle_special(ctx, ev);
@@ -346,16 +346,15 @@ static void dispatch_event(PlaybackContext& ctx, const hrr::Event& ev,
   if (etype >= HRR_API_COUNT || !hrr_playback_dispatch[etype]) {
     if (log && ctx.verbose)
       fprintf(stderr, "[HRR] T%llu Event %zu: no handler for type %u\n",
-              (unsigned long long)ev.header.thread_id, idx, etype);
+              (unsigned long long)ev.header().thread_id, idx, etype);
     return;
   }
 
-  hipError_t r = hrr_playback_dispatch[etype](
-      ctx, ev.raw_payload.data(), ev.raw_payload.size());
+  hipError_t r = hrr_playback_dispatch[etype](ctx, ev.raw_payload.data());
 
   if (r != hipSuccess && log) {
     fprintf(stderr, "[HRR] T%llu Event %zu (%s) error %d (%s)\n",
-            (unsigned long long)ev.header.thread_id, idx,
+            (unsigned long long)ev.header().thread_id, idx,
             hrr::event_type_name(etype), r, hipGetErrorString(r));
   }
 }
@@ -371,8 +370,8 @@ static void replay_thread(PlaybackContext& ctx,
     const hrr::Event& ev = *events[i];
     if (log && ctx.verbose)
       fprintf(stderr, "[HRR] T%llu [%zu] %s\n",
-              (unsigned long long)ev.header.thread_id, i,
-              hrr::event_type_name(ev.header.event_type));
+              (unsigned long long)ev.header().thread_id, i,
+              hrr::event_type_name(ev.header().event_type));
     const hrr::Event* next_ev = (i + 1 < events.size()) ? events[i + 1] : nullptr;
     dispatch_event(ctx, ev, i, log, next_ev);
   }
@@ -391,7 +390,7 @@ static void run_pass(PlaybackContext& ctx,
     // Reset the global sequence counter to the first event's seq_id so
     // threads start waiting at the right value for each pass.
     if (!archive.events.empty())
-      ctx.next_seq.store(archive.events.front().header.sequence_id,
+      ctx.next_seq.store(archive.events.front().header().sequence_id,
                          std::memory_order_relaxed);
 
     std::vector<std::thread> threads;
@@ -407,7 +406,7 @@ static void run_pass(PlaybackContext& ctx,
       const auto& ev = archive.events[i];
       if (log && ctx.verbose)
         fprintf(stderr, "[HRR] Event %zu: %s\n", i,
-                hrr::event_type_name(ev.header.event_type));
+                hrr::event_type_name(ev.header().event_type));
       const hrr::Event* next_ev = (i + 1 < archive.events.size()) ? &archive.events[i + 1] : nullptr;
       dispatch_event(ctx, ev, i, log, next_ev);
     }
@@ -497,7 +496,7 @@ int main(int argc, char** argv) {
   std::unordered_map<uint64_t, std::vector<const hrr::Event*>> thread_events;
   for (uint64_t tid : archive.threads) thread_events[tid];
   for (const auto& ev : archive.events)
-    thread_events[ev.header.thread_id].push_back(&ev);
+    thread_events[ev.header().thread_id].push_back(&ev);
 
   const bool use_mt = !single_thread && archive.threads.size() > 1;
   printf("[HRR] Mode    : %s\n", use_mt ? "multi-threaded" : "single-threaded");
@@ -509,7 +508,7 @@ int main(int argc, char** argv) {
   // populates module_map, resulting in "kernel not found" errors.
   if (use_mt) {
     for (const auto& ev : archive.events) {
-      uint16_t t = ev.header.event_type;
+      uint16_t t = ev.header().event_type;
       if (t == HRR_API_HIPREGISTERFATBINARY ||
           t == HRR_API_HIPMODULELOADDATA    ||
           t == HRR_API_HIPMODULELOADDATAEX  ||

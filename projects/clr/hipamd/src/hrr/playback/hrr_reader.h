@@ -112,7 +112,14 @@ struct KernelLaunchEvent {
 // ---------------------------------------------------------------------------
 
 struct Event {
-  hrr_event_header header{};
+  // raw_payload is the single source of truth: header(32) + fields.
+  // Cast data() directly to hrr_args_* for field access.
+  // Full struct bytes: header(32) + fields. Cast data() directly to hrr_args_*.
+  std::vector<uint8_t> raw_payload;
+
+  const hrr_event_header& header() const {
+    return *reinterpret_cast<const hrr_event_header*>(raw_payload.data());
+  }
 
   // Stream handle for kernel launch events (raw hipStream_t pointer)
   uint64_t stream_handle = 0;
@@ -132,9 +139,6 @@ struct Event {
 
   // Heap-allocated for kernel launches (variable-length binary payload)
   KernelLaunchEvent* kernel_launch = nullptr;
-
-  // Raw payload bytes (all events; bytes AFTER the 32-byte EventHeader)
-  std::vector<uint8_t> raw_payload;
 
   ~Event()                       { delete kernel_launch; }
   Event()                        = default;

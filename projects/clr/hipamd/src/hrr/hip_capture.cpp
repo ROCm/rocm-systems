@@ -9,6 +9,7 @@
  *   - Module load with code object snapshotting (hipModuleLoad*)
  *   - Kernel launch with arg introspection via kernel->signature()
  *   - Fat binary registration (__hipRegisterFatBinary)
+ *   - Host memory registration (hipHostRegister / hipHostUnregister)
  *
  * Everything else (malloc/free, stream/event, memset, device sync, etc.)
  * is auto-generated in hip_capture_generated.cpp.
@@ -46,6 +47,8 @@
 
 #include <atomic>
 #include <cstring>
+#include <mutex>
+#include <unordered_map>
 #include <vector>
 
 
@@ -541,6 +544,54 @@ void** capture___hipRegisterFatBinary(const void* data) {
     a.blob_hash_hi = h.hi;
   }
   hrr_cap::writer::write_event_raw(HRR_API_HIPREGISTERFATBINARY, &a.hdr, sizeof(a));
+  return r;
+}
+
+// ---------------------------------------------------------------------------
+// hipHostRegister / hipHostUnregister — sysmem blob snapshotting
+//
+// We snapshot the host memory at Register time so the replayer can restore it
+// before calling hipHostRegister on a freshly allocated buffer.
+// hipHostUnregister doesn't receive a size, so we track it in pinned_reg_map.
+// ---------------------------------------------------------------------------
+
+static std::mutex                              g_pinned_reg_mu;
+static std::unordered_map<void*, size_t>       g_pinned_reg_map;
+
+hipError_t capture_hipHostRegister(void* hostPtr, size_t sizeBytes, unsigned int flags) {
+  hipError_t r = g_real_table.hipHostRegister_fn(hostPtr, sizeBytes, flags);
+  if (r == hipSuccess) {
+    hrr_cap::Hash128 h{0, 0};
+    if (hostPtr && sizeBytes > 0)
+      h = hrr_cap::writer::write_blob(hostPtr, sizeBytes);
+    hrr_args_hipHostRegister a{};
+    a.ret          = static_cast<int32_t>(r);
+    a.hostPtr      = reinterpret_cast<uint64_t>(hostPtr);
+    a.sizeBytes    = static_cast<uint64_t>(sizeBytes);
+    a.flags        = flags;
+    a.blob_hash_lo = h.lo;
+    a.blob_hash_hi = h.hi;
+    hrr_cap::writer::write_event_raw(HRR_API_HIPHOSTREGISTER, &a.hdr, sizeof(a));
+    {
+      std::lock_guard<std::mutex> lk(g_pinned_reg_mu);
+      g_pinned_reg_map[hostPtr] = sizeBytes;
+    }
+  }
+  return r;
+}
+
+hipError_t capture_hipHostUnregister(void* hostPtr) {
+  hipError_t r = g_real_table.hipHostUnregister_fn(hostPtr);
+  if (r == hipSuccess) {
+    hrr_args_hipHostUnregister a{};
+    a.ret     = static_cast<int32_t>(r);
+    a.hostPtr = reinterpret_cast<uint64_t>(hostPtr);
+    hrr_cap::writer::write_event_raw(HRR_API_HIPHOSTUNREGISTER, &a.hdr, sizeof(a));
+    {
+      std::lock_guard<std::mutex> lk(g_pinned_reg_mu);
+      g_pinned_reg_map.erase(hostPtr);
+    }
+  }
   return r;
 }
 

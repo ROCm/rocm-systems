@@ -92,6 +92,11 @@ struct PlaybackContext {
     // Appended under map_mutex (unique_lock); no lock needed to read (single writer).
     std::vector<hipEvent_t> owned_timing_events;
 
+    // Backing buffers for hipHostRegister replay: recorded ptr -> malloc'd host buffer.
+    // Needed so hipHostUnregister can call hipHostUnregister then free the buffer.
+    // Guarded by map_mutex.
+    std::unordered_map<uint64_t, void*> host_reg_bufs;
+
     // ---- Pointer translation ----
     // Translates a recorded GPU address to a live pointer.
     // Exact match first; falls back to sub-alloc range search.
@@ -226,11 +231,10 @@ extern thread_local uint64_t hrr_dispatch_seq;
 
 // Each playback shim receives:
 //   ctx      — replay state (mutable)
-//   payload  — pointer to raw_payload bytes (everything AFTER the 32-byte EventHeader)
-//   pl_len   — length of payload in bytes
+//   payload  — pointer to the full hrr_args_* struct (header + fields); cast directly:
+//              const auto* a = reinterpret_cast<const hrr_args_foo*>(payload);
 // Returns hipSuccess (0) on success, or a hipError_t on failure.
-typedef hipError_t (*hrr_playback_fn_t)(PlaybackContext& ctx,
-                                        const uint8_t* payload, size_t pl_len);
+typedef hipError_t (*hrr_playback_fn_t)(PlaybackContext& ctx, const uint8_t* payload);
 
 // Indexed by hrr_api_id_t — defined in hip_playback_generated.cpp
 extern hrr_playback_fn_t hrr_playback_dispatch[HRR_API_COUNT];

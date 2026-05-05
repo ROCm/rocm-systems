@@ -13,6 +13,7 @@
 
 #include <hip/hip_runtime.h>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <string>
 #include <thread>
@@ -180,10 +181,11 @@ hipModule_t PlaybackContext::load_module(uint64_t hash_lo, uint64_t hash_hi) {
 //   [+30..31] num_snapshots (uint16_t, always 0)
 //   per arg:  u8 value_kind, u16 size, <size> bytes data
 
-static hipError_t replay_kernel_launch(PlaybackContext& ctx,
-                                       const uint8_t* pl, size_t pl_len) {
-    const uint8_t* p   = pl;
-    const uint8_t* end = pl + pl_len;
+static hipError_t replay_kernel_launch(PlaybackContext& ctx, const uint8_t* pl) {
+    // Skip the 32-byte header; kernel launch has a variable-length binary format.
+    const auto* hdr = reinterpret_cast<const hrr_event_header*>(pl);
+    const uint8_t* p   = pl + sizeof(hrr_event_header);
+    const uint8_t* end = pl + hdr->payload_length;
 
     if (p + 8 > end) return hipErrorInvalidValue;
     uint64_t stream_rec; memcpy(&stream_rec, p, 8); p += 8;
@@ -362,23 +364,23 @@ static hipError_t replay_kernel_launch(PlaybackContext& ctx,
 // ---------------------------------------------------------------------------
 
 hipError_t playback_hipModuleLaunchKernel(PlaybackContext& ctx,
-                                          const uint8_t* payload, size_t pl_len) {
-    return replay_kernel_launch(ctx, payload, pl_len);
+                                          const uint8_t* payload) {
+    return replay_kernel_launch(ctx, payload);
 }
 
 hipError_t playback_hipExtModuleLaunchKernel(PlaybackContext& ctx,
-                                             const uint8_t* payload, size_t pl_len) {
-    return replay_kernel_launch(ctx, payload, pl_len);
+                                             const uint8_t* payload) {
+    return replay_kernel_launch(ctx, payload);
 }
 
 hipError_t playback_hipLaunchKernel(PlaybackContext& ctx,
-                                    const uint8_t* payload, size_t pl_len) {
-    return replay_kernel_launch(ctx, payload, pl_len);
+                                    const uint8_t* payload) {
+    return replay_kernel_launch(ctx, payload);
 }
 
 hipError_t playback_hipLaunchByPtr(PlaybackContext& ctx,
-                                   const uint8_t* payload, size_t pl_len) {
-    return replay_kernel_launch(ctx, payload, pl_len);
+                                   const uint8_t* payload) {
+    return replay_kernel_launch(ctx, payload);
 }
 
 // ---------------------------------------------------------------------------
@@ -391,11 +393,11 @@ hipError_t playback_hipLaunchByPtr(PlaybackContext& ctx,
 // become resolvable at kernel launch replay time.
 
 hipError_t playback___hipRegisterFatBinary(PlaybackContext& ctx,
-                                           const uint8_t* payload, size_t pl_len) {
-    if (pl_len < 32) return hipSuccess;  // too short — skip gracefully
-    uint64_t blob_hash_lo = rd64(payload,  8);
-    uint64_t blob_hash_hi = rd64(payload, 16);
-    uint64_t blob_size    = rd64(payload, 24);
+                                           const uint8_t* payload) {
+    const auto* a = reinterpret_cast<const hrr_args___hipRegisterFatBinary*>(payload);
+    uint64_t blob_hash_lo = a->blob_hash_lo;
+    uint64_t blob_hash_hi = a->blob_hash_hi;
+    uint64_t blob_size    = a->blob_size;
 
     if (!blob_hash_lo && !blob_hash_hi) return hipSuccess;  // no blob — skip
     if (!blob_size) return hipSuccess;
@@ -429,8 +431,8 @@ hipError_t playback___hipRegisterFatBinary(PlaybackContext& ctx,
 // We ignore the call during replay; functions are looked up by name at launch time.
 
 hipError_t playback_hipModuleGetFunction(PlaybackContext& ctx,
-                                         const uint8_t* payload, size_t pl_len) {
-    (void)ctx; (void)payload; (void)pl_len;
+                                         const uint8_t* payload) {
+    (void)ctx; (void)payload; 
     // Function handles are resolved by name at kernel launch time.
     return hipSuccess;
 }
@@ -448,11 +450,12 @@ hipError_t playback_hipModuleGetFunction(PlaybackContext& ctx,
 // co_hash_lo is at offset +20 (8 bytes), co_hash_hi at +28 (8 bytes).
 
 static hipError_t replay_module_load(PlaybackContext& ctx,
-                                     const uint8_t* payload, size_t pl_len) {
-    if (pl_len < 36) return hipErrorInvalidValue;
-    uint64_t rec_module = rd64(payload,  4);  // recorded hipModule_t raw ptr
-    uint64_t co_hash_lo = rd64(payload, 20);
-    uint64_t co_hash_hi = rd64(payload, 28);
+                                     const uint8_t* payload) {
+    // hipModuleLoad and hipModuleLoadData share the same layout for the fields we need
+    const auto* a = reinterpret_cast<const hrr_args_hipModuleLoadData*>(payload);
+    uint64_t rec_module = a->module;
+    uint64_t co_hash_lo = a->co_hash_lo;
+    uint64_t co_hash_hi = a->co_hash_hi;
 
     if (!co_hash_lo && !co_hash_hi) {
         fprintf(stderr, "[HRR] hipModuleLoad: no code object hash in payload\n");
@@ -467,18 +470,18 @@ static hipError_t replay_module_load(PlaybackContext& ctx,
 }
 
 hipError_t playback_hipModuleLoadData(PlaybackContext& ctx,
-                                      const uint8_t* payload, size_t pl_len) {
-    return replay_module_load(ctx, payload, pl_len);
+                                      const uint8_t* payload) {
+    return replay_module_load(ctx, payload);
 }
 
 hipError_t playback_hipModuleLoadDataEx(PlaybackContext& ctx,
-                                        const uint8_t* payload, size_t pl_len) {
-    return replay_module_load(ctx, payload, pl_len);
+                                        const uint8_t* payload) {
+    return replay_module_load(ctx, payload);
 }
 
 hipError_t playback_hipModuleLoad(PlaybackContext& ctx,
-                                  const uint8_t* payload, size_t pl_len) {
-    return replay_module_load(ctx, payload, pl_len);
+                                  const uint8_t* payload) {
+    return replay_module_load(ctx, payload);
 }
 
 // ---------------------------------------------------------------------------
@@ -487,32 +490,27 @@ hipError_t playback_hipModuleLoad(PlaybackContext& ctx,
 // Payload: ret(4) ptr(8) size(8) [additional fields for managed/host variants]
 // ptr at +4, size at +12
 
-static hipError_t replay_malloc(PlaybackContext& ctx, const uint8_t* pl, size_t pl_len,
-                                bool managed = false, bool host = false) {
-    if (pl_len < 20) return hipErrorInvalidValue;
-    uint64_t rec_ptr = rd64(pl,  4);
-    uint64_t size    = rd64(pl, 12);
-
+static hipError_t replay_malloc(PlaybackContext& ctx, const uint8_t* pl,
+                                bool managed = false) {
+    const auto* a = reinterpret_cast<const hrr_args_hipMalloc*>(pl);
     void* live = nullptr;
     hipError_t r;
     if (managed)
-        r = hipMallocManaged(&live, static_cast<size_t>(size));
-    else if (host)
-        r = hipHostMalloc(&live, static_cast<size_t>(size));
+        r = hipMallocManaged(&live, static_cast<size_t>(a->size));
     else
-        r = hipMalloc(&live, static_cast<size_t>(size));
-
+        r = hipMalloc(&live, static_cast<size_t>(a->size));
     if (r == hipSuccess)
-        ctx.record_alloc(rec_ptr, live, static_cast<size_t>(size));
+        ctx.record_alloc(a->ptr, live, static_cast<size_t>(a->size));
     return r;
 }
 
-hipError_t playback_hipMalloc(PlaybackContext& ctx, const uint8_t* pl, size_t pl_len) {
-    return replay_malloc(ctx, pl, pl_len);
+hipError_t playback_hipMalloc(PlaybackContext& ctx, const uint8_t* pl) {
+    return replay_malloc(ctx, pl);
 }
-hipError_t playback_hipMallocManaged(PlaybackContext& ctx, const uint8_t* pl, size_t pl_len) {
-    return replay_malloc(ctx, pl, pl_len, /*managed=*/true);
+hipError_t playback_hipMallocManaged(PlaybackContext& ctx, const uint8_t* pl) {
+    return replay_malloc(ctx, pl, /*managed=*/true);
 }
+
 
 // ---------------------------------------------------------------------------
 // Manual playback: hipMallocAsync / hipMallocFromPoolAsync
@@ -521,34 +519,141 @@ hipError_t playback_hipMallocManaged(PlaybackContext& ctx, const uint8_t* pl, si
 // hipMallocFromPoolAsync: ret(4) dev_ptr(8) size(8) mem_pool(8) stream(8)
 
 hipError_t playback_hipMallocAsync(PlaybackContext& ctx,
-                                   const uint8_t* pl, size_t pl_len) {
-    if (pl_len < 28) return hipErrorInvalidValue;
-    uint64_t rec_ptr     = rd64(pl,  4);
-    uint64_t size        = rd64(pl, 12);
-    uint64_t stream_rec  = rd64(pl, 20);
-    hipStream_t stream   = ctx.translate_stream(stream_rec);
-
+                                   const uint8_t* pl) {
+    const auto* a = reinterpret_cast<const hrr_args_hipMallocAsync*>(pl);
+    hipStream_t stream = ctx.translate_stream(a->stream);
     void* live = nullptr;
-    hipError_t r = hipMallocAsync(&live, static_cast<size_t>(size), stream);
+    hipError_t r = hipMallocAsync(&live, static_cast<size_t>(a->size), stream);
     if (r == hipSuccess)
-        ctx.record_alloc(rec_ptr, live, static_cast<size_t>(size));
+        ctx.record_alloc(a->dev_ptr, live, static_cast<size_t>(a->size));
     return r;
 }
 
 hipError_t playback_hipMallocFromPoolAsync(PlaybackContext& ctx,
-                                           const uint8_t* pl, size_t pl_len) {
-    if (pl_len < 36) return hipErrorInvalidValue;
-    uint64_t rec_ptr    = rd64(pl,  4);
-    uint64_t size       = rd64(pl, 12);
-    uint64_t pool_rec   = rd64(pl, 20);
-    uint64_t stream_rec = rd64(pl, 28);
-    hipMemPool_t  pool   = ctx.translate_mempool(pool_rec);
-    hipStream_t   stream = ctx.translate_stream(stream_rec);
-
+                                           const uint8_t* pl) {
+    const auto* a  = reinterpret_cast<const hrr_args_hipMallocFromPoolAsync*>(pl);
+    hipMemPool_t pool   = ctx.translate_mempool(a->mem_pool);
+    hipStream_t  stream = ctx.translate_stream(a->stream);
     void* live = nullptr;
-    hipError_t r = hipMallocFromPoolAsync(&live, static_cast<size_t>(size), pool, stream);
+    hipError_t r = hipMallocFromPoolAsync(&live, static_cast<size_t>(a->size), pool, stream);
     if (r == hipSuccess)
-        ctx.record_alloc(rec_ptr, live, static_cast<size_t>(size));
+        ctx.record_alloc(a->dev_ptr, live, static_cast<size_t>(a->size));
+    return r;
+}
+
+// ---------------------------------------------------------------------------
+// Manual playback: hipHostMalloc / hipMallocHost
+// ---------------------------------------------------------------------------
+// hipHostMalloc:  ret(4) ptr(8) size(8) flags(4)
+// hipMallocHost:  ret(4) ptr(8) size(8)
+
+hipError_t playback_hipHostMalloc(PlaybackContext& ctx, const uint8_t* pl) {
+    const auto* a = reinterpret_cast<const hrr_args_hipHostMalloc*>(pl);
+    void* live = nullptr;
+    hipError_t r = hipHostMalloc(&live, static_cast<size_t>(a->size), a->flags);
+    if (r == hipSuccess) ctx.record_alloc(a->ptr, live, static_cast<size_t>(a->size));
+    return r;
+}
+
+hipError_t playback_hipMallocHost(PlaybackContext& ctx, const uint8_t* pl) {
+    const auto* a = reinterpret_cast<const hrr_args_hipMallocHost*>(pl);
+    void* live = nullptr;
+    hipError_t r = hipMallocHost(&live, static_cast<size_t>(a->size));
+    if (r == hipSuccess) ctx.record_alloc(a->ptr, live, static_cast<size_t>(a->size));
+    return r;
+}
+
+hipError_t playback_hipFreeHost(PlaybackContext& ctx, const uint8_t* pl) {
+    const auto* a = reinterpret_cast<const hrr_args_hipFreeHost*>(pl);
+    void* live = ctx.translate_ptr(a->ptr);
+    if (!live) return hipSuccess;
+    hipError_t r = hipFreeHost(live);
+    if (r == hipSuccess) ctx.remove_alloc(a->ptr);
+    return r;
+}
+
+hipError_t playback_hipHostFree(PlaybackContext& ctx, const uint8_t* pl) {
+    const auto* a = reinterpret_cast<const hrr_args_hipHostFree*>(pl);
+    void* live = ctx.translate_ptr(a->ptr);
+    if (!live) return hipSuccess;
+    hipError_t r = hipHostFree(live);
+    if (r == hipSuccess) ctx.remove_alloc(a->ptr);
+    return r;
+}
+
+// ---------------------------------------------------------------------------
+// Manual playback: hipHostRegister / hipHostUnregister
+// ---------------------------------------------------------------------------
+// hipHostRegister recorded a snapshot of the host memory as a blob.
+// At replay we allocate a fresh host buffer (malloc), restore the blob
+// into it, call hipHostRegister on it, and track the (recorded -> live)
+// mapping so kernel-arg pointer translations work.
+// hipHostUnregister unregisters, frees the backing buffer, and removes the entry.
+
+hipError_t playback_hipHostRegister(PlaybackContext& ctx, const uint8_t* pl) {
+    const auto* a = reinterpret_cast<const hrr_args_hipHostRegister*>(pl);
+    size_t sz = static_cast<size_t>(a->sizeBytes);
+    if (sz == 0) return hipSuccess;
+
+    // Allocate backing host buffer aligned to 64 bytes (page-register friendly).
+    void* buf = nullptr;
+#ifdef _WIN32
+    buf = _aligned_malloc(sz, 64);
+#else
+    if (posix_memalign(&buf, 64, sz) != 0) buf = nullptr;
+#endif
+    if (!buf) return hipErrorMemoryAllocation;
+
+    // Restore snapshot into the buffer.
+    if (a->blob_hash_lo || a->blob_hash_hi) {
+        size_t blob_sz = 0;
+        const void* blob = ctx.load_blob(a->blob_hash_lo, a->blob_hash_hi, &blob_sz);
+        if (blob && blob_sz == sz)
+            std::memcpy(buf, blob, sz);
+        else
+            std::memset(buf, 0, sz);
+    } else {
+        std::memset(buf, 0, sz);
+    }
+
+    hipError_t r = hipHostRegister(buf, sz, a->flags);
+    if (r == hipSuccess) {
+        ctx.record_alloc(a->hostPtr, buf, sz);
+        std::unique_lock lk(ctx.map_mutex);
+        ctx.host_reg_bufs[a->hostPtr] = buf;
+    } else {
+#ifdef _WIN32
+        _aligned_free(buf);
+#else
+        free(buf);
+#endif
+    }
+    return r;
+}
+
+hipError_t playback_hipHostUnregister(PlaybackContext& ctx, const uint8_t* pl) {
+    const auto* a = reinterpret_cast<const hrr_args_hipHostUnregister*>(pl);
+    void* live = ctx.translate_ptr(a->hostPtr);
+    if (!live) return hipSuccess;
+
+    hipError_t r = hipHostUnregister(live);
+    if (r == hipSuccess) {
+        ctx.remove_alloc(a->hostPtr);
+        void* buf = nullptr;
+        {
+            std::unique_lock lk(ctx.map_mutex);
+            auto it = ctx.host_reg_bufs.find(a->hostPtr);
+            if (it != ctx.host_reg_bufs.end()) {
+                buf = it->second;
+                ctx.host_reg_bufs.erase(it);
+            }
+        }
+#ifdef _WIN32
+        _aligned_free(buf);
+#else
+        free(buf);
+#endif
+    }
     return r;
 }
 
@@ -558,59 +663,36 @@ hipError_t playback_hipMallocFromPoolAsync(PlaybackContext& ctx,
 // hipFree:       ret(4) ptr(8)
 // hipFreeAsync:  ret(4) dev_ptr(8) stream(8)
 
-hipError_t playback_hipFree(PlaybackContext& ctx, const uint8_t* pl, size_t pl_len) {
-    if (pl_len < 12) return hipErrorInvalidValue;
-    uint64_t rec_ptr = rd64(pl, 4);
-    void* live = ctx.translate_ptr(rec_ptr);
-    if (!live) return hipSuccess;  // already freed or not tracked
+hipError_t playback_hipFree(PlaybackContext& ctx, const uint8_t* pl) {
+    const auto* a = reinterpret_cast<const hrr_args_hipFree*>(pl);
+    void* live = ctx.translate_ptr(a->ptr);
+    if (!live) return hipSuccess;
     hipError_t r = hipFree(live);
-    if (r == hipSuccess) ctx.remove_alloc(rec_ptr);
+    if (r == hipSuccess) ctx.remove_alloc(a->ptr);
     return r;
 }
 
-hipError_t playback_hipFreeAsync(PlaybackContext& ctx, const uint8_t* pl, size_t pl_len) {
-    if (pl_len < 20) return hipErrorInvalidValue;
-    uint64_t rec_ptr    = rd64(pl,  4);
-    uint64_t stream_rec = rd64(pl, 12);
-    void*       live   = ctx.translate_ptr(rec_ptr);
-    hipStream_t stream = ctx.translate_stream(stream_rec);
+hipError_t playback_hipFreeAsync(PlaybackContext& ctx, const uint8_t* pl) {
+    const auto* a  = reinterpret_cast<const hrr_args_hipFreeAsync*>(pl);
+    void*       live   = ctx.translate_ptr(a->dev_ptr);
+    hipStream_t stream = ctx.translate_stream(a->stream);
     if (!live) return hipSuccess;
     hipError_t r = hipFreeAsync(live, stream);
-    if (r == hipSuccess) ctx.remove_alloc(rec_ptr);
+    if (r == hipSuccess) ctx.remove_alloc(a->dev_ptr);
     return r;
 }
 
 // ---------------------------------------------------------------------------
 // Manual playback: hipMemcpy / hipMemcpyAsync / hipMemcpyHtoD / hipMemcpyHtoDAsync
 // ---------------------------------------------------------------------------
-// hipMemcpy:        ret(4) dst(8) src(8) sizeBytes(8) kind(4) hash_lo(8) hash_hi(8)
-// hipMemcpyAsync:   ret(4) dst(8) src(8) sizeBytes(8) kind(4) stream(8) hash_lo(8) hash_hi(8)
-// hipMemcpyHtoD:    ret(4) dst(8) src(8) sizeBytes(8) hash_lo(8) hash_hi(8)
-// hipMemcpyHtoDAsync: ret(4) dst(8) src(8) sizeBytes(8) stream(8) hash_lo(8) hash_hi(8)
 
-static hipError_t replay_memcpy(PlaybackContext& ctx,
-                                const uint8_t* pl, size_t pl_len,
-                                bool is_htod_explicit,
-                                bool is_async, bool has_kind) {
-    // Minimum layout depends on variant
-    size_t expected = 4 + 8 + 8 + 8 + (has_kind ? 4 : 0) + (is_async ? 8 : 0) + 8 + 8;
-    if (pl_len < expected) return hipErrorInvalidValue;
-
-    size_t off = 4;
-    uint64_t dst_rec  = rd64(pl, off);  off += 8;
-    uint64_t src_rec  = rd64(pl, off);  off += 8;
-    uint64_t size     = rd64(pl, off);  off += 8;
-    int32_t  kind     = is_htod_explicit ? 1 /* hipMemcpyHostToDevice */
-                                         : rdi32(pl, off);
-    if (has_kind) off += 4;
-    uint64_t stream_rec = 0;
-    if (is_async) { stream_rec = rd64(pl, off); off += 8; }
-    uint64_t hash_lo = rd64(pl, off); off += 8;
-    uint64_t hash_hi = rd64(pl, off);
-
-    hipStream_t stream = ctx.translate_stream(stream_rec);
-    void*       dst    = ctx.translate_ptr(dst_rec);
-    hipError_t  r      = hipSuccess;
+static hipError_t replay_memcpy_impl(PlaybackContext& ctx,
+                                     uint64_t dst_rec, uint64_t src_rec,
+                                     uint64_t size, int32_t kind,
+                                     hipStream_t stream,
+                                     uint64_t hash_lo, uint64_t hash_hi) {
+    void*      dst = ctx.translate_ptr(dst_rec);
+    hipError_t r   = hipSuccess;
 
     if (kind == hipMemcpyHostToDevice && (hash_lo || hash_hi)) {
         size_t blob_sz = 0;
@@ -656,6 +738,9 @@ static hipError_t replay_memcpy(PlaybackContext& ctx,
             } else {
                 copy_sz = std::min(copy_sz, blob_sz);
                 std::vector<uint8_t> actual(copy_sz);
+                // Sync the stream so all preceding GPU work (kernels, D2D copies) has
+                // completed before reading back the device buffer for comparison.
+                if (stream) hipStreamSynchronize(stream);
                 r = hipMemcpy(actual.data(), src_dev, copy_sz, hipMemcpyDeviceToHost);
                 if (r != hipSuccess) {
                     fprintf(stderr, "[HRR] D2H validate: hipMemcpy failed: %d (%s)\n",
@@ -686,27 +771,35 @@ static hipError_t replay_memcpy(PlaybackContext& ctx,
 }
 
 hipError_t playback_hipMemcpy(PlaybackContext& ctx,
-                              const uint8_t* pl, size_t pl_len) {
-    return replay_memcpy(ctx, pl, pl_len,
-                         /*is_htod_explicit=*/false, /*is_async=*/false, /*has_kind=*/true);
+                              const uint8_t* pl) {
+    const auto* a = reinterpret_cast<const hrr_args_hipMemcpy*>(pl);
+    return replay_memcpy_impl(ctx, a->dst, a->src, a->sizeBytes, a->kind,
+                              nullptr, a->blob_hash_lo, a->blob_hash_hi);
 }
 
 hipError_t playback_hipMemcpyAsync(PlaybackContext& ctx,
-                                   const uint8_t* pl, size_t pl_len) {
-    return replay_memcpy(ctx, pl, pl_len,
-                         /*is_htod_explicit=*/false, /*is_async=*/true, /*has_kind=*/true);
+                                   const uint8_t* pl) {
+    const auto* a = reinterpret_cast<const hrr_args_hipMemcpyAsync*>(pl);
+    return replay_memcpy_impl(ctx, a->dst, a->src, a->sizeBytes, a->kind,
+                              ctx.translate_stream(a->stream),
+                              a->blob_hash_lo, a->blob_hash_hi);
 }
 
 hipError_t playback_hipMemcpyHtoD(PlaybackContext& ctx,
-                                  const uint8_t* pl, size_t pl_len) {
-    return replay_memcpy(ctx, pl, pl_len,
-                         /*is_htod_explicit=*/true, /*is_async=*/false, /*has_kind=*/false);
+                                  const uint8_t* pl) {
+    const auto* a = reinterpret_cast<const hrr_args_hipMemcpyHtoD*>(pl);
+    return replay_memcpy_impl(ctx, a->dst, a->src, a->sizeBytes,
+                              hipMemcpyHostToDevice, nullptr,
+                              a->blob_hash_lo, a->blob_hash_hi);
 }
 
 hipError_t playback_hipMemcpyHtoDAsync(PlaybackContext& ctx,
-                                       const uint8_t* pl, size_t pl_len) {
-    return replay_memcpy(ctx, pl, pl_len,
-                         /*is_htod_explicit=*/true, /*is_async=*/true, /*has_kind=*/false);
+                                       const uint8_t* pl) {
+    const auto* a = reinterpret_cast<const hrr_args_hipMemcpyHtoDAsync*>(pl);
+    return replay_memcpy_impl(ctx, a->dst, a->src, a->sizeBytes,
+                              hipMemcpyHostToDevice,
+                              ctx.translate_stream(a->stream),
+                              a->blob_hash_lo, a->blob_hash_hi);
 }
 
 // ---------------------------------------------------------------------------
@@ -718,51 +811,44 @@ hipError_t playback_hipMemcpyHtoDAsync(PlaybackContext& ctx,
 // hipStreamDestroy:             ret(4) stream(8)
 
 hipError_t playback_hipStreamCreate(PlaybackContext& ctx,
-                                    const uint8_t* pl, size_t pl_len) {
-    if (pl_len < 12) return hipErrorInvalidValue;
-    uint64_t rec = rd64(pl, 4);
+                                    const uint8_t* pl) {
+    const auto* a = reinterpret_cast<const hrr_args_hipStreamCreate*>(pl);
     hipStream_t s = nullptr;
     hipError_t r = hipStreamCreate(&s);
-    if (r == hipSuccess) ctx.record_stream(rec, s);
+    if (r == hipSuccess) ctx.record_stream(a->stream, s);
     return r;
 }
 
 hipError_t playback_hipStreamCreateWithFlags(PlaybackContext& ctx,
-                                             const uint8_t* pl, size_t pl_len) {
-    if (pl_len < 16) return hipErrorInvalidValue;
-    uint64_t rec   = rd64(pl, 4);
-    uint32_t flags = rd32(pl, 12);
-    hipStream_t s  = nullptr;
-    hipError_t r   = hipStreamCreateWithFlags(&s, flags);
+                                             const uint8_t* pl) {
+    const auto* a = reinterpret_cast<const hrr_args_hipStreamCreateWithFlags*>(pl);
+    hipStream_t s = nullptr;
+    hipError_t r  = hipStreamCreateWithFlags(&s, a->flags);
     if (r == hipSuccess) {
-        ctx.record_stream(rec, s);
+        ctx.record_stream(a->stream, s);
         if (ctx.verbose)
             fprintf(stderr, "[HRR] StreamCreateWithFlags: rec=0x%llx -> live=%p\n",
-                    (unsigned long long)rec, (void*)s);
+                    (unsigned long long)a->stream, (void*)s);
     }
     return r;
 }
 
 hipError_t playback_hipStreamCreateWithPriority(PlaybackContext& ctx,
-                                                const uint8_t* pl, size_t pl_len) {
-    if (pl_len < 20) return hipErrorInvalidValue;
-    uint64_t rec    = rd64(pl,  4);
-    uint32_t flags  = rd32(pl, 12);
-    int32_t  pri    = rdi32(pl, 16);
-    hipStream_t s   = nullptr;
-    hipError_t  r   = hipStreamCreateWithPriority(&s, flags, pri);
-    if (r == hipSuccess) ctx.record_stream(rec, s);
+                                                const uint8_t* pl) {
+    const auto* a = reinterpret_cast<const hrr_args_hipStreamCreateWithPriority*>(pl);
+    hipStream_t s = nullptr;
+    hipError_t  r = hipStreamCreateWithPriority(&s, a->flags, a->priority);
+    if (r == hipSuccess) ctx.record_stream(a->stream, s);
     return r;
 }
 
 hipError_t playback_hipStreamDestroy(PlaybackContext& ctx,
-                                     const uint8_t* pl, size_t pl_len) {
-    if (pl_len < 12) return hipErrorInvalidValue;
-    uint64_t rec       = rd64(pl, 4);
-    hipStream_t stream = ctx.translate_stream(rec);
+                                     const uint8_t* pl) {
+    const auto* a  = reinterpret_cast<const hrr_args_hipStreamDestroy*>(pl);
+    hipStream_t stream = ctx.translate_stream(a->stream);
     hipError_t r = hipSuccess;
     if (stream) r = hipStreamDestroy(stream);
-    ctx.remove_stream(rec);
+    ctx.remove_stream(a->stream);
     return r;
 }
 
@@ -784,29 +870,25 @@ hipError_t playback_hipStreamDestroy(PlaybackContext& ctx,
 // hrr_args_hipStreamBeginCapture payload (after 32-byte EventHeader):
 //   ret(4) stream(8) mode(4)
 hipError_t playback_hipStreamBeginCapture(PlaybackContext& ctx,
-                                          const uint8_t* payload, size_t pl_len) {
-    if (pl_len < 16) return hipSuccess;
-    int32_t  recorded_ret  = (int32_t)rd32(payload,  0);
-    uint64_t recorded_strm = rd64(payload,  4);
-    int32_t  recorded_mode = (int32_t)rd32(payload, 12);
+                                          const uint8_t* payload) {
+    const auto* a = reinterpret_cast<const hrr_args_hipStreamBeginCapture*>(payload);
+    if (a->ret != hipSuccess) return hipSuccess;  // original failed — skip
 
-    if (recorded_ret != hipSuccess) return hipSuccess;  // original failed — skip
-
-    hipStream_t stream = ctx.translate_stream(recorded_strm);
-    if (!stream && recorded_strm != 0) {
+    hipStream_t stream = ctx.translate_stream(a->stream);
+    if (!stream && a->stream != 0) {
         // Stream handle not in map — create a temporary stream for graph capture
         fprintf(stderr, "[HRR] hipStreamBeginCapture: stream 0x%llx not found, "
                 "creating temp stream for graph capture\n",
-                (unsigned long long)recorded_strm);
+                (unsigned long long)a->stream);
         hipError_t cr = hipStreamCreate(&stream);
         if (cr != hipSuccess) {
             fprintf(stderr, "[HRR] hipStreamBeginCapture: failed to create temp stream: %d\n", cr);
             return hipSuccess;  // non-fatal
         }
-        ctx.record_stream(recorded_strm, stream);
+        ctx.record_stream(a->stream, stream);
     }
 
-    hipStreamCaptureMode mode = (hipStreamCaptureMode)recorded_mode;
+    hipStreamCaptureMode mode = (hipStreamCaptureMode)a->mode;
     hipError_t r = hipStreamBeginCapture(stream, mode);
     if (r != hipSuccess && mode != hipStreamCaptureModeGlobal) {
         // ThreadLocal may fail in replay context — try Global
@@ -821,30 +903,24 @@ hipError_t playback_hipStreamBeginCapture(PlaybackContext& ctx,
 }
 
 hipError_t playback_hipStreamEndCapture(PlaybackContext& ctx,
-                                        const uint8_t* payload, size_t pl_len) {
-    // Payload layout (after 32-byte EventHeader):
-    //   ret(4) stream(8) pGraph(8)
-    if (pl_len < 20) return hipSuccess;
-    int32_t  rec_ret   = (int32_t)rd32(payload,  0);
-    uint64_t rec_strm  = rd64(payload,  4);
-    uint64_t rec_pgraph = rd64(payload, 12);
+                                        const uint8_t* payload) {
+    const auto* a = reinterpret_cast<const hrr_args_hipStreamEndCapture*>(payload);
+    if (a->ret != hipSuccess) return hipSuccess;  // original call failed — skip
 
-    if (rec_ret != hipSuccess) return hipSuccess;  // original call failed — skip
-
-    hipStream_t stream = ctx.translate_stream(rec_strm);
+    hipStream_t stream = ctx.translate_stream(a->stream);
     if (!stream) {
         fprintf(stderr, "[HRR] hipStreamEndCapture: stream 0x%llx not found in map\n",
-                (unsigned long long)rec_strm);
+                (unsigned long long)a->stream);
         return hipSuccess;  // non-fatal
     }
     ctx.in_graph_capture = false;
     hipGraph_t live_graph = nullptr;
     hipError_t r = hipStreamEndCapture(stream, &live_graph);
     if (r == hipSuccess && live_graph) {
-        ctx.record_graph(rec_pgraph, live_graph);
+        ctx.record_graph(a->pGraph, live_graph);
         if (ctx.verbose)
             fprintf(stderr, "[HRR] hipStreamEndCapture: recorded graph 0x%llx\n",
-                    (unsigned long long)rec_pgraph);
+                    (unsigned long long)a->pGraph);
     } else {
         fprintf(stderr, "[HRR] hipStreamEndCapture failed: %d (%s)\n",
                 r, hipGetErrorString(r));
@@ -853,20 +929,14 @@ hipError_t playback_hipStreamEndCapture(PlaybackContext& ctx,
 }
 
 hipError_t playback_hipGraphInstantiate(PlaybackContext& ctx,
-                                        const uint8_t* payload, size_t pl_len) {
-    // Payload layout (after 32-byte EventHeader):
-    //   ret(4) pGraphExec(8) graph(8) pErrorNode(8) pLogBuffer(8) bufferSize(8)
-    if (pl_len < 20) return hipSuccess;
-    int32_t  rec_ret   = (int32_t)rd32(payload,  0);
-    uint64_t rec_pexec = rd64(payload,  4);
-    uint64_t rec_graph = rd64(payload, 12);
+                                        const uint8_t* payload) {
+    const auto* a = reinterpret_cast<const hrr_args_hipGraphInstantiate*>(payload);
+    if (a->ret != hipSuccess) return hipSuccess;  // original call failed — skip
 
-    if (rec_ret != hipSuccess) return hipSuccess;  // original call failed — skip
-
-    hipGraph_t graph = ctx.translate_graph(rec_graph);
+    hipGraph_t graph = ctx.translate_graph(a->graph);
     if (!graph) {
         fprintf(stderr, "[HRR] hipGraphInstantiate: graph 0x%llx not found in map\n",
-                (unsigned long long)rec_graph);
+                (unsigned long long)a->graph);
         return hipSuccess;  // non-fatal — launches will be skipped
     }
 
@@ -874,10 +944,10 @@ hipError_t playback_hipGraphInstantiate(PlaybackContext& ctx,
     // Use the simplified WithFlags variant; pErrorNode/pLogBuffer are optional at replay
     hipError_t r = hipGraphInstantiateWithFlags(&exec, graph, 0);
     if (r == hipSuccess && exec) {
-        ctx.record_graph_exec(rec_pexec, exec);
+        ctx.record_graph_exec(a->pGraphExec, exec);
         if (ctx.verbose)
             fprintf(stderr, "[HRR] hipGraphInstantiate: recorded exec 0x%llx\n",
-                    (unsigned long long)rec_pexec);
+                    (unsigned long long)a->pGraphExec);
     } else {
         fprintf(stderr, "[HRR] hipGraphInstantiate (via WithFlags) failed: %d (%s)\n",
                 r, hipGetErrorString(r));
@@ -891,23 +961,19 @@ hipError_t playback_hipGraphInstantiate(PlaybackContext& ctx,
 // Payload layout (after 32-byte EventHeader):
 //   ret(4) graphExec(8) stream(8)
 hipError_t playback_hipGraphLaunch(PlaybackContext& ctx,
-                                   const uint8_t* payload, size_t pl_len) {
-    if (pl_len < 20) return hipSuccess;
-    int32_t  rec_ret    = (int32_t)rd32(payload,  0);
-    uint64_t rec_exec   = rd64(payload,  4);
-    uint64_t rec_strm   = rd64(payload, 12);
+                                   const uint8_t* payload) {
+    const auto* a = reinterpret_cast<const hrr_args_hipGraphLaunch*>(payload);
+    if (a->ret != hipSuccess) return hipSuccess;  // original call failed — skip
 
-    if (rec_ret != hipSuccess) return hipSuccess;  // original call failed — skip
-
-    hipGraphExec_t exec = ctx.translate_graph_exec(rec_exec);
+    hipGraphExec_t exec = ctx.translate_graph_exec(a->graphExec);
     if (!exec) {
         if (ctx.verbose)
             fprintf(stderr, "[HRR] hipGraphLaunch: graphExec 0x%llx not found in map\n",
-                    (unsigned long long)rec_exec);
+                    (unsigned long long)a->graphExec);
         return hipSuccess;  // non-fatal — exec not yet created
     }
 
-    hipStream_t stream = ctx.translate_stream(rec_strm);
+    hipStream_t stream = ctx.translate_stream(a->stream);
 
     thread_local hipEvent_t tl_g_start = nullptr;
     thread_local hipEvent_t tl_g_stop  = nullptr;
@@ -934,7 +1000,7 @@ hipError_t playback_hipGraphLaunch(PlaybackContext& ctx,
     if (r != hipSuccess) {
         fprintf(stderr, "[HRR] hipGraphLaunch failed: %d (%s) exec=0x%llx stream=0x%llx\n",
                 r, hipGetErrorString(r),
-                (unsigned long long)rec_exec, (unsigned long long)rec_strm);
+                (unsigned long long)a->graphExec, (unsigned long long)a->stream);
         return r;
     }
 
@@ -952,7 +1018,7 @@ hipError_t playback_hipGraphLaunch(PlaybackContext& ctx,
 
     if (ctx.verbose)
         fprintf(stderr, "[HRR] hipGraphLaunch: exec 0x%llx on stream 0x%llx -> OK\n",
-                (unsigned long long)rec_exec, (unsigned long long)rec_strm);
+                (unsigned long long)a->graphExec, (unsigned long long)a->stream);
     return r;
 }
 
@@ -964,33 +1030,29 @@ hipError_t playback_hipGraphLaunch(PlaybackContext& ctx,
 // hipEventDestroy:           ret(4) event(8)
 
 hipError_t playback_hipEventCreate(PlaybackContext& ctx,
-                                   const uint8_t* pl, size_t pl_len) {
-    if (pl_len < 12) return hipErrorInvalidValue;
-    uint64_t rec = rd64(pl, 4);
+                                   const uint8_t* pl) {
+    const auto* a = reinterpret_cast<const hrr_args_hipEventCreate*>(pl);
     hipEvent_t e = nullptr;
     hipError_t r = hipEventCreate(&e);
-    if (r == hipSuccess) ctx.record_event(rec, e);
+    if (r == hipSuccess) ctx.record_event(a->event, e);
     return r;
 }
 
 hipError_t playback_hipEventCreateWithFlags(PlaybackContext& ctx,
-                                            const uint8_t* pl, size_t pl_len) {
-    if (pl_len < 16) return hipErrorInvalidValue;
-    uint64_t rec   = rd64(pl, 4);
-    uint32_t flags = rd32(pl, 12);
-    hipEvent_t e   = nullptr;
-    hipError_t r   = hipEventCreateWithFlags(&e, flags);
-    if (r == hipSuccess) ctx.record_event(rec, e);
+                                            const uint8_t* pl) {
+    const auto* a = reinterpret_cast<const hrr_args_hipEventCreateWithFlags*>(pl);
+    hipEvent_t e  = nullptr;
+    hipError_t r  = hipEventCreateWithFlags(&e, a->flags);
+    if (r == hipSuccess) ctx.record_event(a->event, e);
     return r;
 }
 
 hipError_t playback_hipEventDestroy(PlaybackContext& ctx,
-                                    const uint8_t* pl, size_t pl_len) {
-    if (pl_len < 12) return hipErrorInvalidValue;
-    uint64_t rec     = rd64(pl, 4);
-    hipEvent_t event = ctx.translate_event(rec);
+                                    const uint8_t* pl) {
+    const auto* a  = reinterpret_cast<const hrr_args_hipEventDestroy*>(pl);
+    hipEvent_t event = ctx.translate_event(a->event);
     hipError_t r = hipSuccess;
     if (event) r = hipEventDestroy(event);
-    ctx.remove_event(rec);
+    ctx.remove_event(a->event);
     return r;
 }

@@ -2882,31 +2882,7 @@ static hipError_t capture_hipHostMalloc(void** ptr, size_t size, unsigned int fl
   return r;
 }
 
-// Generated shim
-static hipError_t capture_hipHostRegister(void* hostPtr, size_t sizeBytes, unsigned int flags) {
-  hipError_t r = g_real_table.hipHostRegister_fn(hostPtr, sizeBytes, flags);
-  if (r == hipSuccess) {
-    hrr_args_hipHostRegister a{};
-    a.ret         = static_cast<int32_t>(r);
-    a.hostPtr = reinterpret_cast<uint64_t>(hostPtr);
-    a.sizeBytes = static_cast<decltype(a.sizeBytes)>(sizeBytes);
-    a.flags = static_cast<decltype(a.flags)>(flags);
-    hrr_cap::writer::write_event_raw(HRR_API_HIPHOSTREGISTER, &a.hdr, sizeof(a));
-  }
-  return r;
-}
 
-// Generated shim
-static hipError_t capture_hipHostUnregister(void* hostPtr) {
-  hipError_t r = g_real_table.hipHostUnregister_fn(hostPtr);
-  if (r == hipSuccess) {
-    hrr_args_hipHostUnregister a{};
-    a.ret         = static_cast<int32_t>(r);
-    a.hostPtr = reinterpret_cast<uint64_t>(hostPtr);
-    hrr_cap::writer::write_event_raw(HRR_API_HIPHOSTUNREGISTER, &a.hdr, sizeof(a));
-  }
-  return r;
-}
 
 // Generated shim
 static hipError_t capture_hipImportExternalMemory(hipExternalMemory_t* extMem_out, const hipExternalMemoryHandleDesc* memHandleDesc) {
@@ -7396,6 +7372,8 @@ static hipError_t capture_hipMipmappedArrayGetMemoryRequirements(hipArrayMemoryR
 // ============================================================
 
 // Forward declarations for hand-written shims (non-static in hip_capture.cpp)
+extern hipError_t capture_hipHostRegister(void* hostPtr, size_t sizeBytes, unsigned int flags);
+extern hipError_t capture_hipHostUnregister(void* hostPtr);
 extern hipError_t capture_hipLaunchByPtr(const void* func);
 extern hipError_t capture_hipLaunchKernel(const void* function_address, dim3 numBlocks, dim3 dimBlocks, void** args, size_t sharedMemBytes, hipStream_t stream);
 extern hipError_t capture_hipMemcpy(void* dst, const void* src, size_t sizeBytes, hipMemcpyKind kind);
