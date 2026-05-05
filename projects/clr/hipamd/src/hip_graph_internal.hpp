@@ -2561,7 +2561,7 @@ class GraphMemsetNode : public GraphNode {
         }
       } else {
         // 2D - hipGraphMemsetNodeSetParams returns invalid value if new width or new height is
-        // greter than actual allocation. userData extents are only populated for hipMallocPitch /
+        // greater than actual allocation. userData extents are only populated for hipMallocPitch /
         // hipMalloc3D; for plain hipMalloc (and similar flat allocators) they are 0, in which case
         // the size-based check in ihipMemset3D_validate below is authoritative.
         size_t discardOffset = 0;
