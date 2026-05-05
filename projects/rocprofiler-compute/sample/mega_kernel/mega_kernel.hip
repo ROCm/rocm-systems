@@ -33,7 +33,7 @@
  * - Strix / Strix Halo / Krackan (RDNA 3.5, gfx1150 / gfx1151 / gfx1152) - Navi3-based
  * APU iGPU:
  *   - Wave32 native, WMMA (FP16/BF16/INT8), VOPD same-wave dual-issue VALU
- *   - FP8/BF8 support; scalar FP in scalar unit; s_singleuse_vdst hint
+ *   - No CDNA-style FP8/BF8 cvt builtins; scalar FP in scalar unit; s_singleuse_vdst hint
  *
  * - RDNA4 Consumer (gfx1200/gfx1201 - RX 9070 XT):
  *   - FP8/BF8 OCP format conversions
@@ -287,11 +287,11 @@ struct TestResults
     int lane_id_passed;
     int wavefront_passed;
 
-    // Async LDS operations ( specific)
+    // Async LDS operations (MI350/RDNA4 where builtins exist)
     int async_lds_load_passed;
     int async_lds_store_passed;
 
-    // WMMA (Wave Matrix Multiply Accumulate) operations (RDNA4/ specific)
+    // WMMA (Wave Matrix Multiply Accumulate) operations (RDNA4 / RDNA 3.5 gfx115x)
     int wmma_f16_passed;   // FP16 → FP32 WMMA
     int wmma_bf16_passed;  // BF16 → FP32 WMMA
     int wmma_i8_passed;    // INT8 → INT32 WMMA
@@ -435,7 +435,7 @@ test_warp_reduce(TestResults* results, int lane_id)
 }
 
 // ============================================================================
-// Section 2: FP8/BF8 Conversion Operations ( specific)
+// Section 2: FP8/BF8 Conversion Operations (CDNA / RDNA4; RDNA 3.5 gfx115x bypassed)
 // ============================================================================
 
 __device__ void
@@ -1058,7 +1058,7 @@ test_atomic_operations_asm([[maybe_unused]] int*         global_int_ptr,
     }
 
 #elif 0  // defined() placeholder for future architecture
-    //  (): Has FP64 atomics
+    // Future arch: FP64 atomics via global_atomic_add_f64
     {
         double old_val = 0.0;
         double add_val = 1.0;
@@ -1864,14 +1864,14 @@ test_dot_products(TestResults* results, int lane_id)
     // - V_DOT8_U32_U4: 8-element unsigned INT4 dot product
     // - V_DOT8_I32_I4: 8-element signed INT4 dot product
     //
-    //  () uses different opcode names:
+    // RDNA4 and RDNA 3.5 APUs use different opcode names:
     // - V_DOT4_U32_U8 -> V_DOT4_U32_IU8
     // - V_DOT4_I32_I8 -> V_DOT4_I32_IU8
     // - V_DOT8_U32_U4 -> V_DOT8_U32_IU4
     // - V_DOT8_I32_I4 -> V_DOT8_I32_IU4
 
 #if 0  // defined() placeholder for future architecture
-    //  (): Use new IU suffix opcodes
+    // Future arch: use new IU suffix opcodes
     unsigned int a = 0x01020304;  // [1, 2, 3, 4] packed as 4 unsigned bytes
     unsigned int b = 0x01010101;  // [1, 1, 1, 1] packed as 4 unsigned bytes
     
@@ -2384,13 +2384,13 @@ test_mfma_operations([[maybe_unused]] TestResults* results, [[maybe_unused]] int
 //
 // TWO TYPES OF DUAL-ISSUE:
 // ------------------------
-// 1. SAME-WAVE CO-ISSUE (VOPD/VOPD3) - MI300 (gfx942), MI350 (gfx950),  ():
+// 1. SAME-WAVE CO-ISSUE (VOPD/VOPD3) - MI300 (gfx942), MI350 (gfx950), RDNA4 (gfx120x), RDNA 3.5 (gfx115x):
 //    - Single instruction encodes two VALU operations (X and Y opcodes)
 //    - X opcode executes on Core MACC, Y opcode executes on Side MACC
 //    - Example: VOPD encoding packs v_add_f32 + v_mul_f32 in one instruction
 //    - VOPD3 extends this with 3 source operands per instruction
 //
-// 2. CROSS-WAVE CO-ISSUE - MI350 (gfx950),  () ONLY:
+// 2. CROSS-WAVE CO-ISSUE - MI350 (gfx950) ONLY:
 //    - Two waves each contribute one VALU instruction
 //    - Instructions execute simultaneously on different MACC units
 //    - One instruction uses DP-MACC (Arbiter-B), other uses Core/Side-MACC (Arbiter-A)
@@ -2578,7 +2578,7 @@ test_dual_issue_patterns([[maybe_unused]] TestResults* results,
 
     if(lane_id == 0)
     {
-#if defined(__gfx950__) || defined(__gfx942__)  // gfx950/: Cross-wave dual-issue VALU
+#if defined(__gfx950__) || defined(__gfx942__)  // gfx950: Cross-wave dual-issue VALU
         // gfx942: Same-wave dual-issue via VOPD/VOPD3
         // Both support some form of dual-issue - mark as passed
         atomicAdd(&results->dual_issue_passed, 1);
@@ -2712,14 +2712,14 @@ test_packed_operations(TestResults* results, int lane_id)
 }
 
 // ============================================================================
-// Section 13: Async LDS Operations (MI350/ specific - global_load/store_async)
+// Section 13: Async LDS Operations (MI350/RDNA4 specific - global_load/store_async)
 // ============================================================================
 //
 // Async LDS Support by Architecture:
 // - MI250 (gfx90a): NO async LDS support
 // - MI300 (gfx942): LIMITED async LDS support (may not have all builtins)
 // - MI350 (gfx950): FULL async LDS support (global_load/store_async_to/from_lds)
-// - RDNA4 (): FULL async LDS support + DS atomic async barriers
+// - RDNA4: FULL async LDS support + DS atomic async barriers
 //
 // -SPECIFIC DS ATOMIC BARRIER BUILTINS:
 // --------------------------------------------
@@ -2749,7 +2749,7 @@ test_async_lds_operations([[maybe_unused]] float* global_src, float* global_dst,
     bool passed = true;
 
 #if __has_builtin(__builtin_amdgcn_global_load_async_to_lds_b32)
-    // MI350 (gfx950) / RDNA4 (): Full async LDS load/store support
+    // MI350 (gfx950) / RDNA4: Full async LDS load/store support
     // global_load_async_to_lds_b8/b32/b64/b128: Load from global to LDS asynchronously
     // global_store_async_from_lds_b8/b32/b64/b128: Store from LDS to global
     // asynchronously
@@ -2875,7 +2875,7 @@ test_async_lds_operations([[maybe_unused]] float* global_src, float* global_dst,
 }
 
 // ============================================================================
-// Section 15.5: WMMA (Wave Matrix Multiply Accumulate) Operations (RDNA4/)
+// Section 15.5: WMMA (Wave Matrix Multiply Accumulate) Operations (RDNA4 / RDNA 3.5)
 // ============================================================================
 //
 // WMMA INSTRUCTIONS - RDNA4 Matrix Cores:
@@ -2897,15 +2897,15 @@ test_async_lds_operations([[maybe_unused]] float* global_src, float* global_dst,
 // ----------------------
 // GFX12 (gfx1200/gfx1201/gfx1150/gfx1151): __builtin_amdgcn_wmma_*_16x16x16_*_w32_gfx12
 // (3-arg)
-//  (): __builtin_amdgcn_wmma_* (no _gfx12 suffix; different signatures per
-//  BuiltinsAMDGPU.td)
+// Pre-gfx12 WMMA: __builtin_amdgcn_wmma_* (no _gfx12 suffix; different signatures per
+// BuiltinsAMDGPU.td)
 //
 // Available for gfx12 (RDNA4 / RDNA 3.5): _w32_gfx12 suffix, 3 args (a, b, c)
 // - __builtin_amdgcn_wmma_f32_16x16x16_f16_w32_gfx12  (FP16 → FP32)
 // - __builtin_amdgcn_wmma_f32_16x16x16_bf16_w32_gfx12 (BF16 → FP32)
 // - __builtin_amdgcn_wmma_i32_16x16x16_iu8_w32_gfx12  (INT8 → INT32)
 //
-// Available for  only (no suffix): 8-arg FP16/BF16, 7-arg INT8
+// Available for older WMMA entry points only (no suffix): 8-arg FP16/BF16, 7-arg INT8
 // - __builtin_amdgcn_wmma_f32_16x16x32_f16, __builtin_amdgcn_wmma_f32_16x16x32_bf16
 // - __builtin_amdgcn_wmma_i32_16x16x64_iu8
 //
@@ -3455,7 +3455,7 @@ mega_kernel(
     // 12. Packed Operations
     test_packed_operations(results, lane_id);
 
-    // 13. Async LDS Operations ( specific)
+    // 13. Async LDS Operations (MI350/RDNA4)
     test_async_lds_operations(async_lds_src, async_lds_dst, results, lane_id, tid);
     __syncthreads();
 
@@ -3463,7 +3463,7 @@ mega_kernel(
     test_rdna4_features(results, lane_id);
     __syncthreads();
 
-    // 15. WMMA (Wave Matrix Multiply Accumulate) Operations (RDNA4/)
+    // 15. WMMA (Wave Matrix Multiply Accumulate) Operations (RDNA4 / RDNA 3.5)
     test_wmma_operations(results, lane_id, tid);
     __syncthreads();
 }

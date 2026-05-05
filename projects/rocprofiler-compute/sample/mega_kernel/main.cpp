@@ -262,11 +262,11 @@ struct TestResults
     int lane_id_passed;
     int wavefront_passed;
 
-    // Async LDS operations ( specific)
+    // Async LDS operations (MI350/RDNA4 where builtins exist)
     int async_lds_load_passed;
     int async_lds_store_passed;
 
-    // WMMA (Wave Matrix Multiply Accumulate) operations (RDNA4/ specific)
+    // WMMA (Wave Matrix Multiply Accumulate) operations (RDNA4 / RDNA 3.5 gfx115x)
     int wmma_f16_passed;   // FP16 → FP32 WMMA
     int wmma_bf16_passed;  // BF16 → FP32 WMMA
     int wmma_i8_passed;    // INT8 → INT32 WMMA

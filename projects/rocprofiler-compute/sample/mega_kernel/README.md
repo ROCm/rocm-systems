@@ -19,13 +19,13 @@ A comprehensive unit test kernel that exercises most of the instructions and fea
 | **RX 9070 XT/9070** | RDNA4 | gfx1201 | FP8/BF8 OCP, Async LDS, Wave32, AI accelerators, RT 2.0 |
 | **RX 9060 series** | RDNA4 | gfx1200 | Same as gfx1201 with different CU count |
 
-### RDNA 3.5 (Strix / Strix Halo / Krackan APU iGPU)
+### RDNA 3.5 (APU iGPU)
 
 | GPU Series | Architecture | GFXIP | Key Features |
 |------------|--------------|-------|--------------|
 | **Strix Point** | RDNA 3.5 | gfx1150 | 16 CUs, WMMA, Wave32, Async LDS |
 | **Strix Halo** | RDNA 3.5 | gfx1151 | Up to 40 CUs, WMMA, Wave32, Async LDS |
-| **Krackan** | RDNA 3.5 | gfx1152 | 32MB Infinity Cache, same feature set |
+| **Krackan** | RDNA 3.5 | gfx1152 | 32MB Infinity Cache, same as gfx1150 |
 
 
 ## Feature Compatibility Matrix

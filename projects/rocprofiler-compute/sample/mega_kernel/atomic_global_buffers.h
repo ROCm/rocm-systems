@@ -1,3 +1,4 @@
+// Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 //
 // Sizes and index layout for mega_kernel global atomic scratch buffers.

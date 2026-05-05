@@ -1,3 +1,6 @@
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+#
 # AMD GPU Mega Kernel Unit Test - Makefile
 #
 # Supported GPU Architectures:
@@ -6,7 +9,7 @@
 #   - MI300/MI300X (CDNA3): gfx942  
 #   - MI350/MI355X (CDNA4): gfx950
 #
-#   RDNA 3.5 (Strix / Strix Halo APU):
+#   RDNA 3.5 (APU):
 #   - Strix Point (RDNA 3.5): gfx1150
 #   - Strix Halo  (RDNA 3.5): gfx1151
 #   - Krackan     (RDNA 3.5): gfx1152
@@ -164,10 +167,10 @@ help:
 	@echo "    gfx942  - MI300/MI300X (CDNA3): + FP8/BF8, TF32, Sparse MFMA"
 	@echo "    gfx950  - MI350/MI355X (CDNA4): + FP6/FP4, Async LDS, Dual-Issue"
 	@echo ""
-	@echo "  RDNA 3.5 (Strix/Krackan APU iGPU):"
-	@echo "    gfx1150 - Strix Point: WMMA, FP8/BF8, TEX load/store tests"
+	@echo "  RDNA 3.5 (APU iGPU):"
+	@echo "    gfx1150 - Strix Point: WMMA, TEX load/store tests (no CDNA-style FP8/BF8 cvt)"
 	@echo "    gfx1151 - Strix Halo: same as gfx1150"
-	@echo "    gfx1152 - Krackan: same family"
+	@echo "    gfx1152 - Krackan: same as gfx1150"
 	@echo ""
 	@echo "  RDNA4 (Consumer):"
 	@echo "    gfx1201 - RX 9070 XT/9070: FP8/BF8 OCP, Async LDS, Raytracing"
