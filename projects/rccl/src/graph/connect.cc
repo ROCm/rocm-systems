@@ -15,6 +15,31 @@
 
 #include "rccl_graph_gen.h"
 
+static void permute_array_inplace(int* input, int length, int* permutation) {
+    for (int i = 0; i < length; i++) {
+        int next = i;
+        
+        // While the element at 'next' hasn't been moved into its final spot
+        while (permutation[next] >= 0) {
+            int target_idx = permutation[next];
+            
+            // Swap input[i] with the element belonging at target_idx
+            int temp_val = input[i];
+            input[i] = input[target_idx];
+            input[target_idx] = temp_val;
+            
+            // Mark this part of the permutation as "done" by flipping the sign
+            int temp_next = permutation[next];
+            permutation[next] = -permutation[next] - 1; 
+            next = temp_next;
+        }
+    }
+
+    // Restore the permutation array if you need to reuse it later
+    for (int i = 0; i < length; i++) {
+        permutation[i] = -permutation[i] - 1;
+    }
+}
 
 /******************************************************************/
 /********************* Internode connection ***********************/
@@ -123,11 +148,22 @@ ncclResult_t ncclTopoPreset(struct ncclComm* comm, struct ncclTopoGraph* (&graph
       channel->collnetDirect.down[i] = -1;
     } 
   }
+  int* localRankOrder = nullptr;
+  if ( rcclParamIntraGraphGen() ) {
+     NCCLCHECK(ncclCalloc(&localRankOrder, nChannels * localRanks));
+     NCCLCHECK(generateRings(localRanks, nChannels, localRankOrder));
+     for ( int c = 1; c < nChannels ; c++ ) {
+      memcpy(graphs[NCCL_ALGO_RING]->intra+c*localRanks, graphs[NCCL_ALGO_RING]->intra, localRanks*sizeof(int));
+    }
+  }
 
   for (int c=0; c<nChannels; c++) {
     struct ncclChannel* channel = comm->channels+c;
 
     int* ringIntra = graphs[NCCL_ALGO_RING]->intra+c*localRanks;
+    if ( rcclParamIntraGraphGen() ) {
+      permute_array_inplace(ringIntra,localRanks,localRankOrder+c*localRanks); /* c -> 0*/
+    }
     int* treeIntra = graphs[NCCL_ALGO_TREE]->intra+c*localRanks;
     int* collNetIntra = graphs[NCCL_ALGO_COLLNET_CHAIN]->intra+c*localRanks;
 
@@ -155,6 +191,7 @@ ncclResult_t ncclTopoPreset(struct ncclComm* comm, struct ncclTopoGraph* (&graph
       }
     }
   }
+  free(localRankOrder);
   // Duplicate channels trees
   struct ncclChannel* channel0 = comm->channels;
   struct ncclChannel* channel1 = (nChannels > MAXCHANNELS/2) ? 0 : channel0+nChannels;
@@ -354,13 +391,8 @@ static ncclResult_t connectRingsLoadBalanced(struct ncclComm* comm, int* ringRec
   int* nodeOrder = nullptr;
   NCCLCHECK(ncclCalloc(&nodeOrder, nChannels * nNodes));
 
-  // Note: generateRings needs to handle the flat indexing (c * nNodes + i)
-  if ( nChannels > MAXCHANNELS || nChannels >= 255 ) {
-    WARN(" generateRings is implemented with an assumption nChannels [=%d] < 255 as an optimization. Update the implementaion to accept uint16/32 for nChannels ",nChannels );
-  }
-
   // 2. Populate the Diverse/Greedy Node Order
-  generateRings(nNodes, nChannels, nodeOrder);
+  NCCLCHECK(generateRings(nNodes, nChannels, nodeOrder));
 
   for (int c = 0; c < nChannels; c++) {
     // Correct offsets for global arrays

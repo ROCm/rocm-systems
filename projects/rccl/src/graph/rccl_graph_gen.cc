@@ -30,6 +30,8 @@ THE SOFTWARE.
 #include <string.h>     // For memset()
 #include <limits.h>     // For INT_MAX
 
+RCCL_PARAM(IntraGraphGen, "INTRA_GRAPH_GEN", 0);
+
 static void generateWalecki(int nNodes, int channel, int* order) {
   if (nNodes <= 0 || !order) return;
 
@@ -65,6 +67,10 @@ static void generateWalecki(int nNodes, int channel, int* order) {
 ncclResult_t generateRings(int nNodes, uint8_t nChannels, int* nodeOrder) {
     // --- SAFETY CHECK: Guard against invalid cluster sizes ---
     if (nNodes <= 0 || nChannels <= 0 || nodeOrder == NULL) return ncclInvalidArgument;
+    if ( nChannels >= 255 ) {
+        WARN(" generateRings is implemented with an assumption nChannels [=%d] < 255 as an optimization. Update the implementaion to accept uint16/32 for nChannels ",nChannels );
+        return ncclInvalidArgument;
+    }
     // Handle degenerate cases (N=1, N=2) where Hamiltonian diversity is impossible
     if (nNodes < 3) {
         for (int c = 0; c < nChannels; c++) {

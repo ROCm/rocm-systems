@@ -70,7 +70,6 @@ set(SRC_FILES
   graph/connect.cc
   graph/paths.cc
   graph/rccl_graph_gen.cc
-  graph/rccl_graph_gen.h
   graph/rings.cc
   graph/rings.h
   graph/rome_models.cc
@@ -147,6 +146,7 @@ set(SRC_FILES
   include/register.h
   include/register_inline.h
   include/rccl_float8.h
+  include/rccl_graph_gen.h
   include/rocmwrap.h
   include/roctx.h
   include/recorder.h
