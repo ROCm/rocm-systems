@@ -11,11 +11,14 @@ target_compile_options(aqlprofile-core-tests-flags
 
 set(AQLPROFILE_CORE_TEST_SOURCES
     aql_profile_tests.cpp aql_profile_v2_tests.cpp command_buffer_tests.cpp
-    counter_tests.cpp logger_tests.cpp memorymanager_tests.cpp pm4_factory_tests.cpp)
+    counter_tests.cpp logger_tests.cpp memorymanager_tests.cpp pm4_factory_tests.cpp
+    aql_profile_v2_c_test.c)
 
 add_executable(aqlprofile-core-tests)
 
 target_sources(aqlprofile-core-tests PRIVATE ${AQLPROFILE_CORE_TEST_SOURCES})
+set_target_properties(aqlprofile-core-tests PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED
+                                                                     ON)
 
 target_link_libraries(
     aqlprofile-core-tests

@@ -255,7 +255,7 @@ TEST_F(NetIbMPITest, SimpleSendRecv) {
         PostSingleRecv(pair.recvComm, buffer, bufferSize, tag, mhandle, &request);
     } else {
         // Sender
-        FillHostBuffer(buffer, bufferSize, rank);
+        fillHostBufferWithPattern<uint8_t>(buffer, bufferSize, makeBytePattern(rank));
         PostSendWithRetry(pair.sendComm, buffer, bufferSize, tag, mhandle, &request);
     }
 
@@ -271,7 +271,7 @@ TEST_F(NetIbMPITest, SimpleSendRecv) {
 
         // Verify received data
         int senderRank = 1;  // Data was sent by rank 1
-        EXPECT_TRUE(VerifyHostBuffer(buffer, bufferSize, senderRank)) << "Data validation failed";
+        EXPECT_TRUE(verifyHostBufferData<uint8_t>(buffer, bufferSize, makeBytePattern(senderRank))) << "Data validation failed";
     }
 
     // NetMHandleGuard will automatically deregister memory when test scope ends
@@ -317,7 +317,7 @@ TEST_F(NetIbMPITest, SendRecvMultipleSizes) {
             PostSingleRecv(pair.recvComm, buffer, size, tag, mhandle, &request);
             ASSERT_NE(request, nullptr) << "Recv request should never be NULL";
         } else {
-            FillHostBuffer(buffer, size, seed);
+            fillHostBufferWithPattern<uint8_t>(buffer, size, makeBytePattern(seed));
             PostSendWithRetry(pair.sendComm, buffer, size, tag, mhandle, &request);
         }
 
@@ -335,7 +335,7 @@ TEST_F(NetIbMPITest, SendRecvMultipleSizes) {
 
         if (rank == 0) {
             EXPECT_EQ(sizes[0], size) << "Size mismatch for transfer of " << size << " bytes";
-            EXPECT_TRUE(VerifyHostBuffer(buffer, size, seed)) << "Data validation failed for size " << size;
+            EXPECT_TRUE(verifyHostBufferData<uint8_t>(buffer, size, makeBytePattern(seed))) << "Data validation failed for size " << size;
         }
 
         // NetMHandleGuard will automatically deregister at end of loop iteration
@@ -448,7 +448,7 @@ TEST_F(NetIbMPITest, FlushAfterRecv) {
                           recvHandles, &request), ncclSuccess);
     } else {
         // Sender
-        ASSERT_EQ(InitializeBuffer(buffer, bufferSize, rank), hipSuccess);
+        ASSERT_EQ(initializeBufferWithPattern<uint8_t>(buffer, bufferSize, makeBytePattern(rank)), hipSuccess);
 
         PostSendWithRetry(pair.sendComm, buffer, bufferSize, tag, mhandle, &request);
     }
@@ -546,7 +546,7 @@ TEST_F(NetIbMPITest, MultipleSequentialTransfers) {
             PostSingleRecv(pair.recvComm, recvBuffer, bufferSize, tag, mhandle, &request);
             ASSERT_NE(request, nullptr) << "Recv request should never be NULL";
         } else {
-            FillHostBuffer(sendBuffer, bufferSize, seed);
+            fillHostBufferWithPattern<uint8_t>(sendBuffer, bufferSize, makeBytePattern(seed));
             PostSendWithRetry(pair.sendComm, sendBuffer, bufferSize, tag, mhandle, &request);
         }
 
@@ -565,7 +565,7 @@ TEST_F(NetIbMPITest, MultipleSequentialTransfers) {
         if (rank == 0) {
             EXPECT_EQ(sizes[0], bufferSize) << "Transfer " << i << " size mismatch";
 
-            EXPECT_TRUE(VerifyHostBuffer(recvBuffer, bufferSize, seed)) << "Transfer " << i << " data validation failed (seed=" << seed << ")";
+            EXPECT_TRUE(verifyHostBufferData<uint8_t>(recvBuffer, bufferSize, makeBytePattern(seed))) << "Transfer " << i << " data validation failed (seed=" << seed << ")";
 
             // NOTE: Flush is NOT called for host memory transfers
             // Flush (iflush) is only needed for GPU Direct RDMA to ensure data visibility on GPU.
@@ -610,7 +610,7 @@ TEST_F(NetIbMPITest, LargeTransfer) {
         PostSingleRecv(pair.recvComm, buffer, bufferSize, tag, mhandle, &request);
     } else {
         // Sender
-        FillHostBuffer(buffer, bufferSize, rank);
+        fillHostBufferWithPattern<uint8_t>(buffer, bufferSize, makeBytePattern(rank));
         PostSendWithRetry(pair.sendComm, buffer, bufferSize, tag, mhandle, &request);
     }
 
@@ -626,7 +626,7 @@ TEST_F(NetIbMPITest, LargeTransfer) {
 
         // Verify received data
         int senderRank = 1;  // Data was sent by rank 1
-        EXPECT_TRUE(VerifyHostBuffer(buffer, bufferSize, senderRank)) << "Large transfer data validation failed";
+        EXPECT_TRUE(verifyHostBufferData<uint8_t>(buffer, bufferSize, makeBytePattern(senderRank))) << "Large transfer data validation failed";
     }
 
     // NetMHandleGuard will automatically deregister at scope end
@@ -830,7 +830,7 @@ TEST_F(NetIbMPITest, MultipleSimultaneousListens) {
                   ncclSuccess);
 
         if (rank == 1) {
-            FillHostBuffer(buf, kTransferSize, seed);
+            fillHostBufferWithPattern<uint8_t>(buf, kTransferSize, makeBytePattern(seed));
         } else {
             memset(buf, 0xDE, kTransferSize);
         }
@@ -857,9 +857,8 @@ TEST_F(NetIbMPITest, MultipleSimultaneousListens) {
 
             size_t errIdx = 0;
             uint8_t errExp = 0, errGot = 0;
-            bool ok = RCCLTestHelpers::verifyHostBufferData<uint8_t>(buf, kTransferSize,
-                [seed](size_t j) { return static_cast<uint8_t>((seed + j) % kBytePatternModulo); },
-                0, 0.0, &errIdx, &errExp, &errGot);
+            bool ok = verifyHostBufferData<uint8_t>(buf, kTransferSize,
+                makeBytePattern(seed), 0, 0.0, &errIdx, &errExp, &errGot);
             EXPECT_TRUE(ok) << listens[c].label << " data mismatch at byte " << errIdx
                             << ": expected " << (int)errExp << " got " << (int)errGot;
         }
@@ -1099,6 +1098,324 @@ TEST_F(NetIbMPITest, RapidConnectDisconnect) {
         GTEST_SKIP() << "RDMA resource counters unavailable; rapid connect/disconnect "
                      << "behavior was tested, but QP/CQ/MR/PD leak check was skipped";
     }
+}
+
+TEST_F(NetIbMPITest, MultiRecv) {
+    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit))
+        << "Test requires exactly 2 processes";
+
+    int rank = MPIEnvironment::world_rank;
+    int peerRank = (rank + 1) % 2;
+
+    ASSERT_EQ(InitNetIb(), ncclSuccess);
+
+    static constexpr int kWidth = 8;
+    static constexpr int kNumBatches = 255;
+    static constexpr int kBaseTag = 8000;
+    static constexpr size_t kSizes[kWidth] = {
+        1, 64, 256, 1024, 4096, 16384, 65536, 131072
+    };
+
+    auto FillPattern = [&](void* buf, size_t size, int batch, int slot) {
+        fillHostBufferWithPattern<uint8_t>(buf, size, [batch, slot](size_t j) {
+            return static_cast<uint8_t>((batch * 17 + slot * 31 + j) % 256);
+        });
+    };
+
+    auto CheckPattern = [&](void* buf, size_t size, int batch, int slot) -> bool {
+        return verifyHostBufferData<uint8_t>(buf, size, [batch, slot](size_t j) {
+            return static_cast<uint8_t>((batch * 17 + slot * 31 + j) % 256);
+        });
+    };
+
+    ConnectionPair pair;
+    ASSERT_EQ(SetupConnection(0, pair, rank, peerRank), ncclSuccess);
+    void* recvComm = pair.recvComm;
+    void* sendComm = pair.sendComm;
+
+    NetConnectionGuard connGuard(net_);
+    if (rank == 0) {
+        connGuard.setRecvComm(pair.recvComm);
+        connGuard.setListenComm(pair.listenComm);
+    } else {
+        connGuard.setSendComm(pair.sendComm);
+    }
+
+    for (int batch = 0; batch < kNumBatches; batch++) {
+        size_t sizes[kWidth];
+        int tags[kWidth];
+        for (int i = 0; i < kWidth; i++) {
+            sizes[i] = kSizes[i];
+            tags[i] = kBaseTag + batch * kWidth + i;
+        }
+
+        if (rank == 0) {
+            void* bufs[kWidth] = {};
+            void* mhs[kWidth] = {};
+            int recvSizes[kWidth] = {};
+
+            auto cleanup = makeScopeGuard([&]() {
+                for (int i = 0; i < kWidth; i++) {
+                    if (mhs[i]) { DeregisterMemory(recvComm, mhs[i]); mhs[i] = nullptr; }
+                    if (bufs[i]) { free(bufs[i]); bufs[i] = nullptr; }
+                }
+            });
+
+            for (int i = 0; i < kWidth; i++) {
+                bufs[i] = malloc(sizes[i]);
+                ASSERT_NE(bufs[i], nullptr)
+                    << "malloc failed for recv batch=" << batch << " slot=" << i;
+                memset(bufs[i], 0xCC, sizes[i]);
+
+                ASSERT_EQ(RegisterMemory(recvComm, bufs[i], sizes[i], NCCL_PTR_HOST, &mhs[i]),
+                          ncclSuccess)
+                    << "RegisterMemory failed for recv batch=" << batch << " slot=" << i;
+                ASSERT_NE(mhs[i], nullptr);
+            }
+
+            void* req = nullptr;
+            ASSERT_EQ(PostRecv(recvComm, kWidth, bufs, sizes, tags, mhs, &req), ncclSuccess)
+                << "PostRecv failed for batch=" << batch;
+            ASSERT_NE(req, nullptr) << "PostRecv returned null request for batch=" << batch;
+
+            MPI_Barrier(MPI_COMM_WORLD);
+
+            ASSERT_EQ(WaitForCompletion(req, recvSizes, kLargeTransferTimeoutMs), ncclSuccess)
+                << "WaitForCompletion failed for recv batch=" << batch;
+
+            for (int i = 0; i < kWidth; i++) {
+                EXPECT_EQ(recvSizes[i], static_cast<int>(sizes[i]))
+                    << "recv size mismatch at batch=" << batch << " slot=" << i;
+
+                EXPECT_TRUE(CheckPattern(bufs[i], sizes[i], batch, i))
+                    << "data mismatch at batch=" << batch
+                    << " slot=" << i
+                    << " size=" << sizes[i];
+            }
+
+            // cleanup guard fires here, deregistering MRs and freeing buffers
+        } else {
+            void* bufs[kWidth] = {};
+            void* mhs[kWidth] = {};
+            void* reqs[kWidth] = {};
+
+            auto cleanup = makeScopeGuard([&]() {
+                for (int i = 0; i < kWidth; i++) {
+                    if (mhs[i]) { DeregisterMemory(sendComm, mhs[i]); mhs[i] = nullptr; }
+                    if (bufs[i]) { free(bufs[i]); bufs[i] = nullptr; }
+                }
+            });
+
+            for (int i = 0; i < kWidth; i++) {
+                bufs[i] = malloc(sizes[i]);
+                ASSERT_NE(bufs[i], nullptr)
+                    << "malloc failed for send batch=" << batch << " slot=" << i;
+
+                FillPattern(bufs[i], sizes[i], batch, i);
+
+                ASSERT_EQ(RegisterMemory(sendComm, bufs[i], sizes[i], NCCL_PTR_HOST, &mhs[i]),
+                          ncclSuccess)
+                    << "RegisterMemory failed for send batch=" << batch << " slot=" << i;
+                ASSERT_NE(mhs[i], nullptr);
+            }
+
+            MPI_Barrier(MPI_COMM_WORLD);
+
+            for (int i = 0; i < kWidth; i++) {
+                reqs[i] = nullptr;
+                PostSendWithRetry(sendComm, bufs[i], sizes[i], tags[i], mhs[i], &reqs[i]);
+                ASSERT_NE(reqs[i], nullptr)
+                    << "PostSend returned null request for batch=" << batch
+                    << " slot=" << i;
+            }
+
+            for (int i = 0; i < kWidth; i++) {
+                int sentSize[1] = {0}; // send request yields one size entry
+                ASSERT_EQ(WaitForCompletion(reqs[i], sentSize, kLargeTransferTimeoutMs), ncclSuccess)
+                    << "send completion failed for batch=" << batch << " slot=" << i;
+            }
+
+            // cleanup guard fires here, deregistering MRs and freeing buffers
+        }
+
+        MPI_Barrier(MPI_COMM_WORLD);
+    }
+
+    MPI_Barrier(MPI_COMM_WORLD);
+    // connGuard closes comms on scope exit
+}
+
+TEST_F(NetIbMPITest, MultiRecvShuffled) {
+    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit))
+        << "Test requires exactly 2 processes";
+
+    int rank = MPIEnvironment::world_rank;
+    int peerRank = (rank + 1) % 2;
+
+    ASSERT_EQ(InitNetIb(), ncclSuccess);
+
+    static constexpr int kWidth = 8;
+    static constexpr int kNumBatches = 255;
+    static constexpr int kBaseTag = 12000;
+    // stride 100 between batches keeps tags visually distinct in debug logs
+    static constexpr int kTagStride = 100;
+    static constexpr size_t kBaseSizes[kWidth] = {
+        1, 64, 256, 1024, 4096, 16384, 65536, 131072
+    };
+
+    // kRecvOrder[slot] = msgId posted at that recv slot (recv posts in slot order)
+    static constexpr int kRecvOrder[kWidth] = {3, 0, 6, 1, 7, 2, 5, 4};
+    // kSendOrder[issueIndex] = msgId to send at that issue position
+    static constexpr int kSendOrder[kWidth] = {5, 2, 7, 0, 6, 3, 1, 4};
+
+    auto FillPattern = [&](void* buf, size_t size, int batch, int msgId) {
+        fillHostBufferWithPattern<uint8_t>(buf, size, [batch, msgId](size_t j) {
+            return static_cast<uint8_t>((batch * 19 + msgId * 37 + j) % 256);
+        });
+    };
+
+    auto CheckPattern = [&](void* buf, size_t size, int batch, int msgId) -> bool {
+        return verifyHostBufferData<uint8_t>(buf, size, [batch, msgId](size_t j) {
+            return static_cast<uint8_t>((batch * 19 + msgId * 37 + j) % 256);
+        });
+    };
+
+    ConnectionPair pair;
+    ASSERT_EQ(SetupConnection(0, pair, rank, peerRank), ncclSuccess);
+    void* recvComm = pair.recvComm;
+    void* sendComm = pair.sendComm;
+
+    NetConnectionGuard connGuard(net_);
+    if (rank == 0) {
+        connGuard.setRecvComm(pair.recvComm);
+        connGuard.setListenComm(pair.listenComm);
+    } else {
+        connGuard.setSendComm(pair.sendComm);
+    }
+
+    for (int batch = 0; batch < kNumBatches; batch++) {
+        int msgTags[kWidth];
+        size_t msgSizes[kWidth];
+        for (int msgId = 0; msgId < kWidth; msgId++) {
+            msgTags[msgId] = kBaseTag + batch * kTagStride + msgId;
+            msgSizes[msgId] = kBaseSizes[msgId];
+        }
+
+        if (rank == 0) {
+            void* bufs[kWidth] = {};
+            void* mhs[kWidth] = {};
+            size_t recvSizesArg[kWidth];
+            int recvTags[kWidth];
+            int recvSizesOut[kWidth] = {};
+
+            auto cleanup = makeScopeGuard([&]() {
+                for (int i = 0; i < kWidth; i++) {
+                    if (mhs[i]) { DeregisterMemory(recvComm, mhs[i]); mhs[i] = nullptr; }
+                    if (bufs[i]) { free(bufs[i]); bufs[i] = nullptr; }
+                }
+            });
+
+            for (int slot = 0; slot < kWidth; slot++) {
+                int msgId = kRecvOrder[slot];
+                recvTags[slot] = msgTags[msgId];
+                recvSizesArg[slot] = msgSizes[msgId];
+
+                bufs[slot] = malloc(recvSizesArg[slot]);
+                ASSERT_NE(bufs[slot], nullptr)
+                    << "malloc failed for recv batch=" << batch << " slot=" << slot;
+                memset(bufs[slot], 0xCC, recvSizesArg[slot]);
+
+                ASSERT_EQ(RegisterMemory(recvComm, bufs[slot], recvSizesArg[slot],
+                                         NCCL_PTR_HOST, &mhs[slot]),
+                          ncclSuccess)
+                    << "RegisterMemory failed for recv batch=" << batch << " slot=" << slot;
+                ASSERT_NE(mhs[slot], nullptr);
+            }
+
+            void* req = nullptr;
+            ASSERT_EQ(PostRecv(recvComm, kWidth, bufs, recvSizesArg, recvTags, mhs, &req),
+                      ncclSuccess)
+                << "PostRecv failed for batch=" << batch;
+            ASSERT_NE(req, nullptr) << "PostRecv returned null request for batch=" << batch;
+
+            MPI_Barrier(MPI_COMM_WORLD);
+
+            ASSERT_EQ(WaitForCompletion(req, recvSizesOut, kLargeTransferTimeoutMs), ncclSuccess)
+                << "WaitForCompletion failed for recv batch=" << batch;
+
+            for (int slot = 0; slot < kWidth; slot++) {
+                int msgId = kRecvOrder[slot];
+                EXPECT_EQ(recvSizesOut[slot], static_cast<int>(msgSizes[msgId]))
+                    << "recv size mismatch at batch=" << batch
+                    << " slot=" << slot
+                    << " msgId=" << msgId;
+
+                EXPECT_TRUE(CheckPattern(bufs[slot], msgSizes[msgId], batch, msgId))
+                    << "data mismatch at batch=" << batch
+                    << " slot=" << slot
+                    << " expected msgId=" << msgId
+                    << " tag=" << msgTags[msgId]
+                    << " size=" << msgSizes[msgId];
+            }
+
+            // cleanup guard fires here, deregistering MRs and freeing buffers
+        } else {
+            void* bufs[kWidth] = {};
+            void* mhs[kWidth] = {};
+            void* reqs[kWidth] = {};
+
+            auto cleanup = makeScopeGuard([&]() {
+                for (int i = 0; i < kWidth; i++) {
+                    if (mhs[i]) { DeregisterMemory(sendComm, mhs[i]); mhs[i] = nullptr; }
+                    if (bufs[i]) { free(bufs[i]); bufs[i] = nullptr; }
+                }
+            });
+
+            for (int msgId = 0; msgId < kWidth; msgId++) {
+                bufs[msgId] = malloc(msgSizes[msgId]);
+                ASSERT_NE(bufs[msgId], nullptr)
+                    << "malloc failed for send batch=" << batch << " msgId=" << msgId;
+
+                FillPattern(bufs[msgId], msgSizes[msgId], batch, msgId);
+
+                ASSERT_EQ(RegisterMemory(sendComm, bufs[msgId], msgSizes[msgId],
+                                         NCCL_PTR_HOST, &mhs[msgId]),
+                          ncclSuccess)
+                    << "RegisterMemory failed for send batch=" << batch
+                    << " msgId=" << msgId;
+                ASSERT_NE(mhs[msgId], nullptr);
+            }
+
+            MPI_Barrier(MPI_COMM_WORLD);
+
+            for (int oi = 0; oi < kWidth; oi++) {
+                int msgId = kSendOrder[oi];
+                reqs[msgId] = nullptr;
+                PostSendWithRetry(sendComm, bufs[msgId], msgSizes[msgId],
+                                  msgTags[msgId], mhs[msgId], &reqs[msgId]);
+                ASSERT_NE(reqs[msgId], nullptr)
+                    << "PostSend returned null request for batch=" << batch
+                    << " msgId=" << msgId;
+            }
+
+            for (int msgId = 0; msgId < kWidth; msgId++) {
+                int sentSize[1] = {0}; // send request yields one size entry
+                ASSERT_EQ(WaitForCompletion(reqs[msgId], sentSize, kLargeTransferTimeoutMs),
+                          ncclSuccess)
+                    << "send completion failed for batch=" << batch
+                    << " msgId=" << msgId;
+            }
+
+            // cleanup guard fires here, deregistering MRs and freeing buffers
+        }
+
+        MPI_Barrier(MPI_COMM_WORLD);
+    }
+
+    MPI_Barrier(MPI_COMM_WORLD);
+    // connGuard closes comms on scope exit
 }
 
 #endif // MPI_TESTS_ENABLED

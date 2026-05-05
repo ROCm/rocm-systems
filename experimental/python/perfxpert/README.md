@@ -34,6 +34,7 @@ PerfXpert follows one common loop:
 apt install -y curl git unzip python3-venv python3-pip
 python3 -m venv .venv
 . .venv/bin/activate
+bun --version  # install bun from your approved package source if this fails
 
 # Latest development build from ROCm/rocm-systems.
 REF=develop; curl -fsSL "https://raw.githubusercontent.com/ROCm/rocm-systems/${REF}/experimental/python/perfxpert/scripts/pip-install-from-git.sh" | bash -s -- "${REF}"
@@ -47,8 +48,10 @@ REF=<SHA>; curl -fsSL "https://raw.githubusercontent.com/ROCm/rocm-systems/${REF
 ```
 
 The wrapper installs from GitHub, scopes submodule init to the pinned
-PerfXpert `opencode` submodule, and bootstraps bun when needed. It
-builds the patched bundled `perfxpert-code` binary and verifies it before exiting.
+PerfXpert `opencode` submodule, and builds the patched bundled `perfxpert-code` binary.
+If bun is missing, pip fails with an actionable prerequisite message instead
+of producing a partial TUI install. The wrapper verifies `perfxpert-code`
+before exiting.
 No separate `opencode` install is needed for the default `perfxpert-code`
 TUI. See [docs/guides/getting-started.md](docs/guides/getting-started.md)
 for the Ubuntu/RHEL/SLES package matrix, direct-pip equivalent, editable
@@ -61,7 +64,7 @@ installs, and troubleshooting.
 | `anthropic` | Claude API | Production default; requires `ANTHROPIC_API_KEY` |
 | `openai` | OpenAI API | Alternative hosted; requires `OPENAI_API_KEY` |
 | `ollama` | Local Ollama | Fully local; requires a running `ollama serve` |
-| `private` | Any OpenAI-compatible endpoint | Internal deployments; requires `PERFXPERT_LLM_PRIVATE_URL` + `PERFXPERT_LLM_PRIVATE_MODEL`; CLI preflight also needs `PERFXPERT_LLM_PRIVATE_API_KEY` or `--llm-api-key` |
+| `private` | Any OpenAI-compatible endpoint | Internal deployments; requires an endpoint (`PERFXPERT_LLM_PRIVATE_URL`) plus either `PERFXPERT_LLM_PRIVATE_API_KEY` or `--llm-api-key`; set `PERFXPERT_LLM_PRIVATE_MODEL` to select the deployment model |
 | `opencode` | Bundled opencode CLI | Used by `perfxpert-code`; not callable from inside opencode itself (recursion-guarded) |
 
 Private endpoint example:
@@ -91,6 +94,7 @@ selects a file destination; all other formats write a report file by
 default, even when `-o` and `-d` are omitted. Use `-d DIR -o NAME` to
 choose the destination. `NAME` is a base name; PerfXpert adds `.txt`,
 `.json`, `.md`, or `.html` when the extension is not already present.
+Use `-o -` to force stdout for pipelines.
 
 LLM-backed analysis uses Chat Completions-style requests. Choose a provider
 model or private endpoint model that supports the Chat Completions API;
