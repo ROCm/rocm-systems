@@ -1,7 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
-set(progress_tests_sources test_format_bar.cpp test_bar_silent.cpp)
+set(progress_tests_sources test_format_bar.cpp test_bar_silent.cpp test_tracker.cpp)
 
 add_library(progress-tests OBJECT ${progress_tests_sources})
 

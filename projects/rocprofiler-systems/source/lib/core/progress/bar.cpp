@@ -133,16 +133,15 @@ stream_is_tty(std::FILE* stream) noexcept
 }
 }  // namespace
 
+// Sample visibility once at construction. Verbose level and the stream's
+// TTY-ness are set during process startup and do not change during a
+// post-processing run, so re-checking on every advance would be waste.
 bar::bar(std::string label, std::uint64_t total, bar_options opts)
 : m_label(std::move(label))
 , m_opts(opts)
 , m_total(total)
-{
-    // Sample visibility once at construction. Verbose level and the stream's
-    // TTY-ness are set during process startup and do not change during a
-    // post-processing run, so re-checking on every advance would be waste.
-    m_visible = m_opts.enabled && m_opts.verbose >= 0 && stream_is_tty(m_opts.stream);
-}
+, m_visible(opts.enabled && opts.verbose >= 0 && stream_is_tty(opts.stream))
+{}
 
 // Idempotent: on_finish()'s CAS short-circuits if it was called already.
 bar::~bar() { on_finish(); }

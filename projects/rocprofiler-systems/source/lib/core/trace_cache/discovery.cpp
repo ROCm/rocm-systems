@@ -11,41 +11,18 @@
 #include <dirent.h>
 
 #include <algorithm>
-#include <cerrno>
 #include <cstdint>
-#include <cstdio>
 #include <cstdlib>
-#include <cstring>
-#include <fstream>
+#include <filesystem>
 #include <memory>
 #include <regex>
 #include <stdexcept>
 #include <string>
+#include <system_error>
 #include <variant>
 
 namespace rocprofsys::trace_cache::discovery
 {
-namespace
-{
-void
-remove_if_exists(const std::string& fname)
-{
-    if(fname.empty()) return;
-    std::ifstream file(fname);
-    if(!file.is_open()) return;
-
-    file.close();
-    auto result = std::remove(fname.c_str());
-    if(result == 0)
-        LOG_DEBUG("Removed file: {}", fname);
-    else if(errno == ENOENT)
-        LOG_DEBUG("File does not exist: {}", fname);
-    else
-        LOG_WARNING("Failed to remove file: {} (errno: {} - {})", fname, errno,
-                    std::strerror(errno));
-}
-}  // namespace
-
 data::directory_files_t
 list_dir_files(const std::string& path)
 {
@@ -120,11 +97,16 @@ clear(const data::mapped_cache_files_t& cache_files)
     LOG_DEBUG("Removing cached temporary files...");
     for(const auto& [_, files] : cache_files)
     {
-        LOG_DEBUG("Removing cached temporary file: {}", files.buff_storage);
-        remove_if_exists(files.buff_storage);
+        for(const auto* fname : { &files.buff_storage, &files.metadata })
+        {
+            if(fname->empty()) continue;
 
-        LOG_DEBUG("Removing cached temporary file: {}", files.metadata);
-        remove_if_exists(files.metadata);
+            std::error_code ec;
+            if(std::filesystem::remove(*fname, ec))
+                LOG_DEBUG("Removed file: {}", *fname);
+            else if(ec)
+                LOG_WARNING("Failed to remove file: {}: {}", *fname, ec.message());
+        }
     }
 }
 

@@ -117,7 +117,7 @@ private:
     std::atomic<std::int64_t>  m_last_render_ns{ 0 };
     std::mutex                 m_render_mtx;
     std::atomic<bool>          m_finished{ false };
-    bool                       m_visible{ false };
+    const bool                 m_visible;
 };
 
 }  // namespace rocprofsys::progress
