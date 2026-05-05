@@ -192,7 +192,7 @@ hsa_status_t Memory::interopMapBuffer(hsa_handle_t fdn, hsa_interop_map_flag_t f
   hsa_agent_t agent = dev().getBackendDevice();
   size_t size;
   size_t metadata_size = 0;
-  void* metadata;
+  void* metadata = nullptr;
   auto fd = fdn;
   hsa_status_t status = Hsa::interop_map_buffer(1, &agent, fd, flags, &size, &interop_deviceMemory_,
 #if IS_WINDOWS
@@ -258,7 +258,7 @@ bool Memory::createInteropBuffer(GLenum targetType, int miplevel) {
 
   deviceMemory_ = static_cast<char*>(interop_deviceMemory_) + offset;
   if(!GlInterop::Detach(owner(), resHandle)) {
-    LogError("GlInterop::Detach(handle %p) failed", resHandle);
+    LogPrintfError("GlInterop::Detach(handle %p) failed", resHandle);
   }
   return true;
 #else

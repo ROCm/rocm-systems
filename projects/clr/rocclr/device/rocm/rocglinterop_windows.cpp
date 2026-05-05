@@ -170,7 +170,7 @@ bool Export(amd::Memory* mem, GLenum targetType, int miplevel, hsa_handle_t* han
       type = GL_RESOURCE_ATTACH_TEXTURE_AMD;
       break;
     default:
-      LogError("Unknown OpenGL interop type: 0x%x", obj->getCLGLObjectType());
+      LogPrintfError("Unknown OpenGL interop type: 0x%x", obj->getCLGLObjectType());
       return false;
   }
 
@@ -186,8 +186,8 @@ bool Export(amd::Memory* mem, GLenum targetType, int miplevel, hsa_handle_t* han
   if (image_srd_size >= glResourceData.textureSRDSize) {
     std::memcpy(image_srd, glResourceData.textureSRD, glResourceData.textureSRDSize);
   } else {
-    LogError("image_srd_size %u < glResourceData.textureSRDSize %u", image_srd_size,
-             glResourceData.textureSRDSize);
+    LogPrintfError("image_srd_size %u < glResourceData.textureSRDSize %u", image_srd_size,
+                   glResourceData.textureSRDSize);
     return false;
   }
   return true;
@@ -218,7 +218,7 @@ bool Detach(amd::Memory* mem, hsa_handle_t handle) {
       type = GL_RESOURCE_ATTACH_TEXTURE_AMD;
       break;
     default:
-      LogError("Unknown OpenGL interop type: 0x%x", obj->getCLGLObjectType());
+      LogPrintfError("Unknown OpenGL interop type: 0x%x", obj->getCLGLObjectType());
       return false;
   }
 
