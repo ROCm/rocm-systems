@@ -18,6 +18,9 @@
 # Exit codes:
 #   0  all files pass (or --fix applied successfully)
 #   1  violations detected
+#
+# Limitation: this script uses regex, not a real parser. --fix will replace
+# matches inside comments and string literals too. Review changes after fixing.
 
 set -euo pipefail
 
