@@ -2,9 +2,13 @@
 # submodules, install into a private build-tree prefix, and expose paths
 # for downstream targets to link against.
 #
-# The submodules live under <project>/external/{lttng-ust,userspace-rcu}.
-# Both are autotools-based and require autoreconf, autoconf, automake,
-# libtool, and pkg-config to be available at configure time.
+# Canonical location: shared/lttng/cmake/. The submodules live under
+# shared/lttng/{lttng-ust,userspace-rcu} and are shared by both consumers
+# (rocr-runtime, clr/hipamd). Each consumer still produces its own
+# private vendored build (see comment on urcu_vendored below).
+# Both submodules are autotools-based and require autoreconf, autoconf,
+# automake, libtool, and pkg-config to be available at configure time.
+# See shared/lttng/README.md for consumer integration details.
 #
 # Outputs (cached, visible to all subsequent CMake code):
 #   LTTNG_VENDORED_PREFIX      — install prefix in the build tree
@@ -491,14 +495,15 @@ ExternalProject_Add(urcu_vendored
     SOURCE_DIR        "${LTTNG_VENDORED_URCU_SRC}"
     BUILD_IN_SOURCE   1
     # The source dir is a git submodule shared across multiple build trees
-    # (e.g. TheRock builds rocr-runtime twice — once as an amd-llvm runtimes
-    # ExternalProject and once as a standalone packaging sub-project — and
-    # both invoke this vendored build with different --prefix paths). Without
-    # cleaning, the .la files left behind by build #1 carry build #1's libdir
-    # baked in, and libtool refuses to install to build #2's libdir with
-    # "cannot install to a directory not ending in <build-1 libdir>".
-    # Run `make distclean` (best-effort: a fresh checkout has no Makefile) to
-    # wipe stale generated state before bootstrap+configure each invocation.
+    # (e.g. TheRock builds rocr-runtime / clr twice — once nested in an
+    # amd-llvm runtimes ExternalProject and once as a standalone packaging
+    # sub-project — and both invoke this vendored build with different
+    # --prefix paths). Without cleaning, the .la files left behind by build
+    # #1 carry build #1's libdir baked in, and libtool refuses to install to
+    # build #2's libdir with "cannot install to a directory not ending in
+    # <build-1 libdir>". Run `make distclean` (best-effort: a fresh checkout
+    # has no Makefile) to wipe stale generated state before bootstrap +
+    # configure each invocation.
     CONFIGURE_COMMAND ${CMAKE_COMMAND} -E env
                       "ACLOCAL_PATH=${_lttng_aclocal_path}"
                       sh -c "(make distclean >/dev/null 2>&1 || true) && ./bootstrap && ./configure \

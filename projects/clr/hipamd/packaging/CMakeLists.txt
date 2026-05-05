@@ -59,7 +59,7 @@ if(HIP_PLATFORM STREQUAL "amd" )
    # Installed flat under ${CMAKE_INSTALL_LIBDIR} (no lttng/ subdir) so
    # downstream consumers that link -lamdhip64 also resolve the NEEDED
    # liblttng-ust.so.1 etc. via the same -L path. LTTNG_VENDORED_LIB_DIR
-   # is set by the include() of cmake/VendorLttng.cmake from
+   # is set by the include() of shared/lttng/cmake/VendorLttng.cmake from
    # hipamd/src/CMakeLists.txt — only populated when
    # HIP_ENABLE_LTTNG_UST=ON, hence the guard.
    if(HIP_ENABLE_LTTNG_UST AND DEFINED LTTNG_VENDORED_LIB_DIR)

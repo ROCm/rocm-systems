@@ -335,13 +335,25 @@ endif()
 
 if(HIP_ENABLE_LTTNG_UST)
     # Vendored LTTng-UST: built from the lttng-ust + userspace-rcu git
-    # submodules under projects/clr/external/, installed into the build
-    # tree at <build>/_deps/lttng-prefix/, and shipped at runtime under
-    # /opt/rocm/lib/ alongside libamdhip64.so (libamdhip64 picks them
-    # up via RPATH $ORIGIN — see set_target_properties below).
-    set(LTTNG_VENDORED_URCU_SRC "${CMAKE_CURRENT_LIST_DIR}/../../external/userspace-rcu")
-    set(LTTNG_VENDORED_UST_SRC  "${CMAKE_CURRENT_LIST_DIR}/../../external/lttng-ust")
-    include(${CMAKE_CURRENT_LIST_DIR}/../cmake/VendorLttng.cmake)
+    # submodules under shared/lttng/ (canonical, shared with rocr-runtime),
+    # installed into the build tree at <build>/_deps/lttng-prefix/, and
+    # shipped at runtime under /opt/rocm/lib/ alongside libamdhip64.so
+    # (libamdhip64 picks them up via RPATH $ORIGIN — see
+    # set_target_properties below). See shared/lttng/README.md.
+    set(LTTNG_VENDORED_ROOT
+        "${CMAKE_CURRENT_LIST_DIR}/../../../../shared/lttng"
+        CACHE PATH "Path to shared vendored LTTng tree (shared/lttng/)")
+    if(NOT EXISTS "${LTTNG_VENDORED_ROOT}/cmake/VendorLttng.cmake")
+        message(FATAL_ERROR
+            "HIP_ENABLE_LTTNG_UST=ON but shared/lttng/ was not found at\n"
+            "    ${LTTNG_VENDORED_ROOT}\n"
+            "Either checkout the rocm-systems super-repo (which provides "
+            "shared/lttng/), set -DLTTNG_VENDORED_ROOT=<path>, or disable "
+            "with -DHIP_ENABLE_LTTNG_UST=OFF.")
+    endif()
+    set(LTTNG_VENDORED_URCU_SRC "${LTTNG_VENDORED_ROOT}/userspace-rcu")
+    set(LTTNG_VENDORED_UST_SRC  "${LTTNG_VENDORED_ROOT}/lttng-ust")
+    include(${LTTNG_VENDORED_ROOT}/cmake/VendorLttng.cmake)
 
     find_package(PkgConfig REQUIRED)
     # Prepend the vendored .pc dir so pkg_check_modules picks it before

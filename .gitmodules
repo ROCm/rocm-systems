@@ -113,19 +113,11 @@
 [submodule "projects/rocprofiler-sdk/external/abseil-cpp"]
 	path = projects/rocprofiler-sdk/external/abseil-cpp
 	url = https://github.com/abseil/abseil-cpp.git
-[submodule "projects/clr/external/lttng-ust"]
-	path = projects/clr/external/lttng-ust
+[submodule "shared/lttng/lttng-ust"]
+	path = shared/lttng/lttng-ust
 	url = https://github.com/lttng/lttng-ust.git
 	branch = stable-2.13
-[submodule "projects/clr/external/userspace-rcu"]
-	path = projects/clr/external/userspace-rcu
-	url = https://github.com/urcu/userspace-rcu.git
-	branch = stable-0.14
-[submodule "projects/rocr-runtime/external/lttng-ust"]
-	path = projects/rocr-runtime/external/lttng-ust
-	url = https://github.com/lttng/lttng-ust.git
-	branch = stable-2.13
-[submodule "projects/rocr-runtime/external/userspace-rcu"]
-	path = projects/rocr-runtime/external/userspace-rcu
+[submodule "shared/lttng/userspace-rcu"]
+	path = shared/lttng/userspace-rcu
 	url = https://github.com/urcu/userspace-rcu.git
 	branch = stable-0.14

@@ -412,15 +412,25 @@ if( BUILD_SHARED_LIBS )
     option(ROCR_ENABLE_LTTNG_UST "Build with LTTng-UST tracepoint emission" ON)
     if(ROCR_ENABLE_LTTNG_UST)
       # Vendored LTTng-UST: built from the lttng-ust + userspace-rcu git
-      # submodules under projects/rocr-runtime/external/, installed into
-      # the build tree at <build>/_deps/lttng-prefix/, and shipped at
-      # runtime under /opt/rocm/lib/ alongside libhsa-runtime64.so.
+      # submodules under shared/lttng/ (canonical, shared with CLR),
+      # installed into the build tree at <build>/_deps/lttng-prefix/, and
+      # shipped at runtime under /opt/rocm/lib/ alongside libhsa-runtime64.so.
       # libhsa-runtime64 picks them up via RPATH $ORIGIN (set below).
-      set(LTTNG_VENDORED_URCU_SRC
-          "${CMAKE_CURRENT_SOURCE_DIR}/../../external/userspace-rcu")
-      set(LTTNG_VENDORED_UST_SRC
-          "${CMAKE_CURRENT_SOURCE_DIR}/../../external/lttng-ust")
-      include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/VendorLttng.cmake)
+      # See shared/lttng/README.md.
+      set(LTTNG_VENDORED_ROOT
+          "${CMAKE_CURRENT_SOURCE_DIR}/../../../../shared/lttng"
+          CACHE PATH "Path to shared vendored LTTng tree (shared/lttng/)")
+      if(NOT EXISTS "${LTTNG_VENDORED_ROOT}/cmake/VendorLttng.cmake")
+        message(FATAL_ERROR
+            "ROCR_ENABLE_LTTNG_UST=ON but shared/lttng/ was not found at\n"
+            "    ${LTTNG_VENDORED_ROOT}\n"
+            "Either checkout the rocm-systems super-repo (which provides "
+            "shared/lttng/), set -DLTTNG_VENDORED_ROOT=<path>, or disable "
+            "with -DROCR_ENABLE_LTTNG_UST=OFF.")
+      endif()
+      set(LTTNG_VENDORED_URCU_SRC "${LTTNG_VENDORED_ROOT}/userspace-rcu")
+      set(LTTNG_VENDORED_UST_SRC  "${LTTNG_VENDORED_ROOT}/lttng-ust")
+      include(${LTTNG_VENDORED_ROOT}/cmake/VendorLttng.cmake)
 
       find_package(PkgConfig REQUIRED)
       # Prepend the vendored .pc dir so pkg_check_modules picks it
