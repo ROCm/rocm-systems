@@ -2,12 +2,12 @@
 name = "nccl4py"
 dynamic = ["version"]
 requires-python = ">=3.10"
-description = "NCCL4Py: Python bindings for NCCL"
+description = "nccl4py: Pythonic Python bindings for RCCL on ROCm (fork of NVIDIA nccl4py)"
 readme = {file = "DESCRIPTION.rst", content-type = "text/x-rst"}
 license = "Apache-2.0"
 license-files = ["LICENSE.txt"]
 authors = [
-    { name = "NVIDIA Corporation" }
+    { name = "Advanced Micro Devices, Inc." }
 ]
 classifiers = [
     "Intended Audience :: Developers",
@@ -47,10 +47,10 @@ test = [
 ]
 
 [project.urls]
-homepage = "https://developer.nvidia.com/nccl"
-documentation = "https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/index.html"
-repository = "https://github.com/NVIDIA/nccl"
-issues = "https://github.com/NVIDIA/nccl/issues"
+homepage = "https://github.com/ROCm/rccl"
+documentation = "https://rccl.readthedocs.io"
+repository = "https://github.com/ROCm/rocm-systems"
+issues = "https://github.com/ROCm/rocm-systems/issues"
 
 [build-system]
 requires = [

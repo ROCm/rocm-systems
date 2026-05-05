@@ -6,12 +6,13 @@
 #
 
 """
-NCCL4Py: Python bindings for NVIDIA Collective Communications Library (NCCL).
+nccl4py: Python bindings for RCCL on ROCm (AMD fork of NVIDIA nccl4py).
 
-NCCL4Py provides Pythonic access to NCCL for efficient multi-GPU and multi-node
-communication. It supports all NCCL collective operations, point-to-point
-communication, and advanced features like buffer registration and custom reduction
-operators.
+nccl4py provides Pythonic access to RCCL (the ROCm Communication Collectives
+Library, AMD's drop-in replacement for NVIDIA NCCL) for efficient multi-GPU
+and multi-node communication. It supports all NCCL/RCCL collective operations,
+point-to-point communication, and advanced features like buffer registration
+and custom reduction operators.
 """
 
 from nccl._version import __version__
