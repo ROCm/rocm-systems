@@ -218,6 +218,8 @@ include(Compilers) # compiler identification
 include(BuildSettings) # compiler flags
 
 set(CMAKE_INSTALL_LIBDIR "lib" CACHE STRING "Object code libraries (lib)" FORCE)
+# C++20 required: timemory branch upgrade-cpp-standard-to-c++20 patches
+# cereal.hpp [=] this captures (deprecated under C++20 -Wdeprecated).
 set(CMAKE_CXX_STANDARD 20 CACHE STRING "CXX language standard")
 
 rocprofiler_systems_add_feature(CMAKE_BUILD_TYPE "Build optimization level")
