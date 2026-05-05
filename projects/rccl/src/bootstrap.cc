@@ -927,7 +927,18 @@ struct bootstrapRing_t {
       // socket carries both send and recv per round (TCP is full-duplex).
       // The pair is owned by the smaller-rank side as connector, larger-rank
       // side as acceptor; fully symmetric, no deadlock by construction.
+      //
+      // For non-pow-2 N (Phase A.3.2 / Bruck), tree[k] is used INBOUND ONLY
+      // (accepted from (rank + 2^k) mod N) and the OUTBOUND side lives in
+      // bruckOut[k] (connected to (rank - 2^k) mod N's listen.tree[k]).
+      // socketBruckAllGather then sends via bruckOut[k] and recvs via
+      // tree[k]. Pow-2 (recursive doubling) keeps using tree[k] bidir.
       struct ncclSocket tree[BOOTSTRAP_MAX_TREE_ROUNDS];
+      // [RCCL] Phase A.3.2: persistent per-round Bruck OUTBOUND socket.
+      // Only set up when treeAllGatherEnabled && nranks is non-pow-2.
+      // For pow-2 N these slots stay in StateNone and the close in
+      // bootstrapDestroy is a no-op.
+      struct ncclSocket bruckOut[BOOTSTRAP_MAX_TREE_ROUNDS];
     } socket;
   };
 };
@@ -1148,6 +1159,7 @@ static ncclResult_t socketRingConnect(ncclSocketAddress* addr, struct ncclSocket
 // socketTreeAllGather) but is called from bootstrapInit's PMIx fast-path arm.
 #ifdef NCCL_HAVE_PMIX
 static ncclResult_t socketTreeConnectAll(struct bootstrapState* state);
+static ncclResult_t socketBruckConnectAll(struct bootstrapState* state);
 #endif
 
 static ncclResult_t bootstrapBidirRingSetupStart(struct ncclComm* comm, struct bootstrapState* state,
@@ -1601,7 +1613,14 @@ ncclResult_t bootstrapInit(int nHandles, void* handles, struct ncclComm* comm) {
     // round-listen later in socketTreeAllGather. Only create as many as
     // we'll actually use (log2(nranks)) and only when the env opt-in is
     // set + nranks is pow-2 — non-tree comms get a static no-op tail.
-    if (ncclParamBootstrapTreeAllGather() != 0 && bootstrapTreePowOfTwo(nranks)) {
+    // [RCCL] Phase A / A.3: bind per-round listen sockets for the tree
+    // AllGather. Phase A MVP only handled pow-2 N (recursive doubling);
+    // Phase A.3 extends to non-pow-2 via Bruck's algorithm, which uses
+    // the same listen-per-round structure but with cyclic-modular
+    // partners instead of XOR. So bind ceil(log_2(N)) listens whenever
+    // tree mode is on, regardless of whether N is a pow-of-two —
+    // dispatch picks the right algorithm later.
+    if (ncclParamBootstrapTreeAllGather() != 0 && nranks >= 2) {
       int rounds = 0;
       while ((1 << rounds) < nranks) rounds++;
       if (rounds > BOOTSTRAP_MAX_TREE_ROUNDS) {
@@ -1819,19 +1838,34 @@ ncclResult_t bootstrapInit(int nHandles, void* handles, struct ncclComm* comm) {
     // connect overlaps for free). Placing it after the RECV close would
     // leak the connect cost into the post-recv "tail" bucket, where it
     // looks like a per-iteration penalty in the wTail metric.
+    // [RCCL] Phase A / A.3: arm tree AllGather. For pow-2 N we use
+    // recursive-doubling (socketTreeAllGather) and benefit from Phase
+    // A.2 persistent per-round sockets. For non-pow-2 N we use Bruck
+    // (socketBruckAllGather), which has cyclic-modular partners that
+    // change direction every round and doesn't fit the symmetric
+    // tree[k] persistent-pair layout — so it stays JIT-connect (one
+    // inbound accept + one outbound connect per round per dispatch).
+    // The dispatcher in bootstrapAllGather later branches on
+    // bootstrapTreePowOfTwo(nranks) to pick the right primitive.
     if (!ncclParamBootstrapNetEnable() &&
         ncclParamBootstrapTreeAllGather() != 0 &&
-        bootstrapTreePowOfTwo(nranks)) {
+        nranks >= 2) {
       state->treeAllGatherEnabled = 1;
-      INFO(NCCL_BOOTSTRAP, "Tree AllGather: enabled for nranks=%d (rounds=%d)",
-           nranks, (int)__builtin_ctz((unsigned)nranks));
-      // Phase A.2: eagerly establish persistent per-round sockets so that
-      // socketTreeAllGather avoids the JIT TCP handshake on every dispatch.
-      // Done here, after the PMIx Fence — KVS now holds every peer's
-      // treeListenAddrs[] so we can resolve all log2(N) partner addresses
-      // locally. Non-blocking connect+accept across rounds means the
-      // handshakes pipeline.
-      NCCLCHECK(socketTreeConnectAll(state));
+      int rounds = 0;
+      while ((1 << rounds) < nranks) rounds++;
+      const char* algo = bootstrapTreePowOfTwo(nranks) ? "recursive-doubling" : "Bruck";
+      INFO(NCCL_BOOTSTRAP, "Tree AllGather: enabled for nranks=%d (rounds=%d, algo=%s)",
+           nranks, rounds, algo);
+      if (bootstrapTreePowOfTwo(nranks)) {
+        // Phase A.2: persistent per-round XOR-partner sockets (one
+        // bidir socket per round, used for both send and recv).
+        NCCLCHECK(socketTreeConnectAll(state));
+      } else {
+        // Phase A.3.2: persistent Bruck sockets. Two sockets per round
+        // (bruckOut[k] for outbound, ring.tree[k] for inbound) because
+        // Bruck's partners are asymmetric per direction.
+        NCCLCHECK(socketBruckConnectAll(state));
+      }
     }
 
     // listenSockRoot was created earlier; nobody will ever connect to it on
@@ -2386,6 +2420,86 @@ static ncclResult_t socketTreeConnectAll(struct bootstrapState* state) {
   return res;
 }
 
+// [RCCL] Phase A.3.2: eagerly establish persistent Bruck per-round
+// sockets at bootstrap-init time. Mirrors socketTreeConnectAll but for
+// the cyclic-modular partner pattern of Bruck (asymmetric: each rank
+// connects to (R - 2^k) mod N for the outbound, and accepts on its own
+// listen.tree[k] from (R + 2^k) mod N for the inbound). Both directions
+// are pipelined async so the kernel handshakes overlap across rounds.
+//
+// Each rank ends up with 2 persistent sockets per round (vs 1 for
+// recursive-doubling): bruckOut[k] for SEND and ring.tree[k] for RECV.
+// socketBruckAllGather then runs without any per-dispatch TCP handshake.
+//
+// Preconditions: treeAllGatherEnabled was just set, comm is on the PMIx
+// fast-path so all peers' treeListenAddrs[] are in KVS, and
+// listen.socket.tree[k] is bound for every k.
+static ncclResult_t socketBruckConnectAll(struct bootstrapState* state) {
+  ncclResult_t res = ncclSuccess;
+  int rank = state->rank;
+  int nranks = state->nranks;
+  uint64_t magic = state->magic;
+  volatile uint32_t* abortFlag = state->abortFlag;
+  int rounds = 0;
+  while ((1 << rounds) < nranks) rounds++;
+
+  // Stage 1: kick off both connect (to (R - 2^k) mod N) and accept (on
+  // own tree[k] from (R + 2^k) mod N) per round, in non-blocking mode.
+  // All 2*rounds handshakes pipeline through the kernel concurrently.
+  for (int k = 0; k < rounds; k++) {
+    int distance = 1 << k;
+    int send_to = (rank - distance + nranks) % nranks;
+
+    // Outbound: connect to send_to's tree[k] listen.
+    {
+      struct extInfo peer = {0};
+      NCCLCHECK(pmixGetPeerInfo(magic, send_to, nranks, &peer));
+      union ncclSocketAddress partnerAddr = peer.treeListenAddrs[k];
+      struct ncclSocket* sock = &STATE_RING(state, socket.bruckOut[k]);
+      NCCLCHECK(ncclSocketInit(sock, &partnerAddr, magic,
+                               ncclSocketTypeBootstrap, abortFlag, /*asyncFlag*/1));
+      NCCLCHECK(ncclSocketConnect(sock));
+    }
+    // Inbound: accept on own listen.tree[k] from (R + 2^k) mod N. The
+    // listen has to be in async mode for the kick-off; restored after
+    // (matches socketTreeConnectAll's pattern).
+    {
+      int oldAsync = STATE_LISTEN(state, socket.tree[k]).asyncFlag;
+      STATE_LISTEN(state, socket.tree[k]).asyncFlag = 1;
+      struct ncclSocket* sock = &STATE_RING(state, socket.tree[k]);
+      ncclResult_t r1 = ncclSocketInit(sock);
+      ncclResult_t r2 = ncclSuccess;
+      if (r1 == ncclSuccess) {
+        r2 = ncclSocketAccept(sock, &STATE_LISTEN(state, socket.tree[k]));
+      }
+      STATE_LISTEN(state, socket.tree[k]).asyncFlag = oldAsync;
+      NCCLCHECK(r1);
+      NCCLCHECK(r2);
+    }
+  }
+
+  // Stage 2: poll all 2*rounds sockets to Ready.
+  int abortCounter = 0;
+  for (int k = 0; k < rounds; k++) {
+    int ready = 0;
+    while (!ready) {
+      NCCLCHECK(checkAbort(abortFlag, &abortCounter));
+      NCCLCHECK(ncclSocketReady(&STATE_RING(state, socket.bruckOut[k]), &ready));
+      if (!ready) sched_yield();
+    }
+    ready = 0;
+    while (!ready) {
+      NCCLCHECK(checkAbort(abortFlag, &abortCounter));
+      NCCLCHECK(ncclSocketReady(&STATE_RING(state, socket.tree[k]), &ready));
+      if (!ready) sched_yield();
+    }
+  }
+
+  INFO(NCCL_BOOTSTRAP, "Bruck AllGather: persistent sockets ready (rank=%d nranks=%d rounds=%d)",
+       rank, nranks, rounds);
+  return res;
+}
+
 static ncclResult_t socketTreeAllGather(struct bootstrapState* state,
                                         char* data, int size) {
   ncclResult_t res = ncclSuccess;
@@ -2443,6 +2557,104 @@ static ncclResult_t socketTreeAllGather(struct bootstrapState* state,
         tFirst / 1e9, tRest / 1e9);
   return ncclSuccess;
 fail:
+  return res;
+}
+
+// [RCCL] Phase A.3: Bruck's AllGather for non-pow-2 N over the socket OOB.
+// Recursive-doubling (socketTreeAllGather) cannot run on non-pow-2 N
+// because the partner-via-XOR pattern presumes a complete binary
+// hypercube. Bruck's algorithm sidesteps this by using a cyclic-modular
+// partner: at round k, rank R sends min(2^k, N - 2^k) chunks to
+// (R - 2^k) mod N and receives the same count from (R + 2^k) mod N.
+// After ceil(log_2(N)) rounds, slot i holds chunk (R + i) mod N — a
+// final memcpy rotates each chunk into its canonical position.
+//
+// Phase A.3.2 scope:
+//   * Persistent per-round sockets, established eagerly during
+//     bootstrapInit by socketBruckConnectAll: bruckOut[k] holds the
+//     outbound connection to (R - 2^k) mod N's tree[k] listen, and
+//     ring.tree[k] holds the inbound accepted from (R + 2^k) mod N.
+//     This eliminates the per-dispatch TCP handshake which was the
+//     dominant cost in the JIT MVP (10 ms / dispatch on N=24 vs ~3 ms
+//     for the ring fallback's persistent socket).
+//   * socketSendRecv runs both directions in parallel on disjoint FDs.
+//   * No extra setup at dispatch time — just send/recv on existing FDs.
+//
+// Last-round chunk-count clamp: send_count = min(2^k, N - 2^k) handles
+// the well-known Bruck non-pow-2 adjustment where the last round
+// transfers only the residue (else we'd over-fill the temp buffer).
+//
+// Memory: one scratch buffer of size N×size for the rotated layout. Bot-
+// strap data is small (KB to a few hundred KB at large scale), so the
+// transient allocation is negligible.
+static ncclResult_t socketBruckAllGather(struct bootstrapState* state,
+                                         char* data, int size) {
+  ncclResult_t res = ncclSuccess;
+  int rank = state->rank;
+  int nranks = state->nranks;
+  uint64_t magic = state->magic;
+  volatile uint32_t* abortFlag = state->abortFlag;
+
+  int rounds = 0;
+  while ((1 << rounds) < nranks) rounds++;
+
+  size_t totalBytes = (size_t)nranks * (size_t)size;
+  char* temp = (char*)malloc(totalBytes);
+  if (!temp) {
+    WARN("socketBruckAllGather: failed to allocate %zu bytes", totalBytes);
+    return ncclSystemError;
+  }
+  // Initial: my chunk goes to slot 0 of the rotated layout.
+  memcpy(temp, data + (size_t)rank * (size_t)size, (size_t)size);
+
+  uint64_t tFirst = 0, tRest = 0;
+  TRACE(NCCL_BOOTSTRAP, "socketBruckAllGather start: rank=%d nranks=%d rounds=%d size=%d",
+        rank, nranks, rounds, size);
+  BOOTSTRAP_PROF_OPEN(tFirst);
+
+  int have = 1;
+  for (int k = 0; k < rounds; k++) {
+    int distance = 1 << k;
+    int send_count = std::min(distance, nranks - distance);
+    if (send_count > have) send_count = have;
+    int chunk_bytes = send_count * size;
+
+    // Persistent sockets, set up once in socketBruckConnectAll:
+    //   bruckOut[k]: outbound to (R - 2^k) mod N for SEND.
+    //   tree[k]:     inbound from (R + 2^k) mod N for RECV.
+    struct ncclSocket* sendSock = &STATE_RING(state, socket.bruckOut[k]);
+    struct ncclSocket* recvSock = &STATE_RING(state, socket.tree[k]);
+
+    NCCLCHECKGOTO(socketSendRecv(sendSock, temp, chunk_bytes,
+                                 recvSock, temp + (size_t)have * (size_t)size, chunk_bytes),
+                  res, fail);
+
+    have += send_count;
+    (void)magic;
+    (void)abortFlag;
+
+    if (k == 0) {
+      BOOTSTRAP_PROF_CLOSE(tFirst);
+      BOOTSTRAP_PROF_OPEN(tRest);
+    }
+  }
+  BOOTSTRAP_PROF_CLOSE(tRest);
+
+  // Final rotation: temp[i] holds chunk (rank + i) mod N. We want
+  // data[c] = chunk c. So data[c] = temp[(c - rank + N) mod N].
+  for (int c = 0; c < nranks; c++) {
+    int src_slot = (c - rank + nranks) % nranks;
+    memcpy(data + (size_t)c * (size_t)size,
+           temp + (size_t)src_slot * (size_t)size, (size_t)size);
+  }
+  free(temp);
+
+  TRACE(NCCL_BOOTSTRAP | NCCL_PROFILE,
+        "socketBruckAllGather first round in %f sec, rest in %f sec",
+        tFirst / 1e9, tRest / 1e9);
+  return ncclSuccess;
+fail:
+  if (temp) free(temp);
   return res;
 }
 #endif // NCCL_HAVE_PMIX
@@ -2556,12 +2768,19 @@ ncclResult_t bootstrapAllGather(void* commState, void* allData, int size) {
     }
   } else {
 #ifdef NCCL_HAVE_PMIX
-    // Tree path takes precedence over bidir/unidir when bootstrapInit decided
-    // it was viable (PMIx fast-path active + pow-of-two nranks + opt-in env).
-    // The flag is set once per comm; bootstrapSplit and other secondary code
-    // paths leave it at 0 so they fall through to the ring variants below.
+    // Tree path takes precedence over bidir/unidir when bootstrapInit
+    // decided it was viable (PMIx fast-path active + opt-in env). The
+    // flag is set once per comm; bootstrapSplit and other secondary
+    // code paths leave it at 0 so they fall through to the ring
+    // variants below. Algorithm dispatch:
+    //   * pow-2 N → recursive doubling (Phase A / A.2 persistent socks)
+    //   * non-pow-2 N → Bruck (Phase A.3 — JIT connect/accept)
     if (state->treeAllGatherEnabled) {
-      NCCLCHECKGOTO(socketTreeAllGather(state, (char*)allData, size), res, exit);
+      if (bootstrapTreePowOfTwo(nranks)) {
+        NCCLCHECKGOTO(socketTreeAllGather(state, (char*)allData, size), res, exit);
+      } else {
+        NCCLCHECKGOTO(socketBruckAllGather(state, (char*)allData, size), res, exit);
+      }
     } else
 #endif
     if (bootstrapBidirEnabled(nranks, 0)) {
@@ -2717,6 +2936,13 @@ ncclResult_t bootstrapClose(void* commState) {
       }
       if (STATE_LISTEN(state, socket.tree[k]).state >= ncclSocketStateInitialized) {
         NCCLCHECK(ncclSocketClose(&STATE_LISTEN(state, socket.tree[k])));
+      }
+      // [RCCL] Phase A.3.2: persistent Bruck OUTBOUND sockets. Only
+      // bound when treeAllGatherEnabled && non-pow-2; for pow-2 N or
+      // tree-allgather-off, these slots stay in StateNone and the
+      // close is a no-op.
+      if (STATE_RING(state, socket.bruckOut[k]).state == ncclSocketStateReady) {
+        NCCLCHECK(ncclSocketClose(&STATE_RING(state, socket.bruckOut[k])));
       }
     }
   }
