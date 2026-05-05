@@ -512,8 +512,7 @@ To see a list of available hardware report blocks, use the ``--list-available-me
    2 -> System Speed-of-Light
          2.1 -> Speed-of-Light
                   2.1.0 -> VALU FLOPs
-                  2.1.1 -> VALU IOPs
-                  2.1.2 -> MFMA FLOPs (F8)
+                  2.1.1 -> MFMA FLOPs (F8)
    ...
    5 -> Command Processor (CPC/CPF)
          5.1 -> Command Processor Fetcher
