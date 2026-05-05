@@ -288,8 +288,25 @@ protected:
     {
         void* p = nullptr;
         if(hipMalloc(&p, size) != hipSuccess) return nullptr;
-        (void)hipMemset(p, 0, size);
-        (void)hipDeviceSynchronize();
+
+        hipError_t err = hipMemset(p, 0, size);
+        if(err != hipSuccess)
+        {
+            ADD_FAILURE() << "hipMemset failed in AllocBuf: "
+                          << hipGetErrorString(err);
+            (void)hipFree(p);
+            return nullptr;
+        }
+
+        err = hipDeviceSynchronize();
+        if(err != hipSuccess)
+        {
+            ADD_FAILURE() << "hipDeviceSynchronize failed in AllocBuf: "
+                          << hipGetErrorString(err);
+            (void)hipFree(p);
+            return nullptr;
+        }
+
         return p;
     }
 
