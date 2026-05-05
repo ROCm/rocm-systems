@@ -184,17 +184,17 @@ private:
         // directBuff is only assigned by setDataPtrs when (Direct && ipcReg);
         // when Direct=1 but no buffer was registered, it stays NULL and using
         // it as a base would compute an invalid GPU address.
-        if ((flags & DirectWrite) && directBuff != nullptr) {
+        if (flags & DirectWrite) {
           ptrs[index] = directBuff + dstIx + offset;
-        } else if ((flags & DirectRead) && directBuff != nullptr) {  // empty send
+        } else if (flags & DirectRead) {  // empty send
           ptrs[index] = nullptr;
         } else {
           ptrs[index] = connEltsFifo + (step%NCCL_STEPS)*connStepSize;
         }
       } else if (!isSendNotRecv && DirectRecv) {
-        if ((flags & DirectRead) && directBuff != nullptr) {
+        if (flags & DirectRead) {
           ptrs[index] = directBuff + srcIx + offset;
-        } else if ((flags & DirectWrite) && directBuff != nullptr) {
+        } else if (flags & DirectWrite) {
           ptrs[index] = directBuff + dstIx + offset;  // send to next from my output buffer
         } else {
           ptrs[index] = connEltsFifo + (step%NCCL_STEPS)*connStepSize;
