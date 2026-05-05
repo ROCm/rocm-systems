@@ -3928,6 +3928,9 @@ cl_int ConvertHSAErrorIntoCLError(hsa_status_t hsa_status) {
     case (hsa_status_t)HSA_STATUS_ERROR_MEMORY_APERTURE_VIOLATION:
       cl_error = CL_INVALID_MEM_OBJECT;
       break;
+    case (hsa_status_t)HSA_STATUS_ERROR_INVALID_DISPATCH_PARAMETERS:
+      cl_error = CL_OUT_OF_RESOURCES;
+      break;
     case HSA_STATUS_ERROR:
     default:
       cl_error = CL_DEVICE_NOT_AVAILABLE;
@@ -3970,14 +3973,13 @@ void callbackQueue(hsa_status_t status, hsa_queue_t* queue, void* data) {
     // so do not let DumpCoreFile() be the reason to abort in those cases. These
     // errors should still honor HIP_SKIP_ABORT_ON_GPU_ERROR consistently.
     const bool is_oom = (status == HSA_STATUS_ERROR_OUT_OF_RESOURCES);
-    // EC_QUEUE_PACKET_DISPATCH_REGISTER_SIZE_INVALID is reported as
-    // HSA_STATUS_ERROR_INVALID_ISA. This is a deterministic dispatch-time
-    // failure (kernel exceeds hardware register limits), not a corruption
-    // or ISA mismatch. Treat it as recoverable: propagate to the caller as
-    // hipErrorLaunchFailure rather than aborting.
-    const bool is_register_overflow = (status == HSA_STATUS_ERROR_INVALID_ISA);
+    // HSA_STATUS_ERROR_INVALID_DISPATCH_PARAMETERS is a dispatch-time
+    // failure (kernel exceeds hardware register limits), not a corruption.
+    // Treat it as recoverable rather than aborting.
+    const bool invalid_dispatch =
+        (status == (hsa_status_t)HSA_STATUS_ERROR_INVALID_DISPATCH_PARAMETERS);
     const bool should_abort =
-      (is_oom || is_register_overflow)
+      (is_oom || invalid_dispatch)
         ? !HIP_SKIP_ABORT_ON_GPU_ERROR
         : (amd::Os::DumpCoreFile() || !HIP_SKIP_ABORT_ON_GPU_ERROR);
 
