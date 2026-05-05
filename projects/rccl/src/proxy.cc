@@ -1972,6 +1972,9 @@ ncclResult_t ncclProxyCreate(struct ncclComm* comm) {
     proxyState->profilerContext = comm->profilerContext;
     proxyState->directMode = comm->directMode;
     memcpy(proxyState->buffSizes, comm->buffSizes, sizeof(comm->buffSizes));
+    // [RCCL] Host side mirrors of device side NCCL_LL128_LINEELEMS & NCCL_LL128_DATAELEMS 
+    proxyState->ll128LineElems = comm->ll128LineElems;
+    proxyState->ll128DataElems = comm->ll128DataElems;
 
     PTHREADCHECK(pthread_create(&comm->proxyState->thread, NULL, ncclProxyService, comm->proxyState), "pthread_create");
     ncclSetThreadName(comm->proxyState->thread, "NCCL Service %2d", comm->cudaDev);

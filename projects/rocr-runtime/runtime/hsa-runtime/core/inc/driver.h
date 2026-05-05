@@ -146,6 +146,7 @@ public:
                                       void **mem, size_t size,
                                       uint32_t node_id) = 0;
 
+  /// @brief Free memory allocated by @ref AllocateMemory.
   virtual hsa_status_t FreeMemory(void *mem, size_t size) = 0;
 
   /// @brief Create an agent dispatch queue with user-mode access rights.

@@ -234,7 +234,7 @@ void AmdGpuCodeObject::load_sections(std::ifstream &elf_file) {
   }
 
   for (const auto &shdr : section_hdrs) {
-    if (shdr.sh_type == SHT_NULL)
+    if (shdr.sh_type == SHT_NULL || shdr.sh_type == SHT_NOBITS)
       continue;
     if (shdr.sh_name >= shstrtab_data.size())
       continue;

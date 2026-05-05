@@ -9,6 +9,7 @@
 
 #include "rocjitsu/isa/arch/amdgpu/cdna4/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna4/machine_insts.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"
 #include "rocjitsu/isa/instruction.h"
 #include <string>
 #include <string_view>
@@ -84,9 +85,12 @@ public:
   uint32_t dpp_bank_mask_ = 0xF;
   uint32_t dpp_bound_ctrl_ = 0;
   std::unique_ptr<DppOperand> dpp_src0_;
-  uint32_t sdwa_src0_sel_ = 6;
+  std::unique_ptr<DppOperand> dpp_src1_;
+  uint32_t sdwa_src0_sel_ = amdgpu::sdwa::DWORD;
   bool sdwa_src0_sext_ = false;
-  uint32_t sdwa_dst_sel_ = 6;
+  uint32_t sdwa_src1_sel_ = amdgpu::sdwa::DWORD;
+  bool sdwa_src1_sext_ = false;
+  uint32_t sdwa_dst_sel_ = amdgpu::sdwa::DWORD;
   uint32_t sdwa_dst_unused_ = 0;
   bool sdwa_clamp_ = false;
 };
@@ -116,9 +120,12 @@ public:
   uint32_t dpp_bank_mask_ = 0xF;
   uint32_t dpp_bound_ctrl_ = 0;
   std::unique_ptr<DppOperand> dpp_src0_;
-  uint32_t sdwa_src0_sel_ = 6;
+  std::unique_ptr<DppOperand> dpp_src1_;
+  uint32_t sdwa_src0_sel_ = amdgpu::sdwa::DWORD;
   bool sdwa_src0_sext_ = false;
-  uint32_t sdwa_dst_sel_ = 6;
+  uint32_t sdwa_src1_sel_ = amdgpu::sdwa::DWORD;
+  bool sdwa_src1_sext_ = false;
+  uint32_t sdwa_dst_sel_ = amdgpu::sdwa::DWORD;
   uint32_t sdwa_dst_unused_ = 0;
   bool sdwa_clamp_ = false;
 };
@@ -164,6 +171,7 @@ class Flat : public IsaInstruction<Isa> {
 public:
   Flat(std::string_view mnemonic, const FlatMachineInst *inst, ExecuteFn exec_fn);
   void build_modifiers(std::string &out) const override;
+  void implicit_uses(RegisterSet &uses) const override;
   using OpEncoding = FlatMachineInst;
   const OpEncoding inst_;
   std::string owned_mnemonic_;

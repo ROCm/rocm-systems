@@ -530,7 +530,7 @@ aqlprofile_att_get_buffer_packets(uint64_t*                      header,
                                   int                            shader_engine_id,
                                   int                            flags);
 
-struct aqlprofile_att_buffer_status_t
+typedef struct aqlprofile_att_buffer_status_t
 {
     uint64_t _size;       // sizeof(aqlprofile_att_buffer_status_t)
     void*    data;        // Read data from, if is full
@@ -539,7 +539,7 @@ struct aqlprofile_att_buffer_status_t
     bool     needs_swap;  // If buffer requires swap
     bool     is_too_late;
     bool     error;
-};
+} aqlprofile_att_buffer_status_t;
 
 /**
  * @brief Fn to retrieve buffer status.
@@ -655,10 +655,8 @@ typedef struct
 
 typedef enum
 {
-    AQLPROFILE_SPM_PARAMETER_TYPE_NONE = 0,
-    AQLPROFILE_SPM_PARAMETER_TYPE_BUFFER_SIZE,
-    AQLPROFILE_SPM_PARAMETER_TYPE_SAMPLE_INTERVAL_SCLK_CYCLES,
-    AQLPROFILE_SPM_PARAMETER_TYPE_SAMPLE_INTERVAL_REFCLK_CYCLES,
+    AQLPROFILE_SPM_PARAMETER_TYPE_BUFFER_SIZE = 0,
+    AQLPROFILE_SPM_PARAMETER_TYPE_SAMPLE_INTERVAL,
     AQLPROFILE_SPM_PARAMETER_TYPE_TIMEOUT,
     AQLPROFILE_SPM_PARAMETER_TYPE_SAMPLE_MODE,
     AQLPROFILE_SPM_PARAMETER_TYPE_LAST,
@@ -666,17 +664,9 @@ typedef enum
 
 typedef enum
 {
-    AQLPROFILE_SPM_PARAMETER_SAMPLE_MODE_NONE = 0,
-    AQLPROFILE_SPM_PARAMETER_SAMPLE_MODE_SCLK,
-    AQLPROFILE_SPM_PARAMETER_SAMPLE_MODE_REFCLK,
+    AQLPROFILE_SPM_PARAMETER_SAMPLE_MODE_SCLK = 0,
+    AQLPROFILE_SPM_PARAMETER_SAMPLE_MODE_REFCLK
 } aqlprofile_spm_parameter_interval_mode_t;
-
-typedef struct aqlprofile_spm_available_configuration_t
-{
-    aqlprofile_spm_parameter_type_t type         = AQLPROFILE_SPM_PARAMETER_TYPE_NONE;
-    uint64_t                        min_interval = 0;
-    uint64_t                        max_interval = 0;
-} aqlprofile_spm_available_configuration_t;
 
 typedef struct
 {
@@ -804,14 +794,14 @@ aqlprofile_spm_decode_stream_v1(aqlprofile_spm_buffer_desc_t        desc,
                                 size_t                              size,
                                 void*                               userdata);
 
-enum aqlprofile_spm_decode_query_t
+typedef enum aqlprofile_spm_decode_query_t
 {
     AQLPROFILE_SPM_DECODE_QUERY_SEG_SIZE = 0,
     AQLPROFILE_SPM_DECODE_QUERY_NUM_XCC,
     AQLPROFILE_SPM_DECODE_QUERY_EVENT_COUNT,
     AQLPROFILE_SPM_DECODE_QUERY_COUNTER_MAP_BYTE_OFFSET,
     AQLPROFILE_SPM_DECODE_QUERY_LAST
-};
+} aqlprofile_spm_decode_query_t;
 
 hsa_status_t
 aqlprofile_spm_decode_query(aqlprofile_spm_buffer_desc_t  desc,
@@ -820,16 +810,6 @@ aqlprofile_spm_decode_query(aqlprofile_spm_buffer_desc_t  desc,
 
 bool
 aqlprofile_spm_is_event_supported(aqlprofile_agent_handle_t agent, aqlprofile_pmc_event_t event);
-
-typedef hsa_status_t (*aqlprofile_spm_available_configurations_cb_t)(
-    const aqlprofile_spm_available_configuration_t* config,
-    size_t                                          num_config,
-    void*                                           user_data);
-
-hsa_status_t
-aqlprofile_spm_query_agent_capabilities(aqlprofile_agent_handle_t                    agent,
-                                        aqlprofile_spm_available_configurations_cb_t cb,
-                                        void*                                        userdata);
 
 #ifdef __cplusplus
 }
