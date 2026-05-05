@@ -44,8 +44,9 @@
 
 #include <algorithm>
 #include <atomic>
-#include <cstring>
+#include <cinttypes>
 #include <climits>
+#include <cstring>
 #include <map>
 #include <set>
 #include <string>
@@ -593,7 +594,7 @@ void GpuAgent::ReserveScratch()
 {
   size_t reserved_sz = core::Runtime::runtime_singleton_->flag().scratch_single_limit();
   if (reserved_sz > MaxScratchDevice()) {
-    fprintf(stdout, "User specified scratch limit exceeds device limits (requested:%lu max:%lu)!\n",
+    fprintf(stdout, "User specified scratch limit exceeds device limits (requested:%zu max:%zu)!\n",
                     reserved_sz, MaxScratchDevice());
     reserved_sz = MaxScratchDevice();
   }
@@ -2422,7 +2423,7 @@ void GpuAgent::AcquireQueueMainScratch(ScratchInfo& scratch) {
 
     // Attempt to trim the maximum number of concurrent waves to allow scratch to fit.
     if (core::Runtime::runtime_singleton_->flag().enable_queue_fault_message())
-      debug_print("Failed to map requested scratch (%ld) - reducing queue occupancy.\n",
+      debug_print("Failed to map requested scratch (%zd) - reducing queue occupancy.\n",
                   scratch.main_size);
     const uint64_t num_cus = properties_.NumFComputeCores / properties_.NumSIMDPerCU;
     const uint64_t se_per_xcc = properties_.NumShaderBanks / properties_.NumXcc;
@@ -2444,7 +2445,7 @@ void GpuAgent::AcquireQueueMainScratch(ScratchInfo& scratch) {
         scratch_used_large_ += scratch.main_size;
         scratch_cache_.insertMain(scratch);
         if (core::Runtime::runtime_singleton_->flag().enable_queue_fault_message())
-          debug_print("  %ld scratch mapped, %.2f%% occupancy.\n", scratch.main_size,
+          debug_print("  %zd scratch mapped, %.2f%% occupancy.\n", scratch.main_size,
                       float(waves_per_cu * num_cus) / scratch.dispatch_slots * 100.0f);
         return;
       }
@@ -2598,7 +2599,7 @@ void GpuAgent::TranslateTime(core::Signal* signal, hsa_amd_profiling_dispatch_ti
   signal->GetRawTs(false, start, end);
 
   if ((start == 0) || (end == 0) || (start < t0_.GPUClockCounter) || (end < t0_.GPUClockCounter)) {
-    debug_print("Signal %p time stamps may be invalid (start=%lu, end=%lu, t0=%lu).\n",
+    debug_print("Signal %p time stamps may be invalid (start=%" PRIu64 ", end=%" PRIu64 ", t0=%" PRIu64 ").\n",
                 &signal->signal_, start, end, t0_.GPUClockCounter);
     time.start = 0;
     time.end = 0;
@@ -2616,7 +2617,7 @@ void GpuAgent::TranslateTime(core::Signal* signal, hsa_amd_profiling_async_copy_
   signal->GetRawTs(true, start, end);
 
   if ((start == 0) || (end == 0) || (start < t0_.GPUClockCounter) || (end < t0_.GPUClockCounter)) {
-    debug_print("Signal %p async copy time stamps may be invalid (start=%lu, end=%lu, t0=%lu).\n",
+    debug_print("Signal %p async copy time stamps may be invalid (start=%" PRIu64 ", end=%" PRIu64 ", t0=%" PRIu64 ").\n",
                 &signal->signal_, start, end, t0_.GPUClockCounter);
     time.start = 0;
     time.end = 0;

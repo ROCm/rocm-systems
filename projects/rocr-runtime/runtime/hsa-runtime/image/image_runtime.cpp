@@ -43,6 +43,7 @@
 #include "image_runtime.h"
 
 #include <assert.h>
+#include <cinttypes>
 #include <climits>
 #include <cstring>
 #include <vector>
@@ -789,7 +790,7 @@ hsa_status_t ImageRuntime::CreateMipmapArrayHandle(
     debug_print("Populating mipmapped array SRD...");
     mipmap_array->printSRD();
     manager->printSRDDetailed(mipmap_array->srd);
-    debug_print("output handle = %lu", image_handle.handle);
+    debug_print("output handle = %" PRIu64, image_handle.handle);
   }
 
   return HSA_STATUS_SUCCESS;

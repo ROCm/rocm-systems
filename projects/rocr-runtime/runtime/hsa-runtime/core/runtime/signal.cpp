@@ -66,7 +66,7 @@ void SharedSignalPool_t::clear() {
     size_t capacity = 0;
     for (auto& block : block_list_) capacity += block.second;
     if (capacity != free_list_.size())
-      debug_print("Warning: Resource leak detected by SharedSignalPool, %ld Signals leaked.\n",
+      debug_print("Warning: Resource leak detected by SharedSignalPool, %zd Signals leaked.\n",
                   capacity - free_list_.size());
   }
 

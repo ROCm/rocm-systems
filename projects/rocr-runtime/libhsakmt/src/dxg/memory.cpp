@@ -27,6 +27,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <assert.h>
+#include <cinttypes>
 #include <sys/types.h>
 #if defined(__linux__)
 #include <sys/mman.h>
@@ -550,14 +551,14 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtRegisterGraphicsHandleToNodesExt(HSAuint64 Graphic
     RegisterFlags.ui32.requiresVAddr = 1;
   }
 
-  pr_debug("number of nodes %lu\n", NumberOfNodes);
+  pr_debug("number of nodes %" PRIu64 "\n", NumberOfNodes);
   wsl::thunk::GpuMemoryHandle mem_handle;
 
   ret = import_dmabuf_fd(GraphicsResourceHandle, NodeArray[0], RegisterFlags.ui32.requiresVAddr,
                          false, &mem_handle, RegisterFlags.ui32.kmtHandle);
   if (ret != HSAKMT_STATUS_SUCCESS) {
     pr_err("hsaKmtRegisterGraphicsHandleToNodesExt: import_dmabuf_fd failed, "
-           "GraphicsResourceHandle: %lu, NodeId: %u\n",
+           "GraphicsResourceHandle: %" PRIu64 ", NodeId: %u\n",
            GraphicsResourceHandle, NodeArray[0]);
     return ret;
   }
@@ -641,7 +642,7 @@ HSAKMT_STATUS import_dmabuf_fd(uint64_t DMABufFd, uint32_t NodeId, bool alloc_va
     std::lock_guard<std::mutex> gard(*allocation_map_lock_);
     auto it = allocation_map_->find((void*)gpu_va);
     if (it == allocation_map_->end()) {
-      pr_err("where's the conflict buffer? va %#lx\n", create_info.va_hint);
+      pr_err("where's the conflict buffer? va %#" PRIx64 "\n", create_info.va_hint);
       return HSAKMT_STATUS_ERROR;
     }
     wsl::thunk::GpuMemory *conflict_mem = wsl::thunk::GpuMemory::Convert(it->second.handle);
