@@ -62,6 +62,10 @@ rocprofiler_add_option(
     "Enable building abseil-cpp (Abseil logging) library internally" ON)
 rocprofiler_add_option(ROCPROFILER_BUILD_SQLITE3
                        "Enable building sqlite3 library internally" OFF)
+rocprofiler_add_option(
+    ROCPROFILER_BUILD_SQLITE_ZSTD
+    "Enable building the sqlite-zstd loadable extension (phiresky/sqlite-zstd) for transparent ZSTD column compression in ROCPD output databases. Requires a Rust toolchain (cargo, rustc) and libzstd-dev."
+    ON)
 rocprofiler_add_option(ROCPROFILER_BUILD_PYBIND11
                        "Enable building pybind11 library internally" ON)
 rocprofiler_add_option(ROCPROFILER_BUILD_GOTCHA

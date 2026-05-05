@@ -24,6 +24,10 @@ rocprofiler_add_interface_library(rocprofiler-sdk-cereal "Enables Cereal support
                                   INTERNAL)
 rocprofiler_add_interface_library(rocprofiler-sdk-sqlite3 "Enables SQLite3 support"
                                   INTERNAL)
+rocprofiler_add_interface_library(
+    rocprofiler-sdk-sqlite-zstd
+    "Carries metadata for the sqlite-zstd loadable extension (phiresky/sqlite-zstd) used by ROCPD to transparently compress columns in the output database"
+    INTERNAL)
 rocprofiler_add_interface_library(rocprofiler-sdk-pybind11 "Enables PyBind11 support"
                                   INTERNAL)
 rocprofiler_add_interface_library(rocprofiler-sdk-gotcha "Enables GOTCHA support"

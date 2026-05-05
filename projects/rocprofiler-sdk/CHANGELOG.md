@@ -21,12 +21,22 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
   - Supports multiple resume/pause cycles, each producing separate trace output files
   - Incompatible with `--att-consecutive-kernels`
 
+**ROCPD output:**
+
+- The `%pid%_results.db` written by `rocprofv3 --output-format rocpd` is now produced with transparent ZSTD compression on the largest text and JSONB columns (`rocpd_string.string` and the `extdata` columns of `rocpd_info_*`, `rocpd_region`, `rocpd_sample`, `rocpd_kernel_dispatch`, `rocpd_memory_copy`, `rocpd_memory_allocate`) via the bundled `phiresky/sqlite-zstd` loadable extension
+  - The file remains a valid SQLite 3 database (`.db` extension unchanged); readers that load `libsqlite_zstd.so` see compressed columns transparently
+  - Compression mode is recorded as a `rocpd_metadata` row with `tag = 'sqlite_zstd'` so readers can detect the format without loading the extension
+  - New CMake option `ROCPROFILER_BUILD_SQLITE_ZSTD` (default `ON`) toggles the build-time dependency on Rust/cargo and the bundled `external/sqlite-zstd` submodule
+  - Runtime override: `ROCPROFILER_SQLITE_ZSTD_LIBPATH=<path>` selects an alternate extension binary; pointing at a non-existent path falls back to producing an uncompressed database
+  - The bundled `rocpd` Python CLI (`convert`, `query`, `summary`, `merge`, `package`) and the C++ pybind interop layer do not yet auto-load the extension; updating them is a tracked follow-up
+
 **Documentation:**
 
 - Added "Using Late-Loading" how-to guide with code examples
 - Documented late-loading workflow and integration with rocprofiler-register
 - Added marker-controlled thread tracing section to the thread trace how-to guide
 - Added cross-reference from ROCTx documentation to ATT with selected-regions
+- Added "Transparent ZSTD compression" section to the rocpd output format how-to guide
 
 ### Changed
 

@@ -291,6 +291,74 @@ else()
 endif()
 
 #
+# sqlite-zstd (phiresky/sqlite-zstd) loadable extension
+#
+# Built via cargo from the external/sqlite-zstd submodule. Produces a single
+# libsqlite_zstd.so that ROCPD loads at runtime (via sqlite3_load_extension)
+# from the writer in source/lib/output/generateRocpd.cpp to transparently
+# compress selected columns of the output database.
+#
+if(ROCPROFILER_BUILD_SQLITE_ZSTD)
+    rocprofiler_checkout_git_submodule(
+        RECURSIVE
+        RELATIVE_PATH external/sqlite-zstd
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+        TEST_FILE Cargo.toml
+        REPO_URL https://github.com/phiresky/sqlite-zstd
+        REPO_BRANCH "master")
+
+    find_program(
+        CARGO_EXECUTABLE
+        NAMES cargo
+        PATH_SUFFIXES bin REQUIRED)
+
+    set(ROCPROFILER_SQLITE_ZSTD_LIBNAME "libsqlite_zstd.so")
+    set(ROCPROFILER_SQLITE_ZSTD_BUILD_DIR
+        "${PROJECT_BINARY_DIR}/external/sqlite-zstd/build")
+    set(ROCPROFILER_SQLITE_ZSTD_INSTALL_DIR
+        "${PROJECT_BINARY_DIR}/external/sqlite-zstd/install/lib")
+    set(ROCPROFILER_SQLITE_ZSTD_LIBPATH
+        "${ROCPROFILER_SQLITE_ZSTD_INSTALL_DIR}/${ROCPROFILER_SQLITE_ZSTD_LIBNAME}")
+
+    include(ExternalProject)
+    externalproject_add(
+        rocprofiler-sdk-sqlite-zstd-build
+        PREFIX ${PROJECT_BINARY_DIR}/external/sqlite-zstd/prefix
+        SOURCE_DIR ${PROJECT_SOURCE_DIR}/external/sqlite-zstd
+        BUILD_IN_SOURCE 0
+        CONFIGURE_COMMAND ${CMAKE_COMMAND} -E make_directory
+                          ${ROCPROFILER_SQLITE_ZSTD_BUILD_DIR}
+        BUILD_COMMAND
+            ${CMAKE_COMMAND} -E env "CARGO_TARGET_DIR=${ROCPROFILER_SQLITE_ZSTD_BUILD_DIR}"
+            ${CARGO_EXECUTABLE} build --release --manifest-path
+            ${PROJECT_SOURCE_DIR}/external/sqlite-zstd/Cargo.toml
+        INSTALL_COMMAND
+            ${CMAKE_COMMAND} -E make_directory
+            ${ROCPROFILER_SQLITE_ZSTD_INSTALL_DIR} COMMAND ${CMAKE_COMMAND} -E
+            copy_if_different
+            ${ROCPROFILER_SQLITE_ZSTD_BUILD_DIR}/release/${ROCPROFILER_SQLITE_ZSTD_LIBNAME}
+            ${ROCPROFILER_SQLITE_ZSTD_LIBPATH}
+        BUILD_BYPRODUCTS ${ROCPROFILER_SQLITE_ZSTD_LIBPATH})
+
+    target_compile_definitions(
+        rocprofiler-sdk-sqlite-zstd
+        INTERFACE
+            $<BUILD_INTERFACE:ROCPROFILER_SQLITE_ZSTD_AVAILABLE=1>
+            $<BUILD_INTERFACE:ROCPROFILER_SQLITE_ZSTD_LIBNAME="${ROCPROFILER_SQLITE_ZSTD_LIBNAME}">
+        )
+
+    set_target_properties(
+        rocprofiler-sdk-sqlite-zstd
+        PROPERTIES rocprofiler_sqlite_zstd_libpath "${ROCPROFILER_SQLITE_ZSTD_LIBPATH}"
+                   rocprofiler_sqlite_zstd_libname "${ROCPROFILER_SQLITE_ZSTD_LIBNAME}")
+
+    add_dependencies(rocprofiler-sdk-sqlite-zstd rocprofiler-sdk-sqlite-zstd-build)
+else()
+    target_compile_definitions(rocprofiler-sdk-sqlite-zstd
+                               INTERFACE $<BUILD_INTERFACE:ROCPROFILER_SQLITE_ZSTD_AVAILABLE=0>)
+endif()
+
+#
 # PyBind11
 #
 if(ROCPROFILER_BUILD_PYBIND11)

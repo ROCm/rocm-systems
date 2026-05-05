@@ -21,7 +21,7 @@ ENV LD_LIBRARY_PATH=/opt/rocm/lib:/opt/rocm/llvm/lib:${LD_LIBRARY_PATH}
 RUN set-euo pipefail; \
     if [ -f /etc/debian_version ]; then \
         apt-get update && \
-        apt-get install -y curl wget gpg python3 python3-pip build-essential coreutils software-properties-common cmake g++-11 g++-12 libdw-dev libsqlite3-dev libdrm-dev file autoconf pkg-config rpm libzstd-dev && \
+        apt-get install -y curl wget gpg python3 python3-pip build-essential coreutils software-properties-common cmake g++-11 g++-12 libdw-dev libsqlite3-dev libdrm-dev file autoconf pkg-config rpm libzstd-dev rustc cargo && \
         add-apt-repository ppa:git-core/ppa && \
         mkdir -p /etc/apt/keyrings && \
         wget -N -P /tmp/ https://repo.radeon.com/amdgpu-install/7.2/ubuntu/jammy/amdgpu-install_7.2.70200-1_all.deb && \
@@ -58,7 +58,7 @@ RUN set -euo pipefail; \
             echo -e "[amdgpu]\nname=amdgpu\nbaseurl=https://repo.radeon.com/amdgpu/latest/rhel/9.6/main/x86_64/\nenabled=1\npriority=50\ngpgcheck=1\ngpgkey=https://repo.radeon.com/rocm/rocm.gpg.key" > /etc/yum.repos.d/amdgpu.repo; \
         fi; \
         dnf clean all; \
-        dnf install -y rocm-openmp rocm-openmp-sdk rocm-llvm-devel hipify-clang libsqlite3x-devel openmpi-devel elfutils-devel; \
+        dnf install -y rocm-openmp rocm-openmp-sdk rocm-llvm-devel hipify-clang libsqlite3x-devel openmpi-devel elfutils-devel libzstd-devel rust cargo; \
         python3 -m pip install -U awscli pipx; \
         python3 -m venv rocprofiler-sdk; \
         source rocprofiler-sdk/bin/activate; \
@@ -74,7 +74,7 @@ RUN set -euo pipefail; \
         echo -e "[ROCm-latest]\nname=ROCm\nbaseurl=https://repo.radeon.com/rocm/zyp/latest/main\nenabled=1\npriority=50\ngpgcheck=1\ngpgkey=https://repo.radeon.com/rocm/rocm.gpg.key" > /etc/zypp/repos.d/rocm.repo; \
         echo -e "[amdgpu]\nname=amdgpu\nbaseurl=https://repo.radeon.com/amdgpu/latest/sle/15.7/main/x86_64/\nenabled=1\npriority=50\ngpgcheck=1\ngpgkey=https://repo.radeon.com/rocm/rocm.gpg.key" > /etc/zypp/repos.d/amdgpu.repo; \
         zypper --gpg-auto-import-keys refresh; \
-        zypper --non-interactive install -y rocm-openmp rocm-openmp-sdk rocm-llvm-devel hipify-clang sqlite3-devel python3-pip; \
+        zypper --non-interactive install -y rocm-openmp rocm-openmp-sdk rocm-llvm-devel hipify-clang sqlite3-devel python3-pip libzstd-devel rust cargo; \
         python3 -m venv rocprofiler-sdk; \
         source rocprofiler-sdk/bin/activate; \
         python3 -m pip install --upgrade pip pipx; \

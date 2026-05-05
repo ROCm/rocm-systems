@@ -59,6 +59,13 @@
 #include <sqlite3.h>
 #include <unistd.h>
 
+#if !defined(ROCPROFILER_SQLITE_ZSTD_AVAILABLE)
+#    define ROCPROFILER_SQLITE_ZSTD_AVAILABLE 0
+#endif
+#if !defined(ROCPROFILER_SQLITE_ZSTD_LIBNAME)
+#    define ROCPROFILER_SQLITE_ZSTD_LIBNAME "libsqlite_zstd.so"
+#endif
+
 #include <dlfcn.h>
 #include <algorithm>
 #include <array>
@@ -142,6 +149,7 @@ struct rocpd_db
     rocpd_db& operator=(rocpd_db&&) = delete;
 
     sqlite3*            conn                = nullptr;
+    bool                zstd_enabled        = false;
     std::string         uuid                = {};
     std::string         guid                = {};
     schema_map_t        schemas             = {};
@@ -264,6 +272,194 @@ read_schema_file(rocpd_db& db, rocpd_sql_schema_kind_t schema_kind)
         ROCPD_SQL_ENGINE_SQLITE3, schema_kind, _options, &_variables, read_file, nullptr, 0, &db));
 
     return db.schemas.at(schema_kind);
+}
+
+// Resolve the absolute path to the bundled phiresky/sqlite-zstd loadable
+// extension. The extension is installed alongside librocprofiler-sdk-rocpd.so
+// at <rocpd lib dir>/rocprofiler-sdk-rocpd/libsqlite_zstd.so by
+// source/lib/output/CMakeLists.txt. We locate it the same way that
+// rocpd_sql_load_schema locates schema files (dladdr against a known symbol in
+// the rocpd shared library), and allow override via env var
+// ROCPROFILER_SQLITE_ZSTD_LIBPATH for power users / non-default installs.
+std::string
+resolve_sqlite_zstd_lib_path()
+{
+    auto _env = common::get_env("ROCPROFILER_SQLITE_ZSTD_LIBPATH", "");
+    if(!_env.empty()) return _env;
+
+    auto* _sym = dlsym(RTLD_DEFAULT, "rocpd_sql_load_schema");
+    if(!_sym) return std::string{ROCPROFILER_SQLITE_ZSTD_LIBNAME};
+
+    Dl_info dl_info = {};
+    if(dladdr(_sym, &dl_info) == 0 || dl_info.dli_fname == nullptr)
+        return std::string{ROCPROFILER_SQLITE_ZSTD_LIBNAME};
+
+    auto _path = fs::path{dl_info.dli_fname}.lexically_normal().parent_path() /
+                 std::string{"rocprofiler-sdk-rocpd"} /
+                 std::string{ROCPROFILER_SQLITE_ZSTD_LIBNAME};
+    return _path.string();
+}
+
+// Attempt to load the sqlite-zstd loadable extension into `conn`. Returns true
+// on success, false otherwise. All failures are demoted to warnings: a missing
+// or incompatible extension must never break profiling output, and the writer
+// will fall through to producing the same uncompressed database it produced
+// before this change.
+bool
+load_sqlite_zstd_extension(sqlite3* conn)
+{
+    if constexpr(ROCPROFILER_SQLITE_ZSTD_AVAILABLE == 0)
+    {
+        ROCP_INFO << "[rocpd] sqlite-zstd disabled at build time "
+                     "(ROCPROFILER_BUILD_SQLITE_ZSTD=OFF); writing uncompressed database";
+        return false;
+    }
+
+    auto ext_path = resolve_sqlite_zstd_lib_path();
+    if(ext_path.empty() || !fs::exists(ext_path))
+    {
+        ROCP_CI_LOG(WARNING) << fmt::format(
+            "[rocpd] sqlite-zstd extension not found at '{}'; writing uncompressed database. "
+            "Override search path with ROCPROFILER_SQLITE_ZSTD_LIBPATH=<path/to/{}>",
+            ext_path,
+            ROCPROFILER_SQLITE_ZSTD_LIBNAME);
+        return false;
+    }
+
+    if(sqlite3_enable_load_extension(conn, 1) != SQLITE_OK)
+    {
+        ROCP_CI_LOG(WARNING) << fmt::format(
+            "[rocpd] sqlite3_enable_load_extension failed: {}; writing uncompressed database",
+            sqlite3_errmsg(conn));
+        return false;
+    }
+
+    char* errmsg = nullptr;
+    auto  rc =
+        sqlite3_load_extension(conn, ext_path.c_str(), "sqlite3_sqlitezstd_init", &errmsg);
+
+    sqlite3_enable_load_extension(conn, 0);
+
+    if(rc != SQLITE_OK)
+    {
+        ROCP_CI_LOG(WARNING) << fmt::format(
+            "[rocpd] sqlite3_load_extension('{}') failed: {}; writing uncompressed database",
+            ext_path,
+            (errmsg) ? errmsg : "unknown error");
+        if(errmsg) sqlite3_free(errmsg);
+        return false;
+    }
+
+    ROCP_INFO << fmt::format("[rocpd] loaded sqlite-zstd extension from '{}'", ext_path);
+    return true;
+}
+
+// (table, column) pairs to mark for transparent zstd compression. Column names
+// must use the {{uuid}} placeholder; they are resolved via replace_uuid below.
+// Targets were chosen to match the audit performed in the plan: every column
+// here is either selected through directly or accessed via JSON_EXTRACT in the
+// shipped views, both of which work transparently when the reader also loads
+// the sqlite-zstd extension. None of the targets are referenced in WHERE/JOIN
+// predicates or in indexes (all indexes in rocpd_indexes.sql are commented out
+// at the time of this change).
+constexpr std::array<std::pair<std::string_view, std::string_view>, 11>
+    sqlite_zstd_compression_targets = {{
+        {"rocpd_string{{uuid}}", "string"},
+        {"rocpd_info_process{{uuid}}", "extdata"},
+        {"rocpd_info_thread{{uuid}}", "extdata"},
+        {"rocpd_info_agent{{uuid}}", "extdata"},
+        {"rocpd_info_queue{{uuid}}", "extdata"},
+        {"rocpd_info_stream{{uuid}}", "extdata"},
+        {"rocpd_region{{uuid}}", "extdata"},
+        {"rocpd_sample{{uuid}}", "extdata"},
+        {"rocpd_kernel_dispatch{{uuid}}", "extdata"},
+        {"rocpd_memory_copy{{uuid}}", "extdata"},
+        {"rocpd_memory_allocate{{uuid}}", "extdata"},
+    }};
+
+// Apply transparent zstd compression to the curated set of (table, column)
+// pairs above and run a one-shot maintenance + VACUUM pass to compact existing
+// rows. Must be called after every bulk insert in write_rocpd has finished
+// (otherwise zstd_enable_transparent has nothing to compress) and after the
+// indexes have been created. Any SQL-level failure here is caught and demoted
+// to a warning: the (already complete) uncompressed database remains valid and
+// readable, just larger than intended.
+void
+apply_zstd_compression(rocpd_db& db)
+{
+    if(db.conn == nullptr) return;
+
+    auto run_sql = [&](std::string_view label, const std::string& stmt) -> bool {
+        char* errmsg = nullptr;
+        auto  rc     = sqlite3_exec(db.conn, stmt.c_str(), nullptr, nullptr, &errmsg);
+        if(rc != SQLITE_OK)
+        {
+            ROCP_CI_LOG(WARNING) << fmt::format(
+                "[rocpd] sqlite-zstd {} failed (rc={}, {}); leaving uncompressed database in "
+                "place. SQL: {}",
+                label,
+                rc,
+                (errmsg) ? errmsg : "unknown error",
+                stmt);
+            if(errmsg) sqlite3_free(errmsg);
+            return false;
+        }
+        if(errmsg) sqlite3_free(errmsg);
+        return true;
+    };
+
+    for(const auto& [table_tmpl, column] : sqlite_zstd_compression_targets)
+    {
+        auto table = replace_uuid(db, table_tmpl);
+        // dict_chooser '''a''' selects a single shared dictionary per table;
+        // compression_level 19 trades CPU at finalize-time for ~2x better
+        // ratio than the default level 3 on the textual/JSON payloads we
+        // target. min_dict_size_bytes_for_training keeps the maintenance pass
+        // from training a dictionary on a near-empty column.
+        auto config = fmt::format(
+            "{{\"table\": \"{}\", \"column\": \"{}\", \"compression_level\": 19, "
+            "\"dict_chooser\": \"''a''\", \"min_dict_size_bytes_for_training\": 5000}}",
+            table,
+            column);
+        auto stmt = fmt::format("SELECT zstd_enable_transparent('{}');", config);
+        if(!run_sql(fmt::format("zstd_enable_transparent({}.{})", table, column), stmt))
+            return;
+    }
+
+    if(!run_sql("zstd_incremental_maintenance",
+                std::string{"SELECT zstd_incremental_maintenance(NULL, 1.0);"}))
+        return;
+
+    if(!run_sql("VACUUM", std::string{"VACUUM;"})) return;
+
+    ROCP_INFO << fmt::format("[rocpd] sqlite-zstd compression applied to {} (table, column) pairs",
+                             sqlite_zstd_compression_targets.size());
+}
+
+// Insert a row into rocpd_metadata recording whether the file was written with
+// sqlite-zstd compression enabled, so downstream readers can detect the format
+// without having to load the extension just to probe.
+void
+record_sqlite_zstd_metadata(rocpd_db& db, bool enabled)
+{
+    if(db.conn == nullptr) return;
+
+    auto stmt = fmt::format(
+        "INSERT INTO `rocpd_metadata{}` (\"tag\", \"value\") VALUES ('sqlite_zstd', '{}');",
+        db.uuid,
+        (enabled) ? "enabled" : "disabled");
+
+    char* errmsg = nullptr;
+    auto  rc     = sqlite3_exec(db.conn, stmt.c_str(), nullptr, nullptr, &errmsg);
+    if(rc != SQLITE_OK)
+    {
+        ROCP_CI_LOG(WARNING) << fmt::format(
+            "[rocpd] failed to record sqlite_zstd metadata (rc={}, {}); SQL: {}",
+            rc,
+            (errmsg) ? errmsg : "unknown error",
+            stmt);
+        if(errmsg) sqlite3_free(errmsg);
+    }
 }
 
 int
@@ -1063,9 +1259,21 @@ write_rocpd(
             output_file.c_str(), &conn, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE, nullptr));
         SQLITE3_CHECK(sqlite3_busy_handler(conn, &sql::busy_handler, nullptr));
 
+        // Load the bundled sqlite-zstd extension before any schema is created
+        // so its triggers are available to the connection. Failure here is a
+        // warning, not fatal: write_rocpd falls back to the same uncompressed
+        // database it produced before this change.
+        db.zstd_enabled = load_sqlite_zstd_extension(conn);
+
         ROCP_ERROR << fmt::format("Opened result file: {} (UUID={})", output_file, uuid_v7);
 
         execute_raw_sql_statements(conn, table_schema);
+
+        // Record the compression mode in rocpd_metadata so readers can detect
+        // it without loading the extension just to probe. Done immediately
+        // after the table schema (which CREATEs rocpd_metadata) and before any
+        // bulk inserts.
+        record_sqlite_zstd_metadata(db, db.zstd_enabled);
 
         for(auto itr : {ROCPD_SQL_SCHEMA_ROCPD_VIEWS,
                         ROCPD_SQL_SCHEMA_ROCPD_DATA_VIEWS,
@@ -2047,6 +2255,16 @@ write_rocpd(
             auto indexes_schema    = read_schema_file(db, ROCPD_SQL_SCHEMA_ROCPD_INDEXES);
             execute_raw_sql_statements(conn, indexes_schema);
         }
+    }
+
+    // Apply transparent zstd compression now that all bulk inserts and indexes
+    // are in place. Skipped if the extension failed to load above. Runs
+    // outside the deferred_transaction scope because zstd_incremental_maintenance
+    // and VACUUM cannot run inside a transaction.
+    if(db.zstd_enabled)
+    {
+        auto _sqlgenperf_zstd = get_simple_timer("sqlite-zstd compress");
+        apply_zstd_compression(db);
     }
 }
 }  // namespace tool

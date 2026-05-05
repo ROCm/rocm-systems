@@ -72,9 +72,28 @@ target_link_libraries(
             rocprofiler-sdk::rocprofiler-sdk-amd-comgr
             rocprofiler-sdk::rocprofiler-sdk-dw
             rocprofiler-sdk::rocprofiler-sdk-elf
-            rocprofiler-sdk::rocprofiler-sdk-sqlite3)
+            rocprofiler-sdk::rocprofiler-sdk-sqlite3
+            rocprofiler-sdk-sqlite-zstd)
 
 target_compile_definitions(rocprofiler-sdk-output-library
                            PRIVATE PROJECT_BINARY_DIR="${PROJECT_BINARY_DIR}")
 
 add_subdirectory(sql)
+
+#
+# Install the sqlite-zstd loadable extension next to the rocpd shared library so
+# the writer in generateRocpd.cpp can resolve it via dladdr at runtime. The path
+# layout matches what resolve_sqlite_zstd_lib_path() in generateRocpd.cpp expects:
+# <librocprofiler-sdk-rocpd.so dir>/rocprofiler-sdk-rocpd/<libname>
+#
+if(ROCPROFILER_BUILD_SQLITE_ZSTD)
+    get_target_property(_ROCPROFILER_SQLITE_ZSTD_LIBPATH rocprofiler-sdk-sqlite-zstd
+                        rocprofiler_sqlite_zstd_libpath)
+    add_dependencies(rocprofiler-sdk-output-library rocprofiler-sdk-sqlite-zstd-build)
+
+    install(
+        FILES ${_ROCPROFILER_SQLITE_ZSTD_LIBPATH}
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}/rocprofiler-sdk-rocpd
+        COMPONENT rocpd
+        OPTIONAL)
+endif()

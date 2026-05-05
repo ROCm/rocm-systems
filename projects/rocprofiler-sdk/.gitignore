@@ -37,6 +37,9 @@
 /.cache
 *.vscode
 
+# Local CMake install prefix (build artifacts)
+/install/
+
 # Github Workflows
 /.github
 

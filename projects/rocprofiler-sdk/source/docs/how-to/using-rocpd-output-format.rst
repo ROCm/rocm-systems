@@ -46,6 +46,80 @@ The profiling session generates output files following the naming convention ``%
 
 - ``%pid%``: The process identifier of the profiled application.
 
+.. _using-rocpd-output-format-zstd:
+
+Transparent ZSTD compression
+----------------------------
+
+Starting with this release, ``rocprofv3`` writes the ``%pid%_results.db`` file
+with transparent `ZSTD <https://facebook.github.io/zstd/>`_ compression applied
+to the largest text and JSONB columns (``rocpd_string.string`` and the
+``extdata`` columns of the ``rocpd_info_*``, ``rocpd_region``, ``rocpd_sample``,
+``rocpd_kernel_dispatch``, ``rocpd_memory_copy``, and ``rocpd_memory_allocate``
+tables) using the `phiresky/sqlite-zstd
+<https://github.com/phiresky/sqlite-zstd>`_ loadable extension. The file is
+still a valid SQLite 3 database (the ``.db`` extension is unchanged).
+
+A row is inserted into the ``rocpd_metadata`` table at write time:
+
+.. code-block:: sql
+
+   SELECT value FROM rocpd_metadata WHERE tag = 'sqlite_zstd';
+   -- 'enabled' if the extension was loaded at write time, 'disabled' otherwise
+
+Reading a compressed database
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Any reader that loads ``libsqlite_zstd.so`` sees the compressed columns
+transparently as if they were never compressed. Without the extension, the
+selected columns return the raw compressed BLOB and a set of ``_zstd_*``
+shadow tables become visible.
+
+The extension is installed alongside the rocpd shared library at
+``<install-prefix>/lib/rocprofiler-sdk-rocpd/libsqlite_zstd.so``.
+
+From the ``sqlite3`` shell:
+
+.. code-block:: bash
+
+   sqlite3 results.db
+   sqlite> .load /opt/rocm-<version>/lib/rocprofiler-sdk-rocpd/libsqlite_zstd.so
+   sqlite> SELECT * FROM rocpd_string LIMIT 5;
+
+From Python:
+
+.. code-block:: python
+
+   import sqlite3
+   conn = sqlite3.connect("results.db")
+   conn.enable_load_extension(True)
+   conn.load_extension("/opt/rocm-<version>/lib/rocprofiler-sdk-rocpd/libsqlite_zstd.so")
+   conn.enable_load_extension(False)
+   for row in conn.execute("SELECT * FROM rocpd_string LIMIT 5"):
+       print(row)
+
+.. note::
+
+   The bundled ``rocpd`` Python CLI (``convert``, ``query``, ``summary``,
+   ``merge``, ``package``) does not yet auto-load the ``sqlite-zstd``
+   extension. Reader integration is tracked as a follow-up. Until it lands,
+   queries that filter or join on the compressed columns through the CLI
+   will operate on raw compressed BLOBs.
+
+Disabling compression
+^^^^^^^^^^^^^^^^^^^^^
+
+Compression can be disabled at build time by configuring with
+``-DROCPROFILER_BUILD_SQLITE_ZSTD=OFF``, or at runtime on a per-run basis by
+pointing the writer at a non-existent extension path:
+
+.. code-block:: bash
+
+   ROCPROFILER_SQLITE_ZSTD_LIBPATH=/dev/null rocprofv3 --hip-trace -- <application>
+
+In both cases the writer logs a warning and produces an uncompressed database
+identical to what previous releases produced.
+
 Converting rocpd to alternative formats
 ---------------------------------------
 
