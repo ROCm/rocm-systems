@@ -59,7 +59,7 @@ sampling_service<Policies>::sampling_service(sampling_config    config,
 : config_(std::move(config))
 , callbacks_(std::move(callbacks))
 , thread_info_resolver_(callbacks_.resolve_thread_info)
-, trace_sink_(thread_info_resolver_, config_.hw_counter_labels)
+, trace_sink_(thread_info_resolver_, config_.hw_counter_labels, callbacks_)
 , perfetto_sink_(thread_info_resolver_, config_.use_perfetto,
                  config_.perfetto_annotations)
 , pause_registry_(clock_)

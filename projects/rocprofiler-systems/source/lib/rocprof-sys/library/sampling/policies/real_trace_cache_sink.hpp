@@ -3,7 +3,6 @@
 
 #pragma once
 
-#include "core/trace_cache/cache_manager.hpp"
 #include "core/trace_cache/sample_type.hpp"
 #include "logger/debug.hpp"
 #include "rocprofiler-systems/categories.h"
@@ -13,12 +12,14 @@
 #include "sampling/data/track_name.hpp"
 #include "sampling/data/track_traits.hpp"
 #include "sampling/policies/stack_frame_json.hpp"
+#include "sampling/sampling_callbacks.hpp"
 #include "sampling/thread_info_data.hpp"
 
 #include <spdlog/fmt/fmt.h>
 
 #include <array>
 #include <cstdint>
+#include <functional>
 #include <optional>
 #include <string>
 #include <utility>
@@ -39,10 +40,13 @@ template <class ThreadInfoResolverT>
 class trace_cache_sink
 {
 public:
-    explicit trace_cache_sink(ThreadInfoResolverT&     resolver,
-                              std::vector<std::string> hw_labels = {})
+    explicit trace_cache_sink(ThreadInfoResolverT&      resolver,
+                              std::vector<std::string>  hw_labels = {},
+                              sampling_callbacks const& callbacks = {})
     : resolver_(resolver)
     , hw_labels_(std::move(hw_labels))
+    , store_region_(callbacks.store_region_sample)
+    , store_pmc_(callbacks.store_pmc_event)
     {}
 
     void store_timer(int64_t tid, std::vector<timer_sample> const& samples)
@@ -73,7 +77,7 @@ public:
                                        ? ("0x" + fmt::format("{:X}", frame.address))
                                        : frame.name;
 
-                trace_cache::get_buffer_storage().store(make_region_sample(
+                store_region_(make_region_sample(
                     category_id, sys_id, track_name, name, sample.beg_ns, sample.end_ns,
                     category_str, frame, depth, sample.metrics.cpu_ns));
 
@@ -107,9 +111,9 @@ public:
                 std::string name = frame.name.empty()
                                        ? ("0x" + fmt::format("{:X}", frame.address))
                                        : frame.name;
-                trace_cache::get_buffer_storage().store(make_region_sample(
-                    category_id, sys_id, track_name, name, sample.beg_ns, sample.end_ns,
-                    category_str, frame, depth));
+                store_region_(make_region_sample(category_id, sys_id, track_name, name,
+                                                 sample.beg_ns, sample.end_ns,
+                                                 category_str, frame, depth));
                 ++depth;
             }
         }
@@ -135,16 +139,14 @@ public:
                 if(!sample.metrics.valid.test(descriptor.valid_bit)) continue;
                 std::string track = std::string{ descriptor.track_prefix } + " [" +
                                     std::to_string(seq_id) + "]";
-                trace_cache::get_buffer_storage().store(
-                    trace_cache::pmc_event_with_sample{
-                        descriptor.category_enum, std::move(track),
-                        static_cast<std::size_t>(mid_ns), std::string{ "{}" },
-                        /*stack_id*/ 0, /*parent_stack_id*/ 0,
-                        /*correlation_id*/ 0, /*call_stack*/ std::string{},
-                        /*line_info*/ std::string{}, static_cast<uint32_t>(sys_id),
-                        /*device_type*/ uint8_t{ 0 },
-                        std::string{ descriptor.track_prefix },
-                        descriptor.read(sample.metrics), std::optional<int64_t>{} });
+                store_pmc_(trace_cache::pmc_event_with_sample{
+                    descriptor.category_enum, std::move(track),
+                    static_cast<std::size_t>(mid_ns), std::string{ "{}" },
+                    /*stack_id*/ 0, /*parent_stack_id*/ 0,
+                    /*correlation_id*/ 0, /*call_stack*/ std::string{},
+                    /*line_info*/ std::string{}, static_cast<uint32_t>(sys_id),
+                    /*device_type*/ uint8_t{ 0 }, std::string{ descriptor.track_prefix },
+                    descriptor.read(sample.metrics), std::optional<int64_t>{} });
             }
 
             if(sample.metrics.valid.test(4) && !hw_labels_.empty())
@@ -157,16 +159,15 @@ public:
                 {
                     std::string track =
                         hw_labels_[idx] + " [" + std::to_string(seq_id) + "]";
-                    trace_cache::get_buffer_storage().store(
-                        trace_cache::pmc_event_with_sample{
-                            hw_category, std::move(track),
-                            static_cast<std::size_t>(mid_ns), std::string{ "{}" },
-                            /*stack_id*/ 0, /*parent_stack_id*/ 0,
-                            /*correlation_id*/ 0, /*call_stack*/ std::string{},
-                            /*line_info*/ std::string{}, static_cast<uint32_t>(sys_id),
-                            /*device_type*/ uint8_t{ 0 }, hw_labels_[idx],
-                            static_cast<double>(sample.metrics.hw_counter[idx]),
-                            std::optional<int64_t>{} });
+                    store_pmc_(trace_cache::pmc_event_with_sample{
+                        hw_category, std::move(track), static_cast<std::size_t>(mid_ns),
+                        std::string{ "{}" },
+                        /*stack_id*/ 0, /*parent_stack_id*/ 0,
+                        /*correlation_id*/ 0, /*call_stack*/ std::string{},
+                        /*line_info*/ std::string{}, static_cast<uint32_t>(sys_id),
+                        /*device_type*/ uint8_t{ 0 }, hw_labels_[idx],
+                        static_cast<double>(sample.metrics.hw_counter[idx]),
+                        std::optional<int64_t>{} });
                 }
             }
         }
@@ -184,7 +185,7 @@ public:
         {
             std::string track = std::string{ descriptor.track_prefix } + " [" +
                                 std::to_string(seq_id) + "]";
-            trace_cache::get_buffer_storage().store(trace_cache::pmc_event_with_sample{
+            store_pmc_(trace_cache::pmc_event_with_sample{
                 descriptor.category_enum, std::move(track),
                 static_cast<std::size_t>(stop_ns), std::string{ "{}" }, 0, 0, 0,
                 std::string{}, std::string{}, static_cast<uint32_t>(sys_id), uint8_t{ 0 },
@@ -198,19 +199,20 @@ public:
             for(auto const& label : hw_labels_)
             {
                 std::string track = label + " [" + std::to_string(seq_id) + "]";
-                trace_cache::get_buffer_storage().store(
-                    trace_cache::pmc_event_with_sample{
-                        hw_category, std::move(track), static_cast<std::size_t>(stop_ns),
-                        std::string{ "{}" }, 0, 0, 0, std::string{}, std::string{},
-                        static_cast<uint32_t>(sys_id), uint8_t{ 0 }, label, 0.0,
-                        std::optional<int64_t>{} });
+                store_pmc_(trace_cache::pmc_event_with_sample{
+                    hw_category, std::move(track), static_cast<std::size_t>(stop_ns),
+                    std::string{ "{}" }, 0, 0, 0, std::string{}, std::string{},
+                    static_cast<uint32_t>(sys_id), uint8_t{ 0 }, label, 0.0,
+                    std::optional<int64_t>{} });
             }
         }
     }
 
 private:
-    ThreadInfoResolverT&     resolver_;
-    std::vector<std::string> hw_labels_;
+    ThreadInfoResolverT&                                             resolver_;
+    std::vector<std::string>                                         hw_labels_;
+    std::function<void(trace_cache::backtrace_region_sample const&)> store_region_;
+    std::function<void(trace_cache::pmc_event_with_sample const&)>   store_pmc_;
 
     static trace_cache::backtrace_region_sample make_region_sample(
         uint32_t category_id, std::size_t sys_id, std::string const& track_name,

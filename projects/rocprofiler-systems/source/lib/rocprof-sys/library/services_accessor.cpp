@@ -125,6 +125,13 @@ make_production_callbacks()
     };
     cb.postfork_parent_reinit = []() { rocprofsys::pmc::postfork_parent_reinit(); };
     cb.postfork_child_cleanup = []() { rocprofsys::pmc::postfork_child_cleanup(); };
+
+    cb.store_region_sample = [](trace_cache::backtrace_region_sample const& s) {
+        trace_cache::get_buffer_storage().store(s);
+    };
+    cb.store_pmc_event = [](trace_cache::pmc_event_with_sample const& s) {
+        trace_cache::get_buffer_storage().store(s);
+    };
 #    if defined(ROCPROFSYS_USE_PAPI)
     cb.setup_hw_counters    = [](int64_t tid) { rocprofsys::papi_bridge::setup(tid); };
     cb.teardown_hw_counters = [](int64_t tid) { rocprofsys::papi_bridge::teardown(tid); };

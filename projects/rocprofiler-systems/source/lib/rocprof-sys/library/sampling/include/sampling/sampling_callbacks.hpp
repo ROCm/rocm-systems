@@ -7,6 +7,7 @@
 // Separated from sampling_config (POD values) so the config struct stays
 // lightweight and copyable without std::function overhead.
 
+#include "core/trace_cache/sample_type.hpp"
 #include "sampling/data/limits.hpp"
 #include "sampling/thread_info_data.hpp"
 
@@ -55,6 +56,14 @@ struct sampling_callbacks
     std::function<void(int64_t)> setup_hw_counters    = [](int64_t) {};
     std::function<void(int64_t)> teardown_hw_counters = [](int64_t) {};
     hw_counter_read_fn           read_hw_counters     = nullptr;
+
+    // Trace cache storage — type-erased so unit tests can intercept without
+    // depending on the global trace_cache::buffer_storage singleton.
+    // Production wiring in services_accessor.cpp.
+    std::function<void(trace_cache::backtrace_region_sample const&)> store_region_sample =
+        [](trace_cache::backtrace_region_sample const&) {};
+    std::function<void(trace_cache::pmc_event_with_sample const&)> store_pmc_event =
+        [](trace_cache::pmc_event_with_sample const&) {};
 };
 
 }  // namespace rocprofsys::sampling
