@@ -165,7 +165,7 @@ __device__ void QueuePair::mlx5_poll_cq_until(uint64_t requested_idx) {
   while (complete_idx < requested_idx) {
     struct mlx5_cqe64* cqe = mlx5_cq.buf;
 
-    // should be s_waitcnt vmcnt(0) : maintain order between load of complete_idx and wqe_counter
+    // lowered to s_waitcnt vmcnt(0) : order ld/rmw complete_idx -> ld wqe_counter
     __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup");
     /* read wqe_counter and sig_op_own from CQE
      * 32-bit load: big-endian 16-bit field, then two 8-bit fields
@@ -207,7 +207,7 @@ __device__ void QueuePair::mlx5_poll_cq_until(uint64_t requested_idx) {
     uint16_t complete_idx16_diff = complete_idx16 - static_cast<uint16_t>(complete_idx);
     uint64_t next_complete_idx   = complete_idx   + static_cast<uint64_t>(complete_idx16_diff);
 
-    // should be s_waitcnt vmcnt(0) : maintain order between load of wqe_counter and RMW of complete_idx
+    // lowered to s_waitcnt vmcnt(0) : order ld wqe_counter -> rmw complete_idx
     __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup");
     /* accumulate the newly-complete indices into mlx5_sq.complete_idx,
      * if some other thread didn't get there first */
