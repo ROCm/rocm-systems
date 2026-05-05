@@ -208,3 +208,5 @@ hsa_amd_queue_intercept_create	STATUS	hsa_status_t
 hsa_amd_queue_intercept_register	STATUS	hsa_status_t
 hsa_amd_queue_iterate	STATUS	hsa_status_t
 hsa_amd_profiling_get_dispatch_records	STATUS	hsa_status_t
+hsa_amd_dispatch_log_test_enable	NO_LTTNG	test-only API
+hsa_amd_dispatch_log_test_get_state	NO_LTTNG	test-only API

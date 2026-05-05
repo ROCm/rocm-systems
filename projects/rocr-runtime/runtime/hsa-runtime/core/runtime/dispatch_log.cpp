@@ -634,6 +634,19 @@ bool drain_one_queue(queue_drain_state& qs, bool force_emit) {
 //     stores it (within the bounded sleep cadence). join() then waits
 //     for the worker's final-drain pass to complete.
 void per_queue_drain_loop(std::shared_ptr<queue_drain_state> qs) {
+  // TEST HOOK: HSA_DISPATCH_LOG_NO_DRAIN=1 makes the drainer worker idle
+  // (sleep-loop until stop) instead of reading FW records. Lets a test
+  // harness inspect raw FW output via hsa_amd_dispatch_log_test_get_state
+  // without the drainer competing or emitting LTTng events. Used by the
+  // dlog_test* programs to isolate FW behavior from drainer behavior.
+  static const bool s_no_drain = (std::getenv("HSA_DISPATCH_LOG_NO_DRAIN") != nullptr);
+  if (s_no_drain) {
+    while (!qs->should_stop.load(std::memory_order_acquire)) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
+    return;
+  }
+
   while (!qs->should_stop.load(std::memory_order_acquire)) {
     const bool any = drain_one_queue(*qs, /* force_emit = */ false);
     if (any) {
@@ -886,7 +899,6 @@ void enable_dispatch_log_for_queue_locked(core::Queue* q) {
     qs->ring_base        = buf;
     qs->ring_records     = record_count;
     qs->ring_mask        = record_count - 1;
-    qs->next_idx         = 0;
 
     // Capture the Phase-2 host-VA pointer set if the new
     // KFD_IOC_PROFILER_DISPATCH_LOG path is active for this queue.
@@ -906,6 +918,34 @@ void enable_dispatch_log_for_queue_locked(core::Queue* q) {
     }
     // else: legacy sentinel-scan mode; null pointers tell drain_one_queue
     // to use the fallback scan path.
+
+    // Initialize next_idx from the CURRENT FW signal value at enable time,
+    // not from 0. The MEC firmware maintains its per-pipe scratch wptr
+    // counter (LdMecAqlProfBufWptr in f32_mec.uc, line 29579) across queue
+    // lifecycles — when KFD destroys a queue and creates a new one on the
+    // same pipe, the new queue's FW state inherits the previous queue's
+    // wptr. Verified empirically with the standalone hsa_dlog_test_mq
+    // multi-queue test: queue Q0's signal value started at 2,069,683 (with
+    // expected 200) reflecting cumulative FW writes from prior queue
+    // instances on the same pipe. Each successive test run grew Q0's
+    // signal by exactly 2*N, confirming the pipe scratch persistence.
+    //
+    // If we left next_idx=0, the drain pass would observe a huge initial
+    // signal value, treat it as overrun (signal - 0 > ring_records), emit
+    // a fake drop event for ~2M phantom records, and start draining from
+    // [signal - ring_records, signal) — most of those slots are pre-zero
+    // ring storage, not actual records. By initializing next_idx to the
+    // current signal we treat the FW's reported state as our starting
+    // point and only emit records FW writes from this point forward.
+    //
+    // Falls back to 0 if signal_ptr is null (legacy sentinel-scan mode);
+    // sentinel-scan handles wraparound via per-slot record_type=0 reset
+    // and doesn't depend on absolute counter values.
+    if (qs->signal_ptr != nullptr) {
+      qs->next_idx = __atomic_load_n(qs->signal_ptr, __ATOMIC_ACQUIRE);
+    } else {
+      qs->next_idx = 0;
+    }
 
     g_active_drainers[qs->queue_id] = qs;
 
@@ -1199,6 +1239,87 @@ void on_queue_destroy(core::Queue* q) {
     g_profiling_refcounts.erase(q);
   }
 }
+
+}  // namespace dispatch_log
+}  // namespace rocr
+
+// =============================================================================
+// TEST-ONLY introspection API for standalone dispatch_log validation programs
+// (dlog_test1, dlog_test2, ...). NOT part of the public HSA ABI; symbol prefix
+// hsa_amd_dispatch_log_test_ to make grep-ability obvious.
+//
+// Usage from a test:
+//   1. set HSA_DISPATCH_LOG_NO_DRAIN=1 in the env so the per-queue worker
+//      sleeps instead of draining (preserves raw FW buffer state for the
+//      test to inspect).
+//   2. register a queue-create callback via
+//      hsa_amd_runtime_queue_create_register
+//   3. in the callback, call hsa_amd_dispatch_log_test_enable(queue) which
+//      invokes AqlQueue::SetProfiling(true), allocating the dispatch record
+//      buffer + host-VA wptr/rptr/signal words and calling SetDispatchLog.
+//   4. submit kernels normally, sync, sleep briefly to let FW finish writes.
+//   5. call hsa_amd_dispatch_log_test_get_state(queue, ...) to retrieve
+//      buffer base + record count + signal pointer for direct verification.
+// =============================================================================
+
+extern "C" {
+
+// Force-enable dispatch_log on the given queue. Calls AqlQueue::SetProfiling
+// (true) which allocates the dispatch record buffer and registers the host-VA
+// pointer set via the new KFD_IOC_PROFILER_DISPATCH_LOG sub-op.
+__attribute__((visibility("default")))
+hsa_status_t hsa_amd_dispatch_log_test_enable(hsa_queue_t* queue) {
+  if (queue == nullptr) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  rocr::core::Queue* q = rocr::core::Queue::Convert(queue);
+  if (q == nullptr) return HSA_STATUS_ERROR_INVALID_QUEUE;
+  if (!rocr::AMD::AqlQueue::IsType(q)) return HSA_STATUS_ERROR_INVALID_QUEUE;
+  auto* aq = static_cast<rocr::AMD::AqlQueue*>(q);
+  return aq->SetProfiling(true);
+}
+
+// Return the dispatch_log buffer base + record count + host-VA wptr / signal
+// pointers for the given queue. Only valid AFTER hsa_amd_dispatch_log_test_enable
+// (or any other path that has called SetProfiling(true) with the new path
+// active).
+__attribute__((visibility("default")))
+hsa_status_t hsa_amd_dispatch_log_test_get_state(
+    hsa_queue_t* queue,
+    void** buffer_base,
+    uint32_t* num_records,
+    const volatile uint64_t** wptr_ptr,
+    const volatile uint64_t** signal_ptr) {
+  if (queue == nullptr || buffer_base == nullptr || num_records == nullptr ||
+      wptr_ptr == nullptr || signal_ptr == nullptr)
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  rocr::core::Queue* q = rocr::core::Queue::Convert(queue);
+  if (q == nullptr) return HSA_STATUS_ERROR_INVALID_QUEUE;
+  if (!rocr::AMD::AqlQueue::IsType(q)) return HSA_STATUS_ERROR_INVALID_QUEUE;
+  auto* aq = static_cast<rocr::AMD::AqlQueue*>(q);
+
+  uint32_t buf_bytes = 0;
+  hsa_status_t s = aq->GetProfilingDispatchRecords(buffer_base, &buf_bytes);
+  if (s != HSA_STATUS_SUCCESS) return s;
+  // FW writes 16-byte records. GetProfilingDispatchRecords reports total bytes
+  // available for FW writes (records * 16); convert back to record count.
+  *num_records = buf_bytes / 16u;
+
+  volatile uint64_t* w = nullptr;
+  volatile uint64_t* r = nullptr;
+  volatile uint64_t* sig = nullptr;
+  s = aq->GetDispatchLogPointers(&w, &r, &sig);
+  if (s != HSA_STATUS_SUCCESS) return s;
+  *wptr_ptr   = w;
+  *signal_ptr = sig;
+  return HSA_STATUS_SUCCESS;
+}
+
+}  // extern "C"
+
+namespace rocr {
+namespace dispatch_log {
+
+// Trailing namespace re-open so clang-format doesn't complain about the file
+// not ending inside a namespace; the body is intentionally empty.
 
 }  // namespace dispatch_log
 }  // namespace rocr
