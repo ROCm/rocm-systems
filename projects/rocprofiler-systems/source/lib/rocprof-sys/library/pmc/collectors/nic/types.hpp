@@ -84,7 +84,7 @@ union enabled_metrics
     uint32_t value = 0;
 };
 
-/// All 10 NIC RDMA metrics enabled (bits 0-5)
+/// All 10 NIC RDMA metrics enabled (bits 0-9)
 static constexpr uint32_t ALL_NIC_METRICS = 0x3FF;
 
 /**
