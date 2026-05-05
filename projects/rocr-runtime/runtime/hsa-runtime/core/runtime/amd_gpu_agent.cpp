@@ -129,7 +129,8 @@ GpuAgent::GpuAgent(HSAuint32 node, const HsaNodeProperties& node_props, bool xna
       extended_aql_dispatch_supported_(false),
       workgroup_clusters_supported_(false),
       kern_cluster_max_dim_({ INT32_MAX, UINT16_MAX, UINT16_MAX }),
-      cluster_max_dim_({ 1, 1, 1 }) {
+      cluster_max_dim_({ 1, 1, 1 }),
+      accelerator_ready_(false) {
   const bool is_apu_node = (properties_.NumCPUCores > 0);
   profile_ = (is_apu_node) ? HSA_PROFILE_FULL : HSA_PROFILE_BASE;
 
@@ -5086,5 +5087,25 @@ hsa_status_t GpuAgent::Preload(uint64_t flags) {
   return HSA_STATUS_SUCCESS;
 }
 
-}  // namespace amd
+hsa_status_t GpuAgent::CheckAcceleratorReadiness() {
+  /*
+   * Confirm the accelerator has reached a ready state before exporting cross-domain
+   * fabric handles. Cache a positive result only; a not-ready state may transition
+   * later, so re-check until ready. If the accelerator never becomes ready, or faults
+   * after cross-domain imports are used, accesses can VM-fault the process.
+   */
+  if (accelerator_ready_) {
+    return HSA_STATUS_SUCCESS;
+  }
+
+  bool ready = false;
+  if (driver().CheckAcceleratorReadiness(*this, &ready) != HSA_STATUS_SUCCESS || !ready) {
+    return static_cast<hsa_status_t>(HSA_STATUS_ERROR_RESOURCE_NOT_READY);
+  }
+
+  accelerator_ready_ = true;
+  return HSA_STATUS_SUCCESS;
+}
+
+}  // namespace AMD
 }  // namespace rocr
