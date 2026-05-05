@@ -30,6 +30,50 @@ Simple Python executable script for invoking `python3 -m @ROCPD_EXE_MODULE@`
 """
 
 
+def _find_sqlite_preload(this_dir):
+    """
+    Locate the rocm-sdk vendored libsqlite3 shipped alongside this binary
+    in TheRock wheel layout. Returns an absolute path or None.
+
+    Behavior can be overridden by the ROCPD_SQLITE_PRELOAD environment
+    variable: setting it to a path forces that file to be preloaded;
+    setting it to an empty string disables the preload entirely.
+    """
+    override = os.environ.get("ROCPD_SQLITE_PRELOAD")
+    if override is not None:
+        return override or None
+
+    path = os.path.normpath(
+        os.path.join(
+            this_dir, "..", "lib", "rocm_sysdeps", "lib", "librocm_sysdeps_sqlite3.so"
+        )
+    )
+    return os.path.realpath(path) if os.path.isfile(path) else None
+
+
+def _inject_sqlite_preload(this_dir, environ):
+    """
+    Prepend the rocm-sdk vendored libsqlite3 to LD_PRELOAD so that both
+    Python's stdlib `sqlite3` module and `libpyrocpd` resolve every
+    sqlite3_* symbol against the same SQLite version. This avoids the
+    cross-library struct-layout mismatch that occurs when the system
+    libsqlite3 (linked into CPython's _sqlite3.so) and the vendored
+    libsqlite3 (linked into libpyrocpd) are different versions.
+    """
+    preload = _find_sqlite_preload(this_dir)
+    if not preload:
+        return
+
+    existing = environ.get("LD_PRELOAD", "").strip()
+    parts = [preload]
+    if existing:
+        parts.append(existing)
+    environ["LD_PRELOAD"] = ":".join(parts)
+
+    if os.environ.get("ROCPD_SQLITE_PRELOAD_VERBOSE"):
+        sys.stderr.write(f"[@ROCPD_EXE_NAME@] LD_PRELOAD={environ['LD_PRELOAD']}\n")
+
+
 def main(argv=sys.argv[1:], environ=dict(os.environ)):
     """
     Executes {sys.executable} -m @ROCPD_EXE_MODULE@ @ROCPD_EXE_MODULE_ARGS@
@@ -63,6 +107,8 @@ def main(argv=sys.argv[1:], environ=dict(os.environ)):
 
     # update PYTHONPATH environment variable
     environ["PYTHONPATH"] = ":".join(python_path)
+
+    _inject_sqlite_preload(this_dir, environ)
 
     args = [f"{sys.executable}", "-m", "@ROCPD_EXE_MODULE@"] + ROCPD_MODULE_ARGS + argv
 

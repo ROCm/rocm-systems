@@ -25,20 +25,64 @@
 import sys
 import os
 
-try:
-    import ctypes
 
-    # RTLD_GLOBAL so Python + librocpd bind the same SQLite, avoiding mixed-lib symbol collisions
-    sqlite3lib = ctypes.CDLL("libsqlite3.so", mode=ctypes.RTLD_GLOBAL)
-except Exception:
-    pass
+def _preload_vendored_sqlite():
+    """
+    Force-load the rocm-sdk vendored libsqlite3 with RTLD_GLOBAL *before*
+    `import sqlite3` happens. This makes Python's stdlib `_sqlite3.so`
+    resolve every sqlite3_* call into the vendored library, matching what
+    `libpyrocpd` is linked against, and avoids the cross-library
+    struct-layout SIGSEGV when the system and vendored SQLite versions
+    differ.
 
-try:
-    import sqlite3
+    Best-effort fallback for users who `import rocpd` from their own
+    Python scripts. Users who launch via the rocpd2pftrace / rocpd2csv /
+    etc. wrappers also get LD_PRELOAD set in the wrapper, which is the
+    more reliable path because it executes before any Python-level
+    import of sqlite3.
 
-    sqlite3.connect(":memory:")  # Test if sqlite3 is available
-except Exception:
-    pass
+    Override path with ROCPD_SQLITE_PRELOAD; set it to an empty string
+    to disable.
+    """
+    override = os.environ.get("ROCPD_SQLITE_PRELOAD")
+    if override is not None and not override:
+        return
+
+    if override:
+        path = override
+    else:
+        # rocpd/__init__.py lives at <prefix>/lib/python<ver>/site-packages/rocpd/.
+        # Three .. from here land in <prefix>/lib/, where the vendored
+        # libraries live under rocm_sysdeps/lib/ (matches the RPATH baked
+        # into libpyrocpd: $ORIGIN/../../../rocm_sysdeps/lib).
+        _here = os.path.dirname(os.path.abspath(__file__))
+        path = os.path.normpath(
+            os.path.join(
+                _here,
+                "..",
+                "..",
+                "..",
+                "rocm_sysdeps",
+                "lib",
+                "librocm_sysdeps_sqlite3.so",
+            )
+        )
+
+    if not os.path.isfile(path):
+        return
+
+    try:
+        import ctypes
+
+        ctypes.CDLL(path, mode=ctypes.RTLD_GLOBAL)
+    except (ImportError, OSError):
+        return
+
+    if os.environ.get("ROCPD_SQLITE_PRELOAD_VERBOSE"):
+        sys.stderr.write(f"[rocpd] preloaded sqlite3: {path}\n")
+
+
+_preload_vendored_sqlite()
 
 from . import libpyrocpd
 from .importer import RocpdImportData
