@@ -1371,7 +1371,8 @@ bool Device::populateOCLDeviceConstants() {
   info_.littleEndian_ = true;
   info_.compilerAvailable_ = true;
   info_.executionCapabilities_ = CL_EXEC_KERNEL;
-  info_.queueProperties_ = CL_QUEUE_PROFILING_ENABLE;
+  info_.queueProperties_ =
+      CL_QUEUE_OUT_OF_ORDER_EXEC_MODE_ENABLE | CL_QUEUE_PROFILING_ENABLE;
   info_.platform_ = AMD_PLATFORM;
   info_.profile_ = "FULL_PROFILE";
   ::strncpy(info_.vendor_, "Advanced Micro Devices, Inc.", sizeof(info_.vendor_) - 1);
