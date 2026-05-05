@@ -117,6 +117,7 @@ jobs:
         uses: actions/checkout@v6
         with:
           sparse-checkout: |
+            .gitmodules
             .github/actions/rocprofiler-sdk-util
             projects/rocprofiler-sdk
             projects/aqlprofile
@@ -134,10 +135,16 @@ jobs:
         run: |
           git --version
           git config --global --add safe.directory '*'
-          git submodule status --recursive | awk '{print $1,$2}' > .git-submodules-status
+          git submodule status --recursive -- \
+            projects/rocprofiler-sdk \
+            projects/aqlprofile \
+            projects/rocprofiler-register \
+            projects/rocprof-trace-decoder \
+            projects/rocr-runtime \
+            projects/clr \
+            projects/hip | awk '{print $1,$2}' > .git-submodules-status
           echo "hash=$(sha256sum .git-submodules-status | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
-          # collect submodule paths for cache 'path'
-          git config --file .gitmodules --get-regexp path | awk '{print $2}' > .git-submodule-paths
+          awk '{print $2}' .git-submodules-status | sort -u > .git-submodule-paths
           { echo "paths<<EOF"; cat .git-submodule-paths; echo "EOF"; } >> "$GITHUB_OUTPUT"
 
       - name: Restore submodule cache
@@ -152,7 +159,12 @@ jobs:
             submods-
 
       - name: Init/Update submodules
-        run: git submodule update --init --recursive --jobs 16
+        shell: bash
+        run: |
+          mapfile -t submodule_paths < .git-submodule-paths
+          if [ "${#submodule_paths[@]}" -gt 0 ]; then
+            git submodule update --init --recursive --jobs 16 -- "${submodule_paths[@]}"
+          fi
 
       - name: Clone ROCDecode
         uses: actions/checkout@v6
@@ -342,6 +354,7 @@ jobs:
         uses: actions/checkout@v6
         with:
           sparse-checkout: |
+            .gitmodules
             .github/actions/rocprofiler-sdk-util
             projects/rocprofiler-sdk
             projects/aqlprofile
@@ -359,10 +372,16 @@ jobs:
         run: |
           git --version
           git config --global --add safe.directory '*'
-          git submodule status --recursive | awk '{print $1,$2}' > .git-submodules-status
+          git submodule status --recursive -- \
+            projects/rocprofiler-sdk \
+            projects/aqlprofile \
+            projects/rocprofiler-register \
+            projects/rocprof-trace-decoder \
+            projects/rocr-runtime \
+            projects/clr \
+            projects/hip | awk '{print $1,$2}' > .git-submodules-status
           echo "hash=$(sha256sum .git-submodules-status | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
-          # collect submodule paths for cache 'path'
-          git config --file .gitmodules --get-regexp path | awk '{print $2}' > .git-submodule-paths
+          awk '{print $2}' .git-submodules-status | sort -u > .git-submodule-paths
           { echo "paths<<EOF"; cat .git-submodule-paths; echo "EOF"; } >> "$GITHUB_OUTPUT"
 
       - name: Restore submodule cache
@@ -377,7 +396,12 @@ jobs:
             submods-
 
       - name: Init/Update submodules
-        run: git submodule update --init --recursive --jobs 16
+        shell: bash
+        run: |
+          mapfile -t submodule_paths < .git-submodule-paths
+          if [ "${#submodule_paths[@]}" -gt 0 ]; then
+            git submodule update --init --recursive --jobs 16 -- "${submodule_paths[@]}"
+          fi
 
       - name: Install requirements (venv)
         timeout-minutes: 10
@@ -485,6 +509,7 @@ jobs:
       uses: actions/checkout@v6
       with:
         sparse-checkout: |
+          .gitmodules
           .github/actions/rocprofiler-sdk-util
           projects/rocprofiler-sdk
           projects/aqlprofile
@@ -502,10 +527,16 @@ jobs:
       run: |
         git --version
         git config --global --add safe.directory '*'
-        git submodule status --recursive | awk '{print $1,$2}' > .git-submodules-status
+        git submodule status --recursive -- \
+          projects/rocprofiler-sdk \
+          projects/aqlprofile \
+          projects/rocprofiler-register \
+          projects/rocprof-trace-decoder \
+          projects/rocr-runtime \
+          projects/clr \
+          projects/hip | awk '{print $1,$2}' > .git-submodules-status
         echo "hash=$(sha256sum .git-submodules-status | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
-        # collect submodule paths for cache 'path'
-        git config --file .gitmodules --get-regexp path | awk '{print $2}' > .git-submodule-paths
+        awk '{print $2}' .git-submodules-status | sort -u > .git-submodule-paths
         { echo "paths<<EOF"; cat .git-submodule-paths; echo "EOF"; } >> "$GITHUB_OUTPUT"
 
     - name: Restore submodule cache
@@ -520,7 +551,12 @@ jobs:
           submods-
 
     - name: Init/Update submodules
-      run: git submodule update --init --recursive --jobs 16
+      shell: bash
+      run: |
+        mapfile -t submodule_paths < .git-submodule-paths
+        if [ "${#submodule_paths[@]}" -gt 0 ]; then
+          git submodule update --init --recursive --jobs 16 -- "${submodule_paths[@]}"
+        fi
 
     - name: Install requirements
       timeout-minutes: 10
