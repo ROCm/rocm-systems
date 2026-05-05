@@ -15,6 +15,7 @@
 
 #include <chrono>
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <string>
@@ -23,6 +24,7 @@
 #include <vector>
 
 #include "MPITestBase.hpp"
+#include "ResourceGuards.hpp"
 #include "TestChecks.hpp"
 #include "rccl/rccl.h"
 
@@ -91,7 +93,11 @@ protected:
     int worldRank_ = -1;
     int worldSize_ = 0;
 
+    // MRs registered through RegMr released via deregMrSym in TearDown
     std::vector<void*> registeredMhandles_;
+
+    // Device buffers allocated through AllocBuf released via hipFree in TearDown
+    std::vector<void*> allocatedDeviceBuffers_;
 
     virtual int GetNumContexts() const { return 1; }
 
@@ -113,7 +119,16 @@ protected:
                 }
             }
             registeredMhandles_.clear();
+        }
 
+        for(void* p : allocatedDeviceBuffers_)
+        {
+            RCCLTestGuards::hipFreeWrapper(p);   // null-safe + warns on hipFree errors
+        }
+        allocatedDeviceBuffers_.clear();
+
+        if(gin_ != nullptr)
+        {
             if(ginCtx_ != nullptr && gin_->destroyContext) {
                 (void)gin_->destroyContext(ginCtx_);
             }
@@ -307,6 +322,7 @@ protected:
             return nullptr;
         }
 
+        allocatedDeviceBuffers_.push_back(p);
         return p;
     }
 
