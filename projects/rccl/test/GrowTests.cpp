@@ -472,4 +472,86 @@ TEST_F(GrowMPITest, Grow_ThenShrink)
     ASSERT_MPI_SUCCESS(MPI_Barrier(MPI_COMM_WORLD));
 }
 
+// --- Grow then shrink with NCCL_SHRINK_ABORT (torchcomms convention) ---
+
+TEST_F(GrowMPITest, Grow_ThenShrinkAbort)
+{
+    if (!validateTestPrerequisites(3)) {
+        GTEST_SKIP() << "Requires at least 3 MPI ranks";
+    }
+
+    const int wr        = MPIEnvironment::world_rank;
+    const int worldSize = MPIEnvironment::world_size;
+    const int existing  = worldSize - 1;
+
+    ASSERT_MPI_EQ(ncclSuccess, buildComm(existing, &initialComm_));
+    ASSERT_MPI_TRUE(wr >= existing || initialComm_ != nullptr);
+
+    ASSERT_MPI_EQ(ncclSuccess, growByOne(initialComm_, existing, &grownComm_));
+    ASSERT_MPI_NE(grownComm_, nullptr);
+
+    ASSERT_MPI_TRUE(runAllReduceAndVerify(grownComm_, worldSize));
+
+    int lastRank = worldSize - 1;
+    ncclComm_t shrunkComm = nullptr;
+    ncclResult_t shrinkRes = ncclSuccess;
+    bool shrinkVerified = true;
+
+    if (wr != lastRank) {
+        shrinkRes = ncclCommShrink(grownComm_, &lastRank, 1, &shrunkComm, nullptr, NCCL_SHRINK_ABORT);
+        if (shrinkRes == ncclSuccess && shrunkComm != nullptr) {
+            shrinkVerified = runAllReduceAndVerify(shrunkComm, worldSize - 1);
+            (void)ncclCommDestroy(shrunkComm);
+        } else {
+            shrinkVerified = false;
+        }
+    }
+
+    ASSERT_MPI_EQ(ncclSuccess, shrinkRes);
+    ASSERT_MPI_TRUE(shrinkVerified);
+    ASSERT_MPI_SUCCESS(MPI_Barrier(MPI_COMM_WORLD));
+}
+
+// --- Error recovery: abort grown comm, recreate, grow again ---
+
+TEST_F(GrowMPITest, Grow_ErrorRecoveryRegrow)
+{
+    if (!validateTestPrerequisites(GrowTestConfig::kMinRanks)) {
+        GTEST_SKIP() << "Requires at least " << GrowTestConfig::kMinRanks << " MPI ranks";
+    }
+
+    const int wr        = MPIEnvironment::world_rank;
+    const int worldSize = MPIEnvironment::world_size;
+    const int existing  = worldSize - 1;
+
+    // Phase 1: Create initial comm and grow
+    ASSERT_MPI_EQ(ncclSuccess, buildComm(existing, &initialComm_));
+    ASSERT_MPI_TRUE(wr >= existing || initialComm_ != nullptr);
+
+    ASSERT_MPI_EQ(ncclSuccess, growByOne(initialComm_, existing, &grownComm_));
+    ASSERT_MPI_NE(grownComm_, nullptr);
+
+    ASSERT_MPI_TRUE(runAllReduceAndVerify(grownComm_, worldSize));
+
+    // Phase 2: Simulate error — abort both comms (torchcomms error recovery path)
+    ASSERT_MPI_EQ(ncclSuccess, ncclCommAbort(grownComm_));
+    grownComm_ = nullptr;
+
+    if (initialComm_) {
+        ASSERT_EQ(ncclSuccess, ncclCommAbort(initialComm_));
+        initialComm_ = nullptr;
+    }
+
+    ASSERT_MPI_SUCCESS(MPI_Barrier(MPI_COMM_WORLD));
+
+    // Phase 3: Recover — create fresh comm and grow again
+    ASSERT_MPI_EQ(ncclSuccess, buildComm(existing, &initialComm_));
+    ASSERT_MPI_TRUE(wr >= existing || initialComm_ != nullptr);
+
+    ASSERT_MPI_EQ(ncclSuccess, growByOne(initialComm_, existing, &grownComm_));
+    ASSERT_MPI_NE(grownComm_, nullptr);
+
+    ASSERT_MPI_TRUE(runAllReduceAndVerify(grownComm_, worldSize));
+}
+
 #endif // MPI_TESTS_ENABLED
