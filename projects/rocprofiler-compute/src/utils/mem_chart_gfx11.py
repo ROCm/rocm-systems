@@ -784,7 +784,7 @@ def main() -> None:
     args = arg_parser.parse_args()
 
     if args.data:
-        with open(args.data) as f:
+        with open(args.data, encoding="utf-8") as f:
             metric_dict = normalize_mem_chart_metrics(json.load(f))
     else:
         metric_dict = normalize_mem_chart_metrics(DEFAULT_SAMPLE_METRICS.copy())
@@ -808,7 +808,7 @@ def main() -> None:
         )
         output = buf.getvalue()
         plain = re.sub(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])", "", output)
-        with open(args.txt, "w") as f:
+        with open(args.txt, "w", encoding="utf-8") as f:
             f.write(plain)
         print(f"Output written to {args.txt}")
     elif args.svg:
@@ -826,7 +826,7 @@ def main() -> None:
             chart_title=heading,
         )
         svg_output = svg_console.export_svg(title=heading)
-        with open(args.svg, "w") as f:
+        with open(args.svg, "w", encoding="utf-8") as f:
             f.write(svg_output)
         print(f"SVG saved to {args.svg}")
     else:

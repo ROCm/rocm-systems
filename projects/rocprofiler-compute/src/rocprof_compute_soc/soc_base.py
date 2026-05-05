@@ -312,7 +312,7 @@ class OmniSoC_Base:
             )
             return
 
-        with open(config_filename_dict[file_id]) as stream:
+        with open(config_filename_dict[file_id], encoding="utf-8") as stream:
             file_config = yaml.safe_load(stream)
         if panel_id is None:
             texts.append(yaml.dump(file_config, sort_keys=False))
@@ -487,7 +487,7 @@ class OmniSoC_Base:
                 if file_id in exclude_file_ids:
                     continue
 
-                with open(filename) as stream:
+                with open(filename, encoding="utf-8") as stream:
                     texts.append(stream.read())
 
         for block_id in filter_blocks:
@@ -660,6 +660,7 @@ class OmniSoC_Base:
             / "rocprof_compute_soc"
             / "profile_configs"
             / "sdk_config.yaml",
+            encoding="utf-8",
         ) as filename:
             sdk_config = yaml.safe_load(filename)
         os.environ["ROCPROFILER_METRICS_PATH"] = create_temp_rocprofiler_metrics_path(
@@ -812,7 +813,7 @@ class OmniSoC_Base:
                             pmc.append(f"{ctr}:device={gpu_idx}")
 
                 # Write counters to file
-                with open(file_name, "w") as fd:
+                with open(file_name, "w", encoding="utf-8") as fd:
                     fd.write(yaml.dump({"jobs": [{"pmc": pmc}]}, sort_keys=False))
         else:
             # Output to files
@@ -855,12 +856,12 @@ class OmniSoC_Base:
                         )
 
                 # Write counters to file
-                with open(pmc_filename, "w") as fd:
+                with open(pmc_filename, "w", encoding="utf-8") as fd:
                     fd.write(yaml.dump({"jobs": [{"pmc": pmc}]}, sort_keys=False))
 
                 # Write counter definitions to file
                 if counter_def:
-                    with open(counter_def_filename, "w") as fp:
+                    with open(counter_def_filename, "w", encoding="utf-8") as fp:
                         fp.write(yaml.dump(counter_def, sort_keys=False))
 
     # ----------------------------------------------------
