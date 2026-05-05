@@ -163,9 +163,8 @@ Text-mode file I/O should be deterministic across machines. Bare `open()` picks 
 
 ### Rules
 
-- Always pass `encoding="utf-8"` to `open()` for text-mode reads and writes. Preserve any existing `mode=` and `newline=` arguments.
+- Always pass `encoding="utf-8"` to `open()` for text-mode reads and writes.
 - Keep committed configuration files (YAML, JSON, INI) ASCII-only. Use plain ASCII substitutes for typographic glyphs: `x` or `*` for multiplication, straight quotes for smart quotes, and `--` for em dashes.
-- Binary-mode `open(..., "rb"/"wb")` does not accept an `encoding` argument — leave those calls alone.
 
 ### Example
 
@@ -174,9 +173,6 @@ Text-mode file I/O should be deterministic across machines. Bare `open()` picks 
 ```python
 with open(config_path, encoding="utf-8") as f:
     data = yaml.safe_load(f)
-
-with open(out_csv, "w", newline="", encoding="utf-8") as f:
-    csv.writer(f).writerows(rows)
 ```
 
 **Bad:** Encoding inherited from the runtime locale
