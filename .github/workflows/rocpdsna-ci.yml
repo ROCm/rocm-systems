@@ -14,6 +14,9 @@ on:
       - '!projects/rocpdsna/docs/**'
       - '!projects/rocpdsna/README.md'
   pull_request:
+    branches:
+      - develop
+      - sna-develop
     paths:
       - '.github/workflows/rocpdsna-ci.yml'
       - 'projects/rocpdsna/**'
