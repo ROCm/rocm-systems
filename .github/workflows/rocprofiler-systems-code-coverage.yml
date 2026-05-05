@@ -117,8 +117,8 @@ jobs:
         update-alternatives \
           --install /usr/bin/gcov gcov /usr/bin/gcov-${GCC_VER} 500
 
-    - name: Configure, Build, and Test
-      timeout-minutes: 120
+    - name: Configure
+      timeout-minutes: 15
       shell: bash
       working-directory: projects/rocprofiler-systems/
       env:
@@ -128,15 +128,12 @@ jobs:
         git config --global --add safe.directory ${PWD}
         echo "CMake version: $(cmake --version | head -n 1)"
         echo "Compiler version: $(gcc --version | head -n 1)"
-        python3 ./scripts/run-ci.py -B build \
-          --name rocprofiler-systems-ubuntu-noble-codecov \
-          --build-jobs $(nproc) \
-          --site GitHub \
-          --coverage \
-          -- \
+        cmake -B build . \
           -DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems \
           -DROCPROFSYS_BUILD_CI=OFF \
           -DROCPROFSYS_BUILD_TESTING=ON \
+          -DROCPROFSYS_BUILD_CODECOV=ON \
+          -DROCPROFSYS_STRIP_LIBRARIES=OFF \
           -DROCPROFSYS_BUILD_DYNINST=ON \
           -DROCPROFSYS_BUILD_BOOST=ON \
           -DROCPROFSYS_BUILD_TBB=ON \
@@ -152,13 +149,24 @@ jobs:
           -DROCPROFSYS_DISABLE_EXAMPLES="transpose;rccl;openmp-target;openmp-vv-offload;lulesh" \
           -DROCPROFSYS_BUILD_NUMBER=${{ github.run_attempt }} \
           -DCMAKE_PREFIX_PATH=/opt/rocm \
-          -DUSE_CLANG_OMP=OFF \
-          -- \
-          -LE "network|gpu"
+          -DUSE_CLANG_OMP=OFF
 
-    - name: Generate Coverage Report
+    - name: Build
+      timeout-minutes: 60
+      shell: bash
+      working-directory: projects/rocprofiler-systems/
+      run: |
+        cmake --build build --parallel $(nproc)
+
+    - name: Unit Tests
+      timeout-minutes: 10
+      shell: bash
+      working-directory: projects/rocprofiler-systems/
+      run: |
+        ./build/bin/rocprof-sys-unit-tests
+
+    - name: Generate Unit Test Coverage
       if: always()
-      id: generatereport
       timeout-minutes: 15
       shell: bash
       working-directory: projects/rocprofiler-systems/
@@ -167,25 +175,58 @@ jobs:
           --build-dir build \
           --source-dir . \
           --output-dir .codecov \
-          --label all \
+          --label unit-tests \
           --low-coverage-count 20
 
-        get-md-contents() { cat .codecov/${1}.md; }
-        cat << EOF > .codecov/report.md
-        # Code Coverage Report
+    - name: E2E Tests
+      timeout-minutes: 60
+      shell: bash
+      working-directory: projects/rocprofiler-systems/
+      run: |
+        find build -name '*.gcda' -delete
+        ctest --test-dir build \
+          --output-on-failure \
+          -LE "network|gpu" \
+          --repeat until-pass:3 after-timeout:2
 
-        ## All
-        $(get-md-contents all)
+    - name: Generate E2E Coverage
+      if: always()
+      timeout-minutes: 15
+      shell: bash
+      working-directory: projects/rocprofiler-systems/
+      run: |
+        python3 scripts/generate-coverage.py \
+          --build-dir build \
+          --source-dir . \
+          --output-dir .codecov \
+          --label e2e-tests \
+          --low-coverage-count 20
 
-        <!-- rocprofiler-systems-coverage -->
-        EOF
+    - name: Generate Coverage Comment
+      if: always()
+      id: generatereport
+      shell: bash
+      working-directory: projects/rocprofiler-systems/
+      run: |
+        get-md-contents() { if [ -f ".codecov/${1}.md" ]; then cat ".codecov/${1}.md"; else echo "_No report generated._"; fi; }
+        {
+          echo "# Code Coverage Report"
+          echo ""
+          echo "## Unit Tests"
+          get-md-contents unit-tests
+          echo ""
+          echo "## E2E Tests"
+          get-md-contents e2e-tests
+          echo ""
+          echo "<!-- rocprofiler-systems-coverage -->"
+        } > .codecov/report.md
 
         echo 'CODECOVERAGE_REPORT<<EOF' >> $GITHUB_OUTPUT
         cat .codecov/report.md >> $GITHUB_OUTPUT
         echo 'EOF' >> $GITHUB_OUTPUT
 
     - name: Write Code Coverage Comment
-      if: github.event_name == 'pull_request'
+      if: always() && github.event_name == 'pull_request'
       timeout-minutes: 5
       uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
       env:

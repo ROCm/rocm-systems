@@ -109,7 +109,9 @@ def load_coverage_json(path: Path) -> dict:
 def compute_file_coverage(data: dict) -> list[dict]:
     files = []
     for file_data in data.get("files", []):
-        filename = file_data.get("filename", "")
+        filename = file_data.get("filename", "") or file_data.get("file", "")
+        if not filename:
+            continue
         lines = file_data.get("lines", [])
         if not lines:
             continue
@@ -182,27 +184,32 @@ def generate_markdown(
     )
     lines.append("")
 
-    low_files = [f for f in file_coverages if f["coverage_pct"] < 80][:low_coverage_count]
-    if low_files:
-        lines.append(f"### Lowest Coverage ({len(low_files)} files below 80%)")
-        lines.append("")
-        lines.append("| Coverage | Lines | File |")
-        lines.append("|----------|-------|------|")
-        for f in low_files:
-            rel = os.path.relpath(f["filename"], source_dir)
-            pct = f["coverage_pct"]
-            if pct >= 80:
-                icon = "🟢"
-            elif pct >= 50:
-                icon = "🟡"
-            else:
-                icon = "🔴"
-            lines.append(
-                f"| {icon} {pct:5.1f}% | "
-                f"{f['covered_lines']}/{f['total_lines']} | "
-                f"`{rel}` |"
-            )
-        lines.append("")
+    if file_coverages:
+        groups = [
+            ("🔴 0-20%", [f for f in file_coverages if f["coverage_pct"] < 20]),
+            ("🟠 20-50%", [f for f in file_coverages if 20 <= f["coverage_pct"] < 50]),
+            ("🟡 50-80%", [f for f in file_coverages if 50 <= f["coverage_pct"] < 80]),
+            ("🟢 80-100%", [f for f in file_coverages if f["coverage_pct"] >= 80]),
+        ]
+        for group_label, group_files in groups:
+            if not group_files:
+                continue
+            lines.append(f"<details>")
+            lines.append(f"<summary>{group_label} ({len(group_files)} files)</summary>")
+            lines.append("")
+            lines.append("| Coverage | Lines | File |")
+            lines.append("|----------|-------|------|")
+            for f in group_files:
+                rel = os.path.relpath(f["filename"], source_dir)
+                pct = f["coverage_pct"]
+                lines.append(
+                    f"| {pct:5.1f}% | "
+                    f"{f['covered_lines']}/{f['total_lines']} | "
+                    f"`{rel}` |"
+                )
+            lines.append("")
+            lines.append("</details>")
+            lines.append("")
 
     buckets = {"0-20%": 0, "20-50%": 0, "50-80%": 0, "80-100%": 0}
     for f in file_coverages:
@@ -251,7 +258,6 @@ def main():
         "--label",
         type=str,
         default="all",
-        choices=("all", "unit", "e2e"),
         help="Coverage report label",
     )
     parser.add_argument(
