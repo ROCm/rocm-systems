@@ -1039,14 +1039,17 @@ get_aql_handles()
             std::vector<aqlprofile_agent_handle_t> agent_handles;
             for(auto& agent : get_agents())
             {
-                aqlprofile_agent_info_t agent_info = {
+                aqlprofile_agent_info_v1_t agent_info = {
                     .agent_gfxip          = agent->name,
                     .xcc_num              = agent->num_xcc,
                     .se_num               = agent->num_shader_banks,
                     .cu_num               = agent->cu_count,
-                    .shader_arrays_per_se = agent->simd_arrays_per_engine};
+                    .shader_arrays_per_se = agent->simd_arrays_per_engine,
+                    .domain               = agent->domain,
+                    .location_id          = agent->location_id};
                 aqlprofile_agent_handle_t handle = {.handle = 0};
-                if(aqlprofile_register_agent(&handle, &agent_info) != HSA_STATUS_SUCCESS)
+                if(aqlprofile_register_agent_info(
+                       &handle, &agent_info, AQLPROFILE_AGENT_VERSION_V1) != HSA_STATUS_SUCCESS)
                 {
                     ROCP_WARNING << "Failed to register agent " << agent->name;
                 }
