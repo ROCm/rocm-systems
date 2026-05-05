@@ -144,17 +144,14 @@ def compute_totals(file_coverages: list[dict]) -> dict:
     }
 
 
-def coverage_bar(pct: float, width: int = 20) -> str:
-    filled = round(pct / 100 * width)
-    empty = width - filled
+def coverage_bar(pct: float) -> str:
     if pct >= 80:
-        color = "🟢"
+        icon = "🟢"
     elif pct >= 50:
-        color = "🟡"
+        icon = "🟡"
     else:
-        color = "🔴"
-    bar = "█" * filled + "░" * empty
-    return f"{color} `{bar}` {pct:.1f}%"
+        icon = "🔴"
+    return f'{icon} **{pct:.1f}%**'
 
 
 def generate_markdown(
