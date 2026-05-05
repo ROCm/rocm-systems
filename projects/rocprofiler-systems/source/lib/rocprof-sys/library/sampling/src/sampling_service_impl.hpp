@@ -492,28 +492,42 @@ filter_and_reverse_frames(std::vector<stack_frame>& frames)
     while(!frames.empty() && signal_artifacts.count(frames.back().name))
         frames.pop_back();
 
-    auto use_label = [](std::string_view lbl) -> short {
-        const auto npos = std::string_view::npos;
-        if(lbl.find("rocprofsys_main") != npos) return 0;
-        if(lbl.find("rocprofsys_libc_start_main") != npos) return 0;
-        if(lbl.find("rocprofsys::") != npos) return 0;
-        if(lbl.find("tim::openmp::") != npos) return -1;
-        if(lbl.find("tim::") != npos) return 0;
-        if(lbl.find("DYNINST_") != npos) return 0;
-        if(lbl.find("rocprofsys_") != npos) return -1;
-        if(lbl.find("rocprofiler_") != npos) return -1;
-        if(lbl.find("perfetto::") != npos) return -1;
+    // Match profiler-internal prefixes only in the function's own name,
+    // not inside template type parameters (which appear after '<').
+    auto find_in_func_name = [](std::string_view lbl, std::string_view needle) -> bool {
+        auto pos = lbl.find(needle);
+        if(pos == std::string_view::npos) return false;
+        auto bracket = lbl.find('<');
+        return bracket == std::string_view::npos || pos < bracket;
+    };
+
+    auto use_label = [&find_in_func_name](std::string_view lbl) -> short {
+        if(find_in_func_name(lbl, "rocprofsys_main")) return 1;
+        if(find_in_func_name(lbl, "rocprofsys_libc_start_main")) return 0;
+        if(find_in_func_name(lbl, "rocprofsys::")) return 0;
+        if(find_in_func_name(lbl, "tim::openmp::")) return -1;
+        if(find_in_func_name(lbl, "tim::")) return 0;
+        if(find_in_func_name(lbl, "DYNINST_")) return 0;
+        if(find_in_func_name(lbl, "rocprofsys_")) return -1;
+        if(find_in_func_name(lbl, "rocprofiler_")) return -1;
+        if(find_in_func_name(lbl, "perfetto::")) return -1;
         if(lbl.find("protozero::") == 0) return -1;
-        if(lbl.find("gotcha_") != npos) return -1;
+        if(find_in_func_name(lbl, "gotcha_")) return -1;
         return 1;
     };
 
     std::vector<stack_frame> filtered;
     filtered.reserve(frames.size());
+
     for(auto& f : frames)
     {
         auto pos = f.name.find("_dyninst");
         if(pos != std::string::npos) f.name.erase(pos, 8);
+
+        // Skip unresolved module+offset frames (e.g. "[libfoo.so+0x1234]").
+        // These are internal library frames from stripped binaries with no
+        // symbol info — the baseline unwinder doesn't capture them.
+        if(!f.name.empty() && f.name.front() == '[') continue;
 
         short use = use_label(f.name);
         if(use == -1) break;
@@ -527,6 +541,14 @@ filter_and_reverse_frames(std::vector<stack_frame>& frames)
     while(it != filtered.end() && is_system_bootstrap_frame(*it))
         ++it;
     if(it != filtered.begin()) filtered.erase(filtered.begin(), it);
+
+    // Gotcha wrappers can resolve to the same symbol as the wrapped function
+    // (e.g. rocprofsys_libc_start_main → __libc_start_main via dladdr),
+    // producing a duplicate at the root. Only dedup the leading prefix —
+    // legitimate consecutive duplicates deeper in the stack (recursive calls,
+    // distinct call sites) must be preserved.
+    while(filtered.size() >= 2 && filtered[0].name == filtered[1].name)
+        filtered.erase(filtered.begin());
 
     frames = std::move(filtered);
 }
