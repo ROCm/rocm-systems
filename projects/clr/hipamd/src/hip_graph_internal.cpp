@@ -5,7 +5,6 @@
  */
 
 #include "hip_graph_internal.hpp"
-#include "device/rocm/rocdevice.hpp"
 
 #define CASE_STRING(X, C)                                                                          \
   case X:                                                                                          \
@@ -433,6 +432,7 @@ void GraphExec::BuildSyncPlan() {
   sync_plan_.patch_list.clear();
   sync_plan_.barrier_packets.clear();
   sync_plan_.leaf_segment_ids.clear();
+  graph_irq_signal_count_ = 0;
 
   auto* device = g_devices[instantiateDeviceId_]->devices()[0];
 
@@ -552,19 +552,8 @@ void GraphExec::BuildSyncPlan() {
     if (segment.segment_ids_edges.empty()) {
       sync_plan_.leaf_segment_ids.push_back(segment.id);
     }
-  }
 
-  // Seed GPU-only signal count with known minimum (SyncPlan HW events)
-  // so even the first launch pre-allocates these instead of growing on demand.
-  graph_signal_count_ = sync_plan_.num_segments;
-
-  // Count interrupt signals needed based on graph topology (host nodes, etc.)
-  graph_irq_signal_count_ = 0;
-  for (const auto& segment : segments_) {
-    if (segment.child_graph_ptr != nullptr) continue;
-    auto segBatchIt = segmentBatches_.find(segment.id);
-    if (segBatchIt == segmentBatches_.end()) continue;
-    auto& segBatch = segBatchIt->second;
+    // Count interrupt signals needed for non-captured host nodes in this segment.
     for (size_t i = 0; i < segment.nodes.size(); ++i) {
       if (!segBatch.node_capture_status[i] &&
           segment.nodes[i]->GetType() == hipGraphNodeTypeHost) {
@@ -572,6 +561,10 @@ void GraphExec::BuildSyncPlan() {
       }
     }
   }
+
+  // Seed GPU-only signal count with known minimum (SyncPlan HW events)
+  // so even the first launch pre-allocates these instead of growing on demand.
+  graph_signal_count_ = sync_plan_.num_segments;
 }
 
 // ================================================================================================
@@ -1735,39 +1728,17 @@ amd::Command* GraphExec::EnqueueSegmentedGraph(hip::Stream* launch_stream,
 
   auto* device = g_devices[launch_stream->DeviceId()]->devices()[0];
 
-  // Create per-launch graph signal pool for intra-segment ActiveSignal() calls.
-  auto* launch_pool = new amd::roc::GraphSignalPool();
-  if (graph_signal_count_ > 0) {
-    if (!launch_pool->Allocate(graph_signal_count_)) {
-      delete launch_pool;
-      if (out_status != nullptr) *out_status = hipErrorOutOfMemory;
-      return nullptr;
-    }
+  // Create per-launch graph signal pool: pre-allocates GPU-only and IRQ signals,
+  // acquires one hw-event per segment, and resets GetLastAcquired() so it only
+  // tracks actual dispatches. All pool method calls are encapsulated in the factory.
+  std::vector<void*> segment_hw_events;
+  auto* launch_pool = device->CreateGraphSignalPool(
+      graph_signal_count_, graph_irq_signal_count_,
+      static_cast<size_t>(sync_plan_.num_segments), segment_hw_events);
+  if (launch_pool == nullptr) {
+    if (out_status != nullptr) *out_status = hipErrorOutOfMemory;
+    return nullptr;
   }
-  if (graph_irq_signal_count_ > 0) {
-    if (!launch_pool->AllocateIrq(graph_irq_signal_count_, true)) {
-      delete launch_pool;
-      if (out_status != nullptr) *out_status = hipErrorOutOfMemory;
-      return nullptr;
-    }
-  }
-
-  // Allocate SyncPlan HW events from the graph pool (replaces CreateHwEvents).
-  // All signals — SyncPlan inter-segment HW events AND intra-segment ActiveSignal
-  // calls — come from one unified GraphSignalPool.
-  std::vector<void*> segment_hw_events(sync_plan_.num_segments, nullptr);
-  for (int i = 0; i < sync_plan_.num_segments; ++i) {
-    segment_hw_events[i] = launch_pool->Acquire();
-    if (segment_hw_events[i] == nullptr) {
-      delete launch_pool;
-      if (out_status != nullptr) *out_status = hipErrorOutOfMemory;
-      return nullptr;
-    }
-  }
-
-  // SyncPlan Acquire calls above are pre-allocation, not GPU dispatches.
-  // Reset so GetLastAcquired() only reflects signals from actual dispatches.
-  launch_pool->ResetLastAcquired();
 
   // Apply pre-computed patches — writes HW events directly into flatPacketData
   if (!sync_plan_.patch_list.empty()) {
@@ -1845,7 +1816,7 @@ amd::Command* GraphExec::EnqueueSegmentedGraph(hip::Stream* launch_stream,
   }
 
   // Cache GPU-only signal count for future launches (first launch or if count grew)
-  size_t used = launch_pool->UsedCount();
+  size_t used = device->GetGraphSignalPoolUsedCount(launch_pool);
   if (used > graph_signal_count_) {
     graph_signal_count_ = used;
   }
@@ -1992,37 +1963,26 @@ hipError_t GraphExec::EnqueueSegment(const Segment& segment, hip::Stream* stream
             !segBatch->node_capture_status[next]) {
           sdma_follows = (segment.nodes[next]->GetType() == hipGraphNodeTypeMemcpy);
         }
-
+        if (sdma_follows) {
+          stream->vdev()->addSystemScope();
+        }
         status = dispatchCurrentBatch(sdma_follows);
         if (status != hipSuccess) return status;
       }
     } else {
       // Non-captured nodes execute through the normal command pipeline.
-      // No pre/post markers needed: in direct dispatch mode the node's submit()
-      // writes directly to the HW queue, preserving in-order execution with
-      // surrounding flat-dispatched batches. Batch command-status tracking is
-      // deferred to the AccumulateCommand enqueued at the end of
-      // EnqueueSegmentedGraph. Engine transitions (e.g. SDMA) are handled by
-      // releaseGpuMemoryFence (hasPendingDispatch_) and WaitingSignal engine tracking.
-      for (; i < segment.nodes.size(); ++i) {
-        if (segBatch && i < segBatch->node_capture_status.size() &&
-            segBatch->node_capture_status[i]) {
-          break;
-        }
-        auto& uncaptured_node = segment.nodes[i];
-        if (DEBUG_HIP_GRAPH_DOT_PRINT) {
-          uncaptured_node->stream_id_ = stream->GetStreamId();
-          uncaptured_node->hw_queue_id_ = stream->getQueueID();
-        }
-        uncaptured_node->SetStream(stream);
-        status = uncaptured_node->CreateCommand(uncaptured_node->GetQueue());
-        if (status != hipSuccess) return status;
-        if (accumulate->graphSignalPool() != nullptr) {
-          uncaptured_node->SetGraphSignalPoolOnCommands(accumulate->graphSignalPool());
-        }
-        uncaptured_node->EnqueueCommands(stream);
+      auto& uncaptured_node = segment.nodes[i];
+      if (DEBUG_HIP_GRAPH_DOT_PRINT) {
+        uncaptured_node->stream_id_ = stream->GetStreamId();
+        uncaptured_node->hw_queue_id_ = stream->getQueueID();
       }
-      --i;
+      uncaptured_node->SetStream(stream);
+      status = uncaptured_node->CreateCommand(uncaptured_node->GetQueue());
+      if (status != hipSuccess) return status;
+      if (accumulate->graphSignalPool() != nullptr) {
+        uncaptured_node->SetGraphSignalPoolOnCommands(accumulate->graphSignalPool());
+      }
+      uncaptured_node->EnqueueCommands(stream);
     }
   }
 

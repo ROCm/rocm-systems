@@ -3675,6 +3675,45 @@ uint8_t* Device::CreateBarrierPacket() const {
 }
 
 // ================================================================================================
+GraphSignalPool* Device::CreateGraphSignalPool(
+    size_t gpu_count, size_t irq_count,
+    size_t segment_count, std::vector<void*>& hw_events) const {
+  // Clear upfront so every failure path honours the contract: caller sees an
+  // empty hw_events whenever nullptr is returned, regardless of what was passed in.
+  hw_events.clear();
+
+  auto* pool = new GraphSignalPool();
+
+  if (gpu_count > 0 && !pool->Allocate(gpu_count)) {
+    delete pool;
+    return nullptr;
+  }
+  if (irq_count > 0 && !pool->AllocateIrq(irq_count, true)) {
+    delete pool;
+    return nullptr;
+  }
+
+  hw_events.resize(segment_count, nullptr);
+  for (size_t i = 0; i < segment_count; ++i) {
+    hw_events[i] = pool->Acquire();
+    if (hw_events[i] == nullptr) {
+      delete pool;
+      hw_events.clear();
+      return nullptr;
+    }
+  }
+
+  // Pre-allocation is done; reset so GetLastAcquired() only reflects GPU dispatches.
+  pool->ResetLastAcquired();
+  return pool;
+}
+
+// ================================================================================================
+size_t Device::GetGraphSignalPoolUsedCount(GraphSignalPool* pool) const {
+  return pool ? pool->UsedCount() : 0;
+}
+
+// ================================================================================================
 void Device::ApplyHwEventPatches(const std::vector<HwEventPatch>& patches,
                                  const std::vector<void*>& hw_events) const {
   for (const auto& patch : patches) {

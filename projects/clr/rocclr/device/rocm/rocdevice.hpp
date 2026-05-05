@@ -544,6 +544,10 @@ class Device : public NullDevice {
   virtual uint8_t* CreateBarrierPacket() const override;
   virtual void ApplyHwEventPatches(const std::vector<HwEventPatch>& patches,
                                    const std::vector<void*>& hw_events) const override;
+  virtual GraphSignalPool* CreateGraphSignalPool(
+      size_t gpu_count, size_t irq_count,
+      size_t segment_count, std::vector<void*>& hw_events) const override;
+  virtual size_t GetGraphSignalPoolUsedCount(GraphSignalPool* pool) const override;
   virtual bool CreateUserEvent(amd::UserEvent* event) const override;
   virtual void SetUserEvent(amd::UserEvent* event) const override;
 
