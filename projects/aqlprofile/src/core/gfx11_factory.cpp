@@ -31,6 +31,8 @@
 
 namespace aql_profile {
 
+Gfx11Factory::~Gfx11Factory() { delete prims_; }
+
 // Gfx builders init
 void Gfx11Factory::Init(const AgentInfo* agent_info) {
   Pm4Factory::cmd_builder_ = new pm4_builder::Gfx11CmdBuilder(acquire_ip_offset_table(agent_info));

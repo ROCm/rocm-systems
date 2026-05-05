@@ -27,6 +27,7 @@
 #include "pm4/pmc_builder.h"
 #include "pm4/spm_builder.h"
 #include "pm4/sqtt_builder.h"
+#include "def/gfx12_def.h"
 
 namespace aql_profile {
 

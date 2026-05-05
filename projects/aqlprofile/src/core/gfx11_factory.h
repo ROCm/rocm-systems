@@ -52,7 +52,7 @@ class Gfx11Factory : public Pm4Factory {
   pm4_builder::PrimitivesProvider* prims_ = nullptr;
 
  public:
-  ~Gfx11Factory() override { delete prims_; }
+  ~Gfx11Factory() override;
 };
 
 // Gfx11.5 factory class

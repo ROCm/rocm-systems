@@ -162,6 +162,13 @@ SET(AQLPROFILE_PM4_FACTORY_SOURCES
     ${LIB_DIR}/pm4/gfx10_primitives_provider.cpp
     ${LIB_DIR}/pm4/gfx11_primitives_provider.cpp
     ${LIB_DIR}/pm4/gfx12_primitives_provider.cpp
+    ${LIB_DIR}/pm4/gfx9_cmd_builder.cpp
+    ${LIB_DIR}/pm4/gfx10_cmd_builder.cpp
+    ${LIB_DIR}/pm4/gfx11_cmd_builder.cpp
+    ${LIB_DIR}/pm4/gfx12_cmd_builder.cpp
+    ${LIB_DIR}/pm4/pmc_builder.cpp
+    ${LIB_DIR}/pm4/spm_builder.cpp
+    ${LIB_DIR}/pm4/sqtt_builder.cpp
 )
 target_sources(pm4-factory-test PRIVATE ${AQLPROFILE_PM4_FACTORY_SOURCES})
 target_include_directories(pm4-factory-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${LIB_DIR} ${LIB_DIR}/core/include)
@@ -243,6 +250,13 @@ SET(AQLPROFILE_V2_SOURCES
     ${LIB_DIR}/pm4/gfx10_primitives_provider.cpp
     ${LIB_DIR}/pm4/gfx11_primitives_provider.cpp
     ${LIB_DIR}/pm4/gfx12_primitives_provider.cpp
+    ${LIB_DIR}/pm4/gfx9_cmd_builder.cpp
+    ${LIB_DIR}/pm4/gfx10_cmd_builder.cpp
+    ${LIB_DIR}/pm4/gfx11_cmd_builder.cpp
+    ${LIB_DIR}/pm4/gfx12_cmd_builder.cpp
+    ${LIB_DIR}/pm4/pmc_builder.cpp
+    ${LIB_DIR}/pm4/spm_builder.cpp
+    ${LIB_DIR}/pm4/sqtt_builder.cpp
 )
 target_sources(aql-profile-v2-test PRIVATE ${AQLPROFILE_V2_SOURCES})
 target_include_directories(aql-profile-v2-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${LIB_DIR} ${LIB_DIR}/core/include)
@@ -282,6 +296,8 @@ add_test(NAME aql-profile-v2-c-compatibility-test
          COMMAND $<TARGET_FILE:aql-profile-v2-c-compatibility-test>)
 set_tests_properties(
     aql-profile-v2-c-compatibility-test
+    PROPERTIES TIMEOUT 45 LABELS "unittests")
+
 # Add tests for new architecture abstractions
 add_executable(hardware-config-test)
 SET(HARDWARE_CONFIG_TEST_SOURCES

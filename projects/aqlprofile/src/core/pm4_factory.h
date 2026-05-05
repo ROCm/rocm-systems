@@ -39,10 +39,13 @@
 #include "core/aql_profile_exception.h"
 #include "def/gpu_block_info.h"
 #include "pm4/cmd_builder.h"
-#include "pm4/pmc_builder.h"
-#include "pm4/spm_builder.h"
-#include "pm4/sqtt_builder.h"
 #include "util/hsa_rsrc_factory.h"
+
+namespace pm4_builder {
+class PmcBuilder;
+class SpmBuilder;
+class SqttBuilder;
+}  // namespace pm4_builder
 
 namespace aql_profile {
 
@@ -108,7 +111,7 @@ class BlockInfoMap {
 };
 
 // Factory of PM4 builders
-class Pm4Factory {
+class __attribute__((visibility("default"))) Pm4Factory {
  public:
   typedef std::mutex mutex_t;
 
@@ -215,10 +218,7 @@ class Pm4Factory {
   virtual uint32_t FindBlock(const char* name) const { return block_map_.Find(name); }
 
   /// Workaround for GFX11. PMC Builder overrides this.
-  virtual int GetNumWGPs() const {
-    if (pmc_builder_) return pmc_builder_->GetNumWGPs();
-    return 1;
-  };
+  virtual int GetNumWGPs() const;
 
   virtual int GetAccumLowID() const { throw HSA_STATUS_ERROR_INVALID_ARGUMENT; };
   virtual int GetAccumHiID() const { throw HSA_STATUS_ERROR_INVALID_ARGUMENT; };
@@ -233,12 +233,7 @@ class Pm4Factory {
         concurrent_mode_(concurrent_create_mode_),
         block_map_(map) {}
 
-  virtual ~Pm4Factory() {
-    delete cmd_builder_;
-    delete pmc_builder_;
-    delete spm_builder_;
-    delete sqtt_builder_;
-  }
+  virtual ~Pm4Factory();
 
   // PM4 command builder
   pm4_builder::CmdBuilder* cmd_builder_;

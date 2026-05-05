@@ -25,6 +25,7 @@
 
 #include "core/aql_profile.hpp"
 #include "core/pm4_factory.h"
+#include "pm4/pmc_builder.h"
 #include "aqlprofile-sdk/version.h"
 #include "aqlprofile-sdk/aql_profile_v2.h"
 // header for memcpy

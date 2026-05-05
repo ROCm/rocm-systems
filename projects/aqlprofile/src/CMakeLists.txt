@@ -33,6 +33,10 @@ set ( LIB_SRC
   ${LIB_DIR}/pm4/pmc_builder.cpp
   ${LIB_DIR}/pm4/spm_builder.cpp
   ${LIB_DIR}/pm4/sqtt_builder.cpp
+  ${LIB_DIR}/pm4/gfx9_cmd_builder.cpp
+  ${LIB_DIR}/pm4/gfx10_cmd_builder.cpp
+  ${LIB_DIR}/pm4/gfx11_cmd_builder.cpp
+  ${LIB_DIR}/pm4/gfx12_cmd_builder.cpp
   ${LIB_DIR}/pm4/gfx9_primitives_provider.cpp
   ${LIB_DIR}/pm4/gfx10_primitives_provider.cpp
   ${LIB_DIR}/pm4/gfx11_primitives_provider.cpp

@@ -28,8 +28,23 @@
 
 #include "core/architecture_init.hpp"
 #include "core/pm4_factory_adapter.hpp"
+#include "pm4/pmc_builder.h"
+#include "pm4/spm_builder.h"
+#include "pm4/sqtt_builder.h"
 
 namespace aql_profile {
+
+Pm4Factory::~Pm4Factory() {
+  delete cmd_builder_;
+  delete pmc_builder_;
+  delete spm_builder_;
+  delete sqtt_builder_;
+}
+
+int Pm4Factory::GetNumWGPs() const {
+  if (pmc_builder_) return pmc_builder_->GetNumWGPs();
+  return 1;
+}
 namespace {
 struct locked_agent_cache {
   std::shared_mutex mutex;

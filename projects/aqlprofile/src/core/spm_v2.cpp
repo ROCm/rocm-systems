@@ -9,6 +9,7 @@
 
 #include "core/logger.h"
 #include "core/pm4_factory.h"
+#include "pm4/spm_builder.h"
 
 #include <map>
 #include <array>

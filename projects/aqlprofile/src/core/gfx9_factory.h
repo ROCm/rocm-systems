@@ -56,7 +56,7 @@ class Gfx9Factory : public Pm4Factory {
   pm4_builder::PrimitivesProvider* prims_ = nullptr;
 
  public:
-  ~Gfx9Factory() override { delete prims_; }
+  ~Gfx9Factory() override;
 };
 
 // Mi100 factory class
