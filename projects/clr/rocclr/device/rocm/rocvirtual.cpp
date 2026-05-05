@@ -1406,15 +1406,6 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const std::vector<uint8_t>& flatPack
     addSystemScope_ = false;
   }
 
-  // Update cached fence state from the last packet's release scope.
-  auto expected_fence_state =
-      extractAqlBits(lastHeader, HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE,
-                     HSA_PACKET_HEADER_WIDTH_SCRELEASE_FENCE_SCOPE);
-  if (expected_fence_state == amd::Device::kCacheStateSystem) {
-    setFenceDirty(false);
-  }
-  fence_state_ = static_cast<Device::CacheState>(expected_fence_state);
-
   uint8_t* queueBase = static_cast<uint8_t*>(gpu_queue_->base_address);
 
   // Reserve ALL slots with a single wptr bump, then submit in kPeriod-sized chunks.
@@ -1423,6 +1414,18 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const std::vector<uint8_t>& flatPack
   // the yield never fires.
   uint64_t startIndex = Hsa::queue_add_write_index_screlease(gpu_queue_, numPackets);
   setFenceDirty(true);
+
+  // Update cached fence state from the last packet's release scope.
+  // Clear fence dirty if the last packet has system-scope release, matching
+  // the single-dispatch path in dispatchGenericAqlPacket (set dirty on reserve,
+  // then conditionally clear if system scope).
+  auto expected_fence_state =
+      extractAqlBits(lastHeader, HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE,
+                     HSA_PACKET_HEADER_WIDTH_SCRELEASE_FENCE_SCOPE);
+  if (expected_fence_state == amd::Device::kCacheStateSystem) {
+    setFenceDirty(false);
+  }
+  fence_state_ = static_cast<Device::CacheState>(expected_fence_state);
 
   const size_t kPeriod = DEBUG_HIP_GRAPH_BATCH_SIZE;
   auto* first_loc = reinterpret_cast<uint32_t*>(
@@ -1532,8 +1535,16 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const std::vector<uint8_t>& flatPack
   }
 
   hasPendingDispatch_ = true;
+
   auto* finalLastSlot = reinterpret_cast<hsa_kernel_dispatch_packet_t*>(
       queueBase + ((startIndex + numPackets - 1) & queueMask) * kPacketSize);
+
+  // Skip the pending dispatch only when both conditions are met: a completion
+  // signal tracks the last packet and the fence is already clean (system scope).
+  if (finalLastSlot->completion_signal.handle != 0 && !isFenceDirty()) {
+    hasPendingDispatch_ = false;
+  }
+
   TrackQueueProgress(*finalLastSlot, startIndex + numPackets - 1, pre_patched);
 
   if (blocking) {
