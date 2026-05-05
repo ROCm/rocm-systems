@@ -897,6 +897,16 @@ For attachment profiling of running processes:
 
     add_parser_bool_argument(
         advanced_options,
+        "--disable-wait-for-children",
+        help="""Disables waiting for child processes to exit before finalizing in the
+        rocprofv3 signal handler. When --disable-wait-for-children is set to true,
+        rocprofv3 will proceed directly to finalization upon receiving a signal without
+        waiting for child processes. Useful when child processes do not respond to
+        termination signals (e.g. torch inductor compile workers).""",
+    )
+
+    add_parser_bool_argument(
+        advanced_options,
         "--process-sync",
         help="""Enables the process synchronization in the rocprofv3 tool finalization stage.
         When --process-sync is set to true,
@@ -1955,6 +1965,9 @@ def run(app_args, args, **kwargs):
 
     if args.disable_signal_handlers is not None:
         update_env("ROCPROF_SIGNAL_HANDLERS", not args.disable_signal_handlers)
+
+    if args.disable_wait_for_children is not None:
+        update_env("ROCPROF_WAIT_FOR_CHILDREN", not args.disable_wait_for_children)
 
     if args.process_sync is not None:
         update_env("ROCPROF_PROCESS_SYNC", args.process_sync)

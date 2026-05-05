@@ -3497,19 +3497,32 @@ rocprofv3_error_signal_handler(int signo, siginfo_t* info, void* ucontext)
         };
 
         auto _children = get_children();
-        ROCP_WARNING << fmt::format(
-            "[PPID={}][PID={}][TID={}][{}] rocprofv3 will wait for {} children to exit",
-            this_ppid,
-            this_pid,
-            this_tid,
-            this_func,
-            _children.size());
-
-        // wait for children
-        for(auto itr : _children)
+        if(tool::get_config().enable_wait_for_children)
         {
-            auto status = wait_pid(itr, WUNTRACED | WNOHANG);
-            if(status) diagnose_status(itr, status.value());
+            ROCP_WARNING << fmt::format(
+                "[PPID={}][PID={}][TID={}][{}] rocprofv3 will wait for {} children to exit",
+                this_ppid,
+                this_pid,
+                this_tid,
+                this_func,
+                _children.size());
+
+            for(auto itr : _children)
+            {
+                auto status = wait_pid(itr, WUNTRACED | WNOHANG);
+                if(status) diagnose_status(itr, status.value());
+            }
+        }
+        else
+        {
+            ROCP_INFO << fmt::format(
+                "[PPID={}][PID={}][TID={}][{}] rocprofv3 skipping wait for {} children "
+                "(ROCPROF_WAIT_FOR_CHILDREN=0)",
+                this_ppid,
+                this_pid,
+                this_tid,
+                this_func,
+                _children.size());
         }
 
         ROCP_WARNING << fmt::format(
