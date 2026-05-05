@@ -7083,3 +7083,56 @@ def test_format_table_ascii_text_wrapping():
     ]
     # Should have multiple lines for the wrapped description
     assert len(desc_lines) > 1, "Long description should wrap to multiple lines"
+
+
+# =============================================================================
+# TESTS FOR reconfigure_stdio_utf8 FUNCTION
+# =============================================================================
+
+
+def test_reconfigure_stdio_utf8_calls_reconfigure_on_both_streams():
+    """Both sys.stdout and sys.stderr should be reconfigured to utf-8/replace."""
+    fake_stdout = mock.MagicMock()
+    fake_stderr = mock.MagicMock()
+    with mock.patch("utils.utils_common.sys") as fake_sys:
+        fake_sys.stdout = fake_stdout
+        fake_sys.stderr = fake_stderr
+        utils_common.reconfigure_stdio_utf8()
+    fake_stdout.reconfigure.assert_called_once_with(encoding="utf-8", errors="replace")
+    fake_stderr.reconfigure.assert_called_once_with(encoding="utf-8", errors="replace")
+
+
+def test_reconfigure_stdio_utf8_swallows_attribute_error():
+    """Streams without a reconfigure attribute (captured / wrapped) are skipped."""
+    fake_stdout = mock.MagicMock(spec=[])  # no reconfigure attribute
+    fake_stderr = mock.MagicMock()
+    with mock.patch("utils.utils_common.sys") as fake_sys:
+        fake_sys.stdout = fake_stdout
+        fake_sys.stderr = fake_stderr
+        utils_common.reconfigure_stdio_utf8()  # must not raise
+    fake_stderr.reconfigure.assert_called_once_with(encoding="utf-8", errors="replace")
+
+
+def test_reconfigure_stdio_utf8_swallows_unsupported_operation():
+    """io.UnsupportedOperation from a captured stream must be swallowed."""
+    fake_stdout = mock.MagicMock()
+    fake_stdout.reconfigure.side_effect = io.UnsupportedOperation("not seekable")
+    fake_stderr = mock.MagicMock()
+    with mock.patch("utils.utils_common.sys") as fake_sys:
+        fake_sys.stdout = fake_stdout
+        fake_sys.stderr = fake_stderr
+        utils_common.reconfigure_stdio_utf8()  # must not raise
+    fake_stderr.reconfigure.assert_called_once_with(encoding="utf-8", errors="replace")
+
+
+def test_reconfigure_stdio_utf8_end_to_end_makes_non_ascii_print_safe():
+    """After reconfigure, encoding to bytes via the wrapper must not raise."""
+    raw = io.BytesIO()
+    wrapper = io.TextIOWrapper(raw, encoding="ascii", errors="strict")
+    with mock.patch("utils.utils_common.sys") as fake_sys:
+        fake_sys.stdout = wrapper
+        fake_sys.stderr = wrapper
+        utils_common.reconfigure_stdio_utf8()
+    wrapper.write("│ box │\n")  # would raise UnicodeEncodeError under ascii/strict
+    wrapper.flush()
+    assert raw.getvalue() == "│ box │\n".encode("utf-8")

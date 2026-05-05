@@ -1078,6 +1078,22 @@ def create_temp_rocprofiler_metrics_path(sdk_config: dict[str, Any]) -> str:
     return str(tmpfile_parent)
 
 
+def reconfigure_stdio_utf8() -> None:
+    """Force sys.stdout / sys.stderr to UTF-8 regardless of the startup locale.
+
+    sys.stdout's encoding is decided once at interpreter startup from
+    locale.getpreferredencoding(), so a later locale.setlocale() call cannot
+    fix it. Reconfiguring the existing TextIOWrapper does. errors="replace"
+    keeps a single bad byte from crashing tabulated output on terminals that
+    cannot render every glyph.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, io.UnsupportedOperation):
+            pass
+
+
 def validate_roofline_csv(workload_dir: Union[str, Path, list]) -> tuple[bool, str]:
     """
     Validate roofline.csv exists and has consistent structure.
