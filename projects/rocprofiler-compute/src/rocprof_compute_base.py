@@ -42,7 +42,6 @@ from utils.utils_common import (
     replace_env,
     replace_rank,
     resolve_rocm_library_path,
-    set_locale_encoding,
     validate_roofline_csv,
 )
 from utils.utils_exceptions import WorkloadCommandError
@@ -71,7 +70,6 @@ class RocProfCompute:
             self.__args.verbose, self.__args.quiet, self.__mode, gui_value
         )
         setattr(self.__args, "loglevel", self.__loglevel)
-        set_locale_encoding()
 
         self.sanitize()
 

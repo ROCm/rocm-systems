@@ -7,7 +7,6 @@ import ctypes
 import errno
 import glob
 import io
-import locale
 import os
 import pty
 import re
@@ -1077,27 +1076,6 @@ def create_temp_rocprofiler_metrics_path(sdk_config: dict[str, Any]) -> str:
         yaml.dump(sdk_config, tmpfile, default_flow_style=False, sort_keys=False)
 
     return str(tmpfile_parent)
-
-
-def set_locale_encoding() -> None:
-    try:
-        # Attempt to set the locale to 'C.UTF-8'
-        locale.setlocale(locale.LC_ALL, "C.UTF-8")
-    except locale.Error:
-        # If 'C.UTF-8' is not available, check if the current locale is UTF-8 based
-        current_locale = locale.getdefaultlocale()
-        if current_locale and current_locale[1] and "UTF-8" in current_locale[1]:
-            try:
-                locale.setlocale(locale.LC_ALL, current_locale[0])
-            except locale.Error as e:
-                console_error(
-                    f"Failed to set locale to the current UTF-8-based locale: {e}"
-                )
-        else:
-            console_error(
-                "Please ensure that a UTF-8-based locale is available on your system.",
-                exit=False,
-            )
 
 
 def validate_roofline_csv(workload_dir: Union[str, Path, list]) -> tuple[bool, str]:

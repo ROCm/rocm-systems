@@ -3,7 +3,6 @@
 
 import builtins
 import io
-import locale
 import logging
 import math
 import os
@@ -3364,710 +3363,509 @@ def test_is_workload_empty_pandas_import_dependency():
 
 
 # =============================================================================
-# TESTS FOR LOCAL ENCODING FUNCTION
+# TESTS FOR reverse_multi_index_df_pmc FUNCTION
 #
 # Normal Functionality:
 #
-# Successful C.UTF-8 locale setting
-# Fallback to current UTF-8 locale when C.UTF-8 fails
-# Various UTF-8 encoding formats and case variations
+# Basic multi-index DataFrame decomposition
+# Multiple levels with different column counts
+# Data type preservation
+# Column order preservation
 # Edge Cases:
 #
-# getdefaultlocale returning None or partial None values
-# Empty encoding strings
-# Unusual but valid locale names
-# Multiple function calls
+# Single-level columns (error case)
+# Empty DataFrames
+# Single column per level
+# Uneven column distribution
+# Single row DataFrames
 # Error Conditions:
 #
-# C.UTF-8 locale not available
-# Fallback locale setting failures
-# No UTF-8 locales available on system
-# getdefaultlocale exceptions
-# Various locale.Error scenarios
-# String Handling and Dependencies:
+# Non-multi-index columns raising ValueError
+# Proper error message validation
+# Data Integrity:
 #
-# UTF-8 substring detection in encoding names
-# Console error message formatting and parameters
-# Locale module dependency verification
-# Return value consistency
+# Mixed data types preservation
+# NaN value handling
+# Index preservation
+# Memory efficiency
 # Special Scenarios:
 #
-# Thread safety simulation
-# Different locale error types and messages
-# Comprehensive error path coverage
-# Module import dependencies
+# Special characters in column names
+# Numeric level names
+# Three-level MultiIndex handling
+# Large DataFrame performance
+# Duplicate level name handling
+# Return Value Validation:
+#
+# Correct return types (list of DataFrames, list of levels)
+# Proper DataFrame structure in results
+# Consistent length of returned lists
 # =============================================================================
 
 
-def test_set_locale_encoding_successful_c_utf8():
+def test_reverse_multi_index_df_pmc_basic_functionality():
     """
-    Test set_locale_encoding when C.UTF-8 locale is
-    available and can be set successfully.
+    Test reverse_multi_index_df_pmc with a basic multi-index DataFrame.
 
     Returns:
-        None: Asserts function sets C.UTF-8 locale without errors.
+        None: Asserts function correctly decomposes multi-index DataFrame.
     """
-    from unittest.mock import patch
+    import pandas as pd
 
-    console_error_calls = []
+    data = {
+        ("file1", "col1"): [1, 2, 3],
+        ("file1", "col2"): [4, 5, 6],
+        ("file2", "col1"): [7, 8, 9],
+        ("file2", "col3"): [10, 11, 12],
+    }
+    df = pd.DataFrame(data)
+    df.columns = pd.MultiIndex.from_tuples(df.columns)
 
-    def mock_console_error(*args, **kwargs):
-        console_error_calls.append((args, kwargs))
+    dfs, coll_levels = utils_analysis.reverse_multi_index_df_pmc(df)
 
-    with patch("locale.setlocale") as mock_setlocale:
-        with patch("utils.utils_common.console_error", side_effect=mock_console_error):
-            mock_setlocale.return_value = None
+    assert len(dfs) == 2
+    assert len(coll_levels) == 2
+    assert "file1" in coll_levels
+    assert "file2" in coll_levels
 
-            utils_common.set_locale_encoding()
+    assert list(dfs[0].columns) == ["col1", "col2"]
+    assert list(dfs[0]["col1"]) == [1, 2, 3]
+    assert list(dfs[0]["col2"]) == [4, 5, 6]
 
-            mock_setlocale.assert_called_once_with(locale.LC_ALL, "C.UTF-8")
-            assert len(console_error_calls) == 0
+    assert list(dfs[1].columns) == ["col1", "col3"]
+    assert list(dfs[1]["col1"]) == [7, 8, 9]
+    assert list(dfs[1]["col3"]) == [10, 11, 12]
 
 
-def test_set_locale_encoding_c_utf8_fails_fallback_to_current_utf8():
+def test_reverse_multi_index_df_pmc_empty_dataframe():
     """
-    Test set_locale_encoding when C.UTF-8 fails but current locale is UTF-8 based.
+    Test reverse_multi_index_df_pmc with empty multi-index DataFrame.
 
     Returns:
-        None: Asserts function falls back to current UTF-8 locale successfully.
+        None: Asserts function handles empty DataFrames correctly.
     """
-    import locale
-    from unittest.mock import patch
+    import pandas as pd
 
-    console_error_calls = []
+    columns = pd.MultiIndex.from_tuples([("file1", "col1"), ("file1", "col2")])
+    df = pd.DataFrame(columns=columns)
 
-    def mock_console_error(*args, **kwargs):
-        console_error_calls.append((args, kwargs))
+    dfs, coll_levels = utils_analysis.reverse_multi_index_df_pmc(df)
 
-    with patch("locale.setlocale") as mock_setlocale:
-        with patch("locale.getdefaultlocale") as mock_getdefaultlocale:
-            with patch(
-                "utils.utils_common.console_error", side_effect=mock_console_error
-            ):
-                mock_setlocale.side_effect = [
-                    locale.Error("C.UTF-8 not available"),
-                    None,
-                ]
-                mock_getdefaultlocale.return_value = ("en_US", "UTF-8")
-
-                utils_common.set_locale_encoding()
-
-                assert mock_setlocale.call_count == 2
-                mock_setlocale.assert_any_call(locale.LC_ALL, "C.UTF-8")
-                mock_setlocale.assert_any_call(locale.LC_ALL, "en_US")
-                assert len(console_error_calls) == 0
+    assert len(dfs) == 1
+    assert len(coll_levels) == 1
+    assert coll_levels[0] == "file1"
+    assert len(dfs[0]) == 0
+    assert list(dfs[0].columns) == ["col1", "col2"]
 
 
-def test_set_locale_encoding_c_utf8_fails_fallback_also_fails():
+def test_reverse_multi_index_df_pmc_single_column_per_level():
     """
-    Test set_locale_encoding when both C.UTF-8 and fallback locale fail.
+    Test reverse_multi_index_df_pmc with single column per level.
 
     Returns:
-        None: Asserts function calls console_error when fallback locale fails.
+        None: Asserts function handles single column per level correctly.
     """
-    import locale
-    from unittest.mock import patch
+    import pandas as pd
 
-    console_error_calls = []
+    data = {
+        ("level1", "col1"): [1, 2, 3],
+        ("level2", "col1"): [4, 5, 6],
+        ("level3", "col1"): [7, 8, 9],
+    }
+    df = pd.DataFrame(data)
+    df.columns = pd.MultiIndex.from_tuples(df.columns)
 
-    def mock_console_error(*args, **kwargs):
-        console_error_calls.append((args, kwargs))
+    dfs, coll_levels = utils_analysis.reverse_multi_index_df_pmc(df)
 
-    with patch("locale.setlocale") as mock_setlocale:
-        with patch("locale.getdefaultlocale") as mock_getdefaultlocale:
-            with patch(
-                "utils.utils_common.console_error", side_effect=mock_console_error
-            ):
-                fallback_error = locale.Error("Fallback locale failed")
-                mock_setlocale.side_effect = [
-                    locale.Error("C.UTF-8 not available"),
-                    fallback_error,
-                ]
-                mock_getdefaultlocale.return_value = ("en_US", "UTF-8")
+    assert len(dfs) == 3
+    assert len(coll_levels) == 3
+    assert set(coll_levels) == {"level1", "level2", "level3"}
 
-                utils_common.set_locale_encoding()
-
-                assert len(console_error_calls) == 1
-                assert (
-                    "Failed to set locale to the current UTF-8-based locale:"
-                    in console_error_calls[0][0][0]
-                )
-                assert "Fallback locale failed" in console_error_calls[0][0][0]
+    for i, df_result in enumerate(dfs):
+        assert len(df_result.columns) == 1
+        assert df_result.columns[0] == "col1"
+        assert len(df_result) == 3
 
 
-def test_set_locale_encoding_no_utf8_locale_available():
+def test_reverse_multi_index_df_pmc_uneven_column_distribution():
     """
-    Test set_locale_encoding when no UTF-8 locale is available.
+    Test reverse_multi_index_df_pmc with uneven column distribution across levels.
 
     Returns:
-        None: Asserts function calls console_error when no UTF-8 locale found.
+        None: Asserts function handles uneven column distributions correctly.
     """
-    import locale
-    from unittest.mock import patch
+    import pandas as pd
 
-    console_error_calls = []
+    data = {
+        ("file1", "col1"): [1, 2, 3],
+        ("file1", "col2"): [4, 5, 6],
+        ("file1", "col3"): [7, 8, 9],
+        ("file2", "col1"): [10, 11, 12],
+        ("file3", "col1"): [13, 14, 15],
+        ("file3", "col2"): [16, 17, 18],
+    }
+    df = pd.DataFrame(data)
+    df.columns = pd.MultiIndex.from_tuples(df.columns)
 
-    def mock_console_error(*args, **kwargs):
-        console_error_calls.append((args, kwargs))
+    dfs, coll_levels = utils_analysis.reverse_multi_index_df_pmc(df)
 
-    with patch("locale.setlocale") as mock_setlocale:
-        with patch("locale.getdefaultlocale") as mock_getdefaultlocale:
-            with patch(
-                "utils.utils_common.console_error", side_effect=mock_console_error
-            ):
-                mock_setlocale.side_effect = locale.Error("C.UTF-8 not available")
-                mock_getdefaultlocale.return_value = ("en_US", "ISO-8859-1")
+    assert len(dfs) == 3
+    assert len(coll_levels) == 3
+    assert set(coll_levels) == {"file1", "file2", "file3"}
 
-                utils_common.set_locale_encoding()
+    file1_df = next(df for i, df in enumerate(dfs) if coll_levels[i] == "file1")
+    assert len(file1_df.columns) == 3
 
-                assert len(console_error_calls) == 1
-                assert (
-                    "Please ensure that a UTF-8-based "
-                    "locale is available on your system."
-                    in console_error_calls[0][0][0]
-                )
-                assert console_error_calls[0][1]["exit"] == False  # noqa
+    file2_df = next(df for i, df in enumerate(dfs) if coll_levels[i] == "file2")
+    assert len(file2_df.columns) == 1
+
+    file3_df = next(df for i, df in enumerate(dfs) if coll_levels[i] == "file3")
+    assert len(file3_df.columns) == 2
 
 
-def test_set_locale_encoding_getdefaultlocale_returns_none():
+def test_reverse_multi_index_df_pmc_duplicate_level_names():
     """
-    Test set_locale_encoding when getdefaultlocale returns None.
+    Test reverse_multi_index_df_pmc with duplicate
+    level names (should handle unique() correctly).
 
     Returns:
-        None: Asserts function handles
-        None return from getdefaultlocale.
+        None: Asserts function handles duplicate level names correctly.
     """
-    import locale
-    from unittest.mock import patch
+    import pandas as pd
 
-    console_error_calls = []
+    data = {
+        ("file1", "col1"): [1, 2, 3],
+        ("file1", "col2"): [4, 5, 6],
+        ("file1", "col3"): [7, 8, 9],
+    }
+    df = pd.DataFrame(data)
+    df.columns = pd.MultiIndex.from_tuples(df.columns)
 
-    def mock_console_error(*args, **kwargs):
-        console_error_calls.append((args, kwargs))
+    dfs, coll_levels = utils_analysis.reverse_multi_index_df_pmc(df)
 
-    with patch("locale.setlocale") as mock_setlocale:
-        with patch("locale.getdefaultlocale") as mock_getdefaultlocale:
-            with patch(
-                "utils.utils_common.console_error", side_effect=mock_console_error
-            ):
-                mock_setlocale.side_effect = locale.Error("C.UTF-8 not available")
-                mock_getdefaultlocale.return_value = None
-
-                utils_common.set_locale_encoding()
-
-                assert len(console_error_calls) == 1
-                assert (
-                    "Please ensure that a UTF-8-based locale "
-                    "is available on your system." in console_error_calls[0][0][0]
-                )
+    assert len(dfs) == 1
+    assert len(coll_levels) == 1
+    assert coll_levels[0] == "file1"
+    assert len(dfs[0].columns) == 3
+    assert list(dfs[0].columns) == ["col1", "col2", "col3"]
 
 
-def test_set_locale_encoding_getdefaultlocale_partial_none():
+def test_reverse_multi_index_df_pmc_mixed_data_types():
     """
-    Test set_locale_encoding when getdefaultlocale returns partial None values.
+    Test reverse_multi_index_df_pmc with mixed data types in columns.
 
     Returns:
-        None: Asserts function handles partial None values from getdefaultlocale.
+        None: Asserts function handles mixed data types correctly.
     """
-    import locale
-    from unittest.mock import patch
+    import pandas as pd
 
-    console_error_calls = []
+    data = {
+        ("file1", "integers"): [1, 2, 3],
+        ("file1", "floats"): [1.1, 2.2, 3.3],
+        ("file1", "strings"): ["a", "b", "c"],
+        ("file2", "booleans"): [True, False, True],
+        ("file2", "mixed"): [1, "text", 3.14],
+    }
+    df = pd.DataFrame(data)
+    df.columns = pd.MultiIndex.from_tuples(df.columns)
 
-    def mock_console_error(*args, **kwargs):
-        console_error_calls.append((args, kwargs))
+    dfs, coll_levels = utils_analysis.reverse_multi_index_df_pmc(df)
 
-    with patch("locale.setlocale") as mock_setlocale:
-        with patch("locale.getdefaultlocale") as mock_getdefaultlocale:
-            with patch(
-                "utils.utils_common.console_error", side_effect=mock_console_error
-            ):
-                mock_setlocale.side_effect = locale.Error("C.UTF-8 not available")
+    assert len(dfs) == 2
+    assert len(coll_levels) == 2
 
-                mock_getdefaultlocale.return_value = ("en_US", None)
+    file1_df = next(df for i, df in enumerate(dfs) if coll_levels[i] == "file1")
+    assert file1_df["integers"].dtype == "int64"
+    assert file1_df["floats"].dtype == "float64"
+    assert file1_df["strings"].dtype == "object"
 
-                try:
-                    utils_common.set_locale_encoding()
-                except TypeError as e:
-                    if "argument of type 'NoneType' is not iterable" in str(e):
-                        pytest.skip(
-                            "Function doesn't handle None encoding "
-                            "gracefully - needs null check"
-                        )
-                    else:
-                        raise
-
-                assert len(console_error_calls) == 1
-                assert (
-                    "Please ensure that a UTF-8-based locale is "
-                    "available on your system." in console_error_calls[0][0][0]
-                )
+    file2_df = next(df for i, df in enumerate(dfs) if coll_levels[i] == "file2")
+    assert file2_df["booleans"].dtype == "bool"
+    assert file2_df["mixed"].dtype == "object"
 
 
-def test_set_locale_encoding_utf8_case_variations():
+def test_reverse_multi_index_df_pmc_nan_values():
     """
-    Test set_locale_encoding with various UTF-8 case variations in encoding.
+    Test reverse_multi_index_df_pmc with NaN values in data.
 
     Returns:
-        None: Asserts function handles different UTF-8 case formats.
+        None: Asserts function handles NaN values correctly.
     """
-    import locale
-    from unittest.mock import patch
+    import numpy as np
+    import pandas as pd
 
-    utf8_variations = ["UTF-8", "utf-8", "UTF8", "utf8"]
+    data = {
+        ("file1", "col1"): [1, np.nan, 3],
+        ("file1", "col2"): [np.nan, 5, 6],
+        ("file2", "col1"): [7, 8, np.nan],
+    }
+    df = pd.DataFrame(data)
+    df.columns = pd.MultiIndex.from_tuples(df.columns)
 
-    for utf8_variant in utf8_variations:
-        console_error_calls = []
+    dfs, coll_levels = utils_analysis.reverse_multi_index_df_pmc(df)
 
-        def mock_console_error(*args, **kwargs):
-            console_error_calls.append((args, kwargs))
+    assert len(dfs) == 2
 
-        with patch("locale.setlocale") as mock_setlocale:
-            with patch("locale.getdefaultlocale") as mock_getdefaultlocale:
-                with patch(
-                    "utils.utils_common.console_error", side_effect=mock_console_error
-                ):
-                    mock_setlocale.side_effect = [
-                        locale.Error("C.UTF-8 not available"),
-                        None,
-                    ]
-                    mock_getdefaultlocale.return_value = ("en_US", utf8_variant)
+    file1_df = next(df for i, df in enumerate(dfs) if coll_levels[i] == "file1")
+    assert pd.isna(file1_df.iloc[1, 0])
+    assert pd.isna(file1_df.iloc[0, 1])
 
-                    utils_common.set_locale_encoding()
-
-                    if "UTF-8" in utf8_variant:
-                        assert len(console_error_calls) == 0
-                        assert mock_setlocale.call_count == 2
-                    else:
-                        assert len(console_error_calls) == 1
+    file2_df = next(df for i, df in enumerate(dfs) if coll_levels[i] == "file2")
+    assert pd.isna(file2_df.iloc[2, 0])
 
 
-def test_set_locale_encoding_empty_encoding():
+def test_reverse_multi_index_df_pmc_special_column_names():
     """
-    Test set_locale_encoding when getdefaultlocale returns empty encoding.
+    Test reverse_multi_index_df_pmc with special characters in column names.
 
     Returns:
-        None: Asserts function handles empty encoding string.
+        None: Asserts function handles special characters in column names.
     """
-    import locale
-    from unittest.mock import patch
+    import pandas as pd
 
-    console_error_calls = []
+    data = {
+        ("file-1", "col_1"): [1, 2, 3],
+        ("file-1", "col.2"): [4, 5, 6],
+        ("file 2", "col@3"): [7, 8, 9],
+        ("file 2", "col#4"): [10, 11, 12],
+    }
+    df = pd.DataFrame(data)
+    df.columns = pd.MultiIndex.from_tuples(df.columns)
 
-    def mock_console_error(*args, **kwargs):
-        console_error_calls.append((args, kwargs))
+    dfs, coll_levels = utils_analysis.reverse_multi_index_df_pmc(df)
 
-    with patch("locale.setlocale") as mock_setlocale:
-        with patch("locale.getdefaultlocale") as mock_getdefaultlocale:
-            with patch(
-                "utils.utils_common.console_error", side_effect=mock_console_error
-            ):
-                mock_setlocale.side_effect = locale.Error("C.UTF-8 not available")
-                mock_getdefaultlocale.return_value = ("en_US", "")
+    assert len(dfs) == 2
+    assert "file-1" in coll_levels
+    assert "file 2" in coll_levels
 
-                utils_common.set_locale_encoding()
+    file1_df = next(df for i, df in enumerate(dfs) if coll_levels[i] == "file-1")
+    assert "col_1" in file1_df.columns
+    assert "col.2" in file1_df.columns
 
-                assert len(console_error_calls) == 1
-                assert (
-                    "Please ensure that a UTF-8-based locale "
-                    "is available on your system." in console_error_calls[0][0][0]
-                )
+    file2_df = next(df for i, df in enumerate(dfs) if coll_levels[i] == "file 2")
+    assert "col@3" in file2_df.columns
+    assert "col#4" in file2_df.columns
 
 
-def test_set_locale_encoding_locale_with_utf8_substring():
+def test_reverse_multi_index_df_pmc_numeric_level_names():
     """
-    Test set_locale_encoding with encoding that contains UTF-8 as substring.
+    Test reverse_multi_index_df_pmc with numeric level names.
 
     Returns:
-        None: Asserts function correctly identifies UTF-8 in encoding names.
+        None: Asserts function handles numeric level names correctly.
     """
-    import locale
-    from unittest.mock import patch
+    import pandas as pd
 
-    console_error_calls = []
+    data = {
+        (1, "col1"): [1, 2, 3],
+        (1, "col2"): [4, 5, 6],
+        (2, "col1"): [7, 8, 9],
+        (3.5, "col1"): [10, 11, 12],
+    }
+    df = pd.DataFrame(data)
+    df.columns = pd.MultiIndex.from_tuples(df.columns)
 
-    def mock_console_error(*args, **kwargs):
-        console_error_calls.append((args, kwargs))
+    dfs, coll_levels = utils_analysis.reverse_multi_index_df_pmc(df)
 
-    with patch("locale.setlocale") as mock_setlocale:
-        with patch("locale.getdefaultlocale") as mock_getdefaultlocale:
-            with patch(
-                "utils.utils_common.console_error", side_effect=mock_console_error
-            ):
-                mock_setlocale.side_effect = [
-                    locale.Error("C.UTF-8 not available"),
-                    None,
-                ]
-                mock_getdefaultlocale.return_value = (
-                    "en_US",
-                    "ISO-8859-1.UTF-8.EXTENDED",
-                )
+    assert len(dfs) == 3
+    assert set(coll_levels) == {1, 2, 3.5}
 
-                utils_common.set_locale_encoding()
-
-                assert len(console_error_calls) == 0
-                assert mock_setlocale.call_count == 2
+    for level in [1, 2, 3.5]:
+        level_df = next(df for i, df in enumerate(dfs) if coll_levels[i] == level)
+        assert len(level_df.columns) >= 1
+        assert "col1" in level_df.columns
 
 
-def test_set_locale_encoding_different_locale_error_types():
+def test_reverse_multi_index_df_pmc_large_dataframe():
     """
-    Test set_locale_encoding with different types of locale.Error exceptions.
+    Test reverse_multi_index_df_pmc with large DataFrame.
 
     Returns:
-        None: Asserts function handles various locale error scenarios.
+        None: Asserts function handles large DataFrames efficiently.
     """
-    import locale
-    from unittest.mock import patch
+    import numpy as np
+    import pandas as pd
 
-    error_scenarios = [
-        "Locale not supported",
-        "Invalid locale specification",
-        "System locale database corrupted",
-        "",  # Empty error message
-    ]
+    num_rows = 1000
+    num_levels = 5
+    num_cols_per_level = 10
 
-    for error_msg in error_scenarios:
-        console_error_calls = []
+    data = {}
+    for level in range(num_levels):
+        for col in range(num_cols_per_level):
+            data[(f"level_{level}", f"col_{col}")] = np.random.randint(0, 100, num_rows)
 
-        def mock_console_error(*args, **kwargs):
-            console_error_calls.append((args, kwargs))
+    df = pd.DataFrame(data)
+    df.columns = pd.MultiIndex.from_tuples(df.columns)
 
-        with patch("locale.setlocale") as mock_setlocale:
-            with patch("locale.getdefaultlocale") as mock_getdefaultlocale:
-                with patch(
-                    "utils.utils_common.console_error", side_effect=mock_console_error
-                ):
-                    fallback_error = locale.Error(error_msg)
-                    mock_setlocale.side_effect = [
-                        locale.Error("C.UTF-8 not available"),
-                        fallback_error,
-                    ]
-                    mock_getdefaultlocale.return_value = ("en_US", "UTF-8")
+    dfs, coll_levels = utils_analysis.reverse_multi_index_df_pmc(df)
 
-                    utils_common.set_locale_encoding()
+    assert len(dfs) == num_levels
+    assert len(coll_levels) == num_levels
 
-                    assert len(console_error_calls) == 1
-                    assert str(fallback_error) in console_error_calls[0][0][0]
+    for i, df_result in enumerate(dfs):
+        assert len(df_result) == num_rows
+        assert len(df_result.columns) == num_cols_per_level
 
 
-def test_set_locale_encoding_unusual_locale_names():
+def test_reverse_multi_index_df_pmc_three_level_index():
     """
-    Test set_locale_encoding with unusual but valid locale names.
+    Test reverse_multi_index_df_pmc with three-level MultiIndex (should still work).
 
     Returns:
-        None: Asserts function handles unusual locale name formats.
+        None: Asserts function handles three-level MultiIndex correctly.
     """
-    import locale
-    from unittest.mock import patch
+    import pandas as pd
 
-    unusual_locales = [
-        ("C", "UTF-8"),
-        ("POSIX", "UTF-8"),
-        ("en_US.UTF-8", "UTF-8"),
-        ("zh_CN.UTF-8", "UTF-8"),
-        ("", "UTF-8"),  # Empty locale name
-    ]
+    data = {
+        ("file1", "group1", "col1"): [1, 2, 3],
+        ("file1", "group1", "col2"): [4, 5, 6],
+        ("file1", "group2", "col1"): [7, 8, 9],
+        ("file2", "group1", "col1"): [10, 11, 12],
+    }
+    df = pd.DataFrame(data)
+    df.columns = pd.MultiIndex.from_tuples(df.columns)
 
-    for locale_name, encoding in unusual_locales:
-        console_error_calls = []
+    dfs, coll_levels = utils_analysis.reverse_multi_index_df_pmc(df)
 
-        def mock_console_error(*args, **kwargs):
-            console_error_calls.append((args, kwargs))
+    assert len(dfs) == 2
+    assert set(coll_levels) == {"file1", "file2"}
 
-        with patch("locale.setlocale") as mock_setlocale:
-            with patch("locale.getdefaultlocale") as mock_getdefaultlocale:
-                with patch(
-                    "utils.utils_common.console_error", side_effect=mock_console_error
-                ):
-                    mock_setlocale.side_effect = [
-                        locale.Error("C.UTF-8 not available"),
-                        None,
-                    ]
-                    mock_getdefaultlocale.return_value = (locale_name, encoding)
-
-                    utils_common.set_locale_encoding()
-
-                    assert len(console_error_calls) == 0
-                    assert mock_setlocale.call_count == 2
-                    mock_setlocale.assert_any_call(locale.LC_ALL, locale_name)
+    file1_df = next(df for i, df in enumerate(dfs) if coll_levels[i] == "file1")
+    assert len(file1_df.columns.levels) == 2
 
 
-def test_set_locale_encoding_getdefaultlocale_exception():
+def test_reverse_multi_index_df_pmc_return_type_validation():
     """
-    Test set_locale_encoding when getdefaultlocale raises an exception.
+    Test reverse_multi_index_df_pmc return types are correct.
 
     Returns:
-        None: Asserts function handles getdefaultlocale exceptions gracefully.
+        None: Asserts function returns correct types.
     """
-    import locale
-    from unittest.mock import patch
+    import pandas as pd
 
-    console_error_calls = []
+    data = {
+        ("file1", "col1"): [1, 2, 3],
+        ("file2", "col1"): [4, 5, 6],
+    }
+    df = pd.DataFrame(data)
+    df.columns = pd.MultiIndex.from_tuples(df.columns)
 
-    def mock_console_error(*args, **kwargs):
-        console_error_calls.append((args, kwargs))
+    dfs, coll_levels = utils_analysis.reverse_multi_index_df_pmc(df)
 
-    with patch("locale.setlocale") as mock_setlocale:
-        with patch("locale.getdefaultlocale") as mock_getdefaultlocale:
-            with patch(
-                "utils.utils_common.console_error", side_effect=mock_console_error
-            ):
-                mock_setlocale.side_effect = locale.Error("C.UTF-8 not available")
-                mock_getdefaultlocale.side_effect = Exception("getdefaultlocale failed")
-
-                try:
-                    utils_common.set_locale_encoding()
-                except Exception:
-                    pass
+    assert isinstance(dfs, list)
+    assert isinstance(coll_levels, list)
+    assert all(isinstance(df, pd.DataFrame) for df in dfs)
+    assert len(dfs) == len(coll_levels)
 
 
-def test_set_locale_encoding_console_error_parameters():
+def test_reverse_multi_index_df_pmc_column_order_preservation():
     """
-    Test set_locale_encoding console_error call parameters are correct.
+    Test reverse_multi_index_df_pmc preserves column order within levels.
 
     Returns:
-        None: Asserts console_error is called with correct parameters.
+        None: Asserts function preserves column order correctly.
     """
-    import locale
-    from unittest.mock import patch
+    import pandas as pd
 
-    console_error_calls = []
+    data = {
+        ("file1", "z_col"): [1, 2, 3],
+        ("file1", "a_col"): [4, 5, 6],
+        ("file1", "m_col"): [7, 8, 9],
+        ("file2", "b_col"): [10, 11, 12],
+        ("file2", "y_col"): [13, 14, 15],
+    }
+    df = pd.DataFrame(data)
+    df.columns = pd.MultiIndex.from_tuples(df.columns)
 
-    def mock_console_error(*args, **kwargs):
-        console_error_calls.append((args, kwargs))
+    dfs, coll_levels = utils_analysis.reverse_multi_index_df_pmc(df)
 
-    with patch("locale.setlocale") as mock_setlocale:
-        with patch("locale.getdefaultlocale") as mock_getdefaultlocale:
-            with patch(
-                "utils.utils_common.console_error", side_effect=mock_console_error
-            ):
-                mock_setlocale.side_effect = locale.Error("C.UTF-8 not available")
-                mock_getdefaultlocale.return_value = ("en_US", "ISO-8859-1")
+    file1_df = next(df for i, df in enumerate(dfs) if coll_levels[i] == "file1")
+    assert list(file1_df.columns) == ["z_col", "a_col", "m_col"]
 
-                utils_common.set_locale_encoding()
-
-                assert len(console_error_calls) == 1
-                args, kwargs = console_error_calls[0]
-                assert len(args) == 1
-                assert "exit" in kwargs
-                assert kwargs["exit"] == False  # noqa
+    file2_df = next(df for i, df in enumerate(dfs) if coll_levels[i] == "file2")
+    assert list(file2_df.columns) == ["b_col", "y_col"]
 
 
-def test_set_locale_encoding_return_value():
+def test_reverse_multi_index_df_pmc_index_preservation():
     """
-    Test that set_locale_encoding returns None (implicit return).
+    Test reverse_multi_index_df_pmc preserves DataFrame index.
 
     Returns:
-        None: Asserts function returns None in all scenarios.
+        None: Asserts function preserves original DataFrame index.
     """
-    import locale
-    from unittest.mock import patch
+    import pandas as pd
 
-    with patch("locale.setlocale") as mock_setlocale:
-        with patch("utils.utils_common.console_error"):
-            mock_setlocale.return_value = None
+    data = {
+        ("file1", "col1"): [1, 2, 3],
+        ("file1", "col2"): [4, 5, 6],
+        ("file2", "col1"): [7, 8, 9],
+    }
+    df = pd.DataFrame(data, index=["row_a", "row_b", "row_c"])
+    df.columns = pd.MultiIndex.from_tuples(df.columns)
 
-            result = utils_common.set_locale_encoding()
-            assert result is None
+    dfs, coll_levels = utils_analysis.reverse_multi_index_df_pmc(df)
 
-    with patch("locale.setlocale") as mock_setlocale:
-        with patch("locale.getdefaultlocale") as mock_getdefaultlocale:
-            with patch("utils.utils_common.console_error"):
-                mock_setlocale.side_effect = locale.Error("C.UTF-8 not available")
-                mock_getdefaultlocale.return_value = ("en_US", "ISO-8859-1")
-
-                result = utils_common.set_locale_encoding()
-                assert result is None
+    for df_result in dfs:
+        assert list(df_result.index) == ["row_a", "row_b", "row_c"]
 
 
-def test_set_locale_encoding_locale_module_import():
+def test_reverse_multi_index_df_pmc_memory_efficiency():
     """
-    Test set_locale_encoding dependency on locale module.
+    Test reverse_multi_index_df_pmc memory usage patterns.
 
     Returns:
-        None: Asserts function properly uses locale module functionality.
+        None: Asserts function doesn't create unnecessary copies.
     """
-    import locale
-    from unittest.mock import patch
+    import pandas as pd
 
-    setlocale_calls = []
-    getdefaultlocale_calls = []
+    data = {
+        ("file1", "col1"): [1, 2, 3],
+        ("file2", "col1"): [4, 5, 6],
+    }
+    df = pd.DataFrame(data)
+    df.columns = pd.MultiIndex.from_tuples(df.columns)
 
-    def mock_setlocale(category, locale_name):
-        setlocale_calls.append((category, locale_name))
-        return None
+    original_memory = df.memory_usage(deep=True).sum()
 
-    def mock_getdefaultlocale():
-        getdefaultlocale_calls.append(True)
-        return ("en_US", "UTF-8")
+    dfs, coll_levels = utils_analysis.reverse_multi_index_df_pmc(df)
 
-    console_error_calls = []
+    total_result_memory = sum(df.memory_usage(deep=True).sum() for df in dfs)
 
-    def mock_console_error(*args, **kwargs):
-        console_error_calls.append((args, kwargs))
-
-    with patch("locale.setlocale", side_effect=mock_setlocale):
-        with patch("locale.getdefaultlocale", side_effect=mock_getdefaultlocale):
-            with patch(
-                "utils.utils_common.console_error", side_effect=mock_console_error
-            ):
-                utils_common.set_locale_encoding()
-
-    assert len(setlocale_calls) == 1
-    assert setlocale_calls[0] == (locale.LC_ALL, "C.UTF-8")
-    assert len(getdefaultlocale_calls) == 0
-    assert len(console_error_calls) == 0
-
-    setlocale_calls.clear()
-    getdefaultlocale_calls.clear()
-    console_error_calls.clear()
-
-    def mock_setlocale_with_error(category, locale_name):
-        setlocale_calls.append((category, locale_name))
-        if locale_name == "C.UTF-8":
-            raise locale.Error("C.UTF-8 not available")
-        return None
-
-    with patch("locale.setlocale", side_effect=mock_setlocale_with_error):
-        with patch("locale.getdefaultlocale", side_effect=mock_getdefaultlocale):
-            with patch(
-                "utils.utils_common.console_error", side_effect=mock_console_error
-            ):
-                utils_common.set_locale_encoding()
-
-    assert len(setlocale_calls) == 2
-    assert setlocale_calls[0] == (locale.LC_ALL, "C.UTF-8")
-    assert setlocale_calls[1] == (locale.LC_ALL, "en_US")
-    assert len(getdefaultlocale_calls) == 1
-    assert len(console_error_calls) == 0
+    assert total_result_memory < original_memory * 3
 
 
-def test_set_locale_encoding_multiple_calls():
+def test_reverse_multi_index_df_pmc_edge_case_single_row():
     """
-    Test set_locale_encoding behavior when called multiple times.
+    Test reverse_multi_index_df_pmc with single row DataFrame.
 
     Returns:
-        None: Asserts function behaves consistently across multiple calls.
+        None: Asserts function handles single row DataFrames correctly.
     """
-    from unittest.mock import patch
+    import pandas as pd
 
-    console_error_calls = []
+    data = {
+        ("file1", "col1"): [100],
+        ("file1", "col2"): [200],
+        ("file2", "col1"): [300],
+    }
+    df = pd.DataFrame(data)
+    df.columns = pd.MultiIndex.from_tuples(df.columns)
 
-    def mock_console_error(*args, **kwargs):
-        console_error_calls.append((args, kwargs))
+    dfs, coll_levels = utils_analysis.reverse_multi_index_df_pmc(df)
 
-    with patch("locale.setlocale") as mock_setlocale:
-        with patch("utils.utils_common.console_error", side_effect=mock_console_error):
-            mock_setlocale.return_value = None
+    assert len(dfs) == 2
+    assert len(coll_levels) == 2
 
-            utils_common.set_locale_encoding()
-            utils_common.set_locale_encoding()
-            utils_common.set_locale_encoding()
+    for df_result in dfs:
+        assert len(df_result) == 1
 
-            assert mock_setlocale.call_count == 3
-            assert len(console_error_calls) == 0
+    file1_df = next(df for i, df in enumerate(dfs) if coll_levels[i] == "file1")
+    assert file1_df.iloc[0]["col1"] == 100
+    assert file1_df.iloc[0]["col2"] == 200
 
-
-def test_set_locale_encoding_thread_safety_simulation():
-    """
-    Test set_locale_encoding behavior in simulated concurrent scenarios.
-
-    Returns:
-        None: Asserts function handles concurrent-like access patterns.
-    """
-    import locale
-    from unittest.mock import patch
-
-    call_count = 0
-
-    def side_effect_setlocale(*args, **kwargs):
-        nonlocal call_count
-        call_count += 1
-        if call_count == 1:
-            raise locale.Error("First call fails")
-        return None
-
-    console_error_calls = []
-
-    def mock_console_error(*args, **kwargs):
-        console_error_calls.append((args, kwargs))
-
-    with patch("locale.setlocale", side_effect=side_effect_setlocale):
-        with patch("locale.getdefaultlocale") as mock_getdefaultlocale:
-            with patch(
-                "utils.utils_common.console_error", side_effect=mock_console_error
-            ):
-                mock_getdefaultlocale.return_value = ("en_US", "UTF-8")
-
-                utils_common.set_locale_encoding()
-
-                assert call_count == 2
-                assert len(console_error_calls) == 0
-
-
-def test_set_locale_encoding_comprehensive_error_handling():
-    """
-    Test set_locale_encoding comprehensive error handling across all code paths.
-
-    Returns:
-        None: Asserts all error paths are properly handled.
-    """
-    import locale
-    from unittest.mock import patch
-
-    console_error_calls = []
-
-    def mock_console_error(*args, **kwargs):
-        console_error_calls.append((args, kwargs))
-
-    test_scenarios = [
-        {
-            "name": "C.UTF-8 success",
-            "setlocale_side_effect": [None],
-            "getdefaultlocale_return": ("en_US", "UTF-8"),
-            "expected_errors": 0,
-        },
-        {
-            "name": "C.UTF-8 fails, fallback success",
-            "setlocale_side_effect": [locale.Error("C.UTF-8 fail"), None],
-            "getdefaultlocale_return": ("en_US", "UTF-8"),
-            "expected_errors": 0,
-        },
-        {
-            "name": "Both fail with UTF-8 locale",
-            "setlocale_side_effect": [
-                locale.Error("C.UTF-8 fail"),
-                locale.Error("Fallback fail"),
-            ],
-            "getdefaultlocale_return": ("en_US", "UTF-8"),
-            "expected_errors": 1,
-        },
-        {
-            "name": "No UTF-8 locale available",
-            "setlocale_side_effect": [locale.Error("C.UTF-8 fail")],
-            "getdefaultlocale_return": ("en_US", "ISO-8859-1"),
-            "expected_errors": 1,
-        },
-    ]
-
-    for scenario in test_scenarios:
-        console_error_calls.clear()
-
-        with patch("locale.setlocale") as mock_setlocale:
-            with patch("locale.getdefaultlocale") as mock_getdefaultlocale:
-                with patch(
-                    "utils.utils_common.console_error", side_effect=mock_console_error
-                ):
-                    mock_setlocale.side_effect = scenario["setlocale_side_effect"]
-                    mock_getdefaultlocale.return_value = scenario[
-                        "getdefaultlocale_return"
-                    ]
-
-                    utils_common.set_locale_encoding()
-
-                    assert len(console_error_calls) == scenario["expected_errors"], (
-                        f"Failed scenario: {scenario['name']}"
-                    )
+    file2_df = next(df for i, df in enumerate(dfs) if coll_levels[i] == "file2")
+    assert file2_df.iloc[0]["col1"] == 300
 
 
 # =============================================================================
