@@ -179,7 +179,7 @@ public:
     static const uint32_t COPY_DATA_SEL_COUNT_1DW_PRM = COPY_DATA_SEL_COUNT_1DW;
 
     static uint32_t Low32(const uint64_t& v) { return (uint32_t) v; }
-    static uint32_t High32(const uint64_t& v) { return (uint32_t)(v >> 32); }
+    static uint32_t High32(const uint64_t& v) { return (uint32_t) (v >> 32); }
 
     // SPM delay functions for global instance
     static uint32_t get_spm_global_delay(const counter_des_t& counter_des,
@@ -467,6 +467,8 @@ public:
         select_value(SPI_PERFCOUNTER0_SELECT);
     static auto constexpr select_value_TA_PERFCOUNTER0_SELECT =
         select_value(TA_PERFCOUNTER0_SELECT);
+    static auto constexpr select_value_TD_PERFCOUNTER0_SELECT =
+        select_value(TD_PERFCOUNTER0_SELECT);
     static auto constexpr select_value_TCP_PERFCOUNTER0_SELECT =
         select_value(TCP_PERFCOUNTER0_SELECT);
     static auto constexpr select_value_SX_PERFCOUNTER0_SELECT =
