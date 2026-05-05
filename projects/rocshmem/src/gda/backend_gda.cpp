@@ -566,7 +566,7 @@ void GDABackend::ctx_destroy(Context *ctx) {
 }
 
 int GDABackend::buffer_register(void *addr, size_t length) {
-  int err;
+  int err = ROCSHMEM_SUCCESS;
 
   /* Register in ptr cache */
   err = Backend::buffer_register(addr, length);
@@ -588,14 +588,21 @@ int GDABackend::buffer_register(void *addr, size_t length) {
 }
 
 int GDABackend::buffer_unregister(void *addr) {
-  int err;
+  int err = ROCSHMEM_SUCCESS;
 
   /* Deregister in ptr cache */
   err = Backend::buffer_unregister(addr);
 
+  if (ROCSHMEM_SUCCESS != err) {
+    return ROCSHMEM_ERROR;
+  }
+
   /* Deregister with QPs */
   for (size_t i = 0; i < num_qps; i++) {
     err = host_qps[i].buffer_unregister((uintptr_t)addr);
+    if (ROCSHMEM_SUCCESS != err) {
+      return ROCSHMEM_ERROR;
+    }
   }
 
   return err;

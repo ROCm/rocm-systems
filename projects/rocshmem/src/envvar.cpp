@@ -210,7 +210,7 @@ namespace envvar {
       "ROUND_ROBIN");
     const var<size_t> num_user_buffers("NUM_USER_BUFFERS",
       "Allocates the number of user buffers an application shall register with "
-      "rocshmem_buffer_register. The default value is 4");
+      "rocshmem_buffer_register. The default value is 4", 4);
   }  // namespace gda
 
   namespace _detail {

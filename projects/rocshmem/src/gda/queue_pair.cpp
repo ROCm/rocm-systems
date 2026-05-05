@@ -372,7 +372,13 @@ int QueuePair::buffer_register(uintptr_t addr, size_t length) {
     if (user_buf_info[i].addr == 0) {
       user_buf_info[i].addr   = addr;
       user_buf_info[i].length = length;
-      user_buf_info[i].lkey   = mr->lkey;
+
+      if (gda_provider_ == GDAProvider::MLX5) {
+        user_buf_info[i].lkey = htobe32(mr->lkey);
+      } else {
+        user_buf_info[i].lkey = mr->lkey;
+      }
+
       break;
     }
   }
@@ -399,7 +405,6 @@ int QueuePair::buffer_unregister(uintptr_t addr) {
 }
 
 __device__ uint32_t QueuePair::get_lkey(uintptr_t addr) {
-
   /* Check if in heap */
   if (is_ptr_in_range(base_heap, base_heap_size, addr)) {
     return lkey;
@@ -407,7 +412,10 @@ __device__ uint32_t QueuePair::get_lkey(uintptr_t addr) {
 
   /* Get the correct lkey for the user buffer */
   for (size_t i=0; i<num_user_buffers; i++) {
-    if (is_ptr_in_range(user_buf_info[i].addr, user_buf_info[i].length, addr)) {
+    uintptr_t uaddr = user_buf_info[i].addr;
+    size_t uaddr_len = user_buf_info[i].length;
+
+    if (is_ptr_in_range(uaddr, uaddr_len, addr)) {
       return user_buf_info[i].lkey;
     }
   }

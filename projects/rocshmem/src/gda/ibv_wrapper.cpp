@@ -225,7 +225,14 @@ int IBVWrapper::dealloc_pd(struct ibv_pd *pd) {
 }
 
 struct ibv_mr* IBVWrapper::reg_mr(struct ibv_pd* pd, void* addr, size_t length, int access, HIPAllocator *allocator) {
-  if (is_dmabuf_supported()) {
+  hipPointerAttribute_t attr;
+  bool is_device_ptr = false;
+
+  CHECK_HIP(hipPointerGetAttributes(&attr, addr));
+
+  is_device_ptr = attr.type == hipMemoryTypeDevice;
+
+  if (is_dmabuf_supported() && is_device_ptr) {
     struct ibv_mr *mr;
     uint64_t offset = 0;
     int fd = 0;
