@@ -7,6 +7,7 @@ This document outlines coding conventions and best practices for Python developm
 - [Function Length](#function-length)
 - [Naming Conventions](#naming-conventions)
 - [I/O and Computation Separation](#io-and-computation-separation)
+- [File I/O Encoding](#file-io-encoding)
 - [Nested Functions](#nested-functions)
 - [When to Use Helper Functions](#when-to-use-helper-functions)
 - [When NOT to Extract Helper Functions](#when-not-to-extract-helper-functions)
@@ -154,6 +155,35 @@ def hash_file(filepath: Path) -> str:
         for chunk in iter(lambda: f.read(4096), b""):
             md5.update(chunk)
     return md5.hexdigest()
+```
+
+## File I/O Encoding
+
+Bare `open()` in text mode falls back to `locale.getpreferredencoding()`, which is not guaranteed to be UTF-8 on RHEL/CentOS-era systems where the C library locale is plain `C` or `POSIX`. Bundled YAML and CSV files are known UTF-8, so declare it explicitly rather than depending on the runtime locale.
+
+### Rules
+
+- Always pass `encoding="utf-8"` to `open()` for text-mode reads and writes under `src/`. Preserve any existing `mode=` and `newline=` arguments.
+- YAML files committed to this project must contain ASCII characters only. Do not introduce non-ASCII glyphs (e.g. `x`, smart quotes, em dashes) into YAML configs — write `x` or `*` for multiplication, plain ASCII quotes, and `--` for em dashes.
+- Binary-mode `open(..., "rb"/"wb")` does not take an `encoding` argument — leave those calls alone.
+
+### Example
+
+**Good:** Encoding declared explicitly
+
+```python
+with open(config_path, encoding="utf-8") as f:
+    data = yaml.safe_load(f)
+
+with open(out_csv, "w", newline="", encoding="utf-8") as f:
+    csv.writer(f).writerows(rows)
+```
+
+**Bad:** Locale-dependent — crashes under `LANG=C` with non-ASCII content
+
+```python
+with open(config_path) as f:
+    data = yaml.safe_load(f)
 ```
 
 ## Nested Functions
