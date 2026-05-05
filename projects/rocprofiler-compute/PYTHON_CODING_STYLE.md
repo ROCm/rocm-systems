@@ -159,13 +159,13 @@ def hash_file(filepath: Path) -> str:
 
 ## File I/O Encoding
 
-Bare `open()` in text mode falls back to `locale.getpreferredencoding()`, which is not guaranteed to be UTF-8 on RHEL/CentOS-era systems where the C library locale is plain `C` or `POSIX`. Bundled YAML and CSV files are known UTF-8, so declare it explicitly rather than depending on the runtime locale.
+Text-mode file I/O should be deterministic across machines. Bare `open()` picks an encoding from the runtime locale, which varies between systems and produces silent corruption or hard decode errors when a file's bytes don't match. Declare the encoding at every call site so the behavior is the same everywhere.
 
 ### Rules
 
-- Always pass `encoding="utf-8"` to `open()` for text-mode reads and writes under `src/`. Preserve any existing `mode=` and `newline=` arguments.
-- YAML files committed to this project must contain ASCII characters only. Do not introduce non-ASCII glyphs (e.g. `x`, smart quotes, em dashes) into YAML configs — write `x` or `*` for multiplication, plain ASCII quotes, and `--` for em dashes.
-- Binary-mode `open(..., "rb"/"wb")` does not take an `encoding` argument — leave those calls alone.
+- Always pass `encoding="utf-8"` to `open()` for text-mode reads and writes. Preserve any existing `mode=` and `newline=` arguments.
+- Keep committed configuration files (YAML, JSON, INI) ASCII-only. Use plain ASCII substitutes for typographic glyphs: `x` or `*` for multiplication, straight quotes for smart quotes, and `--` for em dashes.
+- Binary-mode `open(..., "rb"/"wb")` does not accept an `encoding` argument — leave those calls alone.
 
 ### Example
 
@@ -179,7 +179,7 @@ with open(out_csv, "w", newline="", encoding="utf-8") as f:
     csv.writer(f).writerows(rows)
 ```
 
-**Bad:** Locale-dependent — crashes under `LANG=C` with non-ASCII content
+**Bad:** Encoding inherited from the runtime locale
 
 ```python
 with open(config_path) as f:
