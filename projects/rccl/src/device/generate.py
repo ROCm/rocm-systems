@@ -7,7 +7,7 @@ import shutil
 
 # Order of colls, redops, tys, protos, algos must match src/include/device.h
 # The empty entries are for collectives like Gather, Scatter, etc.
-all_colls     = ["Broadcast", "Reduce", "AllGather", "ReduceScatter", "AllReduce", "SendRecv", "", "", "", "", "", "AlltoAllPivot", "AlltoAllGda", "AlltoAllvGda"]
+all_colls     = ["Broadcast", "Reduce", "AllGather", "ReduceScatter", "AllReduce", "SendRecv", "", "", "", "", "", "AlltoAllPivot", "AlltoAllGda", "AlltoAllvGda", "AllGatherV"]
 all_redops    = ["Sum","Prod","MinMax","PreMulSum","SumPostDiv"]
 all_tys       = ["i8","u8","i32","u32","i64","u64","f16","f32","f64","bf16","f8e4m3","f8e5m2"]
 all_protos    = ["LL","LL128","SIMPLE"]
@@ -96,6 +96,7 @@ else:
 
 algos_of_coll = {
   "AllGather":             ["RING", "PAT"],
+  "AllGatherV":            ["RING"],
   "AllReduce":             ["RING", "TREE"],
   "AlltoAllPivot":         ["RING"],
   "AlltoAllGda":           ["RING"],
@@ -169,6 +170,7 @@ pipelined_types = ["bf16"]
 
 coll_camel_to_lower = {
   "AllGather":             "all_gather",
+  "AllGatherV":            "all_gather_v",
   "AllReduce":             "all_reduce",
   "AlltoAllPivot":         "alltoall_pivot",
   "AlltoAllGda":           "alltoall_gda",

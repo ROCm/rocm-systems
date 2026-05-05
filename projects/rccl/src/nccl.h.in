@@ -67,6 +67,9 @@ typedef struct { char internal[NCCL_UNIQUE_ID_BYTES]; /*!< Opaque array>*/} nccl
 #define NCCL_SPLIT_NOCOLOR -1
 #define NCCL_UNDEF_FLOAT -1.0f
 
+/* Internal use only */
+#define NCCL_API_MAGIC 0xcafebeef
+
 /* Window Registration flags */
 #define NCCL_WIN_DEFAULT 0x00
 #define NCCL_WIN_COLL_SYMMETRIC 0x01
@@ -113,13 +116,15 @@ typedef struct ncclConfig_v22800 {
   int nvlsCTAs;                /*!< Number of NVLS cooperative thread arrays (blocks)*/
   int nChannelsPerNetPeer;     /*!< Number of channels per NET peer*/
   int nvlinkCentricSched;      /*!< nvlinkCentricSched*/
+  int graphUsageMode;          /*!< Graph usage mode*/
+  int numRmaCtx;               /*!< Number of RMA contexts*/
 } ncclConfig_t;
 
 /* Config initializer must be assigned to initialize config structure when it is created.
  * Not initialized config will result in an error. */
 #define NCCL_CONFIG_INITIALIZER {                                               \
   sizeof(ncclConfig_t),                             /* size */                  \
-  0xcafebeef,                                       /* magic */                 \
+  NCCL_API_MAGIC,                                   /* magic */                 \
   NCCL_VERSION(NCCL_MAJOR, NCCL_MINOR, NCCL_PATCH), /* version */               \
   NCCL_CONFIG_UNDEF_INT,                            /* blocking */              \
   NCCL_CONFIG_UNDEF_INT,                            /* cgaClusterSize */        \
@@ -135,6 +140,8 @@ typedef struct ncclConfig_v22800 {
   NCCL_CONFIG_UNDEF_INT,                            /* nvlsCTAs */              \
   NCCL_CONFIG_UNDEF_INT,                            /* nChannelsPerNetPeer */   \
   NCCL_CONFIG_UNDEF_INT,                            /* nvlinkCentricSched */    \
+  NCCL_CONFIG_UNDEF_INT,                            /* graphUsageMode */        \
+  NCCL_CONFIG_UNDEF_INT,                            /* numRmaCtx */             \
 }
 /*! @} */
 
@@ -338,6 +345,23 @@ ncclResult_t pncclCommSplit(ncclComm_t comm, int color, int key, ncclComm_t *new
 ncclResult_t  ncclCommShrink(ncclComm_t comm, int* excludeRanksList, int excludeRanksCount, ncclComm_t* newcomm, ncclConfig_t* config, int shrinkFlags);
 ncclResult_t pncclCommShrink(ncclComm_t comm, int* excludeRanksList, int excludeRanksCount, ncclComm_t* newcomm, ncclConfig_t* config, int shrinkFlags);
 
+/* Generate per-communicator unique ID for grow.
+ * Constraints:
+ * - Cannot generate a new UID while a previous UID is unconsumed
+ * - Each UID can only be used once (no reuse after consumption)
+ * - Must wait for grow operation to complete before calling again */
+ncclResult_t ncclCommGetUniqueId(ncclComm_t comm, ncclUniqueId* uniqueId);
+ncclResult_t pncclCommGetUniqueId(ncclComm_t comm, ncclUniqueId* uniqueId);
+
+/* Grow communicator by adding new ranks.
+ * Parameter usage:
+ * - Existing non-root: comm, uniqueId=NULL, rank=-1
+ * - Existing root: comm, uniqueId=&id, rank=-1
+ * - New ranks: comm=NULL, uniqueId=&id, rank=assigned
+ * The UID is consumed upon successful grow and cannot be reused. */
+ncclResult_t  ncclCommGrow(ncclComm_t comm, int nRanks, const ncclUniqueId* uniqueId, int rank, ncclComm_t* newcomm, ncclConfig_t* config);
+ncclResult_t pncclCommGrow(ncclComm_t comm, int nRanks, const ncclUniqueId* uniqueId, int rank, ncclComm_t* newcomm, ncclConfig_t* config);
+
 /*! @brief      Creates a new communicator (multi thread/process version), similar to ncclCommInitRankConfig.
      @details    Allows to use more than one ncclUniqueId (up to one per rank), 
                  indicated by nId, to accelerate the init operation.
@@ -456,6 +480,10 @@ ncclResult_t  ncclCommWindowDeregister(ncclComm_t comm, ncclWindow_t win);
 /*! @cond       include_hidden */
 ncclResult_t pncclCommWindowDeregister(ncclComm_t comm, ncclWindow_t win);
 /*! @endcond */
+
+/* Get the user pointer from the window */
+ncclResult_t ncclWinGetUserPtr(ncclComm_t comm, ncclWindow_t win, void** outUserPtr);
+ncclResult_t pncclWinGetUserPtr(ncclComm_t comm, ncclWindow_t win, void** outUserPtr);
 
 /*! @defgroup   rccl_api_enumerations API Enumerations
     @details    Enumerations used by collective communication calls
@@ -902,6 +930,110 @@ ncclResult_t pncclRecv(void* recvbuff, size_t count, ncclDataType_t datatype, in
 /*! @endcond */
 
 /*! @} */
+
+/*
+ * Put
+ *
+ * One-sided communication operation that writes data from the local buffer to a
+ * remote peer's registered memory window without explicit participation from the
+ * target process.
+ *
+ * Parameters:
+ *   localbuff    - Local source buffer containing data to be transferred
+ *   count        - Number of elements to transfer
+ *   datatype     - NCCL data type of each element
+ *   peer         - Target rank to write data to
+ *   peerWin      - Memory window object registered by the target peer
+ *   peerWinOffset- Offset in bytes from the start of peer's registered window
+ *   sigIdx       - Signal index identifier for the operation
+ *   ctx          - Context identifier for the operation
+ *   flags        - Reserved for future use
+ *   comm         - NCCL communicator
+ *   stream       - CUDA stream to enqueue the operation on
+ *
+ * Returns:
+ *   ncclSuccess on successful enqueue, error code otherwise
+ */
+ncclResult_t ncclPutSignal(const void* localbuff, size_t count, ncclDataType_t datatype,
+    int peer, ncclWindow_t peerWin, size_t peerWinOffset,
+    int sigIdx, int ctx, unsigned int flags, ncclComm_t comm, cudaStream_t stream);
+
+ncclResult_t pncclPutSignal(const void* localbuff, size_t count, ncclDataType_t datatype,
+    int peer, ncclWindow_t peerWin, size_t peerWinOffset,
+    int sigIdx, int ctx, unsigned int flags, ncclComm_t comm, cudaStream_t stream);
+
+/*
+ * Signal
+ *
+ * Sends a signal to the specified peer without transferring data.
+ *
+ * Parameters:
+ *   peer         - Target rank to send signal to
+ *   sigIdx       - Signal index identifier for the operation
+ *   ctx          - Context identifier for the operation
+ *   flags        - Reserved for future use
+ *   comm         - NCCL communicator
+ *   stream       - CUDA stream to enqueue the operation on
+ *
+ * Returns:
+ *   ncclSuccess on successful signal enqueue, error code otherwise
+ */
+ncclResult_t ncclSignal(int peer, int sigIdx, int ctx, unsigned int flags, ncclComm_t comm, cudaStream_t stream);
+ncclResult_t pncclSignal(int peer, int sigIdx, int ctx, unsigned int flags, ncclComm_t comm, cudaStream_t stream);
+
+/*
+ * Wait Signal Descriptor
+ *
+ * Describes how many signal operations to wait for
+ * from a particular rank on a given signal index and context.
+ */
+typedef struct {
+  int opCnt;    // Number of signal operations to wait for
+  int peer;     // Target peer to wait for signals from
+  int sigIdx;   // Signal index identifier
+  int ctx;      // Context identifier
+} ncclWaitSignalDesc_t;
+
+/*
+ * Wait Signal
+ *
+ * Waits for signals as described in the signal descriptor array.
+ *
+ * Parameters:
+ *   nDesc        - Number of signal descriptors in the array
+ *   signalDescs  - Array of descriptors specifying the signals to wait for.
+ *                  Each descriptor indicates how many signals to expect from
+ *                  a specific peer on a particular signal index and context.
+ *   comm         - NCCL communicator
+ *   stream       - CUDA stream to enqueue the operation on
+ *
+ * Returns:
+ *   ncclSuccess when all required signals received, error code otherwise
+ */
+ncclResult_t ncclWaitSignal(int nDesc, ncclWaitSignalDesc_t* signalDescs, ncclComm_t comm, cudaStream_t stream);
+ncclResult_t pncclWaitSignal(int nDesc, ncclWaitSignalDesc_t* signalDescs, ncclComm_t comm, cudaStream_t stream);
+
+/*
+ * Group semantics
+ *
+ * When managing multiple GPUs from a single thread, and since NCCL collective
+ * calls may perform inter-CPU synchronization, we need to "group" calls for
+ * different ranks/devices into a single call.
+ *
+ * Grouping NCCL calls as being part of the same collective operation is done
+ * using ncclGroupStart and ncclGroupEnd. ncclGroupStart will enqueue all
+ * collective calls until the ncclGroupEnd call, which will wait for all calls
+ * to be complete. Note that for collective communication, ncclGroupEnd only
+ * guarantees that the operations are enqueued on the streams, not that
+ * the operation is effectively done.
+ *
+ * Both collective communication and ncclCommInitRank can be used in conjunction
+ * of ncclGroupStart/ncclGroupEnd, but not together.
+ *
+ * Group semantics also allow to fuse multiple operations on the same device
+ * to improve performance (for aggregated collective calls), or to permit
+ * concurrent progress of multiple send/receive operations.
+ */
 
 /*! @defgroup   msccl_api MSCCL Algorithm
     @details    API calls relating to the optional MSCCL algorithm datapath

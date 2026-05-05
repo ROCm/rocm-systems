@@ -353,7 +353,7 @@ struct RunWorkColl<ncclFuncAllGather, T, RedOp, NCCL_ALGO_NVLS, NCCL_PROTO_SIMPL
               /*MultimemSrcs,MinSrcs,MaxSrcs=*/MultimemSrcs, 1, 1,
               /*MultimemDsts=*/MultimemDsts, 0 + MultimemDsts + MinDsts, 1 + MaxDsts,
               /*PreOpSrcs=*/0>
-              (tid, tn, 0, nullptr, false,
+              (tid, tn, 0, false,
                 /*nSrcs=*/1, [=]__device__(int s/*==0*/) -> void* {
               return (char*)srcPtrs[src] + railAllOffset;
             },

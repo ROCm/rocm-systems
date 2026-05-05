@@ -34,6 +34,15 @@ struct ncclInfo {
   // Optional per-operation metadata for rocSHMEM collectives.
   size_t* sizes;
 #endif
+  // One-sided ops
+  size_t peerWinOffset;
+  ncclWindow_t peerWin;
+  int sigIdx;
+  int ctx;
+  unsigned int flags;
+  // WaitSignal descriptors
+  int nDesc;
+  ncclWaitSignalDesc_t* signalDescs;
 };
 
 #endif

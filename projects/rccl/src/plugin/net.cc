@@ -64,6 +64,8 @@ typedef struct netPluginLib {
   ncclNetPluginState_t ncclCollNetPluginState;  // State of the nccl coll net plugin
   ncclGin_t* ncclGin;                           // Pointer to the ncclGin_t structure
   ncclNetPluginState_t ncclGinPluginState;      // State of the nccl gin plugin
+  ncclGin_t* ncclRma;                           // Pointer to the ncclGin_t structure for RMA
+  ncclNetPluginState_t ncclRmaPluginState;      // State of the nccl gin rma plugin
   int ncclNetPluginRefCount;                    // Reference count for the nccl net plugin
   int netPhysDevs;                              // ncclNet - number of physical devices
   int netVirtDevs;                              // ncclNet - number of virtual devices
@@ -207,6 +209,8 @@ static ncclResult_t ncclNetPluginInit(struct ncclComm* comm, netPluginLib_t* plu
       if (ncclGinIbGdaki.init(&throwAwayContext, comm->commHash, ncclDebugLog) == ncclSuccess) {
         if (ncclGinIbGdaki.devices(&ndev) == ncclSuccess && ndev > 0) {
           pluginLib->ncclGin = &ncclGinIbGdaki;
+        } else {
+          pluginLib->ncclGin = &ncclGinIbProxy;
         }
         ncclGinIbGdaki.finalize(throwAwayContext);
       }
@@ -220,6 +224,17 @@ static ncclResult_t ncclNetPluginInit(struct ncclComm* comm, netPluginLib_t* plu
       pluginLib->ncclGinPluginState = ncclNetPluginStateEnabled;
     }
   }
+
+  // Initialize RMA plugin
+  if (pluginLib->ncclRmaPluginState == ncclNetPluginStateInitReady && pluginLib->ncclRma) {
+    if (pluginLib->ncclRma->init(&comm->netContext, comm->commHash, ncclDebugLog) != ncclSuccess)
+      pluginLib->ncclRmaPluginState = ncclNetPluginStateDisabled;
+    else if (pluginLib->ncclRma->devices(&ndev) != ncclSuccess || ndev <= 0)
+      pluginLib->ncclRmaPluginState = ncclNetPluginStateDisabled;
+    else {
+      pluginLib->ncclRmaPluginState = ncclNetPluginStateEnabled;
+    }
+  }
 exit:
   return ncclSuccess;
 fail:
@@ -230,6 +245,7 @@ fail:
   pluginLib->ncclNetPluginState = ncclNetPluginStateDisabled;
   pluginLib->ncclCollNetPluginState = ncclNetPluginStateDisabled;
   pluginLib->ncclGinPluginState = ncclNetPluginStateDisabled;
+  pluginLib->ncclRmaPluginState = ncclNetPluginStateDisabled;
   goto exit;
 }
 
@@ -250,6 +266,10 @@ static ncclResult_t ncclNetPluginAssignToComm(struct ncclComm* comm, int pluginI
       INFO(NCCL_INIT|NCCL_NET, "Assigned GIN plugin %s to comm", netPluginLibs[pluginIndex].ncclGin->name);
       comm->sharedRes->ginState.ncclGin = netPluginLibs[pluginIndex].ncclGin;
     }
+    if (netPluginLibs[pluginIndex].ncclRmaPluginState >= ncclNetPluginStateEnabled) {
+      INFO(NCCL_INIT|NCCL_NET, "Assigned RMA plugin %s to comm", netPluginLibs[pluginIndex].ncclRma->name);
+      comm->rmaState.rmaProxyState.ncclGin = netPluginLibs[pluginIndex].ncclRma;
+    }
   }
 exit:
   return ncclSuccess;
@@ -258,6 +278,7 @@ fail:
   netPluginLibs[pluginIndex].ncclNetPluginState = ncclNetPluginStateEnabled;
   netPluginLibs[pluginIndex].ncclCollNetPluginState = ncclNetPluginStateEnabled;
   netPluginLibs[pluginIndex].ncclGinPluginState = ncclNetPluginStateEnabled;
+  netPluginLibs[pluginIndex].ncclRmaPluginState = ncclNetPluginStateEnabled;
   goto exit;
 }
 
@@ -337,12 +358,14 @@ static void initPluginLibsOnceFunc() {
       netPluginLibs[pluginCounter].ncclGin = NULL;
       if (ncclParamGinType() == -1)
         netPluginLibs[pluginCounter].ncclGin = (ncclGin_t *)-1;
-      else if (ncclParamGinType() == NCCL_NET_DEVICE_GIN_PROXY)
+      else if (ncclParamGinType() == NCCL_GIN_TYPE_PROXY)
         netPluginLibs[pluginCounter].ncclGin = &ncclGinIbProxy;
-      else if (ncclParamGinType() == NCCL_NET_DEVICE_GIN_GDAKI)
+      else if (ncclParamGinType() == NCCL_GIN_TYPE_GDAKI)
         netPluginLibs[pluginCounter].ncclGin = &ncclGinIbGdaki;
       netPluginLibs[pluginCounter].ncclNetPluginState = ncclNetPluginStateInitReady;
       netPluginLibs[pluginCounter].ncclGinPluginState = netPluginLibs[pluginCounter].ncclGin ? ncclNetPluginStateInitReady : ncclNetPluginStateLoadFailed;
+      netPluginLibs[pluginCounter].ncclRma = &ncclGinIbProxy;
+      netPluginLibs[pluginCounter].ncclRmaPluginState = ncclNetPluginStateInitReady;
       ++pluginCounter;
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
     }
@@ -509,7 +532,7 @@ ncclResult_t ncclGpuGdrSupport(struct ncclComm* comm, int* gdrSupport) {
     while (!connected) {
 
       // If we're aborting now, skip to cleanup
-      if (__atomic_load_n(comm->abortFlag, __ATOMIC_ACQUIRE)) {
+      if (COMPILER_ATOMIC_LOAD(comm->abortFlag, std::memory_order_acquire)) {
         goto cleanup2;
       }
 

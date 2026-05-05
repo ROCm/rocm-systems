@@ -59,6 +59,18 @@ endif()
 project(rccl CXX)
 set(ENV{NCCL_USE_CMAKE} "1")
 
+# Detect OS
+#==================================================================================================
+if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
+    set(NCCL_OS_WINDOWS ON)
+    add_definitions(-DNCCL_OS_WINDOWS)
+elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    set(NCCL_OS_LINUX ON)
+    add_definitions(-DNCCL_OS_LINUX)
+else()
+    message(FATAL_ERROR "Unsupported OS: ${CMAKE_SYSTEM_NAME}")
+endif()
+
 # Build options
 #==================================================================================================
 include(cmake/NcclCompat.cmake)
@@ -141,7 +153,7 @@ endif()
 set(GPU_TARGETS "${DEFAULT_GPUS}" CACHE STRING "Target default GPUs if GPU_TARGETS is not defined.")
 
 # ROCM NetIB patch
-include(cmake/rocmIb.cmake)
+#include(cmake/rocmIb.cmake)
 
 # Modify GPU architectures for Address Sanitizer builds by appending "xnack+"
 if (BUILD_ADDRESS_SANITIZER)

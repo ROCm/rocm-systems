@@ -10,10 +10,49 @@
 
 #include "hip_compat.h"
 
+// compiler specific check for __CUDACC__
+#ifndef NCCL_CHECK_CUDACC
+    #if defined(__clang__)
+        #ifdef __CUDACC__
+            #define NCCL_CHECK_CUDACC 1
+        #else
+            #define NCCL_CHECK_CUDACC 0
+        #endif
+    #else
+        #if __CUDACC__
+            #define NCCL_CHECK_CUDACC 1
+        #else
+            #define NCCL_CHECK_CUDACC 0
+        #endif
+    #endif
+#endif
+
+#if NCCL_CHECK_CUDACC
+  #if defined(NCCL_HOSTLIB_ONLY) || defined(__clang_llvm_bitcode_lib__)
+    #define NCCL_DEVICE_INLINE __device__ __attribute__((always_inline))
+    #define NCCL_HOST_DEVICE_INLINE __host__ __device__ __attribute__((always_inline))
+  #else
+    #define NCCL_DEVICE_INLINE __device__ __forceinline__
+    #define NCCL_HOST_DEVICE_INLINE __host__ __device__ __forceinline__
+  #endif
+#else
+  #ifndef __host__
+    #define __host__
+  #endif
+  #define NCCL_DEVICE_INLINE
+  #define NCCL_HOST_DEVICE_INLINE inline __attribute__((always_inline))
+#endif
+
 #if __cplusplus
 #define NCCL_EXTERN_C extern "C"
 #else
 #define NCCL_EXTERN_C
+#endif
+
+#ifdef __clang_llvm_bitcode_lib__
+#define NCCL_IR_EXTERN_C extern "C"
+#else
+#define NCCL_IR_EXTERN_C
 #endif
 
 #include <stdint.h>
@@ -41,7 +80,7 @@ struct ValueAsType { static constexpr T value = value_; };
 
 // Returns the value zero but the compiler cannot prove that it is zero so it
 // is useful to inhibit compiler optimizations.
-#if __CUDACC__
+#if NCCL_CHECK_CUDACC
 template<typename=void>
 NCCL_DEVICE_INLINE int opaqueZero() {
   __device__ static int zero = 0;
@@ -312,7 +351,7 @@ NCCL_DEVICE_INLINE void fenceReleaseGpu() {
 }
 #endif
 
-#if __CUDACC__
+#if NCCL_CHECK_CUDACC
 template<typename T>
 NCCL_DEVICE_INLINE T atomicLoad(T* ptr, cuda::memory_order ord, cuda::thread_scope scope) {
   switch (scope) {
@@ -329,7 +368,7 @@ NCCL_DEVICE_INLINE T atomicLoad(T* ptr, cuda::memory_order ord, cuda::thread_sco
 }
 #endif
 
-#if __CUDACC__
+#if NCCL_CHECK_CUDACC
 template<typename T>
 NCCL_DEVICE_INLINE void atomicStore(T* ptr, T val, cuda::memory_order ord, cuda::thread_scope scope) {
   switch (scope) {
@@ -448,7 +487,7 @@ struct Optional {
   // Construct with present thing:
   template<typename ...Arg>
   NCCL_HOST_DEVICE_INLINE Optional(Present<Arg...> args):
-    Optional(args, IntSeqUpTo<sizeof...(Arg), 0>::Type()) {
+    Optional(args, typename IntSeqUpTo<sizeof...(Arg), 0>::Type()) {
   }
 
   NCCL_HOST_DEVICE_INLINE ~Optional() {

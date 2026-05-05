@@ -15,6 +15,7 @@
 #include "bootstrap.h"
 #include "channel.h"
 #include "register_inline.h"
+#include "compiler.h"
 
 int64_t ncclParamGdrCopySyncEnable();
 int64_t ncclParamGdrCopyFlushEnable();
@@ -418,14 +419,6 @@ static ncclResult_t sharedBuffersInit(struct ncclCollNetSharedRes* collNet, int 
     NCCLCHECK(ncclCudaHostCalloc(&collNet->hostBuff, *size));
   }
   *gpuPtr = *cpuPtr = cuda ? collNet->cudaBuff : collNet->hostBuff;
-  return ncclSuccess;
-}
-
-static ncclResult_t sharedBuffersGet(struct ncclCollNetSharedRes* collNet, int type, int slot, int channel, int* offset) {
-  // Use different pools for different channels and also separate send/recv.
-  int slotSize = collNet->buffSize / NCCL_STEPS;
-  int globalSlot = (type * NCCL_STEPS + slot) * collNet->nChannels + channel;
-  *offset = slotSize * globalSlot;
   return ncclSuccess;
 }
 
@@ -946,7 +939,7 @@ static ncclResult_t sendProxyProgress(struct ncclProxyState* proxyState, struct 
         int buffSlot = (sub->base+sub->posted)%NCCL_STEPS;
         if (sub->reg == 0 || (!sub->isOneRPN && args->coll == ncclFuncReduceScatter)) {
           resources->recvMem->connFifo[buffSlot].offset = calcRegionOffset(args, 0, s, sub->posted, 0);
-          __sync_synchronize();
+          std::atomic_thread_fence(std::memory_order_seq_cst);
         }
         volatile uint64_t* sendHead = resources->gdcSync ? resources->gdcSync : &resources->sendMem->head;
         TRACE(NCCL_NET, "sendProxy [%ld/%d/%d/%d] posted offset %d @ %p signal %ld->%ld", long(sub->posted), group, buffSlot, sub->nsteps, resources->recvMem->connFifo[buffSlot].offset, &resources->recvMem->connFifo[buffSlot].offset, long(*sendHead), long(sub->base + sub->posted + args->sliceSteps - NCCL_STEPS));
@@ -1176,7 +1169,7 @@ static ncclResult_t recvProxyProgress(struct ncclProxyState* proxyState, struct 
           int buffSlot = (sub->base + sub->transmitted)%NCCL_STEPS;
           volatile struct ncclConnFifo* connFifo = (volatile struct ncclConnFifo*)resources->recvMem->connFifo;
           connFifo[buffSlot].offset = calcRegionOffset(args, 1, s, sub->transmitted, 0);
-          __sync_synchronize();
+          std::atomic_thread_fence(std::memory_order_seq_cst);
         }
         volatile uint64_t* recvTail = resources->gdcSync ? resources->gdcSync : &resources->recvMem->tail;
         if (sub->reg && sub->isOneRPN) {
@@ -1522,7 +1515,7 @@ static ncclResult_t collNetInitRailRankMap(ncclComm_t comm) {
     if (comm->collNetHeads[h] == rank) { comm->collNetUserToDenseRank[rank] = h; break; }
   }
   if (comm->collNetUserToDenseRank[rank] == -1) {
-    comm->collNetUserToDenseRank[rank] = __builtin_popcountll(nonHeadMask & ((1ull << comm->localRank) - 1));
+    comm->collNetUserToDenseRank[rank] = COMPILER_POPCOUNT64(nonHeadMask & ((1ull << comm->localRank) - 1));
   }
   comm->collNetUserToDenseRank[rank] += comm->node * comm->localRanks;
 

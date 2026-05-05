@@ -32,7 +32,8 @@ def emitln(f, lines):
     f.write('  '*indents + ln + '\n')
 
 def indent(s):
-  return '\n'.join('  '+l for l in s.splitlines())
+  endl = '\n' if s.endswith('\n') else ''
+  return '\n'.join('  '+l for l in s.splitlines()) + endl
 
 class Rec(object):
   def __init__(me, **kw):
@@ -55,6 +56,7 @@ class Rec(object):
 reductions = ["AllReduce","ReduceScatter"]
 all_reds = ["sum"]
 all_tys = ["f32","f16","bf16","f8e4m3","f8e5m2"]
+gin_algos = ["GinHier_MCRing"]
 
 nvls_algos_by_coll = {
   "AllReduce": ["AGxLLMC_R","RSxLDMC_AGxSTMC"],
@@ -124,6 +126,8 @@ def kernel_fdep(k):
   return coll_to_lower[k.coll] + '.cpp'
 
 def kernel_fname(k):
+  parts = [coll_to_lower[k.coll]]
+  if k.algo in gin_algos: parts += ['gin']
   if k.coll in reductions:
     if k.algo in ldmc_algos and k.ty.startswith('f8'):
       return paste('_', coll_to_lower[k.coll], k.red, k.ty, k.algo) + '.cpp'
@@ -200,13 +204,13 @@ for coll in set(k.coll for k in enumerate_kernels()):
 
 files_to_print = ""
 # Generate each kernel instantiation file
-for (fname, coll), ks in kernels_by_file.items():
+for (fname, fbase), ks in kernels_by_file.items():
   files_to_print += fname + ";"
   with open(os.path.join(gensrc, fname), "w") as f:
     print("-- Generating %s" % os.path.join(gensrc, fname))
     emitln(f, '#include "sym_kernels.h"')
     emitln(f, '#include "symmetric/kernel.h"')
-    emitln(f, '#include "symmetric/{coll}.h"'.format(coll=coll_to_lower[coll]))
+    emitln(f, '#include "symmetric/{coll}.h"'.format(coll=coll_to_lower[fbase]))
     for k in ks:
       emitln(f, instantiate(k))
 
