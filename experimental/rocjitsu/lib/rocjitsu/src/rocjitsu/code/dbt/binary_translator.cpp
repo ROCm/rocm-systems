@@ -3,7 +3,7 @@
 
 #include "rocjitsu/code/dbt/binary_translator.h"
 
-#include "rocjitsu/analysis/register_liveness.h"
+#include "rocjitsu/analysis/liveness.h"
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/basic_block.h"
@@ -18,9 +18,14 @@
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 
+#include <algorithm>
 #include <cassert>
 #include <climits>
 #include <cstring>
+#include <memory>
+#include <span>
+#include <unordered_set>
+#include <vector>
 
 namespace rocjitsu {
 
@@ -46,6 +51,96 @@ LegalizationLookupFn select_legalization(rj_code_arch_t guest, rj_code_arch_t ho
     };
   }
   return nullptr;
+}
+
+[[nodiscard]] BasicBlock *block_for_offset(const std::vector<std::unique_ptr<BasicBlock>> &blocks,
+                                           uint64_t offset) {
+  for (const auto &block : blocks) {
+    if (block && block->start_offset() <= offset && offset < block->end_offset())
+      return block.get();
+  }
+  return nullptr;
+}
+
+[[nodiscard]] std::vector<uint64_t>
+kernel_entry_offsets(std::span<const KernelDescriptorInfo> kernels) {
+  std::vector<uint64_t> offsets;
+  offsets.reserve(kernels.size());
+  for (const KernelDescriptorInfo &kernel : kernels)
+    offsets.push_back(kernel.entry_text_offset);
+
+  std::ranges::sort(offsets);
+  offsets.erase(std::ranges::unique(offsets).begin(), offsets.end());
+  return offsets;
+}
+
+struct KernelTranslationScope {
+  const KernelDescriptorInfo *info = nullptr;
+  BasicBlock *entry = nullptr;
+  std::vector<BasicBlock *> blocks;
+};
+
+[[nodiscard]] std::vector<BasicBlock *>
+reachable_kernel_blocks(const std::vector<std::unique_ptr<BasicBlock>> &blocks, BasicBlock &entry,
+                        const std::unordered_set<uint64_t> &kernel_entries) {
+  std::unordered_set<const BasicBlock *> reachable;
+  std::vector<BasicBlock *> stack{&entry};
+
+  while (!stack.empty()) {
+    BasicBlock *block = stack.back();
+    stack.pop_back();
+    if (block == nullptr || !reachable.insert(block).second)
+      continue;
+
+    for (BasicBlock *succ : block->successors()) {
+      if (succ == nullptr)
+        continue;
+      if (succ->start_offset() != entry.start_offset() &&
+          kernel_entries.contains(succ->start_offset()))
+        continue;
+      stack.push_back(succ);
+    }
+  }
+
+  std::vector<BasicBlock *> ordered;
+  ordered.reserve(reachable.size());
+  for (const auto &block : blocks) {
+    if (block && reachable.contains(block.get()))
+      ordered.push_back(block.get());
+  }
+  return ordered;
+}
+
+[[nodiscard]] std::vector<KernelTranslationScope>
+kernel_translation_scopes(const std::vector<std::unique_ptr<BasicBlock>> &blocks,
+                          std::span<const KernelDescriptorInfo> kernels) {
+  std::vector<KernelTranslationScope> scopes;
+  const auto entries = kernel_entry_offsets(kernels);
+  if (entries.empty())
+    return scopes;
+
+  std::unordered_set<uint64_t> entry_set(entries.begin(), entries.end());
+  std::vector<const KernelDescriptorInfo *> ordered_kernels;
+  ordered_kernels.reserve(kernels.size());
+  std::unordered_set<uint64_t> seen_entries;
+  for (const KernelDescriptorInfo &kernel : kernels) {
+    if (seen_entries.insert(kernel.entry_text_offset).second)
+      ordered_kernels.push_back(&kernel);
+  }
+
+  std::ranges::sort(ordered_kernels, [](const auto *lhs, const auto *rhs) {
+    return lhs->entry_text_offset < rhs->entry_text_offset;
+  });
+
+  scopes.reserve(ordered_kernels.size());
+  for (const KernelDescriptorInfo *kernel : ordered_kernels) {
+    BasicBlock *entry = block_for_offset(blocks, kernel->entry_text_offset);
+    if (entry == nullptr)
+      continue;
+
+    scopes.push_back({kernel, entry, reachable_kernel_blocks(blocks, *entry, entry_set)});
+  }
+  return scopes;
 }
 
 } // namespace
@@ -78,9 +173,25 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
     result.elf_bytes = patcher.emit();
     return result;
   }
-  auto blocks = BasicBlock::build(obj, *decoder);
+  const auto kernel_info = patcher.kernel_descriptor_info();
+  if (kernel_info.empty()) {
+    result.warnings.push_back("kernel descriptors are required for kernel-level translation");
+    warnings_ = nullptr;
+    return result;
+  }
 
-  std::vector<uint8_t> translated_text(text.size(), 0);
+  const auto entry_offsets = kernel_entry_offsets(kernel_info);
+  auto blocks = BasicBlock::build(obj, *decoder, entry_offsets);
+  auto scopes = kernel_translation_scopes(blocks, kernel_info);
+
+  if (scopes.size() != entry_offsets.size()) {
+    result.warnings.push_back(
+        "kernel descriptor entry offsets are required to map to decoded text blocks");
+    warnings_ = nullptr;
+    return result;
+  }
+
+  std::vector<uint8_t> translated_text(text.begin(), text.end());
 
   // Find the end of actual code (after s_endpgm) to place the cave body
   // in the NOP padding. Scan backwards from the end of .text for the first
@@ -101,62 +212,90 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
   // Align cave start to 4 bytes (already is, since instructions are 4-byte aligned).
   patcher.set_cave_start(code_end);
 
-  for (const auto &block : blocks) {
-    auto liveness = RegisterLiveness::compute(*block);
+  std::unordered_set<const BasicBlock *> translated_blocks;
+  bool warned_shared_blocks = false;
+  for (const KernelTranslationScope &scope : scopes) {
+    if (scope.blocks.empty())
+      continue;
 
-    uint64_t offset = block->start_offset();
-    for (auto it = block->instructions().begin(); it != block->instructions().end(); ++it) {
-      const auto &inst = *it;
-      const uint32_t inst_size = inst.size();
+    LivenessAnalysis liveness(KernelBlockScope(scope.blocks));
 
-      const uint32_t *raw = inst.raw_encoding();
-      if (!raw) {
-        std::memcpy(translated_text.data() + offset, text.data() + offset, inst_size);
-        offset += inst_size;
+    for (BasicBlock *block : scope.blocks) {
+      if (block == nullptr)
+        continue;
+      if (!translated_blocks.insert(block).second) {
+        if (!warned_shared_blocks) {
+          result.warnings.push_back(
+              "basic block is reachable from multiple kernel entries; using first kernel "
+              "liveness for shared code");
+          warned_shared_blocks = true;
+        }
         continue;
       }
 
-      const InstructionLegalization *leg = nullptr;
-      if (legalization_lookup_)
-        leg = legalization_lookup_(inst.encoding_id(), inst.opcode());
+      uint64_t offset = block->start_offset();
+      for (auto it = block->instructions().begin(); it != block->instructions().end(); ++it) {
+        const auto &inst = *it;
+        const uint32_t inst_size = inst.size();
 
-      const uint16_t dst_opcode = leg ? leg->target_opcode : inst.opcode();
-
-      // Try semantic lowering for Expand and Lower actions.
-      // For Expand: must lower (NOP-fill if unhandled).
-      // For Lower: try lowering first, fall through to encoding if unhandled.
-      {
-        auto expansion = semantic_translator_->try_lower_expand(inst, offset, liveness);
-        if (!expansion.empty()) {
-          SemanticReplacement repl{offset, offset + inst_size, std::move(expansion)};
-          apply_semantic(repl, translated_text, patcher);
+        const uint32_t *raw = inst.raw_encoding();
+        if (!raw) {
+          std::memcpy(translated_text.data() + offset, text.data() + offset, inst_size);
           offset += inst_size;
           continue;
         }
-      }
 
-      if (leg && leg->action == Action::Expand) {
-        result.warnings.push_back("EXPAND not yet implemented for " + std::string(inst.mnemonic()));
-        const uint32_t nop = build_s_nop(0, host_arch_);
-        for (uint32_t i = 0; i < inst_size; i += 4)
-          std::memcpy(translated_text.data() + offset + i, &nop, 4);
+        const InstructionLegalization *leg = nullptr;
+        if (legalization_lookup_)
+          leg = legalization_lookup_(inst.encoding_id(), inst.opcode());
+
+        const uint16_t dst_opcode = leg ? leg->target_opcode : inst.opcode();
+
+        // Try semantic lowering for Expand and Lower actions.
+        // For Expand: must lower (NOP-fill if unhandled).
+        // For Lower: try lowering first, fall through to encoding if unhandled.
+        {
+          auto expansion = semantic_translator_->try_lower_expand(inst, offset, liveness);
+          if (!expansion.empty()) {
+            SemanticReplacement repl{offset, offset + inst_size, std::move(expansion)};
+            apply_semantic(repl, translated_text, patcher);
+            offset += inst_size;
+            continue;
+          }
+        }
+
+        if (leg && leg->action == Action::Expand) {
+          result.warnings.push_back("EXPAND not yet implemented for " +
+                                    std::string(inst.mnemonic()));
+          const uint32_t nop = build_s_nop(0, host_arch_);
+          for (uint32_t i = 0; i < inst_size; i += 4)
+            std::memcpy(translated_text.data() + offset + i, &nop, 4);
+          offset += inst_size;
+          continue;
+        }
+
+        handle_encoding(inst, offset, translated_text, dst_opcode, patcher, text);
         offset += inst_size;
-        continue;
       }
-
-      handle_encoding(inst, offset, translated_text, dst_opcode, patcher, text);
-      offset += inst_size;
     }
   }
 
   // Rewrite workgroup_id SGPR references to TTMP registers.
   // This runs after encoding translation so it reads from translated_text.
-  auto wg_info = patcher.workgroup_id_info();
-  for (const auto &block : blocks) {
-    auto wg_rewrites =
-        semantic_translator_->rewrite_workgroup_ids(*block, wg_info, translated_text);
-    for (const auto &repl : wg_rewrites)
-      apply_semantic(repl, translated_text, patcher);
+  std::unordered_set<const BasicBlock *> rewritten_wg_blocks;
+  for (const KernelTranslationScope &scope : scopes) {
+    if (scope.info == nullptr)
+      continue;
+
+    for (BasicBlock *block : scope.blocks) {
+      if (block == nullptr || !rewritten_wg_blocks.insert(block).second)
+        continue;
+
+      auto wg_rewrites = semantic_translator_->rewrite_workgroup_ids(
+          *block, scope.info->workgroup_id, translated_text);
+      for (const auto &repl : wg_rewrites)
+        apply_semantic(repl, translated_text, patcher);
+    }
   }
 
   // Write cave body into the NOP padding at the end of .text.

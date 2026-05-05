@@ -330,6 +330,22 @@ class CodeGenerator:
                     f'{mod_impl}}}'
                 ))
             fmt_enc_name = inst_enc.fmt_enc_name
+            implicit_uses_impl = self._encoding_implicit_uses_impl(
+                inst_enc, enc_field_names
+            )
+            if implicit_uses_impl:
+                public_members.append(
+                    cgen.Line(
+                        'void implicit_uses(RegisterSet &uses) const override;'
+                    )
+                )
+                class_func_impls.append(
+                    cgen.Line(
+                        f'void {fmt_enc_name}::implicit_uses'
+                        f'(RegisterSet &uses) const '
+                        f'{{ {implicit_uses_impl} }}'
+                    )
+                )
 
             if fmt_enc_name not in cond_emitted:
                 cond_emitted.add(fmt_enc_name)
@@ -487,6 +503,26 @@ class CodeGenerator:
         )
         class_def_file.gen_code()
         class_impl_file.gen_code()
+
+    def _encoding_implicit_uses_impl(
+        self, inst_enc: InstEncoding, enc_field_names: set[str]
+    ) -> str:
+        """Return C++ body for hidden register uses on an encoding base."""
+        if (
+            inst_enc.enc_name.upper() == 'ENC_FLAT'
+            and {'seg', 'saddr'} <= enc_field_names
+        ):
+            return (
+                'if (inst_.saddr == 0x7F) return;'
+                'if (inst_.seg == 1) {'
+                'uses.expand(RegisterRef{RegClass::SGPR, '
+                'static_cast<uint16_t>(inst_.saddr), 1});'
+                '} else if (inst_.seg == 2) {'
+                'uses.expand(RegisterRef{RegClass::SGPR, '
+                'static_cast<uint16_t>(inst_.saddr), 2});'
+                '}'
+            )
+        return ''
 
     def _enc_field_at_bit(self, enc_name: str, bit_offset: int) -> str | None:
         """Return the field name at a given bit offset in an encoding, or None."""
@@ -4287,6 +4323,10 @@ class CodeGenerator:
                     if self._enc_has_semantics(child):
                         has_sem = True
                 for inst in all_insts:
+                    inst_sem = (
+                        self.semantics.instructions.get(inst.name)
+                        if self.semantics else None
+                    )
                     # Resolve the instruction's own encoding field names.
                     # Instructions from alternate sub-encodings (e.g.,
                     # VOP3_SDST_ENC under ENC_VOP3) carry their original
@@ -4349,8 +4389,6 @@ class CodeGenerator:
                             )
                         elif opnd.name in inst_field_names:
                             opr_type = opnd.operand_type
-                            inst_sem = (self.semantics.instructions.get(inst.name)
-                                        if self.semantics else None)
                             if (inst_sem and inst_sem.accvgpr_srcs
                                     and opnd.is_input):
                                 opr_type = 'OPR_SRC_VGPR_OR_ACCVGPR'
@@ -4375,6 +4413,25 @@ class CodeGenerator:
                             'void execute_impl(amdgpu::Wavefront &wf)'
                         )
                     )
+                    # CFG metadata is emitted on the concrete ISA instruction
+                    # class, not inferred by generic analysis from mnemonic
+                    # strings. BasicBlock asks the virtual branch_offset_bytes()
+                    # for direct branch targets.
+                    label_operand = next(
+                        (op.name for op in inst.operands
+                         if op.operand_type == 'OPR_LABEL'),
+                        None,
+                    )
+                    if (
+                        inst_sem
+                        and inst_sem.semantic_class in ('branch', 'cbranch')
+                        and label_operand
+                    ):
+                        public_members.append(
+                            cgen.Statement(
+                                'std::optional<int64_t> branch_offset_bytes() const override'
+                            )
+                        )
                     # Embed the full mnemonic (with suffix) as a string literal
                     # so the encoding base gets a string_view to static storage.
                     rule = self.isa_spec.profile.mnemonic_rule(enc.enc_name)
@@ -4386,10 +4443,7 @@ class CodeGenerator:
                     ] + opnd_ctor_init
                     init_list = ', '.join(init_list_parts)
                     # Check if this is a memory instruction to set MEMORY_OP flag
-                    _mem_sem = (
-                        self.semantics.instructions.get(inst.name)
-                        if self.semantics else None
-                    )
+                    _mem_sem = inst_sem
                     _MEM_CLASSES = frozenset({
                         'smem_load', 'smem_store',
                         'flat_load', 'flat_store', 'flat_atomic',
@@ -4509,6 +4563,29 @@ class CodeGenerator:
 
                     if _mem_sem and _mem_sem.semantic_class in _MEM_CLASSES:
                         ctor_body_parts.append('flags_ |= MEMORY_OP;')
+                    # Control-flow flags drive BasicBlock splitting and CFG
+                    # edge construction. Keep this metadata generated from the
+                    # semantic classification so generic code does not have to
+                    # know AMDGPU instruction names or opcode values.
+                    if _mem_sem and _mem_sem.semantic_class == 'branch':
+                        ctor_body_parts.append('flags_ |= BRANCH;')
+                    if _mem_sem and _mem_sem.semantic_class == 'cbranch':
+                        ctor_body_parts.append('flags_ |= COND_BRANCH;')
+                    if _mem_sem and _mem_sem.semantic_class == 'endpgm':
+                        ctor_body_parts.append('flags_ |= PROGRAM_TERMINATOR;')
+                    if _mem_sem and _mem_sem.semantic_class == 'scalar_setpc':
+                        ctor_body_parts.append('flags_ |= INDIRECT_BRANCH;')
+                    if _mem_sem and _mem_sem.semantic_class in (
+                        'scalar_swappc', 'scalar_call',
+                    ):
+                        ctor_body_parts.append('flags_ |= INDIRECT_CALL;')
+                    # Conditional scalar moves leave the destination unchanged
+                    # when their predicate is false, so liveness cannot treat
+                    # them as unconditional kills.
+                    if _mem_sem and _mem_sem.semantic_class in (
+                        'scalar_cmov', 'scalar_cmovk',
+                    ):
+                        ctor_body_parts.append('flags_ |= PREDICATED_DEF;')
 
                     _waitcnt_names = {
                         'S_WAITCNT', 'S_WAIT_LOADCNT', 'S_WAIT_STORECNT',
@@ -4700,6 +4777,20 @@ class CodeGenerator:
 
                     inst_classes.append(s)
                     class_func_impls.append(class_ctor_impl)
+                    if (
+                        inst_sem
+                        and inst_sem.semantic_class in ('branch', 'cbranch')
+                        and label_operand
+                    ):
+                        class_func_impls.append(cgen.Line(
+                            f'std::optional<int64_t> '
+                            f'{inst.fmt_name}::branch_offset_bytes() const {{\n'
+                            f'  // AMDGPU direct branch labels are signed '
+                            f'instruction-count deltas.\n'
+                            f'  return static_cast<int64_t>('
+                            f'static_cast<int16_t>({label_operand}.encoding_value_)) * 4;\n'
+                            f'}}'
+                        ))
                     class_func_impls.append(exec_impl)
 
                 # Build include lists for .cpp files
@@ -5071,11 +5162,25 @@ class CodeGenerator:
         )
         opnd_type_def_file.gen_code()
 
+    @staticmethod
+    def _reg_class_for_prefix(prefix: str) -> str | None:
+        """Map an MRISA register-name prefix to an ISA register class."""
+        match prefix.lower():
+            case 's':
+                return 'RegClass::SGPR'
+            case 'v':
+                return 'RegClass::VGPR'
+            case 'acc':
+                return 'RegClass::ACC_VGPR'
+            case _:
+                return None
+
     def gen_operand(self) -> None:
         """Generate the ISA-specific Operand class with name resolution."""
         arch = self.isa_spec.arch_name
 
         switch_cases = []
+        ref_switch_cases = []
         opnd_types_with_selectors = set()
 
         for opnd_sel in self.isa_spec.opnd_selectors:
@@ -5086,6 +5191,7 @@ class CodeGenerator:
             )
 
             case_lines = []
+            ref_case_lines = []
             for pattern in opnd_sel.name_patterns:
                 if pattern.kind == OperandNamePattern.REG_RANGE:
                     case_lines.append(
@@ -5094,6 +5200,17 @@ class CodeGenerator:
                         f'return reg_name("{pattern.prefix}", '
                         f'encoding_value_ - {opsel_name}::{pattern.min_enum}, size_bits_);'
                     )
+                    reg_class = self._reg_class_for_prefix(pattern.prefix)
+                    # Only register-file prefixes tracked by RegisterSet become
+                    # register refs. Named special registers remain nullopt
+                    # until a consumer needs special-register liveness.
+                    if reg_class is not None:
+                        ref_case_lines.append(
+                            f'if (encoding_value_ >= {opsel_name}::{pattern.min_enum} && '
+                            f'encoding_value_ <= {opsel_name}::{pattern.max_enum}) '
+                            f'return RegisterRef{{{reg_class}, static_cast<uint16_t>('
+                            f'encoding_value_ - {opsel_name}::{pattern.min_enum}), reg_width}};'
+                        )
                 elif pattern.kind == OperandNamePattern.POS_INT:
                     case_lines.append(
                         f'if (encoding_value_ >= {opsel_name}::{pattern.min_enum} && '
@@ -5129,6 +5246,12 @@ class CodeGenerator:
             switch_cases.append(
                 f'case OperandType::{opnd_sel.operand_type}: '
                 f'{{ {case_body} }}'
+            )
+            ref_case_lines.append('break;')
+            ref_case_body = ' '.join(ref_case_lines)
+            ref_switch_cases.append(
+                f'case OperandType::{opnd_sel.operand_type}: '
+                f'{{ {ref_case_body} }}'
             )
 
         no_sel_types = [
@@ -5166,12 +5289,27 @@ class CodeGenerator:
             f'}}'
         )
 
+        ref_switch_body = '\n'.join(ref_switch_cases)
+        ref_impl = (
+            f'std::optional<RegisterRef> Operand::to_register_ref() const {{\n'
+            f'// Liveness tracks operands as contiguous 32-bit register lanes.\n'
+            f'const auto reg_width = static_cast<uint8_t>(size_bits_ > 32 ? size_bits_ / 32 : 1);\n'
+            f'switch (opr_type_) {{\n'
+            f'{ref_switch_body}\n'
+            f'default:\n'
+            f'  break;\n'
+            f'}}\n'
+            f'return std::nullopt;\n'
+            f'}}'
+        )
+
         class_def = [
             cgen.Line(
                 'class Operand : public IsaOperand<Isa> {\n'
                 'public:\n'
                 'Operand(int size_bits, OperandType opr_type, int encoding_value);\n'
                 'std::string name() const override;\n'
+                'std::optional<RegisterRef> to_register_ref() const override;\n'
                 'uint32_t read_scalar(const amdgpu::Wavefront &wf) const override;\n'
                 'uint32_t read_lane(const amdgpu::Wavefront &wf, uint32_t lane) const override;\n'
                 'void write_scalar(amdgpu::Wavefront &wf, uint32_t val) const override;\n'
@@ -5192,6 +5330,7 @@ class CodeGenerator:
                 '}'
             ),
             cgen.Line(name_impl),
+            cgen.Line(ref_impl),
         ]
 
         reg_name_helper = cgen.Line(
