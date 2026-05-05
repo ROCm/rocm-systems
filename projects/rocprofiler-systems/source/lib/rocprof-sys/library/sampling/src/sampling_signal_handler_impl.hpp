@@ -20,7 +20,7 @@ namespace rocprofsys::sampling
 
 template <class Policies>
 void
-sampling_signal_handler_body(int sig, void* ucontext, sampling_service<Policies>& svc)
+sampling_signal_handler_body(int sig, sampling_service<Policies>& svc)
 {
     if(svc.is_blocked()) return;
 
@@ -53,7 +53,7 @@ sampling_signal_handler_body(int sig, void* ucontext, sampling_service<Policies>
     rec.pc_count     = 0;
 
     auto prev_state = set_thread_state(ThreadState::Internal);
-    capture_stack_trace(rec, ucontext);
+    capture_stack_trace(rec);
     set_thread_state(prev_state);
 
     capture_cpu_time(rec);

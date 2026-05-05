@@ -290,11 +290,11 @@ sampling_shutdown_in_child_mode(int64_t tid)
 #    include <csignal>
 
 extern "C" void
-rocprofsys_sampling_signal_handler(int sig, siginfo_t* /*info*/, void* ucontext)
+rocprofsys_sampling_signal_handler(int sig, siginfo_t* /*info*/, void* /*ucontext*/)
 {
     rocprofsys::sampling::sampling_signal_handler_body<
         rocprofsys::sampling::default_sampling_policies>(
-        sig, ucontext, rocprofsys::services::sampling());
+        sig, rocprofsys::services::sampling());
 }
 
 #endif  // __linux__

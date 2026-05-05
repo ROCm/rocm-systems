@@ -62,6 +62,16 @@ struct in_memory_emitter
     // Insert a record directly into the per-tid store (bypasses ring buffer).
     void insert(int64_t tid, backtrace_record const& rec) { m_store[tid].push_back(rec); }
 
+    [[nodiscard]] std::vector<backtrace_record> take(int64_t tid)
+    {
+        call_log.push_back("take(" + std::to_string(tid) + ")");
+        auto it = m_store.find(tid);
+        if(it == m_store.end()) return {};
+        auto result = std::move(it->second);
+        m_store.erase(it);
+        return result;
+    }
+
     // Remove all records for tid — mirrors trace_cache_offload_adapter::erase()
     // for test doubles that need to observe Variant 2 emit behavior.
     void erase(int64_t tid) noexcept { m_store.erase(tid); }

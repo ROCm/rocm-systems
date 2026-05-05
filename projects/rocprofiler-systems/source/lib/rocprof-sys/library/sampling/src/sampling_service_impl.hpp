@@ -768,7 +768,7 @@ sampling_service<Policies>::do_emit_resolved(int64_t tid)
     // L43 — refactor variant of legacy "[{}] Post-processing data for timemory..."
     LOG_DEBUG("[{}] Post-processing data for native report...", tid);
 
-    auto records = offload_.read(tid);
+    auto records = offload_.take(tid);
     if(records.empty()) return;
 
     auto [timer_raw, overflow_raw] = detail::split_records(records);
@@ -803,8 +803,6 @@ sampling_service<Policies>::do_emit_resolved(int64_t tid)
             if(legacy) perfetto_sink_.emit_overflow(tid, nullptr, overflow_samples);
         }
     }
-
-    offload_.erase(tid);
 }
 
 template <class Policies>

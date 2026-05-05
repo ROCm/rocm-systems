@@ -93,6 +93,12 @@ public:
                                1000000000, "sec", m_wall_agg, true);
         }
 
+        if(!m_cpu_agg.empty())
+        {
+            emit_metric_files_("sampling_cpu_clock", "CPU clock time (via sampling)",
+                               1000000000, "sec", m_cpu_agg, true);
+        }
+
         if(!m_trip_agg.empty())
         {
             emit_trip_count_files_();
@@ -106,12 +112,14 @@ public:
 
     void handle(const backtrace_region_sample& sample)
     {
-        int depth = 0;
+        int     depth  = 0;
+        int64_t cpu_ns = -1;
         try
         {
             auto ext = nlohmann::json::parse(sample.extdata);
             if(!ext.contains("depth")) return;
             depth = ext["depth"].get<int>();
+            if(ext.contains("cpu_ns")) cpu_ns = ext["cpu_ns"].get<int64_t>();
         } catch(...)
         {
             return;
@@ -125,6 +133,12 @@ public:
         {
             accumulate_(m_wall_agg[k], dur_s);
             m_trip_agg[k]++;
+
+            if(cpu_ns >= 0)
+            {
+                double cpu_s = static_cast<double>(cpu_ns) * 1.0e-9;
+                accumulate_(m_cpu_agg[k], cpu_s);
+            }
 
             pct_key pk{ sample.thread_id, sample.name };
             m_pct_agg[pk].count++;
@@ -691,6 +705,7 @@ private:
     // ── Members ──────────────────────────────────────────────────────────────
 
     std::map<row_key, stats>     m_wall_agg;
+    std::map<row_key, stats>     m_cpu_agg;
     std::map<pct_key, pct_stats> m_pct_agg;
     std::map<row_key, uint64_t>  m_trip_agg;
 

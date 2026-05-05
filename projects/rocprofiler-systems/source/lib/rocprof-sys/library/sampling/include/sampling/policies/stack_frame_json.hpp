@@ -46,12 +46,13 @@ make_line_info_json(stack_frame const& frame)
     return j.dump();
 }
 
-// Locked extdata schema: { "depth": <int> }.
+// Locked extdata schema: { "depth": <int>, "cpu_ns": <int64> }.
 inline std::string
-make_extdata_json(int depth)
+make_extdata_json(int depth, int64_t cpu_ns = -1)
 {
     nlohmann::json j;
     j["depth"] = depth;
+    if(cpu_ns >= 0) j["cpu_ns"] = cpu_ns;
     return j.dump();
 }
 

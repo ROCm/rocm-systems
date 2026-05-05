@@ -11,7 +11,6 @@
 
 #include <libunwind.h>
 #include <sys/resource.h>
-#include <ucontext.h>
 
 #include <cstdint>
 #include <ctime>
@@ -19,56 +18,55 @@
 namespace rocprofsys::sampling
 {
 
+// Modeled after baseline's timemory get_unw_stack<Depth, Offset, WSignalFrame=false>().
+// Uses unw_getcontext() and skips handler frames via ignore_depth.
+// Bottom-of-stack may include _start/__clone — these are valid frames that
+// the baseline omitted only due to its deeper handler chain.
 inline void
-capture_stack_trace(backtrace_record& rec, void* ucontext)
+capture_stack_trace(backtrace_record& rec)
 {
-    static_assert(sizeof(unw_context_t) == sizeof(ucontext_t),
-                  "unw_context_t / ucontext_t size mismatch — ucontext "
-                  "reinterpret_cast in the sampling signal handler is unsafe");
-
     unw_cursor_t  cursor = {};
     unw_context_t uctx   = {};
-    if(ucontext)
+    unw_getcontext(&uctx);
+    if(unw_init_local(&cursor, &uctx) != 0) return;
+
+    constexpr int64_t ignore_depth = 3;
+    int64_t           total_idx    = 0;
+
+    while(true)
     {
-        uctx = *reinterpret_cast<unw_context_t const*>(
-            static_cast<ucontext_t const*>(ucontext));
-    }
-    else
-    {
-        unw_getcontext(&uctx);
-    }
-    if(unw_init_local(&cursor, &uctx) == 0)
-    {
-        constexpr int skip_frames = 3;
-        for(int skip = 0; skip < skip_frames; ++skip)
+        const int step_rc = unw_step(&cursor);
+        if(step_rc == 0) break;
+        if(step_rc < 0)
         {
-            if(unw_step(&cursor) <= 0) return;
-        }
-
-        while(rec.pc_count < static_cast<uint8_t>(MAX_STACK_DEPTH))
-        {
-            if(unw_is_signal_frame(&cursor))
+            switch(-step_rc)
             {
-                if(unw_step(&cursor) <= 0) break;
-                continue;
-            }
-
-            unw_word_t ip = 0;
-            if(unw_get_reg(&cursor, UNW_REG_IP, &ip) != 0) break;
-            if(ip == 0) break;
-            rec.raw_pcs[rec.pc_count++] = static_cast<uintptr_t>(ip);
-
-            const int step_rc = unw_step(&cursor);
-            if(step_rc == 0) break;
-            if(step_rc < 0)
-            {
-                if(-step_rc == UNW_ENOINFO || -step_rc == UNW_EBADVERSION ||
-                   -step_rc == UNW_EINVALIDIP || -step_rc == UNW_EBADFRAME)
-                    continue;
-                break;
+                case UNW_ENOINFO:
+                case UNW_EBADVERSION:
+                case UNW_EINVALIDIP:
+                case UNW_EBADFRAME: continue;
+                default: goto done;
             }
         }
+
+        if(total_idx < ignore_depth)
+        {
+            ++total_idx;
+            continue;
+        }
+
+        if(unw_is_signal_frame(&cursor)) continue;
+
+        if(total_idx >= static_cast<int64_t>(MAX_STACK_DEPTH) + ignore_depth) break;
+
+        ++total_idx;
+
+        unw_word_t ip = 0;
+        if(unw_get_reg(&cursor, UNW_REG_IP, &ip) != 0) break;
+        if(ip == 0) break;
+        rec.raw_pcs[rec.pc_count++] = static_cast<uintptr_t>(ip);
     }
+done:;
 }
 
 inline void

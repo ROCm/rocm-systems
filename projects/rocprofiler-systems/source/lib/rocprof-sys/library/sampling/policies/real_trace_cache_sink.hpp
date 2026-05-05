@@ -75,7 +75,7 @@ public:
 
                 trace_cache::get_buffer_storage().store(make_region_sample(
                     category_id, sys_id, track_name, name, sample.beg_ns, sample.end_ns,
-                    category_str, frame, depth));
+                    category_str, frame, depth, sample.metrics.cpu_ns));
 
                 ++depth;
             }
@@ -215,7 +215,8 @@ private:
     static trace_cache::backtrace_region_sample make_region_sample(
         uint32_t category_id, std::size_t sys_id, std::string const& track_name,
         std::string const& name, std::uint64_t beg_ns, std::uint64_t end_ns,
-        char const* category_str, stack_frame const& frame, int depth)
+        char const* category_str, stack_frame const& frame, int depth,
+        int64_t cpu_ns = -1)
     {
         return trace_cache::backtrace_region_sample{ category_id,
                                                      static_cast<uint64_t>(sys_id),
@@ -226,7 +227,7 @@ private:
                                                      category_str,
                                                      make_call_stack_json(frame),
                                                      make_line_info_json(frame),
-                                                     make_extdata_json(depth) };
+                                                     make_extdata_json(depth, cpu_ns) };
     }
 
     struct thread_metric_descriptor

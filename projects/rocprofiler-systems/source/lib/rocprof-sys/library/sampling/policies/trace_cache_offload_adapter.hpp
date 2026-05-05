@@ -84,6 +84,17 @@ public:
         m_store[tid].push_back(rec);
     }
 
+    // Atomically read and remove all records for tid.
+    [[nodiscard]] std::vector<backtrace_record> take(int64_t tid)
+    {
+        std::lock_guard<std::mutex> lk{ m_mutex };
+        auto                        it = m_store.find(tid);
+        if(it == m_store.end()) return {};
+        auto result = std::move(it->second);
+        m_store.erase(it);
+        return result;
+    }
+
     // Remove all records for tid after emit_resolved has processed them.
     // Prevents double-emission when post_process() iterates offload_.tids().
     void erase(int64_t tid) noexcept
