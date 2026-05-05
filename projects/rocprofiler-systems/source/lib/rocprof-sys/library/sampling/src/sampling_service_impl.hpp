@@ -293,87 +293,56 @@ sampling_service<Policies>::setup(int64_t tid)
 
 // ── shutdown ──────────────────────────────────────────────────────────────
 
+// Stop signals, drain ring buffer, tear down wiring for a single thread.
+// Does NOT resolve symbols — resolution is deferred to shutdown(0).
+template <class Policies>
+void
+sampling_service<Policies>::shutdown_thread(int64_t tid)
+{
+    auto* state = registry_.at(tid);
+    if(!state) return;
+
+    LOG_DEBUG("Stopping sampler for thread {}...", tid);
+
+    auto sigs = get_signal_types(tid);
+    if(!sigs.empty()) block_signals(sigs);
+
+    state->stop_all_triggers();
+    state->stop();
+
+    if(!state->wait_for_in_flight_zero(5000))
+        LOG_DEBUG("Warning: in-flight handler for thread {} did not finish in 5s", tid);
+
+    offload_.write(tid, state->ring_buffer(), fatal_);
+    do_shutdown_wiring(tid);
+    registry_.erase(tid);
+}
+
 template <class Policies>
 std::set<int>
 sampling_service<Policies>::shutdown(int64_t tid)
 {
-    // AC-20: child process — release state without per-tid processing.
     if(child_process_mode_) return {};
 
-    // When main thread shuts down, stop all other threads first.
-    if(tid == 0)
-    {
-        std::vector<int64_t> other_tids;
-        registry_.each([tid, &other_tids](int64_t t, auto&) {
-            if(t != tid) other_tids.push_back(t);
-        });
-        for(auto other : other_tids)
-        {
-            if(auto* s = registry_.at(other))
-            {
-                s->stop_all_triggers();
-                s->stop();
-                s->wait_for_in_flight_zero(5000);
-                offload_.write(other, s->ring_buffer(), fatal_);
-                do_shutdown_wiring(other);
-                registry_.erase(other);
-            }
-        }
-    }
-
-    // Guard: if Fix 4.2 loop already processed this tid, skip.
     if(!registry_.at(tid))
     {
         LOG_DEBUG("Sampler for thread {} already shut down", tid);
         return {};
     }
 
-    LOG_DEBUG("Stopping sampler for thread {}...", tid);
-
-    // Retrieve the signal set before destroying state.
     auto sigs = get_signal_types(tid);
 
-    // Block signals on the calling thread so no new samples arrive.
-    if(!sigs.empty()) block_signals(sigs);
+    // Worker threads: just drain and exit. Resolution deferred to main thread.
+    shutdown_thread(tid);
 
-    if(auto* state = registry_.at(tid))
-    {
-        // Stop all POSIX timers before clearing the running flag so no new signals
-        // are delivered after stop() (DEC-3: separate realtime + cputime slots).
-        state->stop_all_triggers();
-
-        state->stop();
-        // Busy-wait for any in-flight handler to complete (architecture § 7, 5s timeout).
-        if(!state->wait_for_in_flight_zero(5000))
-        {
-            LOG_DEBUG("Warning: in-flight handler for thread {} did not finish in 5s",
-                      tid);
-        }
-
-        // Drain any remaining ring-buffer records to the offload store.
-        // Safe here: signals are blocked and in-flight count is zero.
-        offload_.write(tid, state->ring_buffer(), fatal_);
-    }
-
-    // Symbol resolution is deferred — do NOT call do_emit_resolved() here.
-    // Baseline defers all resolution to post_process() so worker threads
-    // exit immediately after draining their ring buffers. Eager resolution
-    // on the worker thread adds ~0.5s of dladdr/unw_get_proc_name_by_ip
-    // work, delaying pthread_join on the main thread.
-    //
-    // Resolution runs later via emit_all_deferred() from the main thread
-    // after all joins complete.
-
-    // Clear thread-local signal-handler pointers so a stale signal after
-    // state destruction is a no-op.
-    do_shutdown_wiring(tid);
-
-    // Destroy the per-thread state for this tid.
-    registry_.erase(tid);
-
-    // When main thread shuts down (tid == 0), resolve all deferred data.
+    // Main thread: also drain any remaining worker threads, then resolve all.
     if(tid == 0)
     {
+        std::vector<int64_t> remaining;
+        registry_.each([&remaining](int64_t t, auto&) { remaining.push_back(t); });
+        for(auto other : remaining)
+            shutdown_thread(other);
+
         for(auto deferred_tid : offload_.tids())
             do_emit_resolved(deferred_tid);
     }

@@ -156,6 +156,7 @@ private:
                               std::set<int> const& sigs);
     void start_duration_controller(int64_t tid);
     void register_trace_cache_tracks(int64_t tid, std::set<int> const& sigs);
+    void shutdown_thread(int64_t tid);
     void do_shutdown_wiring(int64_t tid) noexcept;
     void do_emit_resolved(int64_t tid);
     void do_postfork_parent_reinit();
