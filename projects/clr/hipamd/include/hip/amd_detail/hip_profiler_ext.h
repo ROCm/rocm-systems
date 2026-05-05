@@ -32,7 +32,7 @@ extern "C" {
 #endif
 
 /**
- * @brief GPU operation type stored in HipGpuActivityExt::op.
+ * @brief GPU operation type stored in hipGpuActivityExt::op.
  */
 typedef enum {
   HIP_OP_DISPATCH_EXT = 0, /**< Kernel dispatch */
@@ -41,7 +41,7 @@ typedef enum {
 } HipGpuOpExt;
 
 /**
- * @brief Memory copy direction stored in HipGpuActivityExt::copy_kind.
+ * @brief Memory copy direction stored in hipGpuActivityExt::copy_kind.
  * Valid only when op == HIP_OP_COPY_EXT.
  *
  * Each value corresponds to one OpenCL CL_COMMAND_* copy command so callers
@@ -89,11 +89,11 @@ static inline int hipCopyKindIsSDMAExt(HipCopyKindExt kind) {
  * Fixed size: 128 bytes.  Fields beyond the active payload are reserved for
  * future use and must be treated as zero by callers.
  *
- * When embedded as HipApiRecordExt::gpu this struct describes the first (or
+ * When embedded as hipApiRecordExt::gpu this struct describes the first (or
  * only) GPU operation for the API call.  gpu_op_count and gpu_ops expose all
  * operations (>1 for hipGraphLaunch with multiple nodes).
  */
-typedef struct HipGpuActivityExt {
+typedef struct hipGpuActivityExt {
   union {
     uint64_t _flags_u64;        /**< Raw 64-bit access to the packed flags word */
     struct {
@@ -117,7 +117,7 @@ typedef struct HipGpuActivityExt {
    * remaining 40 bytes stay reserved and must be treated as zero by external callers. */
   uint32_t                   gpu_op_count; /**< Total GPU ops (0=none, 1=in gpu field, >1=graph) */
   uint32_t                   _reserved_u32;/**< Reserved — must be zero */
-  const struct HipGpuActivityExt* next;    /**< Next spill node (ops 2..N); NULL at tail or when
+  const struct hipGpuActivityExt* next;    /**< Next spill node (ops 2..N); NULL at tail or when
                                                  gpu_op_count <= 1.  rec->gpu.next is the head. */
   /* Op-specific payload — 40 bytes, two arms sharing the same storage. */
   union {
@@ -143,9 +143,9 @@ typedef struct HipGpuActivityExt {
     };
   };
   uint8_t     _pad1[40];           /**< Remaining reserved padding — must be zero */
-} HipGpuActivityExt;
+} hipGpuActivityExt;
 #ifdef __cplusplus
-static_assert(sizeof(HipGpuActivityExt) == 128, "HipGpuActivityExt must be 128 bytes");
+static_assert(sizeof(hipGpuActivityExt) == 128, "hipGpuActivityExt must be 128 bytes");
 #endif
 
 /**
@@ -159,9 +159,9 @@ static_assert(sizeof(HipGpuActivityExt) == 128, "HipGpuActivityExt must be 128 b
  * with more than one op, gpu.next is the head of the spill linked list (ops 2..N).
  *
  * Fixed size: 256 bytes (48-byte CPU header + 8-byte _spill_tail + 24-byte memory ptrs +
- *             48-byte pad + 128-byte HipGpuActivityExt).
+ *             4-byte chunk_id + 44-byte pad + 128-byte hipGpuActivityExt).
  *
- * Dispatch grid/block dims and kernel argument blobs are stored in the HipGpuActivityExt
+ * Dispatch grid/block dims and kernel argument blobs are stored in the hipGpuActivityExt
  * dispatch union arm (grid_x/y/z, block_x/y/z, kernel_args, kernel_args_size).
  * Copy source/destination addresses are stored in the copy union arm (src, dst).
  * Both are available per-GPU-op for direct launches and graph nodes.
@@ -183,7 +183,7 @@ typedef struct {
   /* Internal tail pointer for the gpu spill linked list — used by the profiler
    * runtime to achieve O(1) append without scanning to the end of the list.
    * Callers must treat this field as opaque and must not read or write it. */
-  const struct HipGpuActivityExt* _spill_tail; /**< Internal — do not use */
+  const struct hipGpuActivityExt* _spill_tail; /**< Internal — do not use */
   /* Memory operation pointers and size.
    * memory1: destination/allocated pointer (hipMalloc, hipMemcpy dst, hipGraphLaunch exec handle).
    * memory2: source pointer for copies.
@@ -192,14 +192,18 @@ typedef struct {
   void*    memory1;  /**< Dst/allocated ptr for memory ops, or graphExec for hipGraphLaunch */
   void*    memory2;  /**< Src ptr for copies */
   uint64_t size;     /**< Bytes for allocs/copies/sets */
+  /* chunk_id: monotonically increasing sequence number assigned when the record is
+   * allocated.  Used by hipProfilerRegisterChunkCallbackExt to order delivery.
+   * The 4 bytes come from shrinking _pad1 by 4; struct size stays 256. */
+  uint32_t          chunk_id;         /**< Delivery sequence number — assigned at allocation */
   /* Remaining padding to complete the 128-byte CPU half.
    * Reserved — must be treated as zero by callers. */
-  uint8_t           _pad1[48];
+  uint8_t           _pad1[44];
   /* GPU activity — second 128-byte half (valid when has_gpu_activity != 0) */
-  HipGpuActivityExt gpu;
-} HipApiRecordExt;
+  hipGpuActivityExt gpu;
+} hipApiRecordExt;
 #ifdef __cplusplus
-static_assert(sizeof(HipApiRecordExt) == 256, "HipApiRecordExt must be 256 bytes");
+static_assert(sizeof(hipApiRecordExt) == 256, "hipApiRecordExt must be 256 bytes");
 #endif
 
 /**
@@ -251,14 +255,14 @@ hipError_t hipProfilerDisableExt(uint64_t* end_record_id);
  *
  * Iteration pattern:
  * @code
- *   const HipApiRecordExt* const* chunks;
+ *   const hipApiRecordExt* const* chunks;
  *   size_t chunk_count, chunk_size, total;
  *   hipProfilerGetRecordsExt(&chunks, &chunk_count, &chunk_size, &total);
  *   for (size_t c = 0; c < chunk_count; ++c) {
  *     size_t n = (total - c * chunk_size < chunk_size)
  *                ? total - c * chunk_size : chunk_size;
  *     for (size_t i = 0; i < n; ++i) {
- *       const HipApiRecordExt* r = &chunks[c][i];
+ *       const hipApiRecordExt* r = &chunks[c][i];
  *       // use r->api_name, r->start_ns, r->end_ns, r->gpu, ...
  *     }
  *   }
@@ -267,7 +271,7 @@ hipError_t hipProfilerDisableExt(uint64_t* end_record_id);
  * Lifetime: the returned pointers are owned by the profiler and remain valid
  * for the lifetime of the process.
  *
- * Note: HipApiRecordExt::_spill_tail is used internally by the profiler runtime
+ * Note: hipApiRecordExt::_spill_tail is used internally by the profiler runtime
  * to maintain the gpu spill linked list.  Treat it as opaque; do not read or write it.
  * Use gpu.gpu_ops[0..gpu_op_count-1] to access all GPU operations.
  *
@@ -276,10 +280,41 @@ hipError_t hipProfilerDisableExt(uint64_t* end_record_id);
  * @param[out] chunk_size   Capacity of each chunk in records.
  * @param[out] total_count  Total number of valid records across all chunks.
  */
-hipError_t hipProfilerGetRecordsExt(const HipApiRecordExt* const** chunks,
+hipError_t hipProfilerGetRecordsExt(const hipApiRecordExt* const** chunks,
                                     size_t* chunk_count,
                                     size_t* chunk_size,
                                     size_t* total_count);
+
+/**
+ * @brief Callback type for streaming delivery of completed activity records.
+ *
+ * @param records    Pointer to an array of count records.  Valid only for the
+ *                   duration of the callback — do not store this pointer.
+ * @param count      Number of records in the array.
+ * @param user_data  Opaque pointer supplied to hipProfilerRegisterChunkCallbackExt.
+ */
+typedef void (*hipProfilerChunkCallback)(
+    const hipApiRecordExt* records,
+    uint32_t               count,
+    void*                  user_data
+);
+
+/**
+ * @brief Register a chunk callback for streaming delivery of completed activity records.
+ *
+ * When registered, records are delivered in chunks as GPU activity completes,
+ * and freed immediately after the callback returns.  Records pointer is valid
+ * only for the duration of the callback — do not store it.
+ *
+ * If not registered, all records are buffered and written at exit (existing
+ * behaviour).  Must be called before hipProfilerEnableExt or setting
+ * GPU_CLR_PROFILE_OUTPUT to take effect.
+ *
+ * @param cb         Chunk delivery callback.  Pass NULL to unregister.
+ * @param user_data  Opaque pointer forwarded to every callback invocation.
+ * @return hipSuccess
+ */
+hipError_t hipProfilerRegisterChunkCallbackExt(hipProfilerChunkCallback cb, void* user_data);
 
 #ifdef __cplusplus
 }

@@ -21,7 +21,7 @@
  *   ar->correlation_id == N  →  index directly into g_records[N/chunk][N%chunk]
  *   No map, no TLS sentinel, no pending table.
  *
- * Chunk storage: g_records holds HipApiRecordExt arrays.
+ * Chunk storage: g_records holds hipApiRecordExt arrays.
  *   Op-1 lives in rec.gpu; ops 2..N are a linked list via rec.gpu.next (graph launches only).
  *   Each node is individually heap-allocated. Freed by FreeChunk walking the list.
  */
@@ -39,6 +39,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cassert>
+#include <condition_variable>
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
@@ -68,7 +69,10 @@ namespace {
 
 inline uint64_t NowNs() { return amd::Os::timeNanos(); }
 
-constexpr size_t kChunkSize = 10000;
+constexpr size_t   kChunkSize           = 10000;
+// Empirical delivery margin: records whose chunk_id is at least this far behind
+// the highest GPU-callback chunk_id are considered fully complete.
+constexpr uint32_t kDeliveryMargin      = 3;
 
 // Two independent enable paths:
 //   g_enable_refcount  — incremented by hipProfilerEnableExt, decremented by Disable.
@@ -96,36 +100,58 @@ std::atomic<activity_callback_t> g_prev_callback{nullptr};
 std::unordered_map<std::string, std::string> g_kernel_names;
 std::mutex                                   g_kernel_names_mtx;
 
-// Chunks of HipApiRecordExt.  Must be reserved to at least kMaxChunks before any
+// Chunks of hipApiRecordExt.  Must be reserved to at least kMaxChunks before any
 // recording starts.  HipGetActiveRecordExt reads g_records.size() and dereferences
 // g_records[idx] without holding g_alloc_mtx (fast path).  If push_back ever
 // reallocates the pointer vector, those bare reads race with the reallocation —
 // undefined behaviour.  reserve() keeps capacity above the watermark so push_back
 // never triggers a realloc.
-std::vector<HipApiRecordExt*> g_records;
+std::vector<hipApiRecordExt*> g_records;
 constexpr size_t kMaxChunks = 100000;  // hard cap: 100000 * 10000 = 1B records max
 std::atomic<size_t>           g_rec_counter{0};
 std::mutex                    g_alloc_mtx;
 
+// Maximum chunk_id seen across all GPU activity callbacks.  Updated with a fetch_max
+// (CAS loop) under memory_order_release in HipActivityCallbackExt so the delivery
+// thread's acquire load establishes happens-before with all GPU writes for records
+// up to and including that id.
+static std::atomic<uint32_t> g_max_gpu_chunk_id{0};
 
+// ── Chunk callback delivery ───────────────────────────────────────────────────
+// When g_chunk_clients is non-empty, a background thread delivers records in
+// chunk_id order as GPU activity completes, invoking every registered client.
+// When empty, records are buffered and written at exit (existing buffered path).
+struct HipChunkClient {
+  hipProfilerChunkCallback cb;
+  void*                    user_data;
+};
+static std::vector<HipChunkClient> g_chunk_clients;
+static std::mutex                  g_chunk_clients_mtx;
+// Monotonically increasing sequence number assigned to each new record slot.
+static std::atomic<uint32_t>    g_next_chunk_id{0};
+
+static std::mutex               g_chunk_mtx;
+static std::condition_variable  g_chunk_cv;
+static std::thread              g_chunk_thread;
+static std::atomic<bool>        g_chunk_thread_stop{false};
 
 // ================================================================================================
-HipApiRecordExt* AllocChunk() {
-  void* raw = ::operator new[](kChunkSize * sizeof(HipApiRecordExt));
-  HipApiRecordExt* chunk = static_cast<HipApiRecordExt*>(raw);
-  std::memset(chunk, 0, kChunkSize * sizeof(HipApiRecordExt));
+hipApiRecordExt* AllocChunk() {
+  void* raw = ::operator new[](kChunkSize * sizeof(hipApiRecordExt));
+  hipApiRecordExt* chunk = static_cast<hipApiRecordExt*>(raw);
+  std::memset(chunk, 0, kChunkSize * sizeof(hipApiRecordExt));
   return chunk;
 }
 
 // ================================================================================================
-void FreeChunk(HipApiRecordExt* chunk) {
+void FreeChunk(hipApiRecordExt* chunk) {
   for (size_t i = 0; i < kChunkSize; ++i) {
     // Free spill node kernel_args blobs and the nodes themselves.
     // All kernel_args blobs are owned: single launches by HipCaptureKernelArgsExt,
     // graph launches by a copy made in fill_dispatch_info.
-    const HipGpuActivityExt* node = chunk[i].gpu.next;
+    const hipGpuActivityExt* node = chunk[i].gpu.next;
     while (node) {
-      const HipGpuActivityExt* next = node->next;
+      const hipGpuActivityExt* next = node->next;
       delete[] node->kernel_args;
       delete node;
       node = next;
@@ -134,6 +160,113 @@ void FreeChunk(HipApiRecordExt* chunk) {
     delete[] chunk[i].gpu.kernel_args;
   }
   ::operator delete[](static_cast<void*>(chunk));
+}
+
+// ================================================================================================
+// Free the resources owned by a single record (GPU spill list + kernel_args blobs).
+// Does NOT free the record struct itself — records live in chunk arrays owned by g_records.
+// Called by the delivery thread after the chunk callback returns.
+static void FreeRecordResources(hipApiRecordExt* rec) {
+  // Free spill node kernel_args blobs and the nodes themselves.
+  const hipGpuActivityExt* node = rec->gpu.next;
+  while (node) {
+    const hipGpuActivityExt* nxt = node->next;
+    delete[] node->kernel_args;
+    delete node;
+    node = nxt;
+  }
+  rec->gpu.next = nullptr;
+  rec->_spill_tail = nullptr;
+  // Free the first-op kernel_args blob.
+  delete[] rec->gpu.kernel_args;
+  rec->gpu.kernel_args = nullptr;
+  rec->gpu.kernel_args_size = 0;
+}
+
+// Forward declarations for ChunkDeliveryThread (defined later in the file).
+static FILE* g_pf_file = nullptr;
+static void  PfChunkCallback(const hipApiRecordExt*, uint32_t, void*);
+
+// ================================================================================================
+// Background thread: delivers completed records to all registered g_chunk_clients.
+//
+// Uses two counters for synchronisation:
+//   g_max_gpu_chunk_id — highest chunk_id whose GPU callback has completed (fetch_max,
+//                         release store in HipActivityCallbackExt).
+//   next_deliver        — local to this thread; next chunk_id to deliver.
+//
+// Mid-stream: deliver [next_deliver .. g_max_gpu_chunk_id - 2] (conservative 2-record
+// safety margin so the delivery thread never races with a still-writing callback).
+// The acquire load of g_max_gpu_chunk_id establishes happens-before with the release
+// store in HipActivityCallbackExt, guaranteeing all GPU fields are visible.
+//
+// Stop-flush: deliver [next_deliver .. g_next_chunk_id - 1] (every allocated record).
+static void ChunkDeliveryThread() {
+  uint32_t next_deliver = 0;
+
+  while (true) {
+    {
+      std::unique_lock<std::mutex> lk(g_chunk_mtx);
+      g_chunk_cv.wait(lk, [&] {
+        if (g_chunk_thread_stop.load(std::memory_order_relaxed)) return true;
+        uint32_t max_id = g_max_gpu_chunk_id.load(std::memory_order_acquire);
+        return max_id >= next_deliver + kDeliveryMargin;
+      });
+    }
+
+    bool stopping = g_chunk_thread_stop.load(std::memory_order_relaxed);
+    uint32_t max_id = g_max_gpu_chunk_id.load(std::memory_order_acquire);
+
+    uint32_t watermark;
+    if (stopping) {
+      // Flush all allocated records regardless of GPU callback status.
+      uint32_t total = g_next_chunk_id.load(std::memory_order_acquire);
+      watermark = (total > 0) ? total - 1 : 0;
+    } else {
+      watermark = max_id - kDeliveryMargin;
+    }
+
+    if (watermark < next_deliver) {
+      if (stopping) break;
+      continue;
+    }
+
+    // Struct-copy records [next_deliver .. watermark].
+    // The acquire load of g_max_gpu_chunk_id above established happens-before with
+    // HipActivityCallbackExt's release store, so all GPU writes are visible here.
+    std::vector<hipApiRecordExt> flat;
+    flat.reserve(watermark - next_deliver + 1);
+    for (uint32_t cid = next_deliver; cid <= watermark; ++cid) {
+      size_t idx = cid / kChunkSize;
+      size_t off = cid % kChunkSize;
+      if (idx >= g_records.size()) break;
+      flat.push_back(g_records[idx][off]);
+    }
+
+    if (!flat.empty()) {
+      // Internal pftrace writer — called directly when env-var output is active.
+      if (g_pf_file)
+        PfChunkCallback(flat.data(), static_cast<uint32_t>(flat.size()), nullptr);
+      // External clients registered via hipProfilerRegisterChunkCallbackExt.
+      std::vector<HipChunkClient> clients;
+      {
+        std::lock_guard<std::mutex> lk(g_chunk_clients_mtx);
+        clients = g_chunk_clients;
+      }
+      for (auto& c : clients)
+        c.cb(flat.data(), static_cast<uint32_t>(flat.size()), c.user_data);
+      // Free owned resources on the originals (not the copies).
+      for (uint32_t cid = next_deliver; cid <= watermark; ++cid) {
+        size_t idx = cid / kChunkSize;
+        size_t off = cid % kChunkSize;
+        if (idx >= g_records.size()) break;
+        FreeRecordResources(&g_records[idx][off]);
+      }
+    }
+
+    next_deliver = watermark + 1;
+    if (stopping) break;
+  }
 }
 
 // ================================================================================================
@@ -203,7 +336,7 @@ int HipActivityCallbackExt(activity_domain_t domain, uint32_t op_id, void* data)
   size_t idx = slot / kChunkSize;
   if (idx >= g_records.size()) return 0;
 
-  HipApiRecordExt* rec = &g_records[idx][slot % kChunkSize];
+  hipApiRecordExt* rec = &g_records[idx][slot % kChunkSize];
 
   // OP_ID_BARRIER maps exclusively to CL_COMMAND_MARKER, which is used for all
   // GPU-side synchronization (graph node barriers, hipStreamWaitEvent, hipEventRecord
@@ -239,7 +372,7 @@ int HipActivityCallbackExt(activity_domain_t domain, uint32_t op_id, void* data)
     return n && (strncmp(n, "hipGraphLaunch", 14) == 0);
   };
 
-  auto fill_dispatch_info = [&](HipGpuActivityExt* gact) {
+  auto fill_dispatch_info = [&](hipGpuActivityExt* gact) {
     if (ar->op != OP_ID_DISPATCH) return;
     gact->kernel_name = ar->kernel_name;
     if (!is_graph_launch()) {
@@ -248,7 +381,7 @@ int HipActivityCallbackExt(activity_domain_t domain, uint32_t op_id, void* data)
       // Spill nodes don't occur for single launches, so no action needed here.
     } else {
       // Graph launch: look up node info by exec handle stored in memory1.
-      // Copy the kernel_args blob so every HipGpuActivityExt owns its blob
+      // Copy the kernel_args blob so every hipGpuActivityExt owns its blob
       // and FreeChunk can unconditionally delete[] it.
       auto* exec = reinterpret_cast<hipGraphExec_t>(rec->memory1);
       std::lock_guard<std::mutex> lk(g_graph_exec_mtx);
@@ -281,7 +414,7 @@ int HipActivityCallbackExt(activity_domain_t domain, uint32_t op_id, void* data)
   // For direct (non-graph) copies, src/dst come from the CPU record (set by the wrapper).
   // For graph copy nodes, look up the matching copy node info captured at instantiate time
   // by matching on copy_kind and bytes; first match wins (best-effort for duplicate nodes).
-  auto fill_copy_info = [&](HipGpuActivityExt* gact) {
+  auto fill_copy_info = [&](hipGpuActivityExt* gact) {
     if (ar->op != OP_ID_COPY) return;
     if (!is_graph_launch()) {
       gact->src = rec->memory2;
@@ -324,7 +457,7 @@ int HipActivityCallbackExt(activity_domain_t domain, uint32_t op_id, void* data)
     rec->has_gpu_activity  = 1;
   } else {
     // Subsequent op (graph launch spill): allocate a new node and O(1)-append via _spill_tail.
-    HipGpuActivityExt* node = new HipGpuActivityExt{};
+    hipGpuActivityExt* node = new hipGpuActivityExt{};
     node->op        = ar->op;
     node->begin_ns  = ar->begin_ns;
     node->end_ns    = ar->end_ns;
@@ -340,8 +473,8 @@ int HipActivityCallbackExt(activity_domain_t domain, uint32_t op_id, void* data)
     node->next = nullptr;
 
     // _spill_tail caches the list tail so append is O(1).
-    HipGpuActivityExt* tail =
-      const_cast<HipGpuActivityExt*>(rec->_spill_tail);
+    hipGpuActivityExt* tail =
+      const_cast<hipGpuActivityExt*>(rec->_spill_tail);
     if (tail)
       tail->next = node;
     else
@@ -349,6 +482,17 @@ int HipActivityCallbackExt(activity_domain_t domain, uint32_t op_id, void* data)
     rec->_spill_tail = node;
 
     rec->gpu.gpu_op_count++;
+  }
+
+  // Update g_max_gpu_chunk_id to rec->chunk_id (fetch_max via CAS loop, release store).
+  // The release store ensures all GPU writes above are visible to the delivery thread
+  // after its acquire load of g_max_gpu_chunk_id.
+  if (g_pf_file || !g_chunk_clients.empty()) {
+    uint32_t id   = rec->chunk_id;
+    uint32_t prev = g_max_gpu_chunk_id.load(std::memory_order_relaxed);
+    while (id > prev && !g_max_gpu_chunk_id.compare_exchange_weak(
+               prev, id, std::memory_order_release, std::memory_order_relaxed)) {}
+    g_chunk_cv.notify_one();
   }
 
   // Forward to previously registered callback (e.g. roctracer / rocprofiler).
@@ -445,7 +589,7 @@ void WriteJsonTraceImpl(const char* filepath) {
   // precision loss for large absolute ns timestamps in the Perfetto UI).
   uint64_t base_ns = UINT64_MAX;
   for (size_t c = 0; c < g_records.size(); ++c) {
-    HipApiRecordExt* chunk = g_records[c];
+    hipApiRecordExt* chunk = g_records[c];
     size_t base  = c * kChunkSize;
     size_t valid = (total > base) ? std::min(total - base, kChunkSize) : 0;
     for (size_t i = 0; i < valid; ++i) {
@@ -455,11 +599,11 @@ void WriteJsonTraceImpl(const char* filepath) {
   }
   if (base_ns == UINT64_MAX) base_ns = 0;
   for (size_t c = 0; c < g_records.size(); ++c) {
-    HipApiRecordExt* chunk = g_records[c];
+    hipApiRecordExt* chunk = g_records[c];
     size_t base  = c * kChunkSize;
     size_t valid = (total > base) ? std::min(total - base, kChunkSize) : 0;
     for (size_t i = 0; i < valid; ++i) {
-      const HipApiRecordExt& rec = chunk[i];
+      const hipApiRecordExt& rec = chunk[i];
       if (!rec.api_name) continue;
       uint64_t ptr = reinterpret_cast<uintptr_t>(rec.memory1);
       if (IsAllocApi(rec.api_name) && ptr) {
@@ -482,7 +626,7 @@ void WriteJsonTraceImpl(const char* filepath) {
       if (ai.end_ns > trace_end_ns) trace_end_ns = ai.end_ns;
   // Also check all record end times for a proper upper bound.
   for (size_t c = 0; c < g_records.size(); ++c) {
-    HipApiRecordExt* chunk = g_records[c];
+    hipApiRecordExt* chunk = g_records[c];
     size_t base  = c * kChunkSize;
     size_t valid = (total > base) ? std::min(total - base, kChunkSize) : 0;
     for (size_t i = 0; i < valid; ++i)
@@ -500,13 +644,13 @@ void WriteJsonTraceImpl(const char* filepath) {
   };
 
   for (size_t c = 0; c < g_records.size(); ++c) {
-    HipApiRecordExt* chunk = g_records[c];
+    hipApiRecordExt* chunk = g_records[c];
     size_t base  = c * kChunkSize;
     size_t valid = (total > base) ? std::min(total - base, kChunkSize) : 0;
     if (valid == 0) continue;
 
     for (size_t i = 0; i < valid; ++i) {
-      const HipApiRecordExt& rec = chunk[i];
+      const hipApiRecordExt& rec = chunk[i];
       tid_set.insert(rec.thread_id);
 
       double s_time  = (rec.start_ns - base_ns) / 1000.0;
@@ -550,13 +694,13 @@ void WriteJsonTraceImpl(const char* filepath) {
 
       // Emit one GPU op event: flow start (ph:s) on CPU side, GPU X event,
       // flow finish (ph:t) on GPU side.  Dims and kernel args are read directly
-      // from the HipGpuActivityExt struct (populated by HipActivityCallbackExt).
+      // from the hipGpuActivityExt struct (populated by HipActivityCallbackExt).
       // Returns {gpu_tid, gpu_ts, has_ts} for chaining node→node flow arrows.
       // emit_host_arrow: draw ph:s/ph:t dep arrow from CPU event to this GPU op.
       //   For graph launches only the first op gets the host arrow; subsequent nodes
       //   are connected via node→node graph arrows instead.
       struct GpuOpInfo { uint64_t tid; double ts; bool has_ts; };
-      auto emit_gpu_op = [&](const HipGpuActivityExt& gop, hipStream_t stream,
+      auto emit_gpu_op = [&](const hipGpuActivityExt& gop, hipStream_t stream,
                              bool emit_host_arrow = true) -> GpuOpInfo {
         uint32_t op_idx  = gop.op < 3 ? gop.op : 3;
         int sdma = (op_idx == OP_ID_COPY) &&
@@ -704,12 +848,12 @@ void WriteJsonTraceImpl(const char* filepath) {
       };
 
       // Op-1 lives directly in rec.gpu; ops 2..N are in the spill linked list.
-      // All dims and kernel args are now in each HipGpuActivityExt node.
+      // All dims and kernel args are now in each hipGpuActivityExt node.
       const bool graph_launch = rec.api_name && strncmp(rec.api_name, "hipGraphLaunch", 14) == 0;
       if (rec.gpu.gpu_op_count > 0) {
         GpuOpInfo prev = emit_gpu_op(rec.gpu, rec.stream, /*emit_host_arrow=*/true);
 
-        for (const HipGpuActivityExt* node = rec.gpu.next; node; node = node->next) {
+        for (const hipGpuActivityExt* node = rec.gpu.next; node; node = node->next) {
           GpuOpInfo cur = emit_gpu_op(*node, rec.stream, /*emit_host_arrow=*/false);
           // Node→node flow arrow within this graph launch.
           if (graph_launch && prev.has_ts && cur.has_ts) {
@@ -1167,6 +1311,489 @@ static void EmitSliceSorted(SortedPktList& pkts, uint64_t uuid,
   }
 }
 
+// ============================================================
+// Streaming pftrace state — persistent across chunk deliveries.
+// All guarded by g_pf_mtx (the chunk callback is called from the delivery
+// thread; ProfilerAtExit accesses from the main thread after thread join).
+// ============================================================
+
+// File handle opened at streaming init; closed in ProfilerAtExit.
+// Forward-declared above ChunkDeliveryThread — definition here.
+// Buffer flushed to file at each chunk boundary.
+static std::string g_pf_buf;
+
+// Intern tables (event names, annotation keys, categories).
+// IIDs start at 1; 0 means "not interned".
+static std::unordered_map<std::string, uint64_t> g_pf_evt_iid;
+static std::unordered_map<std::string, uint64_t> g_pf_ann_iid;
+static std::unordered_map<std::string, uint64_t> g_pf_cat_iid;
+static uint64_t                                   g_pf_next_iid{1};
+
+// Track UUIDs already emitted as TrackDescriptors.
+static std::unordered_set<uint64_t> g_pf_emitted_tracks;
+
+// Compact stream-lane index (same scheme as batch writer).
+static std::unordered_map<uintptr_t, uint64_t> g_pf_stream_lane;
+static uint64_t                                 g_pf_next_lane{0};
+
+// Compact CPU thread index.
+static std::unordered_map<uint64_t, uint32_t> g_pf_tid_map;
+static uint32_t                                g_pf_next_tid{0};
+
+// Monotonically increasing flow ID (separate counter from batch writer).
+static uint64_t g_pf_next_fid{1};
+
+// Alloc lifetime map — built incrementally; memory slices emitted at final flush.
+struct PfAllocInfo { uint64_t start_ns, end_ns, size; };
+static std::unordered_map<uint64_t, std::vector<PfAllocInfo>> g_pf_alloc_map;
+static uint64_t g_pf_trace_end_ns{0};
+
+// Mutex protecting all g_pf_* state.
+static std::mutex g_pf_mtx;
+static bool       g_pf_first_interned{true};  // kSeqFlag_Cleared only on first InternedData packet
+
+// ── Streaming intern helpers ──────────────────────────────────────────────────
+// Returns the IID for a string, adding it to the new-IID list if first seen.
+// Caller passes new_evts/new_anns/new_cats vectors that accumulate entries for
+// the current chunk's InternedData packet.
+static uint64_t PfInternEvt(const std::string& s,
+                              std::vector<std::pair<uint64_t,std::string>>& new_evts) {
+  auto [it, ins] = g_pf_evt_iid.emplace(s, 0);
+  if (ins) { it->second = g_pf_next_iid++; new_evts.push_back({it->second, s}); }
+  return it->second;
+}
+static uint64_t PfInternAnn(const std::string& s,
+                              std::vector<std::pair<uint64_t,std::string>>& new_anns) {
+  auto [it, ins] = g_pf_ann_iid.emplace(s, 0);
+  if (ins) { it->second = g_pf_next_iid++; new_anns.push_back({it->second, s}); }
+  return it->second;
+}
+static uint64_t PfInternCat(const std::string& s,
+                              std::vector<std::pair<uint64_t,std::string>>& new_cats) {
+  auto [it, ins] = g_pf_cat_iid.emplace(s, 0);
+  if (ins) { it->second = g_pf_next_iid++; new_cats.push_back({it->second, s}); }
+  return it->second;
+}
+
+// ── Streaming track descriptor helpers ───────────────────────────────────────
+// Emits a TrackDescriptor packet the first time a UUID is seen.
+static void PfEnsureTrack(uint64_t uuid, uint64_t parent, const std::string& name,
+                           int pid = -1, int tid = -1, bool is_process = false) {
+  if (!g_pf_emitted_tracks.insert(uuid).second) return;  // already emitted
+  EmitTrackDesc(g_pf_buf, uuid, parent, name, pid, tid, is_process);
+}
+
+// ── Lane helpers (same logic as batch writer) ─────────────────────────────────
+static uint64_t PfCompactLane(hipStream_t stream, uint64_t queue_id) {
+  uintptr_t key = stream ? reinterpret_cast<uintptr_t>(stream) : (0x8000ULL | queue_id);
+  auto [it, ins] = g_pf_stream_lane.emplace(key, g_pf_next_lane);
+  if (ins) ++g_pf_next_lane;
+  return it->second;
+}
+static uint32_t PfCompactTid(uint64_t raw) {
+  auto [it, ins] = g_pf_tid_map.emplace(raw, g_pf_next_tid);
+  if (ins) ++g_pf_next_tid;
+  return it->second;
+}
+
+// ── get_gfxip — minimal version (same logic as batch writer) ─────────────────
+static std::pair<std::string,int> PfGetGfxip(int dev_id) {
+  for (int pass = 0; pass < 2; ++pass) {
+    for (size_t gi = 0; gi < hip::g_devices.size(); ++gi) {
+      auto* hdev = hip::g_devices[gi];
+      if (!hdev || hdev->devices().empty()) continue;
+      bool match = (pass == 0) ? (hdev->deviceId() == dev_id)
+                               : (static_cast<int>(gi) == dev_id % static_cast<int>(hip::g_devices.size()));
+      if (!match) continue;
+      const char* tgt = hdev->devices()[0]->isa().targetId();
+      if (tgt && tgt[0]) return {std::string(tgt), static_cast<int>(gi)};
+    }
+  }
+  return {"", -1};
+}
+
+// ── CPU process + thread tracks ───────────────────────────────────────────────
+static void PfEnsureCpuProcess() {
+  if (g_pf_emitted_tracks.count(CpuProcessUuid())) return;
+  std::string proc_name, proc_path;
+  amd::Os::getAppPathAndFileName(proc_name, proc_path);
+  std::string label = proc_name.empty() ? "CPU HIP" : ("CPU HIP [" + proc_name + "]");
+  PfEnsureTrack(CpuProcessUuid(), 0, label, 1024, -1, true);
+}
+static void PfEnsureCpuThread(uint32_t ctid) {
+  PfEnsureCpuProcess();
+  uint64_t uuid = CpuThreadUuid(ctid);
+  PfEnsureTrack(uuid, CpuProcessUuid(), "HIP Thread " + std::to_string(ctid),
+                1024, int(ctid), false);
+}
+static void PfEnsureGpuThread(int dev_id, uint64_t gtid, hipStream_t stream) {
+  uint64_t proc_uuid = GpuProcessUuid(dev_id);
+  if (!g_pf_emitted_tracks.count(proc_uuid)) {
+    auto [gfxip, hip_idx] = PfGetGfxip(dev_id);
+    std::string label = gfxip.empty() ? ("GPU " + std::to_string(dev_id))
+                                      : (gfxip + " [Device " + std::to_string(hip_idx) + "]");
+    PfEnsureTrack(proc_uuid, 0, label, dev_id, -1, true);
+  }
+  uint64_t t_uuid = GpuThreadUuid(dev_id, gtid);
+  if (!g_pf_emitted_tracks.count(t_uuid)) {
+    bool is_sdma = (gtid & 1) != 0;
+    std::string lane;
+    if (stream) {
+      char buf[32]; snprintf(buf, sizeof(buf), "0x%llx",
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(stream)));
+      lane = std::string("Stream ") + buf + (is_sdma ? " [DMA]" : "");
+    } else {
+      lane = std::string(is_sdma ? "SDMA " : "Compute ") + std::to_string(gtid / 2);
+    }
+    PfEnsureTrack(t_uuid, proc_uuid, lane, dev_id, int(gtid), false);
+  }
+}
+
+// ── Chunk callback — incremental pftrace writer ───────────────────────────────
+// Processes one delivery batch: emits track descriptors, InternedData, and
+// sorted event packets directly into g_pf_buf, then writes to g_pf_file.
+// Called from the ChunkDeliveryThread (not on the main thread).
+static void PfChunkCallback(const hipApiRecordExt* records, uint32_t count, void* /*ud*/) {
+  if (!g_pf_file || count == 0) return;
+
+  fprintf(stderr, "[profiler] chunk callback: %u records (chunk_ids %u..%u)\n",
+          count, records[0].chunk_id, records[count-1].chunk_id);
+
+  std::lock_guard<std::mutex> lk(g_pf_mtx);
+
+  // Demangle any new kernel names in this batch.
+  {
+    std::lock_guard<std::mutex> klk(g_kernel_names_mtx);
+    for (auto& kv : g_kernel_names) {
+      if (kv.second.size() > 0 && kv.second[0] == '_') {
+        std::string demangled;
+        if (hip::helpers::demangleName(kv.second, demangled))
+          kv.second = std::move(demangled);
+      }
+    }
+  }
+
+  // ── Accumulate new intern entries for this chunk ──────────────────────────
+  std::vector<std::pair<uint64_t,std::string>> new_evts, new_anns, new_cats;
+
+  // Pre-intern fixed strings.
+  auto cat_hip    = PfInternCat("hip",    new_cats);
+  auto cat_gpu    = PfInternCat("gpu",    new_cats);
+  (void)cat_hip; (void)cat_gpu;
+  // Pre-intern common annotation keys.
+  auto iid_queue_id  = PfInternAnn("queue_id",  new_anns);
+  auto iid_grid      = PfInternAnn("grid",      new_anns);
+  auto iid_block     = PfInternAnn("block",     new_anns);
+  auto iid_copy_kind = PfInternAnn("copy_kind", new_anns);
+  auto iid_bytes     = PfInternAnn("bytes",     new_anns);
+  auto iid_dst       = PfInternAnn("dst",       new_anns);
+  auto iid_src       = PfInternAnn("src",       new_anns);
+  auto iid_stream    = PfInternAnn("stream",    new_anns);
+  auto iid_ptr       = PfInternAnn("ptr",       new_anns);
+  auto iid_size_key  = PfInternAnn("size",      new_anns);
+  std::array<uint64_t,16> iid_kidx;
+  for (int k = 0; k < 16; ++k) iid_kidx[k] = PfInternAnn(std::to_string(k), new_anns);
+
+  // Pre-intern event names that appear in this batch.
+  for (uint32_t ri = 0; ri < count; ++ri) {
+    const hipApiRecordExt& rec = records[ri];
+    if (rec.api_name) PfInternEvt(rec.api_name, new_evts);
+    if (rec.gpu.gpu_op_count == 0) continue;
+    auto scan = [&](const hipGpuActivityExt& gop) {
+      if (gop.op == OP_ID_DISPATCH && gop.kernel_name) {
+        std::lock_guard<std::mutex> klk(g_kernel_names_mtx);
+        auto it = g_kernel_names.find(gop.kernel_name);
+        if (it != g_kernel_names.end()) PfInternEvt(it->second, new_evts);
+      } else if (gop.op == OP_ID_COPY) {
+        PfInternEvt(CopyKindName(gop.copy_kind), new_evts);
+      } else {
+        PfInternEvt("Barrier", new_evts);
+      }
+    };
+    scan(rec.gpu);
+    for (const hipGpuActivityExt* n = rec.gpu.next; n; n = n->next) scan(*n);
+  }
+
+  // ── Update alloc map ──────────────────────────────────────────────────────
+  for (uint32_t ri = 0; ri < count; ++ri) {
+    const hipApiRecordExt& rec = records[ri];
+    if (!rec.api_name) continue;
+    uint64_t ptr = reinterpret_cast<uintptr_t>(rec.memory1);
+    if (IsAllocApi(rec.api_name) && ptr) {
+      g_pf_alloc_map[ptr].push_back({rec.start_ns, 0, rec.size});
+    } else if (IsFreeApi(rec.api_name) && ptr) {
+      auto it = g_pf_alloc_map.find(ptr);
+      if (it != g_pf_alloc_map.end()) {
+        for (auto rit = it->second.rbegin(); rit != it->second.rend(); ++rit)
+          if (rit->end_ns == 0) { rit->end_ns = rec.start_ns; break; }
+      }
+    }
+    g_pf_trace_end_ns = std::max(g_pf_trace_end_ns, rec.end_ns);
+  }
+
+  // ── Emit InternedData packet if any new strings ────────────────────────────
+  if (!new_evts.empty() || !new_anns.empty() || !new_cats.empty()) {
+    ProtoMsg idata;
+    for (auto& kv : new_evts) {
+      ProtoMsg e; e.u64(kIName_iid, kv.first); e.str(kIName_name, kv.second);
+      idata.msg(kIData_evt_names, e);
+    }
+    for (auto& kv : new_anns) {
+      ProtoMsg e; e.u64(kIName_iid, kv.first); e.str(kIName_name, kv.second);
+      idata.msg(kIData_ann_names, e);
+    }
+    for (auto& kv : new_cats) {
+      ProtoMsg e; e.u64(kIName_iid, kv.first); e.str(kIName_name, kv.second);
+      idata.msg(kIData_cat_names, e);
+    }
+    ProtoMsg pkt;
+    pkt.msg(kPkt_interned_data, idata);
+    pkt.u32(kPkt_seq_id, kGlobalSeq);
+    // kSeqFlag_Cleared only on the first InternedData packet — subsequent chunks
+    // only add new names (incremental), so Cleared must not be re-sent or Perfetto
+    // discards all IIDs from prior chunks.
+    uint32_t iflags = kSeqFlag_NeedsState;
+    if (g_pf_first_interned) { iflags |= kSeqFlag_Cleared; g_pf_first_interned = false; }
+    pkt.u32(kPkt_seq_flags, iflags);
+    AppendPacket(g_pf_buf, pkt);
+  }
+
+  // ── Build within-chunk CPU→GPU flow map ──────────────────────────────────
+  // Map from slot index (== chunk_id) to flow id for CPU→GPU arrow.
+  std::unordered_map<uint32_t, uint64_t> chunk_cpu_gpu_fid;   // chunk_id → fid
+  std::unordered_map<uint32_t, uint32_t> chunk_cpu_gpu_ord;   // chunk_id → target op ordinal
+  for (uint32_t ri = 0; ri < count; ++ri) {
+    const hipApiRecordExt& rec = records[ri];
+    if (!rec.api_name || rec.gpu.gpu_op_count == 0) continue;
+    uint32_t min_ord = UINT32_MAX; uint64_t min_ns = UINT64_MAX; uint32_t ord = 0;
+    auto scan_b = [&](const hipGpuActivityExt& gop) {
+      if (gop.begin_ns > 0 && gop.begin_ns < min_ns) { min_ns = gop.begin_ns; min_ord = ord; }
+      ++ord;
+    };
+    scan_b(rec.gpu);
+    for (const hipGpuActivityExt* n = rec.gpu.next; n; n = n->next) scan_b(*n);
+    if (min_ord != UINT32_MAX) {
+      chunk_cpu_gpu_fid[rec.chunk_id] = g_pf_next_fid++;
+      chunk_cpu_gpu_ord[rec.chunk_id] = min_ord;
+    }
+  }
+
+  // ── Collect and sort all event packets ───────────────────────────────────
+  SortedPktList sorted_pkts;
+
+  for (uint32_t ri = 0; ri < count; ++ri) {
+    const hipApiRecordExt& rec = records[ri];
+    if (!rec.api_name) continue;
+
+    uint32_t ctid     = PfCompactTid(rec.thread_id);
+    uint64_t cpu_uuid = CpuThreadUuid(ctid);
+    PfEnsureCpuThread(ctid);
+
+    uint64_t ts_ns  = rec.start_ns;
+    uint64_t dur_ns = (rec.end_ns > rec.start_ns) ? (rec.end_ns - rec.start_ns) : 1;
+
+    // CPU annotations
+    std::vector<std::pair<uint64_t,std::string>> cpu_anns;
+    char buf[32];
+    if (rec.memory1) {
+      snprintf(buf, sizeof(buf), "0x%llx",
+               static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(rec.memory1)));
+      cpu_anns.push_back({iid_ptr, buf});
+    }
+    if (rec.memory2) {
+      snprintf(buf, sizeof(buf), "0x%llx",
+               static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(rec.memory2)));
+      cpu_anns.push_back({iid_src, buf});
+    }
+    if (rec.size) cpu_anns.push_back({iid_size_key, std::to_string(rec.size)});
+    if (rec.stream) {
+      snprintf(buf, sizeof(buf), "0x%llx",
+               static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(rec.stream)));
+      cpu_anns.push_back({iid_stream, buf});
+    }
+
+    // CPU→GPU outflow
+    std::vector<uint64_t> cpu_out;
+    auto cfit = chunk_cpu_gpu_fid.find(rec.chunk_id);
+    if (cfit != chunk_cpu_gpu_fid.end()) cpu_out.push_back(cfit->second);
+
+    uint64_t name_iid = g_pf_evt_iid.count(rec.api_name) ? g_pf_evt_iid[rec.api_name] : 0;
+    EmitSliceSorted(sorted_pkts, cpu_uuid, ts_ns, dur_ns, rec.api_name,
+                    name_iid, cat_hip, cpu_anns, cpu_out, {});
+
+    if (rec.gpu.gpu_op_count == 0) continue;
+
+    // GPU op slices
+    uint32_t cpu_target_ord = chunk_cpu_gpu_ord.count(rec.chunk_id)
+                              ? chunk_cpu_gpu_ord[rec.chunk_id] : UINT32_MAX;
+    uint32_t op_ord = 0;
+    auto emit_gpu = [&](const hipGpuActivityExt& gop) {
+      if (gop.begin_ns == 0) { ++op_ord; return; }
+      int sdma = (gop.op == OP_ID_COPY) &&
+                 hipCopyKindIsSDMAExt(static_cast<HipCopyKindExt>(gop.copy_kind)) ? 1 : 0;
+      uint64_t lane     = PfCompactLane(rec.stream, gop.queue_id);
+      uint64_t gtid     = lane * 2 + sdma;
+      uint64_t gpu_uuid = GpuThreadUuid(static_cast<int>(gop.device_id), gtid);
+      PfEnsureGpuThread(static_cast<int>(gop.device_id), gtid, rec.stream);
+
+      uint64_t g_ts  = gop.begin_ns;
+      uint64_t g_dur = (gop.end_ns > gop.begin_ns) ? (gop.end_ns - gop.begin_ns) : 1;
+
+      std::string gpu_name;
+      if (gop.op == OP_ID_DISPATCH && gop.kernel_name) {
+        std::lock_guard<std::mutex> klk(g_kernel_names_mtx);
+        auto it = g_kernel_names.find(gop.kernel_name);
+        if (it != g_kernel_names.end()) gpu_name = it->second;
+      } else if (gop.op == OP_ID_COPY) {
+        gpu_name = CopyKindName(gop.copy_kind);
+      } else {
+        gpu_name = "Barrier";
+      }
+
+      std::vector<std::pair<uint64_t,std::string>> gpu_anns;
+      gpu_anns.push_back({iid_queue_id, std::to_string(gop.queue_id)});
+      if (gop.op == OP_ID_DISPATCH && gop.grid_x) {
+        snprintf(buf, sizeof(buf), "%ux%ux%u", gop.grid_x, gop.grid_y, gop.grid_z);
+        gpu_anns.push_back({iid_grid, buf});
+        snprintf(buf, sizeof(buf), "%ux%ux%u", gop.block_x, gop.block_y, gop.block_z);
+        gpu_anns.push_back({iid_block, buf});
+      }
+      if (gop.op == OP_ID_COPY) {
+        gpu_anns.push_back({iid_copy_kind, CopyKindName(gop.copy_kind)});
+        gpu_anns.push_back({iid_bytes, std::to_string(gop.bytes)});
+        if (gop.dst) {
+          snprintf(buf, sizeof(buf), "0x%llx",
+                   static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(gop.dst)));
+          gpu_anns.push_back({iid_dst, buf});
+        }
+        if (gop.src) {
+          snprintf(buf, sizeof(buf), "0x%llx",
+                   static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(gop.src)));
+          gpu_anns.push_back({iid_src, buf});
+        }
+      }
+      if (rec.stream) {
+        snprintf(buf, sizeof(buf), "0x%llx",
+                 static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(rec.stream)));
+        gpu_anns.push_back({iid_stream, buf});
+      }
+      if (gop.op == OP_ID_DISPATCH && gop.kernel_args && gop.kernel_args_size > 0) {
+        const uint8_t* p   = gop.kernel_args;
+        const uint8_t* end = p + gop.kernel_args_size;
+        int kidx = 0;
+        while (p + sizeof(uint32_t) <= end) {
+          uint32_t sz; std::memcpy(&sz, p, sizeof(uint32_t)); p += sizeof(uint32_t);
+          if (p + sz > end) break;
+          char vbuf[32];
+          if (sz == 8)      { uint64_t v; std::memcpy(&v, p, 8); snprintf(vbuf, sizeof(vbuf), "0x%llx", static_cast<unsigned long long>(v)); }
+          else if (sz == 4) { uint32_t v; std::memcpy(&v, p, 4); snprintf(vbuf, sizeof(vbuf), "%u", v); }
+          else               { snprintf(vbuf, sizeof(vbuf), "(sz=%u)", sz); }
+          uint64_t key_iid = (kidx < 16) ? iid_kidx[kidx] : PfInternAnn(std::to_string(kidx), new_anns);
+          gpu_anns.push_back({key_iid, vbuf});
+          ++kidx; p += sz;
+        }
+      }
+
+      // CPU→GPU flow terminates on the op with the earliest begin_ns.
+      std::vector<uint64_t> in_flows;
+      if (op_ord == cpu_target_ord && cfit != chunk_cpu_gpu_fid.end())
+        in_flows.push_back(cfit->second);
+
+      uint64_t gpu_name_iid = g_pf_evt_iid.count(gpu_name) ? g_pf_evt_iid[gpu_name] : 0;
+      EmitSliceSorted(sorted_pkts, gpu_uuid, g_ts, g_dur, gpu_name,
+                      gpu_name_iid, cat_gpu, gpu_anns, {}, in_flows);
+      ++op_ord;
+    };
+
+    emit_gpu(rec.gpu);
+    for (const hipGpuActivityExt* n = rec.gpu.next; n; n = n->next) emit_gpu(*n);
+  }
+
+  FlushSorted(g_pf_buf, sorted_pkts);
+
+  // Write accumulated buffer to file.
+  if (!g_pf_buf.empty()) {
+    fwrite(g_pf_buf.data(), 1, g_pf_buf.size(), g_pf_file);
+    fflush(g_pf_file);
+    g_pf_buf.clear();
+  }
+}
+
+// ── PfFlushAllocSlices — called at final close to emit memory lifetime slices.
+static void PfFlushAllocSlices() {
+  if (!g_pf_file || g_pf_alloc_map.empty()) return;
+  // Close any still-open alloc lifetimes.
+  for (auto& kv : g_pf_alloc_map)
+    for (auto& ai : kv.second)
+      if (ai.end_ns == 0) ai.end_ns = g_pf_trace_end_ns;
+
+  // Ensure memory process track.
+  if (!g_pf_emitted_tracks.count(MemProcessUuid())) {
+    uint64_t total_bytes = 0;
+    for (auto& kv : g_pf_alloc_map) for (auto& ai : kv.second) total_bytes += ai.size;
+    char lbl[64];
+    if (total_bytes >= 1024*1024)
+      snprintf(lbl, sizeof(lbl), "GPU Memory (%.1f MB total)", total_bytes/(1024.0*1024.0));
+    else
+      snprintf(lbl, sizeof(lbl), "GPU Memory (%llu B total)",
+               static_cast<unsigned long long>(total_bytes));
+    EmitTrackDesc(g_pf_buf, MemProcessUuid(), 0, lbl, 2048, -1, true);
+    g_pf_emitted_tracks.insert(MemProcessUuid());
+  }
+
+  std::vector<std::pair<uint64_t,std::string>> new_evts, new_anns, new_cats;
+  auto iid_ptr      = PfInternAnn("ptr",  new_anns);
+  auto iid_size_key = PfInternAnn("size", new_anns);
+  auto cat_mem      = PfInternCat("memory", new_cats);
+
+  SortedPktList sorted_pkts;
+
+  for (auto& kv : g_pf_alloc_map) {
+    uint64_t ptr = kv.first;
+    uint64_t mem_tid  = (ptr >> 12) & 0xFFFFF;
+    uint64_t mem_uuid = MemThreadUuid(mem_tid);
+    char ptrbuf[32], sizebuf[32];
+    snprintf(ptrbuf, sizeof(ptrbuf), "0x%llx", static_cast<unsigned long long>(ptr));
+    uint64_t label_size = kv.second.empty() ? 0 : kv.second[0].size;
+    if (label_size >= 1024*1024) snprintf(sizebuf, sizeof(sizebuf), "%.1f MB", label_size/(1024.0*1024.0));
+    else if (label_size >= 1024) snprintf(sizebuf, sizeof(sizebuf), "%.1f KB", label_size/1024.0);
+    else                         snprintf(sizebuf, sizeof(sizebuf), "%llu B", static_cast<unsigned long long>(label_size));
+    EmitTrackDesc(g_pf_buf, mem_uuid, MemProcessUuid(),
+                  std::string(ptrbuf)+" ("+sizebuf+")", 2048, int(mem_tid), false);
+    g_pf_emitted_tracks.insert(mem_uuid);
+
+    for (const PfAllocInfo& ai : kv.second) {
+      std::string alloc_name = std::string(ptrbuf) + " (" + sizebuf + ")";
+      uint64_t alloc_iid = PfInternEvt(alloc_name, new_evts);
+      uint64_t dur_ns = (ai.end_ns > ai.start_ns) ? (ai.end_ns - ai.start_ns) : 1;
+      std::vector<std::pair<uint64_t,std::string>> anns;
+      anns.push_back({iid_ptr, ptrbuf});
+      anns.push_back({iid_size_key, std::to_string(ai.size)});
+      EmitSliceSorted(sorted_pkts, mem_uuid, ai.start_ns, dur_ns,
+                      alloc_name, alloc_iid, cat_mem, anns, {}, {});
+    }
+  }
+
+  // Emit InternedData for any new strings from alloc slices.
+  if (!new_evts.empty() || !new_anns.empty() || !new_cats.empty()) {
+    ProtoMsg idata;
+    for (auto& kv : new_evts) { ProtoMsg e; e.u64(kIName_iid, kv.first); e.str(kIName_name, kv.second); idata.msg(kIData_evt_names, e); }
+    for (auto& kv : new_anns) { ProtoMsg e; e.u64(kIName_iid, kv.first); e.str(kIName_name, kv.second); idata.msg(kIData_ann_names, e); }
+    for (auto& kv : new_cats) { ProtoMsg e; e.u64(kIName_iid, kv.first); e.str(kIName_name, kv.second); idata.msg(kIData_cat_names, e); }
+    ProtoMsg pkt;
+    pkt.msg(kPkt_interned_data, idata);
+    pkt.u32(kPkt_seq_id, kGlobalSeq);
+    pkt.u32(kPkt_seq_flags, kSeqFlag_Cleared | kSeqFlag_NeedsState);
+    AppendPacket(g_pf_buf, pkt);
+  }
+
+  FlushSorted(g_pf_buf, sorted_pkts);
+  if (!g_pf_buf.empty()) {
+    fwrite(g_pf_buf.data(), 1, g_pf_buf.size(), g_pf_file);
+    g_pf_buf.clear();
+  }
+}
+
 // ================================================================================================
 void WriteProtoTraceImpl(const char* filepath) {
   PreDemangleKernelNames();
@@ -1243,11 +1870,11 @@ void WriteProtoTraceImpl(const char* filepath) {
 
   uint64_t t_end = 0;
   for (size_t c = 0; c < g_records.size(); ++c) {
-    HipApiRecordExt* chunk = g_records[c];
+    hipApiRecordExt* chunk = g_records[c];
     size_t base  = c * kChunkSize;
     size_t valid = (total > base) ? std::min(total - base, kChunkSize) : 0;
     for (size_t i = 0; i < valid; ++i) {
-      const HipApiRecordExt& rec = chunk[i];
+      const hipApiRecordExt& rec = chunk[i];
       t_end = std::max(t_end, rec.end_ns);
       compact_tid(rec.thread_id);
       if (rec.api_name) {
@@ -1264,7 +1891,7 @@ void WriteProtoTraceImpl(const char* filepath) {
         }
       }
       if (rec.gpu.gpu_op_count == 0) continue;
-      auto scan = [&](const HipGpuActivityExt& gop) {
+      auto scan = [&](const hipGpuActivityExt& gop) {
         int sdma = (gop.op == OP_ID_COPY) &&
                    hipCopyKindIsSDMAExt(static_cast<HipCopyKindExt>(gop.copy_kind)) ? 1 : 0;
         uint64_t lane = compact_stream_lane(rec.stream, gop.queue_id);
@@ -1273,7 +1900,7 @@ void WriteProtoTraceImpl(const char* filepath) {
         if (rec.stream) gpu_tid_stream[{static_cast<int>(gop.device_id), gtid}] = rec.stream;
       };
       scan(rec.gpu);
-      for (const HipGpuActivityExt* n = rec.gpu.next; n; n = n->next) scan(*n);
+      for (const hipGpuActivityExt* n = rec.gpu.next; n; n = n->next) scan(*n);
     }
   }
   for (auto& kv : alloc_map)
@@ -1298,11 +1925,11 @@ void WriteProtoTraceImpl(const char* filepath) {
   std::unordered_map<uint64_t, uint64_t> graph_node_in_flows;  // receiver key → fid
 
   for (size_t c = 0; c < g_records.size(); ++c) {
-    HipApiRecordExt* chunk = g_records[c];
+    hipApiRecordExt* chunk = g_records[c];
     size_t base  = c * kChunkSize;
     size_t valid = (total > base) ? std::min(total - base, kChunkSize) : 0;
     for (size_t i = 0; i < valid; ++i) {
-      const HipApiRecordExt& rec = chunk[i];
+      const hipApiRecordExt& rec = chunk[i];
       if (!rec.api_name || rec.gpu.gpu_op_count == 0) continue;
       uint64_t slot = base + i;
 
@@ -1314,12 +1941,12 @@ void WriteProtoTraceImpl(const char* filepath) {
         uint32_t min_ord = UINT32_MAX;
         uint64_t min_ns  = UINT64_MAX;
         uint32_t ord = 0;
-        auto scan_begin = [&](const HipGpuActivityExt& gop) {
+        auto scan_begin = [&](const hipGpuActivityExt& gop) {
           if (gop.begin_ns > 0 && gop.begin_ns < min_ns) { min_ns = gop.begin_ns; min_ord = ord; }
           ++ord;
         };
         scan_begin(rec.gpu);
-        for (const HipGpuActivityExt* n = rec.gpu.next; n; n = n->next) scan_begin(*n);
+        for (const hipGpuActivityExt* n = rec.gpu.next; n; n = n->next) scan_begin(*n);
         if (min_ord != UINT32_MAX) {
           uint64_t fid = flow_id++;
           cpu_gpu_flow[slot]       = fid;
@@ -1329,7 +1956,7 @@ void WriteProtoTraceImpl(const char* filepath) {
 
       // GPU→memory flows
       uint32_t op_ord = 0;
-      auto assign_mem_flows = [&](const HipGpuActivityExt& gop) {
+      auto assign_mem_flows = [&](const hipGpuActivityExt& gop) {
         uint64_t key = slot * 1000 + op_ord++;
         uint64_t seen[18]; int nseen = 0;
         auto try_ptr = [&](uint64_t ptr) {
@@ -1365,7 +1992,7 @@ void WriteProtoTraceImpl(const char* filepath) {
         }
       };
       assign_mem_flows(rec.gpu);
-      for (const HipGpuActivityExt* n = rec.gpu.next; n; n = n->next) assign_mem_flows(*n);
+      for (const hipGpuActivityExt* n = rec.gpu.next; n; n = n->next) assign_mem_flows(*n);
 
       // Graph node→node flows sorted by begin_ns so arrows reflect execution order
       // regardless of callback arrival order (e.g. SDMA on a separate hardware engine).
@@ -1373,14 +2000,14 @@ void WriteProtoTraceImpl(const char* filepath) {
         // Collect (begin_ns, ordinal) for each dispatch/copy op with valid timing.
         std::vector<std::pair<uint64_t,uint32_t>> sorted_ops;
         uint32_t ord = 0;
-        auto collect = [&](const HipGpuActivityExt& gop) {
+        auto collect = [&](const hipGpuActivityExt& gop) {
           if (gop.begin_ns > 0 &&
               (gop.op == HIP_OP_DISPATCH_EXT || gop.op == HIP_OP_COPY_EXT))
             sorted_ops.push_back({gop.begin_ns, ord});
           ++ord;
         };
         collect(rec.gpu);
-        for (const HipGpuActivityExt* n = rec.gpu.next; n; n = n->next) collect(*n);
+        for (const hipGpuActivityExt* n = rec.gpu.next; n; n = n->next) collect(*n);
         std::stable_sort(sorted_ops.begin(), sorted_ops.end());
         for (size_t k = 0; k + 1 < sorted_ops.size(); ++k) {
           uint32_t from_ord = sorted_ops[k].second;
@@ -1530,11 +2157,11 @@ void WriteProtoTraceImpl(const char* filepath) {
   std::vector<std::pair<uint64_t,std::string>> gpu_anns;
   std::vector<uint64_t> in_flows_vec;
   for (size_t c = 0; c < g_records.size(); ++c) {
-    HipApiRecordExt* chunk = g_records[c];
+    hipApiRecordExt* chunk = g_records[c];
     size_t base  = c * kChunkSize;
     size_t valid = (total > base) ? std::min(total - base, kChunkSize) : 0;
     for (size_t i = 0; i < valid; ++i) {
-      const HipApiRecordExt& rec = chunk[i];
+      const hipApiRecordExt& rec = chunk[i];
       if (!rec.api_name) continue;
       uint64_t slot     = base + i;
       uint32_t ctid     = compact_tid(rec.thread_id);
@@ -1574,7 +2201,7 @@ void WriteProtoTraceImpl(const char* filepath) {
       auto ctoit = cpu_gpu_target_ord.find(slot);
       uint32_t cpu_target_ord = (ctoit != cpu_gpu_target_ord.end()) ? ctoit->second : UINT32_MAX;
       uint32_t op_ord = 0;
-      auto emit_gpu = [&](const HipGpuActivityExt& gop) {
+      auto emit_gpu = [&](const hipGpuActivityExt& gop) {
         if (gop.begin_ns == 0) { ++op_ord; return; }
         int sdma = (gop.op == OP_ID_COPY) &&
                    hipCopyKindIsSDMAExt(static_cast<HipCopyKindExt>(gop.copy_kind)) ? 1 : 0;
@@ -1678,7 +2305,7 @@ void WriteProtoTraceImpl(const char* filepath) {
 
       if (rec.gpu.gpu_op_count > 0) {
         emit_gpu(rec.gpu);
-        for (const HipGpuActivityExt* n = rec.gpu.next; n; n = n->next) emit_gpu(*n);
+        for (const hipGpuActivityExt* n = rec.gpu.next; n; n = n->next) emit_gpu(*n);
       }
     }
   }
@@ -1737,15 +2364,40 @@ static void ProfilerAtExit() {
   // Skipped on Windows where KFD streams may already be partially torn down.
   if (IsProfilingActive()) DrainAllDevices();
 #endif
+
+  // Stop the chunk delivery thread (if running) and flush all remaining records.
+  // Must happen after DrainAllDevices so all GPU callbacks have fired before the
+  // final flush; the thread's stop path delivers with watermark = UINT32_MAX.
+  if (g_chunk_thread.joinable()) {
+    {
+      std::lock_guard<std::mutex> lk(g_chunk_mtx);
+      g_chunk_thread_stop.store(true, std::memory_order_relaxed);
+    }
+    g_chunk_cv.notify_one();
+    g_chunk_thread.join();
+    g_chunk_thread_stop.store(false, std::memory_order_relaxed);
+  }
+
   // Write trace only when the env-var output path was configured.
   if (flagIsDefault(GPU_CLR_PROFILE_OUTPUT)) return;
   std::string path = AddPidToPath(GPU_CLR_PROFILE_OUTPUT);
-  // Detect extension: use binary Perfetto format for .pftrace, JSON otherwise.
   const char* ext = strrchr(path.c_str(), '.');
-  if (ext && strcmp(ext, ".pftrace") == 0)
+  bool pftrace_mode = (ext && strcmp(ext, ".pftrace") == 0);
+
+  if (pftrace_mode && g_pf_file) {
+    // Streaming pftrace mode: the chunk thread already wrote all event packets.
+    // Flush memory lifetime slices and close the file.
+    PfFlushAllocSlices();
+    fclose(g_pf_file);
+    g_pf_file = nullptr;
+  } else if (pftrace_mode) {
+    // Streaming was requested but file wasn't opened (e.g. open failed at init).
+    // Fall back to batch write.
     WriteProtoTraceImpl(path.c_str());
-  else
+  } else {
+    // JSON mode: always buffered batch write.
     WriteJsonTraceImpl(path.c_str());
+  }
 }
 
 struct HipClrProfilerFinalizer {
@@ -1757,7 +2409,7 @@ struct HipClrProfilerFinalizer {
 }  // anonymous namespace
 
 // ================================================================================================
-void HipCaptureKernelArgsExt(HipGpuActivityExt* gact, hipFunction_t func, void** args) {
+void HipCaptureKernelArgsExt(hipGpuActivityExt* gact, hipFunction_t func, void** args) {
   if (!gact || !func || !args) return;
 
   amd::Kernel* kernel = hip::asKernel(func);
@@ -1793,7 +2445,7 @@ void HipCaptureKernelArgsExt(HipGpuActivityExt* gact, hipFunction_t func, void**
 }
 
 // ================================================================================================
-void HipCaptureKernelArgsPackedExt(HipGpuActivityExt* gact, hipFunction_t func,
+void HipCaptureKernelArgsPackedExt(hipGpuActivityExt* gact, hipFunction_t func,
                                    const void* kernargs, size_t kernargs_size) {
   if (!gact || !func || !kernargs || kernargs_size == 0) {
     return;
@@ -1912,7 +2564,7 @@ void HipCaptureGraphNodeArgsExt(HipGraphNodeInfoExt* info, hipFunction_t func, v
 // Called from each *Layer wrapper — mirrors reference GetActiveRecord().
 // Allocates a record slot, writes slot index into correlation_id TLS so the
 // GPU command that follows inherits it, stamps start_ns, returns the record.
-HipApiRecordExt* HipGetActiveRecordExt(uint32_t api_id) {
+hipApiRecordExt* HipGetActiveRecordExt(uint32_t api_id) {
   size_t slot = g_rec_counter.fetch_add(1, std::memory_order_relaxed);
   size_t idx  = slot / kChunkSize;
 
@@ -1920,16 +2572,18 @@ HipApiRecordExt* HipGetActiveRecordExt(uint32_t api_id) {
     std::lock_guard<std::mutex> lk(g_alloc_mtx);
     if (idx == g_records.size()) {
       assert(idx < kMaxChunks && "HIP profiler record capacity exhausted (kMaxChunks reached)");
-      if (idx < kMaxChunks)
+      if (idx < kMaxChunks) {
         g_records.push_back(AllocChunk());
-      else
+      } else {
         idx = kMaxChunks - 1;  // clamp: slots alias but g_records stays race-free
+      }
     }
   }
 
-  HipApiRecordExt* rec = &g_records[idx][slot % kChunkSize];
+  hipApiRecordExt* rec = &g_records[idx][slot % kChunkSize];
   rec->api_name    = (api_id < kHipApiNamesCountExt) ? kHipApiNamesExt[api_id] : "unknown";
   rec->_flags_u64  = 0;
+  rec->chunk_id    = g_next_chunk_id.fetch_add(1, std::memory_order_relaxed);
 #if defined(_WIN32)
   static thread_local uint64_t cached_tid = static_cast<uint64_t>(GetCurrentThreadId());
   rec->thread_id   = cached_tid;
@@ -2000,6 +2654,34 @@ void HipProfilerInitExt() {
   if (flagIsDefault(GPU_CLR_PROFILE_OUTPUT)) return;
 
   EnsureCallbackAndWrappers();
+
+  // For .pftrace output, register the internal streaming chunk callback.
+  // Records are written incrementally as GPU activity completes; at exit
+  // ProfilerAtExit flushes memory lifetime slices and closes the file.
+  // For .json output (and all other extensions) buffered mode is used.
+  {
+    // Replicate AddPidToPath inline (the helper is static inside the anon namespace).
+    std::string raw_path = GPU_CLR_PROFILE_OUTPUT;
+    std::string pid_str  = "_" + std::to_string(amd::Os::getProcessId());
+    auto dot = raw_path.rfind('.');
+    std::string path = (dot == std::string::npos)
+                       ? raw_path + pid_str
+                       : raw_path.substr(0, dot) + pid_str + raw_path.substr(dot);
+    const char* ext = strrchr(path.c_str(), '.');
+    if (ext && strcmp(ext, ".pftrace") == 0) {
+      FILE* f = fopen(path.c_str(), "wb");
+      if (f) {
+        g_pf_file = f;
+        // Start the delivery thread — ChunkDeliveryThread calls PfChunkCallback
+        // directly when g_pf_file is set, no client registration needed.
+        g_chunk_thread_stop = false;
+        g_chunk_thread      = std::thread(ChunkDeliveryThread);
+      } else {
+        fprintf(stderr, "[profiler] warning: cannot open pftrace file %s — "
+                        "falling back to batch write at exit\n", path.c_str());
+      }
+    }
+  }
 }
 
 // ================================================================================================
@@ -2051,7 +2733,7 @@ hipError_t hipProfilerDisableExt(uint64_t* end_record_id) {
 }
 
 // ================================================================================================
-hipError_t hipProfilerGetRecordsExt(const HipApiRecordExt* const** chunks,
+hipError_t hipProfilerGetRecordsExt(const hipApiRecordExt* const** chunks,
                                      size_t* chunk_count,
                                      size_t* chunk_size,
                                      size_t* total_count) {
@@ -2066,10 +2748,28 @@ hipError_t hipProfilerGetRecordsExt(const HipApiRecordExt* const** chunks,
     total   = g_rec_counter.load(std::memory_order_relaxed);
   }
 
-  *chunks      = reinterpret_cast<const HipApiRecordExt* const*>(g_records.data());
+  *chunks      = reinterpret_cast<const hipApiRecordExt* const*>(g_records.data());
   *chunk_count = nchunks;
   *chunk_size  = kChunkSize;
   *total_count = total;
+  return hipSuccess;
+}
+
+// ================================================================================================
+hipError_t hipProfilerRegisterChunkCallbackExt(hipProfilerChunkCallback cb, void* user_data) {
+  if (!cb) return hipErrorInvalidValue;
+  bool first;
+  {
+    std::lock_guard<std::mutex> lk(g_chunk_clients_mtx);
+    first = g_chunk_clients.empty();
+    g_chunk_clients.push_back({cb, user_data});
+  }
+  // Start the delivery thread only if not already running (pftrace env-var
+  // path may have started it before any external client registered).
+  if (!g_chunk_thread.joinable()) {
+    g_chunk_thread_stop = false;
+    g_chunk_thread      = std::thread(ChunkDeliveryThread);
+  }
   return hipSuccess;
 }
 

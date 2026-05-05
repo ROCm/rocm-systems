@@ -25,7 +25,7 @@ uint64_t HipProfilerEnableExt();
 uint64_t HipProfilerDisableExt();
 
 // Called from each *Layer wrapper.
-HipApiRecordExt* HipGetActiveRecordExt(uint32_t api_id);
+hipApiRecordExt* HipGetActiveRecordExt(uint32_t api_id);
 
 // Declared in hip_clr_dispatch_wrappers.cpp; called by Enable/Disable/Init
 struct HipDispatchTable;
@@ -47,12 +47,12 @@ extern const size_t      kHipApiNamesCountExt;
 // {uint32_t size; uint8_t data[size];} into a heap-allocated blob,
 // and stores kernel_args / kernel_args_size directly on the GPU activity struct.
 // func must be a resolved hipFunction_t.
-void HipCaptureKernelArgsExt(HipGpuActivityExt* gact, hipFunction_t func, void** args);
+void HipCaptureKernelArgsExt(hipGpuActivityExt* gact, hipFunction_t func, void** args);
 
 // Capture kernel arguments from a pre-packed kernargs buffer (the `extra` path).
 // kernargs points to the contiguous ABI buffer; kernargs_size is its byte length.
 // Uses desc.offset_ from the kernel signature to locate each argument.
-void HipCaptureKernelArgsPackedExt(HipGpuActivityExt* gact, hipFunction_t func,
+void HipCaptureKernelArgsPackedExt(hipGpuActivityExt* gact, hipFunction_t func,
                                    const void* kernargs, size_t kernargs_size);
 
 // ============================================================
@@ -61,12 +61,12 @@ void HipCaptureKernelArgsPackedExt(HipGpuActivityExt* gact, hipFunction_t func,
 // per-node dims and kernel args for graph launch spill nodes.
 //
 // All per-op fields (op, copy_kind, grid/block, kernel_args, src/dst, bytes)
-// live directly in gpu (HipGpuActivityExt).  gpu.kernel_name is a stable
+// live directly in gpu (hipGpuActivityExt).  gpu.kernel_name is a stable
 // const char* into the g_kernel_names interning table (non-owning).
 // gpu.kernel_args is an owned blob freed by the destructor.
 // ============================================================
 struct HipGraphNodeInfoExt {
-  HipGpuActivityExt gpu;  // all op-specific fields; gpu.kernel_args is owned
+  hipGpuActivityExt gpu;  // all op-specific fields; gpu.kernel_args is owned
 
   HipGraphNodeInfoExt() : gpu{} {}
   ~HipGraphNodeInfoExt() { delete[] gpu.kernel_args; }
