@@ -27,7 +27,7 @@ sudo rm -rf build
 ### Step 2: Uninstall Previous
 
 ```bash
-sudo rm /opt/amdcuid -rf 2>/dev/null || true
+sudo rm -rf /opt/amdcuid 2>/dev/null || true
 ```
 
 ### Step 3: Configure & Build

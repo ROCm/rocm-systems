@@ -34,8 +34,8 @@ Creates or updates `.claude/project-map.md` — a single source of truth for the
 
 | Language | Directory | Purpose |
 |----------|-----------|---------|
-| C/C++ | `lib/src/cuid/` | Core library implementation |
-| C/C++ headers | `lib/include/cuid/` | Public API headers |
+| C/C++ | `lib/src/` | Core library implementation |
+| C/C++ headers | `lib/include/` | Public API headers |
 
 ## Build & Packaging
 
@@ -65,7 +65,7 @@ Creates or updates `.claude/project-map.md` — a single source of truth for the
 | `cli/amdcuid_tool.cc` | CLI behavior regressions, output format |
 | `daemon/amdcuid_daemon.cc` | Daemon stability, API surface |
 | `lib/src/cuid.cc` | Core C library — correctness |
-| `include/cuid/amd_cuid.h` | Public API — cascades everywhere |
+| `lib/include/amd_cuid.h` | Public API — cascades everywhere |
 | `CMakeLists.txt` | Build system, packaging, install targets |
 
 ## API Cascade Path
