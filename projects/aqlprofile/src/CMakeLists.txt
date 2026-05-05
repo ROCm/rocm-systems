@@ -30,6 +30,9 @@ set ( LIB_SRC
   ${LIB_DIR}/core/architectures/gfx11_architecture.cpp
   ${LIB_DIR}/core/architectures/gfx12_architecture.cpp
   ${LIB_DIR}/core/architectures/mi450_architecture.cpp
+  ${LIB_DIR}/pm4/pmc_builder.cpp
+  ${LIB_DIR}/pm4/spm_builder.cpp
+  ${LIB_DIR}/pm4/sqtt_builder.cpp
   ${LIB_DIR}/pm4/gfx9_primitives_provider.cpp
   ${LIB_DIR}/pm4/gfx10_primitives_provider.cpp
   ${LIB_DIR}/pm4/gfx11_primitives_provider.cpp
