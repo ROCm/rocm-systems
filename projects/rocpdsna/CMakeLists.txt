@@ -126,7 +126,9 @@ endforeach()
 
 target_include_directories(
     rocpdsna-objects
-    PUBLIC $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}/include>
+    PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}/include>
+        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
 
 # ------------------------------------------------------------ #
@@ -270,7 +272,14 @@ install(
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
     ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
-    PUBLIC_HEADER DESTINATION ${CMAKE_INSTALL_INCLUDEDIR} COMPONENT rocpdsna
+)
+
+install(
+    DIRECTORY ${CMAKE_BINARY_DIR}/include/${PACKAGE_NAME}
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+    COMPONENT rocpdsna
+    FILES_MATCHING
+    PATTERN "*.hpp"
 )
 
 install(
