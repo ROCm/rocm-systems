@@ -686,8 +686,7 @@ async_copy_handler(hsa_signal_value_t, void* arg)
         std::tie(orig_amd_signal->start_ts, orig_amd_signal->end_ts) =
             std::tie(rocp_amd_signal->start_ts, rocp_amd_signal->end_ts);
 
-        // Move to ROCP_TRACE when rebasing
-        ROCP_INFO << "Decrementing Signal: " << std::hex << _data->orig_signal.handle << std::dec;
+        ROCP_TRACE << "Decrementing Signal: " << std::hex << _data->orig_signal.handle << std::dec;
         get_core_table()->hsa_signal_subtract_screlease_fn(_data->orig_signal, 1);
     }
 
@@ -932,8 +931,6 @@ async_batch_copy_impl(const hsa_amd_memory_copy_op_t* copy_ops,
     if(copy_ops == nullptr || num_copy_ops == 0)
         return _dispatch(copy_ops, num_copy_ops, num_dep_signals, dep_signals);
 
-    auto _wrapped_copy_ops =
-        std::vector<hsa_amd_memory_copy_op_t>{copy_ops, copy_ops + num_copy_ops};
     auto _intercept_data  = std::vector<intercept_data_t>{};
     auto _intercept_locks = std::vector<intercept_lock_t>{};
 
@@ -961,6 +958,9 @@ async_batch_copy_impl(const hsa_amd_memory_copy_op_t* copy_ops,
 
     if(_intercept_data.empty())
         return _dispatch(copy_ops, num_copy_ops, num_dep_signals, dep_signals);
+
+    auto _wrapped_copy_ops =
+        std::vector<hsa_amd_memory_copy_op_t>{copy_ops, copy_ops + num_copy_ops};
 
     auto _cleanup = [&_intercept_data](bool _decrement_active_signals,
                                        bool _decrement_corr_ref_count) {
@@ -1005,9 +1005,9 @@ async_batch_copy_impl(const hsa_amd_memory_copy_op_t* copy_ops,
         _data->orig_signal = _completion_signal;
         _completion_signal = _data->rocp_signal;
 
-        ROCP_INFO << "Memcpy Batch Original Signal " << std::hex << _data->orig_signal.handle
-                  << std::dec << ": " << _original_value << " | Replacement Signal: " << std::hex
-                  << _completion_signal.handle << std::dec << ": 1";
+        ROCP_TRACE << "Memcpy Batch Original Signal " << std::hex << _data->orig_signal.handle
+                   << std::dec << ": " << _original_value << " | Replacement Signal: " << std::hex
+                   << _completion_signal.handle << std::dec << ": 1";
 
         CHECK_NOTNULL(get_active_signals())->fetch_add(1);
     }
@@ -1122,9 +1122,9 @@ async_copy_impl(Args... args)
     _data->orig_signal = _completion_signal;
     _completion_signal = _data->rocp_signal;
 
-    ROCP_INFO << "Memcpy Original Signal " << std::hex << _data->orig_signal.handle << std::dec
-              << ": " << original_value << " | Replacement Signal: " << std::hex
-              << _completion_signal.handle << std::dec << ": 1";
+    ROCP_TRACE << "Memcpy Original Signal " << std::hex << _data->orig_signal.handle << std::dec
+               << ": " << original_value << " | Replacement Signal: " << std::hex
+               << _completion_signal.handle << std::dec << ": 1";
 
     CHECK_NOTNULL(get_active_signals())->fetch_add(1);
 
