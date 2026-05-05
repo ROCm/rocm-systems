@@ -1,7 +1,6 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc. All Rights Reserved.
 //
 // Benchmark for vector_scalar_add kernel dispatch via HSA (ROCR).
-// Measures combined dispatch overhead (synchronous).
 
 #include <benchmark/benchmark.h>
 
@@ -13,7 +12,9 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <new>
 #include <numeric>
+#include <utility>
 #include <vector>
 
 #define STRINGIFY2(x) #x
@@ -30,6 +31,51 @@ const std::filesystem::path g_insts_path = STRINGIFY(DEFAULT_INSTS_PATH);
 
 constexpr std::size_t N = 1024;
 constexpr std::size_t DATA_SIZE = N * sizeof(std::uint32_t);
+
+class HsaBumpAllocator {
+  void* base_ = nullptr;
+  std::size_t size_ = 0;
+  std::size_t offset_ = 0;
+
+ public:
+  HsaBumpAllocator(hsa_amd_memory_pool_t pool, std::size_t size) : size_(size) {
+    if (hsa_amd_memory_pool_allocate(pool, size, 0, &base_) != HSA_STATUS_SUCCESS) {
+      throw std::bad_alloc();
+    }
+  }
+
+  ~HsaBumpAllocator() {
+    if (base_) hsa_amd_memory_pool_free(base_);
+  }
+
+  HsaBumpAllocator(const HsaBumpAllocator&) = delete;
+  HsaBumpAllocator& operator=(const HsaBumpAllocator&) = delete;
+
+  HsaBumpAllocator(HsaBumpAllocator&& other) noexcept
+      : base_(std::exchange(other.base_, nullptr)),
+        size_(std::exchange(other.size_, 0)),
+        offset_(std::exchange(other.offset_, 0)) {}
+
+  HsaBumpAllocator& operator=(HsaBumpAllocator&& other) noexcept {
+    if (this != &other) {
+      if (base_) hsa_amd_memory_pool_free(base_);
+      base_ = std::exchange(other.base_, nullptr);
+      size_ = std::exchange(other.size_, 0);
+      offset_ = std::exchange(other.offset_, 0);
+    }
+    return *this;
+  }
+
+  template <typename T> T* allocate(std::size_t count, std::size_t alignment = alignof(T)) {
+    std::size_t aligned = (offset_ + alignment - 1) & ~(alignment - 1);
+    std::size_t new_offset = aligned + count * sizeof(T);
+    if (new_offset > size_) throw std::bad_alloc();
+    offset_ = new_offset;
+    return reinterpret_cast<T*>(static_cast<char*>(base_) + aligned);
+  }
+
+  void reset() { offset_ = 0; }
+};
 
 // Agent discovery: find AIE agents
 hsa_status_t find_aie_agent(hsa_agent_t agent, void* data) {
@@ -134,7 +180,7 @@ std::uint64_t dispatch_packet(void* pdi_buf, void* insts_buf, std::size_t insts_
 
 }  // namespace
 
-static void VectorScalarAddHSANoAlloc(benchmark::State& state) {
+static void VectorScalarAddHSA(benchmark::State& state) {
   // --- Initialize HSA runtime ---
   if (hsa_init() != HSA_STATUS_SUCCESS) {
     state.SkipWithError("hsa_init failed");
@@ -269,7 +315,7 @@ static void VectorScalarAddHSANoAlloc(benchmark::State& state) {
   hsa_shut_down();
 }
 
-static void VectorScalarAddHSA(benchmark::State& state) {
+static void VectorScalarAddHSAKernargAlloc(benchmark::State& state) {
   // --- Initialize HSA runtime ---
   if (hsa_init() != HSA_STATUS_SUCCESS) {
     state.SkipWithError("hsa_init failed");
@@ -360,18 +406,16 @@ static void VectorScalarAddHSA(benchmark::State& state) {
     std::fill_n(outputs[i], N, 0);
   }
 
+  // --- Bump allocator for kernargs ---
+  HsaBumpAllocator kernarg_alloc(kernarg_pool, num_dispatches * 4 * sizeof(uint64_t));
+
   // --- Benchmark loop: dispatch is synchronous ---
   std::vector<uint64_t*> kernargs_vec(num_dispatches, nullptr);
   for (auto _ : state) {
+    kernarg_alloc.reset();
     std::uint64_t last_wr_idx = 0;
     for (std::int32_t i = 0; i < num_dispatches; ++i) {
-      // Allocate kernargs from kernarg_memory
-      if (hsa_amd_memory_pool_allocate(kernarg_pool, 4 * sizeof(uint64_t), 0,
-                                       reinterpret_cast<void**>(&kernargs_vec[i])) !=
-          HSA_STATUS_SUCCESS) {
-        state.SkipWithError("Failed to allocate payload buffer");
-        return;
-      }
+      kernargs_vec[i] = kernarg_alloc.allocate<uint64_t>(4);
       kernargs_vec[i][0] = reinterpret_cast<uint64_t>(inputs[i]);
       kernargs_vec[i][1] = reinterpret_cast<uint64_t>(outputs[i]);
       kernargs_vec[i][2] = DATA_SIZE;  // input size
@@ -384,11 +428,6 @@ static void VectorScalarAddHSA(benchmark::State& state) {
 
     // Ring doorbell
     hsa_signal_store_screlease(queue->doorbell_signal, last_wr_idx);
-
-    // Free after dispatch to include allocation overhead in the benchmark
-    for (std::int32_t i = 0; i < num_dispatches; ++i) {
-      hsa_amd_memory_pool_free(kernargs_vec[i]);
-    }
 
     benchmark::ClobberMemory();
   }
@@ -404,8 +443,8 @@ static void VectorScalarAddHSA(benchmark::State& state) {
   hsa_shut_down();
 }
 
-BENCHMARK(VectorScalarAddHSANoAlloc)
+BENCHMARK(VectorScalarAddHSA)->Unit(benchmark::kMicrosecond)->RangeMultiplier(2)->Range(1, 32);
+BENCHMARK(VectorScalarAddHSAKernargAlloc)
     ->Unit(benchmark::kMicrosecond)
     ->RangeMultiplier(2)
     ->Range(1, 32);
-BENCHMARK(VectorScalarAddHSA)->Unit(benchmark::kMicrosecond)->RangeMultiplier(2)->Range(1, 32);
