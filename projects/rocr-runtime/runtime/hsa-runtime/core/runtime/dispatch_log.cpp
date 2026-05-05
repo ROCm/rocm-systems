@@ -149,10 +149,45 @@ struct queue_drain_state {
   uint32_t ring_mask    = 0;     // ring_records - 1, for slot indexing
 
   // Host-managed monotonic record cursor. Mutated only under drain_mu.
-  // Slot index is (next_idx & ring_mask). Sentinel-scan: drainer advances
-  // for every slot whose record_type is non-zero and clears the sentinel
-  // after consume so a wraparound rewrite is re-detectable.
+  // Slot index is (next_idx & ring_mask).
+  //
+  // Two drain modes select on whether wptr_ptr below is non-null:
+  //   - WPTR-bound scan (preferred, MINOR>=20): next_idx tracks the
+  //     absolute count of records the host has emitted. Each pass reads
+  //     fw_wptr atomically and iterates [next_idx, fw_wptr). After
+  //     emitting all records, next_idx is set to fw_wptr and the same
+  //     value is published to *rptr_ptr for FW backpressure visibility
+  //     (FW does not currently read it but publishing keeps the door
+  //     open for future FW that does).
+  //   - Sentinel scan (fallback, older kernel/FW): next_idx still
+  //     advances per non-zero slot. record_type==0 marks empty; the
+  //     drainer clears the sentinel post-emit so wraparound rewrites
+  //     are re-detectable.
   uint64_t next_idx = 0;
+
+  // Phase-2 host-VA pointer set. Populated by
+  // enable_dispatch_log_for_queue_locked from
+  // AqlQueue::GetDispatchLogPointers when the running kernel supports
+  // KFD_IOC_PROFILER_DISPATCH_LOG (MINOR>=20) and the new sub-op
+  // succeeded. All three are nullptr in fallback mode.
+  //
+  // Memory model:
+  //   - wptr_ptr: FW writes per-record (post-increment record count) with
+  //     release-atomicity equivalent (FW spins on TC outstanding tag
+  //     count after the record body write before the wptr publish, per
+  //     f32_mec.uc @SubAqlProfBufWriteRecord). Host reads with acquire
+  //     to establish happens-before with the record body bytes.
+  //   - rptr_ptr: host writes after consume with release. FW reads on
+  //     queue connect (currently informational; backpressure not
+  //     enforced).
+  //   - signal_ptr: FW writes per-record (same value as wptr_ptr — see
+  //     FW Q3 in 2026-05-01-mec-firmware-dispatch-log-interface.md).
+  //     Host can use as an HSA signal payload for hsa_signal_wait_value_geq
+  //     or sleep-then-poll. Currently unused by the drain loop (we busy-
+  //     poll wptr_ptr instead) but kept for future signal-based wait.
+  volatile uint64_t* wptr_ptr   = nullptr;
+  volatile uint64_t* rptr_ptr   = nullptr;
+  volatile uint64_t* signal_ptr = nullptr;
 
   // Per-queue drain mutex. With one worker per queue this is technically
   // redundant in steady state (the worker is the sole drainer for its
@@ -357,20 +392,103 @@ bool drain_one_queue(queue_drain_state& qs, bool force_emit) {
   // Poisoned (disable in flight) or never-populated.
   if (qs.ring_base == nullptr || qs.ring_records == 0) return false;
 
-  // C9 (stage-2 review): bound each pass to one full ring sweep. The
-  // sentinel-scan loop exits only when it observes record_type == 0 for
-  // the current slot; if FW keeps the ring continuously non-empty, an
-  // unbounded loop here would (under the prior single-shared-drainer
-  // design) starve other queues. With one worker per queue today the
-  // cross-queue starvation argument no longer applies, but the cap is
-  // still useful: it bounds the time between checks of qs.should_stop
-  // (and the helper's own kill-switch check below), so a disable
-  // transition does not have to wait for an unbounded FW write rate
-  // to drain. Capping at ring_records slots (= one full ring sweep)
-  // also preserves forward progress: at any instant FW can have at
-  // most ring_records unconsumed slots, so a full sweep always drains
-  // everything that was visible at pass start. Anything FW writes
-  // during the pass becomes the next pass's work.
+  // ============================================================================
+  // PATH A: WPTR-BOUND SCAN (preferred, KFD MINOR>=20 + new FW)
+  //
+  // FW publishes the post-increment record count to *qs.wptr_ptr per
+  // record (see f32_mec.uc @SubAqlProfBufWriteRecord). Host reads it
+  // atomically with acquire and iterates [qs.next_idx, fw_wptr) — each
+  // slot is read exactly once, no duplicates possible. After consuming,
+  // host publishes its position to *qs.rptr_ptr for FW visibility (FW
+  // does not enforce backpressure today but the publish keeps the door
+  // open).
+  //
+  // Overrun handling: if (fw_wptr - qs.next_idx) > qs.ring_records the
+  // host has fallen behind by more than one ring lap; the older records
+  // were silently overwritten (FW does not stall on full ring). We jump
+  // qs.next_idx forward by the overrun distance and emit a kernel_dispatch_drop
+  // tracepoint so the consumer sees the gap. This is the bounded-progress
+  // analog of the sentinel-scan's pass_budget.
+  // ============================================================================
+  if (qs.wptr_ptr != nullptr) {
+    const uint64_t fw_wptr = __atomic_load_n(qs.wptr_ptr, __ATOMIC_ACQUIRE);
+
+    // Nothing new since last pass. Steady-state cheap exit.
+    if (fw_wptr == qs.next_idx) return false;
+
+    // Overrun detection. If FW lapped us, log a drop event and skip
+    // the unrecoverable region. The records we DO read after the skip
+    // are still valid (they're the most recent fw_wptr - ring_records
+    // records, just with a gap before them).
+    uint64_t start = qs.next_idx;
+    uint64_t end   = fw_wptr;
+    if ((end - start) > qs.ring_records) {
+      const uint64_t lost = (end - start) - qs.ring_records;
+      rocm_trace_emit_hsa_kernel_dispatch_drop(
+          queue_id_to_wire(qs.queue_id), lost);
+      start = end - qs.ring_records;
+    }
+
+    bool any = false;
+    for (uint64_t i = start; i < end; ++i) {
+      // Kill-switch pre-check: bail before reading any record. Safe to
+      // bail here because qs.next_idx still points at the unread head
+      // and the next pass will pick up where we stopped (FW state
+      // unchanged — the wptr-bound scan never mutates the slot).
+      if (!force_emit && rocm_trace_disabled()) {
+        qs.next_idx = i;  // record progress so far
+        if (qs.rptr_ptr) __atomic_store_n(qs.rptr_ptr, i, __ATOMIC_RELEASE);
+        return any;
+      }
+
+      const uint64_t slot = i & qs.ring_mask;
+      auto* rec = reinterpret_cast<mec_dispatch_record_16*>(
+          static_cast<char*>(qs.ring_base) + slot * kSlotStride);
+
+      // FW publish-ordering contract (per f32_mec.uc Q6): record body
+      // is host-visible BEFORE the wptr update we acquire-loaded above.
+      // So all four DWs of this record are coherent. Use relaxed atomics
+      // to suppress UB from non-atomic reads on FW-written memory; the
+      // wptr acquire load above provides the ordering.
+      const uint32_t ts_lo        = __atomic_load_n(&rec->ts_lo,        __ATOMIC_RELAXED);
+      const uint32_t ts_hi        = __atomic_load_n(&rec->ts_hi,        __ATOMIC_RELAXED);
+      const uint32_t rt           = __atomic_load_n(&rec->record_type,  __ATOMIC_RELAXED);
+      const uint32_t dispatch_idx = __atomic_load_n(&rec->dispatch_idx, __ATOMIC_RELAXED);
+      const uint64_t gpu_ts       = (static_cast<uint64_t>(ts_hi) << 32) | ts_lo;
+
+      // No slot mutation in the wptr-bound path: FW will overwrite this
+      // slot when wptr next reaches the same physical slot, and our
+      // wptr-based iteration will read it as a new record at that time.
+      // No sentinel needed because we never re-read the same wptr index.
+
+      rocm_trace_emit_hsa_kernel_dispatch_record(
+          queue_id_to_wire(qs.queue_id), dispatch_idx, gpu_ts,
+          static_cast<uint8_t>(rt), force_emit);
+
+      any = true;
+    }
+
+    qs.next_idx = end;
+    // Publish our consumer position back to FW (informational; FW does
+    // not enforce backpressure today but reads on connect/dequeue).
+    if (qs.rptr_ptr) __atomic_store_n(qs.rptr_ptr, end, __ATOMIC_RELEASE);
+    return any;
+  }
+
+  // ============================================================================
+  // PATH B: SENTINEL-SCAN FALLBACK (older kernel/FW without host-VA wptr)
+  //
+  // FW writes record_type ∈ {1, 2} into each slot it produces; host
+  // pre-zeroes the buffer at allocation, so a slot whose record_type
+  // is 0 is "empty". Drainer walks slots from qs.next_idx, atomic-stores
+  // record_type=0 after consume so wraparound rewrites are re-detectable.
+  //
+  // KNOWN ISSUE: FW slot reuse can cause the same (dispatch_idx,
+  // record_type) pair to be observed twice in a single session under
+  // burst patterns (capture rate observed at 250-316% vs expected 200%).
+  // The wptr-bound path above is immune to this; this fallback is only
+  // used on older kernels that don't ship the new MQD slots.
+  // ============================================================================
   const uint64_t pass_budget = qs.ring_records;
   uint64_t pass_consumed = 0;
 
@@ -748,6 +866,25 @@ void enable_dispatch_log_for_queue_locked(core::Queue* q) {
     qs->ring_records     = record_count;
     qs->ring_mask        = record_count - 1;
     qs->next_idx         = 0;
+
+    // Capture the Phase-2 host-VA pointer set if the new
+    // KFD_IOC_PROFILER_DISPATCH_LOG path is active for this queue.
+    // GetDispatchLogPointers returns NOT_INITIALIZED on older
+    // kernels (MINOR<20) or older libhsakmt (no SetDispatchLog
+    // thunk) — in that case the pointers stay null and the drainer
+    // falls back to sentinel-scan automatically.
+    volatile uint64_t* wptr_p   = nullptr;
+    volatile uint64_t* rptr_p   = nullptr;
+    volatile uint64_t* signal_p = nullptr;
+    hsa_status_t dl_status =
+        aql_queue->GetDispatchLogPointers(&wptr_p, &rptr_p, &signal_p);
+    if (dl_status == HSA_STATUS_SUCCESS) {
+      qs->wptr_ptr   = wptr_p;
+      qs->rptr_ptr   = rptr_p;
+      qs->signal_ptr = signal_p;
+    }
+    // else: legacy sentinel-scan mode; null pointers tell drain_one_queue
+    // to use the fallback scan path.
 
     g_active_drainers[qs->queue_id] = qs;
 
