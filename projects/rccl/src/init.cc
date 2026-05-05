@@ -3405,7 +3405,7 @@ ncclResult_t ncclCommRevoke_impl(ncclComm_t comm, int revokeFlags) {
     goto fail;
   }
 
-  if (comm->destroyFlag || comm->finalizeCalled || comm->revokedFlag) {
+  if (comm->destroyFlag || comm->finalizeCalled || __atomic_load_n(&comm->revokedFlag, __ATOMIC_ACQUIRE)) {
     WARN("Comm %p is already in a state of destruction, finalization, or revocation", comm);
     ret = ncclInvalidUsage;
     goto fail;
