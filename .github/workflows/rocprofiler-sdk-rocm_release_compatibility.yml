@@ -65,10 +65,6 @@ jobs:
     - name: Install Git
       timeout-minutes: 25
       run: |
-        sed -i \
-          -e 's|http://archive.ubuntu.com/ubuntu|http://azure.archive.ubuntu.com/ubuntu|g' \
-          -e 's|http://security.ubuntu.com/ubuntu|http://azure.archive.ubuntu.com/ubuntu|g' \
-          /etc/apt/sources.list /etc/apt/sources.list.d/*.sources 2>/dev/null || true
         apt-get update
         apt-get install -y git
 
@@ -78,10 +74,6 @@ jobs:
       timeout-minutes: 10
       shell: bash
       run: |
-        sed -i \
-          -e 's|http://archive.ubuntu.com/ubuntu|http://azure.archive.ubuntu.com/ubuntu|g' \
-          -e 's|http://security.ubuntu.com/ubuntu|http://azure.archive.ubuntu.com/ubuntu|g' \
-          /etc/apt/sources.list /etc/apt/sources.list.d/*.sources 2>/dev/null || true
         cd projects/rocprofiler-sdk
         git config --global --add safe.directory '*'
         apt-get update
