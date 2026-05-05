@@ -71,7 +71,7 @@ jobs:
       ROCPROFSYS_KEEP_TEST_OUTPUT: '0'
 
     steps:
-    - uses: actions/checkout@v6
+    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       with:
         sparse-checkout: |
           projects/rocprofiler-systems/
@@ -129,7 +129,7 @@ jobs:
         echo "CMake version: $(cmake --version | head -n 1)"
         echo "Compiler version: $(gcc --version | head -n 1)"
         python3 ./scripts/run-ci.py -B build \
-          --name ${{ github.repository_owner }}-${{ github.ref_name }}-ubuntu-noble-codecov \
+          --name rocprofiler-systems-ubuntu-noble-codecov \
           --build-jobs $(nproc) \
           --site GitHub \
           --coverage \
@@ -158,6 +158,7 @@ jobs:
 
     - name: Generate Coverage Report
       if: always()
+      id: generatereport
       timeout-minutes: 15
       shell: bash
       working-directory: projects/rocprofiler-systems/
@@ -169,57 +170,37 @@ jobs:
           --label all \
           --low-coverage-count 20
 
-    - name: Post Coverage Comment on PR
+        get-md-contents() { cat .codecov/${1}.md; }
+        cat << EOF > .codecov/report.md
+        # Code Coverage Report
+
+        ## All
+        $(get-md-contents all)
+
+        <!-- rocprofiler-systems-coverage -->
+        EOF
+
+        echo 'CODECOVERAGE_REPORT<<EOF' >> $GITHUB_OUTPUT
+        cat .codecov/report.md >> $GITHUB_OUTPUT
+        echo 'EOF' >> $GITHUB_OUTPUT
+
+    - name: Write Code Coverage Comment
       if: github.event_name == 'pull_request'
       timeout-minutes: 5
-      uses: actions/github-script@v6
+      uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
+      env:
+        COMMENT_BODY: |
+          <details>
+          <summary><h2>Code Coverage Report</h2></summary>
+
+          <!-- Keep the empty line above to render markdown properly -->
+          ${{ steps.generatereport.outputs.CODECOVERAGE_REPORT }}
+          </details>
       with:
         github-token: ${{ secrets.GITHUB_TOKEN }}
         script: |
-          const fs = require('fs');
-          const mdPath = 'projects/rocprofiler-systems/.codecov/all.md';
-          const summaryPath = 'projects/rocprofiler-systems/.codecov/all-summary.json';
-          const commentId = '<!-- rocprofiler-systems-coverage -->';
-
-          let body = '';
-          if (fs.existsSync(mdPath)) {
-            const md = fs.readFileSync(mdPath, 'utf8');
-            const summary = JSON.parse(fs.readFileSync(summaryPath, 'utf8'));
-
-            const pct = summary.coverage_pct;
-            const delta = summary.delta_pct || 0;
-            let status = '✅';
-            // Threshold check — report only for now.
-            // To enforce, uncomment the core.setFailed() line below.
-            if (delta < -1.0) {
-              status = '⚠️ Coverage decreased by more than 1%';
-              // core.setFailed(`Coverage regression: ${delta.toFixed(2)}%`);
-            }
-
-            const runUrl = `${process.env.GITHUB_SERVER_URL}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
-            const timestamp = new Date().toISOString().replace('T', ' ').replace(/\.\d+Z/, ' UTC');
-
-            body = [
-              `<details open>`,
-              `<summary><h3>Code Coverage Report ${status}</h3></summary>`,
-              ``,
-              md,
-              ``,
-              `> 🔄 Updated: ${timestamp} | [Workflow run](${runUrl})`,
-              ``,
-              `</details>`,
-              ``,
-              commentId,
-            ].join('\n');
-          } else {
-            body = [
-              `### Code Coverage Report`,
-              ``,
-              `⚠️ Coverage report was not generated. Check the workflow logs.`,
-              ``,
-              commentId,
-            ].join('\n');
-          }
+          const commentIdentifier = '<!-- rocprofiler-systems-coverage -->';
+          const commentBody = process.env.COMMENT_BODY;
 
           const { data: comments } = await github.rest.issues.listComments({
             owner: context.repo.owner,
@@ -227,20 +208,22 @@ jobs:
             issue_number: context.payload.pull_request.number,
           });
 
-          const existing = comments.find(c => c.body.includes(commentId));
+          const existingComment = comments.find(comment => comment.body.includes(commentIdentifier));
 
-          if (existing) {
+          if (existingComment) {
             await github.rest.issues.updateComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              comment_id: existing.id,
-              body: body,
+              comment_id: existingComment.id,
+              body: commentBody,
             });
+            core.info(`Updated comment with ID: ${existingComment.id}`);
           } else {
             await github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: context.payload.pull_request.number,
-              body: body,
+              body: commentBody,
             });
+            core.info('Created a new comment.');
           }
