@@ -22,6 +22,26 @@
 
 from __future__ import absolute_import
 
+# Export diagnostic utilities for test error handling
+from .diagnostics import (
+    ErrorCategory,
+    assert_with_diagnostic,
+    check_test_prerequisites,
+    log_verbose,
+    log_info,
+    DiagnosticHelper,
+)
+
+__all__ = [
+    'collapse_dict_list',
+    'ErrorCategory',
+    'assert_with_diagnostic',
+    'check_test_prerequisites',
+    'log_verbose',
+    'log_info',
+    'DiagnosticHelper',
+]
+
 
 def collapse_dict_list(data, key="rocprofiler-sdk-tool"):
     """Collapse a dictionary entry list into a single mapped value"""

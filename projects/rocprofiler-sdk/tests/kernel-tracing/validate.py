@@ -24,6 +24,12 @@
 
 import sys
 import pytest
+from pytest_utils import (
+    ErrorCategory,
+    assert_with_diagnostic,
+    check_test_prerequisites,
+    log_verbose,
+)
 
 test_api_traces = [
     "hsa_api_traces",
@@ -36,10 +42,36 @@ test_api_traces = [
 
 # helper function
 def node_exists(name, data, min_len=1):
-    assert name in data
-    assert data[name] is not None
+    assert_with_diagnostic(
+        name in data,
+        ErrorCategory.DATA,
+        f"Required field '{name}' missing in JSON output",
+        context={"available_keys": list(data.keys())[:10]},
+        suggestions=[
+            "Verify profiling tool generated complete output",
+            "Check if tool was terminated prematurely",
+            f"Expected field: {name}"
+        ]
+    )
+    assert_with_diagnostic(
+        data[name] is not None,
+        ErrorCategory.DATA,
+        f"Field '{name}' is null",
+        context={"field": name},
+        suggestions=["Check profiler configuration", "Verify trace collection was active"]
+    )
     if isinstance(data[name], (list, tuple, dict, set)):
-        assert len(data[name]) >= min_len
+        assert_with_diagnostic(
+            len(data[name]) >= min_len,
+            ErrorCategory.DATA,
+            f"Field '{name}' has insufficient data",
+            context={"expected_min": min_len, "actual": len(data[name]), "field": name},
+            suggestions=[
+                "Verify test workload executed properly",
+                "Check if profiler captured events",
+                f"Minimum expected: {min_len}, got: {len(data[name])}"
+            ]
+        )
 
 
 def test_data_structure(input_data):
@@ -106,6 +138,7 @@ def test_size_entries(input_data):
 
 
 def test_timestamps(input_data):
+    log_verbose("Validating timestamp consistency and ordering")
     data = input_data
     sdk_data = data["rocprofiler-sdk-json-tool"]
 
@@ -119,34 +152,120 @@ def test_timestamps(input_data):
                 cb_start[cid] = itr["timestamp"]
             elif phase == 2:
                 cb_end[cid] = itr["timestamp"]
-                assert cb_start[cid] <= itr["timestamp"]
+                assert_with_diagnostic(
+                    cb_start[cid] <= itr["timestamp"],
+                    ErrorCategory.DATA,
+                    "Timestamp ordering violation: end before start",
+                    context={
+                        "correlation_id": cid,
+                        "start_ts": cb_start[cid],
+                        "end_ts": itr["timestamp"],
+                        "trace_type": titr
+                    },
+                    suggestions=[
+                        "Clock synchronization issue detected",
+                        "Check if system time jumped during test",
+                        "Verify TSC (timestamp counter) is stable"
+                    ]
+                )
             else:
-                assert phase == 1 or phase == 2
+                assert_with_diagnostic(
+                    phase == 1 or phase == 2,
+                    ErrorCategory.DATA,
+                    f"Invalid phase value in callback record",
+                    context={"phase": phase, "correlation_id": cid, "trace_type": titr},
+                    suggestions=["Data corruption or API change detected"]
+                )
 
         for itr in sdk_data["buffer_records"][titr]:
-            assert itr["start_timestamp"] <= itr["end_timestamp"]
+            assert_with_diagnostic(
+                itr["start_timestamp"] <= itr["end_timestamp"],
+                ErrorCategory.DATA,
+                "Buffer record: end timestamp before start timestamp",
+                context={
+                    "start": itr["start_timestamp"],
+                    "end": itr["end_timestamp"],
+                    "trace_type": titr
+                },
+                suggestions=["Clock issue or data corruption"]
+            )
 
     for titr in ["kernel_dispatch", "memory_copies"]:
         for itr in sdk_data["buffer_records"][titr]:
-            assert itr["start_timestamp"] < itr["end_timestamp"], f"[{titr}] {itr}"
-            assert itr["correlation_id"]["internal"] > 0, f"[{titr}] {itr}"
-            assert itr["correlation_id"]["external"] > 0, f"[{titr}] {itr}"
-            assert (
-                sdk_data["metadata"]["init_time"] < itr["start_timestamp"]
-            ), f"[{titr}] {itr}"
-            assert (
-                sdk_data["metadata"]["init_time"] < itr["end_timestamp"]
-            ), f"[{titr}] {itr}"
-            assert (
-                sdk_data["metadata"]["fini_time"] > itr["start_timestamp"]
-            ), f"[{titr}] {itr}"
-            assert (
-                sdk_data["metadata"]["fini_time"] > itr["end_timestamp"]
-            ), f"[{titr}] {itr}"
+            assert_with_diagnostic(
+                itr["start_timestamp"] < itr["end_timestamp"],
+                ErrorCategory.DATA,
+                f"[{titr}] Zero-duration or negative duration event",
+                context={"event": itr},
+                suggestions=[
+                    "Check if event actually executed",
+                    "Verify timestamp resolution is sufficient"
+                ]
+            )
+            assert_with_diagnostic(
+                itr["correlation_id"]["internal"] > 0,
+                ErrorCategory.DATA,
+                f"[{titr}] Invalid internal correlation ID (must be > 0)",
+                context={"correlation_id": itr["correlation_id"]["internal"], "event": titr},
+                suggestions=["Profiler initialization issue or data corruption"]
+            )
+            assert_with_diagnostic(
+                itr["correlation_id"]["external"] > 0,
+                ErrorCategory.DATA,
+                f"[{titr}] Invalid external correlation ID (must be > 0)",
+                context={"correlation_id": itr["correlation_id"]["external"], "event": titr},
+                suggestions=["Thread ID tracking failure"]
+            )
+            assert_with_diagnostic(
+                sdk_data["metadata"]["init_time"] < itr["start_timestamp"],
+                ErrorCategory.DATA,
+                f"[{titr}] Event timestamp before profiler initialization",
+                context={
+                    "init_time": sdk_data["metadata"]["init_time"],
+                    "event_start": itr["start_timestamp"],
+                    "event": titr
+                },
+                suggestions=["Clock synchronization issue or init time capture failed"]
+            )
+            assert_with_diagnostic(
+                sdk_data["metadata"]["init_time"] < itr["end_timestamp"],
+                ErrorCategory.DATA,
+                f"[{titr}] Event end timestamp before profiler initialization",
+                context={"event": titr},
+                suggestions=["Timestamp ordering issue"]
+            )
+            assert_with_diagnostic(
+                sdk_data["metadata"]["fini_time"] > itr["start_timestamp"],
+                ErrorCategory.DATA,
+                f"[{titr}] Event started after profiler finalization",
+                context={
+                    "fini_time": sdk_data["metadata"]["fini_time"],
+                    "event_start": itr["start_timestamp"],
+                    "event": titr
+                },
+                suggestions=["Late event capture or incorrect finalization time"]
+            )
+            assert_with_diagnostic(
+                sdk_data["metadata"]["fini_time"] > itr["end_timestamp"],
+                ErrorCategory.DATA,
+                f"[{titr}] Event ended after profiler finalization",
+                context={"event": titr},
+                suggestions=["Event may have been truncated or not fully captured"]
+            )
 
             api_start = cb_start[itr["correlation_id"]["internal"]]
             # api_end = cb_end[itr["correlation_id"]["internal"]]
-            assert api_start < itr["start_timestamp"], f"[{titr}] {itr}"
+            assert_with_diagnostic(
+                api_start < itr["start_timestamp"],
+                ErrorCategory.DATA,
+                f"[{titr}] Async operation started before API call",
+                context={
+                    "api_start": api_start,
+                    "async_start": itr["start_timestamp"],
+                    "correlation_id": itr["correlation_id"]["internal"]
+                },
+                suggestions=["Timestamp correlation issue or clock skew"]
+            )
             # assert api_end <= itr["end_timestamp"], f"[{titr}] {itr}"
 
 

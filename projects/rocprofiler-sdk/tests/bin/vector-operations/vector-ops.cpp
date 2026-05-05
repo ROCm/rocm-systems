@@ -32,6 +32,7 @@
 #include <vector>
 
 #include "common/defines.hpp"
+#include "common/hip_diagnostics.hpp"
 
 #define HIP_API_CALL(CALL)                                                                         \
     {                                                                                              \
@@ -279,6 +280,9 @@ run(int NUM_QUEUE, int DEVICE_ID)
 int
 main(int argc, char** argv)
 {
+    // Validate GPU runtime before test execution
+    validate_hip_runtime("vector-operations");
+
     int stream_count = 8;
     int device_count = 0;
     HIP_API_CALL(hipGetDeviceCount(&device_count));

@@ -24,6 +24,7 @@
 
 import sys
 import pytest
+from pytest_utils import ErrorCategory, assert_with_diagnostic, log_verbose
 
 test_api_traces = [
     "hsa_api_traces",
@@ -36,10 +37,37 @@ test_api_traces = [
 
 # helper function
 def node_exists(name, data, min_len=1):
-    assert name in data
-    assert data[name] is not None
+    assert_with_diagnostic(
+        name in data,
+        ErrorCategory.DATA,
+        f"Required field '{name}' missing in async copy tracing data",
+        context={"available_keys": list(data.keys())[:10]},
+        suggestions=["Verify memory copy profiling was enabled", "Check trace output completeness"]
+    )
+    assert_with_diagnostic(
+        data[name] is not None,
+        ErrorCategory.DATA,
+        f"Field '{name}' is null in async copy trace",
+        context={"field": name},
+        suggestions=["Check profiler configuration for memory copy tracking"]
+    )
     if isinstance(data[name], (list, tuple, dict, set)):
-        assert len(data[name]) >= min_len, f"{name}:\n{data}"
+        assert_with_diagnostic(
+            len(data[name]) >= min_len,
+            ErrorCategory.DATA,
+            f"Insufficient async copy data in field '{name}'",
+            context={
+                "field": name,
+                "expected_min": min_len,
+                "actual": len(data[name]),
+                "data_preview": str(data)[:200]
+            },
+            suggestions=[
+                "Verify test performed memory copies",
+                "Check if async copy tracking was active",
+                f"Expected at least {min_len} entries"
+            ]
+        )
 
 
 def get_operation(record, kind_name, op_name=None):
@@ -83,10 +111,18 @@ def groupby_corr_id(trace_item, op_id=None):
 
         corr_id = x.correlation_id["internal"]
 
-        if corr_id in ret.keys():
-            assert False, f"Duplicate internal corr_id {corr_id}"
-        else:
-            ret[corr_id] = x
+        assert_with_diagnostic(
+            corr_id not in ret.keys(),
+            ErrorCategory.DATA,
+            f"Duplicate internal correlation ID detected",
+            context={"correlation_id": corr_id, "operation": op_id},
+            suggestions=[
+                "Correlation ID uniqueness violated - potential profiler bug",
+                "Check if multiple events are incorrectly sharing same ID",
+                "This indicates data corruption or tracking issue"
+            ]
+        )
+        ret[corr_id] = x
 
     return dotdict(ret)
 

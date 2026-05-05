@@ -22,6 +22,30 @@
 
 #pragma once
 
+#include <cstdlib>
+#include <sstream>
+
+// Error category tags for quick diagnosis
+#define ERROR_TAG_SETUP "[SETUP] "
+#define ERROR_TAG_PERMISSIONS "[PERMISSIONS] "
+#define ERROR_TAG_INFRASTRUCTURE "[INFRASTRUCTURE] "
+#define ERROR_TAG_DATA "[DATA] "
+
+// Check if running in CI environment
+inline bool is_ci_environment() {
+    return std::getenv("CI") != nullptr ||
+           std::getenv("CONTINUOUS_INTEGRATION") != nullptr ||
+           std::getenv("JENKINS_HOME") != nullptr ||
+           std::getenv("GITLAB_CI") != nullptr;
+}
+
+// Determine if verbose logging is enabled
+inline bool is_verbose_logging() {
+    const char* level = std::getenv("ROCPROFILER_TEST_LOG_LEVEL");
+    if(level != nullptr && std::string(level) == "VERBOSE") return true;
+    return !is_ci_environment();
+}
+
 #define ROCPROFILER_CALL(result, msg)                                                              \
     {                                                                                              \
         rocprofiler_status_t CHECKSTATUS = result;                                                 \
@@ -34,6 +58,27 @@
                       << "): " << status_msg << std::endl;                                         \
             std::stringstream errmsg{};                                                            \
             errmsg << "[" #result "][" << __FILE__ << ":" << __LINE__ << "] " << msg               \
+                   << " failure (" << status_name << ": " << status_msg << ")";                    \
+            throw std::runtime_error(errmsg.str());                                                \
+        }                                                                                          \
+    }
+
+// Enhanced ROCPROFILER_CALL with error category and diagnostics
+#define ROCPROFILER_CALL_DIAG(result, msg, category, diagnostic)                                   \
+    {                                                                                              \
+        rocprofiler_status_t CHECKSTATUS = result;                                                 \
+        if(CHECKSTATUS != ROCPROFILER_STATUS_SUCCESS)                                              \
+        {                                                                                          \
+            std::string status_name = rocprofiler_get_status_name(CHECKSTATUS);                    \
+            std::string status_msg  = rocprofiler_get_status_string(CHECKSTATUS);                  \
+            std::cerr << category << "[" #result "][" << __FILE__ << ":" << __LINE__ << "] "       \
+                      << msg << " failed with error code " << status_name << " (" << CHECKSTATUS   \
+                      << "): " << status_msg << std::endl;                                         \
+            if(is_verbose_logging()) {                                                             \
+                std::cerr << "Diagnostic: " << diagnostic << std::endl;                            \
+            }                                                                                      \
+            std::stringstream errmsg{};                                                            \
+            errmsg << category << "[" #result "][" << __FILE__ << ":" << __LINE__ << "] " << msg   \
                    << " failure (" << status_name << ": " << status_msg << ")";                    \
             throw std::runtime_error(errmsg.str());                                                \
         }                                                                                          \

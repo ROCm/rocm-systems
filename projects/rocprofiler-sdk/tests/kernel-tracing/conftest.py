@@ -24,6 +24,14 @@
 
 import json
 import pytest
+from pytest_utils import check_test_prerequisites
+
+
+def pytest_configure(config):
+    """Run prerequisite checks before any tests"""
+    error = check_test_prerequisites()
+    if error:
+        pytest.exit(error, returncode=1)
 
 
 def pytest_addoption(parser):
