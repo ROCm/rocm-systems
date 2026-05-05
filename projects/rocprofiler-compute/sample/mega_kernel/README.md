@@ -2,6 +2,8 @@
 
 A comprehensive unit test kernel that exercises most of the instructions and features available on AMD GPUs including Instinct (MI250/MI300/MI350), Radeon (RX 9070 XT), and Strix/Strix Halo (RDNA 3.5, gfx1150/gfx1151) APU iGPUs.
 
+**Source layout:** This workload lives under `sample/mega_kernel/` in the rocprofiler-compute tree. Full-product CMake installs these sample workloads into the `tests/` install area at build time; the `tests/` tree is not a second source location for this kernel.
+
 ## Supported GPU Architectures
 
 ### CDNA (Compute/Datacenter)
@@ -30,6 +32,8 @@ A comprehensive unit test kernel that exercises most of the instructions and fea
 
 ## Feature Compatibility Matrix
 
+This table lists **what this sample tries to run** on each GFXIP, plus a few hardware facts that are **not** individually exercised here (no standalone RT or “AI accelerator” microbenchmarks in this kernel). MFMA/WMMA rows use **zero-input / zero-output sanity checks** where builtins run; dual-issue is **BYPASSED** in the report (patterns only). Async LDS follows `__has_builtin(__builtin_amdgcn_global_load_async_to_lds_b32)` in code (gfx942 is treated as unsupported in this sample, matching `mega_kernel_device_arch.h`).
+
 | Feature | MI250 (gfx90a) | MI300 (gfx942) | MI350 (gfx950) | Strix/Krackan (gfx115x) | RX 9070 XT (gfx1201) |
 |---------|:--------------:|:--------------:|:--------------:|:-----------------------:|:--------------------:|
 | FP32 Arithmetic | ✅ | ✅ | ✅ | ✅ | ✅ |
@@ -42,17 +46,15 @@ A comprehensive unit test kernel that exercises most of the instructions and fea
 | DOT4/DOT8 Products | ✅ | ✅ | ✅ | ✅ | ✅ (software) |
 | Warp/Wave Ops | ✅ (Wave64) | ✅ (Wave64) | ✅ (Wave64) | ✅ (Wave32) | ✅ (Wave32) |
 | LDS Operations | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Async LDS | ❌ | ⚠️ | ✅ | ✅ | ✅ |
-| Dual-Issue VALU | ❌ | ⚠️ (VOPD) | ✅ | ⚠️ (VOPD) | ❌ |
-| Ray Tracing (RT) | ❌ | ❌ | ❌ | ✅ | ✅ (RT 2.0) |
-| AI Inference Accel. | ❌ | ❌ | ❌ | ✅ | ✅ |
+| Async LDS (this sample) | ❌ | ❌ | ✅ | ✅ | ✅ |
+| Dual-Issue VALU (this sample) | — | BYPASS | BYPASS | BYPASS | — |
 | MFMA Matrix Ops | ✅ | ✅ | ✅ | ❌ | ❌ |
 | WMMA Matrix Ops | ❌ | ❌ | ❌ | ✅ (gfx12) | ✅ (gfx12) |
 | Packed FP16 Atomics | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Packed BF16 Atomics | ❌ | ✅ | ✅ | ✅ | ✅ |
 | VMEM Inline ASM | ✅ | ✅ | ✅ | ✅ | ✅ |
 
-⚠️ = Limited support / may vary by ROCm version
+⚠️ = Limited support / may vary by ROCm version. **BYPASS** = kernel emits instruction patterns but the host report marks the category bypassed (not a correctness proof). Hardware ray-tracing and branded “AI” units are out of scope for this instruction-focused sample.
 
 ## Features Tested
 
@@ -656,6 +658,8 @@ Kernel Execution Time:    0.312 ms
 
 ## Architecture Comparison
 
+Informational hardware notes (not a full map of what this sample executes). For **async LDS in this binary**, see the main compatibility matrix above (gfx942 is off here).
+
 | Feature | MI250 (gfx90a) | MI300 (gfx942) | MI350 (gfx950) | Strix/Krackan (gfx115x)  | RX 9070 XT (gfx1201) |
 |---------|:-------------:|:--------------:|:--------------:|:-------------------:|:--------------------:|
 | Architecture | CDNA2 | CDNA3 | CDNA4 | RDNA 3.5 | RDNA4 |
@@ -666,9 +670,11 @@ Kernel Execution Time:    0.312 ms
 | Packed FP16 Atomics | Yes | Yes | Yes | Yes | Yes |
 | Packed BF16 Atomics | No | Yes | Yes | Yes | Yes |
 | Dual VALU Issue | No | VOPD | Yes | VOPD | No |
-| Async LDS | No | Limited | Yes | Yes | Yes |
+| Async LDS (hardware) | No | Limited† | Yes | Yes | Yes |
 | MFMA Matrix Ops | Yes | Yes | Yes | No | No |
 | WMMA Matrix Ops | No | No | No | Yes | Yes |
+
+† This sample still treats gfx942 as without the async-LDS builtins path; see `mega_kernel_device_arch.h`.
 
 ### Memory/Atomic Instruction Syntax
 

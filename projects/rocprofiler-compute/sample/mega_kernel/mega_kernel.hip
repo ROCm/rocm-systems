@@ -66,69 +66,8 @@
 #include <hip/hip_runtime.h>
 
 #include "atomic_global_buffers.h"
-
-// ============================================================================
-// Architecture Detection Macros
-// ============================================================================
-
-// MI250/MI200 series (CDNA2)
-#if defined(__gfx90a__)
-#    define ARCH_MI250          1
-#    define ARCH_NAME           "MI250 (gfx90a/CDNA2)"
-#    define HAS_HW_FP64_ATOMICS 1
-#    define HAS_FP8             0
-#    define HAS_ASYNC_LDS       0
-#endif
-
-// MI300 series (CDNA3)
-#if defined(__gfx942__)
-#    define ARCH_MI300          1
-#    define ARCH_NAME           "MI300 (gfx942/CDNA3)"
-#    define HAS_HW_FP64_ATOMICS 1
-#    define HAS_FP8             1
-#    define HAS_ASYNC_LDS       0  // May have limited support
-#endif
-
-// MI350 series (CDNA4)
-#if defined(__gfx950__)
-#    define ARCH_MI350          1
-#    define ARCH_NAME           "MI350 (gfx950/CDNA4)"
-#    define HAS_HW_FP64_ATOMICS 1
-#    define HAS_FP8             1
-#    define HAS_FP6_FP4         1
-#    define HAS_ASYNC_LDS       1
-#endif
-
-// Strix Point / Strix Halo / Krackan (RDNA 3.5, gfx1150/gfx1151/gfx1152) - Navi3-based
-// APU iGPU
-#if defined(__gfx1150__) || defined(__gfx1151__) || defined(__gfx1152__)
-#    define ARCH_RDNA35_APU     1
-#    define ARCH_NAME           "RDNA 3.5 APU (gfx1150/gfx1151/gfx1152 - Strix/Krackan)"
-#    define HAS_HW_FP64_ATOMICS 0  // APU iGPUs have limited FP64
-#    define HAS_FP8             0  // NO FP8 conversion builtins on RDNA 3.5 APU
-#    define HAS_ASYNC_LDS       1  // Async LDS supported
-#    define HAS_RAYTRACING      0  // Limited RT on APU
-#    define HAS_AI_ACCELERATORS 0  // Limited AI on APU
-#endif
-
-// RDNA4 consumer (gfx1200/gfx1201) - RX 9070 XT and similar
-#if defined(__gfx1200__) || defined(__gfx1201__)
-#    define ARCH_RDNA4_CONSUMER 1
-#    define ARCH_NAME           "RDNA4 Consumer (gfx1200/gfx1201 - RX 9070 XT)"
-#    define HAS_HW_FP64_ATOMICS 0  // Consumer GPUs have limited FP64
-#    define HAS_FP8             1  // FP8 OCP format supported
-#    define HAS_ASYNC_LDS       1  // Async LDS supported
-#    define HAS_RAYTRACING      1  // RDNA4 has improved raytracing
-#    define HAS_AI_ACCELERATORS 1  // AI accelerators for inference
-#endif
-
-// Default fallback
-#ifndef ARCH_NAME
-#    define ARCH_NAME           "Unknown"
-#    define HAS_HW_FP64_ATOMICS 0
-#    define HAS_FP8             0
-#    define HAS_ASYNC_LDS       0
-#endif
+#include "mega_kernel_device_arch.h"
+#include "mega_kernel_types.h"
 
 // ============================================================================
 // Wait Instruction Compatibility Macros
@@ -218,106 +157,6 @@
 #    define ASM_WAITCNT_ALL  "s_waitcnt vmcnt(0) lgkmcnt(0)"
 
 #endif
-
-// Test result structure - one per feature category
-struct TestResults
-{
-    // Warp operations
-    int warp_shuffle_passed;
-    int warp_ballot_passed;
-    int warp_permute_passed;
-    int warp_reduce_passed;
-
-    // Floating point conversions
-    int fp8_convert_passed;
-    int bf8_convert_passed;
-    int fp16_convert_passed;
-    int bf16_convert_passed;
-
-    // Arithmetic operations
-    int fp32_arith_passed;
-    int fp64_arith_passed;
-    int int32_arith_passed;
-    int int64_arith_passed;
-
-    // Packed operations
-    int pk_f16_passed;
-    int pk_bf16_passed;
-    int pk_add_passed;
-
-    // Atomic operations
-    int atomic_add_f32_passed;
-    int atomic_add_f64_passed;
-    int atomic_min_f32_passed;
-    int atomic_max_f32_passed;
-    int atomic_int_passed;
-    int lds_atomic_passed;
-
-    // Transcendental
-    int trans_sin_passed;
-    int trans_cos_passed;
-    int trans_exp_passed;
-    int trans_log_passed;
-    int trans_sqrt_passed;
-    int trans_rcp_passed;
-    int trans_rsq_passed;
-
-    // Memory operations
-    int global_load_passed;
-    int global_store_passed;
-    int lds_load_passed;
-    int lds_store_passed;
-
-    // DOT products
-    int dot4_passed;
-    int dot8_passed;
-
-    // MFMA (Matrix Fused Multiply-Add) operations (gfx90a+)
-    int mfma_f32_passed;
-    int mfma_f64_passed;
-    int mfma_f16_passed;
-    int mfma_bf16_passed;
-    int mfma_i8_passed;
-    int mfma_f8_passed;  // FP8 MFMA (gfx942+/MI300+)
-
-    // Dual-issue VALU (gfx942+)
-    int dual_issue_passed;
-
-    // Lane/thread info
-    int lane_id_passed;
-    int wavefront_passed;
-
-    // Async LDS operations (MI350/RDNA4 where builtins exist)
-    int async_lds_load_passed;
-    int async_lds_store_passed;
-
-    // WMMA (Wave Matrix Multiply Accumulate) operations (RDNA4 / RDNA 3.5 gfx115x)
-    int wmma_f16_passed;   // FP16 → FP32 WMMA
-    int wmma_bf16_passed;  // BF16 → FP32 WMMA
-    int wmma_i8_passed;    // INT8 → INT32 WMMA
-
-    // VMEM (Vector Memory) Operations - comprehensive memory instruction tests
-    int vmem_flat_passed;     // Flat load/store (flat_load_dword, flat_store_dword, etc.)
-    int vmem_global_passed;   // Global load/store (global_load_b32, etc.)
-    int vmem_buffer_passed;   // Buffer load/store (buffer_load_dword, etc.)
-    int vmem_scratch_passed;  // Scratch load/store (scratch_load_dword, etc.)
-    int vmem_lds_passed;      // LDS operations (ds_read_b32, ds_write_b32, etc.)
-    int vmem_tex_load_passed;   // Texture load (image_load / SQ_INSTS_TEX_LOAD) on Strix
-    int vmem_tex_store_passed;  // Texture store (image_store / SQ_INSTS_TEX_STORE) on
-                                // Strix
-
-    // Atomic Operations - comprehensive inline ASM tests
-    int atomic_global_int_passed;  // global_atomic_add/sub/min/max (integer)
-    int atomic_global_f32_passed;  // global_atomic_add_f32
-    int atomic_global_f64_passed;  // global_atomic_add_f64/min_f64/max_f64
-    int atomic_flat_int_passed;    // flat_atomic_add/sub/min/max (integer)
-    int atomic_ds_int_passed;      // ds_add_u32, ds_min_i32, ds_max_u32, etc.
-    int atomic_ds_f32_passed;      // ds_add_f32, ds_min_f32, ds_max_f32
-    int atomic_ds_f64_passed;      // ds_add_f64, ds_min_f64, ds_max_f64
-    int atomic_pk_f16_passed;      // global_atomic_pk_add_f16 (packed FP16)
-    int atomic_pk_bf16_passed;     // global_atomic_pk_add_bf16 (packed BF16)
-    int atomic_cas_passed;         // Compare-and-swap operations
-};
 
 // Helper: Tolerance-based float comparison
 __device__ inline bool
@@ -1019,7 +858,7 @@ test_atomic_operations_asm([[maybe_unused]] int*         global_int_ptr,
     // CDNA and RDNA 3.5 APU: Use HIP atomics (inline ASM syntax differs)
     {
         float old_val     = atomicAdd(&global_f32_ptr[tid % 64], 1.0f);
-        global_f32_passed = !isnan(old_val);
+        global_f32_passed = global_f32_passed && isfinite(old_val);
     }
 
 #elif defined(__gfx1200__) ||                                                            \
@@ -1034,7 +873,7 @@ test_atomic_operations_asm([[maybe_unused]] int*         global_int_ptr,
                      : "v"(&global_f32_ptr[tid % 64]), "v"(add_val)
                      : "memory");
 
-        global_f32_passed = !isnan(old_val);
+        global_f32_passed = global_f32_passed && isfinite(old_val);
     }
 #else
     global_f32_passed = true;
@@ -1051,7 +890,7 @@ test_atomic_operations_asm([[maybe_unused]] int*         global_int_ptr,
     // CDNA: Use HIP atomics for FP64 (inline ASM too complex)
     {
         double old_val    = unsafeAtomicAdd(&global_f64_ptr[tid % 32], 1.0);
-        global_f64_passed = !isnan(old_val);
+        global_f64_passed = global_f64_passed && isfinite(old_val);
 
         // Min/max also via HIP
         unsafeAtomicMin(&global_f64_ptr[(tid % 32) + 32], 1.0);
@@ -1069,7 +908,7 @@ test_atomic_operations_asm([[maybe_unused]] int*         global_int_ptr,
                      : "v"(&global_f64_ptr[tid % 32]), "v"(add_val)
                      : "memory");
 
-        global_f64_passed = !isnan(old_val);
+        global_f64_passed = global_f64_passed && isfinite(old_val);
     }
 
 #elif defined(__gfx1200__) || defined(__gfx1201__) || defined(__gfx1150__) ||            \
@@ -1986,6 +1825,39 @@ using bf16_4vec   = __attribute__((__vector_size__(4 * sizeof(short)))) short;
 using f16_4vec    = __attribute__((__vector_size__(4 * sizeof(_Float16)))) _Float16;
 using int32_8vec  = __attribute__((__vector_size__(8 * sizeof(int)))) int;
 
+__device__ inline bool
+mfma_out_f32_all_zero(const f32_16vec& r)
+{
+    for(int i = 0; i < 16; i++)
+    {
+        if(!isfinite(r[i]) || r[i] != 0.0f)
+            return false;
+    }
+    return true;
+}
+
+__device__ inline bool
+mfma_out_f64_all_zero(const f64_4vec& r)
+{
+    for(int i = 0; i < 4; i++)
+    {
+        if(!isfinite(r[i]) || r[i] != 0.0)
+            return false;
+    }
+    return true;
+}
+
+__device__ inline bool
+mfma_out_i32_all_zero(const int32_16vec& r)
+{
+    for(int i = 0; i < 16; i++)
+    {
+        if(r[i] != 0)
+            return false;
+    }
+    return true;
+}
+
 // mfma_mode: 0=both (ASM+builtin), 1=asm only, 2=builtin only
 __device__ void
 test_mfma_operations([[maybe_unused]] TestResults* results, [[maybe_unused]] int lane_id,
@@ -2007,89 +1879,75 @@ test_mfma_operations([[maybe_unused]] TestResults* results, [[maybe_unused]] int
 
     // ---- FP32 MFMA: v_mfma_f32_32x32x2f32 (4096 ops) ----
     {
-        float          a    = (float) threadIdx.x;
-        volatile float sink = 0;
-
-        // HIP Builtin (mfma_mode == 0 or 2)
         if(mfma_mode != 1)
         {
             f32_16vec result = { 0 };
-            result = __builtin_amdgcn_mfma_f32_32x32x2f32(a, a, result, 0, 0, 0);
-            sink   = result[0];
+            result   = __builtin_amdgcn_mfma_f32_32x32x2f32(0.0f, 0.0f, result, 0, 0, 0);
+            f32_passed = mfma_out_f32_all_zero(result);
         }
-
-        // For ASM mode, we use the same builtin since inline MFMA ASM
-        // requires accumulator register allocation that's complex to express.
-        // The builtin exercises the same hardware instruction.
-
-        f32_passed = true;
-        (void) sink;
+        else
+        {
+            f32_passed = true;
+        }
     }
 
     // ---- FP64 MFMA: v_mfma_f64_16x16x4f64 (2048 ops) ----
     {
-        double          a    = (double) threadIdx.x;
-        volatile double sink = 0;
-
         if(mfma_mode != 1)
         {
             f64_4vec result = { 0 };
-            result          = __builtin_amdgcn_mfma_f64_16x16x4f64(a, a, result, 0, 0, 0);
-            sink            = result[0];
+            result     = __builtin_amdgcn_mfma_f64_16x16x4f64(0.0, 0.0, result, 0, 0, 0);
+            f64_passed = mfma_out_f64_all_zero(result);
         }
-
-        f64_passed = true;
-        (void) sink;
+        else
+        {
+            f64_passed = true;
+        }
     }
 
     // ---- FP16 MFMA: v_mfma_f32_32x32x8f16 (16384 ops) ----
     {
-        volatile float sink = 0;
-
         if(mfma_mode != 1)
         {
-            f16_4vec a;
-            a[0] = a[1] = a[2] = a[3] = (_Float16) threadIdx.x;
-            f32_16vec result          = { 0 };
-            result = __builtin_amdgcn_mfma_f32_32x32x8f16(a, a, result, 0, 0, 0);
-            sink   = result[0];
+            f16_4vec  a = { 0 };
+            f32_16vec result = { 0 };
+            result     = __builtin_amdgcn_mfma_f32_32x32x8f16(a, a, result, 0, 0, 0);
+            f16_passed = mfma_out_f32_all_zero(result);
         }
-
-        f16_passed = true;
-        (void) sink;
+        else
+        {
+            f16_passed = true;
+        }
     }
 
     // ---- BF16 MFMA: v_mfma_f32_32x32x4bf16 (8192 ops) ----
     {
-        volatile float sink = 0;
-
         if(mfma_mode != 1)
         {
-            bf16_2vec a;
-            a[0] = a[1]      = (short) threadIdx.x;
+            bf16_2vec a      = { 0, 0 };
             f32_16vec result = { 0 };
             result = __builtin_amdgcn_mfma_f32_32x32x4bf16(a, a, result, 0, 0, 0);
-            sink   = result[0];
+            bf16_passed = mfma_out_f32_all_zero(result);
         }
-
-        bf16_passed = true;
-        (void) sink;
+        else
+        {
+            bf16_passed = true;
+        }
     }
 
     // ---- INT8 MFMA: v_mfma_i32_32x32x8i8 (16384 ops) ----
     {
-        int          a    = (int) threadIdx.x;
-        volatile int sink = 0;
-
         if(mfma_mode != 1)
         {
             int32_16vec result = { 0 };
-            result = __builtin_amdgcn_mfma_i32_32x32x8i8(a, a, result, 0, 0, 0);
-            sink   = result[0];
+            result =
+                __builtin_amdgcn_mfma_i32_32x32x8i8(0, 0, result, 0, 0, 0);
+            i8_passed = mfma_out_i32_all_zero(result);
         }
-
-        i8_passed = true;
-        (void) sink;
+        else
+        {
+            i8_passed = true;
+        }
     }
 
     if(lane_id == 0)
@@ -2099,7 +1957,7 @@ test_mfma_operations([[maybe_unused]] TestResults* results, [[maybe_unused]] int
         atomicAdd(&results->mfma_f16_passed, f16_passed ? 1 : 0);
         atomicAdd(&results->mfma_bf16_passed, bf16_passed ? 1 : 0);
         atomicAdd(&results->mfma_i8_passed, i8_passed ? 1 : 0);
-        atomicMin(&results->mfma_f8_passed, -1);  // FP8 not on MI250
+        atomicMin(&results->mfma_f8_passed, -1);
     }
 
 #elif defined(__gfx942__) || defined(__gfx940__) || defined(__gfx941__)
@@ -2115,104 +1973,91 @@ test_mfma_operations([[maybe_unused]] TestResults* results, [[maybe_unused]] int
     bool f8_passed   = true;
 
     // ---- FP32 MFMA: v_mfma_f32_32x32x2f32 (4096 ops) ----
-    // Note: MFMA inline ASM requires complex accumulator register constraints.
-    // For MI300/gfx942, we use builtins as the primary test method since they
-    // properly handle the register allocation.
     {
-        float          a    = (float) threadIdx.x;
-        volatile float sink = 0;
-
         if(mfma_mode != 1)
         {
             f32_16vec result = { 0 };
-            result = __builtin_amdgcn_mfma_f32_32x32x2f32(a, a, result, 0, 0, 0);
-            sink   = result[0];
+            result   = __builtin_amdgcn_mfma_f32_32x32x2f32(0.0f, 0.0f, result, 0, 0, 0);
+            f32_passed = mfma_out_f32_all_zero(result);
         }
-
-        f32_passed = true;
-        (void) sink;
+        else
+        {
+            f32_passed = true;
+        }
     }
 
     // ---- FP64 MFMA: v_mfma_f64_16x16x4f64 (2048 ops) ----
     {
-        double          a    = (double) threadIdx.x;
-        volatile double sink = 0;
-
         if(mfma_mode != 1)
         {
             f64_4vec result = { 0 };
-            result          = __builtin_amdgcn_mfma_f64_16x16x4f64(a, a, result, 0, 0, 0);
-            sink            = result[0];
+            result     = __builtin_amdgcn_mfma_f64_16x16x4f64(0.0, 0.0, result, 0, 0, 0);
+            f64_passed = mfma_out_f64_all_zero(result);
         }
-
-        f64_passed = true;
-        (void) sink;
+        else
+        {
+            f64_passed = true;
+        }
     }
 
     // ---- FP16 MFMA: v_mfma_f32_32x32x8f16 (16384 ops) ----
     {
-        volatile float sink = 0;
-
         if(mfma_mode != 1)
         {
-            f16_4vec a;
-            a[0] = a[1] = a[2] = a[3] = (_Float16) threadIdx.x;
-            f32_16vec result          = { 0 };
-            result = __builtin_amdgcn_mfma_f32_32x32x8f16(a, a, result, 0, 0, 0);
-            sink   = result[0];
+            f16_4vec  a = { 0 };
+            f32_16vec result = { 0 };
+            result     = __builtin_amdgcn_mfma_f32_32x32x8f16(a, a, result, 0, 0, 0);
+            f16_passed = mfma_out_f32_all_zero(result);
         }
-
-        f16_passed = true;
-        (void) sink;
+        else
+        {
+            f16_passed = true;
+        }
     }
 
     // ---- BF16 MFMA: v_mfma_f32_32x32x8bf16_1k (16384 ops) - MI300 enhanced ----
     {
-        volatile float sink = 0;
-
         if(mfma_mode != 1)
         {
-            bf16_4vec a;
-            a[0] = a[1] = a[2] = a[3] = (short) threadIdx.x;
-            f32_16vec result          = { 0 };
+            bf16_4vec a = { 0, 0, 0, 0 };
+            f32_16vec result = { 0 };
             result = __builtin_amdgcn_mfma_f32_32x32x8bf16_1k(a, a, result, 0, 0, 0);
-            sink   = result[0];
+            bf16_passed = mfma_out_f32_all_zero(result);
         }
-
-        bf16_passed = true;
-        (void) sink;
+        else
+        {
+            bf16_passed = true;
+        }
     }
 
     // ---- INT8 MFMA: v_mfma_i32_32x32x16_i8 (32768 ops) - MI300 doubled K ----
     {
-        long         a    = (long) threadIdx.x;
-        volatile int sink = 0;
-
         if(mfma_mode != 1)
         {
             int32_16vec result = { 0 };
-            result = __builtin_amdgcn_mfma_i32_32x32x16_i8(a, a, result, 0, 0, 0);
-            sink   = result[0];
+            result =
+                __builtin_amdgcn_mfma_i32_32x32x16_i8(0LL, 0LL, result, 0, 0, 0);
+            i8_passed = mfma_out_i32_all_zero(result);
         }
-
-        i8_passed = true;
-        (void) sink;
+        else
+        {
+            i8_passed = true;
+        }
     }
 
     // ---- FP8 MFMA: v_mfma_f32_32x32x16_fp8_fp8 (32768 ops) - MI300 new ----
     {
-        double         a    = (double) threadIdx.x;
-        volatile float sink = 0;
-
         if(mfma_mode != 1)
         {
             f32_16vec result = { 0 };
-            result = __builtin_amdgcn_mfma_f32_32x32x16_fp8_fp8(a, a, result, 0, 0, 0);
-            sink   = result[0];
+            result =
+                __builtin_amdgcn_mfma_f32_32x32x16_fp8_fp8(0.0, 0.0, result, 0, 0, 0);
+            f8_passed = mfma_out_f32_all_zero(result);
         }
-
-        f8_passed = true;
-        (void) sink;
+        else
+        {
+            f8_passed = true;
+        }
     }
 
     if(lane_id == 0)
@@ -2238,116 +2083,92 @@ test_mfma_operations([[maybe_unused]] TestResults* results, [[maybe_unused]] int
     bool f8_passed   = true;
 
     // ---- FP32 MFMA: v_mfma_f32_32x32x2f32 ----
-    // Note: MFMA inline ASM requires complex accumulator register constraints.
-    // For MI350/gfx950, we use builtins as the primary test method since they
-    // properly handle the register allocation. ASM version is a simplified
-    // instruction presence test when mfma_mode allows.
     {
-        float          a    = (float) threadIdx.x;
-        volatile float sink = 0;
-
         if(mfma_mode != 1)
         {
             f32_16vec result = { 0 };
-            result = __builtin_amdgcn_mfma_f32_32x32x2f32(a, a, result, 0, 0, 0);
-            sink   = result[0];
+            result   = __builtin_amdgcn_mfma_f32_32x32x2f32(0.0f, 0.0f, result, 0, 0, 0);
+            f32_passed = mfma_out_f32_all_zero(result);
         }
-
-        // ASM mode: For MI350, we rely on builtins for MFMA since inline ASM
-        // requires accumulator register allocation that's complex to express.
-        // The builtin already exercises the same hardware instruction.
-
-        f32_passed = true;
-        (void) sink;
+        else
+        {
+            f32_passed = true;
+        }
     }
 
     // ---- FP64 MFMA: v_mfma_f64_16x16x4f64 ----
     {
-        double          a    = (double) threadIdx.x;
-        volatile double sink = 0;
-
         if(mfma_mode != 1)
         {
             f64_4vec result = { 0 };
-            result          = __builtin_amdgcn_mfma_f64_16x16x4f64(a, a, result, 0, 0, 0);
-            sink            = result[0];
+            result     = __builtin_amdgcn_mfma_f64_16x16x4f64(0.0, 0.0, result, 0, 0, 0);
+            f64_passed = mfma_out_f64_all_zero(result);
         }
-
-        f64_passed = true;
-        (void) sink;
+        else
+        {
+            f64_passed = true;
+        }
     }
 
     // ---- FP16 MFMA: v_mfma_f32_32x32x8f16 ----
     {
-        volatile float sink = 0;
-
         if(mfma_mode != 1)
         {
-            f16_4vec a;
-            a[0] = a[1] = a[2] = a[3] = (_Float16) threadIdx.x;
-            f32_16vec result          = { 0 };
-            result = __builtin_amdgcn_mfma_f32_32x32x8f16(a, a, result, 0, 0, 0);
-            sink   = result[0];
+            f16_4vec  a = { 0 };
+            f32_16vec result = { 0 };
+            result     = __builtin_amdgcn_mfma_f32_32x32x8f16(a, a, result, 0, 0, 0);
+            f16_passed = mfma_out_f32_all_zero(result);
         }
-
-        f16_passed = true;
-        (void) sink;
+        else
+        {
+            f16_passed = true;
+        }
     }
 
     // ---- BF16 MFMA: v_mfma_f32_32x32x8bf16_1k ----
     {
-        volatile float sink = 0;
-
         if(mfma_mode != 1)
         {
-            bf16_4vec a;
-            a[0] = a[1] = a[2] = a[3] = (short) threadIdx.x;
-            f32_16vec result          = { 0 };
+            bf16_4vec a = { 0, 0, 0, 0 };
+            f32_16vec result = { 0 };
             result = __builtin_amdgcn_mfma_f32_32x32x8bf16_1k(a, a, result, 0, 0, 0);
-            sink   = result[0];
+            bf16_passed = mfma_out_f32_all_zero(result);
         }
-
-        bf16_passed = true;
-        (void) sink;
+        else
+        {
+            bf16_passed = true;
+        }
     }
 
     // ---- INT8 MFMA: v_mfma_i32_32x32x16_i8 ----
     {
-        long         a    = (long) threadIdx.x;
-        volatile int sink = 0;
-
         if(mfma_mode != 1)
         {
             int32_16vec result = { 0 };
-            result = __builtin_amdgcn_mfma_i32_32x32x16_i8(a, a, result, 0, 0, 0);
-            sink   = result[0];
+            result =
+                __builtin_amdgcn_mfma_i32_32x32x16_i8(0LL, 0LL, result, 0, 0, 0);
+            i8_passed = mfma_out_i32_all_zero(result);
         }
-
-        i8_passed = true;
-        (void) sink;
+        else
+        {
+            i8_passed = true;
+        }
     }
 
     // ---- Scaled F8F6F4 MFMA: v_mfma_scale_f32_32x32x64_f8f6f4 (131072 ops) ----
-    // Datatypes: 0=fp8, 1=bf8, 2=fp6, 3=bf6, 4=fp4
-    // Note: Scaled MFMA only available via builtin
     {
-        volatile float sink = 0;
-
         if(mfma_mode != 1)
         {
-            int32_8vec a;
-            a[0] = a[1] = a[2] = a[3] = a[4] = a[5] = a[6] = a[7] = (int) threadIdx.x;
-            f32_16vec result                                      = { 0 };
+            int32_8vec  a = { 0 };
+            f32_16vec   result = { 0 };
             result = __builtin_amdgcn_mfma_scale_f32_32x32x64_f8f6f4(a, a, result, 0, 0,
                                                                      0, 0, 0, 0);
-            sink   = result[0];
+            f8_passed = mfma_out_f32_all_zero(result);
         }
-
-        // Scaled MFMA doesn't have a practical inline ASM representation.
-        // When mfma_mode==1, we still mark as passed (uses builtin path).
-
-        f8_passed = true;
-        (void) sink;
+        else
+        {
+            f8_passed = true;
+        }
     }
 
     if(lane_id == 0)
@@ -2448,9 +2269,9 @@ test_mfma_operations([[maybe_unused]] TestResults* results, [[maybe_unused]] int
 //
 
 __device__ void
-test_dual_issue_patterns([[maybe_unused]] TestResults* results,
-                         [[maybe_unused]] int          lane_id)
+test_dual_issue_patterns(TestResults* results, int lane_id, int tid)
 {
+    (void) lane_id;
     // This function demonstrates dual-issue eligible instruction patterns
     // for MI350 (gfx950). The patterns are designed to maximize throughput.
 
@@ -2576,17 +2397,11 @@ test_dual_issue_patterns([[maybe_unused]] TestResults* results,
     // This test provides dual-issue ELIGIBLE patterns.
     // Actual dual-issue depends on wave scheduling and register availability.
 
-    if(lane_id == 0)
+    // Dual-issue is a scheduler/performance property: we emit eligible instruction
+    // patterns but do not verify co-issue in hardware (would need perf counters).
+    if(tid == 0)
     {
-#if defined(__gfx950__) || defined(__gfx942__)  // gfx950: Cross-wave dual-issue VALU
-        // gfx942: Same-wave dual-issue via VOPD/VOPD3
-        // Both support some form of dual-issue - mark as passed
-        atomicAdd(&results->dual_issue_passed, 1);
-#else
-        // Other architectures don't support dual-issue - mark as bypassed (-1)
-        // Only set once (use atomicMin to ensure we get -1)
-        atomicMin(&results->dual_issue_passed, -1);
-#endif
+        results->dual_issue_passed = -1;
     }
 }
 
@@ -3149,6 +2964,28 @@ test_wmma_operations([[maybe_unused]] TestResults* results, [[maybe_unused]] int
         (void) sink;
     }
 
+    {
+        wmma_f16_frag_gfx11 az{}, bz{};
+        wmma_f32_frag       cz = { 0 };
+#    if __has_builtin(__builtin_amdgcn_wmma_f32_16x16x16_f16_w32)
+        cz = __builtin_amdgcn_wmma_f32_16x16x16_f16_w32(az, bz, cz);
+#    endif
+        bool zok = true;
+        for(int i = 0; i < 8; i++)
+            zok = zok && isfinite(cz[i]) && fabsf(cz[i]) < 1e-4f;
+        f16_passed = f16_passed && zok;
+    }
+    {
+        wmma_bf16_frag_gfx11 az{}, bz{};
+        wmma_f32_frag        cz = { 0 };
+#    if __has_builtin(__builtin_amdgcn_wmma_f32_16x16x16_bf16_w32)
+        cz = __builtin_amdgcn_wmma_f32_16x16x16_bf16_w32(az, bz, cz);
+#    endif
+        bool zok = true;
+        for(int i = 0; i < 8; i++)
+            zok = zok && isfinite(cz[i]) && fabsf(cz[i]) < 1e-4f;
+        bf16_passed = bf16_passed && zok;
+    }
     if(lane_id == 0)
     {
         atomicAdd(&results->wmma_f16_passed, f16_passed ? 1 : 0);
@@ -3264,6 +3101,28 @@ test_wmma_operations([[maybe_unused]] TestResults* results, [[maybe_unused]] int
         (void) sink;
     }
 
+    {
+        wmma_f16_frag az{}, bz{};
+        wmma_f32_frag cz = { 0 };
+#    if __has_builtin(__builtin_amdgcn_wmma_f32_16x16x16_f16_w32_gfx12)
+        cz = __builtin_amdgcn_wmma_f32_16x16x16_f16_w32_gfx12(az, bz, cz);
+#    endif
+        bool zok = true;
+        for(int i = 0; i < 8; i++)
+            zok = zok && isfinite(cz[i]) && fabsf(cz[i]) < 1e-4f;
+        f16_passed = f16_passed && zok;
+    }
+    {
+        wmma_bf16_frag az{}, bz{};
+        wmma_f32_frag  cz = { 0 };
+#    if __has_builtin(__builtin_amdgcn_wmma_f32_16x16x16_bf16_w32_gfx12)
+        cz = __builtin_amdgcn_wmma_f32_16x16x16_bf16_w32_gfx12(az, bz, cz);
+#    endif
+        bool zok = true;
+        for(int i = 0; i < 8; i++)
+            zok = zok && isfinite(cz[i]) && fabsf(cz[i]) < 1e-4f;
+        bf16_passed = bf16_passed && zok;
+    }
     if(lane_id == 0)
     {
         atomicAdd(&results->wmma_f16_passed, f16_passed ? 1 : 0);
@@ -3447,7 +3306,7 @@ mega_kernel(
     test_mfma_operations(results, lane_id, mfma_mode);
 
     // 10.5 Dual-Issue VALU Patterns (gfx942+)
-    test_dual_issue_patterns(results, lane_id);
+    test_dual_issue_patterns(results, lane_id, tid);
 
     // 11. Lane/Thread Info
     test_lane_thread_info(results, lane_id);

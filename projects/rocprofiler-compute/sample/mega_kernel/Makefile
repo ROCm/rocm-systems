@@ -3,7 +3,10 @@
 #
 # AMD GPU Mega Kernel Unit Test - Makefile
 #
-# Supported GPU Architectures:
+# Supported offload-arch values (single source for per-arch binaries):
+ARCHES := gfx950 gfx942 gfx90a gfx1150 gfx1151 gfx1152 gfx1201 gfx1200
+ARCH_BINS := $(addprefix mega_kernel_test_,$(ARCHES))
+#
 #   CDNA (Compute/Datacenter):
 #   - MI250/MI250X (CDNA2): gfx90a
 #   - MI300/MI300X (CDNA3): gfx942  
@@ -28,7 +31,7 @@
 #   make gfx1152  - Build for Krackan (gfx1152/RDNA3.5)
 #   make gfx1201  - Build for RX 9070 XT (gfx1201/RDNA4)
 #   make gfx1200  - Build for RX 9060 (gfx1200/RDNA4)
-#   make all-arch - Build binaries for all supported offload-arch targets
+#   make all-arch - Build binaries for all ARCHES
 #   make clean    - Remove build artifacts
 #   make run      - Build and run the test
 
@@ -54,7 +57,7 @@ HOST_SRC = main.cpp
 DEFAULT_TARGET = mega_kernel_test
 
 # Build rules
-.PHONY: all clean run gfx950 gfx942 gfx90a gfx1150 gfx1151 gfx1152 gfx1201 gfx1200 all-arch all-arch-full help
+.PHONY: all clean run $(ARCHES) all-arch all-arch-full help
 
 all: $(DEFAULT_TARGET)
 
@@ -63,87 +66,22 @@ $(DEFAULT_TARGET): $(KERNEL_SRC) $(HOST_SRC)
 	$(HIPCC) $(HIPCC_FLAGS) --offload-arch=$(GPU_ARCH) $(INCLUDES) -o $@ $^
 	@echo "Build complete: $@"
 
-# Explicit architecture-specific build rules
-mega_kernel_test_gfx950: $(KERNEL_SRC) $(HOST_SRC)
-	@echo "Building for gfx950 (MI350/CDNA4)..."
-	$(HIPCC) $(HIPCC_FLAGS) --offload-arch=gfx950 $(INCLUDES) -o $@ $^
+# One pattern rule for all per-arch binaries (stem is full token, e.g. gfx950)
+$(ARCH_BINS): mega_kernel_test_%: $(KERNEL_SRC) $(HOST_SRC)
+	@echo "Building for $*..."
+	$(HIPCC) $(HIPCC_FLAGS) --offload-arch=$* $(INCLUDES) -o $@ $^
 	@echo "Build complete: $@"
 
-mega_kernel_test_gfx942: $(KERNEL_SRC) $(HOST_SRC)
-	@echo "Building for gfx942 (MI300/CDNA3)..."
-	$(HIPCC) $(HIPCC_FLAGS) --offload-arch=gfx942 $(INCLUDES) -o $@ $^
-	@echo "Build complete: $@"
+# Symlink convenience: gfx950 -> mega_kernel_test_gfx950, etc.
+gfx%: mega_kernel_test_gfx%
+	@ln -sf $< mega_kernel_test
+	@echo "Linked mega_kernel_test -> $<"
 
-mega_kernel_test_gfx90a: $(KERNEL_SRC) $(HOST_SRC)
-	@echo "Building for gfx90a (MI250/CDNA2)..."
-	$(HIPCC) $(HIPCC_FLAGS) --offload-arch=gfx90a $(INCLUDES) -o $@ $^
-	@echo "Build complete: $@"
+all-arch: $(ARCH_BINS)
+	@echo "Built: $(ARCHES)"
 
-mega_kernel_test_gfx1150: $(KERNEL_SRC) $(HOST_SRC)
-	@echo "Building for gfx1150 (Strix Point/RDNA3.5)..."
-	$(HIPCC) $(HIPCC_FLAGS) --offload-arch=gfx1150 $(INCLUDES) -o $@ $^
-	@echo "Build complete: $@"
-
-mega_kernel_test_gfx1151: $(KERNEL_SRC) $(HOST_SRC)
-	@echo "Building for gfx1151 (Strix Halo/RDNA3.5)..."
-	$(HIPCC) $(HIPCC_FLAGS) --offload-arch=gfx1151 $(INCLUDES) -o $@ $^
-	@echo "Build complete: $@"
-
-mega_kernel_test_gfx1152: $(KERNEL_SRC) $(HOST_SRC)
-	@echo "Building for gfx1152 (Krackan/RDNA3.5)..."
-	$(HIPCC) $(HIPCC_FLAGS) --offload-arch=gfx1152 $(INCLUDES) -o $@ $^
-	@echo "Build complete: $@"
-
-mega_kernel_test_gfx1201: $(KERNEL_SRC) $(HOST_SRC)
-	@echo "Building for gfx1201 (RX 9070 XT/RDNA4)..."
-	$(HIPCC) $(HIPCC_FLAGS) --offload-arch=gfx1201 $(INCLUDES) -o $@ $^
-	@echo "Build complete: $@"
-
-mega_kernel_test_gfx1200: $(KERNEL_SRC) $(HOST_SRC)
-	@echo "Building for gfx1200 (RX 9060/RDNA4)..."
-	$(HIPCC) $(HIPCC_FLAGS) --offload-arch=gfx1200 $(INCLUDES) -o $@ $^
-	@echo "Build complete: $@"
-
-# Architecture-specific targets (using gfx names)
-gfx950: mega_kernel_test_gfx950
-	@ln -sf mega_kernel_test_gfx950 mega_kernel_test
-	@echo "Linked mega_kernel_test -> mega_kernel_test_gfx950"
-
-gfx942: mega_kernel_test_gfx942
-	@ln -sf mega_kernel_test_gfx942 mega_kernel_test
-	@echo "Linked mega_kernel_test -> mega_kernel_test_gfx942"
-
-gfx90a: mega_kernel_test_gfx90a
-	@ln -sf mega_kernel_test_gfx90a mega_kernel_test
-	@echo "Linked mega_kernel_test -> mega_kernel_test_gfx90a"
-
-gfx1150: mega_kernel_test_gfx1150
-	@ln -sf mega_kernel_test_gfx1150 mega_kernel_test
-	@echo "Linked mega_kernel_test -> mega_kernel_test_gfx1150"
-
-gfx1151: mega_kernel_test_gfx1151
-	@ln -sf mega_kernel_test_gfx1151 mega_kernel_test
-	@echo "Linked mega_kernel_test -> mega_kernel_test_gfx1151"
-
-gfx1152: mega_kernel_test_gfx1152
-	@ln -sf mega_kernel_test_gfx1152 mega_kernel_test
-	@echo "Linked mega_kernel_test -> mega_kernel_test_gfx1152"
-
-gfx1201: mega_kernel_test_gfx1201
-	@ln -sf mega_kernel_test_gfx1201 mega_kernel_test
-	@echo "Linked mega_kernel_test -> mega_kernel_test_gfx1201"
-
-gfx1200: mega_kernel_test_gfx1200
-	@ln -sf mega_kernel_test_gfx1200 mega_kernel_test
-	@echo "Linked mega_kernel_test -> mega_kernel_test_gfx1200"
-
-# Build one binary per listed offload-arch (no symlink)
-all-arch: mega_kernel_test_gfx950 mega_kernel_test_gfx942 mega_kernel_test_gfx90a mega_kernel_test_gfx1150 mega_kernel_test_gfx1151 mega_kernel_test_gfx1152 mega_kernel_test_gfx1201 mega_kernel_test_gfx1200
-	@echo "Built: gfx950 gfx942 gfx90a gfx1150 gfx1151 gfx1152 gfx1201 gfx1200"
-
-# Build all including experimental (requires newer ROCm)
-all-arch-full: mega_kernel_test_gfx950 mega_kernel_test_gfx942 mega_kernel_test_gfx90a mega_kernel_test_gfx1150 mega_kernel_test_gfx1151 mega_kernel_test_gfx1152 mega_kernel_test_gfx1201 mega_kernel_test_gfx1200
-	@echo "Built for all architectures: gfx950, gfx942, gfx90a, gfx1150, gfx1151, gfx1152, gfx1201, gfx1200"
+# Alias: no separate experimental arch list in this sample today
+all-arch-full: all-arch
 
 # Run the test
 run: $(DEFAULT_TARGET)
@@ -160,7 +98,8 @@ clean:
 help:
 	@echo "AMD GPU Mega Kernel Unit Test - Build System"
 	@echo ""
-	@echo "Supported Architectures:"
+	@echo "Supported Architectures (ARCHES in Makefile):"
+	@echo "  $(ARCHES)"
 	@echo ""
 	@echo "  CDNA (Compute/Datacenter):"
 	@echo "    gfx90a  - MI250/MI250X (CDNA2): FP32/FP64/FP16/BF16, HW FP64 atomics"
@@ -186,7 +125,8 @@ help:
 	@echo "  make gfx1152     - Build for Krackan (gfx1152)"
 	@echo "  make gfx1201     - Build for RX 9070 XT (gfx1201/RDNA4)"
 	@echo "  make gfx1200     - Build for RX 9060 (gfx1200/RDNA4)"
-	@echo "  make all-arch    - Build one binary per supported offload-arch"
+	@echo "  make all-arch    - Build one binary per ARCHES"
+	@echo "  make all-arch-full - Same as all-arch (reserved if experimental arches are added)"
 	@echo "  make run         - Build and run the test"
 	@echo "  make clean       - Remove build artifacts"
 	@echo "  make help        - Show this help message"

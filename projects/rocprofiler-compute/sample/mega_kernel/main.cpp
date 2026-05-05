@@ -32,6 +32,8 @@
 #include <vector>
 
 #include "atomic_global_buffers.h"
+#include "mega_kernel_host_arch.hpp"
+#include "mega_kernel_types.h"
 
 // Default configuration
 #define DEFAULT_BATCH_SIZE     1024
@@ -40,14 +42,6 @@
 #define MIN_BATCH_SIZE         64
 #define MAX_BATCH_SIZE         (1024 * 1024 * 16)  // 16M elements max
 #define MAX_NUM_ITERATIONS     10000
-
-// MFMA implementation mode
-enum MfmaMode
-{
-    MFMA_MODE_BOTH    = 0,  // Test both ASM and builtin (default)
-    MFMA_MODE_ASM     = 1,  // Test only inline ASM
-    MFMA_MODE_BUILTIN = 2   // Test only HIP builtins
-};
 
 // Command-line options
 struct TestConfig
@@ -194,105 +188,6 @@ parse_args(int argc, char** argv)
     return config;
 }
 
-// Test result structure (must match the one in the kernel)
-struct TestResults
-{
-    // Warp operations
-    int warp_shuffle_passed;
-    int warp_ballot_passed;
-    int warp_permute_passed;
-    int warp_reduce_passed;
-
-    // Floating point conversions
-    int fp8_convert_passed;
-    int bf8_convert_passed;
-    int fp16_convert_passed;
-    int bf16_convert_passed;
-
-    // Arithmetic operations
-    int fp32_arith_passed;
-    int fp64_arith_passed;
-    int int32_arith_passed;
-    int int64_arith_passed;
-
-    // Packed operations
-    int pk_f16_passed;
-    int pk_bf16_passed;
-    int pk_add_passed;
-
-    // Atomic operations
-    int atomic_add_f32_passed;
-    int atomic_add_f64_passed;
-    int atomic_min_f32_passed;
-    int atomic_max_f32_passed;
-    int atomic_int_passed;
-    int lds_atomic_passed;
-
-    // Transcendental
-    int trans_sin_passed;
-    int trans_cos_passed;
-    int trans_exp_passed;
-    int trans_log_passed;
-    int trans_sqrt_passed;
-    int trans_rcp_passed;
-    int trans_rsq_passed;
-
-    // Memory operations
-    int global_load_passed;
-    int global_store_passed;
-    int lds_load_passed;
-    int lds_store_passed;
-
-    // DOT products
-    int dot4_passed;
-    int dot8_passed;
-
-    // MFMA (Matrix Fused Multiply-Add) operations (gfx90a+)
-    int mfma_f32_passed;
-    int mfma_f64_passed;
-    int mfma_f16_passed;
-    int mfma_bf16_passed;
-    int mfma_i8_passed;
-    int mfma_f8_passed;  // FP8 MFMA (gfx942+/MI300+)
-
-    // Dual-issue VALU (gfx942+)
-    int dual_issue_passed;
-
-    // Lane/thread info
-    int lane_id_passed;
-    int wavefront_passed;
-
-    // Async LDS operations (MI350/RDNA4 where builtins exist)
-    int async_lds_load_passed;
-    int async_lds_store_passed;
-
-    // WMMA (Wave Matrix Multiply Accumulate) operations (RDNA4 / RDNA 3.5 gfx115x)
-    int wmma_f16_passed;   // FP16 → FP32 WMMA
-    int wmma_bf16_passed;  // BF16 → FP32 WMMA
-    int wmma_i8_passed;    // INT8 → INT32 WMMA
-
-    // VMEM (Vector Memory) Operations - comprehensive memory instruction tests
-    int vmem_flat_passed;     // Flat load/store (flat_load_dword, flat_store_dword, etc.)
-    int vmem_global_passed;   // Global load/store (global_load_b32, etc.)
-    int vmem_buffer_passed;   // Buffer load/store (buffer_load_dword, etc.)
-    int vmem_scratch_passed;  // Scratch load/store (scratch_load_dword, etc.)
-    int vmem_lds_passed;      // LDS operations (ds_read_b32, ds_write_b32, etc.)
-    int vmem_tex_load_passed;   // Texture load (gfx115x Strix)
-    int vmem_tex_store_passed;  // Surface store (gfx115x Strix)
-
-    // Atomic Operations - comprehensive inline ASM tests
-    int atomic_global_int_passed;  // global_atomic_add/sub/min/max (integer)
-    int atomic_global_f32_passed;  // global_atomic_add_f32
-    int atomic_global_f64_passed;  // global_atomic_add_f64/min_f64/max_f64
-    int atomic_flat_int_passed;    // flat_atomic_add/sub/min/max (integer)
-    int atomic_ds_int_passed;      // ds_add_u32, ds_min_i32, ds_max_u32, etc.
-    int atomic_ds_f32_passed;      // ds_add_f32, ds_min_f32, ds_max_f32
-    int atomic_ds_f64_passed;      // ds_add_f64, ds_min_f64, ds_max_f64
-    int atomic_pk_f16_passed;      // global_atomic_pk_add_f16 (packed FP16)
-    int atomic_pk_bf16_passed;     // global_atomic_pk_add_bf16 (packed BF16)
-    int atomic_cas_passed;         // Compare-and-swap operations
-};
-
 // Macro for HIP error checking
 #define HIP_CHECK(cmd)                                                                   \
     do                                                                                   \
@@ -305,19 +200,6 @@ struct TestResults
             exit(EXIT_FAILURE);                                                          \
         }                                                                                \
     } while(0)
-
-// External declaration of the kernel (must match mega_kernel.hip)
-extern "C" __global__ void
-mega_kernel(
-    TestResults* results, float* global_float, double* global_double, int* global_int,
-    float* input_buffer, float* output_buffer,
-    float*             async_lds_src,  // Source buffer for async LDS load test
-    float*             async_lds_dst,  // Destination buffer for async LDS store test
-    int                buffer_size,
-    int                mfma_mode,  // 0=both, 1=asm only, 2=builtin only
-    hipTextureObject_t tex_obj,    // Texture for TEX load test (Strix); 0 if not used
-    hipSurfaceObject_t surf_obj    // Surface for TEX store test (Strix); 0 if not used
-);
 
 void
 print_separator()
@@ -352,54 +234,6 @@ static char g_arch_name[64] = "";
 static int g_arch_type = 0;
 
 void
-detect_architecture(const char* arch)
-{
-    strncpy(g_arch_name, arch, sizeof(g_arch_name) - 1);
-    g_arch_name[sizeof(g_arch_name) - 1] = '\0';
-
-    g_arch_type = 0;
-    if(strstr(arch, "gfx1152") || strstr(arch, "gfx1151") || strstr(arch, "gfx1150"))
-    {
-        g_arch_type = 6;  // Strix / Strix Halo / Krackan (RDNA 3.5)
-    }
-    else if(strstr(arch, "gfx1201"))
-    {
-        g_arch_type = 5;  // RX 9070 XT/RDNA4
-    }
-    else if(strstr(arch, "gfx1200"))
-    {
-        g_arch_type = 4;  // RX 9060/RDNA4
-    }
-    else if(strstr(arch, "gfx950"))
-    {
-        g_arch_type = 3;  // MI350/CDNA4
-    }
-    else if(strstr(arch, "gfx942") || strstr(arch, "gfx94"))
-    {
-        g_arch_type = 2;  // MI300/CDNA3
-    }
-    else if(strstr(arch, "gfx90a") || strstr(arch, "gfx908"))
-    {
-        g_arch_type = 1;  // MI250/MI100/CDNA2
-    }
-}
-
-const char*
-get_arch_description()
-{
-    switch(g_arch_type)
-    {
-        case 1: return "MI250/MI250X (CDNA2/gfx90a)";
-        case 2: return "MI300/MI300X (CDNA3/gfx942)";
-        case 3: return "MI350/MI355X (CDNA4/gfx950)";
-        case 4: return "RX 9060 series (RDNA4/gfx1200)";
-        case 5: return "RX 9070 XT/9070 (RDNA4/gfx1201)";
-        case 6: return "Strix/Strix Halo/Krackan (RDNA3.5/gfx1150,gfx1151,gfx1152)";
-        default: return "Unknown Architecture";
-    }
-}
-
-void
 print_device_info()
 {
     int             device;
@@ -408,8 +242,8 @@ print_device_info()
     HIP_CHECK(hipGetDevice(&device));
     HIP_CHECK(hipGetDeviceProperties(&props, device));
 
-    // Detect architecture
-    detect_architecture(props.gcnArchName);
+    mega_kernel_host::detect_architecture(props.gcnArchName, g_arch_name, sizeof(g_arch_name),
+                                         &g_arch_type);
 
     print_separator();
     printf("AMD GPU MEGA KERNEL UNIT TEST\n");
@@ -425,7 +259,8 @@ print_device_info()
     printf("  Shared Memory/Block:   %zu KB\n", props.sharedMemPerBlock / 1024);
     printf("  Clock Rate:            %d MHz\n", props.clockRate / 1000);
     print_separator();
-    printf("Detected Platform:       %s\n", get_arch_description());
+    printf("Detected Platform:       %s\n",
+           mega_kernel_host::arch_description(g_arch_type));
     print_separator();
 }
 
@@ -552,7 +387,8 @@ main(int argc, char** argv)
         HIP_CHECK(hipCreateSurfaceObject(&surf_obj, &resDesc));
     }
 
-    printf("Running GPU Mega Kernel for %s...\n", get_arch_description());
+    printf("Running GPU Mega Kernel for %s...\n",
+           mega_kernel_host::arch_description(g_arch_type));
     if(config.num_iterations > 1)
     {
         printf("  Running %d iterations...\n", config.num_iterations);
@@ -728,8 +564,8 @@ main(int argc, char** argv)
     print_test_result("MFMA INT8 (v_mfma_i32_32x32x*i8)", h_results.mfma_i8_passed);
     print_test_result("MFMA FP8 (v_mfma_f32_32x32x16_fp8)", h_results.mfma_f8_passed);
 
-    printf("\n[Category: Dual-Issue VALU (gfx942+)]\n");
-    print_test_result("Dual-Issue Patterns (VOPD/cross-wave)",
+    printf("\n[Category: Dual-Issue VALU (instruction patterns only)]\n");
+    print_test_result("Dual-Issue Patterns (not scheduler-verified)",
                       h_results.dual_issue_passed);
 
     printf("\n[Category: Lane/Thread Information]\n");
@@ -905,7 +741,8 @@ main(int argc, char** argv)
     print_separator();
 
     // Print architecture-specific feature summary
-    printf("\n%s SPECIFIC FEATURES TESTED:\n", get_arch_description());
+    printf("\n%s SPECIFIC FEATURES TESTED:\n",
+           mega_kernel_host::arch_description(g_arch_type));
 
     switch(g_arch_type)
     {
@@ -957,10 +794,10 @@ main(int argc, char** argv)
 
         case 6:  // Strix/Strix Halo (RDNA 3.5)
             printf("  - RDNA 3.5 (Navi3-based) iGPU: Strix Point (gfx1150) / Strix Halo "
-                   "(gfx1151)\n");
+                   "(gfx1151) / Krackan (gfx1152)\n");
             printf("  - Wave32 native, WMMA (FP16/BF16/INT8) 16x16x16\n");
             printf("  - VOPD same-wave dual-issue VALU\n");
-            printf("  - FP8/BF8 support; scalar FP in scalar unit; s_singleuse_vdst\n");
+            printf("  - No CDNA-style FP8/BF8 cvt builtins; scalar FP; s_singleuse_vdst\n");
             printf("  - Async LDS, WGP architecture\n");
             break;
 
