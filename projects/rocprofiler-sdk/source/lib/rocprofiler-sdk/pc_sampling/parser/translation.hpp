@@ -537,6 +537,21 @@ pack_snapshot_ext_data_gfx12(uint16_t arb_state)
     return result;
 }
 
+/**
+ * @brief Pack GFX1250 ext_data: GFX12 arbiter state bits + LOCK_CONTENTION.
+ *
+ * @param arb_state       Arbiter state bits from perf_snapshot_data1[24:9]
+ * @param lock_contention SAMPLING_LOCK_ERR bit (perf_snapshot_data bit 14)
+ */
+inline uint32_t
+pack_snapshot_ext_data_gfx1250(uint16_t arb_state, bool lock_contention)
+{
+    uint32_t result = pack_snapshot_ext_data_gfx12(arb_state);
+    if(lock_contention)
+        result |= (1u << ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_LOCK_CONTENTION);
+    return result;
+}
+
 // --- copySample specializations for V0 (minimal, all architectures) ---
 
 template <>
@@ -787,10 +802,11 @@ copySample<GFX1250, rocprofiler_pc_sampling_record_v2_t>(const void* sample)
     auto perf_snapshot_data1            = s.perf_snapshot_data1;
     ret.snapshot_information.wave_count = EXTRACT_BITS(perf_snapshot_data1, 5, 0);
 
-    // Pack arbiter state into canonical layout
+    // Pack arbiter state + lock contention into canonical layout
     // GFX1250 arb_state is at bits [24:9] of perf_snapshot_data1 (GFX12 uses [21:6])
-    uint16_t arb_state                = EXTRACT_BITS(perf_snapshot_data1, 24, 9);
-    ret.snapshot_information.ext_data = pack_snapshot_ext_data_gfx12(arb_state);
+    uint16_t arb_state      = EXTRACT_BITS(perf_snapshot_data1, 24, 9);
+    bool lock_contention    = EXTRACT_BITS(perf_snapshot_data, 14, 14);
+    ret.snapshot_information.ext_data = pack_snapshot_ext_data_gfx1250(arb_state, lock_contention);
 
     // Verify that the wave_id of snapshot_data matches the hw_id.wave_id
     auto sampled_wave_id = EXTRACT_BITS(perf_snapshot_data, 13, 9);

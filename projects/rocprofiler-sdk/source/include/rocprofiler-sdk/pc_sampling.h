@@ -1197,11 +1197,16 @@ typedef enum
     ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_ARBITER_STATE_STALLED_FLAT,  ///< GFX9 specific
     ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_ARBITER_STATE_STALLED_EXP,
     ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_ARBITER_STATE_STALLED_BRMSG_MISC,
-    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_DUAL_ISSUE_VALU,  ///< GFX9 specific
+    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_DUAL_ISSUE_VALU,    ///< GFX9 specific
+    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_LOCK_CONTENTION,  ///< GFX1250 specific
     ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_RESERVED0,        ///< future gen specific
     ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_RESERVED1,        ///< future gen specific
-    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_RESERVED2,        ///< future gen specific
     ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_LAST
+
+    /// @var ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_LOCK_CONTENTION
+    /// @brief At least one wave was unable to take a snapshot because the previous snapshot
+    /// had not yet been read. A high frequency of this bit indicates that the sampling
+    /// interval is too small.
 } rocprofiler_pc_sampling_snapshot_ext_v0_field_id_t;
 
 /**

@@ -157,9 +157,10 @@ ROCPROFILER_SNAPSHOT_EXT_V0_FIELD_STRING(
     ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_ARBITER_STATE_STALLED_BRMSG_MISC);
 ROCPROFILER_SNAPSHOT_EXT_V0_FIELD_STRING(
     ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_DUAL_ISSUE_VALU);
+ROCPROFILER_SNAPSHOT_EXT_V0_FIELD_STRING(
+    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_LOCK_CONTENTION);
 ROCPROFILER_SNAPSHOT_EXT_V0_FIELD_STRING(ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_RESERVED0);
 ROCPROFILER_SNAPSHOT_EXT_V0_FIELD_STRING(ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_RESERVED1);
-ROCPROFILER_SNAPSHOT_EXT_V0_FIELD_STRING(ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_RESERVED2);
 
 template <size_t Idx, size_t... Tail>
 const char*
@@ -274,6 +275,27 @@ const rocprofiler_pc_sampling_snapshot_ext_v0_field_id_t gfx12_snapshot_ext_v0_f
 };
 constexpr size_t gfx12_snapshot_ext_v0_fields_count =
     sizeof(gfx12_snapshot_ext_v0_fields) / sizeof(gfx12_snapshot_ext_v0_fields[0]);
+
+// Snapshot ext_data fields supported by GFX1250 (GFX12 fields + LOCK_CONTENTION)
+const rocprofiler_pc_sampling_snapshot_ext_v0_field_id_t gfx1250_snapshot_ext_v0_fields[] = {
+    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_ARBITER_STATE_ISSUED_VALU,
+    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_ARBITER_STATE_ISSUED_LDS,
+    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_ARBITER_STATE_ISSUED_LDS_DIRECT,
+    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_ARBITER_STATE_ISSUED_SCALAR,
+    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_ARBITER_STATE_ISSUED_VMEM_TEX,
+    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_ARBITER_STATE_ISSUED_EXP,
+    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_ARBITER_STATE_ISSUED_BRMSG_MISC,
+    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_ARBITER_STATE_STALLED_VALU,
+    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_ARBITER_STATE_STALLED_LDS,
+    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_ARBITER_STATE_STALLED_LDS_DIRECT,
+    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_ARBITER_STATE_STALLED_SCALAR,
+    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_ARBITER_STATE_STALLED_VMEM_TEX,
+    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_ARBITER_STATE_STALLED_EXP,
+    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_ARBITER_STATE_STALLED_BRMSG_MISC,
+    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_LOCK_CONTENTION,
+};
+constexpr size_t gfx1250_snapshot_ext_v0_fields_count =
+    sizeof(gfx1250_snapshot_ext_v0_fields) / sizeof(gfx1250_snapshot_ext_v0_fields[0]);
 
 /**
  * @brief The functions checks if the `ROCPROFILER_PC_SAMPLING_BETA_ENABLED` is set.
@@ -745,6 +767,7 @@ rocprofiler_query_pc_sampling_snapshot_ext_v0_fields(
 
     // Determine architecture from agent's gfx_target_version
     auto gfxip_major = (agent->gfx_target_version / 10000) % 100;
+    auto gfxip_minor = (agent->gfx_target_version / 100) % 100;
 
     const rocprofiler_pc_sampling_snapshot_ext_v0_field_id_t* fields     = nullptr;
     size_t                                                    num_fields = 0;
@@ -753,6 +776,11 @@ rocprofiler_query_pc_sampling_snapshot_ext_v0_fields(
     {
         fields     = gfx9_snapshot_ext_v0_fields;
         num_fields = gfx9_snapshot_ext_v0_fields_count;
+    }
+    else if(gfxip_major == 12 && gfxip_minor == 5)
+    {
+        fields     = gfx1250_snapshot_ext_v0_fields;
+        num_fields = gfx1250_snapshot_ext_v0_fields_count;
     }
     else if(gfxip_major == 12)
     {
