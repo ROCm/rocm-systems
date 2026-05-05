@@ -118,7 +118,7 @@ find_all_gpu_agents_supporting_pc_sampling_impl(rocprofiler_agent_version_t vers
         {
             auto tool_gpu_agent            = std::make_unique<tool_agent_info>();
             tool_gpu_agent->agent_id       = _agents[i]->id;
-            tool_gpu_agent->arbiter_fields = std::make_unique<arbiter_fields_vec_t>();
+            tool_gpu_agent->ext_v0_fields = std::make_unique<ext_v0_fields_vec_t>();
             tool_gpu_agent->agent          = _agents[i];
 
             ++gpu_index;
@@ -126,8 +126,8 @@ find_all_gpu_agents_supporting_pc_sampling_impl(rocprofiler_agent_version_t vers
             // If the agent supports PC sampling, memoize the config and add it.
             if(query_most_comprehensive_config_for_agent(tool_gpu_agent.get()))
             {
-                // Query arbiter state fields supported by this agent and store per-agent.
-                query_arbiter_fields_for_agent(tool_gpu_agent.get());
+                // Query snapshot ext_data fields supported by this agent and store per-agent.
+                query_snapshot_ext_v0_fields_for_agent(tool_gpu_agent.get());
                 _out_agents->push_back(std::move(tool_gpu_agent));
             }
         }
@@ -190,15 +190,15 @@ query_most_comprehensive_config_for_agent(tool_agent_info* agent_info)
 }
 
 void
-query_arbiter_fields_for_agent(tool_agent_info* agent_info)
+query_snapshot_ext_v0_fields_for_agent(tool_agent_info* agent_info)
 {
-    agent_info->arbiter_fields->clear();
-    agent_info->arbiter_field_names.clear();
+    agent_info->ext_v0_fields->clear();
+    agent_info->ext_v0_field_names.clear();
 
-    auto cb = [](const rocprofiler_pc_sampling_arbiter_state_field_id_t* fields,
-                 size_t                                                  num_fields,
-                 void*                                                   user_data) {
-        auto* out = static_cast<arbiter_fields_vec_t*>(user_data);
+    auto cb = [](const rocprofiler_pc_sampling_snapshot_ext_v0_field_id_t* fields,
+                 size_t                                                    num_fields,
+                 void*                                                     user_data) {
+        auto* out = static_cast<ext_v0_fields_vec_t*>(user_data);
         for(size_t i = 0; i < num_fields; i++)
         {
             out->emplace_back(fields[i]);
@@ -206,14 +206,14 @@ query_arbiter_fields_for_agent(tool_agent_info* agent_info)
         return ROCPROFILER_STATUS_SUCCESS;
     };
 
-    auto status = rocprofiler_query_pc_sampling_arbiter_fields(
-        agent_info->agent_id, cb, agent_info->arbiter_fields.get());
+    auto status = rocprofiler_query_pc_sampling_snapshot_ext_v0_fields(
+        agent_info->agent_id, cb, agent_info->ext_v0_fields.get());
 
     std::stringstream ss;
 
     if(status != ROCPROFILER_STATUS_SUCCESS)
     {
-        ss << "Querying arbiter state fields for agent " << agent_info->agent_id.handle
+        ss << "Querying snapshot ext_data fields for agent " << agent_info->agent_id.handle
            << " failed with status=" << status << " :: " << rocprofiler_get_status_string(status)
            << "\n";
         *utils::get_output_stream() << ss.str();
@@ -222,25 +222,25 @@ query_arbiter_fields_for_agent(tool_agent_info* agent_info)
 
     // Build the field-name LUT once so the buffer callback never has to query names.
     ss << "Agent " << agent_info->agent_id.handle << " supports "
-       << agent_info->arbiter_fields->size() << " arbiter state field(s):\n";
+       << agent_info->ext_v0_fields->size() << " snapshot ext_data field(s):\n";
     size_t field_index = 0;
-    for(auto field_id : *agent_info->arbiter_fields)
+    for(auto field_id : *agent_info->ext_v0_fields)
     {
         const char* name     = nullptr;
         uint64_t    name_len = 0;
         auto        name_status =
-            rocprofiler_get_pc_sampling_arbiter_state_field_name(field_id, &name, &name_len);
+            rocprofiler_get_pc_sampling_snapshot_ext_v0_field_name(field_id, &name, &name_len);
         ++field_index;
         if(name_status == ROCPROFILER_STATUS_SUCCESS && name != nullptr)
         {
             auto name_str = std::string(name, name_len);
-            agent_info->arbiter_field_names.emplace(field_id, name_str);
+            agent_info->ext_v0_field_names.emplace(field_id, name_str);
             ss << "  " << field_index << ". " << name_str << "\n";
         }
         else
         {
             auto fallback = "field_" + std::to_string(static_cast<int>(field_id));
-            agent_info->arbiter_field_names.emplace(field_id, fallback);
+            agent_info->ext_v0_field_names.emplace(field_id, fallback);
             ss << "  " << field_index << ". UNKNOWN(" << static_cast<int>(field_id) << ")\n";
         }
     }
@@ -348,11 +348,11 @@ print_sample_v1(std::ostream& os, const rocprofiler_pc_sampling_record_v1_t* sam
 }
 
 /**
- * @brief Print a V2 stochastic PC sampling record, including arbiter state
- * decoded via the per-agent arbiter fields.
+ * @brief Print a V2 stochastic PC sampling record, including ext_data
+ * decoded via the per-agent snapshot ext_v0 fields.
  *
- * @param agent_info The agent info containing the pre-queried arbiter_fields
- *                   and the memoized arbiter_field_names map.  Passed as
+ * @param agent_info The agent info containing the pre-queried ext_v0_fields
+ *                   and the memoized ext_v0_field_names map.  Passed as
  *                   buffer client_data so there is no need to iterate over
  *                   the global agent list -- this is the recommended policy.
  */
@@ -398,26 +398,26 @@ print_sample_v2(std::ostream&                              os,
 
     os << "wave_count: " << static_cast<unsigned int>(snap.wave_count) << ", ";
 
-    // Decode arbiter_state using the pre-queried per-agent arbiter fields
+    // Decode ext_data using the pre-queried per-agent snapshot ext_v0 fields
     // and the memoized name map (avoids calling the name API per-sample).
-    if(agent_info != nullptr && agent_info->arbiter_fields != nullptr &&
-       !agent_info->arbiter_fields->empty())
+    if(agent_info != nullptr && agent_info->ext_v0_fields != nullptr &&
+       !agent_info->ext_v0_fields->empty())
     {
-        os << "arbiter_state: {";
+        os << "ext_data: {";
 
         // Use the extraction API to get field values; look up names from the LUT.
-        struct arbiter_cb_data
+        struct ext_v0_cb_data
         {
-            std::ostream*                   os;
-            const arbiter_field_name_map_t* name_map;
+            std::ostream*                    os;
+            const ext_v0_field_name_map_t*   name_map;
         };
-        auto cb_data = arbiter_cb_data{&os, &agent_info->arbiter_field_names};
+        auto cb_data = ext_v0_cb_data{&os, &agent_info->ext_v0_field_names};
 
-        auto arbiter_cb = [](const rocprofiler_pc_sampling_arbiter_state_field_id_t* field_ids,
-                             const uint32_t*                                         values,
-                             size_t                                                  num_fields,
-                             void* user_data) -> rocprofiler_status_t {
-            auto&  data  = *static_cast<arbiter_cb_data*>(user_data);
+        auto ext_v0_cb = [](const rocprofiler_pc_sampling_snapshot_ext_v0_field_id_t* field_ids,
+                            const uint32_t*                                           values,
+                            size_t                                                    num_fields,
+                            void* user_data) -> rocprofiler_status_t {
+            auto&  data  = *static_cast<ext_v0_cb_data*>(user_data);
             bool   first = true;
             for(size_t i = 0; i < num_fields; i++)
             {
@@ -430,16 +430,16 @@ print_sample_v2(std::ostream&                              os,
             return ROCPROFILER_STATUS_SUCCESS;
         };
 
-        auto extract_status = rocprofiler_pc_sampling_get_arbiter_state_fields(
-            snap.arbiter_state,
-            agent_info->arbiter_fields->data(),
-            agent_info->arbiter_fields->size(),
-            arbiter_cb,
+        auto extract_status = rocprofiler_pc_sampling_get_snapshot_ext_v0_fields(
+            snap.ext_data,
+            agent_info->ext_v0_fields->data(),
+            agent_info->ext_v0_fields->size(),
+            ext_v0_cb,
             static_cast<void*>(&cb_data));
 
         if(extract_status != ROCPROFILER_STATUS_SUCCESS)
         {
-            os << "ERROR extracting arbiter state";
+            os << "ERROR extracting ext_data fields";
         }
         os << "}";
     }

@@ -460,8 +460,8 @@ copySampleCommon(const SType& sample)
 }
 
 /**
- * @brief Helper to pack GFX9 arbiter state bits into the canonical uint32_t layout
- * where bit N corresponds to rocprofiler_pc_sampling_arbiter_state_field_id_t value N.
+ * @brief Helper to pack GFX9 arbiter state bits into the canonical ext_data uint32_t layout
+ * where bit N corresponds to rocprofiler_pc_sampling_snapshot_ext_v0_field_id_t value N.
  *
  * GFX9 arb_state register layout (from perf_snapshot_data bits [25:10]):
  *   bit 0 = ISSUE_MISC, bit 1 = ISSUE_EXP, bit 2 = ISSUE_FLAT, bit 3 = ISSUE_LDS,
@@ -470,39 +470,39 @@ copySampleCommon(const SType& sample)
  *   bit 12 = STALL_VMEM_TEX, bit 13 = STALL_SCALAR, bit 14 = STALL_MATRIX, bit 15 = STALL_VALU
  */
 inline uint32_t
-pack_arbiter_state_gfx9(uint16_t arb_state, bool dual_issue_valu)
+pack_snapshot_ext_data_gfx9(uint16_t arb_state, bool dual_issue_valu)
 {
     uint32_t result = 0;
     // Map HW bits to canonical field IDs
-    auto set_bit = [&](rocprofiler_pc_sampling_arbiter_state_field_id_t field, int hw_bit) {
+    auto set_bit = [&](rocprofiler_pc_sampling_snapshot_ext_v0_field_id_t field, int hw_bit) {
         if(arb_state & (1u << hw_bit)) result |= (1u << field);
     };
-    set_bit(ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_ISSUE_VALU, 7);
-    set_bit(ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_ISSUE_MATRIX, 6);
-    set_bit(ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_ISSUE_LDS, 3);
-    set_bit(ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_ISSUE_SCALAR, 5);
-    set_bit(ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_ISSUE_VMEM_TEX, 4);
-    set_bit(ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_ISSUE_FLAT, 2);
-    set_bit(ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_ISSUE_EXP, 1);
-    set_bit(ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_ISSUE_BRMSG_MISC, 0);
+    set_bit(ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_ARBITER_STATE_ISSUED_VALU, 7);
+    set_bit(ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_ARBITER_STATE_ISSUED_MATRIX, 6);
+    set_bit(ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_ARBITER_STATE_ISSUED_LDS, 3);
+    set_bit(ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_ARBITER_STATE_ISSUED_SCALAR, 5);
+    set_bit(ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_ARBITER_STATE_ISSUED_VMEM_TEX, 4);
+    set_bit(ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_ARBITER_STATE_ISSUED_FLAT, 2);
+    set_bit(ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_ARBITER_STATE_ISSUED_EXP, 1);
+    set_bit(ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_ARBITER_STATE_ISSUED_BRMSG_MISC, 0);
 
-    set_bit(ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_STALL_VALU, 15);
-    set_bit(ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_STALL_MATRIX, 14);
-    set_bit(ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_STALL_LDS, 11);
-    set_bit(ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_STALL_SCALAR, 13);
-    set_bit(ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_STALL_VMEM_TEX, 12);
-    set_bit(ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_STALL_FLAT, 10);
-    set_bit(ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_STALL_EXP, 9);
-    set_bit(ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_STALL_BRMSG_MISC, 8);
+    set_bit(ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_ARBITER_STATE_STALLED_VALU, 15);
+    set_bit(ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_ARBITER_STATE_STALLED_MATRIX, 14);
+    set_bit(ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_ARBITER_STATE_STALLED_LDS, 11);
+    set_bit(ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_ARBITER_STATE_STALLED_SCALAR, 13);
+    set_bit(ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_ARBITER_STATE_STALLED_VMEM_TEX, 12);
+    set_bit(ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_ARBITER_STATE_STALLED_FLAT, 10);
+    set_bit(ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_ARBITER_STATE_STALLED_EXP, 9);
+    set_bit(ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_ARBITER_STATE_STALLED_BRMSG_MISC, 8);
 
     if(dual_issue_valu)
-        result |= (1u << ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_DUAL_ISSUE_VALU);
+        result |= (1u << ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_DUAL_ISSUE_VALU);
 
     return result;
 }
 
 /**
- * @brief Pack GFX12 arbiter state bits into canonical uint32_t layout.
+ * @brief Pack GFX12 arbiter state bits into canonical ext_data uint32_t layout.
  *
  * GFX12 arb_state register layout (from perf_snapshot_data1 bits [21:6]):
  *   bit 0 = ISSUE_BRMSG, bit 1 = ISSUE_EXP, bit 2 = ISSUE_LDS_DIRECT, bit 3 = ISSUE_LDS,
@@ -512,27 +512,27 @@ pack_arbiter_state_gfx9(uint16_t arb_state, bool dual_issue_valu)
  *   bit 12 = STALL_VMEM_TEX, bit 13 = STALL_SCALAR, bit 14 = STALL_VALU
  */
 inline uint32_t
-pack_arbiter_state_gfx12(uint16_t arb_state)
+pack_snapshot_ext_data_gfx12(uint16_t arb_state)
 {
     uint32_t result  = 0;
-    auto     set_bit = [&](rocprofiler_pc_sampling_arbiter_state_field_id_t field, int hw_bit) {
+    auto     set_bit = [&](rocprofiler_pc_sampling_snapshot_ext_v0_field_id_t field, int hw_bit) {
         if(arb_state & (1u << hw_bit)) result |= (1u << field);
     };
-    set_bit(ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_ISSUE_VALU, 6);
-    set_bit(ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_ISSUE_LDS, 3);
-    set_bit(ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_ISSUE_LDS_DIRECT, 2);
-    set_bit(ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_ISSUE_SCALAR, 5);
-    set_bit(ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_ISSUE_VMEM_TEX, 4);
-    set_bit(ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_ISSUE_EXP, 1);
-    set_bit(ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_ISSUE_BRMSG_MISC, 0);
+    set_bit(ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_ARBITER_STATE_ISSUED_VALU, 6);
+    set_bit(ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_ARBITER_STATE_ISSUED_LDS, 3);
+    set_bit(ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_ARBITER_STATE_ISSUED_LDS_DIRECT, 2);
+    set_bit(ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_ARBITER_STATE_ISSUED_SCALAR, 5);
+    set_bit(ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_ARBITER_STATE_ISSUED_VMEM_TEX, 4);
+    set_bit(ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_ARBITER_STATE_ISSUED_EXP, 1);
+    set_bit(ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_ARBITER_STATE_ISSUED_BRMSG_MISC, 0);
 
-    set_bit(ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_STALL_VALU, 14);
-    set_bit(ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_STALL_LDS, 11);
-    set_bit(ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_STALL_LDS_DIRECT, 10);
-    set_bit(ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_STALL_SCALAR, 13);
-    set_bit(ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_STALL_VMEM_TEX, 12);
-    set_bit(ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_STALL_EXP, 9);
-    set_bit(ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_STALL_BRMSG_MISC, 8);
+    set_bit(ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_ARBITER_STATE_STALLED_VALU, 14);
+    set_bit(ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_ARBITER_STATE_STALLED_LDS, 11);
+    set_bit(ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_ARBITER_STATE_STALLED_LDS_DIRECT, 10);
+    set_bit(ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_ARBITER_STATE_STALLED_SCALAR, 13);
+    set_bit(ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_ARBITER_STATE_STALLED_VMEM_TEX, 12);
+    set_bit(ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_ARBITER_STATE_STALLED_EXP, 9);
+    set_bit(ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_ARBITER_STATE_STALLED_BRMSG_MISC, 8);
 
     return result;
 }
@@ -660,7 +660,7 @@ copySample<GFX9, rocprofiler_pc_sampling_record_v2_t>(const void* sample)
     // Pack arbiter state into canonical layout
     uint16_t arb_state                     = EXTRACT_BITS(perf_snapshot_data, 25, 10);
     bool     dual_issue                    = EXTRACT_BITS(perf_snapshot_data, 2, 2);
-    ret.snapshot_information.arbiter_state = pack_arbiter_state_gfx9(arb_state, dual_issue);
+    ret.snapshot_information.ext_data = pack_snapshot_ext_data_gfx9(arb_state, dual_issue);
 
     return ret;
 }
@@ -719,8 +719,8 @@ copySample<GFX12, rocprofiler_pc_sampling_record_v2_t>(const void* sample)
     ret.snapshot_information.wave_count = EXTRACT_BITS(perf_snapshot_data1, 5, 0);
 
     // Pack arbiter state into canonical layout
-    uint16_t arb_state                     = EXTRACT_BITS(perf_snapshot_data1, 21, 6);
-    ret.snapshot_information.arbiter_state = pack_arbiter_state_gfx12(arb_state);
+    uint16_t arb_state                = EXTRACT_BITS(perf_snapshot_data1, 21, 6);
+    ret.snapshot_information.ext_data = pack_snapshot_ext_data_gfx12(arb_state);
 
     return ret;
 }
@@ -789,8 +789,8 @@ copySample<GFX1250, rocprofiler_pc_sampling_record_v2_t>(const void* sample)
 
     // Pack arbiter state into canonical layout
     // GFX1250 arb_state is at bits [24:9] of perf_snapshot_data1 (GFX12 uses [21:6])
-    uint16_t arb_state                     = EXTRACT_BITS(perf_snapshot_data1, 24, 9);
-    ret.snapshot_information.arbiter_state = pack_arbiter_state_gfx12(arb_state);
+    uint16_t arb_state                = EXTRACT_BITS(perf_snapshot_data1, 24, 9);
+    ret.snapshot_information.ext_data = pack_snapshot_ext_data_gfx12(arb_state);
 
     // Verify that the wave_id of snapshot_data matches the hw_id.wave_id
     auto sampled_wave_id = EXTRACT_BITS(perf_snapshot_data, 13, 9);

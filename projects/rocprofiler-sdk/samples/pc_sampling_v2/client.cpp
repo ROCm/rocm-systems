@@ -35,8 +35,8 @@
  *   comprehensive record version, iterating from LAST-1 down to V0
  * - Prefers stochastic sampling, falling back to host-trap automatically
  * - Uses rocprofiler_configure_pc_sampling_service_v2 with memoized config
- * - Queries arbiter state fields per GPU agent
- * - Decodes arbiter_state via rocprofiler_pc_sampling_get_arbiter_state_fields
+ * - Queries snapshot ext_data fields per GPU agent
+ * - Decodes ext_data via rocprofiler_pc_sampling_get_snapshot_ext_v0_fields
  */
 
 #include "pcs.hpp"

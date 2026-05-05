@@ -119,56 +119,56 @@ get_no_issue_reason_name(rocprofiler_pc_sampling_instruction_not_issued_reason_t
     return nullptr;
 }
 
-// Arbiter state field name infrastructure (same pattern as instruction_type_string)
-#define ROCPROFILER_ARBITER_STATE_FIELD_STRING(CODE)                                               \
+// Snapshot ext_data field name infrastructure (same pattern as instruction_type_string)
+#define ROCPROFILER_SNAPSHOT_EXT_V0_FIELD_STRING(CODE)                                             \
     template <>                                                                                    \
-    struct arbiter_state_field_string<CODE>                                                        \
+    struct snapshot_ext_v0_field_string<CODE>                                                      \
     {                                                                                              \
         static constexpr auto name = #CODE;                                                        \
     };
 
 template <size_t Idx>
-struct arbiter_state_field_string;
+struct snapshot_ext_v0_field_string;
 
-ROCPROFILER_ARBITER_STATE_FIELD_STRING(ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_NONE);
-ROCPROFILER_ARBITER_STATE_FIELD_STRING(ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_ISSUE_VALU);
-ROCPROFILER_ARBITER_STATE_FIELD_STRING(ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_ISSUE_MATRIX);
-ROCPROFILER_ARBITER_STATE_FIELD_STRING(ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_ISSUE_LDS);
-ROCPROFILER_ARBITER_STATE_FIELD_STRING(
-    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_ISSUE_LDS_DIRECT);
-ROCPROFILER_ARBITER_STATE_FIELD_STRING(ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_ISSUE_SCALAR);
-ROCPROFILER_ARBITER_STATE_FIELD_STRING(
-    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_ISSUE_VMEM_TEX);
-ROCPROFILER_ARBITER_STATE_FIELD_STRING(ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_ISSUE_FLAT);
-ROCPROFILER_ARBITER_STATE_FIELD_STRING(ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_ISSUE_EXP);
-ROCPROFILER_ARBITER_STATE_FIELD_STRING(
-    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_ISSUE_BRMSG_MISC);
-ROCPROFILER_ARBITER_STATE_FIELD_STRING(ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_STALL_VALU);
-ROCPROFILER_ARBITER_STATE_FIELD_STRING(ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_STALL_MATRIX);
-ROCPROFILER_ARBITER_STATE_FIELD_STRING(ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_STALL_LDS);
-ROCPROFILER_ARBITER_STATE_FIELD_STRING(
-    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_STALL_LDS_DIRECT);
-ROCPROFILER_ARBITER_STATE_FIELD_STRING(ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_STALL_SCALAR);
-ROCPROFILER_ARBITER_STATE_FIELD_STRING(
-    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_STALL_VMEM_TEX);
-ROCPROFILER_ARBITER_STATE_FIELD_STRING(ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_STALL_FLAT);
-ROCPROFILER_ARBITER_STATE_FIELD_STRING(ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_STALL_EXP);
-ROCPROFILER_ARBITER_STATE_FIELD_STRING(
-    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_STALL_BRMSG_MISC);
-ROCPROFILER_ARBITER_STATE_FIELD_STRING(
-    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_DUAL_ISSUE_VALU);
-ROCPROFILER_ARBITER_STATE_FIELD_STRING(ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_RESERVED0);
-ROCPROFILER_ARBITER_STATE_FIELD_STRING(ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_RESERVED1);
-ROCPROFILER_ARBITER_STATE_FIELD_STRING(ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_RESERVED2);
+ROCPROFILER_SNAPSHOT_EXT_V0_FIELD_STRING(ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_NONE);
+ROCPROFILER_SNAPSHOT_EXT_V0_FIELD_STRING(ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_ARBITER_STATE_ISSUED_VALU);
+ROCPROFILER_SNAPSHOT_EXT_V0_FIELD_STRING(ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_ARBITER_STATE_ISSUED_MATRIX);
+ROCPROFILER_SNAPSHOT_EXT_V0_FIELD_STRING(ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_ARBITER_STATE_ISSUED_LDS);
+ROCPROFILER_SNAPSHOT_EXT_V0_FIELD_STRING(
+    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_ARBITER_STATE_ISSUED_LDS_DIRECT);
+ROCPROFILER_SNAPSHOT_EXT_V0_FIELD_STRING(ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_ARBITER_STATE_ISSUED_SCALAR);
+ROCPROFILER_SNAPSHOT_EXT_V0_FIELD_STRING(
+    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_ARBITER_STATE_ISSUED_VMEM_TEX);
+ROCPROFILER_SNAPSHOT_EXT_V0_FIELD_STRING(ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_ARBITER_STATE_ISSUED_FLAT);
+ROCPROFILER_SNAPSHOT_EXT_V0_FIELD_STRING(ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_ARBITER_STATE_ISSUED_EXP);
+ROCPROFILER_SNAPSHOT_EXT_V0_FIELD_STRING(
+    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_ARBITER_STATE_ISSUED_BRMSG_MISC);
+ROCPROFILER_SNAPSHOT_EXT_V0_FIELD_STRING(ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_ARBITER_STATE_STALLED_VALU);
+ROCPROFILER_SNAPSHOT_EXT_V0_FIELD_STRING(ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_ARBITER_STATE_STALLED_MATRIX);
+ROCPROFILER_SNAPSHOT_EXT_V0_FIELD_STRING(ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_ARBITER_STATE_STALLED_LDS);
+ROCPROFILER_SNAPSHOT_EXT_V0_FIELD_STRING(
+    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_ARBITER_STATE_STALLED_LDS_DIRECT);
+ROCPROFILER_SNAPSHOT_EXT_V0_FIELD_STRING(ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_ARBITER_STATE_STALLED_SCALAR);
+ROCPROFILER_SNAPSHOT_EXT_V0_FIELD_STRING(
+    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_ARBITER_STATE_STALLED_VMEM_TEX);
+ROCPROFILER_SNAPSHOT_EXT_V0_FIELD_STRING(ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_ARBITER_STATE_STALLED_FLAT);
+ROCPROFILER_SNAPSHOT_EXT_V0_FIELD_STRING(ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_ARBITER_STATE_STALLED_EXP);
+ROCPROFILER_SNAPSHOT_EXT_V0_FIELD_STRING(
+    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_ARBITER_STATE_STALLED_BRMSG_MISC);
+ROCPROFILER_SNAPSHOT_EXT_V0_FIELD_STRING(
+    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_DUAL_ISSUE_VALU);
+ROCPROFILER_SNAPSHOT_EXT_V0_FIELD_STRING(ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_RESERVED0);
+ROCPROFILER_SNAPSHOT_EXT_V0_FIELD_STRING(ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_RESERVED1);
+ROCPROFILER_SNAPSHOT_EXT_V0_FIELD_STRING(ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_RESERVED2);
 
 template <size_t Idx, size_t... Tail>
 const char*
-get_arbiter_state_field_name(rocprofiler_pc_sampling_arbiter_state_field_id_t field_id,
-                             std::index_sequence<Idx, Tail...>)
+get_snapshot_ext_v0_field_name(rocprofiler_pc_sampling_snapshot_ext_v0_field_id_t field_id,
+                               std::index_sequence<Idx, Tail...>)
 {
-    if(field_id == Idx) return arbiter_state_field_string<Idx>::name;
+    if(field_id == Idx) return snapshot_ext_v0_field_string<Idx>::name;
     if constexpr(sizeof...(Tail) > 0)
-        return get_arbiter_state_field_name(field_id, std::index_sequence<Tail...>{});
+        return get_snapshot_ext_v0_field_name(field_id, std::index_sequence<Tail...>{});
     return nullptr;
 }
 
@@ -232,48 +232,48 @@ validate_record_kinds(const rocprofiler_pc_sampling_record_kind_t* record_kinds,
     return ROCPROFILER_STATUS_SUCCESS;
 }
 
-// Arbiter state fields supported by GFX9 (MI200/MI300/MI350)
-const rocprofiler_pc_sampling_arbiter_state_field_id_t gfx9_arbiter_fields[] = {
-    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_ISSUE_VALU,
-    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_ISSUE_MATRIX,
-    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_ISSUE_LDS,
-    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_ISSUE_SCALAR,
-    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_ISSUE_VMEM_TEX,
-    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_ISSUE_FLAT,
-    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_ISSUE_EXP,
-    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_ISSUE_BRMSG_MISC,
-    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_STALL_VALU,
-    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_STALL_MATRIX,
-    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_STALL_LDS,
-    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_STALL_SCALAR,
-    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_STALL_VMEM_TEX,
-    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_STALL_FLAT,
-    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_STALL_EXP,
-    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_STALL_BRMSG_MISC,
-    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_DUAL_ISSUE_VALU,
+// Snapshot ext_data fields supported by GFX9 (MI200/MI300/MI350)
+const rocprofiler_pc_sampling_snapshot_ext_v0_field_id_t gfx9_snapshot_ext_v0_fields[] = {
+    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_ARBITER_STATE_ISSUED_VALU,
+    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_ARBITER_STATE_ISSUED_MATRIX,
+    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_ARBITER_STATE_ISSUED_LDS,
+    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_ARBITER_STATE_ISSUED_SCALAR,
+    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_ARBITER_STATE_ISSUED_VMEM_TEX,
+    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_ARBITER_STATE_ISSUED_FLAT,
+    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_ARBITER_STATE_ISSUED_EXP,
+    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_ARBITER_STATE_ISSUED_BRMSG_MISC,
+    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_ARBITER_STATE_STALLED_VALU,
+    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_ARBITER_STATE_STALLED_MATRIX,
+    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_ARBITER_STATE_STALLED_LDS,
+    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_ARBITER_STATE_STALLED_SCALAR,
+    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_ARBITER_STATE_STALLED_VMEM_TEX,
+    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_ARBITER_STATE_STALLED_FLAT,
+    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_ARBITER_STATE_STALLED_EXP,
+    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_ARBITER_STATE_STALLED_BRMSG_MISC,
+    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_DUAL_ISSUE_VALU,
 };
-constexpr size_t gfx9_arbiter_fields_count =
-    sizeof(gfx9_arbiter_fields) / sizeof(gfx9_arbiter_fields[0]);
+constexpr size_t gfx9_snapshot_ext_v0_fields_count =
+    sizeof(gfx9_snapshot_ext_v0_fields) / sizeof(gfx9_snapshot_ext_v0_fields[0]);
 
-// Arbiter state fields supported by GFX12
-const rocprofiler_pc_sampling_arbiter_state_field_id_t gfx12_arbiter_fields[] = {
-    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_ISSUE_VALU,
-    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_ISSUE_LDS,
-    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_ISSUE_LDS_DIRECT,
-    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_ISSUE_SCALAR,
-    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_ISSUE_VMEM_TEX,
-    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_ISSUE_EXP,
-    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_ISSUE_BRMSG_MISC,
-    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_STALL_VALU,
-    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_STALL_LDS,
-    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_STALL_LDS_DIRECT,
-    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_STALL_SCALAR,
-    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_STALL_VMEM_TEX,
-    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_STALL_EXP,
-    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_STALL_BRMSG_MISC,
+// Snapshot ext_data fields supported by GFX12
+const rocprofiler_pc_sampling_snapshot_ext_v0_field_id_t gfx12_snapshot_ext_v0_fields[] = {
+    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_ARBITER_STATE_ISSUED_VALU,
+    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_ARBITER_STATE_ISSUED_LDS,
+    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_ARBITER_STATE_ISSUED_LDS_DIRECT,
+    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_ARBITER_STATE_ISSUED_SCALAR,
+    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_ARBITER_STATE_ISSUED_VMEM_TEX,
+    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_ARBITER_STATE_ISSUED_EXP,
+    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_ARBITER_STATE_ISSUED_BRMSG_MISC,
+    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_ARBITER_STATE_STALLED_VALU,
+    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_ARBITER_STATE_STALLED_LDS,
+    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_ARBITER_STATE_STALLED_LDS_DIRECT,
+    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_ARBITER_STATE_STALLED_SCALAR,
+    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_ARBITER_STATE_STALLED_VMEM_TEX,
+    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_ARBITER_STATE_STALLED_EXP,
+    ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_ARBITER_STATE_STALLED_BRMSG_MISC,
 };
-constexpr size_t gfx12_arbiter_fields_count =
-    sizeof(gfx12_arbiter_fields) / sizeof(gfx12_arbiter_fields[0]);
+constexpr size_t gfx12_snapshot_ext_v0_fields_count =
+    sizeof(gfx12_snapshot_ext_v0_fields) / sizeof(gfx12_snapshot_ext_v0_fields[0]);
 
 /**
  * @brief The functions checks if the `ROCPROFILER_PC_SAMPLING_BETA_ENABLED` is set.
@@ -717,15 +717,16 @@ rocprofiler_query_pc_sampling_agent_configurations_v2(
 }
 
 rocprofiler_status_t
-rocprofiler_get_pc_sampling_arbiter_state_field_name(
-    rocprofiler_pc_sampling_arbiter_state_field_id_t field_id,
-    const char**                                     name,
-    uint64_t*                                        name_len)
+rocprofiler_get_pc_sampling_snapshot_ext_v0_field_name(
+    rocprofiler_pc_sampling_snapshot_ext_v0_field_id_t field_id,
+    const char**                                       name,
+    uint64_t*                                          name_len)
 {
     if(!name || !name_len) return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
 
-    const char* n = get_arbiter_state_field_name(
-        field_id, std::make_index_sequence<ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_LAST>{});
+    const char* n = get_snapshot_ext_v0_field_name(
+        field_id,
+        std::make_index_sequence<ROCPROFILER_PC_SAMPLING_SNAPSHOT_EXT_V0_FIELD_ID_LAST>{});
     if(!n) return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
 
     *name     = n;
@@ -734,9 +735,10 @@ rocprofiler_get_pc_sampling_arbiter_state_field_name(
 }
 
 rocprofiler_status_t
-rocprofiler_query_pc_sampling_arbiter_fields(rocprofiler_agent_id_t                      agent_id,
-                                             rocprofiler_pc_sampling_arbiter_fields_cb_t cb,
-                                             void*                                       user_data)
+rocprofiler_query_pc_sampling_snapshot_ext_v0_fields(
+    rocprofiler_agent_id_t                              agent_id,
+    rocprofiler_pc_sampling_snapshot_ext_v0_fields_cb_t cb,
+    void*                                               user_data)
 {
     const auto* agent = rocprofiler::agent::get_agent(agent_id);
     if(!agent) return ROCPROFILER_STATUS_ERROR_AGENT_NOT_FOUND;
@@ -744,22 +746,22 @@ rocprofiler_query_pc_sampling_arbiter_fields(rocprofiler_agent_id_t             
     // Determine architecture from agent's gfx_target_version
     auto gfxip_major = (agent->gfx_target_version / 10000) % 100;
 
-    const rocprofiler_pc_sampling_arbiter_state_field_id_t* fields     = nullptr;
-    size_t                                                  num_fields = 0;
+    const rocprofiler_pc_sampling_snapshot_ext_v0_field_id_t* fields     = nullptr;
+    size_t                                                    num_fields = 0;
 
     if(gfxip_major == 9)
     {
-        fields     = gfx9_arbiter_fields;
-        num_fields = gfx9_arbiter_fields_count;
+        fields     = gfx9_snapshot_ext_v0_fields;
+        num_fields = gfx9_snapshot_ext_v0_fields_count;
     }
     else if(gfxip_major == 12)
     {
-        fields     = gfx12_arbiter_fields;
-        num_fields = gfx12_arbiter_fields_count;
+        fields     = gfx12_snapshot_ext_v0_fields;
+        num_fields = gfx12_snapshot_ext_v0_fields_count;
     }
     else
     {
-        // Architecture does not support arbiter state fields, deliver empty array
+        // Architecture does not support snapshot ext_data fields, deliver empty array
         return cb(nullptr, 0, user_data);
     }
 
@@ -767,18 +769,18 @@ rocprofiler_query_pc_sampling_arbiter_fields(rocprofiler_agent_id_t             
 }
 
 rocprofiler_status_t
-rocprofiler_pc_sampling_get_arbiter_state_fields(
-    uint32_t                                                arbiter_state,
-    const rocprofiler_pc_sampling_arbiter_state_field_id_t* field_ids,
-    size_t                                                  num_fields,
-    rocprofiler_pc_sampling_arbiter_field_values_cb_t       cb,
-    void*                                                   user_data)
+rocprofiler_pc_sampling_get_snapshot_ext_v0_fields(
+    uint32_t                                                  ext_data,
+    const rocprofiler_pc_sampling_snapshot_ext_v0_field_id_t* field_ids,
+    size_t                                                    num_fields,
+    rocprofiler_pc_sampling_snapshot_ext_v0_field_values_cb_t cb,
+    void*                                                     user_data)
 {
     if(num_fields == 0) return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
 
-    // Extract bit values from arbiter_state.
-    // The arbiter_state is packed such that bit position N corresponds to
-    // rocprofiler_pc_sampling_arbiter_state_field_id_t value N.
+    // Extract bit values from ext_data.
+    // The ext_data is packed such that bit position N corresponds to
+    // rocprofiler_pc_sampling_snapshot_ext_v0_field_id_t value N.
     // Each field is a single bit.
     auto values = std::vector<uint32_t>(num_fields);
     for(size_t i = 0; i < num_fields; i++)
@@ -789,7 +791,7 @@ rocprofiler_pc_sampling_get_arbiter_state_fields(
             values[i] = 0;
             continue;
         }
-        values[i] = (arbiter_state >> field_id) & 1u;
+        values[i] = (ext_data >> field_id) & 1u;
     }
 
     return cb(field_ids, values.data(), num_fields, user_data);

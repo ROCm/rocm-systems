@@ -41,8 +41,8 @@ constexpr uint64_t HOST_TRAP_INTERVAL   = 10000;    // 10000 us
 constexpr uint64_t STOCHASTIC_INTERVAL  = 1048576;  // 2^20 cycles
 
 struct tool_agent_info;
-using arbiter_fields_vec_t        = std::vector<rocprofiler_pc_sampling_arbiter_state_field_id_t>;
-using arbiter_field_name_map_t    = std::map<rocprofiler_pc_sampling_arbiter_state_field_id_t, std::string>;
+using ext_v0_fields_vec_t         = std::vector<rocprofiler_pc_sampling_snapshot_ext_v0_field_id_t>;
+using ext_v0_field_name_map_t    = std::map<rocprofiler_pc_sampling_snapshot_ext_v0_field_id_t, std::string>;
 using tool_agent_info_vec_t       = std::vector<std::unique_ptr<tool_agent_info>>;
 using pc_sampling_buffer_id_vec_t = std::vector<rocprofiler_buffer_id_t>;
 
@@ -51,12 +51,12 @@ struct tool_agent_info
     rocprofiler_agent_id_t    agent_id;
     const rocprofiler_agent_t* agent;
 
-    /// Arbiter state fields supported by this GPU agent (queried per-agent).
-    std::unique_ptr<arbiter_fields_vec_t> arbiter_fields;
-    /// Memoized mapping from arbiter field ID to its name string.
-    /// Populated once during query_arbiter_fields_for_agent to avoid
+    /// Snapshot ext_data fields supported by this GPU agent (queried per-agent).
+    std::unique_ptr<ext_v0_fields_vec_t> ext_v0_fields;
+    /// Memoized mapping from ext_data field ID to its name string.
+    /// Populated once during query_snapshot_ext_v0_fields_for_agent to avoid
     /// repeated name lookups in the buffer callback hot path.
-    arbiter_field_name_map_t arbiter_field_names;
+    ext_v0_field_name_map_t ext_v0_field_names;
 
     /// Most comprehensive PC sampling configuration discovered during the query phase.
     /// Populated by query_most_comprehensive_config_for_agent(); consumed by configure_pc_sampling_for_agent().
@@ -99,11 +99,11 @@ bool
 query_most_comprehensive_config_for_agent(tool_agent_info* agent_info);
 
 /**
- * @brief Query arbiter state fields supported by the agent and store them
- * in agent_info->arbiter_fields.
+ * @brief Query snapshot ext_data fields supported by the agent and store them
+ * in agent_info->ext_v0_fields.
  */
 void
-query_arbiter_fields_for_agent(tool_agent_info* agent_info);
+query_snapshot_ext_v0_fields_for_agent(tool_agent_info* agent_info);
 
 /**
  * @brief Configure PC sampling for the agent using the memoized most comprehensive config.
