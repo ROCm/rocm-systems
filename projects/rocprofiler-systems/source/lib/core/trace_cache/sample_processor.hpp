@@ -116,8 +116,6 @@ struct processor_view_t
         finalize_processing_fn_t    finalize_processing;
     };
 
-    /// Constructs a processor view from a concrete processor type
-    /// @note Uses C++20 concept constraint instead of static_assert
     template <typename T>
         requires std::derived_from<T, processor_t<T>>
     explicit processor_view_t(T& t) noexcept
