@@ -61,7 +61,8 @@ struct stat_entry
  *   - rx_rdma_cnp_pkts = 4         Received CNP (congestion) packets
  *   - tx_rdma_cnp_pkts = 5         Transmitted CNP packets
  *   - tx_rdma_ack_timeout = 6      Local ACK timeout errors
- *   - resp_tx_pkt_seq_err = 7      Responder has detected a packet sequence error and issued a NAK
+ *   - resp_tx_pkt_seq_err = 7      Responder has detected a packet sequence error and
+ * issued a NAK
  *   - req_rx_pkt_seq_err = 8       Requester has detected a sequence error via a NAK
  *   - req_rx_impl_nak_seq_err = 9  Requester has received an ACK out of sequence
  */
