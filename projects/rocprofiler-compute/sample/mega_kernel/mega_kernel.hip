@@ -1,8 +1,8 @@
-// Copyright (c) Advanced Micro Devices, Inc.
-// SPDX-License-Identifier:  MIT
+// Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
+// SPDX-License-Identifier: MIT
 
 /**
- * / GPU Mega Kernel Unit Test
+ * GPU Mega Kernel Unit Test
  *
  * This file contains a comprehensive unit test kernel that exercises
  * most of the instructions/features available on AMD Instinct GPUs.
@@ -17,7 +17,7 @@
  *
  * - MI300/MI300X/MI325X (CDNA3, gfx942):
  *   - All MI250 features
- *   - FP8/BF8 conversions (cvt_pk_fp8/bf8)
+ *   - FP8/BF8 conversions (cvt_pk_fp8/bf8, CDNA3 FNUZ-style packed formats)
  *   - TF32 MFMA, Packed FP32
  *   - Sparse MFMA (FP16/BF16/FP8/INT8)
  *   - Async LDS (global_load_async_to_lds - if available)
@@ -30,12 +30,11 @@
  *   - Async LDS operations
  *   - Unified s_waitcnt instruction
  *
- * - Strix / Strix Halo / Krackan (RDNA 3.5, gfx1150 / gfx1151 / gfx1152) - Navi3-based
- * APU iGPU:
+ * - Strix / Strix Halo / Krackan (RDNA 3.5, gfx1150 / gfx1151 / gfx1152) APU iGPU:
  *   - Wave32 native, WMMA (FP16/BF16/INT8), VOPD same-wave dual-issue VALU
  *   - No CDNA-style FP8/BF8 cvt builtins; scalar FP in scalar unit; s_singleuse_vdst hint
  *
- * - RDNA4 Consumer (gfx1200/gfx1201 - RX 9070 XT):
+ * - RDNA4 Consumer (gfx1200/gfx1201 - RX 9060 Series, RX 9070 Series):
  *   - FP8/BF8 OCP format conversions
  *   - WMMA matrix operations (FP16/BF16/INT8)
  *   - Async LDS operations
@@ -73,12 +72,12 @@
 // Wait Instruction Compatibility Macros
 // ============================================================================
 //
-// WAITCNT INSTRUCTION CHANGES ON :
-// ========================================
-// The unified s_waitcnt instruction is REMOVED on  and replaced with
-// split wait instructions that are available on all GFX12+ architectures.
+// WAITCNT INSTRUCTION CHANGES ON RDNA4 / GFX12+ (e.g. gfx1200/gfx1201):
+// ====================================================================
+// The unified s_waitcnt instruction is REMOVED on RDNA4 consumer GPUs and replaced
+// with split wait instructions (load/store/kmcnt/dscnt/expcnt families).
 //
-// OLD (pre-):           NEW (/gfx1201):
+// OLD (pre-GFX12 / unified wait):   NEW (GFX12 RDNA4, e.g. gfx1201):
 // ---------------------        -----------------------
 // s_waitcnt vmcnt(0)    -->    s_wait_loadcnt 0 + s_wait_storecnt 0
 // s_waitcnt lgkmcnt(0)  -->    s_wait_kmcnt 0 + s_wait_dscnt 0
@@ -112,7 +111,7 @@
 //
 
 #if 0  // defined() placeholder for future architecture
-    //  ONLY: s_waitcnt is REMOVED, use split wait instructions
+    // GFX12+ ONLY: s_waitcnt is REMOVED, use split wait instructions
 #    define WAITCNT_VMEM_ALL()                                                           \
         do                                                                               \
         {                                                                                \
@@ -138,7 +137,7 @@
             __builtin_amdgcn_s_wait_dscnt(0);                                            \
         } while(0)
     
-    // Inline assembly versions for  (split waits with 0x0 syntax)
+    // Inline assembly versions for GFX12+ (split waits with 0x0 syntax)
 #    define ASM_WAITCNT_VMEM "s_wait_loadcnt 0x0\n\ts_wait_storecnt 0x0"
 #    define ASM_WAITCNT_LDS  "s_wait_kmcnt 0x0\n\ts_wait_dscnt 0x0"
 #    define ASM_WAITCNT_ALL                                                              \
@@ -146,7 +145,7 @@
         "0x0"
 
 #else
-// All other architectures (CDNA, RDNA3, RDNA4 consumer, ): Use unified s_waitcnt
+// All other architectures (CDNA, RDNA 3.5, and pre-GFX12 RDNA): unified s_waitcnt
 #    define WAITCNT_VMEM_ALL()   __builtin_amdgcn_s_waitcnt(0)
 #    define WAITCNT_LDS_SCALAR() __builtin_amdgcn_s_waitcnt(0)
 #    define WAITCNT_ALL()        __builtin_amdgcn_s_waitcnt(0)
@@ -282,8 +281,7 @@ test_fp8_conversions(TestResults* results, int lane_id)
 {
     bool passed = true;
 
-#if defined(__gfx950__)  // MI350 (gfx950) / : Test FP8 E4M3 conversions using scaled
-                         // intrinsics
+#if defined(__gfx950__)  // MI350 (gfx950/CDNA4): scaled FP8 E4M3 conversions
     float test_val = 1.5f;
 
     // Convert float to FP8 and back
@@ -300,8 +298,7 @@ test_fp8_conversions(TestResults* results, int lane_id)
     passed = passed && (fabsf(converted.x - test_val) < 0.1f);
 
 #elif defined(__gfx1200__) || defined(__gfx1201__)
-    // RDNA4 Consumer (RX 9070 XT): FP8 OCP format support
-    // RX 9070 XT uses OCP (Open Compute Platform) FP8 format
+    // RDNA4 Consumer (RX 9060 / RX 9070 families): FP8 OCP format support
     float    test_val   = 1.5f;
     uint32_t fp8_packed = 0;
 
@@ -320,7 +317,7 @@ test_fp8_conversions(TestResults* results, int lane_id)
     return;
 
 #elif defined(__gfx942__)
-    // MI300 (gfx942/CDNA3): FP8 E4M3 support via cvt_pk_fp8_f32
+    // MI300 (gfx942/CDNA3): FP8 E4M3 via cvt_pk_fp8_f32 (FNUZ-style packed FP8)
     float    test_val   = 1.5f;
     uint32_t fp8_packed = 0;
 
@@ -357,7 +354,7 @@ test_bf8_conversions(TestResults* results, int lane_id)
 {
     bool passed = true;
 
-#if defined(__gfx950__)  // MI350 (gfx950) / : Test BF8 E5M2 conversions
+#if defined(__gfx950__)  // MI350 (gfx950/CDNA4): BF8 E5M2 conversions
     float    test_val   = 2.0f;
     uint32_t bf8_packed = 0;
 
@@ -368,7 +365,7 @@ test_bf8_conversions(TestResults* results, int lane_id)
     passed = (bf8_packed != 0);
 
 #elif defined(__gfx1200__) || defined(__gfx1201__)
-    // RDNA4 Consumer (RX 9070 XT): BF8 OCP format support
+    // RDNA4 Consumer (RX 9060 / RX 9070 families): BF8 OCP format support
     float    test_val   = 2.0f;
     uint32_t bf8_packed = 0;
 
@@ -614,7 +611,8 @@ test_int64_operations(TestResults* results, int lane_id)
 }
 
 // ============================================================================
-// Section 6: Atomic Operations ( has new FP64 atomics)
+// Section 6: Atomic Operations (HW FP64 atomics: CDNA2+ gfx90a/gfx942/gfx950;
+// bypassed on RDNA consumer gfx12 and RDNA 3.5 gfx115x — no global/DS FP64 atomics)
 // ============================================================================
 
 __device__ void
@@ -767,20 +765,20 @@ test_atomic_int(int* global_mem, TestResults* results, int lane_id)
 //
 // ARCHITECTURE ATOMIC SUPPORT:
 // ----------------------------
-// | Atomic Type              | gfx90a | gfx942 | gfx950 | gfx1200/01 |  |
-// |--------------------------|--------|----------|--------|------------|---------|
-// | INT32/INT64 atomics      |   ✅    |   ✅    |   ✅    |     ✅      |    ✅    |
-// | FP32 atomic add          |   ✅    |   ✅    |   ✅    |     ✅      |    ✅    |
-// | FP64 atomic add/min/max  |   ✅    |   ✅    |   ✅    |     ❌      |    ✅    |
-// | Packed FP16 atomic add   |   ✅    |   ✅    |   ✅    |     ✅      |    ✅    |
-// | Packed BF16 atomic add   |   ❌    |   ✅    |   ✅    |     ✅      |    ✅    |
-// | DS FP32 atomics          |   ✅    |   ✅    |   ✅    |     ✅      |    ✅    |
-// | DS FP64 atomics          |   ✅    |   ✅    |   ✅    |     ❌      |    ✅    |
+// | Atomic Type              | gfx90a | gfx942 | gfx950 | gfx115x | gfx1200/gfx1201 |
+// |--------------------------|--------|--------|--------|---------|-----------------|
+// | INT32/INT64 atomics      |   ✅   |   ✅   |   ✅   |    ✅   |       ✅        |
+// | FP32 atomic add          |   ✅   |   ✅   |   ✅   |    ✅   |       ✅        |
+// | FP64 atomic add/min/max  |   ✅   |   ✅   |   ✅   |    ❌   |       ❌        |
+// | Packed FP16 atomic add   |   ✅   |   ✅   |   ✅   |    ✅   |       ✅        |
+// | Packed BF16 atomic add   |   ❌   |   ✅   |   ✅   |    ✅   |       ✅        |
+// | DS FP32 atomics          |   ✅   |   ✅   |   ✅   |    ✅   |       ✅        |
+// | DS FP64 atomics          |   ✅   |   ✅   |   ✅   |    ❌   |       ❌        |
 //
 // NAMING CONVENTION:
 // ------------------
-// CDNA (gfx9x): global_atomic_add, flat_atomic_add
-// RDNA4 (gfx12): global_atomic_add_u32, flat_atomic_add_u32 (explicit type suffix)
+// CDNA (gfx9x): global_atomic_add, flat_atomic_add (HIP atomics in this sample for gfx115x too)
+// RDNA4 (gfx120x): global_atomic_add_u32, flat_atomic_add_u32 (explicit type suffix in asm paths)
 //
 
 // Shared memory for DS atomic tests
@@ -880,7 +878,7 @@ test_atomic_operations_asm([[maybe_unused]] int*         global_int_ptr,
 #endif
 
     // ========================================================================
-    // TEST 3: GLOBAL FP64 ATOMICS (CDNA +  only)
+    // TEST 3: GLOBAL FP64 ATOMICS (CDNA2+ only; gfx90a/gfx942/gfx950)
     // ========================================================================
     // global_atomic_add_f64, global_atomic_min_f64, global_atomic_max_f64
     // Available on: gfx90a, gfx942, gfx950,
@@ -911,9 +909,15 @@ test_atomic_operations_asm([[maybe_unused]] int*         global_int_ptr,
         global_f64_passed = global_f64_passed && isfinite(old_val);
     }
 
-#elif defined(__gfx1200__) || defined(__gfx1201__) || defined(__gfx1150__) ||            \
-    defined(__gfx1151__) || defined(__gfx1152__)
-    // RDNA4 consumer: No FP64 atomics - bypass
+#elif defined(__gfx1200__) || defined(__gfx1201__)
+    // RDNA4 consumer (gfx12): no hardware FP64 global atomics — bypass
+    if(lane_id == 0 && tid < 32)
+    {
+        atomicMin(&results->atomic_global_f64_passed, -1);
+    }
+    global_f64_passed = true;  // Don't count as failure
+#elif defined(__gfx1150__) || defined(__gfx1151__) || defined(__gfx1152__)
+    // RDNA 3.5 APU (gfx115x): no hardware FP64 global atomics — bypass
     if(lane_id == 0 && tid < 32)
     {
         atomicMin(&results->atomic_global_f64_passed, -1);
@@ -1003,7 +1007,7 @@ test_atomic_operations_asm([[maybe_unused]] int*         global_int_ptr,
     }
 
     // ========================================================================
-    // TEST 7: DS (LDS) FP64 ATOMICS (CDNA +  only)
+    // TEST 7: DS (LDS) FP64 ATOMICS (CDNA2+ only; gfx90a/gfx942/gfx950)
     // ========================================================================
     // ds_add_f64, ds_min_f64, ds_max_f64
     //
@@ -1022,7 +1026,7 @@ test_atomic_operations_asm([[maybe_unused]] int*         global_int_ptr,
         ds_f64_passed = !isnan(ds_atomic_f64_test[tid % 32]);
     }
 #else
-    // RDNA4 consumer: No DS FP64 atomics - bypass
+    // RDNA consumer (gfx12 + gfx115x APU): no DS FP64 atomics — bypass
     if(lane_id == 0 && tid < 32)
     {
         atomicMin(&results->atomic_ds_f64_passed, -1);
@@ -1031,7 +1035,7 @@ test_atomic_operations_asm([[maybe_unused]] int*         global_int_ptr,
 #endif
 
     // ========================================================================
-    // TEST 8: PACKED FP16 ATOMICS (gfx90a+ for pk_add_f16)
+    // TEST 8: PACKED FP16 ATOMICS (gfx90a+ CDNA; RDNA 3.5 gfx115x via HIP; gfx12 asm)
     // ========================================================================
     // global_atomic_pk_add_f16 - Atomically add two FP16 values
     //
@@ -1070,10 +1074,10 @@ test_atomic_operations_asm([[maybe_unused]] int*         global_int_ptr,
 #endif
 
     // ========================================================================
-    // TEST 9: PACKED BF16 ATOMICS (gfx942+ and gfx12)
+    // TEST 9: PACKED BF16 ATOMICS (gfx942+, gfx1150/gfx1151/gfx1152, gfx1200/gfx1201)
     // ========================================================================
     // global_atomic_pk_add_bf16 - Atomically add two BF16 values
-    // Available on: gfx942, gfx950, gfx1200, gfx1201,
+    // Available on: gfx942, gfx950, gfx1150, gfx1151, gfx1152, gfx1200, gfx1201
     // NOT available on: gfx90a
     //
 #if defined(__gfx942__) || defined(__gfx950__) || defined(__gfx1150__) ||                \
@@ -1359,19 +1363,19 @@ test_global_memory(float* input, float* output, TestResults* results, int lane_i
 //
 // ARCHITECTURE DIFFERENCES:
 // -------------------------
-// | Instruction Type      | gfx90a | gfx942 | gfx950 | gfx1200/1201 |  |
-// |-----------------------|--------|--------|--------|--------------|---------|
-// | flat_load/store_b*    |   ✓    |   ✓    |   ✓    |      ✓       |    ✓    |
-// | global_load/store_b*  |   ✓    |   ✓    |   ✓    |      ✓       |    ✓    |
-// | buffer_load/store_*   |   ✓    |   ✓    |   ✓    |      ✓       |    ✓    |
-// | scratch_load/store_*  |   ✓    |   ✓    |   ✓    |      ✓       |    ✓    |
-// | ds_read/write_*       |   ✓    |   ✓    |   ✓    |      ✓       |    ✓    |
-// | global_load_async_*   |   ✗    |   ⚠    |   ✓    |      ✓       |    ✓    |
-// | tensor_load_to_lds    |   ✗    |   ✗    |   ✗    |      ✗       |    ✓    |
+// | Instruction Type      | gfx90a | gfx942 | gfx950 | gfx115x | gfx1200/gfx1201 |
+// |-----------------------|--------|--------|--------|---------|-----------------|
+// | flat_load/store_b*    |   ✓    |   ✓    |   ✓    |    ✓    |       ✓         |
+// | global_load/store_b*  |   ✓    |   ✓    |   ✓    |    ✓    |       ✓         |
+// | buffer_load/store_*   |   ✓    |   ✓    |   ✓    |    ✓    |       ✓         |
+// | scratch_load/store_*  |   ✓    |   ✓    |   ✓    |    ✓    |       ✓         |
+// | ds_read/write_*       |   ✓    |   ✓    |   ✓    |    ✓    |       ✓         |
+// | global_load_async_*   |   ✗    |   ⚠    |   ✓    |    ⚠    |       ✓         |
+// | tensor_load_to_lds    |   ✗    |   ✗    |   ✗    |    ✗    |       ✓         |
 //
-// NAMING CONVENTION CHANGES (RDNA4/gfx12):
-// ----------------------------------------
-// CDNA (gfx9x):                    RDNA4 (gfx12):
+// NAMING CONVENTION CHANGES (GFX12-class RDNA — gfx120x and RDNA 3.5 gfx115x in this sample):
+// -----------------------------------------------------------------------------------------
+// CDNA (gfx9x):                    RDNA4 / RDNA 3.5 APU (flat/global *_b32 style):
 // flat_load_dword                  flat_load_b32
 // flat_load_dwordx2                flat_load_b64
 // flat_load_dwordx4                flat_load_b128
@@ -1442,7 +1446,7 @@ test_vmem_operations([[maybe_unused]] float*       global_ptr,
 
 #elif defined(__gfx1200__) || defined(__gfx1201__) || defined(__gfx1150__) ||            \
     defined(__gfx1151__) ||                                                              \
-    defined(__gfx1152__)  // RDNA4 architectures: flat_load_b32 / flat_store_b32
+    defined(__gfx1152__)  // GFX12-style names: flat_load_b32 / flat_store_b32 (gfx12 + gfx115x)
     if(in_bounds)
     {
         float test_val   = (float) tid + 1.0f;
@@ -1512,7 +1516,7 @@ test_vmem_operations([[maybe_unused]] float*       global_ptr,
 
 #elif defined(__gfx1200__) || defined(__gfx1201__) || defined(__gfx1150__) ||            \
     defined(__gfx1151__) ||                                                              \
-    defined(__gfx1152__)  // RDNA4: global_load_b32 / global_store_b32
+    defined(__gfx1152__)  // GFX12-style names: global_load_b32 / global_store_b32 (gfx12 + gfx115x)
     if(in_bounds)
     {
         float test_val   = (float) (tid * 3) + 0.5f;
@@ -1688,7 +1692,7 @@ test_vmem_operations([[maybe_unused]] float*       global_ptr,
 }
 
 // ============================================================================
-// Section 10: DOT Product Operations ( has DOT4/DOT8)
+// Section 10: DOT Product Operations (CDNA: DOT4/DOT8 asm; RDNA: IU-style opcodes / software sanity)
 // ============================================================================
 
 __device__ void
@@ -1714,7 +1718,7 @@ test_dot_products(TestResults* results, int lane_id)
     unsigned int a = 0x01020304;  // [1, 2, 3, 4] packed as 4 unsigned bytes
     unsigned int b = 0x01010101;  // [1, 1, 1, 1] packed as 4 unsigned bytes
     
-    // v_dot4_u32_iu8 is the  variant
+    // v_dot4_u32_iu8 is the GFX12 IU-suffixed variant
     int dot4_result;
     asm volatile("v_dot4_u32_iu8 %0, %1, %2, %3" 
                  : "=v"(dot4_result) 
@@ -1737,14 +1741,23 @@ test_dot_products(TestResults* results, int lane_id)
     // Expected: 1*1 + 2*1 + 3*1 + 4*1 = 10
     passed = (dot4_result == 10);
 
-#elif defined(__gfx1200__) || defined(__gfx1201__) || defined(__gfx1150__) ||            \
-    defined(__gfx1151__) || defined(__gfx1152__)
-    // RDNA4 (RX 9070 XT): Uses V_DOT4_I32_IU8 instruction
-    // RDNA4 has DOT product instructions for AI inference acceleration
+#elif defined(__gfx1200__) || defined(__gfx1201__)
+    // RDNA4 consumer (gfx120x): ISA uses IU-suffixed DOT4 encodings; use software dot sanity here
     unsigned int a = 0x01020304;  // [1, 2, 3, 4] packed as 4 unsigned bytes
     unsigned int b = 0x01010101;  // [1, 1, 1, 1] packed as 4 unsigned bytes
 
-    // Use builtin for RDNA4 DOT4 - software fallback if not available
+    int a0 = (a >> 0) & 0xFF, a1 = (a >> 8) & 0xFF, a2 = (a >> 16) & 0xFF,
+        a3 = (a >> 24) & 0xFF;
+    int b0 = (b >> 0) & 0xFF, b1 = (b >> 8) & 0xFF, b2 = (b >> 16) & 0xFF,
+        b3          = (b >> 24) & 0xFF;
+    int dot4_result = a0 * b0 + a1 * b1 + a2 * b2 + a3 * b3;
+    passed          = (dot4_result == 10);
+
+#elif defined(__gfx1150__) || defined(__gfx1151__) || defined(__gfx1152__)
+    // RDNA 3.5 APU (gfx115x): DOT4 family per RDNA 3.5 ISA; same software sanity path as gfx120x here
+    unsigned int a = 0x01020304;
+    unsigned int b = 0x01010101;
+
     int a0 = (a >> 0) & 0xFF, a1 = (a >> 8) & 0xFF, a2 = (a >> 16) & 0xFF,
         a3 = (a >> 24) & 0xFF;
     int b0 = (b >> 0) & 0xFF, b1 = (b >> 8) & 0xFF, b2 = (b >> 16) & 0xFF,
@@ -1791,7 +1804,8 @@ test_dot_products(TestResults* results, int lane_id)
 // ============================================================================
 //
 // MFMA INSTRUCTIONS - CDNA Matrix Cores:
-// Reference: https://github.com/ROCm/rocm-amdgpu-bench/blob/main/kernels.cpp
+// For maintained MFMA / roofline coverage, see rocprofiler-compute `src/roofline/benchmark/`
+// (the older rocm-amdgpu-bench kernels repo is deprecated).
 //
 // This test includes BOTH inline assembly AND HIP builtin versions to ensure
 // comprehensive coverage of MFMA instructions.
@@ -1816,7 +1830,7 @@ test_dot_products(TestResults* results, int lane_id)
 //   (FP8/BF8/FP6/FP4: 131072 ops)
 //
 
-// Vector types for MFMA operations (from rocm-amdgpu-bench)
+// Vector types for MFMA operations (layout matches CDNA MFMA builtins)
 using int32_16vec = __attribute__((__vector_size__(16 * sizeof(int)))) int;
 using f32_16vec   = __attribute__((__vector_size__(16 * sizeof(float)))) float;
 using f64_4vec    = __attribute__((__vector_size__(4 * sizeof(double)))) double;
@@ -2205,11 +2219,13 @@ test_mfma_operations([[maybe_unused]] TestResults* results, [[maybe_unused]] int
 //
 // TWO TYPES OF DUAL-ISSUE:
 // ------------------------
-// 1. SAME-WAVE CO-ISSUE (VOPD/VOPD3) - MI300 (gfx942), MI350 (gfx950), RDNA4 (gfx120x), RDNA 3.5 (gfx115x):
+// 1. SAME-WAVE CO-ISSUE (VOPD/VOPD3) - MI300 (gfx942), MI350 (gfx950):
 //    - Single instruction encodes two VALU operations (X and Y opcodes)
 //    - X opcode executes on Core MACC, Y opcode executes on Side MACC
 //    - Example: VOPD encoding packs v_add_f32 + v_mul_f32 in one instruction
 //    - VOPD3 extends this with 3 source operands per instruction
+//    - Consumer RDNA (gfx115x / gfx120x) may expose related VOPD-style dual-op patterns
+//      where the ISA and compiler support them; this sample does not claim perf verification.
 //
 // 2. CROSS-WAVE CO-ISSUE - MI350 (gfx950) ONLY:
 //    - Two waves each contribute one VALU instruction
@@ -2536,7 +2552,7 @@ test_packed_operations(TestResults* results, int lane_id)
 // - MI350 (gfx950): FULL async LDS support (global_load/store_async_to/from_lds)
 // - RDNA4: FULL async LDS support + DS atomic async barriers
 //
-// -SPECIFIC DS ATOMIC BARRIER BUILTINS:
+// GFX12+ / MI350-SPECIFIC DS ATOMIC BARRIER BUILTINS:
 // --------------------------------------------
 // These are used for synchronization with async LDS operations:
 // - __builtin_amdgcn_ds_atomic_async_barrier_arrive_b64: Signal barrier arrival
@@ -2552,7 +2568,7 @@ test_packed_operations(TestResults* results, int lane_id)
 // Shared memory for async LDS test
 __shared__ int async_lds_buffer[64];
 #if 0  // defined() placeholder for future architecture
-__shared__ long async_barrier_counter;  // Use 'long' for  DS atomic barrier
+__shared__ long async_barrier_counter;  // Placeholder type for DS atomic barrier experiments
 #else
 __shared__ long long async_barrier_counter;
 #endif
@@ -2576,7 +2592,7 @@ test_async_lds_operations([[maybe_unused]] float* global_src, float* global_dst,
         global_src[tid] = (float) (tid * 10 + 1);
     }
 
-    // Initialize async barrier counter per block for
+    // Initialize async barrier counter per block for barrier experiments
     if(threadIdx.x == 0)
     {
         async_barrier_counter = 0;
@@ -2599,7 +2615,7 @@ test_async_lds_operations([[maybe_unused]] float* global_src, float* global_dst,
     }
 
 #    if 0  // defined() placeholder for future architecture
-    // : Use DS atomic async barrier for synchronization
+    // GFX12+/MI350: Use DS atomic async barrier for synchronization
     // This signals that this thread has reached the barrier point
     // The barrier counter is atomically incremented
     if (__has_builtin(__builtin_amdgcn_ds_atomic_async_barrier_arrive_b64)) {
@@ -2607,8 +2623,7 @@ test_async_lds_operations([[maybe_unused]] float* global_src, float* global_dst,
             ((__attribute__((address_space(3))) long*)&async_barrier_counter));
     }
     
-    // Wait for async operations to complete
-    // On , use s_wait_asynccnt for async LDS operations
+    // Wait for async operations to complete (s_wait_asynccnt on targets that expose it)
     __builtin_amdgcn_s_wait_asynccnt(0);  // Wait for async copy operations
 #    else
     // Other architectures: Use unified s_waitcnt
@@ -2995,7 +3010,7 @@ test_wmma_operations([[maybe_unused]] TestResults* results, [[maybe_unused]] int
 
 #elif defined(__gfx1200__) || defined(__gfx1201__)
     // ========================================================================
-    // RDNA4 Consumer (gfx1200/gfx1201 - RX 9070 XT) WMMA Tests
+    // RDNA4 Consumer (gfx1200/gfx1201 - RX 9060 / RX 9070 families) WMMA Tests
     // Uses GFX12 WMMA builtins (wmma-128b-insts) with _Vector<8> inputs
     // ========================================================================
     bool f16_passed  = true;
@@ -3143,7 +3158,7 @@ test_wmma_operations([[maybe_unused]] TestResults* results, [[maybe_unused]] int
 }
 
 // ============================================================================
-// Section 16: RDNA4 Consumer-Specific Features (RX 9070 XT / gfx1200/gfx1201)
+// Section 16: RDNA4 Consumer-Specific Features (RX 9060 / RX 9070 families / gfx1200/gfx1201)
 // ============================================================================
 //
 // RDNA4 CONSUMER GPU FEATURES (RX 9070 XT, RX 9070, RX 9060 series):
@@ -3318,7 +3333,7 @@ mega_kernel(
     test_async_lds_operations(async_lds_src, async_lds_dst, results, lane_id, tid);
     __syncthreads();
 
-    // 14. RDNA4 Consumer-Specific Features (RX 9070 XT)
+    // 14. RDNA4 Consumer-Specific Features (RX 9060 / RX 9070 families)
     test_rdna4_features(results, lane_id);
     __syncthreads();
 

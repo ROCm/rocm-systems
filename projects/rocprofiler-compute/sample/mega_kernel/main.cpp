@@ -1,5 +1,5 @@
-// Copyright (c) Advanced Micro Devices, Inc.
-// SPDX-License-Identifier:  MIT
+// Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
+// SPDX-License-Identifier: MIT
 
 /**
  * AMD GPU Mega Kernel Unit Test - Host Code
@@ -793,8 +793,8 @@ main(int argc, char** argv)
             break;
 
         case 6:  // Strix/Strix Halo (RDNA 3.5)
-            printf("  - RDNA 3.5 (Navi3-based) iGPU: Strix Point (gfx1150) / Strix Halo "
-                   "(gfx1151) / Krackan (gfx1152)\n");
+            printf("  - RDNA 3.5 APU iGPU: Strix Point (gfx1150) / Strix Halo (gfx1151) / "
+                   "Krackan (gfx1152)\n");
             printf("  - Wave32 native, WMMA (FP16/BF16/INT8) 16x16x16\n");
             printf("  - VOPD same-wave dual-issue VALU\n");
             printf("  - No CDNA-style FP8/BF8 cvt builtins; scalar FP; s_singleuse_vdst\n");

@@ -1,6 +1,6 @@
 # AMD GPU Mega Kernel Unit Test
 
-A comprehensive unit test kernel that exercises most of the instructions and features available on AMD GPUs including Instinct (MI250/MI300/MI350), Radeon (RX 9070 XT), and Strix/Strix Halo (RDNA 3.5, gfx1150/gfx1151) APU iGPUs.
+A comprehensive unit test kernel that exercises most of the instructions and features available on AMD GPUs including Instinct (MI250/MI300/MI350), Radeon (RX 9060 / RX 9070 families, gfx120x), and Strix/Strix Halo/Krackan (RDNA 3.5, gfx115x) APU iGPUs.
 
 ## Supported GPU Architectures
 
@@ -9,8 +9,8 @@ A comprehensive unit test kernel that exercises most of the instructions and fea
 | GPU Series | Architecture | GFXIP | Key Features |
 |------------|--------------|-------|--------------|
 | **MI250/MI250X** | CDNA2 | gfx90a | FP32/FP64/FP16/BF16, HW FP64 atomics, MFMA, DOT4/DOT8 |
-| **MI300/MI300X/MI325X** | CDNA3 | gfx942 | All MI250 + FP8/BF8, TF32, Sparse MFMA |
-| **MI350X/MI355X** | CDNA4 | gfx950 | All MI300 + FP6/FP4, Async LDS, Enhanced WMMA |
+| **MI300/MI300X/MI325X** | CDNA3 | gfx942 | All MI250 + FP8/BF8 (FNUZ-style cvt), TF32, Sparse MFMA |
+| **MI350X/MI355X** | CDNA4 | gfx950 | All MI300 + FP6/FP4, OCP FP8/BF8 where applicable, Async LDS, Enhanced WMMA |
 
 ### RDNA4 (Consumer)
 
@@ -19,7 +19,7 @@ A comprehensive unit test kernel that exercises most of the instructions and fea
 | **RX 9070 XT/9070** | RDNA4 | gfx1201 | FP8/BF8 OCP, Async LDS, Wave32, AI accelerators, RT 2.0 |
 | **RX 9060 series** | RDNA4 | gfx1200 | Same as gfx1201 with different CU count |
 
-### RDNA 3.5 (APU iGPU)
+### RDNA 3.5+ APU iGPU (gfx115x-class)
 
 | GPU Series | Architecture | GFXIP | Key Features |
 |------------|--------------|-------|--------------|
@@ -302,7 +302,7 @@ MI350 can issue 2 VALU instructions from different waves per cycle under certain
 - Multi-cycle instructions
 
 ### MFMA (Matrix Fused Multiply-Add) Operations (gfx90a+/CDNA)
-Matrix operations using dedicated Matrix Cores. Reference: [rocm-amdgpu-bench](https://github.com/ROCm/rocm-amdgpu-bench/blob/main/kernels.cpp)
+Matrix operations using dedicated Matrix Cores. For maintained MFMA / roofline work, see `src/roofline/benchmark/` in rocprofiler-compute (the older rocm-amdgpu-bench repo is deprecated).
 
 **MI250 (gfx90a/CDNA2):**
 - `__builtin_amdgcn_mfma_f32_32x32x2f32` - FP32 (4096 ops/inst)
@@ -405,7 +405,7 @@ The following features are new or enhanced in MI350 compared to MI300:
 
 ### Strix / Strix Halo / Krackan (RDNA 3.5 / gfx1150 / gfx1151 / gfx1152) Specific Features
 
-RDNA 3.5 is the integrated GPU in Strix Point (gfx1150, 16 CUs), Strix Halo (gfx1151, up to 40 CUs), and Krackan (gfx1152) APUs (Navi3-based):
+RDNA 3.5 is the integrated GPU in Strix Point (gfx1150, 16 CUs), Strix Halo (gfx1151, up to 40 CUs), and Krackan (gfx1152) client APUs:
 
 1. **Wave32 Native**
    - Native Wave32 execution; optimized for mobile and APU workloads.

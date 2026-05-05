@@ -1,4 +1,4 @@
-# Copyright (c) Advanced Micro Devices, Inc.
+# Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
 # SPDX-License-Identifier: MIT
 #
 # AMD GPU Mega Kernel Unit Test - Makefile
@@ -12,7 +12,7 @@ ARCH_BINS := $(addprefix mega_kernel_test_,$(ARCHES))
 #   - MI300/MI300X (CDNA3): gfx942  
 #   - MI350/MI355X (CDNA4): gfx950
 #
-#   RDNA 3.5 (APU):
+#   RDNA 3.5+ APU iGPU (gfx115x-class today; additional APUs may use this bucket later):
 #   - Strix Point (RDNA 3.5): gfx1150
 #   - Strix Halo  (RDNA 3.5): gfx1151
 #   - Krackan     (RDNA 3.5): gfx1152
@@ -103,10 +103,10 @@ help:
 	@echo ""
 	@echo "  CDNA (Compute/Datacenter):"
 	@echo "    gfx90a  - MI250/MI250X (CDNA2): FP32/FP64/FP16/BF16, HW FP64 atomics"
-	@echo "    gfx942  - MI300/MI300X (CDNA3): + FP8/BF8, TF32, Sparse MFMA"
-	@echo "    gfx950  - MI350/MI355X (CDNA4): + FP6/FP4, Async LDS, Dual-Issue"
+	@echo "    gfx942  - MI300/MI300X (CDNA3): + FP8/BF8 (FNUZ-style cvt), TF32, Sparse MFMA"
+	@echo "    gfx950  - MI350/MI355X (CDNA4): + FP6/FP4, OCP FP8/BF8 paths where applicable, Async LDS, Dual-Issue"
 	@echo ""
-	@echo "  RDNA 3.5 (APU iGPU):"
+	@echo "  RDNA 3.5+ APU iGPU (gfx115x-class):"
 	@echo "    gfx1150 - Strix Point: WMMA, TEX load/store tests (no CDNA-style FP8/BF8 cvt)"
 	@echo "    gfx1151 - Strix Halo: same as gfx1150"
 	@echo "    gfx1152 - Krackan: same as gfx1150"

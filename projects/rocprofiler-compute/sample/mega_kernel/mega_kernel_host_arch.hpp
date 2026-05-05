@@ -1,4 +1,4 @@
-// Copyright (c) Advanced Micro Devices, Inc.
+// Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
 // SPDX-License-Identifier: MIT
 //
 // Host-side architecture string → category (keeps detection in one table).
