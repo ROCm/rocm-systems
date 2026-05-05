@@ -4,6 +4,7 @@
 #include "core/categories.hpp"
 #include "core/common.hpp"
 #include "core/config.hpp"
+#include "core/constraint.hpp"
 #include "core/timemory.hpp"
 #include "core/utility.hpp"
 

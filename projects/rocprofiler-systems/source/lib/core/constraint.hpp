@@ -29,7 +29,7 @@ struct clock_identifier
     std::string_view raw_name = {};
     std::string      name     = {};
 
-    clock_identifier();
+    clock_identifier() = default;
     clock_identifier(std::string_view, int);
 
     clock_identifier(const clock_identifier&)                = default;
@@ -52,10 +52,10 @@ struct clock_identifier
 
 struct spec
 {
+    spec() = default;
     spec(int, double, double, std::uint64_t = 0, std::uint64_t = 1);
     spec(clock_identifier, double, double, std::uint64_t = 0, std::uint64_t = 1);
     spec(const std::string&, double, double, std::uint64_t = 0, std::uint64_t = 1);
-    spec(const std::string&);
 
     spec(const spec&)                = default;
     spec(spec&&) noexcept            = default;

@@ -10,9 +10,7 @@
 
 #include <spdlog/fmt/ranges.h>
 
-#include <chrono>
 #include <cstdint>
-#include <ratio>
 #include <string>
 #include <type_traits>
 
@@ -22,9 +20,6 @@ namespace constraint
 {
 namespace
 {
-using clock_type    = std::chrono::high_resolution_clock;
-using duration_type = std::chrono::duration<double, std::nano>;
-
 #define ROCPROFSYS_CLOCK_IDENTIFIER(VAL)                                                 \
     clock_identifier { #VAL, VAL }
 
@@ -170,19 +165,6 @@ spec::spec(const std::string& _clock_id, double _delay, double _dur, std::uint64
 , clock_id{ find_clock_identifier(_clock_id) }
 {}
 
-spec::spec(const std::string& _line)
-: spec{ config::get_setting_value<std::string>("ROCPROFSYS_TRACE_PERIOD_CLOCK_ID")
-            .value_or("CLOCK_REALTIME"),
-        config::get_setting_value<double>("ROCPROFSYS_TRACE_DELAY").value_or(0.0),
-        config::get_setting_value<double>("ROCPROFSYS_TRACE_DURATION").value_or(0.0) }
-{
-    auto _delim = rocprofsys::common::delimit(_line, ":");
-    if(!_delim.empty()) delay = utility::convert<double>(_delim.at(0));
-    if(_delim.size() > 1) duration = utility::convert<double>(_delim.at(1));
-    if(_delim.size() > 2) repeat = utility::convert<std::uint64_t>(_delim.at(2));
-    if(_delim.size() > 3) clock_id = find_clock_identifier(_delim.at(3));
-}
-
 //--------------------------------------------------------------------------------------//
 //
 //  global usage functions
@@ -215,14 +197,34 @@ get_trace_specs()
         }
     }
 
+    // Each ROCPROFSYS_TRACE_PERIODS sub-string has the grammar:
+    //   delay[:duration[:repeat[:clock_id]]]
+    // missing fields fall back to TRACE_DELAY/DURATION/PERIOD_CLOCK_ID.
+    if(auto _periods_v =
+           config::get_setting_value<std::string>("ROCPROFSYS_TRACE_PERIODS")
+               .value_or("");
+       !_periods_v.empty())
     {
-        auto _periods_v =
-            config::get_setting_value<std::string>("ROCPROFSYS_TRACE_PERIODS")
-                .value_or("");
-        if(!_periods_v.empty())
+        const auto _default_delay =
+            config::get_setting_value<double>("ROCPROFSYS_TRACE_DELAY").value_or(0.0);
+        const auto _default_dur =
+            config::get_setting_value<double>("ROCPROFSYS_TRACE_DURATION").value_or(0.0);
+        const auto _default_clock = find_clock_identifier(
+            config::get_setting_value<std::string>("ROCPROFSYS_TRACE_PERIOD_CLOCK_ID")
+                .value_or("CLOCK_REALTIME"));
+
+        for(const auto& _entry : rocprofsys::common::delimit(_periods_v, " ;\t\n"))
         {
-            for(auto itr : rocprofsys::common::delimit(_periods_v, " ;\t\n"))
-                _v.emplace_back(itr);
+            const auto _parts = rocprofsys::common::delimit(_entry, ":");
+            spec       _s{};
+            _s.delay    = _default_delay;
+            _s.duration = _default_dur;
+            _s.clock_id = _default_clock;
+            if(!_parts.empty()) _s.delay = utility::convert<double>(_parts.at(0));
+            if(_parts.size() > 1) _s.duration = utility::convert<double>(_parts.at(1));
+            if(_parts.size() > 2) _s.repeat = utility::convert<uint64_t>(_parts.at(2));
+            if(_parts.size() > 3) _s.clock_id = find_clock_identifier(_parts.at(3));
+            _v.push_back(std::move(_s));
         }
     }
 
