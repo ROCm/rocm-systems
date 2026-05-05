@@ -258,22 +258,6 @@ public:
   /// @param[out] bo_info allocated BO
   hsa_status_t CreateCmdBO(uint32_t size, BOHandle& bo_info);
 
-  /// @brief Executes a command.
-  ///
-  /// @param[in] cmd_bo_handle BO handle of the command to execute
-  /// @param[in] bo_handles handles associated with the command
-  /// @param[in] aie_queue queue to submit to
-  /// @param[out] seq_out sequence number of the command
-  hsa_status_t ExecCmd(const BOHandle& cmd_bo_handle, const std::vector<uint32_t>& bo_handles,
-                       HSA_QUEUEID queue_id, uint64_t& seq_out);
-
-  /// @brief Waits for a command to finish.
-  ///
-  /// @param[in] cmd_bo_handle BO handle of the command to wait for
-  /// @param[in] aie_queue queue the command was submitted to
-  /// @param[in] seq sequence number of the command
-  hsa_status_t WaitCmd(const BOHandle& cmd_bo_handle, HSA_QUEUEID queue_id, uint64_t seq);
-
   std::map<void*, BOHandle> vmem_addr_mappings;
 
   /// @brief Queue to PDI cache map.
