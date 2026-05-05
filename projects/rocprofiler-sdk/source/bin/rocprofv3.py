@@ -590,6 +590,33 @@ For attachment profiling of running processes:
         action="append",
     )
 
+    add_parser_bool_argument(
+        counter_collection_options,
+        "--no-optimize-counters",
+        help="Disable automatic counter group optimization (enabled by default when using --input file)",
+    )
+
+    add_parser_bool_argument(
+        counter_collection_options,
+        "--show-optimization",
+        help="Show detailed counter optimization report with hardware utilization statistics",
+    )
+
+    counter_collection_options.add_argument(
+        "--target-arch",
+        help="Target GPU architecture for counter optimization (e.g., gfx90a, gfx1100). Auto-detected from rocminfo if not specified.",
+        type=str,
+        default=None,
+    )
+
+    counter_collection_options.add_argument(
+        "--optimized-output",
+        help="Save optimized counter groups to YAML file for reuse",
+        type=str,
+        metavar="FILE",
+        default=None,
+    )
+
     pc_sampling_options = parser.add_argument_group("PC sampling options")
 
     add_parser_bool_argument(
@@ -1168,6 +1195,140 @@ def parse_input(input_file):
         )
 
     return None
+
+
+def optimize_counter_groups(jobs, cmd_args):
+    """
+    Optimize counter collection groups if enabled.
+
+    Args:
+        jobs: List of job dicts from parse_input() - each has 'pmc' key with counter list
+        cmd_args: Parsed command-line arguments
+
+    Returns:
+        Optimized jobs list or original if optimization disabled/fails
+    """
+    # Check if optimization is disabled
+    if getattr(cmd_args, 'no_optimize_counters', False):
+        return jobs
+
+    # Only optimize if we have jobs with counters
+    if not jobs or len(jobs) == 0:
+        return jobs
+
+    # Flatten all counters from jobs
+    all_counters = []
+    for job in jobs:
+        if has_set_attr(job, 'pmc'):
+            if isinstance(job.pmc, list):
+                all_counters.extend(job.pmc)
+            else:
+                all_counters.append(job.pmc)
+
+    if not all_counters:
+        return jobs
+
+    # Import optimizer (lazy import to avoid startup overhead)
+    try:
+        from counter_optimizer import CounterOptimizer, detect_architecture, OptimizationReport
+    except ImportError as e:
+        warning(f"Counter optimizer not available: {e}. Skipping optimization.")
+        return jobs
+
+    try:
+        # Detect architecture
+        arch = detect_architecture(getattr(cmd_args, 'target_arch', None))
+
+        # Create optimizer
+        optimizer = CounterOptimizer.create(arch)
+
+        # Optimize
+        original_passes = len(jobs)
+        optimized_groups, report = optimizer.optimize(all_counters, original_passes)
+
+        # Show report if requested or if optimization made changes
+        show_report = getattr(cmd_args, 'show_optimization', False)
+        if show_report or len(optimized_groups) != original_passes:
+            print_optimization_report(report)
+
+        # Save optimized config if requested
+        optimized_output = getattr(cmd_args, 'optimized_output', None)
+        if optimized_output:
+            save_optimized_yaml(optimized_output, optimized_groups, report)
+
+        # Convert back to jobs format
+        optimized_jobs = []
+        for group in optimized_groups:
+            optimized_jobs.append(dotdict({"pmc": group, "sub_directory": "pass_"}))
+
+        return optimized_jobs
+
+    except Exception as e:
+        warning(f"Counter optimization failed: {e}. Using original counter groups.")
+        import traceback
+        traceback.print_exc()
+        return jobs
+
+
+def print_optimization_report(report):
+    """Print optimization report to console."""
+    print("\n" + "="*60)
+    print("Counter Collection Optimization Report")
+    print("="*60)
+    print(f"Architecture: {report.architecture}")
+    print(f"Input counters: {report.input_counters}")
+    print(f"Original passes: {report.original_passes}")
+    print(f"Optimized passes: {report.optimized_passes}", end="")
+
+    if report.passes_saved > 0:
+        print(f" ({report.reduction_percent:.0f}% reduction, saves {report.passes_saved} replay(s))")
+    else:
+        print(" (no optimization possible)")
+
+    if report.warnings:
+        print("\nWarnings:")
+        for warning in report.warnings:
+            print(f"  - {warning}")
+
+    print("\nPass breakdown:")
+    for i, group in enumerate(report.groups, 1):
+        print(f"\n  Pass {i} ({len(group.counters)} counters):")
+        for block, usage in sorted(group.block_usage.items()):
+            bar_width = 20
+            filled = int(usage.utilization * bar_width)
+            bar = "█" * filled + "░" * (bar_width - filled)
+            print(f"    {block:8} {usage.used:2}/{usage.max:2} ({usage.utilization*100:5.1f}%) {bar}")
+
+    print("="*60 + "\n")
+
+
+def save_optimized_yaml(output_file, optimized_groups, report):
+    """Save optimized counter groups to YAML file."""
+    try:
+        import yaml
+    except ImportError:
+        warning("PyYAML not available. Cannot save optimized output.")
+        return
+
+    # Build YAML structure
+    jobs = []
+    for group in optimized_groups:
+        jobs.append({"pmc": group})
+
+    output_data = {"jobs": jobs}
+
+    # Write with header comment
+    with open(output_file, 'w') as f:
+        f.write(f"# Optimized by rocprofv3 counter optimizer for {report.architecture}\n")
+        f.write(f"# Original: {report.original_passes} passes -> Optimized: {report.optimized_passes} passes")
+        if report.passes_saved > 0:
+            f.write(f" ({report.reduction_percent:.0f}% reduction)\n")
+        else:
+            f.write("\n")
+        f.write("# Generated automatically - manual edits may be overwritten\n\n")
+        yaml.dump(output_data, f, default_flow_style=False, sort_keys=False)
+
+    print(f"Optimized counter configuration saved to: {output_file}")
 
 
 def has_set_attr(obj, key):
@@ -2119,6 +2280,10 @@ def main(argv=None):
     inp_args = (
         parse_input(cmd_args.input) if getattr(cmd_args, "input") else [dotdict({})]
     )
+
+    # Optimize counter groups if input file provided
+    if getattr(cmd_args, "input"):
+        inp_args = optimize_counter_groups(inp_args, cmd_args)
 
     # Detect CLI multi-pass mode (multiple --pmc flags)
     cli_multipass = (
