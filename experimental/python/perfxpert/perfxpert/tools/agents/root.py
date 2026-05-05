@@ -1,7 +1,7 @@
-"""agent_root — MCP tool wrapping the Layer-0 Root agent.
+"""agent_root — MCP tool wrapping the Tier-0 Root agent.
 
 Root is the user-facing entry point of the perfxpert agent hierarchy.
-It reads the user's intent, routes to one of the three Layer-1
+It reads the user's intent, routes to one of the three Tier-1
 decision-makers (Analysis / Recommendation / Correctness), and
 assembles a structured verdict with narrative + primary_bottleneck +
 recommendations + warnings + metadata.

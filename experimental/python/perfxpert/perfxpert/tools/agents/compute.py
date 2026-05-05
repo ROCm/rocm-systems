@@ -1,4 +1,4 @@
-"""agent_compute_specialist — MCP tool wrapping the Layer-2 Compute specialist.
+"""agent_compute_specialist — MCP tool wrapping the Tier-2 Compute specialist.
 
 Compute-Techniques Specialist filters and ranks optimization techniques
 for compute-bound kernels (VGPR pressure, FMA usage, wave occupancy,

@@ -23,6 +23,7 @@ from perfxpert import output_config
 def _build_parsed_args(argv):
     """Build a parsed argparse.Namespace from a minimal analyze parser."""
     parser = argparse.ArgumentParser()
+    output_config.add_args(parser)
     process_args = analyze.add_args(parser)
     # `add_args` does not register -i/--input; the top-level wrappers do.
     # For arg-propagation tests we don't need -i, just the analysis flags.
@@ -32,6 +33,13 @@ def _build_parsed_args(argv):
 
 class _FakeConn:
     """Stand-in for a RocpdImportData-style object; unused by propagation checks."""
+
+
+class _FakeConnWithPath:
+    """Minimal RocpdImportData-shaped object carrying an input database path."""
+
+    def __init__(self, path):
+        self._paths = [str(path)]
 
 
 def test_format_flag_propagates():
@@ -126,6 +134,19 @@ def test_format_and_llm_flags_compose():
     assert kwargs["output_format"] == "markdown"
     assert kwargs["llm_provider"] == "anthropic"
     assert kwargs["enable_llm"] is True
+
+
+def test_output_file_and_dir_flags_propagate(tmp_path):
+    process_args, ns = _build_parsed_args(["-o", "report", "-d", str(tmp_path)])
+    kwargs = process_args(_FakeConn(), ns)
+    assert kwargs["output_file"] == "report"
+    assert kwargs["output_path"] == str(tmp_path)
+
+
+def test_output_dash_flag_propagates_for_stdout_override():
+    process_args, ns = _build_parsed_args(["--output", "-"])
+    kwargs = process_args(_FakeConn(), ns)
+    assert kwargs["output_file"] == "-"
 
 
 # ---------------------------------------------------------------------------
@@ -331,6 +352,63 @@ def test_non_text_formats_dir_only_default_to_analysis_stem(
     analyze_mod._execute_agentic(None, config=cfg, output_format=fmt)
 
     out = out_dir / f"analysis{ext}"
+    assert out.read_text() == "REPORT"
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert f"Analysis written to: {out}" in captured.err
+
+
+@pytest.mark.parametrize(
+    ("fmt", "ext"),
+    [("json", ".json"), ("markdown", ".md"), ("webview", ".html")],
+)
+def test_non_text_formats_default_to_input_database_stem(
+    tmp_path,
+    monkeypatch,
+    capsys,
+    fmt,
+    ext,
+):
+    from perfxpert import analyze as analyze_mod
+
+    _stub_agentic_render(monkeypatch)
+    monkeypatch.chdir(tmp_path)
+
+    db = tmp_path / "trace.db"
+    db.touch()
+    cfg = output_config.output_config(output_file=None, output_path=None)
+    analyze_mod._execute_agentic(_FakeConnWithPath(db), config=cfg, output_format=fmt)
+
+    out = tmp_path / f"trace{ext}"
+    assert out.read_text() == "REPORT"
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert f"Analysis written to: ./{out.name}" in captured.err
+
+
+@pytest.mark.parametrize(
+    ("fmt", "ext"),
+    [("json", ".json"), ("markdown", ".md"), ("webview", ".html")],
+)
+def test_non_text_formats_dir_only_default_to_input_database_stem(
+    tmp_path,
+    monkeypatch,
+    capsys,
+    fmt,
+    ext,
+):
+    from perfxpert import analyze as analyze_mod
+
+    _stub_agentic_render(monkeypatch)
+    monkeypatch.chdir(tmp_path)
+
+    db = tmp_path / "trace.db"
+    db.touch()
+    out_dir = tmp_path / "reports"
+    cfg = output_config.output_config(output_file=None, output_path=str(out_dir))
+    analyze_mod._execute_agentic(_FakeConnWithPath(db), config=cfg, output_format=fmt)
+
+    out = out_dir / f"trace{ext}"
     assert out.read_text() == "REPORT"
     captured = capsys.readouterr()
     assert captured.out == ""

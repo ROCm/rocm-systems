@@ -1,4 +1,4 @@
-"""agent_analysis — MCP tool wrapping the Layer-1 Analysis agent.
+"""agent_analysis — MCP tool wrapping the Tier-1 Analysis agent.
 
 Analysis classifies the primary bottleneck of a GPU trace: it reads
 the trace database, computes time breakdown and hot kernels, and

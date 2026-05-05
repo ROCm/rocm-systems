@@ -1,4 +1,4 @@
-"""agent_diff_specialist — MCP tool wrapping the Layer-2 Trace-Diff specialist.
+"""agent_diff_specialist — MCP tool wrapping the Tier-2 Trace-Diff specialist.
 
 Trace-Diff Specialist compares a baseline rocprofiler-sdk database
 against a new run and returns a structured verdict (improved /

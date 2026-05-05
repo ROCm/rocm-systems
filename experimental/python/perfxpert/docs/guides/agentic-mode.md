@@ -22,7 +22,9 @@ Cross-links:
   the LLM and who doesn't
 - [Gate cascade](../architecture/correctness/gate-cascade.md) — correctness is
   identical in both modes
-- [MCP server](../integration/mcp-server.md) — always air-gap-safe
+- [MCP server](../integration/mcp-server.md) — side-effect-safe by
+  default; air-gap/no-LLM only when `PERFXPERT_AIRGAP=1` or
+  `airgap=True`
 
 ## Air-gap mode
 
@@ -231,8 +233,9 @@ an external TUI talks to those runners through MCP.
 - **Interactive optimization** → `perfxpert-code`. Natural-language
   back-and-forth, session persistence, gate cascade active on every
   edit.
-- **External MCP clients** (Claude Desktop, Cursor) → always air-gap
-  safe because the MCP server only exposes `READ_ONLY` tools; see
-  [mcp-server.md](../integration/mcp-server.md).
+- **External MCP clients** (Claude Desktop, Cursor) → side-effect-safe
+  by default because the MCP server exposes only `READ_ONLY` tools. It
+  is air-gap/no-LLM only when `PERFXPERT_AIRGAP=1` or `airgap=True`;
+  see [mcp-server.md](../integration/mcp-server.md).
 - **Scripted LLM runs** → `perfxpert-code run "..."` or
   `build_session(provider="anthropic")` in Python.

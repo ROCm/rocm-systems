@@ -21,7 +21,7 @@ between agents:
 - `ComputeSpecialistInput` / `ComputeSpecialistOutput`,
   `MemorySpecialistInput` / `MemorySpecialistOutput`,
   `LatencySpecialistInput` / `LatencySpecialistOutput`,
-  `DiffSpecialistInput` / `DiffSpecialistOutput` — Layer-2 experts.
+  `DiffSpecialistInput` / `DiffSpecialistOutput` — Tier-2 experts.
   `DiffSpecialistOutput` packs its per-kernel deltas into a single
   `kernel_deltas: Dict[str, List[Dict]]` field with `"regressions"` /
   `"improvements"` keys so the 5-field output cap still holds; the MCP

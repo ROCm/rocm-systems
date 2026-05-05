@@ -13,7 +13,8 @@ importing the Python package directly.
 - [../architecture/agent-runtime/agent-hierarchy.md](../architecture/agent-runtime/agent-hierarchy.md)
   — the agents that call the same tools in-process.
 - [../guides/agentic-mode.md](../guides/agentic-mode.md) — note that
-  MCP clients are always air-gap-safe because only READ_ONLY tools
-  are exposed.
+  MCP clients are side-effect-safe because only READ_ONLY tools are
+  exposed, and air-gap/no-LLM only when `PERFXPERT_AIRGAP=1` or
+  `airgap=True`.
 - [../contributing/perfxpert-mcp/mcp_tools.md](../contributing/perfxpert-mcp/mcp_tools.md) — how
   to add a new tool to the MCP surface.

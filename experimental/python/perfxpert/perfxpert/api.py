@@ -12,7 +12,7 @@ Examples:
     >>> verdict["primary_bottleneck"]
     'mixed'
 
-    >>> # Direct call into a Layer-2 specialist when the bottleneck is known:
+    >>> # Direct call into a Tier-2 specialist when the bottleneck is known:
     >>> techniques = api.agent_compute_specialist(
     ...     input={"gfx_id": "gfx942", "hot_kernels": hot},
     ...     airgap=True,

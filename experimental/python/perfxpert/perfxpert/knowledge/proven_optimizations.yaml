@@ -1,4 +1,4 @@
-# Proven optimization case studies — see spec §6.5 and docs/contributing/proven_optimizations.md.
+# Proven optimization case studies — see spec §6.5 and docs/contributing/agent-brain/proven_optimizations.md.
 # Every entry cites a source and is paired with before/after fixture DBs
 # in tests/fixtures/proven_optimizations/. Integration test
 # tests/test_integration/test_proven_optimizations.py asserts each case

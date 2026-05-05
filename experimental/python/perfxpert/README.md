@@ -89,11 +89,13 @@ perfxpert analyze -i ./out/results_results.db --format text
 ```
 
 `--format` accepts `text` (default), `json`, `markdown`, and `webview`
-(AMD-themed HTML). `text` prints to stdout unless `-d DIR -o NAME`
-selects a file destination; all other formats write a report file by
-default, even when `-o` and `-d` are omitted. Use `-d DIR -o NAME` to
-choose the destination. `NAME` is a base name; PerfXpert adds `.txt`,
-`.json`, `.md`, or `.html` when the extension is not already present.
+(AMD-themed HTML). `text` prints to stdout unless either `-d DIR` or
+`-o NAME` selects a file destination; `-d` defaults the report name from
+the input database stem, and `-o` defaults the directory to `.`. All
+other formats write a report file by default, even when `-o` and `-d`
+are omitted. Use `-d DIR` and/or `-o NAME` to choose the destination.
+`NAME` is a base name; PerfXpert adds `.txt`, `.json`, `.md`, or
+`.html` when the extension is not already present.
 Use `-o -` to force stdout for pipelines.
 
 LLM-backed analysis uses Chat Completions-style requests. Choose a provider

@@ -21,7 +21,7 @@
 # - Inter-node (NIC) entries live alongside the GPU entries with the vendor
 #   codename as the key (e.g. "connectx7"). They are selected explicitly by
 #   callers that know the trace crosses nodes; there is no auto-detection.
-# - See docs/contributing/schemas.md for the "communication" key shape.
+# - See docs/contributing/agent-brain/schemas.md for the "communication" key shape.
 
 gfx908:
   name: "MI100"

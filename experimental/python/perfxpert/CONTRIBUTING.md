@@ -24,7 +24,7 @@ ruff check perfxpert/       # lint (optional — CI runs it anyway)
 | New knowledge entry | `perfxpert/knowledge/<name>.yaml` | [docs/contributing/agent-brain/knowledge.md](docs/contributing/agent-brain/knowledge.md) |
 | New proven optimization | `perfxpert/knowledge/proven_optimizations.yaml` + fixture pair | [docs/contributing/agent-brain/proven_optimizations.md](docs/contributing/agent-brain/proven_optimizations.md) |
 | New agent | `perfxpert/agents/<name>.py` + `agents/fence/<name>.md` | [docs/contributing/agent-brain/agents.md](docs/contributing/agent-brain/agents.md) |
-| New LLM provider | `perfxpert/providers/<name>_model.py` | [docs/contributing/perfxpert/providers.md](docs/contributing/perfxpert/providers.md) |
+| New LLM provider | `perfxpert/providers/<name>_provider.py` | [docs/contributing/perfxpert/providers.md](docs/contributing/perfxpert/providers.md) |
 | New MCP tool | `perfxpert/tools/<module>.py` with `ToolClass.READ_ONLY` | [docs/contributing/perfxpert-mcp/mcp_tools.md](docs/contributing/perfxpert-mcp/mcp_tools.md) |
 | New test fixture | `tests/fixtures/<name>.db` + `.md` | [docs/contributing/agent-brain/fixtures.md](docs/contributing/agent-brain/fixtures.md) |
 | New GPU arch | `knowledge/gpu_specs.yaml` + `vgpr_occupancy_tables.yaml` | [docs/contributing/agent-brain/gpu_arch.md](docs/contributing/agent-brain/gpu_arch.md) |

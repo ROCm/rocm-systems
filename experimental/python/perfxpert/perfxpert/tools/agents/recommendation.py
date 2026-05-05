@@ -1,7 +1,7 @@
-"""agent_recommendation — MCP tool wrapping the Layer-1 Recommendation agent.
+"""agent_recommendation — MCP tool wrapping the Tier-1 Recommendation agent.
 
 Recommendation turns an :class:`AnalysisOutput` verdict into a ranked,
-deduplicated list of optimization techniques. It picks the right Layer-2
+deduplicated list of optimization techniques. It picks the right Tier-2
 specialist (compute / memory / latency / none) based on the primary
 bottleneck and returns the specialist's techniques plus a plateau flag.
 

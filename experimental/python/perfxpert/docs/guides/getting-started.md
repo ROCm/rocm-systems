@@ -526,11 +526,12 @@ perfxpert analyze -i trace.db --format webview -d ./out -o report
 ```
 
 `--format` accepts `text`, `json`, `markdown`, and `webview`.
-`text` prints to stdout unless both `-d DIR` and `-o NAME` identify a
-file destination. Non-text formats write a report file by default; when
-`-d/-o` are omitted, PerfXpert writes beside the current working
-directory using the input database basename, or `analysis` for
-source-only runs. `-o` is a base name: PerfXpert appends `.txt`,
+`text` prints to stdout unless either `-d DIR` or `-o NAME` selects a
+file destination. `-d` defaults the report name from the input database
+stem, or `analysis` for source-only runs; `-o` defaults the directory to
+`.`. Non-text formats write a report file by default; when `-d/-o` are
+omitted, PerfXpert writes beside the current working directory using the
+same default report name. `-o` is a base name: PerfXpert appends `.txt`,
 `.json`, `.md`, or `.html` when that extension is not already present.
 
 ![analyze json](assets/gifs/05-analyze-json.gif)
@@ -1406,9 +1407,11 @@ your own notebooks, CI, or internal tooling.
 ![python API](assets/gifs/12-python-api.gif)
 
 *`from perfxpert import api; api.agent_root(database_path='trace.db',
-airgap=True, ...)` — returns a plain dict with `primary_bottleneck`,
-`narrative`, `hotspots`, `recommendations`, etc. Same schema the CLI
-emits under `--format json`.*
+airgap=True, ...)` — returns the RootOutput dict:
+`primary_bottleneck`, `narrative`, `recommendations`, `warnings`, and
+`metadata`. Use `api.agent_analysis(...)` for `hot_kernels`, or
+`perfxpert analyze --format json` for the CLI report schema with
+`hotspots`.*
 
 See `python-api.md` for the full surface.
 
@@ -1490,7 +1493,7 @@ payload / public JSON).
   integration
 - `../guides/agentic-mode.md` — air-gap vs LLM + provider ladder +
   fallback chain
-- `../guides/python-api.md` — `perfxpert.api` (1:1 mirror of the 7
+- `../guides/python-api.md` — `perfxpert.api` (1:1 mirror of the 8
   agent MCP tools) for embedding PerfXpert's analysis brain in your
   own tooling
 

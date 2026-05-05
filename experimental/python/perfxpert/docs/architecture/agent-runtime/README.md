@@ -7,7 +7,7 @@ API, MCP server, and `perfxpert-code` backends.
 
 | Topic | Doc |
 |-------|-----|
-| Root, Layer-1 agents, specialists, routing, and fence-slice pattern | [agent-hierarchy.md](agent-hierarchy.md) |
+| Root, Tier-1 agents, specialists, routing, and fence-slice pattern | [agent-hierarchy.md](agent-hierarchy.md) |
 
 ## Related Docs
 

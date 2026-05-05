@@ -76,7 +76,7 @@ flowchart TD
 - **Tier 0 (Root)** — classifies the user's natural-language query
   into a routing decision (profile, analyze, recommend, diagnose).
   Owns no tools; its only job is handoff selection.
-- **Tier 1 (Layer-1 agents)** — three siblings:
+- **Tier 1 agents** — three siblings:
   - **Analysis** — reads trace/source artifacts via READ_ONLY tools,
     emits a structured finding (primary bottleneck, metrics,
     kernel_runtimes).

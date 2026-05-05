@@ -23,7 +23,7 @@ is the canonical top-level view. This directory mirrors that diagram by layer:
 docs/architecture/
 ├── entry-surfaces/              CLI, perfxpert-code, backend adapters, API/MCP entry paths
 ├── mcp-boundary/                READ_ONLY external MCP contract
-├── agent-runtime/               Root, Layer-1 agents, specialists, fence-slice pattern
+├── agent-runtime/               Root, Tier-1 agents, specialists, fence-slice pattern
 ├── deterministic-foundation/    classifiers, counters, hardware facts, schemas, knowledge
 └── correctness/                 gate cascade, validation, rollback, anti-reward-hacking rules
 ```

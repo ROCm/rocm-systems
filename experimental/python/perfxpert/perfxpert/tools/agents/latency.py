@@ -1,4 +1,4 @@
-"""agent_latency_specialist — MCP tool wrapping the Layer-2 Latency specialist.
+"""agent_latency_specialist — MCP tool wrapping the Tier-2 Latency specialist.
 
 Latency-Techniques Specialist ranks optimization techniques for
 latency-bound or API-overhead-bound workloads (short kernels, HIP-API

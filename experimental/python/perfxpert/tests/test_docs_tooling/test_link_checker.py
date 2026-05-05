@@ -1,6 +1,8 @@
 """Unit coverage for the docs link checker."""
 
 import importlib.util
+import subprocess
+import sys
 from pathlib import Path
 
 
@@ -34,3 +36,25 @@ def test_strict_link_checker_accepts_heading_anchors(tmp_path: Path) -> None:
     source.write_text("[ok](target.md#first-run-perfxpert-init)\n", encoding="utf-8")
 
     assert link_checker.find_broken_links(tmp_path, validate_anchors=True) == []
+
+
+def test_strict_cli_enables_anchor_validation(tmp_path: Path) -> None:
+    doc = tmp_path / "doc.md"
+    doc.write_text("# Real Heading\n\n[bad](#missing-heading)\n", encoding="utf-8")
+
+    non_strict = subprocess.run(
+        [sys.executable, str(_SCRIPT), str(tmp_path)],
+        check=False,
+        text=True,
+        capture_output=True,
+    )
+    strict = subprocess.run(
+        [sys.executable, str(_SCRIPT), str(tmp_path), "--strict"],
+        check=False,
+        text=True,
+        capture_output=True,
+    )
+
+    assert non_strict.returncode == 0, non_strict.stdout + non_strict.stderr
+    assert strict.returncode == 1
+    assert '"doc.md",3,"#missing-heading","bad"' in strict.stdout

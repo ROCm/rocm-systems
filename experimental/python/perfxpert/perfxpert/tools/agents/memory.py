@@ -1,4 +1,4 @@
-"""agent_memory_specialist — MCP tool wrapping the Layer-2 Memory specialist.
+"""agent_memory_specialist — MCP tool wrapping the Tier-2 Memory specialist.
 
 Memory-Techniques Specialist ranks optimization techniques for
 memory-bound kernels (HBM bandwidth, L1/L2 cache pressure, memcpy

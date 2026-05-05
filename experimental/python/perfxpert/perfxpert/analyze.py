@@ -365,6 +365,8 @@ def add_args(parser: argparse.ArgumentParser):
             "att_dir",
             "prompt",
             "top_kernels",
+            "output_file",
+            "output_path",
             "output_format",
             "min_duration",
             "llm_provider",

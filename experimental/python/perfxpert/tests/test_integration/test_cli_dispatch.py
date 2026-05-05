@@ -9,7 +9,9 @@ from unittest import mock
 
 import pytest
 
+from perfxpert import __main__ as perfxpert_main
 from perfxpert import analyze as analyze_mod
+from perfxpert import connection as connection_mod
 from perfxpert.output_config import output_config
 
 
@@ -107,6 +109,17 @@ def _analysis_payload():
         ],
         "metadata": {},
     }
+
+
+class _FakeCliConnection:
+    """Small stand-in for the top-level CLI's PerfxpertConnection wrapper."""
+
+    def __init__(self, paths):
+        self._paths = [str(path) for path in paths]
+        self.closed = False
+
+    def close(self):
+        self.closed = True
 
 
 @pytest.mark.parametrize(
@@ -312,3 +325,123 @@ def test_execute_agentic_json_output_parity_across_airgap_and_llm(capsys):
     assert airgap_payload["hotspots"] == llm_payload["hotspots"]
     assert airgap_payload["recommendations"] == llm_payload["recommendations"]
     assert airgap_payload["execution_breakdown"] == llm_payload["execution_breakdown"]
+
+
+def test_execute_agentic_honors_cli_output_name_and_dir(tmp_path, monkeypatch, capsys):
+    fake_input = mock.Mock()
+    fake_input._paths = [str(tmp_path / "fake.db")]
+    out_dir = tmp_path / "reports"
+
+    with mock.patch("perfxpert.api.agent_root", return_value=_root_output()):
+        with mock.patch(
+            "perfxpert.analysis.payload.build_analysis_payload",
+            return_value=_analysis_payload(),
+        ):
+            analyze_mod._execute_agentic(
+                input=fake_input,
+                output_format="json",
+                output_file="custom_report",
+                output_path=str(out_dir),
+            )
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    out_file = out_dir / "custom_report.json"
+    assert out_file.exists()
+    payload = json.loads(out_file.read_text())
+    assert payload["summary"]["primary_bottleneck"] == "compute"
+    assert f"Analysis written to: {out_file}" in captured.err
+
+
+def test_execute_agentic_honors_cli_output_dash_stdout(capsys):
+    fake_input = mock.Mock()
+    fake_input._paths = ["/tmp/fake.db"]
+
+    with mock.patch("perfxpert.api.agent_root", return_value=_root_output()):
+        with mock.patch(
+            "perfxpert.analysis.payload.build_analysis_payload",
+            return_value=_analysis_payload(),
+        ):
+            analyze_mod._execute_agentic(
+                input=fake_input,
+                output_format="json",
+                output_file="-",
+            )
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert payload["summary"]["primary_bottleneck"] == "compute"
+    assert "Analysis written to:" not in captured.err
+
+
+def test_top_level_analyze_honors_output_name_and_dir(
+    tmp_path, monkeypatch, capsys
+):
+    db = tmp_path / "fake.db"
+    out_dir = tmp_path / "reports"
+    fake_conn = _FakeCliConnection([db])
+    monkeypatch.setattr(
+        connection_mod,
+        "PerfxpertConnection",
+        lambda paths: fake_conn,
+    )
+
+    with mock.patch("perfxpert.api.agent_root", return_value=_root_output()):
+        with mock.patch(
+            "perfxpert.analysis.payload.build_analysis_payload",
+            return_value=_analysis_payload(),
+        ):
+            perfxpert_main.main(
+                [
+                    "analyze",
+                    "-i",
+                    str(db),
+                    "--format",
+                    "json",
+                    "-d",
+                    str(out_dir),
+                    "-o",
+                    "custom_report",
+                ]
+            )
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert fake_conn.closed is True
+    out_file = out_dir / "custom_report.json"
+    payload = json.loads(out_file.read_text())
+    assert payload["summary"]["primary_bottleneck"] == "compute"
+    assert f"Analysis written to: {out_file}" in captured.err
+
+
+def test_top_level_analyze_honors_output_dash_stdout(tmp_path, monkeypatch, capsys):
+    db = tmp_path / "fake.db"
+    fake_conn = _FakeCliConnection([db])
+    monkeypatch.setattr(
+        connection_mod,
+        "PerfxpertConnection",
+        lambda paths: fake_conn,
+    )
+
+    with mock.patch("perfxpert.api.agent_root", return_value=_root_output()):
+        with mock.patch(
+            "perfxpert.analysis.payload.build_analysis_payload",
+            return_value=_analysis_payload(),
+        ):
+            perfxpert_main.main(
+                [
+                    "analyze",
+                    "-i",
+                    str(db),
+                    "--format",
+                    "json",
+                    "-o",
+                    "-",
+                ]
+            )
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert fake_conn.closed is True
+    assert payload["summary"]["primary_bottleneck"] == "compute"
+    assert "Analysis written to:" not in captured.err

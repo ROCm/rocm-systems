@@ -1,4 +1,4 @@
-"""agent_correctness — MCP tool wrapping the Layer-1 Correctness agent.
+"""agent_correctness — MCP tool wrapping the Tier-1 Correctness agent.
 
 Correctness consumes a :class:`GateVerdictModel` from the 5-gate cascade
 (compile / sol / bitwise / regression / anchors) and decides whether an

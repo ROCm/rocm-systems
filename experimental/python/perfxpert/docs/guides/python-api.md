@@ -16,7 +16,7 @@ Cross-links:
 - [Agentic mode guide](agentic-mode.md) — air-gap vs LLM,
   `PERFXPERT_LLM_FALLBACK_CHAIN`, typed-error taxonomy.
 
-## Exported callables
+## `perfxpert.api` exports
 
 The mirror drops the `perfxpert_` prefix (which is only applied at
 MCP registration):
@@ -32,8 +32,6 @@ MCP registration):
 | `perfxpert_agent_latency_specialist` | `perfxpert.api.agent_latency_specialist` |
 | `perfxpert_agent_diff_specialist` | `perfxpert.api.agent_diff_specialist` |
 | `perfxpert_trace_diff_diff_runs` | `perfxpert.api.trace_diff_diff_runs` |
-| `perfxpert_rccl_analysis_analyze_collectives` | `perfxpert.tools.rccl_analysis.analyze_collectives` |
-| `perfxpert_interconnect_lookup_peaks` | `perfxpert.tools.interconnect.lookup_peaks` |
 
 Every agent callable honors `PERFXPERT_AIRGAP=1` and the full provider /
 fallback-chain ladder (`PERFXPERT_LLM_FALLBACK_CHAIN`) because the
@@ -45,8 +43,19 @@ two rocpd databases and produces a schema-0.3.1 diff dict (see
 `perfxpert diff`, `perfxpert ci`, and `perfxpert analyze --baseline`
 use.
 
-The two communication-analysis tools are deterministic (no
-LLM, no credentials) and map 1:1 onto their module functions:
+## Related deterministic tool callables
+
+The MCP server also exposes deterministic communication-analysis tools
+that are not re-exported from `perfxpert.api`. Import them from
+`perfxpert.tools` directly:
+
+| MCP tool name | Python module callable |
+|---------------|------------------------|
+| `perfxpert_rccl_analysis_analyze_collectives` | `perfxpert.tools.rccl_analysis.analyze_collectives` |
+| `perfxpert_interconnect_lookup_peaks` | `perfxpert.tools.interconnect.lookup_peaks` |
+
+These tools are deterministic (no LLM, no credentials) and map 1:1 onto
+their module functions:
 
 ```python
 # SKIP-SAMPLE — illustrative RCCL analysis call (requires a rocpd .db)
@@ -81,40 +90,32 @@ for rec in out["recommendations"]:
     print(rec["name"], rec["title"])
 ```
 
-`api.agent_root(...)` is the same call `perfxpert analyze` makes
-under the hood — passing `database_path=<path>` + `user_query=<str>`
-gives you the equivalent of the CLI's end-to-end report in a Python
-dict.
+`api.agent_root(...)` is the same Root-agent call `perfxpert analyze`
+makes under the hood, but it returns the RootOutput shape only:
+`narrative`, `recommendations`, `primary_bottleneck`, `warnings`, and
+`metadata`. The batch CLI builds its fuller report by combining that
+RootOutput with the deterministic analysis payload and formatters.
 
-### Hotspot output shape
+### Hot-kernel output shape
 
-Each entry in `out["hotspots"]` is a dict with `name`, `calls`,
-`total_duration`, `avg_duration`, `min_duration`, `max_duration`,
-and `percent_of_total`. When the caller supplied a `source_dir` to
-the root agent, every hotspot **also** carries a
-`source_locations: list[dict]` field:
+Call `api.agent_analysis(...)` when you need structured hot-kernel data
+directly from the agent API. Each entry in `out["hot_kernels"]` is a
+dict with fields such as `name`, `duration_ns`, and percentage/ranking
+metadata derived from the trace:
 
 ```python
-# SKIP-SAMPLE — illustrative output shape for hotspot source correlation
+# SKIP-SAMPLE — illustrative output shape from agent_analysis
 {
     "name": "ns::matmul<float>(float*, float*)",
-    "calls": 128,
-    "total_duration": 92_000_000,
+    "duration_ns": 92_000_000,
     "percent_of_total": 48.5,
-    "source_locations": [
-        {"file": "src/ops.hip",  "line": 42, "kind": "definition"},
-        {"file": "src/main.hip", "line": 88, "kind": "launch"},
-    ],
 }
 ```
 
-`kind` is `"definition"` (the `__global__` symbol declaration) or
-`"launch"` (a detected `hipLaunchKernelGGL` / triple-angle dispatch
-site). The list is empty when the Tier-0 scanner ran but found no
-matching basename, and the field is absent entirely when no source
-scan was performed. The `source_locations` field is the same shape
-as `hotspots[i].source_locations` in the JSON report (schema
-`0.3.1`).
+For the CLI JSON report shape, including `hotspots` and
+`source_locations`, run `perfxpert analyze --format json` or use the
+deterministic payload/formatter stack documented in
+[schemas.md][schemas].
 
 ## Input schemas (one example per agent)
 
@@ -123,7 +124,7 @@ models; frozen to prevent mutation during handoff). Schemas cap at
 ≤10 input fields and ≤5 output fields per agent — CI-enforced in
 `tests/test_agents/test_schema_field_caps.py`.
 
-### `agent_root` — Layer-0 entry point
+### `agent_root` — Tier-0 entry point
 
 ```python
 # SKIP-SAMPLE — illustrative Python API call (requires real trace.db / running session)
@@ -167,7 +168,7 @@ short-circuits all emission when no callback is registered. This is the
 same mechanism the `perfxpert analyze` CLI uses to draw its Rich
 spinner (see the Getting Started guide §6).
 
-### `agent_analysis` — Layer-1 bottleneck classifier
+### `agent_analysis` — Tier-1 bottleneck classifier
 
 ```python
 # SKIP-SAMPLE — illustrative Python API call (requires real trace.db / running session)
@@ -184,7 +185,7 @@ out = api.agent_analysis(
 Output: `primary_bottleneck`, `confidence`, `time_breakdown`,
 `hot_kernels`, `counter_data_available`.
 
-### `agent_recommendation` — Layer-1 technique proposer
+### `agent_recommendation` — Tier-1 technique proposer
 
 ```python
 # SKIP-SAMPLE — illustrative Python API call (requires real trace.db / running session)
@@ -208,7 +209,7 @@ Output: `recommendations` (flat, ranked, deduplicated),
 `specialist_used` (`compute`/`memory`/`latency`/`none`),
 `plateau_detected`.
 
-### `agent_correctness` — Layer-1 gate-verdict narrator
+### `agent_correctness` — Tier-1 gate-verdict narrator
 
 ```python
 # SKIP-SAMPLE — illustrative Python API call (requires real trace.db / running session)
@@ -236,7 +237,7 @@ Output: `verdict` (`pass`/`reject`/`regressed`), `action`
 (`accept`/`revert`/`reject_and_log`), `narrative`,
 `alternative_technique`, `follow_up_task_id`.
 
-### `agent_compute_specialist` — Layer-2 compute-bound expert
+### `agent_compute_specialist` — Tier-2 compute-bound expert
 
 ```python
 # SKIP-SAMPLE — illustrative Python API call (requires real trace.db / running session)
@@ -254,7 +255,7 @@ out = api.agent_compute_specialist(
 Output: `techniques` (list of `{name, rationale, expected_impact,
 effort, risk}`), `confidence`, `citations`.
 
-### `agent_memory_specialist` — Layer-2 memory-bound expert
+### `agent_memory_specialist` — Tier-2 memory-bound expert
 
 ```python
 # SKIP-SAMPLE — illustrative Python API call (requires real trace.db / running session)
@@ -272,7 +273,7 @@ out = api.agent_memory_specialist(
 Output: same shape as compute specialist — `techniques`,
 `confidence`, `citations`.
 
-### `agent_latency_specialist` — Layer-2 launch / dependency-chain expert
+### `agent_latency_specialist` — Tier-2 launch / dependency-chain expert
 
 ```python
 # SKIP-SAMPLE — illustrative Python API call (requires real trace.db / running session)
@@ -289,7 +290,7 @@ out = api.agent_latency_specialist(
 
 Output: same shape — `techniques`, `confidence`, `citations`.
 
-### `agent_diff_specialist` — Layer-2 run-to-run diff narrator
+### `agent_diff_specialist` — Tier-2 run-to-run diff narrator
 
 Compares a baseline rocprofiler-sdk database against a new run and
 returns a structured verdict (improved / regressed / neutral) plus
