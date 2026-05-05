@@ -46,10 +46,6 @@ jobs:
       - name: Get the latest therock build
         id: therock
         run: |
-          sudo sed -i \
-            -e 's|http://archive.ubuntu.com/ubuntu|http://azure.archive.ubuntu.com/ubuntu|g' \
-            -e 's|http://security.ubuntu.com/ubuntu|http://azure.archive.ubuntu.com/ubuntu|g' \
-            /etc/apt/sources.list /etc/apt/sources.list.d/*.sources 2>/dev/null || true
           sudo apt-get update
           sudo apt-get install -y python3-pip python3-venv
           python3 -m venv /tmp/awscli-venv

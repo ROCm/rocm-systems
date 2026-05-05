@@ -61,10 +61,6 @@ jobs:
         timeout-minutes: 10
         shell: bash
         run: |
-          sed -i \
-            -e 's|http://archive.ubuntu.com/ubuntu|http://azure.archive.ubuntu.com/ubuntu|g' \
-            -e 's|http://security.ubuntu.com/ubuntu|http://azure.archive.ubuntu.com/ubuntu|g' \
-            /etc/apt/sources.list /etc/apt/sources.list.d/*.sources 2>/dev/null || true
           apt-get update
           apt-get install -y doxygen graphviz build-essential cmake
       - name: Build Docs
@@ -99,10 +95,6 @@ jobs:
         timeout-minutes: 10
         shell: bash
         run: |
-          sed -i \
-            -e 's|http://archive.ubuntu.com/ubuntu|http://azure.archive.ubuntu.com/ubuntu|g' \
-            -e 's|http://security.ubuntu.com/ubuntu|http://azure.archive.ubuntu.com/ubuntu|g' \
-            /etc/apt/sources.list /etc/apt/sources.list.d/*.sources 2>/dev/null || true
           apt-get update
           apt-get install -y git
           echo "PATH=/usr/bin:$PATH" >> "$GITHUB_ENV"
@@ -148,10 +140,6 @@ jobs:
         shell: bash
         working-directory: projects/rocprofiler-sdk/
         run: |
-          sed -i \
-            -e 's|http://archive.ubuntu.com/ubuntu|http://azure.archive.ubuntu.com/ubuntu|g' \
-            -e 's|http://security.ubuntu.com/ubuntu|http://azure.archive.ubuntu.com/ubuntu|g' \
-            /etc/apt/sources.list /etc/apt/sources.list.d/*.sources 2>/dev/null || true
           apt-get update
           apt-get install -y cmake gcc g++ libdw-dev libsqlite3-dev rpm
           python3 -m pip install -r requirements.txt

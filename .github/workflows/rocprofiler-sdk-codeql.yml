@@ -84,10 +84,6 @@ jobs:
       env:
         DEBIAN_FRONTEND: noninteractive
       run: |
-        sudo sed -i \
-          -e 's|http://archive.ubuntu.com/ubuntu|http://azure.archive.ubuntu.com/ubuntu|g' \
-          -e 's|http://security.ubuntu.com/ubuntu|http://azure.archive.ubuntu.com/ubuntu|g' \
-          /etc/apt/sources.list /etc/apt/sources.list.d/*.sources 2>/dev/null || true
         sudo apt-get update
         sudo apt-get install -y ca-certificates gnupg wget rocm-llvm-dev
         sudo install -d -m 0755 /etc/apt/keyrings
