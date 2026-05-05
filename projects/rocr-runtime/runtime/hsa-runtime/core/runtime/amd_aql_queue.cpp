@@ -1660,6 +1660,72 @@ hsa_status_t AqlQueue::SetProfiling(bool enabled) {
     // they were to fail. Documenting that here for future readers.
     Suspend();
     Resume();
+
+    // Phase-2: try to additionally register the new host-VA pointer set
+    // (wptr/rptr/signal) via KFD_IOC_PROFILER_DISPATCH_LOG. This is the
+    // path the FW reads on queue connect to publish per-record producer
+    // counters back to host-coherent memory, eliminating the need for
+    // sentinel-scan duplicate-detection in the drainer.
+    //
+    // Falls back gracefully on older kernel/libhsakmt: if the new thunk
+    // is missing or the ioctl returns -EINVAL/ENOTTY, the buffer remains
+    // registered via the legacy SetQueueProfilingBuffer + UPDATE_QUEUE
+    // path (which does not deliver wptr/signal updates). Any of the
+    // three pointers being null in queue_properties tells the drainer to
+    // skip the wptr-bound scan for that pointer.
+    constexpr size_t kCacheLineSize = 64;
+    dispatch_log_wptr_buf_ = agent_->system_allocator()(
+        kCacheLineSize, kCacheLineSize, core::MemoryRegion::AllocateNonPaged);
+    dispatch_log_rptr_buf_ = agent_->system_allocator()(
+        kCacheLineSize, kCacheLineSize, core::MemoryRegion::AllocateNonPaged);
+    dispatch_log_signal_buf_ = agent_->system_allocator()(
+        kCacheLineSize, kCacheLineSize, core::MemoryRegion::AllocateNonPaged);
+
+    if (dispatch_log_wptr_buf_ && dispatch_log_rptr_buf_ && dispatch_log_signal_buf_) {
+      // Initialize all three counters to 0. FW writes post-increment values
+      // starting at 1; host reads with __atomic_load_n(__ATOMIC_ACQUIRE).
+      *(volatile uint64_t*)dispatch_log_wptr_buf_   = 0;
+      *(volatile uint64_t*)dispatch_log_rptr_buf_   = 0;
+      *(volatile uint64_t*)dispatch_log_signal_buf_ = 0;
+
+      hsa_status_t dl_status = agent_->driver().SetDispatchLog(
+          queue_id_, static_cast<uint32_t>(agent_->KfdGpuID()),
+          dispatch_record_buffer_, num_records,
+          dispatch_log_wptr_buf_, dispatch_log_rptr_buf_, dispatch_log_signal_buf_);
+      if (dl_status != HSA_STATUS_SUCCESS) {
+        // New path unavailable / refused. Drop the host words; legacy
+        // sentinel-scan path remains active via the buffer registration
+        // we already did above. Drainer detects null host-VA pointers
+        // and falls back automatically.
+        agent_->system_deallocator()(dispatch_log_wptr_buf_);
+        agent_->system_deallocator()(dispatch_log_rptr_buf_);
+        agent_->system_deallocator()(dispatch_log_signal_buf_);
+        dispatch_log_wptr_buf_ = nullptr;
+        dispatch_log_rptr_buf_ = nullptr;
+        dispatch_log_signal_buf_ = nullptr;
+      }
+      // Else: SetDispatchLog succeeded — the kernel updated
+      // queue_properties and re-ran update_mqd, so the new MQD slots
+      // (DW48-DW53) now hold our host VAs and FW will write to them on
+      // subsequent record emissions. No second Suspend/Resume needed; KFD
+      // did the update_queue internally.
+    } else {
+      // Allocation of one or more host words failed. Free any that did
+      // succeed and continue without the new path.
+      if (dispatch_log_wptr_buf_) {
+        agent_->system_deallocator()(dispatch_log_wptr_buf_);
+        dispatch_log_wptr_buf_ = nullptr;
+      }
+      if (dispatch_log_rptr_buf_) {
+        agent_->system_deallocator()(dispatch_log_rptr_buf_);
+        dispatch_log_rptr_buf_ = nullptr;
+      }
+      if (dispatch_log_signal_buf_) {
+        agent_->system_deallocator()(dispatch_log_signal_buf_);
+        dispatch_log_signal_buf_ = nullptr;
+      }
+    }
+
     return HSA_STATUS_SUCCESS;
   }
 
@@ -1687,6 +1753,20 @@ hsa_status_t AqlQueue::SetProfiling(bool enabled) {
     //    (the buffer would leak with no path to reach it again).
     hsa_status_t buf_status =
         agent_->driver().SetQueueProfilingBuffer(queue_id_, nullptr, 0, nullptr);
+
+    // Phase-2: also CLEAR the new sub-op if we registered host-VA pointers
+    // on the enable side. This drops all 4 BO refs (buffer + 3 pointers)
+    // kernel-side and zeros the new MQD slots (DW48-DW53) on the same
+    // update_queue pass that follows. SetDispatchLog with buffer_addr=NULL
+    // issues KFD_DISPATCH_LOG_OP_CLEAR. Status is best-effort: if the new
+    // thunk is missing or fails, we still tear down the legacy path below.
+    if (dispatch_log_wptr_buf_ != nullptr) {
+      (void)agent_->driver().SetDispatchLog(
+          queue_id_, static_cast<uint32_t>(agent_->KfdGpuID()),
+          /*buffer_base=*/nullptr, /*num_records=*/0,
+          /*wptr_addr=*/nullptr, /*rptr_addr=*/nullptr, /*signal_addr=*/nullptr);
+    }
+
     // 2. Flush MQD via UPDATE_QUEUE so FW observes addr=0.
     Suspend();
     Resume();
@@ -1697,6 +1777,20 @@ hsa_status_t AqlQueue::SetProfiling(bool enabled) {
     agent_->system_deallocator()(dispatch_record_buffer_);
     dispatch_record_buffer_ = nullptr;
     dispatch_record_buffer_size_ = 0;
+    // 5. Free the Phase-2 host-VA counter words (idempotent — null in the
+    //    legacy-only path).
+    if (dispatch_log_wptr_buf_) {
+      agent_->system_deallocator()(dispatch_log_wptr_buf_);
+      dispatch_log_wptr_buf_ = nullptr;
+    }
+    if (dispatch_log_rptr_buf_) {
+      agent_->system_deallocator()(dispatch_log_rptr_buf_);
+      dispatch_log_rptr_buf_ = nullptr;
+    }
+    if (dispatch_log_signal_buf_) {
+      agent_->system_deallocator()(dispatch_log_signal_buf_);
+      dispatch_log_signal_buf_ = nullptr;
+    }
     return buf_status;
   }
 
@@ -1718,6 +1812,26 @@ hsa_status_t AqlQueue::GetProfilingDispatchRecords(void** buffer_base,
   // and uses sentinel scan over per-slot record_type to locate fresh records
   // (see core/runtime/dispatch_log.cpp::drain_one_queue).
   *buffer_size = dispatch_record_buffer_size_ * static_cast<uint32_t>(sizeof(mec_dispatch_record));
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t AqlQueue::GetDispatchLogPointers(volatile uint64_t** wptr_ptr,
+                                              volatile uint64_t** rptr_ptr,
+                                              volatile uint64_t** signal_ptr) const {
+  // Phase-2 host-VA pointer set is populated only when:
+  //   1. SetProfiling(true) was called AND
+  //   2. The new KFD_IOC_PROFILER_DISPATCH_LOG sub-op succeeded
+  //      (kernel KFD MINOR >= 20 + libhsakmt has the new thunk).
+  // If either is false we report NOT_INITIALIZED and the drainer falls
+  // back to sentinel-scan via GetProfilingDispatchRecords.
+  if (dispatch_log_wptr_buf_ == nullptr ||
+      dispatch_log_rptr_buf_ == nullptr ||
+      dispatch_log_signal_buf_ == nullptr) {
+    return HSA_STATUS_ERROR_NOT_INITIALIZED;
+  }
+  *wptr_ptr   = static_cast<volatile uint64_t*>(dispatch_log_wptr_buf_);
+  *rptr_ptr   = static_cast<volatile uint64_t*>(dispatch_log_rptr_buf_);
+  *signal_ptr = static_cast<volatile uint64_t*>(dispatch_log_signal_buf_);
   return HSA_STATUS_SUCCESS;
 }
 

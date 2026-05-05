@@ -104,6 +104,10 @@ public:
                            void* queue_addr, uint64_t queue_size, HsaEvent* event) const override;
   hsa_status_t SetQueueProfilingBuffer(HSA_QUEUEID queue_id, void* buffer_base, uint32_t num_records,
                                        volatile uint32_t* wptr_host_addr) const override;
+  hsa_status_t SetDispatchLog(HSA_QUEUEID queue_id, uint32_t gpu_id,
+                              void* buffer_base, uint32_t num_records,
+                              void* wptr_addr, void* rptr_addr,
+                              void* signal_addr) const override;
   hsa_status_t DestroyQueue(HSA_QUEUEID queue_id) const override;
   hsa_status_t SetQueueCUMask(HSA_QUEUEID queue_id, uint32_t cu_mask_count,
                               uint32_t* queue_cu_mask) const override;

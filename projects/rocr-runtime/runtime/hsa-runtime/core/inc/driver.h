@@ -193,6 +193,27 @@ public:
     return static_cast<hsa_status_t>(HSA_STATUS_ERROR_NOT_SUPPORTED);
   }
 
+  /// @brief Configure dispatch-log buffer + host-VA pointer counters via the
+  /// new KFD_IOC_PROFILER_DISPATCH_LOG sub-op.
+  /// @details Returns NOT_SUPPORTED when the kernel thunk doesn't export
+  /// hsaKmtSetDispatchLog (older libhsakmt without KFD MINOR >= 20 / profiler
+  /// version >= 2 awareness). Pass buffer_base = nullptr to issue CLEAR; any
+  /// of wptr_addr/rptr_addr/signal_addr may be nullptr to opt out of that
+  /// side-channel.
+  virtual hsa_status_t SetDispatchLog(HSA_QUEUEID queue_id, uint32_t gpu_id,
+                                      void* buffer_base, uint32_t num_records,
+                                      void* wptr_addr, void* rptr_addr,
+                                      void* signal_addr) const {
+    (void)queue_id;
+    (void)gpu_id;
+    (void)buffer_base;
+    (void)num_records;
+    (void)wptr_addr;
+    (void)rptr_addr;
+    (void)signal_addr;
+    return static_cast<hsa_status_t>(HSA_STATUS_ERROR_NOT_SUPPORTED);
+  }
+
   /// @brief Set the CU mask for a queue.
   /// @details This sets the CU bitmask for a queue. The CU mask determines which CUs
   /// a queue's dispatches can target. Currently this is only supported for GPU devices.

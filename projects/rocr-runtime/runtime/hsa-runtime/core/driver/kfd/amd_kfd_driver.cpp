@@ -460,6 +460,32 @@ hsa_status_t KfdDriver::SetQueueProfilingBuffer(HSA_QUEUEID queue_id, void* buff
   }
 }
 
+hsa_status_t KfdDriver::SetDispatchLog(HSA_QUEUEID queue_id, uint32_t gpu_id,
+                                       void* buffer_base, uint32_t num_records,
+                                       void* wptr_addr, void* rptr_addr,
+                                       void* signal_addr) const {
+  // Same NOT_SUPPORTED-vs-transient distinction as SetQueueProfilingBuffer:
+  // missing thunk symbol = permanent (agent should fall back to legacy path);
+  // thunk-reported NOT_SUPPORTED = also permanent; everything else = transient.
+  auto* loader = core::Runtime::runtime_singleton_->thunkLoader();
+  if (loader->pfn_hsaKmtSetDispatchLog == nullptr)
+    return static_cast<hsa_status_t>(HSA_STATUS_ERROR_NOT_SUPPORTED);
+
+  HSAKMT_STATUS st = loader->pfn_hsaKmtSetDispatchLog(
+      queue_id, gpu_id, buffer_base, num_records,
+      wptr_addr, rptr_addr, signal_addr);
+  switch (st) {
+    case HSAKMT_STATUS_SUCCESS:
+      return HSA_STATUS_SUCCESS;
+    case HSAKMT_STATUS_INVALID_PARAMETER:
+      return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+    case HSAKMT_STATUS_NOT_SUPPORTED:
+      return static_cast<hsa_status_t>(HSA_STATUS_ERROR_NOT_SUPPORTED);
+    default:
+      return HSA_STATUS_ERROR;
+  }
+}
+
 hsa_status_t KfdDriver::SetQueueCUMask(HSA_QUEUEID queue_id, uint32_t cu_mask_count,
                                        uint32_t* queue_cu_mask) const {
   if (HSAKMT_CALL(hsaKmtSetQueueCUMask(queue_id, cu_mask_count, queue_cu_mask)) !=

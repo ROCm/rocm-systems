@@ -174,6 +174,12 @@ namespace core {
       HSAKMT_PFN(hsaKmtSetQueueProfilingBuffer) =
           (HSAKMT_DEF(hsaKmtSetQueueProfilingBuffer)*)rocr::os::GetExportAddress(thunk_handle, "hsaKmtSetQueueProfilingBuffer");
       // Optional: not all thunks export this. Don't fail if missing.
+      HSAKMT_PFN(hsaKmtSetDispatchLog) =
+          (HSAKMT_DEF(hsaKmtSetDispatchLog)*)rocr::os::GetExportAddress(thunk_handle, "hsaKmtSetDispatchLog");
+      // Optional: only present in libhsakmt with KFD_IOC_PROFILER_DISPATCH_LOG
+      // support (KFD MINOR >= 20). Older thunks return NULL here; the caller
+      // (AqlQueue::SetProfiling) detects null and falls back to the legacy
+      // sentinel-scan path via hsaKmtSetQueueProfilingBuffer.
 
       HSAKMT_PFN(hsaKmtDestroyQueue) = (HSAKMT_DEF(hsaKmtDestroyQueue)*)rocr::os::GetExportAddress(thunk_handle, "hsaKmtDestroyQueue");
       if (HSAKMT_PFN(hsaKmtDestroyQueue) == nullptr) goto LOAD_ERROR;
@@ -483,6 +489,8 @@ LOAD_ERROR:
       HSAKMT_PFN(hsaKmtUpdateQueue) = (HSAKMT_DEF(hsaKmtUpdateQueue)*)(&hsaKmtUpdateQueue);
       HSAKMT_PFN(hsaKmtSetQueueProfilingBuffer) =
           (HSAKMT_DEF(hsaKmtSetQueueProfilingBuffer)*)(&hsaKmtSetQueueProfilingBuffer);
+      HSAKMT_PFN(hsaKmtSetDispatchLog) =
+          (HSAKMT_DEF(hsaKmtSetDispatchLog)*)(&hsaKmtSetDispatchLog);
       HSAKMT_PFN(hsaKmtDestroyQueue) = (HSAKMT_DEF(hsaKmtDestroyQueue)*)(&hsaKmtDestroyQueue);
       HSAKMT_PFN(hsaKmtSetQueueCUMask) = (HSAKMT_DEF(hsaKmtSetQueueCUMask)*)(&hsaKmtSetQueueCUMask);
       HSAKMT_PFN(hsaKmtSetMemoryPolicy) = (HSAKMT_DEF(hsaKmtSetMemoryPolicy)*)(&hsaKmtSetMemoryPolicy);

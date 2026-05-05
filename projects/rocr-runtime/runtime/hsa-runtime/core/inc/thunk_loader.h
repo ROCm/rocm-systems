@@ -137,6 +137,10 @@ class ThunkLoader {
                                       HsaEvent* Event);
     typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtSetQueueProfilingBuffer))(
         HSA_QUEUEID QueueId, void* BufferBase, HSAuint32 NumRecords, volatile HSAuint32* WptrHostAddr);
+    typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtSetDispatchLog))(
+        HSA_QUEUEID QueueId, HSAuint32 GpuId,
+        void* BufferBase, HSAuint32 NumRecords,
+        void* WptrAddr, void* RptrAddr, void* SignalAddr);
     typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtDestroyQueue))(HSA_QUEUEID QueueId);
     typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtSetQueueCUMask))(HSA_QUEUEID QueueId, \
                                       HSAuint32 CUMaskCount, \
@@ -449,6 +453,7 @@ class ThunkLoader {
     HSAKMT_DEF(hsaKmtCreateQueueV2)* HSAKMT_PFN(hsaKmtCreateQueueV2);
     HSAKMT_DEF(hsaKmtUpdateQueue)* HSAKMT_PFN(hsaKmtUpdateQueue);
     HSAKMT_DEF(hsaKmtSetQueueProfilingBuffer)* HSAKMT_PFN(hsaKmtSetQueueProfilingBuffer);
+    HSAKMT_DEF(hsaKmtSetDispatchLog)* HSAKMT_PFN(hsaKmtSetDispatchLog);
     HSAKMT_DEF(hsaKmtDestroyQueue)* HSAKMT_PFN(hsaKmtDestroyQueue);
     HSAKMT_DEF(hsaKmtSetQueueCUMask)* HSAKMT_PFN(hsaKmtSetQueueCUMask);
     HSAKMT_DEF(hsaKmtSetMemoryPolicy)* HSAKMT_PFN(hsaKmtSetMemoryPolicy);

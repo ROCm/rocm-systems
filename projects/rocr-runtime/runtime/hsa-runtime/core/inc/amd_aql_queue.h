@@ -223,6 +223,33 @@ class AqlQueue : public core::Queue, private core::LocalSignal, public core::Doo
   hsa_status_t GetProfilingDispatchRecords(void** buffer_base,
                                            uint32_t* buffer_size) const;
 
+  /// @brief Get the per-queue host-VA pointer set used by the new
+  /// FW-readable dispatch-record interface.
+  ///
+  /// Each pointer is the CPU virtual address of an 8-byte counter word
+  /// in host-coherent system memory; the same address is also the GPU
+  /// virtual address (SVM) registered with KFD via the new
+  /// KFD_IOC_PROFILER_DISPATCH_LOG sub-op. MEC firmware reads the GPU
+  /// VAs from the v9 MQD slots DW48-DW53 on queue connect and:
+  ///   - writes the producer wptr (post-increment record count) to
+  ///     @c wptr_ptr per record
+  ///   - writes a monotonic counter (= same value as wptr) to
+  ///     @c signal_ptr per record (HSA-signal-compatible)
+  ///   - reads @c rptr_ptr opportunistically (currently informational
+  ///     only; FW does NOT enforce backpressure on overflow)
+  ///
+  /// All three pointers are nullptr if the new interface was not
+  /// enabled (kernel KFD MINOR < 20 or SetProfiling has not run yet).
+  /// Drainer code must check for null before dereferencing and fall
+  /// back to sentinel-scan.
+  ///
+  /// @returns HSA_STATUS_SUCCESS with non-null out-params if the new
+  /// interface is active for this queue; HSA_STATUS_ERROR_NOT_INITIALIZED
+  /// otherwise.
+  hsa_status_t GetDispatchLogPointers(volatile uint64_t** wptr_ptr,
+                                      volatile uint64_t** rptr_ptr,
+                                      volatile uint64_t** signal_ptr) const;
+
   /// @brief Update signal value using Relaxed semantics
   void StoreRelaxed(hsa_signal_value_t value) override;
 
@@ -395,13 +422,25 @@ class AqlQueue : public core::Queue, private core::LocalSignal, public core::Doo
   // stride and the drainer reads them at 16-byte stride. The extra
   // allocation tail beyond kRecordCount * 16 is unused/reserved and is
   // not part of the ring.
-  // The host-side wptr that the cpc_tracing precedent allocated has been
-  // dropped: the substrate has no path to publish that address to FW (KFD
-  // ABI lacks a wptr_addr field), so consumers locate fresh records via
-  // sentinel scan over per-slot record_type — see
-  // core/runtime/dispatch_log.cpp::drain_one_queue.
+  // The host-side wptr that the cpc_tracing precedent allocated has
+  // been re-introduced: KFD MINOR >= 20 + KFD_IOC_PROFILER_VERSION >= 2
+  // adds the KFD_IOC_PROFILER_DISPATCH_LOG sub-op and a v9 MQD slot
+  // pair (DW48/49) where the kernel programs the host VA the FW writes
+  // the wptr to. Two more pointer pairs (rptr DW50/51, signal DW52/53)
+  // come along for the ride. When the new interface is unavailable
+  // (older kernel/FW) the dispatch_log_*_buf_ fields stay nullptr and
+  // the drainer falls back to sentinel scan over per-slot record_type.
   void* dispatch_record_buffer_ = nullptr;
   uint32_t dispatch_record_buffer_size_ = 0;     // record count (NOT bytes)
+
+  // Three 8-byte host-coherent counter words (one cache line each to
+  // avoid producer/consumer false sharing). Allocated and registered in
+  // SetProfiling(true) when the new interface is supported by the
+  // running kernel; freed and unregistered in SetProfiling(false).
+  // The CPU vaddr equals the GPU vaddr (SVM-mapped GTT memory).
+  void* dispatch_log_wptr_buf_   = nullptr;   // FW writes here per record
+  void* dispatch_log_rptr_buf_   = nullptr;   // host writes here on consume
+  void* dispatch_log_signal_buf_ = nullptr;   // FW writes monotonic counter
 
   // Shared event used for queue errors
   static __forceinline HsaEvent*& queue_event() {
