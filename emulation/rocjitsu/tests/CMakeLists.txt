@@ -24,6 +24,7 @@ set(RJ_OBJECT_LIBS
     simdojo
     rocjitsu_vm
     rocjitsu_vm_amdgpu
+    rocjitsu_vm_plugins
     rocjitsu_vm_risc_v
     rocjitsu_config
 )

@@ -241,7 +241,7 @@ void ComputeUnitCore::tick_pipelines() {
 }
 
 void ComputeUnitCore::route_memory_inst(Instruction *inst, Wavefront &wf) {
-  plugin_group_->onAmdgpuRouteMemoryInstruction(*inst);
+  plugin_group_->onAmdgpuRouteMemoryInstruction(*inst, wf);
   switch (inst->data()->tag()) {
   case SCALAR_MEM:
     scalar_mem_pipeline_.issue(inst, wf);
@@ -338,10 +338,14 @@ bool ComputeUnitCore::step() {
         }
       }
       if (all_at_barrier) {
-        plugin_group_->onAmdgpuBarrierResolved(wg);
+        std::vector<Wavefront *> barrier_wfs;
         for (auto &w2 : wfs_)
           if (w2->wg_id() == wg && w2->state() == WfState::BARRIER)
-            w2->set_state(WfState::RUNNING);
+            barrier_wfs.push_back(w2.get());
+        plugin_group_->onAmdgpuBarrierResolved(
+            std::span<Wavefront *>(barrier_wfs));
+        for (auto *bwf : barrier_wfs)
+          bwf->set_state(WfState::RUNNING);
       }
     }
     retire_halted_wfs();
@@ -458,9 +462,9 @@ bool ComputeUnitCore::step() {
     }
   }
 
-  plugin_group_->onAmdgpuExecuteInstruction(active->pc, *inst);
-
+  plugin_group_->beforeAmdgpuExecuteInstruction(active->pc, *inst, *active);
   execute_instruction(inst, *active);
+  plugin_group_->afterAmdgpuExecuteInstruction(active->pc, *inst, *active);
 
   if constexpr (util::Logger::group_enabled(util::Logger::GROUP_VM)) {
     if (active->wf_id() == 0 && active->trace_inst_count_ <= 2000 && active->num_vgprs_ >= 32) {

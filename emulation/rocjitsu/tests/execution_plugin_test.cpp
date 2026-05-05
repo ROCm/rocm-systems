@@ -42,6 +42,7 @@ constexpr uint32_t S_BARRIER = sopp(10);
 /// A plugin that counts how many times each hook is called.
 class CountingPlugin : public ExecutionPlugin {
 public:
+  CountingPlugin() : ExecutionPlugin("test") {}
   int kernel_dispatches = 0;
   int workgroup_dispatches = 0;
   int instructions = 0;
@@ -50,18 +51,19 @@ public:
   int memory_insts = 0;
   int riscv_instructions = 0;
 
-  void onAmdgpuKernelDispatch(uint64_t, uint64_t) override { ++kernel_dispatches; }
-  void onAmdgpuDispatchWorkgroup(uint32_t, uint32_t, uint32_t,
+  void onAmdgpuKernelDispatch(const KernelDispatchInfo &) override { ++kernel_dispatches; }
+  void onAmdgpuDispatchWorkgroup(uint32_t, uint32_t, uint32_t, uint32_t,
                                  std::span<amdgpu::Wavefront *>) override {
     ++workgroup_dispatches;
   }
-  void onAmdgpuExecuteInstruction(uint64_t, const Instruction &inst) override {
+  void afterAmdgpuExecuteInstruction(uint64_t, const Instruction &inst,
+                                  amdgpu::Wavefront &) override {
     ++instructions;
     if (inst.mnemonic() == "s_barrier")
       ++barriers;
   }
-  void onAmdgpuBarrierResolved(uint32_t) override { ++barriers_resolved; }
-  void onAmdgpuRouteMemoryInstruction(const Instruction &) override { ++memory_insts; }
+  void onAmdgpuBarrierResolved(std::span<amdgpu::Wavefront *>) override { ++barriers_resolved; }
+  void onAmdgpuRouteMemoryInstruction(const Instruction &, amdgpu::Wavefront &) override { ++memory_insts; }
   void onRiscvExecuteInstruction(uint64_t, const Instruction &) override { ++riscv_instructions; }
 };
 

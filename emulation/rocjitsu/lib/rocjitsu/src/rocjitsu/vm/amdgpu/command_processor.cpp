@@ -336,8 +336,10 @@ bool CommandProcessor::step() {
         init_wavefront_regs(cu, wf, pkt, global_wg_id, w);
         wg_wavefronts.push_back(wf);
       }
-      plugin_group_->onAmdgpuDispatchWorkgroup(global_wg_id, pkt.vgprs_per_wf, pkt.sgprs_per_wf,
-                                               std::span<Wavefront *>(wg_wavefronts));
+      plugin_group_->onAmdgpuDispatchWorkgroup(
+            global_wg_id, dispatched_ - 1,
+            pkt.vgprs_per_wf, pkt.sgprs_per_wf,
+            std::span<Wavefront *>(wg_wavefronts));
       next_cu_ = (cu_idx + 1) % cus_.size();
       wg_dispatched = true;
     }
@@ -430,6 +432,8 @@ void CommandProcessor::check_all_idle() {
     if (dp.host_signal) {
       auto *val = reinterpret_cast<int64_t *>(dp.completion_signal + SIG_VAL_OFF);
       auto old_val = std::atomic_ref<int64_t>(*val).fetch_sub(1, std::memory_order_release);
+      if (old_val == 1)
+        plugin_group_->onAmdgpuKernelComplete();
       util::Logger::vm("CP: signal 0x", std::hex, dp.completion_signal, std::dec, " val ", old_val,
                        " -> ", old_val - 1);
       // Write event mailbox and fire interrupt so ROCR's signal wait wakes up.
@@ -448,6 +452,8 @@ void CommandProcessor::check_all_idle() {
     } else if (memory_) {
       auto old = static_cast<int64_t>(memory_->read64(dp.completion_signal + SIG_VAL_OFF));
       memory_->write64(dp.completion_signal + SIG_VAL_OFF, static_cast<uint64_t>(old - 1));
+      if (old == 1)
+        plugin_group_->onAmdgpuKernelComplete();
     }
     dp.completion_signal = 0; // Signal only once.
   }
@@ -787,7 +793,22 @@ void CommandProcessor::process_aql_packet(const hsa_kernel_dispatch_packet_t &pk
                      cus_.size(), " CUs)");
   }
 
-  plugin_group_->onAmdgpuKernelDispatch(pkt.kernel_object, entry_pc);
+  std::string kernel_sym = find_kernel_symbol(pkt.kernel_object, memory_);
+  KernelDispatchInfo dispatch_info{};
+  dispatch_info.kernel_object = pkt.kernel_object;
+  dispatch_info.entry_pc = entry_pc;
+  dispatch_info.kernel_name = kernel_sym;
+  dispatch_info.grid_size_x = pkt.grid_size_x;
+  dispatch_info.grid_size_y = pkt.grid_size_y;
+  dispatch_info.grid_size_z = pkt.grid_size_z;
+  dispatch_info.workgroup_size_x = pkt.workgroup_size_x;
+  dispatch_info.workgroup_size_y = pkt.workgroup_size_y;
+  dispatch_info.workgroup_size_z = pkt.workgroup_size_z;
+  dispatch_info.workgroup_count = total_wgs;
+  dispatch_info.wfs_per_workgroup = wfs_per_wg;
+  dispatch_info.sgprs_per_wf = dp.sgprs_per_wf;
+  dispatch_info.vgprs_per_wf = dp.vgprs_per_wf;
+  plugin_group_->onAmdgpuKernelDispatch(dispatch_info);
 
   dispatch_queue_.push_back(std::move(dp));
 }

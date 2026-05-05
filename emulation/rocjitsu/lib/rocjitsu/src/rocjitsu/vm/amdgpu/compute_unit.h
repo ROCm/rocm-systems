@@ -18,7 +18,7 @@
 #include "rocjitsu/vm/amdgpu/memory_pipeline.h"
 #include "rocjitsu/vm/amdgpu/mtype.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
-#include "rocjitsu/vm/execution_plugin.h"
+#include "rocjitsu/vm/plugins/execution_plugin.h"
 #include "simdojo/components/register_file.h"
 #include "simdojo/components/vector_reg.h"
 #include "util/bit.h"

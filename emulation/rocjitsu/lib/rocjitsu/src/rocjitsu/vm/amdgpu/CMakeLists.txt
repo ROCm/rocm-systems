@@ -14,3 +14,4 @@ rj_add_object_library(rocjitsu_vm_amdgpu
     l2_cache.cpp
     memory_side_cache.cpp
 )
+target_link_libraries(rocjitsu_vm_amdgpu PUBLIC rocjitsu_vm_plugins)
