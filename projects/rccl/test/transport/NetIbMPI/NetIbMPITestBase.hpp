@@ -94,9 +94,6 @@ protected:
     static constexpr bool kRequirePowerOfTwo = true;
     static constexpr int kNoNodeLimit = MPITestConstants::kNoNodeLimit;
 
-    // Buffer pattern constants
-    static constexpr int kBytePatternModulo = 256;
-
     // Timing constants
     static constexpr int kDefaultTimeoutMs = 5000;
     static constexpr int kLargeTransferTimeoutMs = 30000;
@@ -281,42 +278,6 @@ protected:
 
         MPI_Barrier(MPI_COMM_WORLD);
         return ncclSuccess;
-    }
-
-    // Helper: Initialize device buffer with pattern using DeviceBufferHelpers
-    hipError_t InitializeBuffer(void* buffer, size_t size, int pattern) {
-        // Use template-based helper with custom pattern: (pattern + i) % kBytePatternModulo
-        return initializeBufferWithPattern<uint8_t>(
-            buffer, size,
-            [pattern](size_t i) { return static_cast<uint8_t>((pattern + i) % kBytePatternModulo); }
-        );
-    }
-
-    // Helper: Verify device buffer pattern using DeviceBufferHelpers
-    bool VerifyBuffer(void* buffer, size_t size, int pattern) {
-        // Use template-based helper with pattern verification
-        return verifyBufferData<uint8_t>(
-            buffer, size,
-            [pattern](size_t i) {
-                return static_cast<uint8_t>((pattern + i) % kBytePatternModulo);
-            }
-        );
-    }
-
-    // Helper: Fill host buffer with pattern using HostBufferHelpers
-    void FillHostBuffer(void* buffer, size_t size, int seed) {
-        fillHostBufferWithPattern<uint8_t>(
-            buffer, size,
-            [seed](size_t i) { return static_cast<uint8_t>((seed + i) % kBytePatternModulo); }
-        );
-    }
-
-    // Helper: Verify host buffer pattern using HostBufferHelpers
-    bool VerifyHostBuffer(const void* buffer, size_t size, int seed) {
-        return verifyHostBufferData<uint8_t>(
-            buffer, size,
-            [seed](size_t i) { return static_cast<uint8_t>((seed + i) % kBytePatternModulo); }
-        );
     }
 
     // Helper: Retry until the receiver's FIFO slot is ready.
