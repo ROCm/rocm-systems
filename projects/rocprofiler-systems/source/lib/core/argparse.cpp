@@ -17,6 +17,8 @@
 
 #include <spdlog/fmt/ranges.h>
 
+#include <cstdint>
+
 namespace rocprofsys
 {
 namespace argparse

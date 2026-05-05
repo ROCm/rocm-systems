@@ -8,7 +8,7 @@
 namespace rocprofsys::common_utils
 {
 
-enum class tool_mode : uint8_t
+enum class tool_mode : std::uint8_t
 {
     run,
     sample
