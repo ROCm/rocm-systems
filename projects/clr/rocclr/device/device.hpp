@@ -2207,13 +2207,6 @@ class Device : public RuntimeObject {
   //! Sets the heap size of the device
   bool UpdateInitialHeapSize(uint64_t initialHeapSize);
 
-  //! Returns true if the device heap has been fully initialized.
-  //! PAL backend doesn't use the heap initialization path and heap_buffer_ is nullptr
-  bool IsHeapInitialized() const {
-    return (heap_buffer_ == nullptr) ||
-           heap_init_complete_.load(std::memory_order_acquire);
-  }
-
   //! Does this device allow P2P access?
   bool P2PAccessAllowed() const { return (p2p_access_devices_.size() > 0) ? true : false; }
 
@@ -2347,7 +2340,6 @@ class Device : public RuntimeObject {
 
   device::Memory* heap_buffer_;  //!< Preallocated heap buffer for memory allocations on device
 
-  std::atomic<bool> heap_init_complete_{false};  //!< True after device heap init kernel has finished
   amd::Memory* arena_mem_obj_;                          //!< Arena memory object
   uint64_t stack_size_{1024};                           //!< Device stack size
   device::Memory* initial_heap_buffer_;                 //!< Initial heap buffer
