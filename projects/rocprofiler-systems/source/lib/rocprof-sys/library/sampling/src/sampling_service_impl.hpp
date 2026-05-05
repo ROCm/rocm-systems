@@ -315,7 +315,6 @@ sampling_service<Policies>::shutdown(int64_t tid)
                 s->stop();
                 s->wait_for_in_flight_zero(5000);
                 offload_.write(other, s->ring_buffer(), fatal_);
-                do_emit_resolved(other);
                 do_shutdown_wiring(other);
                 registry_.erase(other);
             }
@@ -356,8 +355,14 @@ sampling_service<Policies>::shutdown(int64_t tid)
         offload_.write(tid, state->ring_buffer(), fatal_);
     }
 
-    // Variant 2: parse + resolve + emit to trace_cache immediately.
-    do_emit_resolved(tid);
+    // Symbol resolution is deferred — do NOT call do_emit_resolved() here.
+    // Baseline defers all resolution to post_process() so worker threads
+    // exit immediately after draining their ring buffers. Eager resolution
+    // on the worker thread adds ~0.5s of dladdr/unw_get_proc_name_by_ip
+    // work, delaying pthread_join on the main thread.
+    //
+    // Resolution runs later via emit_all_deferred() from the main thread
+    // after all joins complete.
 
     // Clear thread-local signal-handler pointers so a stale signal after
     // state destruction is a no-op.
@@ -365,6 +370,13 @@ sampling_service<Policies>::shutdown(int64_t tid)
 
     // Destroy the per-thread state for this tid.
     registry_.erase(tid);
+
+    // When main thread shuts down (tid == 0), resolve all deferred data.
+    if(tid == 0)
+    {
+        for(auto deferred_tid : offload_.tids())
+            do_emit_resolved(deferred_tid);
+    }
 
     LOG_DEBUG("Sampler destroyed for thread {}...", tid);
     return sigs;
