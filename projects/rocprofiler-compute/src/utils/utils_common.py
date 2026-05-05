@@ -1079,22 +1079,6 @@ def create_temp_rocprofiler_metrics_path(sdk_config: dict[str, Any]) -> str:
     return str(tmpfile_parent)
 
 
-def reconfigure_stdio_utf8() -> None:
-    """Force sys.stdout / sys.stderr to UTF-8 regardless of system locale.
-
-    sys.stdout's encoding is fixed at interpreter startup from
-    locale.getpreferredencoding(). On systems without an active UTF-8 locale
-    (e.g. RHEL/CentOS with LANG=C) it defaults to ASCII, and printing
-    box-drawing or other non-ASCII characters raises UnicodeEncodeError.
-    """
-    for stream in (sys.stdout, sys.stderr):
-        try:
-            stream.reconfigure(encoding="utf-8")
-        except (AttributeError, io.UnsupportedOperation):
-            # Captured stream (e.g. test runner) — leave it alone.
-            pass
-
-
 def set_locale_encoding() -> None:
     try:
         # Attempt to set the locale to 'C.UTF-8'

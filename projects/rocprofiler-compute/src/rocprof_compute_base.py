@@ -39,7 +39,6 @@ from utils.utils_common import (
     get_version_display,
     load_panel_configs,
     parse_sets_yaml,
-    reconfigure_stdio_utf8,
     replace_env,
     replace_rank,
     resolve_rocm_library_path,
@@ -72,7 +71,6 @@ class RocProfCompute:
             self.__args.verbose, self.__args.quiet, self.__mode, gui_value
         )
         setattr(self.__args, "loglevel", self.__loglevel)
-        reconfigure_stdio_utf8()
         set_locale_encoding()
 
         self.sanitize()
