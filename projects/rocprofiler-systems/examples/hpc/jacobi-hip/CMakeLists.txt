@@ -56,8 +56,6 @@ set(HPC_EXAMPLE_NAME "jacobi-hip")
 add_executable(${HPC_EXAMPLE_NAME} ${_JACOBI_HIP_SOURCES})
 
 target_compile_options(${HPC_EXAMPLE_NAME} PRIVATE -xhip)
-target_compile_options(${HPC_EXAMPLE_NAME} PRIVATE -fPIE)
-target_link_options(${HPC_EXAMPLE_NAME} PRIVATE -pie -Wl,-z,pack-relative-relocs)
 target_compile_definitions(${HPC_EXAMPLE_NAME} PRIVATE __HIP_PLATFORM_HCC__)
 target_include_directories(
     ${HPC_EXAMPLE_NAME}

@@ -73,23 +73,18 @@ target_link_libraries(
 add_executable(mpi-example mpi.cpp)
 target_link_libraries(mpi-example PRIVATE mpi-cxx-interface-library)
 
-set(MPI_EXAMPLES
-    mpi-example
-    mpi-allgather
-    mpi-bcast
-    mpi-all2all
-    mpi-reduce
-    mpi-scatter-gather
-    mpi-send-recv
-    mpi-allreduce
-)
-
-foreach(MPI_EXAMPLE IN LISTS MPI_EXAMPLES)
-    target_compile_options(${MPI_EXAMPLE} PRIVATE -fPIE)
-    target_link_options(${MPI_EXAMPLE} PRIVATE -pie -Wl,-z,pack-relative-relocs)
-endforeach()
-
 if(ROCPROFSYS_INSTALL_EXAMPLES)
+    set(MPI_EXAMPLES
+        mpi-example
+        mpi-allgather
+        mpi-bcast
+        mpi-all2all
+        mpi-reduce
+        mpi-scatter-gather
+        mpi-send-recv
+        mpi-allreduce
+    )
+
     foreach(MPI_EXAMPLE IN LISTS MPI_EXAMPLES)
         if(TARGET ${MPI_EXAMPLE})
             install(

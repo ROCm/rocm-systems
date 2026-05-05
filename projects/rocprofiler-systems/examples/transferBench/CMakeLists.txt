@@ -87,8 +87,6 @@ endif()
 
 add_executable(transferBench AllToAll.cpp)
 target_link_libraries(transferBench PRIVATE Threads::Threads ${HSA_RUNTIME_LIBRARY})
-target_compile_options(transferBench PRIVATE -fPIE)
-target_link_options(transferBench PRIVATE -pie -Wl,-z,pack-relative-relocs)
 target_include_directories(
     transferBench
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${HSA_RUNTIME_INCLUDE_DIR}

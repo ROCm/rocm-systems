@@ -17,8 +17,6 @@ find_package(Threads REQUIRED)
 add_executable(code-coverage code-coverage.cpp)
 target_link_libraries(code-coverage PRIVATE Threads::Threads)
 target_compile_options(code-coverage PRIVATE ${_FLAGS})
-target_compile_options(code-coverage PRIVATE -fPIE)
-target_link_options(code-coverage PRIVATE -pie -Wl,-z,pack-relative-relocs)
 
 if(ROCPROFSYS_INSTALL_EXAMPLES)
     install(

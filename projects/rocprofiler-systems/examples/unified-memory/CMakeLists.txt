@@ -55,8 +55,6 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 add_executable(unified-memory unified-memory.cpp)
-target_compile_options(unified-memory PRIVATE -fPIE)
-target_link_options(unified-memory PRIVATE -pie -Wl,-z,pack-relative-relocs)
 
 foreach(arch IN LISTS ROCPROFSYS_GFX_TARGETS)
     target_compile_options(unified-memory PRIVATE --offload-arch=${arch})

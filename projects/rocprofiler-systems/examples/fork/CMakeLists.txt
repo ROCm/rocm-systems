@@ -26,8 +26,6 @@ target_link_libraries(
     PRIVATE Threads::Threads rocprofiler-systems::rocprofiler-systems-user-library
 )
 target_compile_options(fork-example PRIVATE ${_FLAGS})
-target_compile_options(fork-example PRIVATE -fPIE)
-target_link_options(fork-example PRIVATE -pie -Wl,-z,pack-relative-relocs)
 
 if(ROCPROFSYS_INSTALL_EXAMPLES AND TARGET fork-example)
     install(
@@ -71,11 +69,6 @@ if(HIPCC_EXECUTABLE)
     )
         add_executable(hipMallocConcurrencyMproc hipMallocConcurrencyMproc.cpp)
         target_link_libraries(hipMallocConcurrencyMproc PRIVATE Threads::Threads)
-        target_compile_options(hipMallocConcurrencyMproc PRIVATE -fPIE)
-        target_link_options(
-            hipMallocConcurrencyMproc
-            PRIVATE -pie -Wl,-z,pack-relative-relocs
-        )
         set_target_properties(
             hipMallocConcurrencyMproc
             PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}"

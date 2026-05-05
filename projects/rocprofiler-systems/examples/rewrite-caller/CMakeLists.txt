@@ -14,8 +14,6 @@ set(CMAKE_BUILD_TYPE "Debug")
 
 add_executable(rewrite-caller rewrite-caller.cpp)
 target_compile_options(rewrite-caller PRIVATE ${_FLAGS})
-target_compile_options(rewrite-caller PRIVATE -fPIE)
-target_link_options(rewrite-caller PRIVATE -pie -Wl,-z,pack-relative-relocs)
 
 if(ROCPROFSYS_INSTALL_EXAMPLES AND TARGET rewrite-caller)
     install(

@@ -58,9 +58,7 @@ target_compile_options(
     ${HPC_EXAMPLE_NAME}
     PRIVATE -g -O3 -ffast-math -ffree-form ${offload_arch_flags}
 )
-target_compile_options(${HPC_EXAMPLE_NAME} PRIVATE -fPIE)
 
 target_link_options(${HPC_EXAMPLE_NAME} PRIVATE ${offload_link_flags})
-target_link_options(${HPC_EXAMPLE_NAME} PRIVATE -Wl,-pie -Wl,-z,pack-relative-relocs)
 
 rocprofiler_systems_install_hpc_example(${HPC_EXAMPLE_NAME})

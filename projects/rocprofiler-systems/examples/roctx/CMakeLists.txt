@@ -81,8 +81,6 @@ foreach(_target IN LISTS ROCTX_EXAMPLE_TARGETS)
     endif()
     add_executable(${_target} ${_sources})
     target_link_libraries(${_target} PRIVATE Threads::Threads)
-    target_compile_options(${_target} PRIVATE -fPIE)
-    target_link_options(${_target} PRIVATE -pie -Wl,-z,pack-relative-relocs)
 
     if(
         CMAKE_CXX_COMPILER_ID MATCHES "Clang"

@@ -51,8 +51,6 @@ if(
 endif()
 
 add_executable(sdma_test sdma_test.cpp)
-target_compile_options(sdma_test PRIVATE -fPIE)
-target_link_options(sdma_test PRIVATE -pie -Wl,-z,pack-relative-relocs)
 
 # Specify GPU architectures to compile for
 foreach(arch IN LISTS ROCPROFSYS_GFX_TARGETS)

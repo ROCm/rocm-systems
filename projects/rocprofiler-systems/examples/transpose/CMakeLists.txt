@@ -59,8 +59,6 @@ endif()
 
 add_executable(transpose transpose.cpp)
 target_link_libraries(transpose PRIVATE Threads::Threads)
-target_compile_options(transpose PRIVATE -fPIE)
-target_link_options(transpose PRIVATE -pie -Wl,-z,pack-relative-relocs)
 
 # Specify GPU architectures to compile for
 foreach(arch IN LISTS ROCPROFSYS_GFX_TARGETS)

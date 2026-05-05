@@ -138,8 +138,6 @@ if(HIP_FOUND AND rocjpeg_FOUND AND Threads_FOUND AND rocprofiler-register_FOUND)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=gnu++17")
     target_link_libraries(jpegdecode ${LINK_LIBRARY_LIST})
     target_compile_options(jpegdecode PRIVATE ${_FLAGS})
-    target_compile_options(jpegdecode PRIVATE -fPIE)
-    target_link_options(jpegdecode PRIVATE -pie -Wl,-z,pack-relative-relocs)
     copy_image_files_and_make_copies()
 
     if(ROCPROFSYS_INSTALL_EXAMPLES AND TARGET jpegdecode)

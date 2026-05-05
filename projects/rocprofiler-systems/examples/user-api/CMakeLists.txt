@@ -16,8 +16,6 @@ if(NOT TARGET rocprofiler-systems::rocprofiler-systems-user-library)
     find_package(rocprofiler-systems REQUIRED COMPONENTS user)
 endif()
 add_executable(user-api user-api.cpp)
-target_compile_options(user-api PRIVATE -fPIE)
-target_link_options(user-api PRIVATE -pie -Wl,-z,pack-relative-relocs)
 target_link_libraries(
     user-api
     PRIVATE Threads::Threads rocprofiler-systems::rocprofiler-systems-user-library

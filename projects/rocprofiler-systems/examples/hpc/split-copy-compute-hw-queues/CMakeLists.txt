@@ -46,8 +46,6 @@ set_source_files_properties(compute_comm_overlap.hip PROPERTIES LANGUAGE CXX)
 set(HPC_EXAMPLE_NAME "split-copy-compute-hw-queues")
 add_executable(${HPC_EXAMPLE_NAME} compute_comm_overlap.hip)
 target_compile_options(${HPC_EXAMPLE_NAME} PRIVATE -xhip ${EXAMPLE_COMPILE_FLAGS})
-target_compile_options(${HPC_EXAMPLE_NAME} PRIVATE -fPIE)
-target_link_options(${HPC_EXAMPLE_NAME} PRIVATE -pie -Wl,-z,pack-relative-relocs)
 
 foreach(arch IN LISTS ROCPROFSYS_GFX_TARGETS)
     target_compile_options(${HPC_EXAMPLE_NAME} PRIVATE --offload-arch=${arch})
