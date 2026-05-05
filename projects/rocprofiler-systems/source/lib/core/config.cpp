@@ -2482,6 +2482,10 @@ get_tmpdir()
 
 namespace
 {
+// s_db_path_memo and s_db_path_mutex are reset on each rocprof-sys-attach
+// re-attach via reset_database_path_memo(); s_db_path_session_id is NOT
+// reset and increments monotonically across attaches so that per-call
+// .db filenames stay unique within a single process lifetime.
 std::mutex  s_db_path_mutex;
 std::string s_db_path_memo;
 int         s_db_path_session_id = 0;
@@ -2510,7 +2514,7 @@ get_database_absolute_path(std::string_view database_name, std::string_view suff
     if(!result.empty() && result.at(0) != '/')
     {
         const auto* pwd = getenv("PWD");
-        return settings::format(fmt::format("{}/{}", pwd, result),
+        return settings::format(fmt::format("{}/{}", (pwd ? pwd : "."), result),
                                 get_config()->get_tag());
     }
     return result;
