@@ -436,15 +436,13 @@ class GraphNode : public hipGraphNodeDOTAttribute {
       }
       if (segment_id_ == -1) {
         out << "\nStreamId:" << stream_id_;
-        out << "\nSignalIsRequired: " << ((signal_is_required_) ? "true" : "false");
       }
+      out << "\nSignalIsRequired: " << ((signal_is_required_) ? "true" : "false");
       out << "\nDeviceId:" << dev_id_;
     }
     out << "\"";
     if (DEBUG_HIP_GRAPH_DOT_PRINT) {
-      // Add color coding based on segment ID for better visualization
       if (segment_id_ != -1) {
-        // Color nodes based on segment ID for better visual grouping
         const char* colors[] = {"lightcoral", "lightblue", "lightgreen", "lightyellow",
                                 "lightpink",  "lightgray", "lightcyan",  "lightsalmon"};
         int color_index = segment_id_ % (sizeof(colors) / sizeof(colors[0]));
@@ -889,6 +887,8 @@ class Graph {
 
     // Hierarchical child graph information
     Graph* child_graph_ptr = nullptr;           // Direct pointer to child graph for quick access
+
+    bool needs_completion_signal = false;        // True if any downstream segment is on a different stream
   };
 
   //! Segment information for batch scheduling
@@ -1033,6 +1033,8 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
   //! Find the number of streams required per device for packet engine mode
   //! This method analyzes segments to determine per-device stream requirements
   void FindStreamsReqPerDevForSegments();
+  //! Pre-compute segment-to-stream-index mapping and same-stream dep flags at instantiate
+  void PrecomputeStreamAssignment();
   //! Get the parallel streams map for synchronization before destruction
   const std::unordered_map<int, std::vector<hip::Stream*>>& GetParallelStreams() const {
     return parallel_streams_;
@@ -1320,8 +1322,8 @@ class GraphKernelNode : public GraphNode {
       }
       if (segment_id_ == -1) {
         out << "\nStreamId:" << stream_id_;
-        out << "\nSignalIsRequired: " << ((signal_is_required_) ? "true" : "false");
       }
+      out << "\nSignalIsRequired: " << ((signal_is_required_) ? "true" : "false");
       out << "\nDeviceId:" << dev_id_;
     }
     out << "\"";

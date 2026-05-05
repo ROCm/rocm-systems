@@ -445,8 +445,13 @@ void GraphExec::BuildSyncPlan() {
   for (const auto& segment : segments_) {
     auto& info = sync_plan_.segment_sync[segment.id];
     info.segment_id = segment.id;
-    // copy dependencies to barrier_dep_indices
-    info.barrier_dep_indices = segment.segment_ids_dependencies;
+    // Only emit barrier packets for cross-stream dependencies. Same-stream
+    // segments execute in queue order so no barrier is needed between them.
+    for (int dep_id : segment.segment_ids_dependencies) {
+      if (segments_[dep_id].stream_id != segment.stream_id) {
+        info.barrier_dep_indices.push_back(dep_id);
+      }
+    }
 
     auto segBatchIt = segmentBatches_.find(segment.id);
     if (segBatchIt == segmentBatches_.end()) {
@@ -1109,6 +1114,37 @@ void GraphExec::FindStreamsReqPerDevForSegments() {
 }
 
 // ================================================================================================
+void GraphExec::PrecomputeStreamAssignment() {
+  size_t num_streams = streams_.empty() ? max_streams_ : streams_.size();
+  if (num_streams == 0) num_streams = 1;
+
+  for (int level = 0; level <= max_dependency_level_; ++level) {
+    auto it = segments_per_level_.find(level);
+    if (it == segments_per_level_.end()) continue;
+
+    const auto& segs_at_level = it->second;
+    for (size_t idx = 0; idx < segs_at_level.size(); ++idx) {
+      int seg_id = segs_at_level[idx];
+      if (seg_id >= 0 && seg_id < static_cast<int>(segments_.size())) {
+        segments_[seg_id].stream_id = static_cast<int>(idx % num_streams);
+      }
+    }
+  }
+
+  for (auto& seg : segments_) {
+    seg.needs_completion_signal = false;
+    for (int edge_id : seg.segment_ids_edges) {
+      if (edge_id >= 0 && edge_id < static_cast<int>(segments_.size())) {
+        if (segments_[edge_id].stream_id != seg.stream_id) {
+          seg.needs_completion_signal = true;
+          break;
+        }
+      }
+    }
+  }
+}
+
+// ================================================================================================
 hipError_t GraphExec::Init() {
   hipError_t status = hipSuccess;
   // Set instantiation device ID early so Find functions can use it
@@ -1140,6 +1176,11 @@ hipError_t GraphExec::Init() {
   }
 
   if (use_segment_scheduling_) {
+    // Pre-compute stream assignment before packet capture so that BuildSyncPlan
+    // (called inside CaptureAQLPackets) can see each segment's stream_id and
+    // skip same-stream dependency barriers.
+    PrecomputeStreamAssignment();
+
     // For graph nodes capture AQL packets to dispatch them directly during graph launch.
     status = CaptureAQLPackets();
   }
@@ -1928,16 +1969,7 @@ hipError_t GraphExec::EnqueueSegment(const Segment& segment, hip::Stream* stream
     return hipSuccess;
   }
 
-  // If the segment has uncaptured nodes and the first node is non-captured,
-  // dispatch the first batch (dep barriers) before executing non-captured nodes
-  bool first_node_uncaptured = segBatch && segBatch->has_uncaptured_nodes &&
-      !segment.nodes.empty() && !segBatch->node_capture_status[0];
-  if (first_node_uncaptured && batchIndex < segBatch->packet_batches.size() &&
-      segBatch->packet_batches[batchIndex].nodeRanges.empty()) {
-    status = dispatchCurrentBatch();
-    if (status != hipSuccess) return status;
-  }
-
+  // Process all nodes in this segment
   for (size_t i = 0; i < segment.nodes.size(); ++i) {
     if (segBatch && i < segBatch->node_capture_status.size() &&
         segBatch->node_capture_status[i]) {
