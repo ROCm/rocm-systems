@@ -353,19 +353,19 @@
   s_or_b32          ttmp3, ttmp2, ttmp3
 
 .if .amdgcn.gfx_generation_minor == 0
-  // Save trap id and halt status in ttmp6.
+  // Save trap id and halt status in ttmp6, so it can be restored by the debugger.
   s_andn2_b32       ttmp6, ttmp6, (TTMP6_SAVED_TRAP_ID_MASK | TTMP6_SAVED_STATUS_HALT_MASK)
   s_bfe_u32         ttmp2, ttmp1, SQ_WAVE_PC_HI_TRAP_ID_BFE
   s_min_u32         ttmp2, ttmp2, 0xF
   s_lshl_b32        ttmp2, ttmp2, TTMP6_SAVED_TRAP_ID_SHIFT
   s_or_b32          ttmp6, ttmp6, ttmp2
-  s_bfe_u32         ttmp2, ttmp12, SQ_WAVE_STATE_PRIV_HALT_BFE
+  s_getreg_b32      ttmp2, hwreg(HW_REG_WAVE_STATE_PRIV, SQ_WAVE_STATE_PRIV_HALT_SHIFT, 1)
   s_lshl_b32        ttmp2, ttmp2, TTMP6_SAVED_STATUS_HALT_SHIFT
   s_or_b32          ttmp6, ttmp6, ttmp2
 .elseif .amdgcn.gfx_generation_minor == 5
-  // Save halt status in ttmp6
+  // Save halt status in ttmp6, so it can be restored by the debugger.
   s_andn2_b32       ttmp6, ttmp6, TTMP6_SAVED_STATUS_HALT_MASK
-  s_bfe_u32         ttmp2, ttmp12, SQ_WAVE_STATE_PRIV_HALT_BFE
+  s_getreg_b32      ttmp2, hwreg(HW_REG_WAVE_STATE_PRIV, SQ_WAVE_STATE_PRIV_HALT_SHIFT, 1)
   s_lshl_b32        ttmp2, ttmp2, TTMP6_SAVED_STATUS_HALT_SHIFT
   s_or_b32          ttmp6, ttmp6, ttmp2
 
@@ -413,7 +413,7 @@
 .halt_wave:
   // Halt the wavefront
   s_bitset1_b32     ttmp6, TTMP6_WAVE_STOPPED_SHIFT
-  s_bitset1_b32     ttmp12, SQ_WAVE_STATE_PRIV_HALT_SHIFT
+  s_setreg_imm32_b32 hwreg(HW_REG_STATE_PRIV, SQ_WAVE_STATE_PRIV_HALT_SHIFT, 1), 1
 
   // Initialize TTMP registers
   s_bitcmp1_b32     ttmp8, TTMP8_DEBUG_FLAG_SHIFT
