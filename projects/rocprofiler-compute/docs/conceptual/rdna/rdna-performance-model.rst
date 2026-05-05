@@ -40,32 +40,50 @@ system memory.
 Workgroups and execution
 ==============================
 
-RDNA3 architecture based APUs organize compute around Workgroup Processors (WGPs) and
-Compute Units (CUs). Wavefronts are typically wave32-oriented in this
-configuration. The Workgroup processor (WGP), Shader Processor Input (SPI), and Command Processor Compute (CPC) panels in gfx1151 expose the dispatch, occupancy, and command-processor side metrics that complement the Instinct/CDNA
-:doc:`Compute unit page <../cdna/compute-unit>`, which uses terminology such as CU and Shader Engines (SE).
+RDNA3 architecture–based APUs organize compute around **Workgroup Processors (WGPs)** and **Compute Units (CUs)**—on gfx1151 each WGP pairs two CUs that share resources.
+Wavefronts are typically wave32-oriented in this configuration.
+The Workgroup processor (WGP), Shader Processor Input (SPI), and Command Processor Compute (CPC) panels in gfx1151 expose dispatch, occupancy, and command-processor metrics for this RDNA execution model (see the nested chapters under :doc:`shader-engine` and :doc:`command-processor`).
 
 Hardware block chapters
 ========================
 
-The RDNA3.5 architecture based metrics tables are categorized by the following blocks. Profiler concepts for RDNA use APU naming (such as, WGP, GL1/GL2) and embed the RDNA3.5 (gfx1151) metric tables under each block:
+Profiler chapters follow the RDNA3 gfx1151 block hierarchy below (roofline and Memory Chart walkthroughs live elsewhere in this manual).
 
-* :doc:`system-speed-of-light` — SoL table for gfx1151. It uses the same
-  metric keys as the analysis panel.
+Shader engine
+-------------
 
-* :doc:`wgp` — Roofline, WGP utilization, waves, instruction mix, WGP instruction and data caches.
+Within each shader engine, gfx1151 metric tables group under:
 
-* :doc:`gl0-cache` — GL0 (TCP): Panel tables and Memory Chart rows through TCP-GL1.
+* :doc:`spi` — **Workgroup Manager (SPI).** Schedules wavefronts onto WGPs after the command processor dispatches work; SPI utilization and wave-dispatch statistics.
 
-* :doc:`gl1-cache` — GL1 Cache: Panel tables and Memory Chart GL1 Cache.
+* :doc:`wgp` — **Workgroup Processor (WGP).** CU-pair execution: occupancy, waves, instruction mix, and WGP instruction/data caches.
 
-* :doc:`gl2-cache` — GL2 Cache, GCEA / DRAM / arbiter, and related panel metrics.
+* :doc:`gl0-cache` — **GL0 (TCP vector cache).** Vector L0 immediately before GL1; TCP-named counters through the TCP–GL1 boundary.
 
-* :doc:`shader-engine` — GRBM GPU/SE utilization and SPI dispatch statistics.
+* :doc:`gl1-cache` — **GL1 Cache.** Shared L1 utilization, requests, cache performance, and the GL1–GL2 interface.
 
-* :doc:`command-processor` — CPC / Micro Engine (ME) metrics (same role as CDNA CP, different tab layout in gfx1151).
+See :doc:`shader-engine` for a short overview tying these blocks together.
 
-* :doc:`references` — Public references and link to Instinct citations.
+Last-level cache and memory paths
+----------------------------------
+
+* :doc:`gl2-cache` — **GL2 Cache.** Last-level GFX on-chip cache performance, requests, and bandwidth.
+
+* :doc:`gcea` — **GCEA.** DRAM read/write interfaces, system arbiter (SARB), and return traffic after GL2.
+
+Host-side control and coarse utilization
+-----------------------------------------
+
+* :doc:`command-processor` — **Command processor.** CPC / MEC panels from packet handling through dispatch toward SPI.
+
+* :doc:`grbm` — **Graphics Register Bus Manager (GRBM).** GPU-wide and per-shader-engine utilization from GRBM-derived counters.
+
+Additional reference material
+-----------------------------
+
+* :doc:`system-speed-of-light` — System Speed-of-Light table using the same gfx1151 metric keys as the analysis panel.
+
+* :doc:`references` — Public references and links to complementary Instinct documentation.
 
 .. Note::
 

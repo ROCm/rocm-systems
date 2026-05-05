@@ -1,16 +1,17 @@
 .. meta::
-   :description: ROCm Compute Profiler RDNA3.5 GL0 (TCP) metrics
+   :description: ROCm Compute Profiler RDNA3.5 GL0 (TCP vector cache) metrics
    :keywords: ROCm Compute Profiler, RDNA, gfx1151, GL0, TCP, L0
 
 .. _rdna-gl0:
 
-===
-GL0
-===
+=========================
+GL0 (TCP Vector Cache)
+=========================
 
-On gfx1151, GL0 is the vector L1 data cache (also referred to as TCP) in front of
-the GL1 cache. For GL1 panels and the GL1 Cache Memory Chart table, see
-:doc:`gl1-cache`. The handoff toward GL2 cache is under :doc:`gl2-cache`.
+**GL0** is the vector-side TCP cache immediately in front of GL1 inside each shader engine datapath (hardware counters keep the ``TCP_*`` prefix on gfx1151).
+
+For GL1 panels and the GL1 Cache Memory Chart table, see :doc:`gl1-cache`.
+The handoff toward GL2 cache is under :doc:`gl2-cache`.
 
 .. note::
 

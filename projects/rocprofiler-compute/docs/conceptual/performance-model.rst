@@ -28,20 +28,26 @@ overview:
 
   * :doc:`cdna/references`
 
-* **Ryzen APU (RDNA)** — :doc:`RDNA3 <rdna/rdna-performance-model>`: Architecture, top-level RDNA3 block diagram, GCEA, gfx1151 panel layout, and chapters for:
+* **Ryzen APU (RDNA)** — :doc:`RDNA3 <rdna/rdna-performance-model>`: Architecture, top-level RDNA3 block diagram, gfx1151 panels, and chapters for:
   * :doc:`rdna/system-speed-of-light`
 
-  * :doc:`rdna/wgp`
+  * :doc:`rdna/shader-engine` (overview)
 
-  * :doc:`rdna/gl0-cache`
+    * :doc:`rdna/spi`
 
-  * :doc:`rdna/gl1-cache`
+    * :doc:`rdna/wgp`
+
+    * :doc:`rdna/gl0-cache`
+
+    * :doc:`rdna/gl1-cache`
 
   * :doc:`rdna/gl2-cache`
 
-  * :doc:`rdna/shader-engine`
+  * :doc:`rdna/gcea`
 
   * :doc:`rdna/command-processor`
+
+  * :doc:`rdna/grbm`
 
   * :doc:`rdna/references`
 

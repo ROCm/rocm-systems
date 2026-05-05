@@ -8,10 +8,9 @@
 GL1
 ===
 
-GL1 Cache is the shared L1 cache layer on gfx1151, supplied by GL0 (TCP).
+**GL1 Cache** is the shared L1 vector cache inside each shader engine on gfx1151, supplied by GL0 (TCP) and forwarding misses toward GL2.
 For GL0 panels and Memory Chart rows through the TCP-GL1 boundary, see
-:doc:`gl0-cache`. For downstream GL2 Cache, GCEA, and DRAM panels after GL1, see
-:doc:`gl2-cache`.
+:doc:`gl0-cache`. For downstream GL2 panels after GL1, see :doc:`gl2-cache`; for DRAM / GCEA interfaces beyond GL2, see :doc:`gcea`.
 
 .. note::
 

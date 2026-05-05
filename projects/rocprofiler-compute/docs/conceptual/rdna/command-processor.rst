@@ -8,7 +8,9 @@
 Command processor (CP)
 =========================
 
-The command processor (CP) connects the host and kernel driver to on-GPU
+The **command processor (CP)** is the GPU front-end that bridges host queues to on-chip scheduling: every kernel launch passes through it before the shader-engine SPI/WGP path executes work.
+
+It connects the host and kernel driver to on-GPU
 scheduling. During the process it pulls work from HSA queues, decodes packets, and dispatches the kernel
 launches to the front-end (SPI / WGP path). On Instinct GPUs, the profiler
 often seperates the metrics into command processor fetcher (CPF) and command processor compute (CPC). The
