@@ -816,6 +816,8 @@ def nullify_unevaluated_metric_values(
         for col in df.columns:
             if col in SUPPORTED_FIELD and col.lower() != "alias":
                 df[col] = "N/A"
+            elif col == "Pct of Peak":
+                df[col] = "N/A"
 
 
 @demarcate

@@ -265,7 +265,6 @@ def compute_pct_of_peak(dfs: dict, dfs_type: dict) -> None:
 
         mask = df[pop_col].apply(lambda v: v is True)
         df[pop_col] = ""
-        df[pop_col] = df[pop_col].astype(object)
         df.loc[mask, pop_col] = [
             calc_pct_of_peak(v, p)
             for v, p in zip(df.loc[mask, value_col], df.loc[mask, peak_col])

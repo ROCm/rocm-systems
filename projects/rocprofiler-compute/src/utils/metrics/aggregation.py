@@ -6,10 +6,21 @@
 from __future__ import annotations
 
 import warnings
-from typing import Any
+from typing import Any, Union
 
 import numpy as np
 import pandas as pd
+
+
+def calc_pct_of_peak(value: object, peak: object) -> Union[float, str]:  # noqa: UP007
+    """Return 100 * value / peak, or empty string on error / zero peak / NaN input."""
+    try:
+        val_f, peak_f = float(value), float(peak)
+    except (ValueError, TypeError):
+        return ""
+    if not (pd.notna(val_f) and pd.notna(peak_f)):
+        return ""
+    return (val_f / peak_f) * 100 if peak_f != 0 else ""
 
 
 def to_min(*args: Any) -> float:
@@ -155,12 +166,3 @@ def to_mod(
 
 def to_concat(a: Any, b: Any) -> str:  # noqa: ANN401
     return str(a) + str(b)
-
-
-def calc_pct_of_peak(value: object, peak: object) -> float | str:
-    """Return 100 * value / peak, or empty string on error / zero peak."""
-    try:
-        val_f, peak_f = float(value), float(peak)
-    except (ValueError, TypeError):
-        return ""
-    return (val_f / peak_f) * 100 if peak_f != 0 else ""

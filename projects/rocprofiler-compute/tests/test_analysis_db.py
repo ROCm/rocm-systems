@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pandas as pd
+import pytest
 
 from rocprof_compute_analyze.analysis_db import db_analysis
 from utils import schema
