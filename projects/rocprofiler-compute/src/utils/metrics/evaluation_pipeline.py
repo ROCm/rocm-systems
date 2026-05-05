@@ -263,18 +263,13 @@ def compute_pct_of_peak(dfs: dict, dfs_type: dict) -> None:
         if not value_col or not peak_col:
             continue
 
-        # Read flags before casting column to object dtype
-        pop_flags = df[pop_col].copy()
+        mask = df[pop_col].apply(lambda v: v is True)
+        df[pop_col] = ""
         df[pop_col] = df[pop_col].astype(object)
-
-        for idx in df.index:
-            pop_flag = pop_flags.loc[idx]
-            if pop_flag != True:  # noqa: E712
-                df.at[idx, pop_col] = ""
-                continue
-            df.at[idx, pop_col] = calc_pct_of_peak(
-                df.loc[idx, value_col], df.loc[idx, peak_col]
-            )
+        df.loc[mask, pop_col] = [
+            calc_pct_of_peak(v, p)
+            for v, p in zip(df.loc[mask, value_col], df.loc[mask, peak_col])
+        ]
 
 
 def validate_dual_issue_metrics(
