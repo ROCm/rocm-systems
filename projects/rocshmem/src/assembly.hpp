@@ -309,19 +309,19 @@ __device__ __forceinline__ void put_asm([[maybe_unused]] uint8_t* src,
     case 16: [[likely]] {
       [[maybe_unused]] __int128_t val128{*(reinterpret_cast<__int128_t*>(src))};
 #if defined(__gfx90a__) || defined(__gfx1100__)
-      asm volatile("flat_store_dwordx4 %0, %1, glc"
+      asm volatile("flat_store_dwordx4 %0, %1, glc slc"
                    :
                    : "v"(dst), "v"(val128)
                    : "memory");
 #endif
 #if defined(__gfx942__) || defined(__gfx950__)
-      asm volatile("flat_store_dwordx4 %0, %1, sc0 sc1"
+      asm volatile("flat_store_dwordx4 %0, %1, sc0 sc1 nt"
                    :
                    : "v"(dst), "v"(val128)
                    : "memory");
 #endif
 #if defined(__gfx1201__)
-      asm volatile("flat_store_b128 %0, %1, scope:SCOPE_SYS"
+      asm volatile("flat_store_b128 %0, %1, scope:SCOPE_SYS th:TH_STORE_NT_RT"
                    :
                    : "v"(dst), "v"(val128)
                    : "memory");
