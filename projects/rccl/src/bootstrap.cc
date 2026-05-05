@@ -142,6 +142,45 @@ NCCL_PARAM(BootstrapPmix, "BOOTSTRAP_PMIX", 0);
 // Default 0 — opt-in. Falls back to ring/bidir if any precondition fails.
 NCCL_PARAM(BootstrapTreeAllGather, "BOOTSTRAP_TREE_ALLGATHER", 0);
 
+// [RCCL] Phase C: opt-in O(log N) binomial-tree rendezvous to replace the
+// flat-root accept-N-and-fan-out pattern in bootstrapInit.
+//
+// Activation precondition: power-of-two nranks AND single bootstrap root
+// (nHandles == 1) AND PMIx fast-path NOT taken (PMIx already gives us
+// O(log N) rendezvous via PMIx_Fence; tree rendezvous is the native
+// alternative for environments without PMIx).
+//
+// Topology: rank R is at level highest_bit(R) of a binomial tree rooted at
+// rank 0. parent(R) = R - (1 << highest_bit(R)); children(R) = ranks
+// (R + 2^k) for every k > highest_bit(R) where R + 2^k < N (rank 0 has
+// children at 1, 2, 4, …, 2^(log2(N)-1)).
+//
+// Three sub-phases:
+//   0. Address discovery: every rank publishes its rendezvous listen addr
+//      to the root thread; root replies with the rank's parent's listen
+//      addr. Still O(N) accepts at the root (this is the cost we cannot
+//      avoid without external pre-distribution like PMIx) but the per-conn
+//      payload is ~32 B instead of ~600 B + ~200 B that the flat-root
+//      protocol carries through the same loop, so the syscall+TCP cost
+//      of the discovery pass dominates rather than the userspace work.
+//   1. Tree gather (extInfo flows up): round k from 0 to log2(N)-1; ranks
+//      with bit k set connect to parent and ship their accumulated subtree
+//      info, then exit; ranks with bit k clear accept from R + 2^k and
+//      append to their buffer. After log2(N) rounds rank 0 has the full
+//      table.
+//   2. Tree scatter (per-rank nextPeer info flows down): symmetric reverse
+//      — root pushes the precomputed nextPeer table slice to each direct
+//      child; intermediate ranks forward sub-slices to their own children;
+//      every rank ends up with its own nextPeer entry.
+//
+// Critical-path latency = O(log N × per-hop RTT) instead of O(N × per-rank
+// RTT) on the root. At N=10 000 that is the difference between ~14 hops
+// and ~10 000 sequential accepts on rank 0.
+//
+// Default 0 — opt-in. Mutually exclusive with PMIx fast-path (PMIx wins
+// when both are armed since it ALSO makes the rendezvous O(log N)).
+NCCL_PARAM(BootstrapTreeRendezvous, "BOOTSTRAP_TREE_RENDEZVOUS", 0);
+
 // MAX_TREE_ROUNDS bounds log2(nranks) for the recursive-doubling tree
 // AllGather. 20 covers nranks up to 2^20 = 1,048,576 — well above any
 // realistic large-scale init the bootstrap targets. The per-round listen
@@ -174,6 +213,84 @@ static inline bool bootstrapBidirEnabled(int nranks, int kind) {
 // bootstrapAllGather just consults the flag (see state->treeAllGatherEnabled).
 static inline bool bootstrapTreePowOfTwo(int n) {
   return n >= 2 && (n & (n - 1)) == 0;
+}
+
+// [RCCL] Phase C: binomial-tree topology helpers.
+//
+// parent(R) = R - (1 << highest_set_bit(R)) for R > 0; -1 for R == 0.
+// Visually, for N=8:
+//                       0
+//             ┌─────────┼─────────┐
+//             1         2         4
+//            (3)      (3,6)    (5,6,7)   ← children at successive levels
+// Rank R sits at depth = popcount(R), its parent is the rank obtained by
+// stripping R's most-significant bit. Each child of R is (R | (1 << k))
+// for some k > MSB(R), which is also (R + (1 << k)) since that bit was
+// previously zero — children are always greater than their parent.
+static inline int bootstrapTreeRdvzParent(int rank) {
+  if (rank <= 0) return -1;
+  int msb = 31 - __builtin_clz((unsigned)rank);
+  return rank - (1 << msb);
+}
+
+// Fills children[] with binomial-tree children of rank inside an N-rank
+// communicator and returns the count. Children of R are R + 2^k for
+// every k > MSB(R) (or every k ≥ 0 when R == 0) with R + 2^k < N.
+// Caller must size children[] for at least BOOTSTRAP_MAX_TREE_ROUNDS.
+static inline int bootstrapTreeRdvzChildren(int rank, int nranks, int* children) {
+  int n = 0;
+  int startK = (rank == 0) ? 0 : (32 - __builtin_clz((unsigned)rank));
+  for (int k = startK; (1 << k) < nranks; k++) {
+    int child = rank + (1 << k);
+    if (child >= nranks) continue;
+    children[n++] = child;
+  }
+  return n;
+}
+
+// Round at which rank R communicates with its parent in the binomial-tree
+// gather. Equivalently MSB(R). Used to size loops and to verify gather
+// ordering invariants.
+static inline int bootstrapTreeRdvzParentRound(int rank) {
+  if (rank <= 0) return -1;
+  return 31 - __builtin_clz((unsigned)rank);
+}
+
+// Forward declaration — the actual struct is defined alongside extInfo
+// (it's the wire-format struct for the bootstrap rendezvous next-peer
+// payload). Forward-declared here so the topology helper can reference
+// the type without pulling the full definition above its declaration site.
+struct ringConnectInfo;
+
+// Wire format for one subtree-member entry exchanged during binomial-tree
+// scatter. Enough to let an intermediate rank (a) extract its OWN
+// nextPeer info (matched on the rank field) and (b) connect to each of
+// its children to forward a sub-slice (listenRootAddress is the dial-in
+// address known after the existing flat-root extInfo gather). The
+// outermost call from root to its direct children carries one entry per
+// rank in the entire subtree below that child; each forwarding step
+// shrinks the slice down to the receiver's own subtree.
+//
+// NOTE: defined just-after struct ringConnectInfo (further down the file)
+// because it embeds it by value. Only the forward declaration lives here
+// to keep the topology helpers grouped together. See the second piece of
+// the definition below the ringConnectInfo block.
+
+// Recursively populates subtreeOut[] with all rank IDs in the binomial
+// subtree rooted at "rank" (including rank itself). subtreeOut[] must hold
+// at least nranks entries. Returns the number of entries written. Order
+// is parent-first then per-child subtree, but downstream code only matches
+// on rank id so the order does not matter for correctness.
+static int bootstrapTreeRdvzSubtree(int rank, int nranks, int* subtreeOut) {
+  int n = 0;
+  subtreeOut[n++] = rank;
+  int startK = (rank == 0) ? 0 : (32 - __builtin_clz((unsigned)rank));
+  for (int k = startK; (1 << k) < nranks; k++) {
+    int child = rank + (1 << k);
+    if (child >= nranks) continue;
+    n += bootstrapTreeRdvzSubtree(child, nranks, subtreeOut + n);
+  }
+  return n;
 }
 
 ncclResult_t bootstrapNetInit() {
@@ -403,6 +520,15 @@ struct ringConnectInfo {
   char revHandle[NCCL_NET_HANDLE_MAXSIZE];
 };
 
+// [RCCL] Phase C: tree-rendezvous wire entry (definition body — see
+// forward-declared treeRdvzEntry near the topology helpers above for the
+// rationale of why this lives here).
+struct treeRdvzEntry {
+  int rank;
+  union ncclSocketAddress listenRootAddress;
+  struct ringConnectInfo nextPeer;
+};
+
 struct extInfo {
   int rank;                                  // rank of the process reaching out
   int nranks;                                // total number of ranks
@@ -418,6 +544,14 @@ struct extInfo {
   // configurations and compatible with the existing PMIx_Put/Get blob
   // protocol (PMIx_BYTE_OBJECT carries the whole struct).
   union ncclSocketAddress treeListenAddrs[BOOTSTRAP_MAX_TREE_ROUNDS];
+  // [RCCL] Phase C: rendezvous listen address used by the binomial-tree
+  // bootstrap rendezvous protocol. Populated by every rank when
+  // NCCL_BOOTSTRAP_TREE_RENDEZVOUS=1; zeros otherwise. The discovery
+  // sub-phase has each rank publish this single address to the root
+  // thread (carried piggybacked on the existing sendToRoot call) so the
+  // root can hand each rank its parent's rendezvous addr without a
+  // separate addr-only round trip.
+  union ncclSocketAddress treeRdvzListenAddress;
 };
 #define NET_HANDLE(h, rank)    ((h) + (rank * NCCL_NET_HANDLE_MAXSIZE))
 #define BOOTSTRAP_HANDLE(h, i) ((struct ncclBootstrapHandle*)((char*)h + i * NCCL_UNIQUE_ID_BYTES))
@@ -444,6 +578,27 @@ fail:
   (void)ncclSocketClose(&sock);
   return res;
 }
+
+// [RCCL] Phase C: tree-rendezvous scatter primitive.
+// Wire format: int n (host byte order, both peers same arch) followed by
+// n×sizeof(treeRdvzEntry) bytes. Receiver pulls n first, allocates, then
+// reads the payload. Used by both the root thread (root → direct children
+// of rank 0) and by intermediate ranks forwarding sub-slices down the
+// binomial tree.
+static ncclResult_t treeRdvzSendSlice(union ncclSocketAddress* dst, uint64_t magic,
+                                      struct treeRdvzEntry* entries, int n) {
+  ncclResult_t res = ncclSuccess;
+  struct ncclSocket sock;
+  NCCLCHECKGOTO(ncclSocketInit(&sock, dst, magic, ncclSocketTypeBootstrap), res, fail);
+  NCCLCHECKGOTO(ncclSocketConnect(&sock), res, fail);
+  NCCLCHECKGOTO(socketSend(&sock, &n, sizeof(int)), res, fail);
+  NCCLCHECKGOTO(socketSend(&sock, entries, n * (int)sizeof(struct treeRdvzEntry)), res, fail);
+  NCCLCHECK(ncclSocketClose(&sock));
+  return res;
+fail:
+  (void)ncclSocketClose(&sock);
+  return res;
+}
 static void* bootstrapRoot(void* rargs) {
   uint64_t timers[BOOTSTRAP_INIT_ROOT_N] = {0};
   struct bootstrapRootArgs* args = (struct bootstrapRootArgs*)rargs;
@@ -456,6 +611,12 @@ static void* bootstrapRoot(void* rargs) {
   struct extInfo info;
   struct ringConnectInfo* rankInfo = NULL;
   union ncclSocketAddress* rankAddressesRoot = NULL; // for initial rank <-> root information exchange
+  // [RCCL] Phase C: in tree-rendezvous mode the inline-send fast path during
+  // the gather loop is disabled (it would race against the tree forwarding
+  // protocol). The flag is set after the first extInfo arrives — that is
+  // when nranks/nroots are known and the precondition (single root, pow-2
+  // nranks, env opt-in) can be evaluated.
+  bool treeRdvzMode = false;
   // get zeros for comparison
   char zeroHandle[NCCL_NET_HANDLE_MAXSIZE];
   union ncclSocketAddress zeroAddress;
@@ -486,6 +647,19 @@ static void* bootstrapRoot(void* rargs) {
       nrecv = n2send + ((nroots > 1) ? 1 : 0);
       NCCLCHECKGOTO(ncclCalloc(&rankInfo, nrecv), res, out);
       NCCLCHECKGOTO(ncclCalloc(&rankAddressesRoot, nrecv), res, out);
+      // [RCCL] Phase C: latch tree-rendezvous mode now that nranks/nroots
+      // are known. Mode is single-process opt-in via env, so all ranks
+      // (and this root thread) reach the same decision deterministically.
+      treeRdvzMode = (ncclParamBootstrapTreeRendezvous() != 0)
+                  && (nroots == 1)
+                  && bootstrapTreePowOfTwo(nranks);
+      if (ncclParamBootstrapTreeRendezvous() != 0 && !treeRdvzMode) {
+        INFO(NCCL_BOOTSTRAP, "Tree rendezvous: disabled at root (nroots=%d, nranks=%d, pow2=%d)",
+             nroots, nranks, bootstrapTreePowOfTwo(nranks));
+      } else if (treeRdvzMode) {
+        INFO(NCCL_BOOTSTRAP, "Tree rendezvous: armed at root (nranks=%d, log2=%d)",
+             nranks, 31 - __builtin_clz((unsigned)nranks));
+      }
     }
 
     if (nranks != info.nranks || nroots != info.nroots || iroot != info.iroot) {
@@ -506,6 +680,17 @@ static void* bootstrapRoot(void* rargs) {
     // revHandle and others see zero (which would cause asymmetric fallback behaviour
     // and deadlock in bootstrapBidirRingSetup).
     memcpy(&rankInfo[localId], &info.connectInfo, sizeof(struct ringConnectInfo));
+
+    // [RCCL] Phase C: in tree-rendezvous mode the inline-send fast path is
+    // disabled — every scatter goes through the tree forwarding pass below,
+    // and we need a complete rankAddressesRoot[] table at that point. Just
+    // stash the listen address and move on.
+    if (treeRdvzMode) {
+      memcpy(rankAddressesRoot + localId, &info.listenRootAddress, sizeof(union ncclSocketAddress));
+      ++c;
+      TRACE(NCCL_BOOTSTRAP, "Received connect from rank %d total %d/%d (tree mode)", info.rank, c, nrecv);
+      continue;
+    }
 
     // Try to inline-send next-info to the just-arrived rank's previous (whose connection
     // address we may already have). For bidir IB we additionally need prev-of-prev's
@@ -548,8 +733,85 @@ static void* bootstrapRoot(void* rargs) {
   TRACE(NCCL_BOOTSTRAP, "COLLECTED ALL %d HANDLES", nrecv);
   BOOTSTRAP_PROF_CLOSE(timers[BOOTSTRAP_INIT_ROOT_RECV]);
 
-  // send the remaining info to the ranks who haven't received anything
+  // [RCCL] Phase C: in tree-rendezvous mode replace the O(N) flat fan-out
+  // with O(log N) outbound connections from this thread. Send a subtree
+  // slice to each direct child of rank 0 (those slices include the child
+  // and every binomial-tree descendant), plus a singleton slice to rank 0
+  // itself. Recipients will recursively forward sub-slices to their own
+  // tree children. Total root outbound = (1 + log2(N)) connections
+  // carrying ~N/2 + N/4 + … + 1 ≈ N entries split across log2(N) channels
+  // — same total bytes as flat-root, but log2(N)× fewer accepts/connects
+  // on the critical path of any single rank's perceived rendezvous time.
   BOOTSTRAP_PROF_OPEN(timers[BOOTSTRAP_INIT_ROOT_SEND]);
+  if (treeRdvzMode) {
+    struct ringConnectInfo* nextPeer = NULL;
+    struct treeRdvzEntry* slice = NULL;
+    int* subtree = NULL;
+    NCCLCHECKGOTO(ncclCalloc(&nextPeer, nranks), res, out);
+    NCCLCHECKGOTO(ncclCalloc(&slice, nranks), res, out);
+    NCCLCHECKGOTO(ncclCalloc(&subtree, nranks), res, out);
+
+    // Compute global nextPeer table (rank r receives info for (r+1)%N's
+    // forward connect plus (r-1+N)%N's revHandle, mirroring what the
+    // legacy fast-path inline-send and final-loop branches deliver).
+    for (int r = 0; r < nranks; r++) {
+      int next = (r + 1) % nranks;
+      int prev = (r - 1 + nranks) % nranks;
+      nextPeer[r] = rankInfo[next];
+      memcpy(nextPeer[r].revHandle, rankInfo[prev].revHandle, NCCL_NET_HANDLE_MAXSIZE);
+    }
+
+    // Targets this thread is responsible for: rank 0 (degenerate slice of
+    // 1, because rank 0 itself is logically the tree root and its full
+    // subtree IS the whole communicator — handed to rank 0 it would race
+    // with this thread on forwarding to {1, 2, 4, …}) followed by rank 0's
+    // binomial-tree children {1, 2, 4, …} which each get the full subtree
+    // rooted at themselves and forward sub-slices to their own children.
+    int directChildren[BOOTSTRAP_MAX_TREE_ROUNDS];
+    int ndirect = bootstrapTreeRdvzChildren(0, nranks, directChildren);
+    // First: degenerate slice {rank 0} → rank 0.
+    slice[0].rank = 0;
+    slice[0].listenRootAddress = rankAddressesRoot[0];
+    slice[0].nextPeer = nextPeer[0];
+    {
+      ncclResult_t r2 = treeRdvzSendSlice(&rankAddressesRoot[0], magic, slice, 1);
+      if (r2 != ncclSuccess) {
+        WARN("Bootstrap Root: tree scatter to rank 0 (singleton) failed: %d", r2);
+        free(nextPeer); free(slice); free(subtree);
+        res = r2;
+        goto out;
+      }
+    }
+    // Then: full subtree slice for each of rank 0's direct binomial-tree
+    // children. Each recipient forwards sub-slices from there.
+    for (int t = 0; t < ndirect; t++) {
+      int c = directChildren[t];
+      int n = bootstrapTreeRdvzSubtree(c, nranks, subtree);
+      for (int j = 0; j < n; j++) {
+        int r = subtree[j];
+        slice[j].rank = r;
+        slice[j].listenRootAddress = rankAddressesRoot[r];
+        slice[j].nextPeer = nextPeer[r];
+      }
+      ncclResult_t r2 = treeRdvzSendSlice(&rankAddressesRoot[c], magic, slice, n);
+      if (r2 != ncclSuccess) {
+        WARN("Bootstrap Root: tree scatter to rank %d (slice=%d entries) failed: %d", c, n, r2);
+        free(nextPeer); free(slice); free(subtree);
+        res = r2;
+        goto out;
+      }
+    }
+    free(nextPeer);
+    free(slice);
+    free(subtree);
+    BOOTSTRAP_PROF_CLOSE(timers[BOOTSTRAP_INIT_ROOT_SEND]);
+    TRACE(NCCL_BOOTSTRAP | NCCL_PROFILE,
+          "Root timings tree (wait %f, recv %f, send %f) directs=%d",
+          timers[BOOTSTRAP_INIT_ROOT_WAIT] / 1e9,
+          timers[BOOTSTRAP_INIT_ROOT_RECV] / 1e9,
+          timers[BOOTSTRAP_INIT_ROOT_SEND] / 1e9, 1 + ndirect);
+    goto out;
+  }
   // here we need to send info only to my own local process
   for (int r = 0; r < n2send; ++r) {
     // use nrecv to periodize: if 1 root, we will send the first one to the last one, if >1 roots we will send the additional one we have received
@@ -689,6 +951,15 @@ struct bootstrapListen_t {
       // unordered backlog across rounds, which races when peers progress
       // through rounds at different speeds).
       struct ncclSocket tree[BOOTSTRAP_MAX_TREE_ROUNDS];
+      // [RCCL] Phase C: single dedicated listen for the binomial-tree
+      // rendezvous protocol. Used by both the gather sub-phase (children
+      // connect to parent and ship subtree info) and the scatter sub-phase
+      // (parent connects to children and ships nextPeer slice). The first
+      // bytes of every tree-rdvz connection identify (peerRank, phase) so
+      // a single listen can multiplex up to log2(N) gather connects from
+      // distinct children plus one scatter connect from the parent without
+      // ordering ambiguity.
+      struct ncclSocket rendezvous;
     } socket;
   };
 };
@@ -1394,9 +1665,108 @@ ncclResult_t bootstrapInit(int nHandles, void* handles, struct ncclComm* comm) {
     BOOTSTRAP_PROF_OPEN(timers[BOOTSTRAP_INIT_TIME_RECV]);
     NCCLCHECK(ncclSocketInit(&sock));
     NCCLCHECK(ncclSocketAccept(&sock, &listenSockRoot));
-    NCCLCHECK(socketRecv(&sock, &nextPeer, sizeof(nextPeer)));
-    NCCLCHECK(ncclSocketClose(&sock));
-    NCCLCHECK(ncclSocketClose(&listenSockRoot));
+    // [RCCL] Phase C: detect tree-rendezvous mode using the same conditions
+    // the root thread uses (env + nHandles==1 + pow-2 nranks). When armed,
+    // the root thread sends a binomial-tree subtree slice instead of a
+    // single ringConnectInfo; this rank picks out its own nextPeer from
+    // the slice and forwards sub-slices to its tree children before
+    // returning. listenSockRoot stays open for the legacy single-recv
+    // pattern; tree mode reads a length-prefixed message on the same
+    // accepted connection.
+    bool useTreeRdvz = (ncclParamBootstrapTreeRendezvous() != 0)
+                    && (nHandles == 1)
+                    && bootstrapTreePowOfTwo(nranks);
+    if (useTreeRdvz) {
+      int n = 0;
+      NCCLCHECK(socketRecv(&sock, &n, sizeof(int)));
+      if (n <= 0 || n > nranks) {
+        WARN("Bootstrap rank %d: tree-rendezvous slice size %d out of range [1, %d]",
+             rank, n, nranks);
+        NCCLCHECK(ncclSocketClose(&sock));
+        NCCLCHECK(ncclSocketClose(&listenSockRoot));
+        return ncclInternalError;
+      }
+      struct treeRdvzEntry* slice = NULL;
+      NCCLCHECK(ncclCalloc(&slice, n));
+      NCCLCHECK(socketRecv(&sock, slice, n * (int)sizeof(struct treeRdvzEntry)));
+      NCCLCHECK(ncclSocketClose(&sock));
+      NCCLCHECK(ncclSocketClose(&listenSockRoot));
+
+      // Locate own nextPeer in the slice — rank id is the search key, the
+      // slice is a flat unordered array (parent-first traversal of the
+      // subtree, but the order doesn't matter here).
+      bool found = false;
+      for (int j = 0; j < n; j++) {
+        if (slice[j].rank == rank) {
+          nextPeer = slice[j].nextPeer;
+          found = true;
+          break;
+        }
+      }
+      if (!found) {
+        WARN("Bootstrap rank %d: own entry missing from tree-rendezvous slice (n=%d)", rank, n);
+        free(slice);
+        return ncclInternalError;
+      }
+
+      // Forward sub-slices to my own tree children, in parallel with the
+      // rest of bootstrapInit progress on the receiver side. Each child's
+      // sub-slice contains only entries inside that child's subtree —
+      // pulled from my received slice by rank id, since the parent's
+      // slice is a strict superset of every child's subtree.
+      //
+      // Special case: rank 0 receives a degenerate {0} singleton from the
+      // root thread (the root thread itself fans out directly to rank 0's
+      // tree children). The generic check below — "is the child rank in
+      // my slice?" — naturally short-circuits this without needing an
+      // explicit rank == 0 branch: if the slice is just {0}, none of the
+      // children {1, 2, 4, …} are present and forwarding is skipped.
+      int children[BOOTSTRAP_MAX_TREE_ROUNDS];
+      int nchild = bootstrapTreeRdvzChildren(rank, nranks, children);
+      if (nchild > 0) {
+        int* subRanks = NULL;
+        struct treeRdvzEntry* subSlice = NULL;
+        NCCLCHECK(ncclCalloc(&subRanks, nranks));
+        NCCLCHECK(ncclCalloc(&subSlice, nranks));
+        for (int i = 0; i < nchild; i++) {
+          int c = children[i];
+          // Check whether c is even in my slice — if not, an upstream
+          // ancestor (typically the root thread) has already shipped the
+          // slice to c directly and we should not duplicate.
+          bool childPresent = false;
+          for (int k = 0; k < n; k++) {
+            if (slice[k].rank == c) { childPresent = true; break; }
+          }
+          if (!childPresent) continue;
+
+          int sn = bootstrapTreeRdvzSubtree(c, nranks, subRanks);
+          // Re-pack child's subtree entries by walking the parent's slice
+          // once per requested rank — O(sn × n) but bounded by N² which
+          // is fine for bootstrap-time sizes (and the N constant on this
+          // path dominates network latency anyway).
+          union ncclSocketAddress childAddr;
+          memset(&childAddr, 0, sizeof(childAddr));
+          for (int j = 0; j < sn; j++) {
+            int r = subRanks[j];
+            for (int k = 0; k < n; k++) {
+              if (slice[k].rank == r) {
+                subSlice[j] = slice[k];
+                if (r == c) childAddr = slice[k].listenRootAddress;
+                break;
+              }
+            }
+          }
+          NCCLCHECK(treeRdvzSendSlice(&childAddr, comm->magic, subSlice, sn));
+        }
+        free(subRanks);
+        free(subSlice);
+      }
+      free(slice);
+    } else {
+      NCCLCHECK(socketRecv(&sock, &nextPeer, sizeof(nextPeer)));
+      NCCLCHECK(ncclSocketClose(&sock));
+      NCCLCHECK(ncclSocketClose(&listenSockRoot));
+    }
     BOOTSTRAP_PROF_CLOSE(timers[BOOTSTRAP_INIT_TIME_RECV]);
   }
 #ifdef NCCL_HAVE_PMIX
