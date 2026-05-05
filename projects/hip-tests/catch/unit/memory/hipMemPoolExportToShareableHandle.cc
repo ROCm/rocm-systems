@@ -18,8 +18,8 @@
 #include "mempool_common.hh"
 #include <hip_test_process.hh>
 
-constexpr int DATA_SIZE = 1024 * 1024;
-constexpr size_t byte_size = DATA_SIZE * sizeof(int);
+static const int DATA_SIZE = isQuickLevel() ? 128 * 1024 : 1024 * 1024;
+static const size_t byte_size = DATA_SIZE * sizeof(int);
 
 /**
  Kernel to perform Square of input data.
