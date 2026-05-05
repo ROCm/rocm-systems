@@ -15,11 +15,7 @@
 
 using namespace rccl;
 
-#if HIP_VERSION >= 71260540
-NCCL_PARAM(LocalRegister, "LOCAL_REGISTER", 1);
-#else
 NCCL_PARAM(LocalRegister, "LOCAL_REGISTER", 0);
-#endif
 
 ncclResult_t ncclRegLocalIsValid(struct ncclReg *reg, bool *isValid) {
   if (reg && isValid) {
