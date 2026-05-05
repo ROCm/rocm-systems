@@ -364,10 +364,6 @@ struct perfetto_policy
                         "nic_tx_cnp_pkts",
                         counter_track::at(device_index, it->second.track_index), ts,
                         static_cast<double>(sample.metric_values.tx_rdma_cnp_pkts));
-                    TRACE_COUNTER(
-                        "nic_tx_rdma_ack_timeout",
-                        counter_track::at(device_index, it->second.track_index), ts,
-                        static_cast<double>(sample.metric_values.tx_rdma_ack_timeout));
                 }
             }
 
