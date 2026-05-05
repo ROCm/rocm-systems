@@ -15,6 +15,7 @@
 #include <unistd.h>
 
 #if defined(ROCPROFSYS_USE_ROCPD_LIBRARY) && ROCPROFSYS_USE_ROCPD_LIBRARY > 0
+#    include <dlfcn.h>
 #    include <rocprofiler-sdk-rocpd/rocpd.h>
 #    include <rocprofiler-sdk-rocpd/types.h>
 
@@ -101,7 +102,22 @@ load_schema_cb(rocpd_sql_engine_t, rocpd_sql_schema_kind_t, rocpd_sql_options_t,
     }
     *query = std::string(schema_content);
 }
-#    else
+
+// Old API (< 1.3.0) callback typedef — no schema_version parameter.
+// Used at runtime when the loaded library is older than the headers we compiled against.
+using rocpd_sql_load_schema_cb_v1_t = void (*)(rocpd_sql_engine_t,
+                                               rocpd_sql_schema_kind_t,
+                                               rocpd_sql_options_t,
+                                               const rocpd_sql_schema_jinja_variables_t*,
+                                               const char*, const char*, void*);
+
+// Old API (< 1.3.0) function pointer typedef — 8 params, no schema_version.
+using rocpd_sql_load_schema_fn_v1_t =
+    rocpd_status_t (*)(rocpd_sql_engine_t, rocpd_sql_schema_kind_t, rocpd_sql_options_t,
+                       const rocpd_sql_schema_jinja_variables_t*,
+                       rocpd_sql_load_schema_cb_v1_t, const char**, uint64_t, void*);
+#    endif
+
 // Legacy API (< 1.3.0): callback does not have schema_version parameter
 void
 load_schema_cb_legacy(rocpd_sql_engine_t, rocpd_sql_schema_kind_t, rocpd_sql_options_t,
@@ -121,7 +137,6 @@ load_schema_cb_legacy(rocpd_sql_engine_t, rocpd_sql_schema_kind_t, rocpd_sql_opt
     }
     *query = std::string(schema_content);
 }
-#    endif
 #endif
 
 std::string
@@ -154,8 +169,22 @@ get_schema_query(rocpd_sql_schema_kind_t schema_kind, const std::string& upid)
     }
     else
     {
-        LOG_WARNING("rocpd runtime {} < {}; schema load unavailable", runtime_version,
-                    ROCPROFSYS_ROCPD_NEW_API_VERSION);
+        // Runtime library is older than the headers we compiled against.
+        // Bypass the link-time new-ABI symbol and call the old 8-param signature via
+        // dlsym so there is no ABI mismatch.
+        void* sym            = dlsym(RTLD_DEFAULT, "rocpd_sql_load_schema");
+        auto  load_schema_v1 = reinterpret_cast<rocpd_sql_load_schema_fn_v1_t>(sym);
+        if(load_schema_v1)
+        {
+            status = load_schema_v1(ROCPD_SQL_ENGINE_SQLITE3, schema_kind,
+                                    ROCPD_SQL_OPTIONS_NONE, &info, load_schema_cb_legacy,
+                                    nullptr, 0, &query);
+        }
+        else
+        {
+            LOG_WARNING("rocpd runtime {} < {}; schema load unavailable", runtime_version,
+                        ROCPROFSYS_ROCPD_NEW_API_VERSION);
+        }
     }
 #    else
     status = rocpd_sql_load_schema(ROCPD_SQL_ENGINE_SQLITE3, schema_kind,
