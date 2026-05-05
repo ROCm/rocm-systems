@@ -41,7 +41,7 @@ click-log==0.4.0
     # via doxysphinx
 comm==0.2.3
     # via ipykernel
-cryptography==46.0.6
+cryptography==46.0.7
     # via pyjwt
 debugpy==1.8.20
     # via ipykernel
