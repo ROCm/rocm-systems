@@ -12,7 +12,8 @@ from pathlib import Path
 import pandas as pd
 
 ROOT = os.path.dirname(os.path.dirname(__file__))
-SRC = os.path.join(ROOT, "src")
+src_candidate = os.path.join(ROOT, "src")
+SRC = src_candidate if os.path.isdir(src_candidate) else ROOT
 if SRC not in sys.path:
     sys.path.insert(0, SRC)
 
