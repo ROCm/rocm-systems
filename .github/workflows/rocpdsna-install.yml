@@ -103,5 +103,5 @@ jobs:
       - name: Run consumer smoke test
         working-directory: consumer-build
         env:
-          LD_LIBRARY_PATH: ${{ github.workspace }}/rocpdsna-install/lib
+          LD_LIBRARY_PATH: ${{ env.INSTALL_PREFIX }}/lib
         run: ctest --output-on-failure
