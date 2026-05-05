@@ -2483,41 +2483,51 @@ get_tmpdir()
     return static_cast<tim::tsettings<std::string>&>(*_v->second).get();
 }
 
+namespace
+{
+// s_db_path_memo and s_db_path_mutex are reset on each rocprof-sys-attach
+// re-attach via reset_database_path_memo(); s_db_path_session_id is NOT
+// reset and increments monotonically across attaches so that per-call
+// .db filenames stay unique within a single process lifetime.
+std::mutex  s_db_path_mutex;
+std::string s_db_path_memo;
+int         s_db_path_session_id = 0;
+}  // namespace
+
 std::string
 get_database_absolute_path(std::string_view database_name, std::string_view suffix)
 {
-    const auto*  pwd                   = getenv("PWD");
-    const auto*  existing_path         = std::getenv("ROCPROFSYS_DATABASE_DIR");
-    static auto* attach_add_session_id = getenv("ROCPROFSYS_REATTACH_ADD_SESSION_ID");
+    std::unique_lock<std::mutex> lk{ s_db_path_mutex };
 
-    auto dir = existing_path ? std::string{ existing_path } : std::string{};
-    auto ext = std::string{ "db" };
-
-    static auto session_id = 0;
-    auto        cfg =
-        attach_add_session_id
-                   ? settings::compose_filename_config{ settings::use_output_suffix(),
-                                                 fmt::format("%pid%-{}", session_id++),
-                                                 false, dir }
-                   : settings::compose_filename_config{ settings::use_output_suffix(), suffix,
-                                                 false, dir };
+    auto cfg = settings::compose_filename_config{
+        settings::use_output_suffix(),
+        fmt::format("{}-{}", suffix, s_db_path_session_id++), false, s_db_path_memo
+    };
 
     auto result =
-        settings::compose_output_filename(std::string{ database_name }, ext, cfg);
+        settings::compose_output_filename(std::string{ database_name }, "db", cfg);
 
     const auto get_dir = [](const std::string& path) {
         const auto last_slash = path.find_last_of("/\\");
         return (last_slash != std::string::npos) ? path.substr(0, last_slash + 1)
                                                  : std::string{};
     };
-
-    dir = get_dir(result);
-    setenv("ROCPROFSYS_DATABASE_DIR", dir.c_str(), 1);
+    s_db_path_memo = get_dir(result);
 
     if(!result.empty() && result.at(0) != '/')
-        return settings::format(fmt::format("{}/{}", pwd, result),
+    {
+        const auto* pwd = getenv("PWD");
+        return settings::format(fmt::format("{}/{}", (pwd ? pwd : "."), result),
                                 get_config()->get_tag());
+    }
     return result;
+}
+
+void
+reset_database_path_memo()
+{
+    std::unique_lock<std::mutex> lk{ s_db_path_mutex };
+    s_db_path_memo.clear();
 }
 
 std::string

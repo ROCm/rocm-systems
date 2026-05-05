@@ -1294,6 +1294,7 @@ rocprofsys_reset_for_reattach_hidden(void)
     rocprofsys_finalization_done.store(false);
     rocprofsys_init_library_done.store(false);
     rocprofsys_init_tooling_done.store(0);
+    ::rocprofsys::reset_database_path_memo();
     ::rocprofsys::reset_state();
 }
 

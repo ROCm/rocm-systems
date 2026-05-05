@@ -370,6 +370,9 @@ get_tmpdir();
 std::string
 get_database_absolute_path(std::string_view database_name, std::string_view tag);
 
+void
+reset_database_path_memo();
+
 std::string
 get_perfetto_output_filename_with_suffix(std::string_view suffix = "");
 
