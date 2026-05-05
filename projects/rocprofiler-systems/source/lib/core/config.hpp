@@ -7,6 +7,7 @@
 #include "common/defines.h"
 #include "state.hpp"
 #include "timemory.hpp"
+#include <cstdint>
 
 #include <timemory/backends/threading.hpp>
 #include <timemory/macros/language.hpp>
@@ -54,7 +55,7 @@ int
 get_sampling_cputime_signal();
 
 std::set<int>
-get_sampling_signals(int64_t _tid = 0);
+get_sampling_signals(std::int64_t _tid = 0);
 
 void
 finalize();
@@ -239,7 +240,7 @@ get_perfetto_shmem_size_hint();
 size_t
 get_perfetto_buffer_size();
 
-uint32_t
+std::uint32_t
 get_perfetto_flush_period();
 
 bool
@@ -257,7 +258,7 @@ get_disabled_categories();
 bool
 get_perfetto_annotations() ROCPROFSYS_HOT;
 
-uint64_t
+std::uint64_t
 get_thread_pool_size();
 
 std::string&
@@ -306,13 +307,13 @@ get_sampling_cpus();
 std::string
 get_cpu_metrics();
 
-std::set<int64_t>
+std::set<std::int64_t>
 get_sampling_cputime_tids();
 
-std::set<int64_t>
+std::set<std::int64_t>
 get_sampling_realtime_tids();
 
-std::set<int64_t>
+std::set<std::int64_t>
 get_sampling_overflow_tids();
 
 bool
@@ -419,7 +420,7 @@ get_causal_mode();
 bool
 get_causal_end_to_end();
 
-std::vector<int64_t>
+std::vector<std::int64_t>
 get_causal_fixed_speedup();
 
 std::string

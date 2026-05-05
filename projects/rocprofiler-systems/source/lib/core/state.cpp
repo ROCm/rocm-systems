@@ -5,6 +5,7 @@
 #include "common/static_object.hpp"
 #include "config.hpp"
 #include "utility.hpp"
+#include <cstdint>
 
 #include "logger/debug.hpp"
 
@@ -31,7 +32,7 @@ get_thread_state_value()
 }
 
 auto&
-get_thread_state_history(int64_t _idx = utility::get_thread_index())
+get_thread_state_history(std::int64_t _idx = utility::get_thread_index())
 {
     static auto _v = utility::get_filled_array<ROCPROFSYS_MAX_THREADS>(
         []() { return utility::get_reserved_vector<ThreadState>(32); });

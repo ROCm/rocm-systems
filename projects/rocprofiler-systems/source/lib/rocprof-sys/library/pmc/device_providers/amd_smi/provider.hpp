@@ -58,7 +58,7 @@ private:
      */
     [[nodiscard]] std::vector<amdsmi_socket_handle> get_socket_handles()
     {
-        uint32_t count = 0;
+        std::uint32_t count = 0;
         check_amd_smi_status(m_driver_api->get_socket_handles(&count, nullptr),
                              "Failed to get socket count!");
 
@@ -84,7 +84,7 @@ private:
     [[nodiscard]] std::vector<amdsmi_processor_handle> get_gpu_handles_for_socket(
         amdsmi_socket_handle socket_handle)
     {
-        uint32_t count = 0;
+        std::uint32_t count = 0;
         auto status = m_driver_api->get_processor_handles(socket_handle, &count, nullptr);
 
         if(status != AMDSMI_STATUS_SUCCESS || count == 0)
@@ -117,8 +117,8 @@ private:
     [[nodiscard]] std::vector<amdsmi_processor_handle> get_nic_handles_for_socket(
         amdsmi_socket_handle socket_handle)
     {
-        uint32_t count  = 0;
-        auto     status = m_driver_api->get_processor_handles_by_type(
+        std::uint32_t count  = 0;
+        auto          status = m_driver_api->get_processor_handles_by_type(
             socket_handle, AMDSMI_PROCESSOR_TYPE_AMD_NIC, nullptr, &count);
 
         if(status != AMDSMI_STATUS_SUCCESS || count == 0)

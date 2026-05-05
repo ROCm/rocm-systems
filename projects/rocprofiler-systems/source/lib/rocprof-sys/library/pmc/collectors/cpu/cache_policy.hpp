@@ -133,7 +133,7 @@ struct cache_policy
     static void store_sample(size_t device_id, const std::string& /*device_name*/,
                              const enabled_metrics& enabled_metrics_cfg,
                              const enabled_metrics& supported_metrics,
-                             const metrics& metric_values, uint64_t timestamp)
+                             const metrics& metric_values, std::uint64_t timestamp)
     {
         enabled_metrics effective;
         effective.value = enabled_metrics_cfg.value & supported_metrics.value;
@@ -141,7 +141,7 @@ struct cache_policy
         const auto& cpu_data = get_effective_cpu_data(metric_values);
 
         trace_cache::get_buffer_storage().store(trace_cache::cpu_pmc_sample{
-            effective, static_cast<uint32_t>(device_id), timestamp,
+            effective, static_cast<std::uint32_t>(device_id), timestamp,
             metric_values.process_data, serialize_frequencies(cpu_data),
             serialize_loads(cpu_data) });
     }
