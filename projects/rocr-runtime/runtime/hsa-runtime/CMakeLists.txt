@@ -242,6 +242,7 @@ set ( SRCS core/driver/driver.cpp
            core/runtime/runtime.cpp
            core/runtime/signal.cpp
            core/runtime/queue.cpp
+           core/runtime/clock_sync.cpp
            core/runtime/dispatch_log.cpp
            core/runtime/cache.cpp
            core/runtime/svm_profiler.cpp

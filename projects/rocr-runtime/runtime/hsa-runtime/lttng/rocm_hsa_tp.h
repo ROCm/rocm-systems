@@ -166,10 +166,10 @@ LTTNG_UST_TRACEPOINT_EVENT(
  * consumer decide. Future FW revisions that change the polarity (or add
  * a third record_type) cost only a consumer change.
  *
- * gpu_ts is host-domain (system clock) translated from the FW-written
- * GPU clock by HSA's existing GpuAgent::TranslateTime infrastructure
- * (monotonic linear interpolation, so the relative ordering of any two
- * records' timestamps is preserved by the translation).
+ * gpu_ts is the raw hardware clock counter written by the FW. It is NOT
+ * translated to the host system clock domain. The consumer must use the
+ * rocm_hsa:clock_sync tracepoint to correlate this raw GPU timestamp with
+ * the system clock.
  *
  * record_type is the raw value FW wrote (uint8_t — the FW field is
  * 32 bits but the values seen so far fit in uint8_t and the on-the-wire
@@ -214,6 +214,23 @@ LTTNG_UST_TRACEPOINT_EVENT(
     LTTNG_UST_TP_FIELDS(
         lttng_ust_field_integer(uint32_t, queue_id, queue_id)
         lttng_ust_field_integer(uint64_t, bytes_lost, bytes_lost)
+    )
+)
+
+/* clock_sync: emitted periodically to correlate raw GPU timestamps with the
+ * host system clock.
+ *
+ * gpu_id is the node_id of the GPU agent.
+ * gpu_ts is the raw hardware clock counter.
+ * system_ts is the corresponding host system clock counter.
+ */
+LTTNG_UST_TRACEPOINT_EVENT(
+    rocm_hsa, clock_sync,
+    LTTNG_UST_TP_ARGS(uint64_t, gpu_id, uint64_t, gpu_ts, uint64_t, system_ts),
+    LTTNG_UST_TP_FIELDS(
+        lttng_ust_field_integer(uint64_t, gpu_id, gpu_id)
+        lttng_ust_field_integer(uint64_t, gpu_ts, gpu_ts)
+        lttng_ust_field_integer(uint64_t, system_ts, system_ts)
     )
 )
 

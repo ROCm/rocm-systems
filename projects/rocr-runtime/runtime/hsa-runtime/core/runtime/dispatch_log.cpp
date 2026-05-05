@@ -70,8 +70,8 @@
 // fresh records by scanning the ring sequentially from a host-managed
 // monotonic cursor (next_idx). A slot whose record_type is 0 is "empty"
 // (FW writes record_type ∈ {1,2}, and the buffer is pre-zeroed at alloc
-// in AqlQueue::SetProfiling). After consuming a slot the drainer zeroes
-// it again so wraparound rewrites are re-detectable. See drain_one_queue
+// in AqlQueue::SetProfiling). After consuming a slot the drainer clears
+// the record_type sentinel so wraparound rewrites are re-detectable. See drain_one_queue
 // below for the canonical implementation.
 
 #include "core/inc/dispatch_log.h"
@@ -111,19 +111,19 @@ namespace {
 
 // ============================================================================
 // Per-queue profiling-bit refcount (spec §4a). Each Queue gets one of these
-// keyed in g_owners; the mutex serializes the refcount RMW + the bit set/clear
+// keyed in g_profiling_refcounts; the mutex serializes the refcount RMW + the bit set/clear
 // transition. Phase A uses a side-map keyed on core::Queue* rather than a
 // dl_state pointer hung off the Queue itself; the in-Queue void*
 // dispatch_log_state is reserved for a future refactor.
 // ============================================================================
-struct queue_profiling_owners {
+struct queue_profiling_refcount {
   std::mutex m;
   uint32_t   refcount = 0;
 };
 
 // ============================================================================
 // queue_drain_state per spec §7. Held via std::shared_ptr from both the
-// drainer registry (g_active_queues) and the per-queue worker thread (which
+// drainer registry (g_active_drainers) and the per-queue worker thread (which
 // holds its own ref by-value via per_queue_drain_loop). Stores only NON-OWNING
 // pointers into the buffer owned by AqlQueue (the buffer is alloc'd by
 // AqlQueue::SetProfiling(true) and freed by SetProfiling(false) or the
@@ -138,85 +138,50 @@ struct queue_drain_state {
   // rocm_trace_emit_* call sites, not here.
   uint64_t  queue_id = 0;
 
-  // Owned, queue-independent GPU->system time-translation callable.
-  // Captured at register time so it remains callable even after the
-  // underlying core::Queue (and any queue-scoped state on the agent) has
-  // been destroyed. The agent itself outlives any queue created on it
-  // (HSA agents have process lifetime), so capturing the agent reference
-  // by value inside this callable is safe.
-  std::function<uint64_t(uint64_t /* gpu_ts */)> translate_gpu_ts;
-
-  // NON-OWNING ring view. The buffer is owned by AqlQueue::dispatch_record_buffer_;
-  // do not free here. The kernel-side BO is allocated oversized at
-  // `ring_records * 40` bytes purely to satisfy host KFD BO-size validation
-  // (amd/amdkfd/kfd_process_queue_manager.c:633 `buf_byte_size = count * 40`).
-  // The active FW/drainer ring uses the 16-byte FW record stride
-  // (kSlotStride): FW writes records at 16-byte stride and the drainer
-  // reads them at 16-byte stride. The extra allocation tail beyond
-  // `ring_records * 16` is unused/reserved and is not part of the ring.
-  void*    ring_base    = nullptr;     // host-virtual base of the FW record area
-  uint32_t ring_records = 0;           // power-of-2 slot count (e.g. 65536)
-  uint32_t ring_mask    = 0;           // ring_records - 1, for slot indexing
+  // NON-OWNING ring view. Buffer is owned by AqlQueue::dispatch_record_buffer_
+  // (alloc'd by SetProfiling(true), freed by SetProfiling(false) or the
+  // AqlQueue dtor). FW writes 16-byte mec_dispatch_record entries at
+  // 16-byte stride; the drainer reads at the same stride. The host BO is
+  // allocated oversized at `ring_records * 40` to satisfy the deployed
+  // KFD's BO-size validation; bytes beyond `ring_records * 16` are unused.
+  void*    ring_base    = nullptr;
+  uint32_t ring_records = 0;     // power-of-2 slot count
+  uint32_t ring_mask    = 0;     // ring_records - 1, for slot indexing
 
   // Host-managed monotonic record cursor. Mutated only under drain_mu.
-  // Slot index is (next_idx & ring_mask). Sentinel-scan design: the
-  // substrate publishes no FW wptr, so we advance next_idx for every
-  // slot whose record_type is non-zero, and zero the slot after consume
-  // so a wraparound re-write is re-detectable. See drain_one_queue.
+  // Slot index is (next_idx & ring_mask). Sentinel-scan: drainer advances
+  // for every slot whose record_type is non-zero and clears the sentinel
+  // after consume so a wraparound rewrite is re-detectable.
   uint64_t next_idx = 0;
 
-  // Per-queue drain mutex. Steady state: only the per-queue worker thread
-  // holds this (so it is technically redundant in today's design — the
-  // worker is the sole drainer for its queue). Retained as defense in
-  // depth against any future code path that calls drain_one_queue
-  // synchronously from another thread (e.g. a future
-  // synchronous-final-drain helper). Per-queue scope, so other queues'
-  // drains are not blocked.
+  // Per-queue drain mutex. With one worker per queue this is technically
+  // redundant in steady state (the worker is the sole drainer for its
+  // queue), but it is retained as defense in depth against any future
+  // synchronous-final-drain helper from another thread.
   std::mutex drain_mu;
 
-  // Per-queue worker thread shutdown signal + handle. The supported
-  // ownership model is: disable_dispatch_log_for_queue_locked stores
-  // should_stop with release ordering and joins worker BEFORE
-  // dropping the registry's shared_ptr ref. The worker checks
-  // should_stop with acquire ordering each iteration. The destructor
-  // (below) is NOT a generic safety net for unjoined-running workers
-  // — see the destructor comment for the narrow case it handles.
+  // Per-queue worker thread shutdown signal + handle. Disable path stores
+  // should_stop with release ordering and joins worker before dropping the
+  // registry's shared_ptr ref. The worker checks should_stop with acquire
+  // ordering each iteration.
   std::atomic<bool> should_stop{false};
   std::thread       worker;
 
   // Defensive safety net for early-construction failures (review C2,
-  // stage-2 code-quality). The supported lifetime model is: explicit
-  // disable / shutdown path stops + joins worker BEFORE dropping any
-  // shared_ptr ref. This destructor only matters in one specific case:
-  // a qs was made_shared but worker was never assigned (e.g. enable
-  // path's std::thread construction threw — review C1) and the
-  // registry path is rolling back via shared_ptr drop. In that case
-  // worker is default-constructed (joinable() == false) so the body
-  // is a no-op.
-  //
-  // The destructor canNOT meaningfully recover a started-but-unjoined
-  // worker. The worker holds its own shared_ptr<queue_drain_state>
-  // by value (per_queue_drain_loop param), so the destructor cannot
-  // be the path that releases the last ref while the worker is still
-  // running — by definition the worker's own ref is the last one when
-  // the loop returns, and at that point we are already on the worker
-  // thread. self-join would throw std::system_error
-  // (resource_deadlock_would_occur). Guard against that edge case
-  // explicitly: skip the join if `worker` represents the current
-  // thread. std::thread::id comparison is cheap and well-defined.
+  // stage-2 code-quality). Supported lifetime model is explicit
+  // disable / shutdown stops + joins worker BEFORE dropping the
+  // registry's shared_ptr ref. This destructor only catches the narrow
+  // case where the shared_ptr's last ref is dropped with the worker
+  // still running (e.g. construction-failure rollback inside
+  // enable_dispatch_log_for_queue_locked). Self-join is illegal —
+  // detect via thread::id and detach() instead.
   ~queue_drain_state() {
-    if (worker.joinable() &&
-        worker.get_id() != std::this_thread::get_id()) {
-      should_stop.store(true, std::memory_order_release);
-      worker.join();
-    } else if (worker.joinable()) {
-      // Self-destruction path. We cannot join ourselves; detach so
-      // std::thread's destructor doesn't std::terminate the process.
-      // This branch indicates a programming error (the supported
-      // lifetime model requires explicit join from a non-worker
-      // thread before dropping the last ref); detaching is a
-      // best-effort cleanup, not a correctness path.
-      worker.detach();
+    if (worker.joinable()) {
+      if (worker.get_id() == std::this_thread::get_id()) {
+        worker.detach();
+      } else {
+        worker.join();
+      }
     }
   }
 };
@@ -228,72 +193,50 @@ struct queue_drain_state {
 // Spec §4 single source of truth for "should HSA be collecting kernel-dispatch
 // timestamps right now?". Folded predicate of !rocm_trace_disabled() &&
 // lttng_ust_tracepoint_enabled(rocm_hsa, kernel_dispatch_record) &&
-// g_substrate_present. Written only by ts_poller; read by on_queue_create
-// (relaxed, hot path). Per-queue drainer workers do not gate on this flag
-// directly — they live for the lifetime of their queue's enable->disable
-// window, and the poller's disable pass is what stops them when the
-// predicate transitions to false.
-std::atomic<bool> G_tracepoint_enabled{false};
+// g_kfd_supports_dispatch_log. Written only by ts_poller; read by
+// on_queue_create (relaxed, hot path).
+std::atomic<bool> g_dispatch_logging_active{false};
 
 // Set true if the KFD substrate version probe at init() reports a kernel
-// minor version >= 22 (the minor version that introduced the
+// minor version >= 22 (the version that introduced the
 // dispatch_record_buffer_{addr,size} trailing fields on UPDATE_QUEUE).
 // Probed once at init via AMDKFD_IOC_GET_VERSION; never mutated afterwards.
-std::atomic<bool> g_substrate_present{false};
+std::atomic<bool> g_kfd_supports_dispatch_log{false};
 
 // Latched true after we log the "substrate absent, tracepoint enable
 // is a no-op" message once. Avoids spamming the user log on every poll tick.
-std::atomic<bool> g_substrate_absent_warned{false};
+std::atomic<bool> g_kfd_unsupported_warned{false};
 
-// Driven by shutdown(); poller and drainer observe and exit.
+// Driven by shutdown(); poller and per-queue workers observe and exit.
 std::atomic<bool> g_shutdown{false};
 
-// Spec §4 lifecycle mutex. Guards g_active_queues + g_no_dispatch_log_agents.
-// Acquired only briefly: enable/disable per-queue and snapshot-cloning.
-std::mutex g_lifecycle_mu;
+// Spec §4 lifecycle mutex. Guards g_active_drainers, g_all_queues, and
+// g_no_dispatch_log_agents. Acquired only briefly: enable/disable per-queue
+// and snapshot-cloning.
+std::mutex g_queue_registry_mu;
 
-// Drainer registry (spec §4 lifetime protocol). Keyed by the full 64-bit
-// hsa_queue_t::id (the value FW writes into the record dispatch_idx is
-// per-queue, so queue_id distinguishes drains). Holds one shared_ptr per
-// active queue. See C5 fix: the LTTng tracepoint payload narrows this to
-// uint32_t at emit, but internal lifetime keys must stay 64-bit because
-// hsa_queue_t::id is uint64_t and unique over the application's lifetime.
-std::unordered_map<uint64_t, std::shared_ptr<queue_drain_state>> g_active_queues;
+// Drainer registry (spec §4 lifetime protocol). Keyed by full 64-bit
+// hsa_queue_t::id. One shared_ptr per active queue; the per-queue worker
+// thread holds its own ref by-value via per_queue_drain_loop.
+std::unordered_map<uint64_t, std::shared_ptr<queue_drain_state>> g_active_drainers;
 
 // Poller-only "live queue" side map (spec §4 enable/disable convergence).
-//
-// Distinct from g_active_queues: this tracks every Queue* known to the
-// dispatch_log subsystem (registered by on_queue_create, removed by
-// on_queue_destroy), regardless of whether dispatch logging is currently
-// enabled on it. The poller iterates this set under g_lifecycle_mu to drive
-// the §4 idempotent enable/disable passes.
-//
-// Keyed by full 64-bit hsa_queue_t::id (see g_active_queues commentary
-// above and C5 fix).
-std::unordered_map<uint64_t, core::Queue*> g_known_queues;
+// Distinct from g_active_drainers: tracks every Queue* known to the
+// dispatch_log subsystem, regardless of whether dispatch logging is
+// currently enabled on it. Iterated by the poller under g_queue_registry_mu.
+std::unordered_map<uint64_t, core::Queue*> g_all_queues;
 
 // Side-map for the QueueProfilingAcquire/Release refcount (spec §4a). One
-// entry per Queue* that has ever had at least one acquire. Looked up under
-// g_owners_mu.
-//
-// **Lifetime contract.** Entries are held via std::shared_ptr because
-// QueueProfilingAcquire / QueueProfilingRelease intentionally drop
-// g_owners_mu before locking the per-entry mutex (the per-entry lock can
-// be held across SetProfiling(), which we don't want to do under the
-// global map mutex). Without shared ownership, on_queue_destroy could
-// erase the map entry between our map-lookup and our per-entry-lock,
-// freeing the queue_profiling_owners object out from under us. Copying
-// the shared_ptr while still holding g_owners_mu pins the entry alive
-// until the API call's local shared_ptr drops, even if on_queue_destroy
-// concurrently erases the map slot.
-std::mutex g_owners_mu;
-std::unordered_map<core::Queue*, std::shared_ptr<queue_profiling_owners>> g_owners;
+// entry per Queue* that has ever had at least one acquire. Held via
+// shared_ptr because Acquire/Release intentionally drop
+// g_profiling_refcounts_mu before locking the per-entry mutex.
+std::mutex g_profiling_refcounts_mu;
+std::unordered_map<core::Queue*, std::shared_ptr<queue_profiling_refcount>> g_profiling_refcounts;
 
 // Per-agent "no-dispatch-log" mark. If GetProfilingDispatchRecords reports
-// NOT_INITIALIZED (or another error) for any queue on a given agent, that
-// agent is added here and subsequent enable_dispatch_log_for_queue calls on
-// queues belonging to it short-circuit (spec §5 unsupported-agent row,
-// §9 unsupported-agent row).
+// NOT_INITIALIZED for any queue on a given agent, that agent is added here
+// and subsequent enable_dispatch_log_for_queue calls on queues belonging to
+// it short-circuit (spec §5/§9 unsupported-agent rows).
 std::unordered_set<core::Agent*> g_no_dispatch_log_agents;
 
 // Threads. Per-queue drainer threads (one per active queue) live inside
@@ -305,13 +248,11 @@ std::thread g_poller_thread;
 // ============================================================================
 
 // Full 64-bit hsa_queue_t::id (see hsa.h:2359-2361). Internal registries
-// (g_active_queues, g_known_queues) and queue_drain_state.queue_id all key
+// (g_active_drainers, g_all_queues) and queue_drain_state.queue_id all key
 // on this full value to avoid the high-32-bit collision risk flagged in
 // C5. The LTTng tracepoint payload narrows to the low 32 bits at the
 // emit call sites only.
 uint64_t queue_id_of(core::Queue* q) {
-  // amd_queue_t.hsa_queue.id is set in the queue ctor (see e.g.
-  // amd_aql_queue.cpp:298, host_queue.cpp:77).
   return q->amd_queue_.hsa_queue.id;
 }
 
@@ -327,22 +268,6 @@ uint32_t queue_id_to_wire(uint64_t qid) {
 
 bool agent_is_gpu(core::Agent* a) {
   return a != nullptr && a->device_type() == core::Agent::kAmdGpuDevice;
-}
-
-// Build the GPU->system translation callable from the Queue's owning agent.
-// Captures the agent pointer by value; agents have process lifetime so this
-// is safe even after the queue is destroyed (spec §7).
-std::function<uint64_t(uint64_t)> make_translate_gpu_ts(core::Queue* q) {
-  core::Agent* agent = q->GetAgent();
-  if (!agent_is_gpu(agent)) {
-    // Non-GPU (CPU / soft) queue. Pass-through; we shouldn't be enabling on
-    // these at all, but be defensive.
-    return [](uint64_t t) { return t; };
-  }
-  auto* gpu = static_cast<AMD::GpuAgentInt*>(agent);
-  return [gpu](uint64_t gpu_ts) -> uint64_t {
-    return gpu->TranslateTime(gpu_ts);
-  };
 }
 
 #if defined(__linux__)
@@ -375,15 +300,15 @@ bool probe_substrate_version() {
 bool probe_substrate_version() { return false; }
 #endif
 
-// Iterate g_known_queues under g_lifecycle_mu and invoke fn(queue_id, queue)
+// Iterate g_all_queues under g_queue_registry_mu and invoke fn(queue_id, queue)
 // for each entry. C6 fix: replaces the previous "snapshot into vector then
-// iterate" pattern. fn must NOT mutate g_known_queues. fn IS allowed to
-// mutate g_active_queues (e.g. enable_dispatch_log_for_queue_locked inserts,
+// iterate" pattern. fn must NOT mutate g_all_queues. fn IS allowed to
+// mutate g_active_drainers (e.g. enable_dispatch_log_for_queue_locked inserts,
 // disable_dispatch_log_for_queue_locked erases).
 template <typename F>
 void for_each_known_queue_locked(F&& fn) {
-  std::lock_guard<std::mutex> lk(g_lifecycle_mu);
-  for (auto& kv : g_known_queues) fn(kv.first, kv.second);
+  std::lock_guard<std::mutex> lk(g_queue_registry_mu);
+  for (auto& kv : g_all_queues) fn(kv.first, kv.second);
 }
 
 // ============================================================================
@@ -459,9 +384,9 @@ bool drain_one_queue(queue_drain_state& qs, bool force_emit) {
     // helper's own kill-switch check still runs (defense in depth).
     //
     // Position rationale: this check MUST sit before the record_type
-    // load + slot memset (below) so that bailing here leaves the slot
-    // intact and `qs.next_idx` still pointing at it. If we zeroed the
-    // slot first and then bailed, the slot would be permanently
+    // load + slot mutation (below) so that bailing here leaves the slot
+    // intact and `qs.next_idx` still pointing at it. If we cleared the
+    // sentinel first and then bailed, the slot would be permanently
     // destroyed (FW had already written it, and the wptr cursor stays
     // put), and on the next drain pass the sentinel scan would observe
     // rt == 0 at next_idx and stop — stranding any later FW-written
@@ -487,7 +412,7 @@ bool drain_one_queue(queue_drain_state& qs, bool force_emit) {
     // is not possible under that FW contract.
     //
     // We still use an acquire on the record_type load so the subsequent
-    // body loads (and the slot memset) are not reordered above it; this
+    // body loads are not reordered above it; this
     // turns the type-load into a proper atomic acquire instead of a
     // plain (data-racy) load on memory another agent writes
     // concurrently. The body fields are read with relaxed atomicity for
@@ -497,7 +422,7 @@ bool drain_one_queue(queue_drain_state& qs, bool force_emit) {
     uint32_t rt = __atomic_load_n(&rec->record_type, __ATOMIC_ACQUIRE);
     if (rt == 0) break;
 
-    // Snapshot the rest of the record locally before zeroing the slot.
+    // Snapshot the rest of the record locally before clearing the sentinel.
     // Relaxed atomic loads suffice (see comment above) — the acquire on
     // record_type above already orders these.
     const uint32_t ts_lo        = __atomic_load_n(&rec->ts_lo, __ATOMIC_RELAXED);
@@ -505,12 +430,12 @@ bool drain_one_queue(queue_drain_state& qs, bool force_emit) {
     const uint32_t dispatch_idx = __atomic_load_n(&rec->dispatch_idx, __ATOMIC_RELAXED);
     const uint64_t gpu_ts       = (static_cast<uint64_t>(ts_hi) << 32) | ts_lo;
 
-    // Zero the consumed slot so a wraparound rewrite by FW (next time
+    // Zero the record_type field so a wraparound rewrite by FW (next time
     // the ring loops past this position) is re-detected as a fresh
-    // non-zero record_type. FW writes 16-byte records at 16-byte
-    // stride, so zeroing kSlotStride bytes resets the entire next-write
-    // target.
-    std::memset(rec, 0, kSlotStride);
+    // non-zero record_type. We only need to clear the sentinel field,
+    // not the entire 16-byte slot, since the FW always writes the full
+    // 16 bytes atomically.
+    __atomic_store_n(&rec->record_type, 0, __ATOMIC_RELEASE);
 
     // Emit one event per FW-written record. No host-side START/END
     // pairing — consumer joins on (queue_id, dispatch_idx) and uses
@@ -536,15 +461,10 @@ bool drain_one_queue(queue_drain_state& qs, bool force_emit) {
     // widen the schema (and the cast) when (and only when) such a FW
     // revision exists.
     //
-    // Use the captured queue-independent translation callable — Queue
-    // may be destroyed mid-pass even though the shared_ptr keeps qs
-    // alive.
-    const uint64_t gpu_ts_sys = qs.translate_gpu_ts(gpu_ts);
-
     // Narrow internal 64-bit queue_id at the tracepoint boundary
     // (spec §6 / §14, C5 fix). dispatch_idx is 32-bit per FW contract.
     rocm_trace_emit_hsa_kernel_dispatch_record(
-        queue_id_to_wire(qs.queue_id), dispatch_idx, gpu_ts_sys,
+        queue_id_to_wire(qs.queue_id), dispatch_idx, gpu_ts,
         static_cast<uint8_t>(rt), force_emit);
 
     qs.next_idx += 1;
@@ -561,7 +481,7 @@ bool drain_one_queue(queue_drain_state& qs, bool force_emit) {
 // thread lifetime regardless of registry mutations elsewhere.
 //
 // Per-queue ownership eliminates cross-queue serialization: the previous
-// shared drainer iterated all queues sequentially under g_lifecycle_mu
+// shared drainer iterated all queues sequentially under g_queue_registry_mu
 // snapshot, with a per-pass budget capped at qs.ring_records, so a
 // larger ring slowed the visit cycle to other queues. Each per-queue
 // worker now stays hot on its own ring at the FW's local write rate
@@ -579,11 +499,6 @@ void per_queue_drain_loop(std::shared_ptr<queue_drain_state> qs) {
     const bool any = drain_one_queue(*qs, /* force_emit = */ false);
     if (any) {
       std::this_thread::yield();
-    } else {
-      // Same idle backoff as the prior shared drainer (500 us). Bounds
-      // the worst-case latency between the disable path setting
-      // should_stop and this thread observing it.
-      std::this_thread::sleep_for(std::chrono::microseconds(500));
     }
   }
   // Final drain after the stop signal so any FW records written between
@@ -613,12 +528,12 @@ void wait_for_idle(core::Queue* q) {
 // Profiling-bit refcount (spec §4a).
 // ============================================================================
 
-std::shared_ptr<queue_profiling_owners> get_or_create_owners(core::Queue* q) {
-  // Caller holds g_owners_mu.
-  auto it = g_owners.find(q);
-  if (it != g_owners.end()) return it->second;
-  auto inserted = g_owners.emplace(
-      q, std::make_shared<queue_profiling_owners>());
+std::shared_ptr<queue_profiling_refcount> get_or_create_owners(core::Queue* q) {
+  // Caller holds g_profiling_refcounts_mu.
+  auto it = g_profiling_refcounts.find(q);
+  if (it != g_profiling_refcounts.end()) return it->second;
+  auto inserted = g_profiling_refcounts.emplace(
+      q, std::make_shared<queue_profiling_refcount>());
   return inserted.first->second;
 }
 
@@ -627,13 +542,13 @@ std::shared_ptr<queue_profiling_owners> get_or_create_owners(core::Queue* q) {
 hsa_status_t QueueProfilingAcquire(core::Queue* q) {
   if (q == nullptr) return HSA_STATUS_ERROR_INVALID_QUEUE;
   // Pin the entry alive across the per-entry lock acquire by copying the
-  // shared_ptr out under g_owners_mu. Even if on_queue_destroy erases the
+  // shared_ptr out under g_profiling_refcounts_mu. Even if on_queue_destroy erases the
   // map slot between here and the lock_guard below, this local shared_ptr
-  // keeps the queue_profiling_owners object alive (spec §4a + lifetime
-  // contract on g_owners). See C4 fix.
-  std::shared_ptr<queue_profiling_owners> owners;
+  // keeps the queue_profiling_refcount object alive (spec §4a + lifetime
+  // contract on g_profiling_refcounts). See C4 fix.
+  std::shared_ptr<queue_profiling_refcount> owners;
   {
-    std::lock_guard<std::mutex> lk(g_owners_mu);
+    std::lock_guard<std::mutex> lk(g_profiling_refcounts_mu);
     owners = get_or_create_owners(q);
   }
   std::lock_guard<std::mutex> lk(owners->m);
@@ -657,11 +572,11 @@ hsa_status_t QueueProfilingAcquire(core::Queue* q) {
 hsa_status_t QueueProfilingRelease(core::Queue* q) {
   if (q == nullptr) return HSA_STATUS_ERROR_INVALID_QUEUE;
   // See QueueProfilingAcquire for the shared_ptr lifetime rationale (C4).
-  std::shared_ptr<queue_profiling_owners> owners;
+  std::shared_ptr<queue_profiling_refcount> owners;
   {
-    std::lock_guard<std::mutex> lk(g_owners_mu);
-    auto it = g_owners.find(q);
-    if (it == g_owners.end()) {
+    std::lock_guard<std::mutex> lk(g_profiling_refcounts_mu);
+    auto it = g_profiling_refcounts.find(q);
+    if (it == g_profiling_refcounts.end()) {
       // Underflow without ever acquiring. Caller bug; spec §4a says return
       // failure without modifying state.
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
@@ -703,7 +618,7 @@ namespace {
 //      and the FW-record-stride capacity in bytes (record_count * 16).
 //      The substrate publishes no host-visible FW write pointer; consumers
 //      locate fresh records via sentinel scan over per-slot record_type.
-//   5. Register a non-owning queue_drain_state in g_active_queues with
+//   5. Register a non-owning queue_drain_state in g_active_drainers with
 //      next_idx = 0 (the host-managed monotonic record cursor used by
 //      the sentinel-scan drainer).
 // ============================================================================
@@ -722,14 +637,14 @@ void enable_dispatch_log_for_queue_locked(core::Queue* q) {
   auto* aql_queue = static_cast<AMD::AqlQueue*>(q);
 
   // Substrate / per-agent gate.
-  if (!g_substrate_present.load(std::memory_order_relaxed)) return;
+  if (!g_kfd_supports_dispatch_log.load(std::memory_order_relaxed)) return;
   if (g_no_dispatch_log_agents.count(q->GetAgent()) > 0) return;
 
   // Step 1: enable profiling on the queue. This is the AqlQueue::SetProfiling
   // call that allocates the dispatch-record buffer, calls
   // hsaKmtSetQueueProfilingBuffer, and Suspends/Resumes the queue to flush
-  // the MQD via UPDATE_QUEUE. QueueProfilingAcquire takes g_owners_mu (not
-  // g_lifecycle_mu), so it's safe to call while holding g_lifecycle_mu.
+  // the MQD via UPDATE_QUEUE. QueueProfilingAcquire takes g_profiling_refcounts_mu (not
+  // g_queue_registry_mu), so it's safe to call while holding g_queue_registry_mu.
   hsa_status_t s = QueueProfilingAcquire(q);
   if (s != HSA_STATUS_SUCCESS) {
     // C5: distinguish substrate-absent from per-queue transient failures.
@@ -801,8 +716,7 @@ void enable_dispatch_log_for_queue_locked(core::Queue* q) {
   //
   // What can throw here:
   //   - std::make_shared<queue_drain_state>() (allocation)
-  //   - std::function copy of make_translate_gpu_ts(q) (allocation)
-  //   - g_active_queues[qs->queue_id] = qs (unordered_map insert,
+  //   - g_active_drainers[qs->queue_id] = qs (unordered_map insert,
   //     can throw on rehash allocation)
   //   - std::thread(per_queue_drain_loop, qs) (std::system_error on
   //     EAGAIN / RLIMIT_NPROC / address-space exhaustion — review
@@ -830,13 +744,12 @@ void enable_dispatch_log_for_queue_locked(core::Queue* q) {
     // owned by AqlQueue, freed on SetProfiling(false) or AqlQueue dtor.
     qs = std::make_shared<queue_drain_state>();
     qs->queue_id         = queue_id_of(q);
-    qs->translate_gpu_ts = make_translate_gpu_ts(q);
     qs->ring_base        = buf;
     qs->ring_records     = record_count;
     qs->ring_mask        = record_count - 1;
     qs->next_idx         = 0;
 
-    g_active_queues[qs->queue_id] = qs;
+    g_active_drainers[qs->queue_id] = qs;
 
     // Step 4: spawn the per-queue drainer worker AFTER registration.
     // The worker holds its own shared_ptr<queue_drain_state> by value
@@ -852,7 +765,7 @@ void enable_dispatch_log_for_queue_locked(core::Queue* q) {
                  e.what());
     // Erase from registry if we got far enough to insert. erase() is
     // safe on a missing key (returns 0).
-    g_active_queues.erase(queue_id_of(q));
+    g_active_drainers.erase(queue_id_of(q));
     // Release the profiling ref bumped by QueueProfilingAcquire above.
     // dispatch_log_active was never flipped to true, so no flag
     // rollback is needed. The next poller enable pass will retry.
@@ -889,8 +802,8 @@ void disable_dispatch_log_for_queue_locked(core::Queue* q) {
   //    a local ref so qs survives even after the registry erase below.
   std::shared_ptr<queue_drain_state> qs_ptr;
   {
-    auto it = g_active_queues.find(queue_id_of(q));
-    if (it != g_active_queues.end()) qs_ptr = it->second;
+    auto it = g_active_drainers.find(queue_id_of(q));
+    if (it != g_active_drainers.end()) qs_ptr = it->second;
   }
 
   // c. Stop and join the per-queue worker thread. The worker performs
@@ -927,7 +840,7 @@ void disable_dispatch_log_for_queue_locked(core::Queue* q) {
   // e. Release profiling ref. On the 1->0 edge AqlQueue::SetProfiling(false)
   //    clears the KFD profiling-buffer registration (UPDATE_QUEUE with
   //    addr=0) and frees the per-queue dispatch-record buffer.
-  //    QueueProfilingRelease takes g_owners_mu, NOT g_lifecycle_mu.
+  //    QueueProfilingRelease takes g_profiling_refcounts_mu, NOT g_queue_registry_mu.
   //    By this point the worker is joined so no thread can dereference
   //    the buffer.
   //
@@ -945,7 +858,7 @@ void disable_dispatch_log_for_queue_locked(core::Queue* q) {
   //    per_queue_drain_loop) is already released because the worker
   //    has returned and joined, so this drops the last ref and the
   //    queue_drain_state destructor fires.
-  g_active_queues.erase(queue_id_of(q));
+  g_active_drainers.erase(queue_id_of(q));
 
   q->dispatch_log_active.store(false, std::memory_order_release);
 }
@@ -956,11 +869,25 @@ void disable_dispatch_log_for_queue_locked(core::Queue* q) {
 
 bool predicate_now() {
 #if defined(HSA_ENABLE_LTTNG_UST) && HSA_ENABLE_LTTNG_UST
-  if (rocm_trace_disabled()) return false;
-  if (!g_substrate_present.load(std::memory_order_relaxed)) {
-    if (lttng_ust_tracepoint_enabled(rocm_hsa, kernel_dispatch_record)) {
-      bool warned = g_substrate_absent_warned.load(std::memory_order_relaxed);
-      if (!warned && g_substrate_absent_warned.compare_exchange_strong(
+  /* DIAGNOSTIC: log the three predicate inputs once on the first call
+   * so we can see why dispatch_log is or isn't enabling. */
+  static std::atomic<bool> diag_first{true};
+  bool first_call = diag_first.exchange(false);
+  bool trace_dis = rocm_trace_disabled();
+  bool kfd_ok   = g_kfd_supports_dispatch_log.load(std::memory_order_relaxed);
+  int  tp_en    = lttng_ust_tracepoint_enabled(rocm_hsa, kernel_dispatch_record);
+  if (first_call) {
+    std::fprintf(stderr,
+                 "[hsa-runtime] dispatch_log DIAG predicate_now first-call: "
+                 "trace_disabled=%d kfd_supports=%d tracepoint_enabled=%d\n",
+                 (int)trace_dis, (int)kfd_ok, tp_en);
+  }
+
+  if (trace_dis) return false;
+  if (!kfd_ok) {
+    if (tp_en) {
+      bool warned = g_kfd_unsupported_warned.load(std::memory_order_relaxed);
+      if (!warned && g_kfd_unsupported_warned.compare_exchange_strong(
                          warned, true)) {
         std::fprintf(stderr,
                      "[hsa-runtime] dispatch_log: tracepoint "
@@ -971,7 +898,7 @@ bool predicate_now() {
     }
     return false;
   }
-  return lttng_ust_tracepoint_enabled(rocm_hsa, kernel_dispatch_record) != 0;
+  return tp_en != 0;
 #else
   return false;
 #endif
@@ -980,9 +907,26 @@ bool predicate_now() {
 void ts_poller_loop() {
   const auto tick_interval = std::chrono::milliseconds(5);
 
+  /* DIAGNOSTIC: confirm the poller actually starts, and log every
+   * predicate-result transition so we can see when (or if) it ever
+   * flips true. Steady-state silent. */
+  std::fprintf(stderr,
+               "[hsa-runtime] dispatch_log DIAG ts_poller_loop entered\n");
+  bool last_curr = false;
+  bool first_iter = true;
+
   while (!g_shutdown.load(std::memory_order_relaxed)) {
     const bool curr = predicate_now();
-    G_tracepoint_enabled.store(curr, std::memory_order_relaxed);
+    g_dispatch_logging_active.store(curr, std::memory_order_relaxed);
+
+    if (first_iter || curr != last_curr) {
+      std::fprintf(stderr,
+                   "[hsa-runtime] dispatch_log DIAG ts_poller_loop predicate=%d "
+                   "(was %d)\n",
+                   (int)curr, (int)last_curr);
+      last_curr = curr;
+      first_iter = false;
+    }
 
     if (curr) {
       // ENABLE pass (spec §4): for each known live queue Q with
@@ -1017,7 +961,7 @@ void init() {
   // KFD minor >= 22 (the version that introduced the
   // dispatch_record_buffer_{addr,size} trailing fields on UPDATE_QUEUE).
   const bool present = probe_substrate_version();
-  g_substrate_present.store(present, std::memory_order_release);
+  g_kfd_supports_dispatch_log.store(present, std::memory_order_release);
 
   // Spawn poller unconditionally so the steady-state idle path is exercised
   // even when the substrate is missing. The poller's enable branch
@@ -1044,20 +988,20 @@ void shutdown() {
         disable_dispatch_log_for_queue_locked(q);
       });
 
-  // Drop any drain-state shared_ptrs still pinned by g_active_queues.
+  // Drop any drain-state shared_ptrs still pinned by g_active_drainers.
   // The destructor on queue_drain_state defensively joins worker if it
   // is still joinable (it should not be — disable above joined it
   // already), so this is safe even if a queue somehow escaped the
   // disable pass above.
   {
-    std::lock_guard<std::mutex> lk(g_lifecycle_mu);
-    g_known_queues.clear();
-    g_active_queues.clear();
+    std::lock_guard<std::mutex> lk(g_queue_registry_mu);
+    g_all_queues.clear();
+    g_active_drainers.clear();
     g_no_dispatch_log_agents.clear();
   }
   {
-    std::lock_guard<std::mutex> lk(g_owners_mu);
-    g_owners.clear();
+    std::lock_guard<std::mutex> lk(g_profiling_refcounts_mu);
+    g_profiling_refcounts.clear();
   }
 }
 
@@ -1065,12 +1009,12 @@ void on_queue_create(core::Queue* q) {
   if (q == nullptr) return;
 
   // Register the queue in the poller's live-queue side map BEFORE running
-  // the enable sequence. Holding g_lifecycle_mu across both the registry
+  // the enable sequence. Holding g_queue_registry_mu across both the registry
   // insert and the enable serializes us against the poller (which iterates
-  // g_known_queues under the same mutex) and against on_queue_destroy.
-  std::lock_guard<std::mutex> lk(g_lifecycle_mu);
-  g_known_queues[queue_id_of(q)] = q;
-  if (G_tracepoint_enabled.load(std::memory_order_relaxed)) {
+  // g_all_queues under the same mutex) and against on_queue_destroy.
+  std::lock_guard<std::mutex> lk(g_queue_registry_mu);
+  g_all_queues[queue_id_of(q)] = q;
+  if (g_dispatch_logging_active.load(std::memory_order_relaxed)) {
     enable_dispatch_log_for_queue_locked(q);
   }
 }
@@ -1078,13 +1022,13 @@ void on_queue_create(core::Queue* q) {
 void on_queue_destroy(core::Queue* q) {
   if (q == nullptr) return;
 
-  // Remove from g_known_queues BEFORE the disable sequence so the poller
+  // Remove from g_all_queues BEFORE the disable sequence so the poller
   // can never observe a Queue* whose underlying core::Queue is being torn
   // down. Held across the disable so the poller's iterating thread is
   // forced to wait behind the mutex if it currently holds it.
   {
-    std::lock_guard<std::mutex> lk(g_lifecycle_mu);
-    g_known_queues.erase(queue_id_of(q));
+    std::lock_guard<std::mutex> lk(g_queue_registry_mu);
+    g_all_queues.erase(queue_id_of(q));
     if (q->dispatch_log_active.load(std::memory_order_acquire)) {
       disable_dispatch_log_for_queue_locked(q);
     }
@@ -1093,8 +1037,8 @@ void on_queue_destroy(core::Queue* q) {
   // Drop the per-queue refcount entry. Safe to do unconditionally — if the
   // queue never had an acquire, the lookup is just a miss.
   {
-    std::lock_guard<std::mutex> lk(g_owners_mu);
-    g_owners.erase(q);
+    std::lock_guard<std::mutex> lk(g_profiling_refcounts_mu);
+    g_profiling_refcounts.erase(q);
   }
 }
 

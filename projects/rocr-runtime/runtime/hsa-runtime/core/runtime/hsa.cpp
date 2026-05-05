@@ -760,7 +760,7 @@ hsa_status_t hsa_queue_create(
   // Called immediately after the queue is visible to the caller. If the
   // tracepoint is currently enabled, runs the per-queue ENABLE sequence
   // synchronously on this thread (bounded latency: one alloc + one ioctl
-  // + MQD-flush). No-op when G_tracepoint_enabled is false (the steady
+  // + MQD-flush). No-op when g_dispatch_logging_active is false (the steady
   // state).
   rocr::dispatch_log::on_queue_create(cmd_queue);
 

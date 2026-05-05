@@ -219,9 +219,10 @@ static inline void rocm_trace_emit_hsa_intercept_packets(uint32_t queue_id,
  * would be unachievable. Steady-state drainer passes always pass
  * force_emit=false.
  *
- * gpu_ts_sys is the FW-written GPU clock already translated to the host
- * system clock domain by the drainer (via the per-queue translate_gpu_ts
- * callable). record_type is the raw FW-written tag, narrowed to uint8_t at
+ * gpu_ts is the raw FW-written GPU clock. It is NOT translated to the host
+ * system clock domain by the drainer. The consumer must use the rocm_hsa:clock_sync
+ * tracepoint to correlate this raw GPU timestamp with the system clock.
+ * record_type is the raw FW-written tag, narrowed to uint8_t at
  * the call site (current FW values are 1 and 2; see drain_one_queue).
  *
  * parent_corr_id is always 0 because the drainer thread has no API context
@@ -230,7 +231,7 @@ static inline void rocm_trace_emit_hsa_intercept_packets(uint32_t queue_id,
  */
 static inline void rocm_trace_emit_hsa_kernel_dispatch_record(
     uint32_t queue_id, uint32_t dispatch_idx,
-    uint64_t gpu_ts_sys, uint8_t record_type,
+    uint64_t gpu_ts, uint8_t record_type,
     bool     force_emit /* default false at call site via wrapper */) {
     if (rocm_trace_disabled()) return;
     if (force_emit ||
@@ -238,7 +239,7 @@ static inline void rocm_trace_emit_hsa_kernel_dispatch_record(
         const uint64_t self_corr = rocp_reg_next_corr_id();
         lttng_ust_do_tracepoint(rocm_hsa, kernel_dispatch_record,
                                 queue_id, dispatch_idx,
-                                gpu_ts_sys, record_type,
+                                gpu_ts, record_type,
                                 self_corr, /* parent_corr_id */ (uint64_t)0);
     }
 }
@@ -261,6 +262,17 @@ static inline void rocm_trace_emit_hsa_kernel_dispatch_drop(uint32_t queue_id,
     if (lttng_ust_tracepoint_enabled(rocm_hsa, kernel_dispatch_drop)) {
         lttng_ust_do_tracepoint(rocm_hsa, kernel_dispatch_drop,
                                 queue_id, bytes_lost);
+    }
+}
+
+/* clock_sync emit helper. Emits a CPU/GPU clock pair for offline translation. */
+static inline void rocm_trace_emit_hsa_clock_sync(uint64_t gpu_id,
+                                                  uint64_t gpu_ts,
+                                                  uint64_t system_ts) {
+    if (rocm_trace_disabled()) return;
+    if (lttng_ust_tracepoint_enabled(rocm_hsa, clock_sync)) {
+        lttng_ust_do_tracepoint(rocm_hsa, clock_sync,
+                                gpu_id, gpu_ts, system_ts);
     }
 }
 
@@ -298,7 +310,10 @@ static inline void rocm_trace_emit_hsa_kernel_dispatch_record(uint32_t a, uint32
 static inline void rocm_trace_emit_hsa_kernel_dispatch_drop(uint32_t a, uint64_t b) {
     (void)a; (void)b;
 }
+static inline void rocm_trace_emit_hsa_clock_sync(uint64_t a, uint64_t b, uint64_t c) {
+    (void)a; (void)b; (void)c;
+}
 
-#endif
+#endif /* HSA_ENABLE_LTTNG_UST */
 
 #endif /* ROCM_HSA_TRACE_EMIT_H_ */
