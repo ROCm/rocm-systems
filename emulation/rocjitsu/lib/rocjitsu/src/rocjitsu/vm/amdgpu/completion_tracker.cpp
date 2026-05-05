@@ -46,8 +46,8 @@ void CompletionTracker::drain_completions(std::vector<HwQueueState> &queues) {
     while (!qs.entries.empty() && qs.entries.front().fully_completed()) {
       auto &entry = qs.entries.front();
 
+      flush_caches();
       if (entry.completion_signal != 0) {
-        flush_caches();
         fire_signal(entry);
       }
 

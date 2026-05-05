@@ -178,6 +178,12 @@ void CommandProcessor::startup() {
 }
 
 void CommandProcessor::register_queue(HwQueue queue) {
+  util::Logger::vm([&](auto &os) {
+    os << std::format("REGISTER_QUEUE id={} ring={:#x} size={} rptr={:#x} wptr={:#x} "
+                      "doorbell_off={} is_sdma={}",
+                      queue.queue_id, queue.ring_base_va, queue.ring_size, queue.read_ptr_va,
+                      queue.write_ptr_va, queue.doorbell_offset, queue.is_sdma);
+  });
   bool start_poll = queue.host_accessible;
   {
     std::lock_guard<std::mutex> lock(hw_queue_mutex_);
@@ -622,6 +628,14 @@ void CommandProcessor::process_aql_packet(const hsa_kernel_dispatch_packet_t &pk
   }
 
   plugin_group_->onAmdgpuKernelDispatch(pkt.kernel_object, entry_pc);
+  util::Logger::vm([&](auto &os) {
+    os << std::format("DISPATCH d={} pc={:#x} grid=[{},{},{}] wg=[{},{},{}] total_wgs={} "
+                      "sgprs={} vgprs={} lds={} kernarg={:#x}",
+                      dp.dispatch_id, entry_pc, dp.grid_wgs_x, dp.grid_wgs_y, dp.grid_wgs_z,
+                      pkt.workgroup_size_x, pkt.workgroup_size_y, pkt.workgroup_size_z, total_wgs,
+                      dp.sgprs_per_wf, dp.vgprs_per_wf, dp.group_segment_fixed_size,
+                      dp.kernarg_addr);
+  });
 
   {
     static uint32_t dispatch_count = 0;
@@ -672,6 +686,13 @@ void CommandProcessor::fetch_from_queue(HwQueue &queue, HwQueueState &qs) {
     write_idx = read_gpu_u64(queue.write_ptr_va);
     read_idx = read_gpu_u64(queue.read_ptr_va);
   }
+
+  util::Logger::vm([&](auto &os) {
+    static uint64_t fetch_count = 0;
+    if (write_idx != read_idx && ++fetch_count <= 50)
+      os << std::format("FETCH q={} w={} r={} delta={} sdma={}", queue.queue_id, write_idx,
+                        read_idx, write_idx - read_idx, queue.is_sdma);
+  });
 
   // SDMA queues use byte-granularity pointers and have their own doorbell
   // semantics — skip the AQL doorbell clamping that assumes packet indices.
@@ -725,6 +746,10 @@ void CommandProcessor::fetch_from_queue(HwQueue &queue, HwQueueState &qs) {
     }
 
     uint8_t pkt_type = pkt.header & 0xFF;
+    util::Logger::vm([&](auto &os) {
+      os << std::format("PKT q={} slot={} type={} header={:#x} read_idx={}", queue.queue_id, slot,
+                        pkt_type, pkt.header, read_idx);
+    });
 
     // INVALID packet: the producer reserved this slot but hasn't written the
     // header yet. Stop fetching — the doorbell poll thread will fire another
@@ -747,7 +772,9 @@ void CommandProcessor::fetch_from_queue(HwQueue &queue, HwQueueState &qs) {
       // stop fetching from this queue. The next doorbell event will retry.
       // This prevents blocking the CP from processing other queues (SDMA)
       // that may be responsible for satisfying these dependencies.
-      bool deps_satisfied = true;
+      bool deps_satisfied =
+          is_and; // AND: assume true until a dep fails; OR: assume false until one passes
+      bool has_deps = false;
       for (int dep = 0; dep < 5; ++dep) {
         uint64_t dep_sig = 0;
         if (queue.host_accessible)
@@ -757,6 +784,7 @@ void CommandProcessor::fetch_from_queue(HwQueue &queue, HwQueueState &qs) {
           dep_sig = read_gpu_u64(pkt_addr + DEP_OFF + dep * 8);
         if (dep_sig == 0)
           continue;
+        has_deps = true;
         auto *val = reinterpret_cast<int64_t *>(dep_sig + SIG_VAL_OFF);
         int64_t v = std::atomic_ref<int64_t>(*val).load(std::memory_order_acquire);
         if (v > 0) {
@@ -765,10 +793,14 @@ void CommandProcessor::fetch_from_queue(HwQueue &queue, HwQueueState &qs) {
             break;
           }
         } else {
-          if (!is_and)
-            break; // OR: one satisfied is enough.
+          if (!is_and) {
+            deps_satisfied = true;
+            break;
+          }
         }
       }
+      if (!has_deps)
+        deps_satisfied = true;
       if (!deps_satisfied) {
         // Dependencies not ready. Stop fetching — don't advance read pointer
         // past this packet. Schedule a re-check via doorbell event.
@@ -977,6 +1009,25 @@ void CommandProcessor::handle_doorbell(simdojo::Tick) {
   if (completion_)
     completion_->drain_completions(new_queue_states_);
 
+  // Re-fetch: pick up any packets the host submitted while we were executing
+  // (e.g., barrier packets queued after a kernel dispatch). Process them
+  // immediately so host signal waits see completed barriers before returning.
+  for (size_t i = 0; i < hw_queues_.size(); ++i)
+    fetch_from_queue(hw_queues_[i], new_queue_states_[i]);
+  // Process any new non-kernel entries (barriers with total_wgs==0).
+  for (size_t qi = 0; qi < hw_queues_.size(); ++qi) {
+    auto &qs = new_queue_states_[qi];
+    while (qs.next_dispatch_idx < qs.entries.size()) {
+      auto &entry = qs.entries[qs.next_dispatch_idx];
+      if (!entry.is_non_kernel())
+        break;
+      entry.completed_wgs = entry.total_wgs;
+      ++qs.next_dispatch_idx;
+    }
+  }
+  if (completion_)
+    completion_->drain_completions(new_queue_states_);
+
   // Register as primary on first dispatch.
   if (!is_primary_ && pending_entries() > 0) {
     engine()->register_as_primary();
@@ -1068,6 +1119,17 @@ void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint
       uint32_t count = (dw(1) & 0x3FFFFFF) + 1;
       uint64_t src = static_cast<uint64_t>(dw(3)) | (static_cast<uint64_t>(dw(4)) << 32);
       uint64_t dst = static_cast<uint64_t>(dw(5)) | (static_cast<uint64_t>(dw(6)) << 32);
+      util::Logger::vm("SDMA COPY: src=", std::hex, src, " dst=", dst, std::dec, " count=", count,
+                       " (", count / 1024, " KB)");
+      if (dst <= 0x4d08242f10 && dst + count > 0x4d08242f00) {
+        uint64_t off = 0x4d08242f08 - dst;
+        if (off + 4 <= count) {
+          uint32_t val = 0;
+          std::memcpy(&val, reinterpret_cast<const uint8_t *>(src) + off, 4);
+          util::Logger::vm("SDMA WATCHPOINT: copying ", std::hex, val, std::dec,
+                           " to NaN address 0x4d08242f08");
+        }
+      }
       if (header & (1u << 28)) {
         // Broadcast copy (2 destinations) — 9 dwords.
         uint64_t dst2 = static_cast<uint64_t>(dw(7)) | (static_cast<uint64_t>(dw(8)) << 32);
