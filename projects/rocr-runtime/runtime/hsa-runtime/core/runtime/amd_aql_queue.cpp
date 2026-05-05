@@ -206,7 +206,7 @@ AqlQueue::AqlQueue(core::SharedQueue* shared_queue, GpuAgent* agent, size_t req_
 
   queue_scratch_.use_once_limit = core::Runtime::runtime_singleton_->flag().scratch_single_limit();
   if (queue_scratch_.use_once_limit > agent_->MaxScratchDevice()) {
-    fprintf(stdout, "User specified scratch limit exceeds device limits (requested:%lu max:%lu)!\n",
+    fprintf(stdout, "User specified scratch limit exceeds device limits (requested:%zu max:%zu)!\n",
                     queue_scratch_.use_once_limit, agent_->MaxScratchDevice());
     queue_scratch_.use_once_limit = agent_->MaxScratchDevice();
   }
