@@ -2,7 +2,6 @@
 # SPDX-License-Identifier:  MIT
 
 import csv
-import importlib.util
 import inspect
 import os
 import re
@@ -581,12 +580,12 @@ def clear_rank_env(monkeypatch, *env_vars):
 
 
 def skip_unsupported_roofline_soc():
-    if soc in {"MI100", "STRIX_HALO"}:
+    if soc in {"MI100", "RDNA35_HALO"}:
         pytest.skip(f"Roofline is not supported on {soc}")
 
 
-def is_strix_halo_soc():
-    return soc == "STRIX_HALO"
+def is_rdna35_halo_soc():
+    return soc == "RDNA35_HALO"
 
 
 # --
@@ -1814,7 +1813,7 @@ def test_roof_sort_kernels(
 
 @pytest.mark.section
 def test_lds_section(binary_handler_profile_rocprof_compute):
-    lds_block = "3" if is_strix_halo_soc() else "12"
+    lds_block = "3" if is_rdna35_halo_soc() else "12"
     options = ["--block", lds_block]
     workload_dir = common.get_output_dir()
     _ = binary_handler_profile_rocprof_compute(
@@ -1838,7 +1837,7 @@ def test_lds_section(binary_handler_profile_rocprof_compute):
 
 @pytest.mark.section
 def test_instmix_memchart_section(binary_handler_profile_rocprof_compute):
-    instmix_block = "7" if is_strix_halo_soc() else "10"
+    instmix_block = "7" if is_rdna35_halo_soc() else "10"
     options = ["--block", instmix_block, "3"]
     workload_dir = common.get_output_dir()
     _ = binary_handler_profile_rocprof_compute(
@@ -1856,7 +1855,7 @@ def test_instmix_memchart_section(binary_handler_profile_rocprof_compute):
         f"- '{instmix_block}'", f"{workload_dir}/profiling_config.yaml"
     )
     assert common.check_file_pattern("- '3'", f"{workload_dir}/profiling_config.yaml")
-    instmix_counter = "SQ_INSTS_FLAT" if is_strix_halo_soc() else "TA_FLAT_WAVEFRONTS"
+    instmix_counter = "SQ_INSTS_FLAT" if is_rdna35_halo_soc() else "TA_FLAT_WAVEFRONTS"
     results_files = Path(workload_dir).glob("results_*.csv")
     assert any(
         common.check_file_pattern(instmix_counter, str(f)) for f in results_files
@@ -1870,7 +1869,7 @@ def test_instmix_memchart_section(binary_handler_profile_rocprof_compute):
 
 @pytest.mark.section
 def test_lds_sol_section(binary_handler_profile_rocprof_compute):
-    lds_sol_block = "3" if is_strix_halo_soc() else "12.1"
+    lds_sol_block = "3" if is_rdna35_halo_soc() else "12.1"
     options = ["--block", lds_sol_block]
     workload_dir = common.get_output_dir()
     _ = binary_handler_profile_rocprof_compute(
@@ -1888,7 +1887,7 @@ def test_lds_sol_section(binary_handler_profile_rocprof_compute):
         f"- '{lds_sol_block}'", f"{workload_dir}/profiling_config.yaml"
     )
     lds_sol_counter = (
-        "SQC_LDS_IDX_ACTIVE" if is_strix_halo_soc() else "SQ_ACTIVE_INST_LDS"
+        "SQC_LDS_IDX_ACTIVE" if is_rdna35_halo_soc() else "SQ_ACTIVE_INST_LDS"
     )
     results_files = Path(workload_dir).glob("results_*.csv")
     assert any(
@@ -1899,7 +1898,7 @@ def test_lds_sol_section(binary_handler_profile_rocprof_compute):
 
 @pytest.mark.section
 def test_instmix_section_global_write_kernel(binary_handler_profile_rocprof_compute):
-    instmix_block = "7" if is_strix_halo_soc() else "10"
+    instmix_block = "7" if is_rdna35_halo_soc() else "10"
     options = ["-k", "global_write", "--block", instmix_block]
     custom_config = dict(config)
     custom_config["kernel_name_1"] = "global_write"
@@ -1925,7 +1924,7 @@ def test_instmix_section_global_write_kernel(binary_handler_profile_rocprof_comp
         "- global_write", f"{workload_dir}/profiling_config.yaml"
     )
     kernel_counter = (
-        "SQ_INSTS_FLAT_STORE" if is_strix_halo_soc() else "TA_FLAT_WAVEFRONTS"
+        "SQ_INSTS_FLAT_STORE" if is_rdna35_halo_soc() else "TA_FLAT_WAVEFRONTS"
     )
     results_files = Path(workload_dir).glob("results_*.csv")
     assert any(common.check_file_pattern(kernel_counter, str(f)) for f in results_files)
@@ -2720,18 +2719,9 @@ def test_iteration_multiplexing_data_types(
     common.clean_output_dir(config["cleanup"], workload_dir)
 
 
-skip_if_no_torch_gpu = pytest.mark.skipif(
-    (
-        importlib.util.find_spec("torch") is None
-        or not __import__("torch").cuda.is_available()
-    ),
-    reason=("PyTorch and GPU access are required for this test"),
-)
-
-
-@skip_if_no_torch_gpu
 @pytest.mark.torch_trace
 def test_torch_trace_profile(
+    require_torch_gpu,
     binary_handler_profile_rocprof_compute,
     binary_handler_analyze_rocprof_compute,
     capsys,
@@ -3066,9 +3056,10 @@ def test_torch_trace_profile(
     common.clean_output_dir(config["cleanup"], workload_dir)
 
 
-@skip_if_no_torch_gpu
 @pytest.mark.torch_trace
-def test_torch_trace_overhead(binary_handler_profile_rocprof_compute):
+def test_torch_trace_overhead(
+    require_torch_gpu, binary_handler_profile_rocprof_compute
+):
     """
     Measure overhead introduced by --torch-trace flag.
     Compares execution time with and without the flag to ensure overhead is acceptable.
@@ -3080,7 +3071,7 @@ def test_torch_trace_overhead(binary_handler_profile_rocprof_compute):
     returncode_baseline = binary_handler_profile_rocprof_compute(
         config,
         workload_dir_baseline,
-        [],  # No torch-trace flag
+        ["--iteration-multiplexing"],  # Baseline without --torch-trace
         check_success=True,
         roof=False,
         app_name="torch_test_app",
@@ -3103,7 +3094,7 @@ def test_torch_trace_overhead(binary_handler_profile_rocprof_compute):
     returncode_with_flag = binary_handler_profile_rocprof_compute(
         config,
         workload_dir_with_flag,
-        ["--experimental", "--torch-trace"],
+        ["--experimental", "--torch-trace", "--iteration-multiplexing"],
         check_success=True,
         roof=False,
         app_name="torch_test_app",
@@ -3378,6 +3369,7 @@ def test_multi_rank_no_warning_with_iteration_multiplexing(
     ],
 )
 def test_profile_invalid_workloads_torch_trace(
+    require_torch_gpu,
     binary_handler_profile_rocprof_compute,
     workload_cmd,
     expected_exit,
@@ -3394,7 +3386,7 @@ def test_profile_invalid_workloads_torch_trace(
     returncode, stdout, stderr = binary_handler_profile_rocprof_compute(
         test_config,
         workload_dir,
-        options=["--experimental", "--torch-trace"],
+        options=["--experimental", "--torch-trace", "--iteration-multiplexing"],
         check_success=False,
         app_name=app_name,
         capture_output=True,

@@ -203,9 +203,22 @@ def validate_json_exec_mask_manipulation(
                 # validate instruction decoding
                 inst = instructions[inst_index]
                 comm = comments[inst_index]
-                # The instruction comment is isually in the following format:
+                # The instruction comment is usually in the following format:
                 # /path/to/source/file.cpp:line_num
-                line_num = int(comm.split(":")[-1])
+                # However, compiler-generated control-flow instructions
+                # (e.g., s_andn2_saveexec, s_or_b64, s_cbranch_execz,
+                # s_branch, v_mov_b32) used for SIMD divergence may have
+                # DWARF line number 0, rendered as "?". These instructions
+                # are not v_rcp_f64/v_rcp_f32 and have no meaningful source
+                # line or exec mask to validate — skip them.
+                line_num_str = comm.split(":")[-1]
+                if line_num_str == "?":
+                    assert not inst.startswith("v_rcp_f64") and not inst.startswith(
+                        "v_rcp_f32"
+                    ), f"v_rcp instruction unexpectedly has unknown source line: {inst}"
+                    continue
+
+                line_num = int(line_num_str)
                 if inst.startswith("v_rcp_f64"):
                     # even SIMD lanes active
                     # assert np.uint64(exec_mask) == even_simds_active_exec_mask

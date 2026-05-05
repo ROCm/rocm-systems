@@ -150,13 +150,23 @@ def check_for_non_skippable_path(paths: Optional[Iterable[str]]) -> bool:
     return any(not is_path_skippable(p) for p in paths)
 
 
+def check_rccl_changes(modified_paths: Optional[Iterable[str]]) -> bool:
+    """Returns true if any files under projects/rccl/ were modified."""
+    if modified_paths is None:
+        return False
+    return any(path.startswith("projects/rccl/") for path in modified_paths)
+
+
 def retrieve_projects(args):
     # Nightly (schedule): use same test coverage as TheRock submodule bump PRs —
     # single nightly job with THEROCK_ENABLE_ALL=ON and full projects_to_test list.
+    # Run all builds and tests including RCCL.
     if args.get("is_nightly"):
         nightly_config = project_map.get("nightly")
         if not nightly_config:
-            logging.warning("No 'nightly' entry in project_map, nightly will have no jobs")
+            logging.warning(
+                "No 'nightly' entry in project_map, nightly will have no jobs"
+            )
             return []
         # Run full coverage on both Linux and Windows (no path-based skip).
         return [
@@ -214,7 +224,7 @@ def retrieve_projects(args):
             subtrees = list(matched_subtrees)
 
         # If files changed but no subtree matched → evaluate all
-        if modified_paths and not subtrees:
+        if modified_paths and not subtrees and not check_rccl_changes(modified_paths):
             logging.info(
                 "Modified files did not match known subtrees, evaluating all projects"
             )
@@ -300,16 +310,45 @@ def retrieve_projects(args):
 
 def run(args):
     project_to_run = retrieve_projects(args)
-    set_github_output({"projects": json.dumps(project_to_run)})
+    outputs = {"projects": json.dumps(project_to_run)}
+
+    # Determine if RCCL CI should run (only relevant for Linux platform)
+    if args.get("platform") == "linux":
+        if args.get("is_nightly"):
+            # Nightly runs always run RCCL CI
+            outputs["run_linux_rccl_ci"] = "true"
+        elif args.get("is_workflow_dispatch"):
+            # For workflow_dispatch, check if projects/rccl was explicitly selected
+            input_projects = args.get("input_projects", "")
+            if "projects/rccl" in input_projects:
+                outputs["run_linux_rccl_ci"] = "true"
+            else:
+                outputs["run_linux_rccl_ci"] = "false"
+        else:
+            # For push/PR events, check if any files under projects/rccl/ changed
+            base_ref = args.get("base_ref")
+            modified_paths = get_modified_paths(base_ref)
+            if check_rccl_changes(modified_paths):
+                outputs["run_linux_rccl_ci"] = "true"
+            else:
+                outputs["run_linux_rccl_ci"] = "false"
+
+    set_github_output(outputs)
+    return outputs
 
 
 if __name__ == "__main__":
     args = {}
     github_event_name = os.getenv("GITHUB_EVENT_NAME")
+    github_workflow = os.getenv("GITHUB_WORKFLOW", "")
     args["is_pull_request"] = github_event_name == "pull_request"
     args["is_push"] = github_event_name == "push"
     args["is_workflow_dispatch"] = github_event_name == "workflow_dispatch"
-    args["is_nightly"] = github_event_name == "schedule"
+    # Nightly: either scheduled run or manual dispatch of the nightly workflow
+    args["is_nightly"] = github_event_name == "schedule" or (
+        github_event_name == "workflow_dispatch"
+        and github_workflow == "TheRock CI Nightly"
+    )
 
     input_subtrees = os.getenv("SUBTREES", "")
     args["input_subtrees"] = input_subtrees

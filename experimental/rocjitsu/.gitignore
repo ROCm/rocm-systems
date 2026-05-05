@@ -38,3 +38,5 @@ __pycache__
 
 # agents
 .claude
+
+CMakePresets.json

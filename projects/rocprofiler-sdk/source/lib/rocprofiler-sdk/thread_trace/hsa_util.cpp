@@ -35,7 +35,7 @@ namespace rocprofiler
 {
 namespace thread_trace
 {
-constexpr size_t QUEUE_SIZE = 256;  // Small dedicated queue for SQTT control traffic
+constexpr size_t QUEUE_SIZE = 512;  // Small dedicated queue for SQTT control traffic
 
 // --- signal free functions ---
 
@@ -61,8 +61,8 @@ void
 signal_destroy(hsa_signal_t sig)
 {
     signal_wait(sig);
-    auto _status = hsa::get_core_table()->hsa_signal_destroy_fn(sig);
-    ROCP_WARNING_IF(_status != HSA_STATUS_SUCCESS) << "Failed to destroy signal: " << _status;
+    auto _status = CHECK_NOTNULL(hsa::get_core_table())->hsa_signal_destroy_fn(sig);
+    ROCP_CI_LOG_IF(WARNING, _status != HSA_STATUS_SUCCESS) << "Failed: " << _status;
 }
 
 void
@@ -110,6 +110,7 @@ namespace
 void
 default_submit(const att_queue_t& q, hsa_ext_amd_aql_pm4_packet_t* packet, hsa_signal_t* completion)
 {
+    ROCP_TRACE << "Submit packet";
     auto* core = CHECK_NOTNULL(hsa::get_core_table());
 
     // NOTE: This does not check for queue-full. With QUEUE_SIZE=256 and bursts of
