@@ -1614,6 +1614,39 @@ hsa_status_t HSA_API hsa_amd_image_create(
 );
 
 /**
+ * @brief Creates an image from an opaque vendor specific image format.
+ * Does not modify data at image_data.  Intended initially for
+ * accessing interop images.
+ *
+ * @param agent[in] Agent on which to create the image
+ *
+ * @param[in] image_descriptor[in] Vendor specific image format
+ *
+ * @param[in] image_data Pointer to image backing store
+ *
+ * @param[in] access_permission Access permissions for the image object
+ *
+ * @param[out] image Created image object.
+ *
+ * @retval HSA_STATUS_SUCCESS Image created successfully
+ *
+ * @retval HSA_STATUS_ERROR_NOT_INITIALIZED if HSA is not initialized
+ *
+ * @retval HSA_STATUS_ERROR_OUT_OF_RESOURCES if there is a failure in allocating
+ * necessary resources
+ *
+ * @retval HSA_STATUS_ERROR_INVALID_ARGUMENT Bad or mismatched descriptor,
+ * null image_data, or mismatched access_permission.
+ */
+hsa_status_t HSA_API hsa_amd_image_create_v2(
+    hsa_agent_t agent,
+    const hsa_ext_image_descriptor_v2_t* image_descriptor,
+    const hsa_amd_image_descriptor_t* image_layout,
+    const void* image_data,
+    hsa_access_permission_t access_permission,
+    hsa_ext_image_t* image);
+
+/**
  * @brief Query image limits.
  *
  * @param[in] agent A valid agent.

@@ -87,7 +87,7 @@ void HsaApiTable::Init() {
   // they can add preprocessor macros on the new functions
 
   constexpr size_t expected_core_api_table_size = 1016;
-  constexpr size_t expected_amd_ext_table_size = 704;
+  constexpr size_t expected_amd_ext_table_size = 712;
   constexpr size_t expected_image_ext_table_size = 128;
   constexpr size_t expected_finalizer_ext_table_size = 64;
   constexpr size_t expected_tools_table_size = 64;
@@ -393,7 +393,7 @@ void HsaApiTable::UpdateCore() {
 
 // Update Api table for Amd Extensions.
 // @note: Current implementation will initialize the
-// member variable hsa_amd_image_create_fn while loading
+// member variables hsa_amd_image_create_fn and hsa_amd_image_create_v2_fn while loading
 // Image extension library
 void HsaApiTable::UpdateAmdExts() {
 
