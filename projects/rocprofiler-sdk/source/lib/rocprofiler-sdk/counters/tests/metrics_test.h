@@ -2070,3 +2070,144 @@ static const std::unordered_map<std::string, std::vector<std::vector<std::string
         "",
         "reduce(TCC_BUBBLE,sum)",
         "Number of 128-byte read requests sent to EA. Sum over all TCC instances."}}}};
+
+// Expected basic TD-block counters for gfx11 (gfx1100/1101/1102/1150/1151/1152/1153).
+// TD_TD_BUSY (event 1) and TD_TC_STALL (event 41) are pre-existing counters whose
+// gfx11 architecture support was added in the same change set as the new entries
+// below. Layout matches basic_gfx908: {name, block, event, expression, description}.
+static const std::unordered_map<std::string, std::vector<std::vector<std::string>>>
+    td_basic_gfx11 = {
+        {"gfx1100",
+         {{"TD_TD_BUSY",
+           "TD",
+           "1",
+           "<None>",
+           "TD is processing or waiting for data. Perf_Windowing not supported for this "
+           "counter."},
+          {"TD_INPUT_BUSY",
+           "TD",
+           "2",
+           "<None>",
+           "TD input subblock is busy or waiting for data. This means the instruction, "
+           "state or TC data fifos may not be empty or the TD is processing a wave. "
+           "Perf_Windowing not supported for this counter."},
+          {"TD_SAMPLER_LERP_BUSY",
+           "TD",
+           "3",
+           "<None>",
+           "TD filter subblock is busy, which means any of the four lerps has pixel data "
+           "flowing down its pipeline (blend, accumulation, format). Perf_Windowing not "
+           "supported for this counter."},
+          {"TD_SAMPLER_OUT_BUSY",
+           "TD",
+           "4",
+           "<None>",
+           "TD sampler output subblock is busy. This means the TD's sampler output "
+           "pipeline (accumulation, data swizzle, data packing) could be processing "
+           "pixel data. Perf_Windowing not supported for this counter."},
+          {"TD_NOFILTER_BUSY",
+           "TD",
+           "5",
+           "<None>",
+           "TD no_filter subblock is busy. This means the TD's no_filter pipeline "
+           "(decode, format, data swizzle, data packing) could be processing "
+           "non-sampler data. Perf_Windowing not supported for this counter."},
+          {"TD_RAY_TRACING_BVH4_BUSY",
+           "TD",
+           "6",
+           "<None>",
+           "TD ray tracing subblock is busy. This means the TD's raytracing pipeline "
+           "(box and triangle test pipeline) could be processing a thread. "
+           "Perf_Windowing not supported for this counter."},
+          {"TD_TA_DATA_STALL",
+           "TD",
+           "40",
+           "<None>",
+           "TD is stalled waiting for TA data. Perf_Windowing not supported for this "
+           "counter."},
+          {"TD_TC_STALL", "TD", "41", "<None>", "TD is stalled waiting for TC data."},
+          {"TD_TC_RAM_STALL",
+           "TD",
+           "42",
+           "<None>",
+           "TD is stalled waiting for a TC ram request. Perf_Windowing not supported "
+           "for this counter."},
+          {"TD_LDS_STALL",
+           "TD",
+           "43",
+           "<None>",
+           "TD is stalled because it has run out of credits and it has data waiting to "
+           "be sent out to the LDS. Perf_Windowing not supported for this counter."}}}};
+
+// Expected derived (_sum) TD counters for gfx11.
+// Layout matches derived_gfx908: {name, block, event, expression, description}.
+static const std::unordered_map<std::string, std::vector<std::vector<std::string>>>
+    td_derived_gfx11 = {
+        {"gfx1100",
+         {{"TD_TD_BUSY_sum",
+           "",
+           "",
+           "reduce(TD_TD_BUSY,sum)",
+           "TD is processing or waiting for data. Perf_Windowing not supported for this "
+           "counter. Sum over TD instances."},
+          {"TD_INPUT_BUSY_sum",
+           "",
+           "",
+           "reduce(TD_INPUT_BUSY,sum)",
+           "TD input subblock is busy or waiting for data. This means the instruction, "
+           "state or TC data fifos may not be empty or the TD is processing a wave. "
+           "Perf_Windowing not supported for this counter. Sum over TD instances."},
+          {"TD_SAMPLER_LERP_BUSY_sum",
+           "",
+           "",
+           "reduce(TD_SAMPLER_LERP_BUSY,sum)",
+           "TD filter subblock is busy, which means any of the four lerps has pixel data "
+           "flowing down its pipeline (blend, accumulation, format). Perf_Windowing not "
+           "supported for this counter. Sum over TD instances."},
+          {"TD_SAMPLER_OUT_BUSY_sum",
+           "",
+           "",
+           "reduce(TD_SAMPLER_OUT_BUSY,sum)",
+           "TD sampler output subblock is busy. This means the TD's sampler output "
+           "pipeline (accumulation, data swizzle, data packing) could be processing "
+           "pixel data. Perf_Windowing not supported for this counter. Sum over TD "
+           "instances."},
+          {"TD_NOFILTER_BUSY_sum",
+           "",
+           "",
+           "reduce(TD_NOFILTER_BUSY,sum)",
+           "TD no_filter subblock is busy. This means the TD's no_filter pipeline "
+           "(decode, format, data swizzle, data packing) could be processing "
+           "non-sampler data. Perf_Windowing not supported for this counter. Sum over "
+           "TD instances."},
+          {"TD_RAY_TRACING_BVH4_BUSY_sum",
+           "",
+           "",
+           "reduce(TD_RAY_TRACING_BVH4_BUSY,sum)",
+           "TD ray tracing subblock is busy. This means the TD's raytracing pipeline "
+           "(box and triangle test pipeline) could be processing a thread. "
+           "Perf_Windowing not supported for this counter. Sum over TD instances."},
+          {"TD_TA_DATA_STALL_sum",
+           "",
+           "",
+           "reduce(TD_TA_DATA_STALL,sum)",
+           "TD is stalled waiting for TA data. Perf_Windowing not supported for this "
+           "counter. Sum over TD instances."},
+          {"TD_TC_STALL_sum",
+           "",
+           "",
+           "reduce(TD_TC_STALL,sum)",
+           "TD is stalled waiting for TC data. Sum over TD instances."},
+          {"TD_TC_RAM_STALL_sum",
+           "",
+           "",
+           "reduce(TD_TC_RAM_STALL,sum)",
+           "TD is stalled waiting for a TC ram request. Perf_Windowing not supported "
+           "for this counter. Sum over TD instances."},
+          {"TD_LDS_STALL_sum",
+           "",
+           "",
+           "reduce(TD_LDS_STALL,sum)",
+           "TD is stalled because it has run out of credits and it has data waiting to "
+           "be sent out to the LDS. Perf_Windowing not supported for this counter. "
+           "Sum over TD instances."}}}};

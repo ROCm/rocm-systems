@@ -160,6 +160,77 @@ TEST(metrics, derived_load)
     }
 }
 
+TEST(metrics, td_counters_gfx11)
+{
+    // Subset-find verification of the TD-block counters added for gfx11.
+    // Unlike `base_load`/`derived_load` (which assert exact size equality
+    // against a complete gfx908 expected list), this test only checks that
+    // the new TD entries are present on every gfx11 alias listed in
+    // config.yaml with the expected block/event (basic) and expression
+    // (derived). Adding a full gfx1100 expected list would require
+    // mirroring ~1000 metrics and would be unmaintainable.
+    auto loaded_metrics = counters::loadMetrics();
+    auto basic_test    = loadTestData(td_basic_gfx11);
+    auto derived_test  = loadTestData(td_derived_gfx11);
+
+    ASSERT_EQ(basic_test.count("gfx1100"), 1);
+    ASSERT_EQ(derived_test.count("gfx1100"), 1);
+    const auto& expected_basic   = basic_test.at("gfx1100");
+    const auto& expected_derived = derived_test.at("gfx1100");
+
+    // gfx11 architecture aliases that share the new TD definitions in
+    // projects/rocprofiler-sdk/source/share/rocprofiler-sdk/config.yaml.
+    static const std::vector<std::string> gfx11_aliases = {"gfx11",
+                                                           "gfx1100",
+                                                           "gfx1101",
+                                                           "gfx1102",
+                                                           "gfx1150",
+                                                           "gfx1151",
+                                                           "gfx1152",
+                                                           "gfx1153"};
+
+    for(const auto& gfx : gfx11_aliases)
+    {
+        auto arch_it = loaded_metrics->arch_to_metric.find(gfx);
+        ASSERT_NE(arch_it, loaded_metrics->arch_to_metric.end())
+            << "no metrics loaded for " << gfx;
+        const auto& metrics = arch_it->second;
+
+        auto find_by_name =
+            [&metrics](const std::string& name) -> std::optional<counters::Metric> {
+            for(const auto& m : metrics)
+                if(m.name() == name) return m;
+            return std::nullopt;
+        };
+
+        for(const auto& expected : expected_basic)
+        {
+            auto found = find_by_name(expected.name());
+            ASSERT_TRUE(found.has_value())
+                << gfx << " missing basic TD counter " << expected.name();
+            EXPECT_EQ(found->block(), expected.block())
+                << gfx << " " << expected.name() << " block mismatch";
+            EXPECT_EQ(found->event(), expected.event())
+                << gfx << " " << expected.name() << " event mismatch";
+            EXPECT_TRUE(found->expression().empty())
+                << gfx << " " << expected.name()
+                << " is a basic counter but has expression " << found->expression();
+        }
+
+        for(const auto& expected : expected_derived)
+        {
+            auto found = find_by_name(expected.name());
+            ASSERT_TRUE(found.has_value())
+                << gfx << " missing derived TD counter " << expected.name();
+            EXPECT_EQ(found->expression(), expected.expression())
+                << gfx << " " << expected.name() << " expression mismatch";
+            EXPECT_TRUE(found->block().empty())
+                << gfx << " " << expected.name()
+                << " is a derived counter but has block " << found->block();
+        }
+    }
+}
+
 TEST(metrics, check_agent_valid)
 {
     auto        mets      = counters::loadMetrics();

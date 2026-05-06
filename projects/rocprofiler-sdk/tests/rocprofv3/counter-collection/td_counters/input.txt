@@ -1,0 +1,11 @@
+# TD-block counters for gfx11/gfx1100-gfx1153.
+#
+# The TD hardware block on gfx11 exposes only 2 counter slots
+# (TdCounterBlockNumCounters = 2 in projects/aqlprofile/gfxip/gfx11/gfx11_block_info.h),
+# so each pmc line below collects at most 2 distinct TD events plus their
+# corresponding _sum derived counters.
+pmc: TD_TD_BUSY TD_TD_BUSY_sum TD_INPUT_BUSY TD_INPUT_BUSY_sum
+pmc: TD_SAMPLER_LERP_BUSY TD_SAMPLER_LERP_BUSY_sum TD_SAMPLER_OUT_BUSY TD_SAMPLER_OUT_BUSY_sum
+pmc: TD_NOFILTER_BUSY TD_NOFILTER_BUSY_sum TD_RAY_TRACING_BVH4_BUSY TD_RAY_TRACING_BVH4_BUSY_sum
+pmc: TD_TA_DATA_STALL TD_TA_DATA_STALL_sum TD_TC_STALL TD_TC_STALL_sum
+pmc: TD_TC_RAM_STALL TD_TC_RAM_STALL_sum TD_LDS_STALL TD_LDS_STALL_sum
