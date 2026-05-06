@@ -65,6 +65,8 @@ jobs:
       options: --cap-add CAP_SYS_ADMIN
 
     env:
+      OMPI_ALLOW_RUN_AS_ROOT: 1
+      OMPI_ALLOW_RUN_AS_ROOT_CONFIRM: 1
       ROCPROFSYS_VERBOSE: 2
       ROCPROFSYS_CI: 'ON'
       ROCPROFSYS_MAX_THREADS: '64'

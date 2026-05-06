@@ -151,7 +151,7 @@ def coverage_bar(pct: float) -> str:
         icon = "🟡"
     else:
         icon = "🔴"
-    return f'{icon} **{pct:.1f}%**'
+    return f"{icon} **{pct:.1f}%**"
 
 
 def generate_markdown(

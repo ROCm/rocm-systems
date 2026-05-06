@@ -84,7 +84,8 @@ class required_table:
 
 def print_help():
     """Print out the help message"""
-    print(f"""
+    print(
+        f"""
     ROCPD Database Validation Tool
 
     DESCRIPTION:
@@ -123,7 +124,8 @@ def print_help():
         64 - Invalid command line arguments (EX_USAGE)
         65 - Validation failures detected (EX_DATAERR)
         1  - General error (database connection, file not found, etc.)
-    """)
+    """
+    )
 
 
 def validate_table(cursor, rule, tables, available_metrics=None) -> bool:
