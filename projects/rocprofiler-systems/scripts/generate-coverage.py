@@ -31,7 +31,6 @@ import sys
 from pathlib import Path
 from typing import Optional
 
-
 GCOVR_EXCLUDE_PATTERNS = [
     r"/usr/.*",
     r"/opt/.*",
