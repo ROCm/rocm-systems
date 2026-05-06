@@ -3,6 +3,7 @@
 #
 set ( TARGET_LIB "${TARGET_NAME}" )
 set ( LIB_SRC
+  # Core
   ${LIB_DIR}/core/aql_profile.cpp
   ${LIB_DIR}/core/counters.cpp
   ${LIB_DIR}/core/threadtrace.cpp
@@ -11,7 +12,26 @@ set ( LIB_SRC
   ${LIB_DIR}/core/spm_v2.cpp
   ${LIB_DIR}/core/populate_aql.cpp
   ${LIB_DIR}/core/memorymanager.cpp
+  ${LIB_DIR}/core/parse_ip_discovery.cpp
+  ${LIB_DIR}/core/vega20_reg_init.cpp
+  ${LIB_DIR}/core/navi_reg_init.cpp
+  ${LIB_DIR}/core/ip_offset_table_init.cpp
+  # Architecture abstraction layer
+  ${LIB_DIR}/core/hardware_architecture.cpp
+  ${LIB_DIR}/core/architecture_registry.cpp
+  ${LIB_DIR}/core/architecture_init.cpp
+  ${LIB_DIR}/core/architectures/gfx9_architecture.cpp
+  ${LIB_DIR}/core/architectures/mi100_architecture.cpp
+  ${LIB_DIR}/core/architectures/mi200_architecture.cpp
+  ${LIB_DIR}/core/architectures/mi300_architecture.cpp
+  ${LIB_DIR}/core/architectures/mi350_architecture.cpp
+  ${LIB_DIR}/core/architectures/mi450_architecture.cpp
+  ${LIB_DIR}/core/architectures/gfx10_architecture.cpp
+  ${LIB_DIR}/core/architectures/gfx11_architecture.cpp
+  ${LIB_DIR}/core/architectures/gfx12_architecture.cpp
+  # PM4 factory (legacy)
   ${LIB_DIR}/core/pm4_factory.cpp
+  ${LIB_DIR}/core/pm4_factory_adapter.cpp
   ${LIB_DIR}/core/gfx9_factory.cpp
   ${LIB_DIR}/core/gfx908_factory.cpp
   ${LIB_DIR}/core/gfx90a_factory.cpp
@@ -21,15 +41,7 @@ set ( LIB_SRC
   ${LIB_DIR}/core/gfx115x_factory.cpp
   ${LIB_DIR}/core/gfx12_factory.cpp
   ${LIB_DIR}/core/gfx1250_factory.cpp
-  ${LIB_DIR}/core/architecture_init.cpp
-  ${LIB_DIR}/core/architecture_registry.cpp
-  ${LIB_DIR}/core/hardware_architecture.cpp
-  ${LIB_DIR}/core/pm4_factory_adapter.cpp
-  ${LIB_DIR}/core/architectures/gfx9_architecture.cpp
-  ${LIB_DIR}/core/architectures/gfx10_architecture.cpp
-  ${LIB_DIR}/core/architectures/gfx11_architecture.cpp
-  ${LIB_DIR}/core/architectures/gfx12_architecture.cpp
-  ${LIB_DIR}/core/architectures/mi450_architecture.cpp
+  # PM4 builders
   ${LIB_DIR}/pm4/pmc_builder.cpp
   ${LIB_DIR}/pm4/spm_builder.cpp
   ${LIB_DIR}/pm4/sqtt_builder.cpp
@@ -41,14 +53,7 @@ set ( LIB_SRC
   ${LIB_DIR}/pm4/gfx10_primitives_provider.cpp
   ${LIB_DIR}/pm4/gfx11_primitives_provider.cpp
   ${LIB_DIR}/pm4/gfx12_primitives_provider.cpp
-  ${LIB_DIR}/core/architectures/mi100_architecture.cpp
-  ${LIB_DIR}/core/architectures/mi200_architecture.cpp
-  ${LIB_DIR}/core/architectures/mi300_architecture.cpp
-  ${LIB_DIR}/core/architectures/mi350_architecture.cpp
-  ${LIB_DIR}/core/vega20_reg_init.cpp
-  ${LIB_DIR}/core/parse_ip_discovery.cpp
-  ${LIB_DIR}/core/navi_reg_init.cpp
-  ${LIB_DIR}/core/ip_offset_table_init.cpp
+  # Utilities
   ${LIB_DIR}/util/hsa_rsrc_factory.cpp
 )
 

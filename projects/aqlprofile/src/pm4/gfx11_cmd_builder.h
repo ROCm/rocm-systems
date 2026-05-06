@@ -66,19 +66,8 @@ class Gfx11CmdBuilder : public CmdBuilder {
   void BuildMutexReleasePacket(CmdBuffer* cmdbuf, size_t addr) override;
   void BuildPrimeL2(CmdBuffer* cmdBuf, uint64_t addr) override;
 
-  // Register& overloads
-  void BuildWriteShRegPacket(CmdBuffer* cmd, const Register& reg, uint32_t value);
-  void BuildWriteUConfigRegPacket(CmdBuffer* cmd, const Register& reg, uint32_t value);
-  void BuildWritePConfigRegPacket(CmdBuffer* cmd, const Register& reg, uint32_t value);
-  void BuildCopyCounterDataPacket(CmdBuffer* cmd, const Register& reg_lo, const Register& reg_hi,
-                                  const uint32_t* dst_addr, uint32_t mask);
-  void BuildWriteConfigRegPacket(CmdBuffer* cmd, const Register& reg, uint32_t value);
-  void BuildWaitRegMemCommand(CmdBuffer* cmd, bool mem_space, const Register& wait_addr,
-                              bool func_eq, uint32_t mask_val, uint32_t wait_val);
   void BuildWriteRegDataPacket(CmdBuffer* cmd, const Register& reg, const uint32_t* data,
                                uint32_t count, bool wait);
-  void BuildCopyRegDataPacket(CmdBuffer* cmd, const Register& reg, const void* dst_addr,
-                              uint32_t size, bool wait);
 };
 
 }  // namespace pm4_builder

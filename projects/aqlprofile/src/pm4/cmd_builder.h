@@ -287,7 +287,9 @@ class CmdBuilder {
   virtual void BuildWritePConfigRegPacketToChiplet(CmdBuffer* cmdbuf, uint32_t addr, uint32_t value,
                                                    ChipletId chiplet, bool write_to_aid = true) {}
   virtual void BuildWritePConfigRegPacketToChiplet(CmdBuffer* cmdbuf, const Register& reg, uint32_t value,
-                                                   ChipletId chiplet, bool write_to_aid = true) {}
+                                                   ChipletId chiplet, bool write_to_aid = true) {
+    BuildWritePConfigRegPacketToChiplet(cmdbuf, get_addr(reg), value, chiplet, write_to_aid);
+  }
 
   virtual uint32_t BuildCopyCounterDataPacketFromChiplet(CmdBuffer* cmdbuf, const Register& reg_lo,
                                                          const Register& reg_hi, const void* dst_addr,
@@ -296,14 +298,19 @@ class CmdBuilder {
   virtual void BuildPredExecPacket(CmdBuffer* cmdbuf, uint32_t xcc_id = 0, uint32_t exec_count = 0) {}
 
   virtual void BuildWritePConfigRegPacket(CmdBuffer* cmdbuf, uint64_t addr, uint32_t value) {}
-  virtual void BuildWritePConfigRegPacket(CmdBuffer* cmdbuf, const Register& reg, uint32_t value) {}
+  virtual void BuildWritePConfigRegPacket(CmdBuffer* cmdbuf, const Register& reg, uint32_t value) {
+    BuildWritePConfigRegPacket(cmdbuf, get_addr(reg), value);
+  }
 
   virtual uint32_t BuildCopyCounterDataPacket(CmdBuffer* cmdbuf, uint64_t src_reg_addr_lo,
                                               uint64_t src_reg_addr_hi, const uint32_t* dst_addr,
                                               uint32_t dw_mask) { return 0; }
   virtual void BuildCopyCounterDataPacket(CmdBuffer* cmdbuf, const Register& reg_lo,
                                           const Register& reg_hi, const uint32_t* dst_addr,
-                                          uint32_t dw_mask) {}
+                                          uint32_t dw_mask) {
+    BuildCopyCounterDataPacket(cmdbuf, (dw_mask & 1 << 0) ? get_addr(reg_lo) : 0,
+                               (dw_mask & 1 << 1) ? get_addr(reg_hi) : 0, dst_addr, dw_mask);
+  }
 
  private:
   const reg_base_offset_table* const ip_offset_table;

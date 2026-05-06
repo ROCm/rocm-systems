@@ -281,47 +281,9 @@ void Gfx10CmdBuilder::BuildIndirectBufferCmd(CmdBuffer* cmdbuf, const void* cmd_
   APPEND_COMMAND_WRAPPER(cmdbuf, pm4mec_indirect_buffer_cmd);
 }
 
-// Register& overload delegators
-void Gfx10CmdBuilder::BuildWriteShRegPacket(CmdBuffer* cmd, const Register& reg, uint32_t value) {
-  BuildWriteShRegPacket(cmd, get_addr(reg), value);
-}
-
-void Gfx10CmdBuilder::BuildWriteUConfigRegPacket(CmdBuffer* cmd, const Register& reg,
-                                                 uint32_t value) {
-  BuildWriteUConfigRegPacket(cmd, get_addr(reg), value);
-}
-
-void Gfx10CmdBuilder::BuildWritePConfigRegPacket(CmdBuffer* cmd, const Register& reg,
-                                                 uint32_t value) {
-  BuildWritePConfigRegPacket(cmd, get_addr(reg), value);
-}
-
-void Gfx10CmdBuilder::BuildCopyCounterDataPacket(CmdBuffer* cmd, const Register& reg_lo,
-                                                 const Register& reg_hi,
-                                                 const uint32_t* dst_addr, uint32_t mask) {
-  BuildCopyCounterDataPacket(cmd, (mask & 1 << 0) ? get_addr(reg_lo) : 0,
-                             (mask & 1 << 1) ? get_addr(reg_hi) : 0, dst_addr, mask);
-}
-
-void Gfx10CmdBuilder::BuildWriteConfigRegPacket(CmdBuffer* cmd, const Register& reg,
-                                                uint32_t value) {
-  BuildWriteConfigRegPacket(cmd, get_addr(reg), value);
-}
-
-void Gfx10CmdBuilder::BuildWaitRegMemCommand(CmdBuffer* cmd, bool mem_space,
-                                             const Register& wait_addr, bool func_eq,
-                                             uint32_t mask_val, uint32_t wait_val) {
-  BuildWaitRegMemCommand(cmd, mem_space, get_addr(wait_addr), func_eq, mask_val, wait_val);
-}
-
 void Gfx10CmdBuilder::BuildWriteRegDataPacket(CmdBuffer* cmd, const Register& reg,
                                               const uint32_t* data, uint32_t count, bool wait) {
   BuildWriteRegDataPacket(cmd, get_addr(reg), data, count, wait);
-}
-
-void Gfx10CmdBuilder::BuildCopyRegDataPacket(CmdBuffer* cmd, const Register& reg,
-                                             const void* dst_addr, uint32_t size, bool wait) {
-  BuildCopyRegDataPacket(cmd, get_addr(reg), dst_addr, size, wait);
 }
 
 }  // namespace pm4_builder

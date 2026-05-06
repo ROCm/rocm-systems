@@ -497,58 +497,14 @@ void Gfx12CmdBuilder::BuildWritePConfigRegPacketToChiplet(CmdBuffer* cmdbuf, uin
   BuildWritePConfigRegPacketImpl(cmdbuf, addr, value, chiplet, write_to_aid);
 }
 
-void Gfx12CmdBuilder::BuildWritePConfigRegPacketToChiplet(CmdBuffer* cmdbuf, const Register& reg,
-                                                          uint32_t value, ChipletId chiplet,
-                                                          bool write_to_aid) {
-  BuildWritePConfigRegPacketImpl(cmdbuf, get_addr(reg), value, chiplet, write_to_aid);
-}
-
 void Gfx12CmdBuilder::BuildWriteConfigRegPacket(CmdBuffer* cmdbuf, uint32_t addr, uint32_t value) {
   return IsPrivilegedConfigReg(addr) ? BuildWritePConfigRegPacket(cmdbuf, addr, value)
                                      : BuildWriteUConfigRegPacket(cmdbuf, addr, value);
 }
 
-// Register& overload delegators
-void Gfx12CmdBuilder::BuildWriteShRegPacket(CmdBuffer* cmd, const Register& reg, uint32_t value) {
-  BuildWriteShRegPacket(cmd, get_addr(reg), value);
-}
-
-void Gfx12CmdBuilder::BuildWriteUConfigRegPacket(CmdBuffer* cmd, const Register& reg,
-                                                 uint32_t value) {
-  BuildWriteUConfigRegPacket(cmd, get_addr(reg), value);
-}
-
-void Gfx12CmdBuilder::BuildWritePConfigRegPacket(CmdBuffer* cmd, const Register& reg,
-                                                 uint32_t value) {
-  BuildWritePConfigRegPacket(cmd, get_addr(reg), value);
-}
-
-void Gfx12CmdBuilder::BuildCopyCounterDataPacket(CmdBuffer* cmd, const Register& reg_lo,
-                                                 const Register& reg_hi,
-                                                 const uint32_t* dst_addr, uint32_t mask) {
-  BuildCopyCounterDataPacket(cmd, (mask & 1 << 0) ? get_addr(reg_lo) : 0,
-                             (mask & 1 << 1) ? get_addr(reg_hi) : 0, dst_addr, mask);
-}
-
-void Gfx12CmdBuilder::BuildWriteConfigRegPacket(CmdBuffer* cmd, const Register& reg,
-                                                uint32_t value) {
-  BuildWriteConfigRegPacket(cmd, get_addr(reg), value);
-}
-
-void Gfx12CmdBuilder::BuildWaitRegMemCommand(CmdBuffer* cmd, bool mem_space,
-                                             const Register& wait_addr, bool func_eq,
-                                             uint32_t mask_val, uint32_t wait_val) {
-  BuildWaitRegMemCommand(cmd, mem_space, get_addr(wait_addr), func_eq, mask_val, wait_val);
-}
-
 void Gfx12CmdBuilder::BuildWriteRegDataPacket(CmdBuffer* cmd, const Register& reg,
                                               const uint32_t* data, uint32_t count, bool wait) {
   BuildWriteRegDataPacket(cmd, get_addr(reg), data, count, wait);
-}
-
-void Gfx12CmdBuilder::BuildCopyRegDataPacket(CmdBuffer* cmd, const Register& reg,
-                                             const void* dst_addr, uint32_t size, bool wait) {
-  BuildCopyRegDataPacket(cmd, get_addr(reg), dst_addr, size, wait);
 }
 
 }  // namespace pm4_builder
