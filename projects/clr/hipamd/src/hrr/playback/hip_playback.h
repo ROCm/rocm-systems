@@ -217,7 +217,7 @@ struct PlaybackContext {
     hipModule_t load_module(uint64_t hash_lo, uint64_t hash_hi);
 
 private:
-    mutable std::unordered_map<uint64_t, std::vector<uint8_t>> blob_cache_;
+    mutable std::unordered_map<std::string, std::vector<uint8_t>> blob_cache_;
 };
 
 // Thread-local sequence ID — set by dispatch_event before calling any handler.

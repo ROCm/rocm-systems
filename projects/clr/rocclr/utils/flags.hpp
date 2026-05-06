@@ -269,7 +269,7 @@ release(bool, DEBUG_CLR_DISABLE_IMAGE, false,                                 \
 release(bool, DEBUG_CLR_ENABLE_PREFETCH_METADATA, true,                       \
         "Enable metadata prefetch for some Aql packets")                      \
 release(cstring, HIP_HRR_CAPTURE_OUTPUT, "",                                  \
-        "Enable in-tree HIP Record & Replay capture and write archive to this ") \
+        "Set to a directory path to enable HRR capture; archive written there") \
 release(uint, DEBUG_CLR_DOORBELL_SKIP, 16,                                    \
         "Number of consecutive dispatches that may skip the doorbell flush.")
 

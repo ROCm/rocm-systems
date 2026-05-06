@@ -91,7 +91,7 @@ static std::vector<uint8_t> read_file(const std::string& path) {
 const void* PlaybackContext::load_blob(uint64_t hash_lo, uint64_t hash_hi,
                                        size_t* sz_out) const {
     if (!hash_lo && !hash_hi) return nullptr;
-    auto key = hash_lo ^ (hash_hi << 1);
+    std::string key = hrr::hash_hex(hash_lo, hash_hi);
     {
         std::shared_lock lk(map_mutex);
         auto it = blob_cache_.find(key);
@@ -112,7 +112,7 @@ const void* PlaybackContext::load_blob(uint64_t hash_lo, uint64_t hash_hi,
 const void* PlaybackContext::load_code_object(uint64_t hash_lo, uint64_t hash_hi,
                                               size_t* sz_out) const {
     if (!hash_lo && !hash_hi) return nullptr;
-    auto key = hash_lo ^ ((hash_hi << 1) | 1u);
+    std::string key = hrr::hash_hex(hash_lo, hash_hi);
     {
         std::shared_lock lk(map_mutex);
         auto it = blob_cache_.find(key);
@@ -386,21 +386,28 @@ hipError_t playback_hipLaunchByPtr(PlaybackContext& ctx,
 // ---------------------------------------------------------------------------
 // Manual playback: __hipRegisterFatBinary
 // ---------------------------------------------------------------------------
-// Payload layout (raw_payload bytes after 32-byte EventHeader):
-//   ret(8) blob_hash_lo(8) blob_hash_hi(8) blob_size(8)
-//
 // Load the fat binary blob via hipModuleLoadData so all embedded kernel names
 // become resolvable at kernel launch replay time.
+// Stored in co_modules keyed by the full 32-char hex hash — collision-free
+// and consistent with load_module(), so kernel name scans find it automatically.
 
 hipError_t playback___hipRegisterFatBinary(PlaybackContext& ctx,
                                            const uint8_t* payload) {
     const auto* a = reinterpret_cast<const hrr_args___hipRegisterFatBinary*>(payload);
     uint64_t blob_hash_lo = a->blob_hash_lo;
     uint64_t blob_hash_hi = a->blob_hash_hi;
-    uint64_t blob_size    = a->blob_size;
 
     if (!blob_hash_lo && !blob_hash_hi) return hipSuccess;  // no blob — skip
-    if (!blob_size) return hipSuccess;
+    if (!a->blob_size) return hipSuccess;
+
+    std::string hex = hrr::hash_hex(blob_hash_lo, blob_hash_hi);
+
+    // Deduplicate: if already loaded (e.g. multiple __hipRegisterFatBinary events
+    // for the same binary), skip the load.
+    {
+        std::shared_lock lk(ctx.map_mutex);
+        if (ctx.co_modules.count(hex)) return hipSuccess;
+    }
 
     size_t sz = 0;
     const void* blob = ctx.load_blob(blob_hash_lo, blob_hash_hi, &sz);
@@ -417,8 +424,10 @@ hipError_t playback___hipRegisterFatBinary(PlaybackContext& ctx,
         return hipSuccess;  // non-fatal
     }
 
-    // Store under a synthetic key (use hash_lo as key since we have no recorded handle)
-    ctx.record_module(blob_hash_lo, mod);
+    {
+        std::unique_lock lk(ctx.map_mutex);
+        ctx.co_modules.emplace(hex, mod);
+    }
     if (ctx.verbose)
         fprintf(stderr, "[HRR] Loaded fat binary blob (%zu bytes) -> hipModule_t\n", sz);
     return hipSuccess;
@@ -686,10 +695,14 @@ hipError_t playback_hipFreeAsync(PlaybackContext& ctx, const uint8_t* pl) {
 // Manual playback: hipMemcpy / hipMemcpyAsync / hipMemcpyHtoD / hipMemcpyHtoDAsync
 // ---------------------------------------------------------------------------
 
+// is_async: true  -> call hipMemcpyAsync(stream) regardless of whether stream is null
+//           false -> call synchronous hipMemcpy (no stream argument)
+// This mirrors the captured API exactly — hipMemcpyAsync on the default stream
+// (stream_rec==0, translated to nullptr) must still use the async variant.
 static hipError_t replay_memcpy_impl(PlaybackContext& ctx,
                                      uint64_t dst_rec, uint64_t src_rec,
                                      uint64_t size, int32_t kind,
-                                     hipStream_t stream,
+                                     bool is_async, hipStream_t stream,
                                      uint64_t hash_lo, uint64_t hash_hi) {
     void*      dst = ctx.translate_ptr(dst_rec);
     hipError_t r   = hipSuccess;
@@ -706,14 +719,14 @@ static hipError_t replay_memcpy_impl(PlaybackContext& ctx,
                             (unsigned long long)dst_rec); return hipErrorInvalidValue; }
         size_t copy_sz = static_cast<size_t>(size);
         if (copy_sz > blob_sz) copy_sz = blob_sz;
-        if (stream)
+        if (is_async)
             r = hipMemcpyAsync(dst, blob, copy_sz, hipMemcpyHostToDevice, stream);
         else
             r = hipMemcpy(dst, blob, copy_sz, hipMemcpyHostToDevice);
     } else if (kind == hipMemcpyDeviceToDevice) {
         void* src = ctx.translate_ptr(src_rec);
         if (dst && src) {
-            if (stream)
+            if (is_async)
                 r = hipMemcpyAsync(dst, src, static_cast<size_t>(size),
                                    hipMemcpyDeviceToDevice, stream);
             else
@@ -740,7 +753,7 @@ static hipError_t replay_memcpy_impl(PlaybackContext& ctx,
                 std::vector<uint8_t> actual(copy_sz);
                 // Sync the stream so all preceding GPU work (kernels, D2D copies) has
                 // completed before reading back the device buffer for comparison.
-                if (stream) hipStreamSynchronize(stream);
+                hipStreamSynchronize(stream);
                 r = hipMemcpy(actual.data(), src_dev, copy_sz, hipMemcpyDeviceToHost);
                 if (r != hipSuccess) {
                     fprintf(stderr, "[HRR] D2H validate: hipMemcpy failed: %d (%s)\n",
@@ -774,14 +787,15 @@ hipError_t playback_hipMemcpy(PlaybackContext& ctx,
                               const uint8_t* pl) {
     const auto* a = reinterpret_cast<const hrr_args_hipMemcpy*>(pl);
     return replay_memcpy_impl(ctx, a->dst, a->src, a->sizeBytes, a->kind,
-                              nullptr, a->blob_hash_lo, a->blob_hash_hi);
+                              /*is_async=*/false, nullptr,
+                              a->blob_hash_lo, a->blob_hash_hi);
 }
 
 hipError_t playback_hipMemcpyAsync(PlaybackContext& ctx,
                                    const uint8_t* pl) {
     const auto* a = reinterpret_cast<const hrr_args_hipMemcpyAsync*>(pl);
     return replay_memcpy_impl(ctx, a->dst, a->src, a->sizeBytes, a->kind,
-                              ctx.translate_stream(a->stream),
+                              /*is_async=*/true, ctx.translate_stream(a->stream),
                               a->blob_hash_lo, a->blob_hash_hi);
 }
 
@@ -789,7 +803,8 @@ hipError_t playback_hipMemcpyHtoD(PlaybackContext& ctx,
                                   const uint8_t* pl) {
     const auto* a = reinterpret_cast<const hrr_args_hipMemcpyHtoD*>(pl);
     return replay_memcpy_impl(ctx, a->dst, a->src, a->sizeBytes,
-                              hipMemcpyHostToDevice, nullptr,
+                              hipMemcpyHostToDevice,
+                              /*is_async=*/false, nullptr,
                               a->blob_hash_lo, a->blob_hash_hi);
 }
 
@@ -798,7 +813,7 @@ hipError_t playback_hipMemcpyHtoDAsync(PlaybackContext& ctx,
     const auto* a = reinterpret_cast<const hrr_args_hipMemcpyHtoDAsync*>(pl);
     return replay_memcpy_impl(ctx, a->dst, a->src, a->sizeBytes,
                               hipMemcpyHostToDevice,
-                              ctx.translate_stream(a->stream),
+                              /*is_async=*/true, ctx.translate_stream(a->stream),
                               a->blob_hash_lo, a->blob_hash_hi);
 }
 
