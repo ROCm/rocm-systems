@@ -624,10 +624,17 @@ def reverse_multi_index_df_pmc(
 def impute_counters_iteration_multiplex(
     df_multi_index: pd.DataFrame,
     policy: str,
+    workload_dir: Path,
 ) -> pd.DataFrame:
     """
     Perform data imputation for missing counter values due to iteration multiplexing.
     """
+    # Counter buckets configured for the workload. A kernel needs at least
+    # this many dispatches to cover every bucket.
+    num_perfmon_files = len(list(workload_dir.glob("perfmon/*.txt"))) + len(
+        list(workload_dir.glob("perfmon/pmc_perf_*.yaml"))
+    )
+
     non_counter_column_index = [
         "Dispatch_ID",
         "GPU_ID",
@@ -677,6 +684,16 @@ def impute_counters_iteration_multiplex(
         incomplete_kernel_names: set[str] = set()
 
         for _, group in unique_occurences:
+            # Skip imputation entirely for undersampled kernels: nullify
+            # counters so metric evaluation excludes them. Non-counter columns
+            # are preserved for Top Stats (Block 1) timing.
+            if len(group) < num_perfmon_files:
+                group_copy = group.copy()
+                group_copy[counter_columns] = np.nan
+                incomplete_kernel_names.add(group_copy["Kernel_Name"].iloc[0])
+                group_dfs.append(group_copy)
+                continue
+
             # Identify counter buckets
             counter_groups: set[frozenset[str]] = set()
             for _, row in group.iterrows():
@@ -711,11 +728,6 @@ def impute_counters_iteration_multiplex(
                 .ffill()  # Propagate forward to end of subgroup
             )
 
-            group_copy, affected_kernels = _nullify_incomplete_dispatch_rows(
-                group_copy, counter_columns
-            )
-            incomplete_kernel_names.update(affected_kernels)
-
             group_dfs.append(group_copy)
 
         if incomplete_kernel_names:
@@ -732,26 +744,6 @@ def impute_counters_iteration_multiplex(
     return final_df
 
 
-def _nullify_incomplete_dispatch_rows(
-    group: pd.DataFrame,
-    counter_columns: list[str],
-) -> tuple[pd.DataFrame, set[str]]:
-    """
-    Nullify all counter columns for dispatch rows that still have NaN after imputation.
-
-    A dispatch row with any remaining NaN counter value cannot produce valid metrics.
-    Non-counter columns are preserved so that Top Stats timing data remains accurate.
-
-    Returns the group with nullified rows and the set of affected kernel names.
-    """
-    incomplete_mask = group[counter_columns].isnull().any(axis=1)
-    if not incomplete_mask.any():
-        return group, set()
-    group.loc[incomplete_mask, counter_columns] = np.nan
-    affected_kernels: set[str] = set(group.loc[incomplete_mask, "Kernel_Name"].unique())
-    return group, affected_kernels
-
-
 def _warn_kernels_with_incomplete_coverage(incomplete_kernel_names: set[str]) -> None:
     """
     Emit a warning listing kernels excluded from metrics due to missing counter data.
@@ -764,14 +756,14 @@ def _warn_kernels_with_incomplete_coverage(incomplete_kernel_names: set[str]) ->
         "imputation",
         (
             f"Some kernels have missing counter data after imputation and "
-            f"have been excluded from metric calculations:\n\n"
+            f"have been excluded from metrics calculations:\n\n"
             f"{kernel_list}\n\n"
-            f"Execution times for these kernels are still shown in Top Stats "
-            f"(Block 1).\n"
-            f"To get more complete counter coverage, you may consider:\n"
-            f"  - running the kernel more times\n"
-            f"  - collecting fewer metric blocks or counter sets\n"
-            f"  - using application replay instead of iteration multiplexing"
+            f"Execution times for these kernels are still shown in Top Stats.\n"
+            f"To get more complete kernel coverage for metrics calculations, "
+            f"you may consider:\n"
+            f"  - disabling iteration multiplexing to use application replay\n"
+            f"  - increasing the number of iterations for these kernels in "
+            f"the workload"
         ),
     )
 

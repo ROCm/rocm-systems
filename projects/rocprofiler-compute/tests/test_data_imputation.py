@@ -1,6 +1,8 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
+from pathlib import Path
+
 import pandas as pd
 import pytest
 
@@ -22,7 +24,21 @@ def make_multilevel_df(data: dict) -> "pd.DataFrame":
     return df
 
 
-def test_impute_multiplex_kernel_policy():
+def seed_perfmon_files(tmp_path: Path, count: int) -> None:
+    """Create empty pmc_perf_*.yaml files so the imputation function sees the
+    expected number of counter buckets. Clears any existing perfmon files
+    first so the helper is safe to call multiple times in one test."""
+    perfmon = tmp_path / "perfmon"
+    perfmon.mkdir(exist_ok=True)
+    for stale in perfmon.glob("pmc_perf_*.yaml"):
+        stale.unlink()
+    for stale in perfmon.glob("*.txt"):
+        stale.unlink()
+    for i in range(count):
+        (perfmon / f"pmc_perf_{i}.yaml").touch()
+
+
+def test_impute_multiplex_kernel_policy(tmp_path: Path) -> None:
     """Test imputation with kernel policy on a single kernel."""
 
     data = {
@@ -45,7 +61,7 @@ def test_impute_multiplex_kernel_policy():
 
     df = make_multilevel_df(data)
 
-    result = utils.impute_counters_iteration_multiplex(df, "kernel")
+    result = utils.impute_counters_iteration_multiplex(df, "kernel", tmp_path)
 
     # Sort by Dispatch_ID to ensure consistent order
     result = result.sort_values(by=("file1", "Dispatch_ID"))
@@ -57,7 +73,7 @@ def test_impute_multiplex_kernel_policy():
     assert result[("file1", "Counter1")].iloc[1] == 100
 
 
-def test_impute_multiplex_kernel_launch_params_policy():
+def test_impute_multiplex_kernel_launch_params_policy(tmp_path: Path) -> None:
     """Test imputation with kernel_launch_params policy on a single kernel."""
 
     data = {
@@ -80,7 +96,9 @@ def test_impute_multiplex_kernel_launch_params_policy():
 
     df = make_multilevel_df(data)
 
-    result = utils.impute_counters_iteration_multiplex(df, "kernel_launch_params")
+    result = utils.impute_counters_iteration_multiplex(
+        df, "kernel_launch_params", tmp_path
+    )
 
     # Sort by Dispatch_ID to ensure consistent order
     result = result.sort_values(by=("file1", "Dispatch_ID"))
@@ -93,7 +111,7 @@ def test_impute_multiplex_kernel_launch_params_policy():
     assert len(result) == 3
 
 
-def test_impute_multiplex_kernel_launch_params_no_imputation():
+def test_impute_multiplex_kernel_launch_params_no_imputation(tmp_path: Path) -> None:
     """Test imputation with kernel_launch_params when no imputation is possible."""
 
     data = {
@@ -115,8 +133,13 @@ def test_impute_multiplex_kernel_launch_params_no_imputation():
     }
 
     df = make_multilevel_df(data)
+    # Counter1 and Counter2 form 2 round-robin buckets.
+    num_counter_bucket = 2
+    seed_perfmon_files(tmp_path, count=num_counter_bucket)
 
-    result = utils.impute_counters_iteration_multiplex(df, "kernel_launch_params")
+    result = utils.impute_counters_iteration_multiplex(
+        df, "kernel_launch_params", tmp_path
+    )
 
     # Sort by Dispatch_ID to ensure consistent order
     result = result.sort_values(by=("file1", "Dispatch_ID"))
@@ -134,7 +157,7 @@ def test_impute_multiplex_kernel_launch_params_no_imputation():
     assert pd.isna(result[("file1", "Counter2")].iloc[2])
 
 
-def test_impute_multiplex_multi_kernel_kernel_policy():
+def test_impute_multiplex_multi_kernel_kernel_policy(tmp_path: Path) -> None:
     """Test imputation with kernel policy on multiple kernels."""
 
     data = {
@@ -157,7 +180,7 @@ def test_impute_multiplex_multi_kernel_kernel_policy():
 
     df = make_multilevel_df(data)
 
-    result = utils.impute_counters_iteration_multiplex(df, "kernel")
+    result = utils.impute_counters_iteration_multiplex(df, "kernel", tmp_path)
 
     # Sort by Dispatch_ID to ensure consistent order
     result = result.sort_values(by=("file1", "Dispatch_ID"))
@@ -170,7 +193,9 @@ def test_impute_multiplex_multi_kernel_kernel_policy():
     assert len(result) == 3  # Ensure same number of rows
 
 
-def test_impute_multiplex_multi_kernel_kernel_launch_params_no_imputation():
+def test_impute_multiplex_multi_kernel_kernel_launch_params_no_imputation(
+    tmp_path: Path,
+) -> None:
     """Test imputation with kernel_launch_params when no imputation is possible."""
 
     data = {
@@ -192,8 +217,13 @@ def test_impute_multiplex_multi_kernel_kernel_launch_params_no_imputation():
     }
 
     df = make_multilevel_df(data)
+    # Counter1 and Counter2 form 2 round-robin buckets.
+    num_counter_bucket = 2
+    seed_perfmon_files(tmp_path, count=num_counter_bucket)
 
-    result = utils.impute_counters_iteration_multiplex(df, "kernel_launch_params")
+    result = utils.impute_counters_iteration_multiplex(
+        df, "kernel_launch_params", tmp_path
+    )
 
     # Sort by Dispatch_ID to ensure consistent order
     result = result.sort_values(by=("file1", "Dispatch_ID"))
@@ -211,7 +241,7 @@ def test_impute_multiplex_multi_kernel_kernel_launch_params_no_imputation():
     assert pd.isna(result[("file1", "Counter2")].iloc[2])
 
 
-def test_fewer_dispatches_single_kernel():
+def test_fewer_dispatches_single_kernel(tmp_path: Path) -> None:
     """
     Test imputation with kernel policy on a single kernel with
     fewer dispatches than buckets.
@@ -240,7 +270,10 @@ def test_fewer_dispatches_single_kernel():
     }
 
     df = make_multilevel_df(data)
-    result = utils.impute_counters_iteration_multiplex(df, "kernel")
+    # C1, C2, C3 form 3 round-robin buckets but the kernel only had 2 dispatches.
+    num_counter_bucket = 3
+    seed_perfmon_files(tmp_path, count=num_counter_bucket)
+    result = utils.impute_counters_iteration_multiplex(df, "kernel", tmp_path)
     result = result.sort_values(by=("file1", "Dispatch_ID"))
 
     assert isinstance(result, pd.DataFrame)
@@ -256,7 +289,7 @@ def test_fewer_dispatches_single_kernel():
     assert pd.isna(result[("file1", "C3")].iloc[1])
 
 
-def test_fewer_dispatches_multiple_kernels_both_incomplete():
+def test_fewer_dispatches_multiple_kernels_both_incomplete(tmp_path: Path) -> None:
     """
     Test imputation with kernel policy on multiple kernels, both incomplete.
 
@@ -284,7 +317,10 @@ def test_fewer_dispatches_multiple_kernels_both_incomplete():
     }
 
     df = make_multilevel_df(data)
-    result = utils.impute_counters_iteration_multiplex(df, "kernel")
+    # C1, C2, C3 form 3 round-robin buckets but each kernel has only 2 dispatches.
+    num_counter_bucket = 3
+    seed_perfmon_files(tmp_path, count=num_counter_bucket)
+    result = utils.impute_counters_iteration_multiplex(df, "kernel", tmp_path)
     result = result.sort_values(by=("file1", "Dispatch_ID"))
 
     assert isinstance(result, pd.DataFrame)
@@ -307,7 +343,7 @@ def test_fewer_dispatches_multiple_kernels_both_incomplete():
     assert pd.isna(result[("file1", "C3")].iloc[3])
 
 
-def test_fewer_dispatches_one_incomplete_one_complete():
+def test_fewer_dispatches_one_incomplete_one_complete(tmp_path: Path) -> None:
     """
     Test imputation with kernel policy on one kernel incomplete, second complete.
 
@@ -341,7 +377,10 @@ def test_fewer_dispatches_one_incomplete_one_complete():
     }
 
     df = make_multilevel_df(data)
-    result = utils.impute_counters_iteration_multiplex(df, "kernel")
+    # C1, C2, C3 form 3 round-robin buckets; kernel_a has only 2 dispatches.
+    num_counter_bucket = 3
+    seed_perfmon_files(tmp_path, count=num_counter_bucket)
+    result = utils.impute_counters_iteration_multiplex(df, "kernel", tmp_path)
     result = result.sort_values(by=("file1", "Dispatch_ID"))
 
     assert isinstance(result, pd.DataFrame)
@@ -367,7 +406,7 @@ def test_fewer_dispatches_one_incomplete_one_complete():
     assert result[("file1", "C3")].iloc[4] == 70
 
 
-def test_fewer_dispatches_same_kernel_different_launch_params():
+def test_fewer_dispatches_same_kernel_different_launch_params(tmp_path: Path) -> None:
     """
     Test imputation with kernel_launch_params on the same kernel
     with different launch params.
@@ -402,7 +441,12 @@ def test_fewer_dispatches_same_kernel_different_launch_params():
     }
 
     df = make_multilevel_df(data)
-    result = utils.impute_counters_iteration_multiplex(df, "kernel_launch_params")
+    # C1, C2, C3 form 3 round-robin buckets but each launch config has 2 dispatches.
+    num_counter_bucket = 3
+    seed_perfmon_files(tmp_path, count=num_counter_bucket)
+    result = utils.impute_counters_iteration_multiplex(
+        df, "kernel_launch_params", tmp_path
+    )
     result = result.sort_values(by=("file1", "Dispatch_ID"))
 
     assert isinstance(result, pd.DataFrame)
@@ -425,7 +469,9 @@ def test_fewer_dispatches_same_kernel_different_launch_params():
     assert pd.isna(result[("file1", "C3")].iloc[3])
 
 
-def test_fewer_dispatches_same_kernel_one_incomplete_one_complete():
+def test_fewer_dispatches_same_kernel_one_incomplete_one_complete(
+    tmp_path: Path,
+) -> None:
     """
     Test imputation with kernel_launch_params on one config incomplete, other complete.
 
@@ -460,7 +506,12 @@ def test_fewer_dispatches_same_kernel_one_incomplete_one_complete():
     }
 
     df = make_multilevel_df(data)
-    result = utils.impute_counters_iteration_multiplex(df, "kernel_launch_params")
+    # C1, C2, C3 form 3 round-robin buckets; the first launch config has 2 dispatches.
+    num_counter_bucket = 3
+    seed_perfmon_files(tmp_path, count=num_counter_bucket)
+    result = utils.impute_counters_iteration_multiplex(
+        df, "kernel_launch_params", tmp_path
+    )
     result = result.sort_values(by=("file1", "Dispatch_ID"))
 
     assert isinstance(result, pd.DataFrame)
@@ -486,7 +537,7 @@ def test_fewer_dispatches_same_kernel_one_incomplete_one_complete():
     assert result[("file1", "C3")].iloc[4] == 70
 
 
-def test_incomplete_last_group_single_kernel():
+def test_incomplete_last_group_single_kernel(tmp_path: Path) -> None:
     """
     Test imputation with kernel policy on a single kernel with incomplete last group.
 
@@ -513,7 +564,7 @@ def test_incomplete_last_group_single_kernel():
     }
 
     df = make_multilevel_df(data)
-    result = utils.impute_counters_iteration_multiplex(df, "kernel")
+    result = utils.impute_counters_iteration_multiplex(df, "kernel", tmp_path)
     result = result.sort_values(by=("file1", "Dispatch_ID"))
 
     assert isinstance(result, pd.DataFrame)
@@ -531,7 +582,7 @@ def test_incomplete_last_group_single_kernel():
     assert result[("file1", "C2")].iloc[2] == 20
 
 
-def test_incomplete_last_group_multiple_kernels_both_incomplete():
+def test_incomplete_last_group_multiple_kernels_both_incomplete(tmp_path: Path) -> None:
     """
     Test imputation with kernel policy on multiple kernels,
     both with incomplete last groups.
@@ -590,7 +641,7 @@ def test_incomplete_last_group_multiple_kernels_both_incomplete():
     }
 
     df = make_multilevel_df(data)
-    result = utils.impute_counters_iteration_multiplex(df, "kernel")
+    result = utils.impute_counters_iteration_multiplex(df, "kernel", tmp_path)
     result = result.sort_values(by=("file1", "Dispatch_ID"))
 
     assert isinstance(result, pd.DataFrame)
@@ -632,7 +683,7 @@ def test_incomplete_last_group_multiple_kernels_both_incomplete():
     assert result[("file1", "C3")].iloc[8] == 70
 
 
-def test_incomplete_last_group_one_incomplete_other_complete():
+def test_incomplete_last_group_one_incomplete_other_complete(tmp_path: Path) -> None:
     """
     Test imputation with kernel policy on one kernel incomplete, second kernel complete.
 
@@ -704,7 +755,7 @@ def test_incomplete_last_group_one_incomplete_other_complete():
     }
 
     df = make_multilevel_df(data)
-    result = utils.impute_counters_iteration_multiplex(df, "kernel")
+    result = utils.impute_counters_iteration_multiplex(df, "kernel", tmp_path)
     result = result.sort_values(by=("file1", "Dispatch_ID"))
 
     assert isinstance(result, pd.DataFrame)
@@ -749,7 +800,9 @@ def test_incomplete_last_group_one_incomplete_other_complete():
     assert result[("file1", "C3")].iloc[9] == 100
 
 
-def test_incomplete_last_group_same_kernel_different_launch_params():
+def test_incomplete_last_group_same_kernel_different_launch_params(
+    tmp_path: Path,
+) -> None:
     """
     Test imputation with kernel_launch_params on the same kernel
     with different launch params.
@@ -785,7 +838,9 @@ def test_incomplete_last_group_same_kernel_different_launch_params():
     }
 
     df = make_multilevel_df(data)
-    result = utils.impute_counters_iteration_multiplex(df, "kernel_launch_params")
+    result = utils.impute_counters_iteration_multiplex(
+        df, "kernel_launch_params", tmp_path
+    )
     result = result.sort_values(by=("file1", "Dispatch_ID"))
 
     assert isinstance(result, pd.DataFrame)
@@ -809,7 +864,9 @@ def test_incomplete_last_group_same_kernel_different_launch_params():
     assert result[("file1", "C2")].iloc[5] == 60
 
 
-def test_incomplete_last_group_same_kernel_one_incomplete_one_complete():
+def test_incomplete_last_group_same_kernel_one_incomplete_one_complete(
+    tmp_path: Path,
+) -> None:
     """
     Test imputation with kernel_launch_params on the same kernel
     with one config incomplete, other complete.
@@ -846,7 +903,9 @@ def test_incomplete_last_group_same_kernel_one_incomplete_one_complete():
     }
 
     df = make_multilevel_df(data)
-    result = utils.impute_counters_iteration_multiplex(df, "kernel_launch_params")
+    result = utils.impute_counters_iteration_multiplex(
+        df, "kernel_launch_params", tmp_path
+    )
     result = result.sort_values(by=("file1", "Dispatch_ID"))
 
     assert isinstance(result, pd.DataFrame)
@@ -872,7 +931,7 @@ def test_incomplete_last_group_same_kernel_one_incomplete_one_complete():
     assert result[("file1", "C2")].iloc[6] == 80
 
 
-def test_complete_last_group_single_kernel():
+def test_complete_last_group_single_kernel(tmp_path: Path) -> None:
     """
     Test imputation with kernel policy on a single kernel with complete last group.
 
@@ -900,7 +959,7 @@ def test_complete_last_group_single_kernel():
     }
 
     df = make_multilevel_df(data)
-    result = utils.impute_counters_iteration_multiplex(df, "kernel")
+    result = utils.impute_counters_iteration_multiplex(df, "kernel", tmp_path)
     result = result.sort_values(by=("file1", "Dispatch_ID"))
 
     assert isinstance(result, pd.DataFrame)
@@ -919,7 +978,7 @@ def test_complete_last_group_single_kernel():
     assert result[("file1", "C2")].iloc[3] == 40
 
 
-def test_complete_last_group_multiple_kernels_both_complete():
+def test_complete_last_group_multiple_kernels_both_complete(tmp_path: Path) -> None:
     """
     Test imputation with kernel policy on multiple kernels, both complete.
 
@@ -1051,7 +1110,7 @@ def test_complete_last_group_multiple_kernels_both_complete():
     }
 
     df = make_multilevel_df(data)
-    result = utils.impute_counters_iteration_multiplex(df, "kernel")
+    result = utils.impute_counters_iteration_multiplex(df, "kernel", tmp_path)
     result = result.sort_values(by=("file1", "Dispatch_ID"))
 
     assert isinstance(result, pd.DataFrame)
@@ -1102,7 +1161,9 @@ def test_complete_last_group_multiple_kernels_both_complete():
     assert result[("file1", "C3")].iloc[11] == 120
 
 
-def test_complete_last_group_same_kernel_different_launch_params():
+def test_complete_last_group_same_kernel_different_launch_params(
+    tmp_path: Path,
+) -> None:
     """
     Test imputation with kernel_launch_params on the same kernel
     with different launch params.
@@ -1140,7 +1201,9 @@ def test_complete_last_group_same_kernel_different_launch_params():
     }
 
     df = make_multilevel_df(data)
-    result = utils.impute_counters_iteration_multiplex(df, "kernel_launch_params")
+    result = utils.impute_counters_iteration_multiplex(
+        df, "kernel_launch_params", tmp_path
+    )
     result = result.sort_values(by=("file1", "Dispatch_ID"))
 
     assert isinstance(result, pd.DataFrame)
@@ -1171,7 +1234,9 @@ def test_complete_last_group_same_kernel_different_launch_params():
     assert result[("file1", "C2")].iloc[7] == 80
 
 
-def test_impute_counters_iteration_multiplex_incorrect_structure():
+def test_impute_counters_iteration_multiplex_incorrect_structure(
+    tmp_path: Path,
+) -> None:
     """Test imputation when the DataFrame is not a MultiIndex."""
 
     flat_df = pd.DataFrame({
@@ -1180,10 +1245,12 @@ def test_impute_counters_iteration_multiplex_incorrect_structure():
         "C1": [10],
     })
     with pytest.raises(ValueError, match="multi-index"):
-        utils.impute_counters_iteration_multiplex(flat_df, "kernel")
+        utils.impute_counters_iteration_multiplex(flat_df, "kernel", tmp_path)
 
 
-def test_impute_counters_iteration_multiplex_single_level_multiindex():
+def test_impute_counters_iteration_multiplex_single_level_multiindex(
+    tmp_path: Path,
+) -> None:
     """Test imputation when the DataFrame is a Single-level MultiIndex."""
 
     single_level_df = pd.DataFrame({
@@ -1195,10 +1262,12 @@ def test_impute_counters_iteration_multiplex_single_level_multiindex():
         ["Dispatch_ID", "Kernel_Name", "C1"]
     ])
     with pytest.raises(ValueError, match="multi-index"):
-        utils.impute_counters_iteration_multiplex(single_level_df, "kernel")
+        utils.impute_counters_iteration_multiplex(single_level_df, "kernel", tmp_path)
 
 
-def test_impute_counters_iteration_multiplex_missing_kernel_name():
+def test_impute_counters_iteration_multiplex_missing_kernel_name(
+    tmp_path: Path,
+) -> None:
     """
     Test imputation when the DataFrame is a valid 2-level MultiIndex
     but without the Kernel_Name column raises a KeyError.
@@ -1222,10 +1291,10 @@ def test_impute_counters_iteration_multiplex_missing_kernel_name():
     }
     df_no_kn = make_multilevel_df(data_no_kernel_name)
     with pytest.raises(KeyError):
-        utils.impute_counters_iteration_multiplex(df_no_kn, "kernel")
+        utils.impute_counters_iteration_multiplex(df_no_kn, "kernel", tmp_path)
 
 
-def test_impute_counters_iteration_multiplex_empty_dataframe():
+def test_impute_counters_iteration_multiplex_empty_dataframe(tmp_path: Path) -> None:
     """Test imputation when the DataFrame is a valid MultiIndex but has no data rows."""
 
     data_empty = {
@@ -1246,7 +1315,7 @@ def test_impute_counters_iteration_multiplex_empty_dataframe():
         ("file1", "C2"): [],
     }
     df_empty = make_multilevel_df(data_empty)
-    result = utils.impute_counters_iteration_multiplex(df_empty, "kernel")
+    result = utils.impute_counters_iteration_multiplex(df_empty, "kernel", tmp_path)
 
     # Empty-group fallback preserves the input schema with zero rows.
     assert isinstance(result, pd.DataFrame)
@@ -1254,7 +1323,7 @@ def test_impute_counters_iteration_multiplex_empty_dataframe():
     assert len(result) == 0
 
 
-def test_impute_counters_iteration_multiplex_all_counters_nan():
+def test_impute_counters_iteration_multiplex_all_counters_nan(tmp_path: Path) -> None:
     """
     Test imputation when all counter values are NaN.
 
@@ -1280,7 +1349,7 @@ def test_impute_counters_iteration_multiplex_all_counters_nan():
         ("file1", "C2"): [None, None, None],
     }
     df_all_nan = make_multilevel_df(data_all_nan)
-    result = utils.impute_counters_iteration_multiplex(df_all_nan, "kernel")
+    result = utils.impute_counters_iteration_multiplex(df_all_nan, "kernel", tmp_path)
 
     # Group was dropped (no valid counters) -- empty schema-aligned frame.
     assert isinstance(result, pd.DataFrame)
@@ -1288,7 +1357,7 @@ def test_impute_counters_iteration_multiplex_all_counters_nan():
     assert len(result) == 0
 
 
-def test_impute_counters_iteration_multiplex_no_counter_columns():
+def test_impute_counters_iteration_multiplex_no_counter_columns(tmp_path: Path) -> None:
     """
     Test imputation when the DataFrame contains only the 13 non-counter columns.
 
@@ -1312,7 +1381,9 @@ def test_impute_counters_iteration_multiplex_no_counter_columns():
         ("file1", "Kernel_ID"): [1, 1],
     }
     df_no_counters = make_multilevel_df(data_no_counters)
-    result = utils.impute_counters_iteration_multiplex(df_no_counters, "kernel")
+    result = utils.impute_counters_iteration_multiplex(
+        df_no_counters, "kernel", tmp_path
+    )
 
     # Group was dropped (no counter columns exist) -- empty schema-aligned frame.
     assert isinstance(result, pd.DataFrame)
@@ -1320,7 +1391,9 @@ def test_impute_counters_iteration_multiplex_no_counter_columns():
     assert len(result) == 0
 
 
-def test_impute_counters_iteration_multiplex_unrecognized_policy():
+def test_impute_counters_iteration_multiplex_unrecognized_policy(
+    tmp_path: Path,
+) -> None:
     """
     Test imputation when the policy is unrecognized.
     Any policy other than "kernel" falls through to the else branch
@@ -1346,10 +1419,10 @@ def test_impute_counters_iteration_multiplex_unrecognized_policy():
     }
     df_policy = make_multilevel_df(data_policy)
     result_invalid = utils.impute_counters_iteration_multiplex(
-        df_policy, "invalid_policy"
+        df_policy, "invalid_policy", tmp_path
     )
     result_klp = utils.impute_counters_iteration_multiplex(
-        df_policy, "kernel_launch_params"
+        df_policy, "kernel_launch_params", tmp_path
     )
     assert isinstance(result_invalid, pd.DataFrame)
     pd.testing.assert_frame_equal(
@@ -1358,7 +1431,7 @@ def test_impute_counters_iteration_multiplex_unrecognized_policy():
     )
 
 
-def test_impute_counters_iteration_multiplex_multi_file():
+def test_impute_counters_iteration_multiplex_multi_file(tmp_path: Path) -> None:
     """
     Test imputation when the DataFrame has multiple collection levels (multi-file).
 
@@ -1399,7 +1472,9 @@ def test_impute_counters_iteration_multiplex_multi_file():
         ("file2", "C2"): [None, 60],
     }
     df_multi_file = make_multilevel_df(data_multi_file)
-    result = utils.impute_counters_iteration_multiplex(df_multi_file, "kernel")
+    result = utils.impute_counters_iteration_multiplex(
+        df_multi_file, "kernel", tmp_path
+    )
     result = result.sort_values(by=("file1", "Dispatch_ID"))
 
     assert isinstance(result, pd.DataFrame)
@@ -1423,7 +1498,7 @@ def test_impute_counters_iteration_multiplex_multi_file():
     assert result[("file2", "C2")].iloc[1] == 60
 
 
-def test_incomplete_dispatches_nullify_counter_values():
+def test_incomplete_dispatches_nullify_counter_values(tmp_path: Path) -> None:
     """
     After imputation, any dispatch row that still has at least one NaN counter
     value should have ALL counter columns set to NaN (fully nullified).
@@ -1461,7 +1536,10 @@ def test_incomplete_dispatches_nullify_counter_values():
         ("file1", "C3"): [None, None],
     }
     df = make_multilevel_df(data)
-    result = utils.impute_counters_iteration_multiplex(df, "kernel")
+    # C1, C2, C3 form 3 round-robin buckets but the kernel only had 2 dispatches.
+    num_counter_bucket = 3
+    seed_perfmon_files(tmp_path, count=num_counter_bucket)
+    result = utils.impute_counters_iteration_multiplex(df, "kernel", tmp_path)
     result = result.sort_values(by=("file1", "Dispatch_ID")).reset_index(drop=True)
 
     assert isinstance(result, pd.DataFrame)
@@ -1484,3 +1562,48 @@ def test_incomplete_dispatches_nullify_counter_values():
     assert result[("file1", "Start_Timestamp")].iloc[1] == 1200
     assert result[("file1", "End_Timestamp")].iloc[1] == 1700
     assert result[("file1", "Kernel_Name")].iloc[1] == "kernel_a"
+
+
+def test_undersampled_kernel_nullified_against_perfmon_file_count(
+    tmp_path: Path,
+) -> None:
+    """
+    A kernel whose dispatch count is below the number of configured perfmon
+    files must be nullified even when its visible counter columns are fully
+    imputed. This guards the degenerate case where some buckets never reached
+    the joined dataframe at all.
+    """
+    # 5 perfmon buckets configured, kernel only has 2 dispatches; the visible
+    # counters look fully populated but bucket coverage is incomplete.
+    num_counter_bucket = 5
+    seed_perfmon_files(tmp_path, count=num_counter_bucket)
+
+    data = {
+        ("file1", "Dispatch_ID"): [1, 2],
+        ("file1", "GPU_ID"): [0, 0],
+        ("file1", "Grid_Size"): [1024, 1024],
+        ("file1", "Workgroup_Size"): [64, 64],
+        ("file1", "LDS_Per_Workgroup"): [32, 32],
+        ("file1", "Scratch_Per_Workitem"): [0, 0],
+        ("file1", "Arch_VGPR"): [16, 16],
+        ("file1", "Accum_VGPR"): [0, 0],
+        ("file1", "SGPR"): [32, 32],
+        ("file1", "Kernel_Name"): ["kernel_a", "kernel_a"],
+        ("file1", "Start_Timestamp"): [1000, 1200],
+        ("file1", "End_Timestamp"): [1500, 1700],
+        ("file1", "Kernel_ID"): [1, 1],
+        ("file1", "C1"): [10, 30],
+        ("file1", "C2"): [20, 40],
+    }
+    df = make_multilevel_df(data)
+    result = utils.impute_counters_iteration_multiplex(df, "kernel", tmp_path)
+    result = result.sort_values(by=("file1", "Dispatch_ID")).reset_index(drop=True)
+
+    assert pd.isna(result[("file1", "C1")].iloc[0])
+    assert pd.isna(result[("file1", "C2")].iloc[0])
+    assert pd.isna(result[("file1", "C1")].iloc[1])
+    assert pd.isna(result[("file1", "C2")].iloc[1])
+
+    # Timestamps and kernel name preserved for Top Stats.
+    assert result[("file1", "Start_Timestamp")].iloc[0] == 1000
+    assert result[("file1", "Kernel_Name")].iloc[0] == "kernel_a"
