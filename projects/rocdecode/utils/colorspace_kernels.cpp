@@ -56,7 +56,7 @@ void inline GetColMatCoefficients(int col_standard, float &wr, float &wb, int &b
         wr = 0.2627f; wb = 0.0593f;
         // 10-bit only
         black = 64 << 6; white = 940 << 6; white_c = 960 << 6;
-        max = (1 << 16) - 1;
+        max = 1023 << 6;
         break;
     }
 }
