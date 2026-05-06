@@ -89,7 +89,7 @@ auto callback_operation_option_names =
 auto buffered_operation_option_names =
     std::unordered_map<rocprofiler_buffer_tracing_kind_t, operation_options>{};
 
-std::unordered_set<int32_t>
+std::unordered_set<std::int32_t>
 get_operations_impl(rocprofiler_callback_tracing_kind_t kindv,
                     const std::string&                  optname = {})
 {
@@ -98,7 +98,7 @@ get_operations_impl(rocprofiler_callback_tracing_kind_t kindv,
 
     if(optname.empty())
     {
-        auto _ret = std::unordered_set<int32_t>{};
+        auto _ret = std::unordered_set<std::int32_t>{};
         for(auto iitr : callback_tracing_info[kindv].items())
         {
             if(iitr.second && *iitr.second != "none") _ret.emplace(iitr.first);
@@ -115,9 +115,9 @@ get_operations_impl(rocprofiler_callback_tracing_kind_t kindv,
         std::abort();
     }
 
-    if(_val->empty()) return std::unordered_set<int32_t>{};
+    if(_val->empty()) return std::unordered_set<std::int32_t>{};
 
-    auto _ret = std::unordered_set<int32_t>{};
+    auto _ret = std::unordered_set<std::int32_t>{};
     for(const auto& itr : tim::delimit(*_val, " ,;:\n\t"))
     {
         for(auto iitr : callback_tracing_info[kindv].items())
@@ -134,7 +134,7 @@ get_operations_impl(rocprofiler_callback_tracing_kind_t kindv,
     return _ret;
 }
 
-std::unordered_set<int32_t>
+std::unordered_set<std::int32_t>
 get_operations_impl(rocprofiler_buffer_tracing_kind_t kindv,
                     const std::string&                optname = {})
 {
@@ -143,7 +143,7 @@ get_operations_impl(rocprofiler_buffer_tracing_kind_t kindv,
 
     if(optname.empty())
     {
-        auto _ret = std::unordered_set<int32_t>{};
+        auto _ret = std::unordered_set<std::int32_t>{};
         for(auto iitr : buffered_tracing_info[kindv].items())
         {
             if(iitr.second && *iitr.second != "none") _ret.emplace(iitr.first);
@@ -160,9 +160,9 @@ get_operations_impl(rocprofiler_buffer_tracing_kind_t kindv,
         std::abort();
     }
 
-    if(_val->empty()) return std::unordered_set<int32_t>{};
+    if(_val->empty()) return std::unordered_set<std::int32_t>{};
 
-    auto _ret = std::unordered_set<int32_t>{};
+    auto _ret = std::unordered_set<std::int32_t>{};
     for(const auto& itr : tim::delimit(*_val, " ,;:\n\t"))
     {
         for(auto iitr : buffered_tracing_info[kindv].items())
@@ -178,13 +178,13 @@ get_operations_impl(rocprofiler_buffer_tracing_kind_t kindv,
     return _ret;
 }
 
-std::vector<int32_t>
-get_operations_impl(const std::unordered_set<int32_t>& _complete,
-                    const std::unordered_set<int32_t>& _include,
-                    const std::unordered_set<int32_t>& _exclude)
+std::vector<std::int32_t>
+get_operations_impl(const std::unordered_set<std::int32_t>& _complete,
+                    const std::unordered_set<std::int32_t>& _include,
+                    const std::unordered_set<std::int32_t>& _exclude)
 {
     auto _convert = [](const auto& _dset) {
-        auto _dret = std::vector<int32_t>{};
+        auto _dret = std::vector<std::int32_t>{};
         _dret.reserve(_dset.size());
         for(auto itr : _dset)
             _dret.emplace_back(itr);
@@ -212,9 +212,9 @@ get_version()
 
     if(_version.formatted == 0)
     {
-        uint32_t _major = 0;
-        uint32_t _minor = 0;
-        uint32_t _patch = 0;
+        std::uint32_t _major = 0;
+        std::uint32_t _minor = 0;
+        std::uint32_t _patch = 0;
 
         ROCPROFILER_CALL(rocprofiler_get_version(&_major, &_minor, &_patch));
 
@@ -568,8 +568,8 @@ get_buffered_domains()
         {
             // rocprofiler-sdk < 1.2.2 has a fatal bug parsing KFD events with
             // undefined node IDs (0xFFFFFFFF). Guard at runtime to avoid abort().
-            constexpr uint32_t kfd_min_version = 10202;  // 1.2.2
-            auto               _ver            = get_version();
+            constexpr std::uint32_t kfd_min_version = 10202;  // 1.2.2
+            auto                    _ver            = get_version();
             if(_ver.formatted < kfd_min_version)
             {
                 static bool _warned = false;
@@ -643,7 +643,7 @@ get_group_by_queue(void)
     return _ret;
 }
 
-std::vector<int32_t>
+std::vector<std::int32_t>
 get_operations(rocprofiler_callback_tracing_kind_t kindv)
 {
     if(callback_operation_option_names.count(kindv) == 0)
@@ -663,7 +663,7 @@ get_operations(rocprofiler_callback_tracing_kind_t kindv)
     return get_operations_impl(_complete, _include, _exclude);
 }
 
-std::vector<int32_t>
+std::vector<std::int32_t>
 get_operations(rocprofiler_buffer_tracing_kind_t kindv)
 {
     if(buffered_operation_option_names.count(kindv) == 0)
@@ -683,7 +683,7 @@ get_operations(rocprofiler_buffer_tracing_kind_t kindv)
     return get_operations_impl(_complete, _include, _exclude);
 }
 
-std::unordered_set<int32_t>
+std::unordered_set<std::int32_t>
 get_backtrace_operations(rocprofiler_callback_tracing_kind_t kindv)
 {
     if(callback_operation_option_names.count(kindv) == 0)
@@ -696,14 +696,14 @@ get_backtrace_operations(rocprofiler_callback_tracing_kind_t kindv)
 
     auto _data = get_operations_impl(
         kindv, callback_operation_option_names.at(kindv).operations_annotate_backtrace);
-    auto _ret = std::unordered_set<int32_t>{};
+    auto _ret = std::unordered_set<std::int32_t>{};
     _ret.reserve(_data.size());
     for(auto itr : _data)
         _ret.emplace(itr);
     return _ret;
 }
 
-std::unordered_set<int32_t>
+std::unordered_set<std::int32_t>
 get_backtrace_operations(rocprofiler_buffer_tracing_kind_t kindv)
 {
     if(buffered_operation_option_names.count(kindv) == 0)
@@ -716,7 +716,7 @@ get_backtrace_operations(rocprofiler_buffer_tracing_kind_t kindv)
 
     auto _data = get_operations_impl(
         kindv, buffered_operation_option_names.at(kindv).operations_annotate_backtrace);
-    auto _ret = std::unordered_set<int32_t>{};
+    auto _ret = std::unordered_set<std::int32_t>{};
     _ret.reserve(_data.size());
     for(auto itr : _data)
         _ret.emplace(itr);

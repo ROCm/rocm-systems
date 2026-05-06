@@ -115,7 +115,7 @@ att_queue_submit_signal_last(const att_queue_t& q, VecType& vec)
 /// waiting on the last signal guarantees the entire batch has drained.
 template <typename VecType>
 signal_ptr_t
-att_queue_submit_and_signal_last(const att_queue_t& q, VecType& vec)
+att_queue_submit_and_wait_last(const att_queue_t& q, VecType& vec)
 {
     auto sig = att_queue_submit_signal_last(q, vec);
     if(sig) signal_wait(*sig);

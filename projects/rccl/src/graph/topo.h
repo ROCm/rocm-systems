@@ -223,6 +223,8 @@ struct ncclTopoSystem {
   bool useRailOptimizedTrees;
   /* RCCL Rome / GIO preset: RCCL_ROME_TOPO_PRESET_MODEL_IDX_* sentinels or romeTopoModels[] index */
   int romeTopoModelIdx;
+  /* Preset matchers assume uniform ranks per host; otherwise use generic search in ncclTopoCompute */
+  bool skipPresetTopoMatching;
 };
 
 ncclResult_t ncclTopoGetNode(struct ncclTopoSystem* system, struct ncclTopoNode** node, int type, uint64_t id);

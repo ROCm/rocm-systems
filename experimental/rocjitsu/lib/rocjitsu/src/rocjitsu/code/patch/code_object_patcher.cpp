@@ -18,6 +18,32 @@ RJ_DIAGNOSTIC_POP
 #include <elf.h>
 
 namespace rocjitsu {
+namespace {
+
+struct Wave64DescriptorPatchInfo {
+  uint32_t vgpr_granularity;  // rsrc1 encodes (actual_vgprs / granularity) - 1.
+  bool clear_rsrc1_mode_bits; // GFX12 deprecates DX10_CLAMP and IEEE_MODE.
+};
+
+Wave64DescriptorPatchInfo wave64_descriptor_patch_info(rj_code_arch_t target_arch) {
+  // Keep per-generation descriptor conventions in one place so adding a new
+  // RDNA target does not require scattering magic constants through the patcher.
+  switch (target_arch) {
+  case ROCJITSU_CODE_ARCH_RDNA1:
+  case ROCJITSU_CODE_ARCH_RDNA2:
+  case ROCJITSU_CODE_ARCH_RDNA3:
+  case ROCJITSU_CODE_ARCH_RDNA3_5:
+    return {8u, false};
+  case ROCJITSU_CODE_ARCH_RDNA4:
+    return {12u, true};
+  default:
+    // Unknown targets keep the older GFX10/GFX11-compatible behavior: 8-VGPR
+    // granularity and preserved floating-point mode bits.
+    return {8u, false};
+  }
+}
+
+} // namespace
 
 CodeObjectPatcher::CodeObjectPatcher(const AmdGpuCodeObject &obj)
     : image_(obj.image_data(), obj.image_data() + obj.image_size()), text_offset_(0),
@@ -48,9 +74,13 @@ void CodeObjectPatcher::update_elf_flags(uint32_t new_mach) {
   ehdr->e_flags = (ehdr->e_flags & ~0xFFu) | (new_mach & 0xFFu);
 }
 
-void CodeObjectPatcher::patch_kernel_descriptors_for_wave64() {
+void CodeObjectPatcher::patch_kernel_descriptors_for_wave64(rj_code_arch_t target_arch) {
   using KD = rocr::llvm::amdhsa::kernel_descriptor_t;
   namespace kd = rocr::llvm::amdhsa;
+
+  // Select target-specific descriptor policy once; the loop below only applies
+  // the policy while walking each kernel descriptor in the code object.
+  const Wave64DescriptorPatchInfo target_info = wave64_descriptor_patch_info(target_arch);
 
   auto *ehdr = reinterpret_cast<Elf64_Ehdr *>(image_.data());
   if (ehdr->e_shoff + static_cast<uint64_t>(ehdr->e_shnum) * sizeof(Elf64_Shdr) > image_.size())
@@ -91,9 +121,9 @@ void CodeObjectPatcher::patch_kernel_descriptors_for_wave64() {
 
       auto *kd = reinterpret_cast<KD *>(image_.data() + file_off);
 
-      // --- compute_pgm_rsrc1: translate GFX9 → GFX12 ---
+      // --- compute_pgm_rsrc1: translate GFX9 → GFX10+ ---
 
-      // VGPR granularity: GFX9 wave64 uses granularity 8, RDNA4 wave64 uses 12.
+      // VGPR granularity: GFX9/GFX11 wave64 use 8, RDNA4 wave64 uses 12.
       // On CDNA3/4, AccVGPRs occupy the upper portion of the unified VGPR file.
       // ACCUM_OFFSET in rsrc3 indicates where AccVGPRs start: (offset+1)*4.
       // The translated code must allocate enough VGPRs for both ranges.
@@ -109,18 +139,22 @@ void CodeObjectPatcher::patch_kernel_descriptors_for_wave64() {
       // Semantic lowering (e.g., MFMA→WMMA) injects instructions that need
       // temp VGPRs found via liveness analysis. Ensure enough headroom.
       actual_vgprs = std::max(actual_vgprs, 128u);
-      uint32_t rdna4_vgpr_gran = std::max(1u, (actual_vgprs + 11) / 12 - 1);
+      uint32_t target_vgpr_gran =
+          (actual_vgprs + target_info.vgpr_granularity - 1) / target_info.vgpr_granularity - 1;
       AMDHSA_BITS_SET(kd->compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
-                      rdna4_vgpr_gran);
+                      target_vgpr_gran);
 
       // SGPR granularity: on GFX10+, the field is ignored by hardware but must
       // be set for the runtime. Use 0 (8 SGPRs) which matches native compilers.
       AMDHSA_BITS_SET(kd->compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
                       0);
 
-      // DX10_CLAMP and IEEE_MODE are deprecated on GFX12 — clear them.
-      AMDHSA_BITS_SET(kd->compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_ENABLE_DX10_CLAMP, 0);
-      AMDHSA_BITS_SET(kd->compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_ENABLE_IEEE_MODE, 0);
+      // DX10_CLAMP and IEEE_MODE are deprecated on GFX12. Preserve them for
+      // GFX11, where they still affect floating-point behavior.
+      if (target_info.clear_rsrc1_mode_bits) {
+        AMDHSA_BITS_SET(kd->compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_ENABLE_DX10_CLAMP, 0);
+        AMDHSA_BITS_SET(kd->compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_ENABLE_IEEE_MODE, 0);
+      }
 
       // Set GFX10+ required mode bits.
       AMDHSA_BITS_SET(kd->compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_WGP_MODE, 1);
@@ -140,84 +174,8 @@ void CodeObjectPatcher::patch_kernel_descriptors_for_wave64() {
   }
 }
 
-std::vector<CodeObjectPatcher::WorkGroupIdInfo> CodeObjectPatcher::workgroup_id_info() const {
-  using KD = rocr::llvm::amdhsa::kernel_descriptor_t;
-  namespace kd = rocr::llvm::amdhsa;
-
-  std::vector<WorkGroupIdInfo> infos;
-
-  auto *ehdr = reinterpret_cast<const Elf64_Ehdr *>(image_.data());
-  if (ehdr->e_shoff + static_cast<uint64_t>(ehdr->e_shnum) * sizeof(Elf64_Shdr) > image_.size())
-    return infos;
-  auto *shdr = reinterpret_cast<const Elf64_Shdr *>(image_.data() + ehdr->e_shoff);
-
-  // Find the .text section's virtual address for offset calculation.
-  uint64_t text_vaddr = 0;
-  for (int i = 0; i < ehdr->e_shnum; ++i) {
-    if (shdr[i].sh_offset == text_offset_ && shdr[i].sh_size == text_size_) {
-      text_vaddr = shdr[i].sh_addr;
-      break;
-    }
-  }
-
-  for (int i = 0; i < ehdr->e_shnum; ++i) {
-    if (shdr[i].sh_type != SHT_SYMTAB)
-      continue;
-    if (shdr[i].sh_offset + shdr[i].sh_size > image_.size())
-      continue;
-    auto *symtab = reinterpret_cast<const Elf64_Sym *>(image_.data() + shdr[i].sh_offset);
-    int nsyms = shdr[i].sh_size / sizeof(Elf64_Sym);
-    if (shdr[i].sh_link >= ehdr->e_shnum)
-      continue;
-    auto *strtab_shdr = &shdr[shdr[i].sh_link];
-    if (strtab_shdr->sh_offset + strtab_shdr->sh_size > image_.size())
-      continue;
-    auto *strtab = reinterpret_cast<const char *>(image_.data() + strtab_shdr->sh_offset);
-
-    for (int j = 0; j < nsyms; ++j) {
-      if (symtab[j].st_size != sizeof(KD))
-        continue;
-      if (strtab_shdr->sh_size > 0 && symtab[j].st_name > 0) {
-        if (symtab[j].st_name >= strtab_shdr->sh_size)
-          continue;
-        const char *name = strtab + symtab[j].st_name;
-        size_t len = strlen(name);
-        if (len >= 3 && strcmp(name + len - 3, ".kd") != 0)
-          continue;
-      }
-      uint16_t sec_idx = symtab[j].st_shndx;
-      if (sec_idx >= ehdr->e_shnum)
-        continue;
-      uint64_t kd_file_off = shdr[sec_idx].sh_offset + (symtab[j].st_value - shdr[sec_idx].sh_addr);
-      if (kd_file_off + sizeof(KD) > image_.size())
-        continue;
-
-      const auto *kdp = reinterpret_cast<const KD *>(image_.data() + kd_file_off);
-      uint64_t kd_vaddr = symtab[j].st_value;
-      uint64_t entry_vaddr = kd_vaddr + kdp->kernel_code_entry_byte_offset;
-      uint64_t entry_text_off = entry_vaddr - text_vaddr;
-
-      uint32_t rsrc2 = kdp->compute_pgm_rsrc2;
-
-      // User SGPR count from compute_pgm_rsrc2 — this is the authoritative
-      // count set by the compiler, including preloaded kernel arguments.
-      // The enable_sgpr_* bits in kernel_code_properties describe which
-      // user SGPRs are enabled, but USER_SGPR_COUNT is the actual count
-      // used by CP/SPI to place system SGPRs after user SGPRs.
-      uint32_t sgpr = AMDHSA_BITS_GET(rsrc2, kd::COMPUTE_PGM_RSRC2_USER_SGPR_COUNT);
-
-      WorkGroupIdInfo info{entry_text_off, -1, -1, -1};
-      if (AMDHSA_BITS_GET(rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X))
-        info.sgpr_wg_id_x = static_cast<int8_t>(sgpr++);
-      if (AMDHSA_BITS_GET(rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Y))
-        info.sgpr_wg_id_y = static_cast<int8_t>(sgpr++);
-      if (AMDHSA_BITS_GET(rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Z))
-        info.sgpr_wg_id_z = static_cast<int8_t>(sgpr++);
-
-      infos.push_back(info);
-    }
-  }
-  return infos;
+std::vector<KernelDescriptorInfo> CodeObjectPatcher::kernel_descriptor_info() const {
+  return collect_kernel_descriptor_info(image_, text_offset_, text_size_);
 }
 
 void CodeObjectPatcher::append_cave_body(std::span<const uint32_t> words) {

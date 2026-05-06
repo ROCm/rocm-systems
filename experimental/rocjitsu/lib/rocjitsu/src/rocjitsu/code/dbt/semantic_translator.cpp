@@ -150,8 +150,7 @@ build_vop3(uint16_t op, uint8_t vdst, uint16_t src0, uint16_t src1 = 0, uint16_t
 // Instruction lowering functions
 // ---------------------------------------------------------------------------
 
-std::vector<uint32_t> lower_v_lshl_add_u64(const Instruction &inst,
-                                           [[maybe_unused]] rj_code_arch_t host_arch) {
+std::vector<uint32_t> lower_v_lshl_add_u64(const Instruction &inst, rj_code_arch_t host_arch) {
   const auto *raw = inst.raw_encoding();
   if (!raw || inst.size() < 8)
     return {};
@@ -177,8 +176,14 @@ std::vector<uint32_t> lower_v_lshl_add_u64(const Instruction &inst,
     words.push_back(w1);
   }
 
-  // s_wait_alu 0xFFFD — drain VALU→carry dependency
-  words.push_back(pack_sopp(kSoppWaitAlu, 0xFFFD));
+  // VCC writeback dependency. GFX12 (RDNA4) requires an explicit s_wait_alu
+  // before reading VCC as carry-in. GFX11 (RDNA3) handles back-to-back
+  // VCC-write/VCC-read VALU ops via hardware scoreboarding, so no wait is
+  // required there. SOPP opcode 8 has different meanings between gens
+  // (s_wait_alu on GFX12 vs s_waitcnt on GFX11) so emitting it
+  // unconditionally would corrupt RDNA3 output.
+  if (host_arch == ROCJITSU_CODE_ARCH_RDNA4)
+    words.push_back(pack_sopp(kSoppWaitAlu, 0xFFFD));
 
   // v_add_co_ci_u32 vdst_hi, vcc_lo, src0_hi, src2_hi, vcc_lo
   {
@@ -249,11 +254,10 @@ constexpr uint8_t kOpWmmaF32_16x16x16_F16 = 64;
 /// layout (lanes 16-31 ↔ lanes 32-47). Fix via ds_bpermute with a
 /// pre-computed address VGPR that encodes identity for lanes 0-15,48-63
 /// and XOR-48 for lanes 16-47.
-std::vector<uint32_t> lower_mfma_f32_16x16x16_f16(const Instruction &inst,
-                                                  [[maybe_unused]] rj_code_arch_t host_arch,
-                                                  uint64_t offset, const RegisterLiveness &liveness,
-                                                  const LaneLayout *guest_layout,
-                                                  const LaneLayout *host_layout) {
+std::vector<uint32_t>
+lower_mfma_f32_16x16x16_f16(const Instruction &inst, [[maybe_unused]] rj_code_arch_t host_arch,
+                            [[maybe_unused]] uint64_t offset, const LivenessAnalysis &liveness,
+                            const LaneLayout *guest_layout, const LaneLayout *host_layout) {
   const auto *raw = inst.raw_encoding();
   if (!raw || inst.size() < 8)
     return {};
@@ -271,17 +275,17 @@ std::vector<uint32_t> lower_mfma_f32_16x16x16_f16(const Instruction &inst,
 
   assert(src0 >= 256 && src1 >= 256 && "MFMA VGPR sources expected");
 
-  auto exec_save_opt = liveness.find_free_sgpr_pair();
+  auto exec_save_opt = liveness.find_free_sgpr_pair(&inst);
   if (!exec_save_opt)
     return {};
   const uint8_t kExecSave = static_cast<uint8_t>(*exec_save_opt);
 
-  auto tmp_sgpr_opt = liveness.find_free_sgpr(kExecSave + 2);
+  auto tmp_sgpr_opt = liveness.find_free_sgpr(&inst, kExecSave + 2);
   if (!tmp_sgpr_opt)
     return {};
   const uint8_t kTmpSgpr = static_cast<uint8_t>(*tmp_sgpr_opt);
 
-  auto free_reg = liveness.find_free_run(offset, 1, vdst + 4);
+  auto free_reg = liveness.find_free_run(&inst, 1, vdst + 4);
   if (!free_reg)
     return {};
   const uint8_t vaddr = static_cast<uint8_t>(*free_reg);
@@ -361,7 +365,7 @@ std::vector<uint32_t> lower_accvgpr_write([[maybe_unused]] const Instruction &in
 // ---------------------------------------------------------------------------
 
 std::vector<uint32_t> expand_waitcnt(const Instruction &inst, uint32_t, uint64_t,
-                                     const RegisterLiveness &, const LaneLayout *,
+                                     const LivenessAnalysis &, const LaneLayout *,
                                      const LaneLayout *) {
   if (!inst.raw_encoding())
     return {};
@@ -369,27 +373,48 @@ std::vector<uint32_t> expand_waitcnt(const Instruction &inst, uint32_t, uint64_t
   return encode_waitcnt_gfx12(decode_waitcnt_gfx9(sopp.simm16));
 }
 
-std::vector<uint32_t> expand_v_lshl_add_u64(const Instruction &inst, uint32_t, uint64_t,
-                                            const RegisterLiveness &, const LaneLayout *,
+std::vector<uint32_t> expand_v_lshl_add_u64(const Instruction &inst, uint32_t arch, uint64_t,
+                                            const LivenessAnalysis &, const LaneLayout *,
                                             const LaneLayout *) {
-  return lower_v_lshl_add_u64(inst, ROCJITSU_CODE_ARCH_RDNA4);
+  return lower_v_lshl_add_u64(inst, static_cast<rj_code_arch_t>(arch));
+}
+
+/// @brief Lower CDNA4 (GFX9) s_waitcnt to RDNA3 (GFX11) s_waitcnt.
+/// @details The simm16 counter-bit layout differs between GFX9 and GFX11
+/// (different bit positions for vmcnt/expcnt/lgkmcnt), so a verbatim
+/// simm16 copy by the auto-encoder gives incorrect waits. Rather than
+/// re-encode the counters precisely, emit a conservative full-drain
+/// s_waitcnt 0 which waits for every counter to reach 0. Slower than the
+/// original (which only waited on the specified counter classes) but
+/// always correct. A future change can add encode_waitcnt_gfx11 for a
+/// precise mapping, mirroring encode_waitcnt_gfx12 for the RDNA4 path.
+std::vector<uint32_t> expand_waitcnt_gfx9_to_gfx11(const Instruction &inst, uint32_t, uint64_t,
+                                                   const LivenessAnalysis &, const LaneLayout *,
+                                                   const LaneLayout *) {
+  // Defensive guard: the rule table is keyed by encoding and opcode, but only
+  // SOPP s_waitcnt has the GFX9 waitcnt simm16 layout this lowering expects.
+  constexpr uint16_t kEnc_SOPP_value = 0x17F;
+  if (inst.encoding_id() != kEnc_SOPP_value)
+    return {};
+  constexpr uint32_t kRdna3SoppOp_s_waitcnt = 9;
+  return {pack_sopp(kRdna3SoppOp_s_waitcnt, 0)};
 }
 
 std::vector<uint32_t> expand_accvgpr_read(const Instruction &inst, uint32_t, uint64_t,
-                                          const RegisterLiveness &, const LaneLayout *,
+                                          const LivenessAnalysis &, const LaneLayout *,
                                           const LaneLayout *) {
   return lower_accvgpr_read(inst, ROCJITSU_CODE_ARCH_RDNA4);
 }
 
 std::vector<uint32_t> expand_accvgpr_write(const Instruction &inst, uint32_t, uint64_t,
-                                           const RegisterLiveness &, const LaneLayout *,
+                                           const LivenessAnalysis &, const LaneLayout *,
                                            const LaneLayout *) {
   return lower_accvgpr_write(inst, ROCJITSU_CODE_ARCH_RDNA4);
 }
 
 std::vector<uint32_t> expand_mfma_f32_16x16x16_f16(const Instruction &inst, uint32_t arch,
                                                    uint64_t offset,
-                                                   const RegisterLiveness &liveness,
+                                                   const LivenessAnalysis &liveness,
                                                    const LaneLayout *guest,
                                                    const LaneLayout *host) {
   return lower_mfma_f32_16x16x16_f16(inst, static_cast<rj_code_arch_t>(arch), offset, liveness,
@@ -426,6 +451,23 @@ const TranslationRule kExpandRules_cdna4_to_rdna4[] = {
      expand_accvgpr_write, nullptr, nullptr},
 };
 
+// CDNA4 -> RDNA3 expand rules. With the codegen fixes (per-pair enc_map for
+// the FLAT family, FLAT_LOAD_/FLAT_STORE_ DWORD->B32 in the rename map,
+// target_opcode preserved through domain-rule overrides), the auto-generated
+// encoding translator handles the FLAT_GLBL family at the encoding level.
+// Two genuine Expand cases remain:
+//   - s_waitcnt: simm16 counter-bit layout differs between GFX9 and GFX11,
+//     so an opcode swap alone is not enough.
+//   - v_lshl_add_u64: no carry-propagating fused 64-bit add on RDNA3, expands
+//     to v_add_co_u32 + v_add_co_ci_u32.
+// Rule table must stay sorted by (src_encoding_id, src_opcode).
+const TranslationRule kExpandRules_cdna4_to_rdna3[] = {
+    {kEncSopp, kCdna4Op_s_waitcnt, RuleAction::Expand, 0, 0, nullptr, expand_waitcnt_gfx9_to_gfx11,
+     nullptr, nullptr},
+    {kEncVop3, kCdna4Op_v_lshl_add_u64, RuleAction::Expand, 0, 0, nullptr, expand_v_lshl_add_u64,
+     nullptr, nullptr},
+};
+
 } // namespace
 
 // ---------------------------------------------------------------------------
@@ -436,10 +478,12 @@ SemanticTranslator::SemanticTranslator(rj_code_arch_t guest, rj_code_arch_t host
     : host_arch_(host) {
   if (guest == ROCJITSU_CODE_ARCH_CDNA4 && host == ROCJITSU_CODE_ARCH_RDNA4)
     expand_rules_ = kExpandRules_cdna4_to_rdna4;
+  else if (guest == ROCJITSU_CODE_ARCH_CDNA4 && host == ROCJITSU_CODE_ARCH_RDNA3)
+    expand_rules_ = kExpandRules_cdna4_to_rdna3;
 }
 
 std::vector<uint32_t> SemanticTranslator::try_lower_expand(const Instruction &inst, uint64_t offset,
-                                                           const RegisterLiveness &liveness) const {
+                                                           const LivenessAnalysis &liveness) const {
   const uint16_t eid = inst.encoding_id();
   const uint16_t op = inst.opcode();
   TranslationRule key{eid, op, RuleAction::Expand, 0, 0, nullptr, nullptr, nullptr, nullptr};
@@ -453,10 +497,10 @@ std::vector<uint32_t> SemanticTranslator::try_lower_expand(const Instruction &in
 
 // --- Workgroup ID rewrite ---
 
-std::vector<SemanticReplacement> SemanticTranslator::rewrite_workgroup_ids(
-    BasicBlock &block, std::span<const CodeObjectPatcher::WorkGroupIdInfo> wg_info,
-    std::span<const uint8_t> translated_text) const {
-  if (host_arch_ != ROCJITSU_CODE_ARCH_RDNA4 || wg_info.empty())
+std::vector<SemanticReplacement>
+SemanticTranslator::rewrite_workgroup_ids(BasicBlock &block, const KernelWorkGroupIdInfo &wg_info,
+                                          std::span<const uint8_t> translated_text) const {
+  if (host_arch_ != ROCJITSU_CODE_ARCH_RDNA4)
     return {};
 
   // RDNA4 delivers workgroup IDs via TTMP registers, not SGPRs.
@@ -467,43 +511,41 @@ std::vector<SemanticReplacement> SemanticTranslator::rewrite_workgroup_ids(
 
   std::vector<SemanticReplacement> result;
 
-  for (const auto &info : wg_info) {
-    uint64_t offset = block.start_offset();
-    for (const auto &inst : block.instructions()) {
-      if (offset < info.entry_text_offset || offset + 8 > translated_text.size()) {
-        offset += inst.size();
-        continue;
-      }
-
-      if (inst.size() < 8) {
-        offset += inst.size();
-        continue;
-      }
-
-      uint32_t w0, w1;
-      std::memcpy(&w0, translated_text.data() + offset, 4);
-      std::memcpy(&w1, translated_text.data() + offset + 4, 4);
-
-      // VOP3 word1 has src0 in bits[8:0]. Check if it matches any
-      // workgroup_id SGPR and substitute the corresponding TTMP.
-      // Only rewrite src0 — the workgroup_id SGPRs are consumed in
-      // s_mul/v_mul patterns where the ID appears as src0. Rewriting
-      // other operand slots risks false matches with unrelated SGPRs
-      // that happen to share the same encoding value.
-      uint16_t src0 = w1 & 0x1FF;
-      if (info.sgpr_wg_id_x >= 0 && src0 == static_cast<uint16_t>(info.sgpr_wg_id_x)) {
-        uint32_t new_w1 = (w1 & ~0x1FFu) | kTTMP9;
-        result.push_back({offset, offset + static_cast<uint64_t>(inst.size()), {w0, new_w1}});
-      } else if (info.sgpr_wg_id_y >= 0 && src0 == static_cast<uint16_t>(info.sgpr_wg_id_y)) {
-        uint32_t new_w1 = (w1 & ~0x1FFu) | kTTMP7;
-        result.push_back({offset, offset + static_cast<uint64_t>(inst.size()), {w0, new_w1}});
-      } else if (info.sgpr_wg_id_z >= 0 && src0 == static_cast<uint16_t>(info.sgpr_wg_id_z)) {
-        uint32_t new_w1 = (w1 & ~0x1FFu) | kTTMP7;
-        result.push_back({offset, offset + static_cast<uint64_t>(inst.size()), {w0, new_w1}});
-      }
-
+  uint64_t offset = block.start_offset();
+  for (const auto &inst : block.instructions()) {
+    if (offset < wg_info.entry_text_offset || offset + 8 > translated_text.size()) {
       offset += inst.size();
+      continue;
     }
+
+    if (inst.size() < 8) {
+      offset += inst.size();
+      continue;
+    }
+
+    uint32_t w0, w1;
+    std::memcpy(&w0, translated_text.data() + offset, 4);
+    std::memcpy(&w1, translated_text.data() + offset + 4, 4);
+
+    // VOP3 word1 has src0 in bits[8:0]. Check if it matches any
+    // workgroup_id SGPR and substitute the corresponding TTMP.
+    // Only rewrite src0 — the workgroup_id SGPRs are consumed in
+    // s_mul/v_mul patterns where the ID appears as src0. Rewriting
+    // other operand slots risks false matches with unrelated SGPRs
+    // that happen to share the same encoding value.
+    uint16_t src0 = w1 & 0x1FF;
+    if (wg_info.sgpr_wg_id_x >= 0 && src0 == static_cast<uint16_t>(wg_info.sgpr_wg_id_x)) {
+      uint32_t new_w1 = (w1 & ~0x1FFu) | kTTMP9;
+      result.push_back({offset, offset + static_cast<uint64_t>(inst.size()), {w0, new_w1}});
+    } else if (wg_info.sgpr_wg_id_y >= 0 && src0 == static_cast<uint16_t>(wg_info.sgpr_wg_id_y)) {
+      uint32_t new_w1 = (w1 & ~0x1FFu) | kTTMP7;
+      result.push_back({offset, offset + static_cast<uint64_t>(inst.size()), {w0, new_w1}});
+    } else if (wg_info.sgpr_wg_id_z >= 0 && src0 == static_cast<uint16_t>(wg_info.sgpr_wg_id_z)) {
+      uint32_t new_w1 = (w1 & ~0x1FFu) | kTTMP7;
+      result.push_back({offset, offset + static_cast<uint64_t>(inst.size()), {w0, new_w1}});
+    }
+
+    offset += inst.size();
   }
   return result;
 }

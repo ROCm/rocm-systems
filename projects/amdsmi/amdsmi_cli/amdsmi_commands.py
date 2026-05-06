@@ -33,6 +33,7 @@ import time
 import copy
 
 from _version import __version__
+
 from amdsmi_cli_exceptions import (
     AmdSmiInvalidParameterException,
     AmdSmiRequiredCommandException,
@@ -10255,7 +10256,9 @@ class AMDSMICommands:
             args.pcie = pcie
         if process:
             args.process = process
-        if brcm_nic or args.brcm_nic:
+        if self.helpers.is_brcm_nic_initialized() and (
+            brcm_nic or getattr(args, "brcm_nic", False)
+        ):
             self.metric_nic(
                 args,
                 multiple_devices,
@@ -10267,7 +10270,9 @@ class AMDSMICommands:
                 nic_temperature=args.temperature,
             )
             return
-        if brcm_switch or args.brcm_switch:
+        if self.helpers.is_brcm_switch_initialized() and (
+            brcm_switch or getattr(args, "brcm_switch", False)
+        ):
             self.metric_switch(
                 args,
                 multiple_devices,
