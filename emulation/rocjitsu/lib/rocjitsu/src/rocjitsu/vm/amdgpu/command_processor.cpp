@@ -432,8 +432,6 @@ void CommandProcessor::check_all_idle() {
     if (dp.host_signal) {
       auto *val = reinterpret_cast<int64_t *>(dp.completion_signal + SIG_VAL_OFF);
       auto old_val = std::atomic_ref<int64_t>(*val).fetch_sub(1, std::memory_order_release);
-      if (old_val == 1)
-        plugin_group_->onAmdgpuKernelComplete();
       util::Logger::vm("CP: signal 0x", std::hex, dp.completion_signal, std::dec, " val ", old_val,
                        " -> ", old_val - 1);
       // Write event mailbox and fire interrupt so ROCR's signal wait wakes up.
@@ -452,8 +450,6 @@ void CommandProcessor::check_all_idle() {
     } else if (memory_) {
       auto old = static_cast<int64_t>(memory_->read64(dp.completion_signal + SIG_VAL_OFF));
       memory_->write64(dp.completion_signal + SIG_VAL_OFF, static_cast<uint64_t>(old - 1));
-      if (old == 1)
-        plugin_group_->onAmdgpuKernelComplete();
     }
     dp.completion_signal = 0; // Signal only once.
   }

@@ -60,9 +60,6 @@ public:
   /// Called when a new AMDGPU kernel dispatch begins.
   virtual void onAmdgpuKernelDispatch(const KernelDispatchInfo & /*info*/) {}
 
-  /// Called when all wavefronts of a kernel dispatch have completed.
-  virtual void onAmdgpuKernelComplete() {}
-
   /// Called after a workgroup's wavefronts have been dispatched to a CU.
   virtual void onAmdgpuDispatchWorkgroup(
       uint32_t /*wg_id*/, uint32_t /*n_dispatched*/,
@@ -128,11 +125,6 @@ public:
   void onAmdgpuKernelDispatch(const KernelDispatchInfo &info) {
     for (auto &p : plugins_)
       p->onAmdgpuKernelDispatch(info);
-  }
-
-  void onAmdgpuKernelComplete() {
-    for (auto &p : plugins_)
-      p->onAmdgpuKernelComplete();
   }
 
   void onAmdgpuDispatchWorkgroup(uint32_t wg_id, uint32_t n_dispatched,
