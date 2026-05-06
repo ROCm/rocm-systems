@@ -12,4 +12,5 @@ rj_add_object_library(rocjitsu_code
     dbt/lane_permutation.cpp
     dbt/semantic_translator.cpp
     patch/code_object_patcher.cpp
+    patch/kernel_descriptor_info.cpp
 )

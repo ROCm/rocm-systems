@@ -53,12 +53,12 @@ public:
     : m_object{ &obj }
     , m_setup_impl{ [](void* ptr) { static_cast<T*>(ptr)->setup(); } }
     , m_config_impl{ [](void* ptr) { static_cast<T*>(ptr)->config(); } }
-    , m_sample_impl{ [](void* ptr, int64_t timestamp) {
+    , m_sample_impl{ [](void* ptr, std::int64_t timestamp) {
         static_cast<T*>(ptr)->sample(timestamp);
     } }
     , m_post_process_impl{ [](void* ptr) { static_cast<T*>(ptr)->post_process(); } }
     , m_shutdown_impl{ [](void* ptr) { static_cast<T*>(ptr)->shutdown(); } }
-    , m_pause_impl{ [](void* ptr, int64_t timestamp) {
+    , m_pause_impl{ [](void* ptr, std::int64_t timestamp) {
         static_cast<T*>(ptr)->pause(timestamp);
     } }
     {}
@@ -83,7 +83,7 @@ public:
      * @param timestamp Current timestamp in nanoseconds.
      * Calls the underlying collector's sample() method.
      */
-    void sample(int64_t timestamp) { m_sample_impl(m_object, timestamp); }
+    void sample(std::int64_t timestamp) { m_sample_impl(m_object, timestamp); }
 
     /**
      * @brief Post-process collected metrics.
@@ -105,15 +105,15 @@ public:
      * @param timestamp Current timestamp in nanoseconds.
      * Calls the underlying collector's write_zero() method.
      */
-    void pause(int64_t timestamp) { m_pause_impl(m_object, timestamp); }
+    void pause(std::int64_t timestamp) { m_pause_impl(m_object, timestamp); }
 
 private:
     using setup_fn_t        = void (*)(void*);
     using config_fn_t       = void (*)(void*);
-    using sample_fn_t       = void (*)(void*, int64_t);
+    using sample_fn_t       = void (*)(void*, std::int64_t);
     using post_process_fn_t = void (*)(void*);
     using shutdown_fn_t     = void (*)(void*);
-    using pause_fn_t        = void (*)(void*, int64_t);
+    using pause_fn_t        = void (*)(void*, std::int64_t);
 
     void*             m_object;            /**< Non-owning pointer to collector */
     setup_fn_t        m_setup_impl;        /**< Type-erased setup function */
