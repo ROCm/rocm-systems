@@ -16,7 +16,7 @@ The FFMpeg demultiplexer (demuxer) extracts a segment of video data and sends it
 
 When hardware decoding is used, the parser extracts information such as picture and slice parameters, and sends it to the hardware decoder to consume. The hardware decoder decodes the frame using the Video Acceleration API (VA-API). 
 
-When FFMpeg-based software decoding is used, no separate parsing step is required and the the data that was extracted by the demuxer is sent directly to the decoder to consume.
+When FFMpeg-based software decoding is used, no separate parsing step is required and the data that was extracted by the demuxer is sent directly to the decoder to consume.
 
 .. note:: 
 
