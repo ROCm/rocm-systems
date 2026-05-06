@@ -1068,6 +1068,97 @@ void PalVideoDecoder::Destroy() {
     ReleasePalPlatform();
 }
 
+rocDecStatus PalVideoDecoder::ExportSurface(int pic_idx,
+                                             uint32_t& width,
+                                             uint32_t& height,
+                                             uint32_t pitch[3],
+                                             uint32_t offset[3],
+                                             uint32_t& num_planes,
+                                             void*& kmt_handle,
+                                             size_t& mem_size) {
+    std::lock_guard<std::mutex> lock(mutex_);
+
+    if (!initialized_ || pic_idx < 0) {
+        return ROCDEC_INVALID_PARAMETER;
+    }
+
+    // Get DPB slot
+    PalDpbSlot* slot = dpb_.GetSlot(pic_idx);
+    if (!slot || !slot->image.Get() || !slot->image_memory.Get()) {
+        CriticalLog(g_rocdec_logger, "PAL: Invalid DPB slot for export");
+        return ROCDEC_INVALID_PARAMETER;
+    }
+
+    Pal::IImage* image = slot->image.Get();
+    Pal::IGpuMemory* gpu_mem = slot->image_memory.Get();
+
+    // Get image create info to determine format
+    const Pal::ImageCreateInfo& create_info = image->GetImageCreateInfo();
+    width = create_info.extent.width;
+    height = create_info.extent.height;
+
+    // NV12/P010 has 2 planes (Y plane and UV interleaved plane)
+    num_planes = 2;
+
+    // Query subresource layout for each plane
+    for (uint32_t plane = 0; plane < num_planes; plane++) {
+        Pal::SubresId subres = {};
+        subres.plane = static_cast<uint8_t>(plane);
+        subres.mipLevel = 0;
+        subres.arraySlice = slot->image_index;
+
+        Pal::SubresLayout layout = {};
+        Pal::Result res = image->GetSubresourceLayout(subres, &layout);
+        if (Util::IsErrorResult(res)) {
+            CriticalLog(g_rocdec_logger, ROCDEC_STR("PAL: GetSubresourceLayout failed for plane ") +
+                        ROCDEC_TOSTR(plane) + " with result " + ROCDEC_TOSTR((int)res));
+            return ROCDEC_RUNTIME_ERROR;
+        }
+
+        offset[plane] = static_cast<uint32_t>(layout.offset);
+        pitch[plane] = static_cast<uint32_t>(layout.rowPitch);
+
+        InfoLog(g_rocdec_logger, ROCDEC_STR("PAL: Plane ") + ROCDEC_TOSTR(plane) +
+                " offset=" + ROCDEC_TOSTR(offset[plane]) +
+                " pitch=" + ROCDEC_TOSTR(pitch[plane]));
+    }
+
+    // Third plane unused for NV12/P010
+    offset[2] = 0;
+    pitch[2] = 0;
+
+    // Get total memory size
+    const Pal::GpuMemoryDesc& mem_desc = gpu_mem->Desc();
+    mem_size = mem_desc.size;
+
+    // Export GPU memory as Windows KMT handle
+#if defined(PAL_KMT_BUILD)
+    Pal::GpuMemoryExportInfo export_info = {};
+    export_info.exportType = Pal::ExportHandleType::Default;
+    export_info.pSecurityAttributes = nullptr;
+    export_info.pNtObjectName = nullptr;
+    export_info.accessFlags = 0;  // Use default access
+
+    Pal::OsExternalHandle external_handle = gpu_mem->ExportExternalHandle(export_info);
+    if (external_handle == nullptr) {
+        CriticalLog(g_rocdec_logger, "PAL: ExportExternalHandle failed");
+        return ROCDEC_RUNTIME_ERROR;
+    }
+
+    kmt_handle = external_handle;
+#else
+    // PAL_KMT_BUILD not defined - export not available
+    CriticalLog(g_rocdec_logger, "PAL: ExportExternalHandle not available (PAL_KMT_BUILD not defined)");
+    return ROCDEC_NOT_SUPPORTED;
+#endif
+
+    InfoLog(g_rocdec_logger, ROCDEC_STR("PAL: Exported surface pic_idx=") + ROCDEC_TOSTR(pic_idx) +
+            " size=" + ROCDEC_TOSTR(width) + "x" + ROCDEC_TOSTR(height) +
+            " mem_size=" + ROCDEC_TOSTR(mem_size));
+
+    return ROCDEC_SUCCESS;
+}
+
 rocDecStatus PalVideoDecoder::QueryDecoderCaps(RocdecDecodeCaps* caps) {
     if (!caps) {
         return ROCDEC_INVALID_PARAMETER;

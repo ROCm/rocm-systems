@@ -275,16 +275,57 @@ rocDecStatus RocDecoder::GetVideoFrame(int pic_idx, void *dev_mem_ptr[3], uint32
 
     // Do HIP interop once per surface and reuse
     if (hip_interop_[pic_idx].hip_mapped_device_mem == nullptr) {
-        // Get PAL image GPU memory for this decoded frame
-        // TODO: This requires exposing GetDpbSlot and image memory from PAL decoder
-        // For now, return NOT_IMPLEMENTED until we add the necessary PAL export API
-        ErrorLog(g_rocdec_logger, "PAL image export for HIP interop not yet implemented.");
-        rocdec_status = ROCDEC_NOT_IMPLEMENTED;
-        FunctionExitLog(g_rocdec_logger);
-        return rocdec_status;
+        // Export PAL surface
+        uint32_t width = 0, height = 0;
+        uint32_t pitch[3] = {0};
+        uint32_t offset[3] = {0};
+        uint32_t num_planes = 0;
+        void* kmt_handle = nullptr;
+        size_t mem_size = 0;
+
+        rocdec_status = pal_video_decoder_->ExportSurface(
+            pic_idx, width, height, pitch, offset, num_planes, kmt_handle, mem_size);
+        if (rocdec_status != ROCDEC_SUCCESS) {
+            ErrorLog(g_rocdec_logger, "Failed to export PAL surface for picture idx = " + ROCDEC_TOSTR(pic_idx));
+            FunctionExitLog(g_rocdec_logger);
+            return rocdec_status;
+        }
+
+        // Import into HIP using Windows KMT handle
+        hipExternalMemoryHandleDesc external_mem_handle_desc = {};
+        hipExternalMemoryBufferDesc external_mem_buffer_desc = {};
+
+        external_mem_handle_desc.type = hipExternalMemoryHandleTypeOpaqueWin32Kmt;
+        external_mem_handle_desc.handle.win32.handle = kmt_handle;
+        external_mem_handle_desc.size = mem_size;
+        external_mem_handle_desc.flags = 0;
+
+        CHECK_HIP(hipImportExternalMemory(&hip_interop_[pic_idx].hip_ext_mem, &external_mem_handle_desc));
+
+        external_mem_buffer_desc.size = mem_size;
+        external_mem_buffer_desc.offset = 0;
+        external_mem_buffer_desc.flags = 0;
+
+        CHECK_HIP(hipExternalMemoryGetMappedBuffer(
+            (void**)&hip_interop_[pic_idx].hip_mapped_device_mem,
+            hip_interop_[pic_idx].hip_ext_mem,
+            &external_mem_buffer_desc));
+
+        hip_interop_[pic_idx].width = width;
+        hip_interop_[pic_idx].height = height;
+        hip_interop_[pic_idx].num_layers = num_planes;
+
+        for (uint32_t i = 0; i < num_planes; i++) {
+            hip_interop_[pic_idx].offset[i] = offset[i];
+            hip_interop_[pic_idx].pitch[i] = pitch[i];
+        }
+
+        InfoLog(g_rocdec_logger, "PAL-HIP interop established for picture idx = " + ROCDEC_TOSTR(pic_idx) +
+                " width=" + ROCDEC_TOSTR(width) + " height=" + ROCDEC_TOSTR(height) +
+                " num_planes=" + ROCDEC_TOSTR(num_planes));
     }
 
-    // Return device memory pointers (once implemented)
+    // Return device memory pointers
     for (int i = 0; i < hip_interop_[pic_idx].num_layers; i++) {
         dev_mem_ptr[i] = hip_interop_[pic_idx].hip_mapped_device_mem + hip_interop_[pic_idx].offset[i];
         horizontal_pitch[i] = hip_interop_[pic_idx].pitch[i];

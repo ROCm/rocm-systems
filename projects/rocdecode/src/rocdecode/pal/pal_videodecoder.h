@@ -243,6 +243,28 @@ public:
      */
     static rocDecStatus QueryDecoderCaps(RocdecDecodeCaps* caps);
 
+    /**
+     * @brief Export decoded surface for HIP interop
+     *
+     * @param pic_idx Picture index
+     * @param width Output width
+     * @param height Output height
+     * @param pitch Output pitch for each plane
+     * @param offset Output offset for each plane
+     * @param num_planes Output number of planes
+     * @param kmt_handle Output Windows KMT handle for HIP import
+     * @param mem_size Output total memory size
+     * @return rocDecStatus
+     */
+    rocDecStatus ExportSurface(int pic_idx,
+                               uint32_t& width,
+                               uint32_t& height,
+                               uint32_t pitch[3],
+                               uint32_t offset[3],
+                               uint32_t& num_planes,
+                               void*& kmt_handle,
+                               size_t& mem_size);
+
 private:
     // PAL platform and device (shared across all decoders)
     static Pal::IPlatform* GetPalPlatform();

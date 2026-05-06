@@ -329,7 +329,11 @@ if(DEPENDENCIES_MET)
   # Windows-specific: export all symbols for DLL and define platform macro
   if(IS_WINDOWS)
     set_target_properties(${PROJECT_NAME} PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON)
-    target_compile_definitions(${PROJECT_NAME} PRIVATE ROCDECODE_BUILD_WINDOWS=1)
+    target_compile_definitions(${PROJECT_NAME} PRIVATE
+      ROCDECODE_BUILD_WINDOWS=1
+      PAL_KMT_BUILD=1
+      PAL_CLOSED_SOURCE=1
+    )
 
     # Set static runtime library to match PAL (works for both MSVC and Clang)
     set_property(TARGET ${PROJECT_NAME} PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
