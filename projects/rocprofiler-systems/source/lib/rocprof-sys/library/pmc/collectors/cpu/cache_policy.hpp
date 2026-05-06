@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "core/categories.hpp"
 #include "core/config.hpp"
 #include "core/trace_cache/cache_manager.hpp"
 #include "core/trace_cache/metadata_registry.hpp"
@@ -38,11 +39,11 @@ struct cache_policy
 
     static void initialize_tracks_metadata()
     {
-        const auto thread_id = std::nullopt;
-
-        trace_cache::get_metadata_registry().add_track(
-            { "cpu_frequency", thread_id, "{}" });
-        trace_cache::get_metadata_registry().add_track({ "cpu_load", thread_id, "{}" });
+        // Per-cpu cpu_frequency and cpu_load tracks are registered in
+        // initialize_pmc_metadata once the per-socket monitored_cpus set is
+        // known. The sampler at rocpd_processor.cpp:633-655 emits the
+        // per-cpu format "<base> [<device_id>] Core [<cpu_id>]"; that is
+        // also what we register on the receiving side.
     }
 
     /**
@@ -50,7 +51,7 @@ struct cache_policy
      *
      * @param socket_id Socket (physical package) ID for agent registration.
      * @param monitored_cpus Set of CPU IDs being monitored on this socket.
-     * @param is_first_socket True if this is the first selected socket —
+     * @param is_first_socket True if this is the first selected socket;
      *        process-level metrics are registered only once, under this socket.
      */
     static void initialize_pmc_metadata(size_t                  socket_id,
@@ -65,55 +66,77 @@ struct cache_policy
         constexpr const char* EXPRESSION       = "";
         constexpr const char* TARGET_ARCH      = "CPU";
 
+        // Names registered here MUST match the names emitted by the sampler in
+        // rocpd_processor.cpp (lines 595-656). The sampler uses
+        // trait::name<category::*>::value; using those traits here keeps the
+        // two sites in sync. See AIPROFSYST-445.
+        using ::tim::trait::name;
+
+        const std::string freq_base = name<category::cpu_freq>::value;
+        const std::string load_base = name<category::cpu_load>::value;
+
         for(const auto cpu_id : monitored_cpus)
         {
-            const auto freq_name = fmt::format("cpu{}_frequency", cpu_id);
+            const auto freq_name =
+                fmt::format("{} [{}] Core [{}]", freq_base, socket_id, cpu_id);
             trace_cache::get_metadata_registry().add_pmc_info(
                 { agent_type::CPU, socket_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
                   freq_name.c_str(), freq_name.c_str(), "CPU Core Frequency",
                   LONG_DESCRIPTION, COMPONENT, "MHz", rocprofsys::trace_cache::ABSOLUTE,
                   BLOCK, EXPRESSION, 0, 0, "{}" });
+            trace_cache::get_metadata_registry().add_track(
+                { freq_name, std::nullopt, "{}" });
 
-            const auto load_name = fmt::format("cpu{}_load", cpu_id);
+            const auto load_name =
+                fmt::format("{} [{}] Core [{}]", load_base, socket_id, cpu_id);
             trace_cache::get_metadata_registry().add_pmc_info(
                 { agent_type::CPU, socket_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
                   load_name.c_str(), load_name.c_str(), "CPU Core Load Percentage",
                   LONG_DESCRIPTION, COMPONENT, trace_cache::PERCENTAGE,
                   rocprofsys::trace_cache::ABSOLUTE, BLOCK, EXPRESSION, 0, 0, "{}" });
+            trace_cache::get_metadata_registry().add_track(
+                { load_name, std::nullopt, "{}" });
         }
 
         // Process-level metrics are process-wide; register under first selected socket
         if(!is_first_socket) return;
 
-        trace_cache::get_metadata_registry().add_pmc_info(
-            { agent_type::CPU, socket_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
-              "process_page_rss", "Page RSS", "Process Physical Memory (RSS)",
-              LONG_DESCRIPTION, COMPONENT, "bytes", rocprofsys::trace_cache::ABSOLUTE,
-              BLOCK, EXPRESSION, 0, 0, "{}" });
+        auto add_process_pmc = [&](const char* metric_name, const char* symbol,
+                                   const char* description, const char* units,
+                                   const char* value_type) {
+            trace_cache::get_metadata_registry().add_pmc_info(
+                { agent_type::CPU, socket_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
+                  metric_name, symbol, description, LONG_DESCRIPTION, COMPONENT, units,
+                  value_type, BLOCK, EXPRESSION, 0, 0, "{}" });
+            trace_cache::get_metadata_registry().add_track(
+                { metric_name, std::nullopt, "{}" });
+        };
 
-        trace_cache::get_metadata_registry().add_pmc_info(
-            { agent_type::CPU, socket_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
-              "process_virt_mem", "Virt Mem", "Process Virtual Memory", LONG_DESCRIPTION,
-              COMPONENT, "bytes", rocprofsys::trace_cache::ABSOLUTE, BLOCK, EXPRESSION, 0,
-              0, "{}" });
+        add_process_pmc(name<category::process_page>::value, "Page RSS",
+                        "Process Physical Memory (RSS)", "MB",
+                        rocprofsys::trace_cache::ABSOLUTE);
 
-        trace_cache::get_metadata_registry().add_pmc_info(
-            { agent_type::CPU, socket_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
-              "process_peak_rss", "Peak RSS", "Process Peak Memory (HWM)",
-              LONG_DESCRIPTION, COMPONENT, "bytes", rocprofsys::trace_cache::ABSOLUTE,
-              BLOCK, EXPRESSION, 0, 0, "{}" });
+        add_process_pmc(name<category::process_virt>::value, "Virt Mem",
+                        "Process Virtual Memory", "MB",
+                        rocprofsys::trace_cache::ABSOLUTE);
 
-        trace_cache::get_metadata_registry().add_pmc_info(
-            { agent_type::CPU, socket_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
-              "process_ctx_switches", "Ctx Switches", "Context Switches",
-              LONG_DESCRIPTION, COMPONENT, "count", rocprofsys::trace_cache::ABSOLUTE,
-              BLOCK, EXPRESSION, 0, 0, "{}" });
+        add_process_pmc(name<category::process_peak>::value, "Peak RSS",
+                        "Process Peak Memory (HWM)", "MB",
+                        rocprofsys::trace_cache::ABSOLUTE);
 
-        trace_cache::get_metadata_registry().add_pmc_info(
-            { agent_type::CPU, socket_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
-              "process_page_faults", "Page Faults", "Page Faults", LONG_DESCRIPTION,
-              COMPONENT, "count", rocprofsys::trace_cache::ABSOLUTE, BLOCK, EXPRESSION, 0,
-              0, "{}" });
+        add_process_pmc(name<category::process_context_switch>::value, "Ctx Switches",
+                        "Context Switches", "count", rocprofsys::trace_cache::ABSOLUTE);
+
+        add_process_pmc(name<category::process_page_fault>::value, "Page Faults",
+                        "Page Faults", "count", rocprofsys::trace_cache::ABSOLUTE);
+
+        add_process_pmc(name<category::process_user_mode_time>::value, "User Time",
+                        "Process CPU Time in User Mode", "sec",
+                        rocprofsys::trace_cache::ABSOLUTE);
+
+        add_process_pmc(name<category::process_kernel_mode_time>::value, "Kernel Time",
+                        "Process CPU Time in Kernel Mode", "sec",
+                        rocprofsys::trace_cache::ABSOLUTE);
     }
 
     /**
