@@ -1091,7 +1091,7 @@ static ncclResult_t IbCastReceiverQpsCreateToRts(ncclIbRecvComm* rComm, struct n
     qpCreateAttrs.pd = rCommDev->base.pd;
     qpCreateAttrs.qpContext = &rComm->base.stats;
 
-    qpCreateAttrs.ctsQpSlot = NCCL_CTS_QP_SLOT_INVALID;
+    qpCreateAttrs.ctsQpSlot = qpIndex;
     qpCreateAttrs.isCtsEnabled = rComm->useCtsOffload;
     qpCreateAttrs.isDataQp = false;
     qpCreateAttrs.channelId = channelId;

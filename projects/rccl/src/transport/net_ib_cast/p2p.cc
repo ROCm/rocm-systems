@@ -179,7 +179,7 @@ ncclResult_t IbCastMultiSend(struct ncclIbSendComm* comm, int slot, int nqps, in
   ncclIbQp* qp = NULL;
   const int align = 128;
   for (int i = 0; i < nqps; i++) {
-    NCCLCHECK(IbCastCommBaseGetQpForRequest(&comm->base, startQpIndex, wrrSched ? 0 : i, &qp, &qpIndex));
+    NCCLCHECK(IbCastCommBaseGetQpForRequest(&comm->base, startQpIndex, i, &qp, &qpIndex));
 
     TRACE(NCCL_NET, "NET/IB: %s: Posting send (req=%p, comm=%p, id=%ld, slot=%d, nreqs=%d, wr_id=%ld) on QP (qp_num=%u, devIndex=%d, qpIndex=%d)", __func__, reqs[0], reqs[0]->base, reqs[0]->id, slot, nreqs, wr_id, qp->qp->qp_num, qp->devIndex, qpIndex);
 
@@ -543,28 +543,32 @@ ncclResult_t IbCastIrecv(void* recvComm, int n, void** data, size_t* sizes, int*
 
   struct ncclIbRequest* req = NULL;
   int slot = comm->base.fifoHead % NET_IB_MAX_REQUESTS;
+
+  NCCLCHECK(IbCastGetRequest(&comm->base, &req));
+  rxReqIndex = (uint16_t) (req - comm->base.reqs);
+  req->id = comm->base.fifoHead;
+  req->type = NCCL_NET_IB_REQ_RECV;
+  req->sock = &comm->base.sock;
+  req->nreqs = n;
+  for (int devIndex = 0; devIndex < comm->base.vProps.ndevs; devIndex++) {
+    req->devBases[devIndex] = IbCastGetNetCommDevBase(&comm->base, devIndex);
+  }
+
+  TRACE(NCCL_NET, "NET/IB: %s: Recv request created (req=%p, comm=%p, id=%ld, slot=%d, nreqs=%d, tag[0]=%x)", __func__, req, req->base, req->id, slot, n, tags[0]);
+
+#ifdef NCCL_ENABLE_NET_PROFILING
+  for (int r = 0; r < n && phandles; r++) req->pInfo[r].nEventHandles = 0;
+#endif
+
+  // Store the request in a table for easy retrieval by ID.
+  comm->recvReqs[slot] = req;
+
+  req->recv.aggSize = 0;
+  req->recv.cmplsRecords = &comm->cmplsRecords[slot];
+  memset(req->recv.cmplsRecords->sizes, 0, sizeof(int)*n);
+  memset(req->recv.cmplsRecords->completions, 0, sizeof(req->recv.cmplsRecords->completions));
+
   if (!netOptRecvCompletionEnabled) {
-    NCCLCHECK(IbCastGetRequest(&comm->base, &req));
-    rxReqIndex = (uint16_t) (req - comm->base.reqs);
-    req->id = comm->base.fifoHead;
-    req->type = NCCL_NET_IB_REQ_RECV;
-    req->sock = &comm->base.sock;
-    req->nreqs = n;
-    if (comm->base.resiliency) {
-      // When resiliency is enabled, a recv request can be served by any device.
-      for (int devIndex = 0; devIndex < comm->base.vProps.ndevs; devIndex++) {
-        req->devBases[devIndex] = IbCastGetNetCommDevBase(&comm->base, devIndex);
-      }
-    }
-    TRACE(NCCL_NET, "NET/IB: %s: Recv request created (req=%p, comm=%p, id=%ld, slot=%d, nreqs=%d, tag[0]=%x)", __func__, req, req->base, req->id, slot, n, tags[0]);
-
-  #ifdef NCCL_ENABLE_NET_PROFILING
-    for (int r = 0; r < n && phandles; r++) req->pInfo[r].nEventHandles = 0;
-  #endif
-
-    // Store the request in a table for easy retrieval by ID.
-    comm->recvReqs[req->id % NET_IB_MAX_REQUESTS] = req;
-
     TIME_START(1);
     const int nqps = IbCastCommBaseGetNqpsPerRequest(&comm->base);
     int qpIndex = -1;
@@ -599,11 +603,6 @@ ncclResult_t IbCastIrecv(void* recvComm, int n, void** data, size_t* sizes, int*
   #endif
     }
     TIME_STOP(1);
-
-    req->recv.aggSize = 0;
-    req->recv.cmplsRecords = &comm->cmplsRecords[slot];
-    memset(req->recv.cmplsRecords->sizes, 0, sizeof(int)*n);
-    memset(req->recv.cmplsRecords->completions, 0, sizeof(req->recv.cmplsRecords->completions));
   }
 
   struct ncclIbSendFifo* localElem = comm->remCtsFifo.elems[slot];
@@ -864,6 +863,7 @@ static inline ncclResult_t IbCastCompletionEventProcess(struct ncclIbNetCommBase
       }
       TRACE(NCCL_NET, "NET/IB: %s: Got completion for a recv request (req=%p, comm=%p, id=%ld, devIndex=%d, qp_num=%u)", __func__, req, req->base, req->id, devIndex, wc->qp_num);
       struct ncclIbRecvComm* recvComm = (struct ncclIbRecvComm*)commBase;
+      commBase->rxPosts[wc->wr_id]--;
       if (recvComm->prepostReceiveWorkRequests) {
         // Post another receive work request on the QP
         ncclIbQp* qp = NULL;
