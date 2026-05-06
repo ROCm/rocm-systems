@@ -725,6 +725,8 @@ void aggregateForTypeAndOp(AggregationType aggType)
       const T* input = &h_input.host_ptr()[numAggregation * wavefrontSize];
       unsigned long long mask = ~0ull;
       Op op {};
+      std::string opName = opToString<T, Op>();
+      int resultLane;
 
       if constexpr (TileSize > 0) {
         mask >>= (64 - TileSize);
@@ -734,23 +736,22 @@ void aggregateForTypeAndOp(AggregationType aggType)
       mask &= h_extraMasks.host_ptr()[numAggregation];
       lastLane = 64 - __builtin_clzll(mask) - 1;
       calculateExpected(expected, input, op, mask, aggType);
+      resultLane = (aggType == AggregationType::Reduce)? lastLane : laneId;
 
       if constexpr (std::is_integral<T>::value) {
         // for integral types the result should match exactly
         if ((1ull << laneId) & mask) {
-          int resultLane = (aggType == AggregationType::Reduce)? lastLane : laneId;
           // for reduce, the result would be in the last lane whose first bit is on in the mask
           // for scans, the associated result is different in each lane
           if (result != expected[resultLane]) {
-            std::string opName = opToString<T, Op>();
-
             printMismatch(result, expected[resultLane], input, mask);
             INFO("Operator: " << opName << " mask: 0x" << std::hex << mask);
             REQUIRE(result == expected[resultLane]);
           }
         }
       } else {
-        compareFloatingPoint(result, expected[laneId], mask, h_input.host_ptr());
+        INFO("Operator: " << opName << " mask: 0x" << std::hex << mask);
+        compareFloatingPoint(result, expected[resultLane], mask, h_input.host_ptr());
       }
     }
 
