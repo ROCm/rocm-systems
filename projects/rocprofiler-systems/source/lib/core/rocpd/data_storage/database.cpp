@@ -4,6 +4,7 @@
 #include "database.hpp"
 #include "common/md5sum.hpp"
 #include "node_info.hpp"
+#include <cstdint>
 
 #include "logger/debug.hpp"
 
@@ -115,7 +116,7 @@ using rocpd_sql_load_schema_cb_v1_t = void (*)(rocpd_sql_engine_t,
 using rocpd_sql_load_schema_fn_v1_t =
     rocpd_status_t (*)(rocpd_sql_engine_t, rocpd_sql_schema_kind_t, rocpd_sql_options_t,
                        const rocpd_sql_schema_jinja_variables_t*,
-                       rocpd_sql_load_schema_cb_v1_t, const char**, uint64_t, void*);
+                       rocpd_sql_load_schema_cb_v1_t, const char**, std::uint64_t, void*);
 #    endif
 
 // Legacy API (< 1.3.0): callback does not have schema_version parameter
@@ -143,9 +144,9 @@ std::string
 get_schema_query(rocpd_sql_schema_kind_t schema_kind, const std::string& upid)
 {
 #if defined(ROCPROFSYS_USE_ROCPD_LIBRARY) && ROCPROFSYS_USE_ROCPD_LIBRARY > 0
-    uint32_t rt_major = 0, rt_minor = 0, rt_patch = 0;
+    std::uint32_t rt_major = 0, rt_minor = 0, rt_patch = 0;
     rocpd_get_version(&rt_major, &rt_minor, &rt_patch);
-    const uint32_t runtime_version =
+    const std::uint32_t runtime_version =
         ROCPD_VERSION_TRIPLET_TO_INT(rt_major, rt_minor, rt_patch);
 
     if(runtime_version != ROCPROFSYS_ROCPD_COMPILE_VERSION)
