@@ -70,23 +70,23 @@ union enabled_metrics
 {
     struct
     {
-        uint32_t rx_rdma_ucast_bytes     : 1;
-        uint32_t tx_rdma_ucast_bytes     : 1;
-        uint32_t rx_rdma_ucast_pkts      : 1;
-        uint32_t tx_rdma_ucast_pkts      : 1;
-        uint32_t rx_rdma_cnp_pkts        : 1;
-        uint32_t tx_rdma_cnp_pkts        : 1;
-        uint32_t tx_rdma_ack_timeout     : 1;
-        uint32_t resp_tx_pkt_seq_err     : 1;
-        uint32_t req_rx_pkt_seq_err      : 1;
-        uint32_t req_rx_impl_nak_seq_err : 1;
+        std::uint32_t rx_rdma_ucast_bytes     : 1;
+        std::uint32_t tx_rdma_ucast_bytes     : 1;
+        std::uint32_t rx_rdma_ucast_pkts      : 1;
+        std::uint32_t tx_rdma_ucast_pkts      : 1;
+        std::uint32_t rx_rdma_cnp_pkts        : 1;
+        std::uint32_t tx_rdma_cnp_pkts        : 1;
+        std::uint32_t tx_rdma_ack_timeout     : 1;
+        std::uint32_t resp_tx_pkt_seq_err     : 1;
+        std::uint32_t req_rx_pkt_seq_err      : 1;
+        std::uint32_t req_rx_impl_nak_seq_err : 1;
 
     } bits;
     uint32_t value = 0;
 };
 
 /// All 10 NIC RDMA metrics enabled (bits 0-9)
-static constexpr uint32_t ALL_NIC_METRICS = 0x3FF;
+static constexpr std::uint32_t ALL_NIC_METRICS = 0x3FF;
 
 /**
  * @brief Container for NIC RDMA metrics.
@@ -96,16 +96,16 @@ static constexpr uint32_t ALL_NIC_METRICS = 0x3FF;
  */
 struct metrics
 {
-    uint64_t rx_rdma_ucast_bytes     = 0;
-    uint64_t tx_rdma_ucast_bytes     = 0;
-    uint64_t rx_rdma_ucast_pkts      = 0;
-    uint64_t tx_rdma_ucast_pkts      = 0;
-    uint64_t rx_rdma_cnp_pkts        = 0;
-    uint64_t tx_rdma_cnp_pkts        = 0;
-    uint64_t tx_rdma_ack_timeout     = 0;
-    uint64_t resp_tx_pkt_seq_err     = 0;
-    uint64_t req_rx_pkt_seq_err      = 0;
-    uint64_t req_rx_impl_nak_seq_err = 0;
+    std::uint64_t rx_rdma_ucast_bytes     = 0;
+    std::uint64_t tx_rdma_ucast_bytes     = 0;
+    std::uint64_t rx_rdma_ucast_pkts      = 0;
+    std::uint64_t tx_rdma_ucast_pkts      = 0;
+    std::uint64_t rx_rdma_cnp_pkts        = 0;
+    std::uint64_t tx_rdma_cnp_pkts        = 0;
+    std::uint64_t tx_rdma_ack_timeout     = 0;
+    std::uint64_t resp_tx_pkt_seq_err     = 0;
+    std::uint64_t req_rx_pkt_seq_err      = 0;
+    std::uint64_t req_rx_impl_nak_seq_err = 0;
 };
 
 }  // namespace nic
