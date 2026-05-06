@@ -222,7 +222,7 @@ typedef void (*rocprofiler_spm_dispatch_counting_record_cb_t)(
     rocprofiler_spm_record_flag_t                           flags,
     rocprofiler_user_data_t                                 userdata,
     void*                                                   record_callback_args);
-    
+
 /**
  * @brief (experimental) Kernel Dispatch Callback. This is a callback that is invoked before the
  * kernel is enqueued into the HSA queue. What counters to collect for a kernel are set via passing
