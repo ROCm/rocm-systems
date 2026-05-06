@@ -1,4 +1,4 @@
-# Local markdownlint config — mirrors ROCm/rocm-docs-core develop/.markdownlint.yaml
+# Based on rocm-docs-core; kept local for stability
 default: true
 MD013: false
 MD024:
