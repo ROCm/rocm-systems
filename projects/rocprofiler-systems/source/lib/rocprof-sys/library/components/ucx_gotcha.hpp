@@ -47,25 +47,25 @@ struct ucx_gotcha : tim::component::base<ucx_gotcha, void>
     }
 
 public:
-    // Specific audit functions for tag operations (with uint64_t tags)
-    // ucp_tag_send_nbx: (void* ep, const void* buffer, size_t count, uint64_t tag, const
-    // void* param)
+    // Specific audit functions for tag operations (with std::uint64_t tags)
+    // ucp_tag_send_nbx: (void* ep, const void* buffer, size_t count, std::uint64_t tag,
+    // const void* param)
     static void audit(const gotcha_data&, audit::incoming, void*, const void*, size_t,
-                      uint64_t, const void*);
-    // ucp_tag_recv_nbx: (void* worker, void* buffer, size_t count, uint64_t tag, uint64_t
-    // tag_mask, const void* param)
-    static void audit(const gotcha_data&, audit::incoming, void*, void*, size_t, uint64_t,
-                      uint64_t, const void*);
+                      std::uint64_t, const void*);
+    // ucp_tag_recv_nbx: (void* worker, void* buffer, size_t count, std::uint64_t tag,
+    // std::uint64_t tag_mask, const void* param)
+    static void audit(const gotcha_data&, audit::incoming, void*, void*, size_t,
+                      std::uint64_t, std::uint64_t, const void*);
 
     // RMA operations
-    // ucp_put_nbx: (void* ep, const void* buffer, size_t count, uint64_t remote_addr,
-    // void* rkey, const void* param)
+    // ucp_put_nbx: (void* ep, const void* buffer, size_t count, std::uint64_t
+    // remote_addr, void* rkey, const void* param)
     static void audit(const gotcha_data&, audit::incoming, void*, const void*, size_t,
-                      uint64_t, void*, const void*);
-    // ucp_get_nbx: (void* ep, void* buffer, size_t count, uint64_t remote_addr, void*
-    // rkey, const void* param)
-    static void audit(const gotcha_data&, audit::incoming, void*, void*, size_t, uint64_t,
-                      void*, const void*);
+                      std::uint64_t, void*, const void*);
+    // ucp_get_nbx: (void* ep, void* buffer, size_t count, std::uint64_t remote_addr,
+    // void* rkey, const void* param)
+    static void audit(const gotcha_data&, audit::incoming, void*, void*, size_t,
+                      std::uint64_t, void*, const void*);
 
     // Active message send
     // ucp_am_send_nbx: (void* ep, unsigned id, const void* header, size_t header_length,

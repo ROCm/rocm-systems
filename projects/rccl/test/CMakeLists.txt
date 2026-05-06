@@ -273,6 +273,7 @@ if(BUILD_TESTS)
       transport/ShmMPITests.cpp
       transport/NetIbMPI/GeneralTests.cpp
       transport/NetIbMPI/NicFusionTests.cpp
+      transport/NetIbMPI/CastTests.cpp
       ImplicitLaunchOrderMPITests.cpp
       CommMPITests.cpp
       RegistrationMPITests.cpp

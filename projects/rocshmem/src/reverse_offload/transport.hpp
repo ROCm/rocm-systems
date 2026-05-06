@@ -41,7 +41,7 @@ class Transport {
  public:
   virtual ~Transport() = default;
 
-  virtual void initTransport(int num_queues, BackendProxyT *proxy) = 0;
+  virtual void initTransport(int num_queues, BackendProxy *proxy) = 0;
 
   virtual void finalizeTransport() = 0;
 
