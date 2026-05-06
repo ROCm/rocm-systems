@@ -452,25 +452,27 @@ rocpd_processor_t::handle([[maybe_unused]] const gpu_pmc_sample& _gpu_pmc)
                   info::format_track_name<category::amd_smi_xgmi_link_speed>(),
                   enabled.bits.xgmi, m.xgmi.link.speed);
 
-    // XGMI data accumulators (per-link arrays)
-    auto insert_xgmi_link_metrics = [&](const std::string& base_track_name,
-                                        bool is_enabled, const auto& arr) {
+    // XGMI data accumulators (per-link arrays). Use format_track_name so the
+    // emitted PMC name and track name match what cache_policy registered:
+    // "device_xgmi_(read|write)_data_<N>".
+    auto insert_xgmi_link_metrics = [&](auto category_tag, bool is_enabled,
+                                        const auto& arr) {
+        using category_t = decltype(category_tag);
         if(!is_enabled) return;
         for(size_t i = 0; i < arr.size(); ++i)
         {
             if(arr[i] == pmc::collectors::gpu::METRIC_VALUE_NOT_SUPPORTED_64) continue;
 
-            std::string pmc_name = base_track_name + "_link" + std::to_string(i);
-            std::string track_name =
-                base_track_name + " [Link " + std::to_string(i) + "]";
-            insert_metric(true, pmc_name.c_str(), track_name.c_str(), arr[i]);
+            auto name =
+                info::format_track_name<category_t>(std::nullopt, static_cast<int>(i));
+            insert_metric(true, name.c_str(), name.c_str(), arr[i]);
         }
     };
 
-    insert_xgmi_link_metrics(trait::name<category::amd_smi_xgmi_read_data>::value,
-                             enabled.bits.xgmi, m.xgmi.data_acc.read);
-    insert_xgmi_link_metrics(trait::name<category::amd_smi_xgmi_write_data>::value,
-                             enabled.bits.xgmi, m.xgmi.data_acc.write);
+    insert_xgmi_link_metrics(category::amd_smi_xgmi_read_data{}, enabled.bits.xgmi,
+                             m.xgmi.data_acc.read);
+    insert_xgmi_link_metrics(category::amd_smi_xgmi_write_data{}, enabled.bits.xgmi,
+                             m.xgmi.data_acc.write);
 }
 
 void

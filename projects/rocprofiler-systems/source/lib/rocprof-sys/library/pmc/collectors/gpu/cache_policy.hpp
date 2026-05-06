@@ -274,19 +274,28 @@ struct cache_policy
               LONG_DESCRIPTION, COMPONENT, "Mbps", rocprofsys::trace_cache::ABSOLUTE,
               BLOCK, EXPRESSION, 0, 0, "{}" });
 
-        trace_cache::get_metadata_registry().add_pmc_info(
-            { agent_type::GPU, gpu_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
-              trait::name<category::amd_smi_xgmi_read_data>::value, "XGMI Read",
-              trait::name<category::amd_smi_xgmi_read_data>::description,
-              LONG_DESCRIPTION, COMPONENT, "KB", rocprofsys::trace_cache::ABSOLUTE, BLOCK,
-              EXPRESSION, 0, 0, "{}" });
+        for(size_t link = 0; link < MAX_NUM_XGMI_LINKS; ++link)
+        {
+            auto read_name =
+                trace_cache::info::format_track_name<category::amd_smi_xgmi_read_data>(
+                    std::nullopt, static_cast<int>(link));
+            trace_cache::get_metadata_registry().add_pmc_info(
+                { agent_type::GPU, gpu_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
+                  read_name, "XGMI Read",
+                  trait::name<category::amd_smi_xgmi_read_data>::description,
+                  LONG_DESCRIPTION, COMPONENT, "KB", rocprofsys::trace_cache::ABSOLUTE,
+                  BLOCK, EXPRESSION, 0, 0, "{}" });
 
-        trace_cache::get_metadata_registry().add_pmc_info(
-            { agent_type::GPU, gpu_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
-              trait::name<category::amd_smi_xgmi_write_data>::value, "XGMI Write",
-              trait::name<category::amd_smi_xgmi_write_data>::description,
-              LONG_DESCRIPTION, COMPONENT, "KB", rocprofsys::trace_cache::ABSOLUTE, BLOCK,
-              EXPRESSION, 0, 0, "{}" });
+            auto write_name =
+                trace_cache::info::format_track_name<category::amd_smi_xgmi_write_data>(
+                    std::nullopt, static_cast<int>(link));
+            trace_cache::get_metadata_registry().add_pmc_info(
+                { agent_type::GPU, gpu_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
+                  write_name, "XGMI Write",
+                  trait::name<category::amd_smi_xgmi_write_data>::description,
+                  LONG_DESCRIPTION, COMPONENT, "KB", rocprofsys::trace_cache::ABSOLUTE,
+                  BLOCK, EXPRESSION, 0, 0, "{}" });
+        }
 
         trace_cache::get_metadata_registry().add_pmc_info(
             { agent_type::GPU, gpu_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
