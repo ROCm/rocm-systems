@@ -57,3 +57,19 @@ GL2 Cache bandwidth
 
       .. jinja:: rdna1151-gl2-cache-bandwidth-gfx1151
          :file: _templates/metrics_table.j2
+
+Memory chart: GL2 cache
+=======================
+
+The following Memory Chart table aligns with the on-screen flow through GL2.
+
+Memory chart - GL2 cache
+------------------------
+
+.. tab-set::
+
+   .. tab-item:: RDNA 3.5 (gfx1151)
+      :selected:
+
+      .. jinja:: rdna1151-memory-chart-gl2-cache-gfx1151
+         :file: _templates/metrics_table.j2

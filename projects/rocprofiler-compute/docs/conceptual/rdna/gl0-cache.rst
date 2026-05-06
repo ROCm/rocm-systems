@@ -15,7 +15,7 @@ The handoff toward GL2 cache is under :doc:`gl2-cache`.
 
 .. note::
 
-   GL0 is the same as TCP on the RDNA3.5 architecture. Hardware counter names
+   On RDNA3.5, GL0 and TCP refer to the same cache. Hardware counter names
    (for example, ``TCP_REQ_sum``) retain the TCP prefix.
 
 GL0 cache panels

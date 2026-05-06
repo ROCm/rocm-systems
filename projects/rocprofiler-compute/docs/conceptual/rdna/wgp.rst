@@ -1,5 +1,5 @@
 .. meta::
-   :description: ROCm Compute Profiler — RDNA3.5 WGP / roofline metrics
+   :description: ROCm Compute Profiler - RDNA3.5 WGP / roofline metrics
    :keywords: ROCm Compute Profiler, RDNA, gfx1151, WGP, roofline
 
 .. _rdna-wgp:
@@ -15,7 +15,7 @@ The sections below list RDNA3.5 (gfx1151) metric descriptions.
 
 .. Note::
    AMD Instinct (CDNA) GPUs use a different execution hierarchy and panel grouping.
-   For Instinct-only pipeline metrics (for example, VALU / VMEM / MFMA-style tables), see :doc:`../cdna/cdna-performance-model`—without assuming RDNA WGPs or CUs map directly to those layouts.
+   For Instinct-only pipeline metrics (for example, VALU / VMEM / MFMA-style tables), see :doc:`../cdna/cdna-performance-model`-without assuming RDNA WGPs or CUs map directly to those layouts.
 
 Roofline
 ========

@@ -1,5 +1,5 @@
 .. meta::
-   :description: ROCm Compute Profiler — RDNA3.5 shader engine overview and navigation
+   :description: ROCm Compute Profiler - RDNA3.5 shader engine overview and navigation
    :keywords: ROCm Compute Profiler, RDNA, gfx1151, shader engine
 
 .. _rdna-shader-engine:
@@ -15,13 +15,13 @@ Each WGP maps to **two Compute Units (CUs)** that share execution resources and 
 
 Follow the nested chapters under **Shader engine** in the navigation for gfx1151 metric tables:
 
-* :doc:`spi` — SPI / Workgroup Manager: utilization and wave dispatch statistics that sit between the command processor and WGP execution.
+* :doc:`spi` - SPI / Workgroup Manager: utilization and wave dispatch statistics that sit between the command processor and WGP execution.
 
-* :doc:`wgp` — Workgroup Processor: occupancy, waves, instruction mix, and WGP-local instruction/data caches at CU pair granularity.
+* :doc:`wgp` - Workgroup Processor: occupancy, waves, instruction mix, and WGP-local instruction/data caches at CU pair granularity.
 
-* :doc:`gl0-cache` — GL0 (TCP vector cache): panels from GL0 utilization through the TCP–GL1 boundary.
+* :doc:`gl0-cache` - GL0 (TCP vector cache): panels from GL0 utilization through the TCP-GL1 boundary.
 
-* :doc:`gl1-cache` — GL1 Cache: utilization, requests, cache performance, and the GL1–GL2 interface.
+* :doc:`gl1-cache` - GL1 Cache: utilization, requests, cache performance, and the GL1-GL2 interface.
 
 GPU-wide and per-SE utilization summarized through GRBM is documented separately; see :doc:`grbm`.
 

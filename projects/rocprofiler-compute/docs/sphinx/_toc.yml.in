@@ -52,7 +52,7 @@ subtrees:
         - file: conceptual/cdna/shader-engine.rst
           title: Shader engine
         - file: conceptual/cdna/command-processor.rst
-          title: Command processor
+          title: Command processor (CP)
         - file: conceptual/cdna/references.rst
       - file: conceptual/rdna/rdna-performance-model.rst
         title: RDNA3
@@ -65,7 +65,7 @@ subtrees:
           - file: conceptual/rdna/spi.rst
             title: Workgroup Manager (SPI)
           - file: conceptual/rdna/wgp.rst
-            title: Workgroup Processor (WGP)
+            title: Workgroup processor (WGP)
           - file: conceptual/rdna/gl0-cache.rst
             title: GL0 (TCP Vector Cache)
           - file: conceptual/rdna/gl1-cache.rst
@@ -75,7 +75,7 @@ subtrees:
         - file: conceptual/rdna/gcea.rst
           title: GCEA
         - file: conceptual/rdna/command-processor.rst
-          title: Command processor
+          title: Command processor (CP)
         - file: conceptual/rdna/grbm.rst
           title: Graphics Register Bus Manager (GRBM)
         - file: conceptual/rdna/references.rst

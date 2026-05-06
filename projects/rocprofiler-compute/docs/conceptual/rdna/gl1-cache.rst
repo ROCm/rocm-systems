@@ -74,3 +74,31 @@ GL1 Cache stalls
 
       .. jinja:: rdna1151-gl1-cache-stalls-gfx1151
          :file: _templates/metrics_table.j2
+
+Memory chart: GL1 cache and GL1-GL2 interface
+=============================================
+
+The following Memory Chart tables align with the on-screen flow through GL1
+and the GL1-GL2 interface.
+
+Memory chart - GL1 cache
+------------------------
+
+.. tab-set::
+
+   .. tab-item:: RDNA 3.5 (gfx1151)
+      :selected:
+
+      .. jinja:: rdna1151-memory-chart-gl1-cache-gfx1151
+         :file: _templates/metrics_table.j2
+
+Memory chart - GL1-GL2 interface
+--------------------------------
+
+.. tab-set::
+
+   .. tab-item:: RDNA 3.5 (gfx1151)
+      :selected:
+
+      .. jinja:: rdna1151-memory-chart-gl1-gl2-interface-gfx1151
+         :file: _templates/metrics_table.j2

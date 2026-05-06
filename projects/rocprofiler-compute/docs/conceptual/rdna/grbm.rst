@@ -1,5 +1,5 @@
 .. meta::
-   :description: ROCm Compute Profiler — RDNA3.5 GRBM GPU and shader-engine utilization
+   :description: ROCm Compute Profiler - RDNA3.5 GRBM GPU and shader-engine utilization
    :keywords: ROCm Compute Profiler, RDNA, gfx1151, GRBM
 
 .. _rdna-grbm:

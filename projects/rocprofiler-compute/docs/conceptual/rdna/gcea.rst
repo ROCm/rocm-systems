@@ -1,5 +1,5 @@
 .. meta::
-   :description: ROCm Compute Profiler — RDNA3.5 GCEA and DRAM interface metrics (gfx1151)
+   :description: ROCm Compute Profiler - RDNA3.5 GCEA and DRAM interface metrics (gfx1151)
    :keywords: ROCm Compute Profiler, RDNA, gfx1151, GCEA, DRAM
 
 .. _rdna-gcea:
@@ -61,4 +61,21 @@ Return interface
       :selected:
 
       .. jinja:: rdna1151-return-interface-gfx1151
+         :file: _templates/metrics_table.j2
+
+Memory chart: GCEA to system memory
+===================================
+
+The following Memory Chart table aligns with the on-screen flow from GCEA out
+to system memory.
+
+Memory chart - GCEA to system memory
+------------------------------------
+
+.. tab-set::
+
+   .. tab-item:: RDNA 3.5 (gfx1151)
+      :selected:
+
+      .. jinja:: rdna1151-memory-chart-gcea-to-system-memory-gfx1151
          :file: _templates/metrics_table.j2

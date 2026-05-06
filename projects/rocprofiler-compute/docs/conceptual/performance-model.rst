@@ -13,7 +13,7 @@ supported analysis configurations.
 Use the following pages for architecture-specific naming, panel layout, and conceptual
 overview:
 
-* **Instinct (CDNA)** — :doc:`AMD CDNA architecture (CDNA-CDNA4) <cdna/cdna-performance-model>`:
+* **Instinct (CDNA)** - :doc:`AMD CDNA architecture (CDNA-CDNA4) <cdna/cdna-performance-model>`:
   Architecture and data-type tables, top-level CDNA block diagrams, MI-series terminology,
   and chapters for:
   * :doc:`cdna/system-speed-of-light`
@@ -28,7 +28,7 @@ overview:
 
   * :doc:`cdna/references`
 
-* **Ryzen APU (RDNA)** — :doc:`RDNA3 <rdna/rdna-performance-model>`: Architecture, top-level RDNA3 block diagram, gfx1151 panels, and chapters for:
+* **Ryzen APU (RDNA)** - :doc:`RDNA3 <rdna/rdna-performance-model>`: Architecture, top-level RDNA3 block diagram, gfx1151 panels, and chapters for:
   * :doc:`rdna/system-speed-of-light`
 
   * :doc:`rdna/shader-engine` (overview)
