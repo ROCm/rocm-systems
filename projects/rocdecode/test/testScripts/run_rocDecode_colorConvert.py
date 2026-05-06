@@ -24,7 +24,6 @@ import os
 import subprocess
 import sys
 import json
-import tempfile
 
 __license__ = "MIT"
 __version__ = "1.0"
@@ -38,6 +37,7 @@ COLOR_STANDARDS = {
     "bt601":     "smpte170m",
     "smpte240m": "smpte240m",
     "bt2020":    "bt2020ncl",
+    "bt2020c":   "bt2020cl",
 }
 
 def get_video_info(input_file):
@@ -54,9 +54,15 @@ def get_video_info(input_file):
     stream = info["streams"][0]
     width = int(stream["width"])
     height = int(stream["height"])
-    nb_frames = int(stream.get("nb_frames", 0))
+    try:
+        nb_frames = int(stream.get("nb_frames", 0))
+    except (ValueError, TypeError):
+        nb_frames = 0
     # Determine bit depth: check bits_per_raw_sample first, then infer from pix_fmt
-    bit_depth = int(stream.get("bits_per_raw_sample", 0))
+    try:
+        bit_depth = int(stream.get("bits_per_raw_sample", 0))
+    except (ValueError, TypeError):
+        bit_depth = 0
     if bit_depth == 0:
         pix_fmt = stream.get("pix_fmt", "")
         if "10" in pix_fmt:
@@ -69,10 +75,18 @@ def get_video_info(input_file):
 
 def run_rocdecode(exe_path, input_file, output_file, color_standard, num_frames, device_id):
     """Run videodecodergb to produce raw RGB output."""
-    cmd = f"{exe_path} -i {input_file} -of rgb -o {output_file} -cs {color_standard} -f {num_frames} -d {device_id}"
-    print(f"  rocDecode cmd: {cmd}")
-    ret = os.system(cmd)
-    return ret == 0
+    cmd = [
+        exe_path,
+        "-i", input_file,
+        "-of", "rgb",
+        "-o", output_file,
+        "-cs", color_standard,
+        "-f", str(num_frames),
+        "-d", str(device_id)
+    ]
+    print(f"  rocDecode cmd: {' '.join(cmd)}")
+    result = subprocess.run(cmd, check=False)
+    return result.returncode == 0
 
 def run_ffmpeg(input_file, output_file, ffmpeg_matrix, num_frames):
     """Run FFmpeg to produce raw RGB output with matching colorspace."""

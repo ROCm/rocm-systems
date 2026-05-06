@@ -343,6 +343,15 @@ int main(int argc, char **argv) {
                 std::cerr << "Error: Failed to get Output Image Info!" << std::endl;
                 break;
             }
+            if (!n_frame && convert_to_rgb) {
+                bool is_bt2020 = (col_standard == ColorSpaceStandard_BT2020 || col_standard == ColorSpaceStandard_BT2020C);
+                if (is_bt2020 && surf_info->bit_depth <= 8) {
+                    std::cerr << "Warning: BT.2020 color standard is intended for 10-bit content but input is " << surf_info->bit_depth << "-bit." << std::endl;
+                } else if (!is_bt2020 && surf_info->bit_depth > 8) {
+                    std::cerr << "Warning: " << st_color_standard_name[std::find(st_color_standard_value.begin(), st_color_standard_value.end(), col_standard) - st_color_standard_value.begin()]
+                              << " color standard uses 8-bit range but input is " << surf_info->bit_depth << "-bit." << std::endl;
+                }
+            }
             if (resize_dim.w && resize_dim.h && !resize_surf_info) {
                 resize_surf_info = new OutputSurfaceInfo;
                 memcpy(resize_surf_info, surf_info, sizeof(OutputSurfaceInfo));

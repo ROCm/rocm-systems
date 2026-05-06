@@ -67,25 +67,35 @@ Given a YUV pixel with studio-range values, the conversion to full-range RGB is:
 ```
 Kg = 1 - Kr - Kb
 
-fy = Y  - low       (low = 16 for 8-bit, 64<<6 for 10-bit)
-fu = Cb - mid       (mid = 128 for 8-bit, 1<<15 for 10-bit)
+fy = Y  - low       (low = 16 for 8-bit, 64<<6 for 10-bit P016)
+fu = Cb - mid       (mid = 128 for 8-bit, 1<<15 for 10-bit P016)
 fv = Cr - mid
 
-       | max/(white-black)     0                          0                      |
-mat =  | max/(white-black)     0                          0                      |  *  base_mat
-       | max/(white-black)     0                          0                      |
-
-where the luma column (column 0) scales by max/(white - black) and the chroma columns (1, 2) scale by max/(white_c - black):
+Base matrix (unscaled):
 
        | 1    0                             (1-Kr)/0.5                       |
-base = | 1   -Kb*(1-Kb) / (0.5*(1-Kb-Kr))  -Kr*(1-Kr) / (0.5*(1-Kb-Kr))    |
+base = | 1   -Kb*(1-Kb) / (0.5*(1-Kb-Kr))  -Kr*(1-Kr) / (0.5*(1-Kb-Kr))      |
        | 1    (1-Kb)/0.5                    0                                |
 
-R = mat[0][0]*fy + mat[0][1]*fu + mat[0][2]*fv
-G = mat[1][0]*fy + mat[1][1]*fu + mat[1][2]*fv
-B = mat[2][0]*fy + mat[2][1]*fu + mat[2][2]*fv
+Column-wise scaling (luma and chroma scaled independently):
 
-R, G, B = clamp(R, G, B, 0, max)
+  Sy = max / (white - black)        luma scale
+  Sc = max / (white_c - black)      chroma scale
+
+  mat[i][0] = base[i][0] * Sy       for i = 0..2
+  mat[i][1] = base[i][1] * Sc       for i = 0..2
+  mat[i][2] = base[i][2] * Sc       for i = 0..2
+
+Conversion:
+
+  R = mat[0][0]*fy + mat[0][1]*fu + mat[0][2]*fv
+  G = mat[1][0]*fy + mat[1][1]*fu + mat[1][2]*fv
+  B = mat[2][0]*fy + mat[2][1]*fu + mat[2][2]*fv
+
+  R, G, B = clamp(R, G, B, 0, maxf)
+
+where maxf is the full storage range for the YUV unit type
+(255 for 8-bit, 65535 for 16-bit P016).
 ```
 
 ### Validation with FFmpeg
