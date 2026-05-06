@@ -109,7 +109,6 @@ Panel Config:
           unit: Bytes/s
 
   metrics_description:
-    # Table 1301 - GL2 Cache Performance
     GL2 Cache Hit Rate: >-
       Percentage of GL2 cache requests serviced from cache without forwarding through
       GCEA (Graphics Core Efficiency Arbiter). GL2 cache is the GPU's final on-chip cache
@@ -123,7 +122,6 @@ Panel Config:
       Number of GL2 cache requests that missed and required fetching through GCEA
       (Graphics Core Efficiency Arbiter). High miss counts indicate heavy memory traffic.
       Consider improving data locality or reducing working set size.
-    # Table 1302 - GL2 Cache Request Statistics
     Total Requests: >-
       Total number of requests received by the GL2 cache from all GL1 caches and other
       clients. This represents the aggregate memory traffic at the GPU's final on-chip cache.
@@ -146,7 +144,6 @@ Panel Config:
       Number of write requests forwarded from GL2 cache through GCEA (Graphics Core
       Efficiency Arbiter). These include evictions and writebacks going toward system
       memory. High counts indicate write-intensive workloads consuming memory bandwidth.
-    # Table 1303 - GL2 Cache Bandwidth
     GL2 Cache Read BW: >-
       Achieved read bandwidth at the GL2 cache level. This represents total read traffic
       from GL1 caches to GL2. High bandwidth indicates memory-intensive read patterns.

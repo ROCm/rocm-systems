@@ -150,7 +150,6 @@ Panel Config:
           pop: None
 
   metrics_description:
-    # Table 201 - System Speed-of-Light
     VALU FLOPs: >-
       Floating-point operations per second on the VALU. Peak is based on
       FP32 FMA single-issue (128 FLOPs/CU/cycle). VOPD dual-issue doubles

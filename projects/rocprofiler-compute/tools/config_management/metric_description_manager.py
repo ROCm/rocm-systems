@@ -6,24 +6,18 @@
 Metric description manager.
 Syncs metric descriptions between config YAMLs and documentation files.
 
-Run from the ``rocprofiler-compute`` project root so default
-``--per-arch-output`` (``tools/per_arch_metric_definitions``) and
-``--docs-output-dir`` (``docs/data/metrics``) resolve correctly.
+Run from the project root so default options resolve:
+  --per-arch-output (tools/per_arch_metric_definitions)
+  --docs-output-dir (docs/data/metrics)
 
-Panel YAMLs are loaded with a sorted ``*.yaml`` glob per architecture; filenames
-(e.g. gfx11** ``0300_memory_chart.yaml``, ``0700_workgroup_processor.yaml``) are
-not hardcoded—only ``Panel Config`` content and ``metric_table`` ids matter.
-RDNA 3.5 (gfx11xx) variants share one panel-id map
-(``RDNA35_PANEL_ID_TO_SECTION_BY_ARCH``).
+Usage (paths relative to project root):
+    SCRIPT=tools/config_management/metric_description_manager.py
+    CONFIGS=src/rocprof_compute_soc/analysis_configs
 
-Usage:
-    python tools/config_management/metric_description_manager.py \\
-        --sync-arch gfx1151 src/rocprof_compute_soc/analysis_configs
-    python tools/config_management/metric_description_manager.py --sync-all \\
-        src/rocprof_compute_soc/analysis_configs
-    python tools/config_management/metric_description_manager.py \\
-        --validate gfx1151 src/rocprof_compute_soc/analysis_configs
-    python tools/config_management/metric_description_manager.py --generate-docs
+    python $SCRIPT --sync-arch <arch_name> $CONFIGS
+    python $SCRIPT --sync-all $CONFIGS
+    python $SCRIPT --validate <arch_name> $CONFIGS
+    python $SCRIPT --generate-docs
 """
 
 from __future__ import annotations
@@ -43,23 +37,10 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from config_management import utils_ruamel as cm_utils  # noqa: E402
 
-# Base architectures for ``--generate-docs``. RDNA35 gfx11** extras on disk are
-# appended automatically (see ``resolved_docs_target_archs``). Keep CDNA entries
-# aligned with ``src/rocprof_compute_soc/analysis_configs/``.
-DEFAULT_DOCS_TARGET_ARCHS: list[str] = [
-    "gfx908",
-    "gfx90a",
-    "gfx942",
-    "gfx950",
-    "gfx1151",
-]
-
-_GFX11_VARIANT_RE = re.compile(r"^gfx11[0-9a-f]{2}$", re.IGNORECASE)
-
 
 def is_rdna35_arch(arch_name: str) -> bool:
-    """True for RDNA 3.5 IP names: ``gfx11xx`` (``gfx1100`` … ``gfx11ff``)."""
-    return bool(_GFX11_VARIANT_RE.fullmatch(arch_name))
+    """True for RDNA 3.5 IP names: gfx115x (gfx1150 to gfx115f)."""
+    return bool(re.fullmatch(r"gfx115[0-9a-f]", arch_name, re.IGNORECASE))
 
 
 def normalize_unit_for_docs(unit: str) -> str:
@@ -114,19 +95,6 @@ def normalize_docs_metric_name(arch_name: str, metric_name: str) -> str:
     return replacements.get(metric_name, metric_name)
 
 
-def normalize_docs_rst(arch_name: str, rst_text: str) -> str:
-    """Apply docs-only wording cleanup for selected architectures."""
-    if not is_rdna35_arch(arch_name) or not isinstance(rst_text, str):
-        return rst_text
-
-    replacements: dict[str, str] = {}
-
-    for old_text, new_text in replacements.items():
-        rst_text = rst_text.replace(old_text, new_text)
-
-    return rst_text
-
-
 # All CDNA architectures share the same panel ID mapping.
 CDNA_PANEL_ID_TO_SECTION: dict[int, str] = {
     201: "System Speed-of-Light",
@@ -165,8 +133,7 @@ CDNA_PANEL_ID_TO_SECTION: dict[int, str] = {
     1706: "L2 - Fabric interface detailed metrics",
 }
 
-# RDNA 3.5 (gfx11xx): metric_table IDs → section names. Shared by every
-# ``is_rdna35_arch`` variant (gfx1100 … gfx11ff), not per-directory.
+# RDNA 3.5 (gfx115x) metric_table ids -> section names
 RDNA35_PANEL_ID_TO_SECTION_BY_ARCH: dict[int, str] = {
     1: "Top Kernels",
     2: "Dispatch List",
@@ -439,21 +406,14 @@ def preserve_manual_rst_edits(new_descriptions: dict, existing_per_arch: dict) -
 
 
 def resolved_docs_target_archs(per_arch_dir: Union[str, Path]) -> list[str]:
-    """
-    Doc emit list: ``DEFAULT_DOCS_TARGET_ARCHS`` plus any gfx11** arch that has a
-    per-arch YAML on disk but is not already listed (e.g. gfx1150).
-    """
-    p = Path(per_arch_dir)
-    arches = list(DEFAULT_DOCS_TARGET_ARCHS)
-    known = set(arches)
-    extra: list[str] = []
+    """Doc emit list: every per-arch YAML on disk except known-excluded archs."""
+    excluded = {"gfx940", "gfx941"}
     suffix = "_metrics_description.yaml"
-    for path in p.glob(f"*{suffix}"):
-        arch = path.name.removesuffix(suffix)
-        if is_rdna35_arch(arch) and arch not in known:
-            extra.append(arch)
-    extra.sort()
-    return arches + extra
+    return sorted(
+        arch
+        for path in Path(per_arch_dir).glob(f"*{suffix}")
+        if (arch := path.name.removesuffix(suffix)) not in excluded
+    )
 
 
 def generate_docs_from_per_arch(
@@ -500,10 +460,7 @@ def generate_docs_from_per_arch(
                 entry = {}
                 if "rst" in metric_info:
                     entry["rst"] = SingleQuotedScalarString(
-                        normalize_docs_rst(
-                            arch,
-                            format_yaml_scalar(metric_info["rst"]),
-                        )
+                        format_yaml_scalar(metric_info["rst"])
                     )
                 if "unit" in metric_info:
                     entry["unit"] = metric_info["unit"]

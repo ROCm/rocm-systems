@@ -164,7 +164,6 @@ Panel Config:
           unit: Percent
 
   metrics_description:
-    # Table 501 - CPC Utilization
     CPC Busy: >-
       Percentage of time the Command Processor Compute is actively processing commands.
       High busy percentage indicates efficient command stream processing. Low values may
@@ -177,7 +176,6 @@ Panel Config:
       Percentage of time the Command Processor Compute is stalled waiting for resources.
       High stall rates may indicate memory bottlenecks, synchronization issues, or
       contention for internal command processor resources.
-    # Table 502 - CPC Interface Utilization
     TCIU Busy: >-
       Percentage of time the Texture Cache Interface Unit is busy handling command
       processor memory requests. High utilization indicates significant memory traffic
@@ -190,7 +188,6 @@ Panel Config:
       Percentage of time the Graphics Cache Rinse Interface Unit is busy. This unit
       handles cache coherency operations. High utilization may indicate frequent
       cache flushes or synchronization points.
-    # Table 503 - MEC Stall Cycles
     ME1 Stall on RCIU Ready: >-
       Cycles the Micro Engine is stalled waiting for the Register Cache Interface
       Unit. High stall counts may indicate register allocation bottlenecks or
@@ -204,7 +201,6 @@ Panel Config:
     ME1 Stall on ROQ Data: >-
       Cycles the Micro Engine is stalled waiting for data from the Ring Output Queue.
       High stall counts may indicate command stream processing bottlenecks.
-    # Table 504 - CPC Memory Requests
     TCIU Read Requests: >-
       Number of read requests issued by the command processor through the texture cache
       interface. These requests fetch command buffer data and kernel arguments.
@@ -217,7 +213,6 @@ Panel Config:
     GUS Write Requests: >-
       Number of write requests to the Global Unified Shader memory interface. High write
       counts may indicate frequent state updates or completion notifications.
-    # Table 505 - MEC Instruction Cache
     Instruction Cache Hits: >-
       Number of Micro Engine instruction fetches serviced from the instruction cache.
       Higher hit counts indicate good instruction locality in command processing code.

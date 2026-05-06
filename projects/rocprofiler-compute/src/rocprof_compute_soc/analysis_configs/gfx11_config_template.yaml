@@ -136,7 +136,7 @@ panels:
   - type: metric_table
     id: 11
     title: Scalar Data Cache
-- file: l1_cache.yaml
+- file: l0_cache.yaml
   panel_id: 9
   panel_title: GL0 Cache (TCP Cache)
   panel_alias:

@@ -28,18 +28,16 @@ rocprofiler-compute/
 │       │       └── <latest_arch>_diff.yaml
 │       ├── gfx90a/
 │       ├── gfx940/
-│       ├── gfx950/                      # latest_arch (CDNA gfx9 line)
-│       ├── gfx1151/                     # RDNA 3.5 (gfx11**)
-│       ├── gfx9_config_template.yaml    # CDNA panel contract
-│       └── gfx11_config_template.yaml   # RDNA 3.5 gfx11** panel contract
+│       ├── gfx950/                      # latest_arch for CDNA (gfx9)
+│       ├── gfx1151/                     # RDNA 3.5 (gfx115*)
+│       ├── gfx9_config_template.yaml    # CDNA (gfx9) panel contract
+│       └── gfx11_config_template.yaml   # RDNA 3.5 (gfx115*) panel contract
 │
 ├── src/utils/
 │   ├── hash_checker.py
 │   ├── .config_hashes.json
 │
 └── tools/config_management/
-    ├── gfx9_config_template.yaml        # copy / reference (may mirror src)
-    ├── gfx11_config_template.yaml         # copy / reference (may mirror src)
     ├── master_config_workflow_script.py
     ├── parse_config_template.py
     ├── verify_against_config_template.py

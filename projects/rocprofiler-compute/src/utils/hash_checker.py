@@ -12,8 +12,8 @@ Errors (per arch):
 - If an older arch's delta changed but neither latest panels nor this arch's
   panels changed
 
-Architectures without ``config_delta/*_diff.yaml`` (e.g. RDNA gfx11** standalone
-configs) skip the older-arch delta checks (C/D).
+Architectures without config_delta/*_diff.yaml (e.g. RDNA 3.5 gfx115*) skip
+the delta checks.
 
 """
 
@@ -32,9 +32,7 @@ from tools.config_management import hash_manager  # noqa: E402
 
 CONFIGS_ROOT: Path = PROJECT_ROOT / "src" / "rocprof_compute_soc" / "analysis_configs"
 HASH_FILE: Path = PROJECT_ROOT / "src" / "utils" / ".config_hashes.json"
-TEMPLATE_FILE: Path = (
-    PROJECT_ROOT / "tools" / "config_management" / "gfx9_config_template.yaml"
-)
+TEMPLATE_FILE: Path = CONFIGS_ROOT / "gfx9_config_template.yaml"
 
 
 # ---------- helpers ----------
@@ -82,8 +80,7 @@ def _prev_panels_and_delta(
 
 
 def _arch_has_delta_yaml(arch_dir: Path) -> bool:
-    d = arch_dir / "config_delta"
-    return d.is_dir() and bool(list(d.glob("*_diff.yaml")))
+    return any((arch_dir / "config_delta").glob("*_diff.yaml"))
 
 
 def _changed_panel_files(cur: dict[str, str], prev: dict[str, str]) -> list[str]:

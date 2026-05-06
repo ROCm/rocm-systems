@@ -22,8 +22,6 @@ ANALYSIS_CONFIGS = SOC_ROOT / "analysis_configs"
 
 GFX9_TEMPLATE = ANALYSIS_CONFIGS / "gfx9_config_template.yaml"
 GFX11_TEMPLATE = ANALYSIS_CONFIGS / "gfx11_config_template.yaml"
-# Backwards-compatible name (CDNA / gfx9 line template only)
-TEMPLATE_FILE = GFX9_TEMPLATE
 HASH_JSON = REPO_ROOT / "src" / "utils" / ".config_hashes.json"
 BACKUP_DIR = SCRIPT_DIR / "backups"
 
@@ -115,6 +113,7 @@ def main():
         PYTHON,
         VERIFY_SCRIPT,
         ANALYSIS_CONFIGS,
+        "--gfx9-template",
         GFX9_TEMPLATE,
         "--gfx11-template",
         GFX11_TEMPLATE,
@@ -159,6 +158,7 @@ def main():
                 PYTHON,
                 VERIFY_SCRIPT,
                 ANALYSIS_CONFIGS,
+                "--gfx9-template",
                 GFX9_TEMPLATE,
                 "--gfx11-template",
                 GFX11_TEMPLATE,
@@ -237,6 +237,7 @@ def main():
                 PYTHON,
                 VERIFY_SCRIPT,
                 ANALYSIS_CONFIGS,
+                "--gfx9-template",
                 GFX9_TEMPLATE,
                 "--gfx11-template",
                 GFX11_TEMPLATE,

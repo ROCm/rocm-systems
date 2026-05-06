@@ -57,7 +57,6 @@ Panel Config:
           unit: Percent
 
   metrics_description:
-    # Table 1701 - GPU Utilization
     GPU Busy: >-
       Percentage of time the GPU was actively processing work. This is the primary
       utilization metric showing overall GPU activity. Low GPU busy indicates
@@ -70,7 +69,6 @@ Panel Config:
       Percentage of GPU active time the GL2 cache was busy servicing memory requests.
       High GL2 busy indicates memory-intensive workloads. Compare with compute activity
       to determine if the workload is memory-bound or compute-bound.
-    # Table 1702 - Shader Engine Utilization
     TA Busy: >-
       Percentage of GPU active time the Texture Addresser was busy processing memory
       address calculations. High TA busy indicates active texture or buffer memory
