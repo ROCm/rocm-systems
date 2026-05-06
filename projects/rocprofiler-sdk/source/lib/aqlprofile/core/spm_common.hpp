@@ -1,6 +1,7 @@
 #pragma once
 
-#include "aqlprofile-sdk/aql_profile_v2.h"
+#include "lib/aqlprofile/aqlprofile.hpp"
+
 #include <string>
 #include <stdio.h>
 #include <stdexcept>

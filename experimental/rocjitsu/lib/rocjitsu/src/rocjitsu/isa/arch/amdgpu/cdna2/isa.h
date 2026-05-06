@@ -24,7 +24,8 @@ namespace cdna2 {
 /// bits are inert in simulation via `amdgpu::CdnaStatusReg`.
 struct Isa : amdgpu::CdnaIsaBase {
   static constexpr uint32_t MAX_ACC_VGPRS_PER_WF =
-      256; ///< Separate AccVGPR file (encoding base 512).
+      256;                               ///< Separate AccVGPR file (encoding base 512).
+  static constexpr bool SRAM_ECC = true; ///< gfx90a has SRAM ECC.
 
   using Decoder = cdna2::Decoder;
   using MachineInst = cdna2::MachineInst;

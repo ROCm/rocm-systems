@@ -7,6 +7,7 @@
 #include "core/agent_manager.hpp"
 #include "core/perfetto.hpp"
 #include "core/timemory.hpp"
+#include <cstdint>
 
 #include <rocprofiler-sdk/agent.h>
 #include <rocprofiler-sdk/buffer_tracing.h>
@@ -39,14 +40,14 @@ using rocprofsys_agent_t = agent;
 
 struct code_object_callback_record_t
 {
-    uint64_t                                             timestamp = 0;
+    std::uint64_t                                        timestamp = 0;
     rocprofiler_callback_tracing_record_t                record    = {};
     rocprofiler_callback_tracing_code_object_load_data_t payload   = {};
 };
 
 struct kernel_symbol_callback_record_t
 {
-    uint64_t                              timestamp = 0;
+    std::uint64_t                         timestamp = 0;
     rocprofiler_callback_tracing_record_t record    = {};
     kernel_symbol_data_t                  payload   = {};
 };
@@ -75,7 +76,7 @@ struct rocprofiler_tool_counter_info_t : rocprofiler_counter_info_v0_t
 
 struct tool_agent
 {
-    uint64_t                  device_id = 0;
+    std::uint64_t             device_id = 0;
     const rocprofsys_agent_t* agent     = nullptr;
 };
 
@@ -154,11 +155,11 @@ struct client_data
     buffer_id_vec_t             get_buffers() const;
     const rocprofsys_agent_t*   get_agent(rocprofiler_agent_id_t _id) const;
     const tool_agent*           get_gpu_tool_agent(rocprofiler_agent_id_t id) const;
-    const kernel_symbol_data_t* get_kernel_symbol_info(uint64_t _kernel_id) const;
+    const kernel_symbol_data_t* get_kernel_symbol_info(std::uint64_t _kernel_id) const;
     const rocprofiler_tool_counter_info_t* get_tool_counter_info(
         rocprofiler_agent_id_t _agent_id, rocprofiler_counter_id_t _counter_id) const;
     const rocprofiler_callback_tracing_code_object_load_data_t* get_code_object_info(
-        uint64_t code_object_id) const;
+        std::uint64_t code_object_id) const;
 };
 
 inline client_data::context_id_vec_t
@@ -216,7 +217,7 @@ client_data::get_gpu_tool_agent(rocprofiler_agent_id_t id) const
 }
 
 inline const kernel_symbol_data_t*
-client_data::get_kernel_symbol_info(uint64_t _kernel_id) const
+client_data::get_kernel_symbol_info(std::uint64_t _kernel_id) const
 {
     return kernel_symbol_records.rlock(
         [_kernel_id](const auto& _data) -> const kernel_symbol_data_t* {
@@ -244,7 +245,7 @@ client_data::get_tool_counter_info(rocprofiler_agent_id_t   _agent_id,
 }
 
 inline const rocprofiler_callback_tracing_code_object_load_data_t*
-client_data::get_code_object_info(uint64_t code_object_id) const
+client_data::get_code_object_info(std::uint64_t code_object_id) const
 {
     return code_object_records.rlock(
         [code_object_id](const auto& _data)

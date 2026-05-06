@@ -237,7 +237,7 @@ class TestCrossIsaAnalyzer:
         # Critical assertion: _can_share_execute must return False for ALL v_cmpx
         failing_instructions = []
         for mnemonic, encoding_name, semantic_class in v_cmpx_instructions:
-            can_share = codegen._can_share_execute(mnemonic, encoding_name)
+            can_share = codegen._can_share_execute(mnemonic)
             if can_share:
                 failing_instructions.append((mnemonic, encoding_name, semantic_class))
 

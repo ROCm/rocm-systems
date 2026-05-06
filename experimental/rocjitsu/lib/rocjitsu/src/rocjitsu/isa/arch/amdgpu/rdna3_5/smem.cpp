@@ -297,7 +297,10 @@ SAtcProbeSmem::SAtcProbeSmem(const MachineInst *inst)
   num_dst_ = 0;
 }
 
-void SAtcProbeSmem::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SAtcProbeSmem::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 SAtcProbeBufferSmem::SAtcProbeBufferSmem(const MachineInst *inst)
     : Smem("s_atc_probe_buffer", reinterpret_cast<const OpEncoding *>(inst),
@@ -312,7 +315,10 @@ SAtcProbeBufferSmem::SAtcProbeBufferSmem(const MachineInst *inst)
   num_dst_ = 0;
 }
 
-void SAtcProbeBufferSmem::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SAtcProbeBufferSmem::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 } // namespace rdna3_5
 } // namespace rocjitsu

@@ -9,9 +9,11 @@
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "util/data_types.h"
 #include "util/except.h"
+#include "util/log.h"
 #include <algorithm>
 #include <bit>
 #include <cmath>
+#include <format>
 #include <limits>
 
 namespace rocjitsu {
@@ -62,6 +64,7 @@ SCmovB32Sop1::SCmovB32Sop1(const MachineInst *inst)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+  flags_ |= PREDICATED_DEF;
 }
 
 void SCmovB32Sop1::execute_impl(amdgpu::Wavefront &wf) {
@@ -81,6 +84,7 @@ SCmovB64Sop1::SCmovB64Sop1(const MachineInst *inst)
     ssrc0 = Operand(
         64, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+  flags_ |= PREDICATED_DEF;
 }
 
 void SCmovB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
@@ -555,6 +559,7 @@ SSetpcB64Sop1::SSetpcB64Sop1(const MachineInst *inst)
     ssrc0 = Operand(
         64, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+  flags_ |= INDIRECT_BRANCH;
 }
 
 void SSetpcB64Sop1::execute_impl(amdgpu::Wavefront &wf) { wf.pc = ssrc0.read_scalar64(wf) - size_; }
@@ -572,6 +577,7 @@ SSwappcB64Sop1::SSwappcB64Sop1(const MachineInst *inst)
     ssrc0 = Operand(
         64, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+  flags_ |= INDIRECT_CALL;
 }
 
 void SSwappcB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
@@ -592,7 +598,7 @@ SRfeB64Sop1::SRfeB64Sop1(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void SRfeB64Sop1::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SRfeB64Sop1::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_rfe_b64_sop1(*this, wf); }
 
 SAndSaveexecB64Sop1::SAndSaveexecB64Sop1(const MachineInst *inst)
     : Sop1("s_and_saveexec_b64", reinterpret_cast<const OpEncoding *>(inst),
@@ -799,7 +805,10 @@ SMovrelsB32Sop1::SMovrelsB32Sop1(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void SMovrelsB32Sop1::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SMovrelsB32Sop1::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 SMovrelsB64Sop1::SMovrelsB64Sop1(const MachineInst *inst)
     : Sop1("s_movrels_b64", reinterpret_cast<const OpEncoding *>(inst),
@@ -816,7 +825,10 @@ SMovrelsB64Sop1::SMovrelsB64Sop1(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void SMovrelsB64Sop1::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SMovrelsB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 SMovreldB32Sop1::SMovreldB32Sop1(const MachineInst *inst)
     : Sop1("s_movreld_b32", reinterpret_cast<const OpEncoding *>(inst),
@@ -833,7 +845,10 @@ SMovreldB32Sop1::SMovreldB32Sop1(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void SMovreldB32Sop1::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SMovreldB32Sop1::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 SMovreldB64Sop1::SMovreldB64Sop1(const MachineInst *inst)
     : Sop1("s_movreld_b64", reinterpret_cast<const OpEncoding *>(inst),
@@ -850,7 +865,10 @@ SMovreldB64Sop1::SMovreldB64Sop1(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void SMovreldB64Sop1::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SMovreldB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 SCbranchJoinSop1::SCbranchJoinSop1(const MachineInst *inst)
     : Sop1("s_cbranch_join", reinterpret_cast<const OpEncoding *>(inst),
@@ -865,7 +883,9 @@ SCbranchJoinSop1::SCbranchJoinSop1(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void SCbranchJoinSop1::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SCbranchJoinSop1::execute_impl(amdgpu::Wavefront &wf) {
+  amdgpu::execute_s_cbranch_join_sop1(*this, wf);
+}
 
 SAbsI32Sop1::SAbsI32Sop1(const MachineInst *inst)
     : Sop1("s_abs_i32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SAbsI32Sop1>()),
@@ -896,7 +916,9 @@ SSetGprIdxIdxSop1::SSetGprIdxIdxSop1(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void SSetGprIdxIdxSop1::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SSetGprIdxIdxSop1::execute_impl(amdgpu::Wavefront &wf) {
+  amdgpu::execute_s_set_gpr_idx_idx_sop1(*this, wf);
+}
 
 SAndn1SaveexecB64Sop1::SAndn1SaveexecB64Sop1(const MachineInst *inst)
     : Sop1("s_andn1_saveexec_b64", reinterpret_cast<const OpEncoding *>(inst),
@@ -989,7 +1011,10 @@ SBitreplicateB64B32Sop1::SBitreplicateB64B32Sop1(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void SBitreplicateB64B32Sop1::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SBitreplicateB64B32Sop1::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
+}
 
 } // namespace cdna1
 } // namespace rocjitsu
