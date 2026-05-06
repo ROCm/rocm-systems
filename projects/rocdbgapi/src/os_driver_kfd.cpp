@@ -1954,6 +1954,9 @@ kfd_driver_t::xfer_global_memory_partial (global_address_t address, void *read,
 
   ++(read != nullptr ? m_read_request_count : m_write_request_count);
 
+  if (address > std::numeric_limits<off_t>::max ())
+    return AMD_DBGAPI_STATUS_ERROR_MEMORY_ACCESS;
+
   auto offset = utils::narrow<off_t> (address);
   ssize_t ret = read != nullptr
                   ? pread (*m_proc_mem_fd, read, *size, offset)

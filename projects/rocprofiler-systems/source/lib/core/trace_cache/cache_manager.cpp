@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "cache_manager.hpp"
+#include <cstdint>
 
 #include "core/output_file_registry.hpp"
 #include "core/trace_cache/metadata_registry.hpp"
@@ -323,8 +324,8 @@ merge_perfetto_files()
     // settings::default_process_suffix() which was set to dmp::rank() during
     // initialization
 
-    auto    suffix_variant  = settings::default_process_suffix();
-    int32_t cached_mpi_rank = 0;
+    auto         suffix_variant  = settings::default_process_suffix();
+    std::int32_t cached_mpi_rank = 0;
 
     if(std::holds_alternative<int>(suffix_variant))
     {

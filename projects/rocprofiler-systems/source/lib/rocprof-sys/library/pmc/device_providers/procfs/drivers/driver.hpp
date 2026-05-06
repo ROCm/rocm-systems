@@ -31,17 +31,17 @@ static constexpr size_t STATM_BUFFER_SIZE = 256;
 // Approximate bytes per /proc/stat CPU line (for dynamic sizing).
 static constexpr size_t BYTES_PER_STAT_LINE = 120;
 // sysfs frequency file: value in kHz, always < 32 bytes.
-static constexpr uint8_t SYSFS_FREQ_BUFFER_SIZE = 32;
+static constexpr std::uint8_t SYSFS_FREQ_BUFFER_SIZE = 32;
 // ru_maxrss is in KB on Linux.
-static constexpr int64_t KB_TO_BYTES = 1024;
+static constexpr std::int64_t KB_TO_BYTES = 1024;
 // Microseconds per second (for timeval conversion).
-static constexpr int64_t US_PER_SECOND = 1'000'000;
+static constexpr std::int64_t US_PER_SECOND = 1'000'000;
 // kHz to MHz conversion for sysfs scaling_cur_freq.
 static constexpr float KHZ_TO_MHZ = 0.001f;
 // /proc/stat per-CPU line prefix.
 static constexpr std::string_view PROC_STAT_CPU_PREFIX = "cpu";
 // Number of jiffies fields per CPU line in /proc/stat.
-static constexpr uint8_t JIFFIES_FIELD_COUNT = 7;
+static constexpr std::uint8_t JIFFIES_FIELD_COUNT = 7;
 
 struct file_closer
 {
@@ -82,20 +82,20 @@ split_lines(std::string_view content)
 
 struct cpu_jiffies
 {
-    uint64_t user    = 0;
-    uint64_t nice    = 0;
-    uint64_t system  = 0;
-    uint64_t idle    = 0;
-    uint64_t iowait  = 0;
-    uint64_t irq     = 0;
-    uint64_t softirq = 0;
+    std::uint64_t user    = 0;
+    std::uint64_t nice    = 0;
+    std::uint64_t system  = 0;
+    std::uint64_t idle    = 0;
+    std::uint64_t iowait  = 0;
+    std::uint64_t irq     = 0;
+    std::uint64_t softirq = 0;
 
-    [[nodiscard]] constexpr uint64_t total() const noexcept
+    [[nodiscard]] constexpr std::uint64_t total() const noexcept
     {
         return user + nice + system + idle + iowait + irq + softirq;
     }
 
-    [[nodiscard]] constexpr uint64_t active() const noexcept
+    [[nodiscard]] constexpr std::uint64_t active() const noexcept
     {
         return user + nice + system + irq + softirq;
     }
@@ -103,26 +103,26 @@ struct cpu_jiffies
 
 struct rusage_snapshot
 {
-    int64_t page_rss         = 0;
-    int64_t virt_mem         = 0;
-    int64_t peak_rss         = 0;
-    int64_t context_switches = 0;
-    int64_t page_faults      = 0;
-    int64_t user_mode_time   = 0;
-    int64_t kernel_mode_time = 0;
+    std::int64_t page_rss         = 0;
+    std::int64_t virt_mem         = 0;
+    std::int64_t peak_rss         = 0;
+    std::int64_t context_switches = 0;
+    std::int64_t page_faults      = 0;
+    std::int64_t user_mode_time   = 0;
+    std::int64_t kernel_mode_time = 0;
 };
 
 struct statm_data
 {
-    int64_t virt_mem = 0;
-    int64_t page_rss = 0;
+    std::int64_t virt_mem = 0;
+    std::int64_t page_rss = 0;
 };
 
 // Maps socket (physical package) ID to the set of logical CPU IDs on that socket.
 using socket_topology_t = std::map<size_t, std::set<size_t>>;
 
 // sysfs topology file: value is a small integer, always < 16 bytes.
-static constexpr uint8_t SYSFS_TOPOLOGY_BUFFER_SIZE = 16;
+static constexpr std::uint8_t SYSFS_TOPOLOGY_BUFFER_SIZE = 16;
 
 /**
  * @brief Discover CPU socket topology from sysfs.
@@ -190,11 +190,11 @@ parse_proc_stat(std::string_view content)
                                                line.data() + space, cpu_id);
         if(ec != std::errc()) return;
 
-        cpu_jiffies jiffies;
-        uint64_t*   fields[]  = { &jiffies.user,   &jiffies.nice,   &jiffies.system,
-                                  &jiffies.idle,   &jiffies.iowait, &jiffies.irq,
-                                  &jiffies.softirq };
-        auto        remaining = ltrim(line.substr(space));
+        cpu_jiffies    jiffies;
+        std::uint64_t* fields[]  = { &jiffies.user,   &jiffies.nice,   &jiffies.system,
+                                     &jiffies.idle,   &jiffies.iowait, &jiffies.irq,
+                                     &jiffies.softirq };
+        auto           remaining = ltrim(line.substr(space));
 
         for(size_t i = 0; i < JIFFIES_FIELD_COUNT && !remaining.empty(); ++i)
         {
@@ -232,8 +232,8 @@ parse_statm(std::string_view content)
         std::from_chars(remaining.data(), remaining.data() + remaining.size(), rss_pages);
     if(e2 != std::errc()) return std::nullopt;
 
-    return statm_data{ static_cast<int64_t>(virt_pages) * page_size,
-                       static_cast<int64_t>(rss_pages) * page_size };
+    return statm_data{ static_cast<std::int64_t>(virt_pages) * page_size,
+                       static_cast<std::int64_t>(rss_pages) * page_size };
 }
 
 /**
@@ -297,16 +297,17 @@ public:
         struct rusage usage = {};
         if(getrusage(RUSAGE_SELF, &usage) == 0)
         {
-            snap.peak_rss = static_cast<int64_t>(usage.ru_maxrss) * KB_TO_BYTES;
+            snap.peak_rss = static_cast<std::int64_t>(usage.ru_maxrss) * KB_TO_BYTES;
             snap.context_switches =
-                static_cast<int64_t>(usage.ru_nvcsw + usage.ru_nivcsw);
-            snap.page_faults = static_cast<int64_t>(usage.ru_majflt + usage.ru_minflt);
+                static_cast<std::int64_t>(usage.ru_nvcsw + usage.ru_nivcsw);
+            snap.page_faults =
+                static_cast<std::int64_t>(usage.ru_majflt + usage.ru_minflt);
             snap.user_mode_time =
-                static_cast<int64_t>(usage.ru_utime.tv_sec) * US_PER_SECOND +
-                static_cast<int64_t>(usage.ru_utime.tv_usec);
+                static_cast<std::int64_t>(usage.ru_utime.tv_sec) * US_PER_SECOND +
+                static_cast<std::int64_t>(usage.ru_utime.tv_usec);
             snap.kernel_mode_time =
-                static_cast<int64_t>(usage.ru_stime.tv_sec) * US_PER_SECOND +
-                static_cast<int64_t>(usage.ru_stime.tv_usec);
+                static_cast<std::int64_t>(usage.ru_stime.tv_sec) * US_PER_SECOND +
+                static_cast<std::int64_t>(usage.ru_stime.tv_usec);
         }
 
         const auto content =

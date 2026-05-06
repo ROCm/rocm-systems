@@ -61,11 +61,11 @@ struct backtrace_metrics : comp::empty_base
     backtrace_metrics& operator=(const backtrace_metrics&)     = default;
     backtrace_metrics& operator=(backtrace_metrics&&) noexcept = default;
 
-    static void                     configure(bool, int64_t _tid = threading::get_id());
-    static void                     init_perfetto(int64_t _tid, valid_array_t);
-    static void                     fini_perfetto(int64_t _tid, valid_array_t);
-    static void                     init_cache(int64_t _tid, valid_array_t);
-    static std::vector<std::string> get_hw_counter_labels(int64_t);
+    static void configure(bool, std::int64_t _tid = threading::get_id());
+    static void init_perfetto(std::int64_t _tid, valid_array_t);
+    static void fini_perfetto(std::int64_t _tid, valid_array_t);
+    static void init_cache(std::int64_t _tid, valid_array_t);
+    static std::vector<std::string> get_hw_counter_labels(std::int64_t);
 
     template <typename Tp>
     static bool get_valid(Tp, valid_array_t);
@@ -76,7 +76,7 @@ struct backtrace_metrics : comp::empty_base
     static void start();
     static void stop();
     void        sample(int = -1);
-    void        post_process(int64_t _tid, const backtrace* _bt,
+    void        post_process(std::int64_t _tid, const backtrace* _bt,
                              const backtrace_metrics* _last) const;
 
     explicit operator bool() const { return m_valid.any(); }
@@ -94,8 +94,8 @@ struct backtrace_metrics : comp::empty_base
     auto        get_page_faults() const { return m_page_flt; }
     const auto& get_hw_counters() const { return m_hw_counter; }
 
-    void post_process_perfetto(int64_t _tid, uint64_t _ts) const;
-    void cache_backtrace_data(int64_t _tid, uint64_t _ts) const;
+    void post_process_perfetto(std::int64_t _tid, std::uint64_t _ts) const;
+    void cache_backtrace_data(std::int64_t _tid, std::uint64_t _ts) const;
 
     backtrace_metrics& operator-=(const backtrace_metrics&);
 
@@ -107,10 +107,10 @@ struct backtrace_metrics : comp::empty_base
 
 private:
     valid_array_t     m_valid      = {};
-    int64_t           m_cpu        = 0;
-    int64_t           m_mem_peak   = 0;
-    int64_t           m_ctx_swch   = 0;
-    int64_t           m_page_flt   = 0;
+    std::int64_t      m_cpu        = 0;
+    std::int64_t      m_mem_peak   = 0;
+    std::int64_t      m_ctx_swch   = 0;
+    std::int64_t      m_page_flt   = 0;
     hw_counter_data_t m_hw_counter = {};
 };
 
