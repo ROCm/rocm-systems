@@ -47,7 +47,7 @@
 #define RCCL_API_TRACE_VERSION_MAJOR 0
 
 // should be increased every time new members are added to existing dispatch tables
-#define RCCL_API_TRACE_VERSION_PATCH 3
+#define RCCL_API_TRACE_VERSION_PATCH 4
 
 #if !defined(RCCL_EXTERN_C_INIT)
 #    ifdef __cplusplus
@@ -309,9 +309,9 @@ typedef struct rcclApiFuncTable
     ncclCommShrink_fn_t           ncclCommShrink_fn;
     ncclCommWindowRegister_fn_t   ncclCommWindowRegister_fn;
     ncclCommWindowDeregister_fn_t ncclCommWindowDeregister_fn;
-    ncclCommRevoke_fn_t           ncclCommRevoke_fn;
     ncclAlltoAll_fn_t             ncclAlltoAll_fn;
     ncclAlltoAllv_fn_t            ncclAlltoAllv_fn;
+    ncclCommRevoke_fn_t           ncclCommRevoke_fn;
 } rcclApiFuncTable;
 
 RCCL_EXTERN_C_FINI

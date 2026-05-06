@@ -109,11 +109,13 @@ RCCL_API_INFO_DEFINITION_V(ROCPROFILER_RCCL_TABLE_ID, ROCPROFILER_RCCL_API_ID_nc
 RCCL_API_INFO_DEFINITION_V(ROCPROFILER_RCCL_TABLE_ID, ROCPROFILER_RCCL_API_ID_ncclCommShrink, ncclCommShrink, ncclCommShrink_fn, comm, excludeRanksList, excludeRanksCount, newcomm, config, shrinkFlags)
 RCCL_API_INFO_DEFINITION_V(ROCPROFILER_RCCL_TABLE_ID, ROCPROFILER_RCCL_API_ID_ncclCommWindowRegister, ncclCommWindowRegister, ncclCommWindowRegister_fn, comm, buff, size, win, winFlags)
 RCCL_API_INFO_DEFINITION_V(ROCPROFILER_RCCL_TABLE_ID, ROCPROFILER_RCCL_API_ID_ncclCommWindowDeregister, ncclCommWindowDeregister, ncclCommWindowDeregister_fn, comm, win)
-RCCL_API_INFO_DEFINITION_V(ROCPROFILER_RCCL_TABLE_ID, ROCPROFILER_RCCL_API_ID_ncclCommRevoke, ncclCommRevoke, ncclCommRevoke_fn, comm, revokeFlags)
 #endif
 #if RCCL_API_TRACE_VERSION_PATCH >= 3
 RCCL_API_INFO_DEFINITION_V(ROCPROFILER_RCCL_TABLE_ID, ROCPROFILER_RCCL_API_ID_ncclAlltoAll, ncclAlltoAll, ncclAlltoAll_fn, sendbuff, recvbuff, count, datatype, comm, stream)
 RCCL_API_INFO_DEFINITION_V(ROCPROFILER_RCCL_TABLE_ID, ROCPROFILER_RCCL_API_ID_ncclAlltoAllv, ncclAlltoAllv, ncclAlltoAllv_fn, sendbuff, sendcounts, sdispls, recvbuff, recvcounts, rdispls, datatype, comm, stream)
+#endif
+#if RCCL_API_TRACE_VERSION_PATCH >= 4
+RCCL_API_INFO_DEFINITION_V(ROCPROFILER_RCCL_TABLE_ID, ROCPROFILER_RCCL_API_ID_ncclCommRevoke, ncclCommRevoke, ncclCommRevoke_fn, comm, revokeFlags)
 #endif
 
 #else
